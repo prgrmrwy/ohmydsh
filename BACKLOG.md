@@ -66,12 +66,13 @@
   - 形态差异:subagent 委派(独立任务 → 回最终答案)vs provider 级(挂进 DSH 模型路由/选择器),B004 动机(免 api-key)满足,形态待确认;
   - 接入路径:`dsh plugin add` 装包 + `cordis.patch.yml` 两行(provider 行 + tool 行),preset 需启用工具行(默认 disabled);
   - 前置条件:本机安装并登录对应 CLI;ACP 后端仅在接入"只讲 ACP 的外部 agent"时才需要。
-  - 多机派发设计(2026-08-14 讨论):本机走 `subagent-claude-code`(官方 SDK,原生设置);远端机走 `subagent-acp` 多实例(`command: ssh <host> claude-code-acp`,providerName 区分机器,如 `claude-lumevm`),每实例一条 tool 行(toolName 带机器名)→ 模型按工具名选机器;
-  - IO 隔离:ACP-over-SSH 天然满足"各机操作各机 IO"(远端进程跑在远端盘);同路径约定(两机同一绝对路径 checkout)让 ACP workspace 参数直接可用;共享挂载目录是唯一风险,需约定禁止委派;
-  - 待验证:claude-code-acp 对 workspace 参数的处理、SSH 免密与远端进程终止语义、ACP 后端为 one-shot(无跨轮续聊);
+  - 范围决策(2026-08-14):**先做单机可用**(本机 `claude` / `codex` subagent);多机派发与分布式暂缓,以下相关条目归档备查;
+  - 多机派发设计(暂缓):本机走 `subagent-claude-code`(官方 SDK,原生设置);远端机走 `subagent-acp` 多实例(`command: ssh <host> claude-code-acp`,providerName 区分机器,如 `claude-lumevm`),每实例一条 tool 行(toolName 带机器名)→ 模型按工具名选机器;
+  - IO 隔离(暂缓):ACP-over-SSH 天然满足"各机操作各机 IO"(远端进程跑在远端盘);同路径约定(两机同一绝对路径 checkout)让 ACP workspace 参数直接可用;共享挂载目录是唯一风险,需约定禁止委派;
+  - 待验证(暂缓):claude-code-acp 对 workspace 参数的处理、SSH 免密与远端进程终止语义、ACP 后端为 one-shot(无跨轮续聊);
   - selector 订阅方案(2026-08-14 补充):官方无订阅制 LlmAdapter;可行路径 = 自研 adapter 包装产品 CLI 登录态(Claude: `claude -p --output-format stream-json`;GPT: `codex app-server --stdio` JSON-RPC),限流/延迟/ToS 需注意,与 subagent 路线可并存;
-  - 分布式能力(2026-08-14 确认):官方件 = `dsh-acp`(ACP server,stdio,text-only)+ `subagent-acp`(client,command 可配)。"每台设备常驻一个 DSH ACP server,本机按 providerName 注册多实例,ssh 派发" = 官方支持的分布式 agent 池形态;daemon 长连接需自定义 provider。
-- **更新**: 2026-08-14 新增,提升 P0;同日完成 GitHub 调研,确认官方现成方案,待确认形态后进入实施。
+  - 分布式能力(暂缓):官方件 = `dsh-acp`(ACP server,stdio,text-only)+ `subagent-acp`(client,command 可配)。"每台设备常驻一个 DSH ACP server,本机按 providerName 注册多实例,ssh 派发" = 官方支持的分布式 agent 池形态;daemon 长连接需自定义 provider。
+- **更新**: 2026-08-14 新增,提升 P0;同日完成 GitHub 调研,确认官方现成方案;同日定范围:单机可用,多机/分布式暂缓。
 
 ### [B005] 新任务自动建 worktree,再 cwd 进入开始 agent 交互
 - **状态**: 想法
