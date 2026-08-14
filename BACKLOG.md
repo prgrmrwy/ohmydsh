@@ -119,6 +119,19 @@
   - 待设计:状态与会话生命周期事件的映射、看板入口位置、与现有 sidebar/会话列表共存方式。
 - **更新**: 2026-08-14 新增
 
+### [B009] 仓库结构定稿:总配置 + 可插拔定制(monorepo)
+- **状态**: 想法
+- **优先级**: P0
+- **背景 / 动机**: zydsh 预期承载大量 DSH 定制(preset、插件包、skill、profile patch 等),期望一个总配置统一管理,各项定制可插拔开关、各自独立发布维护,但都放在同一仓库内。
+- **要点**:
+  - 目标形态:monorepo;根级"总配置"(manifest)声明启用哪些定制;每项定制独立目录(或包),可单独启用/禁用;
+  - 定制类型盘点:agent preset、host 插件包(llm provider / subagent 接线 / 工具)、skill、cordis.patch 片段、启动脚本(`scripts/dsh.fish` 已有);
+  - 发布/维护:每项定制独立版本(各自 package.json 或独立版本记录),总配置按版本引用;
+  - 部署同步:总配置 → `~/.dsh` 落点(`.agent-presets/`、`profiles/web/cordis.patch.yml`、profile node_modules)的同步工具(`dsh plugin add` / 脚本);
+  - 结合此前草案:`plugins/`、`presets/`、`profile/`、`skills/` 布局;与 openspec 工作流、BACKLOG.md 配合;
+  - 待设计:目录布局、总配置格式(JSON/YAML)、开关粒度(全局 vs per-session)、多定制间依赖关系。
+- **更新**: 2026-08-14 新增,即定 P0。
+
 ---
 
 ## 已完成
