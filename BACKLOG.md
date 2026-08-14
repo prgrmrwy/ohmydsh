@@ -86,8 +86,10 @@
   - 先核实能力边界:deepseek 模型(deepseek-v4-pro / chat 等)官方 API 是否原生支持图片输入;
   - 若原生支持 → 落在 LLM 消息协议(image 内容块)+ `dsh-llm-deepseek` 适配器,属插件层改造;
   - 若不支持 → 备选:视觉路由(图片任务转发到视觉模型)、本地 OCR/描述预处理,或混用方案;
-  - 现状排查:DSH 已有 `dsh-attachment` 与 `read_image` 等图片管道,确认 harness 侧缺口在协议、适配器还是 UI 上传。
-- **更新**: 2026-08-14 新增;同日提升为 P0。
+  - 现状排查:DSH 已有 `dsh-attachment` 与 `read_image` 等图片管道,确认 harness 侧缺口在协议、适配器还是 UI 上传;
+  - 闸门定位(2026-08-14 代码级确认):① 发送层 `dsh-host-apiproxy` 在提交时检测消息含图片,路由模型 `inputModalities` 不含 image 即拒(`model-unavailable`,deepseek 声明 `["text"]`);② 模型层 `dsh-llm-deepseek` 的 `assertTextOnly` 对图片块显式抛 `UNSUPPORTED_CONTENT`。图片进不了会话,主 agent 无委派机会;
+  - 可行路径候选:图片落 workspace + 消息转文本路径 + 委派给视觉子代理(与 B004 的 `subagent-claude-code` 协同);或做视觉路由/输入层转换。
+- **更新**: 2026-08-14 新增,提升 P0;同日完成闸门定位调研。
 
 ### [B007] 类似 Claude 的 /btw 沟通模式
 - **状态**: 想法
