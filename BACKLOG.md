@@ -84,6 +84,17 @@
   - 现状排查:DSH 已有 `dsh-attachment` 与 `read_image` 等图片管道,确认 harness 侧缺口在协议、适配器还是 UI 上传。
 - **更新**: 2026-08-14 新增
 
+### [B007] 类似 Claude 的 /btw 沟通模式
+- **状态**: 想法
+- **背景 / 动机**: 增加类似 Claude Code `/btw`(by the way)的沟通方式:发一条消息让 agent 只记录、不立即处理,不打断当前任务。
+- **要点**:
+  - 入口形态:slash 命令或输入触发;先查 DSH 现有 command/input-trigger 机制(`dsh-client-ui-commands`、`dsh-client-ui-input-trigger`)的扩展点;
+  - 语义:低优先级侧注,不触发即时行动,写入持久记忆;
+  - 存储位置待设计:会话内记忆 vs workspace 文件(如 NOTES.md)vs 任务级;
+  - 消费时机:当前任务完成后回顾,或后续任务开始时带上;
+  - 待设计:多任务并行时 btw 的归属(属于哪个任务/会话)、与 goal/todo 列表的交互。
+- **更新**: 2026-08-14 新增
+
 ---
 
 ## 已完成
