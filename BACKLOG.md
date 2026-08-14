@@ -61,10 +61,12 @@
 - **优先级**: P0
 - **背景 / 动机**: 目前 Codex 和 Anthropics 只能填 api-key 接入,希望支持订阅账号直接授权(OAuth 登录),免去自备 key。
 - **要点**:
-  - provider 层增加订阅制授权流(OpenAI/Claude 订阅登录态);
-  - 注意各平台对第三方工具使用订阅账号的 ToS 限制(参考 Claude Code 的 OAuth 流程);
-  - 评估是否在现有模型路由的 provider 配置上扩展,还是新增认证插件。
-- **更新**: 2026-08-14 新增;同日提升为 P0,优先推进。
+  - 调研结论(2026-08-14):官方 master 已内置 `subagent-claude-code` / `subagent-codex` / `subagent-acp` 三个包,且已发布 npm `0.1.0-rc.6`(与运行版同版本);
+  - 官方路线 = **CLI-as-subagent**:复用本机 `claude` / `codex` CLI 的订阅登录态,插件不做 OAuth;`claude-code` 走官方 Claude Agent SDK,合规性优于野生 token 代理;
+  - 形态差异:subagent 委派(独立任务 → 回最终答案)vs provider 级(挂进 DSH 模型路由/选择器),B004 动机(免 api-key)满足,形态待确认;
+  - 接入路径:`dsh plugin add` 装包 + `cordis.patch.yml` 两行(provider 行 + tool 行),preset 需启用工具行(默认 disabled);
+  - 前置条件:本机安装并登录对应 CLI;ACP 后端仅在接入"只讲 ACP 的外部 agent"时才需要。
+- **更新**: 2026-08-14 新增,提升 P0;同日完成 GitHub 调研,确认官方现成方案,待确认形态后进入实施。
 
 ### [B005] 新任务自动建 worktree,再 cwd 进入开始 agent 交互
 - **状态**: 想法
