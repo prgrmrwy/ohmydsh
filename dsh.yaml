@@ -35,3 +35,7 @@ customizations:
   - id: add-dsh-plugin
     type: skill
     enabled: true
+  # 自研 skill:移除插件的标准流程
+  - id: remove-dsh-plugin
+    type: skill
+    enabled: true

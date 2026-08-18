@@ -133,6 +133,20 @@ async function syncPackages(manifest, items) {
     }
   }
 
+  // remove entries deleted from the manifest (previously managed, now absent)
+  const state = await loadState()
+  const currentNames = new Set(names.values())
+  const previousNames = state.managedPackages ?? []
+  for (const name of previousNames) {
+    if (currentNames.has(name)) continue
+    if (installedVersion(name) !== undefined) {
+      change(`remove deleted package ${name}`)
+      if (!dshCli(['plugin', '--profile', PROFILE, 'remove', name], { version: manifest.dshVersion })) fail(`failed to remove ${name}`)
+    }
+  }
+  state.managedPackages = [...currentNames]
+  await saveState(state)
+
   // install / pin-check enabled ones
   for (const item of enabled) {
     const name = names.get(item.id)
@@ -155,7 +169,7 @@ async function syncPackages(manifest, items) {
   // normalize bundles: shipped base (non-managed) entries first, then enabled managed in manifest order
   const refreshed = readJson(profilePkgPath)
   if (refreshed !== undefined) {
-    const managed = new Set([...names.values()])
+    const managed = new Set([...names.values(), ...(state.managedPackages ?? [])])
     const base = (refreshed.dsh?.profile?.bundles ?? []).filter((b) => !managed.has(b))
     const bundles = [...base, ...enabledNames]
     const before = JSON.stringify(refreshed.dsh?.profile?.bundles ?? [])
@@ -166,7 +180,6 @@ async function syncPackages(manifest, items) {
       change(`bundles: [${bundles.join(', ')}]`)
       await writeJson(profilePkgPath, refreshed)
     }
-    const state = await loadState()
     if (JSON.stringify(state.shippedBundles ?? []) !== JSON.stringify(base)) {
       state.shippedBundles = base
       await saveState(state)
@@ -220,6 +233,9 @@ async function doReset(manifest) {
     }
     delete state[key]
   }
+  delete state.managedPackages
+  delete state['managed:preset']
+  delete state['managed:skill']
   await saveState(state)
 }
 
@@ -256,6 +272,21 @@ async function syncDirs(manifest, items, type, srcDir, dstRoot, requiredFile, la
       delete state[key]
     }
   }
+  // remove entries deleted from the manifest (previously managed, now absent)
+  const currentIds = new Set(managed.map((i) => i.id))
+  for (const id of state[`managed:${type}`] ?? []) {
+    if (currentIds.has(id)) continue
+    const key = `${type}:${id}`
+    if (state[key] !== undefined) {
+      const dst = path.join(dstRoot, id)
+      if (existsSync(dst)) {
+        change(`remove deleted ${label} ${id}`)
+        await rm(dst, { recursive: true, force: true })
+      }
+    }
+    delete state[key]
+  }
+  state[`managed:${type}`] = [...currentIds]
   await saveState(state)
 }
 
