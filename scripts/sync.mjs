@@ -52,6 +52,8 @@ function loadManifest() {
     if (!['local', 'remote'].includes(source)) throw new Error(`${label} (${item.id}): source must be local|remote`)
     if (source === 'remote' && item.type !== 'package') throw new Error(`${label} (${item.id}): source remote only applies to type package`)
     if (item.type === 'package' && source === 'remote' && typeof item.spec !== 'string') throw new Error(`${label} (${item.id}): remote package requires spec`)
+    if (item.name !== undefined && (typeof item.name !== 'string' || !/^(@[^/@]+\/[^/@]+|[^/@]+)$/.test(item.name))) throw new Error(`${label} (${item.id}): name must be a valid npm package name`)
+    if (item.type === 'package' && source === 'remote' && parseSpec(item.spec) === undefined && item.name === undefined) throw new Error(`${label} (${item.id}): remote package with a non-npm spec requires an explicit name (real npm package name)`)
     if ((item.type === 'package' || item.type === 'preset') && typeof item.version !== 'string') throw new Error(`${label} (${item.id}): package/preset requires version`)
     // deps: ownership references into the top-level dependencies list (not an install source)
     if (item.deps !== undefined) {
@@ -124,8 +126,8 @@ function npmNameOf(item) {
     if (pkg === undefined) throw new Error(`package ${item.id}: packages/${item.id}/package.json missing`)
     return pkg.name
   }
-  const m = String(item.spec).match(/^(@[^/@]+\/[^/@]+|[^/@]+)@/)
-  return m ? m[1] : String(item.spec)
+  if (item.name !== undefined) return item.name
+  return parseSpec(item.spec).name
 }
 
 function installedVersion(name) {
@@ -218,7 +220,7 @@ async function syncPackages(manifest, items) {
     const current = installedVersion(name)
     if (current !== undefined && item.source === 'remote' && current !== item.version) {
       change(`version drift ${name} ${current} -> ${item.version}, re-adding`)
-      if (!dshCli(['plugin', '--profile', PROFILE, 'add', `${name}@${item.version}`], { version: manifest.dshVersion })) fail(`failed to pin ${name}`)
+      if (!dshCli(['plugin', '--profile', PROFILE, 'add', item.spec], { version: manifest.dshVersion })) fail(`failed to pin ${name}`)
     } else if (current !== undefined && item.source === 'local' && current !== item.version) {
       change(`local package ${name} ${current} -> ${item.version}, re-adding`)
       if (!dshCli(['plugin', '--profile', PROFILE, 'add', spec], { version: manifest.dshVersion })) fail(`failed to reinstall ${name}`)
