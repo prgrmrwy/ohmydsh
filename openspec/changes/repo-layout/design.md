@@ -35,18 +35,23 @@ zydsh 是嵌套 git 仓库(独立 `.git`,main 分支),已装 openspec(CLI 1.9.0,
 - 社区 bundle 标准即 patch 跟包;`patches/` 只放无代码的纯行调优(如启用某工具行)。
 - 备选:集中 patches/ 目录——拆包时行与代码分离难维护,与生态冲突。
 
-### D4:sync 物化策略 = 生成 + 链接(而非全 copy)
-- presets:优先 symlink `~/.dsh/.agent-presets/<id>` → 仓库目录(单真相源,改即生效);若 DSH 不跟随 symlink,退化为 copy + 变更检测;
+### D4:sync 物化策略 = copy + 生成(不用 symlink,spike 已证)
+- presets:**copy 进** `~/.dsh/.agent-presets/<id>`(spike 1.1 代码级确认:roster 扫描用 `readdir({withFileTypes:true})` 的 `Dirent.isDirectory()`,对 symlink 返回 false,symlink 不会被发现);copy 后按内容哈希做变更检测;
 - `cordis.patch.yml`:sync 生成(带 generated 标记头,按 manifest 顺序合并 enabled patch 行),`~/.dsh` 手改不保留(仓库是真相源);
-- packages:`dsh plugin add file:<path>`(或 link:,实测选优)。
-- 备选:全 copy(易漂移、需重复同步);启动时 `--patch` 参数(依赖启动方式,且 preset/skill 仍需物化,不解决全部)。
+- packages:`dsh plugin add <spec>`(spike 1.3 确认:add 自动写 dependencies 并追加进 `dsh.profile.bundles`,重启即自动加载 bundle patch,无需 sync 写 composition 行);local 用 `file:` 路径;
+- 版本 pin:安装后校验 `node_modules/<name>/package.json` 版本 == manifest pin,不一致则重装;`--save-exact` 仅首次安装生效,漂移修正靠重装。
+- 备选已排除:全 copy(易漂移);symlink(roster 不认);启动 `--patch`(依赖启动方式,不解决 preset/skill)。
 
 ### D5:版本与发布 = 独立 semver + git tag,先不接 registry
 - package 类用 package.json 的 version;非包类(preset/patch/skill)用目录内 `VERSION` 文件;各自 CHANGELOG;
 - tag 规则 `<id>@<version>`;package 类未来可 publish(发布策略另议)。
 
-### D6:skills 落点 = 仓库根 `skills/<name>/SKILL.md`
-DSH skill 解析为分层多源(含 `project-dsh`/`project-agents`),仓库即项目根,skill 可随 cwd 被发现。目录名在实施首步 spike 验证;若不成立,退化为"跟包 skills/ 目录"(社区惯例)或 preset 携带。
+### D6:skills 落点(spike 1.2 已定)
+DSH skill 分层源(每 skill = `<root>/<name>/SKILL.md`):
+- project 级:`<项目根>/.dsh/skills/`(project-dsh)、`<项目根>/.agents/skills/`(project-agents),随会话 cwd 的 git 根发现;
+- user 全局:`~/.dsh/skills`(user-dsh)、`~/.agents/skills`(user-agents);
+- custom 目录(config 可配)、bundled(宿主)。
+仓库以 `skills/<name>/SKILL.md` 为源码位置,sync 物化到 `~/.dsh/skills`(user-dsh,全局可用、不依赖会话 cwd);project 级方案仅作备选。
 
 ### D7:目录布局(定稿)
 
@@ -86,6 +91,7 @@ customizations:
 ```
 
 - sync 按 `source` 与 type 分发物化动作(`local` → 仓库路径;`remote` → `spec` 原址);`enabled: false` = 不物化(仓库内容保留);
+- package 类:sync 只负责 `dsh plugin add <spec>`(自动进 `dsh.profile.bundles`,spike 1.3 证实),不写 composition 行;pin 校验按安装后 `node_modules` 实际版本比对;
 - sync 全量重建生成文件(先备份),重跑即修复漂移;回滚 = 改 manifest 重 sync;
 - `dshVersion` 与 `scripts/dsh.fish` 的 `DSH_VERSION` 对齐(sync 校验,不一致告警)。
 
@@ -98,14 +104,14 @@ customizations:
 
 ## Risks / Trade-offs
 
-- [DSH 不跟随 preset symlink] → 实施首步 spike;失败则退化为 copy + 变更检测 + re-sync 提示。
+- [preset symlink 不被 roster 跟随(已证实)] → copy + 哈希变更检测;详见 D4。
 - [`dsh plugin add file:` 在 DSH 升级/profile 刷新后丢失] → sync 是唯一安装入口,升级后重跑 sync 即恢复;README 写明。
 - [社区 bundle 标准随 DSH 版本演进] → manifest 锁 DSH 版本;升级前先验证社区包兼容性,再升 manifest。
 - [sync 覆盖 `~/.dsh` 手改] → generated 标记头 + README 明示"真相源在仓库";手改一律回写仓库。
-- [skills 目录名未验证] → tasks 里设 spike,不阻塞其他物化路径。
 - [remote 包下架/改版/破坏性升级] → `spec` 精确 pin;升级是显式动作(改 pin 重跑 sync),不自动漂移;
 - [第三方代码安全] → manifest `note` 记录来源与审查;安装前人工看源码的约定写入 README;
-- [remote 安装失败(网络/源不可达)] → sync 报可读错误并列出失败条目,不半途静默。
+- [remote 安装失败(网络/源不可达)] → sync 报可读错误并列出失败条目,不半途静默;
+- [第三方插件拉高依赖版本(实测 cost-meter 带 rc.7,运行体 rc.6)] → 重启后验证加载;`note` 记录;sync 的 pin 校验覆盖。
 
 ## Migration Plan
 
