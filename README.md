@@ -51,6 +51,7 @@ ln -s /Users/bytedance/mydir/opensource/mydsh/bin/dsh ~/.local/bin/dsh
 | `dsh build` | 只 build,不启动 |
 | `dsh -d` | 等价默认行为(兼容保留) |
 | `dsh stop` | 停止 dsh web 进程,并关闭 UI(PWA;浏览器标签请手动关) |
+| `dsh restart` | 重启:stop → 等端口释放 → 拉起(**替代 `dsh stop & dsh`,后者 stop 与 start 竞态:start 会复用旧实例,随后又被 stop 杀掉**) |
 | `dsh reset` | **一键清零自定义 plugins**(移除全部自定义包、重置 patch 层、清掉 sync 出去的 preset/skill;可 `dsh build` 恢复) |
 | `dsh history` | 查看历次启动清单(时间 / 版本 / 端口 / 加载的 plugins,记录在 `~/.dsh/dsh-startup.log`) |
 | `dsh -p 8080` | 指定端口(默认 3080) |

@@ -58,7 +58,7 @@
 - **更新**: 2026-08-14 新增
 
 ### [B004] AI provider 订阅制认证
-- **状态**: 想法
+- **状态**: 实施中
 - **优先级**: P0
 - **背景 / 动机**: 目前 Codex 和 Anthropics 只能填 api-key 接入,希望支持订阅账号直接授权(OAuth 登录),免去自备 key。
 - **要点**:
@@ -73,7 +73,8 @@
   - 待验证(暂缓):claude-code-acp 对 workspace 参数的处理、SSH 免密与远端进程终止语义、ACP 后端为 one-shot(无跨轮续聊);
   - selector 订阅方案(2026-08-14 补充):官方无订阅制 LlmAdapter;可行路径 = 自研 adapter 包装产品 CLI 登录态(Claude: `claude -p --output-format stream-json`;GPT: `codex app-server --stdio` JSON-RPC),限流/延迟/ToS 需注意,与 subagent 路线可并存;
   - 分布式能力(暂缓):官方件 = `dsh-acp`(ACP server,stdio,text-only)+ `subagent-acp`(client,command 可配)。"每台设备常驻一个 DSH ACP server,本机按 providerName 注册多实例,ssh 派发" = 官方支持的分布式 agent 池形态;daemon 长连接需自定义 provider。
-- **更新**: 2026-08-14 新增,提升 P0;同日完成 GitHub 调研,确认官方现成方案;同日定范围:单机可用,多机/分布式暂缓。
+  - 接线落地(2026-08-19):**codex 先行,claude 待本机可用**——首个按 repo-layout 落地的定制:官方 `@deepseek-ai/dsh-subagent-codex@0.1.0-rc.6` 按 `remote` 入 manifest(无 dsh.bundle,装为 plain dependency 不进 bundle 层),其缺失 peer `@deepseek-ai/dsh-sdk-protocol@0.1.0-rc.6` 入 manifest 顶层 `dependencies:`(新增支撑包契约,条目 `deps:` 引用归属,sync 校验悬空引用);provider+tool 两行接线放 `patches/subagent-codex-wiring.yml`(type: patch,sync 合并进生成 patch 层,直插 host 平面,工具 `subagent_codex` 全会话可见,preset 无需改动);sync 顺带修复 bundle-less 包不得进 bundle 层;本机 codex-cli 0.144.3(ChatGPT 登录态)app-server 握手实测通过(官方基线 0.147.0);2026-08-19 重启验收:provider+tool 两行激活,`subagent_codex` 工具已注入会话;真实委派调用待新会话做一次最终验收。
+- **更新**: 2026-08-14 新增,提升 P0;同日完成 GitHub 调研,确认官方现成方案;同日定范围:单机可用,多机/分布式暂缓;2026-08-19 codex 接线按「remote 包 + 顶层 dependencies + patches 覆盖」落地为 repo-layout 首个定制并重启验收通过(工具已注入会话),claude 对应接线待本机 claude 可用后另加。
 
 ### [B005] 新任务自动建 worktree,再 cwd 进入开始 agent 交互
 - **状态**: 想法
@@ -132,7 +133,8 @@
   - 结合此前草案:`plugins/`、`presets/`、`profile/`、`skills/` 布局;与 openspec 工作流、BACKLOG.md 配合;
   - 待设计:目录布局、总配置格式(JSON/YAML)、开关粒度(全局 vs per-session)、多定制间依赖关系。
   - 方向定稿(2026-08-14):定制单元采用社区 `dsh.bundle` 标准(package.json 声明 bundle + 自带 cordis.patch.yml + src/),patch 跟包走;presets 走官方 `.agent-presets` 机制;skills 跟包或 project 源;总配置 manifest + sync 为自研薄层。
-- **更新**: 2026-08-14 新增,即定 P0;同日方向定稿,进入 openspec 设计(change: repo-layout);设计定稿 + 实施完成(骨架 / `dsh.yaml` / `scripts/sync.mjs` / 迁移,spike 与 spec 场景验收通过),首个 remote 定制 cost-meter 纳入;剩余:4.4(B004 首个 local package)、4.6(重启验证 cost-meter 加载)。
+  - 结构定稿文档位置(2026-08-19):`README.md`(目录结构 + 真相源约定 + sync 用法)、`dsh.yaml`(manifest 契约:customizations / 顶层 `dependencies` / 字段约定)、`packages/README.md` / `presets/README.md` / `patches/README.md` / `skills/README.md`(各类定制单元规范);设计过程见 openspec change `repo-layout`(design D7/D8 定稿,归档后移入 `openspec/changes/archive/`)。
+- **更新**: 2026-08-14 新增,即定 P0;同日方向定稿,进入 openspec 设计(change: repo-layout);设计定稿 + 实施完成(骨架 / `dsh.yaml` / `scripts/sync.mjs` / 迁移,spike 与 spec 场景验收通过),首个 remote 定制 cost-meter 纳入,首个按新结构落地的定制 subagent-codex(remote 包 + 顶层 dependencies + patches 接线)落地(2026-08-19);4.6 重启验收通过(cost-meter host+client 加载、subagent 两行激活、`dsh restart` 子命令补充);剩余:openspec 归档。
 
 ### [B010] 任意页面查看 API 使用量
 - **状态**: 想法
@@ -147,6 +149,20 @@
   - 建议路径:先试用 dsh-cost-meter 或 @kenz1117/dsh-ui-usage-billing,满足即用(评估后归档本条目),不满足再自研(落点 = client UI 全局组件 + host 侧聚合 API);
   - 待确认:指标范围(余额 / 当日费用 / 会话费用 / 配额)、入口位置偏好、是否要多厂商。
 - **更新**: 2026-08-18 新增;完成社区调研,确认存在成熟现成产品,结论为「评估复用优先」。
+
+### [B011] 输入框 @ 唤起 subagent 选择并指派任务 + subagent 管理面板
+- **状态**: 想法
+- **优先级**: P1
+- **背景 / 动机**: B004 落地后 subagent 会变多(claude-code / codex / 多机实例),希望用户能在输入框直接 `@` 唤起 subagent 选择器、显式指派任务给某个 subagent,而不是只能靠主 agent 自主决定委派;同时需要一个管理面板统一查看/配置这些 subagent。
+- **要点**:
+  - 前置条件:先验证 B004 单机 subagent 好用(openspec 4.4),「好用」再决定本条优先级;
+  - 入口形态:复用 `dsh-client-ui-input-trigger` 的 trigger 机制(现有 `/` slash-menu 即由它注册,支持 lexicon 候选 + `ReferenceInsert` / `ConsumeTokenRequest` 等契约),新增 `@` trigger 大概率不动会话主链路;UI 参考 `dsh-client-ui-model-selection` 的两级菜单;
+  - 数据源:subagent 注册表 = host 侧 subagent registry / tool 清单(`subagent-claude-code` 每实例一条 tool 行,天然可按 providerName / toolName 列出);也可混入当前会话树里的活跃 subagent(类似 `list_agents` 的 children 视图);
+  - 指派语义(待设计):选中后把输入内容作为委派请求直接发给该 subagent(用户显式选目标,等价于主 agent 调 subagent 工具但由人指定),还是生成一条指令让主 agent 转发;结果如何回流展示;
+  - 管理面板:subagent 列表(名称 / provider / 模型 / 机器 / 状态 / 任务数),配置(增删、默认模型、persona 提示词),任务历史;落点 = client UI(设置页 Tab 或侧栏面板)+ host 侧配置持久化;
+  - 与 B001 关系:B001 是 agent 自主编排(tech-lead 派活),本条是用户手动指派,互补;面板可复用一个 subagent registry 设计,避免两处各建一套;
+  - 与 B008 可联动:面板里 subagent 的任务状态可进会话看板。
+- **更新**: 2026-08-19 新增
 
 ---
 

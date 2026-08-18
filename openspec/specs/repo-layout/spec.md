@@ -1,15 +1,20 @@
-## Purpose
+# repo-layout Specification
 
+## Purpose
 定义 zydsh 仓库的目录结构、总配置 manifest 契约,以及将启用的定制物化到 DSH 部署环境的 sync 行为。
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: 总配置 manifest 声明 DSH 版本与定制列表
-仓库根必须(SHALL)包含 `dsh.yaml` manifest。manifest 必须声明锁定的 DSH 版本与定制列表,其中每项必须包含 `id`、`type`、`enabled`,且 `package` 与 `preset` 类型必须包含 `version`。
+仓库根必须(SHALL)包含 `dsh.yaml` manifest。manifest 必须声明锁定的 DSH 版本与定制列表,其中每项必须包含 `id`、`type`、`enabled`,且 `package` 与 `preset` 类型必须包含 `version`。manifest 可(MAY)声明顶层 `dependencies` 列表:无 bundle 的支撑包(如 remote 定制缺失的 peer),每项为含精确版本的 npm spec;定制条目可(MAY)通过 `deps` 引用其中的包名声明归属,被引用的包名必须存在于顶层 `dependencies`,否则 sync 报错。
 
 #### Scenario: 读取 manifest
 - **WHEN** 用户读取 `dsh.yaml`
 - **THEN** 每项定制的 id、类型、版本(按需)与启用状态均显式可见
+
+#### Scenario: 声明支撑依赖
+- **WHEN** 某定制需要运行体未携带的 npm 支撑包
+- **THEN** 该支撑包以含精确版本的 spec 列入顶层 `dependencies`,依赖它的定制条目通过 `deps` 引用其包名;引用不存在的包名时 sync 报错
 
 #### Scenario: manifest 缺失
 - **WHEN** sync 运行时 `dsh.yaml` 不存在

@@ -8,6 +8,7 @@
 #   dsh -b         重新 build(安装/同步 plugins)后再启动
 #   dsh build      只 build,不启动
 #   dsh stop       停止 dsh web 进程,并关闭 UI(PWA;浏览器标签请手动关)
+#   dsh restart    重启:stop → 等端口释放 → start(避免 stop & dsh 竞态)
 #   dsh reset      一键清零自定义 plugins(patch/preset/skill 一并重置;可 dsh build 恢复)
 #   dsh history    查看历次启动清单(时间 / 版本 / 端口 / 加载的 plugins)
 #   dsh -p 8080    指定端口(默认 3080)
@@ -43,6 +44,7 @@ PORT=3080
 BUILD=0
 BUILD_ONLY=0
 STOP=0
+RESTART=0
 NO_OPEN=0
 RESET=0
 FOREGROUND=0
@@ -58,6 +60,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     build) BUILD_ONLY=1; shift ;;
     stop) STOP=1; shift ;;
+    restart) RESTART=1; shift ;;
     reset) RESET=1; shift ;;
     history) HISTORY=1; shift ;;
     -b|--build) BUILD=1; shift ;;
@@ -104,6 +107,20 @@ do_stop() {
   else
     echo "dsh stopped(浏览器页面请手动关闭)"
   fi
+}
+
+# stop, then wait until the port is released so a follow-up start never races
+do_restart() {
+  do_stop
+  for _ in $(seq 1 40); do
+    if ! nc -z 127.0.0.1 "$PORT" >/dev/null 2>&1; then
+      echo "port $PORT released"
+      return 0
+    fi
+    sleep 0.25
+  done
+  echo "warn: port $PORT still busy after 10s — start may reuse the old instance" >&2
+  return 1
 }
 
 do_history() {
@@ -241,6 +258,10 @@ if [[ $BUILD_ONLY -eq 1 ]]; then
 fi
 if [[ $BUILD -eq 1 ]]; then
   do_build
+fi
+
+if [[ $RESTART -eq 1 ]]; then
+  do_restart
 fi
 
 # Idempotent start: reuse the running instance instead of spawning another

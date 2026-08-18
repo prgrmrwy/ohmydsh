@@ -1,0 +1,18 @@
+# B004 接线:官方 codex subagent 的 provider 行 + 委派工具行,直插本 profile 的 host 平面。
+# 官方 README:"A custom host composition can still use both rows directly."
+# 配套 remote 定制:manifest 的 subagent-codex(@deepseek-ai/dsh-subagent-codex@0.1.0-rc.6)
+# 与其 peer dsh-sdk-protocol(运行体未带,须显式安装)。
+# provider 注册进 ctx.subagents(codex);工具 subagent_codex 对全部会话可见
+# (任务一次性委派,只回最终答案)。本机 codex 登录态生效(codex login;provider 从 PATH
+# 解析 codex,原生配置/鉴权)。claude 对应接线待本机 claude 可用后另加(见 BACKLOG B004)。
+- insert:
+    - id: subagent-codex
+      name: '@deepseek-ai/dsh-subagent-codex'
+
+    - id: tool-subagent-codex
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: codex
+        toolName: subagent_codex
+        enableRunInBackground: false
+        maxDepth: provider-managed

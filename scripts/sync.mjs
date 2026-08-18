@@ -33,6 +33,17 @@ function loadManifest() {
   if (typeof doc !== 'object' || doc === null) throw new Error(`manifest ${file} is empty or not a YAML mapping`)
   if (typeof doc.dshVersion !== 'string' || doc.dshVersion === '') throw new Error('manifest: dshVersion is required')
   if (!Array.isArray(doc.customizations)) throw new Error('manifest: customizations must be a list')
+
+  // top-level dependencies: bundle-less support packages (exact-version npm specs)
+  const deps = (doc.dependencies ?? []).map((spec, index) => {
+    const label = `dependencies[${index}]`
+    if (typeof spec !== 'string') throw new Error(`${label}: must be a string npm spec with exact version`)
+    const parsed = parseSpec(spec)
+    if (parsed === undefined) throw new Error(`${label}: "${spec}" — expected "<name>@<version>"`)
+    return { ...parsed, spec }
+  })
+  const depNames = new Set(deps.map((d) => d.name))
+
   const items = doc.customizations.map((item, index) => {
     const label = `customizations[${index}]`
     if (typeof item.id !== 'string' || !/^[a-z0-9][a-z0-9._-]*$/i.test(item.id)) throw new Error(`${label}: valid string id required`)
@@ -42,9 +53,22 @@ function loadManifest() {
     if (source === 'remote' && item.type !== 'package') throw new Error(`${label} (${item.id}): source remote only applies to type package`)
     if (item.type === 'package' && source === 'remote' && typeof item.spec !== 'string') throw new Error(`${label} (${item.id}): remote package requires spec`)
     if ((item.type === 'package' || item.type === 'preset') && typeof item.version !== 'string') throw new Error(`${label} (${item.id}): package/preset requires version`)
+    // deps: ownership references into the top-level dependencies list (not an install source)
+    if (item.deps !== undefined) {
+      if (!Array.isArray(item.deps) || item.deps.some((d) => typeof d !== 'string')) throw new Error(`${label} (${item.id}): deps must be a list of package names`)
+      for (const name of item.deps) {
+        if (!depNames.has(name)) throw new Error(`${label} (${item.id}): deps references "${name}" which is missing from top-level dependencies`)
+      }
+    }
     return { ...item, source, enabled: item.enabled !== false }
   })
-  return { dshVersion: doc.dshVersion, items }
+  return { dshVersion: doc.dshVersion, items, deps }
+}
+
+function parseSpec(spec) {
+  const m = String(spec).match(/^(@[^/@]+\/[^/@]+|[^/@]+)@(.+)$/)
+  if (m === null || m[2] === '') return undefined
+  return { name: m[1], version: m[2] }
 }
 
 // ---------- helpers ----------
@@ -109,7 +133,45 @@ function installedVersion(name) {
   return pkg?.version
 }
 
+function declaresBundle(name) {
+  const pkg = readJson(path.join(PROFILE_DIR, 'node_modules', ...name.split('/'), 'package.json'))
+  return pkg?.dsh?.bundle?.patch !== undefined
+}
+
 // ---------- actions ----------
+/**
+ * Bundle-less support packages from the top-level `dependencies` list:
+ * install / pin / remove as plain profile dependencies. Never join the
+ * bundle layer stack (`dsh plugin add` reconciliation already keeps
+ * bundle-less packages out); state tracking mirrors managedPackages.
+ */
+async function syncDependencies(manifest) {
+  const state = await loadState()
+  const currentNames = new Set(manifest.deps.map((d) => d.name))
+  const previousNames = state.managedDependencies ?? []
+  for (const name of previousNames) {
+    if (currentNames.has(name)) continue
+    if (installedVersion(name) !== undefined) {
+      change(`remove dependency ${name}`)
+      if (!dshCli(['plugin', '--profile', PROFILE, 'remove', name], { version: manifest.dshVersion })) fail(`failed to remove dependency ${name}`)
+    }
+  }
+  for (const dep of manifest.deps) {
+    const current = installedVersion(dep.name)
+    if (current !== undefined && current !== dep.version) {
+      change(`dependency drift ${dep.name} ${current} -> ${dep.version}, re-adding`)
+      if (!dshCli(['plugin', '--profile', PROFILE, 'add', `${dep.name}@${dep.version}`], { version: manifest.dshVersion })) fail(`failed to pin dependency ${dep.name}`)
+    } else if (current === undefined) {
+      change(`install dependency ${dep.name} (${dep.spec})`)
+      if (!dshCli(['plugin', '--profile', PROFILE, 'add', dep.spec], { version: manifest.dshVersion })) fail(`failed to install dependency ${dep.name}`)
+    } else {
+      log(`dependency ${dep.name}@${current} up-to-date`)
+    }
+  }
+  state.managedDependencies = [...currentNames]
+  await saveState(state)
+}
+
 async function syncPackages(manifest, items) {
   const packages = items.filter((i) => i.type === 'package')
   const enabled = packages.filter((i) => i.enabled)
@@ -133,12 +195,14 @@ async function syncPackages(manifest, items) {
     }
   }
 
-  // remove entries deleted from the manifest (previously managed, now absent)
+  // remove entries deleted from the manifest (previously managed, now absent);
+  // names now managed as top-level dependencies are not ours to remove
   const state = await loadState()
+  const depNames = new Set(manifest.deps.map((d) => d.name))
   const currentNames = new Set(names.values())
   const previousNames = state.managedPackages ?? []
   for (const name of previousNames) {
-    if (currentNames.has(name)) continue
+    if (currentNames.has(name) || depNames.has(name)) continue
     if (installedVersion(name) !== undefined) {
       change(`remove deleted package ${name}`)
       if (!dshCli(['plugin', '--profile', PROFILE, 'remove', name], { version: manifest.dshVersion })) fail(`failed to remove ${name}`)
@@ -166,12 +230,16 @@ async function syncPackages(manifest, items) {
     }
   }
 
-  // normalize bundles: shipped base (non-managed) entries first, then enabled managed in manifest order
+  // normalize bundles: shipped base (non-managed) entries first, then enabled managed in manifest order.
+  // Only bundle-declaring packages join the layer stack: a package without a dsh.bundle manifest
+  // is a plain dependency (mirrors `dsh plugin add` reconciliation); forcing it into bundles
+  // would fail profile load ("bundle without dsh.bundle manifest").
   const refreshed = readJson(profilePkgPath)
   if (refreshed !== undefined) {
     const managed = new Set([...names.values(), ...(state.managedPackages ?? [])])
     const base = (refreshed.dsh?.profile?.bundles ?? []).filter((b) => !managed.has(b))
-    const bundles = [...base, ...enabledNames]
+    const bundleNames = enabledNames.filter((name) => declaresBundle(name))
+    const bundles = [...base, ...bundleNames]
     const before = JSON.stringify(refreshed.dsh?.profile?.bundles ?? [])
     refreshed.dsh ??= {}
     refreshed.dsh.profile ??= {}
@@ -234,6 +302,7 @@ async function doReset(manifest) {
     delete state[key]
   }
   delete state.managedPackages
+  delete state.managedDependencies
   delete state['managed:preset']
   delete state['managed:skill']
   await saveState(state)
@@ -329,6 +398,7 @@ async function main() {
   if (process.argv.includes('--reset')) {
     await doReset(manifest)
   } else {
+    await syncDependencies(manifest)
     await syncPackages(manifest, manifest.items)
     await syncDirs(manifest, manifest.items, 'preset', 'presets', path.join(DSH_HOME, '.agent-presets'), 'cordis.yml', 'preset')
     await syncDirs(manifest, manifest.items, 'skill', 'skills', path.join(DSH_HOME, 'skills'), 'SKILL.md', 'skill')
