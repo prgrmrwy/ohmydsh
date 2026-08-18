@@ -34,11 +34,12 @@ ln -s /Users/bytedance/mydir/opensource/zydsh/bin/dsh ~/.local/bin/dsh
 
 | 命令 | 行为 |
 |---|---|
-| `dsh` | 用**上次 build** 启动(默认;更新仓库不影响,直到显式 build);服务就绪后**自动打开 web UI** |
-| `dsh --no-open` | 启动但不自动打开浏览器 |
+| `dsh` | **非阻塞启动**(类似 `dsh &`):未运行 → 后台拉起 + 就绪后开 UI;已运行 → 直接打开 UI;UI 也已打开 → 提示"已在运行" |
+| `dsh --no-open` | 启动/检测时不自动打开 UI |
+| `dsh --foreground` | 前台阻塞运行(调试用) |
 | `dsh -b` | 重新 build(安装/同步 plugins)后再启动 |
 | `dsh build` | 只 build,不启动 |
-| `dsh -d` | 后台启动 + 打开浏览器 |
+| `dsh -d` | 等价默认行为(兼容保留) |
 | `dsh stop` | 停止 dsh web 进程 |
 | `dsh reset` | **一键清零自定义 plugins**(移除全部自定义包、重置 patch 层、清掉 sync 出去的 preset/skill;可 `dsh build` 恢复) |
 | `dsh -p 8080` | 指定端口(默认 3080) |
