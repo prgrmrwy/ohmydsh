@@ -26,7 +26,7 @@ zydsh 是嵌套 git 仓库(独立 `.git`,main 分支),已装 openspec(CLI 1.9.0,
 - 采纳理由:生态兼容 + 官方安装口子 + 有真实参照实现。
 
 ### D2:总配置 = 自研薄层 `dsh.yaml`
-根级 YAML:锁 DSH 版本 + `customizations` 列表(每项 `id/type/version/enabled`)。
+根级 YAML:锁 DSH 版本 + `customizations` 列表(每项 `id/type/version/source/enabled`,其中 `source` 区分 `local` 自研与 `remote` 第三方)。
 - 备选 JSON:无注释,人工维护体验差;
 - 备选"目录存在即启用":无版本、无开关语义,无法表达"保留但禁用"。
 - 采纳理由:YAML 可读 + 显式插拔语义 + 版本引用。manifest 之外的一切都复用现有机制,不自研。
@@ -70,15 +70,31 @@ zydsh/
 ```yaml
 dshVersion: 0.1.0-rc.6
 customizations:
-  - id: subagent-claude-code
+  # 自研:源码 + 配置都在仓库
+  - id: tool-open-ide
     type: package            # package | preset | patch | skill
+    source: local            # 默认值;源码在 packages/<id>/
     version: 0.1.0           # package/preset 必填;patch 可省略
     enabled: true
+  # 第三方:只存 pin + 覆盖 + 记录,不 vendor 源码
+  - id: dsh-agent-teams
+    type: package
+    source: remote
+    spec: '@nanmicoder/dsh-agent-teams@0.1.7'   # npm 精确版本;或 github:owner/repo#tag
+    enabled: true
+    note: 多角色团队插件,B001 评估候选
 ```
 
-- sync 按 type 分发物化动作;`enabled: false` = 不物化(仓库内容保留);
+- sync 按 `source` 与 type 分发物化动作(`local` → 仓库路径;`remote` → `spec` 原址);`enabled: false` = 不物化(仓库内容保留);
 - sync 全量重建生成文件(先备份),重跑即修复漂移;回滚 = 改 manifest 重 sync;
 - `dshVersion` 与 `scripts/dsh.fish` 的 `DSH_VERSION` 对齐(sync 校验,不一致告警)。
+
+### D9:第三方定制 = 引用 + 覆盖,不 vendor
+`remote` 定制只在仓库维护三样东西:manifest 里的 `spec` 精确 pin、`patches/<id>.yml` 个人覆盖片段、条目说明(`note`/审查记录)。代码永远从 npm/git 原址安装。
+- 备选 vendor 源码入仓:LICENSE 混杂、上游更新需手工合并、仓库角色变成代码库,维护负担随插件数线性增长;
+- 备选完全不进 manifest 手动装:换机/重建不可复现,违背"一键加载";
+- 采纳理由:仓库定位是"个人配置清单 + 自研定制",第三方代码归属上游,升级 = 改 pin 重跑 sync;
+- 安全约定:第三方插件即第三方代码(社区列表明示警告),安装前看源码、`note` 记录来源与审查结论;`spec` 必须含精确版本,避免漂移。
 
 ## Risks / Trade-offs
 
@@ -87,6 +103,9 @@ customizations:
 - [社区 bundle 标准随 DSH 版本演进] → manifest 锁 DSH 版本;升级前先验证社区包兼容性,再升 manifest。
 - [sync 覆盖 `~/.dsh` 手改] → generated 标记头 + README 明示"真相源在仓库";手改一律回写仓库。
 - [skills 目录名未验证] → tasks 里设 spike,不阻塞其他物化路径。
+- [remote 包下架/改版/破坏性升级] → `spec` 精确 pin;升级是显式动作(改 pin 重跑 sync),不自动漂移;
+- [第三方代码安全] → manifest `note` 记录来源与审查;安装前人工看源码的约定写入 README;
+- [remote 安装失败(网络/源不可达)] → sync 报可读错误并列出失败条目,不半途静默。
 
 ## Migration Plan
 
