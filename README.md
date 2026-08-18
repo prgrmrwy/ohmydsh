@@ -34,7 +34,7 @@ ln -s /Users/bytedance/mydir/opensource/zydsh/bin/dsh ~/.local/bin/dsh
 
 | 命令 | 行为 |
 |---|---|
-| `dsh` | **非阻塞启动**(类似 `dsh &`):未运行 → 后台拉起 + 就绪后开 UI;已运行 → 直接打开 UI;UI 也已打开 → 提示"已在运行" |
+| `dsh` | **非阻塞启动**(类似 `dsh &`):未运行 → 后台拉起 + 就绪后开 UI;已运行 → 直接打开 UI;UI 也已打开 → 提示"已在运行";每次打印**带备注的插件清单**(manifest note > 包 description) |
 | `dsh --no-open` | 启动/检测时不自动打开 UI |
 | `dsh --foreground` | 前台阻塞运行(调试用) |
 | `dsh -b` | 重新 build(安装/同步 plugins)后再启动 |
