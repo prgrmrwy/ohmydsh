@@ -38,7 +38,7 @@ try {
       const m = String(item.spec).match(/^(@[^/@]+\/[^/@]+|[^/@]+)@/)
       name = m ? m[1] : item.spec
     }
-    if (name && item.note) notes.set(name, item.note)
+    if (name && (item.brief || item.note)) notes.set(name, item.brief ?? item.note)
   }
 } catch {
   // manifest unreadable → fall back to package descriptions only
