@@ -23,7 +23,7 @@
 ## 4. 迁移与验证
 
 - [x] 4.1 迁移现有文件:`BACKLOG.md`、`scripts/dsh.fish` 保留原位置(design D7 本就不移动),新增骨架与 sync;git 历史保留
-- [x] 4.2 更新 `scripts/dsh.fish`:新增 `dsh-sync` 函数(`node scripts/sync.mjs`);不在启动时自动 sync(避免意外),版本由 sync 校验告警
+- [x] 4.2 启动命令:`bin/dsh`(bash & fish 通用,经 `~/.local/bin/dsh` symlink 上 PATH);默认用上次 build 启动、`dsh -b` 先 build 再启动、`dsh build` 只 build、`dsh -d` 后台、`dsh stop` 停止;版本单一来源 = `dsh.yaml`(脚本运行时读取,移除 dsh.fish 的 DSH_VERSION 常量)
 - [x] 4.3 按 spec 场景验收:manifest 缺失报错 ✓、disabled 不物化 ✓(cost-meter 移除实测)、toggle 可逆 ✓(移除→重装)、双 patch 合并顺序 ✓(探针)、local/remote 混合一次 sync ✓(首条 remote)、remote pin 复现 ✓(重装后 1.5.6)
 - [ ] 4.4 用 B004 单机接入作为首个真实定制(package: subagent-claude-code 接线),实战验证 sync + bundle 链路
 - [ ] 4.5 更新 BACKLOG B009 状态为已设计/实施中,记录新结构文档位置

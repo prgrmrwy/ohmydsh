@@ -24,10 +24,25 @@ skills/<name>/            # skill(见 skills/README.md)
 
 ## 使用
 
+**安装启动命令**(一次性,两 shell 的 PATH 均含 `~/.local/bin`):
+
 ```bash
-node scripts/sync.mjs     # 物化(幂等,可重跑)
-# fish: dsh-sync
+ln -s /Users/bytedance/mydir/opensource/zydsh/bin/dsh ~/.local/bin/dsh
 ```
+
+**日常**:
+
+| 命令 | 行为 |
+|---|---|
+| `dsh` | 用**上次 build** 启动(默认;更新仓库不影响,直到显式 build) |
+| `dsh -b` | 重新 build(安装/同步 plugins)后再启动 |
+| `dsh build` | 只 build,不启动 |
+| `dsh -d` | 后台启动 + 打开浏览器 |
+| `dsh stop` | 停止 dsh web 进程 |
+| `dsh -p 8080` | 指定端口(默认 3080) |
+
+- "build" = 按 `dsh.yaml` 物化到 `~/.dsh`(即 `node scripts/sync.mjs`,幂等可重跑);
+- 版本单一来源:`dsh.yaml` 的 `dshVersion`,启动脚本运行时读取。
 
 sync 行为按定制类型:
 
