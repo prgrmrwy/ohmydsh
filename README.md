@@ -40,6 +40,7 @@ ln -s /Users/bytedance/mydir/opensource/zydsh/bin/dsh ~/.local/bin/dsh
 | `dsh build` | 只 build,不启动 |
 | `dsh -d` | 后台启动 + 打开浏览器 |
 | `dsh stop` | 停止 dsh web 进程 |
+| `dsh reset` | **一键清零自定义 plugins**(移除全部自定义包、重置 patch 层、清掉 sync 出去的 preset/skill;可 `dsh build` 恢复) |
 | `dsh -p 8080` | 指定端口(默认 3080) |
 
 - "build" = 按 `dsh.yaml` 物化到 `~/.dsh`(即 `node scripts/sync.mjs`,幂等可重跑);
