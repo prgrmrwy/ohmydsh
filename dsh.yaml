@@ -4,6 +4,10 @@
 
 dshVersion: 0.1.0-rc.6     # 启动脚本 bin/dsh 运行时读取,单一版本来源
 
+bundlesBrief:              # 出厂 bundle 的短备注(非 manifest 管理的包)
+  "@deepseek-ai/dsh-base": 核心 bundle(agent / 会话 / 工具骨架)
+  "@deepseek-ai/dsh-web-app": web 壳(浏览器 UI)
+
 customizations:
   # 字段约定:brief = 启动清单里的短备注(优先于 note);note = 完整来源/审查记录
   # 第三方(remote):只存 pin + 覆盖 + 记录,不 vendor 源码
