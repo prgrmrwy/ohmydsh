@@ -23,6 +23,14 @@ customizations:
     enabled: true
     brief: 支持图片识别(粘贴即视觉,走 Codex)
     note: B006 生态解:粘贴图片即视觉(web client + modlens_read_image 工具 + 模型选择器 vision 条目);repo https://github.com/liustack/modlens(3.1k stars,MIT,活跃);引擎策略:仅 codex(OpenAI 产品 CLI,二进制 codex),claude 显式禁用(reuse.claude=false);实测真实读图成功(33.8s,计 Codex 额度);需重启生效
+  - id: archify-dsh
+    type: package
+    source: remote
+    spec: '@tt-a1i/archify-dsh@0.1.0'
+    version: 0.1.0
+    enabled: true
+    brief: 架构图 skill(架构/时序/数据流/生命周期)
+    note: repo https://github.com/tt-a1i/archify(14.2k stars,MIT,活跃);skill-only bundle,对话内生成可交互架构图(自包含 HTML/PNG/SVG);后续可配合 B001 架构师角色;需重启生效
   # 自研 skill:添加远端插件的标准流程
   - id: add-dsh-plugin
     type: skill
