@@ -14,7 +14,8 @@ bundlesBrief:              # 出厂 bundle 的短备注(非 manifest 管理的�
   "@deepseek-ai/dsh-web-app": web 壳(浏览器 UI)
 
 customizations:
-  # 字段约定:brief = 启动清单里的短备注(优先于 note);note = 完整来源/审查记录
+  # 字段约定:brief = 启动清单里的短备注(优先于 note);note = 完整来源/审查记录;
+  #          name = 非 npm spec(github/tarball)时的真实包名(必填;npm spec 可省略)
   # 第三方(remote):只存 pin + 覆盖 + 记录,不 vendor 源码
   - id: cost-meter
     type: package
@@ -65,3 +66,13 @@ customizations:
   - id: remove-dsh-plugin
     type: skill
     enabled: true
+  # 第三方(remote):B003 IDE 集成 — workspace 菜单一键在 VSCode 打开
+  - id: open-in-vscode
+    type: package
+    source: remote
+    spec: 'https://github.com/omdsh-dev/dsh-open-in-vscode/archive/refs/tags/v0.1.6.tar.gz'
+    name: dsh-open-in-vscode
+    version: 0.1.6
+    enabled: true
+    brief: 工作区菜单「在 VSCode 中打开」
+    note: B003 落地;npm 0.2.0 已 unpublished,按官方 README 建议用 tag v0.1.6 的 tarball 直装(不跑 git prepare);MIT,50 stars,2026-08-16 活跃;host 行 dsh-open-in-vscode(typert 服务 openInVscode/open,用户点击时 spawn 编辑器 CLI)+ web client(workspace 行菜单,rc.6 走兼容适配器),无工具/无模型可见面;前置:本机装了 VS Code CLI(code),详见 https://github.com/omdsh-dev/dsh-open-in-vscode
