@@ -48,15 +48,6 @@
   - 可复用现有 `lark-im`(收发消息)、`lark-event`(事件订阅)能力;需定义交互入口与鉴权(群→会话映射)。
 - **更新**: 2026-08-14 新增
 
-### [B003] IDE 集成:打开当前项目目录
-- **状态**: 想法
-- **背景 / 动机**: 增加用 IDE 打开当前项目目录的能力,暂时只支持 VSCode。
-- **要点**:
-  - 提供 tool/命令:调 `code <项目目录>` 或 vscode:// URI;
-  - 明确"当前项目目录"来源(workspace 路径);
-  - 未来可扩展 JetBrains 等其他 IDE。
-- **更新**: 2026-08-14 新增
-
 ### [B004] AI provider 订阅制认证
 - **状态**: 实施中
 - **优先级**: P0
@@ -167,3 +158,12 @@
   - 方向定稿(2026-08-14):定制单元采用社区 `dsh.bundle` 标准(package.json 声明 bundle + 自带 cordis.patch.yml + src/),patch 跟包走;presets 走官方 `.agent-presets` 机制;skills 跟包或 project 源;总配置 manifest + sync 为自研薄层。
   - 结构定稿文档位置(2026-08-19):`README.md`(目录结构 + 真相源约定 + sync 用法)、`dsh.yaml`(manifest 契约:customizations / 顶层 `dependencies` / 字段约定)、`packages/README.md` / `presets/README.md` / `patches/README.md` / `skills/README.md`(各类定制单元规范);设计过程见 openspec change `repo-layout`(design D7/D8 定稿,归档后移入 `openspec/changes/archive/`)。
 - **更新**: 2026-08-14 新增,即定 P0;同日方向定稿,进入 openspec 设计(change: repo-layout);设计定稿 + 实施完成(骨架 / `dsh.yaml` / `scripts/sync.mjs` / 迁移,spike 与 spec 场景验收通过),首个 remote 定制 cost-meter 纳入,首个按新结构落地的定制 subagent-codex(remote 包 + 顶层 dependencies + patches 接线)落地(2026-08-19);4.6 重启验收通过(cost-meter host+client 加载、subagent 两行激活、`dsh restart` 子命令补充);2026-08-19 openspec 归档完成(`2026-08-19-repo-layout`,主 specs 8 需求/16 场景),B004 codex 委派端到端验收通过,本条目完成。
+
+### [B003] IDE 集成:打开当前项目目录
+- **状态**: 已完成
+- **背景 / 动机**: 增加用 IDE 打开当前项目目录的能力,暂时只支持 VSCode。
+- **要点**:
+  - 方案定稿(2026-08-19):复用社区插件 [dsh-open-in-vscode](https://github.com/omdsh-dev/dsh-open-in-vscode) v0.1.6——workspace 行 `…` 菜单「在 VSCode 中打开」,host 侧 spawn `code <path>`(进程分离);MIT,源码已审,无模型可见面;
+  - npm 0.2.0 已 unpublished,按官方 README 用 tag v0.1.6 tarball 直装(manifest id: `open-in-vscode`,非 npm spec 显式 `name` 字段);sync 为此支持非 npm spec;
+  - 未来扩展:JetBrains 等——插件 config 的 `command`/`args` 可配任意编辑器 CLI。
+- **更新**: 2026-08-14 新增;2026-08-19 落地社区插件方案,重启验收通过(菜单打开 VSCode 正常),本条目完成。
