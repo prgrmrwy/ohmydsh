@@ -38,8 +38,14 @@ try {
     if (item.source === "local") {
       name = readJson(path.join(REPO, "packages", item.id, "package.json"))?.name
     } else if (item.spec) {
-      const m = String(item.spec).match(/^(@[^/@]+\/[^/@]+|[^/@]+)@/)
-      name = m ? m[1] : item.spec
+      // explicit `name` (required for non-npm specs like github/tarball) wins;
+      // otherwise derive it from an npm `name@version` spec
+      if (typeof item.name === "string" && item.name !== "") {
+        name = item.name
+      } else {
+        const m = String(item.spec).match(/^(@[^/@]+\/[^/@]+|[^/@]+)@/)
+        name = m ? m[1] : item.spec
+      }
     }
     if (name && (item.brief || item.note)) notes.set(name, item.brief ?? item.note)
   }
