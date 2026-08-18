@@ -95,6 +95,24 @@ do_history() {
   fi
 }
 
+# Print the plugin list this profile would load / loaded, one per line
+loaded_plugins() {
+  if [[ -f "$PROFILE_PKG" ]]; then
+    node -e 'const p=require(process.argv[1]);console.log((p.dsh&&p.dsh.profile&&p.dsh.profile.bundles||[]).join("\n"))' "$PROFILE_PKG" 2>/dev/null || true
+  fi
+}
+
+print_plugins() {
+  local plugins
+  plugins="$(loaded_plugins)"
+  if [[ -n "$plugins" ]]; then
+    echo "加载的 plugins:"
+    echo "$plugins" | sed 's/^/  - /'
+  else
+    echo "加载的 plugins:(无法读取 profile 清单)"
+  fi
+}
+
 # Append one startup record: timestamp, dsh version, port, loaded plugins
 record_startup() {
   local VER="$1" bundles=""
@@ -168,6 +186,8 @@ start_server() {
     trap 'kill -TERM "${pid:-}" 2>/dev/null || true' INT TERM
     if wait_for_port "$PORT" 60 "$pid"; then
       open_ui
+      echo "dsh 已启动: http://127.0.0.1:$PORT (dshVersion=$VER)"
+      print_plugins
     elif kill -0 "$pid" 2>/dev/null; then
       echo "warn: server did not answer on port $PORT within 30s" >&2
     else
@@ -180,6 +200,8 @@ start_server() {
     disown 2>/dev/null || true
     if wait_for_port "$PORT" 60 "$pid"; then
       open_ui
+      echo "dsh 已启动: http://127.0.0.1:$PORT (dshVersion=$VER)"
+      print_plugins
     elif kill -0 "$pid" 2>/dev/null; then
       echo "warn: server did not answer on port $PORT — see $DSH_HOME/dsh.log" >&2
     else
@@ -212,14 +234,17 @@ fi
 if is_server_up; then
   if [[ $NO_OPEN -eq 1 ]]; then
     echo "dsh 已在运行: http://127.0.0.1:$PORT"
+    print_plugins
     exit 0
   fi
   if is_ui_open; then
     echo "dsh 已在运行(UI 已打开): http://127.0.0.1:$PORT"
+    print_plugins
     exit 0
   fi
   open_ui
   echo "dsh 已在运行,已为你打开 UI: http://127.0.0.1:$PORT"
+  print_plugins
   exit 0
 fi
 
