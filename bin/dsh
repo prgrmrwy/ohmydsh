@@ -77,8 +77,11 @@ do_stop() {
 }
 
 wait_for_port() {
-  local port="$1" tries="${2:-60}"
+  local port="$1" tries="${2:-60}" pid="${3:-}"
   for _ in $(seq 1 "$tries"); do
+    if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
+      return 2 # server process exited early
+    fi
     if nc -z 127.0.0.1 "$port" >/dev/null 2>&1; then return 0; fi
     sleep 0.5
   done
@@ -116,7 +119,7 @@ do_start() {
   fi
   if [[ $DAEMON -eq 1 ]]; then
     mkdir -p "$DSH_HOME"
-    nohup npx -y "@deepseek-ai/dsh@$VER" web --port "$PORT" "${PASSTHRU[@]}" >>"$DSH_HOME/dsh.log" 2>&1 &
+    nohup npx -y "@deepseek-ai/dsh@$VER" web --port "$PORT" ${PASSTHRU[@]+"${PASSTHRU[@]}"} >>"$DSH_HOME/dsh.log" 2>&1 &
     disown 2>/dev/null || true
     if wait_for_port "$PORT"; then
       open_ui
@@ -124,15 +127,17 @@ do_start() {
       echo "warn: server did not answer on port $PORT — see $DSH_HOME/dsh.log" >&2
     fi
   else
-    npx -y "@deepseek-ai/dsh@$VER" web --port "$PORT" "${PASSTHRU[@]}" &
+    npx -y "@deepseek-ai/dsh@$VER" web --port "$PORT" ${PASSTHRU[@]+"${PASSTHRU[@]}"} &
     local pid=$!
     trap 'kill -TERM "${pid:-}" 2>/dev/null || true' INT TERM
-    if wait_for_port "$PORT"; then
+    if wait_for_port "$PORT" 60 "$pid"; then
       open_ui
-    else
+    elif kill -0 "$pid" 2>/dev/null; then
       echo "warn: server did not answer on port $PORT within 30s" >&2
+    else
+      echo "error: server exited early — check output above" >&2
     fi
-    wait "$pid"
+    wait "$pid" || echo "dsh stopped"
   fi
 }
 
