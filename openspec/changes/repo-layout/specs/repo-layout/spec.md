@@ -1,63 +1,63 @@
 ## Purpose
 
-Defines the zydsh repository layout, the master manifest contract, and the sync behavior that materializes enabled customizations into a DSH deployment.
+定义 zydsh 仓库的目录结构、总配置 manifest 契约,以及将启用的定制物化到 DSH 部署环境的 sync 行为。
 
 ## ADDED Requirements
 
-### Requirement: Master manifest declares DSH version and customizations
-The repository SHALL contain a root `dsh.yaml` manifest. The manifest SHALL declare the pinned DSH version and a list of customizations, where each entry specifies `id`, `type`, and `enabled`, and SHALL specify `version` for `package` and `preset` types.
+### Requirement: 总配置 manifest 声明 DSH 版本与定制列表
+仓库根必须(SHALL)包含 `dsh.yaml` manifest。manifest 必须声明锁定的 DSH 版本与定制列表,其中每项必须包含 `id`、`type`、`enabled`,且 `package` 与 `preset` 类型必须包含 `version`。
 
-#### Scenario: Read manifest
-- **WHEN** a user reads `dsh.yaml`
-- **THEN** every customization's id, type, version (where required), and enabled state are explicit
+#### Scenario: 读取 manifest
+- **WHEN** 用户读取 `dsh.yaml`
+- **THEN** 每项定制的 id、类型、版本(按需)与启用状态均显式可见
 
-#### Scenario: Missing manifest
-- **WHEN** sync runs and `dsh.yaml` is absent
-- **THEN** sync exits with an error naming the missing manifest and how to create it
+#### Scenario: manifest 缺失
+- **WHEN** sync 运行时 `dsh.yaml` 不存在
+- **THEN** sync 以错误退出,并指明缺失的 manifest 及其创建方式
 
-### Requirement: Customization units follow the community bundle standard
-A `package` customization SHALL be a self-contained directory whose `package.json` declares a `dsh.bundle` manifest and whose composition rows live in its own `cordis.patch.yml`, so it installs via `dsh plugin add`. A `preset` customization SHALL be a directory containing a `cordis.yml`. A `patch` customization SHALL be a YAML patch-list fragment. A `skill` customization SHALL provide its skill definition under its own directory.
+### Requirement: 定制单元遵循社区 bundle 标准
+`package` 类定制必须(SHALL)是自包含目录,其 `package.json` 必须声明 `dsh.bundle` manifest,其 composition 行必须位于自带 `cordis.patch.yml` 中,从而可通过 `dsh plugin add` 安装。`preset` 类定制必须(SHALL)是包含 `cordis.yml` 的目录。`patch` 类定制必须是 YAML patch-list 片段。`skill` 类定制必须在自身目录下提供 skill 定义。
 
-#### Scenario: Add a package customization
-- **WHEN** a package customization is added under `packages/<name>/`
-- **THEN** the directory contains a `package.json` with `dsh.bundle` and a `cordis.patch.yml`, and `dsh plugin add` succeeds
+#### Scenario: 新增 package 定制
+- **WHEN** 在 `packages/<name>/` 下新增一个 package 定制
+- **THEN** 该目录包含带 `dsh.bundle` 的 `package.json` 与 `cordis.patch.yml`,且 `dsh plugin add` 安装成功
 
-#### Scenario: Add a preset customization
-- **WHEN** a preset customization is added under `presets/<id>/`
-- **THEN** the directory contains a `cordis.yml` and the preset is mountable by the DSH roster
+#### Scenario: 新增 preset 定制
+- **WHEN** 在 `presets/<id>/` 下新增一个 preset 定制
+- **THEN** 该目录包含 `cordis.yml`,且该 preset 可被 DSH roster 挂载
 
-### Requirement: Sync materializes enabled customizations idempotently
-The sync tool SHALL materialize every enabled customization into the DSH deployment (`~/.dsh`), and SHALL be idempotent: running it twice on an unchanged repository produces no changes on the second run.
+### Requirement: sync 幂等地物化启用定制
+sync 工具必须(SHALL)把每项启用定制物化到 DSH 部署环境(`~/.dsh`),且必须幂等:在仓库未变更时连续运行两次,第二次不得产生任何变化。
 
-#### Scenario: Repeat sync is a no-op
-- **WHEN** sync runs twice without repository changes
-- **THEN** the second run reports no changes
+#### Scenario: 重复运行 sync 为空操作
+- **WHEN** 仓库无变更时连续运行 sync 两次
+- **THEN** 第二次运行报告无任何变化
 
-#### Scenario: Disabled customization is absent from deployment
-- **WHEN** a customization has `enabled: false`
-- **THEN** sync leaves no trace of it in the deployment surface
+#### Scenario: 禁用定制不出现在部署面
+- **WHEN** 某定制 `enabled: false`
+- **THEN** sync 不在部署面留下该定制的任何痕迹
 
-#### Scenario: Enabled customization is materialized
-- **WHEN** a customization has `enabled: true`
-- **THEN** its package is installed, its patch rows are merged, or its preset is linked, according to its type
+#### Scenario: 启用定制被物化
+- **WHEN** 某定制 `enabled: true`
+- **THEN** 按其类型,其包被安装、其 patch 行被合并、或其 preset 被链接
 
-### Requirement: Toggling is reversible without deleting repository content
-Changing a customization's `enabled` value and re-running sync SHALL add or remove it from the deployment while its files remain in the repository.
+### Requirement: 开关可逆且不删除仓库内容
+修改定制的 `enabled` 值并重跑 sync,必须(SHALL)将其从部署面添加或移除,同时其文件保留在仓库中。
 
-#### Scenario: Disable then re-enable
-- **WHEN** a customization is disabled and later re-enabled, with sync after each change
-- **THEN** the deployment first loses and then regains exactly that customization, and the repository copy is unchanged throughout
+#### Scenario: 禁用后再启用
+- **WHEN** 某定制被禁用随后又被启用,且每次变更后都运行 sync
+- **THEN** 部署面先失去后重新获得该定制,仓库副本全程不变
 
-### Requirement: Generated deployment files are marked and merged in order
-Files sync generates (including the profile patch layer) SHALL carry a generated marker stating the repository is the source of truth, and patch rows from multiple enabled customizations SHALL be merged in manifest order.
+### Requirement: 生成文件带标记且按序合并
+sync 生成的文件(含 profile patch 层)必须(SHALL)带有生成标记头,声明仓库为真相源;多个启用定制贡献的 patch 行必须按 manifest 顺序合并。
 
-#### Scenario: Two enabled patch customizations
-- **WHEN** two patch customizations are enabled
-- **THEN** the generated patch layer contains both fragments in manifest order under a generated marker header
+#### Scenario: 两个启用 patch 定制
+- **WHEN** 两个 patch 定制被启用
+- **THEN** 生成的 patch 层在生成标记头下按 manifest 顺序包含两个片段
 
-### Requirement: Customizations carry independent versions
-Every `package` customization SHALL have a `version` in its `package.json`, and every `preset` customization SHALL have a `VERSION` file, so the manifest can reference each customization independently.
+### Requirement: 定制携带独立版本
+每个 `package` 定制必须(SHALL)在 `package.json` 中有 `version`,每个 `preset` 定制必须有 `VERSION` 文件,使 manifest 能独立引用各定制。
 
-#### Scenario: Version bump of one customization
-- **WHEN** one customization's version is bumped and the manifest updated
-- **THEN** other customizations' versions are unaffected
+#### Scenario: 单个定制版本升级
+- **WHEN** 某定制版本升级且 manifest 同步更新
+- **THEN** 其他定制的版本不受影响
