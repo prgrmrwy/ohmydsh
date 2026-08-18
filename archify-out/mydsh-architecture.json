@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "mydsh — DSH 定制仓架构",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/prgrmrwy/mydsh",
+      "revision": "27c706ac878f212fcf828a9db8e386b49d2a9d9b"
+    }
+  },
+  "components": [
+    {
+      "id": "dev",
+      "type": "external",
+      "label": "开发者",
+      "sublabel": "shell",
+      "pos": [40, 280],
+      "size": [90, 52]
+    },
+    {
+      "id": "manifest",
+      "type": "database",
+      "label": "dsh.yaml",
+      "sublabel": "总配置 · 唯一开关面",
+      "sources": [{ "path": "dsh.yaml", "line": 1, "label": "总配置" }],
+      "pos": [250, 100],
+      "size": [150, 56]
+    },
+    {
+      "id": "launcher",
+      "type": "backend",
+      "label": "bin/dsh 启动器",
+      "sublabel": "start · build · stop · reset",
+      "sources": [{ "path": "bin/dsh", "line": 1, "label": "启动脚本" }],
+      "pos": [250, 280],
+      "size": [150, 56]
+    },
+    {
+      "id": "customizations",
+      "type": "database",
+      "label": "定制源",
+      "sublabel": "packages · presets · patches · skills",
+      "sources": [{ "path": "dsh.yaml", "line": 11, "label": "customizations" }],
+      "pos": [560, 460],
+      "size": [150, 56]
+    },
+    {
+      "id": "sync",
+      "type": "backend",
+      "label": "scripts/sync.mjs",
+      "sublabel": "物化引擎 · 幂等可重跑",
+      "sources": [{ "path": "scripts/sync.mjs", "line": 1, "label": "物化引擎" }],
+      "pos": [560, 280],
+      "size": [170, 56]
+    },
+    {
+      "id": "profile",
+      "type": "database",
+      "label": "profiles/web",
+      "sublabel": "bundles · cordis.patch.yml",
+      "sources": [{ "path": "scripts/sync.mjs", "line": 16, "label": "PROFILE_DIR" }],
+      "pos": [900, 150],
+      "size": [170, 56]
+    },
+    {
+      "id": "dirs",
+      "type": "database",
+      "label": "定制目录",
+      "sublabel": "~/.dsh/.agent-presets · skills",
+      "sources": [{ "path": "scripts/sync.mjs", "line": 333, "label": "preset/skill 复制" }],
+      "pos": [900, 300],
+      "size": [170, 56]
+    },
+    {
+      "id": "state",
+      "type": "database",
+      "label": ".mydsh-sync-state.json",
+      "sublabel": "增量 hash · 管理记录",
+      "sources": [{ "path": "scripts/sync.mjs", "line": 17, "label": "STATE_FILE" }],
+      "pos": [900, 450],
+      "size": [170, 56]
+    },
+    {
+      "id": "server",
+      "type": "cloud",
+      "label": "DSH Web Server",
+      "sublabel": "@deepseek-ai/dsh web :3080",
+      "sources": [{ "path": "bin/dsh", "line": 211, "label": "npx dsh web" }],
+      "pos": [1240, 220],
+      "size": [160, 56]
+    },
+    {
+      "id": "ui",
+      "type": "frontend",
+      "label": "浏览器 UI",
+      "sublabel": "127.0.0.1:3080 · PWA",
+      "sources": [{ "path": "bin/dsh", "line": 165, "label": "open_ui" }],
+      "pos": [1240, 400],
+      "size": [160, 56]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "mydsh 仓库 · 真相源",
+      "wraps": ["manifest", "launcher", "customizations", "sync"]
+    },
+    {
+      "kind": "region",
+      "label": "~/.dsh · 物化产物",
+      "wraps": ["profile", "dirs", "state"]
+    },
+    {
+      "kind": "region",
+      "label": "DSH 运行时",
+      "wraps": ["server", "ui"]
+    }
+  ],
+  "connections": [
+    { "id": "dev-start", "from": "dev", "to": "launcher", "label": "dsh / dsh build", "variant": "emphasis" },
+    { "id": "launcher-version", "from": "launcher", "to": "manifest", "label": "读 dshVersion" },
+    { "id": "launcher-sync", "from": "launcher", "to": "sync", "label": "dsh build · -b", "labelDy": 42 },
+    { "id": "manifest-sync", "from": "manifest", "to": "sync", "label": "读取清单" },
+    { "id": "customizations-sync", "from": "customizations", "to": "sync", "label": "源内容", "fromSide": "top", "toSide": "bottom" },
+    { "id": "sync-profile", "from": "sync", "to": "profile", "label": "dsh plugin add", "variant": "emphasis" },
+    { "id": "sync-dirs", "from": "sync", "to": "dirs", "label": "复制", "labelDx": -46, "labelDy": 36 },
+    { "id": "sync-state", "from": "sync", "to": "state", "label": "读写 hash 状态" },
+    { "id": "profile-server", "from": "profile", "to": "server", "label": "加载 bundles" },
+    { "id": "dirs-server", "from": "dirs", "to": "server", "label": "加载 presets/skills", "labelDx": -70 },
+    { "id": "launcher-server", "from": "launcher", "to": "server", "label": "npx @deepseek-ai/dsh@<pin> web", "variant": "dashed", "fromSide": "bottom", "toSide": "left", "via": [[325, 570], [1170, 570], [1170, 248]] },
+    { "id": "server-ui", "from": "server", "to": "ui", "label": "HTTP", "labelDy": 28 }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "运行链路",
+      "items": [
+        "bin/dsh 幂等启动:未运行 → npx 拉起 + 开 UI;已运行 → 直接开 UI",
+        "版本单一来源:dsh.yaml 的 dshVersion,启动脚本运行时读取",
+        "每次启动打印带备注的插件清单(manifest note > 包 description)"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "物化规则",
+      "items": [
+        "package local → dsh plugin add file:<path>,自动进 profile bundles",
+        "preset/skill → 复制到 ~/.dsh/.agent-presets、~/.dsh/skills",
+        "patch → 按 manifest 顺序合并生成 cordis.patch.yml(带 generated 头)"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "真相源约定",
+      "items": [
+        "仓库是唯一真相源;~/.dsh 手改不保留",
+        "禁用 ≠ 删除:enabled: false 只停止物化",
+        "reset 一键清零自定义,dsh build 可恢复"
+      ]
+    }
+  ]
+}
