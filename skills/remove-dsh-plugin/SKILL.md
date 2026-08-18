@@ -1,12 +1,12 @@
 ---
 name: remove-dsh-plugin
-description: 从 zydsh 定制仓移除一个 DSH 插件:从 manifest(dsh.yaml)删除条目 → dsh build 卸载 → 询问用户是否重启 DSH。
+description: 从 mydsh 定制仓移除一个 DSH 插件:从 manifest(dsh.yaml)删除条目 → dsh build 卸载 → 询问用户是否重启 DSH。
 whenToUse: 用户要求卸载/移除某个 DSH 插件(给出包名、npm 链接或 id)时。
 ---
 
 # 移除插件(remove-dsh-plugin)
 
-目标仓库:/Users/bytedance/mydir/opensource/zydsh(DSH 定制仓)。
+目标仓库:/Users/bytedance/mydir/opensource/mydsh(DSH 定制仓)。
 
 ## 流程(严格按序)
 

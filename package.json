@@ -1,5 +1,5 @@
 {
-  "name": "zydsh",
+  "name": "mydsh",
   "private": true,
   "type": "module",
   "description": "DSH 定制仓:总配置 + 可插拔定制",

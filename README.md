@@ -1,4 +1,4 @@
-# zydsh — DSH 定制仓
+# mydsh — DSH 定制仓
 
 本仓库是 DSH(DeepSeek Harness)的定制仓:**总配置统一管理,各项定制可插拔、独立版本、独立维护,但都在同一仓库内**。
 
@@ -27,7 +27,7 @@ skills/<name>/            # skill(见 skills/README.md)
 **安装启动命令**(一次性,两 shell 的 PATH 均含 `~/.local/bin`):
 
 ```bash
-ln -s /Users/bytedance/mydir/opensource/zydsh/bin/dsh ~/.local/bin/dsh
+ln -s /Users/bytedance/mydir/opensource/mydsh/bin/dsh ~/.local/bin/dsh
 ```
 
 **日常**:
