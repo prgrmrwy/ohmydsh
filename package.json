@@ -1,0 +1,12 @@
+{
+  "name": "zydsh",
+  "private": true,
+  "type": "module",
+  "description": "DSH 定制仓:总配置 + 可插拔定制",
+  "scripts": {
+    "sync": "node scripts/sync.mjs"
+  },
+  "devDependencies": {
+    "js-yaml": "^4.1.0"
+  }
+}
