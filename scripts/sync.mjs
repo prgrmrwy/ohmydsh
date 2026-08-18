@@ -233,13 +233,8 @@ async function syncPatches(items) {
   await writeFile(target, content)
 }
 
-function checkDshVersion(manifest) {
-  const fish = path.join(REPO, 'scripts', 'dsh.fish')
-  if (!existsSync(fish)) return
-  const m = readFileSync(fish, 'utf8').match(/set -g DSH_VERSION (.+)/)
-  if (m && m[1] !== manifest.dshVersion) {
-    console.error(`[sync] WARN scripts/dsh.fish pins DSH_VERSION ${m[1]} but dsh.yaml says ${manifest.dshVersion}`)
-  }
+function logVersion(manifest) {
+  log(`dshVersion: ${manifest.dshVersion} (launcher bin/dsh reads dsh.yaml as the single source)`)
 }
 
 // ---------- main ----------
@@ -250,7 +245,7 @@ async function main() {
   await syncDirs(manifest, manifest.items, 'preset', 'presets', path.join(DSH_HOME, '.agent-presets'), 'cordis.yml', 'preset')
   await syncDirs(manifest, manifest.items, 'skill', 'skills', path.join(DSH_HOME, 'skills'), 'SKILL.md', 'skill')
   await syncPatches(manifest.items)
-  checkDshVersion(manifest)
+  logVersion(manifest)
   console.log('')
   if (failures.length > 0) {
     console.error(`[sync] finished with ${failures.length} failure(s):`)

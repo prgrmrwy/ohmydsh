@@ -1,5 +1,5 @@
 # zydsh 总配置 — DSH 定制的唯一开关面。
-# 修改后运行 `node scripts/sync.mjs`(fish 里 `dsh-sync`)物化到 ~/.dsh。
+# 修改后运行 `dsh build`(或 `node scripts/sync.mjs`)物化到 ~/.dsh。
 # 约定:禁用(enabled: false)≠删除;手改一律回写本仓库。
 
 dshVersion: 0.1.0-rc.6     # 与 scripts/dsh.fish 的 DSH_VERSION 保持一致
