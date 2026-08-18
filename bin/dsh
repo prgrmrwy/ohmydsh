@@ -114,19 +114,13 @@ do_history() {
   fi
 }
 
-# Print the plugin list this profile would load / loaded, one per line
-loaded_plugins() {
-  if [[ -f "$PROFILE_PKG" ]]; then
-    node -e 'const p=require(process.argv[1]);console.log((p.dsh&&p.dsh.profile&&p.dsh.profile.bundles||[]).join("\n"))' "$PROFILE_PKG" 2>/dev/null || true
-  fi
-}
-
+# Print the plugin list this profile would load / loaded, one per line, with a note
 print_plugins() {
-  local plugins
-  plugins="$(loaded_plugins)"
-  if [[ -n "$plugins" ]]; then
+  local out
+  out="$(node "$REPO/scripts/plugin-list.mjs" 2>/dev/null || true)"
+  if [[ -n "$out" ]]; then
     echo "加载的 plugins:"
-    echo "$plugins" | sed 's/^/  - /'
+    echo "$out" | sed 's/^/  - /'
   else
     echo "加载的 plugins:(无法读取 profile 清单)"
   fi
