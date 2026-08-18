@@ -9,6 +9,8 @@
 #   dsh stop       停止 dsh web 进程
 #   dsh -p 8080    指定端口(默认 3080)
 #
+# 环境变量:DSH_OPEN_APP = PWA/App 的路径或名称,设置后打开该应用而非默认浏览器(可选)
+#
 # 安装: ln -s <repo>/bin/dsh ~/.local/bin/dsh(两 shell 的 PATH 均含 ~/.local/bin)
 set -euo pipefail
 
@@ -76,6 +78,16 @@ wait_for_port() {
 open_ui() {
   [[ $NO_OPEN -eq 1 ]] && return 0
   local url="http://127.0.0.1:$PORT"
+  if [[ -n "${DSH_OPEN_APP:-}" ]]; then
+    if [[ "$DSH_OPEN_APP" == *.app && -e "$DSH_OPEN_APP" ]]; then
+      # installed PWA: launch the app (it opens its own start_url)
+      open "$DSH_OPEN_APP"
+    else
+      # application name: open the URL with it
+      open -a "$DSH_OPEN_APP" "$url" 2>/dev/null || open "$url"
+    fi
+    return 0
+  fi
   if command -v open >/dev/null 2>&1; then
     open "$url"
   elif command -v xdg-open >/dev/null 2>&1; then
