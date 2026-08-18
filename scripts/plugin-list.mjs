@@ -25,10 +25,13 @@ function readJson(file) {
   }
 }
 
-// manifest notes keyed by npm package name
+// manifest notes keyed by npm package name, plus explicit base-bundle briefs
 const notes = new Map()
 try {
   const doc = yaml.load(readFileSync(path.join(REPO, "dsh.yaml"), "utf8"))
+  for (const [name, brief] of Object.entries(doc?.bundlesBrief ?? {})) {
+    if (brief) notes.set(name, brief)
+  }
   for (const item of doc?.customizations ?? []) {
     if (item?.type !== "package") continue
     let name
