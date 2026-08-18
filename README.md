@@ -34,7 +34,8 @@ ln -s /Users/bytedance/mydir/opensource/zydsh/bin/dsh ~/.local/bin/dsh
 
 | 命令 | 行为 |
 |---|---|
-| `dsh` | 用**上次 build** 启动(默认;更新仓库不影响,直到显式 build) |
+| `dsh` | 用**上次 build** 启动(默认;更新仓库不影响,直到显式 build);服务就绪后**自动打开 web UI** |
+| `dsh --no-open` | 启动但不自动打开浏览器 |
 | `dsh -b` | 重新 build(安装/同步 plugins)后再启动 |
 | `dsh build` | 只 build,不启动 |
 | `dsh -d` | 后台启动 + 打开浏览器 |
