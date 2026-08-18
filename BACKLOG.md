@@ -27,6 +27,7 @@
   - 阶段交接物 = workspace 文件(design.md、AC 清单、review 报告);subagent 不继承父对话,workspace 是共享记忆。
   - 工具选型:常规串行用 subagent 工具;大规模 fan-out(QA 多 AC 并行)用 workflow;跨轮长任务用 goal;Ralph 不适合。
   - QA 阶段可复用 `verifying-acceptance` skill(黑盒自测 + AC 证据)。
+  - 参考实现标记(2026-08-14):社区插件 [dsh-agent-teams](https://github.com/NanmiCoder/dsh-agent-teams) 已实现自然语言驱动的多角色团队(captain/members + 任务依赖 + 树形监控),做 B001 时优先评估复用,而非从零写。
 - **开放问题**:
   1. 门禁强度:全程自主 vs 关键节点(设计定稿 / review 通过 / 验收通过)人工确认
   2. 是否需要独立 coder 角色,还是 tech-lead 自己写代码
@@ -130,7 +131,8 @@
   - 部署同步:总配置 → `~/.dsh` 落点(`.agent-presets/`、`profiles/web/cordis.patch.yml`、profile node_modules)的同步工具(`dsh plugin add` / 脚本);
   - 结合此前草案:`plugins/`、`presets/`、`profile/`、`skills/` 布局;与 openspec 工作流、BACKLOG.md 配合;
   - 待设计:目录布局、总配置格式(JSON/YAML)、开关粒度(全局 vs per-session)、多定制间依赖关系。
-- **更新**: 2026-08-14 新增,即定 P0。
+  - 方向定稿(2026-08-14):定制单元采用社区 `dsh.bundle` 标准(package.json 声明 bundle + 自带 cordis.patch.yml + src/),patch 跟包走;presets 走官方 `.agent-presets` 机制;skills 跟包或 project 源;总配置 manifest + sync 为自研薄层。
+- **更新**: 2026-08-14 新增,即定 P0;同日方向定稿,进入 openspec 设计(change: repo-layout)。
 
 ---
 
