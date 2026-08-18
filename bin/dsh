@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # zydsh/dsh — start DSH from this customization repo (bash & fish 通用命令).
 #
-#   dsh            用上次 build 启动(默认;仓库更新不影响,除非显式 build)
+#   dsh            用上次 build 启动;服务就绪后自动打开 web UI(默认)
+#   dsh --no-open  启动但不打开浏览器
 #   dsh -b         重新 build(安装/同步 plugins)后再启动
 #   dsh build      只 build,不启动
 #   dsh -d         后台启动并打开浏览器
@@ -25,6 +26,7 @@ BUILD=0
 BUILD_ONLY=0
 DAEMON=0
 STOP=0
+NO_OPEN=0
 PASSTHRU=()
 
 usage() {
@@ -38,6 +40,7 @@ while [[ $# -gt 0 ]]; do
     stop) STOP=1; shift ;;
     -b|--build) BUILD=1; shift ;;
     -d|--daemon) DAEMON=1; shift ;;
+    --no-open) NO_OPEN=1; shift ;;
     -p|--port) PORT="$2"; shift 2 ;;
     --port=*) PORT="${1#*=}"; shift ;;
     -h|--help) usage ;;
@@ -61,6 +64,27 @@ do_stop() {
   fi
 }
 
+wait_for_port() {
+  local port="$1" tries="${2:-60}"
+  for _ in $(seq 1 "$tries"); do
+    if nc -z 127.0.0.1 "$port" >/dev/null 2>&1; then return 0; fi
+    sleep 0.5
+  done
+  return 1
+}
+
+open_ui() {
+  [[ $NO_OPEN -eq 1 ]] && return 0
+  local url="http://127.0.0.1:$PORT"
+  if command -v open >/dev/null 2>&1; then
+    open "$url"
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$url" >/dev/null 2>&1 || true
+  else
+    echo "dsh started — open $url"
+  fi
+}
+
 do_start() {
   local VER
   VER="$(dsh_version)"
@@ -72,13 +96,21 @@ do_start() {
     mkdir -p "$DSH_HOME"
     nohup npx -y "@deepseek-ai/dsh@$VER" web --port "$PORT" "${PASSTHRU[@]}" >>"$DSH_HOME/dsh.log" 2>&1 &
     disown 2>/dev/null || true
-    if command -v open >/dev/null 2>&1; then
-      open "http://127.0.0.1:$PORT"
+    if wait_for_port "$PORT"; then
+      open_ui
     else
-      echo "dsh started — open http://127.0.0.1:$PORT"
+      echo "warn: server did not answer on port $PORT — see $DSH_HOME/dsh.log" >&2
     fi
   else
-    exec npx -y "@deepseek-ai/dsh@$VER" web --port "$PORT" "${PASSTHRU[@]}"
+    npx -y "@deepseek-ai/dsh@$VER" web --port "$PORT" "${PASSTHRU[@]}" &
+    local pid=$!
+    trap 'kill -TERM "${pid:-}" 2>/dev/null || true' INT TERM
+    if wait_for_port "$PORT"; then
+      open_ui
+    else
+      echo "warn: server did not answer on port $PORT within 30s" >&2
+    fi
+    wait "$pid"
   fi
 }
 
