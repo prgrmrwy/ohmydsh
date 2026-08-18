@@ -2,9 +2,9 @@
 
 ## 1. Spikes(先验证再定实现)
 
-- [ ] 1.1 验证 preset symlink:在 `~/.dsh/.agent-presets/<id>` 建指向仓库的符号链接,确认 DSH roster 能挂载(不跟随则定 copy + 变更检测方案)
-- [ ] 1.2 验证 skills 落点:确认 DSH `project-*` skill 源的目录名与发现规则,定 `skills/` 或跟包方案
-- [ ] 1.3 验证 `dsh plugin add file:/link:` 行为:确认本地包安装后,profile 刷新/DSH 升级时是否丢失,决定 sync 重装策略
+- [x] 1.1 验证 preset symlink:在 `~/.dsh/.agent-presets/<id>` 建指向仓库的符号链接,确认 DSH roster 能挂载 → **结论:不能**。roster 扫描用 `readdir({withFileTypes:true})` + `Dirent.isDirectory()`,symlink 返回 false 被跳过 → preset 一律 copy + 哈希变更检测(见 design D4)
+- [x] 1.2 验证 skills 落点:确认 DSH `project-*` skill 源的目录名与发现规则 → **结论已定**:project 级 = `<项目根>/.dsh/skills/<name>/SKILL.md` 与 `.agents/skills/`;user 全局 = `~/.dsh/skills` 与 `~/.agents/skills`;采用"仓库 `skills/` 源码 → sync 物化到 `~/.dsh/skills`"
+- [x] 1.3 验证 `dsh plugin add file:/link:` 行为 → **结论**:`dsh plugin --profile web add <pkg>` = pnpm 安装 + 自动追加进 `dsh.profile.bundles`,重启后自动加载 bundle patch,`cordis.patch.yml` 无需手写行;幂等(重复 add 无变化);`--save-exact` 仅首次安装生效。实测安装 dsh-cost-meter@1.5.6 成功(其依赖拉到 rc.7 家族,与 rc.6 运行体并存,重启后待验证,见 4.6)
 
 ## 2. 目录骨架与 manifest
 
@@ -27,3 +27,4 @@
 - [ ] 4.3 按 spec 场景验收:manifest 缺失报错、disabled 不物化、toggle 可逆、双 patch 合并顺序、独立版本、local/remote 混合清单一次 sync、remote pin 复现与覆盖片段生效
 - [ ] 4.4 用 B004 单机接入作为首个真实定制(package: subagent-claude-code 接线),实战验证 sync + bundle 链路
 - [ ] 4.5 更新 BACKLOG B009 状态为已设计/实施中,记录新结构文档位置
+- [ ] 4.6 重启 DSH 后验证 dsh-cost-meter 在 web 正常加载(rc.7 依赖混杂风险,首个 remote 实例)
