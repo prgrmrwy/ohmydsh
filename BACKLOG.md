@@ -121,7 +121,7 @@
 - **更新**: 2026-08-14 新增
 
 ### [B009] 仓库结构定稿:总配置 + 可插拔定制(monorepo)
-- **状态**: 想法
+- **状态**: 实施中
 - **优先级**: P0
 - **背景 / 动机**: zydsh 预期承载大量 DSH 定制(preset、插件包、skill、profile patch 等),期望一个总配置统一管理,各项定制可插拔开关、各自独立发布维护,但都放在同一仓库内。
 - **要点**:
@@ -132,7 +132,21 @@
   - 结合此前草案:`plugins/`、`presets/`、`profile/`、`skills/` 布局;与 openspec 工作流、BACKLOG.md 配合;
   - 待设计:目录布局、总配置格式(JSON/YAML)、开关粒度(全局 vs per-session)、多定制间依赖关系。
   - 方向定稿(2026-08-14):定制单元采用社区 `dsh.bundle` 标准(package.json 声明 bundle + 自带 cordis.patch.yml + src/),patch 跟包走;presets 走官方 `.agent-presets` 机制;skills 跟包或 project 源;总配置 manifest + sync 为自研薄层。
-- **更新**: 2026-08-14 新增,即定 P0;同日方向定稿,进入 openspec 设计(change: repo-layout)。
+- **更新**: 2026-08-14 新增,即定 P0;同日方向定稿,进入 openspec 设计(change: repo-layout);设计定稿 + 实施完成(骨架 / `dsh.yaml` / `scripts/sync.mjs` / 迁移,spike 与 spec 场景验收通过),首个 remote 定制 cost-meter 纳入;剩余:4.4(B004 首个 local package)、4.6(重启验证 cost-meter 加载)。
+
+### [B010] 任意页面查看 API 使用量
+- **状态**: 想法
+- **优先级**: P2
+- **背景 / 动机**: 希望不切换到专门页面,在 Web GUI 任意页面(会话、设置等)都能随时看到 API 用量(请求数 / token / 费用 / 余额 / 配额)。
+- **要点**:
+  - 调研结论(2026-08-18):社区已有大量现成产品,npm 均已发布,无需从零自研,优先评估复用:
+    - **全局可见类**(任意页面常驻):[dsh-cost-meter](https://www.npmjs.com/package/dsh-cost-meter) v1.5.9 功能最全(本会话费用、当日费用、官方余额、OpenCode Go 额度、Coding Plan 六家额度、90+ 模型价格目录,侧边栏 / 输入区 / dock 多位置可配);[@kenz1117/dsh-ui-usage-billing](https://www.npmjs.com/package/@kenz1117/dsh-ui-usage-billing) v0.2.6(侧边栏入口胶囊 + 完整计费仪表盘,30s 自动刷新);[dsh-usage-dashboard](https://www.npmjs.com/package/dsh-usage-dashboard) v0.1.0(侧边栏底部余额 + 今日花费);[@faith1688/dsh-usage-meter-harness](https://www.npmjs.com/package/@faith1688/dsh-usage-meter-harness) v0.1.2(输入框旁 tokens / 费用 / 真实余额);dsh-account-meter v0.1.3(右侧多账户余额计量框);
+    - **专用页类**:[@abcdefu_cja/dsh-usage-stats](https://www.npmjs.com/package/@abcdefu_cja/dsh-usage-stats) v0.1.0(设置页「用量统计」Tab + 会话页用量按钮,精确 token 计数);dsh-usage-insights v0.2.0 / dsh-activity-report(本地只读用量 / 性能分析);
+    - **其他**:dsh-usage-balance(会话成本 chips + token 热图)、@az7627/dsh-token-usage(会话内 token 时间线)、dsh-token-price;GitHub 侧 [dsh-usage-dashboard-plus](https://github.com/1HelloMan1/dsh-usage-dashboard-plus)(余额 / 日花费 / 分模型统计 / 调用日志 / 缓存率 / TTFT / CSV 导出);社区插件目录 [awesome-dsh-plugin](https://awesome-dsh-plugin.com);
+    - 通用方案(非 DSH 专属,tokmon 本地代理仪表盘、Langfuse / Helicone 等观测平台)与「Web GUI 任意页面常驻」诉求直接相关度低,不优先。
+  - 建议路径:先试用 dsh-cost-meter 或 @kenz1117/dsh-ui-usage-billing,满足即用(评估后归档本条目),不满足再自研(落点 = client UI 全局组件 + host 侧聚合 API);
+  - 待确认:指标范围(余额 / 当日费用 / 会话费用 / 配额)、入口位置偏好、是否要多厂商。
+- **更新**: 2026-08-18 新增;完成社区调研,确认存在成熟现成产品,结论为「评估复用优先」。
 
 ---
 

@@ -7,9 +7,10 @@
 #   dsh         # foreground web server on the pinned version
 #   dsh-up      # background + open http://127.0.0.1:3080
 #   dsh-down    # stop the running dsh web process
+#   dsh-sync    # materialize dsh.yaml customizations into ~/.dsh
 #
 # Version is pinned so npx cannot silently drift to a newer rc.
-# Bump DSH_VERSION here when you intentionally upgrade.
+# Bump DSH_VERSION here when you intentionally upgrade (sync warns on mismatch with dsh.yaml).
 
 set -g DSH_VERSION 0.1.0-rc.6
 set -g DSH_PORT 3080
@@ -25,4 +26,8 @@ end
 
 function dsh-down
     pkill -f '\.bin/dsh web'; or echo 'no dsh process found'
+end
+
+function dsh-sync
+    node /Users/bytedance/mydir/opensource/zydsh/scripts/sync.mjs
 end
