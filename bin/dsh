@@ -9,7 +9,8 @@
 #   dsh stop       停止 dsh web 进程
 #   dsh -p 8080    指定端口(默认 3080)
 #
-# 环境变量:DSH_OPEN_APP = PWA/App 的路径或名称,设置后打开该应用而非默认浏览器(可选)
+# 本地环境:仓库根 .env.local(gitignored)可放 DSH_OPEN_APP 等;也可行内临时传入,
+# 如 DSH_OPEN_APP="xxx.app" dsh。DSH_OPEN_APP = PWA/App 路径或名称时打开该应用。
 #
 # 安装: ln -s <repo>/bin/dsh ~/.local/bin/dsh(两 shell 的 PATH 均含 ~/.local/bin)
 set -euo pipefail
@@ -22,6 +23,15 @@ while [ -L "$SOURCE" ]; do
   [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
 done
 REPO="$(cd "$(dirname "$SOURCE")/.." && pwd)"
+
+# Local overrides (gitignored; optional)
+if [[ -f "$REPO/.env.local" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$REPO/.env.local"
+  set +a
+fi
+
 DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 PORT=3080
 BUILD=0
