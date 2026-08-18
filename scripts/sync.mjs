@@ -166,7 +166,61 @@ async function syncPackages(manifest, items) {
       change(`bundles: [${bundles.join(', ')}]`)
       await writeJson(profilePkgPath, refreshed)
     }
+    const state = await loadState()
+    if (JSON.stringify(state.shippedBundles ?? []) !== JSON.stringify(base)) {
+      state.shippedBundles = base
+      await saveState(state)
+    }
   }
+}
+
+/**
+ * One-click reset: remove every plugin beyond the shipped base set, reset the
+ * generated patch layer, and drop synced presets/skills. Reversible via sync.
+ */
+async function doReset(manifest) {
+  const state = await loadState()
+  const shipped = state.shippedBundles ?? ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app']
+  const profilePkgPath = path.join(PROFILE_DIR, 'package.json')
+  const profilePkg = readJson(profilePkgPath)
+  if (profilePkg === undefined) return fail(`profile package.json missing at ${PROFILE_DIR}`)
+
+  const bundles = profilePkg.dsh?.profile?.bundles ?? []
+  const removable = [...new Set([
+    ...bundles.filter((b) => !shipped.includes(b)),
+    ...Object.keys(profilePkg.dependencies ?? {}).filter((d) => !shipped.includes(d)),
+  ])]
+  for (const name of removable) {
+    change(`remove plugin ${name}`)
+    if (!dshCli(['plugin', '--profile', PROFILE, 'remove', name], { version: manifest.dshVersion })) fail(`failed to remove ${name}`)
+  }
+
+  const refreshed = readJson(profilePkgPath) ?? profilePkg
+  refreshed.dsh ??= {}
+  refreshed.dsh.profile ??= {}
+  refreshed.dsh.profile.bundles = shipped
+  await writeJson(profilePkgPath, refreshed)
+
+  const target = path.join(PROFILE_DIR, 'cordis.patch.yml')
+  const content = GENERATED_HEADER + '\n[]\n'
+  if (!existsSync(target) || readFileSync(target, 'utf8') !== content) {
+    if (existsSync(target)) await writeFile(target + '.bak', readFileSync(target, 'utf8'))
+    change(`reset ${target}`)
+    await mkdir(path.dirname(target), { recursive: true })
+    await writeFile(target, content)
+  }
+
+  for (const key of Object.keys(state)) {
+    const m = key.match(/^(preset|skill):(.+)$/)
+    if (m === null) continue
+    const dst = path.join(DSH_HOME, m[1] === 'preset' ? '.agent-presets' : 'skills', m[2])
+    if (existsSync(dst)) {
+      change(`remove ${m[1]} ${m[2]}`)
+      await rm(dst, { recursive: true, force: true })
+    }
+    delete state[key]
+  }
+  await saveState(state)
 }
 
 async function syncDirs(manifest, items, type, srcDir, dstRoot, requiredFile, label) {
@@ -241,10 +295,14 @@ function logVersion(manifest) {
 async function main() {
   const manifest = loadManifest()
   await mkdir(PROFILE_DIR, { recursive: true })
-  await syncPackages(manifest, manifest.items)
-  await syncDirs(manifest, manifest.items, 'preset', 'presets', path.join(DSH_HOME, '.agent-presets'), 'cordis.yml', 'preset')
-  await syncDirs(manifest, manifest.items, 'skill', 'skills', path.join(DSH_HOME, 'skills'), 'SKILL.md', 'skill')
-  await syncPatches(manifest.items)
+  if (process.argv.includes('--reset')) {
+    await doReset(manifest)
+  } else {
+    await syncPackages(manifest, manifest.items)
+    await syncDirs(manifest, manifest.items, 'preset', 'presets', path.join(DSH_HOME, '.agent-presets'), 'cordis.yml', 'preset')
+    await syncDirs(manifest, manifest.items, 'skill', 'skills', path.join(DSH_HOME, 'skills'), 'SKILL.md', 'skill')
+    await syncPatches(manifest.items)
+  }
   logVersion(manifest)
   console.log('')
   if (failures.length > 0) {

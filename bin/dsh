@@ -7,6 +7,7 @@
 #   dsh build      只 build,不启动
 #   dsh -d         后台启动并打开浏览器
 #   dsh stop       停止 dsh web 进程
+#   dsh reset      一键清零自定义 plugins(patch/preset/skill 一并重置;可 dsh build 恢复)
 #   dsh -p 8080    指定端口(默认 3080)
 #
 # 本地环境:仓库根 .env.local(gitignored)可放 DSH_OPEN_APP 等;也可行内临时传入,
@@ -39,6 +40,7 @@ BUILD_ONLY=0
 DAEMON=0
 STOP=0
 NO_OPEN=0
+RESET=0
 PASSTHRU=()
 
 usage() {
@@ -50,6 +52,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     build) BUILD_ONLY=1; shift ;;
     stop) STOP=1; shift ;;
+    reset) RESET=1; shift ;;
     -b|--build) BUILD=1; shift ;;
     -d|--daemon) DAEMON=1; shift ;;
     --no-open) NO_OPEN=1; shift ;;
@@ -143,6 +146,10 @@ do_start() {
 
 if [[ $STOP -eq 1 ]]; then
   do_stop
+  exit 0
+fi
+if [[ $RESET -eq 1 ]]; then
+  node "$REPO/scripts/sync.mjs" --reset
   exit 0
 fi
 if [[ $BUILD_ONLY -eq 1 ]]; then
