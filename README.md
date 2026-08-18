@@ -45,6 +45,13 @@ ln -s /Users/bytedance/mydir/opensource/zydsh/bin/dsh ~/.local/bin/dsh
 - "build" = 按 `dsh.yaml` 物化到 `~/.dsh`(即 `node scripts/sync.mjs`,幂等可重跑);
 - 版本单一来源:`dsh.yaml` 的 `dshVersion`,启动脚本运行时读取。
 
+**打开 UI 的方式**(环境变量 `DSH_OPEN_APP`):
+
+- 未设置:服务就绪后用默认浏览器打开 `http://127.0.0.1:3080`;
+- 设置为已安装 PWA 的路径(如 `~/Applications/Chrome Apps.localized/DeepSeek Harness.app`):直接启动该 PWA 窗口;
+- 设置为应用名:用该应用打开 URL。
+- 注意:PWA 打开的是它自己的 start_url,自定义端口(`dsh -p`)时与 PWA 可能不一致,用 `--no-open` 规避。
+
 sync 行为按定制类型:
 
 | 类型 | source | 物化动作 |
