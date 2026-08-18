@@ -25,6 +25,6 @@
 - [x] 4.1 迁移现有文件:`BACKLOG.md`、`scripts/dsh.fish` 保留原位置(design D7 本就不移动),新增骨架与 sync;git 历史保留
 - [x] 4.2 启动命令:`bin/dsh`(bash & fish 通用,经 `~/.local/bin/dsh` symlink 上 PATH);默认用上次 build 启动、`dsh -b` 先 build 再启动、`dsh build` 只 build、`dsh -d` 后台、`dsh stop` 停止;版本单一来源 = `dsh.yaml`(脚本运行时读取,移除 dsh.fish 的 DSH_VERSION 常量)
 - [x] 4.3 按 spec 场景验收:manifest 缺失报错 ✓、disabled 不物化 ✓(cost-meter 移除实测)、toggle 可逆 ✓(移除→重装)、双 patch 合并顺序 ✓(探针)、local/remote 混合一次 sync ✓(首条 remote)、remote pin 复现 ✓(重装后 1.5.6)
-- [ ] 4.4 用 B004 单机接入作为首个真实定制(package: subagent-claude-code 接线),实战验证 sync + bundle 链路
-- [ ] 4.5 更新 BACKLOG B009 状态为已设计/实施中,记录新结构文档位置
-- [ ] 4.6 重启 DSH 后验证 dsh-cost-meter 在 web 正常加载(rc.7 依赖混杂风险,首个 remote 实例)
+- [x] 4.4 用 B004 单机接入作为首个真实定制,实战验证 sync + bundle/patch 链路 → **接线目标按用户指示由 claude 改为 codex**(本机 claude 暂不可用);形态按仓库 D3/D9 定稿:**remote 包 + 顶层 dependencies + patches 接线**——官方 `@deepseek-ai/dsh-subagent-codex@0.1.0-rc.6` 按 remote 装为 plain dependency,其缺失 peer `@deepseek-ai/dsh-sdk-protocol@0.1.0-rc.6` 入 manifest 顶层 `dependencies:`(条目 `deps:` 引用归属,sync 校验悬空引用),provider+tool 两行直插 host 平面放 `patches/subagent-codex-wiring.yml`(type: patch,sync 合并进生成 patch 层);顺带修 `scripts/sync.mjs`:bundles 只收声明 dsh.bundle 的包(对齐 `dsh plugin add` reconcile);sync 实测:安装/移除/生成正确、二次运行幂等、provider import 链解析到运行体副本(无重复 runtime 家族);codex app-server 握手实测通过(0.144.3,官方基线 0.147.0);运行时加载验收随 4.6 重启
+- [x] 4.5 更新 BACKLOG B009 状态为已设计/实施中,记录新结构文档位置
+- [x] 4.6 重启 DSH 后验证 dsh-cost-meter 在 web 正常加载(rc.7 依赖混杂风险,首个 remote 实例) → 02:54 干净重启后验收:host 侧 `[dsh-cost-meter] 已加载` ✓;web 客户端 bundle 已进 `__DSH_BOOT__` entries(`/plugins/dsh-cost-meter/client.js`)✓;rc.7 依赖混杂无启动报错;subagent-codex provider+tool 两行激活(会话记录出现 `subagent_codex` 工具定义,已注入会话)✓;顺带给 `bin/dsh` 加 `restart` 子命令(踩坑 `dsh stop & dsh` 竞态:start 复用旧实例后被 stop 杀掉);真实 codex 委派调用建议在新会话做一次最终验收(本会话工具快照为重启前)

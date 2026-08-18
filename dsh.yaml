@@ -4,6 +4,11 @@
 
 dshVersion: 0.1.0-rc.6     # 启动脚本 bin/dsh 运行时读取,单一版本来源
 
+dependencies:               # 无 dsh.bundle 的支撑包(plain dependency,不进 bundle 层)
+                            # 安装唯一入口:精确版本 pin,sync 管理;定制条目用 deps: 引用以声明归属
+  # B004 配套:官方 codex provider 的 peer dependency,运行体(0.1.0-rc.6)未带
+  - '@deepseek-ai/dsh-sdk-protocol@0.1.0-rc.6'
+
 bundlesBrief:              # 出厂 bundle 的短备注(非 manifest 管理的包)
   "@deepseek-ai/dsh-base": 核心 bundle(agent / 会话 / 工具骨架)
   "@deepseek-ai/dsh-web-app": web 壳(浏览器 UI)
@@ -35,6 +40,23 @@ customizations:
     enabled: true
     brief: 架构图 skill(架构/时序/数据流/生命周期)
     note: repo https://github.com/tt-a1i/archify(14.2k stars,MIT,活跃);skill-only bundle,对话内生成可交互架构图(自包含 HTML/PNG/SVG);后续可配合 B001 架构师角色;需重启生效
+  # 自研(local)包位置见 packages/(本轮暂无);以下为第三方(remote):只存 pin + 记录,不 vendor 源码
+  # B004 单机接入 — 官方 codex subagent(接线见下方 patch 条目)
+  - id: subagent-codex
+    type: package
+    source: remote
+    spec: '@deepseek-ai/dsh-subagent-codex@0.1.0-rc.6'
+    version: 0.1.0-rc.6
+    enabled: true
+    deps:
+      - '@deepseek-ai/dsh-sdk-protocol'   # 归属引用:安装以顶层 dependencies 为准
+    brief: codex subagent 委派(本机 codex 登录态)
+    note: B004 单机接入;官方 provider 无 dsh.bundle,装为 plain dependency(不进 bundle 层),接线两行见 patches/subagent-codex-wiring.yml;本机 codex-cli 0.144.3 握手实测通过(官方基线 0.147.0);claude 对应包待本机 claude 可用后另加
+  # 自研 patch:B004 两行接线(provider + tool,直插 host 平面)
+  - id: subagent-codex-wiring
+    type: patch
+    enabled: true
+    brief: codex subagent 两行接线
   # 自研 skill:添加远端插件的标准流程
   - id: add-dsh-plugin
     type: skill

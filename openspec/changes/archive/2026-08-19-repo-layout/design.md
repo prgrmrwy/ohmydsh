@@ -74,6 +74,8 @@ zydsh/
 
 ```yaml
 dshVersion: 0.1.0-rc.6
+dependencies:               # 无 bundle 支撑包(可选):精确版本 pin,plain dependency,不进 bundle 层
+  - '@deepseek-ai/dsh-sdk-protocol@0.1.0-rc.6'
 customizations:
   # 自研:源码 + 配置都在仓库
   - id: tool-open-ide
@@ -87,11 +89,14 @@ customizations:
     source: remote
     spec: '@nanmicoder/dsh-agent-teams@0.1.7'   # npm 精确版本;或 github:owner/repo#tag
     enabled: true
+    deps: ['@deepseek-ai/dsh-sdk-protocol']     # 可选:归属引用(安装以顶层 dependencies 为准)
     note: 多角色团队插件,B001 评估候选
 ```
 
+- 顶层 `dependencies` = 无 bundle 支撑包的**安装唯一入口**:sync 按精确版本安装/校验/移除,不进 bundle 层;条目 `deps` 仅为归属引用,sync 校验引用的包名必须存在于顶层列表,悬空引用报错;
+
 - sync 按 `source` 与 type 分发物化动作(`local` → 仓库路径;`remote` → `spec` 原址);`enabled: false` = 不物化(仓库内容保留);
-- package 类:sync 只负责 `dsh plugin add <spec>`(自动进 `dsh.profile.bundles`,spike 1.3 证实),不写 composition 行;pin 校验按安装后 `node_modules` 实际版本比对;
+- package 类:sync 只负责 `dsh plugin add <spec>`,不写 composition 行;声明 `dsh.bundle` 的包自动进 `dsh.profile.bundles`(spike 1.3 证实),bundle-less 包保持 plain dependency 不进 bundle 层(sync 归一化与 `dsh plugin add` reconcile 对齐);pin 校验按安装后 `node_modules` 实际版本比对;
 - sync 全量重建生成文件(先备份),重跑即修复漂移;回滚 = 改 manifest 重 sync;
 - `dshVersion` 与 `scripts/dsh.fish` 的 `DSH_VERSION` 对齐(sync 校验,不一致告警)。
 
