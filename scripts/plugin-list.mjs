@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Print the profile's loaded plugin bundles, one per line: "name  // desc".
-// desc 来源:zydsh manifest 的 note(按 npm 名匹配)> 已安装包 package.json 的 description。
+// desc 来源:mydsh manifest 的 note(按 npm 名匹配)> 已安装包 package.json 的 description。
 import { readFileSync } from "node:fs"
 import path from "node:path"
 import os from "node:os"

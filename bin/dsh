@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# zydsh/dsh — start DSH from this customization repo (bash & fish 通用命令,非阻塞).
+# mydsh/dsh — start DSH from this customization repo (bash & fish 通用命令,非阻塞).
 #
 #   dsh            非阻塞启动:未运行 → 后台拉起 + 就绪后打开 UI;
 #                  已运行 → 直接打开 UI;UI 也已打开 → 提示已在运行
