@@ -22,6 +22,16 @@ patches/<id>.yml          # 纯 composition 片段 / 对 remote 包的覆盖(见
 skills/<name>/            # skill(见 skills/README.md)
 ```
 
+## 架构图
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="archify-out/mydsh-architecture.dark.png">
+  <img alt="mydsh 架构图:仓库真相源 → sync 物化 → ~/.dsh → DSH 运行时" src="archify-out/mydsh-architecture.light.png" width="100%">
+</picture>
+
+> 交互版(明暗主题 / 缩放 / 导出):`archify-out/mydsh-architecture.html`;
+> 矢量版:`archify-out/mydsh-architecture.dual.svg`(自带明暗主题适配)。
+
 ## 使用
 
 **安装启动命令**(一次性,两 shell 的 PATH 均含 `~/.local/bin`):
@@ -64,6 +74,8 @@ sync 行为按定制类型:
 | preset | — | copy 到 `~/.dsh/.agent-presets/<id>` |
 | patch | — | 按 manifest 顺序合并生成 profile `cordis.patch.yml` |
 | skill | — | copy 到 `~/.dsh/skills/<id>` |
+
+顶层 `dependencies:` = 无 bundle 的支撑包(如 remote 定制缺失的 peer),精确版本 pin 装为 plain dependency、**不进 bundle 层**;定制条目用 `deps:` 引用其包名声明归属(安装仍以顶层列表为唯一入口,sync 校验引用,悬空引用报错)。
 
 ## 第三方定制(remote)约定
 
