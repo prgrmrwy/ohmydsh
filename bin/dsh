@@ -7,7 +7,7 @@
 #   dsh --foreground 前台运行(调试用,阻塞)
 #   dsh -b         重新 build(安装/同步 plugins)后再启动
 #   dsh build      只 build,不启动
-#   dsh stop       停止 dsh web 进程
+#   dsh stop       停止 dsh web 进程,并关闭 UI(PWA;浏览器标签请手动关)
 #   dsh reset      一键清零自定义 plugins(patch/preset/skill 一并重置;可 dsh build 恢复)
 #   dsh history    查看历次启动清单(时间 / 版本 / 端口 / 加载的 plugins)
 #   dsh -p 8080    指定端口(默认 3080)
@@ -79,11 +79,30 @@ do_build() {
   node "$REPO/scripts/sync.mjs"
 }
 
-do_stop() {
-  if pkill -f '\.bin/dsh web'; then
-    echo "dsh stopped"
+close_ui() {
+  local name
+  if [[ "$DSH_OPEN_APP" == *.app ]]; then
+    name="$(basename "$DSH_OPEN_APP" .app)"
   else
+    name="$DSH_OPEN_APP"
+  fi
+  pkill -f "$name" >/dev/null 2>&1 || true
+}
+
+do_stop() {
+  if ! pkill -f '\.bin/dsh web'; then
     echo "no dsh process found"
+    return 0
+  fi
+  if [[ -n "${DSH_OPEN_APP:-}" ]]; then
+    if is_ui_open; then
+      close_ui
+      echo "dsh stopped(UI 已关闭)"
+    else
+      echo "dsh stopped(UI 未在运行)"
+    fi
+  else
+    echo "dsh stopped(浏览器页面请手动关闭)"
   fi
 }
 
