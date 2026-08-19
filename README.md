@@ -16,7 +16,6 @@ BACKLOG.md                # 想法池
 openspec/                 # spec-driven 变更流程
 scripts/bootstrap.sh       # clone 后初始化:检查 Node 环境 + 安装依赖(幂等)
 scripts/install.sh         # 一键安装:bin/dsh → ~/.local/bin(幂等,可卸载)
-scripts/dsh.fish          # fish 旧别名(可选,见文件内注释)
 scripts/sync.mjs          # manifest → ~/.dsh 物化
 instructions/dsh-home.md  # 工作环境级模型指令源文件
 packages/<name>/          # 自研 bundle 插件(见 packages/README.md)
@@ -52,11 +51,11 @@ dsh build && dsh           # ③ 物化定制配置并启动,UI 自动打开
 - 依赖出问题想重装:`./scripts/bootstrap.sh --force`;
 - install.sh 默认装到 `~/.local/bin/dsh`(想换目录:`DSH_BIN_DIR=/opt/bin ./scripts/install.sh`);重复执行可覆盖更新,不影响 `~/.dsh` 物化产物;
 - 装的是**相对符号链接**,仓库整体移动后命令依然可用,无需重装;
-- 若 `~/.local/bin` 不在 PATH,脚本会打印各 shell(bash/zsh/fish)的配置提示;
+- 若 `~/.local/bin` 不在 PATH,脚本会打印各 shell(bash/zsh)的配置提示;
 - 卸载:`./scripts/install.sh uninstall`;
 - 跳过脚本?在仓库根执行等价的原始命令也行:
   ```bash
-  ln -s "$PWD/bin/dsh" "$HOME/.local/bin/dsh"   # fish: ln -s (pwd)/bin/dsh ~/.local/bin/dsh
+  ln -s "$PWD/bin/dsh" "$HOME/.local/bin/dsh"
   ```
 
 **快速上手**(命令已装好;还没装?先看上面「从零开始」):
