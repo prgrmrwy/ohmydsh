@@ -107,6 +107,8 @@ sync 行为按定制类型:
 
 DSH 官方 `standard` preset 会自动加载,无需复制出 `mydsh` preset。`$DSH_HOME/AGENTS.md` 给该 DSH 工作环境提供前馈模型指导;它不是权限授予,也不是强制安全边界,实际能力始终由最新 runtime context 与工具执行策略决定。`dsh-sandbox-notes` skill 继续保留,用于需要时查阅完整背景与恢复细节。
 
+现象、迁移原因、错误恢复规则与验证步骤见 [`docs/notes/dsh-home-agent-instructions.md`](docs/notes/dsh-home-agent-instructions.md)。
+
 ## 第三方定制(remote)约定
 
 - 只存三样:**精确版本 pin**、**个人覆盖片段**(`patches/<id>.yml`)、**条目说明**(`note`/审查记录);**不 vendor 源码**。

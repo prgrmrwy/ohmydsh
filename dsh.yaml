@@ -4,6 +4,10 @@
 
 dshVersion: 0.1.0-rc.6     # 启动脚本 bin/dsh 运行时读取,单一版本来源
 
+agentInstructions:          # DSH 原生工作环境级指令,单例物化为 $DSH_HOME/AGENTS.md
+  enabled: true
+  source: instructions/dsh-home.md
+
 dependencies:               # 无 dsh.bundle 的支撑包(plain dependency,不进 bundle 层)
                             # 安装唯一入口:精确版本 pin,sync 管理;定制条目用 deps: 引用以声明归属
   # B004 配套:官方 codex provider 的 peer dependency,运行体(0.1.0-rc.6)未带
@@ -70,12 +74,6 @@ customizations:
   - id: dsh-sandbox-notes
     type: skill
     enabled: true
-  # 自研 preset:standard 基线 + 沙箱铁律(默认不携带 sandbox_permissions,规避 core 缺陷 D001)
-  - id: mydsh
-    type: preset
-    version: 0.1.0
-    enabled: true
-    brief: mydsh 定制(standard + 沙箱铁律)
   # 第三方(remote):B003 IDE 集成 — workspace 菜单一键在 VSCode 打开
   - id: open-in-vscode
     type: package
