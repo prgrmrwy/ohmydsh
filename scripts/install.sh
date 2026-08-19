@@ -71,9 +71,6 @@ case "$ACTION" in
     if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
       echo
       echo "WARN $BIN_DIR 不在当前 PATH,按你的 shell 配置一行(重开终端生效):"
-      if command -v fish >/dev/null 2>&1; then
-        echo "  fish:     fish_add_path $BIN_DIR"
-      fi
       echo "  bash:     echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc"
       echo "  zsh:      echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.zshrc"
     fi
