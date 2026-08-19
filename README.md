@@ -89,6 +89,14 @@ dsh stop    # 3. 停止服务
 
 小知识:"build" 就是按 `dsh.yaml` 物化到 `~/.dsh`(即 `node scripts/sync.mjs`,幂等可重跑);`DSH_HOME` 未设置或只含空白时默认 `~/.dsh`,也支持 `DSH_HOME=~/...`;DSH 版本单一来源是 `dsh.yaml` 的 `dshVersion`,启动时动态读取。
 
+**自动升级 DSH 运行体**(`autoUpdate`,默认开):
+
+- `dsh`(未运行)/ `dsh -b` / `dsh build` / `dsh restart` 前置会检测 `@deepseek-ai/dsh` 在 registry 目标频道(`latest` 或 `next`)的最新版本;低于最新即**阻塞式自动升级**再继续:改 `dsh.yaml` 的 `dshVersion` + 同族 `@deepseek-ai/dsh-*` pin → 重跑 sync 物化 → `git commit --no-verify`(`chore(dsh): auto-bump <旧> → <新>`)→ 再启动;
+- 只会自动改写名字匹配 `@deepseek-ai/dsh-*` 且 pin 等于旧运行体的条目,第三方插件与刻意钉住的其他版本不动;改写前留 `dsh.yaml.bak`,sync 失败即从备份回滚并报错不启动;
+- **前提是工作区干净**:仓库有未提交改动时不升级,输出会说明原因(提交后下次启动自动跟上);检测失败/离线时按当前版本继续,不阻塞;
+- **逃生门 & 频道**:想钉在旧版,`dsh.yaml` 置 `autoUpdate.enabled: false` 或临时 `DSH_SKIP_UPDATE=1 dsh`;追 `next`(前夜版)用 `DSH_UPDATE_CHANNEL=next dsh`(或改 `autoUpdate.channel`);
+- 升级/跳过/离线事件记录在 `~/.dsh/dsh-startup.log`,`dsh history` 可见。
+
 **局域网访问**(`dsh.yaml` 的 `web.lan`,**默认关闭**):
 
 - 需要时把 `web.lan` 改为 `true` 后 `dsh build`;sync 会把 webserver 绑到 `0.0.0.0`,启动时除 `http://127.0.0.1:<端口>` 外同时打印局域网地址 `http://<本机IP>:<端口>`,同一局域网的其他设备(手机/平板等)可直接打开;
@@ -128,11 +136,11 @@ DSH 官方 `standard` preset 会自动加载,无需复制出 `mydsh` preset。`$
 ## 第三方定制(remote)约定
 
 - 只存三样:**精确版本 pin**、**个人覆盖片段**(`patches/<id>.yml`)、**条目说明**(`note`/审查记录);**不 vendor 源码**。
-- 升级 = 改 pin 重跑 sync;不自动漂移。
+- 升级 = 改 pin 重跑 sync(默认由 `autoUpdate` 自动完成,见上方「自动升级」;`DSH_SKIP_UPDATE=1` 恢复纯手工改 pin 模式)。
 - **安全提醒**:插件即第三方代码(社区列表明示警告),安装前先看源码,`note` 记录来源与审查结论。
 
 ## 开发流
 
 - 新想法 → `BACKLOG.md`;单项实施 → openspec change(`openspec new change <name>`);
 - 自研 package 改代码后**要 bump 版本**(manifest 同步),sync 才会重装;
-- DSH 升级后重跑 sync 恢复全部定制。
+- DSH 运行体由 `autoUpdate` 自动升级并重跑 sync 恢复全部定制;手工升级同样 = 改 `dshVersion` 后重跑 sync。

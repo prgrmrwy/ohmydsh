@@ -14,6 +14,10 @@
 #   dsh -p 8080    指定端口(默认 3080)
 #   (web.lan / DSH_LAN 开启时,启动输出同时打印本机与局域网地址;临时仅本机:--host 127.0.0.1)
 #
+# autoUpdate(默认开启):start/-b/build/restart 前置检测 registry 最新 DSH 版本,
+#   有更新且工作区干净时阻塞式自动升级(改 dsh.yaml + 同族 pin → 重跑 sync → 自动提交)再启动;
+#   逃生门:autoUpdate.enabled:false 或 DSH_SKIP_UPDATE=1;频道:autoUpdate.channel / DSH_UPDATE_CHANNEL。
+#
 # 本地环境:仓库根 .env.local(gitignored)可放 DSH_OPEN_APP 等;也可行内临时传入,
 # 如 DSH_OPEN_APP="xxx.app" dsh。DSH_OPEN_APP = PWA/App 路径或名称时打开该应用。
 #
@@ -321,12 +325,104 @@ if [[ $RESET -eq 1 ]]; then
   node "$REPO/scripts/sync.mjs" --reset
   exit 0
 fi
+
+# ---------- autoUpdate:启动/构建前自动检测并升级 DSH 版本(见文件头部注释) ----------
+AUTOUP_UPDATED=0   # 本次调用是否已完成自动升级(避免 -b/build 重复物化)
+
+# check-update.mjs 输出 JSON 解析进全局变量;解析失败回退 AU_STATUS=error(fail-open)
+autoup_parse() {
+  local out="$1" fields
+  AUTOUP_ENABLED=0; AU_STATUS="error"; AU_CURRENT=""; AU_LATEST=""; AU_CHANNEL=""; AU_ERROR=""
+  [[ "$out" != \{* ]] && { AU_ERROR="check-update 输出异常"; return 1; }
+  fields="$(printf '%s' "$out" | node -e '
+    let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{
+      const esc=(s)=>"\""+String(s??"").replace(/[\\"$`]/g,"\\$&")+"\"";
+      const j=JSON.parse(d);
+      console.log("AUTOUP_ENABLED="+(j.enabled?1:0));
+      console.log("AU_STATUS="+esc(j.status));
+      console.log("AU_CURRENT="+esc(j.current));
+      console.log("AU_LATEST="+esc(j.latest));
+      console.log("AU_CHANNEL="+esc(j.channel));
+      console.log("AU_ERROR="+esc(j.error));
+    })'
+  )" && eval "$fields"
+}
+
+# 记录 autoUpdate 事件到启动日志(kind: upgrade|skip|offline)
+record_autoup_event() {
+  local kind="$1" msg
+  case "$kind" in
+    upgrade) msg="autoUpdate: $2 -> $3 (channel=$4)" ;;
+    skip)    msg="autoUpdate: skip upgrade to $2 ($3)" ;;
+    offline) msg="autoUpdate: offline ($3)" ;;
+  esac
+  printf '[%s] %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$msg" >>"$STARTUP_LOG"
+}
+
+# 升级链:改写 dsh.yaml(含同族 pin)→ 重跑 sync → 自动 commit。任何失败即报错退出、不启动。
+do_autoupgrade() {
+  local rewrite_out
+  echo "检测到新版本 $AU_CURRENT -> $AU_LATEST (channel=$AU_CHANNEL),开始自动升级..."
+  rewrite_out="$(node "$REPO/scripts/check-update.mjs" --rewrite-to "$AU_LATEST" 2>&1 || true)"
+  if [[ "$rewrite_out" != *"wrote "* ]]; then
+    echo "error: 自动改写 dsh.yaml 失败:" >&2
+    echo "$rewrite_out" >&2
+    exit 1
+  fi
+  printf '%s\n' "$rewrite_out" | sed -n 's/^rewrite: /  /p'
+  if ! node "$REPO/scripts/sync.mjs"; then
+    echo "error: 升级后 sync 失败,从 dsh.yaml.bak 回滚 dsh.yaml" >&2
+    cp "$REPO/dsh.yaml.bak" "$REPO/dsh.yaml"
+    rm -f "$REPO/dsh.yaml.bak"
+    exit 1
+  fi
+  if ! git -C "$REPO" add dsh.yaml || ! git -C "$REPO" commit --no-verify -m "chore(dsh): auto-bump $AU_CURRENT → $AU_LATEST" >/dev/null; then
+    echo "error: 自动 commit 失败(dsh.yaml 已升级并完成 build)。处置:git commit dsh.yaml 保留,或 git checkout -- dsh.yaml 回滚" >&2
+    exit 1
+  fi
+  rm -f "$REPO/dsh.yaml.bak"
+  AUTOUP_UPDATED=1
+  record_autoup_event upgrade "$AU_CURRENT" "$AU_LATEST" "$AU_CHANNEL"
+  echo "DSH 已自动升级至 $AU_LATEST 并提交。"
+}
+
+# 检测 + 分支;始终返回 0(继续),升级链内部失败会直接 exit。
+autoupdate() {
+  local out
+  out="$(node "$REPO/scripts/check-update.mjs" 2>/dev/null || true)"
+  autoup_parse "$out"
+  if [[ $AUTOUP_ENABLED -ne 1 ]]; then return 0; fi
+  case "$AU_STATUS" in
+    update)
+      if [[ -n "$(git -C "$REPO" status --porcelain)" ]]; then
+        echo "检测到新版本 $AU_LATEST,但仓库有未提交改动,已跳过自动更新(提交后下次启动自动升级)"
+        record_autoup_event skip "$AU_LATEST" "dirty-worktree"
+        return 0
+      fi
+      do_autoupgrade
+      ;;
+    offline)
+      echo "warn: 版本检测失败($AU_ERROR),按当前版本继续"
+      record_autoup_event offline "" "$AU_ERROR"
+      ;;
+    no-update) : ;;
+    *)
+      echo "warn: 版本检测不可用($AU_ERROR),按当前版本继续"
+      ;;
+  esac
+  return 0
+}
+
+if [[ $BUILD_ONLY -eq 1 || $BUILD -eq 1 || $RESTART -eq 1 ]] || ! is_server_up; then
+  autoupdate
+fi
+
 if [[ $BUILD_ONLY -eq 1 ]]; then
-  do_build
+  [[ $AUTOUP_UPDATED -ne 1 ]] && do_build
   exit 0
 fi
 if [[ $BUILD -eq 1 ]]; then
-  do_build
+  [[ $AUTOUP_UPDATED -ne 1 ]] && do_build
 fi
 
 if [[ $RESTART -eq 1 ]]; then

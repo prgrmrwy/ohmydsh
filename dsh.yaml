@@ -4,6 +4,10 @@
 
 dshVersion: 0.1.0-rc.6     # 启动脚本 bin/dsh 运行时读取,单一版本来源
 
+autoUpdate:                # 启动/构建前自动检测并升级 DSH 版本(channel = registry dist-tag)
+  enabled: true            # 逃生门:false 或 env DSH_SKIP_UPDATE=1 完全跳过检测(可钉在旧版)
+  channel: latest          # 追踪频道:latest / next;env DSH_UPDATE_CHANNEL 可临时覆盖(优先级最高)
+
 web:                       # Web 启动形态(非 customization;sync 直接渲染进 profile patch)
   lan: false               # 默认关闭。开启:绑定 0.0.0.0,启动后打印局域网地址,同网络设备可访问
                            # ⚠ 局域网可驱动完整 agent 能力(bash/文件读写),仅可信网络开启
