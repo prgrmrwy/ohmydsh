@@ -1,2 +1,0 @@
-name: mydsh 定制
-description: 功能完整的编码 Agent(standard 基线)+ 沙箱权限避坑铁律(sandbox_permissions 默认不携带,规避 DSH core 缺陷)。

@@ -1,7 +1,7 @@
 # repo-layout Specification
 
 ## Purpose
-定义 zydsh 仓库的目录结构、总配置 manifest 契约,以及将启用的定制物化到 DSH 部署环境的 sync 行为。
+定义 mydsh 仓库的目录结构、总配置 manifest 契约,以及将启用的定制和环境级指令物化到 DSH 部署环境的 sync 行为。
 
 ## Requirements
 
@@ -21,7 +21,7 @@
 - **THEN** sync 以错误退出,并指明缺失的 manifest 及其创建方式
 
 ### Requirement: 定制单元遵循社区 bundle 标准
-`package` 类定制必须(SHALL)是自包含目录,其 `package.json` 必须声明 `dsh.bundle` manifest,其 composition 行必须位于自带 `cordis.patch.yml` 中,从而可通过 `dsh plugin add` 安装。`preset` 类定制必须(SHALL)是包含 `cordis.yml` 的目录。`patch` 类定制必须是 YAML patch-list 片段。`skill` 类定制必须在自身目录下提供 skill 定义。
+`package` 类定制必须(SHALL)是自包含目录,其 `package.json` 必须声明 `dsh.bundle` manifest,其 composition 行必须位于自带 `cordis.patch.yml` 中,从而可通过 `dsh plugin add` 安装。`preset` 类定制必须(SHALL)是包含 `agent.cordis.yml` 的目录。`patch` 类定制必须是 YAML patch-list 片段。`skill` 类定制必须在自身目录下提供 skill 定义。
 
 #### Scenario: 新增 package 定制
 - **WHEN** 在 `packages/<name>/` 下新增一个 package 定制
@@ -29,7 +29,7 @@
 
 #### Scenario: 新增 preset 定制
 - **WHEN** 在 `presets/<id>/` 下新增一个 preset 定制
-- **THEN** 该目录包含 `cordis.yml`,且该 preset 可被 DSH roster 挂载
+- **THEN** 该目录包含 `agent.cordis.yml`,且该 preset 可被 DSH roster 挂载
 
 ### Requirement: manifest 支持本地与远端两种定制来源
 每项定制必须(SHALL)通过 `source` 字段声明来源:`local`(仓库自研,源码位于 `packages/<id>/`)或 `remote`(第三方插件)。`remote` 定制必须包含 `spec`(npm 或 git 地址,含精确版本 pin),仓库不得 vendor 其源码;对 `remote` 定制的个人配置覆盖必须存放在 `patches/<id>.yml`。
@@ -55,7 +55,26 @@ sync 工具必须(SHALL)把每项启用定制物化到 DSH 部署环境(`~/.dsh`
 
 #### Scenario: 启用定制被物化
 - **WHEN** 某定制 `enabled: true`
-- **THEN** 按其类型,其包被安装、其 patch 行被合并、或其 preset 被链接
+- **THEN** 按其类型,其包被安装、其 patch 行被合并、或其 preset/skill 被复制
+
+### Requirement: 环境级 agent instructions 单例安全物化
+manifest 可(MAY)声明顶层 `agentInstructions` 映射,包含布尔 `enabled` 与仓库内相对文件 `source`;该配置不是 customization type。启用时 sync 必须(SHALL)将源内容加 GENERATED/provenance 头后原子物化为 `$DSH_HOME/AGENTS.md`,并记录 `source` 与部署内容哈希。绝对路径、`..` 逃逸及解析到仓库外的源必须被拒绝。
+
+#### Scenario: 首次部署与重复 sync
+- **WHEN** `agentInstructions` 启用且目标不存在
+- **THEN** sync 生成 `$DSH_HOME/AGENTS.md` 并记录所有权状态;仓库与目标未变时再次 sync 为空操作
+
+#### Scenario: 未托管目标冲突
+- **WHEN** 目标已存在、内容不同且没有本仓库的部署状态
+- **THEN** sync 报错并保留原文件,不得覆盖
+
+#### Scenario: 托管目标发生漂移
+- **WHEN** 目标内容不再匹配状态中的上次部署哈希
+- **THEN** sync 报错并保留目标与所有权状态,不得用新源覆盖
+
+#### Scenario: 安全撤销
+- **WHEN** 配置被禁用、字段被删除或执行 reset
+- **THEN** 仅当目标仍匹配上次部署哈希时删除目标并清除状态;目标不存在时清除陈旧状态;内容漂移时保留目标与状态并报错
 
 ### Requirement: sync 按来源分发物化
 sync 必须(SHALL)按 `source` 分发物化动作:`local` 用仓库路径安装,`remote` 用其 `spec` 从原址安装;两者必须共享相同的开关、幂等与生成标记语义。
