@@ -12,6 +12,7 @@
 #   dsh reset      一键清零自定义 plugins(patch/preset/skill 一并重置;可 dsh build 恢复)
 #   dsh history    查看历次启动清单(时间 / 版本 / 端口 / 加载的 plugins)
 #   dsh -p 8080    指定端口(默认 3080)
+#   (web.lan / DSH_LAN 开启时,启动输出同时打印本机与局域网地址;临时仅本机:--host 127.0.0.1)
 #
 # 本地环境:仓库根 .env.local(gitignored)可放 DSH_OPEN_APP 等;也可行内临时传入,
 # 如 DSH_OPEN_APP="xxx.app" dsh。DSH_OPEN_APP = PWA/App 路径或名称时打开该应用。
@@ -40,6 +41,27 @@ DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 PROFILE="${DSH_PROFILE:-web}"
 PROFILE_PKG="$DSH_HOME/profiles/$PROFILE/package.json"
 STARTUP_LOG="$DSH_HOME/dsh-startup.log"
+
+# LAN serving switch: DSH_LAN env (inline or .env.local) beats dsh.yaml web.lan.
+# When on, sync renders a 0.0.0.0 webserver bind and the launcher prints the LAN URL.
+LAN_ENABLED=0
+lan_enabled() {
+  local v="${DSH_LAN:-}"
+  if [[ -n "$v" ]]; then
+    case "$v" in
+      1|true|TRUE|True|yes|YES|Yes|on|ON|On) return 0 ;;
+      0|false|FALSE|False|no|NO|No|off|OFF|Off) return 1 ;;
+    esac
+  fi
+  [[ "$(node -e '
+    const path = require("node:path")
+    const fs = require("node:fs")
+    const yaml = require(path.join(process.argv[1], "node_modules", "js-yaml"))
+    const doc = yaml.load(fs.readFileSync(path.join(process.argv[1], "dsh.yaml"), "utf8"))
+    console.log(doc && doc.web && doc.web.lan ? "1" : "")
+  ' "$REPO" 2>/dev/null)" == "1" ]]
+}
+if lan_enabled; then LAN_ENABLED=1; fi
 PORT=3080
 BUILD=0
 BUILD_ONLY=0
@@ -52,7 +74,7 @@ HISTORY=0
 PASSTHRU=()
 
 usage() {
-  sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit 0
 }
 
@@ -179,6 +201,51 @@ wait_for_port() {
   return 1
 }
 
+# CGNAT (100.64.0.0/10,如 Tailscale) 与 link-local (169.254/16) 不算局域网地址
+is_lan_ip() {
+  local o1 o2
+  o1="${1%%.*}"
+  o2="${1#*.}"; o2="${o2%%.*}"
+  [[ "$o1" == "169" && "$o2" == "254" ]] && return 1
+  [[ "$o1" == "100" && "$o2" -ge 64 && "$o2" -le 127 ]] && return 1
+  return 0
+}
+
+# First non-loopback IPv4 address, default-route interface preferred; falls back
+# to scanning for a private-range address (skips CGNAT/link-local), then to
+# hostname -I. Best effort: empty when none can be determined.
+lan_ip() {
+  local ip="" iface cand
+  if command -v route >/dev/null 2>&1 && command -v ifconfig >/dev/null 2>&1; then
+    iface="$(route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}')"
+    if [[ -n "$iface" ]]; then
+      ip="$(ifconfig "$iface" 2>/dev/null | awk '/inet / && $2 !~ /^127\./{print $2; exit}')"
+    fi
+  fi
+  if [[ -z "$ip" ]] || ! is_lan_ip "$ip"; then
+    cand="$(ifconfig 2>/dev/null | awk '
+      /inet / && $2 !~ /^127\./ {
+        split($2, o, ".")
+        if (o[1] == 169 && o[2] == 254) next
+        if (o[1] == 100 && o[2] >= 64 && o[2] <= 127) next
+        print $2; exit
+      }')"
+    [[ -n "$cand" ]] && ip="$cand"
+  fi
+  if [[ -z "$ip" ]] && command -v hostname >/dev/null 2>&1; then
+    ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  fi
+  [[ -n "$ip" ]] && echo "$ip"
+}
+
+# One LAN access line after the loopback URL line, when LAN serving is enabled.
+print_lan() {
+  [[ $LAN_ENABLED -eq 1 ]] || return 0
+  local ip
+  ip="$(lan_ip)"
+  [[ -n "$ip" ]] && echo "局域网: http://$ip:$PORT (同网络设备可访问;临时仅本机:dsh --host 127.0.0.1)"
+}
+
 open_ui() {
   [[ $NO_OPEN -eq 1 ]] && return 0
   local url="http://127.0.0.1:$PORT"
@@ -217,6 +284,7 @@ start_server() {
     if wait_for_port "$PORT" 60 "$pid"; then
       open_ui
       echo "dsh 已启动: http://127.0.0.1:$PORT (dshVersion=$VER)"
+      print_lan
       print_plugins
     elif kill -0 "$pid" 2>/dev/null; then
       echo "warn: server did not answer on port $PORT within 30s" >&2
@@ -231,6 +299,7 @@ start_server() {
     if wait_for_port "$PORT" 60 "$pid"; then
       open_ui
       echo "dsh 已启动: http://127.0.0.1:$PORT (dshVersion=$VER)"
+      print_lan
       print_plugins
     elif kill -0 "$pid" 2>/dev/null; then
       echo "warn: server did not answer on port $PORT — see $DSH_HOME/dsh.log" >&2
@@ -268,16 +337,19 @@ fi
 if is_server_up; then
   if [[ $NO_OPEN -eq 1 ]]; then
     echo "dsh 已在运行: http://127.0.0.1:$PORT"
+    print_lan
     print_plugins
     exit 0
   fi
   if is_ui_open; then
     echo "dsh 已在运行(UI 已打开): http://127.0.0.1:$PORT"
+    print_lan
     print_plugins
     exit 0
   fi
   open_ui
   echo "dsh 已在运行,已为你打开 UI: http://127.0.0.1:$PORT"
+  print_lan
   print_plugins
   exit 0
 fi
