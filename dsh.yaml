@@ -34,8 +34,8 @@ customizations:
   - id: cost-meter
     type: package
     source: remote
-    spec: dsh-cost-meter@1.5.6
-    version: 1.5.6
+    spec: dsh-cost-meter@1.5.22
+    version: 1.5.22
     enabled: true
     brief: 会话费用统计
     note: 会话费用统计(web client 插件);仓库 https://github.com/Han-1413141/dsh-cost-meter;依赖拉到 rc.7 家族,重启后验证加载
