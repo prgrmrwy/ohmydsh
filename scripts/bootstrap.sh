@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mydsh/scripts/bootstrap.sh — clone 后初始化仓库:检查 Node 环境并安装依赖(幂等)。
+# ohmydsh/scripts/bootstrap.sh — clone 后初始化仓库:检查 Node 环境并安装依赖(幂等)。
 #
 # 跨系统:macOS / Linux / WSL / Git Bash。
 #

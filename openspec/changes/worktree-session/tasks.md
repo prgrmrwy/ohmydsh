@@ -56,7 +56,7 @@
 
 - [ ] 8.1 Run package typecheck, unit/integration tests, client/host builds and real-Git smoke tests; verify committed build artifacts match source if the package ships prebuilt output.
 - [ ] 8.2 Install the disabled bundle into an isolated test `DSH_HOME` and perform browser acceptance on the existing DSH GUI build: homepage placement, base selection, toggle, normal submit, successful WS first submit and staged failure/retry.
-- [ ] 8.3 Run two real mydsh Worktree Sessions from `main`; prove unique branches/cwds, unchanged main checkout, shared correct-fingerprint lean dependencies, distinct development `DSH_HOME`s and no writes to the GUI's real `~/.dsh`.
+- [ ] 8.3 Run two real ohmydsh Worktree Sessions from `main`; prove unique branches/cwds, unchanged main checkout, shared correct-fingerprint lean dependencies, distinct development `DSH_HOME`s and no writes to the GUI's real `~/.dsh`.
 - [ ] 8.4 Validate promote and safe clean end-to-end, including refusal of dirty and unproven branches; document recovery for orphaned prepared operations.
 - [ ] 8.5 Enable `worktree-session` package and `ws` skill in `dsh.yaml`, run `dsh build`, confirm successful materialization, and ask the user to restart DSH rather than stopping the current session automatically.
 - [ ] 8.6 Add a deferred backlog section to this change's design/implementation notes for `/ws setup`, per-repository local config/trust, pnpm/Rush adapters, explicit ref refresh and squash-merge provider proofs; do not add these to the repository-global `BACKLOG.md`.
