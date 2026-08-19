@@ -16,7 +16,7 @@
 # 本地环境:仓库根 .env.local(gitignored)可放 DSH_OPEN_APP 等;也可行内临时传入,
 # 如 DSH_OPEN_APP="xxx.app" dsh。DSH_OPEN_APP = PWA/App 路径或名称时打开该应用。
 #
-# 安装: ln -s <repo>/bin/dsh ~/.local/bin/dsh(两 shell 的 PATH 均含 ~/.local/bin)
+# 安装: 仓库根执行 ./scripts/install.sh(默认装到 ~/.local/bin/dsh,幂等可重跑,可卸载)
 set -euo pipefail
 
 # Resolve symlinks so the repo path is correct when invoked via ~/.local/bin/dsh
