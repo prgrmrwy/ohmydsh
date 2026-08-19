@@ -116,3 +116,16 @@ customizations:
     enabled: true
     brief: 归档会话查看与恢复(设置页「归档管理」)
     note: 'repo https://github.com/Neumannzc/dsh-archive-manager(MIT);用途:设置 → 归档管理,按工作区列出已归档会话,一键取消归档回侧边栏继续原会话;审查(2026-08-19):host 端幂等补丁 WorkspaceRegistry.unarchiveSession(官方未来提供则让位),unarchive 走 registry 自身 enqueueOperation/requireState/setState 状态路径,经官方 archived-sessions-changed 帧广播;webServer 路由带信任防护(Host fence 防 DNS rebinding + Origin 校验 + 8KiB body cap);无删除/破坏性功能;仅 react peer;本地 clone 验证 typecheck + 17 单测 + build 全过(CI 红叉仅为 pnpm 忽略 esbuild 构建脚本的环境问题);⚠ TRUSTED_HOSTS 默认空 → 仅限 loopback(127.0.0.1/localhost),开启 web.lan 需源码加 trustedHosts;DSH 升级后需回归验证'
+  - id: width-tiers
+    type: package
+    source: remote
+    spec: dsh-width-tiers@1.0.2
+    version: 1.0.2
+    enabled: true
+    brief: 对话区宽度五档切换(748px 至全宽)
+    note: 'repo https://github.com/aaronlei/dsh-width-tiers(MIT);用途:Web 对话区标准/中等/宽/超宽/全宽五档切换并以 localStorage 记忆;审查(2026-08-20 npm 1.0.2 精确包):host 入口为空操作,client 仅注入 layout/locale,通过 --dsh-chat-content-width 行内覆盖调整宽度,不依赖构建哈希类名;无网络请求、Host 文件/命令/模型能力,生命周期 disposer 会清理 DOM、监听器、定时器与样式;注意非标准档会主动关闭详情面板,全宽档会经官方 layout 服务收起侧边栏;依赖 DSH Web rc.x 客户端布局与 locale 服务,升级后需回归验证'
+  # dsh-width-tiers 没有 dsh.bundle,需显式 loader 行让 client scanner 发现浏览器半区。
+  - id: width-tiers-wiring
+    type: patch
+    enabled: true
+    brief: 对话宽度插件 Web 加载接线
