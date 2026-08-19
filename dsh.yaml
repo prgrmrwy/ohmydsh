@@ -66,6 +66,10 @@ customizations:
   - id: remove-dsh-plugin
     type: skill
     enabled: true
+  # 自研 skill:沙箱/权限升级避坑(sandbox_permissions 正确用法 + core 缺陷绕过)
+  - id: dsh-sandbox-notes
+    type: skill
+    enabled: true
   # 第三方(remote):B003 IDE 集成 — workspace 菜单一键在 VSCode 打开
   - id: open-in-vscode
     type: package
