@@ -98,11 +98,11 @@ customizations:
   - id: llm-subscriptions
     type: package
     source: remote
-    spec: dsh-plugin-subscriptions@0.3.1
-    version: 0.3.1
+    spec: dsh-plugin-subscriptions@0.4.2
+    version: 0.4.2
     enabled: true
-    brief: codex/claude/grok 订阅制 provider(设置页 OAuth 登录,输入框可切换)
-    note: B004 扩展(订阅制主对话,非委派);repo https://github.com/V1ki/dsh-plugin-subscriptions(MIT,127 stars,活跃,2026-08-19 最近提交);功能:设置页 Subscriptions 页 OAuth 登录 ChatGPT(Codex)/ Claude / Grok(X Premium),登录后出现在会话模型选择器(/model 分组 ChatGPT (Codex) / Claude (Subscription) / Grok (Subscription)),live 模型目录(codex 走 chatgpt.com/backend-api/codex/models,claude 内置 opus-4-5/sonnet-4-5/haiku-4-5),附用量卡片 / Effort 选择器 / image_generate / x_search 工具;审查(2026-08-19 源码已读):零运行时依赖,bundle 自带 patch,host 侧与 modlens 同机制 ctx.llm.registerAdapter(codex/claude/grok 三 adapter,未登录不出现在选择器,请求 MISSING_CREDENTIAL);OAuth 端点全部官方(openai.com/anthropic.com/x.ai),唯一本地端点 http://localhost 为 PKCE 回调;token 落 ~/.dsh/plugins/subscriptions/auth.json(0600,tmp+rename 原子写),自动刷新;无 child_process/eval/env 读取;peer deps 均 ^0.1.0-rc.5(满足 rc.6 运行体),client inject 三包(dsh-client-runtime/dsh-client-ui-settings/dsh-client-locale)rc.6 已具备;风险:订阅自动化使用存在 ToS/封号风险(open issue \#1,与网页版同级),可 config.providers 只留 codex/claude;grok 不登录即不出现,无需显式禁用
+    brief: codex/claude/grok 订阅制 provider(Claude 复用本机登录态,输入框可切换)
+    note: B004 扩展(订阅制主对话,非委派);每次升级先读 change openspec/changes/2026-08-20-llm-subscriptions-upgrade(含 ADR-0001 选型);repo https://github.com/V1ki/dsh-plugin-subscriptions(MIT,158 stars,活跃,每日提交);功能:设置页 Subscriptions 页登录 ChatGPT(Codex)/ Claude / Grok(X Premium),登录后出现在会话模型选择器(/model 分组),live 模型目录(codex 走 chatgpt.com/backend-api/codex/models、claude 走 api.anthropic.com/v1/models 带 thinking/effort),附用量卡片 / Effort 选择器 / image_generate / x_search;0.4.2 关键变化(2026-08-20 diff 0.3.1→0.4.2 源码核对):① claude 登录默认「导入本机 Claude Code 凭据」— macOS keychain(服务名 "Claude Code-credentials")→ 失败回退 ~/.claude/.credentials.json(尊重 CLAUDE_CONFIG_DIR),命中即秒登录不弹浏览器,无凭据时报"Run claude first";刷新后写回 CLI 凭据库(stale-blob 乐观并发校验,与 claude CLI 共享同账号不打架)② OAuth 底层改用 claude.com/cai/oauth/authorize + 固定回调 platform.claude.com/oauth/code/callback(旧 claude.ai/oauth/authorize 已废弃 → 修复 0.3.1 authorization failed)③ 新增 providerRetryPolicy(1s→60s 指数退避)与 execFileSync 探测 claude --version(⚠ 信任面变化:0.3.1 的"无 child_process"对 0.4.2 不成立,本条目由 2026-08-20 审查确认);路由 id(codex/claude/grok)未变 → subscriptions-sandbox-shim 与既有 codex 会话(auth.json)兼容;peer 仍 ^0.1.0-rc.5(兼容 rc.7 解析);风险:订阅自动化 ToS/封号(与网页版同级),config.providers 可只留 codex/claude;grok 不登录即不出现
   # 自研(local):D001/issue #7 + Codex Responses 孤立 function_call 部署侧缓解
   - id: subscriptions-sandbox-shim
     type: package
