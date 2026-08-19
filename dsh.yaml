@@ -2,7 +2,7 @@
 # 修改后运行 `dsh build`(或 `node scripts/sync.mjs`)物化到 ~/.dsh。
 # 约定:禁用(enabled: false)≠删除;手改一律回写本仓库。
 
-dshVersion: 0.1.0-rc.6     # 启动脚本 bin/dsh 运行时读取,单一版本来源
+dshVersion: 0.1.0-rc.7     # 启动脚本 bin/dsh 运行时读取,单一版本来源
 
 autoUpdate:                # 启动/构建前自动检测并升级 DSH 版本(channel = registry dist-tag)
   enabled: true            # 逃生门:false 或 env DSH_SKIP_UPDATE=1 完全跳过检测(可钉在旧版)
@@ -21,7 +21,7 @@ agentInstructions:          # DSH 原生工作环境级指令,单例物化为 $D
 dependencies:               # 无 dsh.bundle 的支撑包(plain dependency,不进 bundle 层)
                             # 安装唯一入口:精确版本 pin,sync 管理;定制条目用 deps: 引用以声明归属
   # B004 配套:官方 codex provider 的 peer dependency,运行体(0.1.0-rc.6)未带
-  - '@deepseek-ai/dsh-sdk-protocol@0.1.0-rc.6'
+  - '@deepseek-ai/dsh-sdk-protocol@0.1.0-rc.7'
 
 bundlesBrief:              # 出厂 bundle 的短备注(非 manifest 管理的包)
   "@deepseek-ai/dsh-base": 核心 bundle(agent / 会话 / 工具骨架)
@@ -60,8 +60,8 @@ customizations:
   - id: subagent-codex
     type: package
     source: remote
-    spec: '@deepseek-ai/dsh-subagent-codex@0.1.0-rc.6'
-    version: 0.1.0-rc.6
+    spec: '@deepseek-ai/dsh-subagent-codex@0.1.0-rc.7'
+    version: 0.1.0-rc.7
     enabled: true
     deps:
       - '@deepseek-ai/dsh-sdk-protocol'   # 归属引用:安装以顶层 dependencies 为准
