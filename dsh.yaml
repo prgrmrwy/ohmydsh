@@ -99,3 +99,20 @@ customizations:
     enabled: true
     brief: codex/claude/grok 订阅制 provider(设置页 OAuth 登录,输入框可切换)
     note: B004 扩展(订阅制主对话,非委派);repo https://github.com/V1ki/dsh-plugin-subscriptions(MIT,127 stars,活跃,2026-08-19 最近提交);功能:设置页 Subscriptions 页 OAuth 登录 ChatGPT(Codex)/ Claude / Grok(X Premium),登录后出现在会话模型选择器(/model 分组 ChatGPT (Codex) / Claude (Subscription) / Grok (Subscription)),live 模型目录(codex 走 chatgpt.com/backend-api/codex/models,claude 内置 opus-4-5/sonnet-4-5/haiku-4-5),附用量卡片 / Effort 选择器 / image_generate / x_search 工具;审查(2026-08-19 源码已读):零运行时依赖,bundle 自带 patch,host 侧与 modlens 同机制 ctx.llm.registerAdapter(codex/claude/grok 三 adapter,未登录不出现在选择器,请求 MISSING_CREDENTIAL);OAuth 端点全部官方(openai.com/anthropic.com/x.ai),唯一本地端点 http://localhost 为 PKCE 回调;token 落 ~/.dsh/plugins/subscriptions/auth.json(0600,tmp+rename 原子写),自动刷新;无 child_process/eval/env 读取;peer deps 均 ^0.1.0-rc.5(满足 rc.6 运行体),client inject 三包(dsh-client-runtime/dsh-client-ui-settings/dsh-client-locale)rc.6 已具备;风险:订阅自动化使用存在 ToS/封号风险(open issue \#1,与网页版同级),可 config.providers 只留 codex/claude;grok 不登录即不出现,无需显式禁用
+  # 自研(local):D001/issue #7 + Codex Responses 孤立 function_call 部署侧缓解
+  - id: subscriptions-sandbox-shim
+    type: package
+    source: local
+    version: 0.1.1
+    enabled: true
+    brief: 订阅 provider 工具面 sandbox 字段与 Responses 历史配对清洗(shim)
+    note: 'D001/upstream https://github.com/V1ki/dsh-plugin-subscriptions/issues/7 部署侧缓解;适配器边界两层剥离(schema 出站 + arguments 入站),并清理中断 subagent settlement notice 注入父会话的孤立 tool-call(避免 Codex No tool output found HTTP 400);默认只作用 codex/grok,配置见 packages/subscriptions-sandbox-shim/README.md;⚠ sandbox 字段剥离仅限 danger-full-access + approval: never 部署,受限部署(read-only/workspace-write + ask)必须 enabled: false(合法升级通道会被误剥);上游修复后按 manifest 删除移除'
+  # 第三方(remote):归档会话查看/恢复 — 官方只有 archiveSession 无 unarchive(上游 Discussion #2613 已知缺口)
+  - id: ui-archive-manager
+    type: package
+    source: remote
+    spec: '@tangzai/dsh-ui-archive-manager@0.1.1'
+    version: 0.1.1
+    enabled: true
+    brief: 归档会话查看与恢复(设置页「归档管理」)
+    note: 'repo https://github.com/Neumannzc/dsh-archive-manager(MIT);用途:设置 → 归档管理,按工作区列出已归档会话,一键取消归档回侧边栏继续原会话;审查(2026-08-19):host 端幂等补丁 WorkspaceRegistry.unarchiveSession(官方未来提供则让位),unarchive 走 registry 自身 enqueueOperation/requireState/setState 状态路径,经官方 archived-sessions-changed 帧广播;webServer 路由带信任防护(Host fence 防 DNS rebinding + Origin 校验 + 8KiB body cap);无删除/破坏性功能;仅 react peer;本地 clone 验证 typecheck + 17 单测 + build 全过(CI 红叉仅为 pnpm 忽略 esbuild 构建脚本的环境问题);⚠ TRUSTED_HOSTS 默认空 → 仅限 loopback(127.0.0.1/localhost),开启 web.lan 需源码加 trustedHosts;DSH 升级后需回归验证'

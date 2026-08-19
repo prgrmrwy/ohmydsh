@@ -1,0 +1,25 @@
+{
+  "name": "dsh-subscriptions-sandbox-shim",
+  "version": "0.1.1",
+  "description": "Strip DSH sandbox escalation fields (sandbox_permissions/justification) from subscription provider (codex/grok) tool faces — deployment-side mitigation for dsh-plugin-subscriptions issue #7 (\"not strictly wider\"). Host-only plugin, no client bundle.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-llm": "^0.1.0-rc.5",
+    "@deepseek-ai/schemastery": "^3.18.1"
+  }
+}

@@ -149,7 +149,16 @@
 - **现象**: 会话处于 danger-full-access 模式时,任何携带 `sandbox_permissions` 参数的工具调用(bash/write/edit)都报 `sandbox escalation to "X" is not strictly wider than this call's current "X" mode`,且报错不提示修正方法,agent 会反复踩坑(2026-08-19 commit push 时连踩 10+ 次)。
 - **根因**: DSH core 的工具 schema 静态广告 `sandbox_permissions` 枚举,不随会话当前模式变化;拒绝逻辑也不自我纠正。
 - **绕过**: 工具调用默认不带 `sandbox_permissions` 参数;仅在被真实拒绝(`[sandbox: file access denied ...]`)时带最窄的足够权限重试一次;遇到 "not strictly wider" 报错直接移除参数重试。细节与铁律见 skill `dsh-sandbox-notes`。
-- **上游**: https://github.com/V1ki/dsh-plugin-subscriptions/issues/7(纯 core 问题,与插件无关);待上游修复或升级 DSH 后解除。
+- **部署侧缓解(2026-08-19)**: 自研插件 `subscriptions-sandbox-shim`(manifest 条目,packages/subscriptions-sandbox-shim)在适配器边界为订阅 provider(codex/grok)自动剥离升级字段(schema 出站 + arguments 入站),GPT 会话不再触发该报错;仅适用 danger-full-access + approval: never 部署,受限部署必须禁用。设计见 openspec change `subscriptions-sandbox-shim`。
+- **移除条件**: 上游修复(deepseek-harness 静态 schema 感知会话模式 / 拒绝文案自纠)或 DSH 升级消除缺陷后,删除 manifest 条目 + sync + restart。
+
+### [D002] core/subscriptions 交界缺陷:subagent settlement notice 产生孤立 Responses function_call
+- **状态**: 已定位并在 shim 0.1.1 绕过(待上游修复)
+- **现象**: Codex 会话运行一段时间后稳定报 HTTP 400 `No tool output found for function call call_...`;同一坏会话后续请求重复失败,切 DeepSeek 可继续。
+- **根因**: 中断 continuable subagent 时,DSH `AssistantOutputFold` 选取子会话最后一条非空 assistant content(可含尚未收口的 `tool-call`),`notifySettlement` 又把整段 content 作为父会话的 user message 注入;`dsh-plugin-subscriptions` 的 Responses 翻译器不校验 block 所在角色,把 user message 内的 copied `tool-call` 也序列化成父请求 `function_call`,但父会话没有对应 `function_call_output`,Codex 后端遂返回 400。
+- **实证**: 主会话 `session-77e49055-...` 的 seq 10591 含 user-role `call_00_PmW7x...`,紧接 seq 10592 即相同 call id 的 400;源 call/result 实际成对存在于子会话 `e34d5d2b-...` seq 50330/50332,证明是跨会话复制污染而非工具执行漏结果。
+- **部署侧缓解(2026-08-19)**: `subscriptions-sandbox-shim` 0.1.1 在 codex/grok adapter 请求边界按角色和 call id 清理孤立 tool-call/tool-result;正常 assistant call + user result 配对保持不变,非目标 provider 零影响。
+- **上游修复建议**: core settlement notice 只传播 text/image(至少剥离 tool-call/tool-result);subscriptions `toResponsesInput` 仅允许 assistant→function_call、user tool-result→function_call_output,并做最终配对校验。
 
 ---
 
