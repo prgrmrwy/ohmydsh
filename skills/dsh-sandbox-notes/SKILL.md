@@ -34,3 +34,10 @@ whenToUse: 文件/命令操作被沙箱拒绝([sandbox: file access denied ...])
 - 原因:之前 `dsh build` 被沙箱拒绝后成功升级过一次(danger-full-access),此后所有 git 调用仍携带 `sandbox_permissions` 参数,策略已切到 danger-full-access,任何携带都失败;
 - 绕过:所有调用移除 `sandbox_permissions` 字段 → 立即恢复正常;
 - 教训:被批准过一次升级 ≠ 后续调用需要带参数;参数只在"被拒→升级"的那一次出现。
+
+## 部署侧缓解:dsh-subscriptions-sandbox-shim(2026-08-19 落地)
+
+- 针对 GPT/Codex/Grok 这类**爱填可选参数**的模型,本仓库新增自研插件 `subscriptions-sandbox-shim`(packages/subscriptions-sandbox-shim):在适配器边界自动剥掉 `sandbox_permissions`/`justification`(出站 schema + 入站 arguments 两层),`danger-full-access` + `approval: never` 部署下 GPT 会话不再踩 "not strictly wider";
+- **对 DeepSeek 等原生 provider 零影响**(按 provider 路由精确匹配,默认只作用 codex/grok);
+- shim 存在时,本铁律对订阅 provider 仍是正确行为(不带参数),只是不再需要手动处理报错——模型填了也会被剥掉;
+- ⚠ shim 仅适用于"无合法升级路径"的部署;受限部署(ask 审批)必须禁用该定制,否则合法升级会被误剥。
