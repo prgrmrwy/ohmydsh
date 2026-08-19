@@ -68,7 +68,7 @@ dsh stop    # 3. 停止服务
 ```
 
 - 想一步到位?"构建 + 启动"用 `dsh -b`;
-- 启动后 UI 在 **http://127.0.0.1:3080**(换端口:`dsh -p 8080`);
+- 启动后 UI 在 **http://127.0.0.1:3080**(换端口:`dsh -p 8080`);`web.lan` 开启时(默认关),启动输出会**同时打印局域网地址**,同网络设备可直接打开;
 - 每次启动/停止,终端都会打印**当前加载的插件清单**,一眼看清生效了哪些定制;
 - 重复执行 `dsh` 不会起第二个实例:已在运行就只是帮你把 UI 打开。
 
@@ -89,6 +89,14 @@ dsh stop    # 3. 停止服务
 
 小知识:"build" 就是按 `dsh.yaml` 物化到 `~/.dsh`(即 `node scripts/sync.mjs`,幂等可重跑);`DSH_HOME` 未设置或只含空白时默认 `~/.dsh`,也支持 `DSH_HOME=~/...`;DSH 版本单一来源是 `dsh.yaml` 的 `dshVersion`,启动时动态读取。
 
+**局域网访问**(`dsh.yaml` 的 `web.lan`,**默认关闭**):
+
+- 需要时把 `web.lan` 改为 `true` 后 `dsh build`;sync 会把 webserver 绑到 `0.0.0.0`,启动时除 `http://127.0.0.1:<端口>` 外同时打印局域网地址 `http://<本机IP>:<端口>`,同一局域网的其他设备(手机/平板等)可直接打开;
+- ⚠️ 安全提示:绑定局域网意味着同网段任意设备都能访问并驱动完整 agent 能力(bash、文件读写等),这是官方 CLI 出于安全故意禁用的;请只在可信网络、需要时临时开启,用完改回 `false` 后 `dsh build`;
+- 不想改配置文件?`.env.local`(gitignored)或行内传 `DSH_LAN=1` / `DSH_LAN=0` 即可覆盖开关(优先级高于 `dsh.yaml`,如 `DSH_LAN=1 dsh` 临时开启),同样需要 `dsh build` 让绑定生效;
+- 临时单次仅本机:`dsh --host 127.0.0.1`;
+- macOS 首次开放端口可能弹防火墙询问,选择允许 node 接受传入连接。
+
 **UI 打开方式**(用 `DSH_OPEN_APP` 控制,不用改 shell 配置):
 
 - 默认:系统默认浏览器打开 `http://127.0.0.1:3080`;
@@ -106,6 +114,8 @@ sync 行为按定制类型:
 | skill | — | copy 到 `~/.dsh/skills/<id>` |
 
 顶层 `dependencies:` = 无 bundle 的支撑包(如 remote 定制缺失的 peer),精确版本 pin 装为 plain dependency、**不进 bundle 层**;定制条目用 `deps:` 引用其包名声明归属(安装仍以顶层列表为唯一入口,sync 校验引用,悬空引用报错)。
+
+顶层 `web.lan`(布尔)不是 customization:开启时 sync 额外生成一条 webserver 绑 `0.0.0.0` 的 patch fragment(见「局域网访问」);`DSH_LAN` 环境变量可覆盖(见 `.env.local.example`)。
 
 ## 环境级 instructions
 

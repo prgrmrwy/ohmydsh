@@ -4,6 +4,12 @@
 
 dshVersion: 0.1.0-rc.6     # 启动脚本 bin/dsh 运行时读取,单一版本来源
 
+web:                       # Web 启动形态(非 customization;sync 直接渲染进 profile patch)
+  lan: false               # 默认关闭。开启:绑定 0.0.0.0,启动后打印局域网地址,同网络设备可访问
+                           # ⚠ 局域网可驱动完整 agent 能力(bash/文件读写),仅可信网络开启
+                           # 开启方式:改 true 后 dsh build;或 .env.local 写 DSH_LAN=1(优先级更高)
+                           # 临时仅本机:dsh --host 127.0.0.1
+
 agentInstructions:          # DSH 原生工作环境级指令,单例物化为 $DSH_HOME/AGENTS.md
   enabled: true
   source: instructions/dsh-home.md
