@@ -390,7 +390,11 @@ do_autoupgrade() {
 autoupdate() {
   local out
   out="$(node "$REPO/scripts/check-update.mjs" 2>/dev/null || true)"
-  autoup_parse "$out"
+  if ! autoup_parse "$out"; then
+    # 脚本本身不可用(空输出/非 JSON):fail-open,但显式警告,不静默吞掉
+    echo "warn: 版本检测不可用($AU_ERROR),按当前版本继续"
+    return 0
+  fi
   if [[ $AUTOUP_ENABLED -ne 1 ]]; then return 0; fi
   case "$AU_STATUS" in
     update)
