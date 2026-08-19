@@ -402,7 +402,7 @@ async function main() {
   } else {
     await syncDependencies(manifest)
     await syncPackages(manifest, manifest.items)
-    await syncDirs(manifest, manifest.items, 'preset', 'presets', path.join(DSH_HOME, '.agent-presets'), 'cordis.yml', 'preset')
+    await syncDirs(manifest, manifest.items, 'preset', 'presets', path.join(DSH_HOME, '.agent-presets'), 'agent.cordis.yml', 'preset')
     await syncDirs(manifest, manifest.items, 'skill', 'skills', path.join(DSH_HOME, 'skills'), 'SKILL.md', 'skill')
     await syncPatches(manifest.items)
   }

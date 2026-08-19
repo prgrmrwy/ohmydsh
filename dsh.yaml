@@ -70,6 +70,12 @@ customizations:
   - id: dsh-sandbox-notes
     type: skill
     enabled: true
+  # 自研 preset:standard 基线 + 沙箱铁律(默认不携带 sandbox_permissions,规避 core 缺陷 D001)
+  - id: mydsh
+    type: preset
+    version: 0.1.0
+    enabled: true
+    brief: mydsh 定制(standard + 沙箱铁律)
   # 第三方(remote):B003 IDE 集成 — workspace 菜单一键在 VSCode 打开
   - id: open-in-vscode
     type: package
