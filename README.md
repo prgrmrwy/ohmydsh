@@ -1,4 +1,4 @@
-# mydsh — DSH 定制仓
+# ohmydsh — DSH 定制仓
 
 本仓库是 DSH(DeepSeek Harness)的定制仓:**总配置统一管理,各项定制可插拔、独立版本、独立维护,但都在同一仓库内**。
 
@@ -29,19 +29,19 @@ tests/                    # sync 黑盒回归测试
 ## 架构图
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="archify-out/mydsh-architecture.dark.png">
-  <img alt="mydsh 架构图:仓库真相源 → sync 物化 → ~/.dsh → DSH 运行时" src="archify-out/mydsh-architecture.light.png" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="archify-out/ohmydsh-architecture.dark.png">
+  <img alt="ohmydsh 架构图:仓库真相源 → sync 物化 → ~/.dsh → DSH 运行时" src="archify-out/ohmydsh-architecture.light.png" width="100%">
 </picture>
 
-> 交互版(明暗主题 / 缩放 / 导出):`archify-out/mydsh-architecture.html`;
-> 矢量版:`archify-out/mydsh-architecture.dual.svg`(自带明暗主题适配)。
+> 交互版(明暗主题 / 缩放 / 导出):`archify-out/ohmydsh-architecture.html`;
+> 矢量版:`archify-out/ohmydsh-architecture.dual.svg`(自带明暗主题适配)。
 
 ## 使用
 
 **从零开始**(clone 以后到能用的完整流程;macOS / Linux / WSL / Git Bash 通用,`bin/dsh` 是 bash 脚本,Windows 原生不支持):
 
 ```bash
-git clone <仓库地址> && cd mydsh
+git clone <仓库地址> && cd ohmydsh
 ./scripts/bootstrap.sh     # ① 初始化:检查 Node 环境 + 安装依赖(只需一次,幂等)
 ./scripts/install.sh       # ② 安装 dsh 命令到 ~/.local/bin
 dsh build && dsh           # ③ 物化定制配置并启动,UI 自动打开
@@ -126,9 +126,9 @@ sync 行为按定制类型:
 
 ## 环境级 instructions
 
-顶层 `agentInstructions` 不是一种 customization type。启用时,sync 校验 `source` 是仓库内相对文件,加 GENERATED/provenance 头后原子写入 `$DSH_HOME/AGENTS.md`,并在 `.mydsh-sync-state.json` 记录来源与部署哈希。连续 build 幂等;禁用、删除字段或 `dsh reset` 时,只会删除仍匹配已部署哈希的目标。目标若已有未托管内容,或托管后被修改,sync 会保留文件并报错,要求人工决定如何处理。
+顶层 `agentInstructions` 不是一种 customization type。启用时,sync 校验 `source` 是仓库内相对文件,加 GENERATED/provenance 头后原子写入 `$DSH_HOME/AGENTS.md`,并在 `.ohmydsh-sync-state.json` 记录来源与部署哈希。连续 build 幂等;禁用、删除字段或 `dsh reset` 时,只会删除仍匹配已部署哈希的目标。目标若已有未托管内容,或托管后被修改,sync 会保留文件并报错,要求人工决定如何处理。
 
-DSH 官方 `standard` preset 会自动加载,无需复制出 `mydsh` preset。`$DSH_HOME/AGENTS.md` 给该 DSH 工作环境提供前馈模型指导;它不是权限授予,也不是强制安全边界,实际能力始终由最新 runtime context 与工具执行策略决定。`dsh-sandbox-notes` skill 继续保留,用于需要时查阅完整背景与恢复细节。
+DSH 官方 `standard` preset 会自动加载,无需复制出 `ohmydsh` preset。`$DSH_HOME/AGENTS.md` 给该 DSH 工作环境提供前馈模型指导;它不是权限授予,也不是强制安全边界,实际能力始终由最新 runtime context 与工具执行策略决定。`dsh-sandbox-notes` skill 继续保留,用于需要时查阅完整背景与恢复细节。
 
 现象、迁移原因、错误恢复规则与验证步骤见 [`docs/notes/dsh-home-agent-instructions.md`](docs/notes/dsh-home-agent-instructions.md)。
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mydsh/scripts/install.sh — 把仓库 bin/dsh 安装到 ~/.local/bin(幂等,可重跑)。
+# ohmydsh/scripts/install.sh — 把仓库 bin/dsh 安装到 ~/.local/bin(幂等,可重跑)。
 #
 # 跨系统:macOS / Linux / WSL / Git Bash(bin/dsh 是 bash 脚本,Windows 原生 cmd/PowerShell 不支持)。
 #

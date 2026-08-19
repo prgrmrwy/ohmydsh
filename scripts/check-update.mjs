@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// mydsh autoupdate — 启动/构建前的 DSH 版本检测与 dsh.yaml 行级改写。
+// ohmydsh autoupdate — 启动/构建前的 DSH 版本检测与 dsh.yaml 行级改写。
 //
 // 两个模式:
 //   (默认)检测:读 dsh.yaml 的 dshVersion,直连 npm registry 取目标频道
@@ -70,7 +70,7 @@ function resolveChannel(args) {
 // GET registry, return parsed JSON or throw on network/timeout/invalid.
 function fetchJson(url) {
   return new Promise((resolve, reject) => {
-    const req = https.get(url, { headers: { "accept": "application/json", "user-agent": "mydsh-autoupdate" } }, (res) => {
+    const req = https.get(url, { headers: { "accept": "application/json", "user-agent": "ohmydsh-autoupdate" } }, (res) => {
       if (res.statusCode !== 200) {
         reject(new Error(`registry HTTP ${res.statusCode}`))
         res.resume()

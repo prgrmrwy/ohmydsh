@@ -20,7 +20,7 @@ DSH 工具 schema 会展示 `sandbox_permissions`,但展示的参数不一定适
 
 ## 为何从 preset 改为 `$DSH_HOME/AGENTS.md`
 
-- 官方 `standard` 自动加载,无需维护 `mydsh` 副本。
+- 官方 `standard` 自动加载,无需维护 `ohmydsh` 副本。
 - 环境指令与 roster 选择解耦,所有在该 DSH_HOME 下工作的 agent 都能获得同一份前馈。
 - 真相源缩为 `instructions/dsh-home.md`,由 `dsh.yaml` 顶层 `agentInstructions` 控制。
 - sync 用来源与部署哈希保护所有权:未托管目标不覆盖,托管目标漂移不覆盖/不删除,写入使用临时文件后原子 rename。
@@ -29,6 +29,6 @@ DSH 工具 schema 会展示 `sandbox_permissions`,但展示的参数不一定适
 
 1. 运行 `node --test tests/sync-agent-instructions.test.mjs`,覆盖路径逃逸、首次部署、幂等、未托管冲突、漂移和安全撤销。
 2. 运行 `node scripts/sync.mjs`,确认 `$DSH_HOME/AGENTS.md` 含 GENERATED/provenance 头和源文件内容。
-3. 检查 `$DSH_HOME/.mydsh-sync-state.json` 的 `agentInstructions.source` 与 `deployedHash`。
+3. 检查 `$DSH_HOME/.ohmydsh-sync-state.json` 的 `agentInstructions.source` 与 `deployedHash`。
 4. 再运行一次 sync,应报告无变化。
-5. 确认 `$DSH_HOME/.agent-presets/mydsh` 已删除,而 `$DSH_HOME/skills/dsh-sandbox-notes` 仍存在。
+5. 确认 `$DSH_HOME/.agent-presets/ohmydsh` 已删除,而 `$DSH_HOME/skills/dsh-sandbox-notes` 仍存在。

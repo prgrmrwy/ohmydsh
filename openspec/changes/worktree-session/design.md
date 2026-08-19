@@ -27,7 +27,7 @@
 - 不修改侧边栏 New Session，也不在选择 base/toggle 时提前创建资源。
 - 不在首版实现 `/ws setup`、自动识别任意仓库、pnpm/Rush adapter；这些列入本 change 的 deferred backlog。
 - 不原地切换主 checkout 分支，不自动 fetch/reset base，不自动 push/merge/delete remote branch。
-- 不让同一正在运行的 DSH Host 按 Session 切换进程级 `DSH_HOME`；隔离 home 仅用于 worktree 内 mydsh 开发构建。
+- 不让同一正在运行的 DSH Host 按 Session 切换进程级 `DSH_HOME`；隔离 home 仅用于 worktree 内 ohmydsh 开发构建。
 - 不把任务 backlog 写入仓库根 `BACKLOG.md`，也不在每个 worktree 创建运行时 backlog 文件。
 
 ## Decisions
@@ -255,7 +255,7 @@ Host 与脚本复用同一纯 Git/metadata 模块或相同格式契约，避免�
 
 1. 新增本地 package 与 ws skill，但先在 manifest 中保持 disabled，完成 Host Git/operation/lean fixture 与 Client 单测。
 2. 使用独立测试 `DSH_HOME` 安装 bundle，验证首页 chip、普通发送零影响、armed 首发成功/失败/重试。
-3. 在当前 mydsh 仓库做真实 Git 冒烟：从 main 并行创建两个任务，确认主 checkout 不变、cwd/branch/lock fingerprint和 build home 均隔离。
+3. 在当前 ohmydsh 仓库做真实 Git 冒烟：从 main 并行创建两个任务，确认主 checkout 不变、cwd/branch/lock fingerprint和 build home 均隔离。
 4. 验证 promote 和 clean 安全门，运行 package typecheck/tests/build；补齐 LICENSE/NOTICE。
 5. 将 `dsh.yaml` 条目启用并执行 `dsh build`；由用户决定何时重启当前 DSH。回滚为禁用 package/skill 后重跑 build；已有 worktree与 operation metadata 保留，供人工清理，不自动删除开发工作。
 

@@ -1,12 +1,12 @@
 ---
 name: add-dsh-plugin
-description: 往 mydsh 定制仓添加远端 DSH 插件:先写 manifest(dsh.yaml),再 dsh build,然后询问用户是否重启 DSH。
+description: 往 ohmydsh 定制仓添加远端 DSH 插件:先写 manifest(dsh.yaml),再 dsh build,然后询问用户是否重启 DSH。
 whenToUse: 用户要求安装/添加某个 DSH 插件(给出包名、npm 链接、awesome 列表条目,或说"想装 xxx 插件")时。
 ---
 
 # 添加远端插件(add-dsh-plugin)
 
-目标仓库:/Users/bytedance/mydir/opensource/mydsh(DSH 定制仓)。
+目标仓库:/Users/bytedance/mydir/opensource/ohmydsh(DSH 定制仓)。
 
 ## 流程(严格按序)
 

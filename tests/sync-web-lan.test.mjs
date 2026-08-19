@@ -10,7 +10,7 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SYNC_SCRIPT = path.join(REPO, 'scripts', 'sync.mjs')
 
 async function fixture({ web } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'mydsh-web-lan-'))
+  const root = await mkdtemp(path.join(os.tmpdir(), 'ohmydsh-web-lan-'))
   const repo = path.join(root, 'repo')
   const dshHome = path.join(root, 'dsh-home')
   await mkdir(path.join(repo, 'scripts'), { recursive: true })

@@ -2,10 +2,10 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "mydsh — DSH 定制仓架构",
+    "title": "ohmydsh — DSH 定制仓架构",
     "quality_profile": "showcase",
     "repository": {
-      "url": "https://github.com/prgrmrwy/mydsh",
+      "url": "https://github.com/prgrmrwy/ohmydsh",
       "revision": "27c706ac878f212fcf828a9db8e386b49d2a9d9b"
     }
   },
@@ -75,7 +75,7 @@
     {
       "id": "state",
       "type": "database",
-      "label": ".mydsh-sync-state.json",
+      "label": ".ohmydsh-sync-state.json",
       "sublabel": "增量 hash · 管理记录",
       "sources": [{ "path": "scripts/sync.mjs", "line": 17, "label": "STATE_FILE" }],
       "pos": [900, 450],
@@ -103,7 +103,7 @@
   "boundaries": [
     {
       "kind": "region",
-      "label": "mydsh 仓库 · 真相源",
+      "label": "ohmydsh 仓库 · 真相源",
       "wraps": ["manifest", "launcher", "customizations", "sync"]
     },
     {

@@ -66,7 +66,7 @@
 
 ### Requirement: 当前仓库采用可验证的 lean 依赖初始化
 
-首版系统 SHALL 为 mydsh 的新 worktree 建立 `lean` 依赖状态：按 `package-lock.json` 指纹复用只属于相同指纹的共享 npm 安装结果，并将 worktree 的 `node_modules` 指向该结果。初始化 SHALL 校验 lockfile 指纹和安装健康状态；不匹配或不健康的结果不得被复用。系统 SHALL 明确暴露 `lean` 状态，并要求在执行会改变安装结果的 npm 操作前先提升为 `mutable`。
+首版系统 SHALL 为 ohmydsh 的新 worktree 建立 `lean` 依赖状态：按 `package-lock.json` 指纹复用只属于相同指纹的共享 npm 安装结果，并将 worktree 的 `node_modules` 指向该结果。初始化 SHALL 校验 lockfile 指纹和安装健康状态；不匹配或不健康的结果不得被复用。系统 SHALL 明确暴露 `lean` 状态，并要求在执行会改变安装结果的 npm 操作前先提升为 `mutable`。
 
 #### Scenario: 相同 lockfile 复用依赖
 - **WHEN** 新 worktree 的 `package-lock.json` 指纹已有健康的共享安装结果
@@ -82,14 +82,14 @@
 
 ### Requirement: 本地环境与开发构建目标按 Worktree Session 隔离
 
-系统 SHALL 将主 checkout 中允许同步且被 Git 忽略的 `.env.local` 复制到新 worktree，并为该任务分配独立的开发构建 `DSH_HOME`。通过 WS 约定执行的 mydsh 构建 SHALL 写入该隔离目录，不得隐式物化到当前运行 GUI 使用的真实 `~/.dsh`。该隔离目录只约束 worktree 内的开发构建，不声称改变已运行 DSH Host 的进程级 home。
+系统 SHALL 将主 checkout 中允许同步且被 Git 忽略的 `.env.local` 复制到新 worktree，并为该任务分配独立的开发构建 `DSH_HOME`。通过 WS 约定执行的 ohmydsh 构建 SHALL 写入该隔离目录，不得隐式物化到当前运行 GUI 使用的真实 `~/.dsh`。该隔离目录只约束 worktree 内的开发构建，不声称改变已运行 DSH Host 的进程级 home。
 
 #### Scenario: 复制本地环境并覆盖构建 home
 - **WHEN** 主 checkout 存在 `.env.local` 且 Worktree Session 初始化成功
 - **THEN** worktree 获得本地副本，其中开发构建使用的 `DSH_HOME` 指向该任务的隔离目录，同时源文件保持不变
 
 #### Scenario: 并行构建不互相覆盖
-- **WHEN** 两个 Worktree Session 分别按 WS 约定执行 mydsh build
+- **WHEN** 两个 Worktree Session 分别按 WS 约定执行 ohmydsh build
 - **THEN** 两次构建写入不同的开发 `DSH_HOME`，且均不写入当前 GUI 的真实 `~/.dsh`
 
 #### Scenario: 不承诺运行中 Host 隔离

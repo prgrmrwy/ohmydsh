@@ -2,7 +2,7 @@
 
 ## Why
 
-当前在同一仓库并行启动多个 DSH 编码会话时，会话默认共享同一 checkout、依赖安装结果与 mydsh 物化目标，容易发生文件互踩、依赖状态串线和并行 `dsh build` 覆盖。需要一个类似 Claude Code `--worktree` 的首页启动能力：用户先选择 base、勾选 Worktree，再以第一次发送作为原子启动动作，让真正执行任务的 Agent 从出生起就在隔离 worktree 中工作。
+当前在同一仓库并行启动多个 DSH 编码会话时，会话默认共享同一 checkout、依赖安装结果与 ohmydsh 物化目标，容易发生文件互踩、依赖状态串线和并行 `dsh build` 覆盖。需要一个类似 Claude Code `--worktree` 的首页启动能力：用户先选择 base、勾选 Worktree，再以第一次发送作为原子启动动作，让真正执行任务的 Agent 从出生起就在隔离 worktree 中工作。
 
 ## What Changes
 
@@ -12,7 +12,7 @@
 - 第一次发送时按顺序完成：冻结首条输入 → 基于所选 base 创建独立 task branch 与 worktree → 执行当前仓库的 npm lean 初始化和本地环境同步 → 为开发构建分配隔离的 `DSH_HOME` → 注册 DSH Workspace → 以 worktree 为 cwd 创建目标空白 Session → 迁移并提交首条输入。目标 Agent 的第一轮不得早于 worktree/setup 完成。
 - 首次启动任一步骤失败时不得把消息降级发送到原 checkout；保留原输入和 Worktree 选择，报告失败阶段并允许幂等重试或由用户显式关闭 Worktree。
 - 提供 `/ws` skill/命令面用于查看依赖隔离状态、将 lean worktree 提升为 mutable、以及安全清理已完成 worktree；清理不得静默丢弃未提交或未合并工作。
-- 首版只适配当前 mydsh 仓库：npm 根依赖、`node_modules` lean 复用、`.env.local` 本地环境同步、独立开发构建 `DSH_HOME`。通用多仓 adapter 与由 LLM 识别仓库并生成配置的 `/ws setup` 记入本 change 的 deferred backlog，不进入 MVP。
+- 首版只适配当前 ohmydsh 仓库：npm 根依赖、`node_modules` lean 复用、`.env.local` 本地环境同步、独立开发构建 `DSH_HOME`。通用多仓 adapter 与由 LLM 识别仓库并生成配置的 `/ws setup` 记入本 change 的 deferred backlog，不进入 MVP。
 - 借鉴 MIT 项目 `LaoYueHanNi/dsh-git-worktree` 的输入框分支 UI、Git 探测和 Workspace 跳转模式，但将“选择目标分支后立即创建/切换”改为“选择 base，首次发送时创建新的 task branch/worktree”；不提供对主 checkout 的原地 `git switch`。
 
 ## Capabilities

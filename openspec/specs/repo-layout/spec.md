@@ -1,7 +1,7 @@
 # repo-layout Specification
 
 ## Purpose
-定义 mydsh 仓库的目录结构、总配置 manifest 契约,以及将启用的定制和环境级指令物化到 DSH 部署环境的 sync 行为。
+定义 ohmydsh 仓库的目录结构、总配置 manifest 契约,以及将启用的定制和环境级指令物化到 DSH 部署环境的 sync 行为。
 
 ## Requirements
 

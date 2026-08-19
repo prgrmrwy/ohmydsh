@@ -1,4 +1,4 @@
-# mydsh 总配置 — DSH 定制的唯一开关面。
+# ohmydsh 总配置 — DSH 定制的唯一开关面。
 # 修改后运行 `dsh build`(或 `node scripts/sync.mjs`)物化到 ~/.dsh。
 # 约定:禁用(enabled: false)≠删除;手改一律回写本仓库。
 
