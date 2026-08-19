@@ -142,6 +142,17 @@
 
 ---
 
+## 缺陷备忘
+
+### [D001] core 缺陷:sandbox_permissions 静态广告导致 "not strictly wider" 报错
+- **状态**: 已绕过(上游 open)
+- **现象**: 会话处于 danger-full-access 模式时,任何携带 `sandbox_permissions` 参数的工具调用(bash/write/edit)都报 `sandbox escalation to "X" is not strictly wider than this call's current "X" mode`,且报错不提示修正方法,agent 会反复踩坑(2026-08-19 commit push 时连踩 10+ 次)。
+- **根因**: DSH core 的工具 schema 静态广告 `sandbox_permissions` 枚举,不随会话当前模式变化;拒绝逻辑也不自我纠正。
+- **绕过**: 工具调用默认不带 `sandbox_permissions` 参数;仅在被真实拒绝(`[sandbox: file access denied ...]`)时带最窄的足够权限重试一次;遇到 "not strictly wider" 报错直接移除参数重试。细节与铁律见 skill `dsh-sandbox-notes`。
+- **上游**: https://github.com/V1ki/dsh-plugin-subscriptions/issues/7(纯 core 问题,与插件无关);待上游修复或升级 DSH 后解除。
+
+---
+
 ## 已完成
 
 ### [B009] 仓库结构定稿:总配置 + 可插拔定制(monorepo)
