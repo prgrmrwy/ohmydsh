@@ -1,11 +1,12 @@
-import { lstat, realpath, rm } from 'node:fs/promises'
-import { dirname, join, relative, resolve, sep } from 'node:path'
+import { realpath } from 'node:fs/promises'
+import { join, resolve, sep } from 'node:path'
 import type { CleanResult, OperationRecord, PromoteResult, StatusResult } from '../wire.js'
+import { bindingOf } from '../wire.js'
 import { promoteDependencies } from './dependencies.js'
 import { WsError } from './errors.js'
-import { readJson, withMkdirLock } from './fs.js'
+import { withMkdirLock } from './fs.js'
 import { createGitClient, discoverRepo, listWorktrees, worktreeStatus, type GitClient } from './git.js'
-import { operationFile, saveOperation } from './operation.js'
+import { findBySourceSession, loadOperation, operationFile, saveOperation } from './operation.js'
 import { runProcess, type ProcessRunner } from './process.js'
 
 function statusOf(operation: OperationRecord): StatusResult {
@@ -38,21 +39,40 @@ export async function resolveOperation(path: string, git = createGitClient()): P
   }
   for (const name of names) {
     if (!name.endsWith('.json')) continue
-    const operation = await readJson<OperationRecord>(join(operationsDir, name))
+    const operation = await loadOperation(repo.gitCommonDir, name.slice(0, -'.json'.length))
     if (operation?.worktreePath === worktree.path) return operation
   }
   throw new WsError('OPERATION_NOT_FOUND', `Worktree is not registered to Worktree Session: ${worktree.path}`)
 }
 
-export async function wsStatus(path: string, git = createGitClient()): Promise<StatusResult> {
-  return statusOf(await resolveOperation(path, git))
+export interface MaintenanceTarget {
+  path?: string
+  sessionId?: string
+  repoPath?: string
 }
 
-export async function wsPromote(path: string, options: { runner?: ProcessRunner; git?: GitClient } = {}): Promise<PromoteResult> {
-  const initial = await resolveOperation(path, options.git)
+export async function resolveMaintenanceTarget(target: string | MaintenanceTarget, git = createGitClient()): Promise<OperationRecord> {
+  if (typeof target === 'string') return resolveOperation(target, git)
+  if (target.sessionId !== undefined) {
+    if (target.repoPath === undefined) throw new WsError('INVALID_REQUEST', 'repoPath is required with sessionId')
+    const repo = await discoverRepo(target.repoPath, git)
+    const operation = await findBySourceSession(repo.gitCommonDir, target.sessionId)
+    if (operation === undefined) throw new WsError('OPERATION_NOT_FOUND', `No Worktree Session binding exists for Session ${target.sessionId}`)
+    return operation
+  }
+  if (target.path !== undefined) return resolveOperation(target.path, git)
+  throw new WsError('INVALID_REQUEST', 'Provide sessionId + repoPath, or an explicit compatibility path')
+}
+
+export async function wsStatus(target: string | MaintenanceTarget, git = createGitClient()): Promise<StatusResult> {
+  return statusOf(await resolveMaintenanceTarget(target, git))
+}
+
+export async function wsPromote(target: string | MaintenanceTarget, options: { runner?: ProcessRunner; git?: GitClient } = {}): Promise<PromoteResult> {
+  const initial = await resolveMaintenanceTarget(target, options.git)
   const lock = join(initial.gitCommonDir, 'ws', 'locks', 'repo.lock')
   return withMkdirLock(lock, async () => {
-    const operation = await resolveOperation(path, options.git)
+    const operation = await resolveMaintenanceTarget(target, options.git)
     if (operation.phase !== 'prepared') throw new WsError('PROMOTE_REFUSED', `Operation phase ${operation.phase} is not prepared`)
     if (operation.dependencyMode === 'mutable') return { ...statusOf(operation), dependencyMode: 'mutable' }
     await promoteDependencies(operation, options.runner ?? runProcess)
@@ -61,24 +81,27 @@ export async function wsPromote(path: string, options: { runner?: ProcessRunner;
   }, { timeoutMs: 16 * 60_000, staleMs: 30 * 60_000 })
 }
 
-export async function wsClean(path: string, options: {
+export async function wsClean(targetInput: string | MaintenanceTarget, options: {
   dryRun?: boolean
   activePaths?: readonly string[]
+  activeBoundSessionIds?: readonly string[]
   cwd?: string
   git?: GitClient
   requireActivePaths?: boolean
 } = {}): Promise<CleanResult> {
   const git = options.git ?? createGitClient()
-  const initial = await resolveOperation(path, git)
+  const initial = await resolveMaintenanceTarget(targetInput, git)
   const lock = join(initial.gitCommonDir, 'ws', 'locks', 'repo.lock')
   return withMkdirLock(lock, async () => {
-    const operation = await resolveOperation(path, git)
+    const operation = await resolveMaintenanceTarget(targetInput, git)
     const cwd = resolve(options.cwd ?? process.cwd())
     const target = resolve(operation.worktreePath)
     if (options.requireActivePaths === true && options.activePaths === undefined) throw new WsError('CLEAN_REFUSED', 'Active DSH Session paths were not supplied by the trusted Host')
     const active = (options.activePaths ?? []).map(item => resolve(item))
     if (cwd === target || cwd.startsWith(`${target}${sep}`)) throw new WsError('CLEAN_REFUSED', 'Refusing to clean the caller current worktree')
     if (active.some(item => item === target || item.startsWith(`${target}${sep}`))) throw new WsError('CLEAN_REFUSED', 'Refusing to clean a worktree used by an active DSH Session')
+    const binding = bindingOf(operation)
+    if (binding?.mode === 'source-session' && (options.activeBoundSessionIds ?? []).includes(binding.sourceSessionId)) throw new WsError('CLEAN_REFUSED', `Refusing to clean a worktree bound to active source Session ${binding.sourceSessionId}`)
     if (operation.phase !== 'prepared') throw new WsError('CLEAN_REFUSED', `Operation is in-flight at phase ${operation.phase}`)
     if ((await worktreeStatus(target, git)).trim() !== '') throw new WsError('CLEAN_REFUSED', 'Refusing to clean a dirty worktree')
     const baseTip = await git.run(operation.repoRoot, ['rev-parse', '--verify', `${operation.baseRef}^{commit}`])
@@ -87,15 +110,22 @@ export async function wsClean(path: string, options: {
     if (hasProgress.code !== 0) throw new WsError('CLEAN_REFUSED', `Task branch ${operation.taskBranch} no longer descends from its recorded base commit`)
     const ancestor = await git.runner('git', ['merge-base', '--is-ancestor', taskHead.trim(), baseTip.trim()], { cwd: operation.repoRoot })
     if (ancestor.code !== 0) throw new WsError('CLEAN_REFUSED', `Task branch ${operation.taskBranch} is not proven merged into ${operation.baseRef}`)
+    const sourceBinding = operation.schemaVersion === 2 && binding?.mode === 'source-session' ? binding : undefined
+    if (sourceBinding === undefined) throw new WsError('CLEAN_REFUSED', `Operation ${operation.operationId} has an unsupported or malformed maintenance binding`)
     const actions = [
       `git worktree remove ${target}`,
       `git branch -d ${operation.taskBranch}`,
-      `remove ${operationFile(operation.gitCommonDir, operation.operationId)}`,
+      `retain cleaned tombstone ${operationFile(operation.gitCommonDir, operation.operationId)}`,
     ]
     if (options.dryRun === true) return { dryRun: true, operationId: operation.operationId, worktreePath: target, taskBranch: operation.taskBranch, actions, cleaned: false }
     await git.run(operation.repoRoot, ['worktree', 'remove', target])
     await git.run(operation.repoRoot, ['branch', '-d', operation.taskBranch])
-    await rm(operationFile(operation.gitCommonDir, operation.operationId), { force: true })
+    const { diagnostics: _diagnostics, cacheNodeModules: _cacheNodeModules, ...tombstone } = operation
+    await saveOperation({
+      ...tombstone,
+      phase: 'cleaned',
+      binding: { ...sourceBinding, state: 'cleaned', updatedAt: new Date().toISOString() },
+    })
     return { dryRun: false, operationId: operation.operationId, worktreePath: target, taskBranch: operation.taskBranch, actions, cleaned: true }
   }, { timeoutMs: 30_000, staleMs: 30 * 60_000 })
 }

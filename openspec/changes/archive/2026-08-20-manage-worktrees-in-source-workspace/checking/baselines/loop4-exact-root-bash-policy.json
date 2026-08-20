@@ -1,0 +1,87 @@
+{
+  "sessionId": "session-a8c75989-1502-42f2-bb8e-fc25055cf024",
+  "initialEventCount": 3,
+  "initialAsOfSeq": 2,
+  "promptAccepted": {
+    "type": "server-response",
+    "rpcId": "db00d1ba-7561-475e-8ca0-48f0e95890a3",
+    "result": {
+      "ok": true,
+      "value": {
+        "accepted": true
+      }
+    }
+  },
+  "expectedManagedRoot": "/private/tmp/ws-browser-acceptance/.worktrees/acceptance-loop4-exact-managed-root-diagnostic",
+  "toolCall": {
+    "event": {
+      "type": "tool/call",
+      "seq": 222,
+      "time": 1787233898510,
+      "data": {
+        "turn": 1,
+        "step": 1,
+        "callId": "chatcmpl-tool-bd7428f24a909206",
+        "name": "bash",
+        "arguments": "{\"command\":\"pwd\",\"description\":\"Print current working directory without workdir\"}"
+      }
+    },
+    "view": {
+      "for": "call",
+      "view": {
+        "card": "terminal",
+        "title": "pwd",
+        "description": "Print current working directory without workdir"
+      }
+    }
+  },
+  "toolResult": {
+    "event": {
+      "type": "tool/result",
+      "seq": 223,
+      "time": 1787233898511,
+      "data": {
+        "turn": 1,
+        "step": 1,
+        "message": {
+          "source": {
+            "kind": "tool",
+            "callId": "chatcmpl-tool-bd7428f24a909206"
+          },
+          "content": [
+            {
+              "type": "tool-result",
+              "toolCallId": "chatcmpl-tool-bd7428f24a909206",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Error: bash 需要显式指定托管执行目录（worktree）内的 workdir：/private/tmp/ws-browser-acceptance/.worktrees/acceptance-loop4-exact-managed-root-diagnostic"
+                }
+              ],
+              "isError": true
+            }
+          ],
+          "role": "user",
+          "id": "59afa863-ebba-4384-bd96-e4c3f68d0102"
+        }
+      },
+      "sourceEventSeqs": [
+        222
+      ],
+      "surfaceOp": "append"
+    },
+    "view": {
+      "for": "result",
+      "view": {
+        "card": "generic",
+        "content": [
+          {
+            "type": "text",
+            "text": "```console\nError: bash 需要显式指定托管执行目录（worktree）内的 workdir：/private/tmp/ws-browser-acceptance/.worktrees/acceptance-loop4-exact-managed-root-diagnostic\n```"
+          }
+        ]
+      }
+    }
+  },
+  "diagnosticContainsExactManagedRoot": true
+}

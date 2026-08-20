@@ -403,24 +403,40 @@ async function syncPackages(manifest, items) {
   state.managedPackages = [...currentNames]
   await saveState(state)
 
-  // install / pin-check enabled ones
+  // install / pin-check enabled ones. Local file dependencies are copied into
+  // the profile rather than symlinked; version equality alone therefore cannot
+  // prove the installed bytes are current. Persist a source-content hash and
+  // force remove+add whenever it changes (or when upgrading old hashless state).
+  const previousLocalHashes = state.localPackageHashes ?? {}
+  const nextLocalHashes = {}
   for (const item of enabled) {
     const name = names.get(item.id)
-    const spec = item.source === 'local' ? `file:${path.join(REPO, 'packages', item.id)}` : item.spec
+    const localDir = item.source === 'local' ? path.join(REPO, 'packages', item.id) : undefined
+    const spec = localDir === undefined ? item.spec : `file:${localDir}`
+    const localHash = localDir === undefined ? undefined : await dirHash(localDir)
     const current = installedVersion(name)
+    let installed = true
     if (current !== undefined && item.source === 'remote' && current !== item.version) {
       change(`version drift ${name} ${current} -> ${item.version}, re-adding`)
-      if (!dshCli(['plugin', '--profile', PROFILE, 'add', item.spec], { version: manifest.dshVersion })) fail(`failed to pin ${name}`)
-    } else if (current !== undefined && item.source === 'local' && current !== item.version) {
-      change(`local package ${name} ${current} -> ${item.version}, re-adding`)
-      if (!dshCli(['plugin', '--profile', PROFILE, 'add', spec], { version: manifest.dshVersion })) fail(`failed to reinstall ${name}`)
+      installed = dshCli(['plugin', '--profile', PROFILE, 'add', item.spec], { version: manifest.dshVersion })
+      if (!installed) fail(`failed to pin ${name}`)
+    } else if (current !== undefined && item.source === 'local' && (current !== item.version || previousLocalHashes[name] !== localHash)) {
+      const reason = current !== item.version ? `${current} -> ${item.version}` : 'content changed'
+      change(`local package ${name} ${reason}, reinstalling`)
+      const removed = dshCli(['plugin', '--profile', PROFILE, 'remove', name], { version: manifest.dshVersion })
+      installed = removed && dshCli(['plugin', '--profile', PROFILE, 'add', spec], { version: manifest.dshVersion })
+      if (!installed) fail(`failed to reinstall ${name}`)
     } else if (current === undefined) {
       change(`install ${item.source} package ${name} (${spec})`)
-      if (!dshCli(['plugin', '--profile', PROFILE, 'add', spec], { version: manifest.dshVersion })) fail(`failed to install ${name}`)
+      installed = dshCli(['plugin', '--profile', PROFILE, 'add', spec], { version: manifest.dshVersion })
+      if (!installed) fail(`failed to install ${name}`)
     } else {
       log(`package ${name}@${current} up-to-date`)
     }
+    if (installed && localHash !== undefined) nextLocalHashes[name] = localHash
   }
+  state.localPackageHashes = nextLocalHashes
+  await saveState(state)
 
   // normalize bundles: shipped base (non-managed) entries first, then enabled managed in manifest order.
   // Only bundle-declaring packages join the layer stack: a package without a dsh.bundle manifest

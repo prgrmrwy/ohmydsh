@@ -5,7 +5,9 @@ export declare const ROUTES: {
     readonly operationStatus: "/worktree-session/api/operation-status";
     readonly promote: "/worktree-session/api/promote";
     readonly clean: "/worktree-session/api/clean";
-    readonly handoff: "/worktree-session/api/handoff";
+    readonly bindSource: "/worktree-session/api/bind-source";
+    readonly sessionStatus: "/worktree-session/api/session-status";
+    readonly status: "/worktree-session/api/status";
 };
 export type OperationPhase = 'allocated' | 'branch-created' | 'worktree-created' | 'dependencies-ready' | 'environment-ready' | 'prepared' | 'cleaned';
 export type ActiveOperationPhase = Exclude<OperationPhase, 'prepared' | 'cleaned'>;
@@ -25,8 +27,15 @@ export interface WorktreeEntry {
     detached: boolean;
     prunable: boolean;
 }
+export interface SourceSessionBinding {
+    mode: 'source-session';
+    sourceSessionId: string;
+    state: 'bound' | 'submit-claimed' | 'admitted' | 'uncertain' | 'cleaned';
+    updatedAt: string;
+}
+export type SessionBinding = SourceSessionBinding;
 export interface OperationRecord {
-    schemaVersion: 1;
+    schemaVersion: 2;
     operationId: string;
     repoRoot: string;
     gitCommonDir: string;
@@ -43,12 +52,10 @@ export interface OperationRecord {
     createdAt: string;
     updatedAt: string;
     diagnostics?: readonly string[];
-    handoff?: {
-        state: 'target-bound' | 'submit-claimed' | 'admitted' | 'uncertain';
-        targetSessionId: string;
-        updatedAt: string;
-    };
+    binding?: SessionBinding;
 }
+/** The persisted binding of a schema-v2 operation, if established. */
+export declare function bindingOf(operation: OperationRecord): SessionBinding | undefined;
 export interface RepoStatusRequest {
     repoPath: string;
 }
@@ -85,16 +92,32 @@ export interface OperationStatusRequest {
 export interface MaintenanceRequest {
     path: string;
 }
-export interface HandoffRequest {
+export interface BindSourceRequest {
     operationId: string;
     repoPath: string;
-    action: 'bind-target' | 'claim-submit' | 'admitted' | 'uncertain';
-    targetSessionId: string;
+    sourceSessionId: string;
 }
-export interface HandoffResult {
-    state: 'target-bound' | 'submit-claimed' | 'admitted' | 'uncertain';
-    targetSessionId: string;
+export interface SourceBindingRequest extends BindSourceRequest {
+    action: 'bind-source' | 'claim-submit' | 'admitted' | 'uncertain' | 'cleaned';
+}
+export interface BindSourceResult {
+    sourceSessionId: string;
+    state: 'bound' | 'submit-claimed' | 'admitted' | 'uncertain' | 'cleaned';
     submitAllowed: boolean;
+}
+export interface SessionStatusRequest {
+    sessionId: string;
+    repoPath: string;
+}
+export interface SessionStatusResult {
+    bound: boolean;
+    operationId?: string;
+    phase?: OperationPhase;
+    taskBranch?: string;
+    worktreePath?: string;
+    dependencyMode?: DependencyMode;
+    lifecycle?: 'bound' | 'submit-claimed' | 'admitted' | 'uncertain' | 'cleaned';
+    cleaned?: boolean;
 }
 export interface CleanRequest extends MaintenanceRequest {
     dryRun: boolean;
@@ -123,7 +146,7 @@ export interface CleanResult {
     actions: readonly string[];
     cleaned: boolean;
 }
-export type WsErrorCode = 'INVALID_REQUEST' | 'UNTRUSTED_REQUEST' | 'METHOD_NOT_ALLOWED' | 'BODY_TOO_LARGE' | 'NOT_A_REPOSITORY' | 'OUTSIDE_REPOSITORY' | 'GIT_FAILED' | 'GIT_TIMEOUT' | 'OPERATION_CONFLICT' | 'OPERATION_NOT_FOUND' | 'OPERATION_INVALID' | 'DEPENDENCY_FAILED' | 'ENVIRONMENT_FAILED' | 'PROMOTE_REFUSED' | 'CLEAN_REFUSED' | 'INTERNAL_ERROR';
+export type WsErrorCode = 'INVALID_REQUEST' | 'UNTRUSTED_REQUEST' | 'METHOD_NOT_ALLOWED' | 'BODY_TOO_LARGE' | 'NOT_A_REPOSITORY' | 'OUTSIDE_REPOSITORY' | 'GIT_FAILED' | 'GIT_TIMEOUT' | 'OPERATION_CONFLICT' | 'OPERATION_NOT_FOUND' | 'OPERATION_INVALID' | 'UNSUPPORTED_SCHEMA_VERSION' | 'DEPENDENCY_FAILED' | 'ENVIRONMENT_FAILED' | 'PROMOTE_REFUSED' | 'CLEAN_REFUSED' | 'INTERNAL_ERROR';
 export interface WsWireError {
     code: WsErrorCode;
     message: string;

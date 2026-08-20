@@ -1,11 +1,11 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { isAbsolute } from 'node:path'
-import type { HandoffRequest, StartOperationRequest, WireEnvelope } from '../wire.js'
+import type { OperationRecord, SourceBindingRequest, StartOperationRequest, WireEnvelope } from '../wire.js'
 import { ROUTES } from '../wire.js'
 import { wireError, WsError } from './errors.js'
 import { createGitClient, discoverRepo, listRefs, listWorktrees } from './git.js'
-import { loadOperation, startOperation, updateHandoff } from './operation.js'
-import { wsClean, wsPromote } from './maintenance.js'
+import { bindSource, findBySourceSession, loadOperation, sessionStatus, startOperation, updateSourceBinding } from './operation.js'
+import { wsClean, wsPromote, wsStatus } from './maintenance.js'
 
 const BODY_LIMIT = 64 * 1024
 
@@ -73,6 +73,16 @@ function absolutePath(record: Record<string, unknown>, key: string): string {
   return value
 }
 
+function maintenanceTarget(body: unknown): { path: string } | { sessionId: string; repoPath: string } {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new WsError('INVALID_REQUEST', 'Request body must be an object')
+  const record = body as Record<string, unknown>
+  const keys = Object.keys(record).sort()
+  for (const key of keys) if (key !== 'path' && key !== 'repoPath' && key !== 'sessionId') throw new WsError('INVALID_REQUEST', `Unknown body key ${key}`)
+  if (keys.length === 1 && keys[0] === 'path') return { path: absolutePath(record, 'path') }
+  if (keys.length === 2 && keys[0] === 'repoPath' && keys[1] === 'sessionId') return { sessionId: stringField(record, 'sessionId'), repoPath: absolutePath(record, 'repoPath') }
+  throw new WsError('INVALID_REQUEST', 'Provide exactly path, or sessionId + repoPath')
+}
+
 function route<T>(path: string, action: (body: unknown) => Promise<T>): RouteRegistration {
   return {
     path,
@@ -93,9 +103,20 @@ function route<T>(path: string, action: (body: unknown) => Promise<T>): RouteReg
 
 export interface HostRouteDeps {
   activeSessionPaths?: () => readonly string[]
+  activeBoundSessionIds?: () => readonly string[]
+  /** Validate the source Session against the durable operation and synchronously install scoped policy. */
+  bindLiveSource?: (sourceSessionId: string, operation: OperationRecord, options: { requireBlank: boolean }) => void
+  /** Refresh an already-bound live Session after Host restart/UI resume. */
+  recordBind?: (sourceSessionId: string, operation: OperationRecord | undefined) => void
+}
+
+async function loadBySession(repoPath: string, sourceSessionId: string): Promise<OperationRecord | undefined> {
+  const repo = await discoverRepo(repoPath)
+  return findBySourceSession(repo.gitCommonDir, sourceSessionId)
 }
 
 export function createRoutes(deps: HostRouteDeps = {}): readonly RouteRegistration[] {
+  const recordBind = (sourceSessionId: string, operation: OperationRecord | undefined): void => deps.recordBind?.(sourceSessionId, operation)
   return [
     route(ROUTES.repoStatus, async body => {
       const parsed = strictObject(body, ['repoPath'])
@@ -122,21 +143,58 @@ export function createRoutes(deps: HostRouteDeps = {}): readonly RouteRegistrati
       if (operation === undefined) throw new WsError('OPERATION_NOT_FOUND', 'Operation not found')
       return operation
     }),
-    route(ROUTES.handoff, async body => {
-      const parsed = strictObject(body, ['operationId', 'repoPath', 'action', 'targetSessionId'])
-      if (parsed.action !== 'bind-target' && parsed.action !== 'claim-submit' && parsed.action !== 'admitted' && parsed.action !== 'uncertain') throw new WsError('INVALID_REQUEST', 'Invalid handoff action')
-      const request: HandoffRequest = { operationId: stringField(parsed, 'operationId'), repoPath: absolutePath(parsed, 'repoPath'), action: parsed.action, targetSessionId: stringField(parsed, 'targetSessionId') }
-      return updateHandoff(request)
+    route(ROUTES.bindSource, async body => {
+      const parsed = strictObject(body, ['operationId', 'repoPath', 'sourceSessionId', 'action'])
+      if (parsed.action !== 'bind-source' && parsed.action !== 'claim-submit' && parsed.action !== 'admitted' && parsed.action !== 'uncertain' && parsed.action !== 'cleaned') throw new WsError('INVALID_REQUEST', 'Invalid source binding action')
+      const request: SourceBindingRequest = {
+        operationId: stringField(parsed, 'operationId'),
+        repoPath: absolutePath(parsed, 'repoPath'),
+        sourceSessionId: stringField(parsed, 'sourceSessionId'),
+        action: parsed.action,
+      }
+      if (request.action === 'bind-source') {
+        const repo = await discoverRepo(request.repoPath)
+        const operation = await loadOperation(repo.gitCommonDir, request.operationId)
+        if (operation === undefined) throw new WsError('OPERATION_NOT_FOUND', 'Prepared operation not found')
+        deps.bindLiveSource?.(request.sourceSessionId, operation, { requireBlank: true })
+        const result = await bindSource(request)
+        recordBind(request.sourceSessionId, await loadBySession(request.repoPath, request.sourceSessionId))
+        return result
+      }
+      const current = await loadBySession(request.repoPath, request.sourceSessionId)
+      if (current === undefined) throw new WsError('OPERATION_NOT_FOUND', 'Source Session binding not found')
+      // Claim is admitted only after the exact live Agent policy has been reinstalled.
+      if (request.action === 'claim-submit') deps.bindLiveSource?.(request.sourceSessionId, current, { requireBlank: true })
+      const result = await updateSourceBinding(request)
+      recordBind(request.sourceSessionId, await loadBySession(request.repoPath, request.sourceSessionId))
+      return result
     }),
+    route(ROUTES.sessionStatus, async body => {
+      const parsed = strictObject(body, ['sessionId', 'repoPath'])
+      const repoPath = absolutePath(parsed, 'repoPath')
+      const sourceSessionId = stringField(parsed, 'sessionId')
+      const result = await sessionStatus(repoPath, sourceSessionId)
+      if (result.bound) recordBind(sourceSessionId, await loadBySession(repoPath, sourceSessionId))
+      else recordBind(sourceSessionId, undefined)
+      return result
+    }),
+    route(ROUTES.status, async body => wsStatus(maintenanceTarget(body))),
     route(ROUTES.promote, async body => {
-      const parsed = strictObject(body, ['path'])
-      return wsPromote(absolutePath(parsed, 'path'))
+      const target = maintenanceTarget(body)
+      const result = await wsPromote(target)
+      if ('sessionId' in target) recordBind(target.sessionId, await loadBySession(target.repoPath, target.sessionId))
+      return result
     }),
     route(ROUTES.clean, async body => {
-      const parsed = strictObject(body, ['path', 'dryRun'])
-      if (typeof parsed.dryRun !== 'boolean') throw new WsError('INVALID_REQUEST', 'dryRun must be boolean')
+      if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new WsError('INVALID_REQUEST', 'Request body must be an object')
+      const { dryRun, ...targetBody } = body as Record<string, unknown>
+      if (typeof dryRun !== 'boolean') throw new WsError('INVALID_REQUEST', 'dryRun must be boolean')
+      const target = maintenanceTarget(targetBody)
       const activePaths = deps.activeSessionPaths?.()
-      return wsClean(absolutePath(parsed, 'path'), { dryRun: parsed.dryRun, requireActivePaths: true, ...(activePaths === undefined ? {} : { activePaths }) })
+      const activeBoundSessionIds = deps.activeBoundSessionIds?.()
+      const result = await wsClean(target, { dryRun, requireActivePaths: true, ...(activePaths === undefined ? {} : { activePaths }), ...(activeBoundSessionIds === undefined ? {} : { activeBoundSessionIds }) })
+      if (!dryRun && 'sessionId' in target) recordBind(target.sessionId, await loadBySession(target.repoPath, target.sessionId))
+      return result
     }),
   ]
 }

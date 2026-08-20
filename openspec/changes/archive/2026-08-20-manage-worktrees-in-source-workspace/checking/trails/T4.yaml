@@ -1,0 +1,104 @@
+id: T4
+name: Runtime-context stability and promotion
+description: Verify stable runtime-context deduplication across later turns and lean-to-mutable promotion status.
+device: pc
+parallel_group: D
+conflicts_with: [T2, T3, T5]
+precondition: A real Worktree-bound Session is in lean state; record its binding identity and count/content of equivalent stable runtime-context snapshots in conversation history.
+ask_user_if_blocked: true
+status: passed
+blocked_reason: null
+mock_setup:
+  required: false
+  status: not_needed
+  scenario_id: null
+  surface: conversation-runtime-context-history
+  data_source: real Session history and Worktree status
+  evidence: []
+  enable: {command: null, env: null, notes: null}
+  user_decision: null
+steps:
+  - seq: 1
+    description: Submit two distinct later-turn messages without changing the Session worktree binding.
+    action: fill
+    target: "textarea, [contenteditable='true']"
+    value: "Acceptance later turn one; keep the existing worktree binding unchanged. Then submit later turn two under the same binding."
+    url_needs_input: false
+    checkpoints:
+      - id: INT-05
+        description: Repeated later turns under an unchanged binding do not append equivalent runtime-context snapshots.
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: false
+        data_scenario: unchanged-binding-later-turns
+        surface: conversation-runtime-context-history
+        data_source: real Session conversation/runtime-context history
+        mock_scenario_id: null
+        expected_source: spec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: "Consequence 状态 assertion: both unique later messages are admitted, binding identity is unchanged, and the count of stable runtime-context snapshots equivalent to baseline does not increase after either turn."
+        result: pass
+        result_detail: "Loop 2: two later turns were admitted under the same binding; history contains one stable runtime-context snapshot only. Evidence: baselines/loop2-T4-later-turns-history.json, screenshots/loop2-T4-later-turns.png."
+        selector: "[data-testid='conversation']"
+        expected_text: "both later messages admitted; unchanged binding; equivalent stable snapshot count unchanged"
+        expected_attrs: {later_message_count: "2", binding_id_after: "equals baseline binding id", equivalent_snapshot_count_after_each_turn: "equals baseline count", snapshot_digest_after: "equals baseline digest"}
+        expected_visible: null
+  - seq: 2
+    description: Ask the Session agent to perform the supported dependency promotion from lean to mutable and wait for completion.
+    action: fill
+    target: "textarea, [contenteditable='true']"
+    value: "Promote this Worktree Session from lean dependencies to mutable using the supported Worktree Session operation, then report status."
+    url_needs_input: false
+    checkpoints:
+      - id: INT-06
+        description: Lean-to-mutable promotion makes the UI/status report mutable.
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: false
+        data_scenario: lean-to-mutable-promotion
+        surface: worktree-session-status
+        data_source: real Worktree Session operation state
+        mock_scenario_id: null
+        expected_source: spec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: "Consequence 状态 assertion: promotion operation completes and [data-testid=worktree-session-status] or ws status reports mutable rather than lean for the same binding."
+        result: pass
+        result_detail: "Loop 2 plugin API session-status changed dependencyMode from lean to mutable for operation 0c0c809c-5f16-4725-bb3e-3dfbc0f81838. Evidence: baselines/loop2-T4-promote-api.json."
+        selector: "[data-testid='worktree-session-status']"
+        expected_text: mutable
+        expected_attrs: null
+        expected_visible: true
+  - seq: 3
+    description: Reinspect stable runtime-context history immediately after promotion.
+    action: click
+    target: "[data-testid='conversation']"
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: INT-07
+        description: Promotion to mutable does not append a new stable runtime-context snapshot.
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: false
+        data_scenario: lean-to-mutable-promotion
+        surface: conversation-runtime-context-history
+        data_source: real Session conversation/runtime-context history
+        mock_scenario_id: null
+        expected_source: spec
+        expected_unverified: false
+        input_method: null
+        class: deterministic
+        reviewer_notes: "Consequence 状态 assertion: compare exact stable runtime-context snapshot count/content before and after promotion; status changes to mutable but no new stable snapshot is appended."
+        result: pass
+        result_detail: "Loop 2 post-promote history retains the same single stable binding snapshot; mutable is live operation status, not appended stable context. Evidence: baselines/loop2-T4-later-turns-history.json, baselines/loop2-T4-post-promote-history.json, baselines/loop2-T4-promote-api.json."
+        selector: "[data-testid='conversation']"
+        expected_text: "mutable status with stable runtime-context snapshot count and content unchanged"
+        expected_attrs: {dependency_mode_after: "mutable", equivalent_snapshot_count_after: "equals pre-promote count", stable_snapshot_digest_after: "equals pre-promote digest"}
+        expected_visible: null
