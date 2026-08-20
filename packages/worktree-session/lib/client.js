@@ -14,7 +14,9 @@ window.__ModuleLoader__.load({
 			operationStatus: "/worktree-session/api/operation-status",
 			promote: "/worktree-session/api/promote",
 			clean: "/worktree-session/api/clean",
-			handoff: "/worktree-session/api/handoff"
+			bindSource: "/worktree-session/api/bind-source",
+			sessionStatus: "/worktree-session/api/session-status",
+			status: "/worktree-session/api/status"
 		};
 		//#endregion
 		//#region src/client/api.ts
@@ -45,7 +47,10 @@ window.__ModuleLoader__.load({
 					enabled: value.enabled === true,
 					...typeof value.baseRef === "string" ? { baseRef: value.baseRef } : {},
 					...typeof value.operationId === "string" ? { operationId: value.operationId } : {},
-					...typeof value.targetSessionId === "string" ? { targetSessionId: value.targetSessionId } : {},
+					...typeof value.taskBranch === "string" ? { taskBranch: value.taskBranch } : {},
+					...typeof value.worktreePath === "string" ? { worktreePath: value.worktreePath } : {},
+					...value.dependencyMode === "lean" || value.dependencyMode === "mutable" ? { dependencyMode: value.dependencyMode } : {},
+					...value.lifecycle === "bound" || value.lifecycle === "submit-claimed" || value.lifecycle === "admitted" || value.lifecycle === "uncertain" || value.lifecycle === "cleaned" ? { lifecycle: value.lifecycle } : {},
 					submitted: value.submitted === true
 				};
 			} catch {
@@ -59,7 +64,10 @@ window.__ModuleLoader__.load({
 					enabled: stage.enabled,
 					baseRef: stage.baseRef,
 					operationId: stage.operationId,
-					targetSessionId: stage.targetSessionId,
+					taskBranch: stage.taskBranch,
+					worktreePath: stage.worktreePath,
+					dependencyMode: stage.dependencyMode,
+					lifecycle: stage.lifecycle,
 					submitted: stage.submitted
 				}));
 			} catch {}
@@ -152,19 +160,38 @@ window.__ModuleLoader__.load({
 				imageIds: state.imageIds
 			};
 		}
+		/** Restore only content consumed by the official source submit on uncertain admission. */
+		function restoreSnapshot(input, snapshot) {
+			const current = input.state.getSnapshot();
+			if (current.draft === "") input.setDraft(snapshot.text);
+			const present = new Set(current.imageIds);
+			const missing = snapshot.imageIds.filter((id) => !present.has(id));
+			if (missing.length > 0) input.addImages(missing);
+		}
+		async function bindingAction(operationId, repoPath, sourceSessionId, action) {
+			return post(ROUTES.bindSource, {
+				operationId,
+				repoPath,
+				sourceSessionId,
+				action
+			});
+		}
 		async function runHandoff(ctx, sourceSessionId, cwd, mode, decoration) {
 			const stage = getStage(sourceSessionId, cwd);
 			if (!stage.enabled || stage.baseRef === void 0) {
 				decoration.original.call(decoration.input, mode);
 				return;
 			}
+			let claimed = false;
+			let snapshot;
+			let id = stage.operationId;
 			try {
 				setStage(sourceSessionId, cwd, {
 					phase: "validating",
 					error: void 0
 				});
-				const snapshot = preflight(ctx, decoration.input);
-				const id = stage.operationId ?? operationId();
+				snapshot = preflight(ctx, decoration.input);
+				id ??= operationId();
 				setStage(sourceSessionId, cwd, {
 					operationId: id,
 					phase: "host"
@@ -177,104 +204,69 @@ window.__ModuleLoader__.load({
 					dependencyMode: "lean"
 				};
 				const prepared = await post(ROUTES.start, request);
-				setStage(sourceSessionId, cwd, { phase: prepared.phase });
-				setStage(sourceSessionId, cwd, { phase: "workspace" });
-				const workspace = await ctx.workspaces.create({ path: prepared.worktreePath });
-				const targetId = await ctx.workspaces.connectWorkspace(workspace.workspaceId);
-				const targetSessionId = targetId;
-				await post(ROUTES.handoff, {
-					operationId: id,
-					repoPath: cwd,
-					action: "bind-target",
-					targetSessionId
+				setStage(sourceSessionId, cwd, {
+					phase: "binding",
+					taskBranch: prepared.taskBranch,
+					worktreePath: prepared.worktreePath,
+					dependencyMode: prepared.dependencyMode
 				});
-				setStage(sourceSessionId, cwd, { targetSessionId });
-				if (summary(ctx, targetSessionId)?.blank === false) {
-					await post(ROUTES.handoff, {
-						operationId: id,
-						repoPath: cwd,
-						action: "admitted",
-						targetSessionId
-					});
-					ctx.sessions.open(targetId);
+				setStage(sourceSessionId, cwd, { lifecycle: (await bindingAction(id, cwd, sourceSessionId, "bind-source")).state });
+				setStage(sourceSessionId, cwd, { phase: "claim" });
+				const claim = await bindingAction(id, cwd, sourceSessionId, "claim-submit");
+				if (!claim.submitAllowed) {
 					setStage(sourceSessionId, cwd, {
-						phase: "done",
+						phase: "uncertain",
+						lifecycle: claim.state,
 						submitted: true,
-						enabled: false
+						error: "Source submit was already claimed durably; inspect this Session before retrying"
 					});
 					decoration.restore();
 					return;
 				}
-				if (getStage(sourceSessionId, cwd).submitted) {
-					ctx.sessions.open(targetId);
-					setStage(sourceSessionId, cwd, {
-						phase: "uncertain",
-						error: "Target submit was already attempted; review the target Session before retrying"
-					});
-					return;
-				}
-				const targetScope = ctx.sessions.scope(targetId);
-				if (targetScope === void 0) throw new Error("Target Session scope is unavailable");
-				const target = ctx.conversation.input.for(targetScope);
-				setStage(sourceSessionId, cwd, { phase: "transfer" });
-				if (snapshot.imageIds.length > 0 && !target.addImages(snapshot.imageIds)) throw new Error("Target Session refused draft images");
-				target.setDraft(snapshot.text);
-				ctx.sessions.open(targetId);
-				if (!(await post(ROUTES.handoff, {
-					operationId: id,
-					repoPath: cwd,
-					action: "claim-submit",
-					targetSessionId
-				})).submitAllowed) {
-					ctx.sessions.open(targetId);
-					setStage(sourceSessionId, cwd, {
-						phase: "uncertain",
-						submitted: true,
-						error: "Target submit was already claimed durably; review the target Session before retrying"
-					});
-					decoration.restore();
-					return;
-				}
+				claimed = true;
 				setStage(sourceSessionId, cwd, {
 					phase: "submit",
+					lifecycle: claim.state,
 					submitted: true
 				});
-				target.submit(mode);
-				if (!await waitForAdmission(ctx, targetSessionId)) {
-					await post(ROUTES.handoff, {
-						operationId: id,
-						repoPath: cwd,
-						action: "uncertain",
-						targetSessionId
-					});
+				decoration.original.call(decoration.input, mode);
+				if (!await waitForAdmission(ctx, sourceSessionId)) {
+					await bindingAction(id, cwd, sourceSessionId, "uncertain");
+					restoreSnapshot(decoration.input, snapshot);
 					setStage(sourceSessionId, cwd, {
 						phase: "uncertain",
-						error: "Target admission is uncertain; the target draft is preserved and will not be auto-submitted again"
+						lifecycle: "uncertain",
+						error: "Source admission is uncertain; the draft is preserved and will not be auto-submitted again"
 					});
 					decoration.restore();
 					return;
 				}
-				await post(ROUTES.handoff, {
-					operationId: id,
-					repoPath: cwd,
-					action: "admitted",
-					targetSessionId
-				});
-				decoration.input.setDraft("");
-				for (const imageId of snapshot.imageIds) decoration.input.removeImage(imageId);
+				await bindingAction(id, cwd, sourceSessionId, "admitted");
 				setStage(sourceSessionId, cwd, {
 					phase: "done",
+					lifecycle: "admitted",
 					enabled: false,
 					error: void 0
 				});
 				decoration.restore();
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
-				decoration.input.notify("error", `Worktree Session: ${message}`);
-				setStage(sourceSessionId, cwd, {
+				if (claimed && id !== void 0) {
+					try {
+						await bindingAction(id, cwd, sourceSessionId, "uncertain");
+					} catch {}
+					if (snapshot !== void 0) restoreSnapshot(decoration.input, snapshot);
+					setStage(sourceSessionId, cwd, {
+						phase: "uncertain",
+						lifecycle: "uncertain",
+						submitted: true,
+						error: message
+					});
+				} else setStage(sourceSessionId, cwd, {
 					phase: "error",
 					error: message
 				});
+				decoration.input.notify("error", `Worktree Session: ${message}`);
 			}
 		}
 		function decorateSubmit(ctx, sessionId, cwd) {
@@ -340,7 +332,13 @@ window.__ModuleLoader__.load({
 			height: 26,
 			maxWidth: 190
 		};
-		function WorktreeControls({ pluginContext: ctx, session, sessionId, useSessions }) {
+		/** Open an absolute directory with the local editor via a `vscode://file/` deep link. */
+		function openWorktreeInEditor(path) {
+			if (!path.startsWith("/") && !/^[A-Za-z]:[/\\]/.test(path)) return;
+			const uri = `vscode://file${encodeURI(path)}`;
+			window.open(uri, "_blank");
+		}
+		function WorktreeControls({ pluginContext: ctx, session, sessionId, useSessions, openWorktree = openWorktreeInEditor }) {
 			const cwd = useSessions((state) => state.byId[sessionId])?.cwd;
 			const [revision, setRevision] = (0, react.useState)(0);
 			const [query, setQuery] = (0, react.useState)("");
@@ -350,20 +348,45 @@ window.__ModuleLoader__.load({
 				setRevision((value) => value + 1);
 			}), [sessionId]);
 			(0, react.useEffect)(() => {
-				if (cwd === void 0 || !session.blank) {
+				if (cwd === void 0) {
 					restoreSubmit(sessionId);
 					return;
 				}
 				let live = true;
-				post(ROUTES.repoStatus, { repoPath: cwd }).then((result) => {
+				post(ROUTES.sessionStatus, {
+					repoPath: cwd,
+					sessionId
+				}).then((status) => {
 					if (!live) return;
-					const selected = getStage(sessionId, cwd).baseRef ?? result.currentBranch ?? result.refs[0]?.name;
-					setStage(sessionId, cwd, {
-						refs: result.refs,
-						...selected === void 0 ? {} : { baseRef: selected }
+					if (status.bound) {
+						setStage(sessionId, cwd, {
+							enabled: false,
+							...status.operationId === void 0 ? {} : { operationId: status.operationId },
+							...status.taskBranch === void 0 ? {} : { taskBranch: status.taskBranch },
+							...status.worktreePath === void 0 ? {} : { worktreePath: status.worktreePath },
+							...status.dependencyMode === void 0 ? {} : { dependencyMode: status.dependencyMode },
+							...status.lifecycle === void 0 ? {} : { lifecycle: status.lifecycle },
+							phase: status.lifecycle === "uncertain" ? "uncertain" : status.lifecycle === "cleaned" ? "cleaned" : "done"
+						});
+						restoreSubmit(sessionId);
+						return;
+					}
+					if (!session.blank) {
+						restoreSubmit(sessionId);
+						return;
+					}
+					post(ROUTES.repoStatus, { repoPath: cwd }).then((result) => {
+						if (!live) return;
+						const selected = getStage(sessionId, cwd).baseRef ?? result.currentBranch ?? result.refs[0]?.name;
+						setStage(sessionId, cwd, {
+							refs: result.refs,
+							...selected === void 0 ? {} : { baseRef: selected }
+						});
+					}).catch(() => {
+						if (live) resetStage(sessionId);
 					});
 				}).catch(() => {
-					if (live) resetStage(sessionId);
+					if (live && !session.blank) restoreSubmit(sessionId);
 				});
 				return () => {
 					live = false;
@@ -401,7 +424,62 @@ window.__ModuleLoader__.load({
 				revision,
 				stage?.refs
 			]);
-			if (cwd === void 0 || !session.blank || stage === void 0 || stage.refs.length === 0) return null;
+			if (cwd === void 0 || stage === void 0) return null;
+			if (stage.lifecycle !== void 0) {
+				const lifecycle = stage.lifecycle === "admitted" || stage.lifecycle === "bound" || stage.lifecycle === "submit-claimed" ? "active" : stage.lifecycle;
+				const canOpen = lifecycle !== "cleaned" && stage.worktreePath !== void 0;
+				const branchStyle = {
+					...controlStyle,
+					boxSizing: "border-box",
+					display: "block",
+					lineHeight: "24px",
+					padding: "0 8px",
+					whiteSpace: "nowrap",
+					overflow: "hidden",
+					textOverflow: "ellipsis",
+					...canOpen ? {
+						cursor: "pointer",
+						borderColor: "var(--dsw-alias-line-border-strong, #a0a0a0)"
+					} : {}
+				};
+				const openBranch = () => {
+					if (canOpen) openWorktree(stage.worktreePath);
+				};
+				const onBranchKeyDown = (event) => {
+					if (event.key === "Enter" || event.key === " ") {
+						event.preventDefault();
+						openBranch();
+					}
+				};
+				return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+					style: containerStyle,
+					"data-testid": "worktree-session-status",
+					title: stage.worktreePath,
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+							title: stage.taskBranch,
+							style: branchStyle,
+							...canOpen ? {
+								role: "button",
+								tabIndex: 0,
+								onClick: openBranch,
+								onKeyDown: onBranchKeyDown,
+								"aria-label": `Open worktree in editor: ${stage.taskBranch ?? "worktree"}`
+							} : {},
+							children: ["⑂ ", stage.taskBranch ?? "worktree"]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							style: { opacity: .8 },
+							children: stage.dependencyMode ?? "lean"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							style: { color: lifecycle === "uncertain" ? "#d9822b" : lifecycle === "cleaned" ? "#888" : "#2b8a3e" },
+							children: lifecycle
+						})
+					]
+				});
+			}
+			if (!session.blank || stage.refs.length === 0) return null;
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 				style: containerStyle,
 				"data-testid": "worktree-session-controls",
@@ -505,11 +583,7 @@ window.__ModuleLoader__.load({
 								enabled,
 								phase: "idle",
 								error: void 0,
-								...enabled ? {} : {
-									operationId: void 0,
-									submitted: false,
-									targetSessionId: void 0
-								}
+								...enabled ? {} : { submitted: false }
 							});
 							if (!enabled) restoreSubmit(sessionId);
 						},
@@ -535,7 +609,6 @@ window.__ModuleLoader__.load({
 		const inject = [
 			"slots",
 			"sessions",
-			"workspaces",
 			"conversation"
 		];
 		function apply(ctx) {

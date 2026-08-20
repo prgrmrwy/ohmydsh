@@ -1,4 +1,4 @@
-import type { OperationPhase, RefEntry } from '../wire.ts'
+import type { DependencyMode, OperationPhase, RefEntry, SessionStatusResult } from '../wire.ts'
 
 export interface ClientStage {
   sessionId: string
@@ -7,8 +7,11 @@ export interface ClientStage {
   baseRef?: string
   refs: readonly RefEntry[]
   operationId?: string
-  targetSessionId?: string
-  phase: 'idle' | 'validating' | 'host' | 'workspace' | 'transfer' | 'submit' | OperationPhase | 'error' | 'uncertain' | 'done'
+  taskBranch?: string
+  worktreePath?: string
+  dependencyMode?: DependencyMode
+  lifecycle?: SessionStatusResult['lifecycle']
+  phase: 'idle' | 'validating' | 'host' | 'binding' | 'claim' | 'submit' | OperationPhase | 'error' | 'uncertain' | 'done'
   error?: string
   submitted: boolean
 }
@@ -28,7 +31,10 @@ function restore(sessionId: string, cwd: string): Partial<ClientStage> {
       enabled: value.enabled === true,
       ...(typeof value.baseRef === 'string' ? { baseRef: value.baseRef } : {}),
       ...(typeof value.operationId === 'string' ? { operationId: value.operationId } : {}),
-      ...(typeof value.targetSessionId === 'string' ? { targetSessionId: value.targetSessionId } : {}),
+      ...(typeof value.taskBranch === 'string' ? { taskBranch: value.taskBranch } : {}),
+      ...(typeof value.worktreePath === 'string' ? { worktreePath: value.worktreePath } : {}),
+      ...(value.dependencyMode === 'lean' || value.dependencyMode === 'mutable' ? { dependencyMode: value.dependencyMode } : {}),
+      ...(value.lifecycle === 'bound' || value.lifecycle === 'submit-claimed' || value.lifecycle === 'admitted' || value.lifecycle === 'uncertain' || value.lifecycle === 'cleaned' ? { lifecycle: value.lifecycle } : {}),
       submitted: value.submitted === true,
     }
   } catch { return {} }
@@ -36,7 +42,7 @@ function restore(sessionId: string, cwd: string): Partial<ClientStage> {
 
 function persist(stage: ClientStage): void {
   try {
-    localStorage.setItem(persistenceKey(stage.sessionId), JSON.stringify({ cwd: stage.cwd, enabled: stage.enabled, baseRef: stage.baseRef, operationId: stage.operationId, targetSessionId: stage.targetSessionId, submitted: stage.submitted }))
+    localStorage.setItem(persistenceKey(stage.sessionId), JSON.stringify({ cwd: stage.cwd, enabled: stage.enabled, baseRef: stage.baseRef, operationId: stage.operationId, taskBranch: stage.taskBranch, worktreePath: stage.worktreePath, dependencyMode: stage.dependencyMode, lifecycle: stage.lifecycle, submitted: stage.submitted }))
   } catch { /* browser storage may be disabled */ }
 }
 
