@@ -4840,7 +4840,7 @@
       </div>
     </div>
 
-    <script id="archify-guided-views-data" type="application/json">[{"id":"submit-path","label":"首次提交主链路","focus":["user","web-client","host-api","operation","target-session"],"note":"空白 Git Session 从选择基线到进入隔离目标 Session 的主路径。"},{"id":"resource-prep","label":"隔离资源准备","focus":["operation","git-worktree","lean-cache","isolated-env","operation-store"],"note":"仓库锁内依次创建、校验并持久化可恢复资源。"},{"id":"maintenance-path","label":"维护操作","focus":["ws-skill","host-api","operation","git-worktree","lean-cache"],"note":"status、promote、clean 复用 Host 安全边界与仓库锁。"}]</script>
+    <script id="archify-guided-views-data" type="application/json">[{"id":"submit-path","label":"源 Session 原地提交","focus":["user","web-client","host-api","operation","source-session"],"note":"空白 Git Session 准备 worktree、原地绑定并沿同一源 Session 提交；不创建目标 Workspace/Session。"},{"id":"resource-prep","label":"隔离资源准备","focus":["operation","git-worktree","lean-cache","isolated-env","operation-store"],"note":"仓库锁内依次创建、校验并持久化可恢复资源；逻辑执行根是 .worktrees/<task>。"},{"id":"maintenance-path","label":"状态与维护","focus":["ws-skill","host-api","operation","git-worktree","lean-cache"],"note":"状态 UI 与 status/promote/clean 复用 Host 安全边界；默认 lean，promote 后刷新状态。"}]</script>
 
     <div class="guided-views no-print" id="guided-views" hidden aria-label="Guided diagram views">
       <button id="guided-view-prev" type="button" aria-label="Previous guided view" title="Previous guided view ([)">&#8592;</button>
@@ -4917,12 +4917,12 @@
 
         <!-- Connection paths (before components for correct z-order) -->
         <path data-edge-from="user" data-edge-to="web-client" data-edge-label="选 base 并首次提交" data-edge-key="0" data-edge-id="user-submit" data-composition-points="180,287;250,287" d="M 180 287 L 250 287" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="web-client" data-edge-to="host-api" data-edge-label="POST start / handoff" data-edge-key="1" data-edge-id="client-start" data-composition-points="440,287;520,287" d="M 440 287 L 520 287" class="a-security" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="web-client" data-edge-to="host-api" data-edge-label="POST start / bind-source" data-edge-key="1" data-edge-id="client-start" data-composition-points="440,287;520,287" d="M 440 287 L 520 287" class="a-security" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
         <path data-edge-from="host-api" data-edge-to="operation" data-edge-label="严格请求与错误信封" data-edge-key="2" data-edge-id="api-dispatch" data-composition-points="710,287;790,287" d="M 710 287 L 790 287" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="operation" data-edge-to="target-session" data-edge-label="prepared facts + exactly-once handoff" data-edge-key="3" data-edge-id="prepared-target" data-composition-points="990,287;1190,287" d="M 990 287 L 1190 287" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="operation" data-edge-to="source-session" data-edge-label="bind-source + exactly-once submit" data-edge-key="3" data-edge-id="prepared-source" data-composition-points="990,287;1190,287" d="M 990 287 L 1190 287" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="ws-skill" data-edge-to="host-api" data-edge-label="安全维护调用" data-edge-key="4" data-edge-id="maintenance" data-composition-points="615,144;615,245" d="M 615 144 L 615 245" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         <path data-edge-from="operation" data-edge-to="operation-store" data-edge-label="阶段与提交声明" data-edge-key="5" data-edge-id="persist" data-composition-points="890,329;890,414.5;475,414.5;475,500" d="M 890 329 L 890 406.5 Q 890 414.5 882 414.5 L 483 414.5 Q 475 414.5 475 422.5 L 475 500" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="operation" data-edge-to="git-worktree" data-edge-label="分支与 cwd" data-edge-key="6" data-edge-id="prepare-git" data-composition-points="890,329;890,414.5;695,414.5;695,500" d="M 890 329 L 890 406.5 Q 890 414.5 882 414.5 L 703 414.5 Q 695 414.5 695 422.5 L 695 500" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="operation" data-edge-to="git-worktree" data-edge-label="分支与 managed root" data-edge-key="6" data-edge-id="prepare-git" data-composition-points="890,329;890,414.5;695,414.5;695,500" d="M 890 329 L 890 406.5 Q 890 414.5 882 414.5 L 703 414.5 Q 695 414.5 695 422.5 L 695 500" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         <path data-edge-from="operation" data-edge-to="lean-cache" data-edge-label="依赖复用" data-edge-key="7" data-edge-id="prepare-deps" data-composition-points="883,329;883,414.5;915,414.5;915,500" d="M 883 329 L 883 406.5 Q 883 414.5 891 414.5 L 907 414.5 Q 915 414.5 915 422.5 L 915 500" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         <path data-edge-from="operation" data-edge-to="isolated-env" data-edge-label="安全环境" data-edge-key="8" data-edge-id="prepare-env" data-composition-points="897,329;897,414.5;1135,414.5;1135,500" d="M 897 329 L 897 406.5 Q 897 414.5 905 414.5 L 1127 414.5 Q 1135 414.5 1135 422.5 L 1135 500" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
 
@@ -4939,8 +4939,8 @@
         <text data-detail="context" x="110" y="301" class="t-muted" font-size="9" text-anchor="middle">空白 Git Session</text>
         </g>
 
-        <g id="node-web-client" data-node-id="web-client" data-node-label="DSH Web 客户端" tabindex="0" role="button" aria-label="Focus DSH Web 客户端, 基线控件 · submit handoff, DSH Web" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="基线控件 · submit handoff" data-node-tag="默认关闭" data-node-context="DSH Web">
-          <title>DSH Web 客户端 · 基线控件 · submit handoff · DSH Web · 默认关闭</title>
+        <g id="node-web-client" data-node-id="web-client" data-node-label="DSH Web 客户端" tabindex="0" role="button" aria-label="Focus DSH Web 客户端, 基线控件 · 原地绑定提交, DSH Web" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="基线控件 · 原地绑定提交" data-node-tag="默认关闭" data-node-context="DSH Web">
+          <title>DSH Web 客户端 · 基线控件 · 原地绑定提交 · DSH Web · 默认关闭</title>
           <rect x="250" y="245" width="190" height="84" rx="6" class="c-mask"/>
           <rect x="250" y="245" width="190" height="84" rx="6" class="c-frontend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(256 251) scale(0.6875)">
@@ -4950,7 +4950,7 @@
             <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
           </g>
           <text data-detail-anchor x="345" y="285" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">DSH Web 客户端</text>
-        <text data-detail="context" x="345" y="301" class="t-muted" font-size="9" text-anchor="middle">基线控件 · submit handoff</text>
+        <text data-detail="context" x="345" y="301" class="t-muted" font-size="9" text-anchor="middle">基线控件 · 原地绑定提交</text>
         <text data-detail="fine" x="345" y="321" class="t-frontend" font-size="7" text-anchor="middle">默认关闭</text>
         </g>
 
@@ -4977,8 +4977,8 @@
         <text data-detail="context" x="890" y="301" class="t-muted" font-size="9" text-anchor="middle">单飞 · 仓库锁 · 阶段校验</text>
         </g>
 
-        <g id="node-target-session" data-node-id="target-session" data-node-label="目标 Workspace / Session" tabindex="0" role="button" aria-label="Focus 目标 Workspace / Session, create · connect · open · submit, DSH Web" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="create · connect · open · submit" data-node-context="DSH Web">
-          <title>目标 Workspace / Session · create · connect · open · submit · DSH Web</title>
+        <g id="node-source-session" data-node-id="source-session" data-node-label="源 Workspace / Session" tabindex="0" role="button" aria-label="Focus 源 Workspace / Session, immutable cwd = repo · submit in place, DSH Web" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="immutable cwd = repo · submit in place" data-node-context="DSH Web">
+          <title>源 Workspace / Session · immutable cwd = repo · submit in place · DSH Web</title>
           <rect x="1190" y="245" width="210" height="84" rx="6" class="c-mask"/>
           <rect x="1190" y="245" width="210" height="84" rx="6" class="c-frontend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(1196 251) scale(0.6875)">
@@ -4987,8 +4987,9 @@
             <circle cx="4.1" cy="4.8" r=".7" class="sigil-fill"/>
             <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
           </g>
-          <text data-detail-anchor x="1295" y="285" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">目标 Workspace / Session</text>
-        <text data-detail="context" x="1295" y="301" class="t-muted" font-size="9" text-anchor="middle">create · connect · open · submit</text>
+          <text data-detail-anchor x="1295" y="285" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">源 Workspace / Session</text>
+        <text data-detail="context" x="1295" y="301" class="t-muted" font-size="9" text-anchor="middle">immutable cwd = repo · 原地 submit</text>
+        <text data-detail="fine" x="1295" y="321" class="t-frontend" font-size="7" text-anchor="middle">一 Git repo · 一 DSH Workspace</text>
         </g>
 
         <g id="node-ws-skill" data-node-id="ws-skill" data-node-label="/ws Skill" tabindex="0" role="button" aria-label="Focus /ws Skill, status · promote · clean, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="status · promote · clean" data-node-context="Architecture component">
@@ -5003,15 +5004,16 @@
         <text data-detail="context" x="615" y="121" class="t-muted" font-size="9" text-anchor="middle">status · promote · clean</text>
         </g>
 
-        <g id="node-git-worktree" data-node-id="git-worktree" data-node-label="Git Worktree" tabindex="0" role="button" aria-label="Focus Git Worktree, ws/&lt;slug&gt; · .worktrees/&lt;slug&gt;, DSH Host 信任边界" aria-pressed="false" data-node-kind="backend" data-node-sublabel="ws/&lt;slug&gt; · .worktrees/&lt;slug&gt;" data-node-context="DSH Host 信任边界">
-          <title>Git Worktree · ws/&lt;slug&gt; · .worktrees/&lt;slug&gt; · DSH Host 信任边界</title>
+        <g id="node-git-worktree" data-node-id="git-worktree" data-node-label="Managed Git Worktree" tabindex="0" role="button" aria-label="Focus Managed Git Worktree, ws/&lt;task&gt; · .worktrees/&lt;task&gt;, DSH Host 信任边界" aria-pressed="false" data-node-kind="backend" data-node-sublabel="ws/&lt;task&gt; · .worktrees/&lt;task&gt;" data-node-context="DSH Host 信任边界">
+          <title>Managed Git Worktree · ws/&lt;task&gt; · .worktrees/&lt;task&gt; · logical execution root · DSH Host 信任边界</title>
           <rect x="600" y="500" width="190" height="80" rx="6" class="c-mask"/>
           <rect x="600" y="500" width="190" height="80" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(606 506) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-detail-anchor x="695" y="538" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Git Worktree</text>
-        <text data-detail="context" x="695" y="554" class="t-muted" font-size="9" text-anchor="middle">ws/&lt;slug&gt; · .worktrees/&lt;slug&gt;</text>
+          <text data-detail-anchor x="695" y="538" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Managed Git Worktree</text>
+        <text data-detail="context" x="695" y="554" class="t-muted" font-size="9" text-anchor="middle">ws/&lt;task&gt; · .worktrees/&lt;task&gt;</text>
+        <text data-detail="fine" x="695" y="572" class="t-backend" font-size="7" text-anchor="middle">逻辑执行根（非 Session cwd）</text>
         </g>
 
         <g id="node-lean-cache" data-node-id="lean-cache" data-node-label="Lean 依赖缓存" tabindex="0" role="button" aria-label="Focus Lean 依赖缓存, 指纹 · 摘要 · 只读链接, DSH Host 信任边界" aria-pressed="false" data-node-kind="database" data-node-sublabel="指纹 · 摘要 · 只读链接" data-node-context="DSH Host 信任边界">
@@ -5055,17 +5057,17 @@
           <rect x="166.8" y="220" width="96.39999999999999" height="14" rx="3" class="c-mask"/>
           <text x="215" y="230" class="t-backend" font-size="8" text-anchor="middle">选 base 并首次提交</text>
         </g>
-        <g data-detail="context" data-edge-from="web-client" data-edge-to="host-api" data-edge-label="POST start / handoff" data-edge-key="1" data-edge-id="client-start">
+        <g data-detail="context" data-edge-from="web-client" data-edge-to="host-api" data-edge-label="POST start / bind-source" data-edge-key="1" data-edge-id="client-start">
           <rect x="427" y="220" width="106" height="14" rx="3" class="c-mask"/>
-          <text x="480" y="230" class="t-security" font-size="8" text-anchor="middle">POST start / handoff</text>
+          <text x="480" y="230" class="t-security" font-size="8" text-anchor="middle">POST start / bind-source</text>
         </g>
         <g data-detail="context" data-edge-from="host-api" data-edge-to="operation" data-edge-label="严格请求与错误信封" data-edge-key="2" data-edge-id="api-dispatch">
           <rect x="701.8" y="220" width="96.39999999999999" height="14" rx="3" class="c-mask"/>
           <text x="750" y="230" class="t-muted" font-size="8" text-anchor="middle">严格请求与错误信封</text>
         </g>
-        <g data-detail="context" data-edge-from="operation" data-edge-to="target-session" data-edge-label="prepared facts + exactly-once handoff" data-edge-key="3" data-edge-id="prepared-target">
+        <g data-detail="context" data-edge-from="operation" data-edge-to="source-session" data-edge-label="bind-source + exactly-once submit" data-edge-key="3" data-edge-id="prepared-source">
           <rect x="996.2" y="239" width="187.6" height="14" rx="3" class="c-mask"/>
-          <text x="1090" y="249" class="t-backend" font-size="8" text-anchor="middle">prepared facts + exactly-once handoff</text>
+          <text x="1090" y="249" class="t-backend" font-size="8" text-anchor="middle">bind-source + exactly-once submit</text>
         </g>
         <g data-detail="context" data-edge-from="ws-skill" data-edge-to="host-api" data-edge-label="安全维护调用" data-edge-key="4" data-edge-id="maintenance">
           <rect x="701.2" y="170" width="67.6" height="14" rx="3" class="c-mask"/>
@@ -5075,9 +5077,9 @@
           <rect x="561.4" y="445" width="77.2" height="14" rx="3" class="c-mask"/>
           <text x="600" y="455" class="t-muted" font-size="8" text-anchor="middle">阶段与提交声明</text>
         </g>
-        <g data-detail="context" data-edge-from="operation" data-edge-to="git-worktree" data-edge-label="分支与 cwd" data-edge-key="6" data-edge-id="prepare-git">
-          <rect x="731" y="460" width="58" height="14" rx="3" class="c-mask"/>
-          <text x="760" y="470" class="t-muted" font-size="8" text-anchor="middle">分支与 cwd</text>
+        <g data-detail="context" data-edge-from="operation" data-edge-to="git-worktree" data-edge-label="分支与 managed root" data-edge-key="6" data-edge-id="prepare-git">
+          <rect x="710" y="460" width="100" height="14" rx="3" class="c-mask"/>
+          <text x="760" y="470" class="t-muted" font-size="8" text-anchor="middle">分支与 managed root</text>
         </g>
         <g data-detail="context" data-edge-from="operation" data-edge-to="lean-cache" data-edge-label="依赖复用" data-edge-key="7" data-edge-id="prepare-deps">
           <rect x="929.8" y="394.5" width="48.4" height="14" rx="3" class="c-mask"/>
@@ -5303,7 +5305,7 @@
         <ul>
           <li>&bull; 控件只在空白 Git Session 出现</li>
           <li>&bull; 未开启时沿用普通 submit</li>
-          <li>&bull; 文本和图片在目标接受后才清理源草稿</li>
+          <li>&bull; 原 Session 原地绑定并提交；不创建目标 Workspace/Session</li>
         </ul>
       </div>
 
@@ -5315,7 +5317,7 @@
         <ul>
           <li>&bull; operationId 单飞和原子阶段元数据</li>
           <li>&bull; prepared 重放会重新校验并修复资源</li>
-          <li>&bull; 每个任务拥有唯一分支、cwd 与 DSH_HOME</li>
+          <li>&bull; Session cwd 固定为 repo；.worktrees/&lt;task&gt; 是 managed root</li>
         </ul>
       </div>
 
@@ -5326,11 +5328,39 @@
         </div>
         <ul>
           <li>&bull; Git 使用 argv 执行且不切换主 checkout</li>
-          <li>&bull; 缓存有指纹、摘要与只读保护</li>
-          <li>&bull; clean 拒绝脏、未合并、活跃或 in-flight worktree</li>
+          <li>&bull; 默认 lean；Agent promote 后 UI/status 显示 mutable</li>
+          <li>&bull; clean 保留源 Workspace 下的 cleaned 历史 Session</li>
         </ul>
       </div>
     </div>
+
+    <section class="cards" aria-label="Compatibility and DSH contract notes">
+      <div class="card">
+        <div class="card-header"><div class="card-dot cyan"></div><h3>仅 schema-v2</h3></div>
+        <ul>
+          <li>&bull; 仅支持 schemaVersion: 2 source-session binding</li>
+          <li>&bull; schema-v1 / 未知版本读取时以 unsupported-version 诊断 fail closed</li>
+          <li>&bull; 历史 Session 日志与 Workspace/Session 注册不被迁移、重命名或重绑定</li>
+          <li>&bull; 显式 path 保留为 v2 operator recovery / diagnostics</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-dot emerald"></div><h3>状态与上下文分层</h3></div>
+        <ul>
+          <li>&bull; UI：branch + lean/mutable + active/uncertain/cleaned</li>
+          <li>&bull; 分支名单行省略（ellipsis），hover 显示完整名称</li>
+          <li>&bull; 点击分支名以本机编辑器打开绑定 worktree（默认 vscode://file deep link，可配置）</li>
+          <li>&bull; runtime context 仅保留 repo、managed root、branch 与不变量</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-dot rose"></div><h3>DSH exact contract</h3></div>
+        <ul>
+          <li>&bull; 假设 exact installed DSH rc.7 tool/runtime-context API</li>
+          <li>&bull; 每次 DSH 升级必须重审 tool contract 与 context projection</li>
+        </ul>
+      </div>
+    </section>
 
   </div>
 
