@@ -1,0 +1,145 @@
+meta:
+  feature: manage-worktrees-in-source-workspace
+  base_branch: main
+  base_commit: d12a1857505f2cfeb0c7f599535a0886ba3bc441
+  created: "2026-08-20T09:27:24Z"
+  device: pc
+  device_profile: "1280x800"
+  sources:
+    git_diff: true
+    openspec: true
+    prd: false
+    ui_specs: false
+    figma: false
+  mock:
+    status: none
+    evidence_count: 2
+    user_decision_required: false
+    evidence:
+      - "Stage 2 decision: every INT-01 through INT-09 scenario uses real Git, DSH Workspace/Session registry, conversation history, filesystem, and tool lifecycle state; no mock is required."
+      - "Repository fixtures and MSW references are test-only and are not an enablement path for this browser acceptance plan."
+    surface_scenario_matrix:
+      - surface: source-session-input
+        data_source: real DSH Session and Git repository state
+        scenarios: [ordinary-submit, first-worktree-submit]
+        covered: true
+        trail_ids: [T1, T2]
+        status: planned
+      - surface: workspace-session-registry
+        data_source: real DSH Workspace and Session registry
+        scenarios: [before-after-worktree-submit, legacy-schema-v1]
+        covered: true
+        trail_ids: [T2, T6]
+        status: planned
+      - surface: conversation-runtime-context-history
+        data_source: real Session conversation history
+        scenarios: [unchanged-binding-later-turns, lean-to-mutable-promotion]
+        covered: true
+        trail_ids: [T4]
+        status: planned
+      - surface: bound-session-tool-execution
+        data_source: real Bash and file tool execution
+        scenarios: [implicit-workdir-rejected, source-checkout-file-rejected, worktree-target-allowed-through]
+        covered: true
+        trail_ids: [T3]
+        status: planned
+      - surface: worktree-session-status
+        data_source: real Worktree Session operation state
+        scenarios: [lean, mutable]
+        covered: true
+        trail_ids: [T4]
+        status: planned
+      - surface: archived-session-history
+        data_source: real Git worktree, branch, and archived Session state
+        scenarios: [safe-merged-cleanup]
+        covered: true
+        trail_ids: [T5]
+        status: planned
+      - surface: legacy-target-workspace
+        data_source: real pre-upgrade schema-v1 Workspace and Session state
+        scenarios: [registration-preservation, compatible-maintenance-or-version-diagnostic]
+        covered: true
+        trail_ids: [T6]
+        status: planned
+  execution_strategy:
+    recommendation: single_agent_recommended
+    selected: single_agent
+    reason:
+      - Trails mutate shared Git worktree, branch, Session, and Workspace state and are safest in lifecycle order.
+      - Cleanup and legacy compatibility checks depend on preserving exact before/after observations in one browser context.
+      - Six trails and eleven checkpoints remain practical for sequential execution.
+    risks:
+      - Concurrent agents could race on shared Session bindings, branch cleanup, or registry counts.
+      - Destructive cleanup requires a uniquely identified archived, clean, inactive, proven-merged worktree.
+    agent_assignments: []
+  stats:
+    total_trails: 6
+    total_checkpoints: 11
+    by_focus:
+      integration: 11
+      interaction: 0
+      visual: 0
+    by_automation:
+      full: 10
+      partial: 1
+      manual: 0
+  report_path: openspec/changes/manage-worktrees-in-source-workspace/checking/report.md
+  feishu_url: null
+
+manuals: []
+
+trails:
+  - id: T1
+    name: Ordinary source Session submit
+    file: trails/T1.yaml
+    device: pc
+    parallel_group: A
+    status: passed
+    blocked_reason: null
+    checkpoint_count: 1
+    summary: Submit with Worktree disabled and prove the ordinary Session path has no worktree side effect.
+  - id: T2
+    name: First Worktree submit and entity preservation
+    file: trails/T2.yaml
+    device: pc
+    parallel_group: B
+    status: passed
+    blocked_reason: null
+    checkpoint_count: 2
+    summary: Enable Worktree on a blank source Session, submit once, and verify one binding without new DSH entities.
+  - id: T3
+    name: Bound Session tool policy
+    file: trails/T3.yaml
+    device: pc
+    parallel_group: C
+    status: passed
+    blocked_reason: null
+    checkpoint_count: 3
+    summary: Exercise Bash and file tool targets across implicit, source-checkout, and in-worktree paths; Loop 4 verified the repaired exact-root diagnostic on the live restarted Host.
+  - id: T4
+    name: Runtime-context stability and promotion
+    file: trails/T4.yaml
+    device: pc
+    parallel_group: D
+    status: passed
+    blocked_reason: null
+    checkpoint_count: 3
+    summary: Verify unchanged binding deduplication and lean-to-mutable promotion without stable snapshot growth.
+  - id: T5
+    name: Safe archived cleanup
+    file: trails/T5.yaml
+    device: pc
+    parallel_group: E
+    status: passed
+    blocked_reason: null
+    checkpoint_count: 1
+    summary: Loop 4 safely cleaned the archived merged worktree after a successful Host dry-run and preserved the historical Session, archived state, Workspace ownership, and history hash.
+  - id: T6
+    name: Legacy schema-v1 compatibility
+    file: trails/T6.yaml
+    device: pc
+    parallel_group: F
+    status: passed
+    blocked_reason: null
+    checkpoint_count: 1
+    summary: Loop 4 preserved an independent schema-v1 Workspace/Session and operation across restart, verified compatible path status, and opened the exact blank Session through the GUI's standard reuse path without migration.

@@ -1,0 +1,69 @@
+{
+  "workspaceId": "38ed2378-881c-44f8-8cea-b6dc2ada959e",
+  "sessionId": "session-a8c75989-1502-42f2-bb8e-fc25055cf024",
+  "operationId": "0ce20f78-5ed8-4d7c-9bb8-4e6a15846bb9",
+  "sessionCreate": {
+    "request": {
+      "type": "client-request",
+      "rpcId": "ff818485-58f8-45f7-9ec7-5ea2fec81a23",
+      "method": "session.create",
+      "payload": {
+        "workspaceId": "38ed2378-881c-44f8-8cea-b6dc2ada959e"
+      }
+    },
+    "response": {
+      "type": "server-response",
+      "rpcId": "ff818485-58f8-45f7-9ec7-5ea2fec81a23",
+      "result": {
+        "ok": true,
+        "value": {
+          "sessionId": "session-a8c75989-1502-42f2-bb8e-fc25055cf024",
+          "agentPreset": "standard"
+        }
+      }
+    }
+  },
+  "start": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "data": {
+        "operationId": "0ce20f78-5ed8-4d7c-9bb8-4e6a15846bb9",
+        "phase": "prepared",
+        "worktreePath": "/private/tmp/ws-browser-acceptance/.worktrees/acceptance-loop4-exact-managed-root-diagnostic",
+        "taskBranch": "ws/acceptance-loop4-exact-managed-root-diagnostic",
+        "baseCommit": "1646488d11ca909399ddc499b38e86a364e8310b",
+        "dependencyMode": "lean",
+        "lockFingerprint": "f18d41c5782ab664e5a63449415d9c94bc326b78b41fc5ce064aca365c38d010",
+        "dshHome": "/private/tmp/ws-browser-acceptance/.git/ws/dsh-home/0ce20f78-5ed8-4d7c-9bb8-4e6a15846bb9"
+      }
+    }
+  },
+  "bind": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "data": {
+        "sourceSessionId": "session-a8c75989-1502-42f2-bb8e-fc25055cf024",
+        "state": "bound",
+        "submitAllowed": false
+      }
+    }
+  },
+  "status": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "data": {
+        "bound": true,
+        "operationId": "0ce20f78-5ed8-4d7c-9bb8-4e6a15846bb9",
+        "phase": "prepared",
+        "taskBranch": "ws/acceptance-loop4-exact-managed-root-diagnostic",
+        "worktreePath": "/private/tmp/ws-browser-acceptance/.worktrees/acceptance-loop4-exact-managed-root-diagnostic",
+        "dependencyMode": "lean",
+        "lifecycle": "bound",
+        "cleaned": false
+      }
+    }
+  }
+}

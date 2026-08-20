@@ -1,0 +1,55 @@
+id: T6
+name: Legacy schema-v1 compatibility
+description: Verify a pre-upgrade independent target Workspace and Session are preserved and receive compatible maintenance or an explicit version diagnostic.
+device: pc
+parallel_group: F
+conflicts_with: [T2, T5]
+precondition: "Use the real pre-restart schema-v1 upgrade fixture recorded in baselines/loop4-T6-schema-v1-fixture-before-restart.json: operation 12077df1-7387-471c-a1ab-6f8f7c344f96 remains schemaVersion 1 and target-bound to Session session-f078f926-1bb4-46a1-a980-b1e8a1d20f0a in independent Workspace 303fcaf5-21fa-4839-8d38-b28ec6523ef3 at .worktrees/browser-acceptance-task. After Host restart, compare exact ids/title/path/ownership, unopened Session log SHA-256, operation SHA-256/schema/handoff, and live path-based status before any action that could append lifecycle events."
+ask_user_if_blocked: true
+status: passed
+blocked_reason: null
+mock_setup:
+  required: false
+  status: not_needed
+  scenario_id: null
+  surface: legacy-target-workspace
+  data_source: real schema-v1 Workspace, Session, history, and operation state
+  evidence: []
+  enable: {command: null, env: null, notes: null}
+  user_decision: null
+steps:
+  - seq: 1
+    description: Navigate to the existing GUI and open the recorded schema-v1 independent target Workspace and Session.
+    action: navigate
+    target: http://127.0.0.1:3080
+    value: null
+    url_needs_input: false
+    checkpoints: []
+  - seq: 2
+    description: Invoke a supported maintenance/status operation for the legacy Session and observe its diagnostic and registry/history state.
+    action: fill
+    target: "textarea, [contenteditable='true']"
+    value: "Inspect and perform a non-destructive supported Worktree Session maintenance/status operation for this pre-upgrade schema-v1 Session; preserve all identities and report any explicit version diagnostic."
+    url_needs_input: false
+    checkpoints:
+      - id: INT-09
+        description: A schema-v1 independent target Workspace/Session remains registered and unchanged, and maintenance works compatibly or gives an explicit version diagnostic.
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: false
+        data_scenario: legacy-schema-v1
+        surface: legacy-target-workspace
+        data_source: real DSH Workspace/Session registry, history, and legacy operation state
+        mock_scenario_id: null
+        expected_source: spec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: "Consequence 状态 assertion: compare baseline afterward—Workspace and Session remain registered with identical ids, names, ownership, paths, and history digest; nothing is migrated, rebound, deleted, or renamed. The maintenance request must either complete compatibly or display a diagnostic that explicitly identifies unsupported operation/version, not a generic failure."
+        result: pass
+        result_detail: "Loop 4: before any GUI open, post-restart preflight proved the independent Workspace 303fcaf5-21fa-4839-8d38-b28ec6523ef3, exact target Session session-f078f926-1bb4-46a1-a980-b1e8a1d20f0a, cwd/ownership, unopened Session log SHA-256, and schema-v1 operation SHA-256/handoff were unchanged; live path-based status succeeded without a source binding. GUI showed `browser-acceptance-task`; rc.7 intentionally hides blank Session treeitems, and the Workspace New Session action reused the same exact blank Session without creating another. Opening appended only the standard `session/end-seed` lifecycle marker: all 3 pre-existing events remained an exact prefix, and the operation hash/schema/handoff remained unchanged. Evidence: baselines/loop4-T6-schema-v1-fixture-before-restart.json, loop4-post-restart-preflight.json, loop4-T6-live-registry.json, loop4-T6-after-gui-open.json; screenshots/loop4-T6-visible.png and loop4-T6-blank-session-open.png. Do not describe the post-open log as byte-identical."
+        selector: "[data-testid='workspace-sidebar'], [data-testid='session-list'], [data-testid='conversation'], [data-testid='worktree-session-status']"
+        expected_text: "legacy identities and history unchanged; compatible completion or explicit unsupported operation/version diagnostic"
+        expected_attrs: null
+        expected_visible: true

@@ -1,0 +1,48 @@
+id: T5
+name: Safe archived cleanup
+description: Clean resources only after proving archived, clean, inactive, and merged state, while preserving Session history.
+device: pc
+parallel_group: E
+conflicts_with: [T1, T2, T3, T4, T6]
+precondition: Prepare a uniquely identified real Worktree Session whose task branch is proven merged into main, worktree is clean and inactive, and Session is archived; record Session id, source Workspace id, worktree path, and branch name.
+ask_user_if_blocked: true
+status: passed
+blocked_reason: null
+mock_setup:
+  required: false
+  status: not_needed
+  scenario_id: null
+  surface: archived-session-history
+  data_source: real Git resources and DSH Session operation/history state
+  evidence: []
+  enable: {command: null, env: null, notes: null}
+  user_decision: null
+steps:
+  - seq: 1
+    description: In the archived Session, invoke the supported safe Worktree cleanup operation after reconfirming all safety predicates.
+    action: fill
+    target: "textarea, [contenteditable='true']"
+    value: "Run safe Worktree Session cleanup for this archived Session only after confirming it is clean, inactive, and its branch is proven merged; report resource and history state afterward."
+    url_needs_input: false
+    checkpoints:
+      - id: INT-08
+        description: Safe archived cleanup removes merged worktree/branch resources, marks cleaned, and preserves the historical Session under its source Workspace.
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: false
+        data_scenario: safe-merged-cleanup
+        surface: archived-session-history
+        data_source: real Git worktree/branch inventory and DSH Session registry/history
+        mock_scenario_id: null
+        expected_source: spec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: "Destructive consequence 状态 assertion: before invocation independently prove archived+clean+inactive+merged; afterward the exact worktree path and task branch are absent, operation state is cleaned, and the same historical Session id remains archived under the same source Workspace with conversation history intact."
+        result: pass
+        result_detail: "Loop 4 after Host restart: post-restart preflight proved the source Session archived and inactive, both checkouts clean, and task branch merged; Host dry-run returned the exact safe removal plan. The guarded runner repeated dry-run before applying one real clean. Post-clean verification passed 16 assertions: exact worktree and task branch absent, source checkout clean, schema-v2 cleaned tombstone retained with the same Session binding, Session still archived under Workspace 38ed2378-881c-44f8-8cea-b6dc2ada959e, and Session log SHA-256 unchanged. Evidence: baselines/loop4-post-restart-preflight.json, loop4-T5-clean-result.json, loop4-T5-post-clean-verify.json."
+        selector: "[data-testid='worktree-session-status'], [data-testid='session-list'], [data-testid='conversation']"
+        expected_text: cleaned
+        expected_attrs: null
+        expected_visible: true
