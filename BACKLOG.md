@@ -152,6 +152,17 @@
   - 待确认:首版仅做普通关键字匹配，还是同时支持短语、大小写、正则或语义搜索。
 - **更新**: 2026-08-20 新增
 
+### [B013] 侧边栏会话列表每个 session 前显示当前模型 icon
+- **状态**: 想法
+- **背景 / 动机**: 多模型混用(DeepSeek / Codex / Claude / Grok 订阅等)后,不进入会话看不出各会话正在用哪个模型;希望在侧边栏会话列表**每个 session 标题前**放一个类似 icon 的模型标识(provider logo / 缩写徽标),一眼区分。
+- **要点**:
+  - 展示形态(2026-08-20 用户明确):session 条目**前置** icon 式标识,不与用量类插件(B010,多落在 dock / 侧栏底部 / 输入区)争同一空间;形态候选 = provider logo 小图标 / 单色缩写圆徽(DS / GPT / CL / GK);
+  - 数据源:会话当前模型选择(参考 `dsh-client-ui-model-selection` 的选择器数据与 `dsh-agent-default-model` 默认模型逻辑);注意会话中途切换模型时列表需联动刷新;
+  - 落点预估:client UI 插件,挂进官方 `dsh-client-ui-sidebar`(session 树,自带 state dots)条目的 Slot(先用 Inspect 查条目行是否有可注册的前置扩展点;session-manager / session-pin 均证明第三方能在侧栏行上加装饰,机制可参考);
+  - 社区调研(2026-08-20):**未发现现成同款**(逐条扫过 [awesome-dsh-plugin](https://github.com/Anil-matcha/awesome-dsh-plugin) UI/Sessions/Usage 分类 + npm 搜索)。最接近的:[dsh-hud](https://github.com/a903067276-rgb/dsh-hud)(浮动面板显示当前模型,非 per-session 列表)、[dsh-session-pin](https://github.com/PerryLink/dsh-session-pin)(侧栏行加颜色/tags,形态相近但内容是 pin 不是模型)、[dsh-session-manager](https://github.com/dream12347/dsh-session-manager)(侧栏行加未读/状态点,证明行级装饰可行)。结论:需自研,可借鉴 session-pin / session-manager 的行装饰实现;
+  - 可先用动态 Cordis Plugin 做原型验证展示效果与数据可得性,满意后再固化为仓库定制。
+- **更新**: 2026-08-20 新增;同日明确形态(session 前 icon,不占用量空间)并完成社区调研:无现成同款,需自研,行级装饰机制有三个可借鉴实现。
+
 ---
 
 ## 缺陷备忘
