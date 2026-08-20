@@ -259,6 +259,23 @@ Host 与脚本复用同一纯 Git/metadata 模块或相同格式契约，避免�
 4. 验证 promote 和 clean 安全门，运行 package typecheck/tests/build；补齐 LICENSE/NOTICE。
 5. 将 `dsh.yaml` 条目启用并执行 `dsh build`；由用户决定何时重启当前 DSH。回滚为禁用 package/skill 后重跑 build；已有 worktree与 operation metadata 保留，供人工清理，不自动删除开发工作。
 
+## Deferred implementation backlog
+
+以下项目明确不属于 MVP，也不在仓库根 `BACKLOG.md` 登记：
+
+- `/ws setup`：等待确定仓库探测产物、审核界面和可重复生成语义后再设计；当前不暴露命令。
+- per-repository local config/trust：等待确定本机配置位置、仓库携带配置的信任边界及命令白名单；当前不创建 `~/.dsh/ws.yaml` 或 `.dsh/ws.yaml`。
+- pnpm/Rush adapters：等待在真实非 npm 单根仓库验证缓存、提升和健康检查语义；当前只支持 ohmydsh npm 根依赖。
+- explicit ref refresh：MVP 的 focus/menu refresh 只重读本地 refs，不隐式 fetch；未来可增加明确的网络 refresh 操作。
+- squash-merge provider proofs：MVP clean 仅接受普通 Git ancestry；未来可接 GitHub/Codebase 等 provider 证明，但不得用强删替代证明。
+
+## Confirmed rc.7 compatibility notes
+
+- DSH `0.1.0-rc.7` 通过同一个 Loader Host 行发现 package 的 `dsh.client` 声明；bundle 不需要第二个 client 行。
+- `conversation.input.left` 是 session-scoped list slot；Workspace 注册、blank Session 连接和导航使用公开的 `workspaces.create`、`connectWorkspace` 与 `sessions.open`。
+- rc.7 没有正式 pre-submit middleware。MVP 对 scoped `SessionInput.submit` 做兼容性检查后临时 shadow，并在 disarm、成功、生命周期退出和 dispose 时恢复；若 facade 不可扩展或不可写则 fail closed。
+- draft image id 是浏览器进程内对象；不持久化。handoff 前用 ConversationController 的实时解析能力校验，目标拒绝 `addImages` 时不清理 source。
+
 ## Open Questions
 
-（无。`/ws setup`、多仓 adapter 和 squash-merge 平台证明是明确 deferred backlog，不影响本次规范、方案或任务拆分。）
+（无。上述项目是明确 deferred backlog，不影响本次规范、方案或任务拆分。）

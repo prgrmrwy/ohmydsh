@@ -1,0 +1,4 @@
+# Worktree Session Host entry. The package also declares a Web client bundle.
+- insert:
+    - id: worktree-session
+      name: dsh-worktree-session

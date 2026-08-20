@@ -1,0 +1,142 @@
+import type { IncomingMessage, ServerResponse } from 'node:http'
+import { isAbsolute } from 'node:path'
+import type { HandoffRequest, StartOperationRequest, WireEnvelope } from '../wire.js'
+import { ROUTES } from '../wire.js'
+import { wireError, WsError } from './errors.js'
+import { createGitClient, discoverRepo, listRefs, listWorktrees } from './git.js'
+import { loadOperation, startOperation, updateHandoff } from './operation.js'
+import { wsClean, wsPromote } from './maintenance.js'
+
+const BODY_LIMIT = 64 * 1024
+
+export interface RouteRegistration {
+  path: string
+  handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>
+}
+
+function send<T>(res: ServerResponse, status: number, body: WireEnvelope<T>): void {
+  const encoded = JSON.stringify(body)
+  res.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-store',
+    'content-length': Buffer.byteLength(encoded),
+  })
+  res.end(encoded)
+}
+
+function trusted(req: IncomingMessage): boolean {
+  const host = (req.headers.host ?? '').toLowerCase()
+  const hostname = host.startsWith('[') ? host.slice(1, host.indexOf(']')) : host.split(':')[0]
+  if (hostname !== '127.0.0.1' && hostname !== 'localhost' && hostname !== '::1') return false
+  const origin = req.headers.origin
+  if (origin === undefined || origin === 'null') return true
+  try {
+    const originHost = new URL(origin).hostname.toLowerCase()
+    return originHost === hostname || (originHost === 'localhost' && hostname === '127.0.0.1') || (originHost === '127.0.0.1' && hostname === 'localhost')
+  } catch { return false }
+}
+
+async function readBody(req: IncomingMessage): Promise<unknown> {
+  const declared = Number(req.headers['content-length'] ?? 0)
+  if (Number.isFinite(declared) && declared > BODY_LIMIT) throw new WsError('BODY_TOO_LARGE', 'Request body is too large')
+  return new Promise((resolvePromise, rejectPromise) => {
+    const chunks: Buffer[] = []
+    let size = 0
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length
+      if (size > BODY_LIMIT) { rejectPromise(new WsError('BODY_TOO_LARGE', 'Request body is too large')); req.destroy(); return }
+      chunks.push(chunk)
+    })
+    req.on('end', () => {
+      try { resolvePromise(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')) } catch { rejectPromise(new WsError('INVALID_REQUEST', 'Request body must be valid JSON')) }
+    })
+    req.on('error', rejectPromise)
+  })
+}
+
+function strictObject(body: unknown, keys: readonly string[]): Record<string, unknown> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new WsError('INVALID_REQUEST', 'Request body must be an object')
+  const record = body as Record<string, unknown>
+  for (const key of Object.keys(record)) if (!keys.includes(key)) throw new WsError('INVALID_REQUEST', `Unknown body key ${key}`)
+  for (const key of keys) if (!(key in record)) throw new WsError('INVALID_REQUEST', `Missing body key ${key}`)
+  return record
+}
+
+function stringField(record: Record<string, unknown>, key: string): string {
+  if (typeof record[key] !== 'string' || record[key].trim() === '') throw new WsError('INVALID_REQUEST', `${key} must be a non-empty string`)
+  return record[key]
+}
+
+function absolutePath(record: Record<string, unknown>, key: string): string {
+  const value = stringField(record, key)
+  if (!isAbsolute(value)) throw new WsError('INVALID_REQUEST', `${key} must be absolute`)
+  return value
+}
+
+function route<T>(path: string, action: (body: unknown) => Promise<T>): RouteRegistration {
+  return {
+    path,
+    async handler(req, res) {
+      try {
+        if (!trusted(req)) throw new WsError('UNTRUSTED_REQUEST', 'Untrusted Host or Origin')
+        if (req.method !== 'POST') throw new WsError('METHOD_NOT_ALLOWED', 'Only POST is supported')
+        if (!(req.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) throw new WsError('INVALID_REQUEST', 'Content-Type must be application/json')
+        send(res, 200, { ok: true, data: await action(await readBody(req)) })
+      } catch (error) {
+        const wire = wireError(error)
+        const status = wire.code === 'UNTRUSTED_REQUEST' ? 403 : wire.code === 'METHOD_NOT_ALLOWED' ? 405 : wire.code === 'BODY_TOO_LARGE' ? 413 : wire.code.endsWith('_NOT_FOUND') ? 404 : wire.code === 'OPERATION_CONFLICT' ? 409 : wire.code === 'INTERNAL_ERROR' ? 500 : 400
+        send(res, status, { ok: false, error: wire })
+      }
+    },
+  }
+}
+
+export interface HostRouteDeps {
+  activeSessionPaths?: () => readonly string[]
+}
+
+export function createRoutes(deps: HostRouteDeps = {}): readonly RouteRegistration[] {
+  return [
+    route(ROUTES.repoStatus, async body => {
+      const parsed = strictObject(body, ['repoPath'])
+      const repoPath = absolutePath(parsed, 'repoPath')
+      const git = createGitClient()
+      const repo = await discoverRepo(repoPath, git)
+      return { repo: true as const, ...repo, refs: await listRefs(repo.repoRoot, git), worktrees: await listWorktrees(repo.repoRoot, git) }
+    }),
+    route(ROUTES.start, async body => {
+      const parsed = strictObject(body, ['operationId', 'repoPath', 'baseRef', 'taskText', 'dependencyMode'])
+      const request: StartOperationRequest = {
+        operationId: stringField(parsed, 'operationId'),
+        repoPath: absolutePath(parsed, 'repoPath'),
+        baseRef: stringField(parsed, 'baseRef'),
+        taskText: stringField(parsed, 'taskText'),
+        dependencyMode: parsed.dependencyMode === 'lean' ? 'lean' : (() => { throw new WsError('INVALID_REQUEST', 'dependencyMode must be lean') })(),
+      }
+      return startOperation(request)
+    }),
+    route(ROUTES.operationStatus, async body => {
+      const parsed = strictObject(body, ['operationId', 'repoPath'])
+      const repo = await discoverRepo(absolutePath(parsed, 'repoPath'))
+      const operation = await loadOperation(repo.gitCommonDir, stringField(parsed, 'operationId'))
+      if (operation === undefined) throw new WsError('OPERATION_NOT_FOUND', 'Operation not found')
+      return operation
+    }),
+    route(ROUTES.handoff, async body => {
+      const parsed = strictObject(body, ['operationId', 'repoPath', 'action', 'targetSessionId'])
+      if (parsed.action !== 'bind-target' && parsed.action !== 'claim-submit' && parsed.action !== 'admitted' && parsed.action !== 'uncertain') throw new WsError('INVALID_REQUEST', 'Invalid handoff action')
+      const request: HandoffRequest = { operationId: stringField(parsed, 'operationId'), repoPath: absolutePath(parsed, 'repoPath'), action: parsed.action, targetSessionId: stringField(parsed, 'targetSessionId') }
+      return updateHandoff(request)
+    }),
+    route(ROUTES.promote, async body => {
+      const parsed = strictObject(body, ['path'])
+      return wsPromote(absolutePath(parsed, 'path'))
+    }),
+    route(ROUTES.clean, async body => {
+      const parsed = strictObject(body, ['path', 'dryRun'])
+      if (typeof parsed.dryRun !== 'boolean') throw new WsError('INVALID_REQUEST', 'dryRun must be boolean')
+      const activePaths = deps.activeSessionPaths?.()
+      return wsClean(absolutePath(parsed, 'path'), { dryRun: parsed.dryRun, requireActivePaths: true, ...(activePaths === undefined ? {} : { activePaths }) })
+    }),
+  ]
+}
