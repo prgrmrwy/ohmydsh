@@ -6,7 +6,9 @@ export const ROUTES = {
   operationStatus: '/worktree-session/api/operation-status',
   promote: '/worktree-session/api/promote',
   clean: '/worktree-session/api/clean',
-  handoff: '/worktree-session/api/handoff',
+  bindSource: '/worktree-session/api/bind-source',
+  sessionStatus: '/worktree-session/api/session-status',
+  status: '/worktree-session/api/status',
 } as const
 
 export type OperationPhase =
@@ -38,8 +40,17 @@ export interface WorktreeEntry {
   prunable: boolean
 }
 
+export interface SourceSessionBinding {
+  mode: 'source-session'
+  sourceSessionId: string
+  state: 'bound' | 'submit-claimed' | 'admitted' | 'uncertain' | 'cleaned'
+  updatedAt: string
+}
+
+export type SessionBinding = SourceSessionBinding
+
 export interface OperationRecord {
-  schemaVersion: 1
+  schemaVersion: 2
   operationId: string
   repoRoot: string
   gitCommonDir: string
@@ -56,11 +67,12 @@ export interface OperationRecord {
   createdAt: string
   updatedAt: string
   diagnostics?: readonly string[]
-  handoff?: {
-    state: 'target-bound' | 'submit-claimed' | 'admitted' | 'uncertain'
-    targetSessionId: string
-    updatedAt: string
-  }
+  binding?: SessionBinding
+}
+
+/** The persisted binding of a schema-v2 operation, if established. */
+export function bindingOf(operation: OperationRecord): SessionBinding | undefined {
+  return operation.binding
 }
 
 export interface RepoStatusRequest {
@@ -105,17 +117,36 @@ export interface MaintenanceRequest {
   path: string
 }
 
-export interface HandoffRequest {
+export interface BindSourceRequest {
   operationId: string
   repoPath: string
-  action: 'bind-target' | 'claim-submit' | 'admitted' | 'uncertain'
-  targetSessionId: string
+  sourceSessionId: string
 }
 
-export interface HandoffResult {
-  state: 'target-bound' | 'submit-claimed' | 'admitted' | 'uncertain'
-  targetSessionId: string
+export interface SourceBindingRequest extends BindSourceRequest {
+  action: 'bind-source' | 'claim-submit' | 'admitted' | 'uncertain' | 'cleaned'
+}
+
+export interface BindSourceResult {
+  sourceSessionId: string
+  state: 'bound' | 'submit-claimed' | 'admitted' | 'uncertain' | 'cleaned'
   submitAllowed: boolean
+}
+
+export interface SessionStatusRequest {
+  sessionId: string
+  repoPath: string
+}
+
+export interface SessionStatusResult {
+  bound: boolean
+  operationId?: string
+  phase?: OperationPhase
+  taskBranch?: string
+  worktreePath?: string
+  dependencyMode?: DependencyMode
+  lifecycle?: 'bound' | 'submit-claimed' | 'admitted' | 'uncertain' | 'cleaned'
+  cleaned?: boolean
 }
 
 export interface CleanRequest extends MaintenanceRequest {
@@ -161,6 +192,7 @@ export type WsErrorCode =
   | 'OPERATION_CONFLICT'
   | 'OPERATION_NOT_FOUND'
   | 'OPERATION_INVALID'
+  | 'UNSUPPORTED_SCHEMA_VERSION'
   | 'DEPENDENCY_FAILED'
   | 'ENVIRONMENT_FAILED'
   | 'PROMOTE_REFUSED'

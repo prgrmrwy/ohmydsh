@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { bindingOf } from '../wire.js';
 import { cacheHealthy, dependencyFingerprint, ensureLeanLink, leanLinkMatches, prepareDependencyCache } from './dependencies.js';
 import { prepareEnvironment, ensureWorktreeExclude } from './environment.js';
 import { WsError, messageOf } from './errors.js';
@@ -11,7 +12,14 @@ export function operationFile(gitCommonDir, operationId) {
     return join(gitCommonDir, 'ws', 'operations', `${operationId}.json`);
 }
 export async function loadOperation(gitCommonDir, operationId) {
-    return readJson(operationFile(gitCommonDir, operationId));
+    const record = await readJson(operationFile(gitCommonDir, operationId));
+    if (record === undefined)
+        return undefined;
+    const schemaVersion = record.schemaVersion;
+    if (schemaVersion !== 2) {
+        throw new WsError('UNSUPPORTED_SCHEMA_VERSION', `Unsupported Worktree Session operation schemaVersion ${String(schemaVersion)}; the legacy target-Workspace flow has been retired and only schema-v2 source-session bindings are supported`);
+    }
+    return record;
 }
 export async function saveOperation(operation, now = new Date()) {
     const next = { ...operation, updatedAt: now.toISOString() };
@@ -107,7 +115,7 @@ async function performStart(request, deps) {
             const allocation = await allocateTask(repo.repoRoot, request.taskText, git);
             const timestamp = now().toISOString();
             operation = {
-                schemaVersion: 1,
+                schemaVersion: 2,
                 operationId: request.operationId,
                 repoRoot: repo.repoRoot,
                 gitCommonDir: repo.gitCommonDir,
@@ -173,7 +181,65 @@ export function startOperation(request, deps = {}) {
     flights.set(key, flight);
     return flight;
 }
-export async function updateHandoff(request) {
+export function createOperationId() {
+    return randomUUID();
+}
+/** Resolve the operation whose source-session binding owns the given Session id. */
+export async function findBySourceSession(gitCommonDir, sourceSessionId) {
+    const dir = join(gitCommonDir, 'ws', 'operations');
+    let names;
+    try {
+        names = await (await import('node:fs/promises')).readdir(dir);
+    }
+    catch {
+        return undefined;
+    }
+    for (const name of names) {
+        if (!name.endsWith('.json'))
+            continue;
+        const operation = await loadOperation(gitCommonDir, name.slice(0, -'.json'.length));
+        if (operation === undefined)
+            continue;
+        const binding = bindingOf(operation);
+        if (binding?.mode === 'source-session' && binding.sourceSessionId === sourceSessionId)
+            return operation;
+    }
+    return undefined;
+}
+function ensureFreshSourceBinding(operation, sourceSessionId) {
+    if (operation.binding !== undefined && operation.binding.mode === 'source-session')
+        return operation;
+    return { ...operation, binding: { mode: 'source-session', sourceSessionId, state: 'bound', updatedAt: new Date().toISOString() } };
+}
+export async function bindSource(request) {
+    validateOperationId(request.operationId);
+    if (request.sourceSessionId.trim() === '')
+        throw new WsError('INVALID_REQUEST', 'sourceSessionId must be non-empty');
+    const repo = await discoverRepo(request.repoPath);
+    const requestedPath = await (await import('node:fs/promises')).realpath(request.repoPath);
+    if (!withinRepo(repo.repoRoot, requestedPath))
+        throw new WsError('OUTSIDE_REPOSITORY', 'Requested path is outside the repository root');
+    const lock = join(repo.gitCommonDir, 'ws', 'locks', 'repo.lock');
+    return withMkdirLock(lock, async () => {
+        const operation = await loadOperation(repo.gitCommonDir, request.operationId);
+        if (operation === undefined || operation.phase !== 'prepared')
+            throw new WsError('OPERATION_NOT_FOUND', 'Prepared operation not found');
+        if (operation.repoRoot !== repo.repoRoot)
+            throw new WsError('OPERATION_CONFLICT', 'Operation belongs to a different repository');
+        const owned = await findBySourceSession(repo.gitCommonDir, request.sourceSessionId);
+        if (owned !== undefined && owned.operationId !== operation.operationId) {
+            throw new WsError('OPERATION_CONFLICT', `Session ${request.sourceSessionId} is already bound to operation ${owned.operationId}`);
+        }
+        const current = bindingOf(operation);
+        if (current?.mode === 'source-session' && current.sourceSessionId !== request.sourceSessionId) {
+            throw new WsError('OPERATION_CONFLICT', `Operation is already bound to source Session ${current.sourceSessionId}`);
+        }
+        const updated = await saveOperation(ensureFreshSourceBinding(operation, request.sourceSessionId));
+        const binding = bindingOf(updated);
+        return { sourceSessionId: request.sourceSessionId, state: binding?.mode === 'source-session' ? binding.state : 'bound', submitAllowed: false };
+    });
+}
+export async function updateSourceBinding(request) {
     validateOperationId(request.operationId);
     const repo = await discoverRepo(request.repoPath);
     const lock = join(repo.gitCommonDir, 'ws', 'locks', 'repo.lock');
@@ -181,28 +247,48 @@ export async function updateHandoff(request) {
         const operation = await loadOperation(repo.gitCommonDir, request.operationId);
         if (operation === undefined || operation.phase !== 'prepared')
             throw new WsError('OPERATION_NOT_FOUND', 'Prepared operation not found');
-        const current = operation.handoff;
-        if (current !== undefined && current.targetSessionId !== request.targetSessionId)
-            throw new WsError('OPERATION_CONFLICT', 'Operation is already bound to another target Session');
-        let state;
+        const current = bindingOf(operation);
+        if (current?.mode === 'source-session' && current.sourceSessionId !== request.sourceSessionId) {
+            throw new WsError('OPERATION_CONFLICT', `Operation is already bound to source Session ${current.sourceSessionId}`);
+        }
+        let next = ensureFreshSourceBinding(operation, request.sourceSessionId);
+        const binding = bindingOf(next);
+        if (binding === undefined || binding.mode !== 'source-session')
+            throw new WsError('OPERATION_INVALID', 'Binding was not established');
+        let state = binding.state;
         let submitAllowed = false;
-        if (request.action === 'bind-target')
-            state = current?.state ?? 'target-bound';
-        else if (request.action === 'claim-submit') {
-            if (current?.state === 'submit-claimed' || current?.state === 'admitted' || current?.state === 'uncertain')
-                state = current.state;
-            else {
+        if (request.action === 'claim-submit') {
+            if (binding.state === 'bound') {
                 state = 'submit-claimed';
                 submitAllowed = true;
             }
+            else
+                state = binding.state;
         }
-        else
+        else if (request.action !== 'bind-source') {
             state = request.action;
-        const updatedAt = new Date().toISOString();
-        await saveOperation({ ...operation, handoff: { state, targetSessionId: request.targetSessionId, updatedAt } });
-        return { state, targetSessionId: request.targetSessionId, submitAllowed };
+        }
+        next = { ...next, binding: { ...binding, state, updatedAt: new Date().toISOString() } };
+        await saveOperation(next);
+        return { sourceSessionId: request.sourceSessionId, state, submitAllowed };
     });
 }
-export function createOperationId() {
-    return randomUUID();
+export async function sessionStatus(repoPath, sourceSessionId) {
+    const repo = await discoverRepo(repoPath);
+    const operation = await findBySourceSession(repo.gitCommonDir, sourceSessionId);
+    if (operation === undefined)
+        return { bound: false };
+    const binding = bindingOf(operation);
+    if (binding === undefined || binding.mode !== 'source-session')
+        return { bound: false };
+    return {
+        bound: true,
+        operationId: operation.operationId,
+        phase: operation.phase,
+        taskBranch: operation.taskBranch,
+        worktreePath: operation.worktreePath,
+        dependencyMode: operation.dependencyMode,
+        lifecycle: binding.state,
+        cleaned: binding.state === 'cleaned',
+    };
 }

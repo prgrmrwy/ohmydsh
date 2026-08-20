@@ -1,6 +1,6 @@
 import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ConversationController } from '@deepseek-ai/dsh-client-ui-conversation/client'
-import type { HandoffResult, PreparedOperationResult, StartOperationRequest } from '../wire.ts'
+import type { BindSourceResult, PreparedOperationResult, StartOperationRequest } from '../wire.ts'
 import { post, ROUTES } from './api.ts'
 import { getStage, setStage } from './stage-store.ts'
 
@@ -58,67 +58,68 @@ function preflight(ctx: ClientContext, input: InputFacade): { text: string; imag
   return { text: state.draft, imageIds: state.imageIds as readonly never[] }
 }
 
+/** Restore only content consumed by the official source submit on uncertain admission. */
+function restoreSnapshot(input: InputFacade, snapshot: { text: string; imageIds: readonly never[] }): void {
+  const current = input.state.getSnapshot()
+  if (current.draft === '') input.setDraft(snapshot.text)
+  const present = new Set(current.imageIds)
+  const missing = snapshot.imageIds.filter(id => !present.has(id))
+  if (missing.length > 0) input.addImages(missing)
+}
+
+async function bindingAction(operationId: string, repoPath: string, sourceSessionId: string, action: 'bind-source' | 'claim-submit' | 'admitted' | 'uncertain'): Promise<BindSourceResult> {
+  return post<BindSourceResult>(ROUTES.bindSource, { operationId, repoPath, sourceSessionId, action })
+}
+
 async function runHandoff(ctx: ClientContext, sourceSessionId: string, cwd: string, mode: SubmitMode | undefined, decoration: Decoration): Promise<void> {
   const stage = getStage(sourceSessionId, cwd)
   if (!stage.enabled || stage.baseRef === undefined) { decoration.original.call(decoration.input, mode); return }
+  let claimed = false
+  let snapshot: ReturnType<typeof preflight> | undefined
+  let id = stage.operationId
   try {
     setStage(sourceSessionId, cwd, { phase: 'validating', error: undefined })
-    const snapshot = preflight(ctx, decoration.input)
-    const id = stage.operationId ?? operationId()
+    snapshot = preflight(ctx, decoration.input)
+    id ??= operationId()
     setStage(sourceSessionId, cwd, { operationId: id, phase: 'host' })
     const request: StartOperationRequest = { operationId: id, repoPath: cwd, baseRef: stage.baseRef, taskText: snapshot.text, dependencyMode: 'lean' }
     const prepared = await post<PreparedOperationResult>(ROUTES.start, request)
-    setStage(sourceSessionId, cwd, { phase: prepared.phase })
-    setStage(sourceSessionId, cwd, { phase: 'workspace' })
-    const workspace = await ctx.workspaces.create({ path: prepared.worktreePath })
-    const targetId = await ctx.workspaces.connectWorkspace(workspace.workspaceId)
-    const targetSessionId = targetId as string
-    await post<HandoffResult>(ROUTES.handoff, { operationId: id, repoPath: cwd, action: 'bind-target', targetSessionId })
-    setStage(sourceSessionId, cwd, { targetSessionId })
-    const targetSummary = summary(ctx, targetSessionId)
-    if (targetSummary?.blank === false) {
-      await post<HandoffResult>(ROUTES.handoff, { operationId: id, repoPath: cwd, action: 'admitted', targetSessionId })
-      ctx.sessions.open(targetId)
-      setStage(sourceSessionId, cwd, { phase: 'done', submitted: true, enabled: false })
-      decoration.restore()
-      return
-    }
-    if (getStage(sourceSessionId, cwd).submitted) {
-      ctx.sessions.open(targetId)
-      setStage(sourceSessionId, cwd, { phase: 'uncertain', error: 'Target submit was already attempted; review the target Session before retrying' })
-      return
-    }
-    const targetScope = ctx.sessions.scope(targetId)
-    if (targetScope === undefined) throw new Error('Target Session scope is unavailable')
-    const target = ctx.conversation.input.for(targetScope)
-    setStage(sourceSessionId, cwd, { phase: 'transfer' })
-    if (snapshot.imageIds.length > 0 && !target.addImages(snapshot.imageIds)) throw new Error('Target Session refused draft images')
-    target.setDraft(snapshot.text)
-    ctx.sessions.open(targetId)
-    const claim = await post<HandoffResult>(ROUTES.handoff, { operationId: id, repoPath: cwd, action: 'claim-submit', targetSessionId })
+    setStage(sourceSessionId, cwd, { phase: 'binding', taskBranch: prepared.taskBranch, worktreePath: prepared.worktreePath, dependencyMode: prepared.dependencyMode })
+    const bound = await bindingAction(id, cwd, sourceSessionId, 'bind-source')
+    setStage(sourceSessionId, cwd, { lifecycle: bound.state })
+
+    setStage(sourceSessionId, cwd, { phase: 'claim' })
+    const claim = await bindingAction(id, cwd, sourceSessionId, 'claim-submit')
     if (!claim.submitAllowed) {
-      ctx.sessions.open(targetId)
-      setStage(sourceSessionId, cwd, { phase: 'uncertain', submitted: true, error: 'Target submit was already claimed durably; review the target Session before retrying' })
+      setStage(sourceSessionId, cwd, { phase: 'uncertain', lifecycle: claim.state, submitted: true, error: 'Source submit was already claimed durably; inspect this Session before retrying' })
       decoration.restore()
       return
     }
-    setStage(sourceSessionId, cwd, { phase: 'submit', submitted: true })
-    target.submit(mode)
-    if (!(await waitForAdmission(ctx, targetSessionId))) {
-      await post<HandoffResult>(ROUTES.handoff, { operationId: id, repoPath: cwd, action: 'uncertain', targetSessionId })
-      setStage(sourceSessionId, cwd, { phase: 'uncertain', error: 'Target admission is uncertain; the target draft is preserved and will not be auto-submitted again' })
+
+    claimed = true
+    setStage(sourceSessionId, cwd, { phase: 'submit', lifecycle: claim.state, submitted: true })
+    decoration.original.call(decoration.input, mode)
+    if (!(await waitForAdmission(ctx, sourceSessionId))) {
+      await bindingAction(id, cwd, sourceSessionId, 'uncertain')
+      restoreSnapshot(decoration.input, snapshot)
+      setStage(sourceSessionId, cwd, { phase: 'uncertain', lifecycle: 'uncertain', error: 'Source admission is uncertain; the draft is preserved and will not be auto-submitted again' })
       decoration.restore()
       return
     }
-    await post<HandoffResult>(ROUTES.handoff, { operationId: id, repoPath: cwd, action: 'admitted', targetSessionId })
-    decoration.input.setDraft('')
-    for (const imageId of snapshot.imageIds) decoration.input.removeImage(imageId)
-    setStage(sourceSessionId, cwd, { phase: 'done', enabled: false, error: undefined })
+
+    await bindingAction(id, cwd, sourceSessionId, 'admitted')
+    setStage(sourceSessionId, cwd, { phase: 'done', lifecycle: 'admitted', enabled: false, error: undefined })
     decoration.restore()
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
+    if (claimed && id !== undefined) {
+      try { await bindingAction(id, cwd, sourceSessionId, 'uncertain') } catch { /* preserve the primary error */ }
+      if (snapshot !== undefined) restoreSnapshot(decoration.input, snapshot)
+      setStage(sourceSessionId, cwd, { phase: 'uncertain', lifecycle: 'uncertain', submitted: true, error: message })
+    } else {
+      setStage(sourceSessionId, cwd, { phase: 'error', error: message })
+    }
     decoration.input.notify('error', `Worktree Session: ${message}`)
-    setStage(sourceSessionId, cwd, { phase: 'error', error: message })
   }
 }
 
@@ -147,8 +148,8 @@ export function decorateSubmit(ctx: ClientContext, sessionId: string, cwd: strin
     },
   } satisfies Decoration
   decoration.wrapper = function submit(mode?: SubmitMode): void {
-    const stage = getStage(sessionId, cwd)
-    if (!stage.enabled) { original.call(input, mode); return }
+    const current = getStage(sessionId, cwd)
+    if (!current.enabled) { original.call(input, mode); return }
     if (decoration.flight !== undefined) return
     decoration.flight = runHandoff(ctx, sessionId, cwd, mode, decoration).finally(() => { decoration.flight = undefined })
   }
