@@ -361,6 +361,22 @@ async function syncPackages(manifest, items) {
   }
   const enabledNames = enabled.map((i) => names.get(i.id)).filter(Boolean)
 
+  // Local package specs embed the absolute checkout path. Repair stale paths
+  // before any plugin command so a moved/renamed repository cannot make pnpm
+  // fail while reconciling an otherwise unrelated package.
+  let repairedLocalSpecs = false
+  profilePkg.dependencies ??= {}
+  for (const item of enabled.filter((entry) => entry.source === 'local')) {
+    const name = names.get(item.id)
+    const expected = `file:${path.join(REPO, 'packages', item.id)}`
+    if (name !== undefined && profilePkg.dependencies[name] !== expected) {
+      change(`local package path ${name} -> ${expected}`)
+      profilePkg.dependencies[name] = expected
+      repairedLocalSpecs = true
+    }
+  }
+  if (repairedLocalSpecs) await writeJson(profilePkgPath, profilePkg)
+
   // remove disabled / missing ones first
   for (const [id, name] of names) {
     const item = packages.find((i) => i.id === id)
