@@ -1,0 +1,33 @@
+{
+  "schema": "worktree-session-acceptance-baseline-v1",
+  "capturedAt": "2026-08-20",
+  "legacyOperation": {
+    "schemaVersion": 1,
+    "operationId": "12077df1-7387-471c-a1ab-6f8f7c344f96",
+    "file": "/Users/bytedance/mydir/opensource/ohmydsh/.git/ws/operations/12077df1-7387-471c-a1ab-6f8f7c344f96.json",
+    "sha256": "5db7d3821af482c132d3e826b6a12efa5a2656bf381912cacde49aeb0318bc86",
+    "phase": "prepared",
+    "dependencyMode": "lean",
+    "worktreePath": "/Users/bytedance/mydir/opensource/ohmydsh/.worktrees/browser-acceptance-task",
+    "taskBranch": "ws/browser-acceptance-task",
+    "worktreeHead": "fdd1a6538bae4403a64d6fb768840cca21356eb4",
+    "worktreeStatusCount": 0,
+    "statusCompatibility": "passed"
+  },
+  "legacyTargetSessionStore": {
+    "directory": "/Users/bytedance/.dsh/sessions/--Users-bytedance-mydir-opensource-ohmydsh-.worktrees-claude-change-2026-08-20-llm-subscriptions-upgra--",
+    "sessions": [
+      { "id": "47be1443-d794-463f-be91-a7fbf8de790a", "sha256": "1b5a1fa95852a072ece11c606556e0287fa8d1db24accd4397fb1533c97d3743" },
+      { "id": "session-2376fb73-159c-4228-ba3d-fa96690a3abe", "sha256": "dc5d8ae694648b4773793aa2cd47eb1c1598195b3e8d6cb868208a542327d2ad" },
+      { "id": "session-4813b591-c1d3-4c85-8f3a-920021685aa0", "sha256": "85b634cb0b7ce816592cecaffb9ff8cc59a66303c61704156aa184243d97e410" },
+      { "id": "session-d22f0873-1b83-4007-b184-8eb89686092a", "sha256": "4592b4f39ddaa061b4d24183455f27ddda95bf4149ff46a22b82d03255b793b0" }
+    ]
+  },
+  "invariantsAfterRestart": [
+    "operation file identity and sha256 unchanged",
+    "legacy worktree branch and HEAD unchanged",
+    "all four target-worktree Session ids remain present",
+    "all four persisted Session history sha256 values remain unchanged",
+    "no source-session binding is synthesized for the schema-v1 operation"
+  ]
+}

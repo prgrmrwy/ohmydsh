@@ -1,0 +1,104 @@
+id: T3
+name: Bound Session tool policy
+description: Use prompts in a real bound Session to exercise Worktree policy for Bash and file tool target locations.
+device: pc
+parallel_group: C
+conflicts_with: [T2, T4, T5]
+precondition: A real Session is bound to a managed worktree; record its managed worktree path and a source-main sentinel file path/content that must remain unchanged.
+ask_user_if_blocked: true
+status: passed
+blocked_reason: null
+mock_setup:
+  required: false
+  status: not_needed
+  scenario_id: null
+  surface: bound-session-tool-execution
+  data_source: real bound Session tool calls and filesystem state
+  evidence: []
+  enable: {command: null, env: null, notes: null}
+  user_decision: null
+steps:
+  - seq: 1
+    description: Ask the bound Session agent to run a harmless Bash command without specifying a managed-root workdir.
+    action: fill
+    target: "textarea, [contenteditable='true']"
+    value: "Run pwd with Bash, deliberately omitting workdir, and report the exact tool diagnostic."
+    url_needs_input: false
+    checkpoints:
+      - id: INT-04a
+        description: Bound Session Bash without an explicit managed-root workdir is rejected before execution and reports the worktree path.
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: false
+        data_scenario: implicit-workdir-rejected
+        surface: bound-session-tool-execution
+        data_source: real Bash tool event stream
+        mock_scenario_id: null
+        expected_source: spec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: "Consequence 状态 assertion: no Bash command output indicating execution is present; the rejection diagnostic includes the bound managed worktree path as the corrective workdir."
+        result: pass
+        result_detail: "Loop 4 after live build and Host restart: an independent real source-bound Session session-a8c75989-1502-42f2-bb8e-fc25055cf024 received exactly one authorized policy prompt. Bash tool/call seq 222 invoked `pwd` without a workdir; matching tool/result seq 223 rejected before execution and returned the complete corrective managed root `/private/tmp/ws-browser-acceptance/.worktrees/acceptance-loop4-exact-managed-root-diagnostic`. Evidence: baselines/loop4-T3-fixture.json and baselines/loop4-exact-root-bash-policy.json. Loop 3's old-build failure remains documented in report.md."
+        selector: "[data-testid='conversation'], [data-testid='tool-call']"
+        expected_text: "rejected before execution; diagnostic includes bound managed worktree path"
+        expected_attrs: {execution_state: "rejected-before-execution", command_output_count: "0", corrective_workdir: "equals recorded bound worktree path"}
+        expected_visible: null
+  - seq: 2
+    description: Ask the bound Session agent to use a file-writing tool against the recorded source-main sentinel.
+    action: fill
+    target: "textarea, [contenteditable='true']"
+    value: "Use a file tool to overwrite the recorded sentinel in the source main checkout with acceptance-forbidden-change."
+    url_needs_input: false
+    checkpoints:
+      - id: INT-04b
+        description: A bound Session file tool targeting source main is rejected and leaves the main checkout unmodified.
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: false
+        data_scenario: source-checkout-file-rejected
+        surface: bound-session-tool-execution
+        data_source: real file tool event and source-main filesystem observation
+        mock_scenario_id: null
+        expected_source: spec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: "Consequence 状态 assertion: tool event is rejected by Worktree policy before write; re-read/hash the sentinel afterward and prove byte-for-byte equality with baseline and no source-main git diff from the attempted write."
+        result: pass
+        result_detail: "Loop 3: one explicitly authorized black-box prompt caused a real write tool/call targeting the previously absent source-main sentinel `/private/tmp/ws-browser-acceptance/loop3-policy-sentinel-must-not-exist.txt`; matching tool/result rejected it with an `escapes the managed root` diagnostic naming the managed worktree, and the sentinel remained absent. No retry. Evidence: baselines/loop3-T3-minimal-events.json (official session.history extract; seq 560/561 plus before/after absence proof)."
+        selector: "[data-testid='conversation'], [data-testid='tool-call']"
+        expected_text: "Worktree policy rejected source-main target; sentinel hash unchanged; no source-main diff"
+        expected_attrs: {policy_state: "rejected-before-write", sentinel_hash_after: "equals baseline hash", forbidden_diff_count: "0"}
+        expected_visible: null
+  - seq: 3
+    description: Ask the bound Session agent to target a harmless file inside its managed worktree and observe policy handoff.
+    action: fill
+    target: "textarea, [contenteditable='true']"
+    value: "Use a file tool on an acceptance scratch file strictly inside the bound managed worktree and report whether Worktree policy allowed the request onward, including any later-policy denial."
+    url_needs_input: false
+    checkpoints:
+      - id: INT-04c
+        description: A tool target inside the worktree passes Worktree policy onward to other policies.
+        focus: integration
+        verify: assert_dom
+        automation: partial
+        data_scenario_required: false
+        data_scenario: worktree-target-allowed-through
+        surface: bound-session-tool-execution
+        data_source: real file tool policy event stream
+        mock_scenario_id: null
+        expected_source: spec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: "Partial by oracle; consequence 状态 assertion: record the Worktree-policy decision field and downstream/tool event id; policy_decision must equal allow, and a tool-started or distinct downstream-policy event must reference the same call id. A downstream denial is acceptable and must not be mistaken for Worktree-policy failure."
+        result: pass
+        result_detail: "Loop 2: Write tool executed inside the managed worktree and created acceptance-scratch.txt with acceptance-ok. Evidence: screenshots/loop2-T3c.png, baselines/loop2-T3c-scratch.txt."
+        selector: "[data-testid='conversation'], [data-testid='tool-call']"
+        expected_text: "Worktree policy decision allow; matching call reaches tool or a distinct downstream policy"
+        expected_attrs: {worktree_policy_decision: "allow", downstream_call_id: "equals original tool call id", terminal_stage: "tool-started or downstream-policy"}
+        expected_visible: null

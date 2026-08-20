@@ -1,0 +1,52 @@
+{
+  "session_status_before": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "data": {
+        "bound": true,
+        "operationId": "0c0c809c-5f16-4725-bb3e-3dfbc0f81838",
+        "phase": "prepared",
+        "taskBranch": "ws/acceptance-int-02-unique-first-worktree-message",
+        "worktreePath": "/private/tmp/ws-browser-acceptance/.worktrees/acceptance-int-02-unique-first-worktree-message",
+        "dependencyMode": "lean",
+        "lifecycle": "admitted",
+        "cleaned": false
+      }
+    }
+  },
+  "promote": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "data": {
+        "operationId": "0c0c809c-5f16-4725-bb3e-3dfbc0f81838",
+        "phase": "prepared",
+        "repoRoot": "/private/tmp/ws-browser-acceptance",
+        "baseRef": "main",
+        "baseCommit": "1646488d11ca909399ddc499b38e86a364e8310b",
+        "taskBranch": "ws/acceptance-int-02-unique-first-worktree-message",
+        "worktreePath": "/private/tmp/ws-browser-acceptance/.worktrees/acceptance-int-02-unique-first-worktree-message",
+        "dependencyMode": "mutable",
+        "lockFingerprint": "f18d41c5782ab664e5a63449415d9c94bc326b78b41fc5ce064aca365c38d010",
+        "dshHome": "/private/tmp/ws-browser-acceptance/.git/ws/dsh-home/0c0c809c-5f16-4725-bb3e-3dfbc0f81838"
+      }
+    }
+  },
+  "session_status_after": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "data": {
+        "bound": true,
+        "operationId": "0c0c809c-5f16-4725-bb3e-3dfbc0f81838",
+        "phase": "prepared",
+        "taskBranch": "ws/acceptance-int-02-unique-first-worktree-message",
+        "worktreePath": "/private/tmp/ws-browser-acceptance/.worktrees/acceptance-int-02-unique-first-worktree-message",
+        "dependencyMode": "mutable",
+        "lifecycle": "admitted",
+        "cleaned": false
+      }
+    }
+  }
+}
