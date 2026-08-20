@@ -2,7 +2,10 @@ import { defineTool } from '@deepseek-ai/dsh-tools';
 import { wsClean, wsPromote, wsStatus } from './maintenance.js';
 export function targetFor(args, exec) {
     const agent = exec.agent;
-    if (args.path !== undefined) {
+    // Older model/tool clients sometimes materialize an omitted optional string as
+    // `""`. Treat that wire artefact as absent so a bound call still resolves by
+    // Session identity; every non-empty explicit path remains forbidden to Agents.
+    if (args.path !== undefined && args.path !== '') {
         if (agent !== undefined)
             throw new Error('ws explicit path is unavailable to an Agent-bound call; use the Session binding or the path-oriented dsh-ws CLI');
         return args.path;
@@ -12,16 +15,17 @@ export function targetFor(args, exec) {
         throw new Error('ws requires a calling Session binding or an explicit operator recovery path');
     return { sessionId: String(agent.session.id), repoPath };
 }
+/** Agent-visible arguments deliberately exclude operator-only path targeting. */
+export const WS_TOOL_PARAMETERS = {
+    action: { type: 'string', required: true, enum: ['status', 'promote', 'clean'], description: 'Maintenance action for the exact calling Session binding.' },
+    dry_run: { type: 'boolean', description: 'For clean only, preview the safety-proven actions without removing resources.' },
+};
 /** Register the Session-oriented maintenance tool. */
 export function registerWsTool(ctx) {
     return ctx.tools.register(defineTool({
         name: 'ws',
-        description: 'Inspect or promote the current Worktree Session binding; explicit paths remain available for operator recovery and diagnostics. Clean always applies the existing active/dirty/merge safety gates.',
-        parameters: {
-            action: { type: 'string', required: true, enum: ['status', 'promote', 'clean'], description: 'Maintenance action.' },
-            path: { type: 'string', description: 'Optional absolute operator recovery/debug worktree path. Omit to resolve the calling source Session binding.' },
-            dry_run: { type: 'boolean', description: 'For clean, preview the safety-proven actions without removing resources.' },
-        },
+        description: 'Inspect or promote the exact current Worktree Session binding. Clean applies the active/dirty/merge safety gates. Path-oriented operator recovery is available only through dsh-ws or the Skill shell wrapper.',
+        parameters: WS_TOOL_PARAMETERS,
         output: {
             schema: {
                 type: 'object',

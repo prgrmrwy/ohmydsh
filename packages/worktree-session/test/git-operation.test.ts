@@ -98,6 +98,20 @@ describe('Git worktree operation', () => {
     expect(await readFile(join(replay.worktreePath, '.env.local'), 'utf8')).toContain(`DSH_HOME='${replay.dshHome}'`)
   }, 120_000)
 
+  it('prunes a stale registration before recreating a deleted prepared worktree', async () => {
+    const root = await fixture()
+    const request = { operationId: 'operation-repair-worktree', repoPath: root, baseRef: 'main', taskText: 'repair missing worktree', dependencyMode: 'lean' as const }
+    const prepared = await startOperation(request)
+    await rm(prepared.worktreePath, { recursive: true, force: true })
+
+    const stale = await listWorktrees(root)
+    expect(stale.some(entry => entry.path === prepared.worktreePath && entry.prunable)).toBe(true)
+
+    const replay = await startOperation(request)
+    expect(replay).toEqual(prepared)
+    expect((await listWorktrees(root)).some(entry => entry.path === prepared.worktreePath && !entry.prunable)).toBe(true)
+  }, 120_000)
+
   it('resumes one operation id and keeps secrets out of metadata', async () => {
     const root = await fixture()
     const request = { operationId: 'operation-12345678', repoPath: root, baseRef: 'main', taskText: 'Prepare docs', dependencyMode: 'lean' as const }
