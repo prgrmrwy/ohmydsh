@@ -32,6 +32,8 @@ describe('Worktree Session stable runtime context', () => {
     // No dynamic fields leak into the active context.
     expect(first).toContain('/repo/.worktrees/task')
     expect(first).toContain('ws/task')
+    expect(first).toContain('不要再用 pwd、目录枚举或 ws status 例行确认')
+    expect(first).toContain('无 path 的 ws status')
     expect(first).not.toContain('updatedAt')
     expect(first).not.toContain('2026-')
     expect(first).not.toContain('lean')

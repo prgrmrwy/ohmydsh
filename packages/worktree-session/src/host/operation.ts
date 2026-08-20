@@ -144,6 +144,10 @@ async function performStart(request: StartOperationRequest, deps: OperationDeps)
       operation = await saveOperation({ ...operation, phase: 'branch-created' }, now())
       if (!(await validateResource(operation, 'worktree-created', git, runner))) {
         if (await branchExists(operation.repoRoot, operation.taskBranch, git) && !(await isDirectory(operation.worktreePath))) {
+          // A crashed/deleted checkout can leave Git's registration behind.
+          // Prune it before re-adding the recorded branch; otherwise every
+          // replay fails with "missing but already registered worktree".
+          await pruneInvalidRegistrations(operation.repoRoot, git)
           await createTaskWorktree(operation.repoRoot, operation.taskBranch, operation.worktreePath, operation.baseCommit, git)
         }
       }

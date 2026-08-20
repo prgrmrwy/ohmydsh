@@ -13,8 +13,9 @@ export function activeBindingContext(operation) {
         '- 所有本地文件与搜索工具必须使用托管执行目录中的绝对路径。',
         '- 禁止修改主 checkout（源仓库主工作区）。',
         '- 修改依赖（install/uninstall/update）前必须先通过 ws promote。',
+        '- 上述仓库、执行目录与分支已经由 Host 绑定并强制执行；不要再用 pwd、目录枚举或 ws status 例行确认。仅在任务确实需要实时依赖模式/阶段时调用 ws status，且不要传 path。',
         '',
-        '此上下文是稳定绑定不变式；依赖模式、任务阶段与实时状态请通过 ws status 查询。',
+        '此上下文是稳定绑定不变式；动态状态仅按需通过无 path 的 ws status 查询。',
     ].join('\n');
 }
 /** Deterministic terminal context for a cleaned historical binding. */
