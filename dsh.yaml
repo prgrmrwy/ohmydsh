@@ -55,7 +55,18 @@ customizations:
     enabled: true
     brief: 架构图 skill(架构/时序/数据流/生命周期)
     note: repo https://github.com/tt-a1i/archify(14.2k stars,MIT,活跃);skill-only bundle,对话内生成可交互架构图(自包含 HTML/PNG/SVG);后续可配合 B001 架构师角色;需重启生效
-  # 自研(local)包位置见 packages/(本轮暂无);以下为第三方(remote):只存 pin + 记录,不 vendor 源码
+  # 自研(local):首页空白会话首发启动到隔离 Git worktree；验收前保持禁用。
+  - id: worktree-session
+    type: package
+    source: local
+    version: 0.1.0
+    enabled: true
+    brief: Worktree Session 首发隔离(task branch/lean deps/独立 build home)
+    note: '自研 Host+Web bundle；从 base 在首次普通发送时创建唯一 ws/* branch 与 .worktrees/* checkout，不切换主 checkout；npm lean/mutable、.env.local ignored-only 同步、隔离开发 DSH_HOME、安全 status/promote/clean；交互与 Git 探测概念参考 https://github.com/LaoYueHanNi/dsh-git-worktree (MIT，详见 packages/worktree-session/NOTICE)'
+  - id: ws
+    type: skill
+    enabled: true
+  # 以下为第三方(remote):只存 pin + 覆盖 + 记录,不 vendor 源码
   # B004 单机接入 — 官方 codex subagent(接线见下方 patch 条目)
   - id: subagent-codex
     type: package
