@@ -137,6 +137,7 @@ DSH 官方 `standard` preset 会自动加载,无需复制出 `ohmydsh` preset。
 - 只存三样:**精确版本 pin**、**个人覆盖片段**(`patches/<id>.yml`)、**条目说明**(`note`/审查记录);**不 vendor 源码**。
 - 升级 = 改 pin 重跑 sync(默认由 `autoUpdate` 自动完成,见上方「自动升级」;`DSH_SKIP_UPDATE=1` 恢复纯手工改 pin 模式)。
 - **安全提醒**:插件即第三方代码(社区列表明示警告),安装前先看源码,`note` 记录来源与审查结论。
+- **`llm-subscriptions` 订阅 provider 插件**(`dsh-plugin-subscriptions`,当前 pin `0.4.2`):Claude 登录 = 导入本机 Claude Code 凭据(秒登录,不弹 OAuth),升级与选型细见 change `openspec/changes/2026-08-20-llm-subscriptions-upgrade`(含 ADR-0001)。**回滚**:`dsh.yaml` 该条目 `spec`/`version` 改回 `dsh-plugin-subscriptions@0.3.1` / `0.3.1` → `dsh build` → 重启;codex 会话不受影响,可无损回滚。
 
 ## 开发流
 
