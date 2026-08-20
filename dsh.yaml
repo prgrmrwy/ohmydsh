@@ -63,6 +63,14 @@ customizations:
     enabled: true
     brief: Worktree Session 首发隔离(task branch/lean deps/独立 build home)
     note: '自研 Host+Web bundle；从 base 在首次普通发送时创建唯一 ws/* branch 与 .worktrees/* checkout，不切换主 checkout；npm lean/mutable、.env.local ignored-only 同步、隔离开发 DSH_HOME、安全 status/promote/clean；交互与 Git 探测概念参考 https://github.com/LaoYueHanNi/dsh-git-worktree (MIT，详见 packages/worktree-session/NOTICE)'
+  # 自研(local):B013 sidebar 会话行前动态 provider logo
+  - id: sidebar-session-provider-icon
+    type: package
+    source: local
+    version: 0.1.0
+    enabled: true
+    brief: 侧边栏会话行 provider logo(最后一次实际请求)
+    note: 'B013 落地;openspec change sidebar-session-provider-icon;Host 注册 provider session-projection 单元(折叠 request/header→最后一次实际请求的 provider/model,官方 SessionProjectionMap 通道,重启不丢),Web client 轻量 DOM 注入 + row-locator 单模块,不触碰官方 StateDot/时间/菜单/拖拽;未知 provider 首字母 fallback'
   - id: ws
     type: skill
     enabled: true

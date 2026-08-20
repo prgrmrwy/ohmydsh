@@ -152,6 +152,19 @@
   - 待确认:首版仅做普通关键字匹配，还是同时支持短语、大小写、正则或语义搜索。
 - **更新**: 2026-08-20 新增
 
+### [B013] sidebar session 前展示动态 provider logo（表示该会话用的 provider）
+- **状态**: 讨论中
+- **优先级**: P2
+- **背景 / 动机**: 接入订阅制 provider（codex / claude / grok）后，侧边栏里每个 session 用了哪个 provider 只能进到会话内才看得到；希望在 sidebar 每行标题前显示该会话「当前在用的 provider」的动态 logo 图标。
+- **要点**:
+  - provider 基准(2026-08-21 定):该会话**最后一次实际发出的 assistant 请求**的 provider/model；会话中途切模型图标跟随；空白/无请求会话不显示；
+  - 数据链路(2026-08-21 源码核实):官方 `SessionProjectionMap` 可合并扩展；在 host 侧注册一个 `provider` projection 单元(init/apply/view + schema)，折叠会话日志事件记录最后一次请求的 provider/model，值经 `session/projection` 帧流到 `SessionSummary.projectionValues`（官方 title/sessionStats/tokenUsage 同路）——重启不丢、历史会话全有、不存 localStorage；
+  - 渲染路线(2026-08-21 定):**轻量 DOM 注入 + 定位器模块**——不重写官方浏览器（官方 rc.7 / master rc.8 的 session 行无 per-row slot），客户端订阅 sessions.list + MutationObserver 在每行标题前插入 12~14px provider logo SVG；所有 DOM 结构依赖收进独立 `row-locator` 模块（用 role="treeitem" + aria-selected + 标题反查，避免 hashed class），升级只修一处；
+  - 明确边界(2026-08-21 用户强调):**不得影响任务状态 icon（官方 StateDot）**——只读不动，也不替换其位置；时间/菜单/拖拽排序保持官方原样；
+  - logo 来源:各 provider 官方 logo 内联 SVG（codex/OpenAI、claude/Anthropic、grok/xAI、deepseek 等），无需考虑版权；
+  - 替代方案(已在 design 对比):影子替换整个 `sidebar.workspaces`（organizer-sidebar 的 priority:-2 做法，零 hack 但需重画整套浏览器）——因侵入性/可维护性被否；社区 `dsh-sentinel` 的 `sessionRow.branch` 依赖官方没有的 `betterSidebar` 服务契约，不可用。
+- **更新**: 2026-08-21 新增；同日对齐预期（provider 基准 / 轻量 DOM 注入 + 定位器 / 不动 StateDot / 走完整 openspec）。
+
 ---
 
 ## 缺陷备忘
