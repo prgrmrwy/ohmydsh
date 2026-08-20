@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { main } from '../src/cli.js'
-import { startOperation } from '../src/host/operation.js'
+import { bindSource, startOperation } from '../src/host/operation.js'
 
 const exec = promisify(execFile)
 const roots: string[] = []
@@ -36,6 +36,7 @@ describe('dsh-ws CLI', () => {
   it('prints a dry-run cleanup plan after ordinary merge proof', async () => {
     const root = await fixture()
     const prepared = await startOperation({ operationId: 'operation-cli-2', repoPath: root, baseRef: 'main', taskText: 'cli clean', dependencyMode: 'lean' })
+    await bindSource({ operationId: prepared.operationId, repoPath: root, sourceSessionId: 'session-cli-2' })
     await git(root, 'merge', '--no-ff', prepared.taskBranch, '-m', 'merge')
     const chunks: string[] = []
     vi.spyOn(process.stdout, 'write').mockImplementation(chunk => { chunks.push(String(chunk)); return true })

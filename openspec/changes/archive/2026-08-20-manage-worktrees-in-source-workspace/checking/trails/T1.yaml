@@ -1,0 +1,55 @@
+id: T1
+name: Ordinary source Session submit
+description: Verify the disabled Worktree control leaves the ordinary source Workspace Session submission lifecycle unchanged.
+device: pc
+parallel_group: A
+conflicts_with: [T2, T3, T4, T5]
+precondition: A real source Workspace Session is open in the existing DSH GUI and has no worktree binding; record managed worktree/branch inventory before submission.
+ask_user_if_blocked: true
+status: passed
+blocked_reason: null
+mock_setup:
+  required: false
+  status: not_needed
+  scenario_id: null
+  surface: source-session-input
+  data_source: real DSH Session and Git repository state
+  evidence: []
+  enable: {command: null, env: null, notes: null}
+  user_decision: null
+steps:
+  - seq: 1
+    description: Navigate to the existing DSH GUI and open the prepared unbound source Workspace Session.
+    action: navigate
+    target: http://127.0.0.1:3080
+    value: null
+    url_needs_input: false
+    checkpoints: []
+  - seq: 2
+    description: Confirm Worktree is disabled, enter a unique ordinary message, observe submission traffic, and submit once.
+    action: submit
+    target: "form:has(textarea), form:has([contenteditable='true'])"
+    value: "acceptance INT-01 unique ordinary message"
+    url_needs_input: false
+    checkpoints:
+      - id: INT-01
+        description: With Worktree disabled, submission uses the ordinary Session path and creates or binds no worktree.
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: false
+        data_scenario: ordinary-submit
+        surface: source-session-input
+        data_source: real DSH Session, operation state, and Git worktree inventory
+        mock_scenario_id: null
+        expected_source: spec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: "Consequence 状态 assertion: after one submit, the unique message appears once in the same Session; Session remains unbound; managed worktree/branch inventory equals the recorded baseline; network observation must show the ordinary Session submit path rather than /worktree-session/api/* creation/binding routes."
+        result: pass
+        result_detail: "Loop 2: ordinary message appeared once in the original Session with Worktree disabled; post-submit Git inventory contains only main checkout/main branch. Evidence: screenshots/loop2-T1-after.png, baselines/loop2-T1-after-api.json, baselines/loop2-T1-worktrees-after.txt."
+        selector: "[data-testid='worktree-session-status'], [data-testid='conversation']"
+        expected_text: "unique ordinary message exactly once; Session unbound; worktree and branch counts unchanged"
+        expected_attrs: null
+        expected_visible: true

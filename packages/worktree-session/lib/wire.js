@@ -5,5 +5,11 @@ export const ROUTES = {
     operationStatus: '/worktree-session/api/operation-status',
     promote: '/worktree-session/api/promote',
     clean: '/worktree-session/api/clean',
-    handoff: '/worktree-session/api/handoff',
+    bindSource: '/worktree-session/api/bind-source',
+    sessionStatus: '/worktree-session/api/session-status',
+    status: '/worktree-session/api/status',
 };
+/** The persisted binding of a schema-v2 operation, if established. */
+export function bindingOf(operation) {
+    return operation.binding;
+}

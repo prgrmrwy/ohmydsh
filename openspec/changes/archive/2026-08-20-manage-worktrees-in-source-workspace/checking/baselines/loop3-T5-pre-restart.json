@@ -1,0 +1,27 @@
+{
+  "workspaceId": "38ed2378-881c-44f8-8cea-b6dc2ada959e",
+  "sessionId": "session-8b52690f-5279-46c0-a45a-caf2df6b13bd",
+  "operationId": "0c0c809c-5f16-4725-bb3e-3dfbc0f81838",
+  "repoRoot": "/private/tmp/ws-browser-acceptance",
+  "worktreePath": "/private/tmp/ws-browser-acceptance/.worktrees/acceptance-int-02-unique-first-worktree-message",
+  "taskBranch": "ws/acceptance-int-02-unique-first-worktree-message",
+  "baseRef": "main",
+  "facts": {
+    "sourceCheckoutClean": true,
+    "managedWorktreeClean": true,
+    "taskBranchMergedByGitAncestry": true,
+    "sessionArchived": true,
+    "sessionStillAccountedUnderSourceWorkspace": true,
+    "hostDryRunRefusedWhileAgentLive": true,
+    "hostDryRunRefusal": "Refusing to clean a worktree bound to active source Session session-8b52690f-5279-46c0-a45a-caf2df6b13bd"
+  },
+  "requiredAfterRestart": [
+    "Host clean dry-run succeeds only after the archived Session Agent is absent from the live Agent registry",
+    "real clean removes only the exact managed worktree and merged task branch",
+    "operation becomes a cleaned source-session tombstone",
+    "the same Session id remains archived under Workspace 38ed2378-881c-44f8-8cea-b6dc2ada959e with its prior conversation history"
+  ],
+  "sessionLogFile": "/Users/bytedance/.dsh/sessions/--private-tmp-ws-browser-acceptance--/session-8b52690f-5279-46c0-a45a-caf2df6b13bd/session.jsonl.zstd",
+  "sessionLogHash": "8a61760d6d14a65db077986cddad008fdc60db1794a128faf127ee2b22b5492d",
+  "sessionHistoryEventCount": 635
+}

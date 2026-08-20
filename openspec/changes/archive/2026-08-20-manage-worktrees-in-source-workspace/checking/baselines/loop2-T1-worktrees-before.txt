@@ -1,0 +1,8 @@
+worktree /Users/bytedance/mydir/opensource/ohmydsh
+HEAD d12a1857505f2cfeb0c7f599535a0886ba3bc441
+branch refs/heads/main
+
+worktree /Users/bytedance/mydir/opensource/ohmydsh/.worktrees/browser-acceptance-task
+HEAD fdd1a6538bae4403a64d6fb768840cca21356eb4
+branch refs/heads/ws/browser-acceptance-task
+

@@ -1,0 +1,4 @@
+{
+  "request": {"type":"client-request","rpcId":"loop4-t3-session-create-001","method":"session.create","payload":{"workspaceId":"38ed2378-881c-44f8-8cea-b6dc2ada959e"}},
+  "response": {"type":"server-response","rpcId":"loop4-t3-session-create-001","result":{"ok":true,"value":{"sessionId":"session-6062340b-f3df-4b5a-83cc-baa9133b9f77","agentPreset":"standard"}}}
+}

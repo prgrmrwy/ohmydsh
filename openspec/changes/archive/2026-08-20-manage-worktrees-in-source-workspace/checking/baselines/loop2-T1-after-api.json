@@ -1,0 +1,243 @@
+{
+  "workspace_list": {
+    "type": "server-response",
+    "rpcId": "5dc339d1-6e3f-4938-acf0-acd870cc0c93",
+    "result": {
+      "ok": true,
+      "value": {
+        "items": [
+          {
+            "workspaceId": "38ed2378-881c-44f8-8cea-b6dc2ada959e",
+            "path": "/private/tmp/ws-browser-acceptance",
+            "title": "ws-browser-acceptance",
+            "sessionIds": [
+              "session-b4a8ac7c-b88d-4735-8b34-f5e6813be122"
+            ],
+            "createdAt": "2026-08-20T11:25:26.414Z",
+            "updatedAt": "2026-08-20T11:25:26.469Z"
+          },
+          {
+            "workspaceId": "06a41c69-2e75-4217-aa73-4233f4d1981e",
+            "path": "/Users/bytedance/mydir/dev/dev-infra-server",
+            "title": "dev-infra-server",
+            "sessionIds": [
+              "session-3180baca-2acb-4649-a6c0-a9f17b53b301"
+            ],
+            "createdAt": "2026-08-20T07:06:38.864Z",
+            "updatedAt": "2026-08-20T07:06:38.922Z"
+          },
+          {
+            "workspaceId": "ceebb24c-8309-41a2-a2ca-1e431e64f6b1",
+            "path": "/Users/bytedance/mydir/opensource/ohmydsh",
+            "title": "ohmydsh",
+            "sessionIds": [
+              "session-a1f559a0-2d74-4312-8a7d-56e5259371c4",
+              "session-e58f07b4-1cdc-4a11-afea-e8681205ae95",
+              "session-bb912c27-51e7-4c0b-8f3f-778994ae472a",
+              "session-445b8660-722a-4f63-bdb9-ca7f0f5f0e88",
+              "session-36a1817a-3a76-41b8-be9d-5045b9921f09"
+            ],
+            "createdAt": "2026-08-19T21:03:48.954Z",
+            "updatedAt": "2026-08-20T10:04:56.529Z"
+          },
+          {
+            "workspaceId": "117c2452-236d-4254-af3c-4a1ddb7d779d",
+            "path": "/Users/bytedance/mydir/dev/multica-runtime",
+            "title": "multica-runtime",
+            "sessionIds": [
+              "session-6b6f4b85-e79d-404a-b637-0ad51bc2fe8d",
+              "session-d86b9c64-adbd-4f81-8793-66d122a20f31",
+              "session-2507701f-3976-46b0-a890-c6bb93736379",
+              "session-ced9cbb0-37c9-4102-9a78-cbc1894fd021",
+              "session-7eae5283-e3d4-4db7-be40-dfd25aa76b73",
+              "session-d2ec110e-aac1-4692-b83f-a4ffec447d9c",
+              "session-2e5ac7bb-2ac9-4a1d-b661-80421c6ceb06",
+              "session-06846468-0e3e-4bb4-8e4c-fa7af4a568df",
+              "session-2d13a79a-5b25-4f7d-99e0-2b78f7c5acfb"
+            ],
+            "createdAt": "2026-08-13T16:31:08.310Z",
+            "updatedAt": "2026-08-19T08:11:46.319Z"
+          },
+          {
+            "workspaceId": "bb19dc5f-99a4-4e87-aa65-68fb08dd976e",
+            "path": "/Users/bytedance/mydir/dev/nexus",
+            "title": "nexus",
+            "sessionIds": [
+              "session-b71a93b0-b827-41f1-a1a4-3fdd419ca54a",
+              "session-0dd748ed-7981-4980-8adf-aed917abcb07",
+              "session-9d903369-cc76-46e9-8aa1-1b4d73f7e608",
+              "session-c66ab461-a3bc-4caa-af75-73a0f3ba76fc",
+              "session-dc4f4564-fb5f-451f-8360-3f515c55c506",
+              "session-0a68d75b-6d0f-4d0e-8fb2-949952b49a9e"
+            ],
+            "createdAt": "2026-08-13T14:43:23.559Z",
+            "updatedAt": "2026-08-20T10:45:53.591Z"
+          }
+        ],
+        "archivedSessionIds": [
+          "session-2e5ac7bb-2ac9-4a1d-b661-80421c6ceb06",
+          "session-06846468-0e3e-4bb4-8e4c-fa7af4a568df",
+          "session-d2ec110e-aac1-4692-b83f-a4ffec447d9c",
+          "session-ced9cbb0-37c9-4102-9a78-cbc1894fd021",
+          "session-2d13a79a-5b25-4f7d-99e0-2b78f7c5acfb",
+          "session-7eae5283-e3d4-4db7-be40-dfd25aa76b73",
+          "session-74657de3-4f48-47b0-8653-7aef89016f36",
+          "session-d44e5797-4286-4ed0-aaea-7ff82d20b162",
+          "session-68044e7a-98b9-4e44-9f20-74eb65c7f729",
+          "session-51bb18df-ad51-4256-9b8c-cd07c8340dfb",
+          "session-2507701f-3976-46b0-a890-c6bb93736379",
+          "session-7db0b8be-d55e-4e37-8358-bcb097a01f91",
+          "session-15a9f079-47f9-47e1-a470-6dda42671772",
+          "session-d86b9c64-adbd-4f81-8793-66d122a20f31",
+          "session-d8cd5b2a-d0e7-444b-9381-b7f1000c5a93",
+          "session-add64c9f-0be0-4873-b6c9-25d55cbb11ad",
+          "session-685bd336-7c5b-421e-8933-897b64be9648",
+          "session-b90655e4-e21f-4215-af7f-198d3e4ccd58",
+          "session-8ae0d05b-adf1-4f0d-9269-63ca64a5d378",
+          "session-6b6f4b85-e79d-404a-b637-0ad51bc2fe8d",
+          "session-be5482c8-fecc-4cf4-8a82-0dbbe9d432a9",
+          "session-77e49055-9898-48a3-9e54-b5b15b23c257",
+          "session-19e1c93d-b3d3-45f9-8c3d-d4830d6f9b05",
+          "session-960e2819-8a8e-4e79-884d-bea93633e354",
+          "session-e907ac6b-db21-4082-b8ae-a0bb387c19b0",
+          "session-e8cfa771-146c-4fd7-9d0e-44bb869e3469",
+          "session-219e535c-40a1-473c-8ac6-768ddba56af5",
+          "session-983f7da7-72ab-4afc-89c1-5c9c8e50b80b",
+          "session-42164c3a-d126-4fef-b7a6-594a764913ea",
+          "session-e01185f6-3bf2-4a51-8608-ac852a057a6f",
+          "session-36a1817a-3a76-41b8-be9d-5045b9921f09",
+          "session-d22f0873-1b83-4007-b184-8eb89686092a",
+          "session-dc4f4564-fb5f-451f-8360-3f515c55c506",
+          "session-4813b591-c1d3-4c85-8f3a-920021685aa0",
+          "session-c66ab461-a3bc-4caa-af75-73a0f3ba76fc",
+          "session-bb912c27-51e7-4c0b-8f3f-778994ae472a",
+          "session-e58f07b4-1cdc-4a11-afea-e8681205ae95",
+          "session-0dd748ed-7981-4980-8adf-aed917abcb07"
+        ]
+      }
+    }
+  },
+  "history": {
+    "type": "server-response",
+    "rpcId": "3cd929b1-226a-4aa0-8bd1-405a0e31ff26",
+    "result": {
+      "ok": true,
+      "value": {
+        "events": [
+          {
+            "event": {
+              "type": "permission/preset",
+              "seq": 0,
+              "time": 1787225126467,
+              "data": {
+                "preset": "danger-full-access"
+              }
+            }
+          },
+          {
+            "event": {
+              "type": "sandbox/mode",
+              "seq": 1,
+              "time": 1787225126468,
+              "data": {
+                "mode": "danger-full-access"
+              }
+            }
+          },
+          {
+            "event": {
+              "type": "approval/policy",
+              "seq": 2,
+              "time": 1787225126468,
+              "data": {
+                "policy": "never"
+              }
+            }
+          }
+        ],
+        "hasMore": false,
+        "projections": {
+          "asOfSeq": 2,
+          "values": {
+            "sessionStats": {
+              "turns": 0,
+              "steps": 0,
+              "llmMs": 0,
+              "toolMs": 0,
+              "ttftMs": 0,
+              "ttftSteps": 0,
+              "decodeMs": 0,
+              "decodeTokens": 0
+            },
+            "title": null,
+            "goal": null,
+            "tokenUsage": {
+              "uncachedInputTokens": 0,
+              "outputTokens": 0,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "contextPressure": {},
+            "contextBreakdown": {
+              "systemTokens": 0,
+              "toolsTokens": 0,
+              "messageTokens": 0
+            },
+            "subagentTiming": {
+              "settledMs": 0
+            },
+            "subagent": null,
+            "costUsage": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "reasoning": 0,
+              "cost": 0,
+              "byModel": {},
+              "byProviderModel": {}
+            },
+            "permissions": {
+              "options": [
+                {
+                  "value": "read-only",
+                  "name": "read-only"
+                },
+                {
+                  "value": "workspace-write",
+                  "name": "workspace-write"
+                },
+                {
+                  "value": "danger-full-access",
+                  "name": "danger-full-access"
+                }
+              ],
+              "currentValue": "danger-full-access"
+            },
+            "sessionListMetadata": {
+              "blank": true,
+              "lastPromptAt": null
+            },
+            "imageLimits": {
+              "maxImageBytes": 5242880,
+              "maxImagesPerMessage": 20,
+              "maxMessageImageBytes": 104857600,
+              "maxImagePixels": 40000000,
+              "mediaTypes": [
+                "image/png",
+                "image/jpeg",
+                "image/webp",
+                "image/gif"
+              ]
+            },
+            "todos": null,
+            "plan": {
+              "active": false,
+              "pending": false
+            }
+          }
+        }
+      }
+    }
+  }
+}

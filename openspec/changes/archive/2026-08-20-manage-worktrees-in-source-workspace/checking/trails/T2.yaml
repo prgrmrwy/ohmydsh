@@ -1,0 +1,91 @@
+id: T2
+name: First Worktree submit and entity preservation
+description: Create the first Worktree binding from a blank source Session and prove message admission and DSH entity invariants.
+device: pc
+parallel_group: B
+conflicts_with: [T1, T3, T4, T5, T6]
+precondition: A blank, unbound source Workspace Session is open; record its Session identity, owning Workspace identity, Workspace count, Session registry, and Git worktree/branch inventory.
+ask_user_if_blocked: true
+status: passed
+blocked_reason: null
+mock_setup:
+  required: false
+  status: not_needed
+  scenario_id: null
+  surface: source-session-input
+  data_source: real DSH Session, registry, operation, and Git state
+  evidence: []
+  enable: {command: null, env: null, notes: null}
+  user_decision: null
+steps:
+  - seq: 1
+    description: Navigate to the prepared blank source Workspace Session in the existing GUI.
+    action: navigate
+    target: http://127.0.0.1:3080
+    value: null
+    url_needs_input: false
+    checkpoints: []
+  - seq: 2
+    description: Wait for the Worktree controls to be ready; the next submit action includes selecting base main and enabling Worktree.
+    action: wait_for
+    target: "[data-testid='worktree-session-controls']"
+    value: null
+    url_needs_input: false
+    checkpoints: []
+  - seq: 3
+    description: Select base main, enable Worktree, enter the unique first message, and submit exactly once while observing /worktree-session/api/* traffic.
+    action: submit
+    target: "[data-testid='worktree-session-controls'], form:has(textarea), form:has([contenteditable='true'])"
+    value: "acceptance INT-02 unique first worktree message"
+    url_needs_input: false
+    checkpoints:
+      - id: INT-02
+        description: The first Worktree submit creates exactly one task branch/worktree and admits the first message exactly once in the same Session.
+        focus: integration
+        verify: assert_network
+        automation: full
+        data_scenario_required: false
+        data_scenario: first-worktree-submit
+        surface: source-session-input
+        data_source: real DSH Session operation and Git worktree/branch state
+        mock_scenario_id: null
+        expected_source: spec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: "Consequence 状态 assertion: compare before/after Git inventory; exactly one new task branch and one new worktree correspond to this Session, the Session identity is unchanged and bound to that worktree, and the unique first message appears exactly once in its conversation."
+        result: pass
+        result_detail: "Loop 2: first Worktree submit created exactly one managed worktree and one ws/* branch, retained Session session-8b52690f-5279-46c0-a45a-caf2df6b13bd, and admitted the unique message once. Evidence: screenshots/loop2-T2-after.png, baselines/loop2-T2-worktrees-before.txt, baselines/loop2-T2-worktrees-after.txt, baselines/loop2-T2-after-api.json."
+        expected_url: "/worktree-session/api/*"
+        expected_method: POST
+        expected_params: null
+        expected_status: null
+        expected_response: null
+  - seq: 4
+    description: Inspect the Workspace and Session registry after the Worktree submission.
+    action: click
+    target: "[data-testid='workspace-sidebar'], [aria-label*='Workspace']"
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: INT-03
+        description: Worktree submission adds no top-level Workspace or target Session and preserves source Session identity and ownership.
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: false
+        data_scenario: before-after-worktree-submit
+        surface: workspace-session-registry
+        data_source: real DSH Workspace and Session registry
+        mock_scenario_id: null
+        expected_source: spec
+        expected_unverified: false
+        input_method: null
+        class: deterministic
+        reviewer_notes: "Consequence 状态 assertion: Workspace count equals baseline; the original Session id still belongs to the original source Workspace; no additional top-level Workspace and no target Session exists, while the same Session carries the worktree binding."
+        result: pass
+        result_detail: "Loop 2 Host API registry before/after shows Workspace 38ed2378-881c-44f8-8cea-b6dc2ada959e and the same source Session; no target Workspace/Session was created. Evidence: baselines/loop2-fixture-api.json, baselines/loop2-T2-after-api.json."
+        selector: "[data-testid='workspace-sidebar'], [data-testid='session-list']"
+        expected_text: "original source Workspace and Session identity retained; no additional Workspace or target Session"
+        expected_attrs: null
+        expected_visible: true
