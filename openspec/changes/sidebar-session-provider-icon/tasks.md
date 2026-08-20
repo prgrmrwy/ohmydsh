@@ -27,4 +27,4 @@
 
 - [x] 5.1 `npm run build` + typecheck in the package; fix any leaf diagnostics.
 - [x] 5.2 `node scripts/sync.mjs` then `dsh build`; confirm the bundle loads (`dsh --profile web --dump-config` shows the row, log has no load errors).
-- [ ] 5.3 Restart acceptance: sidebar shows provider logos per session (incl. history after restart), logo updates when a session switches provider, official `StateDot`/time/menu/drag unchanged, blank sessions show no logo.
+- [ ] 5.3 Restart acceptance (real GUI deployment, user-driven): sidebar shows provider logos per session (incl. history after restart), logo updates when a session switches provider, official `StateDot`/time/menu/drag unchanged, blank sessions show no logo. NOTE: main checkout holds uncommitted parallel schema-v2 work; merge to main is handled by the user in a separate session.
