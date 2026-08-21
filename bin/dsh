@@ -47,11 +47,10 @@ PROFILE_PKG="$DSH_HOME/profiles/$PROFILE/package.json"
 STARTUP_LOG="$DSH_HOME/dsh-startup.log"
 
 # Repo default registry: the committed repo .npmrc wins for every child
-# npm/npx process, overriding user-level config (~/.npmrc may point at a
-# lagging mirror like bnpm.byted.org, causing "new version detected but
-# install fails" — 0.1.1-rc.1 ETARGET on 2026-08-21). check-update.mjs
-# (version detection) already targets npmjs, so installs must match.
-# Explicit npm_config_registry / NPM_CONFIG_REGISTRY / .env.local still take
+# npm/npx process, overriding user-level ~/.npmrc, so version detection
+# (check-update.mjs → npmjs) and installs use the same source. The repo and
+# its lockfiles must not depend on internal mirrors. Explicit
+# npm_config_registry / NPM_CONFIG_REGISTRY / .env.local still take
 # precedence. NB: npm 11 honors the lowercase npm_config_* env form only.
 if [[ -f "$REPO/.npmrc" ]]; then
   REPO_REGISTRY="$(sed -n 's/^[[:space:]]*registry[[:space:]]*=[[:space:]]*"\{0,1\}\([^"[:space:]]*\)"\{0,1\}[[:space:]]*/\1/p' "$REPO/.npmrc" | head -1)"
