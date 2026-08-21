@@ -2,74 +2,67 @@
 
 ## Context
 
-动机见 proposal.md。现状约束（均已源码核实）：
+官方侧边栏 session 行没有 per-row slot，因此渲染仍采用轻量 DOM 注入，所有 DOM 假设集中在 `row-locator.ts`。需求口径经实机反馈修订：logo 应表示输入框当前选择，而非只表示最后请求；品牌图必须使用真实下载资产而非手绘近似图。
 
-- Web 侧边栏的 session 行由官方 `@deepseek-ai/dsh-client-ui-workspace` 渲染（`SessionNodeItem`），行结构固定为 `[状态点 slot][标题][时间][行菜单]`，**没有 per-session-row 的 slot 注入点**（已安装 rc.7 与 GitHub master rc.8 的 `Rows.tsx` 均确认）。社区 `dsh-sentinel` 使用的 `sidebar.workspaces.sessionRow.branch` 依赖官方不存在的 `betterSidebar` 服务契约，装上也不渲染。
-- 数据面存在官方标准通道：`@deepseek-ai/dsh-session-projection` 的 `SessionProjectionMap` 是 **declaration-merge 可扩展**的 projection 表，host 侧注册单元后，框架订阅/驱动、持久化缓存（`(sessionId, key, ver, seq, val)`）、随列表帧下发到 `SessionSummary.projectionValues`。官方 `title` / `sessionStats` / `tokenUsage` 均走此路。
-- provider/model 的真相源：session 日志的 `request/header` 事件携带 `EpochHeader.config`（`LlmCallConfig { provider, model, … }`），且**只在路由/容量变化时 append**（canonical equality），因此 fold 到最新一条 `request/header` 即"最后一次实际请求"的路由。`assistant/message` 不直接携带 provider。
+官方 model-selection 的实现提供恰当数据面：
+
+- `ctx.modelDirectories.directoryFor(sessionId).store.current` 是输入框 selector 与 `/model` 命令共享的状态；
+- `current` 类型为 `{ provider, model, reasoningEffort? }`，含义是“下一次 assembled step 的模型选择”；
+- `session.selectModel` 成功后 store 同步更新，失败则保留旧选择；
+- store 支持 `getSnapshot()` + `subscribe()`，无需拦截 DOM 点击或自行调用 RPC。
 
 ## Goals / Non-Goals
 
 **Goals:**
-- 用官方 projection 通道（不引入新 API/协议）让 host 侧为每个会话维护 `provider` 投影值并流到客户端。
-- 在侧边栏 session 行标题前渲染动态 provider logo，切 provider / 重启后依然准确，不存 localStorage。
-- 将 DOM 结构依赖**收敛到单一模块**，使升级时只修一处、失败无害降级。
+- 当前打开 session 的 icon 随输入框选择成功立即变化，不等待发送消息。
+- 冷历史 session 仍可凭持久请求投影显示近似当前品牌，不使用 localStorage。
+- 使用下载落盘的真实品牌 SVG，正确区分 DeepSeek、OpenAI/GPT、OpenCode 等。
+- 保持 StateDot、时间、菜单、拖拽完全不变。
 
 **Non-Goals:**
-- 不实现"影子替换整个 sidebar.workspaces"（organizer-sidebar 的 `priority:-2` 做法）。
-- 不修改官方 `sessionRow` 渲染的任何既有元素；`StateDot` 状态点保持只读原样。
-- 不做 per-session provider 的选择页/管理 UI；不处理模型能力差异（视觉路由等）——那是别的 capability。
-- 无 provider 值的行不做任何插入修改（避免空行占位跳动）。
+- 不为所有历史 session 主动恢复 agent 或逐个调用 `session.models`；这会改变运行状态并产生不必要开销。
+- 不影子替换整棵 sidebar。
+- 不在浏览器运行时访问外部图标 CDN。
 
 ## Decisions
 
-### D1 数据单元：host 侧注册 `provider` session-projection 键
-在自研 host 侧注册一个 `ProjectionDefinition`，键 `provider`、`stateVersion: 1`：
-- `init()` → `{ provider: string | null, model: string | null }`（空日志无值）。
-- `apply(state, event)` → 仅对 `event.type === 'request/header'` 更新为 `{ provider: header.config.provider, model: header.config.model }`；其它事件原引用返回（零下游工作）。这是纯同步折叠，满足 projection 单元契约（MUST 同步、state 必须 plain JSON）。
-- `view(state)` → 无 provider 时返回 `null`（`provider: null`），否则返回 `{ provider, model }`；schema 用 zod 校验。
-- 由 `ctx.inject(['sessionProjections'], …)` 注册，headless 组合无服务时不受影响（官方约定）。
+### D1 数据优先级：selector store > last-request projection
 
-**为什么选它**：官方投影通道自动处理订阅/驱动/持久化缓存/帧下发，重启后 host 用缓存+日志尾巴重 fold，所有历史会话的 provider 都可用——客户端零计算、零 localStorage。**替代方案**：
-- 客户端逐会话打开读 `conversation.requestConfig`：要为每个历史会话拉历史、成本高且不持久；
-- 客户端 localStorage 记录：换浏览器/清缓存即丢，且与"真相在 host 日志"的模型相悖。
-两者均被否。
+客户端维护本进程观察到的 `sessionId → {provider,model}` map：
 
-### D2 渲染：轻量 DOM 注入 + `row-locator` 模块（不用影子替换）
-新增 web client 插件：
-- 订阅 `ctx.sessions.list`（每行 summary 已带 `projectionValues.provider`），维护 `sessionId → provider` 映射。
-- 用 `MutationObserver` 观察侧边栏 session 树区（`sidebar.workspaces` 渲染所在节点），在**新出现的 session 行**上插入 logo；行被移除时同步清理。全部 DOM 结构知识收进 `src/client/row-locator.ts` 单一模块。
-- row-locator 的定位策略（**不用 hashed 完整类名**）：
-  1. 主锚：`[role="treeitem"]` 且类名以 `sessionRow` 结尾（CSS Modules 产物保留局部类名后缀 `…_sessionRow`，升级仅前缀 hash 变化时仍可命中；`projectRow`/folder 行作为排除条件）；
-  2. 行识别后，取其标题 `span[class$="title"]` 文本，与 sessions.list 的 `displayTitle` 反查对应 `sessionId`（重复标题按行内已插入集合去重 + 顺序兜底）；
-  3. 严苛失败时（无匹配行/结构异常）**安全不插**：不抛未捕获异常，不向错误行注入。
-- 只在 `projectionValues.provider` 非空时插入；插入位置为标题文本前的一个独立 `<span>`（logo svg），**不影响状态点 / 时间 / 菜单 / 拖拽**。
+1. `sessions.list.current` 变化时，解析当前 session 的 `ModelDirectory`；
+2. 订阅 `directory.store`，`current` 非空时写入 map 并 reconcile；
+3. 首次 `current === null` 时调用官方 `directory.load()`，让输入框和侧栏共享同一加载；
+4. session 离开 current 后保留最近观察值；再次切回会重新订阅并刷新；
+5. 未观察到 selector 值的历史行回退到 `projectionValues.provider`。
 
-**为什么选它**：官方无 per-row slot，能凑齐"每行一个动态图标且不动官方结构"的入口只有「替换整棵浏览器」或「DOM 注入」。替换整棵（D3）运维成本高、与官方功能脱节；DOM 注入最轻，且本项目 B010/B003 已有"复用社区轻量方案"先例。脆弱面用单一 `row-locator` + 降级策略兜底。
+这保证即时切换，同时不批量唤醒历史 agent。host projection 继续折叠 `request/header`，但语义明确为 cold fallback，不再宣称是所有行的主真相源。
 
-### D3（否决）影子替换 `sidebar.workspaces`
-organizer-sidebar 用 `priority:-2` 把单槽位 `sidebar.workspaces` 整个顶替，需自建分组/搜索/拖拽/菜单/状态点。零 hack（用的是官方 declared slot），但把所有功能面拉入维护范围，官方每个版本加功能都要跟着抄，正是用户反感的"侵入性/可维护性"问题。**否决**，记录以证权衡。
+### D2 品牌映射：已知 provider route 优先，model 作为未知-route fallback
 
-### D4 provider → logo 映射与未知 provider
-client 内置一小张「provider 名 → 内联 SVG」映射表，覆盖已知 provider（从 provider 名判断：`codex`/openai、`claude`/anthropic、`grok`/xAI、`deepseek` 等），用官方品牌 logo（用户确认无需考虑版权）。未知 provider 用中性 fallback（首字母圆标，避免误导）。logo 约 12~14px，`title` 属性带 provider/model 提示（若有 model）。
+真实会话 route 抽样确认 `opencode-go/deepseek-v4-flash`：这里品牌应是 OpenCode，而不是 model 名里的 DeepSeek。因此 `brandKeyOf(provider, model)` 先识别已知 route（`opencode-go`、`deepseek-official`、`codex`、`claude`、`grok`），仅当 route 为未知/通用兼容层时再按 model 推断。未知值使用中性首字母。
 
-### D5 打包与接线
-按 repo-layout：新增 `packages/sidebar-session-provider-icon/` 本地自研包（`dsh.bundle` + `cordis.patch.yml` + `src/`），manifest `dsh.yaml` 加一条 `source: local` 的 package 定制；client 面按官方 `dsh.client.platform: "web"` + `inject` 声明，host 面注册 projection 单元。走 `scripts/sync.mjs` + `dsh build` 物化，重启生效。
+### D3 资产：固定来源下载落盘，构建时 text loader 内联
+
+- DeepSeek、OpenAI、Anthropic、Grok：`@lobehub/icons-static-svg@1.94.0`（MIT）；
+- OpenCode：`anomalyco/opencode@5e75e5e9901f0d178f425bfb47f1bd46cbe78a59` 官方 provider SVG（MIT）。
+
+SVG 文件保存在 `src/client/assets/`；tsdown `loader: { '.svg': 'text' }` 将其编入 `lib/client.js`。不手写 path，不运行时联网。
+
+### D4 渲染边界保持不变
+
+MutationObserver 只维护标题前的独立 badge span；`row-locator.ts` 是唯一 DOM 耦合点。官方 StateDot、时间、菜单、拖拽节点不读写。定位失败静默跳过。
 
 ## Risks / Trade-offs
 
-- **DOM 结构脆弱（升级风险）** → 全部收敛于 `row-locator`（单一改动点）；后缀锚 + 文本反查即可命中目标；定位失败一律静默降级为不显示，绝不误插/报错。
-- **class 名完全重命名（css-modules 局部名改掉）** → row-locator 退化为 title 文本反查 + 行菜单锚点；仍失败则安全不显示（spec 已约定该降级）。
-- **投影键长期归属** → `stateVersion: 1` 起步，后续决定变更时 bump，旧缓存自动丢弃。
-- **重复标题会话反查错行** → 行内已插入集合去重 + 顺序兜底；错误注入的代价只是 logo 短暂错位，会被下一次观察修正。
-- **注入导致布局抖动** → 无 provider 值不插；插入使用固定 14px 内联元素且不替换官方元素，布局影响仅标题前多 2~4px。
+- **只即时观察 current session**：离屏历史 session 如果在别的客户端进程切换但未发送请求，本客户端无法知道；主动逐一恢复/拉取所有历史 agent 成本更高且有副作用，因此接受 projection fallback 的有限陈旧性。
+- **第三方品牌资产更新**：资产锁版本/commit，升级显式进行，避免 CDN 漂移。
+- **route 命名持续演进**：优先维护已知 route 映射；未知兼容 route 可按 model fallback，仍无法识别则显示中性 fallback，不误冒充。
+- **DOM 升级风险**：继续集中在 row-locator，并以不显示作为安全降级。
 
-## Migration Plan
+## Migration / Acceptance
 
-1. 实现本 change（包 + manifest 条目），commit 后 `node scripts/sync.mjs` + `dsh build` 物化到 `~/.dsh`。
-2. 重启 DSH：确认 host 侧 projection 生效（`dsh --profile web --dump-config` 能看到新包行 / 日志无加载错误）、client 侧 sidebar 每行出现 logo。
-3. 回滚：删 manifest 条目 + sync + 重启（plugin bundle 卸载即还原官方行渲染）；不改动任何官方文件。
-
-## Open Questions
-
-无。数据源（`request/header`）、投影表扩展点、渲染入口（DOM 注入）均已核实，spec/设计/任务无需再依赖未知项。
+1. build/typecheck/test；确认真实 SVG 被编入 client bundle。
+2. sync 到隔离 DSH_HOME，检查 plugin host/client 加载。
+3. GUI 验收：选 DeepSeek/GPT/OpenCode 时 icon 正确；不发送消息直接切模型，当前行立即更新；StateDot/时间/菜单/拖拽不变。
+4. 用户确认后经受控合入；重启真实 DSH 生效。
