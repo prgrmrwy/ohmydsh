@@ -164,8 +164,8 @@ async function atomicWrite(file, content) {
   }
 }
 
-async function dirHash(dir) {
-  const entries = await collectFiles(dir)
+async function filesHash(dir, options = {}) {
+  const entries = await collectFiles(dir, dir, options)
   const h = createHash('sha256')
   for (const rel of entries.sort()) {
     h.update(rel + '\0')
@@ -174,15 +174,90 @@ async function dirHash(dir) {
   return h.digest('hex')
 }
 
-async function collectFiles(dir, base = dir) {
+async function dirHash(dir) {
+  return filesHash(dir)
+}
+
+async function collectFiles(dir, base = dir, options = {}) {
   const out = []
+  const excludeDirs = new Set(options.excludeDirs ?? [])
+  const excludeFiles = new Set(options.excludeFiles ?? [])
   for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const rel = path.relative(base, path.join(dir, entry.name)).split(path.sep).join('/')
     if (entry.name.startsWith('.') || entry.name === 'node_modules') continue
+    if (entry.isDirectory() && excludeDirs.has(rel)) continue
+    if (entry.isFile() && (excludeFiles.has(entry.name) || excludeFiles.has(rel))) continue
     const full = path.join(dir, entry.name)
-    if (entry.isDirectory()) out.push(...await collectFiles(full, base))
+    if (entry.isDirectory()) out.push(...await collectFiles(full, base, options))
     else if (entry.isFile()) out.push(path.relative(base, full))
   }
   return out
+}
+
+async function localBuildInputHash(dir) {
+  const entries = await collectFiles(dir, dir, {
+    excludeDirs: ['lib', 'node_modules', 'test', 'tests', 'checking', 'coverage'],
+    excludeFiles: ['package-lock.json', 'npm-debug.log'],
+  })
+  const selected = entries.filter((rel) => {
+    const normalized = rel.split(path.sep).join('/')
+    const base = path.posix.basename(normalized)
+    return normalized.startsWith('src/') ||
+      normalized === 'package.json' ||
+      base === 'build.mjs' ||
+      /^tsconfig(?:\..+)?\.json$/.test(base) ||
+      /^(?:tsdown|vite|rollup|esbuild)\.config\.[cm]?[jt]s$/.test(base)
+  })
+  const h = createHash('sha256')
+  for (const rel of selected.sort()) {
+    h.update(rel + '\0')
+    h.update(await readFile(path.join(dir, rel)))
+  }
+  return h.digest('hex')
+}
+
+async function localInstallContentHash(dir) {
+  const pkg = readJson(path.join(dir, 'package.json'))
+  const included = new Set(['package.json', pkg?.dsh?.bundle?.patch, ...(pkg?.files ?? [])].filter(Boolean))
+  const entries = await collectFiles(dir, dir, {
+    excludeDirs: Array.isArray(pkg?.files) && pkg.files.length > 0
+      ? ['node_modules', 'src', 'test', 'tests', 'checking', 'coverage']
+      : ['node_modules', 'test', 'tests', 'checking', 'coverage'],
+    excludeFiles: ['package-lock.json', 'tsconfig.json', 'tsconfig.client.json', 'tsdown.config.ts', 'vitest.config.ts'],
+  })
+  const selected = Array.isArray(pkg?.files) && pkg.files.length > 0
+    ? entries.filter((rel) => {
+        const normalized = rel.split(path.sep).join('/')
+        return [...included].some((item) => normalized === item || normalized.startsWith(`${item}/`))
+      })
+    : entries
+  const h = createHash('sha256')
+  for (const rel of selected.sort()) {
+    h.update(rel + '\0')
+    h.update(await readFile(path.join(dir, rel)))
+  }
+  return h.digest('hex')
+}
+
+function localBuildOutputsExist(dir, pkg) {
+  if (typeof pkg?.scripts?.build !== 'string') return true
+  const files = Array.isArray(pkg.files) ? pkg.files : []
+  const outputRoots = files.filter((entry) => typeof entry === 'string' && entry !== '')
+  if (outputRoots.length === 0) return existsSync(path.join(dir, 'lib'))
+  return outputRoots.every((entry) => existsSync(path.join(dir, entry)))
+}
+
+function runLocalBuild(item, dir) {
+  const pkg = readJson(path.join(dir, 'package.json'))
+  if (typeof pkg?.scripts?.build !== 'string') return true
+  change(`build local package ${pkg.name ?? item.id}`)
+  const result = spawnSync('npm', ['run', 'build', '--workspace', pkg.name], {
+    cwd: REPO,
+    stdio: 'inherit',
+  })
+  if (result.status === 0) return true
+  fail(`local package ${pkg.name ?? item.id}: npm run build --workspace ${pkg.name} failed before deployment`)
+  return false
 }
 
 async function loadState() {
@@ -403,17 +478,32 @@ async function syncPackages(manifest, items) {
   state.managedPackages = [...currentNames]
   await saveState(state)
 
-  // install / pin-check enabled ones. Local file dependencies are copied into
-  // the profile rather than symlinked; version equality alone therefore cannot
-  // prove the installed bytes are current. Persist a source-content hash and
-  // force remove+add whenever it changes (or when upgrading old hashless state).
+  // Local file dependencies are copied into the profile rather than symlinked.
+  // Build from source before any remove/reinstall, then compare only publishable
+  // bytes. Build-input and install-content identities are deliberately separate.
   const previousLocalHashes = state.localPackageHashes ?? {}
+  const previousBuildInputs = state.localPackageBuildInputs ?? {}
   const nextLocalHashes = {}
+  const nextBuildInputs = {}
   for (const item of enabled) {
     const name = names.get(item.id)
     const localDir = item.source === 'local' ? path.join(REPO, 'packages', item.id) : undefined
     const spec = localDir === undefined ? item.spec : `file:${localDir}`
-    const localHash = localDir === undefined ? undefined : await dirHash(localDir)
+    let localHash
+    let buildInputHash
+    if (localDir !== undefined) {
+      const localPkg = readJson(path.join(localDir, 'package.json'))
+      buildInputHash = await localBuildInputHash(localDir)
+      const needsBuild = typeof localPkg?.scripts?.build === 'string' && (
+        previousBuildInputs[name] !== buildInputHash || !localBuildOutputsExist(localDir, localPkg)
+      )
+      if (needsBuild && !runLocalBuild(item, localDir)) continue
+      if (!localBuildOutputsExist(localDir, localPkg)) {
+        fail(`local package ${name}: build outputs are missing after build readiness check`)
+        continue
+      }
+      localHash = await localInstallContentHash(localDir)
+    }
     const current = installedVersion(name)
     let installed = true
     if (current !== undefined && item.source === 'remote' && current !== item.version) {
@@ -433,9 +523,13 @@ async function syncPackages(manifest, items) {
     } else {
       log(`package ${name}@${current} up-to-date`)
     }
-    if (installed && localHash !== undefined) nextLocalHashes[name] = localHash
+    if (installed && localHash !== undefined && buildInputHash !== undefined) {
+      nextLocalHashes[name] = localHash
+      nextBuildInputs[name] = buildInputHash
+    }
   }
   state.localPackageHashes = nextLocalHashes
+  state.localPackageBuildInputs = nextBuildInputs
   await saveState(state)
 
   // normalize bundles: shipped base (non-managed) entries first, then enabled managed in manifest order.
@@ -510,6 +604,8 @@ async function doReset(manifest) {
     delete state[key]
   }
   delete state.managedPackages
+  delete state.localPackageHashes
+  delete state.localPackageBuildInputs
   delete state.managedDependencies
   delete state['managed:preset']
   delete state['managed:skill']

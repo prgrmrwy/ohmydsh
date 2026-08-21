@@ -38,12 +38,17 @@ Backlog 条目：[B013](../../BACKLOG.md)。设计与取舍见 OpenSpec change `
 
 ## 开发
 
+依赖由仓库根 workspace 统一安装，`lib/` 是 gitignored 构建产物：
+
 ```sh
+# 在仓库根执行
 npm install
-npm run typecheck
-npm test
-npm run build
+npm run typecheck --workspace dsh-sidebar-session-provider-icon
+npm test --workspace dsh-sidebar-session-provider-icon
+npm run build --workspace dsh-sidebar-session-provider-icon
 ```
+
+直接运行 `dsh build` / sync 时，也会在安装 local package 前按需生成 `lib/`。
 
 ## License
 

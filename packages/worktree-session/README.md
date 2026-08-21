@@ -1,5 +1,7 @@
 # dsh-worktree-session
 
+> Development: install dependencies once from the repository root with `npm install` or `npm ci`. Run package commands with `--workspace dsh-worktree-session`. The exported `lib/` and `dsh-ws` CLI are generated, gitignored artifacts; root sync builds them before installing this local package.
+
 Worktree Session (WS) keeps **one Git repository in one DSH Workspace**. On the
 first submit from a blank Git-backed source Session, the opt-in flow creates a
 unique `ws/*` task branch and a nested `.worktrees/<task>` checkout, then binds
