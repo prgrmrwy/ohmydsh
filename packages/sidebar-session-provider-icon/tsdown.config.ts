@@ -3,6 +3,7 @@ import { defineConfig } from 'tsdown'
 const external = [
   '@deepseek-ai/cordis',
   '@deepseek-ai/dsh-client-runtime',
+  '@deepseek-ai/dsh-client-ui-model-selection',
   '@deepseek-ai/dsh-session',
   '@deepseek-ai/dsh-session-projection',
   'zod',
@@ -19,6 +20,7 @@ export default defineConfig({
   sourcemap: true,
   external,
   noExternal: (id: string) => (external.includes(id) ? undefined : true),
+  loader: { '.svg': 'text' },
   outputOptions: {
     entryFileNames: 'client.js',
     banner: 'window.__ModuleLoader__.load({ id: "dsh-sidebar-session-provider-icon", factory: (require) => {',

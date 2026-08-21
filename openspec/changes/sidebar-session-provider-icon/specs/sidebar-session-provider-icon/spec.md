@@ -1,50 +1,61 @@
 ## Purpose
 
-在 Web GUI 侧边栏的每个 session 行标题前展示该会话当前在用的 provider 的动态 logo（基于最后一次实际发送的 assistant 请求折叠而来，重启后依然准确），同时保证不干扰官方任务状态点与其余行内 UI。
+在 Web GUI 侧边栏每个 session 标题前展示该会话输入框当前选中的模型品牌 logo；选择器切换后立即更新，同时以最近实际请求作为冷历史 fallback，并保证不干扰官方任务状态点及其余行内 UI。
 
 ## ADDED Requirements
 
-### Requirement: host 侧维护并发布每个会话的 provider 投影值
-系统 SHALL 通过 session-projection 机制为每个会话维护一个 `provider` 投影值，记录该会话**最后一次实际发送的 assistant 请求**的 provider 与 model；该投影值 SHALL 随官方会话投影通道（列表帧的 `projectionValues`）下发到 Web 客户端，任何已产生过请求的历史会话——包括 DSH 重启后未再次打开过的会话——都能取到该值，且不依赖浏览器 localStorage。从未产生过 assistant 请求的会话（如空白"新会话"占位）SHALL 不发布 provider 值。
+### Requirement: 输入框当前模型选择为活动会话的 logo 真相源
+系统 SHALL 对当前打开的普通 session 订阅官方 model-selection 插件的 per-session `ModelDirectory.store.current`。当输入框模型选择成功改变 provider/model 时，系统 SHALL 无需用户发送消息、无需刷新页面，即更新该 session 行的品牌 logo。空白 session 只要存在当前选择，也 SHALL 显示对应 logo。
 
-#### Scenario: 会话使用过 provider 后投影可见
-- **WHEN** 一个会话至少完成过一次 assistant 请求
-- **THEN** 该会话的 provider 投影值等于最近一次请求实际使用的 provider 与 model，并随会话列表下发到 Web 客户端
+#### Scenario: 输入框切模型后立即更新
+- **WHEN** 当前 session 的输入框从模型 A 成功切换为模型 B，且尚未发送下一条消息
+- **THEN** 该 session 行立即显示模型 B 的品牌 logo，不继续显示模型 A
 
-#### Scenario: 会话中途切换 provider
-- **WHEN** 会话在历史请求中以 provider A 运行，随后一次请求切换为 provider B
-- **THEN** 该会话的 provider 投影值为 provider B（最后一次实际请求）
+#### Scenario: 空白 session 显示选择
+- **WHEN** 一个尚未发过消息的空白 session 已加载模型选择器并拥有当前选择
+- **THEN** 该行显示当前选择的品牌 logo
 
-#### Scenario: 重启后历史会话仍可取到 provider
-- **WHEN** DSH 重启，且某历史会话自上次运行后未再被打开
-- **THEN** 该会话的 provider 投影值仍可用，且等于其最近一次请求实际使用的 provider
+#### Scenario: 选择失败不提前切换
+- **WHEN** 用户尝试选择模型 B，但官方 `session.selectModel` 返回失败
+- **THEN** logo 继续表示官方 store 中已确认的旧选择，不显示未成功的 B
 
-#### Scenario: 空白会话无 provider 值
-- **WHEN** 一个会话从未产生过 assistant 请求（空白"新会话"）
-- **THEN** 该会话无 provider 投影值，客户端据此不展示任何 logo
+### Requirement: 最后实际请求投影仅作冷历史 fallback
+系统 SHALL 通过 session-projection 维护最近一次实际 assistant 请求的 provider/model。对于尚未在本浏览器进程加载 model-selector store 的历史 session，客户端 SHALL 使用该投影作为 fallback；一旦观察到 selector 的 `current`，selector 值 SHALL 覆盖投影。该 fallback SHALL 在 DSH 重启后可用且不依赖 localStorage。
 
-### Requirement: 侧边栏 session 行标题前展示 provider logo
-系统 SHALL 在 Web 侧边栏的 session 列表行中，为每个拥有 provider 投影值的会话，在其标题文本前渲染对应 provider 的官方 logo 图标（约 12~14px 内联 SVG）。logo 显示 SHALL 是动态的：当某会话的 provider 投影值发生变化（会话切换了 provider）时，该行的 logo 无需整页刷新即随之更新；不应对没有 provider 值的行做任何插入。logo 不得显示在空白/无请求会话行上。
+#### Scenario: 冷历史 session 使用 fallback
+- **WHEN** 一个历史 session 尚未打开/加载选择器，但有最近请求投影
+- **THEN** 侧边栏按投影显示对应品牌 logo
 
-#### Scenario: 展示 provider logo
-- **WHEN** 侧边栏渲染一个拥有 provider 投影值的会话行
-- **THEN** 该行标题前出现对应 provider 的官方 logo 图标
+#### Scenario: selector 覆盖旧投影
+- **WHEN** 某 session 的最近请求投影为模型 A，而 selector store 的当前选择为模型 B
+- **THEN** 侧边栏显示模型 B 的品牌 logo
 
-#### Scenario: logo 随 provider 变化而更新
-- **WHEN** 一个已显示 provider A logo 的会话实际切换为 provider B 并完成请求
-- **THEN** 该行 logo 自动更新为 provider B 的图标，用户无需刷新页面
+#### Scenario: 两类数据都不存在
+- **WHEN** session 无 selector 当前值且无请求投影
+- **THEN** 该行不插入 logo
 
-#### Scenario: 无 provider 值的行不插入 logo
-- **WHEN** 侧边栏渲染一个无 provider 投影值的会话行（如空白新会话）
-- **THEN** 该行不插入任何 logo 元素，行内容与官方渲染一致
+### Requirement: 使用下载落盘的真实品牌资产
+系统 SHALL 使用下载后随包保存的品牌 SVG，而不是代码中手绘的近似 path。已知映射 SHALL 至少覆盖 DeepSeek 鲸鱼、OpenAI/GPT 螺旋、OpenCode、Anthropic/Claude 与 Grok。品牌判定 SHALL 优先识别已知 provider route；仅当 route 未知/通用时再按 model id fallback。未知选择 SHALL 使用中性 fallback，不得冒充已知品牌。浏览器运行时 SHALL 不为品牌图访问外部 CDN。
+
+#### Scenario: DeepSeek/OpenAI/OpenCode 显示正确品牌
+- **WHEN** 当前选择分别属于 DeepSeek、GPT/Codex 或 OpenCode
+- **THEN** 行中分别使用下载落盘的 DeepSeek 鲸鱼、OpenAI 螺旋或 OpenCode SVG
+
+#### Scenario: OpenCode route 不被模型名误判
+- **WHEN** 当前选择为真实路由 `opencode-go/deepseek-v4-flash`
+- **THEN** 显示 OpenCode logo，而不是 DeepSeek logo
+
+#### Scenario: 未知兼容 route 使用 model fallback
+- **WHEN** provider route 未知/通用，但 model id 明确属于 GPT 或 DeepSeek
+- **THEN** 显示对应 OpenAI 或 DeepSeek logo
 
 ### Requirement: 不影响官方行内 UI 与任务状态点
-系统 SHALL 只读使用官方 session 行 DOM，不得替换、移动、隐藏或改写官方渲染的状态点 `StateDot`（运行/等待审批/计划待审/完成等状态指示）、时间标签、右键菜单或拖拽排序行为。logo 元素 SHALL 作为独立的追加元素插入标题旁，与官方元素互不覆盖；当官方行结构在 DSH 升级后发生变化时，无法可靠定位行的部分 SHALL 安全地不展示 logo（降级为不显示），不得报错或破坏页面其余功能。
+系统 SHALL 只读使用官方 session 行 DOM，不得替换、移动、隐藏或改写官方 `StateDot`、时间标签、右键菜单或拖拽行为。logo SHALL 作为标题前独立元素；无法可靠定位时 SHALL 安全降级为不显示。
 
 #### Scenario: 状态点保持官方原样
-- **WHEN** 拥有 provider logo 的会话行进渲染
-- **THEN** 其官方状态点（运行/等待/完成等）的显示逻辑与外观与未安装该功能时完全一致
+- **WHEN** session 行展示模型 logo
+- **THEN** 官方状态点的显示逻辑、外观与位置保持不变
 
 #### Scenario: 官方行结构变化时安全降级
-- **WHEN** DSH 升级导致 session 行 DOM 结构不再可被可靠定位
-- **THEN** 插件不向任何行插入 logo，不抛出未捕获异常，其余页面功能不受影响
+- **WHEN** DSH 升级导致 session 行无法可靠定位
+- **THEN** 插件不向错误行插入 logo、不抛未捕获异常，其余页面功能不受影响

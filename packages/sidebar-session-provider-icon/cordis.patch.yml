@@ -1,6 +1,6 @@
 # dsh-sidebar-session-provider-icon Host entry: registers the `provider`
-# session-projection unit so per-session last-request provider/model flows to
-# the Web client. The package also declares a Web client bundle (badge render).
+# session-projection unit as a cold-history fallback. The Web client bundle
+# prefers the composer selector's live per-session provider/model state.
 - insert:
     - id: sidebar-session-provider-icon
       name: dsh-sidebar-session-provider-icon

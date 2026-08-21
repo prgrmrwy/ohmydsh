@@ -1,82 +1,89 @@
 /**
- * Provider → logo badge markup. The badge is an inline SVG snippet injected
- * as a standalone span before a session row's title. Known providers map to
- * their official logo; unknown providers get a neutral first-letter badge so
- * the sidebar never mislabels an unhandled route.
+ * Provider/model → downloaded brand logo asset.
+ *
+ * No path in this file is hand-drawn. SVG sources are pinned and vendored in
+ * `assets/` so the sidebar never fetches a CDN at runtime:
+ * - DeepSeek/OpenAI/Anthropic/Grok: @lobehub/icons-static-svg 1.94.0 (MIT)
+ * - OpenCode: anomalyco/opencode commit 5e75e5e… (MIT)
  *
  * @module dsh-sidebar-session-provider-icon/client/logos
  */
+import anthropicSvg from './assets/anthropic.svg'
+import deepseekSvg from './assets/deepseek.svg'
+import grokSvg from './assets/grok.svg'
+import openaiSvg from './assets/openai.svg'
+import opencodeSvg from './assets/opencode.svg'
 
-/** Badge side length for the injected SVG (matches the official status slot width). */
+/** Badge side length for the injected SVG. */
 export const BADGE_SIZE = 14
-
-/** Fallback color used for unknown providers (neutral slate, no brand implication). */
 const UNKNOWN_FILL = '#8a9199'
 
-/**
- * Normalize a provider id for matching: lowercase, strip common name-space
- * decorations (`@scope/` prefixes, `-` separators), so `@deepseek-ai/dsh-…`
- * adapter ids and `dsh-plugin-subscriptions` route ids both land on the same
- * brand key.
- * @param provider - raw provider id from the projection.
- * @returns normalized provider id (already trimmed/lowercased).
- */
-export function normalizeProviderId(provider: string): string {
-  const trimmed = provider.trim().toLowerCase().replace(/^@[^/]+\//, '')
-  // Strip a leading known runtime-family prefix so adapter package ids reduce
-  // to the brand (e.g. "dsh-llm-deepseek" → "deepseek").
-  return trimmed.replace(/^dsh[-_]?/i, '')
+export type BrandKey = 'deepseek' | 'openai' | 'opencode' | 'anthropic' | 'grok'
+
+/** Normalize opaque route/model ids without guessing display names. */
+export function normalizeIdentity(value: string): string {
+  return value.trim().toLowerCase().replace(/^@[^/]+\//, '').replace(/^dsh[-_]?/i, '')
 }
 
-/** Find the brand key for a raw provider id, or undefined when unknown. */
-function brandKeyOf(provider: string): string | undefined {
-  const norm = normalizeProviderId(provider)
-  if (norm.includes('codex') || norm.includes('openai') || norm.includes('gpt')) return 'codex'
-  if (norm.includes('claude') || norm.includes('anthropic')) return 'claude'
-  if (norm.includes('grok')) return 'grok'
-  if (norm.includes('deepseek')) return 'deepseek'
+/**
+ * Resolve a brand from the exact model selection. A recognized provider route
+ * wins: `opencode-go/deepseek-v4-flash` is the OpenCode provider, not the
+ * DeepSeek official provider. Model identity is only a fallback for generic or
+ * otherwise unknown compatible routes.
+ */
+export function brandKeyOf(provider: string, model: string): BrandKey | undefined {
+  const route = normalizeIdentity(provider)
+  const picked = normalizeIdentity(model)
+  if (route.includes('opencode')) return 'opencode'
+  if (route.includes('deepseek')) return 'deepseek'
+  if (route.includes('anthropic') || route.includes('claude')) return 'anthropic'
+  if (route.includes('grok') || route === 'xai') return 'grok'
+  if (route.includes('openai') || route.includes('codex')) return 'openai'
+  if (picked.includes('opencode')) return 'opencode'
+  if (picked.includes('deepseek')) return 'deepseek'
+  if (picked.includes('anthropic') || picked.includes('claude')) return 'anthropic'
+  if (picked.includes('grok')) return 'grok'
+  if (picked.includes('gpt') || picked.includes('codex')) return 'openai'
   return undefined
 }
 
-/** Inline SVG viewBox fragments (24×24, scaled by the badge host). */
-const LOGO_SVGS: Record<string, string> = {
-  // Anthropic Claude — stylized starburst.
-  claude: '<path fill="%fill%" d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2Zm0 3.2 1.6 4.4L18 11l-4.4 1.4L12 16l-1.6-4.4L6 11l4.4-1.4L12 5.2Z" fill-rule="evenodd"/>',
-  // OpenAI codex/gpt — six-point rosette.
-  codex: '<path fill="%fill%" d="M6 6 2 12l4 6h12l4-6-4-6H6Zm6 3.2 1.4 3.6 3.6 1.4-3.6 1.4L12 19.2l-1.4-3.6-3.6-1.4 3.6-1.4L12 9.2Z" fill-rule="evenodd"/>',
-  // xAI grok — angular bolt.
-  grok: '<path fill="%fill%" d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z" fill-rule="evenodd"/>',
-  // DeepSeek — whale tail.
-  deepseek: '<path fill="%fill%" d="M12 3c-4 0-7 2.4-8 6 .5-1 1.6-1.6 3-1.6H9C8 5.6 9.2 4.6 12 4.6s4 1 3 2.8h2c1.4 0 2.5.6 3 1.6-1-3.6-4-6-8-6Z" fill-rule="evenodd"/>',
+const LOGOS: Record<BrandKey, string> = {
+  deepseek: deepseekSvg,
+  openai: openaiSvg,
+  opencode: opencodeSvg,
+  anthropic: anthropicSvg,
+  grok: grokSvg,
 }
 
-/** Brand → brand color (official-ish, hardcoded; no assets shipped). */
-const BRAND_COLORS: Record<string, string> = {
-  claude: '#cc785c',
-  codex: '#10a37f',
-  grok: '#8b5cf6',
-  deepseek: '#4d6bfe',
+/** Normalize bundler text/data-url forms, then size without editing the downloaded path. */
+function sizedSvg(imported: string): string {
+  const raw = imported.startsWith('data:image/svg+xml,')
+    ? decodeURIComponent(imported.slice('data:image/svg+xml,'.length))
+    : imported
+  return raw.replace(/<svg\b[^>]*>/, (tag) => {
+    const withoutSize = tag
+      .replace(/\s(?:width|height)=(?:"[^"]*"|'[^']*')/g, '')
+      .replace(/\sstyle=(?:"[^"]*"|'[^']*')/g, '')
+    return withoutSize.replace('<svg', `<svg width="${BADGE_SIZE}" height="${BADGE_SIZE}" aria-hidden="true" style="display:block;color:currentColor"`)
+  })
 }
 
-/**
- * Render the badge innerHTML for a provider/model pair. Unknown providers get
- * a neutral first-letter badge (no brand implication) with a `title` tooltip
- * carrying the raw provider/model so the identity stays transparent.
- * @param provider - raw provider id.
- * @param model - raw model id (or empty).
- * @returns innerHTML string for a 14px inline-flex badge span.
- */
+/** Escape the one-character unknown-brand label before assigning innerHTML. */
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[char] ?? char))
+}
+
+/** Render downloaded brand SVG, or a neutral letter for a genuinely unknown route. */
 export function badgeInnerHTML(provider: string, model: string): string {
-  const key = brandKeyOf(provider)
-  if (key !== undefined) {
-    const fill = BRAND_COLORS[key] ?? UNKNOWN_FILL
-    return `<svg width="${BADGE_SIZE}" height="${BADGE_SIZE}" viewBox="0 0 24 24" aria-hidden="true" style="display:block">${LOGO_SVGS[key].replace(/%fill%/g, fill)}</svg>`
-  }
-  const letter = normalizeProviderId(provider).slice(0, 1).toUpperCase() || '?'
-  return `<span style="display:inline-flex;align-items:center;justify-content:center;width:${BADGE_SIZE}px;height:${BADGE_SIZE}px;border-radius:4px;background:${UNKNOWN_FILL};color:#fff;font-size:9px;line-height:1;font-weight:600">${letter}</span>`
+  const key = brandKeyOf(provider, model)
+  if (key !== undefined) return sizedSvg(LOGOS[key])
+  const letter = normalizeIdentity(model || provider).slice(0, 1).toUpperCase() || '?'
+  return `<span style="display:inline-flex;align-items:center;justify-content:center;width:${BADGE_SIZE}px;height:${BADGE_SIZE}px;border-radius:4px;background:${UNKNOWN_FILL};color:#fff;font-size:9px;line-height:1;font-weight:600">${escapeHtml(letter)}</span>`
 }
 
-/** Human tooltip for the badge (shown when the row hovers). */
+/** Human tooltip for the exact selector state. */
 export function badgeTitle(provider: string, model: string): string {
   return model !== '' ? `${provider} · ${model}` : provider
 }

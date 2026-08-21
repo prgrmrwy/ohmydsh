@@ -87,25 +87,39 @@ describe('row-locator', () => {
     expect(sessionIdOfRow(titleNodeOf(row), index, used)).toBeUndefined()
   })
 
-  it('does not mistake a no-provider row for a badge target', () => {
+  it('can identify a blank row so a current selector value may decorate it', () => {
     const index = providerTitleIndex(listState([
       { id: 'blank', title: 'New Session', provider: null, model: '' },
     ]))
     const used = new Set<string>()
     const row = rowNode(['YDXeBa_sessionRow'], 'New Session')
-    expect(sessionIdOfRow(titleNodeOf(row), index, used)).toBeUndefined()
+    expect(sessionIdOfRow(titleNodeOf(row), index, used)).toBe('blank')
   })
 })
 
 describe('provider-map', () => {
-  it('builds a provider map for provider-bearing rows and skips blanks', () => {
+  it('uses observed selector state before the last-request projection', () => {
     const list = listState([
-      { id: 'a', title: 'A', provider: 'codex', model: 'gpt' },
+      { id: 'a', title: 'A', provider: 'codex', model: 'gpt-5' },
+      { id: 'b', title: 'B', provider: null, model: '' },
+    ])
+    const selected = new Map([
+      ['a', { provider: 'deepseek-official', model: 'deepseek-v4' }],
+      ['b', { provider: 'opencode', model: 'opencode-go' }],
+    ])
+    const map = providerBySession(list, selected)
+    expect(map.get('a')).toEqual({ provider: 'deepseek-official', model: 'deepseek-v4' })
+    expect(map.get('b')).toEqual({ provider: 'opencode', model: 'opencode-go' })
+    expect(map.size).toBe(2)
+  })
+
+  it('falls back to the durable last-request projection when selector state is unseen', () => {
+    const list = listState([
+      { id: 'a', title: 'A', provider: 'codex', model: 'gpt-5' },
       { id: 'b', title: 'B', provider: null, model: '' },
     ])
     const map = providerBySession(list)
-    expect(map.get('a')).toEqual({ provider: 'codex', model: 'gpt' })
+    expect(map.get('a')).toEqual({ provider: 'codex', model: 'gpt-5' })
     expect(map.has('b')).toBe(false)
-    expect(map.size).toBe(1)
   })
 })

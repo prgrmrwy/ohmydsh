@@ -1,0 +1,200 @@
+id: T1
+name: 侧栏 session 行实时切模与既有交互回归
+description: "在固定真实 GUI http://127.0.0.1:3091 上，以同一 session 行顺序验证实时切模、空白 session 选模、StateDot 以及时间/菜单/拖拽回归。"
+device: pc
+parallel_group: A
+conflicts_with: [T2]
+precondition: "目标 GUI 已登录并至少有一个可切换模型的当前 session；另有空白 session 或可安全新建空白 session。全程不发送消息、不刷新页面。"
+ask_user_if_blocked: true
+status: blocked
+blocked_reason: "Loop 2: user authorized adding the worktree, but the 3091 添加工作区 control opens a native directory picker that agent-browser cannot automate or inspect (no DOM dialog/path input appears). Workspace remains unconfigured, so T1 preconditions remain unmet."
+execution:
+  engine: "agent-browser 0.23.3"
+  executed_at: "2026-06-17"
+  target_url: "http://127.0.0.1:3091/"
+  evidence:
+    - "screenshots/T1-blocked-no-workspace.png"
+    - "DOM: treeitems=0, providerLogos=0"
+    - "Body text includes 选择工作区 and 暂无会话"
+  attempts: 1
+mock_setup:
+  required: false
+  status: not_needed
+  scenario_id: null
+  surface: sidebar-session-row
+  data_source: "runtime session projection"
+  evidence:
+    - "CP01/CP02/CP10/CP11 的阶段2结论均为 not_needed。"
+  enable:
+    command: null
+    env: null
+    notes: "直接使用真实 GUI 数据，不启用 mock。"
+  user_decision: null
+
+steps:
+  - seq: 1
+    description: "导航到固定目标 GUI，定位一个当前 session 行，记录其模型图标、消息列表内容/数量、发送状态、StateDot、时间文本及行结构。"
+    action: navigate
+    target: "http://127.0.0.1:3091"
+    value: null
+    url_needs_input: false
+    checkpoints: []
+
+  - seq: 2
+    description: "打开当前 session 的模型选择器并选择与当前不同的模型 B；不发送消息，不刷新页面。"
+    action: click
+    target: "当前 session 行的模型选择器；随后点击模型 B 选项（执行时用可访问名称/稳定 DOM 定位）"
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: CP01
+        description: "成功切换到模型 B 后，当前行立即更新为 B 的 provider icon；消息列表内容/数量与发送状态保持切换前记录值，且过程无发送、无刷新。"
+        focus: interaction
+        verify: assert_dom
+        automation: full
+        data_scenario_required: false
+        data_scenario: null
+        surface: sidebar-session-row
+        data_source: "runtime session projection"
+        mock_scenario_id: null
+        expected_source: "阶段1 checkpoint CP01"
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: "真实操作后果断言：icon 变为 B，同时消息列表与发送状态不变。"
+        result: skipped
+        result_detail: "T1 precondition unmet: isolated GUI has no configured workspace or session, so the model selector and sidebar session row cannot be observed. Evidence: screenshots/T1-blocked-no-workspace.png; treeitems=0; providerLogos=0."
+        selector: "当前 session 行 provider icon + 消息列表容器 + composer/send 控件"
+        expected_text: "模型选择为 B；消息列表内容/数量与切换前一致；发送状态与切换前一致"
+        expected_attrs:
+          provider_icon: "对应模型 B"
+          navigation_type: "no-refresh"
+          message_send: "not-triggered"
+        expected_visible: true
+
+  - seq: 3
+    description: "定位空白 session，打开其模型选择器并选择一个模型；不发送消息，不刷新页面。"
+    action: click
+    target: "空白 session 行的模型选择器；随后点击一个模型选项（执行时用可访问名称/稳定 DOM 定位）"
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: CP02
+        description: "空白 session 选择模型后，该行更新为所选模型并显示对应 provider logo；消息列表仍为空且发送状态保持未发送。"
+        focus: interaction
+        verify: assert_dom
+        automation: full
+        data_scenario_required: false
+        data_scenario: null
+        surface: sidebar-session-row
+        data_source: "runtime session projection"
+        mock_scenario_id: null
+        expected_source: "阶段1 checkpoint CP02"
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: "真实操作后果断言：选择后 logo 出现，同时空白消息状态与未发送状态不变。"
+        result: skipped
+        result_detail: "T1 precondition unmet: isolated GUI has no configured workspace or session, so the model selector and sidebar session row cannot be observed. Evidence: screenshots/T1-blocked-no-workspace.png; treeitems=0; providerLogos=0."
+        selector: "空白 session 行 provider icon + 空消息列表 + composer/send 控件"
+        expected_text: "显示所选模型；消息列表保持空白；发送状态为未发送"
+        expected_attrs:
+          provider_icon: "对应所选模型"
+          message_count: "0"
+          message_send: "not-triggered"
+        expected_visible: true
+
+  - seq: 4
+    description: "在已记录的 session 行上核对 StateDot，并与操作前记录比较其显示、外观和位置。"
+    action: wait_for
+    target: "当前 session 行 StateDot 与相邻 provider icon/标题区域"
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: CP10
+        description: "StateDot 在切模前后保持相同显示状态、外观属性和相对位置，不因 provider icon 更新而移动或改变。"
+        focus: interaction
+        verify: assert_dom
+        automation: full
+        data_scenario_required: false
+        data_scenario: null
+        surface: sidebar-session-state-and-controls
+        data_source: "rendered session state"
+        mock_scenario_id: null
+        expected_source: "阶段1 checkpoint CP10"
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: "focus 分类保持 interaction；可辅截图，但 DOM 前后对比为主。"
+        result: skipped
+        result_detail: "T1 precondition unmet: isolated GUI has no configured workspace or session, so the model selector and sidebar session row cannot be observed. Evidence: screenshots/T1-blocked-no-workspace.png; treeitems=0; providerLogos=0."
+        selector: "当前 session 行 StateDot"
+        expected_text: "与切模前记录一致"
+        expected_attrs:
+          display: "unchanged"
+          appearance: "unchanged"
+          relative_position: "unchanged"
+        expected_visible: true
+
+  - seq: 5
+    description: "打开当前 session 行菜单，再通过关闭动作收起菜单。"
+    action: click
+    target: "当前 session 行菜单按钮；随后点击关闭区域或按 Escape"
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: CP11-MENU
+        description: "菜单点击后正常打开，关闭动作后菜单关闭；session 行、时间文本和 provider icon 仍保持可用。"
+        focus: interaction
+        verify: assert_dom
+        automation: full
+        data_scenario_required: false
+        data_scenario: null
+        surface: sidebar-session-state-and-controls
+        data_source: "rendered session state"
+        mock_scenario_id: null
+        expected_source: "阶段1 checkpoint CP11"
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: "CP11 的菜单后果子断言；执行结果汇总到 CP11。"
+        result: skipped
+        result_detail: "T1 precondition unmet: isolated GUI has no configured workspace or session, so the model selector and sidebar session row cannot be observed. Evidence: screenshots/T1-blocked-no-workspace.png; treeitems=0; providerLogos=0."
+        selector: "session 行菜单及其触发按钮"
+        expected_text: "菜单先打开后关闭；时间文本与行内容保持不变"
+        expected_attrs:
+          open_then_closed: "true"
+          row_usable: "true"
+        expected_visible: false
+
+  - seq: 6
+    description: "对当前 session 行执行短距离、非破坏性的拖拽手势，避免跨目标落放或改变共享排序。"
+    action: drag
+    target: "当前 session 行拖拽手柄或可拖区域；短距离移动后回到原位/取消落放"
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: CP11
+        description: "时间显示保持原值，菜单仍可再次打开关闭，拖拽手势后 session 行结构仍存在且模型选择器、菜单与 provider icon 均可继续使用。"
+        focus: interaction
+        verify: assert_dom
+        automation: full
+        data_scenario_required: false
+        data_scenario: null
+        surface: sidebar-session-state-and-controls
+        data_source: "rendered session state"
+        mock_scenario_id: null
+        expected_source: "阶段1 checkpoint CP11"
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: "采用非破坏性拖拽；必须验证真实后果而非仅验证控件存在。CP11-MENU 是同一 checkpoint 的辅助子断言，不计入 plan checkpoint 总数。"
+        result: skipped
+        result_detail: "T1 precondition unmet: isolated GUI has no configured workspace or session, so the model selector and sidebar session row cannot be observed. Evidence: screenshots/T1-blocked-no-workspace.png; treeitems=0; providerLogos=0."
+        selector: "当前 session 行、时间、模型选择器、菜单按钮与 provider icon"
+        expected_text: "时间与操作前一致；拖拽后行结构完整；菜单可再次打开并关闭"
+        expected_attrs:
+          drag_gesture_observed: "true"
+          row_structure: "usable"
+          controls: "usable"
+        expected_visible: true

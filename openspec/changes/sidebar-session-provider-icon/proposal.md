@@ -2,28 +2,27 @@
 
 ## Why
 
-接入订阅制 provider（codex / claude / grok）并与 DeepSeek 混用后，侧边栏里几十个历史会话各自用了哪个 provider，必须点进会话才看得到。用户希望在 sidebar 每行 session 标题前直接显示「该会话当前在用的 provider」的动态 logo，做到扫一眼侧边栏即可分辨会话归属，且切了模型/重启 DSH 后依然准确。
+多模型混用后，侧边栏无法一眼看出每个 session 输入框下一次发送将使用哪个模型。初版按“最后一次实际请求”显示且使用手绘简化 SVG；实机反馈表明这会让用户切换输入框模型后仍看到旧 icon，且图形无法准确表达 DeepSeek 鲸鱼、OpenAI 螺旋和 OpenCode 等品牌。
 
 ## What Changes
 
-- Host 侧新增一个 `provider` session-projection 单元：折叠会话日志，维护并发布该会话**最后一次实际发送的 assistant 请求**的 provider + model 投影值，经官方 `session/projection` 帧流到每条 `SessionSummary.projectionValues`。
-- Web client 新增一个 UI 插件：订阅 sessions 列表，在侧边栏每个 session 行的标题前渲染对应 provider 的官方 logo（12~14px 内联 SVG），随会话 provider 变化实时更新。
-- 展示规则：空白 / 从未产生过 assistant 请求的 session 不显示 logo；provider 不可知时不显示（不消除占位导致行跳动，最大化不干扰）。
-- **边界（用户明确要求）**：不得影响官方任务状态 `StateDot`（绿/黄/蓝状态点）——只读、不替换、不移动其位置；时间、右键菜单、拖拽排序等行内元素保持官方原样。
-- 不采用影子替换整个 `sidebar.workspaces`（organizer-sidebar 的 `priority:-2` 做法）：侵入性/维护成本高、重画整套浏览器与官方升级脱节。
+- Web client 直接订阅官方 `dsh-client-ui-model-selection` 的 per-session `ModelDirectory.store.current`；输入框选择成功后，侧边栏对应 session 的 logo 立即更新，无需先发送消息。
+- Host `provider` session-projection 保留，但降级为冷历史 fallback：尚未在本浏览器打开/加载选择器的历史 session 仍可用最近一次实际请求推导 logo，重启不丢且不使用 localStorage。
+- 品牌映射同时读取 provider + model：已知 provider route 优先（真实路由 `opencode-go/deepseek-v4-flash` 必须显示 OpenCode），未知/兼容 route 才按 model fallback；覆盖 DeepSeek、OpenAI/GPT/Codex、OpenCode、Anthropic/Claude、Grok。
+- 不再手绘 SVG：品牌资产从固定版本来源下载并随包落盘，构建时内联，不产生浏览器运行时网络请求。
+- **边界不变**：不得替换、移动、隐藏或改写官方任务状态 `StateDot`、时间、菜单与拖拽行为。
 
 ## Capabilities
 
 ### New Capabilities
-- `sidebar-session-provider-icon`: 每行 session 的 provider logo 展示 —— host 侧 provider 投影值 + web 客户端轻量 DOM 注入渲染，且不触碰官方状态点。
+- `sidebar-session-provider-icon`: 每行 session 的当前选中模型品牌 logo；选择器即时状态优先，持久最后请求 fallback；轻量 DOM 注入且不触碰官方状态点。
 
 ### Modified Capabilities
-<!-- 无。行为变化均落在新 capability 内，不改动既有 spec 的需求。 -->
+<!-- 无。 -->
 
 ## Impact
 
-- 本仓库自研包：新增 `packages/sidebar-session-provider-icon/`（本地定制，host + client 双面 bundle）。
-- `dsh.yaml` manifest：新增一条 `customizations` 本地 package 条目（`source: local`）。
-- 数据面：`@deepseek-ai/dsh-session-projection` 的 `SessionProjectionMap` 通过 declaration merging 新增 `provider` 键（host 侧），client 侧经 `projectionValues` 读取；无 API/协议改动，官方 title/stats/token 同路。
-- 渲染面：`@deepseek-ai/dsh-client-ui-workspace` session 行无 per-row slot（已核实 rc.7 与 master rc.8 `Rows.tsx`），故在官方行 DOM 上只读注入 logo；全部 DOM 结构依赖收进独立 `row-locator` 模块，升级只修一处。
-- 不影响既有插件（cost-meter / subscriptions / worktree-session 等），不触碰 sandbox / approval / 模型请求面。
+- `packages/sidebar-session-provider-icon/` client 新增对 `@deepseek-ai/dsh-client-ui-model-selection` 的 peer/inject 依赖。
+- `src/client/assets/` 保存固定来源的品牌 SVG；client bundle 内联，不运行时下载。
+- Host projection/协议不变，只改变 client 对两类数据源的优先级。
+- DOM 结构依赖仍只存在于 `row-locator.ts`，官方 session 行无 per-row slot 的约束不变。
