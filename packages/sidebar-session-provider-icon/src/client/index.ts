@@ -90,7 +90,7 @@ function reconcileList(ctx: ClientContext, selected: ReadonlyMap<string, Provide
       badge.dataset.provider = projection.provider
       badge.dataset.model = projection.model
       badge.title = badgeTitle(projection.provider, projection.model)
-      badge.style.cssText = 'display:inline-flex;align-items:center;margin-right:4px;line-height:0;flex:none'
+      badge.style.cssText = 'display:inline-flex;align-items:center;margin-left:4px;line-height:0;flex:none'
       badge.innerHTML = badgeInnerHTML(projection.provider, projection.model)
       title.insertAdjacentElement?.('beforebegin', badge)
     } catch {

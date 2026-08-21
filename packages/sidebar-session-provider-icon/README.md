@@ -24,7 +24,7 @@ Backlog 条目：[B013](../../BACKLOG.md)。设计与取舍见 OpenSpec change `
 
 不手绘 SVG，也不在浏览器运行时访问 CDN：
 
-- DeepSeek（鲸鱼）、OpenAI/GPT（螺旋）、Anthropic、Grok：`@lobehub/icons-static-svg@1.94.0`，MIT；
+- DeepSeek（鲸鱼）、OpenAI/GPT（螺旋）、Anthropic、Grok、Kimi、GLM（智谱）、MiniMax、Pi、OpenClaw、Hermes Agent（兼容 `hermas` 拼写）：`@lobehub/icons-static-svg@1.94.0`，MIT；
 - OpenCode：`anomalyco/opencode` commit `5e75e5e9901f0d178f425bfb47f1bd46cbe78a59` 的官方 provider SVG，MIT。
 
 品牌判断优先识别已知 `provider` route：例如真实选择 `opencode-go/deepseek-v4-flash` 显示 OpenCode，而不是 DeepSeek；只有未知/通用 route 才按 `model` fallback。未知选择显示中性首字母 fallback。
