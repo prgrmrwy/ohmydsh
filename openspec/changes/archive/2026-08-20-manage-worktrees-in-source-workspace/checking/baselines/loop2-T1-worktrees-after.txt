@@ -1,4 +1,0 @@
-worktree /private/tmp/ws-browser-acceptance
-HEAD 1646488d11ca909399ddc499b38e86a364e8310b
-branch refs/heads/main
-

@@ -1,2 +1,0 @@
-main
-ws/acceptance-int-02-unique-first-worktree-message

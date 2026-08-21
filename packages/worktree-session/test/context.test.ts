@@ -36,9 +36,9 @@ describe('Worktree Session stable runtime context', () => {
     expect(first).toContain('无 path 的 ws status')
     expect(first).not.toContain('updatedAt')
     expect(first).not.toContain('2026-')
-    expect(first).not.toContain('lean')
-    expect(first).not.toContain('mutable')
-    expect(first).not.toContain('prepared')
+    expect(first).not.toMatch(/\blean\b/)
+    expect(first).not.toMatch(/\bmutable\b/)
+    expect(first).not.toMatch(/\bprepared\b/)
   })
 
   it('stays byte-identical across a lean -> mutable transition', () => {

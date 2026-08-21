@@ -5,7 +5,10 @@
 ## 真相源约定
 
 - **仓库是唯一真相源**。`dsh.yaml` + 各定制目录 + `instructions/dsh-home.md` = 完整配置;`~/.dsh` 是物化产物。
+- 根 `package-lock.json` 是全部 npm workspace 的唯一依赖锁；TypeScript local package 只提交 `src/`，gitignored `lib/` 由根 build/sync 生成。
 - `cordis.patch.yml`、presets/skills 与 `$DSH_HOME/AGENTS.md` 都应从仓库修改后重新 sync。`AGENTS.md` 有 ownership/hash 漂移防护:发现未托管文件或本地改动时会报错并保留,不会静默覆盖或删除。
+- OpenSpec checking 长期只提交报告、trail、gate、复现脚本或显式审核的 test fixture；raw history/baseline 和批量截图应放外部 artifact，或在报告中声明仅临时留存。
+- 提交前运行 `npm test` 与 `npm run check:artifacts`，防止生成产物、nested lock、raw evidence 或重复架构图进入 Git。
 - **禁用 ≠ 删除**:`enabled: false` 只表示不物化,仓库内容保留,随时可重新启用。
 
 ## 目录结构
@@ -28,13 +31,10 @@ tests/                    # sync 黑盒回归测试
 
 ## 架构图
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="archify-out/ohmydsh-architecture.dark.png">
-  <img alt="ohmydsh 架构图:仓库真相源 → sync 物化 → ~/.dsh → DSH 运行时" src="archify-out/ohmydsh-architecture.light.png" width="100%">
-</picture>
+<img alt="ohmydsh 架构图:仓库真相源 → sync 物化 → ~/.dsh → DSH 运行时" src="archify-out/ohmydsh-architecture.dual.svg" width="100%">
 
-> 交互版(明暗主题 / 缩放 / 导出):`archify-out/ohmydsh-architecture.html`;
-> 矢量版:`archify-out/ohmydsh-architecture.dual.svg`(自带明暗主题适配)。
+> 展示资产为 `archify-out/ohmydsh-architecture.dual.svg`(单文件,自带明暗主题适配);
+> 可编辑图源为 `archify-out/ohmydsh-architecture.json`,架构变化时更新图源并重新导出该 SVG。
 
 ## 使用
 
@@ -47,7 +47,7 @@ git clone <仓库地址> && cd ohmydsh
 dsh build && dsh           # ③ 物化定制配置并启动,UI 自动打开
 ```
 
-- 前置要求:**Node.js ≥ 16**(含 npm);bootstrap 会检查并给出缺失时的安装提示;
+- 前置要求:**Node.js ≥ 22.19**(含 npm，与 local package engines 一致);bootstrap 会检查并给出缺失时的安装提示;
 - 依赖出问题想重装:`./scripts/bootstrap.sh --force`;
 - install.sh 默认装到 `~/.local/bin/dsh`(想换目录:`DSH_BIN_DIR=/opt/bin ./scripts/install.sh`);重复执行可覆盖更新,不影响 `~/.dsh` 物化产物;
 - 装的是**相对符号链接**,仓库整体移动后命令依然可用,无需重装;
