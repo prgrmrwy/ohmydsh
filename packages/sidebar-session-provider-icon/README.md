@@ -1,43 +1,50 @@
 # dsh-sidebar-session-provider-icon
 
-在 DSH Web 侧边栏的每个 session 行标题前显示该会话**当前在用的 provider** 的动态 logo（codex / claude / grok / deepseek 等官方图标），随会话实际切换 provider 实时更新，重启后依然准确，且不干扰官方任务状态点。
+在 DSH Web 侧边栏每个 session 标题前显示该会话**输入框当前选中的模型品牌** logo。模型选择器切换成功后立即更新，不必先发送消息；不干扰官方任务状态点。
 
-Backlog 条目：[B013](../../BACKLOG.md)。设计与取舍见 openspec change `sidebar-session-provider-icon`。
+Backlog 条目：[B013](../../BACKLOG.md)。设计与取舍见 OpenSpec change `sidebar-session-provider-icon`。
 
-## 背景
+## 数据优先级
 
-接入订阅制 provider（codex / claude / grok）并与 DeepSeek 混用后，侧边栏大量历史会话各自用了哪个 provider 只能点进会话才看得到。官方 `dsh-client-ui-workspace` 的 session 行**没有 per-row slot**（rc.7 / master rc.8 均无），因此本插件采用「host 侧官方投影通道 + 客户端轻量 DOM 注入」路线，侵入性最低、可维护。
+1. **即时真相源**：官方 `dsh-client-ui-model-selection` 的 `ctx.modelDirectories.directoryFor(sessionId).store.current`。这是输入框 selector 与 `/model` 命令共享的唯一 per-session state，`session.selectModel` 成功后立即发布 `{ provider, model }`。
+2. **历史 fallback**：Host 的 `provider` session-projection 折叠日志 `request/header`，为尚未在本浏览器打开/加载 selector 的历史会话提供最近一次实际请求的品牌。重启不丢，不使用 localStorage。
+
+因此，当前打开 session（包括尚未发送消息的空白 session）按输入框选择显示；冷历史 session 在未加载 selector 前按最后请求显示。
 
 ## 架构
 
 | 面 | 实现 |
 |---|---|
-| Host | 注册 `provider` session-projection 单元（`src/provider.ts`），折叠日志 `request/header` 事件 → 每次会话最后一次实际请求的 `{ provider, model }`，走官方 `SessionProjectionMap` 通道（持久化缓存 + 列表帧 `projectionValues`）下发客户端 |
-| Client | `src/client/row-locator.ts` 收拢全部官方行 DOM 结构知识（suffix 匹配 `sessionRow`/`title`，标题反查 id）；`src/client/provider-map.ts` 由列表快照推导 `sessionId → provider`；`src/client/logos.ts` 出 logo 内联 SVG；`src/client/index.ts` 用 `MutationObserver` + `sessions.list` 订阅保持徽标同步 |
-| Wire | `cordis.patch.yml` host 行 + `dsh.client` web 声明 |
+| Host | `src/provider.ts` 注册 `provider` projection，折叠 `request/header`，只承担冷历史 fallback |
+| Client 数据 | 订阅 `ctx.modelDirectories` 的 per-session store；selector 选择优先于 projection fallback |
+| Client DOM | `row-locator.ts` 收拢官方行 DOM 知识；`MutationObserver` 只在标题前维护独立 badge span |
+| 品牌图 | `src/client/assets/*.svg` 下载后随包落盘；`logos.ts` 先识别已知 provider route，未知 route 再按 model fallback |
 
-## 行为约定
+## 品牌资产
 
-- provider 基准 = 该会话**最后一次实际发送的 assistant 请求**的 provider/model（`request/header` 只在路由变化时 append，故折叠最新一条即真相源）。
-- 空白 / 无请求会话不显示徽标；无 provider 值时不渲染（零占位跳动）。
-- **不触碰官方 `StateDot`**：徽标是插入标题前的独立 `<span>`，状态点/时间/行菜单/拖拽全部保持官方原样，只读。
-- 升级安全：行结构一旦变化导致无法可靠定位，静默降级为不显示徽标，绝不误插 / 报错。
+不手绘 SVG，也不在浏览器运行时访问 CDN：
 
-## 安装（由总配置管理）
+- DeepSeek（鲸鱼）、OpenAI/GPT（螺旋）、Anthropic、Grok：`@lobehub/icons-static-svg@1.94.0`，MIT；
+- OpenCode：`anomalyco/opencode` commit `5e75e5e9901f0d178f425bfb47f1bd46cbe78a59` 的官方 provider SVG，MIT。
 
-1. `dsh.yaml` 已含本定制（`source: local`），此处仅记录口:
-   `node scripts/sync.mjs` → `dsh build` → 重启 DSH。
-2. 回滚：删 `dsh.yaml` 中本条目 → `sync` + `dsh build` → 重启。
+品牌判断优先识别已知 `provider` route：例如真实选择 `opencode-go/deepseek-v4-flash` 显示 OpenCode，而不是 DeepSeek；只有未知/通用 route 才按 `model` fallback。未知选择显示中性首字母 fallback。
+
+## UI 边界
+
+- **不触碰官方 `StateDot`**：不替换、不移动、不隐藏；
+- 时间、行菜单、拖拽行为保持官方原样；
+- badge 是标题前的独立 `<span>`；
+- DOM 无法可靠定位时静默降级为不显示，不破坏页面。
 
 ## 开发
 
 ```sh
-npm install            # 安装 dev 依赖
-npm run typecheck      # host + client 类型检查
-npm test               # host 折叠单测 + client 定位器单测
-npm run build          # host(tsc) + client(tsdown) → lib/
+npm install
+npm run typecheck
+npm test
+npm run build
 ```
 
 ## License
 
-MIT，见 [LICENSE](LICENSE)。Provider logo 为各自官方品牌图形的简化内联 SVG（供应商保留其品牌权利；本项目按"无需考虑版权"的展示用途内置）。
+代码 MIT，见 [LICENSE](LICENSE)。品牌资产库/上游仓库许可见上文；各品牌方保留商标权利。

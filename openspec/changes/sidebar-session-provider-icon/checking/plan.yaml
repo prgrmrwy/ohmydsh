@@ -1,0 +1,169 @@
+meta:
+  feature: sidebar-session-provider-icon
+  base_branch: ws/backlog-sidebar-session-icon-provider
+  base_commit: e2c05c8f3fb724b93c15ed403287cc631d542f6a
+  created: "2026-06-17T00:00:00+08:00"
+  target_url: "http://127.0.0.1:3091"
+  execution_focus: interaction
+  device: pc
+  device_profile: "1280x800"
+  sources:
+    git_diff: true
+    openspec: true
+    prd: false
+    ui_specs: false
+    figma: false
+  mock:
+    status: missing
+    evidence_count: 3
+    user_decision_required: false
+    user_decision: "阶段2已决定：真实 GUI 可执行项自动跑；missing/unknown 场景改人工，不补 mock。"
+    counts:
+      available: 0
+      missing: 3
+      unknown: 5
+      not_needed: 4
+    evidence:
+      - "package.json 无 mock script。"
+      - "仓库中未找到可用于这些场景的 handlers/fixtures 及明确启用入口。"
+      - "lockfile 出现 msw，但未找到已启用的 handler、service worker 或运行入口。"
+    checkpoint_status:
+      CP01: not_needed
+      CP02: not_needed
+      CP03: missing
+      CP04: unknown
+      CP05: unknown
+      CP06: unknown
+      CP07: unknown
+      CP08: unknown
+      CP09: missing
+      CP10: not_needed
+      CP11: not_needed
+      CP12: missing
+    surface_scenario_matrix:
+      - surface: sidebar-session-row
+        data_source: "runtime session projection"
+        scenarios: ["active session model switch", "blank session model selection"]
+        covered: true
+        trail_ids: [T1]
+        status: planned
+      - surface: sidebar-session-row
+        data_source: "runtime session projection"
+        scenarios: ["selectModel failure", "cold-history fallback", "selector B overrides projection A", "neither source has provider", "unknown route model fallback", "DOM structure changed"]
+        covered: false
+        trail_ids: [T2]
+        status: manual
+      - surface: sidebar-session-provider-icon
+        data_source: "provider route and model metadata"
+        scenarios: ["DeepSeek whale", "OpenAI spiral", "OpenCode official icon", "opencode-go/deepseek-v4-flash route precedence"]
+        covered: false
+        trail_ids: [T2]
+        status: manual
+      - surface: sidebar-session-state-and-controls
+        data_source: "rendered session state"
+        scenarios: ["StateDot unchanged", "time/menu/drag unaffected"]
+        covered: true
+        trail_ids: [T1]
+        status: planned
+  execution_strategy:
+    recommendation: single_only
+    selected: single_agent
+    reason:
+      - "仅一条真实 GUI 自动 trail，且多个步骤共享同一 session 行与模型选择状态。"
+      - "菜单与拖拽验证需顺序执行，避免共享状态互相干扰。"
+    risks:
+      - "切换模型会改变共享 session 的当前选择，但不得发送消息或刷新。"
+      - "拖拽只做非破坏性手势并确认行结构仍可用。"
+      - "人工场景缺少可信 mock、账号 route 或视觉基准。"
+    agent_assignments: []
+  stats:
+    total_trails: 2
+    total_checkpoints: 12
+    by_focus:
+      integration: 0
+      interaction: 11
+      visual: 1
+    by_automation:
+      full: 4
+      partial: 0
+      manual: 8
+  report_path: null
+  feishu_url: null
+
+manuals:
+  - id: CP03
+    description: selectModel 失败时保持旧选择
+    reason: "mock missing；阶段2决定不补 mock，改人工。"
+    how: "在可人为触发 selectModel 失败的真实环境中切换模型，确认当前行仍显示旧选择与旧图标。"
+    focus: interaction
+    related_trail: T2
+    mock_related: true
+  - id: CP04
+    description: 冷历史场景使用 fallback
+    reason: "数据场景与构造方式 unknown；阶段2决定改人工。"
+    how: "准备冷历史 session，打开侧栏并按既有 oracle 核对 fallback。"
+    focus: interaction
+    related_trail: T2
+    mock_related: true
+  - id: CP05
+    description: selector B 覆盖投影 A
+    reason: "双来源数据构造方式 unknown；阶段2决定改人工。"
+    how: "准备 selector B 与投影 A 冲突的 session，确认当前行采用 B。"
+    focus: interaction
+    related_trail: T2
+    mock_related: true
+  - id: CP06
+    description: 两数据源均无 provider 时不显示 logo
+    reason: "缺字段数据构造方式 unknown；阶段2决定改人工。"
+    how: "准备两来源均无 provider 的 session，确认当前行无 provider logo。"
+    focus: interaction
+    related_trail: T2
+    mock_related: true
+  - id: CP07
+    description: DeepSeek 鲸鱼、OpenAI 螺旋、OpenCode 官方图标视觉检查
+    reason: "无可信视觉基准；按要求保留截图供人工，且 interaction focus 执行时 skipped-not-in-focus。"
+    how: "分别展示三个 provider 图标并截图，人工核对品牌图形。"
+    focus: visual
+    related_trail: T2
+    mock_related: true
+  - id: CP08
+    description: opencode-go/deepseek-v4-flash 显示 OpenCode 而非 DeepSeek
+    reason: "账号 route unknown；阶段2决定改人工。"
+    how: "使用具备该 route 的真实账号/session，确认显示 OpenCode 图标。"
+    focus: interaction
+    related_trail: T2
+    mock_related: true
+  - id: CP09
+    description: unknown route 按 model fallback
+    reason: "mock missing；阶段2决定不补 mock，改人工。"
+    how: "准备 unknown route 且 model 可识别的 session，按既有 oracle 核对 fallback。"
+    focus: interaction
+    related_trail: T2
+    mock_related: true
+  - id: CP12
+    description: DOM 结构变化时安全降级
+    reason: "mock missing；阶段2决定不补 mock，改人工。"
+    how: "在可控环境改变目标 DOM 结构，确认页面不崩溃且 session 行仍可使用。"
+    focus: interaction
+    related_trail: T2
+    mock_related: true
+
+trails:
+  - id: T1
+    name: 侧栏 session 行实时切模与既有交互回归
+    file: trails/T1.yaml
+    device: pc
+    parallel_group: A
+    status: blocked
+    blocked_reason: "Loop 2: 添加工作区 invokes a native directory picker unavailable to agent-browser; no DOM dialog/path input appears, so the authorized worktree could not be selected and T1 remains blocked."
+    checkpoint_count: 4
+    summary: "在真实 GUI 3091 上覆盖 CP01、CP02、CP10、CP11；不发送、不刷新，并断言图标变化及消息/发送状态不变。"
+  - id: T2
+    name: 特殊数据、route、视觉与降级人工验收
+    file: trails/T2.yaml
+    device: pc
+    parallel_group: B
+    status: pending
+    blocked_reason: null
+    checkpoint_count: 8
+    summary: "记录 CP03–CP09、CP12 的人工步骤；CP07 为 visual_inspect，interaction focus 下未来执行时跳过。"

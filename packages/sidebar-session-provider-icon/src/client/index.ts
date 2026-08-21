@@ -1,9 +1,10 @@
 /**
  * Web client entry for dsh-sidebar-session-provider-icon.
  *
- * Subscribes to the sessions list, and through a MutationObserver keeps a
- * provider logo badge in front of each sidebar session row's title, updated
- * as sessions gain/switch providers and as rows mount/unmount. It NEVER
+ * Subscribes to the official model selector's per-session store (with the
+ * durable last-request projection as a cold-history fallback), and through a
+ * MutationObserver keeps a brand logo badge in front of each sidebar session
+ * row's title. It NEVER
  * touches the official status `StateDot`, time, row menu, or drag cells —
  * the badge is an independent span inserted before the title, and rows
  * without a provider value get no badge at all.
@@ -15,11 +16,14 @@
  * @module dsh-sidebar-session-provider-icon/client
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'
+import type { ProviderProjection } from '../types.ts'
 import { providerBySession, providerTitleIndex } from './provider-map.js'
 import { badgeInnerHTML, badgeTitle } from './logos.js'
 import { BADGE_MARKER, isSessionRow, sessionIdOfRow, titleNodeOf } from './row-locator.js'
+import { bindSelectionDirectory } from './selection-binding.js'
 
-export const inject = ['sessions']
+export const inject = ['sessions', 'modelDirectories']
 
 /** Debounce a reconcile through requestAnimationFrame (coalesce bursts). */
 function scheduleReconcile(fn: () => void): () => void {
@@ -53,10 +57,10 @@ function removeBadge(row: Element): void {
   existing?.remove()
 }
 
-/** Reconcile one render pass: read list state and sync every visible row. */
-function reconcileList(ctx: ClientContext): void {
+/** Reconcile one render pass: read list + selector state and sync every visible row. */
+function reconcileList(ctx: ClientContext, selected: ReadonlyMap<string, ProviderProjection>): void {
   const list = ctx.sessions.list.getSnapshot()
-  const bySession = providerBySession(list)
+  const bySession = providerBySession(list, selected)
   const index = providerTitleIndex(list)
   const used = new Set<string>()
   for (const row of findSessionRows()) {
@@ -97,12 +101,43 @@ function reconcileList(ctx: ClientContext): void {
 
 export function apply(ctx: ClientContext): void {
   const observed = new Set<Node>()
+  const selected = new Map<string, ProviderProjection>()
   let observer: MutationObserver | null = null
+  let selectedSessionId: string | undefined
+  let stopDirectory: (() => void) | undefined
 
-  const reconcile = scheduleReconcile(() => reconcileList(ctx))
+  const reconcile = scheduleReconcile(() => reconcileList(ctx, selected))
+  const syncCurrentDirectory = (): void => {
+    const id = ctx.sessions.list.getSnapshot().current
+    if (id === selectedSessionId) return
+    stopDirectory?.()
+    stopDirectory = undefined
+    selectedSessionId = undefined
+    if (id === undefined) {
+      reconcile()
+      return
+    }
+    try {
+      stopDirectory = bindSelectionDirectory(
+        id,
+        (sessionId) => ctx.modelDirectories.directoryFor(sessionId),
+        selected,
+        reconcile,
+      )
+      // Record only after resolve + subscription succeeds. A transient startup
+      // failure remains retryable on the next list/DOM signal for the same id.
+      selectedSessionId = id
+    } catch {
+      // Addressed/temporarily unavailable sessions retain fallback and retry.
+      reconcile()
+    }
+  }
   const stop = (): void => {
     observer?.disconnect()
     observer = null
+    stopDirectory?.()
+    stopDirectory = undefined
+    selectedSessionId = undefined
     observed.clear()
   }
 
@@ -110,9 +145,13 @@ export function apply(ctx: ClientContext): void {
     // Observe the sidebar browsing region once it exists; re-armed on each
     // reconnect to a fresh DOM if the shell remounts (belt-and-suspenders).
     const root = document.body
-    observer = new MutationObserver(() => reconcile())
+    observer = new MutationObserver(() => {
+      syncCurrentDirectory()
+      reconcile()
+    })
     observer.observe(root, { childList: true, subtree: true })
     observed.add(root)
+    syncCurrentDirectory()
     reconcile()
     return () => {
       stop()
@@ -120,5 +159,8 @@ export function apply(ctx: ClientContext): void {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, 'sidebar-provider-icon: badge sync')
 
-  ctx.effect(() => ctx.sessions.list.subscribe(() => reconcile()), 'sidebar-provider-icon: list sync')
+  ctx.effect(() => ctx.sessions.list.subscribe(() => {
+    syncCurrentDirectory()
+    reconcile()
+  }), 'sidebar-provider-icon: list + selected model sync')
 }
