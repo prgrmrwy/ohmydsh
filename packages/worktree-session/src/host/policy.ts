@@ -21,15 +21,15 @@ export function findOperationForSession(agent: Agent | undefined): OperationReco
 }
 
 function refreshAgent(agent: Agent | undefined, operation: OperationRecord | undefined, validationFailure?: string): void {
-  if (agent === undefined || operation === undefined) return
-  const binding = bindingOf(operation)
-  // Stable runtime context for bound (active or cleaned) Sessions.
-  installContext(agent, operation)
+  if (agent === undefined) return
   const previous = guards.get(agent)
   if (previous !== undefined) { previous(); guards.delete(agent) }
-  // Every source binding keeps a guard. A cleaned binding reaches checkTool's
-  // terminal deny-all branch; it must never fall back to the source checkout.
-  if (binding?.mode === 'source-session') guards.set(agent, installGuard(agent, operation, validationFailure, continuableDelegationTools))
+  installContext(agent, operation)
+  if (operation === undefined) return
+  const binding = bindingOf(operation)
+  // Every current source binding keeps a guard. Cleaned and cleaned-archived
+  // reach checkTool's terminal deny-all branch; released history installs none.
+  if (binding?.mode === 'source-session' && binding.state !== 'released') guards.set(agent, installGuard(agent, operation, validationFailure, continuableDelegationTools))
 }
 
 /**
@@ -38,9 +38,10 @@ function refreshAgent(agent: Agent | undefined, operation: OperationRecord | und
  * Idempotent per Agent and safe to call on resume or after Host restart.
  */
 export function rememberBind(ctx: Context, sourceSessionId: string, operation: OperationRecord | undefined, validationFailure?: string): void {
-  if (operation === undefined) { survey.delete(sourceSessionId); return }
-  survey.set(sourceSessionId, operation)
-  refreshAgent(ctx.agents.get(sourceSessionId as never), operation, validationFailure)
+  const current = operation !== undefined && bindingOf(operation)?.state !== 'released' ? operation : undefined
+  if (current === undefined) survey.delete(sourceSessionId)
+  else survey.set(sourceSessionId, current)
+  refreshAgent(ctx.agents.get(sourceSessionId as never), current, validationFailure)
 }
 
 /** Re-install the recorded context/guard for a Session whose Agent just came live. */
@@ -81,7 +82,7 @@ export function registerSubagentInheritance(ctx: Context): () => void {
 export function activeBoundSessionIds(ctx: Context): readonly string[] {
   return [...survey.entries()].flatMap(([sessionId, operation]) => {
     const binding = bindingOf(operation)
-    if (binding?.mode !== 'source-session' || binding.state === 'cleaned') return []
+    if (binding?.mode !== 'source-session' || binding.state === 'cleaned' || binding.state === 'cleaned-archived' || binding.state === 'released') return []
     return ctx.agents.get(sessionId as never) !== undefined || ctx.sessions.get(sessionId as never) !== undefined ? [sessionId] : []
   })
 }

@@ -19,7 +19,7 @@
 //   2. main checkout is clean (no uncommitted changes)
 //   3. merge is fast-forward OR a clean merge (no conflicts expected); the
 //      script refuses to leave a conflicted tree behind
-//   4. no worktree-session operation is in-flight (phase != prepared)
+//   4. no worktree-session operation is in-flight (terminal prepared/cleaned are allowed)
 //
 // Exit code 0 on success (or dry-run with a viable plan); 1 on gate failure
 // or refused execution without --yes.
@@ -88,7 +88,7 @@ function inFlightOperations() {
   if (!existsSync(dir)) return []
   return readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => {
     try { return JSON.parse(readFileSync(path.join(dir, f), 'utf8')) } catch { return null }
-  }).filter(Boolean).filter((o) => o.phase !== 'prepared')
+  }).filter(Boolean).filter((o) => o.phase !== 'prepared' && o.phase !== 'cleaned')
 }
 
 function main() {

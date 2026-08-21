@@ -4,15 +4,18 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-subagent'
+import type {} from '@deepseek-ai/dsh-storage-domain'
+import type {} from '@deepseek-ai/dsh-workspace'
 import { createRoutes } from './host/http.js'
+import { registerArchiveLifecycle, reconcileSessionSnapshot } from './host/archive.js'
 import { activeBoundSessionIds as boundSessionIds, configureContinuableDelegationTools, registerSubagentInheritance, rememberBind } from './host/policy.js'
 import { WsError } from './host/errors.js'
 import { recoverBindingSync } from './host/recovery.js'
 import { registerWsTool } from './host/tool.js'
-import type { OperationRecord } from './wire.js'
+import { bindingOf, type OperationRecord } from './wire.js'
 
 export const name = 'worktree-session'
-export const inject = ['webServer', 'sessions', 'agents', 'tools', 'systemPrompt', 'subagents']
+export const inject = ['webServer', 'sessions', 'agents', 'tools', 'systemPrompt', 'subagents', 'workspaceRegistry', 'storageDomain']
 
 export interface Config { continuableDelegationTools?: readonly string[] }
 
@@ -35,17 +38,27 @@ export function apply(ctx: Context, config: Config = {}): void {
   }
   const recoverAgent = (agent: ReturnType<typeof ctx.agents.get>): void => {
     if (agent === undefined) return
-    const recovered = recoverBindingSync(agent.session.header.cwd, agent.session.id as string)
-    if (recovered !== undefined) rememberBind(ctx, agent.session.id as string, recovered.operation, recovered.valid ? undefined : recovered.diagnostic)
+    const sourceSessionId = agent.session.id as string
+    const recovered = recoverBindingSync(agent.session.header.cwd, sourceSessionId)
+    // Legacy cleaned tombstones need the durable snapshot reconciled before any
+    // old deny-all policy can be installed during the compatibility window.
+    const recoveredBinding = recovered === undefined ? undefined : bindingOf(recovered.operation)
+    if (recovered !== undefined && !(recoveredBinding?.state === 'cleaned' && recoveredBinding.archiveLifecycle === undefined)) {
+      rememberBind(ctx, sourceSessionId, recovered.operation, recovered.valid ? undefined : recovered.diagnostic)
+    }
+    void reconcileSessionSnapshot(ctx, sourceSessionId, { recordBind }).catch(error => {
+      ctx.logger.warn(`worktree-session recovery reconciliation failed: ${error instanceof Error ? error.message : String(error)}`)
+    })
   }
   // session-start is synchronously emitted before the first driver step; install
   // restored policy before the event returns. Also rescue Agents already live if
   // this plugin hot-loads after their publication.
   ctx.on('agent/session-start', ({ agent }) => { recoverAgent(agent) })
-  for (const agent of ctx.agents.list()) recoverAgent(agent)
   registerSubagentInheritance(ctx)
+  ctx.effect(() => registerArchiveLifecycle(ctx, { recordBind }), 'worktree-session: observe durable archive lifecycle')
+  for (const agent of ctx.agents.list()) recoverAgent(agent)
   ctx.effect(() => registerWsTool(ctx), 'worktree-session: register Session-oriented ws tool')
-  for (const route of createRoutes({ activeSessionPaths, activeBoundSessionIds: () => boundSessionIds(ctx), recordBind, bindLiveSource })) {
+  for (const route of createRoutes({ activeSessionPaths, activeBoundSessionIds: () => boundSessionIds(ctx), recordBind, bindLiveSource, reconcileSession: sourceSessionId => reconcileSessionSnapshot(ctx, sourceSessionId, { recordBind }) })) {
     ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: route.path, handler: route.handler }), `worktree-session: ${route.path}`)
   }
 }

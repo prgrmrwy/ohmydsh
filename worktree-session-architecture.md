@@ -119,11 +119,17 @@ stateDiagram-v2
     active --> uncertain : 提交 claimed 但未确认
     uncertain --> active : 重放校验确认 admission
     active --> cleaned : ws clean(安全门通过)
-    cleaned --> [*]
+    cleaned --> cleanedArchived : 观察到进入归档集
+    cleanedArchived --> released : 观察到取消归档
+    released --> released : 重复归档/取消归档
     note right of cleaned
         仅移除安全已证明的 worktree/branch 运行时资源
         保留紧凑 cleaned tombstone
         历史 Session 留在源 Workspace,不删除不移动
+    end note
+    note right of released
+        审计 tombstone 保留但不再是当前绑定
+        Session 恢复普通行为,不创建替代资源
     end note
 ```
 
@@ -136,8 +142,10 @@ stateDiagram-v2
 
 ## 普通 Session 恢复(cleaned 历史 Session)
 
-- 当前实现中，清理后重新打开历史 Session 会提示旧执行根已被清理、拒绝复用被移除的路径，并引导创建新的 Worktree Session（fail closed，不复活旧绑定）。
-- 活跃变更 `restore-cleaned-session-as-ordinary` 将在用户归档后再取消归档时，把 cleaned 历史 Session 转为普通源 Workspace Session：解除运行时 WS 约束但保留审计 tombstone，不自动创建 worktree，仍不支持非空白 Session 触发 `ws start`。
+- 清理后、归档转换发生前，重新打开历史 Session 仍保持 cleaned 防护：提示旧执行根已不存在，并拒绝复用被移除的路径或主 checkout。
+- cleaned Session 进入归档集后再取消归档时，Host 将绑定单调转换为 `released`：解除运行时 Worktree guard/context 和客户端残留状态，同时保留审计 tombstone。
+- released operation 不再参与当前绑定查询、恢复、状态、策略或无 path 维护；对应非空白 Session 恢复普通输入行为，且不会创建 branch、worktree、Workspace、Session 或 operation，也不提供 `ws start`。
+- 重复归档/取消归档不会让 released 绑定回退；缺少 archive lifecycle marker 的 legacy schema-v2 cleaned tombstone 会在兼容对账时按当前归档成员关系 fail-closed 迁移。
 - 孤儿操作:用 `dsh-ws status <worktree>` 检查并保留/提交有用工作;
   破坏性清理要求有效的 schema-v2 source-session 绑定,
   未绑定或格式损坏的记录 fail closed,需操作员显式修复。
@@ -145,4 +153,4 @@ stateDiagram-v2
   worktree、分支、绑定、依赖或操作文件,也不迁移或伪造绑定。
 - 历史 Session 日志与既有 Workspace/Session 注册保持独立且不受影响;
   清理安全 Git 资源从不意味着删除或重挂历史 DSH Workspace/Session 注册或历史。
-- 上述普通 Session 恢复语义由活跃变更 `restore-cleaned-session-as-ordinary` 跟踪；实现落地后，本节应从“计划”更新为最终行为与验证结果。
+- `restore-cleaned-session-as-ordinary` 已通过真实 Host/GUI 验收并归档；主 spec 以该最终行为为准。

@@ -40,7 +40,8 @@ export function cleanedBindingContext(operation: OperationRecord): string {
 /** Deterministic stable context for a bound Session, or undefined when not bound. */
 export function boundContextText(operation: OperationRecord | undefined, binding: SessionBinding | undefined): string | undefined {
   if (operation === undefined) return undefined
-  if (binding?.mode === 'source-session' && binding.state === 'cleaned') return cleanedBindingContext(operation)
+  if (binding?.mode === 'source-session' && binding.state === 'released') return undefined
+  if (binding?.mode === 'source-session' && (binding.state === 'cleaned' || binding.state === 'cleaned-archived')) return cleanedBindingContext(operation)
   if (binding?.mode === 'source-session') return activeBindingContext(operation)
   return undefined
 }

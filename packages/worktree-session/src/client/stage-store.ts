@@ -68,6 +68,20 @@ export function resetStage(sessionId: string): void {
   for (const listener of listeners.get(sessionId) ?? []) listener()
 }
 
+/** Clear only the persisted/in-memory stage proven to belong to this Session/cwd. */
+export function resetStageForCwd(sessionId: string, cwd: string): boolean {
+  const existing = stages.get(sessionId)
+  if (existing !== undefined && existing.cwd !== cwd) return false
+  if (existing === undefined) {
+    try {
+      const raw = localStorage.getItem(persistenceKey(sessionId))
+      if (raw !== null && (JSON.parse(raw) as Partial<ClientStage>).cwd !== cwd) return false
+    } catch { return false }
+  }
+  resetStage(sessionId)
+  return true
+}
+
 export function subscribeStage(sessionId: string, listener: () => void): () => void {
   const set = listeners.get(sessionId) ?? new Set()
   set.add(listener)

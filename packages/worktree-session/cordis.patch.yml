@@ -2,6 +2,9 @@
 - insert:
     - id: worktree-session
       name: dsh-worktree-session
+      inject:
+        - workspaceRegistry
+        - storageDomain
       config:
         # Exact audited Host composition: base `subagent` uses
         # backgroundMode=continuable. One-shot fork/codex tools are excluded.

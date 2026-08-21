@@ -6,7 +6,7 @@ import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import { discoverRepo } from '../src/host/git.js'
 import { atomicJson, readJson } from '../src/host/fs.js'
-import { bindSource, findBySourceSession, loadOperation, operationFile, sessionStatus, startOperation, updateSourceBinding } from '../src/host/operation.js'
+import { bindSource, findBySourceSession, findHistoryBySourceSession, loadOperation, operationFile, reconcileSourceArchiveLifecycle, sessionStatus, startOperation, updateSourceBinding } from '../src/host/operation.js'
 import { wsClean } from '../src/host/maintenance.js'
 import { bindingOf, type OperationRecord } from '../src/wire.js'
 
@@ -112,6 +112,44 @@ describe('source-session binding (schema-v2)', () => {
     const repo = await discoverRepo(root)
     const binding = bindingOf(await loadOperation(repo.gitCommonDir, operationId) as OperationRecord)
     expect(binding?.mode === 'source-session' ? binding.sourceSessionId : '').toBe('session-a')
+  }, 120_000)
+
+  it('moves archive-aware cleaned history monotonically and excludes released records from current lookup', async () => {
+    const root = await fixture()
+    const operationId = await prepared(root)
+    await bindSource({ operationId, repoPath: root, sourceSessionId: 'session-release' })
+    const repo = await discoverRepo(root)
+    const operation = await loadOperation(repo.gitCommonDir, operationId) as OperationRecord
+    await atomicJson(operationFile(repo.gitCommonDir, operationId), {
+      ...operation,
+      phase: 'cleaned',
+      binding: { mode: 'source-session', sourceSessionId: 'session-release', state: 'cleaned', archiveLifecycle: { version: 1 }, updatedAt: operation.updatedAt },
+    })
+    const archived = await reconcileSourceArchiveLifecycle({ gitCommonDir: repo.gitCommonDir, sourceSessionId: 'session-release', archived: true, mode: 'archive-observed' })
+    expect(bindingOf(archived!)?.state).toBe('cleaned-archived')
+    const released = await reconcileSourceArchiveLifecycle({ gitCommonDir: repo.gitCommonDir, sourceSessionId: 'session-release', archived: false, mode: 'unarchive-observed' })
+    expect(bindingOf(released!)?.state).toBe('released')
+    expect(await findBySourceSession(repo.gitCommonDir, 'session-release')).toBeUndefined()
+    expect(bindingOf((await findHistoryBySourceSession(repo.gitCommonDir, 'session-release'))!)?.state).toBe('released')
+    expect(await sessionStatus(root, 'session-release')).toEqual({ bound: false })
+    expect(await reconcileSourceArchiveLifecycle({ gitCommonDir: repo.gitCommonDir, sourceSessionId: 'session-release', archived: true, mode: 'archive-observed' })).toEqual(released)
+    await expect(bindSource({ operationId, repoPath: root, sourceSessionId: 'session-release' })).rejects.toMatchObject({ code: 'OPERATION_NOT_FOUND' })
+  }, 120_000)
+
+  it('migrates legacy cleaned tombstones from the current archive snapshot exactly once', async () => {
+    const root = await fixture()
+    const operationId = await prepared(root)
+    await bindSource({ operationId, repoPath: root, sourceSessionId: 'session-legacy' })
+    const repo = await discoverRepo(root)
+    const operation = await loadOperation(repo.gitCommonDir, operationId) as OperationRecord
+    await atomicJson(operationFile(repo.gitCommonDir, operationId), {
+      ...operation,
+      phase: 'cleaned',
+      binding: { mode: 'source-session', sourceSessionId: 'session-legacy', state: 'cleaned', updatedAt: operation.updatedAt },
+    })
+    const released = await reconcileSourceArchiveLifecycle({ gitCommonDir: repo.gitCommonDir, sourceSessionId: 'session-legacy', archived: false, mode: 'current-snapshot' })
+    expect(bindingOf(released!)?.state).toBe('released')
+    expect(bindingOf(released!)?.archiveLifecycle).toEqual({ version: 1 })
   }, 120_000)
 
   it('fails closed on schema-v1 metadata on read and never fabricates a binding', async () => {

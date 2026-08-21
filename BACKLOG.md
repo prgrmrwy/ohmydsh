@@ -167,6 +167,34 @@
   - 替代方案(已在 design 对比):影子替换整个 `sidebar.workspaces`(organizer-sidebar 的 priority:-2 做法,零 hack 但需重画整套浏览器)——因侵入性/可维护性被否;社区 `dsh-sentinel` 的 `sessionRow.branch` 依赖官方没有的 `betterSidebar` 服务契约,不可用。
 - **更新**: 2026-08-20 新增;同日明确形态(session 前 icon,不占用量空间)并完成社区调研:无现成同款,需自研,行级装饰机制有三个可借鉴实现;2026-08-21 初版落地后按实机反馈修订:provider 基准改为输入框当前选择(即时更新,最后请求仅作历史 fallback),手绘图替换为下载落盘的真实品牌 SVG,补 OpenCode 映射;继续保持轻量 DOM 注入 + 不动 StateDot。
 
+### [B014] Worktree Session 隔离度分层与 build/runtime home 解耦
+- **状态**: 讨论中
+- **优先级**: P1
+- **背景 / 动机**: Worktree Session 当前把任务专属 `DSH_HOME` 写入 worktree `.env.local`，可正确防止候选 build/sync 污染真实 `~/.dsh`；但同一个 `bin/dsh` 同时承担 build、preview、start、restart，用户从 task worktree 执行 restart 时会把整个 Host 切到空白隔离 home，表现为插件、Workspace/Session、provider 配置和凭据全部“消失”并要求重新输入 API Key。原数据未丢失，但当前边界非常容易误用。
+- **五层隔离模型**:
+  1. **源码隔离**：每个任务使用独立 branch/worktree，Agent 本地工具只访问 managed root；默认必须。
+  2. **依赖隔离**：默认 lean、同 fingerprint 共享 cache；依赖变更前 promote，之后使用 worktree-local mutable dependencies。
+  3. **部署隔离**：task `DSH_HOME=<git-common-dir>/ws/dsh-home/<operationId>` 只用于 `dsh build`、bundle composition、隔离安装与独立 preview，不读取真实用户配置。
+  4. **真实配置验收**：显式 opt-in 使用 `DSH_HOME=$HOME/.dsh` 部署/加载候选 bundle，以真实 Workspace/Session/provider 验收；属于影响日常 profile 的部署动作，必须可识别、可回滚。
+  5. **日常运行**：实现合入 main 后，由 main launcher 对真实 `~/.dsh` build/restart；不得依赖 task worktree 路径。
+- **设计原则**:
+  - 完全隔离本身符合预期，不应通过共享凭据/Session 来削弱第 3 层；应解决 build home 与 runtime home 粗粒度耦合及 launcher UX。
+  - `DSH_HOME` 是进程级总根，当前同时承载 bundle/profile、Workspace/Session、provider 凭据、storage、skills 和日志，不能再把它描述成单纯“构建输出目录”。
+  - 隔离 preview 与真实 profile acceptance 必须是两种显式模式；不得把 task launcher 的 restart 当作真实 GUI 无副作用重启。
+- **优化候选**:
+  - 拆分 `DSH_BUILD_HOME` / `DSH_RUNTIME_HOME`，或由命令显式选择目标 home，而不是在 task `.env.local` 中无条件覆盖进程级 `DSH_HOME`。
+  - 命令边界建议：`dsh build --isolated`、`dsh preview --isolated --port <port>`、`dsh deploy --profile web`、`dsh restart`；其中 restart 只重启既有真实 profile。
+  - launcher 每次启动打印绝对 `DSH_HOME` / profile；检测到 `.git/ws/dsh-home/` 时显示醒目的“隔离预览环境”，start/restart 默认拒绝或要求明确确认。
+  - Worktree Session 运行上下文应明确：worktree 的 `bin/dsh build` 默认是隔离构建，不代表当前日常 GUI 已更新；真实部署需独立授权步骤。
+- **验收标准**:
+  - task build 不写真实 `~/.dsh`，两个并行任务仍拥有不同部署根；
+  - task preview 不读取或复制真实凭据/Session，且使用独立端口并显著标识隔离环境；
+  - 日常 restart 不会因 cwd/worktree `.env.local` 改变 runtime home；
+  - 真实 profile deploy 前后可展示目标、差异与回滚路径，restart 后保留原 Workspace/Session/provider；
+  - 自动化验收能分别声明 isolated preview 与 real-profile acceptance，且不会混用。
+- **关联记录**: `openspec/changes/restore-cleaned-session-as-ordinary/WORKTREE-ISOLATION-NOTE.md`（2026-08-21 误用复盘与详细现象）。
+- **更新**: 2026-08-21 记录五层隔离模型；确认“完全隔离”适合作为开发 build/preview，但现有 `DSH_HOME` + 通用 launcher 造成运行边界不清，后续需专项 OpenSpec 优化。
+
 ---
 
 ## 缺陷备忘

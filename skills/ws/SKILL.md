@@ -77,9 +77,16 @@ malformed v2 binding fails closed and requires explicit operator repair.
 
 Successful cleanup removes only safety-proven Git/runtime resources and marks
 the binding `cleaned`. It keeps the historical source Session in the source
-Workspace. If that Session is reopened, explain that its old managed execution
-root no longer exists, do not execute against the removed path or main checkout,
-and direct the user to create a new Worktree Session.
+Workspace. Before archive → unarchive, reopening it remains fail-closed: explain
+that its old managed execution root no longer exists and do not use the removed
+path or main checkout.
+
+Once a cleaned Session is archived and then unarchived, the Host automatically
+releases the current binding while retaining its tombstone as audit history. The
+Session is then ordinary and no-path `ws` maintenance no longer targets that old
+operation. Release creates no branch, worktree, Workspace, Session, or operation,
+and never exposes `ws start`: a restored non-blank Session cannot enter Worktree
+mode or reuse the released binding. Repeated archive/unarchive remains released.
 
 ## Schema-v2 only
 
