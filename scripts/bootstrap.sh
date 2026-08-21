@@ -32,7 +32,7 @@ cd "$REPO"
 # ---------- 1. 检查 Node / npm ----------
 for tool in node npm; do
   if ! command -v "$tool" >/dev/null 2>&1; then
-    echo "error: 未找到 $tool,请先安装 Node.js ≥ 16" >&2
+    echo "error: 未找到 $tool,请先安装 Node.js ≥ 22.19" >&2
     echo "  macOS:   brew install node" >&2
     echo "  Linux:   用发行版包管理器安装 nodejs / npm" >&2
     echo "  通用:    从 https://nodejs.org 下载安装" >&2
@@ -41,18 +41,19 @@ for tool in node npm; do
 done
 
 NODE_MAJOR="$(node -v | sed -E 's/^v([0-9]+).*/\1/')"
-if [ "$NODE_MAJOR" -lt 16 ]; then
-  echo "error: Node.js 版本过低(node -v = $(node -v)),需要 ≥ 16" >&2
+NODE_MINOR="$(node -v | sed -E 's/^v[0-9]+\.([0-9]+).*/\1/')"
+if [ "$NODE_MAJOR" -lt 22 ] || { [ "$NODE_MAJOR" -eq 22 ] && [ "$NODE_MINOR" -lt 19 ]; }; then
+  echo "error: Node.js 版本过低(node -v = $(node -v)),需要 ≥ 22.19" >&2
   exit 1
 fi
 echo "环境 OK: node $(node -v) / npm $(npm -v)"
 
-# ---------- 2. 安装依赖(幂等) ----------
-if [ "$FORCE" -eq 1 ] || [ ! -f node_modules/js-yaml/package.json ]; then
-  echo "安装依赖(npm install)..."
+# ---------- 2. 从根 lock 安装全部 workspace 依赖(幂等) ----------
+if [ "$FORCE" -eq 1 ] || [ ! -f node_modules/js-yaml/package.json ] || [ ! -f node_modules/typescript/package.json ]; then
+  echo "从根 package-lock 安装 workspace 依赖(npm install)..."
   npm install
 else
-  echo "依赖已就绪,跳过 npm install(如遇依赖问题可 ./scripts/bootstrap.sh --force 重装)"
+  echo "根 workspace 依赖已就绪,跳过 npm install(如遇依赖问题可 ./scripts/bootstrap.sh --force 重装)"
 fi
 
 echo "OK 初始化完成。下一步:"

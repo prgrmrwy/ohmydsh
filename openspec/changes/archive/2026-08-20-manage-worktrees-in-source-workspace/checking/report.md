@@ -9,6 +9,8 @@
 **来源**：OpenSpec tasks 7.3–7.5、source-workspace-worktree-session spec  
 **Focus**：integration
 
+> **证据留存说明（2026-08 slim-repository-artifacts）**：本报告及 trails/gates/scripts 中引用的 `baselines/*` 与 `screenshots/*` 原始验收证据（session/history 快照、API envelope、批量截图）为一次性会话产物，未托管于任何外部 artifact 存储，已按仓库派生资产保留规则移出当前版本树（历史 commit 仍可追溯）——后续 raw evidence 视为 ephemeral。验收结论、检查点台账与复现脚本（`scripts/*.mjs`，其读取的 baseline 输入已随之移除，脚本仅作复现步骤参考）完整保留于本目录。
+
 ## Verdict
 
 **PASS（最终 Loop 4；11/11 integration checkpoints passed）**。Loop 1 的环境阻塞、Loop 2 的模型预拒绝、Loop 3 的诊断缺 exact root 均保留为历史记录；最终 live build + 用户重启后，T1–T6 全部通过。真实证据覆盖普通提交、同一 Workspace/Session 原地 Worktree首提、Workspace/Session数量不增长、工具 confinement、runtime-context去重、lean→mutable、安全归档 cleanup，以及schema-v1独立 Workspace/Session重启兼容。未使用mock或伪造tool/history事件。
