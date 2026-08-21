@@ -159,13 +159,13 @@
 - **要点**:
   - 展示形态(2026-08-20 用户明确):session 条目**前置** icon 式标识,不与用量类插件(B010,多落在 dock / 侧栏底部 / 输入区)争同一空间;形态候选 = provider logo 小图标 / 单色缩写圆徽(DS / GPT / CL / GK);
   - 社区调研(2026-08-20):**未发现现成同款**(逐条扫过 [awesome-dsh-plugin](https://github.com/Anil-matcha/awesome-dsh-plugin) UI/Sessions/Usage 分类 + npm 搜索)。最接近的:[dsh-hud](https://github.com/a903067276-rgb/dsh-hud)(浮动面板显示当前模型,非 per-session 列表)、[dsh-session-pin](https://github.com/PerryLink/dsh-session-pin)(侧栏行加颜色/tags,形态相近但内容是 pin 不是模型)、[dsh-session-manager](https://github.com/dream12347/dsh-session-manager)(侧栏行加未读/状态点,证明行级装饰可行)。结论:需自研,可借鉴 session-pin / session-manager 的行装饰实现;
-  - provider 基准(2026-08-21 定):该会话**最后一次实际发出的 assistant 请求**的 provider/model(非"模型选择器里选的配置");会话中途切模型图标跟随;空白/无请求会话不显示;
-  - 数据链路(2026-08-21 源码核实):官方 `SessionProjectionMap` 可合并扩展;host 侧注册 `provider` projection 单元(init/apply/view + schema),折叠会话日志 `request/header` 事件记录最后一次请求的 provider/model,值经 `session/projection` 帧流到 `SessionSummary.projectionValues`(官方 title/sessionStats/tokenUsage 同路)——重启不丢、历史会话全有、不存 localStorage;
+  - provider 基准(2026-08-21 修订):该会话输入框**当前选中的下一次请求模型**;选择器切换成功即立即切 logo,无需先发送消息;当前/本进程已观察的会话以官方 `ctx.modelDirectories.directoryFor(sessionId).store.current` 为真相源,空白会话也可显示已选模型;
+  - 数据链路(2026-08-21 源码核实):官方 model-selection 插件的 per-session `ModelDirectory.store` 是输入框与 `/model` 命令共享的唯一状态,`session.selectModel` 成功后同步发布 `{provider,model}`;客户端直接订阅该 store。host `SessionProjectionMap.provider` 仍折叠 `request/header`,仅作为未打开/未加载历史会话的持久冷启动 fallback——重启不丢、不存 localStorage;
   - 渲染路线(2026-08-21 定):**轻量 DOM 注入 + 定位器模块**——官方 rc.7 / master rc.8 的 session 行**无 per-row slot**,不重写官方浏览器;客户端订阅 sessions.list + MutationObserver 在每行标题前插入 12~14px provider logo SVG;DOM 结构依赖收进独立 `row-locator` 模块(role="treeitem" + 标题反查,避免 hashed class),升级只修一处;
   - 明确边界(2026-08-21 用户强调):**不得影响任务状态 icon(官方 StateDot)**——只读不动,也不替换其位置;时间/菜单/拖拽排序保持官方原样;
-  - logo 来源:各 provider 官方 logo 内联 SVG(codex/OpenAI、claude/Anthropic、grok/xAI、deepseek 等),无需考虑版权;未知 provider 首字母 fallback;
+  - logo 来源(2026-08-21 修订):不手绘;下载并随包固定保存品牌 SVG——DeepSeek 鲸鱼、OpenAI/GPT 螺旋、Anthropic、Grok 来自 `@lobehub/icons-static-svg@1.94.0`(MIT),OpenCode 来自 anomalyco/opencode 固定 commit `5e75e5e`(MIT);品牌判断优先识别已知 provider route(`opencode-go` 即 OpenCode,即使 model 为 `deepseek-v4-flash`),未知/兼容 route 才按 model fallback;未知选择首字母 fallback;
   - 替代方案(已在 design 对比):影子替换整个 `sidebar.workspaces`(organizer-sidebar 的 priority:-2 做法,零 hack 但需重画整套浏览器)——因侵入性/可维护性被否;社区 `dsh-sentinel` 的 `sessionRow.branch` 依赖官方没有的 `betterSidebar` 服务契约,不可用。
-- **更新**: 2026-08-20 新增;同日明确形态(session 前 icon,不占用量空间)并完成社区调研:无现成同款,需自研,行级装饰机制有三个可借鉴实现;2026-08-21 对齐预期(provider 基准 = 最后一次实际请求 / 轻量 DOM 注入 + 定位器 / 不动 StateDot / 走完整 openspec),openspec change `sidebar-session-provider-icon` 实施完成。
+- **更新**: 2026-08-20 新增;同日明确形态(session 前 icon,不占用量空间)并完成社区调研:无现成同款,需自研,行级装饰机制有三个可借鉴实现;2026-08-21 初版落地后按实机反馈修订:provider 基准改为输入框当前选择(即时更新,最后请求仅作历史 fallback),手绘图替换为下载落盘的真实品牌 SVG,补 OpenCode 映射;继续保持轻量 DOM 注入 + 不动 StateDot。
 
 ---
 

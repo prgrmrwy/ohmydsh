@@ -1,0 +1,264 @@
+id: T2
+name: 特殊数据、route、视觉与降级人工验收
+description: "在固定真实 GUI http://127.0.0.1:3091 上，由人工准备缺失或未知的数据/账号条件，覆盖失败保持、fallback、来源优先级、品牌图标、route 与安全降级。"
+device: pc
+parallel_group: B
+conflicts_with: [T1]
+precondition: "逐项具备对应真实数据、账号 route 或可控失败/DOM 条件；不得补 mock。CP07 需要截图，但当前 execution focus=interaction 时记 skipped-not-in-focus。"
+ask_user_if_blocked: false
+status: pending
+blocked_reason: null
+mock_setup:
+  required: true
+  status: missing
+  scenario_id: "manual-special-data-routes-and-failures"
+  surface: sidebar-session-row
+  data_source: "runtime session projection + selector + provider route/model metadata"
+  evidence:
+    - "package.json 无 mock script。"
+    - "未找到 handlers/fixtures 及明确启用入口。"
+    - "lockfile 中的 msw 无已确认启用入口。"
+  enable:
+    command: null
+    env: null
+    notes: "阶段2用户决定：真实 GUI 可执行项自动跑；missing/unknown 改人工，不补 mock。"
+  user_decision: manual
+
+steps:
+  - seq: 1
+    description: "人工准备可触发 selectModel 失败的真实 session，记录旧选择与旧图标后尝试切换。"
+    action: wait_for
+    target: "http://127.0.0.1:3091 上可触发 selectModel 失败的 session"
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: CP03
+        description: "selectModel 失败后当前行保持旧选择与旧 provider icon。"
+        focus: interaction
+        verify: assert_dom
+        automation: manual
+        data_scenario_required: true
+        data_scenario: selectModel-failure
+        surface: sidebar-session-row
+        data_source: "runtime session projection"
+        mock_scenario_id: null
+        expected_source: "阶段1 checkpoint CP03"
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: "mock missing，按阶段2决定人工。"
+        result: null
+        result_detail: null
+        selector: "失败切换涉及的 session 行模型选择与 provider icon"
+        expected_text: "仍为失败前的旧选择"
+        expected_attrs:
+          provider_icon: "unchanged-old-selection"
+        expected_visible: true
+
+  - seq: 2
+    description: "人工打开具备冷历史数据的 session。"
+    action: wait_for
+    target: "冷历史 session 行"
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: CP04
+        description: "冷历史 session 按既有 checkpoint 使用 fallback。"
+        focus: interaction
+        verify: assert_dom
+        automation: manual
+        data_scenario_required: true
+        data_scenario: cold-history-fallback
+        surface: sidebar-session-row
+        data_source: "session history"
+        mock_scenario_id: null
+        expected_source: "阶段1 checkpoint CP04"
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: "数据构造 unknown；不得从 diff 发明更具体 expected。"
+        result: null
+        result_detail: null
+        selector: "冷历史 session 行 provider icon"
+        expected_text: "使用 checkpoint 声明的 fallback"
+        expected_attrs: null
+        expected_visible: true
+
+  - seq: 3
+    description: "人工准备 selector B 与投影 A 冲突的 session 并打开侧栏。"
+    action: wait_for
+    target: "selector B 与 projection A 冲突的 session 行"
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: CP05
+        description: "selector B 覆盖投影 A，当前行采用 B。"
+        focus: interaction
+        verify: assert_dom
+        automation: manual
+        data_scenario_required: true
+        data_scenario: selector-B-overrides-projection-A
+        surface: sidebar-session-row
+        data_source: "selector + runtime session projection"
+        mock_scenario_id: null
+        expected_source: "阶段1 checkpoint CP05"
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: "双来源构造 unknown，按阶段2决定人工。"
+        result: null
+        result_detail: null
+        selector: "冲突 session 行模型选择与 provider icon"
+        expected_text: "采用 selector B"
+        expected_attrs:
+          source_precedence: B
+        expected_visible: true
+
+  - seq: 4
+    description: "人工准备 selector 与投影均无 provider 的 session 并打开侧栏。"
+    action: wait_for
+    target: "两数据来源均无 provider 的 session 行"
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: CP06
+        description: "两数据来源均无 provider 时，session 行不包含 provider logo。"
+        focus: interaction
+        verify: assert_dom
+        automation: manual
+        data_scenario_required: true
+        data_scenario: no-provider-in-either-source
+        surface: sidebar-session-row
+        data_source: "selector + runtime session projection"
+        mock_scenario_id: null
+        expected_source: "阶段1 checkpoint CP06"
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: "缺字段构造 unknown，按阶段2决定人工。"
+        result: null
+        result_detail: null
+        selector: "目标 session 行 provider logo 区域"
+        expected_text: null
+        expected_attrs:
+          provider_logo_count: "0"
+        expected_visible: false
+
+  - seq: 5
+    description: "人工分别展示 DeepSeek、OpenAI 与 OpenCode 对应 session 行并截图。"
+    action: wait_for
+    target: "三个 provider 对应的 sidebar session icon 区域"
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: CP07
+        description: "DeepSeek 显示鲸鱼、OpenAI 显示螺旋、OpenCode 显示官方图标。"
+        focus: visual
+        verify: visual_inspect
+        automation: manual
+        data_scenario_required: true
+        data_scenario: three-provider-brand-icons
+        surface: sidebar-session-provider-icon
+        data_source: "provider route and model metadata"
+        mock_scenario_id: null
+        expected_source: "阶段1 checkpoint CP07"
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: "缺可信视觉基准；截图供人工。execution focus=interaction 时结果应为 skipped — not in focus。"
+        result: null
+        result_detail: null
+        target_area: "DeepSeek/OpenAI/OpenCode 三个 session 行的 provider icon"
+        inspect_notes: "人工核对：DeepSeek 鲸鱼、OpenAI 螺旋、OpenCode 官方图标；不要用实现 diff 作为视觉 oracle。"
+
+  - seq: 6
+    description: "人工使用账号 route 为 opencode-go、model 为 deepseek-v4-flash 的真实 session。"
+    action: wait_for
+    target: "opencode-go/deepseek-v4-flash session 行"
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: CP08
+        description: "opencode-go/deepseek-v4-flash 显示 OpenCode，而非 DeepSeek。"
+        focus: interaction
+        verify: assert_dom
+        automation: manual
+        data_scenario_required: true
+        data_scenario: opencode-route-with-deepseek-model
+        surface: sidebar-session-provider-icon
+        data_source: "account route + model metadata"
+        mock_scenario_id: null
+        expected_source: "阶段1 checkpoint CP08"
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: "账号 route unknown，按阶段2决定人工。"
+        result: null
+        result_detail: null
+        selector: "目标 session 行 provider icon"
+        expected_text: "OpenCode；不包含 DeepSeek"
+        expected_attrs:
+          provider: opencode
+          not_provider: deepseek
+        expected_visible: true
+
+  - seq: 7
+    description: "人工准备 unknown route 且 model 可用于 fallback 的真实 session。"
+    action: wait_for
+    target: "unknown route session 行"
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: CP09
+        description: "unknown route 按 model fallback。"
+        focus: interaction
+        verify: assert_dom
+        automation: manual
+        data_scenario_required: true
+        data_scenario: unknown-route-model-fallback
+        surface: sidebar-session-provider-icon
+        data_source: "account route + model metadata"
+        mock_scenario_id: null
+        expected_source: "阶段1 checkpoint CP09"
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: "mock missing；不得从 diff 发明具体 model 到 icon 映射。"
+        result: null
+        result_detail: null
+        selector: "unknown route session 行 provider icon"
+        expected_text: "按该 session 的 model fallback"
+        expected_attrs:
+          fallback_source: model
+        expected_visible: true
+
+  - seq: 8
+    description: "人工在可控环境改变目标 DOM 结构，然后打开侧栏并操作目标 session 行。"
+    action: wait_for
+    target: "DOM 结构变化后的 sidebar session 行"
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: CP12
+        description: "DOM 结构变化时安全降级：页面不崩溃，session 行仍可使用。"
+        focus: interaction
+        verify: assert_dom
+        automation: manual
+        data_scenario_required: true
+        data_scenario: changed-dom-structure
+        surface: sidebar-session-row
+        data_source: "rendered DOM"
+        mock_scenario_id: null
+        expected_source: "阶段1 checkpoint CP12"
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: "mock missing，按阶段2决定人工。"
+        result: null
+        result_detail: null
+        selector: "变化后的 sidebar 与目标 session 行"
+        expected_text: "页面未崩溃；session 行仍可操作"
+        expected_attrs:
+          safe_degradation: "true"
+          row_usable: "true"
+        expected_visible: true
