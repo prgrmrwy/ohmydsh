@@ -82,6 +82,7 @@ dsh stop    # 3. 停止服务
 | 重启 | `dsh restart` | 停 → 等端口释放 → 再启动,一步到位(别用 `dsh stop & dsh`,两者会打架) |
 | 看历史 | `dsh history` | 历次启动的时间 / DSH 版本 / 端口 / 插件清单(记录在 `~/.dsh/dsh-startup.log`) |
 | 一键清空定制 | `dsh reset` | 移除自定义插件、preset、skill,并安全撤销托管的 `$DSH_HOME/AGENTS.md`(反悔了?`dsh build` 就能恢复) |
+| 统一升级插件 | `dsh plugin-update` | 检测远端插件新版本(兼容性/稳定性判定)→ 逐条确认 → 改 `dsh.yaml` + sync + 自动提交;`--dry-run` 只预览,`--yes` 跳过确认;needs-review 条目永远等人工 |
 | 调试 | `dsh --foreground` | 前台运行,日志直接打在终端 |
 | 换端口 | `dsh -p 8080` | 默认 3080 |
 | 不弹 UI | `dsh --no-open` | 启动/检测时不自动打开 UI |

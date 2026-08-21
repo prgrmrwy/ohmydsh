@@ -11,6 +11,8 @@
 #   dsh restart    重启:stop → 等端口释放 → start(避免 stop & dsh 竞态)
 #   dsh reset      一键清零自定义 plugins(patch/preset/skill 一并重置;可 dsh build 恢复)
 #   dsh history    查看历次启动清单(时间 / 版本 / 端口 / 加载的 plugins)
+#   dsh plugin-update 统一升级远端插件(检测 → 确认 → 改 dsh.yaml → sync → 自动提交;
+#                   --dry-run 只预览;--yes 跳过逐条确认)
 #   dsh -p 8080    指定端口(默认 3080)
 #   (web.lan / DSH_LAN 开启时,启动输出同时打印本机与局域网地址;临时仅本机:--host 127.0.0.1)
 #
@@ -88,6 +90,9 @@ NO_OPEN=0
 RESET=0
 FOREGROUND=0
 HISTORY=0
+PLUGIN_UPDATE=0
+DRY_RUN=""
+YES_FLAG=""
 PASSTHRU=()
 
 usage() {
@@ -102,6 +107,9 @@ while [[ $# -gt 0 ]]; do
     restart) RESTART=1; shift ;;
     reset) RESET=1; shift ;;
     history) HISTORY=1; shift ;;
+    plugin-update) PLUGIN_UPDATE=1; shift ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    -y|--yes) YES_FLAG=1; shift ;;
     -b|--build) BUILD=1; shift ;;
     -d|--daemon) shift ;;        # 兼容保留:默认即非阻塞后台
     --foreground) FOREGROUND=1; shift ;;
@@ -429,6 +437,11 @@ autoupdate() {
   esac
   return 0
 }
+
+if [[ $PLUGIN_UPDATE -eq 1 ]]; then
+  node "$REPO/scripts/plugin-update.mjs" ${DRY_RUN:+--dry-run} ${YES_FLAG:+--yes}
+  exit $?
+fi
 
 if [[ $BUILD_ONLY -eq 1 || $BUILD -eq 1 || $RESTART -eq 1 ]] || ! is_server_up; then
   autoupdate
