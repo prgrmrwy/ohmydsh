@@ -100,6 +100,7 @@ describe('maintenance', () => {
     const record = await loadOperation(repo.gitCommonDir, prepared.operationId)
     expect(record?.phase).toBe('cleaned')
     expect(bindingOf(record!)?.state).toBe('cleaned')
+    expect(bindingOf(record!)?.archiveLifecycle).toEqual({ version: 1 })
     expect((await sessionStatus(root, 'session-archived'))).toMatchObject({ bound: true, cleaned: true, lifecycle: 'cleaned' })
   }, 120_000)
 

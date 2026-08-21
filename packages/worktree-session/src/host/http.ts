@@ -108,6 +108,8 @@ export interface HostRouteDeps {
   bindLiveSource?: (sourceSessionId: string, operation: OperationRecord, options: { requireBlank: boolean }) => void
   /** Refresh an already-bound live Session after Host restart/UI resume. */
   recordBind?: (sourceSessionId: string, operation: OperationRecord | undefined) => void
+  /** Reconcile archive lifecycle before deciding whether a current binding exists. */
+  reconcileSession?: (sourceSessionId: string) => Promise<void>
 }
 
 async function loadBySession(repoPath: string, sourceSessionId: string): Promise<OperationRecord | undefined> {
@@ -173,6 +175,7 @@ export function createRoutes(deps: HostRouteDeps = {}): readonly RouteRegistrati
       const parsed = strictObject(body, ['sessionId', 'repoPath'])
       const repoPath = absolutePath(parsed, 'repoPath')
       const sourceSessionId = stringField(parsed, 'sessionId')
+      await deps.reconcileSession?.(sourceSessionId)
       const result = await sessionStatus(repoPath, sourceSessionId)
       if (result.bound) recordBind(sourceSessionId, await loadBySession(repoPath, sourceSessionId))
       else recordBind(sourceSessionId, undefined)

@@ -48,7 +48,7 @@ class ScriptedAdapter extends LlmAdapter {
   }
 }
 
-function operation(state: 'admitted' | 'cleaned' = 'admitted'): OperationRecord {
+function operation(state: 'admitted' | 'cleaned' | 'released' = 'admitted'): OperationRecord {
   return {
     schemaVersion: 2,
     operationId: 'operation-12345678',
@@ -216,6 +216,34 @@ describe('Worktree Session AgentLoop runtime-context projection', () => {
     expect(result.isError).toBe(true)
     expect(result.isError && result.error.message).toMatch(/已清理/)
     expect(bodyCalls).toBe(0)
+  })
+
+  it('removes the cleaned guard/context on release and emits the standard cleared projection once', async () => {
+    const cleaned = operation('cleaned')
+    const released = operation('released')
+    const { ctx } = await harness(2)
+    let bodyCalls = 0
+    ctx.tools.register(defineContentToolFixture({
+      name: 'read',
+      description: 'release fixture',
+      parameters: { file_path: { type: 'string', required: true } },
+      async execute() { bodyCalls += 1; return [{ type: 'text', text: 'ordinary' }] },
+    }))
+    const { agent } = await createBoundAgent(ctx, cleaned)
+    rememberBind(ctx, agent.session.id as string, cleaned)
+    await step(agent, 'cleaned')
+    rememberBind(ctx, agent.session.id as string, released)
+    const result = await ctx.tools.execute({ callId: CallId('released-read'), name: 'read', arguments: { file_path: '/repo/file.txt' }, agent, signal: new AbortController().signal })
+    expect(result.isError).toBe(false)
+    expect(bodyCalls).toBe(1)
+    await step(agent, 'released')
+    const projections = runtimeContextEvents(agent)
+    expect(projections).toHaveLength(2)
+    expect(eventText(projections[0]!)).toContain('已清理')
+    expect(eventText(projections[1]!)).toContain('Current runtime context')
+    expect(eventText(projections[1]!)).not.toContain('Worktree Session（已清理）')
+    rememberBind(ctx, agent.session.id as string, released)
+    expect(await ctx.tools.execute({ callId: CallId('released-read-again'), name: 'read', arguments: { file_path: '/repo/again.txt' }, agent, signal: new AbortController().signal })).toMatchObject({ isError: false })
   })
 
   it('adds one terminal snapshot for active to cleaned and does not repeat it', async () => {

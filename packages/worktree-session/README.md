@@ -66,9 +66,18 @@ never deletes remote branches or shared npm caches.
 
 Successful cleanup removes only safety-proven worktree/branch runtime resources
 and retains a compact `cleaned` tombstone. The historical Session is not deleted
-or moved: it remains under the source Workspace. Reopening it shows that the old
-execution root has been cleaned, denies reuse of that removed path, and directs
-the user to create a new Worktree Session.
+or moved: it remains under the source Workspace. Until it completes an archive →
+unarchive transition, reopening it shows that the old execution root has been
+cleaned and denies reuse of that removed path.
+
+After a cleaned Session is archived and then unarchived, WS automatically marks
+its source binding as terminal `released` audit history and restores the Session
+as an ordinary source-Workspace Session. This removes the cleaned tool guard,
+runtime context, status badge, and stale client stage without creating a branch,
+worktree, Workspace, Session, or operation. Released state is monotonic and is
+not recovered as a current binding after restart. The restored non-blank Session
+still cannot start Worktree mode: there is no `ws start`, binding reuse, or
+mid-Session Worktree control; Worktree startup remains blank-Session-only.
 
 ## Recovery and persisted binding
 

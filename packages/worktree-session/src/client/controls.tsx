@@ -3,7 +3,7 @@ import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { RepoStatusResult, SessionStatusResult } from '../wire.ts'
 import { post, ROUTES } from './api.ts'
 import { decorateSubmit, restoreSubmit } from './handoff.ts'
-import { getStage, resetStage, setStage, subscribeStage, type ClientStage } from './stage-store.ts'
+import { getStage, resetStage, resetStageForCwd, setStage, subscribeStage, type ClientStage } from './stage-store.ts'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 
 export type WorktreeControlsProps = PropsRuntime<'conversation.input.left'> & {
@@ -49,7 +49,11 @@ export function WorktreeControls({ pluginContext: ctx, session, sessionId, useSe
         restoreSubmit(sessionId as string)
         return
       }
-      if (!session.blank) { restoreSubmit(sessionId as string); return }
+      // Host status is authoritative: release stale cleaned/local handoff state
+      // for this exact immutable Session cwd before ordinary rendering rules.
+      resetStageForCwd(sessionId as string, cwd)
+      restoreSubmit(sessionId as string)
+      if (!session.blank) return
       void post<RepoStatusResult>(ROUTES.repoStatus, { repoPath: cwd }).then(result => {
         if (!live) return
         const current = getStage(sessionId as string, cwd)

@@ -40,14 +40,37 @@ export interface WorktreeEntry {
   prunable: boolean
 }
 
+export type PublicBindingLifecycle = 'bound' | 'submit-claimed' | 'admitted' | 'uncertain' | 'cleaned'
+export type SourceBindingState = PublicBindingLifecycle | 'cleaned-archived' | 'released'
+
+/**
+ * Marks tombstones written by the archive-aware schema-v2 implementation.
+ * Its absence on a cleaned binding identifies a pre-change tombstone for the
+ * one-time compatibility reconciliation; schemaVersion deliberately remains 2.
+ */
+export interface ArchiveLifecycleMetadata {
+  version: 1
+}
+
 export interface SourceSessionBinding {
   mode: 'source-session'
   sourceSessionId: string
-  state: 'bound' | 'submit-claimed' | 'admitted' | 'uncertain' | 'cleaned'
+  state: SourceBindingState
   updatedAt: string
+  archiveLifecycle?: ArchiveLifecycleMetadata
 }
 
 export type SessionBinding = SourceSessionBinding
+
+/** Released audit history is deliberately not a current Session binding. */
+export function isCurrentBinding(binding: SessionBinding | undefined): binding is SourceSessionBinding {
+  return binding?.mode === 'source-session' && binding.state !== 'released'
+}
+
+/** Map internal archive states onto the stable public lifecycle vocabulary. */
+export function publicBindingLifecycle(binding: SourceSessionBinding): PublicBindingLifecycle {
+  return binding.state === 'cleaned-archived' || binding.state === 'released' ? 'cleaned' : binding.state
+}
 
 export interface OperationRecord {
   schemaVersion: 2
@@ -145,7 +168,7 @@ export interface SessionStatusResult {
   taskBranch?: string
   worktreePath?: string
   dependencyMode?: DependencyMode
-  lifecycle?: 'bound' | 'submit-claimed' | 'admitted' | 'uncertain' | 'cleaned'
+  lifecycle?: PublicBindingLifecycle
   cleaned?: boolean
 }
 

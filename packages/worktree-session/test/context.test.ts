@@ -69,6 +69,13 @@ describe('Worktree Session stable runtime context', () => {
     expect(cleanedText).not.toContain('2026-')
   })
 
+  it('guards cleaned-archived like cleaned but gives released audit history no runtime context', () => {
+    const archived = operation({ binding: { mode: 'source-session', sourceSessionId: 'session-c', state: 'cleaned-archived', archiveLifecycle: { version: 1 }, updatedAt: '2026-01-03T00:00:00.000Z' } })
+    const released = operation({ binding: { mode: 'source-session', sourceSessionId: 'session-c', state: 'released', archiveLifecycle: { version: 1 }, updatedAt: '2026-01-04T00:00:00.000Z' } })
+    expect(boundContextText(archived, bindingOf(archived))).toBe(cleanedBindingContext(archived))
+    expect(boundContextText(released, bindingOf(released))).toBeUndefined()
+  })
+
   it('reprojects the same active text after a hypothetical compaction without duplication', () => {
     const record = operation({ binding: { mode: 'source-session', sourceSessionId: 'session-a', state: 'admitted', updatedAt: '2026-01-01T00:00:00.000Z' } })
     const text = boundContextText(record, bindingOf(record))

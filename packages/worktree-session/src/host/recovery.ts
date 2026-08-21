@@ -28,7 +28,7 @@ function gitCommonDir(repoRoot: string): string | undefined {
 function identityDiagnostic(operation: OperationRecord): string | undefined {
   const binding = bindingOf(operation)
   if (binding?.mode !== 'source-session') return 'operation is not a source-session binding'
-  if (binding.state === 'cleaned') return undefined
+  if (binding.state === 'cleaned' || binding.state === 'cleaned-archived') return undefined
   try {
     if (!statSync(operation.worktreePath).isDirectory()) return `managed worktree is not a directory: ${operation.worktreePath}`
     const repoReal = realpathSync(operation.repoRoot)
@@ -59,7 +59,7 @@ export function recoverBindingSync(repoPath: string | undefined, sourceSessionId
     let operation: OperationRecord
     try { operation = JSON.parse(readFileSync(join(operationsDir, name), 'utf8')) as OperationRecord } catch { continue }
     const binding = bindingOf(operation)
-    if (binding?.mode !== 'source-session' || binding.sourceSessionId !== sourceSessionId) continue
+    if (binding?.mode !== 'source-session' || binding.sourceSessionId !== sourceSessionId || binding.state === 'released') continue
     let operationRepoRoot: string
     try { operationRepoRoot = realpathSync(operation.repoRoot) } catch { return { operation, valid: false, diagnostic: 'operation repository root is missing or invalid' } }
     if (operationRepoRoot !== repoRoot) return { operation, valid: false, diagnostic: 'source Session cwd no longer equals operation repository root' }

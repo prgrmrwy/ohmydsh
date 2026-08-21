@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { BindSourceResult, OperationPhase, OperationRecord, PreparedOperationResult, SessionStatusResult, StartOperationRequest } from '../wire.js'
-import { bindingOf } from '../wire.js'
+import type { BindSourceResult, OperationPhase, OperationRecord, PreparedOperationResult, SessionStatusResult, SourceBindingState, StartOperationRequest } from '../wire.js'
+import { bindingOf, isCurrentBinding, publicBindingLifecycle } from '../wire.js'
 import { cacheHealthy, dependencyFingerprint, ensureLeanLink, leanLinkMatches, prepareDependencyCache } from './dependencies.js'
 import { prepareEnvironment, ensureWorktreeExclude } from './environment.js'
 import { WsError, messageOf } from './errors.js'
@@ -187,14 +187,14 @@ export function createOperationId(): string {
   return randomUUID()
 }
 
-/** Resolve the operation whose source-session binding owns the given Session id. */
-export async function findBySourceSession(gitCommonDir: string, sourceSessionId: string): Promise<OperationRecord | undefined> {
+/** Resolve historical/audit metadata for a source Session, including released records. */
+export async function findHistoryBySourceSession(gitCommonDir: string, sourceSessionId: string): Promise<OperationRecord | undefined> {
   const dir = join(gitCommonDir, 'ws', 'operations')
   let names: string[]
   try { names = await (await import('node:fs/promises')).readdir(dir) } catch {
     return undefined
   }
-  for (const name of names) {
+  for (const name of names.sort()) {
     if (!name.endsWith('.json')) continue
     const operation = await loadOperation(gitCommonDir, name.slice(0, -'.json'.length))
     if (operation === undefined) continue
@@ -202,6 +202,49 @@ export async function findBySourceSession(gitCommonDir: string, sourceSessionId:
     if (binding?.mode === 'source-session' && binding.sourceSessionId === sourceSessionId) return operation
   }
   return undefined
+}
+
+/** Resolve only the operation that currently owns the source Session. */
+export async function findBySourceSession(gitCommonDir: string, sourceSessionId: string): Promise<OperationRecord | undefined> {
+  const operation = await findHistoryBySourceSession(gitCommonDir, sourceSessionId)
+  if (operation === undefined) return undefined
+  return isCurrentBinding(bindingOf(operation)) ? operation : undefined
+}
+
+export type ArchiveReconcileMode = 'archive-observed' | 'unarchive-observed' | 'current-snapshot'
+
+/**
+ * Move a cleaned source binding monotonically through its archive lifecycle.
+ * The caller supplies the current archive membership and holds no lock; this
+ * helper takes the repository lock so event/status/recovery callers share one
+ * idempotent durable transition boundary.
+ */
+export async function reconcileSourceArchiveLifecycle(options: {
+  gitCommonDir: string
+  sourceSessionId: string
+  archived: boolean
+  mode: ArchiveReconcileMode
+  now?: () => Date
+}): Promise<OperationRecord | undefined> {
+  const lock = join(options.gitCommonDir, 'ws', 'locks', 'repo.lock')
+  return withMkdirLock(lock, async () => {
+    const operation = await findHistoryBySourceSession(options.gitCommonDir, options.sourceSessionId)
+    if (operation === undefined) return undefined
+    const binding = bindingOf(operation)
+    if (binding?.mode !== 'source-session') return operation
+    if (binding.state === 'released') return operation
+    const legacy = operation.phase === 'cleaned' && binding.state === 'cleaned' && binding.archiveLifecycle === undefined
+    let state: SourceBindingState | undefined
+    if (legacy && options.mode === 'current-snapshot') state = options.archived ? 'cleaned-archived' : 'released'
+    else if (binding.archiveLifecycle?.version === 1 && binding.state === 'cleaned' && options.archived && (options.mode === 'archive-observed' || options.mode === 'current-snapshot')) state = 'cleaned-archived'
+    else if (binding.archiveLifecycle?.version === 1 && binding.state === 'cleaned-archived' && !options.archived && (options.mode === 'unarchive-observed' || options.mode === 'current-snapshot')) state = 'released'
+    if (state === undefined) return operation
+    const now = options.now?.() ?? new Date()
+    return saveOperation({
+      ...operation,
+      binding: { ...binding, state, archiveLifecycle: { version: 1 }, updatedAt: now.toISOString() },
+    }, now)
+  })
 }
 
 function ensureFreshSourceBinding(operation: OperationRecord, sourceSessionId: string): OperationRecord {
@@ -225,12 +268,15 @@ export async function bindSource(request: { operationId: string; repoPath: strin
       throw new WsError('OPERATION_CONFLICT', `Session ${request.sourceSessionId} is already bound to operation ${owned.operationId}`)
     }
     const current = bindingOf(operation)
+    if (current?.mode === 'source-session' && current.state === 'released') {
+      throw new WsError('OPERATION_CONFLICT', 'A released historical operation cannot be rebound')
+    }
     if (current?.mode === 'source-session' && current.sourceSessionId !== request.sourceSessionId) {
       throw new WsError('OPERATION_CONFLICT', `Operation is already bound to source Session ${current.sourceSessionId}`)
     }
     const updated = await saveOperation(ensureFreshSourceBinding(operation, request.sourceSessionId))
     const binding = bindingOf(updated)
-    return { sourceSessionId: request.sourceSessionId, state: binding?.mode === 'source-session' ? binding.state : 'bound', submitAllowed: false }
+    return { sourceSessionId: request.sourceSessionId, state: binding?.mode === 'source-session' ? publicBindingLifecycle(binding) : 'bound', submitAllowed: false }
   })
 }
 
@@ -242,6 +288,9 @@ export async function updateSourceBinding(request: { operationId: string; repoPa
     const operation = await loadOperation(repo.gitCommonDir, request.operationId)
     if (operation === undefined || operation.phase !== 'prepared') throw new WsError('OPERATION_NOT_FOUND', 'Prepared operation not found')
     const current = bindingOf(operation)
+    if (current?.mode === 'source-session' && (current.state === 'cleaned-archived' || current.state === 'released')) {
+      throw new WsError('OPERATION_CONFLICT', `Binding lifecycle ${current.state} is terminal and cannot regress`)
+    }
     if (current?.mode === 'source-session' && current.sourceSessionId !== request.sourceSessionId) {
       throw new WsError('OPERATION_CONFLICT', `Operation is already bound to source Session ${current.sourceSessionId}`)
     }
@@ -258,7 +307,7 @@ export async function updateSourceBinding(request: { operationId: string; repoPa
     }
     next = { ...next, binding: { ...binding, state, updatedAt: new Date().toISOString() } }
     await saveOperation(next)
-    return { sourceSessionId: request.sourceSessionId, state, submitAllowed }
+    return { sourceSessionId: request.sourceSessionId, state: publicBindingLifecycle({ ...binding, state }), submitAllowed }
   })
 }
 
@@ -275,7 +324,7 @@ export async function sessionStatus(repoPath: string, sourceSessionId: string): 
     taskBranch: operation.taskBranch,
     worktreePath: operation.worktreePath,
     dependencyMode: operation.dependencyMode,
-    lifecycle: binding.state,
-    cleaned: binding.state === 'cleaned',
+    lifecycle: publicBindingLifecycle(binding),
+    cleaned: binding.state === 'cleaned' || binding.state === 'cleaned-archived',
   }
 }

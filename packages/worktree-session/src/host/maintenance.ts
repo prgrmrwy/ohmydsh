@@ -124,7 +124,7 @@ export async function wsClean(targetInput: string | MaintenanceTarget, options: 
     await saveOperation({
       ...tombstone,
       phase: 'cleaned',
-      binding: { ...sourceBinding, state: 'cleaned', updatedAt: new Date().toISOString() },
+      binding: { ...sourceBinding, state: 'cleaned', archiveLifecycle: { version: 1 }, updatedAt: new Date().toISOString() },
     })
     return { dryRun: false, operationId: operation.operationId, worktreePath: target, taskBranch: operation.taskBranch, actions, cleaned: true }
   }, { timeoutMs: 30_000, staleMs: 30 * 60_000 })
