@@ -9,6 +9,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import yaml from 'js-yaml'
+import { runDshCli } from './lib/dsh-cli.mjs'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DSH_HOME = resolveDshHome(process.env.DSH_HOME)
@@ -293,11 +294,10 @@ async function saveState(state) {
 }
 
 function dshCli(args, opts = {}) {
-  const base = process.env.DSH_BIN
-    ? [process.env.DSH_BIN]
-    : ['npx', '-y', `@deepseek-ai/dsh@${opts.version}`]
-  const r = spawnSync(base[0], [...base.slice(1), ...args], { stdio: 'inherit' })
-  return r.status === 0
+  // 升级链可靠性(see openspec/changes/upgrade-cli-provisioning):解析目标
+  // 版本 CLI 的就绪 bin 并 node 直连执行,首次就绪后不再发起新的 npx
+  // 进程,避免 libnpmexec 安装锁竞争(ECOMPROMISED)。DSH_BIN 优先保留。
+  return runDshCli(args, { spec: `@deepseek-ai/dsh@${opts.version}`, version: opts.version, dshBinEnv: process.env.DSH_BIN })
 }
 
 function npmNameOf(item) {
