@@ -27,7 +27,7 @@
 
 - [x] 5.1 `npm run build` + typecheck in the package; fix any leaf diagnostics.
 - [x] 5.2 `node scripts/sync.mjs` then `dsh build`; confirm the bundle loads (`dsh --profile web --dump-config` shows the row, log has no load errors).
-- [ ] 5.3 Restart acceptance (real GUI deployment, user-driven): sidebar shows correct model-brand logos, official `StateDot`/time/menu/drag unchanged.
+- [x] 5.3 Restart acceptance (real GUI deployment, user-driven): sidebar shows correct model-brand logos, official `StateDot`/time/menu/drag unchanged. <!-- verified on real 3080 GUI by user -->
 
 ## 6. Revision after real-GUI feedback: selected model + real brand assets
 
@@ -35,4 +35,4 @@
 - [x] 6.2 Replace every hand-drawn logo path with downloaded, pinned SVG assets for DeepSeek whale, OpenAI spiral, OpenCode, Anthropic and Grok; resolve known provider routes before using model as a fallback and keep a neutral unknown fallback.
 - [x] 6.3 Update package dependencies/inject metadata, B013, README, proposal/design/spec, and add tests for selector precedence, blank-session selection, OpenCode disambiguation and actual downloaded asset content.
 - [x] 6.4 Run package typecheck, 21 tests and build; confirm SVG assets inline into `lib/client.js` with no runtime CDN dependency; independently review and cover retry after a transient same-session directory-resolution failure.
-- [ ] 6.5 Sync/start an isolated GUI build and verify: DeepSeek/GPT/OpenCode logos visually match downloaded assets, switching the composer model changes the current row icon before sending, and StateDot/time/menu/drag remain untouched.
+- [x] 6.5 Sync/start an isolated GUI build, then deploy to the real GUI and verify: DeepSeek/GPT/OpenCode logos visually match downloaded assets, switching the composer model changes the current row icon before sending, and StateDot/time/menu/drag remain untouched. <!-- isolated load verified; real 3080 GUI verified by user -->
