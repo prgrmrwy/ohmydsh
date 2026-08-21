@@ -29,11 +29,11 @@ customizations:
   - id: cost-meter
     type: package
     source: remote
-    spec: dsh-cost-meter@1.5.22
-    version: 1.5.22
+    spec: dsh-cost-meter@1.5.35
+    version: 1.5.35
     enabled: true
     brief: 会话费用统计
-    note: 会话费用统计(web client 插件);仓库 https://github.com/Han-1413141/dsh-cost-meter;依赖拉到 rc.7 家族,重启后验证加载
+    note: '会话费用统计(web client 插件);仓库 https://github.com/Han-1413141/dsh-cost-meter;1.5.35(2026-08-21 审查):v1.5.34 为 dsh 0.1.1-rc.x 适配(修复 rc.2 下费用展示丢失),v1.5.32 内置 DeepSeek-V4-Flash-Vision-Exp 计价,v1.5.35 修正未命中模型列表口径;升级后需重启验证加载与展示'
   - id: modlens
     type: package
     source: remote
