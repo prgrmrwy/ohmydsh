@@ -46,6 +46,20 @@ PROFILE="${DSH_PROFILE:-web}"
 PROFILE_PKG="$DSH_HOME/profiles/$PROFILE/package.json"
 STARTUP_LOG="$DSH_HOME/dsh-startup.log"
 
+# Repo default registry: the committed repo .npmrc wins for every child
+# npm/npx process, overriding user-level config (~/.npmrc may point at a
+# lagging mirror like bnpm.byted.org, causing "new version detected but
+# install fails" — 0.1.1-rc.1 ETARGET on 2026-08-21). check-update.mjs
+# (version detection) already targets npmjs, so installs must match.
+# Explicit npm_config_registry / NPM_CONFIG_REGISTRY / .env.local still take
+# precedence. NB: npm 11 honors the lowercase npm_config_* env form only.
+if [[ -f "$REPO/.npmrc" ]]; then
+  REPO_REGISTRY="$(sed -n 's/^[[:space:]]*registry[[:space:]]*=[[:space:]]*"\{0,1\}\([^"[:space:]]*\)"\{0,1\}[[:space:]]*/\1/p' "$REPO/.npmrc" | head -1)"
+  if [[ -n "$REPO_REGISTRY" && -z "${npm_config_registry:-}" && -z "${NPM_CONFIG_REGISTRY:-}" ]]; then
+    export npm_config_registry="$REPO_REGISTRY"
+  fi
+fi
+
 # LAN serving switch: DSH_LAN env (inline or .env.local) beats dsh.yaml web.lan.
 # When on, sync renders a 0.0.0.0 webserver bind and the launcher prints the LAN URL.
 LAN_ENABLED=0
