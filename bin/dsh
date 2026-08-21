@@ -152,11 +152,19 @@ ui_pid() {
 
 is_ui_open() { [[ -n "$(ui_pid)" ]]; }
 
+# 优雅退出 PWA:直接 kill 会让 Chrome 记为"崩溃"(exit_type=Crashed),
+# 触发其"恢复上一会话"策略把旧 3080 标签复活(即用户看到的"浏览器页签
+# + PWA 双开")。先 AppleScript quit,失败才 kill 兜底。
 close_ui() {
   local pid name
   pid="$(ui_pid)" || return 0
-  kill "$pid" 2>/dev/null || true
   name="$(ui_app_name 2>/dev/null)" || true
+  if [[ -n "$name" ]] && command -v osascript >/dev/null 2>&1; then
+    osascript -e "tell application \"$name\" to quit" >/dev/null 2>&1 && {
+      for _ in $(seq 1 20); do [[ -z "$(ui_pid)" ]] && return 0; sleep 0.1; done
+    }
+  fi
+  kill "$pid" 2>/dev/null || true
   [[ -n "$name" ]] && pkill -f "$name" >/dev/null 2>&1 || true
 }
 
@@ -167,12 +175,8 @@ do_stop() {
   fi
   if ui_app_name >/dev/null 2>&1; then
     if is_ui_open; then
-      if [[ $KEEP_UI -eq 1 ]]; then
-        echo "dsh stopped(UI 保留,PWA 将在重启后自动重连)"
-      else
-        close_ui
-        echo "dsh stopped(UI 已关闭)"
-      fi
+      close_ui
+      echo "dsh stopped(UI 已关闭)"
     else
       echo "dsh stopped(UI 未在运行)"
     fi
@@ -182,9 +186,7 @@ do_stop() {
 }
 
 # stop, then wait until the port is released so a follow-up start never races
-# KEEP_UI=1:重启时保留 PWA 窗口(server 恢复后自动重连),避免"关掉又重开"。
 do_restart() {
-  local KEEP_UI=1
   do_stop
   for _ in $(seq 1 40); do
     if ! nc -z 127.0.0.1 "$PORT" >/dev/null 2>&1; then
