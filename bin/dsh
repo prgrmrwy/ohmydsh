@@ -129,13 +129,17 @@ do_build() {
   node "$REPO/scripts/sync.mjs"
 }
 
+# UI 对应的进程名:显式 DSH_OPEN_APP 优先,否则自动探测的 PWA;无 → 空。
+ui_app_name() {
+  local app="${DSH_OPEN_APP:-}"
+  [[ -z "$app" ]] && app="$(pwa_app_of)"
+  [[ -z "$app" ]] && return 1
+  if [[ "$app" == *.app ]]; then basename "$app" .app; else echo "$app"; fi
+}
+
 close_ui() {
   local name
-  if [[ "$DSH_OPEN_APP" == *.app ]]; then
-    name="$(basename "$DSH_OPEN_APP" .app)"
-  else
-    name="$DSH_OPEN_APP"
-  fi
+  name="$(ui_app_name 2>/dev/null)" || return 0
   pkill -f "$name" >/dev/null 2>&1 || true
 }
 
@@ -144,7 +148,7 @@ do_stop() {
     echo "no dsh process found"
     return 0
   fi
-  if [[ -n "${DSH_OPEN_APP:-}" ]]; then
+  if ui_app_name >/dev/null 2>&1; then
     if is_ui_open; then
       close_ui
       echo "dsh stopped(UI 已关闭)"
@@ -204,13 +208,8 @@ is_server_up() {
 }
 
 is_ui_open() {
-  [[ -n "${DSH_OPEN_APP:-}" ]] || return 1
   local name
-  if [[ "$DSH_OPEN_APP" == *.app ]]; then
-    name="$(basename "$DSH_OPEN_APP" .app)"
-  else
-    name="$DSH_OPEN_APP"
-  fi
+  name="$(ui_app_name 2>/dev/null)" || return 1
   pgrep -f "$name" >/dev/null 2>&1
 }
 
@@ -271,23 +270,56 @@ print_lan() {
   [[ -n "$ip" ]] && echo "局域网: http://$ip:$PORT (同网络设备可访问;临时仅本机:dsh --host 127.0.0.1)"
 }
 
+# 探测已安装的 DeepSeek Harness PWA(Chrome Apps 目录)。未显式配置
+# DSH_OPEN_APP 时,若唯一匹配则只开 PWA;多个/无匹配 → 浏览器。
+pwa_app_of() {
+  local found=""
+  shopt -s nullglob nocaseglob
+  for p in "$HOME"/Applications/Chrome\ Apps.localized/*DeepSeek\ Harness.app "$HOME"/Applications/*DeepSeek\ Harness.app; do
+    if [[ -d "$p" ]]; then
+      if [[ -n "$found" ]]; then echo ""; return 0; fi
+      found="$p"
+    fi
+  done
+  shopt -u nullglob nocaseglob
+  echo "$found"
+}
+
 open_ui() {
   [[ $NO_OPEN -eq 1 ]] && return 0
   local url="http://127.0.0.1:$PORT"
-  if [[ -n "${DSH_OPEN_APP:-}" ]]; then
-    if [[ "$DSH_OPEN_APP" == *.app && -e "$DSH_OPEN_APP" ]]; then
-      # installed PWA: launch the app (it opens its own start_url)
-      open "$DSH_OPEN_APP"
+  local app="${DSH_OPEN_APP:-}"
+  if [[ -z "$app" ]]; then
+    app="$(pwa_app_of)"
+    if [[ -n "$app" ]] && [[ "$app" == *.app && -e "$app" ]]; then
+      open "$app" && { echo "UI: 已打开 PWA($app)"; return 0; }
+      echo "warn: 打开 PWA 失败,回退浏览器" >&2
+      app=""
+    fi
+  fi
+  if [[ -n "$app" ]]; then
+    if [[ "$app" == *.app && -e "$app" ]]; then
+      # installed PWA: launch the app (it opens its own start_url);失败才回退浏览器
+      if open "$app"; then
+        echo "UI: 已打开 PWA($app)"
+        return 0
+      fi
+      echo "warn: 打开 PWA 失败($app),回退浏览器" >&2
     else
       # application name: open the URL with it
-      open -a "$DSH_OPEN_APP" "$url" 2>/dev/null || open "$url"
+      if open -a "$app" "$url" 2>/dev/null; then
+        echo "UI: 已通过 $app 打开"
+        return 0
+      fi
+      echo "warn: 打开 $app 失败,回退浏览器" >&2
     fi
-    return 0
   fi
   if command -v open >/dev/null 2>&1; then
     open "$url"
+    echo "UI: 已打开浏览器 $url"
   elif command -v xdg-open >/dev/null 2>&1; then
     xdg-open "$url" >/dev/null 2>&1 || true
+    echo "UI: 已打开浏览器 $url"
   else
     echo "dsh started — open $url"
   fi
