@@ -1,5 +1,7 @@
 # sidebar-session-provider-icon 验收报告
 
+> **证据留存说明（2026-08 slim-repository-artifacts）**：本报告与 trails 中引用的 `screenshots/*` 原始截图证据为一次性会话产物，未托管于任何外部 artifact 存储，已按仓库派生资产保留规则移出当前版本树（历史 commit 仍可追溯）——后续 raw evidence 视为 ephemeral。验收结论与检查点台账完整保留于本目录。
+
 ## Loop 3 — Real GUI user acceptance
 
 ### Verdict

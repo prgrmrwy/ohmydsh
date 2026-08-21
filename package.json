@@ -3,8 +3,13 @@
   "private": true,
   "type": "module",
   "description": "DSH 定制仓:总配置 + 可插拔定制",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "sync": "node scripts/sync.mjs"
+    "sync": "node scripts/sync.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check:artifacts": "node scripts/check-tracked-artifacts.mjs"
   },
   "devDependencies": {
     "js-yaml": "^4.1.0",

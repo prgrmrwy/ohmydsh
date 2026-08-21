@@ -29,7 +29,7 @@
 
 ## 5. Documentation, build, and acceptance
 
-- [ ] 5.1 Update `packages/worktree-session/README.md`, `skills/ws/SKILL.md`, and `worktree-session-architecture.html` to document automatic cleaned→ordinary conversion on unarchive and the continued absence of non-blank `ws start`.
+- [ ] 5.1 Update `packages/worktree-session/README.md`, `skills/ws/SKILL.md`, and `worktree-session-architecture.md` to document automatic cleaned→ordinary conversion on unarchive and the continued absence of non-blank `ws start`.
 - [ ] 5.2 Run strict OpenSpec validation, package typecheck/full Vitest suite, build generated `lib` artifacts, and `git diff --check`.
 - [ ] 5.3 Run `node scripts/sync.mjs` twice, require the second run to report deployment-manifest idempotence, and verify the deployed Host/client bundle contains the release lifecycle behavior.
 - [ ] 5.4 Restart the existing DSH Host and perform browser acceptance at `http://127.0.0.1:3080`: the reported already-unarchived cleaned Session becomes ordinary, a fresh cleaned Session stays cleaned until archive→unarchive, and release creates no Git/DSH resources.
