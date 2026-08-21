@@ -1,5 +1,31 @@
 # sidebar-session-provider-icon 验收报告
 
+## Loop 3 — Real GUI user acceptance
+
+### Verdict
+
+**PASS — user-confirmed on the real GUI**
+
+在 0.1.1 同步到真实 DSH_HOME 后，`http://127.0.0.1:3080` 已服务最终 client bundle revision `ca27035cb9f1`。用户刷新页面并明确确认以下五项全部正确：
+
+1. `deepseek-official / deepseek-v4-flash` 显示 DeepSeek 鲸鱼；
+2. `codex / gpt-5.6-sol` 显示 OpenAI 螺旋；
+3. `opencode-go / deepseek-v4-flash` 显示 OpenCode，而非被 model id 误判为 DeepSeek；
+4. 输入框模型选择器切换后无需发送消息，当前 session 行 icon 立即变化；
+5. 官方 StateDot、时间、菜单和拖拽均未受影响。
+
+此 Loop 是真实 GUI 的用户目视/交互验收，不追溯改写 Loop 1/2 的隔离浏览器自动化结果；其 blocked 记录与证据继续保留。特殊失败注入、冷历史冲突数据和 DOM 版本破坏等 T2 场景仍属于报告中声明的人工/专项范围。
+
+### Release evidence
+
+- Main merge commit: `c27c72d`；feature commit: `e4573ec`。
+- Installed package: `dsh-sidebar-session-provider-icon@0.1.1`。
+- Served bundle contains `modelDirectories`, known-route priority and downloaded brand SVG assets.
+- Package checks: typecheck PASS；21 tests PASS；build PASS；OpenSpec strict validation PASS。
+- Independent code review high finding（同 session 首次 directory 解析失败后不可重试）已修复并由 lifecycle regression test 覆盖。
+
+---
+
 ## Loop 2
 
 ### Verdict
