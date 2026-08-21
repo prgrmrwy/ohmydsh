@@ -37,11 +37,19 @@
 - **THEN** 该行不插入 logo
 
 ### Requirement: 使用下载落盘的真实品牌资产
-系统 SHALL 使用下载后随包保存的品牌 SVG，而不是代码中手绘的近似 path。已知映射 SHALL 至少覆盖 DeepSeek 鲸鱼、OpenAI/GPT 螺旋、OpenCode、Anthropic/Claude 与 Grok。品牌判定 SHALL 优先识别已知 provider route；仅当 route 未知/通用时再按 model id fallback。未知选择 SHALL 使用中性 fallback，不得冒充已知品牌。浏览器运行时 SHALL 不为品牌图访问外部 CDN。
+系统 SHALL 使用下载后随包保存的品牌 SVG，而不是代码中手绘的近似 path。已知映射 SHALL 至少覆盖 DeepSeek 鲸鱼、OpenAI/GPT 螺旋、OpenCode、Anthropic/Claude、Grok、Kimi、GLM/智谱、MiniMax、Pi、OpenClaw 与 Hermes Agent（含 `hermas` 兼容别名）。品牌判定 SHALL 优先识别已知 provider route；仅当 route 未知/通用时再按 model id fallback。未知选择 SHALL 使用中性 fallback，不得冒充已知品牌。浏览器运行时 SHALL 不为品牌图访问外部 CDN。
 
 #### Scenario: DeepSeek/OpenAI/OpenCode 显示正确品牌
 - **WHEN** 当前选择分别属于 DeepSeek、GPT/Codex 或 OpenCode
 - **THEN** 行中分别使用下载落盘的 DeepSeek 鲸鱼、OpenAI 螺旋或 OpenCode SVG
+
+#### Scenario: Kimi/GLM/MiniMax/Pi 显示正确品牌
+- **WHEN** 当前选择的 provider route 或明确 model id 属于 Kimi、GLM/智谱、MiniMax 或 Pi
+- **THEN** 行中使用对应的下载落盘 SVG，不使用中性首字母 fallback
+
+#### Scenario: OpenClaw/Hermes 显示正确品牌
+- **WHEN** 当前选择的 provider route 或明确 model id 属于 OpenClaw、Hermes Agent、NousResearch，或使用 `hermas` 兼容拼写
+- **THEN** 行中使用对应的 OpenClaw 或 Hermes Agent SVG，不使用中性首字母 fallback
 
 #### Scenario: OpenCode route 不被模型名误判
 - **WHEN** 当前选择为真实路由 `opencode-go/deepseek-v4-flash`

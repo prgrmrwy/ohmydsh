@@ -15,3 +15,7 @@
 - 手绘近似 SVG 全部替换为下载落盘的固定品牌资产：DeepSeek 鲸鱼、OpenAI 螺旋、OpenCode、Anthropic、Grok；运行时不访问 CDN。
 - 按真实 route 校正映射：`opencode-go/deepseek-v4-flash` 显示 OpenCode，`deepseek-official/deepseek-v4-flash` 才显示 DeepSeek。
 - 空白 session 有当前 selector 值时亦显示品牌；继续保持 StateDot/时间/菜单/拖拽原样。
+
+## 0.1.2 — 2026-08-21
+
+- 按真实 GUI 对齐反馈调整图标间距为仅左侧 4px；新增 Kimi、GLM（智谱）、MiniMax、Pi、OpenClaw、Hermes Agent 的固定品牌资产和 route/model 映射；Hermes 同时兼容用户输入的 `hermas` 别名。

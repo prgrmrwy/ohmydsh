@@ -1,6 +1,6 @@
 {
   "name": "dsh-sidebar-session-provider-icon",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Show each sidebar session's currently selected model brand logo, updating immediately from the composer selector with a durable last-request fallback",
   "license": "MIT",
   "type": "module",
