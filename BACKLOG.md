@@ -113,20 +113,6 @@
   - 待设计:状态与会话生命周期事件的映射、看板入口位置、与现有 sidebar/会话列表共存方式。
 - **更新**: 2026-08-14 新增
 
-### [B010] 任意页面查看 API 使用量
-- **状态**: 实施中
-- **优先级**: P2
-- **背景 / 动机**: 希望不切换到专门页面,在 Web GUI 任意页面(会话、设置等)都能随时看到 API 用量(请求数 / token / 费用 / 余额 / 配额)。
-- **要点**:
-  - 调研结论(2026-08-18):社区已有大量现成产品,npm 均已发布,无需从零自研,优先评估复用:
-    - **全局可见类**(任意页面常驻):[dsh-cost-meter](https://www.npmjs.com/package/dsh-cost-meter) v1.5.9 功能最全(本会话费用、当日费用、官方余额、OpenCode Go 额度、Coding Plan 六家额度、90+ 模型价格目录,侧边栏 / 输入区 / dock 多位置可配);[@kenz1117/dsh-ui-usage-billing](https://www.npmjs.com/package/@kenz1117/dsh-ui-usage-billing) v0.2.6(侧边栏入口胶囊 + 完整计费仪表盘,30s 自动刷新);[dsh-usage-dashboard](https://www.npmjs.com/package/dsh-usage-dashboard) v0.1.0(侧边栏底部余额 + 今日花费);[@faith1688/dsh-usage-meter-harness](https://www.npmjs.com/package/@faith1688/dsh-usage-meter-harness) v0.1.2(输入框旁 tokens / 费用 / 真实余额);dsh-account-meter v0.1.3(右侧多账户余额计量框);
-    - **专用页类**:[@abcdefu_cja/dsh-usage-stats](https://www.npmjs.com/package/@abcdefu_cja/dsh-usage-stats) v0.1.0(设置页「用量统计」Tab + 会话页用量按钮,精确 token 计数);dsh-usage-insights v0.2.0 / dsh-activity-report(本地只读用量 / 性能分析);
-    - **其他**:dsh-usage-balance(会话成本 chips + token 热图)、@az7627/dsh-token-usage(会话内 token 时间线)、dsh-token-price;GitHub 侧 [dsh-usage-dashboard-plus](https://github.com/1HelloMan1/dsh-usage-dashboard-plus)(余额 / 日花费 / 分模型统计 / 调用日志 / 缓存率 / TTFT / CSV 导出);社区插件目录 [awesome-dsh-plugin](https://awesome-dsh-plugin.com);
-    - 通用方案(非 DSH 专属,tokmon 本地代理仪表盘、Langfuse / Helicone 等观测平台)与「Web GUI 任意页面常驻」诉求直接相关度低,不优先。
-  - 采纳路径(2026-08-21):按调研结论启用功能最全的 dsh-cost-meter,满足「任意页面常驻」诉求;升级至 1.5.35(rc.2 适配修复费用展示缺失、内置 DeepSeek-V4-Flash-Vision-Exp 计价、修正未命中模型列表口径);
-  - 待确认:指标范围(余额 / 当日费用 / 会话费用 / 配额)、入口位置偏好、是否要多厂商。
-- **更新**: 2026-08-18 新增;完成社区调研,确认存在成熟现成产品,结论为「评估复用优先」;2026-08-21 cost-meter 1.5.35 已启用(重启验收 host + web client 加载正常);2026-08-24 本条推进为实施中,日常试用确认满意后归档。
-
 ### [B011] 输入框 @ 唤起 subagent 选择并指派任务 + subagent 管理面板
 - **状态**: 想法
 - **优先级**: P1
@@ -151,8 +137,6 @@
   - 实现关注:优先调研现有 session 持久化与查询 API；数据量大时考虑全文索引、增量更新，以及本地会话内容的隐私边界；
   - 待确认:首版仅做普通关键字匹配，还是同时支持短语、大小写、正则或语义搜索。
 - **更新**: 2026-08-20 新增
-
-
 
 ### [B014] Worktree Session 隔离度分层与 build/runtime home 解耦
 - **状态**: 讨论中
@@ -264,3 +248,14 @@
   - logo:品牌 SVG 下载随包固定保存(DeepSeek/OpenAI/Anthropic/Grok/OpenCode 等),不手绘;未知/兼容 route 按 model fallback,再未知取首字母;
   - 设计过程、替代方案对比(影子替换 browser 被否、dsh-sentinel 依赖不存在契约)见 openspec change `sidebar-session-provider-icon`(已归档)。
 - **更新**: 2026-08-20 新增并明确形态,社区调研确认无现成同款需自研;2026-08-21 初版落地 + 实机反馈修订(provider 基准改输入框当前选择、替换为真实品牌 SVG、补 OpenCode 映射);openspec 归档完成(主 spec 入 `openspec/specs/sidebar-session-provider-icon/`,manifest 条目已启用),2026-08-24 回填本条目为已完成。
+
+### [B010] 任意页面查看 API 使用量
+- **状态**: 已完成
+- **优先级**: P2
+- **背景 / 动机**: 希望不切换到专门页面,在 Web GUI 任意页面(会话、设置等)都能随时看到 API 用量(请求数 / token / 费用 / 余额 / 配额)。
+- **要点**:
+  - 调研结论(2026-08-18):社区已有大量现成产品,npm 均已发布,无需从零自研,优先评估复用;完整候选清单(全局可见类 / 专用页类 / 通用方案)见本条历史记录(git history 可复核);
+  - 采纳路径:按调研结论启用功能最全的 [dsh-cost-meter](https://www.npmjs.com/package/dsh-cost-meter)(任意页面常驻展示本会话费用 / 当日费用 / 官方余额等,侧边栏 / 输入区 / dock 多位置可配),满足即用,不启动自研;
+  - 落地版本:1.5.35(rc.2 适配修复费用展示缺失、内置 DeepSeek-V4-Flash-Vision-Exp 计价、修正未命中模型列表口径),manifest 条目已启用,重启验收 host + web client 加载正常;
+  - 试用心得:日常使用确认满足「任意页面常驻看用量」诉求;若后续对指标范围 / 多厂商聚合有新要求,可回到本条重新评估候选(如 @kenz1117/dsh-ui-usage-billing)或自研。
+- **更新**: 2026-08-18 新增;完成社区调研,结论「评估复用优先」;2026-08-21 cost-meter 1.5.35 启用并重启验收;2026-08-24 试用确认满意,归档为已完成。
