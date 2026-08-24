@@ -114,7 +114,7 @@
 - **更新**: 2026-08-14 新增
 
 ### [B010] 任意页面查看 API 使用量
-- **状态**: 想法
+- **状态**: 实施中
 - **优先级**: P2
 - **背景 / 动机**: 希望不切换到专门页面,在 Web GUI 任意页面(会话、设置等)都能随时看到 API 用量(请求数 / token / 费用 / 余额 / 配额)。
 - **要点**:
@@ -123,9 +123,9 @@
     - **专用页类**:[@abcdefu_cja/dsh-usage-stats](https://www.npmjs.com/package/@abcdefu_cja/dsh-usage-stats) v0.1.0(设置页「用量统计」Tab + 会话页用量按钮,精确 token 计数);dsh-usage-insights v0.2.0 / dsh-activity-report(本地只读用量 / 性能分析);
     - **其他**:dsh-usage-balance(会话成本 chips + token 热图)、@az7627/dsh-token-usage(会话内 token 时间线)、dsh-token-price;GitHub 侧 [dsh-usage-dashboard-plus](https://github.com/1HelloMan1/dsh-usage-dashboard-plus)(余额 / 日花费 / 分模型统计 / 调用日志 / 缓存率 / TTFT / CSV 导出);社区插件目录 [awesome-dsh-plugin](https://awesome-dsh-plugin.com);
     - 通用方案(非 DSH 专属,tokmon 本地代理仪表盘、Langfuse / Helicone 等观测平台)与「Web GUI 任意页面常驻」诉求直接相关度低,不优先。
-  - 建议路径:先试用 dsh-cost-meter 或 @kenz1117/dsh-ui-usage-billing,满足即用(评估后归档本条目),不满足再自研(落点 = client UI 全局组件 + host 侧聚合 API);
+  - 采纳路径(2026-08-21):按调研结论启用功能最全的 dsh-cost-meter,满足「任意页面常驻」诉求;升级至 1.5.35(rc.2 适配修复费用展示缺失、内置 DeepSeek-V4-Flash-Vision-Exp 计价、修正未命中模型列表口径);
   - 待确认:指标范围(余额 / 当日费用 / 会话费用 / 配额)、入口位置偏好、是否要多厂商。
-- **更新**: 2026-08-18 新增;完成社区调研,确认存在成熟现成产品,结论为「评估复用优先」。
+- **更新**: 2026-08-18 新增;完成社区调研,确认存在成熟现成产品,结论为「评估复用优先」;2026-08-21 cost-meter 1.5.35 已启用(重启验收 host + web client 加载正常);2026-08-24 本条推进为实施中,日常试用确认满意后归档。
 
 ### [B011] 输入框 @ 唤起 subagent 选择并指派任务 + subagent 管理面板
 - **状态**: 想法
@@ -152,20 +152,7 @@
   - 待确认:首版仅做普通关键字匹配，还是同时支持短语、大小写、正则或语义搜索。
 - **更新**: 2026-08-20 新增
 
-### [B013] 侧边栏会话列表每个 session 前显示当前模型 icon（provider logo）
-- **状态**: 讨论中
-- **优先级**: P2
-- **背景 / 动机**: 多模型混用(DeepSeek / Codex / Claude / Grok 订阅等)后,不进入会话看不出各会话正在用哪个模型;希望在侧边栏会话列表**每个 session 标题前**放一个类似 icon 的模型标识(provider logo / 缩写徽标),一眼区分。
-- **要点**:
-  - 展示形态(2026-08-20 用户明确):session 条目**前置** icon 式标识,不与用量类插件(B010,多落在 dock / 侧栏底部 / 输入区)争同一空间;形态候选 = provider logo 小图标 / 单色缩写圆徽(DS / GPT / CL / GK);
-  - 社区调研(2026-08-20):**未发现现成同款**(逐条扫过 [awesome-dsh-plugin](https://github.com/Anil-matcha/awesome-dsh-plugin) UI/Sessions/Usage 分类 + npm 搜索)。最接近的:[dsh-hud](https://github.com/a903067276-rgb/dsh-hud)(浮动面板显示当前模型,非 per-session 列表)、[dsh-session-pin](https://github.com/PerryLink/dsh-session-pin)(侧栏行加颜色/tags,形态相近但内容是 pin 不是模型)、[dsh-session-manager](https://github.com/dream12347/dsh-session-manager)(侧栏行加未读/状态点,证明行级装饰可行)。结论:需自研,可借鉴 session-pin / session-manager 的行装饰实现;
-  - provider 基准(2026-08-21 修订):该会话输入框**当前选中的下一次请求模型**;选择器切换成功即立即切 logo,无需先发送消息;当前/本进程已观察的会话以官方 `ctx.modelDirectories.directoryFor(sessionId).store.current` 为真相源,空白会话也可显示已选模型;
-  - 数据链路(2026-08-21 源码核实):官方 model-selection 插件的 per-session `ModelDirectory.store` 是输入框与 `/model` 命令共享的唯一状态,`session.selectModel` 成功后同步发布 `{provider,model}`;客户端直接订阅该 store。host `SessionProjectionMap.provider` 仍折叠 `request/header`,仅作为未打开/未加载历史会话的持久冷启动 fallback——重启不丢、不存 localStorage;
-  - 渲染路线(2026-08-21 定):**轻量 DOM 注入 + 定位器模块**——官方 rc.7 / master rc.8 的 session 行**无 per-row slot**,不重写官方浏览器;客户端订阅 sessions.list + MutationObserver 在每行标题前插入 12~14px provider logo SVG;DOM 结构依赖收进独立 `row-locator` 模块(role="treeitem" + 标题反查,避免 hashed class),升级只修一处;
-  - 明确边界(2026-08-21 用户强调):**不得影响任务状态 icon(官方 StateDot)**——只读不动,也不替换其位置;时间/菜单/拖拽排序保持官方原样;
-  - logo 来源(2026-08-21 修订):不手绘;下载并随包固定保存品牌 SVG——DeepSeek 鲸鱼、OpenAI/GPT 螺旋、Anthropic、Grok 来自 `@lobehub/icons-static-svg@1.94.0`(MIT),OpenCode 来自 anomalyco/opencode 固定 commit `5e75e5e`(MIT);品牌判断优先识别已知 provider route(`opencode-go` 即 OpenCode,即使 model 为 `deepseek-v4-flash`),未知/兼容 route 才按 model fallback;未知选择首字母 fallback;
-  - 替代方案(已在 design 对比):影子替换整个 `sidebar.workspaces`(organizer-sidebar 的 priority:-2 做法,零 hack 但需重画整套浏览器)——因侵入性/可维护性被否;社区 `dsh-sentinel` 的 `sessionRow.branch` 依赖官方没有的 `betterSidebar` 服务契约,不可用。
-- **更新**: 2026-08-20 新增;同日明确形态(session 前 icon,不占用量空间)并完成社区调研:无现成同款,需自研,行级装饰机制有三个可借鉴实现;2026-08-21 初版落地后按实机反馈修订:provider 基准改为输入框当前选择(即时更新,最后请求仅作历史 fallback),手绘图替换为下载落盘的真实品牌 SVG,补 OpenCode 映射;继续保持轻量 DOM 注入 + 不动 StateDot。
+
 
 ### [B014] Worktree Session 隔离度分层与 build/runtime home 解耦
 - **状态**: 讨论中
@@ -265,3 +252,15 @@
   - npm 0.2.0 已 unpublished,按官方 README 用 tag v0.1.6 tarball 直装(manifest id: `open-in-vscode`,非 npm spec 显式 `name` 字段);sync 为此支持非 npm spec;
   - 未来扩展:JetBrains 等——插件 config 的 `command`/`args` 可配任意编辑器 CLI。
 - **更新**: 2026-08-14 新增;2026-08-19 落地社区插件方案,重启验收通过(菜单打开 VSCode 正常),本条目完成。
+
+### [B013] 侧边栏会话列表每个 session 前显示当前模型 icon（provider logo）
+- **状态**: 已完成
+- **优先级**: P2
+- **背景 / 动机**: 多模型混用(DeepSeek / Codex / Claude / Grok 订阅等)后,不进入会话看不出各会话正在用哪个模型;希望在侧边栏会话列表**每个 session 标题前**放一个类似 icon 的模型标识(provider logo / 缩写徽标),一眼区分。
+- **要点**:
+  - 落地形态:session 行**前置** provider logo SVG,以该会话输入框**当前选中的下一次请求模型**为基准,选择器切换成功即立即切换 logo;官方 model-selection 的 per-session `ModelDirectory.store` 为真相源,host projection 仅作未打开历史会话的冷启动 fallback;
+  - 实现路线:**轻量 DOM 注入 + 独立 `row-locator` 模块**(role="treeitem" + 标题反查,避免 hashed class),不重写官方浏览器;官方 session 行无 per-row slot,升级只修 row-locator 一处;
+  - 边界:不触碰官方 StateDot / 时间 / 菜单 / 拖拽,保持官方原样;
+  - logo:品牌 SVG 下载随包固定保存(DeepSeek/OpenAI/Anthropic/Grok/OpenCode 等),不手绘;未知/兼容 route 按 model fallback,再未知取首字母;
+  - 设计过程、替代方案对比(影子替换 browser 被否、dsh-sentinel 依赖不存在契约)见 openspec change `sidebar-session-provider-icon`(已归档)。
+- **更新**: 2026-08-20 新增并明确形态,社区调研确认无现成同款需自研;2026-08-21 初版落地 + 实机反馈修订(provider 基准改输入框当前选择、替换为真实品牌 SVG、补 OpenCode 映射);openspec 归档完成(主 spec 入 `openspec/specs/sidebar-session-provider-icon/`,manifest 条目已启用),2026-08-24 回填本条目为已完成。
