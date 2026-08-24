@@ -142,3 +142,11 @@ customizations:
     enabled: true
     brief: 划选即问侧边栏问答(压缩上下文,省 token)
     note: 'B007 终选(替代 dsh-air:fork 全量继承费 token,codex 订阅无缓存保障);repo https://github.com/ChenRuoT/dsh-sidebar-qa(MIT,2026-08-24 README+发布物审查);划选文本→「提问」→侧边栏内嵌问答,独立会话(❓<主题>)不中断主对话;三种上下文策略=全量继承(fork+前缀缓存)/压缩(快速模型压旧历史+近期原文,默认)/机械裁切(定长窗口),默认 compressed 解决侧问费 token 痛点;嵌套追问+追问记录树(归档/删除置灰);依赖 dsh-better-sidebar ^0.14.0(同批入 manifest);peer rc.8 系对运行体 0.1.1-rc.2 满足'
+  - id: lan-gate
+    type: package
+    source: remote
+    spec: dsh-lan-gate@0.1.2
+    version: 0.1.2
+    enabled: true
+    brief: 局域网访问密码门禁(CIDR 白名单 + scrypt 密码)
+    note: 'B015 第一步(2026-08-24 源码审查);repo https://github.com/maxesisnclaw/dsh-lan-gate(MIT,零运行依赖);自带 bundle patch 直接把 webserver 绑 0.0.0.0(故无需开 manifest web.lan,二者等价且不应叠加),并注入 randomUUID polyfill 使非安全上下文下 GUI 可用;安全模型:CIDR 白名单默认三段私网(含 192.168.0.0/16)按 socket.remoteAddress 判定 + scrypt(N=16384)密码 + timingSafeEqual + 登录限流(5次/60s/IP) + HttpOnly/SameSite=Strict cookie + Origin 必须匹配 Host;策略文件 $DSH_HOME/lan-gate.json(0600,只存 scrypt 验证器);⚠ 首次需从 127.0.0.1 打开 /dsh-lan-full/login 设置密码,且**必须把 loopbackBypassAuth 保持 true 才能本机免密**;⚠ 不是 TLS 终结器——明文 HTTP 下同网可嗅探密码与 cookie,HTTPS 诉求未解(B015 待续);⚠ 与反向代理不兼容(rejectProxyHeaders 默认 true,且代理会把对端 IP 变成 127.0.0.1 从而被 loopback 旁路):已据此否决 @wingsky-1/dsh-lan-proxy 叠加方案'
