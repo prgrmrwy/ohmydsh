@@ -47,7 +47,7 @@ git clone <仓库地址> && cd ohmydsh
 dsh build && dsh           # ③ 物化定制配置并启动,UI 自动打开
 ```
 
-- 前置要求:**Node.js 24.12.0 + npm 11.6.2**；版本由根 `package.json`、`.nvmrc` 和 `.npmrc` 共同固定，bootstrap 会检查并给出缺失时的安装提示;
+- 前置要求:**Node.js >= 22 + npm >= 10**(推荐 `.nvmrc` 中的版本);根 `package.json` 的 `engines` 声明最低版本,bootstrap 只在低于最低版本时报错,更高版本仅提示不阻塞;
 - 依赖出问题想重装:`./scripts/bootstrap.sh --force`;
 - install.sh 默认装到 `~/.local/bin/dsh`(想换目录:`DSH_BIN_DIR=/opt/bin ./scripts/install.sh`);重复执行可覆盖更新,不影响 `~/.dsh` 物化产物;
 - 装的是**相对符号链接**,仓库整体移动后命令依然可用,无需重装;
