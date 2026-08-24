@@ -7,6 +7,14 @@
  */
 import type {} from '@deepseek-ai/dsh-session-projection/types'
 
+/** Plain-JSON fold state persisted by the `provider` projection unit. */
+export interface ProviderProjectionState {
+    /** Provider id of the last recorded route; `null` before the first request. */
+    provider: string | null;
+    /** Model id of the last recorded route; `null` before the first request. */
+    model: string | null;
+}
+
 /** Latest-request route identity published by the `provider` projection unit. */
 export interface ProviderProjection {
     /** Provider id of the session's last actual assistant request. */
@@ -24,5 +32,14 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
          * this resolves to a non-null value.
          */
         provider: ProviderProjection | null;
+    }
+
+    interface SessionProjectionStateMap {
+        /**
+         * Fold state behind the `provider` key. Kept separate from the wire
+         * value: the state carries nullable fields so an empty log still has a
+         * well-formed state, while the wire value collapses to `null`.
+         */
+        provider: ProviderProjectionState;
     }
 }

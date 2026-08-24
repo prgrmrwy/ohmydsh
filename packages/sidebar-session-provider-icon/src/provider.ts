@@ -13,7 +13,7 @@
  */
 import { z } from 'zod'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import type { ProviderProjection } from './types.ts'
+import type { ProviderProjection, ProviderProjectionState } from './types.ts'
 import type { SessionProjectionMap } from '@deepseek-ai/dsh-session-projection/types'
 
 /** Wire schema for the `provider` projection value (non-null route identity). */
@@ -22,11 +22,15 @@ export const providerSchema = z.object({
   model: z.string(),
 }).strict().nullable()
 
-/** Internal plain-JSON fold state. */
-export interface ProviderProjectionState {
-  provider: string | null
-  model: string | null
-}
+/**
+ * Validates persisted fold state before it seeds a fold. Distinct from
+ * {@link providerSchema}: the state keeps nullable fields so an empty log has a
+ * well-formed state, while the wire value collapses the empty case to `null`.
+ */
+export const providerStateSchema = z.object({
+  provider: z.string().nullable(),
+  model: z.string().nullable(),
+}).strict()
 
 export const providerProjectionInitialState: ProviderProjectionState = {
   provider: null,
@@ -59,18 +63,24 @@ export function viewProviderProjection(state: ProviderProjectionState): SessionP
 /** The `provider` unit registered on `ctx.sessionProjections` (exported for the unit spec). */
 export const providerProjectionDefinition = {
   key: 'provider',
-  schema: providerSchema,
+  stateSchema: providerStateSchema,
   init: () => providerProjectionInitialState,
   apply: applyProviderEvent,
-  view: viewProviderProjection,
+  wire: {
+    viewSchema: providerSchema,
+    view: viewProviderProjection,
+  },
   stateVersion: 1,
 } as const satisfies {
   key: keyof SessionProjectionMap
-  schema: import('zod').ZodType<SessionProjectionMap['provider']>
+  stateSchema: import('zod').ZodType<ProviderProjectionState>
   init(): ProviderProjectionState
   apply(state: ProviderProjectionState, event: SessionEvent): ProviderProjectionState
-  view(state: ProviderProjectionState): SessionProjectionMap['provider']
+  wire: {
+    viewSchema: import('zod').ZodType<SessionProjectionMap['provider']>
+    view(state: ProviderProjectionState): SessionProjectionMap['provider']
+  }
   stateVersion: number
 }
 
-export type { ProviderProjection }
+export type { ProviderProjection, ProviderProjectionState }

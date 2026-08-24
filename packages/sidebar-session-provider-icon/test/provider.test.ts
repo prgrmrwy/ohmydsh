@@ -3,7 +3,9 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import {
   applyProviderEvent,
   providerProjectionInitialState,
+  providerProjectionDefinition,
   providerSchema,
+  providerStateSchema,
   viewProviderProjection,
 } from '../src/provider.js'
 
@@ -49,6 +51,26 @@ describe('provider projection', () => {
     expect(viewProviderProjection(state)).toBeNull()
     state = applyProviderEvent(state, headerEvent('deepseek', 'deepseek-v4'))
     expect(state.provider).toBe('deepseek')
+  })
+
+  it('state schema accepts the empty fold state and rejects wire-shaped values', () => {
+    // The persisted state keeps nullable fields; the wire value collapses the
+    // empty case to null, so the two schemas are deliberately not interchangeable.
+    expect(providerStateSchema.parse(providerProjectionInitialState)).toEqual({ provider: null, model: null })
+    expect(providerStateSchema.parse({ provider: 'codex', model: 'gpt-5-codex' })).toEqual({ provider: 'codex', model: 'gpt-5-codex' })
+    expect(() => providerStateSchema.parse(null)).toThrow()
+    expect(() => providerStateSchema.parse({ provider: 'codex' })).toThrow()
+  })
+
+  it('registers a definition matching the host projection contract', () => {
+    // Guards the rc.7 → 0.1.1 migration: state validation and the client view
+    // are separate slots now (stateSchema + wire{viewSchema,view}).
+    expect(providerProjectionDefinition.key).toBe('provider')
+    expect(providerProjectionDefinition.stateSchema).toBe(providerStateSchema)
+    expect(providerProjectionDefinition.wire.viewSchema).toBe(providerSchema)
+    expect(providerProjectionDefinition.wire.view).toBe(viewProviderProjection)
+    expect(providerProjectionDefinition.init()).toEqual({ provider: null, model: null })
+    expect(Number.isInteger(providerProjectionDefinition.stateVersion)).toBe(true)
   })
 
   it('schema accepts a valid projection and rejects a bad wire value', () => {
