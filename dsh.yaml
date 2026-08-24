@@ -130,3 +130,12 @@ customizations:
     type: patch
     enabled: true
     brief: 对话宽度插件 Web 加载接线
+  # 第三方(remote):B007 侧会话 — /btw 停靠式侧边对话,不打断主会话
+  - id: dsh-air
+    type: package
+    source: remote
+    spec: dsh-air@0.1.2
+    version: 0.1.2
+    enabled: true
+    brief: /btw 停靠式侧边对话 + 输入框历史召回
+    note: 'B007 候选;repo https://github.com/kaieye/dsh-AIR(MIT,2026-08-24 代码审查);纯 client 插件(peer 仅 react):input-trigger 劫持 /btw(/side 等价别名)提交 → 官方 sessions.fork(最近已完成 turn 前缀)建子会话,主会话不产生模型回合、历史与视口不动;首条 prompt 注入隐藏 boundary 信封(继承历史仅参考,禁边界前指令/工具改动/提权/子代理),UI 投影过滤;抽屉挂 conversation.input.dock 槽渲染子会话原生树,可持续追问;模型继承父会话当前模型(无 selectModel);fallback 依赖 sessions.create(rc.2 契约无此方法 → 主会话进行中开 /btw 提示暂不可用,待实测);BTW 子会话真实存在可配合 ui-archive-manager 归档;语义逐条对照 codex-rs/tui/src/app/side.rs;另含 ↑/↓ 历史召回 + Ctrl+R 搜索(localStorage)'
