@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { wsClean, wsPromote, wsStatus } from './host/maintenance.js'
@@ -25,4 +26,22 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) process.exitCode = await main()
+// npm installs `bin` targets as symlinks: Node resolves the ESM module to the
+// realpath while process.argv[1] keeps the symlink path, so a plain URL
+// comparison would never match and the CLI would exit 0 without running a
+// single safety check. import.meta.main answers "was this module the entry
+// point" directly; the realpath comparison covers runtimes without it. If
+// neither can prove entry, run nothing — importing the module must stay
+// side-effect free.
+function isEntrypoint(argv1: string | undefined): boolean {
+  const mainMarker = (import.meta as { main?: unknown }).main
+  if (typeof mainMarker === 'boolean') return mainMarker
+  if (!argv1) return false
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(argv1)).href
+  } catch {
+    return false
+  }
+}
+
+if (isEntrypoint(process.argv[1])) process.exitCode = await main()
