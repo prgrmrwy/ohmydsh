@@ -161,6 +161,21 @@ sync 生成的文件(含 profile patch 层)必须(SHALL)带有生成标记头,�
 - **WHEN** 开发者修改 local package 的 dependency 或 devDependency
 - **THEN** 仅根 `package-lock.json` 随之更新，package 目录中不产生需提交的独立 lockfile
 
+### Requirement: 自研 package 的运行体 peer 声明跟随 manifest 版本族
+仓库内 local package 对运行体包(`@deepseek-ai/dsh-*`)的 `peerDependencies` 声明必须(SHALL)与 `dsh.yaml` 所 pin 的 `dshVersion` 属于同一版本族,并采用与上游自身一致的范围写法。此类 peer 不得(SHALL NOT)使用精确版本 pin:精确 pin 在运行体升级后可能解析出第二份同名包,造成同一模块的双实例。仓库必须(SHALL)提供一项自动检查,在任一 local package 的运行体 peer 声明偏离当前 `dshVersion` 版本族时失败,并指出具体的 package、依赖名与实际声明。非运行体依赖(如 `react`、`@deepseek-ai/cordis`、`@deepseek-ai/schemastery`)不受本要求约束。
+
+#### Scenario: 运行体升级后声明未跟进
+- **WHEN** `dshVersion` 升级到新版本族,而某 local package 的 `@deepseek-ai/dsh-*` peer 仍声明旧版本族
+- **THEN** 仓库检查失败,并指出该 package、依赖名与实际声明
+
+#### Scenario: 拒绝精确 pin
+- **WHEN** 某 local package 以精确版本(而非范围)声明运行体包 peer
+- **THEN** 仓库检查失败,要求改为跟随版本族的范围写法
+
+#### Scenario: 声明已对齐
+- **WHEN** 全部 local package 的运行体 peer 均处于当前 `dshVersion` 版本族且均为范围写法
+- **THEN** 仓库检查通过,且不对非运行体依赖提出要求
+
 ### Requirement: 仓库初始化按最低版本准则校验 Node/npm 工具链
 仓库初始化脚本必须(SHALL)按**最低版本准则**校验 Node 与 npm:仅当实际版本低于声明的最低版本时拒绝初始化并给出升级指引;不低于最低版本时必须放行,不得因版本与推荐值不同而失败。最低版本必须(SHALL)在根 `package.json` 的 `engines` 中以范围形式声明,并与初始化脚本内的阈值保持一致。`.nvmrc` 必须(SHALL)作为**推荐版本**的单一来源被初始化脚本读取;实际版本与推荐值不同时,脚本必须仅提示并继续执行。版本比较必须(SHALL)在 bash 内自包含实现,不得依赖 `sort -V`、semver 或其他非 POSIX 通用工具,以保持 macOS / Linux / WSL / Git Bash 通用。仓库不得(SHALL NOT)通过 `packageManager` 等字段在 `engines` 之外再声明一个精确的包管理器版本。依赖的可复现性由根 `package-lock.json` 保证,不由工具链版本相等保证。
 
