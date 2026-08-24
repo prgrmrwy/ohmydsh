@@ -29,6 +29,6 @@ DSH 工具 schema 会展示 `sandbox_permissions`,但展示的参数不一定适
 
 1. 运行 `node --test tests/sync-agent-instructions.test.mjs`,覆盖路径逃逸、首次部署、幂等、未托管冲突、漂移和安全撤销。
 2. 运行 `node scripts/sync.mjs`,确认 `$DSH_HOME/AGENTS.md` 含 GENERATED/provenance 头和源文件内容。
-3. 检查 `$DSH_HOME/.ohmydsh-sync-state.json` 的 `agentInstructions.source` 与 `deployedHash`。
+3. 检查 `$DSH_HOME/.dsh-sync-state.json` 的 `agentInstructions.source` 与 `deployedHash`。
 4. 再运行一次 sync,应报告无变化。
 5. 确认 `$DSH_HOME/.agent-presets/ohmydsh` 已删除,而 `$DSH_HOME/skills/dsh-sandbox-notes` 仍存在。

@@ -197,6 +197,29 @@
 
 ---
 
+### [B015] 跨机器访问 DSH:局域网 HTTPS(secure context)
+- **状态**: 想法
+- **优先级**: P2
+- **背景 / 动机**: 本机启动 DSH 后,希望在同局域网的另一台机器上使用。现有 `web.lan`(dsh.yaml `web.lan` / `DSH_LAN`)已能绑 `0.0.0.0` 并打印局域网地址,但访问走的是明文 **http://192.168.x.x:3080**,浏览器判为**非安全上下文**。真正的问题不是地址栏「不安全」标记,而是 secure-context-only API 直接不可用——DSH 的 RPC id 生成路径在用 `crypto.randomUUID()`(`dsh-client-connection/lib/client.js:6179` `RpcId(crypto.randomUUID())`,同包 `:242`、`dsh-client-ui-conversation/lib/client.js:63` 各一处),非 localhost 明文 HTTP 下 GUI 大概率整体不可用,而非「能用但有警告」。
+- **上游态度**: `@deepseek-ai/dsh-host-webserver` 用 `node:http`,README 明确「No TLS, auth, or origin policy」,并把 TLS 归为 dev-facing v1 范围外、建议**前置真正的反向代理**;host 配置 schema 只接受 `127.0.0.1` / `0.0.0.0`。核心不会提供 HTTPS,方案必须在插件或代理层解。
+- **社区选型(2026-08-24 调研,npm)**:
+  - **polyfill 派**(仍明文 HTTP,补 randomUUID 使 GUI 可用,警告仍在):`dsh-lan-access` 0.1.3(MIT)、`@woyeshishen/dsh-lan-access` 1.0.4、`dsh-lan-bridge` 0.2.1、`@huxy/dsh-lan`。
+  - **TLS 代理派(首选)**:`@wingsky-1/dsh-lan-proxy` 0.1.12(MIT,repo wingsky-1/dsh-plugin-hub)——`0.0.0.0` 上 HTTP(3081)+ **HTTPS(3443)** 并存,转发到回环 3080;重写 Host/Origin 以过 `/api` 浏览器信任围栏,只接受 IP 字面量或 localhost 的 Host 头(DNS 重绑定防护);证书自动自签名或走 `tlsCertFile`/`tlsKeyFile`;另含 events.mux/events.host 的 permessage-deflate(自述省 75~79% 流量)。⚠ 安装即在 3081/3443 开监听。
+  - **门禁派**(正交,补上游缺失的 auth):`dsh-lan-gate` 0.1.2(MIT)、`dsh-lan-pass`、`dsh-lan-gateway` 0.2.1(**无 license 字段,慎用**)。
+  - **隧道 / 远程派**(走公网 HTTPS 域名,证书天然可信):`dsh-remote-plugin` 0.6.13、`dsh-remote-desktop` 1.6.1、`@polaris-l/dsh-mobile-remote` 2.4.1、`@xgone/dsh-remote`(登录门禁 + TOTP + 签名 cookie)。
+- **倾向方案**: `@wingsky-1/dsh-lan-proxy` + **mkcert 自签 CA**(证书经 `tlsCertFile`/`tlsKeyFile` 注入)。理由:拿到真正的 secure context(randomUUID 等 API 原生可用,不靠 polyfill 绕过),另一台机器装一次 root CA 后**地址栏零警告**;不装 CA 时用其自签名证书也能跑,仅首次需手动放行。
+- **前置条件(两条,立项即须处理)**:
+  1. **暴露面**:局域网开放的是完整 agent 面(bash / 文件读写),`dsh.yaml` `web.lan` 注释已标注「仅可信网络开启」。长期开启须叠加门禁派插件,不裸奔。
+  2. **与已装插件的已知冲突**:`ui-archive-manager` 的 `TRUSTED_HOSTS` 默认空 → 仅限 loopback(127.0.0.1/localhost),**开启 web.lan 需源码加 trustedHosts**(见 dsh.yaml 该条目 note),否则局域网下其路由会被信任防护挡掉。
+- **开放问题**:
+  1. 证书方案:mkcert 自签 CA(需在每台访问设备装 root CA) vs 内网 CA 签发 vs 直接走隧道派用公网证书;
+  2. 是否把 HTTPS 能力纳入 `dsh.yaml` `web` 段(如 `web.https`)由 sync 统一渲染,还是仅作为 remote 定制条目接入;
+  3. 门禁强度:密码 / CIDR 白名单 / TOTP,以及与 `web.lan` 开关的组合语义;
+  4. 是否顺带评估隧道派以覆盖「不在同一局域网」的场景(与 B004 轴 B 的多机委派正交)。
+- **更新**: 2026-08-24 新增;完成 backlog 选型调研与前置条件梳理,未立项、未安装任何插件。
+
+---
+
 ## 缺陷备忘
 
 ### [D001] core 缺陷:sandbox_permissions 静态广告导致 "not strictly wider" 报错
