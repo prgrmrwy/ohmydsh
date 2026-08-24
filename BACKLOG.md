@@ -48,59 +48,20 @@
   - 可复用现有 `lark-im`(收发消息)、`lark-event`(事件订阅)能力;需定义交互入口与鉴权(群→会话映射)。
 - **更新**: 2026-08-14 新增
 
-### [B004] AI provider 订阅制认证
-- **状态**: 实施中
-- **优先级**: P0
-- **背景 / 动机**: 目前 Codex 和 Anthropics 只能填 api-key 接入,希望支持订阅账号直接授权(OAuth 登录),免去自备 key。
-- **要点**:
-  - 调研结论(2026-08-14):官方 master 已内置 `subagent-claude-code` / `subagent-codex` / `subagent-acp` 三个包,且已发布 npm `0.1.0-rc.6`(与运行版同版本);
-  - 官方路线 = **CLI-as-subagent**:复用本机 `claude` / `codex` CLI 的订阅登录态,插件不做 OAuth;`claude-code` 走官方 Claude Agent SDK,合规性优于野生 token 代理;
-  - 形态差异:subagent 委派(独立任务 → 回最终答案)vs provider 级(挂进 DSH 模型路由/选择器),B004 动机(免 api-key)满足,形态待确认;
-  - 接入路径:`dsh plugin add` 装包 + `cordis.patch.yml` 两行(provider 行 + tool 行),preset 需启用工具行(默认 disabled);
-  - 前置条件:本机安装并登录对应 CLI;ACP 后端仅在接入"只讲 ACP 的外部 agent"时才需要。
-  - 范围决策(2026-08-14):**先做单机可用**(本机 `claude` / `codex` subagent);多机派发与分布式暂缓,以下相关条目归档备查;
-  - 多机派发设计(暂缓):本机走 `subagent-claude-code`(官方 SDK,原生设置);远端机走 `subagent-acp` 多实例(`command: ssh <host> claude-code-acp`,providerName 区分机器,如 `claude-lumevm`),每实例一条 tool 行(toolName 带机器名)→ 模型按工具名选机器;
-  - IO 隔离(暂缓):ACP-over-SSH 天然满足"各机操作各机 IO"(远端进程跑在远端盘);同路径约定(两机同一绝对路径 checkout)让 ACP workspace 参数直接可用;共享挂载目录是唯一风险,需约定禁止委派;
-  - 待验证(暂缓):claude-code-acp 对 workspace 参数的处理、SSH 免密与远端进程终止语义、ACP 后端为 one-shot(无跨轮续聊);
-  - selector 订阅方案(2026-08-14 补充):官方无订阅制 LlmAdapter;可行路径 = 自研 adapter 包装产品 CLI 登录态(Claude: `claude -p --output-format stream-json`;GPT: `codex app-server --stdio` JSON-RPC),限流/延迟/ToS 需注意,与 subagent 路线可并存;
-  - 分布式能力(暂缓):官方件 = `dsh-acp`(ACP server,stdio,text-only)+ `subagent-acp`(client,command 可配)。"每台设备常驻一个 DSH ACP server,本机按 providerName 注册多实例,ssh 派发" = 官方支持的分布式 agent 池形态;daemon 长连接需自定义 provider。
-  - 接线落地(2026-08-19):**codex 先行,claude 待本机可用**——首个按 repo-layout 落地的定制:官方 `@deepseek-ai/dsh-subagent-codex@0.1.0-rc.6` 按 `remote` 入 manifest(无 dsh.bundle,装为 plain dependency 不进 bundle 层),其缺失 peer `@deepseek-ai/dsh-sdk-protocol@0.1.0-rc.6` 入 manifest 顶层 `dependencies:`(新增支撑包契约,条目 `deps:` 引用归属,sync 校验悬空引用);provider+tool 两行接线放 `patches/subagent-codex-wiring.yml`(type: patch,sync 合并进生成 patch 层,直插 host 平面,工具 `subagent_codex` 全会话可见,preset 无需改动);sync 顺带修复 bundle-less 包不得进 bundle 层;本机 codex-cli 0.144.3(ChatGPT 登录态)app-server 握手实测通过(官方基线 0.147.0);2026-08-19 重启验收:provider+tool 两行激活,`subagent_codex` 工具已注入会话;同日真实委派验收通过(工具调用 codex 成功返回模型自述,GPT-5 Codex,本机登录态生效)。
-  - 插件选型 ADR(2026-08-20):订阅 provider 插件继续 V1ki `dsh-plugin-subscriptions@0.4.2`(change `2026-08-20-llm-subscriptions-upgrade`,ADR-0001 落 design.md);lninghaha `dsh-coding-subscription-oauth@0.5.4` 列为候选,未装。**重新评估触发条件**(任一满足即重开选型、以「试用 lninghaha」立项):① VM/远程机上需纯 OAuth 订阅登录且该机无 claude CLI 登录态(V1ki 在此时 claude 登录按钮直接报错);② lninghaha 在 VM 沙箱实机验证全绿 —— npm 无 peer 冲突(运行体解析 dsh-llm@rc.7 下其 `=rc.6` 硬 pin 有冲突风险)、设备码 + CLI 只读拉取 + claude/codex 流式通、attribution 链路生效;③ V1ki 0.4.2 出现无法绕开的维护性回归(keychain 服务名长期失配 / 上游停更)。分布式(多机委派)与插件选型正交 = 轴 B(官方 subagent/ACP 平面),另行立项。
-- **更新**: 2026-08-14 新增,提升 P0;同日完成 GitHub 调研,确认官方现成方案;同日定范围:单机可用,多机/分布式暂缓;2026-08-19 codex 接线按「remote 包 + 顶层 dependencies + patches 覆盖」落地为 repo-layout 首个定制,重启 + 真实委派端到端验收通过,claude 对应接线待本机 claude 可用后另加。
-
-### [B005] 新任务自动建 worktree,再 cwd 进入开始 agent 交互
-- **状态**: 想法
-- **背景 / 动机**: 创建新任务时,先用特定工具创建 git worktree,cwd 到 worktree 之后才开始 agent 交互,保证任务间文件隔离、并行任务互不干扰。
-- **要点**:
-  - 触发时机:新任务(会话)创建时,自动或可选地走 worktree 流程;
-  - 现有基础:本会话已有 `sw` skill(start-by-worktree,面向 Nexus coding sessions),机制可参考/复用,先评估其可泛化程度;
-  - 待设计:入口形态(skill / host 插件 / 任务创建钩子)、worktree 目录与分支命名约定、任务 ↔ worktree 映射与回收;
-  - 注意:zydsh 是嵌套仓库、父仓库多项目,worktree 策略需考虑仓库结构。
-- **更新**: 2026-08-14 新增
-
-### [B006] DeepSeek 模型下支持图片能力
-- **状态**: 想法
-- **优先级**: P0
-- **背景 / 动机**: 希望用 deepseek 模型时也能处理图片输入(截图理解、读图等)。
-- **要点**:
-  - 先核实能力边界:deepseek 模型(deepseek-v4-pro / chat 等)官方 API 是否原生支持图片输入;
-  - 若原生支持 → 落在 LLM 消息协议(image 内容块)+ `dsh-llm-deepseek` 适配器,属插件层改造;
-  - 若不支持 → 备选:视觉路由(图片任务转发到视觉模型)、本地 OCR/描述预处理,或混用方案;
-  - 现状排查:DSH 已有 `dsh-attachment` 与 `read_image` 等图片管道,确认 harness 侧缺口在协议、适配器还是 UI 上传;
-  - 闸门定位(2026-08-14 代码级确认):① 发送层 `dsh-host-apiproxy` 在提交时检测消息含图片,路由模型 `inputModalities` 不含 image 即拒(`model-unavailable`,deepseek 声明 `["text"]`);② 模型层 `dsh-llm-deepseek` 的 `assertTextOnly` 对图片块显式抛 `UNSUPPORTED_CONTENT`。图片进不了会话,主 agent 无委派机会;
-  - 可行路径候选:图片落 workspace + 消息转文本路径 + 委派给视觉子代理(与 B004 的 `subagent-claude-code` 协同);或做视觉路由/输入层转换。
-- **更新**: 2026-08-14 新增,提升 P0;同日完成闸门定位调研。
-
 ### [B007] 类似 Claude 的 /btw 沟通模式
-- **状态**: 想法
+- **状态**: 讨论中
 - **背景 / 动机**: 增加类似 Claude Code `/btw`(by the way)的沟通方式:发一条消息让 agent 只记录、不立即处理,不打断当前任务。
 - **要点**:
   - 入口形态:slash 命令或输入触发;先查 DSH 现有 command/input-trigger 机制(`dsh-client-ui-commands`、`dsh-client-ui-input-trigger`)的扩展点;
   - 语义:低优先级侧注,不触发即时行动,写入持久记忆;
   - 存储位置待设计:会话内记忆 vs workspace 文件(如 NOTES.md)vs 任务级;
   - 消费时机:当前任务完成后回顾,或后续任务开始时带上;
-  - 待设计:多任务并行时 btw 的归属(属于哪个任务/会话)、与 goal/todo 列表的交互。
-- **更新**: 2026-08-14 新增
+  - 待设计:多任务并行时 btw 的归属(属于哪个任务/会话)、与 goal/todo 列表的交互;
+  - 社区调研(2026-08-24):**已有现成实现** [dsh-sidechain](https://github.com/omdsh-dev/dsh-sidechain)(omdsh-dev org,与 open-in-vscode 同源)——`/btw <问题>` 一次性侧问(后台单轮问答,命令立即返回,侧链面板展示过程与答案,只读不可续问)+ `/side <问题>` 可持续追问侧会话 + `/side list`;机制:fork 当前会话创建独立子会话,侧会话日志/工具活动不写入主会话历史,主线程不中断,默认只读 persona;
+  - 匹配度:/btw = Claude 风格「不打断当前任务的侧问」(后台给答案),精准覆盖 B007 核心诉求;「只记录、不立即处理」的纯记忆形态(写入 NOTES.md 待回顾)不在其内,如需可叠加;
+  - 注意点:README 声明适配至 `0.1.1-rc.1`(当前 DSH pin `0.1.1-rc.2` 未列,接入前需验证兼容);安装示例用 `github:Buyi-wsgzg/dsh-sidechain`,与现仓库 org(omdsh-dev)不一致,接入前确认来源;依赖 `dsh-subagent` / `dsh-subagent-fork` / `dsh-commands`(默认 Web profile 已含);
+  - 后续:按 add-dsh-plugin 流程试用接入,或先人工试用再决定。
+- **更新**: 2026-08-14 新增;2026-08-24 完成社区调研,发现现成实现 dsh-sidechain(/btw 一次性侧问 + /side 持续侧会话,fork 隔离不写主历史),诉求核心被覆盖,推进为讨论中。
 
 ### [B008] 会话(任务)看板视图
 - **状态**: 想法
@@ -125,7 +86,7 @@
   - 管理面板:subagent 列表(名称 / provider / 模型 / 机器 / 状态 / 任务数),配置(增删、默认模型、persona 提示词),任务历史;落点 = client UI(设置页 Tab 或侧栏面板)+ host 侧配置持久化;
   - 与 B001 关系:B001 是 agent 自主编排(tech-lead 派活),本条是用户手动指派,互补;面板可复用一个 subagent registry 设计,避免两处各建一套;
   - 与 B008 可联动:面板里 subagent 的任务状态可进会话看板。
-- **更新**: 2026-08-19 新增
+- **更新**: 2026-08-19 新增;2026-08-24 B004 归档后前置更新:subagent-codex 一次性委派已移除(订阅 provider 为主形态),显式委派走内置 subagent/fork 工具,「subagent 变多」前提不再成立,本条动机与数据源描述待重定(可并入 dsh-sidechain 的 /side 子代理面板评估)。
 
 ### [B012] 类似 Codex 的 session 内容关键字搜索
 - **状态**: 想法
@@ -259,3 +220,34 @@
   - 落地版本:1.5.35(rc.2 适配修复费用展示缺失、内置 DeepSeek-V4-Flash-Vision-Exp 计价、修正未命中模型列表口径),manifest 条目已启用,重启验收 host + web client 加载正常;
   - 试用心得:日常使用确认满足「任意页面常驻看用量」诉求;若后续对指标范围 / 多厂商聚合有新要求,可回到本条重新评估候选(如 @kenz1117/dsh-ui-usage-billing)或自研。
 - **更新**: 2026-08-18 新增;完成社区调研,结论「评估复用优先」;2026-08-21 cost-meter 1.5.35 启用并重启验收;2026-08-24 试用确认满意,归档为已完成。
+
+### [B004] AI provider 订阅制认证(单机)
+- **状态**: 已完成
+- **优先级**: P0
+- **背景 / 动机**: 希望 Codex / Claude 等不填 api-key,直接用订阅账号授权(OAuth / 本机 CLI 登录态)接入。
+- **要点**:
+  - 实现形态 = **provider 级订阅**(V1ki `dsh-plugin-subscriptions`,manifest id `llm-subscriptions`,当前 0.5.0):codex / claude / grok 订阅登录后出现在输入框模型选择器,claude 复用本机 Claude Code 凭据(keychain 导入秒登录);选型与重评估触发条件见 change `2026-08-20-llm-subscriptions-upgrade`(ADR-0001);
+  - 形态演进:官方 CLI-as-subagent 路线(subagent-codex 接线)2026-08-19 落地后,于 2026-08-21(`7bf394e`)移除——主对话已被订阅制 provider 覆盖,委派能力经内置 spawn/fork 子代理保留,modlens 独立走 codex CLI 不受影响;
+  - 单机验收:codex 订阅(2026-08-19 委派端到端 + 主对话)通过;claude 本机 CLI 2.1.221 可用、凭据导入登录可用(2026-08-24 确认);
+  - 范围边界:多机派发 / 分布式(轴 B:官方 subagent/ACP 平面)暂缓,另行立项。
+- **更新**: 2026-08-14 新增 P0 并定单机范围;2026-08-19 codex 落地验收;2026-08-21 subagent-codex 移除、订阅制定为主形态;2026-08-24 claude 本机可用确认,单机目标达成,归档为已完成。
+
+### [B005] 新任务自动建 worktree,再 cwd 进入开始 agent 交互
+- **状态**: 已完成
+- **背景 / 动机**: 创建新任务时自动进入独立 git worktree,保证任务间文件隔离、并行任务互不干扰。
+- **要点**:
+  - 落地实现 = 自研 **Worktree Session**(`packages/worktree-session` + `ws` / `sw` skill + `scripts/ws-*.mjs`,manifest 已启用):首页空白会话首次普通发送时从 base 创建唯一 `ws/*` branch 与 `.worktrees/*` checkout,Agent 托管执行目录即该 worktree;npm lean 依赖复用、隔离开发 DSH_HOME、status/promote/clean 收尾,不切换主 checkout;
+  - 首版适配当前 ohmydsh 仓;zydsh 嵌套仓库 / 多项目结构的泛化仍需单独评估;
+  - 隔离层次的进一步讨论见 B014(未完成,需另行立项)。
+- **更新**: 2026-08-14 新增;2026-08-24 确认当前 ws 机制已达成诉求(会话级隔离 worktree + 独立执行目录),归档为已完成;嵌套仓库泛化如需另立项。
+
+### [B006] DeepSeek 模型下支持图片能力
+- **状态**: 已完成
+- **优先级**: P0
+- **背景 / 动机**: 希望用 deepseek / 订阅模型时也能处理图片输入(截图理解、读图等)。
+- **要点**:
+  - 能力现状(2026-08-24):DeepSeek 官方已发布 **DeepSeek-V4-Flash-Vision-Exp**(多模态,vision at text prices,cost-meter 已内置计价)→ DeepSeek 原生图片能力已成,无需适配器改造;原闸门定位(apiproxy `inputModalities` 拒图 + `assertTextOnly` 抛错)随视觉模型加入而失效;
+  - 生态兜底:`modlens`(manifest 已启用,粘贴即视觉,走 codex CLI,实测读图成功)覆盖「截图理解」高频场景;
+  - 遗留观察:**opencode-go 路由暂无可靠原生 vision**(社区网关 OmniRoute PR #2740 显示其声明过度、需 vision-bridge 强制),待上游支持即可,无本仓动作;
+  - 历史调研细节见本条 git history。
+- **更新**: 2026-08-14 新增 P0 并完成闸门定位;2026-08-24 确认 DeepSeek Vision-Exp 已发布、modlens 兜底已启用、opencode-go 待上游,归档为已完成。
