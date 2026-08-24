@@ -35,6 +35,64 @@
   4. 是否给某些角色(如 anti)配不同模型
 - **更新**: 2026-08-14 完成方案讨论,讨论进度已归档(要点 + 4 个开放问题);暂停跟进,待开放问题确认后进入设计。
 
+### [B014] Worktree Session 隔离度分层与 build/runtime home 解耦
+- **状态**: 讨论中
+- **优先级**: P1
+- **背景 / 动机**: Worktree Session 当前把任务专属 `DSH_HOME` 写入 worktree `.env.local`，可正确防止候选 build/sync 污染真实 `~/.dsh`；但同一个 `bin/dsh` 同时承担 build、preview、start、restart，用户从 task worktree 执行 restart 时会把整个 Host 切到空白隔离 home，表现为插件、Workspace/Session、provider 配置和凭据全部“消失”并要求重新输入 API Key。原数据未丢失，但当前边界非常容易误用。
+- **五层隔离模型**:
+  1. **源码隔离**：每个任务使用独立 branch/worktree，Agent 本地工具只访问 managed root；默认必须。
+  2. **依赖隔离**：默认 lean、同 fingerprint 共享 cache；依赖变更前 promote，之后使用 worktree-local mutable dependencies。
+  3. **部署隔离**：task `DSH_HOME=<git-common-dir>/ws/dsh-home/<operationId>` 只用于 `dsh build`、bundle composition、隔离安装与独立 preview，不读取真实用户配置。
+  4. **真实配置验收**：显式 opt-in 使用 `DSH_HOME=$HOME/.dsh` 部署/加载候选 bundle，以真实 Workspace/Session/provider 验收；属于影响日常 profile 的部署动作，必须可识别、可回滚。
+  5. **日常运行**：实现合入 main 后，由 main launcher 对真实 `~/.dsh` build/restart；不得依赖 task worktree 路径。
+- **设计原则**:
+  - 完全隔离本身符合预期，不应通过共享凭据/Session 来削弱第 3 层；应解决 build home 与 runtime home 粗粒度耦合及 launcher UX。
+  - `DSH_HOME` 是进程级总根，当前同时承载 bundle/profile、Workspace/Session、provider 凭据、storage、skills 和日志，不能再把它描述成单纯“构建输出目录”。
+  - 隔离 preview 与真实 profile acceptance 必须是两种显式模式；不得把 task launcher 的 restart 当作真实 GUI 无副作用重启。
+- **优化候选**:
+  - 拆分 `DSH_BUILD_HOME` / `DSH_RUNTIME_HOME`，或由命令显式选择目标 home，而不是在 task `.env.local` 中无条件覆盖进程级 `DSH_HOME`。
+  - 命令边界建议：`dsh build --isolated`、`dsh preview --isolated --port <port>`、`dsh deploy --profile web`、`dsh restart`；其中 restart 只重启既有真实 profile。
+  - launcher 每次启动打印绝对 `DSH_HOME` / profile；检测到 `.git/ws/dsh-home/` 时显示醒目的“隔离预览环境”，start/restart 默认拒绝或要求明确确认。
+  - Worktree Session 运行上下文应明确：worktree 的 `bin/dsh build` 默认是隔离构建，不代表当前日常 GUI 已更新；真实部署需独立授权步骤。
+- **验收标准**:
+  - task build 不写真实 `~/.dsh`，两个并行任务仍拥有不同部署根；
+  - task preview 不读取或复制真实凭据/Session，且使用独立端口并显著标识隔离环境；
+  - 日常 restart 不会因 cwd/worktree `.env.local` 改变 runtime home；
+  - 真实 profile deploy 前后可展示目标、差异与回滚路径，restart 后保留原 Workspace/Session/provider；
+  - 自动化验收能分别声明 isolated preview 与 real-profile acceptance，且不会混用。
+- **关联记录**: `openspec/changes/restore-cleaned-session-as-ordinary/WORKTREE-ISOLATION-NOTE.md`（2026-08-21 误用复盘与详细现象）。
+- **更新**: 2026-08-21 记录五层隔离模型；确认“完全隔离”适合作为开发 build/preview，但现有 `DSH_HOME` + 通用 launcher 造成运行边界不清，后续需专项 OpenSpec 优化。
+
+### [B015] 跨机器访问 DSH:局域网 HTTPS(secure context)
+- **状态**: 讨论中
+- **优先级**: P1(2026-08-24 用户明确要推进:`dsh web` 支持 192.168 内网 IP 访问 + HTTPS)
+- **背景 / 动机**: 本机启动 DSH 后,希望在同局域网的另一台机器上使用。现有 `web.lan`(dsh.yaml `web.lan` / `DSH_LAN`)已能绑 `0.0.0.0` 并打印局域网地址,但访问走的是明文 **http://192.168.x.x:3080**,浏览器判为**非安全上下文**。真正的问题不是地址栏「不安全」标记,而是 secure-context-only API 直接不可用——DSH 的 RPC id 生成路径在用 `crypto.randomUUID()`(`dsh-client-connection/lib/client.js:6179` `RpcId(crypto.randomUUID())`,同包 `:242`、`dsh-client-ui-conversation/lib/client.js:63` 各一处),非 localhost 明文 HTTP 下 GUI 大概率整体不可用,而非「能用但有警告」。
+- **上游态度**: `@deepseek-ai/dsh-host-webserver` 用 `node:http`,README 明确「No TLS, auth, or origin policy」,并把 TLS 归为 dev-facing v1 范围外、建议**前置真正的反向代理**;host 配置 schema 只接受 `127.0.0.1` / `0.0.0.0`。核心不会提供 HTTPS,方案必须在插件或代理层解。
+- **社区选型(2026-08-24 调研,npm)**:
+  - **polyfill 派**(仍明文 HTTP,补 randomUUID 使 GUI 可用,警告仍在):`dsh-lan-access` 0.1.3(MIT)、`@woyeshishen/dsh-lan-access` 1.0.4、`dsh-lan-bridge` 0.2.1、`@huxy/dsh-lan`。
+  - **TLS 代理派(首选)**:`@wingsky-1/dsh-lan-proxy` 0.1.12(MIT,repo wingsky-1/dsh-plugin-hub)——`0.0.0.0` 上 HTTP(3081)+ **HTTPS(3443)** 并存,转发到回环 3080;重写 Host/Origin 以过 `/api` 浏览器信任围栏,只接受 IP 字面量或 localhost 的 Host 头(DNS 重绑定防护);证书自动自签名或走 `tlsCertFile`/`tlsKeyFile`;另含 events.mux/events.host 的 permessage-deflate(自述省 75~79% 流量)。⚠ 安装即在 3081/3443 开监听。
+  - **门禁派**(正交,补上游缺失的 auth):`dsh-lan-gate` 0.1.2(MIT)、`dsh-lan-pass`、`dsh-lan-gateway` 0.2.1(**无 license 字段,慎用**)。
+  - **隧道 / 远程派**(走公网 HTTPS 域名,证书天然可信):`dsh-remote-plugin` 0.6.13、`dsh-remote-desktop` 1.6.1、`@polaris-l/dsh-mobile-remote` 2.4.1、`@xgone/dsh-remote`(登录门禁 + TOTP + 签名 cookie)。
+- **倾向方案**: `@wingsky-1/dsh-lan-proxy` + **mkcert 自签 CA**(证书经 `tlsCertFile`/`tlsKeyFile` 注入)。理由:拿到真正的 secure context(randomUUID 等 API 原生可用,不靠 polyfill 绕过),另一台机器装一次 root CA 后**地址栏零警告**;不装 CA 时用其自签名证书也能跑,仅首次需手动放行。
+- **前置条件(两条,立项即须处理)**:
+  1. **暴露面**:局域网开放的是完整 agent 面(bash / 文件读写),`dsh.yaml` `web.lan` 注释已标注「仅可信网络开启」。长期开启须叠加门禁派插件,不裸奔。
+  2. **与已装插件的已知冲突**:`ui-archive-manager` 的 `TRUSTED_HOSTS` 默认空 → 仅限 loopback(127.0.0.1/localhost),**开启 web.lan 需源码加 trustedHosts**(见 dsh.yaml 该条目 note),否则局域网下其路由会被信任防护挡掉。
+- **开放问题**:
+  1. 证书方案:mkcert 自签 CA(需在每台访问设备装 root CA) vs 内网 CA 签发 vs 直接走隧道派用公网证书;
+  2. 是否把 HTTPS 能力纳入 `dsh.yaml` `web` 段(如 `web.https`)由 sync 统一渲染,还是仅作为 remote 定制条目接入;
+  3. 门禁强度:密码 / CIDR 白名单 / TOTP,以及与 `web.lan` 开关的组合语义;
+  4. 是否顺带评估隧道派以覆盖「不在同一局域网」的场景(与 B004 轴 B 的多机委派正交)。
+- **本机现状核实(2026-08-24,推进前实测)**:
+  - `dsh.yaml` `web.lan` 当前 **false**(默认关);`scripts/sync.mjs` 的 `LAN_FRAGMENT` 在开启时渲染 `webserver.config.host = ctx.webStartup.host ?? '0.0.0.0'`,manifest 校验只接受布尔,`DSH_LAN` env 优先级高于 manifest;
+  - 本机 LAN 地址 = **192.168.64.3**(en0,网关 192.168.64.1),与用户诉求的 192 段一致;
+  - secure-context 闸门**已核实存在**:当前部署的 client bundle 中 `crypto.randomUUID()` 共 9 处调用,其中浏览器侧关键路径 3 处(`dsh-client-connection/lib/client.js:242`、`:6181`,`dsh-client-ui-conversation/lib/client.js:62`),非安全上下文下该 API 为 `undefined`([MDN:randomUUID 仅安全上下文可用](https://developer.mozilla.org/en-US/docs/Web/API/Crypto/randomUUID));上游已有两条同题讨论确认 GUI 直接不可用而非仅告警([#4209 mintRpcId 报错](https://github.com/deepseek-ai/deepseek-harness/discussions/4209)、[#2396 LAN 绑定不可用](https://github.com/deepseek-ai/deepseek-harness/discussions/2396));
+  - `dsh-web-app` 侧已内建 LAN 信任推导:`resolveLanTrust()` 在 bind 为 `0.0.0.0` 时枚举非内部 IPv4 作为 `trustedHosts`(**无端口的 IP 字面量**,注释说明 DNS 重绑定需攻击者可控域名故 IP 字面量安全),另有 `--trusted-host` CLI 可追加 → **官方 `/api` 围栏本身不阻挡局域网 IP 访问**,阻挡点只在 secure context 与第三方插件各自的围栏;
+  - `ui-archive-manager` 冲突**已核实**:`lib/index.js:38` `const TRUSTED_HOSTS = []` 硬编码空数组(非配置项),`:104` 处非 loopback 且不在该数组即拒绝 → 局域网下其 unarchive 路由必被挡,需 patch 源码或接受该功能在 LAN 下不可用;
+  - `@wingsky-1/dsh-lan-proxy` **npm 核实**:0.1.12,MIT,2026-08-23 更新(活跃),`dsh.bundle` + `dsh.client`(platform web)双面,运行依赖仅 `schemastery`,peer 仅 react;
+  - 工具链:本机 **mkcert 未安装**(brew 可装),`openssl` 可用(`/usr/bin/openssl`)。
+- **推进决策(待定,见开放问题)**: 优先验证「TLS 代理派 + 自签证书」能否一次打通 secure context;polyfill 派仅作为降级备选(不解决 HTTPS 诉求,仅让明文 HTTP 下 GUI 可用)。
+- **更新**: 2026-08-24 新增;完成 backlog 选型调研与前置条件梳理,未立项、未安装任何插件;2026-08-24 用户明确要求推进(内网 IP + HTTPS),升 P1 并进入讨论中,完成本机现状核实(web.lan 现状 / LAN IP / secure-context 闸门与上游讨论 / 官方 trustedHosts 推导机制 / archive-manager 硬编码冲突 / lan-proxy npm 元数据 / mkcert 缺失),仍未安装任何插件。
+
 ---
 
 ## 想法
@@ -48,23 +106,6 @@
   - 可复用现有 `lark-im`(收发消息)、`lark-event`(事件订阅)能力;需定义交互入口与鉴权(群→会话映射)。
 - **更新**: 2026-08-14 新增
 
-### [B007] 类似 Claude 的 /btw 沟通模式
-- **状态**: 讨论中
-- **背景 / 动机**: 增加类似 Claude Code `/btw`(by the way)的沟通方式:发一条消息让 agent 只记录、不立即处理,不打断当前任务。
-- **要点**:
-  - 入口形态:slash 命令或输入触发;先查 DSH 现有 command/input-trigger 机制(`dsh-client-ui-commands`、`dsh-client-ui-input-trigger`)的扩展点;
-  - 语义:低优先级侧注,不触发即时行动,写入持久记忆;
-  - 存储位置待设计:会话内记忆 vs workspace 文件(如 NOTES.md)vs 任务级;
-  - 消费时机:当前任务完成后回顾,或后续任务开始时带上;
-  - 待设计:多任务并行时 btw 的归属(属于哪个任务/会话)、与 goal/todo 列表的交互;
-  - 社区调研(2026-08-24):同类实现已有**三家**,核心语义一致 = fork 独立子会话 / 独立会话,不打断主线程:
-    - **[dsh-sidechain](https://github.com/omdsh-dev/dsh-sidechain)**(omdsh-dev,GitHub 源,**npm 未发布**):`/btw <问题>` 一次性侧问(后台单轮,只读不可续问)+ `/side <问题>` 可持续侧会话 + `/side list`;fork 当前会话,侧会话日志/工具活动不写主历史,默认只读 persona;适配声明至 `0.1.1-rc.1`(当前 pin rc.2 待验证);README 安装示例指向 `Buyi-wsgzg` org,与现仓库不一致,接入前确认来源;
-    - **[dsh-air](https://github.com/kaieye/dsh-AIR)@0.1.2**(npm,MIT):`/btw [问题]` 打开停靠式侧边对话(`/side` **等价别名,可持续追问**,区别于 sidechain 的只读一次性 /btw)+ 侧边栏内嵌问答;顺带 ↑/↓ 历史发送记录召回 + Ctrl+R 搜索(localStorage,上限 500 可调 10–5000);输入框历史与侧问打包,键盘党顺带收益;实现 = 纯 client(input-trigger 劫持 `/btw` 提交 → 官方 `sessions.fork`(已完成 turn 前缀,主会话进行中 fallback `create`+快照) → 首条 prompt 注入隐藏 boundary 信封(继承历史仅参考/禁工具改动/禁子代理) → 抽屉渲染子会话原生树,主会话不产生模型回合、历史与视口不动),语义对齐 Codex TUI side conversation(源码注释逐条对照 `codex-rs/tui/src/app/side.rs`);**模型选择 = 零干预**:无 selectModel 调用,面板无模型 UI——fork 子会话模型继承父会话当前模型(fork 契约仅 sessionId/atSeq/increaseTitle,host 端按 boundary 复制含 request/header 的事件日志,ModelDirectory current 随之恢复),fallback create 空会话用部署默认 `agent-default-model`(本机 = codex/gpt-5.6-sol/high);**上下文感知分路径**:fork = 完整感知(全量已完成事件含工具调用,仅以 boundary 标记为参考),fallback = 文本级部分感知(`<parent-thread-snapshot>` 可见节点序列化:user/assistant 文本 + tool-result 参数输出 + 在途 partial/runningCalls,reasoning 块故意排除);
-    - **[dsh-sidebar-qa](https://github.com/ChenRuoT/dsh-sidebar-qa)@0.4.0**(npm,MIT):划选任意文本 → 「提问」浮层 → 侧边栏内嵌问答(独立会话 `❓<主题>`,可继续/归档);三种上下文策略 = `sessions.fork` 全量继承(前缀缓存命中)/ 压缩 / 机械裁切;嵌套追问 + 追问记录树(归档/删除置灰);**功能最全但依赖第三方 [dsh-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) ≥0.14.0**(对应 DSH 0.1.0-rc.8 起,rc.2 peer 解析待验证),多一件依赖、信任面更大;
-    - 旁类(非侧问,记录备查):[dsh-session-fork](https://github.com/Jason-skd/dsh-session-fork)(npm,「会话 = 分支」范式:并行分支 + squash 回主 + 内置 branch 图,Wiki 宣称与 git worktree 搭配——与 worktree 会话精神同向,关联 B014)、dsh-routed-subagent(bpc-oss:one-shot subagent 挂任意 preset + per-call 模型覆盖);
-  - 匹配度:三家均覆盖「/btw 不打断主会话」核心诉求;「只记录、不立即处理」的纯记忆形态(写 NOTES.md 待回顾)三家均未覆盖,如需可叠加;
-  - 后续:选型试用——语义最贴 = sidechain;顺带历史召回 = dsh-air;功能最全 = sidebar-qa(代价:better-sidebar 依赖链);按 add-dsh-plugin 流程接入前先确认 npm 源与 DSH 0.1.1-rc.2 兼容性。
-- **更新**: 2026-08-14 新增;2026-08-24 完成两轮社区调研:首轮发现 dsh-sidechain,二轮确认同类共三家(sidechain / dsh-air / dsh-sidebar-qa)并拉齐对比,诉求核心普遍被覆盖,推进为讨论中,待选型试用;2026-08-24 试装 dsh-air 后弃用(=/btw fork 子会话全量继承父历史,每轮重复计费,主模型 codex 订阅无前缀缓存保障,侧问会话堆积),终选 sidebar-qa(better-sidebar 0.15.2 + dsh-sidebar-qa 0.4.0 已入 manifest 并合入 main,默认 compressed 策略省 token),待实测归档;2026-08-24 sidebar-qa 实现审查结论(源码核实):侧问发起零阻塞——create/fork 独立会话、prompt 走 queue,主对话进行中 inherit 自动降级 compressed(fork 需已完成 turn);host 仅对主会话只读 readSurface + 快速模型 160 token 摘要,不改主会话;侧问上下文只含已完成落盘内容,**看不到进行中 tool call/流式输出**(与 dsh-air 的 interrupted snapshot 携带在途状态相反,完整性/省 token 不可兼得)。
 
 ### [B008] 会话(任务)看板视图
 - **状态**: 想法
@@ -102,56 +143,9 @@
   - 待确认:首版仅做普通关键字匹配，还是同时支持短语、大小写、正则或语义搜索。
 - **更新**: 2026-08-20 新增
 
-### [B014] Worktree Session 隔离度分层与 build/runtime home 解耦
-- **状态**: 讨论中
-- **优先级**: P1
-- **背景 / 动机**: Worktree Session 当前把任务专属 `DSH_HOME` 写入 worktree `.env.local`，可正确防止候选 build/sync 污染真实 `~/.dsh`；但同一个 `bin/dsh` 同时承担 build、preview、start、restart，用户从 task worktree 执行 restart 时会把整个 Host 切到空白隔离 home，表现为插件、Workspace/Session、provider 配置和凭据全部“消失”并要求重新输入 API Key。原数据未丢失，但当前边界非常容易误用。
-- **五层隔离模型**:
-  1. **源码隔离**：每个任务使用独立 branch/worktree，Agent 本地工具只访问 managed root；默认必须。
-  2. **依赖隔离**：默认 lean、同 fingerprint 共享 cache；依赖变更前 promote，之后使用 worktree-local mutable dependencies。
-  3. **部署隔离**：task `DSH_HOME=<git-common-dir>/ws/dsh-home/<operationId>` 只用于 `dsh build`、bundle composition、隔离安装与独立 preview，不读取真实用户配置。
-  4. **真实配置验收**：显式 opt-in 使用 `DSH_HOME=$HOME/.dsh` 部署/加载候选 bundle，以真实 Workspace/Session/provider 验收；属于影响日常 profile 的部署动作，必须可识别、可回滚。
-  5. **日常运行**：实现合入 main 后，由 main launcher 对真实 `~/.dsh` build/restart；不得依赖 task worktree 路径。
-- **设计原则**:
-  - 完全隔离本身符合预期，不应通过共享凭据/Session 来削弱第 3 层；应解决 build home 与 runtime home 粗粒度耦合及 launcher UX。
-  - `DSH_HOME` 是进程级总根，当前同时承载 bundle/profile、Workspace/Session、provider 凭据、storage、skills 和日志，不能再把它描述成单纯“构建输出目录”。
-  - 隔离 preview 与真实 profile acceptance 必须是两种显式模式；不得把 task launcher 的 restart 当作真实 GUI 无副作用重启。
-- **优化候选**:
-  - 拆分 `DSH_BUILD_HOME` / `DSH_RUNTIME_HOME`，或由命令显式选择目标 home，而不是在 task `.env.local` 中无条件覆盖进程级 `DSH_HOME`。
-  - 命令边界建议：`dsh build --isolated`、`dsh preview --isolated --port <port>`、`dsh deploy --profile web`、`dsh restart`；其中 restart 只重启既有真实 profile。
-  - launcher 每次启动打印绝对 `DSH_HOME` / profile；检测到 `.git/ws/dsh-home/` 时显示醒目的“隔离预览环境”，start/restart 默认拒绝或要求明确确认。
-  - Worktree Session 运行上下文应明确：worktree 的 `bin/dsh build` 默认是隔离构建，不代表当前日常 GUI 已更新；真实部署需独立授权步骤。
-- **验收标准**:
-  - task build 不写真实 `~/.dsh`，两个并行任务仍拥有不同部署根；
-  - task preview 不读取或复制真实凭据/Session，且使用独立端口并显著标识隔离环境；
-  - 日常 restart 不会因 cwd/worktree `.env.local` 改变 runtime home；
-  - 真实 profile deploy 前后可展示目标、差异与回滚路径，restart 后保留原 Workspace/Session/provider；
-  - 自动化验收能分别声明 isolated preview 与 real-profile acceptance，且不会混用。
-- **关联记录**: `openspec/changes/restore-cleaned-session-as-ordinary/WORKTREE-ISOLATION-NOTE.md`（2026-08-21 误用复盘与详细现象）。
-- **更新**: 2026-08-21 记录五层隔离模型；确认“完全隔离”适合作为开发 build/preview，但现有 `DSH_HOME` + 通用 launcher 造成运行边界不清，后续需专项 OpenSpec 优化。
 
 ---
 
-### [B015] 跨机器访问 DSH:局域网 HTTPS(secure context)
-- **状态**: 想法
-- **优先级**: P2
-- **背景 / 动机**: 本机启动 DSH 后,希望在同局域网的另一台机器上使用。现有 `web.lan`(dsh.yaml `web.lan` / `DSH_LAN`)已能绑 `0.0.0.0` 并打印局域网地址,但访问走的是明文 **http://192.168.x.x:3080**,浏览器判为**非安全上下文**。真正的问题不是地址栏「不安全」标记,而是 secure-context-only API 直接不可用——DSH 的 RPC id 生成路径在用 `crypto.randomUUID()`(`dsh-client-connection/lib/client.js:6179` `RpcId(crypto.randomUUID())`,同包 `:242`、`dsh-client-ui-conversation/lib/client.js:63` 各一处),非 localhost 明文 HTTP 下 GUI 大概率整体不可用,而非「能用但有警告」。
-- **上游态度**: `@deepseek-ai/dsh-host-webserver` 用 `node:http`,README 明确「No TLS, auth, or origin policy」,并把 TLS 归为 dev-facing v1 范围外、建议**前置真正的反向代理**;host 配置 schema 只接受 `127.0.0.1` / `0.0.0.0`。核心不会提供 HTTPS,方案必须在插件或代理层解。
-- **社区选型(2026-08-24 调研,npm)**:
-  - **polyfill 派**(仍明文 HTTP,补 randomUUID 使 GUI 可用,警告仍在):`dsh-lan-access` 0.1.3(MIT)、`@woyeshishen/dsh-lan-access` 1.0.4、`dsh-lan-bridge` 0.2.1、`@huxy/dsh-lan`。
-  - **TLS 代理派(首选)**:`@wingsky-1/dsh-lan-proxy` 0.1.12(MIT,repo wingsky-1/dsh-plugin-hub)——`0.0.0.0` 上 HTTP(3081)+ **HTTPS(3443)** 并存,转发到回环 3080;重写 Host/Origin 以过 `/api` 浏览器信任围栏,只接受 IP 字面量或 localhost 的 Host 头(DNS 重绑定防护);证书自动自签名或走 `tlsCertFile`/`tlsKeyFile`;另含 events.mux/events.host 的 permessage-deflate(自述省 75~79% 流量)。⚠ 安装即在 3081/3443 开监听。
-  - **门禁派**(正交,补上游缺失的 auth):`dsh-lan-gate` 0.1.2(MIT)、`dsh-lan-pass`、`dsh-lan-gateway` 0.2.1(**无 license 字段,慎用**)。
-  - **隧道 / 远程派**(走公网 HTTPS 域名,证书天然可信):`dsh-remote-plugin` 0.6.13、`dsh-remote-desktop` 1.6.1、`@polaris-l/dsh-mobile-remote` 2.4.1、`@xgone/dsh-remote`(登录门禁 + TOTP + 签名 cookie)。
-- **倾向方案**: `@wingsky-1/dsh-lan-proxy` + **mkcert 自签 CA**(证书经 `tlsCertFile`/`tlsKeyFile` 注入)。理由:拿到真正的 secure context(randomUUID 等 API 原生可用,不靠 polyfill 绕过),另一台机器装一次 root CA 后**地址栏零警告**;不装 CA 时用其自签名证书也能跑,仅首次需手动放行。
-- **前置条件(两条,立项即须处理)**:
-  1. **暴露面**:局域网开放的是完整 agent 面(bash / 文件读写),`dsh.yaml` `web.lan` 注释已标注「仅可信网络开启」。长期开启须叠加门禁派插件,不裸奔。
-  2. **与已装插件的已知冲突**:`ui-archive-manager` 的 `TRUSTED_HOSTS` 默认空 → 仅限 loopback(127.0.0.1/localhost),**开启 web.lan 需源码加 trustedHosts**(见 dsh.yaml 该条目 note),否则局域网下其路由会被信任防护挡掉。
-- **开放问题**:
-  1. 证书方案:mkcert 自签 CA(需在每台访问设备装 root CA) vs 内网 CA 签发 vs 直接走隧道派用公网证书;
-  2. 是否把 HTTPS 能力纳入 `dsh.yaml` `web` 段(如 `web.https`)由 sync 统一渲染,还是仅作为 remote 定制条目接入;
-  3. 门禁强度:密码 / CIDR 白名单 / TOTP,以及与 `web.lan` 开关的组合语义;
-  4. 是否顺带评估隧道派以覆盖「不在同一局域网」的场景(与 B004 轴 B 的多机委派正交)。
-- **更新**: 2026-08-24 新增;完成 backlog 选型调研与前置条件梳理,未立项、未安装任何插件。
 
 ### [B016] 成本分级:子代理按任务类型挂不同模型/档位
 - **状态**: 想法
@@ -190,6 +184,26 @@
 ---
 
 ## 已完成
+### [B007] 类似 Claude 的 /btw 沟通模式
+- **状态**: 已完成
+- **背景 / 动机**: 增加类似 Claude Code `/btw`(by the way)的沟通方式:发一条消息让 agent 只记录、不立即处理,不打断当前任务。
+- **要点**:
+  - 入口形态:slash 命令或输入触发;先查 DSH 现有 command/input-trigger 机制(`dsh-client-ui-commands`、`dsh-client-ui-input-trigger`)的扩展点;
+  - 语义:低优先级侧注,不触发即时行动,写入持久记忆;
+  - 存储位置待设计:会话内记忆 vs workspace 文件(如 NOTES.md)vs 任务级;
+  - 消费时机:当前任务完成后回顾,或后续任务开始时带上;
+  - 待设计:多任务并行时 btw 的归属(属于哪个任务/会话)、与 goal/todo 列表的交互;
+  - 社区调研(2026-08-24):同类实现已有**三家**,核心语义一致 = fork 独立子会话 / 独立会话,不打断主线程:
+    - **[dsh-sidechain](https://github.com/omdsh-dev/dsh-sidechain)**(omdsh-dev,GitHub 源,**npm 未发布**):`/btw <问题>` 一次性侧问(后台单轮,只读不可续问)+ `/side <问题>` 可持续侧会话 + `/side list`;fork 当前会话,侧会话日志/工具活动不写主历史,默认只读 persona;适配声明至 `0.1.1-rc.1`(当前 pin rc.2 待验证);README 安装示例指向 `Buyi-wsgzg` org,与现仓库不一致,接入前确认来源;
+    - **[dsh-air](https://github.com/kaieye/dsh-AIR)@0.1.2**(npm,MIT):`/btw [问题]` 打开停靠式侧边对话(`/side` **等价别名,可持续追问**,区别于 sidechain 的只读一次性 /btw)+ 侧边栏内嵌问答;顺带 ↑/↓ 历史发送记录召回 + Ctrl+R 搜索(localStorage,上限 500 可调 10–5000);输入框历史与侧问打包,键盘党顺带收益;实现 = 纯 client(input-trigger 劫持 `/btw` 提交 → 官方 `sessions.fork`(已完成 turn 前缀,主会话进行中 fallback `create`+快照) → 首条 prompt 注入隐藏 boundary 信封(继承历史仅参考/禁工具改动/禁子代理) → 抽屉渲染子会话原生树,主会话不产生模型回合、历史与视口不动),语义对齐 Codex TUI side conversation(源码注释逐条对照 `codex-rs/tui/src/app/side.rs`);**模型选择 = 零干预**:无 selectModel 调用,面板无模型 UI——fork 子会话模型继承父会话当前模型(fork 契约仅 sessionId/atSeq/increaseTitle,host 端按 boundary 复制含 request/header 的事件日志,ModelDirectory current 随之恢复),fallback create 空会话用部署默认 `agent-default-model`(本机 = codex/gpt-5.6-sol/high);**上下文感知分路径**:fork = 完整感知(全量已完成事件含工具调用,仅以 boundary 标记为参考),fallback = 文本级部分感知(`<parent-thread-snapshot>` 可见节点序列化:user/assistant 文本 + tool-result 参数输出 + 在途 partial/runningCalls,reasoning 块故意排除);
+    - **[dsh-sidebar-qa](https://github.com/ChenRuoT/dsh-sidebar-qa)@0.4.0**(npm,MIT):划选任意文本 → 「提问」浮层 → 侧边栏内嵌问答(独立会话 `❓<主题>`,可继续/归档);三种上下文策略 = `sessions.fork` 全量继承(前缀缓存命中)/ 压缩 / 机械裁切;嵌套追问 + 追问记录树(归档/删除置灰);**功能最全但依赖第三方 [dsh-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) ≥0.14.0**(对应 DSH 0.1.0-rc.8 起,rc.2 peer 解析待验证),多一件依赖、信任面更大;
+    - 旁类(非侧问,记录备查):[dsh-session-fork](https://github.com/Jason-skd/dsh-session-fork)(npm,「会话 = 分支」范式:并行分支 + squash 回主 + 内置 branch 图,Wiki 宣称与 git worktree 搭配——与 worktree 会话精神同向,关联 B014)、dsh-routed-subagent(bpc-oss:one-shot subagent 挂任意 preset + per-call 模型覆盖);
+  - 匹配度:三家均覆盖「/btw 不打断主会话」核心诉求;「只记录、不立即处理」的纯记忆形态(写 NOTES.md 待回顾)三家均未覆盖,如需可叠加;
+  - 选型结论:语义最贴 = sidechain;顺带历史召回 = dsh-air;功能最全 = sidebar-qa(代价:better-sidebar 依赖链)。**终选 sidebar-qa**,已按 add-dsh-plugin 流程接入并确认 DSH 0.1.1-rc.2 兼容;
+  - 落地形态:`better-sidebar` 0.15.2 + `dsh-sidebar-qa` 0.4.0(manifest 均已启用),划选任意文本 → 「提问」浮层 → 侧边栏内嵌问答(独立会话,可继续/归档),默认 compressed 上下文策略省 token;
+  - 未覆盖项(如需另立项):「只记录、不立即处理」的纯记忆形态(写 NOTES.md 待回顾)三家均未提供;侧问上下文看不到主会话**进行中**的 tool call / 流式输出(实现所限,完整性与省 token 不可兼得)。
+- **更新**: 2026-08-14 新增;2026-08-24 完成两轮社区调研:首轮发现 dsh-sidechain,二轮确认同类共三家(sidechain / dsh-air / dsh-sidebar-qa)并拉齐对比,诉求核心普遍被覆盖,推进为讨论中,待选型试用;2026-08-24 试装 dsh-air 后弃用(=/btw fork 子会话全量继承父历史,每轮重复计费,主模型 codex 订阅无前缀缓存保障,侧问会话堆积),终选 sidebar-qa(better-sidebar 0.15.2 + dsh-sidebar-qa 0.4.0 已入 manifest 并合入 main,默认 compressed 策略省 token),待实测归档;2026-08-24 sidebar-qa 实现审查结论(源码核实):侧问发起零阻塞——create/fork 独立会话、prompt 走 queue,主对话进行中 inherit 自动降级 compressed(fork 需已完成 turn);host 仅对主会话只读 readSurface + 快速模型 160 token 摘要,不改主会话;侧问上下文只含已完成落盘内容,**看不到进行中 tool call/流式输出**(与 dsh-air 的 interrupted snapshot 携带在途状态相反,完整性/省 token 不可兼得);2026-08-24 日常使用确认 sidebar-qa 已满足诉求,归档为已完成。
+
 
 ### [B009] 仓库结构定稿:总配置 + 可插拔定制(monorepo)
 - **状态**: 已完成
@@ -264,7 +278,7 @@
 - **背景 / 动机**: 希望用 deepseek / 订阅模型时也能处理图片输入(截图理解、读图等)。
 - **要点**:
   - 能力现状(2026-08-24):DeepSeek 官方已发布 **DeepSeek-V4-Flash-Vision-Exp**(多模态,vision at text prices,cost-meter 已内置计价)→ DeepSeek 原生图片能力已成,无需适配器改造;原闸门定位(apiproxy `inputModalities` 拒图 + `assertTextOnly` 抛错)随视觉模型加入而失效;
-  - 生态兜底:`modlens`(manifest 已启用,粘贴即视觉,走 codex CLI,实测读图成功)覆盖「截图理解」高频场景;
+  - 生态兜底(已退场):`modlens` 曾作为「粘贴即视觉」兜底启用(走 codex CLI,实测读图成功);DeepSeek 原生视觉可用后于 2026-08-24 从 manifest 移除并卸载(`92368d0`),本条不再依赖任何第三方视觉插件;如需重新引入按 add-dsh-plugin 流程接入;
   - 遗留观察:**opencode-go 路由暂无可靠原生 vision**(社区网关 OmniRoute PR #2740 显示其声明过度、需 vision-bridge 强制),待上游支持即可,无本仓动作;
   - 历史调研细节见本条 git history。
-- **更新**: 2026-08-14 新增 P0 并完成闸门定位;2026-08-24 确认 DeepSeek Vision-Exp 已发布、modlens 兜底已启用、opencode-go 待上游,归档为已完成。
+- **更新**: 2026-08-14 新增 P0 并完成闸门定位;2026-08-24 确认 DeepSeek Vision-Exp 已发布、modlens 兜底已启用、opencode-go 待上游,归档为已完成;2026-08-24 收尾:原生视觉已足够,modlens 兜底移除(manifest 条目删除 + 卸载),本条收敛为纯原生能力。
