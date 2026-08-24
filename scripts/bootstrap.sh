@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # ohmydsh/scripts/bootstrap.sh — clone 后初始化仓库:检查 Node 环境并安装依赖(幂等)。
 #
+# 环境准则:要求最低版本(node >= 22 / npm >= 10),不锁死精确版本;
+# .nvmrc 里的版本只是推荐值,不匹配仅提示。
+#
 # 跨系统:macOS / Linux / WSL / Git Bash。
 #
 #   用法:
@@ -30,11 +33,31 @@ REPO="$(dirname "$(resolve_path "${BASH_SOURCE[0]}")")"
 cd "$REPO"
 
 # ---------- 1. 检查 Node / npm ----------
-EXPECTED_NODE="24.12.0"
-EXPECTED_NPM="11.6.2"
+# 准则:只要求「不低于最低版本」,不锁死精确版本。
+#   - 低于最低版本 -> 报错退出(仓库脚本/依赖确实跑不起来)
+#   - 高于最低版本但与推荐版本不同 -> 仅提示,继续执行
+MIN_NODE="22.0.0"
+MIN_NPM="10.0.0"
+RECOMMENDED_NODE="$( [ -f .nvmrc ] && tr -d ' \t\r\nv' < .nvmrc || echo "24.12.0" )"
+
+# 纯 bash 版本比较:version_lt A B -> A < B 时返回 0
+version_lt() {
+  local a="${1%%-*}" b="${2%%-*}" i
+  local -a x y
+  IFS=. read -r -a x <<< "$a"
+  IFS=. read -r -a y <<< "$b"
+  for i in 0 1 2; do
+    local xi="${x[i]:-0}" yi="${y[i]:-0}"
+    xi="${xi//[!0-9]/}"; yi="${yi//[!0-9]/}"
+    (( 10#${xi:-0} < 10#${yi:-0} )) && return 0
+    (( 10#${xi:-0} > 10#${yi:-0} )) && return 1
+  done
+  return 1
+}
+
 for tool in node npm; do
   if ! command -v "$tool" >/dev/null 2>&1; then
-    echo "error: 未找到 $tool,需要 Node.js $EXPECTED_NODE + npm $EXPECTED_NPM" >&2
+    echo "error: 未找到 $tool,需要 Node.js >= $MIN_NODE + npm >= $MIN_NPM" >&2
     echo "  nvm:     nvm install && nvm use" >&2
     echo "  通用:    从 https://nodejs.org 下载安装" >&2
     exit 1
@@ -43,13 +66,22 @@ done
 
 ACTUAL_NODE="$(node -v | sed 's/^v//')"
 ACTUAL_NPM="$(npm -v)"
-if [ "$ACTUAL_NODE" != "$EXPECTED_NODE" ] || [ "$ACTUAL_NPM" != "$EXPECTED_NPM" ]; then
-  echo "error: 工具链版本不匹配: node $ACTUAL_NODE / npm $ACTUAL_NPM" >&2
-  echo "  需要: node $EXPECTED_NODE / npm $EXPECTED_NPM" >&2
+
+if version_lt "$ACTUAL_NODE" "$MIN_NODE"; then
+  echo "error: Node.js 版本过低: v$ACTUAL_NODE(需要 >= $MIN_NODE,推荐 $RECOMMENDED_NODE)" >&2
   echo "  使用 nvm 时可运行: nvm install && nvm use" >&2
   exit 1
 fi
-echo "环境 OK: node v$ACTUAL_NODE / npm $ACTUAL_NPM"
+if version_lt "$ACTUAL_NPM" "$MIN_NPM"; then
+  echo "error: npm 版本过低: $ACTUAL_NPM(需要 >= $MIN_NPM)" >&2
+  echo "  升级: npm install -g npm@latest" >&2
+  exit 1
+fi
+
+echo "环境 OK: node v$ACTUAL_NODE / npm $ACTUAL_NPM(要求 node >= $MIN_NODE, npm >= $MIN_NPM)"
+if [ "$ACTUAL_NODE" != "$RECOMMENDED_NODE" ]; then
+  echo "提示: 推荐 Node $RECOMMENDED_NODE(.nvmrc);当前 v$ACTUAL_NODE 满足最低要求,继续执行。"
+fi
 
 # ---------- 2. 从根 lock 安装全部 workspace 依赖(幂等) ----------
 if [ "$FORCE" -eq 1 ] || [ ! -f node_modules/js-yaml/package.json ] || [ ! -f node_modules/typescript/package.json ]; then
