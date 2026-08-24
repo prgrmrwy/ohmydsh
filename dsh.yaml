@@ -2,7 +2,7 @@
 # 修改后运行 `dsh build`(或 `node scripts/sync.mjs`)物化到 ~/.dsh。
 # 约定:禁用(enabled: false)≠删除;手改一律回写本仓库。
 
-dshVersion: 0.1.0-rc.7     # 启动脚本 bin/dsh 运行时读取,单一版本来源
+dshVersion: 0.1.1-rc.2     # 启动脚本 bin/dsh 运行时读取,单一版本来源
 
 autoUpdate:                # 启动/构建前自动检测并升级 DSH 版本(channel = registry dist-tag)
   enabled: true            # 逃生门:false 或 env DSH_SKIP_UPDATE=1 完全跳过检测(可钉在旧版)
@@ -138,7 +138,7 @@ customizations:
     version: 0.15.2
     enabled: true
     brief: 服务化侧边栏工作台框架(sidebar-qa 的前置依赖)
-    note: 'B007/sidebar-qa 前置;repo https://github.com/omdsh-dev/DSH-better-sidebar(MIT,2026-08-24 摘要审查);重型框架:右侧栏+底部面板双工作台(ctx.betterSidebar.registerTab 开放给生态,28+ 插件),内置文件管理/内嵌浏览器/真实终端(node-pty)/Git 面板/后台任务/侧边对话(beta,完整上下文继承=费 token 形态,可设置关闭);README 官宣支持 DSH 0.1.0-rc.8 / 0.1.1-rc.1 / 0.1.1-rc.2,peer ^0.1.0-rc.8 对运行体 0.1.1-rc.2 满足;信任面:终端/浏览器/可选工具注入(terminal_* / sidebar_open,默认关闭),比轻量插件重得多;仅为 sidebar-qa 引入,接入后只开所需 tab'
+    note: 'B007/sidebar-qa 前置;repo https://github.com/omdsh-dev/DSH-better-sidebar(MIT,2026-08-24 摘要审查);重型框架:右侧栏+底部面板双工作台(ctx.betterSidebar.registerTab 开放给生态,28+ 插件),内置文件管理/内嵌浏览器/真实终端(node-pty)/Git 面板/后台任务/侧边对话(beta,完整上下文继承=费 token 形态,可设置关闭);README 官宣支持 DSH 0.1.0-rc.8 / 0.1.1-rc.1 / 0.1.1-rc.2,peer ^0.1.0-rc.8 对运行体 0.1.1-rc.2 满足;信任面:终端/浏览器/可选工具注入(terminal_* / sidebar_open,默认关闭),比轻量插件重得多;仅为 sidebar-qa 引入,接入后只开所需 tab;部署侧信任决定(2026-08-24):profile pnpm `allowBuilds.node-pty: true` 已批准其原生构建脚本,否则安装被 ERR_PNPM_IGNORED_BUILDS 挡下'
   - id: sidebar-qa
     type: package
     source: remote
