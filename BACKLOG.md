@@ -153,6 +153,20 @@
   4. 是否顺带评估隧道派以覆盖「不在同一局域网」的场景(与 B004 轴 B 的多机委派正交)。
 - **更新**: 2026-08-24 新增;完成 backlog 选型调研与前置条件梳理,未立项、未安装任何插件。
 
+### [B016] 成本分级:子代理按任务类型挂不同模型/档位
+- **状态**: 想法
+- **优先级**: P1
+- **背景 / 动机**: DSH 是组合式 + 委派式架构,子代理默认继承父会话模型(fork 继承父模型,spawn 用部署默认 `agent-default-model`),fan-out(QA 并行、检索、摘要、格式化)因此全用旗舰模型。实测账单(2026-08-24 cost-meter):codex 单日 2921 calls ¥445、claude-opus-5 205 calls ¥163,而 opencode-go deepseek-v4-flash 整天 ¥0.28——同量级任务用便宜档可省一个数量级。官方 subagent capability seam 已支持 persona / toolFilter / outputSchema / depthLimit,唯独 per-call model 覆盖不在官方 tool 层([官方 Agent Note 2026-06-21-subagent-capability-seam](https://github.com/deepseek-ai/deepseek-harness/blob/master/.agents/notes/implemented/feature/2026-06-21-subagent-capability-seam.md))。
+- **要点**:
+  - 社区已有实现参考:[dsh-routed-subagent](https://github.com/bpc-oss/dsh-routed-subagent)(bpc-oss:one-shot subagent 挂任意 preset + per-call model/provider 覆盖 + 模型可用性预检),推进时优先评估复用而非从零写(与 B001 同口径)。
+  - 设计问题:
+    1. 模型选择规则:按子任务类型(检索/摘要→flash 档,代码生成→旗舰)/上下文体积/预算上限,还是显式 per-call 参数;
+    2. fork(继承父) vs 显式覆盖 的优先级语义;
+    3. 与 B011 subagent 管理面板的协同(面板上可视化每个子代理的模型与成本);
+    4. 省钱效果的可验证性:cost-meter 已按 byProviderModel 拆分记账,可直接对比分级前后成本。
+  - 与 B001 开放问题 4(anti 角色配不同模型)是同一问题的两个切片,可合并设计。
+- **更新**: 2026-08-24 新增,源自 claude/codex 订阅成本复盘(上游 #17/#24 缓存缺陷修复后,成本分级是下一个杠杆)。
+
 ---
 
 ## 缺陷备忘
