@@ -29,16 +29,18 @@ customizations:
   - id: cost-meter
     type: package
     source: remote
-    spec: dsh-cost-meter@1.5.35
-    version: 1.5.35
+    spec: dsh-cost-meter@1.5.42
+    version: 1.5.42
+      # [2026-08-24] plugin-update: cost-meter 1.5.35 -> 1.5.42(release notes 见 registry;审查记录请补进 note)
     enabled: true
     brief: 会话费用统计
     note: '会话费用统计(web client 插件);仓库 https://github.com/Han-1413141/dsh-cost-meter;1.5.35(2026-08-21 审查):v1.5.34 为 dsh 0.1.1-rc.x 适配(修复 rc.2 下费用展示丢失),v1.5.32 内置 DeepSeek-V4-Flash-Vision-Exp 计价,v1.5.35 修正未命中模型列表口径;升级后需重启验证加载与展示'
   - id: modlens
     type: package
     source: remote
-    spec: '@liustack/modlens@3.23.1'
-    version: 3.23.1
+    spec: '@liustack/modlens@3.24.2'
+    version: 3.24.2
+      # [2026-08-24] plugin-update: modlens 3.23.1 -> 3.24.2(release notes 见 registry;审查记录请补进 note)
     enabled: true
     brief: 支持图片识别(粘贴即视觉,走 Codex)
     note: 'B006 生态解:粘贴图片即视觉(web client + modlens_read_image 工具 + 模型选择器 vision 条目);repo https://github.com/liustack/modlens(3.1k stars,MIT,活跃);引擎策略:仅 codex(OpenAI 产品 CLI,二进制 codex),claude 显式禁用(reuse.claude=false);实测真实读图成功(33.8s,计 Codex 额度);需重启生效。3.23.1(2026-08-22 升级):v3.23.1 修复 dsh 0.1.1 新增必选 adapter 方法 prepareCall 缺失导致的 (modlens vision) 每轮抛错(rc.2 下必升);v3.23.0 修复 vision 名字路由未声明 image 模态时的 twin 误包;v3.22.2 为文档级'
@@ -120,8 +122,9 @@ customizations:
   - id: width-tiers
     type: package
     source: remote
-    spec: dsh-width-tiers@1.0.2
-    version: 1.0.2
+    spec: dsh-width-tiers@1.0.3
+    version: 1.0.3
+      # [2026-08-24] plugin-update: width-tiers 1.0.2 -> 1.0.3(release notes 见 registry;审查记录请补进 note)
     enabled: true
     brief: 对话区宽度五档切换(748px 至全宽)
     note: 'repo https://github.com/aaronlei/dsh-width-tiers(MIT);用途:Web 对话区标准/中等/宽/超宽/全宽五档切换并以 localStorage 记忆;审查(2026-08-20 npm 1.0.2 精确包):host 入口为空操作,client 仅注入 layout/locale,通过 --dsh-chat-content-width 行内覆盖调整宽度,不依赖构建哈希类名;无网络请求、Host 文件/命令/模型能力,生命周期 disposer 会清理 DOM、监听器、定时器与样式;注意非标准档会主动关闭详情面板,全宽档会经官方 layout 服务收起侧边栏;依赖 DSH Web rc.x 客户端布局与 locale 服务,升级后需回归验证'
@@ -134,8 +137,9 @@ customizations:
   - id: better-sidebar
     type: package
     source: remote
-    spec: dsh-better-sidebar@0.15.2
-    version: 0.15.2
+    spec: dsh-better-sidebar@0.16.0
+    version: 0.16.0
+      # [2026-08-24] plugin-update: better-sidebar 0.15.2 -> 0.16.0(release notes 见 registry;审查记录请补进 note)
     enabled: true
     brief: 服务化侧边栏工作台框架(sidebar-qa 的前置依赖)
     note: 'B007/sidebar-qa 前置;repo https://github.com/omdsh-dev/DSH-better-sidebar(MIT,2026-08-24 摘要审查);重型框架:右侧栏+底部面板双工作台(ctx.betterSidebar.registerTab 开放给生态,28+ 插件),内置文件管理/内嵌浏览器/真实终端(node-pty)/Git 面板/后台任务/侧边对话(beta,完整上下文继承=费 token 形态,可设置关闭);README 官宣支持 DSH 0.1.0-rc.8 / 0.1.1-rc.1 / 0.1.1-rc.2,peer ^0.1.0-rc.8 对运行体 0.1.1-rc.2 满足;信任面:终端/浏览器/可选工具注入(terminal_* / sidebar_open,默认关闭),比轻量插件重得多;仅为 sidebar-qa 引入,接入后只开所需 tab;部署侧信任决定(2026-08-24):profile pnpm `allowBuilds.node-pty: true` 已批准其原生构建脚本,否则安装被 ERR_PNPM_IGNORED_BUILDS 挡下'
