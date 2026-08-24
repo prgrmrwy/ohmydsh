@@ -63,41 +63,6 @@
 - **关联记录**: `openspec/changes/restore-cleaned-session-as-ordinary/WORKTREE-ISOLATION-NOTE.md`（2026-08-21 误用复盘与详细现象）。
 - **更新**: 2026-08-21 记录五层隔离模型；确认“完全隔离”适合作为开发 build/preview，但现有 `DSH_HOME` + 通用 launcher 造成运行边界不清，后续需专项 OpenSpec 优化。
 
-### [B015] 跨机器访问 DSH:局域网 HTTPS(secure context)
-- **状态**: 讨论中
-- **优先级**: P1(2026-08-24 用户明确要推进:`dsh web` 支持 192.168 内网 IP 访问 + HTTPS)
-- **背景 / 动机**: 本机启动 DSH 后,希望在同局域网的另一台机器上使用。现有 `web.lan`(dsh.yaml `web.lan` / `DSH_LAN`)已能绑 `0.0.0.0` 并打印局域网地址,但访问走的是明文 **http://192.168.x.x:3080**,浏览器判为**非安全上下文**。真正的问题不是地址栏「不安全」标记,而是 secure-context-only API 直接不可用——DSH 的 RPC id 生成路径在用 `crypto.randomUUID()`(`dsh-client-connection/lib/client.js:6179` `RpcId(crypto.randomUUID())`,同包 `:242`、`dsh-client-ui-conversation/lib/client.js:63` 各一处),非 localhost 明文 HTTP 下 GUI 大概率整体不可用,而非「能用但有警告」。
-- **上游态度**: `@deepseek-ai/dsh-host-webserver` 用 `node:http`,README 明确「No TLS, auth, or origin policy」,并把 TLS 归为 dev-facing v1 范围外、建议**前置真正的反向代理**;host 配置 schema 只接受 `127.0.0.1` / `0.0.0.0`。核心不会提供 HTTPS,方案必须在插件或代理层解。
-- **社区选型(2026-08-24 调研,npm)**:
-  - **polyfill 派**(仍明文 HTTP,补 randomUUID 使 GUI 可用,警告仍在):`dsh-lan-access` 0.1.3(MIT)、`@woyeshishen/dsh-lan-access` 1.0.4、`dsh-lan-bridge` 0.2.1、`@huxy/dsh-lan`。
-  - **TLS 代理派(首选)**:`@wingsky-1/dsh-lan-proxy` 0.1.12(MIT,repo wingsky-1/dsh-plugin-hub)——`0.0.0.0` 上 HTTP(3081)+ **HTTPS(3443)** 并存,转发到回环 3080;重写 Host/Origin 以过 `/api` 浏览器信任围栏,只接受 IP 字面量或 localhost 的 Host 头(DNS 重绑定防护);证书自动自签名或走 `tlsCertFile`/`tlsKeyFile`;另含 events.mux/events.host 的 permessage-deflate(自述省 75~79% 流量)。⚠ 安装即在 3081/3443 开监听。
-  - **门禁派**(正交,补上游缺失的 auth):`dsh-lan-gate` 0.1.2(MIT)、`dsh-lan-pass`、`dsh-lan-gateway` 0.2.1(**无 license 字段,慎用**)。
-  - **隧道 / 远程派**(走公网 HTTPS 域名,证书天然可信):`dsh-remote-plugin` 0.6.13、`dsh-remote-desktop` 1.6.1、`@polaris-l/dsh-mobile-remote` 2.4.1、`@xgone/dsh-remote`(登录门禁 + TOTP + 签名 cookie)。
-- **倾向方案**: `@wingsky-1/dsh-lan-proxy` + **mkcert 自签 CA**(证书经 `tlsCertFile`/`tlsKeyFile` 注入)。理由:拿到真正的 secure context(randomUUID 等 API 原生可用,不靠 polyfill 绕过),另一台机器装一次 root CA 后**地址栏零警告**;不装 CA 时用其自签名证书也能跑,仅首次需手动放行。
-- **前置条件(两条,立项即须处理)**:
-  1. **暴露面**:局域网开放的是完整 agent 面(bash / 文件读写),`dsh.yaml` `web.lan` 注释已标注「仅可信网络开启」。长期开启须叠加门禁派插件,不裸奔。
-  2. **与已装插件的已知冲突**:`ui-archive-manager` 的 `TRUSTED_HOSTS` 默认空 → 仅限 loopback(127.0.0.1/localhost),**开启 web.lan 需源码加 trustedHosts**(见 dsh.yaml 该条目 note),否则局域网下其路由会被信任防护挡掉。
-- **开放问题**:
-  1. 证书方案:mkcert 自签 CA(需在每台访问设备装 root CA) vs 内网 CA 签发 vs 直接走隧道派用公网证书;
-  2. 是否把 HTTPS 能力纳入 `dsh.yaml` `web` 段(如 `web.https`)由 sync 统一渲染,还是仅作为 remote 定制条目接入;
-  3. 门禁强度:密码 / CIDR 白名单 / TOTP,以及与 `web.lan` 开关的组合语义;
-  4. 是否顺带评估隧道派以覆盖「不在同一局域网」的场景(与 B004 轴 B 的多机委派正交)。
-- **本机现状核实(2026-08-24,推进前实测)**:
-  - `dsh.yaml` `web.lan` 当前 **false**(默认关);`scripts/sync.mjs` 的 `LAN_FRAGMENT` 在开启时渲染 `webserver.config.host = ctx.webStartup.host ?? '0.0.0.0'`,manifest 校验只接受布尔,`DSH_LAN` env 优先级高于 manifest;
-  - 本机 LAN 地址 = **192.168.64.3**(en0,网关 192.168.64.1),与用户诉求的 192 段一致;
-  - secure-context 闸门**已核实存在**:当前部署的 client bundle 中 `crypto.randomUUID()` 共 9 处调用,其中浏览器侧关键路径 3 处(`dsh-client-connection/lib/client.js:242`、`:6181`,`dsh-client-ui-conversation/lib/client.js:62`),非安全上下文下该 API 为 `undefined`([MDN:randomUUID 仅安全上下文可用](https://developer.mozilla.org/en-US/docs/Web/API/Crypto/randomUUID));上游已有两条同题讨论确认 GUI 直接不可用而非仅告警([#4209 mintRpcId 报错](https://github.com/deepseek-ai/deepseek-harness/discussions/4209)、[#2396 LAN 绑定不可用](https://github.com/deepseek-ai/deepseek-harness/discussions/2396));
-  - `dsh-web-app` 侧已内建 LAN 信任推导:`resolveLanTrust()` 在 bind 为 `0.0.0.0` 时枚举非内部 IPv4 作为 `trustedHosts`(**无端口的 IP 字面量**,注释说明 DNS 重绑定需攻击者可控域名故 IP 字面量安全),另有 `--trusted-host` CLI 可追加 → **官方 `/api` 围栏本身不阻挡局域网 IP 访问**,阻挡点只在 secure context 与第三方插件各自的围栏;
-  - `ui-archive-manager` 冲突**已核实**:`lib/index.js:38` `const TRUSTED_HOSTS = []` 硬编码空数组(非配置项),`:104` 处非 loopback 且不在该数组即拒绝 → 局域网下其 unarchive 路由必被挡,需 patch 源码或接受该功能在 LAN 下不可用;
-  - `@wingsky-1/dsh-lan-proxy` **npm 核实**:0.1.12,MIT,2026-08-23 更新(活跃),`dsh.bundle` + `dsh.client`(platform web)双面,运行依赖仅 `schemastery`,peer 仅 react;
-  - 工具链:本机 **mkcert 未安装**(brew 可装),`openssl` 可用(`/usr/bin/openssl`)。
-- **关键否决:TLS 代理与密码门禁不可叠加(2026-08-24 源码审查实证)**:
-  - `dsh-lan-gate` 的准入判定基于 **`socket.remoteAddress`**(`lib/admit.js`,`SECURITY.md` 明写「uses socket.remoteAddress, not Host / X-Forwarded-For」);
-  - `@wingsky-1/dsh-lan-proxy` 在 `0.0.0.0` 终结连接后**自己作为客户端**转发到回环,故到达 gate 的对端地址恒为 `127.0.0.1` → 命中 `loopbackBypassAuth`(默认 true)→ **门禁被完全旁路,局域网任何人免密获得完整 agent**;
-  - 反向也不通:gate 的 `rejectProxyHeaders` 默认 true,代理若补 `X-Forwarded-*` 则请求被 403 全拒。两条路均不可用,**故否决「代理 + 门禁」组合**;
-  - 附:lan-proxy 本身代码质量良好(targetHost 强制回环否则拒启、Host 仅收 IP 字面量/localhost 防 DNS 重绑定、自签证书 0600/825 天/SAN 含本机 LAN IP、无 child_process/无外联),但**不含任何认证**,且 HTTPS 失败会静默降级为明文 HTTP(仅 warn),留待 HTTPS 阶段重新评估。
-- **第一步已落地(2026-08-24)**: 接入 `dsh-lan-gate@0.1.2`(manifest 条目 `lan-gate`,已 sync,二次 sync 幂等,bundles 末位)。它自带 bundle patch 直接把 webserver 绑 `0.0.0.0`,**与 manifest `web.lan` 等价故不叠加**(`web.lan` 保持 false);同时注入 randomUUID polyfill,使非安全上下文下 GUI 可用 → **「192.168 内网 IP 访问」诉求由本步满足**。
-- **仍未满足:HTTPS(secure context)**:当前为明文 HTTP,同网可嗅探密码与 cookie(gate README 自述「not a TLS terminator」)。下一步候选:(a)自研薄层在 `dsh.yaml` 加 `web.https`,用 `https.createServer` **包裹同一个 server** 以保留真实 `socket.remoteAddress`(与 gate 兼容,是唯一能同时满足两诉求的路径);(b)mkcert 本地 CA 签发证书消除浏览器告警(本机 mkcert 未安装)。
-- **更新**: 2026-08-24 新增;完成 backlog 选型调研与前置条件梳理,未立项、未安装任何插件;2026-08-24 用户明确要求推进(内网 IP + HTTPS),升 P1 并进入讨论中,完成本机现状核实(web.lan 现状 / LAN IP / secure-context 闸门与上游讨论 / 官方 trustedHosts 推导机制 / archive-manager 硬编码冲突 / lan-proxy npm 元数据 / mkcert 缺失),仍未安装任何插件;2026-08-24 审查 lan-proxy 与 lan-gate 源码后**否决代理+门禁组合**(代理使对端 IP 恒为回环,门禁被 loopback 旁路),改为先只装 `dsh-lan-gate@0.1.2` 拿到「内网 IP 访问 + 密码/CIDR 门禁」,HTTPS 留作下一步(倾向自研 TLS 包裹同一 server 以保留真实对端 IP)。
 
 ---
 
@@ -190,6 +155,45 @@
 ---
 
 ## 已完成
+### [B015] 跨机器访问 DSH:局域网访问(secure context)
+- **状态**: 已完成(SSH 隧道方案;HTTPS 直连形态未采用,见下)
+- **优先级**: P1(2026-08-24 用户明确要推进:`dsh web` 支持 192.168 内网 IP 访问 + HTTPS)
+- **终选方案(2026-08-24)**: **SSH 隧道**——`ssh -N -L 3080:127.0.0.1:3080 user@192.168.64.3`,浏览器开 `http://127.0.0.1:3080`。用户诉求「有没有类似 ssh 那种免登方案」直接命中:一条路同时解决三件事——公钥免登(`authorized_keys`,强于密码)、SSH 自带传输加密(强于自签 TLS 且无证书告警)、**浏览器侧回环即天然 secure context**(`randomUUID` 原生可用,无需 HTTPS/证书/polyfill,绕过本条最初的闸门);且 DSH 保持 `127.0.0.1` 绑定,局域网**零端口暴露 agent**,暴露面小于任何直连方案。使用说明与验证记录见 `docs/notes/lan-access-ssh-tunnel.md`。
+- **端到端验证(2026-08-24,本机临时密钥自连,测试后已撤销)**: 隧道建立成功;GUI 首页 HTTP 200(含 `__DSH_BOOT__`);`/api/respond` 响应与直连 3080 完全一致(官方信任围栏对回环 Host 天然放行);`/api/events.mux` WebSocket **101 Switching Protocols**;直连 `192.168.64.3:3080` 连接失败(符合预期)。
+- **部署现状**: `web.lan` 保持 false;`lan-gate` manifest 条目保留但 `enabled: false`(可回退到明文局域网+密码门禁形态);未安装任何代理/polyfill 插件。
+- **背景 / 动机**: 本机启动 DSH 后,希望在同局域网的另一台机器上使用。现有 `web.lan`(dsh.yaml `web.lan` / `DSH_LAN`)已能绑 `0.0.0.0` 并打印局域网地址,但访问走的是明文 **http://192.168.x.x:3080**,浏览器判为**非安全上下文**。真正的问题不是地址栏「不安全」标记,而是 secure-context-only API 直接不可用——DSH 的 RPC id 生成路径在用 `crypto.randomUUID()`(`dsh-client-connection/lib/client.js:6179` `RpcId(crypto.randomUUID())`,同包 `:242`、`dsh-client-ui-conversation/lib/client.js:63` 各一处),非 localhost 明文 HTTP 下 GUI 大概率整体不可用,而非「能用但有警告」。
+- **上游态度**: `@deepseek-ai/dsh-host-webserver` 用 `node:http`,README 明确「No TLS, auth, or origin policy」,并把 TLS 归为 dev-facing v1 范围外、建议**前置真正的反向代理**;host 配置 schema 只接受 `127.0.0.1` / `0.0.0.0`。核心不会提供 HTTPS,方案必须在插件或代理层解。
+- **社区选型(2026-08-24 调研,npm)**:
+  - **polyfill 派**(仍明文 HTTP,补 randomUUID 使 GUI 可用,警告仍在):`dsh-lan-access` 0.1.3(MIT)、`@woyeshishen/dsh-lan-access` 1.0.4、`dsh-lan-bridge` 0.2.1、`@huxy/dsh-lan`。
+  - **TLS 代理派(首选)**:`@wingsky-1/dsh-lan-proxy` 0.1.12(MIT,repo wingsky-1/dsh-plugin-hub)——`0.0.0.0` 上 HTTP(3081)+ **HTTPS(3443)** 并存,转发到回环 3080;重写 Host/Origin 以过 `/api` 浏览器信任围栏,只接受 IP 字面量或 localhost 的 Host 头(DNS 重绑定防护);证书自动自签名或走 `tlsCertFile`/`tlsKeyFile`;另含 events.mux/events.host 的 permessage-deflate(自述省 75~79% 流量)。⚠ 安装即在 3081/3443 开监听。
+  - **门禁派**(正交,补上游缺失的 auth):`dsh-lan-gate` 0.1.2(MIT)、`dsh-lan-pass`、`dsh-lan-gateway` 0.2.1(**无 license 字段,慎用**)。
+  - **隧道 / 远程派**(走公网 HTTPS 域名,证书天然可信):`dsh-remote-plugin` 0.6.13、`dsh-remote-desktop` 1.6.1、`@polaris-l/dsh-mobile-remote` 2.4.1、`@xgone/dsh-remote`(登录门禁 + TOTP + 签名 cookie)。
+- **倾向方案**: `@wingsky-1/dsh-lan-proxy` + **mkcert 自签 CA**(证书经 `tlsCertFile`/`tlsKeyFile` 注入)。理由:拿到真正的 secure context(randomUUID 等 API 原生可用,不靠 polyfill 绕过),另一台机器装一次 root CA 后**地址栏零警告**;不装 CA 时用其自签名证书也能跑,仅首次需手动放行。
+- **前置条件(两条,立项即须处理)**:
+  1. **暴露面**:局域网开放的是完整 agent 面(bash / 文件读写),`dsh.yaml` `web.lan` 注释已标注「仅可信网络开启」。长期开启须叠加门禁派插件,不裸奔。
+  2. **与已装插件的已知冲突**:`ui-archive-manager` 的 `TRUSTED_HOSTS` 默认空 → 仅限 loopback(127.0.0.1/localhost),**开启 web.lan 需源码加 trustedHosts**(见 dsh.yaml 该条目 note),否则局域网下其路由会被信任防护挡掉。
+- **开放问题**:
+  1. 证书方案:mkcert 自签 CA(需在每台访问设备装 root CA) vs 内网 CA 签发 vs 直接走隧道派用公网证书;
+  2. 是否把 HTTPS 能力纳入 `dsh.yaml` `web` 段(如 `web.https`)由 sync 统一渲染,还是仅作为 remote 定制条目接入;
+  3. 门禁强度:密码 / CIDR 白名单 / TOTP,以及与 `web.lan` 开关的组合语义;
+  4. 是否顺带评估隧道派以覆盖「不在同一局域网」的场景(与 B004 轴 B 的多机委派正交)。
+- **本机现状核实(2026-08-24,推进前实测)**:
+  - `dsh.yaml` `web.lan` 当前 **false**(默认关);`scripts/sync.mjs` 的 `LAN_FRAGMENT` 在开启时渲染 `webserver.config.host = ctx.webStartup.host ?? '0.0.0.0'`,manifest 校验只接受布尔,`DSH_LAN` env 优先级高于 manifest;
+  - 本机 LAN 地址 = **192.168.64.3**(en0,网关 192.168.64.1),与用户诉求的 192 段一致;
+  - secure-context 闸门**已核实存在**:当前部署的 client bundle 中 `crypto.randomUUID()` 共 9 处调用,其中浏览器侧关键路径 3 处(`dsh-client-connection/lib/client.js:242`、`:6181`,`dsh-client-ui-conversation/lib/client.js:62`),非安全上下文下该 API 为 `undefined`([MDN:randomUUID 仅安全上下文可用](https://developer.mozilla.org/en-US/docs/Web/API/Crypto/randomUUID));上游已有两条同题讨论确认 GUI 直接不可用而非仅告警([#4209 mintRpcId 报错](https://github.com/deepseek-ai/deepseek-harness/discussions/4209)、[#2396 LAN 绑定不可用](https://github.com/deepseek-ai/deepseek-harness/discussions/2396));
+  - `dsh-web-app` 侧已内建 LAN 信任推导:`resolveLanTrust()` 在 bind 为 `0.0.0.0` 时枚举非内部 IPv4 作为 `trustedHosts`(**无端口的 IP 字面量**,注释说明 DNS 重绑定需攻击者可控域名故 IP 字面量安全),另有 `--trusted-host` CLI 可追加 → **官方 `/api` 围栏本身不阻挡局域网 IP 访问**,阻挡点只在 secure context 与第三方插件各自的围栏;
+  - `ui-archive-manager` 冲突**已核实**:`lib/index.js:38` `const TRUSTED_HOSTS = []` 硬编码空数组(非配置项),`:104` 处非 loopback 且不在该数组即拒绝 → 局域网下其 unarchive 路由必被挡,需 patch 源码或接受该功能在 LAN 下不可用;
+  - `@wingsky-1/dsh-lan-proxy` **npm 核实**:0.1.12,MIT,2026-08-23 更新(活跃),`dsh.bundle` + `dsh.client`(platform web)双面,运行依赖仅 `schemastery`,peer 仅 react;
+  - 工具链:本机 **mkcert 未安装**(brew 可装),`openssl` 可用(`/usr/bin/openssl`)。
+- **关键否决:TLS 代理与密码门禁不可叠加(2026-08-24 源码审查实证)**:
+  - `dsh-lan-gate` 的准入判定基于 **`socket.remoteAddress`**(`lib/admit.js`,`SECURITY.md` 明写「uses socket.remoteAddress, not Host / X-Forwarded-For」);
+  - `@wingsky-1/dsh-lan-proxy` 在 `0.0.0.0` 终结连接后**自己作为客户端**转发到回环,故到达 gate 的对端地址恒为 `127.0.0.1` → 命中 `loopbackBypassAuth`(默认 true)→ **门禁被完全旁路,局域网任何人免密获得完整 agent**;
+  - 反向也不通:gate 的 `rejectProxyHeaders` 默认 true,代理若补 `X-Forwarded-*` 则请求被 403 全拒。两条路均不可用,**故否决「代理 + 门禁」组合**;
+  - 附:lan-proxy 本身代码质量良好(targetHost 强制回环否则拒启、Host 仅收 IP 字面量/localhost 防 DNS 重绑定、自签证书 0600/825 天/SAN 含本机 LAN IP、无 child_process/无外联),但**不含任何认证**,且 HTTPS 失败会静默降级为明文 HTTP(仅 warn),留待 HTTPS 阶段重新评估。
+- **中间态(已回退)**: 曾接入 `dsh-lan-gate@0.1.2` 拿到「内网 IP 访问 + 密码/CIDR 门禁」,但仍是明文 HTTP(同网可嗅探密码与 cookie,gate README 自述「not a TLS terminator」)。改用隧道后该条目 `enabled: false`,包已从 bundles 卸载。
+- **未采用的 HTTPS 直连路线(留作移动端场景备选)**: 自研薄层在 `dsh.yaml` 加 `web.https`,用 `https.createServer` **包裹同一个 server**(而非代理转发)以保留真实 `socket.remoteAddress`,从而与门禁兼容;进阶可加 mTLS 客户端证书实现浏览器原生公钥免登。仅当需要手机/平板访问(隧道不便)时才值得投入。
+- **更新**: 2026-08-24 新增;完成 backlog 选型调研与前置条件梳理,未立项、未安装任何插件;2026-08-24 用户明确要求推进(内网 IP + HTTPS),升 P1 并进入讨论中,完成本机现状核实(web.lan 现状 / LAN IP / secure-context 闸门与上游讨论 / 官方 trustedHosts 推导机制 / archive-manager 硬编码冲突 / lan-proxy npm 元数据 / mkcert 缺失),仍未安装任何插件;2026-08-24 审查 lan-proxy 与 lan-gate 源码后**否决代理+门禁组合**(代理使对端 IP 恒为回环,门禁被 loopback 旁路),改为先只装 `dsh-lan-gate@0.1.2` 拿到「内网 IP 访问 + 密码/CIDR 门禁」,HTTPS 留作下一步(倾向自研 TLS 包裹同一 server 以保留真实对端 IP);2026-08-24 用户提出「有没有类似 ssh 那种免登方案」后终选 **SSH 隧道**——公钥免登 + SSH 加密 + 回环天然 secure context,一举满足全部诉求且暴露面最小,`lan-gate` 随之禁用回退,HTTPS 直连路线转为移动端场景的备选,本条归档为已完成。
+
 ### [B007] 类似 Claude 的 /btw 沟通模式
 - **状态**: 已完成
 - **背景 / 动机**: 增加类似 Claude Code `/btw`(by the way)的沟通方式:发一条消息让 agent 只记录、不立即处理,不打断当前任务。
