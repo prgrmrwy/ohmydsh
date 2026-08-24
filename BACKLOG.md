@@ -64,7 +64,7 @@
     - 旁类(非侧问,记录备查):[dsh-session-fork](https://github.com/Jason-skd/dsh-session-fork)(npm,「会话 = 分支」范式:并行分支 + squash 回主 + 内置 branch 图,Wiki 宣称与 git worktree 搭配——与 worktree 会话精神同向,关联 B014)、dsh-routed-subagent(bpc-oss:one-shot subagent 挂任意 preset + per-call 模型覆盖);
   - 匹配度:三家均覆盖「/btw 不打断主会话」核心诉求;「只记录、不立即处理」的纯记忆形态(写 NOTES.md 待回顾)三家均未覆盖,如需可叠加;
   - 后续:选型试用——语义最贴 = sidechain;顺带历史召回 = dsh-air;功能最全 = sidebar-qa(代价:better-sidebar 依赖链);按 add-dsh-plugin 流程接入前先确认 npm 源与 DSH 0.1.1-rc.2 兼容性。
-- **更新**: 2026-08-14 新增;2026-08-24 完成两轮社区调研:首轮发现 dsh-sidechain,二轮确认同类共三家(sidechain / dsh-air / dsh-sidebar-qa)并拉齐对比,诉求核心普遍被覆盖,推进为讨论中,待选型试用。
+- **更新**: 2026-08-14 新增;2026-08-24 完成两轮社区调研:首轮发现 dsh-sidechain,二轮确认同类共三家(sidechain / dsh-air / dsh-sidebar-qa)并拉齐对比,诉求核心普遍被覆盖,推进为讨论中,待选型试用;2026-08-24 试装 dsh-air 后弃用(=/btw fork 子会话全量继承父历史,每轮重复计费,主模型 codex 订阅无前缀缓存保障,侧问会话堆积),终选 sidebar-qa(better-sidebar 0.15.2 + dsh-sidebar-qa 0.4.0 已入 manifest 并合入 main,默认 compressed 策略省 token),待实测归档。
 
 ### [B008] 会话(任务)看板视图
 - **状态**: 想法
