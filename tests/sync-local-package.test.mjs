@@ -181,7 +181,7 @@ test('garbage-collects local build and install hashes when a package is disabled
 
   const disabled = fx.run()
   assert.equal(disabled.status, 0, disabled.stderr)
-  const state = JSON.parse(await readFile(path.join(fx.dshHome, '.ohmydsh-sync-state.json'), 'utf8'))
+  const state = JSON.parse(await readFile(path.join(fx.dshHome, '.dsh-sync-state.json'), 'utf8'))
   assert.deepEqual(state.localPackageHashes, {})
   assert.deepEqual(state.localPackageBuildInputs, {})
 })

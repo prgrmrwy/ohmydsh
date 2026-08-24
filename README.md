@@ -126,7 +126,7 @@ sync 行为按定制类型:
 
 ## 环境级 instructions
 
-顶层 `agentInstructions` 不是一种 customization type。启用时,sync 校验 `source` 是仓库内相对文件,加 GENERATED/provenance 头后原子写入 `$DSH_HOME/AGENTS.md`,并在 `.ohmydsh-sync-state.json` 记录来源与部署哈希。连续 build 幂等;禁用、删除字段或 `dsh reset` 时,只会删除仍匹配已部署哈希的目标。目标若已有未托管内容,或托管后被修改,sync 会保留文件并报错,要求人工决定如何处理。
+顶层 `agentInstructions` 不是一种 customization type。启用时,sync 校验 `source` 是仓库内相对文件,加 GENERATED/provenance 头后原子写入 `$DSH_HOME/AGENTS.md`,并在 `.dsh-sync-state.json` 记录来源与部署哈希。连续 build 幂等;禁用、删除字段或 `dsh reset` 时,只会删除仍匹配已部署哈希的目标。目标若已有未托管内容,或托管后被修改,sync 会保留文件并报错,要求人工决定如何处理。
 
 DSH 官方 `standard` preset 会自动加载,无需复制出 `ohmydsh` preset。`$DSH_HOME/AGENTS.md` 给该 DSH 工作环境提供前馈模型指导;它不是权限授予,也不是强制安全边界,实际能力始终由最新 runtime context 与工具执行策略决定。`dsh-sandbox-notes` skill 继续保留,用于需要时查阅完整背景与恢复细节。
 
