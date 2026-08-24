@@ -130,12 +130,20 @@ customizations:
     type: patch
     enabled: true
     brief: 对话宽度插件 Web 加载接线
-  # 第三方(remote):B007 侧会话 — /btw 停靠式侧边对话,不打断主会话
-  - id: dsh-air
+  # 第三方(remote):B007 侧问答 — better-sidebar 侧边栏框架 + sidebar-qa 划选追问(压缩策略省 token)
+  - id: better-sidebar
     type: package
     source: remote
-    spec: dsh-air@0.1.2
-    version: 0.1.2
+    spec: dsh-better-sidebar@0.15.2
+    version: 0.15.2
     enabled: true
-    brief: /btw 停靠式侧边对话 + 输入框历史召回
-    note: 'B007 候选;repo https://github.com/kaieye/dsh-AIR(MIT,2026-08-24 代码审查);纯 client 插件(peer 仅 react):input-trigger 劫持 /btw(/side 等价别名)提交 → 官方 sessions.fork(最近已完成 turn 前缀)建子会话,主会话不产生模型回合、历史与视口不动;首条 prompt 注入隐藏 boundary 信封(继承历史仅参考,禁边界前指令/工具改动/提权/子代理),UI 投影过滤;抽屉挂 conversation.input.dock 槽渲染子会话原生树,可持续追问;模型继承父会话当前模型(无 selectModel);fallback 依赖 sessions.create(rc.2 契约无此方法 → 主会话进行中开 /btw 提示暂不可用,待实测);BTW 子会话真实存在可配合 ui-archive-manager 归档;语义逐条对照 codex-rs/tui/src/app/side.rs;另含 ↑/↓ 历史召回 + Ctrl+R 搜索(localStorage)'
+    brief: 服务化侧边栏工作台框架(sidebar-qa 的前置依赖)
+    note: 'B007/sidebar-qa 前置;repo https://github.com/omdsh-dev/DSH-better-sidebar(MIT,2026-08-24 摘要审查);重型框架:右侧栏+底部面板双工作台(ctx.betterSidebar.registerTab 开放给生态,28+ 插件),内置文件管理/内嵌浏览器/真实终端(node-pty)/Git 面板/后台任务/侧边对话(beta,完整上下文继承=费 token 形态,可设置关闭);README 官宣支持 DSH 0.1.0-rc.8 / 0.1.1-rc.1 / 0.1.1-rc.2,peer ^0.1.0-rc.8 对运行体 0.1.1-rc.2 满足;信任面:终端/浏览器/可选工具注入(terminal_* / sidebar_open,默认关闭),比轻量插件重得多;仅为 sidebar-qa 引入,接入后只开所需 tab'
+  - id: sidebar-qa
+    type: package
+    source: remote
+    spec: dsh-sidebar-qa@0.4.0
+    version: 0.4.0
+    enabled: true
+    brief: 划选即问侧边栏问答(压缩上下文,省 token)
+    note: 'B007 终选(替代 dsh-air:fork 全量继承费 token,codex 订阅无缓存保障);repo https://github.com/ChenRuoT/dsh-sidebar-qa(MIT,2026-08-24 README+发布物审查);划选文本→「提问」→侧边栏内嵌问答,独立会话(❓<主题>)不中断主对话;三种上下文策略=全量继承(fork+前缀缓存)/压缩(快速模型压旧历史+近期原文,默认)/机械裁切(定长窗口),默认 compressed 解决侧问费 token 痛点;嵌套追问+追问记录树(归档/删除置灰);依赖 dsh-better-sidebar ^0.14.0(同批入 manifest);peer rc.8 系对运行体 0.1.1-rc.2 满足'
