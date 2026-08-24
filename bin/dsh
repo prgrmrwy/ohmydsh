@@ -34,6 +34,8 @@ while [ -L "$SOURCE" ]; do
   [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
 done
 REPO="$(cd "$(dirname "$SOURCE")/.." && pwd)"
+# shellcheck disable=SC1091
+source "$REPO/scripts/lib/dsh-runtime.sh"
 
 # Local overrides (gitignored; optional)
 if [[ -f "$REPO/.env.local" ]]; then
@@ -152,9 +154,8 @@ ui_pid() {
 
 is_ui_open() { [[ -n "$(ui_pid)" ]]; }
 
-# 优雅退出 PWA:直接 kill 会让 Chrome 记为"崩溃"(exit_type=Crashed),
-# 触发其"恢复上一会话"策略把旧 3080 标签复活(即用户看到的"浏览器页签
-# + PWA 双开")。先 AppleScript quit,失败才 kill 兜底。
+# 优雅退出 PWA;Chrome app-mode 进程的 argv 不含应用名,ui_pid 通过
+# lsappinfo 定位。AppleScript 失败或超时才按已验证的 pid 发 TERM。
 close_ui() {
   local pid name
   pid="$(ui_pid)" || return 0
@@ -164,39 +165,66 @@ close_ui() {
       for _ in $(seq 1 20); do [[ -z "$(ui_pid)" ]] && return 0; sleep 0.1; done
     }
   fi
-  kill "$pid" 2>/dev/null || true
-  [[ -n "$name" ]] && pkill -f "$name" >/dev/null 2>&1 || true
+  kill -TERM "$pid" 2>/dev/null || true
+}
+
+# 清理 Chrome 普通窗口里同端口的遗留 DSH 标签。Chrome 的 AppleScript
+# windows 也包含 PWA app-mode 窗口,所以必须在 close_ui 之后调用。
+close_browser_ui_tabs() {
+  command -v osascript >/dev/null 2>&1 || return 0
+  osascript - "$PORT" >/dev/null 2>&1 <<'APPLESCRIPT' || true
+on run argv
+  set targetPrefix to "http://127.0.0.1:" & (item 1 of argv) & "/"
+  tell application "Google Chrome"
+    repeat with w in windows
+      repeat with i from (count of tabs of w) to 1 by -1
+        set t to tab i of w
+        if (URL of t starts with targetPrefix) then close t
+      end repeat
+    end repeat
+  end tell
+end run
+APPLESCRIPT
 }
 
 do_stop() {
-  if ! pkill -f '\.bin/dsh web'; then
-    echo "no dsh process found"
-    return 0
-  fi
-  if ui_app_name >/dev/null 2>&1; then
-    if is_ui_open; then
-      close_ui
-      echo "dsh stopped(UI 已关闭)"
-    else
-      echo "dsh stopped(UI 未在运行)"
-    fi
+  local server_rc=0 ui_was_open=0
+  is_ui_open && ui_was_open=1
+
+  if stop_dsh_server_on_port "$PORT"; then
+    echo "dsh server stopped(port $PORT)"
   else
-    echo "dsh stopped(浏览器页面请手动关闭)"
+    server_rc=$?
+    case "$server_rc" in
+      1) echo "no dsh server found on port $PORT" ;;
+      2) echo "error: port $PORT listener is not provably DSH;refusing to kill" >&2 ;;
+      3) echo "error: lsof is required to stop DSH safely" >&2 ;;
+      4) echo "error: DSH server on port $PORT did not stop" >&2 ;;
+      *) echo "error: failed to stop DSH server on port $PORT(rc=$server_rc)" >&2 ;;
+    esac
   fi
+
+  # UI 生命周期独立于 server 匹配结果:旧实现这里提前 return,升级后 argv
+  # 改变便跳过 UI 清理,是 restart 双开的直接原因。
+  if [[ $ui_was_open -eq 1 ]]; then close_ui; fi
+  close_browser_ui_tabs
+  if [[ $ui_was_open -eq 1 ]]; then
+    echo "dsh UI stopped(PWA/浏览器标签已关闭)"
+  else
+    echo "dsh UI stopped(浏览器标签已清理,PWA 未在运行)"
+  fi
+
+  [[ $server_rc -eq 0 || $server_rc -eq 1 ]]
 }
 
-# stop, then wait until the port is released so a follow-up start never races
+# stop 已负责等待精确 listener pid 退出;restart 只需确认端口确实释放。
 do_restart() {
-  do_stop
-  for _ in $(seq 1 40); do
-    if ! nc -z 127.0.0.1 "$PORT" >/dev/null 2>&1; then
-      echo "port $PORT released"
-      return 0
-    fi
-    sleep 0.25
-  done
-  echo "warn: port $PORT still busy after 10s — start may reuse the old instance" >&2
-  return 1
+  do_stop || return 1
+  if nc -z 127.0.0.1 "$PORT" >/dev/null 2>&1; then
+    echo "error: port $PORT still busy after stopping DSH" >&2
+    return 1
+  fi
+  echo "port $PORT released"
 }
 
 do_history() {
