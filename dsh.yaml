@@ -147,6 +147,6 @@ customizations:
     source: remote
     spec: dsh-lan-gate@0.1.2
     version: 0.1.2
-    enabled: true
+    enabled: false
     brief: 局域网访问密码门禁(CIDR 白名单 + scrypt 密码)
-    note: 'B015 第一步(2026-08-24 源码审查);repo https://github.com/maxesisnclaw/dsh-lan-gate(MIT,零运行依赖);自带 bundle patch 直接把 webserver 绑 0.0.0.0(故无需开 manifest web.lan,二者等价且不应叠加),并注入 randomUUID polyfill 使非安全上下文下 GUI 可用;安全模型:CIDR 白名单默认三段私网(含 192.168.0.0/16)按 socket.remoteAddress 判定 + scrypt(N=16384)密码 + timingSafeEqual + 登录限流(5次/60s/IP) + HttpOnly/SameSite=Strict cookie + Origin 必须匹配 Host;策略文件 $DSH_HOME/lan-gate.json(0600,只存 scrypt 验证器);⚠ 首次需从 127.0.0.1 打开 /dsh-lan-full/login 设置密码,且**必须把 loopbackBypassAuth 保持 true 才能本机免密**;⚠ 不是 TLS 终结器——明文 HTTP 下同网可嗅探密码与 cookie,HTTPS 诉求未解(B015 待续);⚠ 与反向代理不兼容(rejectProxyHeaders 默认 true,且代理会把对端 IP 变成 127.0.0.1 从而被 loopback 旁路):已据此否决 @wingsky-1/dsh-lan-proxy 叠加方案'
+    note: 'B015;repo https://github.com/maxesisnclaw/dsh-lan-gate(MIT,零运行依赖,2026-08-24 源码审查);自带 bundle patch 把 webserver 绑 0.0.0.0(与 manifest web.lan 等价,不应叠加),并注入 randomUUID polyfill 使非安全上下文下 GUI 可用;安全模型:CIDR 白名单默认三段私网(含 192.168.0.0/16)按 socket.remoteAddress 判定 + scrypt(N=16384)密码 + timingSafeEqual + 登录限流(5次/60s/IP) + HttpOnly/SameSite=Strict cookie + Origin 必须匹配 Host;策略文件 $DSH_HOME/lan-gate.json(0600,只存 scrypt 验证器);⚠ 不是 TLS 终结器——明文 HTTP 下同网可嗅探密码与 cookie;⚠ 与反向代理不兼容(rejectProxyHeaders 默认 true,且代理会把对端 IP 变成 127.0.0.1 从而被 loopback 旁路):已据此否决 @wingsky-1/dsh-lan-proxy 叠加方案。**2026-08-24 禁用**:终选 SSH 隧道方案(公钥免登 + SSH 自带加密 + 浏览器侧 127.0.0.1 天然 secure context,无需 HTTPS/证书/polyfill,且局域网零端口暴露),本插件不再需要;保留条目以便回退(改 true 后 dsh build 即恢复明文局域网+密码门禁形态)'
