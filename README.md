@@ -78,8 +78,8 @@ dsh stop    # 3. 停止服务
 | 启动 | `dsh` | 未运行 → 后台拉起 + 打开 UI;已运行 → 打开 UI;UI 也已打开 → 提示"已在运行"。UI 打开策略:显式 `DSH_OPEN_APP`(PWA/应用)优先;未配置时自动探测已安装的 DeepSeek Harness PWA,命中即**只开 PWA**;否则浏览器 |
 | 构建 + 启动 | `dsh -b` | 改过 `dsh.yaml` 或插件后,先重新物化再启动 |
 | 只构建 | `dsh build` | 只把配置物化到 `~/.dsh`,不启动 |
-| 停止 | `dsh stop` | 停掉服务进程(浏览器标签请手动关) |
-| 重启 | `dsh restart` | 停 → 等端口释放 → 再启动,一步到位(别用 `dsh stop & dsh`,两者会打架) |
+| 停止 | `dsh stop` | 按监听端口验证并停掉 DSH server,同时关闭 PWA 与 Chrome 中同端口的 DSH 标签;非 DSH 进程占端口时拒绝误杀 |
+| 重启 | `dsh restart` | 停 server → 关闭全部 UI → 确认端口释放 → 启动 server → 只打开 PWA(存在时),一步到位 |
 | 看历史 | `dsh history` | 历次启动的时间 / DSH 版本 / 端口 / 插件清单(记录在 `~/.dsh/dsh-startup.log`) |
 | 一键清空定制 | `dsh reset` | 移除自定义插件、preset、skill,并安全撤销托管的 `$DSH_HOME/AGENTS.md`(反悔了?`dsh build` 就能恢复) |
 | 统一升级插件 | `dsh plugin-update` | 检测远端插件新版本(兼容性/稳定性判定)→ 逐条确认 → 改 `dsh.yaml` + sync + 自动提交;`--dry-run` 只预览,`--yes` 跳过确认;needs-review 条目永远等人工 |

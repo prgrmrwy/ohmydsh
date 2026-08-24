@@ -43,6 +43,25 @@ manifest 顶层 `autoUpdate` 映射必须(SHALL)支持布尔 `enabled` 与字符
 - **WHEN** registry 查询失败或超时
 - **THEN** 打印警告并以当前 `dshVersion` 正常启动,不中断
 
+### Requirement: stop/restart 按端口安全管理 server 与 UI 生命周期
+
+`dsh stop` 与 `dsh restart` 必须(SHALL)从目标端口的监听进程定位 server,并在信号终止前验证其 argv 属于 DSH web;不得仅依赖某一 npm/npx 版本的固定进程字符串,也不得终止无法证明属于 DSH 的端口占用者。UI 清理必须独立于 server 匹配结果执行:关闭已安装 PWA,并清理 Chrome 普通窗口中指向同一 loopback 端口的遗留标签。`restart` 必须完整执行「停止 server → 关闭全部 UI 表面 → 确认端口释放 → 启动 server → 只打开 PWA(若存在)」。
+
+#### Scenario: npm/npx 升级改变 server argv
+
+- **WHEN** 目标端口由 `node …/node_modules/.bin/dsh web --port <port>` 监听
+- **THEN** stop/restart 仍能定位并停止该 server,不得因旧进程正则不匹配而提前返回
+
+#### Scenario: 端口被非 DSH 服务占用
+
+- **WHEN** 目标端口监听进程的 argv 无法证明属于 DSH web
+- **THEN** stop/restart 拒绝发送信号并以错误退出
+
+#### Scenario: restart 清理重复 UI
+
+- **WHEN** PWA 与 Chrome 普通窗口中的同端口标签同时存在
+- **THEN** restart 关闭二者,重启 server 后只打开已配置或自动探测到的 PWA
+
 ### Requirement: 语义化版本比较决定是否更新
 
 版本比较必须(SHALL)遵循语义化版本规则,含预发布数字序(`rc.9` < `rc.10`)。当前 `dshVersion` 已是最新时不得做任何改写或重建动作。
