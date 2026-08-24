@@ -90,8 +90,14 @@
   - `ui-archive-manager` 冲突**已核实**:`lib/index.js:38` `const TRUSTED_HOSTS = []` 硬编码空数组(非配置项),`:104` 处非 loopback 且不在该数组即拒绝 → 局域网下其 unarchive 路由必被挡,需 patch 源码或接受该功能在 LAN 下不可用;
   - `@wingsky-1/dsh-lan-proxy` **npm 核实**:0.1.12,MIT,2026-08-23 更新(活跃),`dsh.bundle` + `dsh.client`(platform web)双面,运行依赖仅 `schemastery`,peer 仅 react;
   - 工具链:本机 **mkcert 未安装**(brew 可装),`openssl` 可用(`/usr/bin/openssl`)。
-- **推进决策(待定,见开放问题)**: 优先验证「TLS 代理派 + 自签证书」能否一次打通 secure context;polyfill 派仅作为降级备选(不解决 HTTPS 诉求,仅让明文 HTTP 下 GUI 可用)。
-- **更新**: 2026-08-24 新增;完成 backlog 选型调研与前置条件梳理,未立项、未安装任何插件;2026-08-24 用户明确要求推进(内网 IP + HTTPS),升 P1 并进入讨论中,完成本机现状核实(web.lan 现状 / LAN IP / secure-context 闸门与上游讨论 / 官方 trustedHosts 推导机制 / archive-manager 硬编码冲突 / lan-proxy npm 元数据 / mkcert 缺失),仍未安装任何插件。
+- **关键否决:TLS 代理与密码门禁不可叠加(2026-08-24 源码审查实证)**:
+  - `dsh-lan-gate` 的准入判定基于 **`socket.remoteAddress`**(`lib/admit.js`,`SECURITY.md` 明写「uses socket.remoteAddress, not Host / X-Forwarded-For」);
+  - `@wingsky-1/dsh-lan-proxy` 在 `0.0.0.0` 终结连接后**自己作为客户端**转发到回环,故到达 gate 的对端地址恒为 `127.0.0.1` → 命中 `loopbackBypassAuth`(默认 true)→ **门禁被完全旁路,局域网任何人免密获得完整 agent**;
+  - 反向也不通:gate 的 `rejectProxyHeaders` 默认 true,代理若补 `X-Forwarded-*` 则请求被 403 全拒。两条路均不可用,**故否决「代理 + 门禁」组合**;
+  - 附:lan-proxy 本身代码质量良好(targetHost 强制回环否则拒启、Host 仅收 IP 字面量/localhost 防 DNS 重绑定、自签证书 0600/825 天/SAN 含本机 LAN IP、无 child_process/无外联),但**不含任何认证**,且 HTTPS 失败会静默降级为明文 HTTP(仅 warn),留待 HTTPS 阶段重新评估。
+- **第一步已落地(2026-08-24)**: 接入 `dsh-lan-gate@0.1.2`(manifest 条目 `lan-gate`,已 sync,二次 sync 幂等,bundles 末位)。它自带 bundle patch 直接把 webserver 绑 `0.0.0.0`,**与 manifest `web.lan` 等价故不叠加**(`web.lan` 保持 false);同时注入 randomUUID polyfill,使非安全上下文下 GUI 可用 → **「192.168 内网 IP 访问」诉求由本步满足**。
+- **仍未满足:HTTPS(secure context)**:当前为明文 HTTP,同网可嗅探密码与 cookie(gate README 自述「not a TLS terminator」)。下一步候选:(a)自研薄层在 `dsh.yaml` 加 `web.https`,用 `https.createServer` **包裹同一个 server** 以保留真实 `socket.remoteAddress`(与 gate 兼容,是唯一能同时满足两诉求的路径);(b)mkcert 本地 CA 签发证书消除浏览器告警(本机 mkcert 未安装)。
+- **更新**: 2026-08-24 新增;完成 backlog 选型调研与前置条件梳理,未立项、未安装任何插件;2026-08-24 用户明确要求推进(内网 IP + HTTPS),升 P1 并进入讨论中,完成本机现状核实(web.lan 现状 / LAN IP / secure-context 闸门与上游讨论 / 官方 trustedHosts 推导机制 / archive-manager 硬编码冲突 / lan-proxy npm 元数据 / mkcert 缺失),仍未安装任何插件;2026-08-24 审查 lan-proxy 与 lan-gate 源码后**否决代理+门禁组合**(代理使对端 IP 恒为回环,门禁被 loopback 旁路),改为先只装 `dsh-lan-gate@0.1.2` 拿到「内网 IP 访问 + 密码/CIDR 门禁」,HTTPS 留作下一步(倾向自研 TLS 包裹同一 server 以保留真实对端 IP)。
 
 ---
 
