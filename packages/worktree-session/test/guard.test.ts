@@ -26,7 +26,7 @@ async function fixture(): Promise<{ root: string; worktree: string; record: Oper
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 
 describe('fail-closed managed-root tool policy', () => {
-  it('pins the installed rc.7 local and delegation tool contracts', () => {
+  it('pins the installed local and delegation tool contracts', () => {
     expect(TOOL_CONTRACTS).toEqual(expect.objectContaining({
       bash: expect.objectContaining({ pathFields: ['workdir'] }),
       read: expect.objectContaining({ pathFields: ['file_path'] }),
