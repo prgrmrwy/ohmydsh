@@ -57,11 +57,14 @@
   - 存储位置待设计:会话内记忆 vs workspace 文件(如 NOTES.md)vs 任务级;
   - 消费时机:当前任务完成后回顾,或后续任务开始时带上;
   - 待设计:多任务并行时 btw 的归属(属于哪个任务/会话)、与 goal/todo 列表的交互;
-  - 社区调研(2026-08-24):**已有现成实现** [dsh-sidechain](https://github.com/omdsh-dev/dsh-sidechain)(omdsh-dev org,与 open-in-vscode 同源)——`/btw <问题>` 一次性侧问(后台单轮问答,命令立即返回,侧链面板展示过程与答案,只读不可续问)+ `/side <问题>` 可持续追问侧会话 + `/side list`;机制:fork 当前会话创建独立子会话,侧会话日志/工具活动不写入主会话历史,主线程不中断,默认只读 persona;
-  - 匹配度:/btw = Claude 风格「不打断当前任务的侧问」(后台给答案),精准覆盖 B007 核心诉求;「只记录、不立即处理」的纯记忆形态(写入 NOTES.md 待回顾)不在其内,如需可叠加;
-  - 注意点:README 声明适配至 `0.1.1-rc.1`(当前 DSH pin `0.1.1-rc.2` 未列,接入前需验证兼容);安装示例用 `github:Buyi-wsgzg/dsh-sidechain`,与现仓库 org(omdsh-dev)不一致,接入前确认来源;依赖 `dsh-subagent` / `dsh-subagent-fork` / `dsh-commands`(默认 Web profile 已含);
-  - 后续:按 add-dsh-plugin 流程试用接入,或先人工试用再决定。
-- **更新**: 2026-08-14 新增;2026-08-24 完成社区调研,发现现成实现 dsh-sidechain(/btw 一次性侧问 + /side 持续侧会话,fork 隔离不写主历史),诉求核心被覆盖,推进为讨论中。
+  - 社区调研(2026-08-24):同类实现已有**三家**,核心语义一致 = fork 独立子会话 / 独立会话,不打断主线程:
+    - **[dsh-sidechain](https://github.com/omdsh-dev/dsh-sidechain)**(omdsh-dev,GitHub 源,**npm 未发布**):`/btw <问题>` 一次性侧问(后台单轮,只读不可续问)+ `/side <问题>` 可持续侧会话 + `/side list`;fork 当前会话,侧会话日志/工具活动不写主历史,默认只读 persona;适配声明至 `0.1.1-rc.1`(当前 pin rc.2 待验证);README 安装示例指向 `Buyi-wsgzg` org,与现仓库不一致,接入前确认来源;
+    - **[dsh-air](https://github.com/kaieye/dsh-AIR)@0.1.2**(npm,MIT):`/btw [问题]` 打开停靠式侧边对话(`/side` 等价别名)+ 侧边栏内嵌问答;顺带 ↑/↓ 历史发送记录召回 + Ctrl+R 搜索(localStorage,上限 500 可调 10–5000);输入框历史与侧问打包,键盘党顺带收益;
+    - **[dsh-sidebar-qa](https://github.com/ChenRuoT/dsh-sidebar-qa)@0.4.0**(npm,MIT):划选任意文本 → 「提问」浮层 → 侧边栏内嵌问答(独立会话 `❓<主题>`,可继续/归档);三种上下文策略 = `sessions.fork` 全量继承(前缀缓存命中)/ 压缩 / 机械裁切;嵌套追问 + 追问记录树(归档/删除置灰);**功能最全但依赖第三方 [dsh-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) ≥0.14.0**(对应 DSH 0.1.0-rc.8 起,rc.2 peer 解析待验证),多一件依赖、信任面更大;
+    - 旁类(非侧问,记录备查):[dsh-session-fork](https://github.com/Jason-skd/dsh-session-fork)(npm,「会话 = 分支」范式:并行分支 + squash 回主 + 内置 branch 图,Wiki 宣称与 git worktree 搭配——与 worktree 会话精神同向,关联 B014)、dsh-routed-subagent(bpc-oss:one-shot subagent 挂任意 preset + per-call 模型覆盖);
+  - 匹配度:三家均覆盖「/btw 不打断主会话」核心诉求;「只记录、不立即处理」的纯记忆形态(写 NOTES.md 待回顾)三家均未覆盖,如需可叠加;
+  - 后续:选型试用——语义最贴 = sidechain;顺带历史召回 = dsh-air;功能最全 = sidebar-qa(代价:better-sidebar 依赖链);按 add-dsh-plugin 流程接入前先确认 npm 源与 DSH 0.1.1-rc.2 兼容性。
+- **更新**: 2026-08-14 新增;2026-08-24 完成两轮社区调研:首轮发现 dsh-sidechain,二轮确认同类共三家(sidechain / dsh-air / dsh-sidebar-qa)并拉齐对比,诉求核心普遍被覆盖,推进为讨论中,待选型试用。
 
 ### [B008] 会话(任务)看板视图
 - **状态**: 想法
