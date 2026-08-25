@@ -75,8 +75,23 @@ ssh -N dsh            # 前台保持;加 -f 可后台化
 
 `/api` 能通过是因为官方围栏对回环 Host 天然放行,隧道后浏览器发出的 Host 就是 `127.0.0.1:3080`。
 
+补充验证(2026-08-24,确认「隧道能否用 Web 窗口」):经隧道取到的是**完整浏览器 GUI**,非终端形态——首页 `content-type: text/html`(17458 bytes,`<title>DeepSeek Harness</title>`),主 JS bundle `/assets/index-*.js` HTTP 200(399 KB),插件前端资源 `/plugins/dsh-cost-meter/client.js` HTTP 200,WebSocket 101。即实时流式输出与侧边栏等定制均正常。
+
+## 端口冲突:两侧都不自动退避
+
+**服务端(本机 DSH)**——端口被占则**启动失败**,不会静默换端口。上游 `dsh-host-webserver` README:「A listen failure (EADDRINUSE…) throws out of activation and rejects Loader composition」;`bin/dsh` 的 `do_restart` 亦会在端口未释放时报 `error: port 3080 still busy after stopping DSH`。这是刻意设计:若自动改用 3081,客户端隧道配置会指向错误端口而毫无提示。需要换端口时显式指定 `dsh -p 8080`。
+
+**客户端(另一台电脑)**——OpenSSH 默认行为**危险**:本地端口被占时只打印 `bind [127.0.0.1]:3080: Address already in use` 警告,**SSH 仍会连上但转发未建立**,浏览器打开 `127.0.0.1:3080` 看到的是本地占用该端口的其它程序,而非 DSH。上文 `~/.ssh/config` 中的 `ExitOnForwardFailure yes` 正是为此:转发失败即退出并报错,避免「连上了却没用」的假象。
+
+撞端口时改客户端本地端口即可,服务端不动:
+
+```sshconfig
+  LocalForward 3081 127.0.0.1:3080    # 左=客户端本地端口(任选),右=Mac 上 DSH 的真实端口
+```
+
+浏览器随之改开 `http://127.0.0.1:3081`。左右两个端口互相独立,客户端用什么端口都不影响本机。
+
 ## 已知限制
 
 - **每次使用需先起隧道**;可用 `-f` 后台化或交给 autossh / launchd 常驻。
 - **手机/平板不便**:移动浏览器难以走隧道。若将来需要移动端访问,再评估 HTTPS + 长效 cookie 或 mTLS 路线(见 B015)。
-- 客户端本地 3080 若被占用,`ExitOnForwardFailure` 会让连接直接失败 —— 换个本地端口即可(如 `LocalForward 3081 127.0.0.1:3080`)。
