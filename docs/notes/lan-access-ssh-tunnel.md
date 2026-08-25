@@ -37,15 +37,15 @@ DSH 的 Web 客户端在 RPC id 生成路径使用 `crypto.randomUUID()`(`dsh-cl
 ```bash
 # 在客户端机器上(没有密钥时先生成)
 ssh-keygen -t ed25519 -C "$(hostname)-to-dsh"
-ssh-copy-id prgrmrwy@192.168.64.3
+ssh-copy-id <user>@<server-ip>
 ```
 
 然后在客户端 `~/.ssh/config` 写一条,把转发固化:
 
 ```sshconfig
 Host dsh
-  HostName 192.168.64.3
-  User prgrmrwy
+  HostName <server-ip>
+  User <user>
   LocalForward 3080 127.0.0.1:3080
   ServerAliveInterval 30
   ServerAliveCountMax 3
@@ -82,8 +82,8 @@ skills/dsh-tunnel/scripts/dsh-tunnel.sh --no-open       # 不自动开浏览器
 远端信息经环境变量配置,写进 shell rc 后免传参:
 
 ```bash
-export DSH_TUNNEL_HOST=192.168.64.3   # 跑 DSH 的机器
-export DSH_TUNNEL_USER=prgrmrwy
+export DSH_TUNNEL_HOST=<server-ip>    # 跑 DSH 的机器(必填,无默认)
+export DSH_TUNNEL_USER=<user>         # 默认取本机当前用户名
 export DSH_TUNNEL_PORT=3080           # 远端 DSH 端口
 ```
 
