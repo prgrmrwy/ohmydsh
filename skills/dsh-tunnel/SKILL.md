@@ -50,26 +50,50 @@ Windows 客户端无 `ssh-copy-id` 时:
 type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh <user>@<server-ip> "cat >> ~/.ssh/authorized_keys"
 ```
 
-### 3. 起隧道(推荐用本 skill 附带脚本)
+### 3. 装成跨 shell 的全局命令(推荐先做,一次性)
+
+用户的真实目标通常是「以后一个词就能连上」。**alias / fish function 绑死单一 shell**(用户在 fish 与 bash 间切换时会「命令不存在」);装成 PATH 里的可执行文件才跨 shell 通用。在客户端执行:
 
 ```bash
-scripts/dsh-tunnel.sh              # 起隧道:占用自动退避 → curl 校验 → 开浏览器
-scripts/dsh-tunnel.sh status       # 查看隧道与实际本地端口
-scripts/dsh-tunnel.sh stop         # 关闭本脚本起的隧道
-scripts/dsh-tunnel.sh -p 9000      # 指定起始本地端口(仍会退避)
-scripts/dsh-tunnel.sh --strict     # 端口被占直接失败,不退避
-scripts/dsh-tunnel.sh --no-open    # 不自动开浏览器
+mkdir -p ~/.local/bin
+ln -sf ~/.dsh/skills/dsh-tunnel/scripts/dsh-tunnel.sh ~/.local/bin/dshvm   # 或指向仓库内路径
+export DSH_TUNNEL_HOST=<host-or-ssh-alias>    # 写进用户实际 shell 的 rc
+```
+
+之后任意 shell 下敲 `dshvm` 即可。若 command not found,把 `~/.local/bin` 加进 PATH(bash→`~/.bash_profile`,zsh→`~/.zshrc`,fish→`fish_add_path ~/.local/bin`)。
+
+⚠ 命令名别和 DSH 自带的 `dsh` 冲突,用 `dshvm` / `dshweb` 之类。
+
+### 4. 起隧道
+
+```bash
+dsh-tunnel.sh                    # 预检远端 → 占用自动退避 → curl 校验 → 开浏览器
+dsh-tunnel.sh status             # 查看隧道与实际本地端口
+dsh-tunnel.sh stop               # 关闭本脚本起的隧道
+dsh-tunnel.sh -p 9000            # 指定起始本地端口(仍会退避)
+dsh-tunnel.sh --strict           # 端口被占直接失败,不退避
+dsh-tunnel.sh --no-open          # 不自动开浏览器
+dsh-tunnel.sh --no-remote-start  # 不检查/启动远端 DSH,只建隧道
 ```
 
 远端信息经环境变量配置(写进 shell rc 免传参),也可用 `--host` / `--user` / `--remote-port` 覆盖:
 
 ```bash
-export DSH_TUNNEL_HOST=<server-ip>    # 跑 DSH 的机器(必填,无默认)
-export DSH_TUNNEL_USER=<user>         # 默认取本机当前用户名
-export DSH_TUNNEL_PORT=3080           # 远端 DSH 端口
+export DSH_TUNNEL_HOST=<host>     # IP、主机名,或 ~/.ssh/config 别名(如 lumevm);必填
+export DSH_TUNNEL_USER=<user>     # 留空则不拼 user@,交给 ssh 按别名解析
+export DSH_TUNNEL_PORT=3080       # 远端 DSH 端口
 ```
 
-脚本行为:**只退避本地端口**(远端端口恒定,两侧独立)、已有同远端隧道则复用、建成后 `curl` 实测 HTTP 200 才报就绪、始终带 `ExitOnForwardFailure=yes`、`status`/`stop` 按完整转发规格匹配进程不误伤其它 ssh。
+⚠ **用 ssh 别名时不要再加 `--user`** —— 会覆盖别名里的 `User` 导致连错账号。
+
+脚本行为:
+
+- **远端预检**:先 ssh 探测远端 DSH 是否在跑,**没跑就用 `dsh --no-open -p <port>` 远程拉起**并等待就绪(最多 30s);远端没装 `dsh` 命令时明确报错。用户因此不必先手动登录远端开服务;
+- **只退避本地端口**(远端端口恒定,两侧独立);
+- 已有同远端隧道则复用,不重复起;
+- 建成后 `curl` 实测 HTTP 200 才报就绪;
+- 始终带 `ExitOnForwardFailure=yes`;
+- `status` / `stop` 按完整转发规格匹配进程,不误伤其它 ssh。
 
 ### 4. 不用脚本时的等价手写配置
 
