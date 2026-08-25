@@ -64,8 +64,8 @@ scripts/dsh-tunnel.sh --no-open    # 不自动开浏览器
 远端信息经环境变量配置(写进 shell rc 免传参),也可用 `--host` / `--user` / `--remote-port` 覆盖:
 
 ```bash
-export DSH_TUNNEL_HOST=192.168.64.3   # 跑 DSH 的机器
-export DSH_TUNNEL_USER=<user>
+export DSH_TUNNEL_HOST=<server-ip>    # 跑 DSH 的机器(必填,无默认)
+export DSH_TUNNEL_USER=<user>         # 默认取本机当前用户名
 export DSH_TUNNEL_PORT=3080           # 远端 DSH 端口
 ```
 
