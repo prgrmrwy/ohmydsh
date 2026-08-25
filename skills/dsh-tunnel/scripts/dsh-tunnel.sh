@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
-# ohmydsh/scripts/dsh-tunnel.sh — 从另一台机器经 SSH 隧道访问本机 DSH Web GUI。
+# ohmydsh — 从另一台机器经 SSH 隧道访问远端 DSH Web GUI(skills/dsh-tunnel)。
 #
 # 本脚本运行在**客户端**(想访问 DSH 的那台电脑),不是跑 DSH 的那台。
 #
 #   用法:
-#     ./scripts/dsh-tunnel.sh                    起隧道(自动退避占用端口)
-#     ./scripts/dsh-tunnel.sh status             查看隧道状态
-#     ./scripts/dsh-tunnel.sh stop               关闭本脚本起的隧道
-#     ./scripts/dsh-tunnel.sh -p 9000            指定本地端口(仍会在占用时退避)
-#     ./scripts/dsh-tunnel.sh --strict           端口被占则直接失败,不退避
-#     ./scripts/dsh-tunnel.sh --no-open          不自动打开浏览器
+#     dsh-tunnel.sh                    起隧道(自动退避占用端口)
+#     dsh-tunnel.sh status             查看隧道状态
+#     dsh-tunnel.sh stop               关闭本脚本起的隧道
+#     dsh-tunnel.sh -p 9000            指定本地端口(仍会在占用时退避)
+#     dsh-tunnel.sh --strict           端口被占则直接失败,不退避
+#     dsh-tunnel.sh --no-open          不自动打开浏览器
 #
 #   环境变量(可写进 shell rc 免去每次传参):
-#     DSH_TUNNEL_HOST    远端主机(跑 DSH 的机器),默认 192.168.64.3
-#     DSH_TUNNEL_USER    远端用户名,默认 prgrmrwy
+#     DSH_TUNNEL_HOST    远端主机(跑 DSH 的机器)——必填,无默认
+#     DSH_TUNNEL_USER    远端用户名,默认取本机当前用户名
 #     DSH_TUNNEL_PORT    远端 DSH 端口,默认 3080
 #     DSH_TUNNEL_LOCAL   本地起始端口,默认与远端端口相同
+#
+#   也可用 --host / --user / --remote-port 覆盖上述任意一项。
 #
 # 端口退避:本地端口被占用时自动 +1 依次探测(最多 20 次)。这只挪动**本地**端口,
 # 远端 DSH 端口始终不变——两侧端口互相独立。为避免「SSH 连上但转发未建立」的
@@ -25,8 +27,8 @@
 # 背景与取舍见 docs/notes/lan-access-ssh-tunnel.md。
 set -euo pipefail
 
-REMOTE_HOST="${DSH_TUNNEL_HOST:-192.168.64.3}"
-REMOTE_USER="${DSH_TUNNEL_USER:-prgrmrwy}"
+REMOTE_HOST="${DSH_TUNNEL_HOST:-}"
+REMOTE_USER="${DSH_TUNNEL_USER:-$(id -un)}"
 REMOTE_PORT="${DSH_TUNNEL_PORT:-3080}"
 LOCAL_PORT="${DSH_TUNNEL_LOCAL:-$REMOTE_PORT}"
 MAX_PROBE=20
@@ -54,7 +56,7 @@ while [[ $# -gt 0 ]]; do
     --remote-port=*) REMOTE_PORT="${1#*=}"; shift ;;
     --strict) STRICT=1; shift ;;
     --no-open) OPEN_BROWSER=0; shift ;;
-    -h|--help) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "未知参数:$1(用 --help 查看用法)" ;;
   esac
 done
@@ -62,7 +64,21 @@ done
 [[ "$LOCAL_PORT" =~ ^[0-9]+$ ]] || die "本地端口必须是数字:$LOCAL_PORT"
 [[ "$REMOTE_PORT" =~ ^[0-9]+$ ]] || die "远端端口必须是数字:$REMOTE_PORT"
 
-FORWARD_SUFFIX=":127.0.0.1:${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST}"
+# 远端主机无默认值:缺失时明确报错并给出配置方法,不猜测。
+# status/stop 只做本地进程查询,不需要远端信息——缺 host 时用正则通配匹配任意远端。
+HOST_PATTERN="$REMOTE_HOST"
+if [[ -z "$REMOTE_HOST" && "$ACTION" != "start" ]]; then
+  REMOTE_HOST="任意远端"
+  HOST_PATTERN="[^ ]+"
+fi
+if [[ -z "$REMOTE_HOST" ]]; then
+  die "未指定远端主机(跑 DSH 的那台机器)。二选一:
+    export DSH_TUNNEL_HOST=<ip-or-hostname>   # 写进 shell rc 可长期生效
+    $(basename "$0") --host <ip-or-hostname>
+  远端用户名默认取本机当前用户($REMOTE_USER),不同则加 --user <name> 或 export DSH_TUNNEL_USER=<name>"
+fi
+
+FORWARD_SUFFIX=":127.0.0.1:${REMOTE_PORT} ${REMOTE_USER}@${HOST_PATTERN}"
 
 # ---------- 工具:端口是否被占用 ----------
 port_busy() {
@@ -111,7 +127,7 @@ if [[ "$ACTION" == "status" ]]; then
     lp=$(ps -o command= -p "$pid" 2>/dev/null | grep -oE '\-L [0-9]+' | awk '{print $2}')
     info "隧道运行中:pid ${pid}  http://127.0.0.1:${lp}  ->  ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PORT}"
   done <<<"$(tunnel_pids)"
-  [[ $found -eq 1 ]] || info "没有本脚本起的隧道(远端 ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PORT})"
+  [[ $found -eq 1 ]] || info "没有本脚本起的隧道(远端 ${REMOTE_USER}@${REMOTE_HOST},端口 ${REMOTE_PORT})"
   exit 0
 fi
 
