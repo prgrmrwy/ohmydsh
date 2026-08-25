@@ -61,17 +61,22 @@ ssh -N dsh            # 前台保持;加 -f 可后台化
 
 `ServerAliveInterval` 让休眠/断网后的死连接及时暴露;`ExitOnForwardFailure` 确保端口占用时立刻失败而不是静默连上却没有转发。
 
-## 推荐:用 `scripts/dsh-tunnel.sh` 一条命令搞定
+## 推荐:用 `dsh-tunnel` skill 一条命令搞定
 
-手写 `ssh -L` 的痛点是端口撞了要自己改配置。仓库脚本把「探测占用 → 退避换端口 → 建隧道 → 校验可达 → 开浏览器」串成一步(脚本运行在**客户端**):
+这套能力已抽成 skill(`skills/dsh-tunnel/`),会随 sync 部署到 `~/.dsh/skills/dsh-tunnel/`,可被自然语言触发(「怎么从另一台电脑访问 DSH」)。脚本随 skill 一起分发,两处路径均可执行:
+
+- 仓库内:`skills/dsh-tunnel/scripts/dsh-tunnel.sh`
+- 部署后:`~/.dsh/skills/dsh-tunnel/scripts/dsh-tunnel.sh`(客户端机器上装了 ohmydsh 即可用)
+
+手写 `ssh -L` 的痛点是端口撞了要自己改配置。脚本把「探测占用 → 退避换端口 → 建隧道 → 校验可达 → 开浏览器」串成一步(运行在**客户端**):
 
 ```bash
-./scripts/dsh-tunnel.sh                 # 起隧道:占用则自动 +1 退避,通了自动开浏览器
-./scripts/dsh-tunnel.sh status          # 查看当前隧道与实际本地端口
-./scripts/dsh-tunnel.sh stop            # 关闭本脚本起的隧道
-./scripts/dsh-tunnel.sh -p 9000         # 指定起始本地端口(仍会退避)
-./scripts/dsh-tunnel.sh --strict        # 端口被占直接失败,不退避
-./scripts/dsh-tunnel.sh --no-open       # 不自动开浏览器
+skills/dsh-tunnel/scripts/dsh-tunnel.sh                 # 起隧道:占用则自动 +1 退避,通了自动开浏览器
+skills/dsh-tunnel/scripts/dsh-tunnel.sh status          # 查看当前隧道与实际本地端口
+skills/dsh-tunnel/scripts/dsh-tunnel.sh stop            # 关闭本脚本起的隧道
+skills/dsh-tunnel/scripts/dsh-tunnel.sh -p 9000         # 指定起始本地端口(仍会退避)
+skills/dsh-tunnel/scripts/dsh-tunnel.sh --strict        # 端口被占直接失败,不退避
+skills/dsh-tunnel/scripts/dsh-tunnel.sh --no-open       # 不自动开浏览器
 ```
 
 远端信息经环境变量配置,写进 shell rc 后免传参:
@@ -104,7 +109,7 @@ export DSH_TUNNEL_PORT=3080           # 远端 DSH 端口
 
 `/api` 能通过是因为官方围栏对回环 Host 天然放行,隧道后浏览器发出的 Host 就是 `127.0.0.1:3080`。
 
-脚本化验证(2026-08-24):`scripts/dsh-tunnel.sh` 全路径实测通过——3080 被占时自动退避到 3081 并 curl 得 HTTP 200;`status` 正确报告 pid 与实际端口;重复 `start` 复用既有隧道;`--strict` 拒绝退避并以退出码 1 失败;`-p 9500` 指定端口可用;`stop` 干净关闭。测试用临时密钥已撤销。
+脚本化验证(2026-08-24):`skills/dsh-tunnel/scripts/dsh-tunnel.sh` 全路径实测通过——3080 被占时自动退避到 3081 并 curl 得 HTTP 200;`status` 正确报告 pid 与实际端口;重复 `start` 复用既有隧道;`--strict` 拒绝退避并以退出码 1 失败;`-p 9500` 指定端口可用;`stop` 干净关闭。测试用临时密钥已撤销。
 
 补充验证(2026-08-24,确认「隧道能否用 Web 窗口」):经隧道取到的是**完整浏览器 GUI**,非终端形态——首页 `content-type: text/html`(17458 bytes,`<title>DeepSeek Harness</title>`),主 JS bundle `/assets/index-*.js` HTTP 200(399 KB),插件前端资源 `/plugins/dsh-cost-meter/client.js` HTTP 200,WebSocket 101。即实时流式输出与侧边栏等定制均正常。
 

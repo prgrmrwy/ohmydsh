@@ -77,6 +77,10 @@ customizations:
   - id: dsh-sandbox-notes
     type: skill
     enabled: true
+  # 自研 skill:B015 跨机器访问 — 客户端 SSH 隧道(公钥免登 + 端口占用自动退避 + 附脚本)
+  - id: dsh-tunnel
+    type: skill
+    enabled: true
   # 第三方(remote):B003 IDE 集成 — workspace 菜单一键在 VSCode 打开
   - id: open-in-vscode
     type: package
