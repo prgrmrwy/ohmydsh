@@ -61,6 +61,35 @@ ssh -N dsh            # 前台保持;加 -f 可后台化
 
 `ServerAliveInterval` 让休眠/断网后的死连接及时暴露;`ExitOnForwardFailure` 确保端口占用时立刻失败而不是静默连上却没有转发。
 
+## 推荐:用 `scripts/dsh-tunnel.sh` 一条命令搞定
+
+手写 `ssh -L` 的痛点是端口撞了要自己改配置。仓库脚本把「探测占用 → 退避换端口 → 建隧道 → 校验可达 → 开浏览器」串成一步(脚本运行在**客户端**):
+
+```bash
+./scripts/dsh-tunnel.sh                 # 起隧道:占用则自动 +1 退避,通了自动开浏览器
+./scripts/dsh-tunnel.sh status          # 查看当前隧道与实际本地端口
+./scripts/dsh-tunnel.sh stop            # 关闭本脚本起的隧道
+./scripts/dsh-tunnel.sh -p 9000         # 指定起始本地端口(仍会退避)
+./scripts/dsh-tunnel.sh --strict        # 端口被占直接失败,不退避
+./scripts/dsh-tunnel.sh --no-open       # 不自动开浏览器
+```
+
+远端信息经环境变量配置,写进 shell rc 后免传参:
+
+```bash
+export DSH_TUNNEL_HOST=192.168.64.3   # 跑 DSH 的机器
+export DSH_TUNNEL_USER=prgrmrwy
+export DSH_TUNNEL_PORT=3080           # 远端 DSH 端口
+```
+
+行为要点:
+
+- **只退避本地端口**,远端端口恒为 `DSH_TUNNEL_PORT` —— 两侧端口互相独立;
+- 起隧道前先查是否已有指向同一远端的隧道,**有则复用不重起**(幂等);
+- 建成后用 `curl` 实测 HTTP 200 才报「就绪」,否则提示远端 DSH 可能没在跑;
+- 始终带 `ExitOnForwardFailure=yes`,杜绝「连上但没转发」;
+- `status` / `stop` 按完整转发规格匹配进程,不误伤其它 ssh 连接。
+
 ## 验证记录(2026-08-24)
 
 在本机以临时密钥自连(`-L 39080:127.0.0.1:3080`)完成端到端验证,测试后已撤销临时密钥并恢复 `authorized_keys`:
@@ -74,6 +103,8 @@ ssh -N dsh            # 前台保持;加 -f 可后台化
 | 直连 `192.168.64.3:3080` | 连接失败(预期:回环绑定,局域网无暴露) |
 
 `/api` 能通过是因为官方围栏对回环 Host 天然放行,隧道后浏览器发出的 Host 就是 `127.0.0.1:3080`。
+
+脚本化验证(2026-08-24):`scripts/dsh-tunnel.sh` 全路径实测通过——3080 被占时自动退避到 3081 并 curl 得 HTTP 200;`status` 正确报告 pid 与实际端口;重复 `start` 复用既有隧道;`--strict` 拒绝退避并以退出码 1 失败;`-p 9500` 指定端口可用;`stop` 干净关闭。测试用临时密钥已撤销。
 
 补充验证(2026-08-24,确认「隧道能否用 Web 窗口」):经隧道取到的是**完整浏览器 GUI**,非终端形态——首页 `content-type: text/html`(17458 bytes,`<title>DeepSeek Harness</title>`),主 JS bundle `/assets/index-*.js` HTTP 200(399 KB),插件前端资源 `/plugins/dsh-cost-meter/client.js` HTTP 200,WebSocket 101。即实时流式输出与侧边栏等定制均正常。
 
