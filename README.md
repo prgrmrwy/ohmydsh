@@ -20,6 +20,7 @@ openspec/                 # spec-driven 变更流程
 scripts/bootstrap.sh       # clone 后初始化:检查 Node 环境 + 安装依赖(幂等)
 scripts/install.sh         # 一键安装:bin/dsh → ~/.local/bin(幂等,可卸载)
 scripts/sync.mjs          # manifest → ~/.dsh 物化
+scripts/dsh-tunnel.sh      # 客户端:SSH 隧道访问远端 DSH(端口占用自动退避)
 instructions/dsh-home.md  # 工作环境级模型指令源文件
 packages/<name>/          # 自研 bundle 插件(见 packages/README.md)
 presets/<id>/             # agent preset(见 presets/README.md)
