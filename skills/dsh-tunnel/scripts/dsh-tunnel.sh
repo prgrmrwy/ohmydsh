@@ -10,14 +10,20 @@
 #     dsh-tunnel.sh -p 9000            指定本地端口(仍会在占用时退避)
 #     dsh-tunnel.sh --strict           端口被占则直接失败,不退避
 #     dsh-tunnel.sh --no-open          不自动打开浏览器
+#     dsh-tunnel.sh --no-remote-start  不检查/启动远端 DSH,只建隧道
 #
 #   环境变量(可写进 shell rc 免去每次传参):
 #     DSH_TUNNEL_HOST    远端主机(跑 DSH 的机器)——必填,无默认
-#     DSH_TUNNEL_USER    远端用户名,默认取本机当前用户名
+#                        可填 IP、主机名,或 ~/.ssh/config 里的别名(如 lumevm)
+#     DSH_TUNNEL_USER    远端用户名;留空则不拼 user@,交给 ssh 按别名解析
 #     DSH_TUNNEL_PORT    远端 DSH 端口,默认 3080
 #     DSH_TUNNEL_LOCAL   本地起始端口,默认与远端端口相同
 #
 #   也可用 --host / --user / --remote-port 覆盖上述任意一项。
+#   注意:用 ssh 别名时不要再加 --user,否则会覆盖别名里的 User。
+#
+# 远端预检:建隧道前先 ssh 探测远端 DSH 是否在跑;没跑则用 `dsh --no-open` 远程
+# 拉起并等待就绪(最多 30s)。远端没装 dsh 命令时明确报错。--no-remote-start 跳过。
 #
 # 端口退避:本地端口被占用时自动 +1 依次探测(最多 20 次)。这只挪动**本地**端口,
 # 远端 DSH 端口始终不变——两侧端口互相独立。为避免「SSH 连上但转发未建立」的
@@ -28,13 +34,18 @@
 set -euo pipefail
 
 REMOTE_HOST="${DSH_TUNNEL_HOST:-}"
-REMOTE_USER="${DSH_TUNNEL_USER:-$(id -un)}"
 REMOTE_PORT="${DSH_TUNNEL_PORT:-3080}"
 LOCAL_PORT="${DSH_TUNNEL_LOCAL:-$REMOTE_PORT}"
 MAX_PROBE=20
 STRICT=0
 OPEN_BROWSER=1
+NO_REMOTE_START=0
 ACTION="start"
+
+# 用户名只在显式给出时才拼进 target。留空则传裸主机名,让 ssh 自己按
+# ~/.ssh/config 解析(`Host lumevm` 这类别名可能自带 User/HostName/Port,
+# 强行拼 user@ 会覆盖别名里的 User,连错账号)。
+REMOTE_USER="${DSH_TUNNEL_USER:-}"
 
 # 隧道标记:用于 status/stop 精确识别本脚本起的进程,不误伤别的 ssh。
 TAG="dsh-tunnel"
@@ -56,7 +67,8 @@ while [[ $# -gt 0 ]]; do
     --remote-port=*) REMOTE_PORT="${1#*=}"; shift ;;
     --strict) STRICT=1; shift ;;
     --no-open) OPEN_BROWSER=0; shift ;;
-    -h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --no-remote-start) NO_REMOTE_START=1; shift ;;
+    -h|--help) sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "未知参数:$1(用 --help 查看用法)" ;;
   esac
 done
@@ -73,12 +85,23 @@ if [[ -z "$REMOTE_HOST" && "$ACTION" != "start" ]]; then
 fi
 if [[ -z "$REMOTE_HOST" ]]; then
   die "未指定远端主机(跑 DSH 的那台机器)。二选一:
-    export DSH_TUNNEL_HOST=<ip-or-hostname>   # 写进 shell rc 可长期生效
-    $(basename "$0") --host <ip-or-hostname>
-  远端用户名默认取本机当前用户($REMOTE_USER),不同则加 --user <name> 或 export DSH_TUNNEL_USER=<name>"
+    export DSH_TUNNEL_HOST=<host>   # 写进 shell rc 可长期生效
+    $(basename \"$0\") --host <host>
+  <host> 可以是 IP、主机名,或 ~/.ssh/config 里的别名(如 lumevm)。
+  用别名时不要再加 --user——别名自带的 User 会被覆盖。"
 fi
 
-FORWARD_SUFFIX=":127.0.0.1:${REMOTE_PORT} ${REMOTE_USER}@${HOST_PATTERN}"
+# ssh 目标:显式给了用户名才拼 user@,否则传裸主机名交给 ssh 解析别名。
+if [[ -n "$REMOTE_USER" ]]; then
+  SSH_TARGET="${REMOTE_USER}@${REMOTE_HOST}"
+  TARGET_PATTERN="${REMOTE_USER}@${HOST_PATTERN}"
+else
+  SSH_TARGET="$REMOTE_HOST"
+  # 进程命令行里就是裸主机名,匹配时不能带 user@ 前缀。
+  TARGET_PATTERN="$HOST_PATTERN"
+fi
+
+FORWARD_SUFFIX=":127.0.0.1:${REMOTE_PORT} ${TARGET_PATTERN}"
 
 # ---------- 工具:端口是否被占用 ----------
 port_busy() {
@@ -125,9 +148,9 @@ if [[ "$ACTION" == "status" ]]; then
     [[ -n "$pid" ]] || continue
     found=1
     lp=$(ps -o command= -p "$pid" 2>/dev/null | grep -oE '\-L [0-9]+' | awk '{print $2}')
-    info "隧道运行中:pid ${pid}  http://127.0.0.1:${lp}  ->  ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PORT}"
+    info "隧道运行中:pid ${pid}  http://127.0.0.1:${lp}  ->  ${SSH_TARGET}:${REMOTE_PORT}"
   done <<<"$(tunnel_pids)"
-  [[ $found -eq 1 ]] || info "没有本脚本起的隧道(远端 ${REMOTE_USER}@${REMOTE_HOST},端口 ${REMOTE_PORT})"
+  [[ $found -eq 1 ]] || info "没有本脚本起的隧道(远端 ${SSH_TARGET},端口 ${REMOTE_PORT})"
   exit 0
 fi
 
@@ -176,7 +199,43 @@ if port_busy "$PORT"; then
   info "改用本地端口 ${PORT}"
 fi
 
-info "正在建立隧道 → ${REMOTE_USER}@${REMOTE_HOST}(远端 DSH 端口 ${REMOTE_PORT})…"
+# ---------- 远端 DSH 预检:没跑就按需拉起 ----------
+# 隧道只搬运流量,远端 DSH 没跑则转发通了也是空。先探一次,必要时远程启动。
+remote_dsh_up() {
+  ssh -o BatchMode=yes -o ConnectTimeout=8 "$SSH_TARGET" \
+    "nc -z 127.0.0.1 ${REMOTE_PORT} >/dev/null 2>&1" 2>/dev/null
+}
+
+if [[ $NO_REMOTE_START -eq 0 ]]; then
+  info "检查远端 DSH…"
+  if remote_dsh_up; then
+    info "  远端 DSH 已在运行(端口 ${REMOTE_PORT})"
+  else
+    info "  远端 DSH 未运行,尝试远程启动…"
+    # 登录 shell 加载 PATH(dsh 常装在 ~/.local/bin);nohup + 重定向防止 ssh 挂住。
+    # 远端脚本用单引号包裹,端口经位置参数传入,避免多层引号嵌套出错。
+    remote_cmd='command -v dsh >/dev/null 2>&1 || exit 127; nohup dsh --no-open -p "$1" >/dev/null 2>&1 & disown'
+    ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_TARGET" \
+      bash -lc "$(printf '%q' "$remote_cmd")" _ "$REMOTE_PORT" 2>/dev/null
+    rc=$?
+    if [[ $rc -eq 127 ]]; then
+      die "远端未找到 dsh 命令。请先手动登录远端启动,或加 --no-remote-start 跳过本检查"
+    fi
+    # 等待端口起来(最多 ~30s)。
+    ok=0
+    for _ in $(seq 1 15); do
+      sleep 2
+      if remote_dsh_up; then ok=1; break; fi
+    done
+    if [[ $ok -eq 1 ]]; then
+      info "  远端 DSH 已启动 ✓"
+    else
+      info "  ⚠ 远端 DSH 未能在 30s 内就绪,仍继续建隧道(稍后可刷新页面重试)"
+    fi
+  fi
+fi
+
+info "正在建立隧道 → ${SSH_TARGET}(远端 DSH 端口 ${REMOTE_PORT})…"
 
 # ExitOnForwardFailure:转发失败即退出,避免「连上但没有转发」的假象。
 # BatchMode 不启用——首次可能需要输入密码或确认 host key。
@@ -185,7 +244,7 @@ if ! ssh -f -N \
   -o ServerAliveInterval=30 \
   -o ServerAliveCountMax=3 \
   -L "${PORT}:127.0.0.1:${REMOTE_PORT}" \
-  "${REMOTE_USER}@${REMOTE_HOST}"; then
+  "$SSH_TARGET"; then
   die "隧道建立失败。排查:1) 远端是否开启「远程登录」;2) 公钥是否已用 ssh-copy-id 装好;3) ${REMOTE_HOST} 是否可达"
 fi
 
@@ -196,7 +255,7 @@ pid=$(tunnel_pid_on_port "$PORT")
 
 URL="http://127.0.0.1:${PORT}"
 if command -v curl >/dev/null 2>&1; then
-  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 "$URL" || echo 000)
+  code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 8 "$URL" 2>/dev/null); [[ -n "$code" ]] || code=000
   if [[ "$code" == "200" ]]; then
     info "隧道就绪 ✓  ${URL}  (pid ${pid})"
   else

@@ -89,11 +89,16 @@ export DSH_TUNNEL_PORT=3080           # 远端 DSH 端口
 
 行为要点:
 
+- **远端预检**:建隧道前 ssh 探测远端 DSH,没跑则 `dsh --no-open -p <port>` 远程拉起并等待就绪(最多 30s);远端没装 `dsh` 时明确报错。`--no-remote-start` 可跳过;
 - **只退避本地端口**,远端端口恒为 `DSH_TUNNEL_PORT` —— 两侧端口互相独立;
 - 起隧道前先查是否已有指向同一远端的隧道,**有则复用不重起**(幂等);
 - 建成后用 `curl` 实测 HTTP 200 才报「就绪」,否则提示远端 DSH 可能没在跑;
 - 始终带 `ExitOnForwardFailure=yes`,杜绝「连上但没转发」;
-- `status` / `stop` 按完整转发规格匹配进程,不误伤其它 ssh 连接。
+- `status` / `stop` 按完整转发规格匹配进程,不误伤其它 ssh 连接;
+- `DSH_TUNNEL_HOST` 支持 `~/.ssh/config` 别名(如 `lumevm`);用别名时留空 `DSH_TUNNEL_USER`,让 ssh 自己解析 `User` —— 强拼 `user@` 会覆盖别名配置导致连错账号。
+
+**装成全局命令**(跨 shell,推荐):alias / fish function 只在单一 shell 生效,装进 PATH 才通用 ——
+`ln -sf ~/.dsh/skills/dsh-tunnel/scripts/dsh-tunnel.sh ~/.local/bin/dshvm`,再把 `DSH_TUNNEL_HOST` 写进 rc,之后任意 shell 敲 `dshvm` 即可。命令名避免与 DSH 自带 `dsh` 冲突。
 
 ## 验证记录(2026-08-24)
 
@@ -109,7 +114,9 @@ export DSH_TUNNEL_PORT=3080           # 远端 DSH 端口
 
 `/api` 能通过是因为官方围栏对回环 Host 天然放行,隧道后浏览器发出的 Host 就是 `127.0.0.1:3080`。
 
-脚本化验证(2026-08-24):`skills/dsh-tunnel/scripts/dsh-tunnel.sh` 全路径实测通过——3080 被占时自动退避到 3081 并 curl 得 HTTP 200;`status` 正确报告 pid 与实际端口;重复 `start` 复用既有隧道;`--strict` 拒绝退避并以退出码 1 失败;`-p 9500` 指定端口可用;`stop` 干净关闭。测试用临时密钥已撤销。
+脚本化验证(2026-08-24):`dsh-tunnel.sh` 全路径实测通过——3080 被占时自动退避到 3081 并 curl 得 HTTP 200;`status` 正确报告 pid 与实际端口;重复 `start` 复用既有隧道;`--strict` 拒绝退避并以退出码 1 失败;`-p 9500` 指定端口可用;`stop` 干净关闭。
+
+ssh 别名与远端自启验证(2026-08-24):以临时 ssh 别名(自带 User/HostName,复刻 `lumevm` 用法)实测——别名可直接作 `--host`,`status`/`stop` 均能正确匹配进程;远端 DSH 未运行时脚本经 ssh 以 `dsh --no-open -p <port>` 成功远程拉起,等待就绪后建隧道,经隧道访问该新实例得 HTTP 200。测试用临时密钥、别名与远程实例均已清理。
 
 补充验证(2026-08-24,确认「隧道能否用 Web 窗口」):经隧道取到的是**完整浏览器 GUI**,非终端形态——首页 `content-type: text/html`(17458 bytes,`<title>DeepSeek Harness</title>`),主 JS bundle `/assets/index-*.js` HTTP 200(399 KB),插件前端资源 `/plugins/dsh-cost-meter/client.js` HTTP 200,WebSocket 101。即实时流式输出与侧边栏等定制均正常。
 
