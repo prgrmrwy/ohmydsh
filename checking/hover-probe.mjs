@@ -25,6 +25,7 @@ console.log('url after new session:', page.url())
 const candidates = await page.locator('button').evaluateAll((buttons) => buttons.map((b) => ({
   text: b.textContent?.slice(0, 40),
   title: b.getAttribute('title'),
+  aria: b.getAttribute('aria-label'),
   style: b.getAttribute('style')?.slice(0, 160) ?? '',
   visible: !!(b.offsetParent),
   rect: (() => { const r = b.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) } })(),
@@ -45,7 +46,10 @@ if (!chooser) {
 const button = page.locator('button', { hasText: '⑂' }).first()
 await button.hover()
 await page.waitForTimeout(2500) // native title delay ~1s
-const after = await button.evaluate((el) => ({ title: el.getAttribute('title'), hovered: el.matches(':hover'), rect: (() => { const r = el.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) } })() }))
+const after = await button.evaluate((el) => ({ aria: el.getAttribute('aria-label'), hovered: el.matches(':hover'), rect: (() => { const r = el.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) } })() }))
+const labelCount = await page.locator('[data-testid="worktree-session-ref-hover"]').count()
+const labelText = labelCount > 0 ? await page.locator('[data-testid="worktree-session-ref-hover"]').first().textContent() : null
+console.log('hover label present:', labelCount, '| text:', labelText)
 console.log('after hover:', JSON.stringify(after))
 await page.screenshot({ path: 'checking/hover-probe-2.png' })
 

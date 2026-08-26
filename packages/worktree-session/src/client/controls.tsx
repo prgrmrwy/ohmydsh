@@ -55,6 +55,7 @@ export function BaseRefHoverLabel({ text }: { text: string }) {
       left: 0,
       zIndex: 1001,
       pointerEvents: 'none',
+      width: 'max-content',
       maxWidth: 420,
       padding: '4px 8px',
       borderRadius: 6,
