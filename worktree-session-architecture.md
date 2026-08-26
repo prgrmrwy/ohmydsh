@@ -49,6 +49,8 @@ flowchart LR
 ### 客户端交互
 
 - 控件只在空白 Git Session 出现;未开启时沿用普通 submit。
+- 创建态 base ref 选择器(按钮标签与下拉候选项)同样单行省略,
+  hover 显示完整 ref 名并保留"选择无 Git 副作用"提示;选择只更新暂存状态。
 - 源 Session 原地绑定并提交,不创建目标 Workspace/Session;
   文本和图片在绑定提交被接受前保持源草稿完整。
 - 输入区状态 UI 持续显示绑定任务分支、依赖模式(`lean`/`mutable`)与
