@@ -27,4 +27,4 @@
 
 - [x] 5.1 仓库根 `npm test` 与 `npm run check:artifacts`
 - [x] 5.2 `dsh build`（或 `node scripts/sync.mjs`）物化 client bundle；连续运行第二次确认 sync 幂等无新增变更
-- [ ] 5.3 在 DSH Web GUI 刷新后用长分支名（如 `feat/per-model-default-reasoning-effort`）人工核对：输入区单行不换行、hover 可见完整名
+- [x] 5.3 在 DSH Web GUI 刷新后用长分支名（如 `feat/per-model-default-reasoning-effort`）人工核对：输入区单行不换行、hover 可见完整名
