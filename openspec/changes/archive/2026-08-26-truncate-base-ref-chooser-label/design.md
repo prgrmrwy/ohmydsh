@@ -28,11 +28,13 @@
 新增一个内部常量（如 `ellipsisStyle` 或把规则并入 `controlStyle`），供 branch span、base ref 按钮、候选项复用。备选方案是照抄现有 branch span 的字面量：被否决，因为本缺陷的根因正是“上次只在一个分支加了规则”，复制第三份会让第四个控件继续漏掉。
 选择在 `controlStyle` 之外单列常量而非直接改 `controlStyle`：`controlStyle` 也被下拉搜索框 `<input>`（L106，`maxWidth: 'none'`）复用，`input` 不需要 `display: block` / `lineHeight` 这类文本行规则，直接改基础样式会波及无关控件。
 
-**决策 2：`title` 用“完整 ref 名 + 原说明”的复合文案。**
-形如 `feat/per-model-default-reasoning-effort — Choose the base ref; selection has no Git side effects`；未选中 ref 时退回纯说明文案。备选方案是只放 ref 名：被否决，会丢失“选择无 Git 副作用”这一用户已可见的安全语义提示（该语义在 spec 中有独立保证）。
+**决策 2（最终形态）：完整 ref 名提示用页内弹层（`BaseRefHoverLabel`），不依赖原生 `title`。**
+原生 `title` tooltip 在 DSH GUI 中实测不弹出（用户反馈），且无头浏览器无法渲染原生 tooltip、展示不可判定；按钮因此改为 `aria-label`（保留无障碍语义，同时避免双层提示）。弹层在按钮下方 0 间距渲染（`width: max-content`、最多 420px 可换行、`pointer-events: none`、`zIndex: 1001`），文案为“完整 ref 名 — Choose the base ref; selection has no Git side effects”；未选中 ref 时只有纯说明文案。
+**互斥选择**：弹层仅在**下拉列表关闭**时渲染（`!open && hovered`）；列表打开时指针需要用于候选 hover/滚动，弹层必须让位。`onMouseEnter/Leave` 挂在按钮自身而非 wrapper——列表是 wrapper 的子元素，指针移入列表不会触发 wrapper 的 `mouseleave`，会导致弹层“僵尸”残留。
+**备选方案**：a) 只放 ref 名（丢弃“无 Git 副作用”提示）：否决，该语义在 spec 中有独立保证；b) 保持原生 title + 弹层双保险：否决，会出现双层提示；c) 弹层与列表共存：实测与列表交互冲突，被用户否决。
 
-**决策 3：候选项用 `display: block` + `nowrap/hidden/ellipsis` + `title={ref.name}`。**
-候选项已是 `display:block; width:100%`，只需补溢出三件套与 `title`。备选方案是加宽面板：被否决，remote ref 名长度无上界，加宽只是把阈值推高且挤占输入区。
+**决策 3：候选项 `display: block` + `nowrap/hidden/ellipsis` + `title={ref.name}` + hover 高亮。**
+候选项已是 `display:block; width:100%`，补溢出三件套与 `title`。鼠标悬停候选项必须有视觉反馈（用户验收确认），`BaseRefOption` 内部维护 hovered 状态，取色 `refOptionBackground(selected, hovered)`：已选中 `#3370ff22` > 悬停 `var(--dsw-alias-interactive-bg-hover, #00000014)`（跟随 DSH 主题）> 透明。备选方案是加宽面板：否决，remote ref 名长度无上界，加宽只是把阈值推高且挤占输入区。
 
 **决策 4：不改 `maxWidth: 190`。**
 190px 是既有视觉约定，也已被状态栏使用；本次只让超出部分省略而不是换行。调整宽度属独立的视觉调优，超出本 change 范围。
