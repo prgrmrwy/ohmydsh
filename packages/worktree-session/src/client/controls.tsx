@@ -28,12 +28,22 @@ export function baseRefChooserTitle(baseRef: string | undefined): string {
   return baseRef === undefined ? BASE_REF_HINT : `${baseRef} — ${BASE_REF_HINT}`
 }
 
+/** Candidate background: selected tint first, then a hover tint, then transparent. */
+export function refOptionBackground(selected: boolean, hovered: boolean): string {
+  if (selected) return '#3370ff22'
+  if (hovered) return 'var(--dsw-alias-interactive-bg-hover, #00000014)'
+  return 'transparent'
+}
+
 /** One dropdown candidate: single-line ellipsis label with the full ref name on hover. */
 export function BaseRefOption({ name, selected, onSelect }: { name: string, selected: boolean, onSelect: () => void }) {
+  const [hovered, setHovered] = useState(false)
   return <button
     type="button"
     title={name}
-    style={{ ...ellipsisStyle, width: '100%', border: 0, background: selected ? '#3370ff22' : 'transparent', color: 'inherit', textAlign: 'left', padding: '5px 7px', borderRadius: 6 }}
+    onMouseEnter={() => { setHovered(true) }}
+    onMouseLeave={() => { setHovered(false) }}
+    style={{ ...ellipsisStyle, width: '100%', border: 0, background: refOptionBackground(selected, hovered), color: 'inherit', textAlign: 'left', padding: '5px 7px', borderRadius: 6 }}
     onClick={onSelect}
   >{name}</button>
 }

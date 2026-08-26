@@ -12,7 +12,7 @@ vi.mock('../src/client/stage-store.js', () => ({
   setStage: () => {},
 }))
 
-import { BaseRefHoverLabel, BaseRefOption, baseRefChooserTitle, openWorktreeInEditor, WorktreeControls } from '../src/client/controls.js'
+import { BaseRefHoverLabel, BaseRefOption, baseRefChooserTitle, openWorktreeInEditor, refOptionBackground, WorktreeControls } from '../src/client/controls.js'
 
 const BASE_REF_HINT = 'Choose the base ref; selection has no Git side effects'
 const LONG_REF = 'feat/per-model-default-reasoning-effort'
@@ -145,6 +145,12 @@ describe('BaseRefOption dropdown candidate', () => {
   it('highlights the selected candidate only', () => {
     expect(renderOption('main', true)).toContain('background:#3370ff22')
     expect(renderOption('main', false)).toContain('background:transparent')
+  })
+
+  it('uses the interactive hover tint for unselected candidates and keeps selected tint', () => {
+    expect(refOptionBackground(false, true)).toBe('var(--dsw-alias-interactive-bg-hover, #00000014)')
+    expect(refOptionBackground(true, true)).toBe('#3370ff22')
+    expect(refOptionBackground(false, false)).toBe('transparent')
   })
 
   it('calls onSelect without performing any request', () => {
