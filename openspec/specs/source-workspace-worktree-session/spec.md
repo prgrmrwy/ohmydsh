@@ -194,6 +194,29 @@ operator 维护命令面（`status`/`promote`/`clean`）SHALL 在其所有已发
 - **WHEN** 任务分支名在可用宽度内可完整容纳
 - **THEN** 状态栏 SHALL 完整显示分支名且不添加省略号或截断
 
+### Requirement: Input-area base ref chooser shows refs in one line with a hover full name
+输入区在空白会话创建态展示 base ref 选择器时，选择器按钮标签与下拉候选项的 ref 名 SHALL 以单行渲染，超出可用宽度时以省略号截断且不发生换行；当用户 hover 按钮或候选项时，SHALL 能看到该 ref 的完整名称。该展示行为 MUST NOT 改变 base ref 选择语义（选择仍不产生任何 Git 副作用），也不得改变绑定模型、生命周期状态或任何持久数据。
+
+#### Scenario: Long selected base ref keeps the input row on one line
+- **WHEN** 空白会话已选中的 base ref 名在选择器按钮可用宽度内无法完整容纳
+- **THEN** 按钮 SHALL 保持单行布局，超宽部分以省略号显示，且不因换行而增加输入区控件行高
+
+#### Scenario: Hover the chooser reveals the full selected ref name
+- **WHEN** 用户将指针悬停在 base ref 选择器按钮上
+- **THEN** 系统 SHALL 展示当前选中 ref 的完整名称，并同时保留“选择 base ref 不产生 Git 副作用”的说明语义
+
+#### Scenario: Long candidate ref in the dropdown stays on one line
+- **WHEN** 下拉候选列表中某个本地或远端 ref 名超出候选面板可用宽度
+- **THEN** 该候选项 SHALL 单行省略显示，且 hover 时展示该候选 ref 的完整名称
+
+#### Scenario: Short ref names are unaffected
+- **WHEN** 选中的 ref 名或候选 ref 名在可用宽度内可完整容纳
+- **THEN** 系统 SHALL 完整显示该名称且不添加省略号或截断
+
+#### Scenario: Selection still has no Git side effects
+- **WHEN** 用户在下拉列表中点选任意候选 ref
+- **THEN** 系统 SHALL 仅更新该会话的暂存 base ref 选择，且 MUST NOT 执行任何 Git 操作或产生持久绑定
+
 ### Requirement: Branch name opens the bound worktree in the local editor
 在绑定会话的输入区状态栏中，任务分支名 SHALL 是可点击的；用户点击后，系统 SHALL 使用本机编辑器打开该会话绑定的 managed worktree 目录。打开路径 MUST 来自该会话的持久绑定元数据（`worktreePath`），而不是用户可任意指定的文本。未绑定或已清理的会话 MUST 不提供该打开行为。
 
