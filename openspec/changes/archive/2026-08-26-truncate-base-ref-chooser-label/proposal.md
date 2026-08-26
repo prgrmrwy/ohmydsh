@@ -5,8 +5,8 @@
 ## What Changes
 
 - 创建态 base ref 选择器按钮的标签 SHALL 单行渲染，超出可用宽度以省略号截断，不再换行撑高输入区。
-- hover 该按钮时 SHALL 能看到当前选中的完整 base ref 名称，并保留原有“选择 base ref 无 Git 副作用”的说明语义（形如 `feat/xxx — Choose the base ref; selection has no Git side effects`）。
-- 下拉候选列表中的 ref 名同样按单行省略渲染，并以 `title` 提供完整名称（长 remote ref 在 300px 面板内同样会换行，属同一缺陷类）。
+- hover 该按钮时 SHALL 能看到当前选中的完整 base ref 名称，并保留原有“选择 base ref 无 Git 副作用”的说明语义（形如 `feat/xxx — Choose the base ref; selection has no Git side effects`）；该提示以页内弹层渲染（原生 title 实测不弹出），且与打开的下拉列表互斥。
+- 下拉候选列表中的 ref 名同样按单行省略渲染，并以 `title` 提供完整名称、悬停高亮反馈（长 remote ref 在 300px 面板内同样会换行，属同一缺陷类）。
 - 纯展示性修复：不改变 base ref 选择语义（选择仍无 Git 副作用）、不改变绑定模型、生命周期、handoff、wire 协议或任何持久数据。
 
 ## Capabilities
