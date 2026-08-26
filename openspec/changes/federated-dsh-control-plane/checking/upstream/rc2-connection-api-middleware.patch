@@ -1,0 +1,146 @@
+diff --git a/src/index.ts b/src/index.ts
+index a1764a3..6e3f366 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -12,10 +12,13 @@ import { HostConnectionService } from './rpc-host.ts'
+ import { rejectWebSocketUpgrade, WebSocketDownlinks } from './websocket-downlink.ts'
+ 
+ export type {
++  ConnectionApiMiddleware,
++  ConnectionFetchHandler,
+   ConnectionRpcAuthority,
+   ConnectionRpcEndpointMatcher,
+   ConnectionRpcHandler,
+   ConnectionRpcHandlerOptions,
++  HostConnectionApi,
+   HostConnectionHandle,
+   HostConnectionRpc,
+ } from './rpc.ts'
+@@ -136,7 +139,7 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
+   for (const entry of trustedHosts) assertTrustedAuthority(entry)
+   if (ctx.get('apiProxy') !== undefined) assertImageBodyCapacity(ctx, maxRequestBodyBytes)
+   const connection = new HostConnectionService(ctx, trustedHosts)
+-  const fetchHandler = connection.createSharedFetchHandler(API_PATH, {
++  const apiHandler = connection.createSharedFetchHandler(API_PATH, {
+     async fetch(request) {
+       const pathname = new URL(request.url).pathname
+       const method = pathname.startsWith(`${API_PATH}/`)
+@@ -158,6 +161,9 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
+       return toFetchHandler(apiProxy).fetch(request)
+     },
+   })
++  const fetchHandler = {
++    fetch: (request: Request) => connection.handleApiRequest(request, apiHandler),
++  }
+   const route: WebRoute = {
+     kind: 'prefix',
+     path: API_PATH,
+diff --git a/src/rpc-host.ts b/src/rpc-host.ts
+index 0da66c8..8bd4566 100644
+--- a/src/rpc-host.ts
++++ b/src/rpc-host.ts
+@@ -15,9 +15,11 @@ import { bridge, type FetchHandler } from './http-bridge.ts'
+ import { isTrustedApiRequest } from './api-request-trust.ts'
+ import { API_PATH } from './api-path.ts'
+ import type {
++  ConnectionApiMiddleware,
+   ConnectionRpcEndpointMatcher,
+   ConnectionRpcHandler,
+   ConnectionRpcHandlerOptions,
++  HostConnectionApi,
+   HostConnectionHandle,
+   HostConnectionRpc,
+ } from './rpc.ts'
+@@ -42,6 +44,7 @@ declare module '@deepseek-ai/cordis' {
+ /** Host Connection service whose channel registrations belong to the caller fiber. */
+ export class HostConnectionService extends Service implements HostConnectionHandle {
+   private readonly interceptors = new Map<string, ConnectionRpcInterceptor>()
++  private apiMiddleware: ConnectionApiMiddleware | undefined
+ 
+   /**
+    * Provide the Host half over the active HTTP server.
+@@ -62,6 +65,14 @@ export class HostConnectionService extends Service implements HostConnectionHand
+     }
+   }
+ 
++  /** Exclusive outer middleware seam scoped to the Context reading this service. */
++  get api(): HostConnectionApi {
++    const owner = this.ctx
++    return {
++      use: (middleware) => this.registerApiMiddleware(owner, middleware),
++    }
++  }
++
+   /**
+    * Compose one shared-channel Fetch handler from its interceptor and fallback.
+    * @param channel - shared channel mounted by Connection.
+@@ -87,6 +98,29 @@ export class HostConnectionService extends Service implements HostConnectionHand
+     }
+   }
+ 
++  /** Dispatch one already-trusted physical `/api` request around the composed handler. */
++  handleApiRequest(request: Request, next: FetchHandler): Promise<Response> {
++    const middleware = this.apiMiddleware
++    return middleware === undefined
++      ? next.fetch(request)
++      : middleware(request, next)
++  }
++
++  private registerApiMiddleware(
++    owner: Context,
++    middleware: ConnectionApiMiddleware,
++  ): () => Promise<void> {
++    return owner.effect(() => {
++      if (this.apiMiddleware !== undefined) {
++        throw new Error('connection: shared API handler already has an outer middleware')
++      }
++      this.apiMiddleware = middleware
++      return () => {
++        if (this.apiMiddleware === middleware) this.apiMiddleware = undefined
++      }
++    }, 'client-connection: /api outer middleware')
++  }
++
+   private register(
+     owner: Context,
+     channel: string,
+diff --git a/src/rpc.ts b/src/rpc.ts
+index e1260f0..ee2492d 100644
+--- a/src/rpc.ts
++++ b/src/rpc.ts
+@@ -21,6 +21,26 @@ export type ConnectionRpcHandler = (
+ /** Synchronous ownership test for one endpoint on a shared RPC channel. */
+ export type ConnectionRpcEndpointMatcher = (endpoint: string) => boolean
+ 
++/** Minimal Fetch-shaped handler shared by Connection middleware and transport. */
++export interface ConnectionFetchHandler {
++  fetch(request: Request): Promise<Response>
++}
++
++/** Outer middleware around the fully composed shared `/api` handler. */
++export type ConnectionApiMiddleware = (
++  request: Request,
++  next: ConnectionFetchHandler,
++) => Promise<Response>
++
++/** Exclusive outer middleware registry for the physical `/api` channel. */
++export interface HostConnectionApi {
++  /**
++   * Install one middleware after the route trust fence and before the composed
++   * Typert-interceptor/fallback handler. A second owner fails closed.
++   */
++  use(middleware: ConnectionApiMiddleware): () => Promise<void>
++}
++
+ /** Host registry for logical RPC channels carried by the current transport. */
+ export interface HostConnectionRpc {
+   /**
+@@ -56,6 +76,8 @@ export interface HostConnectionRpc {
+ export interface HostConnectionHandle {
+   /** Generic RPC channel registry. */
+   readonly rpc: HostConnectionRpc
++  /** Exclusive outer middleware seam for the composed `/api` handler. */
++  readonly api: HostConnectionApi
+ }
+ 
+ /** Client caller for logical RPC channels carried by the current transport. */

@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "classification": "synthetic-secret-free",
+  "generatedFromRealUserData": false,
+  "nodes": [
+    {
+      "nodeId": "node-local-fixture",
+      "displayName": "This Mac",
+      "state": "ready",
+      "home": "/fixture/local-home",
+      "workspace": {
+        "workspaceId": "fed1:node-local-fixture:w:d29ya3NwYWNlLWNvbGxpc2lvbg",
+        "title": "synthetic-backend",
+        "path": "/fixture/local-home/projects/backend"
+      },
+      "session": {
+        "sessionId": "fed1:node-local-fixture:s:c2Vzc2lvbi1jb2xsaXNpb24",
+        "title": "Synthetic local session",
+        "status": "idle"
+      }
+    },
+    {
+      "nodeId": "node-vm-fixture",
+      "displayName": "VM Fixture",
+      "state": "stale",
+      "home": "/fixture/remote-home",
+      "workspace": {
+        "workspaceId": "fed1:node-vm-fixture:w:d29ya3NwYWNlLWNvbGxpc2lvbg",
+        "title": "synthetic-backend",
+        "path": "/fixture/remote-home/projects/backend"
+      },
+      "session": {
+        "sessionId": "fed1:node-vm-fixture:s:c2Vzc2lvbi1jb2xsaXNpb24",
+        "title": "Synthetic remote session",
+        "status": "running"
+      }
+    }
+  ],
+  "query": "synthetic search",
+  "warning": "VM Fixture timed out; other synthetic results remain visible"
+}

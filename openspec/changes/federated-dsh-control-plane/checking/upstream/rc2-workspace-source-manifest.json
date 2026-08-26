@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
+  "releaseCommit": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+  "releaseTree": "53915efe4e2126cc7779b73dfc8a3bcec5318c44",
+  "commitTime": "2026-08-21T20:03:37+08:00",
+  "dshVersion": "0.1.1-rc.2",
+  "archive": {
+    "format": "tar",
+    "prefix": "deepseek-harness-b150a551/",
+    "sha256": "a94d9b561d366f4d630ee5bc30a8b37eb8dd58ee284bb16bdde0409ecdfa84d6",
+    "size": 163840,
+    "paths": [
+      "LICENSE",
+      "packages/client/ui-workspace/package.json",
+      "packages/client/ui-workspace/src/client",
+      "packages/client/ui-workspace/src/css-modules.d.ts"
+    ]
+  },
+  "patch": {
+    "path": "rc2-workspace-node-section.patch",
+    "sha256": "1a5338a83523a705b9357293a5ee2d2d7833971e3cff800c52c095a7f007860d",
+    "outputs": [
+      { "path": "src/client/WorkspaceBrowser.tsx", "gitBlob": "2f1bd71b888d21be97da6e8b3d24d4ac1fd36d75", "sha256": "3336a8ad505b5b1bba3dc9c17206ead7150741607ed6af279fd6ab7ad1877ab8" },
+      { "path": "src/client/rows/Rows.tsx", "gitBlob": "df2e7e7f5d627b3092e4b70e1469e566263e9379", "sha256": "150519d4a26f19d017ffa511dde4538094643a7afe955ad45144cc39e7dcb7c6" },
+      { "path": "src/client/federation.ts", "gitBlob": "e546ce6fd88c05bf42ba843e05ae5d25a401b4fa", "sha256": "b3cd5ed80d503db22be3f81b15ead4dbf967a8d406a510b20b301bba772ee3c1" }
+    ]
+  },
+  "blobs": [
+    { "path": "LICENSE", "gitBlob": "c1f7a78e89e4e4dc7b86664c3b3c76eb5eee1785", "size": 1065 },
+    { "path": "packages/client/ui-workspace/package.json", "gitBlob": "8ce02c90bca68f524f9f98a06a69ca8c960679cc", "size": 2491 },
+    { "path": "packages/client/ui-workspace/src/client/WorkspaceBrowser.module.css", "gitBlob": "4d19163322dd2d8f21e463ab06e08d3d66425e24", "size": 11016 },
+    { "path": "packages/client/ui-workspace/src/client/WorkspaceBrowser.tsx", "gitBlob": "08f22ed400ac3a80852df186e5a899bc8ba53c33", "size": 54625 },
+    { "path": "packages/client/ui-workspace/src/client/WorkspacePicker.module.css", "gitBlob": "c99164aacf903de5fad8f79db9668506b6e79694", "size": 408 },
+    { "path": "packages/client/ui-workspace/src/client/WorkspacePicker.tsx", "gitBlob": "c72d8cab39302feb43f2c67fdb2a86de0b9ccffe", "size": 10182 },
+    { "path": "packages/client/ui-workspace/src/client/contract/slots.ts", "gitBlob": "bdd85052a0249e4f561eb0a8a3afe11087cd5e26", "size": 8533 },
+    { "path": "packages/client/ui-workspace/src/client/index.ts", "gitBlob": "93269c22c1343dd7c2ffc0f7767b736b12ba9c3d", "size": 6458 },
+    { "path": "packages/client/ui-workspace/src/client/locales.ts", "gitBlob": "c08fd931de5a218a61a234a0d5bb7194f5600100", "size": 5841 },
+    { "path": "packages/client/ui-workspace/src/client/rows/Rows.module.css", "gitBlob": "5dc899af45057cb53201d303178db76cb624c887", "size": 7007 },
+    { "path": "packages/client/ui-workspace/src/client/rows/Rows.tsx", "gitBlob": "d2d121fe4d5ce8a38a817cbbd82e7416865a71b3", "size": 18995 },
+    { "path": "packages/client/ui-workspace/src/client/stores.ts", "gitBlob": "f0853296433b306418fc89e3bf79b756b6bd37b1", "size": 3886 },
+    { "path": "packages/client/ui-workspace/src/client/tree.ts", "gitBlob": "23649a24f7a99e192e3c7840a97a453aae349c1b", "size": 15846 },
+    { "path": "packages/client/ui-workspace/src/css-modules.d.ts", "gitBlob": "bc5e482353ccdad2cac56977c6880a9453324cd6", "size": 123 }
+  ],
+  "deterministicInputs": [
+    "repository URL",
+    "release commit and tree",
+    "ordered archive path list",
+    "archive format and prefix",
+    "per-file Git blob and size manifest",
+    "patch bytes and sha256 1a5338a83523a705b9357293a5ee2d2d7833971e3cff800c52c095a7f007860d",
+    "build toolchain versions and lockfile (added with package skeleton)"
+  ],
+  "license": {
+    "spdx": "MIT",
+    "copyright": "Copyright (c) 2026 DeepSeek",
+    "gitBlob": "c1f7a78e89e4e4dc7b86664c3b3c76eb5eee1785",
+    "noticeFile": "UPSTREAM-NOTICE.md"
+  }
+}

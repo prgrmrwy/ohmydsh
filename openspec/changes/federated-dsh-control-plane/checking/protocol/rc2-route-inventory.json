@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "dshVersion": "0.1.1-rc.2",
+  "releaseCommit": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+  "envelopes": {
+    "clientRequest": { "type": "client-request", "rpcId": "string", "method": "string", "payload": "method-specific object" },
+    "serverResponse": { "type": "server-response", "rpcId": "echoed string", "result": { "ok": "boolean", "valueOrError": "method-specific" } },
+    "serverRequest": { "type": "server-request", "rpcId": "string", "method": "frame payload.type", "payload": "MuxFrame or HostFrame" },
+    "clientResponse": { "type": "client-response", "rpcId": "echoed server-request id", "result": { "ok": "boolean", "valueOrError": "approval/question-specific" } }
+  },
+  "unaryRoutes": [
+    { "path": "/api/session.list", "method": "session.list", "ids": [], "request": { "cursor": "string?" }, "response": { "items": "SessionSummary[]" }, "mode": "read" },
+    { "path": "/api/session.search", "method": "session.search", "ids": [], "request": { "query": "string" }, "response": { "items": "{sessionId,snippet}[]", "hasMore": "boolean" }, "mode": "read" },
+    { "path": "/api/session.create", "method": "session.create", "ids": ["workspaceId?", "sessionId?"], "request": { "workspaceId": "WorkspaceId?", "cwd": "string?", "sessionId": "SessionId?", "agentPreset": "string?", "constraint": "workspaceId and cwd are mutually exclusive" }, "response": { "sessionId": "SessionId", "agentPreset": "string?" }, "mode": "write" },
+    { "path": "/api/session.history", "method": "session.history", "ids": ["sessionId"], "request": { "sessionId": "SessionId", "beforeSeq": "number?", "maxMessages": "number?" }, "response": { "events": "HistoryEntry[]", "hasMore": "boolean", "projections": "{asOfSeq:number,values:Partial<SessionProjectionMap>}?" }, "mode": "read" },
+    { "path": "/api/session.models", "method": "session.models", "ids": ["sessionId"], "request": { "sessionId": "SessionId" }, "response": "SessionModels", "mode": "read" },
+    { "path": "/api/session.selectModel", "method": "session.selectModel", "ids": ["sessionId"], "request": { "sessionId": "SessionId", "provider": "string", "model": "string", "reasoningEffort": "string?" }, "response": { "selected": "ModelSelection" }, "mode": "write" },
+    { "path": "/api/session.rename", "method": "session.rename", "ids": ["sessionId"], "request": { "sessionId": "SessionId", "title": "string" }, "response": { "title": "string", "seq": "number" }, "mode": "write" },
+    { "path": "/api/session.fork", "method": "session.fork", "ids": ["sessionId"], "request": { "sessionId": "SessionId", "atSeq": "number?" }, "response": { "sessionId": "SessionId" }, "mode": "write" },
+    { "path": "/api/session.prompt", "method": "session.prompt", "ids": ["sessionId"], "request": { "sessionId": "SessionId", "mode": "queue|steer", "content": "PromptContentPart[]", "clientTimeZone": "string?" }, "response": { "accepted": "true", "command": "{kind:'success',text?:string}?" }, "mode": "write" },
+    { "path": "/api/session.attachment", "method": "session.attachment", "ids": ["sessionId"], "request": { "sessionId": "SessionId", "attachmentId": "AttachmentId" }, "response": { "attachment": "ImageAttachmentRef", "data": "base64 string" }, "mode": "read" },
+    { "path": "/api/session.updateQueue", "method": "session.updateQueue", "ids": ["sessionId"], "request": { "sessionId": "SessionId", "itemId": "MessageId", "action": "edit|remove|steer" }, "response": { "accepted": "true" }, "mode": "write" },
+    { "path": "/api/session.cancel", "method": "session.cancel", "ids": ["sessionId"], "request": { "sessionId": "SessionId" }, "response": { "accepted": "true" }, "mode": "write" },
+    { "path": "/api/subagent.list", "method": "subagent.list", "ids": ["parentSessionId"], "request": { "parentSessionId": "SessionId" }, "response": "SubagentCatalog", "mode": "read" },
+    { "path": "/api/subagent.history", "method": "subagent.history", "ids": ["parentSessionId", "childSessionId"], "request": { "parentSessionId": "SessionId", "childSessionId": "SessionId", "mode": "one-shot|continuable", "beforeSeq": "number?", "maxMessages": "number?" }, "response": { "events": "HistoryEntry[]", "hasMore": "boolean", "projections": "SessionProjectionsBlock?" }, "mode": "read" },
+    { "path": "/api/subagent.prompt", "method": "subagent.prompt", "ids": ["parentSessionId", "childSessionId"], "request": { "parentSessionId": "SessionId", "childSessionId": "SessionId", "mode": "continuable", "content": "ContentBlock[]", "clientTimeZone": "string?" }, "response": { "messageId": "MessageId" }, "mode": "write" },
+    { "path": "/api/subagent.interrupt", "method": "subagent.interrupt", "ids": ["parentSessionId", "childSessionId"], "request": { "parentSessionId": "SessionId", "childSessionId": "SessionId", "mode": "continuable" }, "response": { "accepted": "true" }, "mode": "write" },
+    { "path": "/api/agentPreset.select", "method": "agentPreset.select", "ids": ["sessionId"], "request": { "sessionId": "SessionId", "agentPreset": "string" }, "response": { "agentPreset": "string" }, "mode": "write" },
+    { "path": "/api/goal.create", "method": "goal.create", "ids": ["sessionId"], "request": { "sessionId": "SessionId", "objective": "string", "maxGoalRounds": "number?" }, "response": { "ref": "GoalRef" }, "mode": "write" },
+    { "path": "/api/goal.edit", "method": "goal.edit", "ids": ["sessionId"], "request": { "sessionId": "SessionId", "ref": "GoalRef", "objective": "string?", "maxGoalRounds": "number?" }, "response": { "ref": "GoalRef" }, "mode": "write" },
+    { "path": "/api/goal.pause", "method": "goal.pause", "ids": ["sessionId"], "request": { "sessionId": "SessionId", "ref": "GoalRef" }, "response": { "ref": "GoalRef" }, "mode": "write" },
+    { "path": "/api/goal.resume", "method": "goal.resume", "ids": ["sessionId"], "request": { "sessionId": "SessionId", "ref": "GoalRef" }, "response": { "ref": "GoalRef" }, "mode": "write" },
+    { "path": "/api/goal.complete", "method": "goal.complete", "ids": ["sessionId"], "request": { "sessionId": "SessionId", "ref": "GoalRef" }, "response": { "ref": "GoalRef" }, "mode": "write" },
+    { "path": "/api/goal.clear", "method": "goal.clear", "ids": ["sessionId"], "request": { "sessionId": "SessionId", "ref": "GoalRef" }, "response": { "cleared": "true" }, "mode": "write" },
+    { "path": "/api/workspace.list", "method": "workspace.list", "ids": [], "request": {}, "response": { "items": "WorkspaceView[]", "archivedSessionIds": "SessionId[]" }, "mode": "read" },
+    { "path": "/api/workspace.create", "method": "workspace.create", "ids": [], "request": { "path": "string" }, "response": { "workspace": "WorkspaceView", "created": "boolean" }, "mode": "write" },
+    { "path": "/api/workspace.rename", "method": "workspace.rename", "ids": ["workspaceId"], "request": { "workspaceId": "WorkspaceId", "title": "string" }, "response": { "workspace": "WorkspaceView" }, "mode": "write" },
+    { "path": "/api/workspace.delete", "method": "workspace.delete", "ids": ["workspaceId"], "request": { "workspaceId": "WorkspaceId" }, "response": { "deleted": "true" }, "mode": "write" },
+    { "path": "/api/workspace.insertBefore", "method": "workspace.insertBefore", "ids": ["workspaceId", "beforeWorkspaceId?"], "request": { "workspaceId": "WorkspaceId", "beforeWorkspaceId": "WorkspaceId?" }, "response": { "workspaceIds": "WorkspaceId[]" }, "mode": "write" },
+    { "path": "/api/workspace.insertSessionBefore", "method": "workspace.insertSessionBefore", "ids": ["workspaceId", "sessionId", "beforeSessionId?"], "request": { "workspaceId": "WorkspaceId", "sessionId": "SessionId", "beforeSessionId": "SessionId?" }, "response": { "workspace": "WorkspaceView" }, "mode": "write" },
+    { "path": "/api/workspace.archiveSession", "method": "workspace.archiveSession", "ids": ["sessionId"], "request": { "sessionId": "SessionId" }, "response": { "archivedSessionIds": "SessionId[]" }, "mode": "write" },
+    { "path": "/api/host.describe", "method": "host.describe", "ids": [], "request": {}, "response": { "version": "string", "cwd": "string", "provider": "string?", "model": "string?", "attachedSessions": "number", "home": "string", "canOpenPath": "boolean" }, "mode": "read" },
+    { "path": "/api/host.listDirectory", "method": "host.listDirectory", "ids": [], "request": { "path": "string?" }, "response": "DirectoryListing", "mode": "read-node-bound" },
+    { "path": "/api/host.createDirectory", "method": "host.createDirectory", "ids": [], "request": { "path": "string", "name": "string" }, "response": { "path": "string" }, "mode": "write-node-bound" },
+    { "path": "/api/respond", "method": "respond", "ids": ["rpcId routes to pending session interaction"], "request": "ClientResponse", "response": "{accepted:true}|{accepted:false,reason:'not-pending'|'bad-response'}", "mode": "write" }
+  ],
+  "nonUnaryRoutes": [
+    { "path": "/api/events.mux", "transport": "browser WebSocket downlink; ApiProxy also supports GET SSE in-process", "frames": ["session/event", "session/subscribed", "approval/requested", "approval/resolved", "question/requested", "question/resolved", "session/queue", "session/jobs", "session/projection", "stream/error"] },
+    { "path": "/api/events.host", "transport": "browser WebSocket downlink; ApiProxy also supports GET SSE in-process", "frames": ["host/session-added", "host/session-removed", "host/session-status", "host/agent-error", "host/workspace-changed", "host/workspace-removed", "host/workspace-order-changed", "host/archived-sessions-changed", "host/remote-event", "stream/error"] },
+    { "path": "/api/session.export?sessionId=<id>&includeDescendants=true", "transport": "GET or HEAD without RPC envelope", "ids": ["sessionId"], "mode": "read-download" }
+  ],
+  "schemaSources": [
+    "@deepseek-ai/dsh-host-apiproxy/lib/types/api/rpc.d.ts",
+    "@deepseek-ai/dsh-host-apiproxy/lib/types/api/sessions.d.ts",
+    "@deepseek-ai/dsh-host-apiproxy/lib/types/api/workspace.d.ts",
+    "@deepseek-ai/dsh-host-apiproxy/lib/types/api/host.d.ts",
+    "@deepseek-ai/dsh-host-apiproxy/lib/types/api/events.d.ts",
+    "@deepseek-ai/dsh-host-apiproxy/lib/types/api/downloads.d.ts",
+    "@deepseek-ai/dsh-host-apiproxy/lib/types/api/rpc-map.d.ts"
+  ]
+}

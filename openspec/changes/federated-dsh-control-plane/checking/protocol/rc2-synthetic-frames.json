@@ -1,0 +1,95 @@
+{
+  "fixturePolicy": {
+    "syntheticOnly": true,
+    "containsCredentials": false,
+    "containsRealPaths": false,
+    "containsUserHistory": false
+  },
+  "unary": {
+    "request": {
+      "type": "client-request",
+      "rpcId": "fixture-rpc-prompt-001",
+      "method": "session.prompt",
+      "payload": {
+        "sessionId": "fixture-session-shared",
+        "mode": "queue",
+        "content": [{ "type": "text", "text": "synthetic prompt" }],
+        "clientTimeZone": "Etc/UTC"
+      }
+    },
+    "success": {
+      "type": "server-response",
+      "rpcId": "fixture-rpc-prompt-001",
+      "result": { "ok": true, "value": { "accepted": true } }
+    },
+    "failure": {
+      "type": "server-response",
+      "rpcId": "fixture-rpc-history-404",
+      "result": {
+        "ok": false,
+        "error": {
+          "code": "session-not-found",
+          "message": "synthetic missing session",
+          "details": { "sessionId": "fixture-session-missing" }
+        }
+      }
+    }
+  },
+  "mux": [
+    {
+      "type": "server-request",
+      "rpcId": "fixture-mux-subscribed-001",
+      "method": "session/subscribed",
+      "payload": { "type": "session/subscribed", "sessionId": "fixture-session-shared", "lastSeq": 7 }
+    },
+    {
+      "type": "server-request",
+      "rpcId": "fixture-mux-projection-008",
+      "method": "session/projection",
+      "payload": { "type": "session/projection", "sessionId": "fixture-session-shared", "key": "title", "value": "Synthetic title", "seq": 8 }
+    },
+    {
+      "type": "server-request",
+      "rpcId": "fixture-approval-stable-001",
+      "method": "approval/requested",
+      "payload": { "type": "approval/requested", "sessionId": "fixture-session-shared", "approvalId": "fixture-approval-001", "toolName": "synthetic_tool", "reason": "synthetic approval" }
+    }
+  ],
+  "respond": {
+    "request": {
+      "type": "client-response",
+      "rpcId": "fixture-approval-stable-001",
+      "result": { "ok": true, "value": { "outcome": "approve" } }
+    },
+    "receipt": { "accepted": true }
+  },
+  "host": [
+    {
+      "type": "server-request",
+      "rpcId": "fixture-host-workspace-001",
+      "method": "host/workspace-changed",
+      "payload": {
+        "type": "host/workspace-changed",
+        "workspace": {
+          "workspaceId": "fixture-workspace-shared",
+          "path": "/synthetic/node-a/project",
+          "title": "Synthetic project",
+          "sessionIds": ["fixture-session-shared"],
+          "createdAt": "2000-01-01T00:00:00.000Z",
+          "updatedAt": "2000-01-01T00:00:01.000Z"
+        }
+      }
+    },
+    {
+      "type": "server-request",
+      "rpcId": "fixture-host-status-001",
+      "method": "host/session-status",
+      "payload": { "type": "host/session-status", "sessionId": "fixture-session-shared", "running": true }
+    }
+  ],
+  "historyBaseline": {
+    "events": [],
+    "hasMore": false,
+    "projections": { "asOfSeq": 8, "values": { "title": "Synthetic title" } }
+  }
+}
