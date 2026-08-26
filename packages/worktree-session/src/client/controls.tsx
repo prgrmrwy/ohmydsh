@@ -38,6 +38,36 @@ export function BaseRefOption({ name, selected, onSelect }: { name: string, sele
   >{name}</button>
 }
 
+/**
+ * In-page hover label for the base ref chooser. Rendered as a sibling of the
+ * chooser button while the pointer is over it (zero gap so the pointer can
+ * reach it without triggering the leave), and shown above the button so it
+ * never overlaps the open dropdown. Deterministic across browsers — native
+ * `title` tooltips vary (and were reported not to appear), so the full ref
+ * name is guaranteed visible.
+ */
+export function BaseRefHoverLabel({ text }: { text: string }) {
+  return <span
+    data-testid="worktree-session-ref-hover"
+    style={{
+      position: 'absolute',
+      top: 26,
+      left: 0,
+      zIndex: 1001,
+      pointerEvents: 'none',
+      maxWidth: 420,
+      padding: '4px 8px',
+      borderRadius: 6,
+      border: '1px solid var(--dsw-alias-line-border, #d0d0d0)',
+      background: 'var(--dsw-alias-bg-layer-2, white)',
+      boxShadow: '0 4px 14px #0003',
+      fontSize: 11,
+      lineHeight: 1.45,
+      whiteSpace: 'normal',
+    }}
+  >{text}</span>
+}
+
 /** Open an absolute directory with the local editor via a `vscode://file/` deep link. */
 export function openWorktreeInEditor(path: string): void {
   if (!path.startsWith('/') && !/^[A-Za-z]:[/\\]/.test(path)) return
@@ -51,6 +81,7 @@ export function WorktreeControls({ pluginContext: ctx, session, sessionId, useSe
   const [revision, setRevision] = useState(0)
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
+  const [hovered, setHovered] = useState(false)
   const stage = cwd === undefined ? undefined : getStage(sessionId as string, cwd)
 
   useEffect(() => subscribeStage(sessionId as string, () => { setRevision(value => value + 1) }), [sessionId])
@@ -119,12 +150,17 @@ export function WorktreeControls({ pluginContext: ctx, session, sessionId, useSe
   if (!session.blank || stage.refs.length === 0) return null
 
   return <span style={containerStyle} data-testid="worktree-session-controls">
-    <span style={{ position: 'relative' }}>
-      <button type="button" style={{ ...controlStyle, ...ellipsisStyle, padding: '0 8px' }} title={baseRefChooserTitle(stage.baseRef)} onClick={() => {
+    <span
+      style={{ position: 'relative' }}
+      onMouseEnter={() => { setHovered(true) }}
+      onMouseLeave={() => { setHovered(false) }}
+    >
+      <button type="button" aria-label={baseRefChooserTitle(stage.baseRef)} style={{ ...controlStyle, ...ellipsisStyle, padding: '0 8px' }} onClick={() => {
         const next = !open
         setOpen(next)
         if (next) void post<RepoStatusResult>(ROUTES.repoStatus, { repoPath: cwd }).then(result => { setStage(sessionId as string, cwd, { refs: result.refs }) })
       }}>⑂ {stage.baseRef ?? 'Choose base'} ▾</button>
+      {hovered && <BaseRefHoverLabel text={baseRefChooserTitle(stage.baseRef)} />}
       {open && <span style={{ position: 'absolute', bottom: 30, left: 0, zIndex: 1000, width: 300, padding: 8, borderRadius: 10, background: 'var(--dsw-alias-bg-layer-2, white)', boxShadow: '0 8px 30px #0003' }}>
         <input autoFocus value={query} onChange={event => { setQuery(event.target.value) }} placeholder="Search local and remote refs" style={{ ...controlStyle, boxSizing: 'border-box', width: '100%', maxWidth: 'none', padding: '0 7px' }} />
         <span style={{ display: 'block', maxHeight: 230, overflow: 'auto', marginTop: 6 }}>
