@@ -12,7 +12,7 @@ vi.mock('../src/client/stage-store.js', () => ({
   setStage: () => {},
 }))
 
-import { BaseRefOption, baseRefChooserTitle, openWorktreeInEditor, WorktreeControls } from '../src/client/controls.js'
+import { BaseRefHoverLabel, BaseRefOption, baseRefChooserTitle, openWorktreeInEditor, WorktreeControls } from '../src/client/controls.js'
 
 const BASE_REF_HINT = 'Choose the base ref; selection has no Git side effects'
 const LONG_REF = 'feat/per-model-default-reasoning-effort'
@@ -92,15 +92,23 @@ describe('WorktreeControls base ref chooser rendering', () => {
     expect(html).toContain(`⑂ ${LONG_REF} ▾`)
   })
 
-  it('shows the full ref name and the no-side-effects hint on hover', () => {
+  it('exposes the full ref name and no-side-effects hint to assistive tech', () => {
     const html = renderChooser(LONG_REF)
-    expect(html).toContain(`title="${LONG_REF} — ${BASE_REF_HINT}"`)
+    expect(html).toContain(`aria-label="${LONG_REF} — ${BASE_REF_HINT}"`)
   })
 
   it('keeps the plain hint when no base ref is selected yet', () => {
     const html = renderChooser(undefined)
-    expect(html).toContain(`title="${BASE_REF_HINT}"`)
+    expect(html).toContain(`aria-label="${BASE_REF_HINT}"`)
     expect(html).toContain('⑂ Choose base ▾')
+  })
+
+  it('renders the in-page hover label with the full ref name', () => {
+    const html = renderToStaticMarkup(createElement(BaseRefHoverLabel, { text: baseRefChooserTitle(LONG_REF) }))
+    expect(html).toContain('data-testid="worktree-session-ref-hover"')
+    expect(html).toContain(`>${LONG_REF} — ${BASE_REF_HINT}</span>`)
+    expect(html).toContain('position:absolute')
+    expect(html).toContain('pointer-events:none')
   })
 
   it('keeps the dropdown search input free of text-line rules', () => {
