@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "dshVersion": "0.1.1-rc.2",
+  "releaseCommit": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+  "assembly": "isolated default web profile",
+  "source": "@deepseek-ai/dsh-api-remotes/client selected TYPERT_REMOTE contributions",
+  "endpoints": [
+    { "endpoint": "commands/execute", "identityFields": ["agentId"], "federatedPolicy": "route-session" },
+    { "endpoint": "commands/list", "identityFields": ["agentId"], "federatedPolicy": "route-session" },
+
+    { "endpoint": "goals/clear", "identityFields": ["agentId"], "federatedPolicy": "route-session" },
+    { "endpoint": "goals/complete", "identityFields": ["agentId"], "federatedPolicy": "route-session" },
+    { "endpoint": "goals/create", "identityFields": ["agentId"], "federatedPolicy": "route-session" },
+    { "endpoint": "goals/edit", "identityFields": ["agentId"], "federatedPolicy": "route-session" },
+    { "endpoint": "goals/pause", "identityFields": ["agentId"], "federatedPolicy": "route-session" },
+    { "endpoint": "goals/resume", "identityFields": ["agentId"], "federatedPolicy": "route-session" },
+
+    { "endpoint": "dynamicCordisRunner/getClientCode", "identityFields": ["agentId"], "federatedPolicy": "reject-federated-v1" },
+    { "endpoint": "dynamicCordisRunner/inventory", "identityFields": [], "federatedPolicy": "local-pass-through" },
+    { "endpoint": "dynamicCordisRunner/invoke", "identityFields": [], "federatedPolicy": "local-pass-through" },
+    { "endpoint": "dynamicCordisRunner/reportClientGuardFailure", "identityFields": ["agentId"], "federatedPolicy": "reject-federated-v1" },
+    { "endpoint": "dynamicCordisRunner/reportRenderFailure", "identityFields": ["agentId"], "federatedPolicy": "reject-federated-v1" },
+    { "endpoint": "dynamicCordisRunner/resolveInspectQuery", "identityFields": ["agentId"], "federatedPolicy": "reject-federated-v1" },
+    { "endpoint": "dynamicCordisRunner/resolveRequestRun", "identityFields": [], "federatedPolicy": "local-pass-through" },
+    { "endpoint": "dynamicCordisRunner/runHostHalf", "identityFields": ["agentId"], "federatedPolicy": "reject-federated-v1" },
+    { "endpoint": "dynamicCordisRunner/settleUserRun", "identityFields": ["agentId"], "federatedPolicy": "reject-federated-v1" },
+    { "endpoint": "dynamicCordisRunner/stopFromPanel", "identityFields": ["agentId"], "federatedPolicy": "reject-federated-v1" },
+    { "endpoint": "dynamicCordisRunner/syncInspectManifest", "identityFields": [], "federatedPolicy": "local-pass-through" },
+    { "endpoint": "dynamicCordisRunner/undefineFromPanel", "identityFields": ["agentId"], "federatedPolicy": "reject-federated-v1" },
+
+    { "endpoint": "fileReferences/list", "identityFields": ["agentId"], "federatedPolicy": "route-session-capability" },
+    { "endpoint": "pluginInventory/list", "identityFields": [], "federatedPolicy": "local-pass-through" },
+    { "endpoint": "messageFeedback/delete", "identityFields": ["request.sessionId"], "federatedPolicy": "route-session-capability" },
+    { "endpoint": "messageFeedback/list", "identityFields": ["request.sessionId"], "federatedPolicy": "route-session-capability" },
+    { "endpoint": "messageFeedback/put", "identityFields": ["request.sessionId"], "federatedPolicy": "route-session-capability" },
+    { "endpoint": "sessionReferenceResolver/candidates", "identityFields": ["agentId"], "federatedPolicy": "route-session-capability" }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
+  "releaseCommit": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+  "releaseTree": "53915efe4e2126cc7779b73dfc8a3bcec5318c44",
+  "dshVersion": "0.1.1-rc.2",
+  "archive": {
+    "format": "tar",
+    "prefix": "deepseek-harness-b150a551/",
+    "sha256": "2e226ab71ebf1050b1ba63202aa9f8e6d988f337ab299506069ff5a0015dd09e",
+    "size": 235520,
+    "paths": [
+      "LICENSE",
+      "packages/client/connection/package.json",
+      "packages/client/connection/src"
+    ]
+  },
+  "patch": {
+    "path": "rc2-connection-api-middleware.patch",
+    "sha256": "e1b6c2d17a5efa05918c8044b011874c363c3f2cd7a4d83b7a2b5990aa87d0b9",
+    "outputs": [
+      { "path": "src/index.ts", "gitBlob": "6e3f3662602a1cff66adb7dcb7d4cf34087d50db", "sha256": "03a4385df672f09b97cde10b3ed40844a1a85e76867b3ee94ac2a860a194b2dd", "size": 9063 },
+      { "path": "src/rpc.ts", "gitBlob": "ee2492db9f93855ad1cb1d7be93af755e7d702ba", "sha256": "a9650eeb53d012804f9a6571fbf3048bd91bd0d4c6a76de09296210dce463b8f", "size": 3784 },
+      { "path": "src/rpc-host.ts", "gitBlob": "8bd456673ee0eb5aca05314aeecd1e44871017f2", "sha256": "5c3638992b4552b2442554b1d9a733cc7cf7d2cb4a8d28b70ae486eda2238b80", "size": 8909 }
+    ]
+  },
+  "blobs": [
+    { "path": "LICENSE", "gitBlob": "c1f7a78e89e4e4dc7b86664c3b3c76eb5eee1785", "size": 1065 },
+    { "path": "packages/client/connection/package.json", "gitBlob": "da33c138ab677f04c7852aaef9b24b1840d5806b", "size": 2178 },
+    { "path": "packages/client/connection/src/api-path.ts", "gitBlob": "f34aa231d4875011b6e89e6972eb30444fead4c2", "size": 541 },
+    { "path": "packages/client/connection/src/api-request-trust.ts", "gitBlob": "ea8914ccc6913c21a694b8cbae3e7fe3d538cd8e", "size": 6354 },
+    { "path": "packages/client/connection/src/client/api.ts", "gitBlob": "1b7627b293e5508558769a1580ce814428c09eb5", "size": 2742 },
+    { "path": "packages/client/connection/src/client/connection.ts", "gitBlob": "8b410534245d15620f47de4723ff6919a893cbf3", "size": 8187 },
+    { "path": "packages/client/connection/src/client/fixture.ts", "gitBlob": "cfcae2eb1f7f8721b14bb0c089be6240dcbc754e", "size": 150425 },
+    { "path": "packages/client/connection/src/client/index.ts", "gitBlob": "dce8d030bffe9a5f9baf58b74ac0d11217915301", "size": 7297 },
+    { "path": "packages/client/connection/src/client/random-uuid.ts", "gitBlob": "dc3106bd8615b2a96fd60807c2cbf970cf4e4cb3", "size": 743 },
+    { "path": "packages/client/connection/src/client/rpc.ts", "gitBlob": "8781b3ee34c1d5289f1d7105bc02f3cfba916110", "size": 2519 },
+    { "path": "packages/client/connection/src/client/web-api-client.ts", "gitBlob": "a2c2d95b7b93aa7710f2d5770375988aaa1601ef", "size": 3639 },
+    { "path": "packages/client/connection/src/http-bridge.ts", "gitBlob": "07fc0fc5dad961c6332c379a6922cf738e352257", "size": 3983 },
+    { "path": "packages/client/connection/src/index.ts", "gitBlob": "a1764a3d58b76978a565642bbd6a497f0e6c08f3", "size": 8879 },
+    { "path": "packages/client/connection/src/invariant.ts", "gitBlob": "78394263cf4cfca05cbffe15cbd8d753cf9f225d", "size": 1331 },
+    { "path": "packages/client/connection/src/loopback-hostname.ts", "gitBlob": "fe2fe93fc9669cb3023ce332abe0cfbccccb1792", "size": 771 },
+    { "path": "packages/client/connection/src/rpc-host.ts", "gitBlob": "0da66c85a74709076a07315e6e5329a2afdacb65", "size": 7745 },
+    { "path": "packages/client/connection/src/rpc.ts", "gitBlob": "e1260f00e8227163e769dae57317eb404679460d", "size": 2971 },
+    { "path": "packages/client/connection/src/websocket-downlink.ts", "gitBlob": "72ae5e94ef352d18ba9922703f87ac3dd58fbc93", "size": 4802 }
+  ],
+  "license": {
+    "spdx": "MIT",
+    "copyright": "Copyright (c) 2026 DeepSeek",
+    "gitBlob": "c1f7a78e89e4e4dc7b86664c3b3c76eb5eee1785",
+    "noticeFile": "UPSTREAM-NOTICE.md"
+  }
+}
