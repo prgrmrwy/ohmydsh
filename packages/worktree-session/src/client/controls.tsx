@@ -151,17 +151,26 @@ export function WorktreeControls({ pluginContext: ctx, session, sessionId, useSe
   if (!session.blank || stage.refs.length === 0) return null
 
   return <span style={containerStyle} data-testid="worktree-session-controls">
-    <span
-      style={{ position: 'relative' }}
-      onMouseEnter={() => { setHovered(true) }}
-      onMouseLeave={() => { setHovered(false) }}
-    >
-      <button type="button" aria-label={baseRefChooserTitle(stage.baseRef)} style={{ ...controlStyle, ...ellipsisStyle, padding: '0 8px' }} onClick={() => {
-        const next = !open
-        setOpen(next)
-        if (next) void post<RepoStatusResult>(ROUTES.repoStatus, { repoPath: cwd }).then(result => { setStage(sessionId as string, cwd, { refs: result.refs }) })
-      }}>⑂ {stage.baseRef ?? 'Choose base'} ▾</button>
-      {hovered && <BaseRefHoverLabel text={baseRefChooserTitle(stage.baseRef)} />}
+    <span style={{ position: 'relative' }}>
+      {/*
+        Hover label and the open ref dropdown are mutually exclusive: while the
+        dropdown is open the pointer needs the list (hover highlight + wheel
+        scroll), so the label only renders with the dropdown closed. Handlers
+        live on the button itself so moving onto the dropdown (a DOM child of
+        this wrapper) never leaves a stale label behind.
+      */}
+      {!open && hovered && <BaseRefHoverLabel text={baseRefChooserTitle(stage.baseRef)} />}
+      <button
+        type="button"
+        aria-label={baseRefChooserTitle(stage.baseRef)}
+        onMouseEnter={() => { setHovered(true) }}
+        onMouseLeave={() => { setHovered(false) }}
+        style={{ ...controlStyle, ...ellipsisStyle, padding: '0 8px' }} onClick={() => {
+          const next = !open
+          setOpen(next)
+          if (next) void post<RepoStatusResult>(ROUTES.repoStatus, { repoPath: cwd }).then(result => { setStage(sessionId as string, cwd, { refs: result.refs }) })
+        }}
+      >⑂ {stage.baseRef ?? 'Choose base'} ▾</button>
       {open && <span style={{ position: 'absolute', bottom: 30, left: 0, zIndex: 1000, width: 300, padding: 8, borderRadius: 10, background: 'var(--dsw-alias-bg-layer-2, white)', boxShadow: '0 8px 30px #0003' }}>
         <input autoFocus value={query} onChange={event => { setQuery(event.target.value) }} placeholder="Search local and remote refs" style={{ ...controlStyle, boxSizing: 'border-box', width: '100%', maxWidth: 'none', padding: '0 7px' }} />
         <span style={{ display: 'block', maxHeight: 230, overflow: 'auto', marginTop: 6 }}>
