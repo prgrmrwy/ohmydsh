@@ -14,6 +14,29 @@ export type WorktreeControlsProps = PropsRuntime<'conversation.input.left'> & {
 
 const containerStyle: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12 }
 const controlStyle: React.CSSProperties = { border: '1px solid var(--dsw-alias-line-border, #d0d0d0)', borderRadius: 8, background: 'transparent', color: 'inherit', height: 26, maxWidth: 190 }
+/**
+ * Shared single-line truncation for every ref-name-bearing control: long branch
+ * and ref names must clip with an ellipsis instead of wrapping and growing the
+ * input row. Kept separate from `controlStyle` because the dropdown search
+ * `<input>` reuses that base style and needs no text-line rules.
+ */
+const ellipsisStyle: React.CSSProperties = { boxSizing: 'border-box', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
+const BASE_REF_HINT = 'Choose the base ref; selection has no Git side effects'
+
+/** Hover text for the base ref chooser: full ref name first, then the no-side-effects hint. */
+export function baseRefChooserTitle(baseRef: string | undefined): string {
+  return baseRef === undefined ? BASE_REF_HINT : `${baseRef} — ${BASE_REF_HINT}`
+}
+
+/** One dropdown candidate: single-line ellipsis label with the full ref name on hover. */
+export function BaseRefOption({ name, selected, onSelect }: { name: string, selected: boolean, onSelect: () => void }) {
+  return <button
+    type="button"
+    title={name}
+    style={{ ...ellipsisStyle, width: '100%', border: 0, background: selected ? '#3370ff22' : 'transparent', color: 'inherit', textAlign: 'left', padding: '5px 7px', borderRadius: 6 }}
+    onClick={onSelect}
+  >{name}</button>
+}
 
 /** Open an absolute directory with the local editor via a `vscode://file/` deep link. */
 export function openWorktreeInEditor(path: string): void {
@@ -78,7 +101,7 @@ export function WorktreeControls({ pluginContext: ctx, session, sessionId, useSe
   if (stage.lifecycle !== undefined) {
     const lifecycle = stage.lifecycle === 'admitted' || stage.lifecycle === 'bound' || stage.lifecycle === 'submit-claimed' ? 'active' : stage.lifecycle
     const canOpen = lifecycle !== 'cleaned' && stage.worktreePath !== undefined
-    const branchStyle: React.CSSProperties = { ...controlStyle, boxSizing: 'border-box', display: 'block', lineHeight: '24px', padding: '0 8px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', ...(canOpen ? { cursor: 'pointer', borderColor: 'var(--dsw-alias-line-border-strong, #a0a0a0)' } : {}) }
+    const branchStyle: React.CSSProperties = { ...controlStyle, ...ellipsisStyle, lineHeight: '24px', padding: '0 8px', ...(canOpen ? { cursor: 'pointer', borderColor: 'var(--dsw-alias-line-border-strong, #a0a0a0)' } : {}) }
     const openBranch = (): void => { if (canOpen) openWorktree(stage.worktreePath as string) }
     const onBranchKeyDown = (event: React.KeyboardEvent): void => {
       if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openBranch() }
@@ -97,7 +120,7 @@ export function WorktreeControls({ pluginContext: ctx, session, sessionId, useSe
 
   return <span style={containerStyle} data-testid="worktree-session-controls">
     <span style={{ position: 'relative' }}>
-      <button type="button" style={{ ...controlStyle, padding: '0 8px' }} title="Choose the base ref; selection has no Git side effects" onClick={() => {
+      <button type="button" style={{ ...controlStyle, ...ellipsisStyle, padding: '0 8px' }} title={baseRefChooserTitle(stage.baseRef)} onClick={() => {
         const next = !open
         setOpen(next)
         if (next) void post<RepoStatusResult>(ROUTES.repoStatus, { repoPath: cwd }).then(result => { setStage(sessionId as string, cwd, { refs: result.refs }) })
@@ -107,7 +130,12 @@ export function WorktreeControls({ pluginContext: ctx, session, sessionId, useSe
         <span style={{ display: 'block', maxHeight: 230, overflow: 'auto', marginTop: 6 }}>
           {(['local', 'remote'] as const).map(kind => <span key={kind} style={{ display: 'block' }}>
             <strong style={{ display: 'block', padding: '5px 7px', opacity: .65 }}>{kind === 'local' ? 'Local' : 'Remote'}</strong>
-            {filtered.filter(ref => ref.kind === kind).map(ref => <button key={ref.fullName} type="button" style={{ display: 'block', width: '100%', border: 0, background: ref.name === stage.baseRef ? '#3370ff22' : 'transparent', color: 'inherit', textAlign: 'left', padding: '5px 7px', borderRadius: 6 }} onClick={() => { setStage(sessionId as string, cwd, { baseRef: ref.name }); setOpen(false) }}>{ref.name}</button>)}
+            {filtered.filter(ref => ref.kind === kind).map(ref => <BaseRefOption
+              key={ref.fullName}
+              name={ref.name}
+              selected={ref.name === stage.baseRef}
+              onSelect={() => { setStage(sessionId as string, cwd, { baseRef: ref.name }); setOpen(false) }}
+            />)}
           </span>)}
         </span>
       </span>}
