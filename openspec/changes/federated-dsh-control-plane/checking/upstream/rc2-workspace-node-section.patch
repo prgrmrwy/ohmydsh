@@ -1,0 +1,815 @@
+diff --git a/src/client/WorkspaceBrowser.tsx b/src/client/WorkspaceBrowser.tsx
+index 08f22ed..2f1bd71 100644
+--- a/src/client/WorkspaceBrowser.tsx
++++ b/src/client/WorkspaceBrowser.tsx
+@@ -245,6 +245,10 @@ type SessionTreeProps = Pick<
+   onSessionArchive: (sessionId: SessionNode['id']) => void
+   /** Session order behavior: fixed after edits, or additionally promoted by user activity. */
+   orderBy: SessionOrderBy
++  /** Caller-owned render instant so extracted sections are deterministic in tests. */
++  now: number
++  /** Node-scoped class copied to every body-portaled row menu and dialog. */
++  portalClassName: string
+ }
+ 
+ /** The scrolling session tree; unmounting drops the sessions subscription and expand-all state. */
+@@ -253,7 +257,7 @@ function SessionTree({
+   onRenameRequest, onDeleteRequest, onSessionRename, onSessionArchive,
+   insertWorkspaceBefore, insertSessionBefore, orderBy,
+   groupExpansion, setGroupExpanded,
+-  sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, home, t,
++  sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, home, now, portalClassName, t,
+ }: SessionTreeProps) {
+   const list = useSessions(s => s)
+   const current = list.current
+@@ -329,7 +333,6 @@ function SessionTree({
+     }),
+     [list, orderedWorkspaces, archivedSessionIds, expandedGroups, sessionOrderByAccount],
+   )
+-  const now = Date.now()
+   const commitSessionDrag = (activeDrag: DragState, over: NonNullable<DragState['over']>): void => {
+     if (sessionDropCommitted.current) return
+     sessionDropCommitted.current = true
+@@ -453,6 +456,7 @@ function SessionTree({
+               <ProjectRowItem
+                 group={group}
+                 home={home}
++                portalClassName={portalClassName}
+                 t={t}
+                 onToggle={() => {
+                   if (group.expanded) {
+@@ -520,6 +524,7 @@ function SessionTree({
+                     onFork={forkSession}
+                     onArchive={onSessionArchive}
+                     drag={dragProps}
++                    portalClassName={portalClassName}
+                     t={t}
+                   />
+                 )
+@@ -548,7 +553,7 @@ function SessionTree({
+ /** The flat "In one list" body: every session is one draggable top-level row. */
+ function FlatList({
+   useSessions, open, forkSession, onSessionRename, onSessionArchive, archivedSessionIds,
+-  orderBy, sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, t,
++  orderBy, sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, now, portalClassName, t,
+ }: Pick<
+   SessionTreeProps,
+   | 'useSessions'
+@@ -562,6 +567,8 @@ function FlatList({
+   | 'sessionUpdatedAtByAccount'
+   | 'syncSessionOrderAccount'
+   | 'setSessionOrder'
++  | 'now'
++  | 'portalClassName'
+   | 't'
+ >) {
+   const list = useSessions(s => s)
+@@ -616,7 +623,6 @@ function FlatList({
+     nextOrder.splice(insertAt === -1 ? nextOrder.length : insertAt, 0, activeDrag.sessionId)
+     setSessionOrder(FLAT_SESSION_ORDER_KEY, nextOrder.map(id => id as string))
+   }
+-  const now = Date.now()
+   return (
+     <div className={clsx(css.treeBody, css.wide)}>
+       <div className={clsx(css.list, css.flatList)} role="tree" aria-label={t('section.sessions')}>
+@@ -636,6 +642,7 @@ function FlatList({
+               onFork={forkSession}
+               onArchive={onSessionArchive}
+               flat
++              portalClassName={portalClassName}
+               drag={{
+                 start: () => {
+                   dropCommitted.current = false
+@@ -737,13 +744,54 @@ function SearchResults({
+ }
+ 
+ /**
+- * Render the browsing region.
+- * @param props - composed slot props (shell owner share + store + injected actions).
+- * @returns the region element tree.
++ * Build-time federation seam: one official rc.2 Workspace/Session subtree.
++ * It deliberately excludes the root section header, search chrome, rail and
++ * directory-flow slot. The caller owns the stable React key and supplies an
++ * isolated store/actions/hooks set for exactly one node.
+  */
+-export function WorkspaceBrowser({
+-  wide,
+-  expandSidebar,
++export interface Rc2WorkspaceNodeSectionProps extends Pick<
++  WorkspaceBrowserProps,
++  | 'useSessions'
++  | 'useWorkspaces'
++  | 'useStore'
++  | 'actions'
++  | 'startSession'
++  | 'open'
++  | 'renameSession'
++  | 'forkSession'
++  | 'renameWorkspace'
++  | 'deleteWorkspace'
++  | 'insertWorkspaceBefore'
++  | 'archiveSession'
++  | 'insertSessionBefore'
++  | 't'
++> {
++  /** Stable opaque federation node identity; never a display name or path. */
++  nodeKey: string
++  /** Global shell-selected list shape. */
++  groupBy: 'workspace' | 'flat'
++  /** Global shell-selected session ordering policy. */
++  orderBy: SessionOrderBy
++  /** Node host account home for official path abbreviation. */
++  home?: string | undefined
++  /** Caller-owned render instant; all official relative-time rows share it. */
++  now: number
++  /** Stable CSS-safe owner namespace for body portals; unique per mounted Node. */
++  overlayNamespace: string
++}
++
++/**
++ * Render one node-scoped official rc.2 Workspace/Session subtree.
++ * @param props - node-scoped runtime hooks, store/actions and Host operations.
++ * @returns only list/tree content and node-owned dialogs/portals.
++ */
++export function Rc2WorkspaceNodeSection({
++  nodeKey,
++  groupBy,
++  orderBy,
++  home,
++  now,
++  overlayNamespace,
+   useSessions,
+   useWorkspaces,
+   useStore,
+@@ -757,23 +805,15 @@ export function WorkspaceBrowser({
+   insertWorkspaceBefore,
+   archiveSession,
+   insertSessionBefore,
+-  createWorkspace,
+-  searchSessions,
+-  searchResultLimit,
+-  useDirectoryFlow,
+-  useHostDescription,
+-  renderSlot,
+   t,
+-}: WorkspaceBrowserProps) {
+-  const home = useHostDescription(description => description?.home)
++}: Rc2WorkspaceNodeSectionProps) {
++  if (!/^[A-Za-z0-9_-]{1,80}$/.test(overlayNamespace)) {
++    throw new Error('Rc2WorkspaceNodeSection overlayNamespace must be a CSS-safe opaque key')
++  }
++  const portalClassName = `dsh-federation-node-overlay-${overlayNamespace}`
+   const workspaces = useWorkspaces(state => state.items)
+   const workspacePhase = useWorkspaces(state => state.phase)
+   const archivedSessionIds = useWorkspaces(state => state.archivedSessionIds)
+-  // Live occupancy of this surface's directory-flow hole (the same source the
+-  // flow reads): a composition without a picking affordance can add nothing.
+-  const directoryFlowAvailable = useDirectoryFlow(occupied => occupied)
+-  const groupBy = useStore(s => s.groupBy)
+-  const orderBy = useStore(s => s.orderBy)
+   const groupExpansion = useStore(s => s.groupExpansion)
+   const sessionOrderByAccount = useStore(s => s.sessionOrderByAccount)
+   const sessionUpdatedAtByAccount = useStore(s => s.sessionUpdatedAtByAccount)
+@@ -810,6 +850,289 @@ export function WorkspaceBrowser({
+       ...workspaces.map(workspace => workspace.workspaceId as string),
+     ])
+   }, [actions.retainAccountKeys, workspacePhase, workspaces])
++
++  const [renameTarget, setRenameTarget] = useState<{ workspaceId: WorkspaceId; currentTitle: string } | null>(null)
++  const [renameDraft, setRenameDraft] = useState('')
++  const [renaming, setRenaming] = useState(false)
++  const [renameError, setRenameError] = useState<string | null>(null)
++  const renameTrimmed = renameDraft.trim()
++  const renameDuplicate = renameTarget !== null && renameTrimmed !== '' && renameTrimmed !== renameTarget.currentTitle
++    && workspaces.some(w => w.title === renameTrimmed)
++  const renameBlocked = renaming || renameTrimmed === ''
++    || renameTarget === null || renameTrimmed === renameTarget.currentTitle || renameDuplicate
++  const closeRename = () => {
++    if (renaming) return
++    setRenameTarget(null)
++    setRenameError(null)
++  }
++  const confirmRename = () => {
++    if (renameBlocked || renameTarget === null) return
++    setRenaming(true)
++    setRenameError(null)
++    renameWorkspace(renameTarget.workspaceId, renameTrimmed).then(() => {
++      setRenaming(false)
++      setRenameTarget(null)
++    }).catch((reason: unknown) => {
++      setRenaming(false)
++      setRenameError(reason instanceof Error ? reason.message : String(reason))
++    })
++  }
++
++  const [sessionRenameTarget, setSessionRenameTarget] = useState<{ sessionId: SessionNode['id']; currentTitle: string } | null>(null)
++  const [sessionRenameDraft, setSessionRenameDraft] = useState('')
++  const [sessionRenaming, setSessionRenaming] = useState(false)
++  const [sessionRenameError, setSessionRenameError] = useState<string | null>(null)
++  const sessionRenameTrimmed = sessionRenameDraft.trim()
++  const sessionRenameBlocked = sessionRenaming || sessionRenameTrimmed === '' || sessionRenameTarget === null
++  const closeSessionRename = () => {
++    if (sessionRenaming) return
++    setSessionRenameTarget(null)
++    setSessionRenameError(null)
++  }
++  const confirmSessionRename = () => {
++    if (sessionRenameBlocked || sessionRenameTarget === null) return
++    setSessionRenaming(true)
++    setSessionRenameError(null)
++    renameSession(sessionRenameTarget.sessionId, sessionRenameTrimmed).then(() => {
++      setSessionRenaming(false)
++      setSessionRenameTarget(null)
++    }).catch((reason: unknown) => {
++      setSessionRenaming(false)
++      setSessionRenameError(reason instanceof Error ? reason.message : String(reason))
++    })
++  }
++  const onSessionRename = (sessionId: SessionNode['id'], currentTitle: string) => {
++    setSessionRenameTarget({ sessionId, currentTitle })
++    setSessionRenameDraft(currentTitle)
++    setSessionRenameError(null)
++  }
++  const onSessionArchive = (sessionId: SessionNode['id']) => {
++    archiveSession(sessionId).catch((reason: unknown) => {
++      console.warn('session archive rejected:', reason)
++    })
++  }
++
++  const [deleteTarget, setDeleteTarget] = useState<{ workspaceId: WorkspaceId; title: string } | null>(null)
++  const [deleting, setDeleting] = useState(false)
++  const [deleteCommittedId, setDeleteCommittedId] = useState<WorkspaceId | null>(null)
++  const [deleteError, setDeleteError] = useState<string | null>(null)
++  useEffect(() => {
++    if (deleteCommittedId === null
++      || workspaces.some(workspace => workspace.workspaceId === deleteCommittedId)) return
++    setDeleting(false)
++    setDeleteCommittedId(null)
++    setDeleteTarget(null)
++  }, [deleteCommittedId, workspaces])
++  const closeDelete = () => {
++    if (deleting) return
++    setDeleteTarget(null)
++    setDeleteError(null)
++  }
++  const confirmDelete = () => {
++    if (deleting || deleteTarget === null) return
++    setDeleting(true)
++    setDeleteCommittedId(null)
++    setDeleteError(null)
++    deleteWorkspace(deleteTarget.workspaceId).then(() => {
++      setDeleteCommittedId(deleteTarget.workspaceId)
++    }).catch((reason: unknown) => {
++      setDeleting(false)
++      setDeleteError(reason instanceof Error ? reason.message : String(reason))
++    })
++  }
++  const composingRef = useRef(false)
++
++  return (
++    <div className={css.listArea} data-rc2-workspace-node-section={nodeKey}>
++      {groupBy === 'flat'
++        ? (
++          <FlatList
++            useSessions={useSessions} open={open} forkSession={forkSession}
++            onSessionRename={onSessionRename} onSessionArchive={onSessionArchive}
++            archivedSessionIds={archivedSessionIds}
++            orderBy={orderBy}
++            sessionOrderByAccount={sessionOrderByAccount}
++            sessionUpdatedAtByAccount={sessionUpdatedAtByAccount}
++            syncSessionOrderAccount={actions.syncSessionOrderAccount}
++            setSessionOrder={actions.setSessionOrder}
++            now={now}
++            portalClassName={portalClassName}
++            t={t}
++          />
++        )
++        : (
++          <SessionTree
++            useSessions={useSessions}
++            onSessionRename={onSessionRename}
++            onSessionArchive={onSessionArchive}
++            forkSession={forkSession}
++            workspaces={workspaces}
++            groupExpansion={groupExpansion}
++            setGroupExpanded={actions.setGroupExpanded}
++            sessionOrderByAccount={sessionOrderByAccount}
++            sessionUpdatedAtByAccount={sessionUpdatedAtByAccount}
++            syncSessionOrderAccount={actions.syncSessionOrderAccount}
++            setSessionOrder={actions.setSessionOrder}
++            archivedSessionIds={archivedSessionIds}
++            startSession={startSession}
++            open={open}
++            insertWorkspaceBefore={insertWorkspaceBefore}
++            insertSessionBefore={insertSessionBefore}
++            orderBy={orderBy}
++            home={home}
++            now={now}
++            portalClassName={portalClassName}
++            t={t}
++            onRenameRequest={(workspaceId, currentTitle) => {
++              setRenameTarget({ workspaceId, currentTitle })
++              setRenameDraft(currentTitle)
++              setRenameError(null)
++            }}
++            onDeleteRequest={(workspaceId, title) => {
++              setDeleteTarget({ workspaceId, title })
++              setDeleteError(null)
++            }}
++          />
++        )}
++
++      <Modal
++        open={renameTarget !== null}
++        onClose={closeRename}
++        closeLabel={t('close')}
++        className={portalClassName}
++        title={t('rename.workspace.title')}
++        footer={(
++          <>
++            <Button variant="outline" disabled={renaming} onClick={closeRename}>{t('cancel')}</Button>
++            <Button variant="primary" disabled={renameBlocked} onClick={confirmRename}>{t('rename')}</Button>
++          </>
++        )}
++      >
++        <input
++          className={css.renameInput}
++          value={renameDraft}
++          aria-label={t('field.workspaceName')}
++          autoFocus
++          disabled={renaming}
++          onFocus={(e) => { e.target.select() }}
++          onChange={(e) => { setRenameDraft(e.target.value); setRenameError(null) }}
++          onCompositionStart={() => { composingRef.current = true }}
++          onCompositionEnd={() => { composingRef.current = false }}
++          onKeyDown={(e) => {
++            if (e.key === 'Enter' && !composingRef.current) {
++              e.preventDefault()
++              confirmRename()
++            }
++          }}
++        />
++        {renameDuplicate && (
++          <div className={css.renameError} role="alert">{t('conflict.named', { name: renameTrimmed })}</div>
++        )}
++        {renameError !== null && <div className={css.renameError} role="alert">{renameError}</div>}
++      </Modal>
++
++      <Modal
++        open={sessionRenameTarget !== null}
++        onClose={closeSessionRename}
++        closeLabel={t('close')}
++        className={portalClassName}
++        title={t('rename.session.title')}
++        footer={(
++          <>
++            <Button variant="outline" disabled={sessionRenaming} onClick={closeSessionRename}>{t('cancel')}</Button>
++            <Button variant="primary" disabled={sessionRenameBlocked} onClick={confirmSessionRename}>{t('rename')}</Button>
++          </>
++        )}
++      >
++        <input
++          className={css.renameInput}
++          value={sessionRenameDraft}
++          aria-label={t('field.sessionName')}
++          autoFocus
++          disabled={sessionRenaming}
++          onFocus={(e) => { e.target.select() }}
++          onChange={(e) => { setSessionRenameDraft(e.target.value); setSessionRenameError(null) }}
++          onCompositionStart={() => { composingRef.current = true }}
++          onCompositionEnd={() => { composingRef.current = false }}
++          onKeyDown={(e) => {
++            if (e.key === 'Enter' && !composingRef.current) {
++              e.preventDefault()
++              confirmSessionRename()
++            }
++          }}
++        />
++        {sessionRenameError !== null && <div className={css.renameError} role="alert">{sessionRenameError}</div>}
++      </Modal>
++
++      <Modal
++        open={deleteTarget !== null}
++        onClose={closeDelete}
++        closeLabel={t('close')}
++        className={portalClassName}
++        title={t('delete.workspace')}
++        {...deleteTarget === null
++          ? {}
++          : { description: t('delete.desc', { name: deleteTarget.title }) }}
++        footer={(
++          <>
++            <Button variant="outline" disabled={deleting} onClick={closeDelete}>{t('cancel')}</Button>
++            <Button
++              variant="outline"
++              className={css.deleteAction}
++              disabled={deleting}
++              onClick={confirmDelete}
++            >
++              {t('delete.workspace')}
++            </Button>
++          </>
++        )}
++      >
++        {deleting && <div className={css.deleteStatus} role="status">{t('delete.pending')}</div>}
++        {deleteError !== null && <div className={css.renameError} role="alert">{deleteError}</div>}
++      </Modal>
++    </div>
++  )
++}
++
++/**
++ * Render the browsing region.
++ * @param props - composed slot props (shell owner share + store + injected actions).
++ * @returns the region element tree.
++ */
++export function WorkspaceBrowser({
++  wide,
++  expandSidebar,
++  useSessions,
++  useWorkspaces,
++  useStore,
++  actions,
++  startSession,
++  open,
++  renameSession,
++  forkSession,
++  renameWorkspace,
++  deleteWorkspace,
++  insertWorkspaceBefore,
++  archiveSession,
++  insertSessionBefore,
++  createWorkspace,
++  searchSessions,
++  searchResultLimit,
++  useDirectoryFlow,
++  useHostDescription,
++  renderSlot,
++  t,
++}: WorkspaceBrowserProps) {
++  const home = useHostDescription(description => description?.home)
++  const now = Date.now()
++  const workspaces = useWorkspaces(state => state.items)
++  const workspacePhase = useWorkspaces(state => state.phase)
++  const archivedSessionIds = useWorkspaces(state => state.archivedSessionIds)
++  // Live occupancy of this surface's directory-flow hole (the same source the
++  // flow reads): a composition without a picking affordance can add nothing.
++  const directoryFlowAvailable = useDirectoryFlow(occupied => occupied)
++  const groupBy = useStore(s => s.groupBy)
++  const orderBy = useStore(s => s.orderBy)
+   // The query outlives the tree and the input (both wide-only) so collapsing
+   // does not silently drop an in-progress filter.
+   const [query, setQuery] = useState('')
+@@ -901,112 +1224,6 @@ export function WorkspaceBrowser({
+     }
+   }, [normalizedQuery, searchSessions])
+ 
+-  // Rename dialog (browser-owned so it outlives row unmounts during collapse).
+-  const [renameTarget, setRenameTarget] = useState<{ workspaceId: WorkspaceId; currentTitle: string } | null>(null)
+-  const [renameDraft, setRenameDraft] = useState('')
+-  const [renaming, setRenaming] = useState(false)
+-  const [renameError, setRenameError] = useState<string | null>(null)
+-  const renameTrimmed = renameDraft.trim()
+-  const renameDuplicate = renameTarget !== null && renameTrimmed !== '' && renameTrimmed !== renameTarget.currentTitle
+-    && workspaces.some(w => w.title === renameTrimmed)
+-  const renameBlocked = renaming || renameTrimmed === ''
+-    || renameTarget === null || renameTrimmed === renameTarget.currentTitle || renameDuplicate
+-  const closeRename = () => {
+-    if (renaming) return
+-    setRenameTarget(null)
+-    setRenameError(null)
+-  }
+-  const confirmRename = () => {
+-    if (renameBlocked) return
+-    setRenaming(true)
+-    setRenameError(null)
+-    renameWorkspace(renameTarget.workspaceId, renameTrimmed).then(() => {
+-      setRenaming(false)
+-      setRenameTarget(null)
+-    }).catch((reason: unknown) => {
+-      setRenaming(false)
+-      setRenameError(reason instanceof Error ? reason.message : String(reason))
+-    })
+-  }
+-
+-  // Session rename dialog (same browser-owned pattern as workspace rename;
+-  // sessions have no client-side name-conflict rule — the host normalizes).
+-  // Unlike workspace rename, an unchanged title is NOT blocked: confirming
+-  // the current automatic title is the gesture that pins it.
+-  const [sessionRenameTarget, setSessionRenameTarget] = useState<{ sessionId: SessionNode['id']; currentTitle: string } | null>(null)
+-  const [sessionRenameDraft, setSessionRenameDraft] = useState('')
+-  const [sessionRenaming, setSessionRenaming] = useState(false)
+-  const [sessionRenameError, setSessionRenameError] = useState<string | null>(null)
+-  const sessionRenameTrimmed = sessionRenameDraft.trim()
+-  const sessionRenameBlocked = sessionRenaming || sessionRenameTrimmed === '' || sessionRenameTarget === null
+-  const closeSessionRename = () => {
+-    if (sessionRenaming) return
+-    setSessionRenameTarget(null)
+-    setSessionRenameError(null)
+-  }
+-  const confirmSessionRename = () => {
+-    if (sessionRenameBlocked) return
+-    setSessionRenaming(true)
+-    setSessionRenameError(null)
+-    renameSession(sessionRenameTarget.sessionId, sessionRenameTrimmed).then(() => {
+-      setSessionRenaming(false)
+-      setSessionRenameTarget(null)
+-    }).catch((reason: unknown) => {
+-      setSessionRenaming(false)
+-      setSessionRenameError(reason instanceof Error ? reason.message : String(reason))
+-    })
+-  }
+-  const onSessionRename = (sessionId: SessionNode['id'], currentTitle: string) => {
+-    setSessionRenameTarget({ sessionId, currentTitle })
+-    setSessionRenameDraft(currentTitle)
+-    setSessionRenameError(null)
+-  }
+-
+-  // Archive is dialog-free: not destructive (the log and the accounting slot
+-  // remain), so the menu action commits directly; the row disappears when the
+-  // archive-set echo lands. Failures are non-fatal console diagnostics, the
+-  // same posture as reorder rejections.
+-  const onSessionArchive = (sessionId: SessionNode['id']) => {
+-    archiveSession(sessionId).catch((reason: unknown) => {
+-      console.warn('session archive rejected:', reason)
+-    })
+-  }
+-
+-  // Delete dialog is separate from the row so a successful removal can
+-  // unmount that row without tearing down the in-flight confirmation state.
+-  const [deleteTarget, setDeleteTarget] = useState<{ workspaceId: WorkspaceId; title: string } | null>(null)
+-  const [deleting, setDeleting] = useState(false)
+-  const [deleteCommittedId, setDeleteCommittedId] = useState<WorkspaceId | null>(null)
+-  const [deleteError, setDeleteError] = useState<string | null>(null)
+-  useEffect(() => {
+-    if (deleteCommittedId === null
+-      || workspaces.some(workspace => workspace.workspaceId === deleteCommittedId)) return
+-    setDeleting(false)
+-    setDeleteCommittedId(null)
+-    setDeleteTarget(null)
+-  }, [deleteCommittedId, workspaces])
+-  const closeDelete = () => {
+-    if (deleting) return
+-    setDeleteTarget(null)
+-    setDeleteError(null)
+-  }
+-  const confirmDelete = () => {
+-    /* v8 ignore next -- the Modal is absent without a target and its button is disabled while deleting. */
+-    if (deleting || deleteTarget === null) return
+-    setDeleting(true)
+-    setDeleteCommittedId(null)
+-    setDeleteError(null)
+-    deleteWorkspace(deleteTarget.workspaceId).then(() => {
+-      // Keep the confirmation pending until this component has rendered the
+-      // committed list projection without the deleted id. Closing earlier
+-      // exposes one stale React frame to the next Create Workspace gesture.
+-      setDeleteCommittedId(deleteTarget.workspaceId)
+-    }).catch((reason: unknown) => {
+-      setDeleting(false)
+-      setDeleteError(reason instanceof Error ? reason.message : String(reason))
+-    })
+-  }
+-
+   return (
+     <div className={clsx(css.root, !wide && css.rail)}>
+       <div className={css.sectionHeader}>
+@@ -1154,145 +1371,32 @@ export function WorkspaceBrowser({
+               t={t}
+             />
+           )
+-          : groupBy === 'flat'
+-            ? (
+-              <FlatList
+-                useSessions={useSessions} open={open} forkSession={forkSession}
+-                onSessionRename={onSessionRename} onSessionArchive={onSessionArchive}
+-                archivedSessionIds={archivedSessionIds}
+-                orderBy={orderBy}
+-                sessionOrderByAccount={sessionOrderByAccount}
+-                sessionUpdatedAtByAccount={sessionUpdatedAtByAccount}
+-                syncSessionOrderAccount={actions.syncSessionOrderAccount}
+-                setSessionOrder={actions.setSessionOrder}
+-                t={t}
+-              />
+-            )
+-            : (
+-              <SessionTree
+-                useSessions={useSessions}
+-                onSessionRename={onSessionRename}
+-                onSessionArchive={onSessionArchive}
+-                forkSession={forkSession}
+-                workspaces={workspaces}
+-                groupExpansion={groupExpansion}
+-                setGroupExpanded={actions.setGroupExpanded}
+-                sessionOrderByAccount={sessionOrderByAccount}
+-                sessionUpdatedAtByAccount={sessionUpdatedAtByAccount}
+-                syncSessionOrderAccount={actions.syncSessionOrderAccount}
+-                setSessionOrder={actions.setSessionOrder}
+-                archivedSessionIds={archivedSessionIds}
+-                startSession={startSession}
+-                open={open}
+-                insertWorkspaceBefore={insertWorkspaceBefore}
+-                insertSessionBefore={insertSessionBefore}
+-                orderBy={orderBy}
+-                home={home}
+-                t={t}
+-                onRenameRequest={(workspaceId, currentTitle) => {
+-                  setRenameTarget({ workspaceId, currentTitle })
+-                  setRenameDraft(currentTitle)
+-                  setRenameError(null)
+-                }}
+-                onDeleteRequest={(workspaceId, title) => {
+-                  setDeleteTarget({ workspaceId, title })
+-                  setDeleteError(null)
+-                }}
+-              />
+-            ))}
++          : (
++            <Rc2WorkspaceNodeSection
++              nodeKey="official-local"
++              groupBy={groupBy}
++              orderBy={orderBy}
++              home={home}
++              now={now}
++              overlayNamespace="official-local"
++              useSessions={useSessions}
++              useWorkspaces={useWorkspaces}
++              useStore={useStore}
++              actions={actions}
++              startSession={startSession}
++              open={open}
++              renameSession={renameSession}
++              forkSession={forkSession}
++              renameWorkspace={renameWorkspace}
++              deleteWorkspace={deleteWorkspace}
++              insertWorkspaceBefore={insertWorkspaceBefore}
++              archiveSession={archiveSession}
++              insertSessionBefore={insertSessionBefore}
++              t={t}
++            />
++          ))}
+       </div>
+ 
+-      <Modal
+-        open={renameTarget !== null}
+-        onClose={closeRename}
+-        closeLabel={t('close')}
+-        title={t('rename.workspace.title')}
+-        footer={(
+-          <>
+-            <Button variant="outline" disabled={renaming} onClick={closeRename}>{t('cancel')}</Button>
+-            <Button variant="primary" disabled={renameBlocked} onClick={confirmRename}>{t('rename')}</Button>
+-          </>
+-        )}
+-      >
+-        <input
+-          className={css.renameInput}
+-          value={renameDraft}
+-          aria-label={t('field.workspaceName')}
+-          autoFocus
+-          disabled={renaming}
+-          onFocus={(e) => { e.target.select() }}
+-          onChange={(e) => { setRenameDraft(e.target.value); setRenameError(null) }}
+-          onCompositionStart={() => { composingRef.current = true }}
+-          onCompositionEnd={() => { composingRef.current = false }}
+-          onKeyDown={(e) => {
+-            if (e.key === 'Enter' && !composingRef.current) {
+-              e.preventDefault()
+-              confirmRename()
+-            }
+-          }}
+-        />
+-        {renameDuplicate && (
+-          <div className={css.renameError} role="alert">{t('conflict.named', { name: renameTrimmed })}</div>
+-        )}
+-        {renameError !== null && <div className={css.renameError} role="alert">{renameError}</div>}
+-      </Modal>
+-
+-      <Modal
+-        open={sessionRenameTarget !== null}
+-        onClose={closeSessionRename}
+-        closeLabel={t('close')}
+-        title={t('rename.session.title')}
+-        footer={(
+-          <>
+-            <Button variant="outline" disabled={sessionRenaming} onClick={closeSessionRename}>{t('cancel')}</Button>
+-            <Button variant="primary" disabled={sessionRenameBlocked} onClick={confirmSessionRename}>{t('rename')}</Button>
+-          </>
+-        )}
+-      >
+-        <input
+-          className={css.renameInput}
+-          value={sessionRenameDraft}
+-          aria-label={t('field.sessionName')}
+-          autoFocus
+-          disabled={sessionRenaming}
+-          onFocus={(e) => { e.target.select() }}
+-          onChange={(e) => { setSessionRenameDraft(e.target.value); setSessionRenameError(null) }}
+-          onCompositionStart={() => { composingRef.current = true }}
+-          onCompositionEnd={() => { composingRef.current = false }}
+-          onKeyDown={(e) => {
+-            if (e.key === 'Enter' && !composingRef.current) {
+-              e.preventDefault()
+-              confirmSessionRename()
+-            }
+-          }}
+-        />
+-        {sessionRenameError !== null && <div className={css.renameError} role="alert">{sessionRenameError}</div>}
+-      </Modal>
+-      <Modal
+-        open={deleteTarget !== null}
+-        onClose={closeDelete}
+-        closeLabel={t('close')}
+-        title={t('delete.workspace')}
+-        {...deleteTarget === null
+-          ? {}
+-          : { description: t('delete.desc', { name: deleteTarget.title }) }}
+-        footer={(
+-          <>
+-            <Button variant="outline" disabled={deleting} onClick={closeDelete}>{t('cancel')}</Button>
+-            <Button
+-              variant="outline"
+-              className={css.deleteAction}
+-              disabled={deleting}
+-              onClick={confirmDelete}
+-            >
+-              {t('delete.workspace')}
+-            </Button>
+-          </>
+-        )}
+-      >
+-        {deleting && <div className={css.deleteStatus} role="status">{t('delete.pending')}</div>}
+-        {deleteError !== null && <div className={css.renameError} role="alert">{deleteError}</div>}
+-      </Modal>
+     </div>
+   )
+ }
+diff --git a/src/client/rows/Rows.tsx b/src/client/rows/Rows.tsx
+index d2d121f..df2e7e7 100644
+--- a/src/client/rows/Rows.tsx
++++ b/src/client/rows/Rows.tsx
+@@ -109,7 +109,7 @@ function rowHalf(e: { clientY: number; currentTarget: HTMLElement }): 'before' |
+  * @param props.t - the browser root's locale seat.
+  * @returns the row element.
+  */
+-export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home, t }: {
++export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home, portalClassName, t }: {
+   group: GroupNode
+   onToggle: () => void
+   onCreate: () => void
+@@ -119,6 +119,8 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
+   drag?: WorkspaceRowDragProps | undefined
+   /** Host account home; POSIX home-rooted hover paths display as `~`. */
+   home?: string | undefined
++  /** Node-scoped class copied to body-portaled menus for ownership arbitration. */
++  portalClassName?: string | undefined
+   t: RowTranslate
+ }) {
+   const row = group
+@@ -172,6 +174,7 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
+             }}
+             portal
+             closeOnPointerLeave
++            className={portalClassName}
+             anchor={(
+               <button
+                 type="button"
+@@ -359,7 +362,7 @@ export function SearchResultItem({ result, currentId, onOpen, t }: {
+  * @param props.t - the browser root's locale seat.
+  * @returns the session row.
+  */
+-export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork, onArchive, drag, flat = false, t }: {
++export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork, onArchive, drag, flat = false, portalClassName, t }: {
+   node: SessionNode
+   currentId: string | undefined
+   now: number
+@@ -374,6 +377,8 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
+   drag?: RowDragProps | undefined
+   /** The row is rendered without a parent Workspace header. */
+   flat?: boolean | undefined
++  /** Node-scoped class copied to body-portaled menus for ownership arbitration. */
++  portalClassName?: string | undefined
+   t: RowTranslate
+ }) {
+   const row = node
+@@ -456,6 +461,7 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
+             }}
+             portal
+             closeOnPointerLeave
++            className={portalClassName}
+             anchor={(
+               <button
+                 type="button"
+diff --git a/tmp/rc2-patch-work/packages/client/ui-workspace/src/client/federation.ts b/src/client/federation.ts
+new file mode 100644
+index 0000000..e546ce6
+--- /dev/null
++++ b/src/client/federation.ts
+@@ -0,0 +1,8 @@
++/**
++ * Build-only rc.2 federation embed entry. It exports no Cordis apply function
++ * and performs no slot registration; the federation package owns composition.
++ */
++export { Rc2WorkspaceNodeSection } from './WorkspaceBrowser.tsx'
++export type { Rc2WorkspaceNodeSectionProps } from './WorkspaceBrowser.tsx'
++export { createWorkspaceViewStore } from './stores.ts'
++export type { SessionGroupBy, SessionOrderBy } from './stores.ts'
