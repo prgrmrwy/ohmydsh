@@ -1,5 +1,10 @@
+import { execFile } from 'node:child_process'
 import { EventEmitter } from 'node:events'
-import { describe, expect, it } from 'vitest'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { promisify } from 'node:util'
+import { afterEach, describe, expect, it } from 'vitest'
 import { createRoutes } from '../src/host/http.js'
 import { ROUTES } from '../src/wire.js'
 
@@ -71,5 +76,28 @@ describe('Host routes', () => {
     queueMicrotask(() => oversized.emit('end'))
     await oversizedPromise
     expect(oversizedResponse.status).toBe(413)
+  })
+
+  it('maps an unsupported project to 400 with the explicit diagnostic', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ws-http-'))
+    const exec = promisify(execFile)
+    await exec('git', ['init', '-b', 'main'], { cwd: root })
+    await exec('git', ['config', 'user.email', 'ws@example.invalid'], { cwd: root })
+    await exec('git', ['config', 'user.name', 'WS Test'], { cwd: root })
+    await writeFile(join(root, 'package.json'), '{"name":"fixture","version":"1.0.0"}\n')
+    await exec('git', ['add', 'package.json'], { cwd: root })
+    await exec('git', ['commit', '-m', 'initial'], { cwd: root })
+    const response = await call(ROUTES.start, {
+      operationId: 'operation-http-unsupported',
+      repoPath: root,
+      baseRef: 'main',
+      taskText: 'unsupported via http',
+      dependencyMode: 'lean',
+    })
+    await rm(root, { recursive: true, force: true })
+    expect(response.status).toBe(400)
+    const wire = JSON.parse(response.body).error
+    expect(wire.code).toBe('UNSUPPORTED_PROJECT')
+    expect(wire.message).toMatch(/package-lock\.json|pnpm-lock\.yaml/)
   })
 })

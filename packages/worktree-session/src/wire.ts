@@ -20,6 +20,9 @@ export type OperationPhase =
   | 'prepared'
   | 'cleaned'
 
+/** Supported dependency project types, resolved from the repo-root lockfile. */
+export type PackageManager = 'npm' | 'pnpm'
+
 export type ActiveOperationPhase = Exclude<OperationPhase, 'prepared' | 'cleaned'>
 export type DependencyMode = 'lean' | 'mutable'
 export type RefKind = 'local' | 'remote'
@@ -83,6 +86,8 @@ export interface OperationRecord {
   worktreePath: string
   taskHash: string
   dependencyMode: DependencyMode
+  /** Dependency project type; absent on legacy operations (treated as npm). */
+  packageManager?: PackageManager
   lockFingerprint?: string
   cacheNodeModules?: string
   dshHome: string
@@ -127,6 +132,7 @@ export interface PreparedOperationResult {
   taskBranch: string
   baseCommit: string
   dependencyMode: DependencyMode
+  packageManager: PackageManager
   lockFingerprint: string
   dshHome: string
 }
@@ -168,6 +174,7 @@ export interface SessionStatusResult {
   taskBranch?: string
   worktreePath?: string
   dependencyMode?: DependencyMode
+  packageManager?: PackageManager
   lifecycle?: PublicBindingLifecycle
   cleaned?: boolean
 }
@@ -186,6 +193,7 @@ export interface StatusResult {
   taskBranch: string
   worktreePath: string
   dependencyMode: DependencyMode
+  packageManager: PackageManager
   lockFingerprint?: string
   dshHome: string
 }
@@ -216,6 +224,7 @@ export type WsErrorCode =
   | 'OPERATION_NOT_FOUND'
   | 'OPERATION_INVALID'
   | 'UNSUPPORTED_SCHEMA_VERSION'
+  | 'UNSUPPORTED_PROJECT'
   | 'DEPENDENCY_FAILED'
   | 'ENVIRONMENT_FAILED'
   | 'PROMOTE_REFUSED'

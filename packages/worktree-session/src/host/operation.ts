@@ -3,12 +3,13 @@ import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { BindSourceResult, OperationPhase, OperationRecord, PreparedOperationResult, SessionStatusResult, SourceBindingState, StartOperationRequest } from '../wire.js'
 import { bindingOf, isCurrentBinding, publicBindingLifecycle } from '../wire.js'
-import { cacheHealthy, dependencyFingerprint, ensureLeanLink, leanLinkMatches, prepareDependencyCache } from './dependencies.js'
+import { cacheHealthy, dependencyFingerprint, ensureLeanLink, leanLinkMatches, prepareDependencyCache, preparePnpmDependencies } from './dependencies.js'
 import { prepareEnvironment, ensureWorktreeExclude } from './environment.js'
 import { WsError, messageOf } from './errors.js'
 import { atomicJson, isDirectory, readJson, withMkdirLock } from './fs.js'
 import { allocateTask, branchExists, createGitClient, createTaskWorktree, discoverRepo, listWorktrees, pruneInvalidRegistrations, resolveCommit, taskSlug, withinRepo, type GitClient } from './git.js'
 import { runProcess, type ProcessRunner } from './process.js'
+import { detectPackageManager } from './project.js'
 
 export interface OperationDeps {
   git?: GitClient
@@ -61,6 +62,7 @@ function resultOf(operation: OperationRecord): PreparedOperationResult {
     taskBranch: operation.taskBranch,
     baseCommit: operation.baseCommit,
     dependencyMode: operation.dependencyMode,
+    packageManager: operation.packageManager ?? 'npm',
     lockFingerprint: operation.lockFingerprint,
     dshHome: operation.dshHome,
   }
@@ -73,8 +75,16 @@ async function validateResource(operation: OperationRecord, phase: OperationPhas
     return (await listWorktrees(operation.repoRoot, git)).some(entry => entry.path === operation.worktreePath && entry.branch === `refs/heads/${operation.taskBranch}`)
   }
   if (phase === 'dependencies-ready') {
+    if (operation.packageManager === 'pnpm') {
+      // pnpm installs directly in the worktree (design D2): readiness is the
+      // unchanged lockfile fingerprint plus an existing node_modules tree.
+      if (operation.lockFingerprint === undefined) return false
+      const expected = await dependencyFingerprint(operation.worktreePath, runner, 'pnpm')
+      if (expected.fingerprint !== operation.lockFingerprint) return false
+      return await isDirectory(join(operation.worktreePath, 'node_modules'))
+    }
     if (operation.lockFingerprint === undefined || operation.cacheNodeModules === undefined) return false
-    const expected = await dependencyFingerprint(operation.worktreePath, runner)
+    const expected = await dependencyFingerprint(operation.worktreePath, runner, 'npm')
     if (expected.fingerprint !== operation.lockFingerprint) return false
     const cacheRoot = join(operation.cacheNodeModules, '..')
     return await cacheHealthy(cacheRoot, expected, runner) && await leanLinkMatches(operation.worktreePath, operation.cacheNodeModules)
@@ -111,6 +121,11 @@ async function performStart(request: StartOperationRequest, deps: OperationDeps)
   return withMkdirLock(lock, async () => {
     let operation = await loadOperation(repo.gitCommonDir, request.operationId)
     if (operation !== undefined) validateReplay(operation, request, repo.repoRoot)
+    // Resolve the dependency project type before creating ANY Git resource or
+    // operation file (fail-closed for unsupported/mixed lockfiles).
+    const packageManager = operation === undefined
+      ? await detectPackageManager(request.repoPath)
+      : operation.packageManager ?? 'npm'
     if (operation === undefined) {
       const baseCommit = await resolveCommit(repo.repoRoot, request.baseRef, git)
       const allocation = await allocateTask(repo.repoRoot, request.taskText, git)
@@ -126,6 +141,7 @@ async function performStart(request: StartOperationRequest, deps: OperationDeps)
         worktreePath: allocation.path,
         taskHash: hashTask(request.taskText),
         dependencyMode: 'lean',
+        packageManager,
         dshHome: join(repo.gitCommonDir, 'ws', 'dsh-home', request.operationId),
         phase: 'allocated',
         createdAt: timestamp,
@@ -154,9 +170,14 @@ async function performStart(request: StartOperationRequest, deps: OperationDeps)
       if (!(await validateResource(operation, 'worktree-created', git, runner))) throw new WsError('OPERATION_INVALID', 'Created worktree failed validation', { phase: 'worktree-created', retryable: true })
       operation = await saveOperation({ ...operation, phase: 'worktree-created' }, now())
       if (!(await validateResource(operation, 'dependencies-ready', git, runner))) {
-        const cache = await prepareDependencyCache(operation.worktreePath, operation.gitCommonDir, runner)
-        await ensureLeanLink(operation.worktreePath, cache.nodeModules)
-        operation = { ...operation, lockFingerprint: cache.fingerprint, cacheNodeModules: cache.nodeModules }
+        if (operation.packageManager === 'pnpm') {
+          const prepared = await preparePnpmDependencies(operation.worktreePath, runner)
+          operation = { ...operation, lockFingerprint: prepared.fingerprint }
+        } else {
+          const cache = await prepareDependencyCache(operation.worktreePath, operation.gitCommonDir, runner)
+          await ensureLeanLink(operation.worktreePath, cache.nodeModules)
+          operation = { ...operation, lockFingerprint: cache.fingerprint, cacheNodeModules: cache.nodeModules }
+        }
       }
       operation = await saveOperation({ ...operation, phase: 'dependencies-ready' }, now())
       const dshHome = await prepareEnvironment(operation.repoRoot, operation.worktreePath, operation.gitCommonDir, operation.operationId, git)
@@ -324,6 +345,7 @@ export async function sessionStatus(repoPath: string, sourceSessionId: string): 
     taskBranch: operation.taskBranch,
     worktreePath: operation.worktreePath,
     dependencyMode: operation.dependencyMode,
+    packageManager: operation.packageManager ?? 'npm',
     lifecycle: publicBindingLifecycle(binding),
     cleaned: binding.state === 'cleaned' || binding.state === 'cleaned-archived',
   }

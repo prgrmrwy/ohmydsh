@@ -2,7 +2,7 @@ import { realpath } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import type { CleanResult, OperationRecord, PromoteResult, StatusResult } from '../wire.js'
 import { bindingOf } from '../wire.js'
-import { promoteDependencies } from './dependencies.js'
+import { promotePnpmDependencies, promoteDependencies } from './dependencies.js'
 import { WsError } from './errors.js'
 import { withMkdirLock } from './fs.js'
 import { createGitClient, discoverRepo, listWorktrees, worktreeStatus, type GitClient } from './git.js'
@@ -19,6 +19,7 @@ function statusOf(operation: OperationRecord): StatusResult {
     taskBranch: operation.taskBranch,
     worktreePath: operation.worktreePath,
     dependencyMode: operation.dependencyMode,
+    packageManager: operation.packageManager ?? 'npm',
     ...(operation.lockFingerprint === undefined ? {} : { lockFingerprint: operation.lockFingerprint }),
     dshHome: operation.dshHome,
   }
@@ -75,7 +76,8 @@ export async function wsPromote(target: string | MaintenanceTarget, options: { r
     const operation = await resolveMaintenanceTarget(target, options.git)
     if (operation.phase !== 'prepared') throw new WsError('PROMOTE_REFUSED', `Operation phase ${operation.phase} is not prepared`)
     if (operation.dependencyMode === 'mutable') return { ...statusOf(operation), dependencyMode: 'mutable' }
-    await promoteDependencies(operation, options.runner ?? runProcess)
+    if (operation.packageManager === 'pnpm') await promotePnpmDependencies(operation.worktreePath, options.runner ?? runProcess)
+    else await promoteDependencies(operation, options.runner ?? runProcess)
     const updated = await saveOperation({ ...operation, dependencyMode: 'mutable' })
     return { ...statusOf(updated), dependencyMode: 'mutable' }
   }, { timeoutMs: 16 * 60_000, staleMs: 30 * 60_000 })

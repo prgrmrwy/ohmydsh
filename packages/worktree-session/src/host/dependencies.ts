@@ -1,16 +1,25 @@
 import { createHash } from 'node:crypto'
 import { chmod, cp, lstat, mkdir, readFile, readdir, readlink, rename, rm, stat, symlink } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
-import type { OperationRecord } from '../wire.js'
+import type { OperationRecord, PackageManager } from '../wire.js'
 import { WsError } from './errors.js'
 import { atomicJson, pathExists, readJson, withMkdirLock } from './fs.js'
 import { checkedProcess, runProcess, type ProcessRunner } from './process.js'
 
-interface ReadyMetadata {
-  schemaVersion: 1
+/** Basic facts of a resolved lockfile/CLI dependency snapshot. */
+export interface DependencyFacts {
   fingerprint: string
   nodeMajor: number
-  npmMajor: number
+  cliMajor: number
+  packageManager: PackageManager
+}
+
+interface ReadyMetadata {
+  schemaVersion: 2
+  fingerprint: string
+  nodeMajor: number
+  cliMajor: number
+  packageManager: PackageManager
   contentDigest: string
   createdAt: string
 }
@@ -46,24 +55,30 @@ async function makeReadOnlyTree(path: string): Promise<void> {
   await chmod(path, info.mode & ~0o222)
 }
 
-export async function npmMajor(runner: ProcessRunner = runProcess, cwd = process.cwd()): Promise<number> {
-  const output = await checkedProcess(runner, 'npm', ['--version'], { cwd, code: 'DEPENDENCY_FAILED' })
+function lockfileName(packageManager: PackageManager): string {
+  return packageManager === 'pnpm' ? 'pnpm-lock.yaml' : 'package-lock.json'
+}
+
+/** Resolve the major version of the configured package-manager CLI. */
+export async function cliMajor(cli: 'npm' | 'pnpm', runner: ProcessRunner = runProcess, cwd = process.cwd()): Promise<number> {
+  const output = await checkedProcess(runner, cli, ['--version'], { cwd, code: 'DEPENDENCY_FAILED' })
   const value = Number.parseInt(output.trim().split('.')[0] ?? '', 10)
-  if (!Number.isSafeInteger(value)) throw new WsError('DEPENDENCY_FAILED', 'Unable to determine npm major version')
+  if (!Number.isSafeInteger(value)) throw new WsError('DEPENDENCY_FAILED', `Unable to determine ${cli} major version`)
   return value
 }
 
-export async function dependencyFingerprint(repoPath: string, runner: ProcessRunner = runProcess): Promise<{ fingerprint: string; nodeMajor: number; npmMajor: number }> {
-  const lock = await readFile(join(repoPath, 'package-lock.json'))
+export async function dependencyFingerprint(repoPath: string, runner: ProcessRunner = runProcess, packageManager: PackageManager = 'npm'): Promise<DependencyFacts> {
+  const lock = await readFile(join(repoPath, lockfileName(packageManager)))
   const node = Number.parseInt(process.versions.node.split('.')[0] ?? '', 10)
-  const npm = await npmMajor(runner, repoPath)
-  const fingerprint = createHash('sha256').update(lock).update(`\0node:${String(node)}\0npm:${String(npm)}`).digest('hex')
-  return { fingerprint, nodeMajor: node, npmMajor: npm }
+  const cli = packageManager === 'pnpm' ? 'pnpm' : 'npm'
+  const major = await cliMajor(cli, runner, repoPath)
+  const fingerprint = createHash('sha256').update(lock).update(`\0node:${String(node)}\0${cli}:${String(major)}`).digest('hex')
+  return { fingerprint, nodeMajor: node, cliMajor: major, packageManager }
 }
 
-export async function cacheHealthy(cacheRoot: string, expected: { fingerprint: string; nodeMajor: number; npmMajor: number }, runner: ProcessRunner = runProcess): Promise<boolean> {
+export async function cacheHealthy(cacheRoot: string, expected: DependencyFacts, runner: ProcessRunner = runProcess): Promise<boolean> {
   const ready = await readJson<ReadyMetadata>(join(cacheRoot, 'ready.json'))
-  if (ready?.schemaVersion !== 1 || ready.fingerprint !== expected.fingerprint || ready.nodeMajor !== expected.nodeMajor || ready.npmMajor !== expected.npmMajor || typeof ready.contentDigest !== 'string') return false
+  if (ready?.schemaVersion !== 2 || ready.fingerprint !== expected.fingerprint || ready.nodeMajor !== expected.nodeMajor || ready.cliMajor !== expected.cliMajor || ready.packageManager !== expected.packageManager || typeof ready.contentDigest !== 'string') return false
   const nodeModules = join(cacheRoot, 'node_modules')
   if (!(await pathExists(nodeModules))) return false
   if (await dependencyTreeDigest(nodeModules) !== ready.contentDigest) return false
@@ -72,7 +87,7 @@ export async function cacheHealthy(cacheRoot: string, expected: { fingerprint: s
 }
 
 export async function prepareDependencyCache(worktreePath: string, gitCommonDir: string, runner: ProcessRunner = runProcess): Promise<{ fingerprint: string; nodeModules: string }> {
-  const fingerprint = await dependencyFingerprint(worktreePath, runner)
+  const fingerprint = await dependencyFingerprint(worktreePath, runner, 'npm')
   const npmRoot = join(gitCommonDir, 'ws', 'cache', 'npm')
   const target = join(npmRoot, fingerprint.fingerprint)
   const lock = join(gitCommonDir, 'ws', 'locks', `npm-${fingerprint.fingerprint}.lock`)
@@ -89,7 +104,7 @@ export async function prepareDependencyCache(worktreePath: string, gitCommonDir:
       await mkdir(join(temporary, 'node_modules'), { recursive: true })
       await makeReadOnlyTree(join(temporary, 'node_modules'))
       const contentDigest = await dependencyTreeDigest(join(temporary, 'node_modules'))
-      await atomicJson(join(temporary, 'ready.json'), { schemaVersion: 1, ...fingerprint, contentDigest, createdAt: new Date().toISOString() } satisfies ReadyMetadata)
+      await atomicJson(join(temporary, 'ready.json'), { schemaVersion: 2, ...fingerprint, contentDigest, createdAt: new Date().toISOString() } satisfies ReadyMetadata)
       await rm(target, { recursive: true, force: true })
       await rename(temporary, target)
     } finally {
@@ -97,6 +112,24 @@ export async function prepareDependencyCache(worktreePath: string, gitCommonDir:
     }
   }, { timeoutMs: 15 * 60_000, staleMs: 30 * 60_000 })
   return { fingerprint: fingerprint.fingerprint, nodeModules: join(target, 'node_modules') }
+}
+
+/** pnpm dependency preparation: install directly in the bound worktree.
+ * pnpm's global content-addressable store provides the cross-worktree reuse
+ * that the npm shared cache directory provides for npm projects; a snapshot
+ * cache would break workspace-internal links that must resolve to the
+ * worktree's own sources (see design D2). */
+export async function preparePnpmDependencies(worktreePath: string, runner: ProcessRunner = runProcess): Promise<{ fingerprint: string }> {
+  const fingerprint = await dependencyFingerprint(worktreePath, runner, 'pnpm')
+  await checkedProcess(runner, 'pnpm', ['install', '--frozen-lockfile', '--ignore-scripts'], { cwd: worktreePath, timeoutMs: 15 * 60_000, code: 'DEPENDENCY_FAILED' })
+  await checkedProcess(runner, 'pnpm', ['list', '--json'], { cwd: worktreePath, timeoutMs: 120_000, code: 'DEPENDENCY_FAILED' })
+  return { fingerprint: fingerprint.fingerprint }
+}
+
+/** pnpm promote: reinstall with scripts per the lockfile (mirrors `npm ci`). */
+export async function promotePnpmDependencies(worktreePath: string, runner: ProcessRunner = runProcess): Promise<void> {
+  await checkedProcess(runner, 'pnpm', ['install', '--frozen-lockfile'], { cwd: worktreePath, timeoutMs: 15 * 60_000, code: 'DEPENDENCY_FAILED' })
+  await checkedProcess(runner, 'pnpm', ['list', '--json'], { cwd: worktreePath, timeoutMs: 120_000, code: 'DEPENDENCY_FAILED' })
 }
 
 export async function leanLinkMatches(worktreePath: string, expectedNodeModules: string): Promise<boolean> {

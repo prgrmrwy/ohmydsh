@@ -1,4 +1,4 @@
-import type { DependencyMode, OperationPhase, RefEntry, SessionStatusResult } from '../wire.ts'
+import type { DependencyMode, OperationPhase, PackageManager, RefEntry, SessionStatusResult } from '../wire.ts'
 
 export interface ClientStage {
   sessionId: string
@@ -10,6 +10,7 @@ export interface ClientStage {
   taskBranch?: string
   worktreePath?: string
   dependencyMode?: DependencyMode
+  packageManager?: PackageManager
   lifecycle?: SessionStatusResult['lifecycle']
   phase: 'idle' | 'validating' | 'host' | 'binding' | 'claim' | 'submit' | OperationPhase | 'error' | 'uncertain' | 'done'
   error?: string
@@ -34,6 +35,7 @@ function restore(sessionId: string, cwd: string): Partial<ClientStage> {
       ...(typeof value.taskBranch === 'string' ? { taskBranch: value.taskBranch } : {}),
       ...(typeof value.worktreePath === 'string' ? { worktreePath: value.worktreePath } : {}),
       ...(value.dependencyMode === 'lean' || value.dependencyMode === 'mutable' ? { dependencyMode: value.dependencyMode } : {}),
+      ...(value.packageManager === 'npm' || value.packageManager === 'pnpm' ? { packageManager: value.packageManager } : {}),
       ...(value.lifecycle === 'bound' || value.lifecycle === 'submit-claimed' || value.lifecycle === 'admitted' || value.lifecycle === 'uncertain' || value.lifecycle === 'cleaned' ? { lifecycle: value.lifecycle } : {}),
       submitted: value.submitted === true,
     }
@@ -42,7 +44,7 @@ function restore(sessionId: string, cwd: string): Partial<ClientStage> {
 
 function persist(stage: ClientStage): void {
   try {
-    localStorage.setItem(persistenceKey(stage.sessionId), JSON.stringify({ cwd: stage.cwd, enabled: stage.enabled, baseRef: stage.baseRef, operationId: stage.operationId, taskBranch: stage.taskBranch, worktreePath: stage.worktreePath, dependencyMode: stage.dependencyMode, lifecycle: stage.lifecycle, submitted: stage.submitted }))
+    localStorage.setItem(persistenceKey(stage.sessionId), JSON.stringify({ cwd: stage.cwd, enabled: stage.enabled, baseRef: stage.baseRef, operationId: stage.operationId, taskBranch: stage.taskBranch, worktreePath: stage.worktreePath, dependencyMode: stage.dependencyMode, packageManager: stage.packageManager, lifecycle: stage.lifecycle, submitted: stage.submitted }))
   } catch { /* browser storage may be disabled */ }
 }
 
