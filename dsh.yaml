@@ -155,3 +155,13 @@ customizations:
     enabled: true
     brief: 划选即问侧边栏问答(压缩上下文,省 token)
     note: 'B007 终选(替代 dsh-air:fork 全量继承费 token,codex 订阅无缓存保障);repo https://github.com/ChenRuoT/dsh-sidebar-qa(MIT,2026-08-24 README+发布物审查);划选文本→「提问」→侧边栏内嵌问答,独立会话(❓<主题>)不中断主对话;三种上下文策略=全量继承(fork+前缀缓存)/压缩(快速模型压旧历史+近期原文,默认)/机械裁切(定长窗口),默认 compressed 解决侧问费 token 痛点;嵌套追问+追问记录树(归档/删除置灰);依赖 dsh-better-sidebar ^0.14.0(同批入 manifest);peer rc.8 系对运行体 0.1.1-rc.2 满足'
+  # 自研(remote):B015 驾驶舱桥接 — DSH web 客户端上报会话点击给本机 dsh-cockpit
+  - id: dsh-cockpit-bridge
+    type: package
+    source: remote
+    spec: 'https://github.com/prgrmrwy/dsh-cockpit/releases/download/dsh-cockpit-bridge-v0.1.0/dsh-cockpit-bridge-0.1.0.tgz'
+    name: dsh-cockpit-bridge
+    version: 0.1.0
+    enabled: true
+    brief: 驾驶舱桥接(web 客户端上报会话点击,顶栏完成提醒自动清除)
+    note: 'B015;repo https://github.com/prgrmrwy/dsh-cockpit(MIT,自研);web client cordis bundle,订阅官方 ctx.sessions.list.current(= 用户点击会话),防抖上报 POST /api/bridge/session-opened 给本机驾驶舱(127.0.0.1:3090,401 先 bootstrap);驾驶舱按请求 Origin 匹配设备,按 sessionId 精确清除完成绿点且保留 re-arm(官方 select 语义的驾驶舱侧观察);启动 hello 让顶栏显示桥接连接态;只传 sessionId,不碰内容/settings/凭据;驾驶舱不可达静默降级;每台接驾驶舱的机器都装'
