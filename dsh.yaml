@@ -46,27 +46,6 @@ customizations:
     enabled: true
     brief: 架构图 skill(架构/时序/数据流/生命周期)
     note: repo https://github.com/tt-a1i/archify(14.2k stars,MIT,活跃);skill-only bundle,对话内生成可交互架构图(自包含 HTML/PNG/SVG);后续可配合 B001 架构师角色;需重启生效
-  # 自研(local):多节点统一控制台；M0 已通过，M1/M2 实施期保持禁用，M3 验收后才可启用。
-  - id: dsh-federation
-    type: package
-    source: local
-    version: 0.1.0
-    enabled: false
-    buildInputs:
-      - package-lock.json
-      - scripts/build-rc2-workspace-embed.mjs
-      - scripts/fetch-rc2-workspace-source.mjs
-      - openspec/changes/federated-dsh-control-plane/checking/upstream/rc2-workspace-source-manifest.json
-      - openspec/changes/federated-dsh-control-plane/checking/upstream/rc2-workspace-node-section.patch
-      - scripts/build-rc2-connection-compat.mjs
-      - scripts/fetch-rc2-connection-source.mjs
-      - openspec/changes/federated-dsh-control-plane/checking/upstream/rc2-connection-source-manifest.json
-      - openspec/changes/federated-dsh-control-plane/checking/upstream/rc2-connection-api-middleware.patch
-    compatDependencies:
-      - name: '@deepseek-ai/dsh-client-connection'
-        path: lib/connection
-    brief: 多节点 Node→Workspace→Session 联邦控制面（实施中，默认禁用）
-    note: '自研 Host+Web bundle；OpenSpec change federated-dsh-control-plane；中央通过系统 OpenSSH 回环隧道连接普通远端 dsh web，远端执行/文件/Git/模型/订阅/凭据保持独立；无文件同步、路径映射、自动下载、远端 openPath、设置/凭据代理或自动委派；固定 rc.2 Workspace/Connection 源码兼容 patch 按 commit/blob/hash fail closed 并保留 last-known-good；M0 13/13 seam gate 已通过，但 M1–M3 完成前严禁启用；回滚=保持/改为 enabled:false 后 dsh build，远端无安装物和状态变更'
   # 自研(local):首页空白会话首发启动到隔离 Git worktree。
   - id: worktree-session
     type: package
