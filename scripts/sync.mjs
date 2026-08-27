@@ -353,6 +353,17 @@ function installedVersion(name) {
   return pkg?.version
 }
 
+/**
+ * The spec string a remote package was installed from, as recorded in the
+ * profile manifest (pnpm stores the tarball/registry URL there). Indexed by
+ * package name; the entry at `name` is the one sync actually controls.
+ */
+function installedSpec(name) {
+  const profile = readJson(path.join(PROFILE_DIR, 'package.json'))
+  if (profile === undefined) return undefined
+  return profile.dependencies?.[name]
+}
+
 function declaresBundle(name) {
   const pkg = readJson(path.join(PROFILE_DIR, 'node_modules', ...name.split('/'), 'package.json'))
   return pkg?.dsh?.bundle?.patch !== undefined
@@ -642,10 +653,29 @@ async function syncPackages(manifest, items) {
     if (compatInvalid) continue
 
     const current = installedVersion(name)
+    const currentlyInstalledFrom = installedSpec(name)
+    // A remoted pin change must trigger re-install even when the package version
+    // is unchanged: bumping the spec commit is exactly how a fork patch update
+    // deploys, and sync previously only compared version. Only tarball/URL specs
+    // are compared this way: pnpm stores a plain version for registry specs
+    // (`name@version` is normalized away), so comparing those here would falsely
+    // drift every registry package. Registry drift stays covered by the version
+    // compare below.
+    const pinSpec = typeof item.spec === 'string'
+      && typeof item.name === 'string'
+      && (/^(?:https?:|git\+|file:)/.test(item.spec) || /\.(?:tar\.gz|tgz)($|\?)/.test(item.spec))
+    const pinDrift = item.source === 'remote'
+      && current !== undefined
+      && pinSpec
+      && currentlyInstalledFrom !== undefined
+      && currentlyInstalledFrom !== item.spec
     const compatChanged = compatEntries.some(entry =>
       installedVersion(entry.name) === undefined || previousCompatHashes[entry.name] !== compatHashes[entry.name])
     let installed = true
-    if (current !== undefined && item.source === 'remote' && current !== item.version) {
+    if (pinDrift) {
+      change(`spec drift ${name} ${currentlyInstalledFrom} -> ${item.spec}, re-adding`)
+      installed = dshCli(['plugin', '--profile', PROFILE, 'add', item.spec], { version: manifest.dshVersion })
+    } else if (current !== undefined && item.source === 'remote' && current !== item.version) {
       change(`version drift ${name} ${current} -> ${item.version}, re-adding`)
       installed = dshCli(['plugin', '--profile', PROFILE, 'add', item.spec], { version: manifest.dshVersion })
       if (!installed) fail(`failed to pin ${name}`)

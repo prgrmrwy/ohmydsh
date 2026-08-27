@@ -83,11 +83,42 @@ if [[ "$action" == add && "$value" == file:* ]]; then
   mkdir -p "$profile/node_modules"
   cp -R "$src" "$profile/node_modules/$name"
 elif [[ "$action" == add ]]; then
-  name="\${value%@*}"
-  version="\${value##*@}"
+  # Tarball URL: name and version come from the archive, not the URL. The
+  # fixture encodes them in the slug: slug = name-version (e.g. foreign-demo-1.0.0).
+  # Registry spec name@version separates both normally.
+  if [[ "$value" == *://* ]]; then
+    slug_base="\${value##*/}"
+    slug="\${slug_base%.tar.gz}"
+    # slug = <name>~<version>; '~' is unambiguous (name and version are not).
+    name="\${slug%%~*}"
+    # The version INSIDE the archive is fixed by the manifest and does not
+    # change when only the commit in the URL is bumped — that is exactly the
+    # fork-patch workflow this test exercises.
+    version="1.0.0"
+  else
+    name="\${value%@*}"
+    version="\${value##*@}"
+  fi
   mkdir -p "$profile/node_modules/$name"
   printf '{"name":"%s","version":"%s","dsh":{"bundle":{"patch":"./cordis.patch.yml"}}}' "$name" "$version" > "$profile/node_modules/$name/package.json"
+  # pnpm records a registry spec as a plain version (name@version is normalized
+  # away), but keeps a tarball URL verbatim. The fake must mirror both, or
+  # installedSpec() comparisons diverge from production.
+  node -e "
+    const fs=require('fs');
+    const p=JSON.parse(fs.readFileSync('$profile/package.json','utf8'));
+    p.dependencies=p.dependencies||{};
+    const spec='$value';
+    p.dependencies['$name'] = spec.includes('://') ? spec : spec.substring(spec.indexOf('@')+1);
+    fs.writeFileSync('$profile/package.json', JSON.stringify(p,null,2));
+  "
 elif [[ "$action" == remove ]]; then
+  node -e "
+    const fs=require('fs');
+    const p=JSON.parse(fs.readFileSync('$profile/package.json','utf8'));
+    delete (p.dependencies||{})['$value'];
+    fs.writeFileSync('$profile/package.json', JSON.stringify(p,null,2));
+  "
   rm -rf "$profile/node_modules/$value"
 fi
 `)
@@ -174,6 +205,65 @@ test('reinstalls a native-JavaScript local package when publishable content chan
   assert.equal(changed.status, 0, changed.stderr)
   assert.match(changed.stdout, /content changed, reinstalling/)
   assert.match(await readFile(installed, 'utf8'), /second/)
+})
+
+test('re-adds a remote package when its pin spec changes', async () => {
+  // The realistic pin form is a tarball URL: changing the commit changes the
+  // URL but not the package version inside it. This is precisely the
+  // llm-subscriptions fork-patch workflow.
+  const fx = await fixture()
+  await writeFile(path.join(fx.repo, 'dsh.yaml'), `dshVersion: 0.1.0-rc.7
+dependencies: []
+customizations:
+  - id: remote-demo
+    type: package
+    source: remote
+    name: remote-demo
+    spec: https://example.invalid/remote-demo~1.0.0.tar.gz
+    version: 1.0.0
+    enabled: true
+`)
+  assert.equal(fx.run().status, 0)
+  assert.match(await actionLog(fx.actions), /add https:\/\/example\.invalid\/remote-demo~1\.0\.0\.tar\.gz/)
+
+  // Bump only the commit in the URL; package version stays 1.0.0 (the version
+  // inside the archive). Previously sync compared only version, so this bump
+  // never deployed.
+  await writeFile(path.join(fx.repo, 'dsh.yaml'), `dshVersion: 0.1.0-rc.7
+dependencies: []
+customizations:
+  - id: remote-demo
+    type: package
+    source: remote
+    name: remote-demo
+    spec: https://example.invalid/remote-demo~1.0.1.tar.gz
+    version: 1.0.0
+    enabled: true
+`)
+  const bumped = fx.run()
+  assert.equal(bumped.status, 0, bumped.stderr)
+  assert.match(bumped.stdout, /spec drift remote-demo .* re-adding/)
+  assert.match(await actionLog(fx.actions), /add https:\/\/example\.invalid\/remote-demo~1\.0\.1\.tar\.gz/)
+
+  // After the re-add, the new pin is recorded and sync is idempotent again.
+  const stable = fx.run()
+  assert.equal(stable.status, 0, stable.stderr)
+  assert.match(stable.stdout, /no changes/)
+})
+
+test('does not re-add a registry-spec package whose plain version is unchanged', async () => {
+  // Guard against the over-broad pin-drift regression: pnpm stores a registry
+  // spec as a plain version in profile dependencies, so a manifest spec of
+  // `name@version` must NOT be treated as a pin drift when nothing changed.
+  const fx = await fixture({ remote: true })
+  assert.equal(fx.run().status, 0)
+  const afterFirst = await actionLog(fx.actions)
+  assert.match(afterFirst, /add remote-demo@1\.0\.0/)
+
+  const unchanged = fx.run()
+  assert.equal(unchanged.status, 0, unchanged.stderr)
+  assert.equal(await actionLog(fx.actions), afterFirst, 'no re-add for an unchanged registry spec')
+  assert.match(unchanged.stdout, /no changes/)
 })
 
 test('garbage-collects local build and install hashes when a package is disabled', async () => {
