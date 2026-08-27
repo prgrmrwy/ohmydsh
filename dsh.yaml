@@ -162,9 +162,9 @@ customizations:
   - id: dsh-cockpit-bridge
     type: package
     source: remote
-    spec: 'https://github.com/prgrmrwy/dsh-cockpit/releases/download/dsh-cockpit-bridge-v0.1.1/dsh-cockpit-bridge-0.1.1.tgz'
+    spec: 'https://github.com/prgrmrwy/dsh-cockpit/releases/download/dsh-cockpit-bridge-v0.1.2/dsh-cockpit-bridge-0.1.2.tgz'
     name: dsh-cockpit-bridge
-    version: 0.1.1
+    version: 0.1.2
     enabled: true
     brief: 驾驶舱桥接(web 客户端上报会话点击,顶栏完成提醒自动清除)
-    note: 'B015;repo https://github.com/prgrmrwy/dsh-cockpit(MIT,自研);web client cordis bundle,订阅官方 ctx.sessions.list.current(= 用户点击会话),防抖上报 POST /api/bridge/session-opened 给本机驾驶舱(127.0.0.1:3090,401 先 bootstrap);驾驶舱按请求 Origin 匹配设备,按 sessionId 精确清除完成绿点且保留 re-arm(官方 select 语义的驾驶舱侧观察);启动 hello 让顶栏显示桥接连接态;只传 sessionId,不碰内容/settings/凭据;驾驶舱不可达静默降级;每台接驾驶舱的机器都装。⚠ 必须 ≥0.1.1:v0.1.0 发布物缺 lib/index.js 而 package.json main 指向它、cordis.patch.yml 又把它插进 bundle 栈,导致装了该插件的设备 DSH 启动即崩(plugin tree failed to load / ERR_MODULE_NOT_FOUND),不是功能降级而是完全无法启动;0.1.1 补了 no-op host 入口(纯浏览器插件同样需要 loader entry 才能被 client-modules scanner 服务浏览器包)并让 tsdown 同时构建 host/client 两个半区'
+    note: 'B015;repo https://github.com/prgrmrwy/dsh-cockpit(MIT,自研);web client cordis bundle,订阅官方 ctx.sessions.list.current(= 用户点击会话),防抖上报 POST /api/bridge/session-opened 给本机驾驶舱(127.0.0.1:3090,401 先 bootstrap);驾驶舱按请求 Origin 匹配设备,按 sessionId 精确清除完成绿点且保留 re-arm(官方 select 语义的驾驶舱侧观察);启动 hello 让顶栏显示桥接连接态;0.1.2 增加 cockpit 切回已加载设备 iframe 时重新上报当前 session，清除当前 active 已完成会话绿点;只传 sessionId,不碰内容/settings/凭据;驾驶舱不可达静默降级;每台接驾驶舱的机器都装。⚠ 必须 ≥0.1.1:v0.1.0 发布物缺 lib/index.js 而 package.json main 指向它、cordis.patch.yml 又把它插进 bundle 栈,导致装了该插件的设备 DSH 启动即崩(plugin tree failed to load / ERR_MODULE_NOT_FOUND),不是功能降级而是完全无法启动;0.1.1 补了 no-op host 入口(纯浏览器插件同样需要 loader entry 才能被 client-modules scanner 服务浏览器包)并让 tsdown 同时构建 host/client 两个半区'
