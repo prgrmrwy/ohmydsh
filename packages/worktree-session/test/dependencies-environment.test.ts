@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, readlink, rm, symlink, writeFile } from 'node
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { cacheHealthy, dependencyFingerprint, ensureLeanLink, prepareDependencyCache } from '../src/host/dependencies.js'
+import { cacheHealthy, dependencyFingerprint, ensureLeanLink, prepareDependencyCache, preparePnpmDependencies, promotePnpmDependencies } from '../src/host/dependencies.js'
 import { ensureWorktreeExclude, managedEnvironment, prepareEnvironment } from '../src/host/environment.js'
 import { createGitClient } from '../src/host/git.js'
 import type { ProcessRunner } from '../src/host/process.js'
@@ -14,16 +14,32 @@ async function root(): Promise<string> { const value = await mkdtemp(join(tmpdir
 
 const npm11: ProcessRunner = async () => ({ code: 0, stdout: '11.6.2\n', stderr: '', timedOut: false })
 const npm10: ProcessRunner = async () => ({ code: 0, stdout: '10.9.0\n', stderr: '', timedOut: false })
+const pnpm10: ProcessRunner = async () => ({ code: 0, stdout: '10.23.0\n', stderr: '', timedOut: false })
+const pnpm9: ProcessRunner = async () => ({ code: 0, stdout: '9.15.0\n', stderr: '', timedOut: false })
 
 describe('dependencies and environment', () => {
-  it('fingerprints lockfile plus npm major', async () => {
+  it('fingerprints npm lockfile plus npm major', async () => {
     const path = await root()
     await writeFile(join(path, 'package-lock.json'), '{"lockfileVersion":3}\n')
     const one = await dependencyFingerprint(path, npm11)
     const two = await dependencyFingerprint(path, npm10)
     expect(one.fingerprint).not.toBe(two.fingerprint)
+    expect(one.packageManager).toBe('npm')
+    expect(one.cliMajor).toBe(11)
     await writeFile(join(path, 'package-lock.json'), '{"lockfileVersion":3,"x":1}\n')
     expect((await dependencyFingerprint(path, npm11)).fingerprint).not.toBe(one.fingerprint)
+  })
+
+  it('fingerprints pnpm lockfile plus pnpm major', async () => {
+    const path = await root()
+    await writeFile(join(path, 'pnpm-lock.yaml'), 'lockfileVersion: \'9.0\'\n')
+    const one = await dependencyFingerprint(path, pnpm10, 'pnpm')
+    const two = await dependencyFingerprint(path, pnpm9, 'pnpm')
+    expect(one.fingerprint).not.toBe(two.fingerprint)
+    expect(one.packageManager).toBe('pnpm')
+    expect(one.cliMajor).toBe(10)
+    await writeFile(join(path, 'pnpm-lock.yaml'), 'lockfileVersion: \'9.0\'\nchanged: true\n')
+    expect((await dependencyFingerprint(path, pnpm10, 'pnpm')).fingerprint).not.toBe(one.fingerprint)
   })
 
   it('refuses an unexpected node_modules and accepts exact lean target', async () => {
@@ -41,9 +57,12 @@ describe('dependencies and environment', () => {
   it('rejects partial or unhealthy cache metadata', async () => {
     const path = await root()
     await mkdir(join(path, 'node_modules'), { recursive: true })
-    const expected = { fingerprint: 'abc', nodeMajor: 24, npmMajor: 11 }
+    const expected = { fingerprint: 'abc', nodeMajor: 24, cliMajor: 11, packageManager: 'npm' as const }
     expect(await cacheHealthy(path, expected, npm11)).toBe(false)
-    await writeFile(join(path, 'ready.json'), JSON.stringify({ schemaVersion: 1, ...expected, createdAt: new Date().toISOString() }))
+    // schemaVersion 1 (pre-pnpm legacy) metadata is treated as stale and rebuilt.
+    await writeFile(join(path, 'ready.json'), JSON.stringify({ schemaVersion: 1, fingerprint: expected.fingerprint, nodeMajor: 24, cliMajor: 11, npmMajor: 11, packageManager: 'npm', createdAt: new Date().toISOString() }))
+    expect(await cacheHealthy(path, expected, npm11)).toBe(false)
+    await writeFile(join(path, 'ready.json'), JSON.stringify({ schemaVersion: 2, ...expected, createdAt: new Date().toISOString() }))
     const unhealthy: ProcessRunner = async () => ({ code: 1, stdout: '', stderr: 'broken', timedOut: false })
     expect(await cacheHealthy(path, expected, unhealthy)).toBe(false)
   })
@@ -101,4 +120,38 @@ describe('dependencies and environment', () => {
     expect(first).not.toBe(second)
     expect((await (await import('node:fs/promises')).stat(join(worktree, '.env.local'))).mode & 0o777).toBe(0o600)
   })
+
+  it('prepares pnpm dependencies in place with a real minimal lockfile', async () => {
+    const path = await root()
+    await writeFile(join(path, 'package.json'), '{"name":"fixture","version":"1.0.0","private":true}\n')
+    await writeFile(join(path, 'pnpm-lock.yaml'), 'lockfileVersion: \'9.0\'\n\nimporters:\n\n  .: {}\n')
+    const prepared = await preparePnpmDependencies(path)
+    expect(prepared.fingerprint).toMatch(/^[0-9a-f]{64}$/)
+    expect((await (await import('node:fs/promises')).stat(join(path, 'node_modules'))).isDirectory()).toBe(true)
+    // frozen-lockfile plus pnpm list verify the tree; a promote reinstall also succeeds.
+    await promotePnpmDependencies(path)
+    expect(prepared.fingerprint).toBe((await dependencyFingerprint(path, runProcess(), 'pnpm')).fingerprint)
+  }, 120_000)
+
+  it('fails pnpm preparation with a clear dependency diagnostic when review fails', async () => {
+    const path = await root()
+    await writeFile(join(path, 'package.json'), '{"name":"fixture","version":"1.0.0","private":true}\n')
+    await writeFile(join(path, 'pnpm-lock.yaml'), 'lockfileVersion: \'9.0\'\n\nimporters:\n\n  .: {}\n')
+    const broken: ProcessRunner = async (file, args, options) => file === 'pnpm' && args[0] === 'install' && (options.cwd === path)
+      ? { code: 1, stdout: '', stderr: 'PNPM_BROKEN', timedOut: false }
+      : { code: 0, stdout: '10.23.0\n', stderr: '', timedOut: false }
+    await expect(preparePnpmDependencies(path, broken)).rejects.toMatchObject({ code: 'DEPENDENCY_FAILED' })
+  })
 })
+
+function runProcess(): ProcessRunner {
+  return (file, args, options) => new Promise(resolvePromise => {
+    (async () => {
+      const { execFile } = await import('node:child_process')
+      execFile(file, [...args], { cwd: options.cwd, encoding: 'utf8', timeout: options.timeoutMs ?? 30_000 }, (error, stdout, stderr) => {
+        const candidate = error as NodeJS.ErrnoException
+        resolvePromise({ code: typeof candidate?.code === 'number' ? candidate.code : error === null ? 0 : 1, stdout: stdout ?? '', stderr: stderr ?? (error?.message ?? ''), timedOut: candidate?.killed === true || candidate?.code === 'ETIMEDOUT' })
+      })
+    })()
+  })
+}
