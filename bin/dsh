@@ -15,6 +15,8 @@
 #                   --dry-run 只预览;--yes 跳过逐条确认)
 #   dsh -p 8080    指定端口(默认 3080)
 #   (web.lan / DSH_LAN 开启时,启动输出同时打印本机与局域网地址;临时仅本机:--host 127.0.0.1)
+#   官方 CLI 命令自动转交,直接用即可:dsh plugin --profile web add <pkg>、
+#                   dsh --profile <name>、dsh --dump-config(插件安装仍建议走 dsh.yaml + dsh build)
 #
 # autoUpdate(默认开启):start/-b/build/restart 前置检测 registry 最新 DSH 版本,
 #   有更新且工作区干净时阻塞式自动升级(改 dsh.yaml + 同族 pin → 重跑 sync → 自动提交)再启动;
@@ -98,13 +100,52 @@ YES_FLAG=""
 PASSTHRU=()
 
 usage() {
-  sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit 0
 }
+
+dsh_version() {
+  grep -m1 '^dshVersion:' "$REPO/dsh.yaml" | sed -E 's/^dshVersion:[[:space:]]*"?([^"#[:space:]]+).*/\1/'
+}
+
+# ---------- 官方 CLI 直通 ----------
+# `dsh` 这个名字同时是本启动器与官方 @deepseek-ai/dsh CLI 的入口,而用户 PATH
+# 里通常只有 ~/.local/bin/dsh(本启动器)。官方 CLI 的调用形式若落到这里,旧实现
+# 会把不认识的参数塞进 PASSTHRU 拼到 `dsh web` 之后 —— 但 web 子命令没有
+# --profile,于是冷启动直接死在 `error: unknown option '--profile'`。
+#
+# 因此在解析自己的参数之前先判定:这次调用属于官方 CLI 吗?属于就原样转交,
+# 让 `dsh plugin --profile web add <pkg>`、`dsh --dump-config` 等按官方语义工作。
+# 判定只认官方独有的顶层选项与 plugin 子命令,不会截走启动器自己的命令
+# (注意 plugin-update 是本仓库命令,与官方 plugin 精确区分)。
+is_official_cli_invocation() {
+  local first_positional="" a
+  for a in "$@"; do
+    case "$a" in
+      # 官方顶层独有选项:启动器没有同名参数,出现即代表调用官方 CLI
+      --profile|--profile=*|--patch|--patch=*|--dump-config|--dump-default-config) return 0 ;;
+    esac
+    if [[ -z "$first_positional" && "$a" != -* ]]; then first_positional="$a"; fi
+  done
+  # 官方子命令(精确匹配,避免误吞本仓库的 plugin-update)
+  [[ "$first_positional" == "plugin" ]]
+}
+
+if is_official_cli_invocation "$@"; then
+  CLI_VER="$(dsh_version)"
+  if [[ -z "$CLI_VER" ]]; then
+    echo "error: dshVersion missing in $REPO/dsh.yaml" >&2
+    exit 1
+  fi
+  DSH_CLI_VERSION="$CLI_VER" exec node "$REPO/scripts/dsh-cli.mjs" "$@"
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     build) BUILD_ONLY=1; shift ;;
+    # 官方 `dsh web` = 启动 web profile,语义与本启动器默认行为一致。吸收掉它,
+    # 否则会被当作未知参数透传成 `dsh web --port N web`(多余位置参数 → 报错)。
+    web) shift ;;
     stop) STOP=1; shift ;;
     restart) RESTART=1; shift ;;
     reset) RESET=1; shift ;;
@@ -119,13 +160,19 @@ while [[ $# -gt 0 ]]; do
     -p|--port) PORT="$2"; shift 2 ;;
     --port=*) PORT="${1#*=}"; shift ;;
     -h|--help) usage ;;
-    *) PASSTHRU+=("$1"); shift ;;
+    # 官方 web app 自己的参数:原样透传给 `dsh web`(--host 会覆盖 LAN 绑定)。
+    --host|--trusted-host) PASSTHRU+=("$1" "$2"); shift 2 ;;
+    --host=*|--trusted-host=*) PASSTHRU+=("$1"); shift ;;
+    # 其余一律拒绝。旧实现静默透传,拼错的参数会被拼到 `dsh web` 之后,
+    # 让服务冷启动直接失败(且错误只出现在 dsh.log 里,极难定位)。
+    *)
+      echo "error: 无法识别的参数 '$1'" >&2
+      echo "       启动器参数见 dsh --help;官方 web 参数仅支持 --host/--port/--no-open/--trusted-host" >&2
+      echo "       官方 CLI 命令(plugin/--profile/--dump-config)会自动转交,无需手动处理" >&2
+      exit 1
+      ;;
   esac
 done
-
-dsh_version() {
-  grep -m1 '^dshVersion:' "$REPO/dsh.yaml" | sed -E 's/^dshVersion:[[:space:]]*"?([^"#[:space:]]+).*/\1/'
-}
 
 do_build() {
   node "$REPO/scripts/sync.mjs"
