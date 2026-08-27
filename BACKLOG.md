@@ -17,6 +17,21 @@
 
 ## 讨论中
 
+### [B017] 迁出或删除 packages/dsh-federation(联邦路线已归档)
+- **状态**: 实施中(本仓侧已完成,待 cockpit 侧提取资产)
+- **优先级**: P1
+- **背景 / 动机**: 多机 DSH 改采驾驶舱外壳(见 `docs/adr/ADR-0003-adopt-cockpit-over-semantic-federation.md`),语义联合 Host 路线已归档为「已探索但不采用」(`openspec/changes/archive/2026-08-27-federated-dsh-control-plane/`)。该 package 全程 `enabled: false`,**从未部署到真实 `~/.dsh`**,继续留在本仓只会造成路线困惑与无意义的维护面。
+- **要点**:
+  - **先提取资产,再处置本体**。需迁往 `dsh-cockpit` 复用的模块清单见 ADR-0003「资产处置」一节:注册表持久化(CAS/0600/fsync/no-follow/损坏不覆盖)、OpenSSH 隧道生命周期(仅 BatchMode 探测、argv/alias 注入防护、bind 冲突有界重试、stderr 脱敏)、终结性信号清理(清理后不得再 spawn、启动窗口不得留 `ppid=1` 孤儿、空转信号不得烧毁 latch)、状态分级与抖动退避、`probeUnary` 与官方事件 envelope 校验(只读部分)、删除节点确认门禁与不可逆摘要诊断。
+  - 这些模块是被独立只读评估以反例证伪后才修好的(commit `5060459`),**不要凭印象重写**,应带着其回归测试一起迁移。
+  - **不迁移**的部分(两个上游 compat patch、联合 ID、CommandRouter、写 ledger、generation 对账、中央 frame 转换、Node Shell/Hero Picker)随归档保留为历史证据。
+  - 处置本体时需一并移除 `dsh.yaml` 中 `dsh-federation` 条目,并确认 `node scripts/sync.mjs` 连跑两次仍报 `no changes`(该 package 未部署,预期无部署面变化)。
+  - 保留 `docs/notes/federated-dsh-operations.md` 还是随之归档,待迁移完成后判断。
+- **更新**:
+  - 2026-08-27 联邦工作已提交(`5060459`)并归档,ADR-0003 已接受。
+  - 2026-08-27 **本仓侧移除已完成**:删除 `packages/dsh-federation`、28 个 `tests/federation-*.test.mjs`、`tests/helpers/`、5 个 rc.2 fetch/build/fixture 脚本、`dsh.yaml` 条目,并修正 `package.json` 的 `check:artifacts`(不再引用已删除的 fixture 检查)。验证:root 40/40、`check:artifacts` 通过、`git diff --check` 通过、`sync` 连跑两次仍 `no changes`、现有 Host(3080)未受影响。
+  - **剩余**:在 `dsh-cockpit` 侧按 ADR-0003「资产处置」从 commit `5060459` 提取上述模块及其回归测试(已确认 8 个源文件与 6 个测试文件均可从该 commit 取回)。完成后本条目可转「已完成」。
+
 ### [B001] 多角色 agent 协作流水线(架构师 / anti 审查 / QA)
 - **状态**: 讨论中(暂停)
 - **背景 / 动机**: 希望 DSH 接任务后按阶段自主分配角色:需求设计 → 架构师;coding 完成 → anti 代码审查;最后 → QA 黑白盒验收。
