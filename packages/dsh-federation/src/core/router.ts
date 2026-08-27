@@ -35,7 +35,10 @@ export class CommandRouter {
    * `knownNodes` keeps the previous port-derived behaviour.
    */
   constructor(ports: ReadonlyMap<NodeId, DshNodePort>, knownNodes?: Iterable<NodeId>) {
-    this.#ports = new Map(ports)
+    // Keep the live port registry by reference. Connectivity removes a port as
+    // soon as either owned event stream disconnects; copying here would leave a
+    // stale adapter routable after the node has left READY.
+    this.#ports = ports
     this.#knownNodes = knownNodes === undefined ? new Set(ports.keys()) : new Set(knownNodes)
   }
 
@@ -62,6 +65,18 @@ export class CommandRouter {
     const before = beforeId === undefined ? undefined : decodeWorkspaceId(beforeId, this.#knownNodes)
     if (before !== undefined && before.nodeId !== current.nodeId) throw new RoutingError('CAPABILITY_DENIED', 'cross-node workspace reorder is forbidden')
     return this.#node(current.nodeId, 'workspace.write').reorderWorkspace(current.nativeId, before?.nativeId, abortOptions(signal))
+  }
+
+  sessionReorder(workspaceId: FederatedWorkspaceId, sessionId: FederatedSessionId, beforeId?: FederatedSessionId, signal?: AbortSignal) {
+    const workspace = decodeWorkspaceId(workspaceId, this.#knownNodes)
+    const session = decodeSessionId(sessionId, this.#knownNodes)
+    const before = beforeId === undefined ? undefined : decodeSessionId(beforeId, this.#knownNodes)
+    if (session.nodeId !== workspace.nodeId || (before !== undefined && before.nodeId !== workspace.nodeId)) {
+      throw new RoutingError('CAPABILITY_DENIED', 'cross-node or cross-workspace session reorder is forbidden')
+    }
+    return this.#node(workspace.nodeId, 'workspace.write').reorderSession(
+      workspace.nativeId, session.nativeId, before?.nativeId, abortOptions(signal),
+    )
   }
 
   sessionList(nodeId: NodeId, signal?: AbortSignal) {

@@ -1,6 +1,6 @@
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import { FederationBridge, type FederatedNodeFacts, type NodeRuntimeBinding } from './bridge.js'
-import { NodeProjectionRuntime } from './node-runtime.js'
+import { NodeProjectionRuntime, type NodeBaseline, type NodeSessionSummary, type NodeWorkspaceView } from './node-runtime.js'
 
 /** Per-node browser projections, keyed by node id. */
 export interface NodeRuntimeRegistry {
@@ -8,6 +8,44 @@ export interface NodeRuntimeRegistry {
 }
 
 /** The Connection surface this module needs; kept minimal on purpose. */
+function parseNodeBaseline(nodeId: FederatedNodeFacts['nodeId'], value: unknown): NodeBaseline {
+  if (typeof value !== 'object' || value === null) throw new Error('node baseline must be an object')
+  const record = value as Record<string, unknown>
+  if (!Array.isArray(record.workspaces) || !Array.isArray(record.sessions) || !Array.isArray(record.archivedSessionIds)) {
+    throw new Error('node baseline arrays are required')
+  }
+  const workspacePrefix = `fed1:${nodeId}:w:`
+  const sessionPrefix = `fed1:${nodeId}:s:`
+  const workspaces = record.workspaces.map((value, index): NodeWorkspaceView => {
+    if (typeof value !== 'object' || value === null) throw new Error(`workspace ${index} must be an object`)
+    const row = value as Record<string, unknown>
+    if (
+      typeof row.workspaceId !== 'string' || !row.workspaceId.startsWith(workspacePrefix)
+      || typeof row.path !== 'string' || typeof row.title !== 'string'
+      || typeof row.createdAt !== 'string' || typeof row.updatedAt !== 'string'
+      || !Array.isArray(row.sessionIds)
+      || !row.sessionIds.every(id => typeof id === 'string' && id.startsWith(sessionPrefix))
+    ) throw new Error(`workspace ${index} is not a valid ${nodeId} baseline row`)
+    return row as unknown as NodeWorkspaceView
+  })
+  const sessions = record.sessions.map((value, index): NodeSessionSummary => {
+    if (typeof value !== 'object' || value === null) throw new Error(`session ${index} must be an object`)
+    const row = value as Record<string, unknown>
+    if (
+      typeof row.id !== 'string' || !row.id.startsWith(sessionPrefix)
+      || typeof row.displayTitle !== 'string' || typeof row.cwd !== 'string'
+      || typeof row.running !== 'boolean' || typeof row.blank !== 'boolean'
+      || typeof row.updatedAt !== 'number' || !Number.isFinite(row.updatedAt)
+    ) throw new Error(`session ${index} is not a valid ${nodeId} baseline row`)
+    return row as unknown as NodeSessionSummary
+  })
+  const archivedSessionIds = record.archivedSessionIds.map((id, index) => {
+    if (typeof id !== 'string' || !id.startsWith(sessionPrefix)) throw new Error(`archived session ${index} has wrong owner`)
+    return id as NodeBaseline['archivedSessionIds'][number]
+  })
+  return { workspaces, sessions, archivedSessionIds }
+}
+
 interface ConnectionLike {
   readonly rpc: {
     call(channel: string, endpoint: string, payload: unknown, signal?: AbortSignal): Promise<{
@@ -50,7 +88,7 @@ export function createRuntimeBridge(ctx: ClientContext): FederationBridge | unde
       runtimes.set(node.nodeId, runtime)
       try {
         const result = await connection.rpc.call('/api', 'federation/baseline', { nodeId: node.nodeId })
-        if (result.ok) runtime.installBaseline(result.value as never)
+        if (result.ok) runtime.installBaseline(parseNodeBaseline(node.nodeId, result.value))
       } catch {
         // A failed baseline leaves the node not-ready; the bridge stays official.
       }

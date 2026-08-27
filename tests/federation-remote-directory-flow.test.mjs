@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { openRealRc2Streams } from './helpers/rc2-stream-proof.mjs'
 
 /**
  * Remote in-app directory flow against a real `dsh web` that serves the
@@ -83,6 +84,7 @@ test('a browse-serving remote node drives the node-bound directory flow', { time
     },
   })
   let bundle
+  let streams
   try {
     await apiReady(port, child)
     bundle = path.join(REPO, 'node_modules/.cache', `federation-browse-${process.pid}.mjs`)
@@ -98,13 +100,15 @@ test('a browse-serving remote node drives the node-bound directory flow', { time
     ])
     assert.equal(builtClient.status, 0, builtClient.stderr)
 
-    const { HttpUnaryCarrier, DshRc2NodeAdapter } = await import(`${pathToFileURL(bundle).href}?v=${Date.now()}`)
+    const fed = await import(`${pathToFileURL(bundle).href}?v=${Date.now()}`)
+    const { HttpUnaryCarrier, DshRc2NodeAdapter } = fed
     const { NodeDirectoryFlow } = await import(`${pathToFileURL(clientBundle).href}?v=${Date.now()}`)
 
     const carrier = new HttpUnaryCarrier({
       endpoint: new URL(`http://127.0.0.1:${port}`), generation: 1, currentGeneration: () => 1, timeoutMs: 30_000,
     })
-    const probe = await DshRc2NodeAdapter.probe(carrier, { mux: true, host: true })
+    streams = await openRealRc2Streams(fed, new URL(`http://127.0.0.1:${port}`))
+    const probe = await DshRc2NodeAdapter.probe(carrier, streams.proof)
     assert.equal(probe.compatibility, 'SUPPORTED', probe.diagnostic)
 
     // This is the whole point: a browse-serving node grants directory capabilities.
@@ -169,6 +173,7 @@ test('a browse-serving remote node drives the node-bound directory flow', { time
     assert.ok(seen.length >= 3)
     assert.ok(seen.every(entry => entry[1] === nodeId), JSON.stringify(seen))
   } finally {
+    streams?.dispose()
     child.kill('SIGKILL')
     await new Promise(resolve => child.once('exit', resolve))
     if (bundle) {

@@ -80,7 +80,9 @@ describe('dual WebSocket event carrier', () => {
       onFrame(frame) { frames.push(frame) },
       onDisconnect() {},
     })
-    await carrier.open()
+    const readiness = await carrier.open()
+    expect(readiness.generation).toBe(3)
+    expect([...readiness.opened]).toEqual(['mux', 'host'])
     expect(sockets.map(socket => socket.url.pathname)).toEqual(['/api/events.mux', '/api/events.host'])
     sockets[0]!.emit('message', { data: JSON.stringify({ type: 'mux-event' }) } satisfies SocketMessageEvent)
     sockets[1]!.emit('message', { data: JSON.stringify({ type: 'host-event' }) } satisfies SocketMessageEvent)
@@ -89,6 +91,117 @@ describe('dual WebSocket event carrier', () => {
       { generation: 3, stream: 'mux', value: { type: 'mux-event' } },
       { generation: 3, stream: 'host', value: { type: 'host-event' } },
     ])
+    carrier.dispose()
+  })
+
+  it('rejects the joint open and closes its peer when one stream dies during half-open', async () => {
+    const sockets: FakeSocket[] = []
+    const carrier = new DualEventCarrier({
+      endpoint: new URL('http://127.0.0.1:49152'), generation: 7, currentGeneration: () => 7,
+      createSocket(url) { const socket = new FakeSocket(url); sockets.push(socket); return socket },
+      validate: (_stream, value) => value,
+      onFrame() {}, onDisconnect() {},
+    })
+    const opening = carrier.open()
+    await Promise.resolve()
+    sockets[0]!.emit('open')
+    sockets[0]!.emit('close', { code: 1006, reason: 'half-open loss' } satisfies SocketCloseEvent)
+    await expect(opening).rejects.toThrow(/half-open|closed/i)
+    expect(sockets[1]!.closed.length).toBeGreaterThan(0)
+  })
+
+  it('closes an already opened peer when the other stream errors before open', async () => {
+    const sockets: FakeSocket[] = []
+    const carrier = new DualEventCarrier({
+      endpoint: new URL('http://127.0.0.1:49152'), generation: 8, currentGeneration: () => 8,
+      createSocket(url) { const socket = new FakeSocket(url); sockets.push(socket); return socket },
+      validate: (_stream, value) => value,
+      onFrame() {}, onDisconnect() {},
+    })
+    const opening = carrier.open()
+    await Promise.resolve()
+    sockets[0]!.emit('open')
+    sockets[1]!.emit('error')
+    await expect(opening).rejects.toThrow(/host event stream failed before open/)
+    expect(sockets[0]!.closed.length).toBeGreaterThan(0)
+  })
+
+  it('does not resolve readiness until both physical streams have opened', async () => {
+    const sockets: FakeSocket[] = []
+    const carrier = new DualEventCarrier({
+      endpoint: new URL('http://127.0.0.1:49152'), generation: 7, currentGeneration: () => 7,
+      createSocket(url) { const socket = new FakeSocket(url); sockets.push(socket); return socket },
+      validate: (_stream, value) => value,
+      onFrame() {}, onDisconnect() {},
+    })
+    let ready = false
+    const opening = carrier.open().then(value => { ready = true; return value })
+    await Promise.resolve()
+    sockets[0]!.emit('open')
+    await Promise.resolve()
+    expect(ready).toBe(false)
+    sockets[1]!.emit('open')
+    await expect(opening).resolves.toMatchObject({ generation: 7 })
+    carrier.dispose()
+  })
+
+  it('closes the owning stream when its validated frame consumer rejects', async () => {
+    const sockets: FakeSocket[] = []
+    const disconnects: unknown[] = []
+    const carrier = new DualEventCarrier({
+      endpoint: new URL('http://127.0.0.1:49152'), generation: 1, currentGeneration: () => 1,
+      createSocket(url) { const socket = new FakeSocket(url); sockets.push(socket); queueMicrotask(() => socket.emit('open')); return socket },
+      validate: (_stream, value) => value,
+      async onFrame() { throw new Error('reconciler rejected frame') },
+      onDisconnect: value => { disconnects.push(value) },
+    })
+    await carrier.open()
+    sockets[0]!.emit('message', { data: '{}' } satisfies SocketMessageEvent)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(sockets[0]!.closed.at(-1)).toMatchObject({ code: 1008, reason: 'reconciler rejected frame' })
+    expect(disconnects).toHaveLength(1)
+    sockets[0]!.emit('close', { code: 1008, reason: 'reconciler rejected frame' } satisfies SocketCloseEvent)
+    expect(disconnects).toHaveLength(1)
+    carrier.dispose()
+  })
+
+  it('drops queued frames from a stream after its consumer rejects', async () => {
+    const sockets: FakeSocket[] = []
+    const seen: number[] = []
+    const carrier = new DualEventCarrier({
+      endpoint: new URL('http://127.0.0.1:49152'), generation: 1, currentGeneration: () => 1,
+      createSocket(url) { const socket = new FakeSocket(url); sockets.push(socket); queueMicrotask(() => socket.emit('open')); return socket },
+      validate: (_stream, value) => value as { id: number },
+      async onFrame(frame) { seen.push(frame.value.id); if (frame.value.id === 1) throw new Error('first frame rejected') },
+      onDisconnect() {},
+    })
+    await carrier.open()
+    sockets[0]!.emit('message', { data: '{"id":1}' } satisfies SocketMessageEvent)
+    sockets[0]!.emit('message', { data: '{"id":2}' } satisfies SocketMessageEvent)
+    await carrier.whenIdle()
+    expect(seen).toEqual([1])
+    carrier.dispose()
+  })
+
+  it('exposes a condition-based idle barrier after queued consumers finish', async () => {
+    const sockets: FakeSocket[] = []
+    let release!: () => void
+    const carrier = new DualEventCarrier({
+      endpoint: new URL('http://127.0.0.1:49152'), generation: 1, currentGeneration: () => 1,
+      createSocket(url) { const socket = new FakeSocket(url); sockets.push(socket); queueMicrotask(() => socket.emit('open')); return socket },
+      validate: (_stream, value) => value,
+      onFrame: () => new Promise<void>(resolve => { release = resolve }),
+      onDisconnect() {},
+    })
+    await carrier.open()
+    sockets[0]!.emit('message', { data: '{}' } satisfies SocketMessageEvent)
+    let idle = false
+    const waiting = carrier.whenIdle().then(() => { idle = true })
+    await Promise.resolve()
+    expect(idle).toBe(false)
+    release()
+    await waiting
+    expect(idle).toBe(true)
     carrier.dispose()
   })
 

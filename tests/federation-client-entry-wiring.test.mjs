@@ -383,7 +383,7 @@ test('a remote node activates once its baseline is installed', { timeout: 240_00
                 return { ok: true, value: { nodes: [{
                   nodeId: 'vm-a', displayName: 'VM A', kind: 'remote', enabled: true, order: 1,
                   state: 'READY', compatibility: 'SUPPORTED', runningSessionCount: 0,
-                  pendingInteractionCount: 0, home: '/remote',
+                  pendingInteractionCount: 0, outcomeUnknownCount: 1, home: '/remote',
                 }] } }
               }
               if (endpoint === 'federation/baseline') {
@@ -420,10 +420,14 @@ test('a remote node activates once its baseline is installed', { timeout: 240_00
     assert.notEqual(winner(slots, 'sidebar.workspaces'), OfficialSidebar,
       'a remote node with an installed baseline must activate the federated sidebar')
     assert.notEqual(winner(slots, 'conversation.hero.workspace'), OfficialHero)
+    const { renderToStaticMarkup } = await import('react-dom/server')
+    const SidebarComponent = slots.entriesOfSlot('sidebar.workspaces')[0].component
+    const sidebarMarkup = renderToStaticMarkup(React.createElement(SidebarComponent))
+    assert.match(sidebarMarkup, /data-federation-outcome-unknown="1"/)
+    assert.match(sidebarMarkup, /manual review required/)
 
     // The hero surface must be the real federated picker, not a copy of the
     // sidebar subtree: render it and check its own markers.
-    const { renderToStaticMarkup } = await import('react-dom/server')
     const HeroComponent = slots.entriesOfSlot('conversation.hero.workspace')[0].component
     const markup = renderToStaticMarkup(React.createElement(HeroComponent))
     assert.match(markup, /data-federation-hero-picker="true"/,
@@ -432,6 +436,39 @@ test('a remote node activates once its baseline is installed', { timeout: 240_00
     assert.match(markup, /data-federation-directory-mode="browse"/,
       'a remote node must offer the in-app browse flow')
     assert.match(markup, new RegExp(`data-federation-picker-workspace="${wid}"`))
+  } finally {
+    for (const bundle of bundles) {
+      await rm(bundle, { force: true })
+      await rm(bundle.replace(/\.mjs$/, '.css'), { force: true })
+    }
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a remote node whose baseline DTO is malformed keeps the browser official', { timeout: 240_000 }, async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'federation-client-remote-malformed-'))
+  const bundles = []
+  try {
+    const { mod, bundle } = await loadClientEntryFull(root)
+    bundles.push(bundle)
+    const slots = officialSlots()
+    const store = snapshot => ({ getSnapshot: () => snapshot, subscribe: () => () => {} })
+    const ctx = {
+      ...fakeClientContext(slots),
+      get: name => (name === 'connection' ? { rpc: { call: async (_channel, endpoint) => endpoint === 'federation/nodes'
+        ? { ok: true, value: { nodes: [{ nodeId: 'vm-a', displayName: 'VM A', kind: 'remote', enabled: true, order: 1, state: 'READY', compatibility: 'SUPPORTED', runningSessionCount: 0, pendingInteractionCount: 0 }] } }
+        : { ok: true, value: { workspaces: [{ workspaceId: 'fed1:vm-b:w:b2xk', title: 'wrong owner', path: '/r', sessionIds: [], createdAt: 'x', updatedAt: 'y' }], sessions: [], archivedSessionIds: [] } },
+      } } : undefined),
+      sessions: { list: store({ ids: [], byId: {}, current: undefined, phase: 'ready', subagentsByParent: {}, jobsBySession: {} }), open: () => {}, fork: async () => 'c', binding: () => ({ session: { rename: async () => ({ ok: true }) } }) },
+      workspaces: { list: store({ items: [], archivedSessionIds: [], state: 'idle', phase: 'ready', error: null, baselinesReady: true }), startSession: () => {}, rename: async () => {}, delete: async () => {}, insertBefore: async () => {}, archiveSession: async () => {}, insertSessionBefore: async () => {} },
+      locale: { bind: () => key => key },
+    }
+    mod.apply(ctx, undefined)
+    for (let attempt = 0; attempt < 160 && winner(slots, 'sidebar.workspaces') === OfficialSidebar; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 25))
+    }
+    assert.equal(winner(slots, 'sidebar.workspaces'), OfficialSidebar)
+    assert.equal(winner(slots, 'conversation.hero.workspace'), OfficialHero)
   } finally {
     for (const bundle of bundles) {
       await rm(bundle, { force: true })

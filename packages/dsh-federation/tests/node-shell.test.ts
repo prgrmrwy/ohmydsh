@@ -45,7 +45,7 @@ const sessB = encodeSessionId({ nodeId: vmB, nativeId: 'shared' as NativeSession
 function rowInput(overrides: Partial<NodeRowInput> = {}): NodeRowInput {
   return {
     nodeId: vmA, displayName: 'VM A', kind: 'remote', enabled: true, order: 1,
-    state: 'READY', compatibility: 'SUPPORTED', runningSessionCount: 0, pendingInteractionCount: 0,
+    state: 'READY', compatibility: 'SUPPORTED', runningSessionCount: 0, pendingInteractionCount: 0, outcomeUnknownCount: 0,
     ...overrides,
   }
 }

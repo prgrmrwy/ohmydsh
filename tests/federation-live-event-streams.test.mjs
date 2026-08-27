@@ -106,7 +106,7 @@ test('the dual event carrier consumes real rc.2 WebSocket streams', { timeout: 3
       `--outfile=${bundle}`, '--log-level=error',
     ])
     assert.equal(built.status, 0, built.stderr)
-    const { DualEventCarrier, HttpUnaryCarrier, DshRc2NodeAdapter } = await import(`${pathToFileURL(bundle).href}?v=${Date.now()}`)
+    const { DualEventCarrier, HttpUnaryCarrier, DshRc2NodeAdapter, validateRc2EventEnvelope } = await import(`${pathToFileURL(bundle).href}?v=${Date.now()}`)
 
     // 2) Open both real streams through the real carrier. Node's global
     //    WebSocket already satisfies the CarrierSocket shape.
@@ -118,17 +118,17 @@ test('the dual event carrier consumes real rc.2 WebSocket streams', { timeout: 3
       generation: 1,
       currentGeneration: () => generation,
       createSocket: url => new WebSocket(url),
-      validate: (_stream, value) => value,
+      validate: validateRc2EventEnvelope,
       onFrame: frame => { frames.push(frame) },
       onDisconnect: event => { disconnects.push(event) },
     })
-    await carrier.open()
+    const streamProof = await carrier.open()
 
     // 3) Cause real host activity and wait for real frames to arrive.
     const unary = new HttpUnaryCarrier({
       endpoint: new URL(`http://127.0.0.1:${port}`), generation: 1, currentGeneration: () => generation, timeoutMs: 30_000,
     })
-    const probe = await DshRc2NodeAdapter.probe(unary, { mux: true, host: true })
+    const probe = await DshRc2NodeAdapter.probe(unary, streamProof)
     const adapter = new DshRc2NodeAdapter({
       nodeId: 'vm-streams', kind: 'remote', displayName: 'vm-streams', enabled: true, order: 1,
       capabilities: probe.capabilities, compatibility: probe.compatibility, state: 'READY',

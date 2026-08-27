@@ -78,11 +78,29 @@ describe('node lifecycle and layered diagnostics (9.1)', () => {
   })
 
   it('never leaks keys, tokens, bearer headers or real home paths into diagnostics', async () => {
+    // A real OpenSSH leak is multi-line with the key material BETWEEN the BEGIN
+    // and END markers, so the fixture must reproduce that shape: asserting only
+    // on the header cannot prove the body was removed.
+    const keyBody = 'b3BlbnNzaC1rZXktdjEAAAAABG5vbmUSECRETKEYMATERIAL'
     const secret = [
-      '-----BEGIN OPENSSH PRIVATE KEY-----abc-----END OPENSSH PRIVATE KEY-----',
+      `-----BEGIN OPENSSH PRIVATE KEY-----\n${keyBody}\n-----END OPENSSH PRIVATE KEY-----`,
       'Authorization: Bearer abcdef123456',
       'sk-livekey0987654321',
+      // The keyword can sit anywhere in the identifier, so neither a prefix nor
+      // a suffix anchor is sufficient.
+      'AWS_SECRET_ACCESS_KEY=leaked-aws-value',
+      'DB_PASSWORD_PROD=leaked-db-value',
+      'client_secret=leaked-oauth-value',
+      // Quotes and brackets are delimiters too: JSON/YAML shapes must not slip
+      // past an identifier-only pattern.
+      '{"client_secret":"leaked-json-value"}',
+      'config["secret_key"] = leaked-bracket-value',
+      // Useful diagnostics must survive redaction, or the operator loses the
+      // information they need to act.
+      'Permission denied (publickey).',
+      '/etc/ssh/ssh_config line 21',
       '/Users/alice/.ssh/id_ed25519',
+      '/var/root/.ssh/id_ed25519',
       'vm-a-secret-alias',
     ].join(' ')
     const manager = new OpenSshTunnelManager({
@@ -102,7 +120,17 @@ describe('node lifecycle and layered diagnostics (9.1)', () => {
       state: 'SSH_UNREACHABLE',
     })
     const error = await manager.connect({ nodeId: vmA, sshAlias: 'vm-a-secret-alias', remoteDshPort: 3080 }).catch(cause => cause)
-    expect(error.diagnostic).not.toMatch(/PRIVATE KEY-----[a-z]/)
+    // The key BODY is the secret; a header-shaped assertion is not evidence.
+    expect(error.diagnostic).not.toContain(keyBody)
+    expect(error.diagnostic).not.toContain('END OPENSSH PRIVATE KEY')
+    expect(error.diagnostic).not.toContain('/var/root')
+    expect(error.diagnostic).not.toContain('leaked-aws-value')
+    expect(error.diagnostic).not.toContain('leaked-db-value')
+    expect(error.diagnostic).not.toContain('leaked-oauth-value')
+    expect(error.diagnostic).not.toContain('leaked-json-value')
+    expect(error.diagnostic).not.toContain('leaked-bracket-value')
+    expect(error.diagnostic).toContain('Permission denied')
+    expect(error.diagnostic).toContain('/etc/ssh/ssh_config')
     expect(error.diagnostic).not.toContain('abcdef123456')
     expect(error.diagnostic).not.toContain('sk-livekey0987654321')
     expect(error.diagnostic).not.toContain('/Users/alice')

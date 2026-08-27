@@ -1,3 +1,5 @@
+import { hostFrameSchema, muxFrameSchema } from '@deepseek-ai/dsh-host-apiproxy/api/events.schema'
+import { serverRequestSchema } from '@deepseek-ai/dsh-host-apiproxy/api/rpc.schema'
 import {
   encodeSessionId,
   encodeWorkspaceId,
@@ -14,7 +16,8 @@ import {
   type SessionProjection,
   type WorkspaceProjection,
 } from '../../../core/index.js'
-import { CarrierError, type EventStreamKind, type Rc2UnaryTransport } from '../../carrier/index.js'
+import { CarrierError, isDualStreamReadiness, type DualStreamReadiness, type EventStreamKind, type Rc2UnaryTransport } from '../../carrier/index.js'
+import { sendAttemptOf } from '../../send-attempt.js'
 import {
   attachmentValue, directoryCreatedValue, directoryListingValue, historyValue, hostDescription,
   modelsValue, object, renameValue, searchValue, selectedModelValue, sessionIdValue, sessionList,
@@ -24,7 +27,7 @@ import {
 import type { ReconciliationFrame } from '../../../core/reconciliation.js'
 
 export type Rc2StableEvent =
-  | { readonly kind: 'reconciliation'; readonly frame: ReconciliationFrame<unknown, unknown, unknown> }
+  | { readonly kind: 'reconciliation'; readonly frame: ReconciliationFrame<WorkspaceProjection, { readonly running: boolean }, unknown> }
   | { readonly kind: 'interaction'; readonly rpcId: RpcId; readonly sessionId: NativeSessionId; readonly interaction: 'approval' | 'question'; readonly payload: unknown }
   | { readonly kind: 'control'; readonly stream: EventStreamKind; readonly payload: unknown }
   | { readonly kind: 'refresh-required'; readonly reason: string }
@@ -44,7 +47,7 @@ const RC2_ADVERTISED_VERSIONS: ReadonlySet<string> = new Set(['0.1.1-rc.2', '0.0
 export const RC2_ALLOWED_METHODS: ReadonlySet<string> = new Set([
   'host.describe', 'host.listDirectory', 'host.createDirectory',
   'workspace.list', 'workspace.create', 'workspace.rename', 'workspace.delete',
-  'workspace.insertBefore', 'workspace.archiveSession',
+  'workspace.insertBefore', 'workspace.insertSessionBefore', 'workspace.archiveSession',
   'session.list', 'session.create', 'session.history', 'session.models', 'session.selectModel',
   'session.rename', 'session.fork', 'session.prompt', 'session.attachment', 'session.updateQueue',
   'session.cancel', 'session.search',
@@ -64,6 +67,24 @@ const FULL_CAPABILITIES = new Set<NodeCapability>([
 const READ_ONLY_CAPABILITIES = new Set<NodeCapability>([
   'workspace.read', 'session.read', 'session.search', 'session.attachment', 'directory.read', 'events.mux', 'events.host',
 ])
+const UNARY_CAPABILITIES = new Set<NodeCapability>([
+  'workspace.read', 'session.read', 'session.search', 'session.attachment', 'directory.read',
+])
+
+export type Rc2EventEnvelope = ReturnType<typeof serverRequestSchema.parse>
+
+/**
+ * Applies rc.2's own two-level wire validation: first the full server-request
+ * envelope, then the payload union owned by the physical stream. Method and
+ * payload discriminator must agree so an envelope cannot be reclassified after
+ * validation.
+ */
+export function validateRc2EventEnvelope(stream: EventStreamKind, value: unknown): Rc2EventEnvelope {
+  const envelope = serverRequestSchema.parse(value)
+  const payload = (stream === 'mux' ? muxFrameSchema : hostFrameSchema).parse(envelope.payload)
+  if (envelope.method !== payload.type) throw new Error(`${stream} event method does not match payload.type`)
+  return { ...envelope, payload }
+}
 
 export interface Rc2ProbeResult {
   readonly compatibility: 'SUPPORTED' | 'EXPERIMENTAL' | 'INCOMPATIBLE'
@@ -96,9 +117,35 @@ export class DshRc2NodeAdapter implements DshNodePort {
     this.capabilities = new Set(capabilities)
   }
 
-  static async probe(carrier: Rc2UnaryTransport, streams: { readonly mux: boolean; readonly host: boolean }, options?: AbortOptions): Promise<Rc2ProbeResult> {
+  static async probeUnary(carrier: Rc2UnaryTransport, options?: AbortOptions): Promise<Rc2ProbeResult> {
+    return this.#probe(carrier, undefined, options)
+  }
+
+  static finalizeProbe(unary: Rc2ProbeResult, streams: DualStreamReadiness): Rc2ProbeResult {
+    if (!isDualStreamReadiness(streams) || !streams.opened.has('mux') || !streams.opened.has('host')) {
+      return { ...unary, compatibility: 'INCOMPATIBLE', capabilities: new Set(), diagnostic: 'both rc.2 event streams must open successfully' }
+    }
+    const optional = {
+      search: unary.capabilities.has('session.search'),
+      browse: unary.capabilities.has('directory.read'),
+    }
+    const capabilities = unary.compatibility === 'SUPPORTED'
+      ? applyOptional(FULL_CAPABILITIES, optional)
+      : unary.compatibility === 'EXPERIMENTAL'
+        ? applyOptional(READ_ONLY_CAPABILITIES, optional)
+        : new Set<NodeCapability>()
+    return { ...unary, capabilities, diagnostic: unary.diagnostic.replace('unary probe; streams not yet authoritative', 'structural probe') }
+  }
+
+  static async probe(carrier: Rc2UnaryTransport, streams: DualStreamReadiness, options?: AbortOptions): Promise<Rc2ProbeResult> {
+    return this.finalizeProbe(await this.#probe(carrier, undefined, options), streams)
+  }
+
+  static async #probe(carrier: Rc2UnaryTransport, streams: DualStreamReadiness | undefined, options?: AbortOptions): Promise<Rc2ProbeResult> {
     const description = hostDescription(await rpc(carrier, 'host.describe', {}, 'probe-host', options))
-    if (!streams.mux || !streams.host) return { compatibility: 'INCOMPATIBLE', version: description.version, capabilities: new Set(), diagnostic: 'both rc.2 event streams must open successfully' }
+    if (streams !== undefined && (!isDualStreamReadiness(streams) || !streams.opened.has('mux') || !streams.opened.has('host'))) {
+      return { compatibility: 'INCOMPATIBLE', version: description.version, capabilities: new Set(), diagnostic: 'both rc.2 event streams must open successfully' }
+    }
     try {
       workspaceList(await rpc(carrier, 'workspace.list', {}, 'probe-workspaces', options))
       sessionList(await rpc(carrier, 'session.list', {}, 'probe-sessions', options))
@@ -113,17 +160,18 @@ export class DshRc2NodeAdapter implements DshNodePort {
       optional.search ? 'content search available' : 'content search disabled by this deployment',
       optional.browse ? 'directory browse available' : 'directory browse not served by this deployment',
     ].join('; ')
+    const streamsVerified = streams !== undefined
     if (!RC2_ADVERTISED_VERSIONS.has(description.version)) {
       return {
         compatibility: 'EXPERIMENTAL', version: description.version,
-        capabilities: applyOptional(READ_ONLY_CAPABILITIES, optional),
+        capabilities: applyOptional(streamsVerified ? READ_ONLY_CAPABILITIES : UNARY_CAPABILITIES, optional),
         diagnostic: `unverified version; only live-probed read capabilities enabled (${notes})`,
       }
     }
     return {
       compatibility: 'SUPPORTED', version: description.version,
-      capabilities: applyOptional(FULL_CAPABILITIES, optional),
-      diagnostic: `verified rc.2 structural probe; ${notes}`,
+      capabilities: applyOptional(streamsVerified ? FULL_CAPABILITIES : UNARY_CAPABILITIES, optional),
+      diagnostic: `${streamsVerified ? 'verified rc.2 structural probe' : 'verified rc.2 unary probe; streams not yet authoritative'}; ${notes}`,
     }
   }
 
@@ -143,6 +191,11 @@ export class DshRc2NodeAdapter implements DshNodePort {
 
   async deleteWorkspace(workspaceId: NativeWorkspaceId, options?: AbortOptions): Promise<void> { trueReceipt(await this.#call('workspace.delete', { workspaceId }, options), 'workspace.delete', 'deleted') }
   async reorderWorkspace(workspaceId: NativeWorkspaceId, beforeId: NativeWorkspaceId | undefined, options?: AbortOptions): Promise<void> { stringListValue(await this.#call('workspace.insertBefore', { workspaceId, ...(beforeId === undefined ? {} : { beforeWorkspaceId: beforeId }) }, options), 'workspace.insertBefore', 'workspaceIds') }
+  async reorderSession(workspaceId: NativeWorkspaceId, sessionId: NativeSessionId, beforeId: NativeSessionId | undefined, options?: AbortOptions): Promise<void> {
+    workspaceValue(await this.#call('workspace.insertSessionBefore', {
+      workspaceId, sessionId, ...(beforeId === undefined ? {} : { beforeSessionId: beforeId }),
+    }, options), 'workspace.insertSessionBefore')
+  }
 
   async listSessions(options?: AbortOptions): Promise<readonly SessionProjection[]> {
     return this.#projectSessions(sessionList(await this.#call('session.list', {}, options)))
@@ -223,8 +276,13 @@ export class DshRc2NodeAdapter implements DshNodePort {
       return { kind: 'reconciliation', frame: { domain: 'session', sessionId, seq, value: payload } }
     }
     if (type === 'host/workspace-changed') {
-      const workspace = object(payload.workspace, 'host/workspace-changed.workspace')
-      return { kind: 'reconciliation', frame: { domain: 'workspace-upsert', workspaceId: string(workspace.workspaceId, 'workspace.workspaceId') as NativeWorkspaceId, value: workspace } }
+      const workspace = workspaceValue({ workspace: payload.workspace }, 'host/workspace-changed')
+      for (const [sessionId, owner] of this.#workspaceBySession) {
+        if (owner === workspace.workspaceId) this.#workspaceBySession.delete(sessionId)
+      }
+      for (const sessionId of workspace.sessionIds) this.#workspaceBySession.set(sessionId, workspace.workspaceId as NativeWorkspaceId)
+      const projected = this.#projectWorkspace(workspace, 0)
+      return { kind: 'reconciliation', frame: { domain: 'workspace-upsert', workspaceId: workspace.workspaceId as NativeWorkspaceId, value: projected } }
     }
     if (type === 'host/workspace-removed') return { kind: 'reconciliation', frame: { domain: 'workspace-remove', workspaceId: string(payload.workspaceId, `${type}.workspaceId`) as NativeWorkspaceId } }
     if (type === 'host/session-status') return { kind: 'reconciliation', frame: { domain: 'status', sessionId: string(payload.sessionId, `${type}.sessionId`) as NativeSessionId, value: { running: payload.running === true } } }
@@ -249,8 +307,12 @@ export class DshRc2NodeAdapter implements DshNodePort {
     this.#archivedSessions.clear()
     for (const sessionId of value.archivedSessionIds) this.#archivedSessions.add(sessionId)
     for (const workspace of value.items) for (const sessionId of workspace.sessionIds) this.#workspaceBySession.set(sessionId, workspace.workspaceId as NativeWorkspaceId)
+    return value.items.map((workspace, order) => this.#projectWorkspace(workspace, order))
+  }
+
+  #projectWorkspace(workspace: Rc2WorkspaceList['items'][number], order: number): WorkspaceProjection {
     const archived = this.#archivedSessions
-    return value.items.map((workspace, order) => ({
+    return {
       ref: { nodeId: this.node.nodeId, nativeId: workspace.workspaceId as NativeWorkspaceId },
       id: encodeWorkspaceId({ nodeId: this.node.nodeId, nativeId: workspace.workspaceId as NativeWorkspaceId }),
       title: workspace.title,
@@ -258,7 +320,9 @@ export class DshRc2NodeAdapter implements DshNodePort {
       sessionIds: workspace.sessionIds.filter(id => !archived.has(id)).map(id => encodeSessionId({ nodeId: this.node.nodeId, nativeId: id as NativeSessionId })),
       archivedSessionIds: workspace.sessionIds.filter(id => archived.has(id)).map(id => encodeSessionId({ nodeId: this.node.nodeId, nativeId: id as NativeSessionId })),
       order,
-    }))
+      createdAt: workspace.createdAt,
+      updatedAt: workspace.updatedAt,
+    }
   }
 
   #projectSessions(value: Rc2SessionList): readonly SessionProjection[] {
@@ -276,6 +340,8 @@ export class DshRc2NodeAdapter implements DshNodePort {
         status: session.running ? 'running' : 'idle',
         ...(session.projections === undefined ? {} : { seq: session.projections.asOfSeq }),
         archived: this.#archivedSessions.has(session.sessionId),
+        blank: session.blank,
+        updatedAt: session.updatedAt,
       }
     })
     for (const projection of projections) this.#sessions.set(projection.ref.nativeId, projection)
@@ -331,11 +397,13 @@ async function probeOptionalCapabilities(carrier: Rc2UnaryTransport, options?: A
 
 async function rpc(carrier: Rc2UnaryTransport, method: string, payload: unknown, rpcId: string, options?: AbortOptions): Promise<unknown> {
   if (!RC2_ALLOWED_METHODS.has(method)) throw new CarrierError('Protocol', `federation refuses to call non-allowlisted rc.2 method ${method}`, false)
+  const onSendAttempt = sendAttemptOf(options)
   const response = object(await carrier.request({
     path: `/api/${method}`,
     method: 'POST',
     body: { type: 'client-request', rpcId, method, payload },
     ...(options?.signal === undefined ? {} : { signal: options.signal }),
+    ...(onSendAttempt === undefined ? {} : { onSendAttempt }),
   }), `${method} response`)
   if (response.type !== 'server-response' || response.rpcId !== rpcId) throw new CarrierError('Protocol', `${method} response envelope mismatch`, false)
   const result = object(response.result, `${method} result`)

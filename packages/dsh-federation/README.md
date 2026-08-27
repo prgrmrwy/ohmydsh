@@ -2,7 +2,7 @@
 
 Federated DSH is a central control plane for independent ordinary `dsh web` nodes. Its target hierarchy is `Node → Workspace → Session`; execution, files, Git state, subscriptions, models, tools, credentials, workspaces and sessions stay on their owning node.
 
-The package is under active OpenSpec implementation in `federated-dsh-control-plane`. Its manifest entry remains `enabled: false` through M1/M2. The current skeleton is intentionally inert: it registers no route and no browser slot.
+The package is under active OpenSpec implementation and acceptance in `federated-dsh-control-plane`. Its manifest entry remains `enabled: false` until the module, integration and real-node gates pass. When enabled, its build also produces a fixed-source rc.2 Connection compatibility artifact; sync installs that artifact under the official Connection package identity in the same profile transaction as this bundle, and removes both on rollback.
 
 ## Safety boundary
 

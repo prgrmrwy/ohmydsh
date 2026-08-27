@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { openRealRc2Streams } from './helpers/rc2-stream-proof.mjs'
 
 /**
  * The complete central request path, composed once, end to end:
@@ -174,6 +175,7 @@ test('the whole central path routes a federated id to its real remote server', {
   let sshd
   let httpServer
   let federationBundle
+  const streamCarriers = []
   try {
     // Two real DSH servers with independent state: "this-mac" and a remote.
     for (const id of ['this-mac', 'vm-remote']) {
@@ -229,7 +231,9 @@ test('the whole central path routes a federated id to its real remote server', {
       const carrier = new HttpUnaryCarrier({
         endpoint: new URL(`http://127.0.0.1:${endpointPort}`), generation: 1, currentGeneration: () => 1, timeoutMs: 30_000,
       })
-      const probe = await DshRc2NodeAdapter.probe(carrier, { mux: true, host: true })
+      const streams = await openRealRc2Streams(fed, new URL(`http://127.0.0.1:${endpointPort}`))
+      streamCarriers.push(streams)
+      const probe = await DshRc2NodeAdapter.probe(carrier, streams.proof)
       assert.equal(probe.compatibility, 'SUPPORTED', `${server.id}: ${probe.diagnostic}`)
       const adapter = new DshRc2NodeAdapter({
         nodeId: nodeIds[kind], kind: kind === 'local' ? 'local' : 'remote',
@@ -269,8 +273,11 @@ test('the whole central path routes a federated id to its real remote server', {
     const owner = ctx.inject(['connection'], child => {
       child.connection.api.use(async request => {
         const pathname = new URL(request.url).pathname
-        const payload = await request.clone().json().catch(() => ({}))
-        const outcome = await uplink.handle({ path: pathname, rpcId: 'central-1', payload })
+        const envelope = await request.clone().json().catch(() => ({}))
+        const payload = envelope?.type === 'client-request' && envelope?.method === pathname.slice('/api/'.length)
+          ? envelope.payload
+          : envelope
+        const outcome = await uplink.handle({ path: pathname, rpcId: envelope?.rpcId ?? 'central-1', payload })
         if (outcome.kind === 'ok') return Response.json({ routed: 'federation', value: outcome.value ?? null })
         if (outcome.kind === 'error') {
           return Response.json({ routed: 'rejected', code: outcome.code }, { status: outcome.status })
@@ -286,11 +293,13 @@ test('the whole central path routes a federated id to its real remote server', {
     httpServer = createServer((req, res) => { void route.handler(req, res) })
     await new Promise(resolve => httpServer.listen(0, '127.0.0.1', resolve))
     const gatewayPort = httpServer.address().port
+    let browserRpc = 0
     const post = async (pathname, payload, headers = {}) => {
+      const method = pathname.slice('/api/'.length)
       const response = await fetch(`http://127.0.0.1:${gatewayPort}${pathname}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...headers },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ type: 'client-request', rpcId: `central-browser-${++browserRpc}`, method, payload }),
       })
       return { status: response.status, body: await response.json().catch(() => ({})) }
     }
@@ -309,6 +318,19 @@ test('the whole central path routes a federated id to its real remote server', {
     const localList = await natives.local.adapter.listSessions()
     assert.deepEqual(localList.map(session => session.title), ['seeded-on-this-mac'],
       'a remote-owned command must not touch This Mac')
+
+    // Browser envelope → Connection → Uplink → Router → real rc.2 reorder.
+    const secondNative = await natives.remote.adapter.createSession(natives.remote.workspace)
+    const secondSession = encodeSessionId({ nodeId: nodeIds.remote, nativeId: secondNative })
+    const remoteWorkspace = encodeWorkspaceId({ nodeId: nodeIds.remote, nativeId: natives.remote.workspace })
+    const reordered = await post('/api/workspace.insertSessionBefore', {
+      workspaceId: remoteWorkspace, sessionId: secondSession, beforeSessionId: remoteSession,
+    })
+    assert.equal(reordered.status, 200, JSON.stringify(reordered))
+    const reorderedWorkspace = (await natives.remote.adapter.listWorkspaces())
+      .find(workspace => workspace.ref.nativeId === natives.remote.workspace)
+    assert.deepEqual(reorderedWorkspace?.sessionIds, [secondSession, remoteSession],
+      'the remote authoritative workspace must persist browser-requested session order')
 
     // 2) A bare native id falls through to the local composed handler.
     nativeCalls.length = 0
@@ -346,6 +368,7 @@ test('the whole central path routes a federated id to its real remote server', {
 
     await owner.dispose()
   } finally {
+    streamCarriers.forEach(streams => streams.dispose())
     if (httpServer) await new Promise(resolve => httpServer.close(resolve))
     if (tunnel?.child?.exitCode === null) tunnel.child.kill('SIGKILL')
     for (const server of servers) {

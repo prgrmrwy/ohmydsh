@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { openRealRc2Streams } from './helpers/rc2-stream-proof.mjs'
 
 /**
  * Central-disconnect independence and reconnect recovery (task 10.2, the half
@@ -82,6 +83,7 @@ test('a central disconnect leaves the remote independent and recovery is generat
   })
   const remotePid = child.pid
   let bundles = []
+  let streams
   try {
     await apiReady(port, child)
     const hostBundle = path.join(REPO, 'node_modules/.cache', `federation-recovery-${process.pid}.mjs`)
@@ -93,7 +95,8 @@ test('a central disconnect leaves the remote independent and recovery is generat
       ])
       assert.equal(built.status, 0, built.stderr)
     }
-    const { HttpUnaryCarrier, DshRc2NodeAdapter } = await import(`${pathToFileURL(hostBundle).href}?v=${Date.now()}`)
+    const host = await import(`${pathToFileURL(hostBundle).href}?v=${Date.now()}`)
+    const { HttpUnaryCarrier, DshRc2NodeAdapter } = host
     const { NodeReconciler, WriteLedger, parseNodeId } = await import(`${pathToFileURL(coreBundle).href}?v=${Date.now()}`)
 
     const nodeId = parseNodeId('vm-recover')
@@ -102,7 +105,8 @@ test('a central disconnect leaves the remote independent and recovery is generat
     const carrier1 = new HttpUnaryCarrier({
       endpoint: new URL(`http://127.0.0.1:${port}`), generation: 1, currentGeneration: () => generation, timeoutMs: 30_000,
     })
-    const probe = await DshRc2NodeAdapter.probe(carrier1, { mux: true, host: true })
+    streams = await openRealRc2Streams(host, new URL(`http://127.0.0.1:${port}`))
+    const probe = await DshRc2NodeAdapter.probe(carrier1, streams.proof)
     const descriptor = {
       nodeId, kind: 'remote', displayName: 'vm-recover', enabled: true, order: 1,
       capabilities: probe.capabilities, compatibility: probe.compatibility, state: 'READY',
@@ -188,6 +192,7 @@ test('a central disconnect leaves the remote independent and recovery is generat
     assert.equal(ledger.get(inFlight).state, 'OUTCOME_UNKNOWN')
     assert.deepEqual(ledger.replayable(), [])
   } finally {
+    streams?.dispose()
     child.kill('SIGKILL')
     await new Promise(resolve => child.once('exit', resolve))
     for (const bundle of bundles) await rm(bundle, { force: true })

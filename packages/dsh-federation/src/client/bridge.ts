@@ -13,6 +13,7 @@ export interface FederatedNodeFacts {
   readonly compatibility: 'SUPPORTED' | 'EXPERIMENTAL' | 'INCOMPATIBLE'
   readonly runningSessionCount: number
   readonly pendingInteractionCount: number
+  readonly outcomeUnknownCount: number
   readonly home?: string
 }
 
@@ -63,6 +64,7 @@ function parseNodes(value: unknown): readonly FederatedNodeFacts[] {
         : 'INCOMPATIBLE',
       runningSessionCount: typeof record.runningSessionCount === 'number' ? record.runningSessionCount : 0,
       pendingInteractionCount: typeof record.pendingInteractionCount === 'number' ? record.pendingInteractionCount : 0,
+      outcomeUnknownCount: typeof record.outcomeUnknownCount === 'number' ? record.outcomeUnknownCount : 0,
       ...(typeof record.home === 'string' ? { home: record.home } : {}),
     })
   }

@@ -36,12 +36,42 @@ export interface SignalSource {
   off(signal: 'SIGINT' | 'SIGTERM', listener: () => void): unknown
 }
 
-export function bindCatchableShutdown(tunnels: OpenSshTunnelManager, source: SignalSource = process): () => void {
+/**
+ * The lifecycle a catchable signal must terminate.
+ *
+ * Disposing only the tunnel manager is not terminal: the per-node reconnect
+ * loop survives and immediately spawns replacement ssh children, so the signal
+ * handler must abort the whole connection lifecycle first and only then release
+ * any tunnel the loop had not yet adopted.
+ */
+export interface ShutdownTarget {
+  readonly tunnels: Pick<OpenSshTunnelManager, 'disposeAll'>
+  dispose(): Promise<void>
+  /**
+   * Whether the full lifecycle owner exists yet. While false, a signal still
+   * releases already-spawned children but must not consume the one-shot latch.
+   */
+  ready?(): boolean
+}
+
+export function bindCatchableShutdown(target: ShutdownTarget, source: SignalSource = process): () => void {
   let started = false
   const dispose = () => {
     if (started) return
+    // The latch may only be set once cleanup has a real target. During startup
+    // the owner may not exist yet; latching on that no-op signal would silently
+    // disable every later signal.
+    if (target.ready !== undefined && !target.ready()) {
+      void target.tunnels.disposeAll().catch(() => {})
+      return
+    }
     started = true
-    void tunnels.disposeAll()
+    void (async () => {
+      // Ordering matters: dispose() aborts reconnect loops and awaits their
+      // in-flight rounds, so no new child can appear after the final sweep.
+      await target.dispose().catch(() => {})
+      await target.tunnels.disposeAll().catch(() => {})
+    })()
   }
   source.on('SIGINT', dispose)
   source.on('SIGTERM', dispose)
