@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # ohmydsh/dsh — start DSH from this customization repo (bash 命令,非阻塞).
 #
-#   dsh            非阻塞启动:未运行 → 后台拉起 + 就绪后打开 UI;
-#                  已运行 → 直接打开 UI;UI 也已打开 → 提示已在运行
-#   dsh --no-open  启动/检测时不自动打开 UI
+#   dsh            非阻塞启动:未运行 → 后台拉起,就绪后按 web.open 决定是否打开 UI;
+#                  已运行 → 打开规则同上;UI 也已打开 → 提示已在运行
+#   dsh --open     强制自动打开 UI(覆盖 manifest web.open: false)
+#   dsh --no-open  启动/检测时不自动打开 UI(优先级最高)
 #   dsh --foreground 前台运行(调试用,阻塞)
 #   dsh -b         重新 build(安装/同步 plugins)后再启动
 #   dsh build      只 build,不启动
@@ -91,6 +92,7 @@ BUILD_ONLY=0
 STOP=0
 RESTART=0
 NO_OPEN=0
+OPEN=0
 RESET=0
 FOREGROUND=0
 HISTORY=0
@@ -156,6 +158,7 @@ while [[ $# -gt 0 ]]; do
     -b|--build) BUILD=1; shift ;;
     -d|--daemon) shift ;;        # 兼容保留:默认即非阻塞后台
     --foreground) FOREGROUND=1; shift ;;
+    --open) OPEN=1; shift ;;
     --no-open) NO_OPEN=1; shift ;;
     -p|--port) PORT="$2"; shift 2 ;;
     --port=*) PORT="${1#*=}"; shift ;;
@@ -385,11 +388,35 @@ pwa_app_of() {
   echo "$found"
 }
 
+# UI 自动打开开关(manifest web.open):缺省 true = 保持"就绪后打开"旧行为;
+# 解析失败时同样按 true 处理(fail-open,不因配置损坏静默改变行为)。
+ui_manifest_open_enabled() {
+  local v
+  v="$(node -e '
+    const path = require("node:path")
+    const fs = require("node:fs")
+    const yaml = require(path.join(process.argv[1], "node_modules", "js-yaml"))
+    const doc = yaml.load(fs.readFileSync(path.join(process.argv[1], "dsh.yaml"), "utf8"))
+    console.log(doc && doc.web && doc.web.open === false ? "" : "1")
+  ' "$REPO" 2>/dev/null)"
+  [[ "$v" == "1" ]]
+}
+
+# 是否允许自动打开 UI:--no-open 显式禁止;--open 强制;否则遵循 manifest web.open。
+ui_should_open() {
+  [[ $NO_OPEN -eq 1 ]] && return 1
+  [[ $OPEN -eq 1 ]] && return 0
+  ui_manifest_open_enabled
+}
+
 # 记录 UI 打开决策(时间 + 目标),便于事后溯源"是谁开了什么"。
 ui_log() { printf '[%s] UI %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*" >> "$DSH_HOME/dsh-ui.log"; }
 
 open_ui() {
-  [[ $NO_OPEN -eq 1 ]] && return 0
+  if ! ui_should_open; then
+    ui_log "suppressed(--no-open / web.open=false)"
+    return 1
+  fi
   local url="http://127.0.0.1:$PORT"
   local app="${DSH_OPEN_APP:-}"
   if [[ -z "$app" ]]; then
@@ -439,6 +466,8 @@ open_ui() {
 
 start_server() {
   local VER pid
+  # 官方 dsh-web-app 默认也会打开浏览器。始终给官方 CLI 传 --no-open，
+  # 确保本启动器的 open_ui 是唯一 UI opener（否则一次 dsh 会打开两个 tab）。
   VER="$(dsh_version)"
   if [[ -z "$VER" ]]; then
     echo "error: dshVersion missing in $REPO/dsh.yaml" >&2
@@ -447,12 +476,15 @@ start_server() {
   mkdir -p "$DSH_HOME"
   record_startup "$VER"
   if [[ $FOREGROUND -eq 1 ]]; then
-    npx -y "@deepseek-ai/dsh@$VER" web --port "$PORT" ${PASSTHRU[@]+"${PASSTHRU[@]}"} &
+    npx -y "@deepseek-ai/dsh@$VER" web --port "$PORT" --no-open ${PASSTHRU[@]+"${PASSTHRU[@]}"} &
     pid=$!
     trap 'kill -TERM "${pid:-}" 2>/dev/null || true' INT TERM
     if wait_for_port "$PORT" 60 "$pid"; then
-      open_ui
-      echo "dsh 已启动: http://127.0.0.1:$PORT (dshVersion=$VER)"
+      if open_ui; then
+        echo "dsh 已启动: http://127.0.0.1:$PORT (dshVersion=$VER)"
+      else
+        echo "dsh 已启动: http://127.0.0.1:$PORT (dshVersion=$VER;未自动打开 UI,可 dsh --open)"
+      fi
       print_lan
       print_plugins
     elif kill -0 "$pid" 2>/dev/null; then
@@ -462,12 +494,15 @@ start_server() {
     fi
     wait "$pid" || echo "dsh stopped"
   else
-    nohup npx -y "@deepseek-ai/dsh@$VER" web --port "$PORT" ${PASSTHRU[@]+"${PASSTHRU[@]}"} >>"$DSH_HOME/dsh.log" 2>&1 &
+    nohup npx -y "@deepseek-ai/dsh@$VER" web --port "$PORT" --no-open ${PASSTHRU[@]+"${PASSTHRU[@]}"} >>"$DSH_HOME/dsh.log" 2>&1 &
     pid=$!
     disown 2>/dev/null || true
     if wait_for_port "$PORT" 60 "$pid"; then
-      open_ui
-      echo "dsh 已启动: http://127.0.0.1:$PORT (dshVersion=$VER)"
+      if open_ui; then
+        echo "dsh 已启动: http://127.0.0.1:$PORT (dshVersion=$VER)"
+      else
+        echo "dsh 已启动: http://127.0.0.1:$PORT (dshVersion=$VER;未自动打开 UI,可 dsh --open)"
+      fi
       print_lan
       print_plugins
     elif kill -0 "$pid" 2>/dev/null; then
@@ -617,8 +652,11 @@ if is_server_up; then
     print_plugins
     exit 0
   fi
-  open_ui
-  echo "dsh 已在运行,已为你打开 UI: http://127.0.0.1:$PORT"
+  if open_ui; then
+    echo "dsh 已在运行,已为你打开 UI: http://127.0.0.1:$PORT"
+  else
+    echo "dsh 已在运行: http://127.0.0.1:$PORT (未自动打开 UI,可 dsh --open)"
+  fi
   print_lan
   print_plugins
   exit 0
