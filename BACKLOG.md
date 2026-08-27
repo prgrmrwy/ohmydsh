@@ -283,7 +283,7 @@
 - **优先级**: P0
 - **背景 / 动机**: 希望 Codex / Claude 等不填 api-key,直接用订阅账号授权(OAuth / 本机 CLI 登录态)接入。
 - **要点**:
-  - 实现形态 = **provider 级订阅**(V1ki `dsh-plugin-subscriptions`,manifest id `llm-subscriptions`,当前 0.5.0):codex / claude / grok 订阅登录后出现在输入框模型选择器,claude 复用本机 Claude Code 凭据(keychain 导入秒登录);选型与重评估触发条件见 change `2026-08-20-llm-subscriptions-upgrade`(ADR-0001);
+  - 实现形态 = **provider 级订阅**(V1ki `dsh-plugin-subscriptions`,manifest id `llm-subscriptions`,当前 0.5.2+pr40.d927e3a = 临时 fork PR#40「按模型默认推理档」tarball,设置页默认档列表收起;上游合并发版后切回 npm):codex / claude / grok 订阅登录后出现在输入框模型选择器,claude 复用本机 Claude Code 凭据(keychain 导入秒登录);选型与重评估触发条件见 change `2026-08-20-llm-subscriptions-upgrade`(ADR-0001);
   - 形态演进:官方 CLI-as-subagent 路线(subagent-codex 接线)2026-08-19 落地后,于 2026-08-21(`7bf394e`)移除——主对话已被订阅制 provider 覆盖,委派能力经内置 spawn/fork 子代理保留,modlens 独立走 codex CLI 不受影响;
   - 单机验收:codex 订阅(2026-08-19 委派端到端 + 主对话)通过;claude 本机 CLI 2.1.221 可用、凭据导入登录可用(2026-08-24 确认);
   - 范围边界:多机派发 / 分布式(轴 B:官方 subagent/ACP 平面)暂缓,另行立项。
