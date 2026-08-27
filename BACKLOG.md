@@ -167,6 +167,13 @@
 - **部署侧缓解(2026-08-19)**: `subscriptions-sandbox-shim` 0.1.1 在 codex/grok adapter 请求边界按角色和 call id 清理孤立 tool-call/tool-result;正常 assistant call + user result 配对保持不变,非目标 provider 零影响。
 - **上游修复建议**: core settlement notice 只传播 text/image(至少剥离 tool-call/tool-result);subscriptions `toResponsesInput` 仅允许 assistant→function_call、user tool-result→function_call_output,并做最终配对校验。
 
+### [D003] sync 对本地包内容变化的增量重装未反映到 profile node_modules(观察,根因待查)
+- **状态**: 待排查
+- **现象**: 修改 `packages/worktree-session` 源码并 rebuild 后,`node scripts/sync.mjs` 检测到 `content changed` 并执行 `dsh plugin --profile web add file:...`(exit 0),但 `~/.dsh/profiles/web/node_modules/dsh-worktree-session` 仍为旧内容(无 `lib/host/project.js`,operation.js 无 packageManager 字段);sync 的 state hash 却已更新,后续 sync 判定 up-to-date,部署与实际源码不一致。
+- **绕过(2026-08-28)**: 在 profile 目录手动 `rm -rf node_modules/dsh-worktree-session && pnpm add file:<路径>` 后内容正确;此后 sync 幂等(`no changes`)。
+- **待查方向**: `dsh plugin add` → profile 内 pnpm add 对 `file:` + lockfile `resolution: {type: directory}` 的目录依赖,在 node_modules 已存在同 spec 时是否跳过实际拷贝/链接;以及 sync 应在重装前先移除旧目录或对 `type: directory` 依赖强制刷新。影响面:任何 local package 的源码改动经 sync 部署都可能"假成功"。
+- **更新**: 2026-08-28 记录(worktree-session pnpm 支持实现部署时发现;当前部署已手动校正)。
+
 ---
 
 ## 已完成

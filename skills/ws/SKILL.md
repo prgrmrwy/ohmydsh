@@ -48,16 +48,17 @@ scripts/ws.sh clean /absolute/worktree/path
 
 ## Dependency and safety rules
 
-- New Worktree Sessions are `lean` by default. Before an npm operation that may
+- New Worktree Sessions are `lean` by default. Before an operation that may
   install, remove, update, or otherwise mutate dependencies, the Agent must run
   `promote` for the current binding, verify success, and only then perform the
   mutation.
-- `promote` verifies the exact lean link, runs and validates worktree-local
-  `npm ci`, and reports `mutable` only after success. It refreshes metadata/UI;
-  it does not change the stable binding context.
+- `promote` validates the recorded dependency target and installs per the
+  lockfile (`npm ci` for npm projects, `pnpm install --frozen-lockfile` for
+  pnpm projects), and reports `mutable` only after success. It refreshes
+  metadata/UI; it does not change the stable binding context.
 - `status` reports operation/base/task branch, managed root, dependency
-  fingerprint/mode, lifecycle, and isolated development `DSH_HOME`; it never
-  prints `.env.local` values.
+  fingerprint/mode, the resolved project type (`npm`/`pnpm`), lifecycle, and
+  isolated development `DSH_HOME`; it never prints `.env.local` values.
 - Always run `clean --dry-run` first. Clean refuses the caller's current
   worktree, a live/executing source Session bound to it (even though that
   Session's immutable cwd is the repo), dirty state, in-flight operations, and
@@ -111,6 +112,12 @@ must fail closed until reviewed.
 
 ## Deferred, not commands
 
-`/ws setup`, per-repository config/trust, generic adapters, pnpm/Rush support,
-explicit network ref refresh, and squash-merge provider proof are backlog only.
-Do not claim they exist and do not synthesize hidden config files for them.
+`/ws setup`, per-repository config/trust, generic adapters, Rush/yarn/bun
+support, explicit network ref refresh, and squash-merge provider proof are
+backlog only. Do not claim they exist and do not synthesize hidden config
+files for them. pnpm projects (single package or pnpm workspace, detected from
+the repo-root `pnpm-lock.yaml`) are supported: lean installs inside the bound
+worktree and reuses pnpm's global store, so dependency changes still require
+`promote` first. Projects with neither lockfile (or with both
+`package-lock.json` and `pnpm-lock.yaml`) are refused before any branch,
+worktree, or operation file is created.

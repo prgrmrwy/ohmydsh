@@ -108,6 +108,7 @@ export function WorktreeControls({ pluginContext: ctx, session, sessionId, useSe
           ...(status.taskBranch === undefined ? {} : { taskBranch: status.taskBranch }),
           ...(status.worktreePath === undefined ? {} : { worktreePath: status.worktreePath }),
           ...(status.dependencyMode === undefined ? {} : { dependencyMode: status.dependencyMode }),
+          ...(status.packageManager === undefined ? {} : { packageManager: status.packageManager }),
           ...(status.lifecycle === undefined ? {} : { lifecycle: status.lifecycle }),
           phase: status.lifecycle === 'uncertain' ? 'uncertain' : status.lifecycle === 'cleaned' ? 'cleaned' : 'done',
         })
@@ -154,7 +155,7 @@ export function WorktreeControls({ pluginContext: ctx, session, sessionId, useSe
         style={branchStyle}
         {...(canOpen ? { role: 'button', tabIndex: 0, onClick: openBranch, onKeyDown: onBranchKeyDown, 'aria-label': `Open worktree in editor: ${stage.taskBranch ?? 'worktree'}` } : {})}
       >⑂ {stage.taskBranch ?? 'worktree'}</span>
-      <span style={{ opacity: .8 }}>{stage.dependencyMode ?? 'lean'}</span>
+      <span style={{ opacity: .8 }}>{stage.dependencyMode ?? 'lean'} · {stage.packageManager ?? 'npm'}</span>
       <span style={{ color: lifecycle === 'uncertain' ? '#d9822b' : lifecycle === 'cleaned' ? '#888' : '#2b8a3e' }}>{lifecycle}</span>
     </span>
   }

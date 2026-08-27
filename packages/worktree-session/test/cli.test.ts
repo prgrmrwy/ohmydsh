@@ -30,6 +30,7 @@ describe('dsh-ws CLI', () => {
     expect(await main(['status', prepared.worktreePath])).toBe(0)
     const output = chunks.join('')
     expect(JSON.parse(output).operationId).toBe('operation-cli-1')
+    expect(JSON.parse(output).packageManager).toBe('npm')
     expect(output).not.toContain('TOKEN=')
   }, 120_000)
 

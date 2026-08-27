@@ -54,6 +54,13 @@ describe('WorktreeControls bound status rendering', () => {
     expect(html).toContain('aria-label="Open worktree in editor')
   })
 
+  it('renders the dependency mode with the resolved package manager', () => {
+    stage = { lifecycle: 'bound', taskBranch: 'ws/task', worktreePath: '/repo/.worktrees/task', dependencyMode: 'lean', packageManager: 'pnpm' }
+    expect(renderControls()).toContain('lean · pnpm')
+    stage = { lifecycle: 'bound', taskBranch: 'ws/task', worktreePath: '/repo/.worktrees/task', dependencyMode: 'mutable', packageManager: 'npm' }
+    expect(renderControls()).toContain('mutable · npm')
+  })
+
   it('does not make the cleaned branch clickable', () => {
     stage = { lifecycle: 'cleaned', taskBranch: 'ws/done', worktreePath: '/repo/.worktrees/done' }
     const html = renderControls()
