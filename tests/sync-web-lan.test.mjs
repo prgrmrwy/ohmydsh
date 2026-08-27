@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SYNC_SCRIPT = path.join(REPO, 'scripts', 'sync.mjs')
 
-async function fixture({ web } = {}) {
+async function fixture({ web, open } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'ohmydsh-web-lan-'))
   const repo = path.join(root, 'repo')
   const dshHome = path.join(root, 'dsh-home')
@@ -23,7 +23,10 @@ async function fixture({ web } = {}) {
     path.join(dshHome, 'profiles', 'web', 'package.json'),
     JSON.stringify({ dependencies: {}, dsh: { profile: { bundles: [] } } }, null, 2) + '\n',
   )
-  const webYaml = web === undefined ? '' : `web:\n  lan: ${JSON.stringify(web)}\n`
+  const webLines = []
+  if (web !== undefined) webLines.push(`  lan: ${JSON.stringify(web)}`)
+  if (open !== undefined) webLines.push(`  open: ${JSON.stringify(open)}`)
+  const webYaml = webLines.length ? `web:\n${webLines.join('\n')}\n` : ''
   await writeFile(
     path.join(repo, 'dsh.yaml'),
     `dshVersion: 0.1.0-rc.6\n${webYaml}dependencies: []\ncustomizations: []\n`,
@@ -71,6 +74,25 @@ test('non-boolean web.lan fails the sync with a manifest error', async () => {
   const result = fx.run()
   assert.notEqual(result.status, 0)
   assert.match(result.stderr, /web\.lan/)
+})
+
+test('web.open: false passes sync idempotently without touching the patch', async () => {
+  const fx = await fixture({ open: false })
+  const first = fx.run()
+  assert.equal(first.status, 0, first.stderr)
+  const patch = await readFile(fx.patchPath, 'utf8')
+  assert.doesNotMatch(patch, /0\.0\.0\.0/)
+  const second = fx.run()
+  assert.equal(second.status, 0, second.stderr)
+  assert.match(second.stdout, /no changes/)
+  assert.equal(await readFile(fx.patchPath, 'utf8'), patch)
+})
+
+test('non-boolean web.open fails the sync with a manifest error', async () => {
+  const fx = await fixture({ open: 'false' })
+  const result = fx.run()
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /web\.open/)
 })
 
 test('DSH_LAN env overrides the manifest: enables when the manifest is off', async () => {

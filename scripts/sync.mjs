@@ -133,13 +133,16 @@ function loadManifest() {
   })
   const web = doc.web ?? {}
   if (typeof web !== 'object' || web === null || Array.isArray(web)) {
-    throw new Error('manifest: web must be a mapping (web.lan: true|false)')
+    throw new Error('manifest: web must be a mapping (web.lan: true|false, web.open: true|false)')
   }
   if (web.lan !== undefined && typeof web.lan !== 'boolean') {
     throw new Error('manifest: web.lan must be a boolean')
   }
+  if (web.open !== undefined && typeof web.open !== 'boolean') {
+    throw new Error('manifest: web.open must be a boolean')
+  }
   const agentInstructions = validateAgentInstructions(doc.agentInstructions)
-  return { dshVersion: doc.dshVersion, items, deps, agentInstructions, web: { lan: web.lan === true } }
+  return { dshVersion: doc.dshVersion, items, deps, agentInstructions, web: { lan: web.lan === true, open: web.open !== false } }
 }
 
 function validateAgentInstructions(value) {
