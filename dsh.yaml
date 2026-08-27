@@ -16,6 +16,9 @@ web:                       # Web 启动形态(非 customization;sync 直接渲�
                            #   浏览器开 http://127.0.0.1:3080(公钥免登 + SSH 加密 + 回环即 secure context)。
                            #   用法见 docs/notes/lan-access-ssh-tunnel.md
                            # ⚠ DSH_LAN=1 环境变量优先级高于本开关,同样不要设置。
+  open: false              # 启动/检测时不自动打开浏览器或 PWA(2026-08-28 本机偏好)。
+                           # 需要时显式 `dsh --open` 强制打开;`dsh --no-open` 仍可临时关闭。
+                           # 缺省(字段不存在)视为 true = 保持旧行为。
 
 agentInstructions:          # DSH 原生工作环境级指令,单例物化为 $DSH_HOME/AGENTS.md
   enabled: true

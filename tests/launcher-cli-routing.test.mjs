@@ -8,7 +8,7 @@
 // 明确失败而不是静默污染 web argv。
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, writeFile, rm, chmod, cp } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, writeFile, rm, chmod, cp } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -35,8 +35,8 @@ async function sandbox() {
   // 启动器:把真实 npx 启动替换成回显,其余逻辑保持原样。
   const src = await import('node:fs/promises').then((fs) => fs.readFile(path.join(ROOT, 'bin/dsh'), 'utf8'))
   const patched = src.replace(
-    /nohup npx -y "@deepseek-ai\/dsh@\$VER" web --port "\$PORT" \$\{PASSTHRU\[@\]\+"\$\{PASSTHRU\[@\]\}"\} >>"\$DSH_HOME\/dsh\.log" 2>&1 &/,
-    'for a in web --port "$PORT" ${PASSTHRU[@]+"${PASSTHRU[@]}"}; do echo "WEB_ARG:$a"; done; exit 0',
+    /nohup npx -y "@deepseek-ai\/dsh@\$VER" web --port "\$PORT" --no-open \$\{PASSTHRU\[@\]\+"\$\{PASSTHRU\[@\]\}"\} >>"\$DSH_HOME\/dsh\.log" 2>&1 &/,
+    'for a in web --port "$PORT" --no-open ${PASSTHRU[@]+"${PASSTHRU[@]}"}; do echo "WEB_ARG:$a"; done; exit 0',
   )
   assert.notEqual(patched, src, 'start_server 的 npx 调用未被替换,测试桩与实现已漂移')
   const bin = path.join(dir, 'bin/dsh')
@@ -109,7 +109,25 @@ test('dsh web 别名被吸收,不再拼成多余位置参数', async (t) => {
   t.after(() => rm(sb.dir, { recursive: true, force: true }))
   const r = run(sb, ['web', '--no-open', '-p', '39990'])
   const webArgs = r.stdout.split('\n').filter((l) => l.startsWith('WEB_ARG:')).map((l) => l.slice(8))
-  assert.deepEqual(webArgs, ['web', '--port', '39990'], 'web 之后不得出现多余位置参数')
+  assert.deepEqual(webArgs, ['web', '--port', '39990', '--no-open'], 'web 之后不得出现多余位置参数,且官方 opener 必须关闭')
+})
+
+test('--open 强制打开标志被接受,且不污染 web argv', async (t) => {
+  const sb = await withStubBin(await sandbox())
+  t.after(() => rm(sb.dir, { recursive: true, force: true }))
+  const r = run(sb, ['--open', '-p', '39991'])
+  assert.equal(r.status, 0, r.stderr)
+  const webArgs = r.stdout.split('\n').filter((l) => l.startsWith('WEB_ARG:')).map((l) => l.slice(8))
+  assert.deepEqual(webArgs, ['web', '--port', '39991', '--no-open'], '--open 由本启动器处理,官方 opener 仍必须关闭')
+})
+
+test('manifest web.open: false 时默认 dsh 启动不报错(冷启动由启动桩接管)', async (t) => {
+  const sb = await withStubBin(await sandbox())
+  t.after(() => rm(sb.dir, { recursive: true, force: true }))
+  const r = run(sb, ['-p', '39992'])
+  assert.equal(r.status, 0, r.stderr)
+  const webArgs = r.stdout.split('\n').filter((l) => l.startsWith('WEB_ARG:')).map((l) => l.slice(8))
+  assert.deepEqual(webArgs, ['web', '--port', '39992', '--no-open'])
 })
 
 test('未知参数明确失败,不静默污染 web argv', async (t) => {
@@ -126,5 +144,12 @@ test('官方 web 参数 --host/--trusted-host 仍原样透传', async (t) => {
   t.after(() => rm(sb.dir, { recursive: true, force: true }))
   const r = run(sb, ['--host', '127.0.0.1', '--no-open', '-p', '39990'])
   const webArgs = r.stdout.split('\n').filter((l) => l.startsWith('WEB_ARG:')).map((l) => l.slice(8))
-  assert.deepEqual(webArgs, ['web', '--port', '39990', '--host', '127.0.0.1'])
+  assert.deepEqual(webArgs, ['web', '--port', '39990', '--no-open', '--host', '127.0.0.1'])
+})
+
+test('前台与后台官方启动路径都强制 --no-open,保证只有启动器负责 UI', async () => {
+  const src = await readFile(path.join(ROOT, 'bin/dsh'), 'utf8')
+  assert.match(src, /npx -y "@deepseek-ai\/dsh@\$VER" web --port "\$PORT" --no-open[^\n]* &/)
+  assert.match(src, /nohup npx -y "@deepseek-ai\/dsh@\$VER" web --port "\$PORT" --no-open[^\n]* >>"\$DSH_HOME\/dsh\.log" 2>&1 &/)
+  assert.doesNotMatch(src, /(?:^|\n)\s*(?:nohup )?npx -y "@deepseek-ai\/dsh@\$VER" web --port "\$PORT" (?!--no-open)/)
 })

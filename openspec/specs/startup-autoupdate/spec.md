@@ -45,7 +45,7 @@ manifest 顶层 `autoUpdate` 映射必须(SHALL)支持布尔 `enabled` 与字符
 
 ### Requirement: stop/restart 按端口安全管理 server 与 UI 生命周期
 
-`dsh stop` 与 `dsh restart` 必须(SHALL)从目标端口的监听进程定位 server,并在信号终止前验证其 argv 属于 DSH web;不得仅依赖某一 npm/npx 版本的固定进程字符串,也不得终止无法证明属于 DSH 的端口占用者。UI 清理必须独立于 server 匹配结果执行:关闭已安装 PWA,并清理 Chrome 普通窗口中指向同一 loopback 端口的遗留标签。`restart` 必须完整执行「停止 server → 关闭全部 UI 表面 → 确认端口释放 → 启动 server → 只打开 PWA(若存在)」。
+`dsh stop` 与 `dsh restart` 必须(SHALL)从目标端口的监听进程定位 server,并在信号终止前验证其 argv 属于 DSH web;不得仅依赖某一 npm/npx 版本的固定进程字符串,也不得终止无法证明属于 DSH 的端口占用者。UI 清理必须独立于 server 匹配结果执行:关闭已安装 PWA,并清理 Chrome 普通窗口中指向同一 loopback 端口的遗留标签。`restart` 必须完整执行「停止 server → 关闭全部 UI 表面 → 确认端口释放 → 启动 server → 启动后按 UI 打开开关只打开 PWA(若存在)」。UI 清理(stop/restart)不受 `web.open` 影响:开关只约束"自动打开",不改变"停止时关闭"。
 
 #### Scenario: npm/npx 升级改变 server argv
 
@@ -60,7 +60,26 @@ manifest 顶层 `autoUpdate` 映射必须(SHALL)支持布尔 `enabled` 与字符
 #### Scenario: restart 清理重复 UI
 
 - **WHEN** PWA 与 Chrome 普通窗口中的同端口标签同时存在
-- **THEN** restart 关闭二者,重启 server 后只打开已配置或自动探测到的 PWA
+- **THEN** restart 关闭二者,重启 server 后按 `web.open` 只打开已配置或自动探测到的 PWA(开关关闭则不开)
+
+### Requirement: UI 自动打开可由 manifest 关闭
+
+启动/检测时是否自动打开浏览器或 PWA 由 manifest 顶层 `web.open` 控制,缺省为打开(保持旧行为)。ohmydsh 启动器必须(MUST)在前台和后台两条官方 `dsh web` 启动路径上始终传入官方 `--no-open`,禁止 `@deepseek-ai/dsh-web-app` 自带的默认浏览器 handoff；UI 打开只能由启动器自身的 `open_ui` 单点负责,避免一次命令由官方与本地启动器各打开一个 tab。`web.open: false` 时,冷启动、已运行(仅打开 UI 的入口)与 `dsh restart` 都不得(SHALL NOT)自动打开浏览器或 PWA,但输出仍须提示访问地址与可用 `dsh --open` 强制打开。显式标志优先级高于 manifest:`dsh --open` 必须(SHALL)强制打开,`dsh --no-open` 必须(SHALL)显式禁止;两者仅控制本启动器 opener,不得重新启用官方 opener。manifest 解析失败时视为缺省(打开),不得因配置损坏静默改变行为。`dsh stop` 的 UI 清理不受本开关影响。
+
+#### Scenario: 缺省自动打开且不重复
+
+- **WHEN** manifest 不含 `web.open` 时运行一次 `dsh` 且 server 未运行
+- **THEN** 官方 `dsh web` 收到 `--no-open`,server 就绪后仅由 ohmydsh 启动器打开一次已安装 PWA(唯一匹配时)或浏览器,不得出现官方 opener 与本地 opener 各打开一个 tab
+
+#### Scenario: manifest 关闭自动打开
+
+- **WHEN** `web.open: false` 时运行 `dsh`(冷启动或已运行)或 `dsh restart`
+- **THEN** 不打开任何 UI,输出提示地址与 `dsh --open`;`dsh stop` 仍正常清理已打开的 UI
+
+#### Scenario: 显式参数优先
+
+- **WHEN** `web.open: false` 时运行 `dsh --open`
+- **THEN** 正常自动打开 UI;反之 `web.open: true`(或缺省)时运行 `dsh --no-open` 仍不打开
 
 ### Requirement: 语义化版本比较决定是否更新
 

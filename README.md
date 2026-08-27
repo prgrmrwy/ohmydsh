@@ -63,7 +63,7 @@ dsh build && dsh           # ③ 物化定制配置并启动,UI 自动打开
 
 ```bash
 dsh build   # 1. 首次:按 dsh.yaml 把定制物化到 ~/.dsh(改了配置后也要重跑)
-dsh         # 2. 启动:自动在后台拉起,就绪后打开 UI
+dsh         # 2. 启动:自动在后台拉起(是否就绪后自动打开 UI 由 web.open 决定,默认开;本仓库默认关)
 dsh stop    # 3. 停止服务
 ```
 
@@ -76,17 +76,17 @@ dsh stop    # 3. 停止服务
 
 | 场景 | 命令 | 说明 |
 |---|---|---|
-| 启动 | `dsh` | 未运行 → 后台拉起 + 打开 UI;已运行 → 打开 UI;UI 也已打开 → 提示"已在运行"。UI 打开策略:显式 `DSH_OPEN_APP`(PWA/应用)优先;未配置时自动探测已安装的 DeepSeek Harness PWA,命中即**只开 PWA**;否则浏览器 |
+| 启动 | `dsh` | 未运行 → 后台拉起 + 打开 UI;已运行 → 打开 UI;UI 也已打开 → 提示"已在运行"。UI 打开策略:显式 `DSH_OPEN_APP`(PWA/应用)优先;未配置时自动探测已安装的 DeepSeek Harness PWA,命中即**只开 PWA**;否则浏览器。`dsh.yaml` 置 `web.open: false`(本仓库默认)则**不自动打开**,需要时 `dsh --open` |
 | 构建 + 启动 | `dsh -b` | 改过 `dsh.yaml` 或插件后,先重新物化再启动 |
 | 只构建 | `dsh build` | 只把配置物化到 `~/.dsh`,不启动 |
 | 停止 | `dsh stop` | 按监听端口验证并停掉 DSH server,同时关闭 PWA 与 Chrome 中同端口的 DSH 标签;非 DSH 进程占端口时拒绝误杀 |
-| 重启 | `dsh restart` | 停 server → 关闭全部 UI → 确认端口释放 → 启动 server → 只打开 PWA(存在时),一步到位 |
+| 重启 | `dsh restart` | 停 server → 关闭全部 UI → 确认端口释放 → 启动 server → 按 `web.open` 只打开 PWA(存在时),一步到位 |
 | 看历史 | `dsh history` | 历次启动的时间 / DSH 版本 / 端口 / 插件清单(记录在 `~/.dsh/dsh-startup.log`) |
 | 一键清空定制 | `dsh reset` | 移除自定义插件、preset、skill,并安全撤销托管的 `$DSH_HOME/AGENTS.md`(反悔了?`dsh build` 就能恢复) |
 | 统一升级插件 | `dsh plugin-update` | 检测远端插件新版本(兼容性/稳定性判定)→ 逐条确认 → 改 `dsh.yaml` + sync + 自动提交;`--dry-run` 只预览,`--yes` 跳过确认;needs-review 条目永远等人工 |
 | 调试 | `dsh --foreground` | 前台运行,日志直接打在终端 |
 | 换端口 | `dsh -p 8080` | 默认 3080 |
-| 不弹 UI | `dsh --no-open` | 启动/检测时不自动打开 UI |
+| 不弹 UI | `dsh --no-open` | 启动/检测时不自动打开 UI(优先级最高;`dsh --open` 反方向强制打开) |
 
 小知识:"build" 就是按 `dsh.yaml` 物化到 `~/.dsh`(即 `node scripts/sync.mjs`,幂等可重跑);`DSH_HOME` 未设置或只含空白时默认 `~/.dsh`,也支持 `DSH_HOME=~/...`;DSH 版本单一来源是 `dsh.yaml` 的 `dshVersion`,启动时动态读取。
 
@@ -106,9 +106,11 @@ dsh stop    # 3. 停止服务
 - 临时单次仅本机:`dsh --host 127.0.0.1`;
 - macOS 首次开放端口可能弹防火墙询问,选择允许 node 接受传入连接。
 
-**UI 打开方式**(用 `DSH_OPEN_APP` 控制,不用改 shell 配置):
+**UI 打开方式**(`web.open` 开关 + `DSH_OPEN_APP` 选目标,不用改 shell 配置):
 
-- 默认:系统默认浏览器打开 `http://127.0.0.1:3080`;
+- 默认:就绪后自动打开,目标=系统默认浏览器打开 `http://127.0.0.1:3080`;
+- 不想自动弹任何 UI:`dsh.yaml` 置 `web.open: false`(本仓库默认关)后 `dsh build`,或临时 `dsh --no-open`;需要时 `dsh --open` 强制打开;
+- 官方 `dsh web` 自身默认也会打开浏览器;ohmydsh 启动官方进程时固定传 `--no-open`,只保留本启动器一个 UI opener,避免一次命令打开两个 tab;
 - 想用 PWA 窗口 / 指定 App 打开:仓库根 `.env.local`(gitignored,模板见 `.env.local.example`)写 `DSH_OPEN_APP=...`,启动时自动生效;也可以临时 `DSH_OPEN_APP="xxx.app" dsh`(行内优先);
 - 注意:自定义端口(`dsh -p`)时 PWA 打开的是自己的 start_url,可能对不上,这种情况用 `--no-open` 手动开。
 
