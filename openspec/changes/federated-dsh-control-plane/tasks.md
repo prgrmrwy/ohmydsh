@@ -30,10 +30,10 @@
 - [x] 3.3 为 ID 增加 round-trip、畸形输入、未知版本、类型混用、重命名稳定性和跨节点 native-id 碰撞的属性测试。
 - [x] 3.4 实现 Node registry 领域模型、不可变 local/remote node id、顺序、启用状态和显示名/alias 变更语义。
 - [x] 3.5 实现 Node/Workspace/Session/Ungrouped/archived 投影及跨节点状态聚合，保证路径始终携带节点归属而不被解析为本机路径。
-- [x] 3.6 实现命令路由器，覆盖 workspace/session/list/history/prompt/cancel/model/queue/attachment/search/archive/respond 等稳定命令和 capability 门禁。
-- [x] 3.7 实现每节点 baseline/generation 对账：session seq/asOfSeq higher-seq-wins；无全局 seq 的 Host frames 使用预缓冲、完整快照、tombstone 和权威 refresh；测试 list-subscribe 窗口、双流乱序、重复、迟到、删除和 refresh race。
-- [x] 3.8 实现写操作 ledger 与 NOT_SENT/SENT_AWAITING_RESPONSE/ACCEPTED/REJECTED/OUTCOME_UNKNOWN 转移，证明断线后不会自动重放。
-- [x] 3.9 实现 per-operation unknown reconciliation：prompt 仅按持久 rpcId，具 seq/revision 操作按唯一证据；cancel/model selection 等无证明时无限保持未知，并测试相同文本和并发远端 GUI。
+- [x] 3.6 实现命令路由器，覆盖 workspace/session/list/history/prompt/cancel/model/queue/attachment/search/archive/respond 等稳定命令和 capability 门禁。（`workspace.insertSessionBefore` 已补齐 Port→Router→Uplink→Adapter 全链；并由 `tests/federation-central-path-live.test.mjs` 以真实浏览器 `client-request` envelope 驱动真实远端 rc.2，读远端 `workspace.list` 验证持久顺序。）
+- [x] 3.7 实现每节点 baseline/generation 对账：session seq/asOfSeq higher-seq-wins；无全局 seq 的 Host frames 使用预缓冲、完整快照、tombstone 和权威 refresh；测试 list-subscribe 窗口、双流乱序、重复、迟到、删除和 refresh race。（生产 `establishRc2NodeSession` 已接 `NodeReconciler`：先开双流再取权威 baseline、缓冲重放、host 窗口触发权威 refresh，收敛后才发布 port。）
+- [x] 3.8 实现写操作 ledger 与 NOT_SENT/SENT_AWAITING_RESPONSE/ACCEPTED/REJECTED/OUTCOME_UNKNOWN 转移，证明断线后不会自动重放。（`LedgeredNodePort` 是生产唯一写包装；SENT 以 carrier 真实 fetch 边界为准，pre-send 失败保持 NOT_SENT，UNKNOWN 后迟到的明确业务拒绝可收敛为 REJECTED。）
+- [x] 3.9 实现 per-operation unknown reconciliation：prompt 仅按持久 rpcId，具 seq/revision 操作按唯一证据；cancel/model selection 等无证明时无限保持未知，并测试相同文本和并发远端 GUI。（重连建链时按 session 分组、最多 20 页扫描 history，仅 `user/message.data.source.rpcId` 精确匹配可收敛；相同文本或他客户端 rpcId 不构成证据。注：rc.2 未为 rename 等提供响应前可比的持久 seq，故该类在响应丢失后按规范无限保持未知。）
 
 ## 4. Registry Storage 与 OpenSSH Tunnel Manager
 
@@ -48,11 +48,11 @@
 ## 5. Carrier 与 rc.2 Remote Adapter
 
 - [x] 5.1 实现只接收 Tunnel Manager 回环 endpoint 的 HTTP unary carrier，包含 timeout、AbortSignal、body 限制、结构化 transport/protocol error 和 generation。
-- [x] 5.2 实现 `/api/events.mux` 与 `/api/events.host` 双流生命周期、验证、背压/有界缓存、断线通知和旧 generation 丢弃。
-- [x] 5.3 实现 rc.2 只读 host/version/capability probe，并按 SUPPORTED/EXPERIMENTAL/INCOMPATIBLE 矩阵保守开放读写能力。
-- [x] 5.4 实现 `DshRc2NodeAdapter` 的 workspace/session baseline 与增量事件转换，Core 不接触 rc.2 schema。
-- [x] 5.5 实现 Workspace CRUD/reorder、Session create/history/prompt/cancel/rename/fork/model/queue/attachment/search/archive/respond 的稳定命令转换。
-- [x] 5.6 为每个 adapter 方法增加 rc.2 fixture contract test，覆盖 remote business error、未知字段、可选能力缺失和 abort/断线。
+- [x] 5.2 实现 `/api/events.mux` 与 `/api/events.host` 双流生命周期、验证、背压/有界缓存、断线通知和旧 generation 丢弃。（生产使用官方 schema validator；联合 open 具共享失败门与 commit 前双流校验，半开失败关闭对端；失败流的排队帧在 message/drain 两层拒收。）
+- [x] 5.3 实现 rc.2 只读 host/version/capability probe，并按 SUPPORTED/EXPERIMENTAL/INCOMPATIBLE 矩阵保守开放读写能力。（拆为 `probeUnary` 与 `finalizeProbe`；写/事件能力只在 Carrier 生成的 module-private branded 双开 token 验证后授予，调用方伪造对象被拒。）
+- [x] 5.4 实现 `DshRc2NodeAdapter` 的 workspace/session baseline 与增量事件转换，Core 不接触 rc.2 schema。（已接生产双流与 `NodeReconciler`；`stream/error` 提升为致命 stream fault。）
+- [x] 5.5 实现 Workspace CRUD/reorder、Session create/history/prompt/cancel/rename/fork/model/queue/attachment/search/archive/respond 的稳定命令转换。（补齐 `workspace.insertSessionBefore` 的 method/payload/response 契约。）
+- [x] 5.6 为每个 adapter 方法增加 rc.2 fixture contract test，覆盖 remote business error、未知字段、可选能力缺失和 abort/断线。（fixture 已对齐官方 `WorkspaceView` 完整字段，含时间戳与 session `blank/updatedAt`。）
 - [x] 5.7 证明 Adapter 不调用 Settings/Subscriptions/Credentials、provider secret、host.openPath、文件同步或远端安装/启停接口。
 
 ## 6. Central Adapter 与原子激活
@@ -77,7 +77,7 @@
 - [x] 7.6 实现联邦 Hero Workspace Picker，使 New Session/空白页面与侧栏共享 Node/Workspace 选择和 blank-session reuse 语义。（注：本条此前已标完成，但 `entry.tsx` 的 Hero 实际是复用 sidebar 子树的占位；round 18 才真正接入 `FederatedHeroPicker` 并以渲染断言验证 node/workspace 选择与 blank-session reuse。）
 - [x] 7.7 实现全局搜索 coordinator：250ms debounce、AbortSignal、每节点独立超时、metadata/content 合并、20 条上限、hasMore 和部分失败警告。
 - [x] 7.8 实现搜索结果 Node/Workspace context、联合 session 打开与查询保持，测试同名/同 native id 不误选。
-- [x] 7.9 实现 Node drag scope；官方 Workspace/Session drag 仅在同 Node/同 Workspace section 内生效，跨 Node/Workspace 不显示 marker 且不发 RPC。
+- [x] 7.9 实现 Node drag scope；官方 Workspace/Session drag 仅在同 Node/同 Workspace section 内生效，跨 Node/Workspace 不显示 marker 且不发 RPC。（接收链已补齐：真实浏览器 envelope 经 Connection→Uplink→Router→Adapter 落到远端 rc.2，并在远端权威 `workspace.list` 中验证持久顺序；跨 node/workspace 在 Router 与 Uplink 双层拒绝。）
 - [x] 7.10 实现 stale/offline 节点树骨架和写禁用，确保其他节点、搜索成功结果与本机 conversation 不受影响。
 - [x] 7.11 将官方 rc.2 WorkspaceBrowser 行为清单转为自动 UI 回归矩阵，覆盖默认五条/show-more、blank、menus/dialogs、status/subagent、hover/copy、rail、keyboard/ARIA/reduced-motion。
 
@@ -93,8 +93,8 @@
 ## 9. 可靠性、安全与性能验证
 
 - [x] 9.1 对节点添加/编辑/删除、SSH/DSH 状态和分级错误建立 Host 与 Client 测试，确保诊断可执行且日志不泄漏 secret/完整会话内容。
-- [x] 9.2 执行断 tunnel、杀 ssh 子进程、双流半断、HTTP response 丢失、baseline 延迟、旧帧注入和中央重启故障测试。
-- [x] 9.3 执行多客户端并发测试：中央 GUI 与远端 GUI 同时 prompt/cancel/approve/rename/reorder，验证远端 Host 最终权威且无联邦锁。
+- [x] 9.2 执行断 tunnel、杀 ssh 子进程、双流半断、HTTP response 丢失、baseline 延迟、旧帧注入和中央重启故障测试。（`tests/federation-connectivity-live.test.mjs` 以真实 OpenSSH 隧道与真实隔离 rc.2 覆盖断流降级、baseline 不再作为 live 服务、远端重启后中央自动新 generation 恢复；半开/失败流/旧 generation 由 Carrier 层反例覆盖。）
+- [ ] 9.3 执行多客户端并发测试：中央 GUI 与远端 GUI 同时 prompt/cancel/approve/rename/reorder，验证远端 Host 最终权威且无联邦锁。（production ledger/reconciler/reorder 接线未完成，历史组件测试不足以证明本条。）
 - [x] 9.4 执行跨节点安全测试：未知 node、伪造联合 ID、跨 Node drag、远端 path 本机打开、任意 SSH target/command 和明文 LAN endpoint 均 fail closed。
 - [x] 9.5 建立侧栏规模基准（至少三 Node、多 Workspace/Session、一个离线节点），验证首屏、搜索、展开和事件更新无明显主线程阻塞或无界缓存。
 - [x] 9.6 验证禁用 federation 后官方 routes、sidebar、Hero Picker、provider logo、本机 session 与插件完整恢复，远端没有安装物或数据变更。
@@ -106,6 +106,6 @@
 - [x] 10.3 完成远端 workspace 浏览/创建/重命名/注册删除、session create/blank/rename/fork/archive/search/reorder 和禁止跨节点拖拽验收。
 - [x] 10.4 编写节点准备、SSH alias、远端 `dsh web`、状态修复、兼容矩阵、OUTCOME_UNKNOWN、隐私边界、禁用/回滚和升级 Workspace Embed patch 的运维文档。
 - [x] 10.5 运行 package typecheck/lint/unit/integration/UI tests、根 `npm test`、`npm run check:artifacts` 和 OpenSpec strict validation，并记录实际结果。
-- [ ] 10.6 在启用前运行 `node scripts/sync.mjs`/`dsh build` 两次验证幂等；确认旧 profile 可安全回滚后才将 `dsh.yaml` 条目切为 enabled。（隔离 DSH_HOME 下的 build/deploy/幂等/回滚/再启用已由 `tests/federation-sync-rollback.test.mjs` 对真实 sync.mjs + 真实 package 证明并通过 mutation 校验；仅剩对真实 `~/.dsh` 执行与切换 enabled 待操作者决定）
+- [ ] 10.6 在启用前运行 `node scripts/sync.mjs`/`dsh build` 两次验证幂等；确认旧 profile 可安全回滚后才将 `dsh.yaml` 条目切为 enabled。（隔离 DSH_HOME 下的 build/deploy/幂等/回滚/再启用已由 `tests/federation-sync-rollback.test.mjs` 证明。**真实 `~/.dsh` 幂等已在 `enabled:false` 下验证**：修掉 `llm-subscriptions` 的装饰版本 `0.5.2+pr40`→`0.5.2` 后，连续两次 sync 均报 `no changes`，部署面与基线逐项一致（104 模块 / 89 版本 / AGENTS.md 全同），现有 Host 未受影响；该幂等缺陷已由 `tests/manifest-version-drift.test.mjs` 固化防回归。仅剩切换 `enabled:true` 后的真实部署待操作者决定。）
 - [ ] 10.7 重启现有 DSH Web Host、刷新 `http://127.0.0.1:3080` 验证实际注入 GUI；不得启动替代 server 冒充现有页面。
 - [ ] 10.8 完成最终安全/兼容审查和 M0–M3 验收报告，确认无剩余阻断项后再进入 change 归档流程。（仓库侧安全/兼容审查与 M0–M3 报告已完成：`checking/m0-m3-acceptance-report.md`，含禁止面静态审查、24 项 mutation 覆盖汇总与已知限制清单。剩余部分依赖 10.2/10.6/10.7 的操作者执行结果，故不勾选。）

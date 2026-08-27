@@ -177,10 +177,18 @@ describe('OpenSSH tunnel manager', () => {
     })
     await manager.connect(request)
     const source = new EventEmitter()
-    const unbind = bindCatchableShutdown(manager, source)
+    // Cleanup must terminate the whole lifecycle, so the disposer takes the
+    // connection owner rather than the tunnel manager alone.
+    let lifecycleDisposed = false
+    const unbind = bindCatchableShutdown({
+      tunnels: manager,
+      dispose: async () => { lifecycleDisposed = true },
+    }, source)
     source.emit('SIGTERM')
-    await new Promise(resolve => setTimeout(resolve, 0))
-    expect(child.signals).toEqual(['SIGTERM'])
+    await vi.waitFor(() => {
+      expect(lifecycleDisposed).toBe(true)
+      expect(child.signals).toEqual(['SIGTERM'])
+    })
     unbind()
 
     const ledger = new WriteLedger()

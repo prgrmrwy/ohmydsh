@@ -121,10 +121,30 @@ export function tunnelArgs(request: TunnelRequest, localPort: number, options: P
 }
 
 function redact(value: string, aliases: readonly string[]): string {
-  let result = value.replace(/(?:sk-|xox[baprs]-|gh[pousr]_)[A-Za-z0-9_-]+/gi, '[REDACTED_TOKEN]')
+  let result = value
+    // PEM blocks must be removed whole. Anchoring on the END marker is
+    // required: a lazy match stops at the BEGIN header's own trailing
+    // `PRIVATE KEY-----` and leaves the key material behind. The unterminated
+    // form is redacted to the end of input so a truncated block cannot leak.
+    .replace(/-----BEGIN[^\n]*PRIVATE KEY-----[\s\S]*?-----END[^\n]*PRIVATE KEY-----/gi, '[REDACTED_PRIVATE_KEY]')
+    .replace(/-----BEGIN[^\n]*PRIVATE KEY-----[\s\S]*/gi, '[REDACTED_PRIVATE_KEY]')
+    .replace(/(?:sk-|xox[baprs]-|gh[pousr]_)[A-Za-z0-9_-]+/gi, '[REDACTED_TOKEN]')
     .replace(/Authorization:\s*Bearer\s+\S+/gi, 'Authorization: Bearer [REDACTED]')
-    .replace(/-----BEGIN[\s\S]*?PRIVATE KEY-----/gi, '[REDACTED_PRIVATE_KEY]')
+    // Credential-shaped assignments beyond the token allowlist. The keyword may
+    // appear anywhere in the identifier (AWS_SECRET_ACCESS_KEY, DB_PASSWORD_PROD,
+    // client_secret), so neither a prefix nor a suffix anchor is safe.
+    // Quotes and brackets must be treated as delimiters too, so JSON/YAML shapes
+    // like {"client_secret":"..."} cannot slip past an identifier-only pattern.
+    .replace(
+      /["'[\]]*[A-Za-z0-9_.-]*(?:pass(?:word|phrase|wd)?|secret|token|credential|api[_-]?key|private[_-]?key)[A-Za-z0-9_.-]*["'[\]]*\s*[=:]\s*["']?[^\s,;}"']+["']?/gi,
+      '[REDACTED_CREDENTIAL]',
+    )
+    // Home directories on every layout OpenSSH may print, including the macOS
+    // private temp/root forms an allowlist of /Users|/home would miss.
+    .replace(/\/private\/var\/folders\/[^\s]*/g, '/[HOME]')
     .replace(/\/(?:Users|home)\/[^/\s]+/g, '/[HOME]')
+    .replace(/\/var\/root/g, '/[HOME]')
+    .replace(/~[A-Za-z0-9._-]+/g, '~[HOME]')
   for (const alias of aliases) result = result.replaceAll(alias, '[SSH_ALIAS]')
   return result
 }
@@ -198,6 +218,11 @@ export class OpenSshTunnelManager {
   readonly #options: Required<Pick<TunnelManagerOptions, 'sshExecutable' | 'spawn' | 'maxBindAttempts' | 'connectTimeoutSeconds' | 'serverAliveIntervalSeconds' | 'serverAliveCountMax' | 'readinessTimeoutMs' | 'maxStderrBytes' | 'terminateGraceMs' | 'random'>> & Pick<TunnelManagerOptions, 'readinessProbe'>
   readonly #active = new Map<NodeId, { generation: number; process: OwnedProcess; abort: AbortController; disposed: boolean }>()
   readonly #generations = new Map<NodeId, number>()
+  /**
+   * Set by `disposeAll`. Cleanup must be terminal: a connect already in flight
+   * would otherwise spawn a replacement child after the sweep and orphan it.
+   */
+  #shutDown = false
 
   constructor(options: TunnelManagerOptions) {
     this.#options = {
@@ -218,12 +243,16 @@ export class OpenSshTunnelManager {
   async connect(request: TunnelRequest): Promise<TunnelHandle> {
     validateSshAlias(request.sshAlias)
     positiveInteger(request.remoteDshPort, 'remote DSH port', 65535)
+    if (this.#shutDown) throw new TunnelError('TUNNEL_ERROR', 'tunnel manager is shut down', 'shutdown')
     await this.disposeNode(request.nodeId)
     const generation = (this.#generations.get(request.nodeId) ?? 0) + 1
     this.#generations.set(request.nodeId, generation)
     let lastDiagnostic = ''
     for (let attempt = 1; attempt <= this.#options.maxBindAttempts; attempt++) {
       const localPort = await reserveCandidatePort()
+      // Re-checked on every attempt: a shutdown can land between the await above
+      // and the spawn below, and a child started after cleanup is an orphan.
+      if (this.#shutDown) throw new TunnelError('TUNNEL_ERROR', 'tunnel manager is shut down', 'shutdown')
       const process = this.#options.spawn(this.#options.sshExecutable, tunnelArgs(request, localPort, this.#options))
       const abort = new AbortController()
       const active = { generation, process, abort, disposed: false }
@@ -266,7 +295,15 @@ export class OpenSshTunnelManager {
     if (active !== undefined) await this.#disposeExact(nodeId, active)
   }
 
+  /**
+   * Terminal cleanup. After this resolves the manager refuses to start new
+   * tunnels, so an in-flight connect cannot leave an orphan behind the sweep.
+   */
   async disposeAll(): Promise<void> {
+    this.#shutDown = true
+    await Promise.all([...this.#active].map(([nodeId, active]) => this.#disposeExact(nodeId, active)))
+    // A connect that was mid-spawn during the sweep registers itself right
+    // after; collect that straggler too.
     await Promise.all([...this.#active].map(([nodeId, active]) => this.#disposeExact(nodeId, active)))
   }
 

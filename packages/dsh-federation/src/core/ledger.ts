@@ -1,6 +1,6 @@
-import type { DeliveryState, NodeId, OperationId, RpcId } from './types.js'
+import type { DeliveryState, NativeSessionId, NodeId, OperationId, RpcId } from './types.js'
 
-export type WriteKind = 'prompt' | 'cancel' | 'selectModel' | 'revisioned'
+export type WriteKind = 'prompt' | 'cancel' | 'selectModel' | 'revisioned' | 'opaque'
 
 export interface WriteOperation {
   readonly operationId: OperationId
@@ -8,6 +8,7 @@ export interface WriteOperation {
   readonly kind: WriteKind
   readonly state: DeliveryState
   readonly rpcId?: RpcId
+  readonly sessionId?: NativeSessionId
   readonly expectedRevision?: number
   readonly rejection?: string
 }
@@ -22,7 +23,20 @@ const transitions: Readonly<Record<DeliveryState, ReadonlySet<DeliveryState>>> =
   SENT_AWAITING_RESPONSE: new Set(['ACCEPTED', 'REJECTED', 'OUTCOME_UNKNOWN']),
   ACCEPTED: new Set(),
   REJECTED: new Set(),
-  OUTCOME_UNKNOWN: new Set(['ACCEPTED']),
+  OUTCOME_UNKNOWN: new Set(['ACCEPTED', 'REJECTED']),
+}
+
+/**
+ * Non-reversible short digest used only for display correlation. Core must stay
+ * runtime-agnostic, so this uses no Node crypto import.
+ */
+function digest(value: string): string {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return hash.toString(16).padStart(8, '0')
 }
 
 export class WriteLedger {
@@ -79,6 +93,57 @@ export class WriteLedger {
 
   unknownForNode(nodeId: NodeId): readonly WriteOperation[] {
     return [...this.#operations.values()].filter(operation => operation.nodeId === nodeId && operation.state === 'OUTCOME_UNKNOWN')
+  }
+
+  /**
+   * Minimal redacted diagnostics.
+   *
+   * These outlive the node they describe and are read by the browser, so they
+   * must carry no correlatable request identity. `operationId` can embed the
+   * caller-supplied rpcId, so it is replaced by an opaque digest that is stable
+   * for display but cannot be mapped back to a prompt, session or request.
+   */
+  unknownDiagnostics(): readonly {
+    readonly operationId: string
+    readonly nodeId: NodeId
+    readonly kind: WriteKind
+    readonly state: DeliveryState
+  }[] {
+    return [...this.#operations.values()]
+      .filter(operation => operation.state === 'OUTCOME_UNKNOWN')
+      .map(operation => Object.freeze({
+        operationId: `op-${digest(operation.operationId)}`,
+        nodeId: operation.nodeId,
+        kind: operation.kind,
+        state: operation.state,
+      }))
+  }
+
+  /**
+   * Drops every in-memory operation for a node that no longer exists.
+   *
+   * Deletion persists the node's redacted diagnostics, so keeping the live rows
+   * would both duplicate each entry and make the operator's explicit clear
+   * appear to fail: the persisted copy would vanish while the ledger copy stayed.
+   */
+  forgetNode(nodeId: NodeId): number {
+    let removed = 0
+    for (const [operationId, operation] of this.#operations) {
+      if (operation.nodeId !== nodeId) continue
+      this.#operations.delete(operationId)
+      removed += 1
+    }
+    return removed
+  }
+
+  markConnectionLostForNode(nodeId: NodeId): readonly WriteOperation[] {
+    const changed: WriteOperation[] = []
+    for (const operation of this.#operations.values()) {
+      if (operation.nodeId === nodeId && operation.state === 'SENT_AWAITING_RESPONSE') {
+        changed.push(this.#transition(operation.operationId, 'OUTCOME_UNKNOWN'))
+      }
+    }
+    return changed
   }
 
   #required(operationId: OperationId): WriteOperation {

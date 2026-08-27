@@ -30,6 +30,7 @@ export interface FederationClientBridge {
     readonly compatibility: 'SUPPORTED' | 'EXPERIMENTAL' | 'INCOMPATIBLE'
     readonly runningSessionCount: number
     readonly pendingInteractionCount: number
+    readonly outcomeUnknownCount: number
     readonly home?: string
   }[]
   /** Per-node runtime hooks and Host operations, already node-scoped. */
@@ -100,7 +101,16 @@ export function applyFederationClient(ctx: ClientContext, options: FederationCli
         key: `${nodeSectionKey(row.nodeId)}:header`,
         'data-federation-node': row.nodeId,
         'data-federation-node-status': row.status,
-      }, row.displayName),
+      },
+      row.displayName,
+      row.outcomeUnknownCount > 0
+        ? createElement('span', {
+          role: 'status',
+          'data-federation-outcome-unknown': row.outcomeUnknownCount,
+          title: 'Remote write outcome is unknown; review the remote session before retrying.',
+        }, ` · ${row.outcomeUnknownCount} outcome unknown — manual review required`)
+        : null,
+      ),
     })
   }
 
