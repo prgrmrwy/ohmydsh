@@ -97,6 +97,8 @@ export interface WorkspaceProjection {
   readonly sessionIds: readonly FederatedSessionId[]
   readonly archivedSessionIds: readonly FederatedSessionId[]
   readonly order: number
+  readonly createdAt?: string
+  readonly updatedAt?: string
 }
 
 export interface SessionProjection {
@@ -108,6 +110,8 @@ export interface SessionProjection {
   readonly status: string
   readonly seq?: number
   readonly archived: boolean
+  readonly blank?: boolean
+  readonly updatedAt?: number
 }
 
 export interface SearchQuery {

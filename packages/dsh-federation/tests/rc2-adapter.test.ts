@@ -1,12 +1,36 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { parseNodeId, type NodeCapability, type NodeDescriptor, type RpcId } from '../src/core/index.js'
-import { CarrierError, DshRc2NodeAdapter, HttpUnaryCarrier, RC2_ALLOWED_METHODS, RC2_FORBIDDEN_METHODS, RemoteBusinessError } from '../src/host/index.js'
+import { CarrierError, DshRc2NodeAdapter, DualEventCarrier, HttpUnaryCarrier, RC2_ALLOWED_METHODS, RC2_FORBIDDEN_METHODS, RemoteBusinessError, validateRc2EventEnvelope, type CarrierSocket, type DualStreamReadiness } from '../src/host/index.js'
 
 const nodeId = parseNodeId('vm-a')
 const full = new Set<NodeCapability>([
   'workspace.read', 'workspace.write', 'session.read', 'session.write', 'session.search',
   'session.attachment', 'directory.read', 'directory.write', 'events.mux', 'events.host', 'interaction.respond',
 ])
+let streamProof: DualStreamReadiness
+
+class OpeningSocket implements CarrierSocket {
+  readonly readyState = 1
+  addEventListener(type: 'open' | 'message' | 'close' | 'error', listener: (() => void)): void {
+    if (type === 'open') queueMicrotask(listener)
+  }
+  close(): void {}
+}
+
+async function streamReadiness(): Promise<DualStreamReadiness> {
+  const carrier = new DualEventCarrier({
+    endpoint: new URL('http://127.0.0.1:49152'), generation: 1, currentGeneration: () => 1,
+    createSocket: () => new OpeningSocket(), validate: (_stream, value) => value,
+    onFrame() {}, onDisconnect() {},
+  })
+  return carrier.open()
+}
+
+const workspaceView = (workspaceId: string, title: string, path: string, sessionIds: string[]) => ({
+  workspaceId, title, path, sessionIds,
+  createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z',
+})
+
 const descriptor: NodeDescriptor = {
   nodeId, kind: 'remote', displayName: 'VM A', enabled: true, order: 0,
   capabilities: full, compatibility: 'SUPPORTED', state: 'READY', sshAlias: 'vm-a', remoteDshPort: 3080,
@@ -38,21 +62,23 @@ function probeCarrier(version: string, failMethod?: string) {
 }
 
 describe('rc.2 capability probe', () => {
+  beforeAll(async () => { streamProof = await streamReadiness() })
+
   it('grants writes on structural proof for every version real rc.2 advertises', async () => {
     // Pinned rc.2 hardcodes host.describe.version = "0.0.1", verified against a
     // real dsh web; an exact-string gate would withhold writes from real rc.2.
     for (const version of ['0.1.1-rc.2', '0.0.1']) {
-      const probe = await DshRc2NodeAdapter.probe(probeCarrier(version), { mux: true, host: true })
+      const probe = await DshRc2NodeAdapter.probe(probeCarrier(version), streamProof)
       expect(probe.compatibility).toBe('SUPPORTED')
       expect(probe.capabilities.has('session.write')).toBe(true)
     }
-    const experimental = await DshRc2NodeAdapter.probe(probeCarrier('9.9.9-unknown'), { mux: true, host: true })
+    const experimental = await DshRc2NodeAdapter.probe(probeCarrier('9.9.9-unknown'), streamProof)
     expect(experimental.compatibility).toBe('EXPERIMENTAL')
     expect(experimental.capabilities.has('session.write')).toBe(false)
   })
 
   it('treats a disabled session-query index as an absent optional capability', async () => {
-    const probe = await DshRc2NodeAdapter.probe(probeCarrier('0.0.1', 'session.search'), { mux: true, host: true })
+    const probe = await DshRc2NodeAdapter.probe(probeCarrier('0.0.1', 'session.search'), streamProof)
     expect(probe.compatibility).toBe('SUPPORTED')
     expect(probe.capabilities.has('session.search')).toBe(false)
     expect(probe.capabilities.has('session.write')).toBe(true)
@@ -64,7 +90,7 @@ describe('rc.2 capability probe', () => {
   })
 
   it('withholds directory capabilities when the remote picker does not serve browse', async () => {
-    const probe = await DshRc2NodeAdapter.probe(probeCarrier('0.0.1', 'host.listDirectory'), { mux: true, host: true })
+    const probe = await DshRc2NodeAdapter.probe(probeCarrier('0.0.1', 'host.listDirectory'), streamProof)
     expect(probe.compatibility).toBe('SUPPORTED')
     expect(probe.capabilities.has('directory.read')).toBe(false)
     expect(probe.capabilities.has('directory.write')).toBe(false)
@@ -87,16 +113,16 @@ describe('rc.2 capability probe', () => {
   })
 
   it('fails incompatible when a core baseline/stream capability or schema is missing', async () => {
-    await expect(DshRc2NodeAdapter.probe(probeCarrier('0.1.1-rc.2'), { mux: true, host: false })).resolves.toMatchObject({ compatibility: 'INCOMPATIBLE' })
-    await expect(DshRc2NodeAdapter.probe(probeCarrier('0.1.1-rc.2', 'session.list'), { mux: true, host: true })).resolves.toMatchObject({ compatibility: 'INCOMPATIBLE' })
-    await expect(DshRc2NodeAdapter.probe(carrier((_method, request) => success(request.rpcId as string, { version: '0.1.1-rc.2' })), { mux: true, host: true })).rejects.toThrow(/host\.describe\.cwd/)
+    await expect(DshRc2NodeAdapter.probe(probeCarrier('0.1.1-rc.2'), { generation: 1, opened: new Set(['mux', 'host']) } as never)).resolves.toMatchObject({ compatibility: 'INCOMPATIBLE' })
+    await expect(DshRc2NodeAdapter.probe(probeCarrier('0.1.1-rc.2', 'session.list'), streamProof)).resolves.toMatchObject({ compatibility: 'INCOMPATIBLE' })
+    await expect(DshRc2NodeAdapter.probe(carrier((_method, request) => success(request.rpcId as string, { version: '0.1.1-rc.2' })), streamProof)).rejects.toThrow(/host\.describe\.cwd/)
   })
 })
 
 describe('DshRc2NodeAdapter contracts', () => {
   it('converts workspace/session baselines and preserves node ownership under unknown fields', async () => {
     const adapter = new DshRc2NodeAdapter(descriptor, carrier((method, request) => {
-      if (method === 'workspace.list') return success(request.rpcId as string, { items: [{ workspaceId: 'w1', title: 'Backend', path: '/remote/backend', sessionIds: ['s1', 's2'], unknown: true }], archivedSessionIds: ['s2'], extra: 'ignored' })
+      if (method === 'workspace.list') return success(request.rpcId as string, { items: [{ ...workspaceView('w1', 'Backend', '/remote/backend', ['s1', 's2']), unknown: true }], archivedSessionIds: ['s2'], extra: 'ignored' })
       return success(request.rpcId as string, { items: [{ sessionId: 's1', updatedAt: 1000, running: true, blank: false, cwd: '/remote/backend', projections: { asOfSeq: 8, values: { title: 'Session' } }, unknown: true }] })
     }), full)
     const workspaces = await adapter.listWorkspaces()
@@ -113,6 +139,7 @@ describe('DshRc2NodeAdapter contracts', () => {
     const adapter = new DshRc2NodeAdapter(descriptor, carrier((method, request) => {
       methods.push(method)
       if (method === 'workspace.insertBefore') expect(request.payload).toEqual({ workspaceId: 'w1', beforeWorkspaceId: 'w2' })
+      if (method === 'workspace.insertSessionBefore') expect(request.payload).toEqual({ workspaceId: 'w1', sessionId: 's1', beforeSessionId: 's2' })
       if (method === 'respond') {
         expect(request).toEqual({ type: 'client-response', rpcId: 'interaction-rpc', result: { ok: true, value: {} } })
         return new Response(JSON.stringify({ accepted: true }))
@@ -130,7 +157,7 @@ describe('DshRc2NodeAdapter contracts', () => {
         expect(request.payload).toEqual({ sessionId: 's1', itemId: 'm1', action: { kind: 'remove' } })
         return success(request.rpcId as string, { accepted: true })
       }
-      if (method === 'workspace.list') return success(request.rpcId as string, { items: [{ workspaceId: 'w1', title: 'Renamed', path: '/remote', sessionIds: ['s1'] }], archivedSessionIds: [] })
+      if (method === 'workspace.list') return success(request.rpcId as string, { items: [workspaceView('w1', 'Renamed', '/remote', ['s1'])], archivedSessionIds: [] })
       if (method === 'session.list') return success(request.rpcId as string, { items: [{ sessionId: 's1', updatedAt: 1, running: false, blank: false, cwd: '/remote' }] })
       if (method === 'session.history') return success(request.rpcId as string, { events: [], hasMore: false })
       if (method === 'session.models') return success(request.rpcId as string, { current: {}, routable: true, groups: [], failures: [] })
@@ -138,19 +165,21 @@ describe('DshRc2NodeAdapter contracts', () => {
       if (method === 'session.attachment') return success(request.rpcId as string, { attachment: {}, data: 'AA==' })
       if (method === 'workspace.delete') return success(request.rpcId as string, { deleted: true })
       if (method === 'workspace.insertBefore') return success(request.rpcId as string, { workspaceIds: ['w1'] })
+      if (method === 'workspace.insertSessionBefore') return success(request.rpcId as string, { workspace: workspaceView('w1', 'W', '/remote', ['s2', 's1']) })
       if (method === 'workspace.archiveSession') return success(request.rpcId as string, { archivedSessionIds: ['s1'] })
       if (method === 'host.listDirectory') return success(request.rpcId as string, { path: '/remote', home: '/remote', crumbs: [], entries: [], truncated: false })
       if (method === 'host.createDirectory') return success(request.rpcId as string, { path: '/remote/child' })
       if (method === 'session.create' || method === 'session.fork') return success(request.rpcId as string, { sessionId: 'new' })
       if (method === 'session.rename') return success(request.rpcId as string, { title: 'x', seq: 2 })
-      if (method === 'workspace.create') return success(request.rpcId as string, { workspace: { workspaceId: 'w2', title: 'New', path: '/remote/new', sessionIds: [] }, created: true })
-      if (method === 'workspace.rename') return success(request.rpcId as string, { workspace: { workspaceId: 'w1', title: 'Renamed', path: '/remote', sessionIds: [] } })
+      if (method === 'workspace.create') return success(request.rpcId as string, { workspace: workspaceView('w2', 'New', '/remote/new', []), created: true })
+      if (method === 'workspace.rename') return success(request.rpcId as string, { workspace: workspaceView('w1', 'Renamed', '/remote', []) })
       return success(request.rpcId as string, { accepted: true })
     }), full)
     await adapter.createWorkspace('/remote/new')
     await adapter.renameWorkspace('w1' as never, 'Renamed')
     await adapter.deleteWorkspace('w1' as never)
     await adapter.reorderWorkspace('w1' as never, 'w2' as never)
+    await adapter.reorderSession('w1' as never, 's1' as never, 's2' as never)
     await adapter.createSession('w1' as never)
     await adapter.history('s1' as never)
     await adapter.models('s1' as never)
@@ -171,7 +200,7 @@ describe('DshRc2NodeAdapter contracts', () => {
     await adapter.listDirectory('/remote')
     await adapter.createDirectory('/remote', 'child')
     expect(methods).toEqual([
-      'workspace.create', 'workspace.rename', 'workspace.delete', 'workspace.insertBefore',
+      'workspace.create', 'workspace.rename', 'workspace.delete', 'workspace.insertBefore', 'workspace.insertSessionBefore',
       'session.create', 'session.history', 'session.models', 'session.prompt', 'session.cancel', 'session.rename',
       'session.fork', 'session.selectModel', 'session.updateQueue', 'session.attachment',
       'workspace.list', 'session.list', 'session.search',
@@ -209,6 +238,21 @@ describe('DshRc2NodeAdapter contracts', () => {
     await expect(mismatch.history('s1' as never)).rejects.toBeInstanceOf(CarrierError)
   })
 
+  it('validates the full official event envelope, physical stream and method before conversion', () => {
+    const mux = { type: 'server-request', rpcId: 'r1', method: 'session/projection', payload: {
+      type: 'session/projection', sessionId: 's1', key: 'title', value: 'T', seq: 8,
+    } }
+    expect(validateRc2EventEnvelope('mux', mux)).toEqual(mux)
+    expect(() => validateRc2EventEnvelope('host', mux)).toThrow()
+    expect(() => validateRc2EventEnvelope('mux', { ...mux, method: 'session/event' })).toThrow(/method/)
+    expect(() => validateRc2EventEnvelope('mux', { ...mux, type: 'client-request' })).toThrow()
+    expect(() => validateRc2EventEnvelope('mux', { ...mux, payload: { ...mux.payload, seq: -1 } })).toThrow()
+    const host = { type: 'server-request', rpcId: 'r2', method: 'host/session-status', payload: {
+      type: 'host/session-status', sessionId: 's1', running: true,
+    } }
+    expect(validateRc2EventEnvelope('host', host)).toEqual(host)
+  })
+
   it('converts mux/host frames into stable Core frames without leaking rc.2 schema', () => {
     const adapter = new DshRc2NodeAdapter(descriptor, carrier((_method, request) => success(request.rpcId as string, {})), full)
     expect(adapter.convertFrame('mux', { type: 'server-request', rpcId: 'r1', payload: { type: 'session/projection', sessionId: 's1', key: 'title', value: 'T', seq: 8 } }))
@@ -217,7 +261,7 @@ describe('DshRc2NodeAdapter contracts', () => {
       .toMatchObject({ kind: 'reconciliation', frame: { domain: 'session', seq: 11 } })
     expect(adapter.convertFrame('mux', { type: 'server-request', rpcId: 'r3', payload: { type: 'approval/requested', sessionId: 's1', approvalId: 'a1', toolName: 't' } }))
       .toMatchObject({ kind: 'interaction', rpcId: 'r3', interaction: 'approval' })
-    expect(adapter.convertFrame('host', { type: 'server-request', rpcId: 'r4', payload: { type: 'host/workspace-changed', workspace: { workspaceId: 'w1', title: 'T', path: '/p', sessionIds: [] } } }))
+    expect(adapter.convertFrame('host', { type: 'server-request', rpcId: 'r4', payload: { type: 'host/workspace-changed', workspace: workspaceView('w1', 'T', '/p', []) } }))
       .toMatchObject({ kind: 'reconciliation', frame: { domain: 'workspace-upsert', workspaceId: 'w1' } })
     expect(adapter.convertFrame('host', { type: 'server-request', rpcId: 'r5', payload: { type: 'host/session-removed', sessionId: 's1' } }))
       .toMatchObject({ kind: 'reconciliation', frame: { domain: 'status-remove' } })
@@ -245,7 +289,7 @@ describe('DshRc2NodeAdapter contracts', () => {
     // swallow it and silently report the capability as "not served here".
     // Verified via the real public probe: a deployment-level refusal (business
     // error) yields an absent capability, while a protocol fault propagates.
-    const businessRefusal = await DshRc2NodeAdapter.probe(probeCarrier('0.0.1', 'session.search'), { mux: true, host: true })
+    const businessRefusal = await DshRc2NodeAdapter.probe(probeCarrier('0.0.1', 'session.search'), streamProof)
     expect(businessRefusal.compatibility).toBe('SUPPORTED')
     expect(businessRefusal.capabilities.has('session.search')).toBe(false)
 
@@ -256,7 +300,7 @@ describe('DshRc2NodeAdapter contracts', () => {
       if (method === 'session.list') return success(request.rpcId as string, { items: [] })
       return success(request.rpcId as string, { path: '/f', home: '/f', crumbs: [], entries: [], truncated: false })
     })
-    await expect(DshRc2NodeAdapter.probe(protocolFault, { mux: true, host: true }))
+    await expect(DshRc2NodeAdapter.probe(protocolFault, streamProof))
       .rejects.toMatchObject({ kind: 'Protocol' })
   })
 

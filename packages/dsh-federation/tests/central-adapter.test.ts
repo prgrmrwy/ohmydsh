@@ -17,6 +17,7 @@ import {
   CentralLocalTransport,
   CentralUplink,
   HostActivationCoordinator,
+  NodeDeletionRequiresConfirmation,
   createRpcIdMinter,
   projectCentralRuntimeView,
   toCentralFrame,
@@ -50,6 +51,7 @@ function port(nodeId: NodeId, calls: [string, unknown][], capabilities = allCapa
     renameWorkspace: record('workspace.rename'),
     deleteWorkspace: record('workspace.delete'),
     reorderWorkspace: record('workspace.insertBefore'),
+    reorderSession: record('workspace.insertSessionBefore'),
     listSessions: record('session.list', []),
     createSession: record('session.create', 'native-new'),
     history: record('session.history'),
@@ -81,6 +83,80 @@ function uplink(calls: [string, unknown][], capabilities = allCapabilities) {
 const remoteSession = encodeSessionId({ nodeId: vmA, nativeId: 'shared' as NativeSessionId })
 const remoteWorkspace = encodeWorkspaceId({ nodeId: vmA, nativeId: 'shared' as NativeWorkspaceId })
 const otherWorkspace = encodeWorkspaceId({ nodeId: vmB, nativeId: 'shared' as NativeWorkspaceId })
+const remoteAnchorSession = encodeSessionId({ nodeId: vmA, nativeId: 'anchor' as NativeSessionId })
+const otherSession = encodeSessionId({ nodeId: vmB, nativeId: 'shared' as NativeSessionId })
+
+describe('federation node management routes', () => {
+  it('routes add/update/reorder/remove to the registry manager and reports confirmation refusal', async () => {
+    const calls: [string, unknown][] = []
+    const router = new CommandRouter(new Map([[local, port(local, calls, allCapabilities, 'local')]]))
+    const seen: unknown[] = []
+    const uplink = new CentralUplink(router, new Set([local]), local, {
+      async nodes() { return [] },
+      async baseline() { return {} },
+      async operations() { return [] },
+      manager: {
+        async addNode(request) { seen.push(['add', request]); return { nodeId: 'node-1', kind: 'remote' } },
+        async updateNode(nodeId, update) { seen.push(['update', nodeId, update]); return { nodeId, kind: 'remote' } },
+        async reorderNode(nodeId, before) { seen.push(['reorder', nodeId, before]); return { nodes: [] } },
+        async removeNode(nodeId, confirmed) {
+          seen.push(['remove', nodeId, confirmed])
+          if (!confirmed) throw new NodeDeletionRequiresConfirmation(nodeId as never, 2)
+          return { retainedDiagnostics: [] }
+        },
+      },
+    })
+
+    await expect(uplink.handle({ path: '/api/federation/node.add', rpcId: 'r1', payload: { displayName: 'VM A', sshAlias: 'vm-a', remoteDshPort: 3080 } }))
+      .resolves.toMatchObject({ kind: 'ok' })
+    await expect(uplink.handle({ path: '/api/federation/node.update', rpcId: 'r2', payload: { nodeId: 'node-1', enabled: false } }))
+      .resolves.toMatchObject({ kind: 'ok' })
+    await expect(uplink.handle({ path: '/api/federation/node.reorder', rpcId: 'r3', payload: { nodeId: 'node-1' } }))
+      .resolves.toMatchObject({ kind: 'ok' })
+    await expect(uplink.handle({ path: '/api/federation/node.remove', rpcId: 'r4', payload: { nodeId: 'node-1' } }))
+      .resolves.toMatchObject({ kind: 'error', status: 409, code: 'federation-node-deletion-unconfirmed' })
+    await expect(uplink.handle({ path: '/api/federation/node.remove', rpcId: 'r5', payload: { nodeId: 'node-1', confirmed: true } }))
+      .resolves.toMatchObject({ kind: 'ok' })
+
+    expect(seen).toEqual([
+      ['add', { displayName: 'VM A', sshAlias: 'vm-a', remoteDshPort: 3080 }],
+      ['update', 'node-1', { enabled: false }],
+      ['reorder', 'node-1', undefined],
+      ['remove', 'node-1', false],
+      ['remove', 'node-1', true],
+    ])
+    expect(calls).toEqual([])
+  })
+
+  it('refuses node management when no manager is attached', async () => {
+    const calls: [string, unknown][] = []
+    const bare = uplink(calls)
+    await expect(bare.handle({ path: '/api/federation/node.add', rpcId: 'r1', payload: { displayName: 'X', sshAlias: 'x', remoteDshPort: 3080 } }))
+      .resolves.toMatchObject({ kind: 'error', status: 503, code: 'federation-inventory-unavailable' })
+  })
+})
+
+describe('federation inventory error boundary', () => {
+  it('returns structured 503 outcomes when node or baseline providers fail', async () => {
+    const calls: [string, unknown][] = []
+    const router = new CommandRouter(new Map([
+      [local, port(local, calls, allCapabilities, 'local')],
+      [vmA, port(vmA, calls)],
+      [vmB, port(vmB, calls)],
+    ]))
+    const provider = new CentralUplink(router, known, local, {
+      async nodes() { throw new Error('registry unavailable') },
+      async baseline() { throw new Error('node snapshot unavailable') },
+      async operations() { throw new Error('operation snapshot unavailable') },
+    })
+    await expect(provider.handle({ path: '/api/federation/nodes', rpcId: 'nodes', payload: {} }))
+      .resolves.toMatchObject({ kind: 'error', status: 503, code: 'federation-inventory-unavailable', message: 'registry unavailable' })
+    await expect(provider.handle({ path: '/api/federation/baseline', rpcId: 'baseline', payload: { nodeId: vmA } }))
+      .resolves.toMatchObject({ kind: 'error', status: 503, code: 'federation-inventory-unavailable', message: 'node snapshot unavailable' })
+    await expect(provider.handle({ path: '/api/federation/operations', rpcId: 'operations', payload: {} }))
+      .resolves.toMatchObject({ kind: 'error', status: 503, code: 'federation-inventory-unavailable', message: 'operation snapshot unavailable' })
+  })
+})
 
 describe('central local transport (6.1, 6.5)', () => {
   it('routes This Mac through the effective composed handler without rebuilding rc.2 composition', async () => {
@@ -151,7 +227,9 @@ describe('central frame conversion (6.3)', () => {
     const context = createRpcIdMinter(vmA)
     expect(toCentralFrame({ kind: 'reconciliation', frame: { domain: 'session', sessionId: 'shared' as NativeSessionId, seq: 4, value: { type: 'session/event', sessionId: 'shared', event: {} } } }, context))
       .toMatchObject({ stream: 'mux', payload: { type: 'session/event', sessionId: remoteSession } })
-    expect(toCentralFrame({ kind: 'reconciliation', frame: { domain: 'workspace-upsert', workspaceId: 'shared' as NativeWorkspaceId, value: { workspaceId: 'shared', title: 'W', sessionIds: ['shared'] } } }, context))
+    expect(toCentralFrame({ kind: 'reconciliation', frame: { domain: 'workspace-upsert', workspaceId: 'shared' as NativeWorkspaceId, value: {
+      ref: { nodeId: vmA, nativeId: 'shared' as NativeWorkspaceId }, id: remoteWorkspace, title: 'W', path: '/remote', sessionIds: [remoteSession], archivedSessionIds: [], order: 0,
+    } } }, context))
       .toMatchObject({ stream: 'host', payload: { type: 'host/workspace-changed', workspace: { workspaceId: remoteWorkspace, sessionIds: [remoteSession] } } })
     expect(toCentralFrame({ kind: 'reconciliation', frame: { domain: 'status', sessionId: 'shared' as NativeSessionId, value: { running: true } } }, context))
       .toMatchObject({ stream: 'host', payload: { type: 'host/session-status', sessionId: remoteSession, running: true } })
@@ -177,7 +255,10 @@ describe('central uplink routing (6.4, 6.9)', () => {
       .resolves.toMatchObject({ kind: 'ok' })
     await expect(central.handle({ path: '/api/session.prompt', rpcId: 'rpc-2', payload: { sessionId: 'bare-native', mode: 'queue', content: [] } }))
       .resolves.toEqual({ kind: 'local-passthrough' })
-    expect(calls.map(([name]) => name)).toEqual(['vm-a:session.prompt'])
+    await expect(central.handle({ path: '/api/workspace.insertSessionBefore', rpcId: 'rpc-3', payload: {
+      workspaceId: remoteWorkspace, sessionId: remoteSession, beforeSessionId: remoteAnchorSession,
+    } })).resolves.toMatchObject({ kind: 'ok' })
+    expect(calls.map(([name]) => name)).toEqual(['vm-a:session.prompt', 'vm-a:workspace.insertSessionBefore'])
   })
 
   it('rejects unknown, forged, wrong-type and cross-node anchor requests', async () => {
@@ -194,6 +275,12 @@ describe('central uplink routing (6.4, 6.9)', () => {
       .resolves.toMatchObject({ kind: 'error', code: 'federation-cross-node-anchor' })
     await expect(central.handle({ path: '/api/workspace.insertBefore', rpcId: 'r', payload: { workspaceId: 'bare-native', beforeWorkspaceId: remoteWorkspace } }))
       .resolves.toMatchObject({ kind: 'error', code: 'federation-cross-node-anchor' })
+    await expect(central.handle({ path: '/api/workspace.insertSessionBefore', rpcId: 'r', payload: {
+      workspaceId: remoteWorkspace, sessionId: otherSession,
+    } })).resolves.toMatchObject({ kind: 'error', code: 'federation-capability-denied' })
+    await expect(central.handle({ path: '/api/workspace.insertSessionBefore', rpcId: 'r', payload: {
+      workspaceId: remoteWorkspace, sessionId: remoteSession, beforeSessionId: otherSession,
+    } })).resolves.toMatchObject({ kind: 'error', code: 'federation-capability-denied' })
   })
 
   it('enforces capability and node readiness before dispatch', async () => {

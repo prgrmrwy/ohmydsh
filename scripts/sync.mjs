@@ -99,7 +99,37 @@ function loadManifest() {
         if (!depNames.has(name)) throw new Error(`${label} (${item.id}): deps references "${name}" which is missing from top-level dependencies`)
       }
     }
-    return { ...item, source, enabled: item.enabled !== false }
+    // A local bundle may build a fixed-source compatibility package that must
+    // resolve under an existing official package identity. It is installed in
+    // the same pnpm transaction as its owner and removed with that owner.
+    let buildInputs
+    if (item.buildInputs !== undefined) {
+      if (source !== 'local' || !Array.isArray(item.buildInputs) || item.buildInputs.some(entry => typeof entry !== 'string' || entry === '' || path.isAbsolute(entry))) {
+        throw new Error(`${label} (${item.id}): buildInputs must be relative repo paths on a local customization`)
+      }
+      buildInputs = item.buildInputs.map((entry, inputIndex) => {
+        const normalized = path.normalize(entry)
+        if (normalized === '..' || normalized.startsWith(`..${path.sep}`)) throw new Error(`${label} (${item.id}).buildInputs[${inputIndex}]: path must stay inside the repository`)
+        return normalized
+      })
+    }
+    let compatDependencies
+    if (item.compatDependencies !== undefined) {
+      if (item.type !== 'package' || source !== 'local' || !Array.isArray(item.compatDependencies)) {
+        throw new Error(`${label} (${item.id}): compatDependencies is only valid as a list on local packages`)
+      }
+      compatDependencies = item.compatDependencies.map((entry, compatIndex) => {
+        const compatLabel = `${label} (${item.id}).compatDependencies[${compatIndex}]`
+        if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) throw new Error(`${compatLabel}: mapping required`)
+        if (typeof entry.name !== 'string' || !/^(@[^/@]+\/[^/@]+|[^/@]+)$/.test(entry.name)) throw new Error(`${compatLabel}: valid npm package name required`)
+        if (typeof entry.path !== 'string' || entry.path === '' || path.isAbsolute(entry.path)) throw new Error(`${compatLabel}: path must be a non-empty relative path`)
+        const normalized = path.normalize(entry.path)
+        if (normalized === '..' || normalized.startsWith(`..${path.sep}`)) throw new Error(`${compatLabel}: path must stay inside the owner package`)
+        if (depNames.has(entry.name)) throw new Error(`${compatLabel}: conflicts with top-level dependency ${entry.name}`)
+        return { name: entry.name, path: normalized }
+      })
+    }
+    return { ...item, source, enabled: item.enabled !== false, buildInputs, compatDependencies }
   })
   const web = doc.web ?? {}
   if (typeof web !== 'object' || web === null || Array.isArray(web)) {
@@ -201,7 +231,7 @@ async function collectFiles(dir, base = dir, options = {}) {
   return out
 }
 
-async function localBuildInputHash(dir) {
+async function localBuildInputHash(dir, extraInputs = []) {
   const entries = await collectFiles(dir, dir, {
     excludeDirs: ['lib', 'node_modules', 'test', 'tests', 'checking', 'coverage'],
     excludeFiles: ['package-lock.json', 'npm-debug.log'],
@@ -211,14 +241,22 @@ async function localBuildInputHash(dir) {
     const base = path.posix.basename(normalized)
     return normalized.startsWith('src/') ||
       normalized === 'package.json' ||
-      base === 'build.mjs' ||
+      (!normalized.includes('/') && /\.mjs$/.test(normalized)) ||
       /^tsconfig(?:\..+)?\.json$/.test(base) ||
       /^(?:tsdown|vite|rollup|esbuild)\.config\.[cm]?[jt]s$/.test(base)
   })
   const h = createHash('sha256')
+  h.update(`node:${process.version}\0`)
   for (const rel of selected.sort()) {
     h.update(rel + '\0')
     h.update(await readFile(path.join(dir, rel)))
+  }
+  for (const input of [...extraInputs].sort()) {
+    const absolute = path.join(REPO, input)
+    const inputStat = await stat(absolute).catch(() => undefined)
+    if (inputStat === undefined || !inputStat.isFile()) throw new Error(`local build input missing or not a regular file: ${input}`)
+    h.update(`repo:${input}\0`)
+    h.update(await readFile(absolute))
   }
   return h.digest('hex')
 }
@@ -458,6 +496,23 @@ async function syncPackages(manifest, items) {
     try { names.set(item.id, npmNameOf(item)) } catch (e) { fail(String(e.message ?? e)) }
   }
   const enabledNames = enabled.map((i) => names.get(i.id)).filter(Boolean)
+  const state = await loadState()
+  const previousCompatByOwner = state.managedCompatDependencies ?? {}
+  const compatByOwner = new Map()
+  const claimedCompatNames = new Set()
+  for (const item of packages) {
+    const owner = names.get(item.id)
+    if (owner === undefined) continue
+    const entries = item.compatDependencies ?? []
+    for (const entry of entries) {
+      if (claimedCompatNames.has(entry.name) || [...names.values()].includes(entry.name)) {
+        fail(`local package ${owner}: compatibility dependency name ${entry.name} is not uniquely owned`)
+        continue
+      }
+      claimedCompatNames.add(entry.name)
+    }
+    compatByOwner.set(owner, entries)
+  }
 
   // Local package specs embed the absolute checkout path. Repair stale paths
   // before any plugin command so a moved/renamed repository cannot make pnpm
@@ -475,27 +530,49 @@ async function syncPackages(manifest, items) {
   }
   if (repairedLocalSpecs) await writeJson(profilePkgPath, profilePkg)
 
-  // remove disabled / missing ones first
+  // Remove a disabled owner and every compatibility override it owns in one
+  // pnpm transaction. This restores DSH's install-anchor fallback without a
+  // window where the bundle is active against the wrong Connection package.
   for (const [id, name] of names) {
     const item = packages.find((i) => i.id === id)
     if (item.enabled) continue
-    if (installedVersion(name) !== undefined) {
-      change(`remove disabled package ${name}`)
-      if (!dshCli(['plugin', '--profile', PROFILE, 'remove', name], { version: manifest.dshVersion })) fail(`failed to remove ${name}`)
+    const compatNames = [...new Set([
+      ...(compatByOwner.get(name) ?? []).map(entry => entry.name),
+      ...(previousCompatByOwner[name] ?? []),
+    ])]
+    const removal = [name, ...compatNames].filter(packageName =>
+      profilePkg.dependencies?.[packageName] !== undefined || installedVersion(packageName) !== undefined)
+    if (removal.length > 0) {
+      change(`remove disabled package ${name}${compatNames.length > 0 ? ' with compatibility overrides' : ''}`)
+      if (!dshCli(['plugin', '--profile', PROFILE, 'remove', ...removal], { version: manifest.dshVersion })) {
+        fail(`failed to remove ${removal.join(', ')}`)
+      } else {
+        delete previousCompatByOwner[name]
+      }
+    } else {
+      delete previousCompatByOwner[name]
     }
   }
 
   // remove entries deleted from the manifest (previously managed, now absent);
   // names now managed as top-level dependencies are not ours to remove
-  const state = await loadState()
   const depNames = new Set(manifest.deps.map((d) => d.name))
   const currentNames = new Set(names.values())
   const previousNames = state.managedPackages ?? []
   for (const name of previousNames) {
     if (currentNames.has(name) || depNames.has(name)) continue
-    if (installedVersion(name) !== undefined) {
-      change(`remove deleted package ${name}`)
-      if (!dshCli(['plugin', '--profile', PROFILE, 'remove', name], { version: manifest.dshVersion })) fail(`failed to remove ${name}`)
+    const compatNames = previousCompatByOwner[name] ?? []
+    const removal = [name, ...compatNames].filter(packageName =>
+      profilePkg.dependencies?.[packageName] !== undefined || installedVersion(packageName) !== undefined)
+    if (removal.length > 0) {
+      change(`remove deleted package ${name}${compatNames.length > 0 ? ' with compatibility overrides' : ''}`)
+      if (!dshCli(['plugin', '--profile', PROFILE, 'remove', ...removal], { version: manifest.dshVersion })) {
+        fail(`failed to remove ${removal.join(', ')}`)
+      } else {
+        delete previousCompatByOwner[name]
+      }
+    } else {
+      delete previousCompatByOwner[name]
     }
   }
   state.managedPackages = [...currentNames]
@@ -506,17 +583,37 @@ async function syncPackages(manifest, items) {
   // bytes. Build-input and install-content identities are deliberately separate.
   const previousLocalHashes = state.localPackageHashes ?? {}
   const previousBuildInputs = state.localPackageBuildInputs ?? {}
-  const nextLocalHashes = {}
-  const nextBuildInputs = {}
+  const previousCompatHashes = state.compatDependencyHashes ?? {}
+  const enabledNameSet = new Set(enabledNames)
+  // Preserve the last successful ledger for enabled owners across a failed
+  // rebuild. Their deployed profile bytes remain intact, so erasing these
+  // hashes would cause a needless replacement after the fixed input is restored.
+  const nextLocalHashes = Object.fromEntries(Object.entries(previousLocalHashes)
+    .filter(([packageName]) => enabledNameSet.has(packageName)))
+  const nextBuildInputs = Object.fromEntries(Object.entries(previousBuildInputs)
+    .filter(([packageName]) => enabledNameSet.has(packageName)))
+  const enabledCompatNames = new Set(enabled.flatMap(item =>
+    (item.compatDependencies ?? []).map(entry => entry.name)))
+  const nextCompatHashes = Object.fromEntries(Object.entries(previousCompatHashes)
+    .filter(([packageName]) => enabledCompatNames.has(packageName)))
+  const nextManagedCompat = Object.fromEntries(Object.entries(previousCompatByOwner)
+    .filter(([packageName]) => enabledNameSet.has(packageName)))
   for (const item of enabled) {
     const name = names.get(item.id)
     const localDir = item.source === 'local' ? path.join(REPO, 'packages', item.id) : undefined
+    const currentCompatNames = (compatByOwner.get(name) ?? []).map(entry => entry.name)
+    const removedCompatNames = (previousCompatByOwner[name] ?? [])
+      .filter(packageName => !currentCompatNames.includes(packageName))
+    if (removedCompatNames.length > 0) {
+      fail(`local package ${name}: refusing to remove or rename active compatibility overrides (${removedCompatNames.join(', ')}); disable the owner and sync first`)
+      continue
+    }
     const spec = localDir === undefined ? item.spec : `file:${localDir}`
     let localHash
     let buildInputHash
     if (localDir !== undefined) {
       const localPkg = readJson(path.join(localDir, 'package.json'))
-      buildInputHash = await localBuildInputHash(localDir)
+      buildInputHash = await localBuildInputHash(localDir, item.buildInputs ?? [])
       const needsBuild = typeof localPkg?.scripts?.build === 'string' && (
         previousBuildInputs[name] !== buildInputHash || !localBuildOutputsExist(localDir, localPkg)
       )
@@ -527,18 +624,47 @@ async function syncPackages(manifest, items) {
       }
       localHash = await localInstallContentHash(localDir)
     }
+    const compatEntries = localDir === undefined ? [] : (compatByOwner.get(name) ?? [])
+    const compatSpecs = []
+    const compatHashes = {}
+    let compatInvalid = false
+    for (const entry of compatEntries) {
+      const compatDir = path.join(localDir, entry.path)
+      const compatPkg = readJson(path.join(compatDir, 'package.json'))
+      if (compatPkg?.name !== entry.name) {
+        fail(`local package ${name}: compatibility artifact ${entry.path} must declare name ${entry.name}`)
+        compatInvalid = true
+        break
+      }
+      compatSpecs.push(`file:${compatDir}`)
+      compatHashes[entry.name] = await dirHash(compatDir)
+    }
+    if (compatInvalid) continue
+
     const current = installedVersion(name)
+    const compatChanged = compatEntries.some(entry =>
+      installedVersion(entry.name) === undefined || previousCompatHashes[entry.name] !== compatHashes[entry.name])
     let installed = true
     if (current !== undefined && item.source === 'remote' && current !== item.version) {
       change(`version drift ${name} ${current} -> ${item.version}, re-adding`)
       installed = dshCli(['plugin', '--profile', PROFILE, 'add', item.spec], { version: manifest.dshVersion })
       if (!installed) fail(`failed to pin ${name}`)
-    } else if (current !== undefined && item.source === 'local' && (current !== item.version || previousLocalHashes[name] !== localHash)) {
-      const reason = current !== item.version ? `${current} -> ${item.version}` : 'content changed'
-      change(`local package ${name} ${reason}, reinstalling`)
-      const removed = dshCli(['plugin', '--profile', PROFILE, 'remove', name], { version: manifest.dshVersion })
-      installed = removed && dshCli(['plugin', '--profile', PROFILE, 'add', spec], { version: manifest.dshVersion })
-      if (!installed) fail(`failed to reinstall ${name}`)
+    } else if (item.source === 'local' && (
+      current === undefined || current !== item.version || previousLocalHashes[name] !== localHash || compatChanged
+    )) {
+      const reason = current === undefined ? 'not installed'
+        : current !== item.version ? `${current} -> ${item.version}`
+          : compatChanged ? 'compatibility artifact changed'
+            : 'content changed'
+      const action = current === undefined
+        ? `install local package ${name} (${spec})`
+        : `local package ${name} ${reason}, reinstalling atomically`
+      change(`${action}${compatEntries.length > 0 ? ' with compatibility overrides' : ''}`)
+      // pnpm stages and commits all local specs as one operation. Do not remove
+      // the last-known-good owner first: a failed build or add must leave the
+      // previous federation + Connection pair intact.
+      installed = dshCli(['plugin', '--profile', PROFILE, 'add', ...compatSpecs, spec], { version: manifest.dshVersion })
+      if (!installed) fail(`failed to deploy ${name}${compatEntries.length > 0 ? ' and compatibility overrides' : ''}`)
     } else if (current === undefined) {
       change(`install ${item.source} package ${name} (${spec})`)
       installed = dshCli(['plugin', '--profile', PROFILE, 'add', spec], { version: manifest.dshVersion })
@@ -549,10 +675,14 @@ async function syncPackages(manifest, items) {
     if (installed && localHash !== undefined && buildInputHash !== undefined) {
       nextLocalHashes[name] = localHash
       nextBuildInputs[name] = buildInputHash
+      Object.assign(nextCompatHashes, compatHashes)
+      nextManagedCompat[name] = compatEntries.map(entry => entry.name)
     }
   }
   state.localPackageHashes = nextLocalHashes
   state.localPackageBuildInputs = nextBuildInputs
+  state.compatDependencyHashes = nextCompatHashes
+  state.managedCompatDependencies = nextManagedCompat
   await saveState(state)
 
   // normalize bundles: shipped base (non-managed) entries first, then enabled managed in manifest order.
@@ -629,6 +759,8 @@ async function doReset(manifest) {
   delete state.managedPackages
   delete state.localPackageHashes
   delete state.localPackageBuildInputs
+  delete state.compatDependencyHashes
+  delete state.managedCompatDependencies
   delete state.managedDependencies
   delete state['managed:preset']
   delete state['managed:skill']

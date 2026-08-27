@@ -21,6 +21,8 @@ export interface UnaryRequest {
   readonly method?: 'GET' | 'POST'
   readonly body?: unknown
   readonly signal?: AbortSignal
+  /** Host-internal evidence emitted immediately before invoking fetch. */
+  readonly onSendAttempt?: () => void
 }
 
 /**
@@ -103,6 +105,7 @@ export class HttpUnaryCarrier {
     const abort = combineAbort(request.signal, this.#timeoutMs)
     const url = new URL(request.path, this.#endpoint)
     try {
+      request.onSendAttempt?.()
       const response = await this.#fetch(url, {
         method: request.method ?? (request.body === undefined ? 'GET' : 'POST'),
         headers: request.body === undefined ? { accept: 'application/json' } : { accept: 'application/json', 'content-type': 'application/json' },

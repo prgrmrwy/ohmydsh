@@ -25,6 +25,8 @@ export interface Rc2Workspace {
   readonly title: string
   readonly path: string
   readonly sessionIds: readonly string[]
+  readonly createdAt: string
+  readonly updatedAt: string
 }
 
 export interface Rc2Session {
@@ -88,6 +90,8 @@ function workspace(value: unknown): Rc2Workspace {
     title: string(record.title, 'workspace.title'),
     path: string(record.path, 'workspace.path'),
     sessionIds: array(record.sessionIds, 'workspace.sessionIds').map((item, index) => string(item, `workspace.sessionIds[${index}]`)),
+    createdAt: string(record.createdAt, 'workspace.createdAt'),
+    updatedAt: string(record.updatedAt, 'workspace.updatedAt'),
   }
 }
 

@@ -34,6 +34,7 @@ function port(nodeId = vmA, capabilities = new Set<NodeCapability>([
     renameWorkspace: record('workspace.rename', {}),
     deleteWorkspace: record('workspace.delete', undefined),
     reorderWorkspace: record('workspace.reorder', undefined),
+    reorderSession: record('workspace.insertSessionBefore', undefined),
     listSessions: record('session.list', []),
     createSession: record('session.create', sessionNative),
     history: record('session.history', {}),
@@ -60,9 +61,15 @@ describe('capability-gated command router', () => {
     await router.prompt(encodeSessionId({ nodeId: vmA, nativeId: sessionNative }), { rpcId: 'rpc-1' as RpcId, mode: 'queue', content: [] })
     await router.models(encodeSessionId({ nodeId: vmA, nativeId: sessionNative }))
     await router.sessionCreate(vmB, encodeWorkspaceId({ nodeId: vmB, nativeId: workspaceNative }))
+    await router.sessionReorder(
+      encodeWorkspaceId({ nodeId: vmA, nativeId: workspaceNative }),
+      encodeSessionId({ nodeId: vmA, nativeId: sessionNative }),
+      undefined,
+    )
     expect(a.calls[0]![0]).toBe('session.prompt')
     expect((a.calls[0]![1] as { sessionId: string }).sessionId).toBe(sessionNative)
     expect(a.calls[1]!.slice(0, 2)).toEqual(['session.models', sessionNative])
+    expect(a.calls[2]!.slice(0, 4)).toEqual(['workspace.insertSessionBefore', workspaceNative, sessionNative, undefined])
     expect(b.calls[0]!.slice(0, 3)).toEqual(['workspace.rename', workspaceNative, 'renamed'])
     expect(b.calls[1]!.slice(0, 2)).toEqual(['session.create', workspaceNative])
   })
@@ -74,6 +81,16 @@ describe('capability-gated command router', () => {
     expect(() => router.workspaceReorder(
       encodeWorkspaceId({ nodeId: vmA, nativeId: workspaceNative }),
       encodeWorkspaceId({ nodeId: vmB, nativeId: workspaceNative }),
+    )).toThrow(/cross-node/)
+    expect(() => router.sessionReorder(
+      encodeWorkspaceId({ nodeId: vmA, nativeId: workspaceNative }),
+      encodeSessionId({ nodeId: vmB, nativeId: sessionNative }),
+      undefined,
+    )).toThrow(/cross-node/)
+    expect(() => router.sessionReorder(
+      encodeWorkspaceId({ nodeId: vmA, nativeId: workspaceNative }),
+      encodeSessionId({ nodeId: vmA, nativeId: sessionNative }),
+      encodeSessionId({ nodeId: vmB, nativeId: sessionNative }),
     )).toThrow(/cross-node/)
     ;(denied.node as { state: string }).state = 'STALE'
     expect(() => router.workspaceList(vmA)).toThrow(/not writable\/authoritative/)
@@ -99,9 +116,15 @@ describe('per-node baseline/generation reconciliation', () => {
     const refresh = reconcile.beginAuthoritativeRefresh(generation)!
     reconcile.accept(generation, { domain: 'workspace-upsert', workspaceId: workspaceNative, value: 'during-refresh' })
     reconcile.accept(generation, { domain: 'status-remove', sessionId: sessionNative })
-    expect(reconcile.commitAuthoritativeRefresh(generation, refresh, { workspaces: [], statuses: [{ id: sessionNative, value: 'snapshot-running' }] })).toBe(true)
+    reconcile.accept(generation, { domain: 'session', sessionId: sessionNative, seq: 14, value: 'event-14-during-refresh' })
+    expect(reconcile.commitAuthoritativeRefresh(
+      generation, refresh,
+      { workspaces: [], statuses: [{ id: sessionNative, value: 'snapshot-running' }] },
+      [{ id: sessionNative, seq: 13, value: 'snapshot-13' }],
+    )).toBe(true)
     expect(reconcile.view()!.workspaces.get(workspaceNative)).toBe('during-refresh')
     expect(reconcile.view()!.statuses.has(sessionNative)).toBe(false)
+    expect(reconcile.view()!.sessionEvents.get(sessionNative)).toMatchObject({ seq: 14, value: 'event-14-during-refresh' })
     expect(reconcile.view()!.refreshRequired).toBe(false)
   })
 
@@ -132,6 +155,15 @@ describe('write delivery ledger', () => {
     ledger.markSent(id)
     expect(ledger.markConnectionLost(id).state).toBe('OUTCOME_UNKNOWN')
     expect(ledger.replayable()).toEqual([])
+    // The public diagnostic must not echo the internal operation id, which can
+    // embed the caller-supplied rpcId.
+    expect(ledger.unknownDiagnostics()).toEqual([{
+      operationId: expect.stringMatching(/^op-[0-9a-f]{8}$/),
+      nodeId: vmA, kind: 'prompt', state: 'OUTCOME_UNKNOWN',
+    }])
+    expect(ledger.unknownDiagnostics()[0]!.operationId).not.toContain('rpc-exact')
+    expect(ledger.unknownDiagnostics()[0]).not.toHaveProperty('rpcId')
+    expect(ledger.unknownDiagnostics()[0]).not.toHaveProperty('sessionId')
     expect(ledger.reconcile(id, { kind: 'prompt-rpc-id', rpcId: 'rpc-other' as RpcId }).state).toBe('OUTCOME_UNKNOWN')
     expect(ledger.reconcile(id, { kind: 'ambiguous-state' }).state).toBe('OUTCOME_UNKNOWN')
     expect(ledger.reconcile(id, { kind: 'prompt-rpc-id', rpcId: 'rpc-exact' as RpcId }).state).toBe('ACCEPTED')
@@ -153,6 +185,22 @@ describe('write delivery ledger', () => {
     expect(ledger.reconcile(revisioned, { kind: 'revision', revision: 41 }).state).toBe('OUTCOME_UNKNOWN')
     expect(ledger.reconcile(revisioned, { kind: 'revision', revision: 42 }).state).toBe('ACCEPTED')
     expect(ledger.unknownForNode(vmA)).toHaveLength(2)
+  })
+
+  it('marks every in-flight write for one disconnected node unknown without touching others', () => {
+    const ledger = new WriteLedger()
+    const a = 'in-flight-a' as OperationId
+    const b = 'in-flight-b' as OperationId
+    const other = 'in-flight-other' as OperationId
+    ledger.create({ operationId: a, nodeId: vmA, kind: 'opaque' })
+    ledger.create({ operationId: b, nodeId: vmA, kind: 'opaque' })
+    ledger.create({ operationId: other, nodeId: vmB, kind: 'opaque' })
+    ledger.markSent(a)
+    ledger.markSent(b)
+    ledger.markSent(other)
+    expect(ledger.markConnectionLostForNode(vmA).map(item => item.operationId)).toEqual([a, b])
+    expect(ledger.get(other)?.state).toBe('SENT_AWAITING_RESPONSE')
+    expect(ledger.replayable()).toEqual([])
   })
 
   it('models NOT_SENT, ACCEPTED and REJECTED transitions without duplicate side effects', () => {

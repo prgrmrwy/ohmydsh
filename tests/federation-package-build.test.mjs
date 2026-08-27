@@ -18,6 +18,7 @@ test('package build embeds provenance, injects owned CSS and reuses unchanged ve
   const first = runBuild()
   assert.equal(first.status, 0, first.stderr)
   assert.match(first.stdout, /workspace embed reused|workspace embed rebuilt/)
+  assert.match(first.stdout, /connection compat e1b6c2d17a5efa05918c8044b011874c363c3f2cd7a4d83b7a2b5990aa87d0b9/)
   const provenance = JSON.parse(await readFile(path.join(PACKAGE, 'lib/workspace-embed-meta/provenance.json'), 'utf8'))
   assert.equal(provenance.schemaVersion, 1)
   assert.equal(provenance.dshVersion, '0.1.1-rc.2')
@@ -29,6 +30,13 @@ test('package build embeds provenance, injects owned CSS and reuses unchanged ve
   assert.match(client, /data-plugin-css=/)
   assert.match(client, /tag\.dataset\.plugin = "dsh-federation"/)
   assert.match(client, /Rows_projectRow/)
+  const connectionMeta = JSON.parse(await readFile(path.join(PACKAGE, 'lib/connection/package.json'), 'utf8'))
+  assert.equal(connectionMeta.name, '@deepseek-ai/dsh-client-connection')
+  assert.equal(connectionMeta.federationProvenance.patchSha256,
+    'e1b6c2d17a5efa05918c8044b011874c363c3f2cd7a4d83b7a2b5990aa87d0b9')
+  const connectionClient = await readFile(path.join(PACKAGE, 'lib/connection/lib/client.js'), 'utf8')
+  assert.match(connectionClient, /id: "@deepseek-ai\/dsh-client-connection"/)
+  assert.deepEqual([...connectionClient.matchAll(/require\((['"])(.*?)\1\)/g)].map(match => match[2]), [])
   await assert.rejects(stat(path.join(PACKAGE, 'lib/client.css')), /ENOENT/)
 
   const sourceBefore = await stat(path.join(PACKAGE, '.generated/workspace-embed/src/client/federation.ts'))

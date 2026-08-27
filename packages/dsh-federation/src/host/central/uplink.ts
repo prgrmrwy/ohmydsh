@@ -8,6 +8,7 @@ import {
   type NodeId,
   type RpcId,
 } from '../../core/index.js'
+import { NodeDeletionRequiresConfirmation } from '../node-lifecycle.js'
 
 /**
  * Federation-owned inventory the browser reads.
@@ -18,6 +19,23 @@ import {
 export interface FederationInventory {
   nodes(options?: { readonly signal?: AbortSignal }): Promise<readonly unknown[]>
   baseline(nodeId: NodeId, options?: { readonly signal?: AbortSignal }): Promise<unknown>
+  operations(options?: { readonly signal?: AbortSignal }): Promise<readonly unknown[]>
+  /** Explicit operator clear of retained diagnostics; omitting ids clears all. */
+  clearOperations?(operationIds?: readonly string[], options?: { readonly signal?: AbortSignal }): Promise<readonly unknown[]>
+  /**
+   * Node lifecycle management. Absent means the deployment does not expose node
+   * editing, and every management route fails closed instead of reaching a
+   * native handler.
+   */
+  readonly manager?: FederationNodeManager
+}
+
+/** The node-management surface the browser is allowed to drive. */
+export interface FederationNodeManager {
+  addNode(request: { readonly displayName: string; readonly sshAlias: string; readonly remoteDshPort: number; readonly enabled?: boolean }): Promise<unknown>
+  updateNode(nodeId: string, update: { readonly displayName?: string; readonly sshAlias?: string; readonly remoteDshPort?: number; readonly enabled?: boolean }): Promise<unknown>
+  reorderNode(nodeId: string, beforeNodeId?: string): Promise<unknown>
+  removeNode(nodeId: string, confirmed: boolean): Promise<unknown>
 }
 
 const FEDERATED_PREFIX = 'fed1:'
@@ -52,6 +70,12 @@ function requireString(payload: Record<string, unknown>, key: string): string {
   const value = payload[key]
   if (typeof value !== 'string' || value === '') throw new FederatedIdError('MALFORMED', `${key} must be a non-empty string`)
   return value
+}
+
+function requireInteger(payload: Record<string, unknown>, key: string): number {
+  const value = payload[key]
+  if (!Number.isInteger(value)) throw new FederatedIdError('MALFORMED', `${key} must be an integer`)
+  return value as number
 }
 
 function isFederated(value: unknown): boolean {
@@ -123,7 +147,57 @@ export class CentralUplink {
         if (this.#inventory === undefined) {
           return reject('federation-inventory-unavailable', 'federation inventory is not attached', 503)
         }
-        return { kind: 'ok', value: { nodes: await this.#inventory.nodes(signal === undefined ? {} : { signal }) } }
+        try {
+          return { kind: 'ok', value: { nodes: await this.#inventory.nodes(signal === undefined ? {} : { signal }) } }
+        } catch (cause) {
+          return reject(
+            'federation-inventory-unavailable',
+            cause instanceof Error ? cause.message : 'federation node inventory is unavailable',
+            503,
+          )
+        }
+      }
+
+      case '/api/federation/node.add':
+      case '/api/federation/node.update':
+      case '/api/federation/node.reorder':
+      case '/api/federation/node.remove': {
+        const manager = this.#inventory?.manager
+        if (manager === undefined) {
+          return reject('federation-inventory-unavailable', 'federation node management is not attached', 503)
+        }
+        try {
+          return { kind: 'ok', value: await this.#manage(manager, request.path, payload) }
+        } catch (cause) {
+          if (cause instanceof NodeDeletionRequiresConfirmation) {
+            return reject('federation-node-deletion-unconfirmed', cause.message, 409)
+          }
+          return reject('federation-node-management-failed', cause instanceof Error ? cause.message : 'node management failed', 400)
+        }
+      }
+
+      case '/api/federation/operations': {
+        if (this.#inventory === undefined) return reject('federation-inventory-unavailable', 'federation inventory is not attached', 503)
+        try {
+          return { kind: 'ok', value: { operations: await this.#inventory.operations(signal === undefined ? {} : { signal }) } }
+        } catch (cause) {
+          return reject('federation-inventory-unavailable', cause instanceof Error ? cause.message : 'federation operation inventory is unavailable', 503)
+        }
+      }
+
+      case '/api/federation/operations.clear': {
+        // Retained diagnostics persist until the operator clears them, so the
+        // clear must be an explicit, addressable action.
+        const clear = this.#inventory?.clearOperations
+        if (clear === undefined) return reject('federation-inventory-unavailable', 'federation diagnostics retention is not attached', 503)
+        try {
+          const ids = Array.isArray(payload.operationIds)
+            ? payload.operationIds.filter((id): id is string => typeof id === 'string')
+            : undefined
+          return { kind: 'ok', value: { operations: await clear(ids, signal === undefined ? {} : { signal }) } }
+        } catch (cause) {
+          return reject('federation-inventory-unavailable', cause instanceof Error ? cause.message : 'federation diagnostics clear failed', 503)
+        }
       }
 
       case '/api/federation/baseline': {
@@ -134,7 +208,15 @@ export class CentralUplink {
         if (!this.#knownNodes.has(nodeId)) {
           return reject('federation-id-unknown-node', `unknown federation node ${nodeId}`, 400)
         }
-        return { kind: 'ok', value: await this.#inventory.baseline(nodeId, signal === undefined ? {} : { signal }) }
+        try {
+          return { kind: 'ok', value: await this.#inventory.baseline(nodeId, signal === undefined ? {} : { signal }) }
+        } catch (cause) {
+          return reject(
+            'federation-inventory-unavailable',
+            cause instanceof Error ? cause.message : 'federation baseline is unavailable',
+            503,
+          )
+        }
       }
 
       case '/api/workspace.create': {
@@ -163,6 +245,17 @@ export class CentralUplink {
           return reject('federation-cross-node-anchor', 'a federated workspace cannot be reordered against a local anchor')
         }
         return { kind: 'ok', value: await this.#router.workspaceReorder(id, anchor, signal) }
+      }
+      case '/api/workspace.insertSessionBefore': {
+        const workspace = this.#workspace(payload, 'workspaceId')
+        const session = this.#session(payload, 'sessionId')
+        const beforeRaw = payload.beforeSessionId
+        const before = beforeRaw === undefined || beforeRaw === null ? undefined : this.#session(payload, 'beforeSessionId')
+        if (workspace === undefined && session === undefined && before === undefined) return { kind: 'local-passthrough' }
+        if (workspace === undefined || session === undefined || (beforeRaw !== undefined && beforeRaw !== null && before === undefined)) {
+          return reject('federation-cross-node-anchor', 'workspace, session and anchor must all belong to the same federated node')
+        }
+        return { kind: 'ok', value: await this.#router.sessionReorder(workspace, session, before, signal) }
       }
       case '/api/workspace.archiveSession': {
         const id = this.#session(payload, 'sessionId')
@@ -277,6 +370,34 @@ export class CentralUplink {
   }
 
   /** Finds a reserved `fed<N>:` identity whose version this build does not support. */
+  async #manage(manager: FederationNodeManager, path: string, payload: Record<string, unknown>): Promise<unknown> {
+    switch (path) {
+      case '/api/federation/node.add':
+        return manager.addNode({
+          displayName: requireString(payload, 'displayName'),
+          sshAlias: requireString(payload, 'sshAlias'),
+          remoteDshPort: requireInteger(payload, 'remoteDshPort'),
+          ...(payload.enabled === undefined ? {} : { enabled: payload.enabled === true }),
+        })
+      case '/api/federation/node.update':
+        return manager.updateNode(requireString(payload, 'nodeId'), {
+          ...(payload.displayName === undefined ? {} : { displayName: requireString(payload, 'displayName') }),
+          ...(payload.sshAlias === undefined ? {} : { sshAlias: requireString(payload, 'sshAlias') }),
+          ...(payload.remoteDshPort === undefined ? {} : { remoteDshPort: requireInteger(payload, 'remoteDshPort') }),
+          ...(payload.enabled === undefined ? {} : { enabled: payload.enabled === true }),
+        })
+      case '/api/federation/node.reorder':
+        return manager.reorderNode(
+          requireString(payload, 'nodeId'),
+          payload.beforeNodeId === undefined ? undefined : requireString(payload, 'beforeNodeId'),
+        )
+      default:
+        // Deleting a node is never implicit: an unconfirmed request must be
+        // refused while outcome-unknown writes exist.
+        return manager.removeNode(requireString(payload, 'nodeId'), payload.confirmed === true)
+    }
+  }
+
   #reservedNonCurrent(value: unknown, seen = new Set<unknown>()): string | undefined {
     if (typeof value === 'string') {
       return RESERVED_FEDERATION_NAMESPACE.test(value) && !value.startsWith(FEDERATED_PREFIX) ? value : undefined

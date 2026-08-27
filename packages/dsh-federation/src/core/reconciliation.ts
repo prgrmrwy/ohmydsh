@@ -74,7 +74,7 @@ export class NodeReconciler<W, S, E> {
     if (!state.baselineInstalled || !state.streamsReady) state.buffer.push(frame)
     else {
       this.#apply(state, frame)
-      if (state.refreshToken !== undefined && frame.domain !== 'session') state.refreshBuffer.push(frame)
+      if (state.refreshToken !== undefined) state.refreshBuffer.push(frame)
     }
     return true
   }
@@ -109,11 +109,17 @@ export class NodeReconciler<W, S, E> {
     return token
   }
 
-  commitAuthoritativeRefresh(generation: number, token: number, snapshot: HostSnapshot<W, S>): boolean {
+  commitAuthoritativeRefresh(
+    generation: number,
+    token: number,
+    snapshot: HostSnapshot<W, S>,
+    sessionBaseline?: readonly SessionEntity<E>[],
+  ): boolean {
     const state = this.#current(generation)
     if (state === undefined || state.refreshToken !== token) return false
     state.workspaces = new Map(snapshot.workspaces.map(item => [item.id, item.value]))
     state.statuses = new Map(snapshot.statuses.map(item => [item.id, item.value]))
+    if (sessionBaseline !== undefined) state.sessionEvents = new Map(sessionBaseline.map(item => [item.id, item]))
     state.workspaceTombstones.clear()
     state.statusTombstones.clear()
     const duringRefresh = state.refreshBuffer.splice(0)

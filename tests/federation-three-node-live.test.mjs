@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { openRealRc2Streams } from './helpers/rc2-stream-proof.mjs'
 
 /**
  * End-to-end three-node acceptance against real infrastructure.
@@ -187,6 +188,7 @@ test('three live rc.2 nodes federate over real tunnels with colliding native ids
   const tunnels = []
   let sshd
   let bundles = []
+  const streamCarriers = []
   try {
     // One real dsh web per node, each with its own DSH_HOME and project dir.
     for (const node of nodes) {
@@ -234,7 +236,9 @@ test('three live rc.2 nodes federate over real tunnels with colliding native ids
       const carrier = new HttpUnaryCarrier({
         endpoint: new URL(`http://127.0.0.1:${localPort}`), generation: 1, currentGeneration: () => 1, timeoutMs: 30_000,
       })
-      const probe = await DshRc2NodeAdapter.probe(carrier, { mux: true, host: true })
+      const streams = await openRealRc2Streams(host, new URL(`http://127.0.0.1:${localPort}`))
+      streamCarriers.push(streams)
+      const probe = await DshRc2NodeAdapter.probe(carrier, streams.proof)
       assert.equal(probe.compatibility, 'SUPPORTED', `${server.node.id}: ${probe.diagnostic}`)
       const descriptor = {
         nodeId: parseNodeId(server.node.id), kind: server.node.kind,
@@ -423,6 +427,7 @@ test('three live rc.2 nodes federate over real tunnels with colliding native ids
       'recovered sessions must stay owned by their node')
     assert.equal(beforeLoss.length, 1, 'the untouched remote keeps exactly its own single session')
   } finally {
+    streamCarriers.forEach(streams => streams.dispose())
     for (const tunnel of tunnels) {
       if (tunnel.exitCode === null) tunnel.kill('SIGKILL')
     }

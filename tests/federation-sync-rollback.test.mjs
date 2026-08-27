@@ -32,14 +32,24 @@ async function fixture({ enabled }) {
   await writeFile(path.join(repo, 'scripts', 'lib', 'dsh-cli.mjs'), await readFile(path.join(REPO, 'scripts', 'lib', 'dsh-cli.mjs')))
   // The package's build imports these repo scripts; copy them so the real
   // build/prepare path runs inside the fixture exactly as it would in the repo.
-  for (const script of ['build-rc2-workspace-embed.mjs', 'fetch-rc2-workspace-source.mjs']) {
+  for (const script of [
+    'build-rc2-workspace-embed.mjs',
+    'fetch-rc2-workspace-source.mjs',
+    'build-rc2-connection-compat.mjs',
+    'fetch-rc2-connection-source.mjs',
+  ]) {
     await writeFile(path.join(repo, 'scripts', script), await readFile(path.join(REPO, 'scripts', script)))
   }
   // The embed build reads its pinned upstream provenance from openspec/, and
   // fails closed without it — so the fixture must carry it too.
   const upstream = 'openspec/changes/federated-dsh-control-plane/checking/upstream'
   await mkdir(path.join(repo, upstream), { recursive: true })
-  for (const asset of ['rc2-workspace-source-manifest.json', 'rc2-workspace-node-section.patch']) {
+  for (const asset of [
+    'rc2-workspace-source-manifest.json',
+    'rc2-workspace-node-section.patch',
+    'rc2-connection-source-manifest.json',
+    'rc2-connection-api-middleware.patch',
+  ]) {
     await writeFile(path.join(repo, upstream, asset), await readFile(path.join(REPO, upstream, asset)))
   }
   await symlink(path.join(REPO, 'node_modules'), path.join(repo, 'node_modules'), 'dir')
@@ -62,6 +72,7 @@ async function fixture({ enabled }) {
   await writeFile(path.join(repo, 'package.json'), JSON.stringify({
     name: 'fixture-root', private: true, type: 'module', workspaces: ['packages/*'],
   }))
+  await writeFile(path.join(repo, 'package-lock.json'), await readFile(path.join(REPO, 'package-lock.json')))
   await writeFile(path.join(profile, 'package.json'), JSON.stringify({ dependencies: {}, dsh: { profile: { bundles: [] } } }, null, 2))
   await writeFile(path.join(repo, 'dsh.yaml'), [
     'dshVersion: 0.1.1-rc.2',
@@ -72,6 +83,19 @@ async function fixture({ enabled }) {
     '    source: local',
     '    version: 0.1.0',
     `    enabled: ${enabled}`,
+    '    buildInputs:',
+    '      - package-lock.json',
+    '      - scripts/build-rc2-workspace-embed.mjs',
+    '      - scripts/fetch-rc2-workspace-source.mjs',
+    '      - openspec/changes/federated-dsh-control-plane/checking/upstream/rc2-workspace-source-manifest.json',
+    '      - openspec/changes/federated-dsh-control-plane/checking/upstream/rc2-workspace-node-section.patch',
+    '      - scripts/build-rc2-connection-compat.mjs',
+    '      - scripts/fetch-rc2-connection-source.mjs',
+    '      - openspec/changes/federated-dsh-control-plane/checking/upstream/rc2-connection-source-manifest.json',
+    '      - openspec/changes/federated-dsh-control-plane/checking/upstream/rc2-connection-api-middleware.patch',
+    '    compatDependencies:',
+    "      - name: '@deepseek-ai/dsh-client-connection'",
+    '        path: lib/connection',
     '',
   ].join('\n'))
 
@@ -82,16 +106,23 @@ set -euo pipefail
 profile="${profile}"
 actions="${actions}"
 action="$4"
-value="$5"
-printf '%s %s\\n' "$action" "$value" >> "$actions"
-if [[ "$action" == add && "$value" == file:* ]]; then
-  src="\${value#file:}"
-  name=$(node -p "require('$src/package.json').name")
-  rm -rf "$profile/node_modules/$name"
-  mkdir -p "$profile/node_modules"
-  cp -R "$src" "$profile/node_modules/$name"
+shift 4
+printf '%s %s\\n' "$action" "$*" >> "$actions"
+if [[ "$action" == add ]]; then
+  for value in "$@"; do
+    [[ "$value" == file:* ]] || continue
+    src="\${value#file:}"
+    name=$(node -p "require('$src/package.json').name")
+    rm -rf "$profile/node_modules/$name"
+    mkdir -p "$(dirname "$profile/node_modules/$name")"
+    cp -R "$src" "$profile/node_modules/$name"
+    node -e "const fs=require('fs');const f='$profile/package.json';const p=JSON.parse(fs.readFileSync(f));p.dependencies??={};p.dependencies[process.argv[1]]=process.argv[2];fs.writeFileSync(f,JSON.stringify(p,null,2))" "$name" "$value"
+  done
 elif [[ "$action" == remove ]]; then
-  rm -rf "$profile/node_modules/$value"
+  for value in "$@"; do
+    rm -rf "$profile/node_modules/$value"
+    node -e "const fs=require('fs');const f='$profile/package.json';const p=JSON.parse(fs.readFileSync(f));delete p.dependencies?.[process.argv[1]];fs.writeFileSync(f,JSON.stringify(p,null,2))" "$value"
+  done
 fi
 `)
   await chmod(fake, 0o755)
@@ -116,15 +147,27 @@ test('enabling dsh-federation deploys, re-syncs idempotently, and disabling roll
     const first = f.run()
     assert.equal(first.status, 0, `${first.stdout}\n${first.stderr}`)
     const installed = path.join(f.profile, 'node_modules', 'dsh-federation')
+    const installedConnection = path.join(f.profile, 'node_modules', '@deepseek-ai', 'dsh-client-connection')
     assert.ok(existsSync(installed), `federation package was not deployed:\n${first.stdout}`)
+    assert.ok(existsSync(installedConnection), `patched Connection was not deployed:\n${first.stdout}`)
 
-    // The deployed artifact must be the built output, not raw sources.
+    // Both deployed artifacts must be built outputs, not raw sources. The
+    // compatibility package deliberately preserves the official package name so
+    // the unchanged DSH Connection row and browser dependency graph resolve it.
     assert.ok(existsSync(path.join(installed, 'lib')), 'deployed package must carry built lib/')
     const deployedPkg = JSON.parse(await readFile(path.join(installed, 'package.json'), 'utf8'))
+    const connectionPkg = JSON.parse(await readFile(path.join(installedConnection, 'package.json'), 'utf8'))
     assert.equal(deployedPkg.name, 'dsh-federation')
+    assert.equal(connectionPkg.name, '@deepseek-ai/dsh-client-connection')
+    assert.equal(connectionPkg.federationProvenance.patchSha256,
+      'e1b6c2d17a5efa05918c8044b011874c363c3f2cd7a4d83b7a2b5990aa87d0b9')
+    const hostArtifact = await readFile(path.join(installedConnection, 'lib/index.js'), 'utf8')
+    assert.match(hostArtifact, /apiMiddleware/, 'deployed Connection must contain the middleware seam')
 
     const afterFirst = await readActions(f.actions)
-    assert.ok(afterFirst.some(line => line.startsWith('add file:')), afterFirst.join('\n'))
+    assert.ok(afterFirst.some(line => line.startsWith('add ') &&
+      line.includes('lib/connection') && line.includes('packages/dsh-federation')),
+    `Connection and federation must deploy in one add transaction:\n${afterFirst.join('\n')}`)
 
     // --- second sync: idempotent, no redeploy ---
     const second = f.run()
@@ -141,9 +184,12 @@ test('enabling dsh-federation deploys, re-syncs idempotently, and disabling roll
     const afterDisable = await readActions(f.actions)
     // The sync itself must have issued the removal; the fake CLI only carries it
     // out, so asserting on the recorded action is what proves the rollback path.
-    assert.ok(afterDisable.some(line => line === 'remove dsh-federation'),
-      `sync did not issue a removal:\n${third.stdout}\n${afterDisable.join('\n')}`)
+    assert.ok(afterDisable.some(line => line ===
+      'remove dsh-federation @deepseek-ai/dsh-client-connection'),
+      `sync did not issue one atomic owner+compat removal:\n${third.stdout}\n${afterDisable.join('\n')}`)
     assert.equal(existsSync(installed), false, `disabling must remove the deployed package:\n${third.stdout}`)
+    assert.equal(existsSync(installedConnection), false,
+      `disabling must remove the direct Connection override:\n${third.stdout}`)
 
     // --- rollback is itself idempotent ---
     const fourth = f.run()
@@ -161,7 +207,105 @@ test('enabling dsh-federation deploys, re-syncs idempotently, and disabling roll
   }
 })
 
-test('the federation build fails closed when the pinned rc.2 source hash does not match', { timeout: 600_000 }, async () => {
+test('a changed Connection patch fails before deployment and preserves the installed pair', { timeout: 600_000 }, async () => {
+  const f = await fixture({ enabled: true })
+  try {
+    const first = f.run()
+    assert.equal(first.status, 0, `${first.stdout}\n${first.stderr}`)
+    const installedFederation = path.join(f.profile, 'node_modules', 'dsh-federation', 'lib', 'index.js')
+    const installedConnection = path.join(f.profile, 'node_modules', '@deepseek-ai', 'dsh-client-connection', 'lib/index.js')
+    const federationBefore = await readFile(installedFederation)
+    const connectionBefore = await readFile(installedConnection)
+    const actionsBefore = await readActions(f.actions)
+
+    const patch = path.join(f.repo,
+      'openspec/changes/federated-dsh-control-plane/checking/upstream/rc2-connection-api-middleware.patch')
+    const original = await readFile(patch, 'utf8')
+    await writeFile(patch, `${original}\n# tampered deployment input\n`)
+    const failed = f.run()
+    assert.notEqual(failed.status, 0)
+    assert.match(failed.stderr, /connection compatibility patch sha256 mismatch/)
+    assert.deepEqual(await readActions(f.actions), actionsBefore,
+      'a failed fixed-source build must not invoke package deployment')
+    assert.deepEqual(await readFile(installedFederation), federationBefore)
+    assert.deepEqual(await readFile(installedConnection), connectionBefore)
+
+    await writeFile(patch, original)
+    const recovered = f.run()
+    assert.equal(recovered.status, 0, `${recovered.stdout}\n${recovered.stderr}`)
+    assert.deepEqual(await readActions(f.actions), actionsBefore,
+      'restoring unchanged fixed inputs must remain deployment-idempotent')
+  } finally {
+    await rm(f.root, { recursive: true, force: true })
+  }
+})
+
+test('root lockfile participates in the local build identity', { timeout: 600_000 }, async () => {
+  const f = await fixture({ enabled: true })
+  try {
+    const first = f.run()
+    assert.equal(first.status, 0, `${first.stdout}\n${first.stderr}`)
+    const lock = path.join(f.repo, 'package-lock.json')
+    await writeFile(lock, `${await readFile(lock, 'utf8')}\n`)
+    const second = f.run()
+    assert.equal(second.status, 0, `${second.stdout}\n${second.stderr}`)
+    assert.match(second.stdout, /build local package dsh-federation/,
+      'changing the pinned root lockfile must invalidate the local build cache')
+  } finally {
+    await rm(f.root, { recursive: true, force: true })
+  }
+})
+
+test('an active owner cannot silently drop its required compatibility override', { timeout: 600_000 }, async () => {
+  const f = await fixture({ enabled: true })
+  try {
+    const first = f.run()
+    assert.equal(first.status, 0, `${first.stdout}\n${first.stderr}`)
+    const actionsBefore = await readActions(f.actions)
+    const connection = path.join(f.profile, 'node_modules', '@deepseek-ai', 'dsh-client-connection', 'lib/index.js')
+    const connectionBefore = await readFile(connection)
+    const manifestPath = path.join(f.repo, 'dsh.yaml')
+    const manifest = await readFile(manifestPath, 'utf8')
+    await writeFile(manifestPath, manifest.replace(
+      /    compatDependencies:\n      - name: '@deepseek-ai\/dsh-client-connection'\n        path: lib\/connection\n/,
+      '',
+    ))
+
+    const rejected = f.run()
+    assert.notEqual(rejected.status, 0)
+    assert.match(rejected.stderr, /refusing to remove or rename active compatibility overrides/)
+    assert.deepEqual(await readActions(f.actions), actionsBefore)
+    assert.deepEqual(await readFile(connection), connectionBefore)
+  } finally {
+    await rm(f.root, { recursive: true, force: true })
+  }
+})
+
+test('disabling after a fresh fixed-source build failure removes the staged owner dependency spec', { timeout: 600_000 }, async () => {
+  const f = await fixture({ enabled: true })
+  try {
+    const patch = path.join(f.repo,
+      'openspec/changes/federated-dsh-control-plane/checking/upstream/rc2-connection-api-middleware.patch')
+    await writeFile(patch, `${await readFile(patch, 'utf8')}\n# tampered before first deployment\n`)
+    const failed = f.run()
+    assert.notEqual(failed.status, 0)
+    assert.deepEqual(await readActions(f.actions), [])
+    let profilePkg = JSON.parse(await readFile(path.join(f.profile, 'package.json'), 'utf8'))
+    assert.ok(profilePkg.dependencies['dsh-federation'], 'sync stages the local owner path before build')
+
+    await f.setEnabled(false)
+    const disabled = f.run()
+    assert.equal(disabled.status, 0, `${disabled.stdout}\n${disabled.stderr}`)
+    assert.deepEqual(await readActions(f.actions), ['remove dsh-federation'])
+    profilePkg = JSON.parse(await readFile(path.join(f.profile, 'package.json'), 'utf8'))
+    assert.equal(profilePkg.dependencies['dsh-federation'], undefined)
+    assert.equal(profilePkg.dependencies['@deepseek-ai/dsh-client-connection'], undefined)
+  } finally {
+    await rm(f.root, { recursive: true, force: true })
+  }
+})
+
+test('the Workspace embed build fails closed when the pinned rc.2 source hash does not match', { timeout: 600_000 }, async () => {
   // Generic "build failure preserves the deployment" is already covered by
   // sync-local-package.test.mjs. The federation-specific risk is different: the
   // Workspace Embed is derived from PINNED upstream rc.2 source, so a changed

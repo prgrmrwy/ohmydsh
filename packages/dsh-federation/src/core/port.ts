@@ -31,6 +31,7 @@ export interface DshNodePort {
   renameWorkspace(workspaceId: NativeWorkspaceId, title: string, options?: AbortOptions): Promise<WorkspaceProjection>
   deleteWorkspace(workspaceId: NativeWorkspaceId, options?: AbortOptions): Promise<void>
   reorderWorkspace(workspaceId: NativeWorkspaceId, beforeId: NativeWorkspaceId | undefined, options?: AbortOptions): Promise<void>
+  reorderSession(workspaceId: NativeWorkspaceId, sessionId: NativeSessionId, beforeId: NativeSessionId | undefined, options?: AbortOptions): Promise<void>
   listSessions(options?: AbortOptions): Promise<readonly SessionProjection[]>
   createSession(workspaceId: NativeWorkspaceId | undefined, options?: AbortOptions): Promise<NativeSessionId>
   history(sessionId: NativeSessionId, options?: AbortOptions & { readonly beforeSeq?: number }): Promise<unknown>

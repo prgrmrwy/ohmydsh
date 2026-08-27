@@ -111,14 +111,27 @@ export async function buildConnectionCompat(options) {
   const packageRoot = sourceRoot.endsWith('packages/client/connection')
     ? sourceRoot
     : path.join(sourceRoot, 'packages/client/connection')
+  const sourceTreeRoot = sourceRoot.endsWith('packages/client/connection')
+    ? path.resolve(sourceRoot, '../../..')
+    : sourceRoot
   await validateSource(packageRoot, manifest)
+  const licenseBlob = manifest.blobs.find(entry => entry.path === 'LICENSE')
+  if (licenseBlob === undefined) throw new Error('connection source manifest is missing LICENSE provenance')
+  await validateBlob(path.join(sourceTreeRoot, 'LICENSE'), licenseBlob, 'connection source LICENSE')
 
   await mkdir(path.dirname(options.outputDir), { recursive: true })
   const stage = await mkdtemp(path.join(path.dirname(options.outputDir), `.${path.basename(options.outputDir)}.stage-`))
   try {
     await cp(packageRoot, stage, { recursive: true })
+    await cp(path.join(sourceTreeRoot, 'LICENSE'), path.join(stage, 'LICENSE'))
+    // The generated stage can live below the caller's Git worktree. Without an
+    // isolated repository, `git apply` walks upward and interprets `src/*`
+    // against that parent checkout instead of the stage, leaving the staged
+    // Connection unchanged while reporting success. Pin discovery to the stage.
+    await run('git', ['init', '-q'], stage)
     await run('git', ['apply', '--check', patchPath], stage)
     await run('git', ['apply', '--whitespace=nowarn', patchPath], stage)
+    await rm(path.join(stage, '.git'), { recursive: true, force: true })
     for (const output of manifest.patch.outputs) {
       await validateBlob(path.join(stage, output.path), output, `connection compatibility output ${output.path}`)
     }

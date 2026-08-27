@@ -19,6 +19,7 @@ export interface NodeRowInput {
   readonly compatibility: 'SUPPORTED' | 'EXPERIMENTAL' | 'INCOMPATIBLE'
   readonly runningSessionCount: number
   readonly pendingInteractionCount: number
+  readonly outcomeUnknownCount: number
   readonly diagnostic?: string
 }
 
@@ -68,6 +69,7 @@ export function deriveNodeRow(input: NodeRowInput): NodeRow {
     showsSkeleton: status === 'stale' || status === 'offline',
     runningSessionCount: input.runningSessionCount,
     pendingInteractionCount: input.pendingInteractionCount,
+    outcomeUnknownCount: input.outcomeUnknownCount,
     expandable: status !== 'disabled',
     ...(input.diagnostic === undefined ? {} : { diagnostic: input.diagnostic }),
   })

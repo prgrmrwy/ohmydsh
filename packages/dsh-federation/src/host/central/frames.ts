@@ -50,11 +50,12 @@ export function toCentralFrame(event: Rc2StableEvent, context: CentralFrameConte
       return { stream: 'mux', rpcId: context.nextRpcId(), payload }
     }
     case 'workspace-upsert': {
-      const workspace = { ...(frame.value as Record<string, unknown>) }
-      workspace.workspaceId = encodeWorkspaceId({ nodeId: context.nodeId, nativeId: frame.workspaceId as NativeWorkspaceId })
-      workspace.sessionIds = Array.isArray(workspace.sessionIds)
-        ? workspace.sessionIds.map(id => rewriteSession(context.nodeId, String(id)))
-        : []
+      const workspace = {
+        workspaceId: frame.value.id,
+        title: frame.value.title,
+        path: frame.value.path,
+        sessionIds: [...frame.value.sessionIds, ...frame.value.archivedSessionIds],
+      }
       return { stream: 'host', rpcId: context.nextRpcId(), payload: { type: 'host/workspace-changed', workspace } }
     }
     case 'workspace-remove':

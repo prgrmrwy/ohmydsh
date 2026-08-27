@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { openRealRc2Streams } from './helpers/rc2-stream-proof.mjs'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const PKG = path.join(REPO, 'packages/dsh-federation')
@@ -79,6 +80,7 @@ test('rc.2 adapter conforms to a real dsh web under an isolated DSH_HOME', { tim
     env: { ...process.env, DSH_HOME: home, DSH_SKIP_UPDATE: '1' },
   })
   let bundle
+  let streams
   try {
     await apiReady(port, child)
     const loaded = await loadFederation()
@@ -90,7 +92,8 @@ test('rc.2 adapter conforms to a real dsh web under an isolated DSH_HOME', { tim
     })
 
     // Structural probe must reach SUPPORTED even though rc.2 reports "0.0.1".
-    const probe = await DshRc2NodeAdapter.probe(carrier, { mux: true, host: true })
+    streams = await openRealRc2Streams(loaded.module, new URL(`http://127.0.0.1:${port}`))
+    const probe = await DshRc2NodeAdapter.probe(carrier, streams.proof)
     assert.equal(probe.compatibility, 'SUPPORTED', `probe diagnostic: ${probe.diagnostic}`)
     assert.ok(probe.capabilities.has('session.write'), 'writes must be granted to a structurally verified rc.2 node')
 
@@ -148,6 +151,7 @@ test('rc.2 adapter conforms to a real dsh web under an isolated DSH_HOME', { tim
       assert.equal(RC2_ALLOWED_METHODS.has(method), false, `${method} must stay unreachable`)
     }
   } finally {
+    streams?.dispose()
     child.kill('SIGKILL')
     await new Promise(resolve => child.once('exit', resolve))
     if (bundle) await rm(bundle, { force: true })
