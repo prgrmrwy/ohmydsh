@@ -91,6 +91,9 @@ if [[ "\${4:-}" == "add" ]]; then
   version="\${spec##*@}"
   mkdir -p "$profile/node_modules/$name"
   printf '{"name":"%s","version":"%s","dsh":{"bundle":{"patch":"./cordis.patch.yml"}}}' "$name" "$version" > "$profile/node_modules/$name/package.json"
+  # A real install also materializes the patch file the manifest declares;
+  # writing only the manifest would leave the package permanently incomplete.
+  printf -- '- insert: []\\n' > "$profile/node_modules/$name/cordis.patch.yml"
   node -e "
     const fs=require('fs');
     const p=JSON.parse(fs.readFileSync('$profile/package.json','utf8'));

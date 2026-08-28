@@ -101,6 +101,10 @@ elif [[ "$action" == add ]]; then
   fi
   mkdir -p "$profile/node_modules/$name"
   printf '{"name":"%s","version":"%s","dsh":{"bundle":{"patch":"./cordis.patch.yml"}}}' "$name" "$version" > "$profile/node_modules/$name/package.json"
+  # A real install materializes the patch file the manifest declares. Writing
+  # only the manifest would leave the fake package permanently incomplete, and
+  # sync's deployment-integrity check would (correctly) keep repairing it.
+  printf -- '- insert: []\\n' > "$profile/node_modules/$name/cordis.patch.yml"
   # pnpm records a registry spec as a plain version (name@version is normalized
   # away), but keeps a tarball URL verbatim. The fake must mirror both, or
   # installedSpec() comparisons diverge from production.
