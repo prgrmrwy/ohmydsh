@@ -211,6 +211,47 @@ export interface CleanResult {
   cleaned: boolean
 }
 
+/**
+ * Why one repository-clean candidate was not cleaned. `not-archived` is this
+ * flow's own precondition; `refused` carries an existing single-operation
+ * safety-gate rejection; `unreadable` marks metadata that could not be parsed
+ * (including retired schema versions), which is reported and never mutated.
+ */
+export type RepoCleanRefusalKind = 'not-archived' | 'refused' | 'unreadable'
+
+/** A candidate this run deliberately left untouched, with a stable reason. */
+export interface RepoCleanRefusal {
+  operationId: string
+  kind: RepoCleanRefusalKind
+  reason: string
+  code?: WsErrorCode
+  sourceSessionId?: string
+  worktreePath?: string
+  taskBranch?: string
+}
+
+/** Completed history (cleaned/released tombstones) skipped without mutation. */
+export interface RepoCleanIgnored {
+  operationId: string
+  lifecycle: 'cleaned' | 'released'
+  worktreePath?: string
+  taskBranch?: string
+}
+
+/**
+ * One repository-wide `ws clean` pass. Candidates are independent: `cleaned`
+ * lists the operations this run removed, while every other operation appears
+ * exactly once under `refused` or `ignored` with its resources intact.
+ */
+export interface RepoCleanResult {
+  dryRun: boolean
+  repoRoot: string
+  scanned: number
+  cleaned: readonly CleanResult[]
+  refused: readonly RepoCleanRefusal[]
+  ignored: readonly RepoCleanIgnored[]
+}
+
 export type WsErrorCode =
   | 'INVALID_REQUEST'
   | 'UNTRUSTED_REQUEST'
