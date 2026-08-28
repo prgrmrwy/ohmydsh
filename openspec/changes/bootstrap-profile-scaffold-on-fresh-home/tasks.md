@@ -29,15 +29,25 @@
 - [x] 4.3 在 devbox 上重跑 sync 确认幂等:输出 `no changes`,无 `initialize profile` 行
 - [x] 4.4 在 devbox 上启动 DSH,确认 bundle 实际加载(启动清单可见)
 
-### 一次误判的记录:devbox 的 IPv6 黑洞
+### 环境记录:devbox 到 github.com 的连通性不稳定
 
-首轮验证时 `dsh-open-in-vscode` 安装失败,我据 `curl https://github.com/...` 连接超时判定为"devbox 无法访问 github.com",并将其记为环境遗留。**该判定是错的**,此处保留以备复核。
+devbox 访问 `github.com:443` **间歇性**超时:实测 `curl -4` 8 次仅 2 次成功,pnpm 日志里也出现 `connect ETIMEDOUT 20.205.243.166:443`(IPv4 地址),重试若干次后才有一次成功。另有一条 IPv6 默认路由但出网是黑洞,`curl` 默认按 RFC 6724 优先 IPv6,因此不加 `-4` 时几乎必失败——但这只是叠加因素,**IPv4 本身同样不稳**。
 
-实际原因:devbox 有一条 IPv6 默认路由和一个 global IPv6 地址,但 IPv6 出网是黑洞。`curl` 默认按 RFC 6724 优先 IPv6,于是固定 15s 超时失败(`connect=0.000000s`,典型丢包特征);而 Node/pnpm 与 `git` 走 IPv4,同一 URL 始终可达。证据:同一 URL 上 `curl -6` 超时、`curl -4` 返回 200、`node fetch` 返回 200,`pnpm add` 成功装出 `dsh-open-in-vscode@0.1.6`。
+诊断此类问题时的两点:一是不要用 `curl` 的探测结果推断 pnpm/git 的可达性(地址族偏好不同);二是不要用一两次探测下"通/不通"的二元结论,间歇性故障需要多次采样,并以实际执行该操作的客户端为准。
 
-方法论教训:我把"用 curl 探测的结果"当成了"该主机的可达性",而真正执行安装的是 pnpm —— 不同客户端的地址族偏好不同,用 A 工具的失败去推断 B 工具的能力并不成立。诊断网络可达性时应当用实际执行该操作的客户端验证。
+后果与处置:manifest 中三项经 GitHub URL 安装的定制在网络窗口内可装上,失败时重跑 sync 即可。`dsh-open-in-vscode@0.1.6` 现已就位,13 项全部物化,sync 为 `no changes`,`git fetch`(HTTPS)正常。
 
-那次失败的真实成因是首轮安装期间的瞬时网络波动(同一批次里另两个 GitHub URL 装成功了,这一矛盾本应当场促使我深究,而不是写进文档)。重跑 sync 后 13 项全部装上,`dsh-open-in-vscode@0.1.6` 已就位,后续 sync 为 `no changes`。devbox 的 `git fetch`(HTTPS)亦正常。
+### 环境记录:local package 的 `lib/` 曾在 devbox 部署面缺失
+
+现象:DSH 启动报 `ERR_MODULE_NOT_FOUND: .../dsh-sidebar-session-provider-icon/lib/index.js`,`dsh-worktree-session` 同样缺 `lib/`,而 sync 却报告 `no changes`。
+
+成因是环境而非 sync 逻辑:首轮部署时(15:41)源码尚未构建出 `lib/`,pnpm 把当时的目录内容装进了 profile;随后 `lib/` 才在 16:47 构建出来。由于 pnpm 对 `file:` 依赖按目录整体缓存,后续 install 认为该 package 已是最新,不再刷新那份陈旧副本——被中断的首轮部署因此留下了一个"装过但内容不全"的中间态。
+
+处置:删除 profile 中该 package 目录后重跑 `pnpm install`,pnpm 重新从源码复制,`lib/` 即就位。两个 TS package 修复后 DSH 启动零 `ERR_MODULE_NOT_FOUND`,13 个 plugin 全部加载,GUI 返回 200。
+
+注:`dsh-subscriptions-sandbox-shim` 没有 `lib/` 是**设计如此**(其 `main` 指向 `./src/index.js`,无 build 脚本),不属于本问题。
+
+已验证 sync 自身无此缺陷:在 Mac 上以全新 `DSH_HOME` 跑一次完整 sync,两个 TS package 的 `lib/` 均正确部署。故不改代码。
 
 ## 5. 收尾
 
