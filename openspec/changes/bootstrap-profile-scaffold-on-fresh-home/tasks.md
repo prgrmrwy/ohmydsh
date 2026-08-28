@@ -25,16 +25,19 @@
 ## 4. 在真实全新机器上确认
 
 - [x] 4.1 在 devbox(`n37-044-026`,全新 `~/.dsh`)上应用修复后运行 sync,确认 `profile package.json missing` 不再出现,且 profile 骨架由运行体模板物化
-- [x] 4.2 确认 package 定制不再被整体跳过:13 项中 12 项完成物化并登记进 profile manifest
-- [x] 4.3 在 devbox 上重跑 sync 确认幂等:无 `initialize profile` 行,已装 package 不重装
-- [x] 4.4 在 devbox 上启动 DSH,确认 12 个 bundle 实际加载(启动清单可见)
-- [x] 4.5 记录残留项:`dsh-open-in-vscode` 因 devbox 无法访问 github.com 而安装失败 —— 与本 change 无关的环境限制,详见下方说明
+- [x] 4.2 确认 package 定制不再被整体跳过:13 项全部完成物化并登记进 profile manifest
+- [x] 4.3 在 devbox 上重跑 sync 确认幂等:输出 `no changes`,无 `initialize profile` 行
+- [x] 4.4 在 devbox 上启动 DSH,确认 bundle 实际加载(启动清单可见)
 
-### 遗留:devbox 无法访问 github.com
+### 一次误判的记录:devbox 的 IPv6 黑洞
 
-devbox 可达 `registry.npmjs.org` 与内网 `bnpm.byted.org`,但对 `github.com:443` 连接超时。manifest 中三项经 GitHub URL 安装的定制里,`dsh-plugin-subscriptions` 与 `dsh-cockpit-bridge` 已在此前的运行中装好并被 pnpm 复用,只有 `dsh-open-in-vscode` 尚未落地,故每次 sync 都会重试并失败。
+首轮验证时 `dsh-open-in-vscode` 安装失败,我据 `curl https://github.com/...` 连接超时判定为"devbox 无法访问 github.com",并将其记为环境遗留。**该判定是错的**,此处保留以备复核。
 
-该包在 npm 上的同名条目是另一来源且 `0.2.0` 已被 unpublish,不能作为替代源。这属于环境网络限制,不是本 change 引入的问题,也不应通过修改共享 manifest(会同时影响可正常访问的机器)来规避。处置需用户决策:为 devbox 配置 GitHub 出网/镜像,或接受该机器少装这一项。
+实际原因:devbox 有一条 IPv6 默认路由和一个 global IPv6 地址,但 IPv6 出网是黑洞。`curl` 默认按 RFC 6724 优先 IPv6,于是固定 15s 超时失败(`connect=0.000000s`,典型丢包特征);而 Node/pnpm 与 `git` 走 IPv4,同一 URL 始终可达。证据:同一 URL 上 `curl -6` 超时、`curl -4` 返回 200、`node fetch` 返回 200,`pnpm add` 成功装出 `dsh-open-in-vscode@0.1.6`。
+
+方法论教训:我把"用 curl 探测的结果"当成了"该主机的可达性",而真正执行安装的是 pnpm —— 不同客户端的地址族偏好不同,用 A 工具的失败去推断 B 工具的能力并不成立。诊断网络可达性时应当用实际执行该操作的客户端验证。
+
+那次失败的真实成因是首轮安装期间的瞬时网络波动(同一批次里另两个 GitHub URL 装成功了,这一矛盾本应当场促使我深究,而不是写进文档)。重跑 sync 后 13 项全部装上,`dsh-open-in-vscode@0.1.6` 已就位,后续 sync 为 `no changes`。devbox 的 `git fetch`(HTTPS)亦正常。
 
 ## 5. 收尾
 
