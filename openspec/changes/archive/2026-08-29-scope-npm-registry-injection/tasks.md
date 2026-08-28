@@ -33,10 +33,10 @@
 - [x] 4.5 `dsh restart` 后在 agent bash 中于**仓库外目录**（如 `/tmp`）执行 `npm config get registry`，确认得到 `~/.npmrc` 的内网源
 - [x] 4.6 同上环境确认 `npm_config_engine_strict` 已不存在
 - [x] 4.7 逃生门验证：`npm_config_registry=https://example.test/ dsh restart` 后在 agent bash 中确认得到 `https://example.test/`
-- [ ] 4.8 在 agent bash 中于内网仓库执行一次原本报 404 的 pnpm/rush 拉包，确认无需 `env -u` 即可成功（原始问题闭环）
+- [x] 4.8 在 agent bash 中于内网仓库执行一次原本报 404 的 pnpm/rush 拉包，确认无需 `env -u` 即可成功（原始问题闭环）
 
 ## 5. 收尾
 
 - [x] 5.1 若实现过程中发现 spec 与实现不一致，先更新 `openspec/changes/scope-npm-registry-injection/specs/` 再改代码
 - [x] 5.2 运行 `openspec validate scope-npm-registry-injection --strict`
-- [ ] 5.3 归档 change（`openspec archive`），确认 `openspec/specs/launcher-npm-environment/spec.md` 已反映最终行为
+- [x] 5.3 归档 change（`openspec archive`），确认 `openspec/specs/launcher-npm-environment/spec.md` 已反映最终行为
