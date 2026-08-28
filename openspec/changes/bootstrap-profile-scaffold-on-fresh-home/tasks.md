@@ -24,10 +24,17 @@
 
 ## 4. 在真实全新机器上确认
 
-- [x] 4.1 在 devbox 上拉取修复后执行 `dsh build`,确认一次跑通且无失败
-- [x] 4.2 确认 devbox profile 的 bundle 列表与 manifest 一致
-- [x] 4.3 在 devbox 上重跑 `dsh build` 确认幂等
-- [x] 4.4 在 devbox 上启动 DSH,确认插件实际加载
+- [x] 4.1 在 devbox(`n37-044-026`,全新 `~/.dsh`)上应用修复后运行 sync,确认 `profile package.json missing` 不再出现,且 profile 骨架由运行体模板物化
+- [x] 4.2 确认 package 定制不再被整体跳过:13 项中 12 项完成物化并登记进 profile manifest
+- [x] 4.3 在 devbox 上重跑 sync 确认幂等:无 `initialize profile` 行,已装 package 不重装
+- [x] 4.4 在 devbox 上启动 DSH,确认 12 个 bundle 实际加载(启动清单可见)
+- [x] 4.5 记录残留项:`dsh-open-in-vscode` 因 devbox 无法访问 github.com 而安装失败 —— 与本 change 无关的环境限制,详见下方说明
+
+### 遗留:devbox 无法访问 github.com
+
+devbox 可达 `registry.npmjs.org` 与内网 `bnpm.byted.org`,但对 `github.com:443` 连接超时。manifest 中三项经 GitHub URL 安装的定制里,`dsh-plugin-subscriptions` 与 `dsh-cockpit-bridge` 已在此前的运行中装好并被 pnpm 复用,只有 `dsh-open-in-vscode` 尚未落地,故每次 sync 都会重试并失败。
+
+该包在 npm 上的同名条目是另一来源且 `0.2.0` 已被 unpublish,不能作为替代源。这属于环境网络限制,不是本 change 引入的问题,也不应通过修改共享 manifest(会同时影响可正常访问的机器)来规避。处置需用户决策:为 devbox 配置 GitHub 出网/镜像,或接受该机器少装这一项。
 
 ## 5. 收尾
 
