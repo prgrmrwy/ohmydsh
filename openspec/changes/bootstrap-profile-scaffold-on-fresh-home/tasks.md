@@ -37,6 +37,27 @@ devbox 访问 `github.com:443` **间歇性**超时:实测 `curl -4` 8 次仅 2 �
 
 后果与处置:manifest 中三项经 GitHub URL 安装的定制在网络窗口内可装上,失败时重跑 sync 即可。`dsh-open-in-vscode@0.1.6` 现已就位,13 项全部物化,sync 为 `no changes`,`git fetch`(HTTPS)正常。
 
+## 6. 部署面完整性核验(由 `lib/` 缺失问题引出的根因修复)
+
+- [x] 6.1 确定性复现:删除**已部署副本**的 `lib/` 后重跑 sync,得到 `up-to-date` / `no changes`,证明这是 sync 的真实缺陷而非纯环境问题
+- [x] 6.2 确认盲区覆盖 `remote` 与顶层 `dependencies`,不只 `local`(remote 更弱:没有内容账本)
+- [x] 6.3 新增 `declaredRuntimeFiles()`:从 `main`/`exports`/`dsh.bundle.patch` 推导运行时文件;条件映射按 Node 的 **first-match** 解析而非取并集
+- [x] 6.4 在真实 profile 的 175 个包上实测误报数 = 0(取并集的写法会误伤 `@standard-schema/spec`、`@upsetjs/venn.js`)
+- [x] 6.5 两级修复:先普通 re-add;仅当安装被证明可用却仍未补齐时,才隔离旧目录重试,失败即回滚复原
+- [x] 6.6 移除"重装前 rm -rf"的写法 —— 它会把「残缺」变成「消失」,在本 bug 主场景(安装被中断)上是倒退
+- [x] 6.7 首次安装亦核验:CLI 退出码只证明安装跑过,不证明产物到位
+- [x] 6.8 源头自身残缺者按 manifest 身份记账,fail closed 且不再每次重装;身份变化即自动重试
+- [x] 6.9 新增 `tests/sync-deployment-integrity.test.mjs`(5 条属性);修正两处夹具:假 CLI 此前只写 manifest 不写其声明的 `cordis.patch.yml`
+- [x] 6.10 `npm test` 62 passed、`check:artifacts` 通过、真实 profile sync 为 `no changes`
+- [x] 6.11 devbox 端到端验证:复刻原始故障(删 `lib/`)→ sync 自动检测并修复 → 幂等 → DSH 启动零 `ERR_MODULE_NOT_FOUND`、14 个 plugin 加载、GUI 200
+- [x] 6.12 在一次真实的网络失败中验证安全不变量:部署副本原样保留、未被删除、无隔离目录残留
+
+### 一次被独立审计推翻的中间实现
+
+首版修复在重装**之前** `rm -rf` 已部署目录。独立审计(子 agent)复现出:当修复安装失败时,该写法会把原本「残缺但存在」的 package 变成「完全消失」,并连带把 profile 的 `bundles` 清空 —— 在本 bug 的主场景上反而是严格倒退,且违反本文件既有注释所声明的不变量(失败必须保留 last-known-good)。审计同时指出条件映射取并集会产生 2 例真实误报,以及夹具不真实导致的幂等回归。
+
+三条 P0 均已修正并各自补上回归测试。教训:对「修复路径」本身也要问一句"失败时会发生什么" —— 我当时只验证了成功路径。
+
 ### 环境记录:local package 的 `lib/` 曾在 devbox 部署面缺失
 
 现象:DSH 启动报 `ERR_MODULE_NOT_FOUND: .../dsh-sidebar-session-provider-icon/lib/index.js`,`dsh-worktree-session` 同样缺 `lib/`,而 sync 却报告 `no changes`。
