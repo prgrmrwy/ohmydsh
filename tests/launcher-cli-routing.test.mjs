@@ -32,13 +32,13 @@ async function sandbox() {
   const stub = path.join(dir, 'cli-stub.mjs')
   await writeFile(stub, `for (const a of process.argv.slice(2)) console.log('CLI_ARG:' + a)\n`)
 
-  // 启动器:把真实 npx 启动替换成回显,其余逻辑保持原样。
+  // 启动器:把真实 server 启动替换成回显,其余逻辑保持原样。
   const src = await import('node:fs/promises').then((fs) => fs.readFile(path.join(ROOT, 'bin/dsh'), 'utf8'))
   const patched = src.replace(
-    /nohup npx -y "@deepseek-ai\/dsh@\$VER" web --port "\$PORT" --no-open \$\{PASSTHRU\[@\]\+"\$\{PASSTHRU\[@\]\}"\} >>"\$DSH_HOME\/dsh\.log" 2>&1 &/,
+    /nohup "\$\{env_args\[@\]\}" node "\$server_bin" web --port "\$PORT" --no-open \$\{PASSTHRU\[@\]\+"\$\{PASSTHRU\[@\]\}"\} >>"\$DSH_HOME\/dsh\.log" 2>&1 &/,
     'for a in web --port "$PORT" --no-open ${PASSTHRU[@]+"${PASSTHRU[@]}"}; do echo "WEB_ARG:$a"; done; exit 0',
   )
-  assert.notEqual(patched, src, 'start_server 的 npx 调用未被替换,测试桩与实现已漂移')
+  assert.notEqual(patched, src, 'start_server 的 server 启动调用未被替换,测试桩与实现已漂移')
   const bin = path.join(dir, 'bin/dsh')
   await writeFile(bin, patched)
   await chmod(bin, 0o755)
@@ -149,7 +149,12 @@ test('官方 web 参数 --host/--trusted-host 仍原样透传', async (t) => {
 
 test('前台与后台官方启动路径都强制 --no-open,保证只有启动器负责 UI', async () => {
   const src = await readFile(path.join(ROOT, 'bin/dsh'), 'utf8')
-  assert.match(src, /npx -y "@deepseek-ai\/dsh@\$VER" web --port "\$PORT" --no-open[^\n]* &/)
-  assert.match(src, /nohup npx -y "@deepseek-ai\/dsh@\$VER" web --port "\$PORT" --no-open[^\n]* >>"\$DSH_HOME\/dsh\.log" 2>&1 &/)
-  assert.doesNotMatch(src, /(?:^|\n)\s*(?:nohup )?npx -y "@deepseek-ai\/dsh@\$VER" web --port "\$PORT" (?!--no-open)/)
+  assert.match(src, /"\$\{env_args\[@\]\}" node "\$server_bin" web --port "\$PORT" --no-open[^\n]* &/)
+  assert.match(src, /nohup "\$\{env_args\[@\]\}" node "\$server_bin" web --port "\$PORT" --no-open[^\n]* >>"\$DSH_HOME\/dsh\.log" 2>&1 &/)
+  assert.doesNotMatch(src, /(?:^|\n)\s*(?:nohup )?"\$\{env_args\[@\]\}" node "\$server_bin" web --port "\$PORT" (?!--no-open)/)
+})
+
+test('server 不再经 npx 拉起:npx 会把 npm_config_* 烘焙给长期进程', async () => {
+  const src = await readFile(path.join(ROOT, 'bin/dsh'), 'utf8')
+  assert.doesNotMatch(src, /npx -y "@deepseek-ai\/dsh@\$VER" web/, 'server 启动必须走 node 直连,否则 npm 环境会泄漏给 agent')
 })
