@@ -74,4 +74,4 @@ devbox 访问 `github.com:443` **间歇性**超时:实测 `curl -4` 8 次仅 2 �
 
 - [x] 5.1 确认 delta 需求与最终行为一致
 - [x] 5.2 运行 `openspec validate --strict`
-- [ ] 5.3 实施与验证完成后归档该 change
+- [x] 5.3 实施与验证完成后归档该 change
