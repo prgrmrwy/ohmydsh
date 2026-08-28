@@ -48,23 +48,56 @@ if [[ -f "$REPO/.env.local" ]]; then
   set +a
 fi
 
+# Snapshot the user's explicit registry override before this launcher runs any
+# npm operation of its own. bin/dsh is a bash script invoked straight from the
+# user's shell, so a value visible at this point normally can only come from
+# the user — inline env, an exported shell var, or .env.local (all deliberate).
+# npm/npx bake npm_config_* only into processes they spawn, never into their
+# caller. That is what lets start_server tell "user intent" apart from "npm
+# exec baked it in" when it strips the inherited npm environment (design D1).
+#
+# The exception is the launcher itself being run by a package manager
+# (`npm run dsh`, `npx ohmydsh`, …): then the entry environment is already
+# baked and the value is NOT user intent. npm sets npm_command for exactly
+# those invocations and never for a plain shell call, so it is a reliable
+# witness. Per spec, a source we cannot attribute to the user must be treated
+# as implicit and stripped — never passed off as intent.
+if [[ -n "${npm_command:-}" ]]; then
+  DSH_USER_REGISTRY=""
+else
+  DSH_USER_REGISTRY="${npm_config_registry:-${NPM_CONFIG_REGISTRY:-}}"
+fi
+
 DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 PROFILE="${DSH_PROFILE:-web}"
 PROFILE_PKG="$DSH_HOME/profiles/$PROFILE/package.json"
 STARTUP_LOG="$DSH_HOME/dsh-startup.log"
 
-# Repo default registry: the committed repo .npmrc wins for every child
-# npm/npx process, overriding user-level ~/.npmrc, so version detection
-# (check-update.mjs → npmjs) and installs use the same source. The repo and
-# its lockfiles must not depend on internal mirrors. Explicit
-# npm_config_registry / NPM_CONFIG_REGISTRY / .env.local still take
-# precedence. NB: npm 11 honors the lowercase npm_config_* env form only.
+# Repo default registry: the committed repo .npmrc is the source for this
+# launcher's own npm work, so version detection (check-update.mjs → npmjs) and
+# installs use the same source. The repo and its lockfiles must not depend on
+# internal mirrors. Explicit npm_config_registry / NPM_CONFIG_REGISTRY /
+# .env.local still take precedence.
+#
+# This value is NOT exported: an exported npm_config_registry propagates down
+# the whole process tree (launcher → DSH server → agent shells) and, because
+# env beats every .npmrc, would silently retarget unrelated npm/pnpm/rush work
+# in other repositories. Injection is per-call via with_repo_registry instead
+# (design D1). NB: npm 11 honors the lowercase npm_config_* env form only.
+REPO_REGISTRY=""
 if [[ -f "$REPO/.npmrc" ]]; then
   REPO_REGISTRY="$(sed -n 's/^[[:space:]]*registry[[:space:]]*=[[:space:]]*"\{0,1\}\([^"[:space:]]*\)"\{0,1\}[[:space:]]*/\1/p' "$REPO/.npmrc" | head -1)"
-  if [[ -n "$REPO_REGISTRY" && -z "${npm_config_registry:-}" && -z "${NPM_CONFIG_REGISTRY:-}" ]]; then
-    export npm_config_registry="$REPO_REGISTRY"
-  fi
 fi
+
+# Run one command with the repo registry applied, scoped to that command only.
+# A user-supplied override wins and is left untouched.
+with_repo_registry() {
+  if [[ -n "$REPO_REGISTRY" && -z "$DSH_USER_REGISTRY" ]]; then
+    npm_config_registry="$REPO_REGISTRY" "$@"
+  else
+    "$@"
+  fi
+}
 
 # LAN serving switch: DSH_LAN env (inline or .env.local) beats dsh.yaml web.lan.
 # When on, sync renders a 0.0.0.0 webserver bind and the launcher prints the LAN URL.
@@ -139,7 +172,8 @@ if is_official_cli_invocation "$@"; then
     echo "error: dshVersion missing in $REPO/dsh.yaml" >&2
     exit 1
   fi
-  DSH_CLI_VERSION="$CLI_VER" exec node "$REPO/scripts/dsh-cli.mjs" "$@"
+  export DSH_CLI_VERSION="$CLI_VER"
+  with_repo_registry exec node "$REPO/scripts/dsh-cli.mjs" "$@"
 fi
 
 while [[ $# -gt 0 ]]; do
@@ -178,7 +212,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 do_build() {
-  node "$REPO/scripts/sync.mjs"
+  with_repo_registry node "$REPO/scripts/sync.mjs"
 }
 
 # UI 对应的进程名:显式 DSH_OPEN_APP 优先,否则自动探测的 PWA;无 → 空。
@@ -464,8 +498,27 @@ open_ui() {
   fi
 }
 
+# npm/npx bake their resolved config into a batch of npm_* variables for every
+# process they spawn. The DSH server is long-lived and hands its environment to
+# every agent shell, so anything inherited here silently retargets the user's
+# npm/pnpm/rush work in unrelated repositories — env outranks every .npmrc.
+# Resolving the CLI and running it under node (see start_server) means npm never
+# spawns the server, so these are not generated in the first place; stripping
+# them is defence in depth for the case where the launcher itself was started
+# from `npm run` and inherited a polluted environment.
+#
+# A registry the user set explicitly is restored afterwards by start_server:
+# that is intent, not inherited noise (design D1/D3).
+server_env_strip_args() {
+  local name
+  while IFS= read -r name; do
+    [[ -n "$name" ]] && printf '%s\0' "-u$name"
+  done < <(compgen -e | grep -E '^npm_(config_|lifecycle_|package_)|^npm_(command|execpath|node_execpath)$' || true)
+}
+
 start_server() {
-  local VER pid
+  local VER pid server_bin resolve_out
+  local -a env_args=() strip=()
   # 官方 dsh-web-app 默认也会打开浏览器。始终给官方 CLI 传 --no-open，
   # 确保本启动器的 open_ui 是唯一 UI opener（否则一次 dsh 会打开两个 tab）。
   VER="$(dsh_version)"
@@ -474,9 +527,32 @@ start_server() {
     exit 1
   fi
   mkdir -p "$DSH_HOME"
+
+  # Resolve the CLI entry (DSH_BIN → npx cache → pnpm dir → install channels).
+  # Resolution may install, so it runs with the repo registry applied; the
+  # server itself is then launched with a clean environment.
+  #
+  # A cold start installs the CLI first, and those installers stream progress
+  # onto this same stdout, so read the DSH_SERVER_BIN= marker line instead of
+  # treating the whole capture as a path.
+  if ! resolve_out="$(DSH_CLI_VERSION="$VER" with_repo_registry node "$REPO/scripts/dsh-server-bin.mjs")"; then
+    echo "error: 无法解析 DSH CLI(@deepseek-ai/dsh@$VER)" >&2
+    exit 1
+  fi
+  server_bin="$(printf '%s\n' "$resolve_out" | sed -n 's/^DSH_SERVER_BIN=//p' | tail -1)"
+  if [[ -z "$server_bin" ]]; then
+    echo "error: DSH CLI 解析未返回 bin 路径(@deepseek-ai/dsh@$VER)" >&2
+    exit 1
+  fi
+
+  while IFS= read -r -d '' arg; do strip+=("$arg"); done < <(server_env_strip_args)
+  env_args=(env "${strip[@]+"${strip[@]}"}")
+  # Re-apply the user's own override on top of the cleaned environment.
+  [[ -n "$DSH_USER_REGISTRY" ]] && env_args+=("npm_config_registry=$DSH_USER_REGISTRY")
+
   record_startup "$VER"
   if [[ $FOREGROUND -eq 1 ]]; then
-    npx -y "@deepseek-ai/dsh@$VER" web --port "$PORT" --no-open ${PASSTHRU[@]+"${PASSTHRU[@]}"} &
+    "${env_args[@]}" node "$server_bin" web --port "$PORT" --no-open ${PASSTHRU[@]+"${PASSTHRU[@]}"} &
     pid=$!
     trap 'kill -TERM "${pid:-}" 2>/dev/null || true' INT TERM
     if wait_for_port "$PORT" 60 "$pid"; then
@@ -494,7 +570,7 @@ start_server() {
     fi
     wait "$pid" || echo "dsh stopped"
   else
-    nohup npx -y "@deepseek-ai/dsh@$VER" web --port "$PORT" --no-open ${PASSTHRU[@]+"${PASSTHRU[@]}"} >>"$DSH_HOME/dsh.log" 2>&1 &
+    nohup "${env_args[@]}" node "$server_bin" web --port "$PORT" --no-open ${PASSTHRU[@]+"${PASSTHRU[@]}"} >>"$DSH_HOME/dsh.log" 2>&1 &
     pid=$!
     disown 2>/dev/null || true
     if wait_for_port "$PORT" 60 "$pid"; then
@@ -522,7 +598,7 @@ if [[ $HISTORY -eq 1 ]]; then
   exit 0
 fi
 if [[ $RESET -eq 1 ]]; then
-  node "$REPO/scripts/sync.mjs" --reset
+  with_repo_registry node "$REPO/scripts/sync.mjs" --reset
   exit 0
 fi
 
@@ -563,14 +639,14 @@ record_autoup_event() {
 do_autoupgrade() {
   local rewrite_out
   echo "检测到新版本 $AU_CURRENT -> $AU_LATEST (channel=$AU_CHANNEL),开始自动升级..."
-  rewrite_out="$(node "$REPO/scripts/check-update.mjs" --rewrite-to "$AU_LATEST" 2>&1 || true)"
+  rewrite_out="$(with_repo_registry node "$REPO/scripts/check-update.mjs" --rewrite-to "$AU_LATEST" 2>&1 || true)"
   if [[ "$rewrite_out" != *"wrote "* ]]; then
     echo "error: 自动改写 dsh.yaml 失败:" >&2
     echo "$rewrite_out" >&2
     exit 1
   fi
   printf '%s\n' "$rewrite_out" | sed -n 's/^rewrite: /  /p'
-  if ! node "$REPO/scripts/sync.mjs"; then
+  if ! with_repo_registry node "$REPO/scripts/sync.mjs"; then
     echo "error: 升级后 sync 失败,从 dsh.yaml.bak 回滚 dsh.yaml" >&2
     cp "$REPO/dsh.yaml.bak" "$REPO/dsh.yaml"
     rm -f "$REPO/dsh.yaml.bak"
@@ -589,7 +665,7 @@ do_autoupgrade() {
 # 检测 + 分支;始终返回 0(继续),升级链内部失败会直接 exit。
 autoupdate() {
   local out
-  out="$(node "$REPO/scripts/check-update.mjs" 2>/dev/null || true)"
+  out="$(with_repo_registry node "$REPO/scripts/check-update.mjs" 2>/dev/null || true)"
   if ! autoup_parse "$out"; then
     # 脚本本身不可用(空输出/非 JSON):fail-open,但显式警告,不静默吞掉
     echo "warn: 版本检测不可用($AU_ERROR),按当前版本继续"
@@ -618,7 +694,7 @@ autoupdate() {
 }
 
 if [[ $PLUGIN_UPDATE -eq 1 ]]; then
-  node "$REPO/scripts/plugin-update.mjs" ${DRY_RUN:+--dry-run} ${YES_FLAG:+--yes}
+  with_repo_registry node "$REPO/scripts/plugin-update.mjs" ${DRY_RUN:+--dry-run} ${YES_FLAG:+--yes}
   exit $?
 fi
 

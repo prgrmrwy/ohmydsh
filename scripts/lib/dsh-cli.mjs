@@ -38,6 +38,33 @@ export function dshBinOf(dir) {
   return path.join(dir, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
 }
 
+/**
+ * 同一安装目录内 dsh CLI 的 `.bin` 符号链接路径。
+ *
+ * 与 dshBinOf 指向同一个 lib/bin.js(node 可直接执行符号链接),区别只在
+ * argv 呈现:长期运行的 web server 必须以这个形式拉起,因为
+ * scripts/lib/dsh-runtime.sh 的 is_dsh_web_pid() 是 dsh stop/restart 在发
+ * 信号前的 fail-closed 归属证明,只认以 `node_modules/.bin/dsh web` 结尾的
+ * 形式(与 `npm exec …` 历史形式)。用 lib/bin.js 拉起会让启动器停不掉自己
+ * 的 server。一次性的 CLI 调用不受此约束,仍可用 dshBinOf。
+ */
+export function dshServerBinOf(dir) {
+  return path.join(dir, 'node_modules', '.bin', 'dsh')
+}
+
+/**
+ * 把 resolveCliBin() 解析出的 lib/bin.js 路径映射为同一安装目录内的
+ * `.bin/dsh` 符号链接路径。DSH_BIN 显式指定时原样返回(用户自负其责)。
+ * @param {{kind: string, bin: string}} resolved
+ * @returns {string}
+ */
+export function serverBinFrom(resolved) {
+  if (resolved.kind === 'env') return resolved.bin
+  // <dir>/node_modules/@deepseek-ai/dsh/lib/bin.js → <dir>/node_modules
+  const nodeModules = path.resolve(path.dirname(resolved.bin), '..', '..', '..')
+  return path.join(nodeModules, '.bin', 'dsh')
+}
+
 /** npx 缓存内目标版本 CLI 的 bin 路径。 */
 export function npxBinPathOf(spec, npxCacheDir) {
   return path.join(npxCacheDir, computeNpxCacheKey([spec]), dshBinOf('.'))
