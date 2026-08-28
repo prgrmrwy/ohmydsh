@@ -1,9 +1,9 @@
-import { realpath } from 'node:fs/promises'
+import { readdir, realpath } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
-import type { CleanResult, OperationRecord, PromoteResult, StatusResult } from '../wire.js'
+import type { CleanResult, OperationRecord, PromoteResult, RepoCleanIgnored, RepoCleanRefusal, RepoCleanResult, StatusResult } from '../wire.js'
 import { bindingOf } from '../wire.js'
 import { promotePnpmDependencies, promoteDependencies } from './dependencies.js'
-import { WsError } from './errors.js'
+import { WsError, messageOf } from './errors.js'
 import { withMkdirLock } from './fs.js'
 import { createGitClient, discoverRepo, listWorktrees, worktreeStatus, type GitClient } from './git.js'
 import { findBySourceSession, loadOperation, operationFile, saveOperation } from './operation.js'
@@ -130,4 +130,99 @@ export async function wsClean(targetInput: string | MaintenanceTarget, options: 
     })
     return { dryRun: false, operationId: operation.operationId, worktreePath: target, taskBranch: operation.taskBranch, actions, cleaned: true }
   }, { timeoutMs: 30_000, staleMs: 30 * 60_000 })
+}
+
+/** Deterministic operation-id list for one repository, oldest file name first. */
+async function listOperationIds(gitCommonDir: string): Promise<readonly string[]> {
+  let names: string[]
+  try { names = await readdir(join(gitCommonDir, 'ws', 'operations')) } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw error
+  }
+  return names.filter(name => name.endsWith('.json')).sort().map(name => name.slice(0, -'.json'.length))
+}
+
+export interface RepoCleanOptions {
+  /** Source Sessions proven archived by the trusted Host; required, never inferred here. */
+  archivedSessionIds: readonly string[]
+  /** Native cwd of every live DSH Session, forwarded to each single-operation gate. */
+  activePaths: readonly string[]
+  /** Source Sessions currently protected by a live Agent/Session. */
+  activeBoundSessionIds?: readonly string[]
+  dryRun?: boolean
+  cwd?: string
+  git?: GitClient
+}
+
+/**
+ * Scan one repository from its main checkout and clean every Worktree Session
+ * whose source Session is archived and whose worktree passes the existing
+ * single-operation safety gates.
+ *
+ * Candidates are independent: each one runs through `wsClean`, which takes the
+ * repository lock and re-validates from disk, so a dirty, active, in-flight,
+ * unmerged, malformed or unsupported record is reported and skipped without
+ * blocking the rest. Nothing here deletes remote branches, shared caches,
+ * Session history, or already-cleaned tombstones.
+ */
+export async function wsCleanRepository(repoPath: string, options: RepoCleanOptions): Promise<RepoCleanResult> {
+  const git = options.git ?? createGitClient()
+  const repo = await discoverRepo(repoPath, git)
+  const cleaned: CleanResult[] = []
+  const refused: RepoCleanRefusal[] = []
+  const ignored: RepoCleanIgnored[] = []
+  const archived = new Set(options.archivedSessionIds)
+  const operationIds = await listOperationIds(repo.gitCommonDir)
+
+  for (const operationId of operationIds) {
+    let operation: OperationRecord | undefined
+    try {
+      operation = await loadOperation(repo.gitCommonDir, operationId)
+    } catch (error) {
+      // Retired schema versions and corrupt metadata are reported, never fixed
+      // or deleted here: the operator decides what to do with the record.
+      refused.push({ operationId, kind: 'unreadable', reason: messageOf(error), ...(error instanceof WsError ? { code: error.code } : {}) })
+      continue
+    }
+    if (operation === undefined) continue
+    const binding = bindingOf(operation)
+    if (binding?.mode !== 'source-session') {
+      refused.push({ operationId, kind: 'unreadable', reason: `Operation ${operationId} has an unsupported or malformed maintenance binding`, code: 'CLEAN_REFUSED', worktreePath: operation.worktreePath, taskBranch: operation.taskBranch })
+      continue
+    }
+    if (binding.state === 'released') {
+      ignored.push({ operationId, lifecycle: 'released', worktreePath: operation.worktreePath, taskBranch: operation.taskBranch })
+      continue
+    }
+    if (operation.phase === 'cleaned' || binding.state === 'cleaned' || binding.state === 'cleaned-archived') {
+      ignored.push({ operationId, lifecycle: 'cleaned', worktreePath: operation.worktreePath, taskBranch: operation.taskBranch })
+      continue
+    }
+    const candidate = { operationId, sourceSessionId: binding.sourceSessionId, worktreePath: operation.worktreePath, taskBranch: operation.taskBranch }
+    if (!archived.has(binding.sourceSessionId)) {
+      refused.push({ ...candidate, kind: 'not-archived', reason: `Source Session ${binding.sourceSessionId} is not archived; archive it before cleaning its Worktree Session` })
+      continue
+    }
+    try {
+      cleaned.push(await wsClean(operation.worktreePath, {
+        ...(options.dryRun === undefined ? {} : { dryRun: options.dryRun }),
+        requireActivePaths: true,
+        activePaths: options.activePaths,
+        ...(options.activeBoundSessionIds === undefined ? {} : { activeBoundSessionIds: options.activeBoundSessionIds }),
+        ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+        git,
+      }))
+    } catch (error) {
+      refused.push({ ...candidate, kind: 'refused', reason: messageOf(error), ...(error instanceof WsError ? { code: error.code } : {}) })
+    }
+  }
+
+  return {
+    dryRun: options.dryRun === true,
+    repoRoot: repo.repoRoot,
+    scanned: operationIds.length,
+    cleaned,
+    refused,
+    ignored,
+  }
 }

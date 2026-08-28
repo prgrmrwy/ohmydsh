@@ -1,16 +1,16 @@
 ---
 name: ws
-description: Inspect, promote, or safely clean a verified ohmydsh Worktree Session binding or operation. Generic Git worktree, lean/mutable, promote, status, or clean requests are not sufficient routing evidence.
-whenToUse: The calling Session has a valid Worktree Session binding, or an explicit absolute path resolves to valid Worktree Session operation metadata. An explicit /ws request still requires ownership validation before state changes.
+description: Inspect or promote a verified ohmydsh Worktree Session binding, or clean this repository's archived Worktree Sessions from its main checkout. Generic Git worktree, lean/mutable, promote, status, or clean requests are not sufficient routing evidence.
+whenToUse: The calling Session has a valid Worktree Session binding, the calling Session sits at the main checkout of a repository that uses Worktree Sessions, or an explicit absolute path resolves to valid Worktree Session operation metadata. An explicit /ws request still requires ownership validation before state changes.
 ---
 
 # Worktree Session operations
 
 ## Ownership boundary
 
-- This skill owns only operations proven by a valid Worktree Session binding for the calling Session, or by an explicit absolute path that resolves to valid operation metadata.
+- This skill owns only operations proven by a valid Worktree Session binding for the calling Session, by the calling Session's own repository main checkout (cleanup), or by an explicit absolute path that resolves to valid operation metadata.
 - A directory under `.worktrees`, a registered Git worktree, a `ws/*` branch, or the words `lean`, `mutable`, `promote`, `status`, or `clean` do not by themselves prove ownership.
-- Before `promote` or `clean`, resolve and validate the exact operation identity, repository root, Git common directory, managed root, binding mode, and lifecycle through the trusted Host path.
+- Before `promote`, resolve and validate the exact operation identity, repository root, Git common directory, managed root, binding mode, and lifecycle through the trusted Host path. `clean` validates the same facts per candidate before removing anything.
 - An explicit `/ws` request selects this command surface but does not waive binding, containment, lifecycle, active-Session, dirty-state, or merge checks.
 - If no valid binding or operation can be proven, allow only read-only diagnostics that cannot mutate Git, dependencies, Session state, or operation metadata; otherwise stop with the exact missing invariant.
 - Never adopt an unknown worktree, synthesize operation metadata, infer ownership from naming, or bypass a refusal with generic Git commands.
@@ -33,8 +33,17 @@ reason to mutate stable runtime context.
 For a schema-v2 bound Session, call the model-visible `ws` tool with
 `action=status` or `action=promote` and omit `path`; the Host resolves the exact
 calling Session binding. Agent calls must not provide `path` or operate on a
-different Session. Use `action=clean` only after reviewing status and a dry run;
-all live Session paths and bindings are protected.
+different Session.
+
+`action=clean` is repository-oriented, not binding-oriented. Run it from an
+ordinary Session whose working directory is the repository main checkout: it
+scans that repository's Worktree Sessions and cleans every candidate whose
+source Session is already archived and whose worktree passes the existing
+safety gates. A Session still bound to a worktree cannot clean itself or its
+peers and is refused with an instruction to switch to the main-checkout
+Session. Review status and `dry_run: true` first; all live Session paths and
+bindings stay protected, and refused candidates are reported with reasons
+instead of being removed.
 
 The shell wrapper has no trustworthy Session-id environment, so use it only with
 an explicit path for operator recovery and diagnostics of schema-v2 operations:
@@ -59,11 +68,15 @@ scripts/ws.sh clean /absolute/worktree/path
 - `status` reports operation/base/task branch, managed root, dependency
   fingerprint/mode, the resolved project type (`npm`/`pnpm`), lifecycle, and
   isolated development `DSH_HOME`; it never prints `.env.local` values.
-- Always run `clean --dry-run` first. Clean refuses the caller's current
+- Always preview with `dry_run: true` (or `clean --dry-run` for the CLI) first.
+  Clean refuses a source Session that is not archived, the caller's current
   worktree, a live/executing source Session bound to it (even though that
   Session's immutable cwd is the repo), dirty state, in-flight operations, and
   branches not proven merged by ordinary Git ancestry. It preserves remote
-  branches and shared caches.
+  branches, shared caches, and already-cleaned tombstones.
+- Repository cleanup is per candidate and best-effort: a refused or unreadable
+  operation is reported with its reason and left untouched, and never blocks
+  other candidates from being evaluated.
 - Never bypass a refusal with force deletion. Preserve/commit useful work and
   establish merge ancestry first.
 
