@@ -37,6 +37,6 @@
 
 ## 5. 收尾
 
-- [ ] 5.1 若实现过程中发现 spec 与实现不一致，先更新 `openspec/changes/scope-npm-registry-injection/specs/` 再改代码
-- [ ] 5.2 运行 `openspec validate scope-npm-registry-injection --strict`
+- [x] 5.1 若实现过程中发现 spec 与实现不一致，先更新 `openspec/changes/scope-npm-registry-injection/specs/` 再改代码
+- [x] 5.2 运行 `openspec validate scope-npm-registry-injection --strict`
 - [ ] 5.3 归档 change（`openspec archive`），确认 `openspec/specs/launcher-npm-environment/spec.md` 已反映最终行为
