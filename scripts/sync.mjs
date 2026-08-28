@@ -338,7 +338,46 @@ function dshCli(args, opts = {}) {
   // 升级链可靠性(see openspec/changes/upgrade-cli-provisioning):解析目标
   // 版本 CLI 的就绪 bin 并 node 直连执行,首次就绪后不再发起新的 npx
   // 进程,避免 libnpmexec 安装锁竞争(ECOMPROMISED)。DSH_BIN 优先保留。
-  return runDshCli(args, { spec: `@deepseek-ai/dsh@${opts.version}`, version: opts.version, dshBinEnv: process.env.DSH_BIN })
+  return runDshCli(args, {
+    spec: `@deepseek-ai/dsh@${opts.version}`,
+    version: opts.version,
+    dshBinEnv: process.env.DSH_BIN,
+    stdio: opts.stdio,
+  })
+}
+
+/**
+ * 全新 `$DSH_HOME` 的 profile 骨架物化。
+ *
+ * 症状:在没有 `~/.dsh` 的机器上首次 `dsh build`,syncPackages/doReset 读不到
+ * `profiles/<name>/package.json` 就 fail(`profile package.json missing`),
+ * 于是全部 package 定制被跳过、启动缺插件 —— sync 假定 profile 已由此前某次
+ * DSH 运行初始化过,但全新机器上并没有这一前置。
+ *
+ * 修法:把这一前置变成 sync 自己的显式步骤,而不是复制一份 profile 模板。
+ * 骨架的真相源是运行体自身(`@deepseek-ai/dsh-app-boot` 的 PROFILE_TEMPLATES /
+ * initProfile:manifest + cordis.patch.yml + pnpm-workspace.yaml)。这里以
+ * `--profile <name> --dump-default-config` 调用目标版本 CLI,只取其"加载
+ * profile 时按需 initProfile"的副作用(不读 user layer,故不会被后续生成的
+ * patch 层内容影响),输出丢弃。
+ *
+ * 语义:
+ * - 幂等 —— manifest 已存在直接返回,不触碰任何既有文件(initProfile 本身也
+ *   从不覆盖已存在的文件);
+ * - fail closed —— 骨架无法物化时报错,让调用方看到真正的首因,而不是随后
+ *   一连串"package 装不上"的次生失败。
+ * @returns {Promise<boolean>} profile manifest 是否已就绪。
+ */
+async function ensureProfileScaffold(manifest) {
+  const profilePkgPath = path.join(PROFILE_DIR, 'package.json')
+  if (existsSync(profilePkgPath)) return true
+  change(`initialize profile ${PROFILE} at ${PROFILE_DIR}`)
+  await mkdir(PROFILE_DIR, { recursive: true })
+  // 副作用调用:输出是整棵默认配置树,对 sync 日志无意义,丢弃。
+  dshCli(['--profile', PROFILE, '--dump-default-config'], { version: manifest.dshVersion, stdio: 'ignore' })
+  if (existsSync(profilePkgPath)) return true
+  fail(`failed to initialize profile ${PROFILE} at ${PROFILE_DIR} (dsh ${manifest.dshVersion} could not create its profile manifest)`)
+  return false
 }
 
 function npmNameOf(item) {
@@ -886,6 +925,8 @@ async function main() {
   const manifest = loadManifest()
   await mkdir(PROFILE_DIR, { recursive: true })
   await migrateLegacyState()
+  // 全新机器上 profile 骨架尚不存在;package 物化与 reset 都以它为前置。
+  await ensureProfileScaffold(manifest)
   if (process.argv.includes('--reset')) {
     await doReset(manifest)
     await syncAgentInstructions(manifest.agentInstructions, { reset: true })

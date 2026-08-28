@@ -113,12 +113,16 @@ export function resolveCliBin({ spec, version, dshBinEnv, npxCacheDir, pnpmCache
 /**
  * 执行一次 dsh CLI 调用:解析 bin 后以 node 直连(env 来源则按原义直接
  * spawn 该命令),退出码 0 返回 true,否则 false。失败不重试安装。
+ * `opts.stdio` 透传给 spawnSync(默认 'inherit'):把 CLI 当作副作用执行
+ * (如用 --dump-default-config 物化 profile 骨架)时传 'ignore',避免把
+ * 整棵配置树打进 sync 日志。
  */
 export function runDshCli(args, opts = {}) {
   const resolved = resolveCliBin(opts)
   if (!resolved) return false
+  const stdio = opts.stdio ?? 'inherit'
   const r = resolved.kind === 'env'
-    ? spawnSync(resolved.bin, args, { stdio: 'inherit' })
-    : spawnSync(process.execPath, [resolved.bin, ...args], { stdio: 'inherit' })
+    ? spawnSync(resolved.bin, args, { stdio })
+    : spawnSync(process.execPath, [resolved.bin, ...args], { stdio })
   return r.status === 0
 }
