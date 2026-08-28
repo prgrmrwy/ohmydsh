@@ -396,6 +396,101 @@ function installedVersion(name) {
 }
 
 /**
+ * Every runtime file a package manifest promises, as package-relative paths.
+ *
+ * Derived from what the loader actually resolves: `main`, the `exports` tree
+ * (any nesting of condition maps / fallback arrays), and `dsh.bundle.patch`
+ * (the composition patch the profile reads). Type declarations are excluded:
+ * a missing `.d.ts` never breaks a running import, so demanding it would turn
+ * a cosmetic gap into a redeploy.
+ *
+ * Conservative by construction — it must never invent a requirement:
+ * - only literal relative specifiers ('./…') are collected; bare specifiers
+ *   and URLs address other packages, not files here;
+ * - wildcard subpaths ('./*') expand per-request and cannot be checked as a
+ *   literal path, so they are skipped;
+ * - `null` targets are exports *blocks*, not files;
+ * - `types` / `typings` conditions are dropped (see above);
+ * - a fallback *array* means "first one that resolves wins", so requiring
+ *   every member would flag a healthy package; it contributes nothing;
+ * - a condition map is resolved **first-match against the conditions this
+ *   loader actually uses**, exactly as Node does — never unioned. Unioning
+ *   would demand the `require` branch of an ESM-only package that merely
+ *   declares one, condemning healthy packages (`@standard-schema/spec`,
+ *   `@upsetjs/venn.js` in this very profile).
+ * Anything unrecognized is ignored rather than guessed at.
+ * @returns {string[]} unique package-relative paths that must exist on disk.
+ */
+/** Import conditions the host loader offers, in Node's resolution order. */
+const RUNTIME_CONDITIONS = ['node', 'import', 'module-sync', 'default']
+
+function declaredRuntimeFiles(pkg) {
+  const found = new Set()
+  const addTarget = (value) => {
+    if (typeof value !== 'string') return
+    if (!value.startsWith('./')) return          // bare specifier / URL: not our file
+    if (value.includes('*')) return              // pattern subpath: no single literal path
+    if (value.endsWith('/')) return              // directory target: not a single file
+    found.add(value.replace(/^\.\//, ''))
+  }
+  // exports values nest arbitrarily: string | null | array of fallbacks | condition map.
+  const walkExports = (node) => {
+    if (node === null || node === undefined) return
+    if (typeof node === 'string') return addTarget(node)
+    if (Array.isArray(node)) return            // fallback list: no single member is required
+    if (typeof node !== 'object') return
+    // First match wins, mirroring Node — stop at the first condition this
+    // runtime would select rather than requiring every branch.
+    for (const condition of RUNTIME_CONDITIONS) {
+      if (condition in node) return walkExports(node[condition])
+    }
+    // No runtime condition applies (types-only / browser-only / custom): the
+    // loader never resolves this entry here, so it requires nothing.
+  }
+  addTarget(typeof pkg?.main === 'string' && pkg.main !== ''
+    ? (pkg.main.startsWith('./') ? pkg.main : `./${pkg.main}`)
+    : undefined)
+  const exports = pkg?.exports
+  if (typeof exports === 'string' || Array.isArray(exports)) walkExports(exports)
+  else if (exports !== null && typeof exports === 'object') {
+    const subpaths = Object.keys(exports).filter((key) => key.startsWith('.'))
+    // Sugar form (`exports` is itself a condition map) vs. subpath map.
+    if (subpaths.length === 0) walkExports(exports)
+    else for (const key of subpaths) walkExports(exports[key])
+  }
+  addTarget(pkg?.dsh?.bundle?.patch)
+  return [...found]
+}
+
+/**
+ * Files a deployed package promises but does not have.
+ *
+ * The freshness checks around this one all reason about *metadata* — the
+ * deployed `package.json`'s version, the source content hash, the recorded
+ * install spec. None of them look at whether the bytes the manifest points at
+ * actually arrived. An install that dies partway (the devbox trigger: a
+ * `pnpm add` transaction interrupted mid-flight) leaves exactly that shape:
+ * a readable `package.json` beside a missing `lib/`, which every metadata
+ * check happily reads as healthy while the loader dies on `import` with
+ * ERR_MODULE_NOT_FOUND.
+ *
+ * `./package.json` is skipped: the manifest was just parsed to get here.
+ * @returns {string[]} missing package-relative paths; empty means healthy.
+ */
+function missingDeployedFiles(name) {
+  const dir = path.join(PROFILE_DIR, 'node_modules', ...name.split('/'))
+  const pkg = readJson(path.join(dir, 'package.json'))
+  if (pkg === undefined) return []   // not installed at all: the version check owns that case
+  // CommonJS-style tolerance: a bare `main` may address a file without its
+  // extension or a directory with an index. Treat a requirement as satisfied
+  // when any of those candidates exists, so legacy layouts are not condemned.
+  const satisfied = (rel) => [rel, `${rel}.js`, `${rel}.mjs`, `${rel}.cjs`, `${rel}.json`, path.join(rel, 'index.js')]
+    .some((candidate) => existsSync(path.join(dir, candidate)))
+  return declaredRuntimeFiles(pkg)
+    .filter((rel) => rel !== 'package.json' && !satisfied(rel))
+}
+
+/**
  * The spec string a remote package was installed from, as recorded in the
  * profile manifest (pnpm stores the tarball/registry URL there). Indexed by
  * package name; the entry at `name` is the one sync actually controls.
@@ -637,6 +732,11 @@ async function syncPackages(manifest, items) {
   const previousLocalHashes = state.localPackageHashes ?? {}
   const previousBuildInputs = state.localPackageBuildInputs ?? {}
   const previousCompatHashes = state.compatDependencyHashes ?? {}
+  // Packages proven incomplete at their source, keyed by the identity that was
+  // proven bad (local content hash / remote spec). Keeping the identity means a
+  // new version or a fixed tarball is retried automatically.
+  const previousUnrepairable = state.unrepairablePackages ?? {}
+  const nextUnrepairable = {}
   const enabledNameSet = new Set(enabledNames)
   // Preserve the last successful ledger for enabled owners across a failed
   // rebuild. Their deployed profile bytes remain intact, so erasing these
@@ -713,8 +813,63 @@ async function syncPackages(manifest, items) {
       && currentlyInstalledFrom !== item.spec
     const compatChanged = compatEntries.some(entry =>
       installedVersion(entry.name) === undefined || previousCompatHashes[entry.name] !== compatHashes[entry.name])
+    // Deployment-side integrity. Every other trigger here compares metadata
+    // (version / source hash / recorded spec) and so cannot see a package that
+    // is installed but incomplete. Checked for local and remote alike: an
+    // interrupted install truncates either one the same way.
+    const missingFiles = current === undefined ? [] : missingDeployedFiles(name)
+    // A package whose *source* cannot satisfy its own manifest (an incomplete
+    // published tarball, e.g. the dsh-cockpit-bridge@0.1.0 incident recorded in
+    // dsh.yaml) is unrepairable by reinstalling. Once proven so for this exact
+    // identity, report it and stop: re-running the install every sync would
+    // churn a network fetch forever without ever converging.
+    // Identity of what was proven incomplete. Must be stable across runs, so it
+    // is derived from the manifest (source hash / declared spec+version) rather
+    // than from the deployed state, which differs between the first install and
+    // later runs. A new version or a re-published tarball changes it and the
+    // package is retried automatically.
+    const repairIdentity = item.source === 'local' ? `local:${localHash}` : `remote:${item.spec}@${item.version}`
     let installed = true
-    if (pinDrift) {
+    if (missingFiles.length > 0 && previousUnrepairable[name] === repairIdentity) {
+      fail(`${name} is incomplete at its source and cannot be repaired by reinstalling (missing ${missingFiles.join(', ')}); pin a fixed version or disable it`)
+      nextUnrepairable[name] = repairIdentity
+      installed = false
+    } else if (missingFiles.length > 0) {
+      change(`incomplete deployment ${name}: missing ${missingFiles.join(', ')}, reinstalling`)
+      // Two stages, ordered so a failure can never destroy a working deployment.
+      // Stage 1 is a plain re-add: cheap, transactional, and enough whenever the
+      // package manager will re-materialize the tree.
+      installed = dshCli(['plugin', '--profile', PROFILE, 'add', ...compatSpecs, spec], { version: manifest.dshVersion })
+      if (!installed) {
+        fail(`failed to repair incomplete deployment of ${name}`)
+      } else if (missingDeployedFiles(name).length > 0) {
+        // Stage 2. pnpm keys a `file:` dependency on the source directory's
+        // identity, so with the manifest already satisfied it re-links the same
+        // truncated tree and stage 1 changes nothing. Evicting the deployed copy
+        // forces a fresh materialization — but only now that stage 1 has proven
+        // the install itself succeeds, so this cannot strand a package that was
+        // merely degraded. Restore the evicted tree if the retry fails.
+        const deployedDir = path.join(PROFILE_DIR, 'node_modules', ...name.split('/'))
+        const quarantine = `${deployedDir}.ohmydsh-recovering`
+        await rm(quarantine, { recursive: true, force: true })
+        await rename(deployedDir, quarantine).catch(() => {})
+        installed = dshCli(['plugin', '--profile', PROFILE, 'add', ...compatSpecs, spec], { version: manifest.dshVersion })
+        const stillMissing = installed ? missingDeployedFiles(name) : []
+        if (!installed || stillMissing.length > 0) {
+          if (!existsSync(deployedDir) && existsSync(quarantine)) {
+            await rename(quarantine, deployedDir).catch(() => {})
+            log(`restored previous deployment of ${name} after failed repair`)
+          }
+          installed = false
+          // Remember the identity so the next run reports instead of retrying.
+          nextUnrepairable[name] = repairIdentity
+          fail(stillMissing.length > 0
+            ? `deployment of ${name} still missing after reinstall: ${stillMissing.join(', ')}`
+            : `failed to repair incomplete deployment of ${name}`)
+        }
+        await rm(quarantine, { recursive: true, force: true })
+      }
+    } else if (pinDrift) {
       change(`spec drift ${name} ${currentlyInstalledFrom} -> ${item.spec}, re-adding`)
       installed = dshCli(['plugin', '--profile', PROFILE, 'add', item.spec], { version: manifest.dshVersion })
     } else if (current !== undefined && item.source === 'remote' && current !== item.version) {
@@ -744,6 +899,20 @@ async function syncPackages(manifest, items) {
     } else {
       log(`package ${name}@${current} up-to-date`)
     }
+    // Post-install verification for every path above, not just the repair
+    // branch: the CLI's exit code reports that the install *ran*, never that
+    // the promised files arrived. A first install of an incomplete publish
+    // would otherwise be recorded as a success and only surface later as a
+    // loader crash. Skipped when the install already failed (that failure is
+    // the first cause and is reported on its own).
+    if (installed && missingFiles.length === 0) {
+      const missingAfterInstall = missingDeployedFiles(name)
+      if (missingAfterInstall.length > 0) {
+        installed = false
+        nextUnrepairable[name] = repairIdentity
+        fail(`${name} installed but is missing ${missingAfterInstall.join(', ')}; its source does not satisfy its own manifest`)
+      }
+    }
     if (installed && localHash !== undefined && buildInputHash !== undefined) {
       nextLocalHashes[name] = localHash
       nextBuildInputs[name] = buildInputHash
@@ -755,6 +924,10 @@ async function syncPackages(manifest, items) {
   state.localPackageBuildInputs = nextBuildInputs
   state.compatDependencyHashes = nextCompatHashes
   state.managedCompatDependencies = nextManagedCompat
+  // Rebuilt from scratch each run: a package that no longer reports missing
+  // files simply stops being listed, so a fixed upstream self-clears.
+  if (Object.keys(nextUnrepairable).length > 0) state.unrepairablePackages = nextUnrepairable
+  else delete state.unrepairablePackages
   await saveState(state)
 
   // normalize bundles: shipped base (non-managed) entries first, then enabled managed in manifest order.
