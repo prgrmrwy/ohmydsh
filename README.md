@@ -1,6 +1,33 @@
-# ohmydsh — DSH 定制仓
+<div align="center">
+
+# ohmydsh
+
+**DeepSeek Harness(DSH)的声明式定制仓 —— 一份 manifest 管理全部定制,幂等物化到 `~/.dsh`**
+
+[![CI](https://github.com/prgrmrwy/ohmydsh/actions/workflows/ci.yml/badge.svg)](https://github.com/prgrmrwy/ohmydsh/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](.nvmrc)
+[![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196.svg)](https://www.conventionalcommits.org/)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
+[English](README.en.md) · [快速开始](#使用) · [架构](#架构图) · [贡献](CONTRIBUTING.md) · [安全](SECURITY.md) · [更新日志](CHANGELOG.md)
+
+</div>
+
+---
 
 本仓库是 DSH(DeepSeek Harness)的定制仓:**总配置统一管理,各项定制可插拔、独立版本、独立维护,但都在同一仓库内**。
+
+## 为什么需要它
+
+手工维护 AI agent 运行时的插件、版本和配置很容易变成一堆"改过但没人记得为什么"的本地状态。ohmydsh 用一份声明式 manifest 把这些收敛成可复现、可审查、可回滚的工程资产:
+
+- 🎛 **单一开关面** —— `dsh.yaml` 管住 DSH 版本、第三方插件、自研 package、patch、skill 与环境级指令。
+- 🔁 **幂等物化** —— `dsh build` 把仓库状态同步到 `~/.dsh`,重复执行结果一致,失败 fail closed。
+- 🔌 **可插拔** —— 每项定制独立启用、禁用、升级、移除;`enabled: false` ≠ 删除。
+- 📌 **精确 pin,不 vendor** —— 第三方只存版本 pin、覆盖片段与审查记录,信任面清晰可查。
+- 🚀 **自动跟版** —— `autoUpdate` 检测新版 DSH 后阻塞式升级、重跑 sync 并自动提交,工作区不干净时不动手。
+- 📐 **规范驱动** —— 行为变化先过 OpenSpec(proposal → design → spec → tasks),再落实现。
 
 ## 真相源约定
 
@@ -148,3 +175,40 @@ DSH 官方 `standard` preset 会自动加载,无需复制出 `ohmydsh` preset。
 - 新想法 → `BACKLOG.md`;单项实施 → openspec change(`openspec new change <name>`);
 - 自研 package 改代码后**要 bump 版本**(manifest 同步),sync 才会重装;
 - DSH 运行体由 `autoUpdate` 自动升级并重跑 sync 恢复全部定制;手工升级同样 = 改 `dshVersion` 后重跑 sync。
+
+提交前请运行:
+
+```bash
+npm test                 # sync 黑盒回归测试
+npm run check:artifacts  # 防止产物 / nested lock / raw evidence 入库
+```
+
+## 贡献
+
+欢迎 Issue 与 PR。动手前请先读 [CONTRIBUTING.md](CONTRIBUTING.md),它说明了阅读顺序、OpenSpec 规范驱动流程、验证要求与提交规范。
+
+参与本项目需遵守[行为准则](CODE_OF_CONDUCT.md)。安全问题请勿开公开 Issue,按 [SECURITY.md](SECURITY.md) 私下报告。
+
+## 项目文档
+
+| 文档 | 说明 |
+|---|---|
+| [CONTRIBUTING.md](CONTRIBUTING.md) | 贡献流程、开发环境与验证要求 |
+| [SECURITY.md](SECURITY.md) | 漏洞报告渠道与本项目特有的安全考量 |
+| [CHANGELOG.md](CHANGELOG.md) | 仓库级变更记录 |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | 社区行为准则 |
+| `openspec/specs/` | 系统当前应满足的行为规范 |
+| `docs/adr/` | 已接受的长期架构决策 |
+| `docs/notes/` | 实现背景、运行约束与验证方法 |
+| `BACKLOG.md` | 想法池 |
+
+## 致谢
+
+- [DeepSeek Harness (DSH)](https://www.npmjs.com/package/@deepseek-ai/dsh) —— 本仓库定制的运行体本体。
+- 各第三方插件作者;来源、许可与审查结论记录在 `dsh.yaml` 对应条目的 `note` 中。
+
+## 许可
+
+本项目基于 [MIT License](LICENSE) 发布。
+
+第三方定制以 pin 方式引用、不 vendor 源码,各自遵循其原始许可;`packages/worktree-session` 的交互概念参考详见该目录下的 `NOTICE`。
