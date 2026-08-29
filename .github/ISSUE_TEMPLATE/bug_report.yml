@@ -1,0 +1,101 @@
+name: 🐞 Bug 报告 / Bug Report
+description: 报告一个缺陷,帮助我们改进 / Report a defect
+labels: ['bug', 'needs-triage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢你花时间报告问题!
+
+        ⚠️ **安全漏洞请不要用这个模板。** 请按 [SECURITY.md](../blob/main/SECURITY.md) 私下报告。
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索过现有 Issue,确认这不是重复问题
+          required: true
+        - label: 我已阅读 README 与相关 `docs/notes/`,确认这不是预期行为
+          required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 受影响的组件
+      description: 不确定就选「不清楚」
+      options:
+        - bin/dsh(启动器 / launcher)
+        - scripts/sync.mjs(物化 / sync)
+        - dsh.yaml(manifest 配置)
+        - packages/worktree-session
+        - packages/sidebar-session-provider-icon
+        - packages/subscriptions-sandbox-shim
+        - 第三方插件集成(remote customization)
+        - 安装 / bootstrap(scripts/*.sh)
+        - 文档 / docs
+        - 不清楚
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 问题描述
+      description: 实际发生了什么?
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+      description: 你原本期望发生什么?如果相关规范(`openspec/specs/`)有约定,请一并指出。
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: 请给出最小可复现步骤
+      placeholder: |
+        1. 修改 dsh.yaml 的 ...
+        2. 运行 `dsh build`
+        3. 运行 `dsh`
+        4. 观察到 ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志 / 输出
+      description: |
+        粘贴终端输出或 `~/.dsh/dsh-startup.log` 的相关片段(`dsh history` 也有用)。
+        ⚠️ **请先移除任何令牌、密钥或私有路径。**
+      render: shell
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境信息
+      description: |
+        请提供以下输出:
+        ```bash
+        node -v && npm -v && uname -sm
+        ```
+        以及 `dsh.yaml` 中的 `dshVersion`。
+      placeholder: |
+        - OS:macOS 15.2 (arm64)
+        - Node:v24.12.0
+        - npm:11.13.0
+        - dshVersion:0.1.1-rc.2
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充信息
+      description: 其他有助于定位问题的上下文(截图、已尝试的排查等)

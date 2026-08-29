@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 🔒 报告安全漏洞 / Report a security vulnerability
+    url: https://github.com/prgrmrwy/ohmydsh/security/advisories/new
+    about: 请勿开公开 Issue。通过 GitHub 私密漏洞报告提交,详见 SECURITY.md。
+  - name: 💬 提问与讨论 / Questions and discussion
+    url: https://github.com/prgrmrwy/ohmydsh/discussions
+    about: 使用疑问、配置求助或开放式想法,请在 Discussions 中发起。
+  - name: 📖 DSH 上游问题 / Upstream DSH issues
+    url: https://www.npmjs.com/package/@deepseek-ai/dsh
+    about: 本仓库是 DSH 的个人定制仓,不是 DSH core。属于运行体本身的问题请反馈给上游。

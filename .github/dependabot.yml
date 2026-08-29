@@ -1,0 +1,47 @@
+# Dependabot 依赖更新配置
+#
+# 作用域说明:这里只管 npm 开发依赖与 GitHub Actions。
+# DSH 运行体(@deepseek-ai/dsh*)与第三方 DSH 插件的版本**不由 Dependabot 管理** ——
+# 它们的真相源是 dsh.yaml 的精确 pin,升级链路是仓库自带的 `autoUpdate` 与
+# `dsh plugin-update`(带兼容性判定、逐条确认与审查记录)。
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+      time: '09:00'
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      # 开发依赖的补丁/次要升级合并成一个 PR,减少噪音。
+      dev-dependencies:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # DSH 运行体与官方 bundle 由 dsh.yaml + autoUpdate 单独管理。
+      - dependency-name: '@deepseek-ai/dsh*'
+
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: monthly
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      github-actions:
+        patterns:
+          - '*'
