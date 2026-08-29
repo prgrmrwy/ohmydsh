@@ -3,6 +3,24 @@
   "private": true,
   "type": "module",
   "description": "DSH 定制仓:总配置 + 可插拔定制",
+  "license": "MIT",
+  "author": "prgrmrwy",
+  "homepage": "https://github.com/prgrmrwy/ohmydsh#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/prgrmrwy/ohmydsh.git"
+  },
+  "bugs": {
+    "url": "https://github.com/prgrmrwy/ohmydsh/issues"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "ai-agent",
+    "configuration-management",
+    "plugin-manifest",
+    "dotfiles"
+  ],
   "engines": {
     "node": ">=22.0.0",
     "npm": ">=10.0.0"
