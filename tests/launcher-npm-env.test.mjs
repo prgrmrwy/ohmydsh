@@ -37,7 +37,7 @@ const BAKED = {
 
 /**
  * 真实启动器沙箱:保留 bin/dsh 全部逻辑,只替换两处外部副作用 ——
- *  1. CLI 解析(会联网安装)→ 固定回显一个 .bin/dsh 路径;
+ *  1. CLI 解析(会联网安装)→ 固定回显一个 lib/bin.js 路径;
  *  2. server exec → 打印子进程实际拿到的 npm_* 环境(JSON)。
  */
 async function sandbox() {
@@ -56,7 +56,7 @@ async function sandbox() {
   const before = patched
   patched = patched.replace(
     /if ! resolve_out="\$\(DSH_CLI_VERSION="\$VER" with_repo_registry node "\$REPO\/scripts\/dsh-server-bin\.mjs"\)"; then/,
-    'if ! resolve_out="$(printf \'0.0.0-installer-noise\\nDSH_SERVER_BIN=%s\\n\' "$REPO/node_modules/.bin/dsh")"; then',
+    'if ! resolve_out="$(printf \'0.0.0-installer-noise\\nDSH_SERVER_BIN=%s\\n\' "$REPO/node_modules/@deepseek-ai/dsh/lib/bin.js")"; then',
   )
   assert.notEqual(patched, before, 'CLI 解析调用未被替换,测试桩与实现已漂移')
 
@@ -166,21 +166,21 @@ test('冷启动时安装器输出不得污染 server bin 路径', async (t) => {
   // 沙箱桩在标记行前混入了一行安装噪声(复现真实冷启动:安装器用
   // stdio:'inherit',与结果共用 stdout)。启动器必须只取标记行。
   const { bin } = probeServerEnv(sb)
-  assert.equal(bin, path.join(sb.dir, 'node_modules/.bin/dsh'), '必须按标记行提取路径,不得把安装输出当成路径')
+  assert.equal(bin, path.join(sb.dir, 'node_modules/@deepseek-ai/dsh/lib/bin.js'), '必须按标记行提取路径,不得把安装输出当成路径')
   assert.ok(!bin.includes('installer-noise'), '安装噪声不得混入 server bin 路径')
 })
 
-test('server bin 解析为 .bin/dsh 符号链接,保持 dsh stop 的归属证明可用', () => {
+test('server bin 使用真实 lib/bin.js,兼容 pnpm shell shim 并保持 stop 归属证明', () => {
   const cases = [
     { kind: 'npx-cache', bin: '/c/_npx/abc/node_modules/@deepseek-ai/dsh/lib/bin.js' },
     { kind: 'pnpm-cache', bin: '/c/ohmydsh/dsh-cli/1.0.0/node_modules/@deepseek-ai/dsh/lib/bin.js' },
   ]
   for (const c of cases) {
     const serverBin = serverBinFrom(c)
-    assert.ok(serverBin.endsWith('/node_modules/.bin/dsh'), `${c.kind}: 必须解析为 .bin/dsh,实际 ${serverBin}`)
-    // is_dsh_web_pid() 的判定模式:argv 必须含 /node_modules/.bin/dsh web
+    assert.equal(serverBin, c.bin, `${c.kind}: 必须保留真实 lib/bin.js,实际 ${serverBin}`)
+    // is_dsh_web_pid() 的判定模式:argv 必须含官方包的真实入口。
     const argv = `node ${serverBin} web --port 3080 --no-open`
-    assert.ok(argv.includes('/node_modules/.bin/dsh web'), `${c.kind}: argv 必须命中归属门`)
+    assert.ok(argv.includes('/node_modules/@deepseek-ai/dsh/lib/bin.js web'), `${c.kind}: argv 必须命中归属门`)
   }
   // DSH_BIN 显式指定时原样返回,由用户自负其责。
   assert.equal(serverBinFrom({ kind: 'env', bin: '/custom/dsh' }), '/custom/dsh')

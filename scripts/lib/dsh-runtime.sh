@@ -8,12 +8,12 @@ dsh_listener_pids() {
   lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | sort -u
 }
 
-# Accept only the DSH web argv forms observed across npm/npx releases.
+# Accept only the DSH web argv forms observed across direct/npm/npx launches.
 is_dsh_web_pid() {
   local pid="$1" command
   command="$(ps -o command= -p "$pid" 2>/dev/null)" || return 1
   case "$command" in
-    *"/node_modules/.bin/dsh web"*|*"npm exec @deepseek-ai/dsh@"*" web"*) return 0 ;;
+    *"/node_modules/@deepseek-ai/dsh/lib/bin.js web"*|*"/node_modules/.bin/dsh web"*|*"npm exec @deepseek-ai/dsh@"*" web"*) return 0 ;;
     *) return 1 ;;
   esac
 }
