@@ -35,16 +35,18 @@ async function waitListening(port, child) {
   throw new Error(`port ${port} did not listen`)
 }
 
-async function makeListener({ dshArgv }) {
+async function makeListener({ dshArgv, directDshArgv = false }) {
   const dir = await mkdtemp(path.join(tmpdir(), 'ohmydsh-runtime-'))
   const port = await freePort()
   await writeFile(path.join(dir, 'web'), `require('node:http').createServer((_,r)=>r.end('ok')).listen(${port},'127.0.0.1')\n`)
   let command = process.execPath
   let args = [path.join(dir, 'web')]
-  if (dshArgv) {
-    const binDir = path.join(dir, 'node_modules/.bin')
+  if (dshArgv || directDshArgv) {
+    const binDir = directDshArgv
+      ? path.join(dir, 'node_modules/@deepseek-ai/dsh/lib')
+      : path.join(dir, 'node_modules/.bin')
     await mkdir(binDir, { recursive: true })
-    command = path.join(binDir, 'dsh')
+    command = path.join(binDir, directDshArgv ? 'bin.js' : 'dsh')
     await symlink(process.execPath, command)
     args = ['web', '--port', String(port)]
   }
@@ -66,6 +68,18 @@ async function cleanup(instance) {
 
 test('stop_dsh_server_on_port stops current node_modules/.bin/dsh web argv', async () => {
   const instance = await makeListener({ dshArgv: true })
+  try {
+    const result = spawnSync('bash', ['-c', `source "$1"; stop_dsh_server_on_port "$2" 20`, '_', HELPERS, String(instance.port)], { encoding: 'utf8' })
+    assert.equal(result.status, 0, result.stderr)
+    await waitExited(instance.child)
+    assert.notEqual(instance.child.signalCode, null)
+  } finally {
+    await cleanup(instance)
+  }
+})
+
+test('stop_dsh_server_on_port stops direct @deepseek-ai/dsh lib/bin.js web argv', async () => {
+  const instance = await makeListener({ directDshArgv: true })
   try {
     const result = spawnSync('bash', ['-c', `source "$1"; stop_dsh_server_on_port "$2" 20`, '_', HELPERS, String(instance.port)], { encoding: 'utf8' })
     assert.equal(result.status, 0, result.stderr)

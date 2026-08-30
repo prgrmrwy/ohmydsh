@@ -9,10 +9,10 @@
 // 在任意仓库执行 npm/pnpm/rush 时都被这套仓库配置劫持(env 优先级高于所有
 // .npmrc)。改为「解析 bin → node 直连」后,子进程不再有任何 npm_*(实测 0)。
 //
-// 关键:必须返回安装目录内的 `node_modules/.bin/dsh` 符号链接,而不是
-// lib/bin.js。scripts/lib/dsh-runtime.sh 的 is_dsh_web_pid() 是 dsh stop /
-// restart 在发信号前的 fail-closed 归属证明,按 argv 匹配;用 lib/bin.js 拉起
-// 会让启动器无法证明该进程属于自己,从而停不掉它。两者指向同一个入口文件。
+// 关键:返回真实的 lib/bin.js,不要返回安装目录内的 `node_modules/.bin/dsh`。
+// npm 的 .bin 通常是符号链接,但 pnpm 的 .bin 是 shell shim;后者若被启动器
+// 以 `node <bin>` 执行会直接产生 SyntaxError。dsh-runtime.sh 同时识别真实
+// lib/bin.js 与历史 npm exec/.bin argv,所以 stop/restart 的归属证明仍然成立。
 //
 // 用法:DSH_CLI_VERSION=<version> node scripts/dsh-server-bin.mjs
 // 输出:成功时 stdout 打印 `DSH_SERVER_BIN=<绝对路径>` 并退出 0;失败退出 1。
@@ -45,12 +45,10 @@ if (resolved === null) {
 
 const serverBin = serverBinFrom(resolved)
 
-// 就绪探测按 lib/bin.js 进行,而 .bin/dsh 是同一次安装产生的符号链接。
-// 正常情况下两者同时存在;若该链接缺失(异常安装布局),必须失败而不是
-// 悄悄回退到 lib/bin.js —— 那会产生停不掉的 server。
+// DSH_BIN 是显式逃生门,可以是调用方自行提供的命令形式;保持原有契约,
+// 只校验解析器自己管理的 npm/pnpm 安装入口。
 if (resolved.kind !== 'env' && !existsSync(serverBin)) {
-  console.error(`error: 安装目录缺少 .bin/dsh 符号链接:${serverBin}`)
-  console.error('提示:该链接是 dsh stop/restart 识别自身 server 的依据;可删除对应缓存目录后重试。')
+  console.error(`error: DSH server 入口不存在:${serverBin}`)
   process.exit(1)
 }
 
