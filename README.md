@@ -155,6 +155,16 @@ sync 行为按定制类型:
 
 顶层 `web.lan`(布尔)不是 customization:开启时 sync 额外生成一条 webserver 绑 `0.0.0.0` 的 patch fragment(见「局域网访问」);`DSH_LAN` 环境变量可覆盖(见 `.env.local.example`)。
 
+**定制项按需开关**(`enabledEnv`,可选字段,任意 `customizations` 条目都能声明):跟 `web.lan`/`DSH_LAN` 同一套语义,但作用范围是单条定制而不是整个 profile。用于"仓库里默认关闭,但在有权限/有需要的机器上用环境变量按需打开"的场景——例如内部专属包:公开分享这份仓库时它不该默认安装,但在有权限的机器上不想手改 `dsh.yaml`。写法:
+
+```yaml
+- id: some-internal-plugin
+  enabled: false            # 仓库默认关闭
+  enabledEnv: DSH_SOME_PLUGIN  # 同名 env 覆盖上面的 enabled;必须是大写 DSH_ 前缀
+```
+
+`DSH_SOME_PLUGIN=1`(或 `true`/`yes`/`on`)在该机器上启用,`=0`(或 `false`/`no`/`off`)禁用;不设置或取值无法识别时回退到 `enabled` 字段。`enabledEnv` 名字不合法(不是大写 `DSH_` 前缀)时 sync 直接报错并中止,避免拼错后"开关看起来没生效"却毫无提示。改动后同样需要 `dsh build` 才生效。仓库内 `dsh-traex-bridge`(内部包)就是这个模式的实例,见下方「第三方定制」。
+
 ## 环境级 instructions
 
 顶层 `agentInstructions` 不是一种 customization type。启用时,sync 校验 `source` 是仓库内相对文件,加 GENERATED/provenance 头后原子写入 `$DSH_HOME/AGENTS.md`,并在 `.dsh-sync-state.json` 记录来源与部署哈希。连续 build 幂等;禁用、删除字段或 `dsh reset` 时,只会删除仍匹配已部署哈希的目标。目标若已有未托管内容,或托管后被修改,sync 会保留文件并报错,要求人工决定如何处理。
@@ -168,6 +178,7 @@ DSH 官方 `standard` preset 会自动加载,无需复制出 `ohmydsh` preset。
 - 只存三样:**精确版本 pin**、**个人覆盖片段**(`patches/<id>.yml`)、**条目说明**(`note`/审查记录);**不 vendor 源码**。
 - 升级 = 改 pin 重跑 sync(默认由 `autoUpdate` 自动完成,见上方「自动升级」;`DSH_SKIP_UPDATE=1` 恢复纯手工改 pin 模式)。
 - **安全提醒**:插件即第三方代码(社区列表明示警告),安装前先看源码,`note` 记录来源与审查结论。
+- **`dsh-traex-bridge`(内部专属包)**:来自 bnpm/内网(`code.byted.org`),鉴权与推理流量走 ByteDance 内网服务,仓库默认 `enabled: false` + `enabledEnv: DSH_TRAEX_BRIDGE`(见上方「定制项按需开关」)。克隆本仓库的机器默认不装它;有内网权限时,本机 `.env.local`(gitignored)加一行 `DSH_TRAEX_BRIDGE=1` 后 `dsh build` 即可启用,详见 `dsh.yaml` 条目 `note`。
 - **`llm-subscriptions` 订阅 provider 插件**(`dsh-plugin-subscriptions`,当前 pin `0.5.2+pr40.d927e3a` = 上游 PR #40「按模型默认推理档」临时 fork tarball,设置页每模型默认档列表收起,详见 `dsh.yaml` 条目 note;上游合并发版后切回 npm):Claude 登录 = 导入本机 Claude Code 凭据(秒登录,不弹 OAuth),升级与选型细见 change `openspec/changes/2026-08-20-llm-subscriptions-upgrade`(含 ADR-0001)。**回滚**:`dsh.yaml` 该条目 `spec`/`version` 改回 `dsh-plugin-subscriptions@0.5.2` / `0.5.2`(或删除临时条目) → `dsh build` → 重启;codex 会话不受影响,可无损回滚。
 
 ## 开发流
