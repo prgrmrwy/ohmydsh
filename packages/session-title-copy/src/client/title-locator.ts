@@ -1,17 +1,17 @@
 /**
- * Title locator: the ONE place in this package that knows the official
+ * Title-zone locator: the ONE place in this package that knows the official
  * conversation-header breadcrumb DOM. Everything the client engine needs
- * about "what the current session title looks like" lives here, so a DSH
- * upgrade that changes the structure requires editing only this file.
+ * about "where the session title area lives" lives here, so a DSH upgrade
+ * that changes the structure requires editing only this file.
  *
  * Official structure (`@deepseek-ai/dsh-client-ui-conversation`
- * `ConversationSessionHeader`, rc.2 line — see openspec change
- * `session-title-copy` design):
+ * `ConversationSessionHeader`, rc.2 — see openspec change
+ * `session-title-id-badge` design):
  *
  *   header                                          ← conversation chrome
  *     div .titleRow
- *       div .titleCluster
- *         nav[aria-label=session.hierarchy]          ← breadcrumb nav
+ *       div .titleCluster                           ← OUR insertion zone
+ *         nav[aria-label=session.hierarchy]          ← breadcrumb nav (anchored)
  *           span .crumbSeg [key=sessionId]
  *             button .crumb[.crumbSubagent][.crumbCurrent]
  *                   (disabled only on the LAST / current session title)
@@ -21,9 +21,9 @@
  *
  * CSS Modules keep the local class name as the suffix of the emitted class
  * (`<hash>__crumb` in nextjs-style, `wSkVaW_crumb` here), so we match by
- * suffix instead of any full hashed token. The current session title is the
- * crumb button carrying the `disabled` attribute (official: `disabled: last`);
- * ancestor crumbs stay enabled and keep their official click-to-open behavior.
+ * suffix instead of any full hashed token. The title area exists whenever a
+ * crumb nav is present (the header is hidden while a session is blank ⇒ no
+ * nav).
  *
  * The locator only READS the DOM; wiring/mutation lives in `wiring.ts`.
  *
@@ -33,9 +33,9 @@
 /** Minimal node surface the locator needs (structural so it is testable without a browser DOM). */
 export interface ElementLike {
   getAttribute(name: string): string | null
-  hasAttribute(name: string): boolean
   querySelector?(selector: string): ElementLike | null
   querySelectorAll?(selector: string): ArrayLike<ElementLike>
+  parentElement?: ElementLike | null
 }
 
 /** Minimal container surface (document or a parent element). */
@@ -61,13 +61,14 @@ export function isCrumbButton(node: ElementLike): boolean {
 }
 
 /**
- * Locate the current session title button: the disabled crumb inside the
- * first conversation header's breadcrumb nav. Returns null when the structure
- * is unrecognizable — callers treat that as "do not inject anything".
+ * Locate the breadcrumb nav inside the first conversation header that
+ * actually contains crumb buttons (the session title exists). The session
+ * header is hidden while the session is blank, so an unrecognizable layout
+ * returns null — callers treat that as "insert nothing".
  * @param root - document or a container holding the conversation layout.
- * @returns the current-title button node, or null.
+ * @returns the crumb nav node, or null.
  */
-export function findCurrentTitleButton(root: ContainerLike): ElementLike | null {
+export function findCrumbNav(root: ContainerLike): ElementLike | null {
   const headers = root.querySelectorAll('header')
   for (let i = 0; i < headers.length; i++) {
     const header = headers[i]
@@ -77,10 +78,18 @@ export function findCurrentTitleButton(root: ContainerLike): ElementLike | null 
     const buttons = nav.querySelectorAll?.('button') ?? []
     for (let j = 0; j < buttons.length; j++) {
       const button = buttons[j]
-      if (button === undefined) continue
-      if (!isCrumbButton(button)) continue
-      if (button.hasAttribute('disabled')) return button
+      if (button !== undefined && isCrumbButton(button)) return nav
     }
   }
   return null
+}
+
+/**
+ * Resolve the insertion zone for the badge: the crumb nav's parent (the
+ * official title cluster). Returns null when the layout is unrecognizable.
+ * @param nav - the crumb nav located by {@link findCrumbNav}.
+ * @returns the zone node, or null.
+ */
+export function titleZoneOf(nav: ElementLike): ElementLike | null {
+  return nav.parentElement ?? null
 }
