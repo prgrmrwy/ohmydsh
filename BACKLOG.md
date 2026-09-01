@@ -39,7 +39,9 @@
   - 交互机制:移除标题 crumb `disabled` 恢复事件,按钮 capture 阶段 click `stopPropagation()` 阻断 React 委托的 `open(current)`;MutationObserver + sessions 订阅 rAF 防抖幂等 reconcile(rc.2 下「React 只为 props diff 写 DOM,disabled 属性被外部移除后不会被重写」,observer 兜底重建场景);
   - 边界:只改当前标题一个按钮;祖先面包屑「点击打开」不变;官方当前标题本就 disabled 死按钮,无官方能力被覆盖(若未来官方移除 disabled,locator 匹配不到 → 插件自动 no-op 让位);DOM 知识单文件 `title-locator.ts`;定位失败/剪贴板拒绝安全降级;不做常驻 copy icon(可发现性 = pointer + hover 底色 + tooltip + toast);
   - 设计过程与替代方案(overlay 遮挡、textContent 反查、copy icon 取舍)见 openspec change `2026-09-01-session-title-copy`(已归档)。
-- **更新**: 2026-09-01 新增;openspec change 完成 propose → 实现 → 单测(16/16)/typecheck/build → 仓库测试(81/81) → 隔离 DSH_HOME 与真实 `~/.dsh` sync 幂等;headless Chrome 对真实 GUI 端到端验证(标题接线、点击剪贴板 = 当前 session id、toast「会话 ID 已复制」);openspec 归档完成(主 spec 入 `openspec/specs/session-title-copy/`,manifest 条目已启用);待重启后人工复核,本条目回填为已完成。
+- **更新**:
+  - 2026-09-01 新增;openspec change 完成 propose → 实现 → 单测(16/16)/typecheck/build → 仓库测试(81/81) → 隔离 DSH_HOME 与真实 `~/.dsh` sync 幂等;headless Chrome 对真实 GUI 端到端验证(标题接线、点击剪贴板 = 当前 session id、toast「会话 ID 已复制」);openspec 归档完成(主 spec 入 `openspec/specs/session-title-copy/`,manifest 条目已启用);待重启后人工复核,本条目回填为已完成。
+  - 2026-09-02 实机反馈修订(v0.1.1):「点击标题复制」改为「标题右侧 6 位 ID 徽标」——标题恢复官方 disabled 原样,徽标显示去 `session-` 前缀前 6 位(如 `9af69b`),hover tooltip 完整 id,点击复制完整 id + toast;openspec change `2026-09-02-session-title-id-badge`(已归档,主 spec 更新);验证:typecheck/build/vitest 20/20、仓库 81/81、隔离 home sync 幂等(D003 绕过);已合入 main(`0b35c68`),待物化 + 重启人工验收。
 
 ### [B017] 迁出或删除 packages/dsh-federation(联邦路线已归档)
 - **状态**: 实施中(本仓侧已完成,待 cockpit 侧提取资产)
