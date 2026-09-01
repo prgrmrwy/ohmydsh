@@ -73,7 +73,7 @@ customizations:
   - id: session-title-copy
     type: package
     source: local
-    version: 0.1.1
+    version: 0.1.2
     enabled: true
     brief: 标题右侧 6 位 session id 徽标(点击复制完整 id + toast;标题恢复官方)
     note: 'B018 落地 + 实机修订;openspec change session-title-id-badge;Web client 订阅官方 sessions list(current 为 id 真相源,cockpit-bridge 同 seam);标题旁插入自建徽标(去 session- 前缀取前 6 位,如 9af69b),hover tooltip 完整 id,点击复制完整 id + 瞬态提示;0.1.0 的标题点击复制已移除——标题恢复官方 disabled 原样;MutationObserver + sessions 订阅 rAF 防抖幂等 reconcile;DOM 结构知识单文件 title-locator;祖先面包屑打开行为不变;无 host 能力/无网络请求;定位失败/剪贴板拒绝安全降级'

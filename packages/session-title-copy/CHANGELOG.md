@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2 — 2026-09-02
+
+- 修复 toast 对比度：背景色误用了不存在的 `--dsw-alias-bg-elevated`（回退到固定深色），与官方主题文字色 `--dsw-alias-label-primary` 在明亮主题下构成「深底 + 深字」。改为官方 theme-adaptive 的 `--dsw-alias-bg-overlay`（明/暗主题各自的浮层底色）+ `--dsw-alias-label-primary`，并补 `--dsw-alias-border-l2` 描边；明暗两种主题下保持可读。新增回归断言防止再次混用固定色与主题 token。
+
 ## 0.1.1 — 2026-09-01
 
 - 实机反馈修订（openspec change `session-title-id-badge`）：交互从「点击标题复制」改为「标题右侧 6 位 ID 徽标」——标题**恢复官方原样**（disabled、cursor default，不再移除/拦截），不为面包屑导航控件引入点击语义。
