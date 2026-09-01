@@ -205,6 +205,10 @@ describe('showCopiedHint', () => {
     expect(el.style.top).toBe('306px')
     expect(el.textContent).toBe(HINT_TEXT)
     expect(el.removed).toBe(false)
+    // Colors must be coherent theme tokens (light-mode contrast regression
+    // guard): never pair a fixed background with a theme text token.
+    expect(el.style.cssText).toContain('var(--dsw-alias-bg-overlay')
+    expect(el.style.cssText).toContain('var(--dsw-alias-label-primary')
     vi.advanceTimersByTime(HINT_LIFETIME_MS)
     expect(el.style.opacity).toBe('0')
     vi.advanceTimersByTime(300)

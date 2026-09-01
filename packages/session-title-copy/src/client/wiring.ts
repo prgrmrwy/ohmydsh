@@ -190,8 +190,14 @@ export function showCopiedHint(anchor: BadgeElementLike, doc?: HintDocumentLike)
     'font-size:12px',
     'line-height:18px',
     'font-family:inherit',
-    'background:var(--dsw-alias-bg-elevated, rgba(28,28,30,0.94))',
+    // Both colors are official theme tokens (theme-adaptive together):
+    // bg-overlay = elevated surface (light gray in light mode, dark in dark
+    // mode), label-primary = primary text of the same theme. Mixing a
+    // hardcoded background with theme tokens broke contrast in light mode
+    // (dark-on-dark), so never pair them with a fixed color.
+    'background:var(--dsw-alias-bg-overlay, rgba(28,28,30,0.94))',
     'color:var(--dsw-alias-label-primary, #fff)',
+    'border:1px solid var(--dsw-alias-border-l2, transparent)',
     'box-shadow:0 2px 8px rgba(0,0,0,0.28)',
     'transition:opacity 200ms ease',
   ].join(';')
