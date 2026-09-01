@@ -196,9 +196,9 @@ customizations:
   - id: dsh-traex-bridge
     type: package
     source: remote
-    spec: '@byted/dsh-traex-bridge@0.1.1'
-    version: 0.1.1
+    spec: '@byted/dsh-traex-bridge@0.1.8'
+    version: 0.1.8
     enabled: false
     enabledEnv: DSH_TRAEX_BRIDGE
     brief: TraeX 官方 bridge provider(设置→模型→TraeX Bridge;默认关闭,见 enabledEnv)
-    note: '内部官方包(bnpm @byted/dsh-traex-bridge,maintainer chenxinhao.046@bytedance.com,仓库 https://code.byted.org/data/dsh-traex-bridge,0.1.0/0.1.1 皆 2026-08-28 发布,0.1.1 新增 Web 设置页登录卡片+设备登录/SSO,9/9 测试通过);直接实现 Trae 登录/模型目录/TraeChat 协议,运行时不依赖 traecli 与 ACP;bundle patch 插入 llm-traex-bridge 并把 agent-default-model 覆盖为 traex/DeepSeek-V4-Flash(仅新会话生效,2026-08-28 用户已确认接受);登录:设置→模型→TraeX Bridge 或 CLI dsh-traex-bridge login device/sso;凭据 ~/.dsh/traex-bridge/auth.json(0600),兼容读取 ~/.trae/cli/auth.json 等本机既有 Trae 登录态;能力:文本/reasoning/工具/token usage/排队,暂不支持图片(UNSUPPORTED_CONTENT);默认 Trae API https://copilot-cn.bytedance.net、ByteCloud 登录 https://cloud.bytedance.net;无 install/postinstall 脚本;peer 依赖 rc.2 区间对运行体 0.1.1-rc.2 满足;Node >=20(本机 22.16.0);安装通道 bnpm(用户级 ~/.npmrc registry=http://bnpm.byted.org;agent 环境注入的 NPM_CONFIG_REGISTRY 会覆盖,安装时需显式指定);⚠ 鉴权与推理流量走 ByteDance 内部服务,凭据仅在 DSH Host 本机保存;⚠ 2026-08-31 起本仓库默认 enabled:false + enabledEnv:DSH_TRAEX_BRIDGE(内部专属,公开仓库默认关闭),本机通过 .env.local 的 DSH_TRAEX_BRIDGE=1 打开,不改本条目 enabled'
+    note: '内部官方包(bnpm @byted/dsh-traex-bridge,maintainer chenxinhao.046@bytedance.com,仓库 https://code.byted.org/data/dsh-traex-bridge,0.1.0–0.1.8 于 2026-08-28 至 2026-09-01 发布,0.1.8 为 registry latest;升级后需重新验证 Web 设置页登录卡片/设备登录/SSO 与模型目录;直接实现 Trae 登录/模型目录/TraeChat 协议,运行时不依赖 traecli 与 ACP;bundle patch 插入 llm-traex-bridge 并把 agent-default-model 覆盖为 traex/DeepSeek-V4-Flash(仅新会话生效,2026-08-28 用户已确认接受);登录:设置→模型→TraeX Bridge 或 CLI dsh-traex-bridge login device/sso;凭据 ~/.dsh/traex-bridge/auth.json(0600),兼容读取 ~/.trae/cli/auth.json 等本机既有 Trae 登录态;能力:文本/reasoning/工具/token usage/排队,暂不支持图片(UNSUPPORTED_CONTENT);默认 Trae API https://copilot-cn.bytedance.net、ByteCloud 登录 https://cloud.bytedance.net;无 install/postinstall 脚本;peer 依赖 rc.2 区间对运行体 0.1.1-rc.2 满足;Node >=20(本机 22.16.0);安装通道 bnpm(用户级 ~/.npmrc registry=http://bnpm.byted.org;agent 环境注入的 NPM_CONFIG_REGISTRY 会覆盖,安装时需显式指定);⚠ 鉴权与推理流量走 ByteDance 内部服务,凭据仅在 DSH Host 本机保存;⚠ 2026-08-31 起本仓库默认 enabled:false + enabledEnv:DSH_TRAEX_BRIDGE(内部专属,公开仓库默认关闭),本机通过 .env.local 的 DSH_TRAEX_BRIDGE=1 打开,不改本条目 enabled'
