@@ -69,6 +69,14 @@ customizations:
     enabled: true
     brief: 侧边栏会话行当前选中模型品牌 logo(选择器即时切换)
     note: 'B013 落地;openspec change sidebar-session-provider-icon;Web client 订阅官方 modelDirectories per-session store,输入框模型切换成功即更新 logo;host provider projection 仅作未打开历史会话 fallback;品牌 SVG 下载落盘(DeepSeek/OpenAI/OpenCode/Anthropic/Grok/Kimi/GLM/MiniMax/Pi/OpenClaw/Hermes),不手绘;轻量 DOM 注入 + row-locator 单模块,不触碰官方 StateDot/时间/菜单/拖拽;未知选择首字母 fallback'
+  # 自研(local):B018 会话标题点击复制 session id
+  - id: session-title-copy
+    type: package
+    source: local
+    version: 0.1.0
+    enabled: true
+    brief: 对话区当前会话标题点击复制 session id(hover pointer + 瞬态反馈)
+    note: 'B018 落地;openspec change session-title-copy;Web client 订阅官方 sessions list(current 为 id 真相源,cockpit-bridge 同 seam);移除标题 crumb disabled 恢复事件 + capture 阶段 click stopPropagation 阻断 React 委托的 open(current);MutationObserver + sessions 订阅 rAF 防抖幂等 reconcile;DOM 结构知识单文件 title-locator;祖先面包屑打开行为不变;无 host 能力/无网络请求;定位失败/剪贴板拒绝安全降级'
   - id: ws
     type: skill
     enabled: true
