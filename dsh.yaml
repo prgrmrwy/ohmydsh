@@ -69,14 +69,14 @@ customizations:
     enabled: true
     brief: 侧边栏会话行当前选中模型品牌 logo(选择器即时切换)
     note: 'B013 落地;openspec change sidebar-session-provider-icon;Web client 订阅官方 modelDirectories per-session store,输入框模型切换成功即更新 logo;host provider projection 仅作未打开历史会话 fallback;品牌 SVG 下载落盘(DeepSeek/OpenAI/OpenCode/Anthropic/Grok/Kimi/GLM/MiniMax/Pi/OpenClaw/Hermes),不手绘;轻量 DOM 注入 + row-locator 单模块,不触碰官方 StateDot/时间/菜单/拖拽;未知选择首字母 fallback'
-  # 自研(local):B018 会话标题点击复制 session id
+  # 自研(local):B018 会话标题旁 session id 短标识徽标(点击复制完整 id)
   - id: session-title-copy
     type: package
     source: local
-    version: 0.1.0
+    version: 0.1.1
     enabled: true
-    brief: 对话区当前会话标题点击复制 session id(hover pointer + 瞬态反馈)
-    note: 'B018 落地;openspec change session-title-copy;Web client 订阅官方 sessions list(current 为 id 真相源,cockpit-bridge 同 seam);移除标题 crumb disabled 恢复事件 + capture 阶段 click stopPropagation 阻断 React 委托的 open(current);MutationObserver + sessions 订阅 rAF 防抖幂等 reconcile;DOM 结构知识单文件 title-locator;祖先面包屑打开行为不变;无 host 能力/无网络请求;定位失败/剪贴板拒绝安全降级'
+    brief: 标题右侧 6 位 session id 徽标(点击复制完整 id + toast;标题恢复官方)
+    note: 'B018 落地 + 实机修订;openspec change session-title-id-badge;Web client 订阅官方 sessions list(current 为 id 真相源,cockpit-bridge 同 seam);标题旁插入自建徽标(去 session- 前缀取前 6 位,如 9af69b),hover tooltip 完整 id,点击复制完整 id + 瞬态提示;0.1.0 的标题点击复制已移除——标题恢复官方 disabled 原样;MutationObserver + sessions 订阅 rAF 防抖幂等 reconcile;DOM 结构知识单文件 title-locator;祖先面包屑打开行为不变;无 host 能力/无网络请求;定位失败/剪贴板拒绝安全降级'
   # 自研(local):B019 设置面板底部 DSH 主机系统时钟(24 小时制 + 时区)
   - id: system-clock
     type: package

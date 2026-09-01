@@ -2,21 +2,26 @@
  * Web client entry for dsh-session-title-copy.
  *
  * Subscribes to the official sessions list store (the current-session id
- * truth source, same seam as dsh-cockpit-bridge), locates the current session
- * title in the official conversation header, and makes it click-to-copy the
- * current session id — with a pointer cursor and a transient "已复制" hint.
+ * truth source, same seam as dsh-cockpit-bridge), locates the official
+ * conversation-header breadcrumb, and keeps a small self-owned badge right of
+ * the current session title showing the first 6 characters of the session id
+ * (`session-` prefix stripped). Clicking the badge copies the FULL current
+ * session id; hovering shows a tooltip with the full id and a pointer cursor.
  *
- * DOM-structure knowledge is confined to `title-locator.ts`; all button
- * wiring and feedback lives in `wiring.ts`. This module only wires them to
- * the live document with a strict-failure boundary: any locator/wiring error
- * is swallowed so the official page is never disturbed.
+ * The official title crumb is NEVER touched (it stays disabled, cursor
+ * default): the interaction moves entirely to our own badge element.
+ *
+ * DOM-structure knowledge is confined to `title-locator.ts`; badge wiring and
+ * feedback lives in `wiring.ts`. This module only wires them to the live
+ * document with a strict-failure boundary: any locator/wiring error is
+ * swallowed so the official page is never disturbed.
  *
  * @module dsh-session-title-copy/client
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import type { WiredButtonLike } from './wiring.js'
-import { findCurrentTitleButton } from './title-locator.js'
-import { reconcile, showCopiedHint, writeClipboard } from './wiring.js'
+import type { BadgeElementLike, CopyContext, CopyHooks } from './wiring.js'
+import { BADGE_MARKER, sessionSnippet, showCopiedHint, styleBadge, updateBadge, wireBadge, writeClipboard } from './wiring.js'
+import { findCrumbNav } from './title-locator.js'
 
 export const inject = ['sessions']
 
@@ -32,38 +37,70 @@ function scheduleReconcile(fn: () => void): () => void {
   }
 }
 
+/** Remove every plugin-owned badge (stale header / plugin cleanup). */
+function clearBadges(root: { querySelectorAll(selector: string): NodeListOf<Element> }): void {
+  for (const el of root.querySelectorAll(`[${BADGE_MARKER}]`)) el.remove()
+}
+
+/** Locate an already-inserted badge inside the title zone. */
+function badgeIn(zone: Element): Element | null {
+  return zone.querySelector(`[${BADGE_MARKER}]`)
+}
+
 export function apply(ctx: ClientContext): void {
   let observer: MutationObserver | null = null
   let cleanupHint: (() => void) | null = null
 
-  const copyContext = {
+  const copyContext: CopyContext = {
     currentSessionId: (): string | undefined => ctx.sessions.list.getSnapshot().current,
   }
-  const hooks = {
+  const hooks: CopyHooks = {
     writeClipboard,
-    showHint: (anchor: WiredButtonLike): void => {
+    showHint: (anchor: BadgeElementLike): void => {
       cleanupHint?.()
       cleanupHint = showCopiedHint(anchor)
     },
   }
   const reconcileNow = scheduleReconcile(() => {
     try {
-      reconcile(findCurrentTitleButton(document) as WiredButtonLike | null, copyContext, hooks)
+      const nav = findCrumbNav(document)
+      if (nav === null || !('parentElement' in nav && nav.parentElement !== null && nav.parentElement !== undefined)) {
+        // No session title (hero/blank or structure unknown): drop any stale badge.
+        clearBadges(document)
+        return
+      }
+      const zoneEl = nav.parentElement as Element
+      let badge = badgeIn(zoneEl) as BadgeElementLike | null
+      if (badge === null) {
+        const created = document.createElement('button') as unknown as BadgeElementLike
+        created.setAttribute('type', 'button')
+        styleBadge(created)
+        // Insert right after the breadcrumb nav, inside the official title cluster.
+        zoneEl.insertBefore(created as unknown as Node, (nav as Element).nextSibling)
+        badge = created
+      }
+      wireBadge(badge, copyContext, hooks)
+      // Equality guard: textContent/title writes trigger our own MutationObserver,
+      // so an unconditional update would loop (mutation -> reconcile -> mutation).
+      const id = copyContext.currentSessionId()
+      if (id !== undefined && (badge.textContent !== sessionSnippet(id) || badge.getAttribute('title') !== id)) {
+        updateBadge(badge, id)
+      }
     } catch {
       // Strict-failure path: never let a locator/wiring error break the page.
     }
   })
 
   ctx.effect(() => {
-    // Observe the official header chrome once it exists; the attribute filter
-    // re-arms the button the moment React re-applies `disabled` (re-render or
-    // remount), the session subscription covers store-driven title changes.
+    // Observe the official header chrome once it exists; the childList filter
+    // catches title-area rebuilds (session switch / title generation), the
+    // session subscription covers store-driven changes.
     observer = new MutationObserver(reconcileNow)
     observer.observe(document.body, {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['disabled', 'class'],
+      attributeFilter: ['class'],
     })
     const unsubscribe = ctx.sessions.list.subscribe(reconcileNow)
     reconcileNow()
@@ -73,6 +110,7 @@ export function apply(ctx: ClientContext): void {
       unsubscribe()
       cleanupHint?.()
       cleanupHint = null
+      clearBadges(document)
     }
-  }, 'session-title-copy: current session title wire')
+  }, 'session-title-copy: session id badge sync')
 }

@@ -1,28 +1,24 @@
 /**
- * Wiring + feedback engine: what happens to the located current-title button.
+ * Badge wiring + feedback engine: the session-id short-identifier badge that
+ * sits right of the current session title.
  *
  * Split from `index.ts` so the behaviour is testable without a browser DOM:
- * `wireTitle` / `reconcile` operate over minimal structural interfaces and an
- * injectable clipboard/hint hook; only `showCopiedHint` (the default hint
- * implementation) and `writeClipboard` (the default clipboard transport) touch
- * real `navigator` / `document`.
+ * `sessionSnippet` / `wireBadge` / `updateBadge` / `styleBadge` operate over
+ * minimal structural interfaces and an injectable clipboard/hint hook; only
+ * `showCopiedHint` (the default hint implementation) and `writeClipboard`
+ * (the default clipboard transport) touch real `navigator` / `document`.
  *
- * Why `disabled` must be removed and the click intercepted:
- * - A `disabled` button suppresses the whole event cascade (no click reaches
- *   an ancestor either), so a plain listener never fires.
- * - After removal the official React onClick (`open(summary.id)` — the crumb
- *   is rendered with `disabled: last` but its onClick is unconditional) WOULD
- *   fire and re-open the current session. React 18 delegates its listener to
- *   the container root (capture + bubble), so a native capture listener
- *   registered directly on the button runs first and `stopPropagation()`
- *   blocks the delegated click entirely.
+ * The badge is entirely plugin-owned (self-namespaced marker attribute), so
+ * unlike the v0.1.0 title wiring there is NO official handler to intercept:
+ * the official title crumb is left untouched (disabled, cursor default) and
+ * the click handler lives on our own element.
  *
  * @module dsh-session-title-copy/client/wiring
  */
 import type { ElementLike } from './title-locator.js'
 
-/** Self-owned marker attribute set on wired buttons (collision-free). */
-export const WIRED_MARKER = 'data-dsh-session-title-copy'
+/** Self-owned marker attribute set on the badge element (collision-free). */
+export const BADGE_MARKER = 'data-dsh-session-title-copy-badge'
 /** Self-owned marker attribute on the transient hint element. */
 export const HINT_MARKER = 'data-dsh-session-title-copy-hint'
 /** Hint label. */
@@ -31,18 +27,25 @@ export const HINT_TEXT = '会话 ID 已复制'
 export const HINT_LIFETIME_MS = 1200
 /** Fade-out duration before the hint is removed. */
 export const HINT_FADE_MS = 200
-/** Tooltip on the title button. */
-export const TITLE_TOOLTIP = '点击复制会话 ID'
+/** Session id prefix stripped before taking the visible snippet. */
+const SESSION_ID_PREFIX = 'session-'
+/** Length of the visible short identifier. */
+export const SNIPPET_LENGTH = 6
 
 /** Minimal style surface (real `CSSStyleDeclaration` satisfies it). */
 export interface StyleLike {
+  cssText?: string
+  left?: string
+  top?: string
+  opacity?: string
+  transform?: string
   cursor?: string
 }
 
-/** Minimal title-button surface. */
-export interface WiredButtonLike extends ElementLike {
+/** Minimal badge surface. */
+export interface BadgeElementLike extends ElementLike {
   setAttribute(name: string, value: string): void
-  removeAttribute(name: string): void
+  textContent: string | null
   addEventListener(
     type: string,
     listener: (event: { stopPropagation(): void }) => void,
@@ -60,29 +63,64 @@ export interface CopyContext {
 /** Injectable transport, so tests do not need a real clipboard or DOM. */
 export interface CopyHooks {
   writeClipboard(text: string): Promise<void>
-  showHint(anchor: WiredButtonLike): void
+  showHint(anchor: BadgeElementLike): void
 }
 
 /**
- * Wire ONE title button: marker it, enable it (remove `disabled`, re-applied
- * by the observer when React re-creates/re-renders the crumb), register the
- * capture-phase click handler and the pointer cursor.
- * Idempotent: a button already carrying the marker is left untouched.
- * @param button - the located current-title button.
+ * Derive the visible short identifier: the first 6 characters after the
+ * `session-` prefix. The full id is `session-9af69be9-…`; taking the raw
+ * first 6 characters would render "sessio", which cannot identify anything.
+ * @param id - full session id.
+ * @returns the 6-character snippet.
+ */
+export function sessionSnippet(id: string): string {
+  const stripped = id.startsWith(SESSION_ID_PREFIX) ? id.slice(SESSION_ID_PREFIX.length) : id
+  return stripped.slice(0, SNIPPET_LENGTH)
+}
+
+/**
+ * Apply the own-branded look to a badge element. Everything is inline so the
+ * plugin never depends on official CSS-module classes; official design tokens
+ * are used with fallbacks only.
+ * @param badge - the badge element (production: `<button type="button">`).
+ */
+export function styleBadge(badge: BadgeElementLike): void {
+  if (badge.style === undefined) return
+  badge.style.cssText = [
+    'font-family:var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace)',
+    'font-size:11px',
+    'line-height:16px',
+    'padding:2px 6px',
+    'border-radius:6px',
+    'border:none',
+    'margin:0',
+    'cursor:pointer',
+    'flex:none',
+    'user-select:text',
+    'background:var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,0.14))',
+    'color:var(--dsw-alias-label-secondary, rgba(255,255,255,0.70))',
+  ].join(';')
+}
+
+/**
+ * Wire ONE badge: marker it and register the click handler that copies the
+ * FULL current session id. Idempotent: a badge already carrying the marker is
+ * left untouched. The badge is plugin-owned, so no propagation blocking is
+ * needed against official handlers — `stopPropagation` is kept defensively so
+ * no ancestor listener (including any future official one) sees the click.
+ * @param badge - the badge element.
  * @param ctx - id source.
  * @param hooks - clipboard + hint transport.
  */
-export function wireTitle(button: WiredButtonLike, ctx: CopyContext, hooks: CopyHooks): void {
-  if (button.getAttribute(WIRED_MARKER) !== null) return
-  button.setAttribute(WIRED_MARKER, '')
-  button.setAttribute('title', TITLE_TOOLTIP)
-  button.addEventListener('click', (event) => {
-    // Block the delegated official onClick (would re-open the same session).
+export function wireBadge(badge: BadgeElementLike, ctx: CopyContext, hooks: CopyHooks): void {
+  if (badge.getAttribute(BADGE_MARKER) !== null) return
+  badge.setAttribute(BADGE_MARKER, '')
+  badge.addEventListener('click', (event) => {
     event.stopPropagation()
     const id = ctx.currentSessionId()
     if (id === undefined) return
     hooks.writeClipboard(id)
-      .then(() => hooks.showHint(button))
+      .then(() => hooks.showHint(badge))
       .catch(() => {
         // Clipboard unavailable/denied: silent degrade, never disturb the page.
       })
@@ -90,18 +128,14 @@ export function wireTitle(button: WiredButtonLike, ctx: CopyContext, hooks: Copy
 }
 
 /**
- * Reconcile one render pass: re-enable the button if the official `disabled`
- * attribute has come back (React re-render or remount), ensure wiring, and
- * keep the pointer cursor. Strict-failure safe: callers wrap in try/catch.
- * @param button - located current-title button, or null (structure unknown).
- * @param ctx - id source.
- * @param hooks - clipboard + hint transport.
+ * Refresh the badge content for the current session: visible 6-char snippet
+ * plus a tooltip carrying the FULL id.
+ * @param badge - the badge element.
+ * @param fullId - current session id.
  */
-export function reconcile(button: WiredButtonLike | null, ctx: CopyContext, hooks: CopyHooks): void {
-  if (button === null) return
-  if (button.hasAttribute('disabled')) button.removeAttribute('disabled')
-  wireTitle(button, ctx, hooks)
-  if (button.style !== undefined) button.style.cursor = 'pointer'
+export function updateBadge(badge: BadgeElementLike, fullId: string): void {
+  badge.textContent = sessionSnippet(fullId)
+  badge.setAttribute('title', fullId)
 }
 
 /**
@@ -123,7 +157,7 @@ export function writeClipboard(text: string): Promise<void> {
 export interface HintElementLike {
   setAttribute(name: string, value: string): void
   remove(): void
-  readonly style: { cssText: string; left?: string; top?: string; opacity?: string; transform?: string }
+  readonly style: StyleLike
   textContent: string | null
 }
 
@@ -137,11 +171,11 @@ export interface HintDocumentLike {
  * Show the transient "已复制" hint below the anchor, auto-removed after a
  * short lifetime. Returns a cleanup function (also removes a hint that is
  * mid-fade). Never affects layout: `position: fixed` + `pointer-events: none`.
- * @param anchor - the title button that was clicked (used for positioning).
+ * @param anchor - the badge that was clicked (used for positioning).
  * @param doc - document (injectable for tests).
  * @returns cleanup function.
  */
-export function showCopiedHint(anchor: WiredButtonLike, doc?: HintDocumentLike): () => void {
+export function showCopiedHint(anchor: BadgeElementLike, doc?: HintDocumentLike): () => void {
   const documentLike = doc ?? (document as unknown as HintDocumentLike)
   const el = documentLike.createElement('div')
   el.setAttribute(HINT_MARKER, '')

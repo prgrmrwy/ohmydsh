@@ -1,7 +1,7 @@
 {
   "name": "dsh-session-title-copy",
-  "version": "0.1.0",
-  "description": "Click the current session title in the DSH web conversation header to copy its session id; hover shows a pointer cursor with a transient copied hint",
+  "version": "0.1.1",
+  "description": "Show the current session id's 6-char snippet next to the DSH web conversation title; click the badge to copy the full session id with a transient hint",
   "license": "MIT",
   "type": "module",
   "main": "./lib/index.js",
