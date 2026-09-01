@@ -17,6 +17,18 @@
 
 ## 讨论中
 
+### [B019] 设置面板底部 DSH 主机系统时钟（24 小时制 + 时区）
+- **状态**: 实施中
+- **优先级**: P2
+- **背景 / 动机**: 多台设备（可能不同时区）经 SSH 隧道访问同一台运行 DSH 的主机时，浏览器本地时间 ≠ DSH 主机时间；设置页没有能一眼确认「当前 DSH 跑在哪台机器、现在几点」的位置。在设置面板底部加一个 **DSH 主机系统** 的时钟（24 小时制 + 时区），与浏览器所在设备无关。
+- **要点**:
+  - 落地形态:本地 Host+Web 包 `dsh-system-clock`(host 半区 + client bundle,同 session-title-copy 构建形态);
+  - 数据链路(关键):时间真相源必须是 **host 进程**,不能用浏览器 `new Date()`。host 经通用 `connection.rpc` 通道 `/dsh-system-clock`(authority loopback,接线同订阅插件的 `/subscriptions-auth`)暴露只读 `now` 采样:主机 epoch / IANA 时区 / UTC 偏移 / hostname;headless 无 connection 时静默不注册;
+  - 实时机制:client 一次采样 + skew 引擎本地每秒 tick,`Intl.DateTimeFormat({ timeZone: 主机时区, hour12: false })` 渲染 → DST 天然正确;60s 周期 + `visibilitychange` 重采样校准,失败保留旧 skew 不中断;
+  - 边界:设置官方 `settings.section`(id system-clock,order 300→导航最底部);采样不可达显示「主机时钟不可用」降级态,绝不静默回退浏览器时间(多机下最误导);只读、零配置、无外部网络外呼、不改官方 DOM/class;
+  - hostname 属加量:用户「多台设备」场景,展示主机名用于区分机器。
+- **更新**: 2026-09-01 新增;openspec change `settings-system-clock` 已 propose;实现 + 单测/typecheck/build 完成(21/21,host/client 双 smoke),隔离 home sync 幂等,openspec 已归档(`2026-09-01-settings-system-clock`,主 spec 生成),待合入 main + 物化 + 重启人工验收。
+
 ### [B018] 会话标题点击复制 session id
 - **状态**: 已完成
 - **优先级**: P2

@@ -77,6 +77,14 @@ customizations:
     enabled: true
     brief: 对话区当前会话标题点击复制 session id(hover pointer + 瞬态反馈)
     note: 'B018 落地;openspec change session-title-copy;Web client 订阅官方 sessions list(current 为 id 真相源,cockpit-bridge 同 seam);移除标题 crumb disabled 恢复事件 + capture 阶段 click stopPropagation 阻断 React 委托的 open(current);MutationObserver + sessions 订阅 rAF 防抖幂等 reconcile;DOM 结构知识单文件 title-locator;祖先面包屑打开行为不变;无 host 能力/无网络请求;定位失败/剪贴板拒绝安全降级'
+  # 自研(local):B019 设置面板底部 DSH 主机系统时钟(24 小时制 + 时区)
+  - id: system-clock
+    type: package
+    source: local
+    version: 0.1.0
+    enabled: true
+    brief: 设置面板底部 DSH 主机系统时钟(24h + 时区 + hostname)
+    note: 'B019 落地;openspec change settings-system-clock;Host+Web bundle:host 经通用 connection RPC 通道 /dsh-system-clock(authority loopback,接线同 subscriptions /subscriptions-auth)暴露只读 now 采样(主机 epoch / IANA 时区 / UTC 偏移 / hostname);web 注册官方 settings.section(id system-clock,order 300→设置导航最底部),一次采样 + skew 引擎本地每秒 tick,Intl timeZone + hour12:false 渲染,DST 正确;60s 周期 + visibilitychange 重同步;采样不可达显式降级,不静默回退浏览器时间;只读、零配置、无外部网络外呼'
   - id: ws
     type: skill
     enabled: true
