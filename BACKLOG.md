@@ -17,6 +17,18 @@
 
 ## 讨论中
 
+### [B018] 会话标题点击复制 session id
+- **状态**: 实施中
+- **优先级**: P2
+- **背景 / 动机**: 开发/调试时常要当前 session id(引用驾驶舱、脚本、日志排查),官方对话区 header 标题是 disabled 按钮且 cursor: default,没有任何取 id 入口。让标题点击复制当前 session id + hover pointer,零成本高频收益。
+- **要点**:
+  - 落地形态:本地 Web client 包 `dsh-session-title-copy`(host 空入口 + client bundle,同 dsh-cockpit-bridge 形态;缺 host 入口会重演 v0.1.0 启动即崩事故);
+  - id 真相源 = 官方 sessions list 的 `current`(与 cockpit-bridge 同 seam),无 host 能力、无网络请求;
+  - 交互机制:移除标题 crumb `disabled` 恢复事件,按钮 capture 阶段 click `stopPropagation()` 阻断 React 委托的 `open(current)`;MutationObserver + sessions 订阅 rAF 防抖幂等 reconcile(Rc.2 下「React 只为 props diff 写 DOM,disabled 属性被外部移除后不会被重写」,observer 兜底重建场景);
+  - 边界:只改当前标题一个按钮;祖先面包屑「点击打开」不变;DOM 知识单文件 `title-locator.ts`;定位失败/剪贴板拒绝安全降级;
+  - 设计过程与替代方案(overlay 遮挡、textContent 反查、改全局 CSS)见 openspec change `session-title-copy`(待归档)。
+- **更新**: 2026-09-01 新增;openspec change 已 propose;实现 + 单测/typecheck/build 完成,待 sync 物化 + 重启人工验收。
+
 ### [B017] 迁出或删除 packages/dsh-federation(联邦路线已归档)
 - **状态**: 实施中(本仓侧已完成,待 cockpit 侧提取资产)
 - **优先级**: P1
