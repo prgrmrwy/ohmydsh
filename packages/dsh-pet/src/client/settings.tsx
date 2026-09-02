@@ -459,13 +459,20 @@ function SkillsTab(): JSX.Element {
 
   const refresh = useCallback(async () => {
     try {
-      setState(
-        (await petApi.skills()) as unknown as {
-          revisions: PetSkillRevision[]
-          selections: PetSkillSelection[]
-          projection: PetProjectionEntry[]
-        },
-      )
+      // Normalize every list. Replacing state wholesale with the raw response
+      // makes a missing field `undefined`, and the first `.length` read then
+      // throws during render — the whole tab blanks out and its buttons stop
+      // responding, with no visible error to explain why.
+      const result = (await petApi.skills()) as unknown as Partial<{
+        revisions: PetSkillRevision[]
+        selections: PetSkillSelection[]
+        projection: PetProjectionEntry[]
+      }>
+      setState({
+        revisions: result.revisions ?? [],
+        selections: result.selections ?? [],
+        projection: result.projection ?? [],
+      })
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
