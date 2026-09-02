@@ -60,6 +60,7 @@ export function clampPosition(
 export function readPosition(
   viewport: { width: number; height: number },
   storage: Pick<Storage, 'getItem' | 'setItem'> | undefined = globalThis.localStorage,
+  size: number = PET_SIZE,
 ): PetPosition {
   try {
     const raw = storage?.getItem(POSITION_KEY)
@@ -71,7 +72,10 @@ export function readPosition(
     if (!Number.isFinite(parsed.x) || !Number.isFinite(parsed.y)) {
       return defaultPosition(viewport)
     }
-    return clampPosition({ x: parsed.x, y: parsed.y }, viewport)
+    // Clamp against the CURRENT size. Using the default constant re-clamps a
+    // resized mascot on every load, so a stored position silently drifts
+    // after a restart.
+    return clampPosition({ x: parsed.x, y: parsed.y }, viewport, size)
   } catch {
     return defaultPosition(viewport)
   }
@@ -88,8 +92,9 @@ export function writePosition(
   position: PetPosition,
   viewport: { width: number; height: number },
   storage: Pick<Storage, 'getItem' | 'setItem'> | undefined = globalThis.localStorage,
+  size: number = PET_SIZE,
 ): PetPosition {
-  const clamped = clampPosition(position, viewport)
+  const clamped = clampPosition(position, viewport, size)
   try {
     storage?.setItem(POSITION_KEY, JSON.stringify(clamped))
   } catch {

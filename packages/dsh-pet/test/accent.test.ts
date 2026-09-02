@@ -168,3 +168,28 @@ describe('the size is bounded and keeps Pet reachable', () => {
     expect(clampPosition({ x: 999, y: 999 }, viewport, 56)).toEqual({ x: 444, y: 344 })
   })
 })
+
+describe('appearance survives a restart', () => {
+  it('keeps a small mascot where the user dropped it', async () => {
+    const { readPosition, writePosition } = await import('../src/client/position.js')
+    const viewport = { width: 1000, height: 800 }
+
+    // A 56px mascot may sit up to 944/744; the 72px default caps at 928/728,
+    // so re-reading with the constant silently pulls it back on every load.
+    writePosition({ x: 940, y: 740 }, viewport, globalThis.localStorage, 56)
+
+    expect(readPosition(viewport, globalThis.localStorage, 56)).toEqual({ x: 940, y: 740 })
+  })
+
+  it('does not drift across repeated restarts', async () => {
+    const { readPosition, writePosition } = await import('../src/client/position.js')
+    const viewport = { width: 1000, height: 800 }
+    writePosition({ x: 940, y: 740 }, viewport, globalThis.localStorage, 56)
+
+    const first = readPosition(viewport, globalThis.localStorage, 56)
+    const second = readPosition(viewport, globalThis.localStorage, 56)
+
+    expect(second).toEqual(first)
+    expect(first).toEqual({ x: 940, y: 740 })
+  })
+})
