@@ -94,3 +94,57 @@ describe('choosing a directory fills the field', () => {
     expect(button(host, '选择当前目录')).toBeUndefined()
   })
 })
+
+describe('the directory browser tolerates an incomplete listing', () => {
+  it('renders when the listing omits its arrays', async () => {
+    stubApi({ revisions: [], selections: [], projection: [] })
+    // A type assertion only CLAIMS these fields exist; a response missing one
+    // would throw on the first `.length` or `.map` read and blank the tab.
+    setDirectoryLister(async () => ({ path: '/Users/me' }) as never)
+    const host = await mountSkills()
+
+    await act(async () => {
+      button(host, '\u6d4f\u89c8\u2026')?.click()
+    })
+
+    expect(button(host, '\u9009\u62e9\u5f53\u524d\u76ee\u5f55')).toBeDefined()
+  })
+})
+
+describe('the mascot menu follows the Skill set', () => {
+  it('reloads capabilities when Settings signals a change', async () => {
+    const calls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        calls.push(String(url))
+        return {
+          status: 200,
+          text: async () =>
+            JSON.stringify({
+              ok: true,
+              data: { capabilities: [], tasks: [], lifecycle: { phase: 'ready' } },
+            }),
+        }
+      }),
+    )
+    const host = document.createElement('div')
+    host.setAttribute('data-shell-overlay', '')
+    document.body.appendChild(host)
+    const { PetOverlay } = await import('../src/client/overlay.js')
+    const { PET_SKILLS_EVENT } = await import('../src/client/accent.js')
+    await act(async () => {
+      createRoot(host).render(createElement(PetOverlay as never, { openSession: () => {} } as never))
+    })
+    const before = calls.filter(url => url.includes('capabilities')).length
+
+    // Settings and the mascot are separate mount points, so without the
+    // broadcast the menu kept whatever it fetched at mount and a new Skill
+    // only appeared after a page reload.
+    await act(async () => {
+      globalThis.dispatchEvent(new Event(PET_SKILLS_EVENT))
+    })
+
+    expect(calls.filter(url => url.includes('capabilities')).length).toBeGreaterThan(before)
+  })
+})

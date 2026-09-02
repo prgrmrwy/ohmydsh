@@ -14,6 +14,7 @@ import {
   DEFAULT_SIZE_PX,
   PET_ACCENT_EVENT,
   PET_APPEARANCE_EVENT,
+  PET_SKILLS_EVENT,
   PET_SIZES,
   resolveAccent,
 } from './accent.js'
@@ -134,8 +135,26 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
         if (!cancelled) setDegraded(cause instanceof Error ? cause.message : String(cause))
       }
     })()
+
+    // Capabilities move with the Skill set, so a Skill added or enabled in
+    // Settings must appear in the menu without a page reload. Settings and the
+    // mascot are separate mount points, hence the broadcast; the interval is a
+    // backstop for changes made outside this browser.
+    const reloadCapabilities = (): void => {
+      void petApi
+        .capabilities()
+        .then(list => {
+          if (!cancelled) setCapabilities(list.capabilities)
+        })
+        .catch(() => undefined)
+    }
+    globalThis.addEventListener(PET_SKILLS_EVENT, reloadCapabilities)
+    const timer = setInterval(reloadCapabilities, 10_000)
+
     return () => {
       cancelled = true
+      clearInterval(timer)
+      globalThis.removeEventListener(PET_SKILLS_EVENT, reloadCapabilities)
     }
   }, [])
 

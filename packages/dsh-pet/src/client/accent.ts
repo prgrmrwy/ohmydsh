@@ -70,6 +70,15 @@ export function resolveAccent(id: string | undefined): PetAccent {
 /** Event announcing that the glyph or size changed. */
 export const PET_APPEARANCE_EVENT = 'dsh-pet:appearance-changed'
 
+/**
+ * Event announcing that the installed Skill set changed.
+ *
+ * Settings and the mascot are separate mount points, so adding or enabling a
+ * Skill must tell the menu to reload rather than leave it showing whatever it
+ * fetched when it mounted.
+ */
+export const PET_SKILLS_EVENT = 'dsh-pet:skills-changed'
+
 /** The glyph shown when the user has not chosen one. */
 export const DEFAULT_GLYPH = '🐾'
 

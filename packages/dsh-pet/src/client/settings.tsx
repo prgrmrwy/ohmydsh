@@ -15,6 +15,7 @@ import {
   DEFAULT_GLYPH,
   PET_ACCENT_EVENT,
   PET_APPEARANCE_EVENT,
+  PET_SKILLS_EVENT,
   normalizeGlyph,
   PET_ACCENTS,
   PET_SIZES,
@@ -488,6 +489,9 @@ function SkillsTab(): JSX.Element {
 
   const refresh = useCallback(async () => {
     try {
+      // Tell a mounted mascot the Skill set may have changed, so its menu
+      // updates without a page reload.
+      globalThis.dispatchEvent?.(new Event(PET_SKILLS_EVENT))
       // Normalize every list. Replacing state wholesale with the raw response
       // makes a missing field `undefined`, and the first `.length` read then
       // throws during render — the whole tab blanks out and its buttons stop
@@ -563,7 +567,7 @@ function SkillsTab(): JSX.Element {
       {browsing !== undefined ? (
         <div className="dshpet-browser">
           <div className="dshpet-crumbs">
-            {browsing.crumbs.map(crumb => (
+            {(browsing.crumbs ?? []).map(crumb => (
               <button
                 key={crumb.path}
                 type="button"
@@ -586,10 +590,10 @@ function SkillsTab(): JSX.Element {
             <code className="dshpet-code">{browsing.path}</code>
           </p>
           <div className="dshpet-browser-list">
-            {browsing.entries.length === 0 ? (
+            {(browsing.entries ?? []).length === 0 ? (
               <p className="dshpet-empty">这个目录下没有子目录。</p>
             ) : (
-              browsing.entries.map(entry => (
+              (browsing.entries ?? []).map(entry => (
                 <button
                   key={entry.path}
                   type="button"
