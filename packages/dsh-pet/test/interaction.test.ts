@@ -96,3 +96,57 @@ describe('hover opens and closes the capability menu', () => {
   // than weaken it into something that passes for the wrong reason, the
   // source-level guard in `client.test.ts` covers the same contract.
 })
+
+/** jsdom has no `PointerEvent`; MouseEvent carries the fields React reads. */
+function pointer(type: string, clientX: number, clientY: number): Event {
+  const event = new MouseEvent(type, { bubbles: true, clientX, clientY })
+  Object.defineProperty(event, 'pointerId', { value: 1 })
+  return event
+}
+
+describe('a drag does not register as a click', () => {
+  it('keeps the panel closed after moving the mascot', async () => {
+    const { host, root } = await mountPet()
+    const mascot = host.querySelector('.dshpet-mascot') as HTMLElement
+    mascot.setPointerCapture = () => {}
+    mascot.releasePointerCapture = () => {}
+
+    // A real drag: press, move well past the 2px threshold, release.
+    mascot.dispatchEvent(
+      pointer('pointerdown', 100, 100),
+    )
+    mascot.dispatchEvent(
+      pointer('pointermove', 200, 180),
+    )
+    mascot.dispatchEvent(
+      pointer('pointerup', 200, 180),
+    )
+    mascot.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await settle()
+
+    // Releasing at the new position must not toggle the panel: moving Pet
+    // would open it every single time.
+    expect(host.querySelector('.dshpet-panel')).toBeNull()
+    void root
+  })
+
+  it('still opens the panel on a click that did not move', async () => {
+    const { host } = await mountPet()
+    const mascot = host.querySelector('.dshpet-mascot') as HTMLElement
+    mascot.setPointerCapture = () => {}
+    mascot.releasePointerCapture = () => {}
+
+    mascot.dispatchEvent(
+      pointer('pointerdown', 100, 100),
+    )
+    mascot.dispatchEvent(
+      pointer('pointerup', 100, 100),
+    )
+    mascot.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await settle()
+
+    // The suppression must be scoped to real drags, or the mascot becomes
+    // unclickable.
+    expect(host.querySelector('.dshpet-panel')).not.toBeNull()
+  })
+})

@@ -188,3 +188,44 @@ describe('the Task panel survives an incomplete response', () => {
     expect(host.querySelector('.dshpet-panel')).not.toBeNull()
   })
 })
+
+describe('a stored setting keeps the editor open when the save fails', () => {
+  it('stays in edit mode and surfaces the error instead of discarding it', async () => {
+    // Reject every write, as a Host-side validation failure would.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        status: 400,
+        text: async () =>
+          JSON.stringify({ ok: false, error: 'INVALID_REQUEST', message: '不接受该取值' }),
+      })),
+    )
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const { PetSettingsSection } = await import('../src/client/settings.js')
+    await act(async () => {
+      createRoot(host).render(
+        createElement(PetSettingsSection, { initialTab: 'general' as const }),
+      )
+    })
+
+    const editButtons = [...host.querySelectorAll('button')].filter(
+      item => item.textContent === '编辑',
+    ) as HTMLButtonElement[]
+    await act(async () => {
+      editButtons[editButtons.length - 1]?.click()
+    })
+    expect(button(host, '保存')).toBeDefined()
+
+    await act(async () => {
+      button(host, '保存')?.click()
+    })
+
+    // Returning to read-only on failure would silently discard the edit with
+    // no way to correct the rejected value. Source-text assertions could not
+    // detect this: the strings they matched stayed exactly where they were.
+    expect(button(host, '保存')).toBeDefined()
+    expect(button(host, '取消')).toBeDefined()
+    expect(host.textContent).toContain('不接受该取值')
+  })
+})
