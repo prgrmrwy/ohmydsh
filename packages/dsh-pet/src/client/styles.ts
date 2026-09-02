@@ -163,4 +163,17 @@ export const PET_CSS = `
 .dshpet-browser-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
   white-space:nowrap}
 .dshpet-browser-chevron{flex:none;color:var(--dsw-alias-label-tertiary,#81858c)}
+/* Accent swatches: each shows the mascot glyph on its own tint, so the
+   choice previews the actual result rather than an abstract colour chip. */
+.dshpet-swatches{display:flex;flex-wrap:wrap;gap:8px}
+.dshpet-settings .dshpet-swatch{width:36px;height:36px;padding:0;border-radius:50%;
+  display:inline-flex;align-items:center;justify-content:center;font-size:17px;
+  line-height:1;cursor:pointer;
+  border:1px solid var(--dsw-alias-border-l2,#0000001a);
+  box-shadow:0 1px 3px rgba(0,0,0,.10);transition:transform .12s ease}
+.dshpet-settings .dshpet-swatch:hover{transform:scale(1.08)}
+.dshpet-settings .dshpet-swatch[data-selected="true"]{
+  border:2px solid var(--dsw-alias-label-primary,#0f1115)}
+.dshpet-settings .dshpet-swatch:focus-visible{
+  outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:2px}
 `

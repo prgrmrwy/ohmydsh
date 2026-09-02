@@ -48,10 +48,15 @@ describe('standing instructions are package-owned but copied', () => {
     ) as { files: string[] }
 
     // Omitting it from `files` would publish a package that throws at boot.
-    expect(pkg.files).toContain('AGENTS.md')
-    await expect(readFile(path.resolve(__dirname, '..', 'AGENTS.md'), 'utf8')).resolves.toContain(
-      'DSH Pet executor session',
-    )
+    expect(pkg.files).toContain('executor-instructions.md')
+    await expect(
+      readFile(path.resolve(__dirname, '..', 'executor-instructions.md'), 'utf8'),
+    ).resolves.toContain('DSH Pet executor session')
+
+    // NOT `AGENTS.md` in the package: that is DSH's directory-level
+    // instruction convention, so anyone working inside `packages/dsh-pet`
+    // would load these executor instructions as their own.
+    expect(pkg.files).not.toContain('AGENTS.md')
   })
 })
 

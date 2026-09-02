@@ -16,7 +16,17 @@ import { fileURLToPath } from 'node:url'
 import { OWNER_ONLY_DIR_MODE, type PetPaths } from './paths.js'
 import { PET_WORKSPACE_TITLE, type PetSourceKind } from '../wire.js'
 
-/** Package-owned standing instructions file, edited as ordinary Markdown. */
+/**
+ * Package-owned standing instructions, edited as ordinary Markdown.
+ *
+ * NOT named `AGENTS.md` in the package: that filename is DSH's directory-level
+ * instruction convention, so anyone working inside `packages/dsh-pet` would
+ * load these executor instructions as their own. It is only named `AGENTS.md`
+ * once materialized into the Pet Workspace, where that IS the intent.
+ */
+const STANDING_INSTRUCTIONS_SOURCE = 'executor-instructions.md'
+
+/** Filename inside the Pet Workspace, where the convention is wanted. */
 const STANDING_INSTRUCTIONS_FILE = 'AGENTS.md'
 
 /**
@@ -34,11 +44,11 @@ export async function readStandingInstructions(): Promise<string> {
   const here = path.dirname(fileURLToPath(import.meta.url))
   // `lib/host/` at runtime, `src/host/` in tests: walk up to the package root.
   for (const candidate of ['..', '../..', '../../..']) {
-    const file = path.resolve(here, candidate, STANDING_INSTRUCTIONS_FILE)
+    const file = path.resolve(here, candidate, STANDING_INSTRUCTIONS_SOURCE)
     const text = await readFile(file, 'utf8').catch(() => undefined)
     if (text !== undefined) return text
   }
-  throw new Error(`dsh-pet: ${STANDING_INSTRUCTIONS_FILE} is missing from the package`)
+  throw new Error(`dsh-pet: ${STANDING_INSTRUCTIONS_SOURCE} is missing from the package`)
 }
 
 

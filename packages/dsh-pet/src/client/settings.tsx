@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { resetPosition } from './position.js'
+import { PET_ACCENTS, readAccent, writeAccent, type PetAccentId } from './accent.js'
 import { petApi, type PetConfig } from './api.js'
 import type { PetProjectionEntry, PetSkillRevision, PetSkillSelection } from '../wire.js'
 
@@ -186,6 +186,7 @@ export function PetSettingsSection(props: { initialTab?: PetSettingsTab } = {}):
 /** General: the followed model, appearance reset and default context policy. */
 function GeneralTab(): JSX.Element {
   const [config, setConfig] = useState<PetConfig | undefined>(undefined)
+  const [accent, setAccent] = useState<PetAccentId>(() => readAccent().id)
   const [presetOptions, setPresetOptions] = useState<
     readonly { value: string; label: string }[]
   >([])
@@ -256,20 +257,30 @@ function GeneralTab(): JSX.Element {
       <section className="dshpet-group">
         <h3 className="dshpet-group-title">外观</h3>
         <p className="dshpet-item-hint">
-          把桌宠移回默认位置（右下角）。当前位置保存在本浏览器中。
+          桌宠配色。保存在本浏览器中，不影响其他设备。
         </p>
-        <div className="dshpet-actions">
-          <button
-            type="button"
-            className="dshpet-action"
-            onClick={() => {
-              // Broadcasts, so a mounted Pet snaps back at once instead of
-              // waiting for a page reload.
-              resetPosition()
-            }}
-          >
-            重置桌宠位置
-          </button>
+        <div className="dshpet-swatches" role="radiogroup" aria-label="桌宠配色">
+          {PET_ACCENTS.map(item => (
+            <button
+              key={item.id}
+              type="button"
+              role="radio"
+              aria-checked={accent === item.id}
+              aria-label={item.label}
+              title={item.label}
+              className="dshpet-swatch"
+              data-selected={accent === item.id}
+              style={{ background: item.background, color: item.foreground }}
+              onClick={() => {
+                // Broadcasts, so a mounted Pet recolors at once instead of
+                // waiting for a page reload.
+                writeAccent(item.id)
+                setAccent(item.id)
+              }}
+            >
+              🐾
+            </button>
+          ))}
         </div>
       </section>
 

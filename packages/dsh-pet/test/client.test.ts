@@ -791,22 +791,17 @@ describe('settings expose the configuration they claim to', () => {
     expect(settings).toContain('agentPreset: next')
   })
 
-  it('resets the Pet position through a broadcast, not a bare storage delete', async () => {
+  it('applies the accent through a broadcast, not just storage', async () => {
     const { readFile } = await import('node:fs/promises')
-    const position = await readFile(
-      path.resolve(__dirname, '..', 'src', 'client', 'position.ts'),
-      'utf8',
-    )
-    const overlay = await readFile(
-      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
-      'utf8',
-    )
+    const [accent, overlay] = await Promise.all([
+      readFile(path.resolve(__dirname, '..', 'src', 'client', 'accent.ts'), 'utf8'),
+      readFile(path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'), 'utf8'),
+    ])
 
-    // The overlay reads the stored position once into React state, so
-    // clearing the key alone did nothing until a reload — the button looked
-    // broken because it was.
-    expect(position).toContain('PET_POSITION_RESET_EVENT')
-    expect(overlay).toContain('PET_POSITION_RESET_EVENT')
+    // The overlay reads the accent once into React state, so writing storage
+    // alone would appear to do nothing until the page was reloaded.
+    expect(accent).toContain('PET_ACCENT_EVENT')
+    expect(overlay).toContain('PET_ACCENT_EVENT')
   })
 
   it('offers a Host directory picker for Skill import', async () => {
@@ -886,7 +881,7 @@ describe('stored settings share one read-only-until-edit pattern', () => {
 
     expect(markup).toContain('模型')
     expect(markup).toContain('Agent 预设')
-    expect(markup).toContain('重置桌宠位置')
+    expect(markup).toContain('桌宠配色')
     // The tab strip is Chinese too.
     expect(markup).toContain('通用')
   })

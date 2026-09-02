@@ -9,10 +9,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { PetApiError, petApi } from './api.js'
+import { PET_ACCENT_EVENT, readAccent } from './accent.js'
 import {
   clampPosition,
-  defaultPosition,
-  PET_POSITION_RESET_EVENT,
   readPosition,
   writePosition,
   type PetPosition,
@@ -55,6 +54,7 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
 
   const viewport = useViewport()
   const [position, setPosition] = useState<PetPosition>(() => readPosition(viewport))
+  const [accent, setAccent] = useState(() => readAccent())
   const [mode, setMode] = useState<Mode>('closed')
   const [capabilities, setCapabilities] = useState<readonly PetCapability[]>([])
   const [degraded, setDegraded] = useState<string | undefined>(undefined)
@@ -68,13 +68,14 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   /** True when the gesture that just ended actually moved Pet. */
   const draggedRef = useRef(false)
 
-  // Settings can clear the stored position; the surface must snap back at
-  // once rather than waiting for a reload, which is why the reset broadcasts.
+  // Settings can change the accent; the surface reads it once into state, so
+  // the change must be broadcast to take effect without a reload.
   useEffect(() => {
-    const onReset = (): void => setPosition(defaultPosition(viewport))
-    globalThis.addEventListener(PET_POSITION_RESET_EVENT, onReset)
-    return () => globalThis.removeEventListener(PET_POSITION_RESET_EVENT, onReset)
-  }, [viewport.width, viewport.height])
+    const onAccent = (): void => setAccent(readAccent())
+    globalThis.addEventListener(PET_ACCENT_EVENT, onAccent)
+    return () => globalThis.removeEventListener(PET_ACCENT_EVENT, onAccent)
+  }, [])
+
 
   // Re-clamp whenever the viewport changes so Pet can never be stranded.
   useEffect(() => {
@@ -255,6 +256,10 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
       <button
         type="button"
         className="dshpet-mascot"
+        // Inline, because the palette is user data: emitting one rule per
+        // accent into the injected stylesheet would couple the CSS to the
+        // palette and grow it for options nobody selected.
+        style={{ background: accent.background, color: accent.foreground }}
         data-dragging={dragging.current !== undefined}
         aria-label="DSH Pet"
         aria-expanded={mode !== 'closed'}
