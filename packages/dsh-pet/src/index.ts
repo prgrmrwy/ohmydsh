@@ -215,6 +215,23 @@ async function initialize(
     ),
   )
 
+  // Account every live executor to the Pet Workspace. Attaching only at
+  // creation leaves behind any executor made before this existed, plus any
+  // whose attach failed — they keep working but never appear under DSH Pet.
+  await lifecycle.contain('Pet workspace accounting', async () => {
+    const workspace = ctx.workspaceRegistry.get(workspaceId as never)
+    if (workspace === undefined) return
+    for (const task of repository.listTasks()) {
+      if (task.archivedAt !== undefined) continue
+      const sessionId = task.executorSessionId
+      if (sessionId === undefined) continue
+      // `attachSession` is idempotent for an already-accounted session, and a
+      // failure here must not block startup: mis-filing in the sidebar is
+      // cosmetic next to refusing to serve the Task at all.
+      await workspace.attachSession(sessionId as never).catch(() => undefined)
+    }
+  })
+
   // Compare stored archive state against the durable archived set before any
   // new Invocation is accepted.
   await lifecycle.contain('Pet archive reconciliation', () =>
