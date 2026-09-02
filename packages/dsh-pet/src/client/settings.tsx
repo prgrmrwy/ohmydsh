@@ -1,7 +1,7 @@
 /**
  * Pet settings section: four stable tabs.
  *
- * General, Skills, Bindings and 诊断信息s are a FIXED information
+ * General, Skills and Diagnostics.
  * architecture — the overlay and Task panel deliberately do not duplicate
  * installation, binding editing or diagnostics.
  *
@@ -423,19 +423,6 @@ function GeneralTab(): JSX.Element {
  * and keeps typing the path, which still works.
  */
 let directoryPicker: (() => Promise<string | undefined>) | undefined
-
-/** Workspaces the browser can see, for the Bindings picker. */
-let workspaceLister: (() => readonly { id: string; label: string; path?: string }[]) | undefined
-
-/**
- * Publish the workspace lister.
- * @param lister - Returns the workspaces currently known to the browser.
- */
-export function setWorkspaceLister(
-  lister: (() => readonly { id: string; label: string; path?: string }[]) | undefined,
-): void {
-  workspaceLister = lister
-}
 
 /** One directory level from the Host, for the in-app browser. */
 export interface PetDirectoryListing {
