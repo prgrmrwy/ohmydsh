@@ -24,6 +24,7 @@ import {
   type PetSizeId,
 } from './accent.js'
 import { petApi, type PetConfig } from './api.js'
+import { PET_EXECUTOR_PRESET } from '../wire.js'
 import type { PetProjectionEntry, PetSkillRevision, PetSkillSelection } from '../wire.js'
 
 /** The four stable tabs. */
@@ -275,8 +276,13 @@ function GeneralTab(): JSX.Element {
       <section className="dshpet-group">
         <h3 className="dshpet-group-title">Agent 预设</h3>
         <p className="dshpet-item-hint">
-          这里选的是 <strong>DSH 的</strong> Agent 预设（决定执行会话装载哪些插件与工具），
-          不是 Pet 专有的东西——Pet 不自带预设。通常保持「默认组合」即可。
+          Agent 预设决定执行会话装载哪些插件与工具。默认使用
+          <strong>「Pet 执行会话」</strong>——它与官方 standard 的唯一差别是
+          不加载本地 Skill 发现，因此只有你在 Pet 里启用的 Skill 对执行会话可见。
+        </p>
+        <p className="dshpet-error">
+          改成 standard 等其它预设会让全局安装的 Skill 也对执行会话可见，
+          相当于放宽授权范围。除非你明确需要，否则保持默认。
         </p>
         <p className="dshpet-item-hint">
           Pet 自己的上下文由常驻指令和每次调用的任务信封提供：告诉执行会话它是 Pet
@@ -285,11 +291,13 @@ function GeneralTab(): JSX.Element {
         </p>
         <StoredField
           label="预设"
-          value={config?.agentPreset ?? ''}
-          emptyText="默认组合"
+          // Unset means Pet's own executor preset, not the Host default: it is
+          // what actually composes the executor, so the field must say so.
+          value={config?.agentPreset ?? PET_EXECUTOR_PRESET}
+          emptyText="Pet 执行会话（推荐）"
           // Enumerated from what this Host offers: a typed name could refer to
           // a composition that does not exist.
-          options={[{ value: '', label: '默认组合' }, ...presetOptions]}
+          options={presetOptions}
           onSave={async next => {
             const updated = await petApi.updateConfig({ agentPreset: next })
             setConfig(updated)

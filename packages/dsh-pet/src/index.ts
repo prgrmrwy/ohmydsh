@@ -44,6 +44,7 @@ import { registerPetTools } from './host/tools.js'
 import { currentAllowlist } from './host/skill-provider.js'
 import { removeLegacyState } from './host/migrate.js'
 import { petDomainSpec } from './host/spec.js'
+import { PET_EXECUTOR_PRESET } from './wire.js'
 import {
   ensurePetWorkspace,
   inspectWorkspace,
@@ -52,14 +53,6 @@ import {
 
 export const name = 'dsh-pet'
 
-/**
- * Preset composing a Pet executor WITHOUT local-root Skill discovery.
- *
- * `standard` loads `skill-filesystem`, which would make every globally
- * installed Skill visible to the executor. Pet's scoped provider is additive
- * and cannot subtract it, so exclusion has to happen in the preset.
- */
-export const PET_EXECUTOR_PRESET = 'dsh-pet-executor'
 
 export const inject = [
   // `storage` is required in addition to `storageDomain`: the backend

@@ -13,6 +13,16 @@ export const PET_PLUGIN_ID = 'dsh-pet'
 export const PET_WORKSPACE_TITLE = 'DSH Pet'
 
 /** Exact Host routes. Every mutation is same-origin/loopback constrained by DSH Web transport. */
+/**
+ * Preset composing a Pet executor WITHOUT local-root Skill discovery.
+ *
+ * Shared because both halves need it: the Host defaults new executors to it,
+ * and Settings shows it as the current selection when none is stored.
+ * `standard` would load `skill-filesystem` and make every globally installed
+ * Skill visible to the executor — see ADR-0001.
+ */
+export const PET_EXECUTOR_PRESET = 'dsh-pet-executor'
+
 export const ROUTES = {
   status: '/dsh-pet/api/status',
   config: '/dsh-pet/api/config',
