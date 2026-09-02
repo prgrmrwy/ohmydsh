@@ -52,6 +52,20 @@ export class CapabilityRegistry {
   }
 
   /**
+   * Resolve a capability by id from the INSTALLED SKILLS.
+   *
+   * This is the authoritative lookup: a capability exists because a Skill is
+   * installed and enabled, not because Pet ships code for it. An optional
+   * Host declaration may annotate the result but can never create one.
+   * @param repository - Pet repository supplying the allowlist.
+   * @param id - Capability id, which is the Skill name.
+   * @returns the resolved capability, or `undefined` when not installed.
+   */
+  resolve(repository: PetRepository, id: string): PetCapability | undefined {
+    return this.project(repository).find(item => item.id === id)
+  }
+
+  /**
    * Project every capability read-only for the Web client.
    *
    * A capability is available only when its dependencies probe clean AND its
@@ -61,31 +75,57 @@ export class CapabilityRegistry {
    * @returns the read-only projection, ordered by id.
    */
   project(repository: PetRepository): readonly PetCapability[] {
-    return [...this.declarations.values()]
-      .map(declaration => {
-        const probeDiagnostic = declaration.probe?.()
-        const selection = repository.getSkillSelection(declaration.skillName)
-        const skillDiagnostic =
-          selection === undefined || selection.enabledDigest === undefined
-            ? `Skill '${declaration.skillName}' is not installed or not enabled in Pet Settings → Skills.`
-            : undefined
-        const diagnostic = probeDiagnostic ?? skillDiagnostic
-        return {
-          id: declaration.id,
-          label: declaration.label,
-          ...(declaration.icon !== undefined ? { icon: declaration.icon } : {}),
-          description: declaration.description,
-          skillName: declaration.skillName,
-          contextRequirement: declaration.contextRequirement,
-          requiresConfirmation: declaration.requiresConfirmation ?? false,
-          available: diagnostic === undefined,
-          ...(diagnostic !== undefined ? { diagnostic } : {}),
-          // Default true: a capability whose Skill was never selected is not
-          // hidden, it is simply unavailable and shows its diagnostic.
-          showAsShortcut: selection?.showAsShortcut ?? true,
-        } satisfies PetCapability
+    // Capabilities are DERIVED FROM INSTALLED SKILLS, not from Pet-side code.
+    // Adding one is an install plus an enable — never a code change — so Pet
+    // ships no per-capability adapter. A Skill declares its own label, icon,
+    // context requirement and confirmation need in its `SKILL.md`
+    // frontmatter, and is responsible for its own bounded behavior.
+    const projected = new Map<string, PetCapability>()
+
+    for (const selection of repository.listSkillSelections()) {
+      const digest = selection.enabledDigest
+      if (digest === undefined) continue
+      const revision = repository.getSkillRevision(selection.skillName, digest)
+      if (revision === undefined) continue
+
+      const declared = revision.pet
+      // Fall back to `optional` for an absent or unrecognized declaration:
+      // an install must never widen its own context authority by typo.
+      const context: PetContextRequirement =
+        declared?.context === 'none' ||
+        declared?.context === 'workspace-required' ||
+        declared?.context === 'session-required'
+          ? declared.context
+          : 'optional'
+      projected.set(selection.skillName, {
+        id: selection.skillName,
+        label: declared?.label ?? selection.skillName,
+        ...(declared?.icon !== undefined ? { icon: declared.icon } : {}),
+        description: revision.description,
+        skillName: selection.skillName,
+        contextRequirement: context,
+        requiresConfirmation: declared?.confirm ?? false,
+        available: true,
+        showAsShortcut: selection.showAsShortcut ?? true,
       })
-      .sort((left, right) => left.id.localeCompare(right.id))
+    }
+
+    // Optional Host-side declarations remain supported for capabilities that
+    // genuinely need a probe (an organization CLI that may be absent), but
+    // they only ANNOTATE a Skill-derived entry — they never create one.
+    for (const declaration of this.declarations.values()) {
+      const base = projected.get(declaration.skillName)
+      if (base === undefined) continue
+      const diagnostic = declaration.probe?.()
+      projected.set(declaration.skillName, {
+        ...base,
+        ...(declaration.icon !== undefined ? { icon: declaration.icon } : {}),
+        available: diagnostic === undefined,
+        ...(diagnostic !== undefined ? { diagnostic } : {}),
+      })
+    }
+
+    return [...projected.values()].sort((left, right) => left.id.localeCompare(right.id))
   }
 
   /**
@@ -99,14 +139,12 @@ export class CapabilityRegistry {
     repository: PetRepository,
     capabilityId: string,
   ): { skillName: string; digest: string } {
-    const declaration = this.declarations.get(capabilityId)
-    if (declaration === undefined) {
-      throw new Error(`Unknown Pet capability '${capabilityId}'`)
-    }
-    const selection = repository.getSkillSelection(declaration.skillName)
+    // The capability id IS the Skill name: a capability exists because a Skill
+    // is installed and enabled, not because Pet ships a declaration for it.
+    const selection = repository.getSkillSelection(capabilityId)
     if (selection?.enabledDigest === undefined) {
-      throw new Error(`Pet Skill '${declaration.skillName}' is not enabled`)
+      throw new Error(`Pet Skill '${capabilityId}' is not enabled`)
     }
-    return { skillName: declaration.skillName, digest: selection.enabledDigest }
+    return { skillName: capabilityId, digest: selection.enabledDigest }
   }
 }

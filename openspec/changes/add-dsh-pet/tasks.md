@@ -183,21 +183,32 @@
   bundles are authored against those exact surfaces and declared in the
   package manifest, and a first boot installs, enables and projects all three.
 
-- [ ] 7.6 ALIGNMENT DEBT — a capability should be Skill + allowlist only, not a
-  bespoke Host module. Today each built-in ships ~165 lines of Host adapter and
-  its own dedicated tool (`pet_create_mr`, `pet_send_cr`,
-  `pet_clean_worktree`), so adding a capability means writing code rather than
-  installing a Skill. The intended shape is a single generic runtime wrapper:
-  the Invocation envelope already carries the trusted meta (source, repository
-  root, managed execution root, snapshot id), and `pet_context` already hands
-  the Agent its authorized snapshot — so a Skill could drive ordinary DSH tools
-  (bash/git/CLI) under Pet's allowlist without any Pet-side adapter. Decide and
-  record: which effects genuinely need a bounded Pet tool (destructive or
-  destination-bearing ones, where a fixed argv and a non-substitutable target
-  are the security boundary) versus which should collapse into the generic
-  wrapper. Note that `clean-worktree` has a real reason to stay bounded (it
-  delegates to Worktree Session's safety gates), while `create-mr` and
-  `send-cr` are candidates for the generic path.
+- [x] 7.6 Pet ships NO per-capability adapter. A capability exists because a
+  Skill is installed and enabled — adding one is an install, never a code
+  change. The Skill declares its own presentation and context requirement in
+  `SKILL.md` frontmatter (`petLabel`, `petIcon`, `petContext`, `petConfirm`),
+  persisted with the immutable revision so queued work keeps what it accepted;
+  an unrecognized `petContext` falls back to `optional` so a bundle cannot
+  widen its own authority by typo.
+
+  Removed `create-mr.ts`, `send-cr.ts`, `clean-worktree.ts` and
+  `bounded-command.ts` (~675 lines) along with the tools `pet_create_mr`,
+  `pet_send_cr` and `pet_clean_worktree`. Exactly ONE tool remains,
+  `pet_context`, which hands a Skill its authorized snapshot; the Skill then
+  drives ordinary DSH tools and owns its own bounded behavior — including the
+  destination and confirmation discipline that used to live in Pet. The three
+  built-ins were rewritten to do exactly that, with `clean-worktree` driving
+  the existing `ws` Skill's gated `scripts/ws.sh clean` rather than
+  reimplementing Worktree Session's safety gates.
+
+  Worktree status remains a Host concern but only as snapshot ENRICHMENT
+  (`worktree-status.ts`): it tells `pet_context` where the managed execution
+  root is, so a Skill never has to guess. Pet performs no worktree effects.
+
+  An optional Host declaration may still ANNOTATE a Skill-derived entry (a
+  probe proving an organization dependency is absent), but it can never create
+  one — covered by a test asserting a declaration with no installed Skill
+  behind it projects nothing.
 
 - [x] 7.2 Implement the `create-mr` capability as a session-required Agent Skill backed by trusted source/worktree resolution, explicit MR target/reviewer validation and bounded Codebase/MR side effects.
 

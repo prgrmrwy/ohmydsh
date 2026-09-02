@@ -2,47 +2,65 @@
 name: send-cr
 description: Send a Code Review request for a merge request to the trusted Lark group configured for the current session's workspace.
 whenToUse: When the user asks to send a CR / request review / notify the review group for an MR.
+petLabel: Send CR
+petIcon: 📣
+petContext: session-required
+petConfirm: false
 ---
 
 # Send CR
 
-Post a Code Review request to the **configured** group for the source
-session's workspace.
+Post a Code Review request for a merge request to the review group.
+
+Pet provides no `send-cr` tool. You send it yourself with ordinary tools
+(`bash`), under Pet's Skill allowlist — every constraint below is this Skill's
+responsibility.
 
 ## Non-negotiable rules
 
-1. **You cannot choose the destination.** The group is resolved from the
-   trusted workspace binding in Pet Settings → Bindings. There is no parameter
-   for a chat, group or user id — do not ask the user for one and do not put
-   one in the note expecting it to route anywhere.
-2. **Call `pet_context` first** to confirm which source and workspace you are
-   acting for.
-3. **Never fabricate an MR URL.** Use one the user gave you, or one a previous
-   `create-mr` Invocation returned in this Task. If you do not have a real
-   URL, ask.
+1. **Never invent a destination.** Use only a chat id the user gave you in
+   this Task, or one they confirm when you ask. Do not guess a group, do not
+   reuse a chat id seen in unrelated context, and do not broadcast to a list.
+2. **Call `pet_context` first** to confirm which source you are acting for.
+3. **Never fabricate an MR URL.** Use one the user provided, or one a previous
+   Invocation in this Task produced. If you do not have a real URL, ask.
+4. **Ask before sending.** Show the exact destination and message text, and
+   send only after the user confirms. A message cannot be unsent.
 
 ## Procedure
 
 1. Call `pet_context`.
-2. Establish the MR URL. If the user did not provide one and this Task has not
-   created one, ask instead of guessing.
-3. Call `pet_send_cr` with `mrUrl` and an optional short `note`.
-4. Report the outcome:
-   - **`sent`** — confirm, and state the `chatId` that was used so the user can
-     verify the destination.
-   - **`refused`** — report `reason` verbatim.
+2. Establish the MR URL and the destination chat id. Ask for whatever is
+   missing rather than inferring it.
+3. Show the user the rendered message and the destination, and wait for
+   confirmation.
+4. Send:
 
-## When no destination is configured
+   ```bash
+   lark-cli im +messages-send --json \
+     --chat-id <oc_...> \
+     --text "<message>" \
+     --idempotency-key "pet-<invocation id from pet_context>"
+   ```
 
-The tool fails with a binding error naming the workspace. Tell the user to set
-a CR group in **Pet Settings → Bindings** for that workspace. Do not attempt
-any other delivery route.
+   The idempotency key must derive from this Invocation's id, so a retry
+   cannot post the same review request twice.
+5. Report the outcome, echoing the chat id actually used so the user can
+   verify where it went. Report a refusal verbatim.
 
 ## Message shape
 
-The message body is a fixed Pet template carrying the source, the MR link and
-your optional note. You cannot restyle it, and it always identifies itself as
-sent by DSH Pet.
+Keep it structured and self-identifying:
+
+```
+【Code Review 请求】
+来源：<source title from pet_context>
+MR：<url>
+说明：<optional short note>
+（由 DSH Pet 发送）
+```
+
+Never restyle it to look like it came from another system or person.
 
 ## Completing
 

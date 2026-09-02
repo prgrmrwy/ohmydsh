@@ -182,6 +182,9 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
         skillName: inspection.skillName,
         digest: inspection.digest,
         description: inspection.description,
+        // An imported Skill declares its own Pet presentation and context
+        // requirement; Pet ships no per-capability adapter.
+        ...(inspection.pet !== undefined ? { pet: inspection.pet } : {}),
         provenance: {
           kind: 'local-import',
           sourcePath: inspection.canonicalSourcePath,

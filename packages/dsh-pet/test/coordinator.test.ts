@@ -9,7 +9,9 @@ import { PetError } from '../src/host/errors.js'
 import { renderEnvelope } from '../src/host/envelope.js'
 import type { AgentRegistryLike } from '../src/host/executor.js'
 import { ensurePetDirectories, resolvePetPaths } from '../src/host/paths.js'
-import { openPetHarness, testInvocation, testTask, type PetHarness } from './harness.js'
+import { openPetHarness, testInvocation, testTask, type PetHarness,
+  installTestSkill,
+} from './harness.js'
 import type { PetInvocationCapture } from '../src/wire.js'
 
 let harness: PetHarness | undefined
@@ -44,6 +46,9 @@ async function fixture(options: { dispatchFails?: boolean } = {}): Promise<Fixtu
       skillName: name,
       digest: `sha256:${name}`,
       description: name,
+      // Capabilities are derived from installed Skills, so the Skill carries
+      // its own context requirement exactly as its frontmatter would.
+      pet: { context: 'session-required' },
       provenance: { kind: 'builtin', installedAt: 1 },
       fileCount: 1,
       totalBytes: 1,
@@ -56,20 +61,6 @@ async function fixture(options: { dispatchFails?: boolean } = {}): Promise<Fixtu
   }
 
   const capabilities = new CapabilityRegistry()
-  capabilities.register({
-    id: 'create-mr',
-    label: 'Create MR',
-    description: 'Create a merge request',
-    skillName: 'create-mr',
-    contextRequirement: 'session-required',
-  })
-  capabilities.register({
-    id: 'send-cr',
-    label: 'Send CR',
-    description: 'Send a CR',
-    skillName: 'send-cr',
-    contextRequirement: 'session-required',
-  })
 
   const dispatched: { session: string; text: string }[] = []
   const dispatcher: PromptDispatcher = {
@@ -181,17 +172,11 @@ describe('create-or-reuse Task', () => {
   it('rejects a capability whose Skill is not enabled', async () => {
     const f = await fixture()
     harness = f.harness
-    f.capabilities.register({
-      id: 'clean-worktree',
-      label: 'Clean',
-      description: 'Clean worktree',
-      skillName: 'clean-worktree',
-      contextRequirement: 'session-required',
-    })
+    // Never installed: there is no such capability to invoke.
 
     await expect(
       f.coordinator.accept(capture({ capabilityId: 'clean-worktree' })),
-    ).rejects.toMatchObject({ code: 'CAPABILITY_UNAVAILABLE' })
+    ).rejects.toMatchObject({ code: 'UNKNOWN_CAPABILITY' })
   })
 })
 
@@ -456,41 +441,59 @@ describe('envelope rendering', () => {
 })
 
 describe('capability projection', () => {
-  it('disables a capability whose dependency is missing', async () => {
+  it('lets an optional Host probe annotate a Skill-derived entry', async () => {
     const f = await fixture()
     harness = f.harness
+
+    // A probe may only ANNOTATE an entry that a Skill already created; it can
+    // never invent a capability of its own. Missing organization tooling is
+    // normally the Skill's own concern, but a Host peer that can genuinely
+    // prove absence may still disable the entry.
     f.capabilities.register({
       id: 'send-cr',
       label: 'Send CR',
-      description: 'Send a CR',
+      description: 'Send a review request',
       skillName: 'send-cr',
       contextRequirement: 'session-required',
-      probe: () => 'bytedcli is not installed on this machine',
+      probe: () => 'lark-cli is not installed',
     })
-
     const projection = f.capabilities.project(f.harness.repository)
-    const sendCr = projection.find(item => item.id === 'send-cr')
 
-    // Missing organization tooling disables the capability instead of breaking Pet.
-    expect(sendCr?.available).toBe(false)
-    expect(sendCr?.diagnostic).toContain('bytedcli')
+    expect(projection.find(item => item.id === 'send-cr')?.available).toBe(false)
+    expect(projection.find(item => item.id === 'send-cr')?.diagnostic).toContain('lark-cli')
     expect(projection.find(item => item.id === 'create-mr')?.available).toBe(true)
   })
 
-  it('disables a capability whose Skill is not enabled', async () => {
+  it('ignores a Host declaration with no installed Skill behind it', async () => {
     const f = await fixture()
     harness = f.harness
+
     f.capabilities.register({
-      id: 'clean-worktree',
-      label: 'Clean',
-      description: 'Clean worktree',
-      skillName: 'clean-worktree',
-      contextRequirement: 'session-required',
+      id: 'ghost',
+      label: 'Ghost',
+      description: 'No Skill installed',
+      skillName: 'ghost',
+      contextRequirement: 'none',
     })
 
+    // Pet-side code cannot conjure a capability; only an install can.
+    expect(f.capabilities.project(f.harness.repository).find(i => i.id === 'ghost')).toBeUndefined()
+  })
+
+  it('drops a capability whose Skill is disabled', async () => {
+    const f = await fixture()
+    harness = f.harness
+    await installTestSkill(harness!, 'clean-worktree', { context: 'session-required' })
+
+    // Disabling removes the enabled digest, so the Skill stops being a
+    // capability at all rather than lingering as an unavailable entry.
+    await f.harness.repository.putSkillSelection({
+      skillName: 'clean-worktree',
+      showAsShortcut: true,
+    })
     const projection = f.capabilities.project(f.harness.repository)
 
-    expect(projection.find(item => item.id === 'clean-worktree')?.available).toBe(false)
+    expect(projection.find(item => item.id === 'clean-worktree')).toBeUndefined()
   })
 })
 
@@ -619,24 +622,19 @@ describe('shortcut visibility controls the radial menu only', () => {
     expect(result.started).toBe(true)
   })
 
-  it('defaults to visible when a Skill was never selected', async () => {
+  it('defaults a freshly installed Skill to visible and available', async () => {
     const f = await fixture()
     harness = f.harness
-    f.capabilities.register({
-      id: 'clean-worktree',
-      label: 'Clean',
-      description: 'Clean worktree',
-      skillName: 'clean-worktree',
-      contextRequirement: 'session-required',
-    })
+    await installTestSkill(harness!, 'clean-worktree', { context: 'session-required' })
 
     const entry = f.capabilities
       .project(f.harness.repository)
       .find(item => item.id === 'clean-worktree')
 
-    // Not hidden — just unavailable, with its diagnostic.
+    // An installed, enabled Skill needs no Pet-side code to become usable.
     expect(entry?.showAsShortcut).toBe(true)
-    expect(entry?.available).toBe(false)
+    expect(entry?.available).toBe(true)
+    expect(entry?.contextRequirement).toBe('session-required')
   })
 })
 

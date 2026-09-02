@@ -280,22 +280,16 @@ describe('Skill install, allowlist isolation and projection', () => {
 })
 
 describe('degraded adapters', () => {
-  it('disables a capability whose dependency is missing without breaking Pet', async () => {
+  it('offers only capabilities backed by an enabled Skill', async () => {
     const deployment = await boot()
     await enableSkill(deployment, 'create-mr')
-    deployment.capabilities.register({
-      id: 'send-cr',
-      label: 'Send CR',
-      description: 'Send a CR',
-      skillName: 'send-cr',
-      contextRequirement: 'session-required',
-      probe: () => 'internal CLI is not installed',
-    })
 
     const projection = deployment.capabilities.project(deployment.repository)
 
+    // A capability exists because a Skill is installed and enabled; one that
+    // was never enabled is simply absent, not an unavailable placeholder.
     expect(projection.find(item => item.id === 'create-mr')?.available).toBe(true)
-    expect(projection.find(item => item.id === 'send-cr')?.available).toBe(false)
+    expect(projection.find(item => item.id === 'send-cr')).toBeUndefined()
   })
 })
 
@@ -383,6 +377,8 @@ describe('Task, executor and Invocation flow', () => {
       skillName: 'tidy',
       digest: inspection.digest,
       description: inspection.description,
+      // The Skill declares it needs no source context.
+      pet: { context: 'none' },
       provenance: { kind: 'local-import', installedAt: Date.now() },
       fileCount: 1,
       totalBytes: 1,
@@ -391,13 +387,6 @@ describe('Task, executor and Invocation flow', () => {
       skillName: 'tidy',
       enabledDigest: inspection.digest,
       showAsShortcut: true,
-    })
-    deployment.capabilities.register({
-      id: 'tidy',
-      label: 'Tidy',
-      description: 'Tidy',
-      skillName: 'tidy',
-      contextRequirement: 'none',
     })
 
     const accepted = await deployment.coordinator.accept({

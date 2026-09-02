@@ -122,6 +122,17 @@ const petSkillRevision = z.object({
   skillName: z.string().min(1),
   digest: z.string().min(1),
   description: z.string(),
+  // Pet presentation and context requirement, declared by the SKILL.md
+  // frontmatter. Persisted with the immutable revision so the menu stays
+  // stable for queued work even if a newer revision changes them.
+  pet: z
+    .object({
+      label: z.string().optional(),
+      icon: z.string().optional(),
+      context: z.enum(['none', 'optional', 'workspace-required', 'session-required']).optional(),
+      confirm: z.boolean().optional(),
+    })
+    .optional(),
   provenance: z.object({
     kind: z.enum(['builtin', 'local-import']),
     sourcePath: z.string().optional(),

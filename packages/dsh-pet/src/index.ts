@@ -23,14 +23,6 @@ import { verifyBackendOwnership, verifyDatabaseLocation } from './host/backend.j
 import { PetChangeFeed } from './host/changes.js'
 import { installBuiltins, resolveManifestPath } from './host/builtins.js'
 import { CapabilityRegistry } from './host/capabilities.js'
-import { createMrDiagnostic } from './host/create-mr.js'
-import { sendCrDiagnostic } from './host/send-cr.js'
-import {
-  cleanWorktreeDiagnostic,
-  loadWorktreeMaintenance,
-  runCleanWorktree,
-  type WorktreeMaintenance,
-} from './host/clean-worktree.js'
 import { SourceContextRegistry, type SourceResolver } from './host/capture.js'
 import { PetCoordinator, type PromptDispatcher } from './host/coordinator.js'
 import {
@@ -47,6 +39,7 @@ import { PetRepository } from './host/repository.js'
 import { createPetRoutes } from './host/routes.js'
 import { createPetSkillProvider, resolveInvocationSkill } from './host/skill-provider.js'
 import { createWorktreeProvider } from './host/worktree-adapter.js'
+import { loadWorktreeStatus } from './host/worktree-status.js'
 import { registerPetTools } from './host/tools.js'
 import { currentAllowlist } from './host/skill-provider.js'
 import { petDomainSpec } from './host/spec.js'
@@ -225,63 +218,10 @@ async function initialize(
 
   const capabilities = new CapabilityRegistry()
 
-  // Optional peer: absent Worktree Session disables the capability with a
-  // diagnostic instead of breaking Pet.
-  const maintenance: WorktreeMaintenance | undefined = await loadWorktreeMaintenance()
-  capabilities.register({
-    id: 'clean-worktree',
-    label: 'Clean Worktree',
-    icon: '🧹',
-    description: 'Remove the merged worktree and task branch of the source session',
-    skillName: 'clean-worktree',
-    contextRequirement: 'session-required',
-    requiresConfirmation: true,
-    probe: () => cleanWorktreeDiagnostic(maintenance),
-  })
-
-  // Organization-specific CLIs may be absent (open-source machines). Probe
-  // once at startup and cache: an unavailable capability is disabled with a
-  // diagnostic rather than breaking Pet.
-  const createMrUnavailable = await createMrDiagnostic()
-  capabilities.register({
-    id: 'create-mr',
-    label: 'Create MR',
-    icon: '🔀',
-    description: 'Open a merge request for the source session branch',
-    skillName: 'create-mr',
-    contextRequirement: 'session-required',
-    probe: () => createMrUnavailable,
-  })
-
-  const sendCrUnavailable = await sendCrDiagnostic()
-  capabilities.register({
-    id: 'send-cr',
-    label: 'Send CR',
-    icon: '📣',
-    description: 'Send a review request to the configured group',
-    skillName: 'send-cr',
-    contextRequirement: 'session-required',
-    probe: () => sendCrUnavailable,
-  })
-
-  const activity = {
-    activePaths: (): readonly string[] =>
-      ctx.sessions
-        .list()
-        .flatMap(session => (session.header.cwd === undefined ? [] : [session.header.cwd])),
-    // Pet executors are the bound sessions Pet itself owns; the Worktree
-    // Session gates additionally consult their own binding state.
-    activeBoundSessionIds: (): readonly string[] =>
-      repository
-        .listTasks()
-        .filter(task => task.archivedAt === undefined && task.sourceKind === 'session')
-        .flatMap(task => (task.sourceId === undefined ? [] : [task.sourceId])),
-  }
-
   // Pet tools are registered on the Host context so Pet executor Agents can
   // reach them; both resolve their target from the calling session.
   ctx.effect(
-    () => registerPetTools(ctx, { repository, maintenance, activity }),
+    () => registerPetTools(ctx, { repository }),
     'dsh-pet: caller-bound Agent tools',
   )
 
@@ -314,6 +254,9 @@ async function initialize(
     })
   }
   const contextProviders = new SourceContextRegistry()
+
+  // Optional Worktree Session enrichment: snapshot context only, no effects.
+  const maintenance = await loadWorktreeStatus()
 
   // Optional Worktree Session enrichment. Without it a snapshot simply
   // carries no managed-worktree fields; Pet must never infer an execution
@@ -552,9 +495,6 @@ export { CapabilityRegistry } from './host/capabilities.js'
 export { SourceContextRegistry, resolveTrustedContext } from './host/capture.js'
 export { executePetContext, PET_CONTEXT_TOOL } from './host/context-tool.js'
 export { createWorktreeProvider } from './host/worktree-adapter.js'
-export { runCreateMr, createMrDiagnostic } from './host/create-mr.js'
-export { runSendCr, sendCrDiagnostic, renderCrMessage } from './host/send-cr.js'
-export { runBoundedCommand, isCommandAvailable } from './host/bounded-command.js'
 export { resolvePetPaths, ensurePetDirectories, isContainedBy } from './host/paths.js'
 export { petDomainSpec, PET_DOMAIN_NAME, PET_DOMAIN_VERSION } from './host/spec.js'
 export {

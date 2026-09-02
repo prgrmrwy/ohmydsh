@@ -142,7 +142,7 @@ export class PetCoordinator {
     // whole create-or-reuse decision, snapshot write and queue append run
     // exclusively, which is what keeps the one-Task-per-scope invariant true
     // under simultaneous requests.
-    const declared = this.deps.capabilities.get(capture.capabilityId)
+    const declared = this.deps.capabilities.resolve(this.deps.repository, capture.capabilityId)
     if (declared === undefined) {
       throw new PetError('UNKNOWN_CAPABILITY', `Unknown Pet capability '${capture.capabilityId}'`)
     }
@@ -158,7 +158,7 @@ export class PetCoordinator {
   /** The admission-critical section, serialized per scope by {@link accept}. */
   private async admit(capture: PetInvocationCapture): Promise<AcceptResult> {
     const { repository, capabilities } = this.deps
-    const declaration = capabilities.get(capture.capabilityId)
+    const declaration = capabilities.resolve(repository, capture.capabilityId)
     if (declaration === undefined) {
       throw new PetError('UNKNOWN_CAPABILITY', `Unknown Pet capability '${capture.capabilityId}'`)
     }
