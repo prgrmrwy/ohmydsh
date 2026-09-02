@@ -1,0 +1,654 @@
+/**
+ * The floating Pet surface.
+ *
+ * Renders only the mascot, the capability menu, the pre-execution source chip
+ * and a compact Task panel. The `shell.overlay` layer is click-through; this
+ * component opts back into pointer events for its own surface only, so it
+ * never blocks the app underneath.
+ */
+
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { PetApiError, petApi } from './api.js'
+import { clampPosition, readPosition, writePosition, type PetPosition } from './position.js'
+import type { PetCapability, PetSourceKind } from '../wire.js'
+
+/** Current browser source selection, captured atomically on invoke. */
+export interface SourceSelection {
+  readonly kind: PetSourceKind
+  readonly sessionId?: string
+  readonly workspaceId?: string
+  readonly title?: string
+}
+
+/** Live DSH facts the overlay reads from the client runtime. */
+export interface PetOverlayProps {
+  /** The browser's current session/workspace, or `undefined` on a Hero page. */
+  readonly currentSource: SourceSelection | undefined
+  /** Opens a native DSH session; used by "open full process". */
+  readonly openSession?: (sessionId: string) => void
+}
+
+type Mode = 'closed' | 'menu' | 'panel'
+
+/**
+ * The Pet overlay surface.
+ * @param props - Live DSH facts and navigation callbacks.
+ * @returns the rendered overlay.
+ */
+export function PetOverlay(props: PetOverlayProps): JSX.Element {
+  const rootRef = useRef<HTMLDivElement | null>(null)
+
+  // NOTE: Pet deliberately stays inside the `shell.overlay` layer instead of
+  // re-parenting itself to `document.body`. React 18 delegates events at the
+  // mount container, so a node moved out of that container silently stops
+  // receiving every synthetic handler — hover, drag and click all die while
+  // the element still renders. The layer is `position:absolute; inset:0` over
+  // a full-height frame, so it already spans the visible area; escaping it
+  // bought nothing and cost every interaction.
+
+  const viewport = useViewport()
+  const [position, setPosition] = useState<PetPosition>(() => readPosition(viewport))
+  const [mode, setMode] = useState<Mode>('closed')
+  const [capabilities, setCapabilities] = useState<readonly PetCapability[]>([])
+  const [degraded, setDegraded] = useState<string | undefined>(undefined)
+  const [error, setError] = useState<string | undefined>(undefined)
+  const [busy, setBusy] = useState(false)
+  const [sourceRemoved, setSourceRemoved] = useState(false)
+  const [pendingConfirm, setPendingConfirm] = useState<PetCapability | undefined>(undefined)
+  const dragging = useRef<
+    { pointerId: number; dx: number; dy: number; moved: boolean } | undefined
+  >(undefined)
+  /** True when the gesture that just ended actually moved Pet. */
+  const draggedRef = useRef(false)
+
+  // Re-clamp whenever the viewport changes so Pet can never be stranded.
+  useEffect(() => {
+    setPosition(current => clampPosition(current, viewport))
+  }, [viewport.width, viewport.height])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const status = await petApi.status()
+        if (cancelled) return
+        setDegraded(
+          status.lifecycle.phase === 'ready' ? undefined : (status.lifecycle.diagnostic ?? status.lifecycle.phase),
+        )
+        const list = await petApi.capabilities()
+        if (!cancelled) setCapabilities(list.capabilities)
+        const config = await petApi.config()
+        // `none` means a new Task starts unattached unless the user opts in,
+        // so the current session is pre-removed rather than pre-selected.
+        if (!cancelled && config.defaultContextPolicy === 'none') setSourceRemoved(true)
+      } catch (cause) {
+        if (!cancelled) setDegraded(cause instanceof Error ? cause.message : String(cause))
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const effectiveSource: SourceSelection =
+    sourceRemoved || props.currentSource === undefined ? { kind: 'none' } : props.currentSource
+
+  // The panel is click-opened, so it needs a click-driven way out. Without
+  // this it could only be closed by clicking the mascot again, which reads as
+  // "Pet is stuck open" once the pointer has moved elsewhere.
+  useEffect(() => {
+    if (mode !== 'panel') return
+    const onPointerDownOutside = (event: PointerEvent): void => {
+      const node = rootRef.current
+      if (node === null) return
+      if (!node.contains(event.target as Node)) setMode('closed')
+    }
+    document.addEventListener('pointerdown', onPointerDownOutside, true)
+    return () => document.removeEventListener('pointerdown', onPointerDownOutside, true)
+  }, [mode])
+
+  const onPointerDown = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    // Pointer capture keeps the drag attached even when the cursor leaves the
+    // element or crosses an iframe boundary.
+    event.currentTarget.setPointerCapture(event.pointerId)
+    dragging.current = {
+      pointerId: event.pointerId,
+      dx: event.clientX,
+      dy: event.clientY,
+      moved: false,
+    }
+  }, [])
+
+  const onPointerMove = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      const state = dragging.current
+      if (state === undefined || state.pointerId !== event.pointerId) return
+      const deltaX = event.clientX - state.dx
+      const deltaY = event.clientY - state.dy
+      if (Math.abs(deltaX) < 2 && Math.abs(deltaY) < 2) return
+      dragging.current = { ...state, dx: event.clientX, dy: event.clientY, moved: true }
+      setPosition(current =>
+        clampPosition({ x: current.x + deltaX, y: current.y + deltaY }, viewport),
+      )
+    },
+    [viewport],
+  )
+
+  const onPointerUp = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      const state = dragging.current
+      dragging.current = undefined
+      if (state === undefined) return
+      event.currentTarget.releasePointerCapture(event.pointerId)
+      // A drag must not also count as a click: releasing at the new position
+      // would otherwise toggle the panel open every time Pet is moved.
+      draggedRef.current = state.moved
+      setPosition(current => writePosition(current, viewport))
+    },
+    [viewport],
+  )
+
+  const run = useCallback(
+    async (capability: PetCapability) => {
+      setError(undefined)
+      // A capability may declare that it must be confirmed before running;
+      // `clean-worktree` does, because its effects are destructive.
+      if (capability.requiresConfirmation && pendingConfirm?.id !== capability.id) {
+        setPendingConfirm(capability)
+        return
+      }
+      setPendingConfirm(undefined)
+      setBusy(true)
+      try {
+        // The atomic capture: whatever the browser shows RIGHT NOW is frozen
+        // into the request. Later page switches cannot change this Invocation.
+        await petApi.createInvocation({
+          clientInvocationId: `inv-${crypto.randomUUID()}`,
+          capabilityId: capability.id,
+          sourceKind: effectiveSource.kind,
+          ...(effectiveSource.sessionId !== undefined
+            ? { sourceSessionId: effectiveSource.sessionId }
+            : {}),
+          ...(effectiveSource.workspaceId !== undefined
+            ? { sourceWorkspaceId: effectiveSource.workspaceId }
+            : {}),
+        })
+        setMode('panel')
+      } catch (cause) {
+        setError(cause instanceof PetApiError ? cause.message : String(cause))
+      } finally {
+        setBusy(false)
+      }
+    },
+    // `pendingConfirm` is read inside, so it must be a dependency: a stale
+    // closure would never observe the first click and the gate would never
+    // release.
+    [effectiveSource, pendingConfirm],
+  )
+
+  // Hidden capabilities stay installed and enabled; they are simply kept out
+  // of the radial menu to control clutter.
+  const shortcuts = capabilities.filter(capability => capability.showAsShortcut)
+
+  const blocked = (capability: PetCapability): string | undefined => {
+    if (!capability.available) return capability.diagnostic ?? 'Unavailable'
+    if (capability.contextRequirement === 'session-required' && effectiveSource.kind !== 'session') {
+      return 'Requires a DSH session'
+    }
+    if (
+      capability.contextRequirement === 'workspace-required' &&
+      effectiveSource.kind === 'none'
+    ) {
+      return 'Requires a workspace'
+    }
+    return undefined
+  }
+
+  return (
+    <div
+      ref={rootRef}
+      className="dshpet-root"
+      data-open={mode !== 'closed'}
+      style={{ left: `${position.x}px`, top: `${position.y}px` }}
+      onMouseEnter={() => {
+        if (mode === 'closed') setMode('menu')
+      }}
+      onMouseLeave={() => {
+        // Hover only owns the MENU. The panel is opened by an explicit click,
+        // so it must not evaporate when the pointer drifts away — it closes on
+        // click, Escape, or an outside click. Collapsing it here was why Pet
+        // appeared to stay open forever: after a capability run switched to
+        // `panel`, no hover exit could ever close it again.
+        if (mode === 'menu') setMode('closed')
+      }}
+      // Focus is the keyboard equivalent of hover, so a keyboard user reaches
+      // the capability menu the same way a pointer user does.
+      onFocus={() => {
+        if (mode === 'closed') setMode('menu')
+      }}
+      onBlur={event => {
+        // Only close when focus genuinely leaves the Pet surface; moving
+        // between the mascot and a menu item must not collapse it.
+        if (mode === 'menu' && !event.currentTarget.contains(event.relatedTarget)) {
+          setMode('closed')
+        }
+      }}
+      onKeyDown={event => {
+        if (event.key === 'Escape') setMode('closed')
+      }}
+    >
+      <button
+        type="button"
+        className="dshpet-mascot"
+        data-dragging={dragging.current !== undefined}
+        aria-label="DSH Pet"
+        aria-expanded={mode !== 'closed'}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onClick={() => {
+          if (draggedRef.current) {
+            draggedRef.current = false
+            return
+          }
+          setMode(current => (current === 'panel' ? 'closed' : 'panel'))
+        }}
+        onKeyDown={event => {
+          if (event.key === 'Escape') setMode('closed')
+          if (event.key === 'ArrowUp' && mode === 'closed') setMode('menu')
+        }}
+      >
+        🐾
+        {degraded !== undefined ? (
+          <span className="dshpet-badge" data-state="degraded" title={degraded} role="status">
+            <span className="dshpet-visually-hidden">Pet is degraded: {degraded}</span>
+            <span aria-hidden="true">!</span>
+          </span>
+        ) : null}
+      </button>
+
+      {mode === 'menu' ? (
+        <div className="dshpet-radial" role="menu" aria-label="Pet capabilities">
+          <SourceChip
+            source={effectiveSource}
+            removable={props.currentSource !== undefined && !sourceRemoved}
+            onRemove={() => setSourceRemoved(true)}
+            onRestore={() => setSourceRemoved(false)}
+            restorable={sourceRemoved && props.currentSource !== undefined}
+          />
+          {shortcuts.length === 0 ? (
+            <p className="dshpet-empty">No capabilities installed yet.</p>
+          ) : null}
+          {shortcuts.map(capability => {
+            const reason = blocked(capability)
+            return (
+              <button
+                key={capability.id}
+                type="button"
+                role="menuitem"
+                className="dshpet-item"
+                disabled={reason !== undefined || busy}
+                title={reason}
+                // `title` is not reliably announced, so the reason is also
+                // bound as the accessible description of the control.
+                aria-describedby={reason !== undefined ? `${capability.id}-reason` : undefined}
+                onClick={() => void run(capability)}
+              >
+                <span className="dshpet-item-label">
+                  {capability.label}
+                  {pendingConfirm?.id === capability.id ? ' — confirm?' : ''}
+                </span>
+                <span className="dshpet-item-hint" id={`${capability.id}-reason`}>
+                  {reason ?? capability.description}
+                </span>
+              </button>
+            )
+          })}
+          {pendingConfirm !== undefined ? (
+            <p className="dshpet-item-hint">
+              Click {pendingConfirm.label} again to confirm.
+            </p>
+          ) : null}
+          {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
+        </div>
+      ) : null}
+
+      {mode === 'panel' ? (
+        <TaskPanel
+          currentSource={effectiveSource}
+          {...(props.openSession !== undefined ? { openSession: props.openSession } : {})}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+/** The pre-execution source chip with remove/restore. */
+function SourceChip(props: {
+  source: SourceSelection
+  removable: boolean
+  restorable: boolean
+  onRemove: () => void
+  onRestore: () => void
+}): JSX.Element {
+  return (
+    <div className="dshpet-chip">
+      <span>
+        {props.source.kind === 'none'
+          ? 'No source (independent task)'
+          : (props.source.title ?? props.source.sessionId ?? props.source.workspaceId)}
+      </span>
+      {props.removable ? (
+        <button
+          type="button"
+          className="dshpet-chip-remove"
+          aria-label="Remove source"
+          onClick={props.onRemove}
+        >
+          ×
+        </button>
+      ) : null}
+      {props.restorable ? (
+        <button
+          type="button"
+          className="dshpet-chip-remove"
+          aria-label="Restore source"
+          onClick={props.onRestore}
+        >
+          ↺
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+interface TaskView {
+  id: string
+  scopeKey: string
+  sourceKind: string
+  sourceId?: string
+  sourceTitle?: string
+  sourceAvailability?: string
+  status: string
+  archivedAt?: number
+  executorSessionId: string
+  revision: number
+  invocations: {
+    id: string
+    capabilityId: string
+    status: string
+    resultSummary?: string
+    errorSummary?: string
+  }[]
+}
+
+/** The compact Task panel: invocation/source/task operations only. */
+function TaskPanel(props: {
+  currentSource: SourceSelection
+  openSession?: (sessionId: string) => void
+}): JSX.Element {
+  const [tab, setTab] = useState<'current' | 'all' | 'archived'>('current')
+  const [tasks, setTasks] = useState<TaskView[]>([])
+  const [error, setError] = useState<string | undefined>(undefined)
+  // Draft answers per Task; a complex interaction still belongs in the native
+  // session, which "Open full process" reaches.
+  const [answers, setAnswers] = useState<Record<string, string>>({})
+
+  const refresh = useCallback(async () => {
+    try {
+      const result = (await petApi.tasks()) as { tasks: TaskView[] }
+      setTasks(result.tasks)
+      setError(undefined)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    let seen = 0
+
+    /**
+     * Generation-aware refresh: the panel asks only for the cheap status
+     * generation and reloads the full task list when the Host reports it is
+     * stale. Without this the panel would show whatever it fetched on mount
+     * forever, because background Invocations settle Host-side.
+     */
+    const poll = async (): Promise<void> => {
+      try {
+        const status = await petApi.status(seen)
+        if (cancelled) return
+        if (status.stale || seen === 0) {
+          seen = status.generation
+          // A complete reload, never an increment applied to partial state.
+          await refresh()
+        }
+      } catch {
+        // A transient failure must not stop later refreshes.
+      }
+    }
+
+    void poll()
+    const timer = setInterval(() => void poll(), 2_000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [refresh])
+
+  // The scope key is the same identity the Host routes on, so "current"
+  // shows exactly the Task this source would reuse — never the executor
+  // session, which is not a source.
+  const currentScopeKey =
+    props.currentSource.kind === 'session' && props.currentSource.sessionId !== undefined
+      ? `session:${props.currentSource.sessionId}`
+      : props.currentSource.kind === 'workspace' && props.currentSource.workspaceId !== undefined
+        ? `workspace:${props.currentSource.workspaceId}`
+        : 'independent:web:default'
+
+  const visible = tasks.filter(task => {
+    if (tab === 'archived') return task.archivedAt !== undefined
+    if (task.archivedAt !== undefined) return false
+    return tab === 'all' || task.scopeKey === currentScopeKey
+  })
+
+  return (
+    <div className="dshpet-panel" role="dialog" aria-label="Pet tasks">
+      <h2>Pet tasks</h2>
+      <div className="dshpet-tabs" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          className="dshpet-tab"
+          aria-selected={tab === 'current'}
+          onClick={() => setTab('current')}
+        >
+          Current
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className="dshpet-tab"
+          aria-selected={tab === 'all'}
+          onClick={() => setTab('all')}
+        >
+          All
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className="dshpet-tab"
+          aria-selected={tab === 'archived'}
+          onClick={() => setTab('archived')}
+        >
+          Archived
+        </button>
+        {/* DSH exposes no plugin-callable API to open a settings section, so
+            Pet points the user at the real location instead of shipping a
+            button that would silently do nothing. */}
+        <span className="dshpet-item-hint" style={{ marginLeft: 'auto' }}>
+          Manage in Settings → Pet
+        </span>
+      </div>
+
+      {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
+      {visible.length === 0 ? (
+        <p className="dshpet-empty">
+          {tab === 'current' ? 'No task for the current source yet.' : `No ${tab} tasks.`}
+        </p>
+      ) : null}
+
+      {visible.map(task => (
+        <div key={task.id} className="dshpet-task">
+          <strong style={{ fontSize: 12 }}>
+            {task.sourceKind === 'none'
+              ? 'Independent task'
+              : `${task.sourceKind}: ${task.sourceTitle ?? task.sourceId ?? task.id}`}
+          </strong>
+          <span className="dshpet-status" style={{ marginLeft: 6 }}>
+            {task.status}
+          </span>
+          {task.sourceAvailability === 'archived' ? (
+            <span className="dshpet-status" style={{ marginLeft: 4 }}>
+              source archived
+            </span>
+          ) : null}
+          {task.invocations.map(invocation => (
+            <div key={invocation.id} className="dshpet-inv">
+              <span>{invocation.capabilityId}</span>
+              <span className="dshpet-status">{invocation.status}</span>
+              {invocation.resultSummary !== undefined ? (
+                <span>{invocation.resultSummary}</span>
+              ) : null}
+              {invocation.errorSummary !== undefined ? (
+                <span className="dshpet-error">{invocation.errorSummary}</span>
+              ) : null}
+              {invocation.status === 'failed' ? (
+                <button
+                  type="button"
+                  className="dshpet-action"
+                  onClick={() => void petApi.retry(invocation.id).then(refresh)}
+                >
+                  Retry
+                </button>
+              ) : null}
+            </div>
+          ))}
+          {task.status === 'waiting-user' ? (
+            <form
+              className="dshpet-actions"
+              onSubmit={event => {
+                event.preventDefault()
+                const text = (answers[task.id] ?? '').trim()
+                if (text === '') return
+                // The answer continues the CURRENT Invocation; it never starts
+                // queued work.
+                void petApi
+                  .answer(task.id, text)
+                  .then(() => {
+                    setAnswers(current => ({ ...current, [task.id]: '' }))
+                    return refresh()
+                  })
+                  .catch((cause: unknown) =>
+                    setError(cause instanceof Error ? cause.message : String(cause)),
+                  )
+              }}
+            >
+              <input
+                className="dshpet-answer"
+                aria-label={`Answer the question waiting in ${task.sourceTitle ?? task.id}`}
+                placeholder="Answer the waiting question…"
+                value={answers[task.id] ?? ''}
+                onChange={event =>
+                  setAnswers(current => ({ ...current, [task.id]: event.target.value }))
+                }
+              />
+              <button type="submit" className="dshpet-action">
+                Send
+              </button>
+            </form>
+          ) : null}
+          <div className="dshpet-actions">
+            {/* Never mirrors the transcript: it navigates to the real session. */}
+            <button
+              type="button"
+              className="dshpet-action"
+              onClick={() => props.openSession?.(task.executorSessionId)}
+            >
+              Open full process
+            </button>
+            {task.sourceKind === 'session' && task.sourceId !== undefined ? (
+              <button
+                type="button"
+                className="dshpet-action"
+                // An archived source can no longer be opened; the Task and its
+                // history remain, so the control is disabled rather than hidden.
+                disabled={task.sourceAvailability === 'archived'}
+                title={
+                  task.sourceAvailability === 'archived'
+                    ? 'The source session was archived'
+                    : undefined
+                }
+                onClick={() => props.openSession?.(task.sourceId!)}
+              >
+                Open source
+              </button>
+            ) : null}
+            {task.status === 'waiting-user' || task.status === 'running' ? (
+              <button
+                type="button"
+                className="dshpet-action"
+                onClick={() => void petApi.cancel(task.id).then(refresh)}
+              >
+                Cancel
+              </button>
+            ) : null}
+            {task.archivedAt === undefined ? (
+              <button
+                type="button"
+                className="dshpet-action"
+                onClick={() => void petApi.archive(task.id, task.revision).then(refresh)}
+              >
+                Archive
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** Track the viewport so position clamping follows resizes. */
+function useViewport(): { width: number; height: number } {
+  const [viewport, setViewport] = useState(() => ({
+    width: globalThis.innerWidth ?? 1280,
+    height: globalThis.innerHeight ?? 800,
+  }))
+  useEffect(() => {
+    // Pet is absolutely positioned inside the shell overlay layer, so that
+    // layer — not the window — is its containing block. Measuring the window
+    // would let clamping place Pet past the layer's right/bottom edge.
+    const read = (): { width: number; height: number } => {
+      const layer = globalThis.document?.querySelector('[data-shell-overlay]')
+      const box = layer?.getBoundingClientRect()
+      return box !== undefined && box.width > 0 && box.height > 0
+        ? { width: box.width, height: box.height }
+        : { width: globalThis.innerWidth, height: globalThis.innerHeight }
+    }
+    setViewport(read())
+    const onResize = (): void => setViewport(read())
+    globalThis.addEventListener('resize', onResize)
+    // Dragging a column resizes the frame without firing a window resize.
+    const observer =
+      typeof ResizeObserver === 'function' ? new ResizeObserver(onResize) : undefined
+    const layer = globalThis.document?.querySelector('[data-shell-overlay]')
+    if (layer !== null && layer !== undefined) observer?.observe(layer)
+    return () => {
+      globalThis.removeEventListener('resize', onResize)
+      observer?.disconnect()
+    }
+  }, [])
+  return viewport
+}
