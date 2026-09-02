@@ -935,3 +935,42 @@ describe('stored settings share one read-only-until-edit pattern', () => {
     expect(markup).toContain('通用')
   })
 })
+
+describe('Skills list shows one row per Skill, not per revision', () => {
+  it('groups revisions by skill name', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // Several immutable revisions of one Skill coexist by design: an upgrade
+    // installs a new one while queued work keeps the digest it accepted.
+    // Iterating revisions directly made the same Skill appear duplicated.
+    expect(settings).toContain('new Set(state.revisions.map(revision => revision.skillName))')
+    expect(settings).not.toContain('{state.revisions.map(revision => {')
+  })
+
+  it('reports retained revisions instead of listing them as separate skills', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    expect(settings).toContain('const retained = revisions.length - 1')
+    expect(settings).toContain('个被引用的历史版本')
+  })
+
+  it('falls back to an installed revision when the Skill is disabled', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // A disabled Skill has no enabled digest, but the row must still say
+    // where it came from rather than disappearing.
+    expect(settings).toContain('?? revisions[0]')
+  })
+})
