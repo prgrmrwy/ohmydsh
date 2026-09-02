@@ -294,6 +294,19 @@ function GeneralTab(): JSX.Element {
  */
 let directoryPicker: (() => Promise<string | undefined>) | undefined
 
+/** Workspaces the browser can see, for the Bindings picker. */
+let workspaceLister: (() => readonly { id: string; label: string; path?: string }[]) | undefined
+
+/**
+ * Publish the workspace lister.
+ * @param lister - Returns the workspaces currently known to the browser.
+ */
+export function setWorkspaceLister(
+  lister: (() => readonly { id: string; label: string; path?: string }[]) | undefined,
+): void {
+  workspaceLister = lister
+}
+
 /**
  * Publish the Host directory picker.
  * @param picker - Picker returning the chosen path, or `undefined` on cancel.
@@ -586,38 +599,68 @@ function BindingsTab(): JSX.Element {
     void refresh()
   }, [refresh])
 
+  // A workspace id is a UUID, so the field offers the known workspaces by
+  // title instead of asking the user to produce one from memory.
+  const workspaceOptions = (workspaceLister?.() ?? []).map(item => ({
+    value: item.id,
+    label: item.path !== undefined ? `${item.label} — ${item.path}` : item.label,
+  }))
+
   return (
     <div className="dshpet-settings">
       <section className="dshpet-group">
       <h3 className="dshpet-group-title">工作区绑定</h3>
       <p className="dshpet-item-hint">
-        副作用的目的地只来自这些可信绑定，模型永远无法自行指定目的地。
+        绑定把「哪个工作区」映射到「副作用发往哪里」。有副作用的能力（例如 Send CR）
+        只会使用这里配置的目的地——模型无法自行指定，也无法从对话内容里推断。
+        未配置绑定时，这类能力会直接拒绝执行并提示你先来这里设置。
       </p>
       <StoredField
-        label="工作区 ID"
+        label="工作区"
         value={draft.workspaceId}
+        emptyText="未绑定工作区"
+        // Fall back to free text when the browser knows no workspaces yet: an
+        // empty <select> would leave the user with nothing to choose.
+        {...(workspaceOptions.length > 0 ? { options: workspaceOptions } : {})}
+        placeholder="工作区 ID"
         onSave={async next => {
           await petApi.updateBinding({ ...draft, workspaceId: next })
           setDraft(current => ({ ...current, workspaceId: next }))
         }}
       />
+      <p className="dshpet-item-hint">
+        要绑定的工作区。列表来自 DSH 左侧「工作区」，选中即可，无需手填 ID。
+      </p>
       <StoredField
         label="业务线"
         value={draft.business}
+        emptyText="未设置"
+        placeholder="例如 infra"
         onSave={async next => {
           await petApi.updateBinding({ ...draft, business: next })
           setDraft(current => ({ ...current, business: next }))
         }}
       />
+      <p className="dshpet-item-hint">
+        可选的业务线标识，仅用于让 Skill 在消息中标注归属，不参与路由。
+        不确定填什么可以留空。
+      </p>
       <StoredField
         label="CR 群 ID"
         value={draft.crGroupId}
+        emptyText="未设置（Send CR 将拒绝执行）"
         placeholder="oc_..."
         onSave={async next => {
           await petApi.updateBinding({ ...draft, crGroupId: next })
           setDraft(current => ({ ...current, crGroupId: next }))
         }}
       />
+      <p className="dshpet-item-hint">
+        接收 Code Review 请求的飞书群，形如 <code className="dshpet-code">oc_</code> 开头的一串字符。
+        查找方式：在终端执行{' '}
+        <code className="dshpet-code">lark-cli im +chat-search --query 群名关键词</code>，
+        从结果里取 <code className="dshpet-code">chat_id</code>。
+      </p>
       {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
       </section>
     </div>

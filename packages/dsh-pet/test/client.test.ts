@@ -254,7 +254,7 @@ describe('settings information architecture', () => {
       createElement(PetSettingsSection, { initialTab: 'bindings' as const }),
     )
 
-    expect(markup).toContain('模型永远无法自行指定目的地')
+    expect(markup).toContain('模型无法自行指定')
   })
 })
 
@@ -972,5 +972,50 @@ describe('Skills list shows one row per Skill, not per revision', () => {
     // A disabled Skill has no enabled digest, but the row must still say
     // where it came from rather than disappearing.
     expect(settings).toContain('?? revisions[0]')
+  })
+})
+
+describe('Bindings explains what to configure and where to find it', () => {
+  it('tells the user what a binding controls and what happens without one', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'bindings' as const }),
+    )
+
+    // A field name alone is not actionable: the panel has to say what the
+    // value does and what breaks when it is missing.
+    expect(markup).toContain('模型无法自行指定')
+    expect(markup).toContain('拒绝执行')
+  })
+
+  it('gives a concrete way to look up the CR chat id', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'bindings' as const }),
+    )
+
+    // `oc_...` ids cannot be guessed, so the panel names the exact command
+    // that produces one rather than leaving the user to search.
+    expect(markup).toContain('lark-cli im +chat-search')
+    expect(markup).toContain('chat_id')
+  })
+
+  it('offers workspaces as a choice instead of asking for a UUID', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    expect(settings).toContain('workspaceOptions')
+    // With no known workspaces an empty <select> would trap the user, so the
+    // field degrades to free text.
+    expect(settings).toContain('workspaceOptions.length > 0')
+  })
+
+  it('marks the optional field as safe to leave empty', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'bindings' as const }),
+    )
+
+    expect(markup).toContain('可以留空')
   })
 })

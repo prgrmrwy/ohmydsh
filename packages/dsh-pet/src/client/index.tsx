@@ -19,7 +19,11 @@ import type {} from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { PetOverlay, type SourceSelection } from './overlay.js'
-import { PetSettingsSection, setDirectoryPicker } from './settings.js'
+import {
+  PetSettingsSection,
+  setDirectoryPicker,
+  setWorkspaceLister,
+} from './settings.js'
 import {
   PET_SETTINGS_NAV_CSS,
   registerPetSettingsNavIcon,
@@ -90,6 +94,19 @@ export function apply(ctx: ClientContext): void {
   // be wrong: it yields the USER's machine. `host.pickDirectory` is served
   // only under the `native` capability, so a remote deployment simply gets
   // no picker and keeps typing the path.
+  // Publish the workspace list so Bindings can offer a real choice: a
+  // workspace id is a UUID, which nobody can type from memory.
+  setWorkspaceLister(() => {
+    const state = ctx.workspaces.list.getSnapshot() as {
+      items?: readonly { workspaceId: string; title?: string; path?: string }[]
+    }
+    return (state.items ?? []).map(item => ({
+      id: String(item.workspaceId),
+      label: item.title ?? item.path ?? String(item.workspaceId),
+      ...(item.path !== undefined ? { path: item.path } : {}),
+    }))
+  })
+
   setDirectoryPicker(async () => {
     const connection = ctx.get('connection') as
       | { rpc?: { host?: { pickDirectory?: (payload: unknown) => Promise<unknown> } } }
