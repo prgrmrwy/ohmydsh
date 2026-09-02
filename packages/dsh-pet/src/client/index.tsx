@@ -115,14 +115,17 @@ export function apply(ctx: ClientContext): void {
   setDirectoryPicker(async () => {
     const connection = ctx.get('connection') as
       | {
-          rpc?: {
+          api?: {
             host?: {
               pickDirectory?: (payload: unknown) => Promise<unknown>
             }
           }
         }
       | undefined
-    const pick = connection?.rpc?.host?.pickDirectory
+    // `host` hangs off `connection.api` (the IApiClient face), NOT
+    // `connection.rpc` — reading the wrong face yields `undefined` and the
+    // picker silently degrades to "unsupported".
+    const pick = connection?.api?.host?.pickDirectory
     if (pick === undefined) return undefined
     const response = (await pick({}).catch(() => undefined)) as
       | { result?: { ok?: boolean; value?: { path?: string | null } } }
@@ -135,14 +138,14 @@ export function apply(ctx: ClientContext): void {
   setDirectoryLister(async requested => {
     const connection = ctx.get('connection') as
       | {
-          rpc?: {
+          api?: {
             host?: {
               listDirectory?: (payload: unknown) => Promise<unknown>
             }
           }
         }
       | undefined
-    const list = connection?.rpc?.host?.listDirectory
+    const list = connection?.api?.host?.listDirectory
     if (list === undefined) return undefined
     const response = (await list(
       requested === undefined ? {} : { path: requested },

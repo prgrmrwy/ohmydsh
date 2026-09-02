@@ -1042,3 +1042,44 @@ describe('preset terminology cannot be confused with Pet context', () => {
     expect(markup).toContain('与这里选什么预设无关')
   })
 })
+
+describe('Host directory APIs are read from the right connection face', () => {
+  it('uses connection.api.host, not connection.rpc.host', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const entry = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'index.tsx'),
+      'utf8',
+    )
+
+    // `host` hangs off the IApiClient face (`connection.api`). Reading
+    // `connection.rpc.host` yields `undefined`, so BOTH the OS picker and the
+    // in-app browser degrade to "this deployment does not support directory
+    // selection" even where listDirectory works fine.
+    expect(entry).toContain('connection?.api?.host?.pickDirectory')
+    expect(entry).toContain('connection?.api?.host?.listDirectory')
+    expect(entry).not.toContain('connection?.rpc?.host')
+  })
+
+  it('matches the face the installed client library actually exposes', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const declared = await readFile(
+      path.resolve(
+        __dirname,
+        '..',
+        '..',
+        '..',
+        'node_modules',
+        '@deepseek-ai',
+        'dsh-host-apiproxy',
+        'lib',
+        'types',
+        'fetch',
+        'client.d.ts',
+      ),
+      'utf8',
+    )
+
+    // Pin the assumption to the real contract rather than to memory.
+    expect(declared).toContain('listDirectory(payload: RequestPayload<\'host.listDirectory\'>')
+  })
+})
