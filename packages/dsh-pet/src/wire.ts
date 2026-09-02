@@ -159,7 +159,8 @@ export interface PetInvocationRecord {
   /** Skill name resolved at acceptance time. */
   readonly skillName: string
   /** Immutable store digest fixed for this Invocation; upgrades never rewrite it. */
-  readonly skillDigest: string
+  /** Registered directory at acceptance time, recorded for diagnostics. */
+  readonly skillSourcePath: string
   /** Pet skill-set generation active when the Invocation was accepted. */
   readonly skillSetGeneration: number
   readonly snapshotId: string
@@ -247,21 +248,20 @@ export interface PetCapability {
 // Skill store
 // ---------------------------------------------------------------------------
 
-export type PetSkillProvenanceKind = 'builtin' | 'local-import'
+/** Every Skill is added by the user; Pet ships no privileged built-ins. */
+export type PetSkillProvenanceKind = 'local-link'
 
 export interface PetSkillProvenance {
   readonly kind: PetSkillProvenanceKind
-  /** Diagnostic-only source path for a local import; never a live provider root. */
+  /** Directory the user registered, echoed for diagnostics. */
   readonly sourcePath?: string
-  /** Package version that shipped a built-in revision. */
-  readonly packageVersion?: string
   readonly installedAt: number
 }
 
 export interface PetSkillRevision {
   readonly skillName: string
-  /** sha256 over the canonical manifest of the copied bundle. */
-  readonly digest: string
+  /** Canonical directory on the Host that the projection links to. */
+  readonly sourcePath: string
   readonly description: string
   /**
    * Pet presentation and context requirement declared by the Skill itself.
@@ -285,11 +285,10 @@ export interface PetSkillRevision {
 /** Per-skill selection state: installed, enabled and shortcut visibility are separate facts. */
 export interface PetSkillSelection {
   readonly skillName: string
-  /** Digest of the single enabled revision, absent when the skill is disabled. */
-  readonly enabledDigest?: string
+  /** Whether the Skill is enabled; a Skill has no versions to choose between. */
+  readonly enabled?: boolean
   readonly showAsShortcut: boolean
   /** Newer trusted built-in revision available but never silently applied. */
-  readonly upgradeAvailableDigest?: string
 }
 
 export type PetProjectionStatus = 'ok' | 'missing' | 'drifted' | 'not-a-symlink' | 'out-of-store'
@@ -297,7 +296,8 @@ export type PetProjectionStatus = 'ok' | 'missing' | 'drifted' | 'not-a-symlink'
 export interface PetProjectionEntry {
   readonly skillName: string
   readonly status: PetProjectionStatus
-  readonly expectedDigest?: string
+  /** Canonical source directory this entry is expected to link to. */
+  readonly expectedSourcePath?: string
   readonly resolvedTarget?: string
   readonly diagnostic?: string
 }

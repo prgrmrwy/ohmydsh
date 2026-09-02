@@ -17,7 +17,7 @@ import { BUNDLED_SKILL_RANK, type SkillCandidate, type SkillDefinition } from '@
 import { PetError } from './errors.js'
 import type { PetPaths } from './paths.js'
 import type { PetRepository } from './repository.js'
-import { SKILL_ENTRY_FILE, parseFrontmatter, verifyRevision } from './skill-bundle.js'
+import { SKILL_ENTRY_FILE, parseFrontmatter } from './skill-bundle.js'
 
 /** Provider name registered in `ctx.skills`. */
 export const PET_SKILL_PROVIDER = 'dsh-pet-allowlist'
@@ -25,14 +25,14 @@ export const PET_SKILL_PROVIDER = 'dsh-pet-allowlist'
 /** One allowlist entry: a name bound to an exact immutable revision. */
 export interface AllowlistEntry {
   readonly skillName: string
-  readonly digest: string
+  readonly sourcePath: string
   readonly description: string
 }
 
 /** Opaque locator handed back to `get()`, carrying the fixed revision. */
 interface PetSkillLocator {
   readonly skillName: string
-  readonly digest: string
+  readonly sourcePath: string
 }
 
 /**
@@ -47,12 +47,12 @@ interface PetSkillLocator {
 export function currentAllowlist(repository: PetRepository): readonly AllowlistEntry[] {
   const entries: AllowlistEntry[] = []
   for (const selection of repository.listSkillSelections()) {
-    if (selection.enabledDigest === undefined) continue
-    const revision = repository.getSkillRevision(selection.skillName, selection.enabledDigest)
+    if (selection.enabled !== true) continue
+    const revision = repository.getSkillRevision(selection.skillName)
     if (revision === undefined) continue
     entries.push({
       skillName: selection.skillName,
-      digest: selection.enabledDigest,
+      sourcePath: revision.sourcePath,
       description: revision.description,
     })
   }
@@ -60,29 +60,30 @@ export function currentAllowlist(repository: PetRepository): readonly AllowlistE
 }
 
 /**
- * Load one skill body directly from an immutable store revision.
+ * Load one skill body from its registered directory.
  *
- * Reads through the store path rather than the Workspace projection so a
- * tampered or drifted projection cannot influence what the Agent receives.
- * @param paths - Resolved Pet paths.
+ * @param paths - Resolved Pet paths (unused; kept for call-site symmetry).
  * @param skillName - Skill name.
- * @param digest - Fixed revision digest.
+ * @param sourcePath - Registered directory.
  * @returns the loaded definition.
- * @throws PetError when the revision is missing or fails digest verification.
+ * @throws PetError when the directory is no longer readable.
  */
 export async function loadRevision(
   paths: PetPaths,
   skillName: string,
-  digest: string,
+  sourcePath: string,
 ): Promise<SkillDefinition> {
-  if (!(await verifyRevision(paths.storeRoot, skillName, digest))) {
+  void paths
+  // Read the registered directory directly rather than the Workspace
+  // projection, so a tampered or drifted link cannot influence what the Agent
+  // receives.
+  const revisionRoot = sourcePath
+  const raw = await readFile(path.join(revisionRoot, SKILL_ENTRY_FILE), 'utf8').catch(() => {
     throw new PetError(
-      'SKILL_DIGEST_MISMATCH',
-      `Pet Skill ${skillName}@${digest} is missing or no longer matches its digest`,
+      'SKILL_NOT_FOUND',
+      `Pet Skill ${skillName} is no longer readable at ${sourcePath}`,
     )
-  }
-  const revisionRoot = path.join(paths.storeRoot, skillName, digest)
-  const raw = await readFile(path.join(revisionRoot, SKILL_ENTRY_FILE), 'utf8')
+  })
   const frontmatter = parseFrontmatter(raw)
   const body = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '')
   return {
@@ -126,17 +127,17 @@ export function createPetSkillProvider(
         source: 'custom',
         provider: PET_SKILL_PROVIDER,
         rank: BUNDLED_SKILL_RANK,
-        locator: { skillName: entry.skillName, digest: entry.digest } satisfies PetSkillLocator,
-        path: path.join(paths.storeRoot, entry.skillName, entry.digest, SKILL_ENTRY_FILE),
+        locator: { skillName: entry.skillName, sourcePath: entry.sourcePath } satisfies PetSkillLocator,
+        path: path.join(entry.sourcePath, SKILL_ENTRY_FILE),
         resourceBase: {
           kind: 'directory',
-          path: path.join(paths.storeRoot, entry.skillName, entry.digest),
+          path: entry.sourcePath,
         },
       })),
     get: async (candidate: SkillCandidate): Promise<SkillDefinition | undefined> => {
       const locator = candidate.locator as PetSkillLocator | undefined
       if (locator === undefined) return undefined
-      return loadRevision(paths, locator.skillName, locator.digest).catch(() => undefined)
+      return loadRevision(paths, locator.skillName, locator.sourcePath).catch(() => undefined)
     },
   }
 }
@@ -158,39 +159,15 @@ export async function resolveInvocationSkill(
   repository: PetRepository,
   paths: PetPaths,
   skillName: string,
-  fixedDigest: string,
 ): Promise<SkillDefinition> {
-  const revision = repository.getSkillRevision(skillName, fixedDigest)
+  const revision = repository.getSkillRevision(skillName)
   if (revision === undefined) {
-    throw new PetError(
-      'SKILL_NOT_FOUND',
-      `Pet Skill ${skillName}@${fixedDigest} is not installed`,
-    )
+    throw new PetError('SKILL_NOT_FOUND', `Pet Skill ${skillName} is not registered`)
   }
   const selection = repository.getSkillSelection(skillName)
-  if (selection === undefined || selection.enabledDigest === undefined) {
+  if (selection?.enabled !== true) {
     throw new PetError('SKILL_DISABLED', `Pet Skill ${skillName} is not enabled`)
   }
-  // Deliberately NOT requiring `selection.enabledDigest === fixedDigest`: a
-  // queued Invocation keeps running its fixed revision after an upgrade. The
-  // revision row's continued existence is what authorizes it.
-  return loadRevision(paths, skillName, fixedDigest)
+  return loadRevision(paths, skillName, revision.sourcePath)
 }
 
-/**
- * Digests that may be physically garbage collected.
- *
- * Retains every digest referenced by an unarchived Task or non-terminal
- * Invocation, plus every currently enabled selection.
- * @param repository - Pet repository.
- * @returns collectable `{ skillName, digest }` pairs.
- */
-export function collectableRevisions(
-  repository: PetRepository,
-): readonly { skillName: string; digest: string }[] {
-  const retained = repository.referencedDigests()
-  return repository
-    .listSkillRevisions()
-    .filter(revision => !retained.has(`${revision.skillName}@${revision.digest}`))
-    .map(revision => ({ skillName: revision.skillName, digest: revision.digest }))
-}

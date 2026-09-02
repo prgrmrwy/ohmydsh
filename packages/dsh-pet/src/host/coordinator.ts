@@ -78,7 +78,7 @@ export interface CoordinatorDeps {
    * boundary: an uninstalled, disabled or tampered revision must fail closed
    * rather than reaching the Agent as ordinary prose.
    */
-  readonly verifySkill?: (skillName: string, digest: string) => Promise<void>
+  readonly verifySkill?: (skillName: string) => Promise<void>
 }
 
 /** Result of accepting a user invocation. */
@@ -178,7 +178,7 @@ export class PetCoordinator {
       this.deps.contextProviders,
     )
 
-    let skill: { skillName: string; digest: string }
+    let skill: { skillName: string; sourcePath: string }
     try {
       skill = capabilities.resolveSkill(repository, capture.capabilityId)
     } catch (error) {
@@ -230,8 +230,9 @@ export class PetCoordinator {
       taskId: task.id,
       capabilityId: capture.capabilityId,
       skillName: skill.skillName,
-      // Fixed now: a later enable/upgrade never rewrites this Invocation.
-      skillDigest: skill.digest,
+      // A registered Skill is the user's own directory and may change in
+      // place, so this records where it pointed rather than pinning content.
+      skillSourcePath: skill.sourcePath,
       skillSetGeneration: repository.global.skillSetGeneration,
       snapshotId: snapshot.id,
       ...(capture.request !== undefined ? { request: capture.request } : {}),
@@ -281,7 +282,7 @@ export class PetCoordinator {
     // for a Skill the Agent cannot legitimately load.
     if (this.deps.verifySkill !== undefined) {
       try {
-        await this.deps.verifySkill(next.skillName, next.skillDigest)
+        await this.deps.verifySkill(next.skillName)
       } catch (error) {
         await repository.updateInvocation(next.id, undefined, current => ({
           ...current,

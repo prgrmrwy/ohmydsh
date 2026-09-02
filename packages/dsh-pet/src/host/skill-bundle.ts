@@ -1,12 +1,12 @@
 /**
- * Skill bundle inspection, digesting and bounded copying.
+ * Skill bundle inspection.
  *
- * A Skill bundle is trusted executable instruction content, so every import
- * is validated BEFORE it becomes a store revision: canonical paths, no
- * symlinks, no special files, no path escapes, and hard file-count/size caps.
- * The digest is computed over a canonical manifest of the bundle's contents,
- * which makes a revision content-addressed and lets projection verify that
- * the directory it points at is still exactly what was installed.
+ * A Skill is REGISTERED, not copied: Pet records the user's own directory and
+ * projects a symlink to it, so editing the source takes effect immediately.
+ * Inspection therefore exists to show the user what they are about to add and
+ * to reject a bundle Pet must not project — one containing symlinks, special
+ * files, path escapes, or missing its `SKILL.md` — rather than to fix content
+ * in place.
  */
 
 import { createHash } from 'node:crypto'
@@ -51,8 +51,6 @@ export interface BundleInspection {
     readonly context?: PetContextRequirement
     readonly confirm?: boolean
   }
-  /** Digest the revision would receive; stable across inspect and import. */
-  readonly digest: string
   readonly files: readonly BundleFile[]
   readonly fileCount: number
   readonly totalBytes: number
@@ -214,30 +212,6 @@ export async function collectBundleFiles(root: string): Promise<readonly BundleF
   return files.sort((left, right) => left.relativePath.localeCompare(right.relativePath))
 }
 
-/**
- * Compute the content-addressed digest of a bundle.
- *
- * The digest covers each file's relative path AND its bytes, so neither a
- * rename nor an edit can preserve a digest. Path ordering is canonical, which
- * makes the digest reproducible across machines and filesystems.
- * @param root - Bundle root.
- * @param files - Files previously collected from `root`.
- * @returns the `sha256:<hex>` digest.
- */
-export async function digestBundle(
-  root: string,
-  files: readonly BundleFile[],
-): Promise<string> {
-  const hash = createHash('sha256')
-  for (const file of files) {
-    hash.update(file.relativePath)
-    hash.update('\0')
-    const bytes = await readFile(path.join(root, ...file.relativePath.split('/')))
-    hash.update(bytes)
-    hash.update('\0')
-  }
-  return `sha256:${hash.digest('hex')}`
-}
 
 /**
  * Inspect a candidate bundle read-only.
@@ -295,7 +269,6 @@ export async function inspectBundle(sourcePath: string): Promise<BundleInspectio
     )
   }
 
-  const digest = await digestBundle(canonical, files)
   const totalBytes = files.reduce((sum, file) => sum + file.bytes, 0)
   return {
     skillName,
@@ -318,7 +291,6 @@ export async function inspectBundle(sourcePath: string): Promise<BundleInspectio
           },
         }
       : {}),
-    digest,
     files,
     fileCount: files.length,
     totalBytes,
@@ -326,115 +298,5 @@ export async function inspectBundle(sourcePath: string): Promise<BundleInspectio
   }
 }
 
-/**
- * Copy an inspected bundle into the immutable store atomically.
- *
- * Copies through a staging directory, re-digests the COPY, and only then
- * renames it into place. Re-digesting after the copy is what makes a
- * concurrent modification of the source during import fail instead of
- * producing a revision whose contents do not match its digest.
- * @param inspection - Result of a prior {@link inspectBundle}.
- * @param storeRoot - Canonical immutable store root.
- * @param stagingRoot - Staging directory root.
- * @returns the absolute revision directory.
- * @throws PetError when verification fails.
- */
-export async function installBundle(
-  inspection: BundleInspection,
-  storeRoot: string,
-  stagingRoot: string,
-): Promise<string> {
-  const target = path.join(storeRoot, inspection.skillName, inspection.digest)
-  const existing = await lstat(target).catch(() => undefined)
-  // Content-addressed: an identical digest is already installed and immutable.
-  if (existing !== undefined && existing.isDirectory()) return target
 
-  await mkdir(stagingRoot, { recursive: true, mode: OWNER_ONLY_DIR_MODE })
-  const staging = await mkdtemp(path.join(stagingRoot, 'import-'))
-  try {
-    for (const file of inspection.files) {
-      const segments = file.relativePath.split('/')
-      const destination = path.join(staging, ...segments)
-      await mkdir(path.dirname(destination), { recursive: true, mode: OWNER_ONLY_DIR_MODE })
-      await copyFile(path.join(inspection.canonicalSourcePath, ...segments), destination)
-    }
 
-    const copiedFiles = await collectBundleFiles(staging)
-    const copiedDigest = await digestBundle(staging, copiedFiles)
-    if (copiedDigest !== inspection.digest) {
-      throw new PetError(
-        'SKILL_IMPORT_REJECTED',
-        `Skill bundle changed during import (expected ${inspection.digest}, copied ${copiedDigest})`,
-      )
-    }
-    if (!isContainedBy(storeRoot, target)) {
-      throw new PetError('SKILL_IMPORT_REJECTED', 'Resolved store target escapes the Pet store')
-    }
-
-    await mkdir(path.dirname(target), { recursive: true, mode: OWNER_ONLY_DIR_MODE })
-    await rename(staging, target)
-    return target
-  } catch (error) {
-    await rm(staging, { recursive: true, force: true })
-    throw error
-  }
-}
-
-/**
- * Re-verify an installed revision still matches its digest.
- *
- * Used by projection publication and startup drift detection: a revision that
- * no longer hashes to its own directory name has been tampered with.
- * @param storeRoot - Canonical store root.
- * @param skillName - Skill name.
- * @param digest - Expected digest.
- * @returns whether the revision is intact.
- */
-export async function verifyRevision(
-  storeRoot: string,
-  skillName: string,
-  digest: string,
-): Promise<boolean> {
-  const target = path.join(storeRoot, skillName, digest)
-  const info = await lstat(target).catch(() => undefined)
-  if (info === undefined || !info.isDirectory()) return false
-  const entry = await lstat(path.join(target, SKILL_ENTRY_FILE)).catch(() => undefined)
-  if (entry === undefined || !entry.isFile()) return false
-  const files = await collectBundleFiles(target).catch(() => undefined)
-  if (files === undefined) return false
-  return (await digestBundle(target, files)) === digest
-}
-
-/**
- * Physically remove one immutable revision directory from the store.
- *
- * Callers MUST first prove the digest is unreferenced (see
- * `collectableRevisions`): a revision fixed by an unarchived Task or a
- * non-terminal Invocation has to survive so that queued work keeps running
- * the exact version it was accepted with.
- * @param storeRoot - Canonical store root.
- * @param skillName - Skill name.
- * @param digest - Revision digest.
- * @returns whether a directory was removed.
- * @throws PetError when the resolved path escapes the store.
- */
-export async function removeRevisionDirectory(
-  storeRoot: string,
-  skillName: string,
-  digest: string,
-): Promise<boolean> {
-  const target = path.join(storeRoot, skillName, digest)
-  if (!isContainedBy(storeRoot, target)) {
-    throw new PetError('SKILL_IMPORT_REJECTED', 'Revision path escapes the Pet immutable store')
-  }
-  const info = await lstat(target).catch(() => undefined)
-  if (info === undefined) return false
-  if (!info.isDirectory()) {
-    throw new PetError(
-      'SKILL_IMPORT_REJECTED',
-      `Refusing to remove ${target}: not a revision directory`,
-    )
-  }
-  await rm(target, { recursive: true, force: true })
-  return true
-}

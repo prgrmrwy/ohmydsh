@@ -83,9 +83,8 @@ export class CapabilityRegistry {
     const projected = new Map<string, PetCapability>()
 
     for (const selection of repository.listSkillSelections()) {
-      const digest = selection.enabledDigest
-      if (digest === undefined) continue
-      const revision = repository.getSkillRevision(selection.skillName, digest)
+      if (selection.enabled !== true) continue
+      const revision = repository.getSkillRevision(selection.skillName)
       if (revision === undefined) continue
 
       const declared = revision.pet
@@ -138,13 +137,17 @@ export class CapabilityRegistry {
   resolveSkill(
     repository: PetRepository,
     capabilityId: string,
-  ): { skillName: string; digest: string } {
+  ): { skillName: string; sourcePath: string } {
     // The capability id IS the Skill name: a capability exists because a Skill
     // is installed and enabled, not because Pet ships a declaration for it.
     const selection = repository.getSkillSelection(capabilityId)
-    if (selection?.enabledDigest === undefined) {
+    if (selection?.enabled !== true) {
       throw new Error(`Pet Skill '${capabilityId}' is not enabled`)
     }
-    return { skillName: capabilityId, digest: selection.enabledDigest }
+    const revision = repository.getSkillRevision(capabilityId)
+    if (revision === undefined) {
+      throw new Error(`Pet Skill '${capabilityId}' is no longer registered`)
+    }
+    return { skillName: capabilityId, sourcePath: revision.sourcePath }
   }
 }

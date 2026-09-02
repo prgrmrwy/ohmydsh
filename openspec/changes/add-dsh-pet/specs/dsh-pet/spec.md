@@ -212,9 +212,9 @@ Pet SHALL 将“已安装”“已启用”“显示为快捷能力”建模为�
 
 一期 SHALL 支持两种安装来源：Pet 插件 manifest 显式声明的受信内置 Skill，以及用户从运行当前 `dsh web` 的 Host 机器绝对路径显式导入的单层 Skill bundle。Web UI SHALL 先提交该路径执行只读检查并展示名称、摘要、文件范围、来源和风险预览，只有用户再次确认后才复制安装；它 MUST NOT 把路径解释为浏览器客户端路径或直接提供持续挂载。首次 Host 初始化 SHALL 仅安装并启用 manifest 标记为 `defaultEnabled` 的一期内置能力；插件升级发现的新内置版本 SHALL 显示为可升级项，但 MUST NOT 静默替换当前选中摘要。安装 SHALL 把经过名称、frontmatter、文件类型、大小和路径边界验证的内容复制到 `$DSH_HOME/plugins/dsh-pet/skills/store/` 的不可变版本中，而 MUST NOT 持续扫描、软链接或在执行时信任原导入目录。Git、URL、npm 与自动市场发现不属于一期。
 
-Pet SHALL 根据启用清单在 `$DSH_HOME/plugins/dsh-pet/workspace/.dsh/skills/` 原子生成由 Pet 管理的目录软链投影：每个 `<skill-name>` 软链只能指向 `$DSH_HOME/plugins/dsh-pet/skills/store/<skill-name>/<digest>/` 下已验证的不可变目录。Pet SHALL 通过同目录临时软链加原子 rename 切换目标，并在发布前验证目标仍位于受管 store、摘要匹配且 `SKILL.md` 有效。损坏、越界或用户手工替换的投影 SHALL fail-closed 并进入可诊断漂移状态。
+Pet SHALL 根据启用清单在 `$DSH_HOME/plugins/dsh-pet/workspace/.dsh/skills/` 原子生成由 Pet 管理的目录软链投影：每个 `<skill-name>` 软链指向用户注册该 Skill 时给定的目录本身。Pet 不复制 Skill 内容——注册即链接，因此用户修改该目录会立即影响后续调用。Pet SHALL 通过同目录临时软链加原子 rename 切换目标，并在发布前验证目标仍是一个包含 `SKILL.md` 的目录。损坏、目标缺失或用户手工替换的投影 SHALL fail-closed 并进入可诊断漂移状态。
 
-DSH filesystem Skill provider 对目录软链执行跟随并把最终目录识别为 Skill bundle；该兼容投影不得作为 Pet Agent 的授权边界。Pet 不得同时投影到 `.agents/skills` 或 provider 专用目录来制造重复候选。用户导入 bundle 内的软链仍 SHALL 被拒绝；只有 Pet Host 自己创建且目标受限于 immutable store 的投影软链受支持。模型 provider 选择 MUST NOT 改变 Skill 安装位置。每个 Invocation SHALL 固定实际调用 Skill 的版本摘要；Skill 升级、禁用或删除不得悄然替换已经持久排队或正在执行的 Invocation。存在使用中引用的旧版本 SHALL 保留至不再被活跃/排队 Invocation 引用。
+DSH filesystem Skill provider 对目录软链执行跟随并把最终目录识别为 Skill bundle；该兼容投影不得作为 Pet Agent 的授权边界。Pet 不得同时投影到 `.agents/skills` 或 provider 专用目录来制造重复候选。用户注册的 bundle 内部若含软链仍 SHALL 被拒绝；只有 Pet Host 自己创建、目标为已注册 Skill 目录的投影软链受支持。模型 provider 选择 MUST NOT 改变 Skill 注册位置。Pet 不提供内置 Skill 类别：所有 Skill 均由用户显式加入，加入一个能力是一次注册而非一次代码改动。由于注册即链接，Skill 内容可随时被其源目录改动；Pet 记录调用当时的来源路径用于诊断，但不承诺内容快照。
 
 #### Scenario: 首次初始化默认内置 Skill
 - **WHEN** Pet Host 第一次初始化且 manifest 将 Create MR、Send CR 和 Clean Worktree 标记为 `defaultEnabled`

@@ -111,17 +111,6 @@ describe('queue recovery', () => {
     expect(repo.nextQueued('task-1')?.id).toBe('inv-2')
   })
 
-  it('keeps queued work fixed to its original Skill digest across a restart', async () => {
-    const medium = emptyMedium()
-    const first = await openPetHarness(medium)
-    await first.repository.createTask(testTask())
-    await first.repository.appendInvocation(testInvocation({ skillDigest: 'sha256:v1' }))
-    await first.close()
-
-    harness = await openPetHarness(medium)
-
-    expect(harness.repository.getInvocation('inv-1')?.skillDigest).toBe('sha256:v1')
-  })
 })
 
 describe('browser closure during execution', () => {

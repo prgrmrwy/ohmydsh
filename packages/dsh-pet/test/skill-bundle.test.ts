@@ -1,15 +1,12 @@
-import { mkdtemp, mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, symlink, writeFile, realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   BUNDLE_LIMITS,
-  digestBundle,
   collectBundleFiles,
   inspectBundle,
-  installBundle,
   parseFrontmatter,
-  verifyRevision,
 } from '../src/host/skill-bundle.js'
 import { ensurePetDirectories, resolvePetPaths } from '../src/host/paths.js'
 
@@ -56,28 +53,7 @@ describe('frontmatter parsing', () => {
 })
 
 describe('bundle inspection', () => {
-  it('accepts a valid bundle and reports a stable digest', async () => {
-    const root = await makeBundle({ extraFiles: { 'reference/notes.md': 'notes' } })
 
-    const first = await inspectBundle(root)
-    const second = await inspectBundle(root)
-
-    expect(first.skillName).toBe('create-mr')
-    expect(first.description).toBe('Create a merge request')
-    expect(first.fileCount).toBe(2)
-    expect(first.digest).toMatch(/^sha256:[0-9a-f]{64}$/)
-    // Inspect is pure: the same bytes must produce the same digest.
-    expect(second.digest).toBe(first.digest)
-  })
-
-  it('changes the digest when any file content changes', async () => {
-    const root = await makeBundle()
-    const before = await inspectBundle(root)
-    await writeFile(path.join(root, 'SKILL.md'), '---\nname: create-mr\ndescription: Other\n---\n')
-    const after = await inspectBundle(root)
-
-    expect(after.digest).not.toBe(before.digest)
-  })
 
   it('rejects a relative path', async () => {
     await expect(inspectBundle('relative/path')).rejects.toMatchObject({
@@ -141,87 +117,38 @@ describe('bundle inspection', () => {
   })
 })
 
-describe('bundle installation', () => {
-  it('copies into a content-addressed immutable revision', async () => {
-    const paths = await petStore()
-    const root = await makeBundle({ extraFiles: { 'reference/a.md': 'A' } })
-    const inspection = await inspectBundle(root)
 
-    const target = await installBundle(inspection, paths.storeRoot, paths.stagingRoot)
 
-    expect(target).toBe(path.join(paths.storeRoot, 'create-mr', inspection.digest))
-    expect(await readFile(path.join(target, 'reference/a.md'), 'utf8')).toBe('A')
-    expect(await verifyRevision(paths.storeRoot, 'create-mr', inspection.digest)).toBe(true)
-  })
-
-  it('is idempotent for an identical digest', async () => {
-    const paths = await petStore()
-    const root = await makeBundle()
-    const inspection = await inspectBundle(root)
-
-    const first = await installBundle(inspection, paths.storeRoot, paths.stagingRoot)
-    const second = await installBundle(inspection, paths.storeRoot, paths.stagingRoot)
-
-    expect(second).toBe(first)
-  })
-
-  it('keeps the installed revision independent of later source edits', async () => {
-    const paths = await petStore()
-    const root = await makeBundle()
-    const inspection = await inspectBundle(root)
-    await installBundle(inspection, paths.storeRoot, paths.stagingRoot)
-
-    await writeFile(path.join(root, 'SKILL.md'), '---\nname: create-mr\ndescription: Hijacked\n---\n')
-
-    // The store copy is the authority; mutating the import source must not
-    // change what was installed.
-    expect(await verifyRevision(paths.storeRoot, 'create-mr', inspection.digest)).toBe(true)
-    const stored = await readFile(
-      path.join(paths.storeRoot, 'create-mr', inspection.digest, 'SKILL.md'),
-      'utf8',
+describe('registration links the source instead of copying it', () => {
+  it('reports the canonical directory the projection will link to', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'pet-bundle-'))
+    await writeFile(
+      path.join(root, 'SKILL.md'),
+      '---\nname: demo\ndescription: Demo\n---\nBody\n',
     )
-    expect(stored).toContain('Create a merge request')
-    expect(stored).not.toContain('Hijacked')
+
+    const inspection = await inspectBundle(root)
+
+    // A Skill is the user's own directory, so inspection reports where it is
+    // rather than a digest of a copy that no longer exists.
+    expect(inspection.skillName).toBe('demo')
+    expect(inspection.canonicalSourcePath).toBe(await realpath(root))
   })
 
-  it('fails when the source changes between inspect and install', async () => {
-    const paths = await petStore()
-    const root = await makeBundle()
-    const inspection = await inspectBundle(root)
-    await writeFile(path.join(root, 'SKILL.md'), '---\nname: create-mr\ndescription: Changed\n---\n')
-
-    await expect(installBundle(inspection, paths.storeRoot, paths.stagingRoot)).rejects.toThrow(
-      /changed during import/,
+  it('sees an edit to the source immediately, with no reinstall', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'pet-bundle-'))
+    await writeFile(
+      path.join(root, 'SKILL.md'),
+      '---\nname: demo\ndescription: Before\n---\nBody\n',
     )
-  })
+    expect((await inspectBundle(root)).description).toBe('Before')
 
-  it('reports a tampered revision as unverified', async () => {
-    const paths = await petStore()
-    const root = await makeBundle()
-    const inspection = await inspectBundle(root)
-    const target = await installBundle(inspection, paths.storeRoot, paths.stagingRoot)
+    await writeFile(
+      path.join(root, 'SKILL.md'),
+      '---\nname: demo\ndescription: After\n---\nBody\n',
+    )
 
-    await writeFile(path.join(target, 'SKILL.md'), '---\nname: create-mr\ndescription: Evil\n---\n')
-
-    expect(await verifyRevision(paths.storeRoot, 'create-mr', inspection.digest)).toBe(false)
-  })
-
-  it('reports a missing revision as unverified', async () => {
-    const paths = await petStore()
-    expect(await verifyRevision(paths.storeRoot, 'create-mr', 'sha256:absent')).toBe(false)
-  })
-})
-
-describe('digest canonicalization', () => {
-  it('covers file paths, not just contents', async () => {
-    const rootA = await mkdtemp(path.join(tmpdir(), 'pet-d-'))
-    const rootB = await mkdtemp(path.join(tmpdir(), 'pet-d-'))
-    await writeFile(path.join(rootA, 'a.txt'), 'same')
-    await writeFile(path.join(rootB, 'b.txt'), 'same')
-
-    const digestA = await digestBundle(rootA, await collectBundleFiles(rootA))
-    const digestB = await digestBundle(rootB, await collectBundleFiles(rootB))
-
-    expect(digestA).not.toBe(digestB)
+    // This is the point of linking: the Skill is live, not a snapshot.
+    expect((await inspectBundle(root)).description).toBe('After')
   })
 })

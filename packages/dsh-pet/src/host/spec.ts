@@ -67,7 +67,7 @@ const petInvocationRecord = z.object({
   taskId: z.string().min(1),
   capabilityId: z.string().min(1),
   skillName: z.string().min(1),
-  skillDigest: z.string().min(1),
+  skillSourcePath: z.string().min(1),
   skillSetGeneration: z.number().int().nonnegative(),
   snapshotId: z.string().min(1),
   request: z.string().optional(),
@@ -118,13 +118,16 @@ const petRunRecord = z.object({
   settledAt: z.number().int().optional(),
 })
 
+// One registration per Skill, keyed by name. A Skill is the user's own
+// directory rather than an immutable copy, so there are no revisions to
+// version, compare or garbage-collect.
 const petSkillRevision = z.object({
   skillName: z.string().min(1),
-  digest: z.string().min(1),
+  /** Canonical directory on the Host that the projection links to. */
+  sourcePath: z.string().min(1),
   description: z.string(),
-  // Pet presentation and context requirement, declared by the SKILL.md
-  // frontmatter. Persisted with the immutable revision so the menu stays
-  // stable for queued work even if a newer revision changes them.
+  // Pet presentation and context requirement, read from the SKILL.md
+  // frontmatter at registration time and refreshed on rescan.
   pet: z
     .object({
       label: z.string().optional(),
@@ -134,9 +137,8 @@ const petSkillRevision = z.object({
     })
     .optional(),
   provenance: z.object({
-    kind: z.enum(['builtin', 'local-import']),
+    kind: z.literal('local-link'),
     sourcePath: z.string().optional(),
-    packageVersion: z.string().optional(),
     installedAt: z.number().int(),
   }),
   fileCount: z.number().int().nonnegative(),
@@ -145,9 +147,9 @@ const petSkillRevision = z.object({
 
 const petSkillSelection = z.object({
   skillName: z.string().min(1),
-  enabledDigest: z.string().optional(),
+  /** Present when the Skill is enabled; a Skill has no versions to pick. */
+  enabled: z.boolean().optional(),
   showAsShortcut: z.boolean(),
-  upgradeAvailableDigest: z.string().optional(),
 })
 
 const petWorkspaceBinding = z.object({
@@ -216,9 +218,8 @@ export type PetWorkspaceBinding = z.infer<typeof petWorkspaceBinding>
  * Composite key for a skill revision row: one skill name may hold several
  * immutable revisions simultaneously while any is still referenced.
  * @param skillName - Kebab-case skill name.
- * @param digest - Content digest of the revision.
  * @returns the stable table key.
  */
-export function revisionKey(skillName: string, digest: string): string {
-  return `${skillName}@${digest}`
+export function revisionKey(skillName: string): string {
+  return skillName
 }

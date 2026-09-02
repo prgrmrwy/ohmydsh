@@ -140,6 +140,30 @@ describe('plugin entry shape', () => {
   })
 })
 
+
+/**
+ * Register and enable a Skill through the real routes.
+ *
+ * There are no built-ins, so a test that invokes a capability must add its
+ * Skill first — exactly as a user would.
+ */
+async function registerSkill(
+  routes: { path: string; handler: (req: never, res: never) => Promise<void> | void }[],
+  skillName: string,
+): Promise<void> {
+  const { mkdtemp, writeFile } = await import('node:fs/promises')
+  const dir = await mkdtemp(path.join(tmpdir(), 'pet-skill-'))
+  await writeFile(
+    path.join(dir, 'SKILL.md'),
+    `---\nname: ${skillName}\ndescription: ${skillName}\npetContext: session-required\n---\nBody\n`,
+  )
+  await callRoute(routes.find(route => route.path === ROUTES.skillImport)!, { path: dir })
+  await callRoute(routes.find(route => route.path === ROUTES.skillMutate)!, {
+    skillName,
+    action: 'enable',
+  })
+}
+
 describe('Host service loads through the loader', () => {
   it('reaches ready and registers its exact routes', async () => {
     const { routes } = await composeHost()
@@ -164,17 +188,17 @@ describe('Host service loads through the loader', () => {
     expect(entries).toContain('state.sqlite')
   })
 
-  it('installs the declared built-in Skill and projects it', async () => {
+  it('ships no privileged built-in Skills', async () => {
     const { home } = await composeHost()
     const { readdir } = await import('node:fs/promises')
 
     const projection = await readdir(
       path.join(home, 'plugins', 'dsh-pet', 'workspace', '.dsh', 'skills'),
-    )
+    ).catch(() => [] as string[])
 
-    // Every manifest bundle marked defaultEnabled is installed, enabled and
-    // projected on a first boot.
-    expect([...projection].sort()).toEqual(['clean-worktree', 'create-mr', 'send-cr'])
+    // Pet has no built-in category: every Skill is added by the user, so a
+    // fresh Host starts with nothing projected.
+    expect(projection).toEqual([])
   })
 
   it('registers no route when the sqlite backend is missing, and does not throw', async () => {
@@ -284,6 +308,8 @@ describe('a real Invocation scopes its executor Agent', () => {
       await new Promise(resolve => setTimeout(resolve, 50))
     }
 
+    await registerSkill(routes, 'clean-worktree')
+
     // A provider/model must be configured before an executor may be created.
     const configRoute = routes.find(route => route.path === ROUTES.configUpdate)
     expect(configRoute).toBeDefined()
@@ -389,6 +415,7 @@ describe('dispatch uses the ordinary Agent lifecycle', () => {
       await new Promise(resolve => setTimeout(resolve, 50))
     }
 
+    await registerSkill(routes, 'clean-worktree')
     await callRoute(routes.find(route => route.path === ROUTES.configUpdate)!, {
       providerId: 'anthropic',
       modelId: 'claude-opus-5',
@@ -491,6 +518,7 @@ describe('archiving from the Pet route syncs the executor session', () => {
       await new Promise(resolve => setTimeout(resolve, 50))
     }
 
+    await registerSkill(routes, 'clean-worktree')
     await callRoute(routes.find(route => route.path === ROUTES.configUpdate)!, {
       providerId: 'anthropic',
       modelId: 'claude-opus-5',
@@ -596,6 +624,8 @@ describe('provider routability is proven before an executor is created', () => {
     while (Date.now() < deadline && routes.length === 0) {
       await new Promise(resolve => setTimeout(resolve, 50))
     }
+
+    await registerSkill(routes, 'clean-worktree')
 
     // No Pet-side model config to set: Pet follows the Host default above.
     const refused = await callRoute(routes.find(r => r.path === ROUTES.invocationCreate)!, {

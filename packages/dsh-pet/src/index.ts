@@ -21,7 +21,6 @@ import type {} from '@deepseek-ai/dsh-workspace'
 import { reconcileArchives, registerArchiveObserver, type ArchiveSink } from './host/archive.js'
 import { verifyBackendOwnership, verifyDatabaseLocation } from './host/backend.js'
 import { PetChangeFeed } from './host/changes.js'
-import { installBuiltins, resolveManifestPath } from './host/builtins.js'
 import { CapabilityRegistry } from './host/capabilities.js'
 import { SourceContextRegistry, type SourceResolver } from './host/capture.js'
 import { PetCoordinator, type PromptDispatcher } from './host/coordinator.js'
@@ -164,9 +163,6 @@ async function initialize(
   }
 
   const version = config.version ?? '0.1.0'
-  await lifecycle.contain('Pet built-in Skills', () =>
-    installBuiltins(repository, paths, version, resolveManifestPath()),
-  )
 
   // Republish the managed projection so a drifted or stale link is repaired
   // before any Invocation can resolve a Skill through it.
@@ -175,7 +171,7 @@ async function initialize(
       paths,
       currentAllowlist(repository).map(entry => ({
         skillName: entry.skillName,
-        digest: entry.digest,
+        sourcePath: entry.sourcePath,
       })),
     ),
   )
@@ -376,9 +372,11 @@ async function initialize(
     workspacePath: paths.workspaceRoot,
     selection,
     executorSetup,
-    verifySkill: async (skillName, digest) => {
-      // Throws SKILL_NOT_FOUND / SKILL_DISABLED / SKILL_DIGEST_MISMATCH.
-      await resolveInvocationSkill(repository, paths, skillName, digest)
+    verifySkill: async skillName => {
+      // Throws SKILL_NOT_FOUND / SKILL_DISABLED. A registered Skill is the
+      // user's own directory, so this proves it is still registered, enabled
+      // and readable — not that its contents are unchanged.
+      await resolveInvocationSkill(repository, paths, skillName)
     },
     renameExecutor: (executorSessionId, title) => {
       const session = ctx.sessions.get(executorSessionId as never)
@@ -497,12 +495,7 @@ export { executePetContext, PET_CONTEXT_TOOL } from './host/context-tool.js'
 export { createWorktreeProvider } from './host/worktree-adapter.js'
 export { resolvePetPaths, ensurePetDirectories, isContainedBy } from './host/paths.js'
 export { petDomainSpec, PET_DOMAIN_NAME, PET_DOMAIN_VERSION } from './host/spec.js'
-export {
-  inspectBundle,
-  installBundle,
-  verifyRevision,
-  BUNDLE_LIMITS,
-} from './host/skill-bundle.js'
+export { inspectBundle, BUNDLE_LIMITS } from './host/skill-bundle.js'
 export {
   rebuildProjection,
   detectProjectionDrift,
