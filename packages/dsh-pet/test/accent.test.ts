@@ -65,21 +65,38 @@ describe('the palette is muted by construction', () => {
   })
 
   it('keeps every colour below 45% saturation', () => {
-    // The mascot floats above real work for the whole session, so a vivid
-    // badge would compete with the content underneath it.
+    // The mascot floats above real work for the whole session, so a vivid paw
+    // would compete with the content underneath it.
     for (const accent of PET_ACCENTS) {
-      expect(saturation(accent.background)).toBeLessThanOrEqual(0.45)
+      expect(saturation(accent.glyph)).toBeLessThanOrEqual(0.45)
     }
   })
 
-  it('keeps the glyph readable on every background', () => {
+  it('keeps the paw readable against the panel surface', () => {
+    // The accent colours the PAW, not the surface, so contrast is measured
+    // against the neutral panel background the mascot sits on.
     for (const accent of PET_ACCENTS) {
-      const [hi, lo] = [luminance(accent.background), luminance(accent.foreground)].sort(
+      const [hi, lo] = [luminance('#ffffff'), luminance(accent.glyph)].sort(
         (a, b) => b - a,
       ) as [number, number]
       // WCAG AA for large text; the glyph is 38px.
       expect((hi + 0.05) / (lo + 0.05)).toBeGreaterThanOrEqual(4.5)
     }
+  })
+
+  it('tints only the paw, never the surface', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const path = await import('node:path')
+    const overlay = await readFile(
+      path.resolve(process.cwd(), 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // Tinting the circle would make Pet read as a status badge, and would
+    // leave no room for a black option — black is a paw colour, not a
+    // backdrop.
+    expect(overlay).toContain('color: accent.glyph')
+    expect(overlay).not.toContain('background: accent.')
   })
 })
 

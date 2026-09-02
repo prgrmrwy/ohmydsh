@@ -34,10 +34,14 @@ export type PetAccentId =
 export interface PetAccent {
   readonly id: PetAccentId
   readonly label: string
-  /** Mascot background. */
-  readonly background: string
-  /** Glyph colour that stays legible on that background. */
-  readonly foreground: string
+  /**
+   * Colour of the mascot GLYPH itself.
+   *
+   * The surface stays the neutral panel background: tinting it would make the
+   * mascot read as a status badge floating over the user's work, and would
+   * leave no room for a black option — black is a paw colour, not a backdrop.
+   */
+  readonly glyph: string
 }
 
 /**
@@ -47,17 +51,15 @@ export interface PetAccent {
  * primary, so the mascot reads as part of the surface instead of an alert.
  */
 export const PET_ACCENTS: readonly PetAccent[] = [
-  { id: 'default', label: '默认', background: '#ffffff', foreground: '#1f2329' },
-  // The one deliberately unsaturated entry: a dark body with a light glyph,
-  // inverting the palette rather than tinting it.
-  { id: 'black', label: '黑', background: '#2b2f36', foreground: '#e8eaed' },
-  { id: 'red', label: '红', background: '#e6d4d1', foreground: '#653c34' },
-  { id: 'orange', label: '橙', background: '#e6dbd1', foreground: '#654b34' },
-  { id: 'yellow', label: '黄', background: '#e6e2d1', foreground: '#655b34' },
-  { id: 'green', label: '绿', background: '#d1e6d2', foreground: '#346538' },
-  { id: 'cyan', label: '青', background: '#d1e4e6', foreground: '#346165' },
-  { id: 'blue', label: '蓝', background: '#d1dae6', foreground: '#344865' },
-  { id: 'purple', label: '紫', background: '#dbd1e6', foreground: '#4c3465' },
+  { id: 'default', label: '默认', glyph: '#1f2329' },
+  { id: 'black', label: '黑', glyph: '#101318' },
+  { id: 'red', label: '红', glyph: '#a1524b' },
+  { id: 'orange', label: '橙', glyph: '#765537' },
+  { id: 'yellow', label: '黄', glyph: '#766637' },
+  { id: 'green', label: '绿', glyph: '#4a7a4f' },
+  { id: 'cyan', label: '青', glyph: '#3f7b80' },
+  { id: 'blue', label: '蓝', glyph: '#4a6b96' },
+  { id: 'purple', label: '紫', glyph: '#6f5b93' },
 ]
 
 /**

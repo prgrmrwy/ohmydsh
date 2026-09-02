@@ -287,7 +287,7 @@ function GeneralTab(): JSX.Element {
               title={item.label}
               className="dshpet-swatch"
               data-selected={accent === item.id}
-              style={{ background: item.background, color: item.foreground }}
+              style={{ color: item.glyph }}
               onClick={() => {
                 // Broadcasts, so a mounted Pet recolors at once instead of
                 // waiting for a page reload.
