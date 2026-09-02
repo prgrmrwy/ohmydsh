@@ -558,7 +558,7 @@ describe('capability menu is reachable and legible without a pointer', () => {
     )
 
     expect(overlay).toContain('role="status"')
-    expect(overlay).toContain('Pet is degraded:')
+    expect(overlay).toContain('Pet 未就绪：')
     expect(overlay).toContain('aria-hidden="true"')
   })
 

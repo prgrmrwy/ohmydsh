@@ -25,7 +25,7 @@ import {
   TERMINAL_TASK_STATUSES,
 } from '../wire.js'
 
-type PetDomain = Domain<typeof petDomainSpec>
+export type PetDomain = Domain<typeof petDomainSpec>
 
 /** Durable Pet data access with domain invariants enforced on every write. */
 export class PetRepository {

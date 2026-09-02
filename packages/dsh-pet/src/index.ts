@@ -41,6 +41,7 @@ import { createWorktreeProvider } from './host/worktree-adapter.js'
 import { loadWorktreeStatus } from './host/worktree-status.js'
 import { registerPetTools } from './host/tools.js'
 import { currentAllowlist } from './host/skill-provider.js'
+import { removeLegacyState } from './host/migrate.js'
 import { petDomainSpec } from './host/spec.js'
 import { ensurePetWorkspace } from './host/workspace.js'
 
@@ -133,10 +134,24 @@ async function initialize(
     return
   }
 
+  // Clear state written by the previous Skill model BEFORE opening: the
+  // domain validates every stored record up front, so one legacy row would
+  // fail the open and degrade a Host that used to work.
+  const cleanup = await lifecycle.contain('Pet legacy state cleanup', async () =>
+    removeLegacyState(paths.databaseFile),
+  )
+  if (cleanup !== undefined && cleanup.removedRows > 0) {
+    ctx.logger.info(
+      `dsh-pet cleared ${cleanup.removedRows} row(s) from the previous Skill model ` +
+        `(${cleanup.clearedTables.join(', ')}); re-add the Skills you want`,
+    )
+  }
+
   const domain = await lifecycle.contain('Pet storage domain', () =>
     ctx.storageDomain.open(petDomainSpec),
   )
   if (domain === undefined) return
+
 
   // Force one durable write so the lazily materialized SQLite file exists,
   // then prove it landed at Pet's configured path rather than a foreign one.
