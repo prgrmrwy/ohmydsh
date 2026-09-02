@@ -889,3 +889,23 @@ describe('module-level client deps must be resolvable', () => {
     expect(declared.has('@deepseek-ai/dsh-client-ui-settings')).toBe(true)
   })
 })
+
+describe('the Pet executor preset omits local-root Skill discovery', () => {
+  it('differs from the shipped standard preset by exactly that plugin', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const nodePath = await import('node:path')
+    const preset = await readFile(
+      nodePath.resolve(process.cwd(), '..', '..', 'presets', 'dsh-pet-executor', 'agent.cordis.yml'),
+      'utf8',
+    )
+
+    // Without this the executor inherits `$DSH_HOME/skills`, `~/.agents/skills`
+    // and project roots, so every globally installed Skill is visible to it —
+    // the spec requires only Pet's allowlist to be publishable.
+    const ids = [...preset.matchAll(/^- id: (\S+)$/gm)].map(match => match[1])
+    expect(ids).not.toContain('skill-filesystem')
+    // The catalog and loader must stay: the executor still needs to load the
+    // Skills that Pet DOES allow.
+    expect(ids).toContain('tool-skill')
+  })
+})

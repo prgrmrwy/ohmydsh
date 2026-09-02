@@ -52,6 +52,15 @@ import {
 
 export const name = 'dsh-pet'
 
+/**
+ * Preset composing a Pet executor WITHOUT local-root Skill discovery.
+ *
+ * `standard` loads `skill-filesystem`, which would make every globally
+ * installed Skill visible to the executor. Pet's scoped provider is additive
+ * and cannot subtract it, so exclusion has to happen in the preset.
+ */
+export const PET_EXECUTOR_PRESET = 'dsh-pet-executor'
+
 export const inject = [
   // `storage` is required in addition to `storageDomain`: the backend
   // ownership proof reads the hub's backend registry directly, and cordis
@@ -377,9 +386,12 @@ async function initialize(
         modelId: current.model,
         // The Pet agent preset stays Pet-owned: it selects the executor's
         // composition, not the model.
-        ...(repository.global.agentPreset !== undefined
-          ? { agentPreset: repository.global.agentPreset }
-          : {}),
+        //
+        // Defaults to the Pet executor preset, which omits `skill-filesystem`.
+        // On `standard` the executor would inherit local-root Skill discovery
+        // and every globally installed Skill would be visible to it — a scoped
+        // provider is additive and cannot subtract one the preset brought in.
+        agentPreset: repository.global.agentPreset ?? PET_EXECUTOR_PRESET,
       },
     )
   }

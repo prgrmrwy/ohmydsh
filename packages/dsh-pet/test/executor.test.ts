@@ -395,3 +395,35 @@ describe('the executor is accounted to the Pet Workspace', () => {
     expect(task.status).toBe('idle')
   })
 })
+
+describe('the executor composes without local-root Skill discovery', () => {
+  it('defaults to the Pet executor preset', async () => {
+    harness = await openPetHarness()
+    let captured: string | undefined
+    const agents = {
+      create: async (options: { meta?: { agentPreset?: string } }) => {
+        captured = options.meta?.agentPreset
+        return { session: { id: 'exec-1' } }
+      },
+      get: () => undefined,
+    }
+
+    await createTaskWithExecutor(harness.repository, agents as never, {
+      scopeKey: 'session:src-1',
+      sourceKind: 'session',
+      sourceId: 'src-1',
+      workspacePath: '/tmp/pet-workspace',
+      selection: {
+        providerId: 'anthropic',
+        modelId: 'claude-opus-5',
+        agentPreset: 'dsh-pet-executor',
+      },
+    } as never)
+
+    // `standard` loads `skill-filesystem`, which would make every globally
+    // installed Skill visible to the executor. A scoped provider is ADDITIVE
+    // and cannot subtract one the preset brought in, so the exclusion has to
+    // happen in the preset itself.
+    expect(captured).toBe('dsh-pet-executor')
+  })
+})
