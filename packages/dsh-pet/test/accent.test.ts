@@ -42,10 +42,11 @@ function saturation(hex: string): number {
 }
 
 describe('the palette is muted by construction', () => {
-  it('offers the seven requested hues plus a default', () => {
-    expect(PET_ACCENTS).toHaveLength(8)
+  it('offers the eight requested colours plus a default', () => {
+    expect(PET_ACCENTS).toHaveLength(9)
     expect(PET_ACCENTS.map(a => a.id)).toEqual([
       'default',
+      'black',
       'red',
       'orange',
       'yellow',
@@ -56,7 +57,7 @@ describe('the palette is muted by construction', () => {
     ])
   })
 
-  it('keeps every hue below 45% saturation', () => {
+  it('keeps every colour below 45% saturation', () => {
     // The mascot floats above real work for the whole session, so a vivid
     // badge would compete with the content underneath it.
     for (const accent of PET_ACCENTS) {
