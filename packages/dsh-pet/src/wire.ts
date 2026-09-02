@@ -242,7 +242,6 @@ export interface PetCapability {
   readonly description: string
   readonly skillName: string
   readonly contextRequirement: PetContextRequirement
-  readonly requiresConfirmation: boolean
   /** Computed: a missing organization-specific dependency disables rather than breaks Pet. */
   readonly available: boolean
   readonly diagnostic?: string
@@ -285,7 +284,6 @@ export interface PetSkillRevision {
     readonly label?: string
     readonly icon?: string
     readonly context?: PetContextRequirement
-    readonly confirm?: boolean
   }
   /**
    * Free-text arguments appended after the skill token on every dispatch.

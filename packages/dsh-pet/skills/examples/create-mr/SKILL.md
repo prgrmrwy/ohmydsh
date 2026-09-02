@@ -5,7 +5,6 @@ whenToUse: When the user asks to open, create or raise an MR / merge request / p
 petLabel: Create MR
 petIcon: 🔀
 petContext: session-required
-petConfirm: false
 ---
 
 # Create MR

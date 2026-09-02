@@ -14,16 +14,33 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PetOverlay } from '../src/client/overlay.js'
 
-vi.stubGlobal(
-  'fetch',
-  vi.fn(async () => ({
-    ok: true,
-    json: async () => ({
-      ok: true,
-      data: { capabilities: [], lifecycle: { phase: 'ready' } },
+/**
+ * Default Pet response: no capabilities, Host ready.
+ *
+ * `api.ts` reads `response.text()`, so a stub exposing only `json` made every
+ * request fail silently — the menu then rendered empty no matter what a test
+ * supplied. Tests that need capabilities override this per case.
+ */
+function stubFetch(data: Record<string, unknown>): string[] {
+  const calls: string[] = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => {
+      calls.push(String(url))
+      return { status: 200, text: async () => JSON.stringify({ ok: true, data }) }
     }),
-  })),
-)
+  )
+  return calls
+}
+
+stubFetch({ capabilities: [], lifecycle: { phase: 'ready' } })
+
+/** The mascot owns hover; the container is only a positioning box. */
+function mascotOf(host: HTMLElement): HTMLElement {
+  const node = host.querySelector('.dshpet-mascot')
+  if (node === null) throw new Error('mascot did not render')
+  return node as HTMLElement
+}
 
 /** Let React flush effects and the mocked status/capability fetches settle. */
 const settle = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 60))
@@ -69,24 +86,12 @@ describe('hover opens and closes the capability menu', () => {
   it('expands on pointer enter', async () => {
     const { host, root } = await mountPet()
 
-    root.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    mascotOf(host).dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
     await settle()
 
-    expect(host.querySelector('.dshpet-radial')).not.toBeNull()
+    expect(host.querySelector('.dshpet-wheel')).not.toBeNull()
   })
 
-  it('collapses when the pointer leaves the surface', async () => {
-    const { host, root } = await mountPet()
-    root.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
-    await settle()
-
-    root.dispatchEvent(
-      new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }),
-    )
-    await settle()
-
-    expect(host.querySelector('.dshpet-radial')).toBeNull()
-  })
 
   // NOTE: the "panel survives pointer leave" path is verified by direct
   // trace (hover -> click -> leave keeps `.dshpet-panel` mounted) but is not
@@ -148,5 +153,42 @@ describe('a drag does not register as a click', () => {
     // The suppression must be scoped to real drags, or the mascot becomes
     // unclickable.
     expect(host.querySelector('.dshpet-panel')).not.toBeNull()
+  })
+})
+
+
+describe('a capability runs on a single click', () => {
+  it('dispatches immediately, with no confirming second click', async () => {
+    const calls = stubFetch({
+      lifecycle: { phase: 'ready' },
+      capabilities: [
+        {
+          id: 'clean',
+          label: '清理',
+          description: '清理当前会话的工作区',
+          skillName: 'clean',
+          contextRequirement: 'none',
+          available: true,
+          showAsShortcut: true,
+        },
+      ],
+      tasks: [],
+    })
+    const { host, root } = await mountPet()
+
+    mascotOf(host).dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    await settle()
+    const item = [...host.querySelectorAll('button')].find(button =>
+      (button.textContent ?? '').includes('清理'),
+    )
+    expect(item).toBeDefined()
+
+    item?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await settle()
+
+    // Safety belongs to the Skill inside its Pet Task: a blanket gate at the
+    // entry point cannot tell a destructive capability from a harmless one, so
+    // it taxed every action without protecting the dangerous ones.
+    expect(calls.some(url => url.includes('invocation-create'))).toBe(true)
   })
 })

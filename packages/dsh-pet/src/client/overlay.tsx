@@ -10,6 +10,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { PetApiError, petApi } from './api.js'
 import {
+  fitLabel,
+  hoverRadius,
+  planRings,
+  planSlots,
+  RING_GAP,
+  RING_WIDTH,
+  WHEEL_CAPACITY,
+} from './wheel.js'
+import {
   DEFAULT_GLYPH,
   DEFAULT_SIZE_PX,
   PET_ACCENT_EVENT,
@@ -72,8 +81,8 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   const [degraded, setDegraded] = useState<string | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
   const [busy, setBusy] = useState(false)
+  const [hovered, setHovered] = useState<string | undefined>(undefined)
   const [sourceRemoved, setSourceRemoved] = useState(false)
-  const [pendingConfirm, setPendingConfirm] = useState<PetCapability | undefined>(undefined)
   const dragging = useRef<
     { pointerId: number; dx: number; dy: number; moved: boolean } | undefined
   >(undefined)
@@ -164,6 +173,33 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   // The panel is click-opened, so it needs a click-driven way out. Without
   // this it could only be closed by clicking the mascot again, which reads as
   // "Pet is stuck open" once the pointer has moved elsewhere.
+  const shortcuts = capabilities.filter(capability => capability.showAsShortcut)
+  // Sized for the largest mascot so one viewBox serves every size; the wheel
+  // may extend past the viewport and is allowed to clip, but the mascot and
+  // the centre are always placed inside it.
+  const WHEEL_VIEWBOX = 88 + 2 * (RING_GAP + 3 * RING_WIDTH)
+  const rings = planRings(shortcuts.length, size)
+  const slots = planSlots(shortcuts.length, size, WHEEL_VIEWBOX / 2)
+  const wheelRadius = hoverRadius(rings, size)
+
+  // Closing is decided by distance from the centre, not by `mouseleave`: the
+  // breathing gap and the seams between slices are all inside the disc, so a
+  // continuous exit path never reports a false departure — which is exactly
+  // why the old rectangular menu needed a grace timer.
+  useEffect(() => {
+    if (mode !== 'menu') return undefined
+    const onMove = (event: MouseEvent): void => {
+      const node = rootRef.current
+      if (node === null) return
+      const box = node.getBoundingClientRect()
+      const dx = event.clientX - (box.left + box.width / 2)
+      const dy = event.clientY - (box.top + box.height / 2)
+      if (Math.hypot(dx, dy) > wheelRadius) setMode('closed')
+    }
+    document.addEventListener('mousemove', onMove)
+    return () => document.removeEventListener('mousemove', onMove)
+  }, [mode, wheelRadius])
+
   useEffect(() => {
     if (mode !== 'panel') return
     const onPointerDownOutside = (event: PointerEvent): void => {
@@ -230,13 +266,10 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   const run = useCallback(
     async (capability: PetCapability) => {
       setError(undefined)
-      // A capability may declare that it must be confirmed before running;
-      // `clean-worktree` does, because its effects are destructive.
-      if (capability.requiresConfirmation && pendingConfirm?.id !== capability.id) {
-        setPendingConfirm(capability)
-        return
-      }
-      setPendingConfirm(undefined)
+      // One click runs the capability. Safety belongs to the Skill inside its
+      // Pet Task: a blanket confirmation here cannot tell a destructive
+      // capability from a harmless one, so it taxed every action without
+      // actually protecting the dangerous ones.
       setBusy(true)
       try {
         // The atomic capture: whatever the browser shows RIGHT NOW is frozen
@@ -259,15 +292,14 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
         setBusy(false)
       }
     },
-    // `pendingConfirm` is read inside, so it must be a dependency: a stale
+    // `effectiveSource` is read inside, so it must be a dependency: a stale
     // closure would never observe the first click and the gate would never
     // release.
-    [effectiveSource, pendingConfirm],
+    [effectiveSource],
   )
 
   // Hidden capabilities stay installed and enabled; they are simply kept out
   // of the radial menu to control clutter.
-  const shortcuts = capabilities.filter(capability => capability.showAsShortcut)
 
   const blocked = (capability: PetCapability): string | undefined => {
     if (!capability.available) return capability.diagnostic ?? 'Unavailable'
@@ -289,19 +321,8 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
       className="dshpet-root"
       data-open={mode !== 'closed'}
       style={{ left: `${position.x}px`, top: `${position.y}px` }}
-      onMouseEnter={() => {
-        if (mode === 'closed') setMode('menu')
-      }}
-      onMouseLeave={() => {
-        // Hover only owns the MENU. The panel is opened by an explicit click,
-        // so it must not evaporate when the pointer drifts away — it closes on
-        // click, Escape, or an outside click. Collapsing it here was why Pet
-        // appeared to stay open forever: after a capability run switched to
-        // `panel`, no hover exit could ever close it again.
-        if (mode === 'menu') setMode('closed')
-      }}
       // Focus is the keyboard equivalent of hover, so a keyboard user reaches
-      // the capability menu the same way a pointer user does.
+      // the capability wheel the same way a pointer user does.
       onFocus={() => {
         if (mode === 'closed') setMode('menu')
       }}
@@ -319,6 +340,12 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
       <button
         type="button"
         className="dshpet-mascot"
+        // Only the mascot OPENS the wheel. Binding this to the container made
+        // the empty square around a collapsed mascot a hover target, so the
+        // wheel sprang open from well outside it.
+        onMouseEnter={() => {
+          if (mode === 'closed') setMode('menu')
+        }}
         // Inline, because the palette is user data: emitting one rule per
         // accent into the injected stylesheet would couple the CSS to the
         // palette and grow it for options nobody selected.
@@ -360,56 +387,93 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
       </button>
 
       {mode === 'menu' ? (
-        <div className="dshpet-radial" role="menu" aria-label="Pet capabilities">
-          <SourceChip
-            source={effectiveSource}
-            removable={props.currentSource !== undefined && !sourceRemoved}
-            onRemove={() => setSourceRemoved(true)}
-            onRestore={() => setSourceRemoved(false)}
-            restorable={sourceRemoved && props.currentSource !== undefined}
-          />
+        <div className="dshpet-wheel" role="menu" aria-label="Pet 能力">
+          <svg
+            className="dshpet-wheel-svg"
+            viewBox={`0 0 ${WHEEL_VIEWBOX} ${WHEEL_VIEWBOX}`}
+            style={{ width: WHEEL_VIEWBOX, height: WHEEL_VIEWBOX }}
+            aria-hidden="true"
+          >
+            {slots.map(slot => {
+              const capability = shortcuts[slot.index]
+              if (capability === undefined) return null
+              const reason = blocked(capability)
+              return (
+                <g
+                  key={capability.id}
+                  className="dshpet-slot"
+                  data-ring={slot.ring}
+                  data-disabled={reason !== undefined || busy}
+                  data-hovered={hovered === capability.id}
+                  // Staggered by ring so the layers read as depth; ring one is
+                  // immediate because the most-used capability lives there and
+                  // must not wait on an animation.
+                  style={{ animationDelay: `${slot.ring * 0.08}s` }}
+                  onClick={() => {
+                    if (reason === undefined && !busy) void run(capability)
+                  }}
+                  onMouseEnter={() => setHovered(capability.id)}
+                  onMouseLeave={() => setHovered(undefined)}
+                >
+                  <title>
+                    {reason ??
+                      (capability.description === ''
+                        ? capability.label
+                        : `${capability.label}: ${capability.description}`)}
+                  </title>
+                  <path className="dshpet-slot-face" d={slot.path} />
+                  <text
+                    className="dshpet-slot-label"
+                    x={slot.labelX}
+                    y={slot.labelY}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    transform={`rotate(${slot.labelRotation} ${slot.labelX} ${slot.labelY})`}
+                  >
+                    {fitLabel(capability.label, slot.labelCapacity)}
+                  </text>
+                </g>
+              )
+            })}
+          </svg>
+
+          {/* Buttons carry the accessible tree: SVG groups are not focusable,
+              so keyboard users would otherwise have no way in. */}
+          <div className="dshpet-wheel-a11y">
+            {shortcuts.slice(0, WHEEL_CAPACITY).map(capability => {
+              const reason = blocked(capability)
+              return (
+                <button
+                  key={capability.id}
+                  type="button"
+                  role="menuitem"
+                  className="dshpet-wheel-item"
+                  disabled={reason !== undefined || busy}
+                  title={reason}
+                  aria-describedby={reason !== undefined ? `${capability.id}-reason` : undefined}
+                  onClick={() => void run(capability)}
+                  onFocus={() => setHovered(capability.id)}
+                  onBlur={() => setHovered(undefined)}
+                >
+                  {capability.label}
+                  <span className="dshpet-visually-hidden" id={`${capability.id}-reason`}>
+                    {reason ?? capability.description}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+
           {degraded !== undefined ? (
-            <p className="dshpet-error">
-              Pet 未就绪：{degraded}
-            </p>
+            <p className="dshpet-wheel-note dshpet-error">Pet 未就绪：{degraded}</p>
           ) : null}
           {shortcuts.length === 0 && degraded === undefined ? (
-            <p className="dshpet-empty">
+            <p className="dshpet-wheel-note dshpet-empty">
               还没有可用能力。在「设置 → Pet → Skill」加入一个 Skill 并启用后，
               它就会出现在这里。
             </p>
           ) : null}
-          {shortcuts.map(capability => {
-            const reason = blocked(capability)
-            return (
-              <button
-                key={capability.id}
-                type="button"
-                role="menuitem"
-                className="dshpet-item"
-                disabled={reason !== undefined || busy}
-                title={reason}
-                // `title` is not reliably announced, so the reason is also
-                // bound as the accessible description of the control.
-                aria-describedby={reason !== undefined ? `${capability.id}-reason` : undefined}
-                onClick={() => void run(capability)}
-              >
-                <span className="dshpet-item-label">
-                  {capability.label}
-                  {pendingConfirm?.id === capability.id ? ' — confirm?' : ''}
-                </span>
-                <span className="dshpet-item-hint" id={`${capability.id}-reason`}>
-                  {reason ?? capability.description}
-                </span>
-              </button>
-            )
-          })}
-          {pendingConfirm !== undefined ? (
-            <p className="dshpet-item-hint">
-              Click {pendingConfirm.label} again to confirm.
-            </p>
-          ) : null}
-          {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
+          {error !== undefined ? <p className="dshpet-wheel-note dshpet-error">{error}</p> : null}
         </div>
       ) : null}
 
@@ -423,44 +487,6 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   )
 }
 
-/** The pre-execution source chip with remove/restore. */
-function SourceChip(props: {
-  source: SourceSelection
-  removable: boolean
-  restorable: boolean
-  onRemove: () => void
-  onRestore: () => void
-}): JSX.Element {
-  return (
-    <div className="dshpet-chip">
-      <span>
-        {props.source.kind === 'none'
-          ? 'No source (independent task)'
-          : (props.source.title ?? props.source.sessionId ?? props.source.workspaceId)}
-      </span>
-      {props.removable ? (
-        <button
-          type="button"
-          className="dshpet-chip-remove"
-          aria-label="Remove source"
-          onClick={props.onRemove}
-        >
-          ×
-        </button>
-      ) : null}
-      {props.restorable ? (
-        <button
-          type="button"
-          className="dshpet-chip-remove"
-          aria-label="Restore source"
-          onClick={props.onRestore}
-        >
-          ↺
-        </button>
-      ) : null}
-    </div>
-  )
-}
 
 interface TaskView {
   id: string
@@ -604,7 +630,19 @@ function TaskPanel(props: {
       ) : null}
 
       {visible.map(task => (
-        <div key={task.id} className="dshpet-task">
+        <div
+          key={task.id}
+          className="dshpet-task"
+          role="button"
+          tabIndex={0}
+          onClick={() => props.openSession?.(task.executorSessionId)}
+          onKeyDown={event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault()
+              props.openSession?.(task.executorSessionId)
+            }
+          }}
+        >
           <strong style={{ fontSize: 12 }}>
             {task.sourceKind === 'none'
               ? 'Independent task'
@@ -673,51 +711,12 @@ function TaskPanel(props: {
               </button>
             </form>
           ) : null}
-          <div className="dshpet-actions">
-            {/* Never mirrors the transcript: it navigates to the real session. */}
-            <button
-              type="button"
-              className="dshpet-action"
-              onClick={() => props.openSession?.(task.executorSessionId)}
-            >
-              Open full process
-            </button>
-            {task.sourceKind === 'session' && task.sourceId !== undefined ? (
-              <button
-                type="button"
-                className="dshpet-action"
-                // An archived source can no longer be opened; the Task and its
-                // history remain, so the control is disabled rather than hidden.
-                disabled={task.sourceAvailability === 'archived'}
-                title={
-                  task.sourceAvailability === 'archived'
-                    ? 'The source session was archived'
-                    : undefined
-                }
-                onClick={() => props.openSession?.(task.sourceId!)}
-              >
-                Open source
-              </button>
-            ) : null}
-            {task.status === 'waiting-user' || task.status === 'running' ? (
-              <button
-                type="button"
-                className="dshpet-action"
-                onClick={() => void petApi.cancel(task.id).then(refresh)}
-              >
-                Cancel
-              </button>
-            ) : null}
-            {task.archivedAt === undefined ? (
-              <button
-                type="button"
-                className="dshpet-action"
-                onClick={() => void petApi.archive(task.id, task.revision).then(refresh)}
-              >
-                Archive
-              </button>
-            ) : null}
-          </div>
+          {/* One action, and it navigates rather than mirrors the transcript.
+              Archiving is deliberately absent: it belongs in the session, and
+              `reconcileArchives` already observes that live — a terminal Task
+              archives itself, while a non-terminal one stays active with a
+              diagnostic instead of being treated as cancelled. Putting a
+              destructive control in a hover panel only invites misclicks. */}
         </div>
       ))}
     </div>

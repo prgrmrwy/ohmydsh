@@ -177,3 +177,22 @@ describe('a non-Skill directory says what to pick instead', () => {
 })
 
 
+
+describe('a removed frontmatter field does not break existing Skills', () => {
+  it('ignores a leftover petConfirm declaration', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'pet-bundle-'))
+    await writeFile(
+      path.join(root, 'SKILL.md'),
+      '---\nname: legacy\ndescription: Declares a field Pet no longer reads\n' +
+        'petLabel: Legacy\npetConfirm: true\n---\nBody\n',
+    )
+
+    // Skills written before the field was dropped must keep loading: rejecting
+    // an unknown key would break every one of them for no benefit.
+    const inspection = await inspectBundle(root)
+
+    expect(inspection.skillName).toBe('legacy')
+    expect(inspection.pet?.label).toBe('Legacy')
+    expect(inspection.pet).not.toHaveProperty('confirm')
+  })
+})
