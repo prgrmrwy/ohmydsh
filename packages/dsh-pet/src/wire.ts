@@ -18,6 +18,7 @@ export const ROUTES = {
   config: '/dsh-pet/api/config',
   configUpdate: '/dsh-pet/api/config-update',
   capabilities: '/dsh-pet/api/capabilities',
+  presets: '/dsh-pet/api/presets',
   skills: '/dsh-pet/api/skills',
   skillInspect: '/dsh-pet/api/skill-inspect',
   skillImport: '/dsh-pet/api/skill-import',
@@ -30,8 +31,6 @@ export const ROUTES = {
   invocationCancel: '/dsh-pet/api/invocation-cancel',
   invocationRetry: '/dsh-pet/api/invocation-retry',
   taskArchive: '/dsh-pet/api/task-archive',
-  bindings: '/dsh-pet/api/bindings',
-  bindingsUpdate: '/dsh-pet/api/bindings-update',
   diagnostics: '/dsh-pet/api/diagnostics',
 } as const
 

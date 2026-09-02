@@ -93,6 +93,8 @@ export const petApi = {
   updateConfig: (patch: Partial<PetConfig>): Promise<PetConfig> =>
     call(ROUTES.configUpdate, patch),
   capabilities: (): Promise<{ capabilities: PetCapability[] }> => call(ROUTES.capabilities),
+  presets: (): Promise<{ presets: readonly { id: string; label: string }[] }> =>
+    call(ROUTES.presets),
   skills: (): Promise<Record<string, unknown>> => call(ROUTES.skills),
   inspectSkill: (path: string): Promise<Record<string, unknown>> =>
     call(ROUTES.skillInspect, { path }),
@@ -116,15 +118,5 @@ export const petApi = {
     call(ROUTES.invocationRetry, { invocationId }),
   archive: (taskId: string, revision?: number): Promise<unknown> =>
     call(ROUTES.taskArchive, revision === undefined ? { taskId } : { taskId, revision }),
-  bindings: (): Promise<{
-    bindings: readonly {
-      workspaceId: string
-      business?: string
-      crGroupId?: string
-      reviewers?: readonly string[]
-    }[]
-  }> => call(ROUTES.bindings),
-  updateBinding: (binding: Record<string, unknown>): Promise<unknown> =>
-    call(ROUTES.bindingsUpdate, binding),
   diagnostics: (): Promise<Record<string, unknown>> => call(ROUTES.diagnostics),
 }
