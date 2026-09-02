@@ -1,9 +1,9 @@
 /**
  * Pet mascot accent colour.
  *
- * Stored per browser alongside the position, not in Host config: it is a
- * display preference for this device, and one Host may be open on several
- * screens with different backgrounds.
+ * Persisted in the Host config file, not `localStorage`: anything the
+ * Settings panel can change is configuration. Only the drag position stays
+ * per-browser, because that is display state rather than a setting.
  *
  * The palette is deliberately desaturated. The mascot sits above real work
  * for the whole session, so a vivid badge would compete with the content it
@@ -11,9 +11,6 @@
  * lightness (86%), which keeps the seven hues consistent with each other and
  * holds glyph contrast above the 4.5:1 readability threshold.
  */
-
-/** Storage key for the chosen accent. */
-export const ACCENT_KEY = 'dsh.pet.v1.accent'
 
 /** Event announcing that the accent changed. */
 export const PET_ACCENT_EVENT = 'dsh-pet:accent-changed'
@@ -70,42 +67,6 @@ export function resolveAccent(id: string | undefined): PetAccent {
   return PET_ACCENTS.find(accent => accent.id === id) ?? PET_ACCENTS[0]!
 }
 
-/**
- * Read the stored accent.
- *
- * An unknown or corrupt value falls back to the default rather than throwing:
- * a bad preference must never stop the mascot from rendering.
- * @param storage - Storage implementation; defaults to `localStorage`.
- * @returns the resolved accent.
- */
-export function readAccent(
-  storage: Pick<Storage, 'getItem'> | undefined = globalThis.localStorage,
-): PetAccent {
-  return resolveAccent(storage?.getItem(ACCENT_KEY) ?? undefined)
-}
-
-/**
- * Persist the accent and tell any live Pet surface to re-read it.
- *
- * The overlay reads the accent once into React state, so writing alone would
- * appear to do nothing until a reload.
- * @param id - Accent to store.
- * @param storage - Storage implementation; defaults to `localStorage`.
- */
-export function writeAccent(
-  id: PetAccentId,
-  storage: Pick<Storage, 'setItem'> | undefined = globalThis.localStorage,
-): void {
-  storage?.setItem(ACCENT_KEY, id)
-  globalThis.dispatchEvent?.(new Event(PET_ACCENT_EVENT))
-}
-
-/** Storage key for the chosen glyph. */
-export const GLYPH_KEY = 'dsh.pet.v1.glyph'
-
-/** Storage key for the chosen size. */
-export const SIZE_KEY = 'dsh.pet.v1.size'
-
 /** Event announcing that the glyph or size changed. */
 export const PET_APPEARANCE_EVENT = 'dsh-pet:appearance-changed'
 
@@ -148,15 +109,11 @@ export type PetSizeId = (typeof PET_SIZES)[number]['id']
 export const DEFAULT_SIZE_PX = 72
 
 /**
- * Read the stored glyph.
- *
- * Empty or whitespace-only input falls back to the default rather than
- * rendering an invisible mascot the user could no longer click.
- * @param storage - Storage implementation; defaults to `localStorage`.
- * @returns the glyph to render.
- */
 /**
  * Keep only the first user-perceived character of a glyph.
+ *
+ * Blank input returns an empty string, which the caller treats as "restore
+ * the default" — an invisible glyph would leave a mascot nobody can click.
  * @param raw - Raw user input.
  * @returns the normalized glyph, or an empty string.
  */
@@ -164,52 +121,3 @@ export function normalizeGlyph(raw: string): string {
   return firstGrapheme(raw.trim())
 }
 
-export function readGlyph(
-  storage: Pick<Storage, 'getItem'> | undefined = globalThis.localStorage,
-): string {
-  const raw = storage?.getItem(GLYPH_KEY)?.trim()
-  if (raw === undefined || raw === '') return DEFAULT_GLYPH
-  // Exactly one character: more would overflow the circle.
-  return firstGrapheme(raw) === '' ? DEFAULT_GLYPH : firstGrapheme(raw)
-}
-
-/**
- * Persist the glyph and tell any live Pet surface to re-read it.
- * @param glyph - Chosen glyph; blank restores the default.
- * @param storage - Storage implementation; defaults to `localStorage`.
- */
-export function writeGlyph(
-  glyph: string,
-  storage: Pick<Storage, 'setItem'> | undefined = globalThis.localStorage,
-): void {
-  storage?.setItem(GLYPH_KEY, firstGrapheme(glyph.trim()))
-  globalThis.dispatchEvent?.(new Event(PET_APPEARANCE_EVENT))
-}
-
-/**
- * Read the stored diameter.
- *
- * An unknown or non-numeric value falls back to the default: a bad preference
- * must never make the mascot unclickable.
- * @param storage - Storage implementation; defaults to `localStorage`.
- * @returns the diameter in pixels.
- */
-export function readSize(
-  storage: Pick<Storage, 'getItem'> | undefined = globalThis.localStorage,
-): number {
-  const raw = storage?.getItem(SIZE_KEY)
-  return PET_SIZES.find(size => size.id === raw)?.px ?? DEFAULT_SIZE_PX
-}
-
-/**
- * Persist the size and tell any live Pet surface to re-read it.
- * @param id - Chosen size.
- * @param storage - Storage implementation; defaults to `localStorage`.
- */
-export function writeSize(
-  id: PetSizeId,
-  storage: Pick<Storage, 'setItem'> | undefined = globalThis.localStorage,
-): void {
-  storage?.setItem(SIZE_KEY, id)
-  globalThis.dispatchEvent?.(new Event(PET_APPEARANCE_EVENT))
-}
