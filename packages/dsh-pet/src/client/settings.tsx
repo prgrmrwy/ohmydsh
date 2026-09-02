@@ -471,7 +471,7 @@ function SkillsTab(): JSX.Element {
   const [browsing, setBrowsing] = useState<PetDirectoryListing | undefined>(undefined)
   const [preview, setPreview] = useState<Record<string, unknown> | undefined>(undefined)
   // Values for the parameters the inspected Skill declared, keyed by name.
-  const [paramValues, setParamValues] = useState<Record<string, string>>({})
+  const [skillArgs, setSkillArgs] = useState('')
   const [error, setError] = useState<string | undefined>(undefined)
 
   const refresh = useCallback(async () => {
@@ -638,7 +638,7 @@ function SkillsTab(): JSX.Element {
             .inspectSkill(path)
             .then(next => {
               setPreview(next)
-              setParamValues({})
+              setSkillArgs('')
             })
             .catch((cause: unknown) =>
               setError(cause instanceof Error ? cause.message : String(cause)),
@@ -659,30 +659,19 @@ function SkillsTab(): JSX.Element {
           <p className="dshpet-item-hint">
             将链接到 <code className="dshpet-code">{String(preview['canonicalSourcePath'])}</code>
           </p>
-          {((preview['params'] ?? []) as { name: string; label: string }[]).length > 0 ? (
-            <div className="dshpet-group">
-              <h3 className="dshpet-group-title">这个 Skill 需要的配置</h3>
-              <p className="dshpet-item-hint">
-                由 Skill 自己在 SKILL.md 中声明。填写后随本次加入一起保存，
-                每次调用都会带给它，无需重复输入。
-              </p>
-              {((preview['params'] ?? []) as { name: string; label: string }[]).map(param => (
-                <label key={param.name} className="dshpet-field">
-                  {param.label}
-                  <input
-                    className="dshpet-input"
-                    value={paramValues[param.name] ?? ''}
-                    onChange={event =>
-                      setParamValues(current => ({
-                        ...current,
-                        [param.name]: event.target.value,
-                      }))
-                    }
-                  />
-                </label>
-              ))}
-            </div>
-          ) : null}
+          <label className="dshpet-field">
+            运行参数（可选）
+            <input
+              className="dshpet-input"
+              value={skillArgs}
+              placeholder="例如：clean"
+              onChange={event => setSkillArgs(event.target.value)}
+            />
+          </label>
+          <p className="dshpet-item-hint">
+            调用时直接拼在 <code className="dshpet-code">/{String(preview['skillName'])}</code>{' '}
+            后面，由 Skill 自己理解，Pet 不做解析。加入后仍可修改。
+          </p>
           <p className="dshpet-error">
             Skill 是会被 Agent 执行的指令内容，只加入你信任的目录。
             加入后 Pet 直接链接该目录，你之后对它的修改会立即生效。
@@ -694,7 +683,7 @@ function SkillsTab(): JSX.Element {
               // Step 2: separately confirmed registration of the exact
               // directory the user was shown.
               void petApi
-                .importSkill(path, paramValues)
+                .importSkill(path, skillArgs)
                 .then(() => {
                   setPreview(undefined)
                   return refresh()
@@ -736,6 +725,22 @@ function SkillsTab(): JSX.Element {
             <p className="dshpet-item-hint">
               <code className="dshpet-code">{revision.sourcePath}</code>
             </p>
+            <StoredField
+              label="运行参数"
+              value={revision.arguments ?? ''}
+              placeholder="例如：clean"
+              emptyText="无"
+              onSave={async next => {
+                // Appended after the skill token on every dispatch; the Skill
+                // itself interprets them.
+                await petApi.mutateSkill({
+                  skillName: revision.skillName,
+                  action: 'arguments',
+                  arguments: next,
+                })
+                await refresh()
+              }}
+            />
             <div className="dshpet-actions">
               <button
                 type="button"

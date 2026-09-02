@@ -59,6 +59,9 @@ function desiredProjection(
   }))
 }
 
+/** Longest free-text argument string accepted for one Skill. */
+const MAX_ARGUMENTS_CHARS = 500
+
 /** Assert Pet is ready before accepting work. */
 function requireReady(lifecycle: PetLifecycleMachine): void {
   if (!lifecycle.isReady) {
@@ -194,7 +197,6 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
         skillName: inspection.skillName,
         description: inspection.description,
         whenToUse: inspection.whenToUse,
-        params: inspection.params ?? [],
         fileCount: inspection.fileCount,
         totalBytes: inspection.totalBytes,
         files: inspection.files,
@@ -205,27 +207,19 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
 
     petRoute(ROUTES.skillImport, async ({ body }) => {
       requireReady(lifecycle)
-      const record = strictBody(body, ['path', 'params'])
+      const record = strictBody(body, ['path', 'arguments'])
       // Registration links the user's own directory; nothing is copied, so a
       // later edit to that directory takes effect immediately.
       const inspection = await inspectBundle(requireString(record, 'path'))
 
-      // Accept values only for parameters the Skill actually declared: the
-      // client must not be able to persist arbitrary keys against a Skill.
-      const declared = inspection.params ?? []
-      const supplied = record['params']
-      const paramValues: Record<string, string> = {}
-      if (supplied !== undefined) {
-        if (typeof supplied !== 'object' || supplied === null || Array.isArray(supplied)) {
-          throw new PetError('INVALID_REQUEST', 'params must be an object')
-        }
-        for (const param of declared) {
-          const value = (supplied as Record<string, unknown>)[param.name]
-          if (typeof value === 'string' && value.trim() !== '') {
-            paramValues[param.name] = value.trim()
-          }
-        }
+      // Free-text arguments, appended after the skill token on dispatch. Pet
+      // stores them verbatim and never parses them.
+      const rawArguments = record['arguments']
+      if (rawArguments !== undefined && typeof rawArguments !== 'string') {
+        throw new PetError('INVALID_REQUEST', 'arguments must be a string')
       }
+      const skillArguments = (rawArguments ?? '').trim().slice(0, MAX_ARGUMENTS_CHARS)
+
       const revision = await repository.putSkillRevision({
         skillName: inspection.skillName,
         sourcePath: inspection.canonicalSourcePath,
@@ -233,8 +227,7 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
         // A Skill declares its own Pet presentation and context requirement;
         // Pet ships no per-capability adapter.
         ...(inspection.pet !== undefined ? { pet: inspection.pet } : {}),
-        ...(declared.length > 0 ? { params: declared } : {}),
-        ...(Object.keys(paramValues).length > 0 ? { paramValues } : {}),
+        ...(skillArguments === '' ? {} : { arguments: skillArguments }),
         provenance: {
           kind: 'local-link',
           sourcePath: inspection.canonicalSourcePath,
@@ -249,7 +242,7 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
 
     petRoute(ROUTES.skillMutate, async ({ body }) => {
       requireReady(lifecycle)
-      const record = strictBody(body, ['skillName', 'action', 'showAsShortcut'])
+      const record = strictBody(body, ['skillName', 'action', 'showAsShortcut', 'arguments'])
       const skillName = requireString(record, 'skillName')
       const action = requireString(record, 'action')
       const selection = repository.getSkillSelection(skillName)
@@ -283,6 +276,26 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
             ...(selection?.enabled === true ? { enabled: true } : {}),
             showAsShortcut: visible,
           })
+          break
+        }
+        case 'arguments': {
+          // Editable after install: the right arguments are usually only
+          // discovered by running the Skill once.
+          const raw = record['arguments']
+          if (raw !== undefined && typeof raw !== 'string') {
+            throw new PetError('INVALID_REQUEST', 'arguments must be a string')
+          }
+          const revision = repository.getSkillRevision(skillName)
+          if (revision === undefined) {
+            throw new PetError('SKILL_NOT_FOUND', `Skill ${skillName} is not registered`)
+          }
+          const next = (raw ?? '').trim().slice(0, MAX_ARGUMENTS_CHARS)
+          // Rebuild without the key when cleared: `exactOptionalPropertyTypes`
+          // distinguishes an absent field from an explicit `undefined`.
+          const { arguments: _dropped, ...rest } = revision
+          await repository.putSkillRevision(
+            next === '' ? rest : { ...rest, arguments: next },
+          )
           break
         }
         case 'remove': {

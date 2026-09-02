@@ -105,14 +105,12 @@ export const petApi = {
   skills: (): Promise<Record<string, unknown>> => call(ROUTES.skills),
   inspectSkill: (path: string): Promise<Record<string, unknown>> =>
     call(ROUTES.skillInspect, { path }),
-  importSkill: (
-    path: string,
-    params?: Readonly<Record<string, string>>,
-  ): Promise<Record<string, unknown>> =>
-    call(ROUTES.skillImport, params === undefined ? { path } : { path, params }),
+  importSkill: (path: string, args?: string): Promise<Record<string, unknown>> =>
+    call(ROUTES.skillImport, args === undefined ? { path } : { path, arguments: args }),
   mutateSkill: (input: {
     skillName: string
-    action: 'enable' | 'disable' | 'shortcut' | 'remove'
+    action: 'enable' | 'disable' | 'shortcut' | 'remove' | 'arguments'
+    arguments?: string
     showAsShortcut?: boolean
   }): Promise<Record<string, unknown>> => call(ROUTES.skillMutate, input),
   rebuildProjection: (): Promise<Record<string, unknown>> => call(ROUTES.projectionRebuild),

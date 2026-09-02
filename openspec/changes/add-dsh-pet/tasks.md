@@ -206,7 +206,23 @@
   bundles are authored against those exact surfaces and declared in the
   package manifest, and a first boot installs, enables and projects all three.
 
-- [x] 7.11 Skills declare the parameters they need, and Pet collects them at
+- [x] 7.11 A Skill carries one free-text argument string, appended after the
+  skill token on every dispatch. Configurable when adding the Skill and
+  editable afterwards, because the right arguments are usually discovered by
+  running it once.
+
+  Replaced an earlier design where the Skill declared named parameters in its
+  frontmatter and Pet rendered one field each. That was more machinery for no
+  gain: the consumer is an LLM reading the Skill's own instructions, so
+  `/ws clean` is already unambiguous and a schema only constrains what the
+  user may type. Pet stores the string verbatim, caps it at 500 characters,
+  and never parses it.
+
+  It must ride on the skill-token line — that line drives real Skill
+  injection, so putting arguments in a separate section would invoke the Skill
+  with no argument at all.
+
+- [x] 7.11-superseded Skills declare the parameters they need, and Pet collects them at
   add time. `SKILL.md` frontmatter carries `petParams: name:Label, other`;
   inspection surfaces the declaration, the add form renders one field per
   parameter, and the values are persisted with the registration and injected

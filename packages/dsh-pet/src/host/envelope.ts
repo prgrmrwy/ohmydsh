@@ -27,18 +27,20 @@ export function renderEnvelope(options: {
   readonly snapshot: PetSourceSnapshot
   readonly isFirst: boolean
   /**
-   * Values the user supplied when this Skill was added.
+   * Free-text arguments configured for this Skill.
    *
-   * Opaque to Pet: the Skill declared the names and consumes them however it
-   * likes. Pet only carries them.
+   * Appended directly after the skill token, exactly as a user would type
+   * them. Opaque to Pet — the Skill's instructions decide what they mean.
    */
-  readonly skillParams?: Readonly<Record<string, string>>
+  readonly skillArguments?: string
 }): string {
   const { task, invocation, snapshot } = options
   const lines: string[] = []
 
-  // The leading token drives the real Skill injection path.
-  lines.push(`/${invocation.skillName}`)
+  // The leading token drives the real Skill injection path. Configured
+  // arguments ride on the same line, exactly as if the user had typed them.
+  const args = options.skillArguments?.trim() ?? ''
+  lines.push(args === '' ? `/${invocation.skillName}` : `/${invocation.skillName} ${args}`)
   lines.push('')
 
   lines.push(options.isFirst ? '## Pet 任务开始' : '## 下一次 Pet 调用')
@@ -70,13 +72,6 @@ export function renderEnvelope(options: {
     lines.push('')
   }
 
-  const params = Object.entries(options.skillParams ?? {})
-  if (params.length > 0) {
-    lines.push('### 已配置参数')
-    lines.push('')
-    for (const [name, value] of params) lines.push(`- ${name}: \`${value}\``)
-    lines.push('')
-  }
 
   lines.push(
     `现在调用 \`${PET_CONTEXT_TOOL}\` 获取本次调用被授权的快照。` +
