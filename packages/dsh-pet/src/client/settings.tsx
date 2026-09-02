@@ -465,7 +465,13 @@ function SkillsTab(): JSX.Element {
                     })
                   }}
                 >
-                  {entry.name}
+                  <span className="dshpet-browser-icon" aria-hidden="true">
+                    📁
+                  </span>
+                  <span className="dshpet-browser-name">{entry.name}</span>
+                  <span className="dshpet-browser-chevron" aria-hidden="true">
+                    ›
+                  </span>
                 </button>
               ))
             )}

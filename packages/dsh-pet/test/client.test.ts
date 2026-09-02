@@ -1083,3 +1083,19 @@ describe('Host directory APIs are read from the right connection face', () => {
     expect(declared).toContain('listDirectory(payload: RequestPayload<\'host.listDirectory\'>')
   })
 })
+
+describe('the directory browser reads as a left-aligned list', () => {
+  it('beats the centering settings-action rule on specificity', () => {
+    // `.dshpet-settings .dshpet-action` centers its label with two levels of
+    // specificity, so a single-class override loses and the folder names
+    // render centered.
+    expect(PET_CSS).toContain('.dshpet-settings .dshpet-browser-entry{justify-content:flex-start')
+    expect(PET_CSS).toContain('.dshpet-settings .dshpet-crumbs{justify-content:flex-start}')
+  })
+
+  it('lays a folder row out as icon, name, chevron', () => {
+    expect(PET_CSS).toContain('.dshpet-browser-name{flex:1')
+    // A long name must truncate rather than push the chevron out of view.
+    expect(PET_CSS).toContain('text-overflow:ellipsis')
+  })
+})

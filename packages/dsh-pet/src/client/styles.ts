@@ -148,7 +148,19 @@ export const PET_CSS = `
 .dshpet-crumbs{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
 .dshpet-browser-list{display:flex;flex-direction:column;gap:2px;
   max-height:220px;overflow:auto}
-.dshpet-browser-entry{justify-content:flex-start;text-align:left;
-  background:0 0;height:28px;padding:0 8px;border-radius:6px}
-.dshpet-browser-entry:hover{background:var(--dsw-alias-interactive-bg-hover,#0000000a)}
+/* Two-level selector, matching the settings action rule that centers its
+   label. A single-class rule loses on specificity, which is why the entries
+   rendered centered instead of as a left-aligned list. */
+.dshpet-settings .dshpet-browser-entry{justify-content:flex-start;text-align:left;
+  width:100%;background:0 0;height:32px;padding:0 8px;border-radius:6px;
+  color:var(--dsw-alias-label-primary,#0f1115)}
+.dshpet-settings .dshpet-browser-entry:hover{
+  background:var(--dsw-alias-interactive-bg-hover,#0000000a)}
+/* The crumb trail is a row of small buttons; keep it left-aligned too. */
+.dshpet-settings .dshpet-crumbs{justify-content:flex-start}
+/* Folder row: icon, name, and a drill-in chevron pinned to the right. */
+.dshpet-browser-icon{flex:none;font-size:14px;line-height:1}
+.dshpet-browser-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.dshpet-browser-chevron{flex:none;color:var(--dsw-alias-label-tertiary,#81858c)}
 `
