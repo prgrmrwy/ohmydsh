@@ -18,6 +18,7 @@ import {
   writeAccent,
   writeGlyph,
   writeSize,
+  normalizeGlyph,
 } from '../src/client/accent.js'
 
 afterEach(() => {
@@ -95,68 +96,15 @@ describe('the accent survives a bad stored value', () => {
     expect(readAccent().id).toBe('default')
   })
 
-  it('reads back what was written', () => {
-    writeAccent('cyan')
-    expect(readAccent().id).toBe('cyan')
-  })
 
   it('resolves an absent value to the default', () => {
     expect(resolveAccent(undefined).id).toBe('default')
   })
 })
 
-describe('the glyph is user-chosen but always renderable', () => {
-  it('falls back to the default when cleared', () => {
-    writeGlyph('   ')
-
-    // A blank glyph would render an invisible mascot the user could no longer
-    // click, stranding Pet on the page.
-    expect(readGlyph()).toBe(DEFAULT_GLYPH)
-  })
-
-  it('accepts an arbitrary emoji, not just the suggestions', () => {
-    writeGlyph('🦖')
-    expect(readGlyph()).toBe('🦖')
-  })
-
-  it('keeps only the first character', () => {
-    writeGlyph('🐾🐱🐶')
-    expect(readGlyph()).toBe('🐾')
-  })
-
-  it('keeps a composed emoji whole rather than cutting it apart', () => {
-    // 👩‍💻 is three code points and 👨‍👩‍👧 is five, yet each is ONE visible
-    // glyph. Counting code points would slice them into fragments that render
-    // as separate figures or replacement characters.
-    writeGlyph('👩‍💻')
-    expect(readGlyph()).toBe('👩‍💻')
-
-    writeGlyph('👨‍👩‍👧')
-    expect(readGlyph()).toBe('👨‍👩‍👧')
-  })
-
-  it('keeps a flag emoji whole', () => {
-    // Regional indicator pairs are two code points forming one glyph.
-    writeGlyph('🇨🇳')
-    expect(readGlyph()).toBe('🇨🇳')
-  })
-
-  it('truncates a composed emoji followed by more input', () => {
-    writeGlyph('👩‍💻🐾')
-    expect(readGlyph()).toBe('👩‍💻')
-  })
-})
 
 describe('the size is bounded and keeps Pet reachable', () => {
-  it('falls back to the default for an unknown value', () => {
-    globalThis.localStorage.setItem(SIZE_KEY, 'enormous')
-    expect(readSize()).toBe(DEFAULT_SIZE_PX)
-  })
 
-  it('reads back a chosen size', () => {
-    writeSize('large')
-    expect(readSize()).toBe(88)
-  })
 
   it('clamps against the ACTUAL size, not a fixed constant', async () => {
     const { clampPosition } = await import('../src/client/position.js')
@@ -220,5 +168,52 @@ describe('the overlay measures its own layer before placing Pet', () => {
 
     // A temporary narrow layout must not overwrite the user's chosen spot.
     expect([...overlay.matchAll(/writePosition\(/g)]).toHaveLength(1)
+  })
+})
+
+describe('glyph normalization is pure, so the Host can store the result', () => {
+  it('keeps only the first user-perceived character', () => {
+    expect(normalizeGlyph('🐾🐱🐶')).toBe('🐾')
+  })
+
+  it('keeps a composed emoji whole', () => {
+    // 👩‍💻 is three code points and 👨‍👩‍👧 is five, yet each is ONE glyph.
+    expect(normalizeGlyph('👩‍💻')).toBe('👩‍💻')
+    expect(normalizeGlyph('👨‍👩‍👧')).toBe('👨‍👩‍👧')
+    expect(normalizeGlyph('🇨🇳')).toBe('🇨🇳')
+  })
+
+  it('returns empty for blank input, which restores the default', () => {
+    expect(normalizeGlyph('   ')).toBe('')
+  })
+})
+
+describe('settings persist Host-side, position stays local', () => {
+  it('exposes no localStorage writer for the configured appearance', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const nodePath = await import('node:path')
+    const settings = await readFile(
+      nodePath.resolve(process.cwd(), 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // The plugin runtime has no usable `localStorage`: writes there are lost,
+    // which is why accent, glyph and size reset on every restart.
+    expect(settings).not.toContain('writeAccent(')
+    expect(settings).not.toContain('writeGlyph(')
+    expect(settings).not.toContain('writeSize(')
+    expect(settings).toContain('updateConfig({ appearance:')
+  })
+
+  it('keeps position in localStorage, because dragging is not a setting', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const nodePath = await import('node:path')
+    const overlay = await readFile(
+      nodePath.resolve(process.cwd(), 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    expect(overlay).toContain('writePosition(')
+    expect(overlay).toContain('globalThis.localStorage')
   })
 })

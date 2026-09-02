@@ -155,6 +155,15 @@ export const DEFAULT_SIZE_PX = 72
  * @param storage - Storage implementation; defaults to `localStorage`.
  * @returns the glyph to render.
  */
+/**
+ * Keep only the first user-perceived character of a glyph.
+ * @param raw - Raw user input.
+ * @returns the normalized glyph, or an empty string.
+ */
+export function normalizeGlyph(raw: string): string {
+  return firstGrapheme(raw.trim())
+}
+
 export function readGlyph(
   storage: Pick<Storage, 'getItem'> | undefined = globalThis.localStorage,
 ): string {

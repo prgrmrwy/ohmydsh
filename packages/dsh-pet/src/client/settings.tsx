@@ -13,14 +13,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   DEFAULT_GLYPH,
+  PET_ACCENT_EVENT,
+  PET_APPEARANCE_EVENT,
+  normalizeGlyph,
   PET_ACCENTS,
   PET_SIZES,
-  readAccent,
-  readGlyph,
-  readSize,
-  writeAccent,
-  writeGlyph,
-  writeSize,
+  resolveAccent,
   type PetAccentId,
   type PetSizeId,
 } from './accent.js'
@@ -221,11 +219,9 @@ export function PetSettingsSection(props: { initialTab?: PetSettingsTab } = {}):
 /** General: the followed model, appearance reset and default context policy. */
 function GeneralTab(): JSX.Element {
   const [config, setConfig] = useState<PetConfig | undefined>(undefined)
-  const [accent, setAccent] = useState<PetAccentId>(() => readAccent().id)
-  const [glyph, setGlyph] = useState(() => readGlyph())
-  const [size, setSize] = useState<PetSizeId>(
-    () => PET_SIZES.find(item => item.px === readSize())?.id ?? 'medium',
-  )
+  const [accent, setAccent] = useState<PetAccentId>('default')
+  const [glyph, setGlyph] = useState(DEFAULT_GLYPH)
+  const [size, setSize] = useState<PetSizeId>('medium')
   const [presetOptions, setPresetOptions] = useState<
     readonly { value: string; label: string }[]
   >([])
@@ -236,7 +232,14 @@ function GeneralTab(): JSX.Element {
   useEffect(() => {
     void petApi
       .config()
-      .then(setConfig)
+      .then(value => {
+        setConfig(value)
+        // Seed the controls from the persisted configuration.
+        const look = value.appearance ?? {}
+        setAccent(resolveAccent(look.accent).id)
+        setGlyph(look.glyph === undefined || look.glyph === '' ? DEFAULT_GLYPH : look.glyph)
+        setSize(PET_SIZES.find(item => item.id === look.size)?.id ?? 'medium')
+      })
       .catch((cause: unknown) => setError(String(cause)))
   }, [])
 
@@ -311,10 +314,20 @@ function GeneralTab(): JSX.Element {
               data-selected={accent === item.id}
               style={{ background: item.background }}
               onClick={() => {
-                // Broadcasts, so a mounted Pet recolors at once instead of
-                // waiting for a page reload.
-                writeAccent(item.id)
                 setAccent(item.id)
+                // Settings are configuration: they belong in the Host config
+                // file, not `localStorage` — the plugin runtime has no usable
+                // browser storage, so writes there are silently lost.
+                void petApi
+                  .updateConfig({ appearance: { accent: item.id } })
+                  .then(next => {
+                    setConfig(next)
+                    // Tell a mounted Pet to re-read without a reload.
+                    globalThis.dispatchEvent?.(new Event(PET_ACCENT_EVENT))
+                  })
+                  .catch((cause: unknown) =>
+                    setError(cause instanceof Error ? cause.message : String(cause)),
+                  )
               }}
             >
               {glyph}
@@ -327,14 +340,20 @@ function GeneralTab(): JSX.Element {
           value={glyph}
           placeholder="🐾"
           onReset={async () => {
-            writeGlyph('')
-            setGlyph(readGlyph())
+            const updated = await petApi.updateConfig({ appearance: { glyph: '' } })
+            setConfig(updated)
+            setGlyph(DEFAULT_GLYPH)
+            globalThis.dispatchEvent?.(new Event(PET_APPEARANCE_EVENT))
           }}
           onSave={async next => {
-            // Stored through the same validation as everywhere else: blank
-            // restores the default, and only the first grapheme is kept.
-            writeGlyph(next)
-            setGlyph(readGlyph())
+            // Only the first grapheme is kept; blank restores the default.
+            const glyphValue = normalizeGlyph(next)
+            const updated = await petApi.updateConfig({
+              appearance: { glyph: glyphValue },
+            })
+            setConfig(updated)
+            setGlyph(glyphValue === '' ? DEFAULT_GLYPH : glyphValue)
+            globalThis.dispatchEvent?.(new Event(PET_APPEARANCE_EVENT))
           }}
         />
         <p className="dshpet-item-hint">
@@ -349,7 +368,15 @@ function GeneralTab(): JSX.Element {
             onChange={event => {
               const next = event.target.value as PetSizeId
               setSize(next)
-              writeSize(next)
+              void petApi
+                .updateConfig({ appearance: { size: next } })
+                .then(updated => {
+                  setConfig(updated)
+                  globalThis.dispatchEvent?.(new Event(PET_APPEARANCE_EVENT))
+                })
+                .catch((cause: unknown) =>
+                  setError(cause instanceof Error ? cause.message : String(cause)),
+                )
             }}
           >
             {PET_SIZES.map(item => (
