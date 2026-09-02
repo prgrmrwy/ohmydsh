@@ -105,6 +105,7 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
         modelId: followed?.modelId ?? global.modelId,
         agentPreset: global.agentPreset,
         defaultContextPolicy: global.defaultContextPolicy,
+        appearance: global.appearance,
         workspaceId: global.workspaceId,
       }
     }),
@@ -116,7 +117,23 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
         'modelId',
         'agentPreset',
         'defaultContextPolicy',
+        'appearance',
       ])
+
+      // Appearance is display state, but it must round-trip exactly: accept
+      // only the known fields and coerce nothing else.
+      const rawAppearance = record['appearance']
+      let appearance: Record<string, string> | undefined
+      if (rawAppearance !== undefined) {
+        if (typeof rawAppearance !== 'object' || rawAppearance === null) {
+          throw new PetError('INVALID_REQUEST', 'appearance must be an object')
+        }
+        const source = rawAppearance as Record<string, unknown>
+        appearance = {}
+        for (const key of ['accent', 'glyph', 'size'] as const) {
+          if (typeof source[key] === 'string') appearance[key] = source[key]
+        }
+      }
       const policy = optionalString(record, 'defaultContextPolicy')
       if (policy !== undefined && policy !== 'current-session' && policy !== 'none') {
         throw new PetError('INVALID_REQUEST', 'defaultContextPolicy must be current-session or none', {
@@ -132,11 +149,16 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
         ...(modelId !== undefined ? { modelId } : {}),
         ...(agentPreset !== undefined ? { agentPreset } : {}),
         ...(policy !== undefined ? { defaultContextPolicy: policy } : {}),
+        // Merge, so setting one field does not clear the others.
+        ...(appearance !== undefined
+          ? { appearance: { ...(current.appearance ?? {}), ...appearance } }
+          : {}),
       }))
       return {
         providerId: updated.providerId,
         modelId: updated.modelId,
         agentPreset: updated.agentPreset,
+        appearance: updated.appearance,
         defaultContextPolicy: updated.defaultContextPolicy,
       }
     }),

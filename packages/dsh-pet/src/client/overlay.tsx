@@ -10,11 +10,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { PetApiError, petApi } from './api.js'
 import {
+  DEFAULT_GLYPH,
+  DEFAULT_SIZE_PX,
   PET_ACCENT_EVENT,
   PET_APPEARANCE_EVENT,
-  readAccent,
-  readGlyph,
-  readSize,
+  PET_SIZES,
+  resolveAccent,
 } from './accent.js'
 import {
   clampPosition,
@@ -59,10 +60,12 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   // bought nothing and cost every interaction.
 
   const viewport = useViewport()
-  const [position, setPosition] = useState<PetPosition>(() => readPosition(viewport, globalThis.localStorage, readSize()))
-  const [accent, setAccent] = useState(() => readAccent())
-  const [glyph, setGlyph] = useState(() => readGlyph())
-  const [size, setSize] = useState(() => readSize())
+  const [position, setPosition] = useState<PetPosition>(() => readPosition(viewport, globalThis.localStorage, DEFAULT_SIZE_PX))
+  // Appearance comes from the Host config, not `localStorage`: the plugin
+  // runtime has no usable browser storage, so writes there are lost.
+  const [accent, setAccent] = useState(() => resolveAccent(undefined))
+  const [glyph, setGlyph] = useState(DEFAULT_GLYPH)
+  const [size, setSize] = useState(DEFAULT_SIZE_PX)
   const [mode, setMode] = useState<Mode>('closed')
   const [capabilities, setCapabilities] = useState<readonly PetCapability[]>([])
   const [degraded, setDegraded] = useState<string | undefined>(undefined)
@@ -79,11 +82,20 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   // Settings can change the accent; the surface reads it once into state, so
   // the change must be broadcast to take effect without a reload.
   useEffect(() => {
-    const onAccent = (): void => setAccent(readAccent())
-    const onAppearance = (): void => {
-      setGlyph(readGlyph())
-      setSize(readSize())
+    const load = (): void => {
+      void petApi
+        .config()
+        .then(config => {
+          const look = config.appearance ?? {}
+          setAccent(resolveAccent(look.accent))
+          setGlyph(look.glyph === undefined || look.glyph === '' ? DEFAULT_GLYPH : look.glyph)
+          setSize(PET_SIZES.find(item => item.id === look.size)?.px ?? DEFAULT_SIZE_PX)
+        })
+        .catch(() => undefined)
     }
+    load()
+    const onAccent = load
+    const onAppearance = load
     globalThis.addEventListener(PET_ACCENT_EVENT, onAccent)
     globalThis.addEventListener(PET_APPEARANCE_EVENT, onAppearance)
     return () => {

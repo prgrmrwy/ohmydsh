@@ -81,6 +81,11 @@ export interface PetConfig {
   readonly providerId?: string
   readonly modelId?: string
   readonly agentPreset?: string
+  readonly appearance?: {
+    readonly accent?: string
+    readonly glyph?: string
+    readonly size?: string
+  }
   readonly defaultContextPolicy: 'current-session' | 'none'
   readonly workspaceId?: string
 }

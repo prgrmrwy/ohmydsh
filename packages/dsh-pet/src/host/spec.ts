@@ -186,6 +186,17 @@ const petGlobalState = z.object({
   agentPreset: z.string().optional(),
   /** Default context policy applied to new Tasks. */
   defaultContextPolicy: z.enum(['current-session', 'none']),
+  // Mascot appearance configured in Settings. Persisted Host-side: anything
+  // the Settings panel can change is configuration and belongs in the config
+  // file. Position is deliberately absent — it is per-browser display state
+  // set by dragging, not a setting, and stays in `localStorage`.
+  appearance: z
+    .object({
+      accent: z.string().optional(),
+      glyph: z.string().optional(),
+      size: z.string().optional(),
+    })
+    .optional(),
   /** Registered Pet Workspace id, once created. */
   workspaceId: z.string().optional(),
 })
