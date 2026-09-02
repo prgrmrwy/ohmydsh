@@ -1,0 +1,50 @@
+# DSH Pet Host entry. The package also declares a Web client bundle.
+#
+# Pet composes the standard SQLite backend and routes ONLY its own `dsh-pet`
+# domain to it. Every other DSH domain keeps the profile's default backend:
+# `storage-domain.routes` is an override map, not a replacement. The Host
+# fails Pet into `degraded` when the `sqlite` backend name is already owned by
+# an incompatible composition rather than replacing that backend.
+- insert:
+    - id: dsh-pet-storage-sqlite
+      name: '@deepseek-ai/dsh-storage-sqlite'
+      config:
+        # Pet state lives under the ACTIVE DSH home, never in the package
+        # checkout or the generated profile, so plugin upgrades and profile
+        # rebuilds never overwrite Pet task data. `dshHomePath` is the same
+        # loader helper the base Web profile uses for `storage-json`, so a
+        # `$DSH_HOME` override moves Pet state with the rest of the harness.
+        path: !!js dshHomePath('plugins', 'dsh-pet', 'state.sqlite')
+# A patch row is a top-level entry naming the row it overrides by `id`; a
+# `patch:` wrapper is not a thing and fails composition with
+# "id is required for non-insert patches".
+#
+# A patch REPLACES the targeted row's whole `config`, so `backend: json` is
+# restated here — omitting it would drop the profile default and leave every
+# other DSH domain unrouted.
+- id: storage-domain
+  config:
+    backend: json
+    routes:
+      # MUST equal PET_DOMAIN_NAME in src/host/spec.ts. DSH's UNIT_NAME_RE
+      # forbids hyphens, so the domain (and this route key) is `dsh_pet`;
+      # a mismatch would silently leave Pet on the profile's JSON backend.
+      dsh_pet: sqlite
+- insert:
+    - id: dsh-pet
+      name: dsh-pet
+      inject:
+        # `storage` is needed alongside `storageDomain`: the backend ownership
+        # proof reads the hub's backend registry, and cordis denies property
+        # access to any service the plugin does not declare.
+        - storage
+        - storageDomain
+        - workspaceRegistry
+        - sessions
+        - sessionTitle
+        - llm
+        - agentDefaultModel
+        - agents
+        - tools
+        - skills
+        - webServer
