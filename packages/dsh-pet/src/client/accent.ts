@@ -21,6 +21,7 @@ export const PET_ACCENT_EVENT = 'dsh-pet:accent-changed'
 /** Identifier of one palette entry. */
 export type PetAccentId =
   | 'default'
+  | 'black'
   | 'red'
   | 'orange'
   | 'yellow'
@@ -47,6 +48,9 @@ export interface PetAccent {
  */
 export const PET_ACCENTS: readonly PetAccent[] = [
   { id: 'default', label: '默认', background: '#ffffff', foreground: '#1f2329' },
+  // The one deliberately unsaturated entry: a dark body with a light glyph,
+  // inverting the palette rather than tinting it.
+  { id: 'black', label: '黑', background: '#2b2f36', foreground: '#e8eaed' },
   { id: 'red', label: '红', background: '#e6d4d1', foreground: '#653c34' },
   { id: 'orange', label: '橙', background: '#e6dbd1', foreground: '#654b34' },
   { id: 'yellow', label: '黄', background: '#e6e2d1', foreground: '#655b34' },
