@@ -132,15 +132,31 @@ describe('the glyph is user-chosen but always renderable', () => {
     expect(readGlyph()).toBe('🦖')
   })
 
-  it('caps a long string so it cannot overflow the circle', () => {
-    writeGlyph('🐾🐾🐾🐾🐾🐾🐾🐾')
-    expect([...readGlyph()]).toHaveLength(4)
+  it('keeps only the first character', () => {
+    writeGlyph('🐾🐱🐶')
+    expect(readGlyph()).toBe('🐾')
   })
 
-  it('keeps a multi-code-point emoji intact', () => {
-    // Naive `slice` would cut a surrogate pair and render a replacement char.
+  it('keeps a composed emoji whole rather than cutting it apart', () => {
+    // 👩‍💻 is three code points and 👨‍👩‍👧 is five, yet each is ONE visible
+    // glyph. Counting code points would slice them into fragments that render
+    // as separate figures or replacement characters.
     writeGlyph('👩‍💻')
-    expect(readGlyph()).toContain('👩')
+    expect(readGlyph()).toBe('👩‍💻')
+
+    writeGlyph('👨‍👩‍👧')
+    expect(readGlyph()).toBe('👨‍👩‍👧')
+  })
+
+  it('keeps a flag emoji whole', () => {
+    // Regional indicator pairs are two code points forming one glyph.
+    writeGlyph('🇨🇳')
+    expect(readGlyph()).toBe('🇨🇳')
+  })
+
+  it('truncates a composed emoji followed by more input', () => {
+    writeGlyph('👩‍💻🐾')
+    expect(readGlyph()).toBe('👩‍💻')
   })
 })
 
