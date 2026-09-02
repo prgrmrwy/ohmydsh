@@ -104,8 +104,11 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
       const followed = deps.followedModel?.()
       // Deliberately projects only non-secret routing selections.
       return {
-        providerId: followed?.providerId ?? global.providerId,
-        modelId: followed?.modelId ?? global.modelId,
+        // Always the Host's default selection: Pet follows DSH rather than
+        // keeping its own copy. The write route no longer accepts these, so
+        // reading a stored value back would only report a stale ghost.
+        providerId: followed?.providerId,
+        modelId: followed?.modelId,
         agentPreset: global.agentPreset,
         defaultContextPolicy: global.defaultContextPolicy,
         appearance: global.appearance,
@@ -116,8 +119,6 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
     petRoute(ROUTES.configUpdate, async ({ body }) => {
       requireReady(lifecycle)
       const record = strictBody(body, [
-        'providerId',
-        'modelId',
         'agentPreset',
         'defaultContextPolicy',
         'appearance',
@@ -143,13 +144,9 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
           defaultContextPolicy: 'invalid',
         })
       }
-      const providerId = optionalString(record, 'providerId')
-      const modelId = optionalString(record, 'modelId')
       const agentPreset = optionalString(record, 'agentPreset')
       const updated = await repository.updateGlobal(current => ({
         ...current,
-        ...(providerId !== undefined ? { providerId } : {}),
-        ...(modelId !== undefined ? { modelId } : {}),
         ...(agentPreset !== undefined ? { agentPreset } : {}),
         ...(policy !== undefined ? { defaultContextPolicy: policy } : {}),
         // Merge, so setting one field does not clear the others.

@@ -17,6 +17,7 @@
  * from the UI.
  */
 
+import { existsSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { PET_DOMAIN_NAME, PET_DOMAIN_VERSION } from './spec.js'
 
@@ -64,11 +65,18 @@ function isLegacyRow(table: string, row: Record<string, unknown>): boolean {
  * @returns what was removed.
  */
 export function removeLegacyState(databaseFile: string): LegacyStateCleanup {
+  // Never CREATE the file. `new DatabaseSync(path)` creates it when absent,
+  // which would defeat the ownership proof that runs later: that check treats
+  // "the file exists after a durable write" as evidence the write landed at
+  // Pet's configured path. Creating it here makes that check pass even when
+  // the records actually went to a foreign medium.
+  if (!existsSync(databaseFile)) return { removedRows: 0, clearedTables: [] }
+
   let db: DatabaseSync
   try {
     db = new DatabaseSync(databaseFile)
   } catch {
-    // No database yet, or it cannot be opened: nothing to clean.
+    // Present but unopenable: nothing this cleanup can do.
     return { removedRows: 0, clearedTables: [] }
   }
 
