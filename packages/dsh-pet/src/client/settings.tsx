@@ -424,20 +424,41 @@ function SkillsTab(): JSX.Element {
       <section className="dshpet-group">
       <h3 className="dshpet-group-title">已安装</h3>
       {state.revisions.length === 0 ? <p className="dshpet-empty">No Skills installed.</p> : null}
-      {state.revisions.map(revision => {
-        const selection = state.selections.find(item => item.skillName === revision.skillName)
-        const enabled = selection?.enabledDigest === revision.digest
+      {/*
+        One row per SKILL, not per revision. Several immutable revisions of one
+        Skill coexist by design — an upgrade installs a new one while queued
+        work keeps running the digest it was accepted with — so listing every
+        revision made the same Skill look duplicated.
+      */}
+      {[...new Set(state.revisions.map(revision => revision.skillName))].map(skillName => {
+        const selection = state.selections.find(item => item.skillName === skillName)
+        const revisions = state.revisions.filter(item => item.skillName === skillName)
+        // Show the enabled revision; fall back to the newest installed one so a
+        // disabled Skill still reports where it came from.
+        const active =
+          revisions.find(item => item.digest === selection?.enabledDigest) ?? revisions[0]
+        if (active === undefined) return null
+        const enabled = selection?.enabledDigest !== undefined
+        const upgrade = selection?.upgradeAvailableDigest
+        const retained = revisions.length - 1
+
         return (
-          <div key={`${revision.skillName}@${revision.digest}`} className="dshpet-task">
-            <strong>{revision.skillName}</strong>{' '}
-            <span className="dshpet-status">{enabled ? 'enabled' : 'installed'}</span>
-            {enabled && selection?.upgradeAvailableDigest !== undefined ? (
-              <span className="dshpet-status" style={{ marginLeft: 4 }}>
-                有可用升级
+          <div key={skillName} className="dshpet-task">
+            <div className="dshpet-task-head">
+              <strong className="dshpet-task-name">{skillName}</strong>
+              <span className="dshpet-status" data-tone={enabled ? 'enabled' : undefined}>
+                {enabled ? '已启用' : '已安装'}
               </span>
-            ) : null}
+              {enabled && upgrade !== undefined ? (
+                <span className="dshpet-status" data-tone="upgrade">
+                  有可用升级
+                </span>
+              ) : null}
+            </div>
             <p className="dshpet-item-hint">
-              {revision.provenance.kind} · {revision.digest.slice(0, 19)}…
+              {active.provenance.kind === 'builtin' ? '内置' : '本机导入'} ·{' '}
+              <code className="dshpet-code">{active.digest.slice(7, 19)}</code>
+              {retained > 0 ? ` · 另保留 ${retained} 个被引用的历史版本` : ''}
             </p>
             <div className="dshpet-actions">
               <button
@@ -446,14 +467,14 @@ function SkillsTab(): JSX.Element {
                 onClick={() =>
                   void petApi
                     .mutateSkill({
-                      skillName: revision.skillName,
+                      skillName,
                       action: enabled ? 'disable' : 'enable',
-                      digest: revision.digest,
+                      digest: active.digest,
                     })
                     .then(refresh)
                 }
               >
-                {enabled ? 'Disable' : 'Enable'}
+                {enabled ? '停用' : '启用'}
               </button>
               <button
                 type="button"
@@ -461,7 +482,7 @@ function SkillsTab(): JSX.Element {
                 onClick={() =>
                   void petApi
                     .mutateSkill({
-                      skillName: revision.skillName,
+                      skillName,
                       action: 'shortcut',
                       showAsShortcut: !(selection?.showAsShortcut ?? true),
                     })
@@ -470,45 +491,41 @@ function SkillsTab(): JSX.Element {
               >
                 {selection?.showAsShortcut === false ? '在菜单显示' : '从菜单隐藏'}
               </button>
-              {enabled && selection?.upgradeAvailableDigest !== undefined ? (
+              {enabled && upgrade !== undefined ? (
                 <button
                   type="button"
-                  className="dshpet-action"
+                  className="dshpet-action dshpet-action-primary"
                   onClick={() => {
                     setError(undefined)
                     // Explicit and user-applied: a packaged upgrade is never
                     // adopted silently, and queued work keeps its fixed digest.
                     void petApi
-                      .mutateSkill({
-                        skillName: revision.skillName,
-                        action: 'upgrade',
-                        digest: selection.upgradeAvailableDigest!,
-                      })
+                      .mutateSkill({ skillName, action: 'upgrade', digest: upgrade })
                       .then(refresh)
                       .catch((cause: unknown) =>
                         setError(cause instanceof Error ? cause.message : String(cause)),
                       )
                   }}
                 >
-                  Upgrade
+                  升级
                 </button>
               ) : null}
               <button
                 type="button"
-                className="dshpet-action"
+                className="dshpet-action dshpet-action-danger"
                 onClick={() => {
                   setError(undefined)
                   // Uninstall disables the Skill first, then collects only
                   // revisions no live Task or queued Invocation references.
                   void petApi
-                    .mutateSkill({ skillName: revision.skillName, action: 'uninstall' })
+                    .mutateSkill({ skillName, action: 'uninstall' })
                     .then(refresh)
                     .catch((cause: unknown) =>
                       setError(cause instanceof Error ? cause.message : String(cause)),
                     )
                 }}
               >
-                Uninstall
+                卸载
               </button>
             </div>
           </div>
