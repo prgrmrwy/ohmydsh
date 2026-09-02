@@ -94,6 +94,9 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
 
 
   // Re-clamp whenever the viewport changes so Pet can never be stranded.
+  // Deliberately does NOT persist: a temporary narrow layout would otherwise
+  // overwrite the user's chosen spot, and it could never be recovered when
+  // the layout widened again. Only a real drag writes the position.
   useEffect(() => {
     setPosition(current => clampPosition(current, viewport, size))
     // `size` included: growing the mascot near an edge must pull it back
@@ -676,10 +679,16 @@ function TaskPanel(props: {
 
 /** Track the viewport so position clamping follows resizes. */
 function useViewport(): { width: number; height: number } {
-  const [viewport, setViewport] = useState(() => ({
-    width: globalThis.innerWidth ?? 1280,
-    height: globalThis.innerHeight ?? 800,
-  }))
+  // Measure the overlay layer up front. Seeding from `window` and correcting
+  // in an effect re-clamps the stored position against a LARGER box first,
+  // then a smaller one — nudging Pet up and left on every load.
+  const [viewport, setViewport] = useState(() => {
+    const layer = globalThis.document?.querySelector('[data-shell-overlay]')
+    const box = layer?.getBoundingClientRect()
+    return box !== undefined && box.width > 0 && box.height > 0
+      ? { width: box.width, height: box.height }
+      : { width: globalThis.innerWidth ?? 1280, height: globalThis.innerHeight ?? 800 }
+  })
   useEffect(() => {
     // Pet is absolutely positioned inside the shell overlay layer, so that
     // layer — not the window — is its containing block. Measuring the window
