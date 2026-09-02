@@ -47,7 +47,6 @@ interface PetSkillLocator {
 export function currentAllowlist(repository: PetRepository): readonly AllowlistEntry[] {
   const entries: AllowlistEntry[] = []
   for (const selection of repository.listSkillSelections()) {
-    if (selection.enabled !== true) continue
     const revision = repository.getSkillRevision(selection.skillName)
     if (revision === undefined) continue
     entries.push({
