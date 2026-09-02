@@ -229,3 +229,4 @@ describe('a stored setting keeps the editor open when the save fails', () => {
     expect(host.textContent).toContain('不接受该取值')
   })
 })
+

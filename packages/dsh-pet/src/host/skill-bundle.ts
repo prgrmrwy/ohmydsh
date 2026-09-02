@@ -49,7 +49,6 @@ export interface BundleInspection {
     readonly label?: string
     readonly icon?: string
     readonly context?: PetContextRequirement
-    readonly confirm?: boolean
   }
   readonly files: readonly BundleFile[]
   readonly fileCount: number
@@ -79,7 +78,6 @@ interface SkillFrontmatter {
    */
   readonly petContext?: string
   /** `true` makes the radial menu ask for a second, explicit click. */
-  readonly petConfirm?: string
 }
 
 /**
@@ -134,7 +132,6 @@ export function parseFrontmatter(content: string): SkillFrontmatter {
     ...(fields['petLabel'] !== undefined ? { petLabel: fields['petLabel'] } : {}),
     ...(fields['petIcon'] !== undefined ? { petIcon: fields['petIcon'] } : {}),
     ...(fields['petContext'] !== undefined ? { petContext: fields['petContext'] } : {}),
-    ...(fields['petConfirm'] !== undefined ? { petConfirm: fields['petConfirm'] } : {}),
   }
 }
 
@@ -287,17 +284,13 @@ export async function inspectBundle(sourcePath: string): Promise<BundleInspectio
     ...(frontmatter.whenToUse !== undefined ? { whenToUse: frontmatter.whenToUse } : {}),
     ...(frontmatter.petLabel !== undefined ||
     frontmatter.petIcon !== undefined ||
-    frontmatter.petContext !== undefined ||
-    frontmatter.petConfirm !== undefined
+    frontmatter.petContext !== undefined
       ? {
           pet: {
             ...(frontmatter.petLabel !== undefined ? { label: frontmatter.petLabel } : {}),
             ...(frontmatter.petIcon !== undefined ? { icon: frontmatter.petIcon } : {}),
             ...(normalizeContext(frontmatter.petContext) !== undefined
               ? { context: normalizeContext(frontmatter.petContext)! }
-              : {}),
-            ...(frontmatter.petConfirm !== undefined
-              ? { confirm: frontmatter.petConfirm === 'true' }
               : {}),
           },
         }

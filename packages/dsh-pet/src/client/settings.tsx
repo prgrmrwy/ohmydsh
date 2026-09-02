@@ -25,6 +25,7 @@ import {
 } from './accent.js'
 import { petApi, type PetConfig } from './api.js'
 import { PET_EXECUTOR_PRESET } from '../wire.js'
+import { WHEEL_CAPACITY } from './wheel.js'
 import type { PetProjectionEntry, PetSkillRevision, PetSkillSelection } from '../wire.js'
 
 /** The four stable tabs. */
@@ -721,6 +722,8 @@ function SkillsTab(): JSX.Element {
       {state.revisions.map(revision => {
         const selection = state.selections.find(item => item.skillName === revision.skillName)
         const enabled = selection?.enabled === true
+        const atCapacity =
+          state.selections.filter(item => item.enabled === true).length >= WHEEL_CAPACITY
 
         return (
           <div key={revision.skillName} className="dshpet-task">
@@ -753,6 +756,16 @@ function SkillsTab(): JSX.Element {
               <button
                 type="button"
                 className="dshpet-action"
+                // The wheel holds 24; enabling past that would leave the Skill
+                // enabled but invisible, which reads as a bug. The cap is a
+                // display constraint only — it never changes what an already
+                // enabled Skill may do.
+                disabled={!enabled && atCapacity}
+                title={
+                  !enabled && atCapacity
+                    ? `已达轮盘容量上限（${WHEEL_CAPACITY} 个），请先停用一个 Skill`
+                    : undefined
+                }
                 onClick={() =>
                   void petApi
                     .mutateSkill({

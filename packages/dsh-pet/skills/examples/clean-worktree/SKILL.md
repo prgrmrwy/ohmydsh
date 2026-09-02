@@ -5,7 +5,6 @@ whenToUse: When the user asks to clean up, remove or tidy the worktree/branch fo
 petLabel: Clean worktree
 petIcon: 🧹
 petContext: session-required
-petConfirm: true
 ---
 
 # Clean worktree

@@ -5,7 +5,6 @@ whenToUse: When the user asks to send a CR / request review / notify the review 
 petLabel: Send CR
 petIcon: 📣
 petContext: session-required
-petConfirm: false
 ---
 
 # Send CR

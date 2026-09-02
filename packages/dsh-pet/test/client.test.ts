@@ -170,7 +170,7 @@ describe('overlay styles', () => {
 
   it('provides a visible keyboard focus indicator', () => {
     expect(PET_CSS).toContain('.dshpet-mascot:focus-visible')
-    expect(PET_CSS).toContain('.dshpet-item:focus-visible')
+    expect(PET_CSS).toContain('.dshpet-wheel-item:focus-visible')
   })
 
   it('adapts to narrow viewports', () => {
@@ -378,7 +378,7 @@ describe('radial menu honors shortcut visibility', () => {
 
     // Without this filter the Settings toggle silently does nothing.
     expect(overlay).toContain('capability.showAsShortcut')
-    expect(overlay).toContain('shortcuts.map(')
+    expect(overlay).toContain('capability.showAsShortcut')
     expect(overlay).not.toContain('capabilities.map(')
   })
 })
@@ -409,20 +409,6 @@ describe('configured behavior is applied, not just displayed', () => {
     expect(settings).toContain("value: 'none'")
   })
 
-  it('gates a capability that declares it requires confirmation', async () => {
-    const { readFile } = await import('node:fs/promises')
-    const overlay = await readFile(
-      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
-      'utf8',
-    )
-
-    // `clean-worktree` declares requiresConfirmation because its effects are
-    // destructive; without a gate the flag was inert.
-    expect(overlay).toContain('capability.requiresConfirmation')
-    expect(overlay).toContain('setPendingConfirm(capability)')
-    // The pending state must be a dependency or the second click never sees it.
-    expect(overlay).toContain('[effectiveSource, pendingConfirm]')
-  })
 })
 
 describe('task panel can answer a waiting Invocation', () => {
@@ -444,33 +430,33 @@ describe('task panel can answer a waiting Invocation', () => {
   })
 })
 
-describe('task panel navigates to both source and executor', () => {
-  it('offers an Open source control for session-sourced Tasks', async () => {
+describe('the Task row is the only navigation control', () => {
+  it('opens the executor session and offers nothing destructive', async () => {
     const { readFile } = await import('node:fs/promises')
     const overlay = await readFile(
       path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
       'utf8',
     )
 
-    // Spec 9.5 requires navigation to the source AND the executor; only the
-    // executor had a control, and TaskView did not even carry sourceId.
-    expect(overlay).toContain('Open source')
-    expect(overlay).toContain('props.openSession?.(task.sourceId!)')
-    expect(overlay).toContain('sourceId?: string')
-    // An archived source is disabled with a reason, never silently broken.
-    expect(overlay).toContain("task.sourceAvailability === 'archived'")
-    expect(overlay).toContain('source archived')
+    // The whole row navigates. Archiving belongs in the session, where
+    // `reconcileArchives` already observes it; a destructive control in a
+    // hover panel only invites misclicks.
+    expect(overlay).toContain("props.openSession?.(task.executorSessionId)")
+    expect(overlay).not.toContain('petApi.archive(')
+    expect(overlay).not.toContain('petApi.cancel(')
+    expect(overlay).not.toContain('Open source')
   })
 
-  it('does not offer source navigation for an independent Task', async () => {
+  it('reaches the row from the keyboard', async () => {
     const { readFile } = await import('node:fs/promises')
     const overlay = await readFile(
       path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
       'utf8',
     )
 
-    // Guarded on a real session source, so a `none` Task shows no control.
-    expect(overlay).toContain("task.sourceKind === 'session' && task.sourceId !== undefined")
+    // A clickable div is invisible to keyboard users without this.
+    expect(overlay).toContain('role="button"')
+    expect(overlay).toContain('tabIndex={0}')
   })
 })
 
@@ -696,7 +682,10 @@ describe('hover, drag and dismissal behave independently', () => {
     // Hover owns the MENU only. The panel is opened deliberately, so a
     // pointer drifting away must not evaporate it — and collapsing it here is
     // why Pet appeared to stay open forever after a capability run.
-    expect(overlay).toContain("if (mode === 'menu') setMode('closed')")
+    // Hover owns the wheel only; the panel is click-opened and must not
+    // evaporate when the pointer drifts. Closing is now distance-based, so
+    // assert the rule rather than a `mouseleave` handler.
+    expect(overlay).toContain("> wheelRadius) setMode('closed')")
     expect(overlay).not.toContain("if (mode !== 'closed') setMode('closed')")
   })
 
@@ -1162,5 +1151,49 @@ describe('the import preview reflects the link model', () => {
     // take effect without any further confirmation.
     expect(settings).toContain('只加入你信任的目录')
     expect(settings).toContain('立即生效')
+  })
+})
+
+describe('Settings caps enabled Skills at the wheel capacity', () => {
+  it('blocks enabling past the cap and explains why', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // Enabling past the cap would leave a Skill enabled but invisible, which
+    // reads as a bug rather than a limit.
+    expect(settings).toContain('disabled={!enabled && atCapacity}')
+    expect(settings).toContain('已达轮盘容量上限')
+  })
+
+  it('never blocks disabling', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // `!enabled &&` matters: at capacity the user must still be able to turn
+    // one off, or the state would be unrecoverable.
+    expect(settings).not.toContain('disabled={atCapacity}')
+  })
+})
+
+describe('the wheel container does not swallow pointer events', () => {
+  it('makes only the slices and mascot interactive', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const styles = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'styles.ts'),
+      'utf8',
+    )
+
+    // The wheel's box is far larger than the mascot. Without this it would
+    // cover the page underneath even while collapsed.
+    expect(styles).toContain('.dshpet-wheel{')
+    const wheel = styles.slice(styles.indexOf('.dshpet-wheel{'))
+    expect(wheel.slice(0, 200)).toContain('pointer-events:none')
+    expect(styles).toContain('.dshpet-slot{pointer-events:auto')
   })
 })

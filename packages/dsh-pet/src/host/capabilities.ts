@@ -18,7 +18,6 @@ export interface CapabilityDeclaration {
   readonly description: string
   readonly skillName: string
   readonly contextRequirement: PetContextRequirement
-  readonly requiresConfirmation?: boolean
   /**
    * Proves the organization-specific dependencies this capability needs.
    * Returning a string disables the capability with that diagnostic.
@@ -78,7 +77,7 @@ export class CapabilityRegistry {
     // Capabilities are DERIVED FROM INSTALLED SKILLS, not from Pet-side code.
     // Adding one is an install plus an enable — never a code change — so Pet
     // ships no per-capability adapter. A Skill declares its own label, icon,
-    // context requirement and confirmation need in its `SKILL.md`
+    // context requirement in its `SKILL.md`
     // frontmatter, and is responsible for its own bounded behavior.
     const projected = new Map<string, PetCapability>()
 
@@ -103,7 +102,6 @@ export class CapabilityRegistry {
         description: revision.description,
         skillName: selection.skillName,
         contextRequirement: context,
-        requiresConfirmation: declared?.confirm ?? false,
         available: true,
         showAsShortcut: selection.showAsShortcut ?? true,
       })

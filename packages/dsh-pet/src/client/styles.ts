@@ -37,24 +37,44 @@ export const PET_CSS = `
 .dshpet-visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;
   overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 
-.dshpet-radial{position:absolute;inset:auto;bottom:78px;right:0;min-width:212px;padding:6px;
-  border-radius:12px;background:var(--dsw-alias-bg-layer-1,#ffffff);
-  box-shadow:0 8px 28px rgba(0,0,0,.22);display:flex;flex-direction:column;gap:2px}
-.dshpet-item{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border:none;border-radius:8px;
-  background:transparent;text-align:left;cursor:pointer;font:inherit;
-  color:var(--dsw-alias-label-primary,#1f2329)}
-.dshpet-item:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,#0000000f)}
-.dshpet-item:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:-2px}
-.dshpet-item:disabled{cursor:not-allowed;opacity:.55}
+/* The wheel is centred on the mascot and may extend past the viewport; the
+   mascot and centre stay inside because positioning clamps them. Pointer
+   events belong to the slices, not the square that contains them. */
+.dshpet-wheel{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  pointer-events:none;z-index:1}
+.dshpet-wheel-svg{overflow:visible;display:block}
+.dshpet-slot{pointer-events:auto;cursor:pointer;opacity:0;
+  animation:dshpet-slot-in .28s ease forwards}
+@keyframes dshpet-slot-in{from{opacity:0}to{opacity:1}}
+.dshpet-slot-face{fill:var(--dsw-alias-bg-layer-1,#ffffff);
+  stroke:var(--dsw-alias-border-l1,#e4e6eb);stroke-width:1;transition:fill .12s ease}
+/* Hover reads as a slightly deeper fill: enough to locate the slice without
+   competing with the content the wheel floats over. */
+.dshpet-slot[data-hovered="true"] .dshpet-slot-face{
+  fill:var(--dsw-alias-interactive-bg-hover,#e9ecf1)}
+.dshpet-slot[data-disabled="true"]{cursor:not-allowed}
+.dshpet-slot[data-disabled="true"] .dshpet-slot-face{opacity:.55}
+.dshpet-slot-label{font-size:12px;fill:var(--dsw-alias-label-primary,#1f2329);
+  pointer-events:none;user-select:none}
+.dshpet-slot[data-disabled="true"] .dshpet-slot-label{
+  fill:var(--dsw-alias-label-tertiary,#8f959e)}
+/* Keyboard path: visually hidden until focused, then shown in place so the
+   focus ring is never invisible. */
+.dshpet-wheel-a11y{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  display:flex;flex-direction:column;gap:2px;pointer-events:none}
+.dshpet-wheel-item{position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+  overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0;
+  background:var(--dsw-alias-bg-layer-1,#fff);font:inherit;font-size:13px;cursor:pointer}
+.dshpet-wheel-item:focus-visible{position:static;width:auto;height:auto;margin:0;
+  overflow:visible;clip:auto;white-space:normal;padding:6px 10px;border-radius:8px;
+  pointer-events:auto;outline:2px solid var(--dsw-alias-state-business-primary,#4176e6)}
+.dshpet-wheel-note{pointer-events:auto;position:absolute;left:50%;top:100%;
+  transform:translateX(-50%);margin-top:8px;max-width:260px;padding:6px 10px;
+  border-radius:8px;background:var(--dsw-alias-bg-layer-1,#fff);
+  box-shadow:0 8px 28px rgba(0,0,0,.22);font-size:13px;line-height:20px}
 .dshpet-item-label{font-size:13px}
 .dshpet-item-hint{font-size:13px;line-height:20px;color:var(--dsw-alias-label-tertiary,#8f959e)}
 
-.dshpet-chip{display:flex;align-items:center;gap:6px;padding:6px 10px;margin-bottom:4px;
-  border-radius:8px;font-size:12px;background:var(--dsw-alias-interactive-bg-hover,#0000000a);
-  color:var(--dsw-alias-label-secondary,#646a73)}
-.dshpet-chip-remove{margin-left:auto;border:none;background:transparent;cursor:pointer;
-  font:inherit;color:var(--dsw-alias-label-tertiary,#8f959e);padding:0 2px;border-radius:4px}
-.dshpet-chip-remove:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6)}
 
 .dshpet-panel{position:absolute;bottom:78px;right:0;width:340px;max-height:60vh;overflow:auto;
   padding:12px;border-radius:12px;background:var(--dsw-alias-bg-layer-1,#ffffff);
@@ -84,7 +104,6 @@ export const PET_CSS = `
 
 @media (max-width:520px){
   .dshpet-panel{width:calc(100vw - 32px)}
-  .dshpet-radial{min-width:180px}
 }
 
 /* Settings rhythm mirroring the shipped DSH sections (ui-theme's AppearanceRow):
