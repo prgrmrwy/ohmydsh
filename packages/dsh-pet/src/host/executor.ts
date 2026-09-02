@@ -122,6 +122,14 @@ export interface CreateExecutorOptions {
    * briefing.
    */
   readonly ensureWorkspace?: () => Promise<readonly string[]>
+  /**
+   * Accounts the new executor session to the Pet Workspace.
+   *
+   * Creating the session with the right `cwd` is not enough: DSH accounts a
+   * session to a workspace explicitly, so without this the executor exists but
+   * never appears under DSH Pet in the sidebar.
+   */
+  readonly attachToWorkspace?: (sessionId: string) => Promise<void>
   readonly selection: PetModelSelection
   /** Scoped composition installed on the executor Agent (Pet skill provider, tools). */
   readonly setup?: (agentCtx: unknown) => void | Promise<void>
@@ -195,6 +203,10 @@ export async function createTaskWithExecutor(
       },
       ...(options.setup !== undefined ? { setup: options.setup } : {}),
     })
+    // Account the session AFTER creation succeeds. A failure here is not fatal
+    // to the Task — the executor works, it is only mis-filed in the sidebar —
+    // so it must not roll back a usable session.
+    await options.attachToWorkspace?.(identity.executorSessionId).catch(() => undefined)
   } catch (error) {
     await repository.setTaskStatus(
       identity.taskId,

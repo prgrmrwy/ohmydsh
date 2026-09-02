@@ -346,3 +346,52 @@ describe('agent options match the flat DSH contract', () => {
     expect((captured as { model?: unknown }).model).toBe('claude-opus-5')
   })
 })
+
+describe('the executor is accounted to the Pet Workspace', () => {
+  it('attaches the session after creation', async () => {
+    harness = await openPetHarness()
+    const attached: string[] = []
+    const agents = {
+      create: async (options: { sessionId: string }) => ({ session: { id: options.sessionId } }),
+      get: () => undefined,
+    }
+
+    await createTaskWithExecutor(harness.repository, agents as never, {
+      scopeKey: 'session:src-1',
+      sourceKind: 'session',
+      sourceId: 'src-1',
+      workspacePath: '/tmp/pet-workspace',
+      selection: { providerId: 'anthropic', modelId: 'claude-opus-5' },
+      attachToWorkspace: async (sessionId: string) => {
+        attached.push(sessionId)
+      },
+    } as never)
+
+    // Creating with the right `cwd` is not enough: DSH accounts sessions to a
+    // workspace explicitly, so without this the executor works but never
+    // appears under DSH Pet in the sidebar.
+    expect(attached).toHaveLength(1)
+  })
+
+  it('keeps a usable executor when accounting fails', async () => {
+    harness = await openPetHarness()
+    const agents = {
+      create: async (options: { sessionId: string }) => ({ session: { id: options.sessionId } }),
+      get: () => undefined,
+    }
+
+    const task = await createTaskWithExecutor(harness.repository, agents as never, {
+      scopeKey: 'session:src-2',
+      sourceKind: 'session',
+      sourceId: 'src-2',
+      workspacePath: '/tmp/pet-workspace',
+      selection: { providerId: 'anthropic', modelId: 'claude-opus-5' },
+      attachToWorkspace: async () => {
+        throw new Error('registry unavailable')
+      },
+    } as never)
+
+    // Being mis-filed in the sidebar must not destroy a working executor.
+    expect(task.status).toBe('idle')
+  })
+})

@@ -395,6 +395,13 @@ async function initialize(
     // Self-heal at the moment a session needs the Workspace: preparation runs
     // once at boot, so anything deleted or left stale afterwards would
     // otherwise persist until the next restart.
+    // Account each executor to the Pet Workspace. Creating it with the right
+    // `cwd` is not enough: DSH accounts sessions explicitly, so without this
+    // the executor never appears under DSH Pet in the sidebar.
+    attachToWorkspace: async sessionId => {
+      const workspace = ctx.workspaceRegistry.get(workspaceId as never)
+      await workspace?.attachSession(sessionId as never)
+    },
     ensureWorkspace: async () => {
       const health = await inspectWorkspace(paths)
       if (health.ok) return []
