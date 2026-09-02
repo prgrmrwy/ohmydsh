@@ -238,6 +238,27 @@ ui_pid() {
 
 is_ui_open() { [[ -n "$(ui_pid)" ]]; }
 
+# macOS Apple Events can wait forever when Chrome has a wedged window/process.
+# Keep UI cleanup best-effort and bounded so stop/restart can always reach the
+# server lifecycle. Kill only the osascript child we spawned, never Chrome.
+run_osascript_bounded() {
+  local timeout_s="${1:-3}" pid status=0
+  shift
+  osascript "$@" &
+  pid=$!
+  (
+    sleep "$timeout_s"
+    kill -TERM "$pid" 2>/dev/null || true
+    sleep 0.2
+    kill -KILL "$pid" 2>/dev/null || true
+  ) &
+  local watchdog=$!
+  wait "$pid" || status=$?
+  kill -TERM "$watchdog" 2>/dev/null || true
+  wait "$watchdog" 2>/dev/null || true
+  return "$status"
+}
+
 # 优雅退出 PWA;Chrome app-mode 进程的 argv 不含应用名,ui_pid 通过
 # lsappinfo 定位。AppleScript 失败或超时才按已验证的 pid 发 TERM。
 close_ui() {
@@ -245,7 +266,7 @@ close_ui() {
   pid="$(ui_pid)" || return 0
   name="$(ui_app_name 2>/dev/null)" || true
   if [[ -n "$name" ]] && command -v osascript >/dev/null 2>&1; then
-    osascript -e "tell application \"$name\" to quit" >/dev/null 2>&1 && {
+    run_osascript_bounded 3 -e "tell application \"$name\" to quit" >/dev/null 2>&1 && {
       for _ in $(seq 1 20); do [[ -z "$(ui_pid)" ]] && return 0; sleep 0.1; done
     }
   fi
@@ -256,7 +277,7 @@ close_ui() {
 # windows 也包含 PWA app-mode 窗口,所以必须在 close_ui 之后调用。
 close_browser_ui_tabs() {
   command -v osascript >/dev/null 2>&1 || return 0
-  osascript - "$PORT" >/dev/null 2>&1 <<'APPLESCRIPT' || true
+  run_osascript_bounded 3 - "$PORT" >/dev/null 2>&1 <<'APPLESCRIPT' || true
 on run argv
   set targetPrefix to "http://127.0.0.1:" & (item 1 of argv) & "/"
   tell application "Google Chrome"

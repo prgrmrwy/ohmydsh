@@ -169,6 +169,14 @@ test('stop 在 autoUpdate 与运行体解析之前短路，restart 只进入一�
   assert.equal((src.match(/^start_server$/gm) ?? []).length, 1, 'launcher 最终只能进入一次 start_server')
 })
 
+test('macOS UI AppleScript 清理有界，不得让 stop/restart 永久等待 Chrome', async () => {
+  const src = await readFile(path.join(ROOT, 'bin/dsh'), 'utf8')
+  assert.match(src, /run_osascript_bounded\(\)/)
+  assert.match(src, /run_osascript_bounded 3 -e "tell application/)
+  assert.match(src, /run_osascript_bounded 3 - "\$PORT"/)
+  assert.doesNotMatch(src, /^\s+osascript - "\$PORT"/m)
+})
+
 test('stop 在无 server 时不调用 npm/npx/pnpm provision', async t => {
   const sb = await sandbox()
   t.after(() => rm(sb.dir, { recursive: true, force: true }))
