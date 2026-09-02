@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>Pet 轮盘设计草图</title>
+<style>
+  body{margin:0;font:14px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;
+    background:#f5f6f7;color:#0f1115}
+  .page{max-width:1100px;margin:0 auto;padding:24px}
+  h1{font-size:18px;margin:0 0 4px}
+  .sub{color:#8a8f99;font-size:13px;margin:0 0 20px}
+  .bar{display:flex;gap:16px;align-items:center;flex-wrap:wrap;
+    background:#fff;border:1px solid #e4e6eb;border-radius:12px;padding:12px 16px;margin-bottom:16px}
+  .bar label{display:flex;gap:8px;align-items:center;font-size:13px}
+  input[type=range]{width:180px}
+  button{height:30px;padding:0 12px;border:1px solid #e4e6eb;border-radius:15px;
+    background:#fff;cursor:pointer;font:inherit;font-size:13px}
+  button:hover{background:#0000000a}
+  button[data-on=true]{background:#0f1115;color:#fff;border-color:#0f1115}
+  .stage{position:relative;height:520px;background:#fff;border:1px solid #e4e6eb;
+    border-radius:12px;overflow:hidden}
+  /* The stage clips deliberately: outer rings may be cut, the mascot never is. */
+  .hint{position:absolute;left:16px;top:14px;color:#8a8f99;font-size:12px;z-index:5}
+  .pet{position:absolute;width:344px;height:344px;transform:translate(-50%,-50%);pointer-events:none}
+  .mascot,.seg{pointer-events:auto}
+  .mascot{position:absolute;left:50%;top:50%;width:72px;height:72px;margin:-36px 0 0 -36px;
+    border-radius:50%;background:#fff;box-shadow:0 6px 20px rgba(0,0,0,.18);
+    display:flex;align-items:center;justify-content:center;font-size:38px;cursor:grab;z-index:3}
+  svg{position:absolute;inset:0;overflow:visible}
+  .ring{opacity:0;transition:opacity .28s ease}
+  .ring[data-shown=true]{opacity:1}
+  .seg{fill:#fff;stroke:#e4e6eb;stroke-width:1;cursor:pointer;
+    transition:fill .12s ease}
+  .seg:hover{fill:#e9ecf1}
+  .lbl{font-size:12px;fill:#0f1115;pointer-events:none;user-select:none}
+  .tip{position:absolute;z-index:9;max-width:240px;padding:6px 10px;border-radius:8px;
+    background:#0f1115;color:#fff;font-size:12px;line-height:1.5;pointer-events:none;
+    opacity:0;transition:opacity .15s ease}
+  .tip[data-on=true]{opacity:1}
+  .panel{position:absolute;width:260px;background:#fff;border-radius:12px;
+    box-shadow:0 8px 28px rgba(0,0,0,.22);padding:6px;display:none;z-index:8}
+  .panel[data-on=true]{display:block}
+  .row{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:8px;cursor:pointer}
+  .row:hover{background:#0000000a}
+  .row .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+  .row .s{font-size:12px;color:#8a8f99}
+  .row .g{color:#c4c8cf}
+  .note{margin-top:16px;background:#fff;border:1px solid #e4e6eb;border-radius:12px;padding:14px 16px}
+  .note h2{font-size:14px;margin:0 0 8px}
+  .note ul{margin:0;padding-left:18px}
+  .note li{margin:3px 0;font-size:13px}
+  code{background:#0000000a;padding:1px 5px;border-radius:4px;font-size:12px}
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Pet 轮盘设计草图</h1>
+  <p class="sub">静态原型 · 可调数量与尺寸 · 悬停桌宠展开，悬停扇区看 tooltip，点击桌宠开面板</p>
+
+  <div class="bar">
+    <label>能力数量 <input id="count" type="range" min="1" max="26" value="7"><b id="countv">7</b></label>
+    <label>桌宠尺寸
+      <select id="size">
+        <option value="56">小 56</option>
+        <option value="72" selected>中 72</option>
+        <option value="88">大 88</option>
+      </select>
+    </label>
+    <button id="edge" data-on="false">靠边显示（看裁切）</button>
+    <button id="replay">重播展开</button>
+  </div>
+
+  <div class="stage" id="stage">
+    <div class="hint" id="hint"></div>
+    <div class="pet" id="pet">
+      <svg id="svg" viewBox="0 0 344 344"></svg>
+      <div class="mascot" id="mascot">🐾</div>
+    </div>
+    <div class="tip" id="tip"></div>
+    <div class="panel" id="panel">
+      <div class="row"><span class="t">ohmydsh · 重构 Pet 轮盘</span><span class="s">运行中</span><span class="g">›</span></div>
+      <div class="row"><span class="t">nexus · 修复登录态</span><span class="s">已完成</span><span class="g">›</span></div>
+      <div class="row"><span class="t">独立任务</span><span class="s">空闲</span><span class="g">›</span></div>
+    </div>
+  </div>
+
+  <div class="note">
+    <h2>这版体现的决策</h2>
+    <ul>
+      <li><b>裁切</b>：外圈允许被视口裁掉，中心圆与桌宠始终完整（点「靠边显示」看效果）。</li>
+      <li><b>文字同角度</b>：沿弧线切向排布；任何会导致倒转的角度自动翻转 180°，底部扇区因此完全正立向上。</li>
+      <li><b>缩略</b>：超出弧长按字数截断加省略号，第 1/2/3 圈约 5/6/7 字。</li>
+      <li><b>Tooltip</b>：仅在有描述时出现，格式 <code>名字: 描述</code>；名字本身不弹 tooltip。</li>
+      <li><b>时序</b>：第 1 圈立即出现，后续每圈延迟 0.08s 依次渐入。</li>
+      <li><b>容量</b>：6 + 8 + 10 = 24；超出部分不渲染（把滑块拉到 26 看兜底）。</li>
+      <li><b>面板</b>：一行一个任务，整行可点进执行会话；不放归档——归档在会话侧做，Pet 自动同步。</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+const CAPS = [6, 8, 10]
+const RING_W = 38
+const GAP = 20
+const CX = 172, CY = 172
+
+const NAMES = [
+  ['清理工作区', '删除本仓库已归档的 Worktree Session'],
+  ['提 MR', '基于当前分支创建合并请求并填写模板'],
+  ['发 CR', '把评审请求发到配置的群'],
+  ['跑测试', '在执行会话里运行仓库测试套件'],
+  ['同步主干', '拉取并 rebase 到最新主干'],
+  ['查 CI', '查看当前分支的流水线状态'],
+  ['生成变更日志', ''],
+  ['格式化', '对改动文件运行格式化工具'],
+  ['依赖升级', '检查并升级过期依赖'],
+  ['清缓存', ''],
+  ['构建产物', '执行完整构建并报告体积变化'],
+  ['回滚上次提交', '撤销最近一次提交但保留改动'],
+]
+
+const svg = document.getElementById('svg')
+const tip = document.getElementById('tip')
+const stage = document.getElementById('stage')
+const pet = document.getElementById('pet')
+const mascot = document.getElementById('mascot')
+const panel = document.getElementById('panel')
+const hint = document.getElementById('hint')
+
+let mascotPx = 72
+let atEdge = false
+let tipTimer
+let ringCount = 0
+
+/** Cap capability count at what the three rings can hold. */
+function layout(total) {
+  const rings = []
+  let left = Math.min(total, CAPS.reduce((a, b) => a + b, 0))
+  for (const cap of CAPS) {
+    if (left <= 0) break
+    rings.push(Math.min(left, cap))
+    left -= Math.min(left, cap)
+  }
+  return rings
+}
+
+/** Annulus sector path; a lone item becomes a full ring. */
+function sector(r0, r1, a0, a1) {
+  if (a1 - a0 >= 359.9) {
+    return `M${CX - r1} ${CY} A${r1} ${r1} 0 1 1 ${CX + r1} ${CY} A${r1} ${r1} 0 1 1 ${CX - r1} ${CY} Z` +
+           `M${CX - r0} ${CY} A${r0} ${r0} 0 1 0 ${CX + r0} ${CY} A${r0} ${r0} 0 1 0 ${CX - r0} ${CY} Z`
+  }
+  const p = (r, a) => [CX + r * Math.cos(a * Math.PI / 180), CY + r * Math.sin(a * Math.PI / 180)]
+  const [x0, y0] = p(r1, a0), [x1, y1] = p(r1, a1)
+  const [x2, y2] = p(r0, a1), [x3, y3] = p(r0, a0)
+  const laf = (a1 - a0) > 180 ? 1 : 0
+  return `M${x0} ${y0} A${r1} ${r1} 0 ${laf} 1 ${x1} ${y1} L${x2} ${y2} A${r0} ${r0} 0 ${laf} 0 ${x3} ${y3} Z`
+}
+
+/** Truncate to the characters the arc can actually show. */
+function fit(text, arc) {
+  const max = Math.max(2, Math.floor((arc - 12) / 12))
+  return text.length <= max ? text : text.slice(0, max - 1) + '…'
+}
+
+function render() {
+  const total = Number(document.getElementById('count').value)
+  const rings = layout(total)
+  const shown = rings.reduce((a, b) => a + b, 0)
+  hint.textContent = shown < total
+    ? `共 ${total} 个，超出 24 上限，仅展示前 ${shown} 个`
+    : `共 ${total} 个，分 ${rings.length} 圈`
+
+  svg.innerHTML = ''
+  ringCount = rings.length
+  let index = 0
+  rings.forEach((n, ri) => {
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g')
+    g.setAttribute('class', 'ring')
+    g.dataset.ring = String(ri)
+    const r0 = mascotPx / 2 + GAP + ri * RING_W
+    const r1 = r0 + RING_W
+    const step = 360 / n
+    for (let i = 0; i < n; i += 1) {
+      const [name, desc] = NAMES[index % NAMES.length]
+      index += 1
+      const a0 = -90 + i * step
+      const a1 = a0 + step
+      const mid = (a0 + a1) / 2
+      const rm = (r0 + r1) / 2
+
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+      path.setAttribute('class', 'seg')
+      path.setAttribute('d', sector(r0, r1, a0, a1))
+      path.addEventListener('mouseenter', event => {
+        clearTimeout(tipTimer)
+        if (desc === '') return
+        // Only a described capability gets a tooltip; the name alone does not.
+        tipTimer = setTimeout(() => {
+          tip.textContent = `${name}: ${desc}`
+          const box = stage.getBoundingClientRect()
+          const at = event.target.getBoundingClientRect()
+          tip.style.left = `${at.left - box.left + at.width / 2 - 120}px`
+          tip.style.top = `${at.top - box.top - 8}px`
+          tip.dataset.on = 'true'
+        }, 600)
+      })
+      path.addEventListener('mouseleave', () => {
+        clearTimeout(tipTimer)
+        tip.dataset.on = 'false'
+      })
+      g.appendChild(path)
+
+      // Text runs tangential to the arc, then flips 180 whenever that would
+      // land upside-down. The bottom sector therefore reads fully upright
+      // rather than inverted.
+      let rot = mid + 90
+      const norm = ((rot % 360) + 360) % 360
+      if (norm > 90 && norm < 270) rot += 180
+      const tx = CX + rm * Math.cos(mid * Math.PI / 180)
+      const ty = CY + rm * Math.sin(mid * Math.PI / 180)
+      const text = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+      text.setAttribute('class', 'lbl')
+      text.setAttribute('x', String(tx))
+      text.setAttribute('y', String(ty))
+      text.setAttribute('text-anchor', 'middle')
+      text.setAttribute('dominant-baseline', 'central')
+      text.setAttribute('transform', `rotate(${rot} ${tx} ${ty})`)
+      text.textContent = fit(name, 2 * Math.PI * rm / n)
+      g.appendChild(text)
+    }
+    svg.appendChild(g)
+  })
+}
+
+function reveal() {
+  // Ring 1 is immediate; each further ring fades in 0.3s later.
+  svg.querySelectorAll('.ring').forEach(ring => {
+    const i = Number(ring.dataset.ring)
+    setTimeout(() => { ring.dataset.shown = 'true' }, i * 80)
+  })
+}
+
+function hide() {
+  svg.querySelectorAll('.ring').forEach(r => { r.dataset.shown = 'false' })
+}
+
+function place() {
+  const box = stage.getBoundingClientRect()
+  pet.style.left = atEdge ? `${box.width - 46}px` : '50%'
+  pet.style.top = atEdge ? `${box.height - 46}px` : '50%'
+  panel.style.left = atEdge ? `${box.width - 290}px` : `${box.width / 2 - 130}px`
+  panel.style.top = atEdge ? `${box.height - 220}px` : `${box.height / 2 + 60}px`
+}
+
+// Only the mascot OPENS the wheel: binding this to the 344px container made
+// the empty area around the collapsed mascot a hover target, so the wheel
+// sprang open from far outside it.
+mascot.addEventListener('mouseenter', reveal)
+
+// Closing is decided by geometry, not by a container's mouseleave: the
+// container is pointer-transparent, so it never receives one. Anything inside
+// the outermost ring counts as "still on the wheel", which also covers the
+// seams between segments.
+stage.addEventListener('mousemove', event => {
+  const box = mascot.getBoundingClientRect()
+  const cx = box.left + box.width / 2
+  const cy = box.top + box.height / 2
+  const dist = Math.hypot(event.clientX - cx, event.clientY - cy)
+  // Measure against the rings actually DRAWN, not the maximum three: with six
+  // capabilities only one ring exists, so hovering empty space where ring two
+  // would be must not keep the wheel open.
+  const outer = mascotPx / 2 + GAP + ringCount * RING_W
+
+  // No grace period is needed: the wheel is one continuous disc from the
+  // mascot outward — the 20px breathing gap and the seams between segments
+  // are all inside `outer` — so any exit path crosses it without ever
+  // leaving. Leaving the disc therefore means the pointer really did leave.
+  if (dist > outer) hide()
+})
+mascot.addEventListener('click', () => {
+  panel.dataset.on = panel.dataset.on === 'true' ? 'false' : 'true'
+})
+
+document.getElementById('count').addEventListener('input', event => {
+  document.getElementById('countv').textContent = event.target.value
+  render(); reveal()
+})
+document.getElementById('size').addEventListener('change', event => {
+  mascotPx = Number(event.target.value)
+  mascot.style.width = `${mascotPx}px`
+  mascot.style.height = `${mascotPx}px`
+  mascot.style.margin = `${-mascotPx / 2}px 0 0 ${-mascotPx / 2}px`
+  mascot.style.fontSize = `${Math.round(mascotPx * 0.53)}px`
+  render(); reveal()
+})
+document.getElementById('edge').addEventListener('click', event => {
+  atEdge = !atEdge
+  event.target.dataset.on = String(atEdge)
+  place()
+})
+document.getElementById('replay').addEventListener('click', () => { hide(); setTimeout(reveal, 120) })
+
+render(); place(); reveal()
+</script>
+</body>
+</html>
