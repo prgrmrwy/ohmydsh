@@ -55,6 +55,8 @@ function StoredField(props: {
   readonly placeholder?: string
   readonly options?: readonly { value: string; label: string }[]
   readonly emptyText?: string
+  /** Optional "restore default" action, shown only while editing. */
+  readonly onReset?: () => Promise<void>
   readonly onSave: (next: string) => Promise<void>
 }): JSX.Element {
   const [editing, setEditing] = useState(false)
@@ -151,6 +153,27 @@ function StoredField(props: {
         >
           取消
         </button>
+        {props.onReset !== undefined ? (
+          <button
+            type="button"
+            className="dshpet-action"
+            disabled={busy}
+            onClick={() => {
+              const reset = props.onReset
+              if (reset === undefined) return
+              setError(undefined)
+              setBusy(true)
+              void reset()
+                .then(() => setEditing(false))
+                .catch((cause: unknown) =>
+                  setError(cause instanceof Error ? cause.message : String(cause)),
+                )
+                .finally(() => setBusy(false))
+            }}
+          >
+            恢复默认
+          </button>
+        ) : null}
       </div>
       {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
     </div>
@@ -286,7 +309,7 @@ function GeneralTab(): JSX.Element {
               title={item.label}
               className="dshpet-swatch"
               data-selected={accent === item.id}
-              style={{ color: item.glyph }}
+              style={{ background: item.background }}
               onClick={() => {
                 // Broadcasts, so a mounted Pet recolors at once instead of
                 // waiting for a page reload.
@@ -299,24 +322,23 @@ function GeneralTab(): JSX.Element {
           ))}
         </div>
 
-        <label className="dshpet-field">
-          图标
-          <input
-            className="dshpet-input dshpet-glyph-input"
-            value={glyph}
-            placeholder="🐾"
-            aria-label="桌宠图标"
-            onChange={event => {
-              // Truncate on input rather than relying on `maxLength`: that
-              // counts UTF-16 units, so a composed emoji would be cut apart
-              // mid-sequence while still looking under the limit.
-              writeGlyph(event.target.value)
-              setGlyph(readGlyph())
-            }}
-          />
-        </label>
+        <StoredField
+          label="图标"
+          value={glyph}
+          placeholder="🐾"
+          onReset={async () => {
+            writeGlyph('')
+            setGlyph(readGlyph())
+          }}
+          onSave={async next => {
+            // Stored through the same validation as everywhere else: blank
+            // restores the default, and only the first grapheme is kept.
+            writeGlyph(next)
+            setGlyph(readGlyph())
+          }}
+        />
         <p className="dshpet-item-hint">
-          输入一个 emoji 或字符，留空恢复默认。
+          一个 emoji 或字符。留空或点「恢复默认」都会回到 {DEFAULT_GLYPH}。
         </p>
 
         <label className="dshpet-field">

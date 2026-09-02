@@ -35,13 +35,14 @@ export interface PetAccent {
   readonly id: PetAccentId
   readonly label: string
   /**
-   * Colour of the mascot GLYPH itself.
+   * Mascot surface colour.
    *
-   * The surface stays the neutral panel background: tinting it would make the
-   * mascot read as a status badge floating over the user's work, and would
-   * leave no room for a black option — black is a paw colour, not a backdrop.
+   * Tinting the SURFACE rather than the glyph is forced by the glyph itself:
+   * the default 🐾 has Emoji_Presentation, so fonts render it as a colour
+   * bitmap and CSS `color` has no effect on it. Colouring the circle is the
+   * only approach that works for every glyph a user might choose.
    */
-  readonly glyph: string
+  readonly background: string
 }
 
 /**
@@ -51,15 +52,15 @@ export interface PetAccent {
  * primary, so the mascot reads as part of the surface instead of an alert.
  */
 export const PET_ACCENTS: readonly PetAccent[] = [
-  { id: 'default', label: '默认', glyph: '#1f2329' },
-  { id: 'black', label: '黑', glyph: '#101318' },
-  { id: 'red', label: '红', glyph: '#a1524b' },
-  { id: 'orange', label: '橙', glyph: '#765537' },
-  { id: 'yellow', label: '黄', glyph: '#766637' },
-  { id: 'green', label: '绿', glyph: '#4a7a4f' },
-  { id: 'cyan', label: '青', glyph: '#3f7b80' },
-  { id: 'blue', label: '蓝', glyph: '#4a6b96' },
-  { id: 'purple', label: '紫', glyph: '#6f5b93' },
+  { id: 'default', label: '默认', background: '#ffffff' },
+  { id: 'black', label: '黑', background: '#2b2f36' },
+  { id: 'red', label: '红', background: '#e6d4d1' },
+  { id: 'orange', label: '橙', background: '#e6dbd1' },
+  { id: 'yellow', label: '黄', background: '#e6e2d1' },
+  { id: 'green', label: '绿', background: '#d1e6d2' },
+  { id: 'cyan', label: '青', background: '#d1e4e6' },
+  { id: 'blue', label: '蓝', background: '#d1dae6' },
+  { id: 'purple', label: '紫', background: '#dbd1e6' },
 ]
 
 /**
