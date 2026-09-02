@@ -6,18 +6,10 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  ACCENT_KEY,
   DEFAULT_GLYPH,
   DEFAULT_SIZE_PX,
   PET_ACCENTS,
-  SIZE_KEY,
-  readAccent,
-  readGlyph,
-  readSize,
   resolveAccent,
-  writeAccent,
-  writeGlyph,
-  writeSize,
   normalizeGlyph,
 } from '../src/client/accent.js'
 
@@ -90,10 +82,8 @@ describe('the palette is muted by construction', () => {
 
 describe('the accent survives a bad stored value', () => {
   it('falls back to the default for an unknown id', () => {
-    globalThis.localStorage.setItem(ACCENT_KEY, 'chartreuse')
-
-    // A corrupt preference must never stop the mascot from rendering.
-    expect(readAccent().id).toBe('default')
+    // A palette entry removed in a later release must not blank the mascot.
+    expect(resolveAccent('chartreuse').id).toBe('default')
   })
 
 
