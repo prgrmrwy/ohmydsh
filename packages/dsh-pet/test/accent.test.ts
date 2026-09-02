@@ -193,3 +193,32 @@ describe('appearance survives a restart', () => {
     expect(first).toEqual({ x: 940, y: 740 })
   })
 })
+
+describe('the overlay measures its own layer before placing Pet', () => {
+  it('seeds the viewport from the shell overlay, not the window', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const nodePath = await import('node:path')
+    const overlay = await readFile(
+      nodePath.resolve(process.cwd(), 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+    const seed = overlay.slice(overlay.indexOf('const [viewport, setViewport] = useState'))
+
+    // Seeding from `window` and correcting in an effect clamps the stored
+    // position against a LARGER box first and a smaller one after, nudging
+    // Pet up and left on every load.
+    expect(seed.slice(0, 400)).toContain('data-shell-overlay')
+  })
+
+  it('never persists a position that only re-clamping produced', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const nodePath = await import('node:path')
+    const overlay = await readFile(
+      nodePath.resolve(process.cwd(), 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // A temporary narrow layout must not overwrite the user's chosen spot.
+    expect([...overlay.matchAll(/writePosition\(/g)]).toHaveLength(1)
+  })
+})
