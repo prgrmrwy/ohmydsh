@@ -177,4 +177,6 @@ export const PET_CSS = `
   border:2px solid var(--dsw-alias-label-primary,#0f1115)}
 .dshpet-settings .dshpet-swatch:focus-visible{
   outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:2px}
+/* The glyph field holds one character, so it needs no full-width box. */
+.dshpet-settings .dshpet-glyph-input{width:72px;text-align:center;font-size:18px}
 `

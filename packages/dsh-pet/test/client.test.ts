@@ -772,7 +772,8 @@ describe('settings surface follows the DSH type scale', () => {
       'utf8',
     )
     const inputs = [...settings.matchAll(/<input\b/g)].length
-    const styled = [...settings.matchAll(/<input\s+className="dshpet-input"/g)].length
+    // Allow additional owned modifiers alongside the base class.
+    const styled = [...settings.matchAll(/<input\s+className="dshpet-input[^"]*"/g)].length
     expect(styled).toBe(inputs)
   })
 })

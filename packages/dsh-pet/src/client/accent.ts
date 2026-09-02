@@ -113,21 +113,27 @@ export const PET_APPEARANCE_EVENT = 'dsh-pet:appearance-changed'
 /** The glyph shown when the user has not chosen one. */
 export const DEFAULT_GLYPH = '🐾'
 
-/** Suggested glyphs; the field also accepts any other emoji. */
-export const PET_GLYPH_SUGGESTIONS: readonly string[] = [
-  '🐾',
-  '🐱',
-  '🐶',
-  '🦊',
-  '🐼',
-  '🐧',
-  '🦉',
-  '🐢',
-  '🤖',
-  '👻',
-  '🌵',
-  '⭐',
-]
+/**
+ * Keep only the first user-perceived character.
+ *
+ * Counting code points is wrong here: 👩‍💻 is three of them and 👨‍👩‍👧 is five,
+ * yet each is a single visible glyph. `Intl.Segmenter` splits on grapheme
+ * clusters, so a composed emoji survives intact instead of being cut into
+ * replacement characters.
+ * @param raw - Raw user input.
+ * @returns the first grapheme, or an empty string.
+ */
+function firstGrapheme(raw: string): string {
+  const Segmenter = (globalThis as { Intl?: { Segmenter?: typeof Intl.Segmenter } }).Intl
+    ?.Segmenter
+  if (Segmenter === undefined) {
+    // Older engines: fall back to code points. Worse for composed emoji, but
+    // never worse than cutting a surrogate pair in half.
+    return [...raw][0] ?? ''
+  }
+  const segmenter = new Segmenter('en', { granularity: 'grapheme' })
+  return [...segmenter.segment(raw)][0]?.segment ?? ''
+}
 
 /** Selectable mascot diameters, in pixels. */
 export const PET_SIZES = [
@@ -154,10 +160,9 @@ export function readGlyph(
   storage: Pick<Storage, 'getItem'> | undefined = globalThis.localStorage,
 ): string {
   const raw = storage?.getItem(GLYPH_KEY)?.trim()
-  // Cap the length: a long string would overflow the circle. Emoji are
-  // multi-code-point, so this counts grapheme-ish units via the spread.
   if (raw === undefined || raw === '') return DEFAULT_GLYPH
-  return [...raw].slice(0, 4).join('')
+  // Exactly one character: more would overflow the circle.
+  return firstGrapheme(raw) === '' ? DEFAULT_GLYPH : firstGrapheme(raw)
 }
 
 /**
@@ -169,7 +174,7 @@ export function writeGlyph(
   glyph: string,
   storage: Pick<Storage, 'setItem'> | undefined = globalThis.localStorage,
 ): void {
-  storage?.setItem(GLYPH_KEY, glyph.trim())
+  storage?.setItem(GLYPH_KEY, firstGrapheme(glyph.trim()))
   globalThis.dispatchEvent?.(new Event(PET_APPEARANCE_EVENT))
 }
 

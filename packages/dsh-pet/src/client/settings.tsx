@@ -14,7 +14,6 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   DEFAULT_GLYPH,
   PET_ACCENTS,
-  PET_GLYPH_SUGGESTIONS,
   PET_SIZES,
   readAccent,
   readGlyph,
@@ -303,37 +302,21 @@ function GeneralTab(): JSX.Element {
         <label className="dshpet-field">
           图标
           <input
-            className="dshpet-input"
+            className="dshpet-input dshpet-glyph-input"
             value={glyph}
-            maxLength={8}
             placeholder="🐾"
             aria-label="桌宠图标"
             onChange={event => {
-              const next = event.target.value
-              setGlyph(next.trim() === '' ? DEFAULT_GLYPH : next)
-              writeGlyph(next)
+              // Truncate on input rather than relying on `maxLength`: that
+              // counts UTF-16 units, so a composed emoji would be cut apart
+              // mid-sequence while still looking under the limit.
+              writeGlyph(event.target.value)
+              setGlyph(readGlyph())
             }}
           />
         </label>
-        <div className="dshpet-swatches" role="group" aria-label="常用图标">
-          {PET_GLYPH_SUGGESTIONS.map(item => (
-            <button
-              key={item}
-              type="button"
-              className="dshpet-swatch"
-              data-selected={glyph === item}
-              aria-label={item}
-              onClick={() => {
-                setGlyph(item)
-                writeGlyph(item)
-              }}
-            >
-              {item}
-            </button>
-          ))}
-        </div>
         <p className="dshpet-item-hint">
-          可直接输入任意 emoji，留空恢复默认。
+          输入一个 emoji 或字符，留空恢复默认。
         </p>
 
         <label className="dshpet-field">
