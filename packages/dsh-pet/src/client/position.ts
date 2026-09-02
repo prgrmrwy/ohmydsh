@@ -36,9 +36,12 @@ export function defaultPosition(viewport: { width: number; height: number }): Pe
 export function clampPosition(
   position: PetPosition,
   viewport: { width: number; height: number },
+  size: number = PET_SIZE,
 ): PetPosition {
-  const maxX = Math.max(0, viewport.width - PET_SIZE)
-  const maxY = Math.max(0, viewport.height - PET_SIZE)
+  // The mascot is resizable, so clamping against a fixed constant would let a
+  // larger Pet be dragged partly off-screen and become unreachable.
+  const maxX = Math.max(0, viewport.width - size)
+  const maxY = Math.max(0, viewport.height - size)
   return {
     x: Math.min(Math.max(0, position.x), maxX),
     y: Math.min(Math.max(0, position.y), maxY),

@@ -7,10 +7,17 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   ACCENT_KEY,
+  DEFAULT_GLYPH,
+  DEFAULT_SIZE_PX,
   PET_ACCENTS,
+  SIZE_KEY,
   readAccent,
+  readGlyph,
+  readSize,
   resolveAccent,
   writeAccent,
+  writeGlyph,
+  writeSize,
 } from '../src/client/accent.js'
 
 afterEach(() => {
@@ -91,5 +98,53 @@ describe('the accent survives a bad stored value', () => {
 
   it('resolves an absent value to the default', () => {
     expect(resolveAccent(undefined).id).toBe('default')
+  })
+})
+
+describe('the glyph is user-chosen but always renderable', () => {
+  it('falls back to the default when cleared', () => {
+    writeGlyph('   ')
+
+    // A blank glyph would render an invisible mascot the user could no longer
+    // click, stranding Pet on the page.
+    expect(readGlyph()).toBe(DEFAULT_GLYPH)
+  })
+
+  it('accepts an arbitrary emoji, not just the suggestions', () => {
+    writeGlyph('🦖')
+    expect(readGlyph()).toBe('🦖')
+  })
+
+  it('caps a long string so it cannot overflow the circle', () => {
+    writeGlyph('🐾🐾🐾🐾🐾🐾🐾🐾')
+    expect([...readGlyph()]).toHaveLength(4)
+  })
+
+  it('keeps a multi-code-point emoji intact', () => {
+    // Naive `slice` would cut a surrogate pair and render a replacement char.
+    writeGlyph('👩‍💻')
+    expect(readGlyph()).toContain('👩')
+  })
+})
+
+describe('the size is bounded and keeps Pet reachable', () => {
+  it('falls back to the default for an unknown value', () => {
+    globalThis.localStorage.setItem(SIZE_KEY, 'enormous')
+    expect(readSize()).toBe(DEFAULT_SIZE_PX)
+  })
+
+  it('reads back a chosen size', () => {
+    writeSize('large')
+    expect(readSize()).toBe(88)
+  })
+
+  it('clamps against the ACTUAL size, not a fixed constant', async () => {
+    const { clampPosition } = await import('../src/client/position.js')
+
+    // Clamping a large mascot against the default constant would leave it
+    // partly off-screen and unclickable.
+    const viewport = { width: 500, height: 400 }
+    expect(clampPosition({ x: 999, y: 999 }, viewport, 88)).toEqual({ x: 412, y: 312 })
+    expect(clampPosition({ x: 999, y: 999 }, viewport, 56)).toEqual({ x: 444, y: 344 })
   })
 })
