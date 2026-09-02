@@ -131,6 +131,11 @@ backlog only. Do not claim they exist and do not synthesize hidden config
 files for them. pnpm projects (single package or pnpm workspace, detected from
 the repo-root `pnpm-lock.yaml`) are supported: lean installs inside the bound
 worktree and reuses pnpm's global store, so dependency changes still require
-`promote` first. Projects with neither lockfile (or with both
-`package-lock.json` and `pnpm-lock.yaml`) are refused before any branch,
-worktree, or operation file is created.
+`promote` first. Projects with neither lockfile are refused before any branch, worktree, or
+operation file is created. If both `package-lock.json` and `pnpm-lock.yaml`
+exist, Worktree Session adopts an explicit supported `packageManager` declaration
+first, then adopts the one lockfile tracked by Git when exactly one is tracked;
+the adoption and ignored lockfile are recorded in operation diagnostics. A
+mixed project with no unique signal (both tracked, neither tracked, or tracking
+state unavailable) is still refused before any branch, worktree, or operation
+file is created.

@@ -87,6 +87,27 @@ export async function worktreeStatus(path: string, git = createGitClient()): Pro
   return git.run(path, ['status', '--porcelain=v1', '--untracked-files=all'])
 }
 
+/**
+ * Resolve whether a repository-relative path is tracked by Git.
+ *
+ * This intentionally does not use GitClient.maybe(): ls-files exits with 1
+ * for an untracked path, while another non-zero exit code means that the
+ * tracking state could not be queried. The distinction is needed by the
+ * mixed-lockfile fail-closed resolution.
+ */
+export async function isTracked(repoRoot: string, relativePath: string, git = createGitClient()): Promise<boolean | undefined> {
+  try {
+    const result = await git.runner('git', ['ls-files', '--error-unmatch', '--', relativePath], { cwd: repoRoot })
+    if (result.timedOut) return undefined
+    if (result.code === 0) return true
+    if (result.code === 1) return false
+    return undefined
+  } catch {
+    // A runner failure means that tracking state cannot be proved.
+    return undefined
+  }
+}
+
 export function taskSlug(taskText: string): string {
   const tokens = taskText.toLowerCase().match(/[a-z0-9]+/g) ?? []
   const joined = tokens.join('-').slice(0, 48).replace(/-+$/g, '')
