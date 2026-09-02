@@ -277,7 +277,7 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
         🐾
         {degraded !== undefined ? (
           <span className="dshpet-badge" data-state="degraded" title={degraded} role="status">
-            <span className="dshpet-visually-hidden">Pet is degraded: {degraded}</span>
+            <span className="dshpet-visually-hidden">Pet 未就绪：{degraded}</span>
             <span aria-hidden="true">!</span>
           </span>
         ) : null}
@@ -292,8 +292,16 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
             onRestore={() => setSourceRemoved(false)}
             restorable={sourceRemoved && props.currentSource !== undefined}
           />
-          {shortcuts.length === 0 ? (
-            <p className="dshpet-empty">No capabilities installed yet.</p>
+          {degraded !== undefined ? (
+            <p className="dshpet-error">
+              Pet 未就绪：{degraded}
+            </p>
+          ) : null}
+          {shortcuts.length === 0 && degraded === undefined ? (
+            <p className="dshpet-empty">
+              还没有可用能力。在「设置 → Pet → Skill」加入一个 Skill 并启用后，
+              它就会出现在这里。
+            </p>
           ) : null}
           {shortcuts.map(capability => {
             const reason = blocked(capability)

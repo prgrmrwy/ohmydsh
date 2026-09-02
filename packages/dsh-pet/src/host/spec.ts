@@ -21,7 +21,13 @@ import { z } from 'zod'
 export const PET_DOMAIN_NAME = 'dsh_pet'
 
 /** Domain format version. A medium stamped with another version rejects at open. */
-export const PET_DOMAIN_VERSION = 1
+// Bumped to 2 when Skills became registered links instead of immutable
+// copies: `skill_revisions.digest` became `sourcePath`,
+// `skill_selections.enabledDigest` became `enabled`, and
+// `invocations.skillDigest` became `skillSourcePath`. Rows written by v1
+// cannot be upgraded in place — the store copies they referenced are gone —
+// so `migrate.ts` clears the affected tables before the domain is opened.
+export const PET_DOMAIN_VERSION = 2
 
 const petSourceKind = z.enum(['session', 'workspace', 'none'])
 
