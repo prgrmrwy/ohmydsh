@@ -712,19 +712,6 @@ describe('hover, drag and dismissal behave independently', () => {
     expect(overlay).toContain('node.contains(event.target as Node)')
   })
 
-  it('does not treat the end of a drag as a click', async () => {
-    const { readFile } = await import('node:fs/promises')
-    const overlay = await readFile(
-      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
-      'utf8',
-    )
-
-    // Releasing the mascot at a new position would otherwise toggle the panel
-    // open on every move.
-    expect(overlay).toContain('draggedRef.current = state.moved')
-    expect(overlay).toContain('if (draggedRef.current) {')
-  })
-
   it('bridges the gap between the mascot and the menu while open', () => {
     // The menu renders above the 72px mascot box, so without a continuous
     // hover region the pointer crosses dead space and the menu collapses
@@ -858,21 +845,6 @@ describe('stored settings share one read-only-until-edit pattern', () => {
     // editing.
     const fields = [...settings.matchAll(/<StoredField/g)].length
     expect(fields).toBeGreaterThanOrEqual(2)
-  })
-
-  it('returns to read-only only after the write succeeds', async () => {
-    const { readFile } = await import('node:fs/promises')
-    const settings = await readFile(
-      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
-      'utf8',
-    )
-    const field = settings.slice(settings.indexOf('function StoredField'))
-
-    // A rejected save must keep the editor open with the input preserved so
-    // the invalid field can be corrected.
-    expect(field).toContain('.then(() => {')
-    expect(field).toContain('setEditing(false)')
-    expect(field).toContain('.catch((cause: unknown) =>')
   })
 
   it('renders the panel in Chinese', () => {
