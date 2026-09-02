@@ -1019,3 +1019,37 @@ describe('Bindings explains what to configure and where to find it', () => {
     expect(markup).toContain('可以留空')
   })
 })
+
+describe('Skill file health is explained without internal jargon', () => {
+  it('names the control by what it does, not by its implementation', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'skills' as const }),
+    )
+
+    // "Rebuild projection" describes Pet's internals. A user only needs to
+    // know these are the Skill links the executor reads.
+    expect(markup).toContain('重新生成 Skill 链接')
+    expect(markup).not.toContain('Rebuild projection')
+    expect(markup).toContain('Skill 文件状态')
+  })
+
+  it('says these links are self-maintained so the button is rarely needed', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'skills' as const }),
+    )
+
+    expect(markup).toContain('你不需要管它')
+    expect(markup).toContain('当前一切正常')
+  })
+
+  it('states the limit: repair fixes links, not tampered content', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'skills' as const }),
+    )
+
+    // Rebuild deliberately refuses to republish a revision whose digest no
+    // longer matches, so the panel must not imply it fixes everything.
+    expect(markup).toContain('只修复链接本身')
+    expect(markup).toContain('重新导入')
+  })
+})

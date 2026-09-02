@@ -547,23 +547,40 @@ function SkillsTab(): JSX.Element {
       </section>
 
       <section className="dshpet-group">
-      <h3 className="dshpet-group-title">投影状态</h3>
+      <h3 className="dshpet-group-title">Skill 文件状态</h3>
+      <p className="dshpet-item-hint">
+        已启用的 Skill 会以只读链接的形式出现在 Pet 工作区里，供执行会话读取。
+        这些链接由 Pet 自己维护——正常情况下你不需要管它。
+        如果链接被外部改动或删除，能力会拒绝执行以避免读到错误内容，
+        这时可以用下面的按钮重新生成。
+      </p>
       {state.projection.length === 0 ? (
-        <p className="dshpet-item-hint">未检测到漂移。</p>
+        <p className="dshpet-item-hint">当前一切正常。</p>
       ) : (
-        state.projection.map(entry => (
-          <p key={entry.skillName} className="dshpet-error">
-            {entry.skillName}: {entry.status} — {entry.diagnostic}
+        <>
+          <p className="dshpet-item-hint">
+            以下 Skill 的链接与预期不符，相关能力已暂停：
           </p>
-        ))
+          {state.projection.map(entry => (
+            <p key={entry.skillName} className="dshpet-error">
+              {entry.skillName} — {entry.diagnostic ?? entry.status}
+            </p>
+          ))}
+        </>
       )}
-      <button
-        type="button"
-        className="dshpet-action"
-        onClick={() => void petApi.rebuildProjection().then(refresh)}
-      >
-        Rebuild projection
-      </button>
+      <div className="dshpet-actions">
+        <button
+          type="button"
+          className="dshpet-action"
+          onClick={() => void petApi.rebuildProjection().then(refresh)}
+        >
+          重新生成 Skill 链接
+        </button>
+      </div>
+      <p className="dshpet-item-hint">
+        重新生成只修复链接本身。如果 Skill 内容被篡改（摘要对不上），
+        会保持拒绝状态而不会被重新启用——需要重新导入该 Skill。
+      </p>
       {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
       </section>
     </div>
@@ -732,11 +749,9 @@ function 诊断信息sTab(): JSX.Element {
             }
           />
           <Fact
-            label="投影"
+            label="Skill 文件"
             value={
-              drift.length === 0
-                ? '一致'
-                : `${drift.length} entr${drift.length === 1 ? 'y' : 'ies'} drifted`
+              drift.length === 0 ? '正常' : `${drift.length} 个链接异常`
             }
           />
         </div>
@@ -770,7 +785,7 @@ function 诊断信息sTab(): JSX.Element {
             className="dshpet-action"
             onClick={() => void petApi.rebuildProjection().then(refresh)}
           >
-            Rebuild projection
+            重新生成 Skill 链接
           </button>
           <button type="button" className="dshpet-action" onClick={() => void refresh()}>
             Refresh
