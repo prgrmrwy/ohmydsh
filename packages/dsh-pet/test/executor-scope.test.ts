@@ -23,10 +23,11 @@ import { Context } from '@deepseek-ai/cordis'
 import SkillRegistry from '@deepseek-ai/dsh-skill'
 import { defineTool, parameterSchemaSpecToJsonSchema } from '@deepseek-ai/dsh-tools'
 import {
-  PET_CLEAN_WORKTREE_PARAMETERS,
   PET_CONTEXT_PARAMETERS,
 } from '../src/host/tools.js'
-import { openPetHarness, type PetHarness } from './harness.js'
+import { openPetHarness, type PetHarness,
+  installTestSkill,
+} from './harness.js'
 import type { PetInvocationCapture } from '../src/wire.js'
 
 let harness: PetHarness | undefined
@@ -98,13 +99,7 @@ describe('executor Agents receive the Pet scope', () => {
     await addSkill(paths, harness, 'demo')
 
     const capabilities = new CapabilityRegistry()
-    capabilities.register({
-      id: 'demo',
-      label: 'Demo',
-      description: 'Demo',
-      skillName: 'demo',
-      contextRequirement: 'session-required',
-    })
+    await installTestSkill(harness!, 'demo', { context: 'session-required' })
 
     const create = vi.fn(async (options: { sessionId: string }) => ({
       session: { id: options.sessionId },
@@ -195,13 +190,7 @@ describe('executor Agents receive the Pet scope', () => {
     await addSkill(paths, harness, 'demo')
 
     const capabilities = new CapabilityRegistry()
-    capabilities.register({
-      id: 'demo',
-      label: 'Demo',
-      description: 'Demo',
-      skillName: 'demo',
-      contextRequirement: 'session-required',
-    })
+    await installTestSkill(harness!, 'demo', { context: 'session-required' })
     const create = vi.fn(async (options: { sessionId: string }) => ({
       session: { id: options.sessionId },
     }))
@@ -271,8 +260,23 @@ describe('Pet tool schemas match the real defineTool contract', () => {
       type: 'object',
       properties: {},
     })
-    const cleanSchema = parameterSchemaSpecToJsonSchema(PET_CLEAN_WORKTREE_PARAMETERS)
-    expect(cleanSchema.properties['confirm']).toMatchObject({ type: 'boolean' })
+  })
+
+  it('registers exactly one tool, because Pet ships no capability adapters', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const tools = await readFile(
+      path.resolve(__dirname, '..', 'src', 'host', 'tools.ts'),
+      'utf8',
+    )
+
+    // A capability is an installed Skill driving ordinary DSH tools. Adding a
+    // per-capability Pet tool would put the runtime back in the business of
+    // shipping code for each capability.
+    expect([...tools.matchAll(/ctx\.tools\.register\(/g)]).toHaveLength(1)
+    expect(tools).toContain('PET_CONTEXT_TOOL')
+    expect(tools).not.toContain('pet_create_mr')
+    expect(tools).not.toContain('pet_send_cr')
+    expect(tools).not.toContain('pet_clean_worktree')
   })
 
   it('rejects the raw JSON Schema shape that was previously shipped', () => {
@@ -311,13 +315,7 @@ describe('executor sessions receive their relationship title', () => {
     await addSkill(paths, harness, 'demo')
 
     const capabilities = new CapabilityRegistry()
-    capabilities.register({
-      id: 'demo',
-      label: 'Demo',
-      description: 'Demo',
-      skillName: 'demo',
-      contextRequirement: 'session-required',
-    })
+    await installTestSkill(harness!, 'demo', { context: 'session-required' })
     const renames: { sessionId: string; title: string }[] = []
     const coordinator = new PetCoordinator({
       repository: harness.repository,
@@ -352,13 +350,7 @@ describe('executor sessions receive their relationship title', () => {
     await addSkill(paths, harness, 'demo')
 
     const capabilities = new CapabilityRegistry()
-    capabilities.register({
-      id: 'demo',
-      label: 'Demo',
-      description: 'Demo',
-      skillName: 'demo',
-      contextRequirement: 'session-required',
-    })
+    await installTestSkill(harness!, 'demo', { context: 'session-required' })
     const renames: string[] = []
     const coordinator = new PetCoordinator({
       repository: harness.repository,
@@ -391,13 +383,7 @@ describe('executor sessions receive their relationship title', () => {
     await addSkill(paths, harness, 'demo')
 
     const capabilities = new CapabilityRegistry()
-    capabilities.register({
-      id: 'demo',
-      label: 'Demo',
-      description: 'Demo',
-      skillName: 'demo',
-      contextRequirement: 'session-required',
-    })
+    await installTestSkill(harness!, 'demo', { context: 'session-required' })
     const coordinator = new PetCoordinator({
       repository: harness.repository,
       capabilities,

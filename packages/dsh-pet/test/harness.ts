@@ -211,3 +211,42 @@ export function testInvocation(
     ...overrides,
   }
 }
+
+/**
+ * Install and enable a Skill so it projects as a capability.
+ *
+ * Capabilities are derived from installed Skills, so a test that wants one
+ * installs a Skill instead of registering Pet-side code — mirroring how a
+ * real deployment adds a capability.
+ * @param harness - Open harness.
+ * @param skillName - Skill (and capability) name.
+ * @param pet - Optional Pet declarations the SKILL.md frontmatter would carry.
+ * @returns the digest the revision was installed under.
+ */
+export async function installTestSkill(
+  harness: PetHarness,
+  skillName: string,
+  pet: {
+    label?: string
+    icon?: string
+    context?: 'none' | 'optional' | 'workspace-required' | 'session-required'
+    confirm?: boolean
+  } = {},
+): Promise<string> {
+  const digest = `sha256:${skillName}`
+  await harness.repository.putSkillRevision({
+    skillName,
+    digest,
+    description: `${skillName} test skill`,
+    ...(Object.keys(pet).length > 0 ? { pet } : {}),
+    provenance: { kind: 'builtin', packageVersion: '0.1.0', installedAt: 1 },
+    fileCount: 1,
+    totalBytes: 32,
+  })
+  await harness.repository.putSkillSelection({
+    skillName,
+    enabledDigest: digest,
+    showAsShortcut: true,
+  })
+  return digest
+}

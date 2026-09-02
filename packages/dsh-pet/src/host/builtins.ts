@@ -109,6 +109,7 @@ export async function inventoryBuiltins(
     items.push({
       skillName: inspection.skillName,
       description: inspection.description,
+      ...(inspection.pet !== undefined ? { pet: inspection.pet } : {}),
       digest: inspection.digest,
       defaultEnabled: entry.defaultEnabled,
       showAsShortcut: entry.showAsShortcut,
@@ -158,6 +159,8 @@ export async function installBuiltins(
         skillName: inspection.skillName,
         digest: inspection.digest,
         description: inspection.description,
+        ...(inspection.pet !== undefined ? { pet: inspection.pet } : {}),
+      ...(inspection.pet !== undefined ? { pet: inspection.pet } : {}),
         provenance: { kind: 'builtin', packageVersion, installedAt: Date.now() },
         fileCount: inspection.fileCount,
         totalBytes: inspection.totalBytes,

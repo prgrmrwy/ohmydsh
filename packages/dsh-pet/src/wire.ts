@@ -263,6 +263,20 @@ export interface PetSkillRevision {
   /** sha256 over the canonical manifest of the copied bundle. */
   readonly digest: string
   readonly description: string
+  /**
+   * Pet presentation and context requirement declared by the Skill itself.
+   *
+   * This is what makes a capability an INSTALL rather than a code change:
+   * Pet reads these from the bundle's frontmatter and ships no per-capability
+   * adapter. Persisted with the immutable revision, so queued work keeps the
+   * declarations it was accepted with.
+   */
+  readonly pet?: {
+    readonly label?: string
+    readonly icon?: string
+    readonly context?: PetContextRequirement
+    readonly confirm?: boolean
+  }
   readonly provenance: PetSkillProvenance
   readonly fileCount: number
   readonly totalBytes: number
