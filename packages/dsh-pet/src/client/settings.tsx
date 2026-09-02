@@ -505,7 +505,14 @@ function SkillsTab(): JSX.Element {
                 setPath(picked)
                 return
               }
-              const listing = await directoryLister?.()
+              // Open at whatever the field already holds, so a typed or
+              // previously chosen path is where browsing starts. An
+              // unreadable path is not an error here: fall back to the Host
+              // default rather than refusing to open the browser.
+              const typed = path.trim()
+              const listing =
+                (typed === '' ? undefined : await directoryLister?.(typed)) ??
+                (await directoryLister?.())
               if (listing === undefined) {
                 setError('此部署不支持目录选择，请直接填写 Host 上的绝对路径。')
                 return
@@ -527,7 +534,11 @@ function SkillsTab(): JSX.Element {
                 className="dshpet-action dshpet-action-sm"
                 onClick={() => {
                   void directoryLister?.(crumb.path).then(next => {
-                    if (next !== undefined) setBrowsing(next)
+                    if (next === undefined) return
+                    setBrowsing(next)
+                    // Mirror the browsed location, so the field always shows
+                    // what "Inspect" would actually read.
+                    setPath(next.path)
                   })
                 }}
               >
@@ -549,7 +560,11 @@ function SkillsTab(): JSX.Element {
                   className="dshpet-action dshpet-browser-entry"
                   onClick={() => {
                     void directoryLister?.(entry.path).then(next => {
-                      if (next !== undefined) setBrowsing(next)
+                      if (next === undefined) return
+                    setBrowsing(next)
+                    // Mirror the browsed location, so the field always shows
+                    // what "Inspect" would actually read.
+                    setPath(next.path)
                     })
                   }}
                 >

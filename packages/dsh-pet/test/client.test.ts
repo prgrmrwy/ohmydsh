@@ -1124,3 +1124,41 @@ describe('the glyph follows the same stored-setting pattern', () => {
     expect(field.indexOf('恢复默认')).toBeGreaterThan(field.indexOf('取消'))
   })
 })
+
+describe('the directory browser starts from the typed path', () => {
+  it('opens at the field value instead of always the Host home', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // Calling the lister with no argument always lists the Host home, so a
+    // path already in the field was ignored and the user had to navigate back
+    // to it by hand.
+    expect(settings).toContain('await directoryLister?.(typed)')
+  })
+
+  it('falls back to the default listing when the typed path is unreadable', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // A half-typed or deleted path must not prevent browsing entirely.
+    expect(settings).toContain('(await directoryLister?.())')
+  })
+
+  it('keeps the field in step with the browsed directory', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // Otherwise the field and the listing disagree, and Inspect would read a
+    // different directory than the one on screen.
+    expect([...settings.matchAll(/setPath\(next\.path\)/g)]).toHaveLength(2)
+  })
+})
