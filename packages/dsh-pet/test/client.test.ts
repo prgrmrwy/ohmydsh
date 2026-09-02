@@ -213,8 +213,8 @@ describe('settings information architecture', () => {
       createElement(PetSettingsSection, { initialTab: 'skills' as const }),
     )
 
-    expect(markup).toContain('Host running')
-    expect(markup).toContain('not this browser')
+    expect(markup).toContain('dsh web')
+    expect(markup).toContain('不是你当前浏览器所在的机器')
   })
 
   it('states that Pet follows the DSH default model instead of its own', () => {
@@ -1051,5 +1051,36 @@ describe('Skill file health is explained without internal jargon', () => {
     // longer matches, so the panel must not imply it fixes everything.
     expect(markup).toContain('只修复链接本身')
     expect(markup).toContain('重新导入')
+  })
+})
+
+describe('Skill install and upgrade semantics are stated', () => {
+  it('says import copies the bundle rather than linking the source', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'skills' as const }),
+    )
+
+    // Copying is what makes the digest meaningful: editing the source
+    // afterwards must not change what Pet runs.
+    expect(markup).toContain('完整复制')
+    expect(markup).toContain('不会影响已安装的版本')
+  })
+
+  it('says an upgrade is explicit and never rewrites queued work', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'skills' as const }),
+    )
+
+    // A packaged upgrade is recorded, not adopted: an Invocation keeps the
+    // digest it was accepted with.
+    expect(markup).toContain('不会自动切换')
+    expect(markup).toContain('已排队的调用')
+  })
+
+  it('says import does not auto-enable', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'skills' as const }),
+    )
+    expect(markup).toContain('导入不会自动启用')
   })
 })

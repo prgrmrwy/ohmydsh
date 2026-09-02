@@ -351,7 +351,9 @@ function SkillsTab(): JSX.Element {
       <section className="dshpet-group">
       <h3 className="dshpet-group-title">从本机导入</h3>
       <p className="dshpet-item-hint">
-        Absolute path on the Host running <code>dsh web</code> — not this browser&apos;s machine.
+        填运行 <code className="dshpet-code">dsh web</code> 那台机器上的绝对路径，
+        不是你当前浏览器所在的机器。会先只读检查并展示内容，确认后才复制安装；
+        导入不会自动启用，需要在下方手动启用。
       </p>
       <div className="dshpet-row">
         <input
@@ -436,7 +438,15 @@ function SkillsTab(): JSX.Element {
 
       <section className="dshpet-group">
       <h3 className="dshpet-group-title">已安装</h3>
-      {state.revisions.length === 0 ? <p className="dshpet-empty">No Skills installed.</p> : null}
+      <p className="dshpet-item-hint">
+        导入时 Pet 会把 Skill 完整复制成一个只读版本（按内容生成摘要），
+        之后你改动原目录也不会影响已安装的版本。
+        「有可用升级」表示 Pet 包里带了新版本，但不会自动切换——
+        已排队的调用仍按接受时锁定的版本执行；点「升级」才会让之后的调用改用新版本。
+      </p>
+      {state.revisions.length === 0 ? (
+        <p className="dshpet-empty">尚未安装任何 Skill。</p>
+      ) : null}
       {/*
         One row per SKILL, not per revision. Several immutable revisions of one
         Skill coexist by design — an upgrade installs a new one while queued
