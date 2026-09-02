@@ -424,3 +424,4 @@ describe('the agent context is a fresh fiber without inherited grants', () => {
     expect(setup).not.toMatch(/scoped\.skills\.registerProvider/)
   })
 })
+

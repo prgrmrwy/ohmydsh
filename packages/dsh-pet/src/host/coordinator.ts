@@ -56,6 +56,8 @@ export interface CoordinatorDeps {
   readonly workspacePath: string
   /** Repairs Workspace files before an executor session is created. */
   readonly ensureWorkspace?: () => Promise<readonly string[]>
+  /** Accounts a new executor session to the Pet Workspace. */
+  readonly attachToWorkspace?: (sessionId: string) => Promise<void>
   /** Resolves the validated Pet model selection at dispatch time. */
   readonly selection: () => PetModelSelection
   /**
@@ -205,6 +207,9 @@ export class PetCoordinator {
         workspacePath: this.deps.workspacePath,
         ...(this.deps.ensureWorkspace !== undefined
           ? { ensureWorkspace: this.deps.ensureWorkspace }
+          : {}),
+        ...(this.deps.attachToWorkspace !== undefined
+          ? { attachToWorkspace: this.deps.attachToWorkspace }
           : {}),
         selection: this.deps.selection(),
         // Scope the executor before it is published: the allowlist provider
