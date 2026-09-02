@@ -993,8 +993,8 @@ describe('the Agent preset is chosen, not typed', () => {
 
     // A typed name could refer to a composition that does not exist.
     expect(settings).toContain('presetOptions')
-    expect(settings).toContain("label: '默认组合'")
-    expect(settings).not.toContain('placeholder="（默认组合）"')
+    // Unset means Pet's own executor preset, not the Host default.
+    expect(settings).toContain('config?.agentPreset ?? PET_EXECUTOR_PRESET')
   })
 })
 
@@ -1016,15 +1016,17 @@ describe('bindings are gone, not hidden', () => {
 })
 
 describe('preset terminology cannot be confused with Pet context', () => {
-  it('says the preset belongs to DSH, not to Pet', () => {
+  it('says the default preset restricts Skill visibility', () => {
     const markup = renderToStaticMarkup(
       createElement(PetSettingsSection, { initialTab: 'general' as const }),
     )
 
-    // Two different things were both being called "preset": DSH's named
-    // plugin composition, and Pet's own standing instructions. Conflating
-    // them made users look for a Pet preset that does not exist.
-    expect(markup).toContain('Pet 不自带预设')
+    // Pet now ships its own executor preset: `standard` would load
+    // `skill-filesystem` and expose every globally installed Skill.
+    expect(markup).toContain('Pet 执行会话')
+    expect(markup).toContain('不加载本地 Skill 发现')
+    // Switching away widens authorization, so the panel must say so.
+    expect(markup).toContain('放宽授权范围')
   })
 
   it('says Pet context applies regardless of the chosen preset', () => {
