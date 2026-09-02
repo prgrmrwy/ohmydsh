@@ -1018,3 +1018,27 @@ describe('bindings are gone, not hidden', () => {
     expect(api).not.toContain('updateBinding')
   })
 })
+
+describe('preset terminology cannot be confused with Pet context', () => {
+  it('says the preset belongs to DSH, not to Pet', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'general' as const }),
+    )
+
+    // Two different things were both being called "preset": DSH's named
+    // plugin composition, and Pet's own standing instructions. Conflating
+    // them made users look for a Pet preset that does not exist.
+    expect(markup).toContain('Pet 不自带预设')
+  })
+
+  it('says Pet context applies regardless of the chosen preset', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'general' as const }),
+    )
+
+    // Standing instructions plus the per-Invocation envelope are what
+    // establish Pet's context — never the preset.
+    expect(markup).toContain('常驻指令')
+    expect(markup).toContain('与这里选什么预设无关')
+  })
+})

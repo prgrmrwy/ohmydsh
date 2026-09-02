@@ -99,7 +99,30 @@
 
 - [x] 4.1 Implement idempotent preparation and registration of the Pet-owned `DSH Pet` Workspace at the stable state path.
 - [x] 4.2 Implement preallocated Task/executor IDs and the recoverable create sequence from persisted `creating-executor` state through ordinary root Agent/session creation, workspace membership and stored association.
-- [x] 4.3 Install Pet standing instructions and validated provider/model selection for executor Agents, with an optional configured Pet preset and a package-owned fallback composition that reuses the current Host LLM registry.
+- [x] 4.3 Install Pet standing instructions and validated provider/model
+  selection for executor Agents, reusing the current Host LLM registry.
+
+  Terminology, because two different things were both being called "preset":
+
+  - **Pet standing instructions** — Pet's own durable context, written to
+    `AGENTS.md` in the Pet Workspace (`host/workspace.ts`). This is the
+    "startup briefing": it tells the executor it is a Pet Task Agent, that one
+    session carries multiple serial Invocations, that finishing one does not
+    end the Task, and that authority comes only from `pet_context`. Combined
+    with the per-Invocation envelope (`host/envelope.ts`), which carries the
+    Task/Invocation ids, source label, repository root, managed execution root
+    and snapshot id, this is what actually establishes Pet's context.
+  - **DSH Agent preset** — a DSH concept Pet does not own: a named plugin
+    composition selected by `AgentOptions.agentPreset`. Pet only passes the
+    user's choice through, enumerated from `ctx.agentPresets.list()`.
+
+  NOT built, deliberately: a package-owned fallback composition. Since 7.6
+  removed the bespoke `pet_*` tools, a Pet executor needs nothing beyond the
+  ordinary DSH tools an installed Skill drives, so the Host default
+  composition is already correct. Shipping a Pet-specific composition would
+  make Pet a privileged container again for no proven benefit. Revisit only
+  with a concrete requirement — for example deliberately narrowing an
+  executor's tool surface.
 
   `validateModelSelection` was also dead: the Host only checked that a
   provider/model was CONFIGURED, never that it was routable, so an unroutable

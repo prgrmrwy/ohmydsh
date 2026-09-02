@@ -231,8 +231,13 @@ function GeneralTab(): JSX.Element {
       <section className="dshpet-group">
         <h3 className="dshpet-group-title">Agent 预设</h3>
         <p className="dshpet-item-hint">
-          Pet 执行会话可选的 DSH Agent 预设。留空则使用默认组合。
-          预设决定执行会话的工具与指令，模型仍跟随 DSH。
+          这里选的是 <strong>DSH 的</strong> Agent 预设（决定执行会话装载哪些插件与工具），
+          不是 Pet 专有的东西——Pet 不自带预设。通常保持「默认组合」即可。
+        </p>
+        <p className="dshpet-item-hint">
+          Pet 自己的上下文由常驻指令和每次调用的任务信封提供：告诉执行会话它是 Pet
+          任务会话、一个会话会串行承载多次调用、以及本次调用的来源与快照。
+          这些始终生效，与这里选什么预设无关。
         </p>
         <StoredField
           label="预设"
