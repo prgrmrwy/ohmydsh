@@ -177,4 +177,31 @@ export const PET_CSS = `
   border:2px solid var(--dsw-alias-label-primary,#0f1115)}
 .dshpet-settings .dshpet-swatch:focus-visible{
   outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:2px}
+/* Button variants. Two-level selectors, matching the settings action rule
+   they must override — a single-class rule loses on specificity and the
+   variant silently has no effect. */
+.dshpet-settings .dshpet-action-primary{
+  background:var(--dsw-alias-button-primary-fill,#0f1115);
+  color:var(--dsw-alias-label-primary-foreground,#fff)}
+.dshpet-settings .dshpet-action-primary:hover:not(:disabled){
+  background:var(--dsw-alias-button-primary-hover,#2a2d33)}
+/* Destructive actions need a visual warning: Remove sat identical to Enable. */
+.dshpet-settings .dshpet-action-danger{
+  color:var(--dsw-alias-state-error-primary,#ec1313)}
+.dshpet-settings .dshpet-action-danger:hover:not(:disabled){
+  background:var(--dsw-alias-interactive-bg-hover-danger,#ec13131a)}
+.dshpet-settings .dshpet-action-sm{height:28px;padding:0 10px;border-radius:14px;
+  font:var(--dsw-font-xxs-12,400 12px/18px inherit)}
+/* Inline code, for paths and identifiers. */
+.dshpet-code{display:inline-flex;align-items:center;padding:0 5px;border-radius:6px;
+  font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:.875em;
+  background:var(--dsw-alias-interactive-bg-hover,#0000000a)}
+/* Installed-Skill row heading. */
+.dshpet-settings .dshpet-task-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dshpet-settings .dshpet-task-name{
+  font:var(--dsw-font-s-strong-14,500 14px/22px inherit);
+  color:var(--dsw-alias-label-primary,#0f1115)}
+/* Enabled state must be visually distinct from not-enabled. */
+.dshpet-settings .dshpet-status[data-tone="enabled"]{
+  color:var(--dsw-alias-state-success-primary,#1a7f37)}
 `

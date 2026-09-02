@@ -119,17 +119,16 @@ export class PetCoordinator {
     // Swallow the predecessor's rejection: one caller's failure must not
     // cascade into the next caller's request.
     const run = previous.then(work, work)
-    this.admission.set(
-      scopeKey,
-      run.catch(() => undefined),
-    )
+    const entry = run.catch(() => undefined)
+    this.admission.set(scopeKey, entry)
     try {
       return await run
     } finally {
-      if (this.admission.get(scopeKey) !== undefined && this.admission.size > 64) {
-        // Bound the map: settled chains for idle scopes need not be retained.
-        this.admission.delete(scopeKey)
-      }
+      // Delete ONLY our own link. Evicting on map size removed whatever chain
+      // happened to be current — which is the SUCCESSOR's — so a later caller
+      // saw no chain and ran concurrently with work still inside the critical
+      // section, defeating the mutual exclusion this exists to provide.
+      if (this.admission.get(scopeKey) === entry) this.admission.delete(scopeKey)
     }
   }
 
@@ -465,7 +464,16 @@ export class PetCoordinator {
    */
   async cancel(taskId: string): Promise<void> {
     const { repository } = this.deps
-    const invocation = repository.findCurrentInvocation(taskId)
+    // Look for anything HOLDING the slot, not only `running`/`waiting-user`.
+    // A dispatch failure leaves the Invocation `recovering`, which occupies
+    // the slot; without this the Task could not be cancelled, retried,
+    // archived, or superseded — the user's only escape was editing the
+    // database by hand.
+    const invocation =
+      repository.findCurrentInvocation(taskId) ??
+      repository
+        .listInvocations(taskId)
+        .find(item => item.status === 'recovering' || item.status === 'dispatching')
     if (invocation === undefined) {
       throw new PetError('NO_CURRENT_INVOCATION', `Pet Task ${taskId} has no current Invocation`)
     }
@@ -487,8 +495,14 @@ export class PetCoordinator {
     if (invocation === undefined) {
       throw new PetError('INVOCATION_NOT_FOUND', `Pet Invocation ${invocationId} not found`)
     }
-    if (invocation.status !== 'failed') {
-      throw new PetError('INVALID_REQUEST', `Only a failed Invocation can be retried`)
+    // `recovering` is retryable too: it means dispatch could not be proven,
+    // not that the work was rejected. Restricting retry to `failed` left a
+    // Task that lost its dispatch permanently stuck.
+    if (invocation.status !== 'failed' && invocation.status !== 'recovering') {
+      throw new PetError(
+        'INVALID_REQUEST',
+        `Only a failed or recovering Invocation can be retried`,
+      )
     }
     const task = repository.getTask(invocation.taskId)
     if (task?.archivedAt !== undefined) {

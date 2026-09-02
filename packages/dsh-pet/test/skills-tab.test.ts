@@ -148,3 +148,43 @@ describe('the mascot menu follows the Skill set', () => {
     expect(calls.filter(url => url.includes('capabilities')).length).toBeGreaterThan(before)
   })
 })
+
+describe('the Task panel survives an incomplete response', () => {
+  it('renders when the payload omits its task list', async () => {
+    stubApi({})
+    const host = document.createElement('div')
+    host.setAttribute('data-shell-overlay', '')
+    document.body.appendChild(host)
+    const { PetOverlay } = await import('../src/client/overlay.js')
+    await act(async () => {
+      createRoot(host).render(createElement(PetOverlay as never, { openSession: () => {} } as never))
+    })
+
+    // Open the panel: TaskPanel only mounts then, and that is where the
+    // unnormalized list is read.
+    await act(async () => {
+      ;(host.querySelector('.dshpet-mascot') as HTMLElement)?.click()
+    })
+
+    // The overlay is a `list` slot, so a render throw makes the boundary
+    // ABDICATE the entry: the mascot silently disappears until a reload,
+    // which is harder to notice than a blank panel.
+    expect(host.querySelector('.dshpet-panel')).not.toBeNull()
+  })
+
+  it('renders a task whose invocations are missing', async () => {
+    stubApi({ tasks: [{ id: 't1', status: 'idle', epoch: 1 }] })
+    const host = document.createElement('div')
+    host.setAttribute('data-shell-overlay', '')
+    document.body.appendChild(host)
+    const { PetOverlay } = await import('../src/client/overlay.js')
+    await act(async () => {
+      createRoot(host).render(createElement(PetOverlay as never, { openSession: () => {} } as never))
+    })
+    await act(async () => {
+      ;(host.querySelector('.dshpet-mascot') as HTMLElement)?.click()
+    })
+
+    expect(host.querySelector('.dshpet-panel')).not.toBeNull()
+  })
+})

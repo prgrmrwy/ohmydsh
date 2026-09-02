@@ -176,6 +176,11 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   }, [mode])
 
   const onPointerDown = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+      // Reset here so each gesture owns its own flag. Relying on the click
+      // handler to clear it strands `true` whenever a drag ends without a
+      // click (pointercancel, or release outside the element), which then
+      // swallows the NEXT click or keyboard activation.
+      draggedRef.current = false
     // Pointer capture keeps the drag attached even when the cursor leaves the
     // element or crosses an iframe boundary.
     event.currentTarget.setPointerCapture(event.pointerId)
@@ -199,7 +204,10 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
         clampPosition({ x: current.x + deltaX, y: current.y + deltaY }, viewport, size),
       )
     },
-    [viewport],
+    // `size` is read inside, so it must be a dependency: a stale closure
+    // clamps against the previous diameter and `onPointerUp` then PERSISTS
+    // that out-of-bounds position.
+    [viewport, size],
   )
 
   const onPointerUp = useCallback(
@@ -213,7 +221,10 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
       draggedRef.current = state.moved
       setPosition(current => writePosition(current, viewport, globalThis.localStorage, size))
     },
-    [viewport],
+    // `size` is read inside, so it must be a dependency: a stale closure
+    // clamps against the previous diameter and `onPointerUp` then PERSISTS
+    // that out-of-bounds position.
+    [viewport, size],
   )
 
   const run = useCallback(
@@ -485,8 +496,13 @@ function TaskPanel(props: {
 
   const refresh = useCallback(async () => {
     try {
-      const result = (await petApi.tasks()) as { tasks: TaskView[] }
-      setTasks(result.tasks)
+      const result = (await petApi.tasks()) as { tasks?: TaskView[] }
+      // Normalize. A type assertion only CLAIMS the field exists; a response
+      // without it makes `tasks` undefined and the next render throws in
+      // `tasks.filter`. The overlay is a `list` slot, so the error boundary
+      // abdicates the entry — the mascot silently disappears until reload,
+      // which is harder to notice than a blank panel.
+      setTasks(Array.isArray(result?.tasks) ? result.tasks : [])
       setError(undefined)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -602,7 +618,7 @@ function TaskPanel(props: {
               source archived
             </span>
           ) : null}
-          {task.invocations.map(invocation => (
+          {(task.invocations ?? []).map(invocation => (
             <div key={invocation.id} className="dshpet-inv">
               <span>{invocation.capabilityId}</span>
               <span className="dshpet-status">{invocation.status}</span>
