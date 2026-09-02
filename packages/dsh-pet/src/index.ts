@@ -12,6 +12,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
+import type {} from '@deepseek-ai/dsh-agent-presets'
 import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-session-title'
 import type {} from '@deepseek-ai/dsh-skill'
@@ -62,6 +63,8 @@ export const inject = [
   'llm',
   // Pet executors follow the Host's default model instead of a private copy.
   'agentDefaultModel',
+  // Enumerates the presets offered for Pet executors.
+  'agentPresets',
   'agents',
   'tools',
   'skills',
@@ -457,6 +460,12 @@ async function initialize(
     packageVersion: version,
     changes,
     archiveSink,
+    listPresets: async () => {
+      // Enumerate what this Host actually offers; a free-text preset name
+      // could name a composition that does not exist.
+      const presets = await ctx.agentPresets.list()
+      return presets.map(preset => ({ id: preset.id, label: preset.name ?? preset.id }))
+    },
     followedModel: () => {
       try {
         const current = ctx.agentDefaultModel.currentSelection()

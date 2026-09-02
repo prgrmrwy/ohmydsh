@@ -10,7 +10,7 @@
 
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import { PetError } from './errors.js'
-import { petDomainSpec, revisionKey, type PetGlobalState, type PetWorkspaceBinding } from './spec.js'
+import { petDomainSpec, revisionKey, type PetGlobalState } from './spec.js'
 import {
   occupiesCurrentSlot,
   type PetInvocationRecord,
@@ -502,32 +502,6 @@ export class PetRepository {
 
   // -- bindings -------------------------------------------------------------
 
-  /**
-   * Read a trusted workspace binding for bounded side effects.
-   * @param workspaceId - Workspace id.
-   * @returns the binding, or `undefined`.
-   */
-  getWorkspaceBinding(workspaceId: string): PetWorkspaceBinding | undefined {
-    return this.domain.table('workspace_bindings').get(workspaceId) as
-      | PetWorkspaceBinding
-      | undefined
-  }
 
-  /** Every configured workspace binding. */
-  listWorkspaceBindings(): readonly PetWorkspaceBinding[] {
-    return [...this.domain.table('workspace_bindings').entries()].map(
-      ([, value]) => value as PetWorkspaceBinding,
-    )
-  }
 
-  /**
-   * Replace one workspace binding wholesale; partial writes are rejected by
-   * the caller's validation before reaching storage.
-   * @param binding - The complete binding row.
-   * @returns the stored binding.
-   */
-  async putWorkspaceBinding(binding: PetWorkspaceBinding): Promise<PetWorkspaceBinding> {
-    await this.domain.table('workspace_bindings').put(binding.workspaceId, binding)
-    return binding
-  }
 }

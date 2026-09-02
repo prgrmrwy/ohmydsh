@@ -53,6 +53,8 @@ function stubServices(ctx: Context, registered: { path: string }[]): void {
   ctx.provide('agentDefaultModel', {
     currentSelection: () => ({ provider: 'anthropic', model: 'claude-opus-5' }),
   })
+  // Declared in `inject`, so `apply` never runs without it.
+  ctx.provide('agentPresets', { list: async () => [] })
   ctx.provide('llm', { listProviders: () => [{ id: 'anthropic', name: 'Anthropic' }] })
   ctx.provide('sessionTitle', { rename: () => ({}) })
   ctx.provide('tools', { register: () => () => {} })
@@ -273,6 +275,7 @@ describe('a real Invocation scopes its executor Agent', () => {
     ctx.provide('agentDefaultModel', {
       currentSelection: () => ({ provider: 'anthropic', model: 'claude-opus-5' }),
     })
+    ctx.provide('agentPresets', { list: async () => [] })
     ctx.provide('llm', { listProviders: () => [{ id: 'anthropic', name: 'Anthropic' }] })
     ctx.provide('sessionTitle', { rename: () => ({}) })
     ctx.provide('tools', { register: () => () => {} })
@@ -304,7 +307,10 @@ describe('a real Invocation scopes its executor Agent', () => {
     await ctx.plugin(petPlugin, { home, version: '0.1.0' })
 
     const deadline = Date.now() + 15_000
-    while (Date.now() < deadline && routes.length === 0) {
+    while (
+      Date.now() < deadline &&
+      routes.find(route => route.path === ROUTES.skillMutate) === undefined
+    ) {
       await new Promise(resolve => setTimeout(resolve, 50))
     }
 
@@ -380,6 +386,7 @@ describe('dispatch uses the ordinary Agent lifecycle', () => {
     ctx.provide('agentDefaultModel', {
       currentSelection: () => ({ provider: 'anthropic', model: 'claude-opus-5' }),
     })
+    ctx.provide('agentPresets', { list: async () => [] })
     ctx.provide('llm', { listProviders: () => [{ id: 'anthropic', name: 'Anthropic' }] })
     ctx.provide('sessionTitle', { rename: () => ({}) })
     ctx.provide('tools', { register: () => () => {} })
@@ -411,7 +418,10 @@ describe('dispatch uses the ordinary Agent lifecycle', () => {
     await ctx.plugin(petPlugin, { home, version: '0.1.0' })
 
     const deadline = Date.now() + 15_000
-    while (Date.now() < deadline && routes.length === 0) {
+    while (
+      Date.now() < deadline &&
+      routes.find(route => route.path === ROUTES.skillMutate) === undefined
+    ) {
       await new Promise(resolve => setTimeout(resolve, 50))
     }
 
@@ -483,6 +493,7 @@ describe('archiving from the Pet route syncs the executor session', () => {
     ctx.provide('agentDefaultModel', {
       currentSelection: () => ({ provider: 'anthropic', model: 'claude-opus-5' }),
     })
+    ctx.provide('agentPresets', { list: async () => [] })
     ctx.provide('llm', { listProviders: () => [{ id: 'anthropic', name: 'Anthropic' }] })
     ctx.provide('sessionTitle', { rename: () => ({}) })
     ctx.provide('tools', { register: () => () => {} })
@@ -514,7 +525,10 @@ describe('archiving from the Pet route syncs the executor session', () => {
     await ctx.plugin(petPlugin, { home, version: '0.1.0' })
 
     const deadline = Date.now() + 15_000
-    while (Date.now() < deadline && routes.length === 0) {
+    while (
+      Date.now() < deadline &&
+      routes.find(route => route.path === ROUTES.skillMutate) === undefined
+    ) {
       await new Promise(resolve => setTimeout(resolve, 50))
     }
 
@@ -582,6 +596,7 @@ describe('provider routability is proven before an executor is created', () => {
     ctx.provide('agentDefaultModel', {
       currentSelection: () => ({ provider: 'ghost-provider', model: 'whatever' }),
     })
+    ctx.provide('agentPresets', { list: async () => [] })
     ctx.provide('llm', { listProviders: () => [{ id: 'anthropic', name: 'Anthropic' }] })
     ctx.provide('sessionTitle', { rename: () => ({}) })
     ctx.provide('tools', { register: () => () => {} })
@@ -621,7 +636,10 @@ describe('provider routability is proven before an executor is created', () => {
     await ctx.plugin(petPlugin, { home, version: '0.1.0' })
 
     const deadline = Date.now() + 15_000
-    while (Date.now() < deadline && routes.length === 0) {
+    while (
+      Date.now() < deadline &&
+      routes.find(route => route.path === ROUTES.skillMutate) === undefined
+    ) {
       await new Promise(resolve => setTimeout(resolve, 50))
     }
 

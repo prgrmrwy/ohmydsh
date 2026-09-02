@@ -41,6 +41,8 @@ export interface RouteDeps {
    * when it cannot be resolved, so the panel degrades instead of failing.
    */
   readonly followedModel?: () => { providerId: string; modelId: string } | undefined
+  /** Agent presets this Host offers, for the Settings picker. */
+  readonly listPresets?: () => Promise<readonly { id: string; label: string }[]>
 }
 
 /** Desired projection derived from the current allowlist. */
@@ -134,6 +136,10 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
         defaultContextPolicy: updated.defaultContextPolicy,
       }
     }),
+
+    petRoute(ROUTES.presets, async () => ({
+      presets: (await deps.listPresets?.()) ?? [],
+    })),
 
     petRoute(ROUTES.capabilities, async () => ({
       capabilities: capabilities.project(repository),
@@ -352,35 +358,6 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
       return { task }
     }),
 
-    petRoute(ROUTES.bindings, async () => ({
-      bindings: repository.listWorkspaceBindings(),
-    })),
-
-    petRoute(ROUTES.bindingsUpdate, async ({ body }) => {
-      requireReady(lifecycle)
-      const record = strictBody(body, ['workspaceId', 'business', 'crGroupId', 'reviewers'])
-      const reviewers = record['reviewers']
-      if (
-        reviewers !== undefined &&
-        (!Array.isArray(reviewers) || reviewers.some(item => typeof item !== 'string'))
-      ) {
-        throw new PetError('BINDING_INVALID', 'reviewers must be an array of strings', {
-          reviewers: 'invalid',
-        })
-      }
-      const binding = await repository.putWorkspaceBinding({
-        workspaceId: requireString(record, 'workspaceId'),
-        ...(optionalString(record, 'business') !== undefined
-          ? { business: optionalString(record, 'business') }
-          : {}),
-        ...(optionalString(record, 'crGroupId') !== undefined
-          ? { crGroupId: optionalString(record, 'crGroupId') }
-          : {}),
-        ...(reviewers !== undefined ? { reviewers: reviewers as string[] } : {}),
-        updatedAt: Date.now(),
-      })
-      return { binding }
-    }),
 
     petRoute(ROUTES.diagnostics, async () => ({
       lifecycle: lifecycle.state,

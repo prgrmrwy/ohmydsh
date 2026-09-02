@@ -183,6 +183,33 @@
   bundles are authored against those exact surfaces and declared in the
   package manifest, and a first boot installs, enables and projects all three.
 
+- [x] 7.8 Removed the Bindings surface entirely. It configured a workspace id,
+  a `business` tag and a CR chat id — but `business` had ZERO readers anywhere
+  in the repository, and after the per-capability adapters were removed in 7.6
+  nothing read bindings at all. The page therefore accepted settings that
+  could never take effect, which is worse than not offering them. Dropped the
+  tab, both routes, the repository accessors, the `workspace_bindings` table
+  and the wire types.
+
+  Follow-up left open deliberately: how a Skill such as `send-cr` learns its
+  destination. Two candidate shapes — several `workspace -> chat` mappings, or
+  per-Skill parameters supplied when the Skill is added — are not yet decided,
+  so no half-built mechanism was left behind in the meantime.
+
+- [x] 7.9 Directory selection now degrades instead of appearing dead.
+  `host.pickDirectory` requires the `native` capability; this deployment only
+  serves `browse`, so the call was rejected and the Browse button did nothing
+  visible. The rejection is now swallowed and falls through to an in-app
+  directory browser built on `host.listDirectory` (crumbs, child directories,
+  "select this directory"); a deployment offering neither says so plainly
+  rather than failing silently.
+
+- [x] 7.10 The Agent preset is enumerated from `ctx.agentPresets.list()`
+  instead of typed free-hand, so it cannot name a composition that does not
+  exist. Adding `agentPresets` to `inject` also required providing it in every
+  loader-composition test block — `apply` waits for every declared service, so
+  a missing one silently registers no routes at all.
+
 - [x] 7.7 MODEL CHANGE — Skills are LINKED, not copied, and Pet ships no
   built-in category. Registering a Skill records the user's own directory and
   projects a symlink to it, so an edit to that directory takes effect on the

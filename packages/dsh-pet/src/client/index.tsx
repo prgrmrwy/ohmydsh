@@ -22,6 +22,7 @@ import { PetOverlay, type SourceSelection } from './overlay.js'
 import {
   PetSettingsSection,
   setDirectoryPicker,
+  setDirectoryLister,
   setWorkspaceLister,
 } from './settings.js'
 import {
@@ -107,15 +108,59 @@ export function apply(ctx: ClientContext): void {
     }))
   })
 
+  // Two-tier: the OS picker when this deployment serves `native`, otherwise
+  // the in-app browser (`browse`). The native call FAILS on a browse-only
+  // deployment — which is why the button appeared to do nothing — so its
+  // rejection must fall through rather than surface as an error.
   setDirectoryPicker(async () => {
     const connection = ctx.get('connection') as
-      | { rpc?: { host?: { pickDirectory?: (payload: unknown) => Promise<unknown> } } }
+      | {
+          rpc?: {
+            host?: {
+              pickDirectory?: (payload: unknown) => Promise<unknown>
+            }
+          }
+        }
       | undefined
     const pick = connection?.rpc?.host?.pickDirectory
     if (pick === undefined) return undefined
-    const response = (await pick({})) as { result?: { ok?: boolean; value?: { path?: string | null } } }
-    return response.result?.ok === true ? (response.result.value?.path ?? undefined) : undefined
+    const response = (await pick({}).catch(() => undefined)) as
+      | { result?: { ok?: boolean; value?: { path?: string | null } } }
+      | undefined
+    if (response?.result?.ok !== true) return undefined
+    return response.result.value?.path ?? undefined
   })
+
+  // Directory listing for the in-app browser, used when no OS picker exists.
+  setDirectoryLister(async requested => {
+    const connection = ctx.get('connection') as
+      | {
+          rpc?: {
+            host?: {
+              listDirectory?: (payload: unknown) => Promise<unknown>
+            }
+          }
+        }
+      | undefined
+    const list = connection?.rpc?.host?.listDirectory
+    if (list === undefined) return undefined
+    const response = (await list(
+      requested === undefined ? {} : { path: requested },
+    ).catch(() => undefined)) as
+      | {
+          result?: {
+            ok?: boolean
+            value?: {
+              path: string
+              entries: { name: string; path: string }[]
+              crumbs: { name: string; path: string }[]
+            }
+          }
+        }
+      | undefined
+    return response?.result?.ok === true ? response.result.value : undefined
+  })
+
 
   // DSH 0.1.x picks settings-nav icons from a closed list of built-in ids, so
   // Pet's row would otherwise render the fallback gear. Mark our own row (and

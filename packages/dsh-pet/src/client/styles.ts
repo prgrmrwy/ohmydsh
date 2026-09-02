@@ -141,4 +141,14 @@ export const PET_CSS = `
 .dshpet-fact-value{font-size:14px;word-break:break-all;
   color:var(--dsw-alias-label-primary,#1f2329)}
 .dshpet-fact-value code{font-size:13px}
+/* In-app Host directory browser, used where no OS picker exists. */
+.dshpet-browser{display:flex;flex-direction:column;gap:8px;padding:12px;
+  border:1px solid var(--dsw-alias-border-l2,#0000001a);border-radius:8px;
+  background:var(--dsw-alias-bg-layer-2,#fff)}
+.dshpet-crumbs{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.dshpet-browser-list{display:flex;flex-direction:column;gap:2px;
+  max-height:220px;overflow:auto}
+.dshpet-browser-entry{justify-content:flex-start;text-align:left;
+  background:0 0;height:28px;padding:0 8px;border-radius:6px}
+.dshpet-browser-entry:hover{background:var(--dsw-alias-interactive-bg-hover,#0000000a)}
 `

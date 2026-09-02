@@ -183,8 +183,8 @@ describe('overlay styles', () => {
 })
 
 describe('settings information architecture', () => {
-  it('exposes exactly the four stable tabs', () => {
-    expect(PET_SETTINGS_TABS).toEqual(['general', 'skills', 'bindings', 'diagnostics'])
+  it('exposes exactly the three stable tabs', () => {
+    expect(PET_SETTINGS_TABS).toEqual(['general', 'skills', 'diagnostics'])
   })
 
   it('renders an accessible tablist', () => {
@@ -249,13 +249,6 @@ describe('settings information architecture', () => {
     expect(markup).toContain('never displayed')
   })
 
-  it('explains that bindings prevent model-supplied destinations', () => {
-    const markup = renderToStaticMarkup(
-      createElement(PetSettingsSection, { initialTab: 'bindings' as const }),
-    )
-
-    expect(markup).toContain('模型无法自行指定')
-  })
 })
 
 describe('client program is actually typechecked', () => {
@@ -864,10 +857,11 @@ describe('stored settings share one read-only-until-edit pattern', () => {
       'utf8',
     )
 
-    // Preset, context policy and all three binding fields are stored values,
-    // so each shows its current setting until the user opts into editing.
+    // Agent preset and default context policy are the stored values that
+    // remain, so each shows its current setting until the user opts into
+    // editing.
     const fields = [...settings.matchAll(/<StoredField/g)].length
-    expect(fields).toBeGreaterThanOrEqual(5)
+    expect(fields).toBeGreaterThanOrEqual(2)
   })
 
   it('returns to read-only only after the write succeeds', async () => {
@@ -899,50 +893,6 @@ describe('stored settings share one read-only-until-edit pattern', () => {
 })
 
 
-describe('Bindings explains what to configure and where to find it', () => {
-  it('tells the user what a binding controls and what happens without one', () => {
-    const markup = renderToStaticMarkup(
-      createElement(PetSettingsSection, { initialTab: 'bindings' as const }),
-    )
-
-    // A field name alone is not actionable: the panel has to say what the
-    // value does and what breaks when it is missing.
-    expect(markup).toContain('模型无法自行指定')
-    expect(markup).toContain('拒绝执行')
-  })
-
-  it('gives a concrete way to look up the CR chat id', () => {
-    const markup = renderToStaticMarkup(
-      createElement(PetSettingsSection, { initialTab: 'bindings' as const }),
-    )
-
-    // `oc_...` ids cannot be guessed, so the panel names the exact command
-    // that produces one rather than leaving the user to search.
-    expect(markup).toContain('lark-cli im +chat-search')
-    expect(markup).toContain('chat_id')
-  })
-
-  it('offers workspaces as a choice instead of asking for a UUID', async () => {
-    const { readFile } = await import('node:fs/promises')
-    const settings = await readFile(
-      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
-      'utf8',
-    )
-
-    expect(settings).toContain('workspaceOptions')
-    // With no known workspaces an empty <select> would trap the user, so the
-    // field degrades to free text.
-    expect(settings).toContain('workspaceOptions.length > 0')
-  })
-
-  it('marks the optional field as safe to leave empty', () => {
-    const markup = renderToStaticMarkup(
-      createElement(PetSettingsSection, { initialTab: 'bindings' as const }),
-    )
-
-    expect(markup).toContain('可以留空')
-  })
-})
 
 describe('Skill file health is explained without internal jargon', () => {
   it('names the control by what it does, not by its implementation', () => {
@@ -1007,5 +957,64 @@ describe('Skills are linked, not copied', () => {
       createElement(PetSettingsSection, { initialTab: 'skills' as const }),
     )
     expect(markup).toContain('目录被删除或移走')
+  })
+})
+
+describe('directory selection degrades to the in-app browser', () => {
+  it('falls through when the OS picker is unavailable', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // `host.pickDirectory` needs the `native` capability; a deployment that
+    // only serves `browse` rejects it. Treating that rejection as an error
+    // left the Browse button apparently dead.
+    expect(settings).toContain('directoryLister')
+    expect(settings).toContain('setBrowsing')
+    expect(settings).toContain('此部署不支持目录选择')
+  })
+
+  it('swallows the native rejection instead of surfacing it', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const entry = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'index.tsx'),
+      'utf8',
+    )
+    expect(entry).toContain('pick({}).catch(() => undefined)')
+    expect(entry).toContain('setDirectoryLister')
+  })
+})
+
+describe('the Agent preset is chosen, not typed', () => {
+  it('offers the presets this Host actually provides', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // A typed name could refer to a composition that does not exist.
+    expect(settings).toContain('presetOptions')
+    expect(settings).toContain("label: '默认组合'")
+    expect(settings).not.toContain('placeholder="（默认组合）"')
+  })
+})
+
+describe('bindings are gone, not hidden', () => {
+  it('drops the tab and its routes entirely', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const [settings, wire, api] = await Promise.all([
+      readFile(path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'), 'utf8'),
+      readFile(path.resolve(__dirname, '..', 'src', 'wire.ts'), 'utf8'),
+      readFile(path.resolve(__dirname, '..', 'src', 'client', 'api.ts'), 'utf8'),
+    ])
+
+    // Nothing read the bindings, so the page configured values that could
+    // never take effect. A dead setting is worse than an absent one.
+    expect(settings).not.toContain('BindingsTab')
+    expect(wire).not.toContain('bindingsUpdate')
+    expect(api).not.toContain('updateBinding')
   })
 })

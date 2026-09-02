@@ -16,7 +16,7 @@ import { petApi, type PetConfig } from './api.js'
 import type { PetProjectionEntry, PetSkillRevision, PetSkillSelection } from '../wire.js'
 
 /** The four stable tabs. */
-export const PET_SETTINGS_TABS = ['general', 'skills', 'bindings', 'diagnostics'] as const
+export const PET_SETTINGS_TABS = ['general', 'skills', 'diagnostics'] as const
 
 export type PetSettingsTab = (typeof PET_SETTINGS_TABS)[number]
 
@@ -149,7 +149,6 @@ function StoredField(props: {
 const TAB_LABELS: Record<PetSettingsTab, string> = {
   general: '通用',
   skills: 'Skill',
-  bindings: '绑定',
   diagnostics: '诊断',
 }
 
@@ -178,7 +177,6 @@ export function PetSettingsSection(props: { initialTab?: PetSettingsTab } = {}):
       <div role="tabpanel" id={`dshpet-panel-${tab}`} aria-labelledby={`dshpet-tab-${tab}`}>
         {tab === 'general' ? <GeneralTab /> : null}
         {tab === 'skills' ? <SkillsTab /> : null}
-        {tab === 'bindings' ? <BindingsTab /> : null}
         {tab === 'diagnostics' ? <诊断信息sTab /> : null}
       </div>
     </div>
@@ -188,7 +186,9 @@ export function PetSettingsSection(props: { initialTab?: PetSettingsTab } = {}):
 /** General: the followed model, appearance reset and default context policy. */
 function GeneralTab(): JSX.Element {
   const [config, setConfig] = useState<PetConfig | undefined>(undefined)
-  const [preset, setPreset] = useState('')
+  const [presetOptions, setPresetOptions] = useState<
+    readonly { value: string; label: string }[]
+  >([])
   const [error, setError] = useState<string | undefined>(undefined)
 
   // The model is read-only here: Pet follows DSH's default selection, so
@@ -196,11 +196,18 @@ function GeneralTab(): JSX.Element {
   useEffect(() => {
     void petApi
       .config()
-      .then(value => {
-        setConfig(value)
-        setPreset(value.agentPreset ?? '')
-      })
+      .then(setConfig)
       .catch((cause: unknown) => setError(String(cause)))
+  }, [])
+
+  useEffect(() => {
+    void petApi
+      .presets()
+      .then(result =>
+        setPresetOptions(result.presets.map(item => ({ value: item.id, label: item.label }))),
+      )
+      // A Host without presets simply offers the default composition.
+      .catch(() => setPresetOptions([]))
   }, [])
 
   return (
@@ -228,10 +235,12 @@ function GeneralTab(): JSX.Element {
           预设决定执行会话的工具与指令，模型仍跟随 DSH。
         </p>
         <StoredField
-          label="预设名称"
+          label="预设"
           value={config?.agentPreset ?? ''}
-          placeholder="（默认组合）"
           emptyText="默认组合"
+          // Enumerated from what this Host offers: a typed name could refer to
+          // a composition that does not exist.
+          options={[{ value: '', label: '默认组合' }, ...presetOptions]}
           onSave={async next => {
             const updated = await petApi.updateConfig({ agentPreset: next })
             setConfig(updated)
@@ -307,6 +316,31 @@ export function setWorkspaceLister(
   workspaceLister = lister
 }
 
+/** One directory level from the Host, for the in-app browser. */
+export interface PetDirectoryListing {
+  readonly path: string
+  readonly entries: readonly { name: string; path: string }[]
+  readonly crumbs: readonly { name: string; path: string }[]
+}
+
+let directoryLister:
+  | ((path?: string) => Promise<PetDirectoryListing | undefined>)
+  | undefined
+
+/**
+ * Publish the Host directory lister.
+ *
+ * Used when the deployment serves `browse` rather than `native`: a remote
+ * Host has no OS picker to open, so the user navigates the Host filesystem
+ * in-app instead.
+ * @param lister - Lists one directory level, or `undefined` when unavailable.
+ */
+export function setDirectoryLister(
+  lister: ((path?: string) => Promise<PetDirectoryListing | undefined>) | undefined,
+): void {
+  directoryLister = lister
+}
+
 /**
  * Publish the Host directory picker.
  * @param picker - Picker returning the chosen path, or `undefined` on cancel.
@@ -325,6 +359,8 @@ function SkillsTab(): JSX.Element {
     projection: PetProjectionEntry[]
   }>({ revisions: [], selections: [], projection: [] })
   const [path, setPath] = useState('')
+  // Non-undefined while the in-app directory browser is open.
+  const [browsing, setBrowsing] = useState<PetDirectoryListing | undefined>(undefined)
   const [preview, setPreview] = useState<Record<string, unknown> | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
 
@@ -362,28 +398,95 @@ function SkillsTab(): JSX.Element {
           placeholder="/absolute/path/on/the/host"
           onChange={event => setPath(event.target.value)}
         />
-        {directoryPicker !== undefined ? (
-          <button
-            type="button"
-            className="dshpet-action"
-            onClick={() => {
-              const pick = directoryPicker
-              if (pick === undefined) return
-              setError(undefined)
-              void pick()
-                .then(picked => {
-                  // Cancellation returns nothing; keep what the user typed.
-                  if (picked !== undefined) setPath(picked)
-                })
-                .catch((cause: unknown) =>
-                  setError(cause instanceof Error ? cause.message : String(cause)),
-                )
-            }}
-          >
-            浏览…
-          </button>
-        ) : null}
+        <button
+          type="button"
+          className="dshpet-action"
+          onClick={() => {
+            setError(undefined)
+            // Try the OS picker first; on a deployment that only serves
+            // `browse` it resolves to nothing, so fall through to the in-app
+            // browser rather than leaving the button apparently dead.
+            void (async () => {
+              const picked = await directoryPicker?.()
+              if (picked !== undefined) {
+                setPath(picked)
+                return
+              }
+              const listing = await directoryLister?.()
+              if (listing === undefined) {
+                setError('此部署不支持目录选择，请直接填写 Host 上的绝对路径。')
+                return
+              }
+              setBrowsing(listing)
+            })()
+          }}
+        >
+          浏览…
+        </button>
       </div>
+      {browsing !== undefined ? (
+        <div className="dshpet-browser">
+          <div className="dshpet-crumbs">
+            {browsing.crumbs.map(crumb => (
+              <button
+                key={crumb.path}
+                type="button"
+                className="dshpet-action dshpet-action-sm"
+                onClick={() => {
+                  void directoryLister?.(crumb.path).then(next => {
+                    if (next !== undefined) setBrowsing(next)
+                  })
+                }}
+              >
+                {crumb.name === '' ? '/' : crumb.name}
+              </button>
+            ))}
+          </div>
+          <p className="dshpet-item-hint">
+            <code className="dshpet-code">{browsing.path}</code>
+          </p>
+          <div className="dshpet-browser-list">
+            {browsing.entries.length === 0 ? (
+              <p className="dshpet-empty">这个目录下没有子目录。</p>
+            ) : (
+              browsing.entries.map(entry => (
+                <button
+                  key={entry.path}
+                  type="button"
+                  className="dshpet-action dshpet-browser-entry"
+                  onClick={() => {
+                    void directoryLister?.(entry.path).then(next => {
+                      if (next !== undefined) setBrowsing(next)
+                    })
+                  }}
+                >
+                  {entry.name}
+                </button>
+              ))
+            )}
+          </div>
+          <div className="dshpet-actions">
+            <button
+              type="button"
+              className="dshpet-action dshpet-action-primary"
+              onClick={() => {
+                // Select the directory currently being viewed.
+                setPath(browsing.path)
+                setBrowsing(undefined)
+              }}
+            >
+              选择当前目录
+            </button>
+            <button
+              type="button"
+              className="dshpet-action"
+              onClick={() => setBrowsing(undefined)}
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      ) : null}
       <button
         type="button"
         className="dshpet-action"
@@ -556,102 +659,6 @@ function SkillsTab(): JSX.Element {
   )
 }
 
-/** Bindings: trusted destinations for bounded side effects. */
-function BindingsTab(): JSX.Element {
-  const [draft, setDraft] = useState({ workspaceId: '', business: '', crGroupId: '' })
-  const [error, setError] = useState<string | undefined>(undefined)
-  const [saved, setSaved] = useState(false)
-  // Read-only until the user opts into editing, so a stored destination is
-  // visible without exposing it to an accidental keystroke.
-  const [editing, setEditing] = useState(false)
-
-  const refresh = useCallback(async () => {
-    try {
-      const result = await petApi.bindings()
-      const first = result.bindings[0]
-      if (first !== undefined) {
-        setDraft({
-          workspaceId: first.workspaceId,
-          business: first.business ?? '',
-          crGroupId: first.crGroupId ?? '',
-        })
-      }
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    }
-  }, [])
-
-  useEffect(() => {
-    void refresh()
-  }, [refresh])
-
-  // A workspace id is a UUID, so the field offers the known workspaces by
-  // title instead of asking the user to produce one from memory.
-  const workspaceOptions = (workspaceLister?.() ?? []).map(item => ({
-    value: item.id,
-    label: item.path !== undefined ? `${item.label} — ${item.path}` : item.label,
-  }))
-
-  return (
-    <div className="dshpet-settings">
-      <section className="dshpet-group">
-      <h3 className="dshpet-group-title">工作区绑定</h3>
-      <p className="dshpet-item-hint">
-        绑定把「哪个工作区」映射到「副作用发往哪里」。有副作用的能力（例如 Send CR）
-        只会使用这里配置的目的地——模型无法自行指定，也无法从对话内容里推断。
-        未配置绑定时，这类能力会直接拒绝执行并提示你先来这里设置。
-      </p>
-      <StoredField
-        label="工作区"
-        value={draft.workspaceId}
-        emptyText="未绑定工作区"
-        // Fall back to free text when the browser knows no workspaces yet: an
-        // empty <select> would leave the user with nothing to choose.
-        {...(workspaceOptions.length > 0 ? { options: workspaceOptions } : {})}
-        placeholder="工作区 ID"
-        onSave={async next => {
-          await petApi.updateBinding({ ...draft, workspaceId: next })
-          setDraft(current => ({ ...current, workspaceId: next }))
-        }}
-      />
-      <p className="dshpet-item-hint">
-        要绑定的工作区。列表来自 DSH 左侧「工作区」，选中即可，无需手填 ID。
-      </p>
-      <StoredField
-        label="业务线"
-        value={draft.business}
-        emptyText="未设置"
-        placeholder="例如 infra"
-        onSave={async next => {
-          await petApi.updateBinding({ ...draft, business: next })
-          setDraft(current => ({ ...current, business: next }))
-        }}
-      />
-      <p className="dshpet-item-hint">
-        可选的业务线标识，仅用于让 Skill 在消息中标注归属，不参与路由。
-        不确定填什么可以留空。
-      </p>
-      <StoredField
-        label="CR 群 ID"
-        value={draft.crGroupId}
-        emptyText="未设置（Send CR 将拒绝执行）"
-        placeholder="oc_..."
-        onSave={async next => {
-          await petApi.updateBinding({ ...draft, crGroupId: next })
-          setDraft(current => ({ ...current, crGroupId: next }))
-        }}
-      />
-      <p className="dshpet-item-hint">
-        接收 Code Review 请求的飞书群，形如 <code className="dshpet-code">oc_</code> 开头的一串字符。
-        查找方式：在终端执行{' '}
-        <code className="dshpet-code">lark-cli im +chat-search --query 群名关键词</code>，
-        从结果里取 <code className="dshpet-code">chat_id</code>。
-      </p>
-      {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
-      </section>
-    </div>
-  )
-}
 
 /**
  * One labelled diagnostic fact.

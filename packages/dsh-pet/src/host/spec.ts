@@ -158,13 +158,6 @@ const petSkillSelection = z.object({
   showAsShortcut: z.boolean(),
 })
 
-const petWorkspaceBinding = z.object({
-  workspaceId: z.string().min(1),
-  business: z.string().optional(),
-  crGroupId: z.string().optional(),
-  reviewers: z.array(z.string()).optional(),
-  updatedAt: z.number().int(),
-})
 
 /**
  * Domain global: Pet-wide configuration and the monotonic skill-set generation
@@ -210,15 +203,12 @@ export const petDomainSpec = defineDomain({
     runs: domainTable<string, z.infer<typeof petRunRecord>>(petRunRecord),
     skill_revisions: domainTable<string, z.infer<typeof petSkillRevision>>(petSkillRevision),
     skill_selections: domainTable<string, z.infer<typeof petSkillSelection>>(petSkillSelection),
-    workspace_bindings: domainTable<string, z.infer<typeof petWorkspaceBinding>>(petWorkspaceBinding),
   },
 })
 
 /** Pet global configuration state as stored. */
 export type PetGlobalState = z.infer<typeof petGlobalState>
 
-/** Durable workspace binding for bounded side effects. */
-export type PetWorkspaceBinding = z.infer<typeof petWorkspaceBinding>
 
 /**
  * Composite key for a skill revision row: one skill name may hold several
