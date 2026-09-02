@@ -778,3 +778,118 @@ describe('hover, drag and dismissal behave independently', () => {
     expect(PET_CSS).toContain('bottom:100%')
   })
 })
+
+describe('settings surface follows the DSH type scale', () => {
+  it('uses the official font tokens instead of ad-hoc sizes', () => {
+    // Each `--dsw-font-*` token carries its own line-height; declaring a bare
+    // font-size left the vertical rhythm to the browser default, which is the
+    // main reason the panel read as cramped and inconsistent.
+    expect(PET_CSS).toContain('var(--dsw-font-s-14')
+    expect(PET_CSS).toContain('var(--dsw-font-xxs-12')
+  })
+
+  it('uses the business accent for focus rings, not the neutral brand token', () => {
+    // `--dsw-alias-brand-primary` resolves to #0f1115 (near-black), so using
+    // it as a focus ring with a blue fallback meant the ring changed colour
+    // depending on whether the token resolved.
+    expect(PET_CSS).toContain('var(--dsw-alias-state-business-primary')
+    expect(PET_CSS).not.toContain('var(--dsw-alias-brand-primary,#3370ff)')
+  })
+
+  it('gives every settings tab the same group rhythm', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+    const titles = [...settings.matchAll(/className="dshpet-group-title"/g)].length
+    const groups = [...settings.matchAll(/className="dshpet-group"/g)].length
+
+    // Previously only General wrapped its sections, so the other three tabs
+    // had no padding, gap or divider at all.
+    expect(groups).toBe(titles)
+  })
+
+  it('styles every settings input rather than leaving a bare control', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+    const inputs = [...settings.matchAll(/<input\b/g)].length
+    const styled = [...settings.matchAll(/<input\s+className="dshpet-input"/g)].length
+    expect(styled).toBe(inputs)
+  })
+})
+
+describe('settings expose the configuration they claim to', () => {
+  it('offers the optional Pet agent preset', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // Tasks 4.3 and 10.2 both require it; the Host accepted `agentPreset` all
+    // along but no control ever let a user set it.
+    expect(settings).toContain('Agent preset')
+    expect(settings).toContain('agentPreset: preset.trim()')
+  })
+
+  it('resets the Pet position through a broadcast, not a bare storage delete', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const position = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'position.ts'),
+      'utf8',
+    )
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // The overlay reads the stored position once into React state, so
+    // clearing the key alone did nothing until a reload — the button looked
+    // broken because it was.
+    expect(position).toContain('PET_POSITION_RESET_EVENT')
+    expect(overlay).toContain('PET_POSITION_RESET_EVENT')
+  })
+
+  it('offers a Host directory picker for Skill import', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // The path is a HOST path, so a browser file input would be wrong — it
+    // yields the user's own machine. A deployment without the native
+    // capability simply gets no picker and keeps typing.
+    expect(settings).toContain('directoryPicker')
+    expect(settings).toContain('Browse')
+    expect(settings).not.toContain('type="file"')
+  })
+
+  it('shows bindings read-only until the user chooses to edit', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    expect(settings).toContain('setEditing(true)')
+    expect(settings).toContain('dshpet-readonly')
+    // A rejected save keeps the form open with the input preserved.
+    expect(settings).toContain('setEditing(false)')
+  })
+
+  it('renders diagnostics as labelled facts instead of a JSON dump', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    expect(settings).toContain('<Fact label="Lifecycle"')
+    expect(settings).not.toContain("JSON.stringify(data?.['lifecycle']")
+  })
+})

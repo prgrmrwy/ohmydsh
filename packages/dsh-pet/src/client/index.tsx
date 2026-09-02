@@ -15,10 +15,11 @@
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 // Type-only merge: pulls the `shell.overlay` SlotMap declaration into this
 // program so the registration is compile-time checked.
+import type {} from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { PetOverlay, type SourceSelection } from './overlay.js'
-import { PetSettingsSection } from './settings.js'
+import { PetSettingsSection, setDirectoryPicker } from './settings.js'
 import {
   PET_SETTINGS_NAV_CSS,
   registerPetSettingsNavIcon,
@@ -37,7 +38,7 @@ import { PET_CSS } from './styles.js'
  * is how the shipped sidebar plugin resolves the same dependency. It also
  * fixes an undeclared-access bug: `readCurrentSource` reads both services.
  */
-export const inject = ['slots', 'sessions', 'workspaces']
+export const inject = ['slots', 'sessions', 'workspaces', 'connection']
 
 /**
  * Mount the Pet overlay and settings section.
@@ -83,6 +84,21 @@ export function apply(ctx: ClientContext): void {
       PetSettingsSection,
     ),
   )
+
+  // Publish the Host directory picker to the settings page. Pet asks for a
+  // Host path (the machine running `dsh web`), so a browser file input would
+  // be wrong: it yields the USER's machine. `host.pickDirectory` is served
+  // only under the `native` capability, so a remote deployment simply gets
+  // no picker and keeps typing the path.
+  setDirectoryPicker(async () => {
+    const connection = ctx.get('connection') as
+      | { rpc?: { host?: { pickDirectory?: (payload: unknown) => Promise<unknown> } } }
+      | undefined
+    const pick = connection?.rpc?.host?.pickDirectory
+    if (pick === undefined) return undefined
+    const response = (await pick({})) as { result?: { ok?: boolean; value?: { path?: string | null } } }
+    return response.result?.ok === true ? (response.result.value?.path ?? undefined) : undefined
+  })
 
   // DSH 0.1.x picks settings-nav icons from a closed list of built-in ids, so
   // Pet's row would otherwise render the fallback gear. Mark our own row (and
