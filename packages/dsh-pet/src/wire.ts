@@ -24,6 +24,7 @@ export const ROUTES = {
   skillImport: '/dsh-pet/api/skill-import',
   skillMutate: '/dsh-pet/api/skill-mutate',
   projectionRebuild: '/dsh-pet/api/projection-rebuild',
+  workspaceRepair: '/dsh-pet/api/workspace-repair',
   tasks: '/dsh-pet/api/tasks',
   taskDetail: '/dsh-pet/api/task-detail',
   invocationCreate: '/dsh-pet/api/invocation-create',
@@ -347,6 +348,8 @@ export type PetErrorCode =
   | 'SKILL_DIGEST_MISMATCH'
   | 'SKILL_IMPORT_REJECTED'
   | 'PROJECTION_DRIFT'
+  /** Workspace files an executor depends on are missing and could not be repaired. */
+  | 'WORKSPACE_UNHEALTHY'
   | 'MODEL_UNAVAILABLE'
   | 'BINDING_INVALID'
   | 'ARCHIVE_BLOCKED'

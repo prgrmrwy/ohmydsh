@@ -44,7 +44,11 @@ import { registerPetTools } from './host/tools.js'
 import { currentAllowlist } from './host/skill-provider.js'
 import { removeLegacyState } from './host/migrate.js'
 import { petDomainSpec } from './host/spec.js'
-import { ensurePetWorkspace } from './host/workspace.js'
+import {
+  ensurePetWorkspace,
+  inspectWorkspace,
+  repairWorkspace,
+} from './host/workspace.js'
 
 export const name = 'dsh-pet'
 
@@ -388,6 +392,14 @@ async function initialize(
     resolver,
     contextProviders,
     workspacePath: paths.workspaceRoot,
+    // Self-heal at the moment a session needs the Workspace: preparation runs
+    // once at boot, so anything deleted or left stale afterwards would
+    // otherwise persist until the next restart.
+    ensureWorkspace: async () => {
+      const health = await inspectWorkspace(paths)
+      if (health.ok) return []
+      return (await repairWorkspace(paths)).problems
+    },
     selection,
     executorSetup,
     verifySkill: async skillName => {
@@ -460,6 +472,8 @@ async function initialize(
     packageVersion: version,
     changes,
     archiveSink,
+    inspectWorkspace: () => inspectWorkspace(paths),
+    repairWorkspace: () => repairWorkspace(paths),
     listPresets: async () => {
       // Enumerate what this Host actually offers; a free-text preset name
       // could name a composition that does not exist.

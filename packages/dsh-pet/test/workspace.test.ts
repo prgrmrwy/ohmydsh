@@ -2,12 +2,16 @@
  * Pet Workspace materialization.
  */
 
-import { lstat, mkdtemp, readFile } from 'node:fs/promises'
+import { lstat, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ensurePetDirectories, resolvePetPaths } from '../src/host/paths.js'
-import { preparePetWorkspace } from '../src/host/workspace.js'
+import {
+  inspectWorkspace,
+  preparePetWorkspace,
+  repairWorkspace,
+} from '../src/host/workspace.js'
 describe('standing instructions are package-owned but copied', () => {
   it('materializes a real file, not a symlink into the package', async () => {
     const home = await mkdtemp(path.join(tmpdir(), 'pet-home-'))
@@ -48,5 +52,76 @@ describe('standing instructions are package-owned but copied', () => {
     await expect(readFile(path.resolve(__dirname, '..', 'AGENTS.md'), 'utf8')).resolves.toContain(
       'DSH Pet executor session',
     )
+  })
+})
+
+describe('the Workspace self-heals instead of staying broken', () => {
+  it('detects a deleted instructions file', async () => {
+    const home = await mkdtemp(path.join(tmpdir(), 'pet-home-'))
+    const paths = resolvePetPaths(home)
+    await ensurePetDirectories(paths)
+    await preparePetWorkspace(paths)
+    await rm(path.join(paths.workspaceRoot, 'AGENTS.md'))
+
+    const health = await inspectWorkspace(paths)
+
+    // Preparation runs once at boot, so a file deleted afterwards would
+    // otherwise persist until the next restart.
+    expect(health.ok).toBe(false)
+    expect(health.problems.join(' ')).toContain('missing')
+  })
+
+  it('detects instructions left stale by a package upgrade', async () => {
+    const home = await mkdtemp(path.join(tmpdir(), 'pet-home-'))
+    const paths = resolvePetPaths(home)
+    await ensurePetDirectories(paths)
+    await preparePetWorkspace(paths)
+    await writeFile(path.join(paths.workspaceRoot, 'AGENTS.md'), 'outdated text\n')
+
+    const health = await inspectWorkspace(paths)
+
+    expect(health.ok).toBe(false)
+    expect(health.problems.join(' ')).toContain('stale')
+  })
+
+  it('repairs a symlink WITHOUT writing through it', async () => {
+    const home = await mkdtemp(path.join(tmpdir(), 'pet-home-'))
+    const paths = resolvePetPaths(home)
+    await ensurePetDirectories(paths)
+    await preparePetWorkspace(paths)
+
+    const decoy = path.join(home, 'decoy.md')
+    await writeFile(decoy, 'PACKAGE CONTENT')
+    const target = path.join(paths.workspaceRoot, 'AGENTS.md')
+    await rm(target)
+    await symlink(decoy, target)
+
+    const health = await repairWorkspace(paths)
+
+    // `writeFile` FOLLOWS a symlink, so a naive repair would overwrite the
+    // package's own file and leave the bad link in place.
+    expect(health.ok).toBe(true)
+    expect(await readFile(decoy, 'utf8')).toBe('PACKAGE CONTENT')
+    expect((await lstat(target)).isSymbolicLink()).toBe(false)
+  })
+
+  it('restores a missing projection directory', async () => {
+    const home = await mkdtemp(path.join(tmpdir(), 'pet-home-'))
+    const paths = resolvePetPaths(home)
+    await ensurePetDirectories(paths)
+    await preparePetWorkspace(paths)
+    await rm(paths.projectionRoot, { recursive: true })
+
+    expect((await inspectWorkspace(paths)).ok).toBe(false)
+    expect((await repairWorkspace(paths)).ok).toBe(true)
+  })
+
+  it('reports healthy right after preparation', async () => {
+    const home = await mkdtemp(path.join(tmpdir(), 'pet-home-'))
+    const paths = resolvePetPaths(home)
+    await ensurePetDirectories(paths)
+    await preparePetWorkspace(paths)
+
+    expect(await inspectWorkspace(paths)).toEqual({ ok: true, problems: [] })
   })
 })

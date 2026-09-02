@@ -54,6 +54,8 @@ export interface CoordinatorDeps {
   readonly resolver: SourceResolver
   readonly contextProviders: SourceContextRegistry
   readonly workspacePath: string
+  /** Repairs Workspace files before an executor session is created. */
+  readonly ensureWorkspace?: () => Promise<readonly string[]>
   /** Resolves the validated Pet model selection at dispatch time. */
   readonly selection: () => PetModelSelection
   /**
@@ -201,6 +203,9 @@ export class PetCoordinator {
           : {}),
         ...(validated.sourceTitle !== undefined ? { sourceTitle: validated.sourceTitle } : {}),
         workspacePath: this.deps.workspacePath,
+        ...(this.deps.ensureWorkspace !== undefined
+          ? { ensureWorkspace: this.deps.ensureWorkspace }
+          : {}),
         selection: this.deps.selection(),
         // Scope the executor before it is published: the allowlist provider
         // and Pet tools must exist before the first prompt is assembled.
