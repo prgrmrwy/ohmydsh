@@ -123,9 +123,10 @@ async function performStart(request: StartOperationRequest, deps: OperationDeps)
     if (operation !== undefined) validateReplay(operation, request, repo.repoRoot)
     // Resolve the dependency project type before creating ANY Git resource or
     // operation file (fail-closed for unsupported/mixed lockfiles).
-    const packageManager = operation === undefined
-      ? await detectPackageManager(request.repoPath)
-      : operation.packageManager ?? 'npm'
+    const resolution = operation === undefined
+      ? await detectPackageManager(repo.repoRoot, git)
+      : { packageManager: operation.packageManager ?? 'npm' }
+    const packageManager = resolution.packageManager
     if (operation === undefined) {
       const baseCommit = await resolveCommit(repo.repoRoot, request.baseRef, git)
       const allocation = await allocateTask(repo.repoRoot, request.taskText, git)
@@ -142,6 +143,11 @@ async function performStart(request: StartOperationRequest, deps: OperationDeps)
         taskHash: hashTask(request.taskText),
         dependencyMode: 'lean',
         packageManager,
+        ...(resolution.adoption === undefined ? {} : {
+          diagnostics: [
+            `混合 lockfile 裁决：采信 ${resolution.adoption.packageManager}（依据 ${resolution.adoption.signal === 'packageManager-field' ? 'package.json 的 packageManager 声明' : 'Git 跟踪状态'}），忽略 ${resolution.adoption.ignoredLockfile}`,
+          ],
+        }),
         dshHome: join(repo.gitCommonDir, 'ws', 'dsh-home', request.operationId),
         phase: 'allocated',
         createdAt: timestamp,

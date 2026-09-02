@@ -20,16 +20,28 @@ binding fails, the source draft and images remain intact and are not submitted
 from the repository checkout. A claimed but unconfirmed admission becomes
 `uncertain` and is not automatically submitted again.
 
+Project type is resolved from the repository-root lockfile before any branch,
+worktree, operation file, or binding is created. A single `package-lock.json`
+or `pnpm-lock.yaml` selects npm or pnpm respectively. If both lockfiles are
+present, WS first honors a supported `packageManager` declaration in
+`package.json`, then adopts the lockfile that is tracked by Git when exactly
+one is tracked; the selected manager and ignored lockfile are recorded in
+operation diagnostics. If no unique signal proves the repository intent, WS
+refuses the request rather than guessing a default manager.
+
 ## Dependency modes and promote
 
 New Worktree Sessions are **lean by default**:
 
-- `lean`: `node_modules` is a verified link to a cache addressed by
-  `package-lock.json`, Node major, and npm major. Before any install, removal,
-  update, or other dependency mutation, the Agent must run `ws promote` for the
-  current bound Session.
-- `mutable`: worktree-local `npm ci` has succeeded and operation metadata has
-  been updated. Only then may the Agent perform dependency mutations.
+- `lean` for npm: `node_modules` is a verified link to a cache addressed by
+  `package-lock.json`, Node major, and npm major. `lean` for pnpm installs from
+  `pnpm-lock.yaml` inside the bound worktree and reuses pnpm's global store;
+  workspace-internal links therefore continue to point at that worktree's own
+  sources. Before any install, removal, update, or other dependency mutation,
+  the Agent must run `ws promote` for the current bound Session.
+- `mutable`: the package-manager-specific full install has succeeded (`npm ci`
+  for npm, or `pnpm install --frozen-lockfile` for pnpm) and operation metadata
+  has been updated. Only then may the Agent perform dependency mutations.
 
 Promotion is Agent-driven and preserves the Session binding. It updates
 metadata and UI status, but does not change the stable model runtime context.
