@@ -224,7 +224,7 @@ describe('settings information architecture', () => {
 
     // Pet executors are ordinary Agents, so the model is the Host's default.
     // There is no Pet-owned copy for the user to set or keep in sync.
-    expect(markup).toContain('follow DSH')
+    expect(markup).toContain('跟随 DSH')
     expect(markup).not.toMatch(/type="password"/)
     expect(markup.toLowerCase()).not.toContain('api key')
   })
@@ -254,7 +254,7 @@ describe('settings information architecture', () => {
       createElement(PetSettingsSection, { initialTab: 'bindings' as const }),
     )
 
-    expect(markup).toContain('never supply a raw destination')
+    expect(markup).toContain('模型永远无法自行指定目的地')
   })
 })
 
@@ -424,7 +424,7 @@ describe('Skills tab surfaces explicit upgrades', () => {
     // A packaged upgrade is recorded as available but never applied silently,
     // so the user needs a visible, explicit way to adopt it.
     expect(settings).toContain('upgradeAvailableDigest')
-    expect(settings).toContain('upgrade available')
+    expect(settings).toContain('有可用升级')
     expect(settings).toContain("action: 'upgrade'")
   })
 })
@@ -451,7 +451,7 @@ describe('configured behavior is applied, not just displayed', () => {
     )
 
     expect(settings).toContain('defaultContextPolicy: next')
-    expect(settings).toContain('<option value="none">')
+    expect(settings).toContain("value: 'none'")
   })
 
   it('gates a capability that declares it requires confirmation', async () => {
@@ -832,8 +832,8 @@ describe('settings expose the configuration they claim to', () => {
 
     // Tasks 4.3 and 10.2 both require it; the Host accepted `agentPreset` all
     // along but no control ever let a user set it.
-    expect(settings).toContain('Agent preset')
-    expect(settings).toContain('agentPreset: preset.trim()')
+    expect(settings).toContain('Agent 预设')
+    expect(settings).toContain('agentPreset: next')
   })
 
   it('resets the Pet position through a broadcast, not a bare storage delete', async () => {
@@ -865,7 +865,7 @@ describe('settings expose the configuration they claim to', () => {
     // yields the user's own machine. A deployment without the native
     // capability simply gets no picker and keeps typing.
     expect(settings).toContain('directoryPicker')
-    expect(settings).toContain('Browse')
+    expect(settings).toContain('浏览')
     expect(settings).not.toContain('type="file"')
   })
 
@@ -889,7 +889,49 @@ describe('settings expose the configuration they claim to', () => {
       'utf8',
     )
 
-    expect(settings).toContain('<Fact label="Lifecycle"')
+    expect(settings).toContain('<Fact label="生命周期"')
     expect(settings).not.toContain("JSON.stringify(data?.['lifecycle']")
+  })
+})
+
+describe('stored settings share one read-only-until-edit pattern', () => {
+  it('routes every persisted value through the shared field', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // Preset, context policy and all three binding fields are stored values,
+    // so each shows its current setting until the user opts into editing.
+    const fields = [...settings.matchAll(/<StoredField/g)].length
+    expect(fields).toBeGreaterThanOrEqual(5)
+  })
+
+  it('returns to read-only only after the write succeeds', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+    const field = settings.slice(settings.indexOf('function StoredField'))
+
+    // A rejected save must keep the editor open with the input preserved so
+    // the invalid field can be corrected.
+    expect(field).toContain('.then(() => {')
+    expect(field).toContain('setEditing(false)')
+    expect(field).toContain('.catch((cause: unknown) =>')
+  })
+
+  it('renders the panel in Chinese', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'general' as const }),
+    )
+
+    expect(markup).toContain('模型')
+    expect(markup).toContain('Agent 预设')
+    expect(markup).toContain('重置桌宠位置')
+    // The tab strip is Chinese too.
+    expect(markup).toContain('通用')
   })
 })
