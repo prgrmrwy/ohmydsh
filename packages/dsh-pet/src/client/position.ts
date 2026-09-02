@@ -95,20 +95,3 @@ export function writePosition(
   return clamped
 }
 
-/** Event announcing that the stored position was cleared. */
-export const PET_POSITION_RESET_EVENT = 'dsh-pet:position-reset'
-
-/**
- * Clear the stored position and tell any live Pet surface to re-read it.
- *
- * Removing the key alone is not enough: the overlay reads the position once,
- * into React state, so a Settings reset appeared to do nothing until the page
- * was reloaded. Broadcasting lets the mounted surface snap back immediately.
- * @param storage - Storage implementation; defaults to `localStorage`.
- */
-export function resetPosition(
-  storage: Pick<Storage, 'removeItem'> | undefined = globalThis.localStorage,
-): void {
-  storage?.removeItem(POSITION_KEY)
-  globalThis.dispatchEvent?.(new Event(PET_POSITION_RESET_EVENT))
-}

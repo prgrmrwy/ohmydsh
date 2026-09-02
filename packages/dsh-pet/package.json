@@ -19,10 +19,10 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "AGENTS.md",
     "LICENSE",
     "README.md",
     "cordis.patch.yml",
+    "executor-instructions.md",
     "lib",
     "skills"
   ],
