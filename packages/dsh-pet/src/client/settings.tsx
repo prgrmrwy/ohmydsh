@@ -615,7 +615,7 @@ function SkillsTab(): JSX.Element {
             )
         }}
       >
-        Inspect
+        检查
       </button>
 
       {preview !== undefined ? (
@@ -624,18 +624,21 @@ function SkillsTab(): JSX.Element {
             <strong>{String(preview['skillName'])}</strong> — {String(preview['description'])}
           </p>
           <p className="dshpet-item-hint">
-            {String(preview['fileCount'])} files, {String(preview['totalBytes'])} bytes
+            {String(preview['fileCount'])} 个文件，{String(preview['totalBytes'])} 字节
           </p>
-          <p className="dshpet-item-hint">Digest: {String(preview['digest'])}</p>
+          <p className="dshpet-item-hint">
+            将链接到 <code className="dshpet-code">{String(preview['canonicalSourcePath'])}</code>
+          </p>
           <p className="dshpet-error">
-            A Skill is trusted executable instruction content. Only import bundles you trust.
+            Skill 是会被 Agent 执行的指令内容，只加入你信任的目录。
+            加入后 Pet 直接链接该目录，你之后对它的修改会立即生效。
           </p>
           <button
             type="button"
             className="dshpet-action"
             onClick={() => {
-              // Step 2: separately confirmed install, pinned to the exact
-              // digest the user was shown.
+              // Step 2: separately confirmed registration of the exact
+              // directory the user was shown.
               void petApi
                 .importSkill(path)
                 .then(() => {

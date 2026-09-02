@@ -65,7 +65,7 @@ describe('bundle inspection', () => {
     const root = await mkdtemp(path.join(tmpdir(), 'pet-bundle-'))
     await writeFile(path.join(root, 'README.md'), 'no entry file')
 
-    await expect(inspectBundle(root)).rejects.toThrow(/missing a regular SKILL\.md/)
+    await expect(inspectBundle(root)).rejects.toThrow(/is not a Skill/)
   })
 
   it('rejects an invalid skill name', async () => {
@@ -150,5 +150,28 @@ describe('registration links the source instead of copying it', () => {
 
     // This is the point of linking: the Skill is live, not a snapshot.
     expect((await inspectBundle(root)).description).toBe('After')
+  })
+})
+
+describe('a non-Skill directory says what to pick instead', () => {
+  it('names the nested candidates when a parent directory is chosen', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'pet-bundle-'))
+    await mkdir(path.join(root, 'alpha'), { recursive: true })
+    await writeFile(
+      path.join(root, 'alpha', 'SKILL.md'),
+      '---\nname: alpha\ndescription: Alpha\n---\nBody\n',
+    )
+
+    // Picking the directory that HOLDS several Skills is the common mistake;
+    // "missing a regular SKILL.md" alone did not say what to do about it.
+    await expect(inspectBundle(root)).rejects.toThrow(/alpha/)
+    await expect(inspectBundle(root)).rejects.toThrow(/directly contains/)
+  })
+
+  it('still reports plainly when there is nothing to suggest', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'pet-bundle-'))
+    await writeFile(path.join(root, 'notes.txt'), 'no skill here')
+
+    await expect(inspectBundle(root)).rejects.toThrow(/is not a Skill/)
   })
 })

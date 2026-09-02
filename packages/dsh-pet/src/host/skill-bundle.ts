@@ -242,9 +242,20 @@ export async function inspectBundle(sourcePath: string): Promise<BundleInspectio
   const entryPath = path.join(canonical, SKILL_ENTRY_FILE)
   const entryInfo = await lstat(entryPath).catch(() => undefined)
   if (entryInfo === undefined || !entryInfo.isFile()) {
+    // Name the likely mistake: users commonly pick the parent directory that
+    // holds several Skills, or a subdirectory such as `scripts/`.
+    const children = await readdir(canonical, { withFileTypes: true }).catch(() => [])
+    const nested = children
+      .filter(child => child.isDirectory())
+      .map(child => child.name)
+      .slice(0, 5)
+    const hint =
+      nested.length > 0
+        ? ` Pick the directory that directly contains ${SKILL_ENTRY_FILE} — perhaps one of: ${nested.join(', ')}.`
+        : ''
     throw new PetError(
       'SKILL_IMPORT_REJECTED',
-      `Skill bundle is missing a regular ${SKILL_ENTRY_FILE}`,
+      `${canonical} has no ${SKILL_ENTRY_FILE}, so it is not a Skill.${hint}`,
     )
   }
 
