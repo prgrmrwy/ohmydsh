@@ -125,6 +125,13 @@ dsh stop    # 3. 停止服务
 - **逃生门 & 频道**:想钉在旧版,`dsh.yaml` 置 `autoUpdate.enabled: false` 或临时 `DSH_SKIP_UPDATE=1 dsh`;追 `next`(前夜版)用 `DSH_UPDATE_CHANNEL=next dsh`(或改 `autoUpdate.channel`);
 - 升级/跳过/离线事件记录在 `~/.dsh/dsh-startup.log`,`dsh history` 可见。
 
+**临时 rc.2 运行体防卡死策略**（默认启用）：
+
+- `@deepseek-ai/dsh@0.1.1-rc.2` 已有精确版本的 npx 或 ohmydsh pnpm 缓存时，启动、build 和官方 CLI 都直接执行缓存入口，不重复运行 npx 计算预发布 peer 依赖；
+- 两级缓存都缺失时，rc.2 默认跳过已观察到可能长期卡死的 npm/libnpmexec 通道，改用有超时、临时 staging 和完整性校验的 pnpm 固定缓存；失败不会换用其他 DSH 版本，也不会覆盖已有可用缓存；
+- 仅用于隔离诊断或验证上游修复时，可单次运行 `DSH_ALLOW_NPX_PROVISION=1 dsh ...` 恢复 npx-first，但仍受超时保护；它与只控制版本检测的 `DSH_SKIP_UPDATE=1` 含义不同；
+- `dsh stop` 始终只做本地进程/UI 清理，不触发 npm/npx/pnpm。临时策略的删除 gate：隔离冷 npx install、连续 build、重复 restart 均能在超时内稳定通过后，删除 `scripts/lib/dsh-cli.mjs` 中唯一的 rc.2 策略项及对应测试。
+
 **局域网访问**(`dsh.yaml` 的 `web.lan`,**默认关闭**):
 
 - 需要时把 `web.lan` 改为 `true` 后 `dsh build`;sync 会把 webserver 绑到 `0.0.0.0`,启动时除 `http://127.0.0.1:<端口>` 外同时打印局域网地址 `http://<本机IP>:<端口>`,同一局域网的其他设备(手机/平板等)可直接打开;
