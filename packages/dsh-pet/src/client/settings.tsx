@@ -1,7 +1,7 @@
 /**
  * Pet settings section: four stable tabs.
  *
- * General, Skills, Bindings and Diagnostics are a FIXED information
+ * General, Skills, Bindings and 诊断信息s are a FIXED information
  * architecture — the overlay and Task panel deliberately do not duplicate
  * installation, binding editing or diagnostics.
  *
@@ -25,6 +25,134 @@ export type PetSettingsTab = (typeof PET_SETTINGS_TABS)[number]
  * @param props - Optionally the initially selected tab, for deep links.
  * @returns the rendered section.
  */
+/**
+ * A stored setting: read-only until the user chooses to edit.
+ *
+ * Every persisted value in this panel behaves the same way — you can see what
+ * is configured without exposing it to an accidental keystroke, and a change
+ * only lands when you save. A rejected save keeps the editor open with the
+ * input preserved so the invalid field can be corrected.
+ *
+ * @param props - Label, current value, options for a choice field, and the
+ *   save handler which may reject with a user-facing message.
+ * @returns the rendered setting row.
+ */
+function StoredField(props: {
+  readonly label: string
+  readonly value: string
+  readonly placeholder?: string
+  readonly options?: readonly { value: string; label: string }[]
+  readonly emptyText?: string
+  readonly onSave: (next: string) => Promise<void>
+}): JSX.Element {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(props.value)
+  const [error, setError] = useState<string | undefined>(undefined)
+  const [busy, setBusy] = useState(false)
+
+  // Adopt an externally refreshed value while not editing, so a save
+  // elsewhere is reflected instead of showing a stale copy.
+  useEffect(() => {
+    if (!editing) setDraft(props.value)
+  }, [props.value, editing])
+
+  const shown = props.value.trim()
+  const display =
+    shown === ''
+      ? (props.emptyText ?? '未设置')
+      : (props.options?.find(option => option.value === shown)?.label ?? shown)
+
+  if (!editing) {
+    return (
+      <div className="dshpet-field">
+        <span className="dshpet-fact-key">{props.label}</span>
+        <div className="dshpet-row">
+          <span className="dshpet-readonly" data-empty={shown === ''}>
+            {display}
+          </span>
+          <button
+            type="button"
+            className="dshpet-action"
+            onClick={() => {
+              setError(undefined)
+              setEditing(true)
+            }}
+          >
+            编辑
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  const commit = (): void => {
+    setError(undefined)
+    setBusy(true)
+    void props
+      .onSave(draft.trim())
+      .then(() => {
+        // Return to read-only only once the write actually succeeded.
+        setEditing(false)
+      })
+      .catch((cause: unknown) =>
+        setError(cause instanceof Error ? cause.message : String(cause)),
+      )
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <div className="dshpet-field">
+      <span className="dshpet-fact-key">{props.label}</span>
+      {props.options === undefined ? (
+        <input
+          className="dshpet-input"
+          value={draft}
+          placeholder={props.placeholder ?? ''}
+          onChange={event => setDraft(event.target.value)}
+        />
+      ) : (
+        <select
+          className="dshpet-input"
+          value={draft}
+          onChange={event => setDraft(event.target.value)}
+        >
+          {props.options.map(option => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      )}
+      <div className="dshpet-actions">
+        <button type="button" className="dshpet-action" disabled={busy} onClick={commit}>
+          保存
+        </button>
+        <button
+          type="button"
+          className="dshpet-action"
+          disabled={busy}
+          onClick={() => {
+            setError(undefined)
+            setDraft(props.value)
+            setEditing(false)
+          }}
+        >
+          取消
+        </button>
+      </div>
+      {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
+    </div>
+  )
+}
+
+/** Chinese labels for the stable tab ids, which stay English on the wire. */
+const TAB_LABELS: Record<PetSettingsTab, string> = {
+  general: '通用',
+  skills: 'Skill',
+  bindings: '绑定',
+  diagnostics: '诊断',
+}
+
 export function PetSettingsSection(props: { initialTab?: PetSettingsTab } = {}): JSX.Element {
   const [tab, setTab] = useState<PetSettingsTab>(props.initialTab ?? 'general')
 
@@ -42,8 +170,7 @@ export function PetSettingsSection(props: { initialTab?: PetSettingsTab } = {}):
             className="dshpet-tab"
             onClick={() => setTab(name)}
           >
-            {name[0]?.toUpperCase()}
-            {name.slice(1)}
+            {TAB_LABELS[name]}
           </button>
         ))}
       </div>
@@ -52,7 +179,7 @@ export function PetSettingsSection(props: { initialTab?: PetSettingsTab } = {}):
         {tab === 'general' ? <GeneralTab /> : null}
         {tab === 'skills' ? <SkillsTab /> : null}
         {tab === 'bindings' ? <BindingsTab /> : null}
-        {tab === 'diagnostics' ? <DiagnosticsTab /> : null}
+        {tab === 'diagnostics' ? <诊断信息sTab /> : null}
       </div>
     </div>
   )
@@ -79,95 +206,79 @@ function GeneralTab(): JSX.Element {
   return (
     <div className="dshpet-settings">
       <section className="dshpet-group">
-        <h3 className="dshpet-group-title">Agent</h3>
+        <h3 className="dshpet-group-title">模型</h3>
         <p className="dshpet-item-hint">
-          Pet executors follow DSH&apos;s default model. Change it in
-          Settings &rarr; 模型, and Pet picks it up on the next Invocation &mdash;
-          no Pet-side setting to keep in sync.
+          Pet 执行会话跟随 DSH 的默认模型。在「设置 → 模型」修改后，下一次调用即生效，
+          Pet 侧无需另行配置，也不会出现两处不一致。
         </p>
-        <p className="dshpet-item-hint">
-          Currently: <code>{config?.providerId ?? '…'}</code>
-          {config?.modelId !== undefined ? <> / <code>{config.modelId}</code></> : null}
-        </p>
+        <div className="dshpet-fact">
+          <span className="dshpet-fact-key">当前模型</span>
+          <span className="dshpet-fact-value">
+            <code>{config?.providerId ?? '…'}</code>
+            {config?.modelId !== undefined ? <> / <code>{config.modelId}</code></> : null}
+          </span>
+        </div>
         {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
       </section>
 
       <section className="dshpet-group">
-        <h3 className="dshpet-group-title">Agent preset</h3>
+        <h3 className="dshpet-group-title">Agent 预设</h3>
         <p className="dshpet-item-hint">
-          Optional DSH Agent preset for Pet executors. Leave empty to use the
-          default composition. The preset selects the executor&apos;s tools and
-          instructions; the model still follows DSH.
+          Pet 执行会话可选的 DSH Agent 预设。留空则使用默认组合。
+          预设决定执行会话的工具与指令，模型仍跟随 DSH。
         </p>
-        <label className="dshpet-field">
-          Preset name
-          <input
-            className="dshpet-input"
-            value={preset}
-            placeholder="(default composition)"
-            onChange={event => setPreset(event.target.value)}
-          />
-        </label>
+        <StoredField
+          label="预设名称"
+          value={config?.agentPreset ?? ''}
+          placeholder="（默认组合）"
+          emptyText="默认组合"
+          onSave={async next => {
+            const updated = await petApi.updateConfig({ agentPreset: next })
+            setConfig(updated)
+          }}
+        />
+      </section>
+
+      <section className="dshpet-group">
+        <h3 className="dshpet-group-title">外观</h3>
+        <p className="dshpet-item-hint">
+          把桌宠移回默认位置（右下角）。当前位置保存在本浏览器中。
+        </p>
         <div className="dshpet-actions">
           <button
             type="button"
             className="dshpet-action"
             onClick={() => {
-              setError(undefined)
-              void petApi
-                .updateConfig({ agentPreset: preset.trim() })
-                .then(next => {
-                  setConfig(next)
-                  setPreset(next.agentPreset ?? '')
-                })
-                .catch((cause: unknown) =>
-                  setError(cause instanceof Error ? cause.message : String(cause)),
-                )
+              // Broadcasts, so a mounted Pet snaps back at once instead of
+              // waiting for a page reload.
+              resetPosition()
             }}
           >
-            Save preset
+            重置桌宠位置
           </button>
         </div>
       </section>
 
       <section className="dshpet-group">
-        <h3 className="dshpet-group-title">Appearance</h3>
-      <button
-        type="button"
-        className="dshpet-action"
-        onClick={() => {
-          resetPosition()
-        }}
-      >
-        Reset Pet position
-      </button>
-      </section>
-
-      <section className="dshpet-group">
-        <h3 className="dshpet-group-title">New tasks</h3>
-      <p className="dshpet-item-hint">
-        Which source a new Task starts with. <code>none</code> starts unattached,
-        so an optional-context capability runs independently unless you pick a source.
-      </p>
-      <label className="dshpet-field">
-        Default context policy
-        <select className="dshpet-input"
+        <h3 className="dshpet-group-title">新建任务</h3>
+        <p className="dshpet-item-hint">
+          新任务默认关联哪个来源。选择「不关联」时任务独立运行，
+          除非你在调用前手动指定来源。
+        </p>
+        <StoredField
+          label="默认上下文策略"
           value={config?.defaultContextPolicy ?? 'current-session'}
-          onChange={event => {
-            const next = event.target.value === 'none' ? 'none' : 'current-session'
-            setError(undefined)
-            void petApi
-              .updateConfig({ defaultContextPolicy: next })
-              .then(setConfig)
-              .catch((cause: unknown) =>
-                setError(cause instanceof Error ? cause.message : String(cause)),
-              )
+          options={[
+            { value: 'current-session', label: '当前会话' },
+            { value: 'none', label: '不关联' },
+          ]}
+          onSave={async next => {
+            const updated = await petApi.updateConfig({
+              defaultContextPolicy: next === 'none' ? 'none' : 'current-session',
+            })
+            setConfig(updated)
           }}
-        >
-          <option value="current-session">current-session</option>
-          <option value="none">none</option>
-        </select>
-      </label>
+        />
       </section>
     </div>
   )
@@ -225,7 +336,7 @@ function SkillsTab(): JSX.Element {
   return (
     <div className="dshpet-settings">
       <section className="dshpet-group">
-      <h3 className="dshpet-group-title">Import from this machine</h3>
+      <h3 className="dshpet-group-title">从本机导入</h3>
       <p className="dshpet-item-hint">
         Absolute path on the Host running <code>dsh web</code> — not this browser&apos;s machine.
       </p>
@@ -254,7 +365,7 @@ function SkillsTab(): JSX.Element {
                 )
             }}
           >
-            Browse…
+            浏览…
           </button>
         ) : null}
       </div>
@@ -311,7 +422,7 @@ function SkillsTab(): JSX.Element {
       </section>
 
       <section className="dshpet-group">
-      <h3 className="dshpet-group-title">Installed</h3>
+      <h3 className="dshpet-group-title">已安装</h3>
       {state.revisions.length === 0 ? <p className="dshpet-empty">No Skills installed.</p> : null}
       {state.revisions.map(revision => {
         const selection = state.selections.find(item => item.skillName === revision.skillName)
@@ -322,7 +433,7 @@ function SkillsTab(): JSX.Element {
             <span className="dshpet-status">{enabled ? 'enabled' : 'installed'}</span>
             {enabled && selection?.upgradeAvailableDigest !== undefined ? (
               <span className="dshpet-status" style={{ marginLeft: 4 }}>
-                upgrade available
+                有可用升级
               </span>
             ) : null}
             <p className="dshpet-item-hint">
@@ -357,7 +468,7 @@ function SkillsTab(): JSX.Element {
                     .then(refresh)
                 }
               >
-                {selection?.showAsShortcut === false ? 'Show in menu' : 'Hide from menu'}
+                {selection?.showAsShortcut === false ? '在菜单显示' : '从菜单隐藏'}
               </button>
               {enabled && selection?.upgradeAvailableDigest !== undefined ? (
                 <button
@@ -406,9 +517,9 @@ function SkillsTab(): JSX.Element {
       </section>
 
       <section className="dshpet-group">
-      <h3 className="dshpet-group-title">Projection</h3>
+      <h3 className="dshpet-group-title">投影状态</h3>
       {state.projection.length === 0 ? (
-        <p className="dshpet-item-hint">No drift detected.</p>
+        <p className="dshpet-item-hint">未检测到漂移。</p>
       ) : (
         state.projection.map(entry => (
           <p key={entry.skillName} className="dshpet-error">
@@ -461,106 +572,35 @@ function BindingsTab(): JSX.Element {
   return (
     <div className="dshpet-settings">
       <section className="dshpet-group">
-      <h3 className="dshpet-group-title">Workspace bindings</h3>
+      <h3 className="dshpet-group-title">工作区绑定</h3>
       <p className="dshpet-item-hint">
-        Side-effect destinations come from these trusted bindings. The model can never supply a
-        raw destination.
+        副作用的目的地只来自这些可信绑定，模型永远无法自行指定目的地。
       </p>
-      {editing ? (
-        <>
-          <label className="dshpet-field">
-            Workspace id
-            <input
-              className="dshpet-input"
-              value={draft.workspaceId}
-              onChange={event => setDraft({ ...draft, workspaceId: event.target.value })}
-            />
-          </label>
-          <label className="dshpet-field">
-            Business
-            <input
-              className="dshpet-input"
-              value={draft.business}
-              onChange={event => setDraft({ ...draft, business: event.target.value })}
-            />
-          </label>
-          <label className="dshpet-field">
-            CR group id
-            <input
-              className="dshpet-input"
-              value={draft.crGroupId}
-              onChange={event => setDraft({ ...draft, crGroupId: event.target.value })}
-            />
-          </label>
-          <div className="dshpet-row">
-            <button
-              type="button"
-              className="dshpet-action"
-              onClick={() => {
-                setError(undefined)
-                setSaved(false)
-                void petApi
-                  .updateBinding({ ...draft })
-                  .then(() => {
-                    setSaved(true)
-                    // Return to read-only only on success; a rejected write
-                    // keeps the form open with the input preserved so the
-                    // user can correct the invalid field.
-                    setEditing(false)
-                    return refresh()
-                  })
-                  .catch((cause: unknown) =>
-                    setError(cause instanceof Error ? cause.message : String(cause)),
-                  )
-              }}
-            >
-              Save binding
-            </button>
-            <button
-              type="button"
-              className="dshpet-action"
-              onClick={() => {
-                setError(undefined)
-                setEditing(false)
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="dshpet-fact">
-            <span className="dshpet-fact-key">Workspace id</span>
-            <span className="dshpet-readonly" data-empty={draft.workspaceId === ''}>
-              {draft.workspaceId === '' ? 'not set' : draft.workspaceId}
-            </span>
-          </div>
-          <div className="dshpet-fact">
-            <span className="dshpet-fact-key">Business</span>
-            <span className="dshpet-readonly" data-empty={draft.business === ''}>
-              {draft.business === '' ? 'not set' : draft.business}
-            </span>
-          </div>
-          <div className="dshpet-fact">
-            <span className="dshpet-fact-key">CR group id</span>
-            <span className="dshpet-readonly" data-empty={draft.crGroupId === ''}>
-              {draft.crGroupId === '' ? 'not set' : draft.crGroupId}
-            </span>
-          </div>
-          <button
-            type="button"
-            className="dshpet-action"
-            onClick={() => {
-              setSaved(false)
-              setEditing(true)
-            }}
-          >
-            Edit
-          </button>
-        </>
-      )}
-      {saved ? <span className="dshpet-item-hint"> Saved.</span> : null}
+      <StoredField
+        label="工作区 ID"
+        value={draft.workspaceId}
+        onSave={async next => {
+          await petApi.updateBinding({ ...draft, workspaceId: next })
+          setDraft(current => ({ ...current, workspaceId: next }))
+        }}
+      />
+      <StoredField
+        label="业务线"
+        value={draft.business}
+        onSave={async next => {
+          await petApi.updateBinding({ ...draft, business: next })
+          setDraft(current => ({ ...current, business: next }))
+        }}
+      />
+      <StoredField
+        label="CR 群 ID"
+        value={draft.crGroupId}
+        placeholder="oc_..."
+        onSave={async next => {
+          await petApi.updateBinding({ ...draft, crGroupId: next })
+          setDraft(current => ({ ...current, crGroupId: next }))
+        }}
+      />
       {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
       </section>
     </div>
@@ -570,7 +610,7 @@ function BindingsTab(): JSX.Element {
 /**
  * One labelled diagnostic fact.
  *
- * Diagnostics previously dumped raw JSON, which is dense and hard to scan; a
+ * 诊断信息s previously dumped raw JSON, which is dense and hard to scan; a
  * label/value pair reads at a glance while still showing the exact value.
  * @param props - Label, value and whether to render the value monospaced.
  * @returns the rendered row.
@@ -586,8 +626,8 @@ function Fact(props: { label: string; value: string; mono?: boolean }): JSX.Elem
   )
 }
 
-/** Diagnostics: lifecycle, paths, digests, drift and explicit repair. */
-function DiagnosticsTab(): JSX.Element {
+/** 诊断信息s: lifecycle, paths, digests, drift and explicit repair. */
+function 诊断信息sTab(): JSX.Element {
   const [data, setData] = useState<Record<string, unknown> | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
 
@@ -617,25 +657,25 @@ function DiagnosticsTab(): JSX.Element {
   return (
     <div className="dshpet-settings">
       <section className="dshpet-group">
-        <h3 className="dshpet-group-title">Status</h3>
+        <h3 className="dshpet-group-title">运行状态</h3>
         <div className="dshpet-facts">
-          <Fact label="Lifecycle" value={lifecycle?.phase ?? '…'} />
+          <Fact label="生命周期" value={lifecycle?.phase ?? '…'} />
           {lifecycle?.diagnostic !== undefined ? (
-            <Fact label="Diagnostic" value={lifecycle.diagnostic} />
+            <Fact label="诊断信息" value={lifecycle.diagnostic} />
           ) : null}
           <Fact
-            label="Enabled skills"
+            label="已启用 Skill"
             value={
               allowlist.length === 0
-                ? 'none'
+                ? '无'
                 : allowlist.map(entry => entry.skillName).join(', ')
             }
           />
           <Fact
-            label="Projection"
+            label="投影"
             value={
               drift.length === 0
-                ? 'in sync'
+                ? '一致'
                 : `${drift.length} entr${drift.length === 1 ? 'y' : 'ies'} drifted`
             }
           />
@@ -654,7 +694,7 @@ function DiagnosticsTab(): JSX.Element {
       </section>
 
       <section className="dshpet-group">
-        <h3 className="dshpet-group-title">Storage</h3>
+        <h3 className="dshpet-group-title">存储路径</h3>
         <div className="dshpet-facts">
           {Object.entries(paths).map(([key, value]) => (
             <Fact key={key} label={key} value={String(value)} mono />
@@ -663,7 +703,7 @@ function DiagnosticsTab(): JSX.Element {
       </section>
 
       <section className="dshpet-group">
-        <h3 className="dshpet-group-title">Actions</h3>
+        <h3 className="dshpet-group-title">操作</h3>
         <div className="dshpet-actions">
           <button
             type="button"
@@ -680,7 +720,7 @@ function DiagnosticsTab(): JSX.Element {
       </section>
 
       <section className="dshpet-group">
-      <h3 className="dshpet-group-title">Channels</h3>
+      <h3 className="dshpet-group-title">渠道</h3>
       <p className="dshpet-item-hint">
         Channel bindings and external replies are not part of this phase. Future channel secrets
         will be stored as protected references and never displayed.
