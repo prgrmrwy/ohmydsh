@@ -427,3 +427,24 @@ describe('the executor composes without local-root Skill discovery', () => {
     expect(captured).toBe('dsh-pet-executor')
   })
 })
+
+describe('startup accounts executors that were never attached', () => {
+  it('the entry runs a workspace accounting pass over live Tasks', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const nodePath = await import('node:path')
+    const entry = await readFile(
+      nodePath.resolve(process.cwd(), 'src', 'index.ts'),
+      'utf8',
+    )
+    const pass = entry.slice(entry.indexOf("'Pet workspace accounting'"))
+
+    // Attaching only at creation cannot reach an executor made before that
+    // existed, nor one whose attach failed: it keeps working but never
+    // appears under DSH Pet. Only a startup pass recovers those.
+    expect(pass.slice(0, 700)).toContain('repository.listTasks()')
+    expect(pass.slice(0, 700)).toContain('attachSession')
+    // Skips archived Tasks, and a failure must not block startup.
+    expect(pass.slice(0, 700)).toContain('task.archivedAt !== undefined')
+    expect(pass.slice(0, 700)).toContain('.catch(() => undefined)')
+  })
+})
