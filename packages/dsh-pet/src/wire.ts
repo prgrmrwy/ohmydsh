@@ -277,6 +277,10 @@ export interface PetSkillRevision {
     readonly context?: PetContextRequirement
     readonly confirm?: boolean
   }
+  /** Parameters this Skill declared in its frontmatter. */
+  readonly params?: readonly { name: string; label: string }[]
+  /** Values the user supplied for those parameters. */
+  readonly paramValues?: Readonly<Record<string, string>>
   readonly provenance: PetSkillProvenance
   readonly fileCount: number
   readonly totalBytes: number

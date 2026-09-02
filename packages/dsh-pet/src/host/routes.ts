@@ -172,6 +172,7 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
         skillName: inspection.skillName,
         description: inspection.description,
         whenToUse: inspection.whenToUse,
+        params: inspection.params ?? [],
         fileCount: inspection.fileCount,
         totalBytes: inspection.totalBytes,
         files: inspection.files,
@@ -182,10 +183,27 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
 
     petRoute(ROUTES.skillImport, async ({ body }) => {
       requireReady(lifecycle)
-      const record = strictBody(body, ['path'])
+      const record = strictBody(body, ['path', 'params'])
       // Registration links the user's own directory; nothing is copied, so a
       // later edit to that directory takes effect immediately.
       const inspection = await inspectBundle(requireString(record, 'path'))
+
+      // Accept values only for parameters the Skill actually declared: the
+      // client must not be able to persist arbitrary keys against a Skill.
+      const declared = inspection.params ?? []
+      const supplied = record['params']
+      const paramValues: Record<string, string> = {}
+      if (supplied !== undefined) {
+        if (typeof supplied !== 'object' || supplied === null || Array.isArray(supplied)) {
+          throw new PetError('INVALID_REQUEST', 'params must be an object')
+        }
+        for (const param of declared) {
+          const value = (supplied as Record<string, unknown>)[param.name]
+          if (typeof value === 'string' && value.trim() !== '') {
+            paramValues[param.name] = value.trim()
+          }
+        }
+      }
       const revision = await repository.putSkillRevision({
         skillName: inspection.skillName,
         sourcePath: inspection.canonicalSourcePath,
@@ -193,6 +211,8 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
         // A Skill declares its own Pet presentation and context requirement;
         // Pet ships no per-capability adapter.
         ...(inspection.pet !== undefined ? { pet: inspection.pet } : {}),
+        ...(declared.length > 0 ? { params: declared } : {}),
+        ...(Object.keys(paramValues).length > 0 ? { paramValues } : {}),
         provenance: {
           kind: 'local-link',
           sourcePath: inspection.canonicalSourcePath,

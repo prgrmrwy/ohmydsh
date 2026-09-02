@@ -7,6 +7,7 @@ import {
   collectBundleFiles,
   inspectBundle,
   parseFrontmatter,
+  parseSkillParams,
 } from '../src/host/skill-bundle.js'
 import { ensurePetDirectories, resolvePetPaths } from '../src/host/paths.js'
 
@@ -173,5 +174,42 @@ describe('a non-Skill directory says what to pick instead', () => {
     await writeFile(path.join(root, 'notes.txt'), 'no skill here')
 
     await expect(inspectBundle(root)).rejects.toThrow(/is not a Skill/)
+  })
+})
+
+describe('a Skill declares the parameters it needs', () => {
+  it('parses name and optional label', () => {
+    expect(parseSkillParams('chatId:CR 群 ID, business')).toEqual([
+      { name: 'chatId', label: 'CR 群 ID' },
+      { name: 'business', label: 'business' },
+    ])
+  })
+
+  it('rejects a name that is not a plain identifier', () => {
+    // The name becomes a storage key and is echoed into the envelope, so a
+    // bundle must not be able to inject arbitrary keys through it.
+    expect(parseSkillParams('../etc/passwd, ok')).toEqual([{ name: 'ok', label: 'ok' }])
+    expect(parseSkillParams('a b, has.dot, 9leading')).toEqual([])
+  })
+
+  it('drops duplicates and caps the count', () => {
+    expect(parseSkillParams('a, a, b')).toHaveLength(2)
+    expect(parseSkillParams('a,b,c,d,e,f,g,h,i,j')).toHaveLength(8)
+  })
+
+  it('treats an absent declaration as no parameters', () => {
+    expect(parseSkillParams(undefined)).toEqual([])
+  })
+
+  it('surfaces the declaration through inspection', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'pet-bundle-'))
+    await writeFile(
+      path.join(root, 'SKILL.md'),
+      '---\nname: demo\ndescription: Demo\npetParams: chatId:Chat\n---\nBody\n',
+    )
+
+    const inspection = await inspectBundle(root)
+
+    expect(inspection.params).toEqual([{ name: 'chatId', label: 'Chat' }])
   })
 })

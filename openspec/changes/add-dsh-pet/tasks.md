@@ -206,6 +206,21 @@
   bundles are authored against those exact surfaces and declared in the
   package manifest, and a first boot installs, enables and projects all three.
 
+- [x] 7.11 Skills declare the parameters they need, and Pet collects them at
+  add time. `SKILL.md` frontmatter carries `petParams: name:Label, other`;
+  inspection surfaces the declaration, the add form renders one field per
+  parameter, and the values are persisted with the registration and injected
+  into every Invocation envelope as a "Configured parameters" section.
+
+  This is the mechanism 7.8 deliberately left open when the Bindings page was
+  removed. It puts the declaration where the requirement lives — in the Skill
+  — instead of in a Pet-side page that has to guess what Skills might want.
+
+  Boundaries, verified in a real booted Host: only declared names are stored
+  (an undeclared key sent alongside `chatId` was dropped); a name must be a
+  plain identifier, since it becomes a storage key and is echoed into the
+  envelope; duplicates collapse and the count is capped at 8.
+
 - [x] 7.8 Removed the Bindings surface entirely. It configured a workspace id,
   a `business` tag and a CR chat id — but `business` had ZERO readers anywhere
   in the repository, and after the per-capability adapters were removed in 7.6

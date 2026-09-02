@@ -26,6 +26,8 @@ export function renderEnvelope(options: {
   readonly invocation: PetInvocationRecord
   readonly snapshot: PetSourceSnapshot
   readonly isFirst: boolean
+  /** Values the user supplied when the Skill was added. */
+  readonly skillParams?: Readonly<Record<string, string>>
 }): string {
   const { task, invocation, snapshot } = options
   const lines: string[] = []
@@ -60,6 +62,14 @@ export function renderEnvelope(options: {
     lines.push('### User request')
     lines.push('')
     lines.push(invocation.request.slice(0, MAX_REQUEST_CHARS))
+    lines.push('')
+  }
+
+  const params = Object.entries(options.skillParams ?? {})
+  if (params.length > 0) {
+    lines.push('### Configured parameters')
+    lines.push('')
+    for (const [name, value] of params) lines.push(`- ${name}: \`${value}\``)
     lines.push('')
   }
 

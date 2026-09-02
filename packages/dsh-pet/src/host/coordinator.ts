@@ -321,7 +321,18 @@ export class PetCoordinator {
       startedAt: Date.now(),
     })
 
-    const text = renderEnvelope({ task, invocation: next, snapshot, isFirst })
+    // Carry the values the user configured when adding the Skill, so a Skill
+    // that needs a destination gets it without asking on every Invocation.
+    const registration = repository.getSkillRevision(next.skillName)
+    const text = renderEnvelope({
+      task,
+      invocation: next,
+      snapshot,
+      isFirst,
+      ...(registration?.paramValues !== undefined
+        ? { skillParams: registration.paramValues }
+        : {}),
+    })
     try {
       await this.deps.dispatcher.dispatch(task.executorSessionId, text)
     } catch (error) {
