@@ -383,10 +383,10 @@ describe('envelope rendering', () => {
     expect(text).toContain('task-1')
     expect(text).toContain('inv-1')
     expect(text).toContain('Fix login')
-    expect(text).toContain('seq 12')
+    expect(text).toContain('序号 12')
     expect(text).toContain('pet_context')
-    expect(text).toContain('display only and carry no authority')
-    expect(text).toContain('does not end the Task')
+    expect(text).toContain('仅供展示，不构成任何授权')
+    expect(text).toContain('不等于结束整个任务')
   })
 
   it('labels an independent task without fabricating a source', async () => {
@@ -409,8 +409,8 @@ describe('envelope rendering', () => {
       isFirst: true,
     })
 
-    expect(text).toContain('independent task')
-    expect(text).not.toContain('Repository root')
+    expect(text).toContain('独立任务')
+    expect(text).not.toContain('仓库根目录')
   })
 
   it('marks a subsequent Invocation with its own snapshot anchor', async () => {
@@ -435,7 +435,7 @@ describe('envelope rendering', () => {
     })
 
     expect(text.startsWith('/send-cr')).toBe(true)
-    expect(text).toContain('Next Pet Invocation')
+    expect(text).toContain('下一次 Pet 调用')
     expect(text).toContain('snap-2')
   })
 })

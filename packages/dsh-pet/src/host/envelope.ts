@@ -41,30 +41,30 @@ export function renderEnvelope(options: {
   lines.push(`/${invocation.skillName}`)
   lines.push('')
 
-  lines.push(options.isFirst ? '## Pet Task started' : '## Next Pet Invocation')
+  lines.push(options.isFirst ? '## Pet 任务开始' : '## 下一次 Pet 调用')
   lines.push('')
-  lines.push(`- Task: \`${task.id}\` (epoch #${task.epoch})`)
-  lines.push(`- Invocation: \`${invocation.id}\``)
-  lines.push(`- Capability: \`${invocation.capabilityId}\``)
+  lines.push(`- 任务：\`${task.id}\`（第 ${task.epoch} 轮）`)
+  lines.push(`- 调用：\`${invocation.id}\``)
+  lines.push(`- 能力：\`${invocation.capabilityId}\``)
 
   if (snapshot.sourceKind === 'none') {
-    lines.push('- Source: **independent task** (no source DSH session or workspace)')
+    lines.push('- 来源：**独立任务**（不关联任何 DSH 会话或工作区）')
   } else {
     const label = snapshot.sessionTitle ?? snapshot.workspaceTitle ?? '(untitled)'
-    lines.push(`- Source ${snapshot.sourceKind}: ${label}`)
-    if (snapshot.cwd !== undefined) lines.push(`- Repository root: \`${snapshot.cwd}\``)
+    lines.push(`- 来源${snapshot.sourceKind === 'session' ? '会话' : '工作区'}：${label}`)
+    if (snapshot.cwd !== undefined) lines.push(`- 仓库根目录：\`${snapshot.cwd}\``)
     if (snapshot.worktree !== undefined) {
-      lines.push(`- Managed execution root: \`${snapshot.worktree.executionRoot}\``)
+      lines.push(`- 受管执行根目录：\`${snapshot.worktree.executionRoot}\``)
     }
   }
   lines.push(
-    `- Snapshot: \`${snapshot.id}\` captured ${new Date(snapshot.capturedAt).toISOString()}` +
-      (snapshot.asOfSeq !== undefined ? ` at seq ${snapshot.asOfSeq}` : ''),
+    `- 快照：\`${snapshot.id}\`，捕获于 ${new Date(snapshot.capturedAt).toISOString()}` +
+      (snapshot.asOfSeq !== undefined ? `（序号 ${snapshot.asOfSeq}）` : ''),
   )
   lines.push('')
 
   if (invocation.request !== undefined && invocation.request.trim() !== '') {
-    lines.push('### User request')
+    lines.push('### 用户请求')
     lines.push('')
     lines.push(invocation.request.slice(0, MAX_REQUEST_CHARS))
     lines.push('')
@@ -72,22 +72,22 @@ export function renderEnvelope(options: {
 
   const params = Object.entries(options.skillParams ?? {})
   if (params.length > 0) {
-    lines.push('### Configured parameters')
+    lines.push('### 已配置参数')
     lines.push('')
     for (const [name, value] of params) lines.push(`- ${name}: \`${value}\``)
     lines.push('')
   }
 
   lines.push(
-    `Call \`${PET_CONTEXT_TOOL}\` now to obtain the authorized snapshot for this Invocation. ` +
-      'The details above are display only and carry no authority.',
+    `现在调用 \`${PET_CONTEXT_TOOL}\` 获取本次调用被授权的快照。` +
+      '以上信息仅供展示，不构成任何授权。用中文回复。',
   )
 
   if (options.isFirst) {
     lines.push('')
     lines.push(
-      'This session is a Pet executor and will host further Invocations for this Task; ' +
-        'completing this one does not end the Task.',
+      '这个会话是 Pet 执行会话，之后还会承载该任务的更多调用；' +
+        '完成本次调用不等于结束整个任务。',
     )
   }
   return lines.join('\n')

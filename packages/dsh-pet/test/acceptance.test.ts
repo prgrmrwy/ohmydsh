@@ -376,7 +376,7 @@ describe('Task, executor and Invocation flow', () => {
     })
 
     expect(accepted.task.scopeKey).toBe('independent:web:default')
-    expect(deployment.dispatched[0]?.text).toContain('independent task')
+    expect(deployment.dispatched[0]?.text).toContain('独立任务')
   })
 })
 

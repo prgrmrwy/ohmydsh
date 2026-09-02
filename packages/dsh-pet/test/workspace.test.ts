@@ -38,7 +38,7 @@ describe('standing instructions are package-owned but copied', () => {
     const text = await readFile(path.join(paths.workspaceRoot, 'AGENTS.md'), 'utf8')
 
     // The copy is self-contained: nothing resolves back into the package.
-    expect(text).toContain('DSH Pet Task Agent')
+    expect(text).toContain('DSH Pet 任务 Agent')
     expect(text).not.toContain('node_modules')
   })
 
@@ -51,7 +51,7 @@ describe('standing instructions are package-owned but copied', () => {
     expect(pkg.files).toContain('executor-instructions.md')
     await expect(
       readFile(path.resolve(__dirname, '..', 'executor-instructions.md'), 'utf8'),
-    ).resolves.toContain('DSH Pet executor session')
+    ).resolves.toContain('DSH Pet 执行会话')
 
     // NOT `AGENTS.md` in the package: that is DSH's directory-level
     // instruction convention, so anyone working inside `packages/dsh-pet`
