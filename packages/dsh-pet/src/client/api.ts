@@ -95,6 +95,8 @@ export const petApi = {
   capabilities: (): Promise<{ capabilities: PetCapability[] }> => call(ROUTES.capabilities),
   presets: (): Promise<{ presets: readonly { id: string; label: string }[] }> =>
     call(ROUTES.presets),
+  repairWorkspace: (): Promise<{ ok: boolean; problems: readonly string[] }> =>
+    call(ROUTES.workspaceRepair),
   skills: (): Promise<Record<string, unknown>> => call(ROUTES.skills),
   inspectSkill: (path: string): Promise<Record<string, unknown>> =>
     call(ROUTES.skillInspect, { path }),

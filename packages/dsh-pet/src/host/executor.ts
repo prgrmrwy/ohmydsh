@@ -114,6 +114,14 @@ export interface CreateExecutorOptions {
   readonly sourceId?: string
   readonly sourceTitle?: string
   readonly workspacePath: string
+  /**
+   * Repairs the Workspace files an executor depends on, returning what could
+   * not be fixed. Preparation runs once at boot, so a file deleted or left
+   * stale afterwards must be caught here — at the moment a session actually
+   * needs it — rather than silently producing an executor with no identity
+   * briefing.
+   */
+  readonly ensureWorkspace?: () => Promise<readonly string[]>
   readonly selection: PetModelSelection
   /** Scoped composition installed on the executor Agent (Pet skill provider, tools). */
   readonly setup?: (agentCtx: unknown) => void | Promise<void>
@@ -153,6 +161,17 @@ export async function createTaskWithExecutor(
     revision: 0,
   }
   await repository.createTask(pending)
+
+  // Self-heal before the session exists. A remaining problem is reported
+  // rather than silently accepted: an executor without its standing
+  // instructions does not know it is a Pet Task Agent.
+  const unresolved = (await options.ensureWorkspace?.()) ?? []
+  if (unresolved.length > 0) {
+    throw new PetError(
+      'WORKSPACE_UNHEALTHY',
+      `Pet Workspace is not usable: ${unresolved.join('; ')}`,
+    )
+  }
 
   try {
     await agents.create({

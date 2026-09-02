@@ -701,6 +701,9 @@ function 诊断信息sTab(): JSX.Element {
     void refresh()
   }, [refresh])
 
+  const workspace = data?.['workspace'] as
+    | { ok?: boolean; problems?: readonly string[] }
+    | undefined
   const lifecycle = data?.['lifecycle'] as
     | { phase?: string; diagnostic?: string }
     | undefined
@@ -727,6 +730,14 @@ function 诊断信息sTab(): JSX.Element {
               allowlist.length === 0
                 ? '无'
                 : allowlist.map(entry => entry.skillName).join(', ')
+            }
+          />
+          <Fact
+            label="工作区文件"
+            value={
+              workspace?.ok === false
+                ? (workspace.problems ?? []).join('；')
+                : '正常'
             }
           />
           <Fact

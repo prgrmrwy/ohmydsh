@@ -43,6 +43,10 @@ export interface RouteDeps {
   readonly followedModel?: () => { providerId: string; modelId: string } | undefined
   /** Agent presets this Host offers, for the Settings picker. */
   readonly listPresets?: () => Promise<readonly { id: string; label: string }[]>
+  /** Inspects the Workspace files an executor session depends on. */
+  readonly inspectWorkspace?: () => Promise<{ ok: boolean; problems: readonly string[] }>
+  /** Restores those files, returning what could not be repaired. */
+  readonly repairWorkspace?: () => Promise<{ ok: boolean; problems: readonly string[] }>
 }
 
 /** Desired projection derived from the current allowlist. */
@@ -135,6 +139,14 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
         agentPreset: updated.agentPreset,
         defaultContextPolicy: updated.defaultContextPolicy,
       }
+    }),
+
+    petRoute(ROUTES.workspaceRepair, async () => {
+      // Explicit, user-applied repair. Sessions also self-heal on creation,
+      // but a visible action lets the user fix a reported problem directly.
+      const health = (await deps.repairWorkspace?.()) ?? { ok: true, problems: [] }
+      deps.changes.publish()
+      return { ok: health.ok, problems: health.problems }
     }),
 
     petRoute(ROUTES.presets, async () => ({
@@ -361,6 +373,7 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
 
     petRoute(ROUTES.diagnostics, async () => ({
       lifecycle: lifecycle.state,
+      workspace: (await deps.inspectWorkspace?.()) ?? { ok: true, problems: [] },
       paths: {
         stateRoot: paths.stateRoot,
         databaseFile: paths.databaseFile,
