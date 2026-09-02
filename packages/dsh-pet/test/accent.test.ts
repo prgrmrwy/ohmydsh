@@ -49,11 +49,10 @@ function saturation(hex: string): number {
 }
 
 describe('the palette is muted by construction', () => {
-  it('offers the eight requested colours plus a default', () => {
-    expect(PET_ACCENTS).toHaveLength(9)
+  it('offers the seven requested hues plus a default', () => {
+    expect(PET_ACCENTS).toHaveLength(8)
     expect(PET_ACCENTS.map(a => a.id)).toEqual([
       'default',
-      'black',
       'red',
       'orange',
       'yellow',
