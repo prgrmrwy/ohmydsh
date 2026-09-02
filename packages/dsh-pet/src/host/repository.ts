@@ -442,7 +442,7 @@ export class PetRepository {
   async putSkillRevision(revision: PetSkillRevision): Promise<PetSkillRevision> {
     await this.domain
       .table('skill_revisions')
-      .put(revisionKey(revision.skillName), revision)
+      .put(revisionKey(revision.skillName), revision as never)
     return revision
   }
 

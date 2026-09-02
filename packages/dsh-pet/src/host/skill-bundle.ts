@@ -51,6 +51,8 @@ export interface BundleInspection {
     readonly context?: PetContextRequirement
     readonly confirm?: boolean
   }
+  /** Parameters the Skill asks for when it is added. */
+  readonly params?: readonly PetSkillParam[]
   readonly files: readonly BundleFile[]
   readonly fileCount: number
   readonly totalBytes: number
@@ -80,6 +82,50 @@ interface SkillFrontmatter {
   readonly petContext?: string
   /** `true` makes the radial menu ask for a second, explicit click. */
   readonly petConfirm?: string
+  /**
+   * Parameters this Skill needs, collected once when the Skill is added.
+   *
+   * Comma-separated, each `name` or `name:Label`. Kept to a flat scalar so the
+   * frontmatter parser stays non-executing — a bundle must not be able to
+   * smuggle behavior through richer syntax.
+   */
+  readonly petParams?: string
+}
+
+/** One parameter a Skill asks the user to supply when it is added. */
+export interface PetSkillParam {
+  /** Stable key the Skill reads from its Invocation context. */
+  readonly name: string
+  /** Human-readable prompt; defaults to the name. */
+  readonly label: string
+}
+
+/**
+ * Parse the `petParams` declaration.
+ *
+ * Accepts `name` or `name:Label`, comma-separated. Names are restricted to a
+ * conservative identifier shape and capped in count, so a bundle cannot use
+ * this channel to inject arbitrary keys or flood the settings form.
+ * @param raw - Raw frontmatter value.
+ * @returns the declared parameters, in order, without duplicates.
+ */
+export function parseSkillParams(raw: string | undefined): readonly PetSkillParam[] {
+  if (raw === undefined) return []
+  const seen = new Set<string>()
+  const params: PetSkillParam[] = []
+  for (const chunk of raw.split(',')) {
+    const [rawName, ...rest] = chunk.split(':')
+    const name = (rawName ?? '').trim()
+    // Reject anything that is not a plain identifier: the name becomes a
+    // storage key and is echoed into the Invocation envelope.
+    if (!/^[A-Za-z][A-Za-z0-9_-]{0,39}$/.test(name)) continue
+    if (seen.has(name)) continue
+    seen.add(name)
+    const label = rest.join(':').trim()
+    params.push({ name, label: label === '' ? name : label })
+    if (params.length >= 8) break
+  }
+  return params
 }
 
 /**
@@ -135,6 +181,7 @@ export function parseFrontmatter(content: string): SkillFrontmatter {
     ...(fields['petIcon'] !== undefined ? { petIcon: fields['petIcon'] } : {}),
     ...(fields['petContext'] !== undefined ? { petContext: fields['petContext'] } : {}),
     ...(fields['petConfirm'] !== undefined ? { petConfirm: fields['petConfirm'] } : {}),
+    ...(fields['petParams'] !== undefined ? { petParams: fields['petParams'] } : {}),
   }
 }
 
@@ -285,6 +332,9 @@ export async function inspectBundle(sourcePath: string): Promise<BundleInspectio
     skillName,
     description: frontmatter.description,
     ...(frontmatter.whenToUse !== undefined ? { whenToUse: frontmatter.whenToUse } : {}),
+    ...(parseSkillParams(frontmatter.petParams).length > 0
+      ? { params: parseSkillParams(frontmatter.petParams) }
+      : {}),
     ...(frontmatter.petLabel !== undefined ||
     frontmatter.petIcon !== undefined ||
     frontmatter.petContext !== undefined ||

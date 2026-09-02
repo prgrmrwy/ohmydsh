@@ -142,6 +142,13 @@ const petSkillRevision = z.object({
       confirm: z.boolean().optional(),
     })
     .optional(),
+  // Parameters the Skill declared, and the values the user supplied when
+  // adding it. Stored with the registration so a capability can be dispatched
+  // without asking again on every Invocation.
+  params: z
+    .array(z.object({ name: z.string().min(1), label: z.string().min(1) }))
+    .optional(),
+  paramValues: z.record(z.string(), z.string()).optional(),
   provenance: z.object({
     kind: z.literal('local-link'),
     sourcePath: z.string().optional(),
