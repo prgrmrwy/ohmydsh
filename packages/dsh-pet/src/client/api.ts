@@ -37,7 +37,30 @@ async function call<T>(path: string, body: unknown = {}): Promise<T> {
     credentials: 'same-origin',
     body: JSON.stringify(body),
   })
-  const payload = (await response.json()) as PetResponse<T>
+  // Read as text first. A Pet route that never registered answers 405 with an
+  // empty body, and calling `response.json()` on that surfaces
+  // "Unexpected end of JSON input" — a parse error that hides the real
+  // problem. Anything that is not a Pet JSON envelope is reported as what it
+  // actually is.
+  const raw = await response.text()
+  if (raw.trim() === '') {
+    throw new PetApiError(
+      'PET_UNAVAILABLE',
+      response.status === 405 || response.status === 404
+        ? 'Pet 的管理接口尚未注册，通常是 Host 未就绪或需要重启 DSH。'
+        : `Pet 返回了空响应（HTTP ${response.status}）。`,
+    )
+  }
+
+  let payload: PetResponse<T>
+  try {
+    payload = JSON.parse(raw) as PetResponse<T>
+  } catch {
+    throw new PetApiError(
+      'PET_UNAVAILABLE',
+      `Pet 返回了非预期的响应（HTTP ${response.status}）：${raw.slice(0, 120)}`,
+    )
+  }
   if (!payload.ok) throw new PetApiError(payload.error, payload.message)
   return payload.data
 }
