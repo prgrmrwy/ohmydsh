@@ -325,17 +325,17 @@ export class PetCoordinator {
       startedAt: Date.now(),
     })
 
-    // Carry whatever values the user configured when adding this Skill. Pet
-    // does not interpret them: the Skill declared the names, the user chose
-    // the values, and the Skill decides what they mean.
+    // Carry the free-text arguments the user configured for this Skill. Pet
+    // does not parse them: they are appended after the skill token and the
+    // Skill's own instructions decide what they mean.
     const registration = repository.getSkillRevision(next.skillName)
     const text = renderEnvelope({
       task,
       invocation: next,
       snapshot,
       isFirst,
-      ...(registration?.paramValues !== undefined
-        ? { skillParams: registration.paramValues }
+      ...(registration?.arguments !== undefined && registration.arguments.trim() !== ''
+        ? { skillArguments: registration.arguments }
         : {}),
     })
     try {
