@@ -94,7 +94,14 @@ export const petApi = {
     call(ROUTES.invocationRetry, { invocationId }),
   archive: (taskId: string, revision?: number): Promise<unknown> =>
     call(ROUTES.taskArchive, revision === undefined ? { taskId } : { taskId, revision }),
-  bindings: (): Promise<Record<string, unknown>> => call(ROUTES.bindings),
+  bindings: (): Promise<{
+    bindings: readonly {
+      workspaceId: string
+      business?: string
+      crGroupId?: string
+      reviewers?: readonly string[]
+    }[]
+  }> => call(ROUTES.bindings),
   updateBinding: (binding: Record<string, unknown>): Promise<unknown> =>
     call(ROUTES.bindingsUpdate, binding),
   diagnostics: (): Promise<Record<string, unknown>> => call(ROUTES.diagnostics),

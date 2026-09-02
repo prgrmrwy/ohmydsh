@@ -748,7 +748,7 @@ describe('client bundle loads without Cockpit changes', () => {
     // its `apply` never runs — styles appear but no surface is ever mounted.
     // Naming the services Pet actually reads pulls in packages that do ship
     // bundles and provide the slot registry.
-    expect(exported.inject).toEqual(['slots', 'sessions', 'workspaces'])
+    expect(exported.inject).toEqual(['slots', 'sessions', 'workspaces', 'connection'])
   })
 
   it('declares the web client half in package metadata', async () => {

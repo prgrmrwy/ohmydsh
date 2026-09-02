@@ -9,7 +9,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { PetApiError, petApi } from './api.js'
-import { clampPosition, readPosition, writePosition, type PetPosition } from './position.js'
+import {
+  clampPosition,
+  defaultPosition,
+  PET_POSITION_RESET_EVENT,
+  readPosition,
+  writePosition,
+  type PetPosition,
+} from './position.js'
 import type { PetCapability, PetSourceKind } from '../wire.js'
 
 /** Current browser source selection, captured atomically on invoke. */
@@ -60,6 +67,14 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   >(undefined)
   /** True when the gesture that just ended actually moved Pet. */
   const draggedRef = useRef(false)
+
+  // Settings can clear the stored position; the surface must snap back at
+  // once rather than waiting for a reload, which is why the reset broadcasts.
+  useEffect(() => {
+    const onReset = (): void => setPosition(defaultPosition(viewport))
+    globalThis.addEventListener(PET_POSITION_RESET_EVENT, onReset)
+    return () => globalThis.removeEventListener(PET_POSITION_RESET_EVENT, onReset)
+  }, [viewport.width, viewport.height])
 
   // Re-clamp whenever the viewport changes so Pet can never be stranded.
   useEffect(() => {

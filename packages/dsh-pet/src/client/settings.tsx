@@ -11,6 +11,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
+import { resetPosition } from './position.js'
 import { petApi, type PetConfig } from './api.js'
 import type { PetProjectionEntry, PetSkillRevision, PetSkillSelection } from '../wire.js'
 
@@ -60,6 +61,7 @@ export function PetSettingsSection(props: { initialTab?: PetSettingsTab } = {}):
 /** General: the followed model, appearance reset and default context policy. */
 function GeneralTab(): JSX.Element {
   const [config, setConfig] = useState<PetConfig | undefined>(undefined)
+  const [preset, setPreset] = useState('')
   const [error, setError] = useState<string | undefined>(undefined)
 
   // The model is read-only here: Pet follows DSH's default selection, so
@@ -67,7 +69,10 @@ function GeneralTab(): JSX.Element {
   useEffect(() => {
     void petApi
       .config()
-      .then(setConfig)
+      .then(value => {
+        setConfig(value)
+        setPreset(value.agentPreset ?? '')
+      })
       .catch((cause: unknown) => setError(String(cause)))
   }, [])
 
@@ -88,12 +93,50 @@ function GeneralTab(): JSX.Element {
       </section>
 
       <section className="dshpet-group">
+        <h3 className="dshpet-group-title">Agent preset</h3>
+        <p className="dshpet-item-hint">
+          Optional DSH Agent preset for Pet executors. Leave empty to use the
+          default composition. The preset selects the executor&apos;s tools and
+          instructions; the model still follows DSH.
+        </p>
+        <label className="dshpet-field">
+          Preset name
+          <input
+            className="dshpet-input"
+            value={preset}
+            placeholder="(default composition)"
+            onChange={event => setPreset(event.target.value)}
+          />
+        </label>
+        <div className="dshpet-actions">
+          <button
+            type="button"
+            className="dshpet-action"
+            onClick={() => {
+              setError(undefined)
+              void petApi
+                .updateConfig({ agentPreset: preset.trim() })
+                .then(next => {
+                  setConfig(next)
+                  setPreset(next.agentPreset ?? '')
+                })
+                .catch((cause: unknown) =>
+                  setError(cause instanceof Error ? cause.message : String(cause)),
+                )
+            }}
+          >
+            Save preset
+          </button>
+        </div>
+      </section>
+
+      <section className="dshpet-group">
         <h3 className="dshpet-group-title">Appearance</h3>
       <button
         type="button"
         className="dshpet-action"
         onClick={() => {
-          globalThis.localStorage?.removeItem('dsh.pet.v1.position')
+          resetPosition()
         }}
       >
         Reset Pet position
@@ -130,6 +173,26 @@ function GeneralTab(): JSX.Element {
   )
 }
 
+/**
+ * Host directory picker, published by the client entry when the deployment
+ * serves the `native` capability.
+ *
+ * Pet imports from a HOST path, so a browser file input would be wrong: it
+ * yields the user's own machine. A remote deployment simply gets no picker
+ * and keeps typing the path, which still works.
+ */
+let directoryPicker: (() => Promise<string | undefined>) | undefined
+
+/**
+ * Publish the Host directory picker.
+ * @param picker - Picker returning the chosen path, or `undefined` on cancel.
+ */
+export function setDirectoryPicker(
+  picker: (() => Promise<string | undefined>) | undefined,
+): void {
+  directoryPicker = picker
+}
+
 /** Skills: install, enable/disable, shortcut visibility and projection status. */
 function SkillsTab(): JSX.Element {
   const [state, setState] = useState<{
@@ -160,12 +223,41 @@ function SkillsTab(): JSX.Element {
   }, [refresh])
 
   return (
-    <div>
+    <div className="dshpet-settings">
+      <section className="dshpet-group">
       <h3 className="dshpet-group-title">Import from this machine</h3>
       <p className="dshpet-item-hint">
         Absolute path on the Host running <code>dsh web</code> — not this browser&apos;s machine.
       </p>
-      <input value={path} onChange={event => setPath(event.target.value)} />
+      <div className="dshpet-row">
+        <input
+          className="dshpet-input"
+          value={path}
+          placeholder="/absolute/path/on/the/host"
+          onChange={event => setPath(event.target.value)}
+        />
+        {directoryPicker !== undefined ? (
+          <button
+            type="button"
+            className="dshpet-action"
+            onClick={() => {
+              const pick = directoryPicker
+              if (pick === undefined) return
+              setError(undefined)
+              void pick()
+                .then(picked => {
+                  // Cancellation returns nothing; keep what the user typed.
+                  if (picked !== undefined) setPath(picked)
+                })
+                .catch((cause: unknown) =>
+                  setError(cause instanceof Error ? cause.message : String(cause)),
+                )
+            }}
+          >
+            Browse…
+          </button>
+        ) : null}
+      </div>
       <button
         type="button"
         className="dshpet-action"
@@ -216,7 +308,9 @@ function SkillsTab(): JSX.Element {
           </button>
         </div>
       ) : null}
+      </section>
 
+      <section className="dshpet-group">
       <h3 className="dshpet-group-title">Installed</h3>
       {state.revisions.length === 0 ? <p className="dshpet-empty">No Skills installed.</p> : null}
       {state.revisions.map(revision => {
@@ -309,7 +403,9 @@ function SkillsTab(): JSX.Element {
           </div>
         )
       })}
+      </section>
 
+      <section className="dshpet-group">
       <h3 className="dshpet-group-title">Projection</h3>
       {state.projection.length === 0 ? (
         <p className="dshpet-item-hint">No drift detected.</p>
@@ -328,6 +424,7 @@ function SkillsTab(): JSX.Element {
         Rebuild projection
       </button>
       {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
+      </section>
     </div>
   )
 }
@@ -337,54 +434,154 @@ function BindingsTab(): JSX.Element {
   const [draft, setDraft] = useState({ workspaceId: '', business: '', crGroupId: '' })
   const [error, setError] = useState<string | undefined>(undefined)
   const [saved, setSaved] = useState(false)
+  // Read-only until the user opts into editing, so a stored destination is
+  // visible without exposing it to an accidental keystroke.
+  const [editing, setEditing] = useState(false)
+
+  const refresh = useCallback(async () => {
+    try {
+      const result = await petApi.bindings()
+      const first = result.bindings[0]
+      if (first !== undefined) {
+        setDraft({
+          workspaceId: first.workspaceId,
+          business: first.business ?? '',
+          crGroupId: first.crGroupId ?? '',
+        })
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
 
   return (
-    <div>
+    <div className="dshpet-settings">
+      <section className="dshpet-group">
       <h3 className="dshpet-group-title">Workspace bindings</h3>
       <p className="dshpet-item-hint">
         Side-effect destinations come from these trusted bindings. The model can never supply a
         raw destination.
       </p>
-      <label className="dshpet-field">
-        Workspace id
-        <input className="dshpet-input"
-          value={draft.workspaceId}
-          onChange={event => setDraft({ ...draft, workspaceId: event.target.value })}
-        />
-      </label>
-      <label className="dshpet-field">
-        Business
-        <input className="dshpet-input"
-          value={draft.business}
-          onChange={event => setDraft({ ...draft, business: event.target.value })}
-        />
-      </label>
-      <label className="dshpet-field">
-        CR group id
-        <input className="dshpet-input"
-          value={draft.crGroupId}
-          onChange={event => setDraft({ ...draft, crGroupId: event.target.value })}
-        />
-      </label>
-      <button
-        type="button"
-        className="dshpet-action"
-        onClick={() => {
-          setError(undefined)
-          setSaved(false)
-          void petApi
-            .updateBinding({ ...draft })
-            .then(() => setSaved(true))
-            // Input is preserved so the user can correct the invalid field.
-            .catch((cause: unknown) =>
-              setError(cause instanceof Error ? cause.message : String(cause)),
-            )
-        }}
-      >
-        Save binding
-      </button>
+      {editing ? (
+        <>
+          <label className="dshpet-field">
+            Workspace id
+            <input
+              className="dshpet-input"
+              value={draft.workspaceId}
+              onChange={event => setDraft({ ...draft, workspaceId: event.target.value })}
+            />
+          </label>
+          <label className="dshpet-field">
+            Business
+            <input
+              className="dshpet-input"
+              value={draft.business}
+              onChange={event => setDraft({ ...draft, business: event.target.value })}
+            />
+          </label>
+          <label className="dshpet-field">
+            CR group id
+            <input
+              className="dshpet-input"
+              value={draft.crGroupId}
+              onChange={event => setDraft({ ...draft, crGroupId: event.target.value })}
+            />
+          </label>
+          <div className="dshpet-row">
+            <button
+              type="button"
+              className="dshpet-action"
+              onClick={() => {
+                setError(undefined)
+                setSaved(false)
+                void petApi
+                  .updateBinding({ ...draft })
+                  .then(() => {
+                    setSaved(true)
+                    // Return to read-only only on success; a rejected write
+                    // keeps the form open with the input preserved so the
+                    // user can correct the invalid field.
+                    setEditing(false)
+                    return refresh()
+                  })
+                  .catch((cause: unknown) =>
+                    setError(cause instanceof Error ? cause.message : String(cause)),
+                  )
+              }}
+            >
+              Save binding
+            </button>
+            <button
+              type="button"
+              className="dshpet-action"
+              onClick={() => {
+                setError(undefined)
+                setEditing(false)
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="dshpet-fact">
+            <span className="dshpet-fact-key">Workspace id</span>
+            <span className="dshpet-readonly" data-empty={draft.workspaceId === ''}>
+              {draft.workspaceId === '' ? 'not set' : draft.workspaceId}
+            </span>
+          </div>
+          <div className="dshpet-fact">
+            <span className="dshpet-fact-key">Business</span>
+            <span className="dshpet-readonly" data-empty={draft.business === ''}>
+              {draft.business === '' ? 'not set' : draft.business}
+            </span>
+          </div>
+          <div className="dshpet-fact">
+            <span className="dshpet-fact-key">CR group id</span>
+            <span className="dshpet-readonly" data-empty={draft.crGroupId === ''}>
+              {draft.crGroupId === '' ? 'not set' : draft.crGroupId}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="dshpet-action"
+            onClick={() => {
+              setSaved(false)
+              setEditing(true)
+            }}
+          >
+            Edit
+          </button>
+        </>
+      )}
       {saved ? <span className="dshpet-item-hint"> Saved.</span> : null}
       {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
+      </section>
+    </div>
+  )
+}
+
+/**
+ * One labelled diagnostic fact.
+ *
+ * Diagnostics previously dumped raw JSON, which is dense and hard to scan; a
+ * label/value pair reads at a glance while still showing the exact value.
+ * @param props - Label, value and whether to render the value monospaced.
+ * @returns the rendered row.
+ */
+function Fact(props: { label: string; value: string; mono?: boolean }): JSX.Element {
+  return (
+    <div className="dshpet-fact">
+      <span className="dshpet-fact-key">{props.label}</span>
+      <span className="dshpet-fact-value">
+        {props.mono === true ? <code>{props.value}</code> : props.value}
+      </span>
     </div>
   )
 }
@@ -406,32 +603,89 @@ function DiagnosticsTab(): JSX.Element {
     void refresh()
   }, [refresh])
 
+  const lifecycle = data?.['lifecycle'] as
+    | { phase?: string; diagnostic?: string }
+    | undefined
+  const paths = (data?.['paths'] ?? {}) as Record<string, unknown>
+  const allowlist = (data?.['allowlist'] ?? []) as readonly { skillName: string }[]
+  const drift = (data?.['drift'] ?? []) as readonly {
+    skillName: string
+    status: string
+    diagnostic?: string
+  }[]
+
   return (
-    <div>
-      <h3 className="dshpet-group-title">Host lifecycle</h3>
-      <pre>{JSON.stringify(data?.['lifecycle'], null, 2)}</pre>
-      <h3 className="dshpet-group-title">Paths</h3>
-      <pre>{JSON.stringify(data?.['paths'], null, 2)}</pre>
-      <h3 className="dshpet-group-title">Allowlist</h3>
-      <pre>{JSON.stringify(data?.['allowlist'], null, 2)}</pre>
-      <h3 className="dshpet-group-title">Drift</h3>
-      <pre>{JSON.stringify(data?.['drift'], null, 2)}</pre>
-      <button
-        type="button"
-        className="dshpet-action"
-        onClick={() => void petApi.rebuildProjection().then(refresh)}
-      >
-        Rebuild projection
-      </button>
-      <button type="button" className="dshpet-action" onClick={() => void refresh()}>
-        Refresh
-      </button>
-      {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
+    <div className="dshpet-settings">
+      <section className="dshpet-group">
+        <h3 className="dshpet-group-title">Status</h3>
+        <div className="dshpet-facts">
+          <Fact label="Lifecycle" value={lifecycle?.phase ?? '…'} />
+          {lifecycle?.diagnostic !== undefined ? (
+            <Fact label="Diagnostic" value={lifecycle.diagnostic} />
+          ) : null}
+          <Fact
+            label="Enabled skills"
+            value={
+              allowlist.length === 0
+                ? 'none'
+                : allowlist.map(entry => entry.skillName).join(', ')
+            }
+          />
+          <Fact
+            label="Projection"
+            value={
+              drift.length === 0
+                ? 'in sync'
+                : `${drift.length} entr${drift.length === 1 ? 'y' : 'ies'} drifted`
+            }
+          />
+        </div>
+        {drift.length > 0 ? (
+          <div className="dshpet-facts">
+            {drift.map(entry => (
+              <Fact
+                key={entry.skillName}
+                label={entry.skillName}
+                value={entry.diagnostic ?? entry.status}
+              />
+            ))}
+          </div>
+        ) : null}
+      </section>
+
+      <section className="dshpet-group">
+        <h3 className="dshpet-group-title">Storage</h3>
+        <div className="dshpet-facts">
+          {Object.entries(paths).map(([key, value]) => (
+            <Fact key={key} label={key} value={String(value)} mono />
+          ))}
+        </div>
+      </section>
+
+      <section className="dshpet-group">
+        <h3 className="dshpet-group-title">Actions</h3>
+        <div className="dshpet-actions">
+          <button
+            type="button"
+            className="dshpet-action"
+            onClick={() => void petApi.rebuildProjection().then(refresh)}
+          >
+            Rebuild projection
+          </button>
+          <button type="button" className="dshpet-action" onClick={() => void refresh()}>
+            Refresh
+          </button>
+        </div>
+        {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
+      </section>
+
+      <section className="dshpet-group">
       <h3 className="dshpet-group-title">Channels</h3>
       <p className="dshpet-item-hint">
         Channel bindings and external replies are not part of this phase. Future channel secrets
         will be stored as protected references and never displayed.
       </p>
+      </section>
     </div>
   )
 }
