@@ -26,7 +26,12 @@ export function renderEnvelope(options: {
   readonly invocation: PetInvocationRecord
   readonly snapshot: PetSourceSnapshot
   readonly isFirst: boolean
-  /** Values the user supplied when the Skill was added. */
+  /**
+   * Values the user supplied when this Skill was added.
+   *
+   * Opaque to Pet: the Skill declared the names and consumes them however it
+   * likes. Pet only carries them.
+   */
   readonly skillParams?: Readonly<Record<string, string>>
 }): string {
   const { task, invocation, snapshot } = options

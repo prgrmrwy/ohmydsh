@@ -216,6 +216,12 @@
   removed. It puts the declaration where the requirement lives — in the Skill
   — instead of in a Pet-side page that has to guess what Skills might want.
 
+  The two halves stay decoupled: Pet supports INJECTING values, and the Skill
+  decides what they mean. Pet reserves no parameter name, validates none of
+  them beyond the identifier shape, and carries the values verbatim. A Skill
+  needing a chat id, a retention window or a tone declares whichever names it
+  wants, and the user supplies the values — none of that reaches Pet's code.
+
   Boundaries, verified in a real booted Host: only declared names are stored
   (an undeclared key sent alongside `chatId` was dropped); a name must be a
   plain identifier, since it becomes a storage key and is echoed into the

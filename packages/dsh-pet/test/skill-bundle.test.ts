@@ -213,3 +213,13 @@ describe('a Skill declares the parameters it needs', () => {
     expect(inspection.params).toEqual([{ name: 'chatId', label: 'Chat' }])
   })
 })
+
+describe('parameter names are the Skill authors choice', () => {
+  it('accepts any identifier, with no reserved vocabulary', () => {
+    // Pet must not privilege particular names such as a chat id: what a
+    // parameter means is entirely the Skill's business.
+    const parsed = parseSkillParams('retentionDays:保留天数, tone, wobble_2')
+
+    expect(parsed.map(p => p.name)).toEqual(['retentionDays', 'tone', 'wobble_2'])
+  })
+})

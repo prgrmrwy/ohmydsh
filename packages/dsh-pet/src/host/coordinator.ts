@@ -321,8 +321,9 @@ export class PetCoordinator {
       startedAt: Date.now(),
     })
 
-    // Carry the values the user configured when adding the Skill, so a Skill
-    // that needs a destination gets it without asking on every Invocation.
+    // Carry whatever values the user configured when adding this Skill. Pet
+    // does not interpret them: the Skill declared the names, the user chose
+    // the values, and the Skill decides what they mean.
     const registration = repository.getSkillRevision(next.skillName)
     const text = renderEnvelope({
       task,
