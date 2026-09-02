@@ -19,11 +19,12 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "lib",
-    "skills",
-    "cordis.patch.yml",
+    "AGENTS.md",
+    "LICENSE",
     "README.md",
-    "LICENSE"
+    "cordis.patch.yml",
+    "lib",
+    "skills"
   ],
   "dsh": {
     "bundle": {
