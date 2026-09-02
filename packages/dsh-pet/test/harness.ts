@@ -201,7 +201,7 @@ export function testInvocation(
     taskId: 'task-1',
     capabilityId: 'create-mr',
     skillName: 'create-mr',
-    skillDigest: 'sha256-aaa',
+    skillSourcePath: '/tmp/pet-test-skills/clean-worktree',
     skillSetGeneration: 1,
     snapshotId: 'snap-1',
     status: 'queued',
@@ -213,15 +213,15 @@ export function testInvocation(
 }
 
 /**
- * Install and enable a Skill so it projects as a capability.
+ * Register and enable a Skill so it projects as a capability.
  *
- * Capabilities are derived from installed Skills, so a test that wants one
- * installs a Skill instead of registering Pet-side code — mirroring how a
- * real deployment adds a capability.
+ * Capabilities are derived from registered Skills, so a test that wants one
+ * registers a Skill instead of adding Pet-side code — mirroring how a real
+ * deployment adds a capability.
  * @param harness - Open harness.
  * @param skillName - Skill (and capability) name.
  * @param pet - Optional Pet declarations the SKILL.md frontmatter would carry.
- * @returns the digest the revision was installed under.
+ * @returns the source path the Skill was registered under.
  */
 export async function installTestSkill(
   harness: PetHarness,
@@ -233,20 +233,20 @@ export async function installTestSkill(
     confirm?: boolean
   } = {},
 ): Promise<string> {
-  const digest = `sha256:${skillName}`
+  const sourcePath = `/tmp/pet-test-skills/${skillName}`
   await harness.repository.putSkillRevision({
     skillName,
-    digest,
+    sourcePath,
     description: `${skillName} test skill`,
     ...(Object.keys(pet).length > 0 ? { pet } : {}),
-    provenance: { kind: 'builtin', packageVersion: '0.1.0', installedAt: 1 },
+    provenance: { kind: 'local-link', sourcePath, installedAt: 1 },
     fileCount: 1,
     totalBytes: 32,
   })
   await harness.repository.putSkillSelection({
     skillName,
-    enabledDigest: digest,
+    enabled: true,
     showAsShortcut: true,
   })
-  return digest
+  return sourcePath
 }

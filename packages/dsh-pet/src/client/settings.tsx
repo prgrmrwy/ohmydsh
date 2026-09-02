@@ -352,8 +352,8 @@ function SkillsTab(): JSX.Element {
       <h3 className="dshpet-group-title">从本机导入</h3>
       <p className="dshpet-item-hint">
         填运行 <code className="dshpet-code">dsh web</code> 那台机器上的绝对路径，
-        不是你当前浏览器所在的机器。会先只读检查并展示内容，确认后才复制安装；
-        导入不会自动启用，需要在下方手动启用。
+        不是你当前浏览器所在的机器。会先只读检查并展示内容，确认后再加入；
+        加入后不会自动启用，需要在下方手动启用。
       </p>
       <div className="dshpet-row">
         <input
@@ -420,7 +420,7 @@ function SkillsTab(): JSX.Element {
               // Step 2: separately confirmed install, pinned to the exact
               // digest the user was shown.
               void petApi
-                .importSkill(path, String(preview['digest']))
+                .importSkill(path)
                 .then(() => {
                   setPreview(undefined)
                   return refresh()
@@ -439,49 +439,28 @@ function SkillsTab(): JSX.Element {
       <section className="dshpet-group">
       <h3 className="dshpet-group-title">已安装</h3>
       <p className="dshpet-item-hint">
-        导入时 Pet 会把 Skill 完整复制成一个只读版本（按内容生成摘要），
-        之后你改动原目录也不会影响已安装的版本。
-        「有可用升级」表示 Pet 包里带了新版本，但不会自动切换——
-        已排队的调用仍按接受时锁定的版本执行；点「升级」才会让之后的调用改用新版本。
+        加入的 Skill 直接链接到你给的目录，Pet 不做复制。
+        因此你改动该目录会立即生效，无需重新加入；
+        相应地，目录被删除或移走时该 Skill 会失效，对应能力将拒绝执行。
+        「移除」只解除登记，不会删除你的目录。
       </p>
       {state.revisions.length === 0 ? (
-        <p className="dshpet-empty">尚未安装任何 Skill。</p>
+        <p className="dshpet-empty">尚未加入任何 Skill。</p>
       ) : null}
-      {/*
-        One row per SKILL, not per revision. Several immutable revisions of one
-        Skill coexist by design — an upgrade installs a new one while queued
-        work keeps running the digest it was accepted with — so listing every
-        revision made the same Skill look duplicated.
-      */}
-      {[...new Set(state.revisions.map(revision => revision.skillName))].map(skillName => {
-        const selection = state.selections.find(item => item.skillName === skillName)
-        const revisions = state.revisions.filter(item => item.skillName === skillName)
-        // Show the enabled revision; fall back to the newest installed one so a
-        // disabled Skill still reports where it came from.
-        const active =
-          revisions.find(item => item.digest === selection?.enabledDigest) ?? revisions[0]
-        if (active === undefined) return null
-        const enabled = selection?.enabledDigest !== undefined
-        const upgrade = selection?.upgradeAvailableDigest
-        const retained = revisions.length - 1
+      {state.revisions.map(revision => {
+        const selection = state.selections.find(item => item.skillName === revision.skillName)
+        const enabled = selection?.enabled === true
 
         return (
-          <div key={skillName} className="dshpet-task">
+          <div key={revision.skillName} className="dshpet-task">
             <div className="dshpet-task-head">
-              <strong className="dshpet-task-name">{skillName}</strong>
+              <strong className="dshpet-task-name">{revision.skillName}</strong>
               <span className="dshpet-status" data-tone={enabled ? 'enabled' : undefined}>
-                {enabled ? '已启用' : '已安装'}
+                {enabled ? '已启用' : '未启用'}
               </span>
-              {enabled && upgrade !== undefined ? (
-                <span className="dshpet-status" data-tone="upgrade">
-                  有可用升级
-                </span>
-              ) : null}
             </div>
             <p className="dshpet-item-hint">
-              {active.provenance.kind === 'builtin' ? '内置' : '本机导入'} ·{' '}
-              <code className="dshpet-code">{active.digest.slice(7, 19)}</code>
-              {retained > 0 ? ` · 另保留 ${retained} 个被引用的历史版本` : ''}
+              <code className="dshpet-code">{revision.sourcePath}</code>
             </p>
             <div className="dshpet-actions">
               <button
@@ -490,9 +469,8 @@ function SkillsTab(): JSX.Element {
                 onClick={() =>
                   void petApi
                     .mutateSkill({
-                      skillName,
+                      skillName: revision.skillName,
                       action: enabled ? 'disable' : 'enable',
-                      digest: active.digest,
                     })
                     .then(refresh)
                 }
@@ -505,7 +483,7 @@ function SkillsTab(): JSX.Element {
                 onClick={() =>
                   void petApi
                     .mutateSkill({
-                      skillName,
+                      skillName: revision.skillName,
                       action: 'shortcut',
                       showAsShortcut: !(selection?.showAsShortcut ?? true),
                     })
@@ -514,41 +492,22 @@ function SkillsTab(): JSX.Element {
               >
                 {selection?.showAsShortcut === false ? '在菜单显示' : '从菜单隐藏'}
               </button>
-              {enabled && upgrade !== undefined ? (
-                <button
-                  type="button"
-                  className="dshpet-action dshpet-action-primary"
-                  onClick={() => {
-                    setError(undefined)
-                    // Explicit and user-applied: a packaged upgrade is never
-                    // adopted silently, and queued work keeps its fixed digest.
-                    void petApi
-                      .mutateSkill({ skillName, action: 'upgrade', digest: upgrade })
-                      .then(refresh)
-                      .catch((cause: unknown) =>
-                        setError(cause instanceof Error ? cause.message : String(cause)),
-                      )
-                  }}
-                >
-                  升级
-                </button>
-              ) : null}
               <button
                 type="button"
                 className="dshpet-action dshpet-action-danger"
                 onClick={() => {
                   setError(undefined)
-                  // Uninstall disables the Skill first, then collects only
-                  // revisions no live Task or queued Invocation references.
+                  // Removes the registration only; the user's own directory is
+                  // never touched, because Pet only ever held a link to it.
                   void petApi
-                    .mutateSkill({ skillName, action: 'uninstall' })
+                    .mutateSkill({ skillName: revision.skillName, action: 'remove' })
                     .then(refresh)
                     .catch((cause: unknown) =>
                       setError(cause instanceof Error ? cause.message : String(cause)),
                     )
                 }}
               >
-                卸载
+                移除
               </button>
             </div>
           </div>
@@ -559,9 +518,9 @@ function SkillsTab(): JSX.Element {
       <section className="dshpet-group">
       <h3 className="dshpet-group-title">Skill 文件状态</h3>
       <p className="dshpet-item-hint">
-        已启用的 Skill 会以只读链接的形式出现在 Pet 工作区里，供执行会话读取。
+        已启用的 Skill 会以链接的形式出现在 Pet 工作区里，供执行会话读取。
         这些链接由 Pet 自己维护——正常情况下你不需要管它。
-        如果链接被外部改动或删除，能力会拒绝执行以避免读到错误内容，
+        如果链接被外部改动，或源目录被删除、移走，能力会拒绝执行，
         这时可以用下面的按钮重新生成。
       </p>
       {state.projection.length === 0 ? (
@@ -588,8 +547,8 @@ function SkillsTab(): JSX.Element {
         </button>
       </div>
       <p className="dshpet-item-hint">
-        重新生成只修复链接本身。如果 Skill 内容被篡改（摘要对不上），
-        会保持拒绝状态而不会被重新启用——需要重新导入该 Skill。
+        重新生成只修复链接本身。如果源目录已不存在或不再包含 SKILL.md，
+        会保持拒绝状态——需要修好该目录，或移除后重新加入。
       </p>
       {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
       </section>

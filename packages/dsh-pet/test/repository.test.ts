@@ -219,37 +219,6 @@ describe('optimistic revision fencing', () => {
   })
 })
 
-describe('digest retention', () => {
-  it('retains digests referenced by live Tasks and enabled selections', async () => {
-    harness = await openPetHarness()
-    const repo = harness.repository
-    await repo.createTask(testTask())
-    await repo.appendInvocation(testInvocation({ skillDigest: 'sha256-live' }))
-    await repo.putSkillSelection({
-      skillName: 'send-cr',
-      enabledDigest: 'sha256-enabled',
-      showAsShortcut: true,
-    })
-
-    const retained = repo.referencedDigests()
-
-    expect(retained.has('create-mr@sha256-live')).toBe(true)
-    expect(retained.has('send-cr@sha256-enabled')).toBe(true)
-    expect(retained.has('create-mr@sha256-unused')).toBe(false)
-  })
-
-  it('keeps a digest referenced by a non-terminal Invocation of an archived Task', async () => {
-    harness = await openPetHarness()
-    const repo = harness.repository
-    await repo.createTask(testTask())
-    await repo.appendInvocation(testInvocation({ skillDigest: 'sha256-queued' }))
-    await repo.setTaskStatus('task-1', 'idle')
-    await repo.archiveTask('task-1')
-
-    // Still queued, so its fixed revision must not be garbage collected.
-    expect(repo.referencedDigests().has('create-mr@sha256-queued')).toBe(true)
-  })
-})
 
 describe('restart recovery', () => {
   it('recovers Tasks, queue order and snapshots from the same medium', async () => {
@@ -318,7 +287,7 @@ describe('epoch and skill-set generation allocation', () => {
 
     const after = await repo.putSkillSelection({
       skillName: 'create-mr',
-      enabledDigest: 'sha256-a',
+      enabled: true,
       showAsShortcut: true,
     })
 

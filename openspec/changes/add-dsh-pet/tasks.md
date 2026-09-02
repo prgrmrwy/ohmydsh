@@ -183,6 +183,29 @@
   bundles are authored against those exact surfaces and declared in the
   package manifest, and a first boot installs, enables and projects all three.
 
+- [x] 7.7 MODEL CHANGE — Skills are LINKED, not copied, and Pet ships no
+  built-in category. Registering a Skill records the user's own directory and
+  projects a symlink to it, so an edit to that directory takes effect on the
+  next Invocation with no reinstall. Removed `builtins.ts`, the packaged
+  manifest, the content-addressed store copy, digest computation and
+  verification, the upgrade flow, multi-revision retention and its garbage
+  collection. The three packaged Skills moved to `skills/examples/` and are no
+  longer installed automatically; a user adds them like any other Skill.
+
+  Deliberately traded away, at the user's explicit direction: content is no
+  longer pinned, so a source edit can change what a queued Invocation runs, and
+  deleting or moving the source directory breaks that Skill. Retained: the
+  allowlist provider is still the authorization boundary (never the
+  projection), a bundle containing symlinks or a relative path is still
+  rejected, and a broken or substituted projection still fails closed with a
+  diagnostic.
+
+  Verified in a real booted Host: registering links the user's directory with
+  provenance `local-link` and no store copy; editing `SKILL.md` afterwards is
+  visible through the projection immediately; moving the directory away is
+  reported as broken; and removing the Skill leaves the user's directory
+  untouched.
+
 - [x] 7.6 Pet ships NO per-capability adapter. A capability exists because a
   Skill is installed and enabled — adding one is an install, never a code
   change. The Skill declares its own presentation and context requirement in

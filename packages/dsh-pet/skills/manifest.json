@@ -1,9 +1,0 @@
-{
-  "$comment": "Package-owned manifest of trusted built-in Pet Skill bundles. Pet installs ONLY the bundles declared here and never scans this directory for undeclared content. Each `directory` is resolved relative to this file and copied into an immutable content-addressed revision in the Pet state store; Pet never executes from node_modules. create-mr and send-cr are authored against the installed `bytedcli codebase mr create` and `lark-cli im +messages-send` contracts; when those CLIs are absent the capability reports itself unavailable instead of breaking Pet.",
-  "version": 1,
-  "skills": [
-    { "directory": "clean-worktree", "defaultEnabled": true, "showAsShortcut": true },
-    { "directory": "create-mr", "defaultEnabled": true, "showAsShortcut": true },
-    { "directory": "send-cr", "defaultEnabled": true, "showAsShortcut": true }
-  ]
-}

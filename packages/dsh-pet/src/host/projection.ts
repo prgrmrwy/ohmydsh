@@ -4,7 +4,7 @@
  * Pet does not copy enabled revisions into the Workspace: it publishes
  * Pet-created directory symlinks
  *
- *   <workspace>/.dsh/skills/<name> -> <store>/<name>/<digest>/
+ *   <workspace>/.dsh/skills/<name> -> <the user's own skill directory>
  *
  * DSH's filesystem Skill provider follows direct child symlinks and treats
  * the resolved directory as a bundle, so one canonical revision serves every
@@ -18,31 +18,32 @@
 
 import { lstat, mkdir, readdir, readlink, realpath, rename, rm, symlink } from 'node:fs/promises'
 import path from 'node:path'
+import { SKILL_ENTRY_FILE } from './skill-bundle.js'
 import { PetError } from './errors.js'
 import { isContainedBy, OWNER_ONLY_DIR_MODE, type PetPaths } from './paths.js'
-import { verifyRevision } from './skill-bundle.js'
 import type { PetProjectionEntry, PetProjectionStatus } from '../wire.js'
 
 /** One desired projection entry: a skill name bound to an exact revision. */
 export interface DesiredProjection {
   readonly skillName: string
-  readonly digest: string
+  /** Canonical source directory the entry links to. */
+  readonly sourcePath: string
 }
 
 /**
  * Inspect one projection entry without changing it.
  * @param paths - Resolved Pet paths.
  * @param skillName - Skill name to inspect.
- * @param expectedDigest - Digest the allowlist says should be published.
+ * @param expectedSourcePath - Digest the allowlist says should be published.
  * @returns the entry's observed status.
  */
 export async function inspectProjectionEntry(
   paths: PetPaths,
   skillName: string,
-  expectedDigest: string,
+  expectedSourcePath: string,
 ): Promise<PetProjectionEntry> {
   const entryPath = path.join(paths.projectionRoot, skillName)
-  const base = { skillName, expectedDigest } as const
+  const base = { skillName, expectedSourcePath } as const
 
   const link = await lstat(entryPath).catch(() => undefined)
   if (link === undefined) {
@@ -69,35 +70,32 @@ export async function inspectProjectionEntry(
     }
   }
   // Canonicalize both sides before comparing: `realpath` resolves
-  // intermediate symlinks, so comparing against an uncanonicalized store path
-  // would misreport valid entries as drift.
-  const canonicalStore = await realpath(paths.storeRoot).catch(() => paths.storeRoot)
-  if (!isContainedBy(canonicalStore, resolved)) {
+  // intermediate symlinks, so comparing raw paths would misreport valid
+  // entries as drift.
+  const expected = await realpath(expectedSourcePath).catch(() => undefined)
+  if (expected === undefined) {
     return {
       ...base,
-      status: 'out-of-store',
+      status: 'missing',
       resolvedTarget: resolved,
-      diagnostic: 'Projection target resolves outside the Pet immutable store',
+      diagnostic: 'Registered Skill directory no longer exists',
     }
   }
-
-  const expected = await realpath(path.join(paths.storeRoot, skillName, expectedDigest)).catch(
-    () => undefined,
-  )
-  if (expected === undefined || resolved !== expected) {
+  if (resolved !== expected) {
     return {
       ...base,
       status: 'drifted',
       resolvedTarget: resolved,
-      diagnostic: 'Projection target does not match the enabled revision',
+      diagnostic: 'Projection target does not match the registered Skill directory',
     }
   }
-  if (!(await verifyRevision(paths.storeRoot, skillName, expectedDigest))) {
+  const info = await lstat(resolved).catch(() => undefined)
+  if (info?.isDirectory() !== true) {
     return {
       ...base,
       status: 'drifted',
       resolvedTarget: resolved,
-      diagnostic: 'Store revision no longer matches its digest',
+      diagnostic: 'Registered Skill path is not a directory',
     }
   }
   return { ...base, status: 'ok', resolvedTarget: resolved }
@@ -118,14 +116,22 @@ export async function publishProjectionEntry(
   paths: PetPaths,
   desired: DesiredProjection,
 ): Promise<void> {
-  const target = path.join(paths.storeRoot, desired.skillName, desired.digest)
-  if (!isContainedBy(paths.storeRoot, target)) {
-    throw new PetError('PROJECTION_DRIFT', 'Projection target escapes the Pet immutable store')
-  }
-  if (!(await verifyRevision(paths.storeRoot, desired.skillName, desired.digest))) {
+  // The link points at the user's own directory, so the check is that the
+  // directory still exists and still holds a Skill — not that it matches a
+  // digest, because a registered Skill is expected to change in place.
+  const target = desired.sourcePath
+  const info = await lstat(target).catch(() => undefined)
+  if (info?.isDirectory() !== true) {
     throw new PetError(
-      'SKILL_DIGEST_MISMATCH',
-      `Store revision ${desired.skillName}@${desired.digest} is missing or does not match its digest`,
+      'PROJECTION_DRIFT',
+      `Registered Skill directory ${target} is missing or is not a directory`,
+    )
+  }
+  const entry = await lstat(path.join(target, SKILL_ENTRY_FILE)).catch(() => undefined)
+  if (entry?.isFile() !== true) {
+    throw new PetError(
+      'PROJECTION_DRIFT',
+      `Registered Skill directory ${target} no longer contains ${SKILL_ENTRY_FILE}`,
     )
   }
 
@@ -145,9 +151,14 @@ export async function publishProjectionEntry(
     // expectation would reject a perfectly valid link.
     const resolved = await realpath(temporary)
     const canonicalTarget = await realpath(target)
-    const canonicalStore = await realpath(paths.storeRoot)
-    if (!isContainedBy(canonicalStore, resolved) || resolved !== canonicalTarget) {
-      throw new PetError('PROJECTION_DRIFT', 'Staged projection link did not resolve to its revision')
+    // The link must resolve to exactly the registered directory. There is no
+    // containment check against a store, because the target is the user's own
+    // directory by design.
+    if (resolved !== canonicalTarget) {
+      throw new PetError(
+        'PROJECTION_DRIFT',
+        'Staged projection link did not resolve to the registered Skill directory',
+      )
     }
     await rename(temporary, entryPath)
   } catch (error) {
@@ -218,11 +229,11 @@ export async function rebuildProjection(
         await rm(entryPath, { recursive: true, force: true })
       }
       await publishProjectionEntry(paths, entry)
-      results.push(await inspectProjectionEntry(paths, entry.skillName, entry.digest))
+      results.push(await inspectProjectionEntry(paths, entry.skillName, entry.sourcePath))
     } catch (error) {
       results.push({
         skillName: entry.skillName,
-        expectedDigest: entry.digest,
+        expectedSourcePath: entry.sourcePath,
         status: 'drifted' satisfies PetProjectionStatus,
         diagnostic: error instanceof Error ? error.message : String(error),
       })
@@ -243,7 +254,7 @@ export async function detectProjectionDrift(
 ): Promise<readonly PetProjectionEntry[]> {
   const entries: PetProjectionEntry[] = []
   for (const entry of desired) {
-    const observed = await inspectProjectionEntry(paths, entry.skillName, entry.digest)
+    const observed = await inspectProjectionEntry(paths, entry.skillName, entry.sourcePath)
     if (observed.status !== 'ok') entries.push(observed)
   }
   return entries

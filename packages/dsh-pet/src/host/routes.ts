@@ -21,8 +21,8 @@ import type { PetLifecycleMachine } from './lifecycle.js'
 import type { PetPaths } from './paths.js'
 import { detectProjectionDrift, rebuildProjection } from './projection.js'
 import type { PetRepository } from './repository.js'
-import { inspectBundle, installBundle, removeRevisionDirectory } from './skill-bundle.js'
-import { collectableRevisions, currentAllowlist } from './skill-provider.js'
+import { inspectBundle } from './skill-bundle.js'
+import { currentAllowlist } from './skill-provider.js'
 import { ROUTES, type PetSourceKind } from '../wire.js'
 
 /** Everything the routes read from the Host. */
@@ -46,10 +46,10 @@ export interface RouteDeps {
 /** Desired projection derived from the current allowlist. */
 function desiredProjection(
   repository: PetRepository,
-): readonly { skillName: string; digest: string }[] {
+): readonly { skillName: string; sourcePath: string }[] {
   return currentAllowlist(repository).map(entry => ({
     skillName: entry.skillName,
-    digest: entry.digest,
+    sourcePath: entry.sourcePath,
   }))
 }
 
@@ -154,39 +154,29 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
         skillName: inspection.skillName,
         description: inspection.description,
         whenToUse: inspection.whenToUse,
-        digest: inspection.digest,
         fileCount: inspection.fileCount,
         totalBytes: inspection.totalBytes,
         files: inspection.files,
         canonicalSourcePath: inspection.canonicalSourcePath,
-        alreadyInstalled:
-          repository.getSkillRevision(inspection.skillName, inspection.digest) !== undefined,
+        alreadyInstalled: repository.getSkillRevision(inspection.skillName) !== undefined,
       }
     }),
 
     petRoute(ROUTES.skillImport, async ({ body }) => {
       requireReady(lifecycle)
-      const record = strictBody(body, ['path', 'expectedDigest'])
+      const record = strictBody(body, ['path'])
+      // Registration links the user's own directory; nothing is copied, so a
+      // later edit to that directory takes effect immediately.
       const inspection = await inspectBundle(requireString(record, 'path'))
-      // Second, separately confirmed step: the client echoes the digest it
-      // showed the user, so a source changed since inspection is rejected.
-      const expected = requireString(record, 'expectedDigest')
-      if (expected !== inspection.digest) {
-        throw new PetError(
-          'SKILL_IMPORT_REJECTED',
-          `Skill bundle changed since inspection (expected ${expected}, found ${inspection.digest})`,
-        )
-      }
-      await installBundle(inspection, paths.storeRoot, paths.stagingRoot)
       const revision = await repository.putSkillRevision({
         skillName: inspection.skillName,
-        digest: inspection.digest,
+        sourcePath: inspection.canonicalSourcePath,
         description: inspection.description,
-        // An imported Skill declares its own Pet presentation and context
-        // requirement; Pet ships no per-capability adapter.
+        // A Skill declares its own Pet presentation and context requirement;
+        // Pet ships no per-capability adapter.
         ...(inspection.pet !== undefined ? { pet: inspection.pet } : {}),
         provenance: {
-          kind: 'local-import',
+          kind: 'local-link',
           sourcePath: inspection.canonicalSourcePath,
           installedAt: Date.now(),
         },
@@ -199,21 +189,19 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
 
     petRoute(ROUTES.skillMutate, async ({ body }) => {
       requireReady(lifecycle)
-      const record = strictBody(body, ['skillName', 'action', 'digest', 'showAsShortcut'])
+      const record = strictBody(body, ['skillName', 'action', 'showAsShortcut'])
       const skillName = requireString(record, 'skillName')
       const action = requireString(record, 'action')
       const selection = repository.getSkillSelection(skillName)
 
       switch (action) {
-        case 'enable':
-        case 'upgrade': {
-          const digest = requireString(record, 'digest')
-          if (repository.getSkillRevision(skillName, digest) === undefined) {
-            throw new PetError('SKILL_NOT_FOUND', `Revision ${skillName}@${digest} is not installed`)
+        case 'enable': {
+          if (repository.getSkillRevision(skillName) === undefined) {
+            throw new PetError('SKILL_NOT_FOUND', `Skill ${skillName} is not registered`)
           }
           await repository.putSkillSelection({
             skillName,
-            enabledDigest: digest,
+            enabled: true,
             showAsShortcut: selection?.showAsShortcut ?? true,
           })
           break
@@ -232,26 +220,16 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
           }
           await repository.putSkillSelection({
             skillName,
-            ...(selection?.enabledDigest !== undefined
-              ? { enabledDigest: selection.enabledDigest }
-              : {}),
+            ...(selection?.enabled === true ? { enabled: true } : {}),
             showAsShortcut: visible,
           })
           break
         }
-        case 'uninstall': {
-          // Two distinct steps, in this order. First remove the skill from
-          // future use and from the shortcut menu; only then collect what is
-          // physically unreferenced. A revision fixed by an unarchived Task or
-          // a non-terminal Invocation is retained, so queued work keeps
-          // running the exact version it was accepted with.
+        case 'remove': {
+          // Drop the registration and its selection. The user's own directory
+          // is never touched — Pet only ever held a link to it.
           await repository.putSkillSelection({ skillName, showAsShortcut: false })
-
-          for (const revision of collectableRevisions(repository)) {
-            if (revision.skillName !== skillName) continue
-            await removeRevisionDirectory(paths.storeRoot, revision.skillName, revision.digest)
-            await repository.deleteSkillRevision(revision.skillName, revision.digest)
-          }
+          await repository.deleteSkillRevision(skillName)
           break
         }
         default:

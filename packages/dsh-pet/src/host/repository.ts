@@ -442,7 +442,7 @@ export class PetRepository {
   async putSkillRevision(revision: PetSkillRevision): Promise<PetSkillRevision> {
     await this.domain
       .table('skill_revisions')
-      .put(revisionKey(revision.skillName, revision.digest), revision)
+      .put(revisionKey(revision.skillName), revision)
     return revision
   }
 
@@ -454,13 +454,12 @@ export class PetRepository {
   }
 
   /**
-   * Look up one installed revision by name and digest.
+   * Look up one registered Skill by name.
    * @param skillName - Kebab-case skill name.
-   * @param digest - Revision digest.
    * @returns the revision, or `undefined`.
    */
-  getSkillRevision(skillName: string, digest: string): PetSkillRevision | undefined {
-    return this.domain.table('skill_revisions').get(revisionKey(skillName, digest)) as
+  getSkillRevision(skillName: string): PetSkillRevision | undefined {
+    return this.domain.table('skill_revisions').get(revisionKey(skillName)) as
       | PetSkillRevision
       | undefined
   }
@@ -469,11 +468,10 @@ export class PetRepository {
    * Remove a physical revision row. Callers MUST first prove no unarchived
    * Task or non-terminal Invocation still references the digest.
    * @param skillName - Skill name.
-   * @param digest - Revision digest.
    * @returns whether a row was removed.
    */
-  async deleteSkillRevision(skillName: string, digest: string): Promise<boolean> {
-    return this.domain.table('skill_revisions').delete(revisionKey(skillName, digest))
+  async deleteSkillRevision(skillName: string): Promise<boolean> {
+    return this.domain.table('skill_revisions').delete(revisionKey(skillName))
   }
 
   /** Current per-skill selection state. */
@@ -500,29 +498,6 @@ export class PetRepository {
   async putSkillSelection(selection: PetSkillSelection): Promise<number> {
     await this.domain.table('skill_selections').put(selection.skillName, selection)
     return this.bumpSkillSetGeneration()
-  }
-
-  /**
-   * Every digest still referenced by an unarchived Task or non-terminal
-   * Invocation. Garbage collection must retain exactly these.
-   * @returns the set of retained `name@digest` keys.
-   */
-  referencedDigests(): ReadonlySet<string> {
-    const liveTaskIds = new Set(
-      this.listTasks().filter(task => task.archivedAt === undefined).map(task => task.id),
-    )
-    const retained = new Set<string>()
-    for (const [, value] of this.domain.table('invocations').entries()) {
-      const invocation = value as PetInvocationRecord
-      const isLive = liveTaskIds.has(invocation.taskId) || occupiesCurrentSlot(invocation.status)
-      if (isLive) retained.add(revisionKey(invocation.skillName, invocation.skillDigest))
-    }
-    for (const selection of this.listSkillSelections()) {
-      if (selection.enabledDigest !== undefined) {
-        retained.add(revisionKey(selection.skillName, selection.enabledDigest))
-      }
-    }
-    return retained
   }
 
   // -- bindings -------------------------------------------------------------

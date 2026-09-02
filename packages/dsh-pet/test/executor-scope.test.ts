@@ -17,7 +17,7 @@ import { SourceContextRegistry, type SourceResolver } from '../src/host/capture.
 import { PetCoordinator, type PromptDispatcher } from '../src/host/coordinator.js'
 import type { AgentRegistryLike } from '../src/host/executor.js'
 import { ensurePetDirectories, resolvePetPaths, type PetPaths } from '../src/host/paths.js'
-import { inspectBundle, installBundle } from '../src/host/skill-bundle.js'
+import { inspectBundle } from '../src/host/skill-bundle.js'
 import { createPetSkillProvider, PET_SKILL_PROVIDER } from '../src/host/skill-provider.js'
 import { Context } from '@deepseek-ai/cordis'
 import SkillRegistry from '@deepseek-ai/dsh-skill'
@@ -63,23 +63,22 @@ async function addSkill(
     `---\nname: ${name}\ndescription: ${name} capability\n---\nBody for ${name}.\n`,
   )
   const inspection = await inspectBundle(root)
-  await installBundle(inspection, paths.storeRoot, paths.stagingRoot)
   await ref.repository.putSkillRevision({
     skillName: inspection.skillName,
-    digest: inspection.digest,
+    sourcePath: inspection.canonicalSourcePath,
     description: inspection.description,
-    provenance: { kind: 'local-import', installedAt: Date.now() },
+    provenance: { kind: 'local-link', installedAt: Date.now() },
     fileCount: inspection.fileCount,
     totalBytes: inspection.totalBytes,
   })
   if (options.enable !== false) {
     await ref.repository.putSkillSelection({
       skillName: name,
-      enabledDigest: inspection.digest,
+      enabled: true,
       showAsShortcut: true,
     })
   }
-  return inspection.digest
+  return inspection.canonicalSourcePath
 }
 
 function capture(overrides: Partial<PetInvocationCapture> = {}): PetInvocationCapture {
@@ -168,7 +167,7 @@ describe('executor Agents receive the Pet scope', () => {
     expect(candidates[0]?.provider).toBe(PET_SKILL_PROVIDER)
   })
 
-  it('loads a scoped candidate body from the immutable store', async () => {
+  it('loads a scoped candidate body from the registered directory', async () => {
     harness = await openPetHarness()
     const paths = await petPaths()
     const digest = await addSkill(paths, harness, 'demo')
@@ -178,10 +177,10 @@ describe('executor Agents receive the Pet scope', () => {
     const definition = await provider.get(candidate!)
 
     expect(definition?.content).toContain('Body for demo')
-    // Resolution is by digest through the store, never through the mutable
+    // Resolution reads the registered directory directly, never the mutable
     // Workspace projection.
     expect(definition?.path).toContain(digest)
-    expect(definition?.path).toContain(path.join('skills', 'store'))
+    expect(definition?.path).toContain('SKILL.md')
   })
 
   it('reuses the existing executor without re-running setup', async () => {

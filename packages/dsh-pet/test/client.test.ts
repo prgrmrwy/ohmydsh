@@ -374,29 +374,6 @@ describe('task panel follows the change feed instead of polling data routes', ()
   })
 })
 
-describe('Skills tab exposes the full lifecycle', () => {
-  it('offers uninstall alongside enable/disable and shortcut visibility', async () => {
-    const { readFile } = await import('node:fs/promises')
-    const settings = await readFile(
-      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
-      'utf8',
-    )
-
-    // Task 3.4 / 10.3 require uninstall; without it the Host action and its
-    // retention-aware garbage collection are unreachable from the UI.
-    expect(settings).toContain("action: 'uninstall'")
-    expect(settings).toContain('Uninstall')
-  })
-
-  it('types uninstall in the management API', async () => {
-    const { readFile } = await import('node:fs/promises')
-    const api = await readFile(
-      path.resolve(__dirname, '..', 'src', 'client', 'api.ts'),
-      'utf8',
-    )
-    expect(api).toContain("'uninstall'")
-  })
-})
 
 describe('radial menu honors shortcut visibility', () => {
   it('renders only capabilities marked as shortcuts', async () => {
@@ -413,21 +390,6 @@ describe('radial menu honors shortcut visibility', () => {
   })
 })
 
-describe('Skills tab surfaces explicit upgrades', () => {
-  it('shows an upgrade affordance only when one is pending', async () => {
-    const { readFile } = await import('node:fs/promises')
-    const settings = await readFile(
-      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
-      'utf8',
-    )
-
-    // A packaged upgrade is recorded as available but never applied silently,
-    // so the user needs a visible, explicit way to adopt it.
-    expect(settings).toContain('upgradeAvailableDigest')
-    expect(settings).toContain('有可用升级')
-    expect(settings).toContain("action: 'upgrade'")
-  })
-})
 
 describe('configured behavior is applied, not just displayed', () => {
   it('starts a new Task unattached when the policy is none', async () => {
@@ -936,44 +898,6 @@ describe('stored settings share one read-only-until-edit pattern', () => {
   })
 })
 
-describe('Skills list shows one row per Skill, not per revision', () => {
-  it('groups revisions by skill name', async () => {
-    const { readFile } = await import('node:fs/promises')
-    const settings = await readFile(
-      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
-      'utf8',
-    )
-
-    // Several immutable revisions of one Skill coexist by design: an upgrade
-    // installs a new one while queued work keeps the digest it accepted.
-    // Iterating revisions directly made the same Skill appear duplicated.
-    expect(settings).toContain('new Set(state.revisions.map(revision => revision.skillName))')
-    expect(settings).not.toContain('{state.revisions.map(revision => {')
-  })
-
-  it('reports retained revisions instead of listing them as separate skills', async () => {
-    const { readFile } = await import('node:fs/promises')
-    const settings = await readFile(
-      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
-      'utf8',
-    )
-
-    expect(settings).toContain('const retained = revisions.length - 1')
-    expect(settings).toContain('个被引用的历史版本')
-  })
-
-  it('falls back to an installed revision when the Skill is disabled', async () => {
-    const { readFile } = await import('node:fs/promises')
-    const settings = await readFile(
-      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
-      'utf8',
-    )
-
-    // A disabled Skill has no enabled digest, but the row must still say
-    // where it came from rather than disappearing.
-    expect(settings).toContain('?? revisions[0]')
-  })
-})
 
 describe('Bindings explains what to configure and where to find it', () => {
   it('tells the user what a binding controls and what happens without one', () => {
@@ -1050,37 +974,38 @@ describe('Skill file health is explained without internal jargon', () => {
     // Rebuild deliberately refuses to republish a revision whose digest no
     // longer matches, so the panel must not imply it fixes everything.
     expect(markup).toContain('只修复链接本身')
-    expect(markup).toContain('重新导入')
+    expect(markup).toContain('重新加入')
   })
 })
 
 describe('Skill install and upgrade semantics are stated', () => {
-  it('says import copies the bundle rather than linking the source', () => {
-    const markup = renderToStaticMarkup(
-      createElement(PetSettingsSection, { initialTab: 'skills' as const }),
-    )
 
-    // Copying is what makes the digest meaningful: editing the source
-    // afterwards must not change what Pet runs.
-    expect(markup).toContain('完整复制')
-    expect(markup).toContain('不会影响已安装的版本')
-  })
-
-  it('says an upgrade is explicit and never rewrites queued work', () => {
-    const markup = renderToStaticMarkup(
-      createElement(PetSettingsSection, { initialTab: 'skills' as const }),
-    )
-
-    // A packaged upgrade is recorded, not adopted: an Invocation keeps the
-    // digest it was accepted with.
-    expect(markup).toContain('不会自动切换')
-    expect(markup).toContain('已排队的调用')
-  })
 
   it('says import does not auto-enable', () => {
     const markup = renderToStaticMarkup(
       createElement(PetSettingsSection, { initialTab: 'skills' as const }),
     )
-    expect(markup).toContain('导入不会自动启用')
+    expect(markup).toContain('不会自动启用')
+  })
+})
+
+describe('Skills are linked, not copied', () => {
+  it('states that a registered Skill stays live', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'skills' as const }),
+    )
+
+    // Linking is the whole model: editing the source takes effect at once,
+    // and removing a Skill must not touch the user's own directory.
+    expect(markup).toContain('直接链接到你给的目录')
+    expect(markup).toContain('立即生效')
+    expect(markup).toContain('不会删除你的目录')
+  })
+
+  it('warns that the Skill breaks if its directory disappears', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'skills' as const }),
+    )
+    expect(markup).toContain('目录被删除或移走')
   })
 })

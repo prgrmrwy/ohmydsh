@@ -44,18 +44,18 @@ async function fixture(options: { dispatchFails?: boolean } = {}): Promise<Fixtu
   for (const name of ['create-mr', 'send-cr']) {
     await created.repository.putSkillRevision({
       skillName: name,
-      digest: `sha256:${name}`,
+      sourcePath: `/tmp/pet-test-skills/${name}`,
       description: name,
-      // Capabilities are derived from installed Skills, so the Skill carries
+      // Capabilities are derived from registered Skills, so the Skill carries
       // its own context requirement exactly as its frontmatter would.
       pet: { context: 'session-required' },
-      provenance: { kind: 'builtin', installedAt: 1 },
+      provenance: { kind: 'local-link', installedAt: 1 },
       fileCount: 1,
       totalBytes: 1,
     })
     await created.repository.putSkillSelection({
       skillName: name,
-      enabledDigest: `sha256:${name}`,
+      enabled: true,
       showAsShortcut: true,
     })
   }
@@ -560,7 +560,7 @@ describe('explicit injection boundary at dispatch', () => {
     expect(ok.started).toBe(true)
   })
 
-  it('dispatches normally when the revision verifies', async () => {
+  it('dispatches normally when the Skill resolves', async () => {
     const f = await fixture()
     harness = f.harness
     const verifySkill = vi.fn(async () => {})
@@ -582,9 +582,8 @@ describe('explicit injection boundary at dispatch', () => {
     const result = await coordinator.accept(capture())
 
     expect(result.started).toBe(true)
-    // Verified against the digest FIXED on the Invocation, not the currently
-    // selected one.
-    expect(verifySkill).toHaveBeenCalledWith('create-mr', 'sha256:create-mr')
+    // Verified against the Skill the Invocation named.
+    expect(verifySkill).toHaveBeenCalledWith('create-mr')
   })
 })
 
@@ -594,7 +593,7 @@ describe('shortcut visibility controls the radial menu only', () => {
     harness = f.harness
     await f.harness.repository.putSkillSelection({
       skillName: 'send-cr',
-      enabledDigest: 'sha256:send-cr',
+      enabled: true,
       showAsShortcut: false,
     })
 
@@ -613,7 +612,7 @@ describe('shortcut visibility controls the radial menu only', () => {
     harness = f.harness
     await f.harness.repository.putSkillSelection({
       skillName: 'send-cr',
-      enabledDigest: 'sha256:send-cr',
+      enabled: true,
       showAsShortcut: false,
     })
 

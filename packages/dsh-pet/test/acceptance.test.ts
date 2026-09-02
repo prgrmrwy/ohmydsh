@@ -18,7 +18,6 @@ import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
 import * as StorageSqlite from '@deepseek-ai/dsh-storage-sqlite'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { archiveTaskFromPet, reconcileArchives } from '../src/host/archive.js'
-import { installBuiltins } from '../src/host/builtins.js'
 import { CapabilityRegistry } from '../src/host/capabilities.js'
 import { SourceContextRegistry, resolveTrustedContext, type SourceResolver } from '../src/host/capture.js'
 import { executePetContext } from '../src/host/context-tool.js'
@@ -27,7 +26,7 @@ import type { AgentRegistryLike } from '../src/host/executor.js'
 import { ensurePetDirectories, resolvePetPaths, type PetPaths } from '../src/host/paths.js'
 import { detectProjectionDrift, rebuildProjection } from '../src/host/projection.js'
 import { PetRepository } from '../src/host/repository.js'
-import { inspectBundle, installBundle } from '../src/host/skill-bundle.js'
+import { inspectBundle } from '../src/host/skill-bundle.js'
 import { createPetSkillProvider, currentAllowlist } from '../src/host/skill-provider.js'
 import { petDomainSpec } from '../src/host/spec.js'
 import { ensurePetWorkspace } from '../src/host/workspace.js'
@@ -160,18 +159,17 @@ async function enableSkill(
 ): Promise<string> {
   const source = await bundle(name, `${name} capability`)
   const inspection = await inspectBundle(source)
-  await installBundle(inspection, deployment.paths.storeRoot, deployment.paths.stagingRoot)
   await deployment.repository.putSkillRevision({
     skillName: inspection.skillName,
-    digest: inspection.digest,
+    sourcePath: inspection.canonicalSourcePath,
     description: inspection.description,
-    provenance: { kind: 'local-import', sourcePath: source, installedAt: Date.now() },
+    provenance: { kind: 'local-link', sourcePath: source, installedAt: Date.now() },
     fileCount: inspection.fileCount,
     totalBytes: inspection.totalBytes,
   })
   await deployment.repository.putSkillSelection({
     skillName: name,
-    enabledDigest: inspection.digest,
+    enabled: true,
     showAsShortcut: true,
   })
   deployment.capabilities.register({
@@ -185,10 +183,10 @@ async function enableSkill(
     deployment.paths,
     currentAllowlist(deployment.repository).map(entry => ({
       skillName: entry.skillName,
-      digest: entry.digest,
+      sourcePath: entry.sourcePath,
     })),
   )
-  return inspection.digest
+  return inspection.canonicalSourcePath
 }
 
 describe('first boot in an isolated DSH home', () => {
@@ -203,22 +201,6 @@ describe('first boot in an isolated DSH home', () => {
     expect(entries).toContain('workspace')
   })
 
-  it('installs no Skills when the manifest declares none', async () => {
-    const deployment = await boot()
-    const manifestDir = await mkdtemp(path.join(tmpdir(), 'pet-manifest-'))
-    const manifestPath = path.join(manifestDir, 'manifest.json')
-    await writeFile(manifestPath, JSON.stringify({ version: 1, skills: [] }))
-
-    const result = await installBuiltins(
-      deployment.repository,
-      deployment.paths,
-      '0.1.0',
-      manifestPath,
-    )
-
-    expect(result.installed).toEqual([])
-    expect(currentAllowlist(deployment.repository)).toEqual([])
-  })
 
   it('exposes exactly four settings tabs', () => {
     expect(PET_SETTINGS_TABS).toEqual(['general', 'skills', 'bindings', 'diagnostics'])
@@ -231,7 +213,7 @@ describe('Skill install, allowlist isolation and projection', () => {
     const digest = await enableSkill(deployment, 'create-mr')
 
     const drift = await detectProjectionDrift(deployment.paths, [
-      { skillName: 'create-mr', digest },
+      { skillName: 'create-mr', sourcePath: digest },
     ])
 
     expect(drift).toEqual([])
@@ -244,12 +226,11 @@ describe('Skill install, allowlist isolation and projection', () => {
     // Install a second Skill without enabling it.
     const source = await bundle('send-cr', 'Send CR')
     const inspection = await inspectBundle(source)
-    await installBundle(inspection, deployment.paths.storeRoot, deployment.paths.stagingRoot)
     await deployment.repository.putSkillRevision({
       skillName: 'send-cr',
-      digest: inspection.digest,
+      sourcePath: inspection.canonicalSourcePath,
       description: inspection.description,
-      provenance: { kind: 'local-import', installedAt: Date.now() },
+      provenance: { kind: 'local-link', installedAt: Date.now() },
       fileCount: 1,
       totalBytes: 1,
     })
@@ -267,13 +248,13 @@ describe('Skill install, allowlist isolation and projection', () => {
     await mkdir(path.join(deployment.paths.projectionRoot, 'create-mr'), { recursive: true })
 
     const before = await detectProjectionDrift(deployment.paths, [
-      { skillName: 'create-mr', digest },
+      { skillName: 'create-mr', sourcePath: digest },
     ])
     expect(before[0]?.status).toBe('not-a-symlink')
 
-    await rebuildProjection(deployment.paths, [{ skillName: 'create-mr', digest }])
+    await rebuildProjection(deployment.paths, [{ skillName: 'create-mr', sourcePath: digest }])
     const after = await detectProjectionDrift(deployment.paths, [
-      { skillName: 'create-mr', digest },
+      { skillName: 'create-mr', sourcePath: digest },
     ])
     expect(after).toEqual([])
   })
@@ -372,20 +353,19 @@ describe('Task, executor and Invocation flow', () => {
     const deployment = await boot()
     const source = await bundle('tidy', 'Tidy things')
     const inspection = await inspectBundle(source)
-    await installBundle(inspection, deployment.paths.storeRoot, deployment.paths.stagingRoot)
     await deployment.repository.putSkillRevision({
       skillName: 'tidy',
-      digest: inspection.digest,
+      sourcePath: inspection.canonicalSourcePath,
       description: inspection.description,
       // The Skill declares it needs no source context.
       pet: { context: 'none' },
-      provenance: { kind: 'local-import', installedAt: Date.now() },
+      provenance: { kind: 'local-link', installedAt: Date.now() },
       fileCount: 1,
       totalBytes: 1,
     })
     await deployment.repository.putSkillSelection({
       skillName: 'tidy',
-      enabledDigest: inspection.digest,
+      enabled: true,
       showAsShortcut: true,
     })
 
