@@ -47,6 +47,11 @@ interface PetSkillLocator {
 export function currentAllowlist(repository: PetRepository): readonly AllowlistEntry[] {
   const entries: AllowlistEntry[] = []
   for (const selection of repository.listSkillSelections()) {
+    // THE authorization boundary. Everything downstream — what the Agent can
+    // see, what gets projected, what diagnostics report — derives from this
+    // list, so a disabled Skill must be excluded here and nowhere else is a
+    // substitute.
+    if (selection.enabled !== true) continue
     const revision = repository.getSkillRevision(selection.skillName)
     if (revision === undefined) continue
     entries.push({

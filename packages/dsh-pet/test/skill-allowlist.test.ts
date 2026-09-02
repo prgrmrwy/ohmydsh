@@ -155,3 +155,47 @@ describe('explicit invocation boundary', () => {
 
 
 
+
+describe('the allowlist is the authorization boundary', () => {
+  it('excludes a Skill whose selection is explicitly disabled', async () => {
+    harness = await openPetHarness()
+    await harness.repository.putSkillRevision({
+      skillName: 'disabled-skill',
+      sourcePath: '/tmp/pet-test-skills/disabled-skill',
+      description: 'disabled',
+      provenance: { kind: 'local-link', installedAt: 1 },
+      fileCount: 1,
+      totalBytes: 1,
+    })
+    // `enabled` is optional in the schema, so an explicit `false` is a real
+    // stored shape — not only the absent-field case the UI happens to write.
+    await harness.repository.putSkillSelection({
+      skillName: 'disabled-skill',
+      enabled: false,
+      showAsShortcut: true,
+    })
+
+    // Everything downstream derives from this list: what the Agent can see,
+    // what gets projected, what diagnostics report. A regression here was
+    // invisible to 415 passing tests.
+    expect(currentAllowlist(harness.repository)).toEqual([])
+  })
+
+  it('excludes a Skill whose selection omits the flag', async () => {
+    harness = await openPetHarness()
+    await harness.repository.putSkillRevision({
+      skillName: 'never-enabled',
+      sourcePath: '/tmp/pet-test-skills/never-enabled',
+      description: 'never enabled',
+      provenance: { kind: 'local-link', installedAt: 1 },
+      fileCount: 1,
+      totalBytes: 1,
+    })
+    await harness.repository.putSkillSelection({
+      skillName: 'never-enabled',
+      showAsShortcut: true,
+    })
+
+    expect(currentAllowlist(harness.repository)).toEqual([])
+  })
+})
