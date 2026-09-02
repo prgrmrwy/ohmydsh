@@ -1162,3 +1162,31 @@ describe('the directory browser starts from the typed path', () => {
     expect([...settings.matchAll(/setPath\(next\.path\)/g)]).toHaveLength(2)
   })
 })
+
+describe('the import preview reflects the link model', () => {
+  it('shows the directory it will link, not a removed digest', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // Digests went away with the copy-based model, so the preview rendered a
+    // literal "Digest: undefined".
+    expect(settings).not.toContain("preview['digest']")
+    expect(settings).toContain("preview['canonicalSourcePath']")
+  })
+
+  it('warns that a linked Skill stays live', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // The trust warning must reflect linking: later edits to that directory
+    // take effect without any further confirmation.
+    expect(settings).toContain('只加入你信任的目录')
+    expect(settings).toContain('立即生效')
+  })
+})
