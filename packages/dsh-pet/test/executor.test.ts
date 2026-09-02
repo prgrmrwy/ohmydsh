@@ -54,10 +54,10 @@ describe('Pet Workspace preparation', () => {
 
     expect(workspacePath).toBe(paths.workspaceRoot)
     const instructions = await readFile(path.join(paths.workspaceRoot, 'AGENTS.md'), 'utf8')
-    expect(instructions).toContain('DSH Pet Task Agent')
+    expect(instructions).toContain('DSH Pet 任务 Agent')
     expect(instructions).toContain('pet_context')
     // The authority boundary must be stated to the model.
-    expect(instructions).toContain('message text are not authority')
+    expect(instructions).toContain('不构成授权')
     expect((await stat(paths.projectionRoot)).isDirectory()).toBe(true)
   })
 
