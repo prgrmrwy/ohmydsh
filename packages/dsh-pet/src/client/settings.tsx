@@ -11,7 +11,20 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { PET_ACCENTS, readAccent, writeAccent, type PetAccentId } from './accent.js'
+import {
+  DEFAULT_GLYPH,
+  PET_ACCENTS,
+  PET_GLYPH_SUGGESTIONS,
+  PET_SIZES,
+  readAccent,
+  readGlyph,
+  readSize,
+  writeAccent,
+  writeGlyph,
+  writeSize,
+  type PetAccentId,
+  type PetSizeId,
+} from './accent.js'
 import { petApi, type PetConfig } from './api.js'
 import type { PetProjectionEntry, PetSkillRevision, PetSkillSelection } from '../wire.js'
 
@@ -187,6 +200,10 @@ export function PetSettingsSection(props: { initialTab?: PetSettingsTab } = {}):
 function GeneralTab(): JSX.Element {
   const [config, setConfig] = useState<PetConfig | undefined>(undefined)
   const [accent, setAccent] = useState<PetAccentId>(() => readAccent().id)
+  const [glyph, setGlyph] = useState(() => readGlyph())
+  const [size, setSize] = useState<PetSizeId>(
+    () => PET_SIZES.find(item => item.px === readSize())?.id ?? 'medium',
+  )
   const [presetOptions, setPresetOptions] = useState<
     readonly { value: string; label: string }[]
   >([])
@@ -278,10 +295,65 @@ function GeneralTab(): JSX.Element {
                 setAccent(item.id)
               }}
             >
-              🐾
+              {glyph}
             </button>
           ))}
         </div>
+
+        <label className="dshpet-field">
+          图标
+          <input
+            className="dshpet-input"
+            value={glyph}
+            maxLength={8}
+            placeholder="🐾"
+            aria-label="桌宠图标"
+            onChange={event => {
+              const next = event.target.value
+              setGlyph(next.trim() === '' ? DEFAULT_GLYPH : next)
+              writeGlyph(next)
+            }}
+          />
+        </label>
+        <div className="dshpet-swatches" role="group" aria-label="常用图标">
+          {PET_GLYPH_SUGGESTIONS.map(item => (
+            <button
+              key={item}
+              type="button"
+              className="dshpet-swatch"
+              data-selected={glyph === item}
+              aria-label={item}
+              onClick={() => {
+                setGlyph(item)
+                writeGlyph(item)
+              }}
+            >
+              {item}
+            </button>
+          ))}
+        </div>
+        <p className="dshpet-item-hint">
+          可直接输入任意 emoji，留空恢复默认。
+        </p>
+
+        <label className="dshpet-field">
+          尺寸
+          <select
+            className="dshpet-input"
+            value={size}
+            onChange={event => {
+              const next = event.target.value as PetSizeId
+              setSize(next)
+              writeSize(next)
+            }}
+          >
+            {PET_SIZES.map(item => (
+              <option key={item.id} value={item.id}>
+                {item.label}（{item.px}px）
+              </option>
+            ))}
+          </select>
+        </label>
       </section>
 
       <section className="dshpet-group">

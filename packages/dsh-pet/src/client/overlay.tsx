@@ -9,7 +9,13 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { PetApiError, petApi } from './api.js'
-import { PET_ACCENT_EVENT, readAccent } from './accent.js'
+import {
+  PET_ACCENT_EVENT,
+  PET_APPEARANCE_EVENT,
+  readAccent,
+  readGlyph,
+  readSize,
+} from './accent.js'
 import {
   clampPosition,
   readPosition,
@@ -55,6 +61,8 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   const viewport = useViewport()
   const [position, setPosition] = useState<PetPosition>(() => readPosition(viewport))
   const [accent, setAccent] = useState(() => readAccent())
+  const [glyph, setGlyph] = useState(() => readGlyph())
+  const [size, setSize] = useState(() => readSize())
   const [mode, setMode] = useState<Mode>('closed')
   const [capabilities, setCapabilities] = useState<readonly PetCapability[]>([])
   const [degraded, setDegraded] = useState<string | undefined>(undefined)
@@ -72,15 +80,25 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   // the change must be broadcast to take effect without a reload.
   useEffect(() => {
     const onAccent = (): void => setAccent(readAccent())
+    const onAppearance = (): void => {
+      setGlyph(readGlyph())
+      setSize(readSize())
+    }
     globalThis.addEventListener(PET_ACCENT_EVENT, onAccent)
-    return () => globalThis.removeEventListener(PET_ACCENT_EVENT, onAccent)
+    globalThis.addEventListener(PET_APPEARANCE_EVENT, onAppearance)
+    return () => {
+      globalThis.removeEventListener(PET_ACCENT_EVENT, onAccent)
+      globalThis.removeEventListener(PET_APPEARANCE_EVENT, onAppearance)
+    }
   }, [])
 
 
   // Re-clamp whenever the viewport changes so Pet can never be stranded.
   useEffect(() => {
-    setPosition(current => clampPosition(current, viewport))
-  }, [viewport.width, viewport.height])
+    setPosition(current => clampPosition(current, viewport, size))
+    // `size` included: growing the mascot near an edge must pull it back
+    // into view rather than leave it partly off-screen.
+  }, [viewport.width, viewport.height, size])
 
   useEffect(() => {
     let cancelled = false
@@ -144,7 +162,7 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
       if (Math.abs(deltaX) < 2 && Math.abs(deltaY) < 2) return
       dragging.current = { ...state, dx: event.clientX, dy: event.clientY, moved: true }
       setPosition(current =>
-        clampPosition({ x: current.x + deltaX, y: current.y + deltaY }, viewport),
+        clampPosition({ x: current.x + deltaX, y: current.y + deltaY }, viewport, size),
       )
     },
     [viewport],
@@ -259,7 +277,14 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
         // Inline, because the palette is user data: emitting one rule per
         // accent into the injected stylesheet would couple the CSS to the
         // palette and grow it for options nobody selected.
-        style={{ background: accent.background, color: accent.foreground }}
+        style={{
+          background: accent.background,
+          color: accent.foreground,
+          width: size,
+          height: size,
+          // Keep the glyph proportional to the circle it sits in.
+          fontSize: Math.round(size * 0.53),
+        }}
         data-dragging={dragging.current !== undefined}
         aria-label="DSH Pet"
         aria-expanded={mode !== 'closed'}
@@ -279,7 +304,7 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
           if (event.key === 'ArrowUp' && mode === 'closed') setMode('menu')
         }}
       >
-        🐾
+        {glyph}
         {degraded !== undefined ? (
           <span className="dshpet-badge" data-state="degraded" title={degraded} role="status">
             <span className="dshpet-visually-hidden">Pet 未就绪：{degraded}</span>
