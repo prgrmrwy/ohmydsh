@@ -181,6 +181,9 @@ const petGlobalState = z.object({
   /** Whether first-boot built-in installation already ran. */
   builtinsInitialized: z.boolean(),
   /** Selected Pet executor provider/model; never contains credentials. */
+  // Retained as optional so a database written by an older Pet still
+  // validates. Nothing writes or reads them any more: Pet follows the Host's
+  // default model selection rather than keeping its own copy.
   providerId: z.string().optional(),
   modelId: z.string().optional(),
   agentPreset: z.string().optional(),

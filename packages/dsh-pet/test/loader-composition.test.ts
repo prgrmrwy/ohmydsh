@@ -316,14 +316,10 @@ describe('a real Invocation scopes its executor Agent', () => {
 
     await registerSkill(routes, 'clean-worktree')
 
-    // A provider/model must be configured before an executor may be created.
+    // Pet follows the Host's default model selection; there is nothing
+    // Pet-side to configure, and the route no longer accepts these fields.
     const configRoute = routes.find(route => route.path === ROUTES.configUpdate)
     expect(configRoute).toBeDefined()
-    const configured = await callRoute(configRoute!, {
-      providerId: 'anthropic',
-      modelId: 'claude-opus-5',
-    })
-    expect(configured.ok).toBe(true)
 
     const createRoute = routes.find(route => route.path === ROUTES.invocationCreate)
     const accepted = await callRoute(createRoute!, {
@@ -426,10 +422,6 @@ describe('dispatch uses the ordinary Agent lifecycle', () => {
     }
 
     await registerSkill(routes, 'clean-worktree')
-    await callRoute(routes.find(route => route.path === ROUTES.configUpdate)!, {
-      providerId: 'anthropic',
-      modelId: 'claude-opus-5',
-    })
     const accepted = await callRoute(routes.find(r => r.path === ROUTES.invocationCreate)!, {
       clientInvocationId: 'inv-1',
       capabilityId: 'clean-worktree',
@@ -533,10 +525,6 @@ describe('archiving from the Pet route syncs the executor session', () => {
     }
 
     await registerSkill(routes, 'clean-worktree')
-    await callRoute(routes.find(route => route.path === ROUTES.configUpdate)!, {
-      providerId: 'anthropic',
-      modelId: 'claude-opus-5',
-    })
     const accepted = (await callRoute(routes.find(r => r.path === ROUTES.invocationCreate)!, {
       clientInvocationId: 'inv-1',
       capabilityId: 'clean-worktree',

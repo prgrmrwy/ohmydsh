@@ -251,10 +251,10 @@
   tab, both routes, the repository accessors, the `workspace_bindings` table
   and the wire types.
 
-  Follow-up left open deliberately: how a Skill such as `send-cr` learns its
-  destination. Two candidate shapes — several `workspace -> chat` mappings, or
-  per-Skill parameters supplied when the Skill is added — are not yet decided,
-  so no half-built mechanism was left behind in the meantime.
+  RESOLVED by 7.11: a Skill carries one free-text argument string, configured
+  when it is added and editable afterwards. A Skill needing a destination —
+  `send-cr` and its chat id — takes it there, so no Pet-side mapping table is
+  needed and none was built.
 
 - [x] 7.9 Directory selection now degrades instead of appearing dead.
   `host.pickDirectory` requires the `native` capability; this deployment only

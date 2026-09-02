@@ -14,8 +14,11 @@ describe('appearance round-trips through the config routes', () => {
 
     // Storing a value the read route never returns looks exactly like a
     // persistence failure: the panel resets on every restart.
-    const readBlock = routes.slice(routes.indexOf('petRoute(ROUTES.config,'))
-    expect(readBlock.slice(0, 900)).toContain('appearance: global.appearance')
+    // Bound the slice at the NEXT route rather than a magic offset: a magic
+    // number silently passes or fails when unrelated lines move.
+    const from = routes.indexOf('petRoute(ROUTES.config,')
+    const readBlock = routes.slice(from, routes.indexOf('petRoute(', from + 10))
+    expect(readBlock).toContain('appearance: global.appearance')
   })
 
   it('never persists the position, which stays per-browser', async () => {
@@ -30,5 +33,39 @@ describe('appearance round-trips through the config routes', () => {
     // Dragging is display state, not a setting.
     expect(appearance).not.toContain('x:')
     expect(appearance).not.toContain('y:')
+  })
+})
+
+describe('the model selection is not Pet-owned', () => {
+  it('rejects provider and model on the write route', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const nodePath = await import('node:path')
+    const routes = await readFile(
+      nodePath.resolve(process.cwd(), 'src', 'host', 'routes.ts'),
+      'utf8',
+    )
+    const from = routes.indexOf('petRoute(ROUTES.configUpdate,')
+    const writeBlock = routes.slice(from, routes.indexOf('petRoute(', from + 10))
+
+    // These used to be accepted and stored, but `selection()` reads the Host
+    // default and never the stored copy — so a saved value was silently
+    // dropped and the panel echoed a different one back. Accepting a field
+    // nothing consumes is worse than not offering it.
+    expect(writeBlock).not.toContain("'providerId'")
+    expect(writeBlock).not.toContain("'modelId'")
+  })
+
+  it('reports the followed selection, never a stored copy', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const nodePath = await import('node:path')
+    const routes = await readFile(
+      nodePath.resolve(process.cwd(), 'src', 'host', 'routes.ts'),
+      'utf8',
+    )
+    const from = routes.indexOf('petRoute(ROUTES.config,')
+    const readBlock = routes.slice(from, routes.indexOf('petRoute(', from + 10))
+
+    expect(readBlock).not.toContain('global.providerId')
+    expect(readBlock).not.toContain('global.modelId')
   })
 })

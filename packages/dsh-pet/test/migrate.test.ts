@@ -98,3 +98,18 @@ describe('legacy Pet state is cleared before the domain opens', () => {
     })
   })
 })
+
+describe('cleanup never creates the database', () => {
+  it('leaves an absent file absent', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'pet-migrate-'))
+    const file = path.join(dir, 'state.sqlite')
+
+    removeLegacyState(file)
+
+    // Creating it here would defeat the later ownership proof, which treats
+    // "the file exists after a durable write" as evidence the write landed at
+    // Pet's configured path rather than a foreign medium.
+    const { existsSync } = await import('node:fs')
+    expect(existsSync(file)).toBe(false)
+  })
+})
