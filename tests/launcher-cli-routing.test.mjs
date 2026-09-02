@@ -158,3 +158,37 @@ test('server 不再经 npx 拉起:npx 会把 npm_config_* 烘焙给长期进程'
   const src = await readFile(path.join(ROOT, 'bin/dsh'), 'utf8')
   assert.doesNotMatch(src, /npx -y "@deepseek-ai\/dsh@\$VER" web/, 'server 启动必须走 node 直连,否则 npm 环境会泄漏给 agent')
 })
+
+test('stop 在 autoUpdate 与运行体解析之前短路，restart 只进入一次 start_server', async () => {
+  const src = await readFile(path.join(ROOT, 'bin/dsh'), 'utf8')
+  const stopBranch = src.indexOf('if [[ $STOP -eq 1 ]]')
+  const autoupdateBlock = src.indexOf('# ---------- autoUpdate:')
+  assert.ok(stopBranch > 0 && stopBranch < autoupdateBlock, 'stop 必须在版本检测/运行体解析前退出')
+  const restartBody = src.match(/do_restart\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.doesNotMatch(restartBody, /resolveCliBin|dsh-server-bin|start_server/, 'restart stop 阶段不得解析/启动运行体')
+  assert.equal((src.match(/^start_server$/gm) ?? []).length, 1, 'launcher 最终只能进入一次 start_server')
+})
+
+test('stop 在无 server 时不调用 npm/npx/pnpm provision', async t => {
+  const sb = await sandbox()
+  t.after(() => rm(sb.dir, { recursive: true, force: true }))
+  const toolDir = path.join(sb.dir, 'tools')
+  const calls = path.join(sb.dir, 'package-manager-calls')
+  await mkdir(toolDir)
+  for (const name of ['npm', 'npx', 'pnpm']) {
+    const tool = path.join(toolDir, name)
+    await writeFile(tool, `#!/usr/bin/env bash\necho ${name} >> "${calls}"\nexit 97\n`)
+    await chmod(tool, 0o755)
+  }
+  const r = spawnSync('bash', [sb.bin, 'stop', '--port', '39989'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${toolDir}:${process.env.PATH}`,
+      DSH_HOME: path.join(sb.dir, 'dsh-home'),
+      HOME: sb.dir,
+    },
+  })
+  assert.equal(r.status, 0, r.stderr)
+  await assert.rejects(readFile(calls), { code: 'ENOENT' })
+})
