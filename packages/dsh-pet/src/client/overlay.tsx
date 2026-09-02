@@ -59,7 +59,7 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   // bought nothing and cost every interaction.
 
   const viewport = useViewport()
-  const [position, setPosition] = useState<PetPosition>(() => readPosition(viewport))
+  const [position, setPosition] = useState<PetPosition>(() => readPosition(viewport, globalThis.localStorage, readSize()))
   const [accent, setAccent] = useState(() => readAccent())
   const [glyph, setGlyph] = useState(() => readGlyph())
   const [size, setSize] = useState(() => readSize())
@@ -177,7 +177,7 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
       // A drag must not also count as a click: releasing at the new position
       // would otherwise toggle the panel open every time Pet is moved.
       draggedRef.current = state.moved
-      setPosition(current => writePosition(current, viewport))
+      setPosition(current => writePosition(current, viewport, globalThis.localStorage, size))
     },
     [viewport],
   )
