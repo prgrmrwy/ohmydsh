@@ -278,9 +278,9 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
         // accent into the injected stylesheet would couple the CSS to the
         // palette and grow it for options nobody selected.
         style={{
-          // Only the paw is tinted; the surface keeps the neutral panel
-          // background so the mascot does not read as a status badge.
-          color: accent.glyph,
+          // The surface is tinted, not the glyph: 🐾 is a colour emoji and
+          // CSS `color` cannot recolour it.
+          background: accent.background,
           width: size,
           height: size,
           // Keep the glyph proportional to the circle it sits in.

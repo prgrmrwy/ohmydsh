@@ -1095,3 +1095,32 @@ describe('the directory browser reads as a left-aligned list', () => {
     expect(PET_CSS).toContain('text-overflow:ellipsis')
   })
 })
+
+describe('the glyph follows the same stored-setting pattern', () => {
+  it('is read-only until edited, and offers a reset', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // Every persisted value in this panel behaves the same way; a bare always
+    // editable input was the odd one out.
+    expect(settings).toContain('label="图标"')
+    expect(settings).toContain('onReset')
+    expect(settings).not.toContain('dshpet-glyph-input')
+  })
+
+  it('renders a reset control inside the shared field', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+    const field = settings.slice(settings.indexOf('function StoredField'))
+
+    expect(field).toContain('恢复默认')
+    // Shown only while editing, next to save and cancel.
+    expect(field.indexOf('恢复默认')).toBeGreaterThan(field.indexOf('取消'))
+  })
+})
