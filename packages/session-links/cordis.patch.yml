@@ -1,0 +1,12 @@
+# dsh-session-links bundle patch
+#
+# `dsh.bundle.patch` layer: one plugin row inserted into the profile bundle
+# stack. The Web client half registers the `session-links` workbench tab
+# through `ctx.betterSidebar` (hard peer dependency declared in package.json;
+# the client entry's `inject = ['betterSidebar', ...]` keeps the plugin
+# inactive — no UI, no behavior — until dsh-better-sidebar provides the
+# service). The host entry is a no-op loader node so the client-modules
+# scanner can serve the browser bundle.
+- insert:
+    - id: session-links
+      name: dsh-session-links
