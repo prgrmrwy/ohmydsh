@@ -163,10 +163,11 @@ export const PET_CSS = `
 .dshpet-browser-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
   white-space:nowrap}
 .dshpet-browser-chevron{flex:none;color:var(--dsw-alias-label-tertiary,#81858c)}
-/* Accent swatches: each shows the mascot glyph on its own tint, so the
-   choice previews the actual result rather than an abstract colour chip. */
+/* Accent swatches: each shows the paw in its own colour on the neutral panel
+   surface, so the chip previews exactly what the mascot will look like. */
 .dshpet-swatches{display:flex;flex-wrap:wrap;gap:8px}
 .dshpet-settings .dshpet-swatch{width:36px;height:36px;padding:0;border-radius:50%;
+  background:var(--dsw-alias-bg-layer-1,#fff);
   display:inline-flex;align-items:center;justify-content:center;font-size:17px;
   line-height:1;cursor:pointer;
   border:1px solid var(--dsw-alias-border-l2,#0000001a);
