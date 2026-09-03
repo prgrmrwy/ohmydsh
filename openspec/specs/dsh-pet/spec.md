@@ -23,7 +23,7 @@ Pet Host 初始化或可选依赖失败时 SHALL 进入可诊断的 degraded 状
 
 ### Requirement: Web 中提供常驻、可拖动且可访问的 Pet 入口
 
-系统 SHALL 在 DSH 页面提供不替换原生工作台的 frame-wide 浮动 Pet。Pet SHALL 在普通会话、无会话 Hero 和 Settings 等页面状态间保持可用，允许用户拖动位置，并在页面重载后恢复已保存的位置。Pet MUST NOT 默认遮挡底层页面交互；其可交互表面 SHALL 明确接管指针和键盘操作，而未绘制区域 MUST NOT 拦截指针事件。
+系统 SHALL 在 DSH 页面提供不替换原生工作台的**视口级**浮动 Pet。Pet SHALL 在普通会话、无会话 Hero 和 Settings 等页面状态间保持可用，允许用户拖动位置，并在页面重载后恢复已保存的位置。Pet 的位置 SHALL 以视口为坐标系，MUST NOT 因应用外壳的布局变化（侧栏、工作台、详情列的展开收起或调宽）而被移动或裁剪。Pet MUST NOT 默认遮挡底层页面交互；其可交互表面 SHALL 明确接管指针和键盘操作，而未绘制区域 MUST NOT 拦截指针事件。
 
 快捷能力 SHALL 呈现为以 Pet 本体为圆心的同心圆环轮盘。轮盘 SHALL 由内向外填充，每圈填满后才启用下一圈，最多三圈，容量依次为 6、8、10，合计上限 24 个能力；超出上限的能力 MUST NOT 渲染，且 MUST NOT 因此报错或阻断其余能力。
 
@@ -42,6 +42,10 @@ hover Pet 本体或等价键盘操作 SHALL 展开轮盘；指向 Pet 本体之�
 #### Scenario: 拖动并重载页面
 - **WHEN** 用户拖动 Pet 到新的可见位置后重载 DSH 页面
 - **THEN** Pet 在视口边界内恢复到已保存位置
+
+#### Scenario: 应用侧栏展开
+- **WHEN** 任一侧栏或工作台展开并压缩应用外壳的可用宽度
+- **THEN** Pet 的屏幕位置保持不变，不被推移也不被裁剪
 
 #### Scenario: 指针掠过 Pet 周围空白
 - **WHEN** 指针经过 Pet 本体之外、轮盘尚未展开的区域
@@ -125,21 +129,29 @@ Pet Task 归档后 MUST NOT 再接收新 Invocation。用户在同一来源 scop
 
 ### Requirement: 来源上下文是显式且可移除的一等输入
 
-系统 SHALL 支持 `session`、`workspace` 和 `none` 三类 Pet Task 来源。每项 Pet Capability SHALL 声明其上下文要求为无需上下文、可选上下文、需要 workspace 或需要 session。用户在执行前 SHALL 能看见有效来源；可选来源 SHALL 允许用户移除或改选。
+系统 SHALL 支持 `session`、`workspace` 和 `none` 三类 Pet Task 来源。用户在执行前
+SHALL 能看见有效来源，并 SHALL 能移除或改选该来源。
 
-没有 active DSH session 时，系统 MUST NOT 隐式绑定最近使用的 session。无需上下文或可选上下文能力 SHALL 能从 `none` 来源创建或复用独立 Pet Task；需要 session/workspace 的能力在缺少目标时 SHALL 禁止执行并提供选择入口。
+系统 MUST NOT 按能力施加上下文门禁：Pet 不声明也不存储任何"此能力需要
+session/workspace"的要求，任何能力在任何来源下都 SHALL 可被发起。没有 active DSH
+session 时，系统 MUST NOT 隐式绑定最近使用的 session，而 SHALL 以 `none` 来源创建
+或复用独立 Pet Task，并在启动消息中明确标注没有 source DSH session。
 
-#### Scenario: 从无会话页面发起独立任务
-- **WHEN** 用户在没有 active session 的页面调用一个无需上下文的能力
-- **THEN** 系统以 `none` 来源创建或复用独立 Pet Task，启动消息明确显示没有 source DSH session
+对来源的实质要求由 Skill 自身在执行时校验并向用户说明。
+
+#### Scenario: 从无会话页面发起任务
+- **WHEN** 用户在没有 active session 的页面调用一个能力
+- **THEN** 系统以 `none` 来源创建或复用独立 Pet Task，启动消息明确显示没有
+      source DSH session，能力正常派发
 
 #### Scenario: 移除可选当前会话
-- **WHEN** 一个可选上下文能力默认显示当前 session，用户在执行前移除该关联
+- **WHEN** 一个能力默认显示当前 session，用户在执行前移除该关联
 - **THEN** Invocation 使用 `none` 来源，且不得向 Agent 暴露刚被移除的 session 上下文
 
-#### Scenario: 缺少强制 session
-- **WHEN** 用户没有 active session 且选择需要 session 的 Clean Worktree 能力
-- **THEN** 系统不创建 Invocation，并提示用户选择一个符合条件的 DSH session
+#### Scenario: 来源不满足由 Skill 报告
+- **WHEN** 用户以 `none` 来源发起一个实际需要 session 的 Skill
+- **THEN** Invocation 正常创建并派发，Skill 经 `pet_context` 发现来源不足后停止并
+      说明需要从一个会话发起
 
 ### Requirement: Pet Task 使用专用 Workspace 中的普通 DSH executor session
 
@@ -257,7 +269,9 @@ Pet SHALL 将“已安装”“已启用”“显示为快捷能力”建模为�
 
 设置界面 SHALL 在已启用 Skill 达到轮盘容量上限（24 个）时阻止继续启用，并说明原因。该上限属于呈现约束，MUST NOT 影响授权边界：超出上限不改变任何 Skill 的启用状态或可执行性，只影响其是否出现在轮盘上。
 
-一期 SHALL 支持两种安装来源：Pet 插件 manifest 显式声明的受信内置 Skill，以及用户从运行当前 `dsh web` 的 Host 机器绝对路径显式导入的单层 Skill bundle。Web UI SHALL 先提交该路径执行只读检查并展示名称、摘要、文件范围、来源和风险预览，只有用户再次确认后才注册安装；它 MUST NOT 把路径解释为浏览器客户端路径。
+安装来源 SHALL 只有一种：用户从运行当前 `dsh web` 的 Host 机器绝对路径显式导入的单层 Skill bundle。Pet MUST NOT 自带、声明或自动安装任何 Skill——不存在"内置 Skill"这一类别，因此也不存在内置与外部之分。Web UI SHALL 先提交该路径执行只读检查并展示名称、摘要、文件范围、来源和风险预览，只有用户再次确认后才注册安装；它 MUST NOT 把路径解释为浏览器客户端路径。
+
+注册 SHALL 记录用户自有目录的链接而非内容副本，因此对该目录的修改立即生效、无需重新导入；目录被删除或移走时该 Skill SHALL 失效并拒绝执行，而不是运行过期副本。
 
 #### Scenario: 启用数量达到上限
 - **WHEN** 用户已启用 24 个 Skill，并尝试启用第 25 个
@@ -267,27 +281,58 @@ Pet SHALL 将“已安装”“已启用”“显示为快捷能力”建模为�
 - **WHEN** 由于历史数据，已启用 Skill 数量超过 24 个
 - **THEN** 轮盘只渲染前 24 个，其余 Skill 仍可被调用与管理，系统不报错
 
+#### Scenario: Pet 不提供任何内置 Skill
+- **WHEN** 用户首次安装 Pet 并打开 Skills 页
+- **THEN** 列表为空，且不存在可供"启用内置 Skill"的入口
+
+#### Scenario: 修改已注册目录立即生效
+- **WHEN** 用户编辑某个已注册 Skill 的源目录内容
+- **THEN** 下一次调用即读到新内容，无需重新导入
+
 ### Requirement: Pet 能力以 Agent Skill 驱动并以有界工具完成副作用
 
-一期 SHALL 内置并默认提供 Create MR、Send CR 和 Clean Worktree 三项 Pet 能力，并让每项能力在对应 executor session 中通过明确的 Skill Invocation 执行。Pet SHALL 允许 Agent参与现场检查、信息补全、结果生成和用户澄清，但创建 MR、发送外部消息、清理 worktree 等副作用 SHALL 通过确定性、有界且可审计的工具或现有安全门禁执行。
+Pet 能力 SHALL 全部由**普通 DSH Skill** 提供：Skill 在仓库 `skills/` 下维护、随
+sync 部署到 `~/.dsh/skills/`，可在任意普通 DSH 会话中独立使用，并由用户在 Pet
+Settings 中显式导入、启用后成为 Pet 能力。Pet MUST NOT 自动 seed 或隐式启用任何
+Skill。
 
-Create MR 和 Clean Worktree SHALL 要求 session 来源；Send CR SHALL 至少支持 session 来源，并在缺少可信 workspace/group/MR 绑定时等待用户补充或明确失败。Pet MUST NOT 让模型通过自由文本自行替换 source 路径、MR 目标、飞书群或 reviewer 绑定。
+系统 MUST NOT 提供任何让 Skill 为 Pet 适配的机制。Skill 的 `SKILL.md` MUST NOT 被
+读取任何 Pet 专属字段，Pet MUST NOT 定义、解析或消费此类声明——不存在"为 Pet 优化
+过的 Skill"与"普通 Skill"之分，因此也不存在两等 Skill。Pet 呈现一项能力时 SHALL
+只使用普通 Skill 已有的信息（名称与 description）。
 
-#### Scenario: Create MR 需要澄清
-- **WHEN** Agent 检查 source snapshot 对应 worktree 后无法唯一确定 target branch
-- **THEN** Invocation 进入 waiting-user，用户回答后在同一 executor session 和 Invocation 中继续
+一期 SHALL 以两项能力验证该形态：`ws`（既有，Worktree Session 维护）与 `send-cr`
+（新增）。Create MR 不属于一期范围。
+
+Pet SHALL 允许 Agent 参与现场检查、信息补全、结果生成和用户澄清，但清理 worktree、
+发送外部消息等副作用 SHALL 通过确定性、有界且可审计的工具或现有安全门禁执行。
+
+Pet MUST NOT 代替 Skill 判断其执行前提。需要特定来源、配置或外部依赖的 Skill
+SHALL 自行在执行开始时校验（在 Pet 中运行时经 `pet_context` 获取可信快照），并在
+不满足时停止并说明缺失项。Pet MUST NOT 让模型通过自由文本自行替换 source 路径、
+清理目标、飞书群或 reviewer 绑定。
+
+#### Scenario: 任何普通 Skill 都能被同等消费
+- **WHEN** 用户导入任意一个普通 DSH Skill（例如既有的 `ws`）
+- **THEN** 它正常成为 Pet 能力，标签为 Skill 名、描述取自其 description，且无需
+      为此修改该 Skill 的任何内容
 
 #### Scenario: Clean Worktree 遇到不安全状态
 - **WHEN** source worktree 尚有未提交修改或无法证明满足清理门禁
-- **THEN** Agent 和确定性工具停止清理并返回可操作说明，不绕过既有安全检查
+- **THEN** Skill 与确定性工具停止清理并返回可操作说明，不绕过既有安全检查
 
-#### Scenario: Send CR 缺少可信群绑定
-- **WHEN** source workspace 没有配置可用的 CR 目标群
-- **THEN** Invocation 不向任意群发送消息，进入等待配置或失败状态并说明缺失项
+#### Scenario: Skill 自行发现来源不满足
+- **WHEN** 用户从没有 source session 的页面调用一个需要 session 的 Skill
+- **THEN** Pet 正常创建 Invocation 并派发，Skill 经 `pet_context` 发现来源不满足后
+      停止并说明原因，而不是由 Pet 提前拦截
 
-#### Scenario: Send CR 成功
-- **WHEN** MR、reviewer 和目标群均由可信绑定解析且用户要求发送
-- **THEN** 有界发送工具按结构化模板发送，并把消息链接和目标摘要记录为 Invocation 结果
+#### Scenario: Send CR 缺少可信群配置
+- **WHEN** source workspace 没有配置可用的 CR 目标群且用户未明确给出
+- **THEN** Skill 不向任意群发送消息，停止并说明缺失项与配置位置
+
+#### Scenario: 能力不被自动启用
+- **WHEN** Pet 首次启动且用户尚未导入任何 Skill
+- **THEN** 能力列表为空，用户需显式导入并启用后能力才出现
 
 ### Requirement: Task 与 DSH session 归档语义保持一致且不误删历史
 
@@ -316,17 +361,24 @@ Create MR 和 Clean Worktree SHALL 要求 session 来源；Send CR SHALL 至少�
 系统 SHALL 在 DSH Settings 注册独立 Pet section，并固定包含以下四个页签：
 
 - **General**：Pet 外观/位置重置、默认 Agent composition、provider/model、新 Task 使用的默认上下文策略；
-- **Skills**：内置 Skill 列表、本地目录导入、已安装版本、启用/禁用、快捷能力可见性、升级/卸载和 Workspace 投影同步状态；
-- **Bindings**：Send CR 等副作用所需的可信 workspace/business/group/reviewer 绑定；
+- **Skills**：Skill 列表、本地目录导入、已安装版本、启用/禁用、快捷能力可见性、升级/卸载和 Workspace 投影同步状态；
+- **环境变量**：按全局与来源 workspace 两个作用域配置的键值，经官方 `ctx.shellEnv` 以 `DSH_PET_*` 注入 Pet executor 的每次 shell 调用；
 - **Diagnostics**：Host 生命周期、状态/Workspace/Skill store 与投影路径、版本摘要、同步漂移、依赖可用性以及显式修复/重建投影操作。
 
-Pet 浮层与 Task 面板 SHALL 只提供快捷能力执行、调用前来源确认以及 Task/Invocation 的日常操作；它们 MUST NOT 承担 Skill 安装、版本管理、可信绑定编辑或完整诊断配置。浮层 SHALL 提供进入相应 Settings 页签的明确入口。
+环境变量页签 SHALL 提供全局与 workspace 两个作用域的编辑入口：全局配置对所有 Pet
+Task 生效，workspace 配置只对该来源生效并**覆盖**同名的全局配置；两者都没有时该
+变量不存在，由 Skill 自行发现并停止。workspace 作用域允许从 Host 已知 workspace
+选择，也允许手工输入尚未列出的 workspace id。页面 SHALL 显示每个 key 实际注入的
+变量名，使用户知道在 Skill 中如何引用。系统 MUST NOT 为此引入自定义模板语法：
+Skill 侧就是普通的 `$DSH_PET_<KEY>` 环境变量引用。
 
-Pet SHALL 显示 provider/model 可用性，但 MUST NOT 读取、回传或保存 subscription token 和其它 provider credentials。配置写入失败 SHALL 保留用户输入并显示错误；需要重启才生效的配置 SHALL 明确提示。敏感 channel 字段在未来加入时 SHALL 以 secret reference 或等价受保护机制保存，管理读取不得回显明文。
+Pet 浮层与 Task 面板 SHALL 只提供快捷能力执行、调用前来源确认以及 Task/Invocation 的日常操作；它们 MUST NOT 承担 Skill 安装、版本管理、环境变量编辑或完整诊断配置。浮层 SHALL 提供进入相应 Settings 页签的明确入口。
+
+Pet SHALL 显示 provider/model 可用性，但 MUST NOT 读取、回传或保存 subscription token 和其它 provider credentials。环境变量页保存的值 MUST NOT 被当作凭据保管机制，页面 SHALL 提示其会进入子进程环境。配置写入失败 SHALL 保留用户输入并显示错误；需要重启才生效的配置 SHALL 明确提示。敏感 channel 字段在未来加入时 SHALL 以 secret reference 或等价受保护机制保存，管理读取不得回显明文。
 
 #### Scenario: 打开 Pet 设置
 - **WHEN** 用户从 Pet 浮层或 DSH Settings 打开 Pet 配置
-- **THEN** 用户看到 General、Skills、Bindings、Diagnostics 四个稳定页签，并能在 Skills 页完成安装、启用和投影诊断而无需进入 Task 执行面板
+- **THEN** 用户看到 General、Skills、环境变量、Diagnostics 四个稳定页签，并能在 Skills 页完成安装、启用和投影诊断而无需进入 Task 执行面板
 
 #### Scenario: Skill 投影发生漂移
 - **WHEN** Diagnostics 检测到已启用 allowlist 与 Workspace `.dsh/skills` 投影摘要不一致
@@ -340,9 +392,17 @@ Pet SHALL 显示 provider/model 可用性，但 MUST NOT 读取、回传或保�
 - **WHEN** 已配置 provider/model 在当前 Host 不可路由
 - **THEN** Pet 在启动 Invocation 前显示可诊断配置错误，不静默回退到另一个可能产生不同副作用的模型
 
-#### Scenario: 保存 workspace CR 绑定失败
-- **WHEN** 用户提交不完整或无效的 workspace/group/reviewer 配置
-- **THEN** 系统拒绝部分写入、保留表单输入并指出无效字段
+#### Scenario: 配置 CR 目标群
+- **WHEN** 用户在环境变量页为某 workspace 保存 `CR_GROUP`
+- **THEN** 页面显示其引用形式 `$DSH_PET_CR_GROUP`，该 workspace 来源的后续 shell 调用可读到该值
+
+#### Scenario: 全局配置对所有 Task 生效
+- **WHEN** 用户在环境变量页的全局作用域保存 `CR_GROUP`，且某来源 workspace 未配置该 key
+- **THEN** 该来源的 shell 调用读到全局值；若该 workspace 另配了同名 key，则读到 workspace 值
+
+#### Scenario: 保存无效配置
+- **WHEN** 用户提交不合法的 key 或空 value
+- **THEN** 系统拒绝写入、保留表单输入并指出无效字段
 
 ### Requirement: 一期由 ohmydsh 管理部署且不改变 Cockpit 和外部 transport 边界
 
