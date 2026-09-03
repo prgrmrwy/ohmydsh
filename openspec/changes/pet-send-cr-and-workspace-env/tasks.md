@@ -167,3 +167,14 @@
       改为按 magic number 逐帧解压，并加解压字符数自检
 - [x] 8.4 send-cr skill 原从 `mr get` 读 reviewer，但该字段恒为 null。
       改用 `mr reviewer list`，并要求排除 `Type: app` 的机器人
+
+## 9. 合入主干后的一次性收尾
+
+- [ ] 9.1 在 Pet 设置 → Skill 里**移除** send-cr 的现有注册（指向
+      `~/.dsh/skills/send-cr` 的部署副本），改为从
+      `/Users/prgrmrwy/opensource/ohmydsh/skills/send-cr` 重新导入并启用。
+      合入前主干没有该目录，只能先指部署副本；合入后应与 `ws` 一致地指向仓库
+      源码，使 SKILL.md 的改动无需 sync 即刻生效
+- [ ] 9.2 可选清理：`~/.dsh/plugins/dsh-pet/skills/store/` 下 clean-worktree /
+      create-mr / send-cr 三个目录是旧 content-addressed 模型的孤儿数据，
+      当前无任何注册引用它们，可直接删除
