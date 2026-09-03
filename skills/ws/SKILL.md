@@ -60,7 +60,24 @@ afterwards, and a refusal from any of them still stands.
 ordinary Session whose working directory is the repository main checkout: it
 scans that repository's Worktree Sessions and cleans every candidate whose
 source Session is already archived and whose worktree passes the existing
-safety gates. A Session still bound to a worktree cannot clean itself or its
+safety gates.
+
+A candidate whose source Session is **not** archived, but which is otherwise
+finished — task branch provably merged, worktree clean, operation prepared, no
+active occupant — is offered to the user as a single finishing action: confirm
+once, and the Host archives that Session and then removes the worktree and
+local task branch. Declining keeps the ordinary "not archived" refusal and
+touches nothing. The offer names the exact source Session id, task branch and
+worktree path; report those back rather than summarizing them.
+
+That offer is never a way around a gate. A candidate that is unmerged, dirty,
+in-flight, malformed or still occupied is refused on that real reason and is
+never offered, and the clean re-verifies every gate after archiving. When a
+gate fails at that point the clean is refused and the archive is deliberately
+kept — report it honestly and tell the user the Session stays recoverable by
+unarchiving it, which restores it as an ordinary Session.
+
+A Session still bound to a worktree cannot clean itself or its
 peers and is refused with an instruction to switch to the main-checkout
 Session. Review status and `dry_run: true` first; all live Session paths and
 bindings stay protected, and refused candidates are reported with reasons

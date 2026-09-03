@@ -1,6 +1,6 @@
 import { readdir, realpath } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
-import type { CleanResult, OperationRecord, PromoteResult, RepoCleanIgnored, RepoCleanRefusal, RepoCleanResult, StatusResult } from '../wire.js'
+import type { CleanResult, OperationRecord, PromoteResult, RepoCleanArchiveOffer, RepoCleanIgnored, RepoCleanRefusal, RepoCleanResult, StatusResult } from '../wire.js'
 import { bindingOf } from '../wire.js'
 import { promotePnpmDependencies, promoteDependencies } from './dependencies.js'
 import { WsError, messageOf } from './errors.js'
@@ -152,6 +152,19 @@ export interface RepoCleanOptions {
   dryRun?: boolean
   cwd?: string
   git?: GitClient
+  /**
+   * Asks the user whether to finish one unarchived-but-otherwise-safe
+   * candidate. Injected by the trusted Host (the approval channel); omitted on
+   * the operator CLI and HTTP paths, which have no trustworthy way to ask and
+   * therefore keep the historical `not-archived` refusal.
+   */
+  confirmArchive?: (offer: RepoCleanArchiveOffer) => Promise<boolean>
+  /**
+   * Archives one source Session. Injected alongside `confirmArchive` so this
+   * layer stays free of any DSH registry dependency and remains testable
+   * without a running Host.
+   */
+  archiveSession?: (sourceSessionId: string) => Promise<void>
 }
 
 /**
@@ -199,20 +212,62 @@ export async function wsCleanRepository(repoPath: string, options: RepoCleanOpti
       continue
     }
     const candidate = { operationId, sourceSessionId: binding.sourceSessionId, worktreePath: operation.worktreePath, taskBranch: operation.taskBranch }
+    let archivedBeforeClean = false
     if (!archived.has(binding.sourceSessionId)) {
-      refused.push({ ...candidate, kind: 'not-archived', reason: `Source Session ${binding.sourceSessionId} is not archived; archive it before cleaning its Worktree Session` })
-      continue
+      const notArchived = { ...candidate, kind: 'not-archived' as const, reason: `Source Session ${binding.sourceSessionId} is not archived; archive it before cleaning its Worktree Session` }
+      // Without an injected asker (operator CLI, HTTP) the historical refusal
+      // stands: there is no trustworthy channel to obtain user intent.
+      if (options.confirmArchive === undefined || options.archiveSession === undefined) {
+        refused.push(notArchived)
+        continue
+      }
+      // Only offer to finish a candidate that is ALREADY safe on every other
+      // gate. The existing dry run is that proof — it takes the repository
+      // lock and evaluates every gate without removing anything — so no gate
+      // is reimplemented here and none can be masked by archiving.
+      try {
+        await wsClean(operation.worktreePath, {
+          dryRun: true,
+          requireActivePaths: true,
+          activePaths: options.activePaths,
+          ...(options.activeBoundSessionIds === undefined ? {} : { activeBoundSessionIds: options.activeBoundSessionIds }),
+          ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+          git,
+        })
+      } catch (error) {
+        // The real blocker is reported instead of the archive precondition.
+        refused.push({ ...candidate, kind: 'refused', reason: messageOf(error), ...(error instanceof WsError ? { code: error.code } : {}) })
+        continue
+      }
+      const confirmed = await options.confirmArchive({ ...candidate, merged: true, clean: true })
+      if (!confirmed) {
+        refused.push(notArchived)
+        continue
+      }
+      try {
+        await options.archiveSession(binding.sourceSessionId)
+      } catch (error) {
+        // Nothing was removed: the candidate keeps every resource.
+        refused.push({ ...candidate, kind: 'archive-failed', reason: messageOf(error), ...(error instanceof WsError ? { code: error.code } : {}) })
+        continue
+      }
+      archivedBeforeClean = true
     }
     try {
-      cleaned.push(await wsClean(operation.worktreePath, {
+      const result = await wsClean(operation.worktreePath, {
         ...(options.dryRun === undefined ? {} : { dryRun: options.dryRun }),
         requireActivePaths: true,
         activePaths: options.activePaths,
         ...(options.activeBoundSessionIds === undefined ? {} : { activeBoundSessionIds: options.activeBoundSessionIds }),
         ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
         git,
-      }))
+      })
+      cleaned.push(archivedBeforeClean ? { ...result, archivedBeforeClean: true } : result)
     } catch (error) {
+      // A candidate archived earlier in this call stays archived: archiving is
+      // idempotent and user-reversible, while an automatic rollback would add
+      // a second failure surface and could fight a concurrent user action. The
+      // refusal is reported honestly instead of being dressed up as success.
       refused.push({ ...candidate, kind: 'refused', reason: messageOf(error), ...(error instanceof WsError ? { code: error.code } : {}) })
     }
   }

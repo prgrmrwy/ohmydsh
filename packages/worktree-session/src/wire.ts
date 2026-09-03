@@ -209,15 +209,40 @@ export interface CleanResult {
   taskBranch: string
   actions: readonly string[]
   cleaned: boolean
+  /**
+   * Present only when this candidate's source Session was archived as part of
+   * THIS call, after the user confirmed finishing it. Absent for an
+   * already-archived candidate, keeping the two paths distinguishable.
+   */
+  archivedBeforeClean?: true
+}
+
+/**
+ * The decidable facts a user needs to judge one archive-then-clean offer. The
+ * candidate is identified exactly (never summarized), and `merged`/`clean`
+ * report the gates already proven at offer time — the clean itself re-verifies
+ * them under the repository lock.
+ */
+export interface RepoCleanArchiveOffer {
+  operationId: string
+  sourceSessionId: string
+  taskBranch: string
+  worktreePath: string
+  /** The task branch is provably merged into its base ref. */
+  merged: boolean
+  /** The worktree has no uncommitted changes. */
+  clean: boolean
 }
 
 /**
  * Why one repository-clean candidate was not cleaned. `not-archived` is this
- * flow's own precondition; `refused` carries an existing single-operation
+ * flow's own precondition (the user was not asked, or declined);
+ * `archive-failed` marks a confirmed offer whose archive call failed, leaving
+ * every resource intact; `refused` carries an existing single-operation
  * safety-gate rejection; `unreadable` marks metadata that could not be parsed
  * (including retired schema versions), which is reported and never mutated.
  */
-export type RepoCleanRefusalKind = 'not-archived' | 'refused' | 'unreadable'
+export type RepoCleanRefusalKind = 'not-archived' | 'archive-failed' | 'refused' | 'unreadable'
 
 /** A candidate this run deliberately left untouched, with a stable reason. */
 export interface RepoCleanRefusal {
