@@ -657,8 +657,14 @@ function TaskPanel(props: {
           className="dshpet-task"
           role="button"
           tabIndex={0}
-          onClick={() => props.openSession?.(task.executorSessionId)}
+          onClick={event => {
+            // The row also hosts the answer field and its submit button.
+            // Navigating on every click would steal focus mid-typing.
+            if ((event.target as HTMLElement).closest('input, button, textarea') !== null) return
+            props.openSession?.(task.executorSessionId)
+          }}
           onKeyDown={event => {
+            if (event.target !== event.currentTarget) return
             if (event.key === 'Enter' || event.key === ' ') {
               event.preventDefault()
               props.openSession?.(task.executorSessionId)

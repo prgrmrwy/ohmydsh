@@ -1197,3 +1197,31 @@ describe('the wheel container does not swallow pointer events', () => {
     expect(styles).toContain('.dshpet-slot{pointer-events:auto')
   })
 })
+
+describe('the Task row reads as clickable', () => {
+  it('shows a pointer cursor and a hover state', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const styles = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'styles.ts'),
+      'utf8',
+    )
+    const rule = styles.slice(styles.indexOf('.dshpet-task{'))
+
+    // The whole row navigates; the default arrow makes it look inert.
+    expect(rule.slice(0, 200)).toContain('cursor:pointer')
+    expect(styles).toContain('.dshpet-task:hover')
+  })
+
+  it('does not navigate when an inner control is used', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // The row hosts the answer field: navigating on every click inside it
+    // would steal focus mid-typing.
+    expect(overlay).toContain("closest('input, button, textarea')")
+    expect(overlay).toContain('if (event.target !== event.currentTarget) return')
+  })
+})

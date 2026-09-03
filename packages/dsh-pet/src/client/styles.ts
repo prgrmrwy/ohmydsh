@@ -85,7 +85,13 @@ export const PET_CSS = `
   border-radius:6px;cursor:pointer;color:var(--dsw-alias-label-secondary,#646a73)}
 .dshpet-tab[aria-selected="true"]{background:var(--dsw-alias-interactive-bg-hover,#0000000f);
   color:var(--dsw-alias-label-primary,#1f2329)}
-.dshpet-task{border-top:1px solid var(--dsw-alias-border-l2,#1f232914);padding:8px 0}
+/* The whole row navigates to the executor session, so it must read as
+   clickable — the default arrow makes it look inert. */
+.dshpet-task{border-top:1px solid var(--dsw-alias-border-l2,#1f232914);padding:8px 0;
+  cursor:pointer;border-radius:8px}
+.dshpet-task:hover{background:var(--dsw-alias-interactive-bg-hover,#0000000a)}
+.dshpet-task:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);
+  outline-offset:-2px}
 .dshpet-inv{display:flex;align-items:center;gap:6px;font-size:12px;padding:3px 0;
   color:var(--dsw-alias-label-secondary,#646a73)}
 .dshpet-status{font-size:11px;padding:1px 6px;border-radius:6px;
