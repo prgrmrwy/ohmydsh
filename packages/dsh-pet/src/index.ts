@@ -214,10 +214,15 @@ async function initialize(
   await lifecycle.contain('Pet restart reconciliation', () =>
     reconcileCreatingExecutors(
       repository,
-      // `agents.get` only finds a LIVE agent, and none is live at startup —
-      // the check it fed was therefore always false, so a Task stranded in
-      // `recovering` never healed. Session existence is the durable fact.
-      sessionId => ctx.sessions.get(sessionId as never) !== undefined,
+      // Both `agents.get` and `sessions.get` mean LOADED, and nothing is
+      // loaded at startup — either check would report every session as gone
+      // and condemn healthy Tasks. The workspace's session account is the
+      // durable record, so ask that instead.
+      sessionId => {
+        const workspace = ctx.workspaceRegistry.get(workspaceId as never)
+        const accounted = (workspace?.sessionIds ?? []) as readonly unknown[]
+        return accounted.some(id => String(id) === sessionId)
+      },
     ),
   )
 
@@ -371,17 +376,24 @@ async function initialize(
       // Pet Task that sat unused had its executor evicted and every later
       // dispatch failed — the session itself was never gone. Resume it from
       // its persisted state instead of reporting the Task as unrecoverable.
+      // `agents.get` and `sessions.get` both mean LOADED, not "exists": DSH
+      // unloads idle entries, so a Pet Task left alone had its executor
+      // evicted and every later dispatch failed while the session was intact.
+      // Gate on resume itself — it reads persisted state, so it is the only
+      // check that can tell an evicted session from a deleted one.
       let handle: unknown = ctx.agents.get(executorSessionId as never)
       if (handle === undefined) {
-        if (ctx.sessions.get(executorSessionId as never) === undefined) {
+        try {
+          handle = await ctx.agents.resume({
+            resumeSessionId: executorSessionId as never,
+          } as never)
+        } catch (error) {
           throw new PetError(
             'INTERNAL',
-            `Pet executor session ${executorSessionId} no longer exists`,
+            `Pet executor session ${executorSessionId} could not be resumed: ` +
+              `${error instanceof Error ? error.message : String(error)}`,
           )
         }
-        handle = await ctx.agents.resume({
-          resumeSessionId: executorSessionId as never,
-        } as never)
       }
       // The ordinary DSH lifecycle: submit a normal user message through
       // `followup`, which is synchronous and void, then flush by awaiting the
