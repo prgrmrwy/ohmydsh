@@ -367,12 +367,21 @@ async function initialize(
 
   const dispatcher: PromptDispatcher = {
     dispatch: async (executorSessionId, text) => {
-      const handle = ctx.agents.get(executorSessionId as never)
+      // `agents.get` only finds a LOADED agent. DSH unloads idle ones, so a
+      // Pet Task that sat unused had its executor evicted and every later
+      // dispatch failed — the session itself was never gone. Resume it from
+      // its persisted state instead of reporting the Task as unrecoverable.
+      let handle: unknown = ctx.agents.get(executorSessionId as never)
       if (handle === undefined) {
-        throw new PetError(
-          'INTERNAL',
-          `Pet executor session ${executorSessionId} is not live`,
-        )
+        if (ctx.sessions.get(executorSessionId as never) === undefined) {
+          throw new PetError(
+            'INTERNAL',
+            `Pet executor session ${executorSessionId} no longer exists`,
+          )
+        }
+        handle = await ctx.agents.resume({
+          resumeSessionId: executorSessionId as never,
+        } as never)
       }
       // The ordinary DSH lifecycle: submit a normal user message through
       // `followup`, which is synchronous and void, then flush by awaiting the

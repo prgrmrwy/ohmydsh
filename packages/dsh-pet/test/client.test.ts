@@ -1284,3 +1284,30 @@ describe('the wheel is reachable above the mascot box', () => {
     expect(overlay).toContain("querySelector('.dshpet-mascot')")
   })
 })
+
+describe('dispatch resumes an unloaded executor', () => {
+  it('does not treat an evicted agent as a missing session', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const entry = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
+    const from = entry.indexOf('const dispatcher: PromptDispatcher')
+    const block = entry.slice(from, entry.indexOf('\n  }\n', from))
+
+    // `agents.get` only finds a LOADED agent. DSH unloads idle ones, so a Pet
+    // Task that sat unused had its executor evicted and every later dispatch
+    // failed with "is not live" — while the session was perfectly intact.
+    expect(block).toContain('ctx.agents.resume(')
+    expect(block).toContain('resumeSessionId')
+  })
+
+  it('still fails when the session itself is gone', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const entry = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
+    const from = entry.indexOf('const dispatcher: PromptDispatcher')
+    const block = entry.slice(from, entry.indexOf('\n  }\n', from))
+
+    // Resume must not paper over a genuinely deleted session: that is a real
+    // failure and has to stay visible.
+    expect(block).toContain('ctx.sessions.get(executorSessionId')
+    expect(block).toContain('no longer exists')
+  })
+})
