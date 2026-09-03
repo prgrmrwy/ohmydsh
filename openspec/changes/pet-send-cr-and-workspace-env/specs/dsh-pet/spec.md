@@ -50,6 +50,32 @@ hover Pet 本体或等价键盘操作 SHALL 展开轮盘；指向 Pet 本体之�
 - **WHEN** 键盘用户聚焦 Pet 并打开快捷能力
 - **THEN** 用户可以遍历、选择或关闭能力轮盘，焦点状态和能力禁用原因均可感知
 
+### Requirement: Pet Skill 通过显式安装和启用清单管理
+
+Pet SHALL 将“已安装”“已启用”“显示为快捷能力”建模为显式 Pet 配置，而 MUST NOT 把 DSH 全局 Skill 发现结果自动加入 Pet。Pet Agent 的 model-facing catalog、`skill` loader 和用户显式 `/<skill-name>` 注入 SHALL 只允许当前配置代际中已启用且由当前 Invocation 固定版本的 Pet Skill；未启用、仅全局可见、已卸载或名称碰撞的 Skill SHALL fail-closed。
+
+设置界面 SHALL 在已启用 Skill 达到轮盘容量上限（24 个）时阻止继续启用，并说明原因。该上限属于呈现约束，MUST NOT 影响授权边界：超出上限不改变任何 Skill 的启用状态或可执行性，只影响其是否出现在轮盘上。
+
+安装来源 SHALL 只有一种：用户从运行当前 `dsh web` 的 Host 机器绝对路径显式导入的单层 Skill bundle。Pet MUST NOT 自带、声明或自动安装任何 Skill——不存在"内置 Skill"这一类别，因此也不存在内置与外部之分。Web UI SHALL 先提交该路径执行只读检查并展示名称、摘要、文件范围、来源和风险预览，只有用户再次确认后才注册安装；它 MUST NOT 把路径解释为浏览器客户端路径。
+
+注册 SHALL 记录用户自有目录的链接而非内容副本，因此对该目录的修改立即生效、无需重新导入；目录被删除或移走时该 Skill SHALL 失效并拒绝执行，而不是运行过期副本。
+
+#### Scenario: 启用数量达到上限
+- **WHEN** 用户已启用 24 个 Skill，并尝试启用第 25 个
+- **THEN** 系统拒绝该次启用并说明已达轮盘容量上限，已启用的 Skill 不受影响
+
+#### Scenario: 存量启用数超过上限
+- **WHEN** 由于历史数据，已启用 Skill 数量超过 24 个
+- **THEN** 轮盘只渲染前 24 个，其余 Skill 仍可被调用与管理，系统不报错
+
+#### Scenario: Pet 不提供任何内置 Skill
+- **WHEN** 用户首次安装 Pet 并打开 Skills 页
+- **THEN** 列表为空，且不存在可供"启用内置 Skill"的入口
+
+#### Scenario: 修改已注册目录立即生效
+- **WHEN** 用户编辑某个已注册 Skill 的源目录内容
+- **THEN** 下一次调用即读到新内容，无需重新导入
+
 ### Requirement: Pet 能力以 Agent Skill 驱动并以有界工具完成副作用
 
 Pet 能力 SHALL 全部由**普通 DSH Skill** 提供：Skill 在仓库 `skills/` 下维护、随
