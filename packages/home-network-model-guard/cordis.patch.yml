@@ -1,0 +1,16 @@
+# dsh-home-network-model-guard bundle patch
+#
+# Mounts the plugin (host entry + declared web client bundle) as a profile
+# bundle row: each DSH web client then loads `./client` (via the package's
+# `dsh.client` declaration) and raises the composer block for sessions whose
+# selection is a Claude-family model while the DSH host sits on a known home
+# network. The host half exposes the `/dsh-home-network-model-guard` loopback
+# Connection RPC channel and is the only half that performs external network
+# calls (egress IP lookup, single fixed endpoint).
+#
+# This is the `dsh.bundle.patch` layer declared in package.json; the ohmydsh
+# manifest (source: local) appends `dsh-home-network-model-guard` to the
+# bundle stack automatically.
+- insert:
+    - id: dsh-home-network-model-guard
+      name: dsh-home-network-model-guard
