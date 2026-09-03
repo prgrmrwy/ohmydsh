@@ -94,6 +94,10 @@ Pet 的快捷能力入口在 `add-dsh-pet` 中最初就写的是「轮盘」，�
 
 ### 移除 `petConfirm`
 
+（`petConfirm` 是实现层的 frontmatter 字段，主 spec 从未把它写成一条需求，
+因此本变更的 delta 不含 REMOVED 段落——那会声称删除一条并不存在的需求。
+决策与迁移说明记录在此。）
+
 入口处的通用二次确认无法区分破坏性与无害操作：它对每个能力都加一次点击，却把安全判断交给了不掌握上下文的 Pet 入口。
 
 安全性应由 Skill 在其 Pet Task 内负责。`clean-worktree` 本就依赖 `wsClean` 既有的 dirty/merge/active 门禁——那才是能真正拒绝危险操作的位置，而 Pet 的确认框只能问「你确定吗」。
