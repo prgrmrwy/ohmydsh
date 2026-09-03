@@ -1225,3 +1225,25 @@ describe('the Task row reads as clickable', () => {
     expect(overlay).toContain('if (event.target !== event.currentTarget) return')
   })
 })
+
+describe('the executor preset falls back on a blank value', () => {
+  it('treats an empty stored preset as unset', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const entry = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
+
+    // `??` only catches `undefined`. An empty string reached DSH verbatim and
+    // broke session resume with `preset "" not found`.
+    expect(entry).toContain("repository.global.agentPreset.trim() === ''")
+    expect(entry).toContain('PET_EXECUTOR_PRESET')
+  })
+
+  it('heals a stored blank preset at startup', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const entry = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
+
+    // The value is invisible in the panel, so a user cannot clear it; without
+    // this, every existing Task stays unusable.
+    expect(entry).toContain("repository.global.agentPreset?.trim() === ''")
+    expect(entry).toContain('const { agentPreset: _blank, ...rest } = current')
+  })
+})

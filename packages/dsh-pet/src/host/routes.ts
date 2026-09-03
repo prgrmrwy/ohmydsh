@@ -144,7 +144,10 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
           defaultContextPolicy: 'invalid',
         })
       }
-      const agentPreset = optionalString(record, 'agentPreset')
+      // Normalize blank to undefined: storing `''` is indistinguishable from
+      // "unset" to a reader using `??`, and DSH rejects it as a preset name.
+      const rawPreset = optionalString(record, 'agentPreset')
+      const agentPreset = rawPreset?.trim() === '' ? undefined : rawPreset
       const updated = await repository.updateGlobal(current => ({
         ...current,
         ...(agentPreset !== undefined ? { agentPreset } : {}),
