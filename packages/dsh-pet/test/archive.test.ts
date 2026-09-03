@@ -315,3 +315,51 @@ describe('archived source stays navigable as history', () => {
     expect(task?.archivedAt).toBeUndefined()
   })
 })
+
+describe('archiving the executor settles a recovering Task', () => {
+  it('archives it instead of keeping it active forever', async () => {
+    harness = await openPetHarness()
+    const task = await harness.repository.createTask({
+      scopeKey: 'session:src-1',
+      sourceKind: 'session',
+      sourceId: 'src-1',
+      executorSessionId: 'exec-1',
+    } as never)
+    await harness.repository.appendInvocation({
+      id: 'inv-a',
+      taskId: task.id,
+      clientInvocationId: 'client-a',
+      capabilityId: 'ws',
+      skillName: 'ws',
+      snapshotId: 'snap-1',
+      status: 'recovering',
+      epoch: task.epoch,
+      createdAt: Date.now(),
+    } as never)
+    await harness.repository.setTaskStatus(task.id, 'recovering', 'stranded')
+
+    // The work was already unprovable and the session it would resume into is
+    // gone, so nothing can advance it. Keeping it active strands the Task: its
+    // slot stays occupied and later capabilities queue behind it forever.
+    await reconcileArchives(harness.repository, new Set(['exec-1']))
+
+    expect(harness.repository.getTask(task.id)?.archivedAt).toBeDefined()
+    expect(harness.repository.getInvocation('inv-a')?.status).toBe('failed')
+  })
+
+  it('still keeps a running Task active when its executor is archived', async () => {
+    harness = await openPetHarness()
+    const task = await harness.repository.createTask({
+      scopeKey: 'session:src-2',
+      sourceKind: 'session',
+      sourceId: 'src-2',
+      executorSessionId: 'exec-2',
+    } as never)
+    await harness.repository.setTaskStatus(task.id, 'running')
+
+    // An external archive is not proof that running work was cancelled.
+    await reconcileArchives(harness.repository, new Set(['exec-2']))
+
+    expect(harness.repository.getTask(task.id)?.archivedAt).toBeUndefined()
+  })
+})

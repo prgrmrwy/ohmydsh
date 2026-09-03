@@ -251,7 +251,12 @@ export async function reconcileCreatingExecutors(
     // capability queues behind it forever. When the executor session is still
     // alive the work can simply be re-dispatched, so fail the stalled
     // Invocation and let the queue drain rather than stranding the Task.
-    if (task.status === 'recovering' && sessionExists(task.executorSessionId)) {
+    if (task.status === 'recovering') {
+      // Either way the stalled Invocation must release the slot, or every
+      // later capability queues behind it forever. `sessions.get` only finds a
+      // LIVE session, so an archived executor reads as missing — and that is
+      // precisely the case that can never resume on its own.
+      const resumable = sessionExists(task.executorSessionId)
       for (const invocation of repository.listInvocations(task.id)) {
         if (invocation.status === 'recovering') {
           await repository.setInvocationStatus(invocation.id, 'failed')
@@ -259,7 +264,13 @@ export async function reconcileCreatingExecutors(
       }
       outcomes.push({
         kind: 'committed',
-        task: await repository.setTaskStatus(task.id, 'idle'),
+        task: await repository.setTaskStatus(
+          task.id,
+          resumable ? 'idle' : 'failed',
+          resumable
+            ? undefined
+            : `Executor session ${task.executorSessionId} is gone, so this Task cannot resume.`,
+        ),
       })
       continue
     }

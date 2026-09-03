@@ -270,7 +270,7 @@ describe('a Task stranded in recovering is released', () => {
     expect(harness.repository.getInvocation(stalled.id)?.status).toBe('failed')
   })
 
-  it('leaves it recovering when the session is gone', async () => {
+  it('settles it as failed when the session is gone', async () => {
     harness = await openPetHarness()
     const task = await harness.repository.createTask({
       scopeKey: 'session:src-2',
@@ -280,10 +280,11 @@ describe('a Task stranded in recovering is released', () => {
     } as never)
     await harness.repository.setTaskStatus(task.id, 'recovering', 'stranded')
 
-    // Without the session there is nothing to re-dispatch into, so the
-    // diagnosable state is the honest one.
+    // A missing session is exactly the case that can never resume, so the
+    // Task must settle rather than hold its slot forever. `sessions.get` only
+    // finds a LIVE session, so an archived executor arrives here too.
     await reconcileCreatingExecutors(harness.repository, () => false)
 
-    expect(harness.repository.getTask(task.id)?.status).toBe('recovering')
+    expect(harness.repository.getTask(task.id)?.status).toBe('failed')
   })
 })
