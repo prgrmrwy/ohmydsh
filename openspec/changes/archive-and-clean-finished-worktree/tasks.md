@@ -37,6 +37,6 @@
 
 - [x] 6.1 更新 `skills/ws/SKILL.md`：说明收尾退出流程（确认 → 归档 → 清理）、提议的前置条件，以及 operator CLI 的例外。
 - [x] 6.2 更新 `worktree-session-architecture.md` 的清理章节，补充归档编排与既有 released 恢复路径的关系。
-- [x] 6.3 运行验证：`npm run build`、`npm run typecheck`、包测试 24 文件 161 通过、仓库级 `npm test` 92/92、`npm run check:artifacts` 合规。`node scripts/sync.mjs` 的幂等验证留待合入主仓后执行——在 worktree 内运行它会把共享部署面指向本 worktree，而 `dsh` 启动器读主仓 manifest，两者会互相覆盖（本次已确认的部署陷阱）。
+- [x] 6.3 运行验证：`npm run build`、`npm run typecheck`、包测试 24 文件 161 通过、仓库级 `npm test` 92/92、`npm run check:artifacts` 合规。合入主仓并重启后于主 checkout 运行 `node scripts/sync.mjs`，第二次运行报 `no changes — deployment already matches manifest`（幂等成立）。注意：在 worktree 内运行 sync 会把共享部署面指向本 worktree，而 `dsh` 启动器读主仓 manifest，两者会互相覆盖——本次已确认的部署陷阱。
 - [x] 6.4 运行 `openspec validate archive-and-clean-finished-worktree --strict`（通过），复核 diff 无范围蔓延：仅 `maintenance.ts`、`tool.ts`、`wire.ts`、一个新测试与两份文档；`dsh-pet` 零改动，operation schema、HTTP route、CLI 行为、归档生命周期与历史 Session 语义均未改变。
 - [ ] 6.5 端到端验证：对一个已完成、已合入的 Worktree Session 走完确认 → 归档 → 清理，并确认 design 中"归档是否使会话从 Host 卸载"这一开放问题的真实行为，据此决定是否需要补充提示或另立 change。
