@@ -71,3 +71,16 @@ cache miss 时在同一版本目录旁创建唯一临时 staging 目录，完成
 5. 回滚只需 revert 该提交；既有 npx/pnpm 缓存可保留，不涉及用户数据。
 
 删除临时策略前，使用显式 `DSH_ALLOW_NPX_PROVISION=1` 在隔离 cache 做一次冷安装，并连续验证 build 与 restart；全部在 timeout 内稳定完成后再走单独 change 删除策略与临时说明。
+
+## 验收缺口（归档时记录）
+
+缓存优先入口本身已实机验证：解析直接命中 npx 缓存中的精确 bin，无依赖
+计算，host 服务 HTTP 200。
+
+但触发本变更的那个症状——TraeX 配置保存报 `r.mutate`——**未能验证**。
+TraeX 在归档时既未部署也未加载（manifest `enabled: false`，profile
+composition 中 0 处，`node_modules` 下无 `@byted` 包），因此没有可观察
+的现场。
+
+这不是「验证通过」，而是「无法验证」。重新启用 TraeX 时应先复验；若症状
+仍在，说明根因不在运行体入口解析，需要另开变更。

@@ -28,4 +28,17 @@
 ## 5. 提交与后续实机验证
 
 - [x] 5.1 将规范、实现、测试和说明提交为一个可独立 revert 的临时 workaround commit，不推送、不远程修改 lumevm/devbox。
-- [ ] 5.2 用户稍后运行普通 `dsh restart` 后验证 host：无 npx 依赖计算、服务 HTTP 200、TraeX `models` RPC 由 0.1.8 Host handler 响应且配置保存不再报 `r.mutate`；该实机步骤完成前明确标记为待用户验证。
+- [x] 5.2 实机验证（部分完成，TraeX 场景未覆盖）。
+
+  **已验证**：`scripts/dsh-server-bin.mjs` 直接从 npx 缓存解析出精确入口
+  （`DSH_SERVER_BIN=~/.npm/_npx/.../@deepseek-ai/dsh/lib/bin.js`），全程无
+  依赖计算；运行中的 host 服务返回 HTTP 200，且其进程正是该入口。
+
+  **未验证**：TraeX `models` RPC 由 0.1.8 Host handler 响应、配置保存不再
+  报 `r.mutate`。原因是 TraeX 当前既未部署也未加载——manifest 中
+  `enabled: false`（2026-08-31 起公开仓库默认关闭），生成的 profile
+  composition 中 traex 出现 0 次，`node_modules` 下也无 `@byted` 包。
+
+  这两条正是本变更的原始动机，因此缺口是实质性的，不作为「已通过」记录：
+  重新启用 TraeX 时应先复验它们，若仍报 `r.mutate` 则说明缓存优先入口
+  未能解决该问题，需要另开变更处理。
