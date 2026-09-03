@@ -316,10 +316,11 @@ describe('client reads DSH contracts, not invented shapes', () => {
 
     // `openSection` belongs to the settings ONBOARDING slot; a plugin cannot
     // call it. A "Settings" button wired to an invented API would silently do
-    // nothing, so Pet points at the real location instead.
+    // nothing — so Pet ships no such control, and no longer carries a hint
+    // that just restated where the panel lives.
     expect(entry).not.toContain('openSettings')
     expect(overlay).not.toContain('openSettings')
-    expect(overlay).toContain('Manage in Settings')
+    expect(overlay).not.toContain('Manage in Settings')
   })
 
   it('registers slots through inject with the two-argument register form', async () => {

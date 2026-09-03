@@ -639,12 +639,6 @@ function TaskPanel(props: {
         >
           Archived
         </button>
-        {/* DSH exposes no plugin-callable API to open a settings section, so
-            Pet points the user at the real location instead of shipping a
-            button that would silently do nothing. */}
-        <span className="dshpet-item-hint" style={{ marginLeft: 'auto' }}>
-          Manage in Settings → Pet
-        </span>
       </div>
 
       {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
