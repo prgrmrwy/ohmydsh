@@ -63,51 +63,6 @@ export const PET_ACCENTS: readonly PetAccent[] = [
  * @param id - Stored identifier, possibly unknown.
  * @returns the matching accent, falling back to the default.
  */
-/**
- * Fade an accent outward, one step per ring.
- *
- * Mixes toward white so outer rings recede and the eye lands on ring one,
- * where the most-used capability sits. The default accent is already white, so
- * the fade is invisible there — ring separation therefore relies on the stroke,
- * never on this gradient alone.
- * @param background - The accent's surface colour.
- * @param ring - Zero-based ring index.
- * @returns the fill for that ring.
- */
-export function ringFill(background: string, ring: number): string {
-  const RING_FADE = [0, 0.45, 0.75] as const
-  const amount = RING_FADE[Math.min(ring, RING_FADE.length - 1)] ?? 0
-  if (amount === 0) return background
-  const value = Number.parseInt(background.slice(1), 16)
-  if (!Number.isFinite(value)) return background
-  const channel = (shift: number): number => {
-    const base = (value >> shift) & 255
-    return Math.round(base + (255 - base) * amount)
-  }
-  return `#${[channel(16), channel(8), channel(0)]
-    .map(part => part.toString(16).padStart(2, '0'))
-    .join('')}`
-}
-
-/**
- * Deepen a ring fill to mark the slice under the pointer.
- *
- * Applied inline for the same reason as the fill itself: an inline fill wins
- * over a class rule, so a CSS-only hover state would silently never appear.
- * @param fill - The ring's resting colour.
- * @returns the hovered colour.
- */
-export function hoverFill(fill: string): string {
-  const value = Number.parseInt(fill.slice(1), 16)
-  if (!Number.isFinite(value)) return fill
-  // Toward black, not a fixed grey: a fixed tint would wash out on dark
-  // accents and overpower pale ones.
-  const channel = (shift: number): number => Math.round(((value >> shift) & 255) * 0.92)
-  return `#${[channel(16), channel(8), channel(0)]
-    .map(part => part.toString(16).padStart(2, '0'))
-    .join('')}`
-}
-
 export function resolveAccent(id: string | undefined): PetAccent {
   return PET_ACCENTS.find(accent => accent.id === id) ?? PET_ACCENTS[0]!
 }
