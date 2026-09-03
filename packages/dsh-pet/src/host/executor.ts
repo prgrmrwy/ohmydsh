@@ -246,6 +246,24 @@ export async function reconcileCreatingExecutors(
     // continued: no Agent is driving it any more. Marking it `recovering`
     // keeps it visible and diagnosable instead of reporting a run that is not
     // actually happening.
+    // A Task left `recovering` by an EARLIER restart is only stuck if nobody
+    // clears it: `recovering` occupies the Invocation slot, so every later
+    // capability queues behind it forever. When the executor session is still
+    // alive the work can simply be re-dispatched, so fail the stalled
+    // Invocation and let the queue drain rather than stranding the Task.
+    if (task.status === 'recovering' && sessionExists(task.executorSessionId)) {
+      for (const invocation of repository.listInvocations(task.id)) {
+        if (invocation.status === 'recovering') {
+          await repository.setInvocationStatus(invocation.id, 'failed')
+        }
+      }
+      outcomes.push({
+        kind: 'committed',
+        task: await repository.setTaskStatus(task.id, 'idle'),
+      })
+      continue
+    }
+
     if (task.status === 'running' || task.status === 'waiting-user') {
       const reason =
         'The Host stopped while this Invocation was in flight, so its outcome is unknown. ' +

@@ -214,7 +214,10 @@ async function initialize(
   await lifecycle.contain('Pet restart reconciliation', () =>
     reconcileCreatingExecutors(
       repository,
-      sessionId => ctx.agents.get(sessionId as never) !== undefined,
+      // `agents.get` only finds a LIVE agent, and none is live at startup —
+      // the check it fed was therefore always false, so a Task stranded in
+      // `recovering` never healed. Session existence is the durable fact.
+      sessionId => ctx.sessions.get(sessionId as never) !== undefined,
     ),
   )
 
@@ -509,6 +512,14 @@ async function initialize(
       }),
     'dsh-pet: project Invocation state from session events',
   )
+
+  // Drain queues left by a restart. Reconciliation frees the Invocation slot,
+  // but nothing re-dispatches on its own: a Task whose slot just opened would
+  // otherwise sit with queued work until the user invoked something new.
+  for (const task of repository.listTasks()) {
+    if (task.archivedAt !== undefined) continue
+    void coordinator.pump(task.id).catch(() => undefined)
+  }
 
   for (const route of createPetRoutes({
     repository,

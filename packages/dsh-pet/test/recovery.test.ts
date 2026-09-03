@@ -238,3 +238,52 @@ describe('in-flight work is reconciled on restart', () => {
     expect(harness.repository.getTask('task-2')?.archivedAt).toBeTypeOf('number')
   })
 })
+
+describe('a Task stranded in recovering is released', () => {
+  it('frees the slot when the executor session still exists', async () => {
+    harness = await openPetHarness()
+    const task = await harness.repository.createTask({
+      scopeKey: 'session:src-1',
+      sourceKind: 'session',
+      sourceId: 'src-1',
+      executorSessionId: 'exec-1',
+    } as never)
+    const stalled = await harness.repository.appendInvocation({
+      id: 'inv-a',
+      taskId: task.id,
+      clientInvocationId: 'client-a',
+      capabilityId: 'ws',
+      skillName: 'ws',
+      snapshotId: 'snap-1',
+      status: 'recovering',
+      epoch: task.epoch,
+      createdAt: Date.now(),
+    } as never)
+    await harness.repository.setTaskStatus(task.id, 'recovering', 'stranded')
+
+    // `recovering` occupies the Invocation slot, so every later capability
+    // queues behind it forever. The session is alive, so the work can simply
+    // be re-invoked — stranding the Task helps nobody.
+    await reconcileCreatingExecutors(harness.repository, () => true)
+
+    expect(harness.repository.getTask(task.id)?.status).toBe('idle')
+    expect(harness.repository.getInvocation(stalled.id)?.status).toBe('failed')
+  })
+
+  it('leaves it recovering when the session is gone', async () => {
+    harness = await openPetHarness()
+    const task = await harness.repository.createTask({
+      scopeKey: 'session:src-2',
+      sourceKind: 'session',
+      sourceId: 'src-2',
+      executorSessionId: 'exec-2',
+    } as never)
+    await harness.repository.setTaskStatus(task.id, 'recovering', 'stranded')
+
+    // Without the session there is nothing to re-dispatch into, so the
+    // diagnosable state is the honest one.
+    await reconcileCreatingExecutors(harness.repository, () => false)
+
+    expect(harness.repository.getTask(task.id)?.status).toBe('recovering')
+  })
+})
