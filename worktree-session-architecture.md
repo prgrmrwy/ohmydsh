@@ -152,6 +152,15 @@ stateDiagram-v2
   语义。所有 active、dirty、in-flight、归档、schema 与 merge 安全门保持不变。`dsh-ws`
   CLI/Skill shell wrapper 仍是无需交互授权的 operator 显式路径入口，行为不变，不能
   用来绕过模型侧授权拒绝。
+- 源 Session 未归档、但其余安全门全通过的候选不再直接拒绝:模型侧入口以一次
+  收尾动作向用户确认(展示源 Session id、任务分支、worktree 路径与已证明的合入
+  /洁净状态),确认后先 `archiveSession` 再执行既有清理。前置判定复用既有
+  `wsClean(dryRun)` 探针,不重复实现任何安全门,因此未合并、脏、in-flight、
+  binding 损坏或仍被占用的候选按真实原因拒绝且不会被提议。归档后清理阶段仍重新
+  校验全部安全门;若此时被拒,系统如实报告清理未完成并保留已完成的归档(归档
+  幂等且可由用户取消归档,按既有 released 路径恢复为普通会话),不伪造回滚。
+  该编排只存在于模型侧 `ws clean`:`dsh-ws` CLI 与 shell wrapper 无可信询问通道,
+  保持既有非交互拒绝。
 - 逐项判定且互不阻塞:未归档、脏、未合并、active 绑定、in-flight、binding 损坏
   或不支持的 schema 只拒绝该项并给出原因,资源保持原样;已 cleaned/released 的
   tombstone 记为 ignored,不重复删除也不回退生命周期。

@@ -55,6 +55,42 @@ interface ApprovalSeam {
  * @returns the authorized path, unchanged.
  * @throws when authorization is not granted for this call.
  */
+/**
+ * Put one question to the user and report whether it was granted.
+ *
+ * The approval seam is consumed opportunistically through cordis'
+ * reflection-safe `ctx.get`, exactly like the official tool `ask` policy
+ * (`dsh-tools` serviceAsk). An absent service reads `undefined` instead of
+ * throwing, so a deployment that composes no ApprovalService fails closed
+ * instead of surfacing an inject error. A throwing ask (no open turn, audit
+ * append failure) is likewise not a grant.
+ * @param ctx - Carrier of the approval service.
+ * @param exec - The execution carrying agent, call identity and signal.
+ * @param reason - The exact human-readable question.
+ * @returns whether the user granted this one action.
+ */
+async function askUser(
+  ctx: { get?: (name: string) => unknown },
+  exec: ExplicitPathExecution,
+  reason: string,
+): Promise<boolean> {
+  const approval = ctx.get?.('approval') as ApprovalSeam | undefined
+  if (approval === undefined) return false
+  try {
+    // The Host owns these values; this seam only forwards them verbatim.
+    const outcome = await approval.request({
+      agent: exec.agent,
+      toolName: 'ws',
+      ...(exec.callId !== undefined ? { callId: exec.callId } : {}),
+      reason,
+      ...(exec.signal !== undefined ? { signal: exec.signal } : {}),
+    } as never)
+    return outcome === 'allowed-once'
+  } catch {
+    return false
+  }
+}
+
 export async function authorizeExplicitPath(
   ctx: { get?: (name: string) => unknown },
   exec: ExplicitPathExecution,
@@ -64,37 +100,13 @@ export async function authorizeExplicitPath(
     `ws explicit path ${request.path} was not authorized by the user for this ${request.action} call; ` +
     'ask the user to approve the request, or use the path-oriented dsh-ws CLI',
   )
-  // The approval seam is consumed opportunistically through cordis'
-  // reflection-safe `ctx.get`, exactly like the official tool `ask` policy
-  // (`dsh-tools` serviceAsk). An absent service reads `undefined` instead of
-  // throwing, so a deployment that composes no ApprovalService keeps the
-  // fail-closed refusal instead of surfacing an inject error.
-  const approval = ctx.get?.('approval') as ApprovalSeam | undefined
-  if (approval === undefined) throw refusal
-
   // The question names the exact action and path so the user judges the real
   // effect, and states that the grant is single-use.
-  const reason =
+  const granted = await askUser(ctx, exec,
     `Run ws ${request.action} against the explicit path ${request.path}, which is outside the calling Session's own binding. ` +
     'Approving authorizes this call once only; every later explicit-path call asks again. ' +
-    'All Worktree Session safety gates still apply.'
-
-  let outcome: string
-  try {
-    // The Host owns these values; this seam only forwards them verbatim.
-    outcome = await approval.request({
-      agent: exec.agent,
-      toolName: 'ws',
-      ...(exec.callId !== undefined ? { callId: exec.callId } : {}),
-      reason,
-      ...(exec.signal !== undefined ? { signal: exec.signal } : {}),
-    } as never)
-  } catch {
-    // An ask that cannot even be put (no open turn, audit append failure)
-    // is not a grant.
-    throw refusal
-  }
-  if (outcome !== 'allowed-once') throw refusal
+    'All Worktree Session safety gates still apply.')
+  if (!granted) throw refusal
   return request.path
 }
 
@@ -204,6 +216,19 @@ export function registerWsTool(ctx: Context): () => void {
           archivedSessionIds: ctx.workspaceRegistry.archivedSessionIds.map(String),
           activePaths: ctx.sessions.list().flatMap(session => session.header.cwd === undefined ? [] : [session.header.cwd]),
           activeBoundSessionIds: bound,
+          // A finished-but-unarchived Worktree Session is offered as one
+          // action: the user confirms, the Host archives, then the existing
+          // clean runs. Only reachable from this Agent-facing tool — the
+          // operator CLI and HTTP routes inject neither hook and keep the
+          // historical refusal, having no trustworthy way to ask.
+          confirmArchive: offer => askUser(ctx, exec,
+            `Finish the Worktree Session for source Session ${offer.sourceSessionId}? ` +
+            `Its task branch ${offer.taskBranch} is proven merged and its worktree ${offer.worktreePath} has no uncommitted changes. ` +
+            'Approving archives that Session and then removes the worktree and local task branch. ' +
+            'Removal is irreversible; the archived Session itself stays recoverable by unarchiving it.'),
+          archiveSession: async sourceSessionId => {
+            await ctx.workspaceRegistry.archiveSession(sourceSessionId as never)
+          },
         })
         return { json: JSON.stringify(result, null, 2) }
       }
