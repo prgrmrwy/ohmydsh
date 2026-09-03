@@ -69,8 +69,23 @@ export const PET_CSS = `
 .dshpet-wheel-item:focus-visible{position:static;width:auto;height:auto;margin:0;
   overflow:visible;clip:auto;white-space:normal;padding:6px 10px;border-radius:8px;
   pointer-events:auto;outline:2px solid var(--dsw-alias-state-business-primary,#4176e6)}
-.dshpet-wheel-note{pointer-events:auto;position:absolute;left:50%;top:100%;
-  transform:translateX(-50%);margin-top:8px;max-width:260px;padding:6px 10px;
+/* Anchor the notes to the MASCOT's bottom edge, not the wheel box. The wheel
+   box is sized for the widest ring (356px), so a top:100% anchor parked the
+   note at that far edge — ~140px below the mascot when the wheel was empty,
+   which read as a stray tooltip. The wheel is centred on the fixed 72px root
+   box, so in wheel coordinates the note's top is the wheel centre (50%) plus
+   the mascot's offset from the root centre ((mascot − root)/2), plus the
+   mascot radius, plus an 8px gap. --dshpet-mascot-size is set inline on the
+   root by the overlay, matching the resizable mascot.
+   Scoped to .dshpet-wheel and kept as a TWO-class selector on purpose: the
+   note also carries dshpet-empty/dshpet-error, whose padding:6px 0 rules
+   come later in source order at the same single-class specificity and
+   silently override the card padding — the hint text touched the card edges
+   ("no margin" bug). */
+.dshpet-wheel .dshpet-wheel-note{pointer-events:auto;position:absolute;
+  left:calc(50% + (var(--dshpet-mascot-size,72px) - 72px) / 2);
+  top:calc(50% + var(--dshpet-mascot-size,72px) - 72px / 2 + 8px);
+  transform:translateX(-50%);max-width:260px;padding:10px;
   border-radius:8px;background:var(--dsw-alias-bg-layer-1,#fff);
   box-shadow:0 8px 28px rgba(0,0,0,.22);font-size:13px;line-height:20px}
 .dshpet-item-label{font-size:13px}

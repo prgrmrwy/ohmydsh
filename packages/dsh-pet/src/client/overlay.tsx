@@ -7,7 +7,7 @@
  * never blocks the app underneath.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { PetApiError, petApi } from './api.js'
 import {
   fitLabel,
@@ -344,7 +344,16 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
       ref={rootRef}
       className="dshpet-root"
       data-open={mode !== 'closed'}
-      style={{ left: `${position.x}px`, top: `${position.y}px` }}
+      style={{
+        left: `${position.x}px`,
+        top: `${position.y}px`,
+        // The wheel notes are anchored to the MASCOT's edge (see
+        // `.dshpet-wheel-note` in styles.ts), but the wheel box is sized for
+        // its widest ring while the mascot is resizable — so the size is
+        // published here for the CSS rules to read. @types/react has no
+        // custom-property signature, hence the cast.
+        '--dshpet-mascot-size': `${size}px`,
+      } as CSSProperties}
       // Focus is the keyboard equivalent of hover, so a keyboard user reaches
       // the capability wheel the same way a pointer user does.
       onFocus={() => {
