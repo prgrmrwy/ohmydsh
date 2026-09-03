@@ -370,47 +370,6 @@ async function initialize(
     },
   }
 
-  const dispatcher: PromptDispatcher = {
-    dispatch: async (executorSessionId, text) => {
-      // `agents.get` only finds a LOADED agent. DSH unloads idle ones, so a
-      // Pet Task that sat unused had its executor evicted and every later
-      // dispatch failed — the session itself was never gone. Resume it from
-      // its persisted state instead of reporting the Task as unrecoverable.
-      // `agents.get` and `sessions.get` both mean LOADED, not "exists": DSH
-      // unloads idle entries, so a Pet Task left alone had its executor
-      // evicted and every later dispatch failed while the session was intact.
-      // Gate on resume itself — it reads persisted state, so it is the only
-      // check that can tell an evicted session from a deleted one.
-      let handle: unknown = ctx.agents.get(executorSessionId as never)
-      if (handle === undefined) {
-        try {
-          handle = await ctx.agents.resume({
-            resumeSessionId: executorSessionId as never,
-          } as never)
-        } catch (error) {
-          throw new PetError(
-            'INTERNAL',
-            `Pet executor session ${executorSessionId} could not be resumed: ` +
-              `${error instanceof Error ? error.message : String(error)}`,
-          )
-        }
-      }
-      // The ordinary DSH lifecycle: submit a normal user message through
-      // `followup`, which is synchronous and void, then flush by awaiting the
-      // agent's idle boundary. `followup` takes a UserMessage — never a raw
-      // string — so the envelope rides the same path a native client uses and
-      // the Skill pre-step sees the leading `/skill-name` token.
-      const agent = (handle as { agent?: unknown }).agent ?? handle
-      const message = createUserMessage({
-        content: [{ type: 'text', text }],
-        source: { kind: 'user' },
-      })
-      ;(agent as { followup(input: unknown): void }).followup(message)
-      const idle = (agent as { whenIdle?: () => Promise<void> }).whenIdle
-      if (typeof idle === 'function') await idle.call(agent)
-    },
-  }
-
   const selection = (): PetModelSelection => {
     // FOLLOW DSH: an executor is an ordinary Agent, so it uses the Host's own
     // default model rather than a Pet-private copy the user has to maintain.
@@ -447,6 +406,55 @@ async function initialize(
       },
     )
   }
+
+  const dispatcher: PromptDispatcher = {
+    dispatch: async (executorSessionId, text) => {
+      // `agents.get` only finds a LOADED agent. DSH unloads idle ones, so a
+      // Pet Task that sat unused had its executor evicted and every later
+      // dispatch failed — the session itself was never gone. Resume it from
+      // its persisted state instead of reporting the Task as unrecoverable.
+      // `agents.get` and `sessions.get` both mean LOADED, not "exists": DSH
+      // unloads idle entries, so a Pet Task left alone had its executor
+      // evicted and every later dispatch failed while the session was intact.
+      // Gate on resume itself — it reads persisted state, so it is the only
+      // check that can tell an evicted session from a deleted one.
+      let handle: unknown = ctx.agents.get(executorSessionId as never)
+      if (handle === undefined) {
+        try {
+          const current = selection()
+          handle = await ctx.agents.resume({
+            resumeSessionId: executorSessionId as never,
+            // Same flat shape as creation. The preset is NOT repeated here:
+            // it lives in the persisted session's meta, which resume reloads.
+            agentOptions: {
+              provider: current.providerId,
+              model: current.modelId,
+            },
+          } as never)
+        } catch (error) {
+          throw new PetError(
+            'INTERNAL',
+            `Pet executor session ${executorSessionId} could not be resumed: ` +
+              `${error instanceof Error ? error.message : String(error)}`,
+          )
+        }
+      }
+      // The ordinary DSH lifecycle: submit a normal user message through
+      // `followup`, which is synchronous and void, then flush by awaiting the
+      // agent's idle boundary. `followup` takes a UserMessage — never a raw
+      // string — so the envelope rides the same path a native client uses and
+      // the Skill pre-step sees the leading `/skill-name` token.
+      const agent = (handle as { agent?: unknown }).agent ?? handle
+      const message = createUserMessage({
+        content: [{ type: 'text', text }],
+        source: { kind: 'user' },
+      })
+      ;(agent as { followup(input: unknown): void }).followup(message)
+      const idle = (agent as { whenIdle?: () => Promise<void> }).whenIdle
+      if (typeof idle === 'function') await idle.call(agent)
+    },
+  }
+
 
   const coordinator = new PetCoordinator({
     repository,

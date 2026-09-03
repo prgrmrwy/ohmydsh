@@ -1328,3 +1328,35 @@ describe('liveness checks never stand in for existence', () => {
     expect(block).toContain('sessionIds')
   })
 })
+
+describe('the hover disc survives the capability fetch', () => {
+  it('holds one ring of radius while the list is empty', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // An empty list collapses the disc to the mascot, so the first hover
+    // after a restart — capabilities still loading — closed the wheel the
+    // moment the pointer left the mascot's face, and the click was lost.
+    expect(overlay).toContain('shortcuts.length === 0')
+    expect(overlay).toContain('size / 2 + RING_GAP + RING_WIDTH')
+  })
+})
+
+describe('resume carries the model route', () => {
+  it('passes the flat provider/model pair, matching creation', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const entry = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
+    const from = entry.indexOf('ctx.agents.resume(')
+    const block = entry.slice(from - 400, from + 400)
+
+    // Without a model route the persona template's {{model}} has no value and
+    // assembly fails before the agent ever runs.
+    expect(block).toContain('provider: current.providerId')
+    expect(block).toContain('model: current.modelId')
+    // The preset is NOT repeated: it lives in the persisted session's meta.
+    expect(block).not.toContain('agentPreset: current.agentPreset')
+  })
+})

@@ -189,7 +189,16 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   const WHEEL_VIEWBOX = 88 + 2 * (RING_GAP + 3 * RING_WIDTH)
   const rings = planRings(shortcuts.length, size)
   const slots = planSlots(shortcuts.length, size, WHEEL_VIEWBOX / 2)
-  const wheelRadius = hoverRadius(rings, size)
+  // While capabilities are still LOADING the list is empty and the disc would
+  // collapse to the mascot: the first hover after a restart then closed the
+  // instant the pointer left the mascot's face, and the click landed on a
+  // wheel that had already vanished. Hold one ring's radius until the answer
+  // arrives; an ACTUALLY empty catalog keeps the wheel open over the hint it
+  // shows for exactly the same reason.
+  const wheelRadius =
+    shortcuts.length === 0
+      ? size / 2 + RING_GAP + RING_WIDTH
+      : hoverRadius(rings, size)
 
   // Closing is decided by distance from the centre, not by `mouseleave`: the
   // breathing gap and the seams between slices are all inside the disc, so a
