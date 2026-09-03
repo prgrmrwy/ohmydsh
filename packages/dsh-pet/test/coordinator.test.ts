@@ -624,7 +624,7 @@ describe('shortcut visibility controls the radial menu only', () => {
   it('defaults a freshly installed Skill to visible and available', async () => {
     const f = await fixture()
     harness = f.harness
-    await installTestSkill(harness!, 'clean-worktree', { context: 'session-required' })
+    await installTestSkill(harness!, 'clean-worktree')
 
     const entry = f.capabilities
       .project(f.harness.repository)
@@ -633,7 +633,27 @@ describe('shortcut visibility controls the radial menu only', () => {
     // An installed, enabled Skill needs no Pet-side code to become usable.
     expect(entry?.showAsShortcut).toBe(true)
     expect(entry?.available).toBe(true)
-    expect(entry?.contextRequirement).toBe('session-required')
+    // The label is just the Skill name: Pet reads no Pet-specific declaration,
+    // so an ordinary Skill and a "Pet-aware" one are indistinguishable.
+    expect(entry?.label).toBe('clean-worktree')
+  })
+
+  it('accepts any capability from a none source, applying no context gate', async () => {
+    const f = await fixture()
+    harness = f.harness
+    // `clean-worktree` genuinely needs a session, but Pet has no way to know
+    // that and deliberately does not ask: the Invocation is created and the
+    // Skill reports the missing source itself. Gating here would require a
+    // Pet-specific declaration on the Skill.
+    await installTestSkill(harness!, 'clean-worktree')
+
+    const result = await f.coordinator.accept(
+      capture({ capabilityId: 'clean-worktree', sourceKind: 'none', sourceSessionId: undefined }),
+    )
+
+    expect(result.started).toBe(true)
+    expect(result.task.scopeKey).toBe('independent:web:default')
+    expect(f.dispatched).toHaveLength(1)
   })
 })
 

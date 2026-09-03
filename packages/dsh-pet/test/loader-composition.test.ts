@@ -793,7 +793,10 @@ describe('client bundle loads without Cockpit changes', () => {
     ) as { dsh?: { client?: { platform?: string } }; files?: string[] }
 
     expect(pkg.dsh?.client?.platform).toBe('web')
-    expect(pkg.files).toContain('skills')
+    // The package ships NO Skills of its own. Bundling any would recreate the
+    // built-in/external split this design removes: every Pet capability comes
+    // from an ordinary Skill the user installs, exactly like `ws`.
+    expect(pkg.files).not.toContain('skills')
   })
 
   it('touches no Cockpit package or source', async () => {

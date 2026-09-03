@@ -29,10 +29,16 @@ import {
 import { petApi, type PetConfig } from './api.js'
 import { PET_EXECUTOR_PRESET } from '../wire.js'
 import { WHEEL_CAPACITY } from './wheel.js'
-import type { PetProjectionEntry, PetSkillRevision, PetSkillSelection } from '../wire.js'
+import type {
+  PetEnvRecord,
+  PetProjectionEntry,
+  PetSkillRevision,
+  PetSkillSelection,
+  PetWorkspaceChoice,
+} from '../wire.js'
 
 /** The four stable tabs. */
-export const PET_SETTINGS_TABS = ['general', 'skills', 'diagnostics'] as const
+export const PET_SETTINGS_TABS = ['general', 'skills', 'env', 'diagnostics'] as const
 
 export type PetSettingsTab = (typeof PET_SETTINGS_TABS)[number]
 
@@ -188,6 +194,7 @@ function StoredField(props: {
 const TAB_LABELS: Record<PetSettingsTab, string> = {
   general: '通用',
   skills: 'Skill',
+  env: '环境变量',
   diagnostics: '诊断',
 }
 
@@ -216,7 +223,8 @@ export function PetSettingsSection(props: { initialTab?: PetSettingsTab } = {}):
       <div role="tabpanel" id={`dshpet-panel-${tab}`} aria-labelledby={`dshpet-tab-${tab}`}>
         {tab === 'general' ? <GeneralTab /> : null}
         {tab === 'skills' ? <SkillsTab /> : null}
-        {tab === 'diagnostics' ? <诊断信息sTab /> : null}
+        {tab === 'env' ? <EnvironmentTab /> : null}
+        {tab === 'diagnostics' ? <DiagnosticsTab /> : null}
       </div>
     </div>
   )
@@ -896,9 +904,350 @@ function SkillsTab(): JSX.Element {
 
 
 /**
+ * Mask a configured value for display.
+ *
+ * Display-layer only: the value is still stored and injected verbatim. This
+ * guards against a shoulder-surf or a screenshot, NOT against anyone who can
+ * read the machine — the panel says as much, so the masking is not mistaken
+ * for credential protection.
+ * @param value - The stored value.
+ * @returns the masked rendering.
+ */
+function maskValue(value: string): string {
+  if (value.length <= 5) return '•'.repeat(Math.max(value.length, 3))
+  return `${value.slice(0, 5)}${'•'.repeat(Math.min(value.length - 5, 10))}`
+}
+
+/** One environment row: name, injected name, masked value and actions. */
+function EnvRow(props: {
+  readonly entry: PetEnvRecord
+  readonly prefix: string
+  /** Set when this workspace entry shadows a global one of the same key. */
+  readonly overridesGlobal?: boolean
+  readonly onRemove: () => Promise<void>
+}): JSX.Element {
+  const [revealed, setRevealed] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  return (
+    <div className="dshpet-env-row">
+      <div className="dshpet-env-key">
+        <span className="dshpet-env-name">
+          {props.entry.key}
+          {props.overridesGlobal === true ? (
+            <span className="dshpet-badge-override">覆盖全局</span>
+          ) : null}
+        </span>
+        <span className="dshpet-env-inject">
+          ${props.prefix}
+          {props.entry.key}
+        </span>
+      </div>
+      <span className="dshpet-env-value">
+        <span className="dshpet-env-secret">
+          {revealed ? props.entry.value : maskValue(props.entry.value)}
+        </span>
+        <button
+          type="button"
+          className="dshpet-reveal"
+          onClick={() => setRevealed(current => !current)}
+        >
+          {revealed ? '隐藏' : '显示'}
+        </button>
+      </span>
+      <div className="dshpet-actions">
+        <button
+          type="button"
+          className="dshpet-action"
+          disabled={busy}
+          onClick={() => {
+            setBusy(true)
+            void props.onRemove().finally(() => setBusy(false))
+          }}
+        >
+          删除
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** The add form shared by both scopes. */
+function EnvAddRow(props: {
+  readonly onAdd: (key: string, value: string) => Promise<void>
+}): JSX.Element {
+  const [key, setKey] = useState('')
+  const [value, setValue] = useState('')
+  const [error, setError] = useState<string | undefined>(undefined)
+  const [busy, setBusy] = useState(false)
+
+  const submit = (): void => {
+    setError(undefined)
+    setBusy(true)
+    void props
+      .onAdd(key.trim(), value.trim())
+      .then(() => {
+        // Clear only on success, so a rejected write keeps what was typed.
+        setKey('')
+        setValue('')
+      })
+      .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)))
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <>
+      <div className="dshpet-row">
+        <div className="dshpet-field">
+          <span>变量名</span>
+          <input
+            className="dshpet-input"
+            value={key}
+            placeholder="CR_GROUP"
+            onChange={event => setKey(event.target.value)}
+          />
+        </div>
+        <div className="dshpet-field">
+          <span>值</span>
+          <input
+            className="dshpet-input"
+            value={value}
+            placeholder="oc_xxxxxxxx"
+            onChange={event => setValue(event.target.value)}
+          />
+        </div>
+        <button type="button" className="dshpet-action" disabled={busy} onClick={submit}>
+          添加
+        </button>
+      </div>
+      {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
+    </>
+  )
+}
+
+/**
+ * Environment: global and per-workspace values injected as `DSH_PET_*`.
+ *
+ * Two scopes, with the workspace one overriding a same-named global entry. The
+ * effective view exists because that precedence is invisible otherwise: with
+ * no gate on what a value can do, "which group does this project actually post
+ * to" must be answerable at a glance.
+ * @returns the rendered tab.
+ */
+function EnvironmentTab(): JSX.Element {
+  const [entries, setEntries] = useState<readonly PetEnvRecord[]>([])
+  const [workspaces, setWorkspaces] = useState<readonly PetWorkspaceChoice[]>([])
+  const [globalScope, setGlobalScope] = useState('global')
+  const [prefix, setPrefix] = useState('DSH_PET_')
+  const [selected, setSelected] = useState<string | undefined>(undefined)
+  const [manualId, setManualId] = useState('')
+  const [error, setError] = useState<string | undefined>(undefined)
+
+  const refresh = useCallback(async () => {
+    try {
+      const data = await petApi.petEnv()
+      setEntries(data.entries ?? [])
+      setWorkspaces(data.workspaces ?? [])
+      setGlobalScope(data.globalScope ?? 'global')
+      setPrefix(data.prefix ?? 'DSH_PET_')
+      setError(undefined)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const mutate = async (input: {
+    scope: string
+    key: string
+    action: 'set' | 'remove'
+    value?: string
+  }): Promise<void> => {
+    await petApi.mutatePetEnv(input)
+    await refresh()
+  }
+
+  const globalEntries = entries.filter(entry => entry.scope === globalScope)
+  const scope = selected ?? workspaces[0]?.id
+  const workspaceEntries = scope === undefined ? [] : entries.filter(e => e.scope === scope)
+  const globalKeys = new Set(globalEntries.map(entry => entry.key))
+
+  // The effective set, computed the same way the Host does: global first, then
+  // the workspace overriding same-named keys.
+  const effective = new Map<string, { value: string; from: 'global' | 'workspace' }>()
+  for (const entry of globalEntries) effective.set(entry.key, { value: entry.value, from: 'global' })
+  for (const entry of workspaceEntries) {
+    effective.set(entry.key, { value: entry.value, from: 'workspace' })
+  }
+
+  return (
+    <div className="dshpet-settings">
+      <section className="dshpet-group">
+        <h3 className="dshpet-group-title">全局</h3>
+        <p className="dshpet-item-hint">
+          对<strong>所有</strong> Pet 任务生效，包括没有关联工作区的独立任务。
+          下面工作区里的同名变量会覆盖这里的值。
+        </p>
+        {globalEntries.length === 0 ? (
+          <p className="dshpet-empty">尚未配置全局变量。</p>
+        ) : (
+          globalEntries.map(entry => (
+            <EnvRow
+              key={entry.key}
+              entry={entry}
+              prefix={prefix}
+              onRemove={() => mutate({ scope: globalScope, key: entry.key, action: 'remove' })}
+            />
+          ))
+        )}
+        <EnvAddRow
+          onAdd={(key, value) => mutate({ scope: globalScope, key, action: 'set', value })}
+        />
+        <p className="dshpet-item-hint">
+          变量名需为大写蛇形（A-Z、数字、下划线），注入时自动加{' '}
+          <code className="dshpet-code">{prefix}</code> 前缀。
+        </p>
+      </section>
+
+      <section className="dshpet-group">
+        <h3 className="dshpet-group-title">工作区</h3>
+        <p className="dshpet-item-hint">
+          只对来源于所选工作区的任务生效，<strong>覆盖</strong>同名的全局变量。
+        </p>
+        <div className="dshpet-field">
+          <span>工作区</span>
+          <select
+            className="dshpet-input"
+            value={scope ?? ''}
+            onChange={event => setSelected(event.target.value)}
+          >
+            {workspaces.length === 0 ? <option value="">（尚无可选工作区）</option> : null}
+            {workspaces.map(item => (
+              <option key={item.id} value={item.id}>
+                {item.title ?? item.id}
+                {item.path === undefined ? '' : ` — ${item.path}`}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="dshpet-row">
+          <div className="dshpet-field">
+            <span>或手工输入工作区 id</span>
+            <input
+              className="dshpet-input"
+              value={manualId}
+              placeholder="尚未列出的 workspace id"
+              onChange={event => setManualId(event.target.value)}
+            />
+          </div>
+          <button
+            type="button"
+            className="dshpet-action"
+            onClick={() => {
+              const trimmed = manualId.trim()
+              if (trimmed !== '') setSelected(trimmed)
+            }}
+          >
+            使用
+          </button>
+        </div>
+
+        {scope === undefined ? (
+          <p className="dshpet-empty">先选择或填写一个工作区。</p>
+        ) : (
+          <>
+            {workspaceEntries.length === 0 ? (
+              <p className="dshpet-empty">该工作区尚未配置变量。</p>
+            ) : (
+              workspaceEntries.map(entry => (
+                <EnvRow
+                  key={entry.key}
+                  entry={entry}
+                  prefix={prefix}
+                  overridesGlobal={globalKeys.has(entry.key)}
+                  onRemove={() => mutate({ scope, key: entry.key, action: 'remove' })}
+                />
+              ))
+            )}
+            <EnvAddRow onAdd={(key, value) => mutate({ scope, key, action: 'set', value })} />
+          </>
+        )}
+      </section>
+
+      {scope === undefined ? null : (
+        <section className="dshpet-group">
+          <h3 className="dshpet-group-title">生效结果</h3>
+          <p className="dshpet-item-hint">
+            来源于该工作区的任务，其命令实际能读到的变量。
+          </p>
+          {effective.size === 0 ? (
+            <p className="dshpet-empty">没有会被注入的变量。</p>
+          ) : (
+            [...effective.entries()].map(([key, resolved]) => (
+              <div className="dshpet-env-row" key={`eff-${key}`}>
+                <div className="dshpet-env-key">
+                  <span className="dshpet-env-name">
+                    ${prefix}
+                    {key}
+                  </span>
+                  <span className="dshpet-env-inject">
+                    {resolved.from === 'workspace' ? '来自工作区' : '来自全局'}
+                  </span>
+                </div>
+                <span className="dshpet-env-value">
+                  <span className="dshpet-env-secret">{maskValue(resolved.value)}</span>
+                </span>
+                <span />
+              </div>
+            ))
+          )}
+          {/* A shadowed global entry is listed too: hiding it makes the
+              override invisible and the effective value hard to explain. */}
+          {globalEntries
+            .filter(entry => effective.get(entry.key)?.from === 'workspace')
+            .map(entry => (
+              <div className="dshpet-env-row dshpet-row-shadowed" key={`shadow-${entry.key}`}>
+                <div className="dshpet-env-key">
+                  <span className="dshpet-env-name">
+                    ${prefix}
+                    {entry.key}
+                    <span className="dshpet-badge-shadowed">已被覆盖</span>
+                  </span>
+                  <span className="dshpet-env-inject">来自全局</span>
+                </div>
+                <span className="dshpet-env-value">
+                  <span className="dshpet-env-secret">{maskValue(entry.value)}</span>
+                </span>
+                <span />
+              </div>
+            ))}
+        </section>
+      )}
+
+      <section className="dshpet-group">
+        <h3 className="dshpet-group-title">关于安全</h3>
+        <p className="dshpet-item-hint">
+          这些值会进入 Pet 执行命令时的子进程环境，该会话里跑的任何命令都能读到。
+          这里不是凭据保管处，请不要存放高敏 token；列表中的值默认打码只为避免
+          共享屏幕时泄露，不改变存储与注入方式。
+        </p>
+        <p className="dshpet-item-hint">
+          某个变量在全局与工作区都没有配置时，它不会存在于环境中；
+          使用它的 Skill 应当自行停下来询问，而不是猜一个值。
+        </p>
+        {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
+      </section>
+    </div>
+  )
+}
+
+/**
  * One labelled diagnostic fact.
  *
- * 诊断信息s previously dumped raw JSON, which is dense and hard to scan; a
+ * Diagnostics previously dumped raw JSON, which is dense and hard to scan; a
  * label/value pair reads at a glance while still showing the exact value.
  * @param props - Label, value and whether to render the value monospaced.
  * @returns the rendered row.
@@ -914,8 +1263,8 @@ function Fact(props: { label: string; value: string; mono?: boolean }): JSX.Elem
   )
 }
 
-/** 诊断信息s: lifecycle, paths, digests, drift and explicit repair. */
-function 诊断信息sTab(): JSX.Element {
+/** Diagnostics: lifecycle, paths, digests, drift and explicit repair. */
+function DiagnosticsTab(): JSX.Element {
   const [data, setData] = useState<Record<string, unknown> | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
 

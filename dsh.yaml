@@ -93,7 +93,7 @@ customizations:
     version: 0.1.0
     enabled: true
     brief: 常驻桌宠 Agent 入口(Pet Task/Invocation/可信来源快照/受管 Skill store)
-    note: 'openspec change add-dsh-pet;Host+Web bundle。Host 随 dsh web 同进程启动,自有受控生命周期(starting/ready/degraded/stopping)——Pet 初始化失败只降级自身,不阻止其余 DSH 服务加载。持久化:组合官方 @deepseek-ai/dsh-storage-sqlite 并仅把 dsh_pet 域路由到该 backend(storage-domain.routes 为覆盖式,profile 其余域保持默认 json);运行时状态一律位于 $DSH_HOME/plugins/dsh-pet/(state.sqlite / workspace / skills/store),与包安装目录和生成 profile 分离,插件升级或 profile 重建不覆盖任务数据。模型:每来源 scope 至多一个未归档 Pet Task,固定复用位于专用 DSH Pet Workspace 的一个普通 root executor session;每次调用创建新 Invocation 并固定当时 source 快照,页面切换不改写已创建 Invocation。Skill 隔离:只安装 manifest 声明的内置 bundle 或用户显式从 Host 绝对路径导入的 bundle,复制为不可变 content-addressed revision,再由 Pet 创建、目标受限于 immutable store 的目录软链投影到 workspace/.dsh/skills;授权边界是 Pet allowlist provider 而非投影,投影损坏/越界 fail-closed 并需显式重建。可信上下文:零参数 pet_context 工具按实际调用 executor session 反查当前 Invocation,模型无法传标识改绑目标。管理面为 loopback + same-origin 精确路由,严格字段校验、响应脱敏,不暴露任意 DSH RPC/prompt/文件路径(仅专用导入操作)。不读取或保存 provider 凭据。一期不含飞书入站 transport、跨设备 Pet Hub,也不改 dsh-cockpit 与 dsh-cockpit-bridge。隔离 DSH home 验收通过后启用(2026-09-01);内置 Skill 一期仅 clean-worktree(委托 worktree-session 的 wsClean 安全门禁,不重建 dirty/merge/active 检查),create-mr 与 send-cr 待内部工具契约确定后再补'
+    note: 'openspec change add-dsh-pet;Host+Web bundle。Host 随 dsh web 同进程启动,自有受控生命周期(starting/ready/degraded/stopping)——Pet 初始化失败只降级自身,不阻止其余 DSH 服务加载。持久化:组合官方 @deepseek-ai/dsh-storage-sqlite 并仅把 dsh_pet 域路由到该 backend(storage-domain.routes 为覆盖式,profile 其余域保持默认 json);运行时状态一律位于 $DSH_HOME/plugins/dsh-pet/(state.sqlite / workspace / skills/store),与包安装目录和生成 profile 分离,插件升级或 profile 重建不覆盖任务数据。模型:每来源 scope 至多一个未归档 Pet Task,固定复用位于专用 DSH Pet Workspace 的一个普通 root executor session;每次调用创建新 Invocation 并固定当时 source 快照,页面切换不改写已创建 Invocation。Skill 隔离:Pet 不自带任何 Skill,也不提供让 Skill 为 Pet 适配的机制(petLabel/petIcon/petContext 解析已移除)——能力一律来自用户从 Host 绝对路径显式导入的普通 DSH Skill,登记为指向用户自有目录的 local-link 并软链投影到 workspace/.dsh/skills;授权边界是 Pet allowlist provider 而非投影,投影损坏/越界 fail-closed 并需显式重建。Pet 不按能力施加上下文门禁,来源是否够用由 Skill 自行校验。可信上下文:零参数 pet_context 工具按实际调用 executor session 反查当前 Invocation,模型无法传标识改绑目标。管理面为 loopback + same-origin 精确路由,严格字段校验、响应脱敏,不暴露任意 DSH RPC/prompt/文件路径(仅专用导入操作)。不读取或保存 provider 凭据。一期不含飞书入站 transport、跨设备 Pet Hub,也不改 dsh-cockpit 与 dsh-cockpit-bridge。隔离 DSH home 验收通过后启用(2026-09-01)。环境变量(openspec change pet-send-cr-and-workspace-env,2026-09-03):按 global 与来源 workspace 两个作用域配置键值,workspace 覆盖同名 global,两者皆无则变量不存在、由 Skill 停下询问;经官方 ctx.shellEnv 以 DSH_PET_<KEY> 注入 executor 每次 shell 调用,值不进 prompt/envelope,走 ShellExecRequest.dshEnv 通道;设置页第四页签「环境变量」含全局/工作区/生效结果三区,值默认打码、标示覆盖关系。⚠ shellEnv 为可选依赖:经 ctx.get 读取(写进 inject 会变必需依赖,Host 缺该服务时 Pet 永不加载),且 register 必须直接调用——包在 ctx.effect 里会因 effect 重跑重复注册抛错,中断 Pet 初始化并导致 executor 丢失 bash/fs 等官方工具(2026-09-03 实测复现并修复)。浮层:Pet 挂在 document.body 下自有宿主 + 独立 React root(非 portal,portal 会脱离事件委托容器使交互静默失效),position:fixed 按视口定位,不被 layout-push 侧栏(如 dsh-better-sidebar 压缩 #root)顶走。一期能力由两个普通 skill 提供:既有 ws,与新增 send-cr(仓库 skills/send-cr,经 lark-cli --as bot 发 CR 到 $DSH_PET_CR_GROUP,MR 由 $DSH_PET_MR_MATCHER 从来源 session 提取,reviewer 取自 bytedcli mr reviewer list;create-mr 不在一期范围)'
   - id: dsh-pet-executor
     type: preset
     version: 0.1.0
@@ -113,6 +113,14 @@ customizations:
     enabled: true
   # 自研 skill:沙箱/权限升级避坑(sandbox_permissions 正确用法 + core 缺陷绕过)
   - id: dsh-sandbox-notes
+    type: skill
+    enabled: true
+  # 自研 skill:把 MR 的 CR 请求发到飞书群(lark-cli im +messages-send)
+  # 与 ws 同等定位的普通 skill:普通会话可直接用;也可在 Pet 设置 → Skill 里导入
+  # 本仓库的 skills/send-cr 成为 Pet 能力,两处行为一致、不含任何 Pet 专属声明。
+  # 目标群来自 $DSH_PET_CR_GROUP(Pet 设置 → 环境变量,工作区覆盖全局);未配置则
+  # 停下来询问,不猜群。发送前必须用户确认。前置:本机装了 lark-cli。
+  - id: send-cr
     type: skill
     enabled: true
   # 第三方(remote):B003 IDE 集成 — workspace 菜单一键在 VSCode 打开

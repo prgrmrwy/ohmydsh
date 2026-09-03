@@ -23,7 +23,8 @@ import { detectProjectionDrift, rebuildProjection } from './projection.js'
 import type { PetRepository } from './repository.js'
 import { inspectBundle } from './skill-bundle.js'
 import { currentAllowlist } from './skill-provider.js'
-import { ROUTES, type PetSourceKind } from '../wire.js'
+import { PET_ENV_PREFIX } from './shell-env.js'
+import { ROUTES, PET_ENV_GLOBAL, type PetSourceKind, type PetWorkspaceChoice } from '../wire.js'
 
 /** Everything the routes read from the Host. */
 export interface RouteDeps {
@@ -43,6 +44,13 @@ export interface RouteDeps {
   readonly followedModel?: () => { providerId: string; modelId: string } | undefined
   /** Agent presets this Host offers, for the Settings picker. */
   readonly listPresets?: () => Promise<readonly { id: string; label: string }[]>
+  /**
+   * Workspaces this Host knows, for the environment tab's picker.
+   *
+   * Shown with title and path: a user configuring "the CR group for project
+   * A" recognizes the project, not an opaque generated id.
+   */
+  readonly listWorkspaces?: () => Promise<readonly PetWorkspaceChoice[]>
   /** Inspects the Workspace files an executor session depends on. */
   readonly inspectWorkspace?: () => Promise<{ ok: boolean; problems: readonly string[] }>
   /** Restores those files, returning what could not be repaired. */
@@ -224,9 +232,6 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
         skillName: inspection.skillName,
         sourcePath: inspection.canonicalSourcePath,
         description: inspection.description,
-        // A Skill declares its own Pet presentation and context requirement;
-        // Pet ships no per-capability adapter.
-        ...(inspection.pet !== undefined ? { pet: inspection.pet } : {}),
         ...(skillArguments === '' ? {} : { arguments: skillArguments }),
         provenance: {
           kind: 'local-link',
@@ -425,6 +430,53 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
       return { task }
     }),
 
+
+    petRoute(ROUTES.petEnv, async () => ({
+      // Both scopes in one response so the UI can mark which workspace entries
+      // shadow a global one without a second round trip.
+      entries: repository.listEnvEntries(),
+      workspaces: (await deps.listWorkspaces?.()) ?? [],
+      globalScope: PET_ENV_GLOBAL,
+      prefix: PET_ENV_PREFIX,
+    })),
+
+    petRoute(ROUTES.petEnvMutate, async ({ body }) => {
+      requireReady(lifecycle)
+      const record = strictBody(body, ['scope', 'key', 'value', 'action'])
+      const action = requireString(record, 'action')
+      const scope = requireString(record, 'scope')
+      const key = requireString(record, 'key')
+
+      // `global` is a reserved scope name, so it must not arrive as a
+      // workspace id: that would silently write the global set while the user
+      // believed they were configuring one workspace.
+      const rawScope = record['scope']
+      if (typeof rawScope !== 'string' || rawScope.trim() === '') {
+        throw new PetError('BINDING_INVALID', 'scope must be "global" or a workspace id')
+      }
+
+      switch (action) {
+        case 'set': {
+          const value = record['value']
+          if (typeof value !== 'string') {
+            throw new PetError('BINDING_INVALID', 'value must be a string')
+          }
+          // The repository validates key shape and non-empty value, so the
+          // rule lives in exactly one place.
+          await repository.putEnvEntry({ scope, key, value: value.trim(), updatedAt: Date.now() })
+          break
+        }
+        case 'remove': {
+          await repository.deleteEnvEntry(scope, key)
+          break
+        }
+        default:
+          throw new PetError('BINDING_INVALID', `Unknown env action '${action}'`)
+      }
+
+      deps.changes.publish()
+      return { entries: repository.listEnvEntries() }
+    }),
 
     petRoute(ROUTES.diagnostics, async () => ({
       lifecycle: lifecycle.state,

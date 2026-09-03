@@ -37,6 +37,7 @@ import { ensurePetDirectories, resolvePetPaths, type PetPaths } from './host/pat
 import { rebuildProjection } from './host/projection.js'
 import { PetRepository } from './host/repository.js'
 import { createPetRoutes } from './host/routes.js'
+import { createPetEnvContributor } from './host/shell-env.js'
 import { createPetSkillProvider, resolveInvocationSkill } from './host/skill-provider.js'
 import { createWorktreeProvider } from './host/worktree-adapter.js'
 import { loadWorktreeStatus } from './host/worktree-status.js'
@@ -279,6 +280,38 @@ async function initialize(
     () => registerPetTools(ctx, { repository }),
     'dsh-pet: caller-bound Agent tools',
   )
+
+  // Publish configured values as ordinary `DSH_PET_*` variables on every shell
+  // call an executor makes. Deliberately OPTIONAL: a Host without the
+  // shell-env registry injects nothing and a Skill needing a value reports it
+  // missing, which is far better than degrading all of Pet over this.
+  // `ctx.get` rather than `ctx.shellEnv`: cordis guards property access and
+  // throws `cannot get property "shellEnv" without inject` for a service this
+  // plugin does not declare, which would abort initialization instead of
+  // degrading. `get` returns `undefined` for an absent service.
+  const shellEnv = ctx.get('shellEnv') as
+    | { register(contributor: never): () => void }
+    | undefined
+  if (shellEnv === undefined) {
+    ctx.logger.info('dsh-pet: shellEnv unavailable; DSH_PET_* variables are not injected')
+  } else {
+    // Called DIRECTLY, not wrapped in `ctx.effect`. `register` already runs
+    // inside its own effect and owns its disposal, so an extra wrapper only
+    // adds a way to run it twice — and the second call throws
+    // `contributor "..." is already registered`, which aborts the rest of Pet's
+    // initialization. That is how the executor ended up with five tools and no
+    // `bash`. Registration failure must never cost Pet its Agent tools, so the
+    // call is additionally contained.
+    try {
+      shellEnv.register(createPetEnvContributor(repository) as never)
+    } catch (error) {
+      ctx.logger.warn(
+        `dsh-pet: DSH_PET_* injection unavailable (${
+          error instanceof Error ? error.message : String(error)
+        })`,
+      )
+    }
+  }
 
   /**
    * Scope every Pet executor Agent at creation time.
@@ -566,6 +599,19 @@ async function initialize(
       // could name a composition that does not exist.
       const presets = await ctx.agentPresets.list()
       return presets.map(preset => ({ id: preset.id, label: preset.name ?? preset.id }))
+    },
+    listWorkspaces: async () => {
+      // The Pet Workspace itself is excluded: it holds executor sessions, so
+      // it is never the SOURCE a user configures a CR group for.
+      const petWorkspaceId = repository.global.workspaceId
+      return ctx.workspaceRegistry
+        .list()
+        .filter((item: { id: string }) => item.id !== petWorkspaceId)
+        .map((item: { id: string; title?: string; path?: string }) => ({
+          id: item.id,
+          ...(item.title !== undefined ? { title: item.title } : {}),
+          ...(item.path !== undefined ? { path: item.path } : {}),
+        }))
     },
     followedModel: () => {
       try {

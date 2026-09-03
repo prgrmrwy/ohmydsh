@@ -8,12 +8,24 @@
  */
 
 export const PET_CSS = `
-/* ABSOLUTE inside the shell overlay layer. That layer is inset 0 over a
-   full-height frame, so it already spans the visible area — and staying in it
-   keeps React's synthetic events working. Re-parenting to the document body
-   moved the node outside React's delegation container, which silently killed
-   hover, drag and click while the element still rendered. */
-.dshpet-root{position:absolute;z-index:999;width:72px;height:72px;
+/* Pet's own mount node, appended to document.body. It spans nothing and
+   paints nothing: it exists so Pet is positioned against the VIEWPORT instead
+   of against #root, which a layout-push sidebar squeezes. pointer-events:none
+   keeps this wrapper from swallowing clicks meant for the page. */
+[data-dsh-pet-host]{pointer-events:none}
+/* FIXED against the viewport, not absolute inside the app frame. An absolute
+   Pet inherits every containing-block change: dsh-better-sidebar shrinks
+   #root itself (margin-right + width:calc), so the whole frame narrows and an
+   absolutely positioned Pet gets pushed and clipped. Fixed positioning ignores
+   that entirely, which is what "Pet yields to nothing" requires — and note
+   z-index alone could never have fixed it, since the problem was the
+   containing block rather than stacking order.
+
+   Interaction survives the move because Pet renders on its OWN React root
+   (see client/index.tsx): a root establishes its own event-delegation
+   container, unlike a portal out of the host root, which silently kills every
+   synthetic handler. */
+.dshpet-root{position:fixed;z-index:2147483000;width:72px;height:72px;
   pointer-events:auto;touch-action:none}
 /* No hover bridge: the wheel is a continuous disc centred on the mascot, so
    there is no dead space to span. The rectangular menu's bridge was a 268px
@@ -174,6 +186,41 @@ export const PET_CSS = `
   font-size:14px;color:var(--dsw-alias-label-primary,#1f2329);
   background:var(--dsw-alias-interactive-bg-hover,#0000000a);border-radius:6px}
 .dshpet-readonly[data-empty="true"]{color:var(--dsw-alias-label-tertiary,#8f959e)}
+/* Environment rows: name + injected name, masked value, actions. The grid keeps
+   the three columns aligned across both scopes and the effective view. */
+.dshpet-settings .dshpet-env-row{display:grid;
+  grid-template-columns:minmax(140px,1fr) minmax(160px,1.4fr) auto;
+  gap:12px;align-items:center;padding:8px;border-radius:8px;
+  border:1px solid var(--dsw-alias-border-l2,#0000001a);
+  background:var(--dsw-alias-bg-layer-2,#fff)}
+.dshpet-env-key{display:flex;flex-direction:column;gap:2px;min-width:0}
+.dshpet-env-name{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;
+  color:var(--dsw-alias-label-primary,#1f2329);overflow:hidden;text-overflow:ellipsis}
+.dshpet-env-inject{font-size:11px;line-height:16px;
+  color:var(--dsw-alias-label-tertiary,#8f959e);
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.dshpet-env-value{display:flex;align-items:center;gap:8px;min-width:0}
+.dshpet-env-secret{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--dsw-alias-label-primary,#1f2329)}
+.dshpet-settings .dshpet-reveal{flex:none;height:22px;padding:0 8px;font-size:11px;
+  line-height:20px;border-radius:11px;cursor:pointer;
+  border:1px solid var(--dsw-alias-border-l2,#0000001a);
+  background:var(--dsw-alias-bg-layer-1,#fff);
+  color:var(--dsw-alias-label-secondary,#61666b)}
+.dshpet-settings .dshpet-reveal:hover{background:var(--dsw-alias-interactive-bg-hover,#0000000a)}
+.dshpet-badge-override{display:inline-block;margin-left:6px;padding:0 6px;height:18px;
+  line-height:18px;font-size:11px;border-radius:9px;white-space:nowrap;
+  background:var(--dsw-alias-state-business-primary,#4176e6);color:#fff}
+.dshpet-badge-shadowed{display:inline-block;margin-left:6px;padding:0 6px;height:18px;
+  line-height:18px;font-size:11px;border-radius:9px;white-space:nowrap;
+  background:var(--dsw-alias-interactive-bg-hover,#0000000a);
+  color:var(--dsw-alias-label-tertiary,#8f959e)}
+/* A shadowed global entry stays visible but reads as inert, so the override is
+   obvious without hiding what it replaced. */
+.dshpet-row-shadowed .dshpet-env-name,
+.dshpet-row-shadowed .dshpet-env-secret{opacity:.55;text-decoration:line-through}
+
 /* Diagnostics rows: label + value pairs instead of a raw JSON dump. */
 .dshpet-facts{display:flex;flex-direction:column;gap:8px;margin:0}
 .dshpet-fact{display:flex;gap:12px;align-items:baseline}

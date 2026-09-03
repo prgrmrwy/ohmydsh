@@ -10,7 +10,15 @@
 
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import { PetError } from './errors.js'
-import { petDomainSpec, revisionKey, type PetGlobalState } from './spec.js'
+import {
+  envKey,
+  petDomainSpec,
+  revisionKey,
+  PET_ENV_GLOBAL_SCOPE,
+  PET_ENV_KEY_PATTERN,
+  type PetEnvEntry,
+  type PetGlobalState,
+} from './spec.js'
 import {
   occupiesCurrentSlot,
   type PetInvocationRecord,
@@ -500,8 +508,101 @@ export class PetRepository {
     return this.bumpSkillSetGeneration()
   }
 
-  // -- bindings -------------------------------------------------------------
+  // -- environment ----------------------------------------------------------
 
+  /**
+   * Every stored environment entry across both scopes.
+   * @returns the entries, ordered by scope then key.
+   */
+  listEnvEntries(): readonly PetEnvEntry[] {
+    return [...this.domain.table('workspace_env').entries()]
+      .map(([, value]) => value as PetEnvEntry)
+      .sort(
+        (left, right) =>
+          left.scope.localeCompare(right.scope) || left.key.localeCompare(right.key),
+      )
+  }
 
+  /**
+   * Entries belonging to one scope.
+   * @param scope - `global` or a workspace id.
+   * @returns the entries, ordered by key.
+   */
+  listEnvEntriesByScope(scope: string): readonly PetEnvEntry[] {
+    return this.listEnvEntries().filter(entry => entry.scope === scope)
+  }
 
+  /**
+   * Look up one entry.
+   * @param scope - `global` or a workspace id.
+   * @param key - Variable name.
+   * @returns the entry, or `undefined`.
+   */
+  getEnvEntry(scope: string, key: string): PetEnvEntry | undefined {
+    return this.domain.table('workspace_env').get(envKey(scope, key)) as PetEnvEntry | undefined
+  }
+
+  /**
+   * Write one entry, replacing any entry with the same scope and key.
+   *
+   * Rejects a malformed key HERE rather than skipping it at injection time: a
+   * key stored in another shape would simply never appear in the child
+   * environment, which the user experiences as silent config that does
+   * nothing.
+   * @param entry - The entry to store.
+   * @returns the stored entry.
+   * @throws PetError when the key shape or value is invalid.
+   */
+  async putEnvEntry(entry: PetEnvEntry): Promise<PetEnvEntry> {
+    if (!PET_ENV_KEY_PATTERN.test(entry.key)) {
+      throw new PetError(
+        'BINDING_INVALID',
+        `Environment variable name '${entry.key}' must be upper snake case, e.g. CR_GROUP`,
+      )
+    }
+    if (entry.value === '') {
+      throw new PetError('BINDING_INVALID', `Environment variable '${entry.key}' needs a value`)
+    }
+    if (entry.scope === '') {
+      throw new PetError('BINDING_INVALID', 'An environment entry needs a scope')
+    }
+    await this.domain.table('workspace_env').put(envKey(entry.scope, entry.key), entry as never)
+    return entry
+  }
+
+  /**
+   * Remove one entry.
+   * @param scope - `global` or a workspace id.
+   * @param key - Variable name.
+   * @returns whether a row was removed.
+   */
+  async deleteEnvEntry(scope: string, key: string): Promise<boolean> {
+    const table = this.domain.table('workspace_env')
+    if (table.get(envKey(scope, key)) === undefined) return false
+    await table.delete(envKey(scope, key))
+    return true
+  }
+
+  /**
+   * Resolve the entries that apply to one Invocation source.
+   *
+   * Global first, then the workspace overriding same-named keys. Returning a
+   * flat map keeps the precedence decision in ONE place: callers (including
+   * the shell-env contributor) never see two candidate values and cannot pick
+   * differently.
+   * @param workspaceId - Source workspace id, when the snapshot has one.
+   * @returns the effective key/value map.
+   */
+  resolveEnvFor(workspaceId: string | undefined): Readonly<Record<string, string>> {
+    const merged: Record<string, string> = {}
+    for (const entry of this.listEnvEntriesByScope(PET_ENV_GLOBAL_SCOPE)) {
+      merged[entry.key] = entry.value
+    }
+    if (workspaceId !== undefined && workspaceId !== '') {
+      for (const entry of this.listEnvEntriesByScope(workspaceId)) {
+        merged[entry.key] = entry.value
+      }
+    }
+    return merged
+  }
 }

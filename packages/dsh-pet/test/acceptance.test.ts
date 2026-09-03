@@ -202,8 +202,8 @@ describe('first boot in an isolated DSH home', () => {
   })
 
 
-  it('exposes exactly the three stable tabs', () => {
-    expect(PET_SETTINGS_TABS).toEqual(['general', 'skills', 'diagnostics'])
+  it('exposes exactly the four stable tabs', () => {
+    expect(PET_SETTINGS_TABS).toEqual(['general', 'skills', 'env', 'diagnostics'])
   })
 })
 

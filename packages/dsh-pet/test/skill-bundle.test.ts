@@ -178,21 +178,53 @@ describe('a non-Skill directory says what to pick instead', () => {
 
 
 
-describe('a removed frontmatter field does not break existing Skills', () => {
-  it('ignores a leftover petConfirm declaration', async () => {
+describe('an ordinary Skill needs no Pet adaptation', () => {
+  it('inspects a plain Skill exactly like one that declares pet fields', async () => {
+    // `ws` in this repo carries no pet* frontmatter. It must inspect to the
+    // same shape as a Skill that still declares them, or "Pet-adapted" would
+    // remain a meaningful distinction.
+    const plain = await mkdtemp(path.join(tmpdir(), 'pet-bundle-'))
+    await writeFile(
+      path.join(plain, 'SKILL.md'),
+      '---\nname: ws\ndescription: Worktree Session operations\n---\nBody\n',
+    )
+    const adapted = await mkdtemp(path.join(tmpdir(), 'pet-bundle-'))
+    await writeFile(
+      path.join(adapted, 'SKILL.md'),
+      '---\nname: ws\ndescription: Worktree Session operations\n' +
+        'petLabel: WS\npetIcon: 🧹\npetContext: session-required\n---\nBody\n',
+    )
+
+    const [a, b] = await Promise.all([inspectBundle(plain), inspectBundle(adapted)])
+
+    const shape = (i: Awaited<ReturnType<typeof inspectBundle>>): unknown => ({
+      skillName: i.skillName,
+      description: i.description,
+      whenToUse: i.whenToUse,
+      keys: Object.keys(i).sort(),
+    })
+    expect(shape(a)).toEqual(shape(b))
+  })
+})
+
+describe('Pet-specific frontmatter is not read at all', () => {
+  it('loads a Skill that still declares pet fields, retaining none of them', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'pet-bundle-'))
     await writeFile(
       path.join(root, 'SKILL.md'),
-      '---\nname: legacy\ndescription: Declares a field Pet no longer reads\n' +
-        'petLabel: Legacy\npetConfirm: true\n---\nBody\n',
+      '---\nname: legacy\ndescription: Declares fields Pet no longer reads\n' +
+        'petLabel: Legacy\npetIcon: 🧹\npetContext: session-required\npetConfirm: true\n' +
+        '---\nBody\n',
     )
 
-    // Skills written before the field was dropped must keep loading: rejecting
-    // an unknown key would break every one of them for no benefit.
+    // Skills written before these fields were dropped must keep loading:
+    // rejecting an unknown key would break every one of them for no benefit.
+    // None of it is retained though — there is deliberately nowhere for a
+    // Pet-specific declaration to land, so no Skill can adapt itself to Pet.
     const inspection = await inspectBundle(root)
 
     expect(inspection.skillName).toBe('legacy')
-    expect(inspection.pet?.label).toBe('Legacy')
-    expect(inspection.pet).not.toHaveProperty('confirm')
+    expect(inspection.description).toBe('Declares fields Pet no longer reads')
+    expect(inspection).not.toHaveProperty('pet')
   })
 })

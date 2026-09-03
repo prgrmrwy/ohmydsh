@@ -138,8 +138,13 @@ describe('overlay markup and accessibility', () => {
 
 describe('overlay styles', () => {
   it('only defines Pet-owned class names', () => {
-    const selectors = PET_CSS.match(/\.[a-zA-Z][\w-]*/g) ?? []
+    // Strip comments first: prose mentioning `document.body` or `index.tsx`
+    // otherwise looks like a `.body` / `.tsx` selector and fails a rule about
+    // actual styling.
+    const declarations = PET_CSS.replace(/\/\*[\s\S]*?\*\//g, '')
+    const selectors = declarations.match(/\.[a-zA-Z][\w-]*/g) ?? []
 
+    expect(selectors.length).toBeGreaterThan(0)
     for (const selector of selectors) {
       expect(selector.startsWith('.dshpet-')).toBe(true)
     }
@@ -213,8 +218,8 @@ describe('overlay styles', () => {
 })
 
 describe('settings information architecture', () => {
-  it('exposes exactly the three stable tabs', () => {
-    expect(PET_SETTINGS_TABS).toEqual(['general', 'skills', 'diagnostics'])
+  it('exposes exactly the four stable tabs', () => {
+    expect(PET_SETTINGS_TABS).toEqual(['general', 'skills', 'env', 'diagnostics'])
   })
 
   it('renders an accessible tablist', () => {
@@ -353,18 +358,20 @@ describe('client reads DSH contracts, not invented shapes', () => {
     expect(overlay).not.toContain('Manage in Settings')
   })
 
-  it('registers slots through inject with the two-argument register form', async () => {
+  it('registers its settings slot through inject with the two-argument form', async () => {
     const { readFile } = await import('node:fs/promises')
     const source = await readFile(
       path.resolve(__dirname, '..', 'src', 'client', 'index.tsx'),
       'utf8',
     )
 
-    expect(source).toContain("ctx.slots.inject('shell.overlay'")
+    // Settings still goes through the slot: it is a page section the shell
+    // owns and lays out. Only the floating surface left, because only it needs
+    // to escape the frame's containing block.
     expect(source).toContain("ctx.slots.inject('settings.section'")
-    expect(source).toContain("name: 'shell.overlay' as const")
+    expect(source).toContain("name: 'settings.section' as const")
     // The old three-argument form throws at load.
-    expect(source).not.toMatch(/register\(\s*'shell\.overlay'/)
+    expect(source).not.toMatch(/register\(\s*'settings\.section'/)
   })
 })
 
@@ -589,37 +596,79 @@ describe('capability menu is reachable and legible without a pointer', () => {
   })
 })
 
-describe('Pet stays inside React\'s event delegation container', () => {
-  it('never re-parents its node out of the mount container', async () => {
+describe('Pet is a top layer that yields to no layout', () => {
+  it('never re-parents an already-mounted node out of its root', async () => {
     const { readFile } = await import('node:fs/promises')
     const overlay = await readFile(
       path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
       'utf8',
     )
 
-    // React 18 delegates events at the mount container. Moving the node to
-    // `document.body` silently stops every synthetic handler — hover, drag
-    // and click all die while the element still renders and looks correct.
+    // React delegates events at the mount container, so MOVING a mounted node
+    // to `document.body` silently stops every synthetic handler while the
+    // element still renders. Pet escapes the frame by owning a separate root
+    // (see index.tsx), never by re-parenting the surface from here.
     expect(overlay).not.toContain('document.body.appendChild')
+    expect(overlay).not.toContain('createPortal')
   })
 
-  it('positions absolutely within the shell overlay layer', () => {
-    // The layer is inset 0 over a full-height frame, so it already spans the
-    // visible area; escaping it bought nothing and cost every interaction.
-    expect(PET_CSS).toContain('.dshpet-root{position:absolute')
-    expect(PET_CSS).not.toContain('.dshpet-root{position:fixed')
+  it('mounts on its own React root under document.body', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const entry = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'index.tsx'),
+      'utf8',
+    )
+
+    // A dedicated root establishes its own delegation container, which is why
+    // interaction survives here where a portal out of the host root would not.
+    expect(entry).toContain('createRoot')
+    expect(entry).toContain('document.body.appendChild')
+    // The surface must NOT also be registered into the frame's overlay slot,
+    // or two Pets would render.
+    expect(entry).not.toContain("ctx.slots.inject('shell.overlay'")
   })
 
-  it('measures its containing layer rather than the window', async () => {
+  it('reuses an existing host instead of stacking a second Pet', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const entry = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'index.tsx'),
+      'utf8',
+    )
+
+    // A client bundle can be applied again by HMR or a plugin reload.
+    expect(entry).toContain('PET_HOST_ATTRIBUTE')
+    expect(entry).toContain('root.unmount()')
+  })
+
+  it('positions against the viewport, not the app frame', () => {
+    // `dsh-better-sidebar` squeezes `#root` itself (margin-right +
+    // width:calc), so every containing block inside it narrows when the panel
+    // opens. Absolute positioning inherits that and Pet gets pushed aside;
+    // fixed positioning does not. This is a containing-block fix — z-index
+    // cannot substitute for it.
+    expect(PET_CSS).toContain('.dshpet-root{position:fixed')
+    expect(PET_CSS).not.toContain('.dshpet-root{position:absolute')
+  })
+
+  it('keeps its own host from swallowing page clicks', () => {
+    // The host spans nothing visually but still sits over the page.
+    expect(PET_CSS).toContain('[data-dsh-pet-host]{pointer-events:none}')
+    expect(PET_CSS).toMatch(/\.dshpet-root\{[^}]*pointer-events:auto/)
+  })
+
+  it('clamps against the window rather than the squeezed frame', async () => {
     const { readFile } = await import('node:fs/promises')
     const overlay = await readFile(
       path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
       'utf8',
     )
 
-    // Clamping against the window would let Pet sit past the layer's edge.
-    expect(overlay).toContain("querySelector('[data-shell-overlay]')")
-    expect(overlay).toContain('ResizeObserver')
+    // Measuring `[data-shell-overlay]` was right while Pet lived inside it,
+    // but that layer shrinks with the sidebar — clamping to it would drag Pet
+    // left as the panel opens, which is the exact behaviour being removed.
+    // Asserted on the QUERY, so prose may still explain the old approach.
+    expect(overlay).not.toMatch(/querySelector\([^)]*data-shell-overlay/)
+    expect(overlay).toContain('globalThis.innerWidth')
   })
 
   it('keeps the mascot and the clamp size in agreement', async () => {
@@ -631,7 +680,9 @@ describe('Pet stays inside React\'s event delegation container', () => {
     const declared = /PET_SIZE = (\d+)/.exec(position)?.[1]
 
     expect(declared).toBeDefined()
-    expect(PET_CSS).toContain(`.dshpet-root{position:absolute;z-index:999;width:${declared}px`)
+    expect(PET_CSS).toMatch(
+      new RegExp(`\\.dshpet-root\\{position:fixed;z-index:\\d+;width:${declared}px`),
+    )
     expect(PET_CSS).toContain(`width:${declared}px;height:${declared}px`)
   })
 })

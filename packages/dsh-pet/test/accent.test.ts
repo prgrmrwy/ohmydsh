@@ -132,20 +132,24 @@ describe('appearance survives a restart', () => {
   })
 })
 
-describe('the overlay measures its own layer before placing Pet', () => {
-  it('seeds the viewport from the shell overlay, not the window', async () => {
+describe('the overlay measures one stable box before placing Pet', () => {
+  it('seeds and re-reads the viewport from the same source', async () => {
     const { readFile } = await import('node:fs/promises')
     const nodePath = await import('node:path')
     const overlay = await readFile(
       nodePath.resolve(process.cwd(), 'src', 'client', 'overlay.tsx'),
       'utf8',
     )
-    const seed = overlay.slice(overlay.indexOf('const [viewport, setViewport] = useState'))
 
-    // Seeding from `window` and correcting in an effect clamps the stored
-    // position against a LARGER box first and a smaller one after, nudging
-    // Pet up and left on every load.
-    expect(seed.slice(0, 400)).toContain('data-shell-overlay')
+    // Seeding from one box and correcting to another in an effect clamps the
+    // stored position against a LARGER box first and a smaller one after,
+    // nudging Pet up and left on every load. Reusing a single `read()` for
+    // both the initial state and the resize handler makes that impossible.
+    expect(overlay).toContain('const [viewport, setViewport] = useState(read)')
+    // The frame is no longer QUERIED: it shrinks with a layout-push sidebar,
+    // and clamping to it would drag Pet aside as the panel opens. (Prose may
+    // still mention the old layer to explain why it was dropped.)
+    expect(overlay).not.toMatch(/querySelector\([^)]*data-shell-overlay/)
   })
 
   it('never persists a position that only re-clamping produced', async () => {

@@ -220,25 +220,17 @@ export function testInvocation(
  * deployment adds a capability.
  * @param harness - Open harness.
  * @param skillName - Skill (and capability) name.
- * @param pet - Optional Pet declarations the SKILL.md frontmatter would carry.
  * @returns the source path the Skill was registered under.
  */
 export async function installTestSkill(
   harness: PetHarness,
   skillName: string,
-  pet: {
-    label?: string
-    icon?: string
-    context?: 'none' | 'optional' | 'workspace-required' | 'session-required'
-    confirm?: boolean
-  } = {},
 ): Promise<string> {
   const sourcePath = `/tmp/pet-test-skills/${skillName}`
   await harness.repository.putSkillRevision({
     skillName,
     sourcePath,
     description: `${skillName} test skill`,
-    ...(Object.keys(pet).length > 0 ? { pet } : {}),
     provenance: { kind: 'local-link', sourcePath, installedAt: 1 },
     fileCount: 1,
     totalBytes: 32,
