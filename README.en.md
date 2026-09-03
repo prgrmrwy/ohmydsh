@@ -117,7 +117,7 @@ The editable diagram source is `archify-out/ohmydsh-architecture.json`; update i
 
 ⚠️ This repository drives an **AI agent runtime with full local machine capabilities** (shell execution, file read/write). Run it only on machines you trust, and review third-party plugin source before installing.
 
-LAN binding (`web.lan`) is **deliberately disabled by default**: enabling it binds to `0.0.0.0` and exposes full agent capability to every device on the network without TLS. The supported remote-access path is an SSH tunnel — see `docs/notes/lan-access-ssh-tunnel.md`.
+The webserver binds to loopback only; LAN binding (`web.lan` / `DSH_LAN`) has been **removed** from this repo. Enabling it exposes full agent capability to every device on the network without TLS.
 
 Report vulnerabilities privately per [SECURITY.md](SECURITY.md).
 
