@@ -135,12 +135,23 @@ stateDiagram-v2
     end note
 ```
 
-清理(模型 `ws clean` 面向调用仓库的主 checkout;`dsh-ws` CLI 面向显式路径,
+清理(模型 `ws clean` 默认面向调用仓库的主 checkout;`dsh-ws` CLI 面向显式路径,
 供操作员恢复与诊断,先 `--dry-run`):
 
-- 模型侧入口是普通主仓 Session:它扫描本仓库的 Worktree Session,逐项清理
+- 模型侧默认入口是普通主仓 Session:它扫描本仓库的 Worktree Session,逐项清理
   「源 Session 已归档 + 通过全部既有安全门」的候选;仍绑定 worktree 的 Session
   既不能清理自己也不能清扫同伴,会被拒绝并提示切换到主仓 Session。
+- 模型调用显式提供绝对 `path` 时，Host 先通过平台 approval 服务向用户展示精确
+  action 与路径；仅本次回答 `allowed-once` 才将该路径作为目标来源。该通道对调用方
+  类型无感知，且不改变默认 cwd/binding 解析：省略或传空 `path` 时不询问用户、仍走
+  默认入口。`rejected`、`cancelled`、`unavailable`、policy `never` 及审计写入失败
+  全部 fail closed；每次请求独立审计为 `approval/asked`/`approval/decided` 对，授权
+  不记忆也不跨调用复用。
+- 授权路径只替换目标来源，不创设新维护语义：`clean` 仍必须证明目标是仓库主
+  checkout，再复用仓库级批量扫描；`status`/`promote` 仍复用既有显式路径单 operation
+  语义。所有 active、dirty、in-flight、归档、schema 与 merge 安全门保持不变。`dsh-ws`
+  CLI/Skill shell wrapper 仍是无需交互授权的 operator 显式路径入口，行为不变，不能
+  用来绕过模型侧授权拒绝。
 - 逐项判定且互不阻塞:未归档、脏、未合并、active 绑定、in-flight、binding 损坏
   或不支持的 schema 只拒绝该项并给出原因,资源保持原样;已 cleaned/released 的
   tombstone 记为 ignored,不重复删除也不回退生命周期。

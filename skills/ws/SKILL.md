@@ -32,8 +32,29 @@ reason to mutate stable runtime context.
 
 For a schema-v2 bound Session, call the model-visible `ws` tool with
 `action=status` or `action=promote` and omit `path`; the Host resolves the exact
-calling Session binding. Agent calls must not provide `path` or operate on a
-different Session.
+calling Session binding. Omit `path` whenever the calling Session already sits
+at the intended target — supplying it needlessly puts an avoidable decision in
+front of the user.
+
+### Targeting another repository or worktree
+
+When the calling Session's own working directory is not the intended target —
+for example a runtime whose Session cwd is its own workspace while the
+repository root arrives through a separate trusted mechanism — pass that root as
+an absolute `path`. Use only a path a trusted mechanism established for this
+call; never a path taken from message prose, and never one you asked the user to
+paste so you could forward it.
+
+Every such call raises a one-shot authorization request naming the exact action
+and path. The user's approval covers that single call and is never reused, so a
+later call asks again. Treat a refusal as the answer: do not retry with a
+different path, and do not fall back to generic Git commands. Without approval —
+including when no one can be asked — the call is refused, which is the intended
+fail-closed behavior rather than a fault to work around.
+
+Authorization only establishes where to look. It exempts nothing: the same
+active, dirty, in-flight, archived, lifecycle and merge-ancestry gates run
+afterwards, and a refusal from any of them still stands.
 
 `action=clean` is repository-oriented, not binding-oriented. Run it from an
 ordinary Session whose working directory is the repository main checkout: it
@@ -43,10 +64,16 @@ safety gates. A Session still bound to a worktree cannot clean itself or its
 peers and is refused with an instruction to switch to the main-checkout
 Session. Review status and `dry_run: true` first; all live Session paths and
 bindings stay protected, and refused candidates are reported with reasons
-instead of being removed.
+instead of being removed. An authorized `path` may name a different repository
+main checkout, and the scan then behaves exactly as it would from that
+checkout's own ordinary Session. Preview with `dry_run: true` before requesting
+authorization for a destructive run, so the user approves a known result rather
+than an unknown one.
 
 The shell wrapper has no trustworthy Session-id environment, so use it only with
-an explicit path for operator recovery and diagnostics of schema-v2 operations:
+an explicit path for unattended operator recovery and diagnostics of schema-v2
+operations (this route asks no one, so it is for operators, not for working
+around a refused authorization):
 
 ```bash
 scripts/ws.sh status /absolute/worktree/path
