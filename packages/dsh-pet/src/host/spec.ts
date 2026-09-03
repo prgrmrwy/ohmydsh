@@ -142,13 +142,11 @@ const petSkillRevision = z.object({
       confirm: z.boolean().optional(),
     })
     .optional(),
-  // Parameters the Skill declared, and the values the user supplied when
-  // adding it. Stored with the registration so a capability can be dispatched
-  // without asking again on every Invocation.
-  params: z
-    .array(z.object({ name: z.string().min(1), label: z.string().min(1) }))
-    .optional(),
-  paramValues: z.record(z.string(), z.string()).optional(),
+  // Free-text arguments appended after the skill token on every dispatch.
+  // A field absent from this schema is STRIPPED on read: the record is
+  // validated coming back out, so an undeclared key survives the write and
+  // then vanishes, which looks exactly like a persistence failure.
+  arguments: z.string().optional(),
   provenance: z.object({
     kind: z.literal('local-link'),
     sourcePath: z.string().optional(),
