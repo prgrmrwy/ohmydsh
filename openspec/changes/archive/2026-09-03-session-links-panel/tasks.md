@@ -36,8 +36,8 @@
 
 - [x] 6.1 `npm run typecheck` / `npm test` / `npm run build`(packages/session-links 内)全绿,输出 `lib/` 不入库
 - [x] 6.2 仓库级 `npm test` + `node scripts/sync.mjs` + `npm run check:artifacts` 通过
-- [ ] 6.3 实机验证:重启 DSH 后「+」菜单出现会话链接 tab;构造含 MR/部署/meego/制品/未知链接的会话,逐条核对分类、排序、去重、badge、切换会话清空重建、关闭 tab 无残留
-- [ ] 6.4 按验收结果回读 spec(openspec/specs/session-links/spec.md),确认行为一致后归档 change
+- [x] 6.3 实机验证:重启 DSH 后「+」菜单出现会话链接 tab;构造含 MR/部署/meego/制品/未知链接的会话,逐条核对分类、排序、去重、badge、切换会话清空重建、关闭 tab 无残留
+- [x] 6.4 按验收结果回读 spec(openspec/specs/session-links/spec.md),确认行为一致后归档 change
 ## 7. 完整会话基线(host 全量日志,H2 实测反馈)
 
 - [x] 7.1 `links.ts` 迁移至 `src/shared/`(host/client 共用);`contract.ts` 定义 `/dsh-session-links` `links` 端点契约
