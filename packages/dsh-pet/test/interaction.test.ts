@@ -192,3 +192,19 @@ describe('a capability runs on a single click', () => {
     expect(calls.some(url => url.includes('invocation-create'))).toBe(true)
   })
 })
+
+describe('empty catalog hint', () => {
+  it('shows the hint inside the wheel when no capability is enabled', async () => {
+    // The single-click test above replaced the module stub with a one-entry
+    // catalog; restore the empty catalog this case depends on.
+    stubFetch({ capabilities: [], lifecycle: { phase: 'ready' } })
+    const { host } = await mountPet()
+
+    mascotOf(host).dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    await settle()
+
+    const note = host.querySelector('.dshpet-wheel-note')
+    expect(note).not.toBeNull()
+    expect(note?.textContent).toContain('还没有可用能力')
+  })
+})

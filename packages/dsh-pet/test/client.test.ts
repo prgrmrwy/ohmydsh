@@ -123,6 +123,17 @@ describe('overlay markup and accessibility', () => {
     expect(markup).toMatch(/left:\d+px/)
     expect(markup).toMatch(/top:\d+px/)
   })
+
+  it('publishes the resizable mascot size to the wheel-note anchor rules', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetOverlay, { currentSource: undefined }),
+    )
+
+    // The wheel notes are anchored to the mascot's edge through
+    // `--dshpet-mascot-size`; without it the rule falls back to 72px and the
+    // note is only correct at the default size.
+    expect(markup).toContain('--dshpet-mascot-size:72px')
+  })
 })
 
 describe('overlay styles', () => {
@@ -171,6 +182,25 @@ describe('overlay styles', () => {
   it('provides a visible keyboard focus indicator', () => {
     expect(PET_CSS).toContain('.dshpet-mascot:focus-visible')
     expect(PET_CSS).toContain('.dshpet-wheel-item:focus-visible')
+  })
+
+  it('anchors wheel notes to the mascot edge, not the wheel box', () => {
+    // The wheel box is sized for its widest ring (356px); `top:100%` parked
+    // the note at that far edge, ~140px below the mascot (the reported bug:
+    // the empty hint appeared far from the pet).
+    const noteRule = PET_CSS.match(/\.dshpet-wheel \.dshpet-wheel-note\{[^}]*\}/)?.[0] ?? ''
+    expect(noteRule).toContain('--dshpet-mascot-size')
+    expect(noteRule).toContain('top:calc(50%')
+    expect(noteRule).not.toContain('top:100%')
+  })
+
+  it('scopes the note rule above the shared empty/error paddings', () => {
+    // The note element carries BOTH dshpet-wheel-note and dshpet-empty (or
+    // dshpet-error). Those modifiers set padding:6px 0 and, because they are
+    // later in source order at the same single-class specificity, they
+    // silently overrode the card's padding:10px — the hint text touched the
+    // card edges ("still no margin" bug). Two-class scope wins the cascade.
+    expect(PET_CSS).toContain('.dshpet-wheel .dshpet-wheel-note{pointer-events:auto;position:absolute')
   })
 
   it('adapts to narrow viewports', () => {
