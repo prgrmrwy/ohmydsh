@@ -601,7 +601,7 @@ describe('Pet stays inside React\'s event delegation container', () => {
 
     expect(declared).toBeDefined()
     expect(PET_CSS).toContain(`.dshpet-root{position:absolute;z-index:999;width:${declared}px`)
-    expect(PET_CSS).toContain(`.dshpet-mascot{width:${declared}px;height:${declared}px`)
+    expect(PET_CSS).toContain(`width:${declared}px;height:${declared}px`)
   })
 })
 
@@ -701,13 +701,6 @@ describe('hover, drag and dismissal behave independently', () => {
     expect(overlay).toContain('node.contains(event.target as Node)')
   })
 
-  it('bridges the gap between the mascot and the menu while open', () => {
-    // The menu renders above the 72px mascot box, so without a continuous
-    // hover region the pointer crosses dead space and the menu collapses
-    // before it can be used.
-    expect(PET_CSS).toContain('.dshpet-root[data-open="true"]::before')
-    expect(PET_CSS).toContain('bottom:100%')
-  })
 })
 
 describe('settings surface follows the DSH type scale', () => {
@@ -1245,5 +1238,48 @@ describe('the executor preset falls back on a blank value', () => {
     // this, every existing Task stays unusable.
     expect(entry).toContain("repository.global.agentPreset?.trim() === ''")
     expect(entry).toContain('const { agentPreset: _blank, ...rest } = current')
+  })
+})
+
+describe('the wheel is reachable above the mascot box', () => {
+  it('drops the rectangular menu hover bridge', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const styles = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'styles.ts'),
+      'utf8',
+    )
+
+    // That bridge was a 268px strip anchored to the root. With the wheel it
+    // lies ON TOP of the slices and swallows their clicks — which is why a
+    // capability sometimes ran and sometimes just closed the wheel.
+    expect(styles).not.toContain('left:-260px')
+    expect(styles).not.toContain('[data-open="true"]::before')
+  })
+
+  it('stacks the wheel above the root and the mascot above the wheel', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const styles = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'styles.ts'),
+      'utf8',
+    )
+    const layer = (selector: string): number => {
+      const rule = styles.slice(styles.indexOf(selector))
+      return Number(/z-index:(\d+)/.exec(rule.slice(0, 220))?.[1] ?? '0')
+    }
+
+    // The mascot must stay clickable; the slices must not sit under it.
+    expect(layer('.dshpet-wheel{')).toBeGreaterThan(0)
+    expect(layer('.dshpet-mascot{')).toBeGreaterThan(layer('.dshpet-wheel{'))
+  })
+
+  it('measures the hover disc from the mascot, not the fixed root box', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // The root is a fixed 72px, so at 56 or 88 its centre is 8px off.
+    expect(overlay).toContain("querySelector('.dshpet-mascot')")
   })
 })

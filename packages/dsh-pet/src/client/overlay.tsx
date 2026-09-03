@@ -198,8 +198,11 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   useEffect(() => {
     if (mode !== 'menu') return undefined
     const onMove = (event: MouseEvent): void => {
-      const node = rootRef.current
-      if (node === null) return
+      // Measure the MASCOT, not the root: the root box is a fixed 72px, so at
+      // any other mascot size its centre is off by half the difference and the
+      // disc is judged from the wrong origin.
+      const node = rootRef.current?.querySelector('.dshpet-mascot')
+      if (node === null || node === undefined) return
       const box = node.getBoundingClientRect()
       const dx = event.clientX - (box.left + box.width / 2)
       const dy = event.clientY - (box.top + box.height / 2)
