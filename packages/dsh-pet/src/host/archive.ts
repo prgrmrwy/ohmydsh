@@ -17,7 +17,11 @@ import type { Context } from '@deepseek-ai/cordis'
 import { workspaceDomainState } from '@deepseek-ai/dsh-workspace'
 import { PetError } from './errors.js'
 import type { PetRepository } from './repository.js'
-import { TERMINAL_TASK_STATUSES, type PetTaskRecord } from '../wire.js'
+import {
+  TERMINAL_INVOCATION_STATUSES,
+  TERMINAL_TASK_STATUSES,
+  type PetTaskRecord,
+} from '../wire.js'
 
 /** Archives an executor session in DSH. */
 export interface ArchiveSink {
@@ -74,8 +78,30 @@ export async function reconcileArchives(
       continue
     }
 
-    // Non-terminal: keep the Task active and visible. Archiving the executor
-    // externally is not proof the work was cancelled.
+    // `recovering` is the one non-terminal status the executor's archival
+    // does settle: the work was already unprovable, and the session it would
+    // resume into is now gone, so nothing can ever advance it. Leaving it
+    // active strands the Task — its slot stays occupied and every later
+    // capability queues behind it forever.
+    if (task.status === 'recovering') {
+      for (const invocation of repository.listInvocations(task.id)) {
+        if (!TERMINAL_INVOCATION_STATUSES.includes(invocation.status)) {
+          await repository.setInvocationStatus(invocation.id, 'failed')
+        }
+      }
+      await repository.setTaskStatus(
+        task.id,
+        'failed',
+        `Executor session ${task.executorSessionId} was archived while this Task was ` +
+          'recovering, so its work can no longer be resumed.',
+      )
+      await repository.archiveTask(task.id)
+      outcomes.push({ taskId: task.id, action: 'task-archived' })
+      continue
+    }
+
+    // Any other non-terminal status: keep the Task active and visible.
+    // Archiving the executor externally is not proof the work was cancelled.
     const diagnostic =
       `Executor session ${task.executorSessionId} was archived while this Task was ` +
       `${task.status}. The Task remains active; cancel it explicitly or recover the ` +
