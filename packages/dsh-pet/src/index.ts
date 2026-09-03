@@ -186,6 +186,16 @@ async function initialize(
     await repository.updateGlobal(current => ({ ...current, workspaceId }))
   }
 
+  // Heal a stored blank preset. Sessions created while it was set fail to
+  // resume with `preset "" not found`, and the value is invisible in the
+  // panel, so a user cannot clear it themselves.
+  if (repository.global.agentPreset?.trim() === '') {
+    await repository.updateGlobal(current => {
+      const { agentPreset: _blank, ...rest } = current
+      return rest
+    })
+  }
+
   const version = config.version ?? '0.1.0'
 
   // Republish the managed projection so a drifted or stale link is repaired
@@ -401,7 +411,15 @@ async function initialize(
         // On `standard` the executor would inherit local-root Skill discovery
         // and every globally installed Skill would be visible to it — a scoped
         // provider is additive and cannot subtract one the preset brought in.
-        agentPreset: repository.global.agentPreset ?? PET_EXECUTOR_PRESET,
+        // Treat blank as unset, not as a preset name. `??` only catches
+        // `undefined`, so an empty string — written by the removed "默认组合"
+        // option — reached DSH verbatim and failed session resume with
+        // `preset "" not found`.
+        agentPreset:
+          repository.global.agentPreset === undefined ||
+          repository.global.agentPreset.trim() === ''
+            ? PET_EXECUTOR_PRESET
+            : repository.global.agentPreset,
       },
     )
   }

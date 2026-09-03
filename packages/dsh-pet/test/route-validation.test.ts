@@ -248,3 +248,28 @@ describe('read routes answer without mutating', () => {
     expect(reply.data?.['modelId']).toBeUndefined()
   })
 })
+
+describe('a blank agent preset is never stored', () => {
+  it('normalizes an empty string to unset', async () => {
+    const reply = await call(ROUTES.configUpdate, { agentPreset: '' })
+
+    // Storing `''` is indistinguishable from "unset" to a reader using `??`,
+    // and DSH rejects it outright: session resume fails with
+    // `preset "" not found`, which the panel cannot show or clear.
+    expect(reply.ok).toBe(true)
+    expect(reply.data?.['agentPreset']).toBeUndefined()
+  })
+
+  it('normalizes whitespace the same way', async () => {
+    const reply = await call(ROUTES.configUpdate, { agentPreset: '   ' })
+
+    expect(reply.ok).toBe(true)
+    expect(reply.data?.['agentPreset']).toBeUndefined()
+  })
+
+  it('keeps a real preset name', async () => {
+    const reply = await call(ROUTES.configUpdate, { agentPreset: 'standard' })
+
+    expect(reply.data?.['agentPreset']).toBe('standard')
+  })
+})
