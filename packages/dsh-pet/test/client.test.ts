@@ -1305,9 +1305,26 @@ describe('dispatch resumes an unloaded executor', () => {
     const from = entry.indexOf('const dispatcher: PromptDispatcher')
     const block = entry.slice(from, entry.indexOf('\n  }\n', from))
 
-    // Resume must not paper over a genuinely deleted session: that is a real
-    // failure and has to stay visible.
-    expect(block).toContain('ctx.sessions.get(executorSessionId')
-    expect(block).toContain('no longer exists')
+    // `sessions.get` also means LOADED, so gating on it re-created the very
+    // bug being fixed. Resume itself reads persisted state, so its failure —
+    // and only its failure — distinguishes evicted from deleted.
+    expect(block).not.toContain('ctx.sessions.get(executorSessionId')
+    expect(block).toContain('could not be resumed')
+  })
+})
+
+describe('liveness checks never stand in for existence', () => {
+  it('does not gate restart reconciliation on a loaded session', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const entry = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
+    const from = entry.indexOf('reconcileCreatingExecutors(')
+    const block = entry.slice(from, from + 700)
+
+    // Nothing is loaded at startup, so `agents.get`/`sessions.get` report
+    // every session as gone and condemn healthy Tasks. The workspace's
+    // session account is the durable record.
+    expect(block).not.toContain('ctx.agents.get(')
+    expect(block).not.toContain('ctx.sessions.get(')
+    expect(block).toContain('sessionIds')
   })
 })
