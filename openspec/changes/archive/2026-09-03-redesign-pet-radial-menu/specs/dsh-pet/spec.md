@@ -93,11 +93,3 @@ Pet SHALL 将“已安装”“已启用”“显示为快捷能力”建模为�
 #### Scenario: 存量启用数超过上限
 - **WHEN** 由于历史数据，已启用 Skill 数量超过 24 个
 - **THEN** 轮盘只渲染前 24 个，其余 Skill 仍可被调用与管理，系统不报错
-
-## REMOVED Requirements
-
-### Requirement: 能力可声明调用前的二次确认
-
-**Reason**: 入口处的通用二次确认既拦不住真正危险的能力，也无法区分破坏性与无害操作——它对每个能力都加了一次点击，却把安全判断交给了不掌握上下文的 Pet 入口。破坏性能力的安全性 SHALL 由 Skill 自身在其 Pet Task 内负责，例如 `clean-worktree` 依赖 `wsClean` 既有的 dirty/merge/active 门禁，那才是能真正拒绝危险操作的位置。
-
-**Migration**: `SKILL.md` frontmatter 中的 `petConfirm` 字段被移除后不再被解析。既有 Skill 中的残留声明 SHALL 被忽略而非报错，因此无需修改即可继续加载。此前依赖该字段的能力（示例 Skill `clean-worktree`）改为单击直接执行，其安全门禁不受影响。
