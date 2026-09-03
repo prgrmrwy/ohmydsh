@@ -29,9 +29,9 @@
   svg{position:absolute;inset:0;overflow:visible}
   .ring{opacity:0;transition:opacity .28s ease}
   .ring[data-shown=true]{opacity:1}
-  .seg{fill:#fff;stroke:#e4e6eb;stroke-width:1;cursor:pointer;
-    transition:fill .12s ease}
-  .seg:hover{fill:#e9ecf1}
+  /* Fill is applied inline per ring; hover likewise, because an inline style
+     cannot be overridden by a class rule. */
+  .seg{stroke:#e4e6eb;stroke-width:1;cursor:pointer;transition:fill .12s ease}
   .lbl{font-size:12px;fill:#0f1115;pointer-events:none;user-select:none}
   .tip{position:absolute;z-index:9;max-width:240px;padding:6px 10px;border-radius:8px;
     background:#0f1115;color:#fff;font-size:12px;line-height:1.5;pointer-events:none;
@@ -66,6 +66,23 @@
         <option value="88">大 88</option>
       </select>
     </label>
+    <label>配色
+      <select id="accent">
+        <option value="#ffffff">默认（白）</option>
+        <option value="#dbd1e6" selected>紫</option>
+        <option value="#d1e6d2">绿</option>
+        <option value="#e6d4d1">红</option>
+        <option value="#d1dae6">蓝</option>
+      </select>
+    </label>
+    <label>梯度
+      <select id="scheme">
+        <option value="soft" selected>A 柔和（60/40/20）</option>
+        <option value="faint">B 极淡（45/30/15）</option>
+        <option value="solid">C 实心（内圈用原色）</option>
+        <option value="none">D 无（统一白底）</option>
+      </select>
+    </label>
     <button id="edge" data-on="false">靠边显示（看裁切）</button>
     <button id="replay">重播展开</button>
   </div>
@@ -92,6 +109,10 @@
       <li><b>缩略</b>：超出弧长按字数截断加省略号，第 1/2/3 圈约 5/6/7 字。</li>
       <li><b>Tooltip</b>：仅在有描述时出现，格式 <code>名字: 描述</code>；名字本身不弹 tooltip。</li>
       <li><b>时序</b>：第 1 圈立即出现，后续每圈延迟 0.08s 依次渐入。</li>
+      <li><b>梯度对比</b>：切换上方「梯度」下拉。A/B 是透明度递减，第 1 圈就比中心圆浅；
+        C 是已回滚那版，第 1 圈用配色原值，与中心圆同深——这正是看起来「圆环比中心还深」的原因
+        （中心圆有阴影，视觉上更浅）。D 是当前线上的无梯度状态。</li>
+      <li><b>默认白色</b>：任何梯度对它都无效，三圈同色，只能靠描边分隔。</li>
       <li><b>容量</b>：6 + 8 + 10 = 24；超出部分不渲染（把滑块拉到 26 看兜底）。</li>
       <li><b>面板</b>：一行一个任务，整行可点进执行会话；不放归档——归档在会话侧做，Pet 自动同步。</li>
     </ul>
@@ -118,6 +139,37 @@ const NAMES = [
   ['构建产物', '执行完整构建并报告体积变化'],
   ['回滚上次提交', '撤销最近一次提交但保留改动'],
 ]
+
+/** Composite an accent over the white panel at a given alpha. */
+function over(hex, alpha) {
+  const n = parseInt(hex.slice(1), 16)
+  const ch = shift => Math.round(((n >> shift) & 255) * alpha + 255 * (1 - alpha))
+  return `#${[ch(16), ch(8), ch(0)].map(v => v.toString(16).padStart(2, '0')).join('')}`
+}
+
+/** Mix an accent toward white — the scheme that was reverted. */
+function mix(hex, amount) {
+  const n = parseInt(hex.slice(1), 16)
+  const ch = shift => {
+    const base = (n >> shift) & 255
+    return Math.round(base + (255 - base) * amount)
+  }
+  return `#${[ch(16), ch(8), ch(0)].map(v => v.toString(16).padStart(2, '0')).join('')}`
+}
+
+const SCHEMES = {
+  soft: (accent, ring) => over(accent, [0.6, 0.4, 0.2][ring] ?? 0.2),
+  faint: (accent, ring) => over(accent, [0.45, 0.3, 0.15][ring] ?? 0.15),
+  solid: (accent, ring) => mix(accent, [0, 0.45, 0.75][ring] ?? 0.75),
+  none: () => '#ffffff',
+}
+
+/** Darken a fill to mark the slice under the pointer. */
+function darker(hex) {
+  const n = parseInt(hex.slice(1), 16)
+  const ch = shift => Math.round(((n >> shift) & 255) * 0.92)
+  return `#${[ch(16), ch(8), ch(0)].map(v => v.toString(16).padStart(2, '0')).join('')}`
+}
 
 const svg = document.getElementById('svg')
 const tip = document.getElementById('tip')
@@ -192,6 +244,16 @@ function render() {
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
       path.setAttribute('class', 'seg')
       path.setAttribute('d', sector(r0, r1, a0, a1))
+      const accent = document.getElementById('accent').value
+      const scheme = document.getElementById('scheme').value
+      const fill = SCHEMES[scheme](accent, ri)
+      // Inline style, NOT setAttribute('fill'): a presentation attribute is
+      // outranked by the `.seg` rule, so the ring colour never showed.
+      path.style.fill = fill
+      // Hover is set inline too: an inline fill beats a class rule, so a
+      // CSS-only hover state would silently never appear.
+      path.addEventListener('mouseenter', () => { path.style.fill = darker(fill) })
+      path.addEventListener('mouseleave', () => { path.style.fill = fill })
       path.addEventListener('mouseenter', event => {
         clearTimeout(tipTimer)
         if (desc === '') return
@@ -294,6 +356,12 @@ document.getElementById('size').addEventListener('change', event => {
   mascot.style.fontSize = `${Math.round(mascotPx * 0.53)}px`
   render(); reveal()
 })
+for (const id of ['accent', 'scheme']) {
+  document.getElementById(id).addEventListener('change', () => {
+    mascot.style.background = document.getElementById('accent').value
+    render(); reveal()
+  })
+}
 document.getElementById('edge').addEventListener('click', event => {
   atEdge = !atEdge
   event.target.dataset.on = String(atEdge)
@@ -301,6 +369,7 @@ document.getElementById('edge').addEventListener('click', event => {
 })
 document.getElementById('replay').addEventListener('click', () => { hide(); setTimeout(reveal, 120) })
 
+mascot.style.background = document.getElementById('accent').value
 render(); place(); reveal()
 </script>
 </body>

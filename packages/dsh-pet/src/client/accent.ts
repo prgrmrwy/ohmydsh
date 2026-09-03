@@ -118,6 +118,97 @@ export type PetSizeId = (typeof PET_SIZES)[number]['id']
 export const DEFAULT_SIZE_PX = 72
 
 /**
+ * How far the wheel's rings fade outward from the mascot accent.
+ *
+ * Outer rings recede so the eye lands on ring one, where the most-used
+ * capability sits.
+ *
+ * `solid` mixes toward white rather than compositing, which leaves ring one at
+ * the accent's full value — visually as deep as the mascot, whose shadow then
+ * makes the ring read as DARKER than the centre. It stays available as a
+ * choice, but not as the default, because that reading is what prompted this
+ * setting to exist.
+ */
+export const PET_RING_STYLES = [
+  { id: 'soft', label: '柔和' },
+  { id: 'faint', label: '极淡' },
+  { id: 'solid', label: '实心' },
+  { id: 'none', label: '无' },
+] as const
+
+/** Identifier of a ring style. */
+export type PetRingStyleId = (typeof PET_RING_STYLES)[number]['id']
+
+/** Ring style applied when none is stored. */
+export const DEFAULT_RING_STYLE: PetRingStyleId = 'soft'
+
+/** Alpha per ring, for the styles that composite over the panel. */
+const RING_ALPHAS: Partial<Record<PetRingStyleId, readonly number[]>> = {
+  soft: [0.6, 0.4, 0.2],
+  faint: [0.45, 0.3, 0.15],
+}
+
+/** How far `solid` mixes each ring toward white. */
+const SOLID_FADE = [0, 0.45, 0.75] as const
+
+/** Render a colour from its channel values. */
+function toHex(red: number, green: number, blue: number): string {
+  return `#${[red, green, blue].map(part => part.toString(16).padStart(2, '0')).join('')}`
+}
+
+/**
+ * Fill for one ring under the chosen style.
+ * @param background - The mascot accent's surface colour.
+ * @param ring - Zero-based ring index.
+ * @param style - Chosen ring style.
+ * @returns the fill colour.
+ */
+export function ringFill(
+  background: string,
+  ring: number,
+  style: PetRingStyleId = DEFAULT_RING_STYLE,
+): string {
+  const surface = '#ffffff'
+  if (style === 'none') return surface
+  const value = Number.parseInt(background.slice(1), 16)
+  if (!Number.isFinite(value)) return surface
+  const step = Math.min(Math.max(ring, 0), 2)
+  const channel = (shift: number): number => (value >> shift) & 255
+
+  if (style === 'solid') {
+    const fade = SOLID_FADE[step] ?? 0.75
+    const mixed = (shift: number): number => {
+      const base = channel(shift)
+      return Math.round(base + (255 - base) * fade)
+    }
+    return toHex(mixed(16), mixed(8), mixed(0))
+  }
+
+  const alpha = RING_ALPHAS[style]?.[step] ?? 0.2
+  const composited = (shift: number): number =>
+    Math.round(channel(shift) * alpha + 255 * (1 - alpha))
+  return toHex(composited(16), composited(8), composited(0))
+}
+
+/**
+ * Deepen a ring fill to mark the slice under the pointer.
+ *
+ * Applied inline for the same reason as the fill: an inline style outranks a
+ * class rule, so a CSS-only hover state would silently never appear.
+ * @param fill - The ring's resting colour.
+ * @returns the hovered colour.
+ */
+export function hoverFill(fill: string): string {
+  const value = Number.parseInt(fill.slice(1), 16)
+  if (!Number.isFinite(value)) return fill
+  // Proportional, not a fixed tint: a fixed one washes out on deep accents and
+  // overpowers pale ones.
+  const channel = (shift: number): number => Math.round(((value >> shift) & 255) * 0.92)
+  return toHex(channel(16), channel(8), channel(0))
+}
+
+
+/**
 /**
  * Keep only the first user-perceived character of a glyph.
  *

@@ -205,3 +205,91 @@ describe('the capacity cap is a display constraint', () => {
     }
   })
 })
+
+describe('the ring gradient is a user choice', () => {
+  it('defaults to a style where ring one is lighter than the mascot', async () => {
+    const { ringFill, DEFAULT_RING_STYLE } = await import('../src/client/accent.js')
+    const accent = '#d1e6d2'
+    const sum = (hex: string): number => {
+      const value = Number.parseInt(hex.slice(1), 16)
+      return ((value >> 16) & 255) + ((value >> 8) & 255) + (value & 255)
+    }
+
+    // The reverted attempt left ring one at the accent's full value, so the
+    // mascot's shadow made the ring read as darker than the centre.
+    expect(sum(ringFill(accent, 0, DEFAULT_RING_STYLE))).toBeGreaterThan(sum(accent))
+  })
+
+  it('fades outward under every compositing style', async () => {
+    const { ringFill } = await import('../src/client/accent.js')
+    const sum = (hex: string): number => {
+      const value = Number.parseInt(hex.slice(1), 16)
+      return ((value >> 16) & 255) + ((value >> 8) & 255) + (value & 255)
+    }
+
+    for (const style of ['soft', 'faint', 'solid'] as const) {
+      const rings = [0, 1, 2].map(ring => sum(ringFill('#d1e6d2', ring, style)))
+      expect(rings[1]).toBeGreaterThan(rings[0] ?? 0)
+      expect(rings[2]).toBeGreaterThan(rings[1] ?? 0)
+    }
+  })
+
+  it('makes "faint" lighter than "soft" at every ring', async () => {
+    const { ringFill } = await import('../src/client/accent.js')
+    const sum = (hex: string): number => {
+      const value = Number.parseInt(hex.slice(1), 16)
+      return ((value >> 16) & 255) + ((value >> 8) & 255) + (value & 255)
+    }
+
+    for (const ring of [0, 1, 2]) {
+      expect(sum(ringFill('#d1e6d2', ring, 'faint'))).toBeGreaterThan(
+        sum(ringFill('#d1e6d2', ring, 'soft')),
+      )
+    }
+  })
+
+  it('keeps "solid" at the accent for ring one', async () => {
+    const { ringFill } = await import('../src/client/accent.js')
+
+    // This is the behaviour that prompted the setting; it stays available.
+    expect(ringFill('#d1e6d2', 0, 'solid')).toBe('#d1e6d2')
+  })
+
+  it('paints a uniform surface under "none"', async () => {
+    const { ringFill } = await import('../src/client/accent.js')
+
+    for (const ring of [0, 1, 2]) {
+      expect(ringFill('#d1e6d2', ring, 'none')).toBe('#ffffff')
+    }
+  })
+
+  it('leaves the white default flat under every style', async () => {
+    const { ringFill, PET_RING_STYLES } = await import('../src/client/accent.js')
+
+    // Measured, not assumed: the default accent is already white, so no style
+    // can separate its rings — the stroke must.
+    for (const style of PET_RING_STYLES) {
+      expect(ringFill('#ffffff', 0, style.id)).toBe('#ffffff')
+      expect(ringFill('#ffffff', 2, style.id)).toBe('#ffffff')
+    }
+  })
+
+  it('clamps a ring index beyond the palette', async () => {
+    const { ringFill } = await import('../src/client/accent.js')
+
+    expect(ringFill('#d1e6d2', 9, 'soft')).toBe(ringFill('#d1e6d2', 2, 'soft'))
+  })
+
+  it('darkens on hover under every style, including white', async () => {
+    const { hoverFill, ringFill, PET_RING_STYLES } = await import('../src/client/accent.js')
+    const sum = (hex: string): number => {
+      const value = Number.parseInt(hex.slice(1), 16)
+      return ((value >> 16) & 255) + ((value >> 8) & 255) + (value & 255)
+    }
+
+    for (const style of PET_RING_STYLES) {
+      const rest = ringFill('#ffffff', 0, style.id)
+      expect(sum(hoverFill(rest))).toBeLessThan(sum(rest))
+    }
+  })
+})

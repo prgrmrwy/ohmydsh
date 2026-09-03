@@ -85,6 +85,7 @@ export interface PetConfig {
     readonly accent?: string
     readonly glyph?: string
     readonly size?: string
+    readonly ringStyle?: string
   }
   readonly defaultContextPolicy: 'current-session' | 'none'
   readonly workspaceId?: string

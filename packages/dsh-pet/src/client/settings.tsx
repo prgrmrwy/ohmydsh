@@ -19,6 +19,9 @@ import {
   normalizeGlyph,
   PET_ACCENTS,
   PET_SIZES,
+  PET_RING_STYLES,
+  DEFAULT_RING_STYLE,
+  type PetRingStyleId,
   resolveAccent,
   type PetAccentId,
   type PetSizeId,
@@ -225,6 +228,7 @@ function GeneralTab(): JSX.Element {
   const [accent, setAccent] = useState<PetAccentId>('default')
   const [glyph, setGlyph] = useState(DEFAULT_GLYPH)
   const [size, setSize] = useState<PetSizeId>('medium')
+  const [ringStyle, setRingStyle] = useState<PetRingStyleId>(DEFAULT_RING_STYLE)
   const [presetOptions, setPresetOptions] = useState<
     readonly { value: string; label: string }[]
   >([])
@@ -242,6 +246,9 @@ function GeneralTab(): JSX.Element {
         setAccent(resolveAccent(look.accent).id)
         setGlyph(look.glyph === undefined || look.glyph === '' ? DEFAULT_GLYPH : look.glyph)
         setSize(PET_SIZES.find(item => item.id === look.size)?.id ?? 'medium')
+        setRingStyle(
+          PET_RING_STYLES.find(item => item.id === look.ringStyle)?.id ?? DEFAULT_RING_STYLE,
+        )
       })
       .catch((cause: unknown) => setError(String(cause)))
   }, [])
@@ -396,6 +403,37 @@ function GeneralTab(): JSX.Element {
             ))}
           </select>
         </label>
+
+        <label className="dshpet-field">
+          圆环底色
+          <select
+            className="dshpet-input"
+            value={ringStyle}
+            onChange={event => {
+              const next = event.target.value as PetRingStyleId
+              setRingStyle(next)
+              void petApi
+                .updateConfig({ appearance: { ringStyle: next } })
+                .then(updated => {
+                  setConfig(updated)
+                  globalThis.dispatchEvent?.(new Event(PET_APPEARANCE_EVENT))
+                })
+                .catch((cause: unknown) =>
+                  setError(cause instanceof Error ? cause.message : String(cause)),
+                )
+            }}
+          >
+            {PET_RING_STYLES.map(item => (
+              <option key={item.id} value={item.id}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="dshpet-item-hint">
+          能力轮盘的圆环底色跟随上面的配色，由内向外逐圈变淡。
+          「默认」配色本身是白色，任何档位下圆环都靠描边区分。
+        </p>
       </section>
 
       <section className="dshpet-group">
