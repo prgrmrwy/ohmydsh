@@ -515,7 +515,7 @@ describe('capability menu is reachable and legible without a pointer', () => {
     expect(overlay).toContain('onFocus={() => {')
     expect(overlay).toContain('onBlur={event => {')
     // Moving focus between the mascot and a menu item must not collapse it.
-    expect(overlay).toContain('!event.currentTarget.contains(event.relatedTarget)')
+    expect(overlay).toContain('event.currentTarget.contains(event.relatedTarget)')
   })
 
   it('binds each disabled reason as an accessible description', async () => {
@@ -1358,5 +1358,40 @@ describe('resume carries the model route', () => {
     expect(block).toContain('model: current.modelId')
     // The preset is NOT repeated: it lives in the persisted session's meta.
     expect(block).not.toContain('agentPreset: current.agentPreset')
+  })
+})
+
+describe('a seam click cannot blur the wheel shut', () => {
+  it('backs the slices with a pointer-opaque disc', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+    const styles = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'styles.ts'),
+      'utf8',
+    )
+
+    // A click landing in a seam fell through the pointer-transparent SVG to
+    // the page, focused it, and blur closed the wheel before the click could
+    // fire — the first click after a restart was reliably lost this way.
+    expect(overlay).toContain('dshpet-wheel-catch')
+    expect(styles).toContain('.dshpet-wheel-catch{fill:transparent;pointer-events:auto}')
+  })
+
+  it('lets blur close only when the pointer really left the disc', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+    const from = overlay.indexOf('onBlur={event => {')
+    const block = overlay.slice(from, from + 1400)
+
+    // Focus loss with the pointer still on the disc is a fall-through, not a
+    // departure; keyboard blur carries no pointer position and still closes.
+    expect(block).toContain('pointerRef.current')
+    expect(block).toContain('<= wheelRadius) return')
   })
 })

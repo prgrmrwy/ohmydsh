@@ -94,6 +94,8 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   >(undefined)
   /** True when the gesture that just ended actually moved Pet. */
   const draggedRef = useRef(false)
+  // Last known pointer position, for the blur-vs-fall-through decision.
+  const pointerRef = useRef({ x: -1e6, y: -1e6 })
 
   // Settings can change the accent; the surface reads it once into state, so
   // the change must be broadcast to take effect without a reload.
@@ -207,6 +209,7 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   useEffect(() => {
     if (mode !== 'menu') return undefined
     const onMove = (event: MouseEvent): void => {
+      pointerRef.current = { x: event.clientX, y: event.clientY }
       // Measure the MASCOT, not the root: the root box is a fixed 72px, so at
       // any other mascot size its centre is off by half the difference and the
       // disc is judged from the wrong origin.
@@ -350,9 +353,23 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
       onBlur={event => {
         // Only close when focus genuinely leaves the Pet surface; moving
         // between the mascot and a menu item must not collapse it.
-        if (mode === 'menu' && !event.currentTarget.contains(event.relatedTarget)) {
-          setMode('closed')
+        //
+        // A mouse click that lands in a seam between slices falls through the
+        // pointer-transparent SVG to the page below, focusing it — blur then
+        // closed the wheel instantly, unmounting the slice under the pointer
+        // before its click could fire. Distance decides instead: focus loss
+        // with the pointer still on the disc is that fall-through, not a real
+        // departure. Keyboard users are unaffected — their focus moves carry
+        // no pointer position, so the distance reads as outside.
+        if (mode !== 'menu' || event.currentTarget.contains(event.relatedTarget)) return
+        const mascot = event.currentTarget.querySelector('.dshpet-mascot')
+        const box = mascot?.getBoundingClientRect()
+        if (box !== undefined) {
+          const dx = pointerRef.current.x - (box.left + box.width / 2)
+          const dy = pointerRef.current.y - (box.top + box.height / 2)
+          if (Math.hypot(dx, dy) <= wheelRadius) return
         }
+        setMode('closed')
       }}
       onKeyDown={event => {
         if (event.key === 'Escape') setMode('closed')
@@ -415,6 +432,16 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
             style={{ width: WHEEL_VIEWBOX, height: WHEEL_VIEWBOX }}
             aria-hidden="true"
           >
+            {/* Catches clicks in the seams and the breathing gap, so they do
+                not fall through to the page, steal focus and blur the wheel
+                shut. Sized to the drawn disc, not the square: the corners
+                stay transparent to the page below. */}
+            <circle
+              className="dshpet-wheel-catch"
+              cx={WHEEL_VIEWBOX / 2}
+              cy={WHEEL_VIEWBOX / 2}
+              r={wheelRadius}
+            />
             {slots.map(slot => {
               const capability = shortcuts[slot.index]
               if (capability === undefined) return null

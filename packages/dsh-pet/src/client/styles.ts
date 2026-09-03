@@ -41,6 +41,9 @@ export const PET_CSS = `
 .dshpet-wheel{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
   pointer-events:none;z-index:2}
 .dshpet-wheel-svg{overflow:visible;display:block}
+/* Invisible but pointer-opaque: seam clicks stop here instead of focusing
+   the page and blurring the wheel closed. */
+.dshpet-wheel-catch{fill:transparent;pointer-events:auto}
 .dshpet-slot{pointer-events:auto;cursor:pointer;opacity:0;
   animation:dshpet-slot-in .28s ease forwards}
 @keyframes dshpet-slot-in{from{opacity:0}to{opacity:1}}
