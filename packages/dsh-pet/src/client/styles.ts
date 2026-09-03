@@ -15,13 +15,11 @@ export const PET_CSS = `
    hover, drag and click while the element still rendered. */
 .dshpet-root{position:absolute;z-index:999;width:72px;height:72px;
   pointer-events:auto;touch-action:none}
-/* The menu and panel render ABOVE the mascot, outside the 72px box. Without a
-   bridge the pointer crosses dead space on its way there, firing mouseleave
-   and collapsing the menu before it can be used. This pseudo-element spans
-   the gap so the hover region is continuous, and it only exists while open. */
-.dshpet-root[data-open="true"]::before{content:'';position:absolute;
-  left:-260px;right:-8px;bottom:100%;height:12px}
-.dshpet-mascot{width:72px;height:72px;border:none;padding:0;border-radius:50%;cursor:grab;
+/* No hover bridge: the wheel is a continuous disc centred on the mascot, so
+   there is no dead space to span. The rectangular menu's bridge was a 268px
+   strip that now lay ON TOP of the wheel and swallowed slice clicks. */
+.dshpet-mascot{position:relative;z-index:3;
+  width:72px;height:72px;border:none;padding:0;border-radius:50%;cursor:grab;
   display:flex;align-items:center;justify-content:center;font-size:38px;line-height:1;
   background:var(--dsw-alias-bg-layer-1,#ffffff);
   color:var(--dsw-alias-label-primary,#1f2329);
@@ -41,7 +39,7 @@ export const PET_CSS = `
    mascot and centre stay inside because positioning clamps them. Pointer
    events belong to the slices, not the square that contains them. */
 .dshpet-wheel{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-  pointer-events:none;z-index:1}
+  pointer-events:none;z-index:2}
 .dshpet-wheel-svg{overflow:visible;display:block}
 .dshpet-slot{pointer-events:auto;cursor:pointer;opacity:0;
   animation:dshpet-slot-in .28s ease forwards}
