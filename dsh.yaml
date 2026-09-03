@@ -9,13 +9,6 @@ autoUpdate:                # 启动/构建前自动检测并升级 DSH 版本(ch
   channel: latest          # 追踪频道:latest / next;env DSH_UPDATE_CHANNEL 可临时覆盖(优先级最高)
 
 web:                       # Web 启动形态(非 customization;sync 直接渲染进 profile patch)
-  lan: false               # 保持关闭。跨机器访问统一走 SSH 隧道,不做明文局域网直连。
-                           # ⚠ 开启会绑 0.0.0.0,把完整 agent 能力(bash/文件读写)暴露到局域网,
-                           #   且 DSH 无 TLS——明文传输可被同网嗅探。2026-08-24 决策:不使用该形态。
-                           # 远端访问方式:另一台机器 `ssh -N -L 3080:127.0.0.1:3080 user@<本机IP>`,
-                           #   浏览器开 http://127.0.0.1:3080(公钥免登 + SSH 加密 + 回环即 secure context)。
-                           #   用法见 docs/notes/lan-access-ssh-tunnel.md
-                           # ⚠ DSH_LAN=1 环境变量优先级高于本开关,同样不要设置。
   open: false              # 启动/检测时不自动打开浏览器或 PWA(2026-08-28 本机偏好)。
                            # 需要时显式 `dsh --open` 强制打开;`dsh --no-open` 仍可临时关闭。
                            # 缺省(字段不存在)视为 true = 保持旧行为。
@@ -34,7 +27,7 @@ customizations:
   #          enabledEnv = 可选,声明后同名 DSH_ 环境变量(真值 1/true/yes/on、
   #            假值 0/false/no/off)覆盖本条目有效启用状态,未设置/无法识别时
   #            回退到 enabled;用于默认关闭、仅在有权限的机器上用 env 打开的
-  #            定制(如内部专属包),与顶层 web.lan / DSH_LAN 同一套语义
+  #            定制(如内部专属包),与顶层 web / DSH_ 环境变量同一套真值/假值语义
   # 第三方(remote):只存 pin + 覆盖 + 记录,不 vendor 源码
   - id: cost-meter
     type: package
@@ -122,10 +115,6 @@ customizations:
   - id: dsh-sandbox-notes
     type: skill
     enabled: true
-  # 自研 skill:B015 跨机器访问 — 客户端 SSH 隧道(公钥免登 + 端口占用自动退避 + 附脚本)
-  - id: dsh-tunnel
-    type: skill
-    enabled: true
   # 第三方(remote):B003 IDE 集成 — workspace 菜单一键在 VSCode 打开
   - id: open-in-vscode
     type: package
@@ -167,7 +156,7 @@ customizations:
     version: 0.1.1
     enabled: true
     brief: 归档会话查看与恢复(设置页「归档管理」)
-    note: 'repo https://github.com/Neumannzc/dsh-archive-manager(MIT);用途:设置 → 归档管理,按工作区列出已归档会话,一键取消归档回侧边栏继续原会话;审查(2026-08-19):host 端幂等补丁 WorkspaceRegistry.unarchiveSession(官方未来提供则让位),unarchive 走 registry 自身 enqueueOperation/requireState/setState 状态路径,经官方 archived-sessions-changed 帧广播;webServer 路由带信任防护(Host fence 防 DNS rebinding + Origin 校验 + 8KiB body cap);无删除/破坏性功能;仅 react peer;本地 clone 验证 typecheck + 17 单测 + build 全过(CI 红叉仅为 pnpm 忽略 esbuild 构建脚本的环境问题);⚠ TRUSTED_HOSTS 默认空 → 仅限 loopback(127.0.0.1/localhost),开启 web.lan 需源码加 trustedHosts;DSH 升级后需回归验证'
+    note: 'repo https://github.com/Neumannzc/dsh-archive-manager(MIT);用途:设置 → 归档管理,按工作区列出已归档会话,一键取消归档回侧边栏继续原会话;审查(2026-08-19):host 端幂等补丁 WorkspaceRegistry.unarchiveSession(官方未来提供则让位),unarchive 走 registry 自身 enqueueOperation/requireState/setState 状态路径,经官方 archived-sessions-changed 帧广播;webServer 路由带信任防护(Host fence 防 DNS rebinding + Origin 校验 + 8KiB body cap);无删除/破坏性功能;仅 react peer;本地 clone 验证 typecheck + 17 单测 + build 全过(CI 红叉仅为 pnpm 忽略 esbuild 构建脚本的环境问题);⚠ TRUSTED_HOSTS 默认空 → 仅限 loopback(127.0.0.1/localhost);DSH 升级后需回归验证'
   - id: width-tiers
     type: package
     source: remote
