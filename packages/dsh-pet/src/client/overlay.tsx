@@ -19,6 +19,11 @@ import {
   WHEEL_CAPACITY,
 } from './wheel.js'
 import {
+  DEFAULT_RING_STYLE,
+  PET_RING_STYLES,
+  hoverFill,
+  ringFill,
+  type PetRingStyleId,
   DEFAULT_GLYPH,
   DEFAULT_SIZE_PX,
   PET_ACCENT_EVENT,
@@ -76,6 +81,7 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   const [accent, setAccent] = useState(() => resolveAccent(undefined))
   const [glyph, setGlyph] = useState(DEFAULT_GLYPH)
   const [size, setSize] = useState(DEFAULT_SIZE_PX)
+  const [ringStyle, setRingStyle] = useState<PetRingStyleId>(DEFAULT_RING_STYLE)
   const [mode, setMode] = useState<Mode>('closed')
   const [capabilities, setCapabilities] = useState<readonly PetCapability[]>([])
   const [degraded, setDegraded] = useState<string | undefined>(undefined)
@@ -100,6 +106,9 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
           setAccent(resolveAccent(look.accent))
           setGlyph(look.glyph === undefined || look.glyph === '' ? DEFAULT_GLYPH : look.glyph)
           setSize(PET_SIZES.find(item => item.id === look.size)?.px ?? DEFAULT_SIZE_PX)
+          setRingStyle(
+            PET_RING_STYLES.find(item => item.id === look.ringStyle)?.id ?? DEFAULT_RING_STYLE,
+          )
         })
         .catch(() => undefined)
     }
@@ -421,7 +430,20 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
                         ? capability.label
                         : `${capability.label}: ${capability.description}`)}
                   </title>
-                  <path className="dshpet-slot-face" d={slot.path} />
+                  <path
+                    className="dshpet-slot-face"
+                    d={slot.path}
+                    // Inline, not a CSS rule or a `fill` attribute: the palette
+                    // is user data, and a presentation attribute would lose to
+                    // the class rule while a class rule would lose to this.
+                    // Hover rides the same channel for that reason.
+                    style={{
+                      fill:
+                        hovered === capability.id
+                          ? hoverFill(ringFill(accent.background, slot.ring, ringStyle))
+                          : ringFill(accent.background, slot.ring, ringStyle),
+                    }}
+                  />
                   <text
                     className="dshpet-slot-label"
                     x={slot.labelX}

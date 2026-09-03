@@ -198,6 +198,7 @@ const petGlobalState = z.object({
       accent: z.string().optional(),
       glyph: z.string().optional(),
       size: z.string().optional(),
+      ringStyle: z.string().optional(),
     })
     .optional(),
   /** Registered Pet Workspace id, once created. */

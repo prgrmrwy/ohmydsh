@@ -134,7 +134,7 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
         }
         const source = rawAppearance as Record<string, unknown>
         appearance = {}
-        for (const key of ['accent', 'glyph', 'size'] as const) {
+        for (const key of ['accent', 'glyph', 'size', 'ringStyle'] as const) {
           if (typeof source[key] === 'string') appearance[key] = source[key]
         }
       }
