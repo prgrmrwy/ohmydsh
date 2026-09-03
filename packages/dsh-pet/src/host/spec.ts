@@ -27,7 +27,13 @@ export const PET_DOMAIN_NAME = 'dsh_pet'
 // `invocations.skillDigest` became `skillSourcePath`. Rows written by v1
 // cannot be upgraded in place — the store copies they referenced are gone —
 // so `migrate.ts` clears the affected tables before the domain is opened.
-export const PET_DOMAIN_VERSION = 2
+//
+// Bumped to 3 for the `workspace_env` table, plus the removal of
+// `skill_revisions.pet` and the `builtinsInitialized` global. Unlike the v1→v2
+// bump this is ADDITIVE: no existing row references anything that disappeared,
+// and zod strips the two dropped keys on read, so v2 data loads unchanged and
+// migration MUST NOT clear any table.
+export const PET_DOMAIN_VERSION = 3
 
 const petSourceKind = z.enum(['session', 'workspace', 'none'])
 
@@ -132,16 +138,10 @@ const petSkillRevision = z.object({
   /** Canonical directory on the Host that the projection links to. */
   sourcePath: z.string().min(1),
   description: z.string(),
-  // Pet presentation and context requirement, read from the SKILL.md
-  // frontmatter at registration time and refreshed on rescan.
-  pet: z
-    .object({
-      label: z.string().optional(),
-      icon: z.string().optional(),
-      context: z.enum(['none', 'optional', 'workspace-required', 'session-required']).optional(),
-      confirm: z.boolean().optional(),
-    })
-    .optional(),
+  // NOTE: a `pet` block used to live here, carrying label/icon/context read
+  // from SKILL.md frontmatter. It was removed so no Skill can adapt itself to
+  // Pet. Rows written before that still hold the key; zod STRIPS undeclared
+  // keys on read, so they load cleanly and simply lose the declaration.
   // Free-text arguments appended after the skill token on every dispatch.
   // A field absent from this schema is STRIPPED on read: the record is
   // validated coming back out, so an undeclared key survives the write and
@@ -163,6 +163,38 @@ const petSkillSelection = z.object({
   showAsShortcut: z.boolean(),
 })
 
+/**
+ * Reserved scope naming the global environment set.
+ *
+ * A DSH workspace id is generated and never this literal, so the two can
+ * share one column without ambiguity.
+ */
+export const PET_ENV_GLOBAL_SCOPE = 'global'
+
+/**
+ * Shape every environment variable name must take.
+ *
+ * Upper snake case, matching the environment-variable convention. Validated on
+ * WRITE rather than skipped at injection: a key stored in some other shape
+ * would be silently absent from the child environment, which reads as "my
+ * config does nothing" with no diagnostic.
+ */
+export const PET_ENV_KEY_PATTERN = /^[A-Z][A-Z0-9_]*$/
+
+/**
+ * One environment entry, keyed by `scope + key`.
+ *
+ * `scope` is either {@link PET_ENV_GLOBAL_SCOPE} or a workspace id. The two
+ * scopes are independent rows: a workspace entry OVERRIDES a global one of the
+ * same key at injection time, but neither overwrites the other in storage.
+ */
+const petEnvEntry = z.object({
+  scope: z.string().min(1),
+  key: z.string().regex(PET_ENV_KEY_PATTERN),
+  value: z.string().min(1),
+  updatedAt: z.number().int(),
+})
+
 
 /**
  * Domain global: Pet-wide configuration and the monotonic skill-set generation
@@ -176,8 +208,10 @@ const petGlobalState = z.object({
   skillSetGeneration: z.number().int().nonnegative(),
   /** Monotonic epoch allocator per scope key. */
   scopeEpochs: z.record(z.string(), z.number().int().nonnegative()),
-  /** Whether first-boot built-in installation already ran. */
-  builtinsInitialized: z.boolean(),
+  // NOTE: `builtinsInitialized` used to live here, reserved for a first-boot
+  // built-in Skill install that was never implemented and is now ruled out —
+  // Pet ships no Skills of its own. Rows written with the key still load: zod
+  // strips undeclared keys on read.
   /** Selected Pet executor provider/model; never contains credentials. */
   // Retained as optional so a database written by an older Pet still
   // validates. Nothing writes or reads them any more: Pet follows the Host's
@@ -212,7 +246,6 @@ export const petDomainSpec = defineDomain({
     initial: {
       skillSetGeneration: 1,
       scopeEpochs: {},
-      builtinsInitialized: false,
       defaultContextPolicy: 'current-session' as const,
     },
   },
@@ -223,11 +256,15 @@ export const petDomainSpec = defineDomain({
     runs: domainTable<string, z.infer<typeof petRunRecord>>(petRunRecord),
     skill_revisions: domainTable<string, z.infer<typeof petSkillRevision>>(petSkillRevision),
     skill_selections: domainTable<string, z.infer<typeof petSkillSelection>>(petSkillSelection),
+    workspace_env: domainTable<string, z.infer<typeof petEnvEntry>>(petEnvEntry),
   },
 })
 
 /** Pet global configuration state as stored. */
 export type PetGlobalState = z.infer<typeof petGlobalState>
+
+/** One stored environment entry. */
+export type PetEnvEntry = z.infer<typeof petEnvEntry>
 
 
 /**
@@ -238,4 +275,18 @@ export type PetGlobalState = z.infer<typeof petGlobalState>
  */
 export function revisionKey(skillName: string): string {
   return skillName
+}
+
+/**
+ * Composite key for one environment entry.
+ *
+ * Scope first so a scope's entries sort together. A workspace id never equals
+ * {@link PET_ENV_GLOBAL_SCOPE}, and a validated key contains no `\u0000`, so
+ * this separator cannot produce a collision between two distinct pairs.
+ * @param scope - `global` or a workspace id.
+ * @param key - Validated upper-snake-case variable name.
+ * @returns the stable table key.
+ */
+export function envKey(scope: string, key: string): string {
+  return `${scope}\u0000${key}`
 }

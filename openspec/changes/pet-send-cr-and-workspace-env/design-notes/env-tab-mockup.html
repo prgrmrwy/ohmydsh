@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>Pet Settings — 环境变量页签（静态原型）</title>
+<style>
+  /* ---- 仅原型用：模拟 DSH 设置页外壳与主题 token ---- */
+  :root{
+    --dsw-alias-bg-base:#f7f8fa; --dsw-alias-bg-layer-1:#fff; --dsw-alias-bg-layer-2:#fff;
+    --dsw-alias-label-primary:#0f1115; --dsw-alias-label-secondary:#61666b;
+    --dsw-alias-label-tertiary:#8f959e; --dsw-alias-label-dimmed:#cfd3d6;
+    --dsw-alias-border-l2:#1f232914; --dsw-alias-state-business-primary:#4176e6;
+    --dsw-alias-state-error-primary:#f54a45; --dsw-alias-interactive-bg-hover:#0000000a;
+  }
+  [data-theme="dark"]{
+    --dsw-alias-bg-base:#17181a; --dsw-alias-bg-layer-1:#212223; --dsw-alias-bg-layer-2:#1c1d1f;
+    --dsw-alias-label-primary:#e8e9ea; --dsw-alias-label-secondary:#a8abb0;
+    --dsw-alias-label-tertiary:#7a7f85; --dsw-alias-label-dimmed:#55595e;
+    --dsw-alias-border-l2:#ffffff1a; --dsw-alias-interactive-bg-hover:#ffffff0f;
+  }
+  body{margin:0;padding:24px;background:var(--dsw-alias-bg-base);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    color:var(--dsw-alias-label-primary)}
+  .shell{max-width:720px;margin:0 auto;background:var(--dsw-alias-bg-layer-1);
+    border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:0 20px}
+  .tabs{display:flex;gap:4px;border-bottom:1px solid var(--dsw-alias-border-l2);
+    padding:12px 0 0;margin:0 -20px;padding-left:20px;padding-right:20px}
+  .tab{padding:8px 12px;font-size:14px;border:none;background:0 0;cursor:pointer;
+    color:var(--dsw-alias-label-secondary);border-bottom:2px solid transparent}
+  .tab[aria-selected="true"]{color:var(--dsw-alias-label-primary);
+    border-bottom-color:var(--dsw-alias-state-business-primary);font-weight:500}
+  .themer{position:fixed;top:12px;right:16px;font-size:12px}
+
+  /* ---- 以下为 Pet 既有 class 约定（摘自 src/client/styles.ts） ---- */
+  .dshpet-settings{font:400 14px/22px inherit;color:var(--dsw-alias-label-primary)}
+  .dshpet-settings .dshpet-group{border-bottom:1px solid var(--dsw-alias-border-l2);
+    display:flex;flex-direction:column;gap:8px;padding:16px 0}
+  .dshpet-settings .dshpet-group:last-child{border-bottom:none}
+  .dshpet-settings .dshpet-group-title{margin:0;font:400 14px/22px inherit;
+    color:var(--dsw-alias-label-primary)}
+  .dshpet-settings .dshpet-field{display:flex;flex-direction:column;gap:4px;min-width:0;
+    font:400 14px/22px inherit;color:var(--dsw-alias-label-secondary)}
+  .dshpet-settings .dshpet-input{width:100%;max-width:360px;box-sizing:border-box;
+    height:28px;padding:0 8px;font:inherit;font-size:14px;
+    color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-1);
+    border:1px solid var(--dsw-alias-border-l2);border-radius:8px;outline:none}
+  .dshpet-settings .dshpet-input::placeholder{color:var(--dsw-alias-label-dimmed)}
+  .dshpet-settings .dshpet-input:focus{border-color:var(--dsw-alias-state-business-primary)}
+  .dshpet-settings .dshpet-row{display:flex;flex-direction:row;gap:12px;
+    align-items:flex-end;flex-wrap:wrap}
+  .dshpet-settings .dshpet-row .dshpet-field{flex:1;min-width:140px}
+  .dshpet-settings .dshpet-action{box-sizing:border-box;display:inline-flex;
+    align-items:center;justify-content:center;gap:4px;height:32px;padding:0 12px;
+    border-radius:16px;font:400 14px/22px inherit;cursor:pointer;
+    border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);
+    color:var(--dsw-alias-label-primary)}
+  .dshpet-settings .dshpet-action:hover{background:var(--dsw-alias-interactive-bg-hover)}
+  .dshpet-settings .dshpet-item-hint{font:400 12px/18px inherit;max-width:560px;
+    color:var(--dsw-alias-label-secondary);margin:0}
+  .dshpet-settings .dshpet-empty{font:400 13px/20px inherit;
+    color:var(--dsw-alias-label-tertiary);padding:6px 0;margin:0}
+  .dshpet-settings .dshpet-error{font:400 12px/18px inherit;
+    color:var(--dsw-alias-state-error-primary);padding:6px 0;margin:0}
+  .dshpet-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;
+    background:var(--dsw-alias-interactive-bg-hover);padding:1px 5px;border-radius:4px}
+  .dshpet-actions{display:flex;gap:8px;flex-wrap:wrap}
+
+  /* ---- 本次新增的环境变量行 ---- */
+  .dshpet-env-row{display:grid;grid-template-columns:minmax(140px,1fr) minmax(160px,1.4fr) auto;
+    gap:12px;align-items:center;padding:8px;border-radius:8px;
+    border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2)}
+  .dshpet-env-key{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .dshpet-env-name{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;
+    color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis}
+  .dshpet-env-inject{font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary);
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .dshpet-env-value{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;
+    color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dshpet-badge-override{display:inline-block;margin-left:6px;padding:0 6px;height:18px;
+    line-height:18px;font-size:11px;border-radius:9px;
+    background:var(--dsw-alias-state-business-primary);color:#fff;white-space:nowrap}
+  .dshpet-badge-shadowed{display:inline-block;margin-left:6px;padding:0 6px;height:18px;
+    line-height:18px;font-size:11px;border-radius:9px;
+    background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-tertiary)}
+  .dshpet-row-shadowed .dshpet-env-name,
+  .dshpet-row-shadowed .dshpet-env-value{opacity:.55;text-decoration:line-through}
+  .dshpet-select{height:28px;padding:0 8px;font-size:14px;border-radius:8px;
+    border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);
+    color:var(--dsw-alias-label-primary);max-width:360px;width:100%}
+  .dshpet-warn{font:400 12px/18px inherit;padding:8px 10px;border-radius:8px;
+    background:#f5a62312;border:1px solid #f5a62333;color:var(--dsw-alias-label-secondary)}
+  /* 值默认打码，点击"显示"才展开；避免截图/共享屏幕时带出群 id。 */
+  .dshpet-env-value{display:flex;align-items:center;gap:8px}
+  .dshpet-env-secret{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dshpet-reveal{flex:none;height:22px;padding:0 8px;font-size:11px;line-height:20px;
+    border-radius:11px;cursor:pointer;
+    border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);
+    color:var(--dsw-alias-label-secondary)}
+  .dshpet-reveal:hover{background:var(--dsw-alias-interactive-bg-hover)}
+</style>
+</head>
+<body>
+<div class="themer">
+  <button class="dshpet-action" onclick="document.body.toggleAttribute('data-theme-dark');
+    document.documentElement.setAttribute('data-theme',
+      document.body.hasAttribute('data-theme-dark')?'dark':'light')">切换深浅色</button>
+</div>
+
+<div class="shell">
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab">General</button>
+    <button class="tab" role="tab">Skills</button>
+    <button class="tab" role="tab" aria-selected="true">环境变量</button>
+    <button class="tab" role="tab">Diagnostics</button>
+  </div>
+
+  <div class="dshpet-settings">
+
+    <!-- ============ 全局 ============ -->
+    <section class="dshpet-group">
+      <h3 class="dshpet-group-title">全局</h3>
+      <p class="dshpet-item-hint">
+        对<strong>所有</strong> Pet 任务生效，包括没有关联工作区的独立任务。
+        下面工作区里的同名变量会覆盖这里的值。
+      </p>
+
+      <div class="dshpet-env-row">
+        <div class="dshpet-env-key">
+          <span class="dshpet-env-name">CR_GROUP</span>
+          <span class="dshpet-env-inject">$DSH_PET_CR_GROUP</span>
+        </div>
+        <span class="dshpet-env-value">
+          <span class="dshpet-env-secret" data-real="oc_default_review_group">oc_de••••••••••</span>
+          <button class="dshpet-reveal" onclick="toggleReveal(this)">显示</button>
+        </span>
+        <div class="dshpet-actions">
+          <button class="dshpet-action">编辑</button>
+          <button class="dshpet-action">删除</button>
+        </div>
+      </div>
+
+      <div class="dshpet-env-row">
+        <div class="dshpet-env-key">
+          <span class="dshpet-env-name">NOTIFY_CHANNEL</span>
+          <span class="dshpet-env-inject">$DSH_PET_NOTIFY_CHANNEL</span>
+        </div>
+        <span class="dshpet-env-value">
+          <span class="dshpet-env-secret" data-real="oc_team_notify">oc_te••••••</span>
+          <button class="dshpet-reveal" onclick="toggleReveal(this)">显示</button>
+        </span>
+        <div class="dshpet-actions">
+          <button class="dshpet-action">编辑</button>
+          <button class="dshpet-action">删除</button>
+        </div>
+      </div>
+
+      <div class="dshpet-row" style="margin-top:4px">
+        <div class="dshpet-field">
+          <span>变量名</span>
+          <input class="dshpet-input" placeholder="CR_GROUP">
+        </div>
+        <div class="dshpet-field">
+          <span>值</span>
+          <input class="dshpet-input" placeholder="oc_xxxxxxxx">
+        </div>
+        <button class="dshpet-action">添加</button>
+      </div>
+      <p class="dshpet-item-hint">变量名需为大写蛇形（<code class="dshpet-code">A-Z</code>、数字、下划线），注入时自动加 <code class="dshpet-code">DSH_PET_</code> 前缀。</p>
+    </section>
+
+    <!-- ============ 按工作区 ============ -->
+    <section class="dshpet-group">
+      <h3 class="dshpet-group-title">工作区</h3>
+      <p class="dshpet-item-hint">
+        只对来源于所选工作区的任务生效，<strong>覆盖</strong>同名的全局变量。
+      </p>
+
+      <div class="dshpet-field">
+        <span>工作区</span>
+        <select class="dshpet-select">
+          <option>ohmydsh — /Users/me/opensource/ohmydsh</option>
+          <option selected>项目A — /Users/me/work/project-a</option>
+          <option>项目B — /Users/me/work/project-b</option>
+          <option>+ 手工输入工作区 id…</option>
+        </select>
+      </div>
+
+      <div class="dshpet-env-row">
+        <div class="dshpet-env-key">
+          <span class="dshpet-env-name">CR_GROUP<span class="dshpet-badge-override">覆盖全局</span></span>
+          <span class="dshpet-env-inject">$DSH_PET_CR_GROUP</span>
+        </div>
+        <span class="dshpet-env-value">
+          <span class="dshpet-env-secret" data-real="oc_project_a_review">oc_pr•••••••••</span>
+          <button class="dshpet-reveal" onclick="toggleReveal(this)">显示</button>
+        </span>
+        <div class="dshpet-actions">
+          <button class="dshpet-action">编辑</button>
+          <button class="dshpet-action">删除</button>
+        </div>
+      </div>
+
+      <div class="dshpet-row" style="margin-top:4px">
+        <div class="dshpet-field">
+          <span>变量名</span>
+          <input class="dshpet-input" placeholder="CR_GROUP">
+        </div>
+        <div class="dshpet-field">
+          <span>值</span>
+          <input class="dshpet-input" placeholder="oc_xxxxxxxx">
+        </div>
+        <button class="dshpet-action">添加</button>
+      </div>
+    </section>
+
+    <!-- ============ 当前工作区的生效结果 ============ -->
+    <section class="dshpet-group">
+      <h3 class="dshpet-group-title">生效结果（项目A）</h3>
+      <p class="dshpet-item-hint">
+        来源于该工作区的任务，其命令实际能读到的变量。
+      </p>
+
+      <div class="dshpet-env-row">
+        <div class="dshpet-env-key">
+          <span class="dshpet-env-name">$DSH_PET_CR_GROUP</span>
+          <span class="dshpet-env-inject">来自工作区</span>
+        </div>
+        <span class="dshpet-env-value">
+          <span class="dshpet-env-secret" data-real="oc_project_a_review">oc_pr•••••••••</span>
+          <button class="dshpet-reveal" onclick="toggleReveal(this)">显示</button>
+        </span>
+        <span></span>
+      </div>
+
+      <div class="dshpet-env-row dshpet-row-shadowed">
+        <div class="dshpet-env-key">
+          <span class="dshpet-env-name">$DSH_PET_CR_GROUP<span class="dshpet-badge-shadowed">已被覆盖</span></span>
+          <span class="dshpet-env-inject">来自全局</span>
+        </div>
+        <span class="dshpet-env-value">
+          <span class="dshpet-env-secret" data-real="oc_default_review_group">oc_de••••••••••</span>
+          <button class="dshpet-reveal" onclick="toggleReveal(this)">显示</button>
+        </span>
+        <span></span>
+      </div>
+
+      <div class="dshpet-env-row">
+        <div class="dshpet-env-key">
+          <span class="dshpet-env-name">$DSH_PET_NOTIFY_CHANNEL</span>
+          <span class="dshpet-env-inject">来自全局</span>
+        </div>
+        <span class="dshpet-env-value">
+          <span class="dshpet-env-secret" data-real="oc_team_notify">oc_te••••••</span>
+          <button class="dshpet-reveal" onclick="toggleReveal(this)">显示</button>
+        </span>
+        <span></span>
+      </div>
+    </section>
+
+    <!-- ============ 校验失败态 ============ -->
+    <section class="dshpet-group">
+      <h3 class="dshpet-group-title">校验失败态（示意）</h3>
+      <div class="dshpet-row">
+        <div class="dshpet-field">
+          <span>变量名</span>
+          <input class="dshpet-input" value="cr-group" style="border-color:#f54a45">
+        </div>
+        <div class="dshpet-field">
+          <span>值</span>
+          <input class="dshpet-input" value="oc_xxx">
+        </div>
+        <button class="dshpet-action">添加</button>
+      </div>
+      <p class="dshpet-error">变量名需为大写蛇形，例如 CR_GROUP；输入内容已保留。</p>
+    </section>
+
+    <!-- ============ 安全提示 ============ -->
+    <section class="dshpet-group">
+      <h3 class="dshpet-group-title">关于安全</h3>
+      <p class="dshpet-warn">
+        这些值会进入 Pet 执行命令时的子进程环境，该会话里跑的任何命令都能读到。
+        这里不是凭据保管处，请不要存放高敏 token。
+      </p>
+      <p class="dshpet-item-hint">
+        某个变量在全局与工作区都没有配置时，它不会存在于环境中；
+        使用它的 Skill 应当自行停下来询问，而不是猜一个值。
+      </p>
+      <p class="dshpet-item-hint">
+        列表中的值默认打码，点「显示」才展开，避免共享屏幕或截图时泄露；
+        这只是显示层的遮挡，不改变值本身的存储与注入方式。
+      </p>
+    </section>
+
+  </div>
+</div>
+
+<script>
+  /* 原型用：切换单行的打码/明文。真实实现里遮挡同样只发生在渲染层，
+     值仍由 Host 正常返回，不做二次加密——它不是凭据保管机制。 */
+  function toggleReveal(button) {
+    const secret = button.parentElement.querySelector('.dshpet-env-secret')
+    const real = secret.getAttribute('data-real')
+    const masked = secret.getAttribute('data-masked') ?? secret.textContent
+    if (secret.getAttribute('data-masked') === null) {
+      secret.setAttribute('data-masked', masked)
+    }
+    const revealed = secret.getAttribute('data-revealed') === 'true'
+    secret.textContent = revealed ? secret.getAttribute('data-masked') : real
+    secret.setAttribute('data-revealed', String(!revealed))
+    button.textContent = revealed ? '显示' : '隐藏'
+  }
+</script>
+</body>
+</html>

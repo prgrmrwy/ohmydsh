@@ -6,7 +6,13 @@
  * same-origin POST that the Host independently validates.
  */
 
-import { ROUTES, type PetCapability, type PetLifecycleState } from '../wire.js'
+import {
+  ROUTES,
+  type PetCapability,
+  type PetEnvRecord,
+  type PetLifecycleState,
+  type PetWorkspaceChoice,
+} from '../wire.js'
 
 /** Uniform envelope returned by every Pet route. */
 type PetResponse<T> = { ok: true; data: T } | { ok: false; error: string; message: string }
@@ -115,6 +121,18 @@ export const petApi = {
     showAsShortcut?: boolean
   }): Promise<Record<string, unknown>> => call(ROUTES.skillMutate, input),
   rebuildProjection: (): Promise<Record<string, unknown>> => call(ROUTES.projectionRebuild),
+  petEnv: (): Promise<{
+    entries: PetEnvRecord[]
+    workspaces: PetWorkspaceChoice[]
+    globalScope: string
+    prefix: string
+  }> => call(ROUTES.petEnv),
+  mutatePetEnv: (input: {
+    scope: string
+    key: string
+    action: 'set' | 'remove'
+    value?: string
+  }): Promise<{ entries: PetEnvRecord[] }> => call(ROUTES.petEnvMutate, input),
   tasks: (): Promise<Record<string, unknown>> => call(ROUTES.tasks),
   taskDetail: (taskId: string): Promise<Record<string, unknown>> =>
     call(ROUTES.taskDetail, { taskId }),

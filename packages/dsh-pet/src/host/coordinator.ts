@@ -176,7 +176,6 @@ export class PetCoordinator {
 
     const validated = await validateCapture(
       capture,
-      declaration.contextRequirement,
       this.deps.resolver,
       this.deps.contextProviders,
     )

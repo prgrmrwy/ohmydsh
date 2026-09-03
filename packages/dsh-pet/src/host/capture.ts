@@ -12,7 +12,6 @@ import { PetError } from './errors.js'
 import type { PetRepository } from './repository.js'
 import {
   scopeKeyOf,
-  type PetContextRequirement,
   type PetInvocationCapture,
   type PetScmFacts,
   type PetSourceSnapshot,
@@ -122,38 +121,23 @@ export interface ValidatedCapture {
 /**
  * Validate a browser capture and build the immutable snapshot.
  *
- * Fails BEFORE any Agent prompt can be queued: an unvalidatable source must
- * not produce a half-created Invocation.
+ * Validates that the NAMED source actually exists — it does not judge whether
+ * that source is sufficient for the capability. Pet applies no per-capability
+ * context gate: a Skill decides at execution time whether its snapshot gives
+ * it what it needs and stops to ask when it does not. Gating here would
+ * require Pet to understand every Skill's prerequisites, which is exactly the
+ * Skill-adapts-to-Pet coupling this design removes.
  * @param capture - The browser's atomic capture.
- * @param requirement - The capability's declared context requirement.
  * @param resolver - Host-side source view.
  * @param registry - Source context providers.
  * @returns the validated capture.
- * @throws PetError when the source is missing, unknown or insufficient.
+ * @throws PetError when the named source is missing or unknown.
  */
 export async function validateCapture(
   capture: PetInvocationCapture,
-  requirement: PetContextRequirement,
   resolver: SourceResolver,
   registry: SourceContextRegistry,
 ): Promise<ValidatedCapture> {
-  if (requirement === 'session-required' && capture.sourceKind !== 'session') {
-    throw new PetError(
-      'CONTEXT_REQUIRED',
-      'This capability requires a DSH session. Select a session before running it.',
-    )
-  }
-  if (
-    requirement === 'workspace-required' &&
-    capture.sourceKind !== 'workspace' &&
-    capture.sourceKind !== 'session'
-  ) {
-    throw new PetError(
-      'CONTEXT_REQUIRED',
-      'This capability requires a workspace. Select a workspace before running it.',
-    )
-  }
-
   let session: HostSessionFacts | undefined
   let workspace: HostWorkspaceFacts | undefined
 

@@ -13,7 +13,6 @@ import { createHash } from 'node:crypto'
 import { lstat, mkdtemp, readdir, readFile, realpath, rename, rm, mkdir, copyFile } from 'node:fs/promises'
 import path from 'node:path'
 import { isSkillName } from '@deepseek-ai/dsh-skill'
-import type { PetContextRequirement } from '../wire.js'
 import { PetError } from './errors.js'
 import { isContainedBy, OWNER_ONLY_DIR_MODE } from './paths.js'
 
@@ -44,12 +43,6 @@ export interface BundleInspection {
   readonly skillName: string
   readonly description: string
   readonly whenToUse?: string
-  /** Pet presentation and context declarations owned by the Skill. */
-  readonly pet?: {
-    readonly label?: string
-    readonly icon?: string
-    readonly context?: PetContextRequirement
-  }
   readonly files: readonly BundleFile[]
   readonly fileCount: number
   readonly totalBytes: number
@@ -60,41 +53,16 @@ export interface BundleInspection {
 /**
  * Minimal frontmatter parsed from `SKILL.md`.
  *
- * A Skill declares its own Pet requirements here. Pet ships NO per-capability
- * adapter: everything an installed Skill needs to appear as a capability
- * travels in this block, so adding one is an install, not a code change.
+ * ONLY ordinary DSH skill fields are read. Pet deliberately provides no way
+ * for a Skill to declare anything Pet-specific: a Skill that could opt into
+ * better Pet treatment would split the ecosystem into "Pet-adapted" and
+ * "ordinary" Skills, and Pet is meant to be just another consumer of the same
+ * Skills every other DSH surface uses.
  */
 interface SkillFrontmatter {
   readonly name?: string
   readonly description?: string
   readonly whenToUse?: string
-  /** Menu label; defaults to the Skill name. */
-  readonly petLabel?: string
-  /** Menu glyph. */
-  readonly petIcon?: string
-  /**
-   * One of `none` | `optional` | `workspace-required` | `session-required`;
-   * anything else (or absent) falls back to `optional`.
-   */
-  readonly petContext?: string
-  /** `true` makes the radial menu ask for a second, explicit click. */
-}
-
-/**
- * Accept only the declared context vocabulary.
- *
- * An unknown or misspelled value is dropped rather than trusted, so a bundle
- * can never widen its own context authority through a typo.
- * @param value - Raw frontmatter value.
- * @returns the valid requirement, or `undefined`.
- */
-function normalizeContext(value: string | undefined): PetContextRequirement | undefined {
-  return value === 'none' ||
-    value === 'optional' ||
-    value === 'workspace-required' ||
-    value === 'session-required'
-    ? value
-    : undefined
 }
 
 /**
@@ -129,9 +97,6 @@ export function parseFrontmatter(content: string): SkillFrontmatter {
     ...(fields['name'] !== undefined ? { name: fields['name'] } : {}),
     ...(fields['description'] !== undefined ? { description: fields['description'] } : {}),
     ...(fields['whenToUse'] !== undefined ? { whenToUse: fields['whenToUse'] } : {}),
-    ...(fields['petLabel'] !== undefined ? { petLabel: fields['petLabel'] } : {}),
-    ...(fields['petIcon'] !== undefined ? { petIcon: fields['petIcon'] } : {}),
-    ...(fields['petContext'] !== undefined ? { petContext: fields['petContext'] } : {}),
   }
 }
 
@@ -282,19 +247,6 @@ export async function inspectBundle(sourcePath: string): Promise<BundleInspectio
     skillName,
     description: frontmatter.description,
     ...(frontmatter.whenToUse !== undefined ? { whenToUse: frontmatter.whenToUse } : {}),
-    ...(frontmatter.petLabel !== undefined ||
-    frontmatter.petIcon !== undefined ||
-    frontmatter.petContext !== undefined
-      ? {
-          pet: {
-            ...(frontmatter.petLabel !== undefined ? { label: frontmatter.petLabel } : {}),
-            ...(frontmatter.petIcon !== undefined ? { icon: frontmatter.petIcon } : {}),
-            ...(normalizeContext(frontmatter.petContext) !== undefined
-              ? { context: normalizeContext(frontmatter.petContext)! }
-              : {}),
-          },
-        }
-      : {}),
     files,
     fileCount: files.length,
     totalBytes,

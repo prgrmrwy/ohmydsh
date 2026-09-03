@@ -273,3 +273,107 @@ describe('a blank agent preset is never stored', () => {
     expect(reply.data?.['agentPreset']).toBe('standard')
   })
 })
+
+describe('environment routes validate before writing', () => {
+  it('rejects a missing scope', async () => {
+    const reply = await call(ROUTES.petEnvMutate, { key: 'CR_GROUP', value: 'x', action: 'set' })
+
+    expect(reply.ok).toBe(false)
+    expect(reply.error).toBe('INVALID_REQUEST')
+    expect(harness!.repository.listEnvEntries()).toHaveLength(0)
+  })
+
+  it('rejects a missing key', async () => {
+    const reply = await call(ROUTES.petEnvMutate, { scope: 'global', value: 'x', action: 'set' })
+
+    expect(reply.ok).toBe(false)
+    expect(harness!.repository.listEnvEntries()).toHaveLength(0)
+  })
+
+  it('rejects a key that is not upper snake case', async () => {
+    const reply = await call(ROUTES.petEnvMutate, {
+      scope: 'global',
+      key: 'cr-group',
+      value: 'x',
+      action: 'set',
+    })
+
+    expect(reply.ok).toBe(false)
+    expect(reply.error).toBe('BINDING_INVALID')
+    expect(reply.message).toContain('upper snake case')
+    expect(harness!.repository.listEnvEntries()).toHaveLength(0)
+  })
+
+  it('rejects an empty value', async () => {
+    const reply = await call(ROUTES.petEnvMutate, {
+      scope: 'global',
+      key: 'CR_GROUP',
+      value: '   ',
+      action: 'set',
+    })
+
+    expect(reply.ok).toBe(false)
+    expect(reply.error).toBe('BINDING_INVALID')
+    expect(harness!.repository.listEnvEntries()).toHaveLength(0)
+  })
+
+  it('rejects an unknown action', async () => {
+    const reply = await call(ROUTES.petEnvMutate, {
+      scope: 'global',
+      key: 'CR_GROUP',
+      value: 'x',
+      action: 'drop',
+    })
+
+    expect(reply.ok).toBe(false)
+    expect(reply.error).toBe('BINDING_INVALID')
+  })
+
+  it('rejects an undeclared body field', async () => {
+    const reply = await call(ROUTES.petEnvMutate, {
+      scope: 'global',
+      key: 'CR_GROUP',
+      value: 'x',
+      action: 'set',
+      extra: 'nope',
+    })
+
+    expect(reply.ok).toBe(false)
+  })
+
+  it('writes a valid global entry and lists it back', async () => {
+    const write = await call(ROUTES.petEnvMutate, {
+      scope: 'global',
+      key: 'CR_GROUP',
+      value: 'oc_default',
+      action: 'set',
+    })
+    expect(write.ok).toBe(true)
+
+    const list = await call(ROUTES.petEnv, {})
+    expect(list.ok).toBe(true)
+    expect(list.data?.['entries']).toEqual([
+      expect.objectContaining({ scope: 'global', key: 'CR_GROUP', value: 'oc_default' }),
+    ])
+    // The client needs both names to render the reference and the scope.
+    expect(list.data?.['globalScope']).toBe('global')
+    expect(list.data?.['prefix']).toBe('DSH_PET_')
+  })
+
+  it('removes an entry', async () => {
+    await call(ROUTES.petEnvMutate, {
+      scope: 'ws-a',
+      key: 'CR_GROUP',
+      value: 'oc_a',
+      action: 'set',
+    })
+    const reply = await call(ROUTES.petEnvMutate, {
+      scope: 'ws-a',
+      key: 'CR_GROUP',
+      action: 'remove',
+    })
+
+    expect(reply.ok).toBe(true)
+    expect(harness!.repository.listEnvEntries()).toHaveLength(0)
+  })
+})

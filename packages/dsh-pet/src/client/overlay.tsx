@@ -325,19 +325,13 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   // Hidden capabilities stay installed and enabled; they are simply kept out
   // of the radial menu to control clutter.
 
-  const blocked = (capability: PetCapability): string | undefined => {
-    if (!capability.available) return capability.diagnostic ?? 'Unavailable'
-    if (capability.contextRequirement === 'session-required' && effectiveSource.kind !== 'session') {
-      return 'Requires a DSH session'
-    }
-    if (
-      capability.contextRequirement === 'workspace-required' &&
-      effectiveSource.kind === 'none'
-    ) {
-      return 'Requires a workspace'
-    }
-    return undefined
-  }
+  // Only a proven-missing dependency disables a capability. Pet applies NO
+  // context gate: it cannot know what a given Skill needs without the Skill
+  // declaring it, and such a declaration is exactly the Pet-adaptation this
+  // design removes. A Skill that needs a session checks its own snapshot and
+  // stops to ask, so the wheel stays live and the answer comes from the Skill.
+  const blocked = (capability: PetCapability): string | undefined =>
+    capability.available ? undefined : (capability.diagnostic ?? 'Unavailable')
 
   return (
     <div
@@ -793,40 +787,32 @@ function TaskPanel(props: {
   )
 }
 
-/** Track the viewport so position clamping follows resizes. */
+/**
+ * Track the VIEWPORT so position clamping follows window resizes.
+ *
+ * Deliberately the window, not the app frame. Pet is `position:fixed` on its
+ * own root under `document.body`, so the viewport is its containing block.
+ * This used to measure `[data-shell-overlay]`, which was correct while Pet
+ * lived inside that layer — but that layer shrinks when a layout-push sidebar
+ * squeezes `#root`, and clamping against it would drag Pet left as the panel
+ * opens. That is precisely the "gets pushed aside" behaviour being removed, so
+ * the frame must not be consulted at all.
+ * @returns the current viewport size.
+ */
 function useViewport(): { width: number; height: number } {
-  // Measure the overlay layer up front. Seeding from `window` and correcting
-  // in an effect re-clamps the stored position against a LARGER box first,
-  // then a smaller one — nudging Pet up and left on every load.
-  const [viewport, setViewport] = useState(() => {
-    const layer = globalThis.document?.querySelector('[data-shell-overlay]')
-    const box = layer?.getBoundingClientRect()
-    return box !== undefined && box.width > 0 && box.height > 0
-      ? { width: box.width, height: box.height }
-      : { width: globalThis.innerWidth ?? 1280, height: globalThis.innerHeight ?? 800 }
+  const read = (): { width: number; height: number } => ({
+    width: globalThis.innerWidth ?? 1280,
+    height: globalThis.innerHeight ?? 800,
   })
+  const [viewport, setViewport] = useState(read)
   useEffect(() => {
-    // Pet is absolutely positioned inside the shell overlay layer, so that
-    // layer — not the window — is its containing block. Measuring the window
-    // would let clamping place Pet past the layer's right/bottom edge.
-    const read = (): { width: number; height: number } => {
-      const layer = globalThis.document?.querySelector('[data-shell-overlay]')
-      const box = layer?.getBoundingClientRect()
-      return box !== undefined && box.width > 0 && box.height > 0
-        ? { width: box.width, height: box.height }
-        : { width: globalThis.innerWidth, height: globalThis.innerHeight }
-    }
-    setViewport(read())
+    // Only a real window resize changes the viewport. A sidebar opening does
+    // not, and must not move Pet.
     const onResize = (): void => setViewport(read())
+    setViewport(read())
     globalThis.addEventListener('resize', onResize)
-    // Dragging a column resizes the frame without firing a window resize.
-    const observer =
-      typeof ResizeObserver === 'function' ? new ResizeObserver(onResize) : undefined
-    const layer = globalThis.document?.querySelector('[data-shell-overlay]')
-    if (layer !== null && layer !== undefined) observer?.observe(layer)
     return () => {
       globalThis.removeEventListener('resize', onResize)
-      observer?.disconnect()
     }
   }, [])
   return viewport

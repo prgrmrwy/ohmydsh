@@ -12,6 +12,8 @@
  * @module dsh-pet/client
  */
 
+import { createElement, useCallback, useSyncExternalStore } from 'react'
+import { createRoot } from 'react-dom/client'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 // Type-only merge: pulls the `shell.overlay` SlotMap declaration into this
 // program so the registration is compile-time checked.
@@ -45,6 +47,14 @@ import { PET_CSS } from './styles.js'
 export const inject = ['slots', 'sessions', 'workspaces', 'connection']
 
 /**
+ * Marks Pet's own mount node under `document.body`.
+ *
+ * A stable attribute rather than a generated id, so a reload can find and
+ * reuse the existing host instead of leaving a second Pet behind.
+ */
+export const PET_HOST_ATTRIBUTE = 'data-dsh-pet-host'
+
+/**
  * Mount the Pet overlay and settings section.
  * @param ctx - Client root context.
  */
@@ -52,6 +62,9 @@ export function apply(ctx: ClientContext): void {
   boundContext = ctx
   ctx.effect(() => () => {
     boundContext = undefined
+    // Drop the memoized projection too: a stale one would be handed to the
+    // next mount as if it were current.
+    sourceCache = undefined
   }, 'dsh-pet: release bound client context')
 
   ctx.effect(() => {
@@ -62,25 +75,44 @@ export function apply(ctx: ClientContext): void {
     return () => style.remove()
   }, 'dsh-pet: styles')
 
-  // `slots.inject` waits for each slot DECLARATION and installs the
-  // registration inside its lifetime, so Pet never registers into a slot the
-  // shell has not declared yet (a direct register would throw at load). The
-  // registration itself is `register({ name, id, ... }, Component)`: for a
-  // `list` slot the `id` is required, and disposal routes through the
-  // caller's fiber.
-  // Keep the `shell.overlay` registration (the shell owns mount lifetime and
-  // ordering), but the SURFACE escapes the clipped layer from inside the
-  // component: that layer is `position:absolute; inset:0` within a frame that
-  // sets `overflow:hidden`, so a viewport-edge floating element is clipped
-  // away — Pet rendered but stayed invisible. The shipped `dsh-width-tiers`
-  // picker solves the same problem the same way, with a `position:fixed`
-  // element parented to `document.body`.
-  ctx.slots.inject('shell.overlay', () =>
-    ctx.slots.register(
-      { name: 'shell.overlay' as const, id: 'dsh-pet', order: 500 },
-      PetOverlaySurface,
-    ),
-  )
+  // Pet mounts on its OWN React root under `document.body`, not into the
+  // `shell.overlay` slot.
+  //
+  // The slot layer is `position:absolute; inset:0` inside the AppFrame, which
+  // lives inside `#root`. A "layout push" plugin — `dsh-better-sidebar` is the
+  // one in use here — squeezes `#root` itself:
+  //
+  //     #root { margin-right: var(--dsh-sidebar-width);
+  //             width: calc(100% - var(--dsh-sidebar-width)); }
+  //
+  // Every descendant containing block narrows with it, so an absolutely
+  // positioned Pet gets pushed and clipped when that panel opens. This is a
+  // CONTAINING BLOCK problem, not a stacking one: no `z-index` can fix it.
+  //
+  // Escaping via `createPortal` was tried before and failed badly (see the
+  // note in `overlay.tsx`): React delegates events at the mount container, so
+  // a node moved out of the host root still renders but silently receives no
+  // hover, drag or click. A separate `createRoot` is different — it
+  // establishes its own delegation container — and it is exactly what
+  // `dsh-better-sidebar` itself does for its panel.
+  ctx.effect(() => {
+    // Reuse an existing host rather than stacking a second Pet: a client
+    // bundle can be applied again by HMR or a plugin reload.
+    const existing = document.querySelector(`[${PET_HOST_ATTRIBUTE}]`)
+    const host = existing instanceof HTMLElement ? existing : document.createElement('div')
+    if (existing === null) {
+      host.setAttribute(PET_HOST_ATTRIBUTE, '')
+      document.body.appendChild(host)
+    }
+    const root = createRoot(host)
+    root.render(createElement(PetOverlaySurface))
+    return () => {
+      // Unmount before removing the node, so React tears down its listeners
+      // instead of leaking them with an orphaned container.
+      root.unmount()
+      host.remove()
+    }
+  }, 'dsh-pet: floating surface on its own root')
 
   ctx.slots.inject('settings.section', () =>
     ctx.slots.register(
@@ -173,14 +205,60 @@ const PET_SECTION_LABEL = (): string => 'Pet'
 
 let boundContext: ClientContext | undefined
 
+/**
+ * Last source projection handed to the surface.
+ *
+ * Kept at module scope so the `useSyncExternalStore` getter can return the
+ * same reference while the selection is unchanged; a fresh object every call
+ * reads as a new snapshot and re-renders forever.
+ */
+let sourceCache: SourceSelection | undefined
+
 function PetOverlaySurface(): JSX.Element | null {
   const ctx = boundContext
+
+  // Pet renders on its own root, so nothing re-renders it when the user
+  // switches sessions — the shell's render pass no longer reaches it. Without
+  // this subscription Pet would keep showing the session that was current when
+  // it mounted and would capture THAT one on the next invocation.
+  // `useSyncExternalStore` compares snapshots by identity, so the getter must
+  // return a STABLE reference while nothing changed. Rebuilding the object on
+  // every call would report a change each time and loop forever.
+  const source = useSyncExternalStore(
+    useCallback(
+      (onChange: () => void) => {
+        if (ctx === undefined) return () => {}
+        const stops = [
+          ctx.sessions.list.subscribe(onChange),
+          ctx.workspaces.list.subscribe(onChange),
+        ]
+        return () => {
+          for (const stop of stops) stop()
+        }
+      },
+      [ctx],
+    ),
+    useCallback(() => {
+      if (ctx === undefined) return undefined
+      const next = readCurrentSource(ctx)
+      const cached = sourceCache
+      if (
+        cached?.sessionId === next?.sessionId &&
+        cached?.workspaceId === next?.workspaceId &&
+        cached?.title === next?.title &&
+        cached?.kind === next?.kind
+      ) {
+        return cached
+      }
+      sourceCache = next
+      return next
+    }, [ctx]),
+  )
+
   if (ctx === undefined) return null
-  // Read the browser's live selection at RENDER time; the atomic capture
-  // happens only when the user actually invokes a capability.
   return (
     <PetOverlay
-      currentSource={readCurrentSource(ctx)}
+      currentSource={source}
       openSession={sessionId => {
         openSession(ctx, sessionId)
       }}

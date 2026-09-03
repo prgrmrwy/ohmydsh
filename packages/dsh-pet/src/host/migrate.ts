@@ -130,19 +130,25 @@ export function removeLegacyState(databaseFile: string): LegacyStateCleanup {
       }
     }
 
-    // Restamp the medium only after the incompatible rows are gone, so a
-    // failure part-way through leaves the old version in place and the
-    // cleanup simply runs again on the next boot.
-    if (removedRows > 0) {
-      const stamped = db
-        .prepare(`SELECT version FROM units WHERE name = ?`)
-        .get(PET_DOMAIN_NAME) as { version?: number } | undefined
-      if (stamped !== undefined && stamped.version !== PET_DOMAIN_VERSION) {
-        db.prepare(`UPDATE units SET version = ? WHERE name = ?`).run(
-          PET_DOMAIN_VERSION,
-          PET_DOMAIN_NAME,
-        )
-      }
+    // Restamp the medium AFTER any incompatible rows are gone, so a failure
+    // part-way through leaves the old version in place and the cleanup simply
+    // runs again on the next boot.
+    //
+    // Deliberately NOT conditional on `removedRows > 0`. The v2→v3 bump is
+    // purely additive (a new table, plus two dropped keys that zod strips on
+    // read), so a healthy v2 medium has nothing to clean and would otherwise
+    // keep its old stamp — and `storageDomain.open` rejects a version
+    // mismatch, degrading a Host that was working fine. Restamping every
+    // openable medium whose rows are compatible is what makes the upgrade a
+    // no-op instead of a failure.
+    const stamped = db
+      .prepare(`SELECT version FROM units WHERE name = ?`)
+      .get(PET_DOMAIN_NAME) as { version?: number } | undefined
+    if (stamped !== undefined && stamped.version !== PET_DOMAIN_VERSION) {
+      db.prepare(`UPDATE units SET version = ? WHERE name = ?`).run(
+        PET_DOMAIN_VERSION,
+        PET_DOMAIN_NAME,
+      )
     }
 
     return { removedRows, clearedTables }

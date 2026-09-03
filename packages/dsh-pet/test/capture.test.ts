@@ -39,7 +39,6 @@ describe('browser capture validation', () => {
   it('builds a snapshot from Host-proven facts', async () => {
     const result = await validateCapture(
       capture(),
-      'session-required',
       resolver,
       new SourceContextRegistry(),
     )
@@ -54,7 +53,6 @@ describe('browser capture validation', () => {
   it('prefers Host-proven titles over browser-supplied display strings', async () => {
     const result = await validateCapture(
       capture({ sessionTitle: 'Spoofed title' }),
-      'optional',
       resolver,
       new SourceContextRegistry(),
     )
@@ -66,28 +64,31 @@ describe('browser capture validation', () => {
     await expect(
       validateCapture(
         capture({ sourceSessionId: 'ghost' }),
-        'session-required',
         resolver,
         new SourceContextRegistry(),
       ),
     ).rejects.toMatchObject({ code: 'SOURCE_NOT_FOUND' })
   })
 
-  it('blocks a session-required capability with no session', async () => {
-    await expect(
-      validateCapture(
-        capture({ sourceKind: 'none', sourceSessionId: undefined }),
-        'session-required',
-        resolver,
-        new SourceContextRegistry(),
-      ),
-    ).rejects.toMatchObject({ code: 'CONTEXT_REQUIRED' })
+  it('applies no context gate, leaving sufficiency to the Skill', async () => {
+    // Pet used to reject a `none` source for a capability that declared
+    // `session-required`. That declaration is gone: gating here would require
+    // Pet to know each Skill's prerequisites, which only a Pet-specific
+    // frontmatter could supply — exactly the Skill-adapts-to-Pet coupling this
+    // design removes. The Invocation is accepted and the Skill decides.
+    const result = await validateCapture(
+      capture({ sourceKind: 'none', sourceSessionId: undefined }),
+      resolver,
+      new SourceContextRegistry(),
+    )
+
+    expect(result.scopeKey).toBe('independent:web:default')
+    expect(result.snapshot.sourceKind).toBe('none')
   })
 
   it('creates an independent scope for a none source', async () => {
     const result = await validateCapture(
       capture({ sourceKind: 'none', sourceSessionId: undefined }),
-      'none',
       resolver,
       new SourceContextRegistry(),
     )
@@ -103,7 +104,6 @@ describe('browser capture validation', () => {
     // The user removed the current session before running an optional capability.
     const result = await validateCapture(
       capture({ sourceKind: 'none', sourceSessionId: undefined }),
-      'optional',
       resolver,
       new SourceContextRegistry(),
     )
@@ -116,7 +116,6 @@ describe('browser capture validation', () => {
   it('resolves a workspace source', async () => {
     const result = await validateCapture(
       capture({ sourceKind: 'workspace', sourceSessionId: undefined, sourceWorkspaceId: 'ws-1' }),
-      'workspace-required',
       resolver,
       new SourceContextRegistry(),
     )
@@ -141,7 +140,7 @@ describe('source context providers', () => {
       }),
     )
 
-    const result = await validateCapture(capture(), 'session-required', resolver, registry)
+    const result = await validateCapture(capture(), resolver, registry)
 
     // The managed execution root differs from the header cwd by design.
     expect(result.snapshot.cwd).toBe('/repo')
@@ -152,7 +151,6 @@ describe('source context providers', () => {
   it('omits worktree fields when the plugin is not installed', async () => {
     const result = await validateCapture(
       capture(),
-      'session-required',
       resolver,
       new SourceContextRegistry(),
     )
@@ -164,7 +162,7 @@ describe('source context providers', () => {
     const registry = new SourceContextRegistry()
     registry.register(createWorktreeProvider({ sessionStatus: async () => ({ bound: false }) }))
 
-    const result = await validateCapture(capture(), 'session-required', resolver, registry)
+    const result = await validateCapture(capture(), resolver, registry)
 
     expect(result.snapshot.worktree).toBeUndefined()
     expect(result.snapshot.cwd).toBe('/repo')
@@ -181,7 +179,7 @@ describe('source context providers', () => {
     )
 
     await expect(
-      validateCapture(capture(), 'session-required', resolver, registry),
+      validateCapture(capture(), resolver, registry),
     ).rejects.toThrow(/worktree-session.*worktree state unreadable/)
   })
 

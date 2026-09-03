@@ -43,7 +43,35 @@ export const ROUTES = {
   invocationRetry: '/dsh-pet/api/invocation-retry',
   taskArchive: '/dsh-pet/api/task-archive',
   diagnostics: '/dsh-pet/api/diagnostics',
+  petEnv: '/dsh-pet/api/env',
+  petEnvMutate: '/dsh-pet/api/env-mutate',
 } as const
+
+/**
+ * Reserved scope naming the global environment set.
+ *
+ * Shared by both halves: the client sends it verbatim as `scope`, and the Host
+ * stores it in the same column workspace ids use. A DSH workspace id is
+ * generated and never this literal, so the two cannot be confused.
+ */
+export const PET_ENV_GLOBAL = 'global'
+
+/** One configured environment entry, as the management routes exchange it. */
+export interface PetEnvRecord {
+  /** `global`, or a workspace id. */
+  readonly scope: string
+  /** Upper-snake-case name, stored WITHOUT the `DSH_PET_` prefix. */
+  readonly key: string
+  readonly value: string
+  readonly updatedAt: number
+}
+
+/** A workspace the environment tab can target, for the picker. */
+export interface PetWorkspaceChoice {
+  readonly id: string
+  readonly title?: string
+  readonly path?: string
+}
 
 /** Maximum accepted JSON request body for any Pet management route. */
 export const MAX_REQUEST_BODY_BYTES = 256 * 1024
@@ -72,9 +100,6 @@ export interface PetLifecycleState {
 
 /** The three supported Pet Task source kinds. */
 export type PetSourceKind = 'session' | 'workspace' | 'none'
-
-/** Declared context requirement of a Pet capability. */
-export type PetContextRequirement = 'none' | 'optional' | 'workspace-required' | 'session-required'
 
 /** Stable scope key that defines active-Task uniqueness. */
 export type PetScopeKey = `session:${string}` | `workspace:${string}` | 'independent:web:default'
@@ -237,11 +262,10 @@ export interface PetRunRecord {
 
 export interface PetCapability {
   readonly id: string
+  /** Always the Skill name: Pet reads no Pet-specific label from a Skill. */
   readonly label: string
-  readonly icon?: string
   readonly description: string
   readonly skillName: string
-  readonly contextRequirement: PetContextRequirement
   /** Computed: a missing organization-specific dependency disables rather than breaks Pet. */
   readonly available: boolean
   readonly diagnostic?: string
@@ -272,19 +296,6 @@ export interface PetSkillRevision {
   /** Canonical directory on the Host that the projection links to. */
   readonly sourcePath: string
   readonly description: string
-  /**
-   * Pet presentation and context requirement declared by the Skill itself.
-   *
-   * This is what makes a capability an INSTALL rather than a code change:
-   * Pet reads these from the bundle's frontmatter and ships no per-capability
-   * adapter. Persisted with the immutable revision, so queued work keeps the
-   * declarations it was accepted with.
-   */
-  readonly pet?: {
-    readonly label?: string
-    readonly icon?: string
-    readonly context?: PetContextRequirement
-  }
   /**
    * Free-text arguments appended after the skill token on every dispatch.
    *

@@ -48,4 +48,9 @@
         - agents
         - tools
         - skills
+        # NOTE: `shellEnv` is deliberately NOT injected. Listing it here makes
+        # it REQUIRED — the plugin fiber would wait for it and Pet would never
+        # load on a Host without the registry. It is read through `ctx.get` in
+        # `src/index.ts` instead, so an absent registry simply means no
+        # `DSH_PET_*` injection.
         - webServer

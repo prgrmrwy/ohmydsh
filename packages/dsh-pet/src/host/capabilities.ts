@@ -1,23 +1,25 @@
 /**
  * Pet capability registry.
  *
- * A capability is UI metadata plus a Skill name and a context requirement.
+ * A capability is a Skill name plus computed availability. It carries NO
+ * Pet-specific presentation or context declaration: Pet reads only what an
+ * ordinary DSH Skill already has (its name and description), so no Skill can
+ * adapt itself to Pet and there is no "Pet-aware" class of Skills.
+ *
  * Availability is COMPUTED, not declared: an organization-specific adapter
  * that is absent produces a disabled capability with a diagnostic rather than
  * breaking Pet, so the plugin still loads in an open-source environment.
  */
 
 import type { PetRepository } from './repository.js'
-import type { PetCapability, PetContextRequirement } from '../wire.js'
+import type { PetCapability } from '../wire.js'
 
 /** A capability declaration before availability is computed. */
 export interface CapabilityDeclaration {
   readonly id: string
   readonly label: string
-  readonly icon?: string
   readonly description: string
   readonly skillName: string
-  readonly contextRequirement: PetContextRequirement
   /**
    * Proves the organization-specific dependencies this capability needs.
    * Returning a string disables the capability with that diagnostic.
@@ -76,9 +78,14 @@ export class CapabilityRegistry {
   project(repository: PetRepository): readonly PetCapability[] {
     // Capabilities are DERIVED FROM INSTALLED SKILLS, not from Pet-side code.
     // Adding one is an install plus an enable — never a code change — so Pet
-    // ships no per-capability adapter. A Skill declares its own label, icon,
-    // context requirement in its `SKILL.md`
-    // frontmatter, and is responsible for its own bounded behavior.
+    // ships no per-capability adapter.
+    //
+    // Only ordinary Skill facts are used: the name becomes the label and the
+    // description carries the rest. Pet deliberately reads no Pet-specific
+    // frontmatter, so an ordinary Skill (say `ws`) is consumed exactly like
+    // any other and cannot be given preferential treatment by declaring
+    // something extra. Whether the source context suffices is the Skill's own
+    // judgement at execution time, not a gate Pet applies here.
     const projected = new Map<string, PetCapability>()
 
     for (const selection of repository.listSkillSelections()) {
@@ -86,22 +93,11 @@ export class CapabilityRegistry {
       const revision = repository.getSkillRevision(selection.skillName)
       if (revision === undefined) continue
 
-      const declared = revision.pet
-      // Fall back to `optional` for an absent or unrecognized declaration:
-      // an install must never widen its own context authority by typo.
-      const context: PetContextRequirement =
-        declared?.context === 'none' ||
-        declared?.context === 'workspace-required' ||
-        declared?.context === 'session-required'
-          ? declared.context
-          : 'optional'
       projected.set(selection.skillName, {
         id: selection.skillName,
-        label: declared?.label ?? selection.skillName,
-        ...(declared?.icon !== undefined ? { icon: declared.icon } : {}),
+        label: selection.skillName,
         description: revision.description,
         skillName: selection.skillName,
-        contextRequirement: context,
         available: true,
         showAsShortcut: selection.showAsShortcut ?? true,
       })
@@ -116,7 +112,6 @@ export class CapabilityRegistry {
       const diagnostic = declaration.probe?.()
       projected.set(declaration.skillName, {
         ...base,
-        ...(declaration.icon !== undefined ? { icon: declaration.icon } : {}),
         available: diagnostic === undefined,
         ...(diagnostic !== undefined ? { diagnostic } : {}),
       })
