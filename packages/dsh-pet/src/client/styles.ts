@@ -48,10 +48,8 @@ export const PET_CSS = `
 @keyframes dshpet-slot-in{from{opacity:0}to{opacity:1}}
 .dshpet-slot-face{fill:var(--dsw-alias-bg-layer-1,#ffffff);
   stroke:var(--dsw-alias-border-l1,#e4e6eb);stroke-width:1;transition:fill .12s ease}
-/* Hover reads as a slightly deeper fill: enough to locate the slice without
-   competing with the content the wheel floats over. */
-.dshpet-slot[data-hovered="true"] .dshpet-slot-face{
-  fill:var(--dsw-alias-interactive-bg-hover,#e9ecf1)}
+/* Hover is applied inline alongside the fill: an inline fill beats a class
+   rule, so a CSS-only hover state would never show. */
 .dshpet-slot[data-disabled="true"]{cursor:not-allowed}
 .dshpet-slot[data-disabled="true"] .dshpet-slot-face{opacity:.55}
 .dshpet-slot-label{font-size:12px;fill:var(--dsw-alias-label-primary,#1f2329);

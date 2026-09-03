@@ -19,6 +19,8 @@ import {
   WHEEL_CAPACITY,
 } from './wheel.js'
 import {
+  hoverFill,
+  ringFill,
   DEFAULT_GLYPH,
   DEFAULT_SIZE_PX,
   PET_ACCENT_EVENT,
@@ -421,7 +423,20 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
                         ? capability.label
                         : `${capability.label}: ${capability.description}`)}
                   </title>
-                  <path className="dshpet-slot-face" d={slot.path} />
+                  <path
+                    className="dshpet-slot-face"
+                    d={slot.path}
+                    // Inline, because the palette is user data: emitting a rule
+                    // per accent would couple the stylesheet to the palette.
+                    // The stroke stays in CSS — the default accent is white, so
+                    // the fade alone cannot separate the rings.
+                    style={{
+                      fill:
+                        hovered === capability.id
+                          ? hoverFill(ringFill(accent.background, slot.ring))
+                          : ringFill(accent.background, slot.ring),
+                    }}
+                  />
                   <text
                     className="dshpet-slot-label"
                     x={slot.labelX}

@@ -205,3 +205,60 @@ describe('the capacity cap is a display constraint', () => {
     }
   })
 })
+
+describe('ring fills follow the mascot accent', () => {
+  it('uses the accent unchanged for the innermost ring', async () => {
+    const { ringFill } = await import('../src/client/accent.js')
+
+    expect(ringFill('#dbd1e6', 0)).toBe('#dbd1e6')
+  })
+
+  it('fades each ring further toward the surface', async () => {
+    const { ringFill } = await import('../src/client/accent.js')
+    const lightness = (hex: string): number => {
+      const value = Number.parseInt(hex.slice(1), 16)
+      return ((value >> 16) & 255) + ((value >> 8) & 255) + (value & 255)
+    }
+
+    // Outer rings recede so the eye lands on ring one, where the most-used
+    // capability sits.
+    expect(lightness(ringFill('#dbd1e6', 1))).toBeGreaterThan(lightness(ringFill('#dbd1e6', 0)))
+    expect(lightness(ringFill('#dbd1e6', 2))).toBeGreaterThan(lightness(ringFill('#dbd1e6', 1)))
+  })
+
+  it('leaves the white default unchanged, so the stroke must separate rings', async () => {
+    const { ringFill } = await import('../src/client/accent.js')
+
+    // Measured, not assumed: the default accent is already white, so the fade
+    // produces identical fills and cannot be the only separator.
+    expect(ringFill('#ffffff', 0)).toBe('#ffffff')
+    expect(ringFill('#ffffff', 2)).toBe('#ffffff')
+  })
+
+  it('clamps a ring index beyond the palette', async () => {
+    const { ringFill } = await import('../src/client/accent.js')
+
+    expect(ringFill('#dbd1e6', 9)).toBe(ringFill('#dbd1e6', 2))
+  })
+
+  it('darkens on hover rather than applying a fixed tint', async () => {
+    const { hoverFill, ringFill } = await import('../src/client/accent.js')
+    const sum = (hex: string): number => {
+      const value = Number.parseInt(hex.slice(1), 16)
+      return ((value >> 16) & 255) + ((value >> 8) & 255) + (value & 255)
+    }
+
+    // A fixed tint would wash out on dark accents and overpower pale ones.
+    for (const ring of [0, 1, 2]) {
+      const rest = ringFill('#d1e6d2', ring)
+      expect(sum(hoverFill(rest))).toBeLessThan(sum(rest))
+    }
+  })
+
+  it('keeps the white default hoverable', async () => {
+    const { hoverFill } = await import('../src/client/accent.js')
+
+    // The one accent where the fade does nothing still needs a hover cue.
+    expect(hoverFill('#ffffff')).not.toBe('#ffffff')
+  })
+})
