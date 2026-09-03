@@ -291,8 +291,7 @@ async function localBuildInputHash(dir, extraInputs = []) {
   return h.digest('hex')
 }
 
-async function localInstallContentHash(dir) {
-  const pkg = readJson(path.join(dir, 'package.json'))
+async function installContentHashOf(dir, pkg) {
   const included = new Set(['package.json', pkg?.dsh?.bundle?.patch, ...(pkg?.files ?? [])].filter(Boolean))
   const entries = await collectFiles(dir, dir, {
     excludeDirs: Array.isArray(pkg?.files) && pkg.files.length > 0
@@ -312,6 +311,61 @@ async function localInstallContentHash(dir) {
     h.update(await readFile(path.join(dir, rel)))
   }
   return h.digest('hex')
+}
+
+async function localInstallContentHash(dir) {
+  const pkg = readJson(path.join(dir, 'package.json'))
+  return installContentHashOf(dir, pkg)
+}
+
+/**
+ * Content hash of a deployed local package, using the SOURCE manifest's
+ * publishable-set contract (the deployed package.json may have been
+ * rewritten by pnpm). The deployment directory must exist; absence is
+ * reported as null (the missing-files repair path owns directory creation).
+ */
+async function deployedContentHash(sourcePkg, name) {
+  const deployedDir = path.join(PROFILE_DIR, 'node_modules', ...name.split('/'))
+  if (!existsSync(deployedDir)) return null
+  return installContentHashOf(deployedDir, sourcePkg)
+}
+
+/**
+ * Force-refresh a deployed local package. pnpm treats `file:` directory
+ * dependencies as merge-without-overwrite: a plain re-add keeps every
+ * already-present subtree file (lib/*) stale. Evicting the deployed copy
+ * first forces fresh materialization. Atomic: on failure (or when the
+ * re-verified bytes still mismatch the source) the previous deployment is
+ * restored and false is returned — never a half-deployed state.
+ */
+async function refreshLocalDeployment(localDir, name, spec, compatSpecs, expectedHash, dshVersion) {
+  const deployedDir = path.join(PROFILE_DIR, 'node_modules', ...name.split('/'))
+  const quarantine = `${deployedDir}.ohmydsh-refresh`
+  const sourcePkg = readJson(path.join(localDir, 'package.json'))
+  await rm(quarantine, { recursive: true, force: true })
+  await rename(deployedDir, quarantine).catch(() => {})
+  const installed = dshCli(['plugin', '--profile', PROFILE, 'add', ...compatSpecs, spec], { version: dshVersion })
+  if (!installed) {
+    // add failed: restore the previous deployment (nothing else was touched).
+    if (!existsSync(deployedDir) && existsSync(quarantine)) {
+      await rename(quarantine, deployedDir).catch(() => {})
+      log(`restored previous deployment of ${name} after failed refresh`)
+    }
+    return false
+  }
+  const deployedHash = await deployedContentHash(sourcePkg, name)
+  if (deployedHash === null || deployedHash !== expectedHash) {
+    // add "succeeded" but the deployed bytes still do not match the source
+    // (e.g. pnpm merging from a cached/stale pack): restore, never accept.
+    await rm(deployedDir, { recursive: true, force: true })
+    if (existsSync(quarantine)) {
+      await rename(quarantine, deployedDir).catch(() => {})
+      log(`restored previous deployment of ${name} after refresh verification mismatch`)
+    }
+    return false
+  }
+  await rm(quarantine, { recursive: true, force: true })
+  return true
 }
 
 function localBuildOutputsExist(dir, pkg) {
@@ -906,19 +960,40 @@ async function syncPackages(manifest, items) {
     } else if (item.source === 'local' && (
       current === undefined || current !== item.version || previousLocalHashes[name] !== localHash || compatChanged
     )) {
-      const reason = current === undefined ? 'not installed'
-        : current !== item.version ? `${current} -> ${item.version}`
-          : compatChanged ? 'compatibility artifact changed'
-            : 'content changed'
-      const action = current === undefined
-        ? `install local package ${name} (${spec})`
-        : `local package ${name} ${reason}, reinstalling atomically`
-      change(`${action}${compatEntries.length > 0 ? ' with compatibility overrides' : ''}`)
-      // pnpm stages and commits all local specs as one operation. Do not remove
-      // the last-known-good owner first: a failed build or add must leave the
-      // previous federation + Connection pair intact.
-      installed = dshCli(['plugin', '--profile', PROFILE, 'add', ...compatSpecs, spec], { version: manifest.dshVersion })
-      if (!installed) fail(`failed to deploy ${name}${compatEntries.length > 0 ? ' and compatibility overrides' : ''}`)
+      if (current === undefined) {
+        change(`install local package ${name} (${spec})`)
+        installed = dshCli(['plugin', '--profile', PROFILE, 'add', ...compatSpecs, spec], { version: manifest.dshVersion })
+        if (!installed) fail(`failed to install ${name}`)
+      } else if (previousLocalHashes[name] !== localHash && !compatChanged) {
+        // Content drift. pnpm `file:` directory dependencies merge without
+        // overwriting existing subtree files, so a plain re-add may leave the
+        // deployed copy stale while the source-side hash says "current".
+        // Verify the DEPLOYED bytes: already matching means the drift was
+        // deployed by other means (manual refresh, previous repair) — record
+        // the hash and move on; mismatching forces an atomic refresh.
+        const deployedHash = await deployedContentHash(readJson(path.join(localDir, 'package.json')), name)
+        if (deployedHash === localHash) {
+          log(`package ${name}@${current} content changed, deployment already matches source`)
+          installed = true
+        } else {
+          change(`local package ${name} content changed, reinstalling atomically`)
+          // Evict-then-add so the deployed copy cannot keep stale subtree
+          // files; refresh re-verifies and restores the old copy on failure.
+          installed = await refreshLocalDeployment(localDir, name, spec, compatSpecs, localHash, manifest.dshVersion)
+          if (!installed) fail(`failed to refresh deployment of ${name}`)
+        }
+      } else {
+        // Version pin drift or a compatibility artifact change: same install
+        // mechanics as before (the atomic refresh path above owns content).
+        const reason = current !== item.version ? `${current} -> ${item.version}` : 'compatibility artifact changed'
+        const action = `local package ${name} ${reason}, reinstalling atomically`
+        change(`${action}${compatEntries.length > 0 ? ' with compatibility overrides' : ''}`)
+        // pnpm stages and commits all local specs as one operation. Do not remove
+        // the last-known-good owner first: a failed build or add must leave the
+        // previous federation + Connection pair intact.
+        installed = dshCli(['plugin', '--profile', PROFILE, 'add', ...compatSpecs, spec], { version: manifest.dshVersion })
+        if (!installed) fail(`failed to deploy ${name}${compatEntries.length > 0 ? ' and compatibility overrides' : ''}`)
+      }
     } else if (current === undefined) {
       change(`install ${item.source} package ${name} (${spec})`)
       installed = dshCli(['plugin', '--profile', PROFILE, 'add', spec], { version: manifest.dshVersion })
