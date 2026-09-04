@@ -30,4 +30,4 @@
 - [x] 5.2 更新 `worktree-session-architecture.md` 的清理章节，补充两级合入证明与 `mergeProof` 字段。
 - [x] 5.3 运行 typecheck 与包测试（25 文件 168 通过）；仓库级检查见下。
 - [x] 5.4 运行 `openspec validate prove-merge-by-patch-equivalence --strict`，复核 diff 无范围蔓延。
-- [ ] 5.5 端到端验证：对 rebase 后已落地的真实 worktree（`ws/pet-send-cr-send-cr-skill-map-workspace`）走完确认 → 归档 → 清理。**由用户在重启 Host 后执行。**
+- [x] 5.5 端到端验证：用户重启 Host 后，在真实 Pet 流程中对 rebase 后已落地的真实 worktree 走完确认 → 归档 → 清理，闭环成功。patch 等价证明在真实 rebase 场景下生效，worktree 与本地任务分支同时移除，operation 推进至 cleaned。
