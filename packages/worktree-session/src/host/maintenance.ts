@@ -250,7 +250,18 @@ export async function wsCleanRepository(repoPath: string, options: RepoCleanOpti
     const candidate = { operationId, sourceSessionId: binding.sourceSessionId, worktreePath: operation.worktreePath, taskBranch: operation.taskBranch }
     let archivedBeforeClean = false
     if (!archived.has(binding.sourceSessionId)) {
-      const notArchived = { ...candidate, kind: 'not-archived' as const, reason: `Source Session ${binding.sourceSessionId} is not archived; archive it before cleaning its Worktree Session` }
+      // The advice differs by caller because the next step differs. When this
+      // call CAN offer to finish the candidate, telling the user to go archive
+      // it by hand would send them off to do exactly what the next real run
+      // would ask about — the reason a preview was read as "nothing to do".
+      const offerable = options.confirmArchive !== undefined && options.archiveSession !== undefined
+      const notArchived = {
+        ...candidate,
+        kind: 'not-archived' as const,
+        reason: offerable
+          ? `Source Session ${binding.sourceSessionId} is not archived; a real run would ask whether to archive it and finish this Worktree Session`
+          : `Source Session ${binding.sourceSessionId} is not archived; archive it before cleaning its Worktree Session`,
+      }
       // Without an injected asker (operator CLI, HTTP) the historical refusal
       // stands: there is no trustworthy channel to obtain user intent.
       //

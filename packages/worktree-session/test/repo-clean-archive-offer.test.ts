@@ -281,7 +281,28 @@ describe('archiving is never proposed to mask a gate', () => {
     // would ask about.
     expect(result.cleaned).toEqual([])
     expect(result.refused[0]).toMatchObject({ operationId: target.operationId, kind: 'not-archived' })
+    // The advice must not send the user off to archive by hand what the next
+    // real run would offer to do: read that way, a preview looks like
+    // "nothing to do here" and the real run never happens.
+    expect(result.refused[0]?.reason).toMatch(/a real run would ask/)
+    expect(result.refused[0]?.reason).not.toMatch(/archive it before cleaning/)
     await expect(access(target.worktreePath)).resolves.toBeUndefined()
+  }, 300_000)
+
+  // The non-interactive entrypoints have no offer to make, so for them the
+  // manual archive genuinely IS the next step.
+  it('keeps the manual-archive advice when no offer is possible', async () => {
+    const root = await fixture()
+    await candidate(root, 'operation-offer-manual', 'session-offer-manual')
+
+    const result = await wsCleanRepository(root, {
+      archivedSessionIds: [],
+      activePaths: [],
+      activeBoundSessionIds: [],
+      cwd: root,
+    })
+
+    expect(result.refused[0]?.reason).toMatch(/archive it before cleaning/)
   }, 300_000)
 
   // A Session finishing its OWN worktree is the whole point of the flow.

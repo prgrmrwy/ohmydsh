@@ -76,6 +76,13 @@ A `dry_run` preview never raises that offer and never archives anything: it
 reports such a candidate as "not archived" so you can see what a real run would
 ask about. Expect the question only on a real run.
 
+A preview and a real run therefore do NOT report the same thing here, and a
+preview that cleans nothing is not evidence that a real run would clean
+nothing. Every candidate listed as "not archived" is one a real run would offer
+to finish. Do not stop at the preview and conclude there is nothing to do:
+report which candidates the real run would ask about, and let the user decide
+whether to make that run.
+
 That offer is never a way around a gate. A candidate that is unmerged, dirty,
 in-flight, malformed or still occupied is refused on that real reason and is
 never offered, and the clean re-verifies every gate after archiving. When a
@@ -89,9 +96,10 @@ Session. Review status and `dry_run: true` first; all live Session paths and
 bindings stay protected, and refused candidates are reported with reasons
 instead of being removed. An authorized `path` may name a different repository
 main checkout, and the scan then behaves exactly as it would from that
-checkout's own ordinary Session. Preview with `dry_run: true` before requesting
-authorization for a destructive run, so the user approves a known result rather
-than an unknown one.
+checkout's own ordinary Session. Preview with `dry_run: true` before a
+destructive run so the user sees which candidates are involved — but read the
+preview for what it is: it lists what would be examined, not what a real run
+would ultimately do to an unarchived candidate.
 
 The shell wrapper has no trustworthy Session-id environment, so use it only with
 an explicit path for unattended operator recovery and diagnostics of schema-v2
@@ -118,7 +126,10 @@ scripts/ws.sh clean /absolute/worktree/path
 - `status` reports operation/base/task branch, managed root, dependency
   fingerprint/mode, the resolved project type (`npm`/`pnpm`), lifecycle, and
   isolated development `DSH_HOME`; it never prints `.env.local` values.
-- Always preview with `dry_run: true` (or `clean --dry-run` for the CLI) first.
+- Always preview with `dry_run: true` (or `clean --dry-run` for the CLI) first,
+  and treat the preview as a list of candidates rather than a verdict: an
+  unarchived candidate that a real run would offer to finish appears there only
+  as a refusal.
   Clean refuses a source Session that is not archived, the caller's current
   worktree, a live/executing source Session bound to it (even though that
   Session's immutable cwd is the repo), dirty state, in-flight operations, and
