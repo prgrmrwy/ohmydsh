@@ -54,9 +54,14 @@ export function renderEnvelope(options: {
   } else {
     const label = snapshot.sessionTitle ?? snapshot.workspaceTitle ?? '(untitled)'
     lines.push(`- 来源${snapshot.sourceKind === 'session' ? '会话' : '工作区'}：${label}`)
-    if (snapshot.cwd !== undefined) lines.push(`- 仓库根目录：\`${snapshot.cwd}\``)
+    // Every path here belongs to the SOURCE session, never to this executor.
+    // Without that attribution a reader takes "受管执行根目录" for its own
+    // working directory — observed in practice: an agent refused to clean a
+    // finished worktree believing it was standing in it, while this session's
+    // cwd is the Pet workspace and is not a Git checkout at all.
+    if (snapshot.cwd !== undefined) lines.push(`- 来源会话的仓库根目录：\`${snapshot.cwd}\``)
     if (snapshot.worktree !== undefined) {
-      lines.push(`- 受管执行根目录：\`${snapshot.worktree.executionRoot}\``)
+      lines.push(`- 来源会话的受管执行根目录：\`${snapshot.worktree.executionRoot}\``)
     }
   }
   lines.push(
