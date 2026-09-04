@@ -24,8 +24,27 @@ export const PET_CSS = `
    Interaction survives the move because Pet renders on its OWN React root
    (see client/index.tsx): a root establishes its own event-delegation
    container, unlike a portal out of the host root, which silently kills every
-   synthetic handler. */
-.dshpet-root{position:fixed;z-index:2147483000;width:72px;height:72px;
+   synthetic handler.
+
+   z-index:999, not "as high as possible". Pet's mount path (document.body >
+   host > .dshpet-root) and the official Settings overlay's ancestor chain
+   (#root > AppFrame) both establish no new stacking context (no transform /
+   filter / isolation / contain), so Pet and Settings compare directly in the
+   ROOT stacking context. The shipped Settings panel
+   (@deepseek-ai/dsh-client-ui-settings-general's SettingsRoot.module.css)
+   sits at z-index:1000 — 999 is one below that known value, deliberately
+   STRICTLY less rather than equal: at equal values the two fixed layers
+   would resolve by DOM insertion order instead, which is exactly the
+   unreliable "depends on which mounted last" outcome the old
+   near-int32-max value(2147483000) papered over by brute force. Observed
+   "ordinary content" z-index values across every deployed DSH/plugin bundle
+   top out at 100 (see fix-pet-below-settings-layer/design.md), so 999 keeps
+   a wide margin above ordinary content while staying below the first known
+   "top-layer modal" tier (Settings, attachment lightbox/drop mask, this
+   deployment's better-sidebar mermaid modal — all 1000+). A future plugin
+   value landing between 100 and 999 is a real risk this constant alone
+   cannot detect; see that design doc for the full survey and rationale. */
+.dshpet-root{position:fixed;z-index:999;width:72px;height:72px;
   pointer-events:auto;touch-action:none}
 /* No hover bridge: the wheel is a continuous disc centred on the mascot, so
    there is no dead space to span. The rectangular menu's bridge was a 268px
