@@ -173,6 +173,23 @@
   - 与 B001 开放问题 4(anti 角色配不同模型)是同一问题的两个切片,可合并设计。
 - **更新**: 2026-08-24 新增,源自 claude/codex 订阅成本复盘(上游 #17/#24 缓存缺陷修复后,成本分级是下一个杠杆)。
 
+### [B021] 等效 Claude 的 simplify skill 与 insight skill(代码并行清理 / 会话使用分析)
+- **状态**: 想法
+- **优先级**: P2
+- **背景 / 动机**: Claude Code 官方能力:bundled skill `/simplify`(并行 4 个 review agent 审查「最近改动」并直接应用清理修复:复用已有 helper / 简化 / 效率 / 抽象层级;明示不查正确性,正确性归 `/code-review`)与 `/insights`(生成 HTML 报告分析本机近期会话:在哪些项目工作、怎么用、哪里出错、可尝试功能;官方是内置命令而非 skill)。这两类「说一声就做完的分析/清理」能力 DSH 目前没有对位,希望补上等效物。
+- **要点**:
+  - 落地形态:本地 skill(skills/<name>/SKILL.md + dsh.yaml `type: skill` 条目,同 ws / add-dsh-plugin / dsh-tunnel 形态);simplify 可纯 prompt 编排(DSH 已有 subagent 并行 fan-out,与 B001 同族);insight 需要读会话存储,可能要 host/plugin 配合;
+  - simplify 等效:对目标范围(如 git 最近改动)并行 spawn 多个 review 子代理,汇总 findings 后应用修复;可评估顺带对位 `/code-review`(正确性 review),或首版只做 simplify,把「不查正确性」写进边界;
+  - insight 等效:读本机 DSH 会话历史(默认 json 存储;storage-domain 可路由 sqlite,见 dsh-pet note),统计项目/模型/失败点/用法,渲染自包含 HTML 报告放工作区文件(可配合 open-in-vscode 打开);
+  - 依赖与协同:会话历史读取与 B012(会话内容关键字搜索)共用「会话持久化与查询 API」调研;review 子代理可用 B016 成本分级挂便宜档;隐私边界:本地生成、不出网、不落库;
+  - 官方参考:commands 参考(https://code.claude.com/docs/en/commands 的 `/simplify`、`/insights` 条目)与 bundled skills 说明(https://code.claude.com/docs/en/skills)。
+- **开放问题**:
+  1. simplify 默认目标 = 最近提交 / uncommitted diff / 显式 path?修复直接应用(官方行为)还是先展示 diff 待确认;
+  2. review 面照搬官方 4 维还是精简(如 abstraction 并入 simplification);
+  3. insight 是否等 B012 的存储调研先落地、直接复用其读取/索引层;
+  4. 与已完成的 B010/cost-meter 统计面板的关系:insight 只做会话行为分析,不重复费用展示。
+- **更新**: 2026-09-04 新增,源自 Claude Code bundled skill `/simplify` 与内置命令 `/insights`(官方 commands 文档)。
+
 ---
 
 ## 缺陷备忘
