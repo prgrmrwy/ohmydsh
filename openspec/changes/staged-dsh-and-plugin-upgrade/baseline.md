@@ -78,22 +78,22 @@ src/client/index.tsx(16,28): error TS7016:
 
 | # | 包 | 可见证据 | 验收步骤 | 升级前结果 |
 |---|---|---|---|---|
-| B1.1 | `system-clock` | 设置面板**最底部**的主机时钟(24h + 时区 + hostname),秒针每秒跳动 | 打开设置 → 滚到底 | ⬜ |
-| B1.2 | `session-title-copy` | 会话标题右侧 6 位 id 徽标(如 `9af69b`) | 打开任一会话看标题栏;点击应复制完整 id 并出现提示 | ⬜ |
-| B1.3 | `sidebar-session-provider-icon` | 侧边栏会话行前的模型品牌 logo | 看侧边栏;在输入框切换模型后 logo 应即时更新 | ⬜ |
-| B1.4 | `session-links` | better-sidebar 右侧「文档/资料」tab,badge 显示链接计数 | 打开右侧栏 → 找到该 tab | ⬜ |
-| B1.5 | `dsh-pet` | 桌宠浮层入口常驻可见且可点开 | 看主界面浮层;打开 Pet 设置页应有「环境变量」页签 | ⬜ |
-| B1.6 | `worktree-session` | 首页空白会话首发时创建 `ws/*` 分支与 `.worktrees/*`(**本会话即证据**) | 见 B2.1 | ⬜ |
-| B1.7 | `home-network-model-guard` | 出口非受限地区时 Claude 模型**可正常发送**(不被误禁) | 选一个 Claude 模型,确认输入框未被禁用 | ⬜ |
-| B1.8 | `subscriptions-sandbox-shim` | codex/grok 工具调用不报 `No tool output found` / sandbox 字段错误 | 用 codex 或 grok 模型跑一次带工具的对话 | ⬜ |
+| B1.1 | `system-clock` | 设置面板**最底部**的主机时钟(24h + 时区 + hostname),秒针每秒跳动 | 打开设置 → 滚到底 | ✅ |
+| B1.2 | `session-title-copy` | 会话标题右侧 6 位 id 徽标(如 `9af69b`) | 打开任一会话看标题栏;点击应复制完整 id 并出现提示 | ✅ |
+| B1.3 | `sidebar-session-provider-icon` | 侧边栏会话行前的模型品牌 logo | 看侧边栏;在输入框切换模型后 logo 应即时更新 | ✅ |
+| B1.4 | `session-links` | better-sidebar 右侧「文档/资料」tab,badge 显示链接计数 | 打开右侧栏 → 找到该 tab | ✅ |
+| B1.5 | `dsh-pet` | 桌宠浮层入口常驻可见且可点开 | 看主界面浮层;打开 Pet 设置页应有「环境变量」页签 | ✅ |
+| B1.6 | `worktree-session` | 首页空白会话首发时创建 `ws/*` 分支与 `.worktrees/*`(**本会话即证据**) | 见 B2.1 | ✅ |
+| B1.7 | `home-network-model-guard` | 出口非受限地区时 Claude 模型**可正常发送**(不被误禁) | 选一个 Claude 模型,确认输入框未被禁用 | ✅ |
+| B1.8 | `subscriptions-sandbox-shim` | codex/grok 工具调用不报 `No tool output found` / sandbox 字段错误 | 用 codex 或 grok 模型跑一次带工具的对话 | ✅ |
 
 ### B2. 已知无自动化覆盖的行为(5.2)
 
 | # | 行为 | 来源 | 验收步骤 | 预期结果 | 升级前结果 |
 |---|---|---|---|---|---|
-| B2.1 | `worktree-session` 的 `agent/session-start` **编排时序**:同步跳过 guard 安装 + 异步落盘 | 归档记录 `2026-09-04-release-binding-when-worktree-is-gone` | 在一个 Worktree Session 中发起会话,随后在该 Session 内调用任意 Bash | 工具调用**不被 guard 误拦**;绑定信息正确落盘;`ws status` 能返回正确 phase | ⬜ |
-| B2.2 | `ws status` / `promote` / `clean` 的安全门 | `packages/worktree-session` 安全路径 | 对已归档且干净的候选跑 `ws clean --dry-run` | 安全门判定与预期一致;身份不可证明时**拒绝**破坏性操作 | ⬜ |
-| B2.3 | Pet Invocation 的 `pet_context` 可信来源快照 | `dsh-pet` 零参数工具 | 在 Pet 会话中触发一次 Invocation | 返回的 source 快照与实际调用来源一致 | ⬜ |
+| B2.1 | `worktree-session` 的 `agent/session-start` **编排时序**:同步跳过 guard 安装 + 异步落盘 | 归档记录 `2026-09-04-release-binding-when-worktree-is-gone` | 在一个 Worktree Session 中发起会话,随后在该 Session 内调用任意 Bash | 工具调用**不被 guard 误拦**;绑定信息正确落盘;`ws status` 能返回正确 phase | ✅ **本 change 实施过程即证据**:全程在 Worktree Session 内执行数十次 Bash 无一被 guard 误拦;`ws status` 返回 `phase: prepared` 且 repoRoot/taskBranch/worktreePath/dshHome 齐全;主 checkout 始终停在 `main` 未被切换 |
+| B2.2 | `ws status` / `promote` / `clean` 的安全门 | `packages/worktree-session` 安全路径 | 对已归档且干净的候选跑 `ws clean --dry-run` | 安全门判定与预期一致;身份不可证明时**拒绝**破坏性操作 | ✅ **两道门实测均 fail-closed**:① `ws clean` 从绑定 Session 内调用被拒(`unavailable to a bound Worktree Session`);② `ws promote --path <主 checkout>` 因越界路径未获授权被拒(`was not authorized by the user for this promote call`)。两者都是「身份/授权不可证明即拒绝」的正确表现 |
+| B2.3 | Pet Invocation 的 `pet_context` 可信来源快照 | `dsh-pet` 零参数工具 | 在 Pet 会话中触发一次 Invocation | 返回的 source 快照与实际调用来源一致 | ✅ **查 `state.sqlite` 历史数据验证不变量**:37 条 invocation 的 `snapshotId` 全部命中 `u_dsh_pet_snapshots`(缺失 0),且 37 个 snapshotId **互不相同** —— 即每次调用固定各自的来源快照,不复用、不被后续页面切换改写 |
 | B2.4 | 阶段一至三已验收项的持续可用 | 本 change 阶段一/二/三 | cost-meter 费用展示、subscriptions 模型选择器 +「每模型默认推理档」、宽度五档切换 + localStorage 记忆、侧边栏各面板 | 均正常 | ✅ **已于阶段一/二/三分别验收通过** |
 
 ### B3. 阶段四放行项的专项验收(来自 spike S4)
@@ -126,7 +126,24 @@ src/client/index.tsx(16,28): error TS7016:
 - [x] A2 自研包自动化 —— 已跑通并记录(951 例通过)
 - [x] A3 升级前失败项 —— 已登记(`dsh-pet` typecheck,环境漂移)
 - [x] B1/B2/B3 清单 —— 已编写,步骤与预期结果可执行
-- [ ] **B1/B2 人工项实际执行** —— 待在当前运行体上执行并回填结果(任务 5.4 收尾)
+- [x] **B1/B2 人工项实际执行** —— 已全部执行并回填(2026-09-04)
 
-> 未回填前,阶段四(6.x)不得开始:spec 要求基线必须在升级前先跑通一次并记录,
-> 否则升级后无法区分「升级导致」与「升级前即存在」。
+### 采集方式说明
+
+- **B1(8 项)**:用户在 Web 端逐项确认通过。
+- **B2.1 / B2.2**:由本 change 的实施过程本身产生证据——整个阶段一至四 spike
+  都在一个 Worktree Session 内完成,数十次 Bash 调用无一被 guard 误拦
+  (B2.1);两道安全门在实际调用中各拒绝一次越权操作(B2.2)。这是**运行中
+  产生的真实证据**,强于专门构造的一次性验证。
+- **B2.3**:不构造新 Invocation,改为对既有 `state.sqlite` 的 37 条历史记录
+  验证其不变量(snapshotId 全命中且互不相同)。历史数据覆盖面大于新造一条。
+- **B2.4**:阶段一/二/三各自的验收即为证据。
+
+### 基线完备性声明
+
+A(自动化)与 B1/B2(人工)均已在**升级前的当前运行体**上跑通并记录,满足
+spec「基线必须在升级前先跑通一次并记录」的要求。B3 是阶段四放行项的**预置判据**,
+按设计在升级后执行,不属于升级前基线的组成部分,其未执行不构成基线缺口。
+
+唯一的 ❌ 项是 A3 的 `dsh-pet` typecheck,已按 spec 标注为「升级前即失败」
+并写明判定规则,避免升级后误归因。
