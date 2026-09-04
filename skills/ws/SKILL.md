@@ -59,6 +59,10 @@ sandbox-escalation one, so a session reporting approval prompts as disabled
 still receives it. "One-shot" describes what agreement covers — this call only,
 never remembered — not a quota to conserve.
 
+A `clean` preview carrying an explicit `path` is not gated: it reads and
+changes nothing, so previewing costs no prompt. The real run still asks, every
+time — `status` and `promote` have no preview form and always ask.
+
 Agreement only establishes where to look. It exempts nothing: the same
 active, dirty, in-flight, archived, lifecycle and merge-ancestry gates run
 afterwards, and a refusal from any of them still stands.
