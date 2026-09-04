@@ -85,8 +85,15 @@ function makeSource(fetchIp: VerdictSource['fetchIp'], classify: VerdictSource['
   return { source: { fingerprint, fetchIp, classify } as VerdictSource, fingerprint }
 }
 
-function makeCache(source: VerdictSource, now: () => number, ttlMs = 60_000, fetchTimeoutMs = 5_000) {
-  return new NetworkVerdictCache(source, now, { ttlMs, fetchTimeoutMs })
+function makeCache(
+  source: VerdictSource,
+  now: () => number,
+  ttlMs = 60_000,
+  fetchTimeoutMs = 5_000,
+  backoffBaseMs?: number,
+  backoffMaxMs?: number,
+) {
+  return new NetworkVerdictCache(source, now, { ttlMs, fetchTimeoutMs, ...(backoffBaseMs !== undefined ? { backoffBaseMs } : {}), ...(backoffMaxMs !== undefined ? { backoffMaxMs } : {}) })
 }
 
 describe('NetworkVerdictCache', () => {
@@ -158,22 +165,88 @@ describe('NetworkVerdictCache', () => {
     expect(results.map((r) => r.verdict)).toEqual(['home', 'home', 'home'])
   })
 
-  it('degrades to unknown on fetch failure, does not cache it, and retries on the next request', async () => {
+  it('degrades to unknown, then self-heals with exponential backoff capped at the max', async () => {
     const fetchIp = vi.fn()
-    fetchIp.mockRejectedValueOnce(new Error('network unreachable')).mockResolvedValueOnce('1.2.3.4')
+    fetchIp.mockRejectedValue(new Error('network unreachable'))
     const { source } = makeSource(fetchIp)
-    const cache = makeCache(source, () => 1_000)
+    let now = 1_000
+    const cache = makeCache(source, () => now, 60_000, 5_000, 2_000, 60_000)
 
     const degraded = await cache.check()
     expect(degraded).toEqual({ verdict: 'unknown', degraded: true, degradedReason: 'fetch-failed' })
     expect('sampledAt' in degraded).toBe(false)
     expect('freshForMs' in degraded).toBe(false)
+    expect(fetchIp).toHaveBeenCalledTimes(1)
 
-    // Next request retries (spec: 降级后可恢复) and succeeds, now cached.
+    // Inside the 2s backoff window: no outbound call, same degraded answer.
+    now += 999
+    const stillDegraded = await cache.check()
+    expect(stillDegraded.verdict).toBe('unknown')
+    expect(stillDegraded.degradedReason).toBe('fetch-failed')
+    expect(fetchIp).toHaveBeenCalledTimes(1)
+
+    // Past the window: retry (2s). Fail again → next window is 4s.
+    now += 2_001
+    await cache.check()
+    expect(fetchIp).toHaveBeenCalledTimes(2)
+    now += 3_999
+    await cache.check()
+    expect(fetchIp).toHaveBeenCalledTimes(2) // still inside 4s window
+    now += 2_001 // crosses the 4s window
+    await cache.check()
+    expect(fetchIp).toHaveBeenCalledTimes(3)
+
+    // Sustained failures: cap the cadence, do not stop retrying.
+    for (let i = 0; i < 10; i++) {
+      now += 60_001
+      await cache.check()
+    }
+    const callsBeforeRecovery = fetchIp.mock.calls.length
+    expect(callsBeforeRecovery).toBeGreaterThanOrEqual(12)
+    expect(callsBeforeRecovery).toBeLessThanOrEqual(14)
+
+    // Network recovers: next retry succeeds, verdict cached, backoff reset.
+    fetchIp.mockResolvedValue('1.2.3.4')
+    now += 60_001
     const recovered = await cache.check()
     expect(recovered.verdict).toBe('home')
     expect(recovered.degraded).toBe(false)
-    expect(fetchIp).toHaveBeenCalledTimes(2)
+    // Backoff reset: a later fresh failure starts from the base again.
+    fetchIp.mockRejectedValueOnce(new Error('again'))
+    now += 60_001
+    await cache.check()
+    expect(fetchIp).toHaveBeenCalledTimes(callsBeforeRecovery + 2)
+    const callsAfter = fetchIp.mock.calls.length
+    now += 999
+    await cache.check()
+    expect(fetchIp).toHaveBeenCalledTimes(callsAfter)
+    now += 2_001
+    await cache.check()
+    expect(fetchIp).toHaveBeenCalledTimes(callsAfter + 1)
+  })
+
+  it('bypasses the backoff window when the fingerprint changes (reconnect must re-verify immediately)', async () => {
+    const fetchIp = vi.fn()
+    fetchIp.mockRejectedValueOnce(new Error('down')).mockResolvedValue('1.2.3.4')
+    const { source, fingerprint } = makeSource(fetchIp)
+    let now = 1_000
+    const cache = makeCache(source, () => now)
+
+    await cache.check() // fails, enters 2s backoff
+    expect(fetchIp).toHaveBeenCalledTimes(1)
+
+    // Same fingerprint inside the window: no retry.
+    now += 1_000
+    await cache.check()
+    expect(fetchIp).toHaveBeenCalledTimes(1)
+
+    // Fingerprint changed (reconnect): immediate re-query regardless of backoff.
+    fingerprint.mockReturnValue('fp-2')
+    now += 1
+    const result = await cache.check()
+    expect(fetchIp).toHaveBeenCalledTimes(2) // one fresh fetch for the new fingerprint
+    expect(source.fingerprint).toHaveBeenCalled()
+    expect(result.verdict).toBe('home')
   })
 
   it('maps timeouts and invalid bodies to their stable diagnostic codes', async () => {
