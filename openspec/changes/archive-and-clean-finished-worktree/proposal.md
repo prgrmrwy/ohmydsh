@@ -6,6 +6,11 @@
 
 ## What Changes
 
+- `clean` 新增可选的处理范围参数（`scope`），取值 `specified` 时只处理按既有规则解析出的那一个 operation：不扫描其他候选，也不就它们发起确认。默认仍为仓库级清扫。Pet 侧无需改动——在能力配置的 skill arguments 里写 `clean specified` 即可，该文本会原样拼进调用。
+
+  此前绑定 Session 发起 `clean` 会被直接拒绝（"请改用主 checkout Session"），使"在自己的工作区里收尾退出"这一最自然的场景不可达；而简单放开为仓库级扫描，又会为不相关候选逐一发问，把一个动作变成多次问答。范围由调用显式声明，而不是让同一个 `clean` 依调用方是否绑定 worktree 隐式变脸——后者会让用户无法从请求本身预见影响范围。
+
+  参数命名为 `specified` 而非 `current`：`ws` 并不具备"当前 worktree"这一独立概念，它只按既有规则（调用 Session 的绑定，或授权路径）解析目标；该参数描述的是**处理范围**（单个 vs 全仓），不是一种新的目标身份，因此不引入第三套目标解析语义。
 - `ws clean` 遇到未归档候选时，不再直接拒绝：汇总该候选的可判定事实（源 Session id、任务分支、是否已证明合入、worktree 是否干净、phase、活跃状态），通过既有一次性授权通道询问用户是否连同归档一起收尾。
 - 用户确认后，系统先调用受信 Host 的 `workspaceRegistry.archiveSession(sourceSessionId)` 完成归档，再对该候选执行既有 `wsClean`；未获确认则保持当前拒绝语义，资源不变。
 - 归档只在候选**其余全部安全门均可通过**时才提议：未合入、dirty、in-flight、schema 不支持、binding 损坏的候选一律先按既有原因拒绝，绝不通过归档掩盖真实阻塞。

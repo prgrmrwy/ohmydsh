@@ -208,6 +208,26 @@ export interface RepoCleanOptions {
    * without a running Host.
    */
   archiveSession?: (sourceSessionId: string) => Promise<void>
+  /**
+   * Restrict the whole pass to this one operation.
+   *
+   * The caller states the scope; nothing here infers it from who is calling.
+   * Finishing one's own worktree and sweeping a repository are different
+   * intents, and asking about unrelated candidates would turn a single
+   * finishing action into a series of questions. Everything else — the gates,
+   * the archive-then-clean offer, the per-candidate reporting — runs through
+   * the same code path, so a narrow scope introduces no second set of rules.
+   */
+  onlyOperationId?: string
+  /**
+   * Restrict the pass to the operation bound to this source Session.
+   *
+   * Resolution lives here because this layer already discovered the repository
+   * and owns the binding lookup; the tool layer would otherwise have to
+   * rediscover both. Mutually exclusive with `onlyOperationId` in practice —
+   * both express the same narrowed scope from different starting facts.
+   */
+  onlySourceSessionId?: string
 }
 
 /**
@@ -228,7 +248,20 @@ export async function wsCleanRepository(repoPath: string, options: RepoCleanOpti
   const refused: RepoCleanRefusal[] = []
   const ignored: RepoCleanIgnored[] = []
   const archived = new Set(options.archivedSessionIds)
-  const operationIds = await listOperationIds(repo.gitCommonDir)
+  const allOperationIds = await listOperationIds(repo.gitCommonDir)
+  // A narrowed scope that resolves to nothing is a failed request, not an
+  // empty sweep: reporting "nothing to do" would read as success while the
+  // intended target went untouched.
+  let onlyOperationId = options.onlyOperationId
+  if (options.onlySourceSessionId !== undefined) {
+    const bound = await findBySourceSession(repo.gitCommonDir, options.onlySourceSessionId)
+    if (bound === undefined) throw new WsError('OPERATION_NOT_FOUND', `Session ${options.onlySourceSessionId} has no current Worktree Session binding in ${repo.repoRoot}`)
+    onlyOperationId = bound.operationId
+  }
+  if (onlyOperationId !== undefined && !allOperationIds.includes(onlyOperationId)) {
+    throw new WsError('OPERATION_NOT_FOUND', `Operation ${onlyOperationId} is not registered in ${repo.repoRoot}`)
+  }
+  const operationIds = onlyOperationId === undefined ? allOperationIds : [onlyOperationId]
 
   for (const operationId of operationIds) {
     let operation: OperationRecord | undefined
