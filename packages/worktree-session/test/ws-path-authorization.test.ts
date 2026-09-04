@@ -33,7 +33,7 @@ describe('explicit ws path is model-visible', () => {
 describe('explicit ws path authorization', () => {
   // 1.1 A granted path becomes the trusted target source for this call.
   it('accepts the explicit path when the user agrees', async () => {
-    const { ctx, ask } = ctxAnswering(['Yes, proceed'])
+    const { ctx, ask } = ctxAnswering(['确认执行'])
     await expect(authorizeExplicitPath(ctx, exec, { action: 'clean', path: '/repo' }))
       .resolves.toBe('/repo')
     expect(ask).toHaveBeenCalledTimes(1)
@@ -41,7 +41,7 @@ describe('explicit ws path authorization', () => {
 
   // 1.2 Declining refuses before any resource is touched.
   it('refuses a declined confirmation', async () => {
-    const { ctx } = ctxAnswering(['No, stop'])
+    const { ctx } = ctxAnswering(['取消'])
     await expect(authorizeExplicitPath(ctx, exec, { action: 'clean', path: '/repo' }))
       .rejects.toThrow(/not authorized by the user/)
   })
@@ -57,7 +57,7 @@ describe('explicit ws path authorization', () => {
 
   // 1.5 Authorization is single-use: a second call asks again.
   it('asks again for every subsequent explicit-path call', async () => {
-    const { ctx, ask } = ctxAnswering(['Yes, proceed'])
+    const { ctx, ask } = ctxAnswering(['确认执行'])
     await authorizeExplicitPath(ctx, exec, { action: 'status', path: '/repo/.worktrees/task' })
     await authorizeExplicitPath(ctx, exec, { action: 'status', path: '/repo/.worktrees/task' })
     expect(ask).toHaveBeenCalledTimes(2)

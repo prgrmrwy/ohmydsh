@@ -1,3 +1,4 @@
+import { basename } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 // Type-only side-effect import: augments `Context` with `userQuestions`.
@@ -41,10 +42,16 @@ interface UserQuestionsSeam {
   ask(request: never): Promise<{ answers: readonly { id: string; selected: readonly string[]; custom?: string }[] }>
 }
 
+/**
+ * Prompt copy is Chinese because these questions are read by the operator of
+ * this deployment, not by the model: the answer is a human decision about
+ * their own repository. Identifiers (paths, branches, Session ids) stay
+ * verbatim so they remain copy-pasteable and greppable.
+ */
 /** The affirmative option label; anything else (or nothing) declines. */
-const CONFIRM_LABEL = 'Yes, proceed'
+const CONFIRM_LABEL = '确认执行'
 /** The explicit declining option, so refusing never requires free text. */
-const DECLINE_LABEL = 'No, stop'
+const DECLINE_LABEL = '取消'
 
 /**
  * Obtain live one-shot user authorization for an Agent-supplied explicit path.
@@ -97,8 +104,8 @@ async function askUser(
         detail,
         header: 'Worktree Session',
         options: [
-          { label: CONFIRM_LABEL, description: 'Proceed with exactly this action.' },
-          { label: DECLINE_LABEL, description: 'Cancel; nothing is changed.' },
+          { label: CONFIRM_LABEL, description: '仅执行本次这一个操作。' },
+          { label: DECLINE_LABEL, description: '取消；不做任何改动。' },
         ],
       }],
       ...(exec.agent !== undefined ? { agent: exec.agent } : {}),
@@ -119,13 +126,15 @@ export async function authorizeExplicitPath(
     `ws explicit path ${request.path} was not authorized by the user for this ${request.action} call; ` +
     'ask the user to approve the request, or use the path-oriented dsh-ws CLI',
   )
-  // The question names the exact action and path so the user judges the real
-  // effect, and states that the grant is single-use.
+  // The question names the exact action and target so the user judges the real
+  // effect, and states that the grant is single-use. The trailing path segment
+  // is surfaced in the title because a long absolute path truncates in narrow
+  // UIs, and that segment is what identifies the worktree at a glance.
   const granted = await askUser(ctx, exec,
-    `Run ws ${request.action} against ${request.path}?`,
-    `That path is outside the calling Session's own binding. ` +
-    'Agreeing authorizes this call once only; every later explicit-path call asks again. ' +
-    'All Worktree Session safety gates still apply afterwards.')
+    `是否对 ${basename(request.path)} 执行 ws ${request.action}？`,
+    `目标路径：${request.path}\n` +
+    '该路径不在当前会话自身的绑定范围内。确认后仅授权本次调用；之后每次指定路径都会重新询问。' +
+    '所有 Worktree Session 安全门在此之后照常逐项执行。')
   if (!granted) throw refusal
   return request.path
 }
@@ -242,12 +251,12 @@ export function registerWsTool(ctx: Context): () => void {
           // operator CLI and HTTP routes inject neither hook and keep the
           // historical refusal, having no trustworthy way to ask.
           confirmArchive: offer => askUser(ctx, exec,
-            `Finish and clean up the Worktree Session on branch ${offer.taskBranch}?`,
-            `Source Session: ${offer.sourceSessionId}\n` +
-            `Worktree: ${offer.worktreePath}\n` +
-            'That branch is proven merged and the worktree has no uncommitted changes. ' +
-            'Agreeing archives that Session and then removes the worktree and the local task branch. ' +
-            'Removal is irreversible; the archived Session itself stays recoverable by unarchiving it.'),
+            `是否归档并清理 Worktree Session ${basename(offer.worktreePath)}？`,
+            `任务分支：${offer.taskBranch}\n` +
+            `工作区：${offer.worktreePath}\n` +
+            `源会话：${offer.sourceSessionId}\n` +
+            '该分支已证明合入，工作区没有未提交改动。确认后将先归档该会话，再删除该工作区与本地任务分支。' +
+            '删除不可逆；被归档的会话本身仍可通过取消归档恢复为普通会话。'),
           archiveSession: async sourceSessionId => {
             await ctx.workspaceRegistry.archiveSession(sourceSessionId as never)
           },

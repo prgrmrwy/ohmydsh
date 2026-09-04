@@ -41,6 +41,17 @@
 
 **替代方案：** 只要未归档就提议，把其余门留给清理阶段。否决：会把安全门失败转化为"用户已经授权了却仍然失败"，且留下不必要的归档。
 
+### 2b. "自身源 Session 仍加载"不阻塞提议（实测修正）
+
+真机验证（pet task `session-bcce3d7d`）暴露了首版设计的死锁：目标 worktree 被精确识别，却因 `Refusing to clean a worktree bound to active source Session` 在提议前即被拒。核对 `dsh-workspace` 实现确认 `archiveSession()` 只往归档集追加 id，**从不卸载 agent 或 dispose session**，因此该门在收尾流程中永远不会自行清除——保持武装等于要求会话先证明自己已不存在，任何 Session 都无法收尾自己的 worktree。
+
+因此 `wsClean` 新增 `finishedSourceSessionId`：仅当它等于该 operation binding 的源 Session 时，豁免这一道门。豁免范围刻意极窄：
+
+- 只对"用户在本次调用中明确确认收尾"的那一个 Session 生效；探针与真正清理各传一次。已归档候选不带该参数，其 live-binding 门仍须自行成立。
+- **绝不豁免** `cwd === target` 与 `activePaths` 两道门——它们证明的是"没有人正站在这个 worktree 里"，与"绑定会话是否加载"是不同的事实。删掉别人脚下的地板永远不被允许。
+
+责任落点随之明确：用户点下确认，即表示该会话不再需要这个 worktree。
+
 ### 3. 归档成功、清理失败时不回滚归档
 
 归档是幂等的、可由用户在 GUI 取消归档回退的、且不破坏 workspace accounting 的操作。清理失败时自动取消归档会引入一个新的失败面（取消归档本身也可能失败），并可能与用户的并发操作打架。因此保留已归档状态，如实报告清理未完成，由用户决定下一步。
@@ -72,5 +83,6 @@
 
 ## Open Questions
 
-- **归档是否会使会话从 Host 卸载**：`policy.ts:86` 的活跃判定看的是 `ctx.agents.get(id)` / `ctx.sessions.get(id)`（是否仍 loaded），而 `archiveSession` 的契约只描述归档集与持久化，未声明卸载行为。若归档不卸载，则"在当前 Worktree Session 内点 Pet 的 `ws clean` 收尾自己"这一场景仍会被 active 门拦下，需要用户先关闭该会话。此问题不阻塞本 change 的其余部分（对**其他**已完成 worktree 的收尾不受影响），留待端到端验证时以真实行为确定，再决定是否需要补充"请先关闭该会话"的明确提示或另立 change。
-- 确认文案的最终措辞（需同时可读且突出不可逆性），实现时定稿。
+- ~~**归档是否会使会话从 Host 卸载**~~ **已解答（实测 + 源码核对）：不会。** `archiveSession()` 仅向归档集追加 id，不触碰会话生命周期，`policy.ts:86` 的 loaded 判定因此不受影响。据此引入 `finishedSourceSessionId` 窄豁免（见决策 2b），"在当前 Worktree Session 内点 Pet 的 `ws clean` 收尾自己"因而可一步走通，无需用户先手动关闭会话。
+- ~~确认文案的最终措辞~~ **已定稿**：中文；标题用 worktree/路径的末段以避免窄 UI 截断，完整路径、任务分支与源会话 id 放在正文；选项为「确认执行」/「取消」。
+- **清理自身 worktree 后当前会话的后续可用性**：清理成功后该执行目录即消失，此后该会话的 bash/文件操作会失效。这是收尾语义的必然结果（会话工作已完成），既有"取消归档 → released → 恢复为普通会话"路径仍可用于查看历史。端到端验证时确认这一表现是否需要在确认文案中更醒目地提示。

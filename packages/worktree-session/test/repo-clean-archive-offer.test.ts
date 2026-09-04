@@ -233,6 +233,8 @@ describe('archiving is never proposed to mask a gate', () => {
   }, 600_000)
 
   // 2.3 An actively occupied candidate is refused without an offer.
+  // Occupancy here means a live Session's cwd is inside the worktree — the
+  // gate that survives the finishing waiver (see the dedicated test below).
   it('refuses an actively occupied candidate without offering', async () => {
     const root = await fixture()
     const target = await candidate(root, 'operation-offer-active', 'session-offer-active')
@@ -250,6 +252,55 @@ describe('archiving is never proposed to mask a gate', () => {
     expect(confirm).not.toHaveBeenCalled()
     expect(result.cleaned).toEqual([])
     expect(result.refused[0]?.reason).toMatch(/active/i)
+    await expect(access(target.worktreePath)).resolves.toBeUndefined()
+  }, 300_000)
+
+  // A Session finishing its OWN worktree is the whole point of the flow.
+  // Archiving never unloads a Session, so its binding stays live throughout;
+  // leaving that gate armed would refuse before the user is ever asked and no
+  // Session could ever finish itself — a deadlock, not a safeguard.
+  it('offers and cleans when the only occupant is the candidate own Session', async () => {
+    const root = await fixture()
+    const target = await candidate(root, 'operation-offer-self', 'session-offer-self')
+    const confirm = confirmer(true)
+    const archived: string[] = []
+
+    const result = await wsCleanRepository(root, {
+      archivedSessionIds: [],
+      // The Session is live and bound, but nobody's cwd is inside the worktree.
+      activePaths: [root],
+      activeBoundSessionIds: ['session-offer-self'],
+      cwd: root,
+      confirmArchive: confirm,
+      archiveSession: async (id: string) => { archived.push(id) },
+    })
+
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(archived).toEqual(['session-offer-self'])
+    expect(result.cleaned.map(entry => entry.operationId)).toEqual([target.operationId])
+    await expect(access(target.worktreePath)).rejects.toMatchObject({ code: 'ENOENT' })
+  }, 300_000)
+
+  // The waiver never extends to "someone is standing inside the worktree":
+  // that gate is what stops the clean from deleting live ground.
+  it('never waives an occupant whose cwd is inside the worktree', async () => {
+    const root = await fixture()
+    const target = await candidate(root, 'operation-offer-inside', 'session-offer-inside')
+    const confirm = confirmer(true)
+
+    const result = await wsCleanRepository(root, {
+      archivedSessionIds: [],
+      // A live Session sits INSIDE the target worktree.
+      activePaths: [target.worktreePath],
+      activeBoundSessionIds: ['session-offer-inside'],
+      cwd: root,
+      confirmArchive: confirm,
+      archiveSession: async () => undefined,
+    })
+
+    expect(confirm).not.toHaveBeenCalled()
+    expect(result.cleaned).toEqual([])
+    expect(result.refused[0]?.reason).toMatch(/active DSH Session/i)
     await expect(access(target.worktreePath)).resolves.toBeUndefined()
   }, 300_000)
 
