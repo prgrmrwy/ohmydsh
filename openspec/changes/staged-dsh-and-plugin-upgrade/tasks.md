@@ -45,7 +45,13 @@
 
 ## 6. 阶段四:运行体迁移与自研包重接线
 
-- [ ] 6.1 创建隔离 Worktree Session(独立 `DSH_HOME`)作为阶段四工作区,确认其构建不影响主 checkout 的日常 GUI。
+> **⛔ 已在 4.5 阀门停止(2026-09-04)**。6.2–6.4 实际执行后,6.5 暴露出 spike 未覆盖的
+> **host 半区破坏**(`Session.events` 移除、`connection.rpc.handle` 删除 `{authority:'loopback'}`
+> 参数、`SubagentRuntime.registerContinuableSetup` 移除),5 个包无法构建。按 tasks 4.5 的
+> 阀门条款停止并回退,结论见 `design.md` 的「阶段四执行结论」。阶段四应作为独立 change
+> 重新提案,spike 须同时覆盖 host 与 client 两个半区。下列未勾选项保持未完成状态。
+
+- [x] 6.1 创建隔离 Worktree Session(独立 `DSH_HOME`)作为阶段四工作区,确认其构建不影响主 checkout 的日常 GUI。
 - [ ] 6.2 `dsh.yaml` 将 `dshVersion` 升到 spike 确定的目标版本(预期 `0.1.2-rc.1`),确认 cordis 随之解析为 `4.0.2`。
 - [ ] 6.3 按 4.2 的评估逐包重接线 7 个自研包的客户端半区;对 `dsh-client-runtime` 这一上游已移除的包,改为声明实际承接包或移除,**不得**机械改写为 `^0.1.2-rc.1`(该版本不存在)。
 - [ ] 6.4 同批更新全部 8 个 local package 的运行体 peer 至新版本族,使 `tests/local-package-peers.test.mjs` 重新通过;不得通过放宽检查、豁免个别 package 或跳过检查来消除失败。
