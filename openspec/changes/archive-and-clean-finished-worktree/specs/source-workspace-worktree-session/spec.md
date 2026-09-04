@@ -16,15 +16,21 @@
 - **THEN** 确认信息 SHALL 包含源 Session id、任务分支、worktree 路径与已判定的合入/洁净状态，且 MUST NOT 以概括表述替代具体候选标识
 
 ### Requirement: Archiving is never proposed to mask an unresolved safety gate
-系统 SHALL 仅对"除未归档外全部既有安全门均可通过"的候选提出归档确认。任务分支未证明合入、worktree dirty、operation 非 prepared、binding 损坏、schema 不受支持，或该 worktree/Session 仍被活跃占用时，系统 MUST 先按既有原因拒绝该候选，MUST NOT 就其发起归档确认，也 MUST NOT 因归档而弱化任何安全门。
+系统 SHALL 仅对"除未归档、以及该候选自身源 Session 仍处于加载状态之外，全部既有安全门均可通过"的候选提出归档确认。任务分支未证明合入、worktree dirty、operation 非 prepared、binding 损坏、schema 不受支持，或有活动 Session 的当前工作目录位于该 worktree 之内时，系统 MUST 先按既有原因拒绝该候选，MUST NOT 就其发起归档确认，也 MUST NOT 因归档而弱化上述任何安全门。
+
+"候选自身源 Session 仍加载"之所以不阻塞提议：归档只将 Session 加入归档集，从不卸载它，因此该门在收尾流程中永远不会自行清除；若保持武装，任何 Session 都无法收尾自己的 worktree —— 那是死锁而非防护。该豁免 MUST 严格限定为"用户在本次调用中明确确认收尾的那一个源 Session"，MUST NOT 扩展到其他 Session，更 MUST NOT 豁免"有会话正站在该 worktree 内"这一判定。
 
 #### Scenario: Unmerged or dirty candidate is refused without an offer
 - **WHEN** 未归档候选的任务分支未证明合入，或其 worktree 存在未提交修改
 - **THEN** 系统 SHALL 按既有原因拒绝该候选，且 MUST NOT 发起归档确认
 
-#### Scenario: Actively occupied candidate is refused without an offer
-- **WHEN** 未归档候选仍被活跃 DSH Session 占用，或调用方当前执行根即该 worktree
-- **THEN** 系统 SHALL 按既有原因拒绝，且 MUST NOT 发起归档确认
+#### Scenario: A Session may finish its own worktree while still loaded
+- **WHEN** 未归档候选的唯一活跃占用是其自身源 Session 仍处于加载状态，且没有任何会话的当前工作目录位于该 worktree 之内
+- **THEN** 系统 SHALL 发起归档确认；用户确认后 SHALL 先归档再清理该候选
+
+#### Scenario: An occupant inside the worktree is never waived
+- **WHEN** 有活动 DSH Session 的当前工作目录位于该 worktree 之内，或调用方当前执行根即该 worktree
+- **THEN** 系统 SHALL 按既有原因拒绝，MUST NOT 发起归档确认，且该判定 MUST NOT 因用户确认收尾而被豁免
 
 #### Scenario: Archiving does not bypass gates re-evaluated at clean time
 - **WHEN** 用户确认并完成归档后，清理阶段重新校验时某个安全门不再通过

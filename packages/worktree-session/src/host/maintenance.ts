@@ -90,6 +90,18 @@ export async function wsClean(targetInput: string | MaintenanceTarget, options: 
   cwd?: string
   git?: GitClient
   requireActivePaths?: boolean
+  /**
+   * The user confirmed finishing THIS operation's own source Session, so its
+   * still-being-loaded state no longer blocks the clean.
+   *
+   * Narrow on purpose. Archiving a Session only adds it to the archive set; it
+   * never unloads the agent, so the "bound source Session is live" gate would
+   * otherwise never clear and a Session could never finish its own worktree —
+   * a deadlock, not a safeguard. This waiver covers exactly that gate for
+   * exactly that Session; every other gate, including the two that prove
+   * nobody is standing INSIDE the worktree, still runs unchanged.
+   */
+  finishedSourceSessionId?: string
 } = {}): Promise<CleanResult> {
   const git = options.git ?? createGitClient()
   const initial = await resolveMaintenanceTarget(targetInput, git)
@@ -103,7 +115,14 @@ export async function wsClean(targetInput: string | MaintenanceTarget, options: 
     if (cwd === target || cwd.startsWith(`${target}${sep}`)) throw new WsError('CLEAN_REFUSED', 'Refusing to clean the caller current worktree')
     if (active.some(item => item === target || item.startsWith(`${target}${sep}`))) throw new WsError('CLEAN_REFUSED', 'Refusing to clean a worktree used by an active DSH Session')
     const binding = bindingOf(operation)
-    if (binding?.mode === 'source-session' && (options.activeBoundSessionIds ?? []).includes(binding.sourceSessionId)) throw new WsError('CLEAN_REFUSED', `Refusing to clean a worktree bound to active source Session ${binding.sourceSessionId}`)
+    // A live binding blocks the clean UNLESS the user just confirmed finishing
+    // this exact Session. Note the two gates above already proved no live
+    // Session — including this one — has its cwd inside the target, so the
+    // waiver can never delete the ground someone is standing on.
+    const finishedByUser = options.finishedSourceSessionId !== undefined
+      && binding?.mode === 'source-session'
+      && binding.sourceSessionId === options.finishedSourceSessionId
+    if (!finishedByUser && binding?.mode === 'source-session' && (options.activeBoundSessionIds ?? []).includes(binding.sourceSessionId)) throw new WsError('CLEAN_REFUSED', `Refusing to clean a worktree bound to active source Session ${binding.sourceSessionId}`)
     if (operation.phase !== 'prepared') throw new WsError('CLEAN_REFUSED', `Operation is in-flight at phase ${operation.phase}`)
     if ((await worktreeStatus(target, git)).trim() !== '') throw new WsError('CLEAN_REFUSED', 'Refusing to clean a dirty worktree')
     const baseTip = await git.run(operation.repoRoot, ['rev-parse', '--verify', `${operation.baseRef}^{commit}`])
@@ -225,6 +244,13 @@ export async function wsCleanRepository(repoPath: string, options: RepoCleanOpti
       // gate. The existing dry run is that proof — it takes the repository
       // lock and evaluates every gate without removing anything — so no gate
       // is reimplemented here and none can be masked by archiving.
+      //
+      // The probe waives exactly one gate: "this candidate's own source
+      // Session is still loaded". Finishing a Session necessarily happens
+      // while it is loaded (archiving never unloads it), so leaving that gate
+      // armed here would refuse every candidate before the user is ever asked
+      // — the deadlock this flow exists to break. Every other gate, including
+      // the two proving nobody's cwd is inside the worktree, stays armed.
       try {
         await wsClean(operation.worktreePath, {
           dryRun: true,
@@ -232,6 +258,7 @@ export async function wsCleanRepository(repoPath: string, options: RepoCleanOpti
           activePaths: options.activePaths,
           ...(options.activeBoundSessionIds === undefined ? {} : { activeBoundSessionIds: options.activeBoundSessionIds }),
           ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+          finishedSourceSessionId: binding.sourceSessionId,
           git,
         })
       } catch (error) {
@@ -260,6 +287,10 @@ export async function wsCleanRepository(repoPath: string, options: RepoCleanOpti
         activePaths: options.activePaths,
         ...(options.activeBoundSessionIds === undefined ? {} : { activeBoundSessionIds: options.activeBoundSessionIds }),
         ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+        // Carry the waiver only for a candidate the user just confirmed
+        // finishing in THIS call. An already-archived candidate never gets it:
+        // its live-binding gate must still hold on its own.
+        ...(archivedBeforeClean ? { finishedSourceSessionId: binding.sourceSessionId } : {}),
         git,
       })
       cleaned.push(archivedBeforeClean ? { ...result, archivedBeforeClean: true } : result)
