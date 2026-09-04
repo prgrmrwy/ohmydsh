@@ -4,9 +4,9 @@
 - [x] 1.2 `dsh.yaml` 将 `dsh-cockpit-bridge` 升到 `0.2.1`(release asset tarball),更新 note 记录 0.2.1 的 capability 失效自愈与"纯续签不再重申 current"修复。
 - [x] 1.3 `dsh.yaml` 将 `llm-subscriptions` 从 fork commit tarball 切回 npm `dsh-plugin-subscriptions@0.6.0`:移除 `name` 字段(npm spec 可省略)、移除临时 fork 的 ⚠ 说明段,note 改为记录上游 PR #40 已合并(2026-08-29)及 `0.6.0` 对 `0.1.1-rc.2`/`0.1.2-alpha` 双运行体兼容。
 - [x] 1.4 `dsh.yaml` 将 `cost-meter` 升到 `1.7.10`,note 补记:密钥治理变更(明文 key 不再落盘、迁入 DSH 凭据库、设置页改 write-only)、网络声明面扩至 19 域但仅在启用对应 Provider 时出站、`1.7.0`/`1.7.8`/`1.7.9` 曾致启动即崩故取 `1.7.10`。
-- [ ] 1.5 执行 `node scripts/sync.mjs` 物化,并连续运行第二次确认幂等(第二次应为 `no changes`)。
-- [ ] 1.6 验收:重启 DSH 并确认宿主正常启动(cost-meter 冒烟——排查 `plugin tree failed to load` / `Cannot access` / `strict codec`);启动清单仍为 20 项;Web 端确认 cost-meter 费用展示、subscriptions 模型选择器与设置页可用;确认 subscriptions 的「每模型默认推理档」功能仍在(该功能来自 PR #40,现由 npm 版本承载)。
-- [ ] 1.7 提交为独立 commit,使回滚粒度与阶段一致。
+- [x] 1.5 执行 `node scripts/sync.mjs` 物化,并连续运行第二次确认幂等(第二次应为 `no changes`)。
+- [x] 1.6 验收:重启 DSH 并确认宿主正常启动(cost-meter 冒烟——排查 `plugin tree failed to load` / `Cannot access` / `strict codec`);启动清单仍为 20 项;Web 端确认 cost-meter 费用展示、subscriptions 模型选择器与设置页可用;确认 subscriptions 的「每模型默认推理档」功能仍在(该功能来自 PR #40,现由 npm 版本承载)。
+- [x] 1.7 提交为独立 commit,使回滚粒度与阶段一致。
 
 ## 2. 阶段二:width-tiers 升级并原子回收手写接线
 

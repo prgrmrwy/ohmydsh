@@ -162,17 +162,13 @@ customizations:
   - id: width-tiers
     type: package
     source: remote
-    spec: dsh-width-tiers@1.0.3
-    version: 1.0.3
-      # [2026-08-24] plugin-update: width-tiers 1.0.2 -> 1.0.3(release notes 见 registry;审查记录请补进 note)
+    spec: dsh-width-tiers@1.0.4
+    version: 1.0.4
+      # [2026-09-04] staged-dsh-and-plugin-upgrade 阶段二:width-tiers 1.0.3 -> 1.0.4,
+      #   并同批删除手写 patch 条目 width-tiers-wiring(接线改由包自带 bundle patch 承载)。
     enabled: true
     brief: 对话区宽度五档切换(748px 至全宽)
-    note: 'repo https://github.com/aaronlei/dsh-width-tiers(MIT);用途:Web 对话区标准/中等/宽/超宽/全宽五档切换并以 localStorage 记忆;审查(2026-08-20 npm 1.0.2 精确包):host 入口为空操作,client 仅注入 layout/locale,通过 --dsh-chat-content-width 行内覆盖调整宽度,不依赖构建哈希类名;无网络请求、Host 文件/命令/模型能力,生命周期 disposer 会清理 DOM、监听器、定时器与样式;注意非标准档会主动关闭详情面板,全宽档会经官方 layout 服务收起侧边栏;依赖 DSH Web rc.x 客户端布局与 locale 服务,升级后需回归验证'
-  # dsh-width-tiers 没有 dsh.bundle,需显式 loader 行让 client scanner 发现浏览器半区。
-  - id: width-tiers-wiring
-    type: patch
-    enabled: true
-    brief: 对话宽度插件 Web 加载接线
+    note: 'repo https://github.com/aaronlei/dsh-width-tiers(MIT);用途:Web 对话区标准/中等/宽/超宽/全宽五档切换并以 localStorage 记忆;1.0.4(2026-09-04 审查,npm 1.0.4 发布物核对):**该版本新增了自带的 cordis.patch.yml,并在 package.json 补上 dsh.bundle.patch** —— 此前本包只声明 dsh.client,`dsh plugin add` 把它装成普通依赖、不进 dsh.profile.bundles,浏览器半区要靠本仓库手写的 patches/width-tiers-wiring.yml 插一行 loader 才被发现;1.0.4 起该接线由包自身承载,故本次升级**与删除 width-tiers-wiring patch 条目在同一批次完成**。两份 patch 语义等价(均为无 id 的 insert,插入同一条 {id: dsh-width-tiers, name: dsh-width-tiers};已用 js-yaml 解析比对,结构逐字段相同),而 DSH 的 applyEntryPatches 对无 id 的 insert 一律 push 且不去重——两者并存会产生**两条同 id 的 loader 行**,因此绝不可只升 pin 而保留手写 patch。验收口径:启动清单中 dsh-width-tiers 恰好出现一次,且 [patch] 标注消失(改由 bundle 承载)。历史审查(2026-08-20 npm 1.0.2 精确包):host 入口为空操作,client 仅注入 layout/locale,通过 --dsh-chat-content-width 行内覆盖调整宽度,不依赖构建哈希类名;无网络请求、Host 文件/命令/模型能力,生命周期 disposer 会清理 DOM、监听器、定时器与样式;注意非标准档会主动关闭详情面板,全宽档会经官方 layout 服务收起侧边栏;依赖 DSH Web rc.x 客户端布局与 locale 服务,升级后需回归验证'
   # 自研(local):B020 会话链接面板 — better-sidebar 右侧工作台 tab(当前会话链接分类)
   - id: session-links
     type: package
