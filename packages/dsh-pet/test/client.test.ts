@@ -685,6 +685,35 @@ describe('Pet is a top layer that yields to no layout', () => {
     )
     expect(PET_CSS).toContain(`width:${declared}px;height:${declared}px`)
   })
+
+  it('sits at the exact z-index chosen to stay below the Settings overlay', () => {
+    // Locked to the precise value, not a `\d+` placeholder: the whole point
+    // of fix-pet-below-settings-layer is a SPECIFIC number (one below the
+    // shipped Settings panel's known 1000), so a regex that matches any
+    // digit sequence would silently accept a regression back toward
+    // 2147483000 (see the deleted-then-reintroduced-by-accident case this
+    // guards against).
+    expect(PET_CSS).toContain('.dshpet-root{position:fixed;z-index:999;')
+  })
+
+  it('stays strictly between ordinary content and the known Settings overlay tier', () => {
+    // Encodes the actual invariant from design.md rather than one fixed
+    // number, so it keeps failing usefully if the constant above is ever
+    // "fixed" back up in isolation: lower bound 100 is the highest value
+    // observed across every deployed DSH/plugin bundle for ordinary
+    // (non-modal) content; upper bound 1000 is the shipped Settings panel's
+    // own z-index (@deepseek-ai/dsh-client-ui-settings-general's
+    // SettingsRoot.module.css .VOzbGW_overlay). Pet must clear the first
+    // floor and stay under the second ceiling — equal to 1000 is NOT
+    // acceptable, since Pet and Settings share the same root stacking
+    // context and a tie would resolve by DOM insertion order instead of a
+    // deliberate rule.
+    const declared = /\.dshpet-root\{position:fixed;z-index:(\d+);/.exec(PET_CSS)?.[1]
+    expect(declared).toBeDefined()
+    const value = Number(declared)
+    expect(value).toBeGreaterThan(100)
+    expect(value).toBeLessThan(1000)
+  })
 })
 
 describe('settings nav glyph stays scoped to Pet\'s own row', () => {
