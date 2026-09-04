@@ -1,28 +1,23 @@
 import { describe, expect, it } from 'vitest'
-import { classifyIp, HOME_NETWORKS, isClaudeFamily } from '../src/rules.js'
+import { classifyCountry, isClaudeFamily } from '../src/rules.js'
 
-describe('classifyIp (whitelist semantics)', () => {
-  it('hits the allowlist as home', () => {
-    expect(classifyIp('1.2.3.4', ['1.2.3.4'])).toBe('home')
-    expect(classifyIp('1.2.3.4', ['9.9.9.9', '1.2.3.4'])).toBe('home')
+describe('classifyCountry (blocklist semantics)', () => {
+  it('hits the blocklist as blocked', () => {
+    expect(classifyCountry('CN', ['CN'])).toBe('blocked')
+    expect(classifyCountry('cn', ['CN'])).toBe('blocked') // lower-case input normalized
+    expect(classifyCountry('CN', ['US', 'CN'])).toBe('blocked')
   })
 
-  it('treats everything else as not-home — never inverts to home', () => {
-    expect(classifyIp('203.0.113.1', ['1.2.3.4'])).toBe('not-home')
-    // A rotating egress pool returning an unlisted address must NOT become
-    // "home" just because it did not hit a known non-home set.
-    expect(classifyIp('198.51.100.2', ['1.2.3.4'])).toBe('not-home')
+  it('treats everything else as allowed — never inverts to blocked', () => {
+    expect(classifyCountry('SG', ['CN'])).toBe('allowed')
+    expect(classifyCountry('US', ['CN'])).toBe('allowed')
+    // A country absent from the blocklist must never become "blocked".
+    expect(classifyCountry('JP', ['CN'])).toBe('allowed')
   })
 
-  it('never blocks on an empty allowlist', () => {
-    expect(classifyIp('1.2.3.4', [])).toBe('not-home')
-    expect(classifyIp('1.2.3.4')).toBe('not-home') // default allowlist has other entries
-  })
-
-  it('classifies the configured home egress IP as home via the default allowlist', () => {
-    // Reads the constant instead of repeating the value: tests stay valid when
-    // the owner updates HOME_NETWORKS (task 5.1 filled it from measurement).
-    expect(classifyIp(HOME_NETWORKS[0] ?? '')).toBe('home')
+  it('blocks by default list containing CN', () => {
+    expect(classifyCountry('CN', ['CN'])).toBe('blocked')
+    expect(classifyCountry('HK', ['CN'])).toBe('allowed')
   })
 })
 

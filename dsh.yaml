@@ -78,14 +78,14 @@ customizations:
     enabled: true
     brief: 设置面板底部 DSH 主机系统时钟(24h + 时区 + hostname)
     note: 'B019 落地;openspec change settings-system-clock;Host+Web bundle:host 经通用 connection RPC 通道 /dsh-system-clock(authority loopback,接线同 subscriptions /subscriptions-auth)暴露只读 now 采样(主机 epoch / IANA 时区 / UTC 偏移 / hostname);web 注册官方 settings.section(id system-clock,order 300→设置导航最底部),一次采样 + skew 引擎本地每秒 tick,Intl timeZone + hour12:false 渲染,DST 正确;60s 周期 + visibilitychange 重同步;采样不可达显式降级,不静默回退浏览器时间;只读、零配置、无外部网络外呼'
-  # 自研(local):家庭网络 × Claude 系列发送拦截(Web blocks affordance + Host 出口 IP 采样)
+  # 自研(local):受限地区 × Claude 发送拦截(Web blocks + Host 出口国家码判定,双备份 Geo,未知 fail-closed)
   - id: home-network-model-guard
     type: package
     source: local
     version: 0.1.0
     enabled: true
-    brief: 家庭网络下禁用 Claude 系列模型发送(输入框禁用 + 原因文案)
-    note: 'openspec change block-claude-on-home-network;Host+Web bundle:host 经 loopback RPC /dsh-home-network-model-guard 提供网络判定(公网出口 IP 白名单,HOME_NETWORKS=[115.197.18.69] 2026-09-03 家庭实测:连续 8 次一致 + ipinfo 交叉一致;TTL 5min 兜底 + 本机非 internal IPv4 指纹失效重查,single-flight 合并,失败 fail-open 不缓存可重试,同端点一次立即重试抗首连抖动,响应只含分类结论不泄漏 IP 原文);web 订阅官方 modelDirectories per-session store + conversation.blocks,Claude 家族识别 provider+model 双字段(claude/anthropic 路由 + claude-* 模型名),routable=false 让位官方不覆盖,只清自己写入的 block,block 槽位订阅自检防官方发布竞态清掉后防抖重断言;⚠ 本仓自研包首例外部网络外呼(单一固定端点 https://ifconfig.me/ip —— 2026-09-03 实测 api.ipify.org 办公网段与家庭网络均被拒故弃用,超时 5s,不回传本地信息,不落盘),仅客户端 affordance 非安全边界(官方 ComposerBlocks 定位,devtools/CLI 可绕过),如需强制另走 llm/stream waterfall;DSH 升级需回归 blocks 共存语义(design Decisions 4)'
+    brief: 出口位于受限地区时禁用 Claude 系列模型发送(输入框禁用 + 原因文案)
+    note: 'openspec change block-claude-on-home-network 归档后更新为 trusted-egress-claude-guard;Host+Web bundle:host 经 loopback RPC /dsh-home-network-model-guard 提供出口判定(两个互为备份的 HTTPS Geo 服务读国家码:主失败切备,双失败 unknown 且指数退避持续重试 2s→60s;blockedCountries 默认 CN,本地配置 $DSH_HOME/plugins/dsh-home-network-model-guard/config.json 可改,不进仓库;TTL 5min + 本机 IPv4 指纹 + 配置代际失效,single-flight,响应只含分类/新鲜度不泄漏 IP);web 订阅官方 modelDirectories per-session store + conversation.blocks,Claude 家族识别 provider+model 双字段(claude/anthropic 路由 + claude-* 模型名),routable=false 让位官方,只清自己写入的 block,槽位自检防官方竞态;⚠ 信任面:仅访问两个声明过的 IP 归属服务,不主动探测 Anthropic/Cloudflare,不回传本地信息,不落盘 IP;blocked/unknown 对 Claude fail-closed(CLI/subagent 等 Host 流由 llm/stream 门禁兜底,实现中),非 Claude 不受影响;仅客户端 affordance 定位已升级为 Host 强制;DSH 升级需回归 blocks 共存语义(design Decisions 4)'
   # 自研(local):DSH Pet 常驻桌宠 Agent 入口(Host+Web 双半区)
   - id: dsh-pet
     type: package
