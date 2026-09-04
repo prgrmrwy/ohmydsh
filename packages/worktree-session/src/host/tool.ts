@@ -92,9 +92,9 @@ async function askUser(
   exec: ExplicitPathExecution,
   question: string,
   detail: string,
-): Promise<boolean> {
+): Promise<boolean | 'unavailable'> {
   const questions = ctx.get?.('userQuestions') as UserQuestionsSeam | undefined
-  if (questions === undefined) return false
+  if (questions === undefined) return 'unavailable'
   try {
     // Everything the user must read goes in `question`, deliberately not in
     // the `detail` slot: the current questions UI styles detail with a 2px
@@ -117,7 +117,13 @@ async function askUser(
     } as never)
     return answer.answers.some(item => item.id === 'ws-confirm' && item.selected.includes(CONFIRM_LABEL))
   } catch {
-    return false
+    // A throwing ask means the question never reached anyone: no provider, an
+    // aborted step, or a caller the seam refuses to ask on behalf of (a
+    // delegated child agent has no human answerer). That is not a decision, so
+    // it is reported as such. Callers still fail closed on it; they simply get
+    // to say WHY, instead of attributing a refusal to a user who never saw the
+    // question.
+    return 'unavailable'
   }
 }
 
@@ -126,10 +132,6 @@ export async function authorizeExplicitPath(
   exec: ExplicitPathExecution,
   request: { action: string; path: string },
 ): Promise<string> {
-  const refusal = new Error(
-    `ws explicit path ${request.path} was not authorized by the user for this ${request.action} call; ` +
-    'ask the user to approve the request, or use the path-oriented dsh-ws CLI',
-  )
   // The question names the exact action and target so the user judges the real
   // effect, and states that the grant is single-use. The trailing path segment
   // is surfaced in the title because a long absolute path truncates in narrow
@@ -139,7 +141,22 @@ export async function authorizeExplicitPath(
     `目标路径：${request.path}\n` +
     '该路径不在当前会话自身的绑定范围内。确认后仅授权本次调用；之后每次指定路径都会重新询问。' +
     '所有 Worktree Session 安全门在此之后照常逐项执行。')
-  if (!granted) throw refusal
+  // Both non-grants fail closed; only the diagnosis differs. Reporting an
+  // unreachable channel as "the user declined" sends the caller to re-ask a
+  // human who was never shown the question.
+  if (granted === 'unavailable') {
+    throw new Error(
+      `ws explicit path ${request.path} could not be authorized because the confirmation question did not reach a human ` +
+      `from this caller, so the ${request.action} was not performed. Run it from a top-level Session (a delegated or ` +
+      'background agent has no answerer), or use the path-oriented dsh-ws CLI.',
+    )
+  }
+  if (!granted) {
+    throw new Error(
+      `ws explicit path ${request.path} was not authorized by the user for this ${request.action} call; ` +
+      'ask the user to approve the request, or use the path-oriented dsh-ws CLI',
+    )
+  }
   return request.path
 }
 
