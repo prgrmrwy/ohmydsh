@@ -72,6 +72,10 @@ local task branch. Declining keeps the ordinary "not archived" refusal and
 touches nothing. The offer names the exact source Session id, task branch and
 worktree path; report those back rather than summarizing them.
 
+A `dry_run` preview never raises that offer and never archives anything: it
+reports such a candidate as "not archived" so you can see what a real run would
+ask about. Expect the question only on a real run.
+
 That offer is never a way around a gate. A candidate that is unmerged, dirty,
 in-flight, malformed or still occupied is refused on that real reason and is
 never offered, and the clean re-verifies every gate after archiving. When a

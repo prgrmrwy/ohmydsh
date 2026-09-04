@@ -253,7 +253,12 @@ export async function wsCleanRepository(repoPath: string, options: RepoCleanOpti
       const notArchived = { ...candidate, kind: 'not-archived' as const, reason: `Source Session ${binding.sourceSessionId} is not archived; archive it before cleaning its Worktree Session` }
       // Without an injected asker (operator CLI, HTTP) the historical refusal
       // stands: there is no trustworthy channel to obtain user intent.
-      if (options.confirmArchive === undefined || options.archiveSession === undefined) {
+      //
+      // A dry run is refused here too. Previewing must not put a decision to
+      // the user and must not archive anything: the caller asked what WOULD
+      // happen, not to start it. Reporting the honest `not-archived` reason
+      // tells them exactly what a real run would ask about.
+      if (options.dryRun === true || options.confirmArchive === undefined || options.archiveSession === undefined) {
         refused.push(notArchived)
         continue
       }
