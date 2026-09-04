@@ -180,3 +180,73 @@
 ### S5: 风险修正
 
 design 原假设「cordis `4.0.1` → `4.0.2` 是 host 升级的连带结果」与实况不符:本机 cordis **现已是 `4.0.2`**(`dsh@0.1.1-rc.2` 依赖 `^4.0.1`,范围自然上浮)。故 `0.18.0` 的两项阻塞中 cordis 一项在阶段三时点即已满足,真正的阻塞只有 dsh-* 版本族。该修正不改变阶段划分。
+
+---
+
+## 阶段四执行结论:在 4.5 阀门停止(2026-09-04)
+
+### 结论
+
+**阶段四不继续,回退全部改动。** 依据 tasks 4.5「若改动量或不确定性超出可接受范围,在此停止并记录原因」。
+
+### 触发原因:spike(S1/S2)的结论不完整
+
+S1/S2 只审计了 **client 半区**(因为 `dsh-client-runtime` 是客户端包),据此得出「7 个包仅需改 inject 声明、不需改写调用形态」。该结论对 client 半区成立,但**遗漏了 host 半区**:`0.1.2` 线同时对 host API 做了破坏性变更,而 spike 未覆盖这一面。
+
+按 S1/S2 的方案实际执行 6.2–6.4(改 inject + 移除 `client-runtime` peer + 全量升到 `^0.1.2-rc.1` + 刷新 lockfile + promote 安装)后,6.5 暴露出 5 个包无法构建。
+
+### 实测破坏面(6.5,8 包 × build/typecheck/test)
+
+| 包 | build | typecheck | test |
+|---|---|---|---|
+| `session-title-copy` | ✅ | ✅ | ✅ 20 |
+| `sidebar-session-provider-icon` | ✅ | ✅ | ✅ 25 |
+| `subscriptions-sandbox-shim` | — | — | ✅ |
+| `system-clock` | ❌ | ❌ | ✅ 21 |
+| `home-network-model-guard` | ❌ | ❌ | ✅ 56 |
+| `session-links` | ❌ | ❌ | ✅ 53 |
+| `dsh-pet` | ❌ | ❌ | ❌ |
+| `worktree-session` | ❌ | ❌ | ❌ |
+
+与 `baseline.md` A2 逐项比对:升级前除 `dsh-pet` typecheck(`@types/react-dom` 环境漂移)外**全绿**,故上述均为**升级新增失败**,归因明确。这正是基线前置的价值。
+
+### 三类 host 半区破坏(与 `client-runtime` 无关)
+
+**B1. `Session.events` 被移除** — 影响 `dsh-pet`、`worktree-session`
+```
+src/index.ts(385,48): error TS2339: Property 'events' does not exist on type 'Session'
+```
+两包都依赖它读取会话事件流(`dsh-pet` 取标题与水位、`worktree-session` 判定 blank session)。替代面未查清。
+
+**B2. `connection.rpc.handle` 的第三个参数被移除** — 影响 `system-clock`、`home-network-model-guard`、`session-links`
+
+逐字节对比两版 `dsh-client-connection/lib/types/rpc.d.ts`:
+```
+0.1.1-rc.2: handle(channel, handler, options: ConnectionRpcHandlerOptions): () => Promise<void>
+0.1.2-rc.1: handle(channel, handler): () => Promise<void>
+```
+被删掉的 `options` 正是本仓库三个包统一传入的 **`{ authority: 'loopback' }`**,而 `ConnectionRpcHandlerOptions` 类型与 `authority` 字段在 `0.1.2` 的类型面中已**完全不存在**。
+
+⚠ **这是安全相关变更,不可机械删参**:`authority: 'loopback'` 是这三个插件把 RPC 通道限制在本机回环的显式声明(见 `dsh.yaml` 各条目审查记录)。在查清 `0.1.2` 用什么机制承接该语义之前,删掉这个参数等于**静默放弃一道安全边界** —— 按仓库「安全相关路径 fail closed」原则,这必须先查清再动。
+
+**B3. `SubagentRuntime.registerContinuableSetup` 被移除** — 影响 `worktree-session`
+```
+src/host/policy.ts(78,24): Property 'registerContinuableSetup' does not exist
+```
+该 API 承载 continuable subagent 的建立策略,是 Worktree Session 的核心路径。
+
+另有 `session-links` 的 `SessionLogOffset` 类型收紧(`number` 不再可直接传入),以及 `worktree-session` 3 例测试因 `no agent factory registered` 失败。
+
+### 为何这超出本 change 的范围
+
+design Non-Goals 明确:「**不在本变更内重新设计自研包的客户端架构;阶段四只做等价接线迁移**」。B1–B3 都不是接线迁移,而是 host 半区的行为面适配,其中 B2 还牵涉安全边界的重新论证。继续做下去将越过本 change 自己划定的边界。
+
+### 后续建议
+
+阶段四应作为**独立 change** 重新提案,其 spike 必须同时覆盖 host 与 client 两个半区,并至少回答:
+1. `Session.events` 在 `0.1.2` 的替代读取方式;
+2. `authority: 'loopback'` 的等价安全机制(**在此之前不得删参**);
+3. `registerContinuableSetup` 的承接 API;
+4. `SessionLogOffset` 等类型收紧的迁移方式。
+
+已保留的成果:阶段一至三(6 个插件升级 + 接线回收)已合入并验收通过,不受本次回退影响。

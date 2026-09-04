@@ -219,6 +219,22 @@
 
 ---
 
+## 待评估插件
+
+### [P001] dsh-ego-browser:让 agent 自行完成 Web 端验收
+- **状态**: 暂缓(阶段四完成后重评估)
+- **优先级**: P2
+- **背景 / 动机**: 本仓库每次插件升级的 Web 端验收(设置页时钟、侧边栏面板、划选提问等)都必须由用户手动重启并肉眼确认,agent 无法自证。`dsh-ego-browser`(https://github.com/Fisfzy/dsh-ego-browser,MIT,npm `dsh-ego-browser@0.8.0`)提供 30+ 个 `ego_*` 工具(`ego_navigate` / `ego_snapshot` / `ego_click` / `ego_read_element` / `ego_screenshot` 等),内置 ego-lite 运行时驱动 Chromium,理论上可让 agent 自己打开 `127.0.0.1:3080` 完成这类验收,把"必须人工看"的验收项转为可自动化。
+- **暂缓理由(2026-09-04 审查 npm 0.8.0 发布物)**:
+  1. **peer 为精确 pin 且不满足任何目标运行体**:`@deepseek-ai/dsh-client-runtime` 等声明为 `0.1.0-rc.8`(精确写法,非范围),对现役 `0.1.1-rc.2` 与阶段四目标 `0.1.2-rc.1` 均不满足;本仓库 spec `repo-layout` 亦明确禁止运行体 peer 用精确 pin(升级后可能解析出第二份同名包,造成同一模块双实例);
+  2. **依赖 0.1.2 线已移除的包**:其 `dsh.client.inject` 含 `@deepseek-ai/dsh-client-runtime` —— 正是 change `staged-dsh-and-plugin-upgrade` 的 spike 确认在 `0.1.2` 线被上游移除的包。用它来验证"移除该包之后系统是否正常",等于用待验证对象验证其自身;
+  3. **引入时机会破坏故障二分**:它会 spawn Chromium、下载托管 FFmpeg 到 `~/.dsh/cache/ego-browser/`、vendored 整个浏览器运行时(1.2MB / 44 文件)。在运行体迁移期间引入,故障源会从"升级"变成"升级 + 新插件",与本 change 分阶段的初衷冲突。
+- **重评估条件**: 阶段四完成(运行体到 `0.1.2` 线)后,且上游已跟进 `0.1.2`(`dsh-client-runtime` 消失后其 inject 必须改)、peer 改为范围写法。届时按 `add-dsh-plugin` 流程走**独立 change**,重点审查信任面 —— 它是本仓库迄今信任面最重的候选(spawn 浏览器 + 下载并执行二进制 + CDP 完全控制 + 可读取任意页面内容),需要比普通插件更严格的准入论证。
+- **补充**: 平台不是障碍 —— README 显示其为全平台自适应(macOS 用 avfoundation),本机可用;最初"仅 Linux"的印象来自过时的搜索摘要,已按发布物纠正。
+- **更新**: 2026-09-04 用户提出、agent 审查发布物后记录;结论是"想法成立但当前不可用",非否决。
+
+---
+
 ## 已完成
 ### [B015] 跨机器访问 DSH:局域网访问(secure context)
 - **状态**: 已完成(SSH 隧道方案;HTTPS 直连形态未采用,见下)
