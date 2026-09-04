@@ -1,30 +1,45 @@
 /**
  * dsh-home-network-model-guard host half.
  *
- * Exposes one read-only Connection RPC channel, `/dsh-home-network-model-guard`,
- * whose single `check` endpoint answers the DSH **host** machine's network
- * verdict for the sending guard: egress IP hit the home allowlist or not. The
- * verdict is cached host-side (TTL + local IPv4 fingerprint invalidation,
- * single-flight), and failures degrade to `'unknown'` (fail open) instead of
- * throwing — the browser never sees a transport error from this channel.
+ * Two independent surfaces:
  *
- * This half is the package's ONLY outbound caller: `fetchEgressIp` queries a
- * single fixed endpoint (`api.ipify.org`) with a timeout+abort, sends no local
- * information, and never persists the measured IP. Registration mirrors
+ * 1. **Egress verdict source** (`/dsh-home-network-model-guard` check RPC, plus
+ *    the `llm/stream` waterfall gate): the host resolves the egress
+ *    country/region through two backup HTTPS Geo services (primary first,
+ *    fallback on failure; both failing → `unknown`). The verdict is cached
+ *    host-side (TTL + local IPv4 fingerprint + config generation,
+ *    single-flight), failed resolutions degrade to `'unknown'` with
+ *    exponential-backoff retries, and the Claude-family gate fails closed on
+ *    `blocked`/`unknown` without ever calling the provider.
+ *
+ * 2. **Local config**: `$DSH_HOME/plugins/dsh-home-network-model-guard/config.json`
+ *    (blockedCountries default CN, two Geo endpoints, cache knobs). Writes
+ *    change the config epoch, which invalidates the verdict cache; nothing
+ *    secret is accepted.
+ *
+ * This half is the package's ONLY outbound caller: the two configured Geo
+ * endpoints. Automatic judgment never touches Anthropic/Cloudflare diagnostic
+ * endpoints, sends no local information beyond the request itself, and raw IPs
+ * are never persisted or returned. The RPC registration mirrors
  * dsh-system-clock: `connection` is deliberately NOT in the inject list
  * (headless compositions lack it), the channel registers lazily once the
  * service exists, and every business outcome returns an RpcResult value
- * (handlers never throw).
+ * (handlers never throw). The `llm/stream` gate registers on the root context
+ * and therefore also guards headless compositions.
  *
  * @module dsh-home-network-model-guard
  */
 import type { Context } from '@deepseek-ai/cordis'
-// Type-only: brings the host Context.connection merge (HostConnectionHandle).
 import type {} from '@deepseek-ai/dsh-client-connection'
+import type {} from '@deepseek-ai/dsh-llm'
 import os from 'node:os'
+import path from 'node:path'
 import { GUARD_CHANNEL, GUARD_CHECK_ENDPOINT } from './contract.js'
-import { fetchEgressIp, fingerprintOf, NetworkVerdictCache } from './network.js'
-import { classifyIp } from './rules.js'
+import { configEpochOf, loadGuardConfig, type GuardConfig } from './config.js'
+import { createEgressGate } from './egress-gate.js'
+import { GeoCountrySource } from './geo.js'
+import { fingerprintOf, NetworkVerdictCache, type VerdictSource } from './network.js'
+import { classifyCountry } from './rules.js'
 
 /** Stable cordis plugin name (the Loader entry). */
 export const name = 'dsh-home-network-model-guard'
@@ -32,34 +47,63 @@ export const name = 'dsh-home-network-model-guard'
 /**
  * Required services before load: none host-side. The `connection` service is
  * resolved lazily through `ctx.inject` so this plugin also loads in headless
- * compositions that do not carry the web connection half.
+ * compositions that do not carry the web connection half; the `llm/stream`
+ * gate registers regardless.
  */
 export const inject: string[] = []
 
+/** Host config path under the DSH home (never the repository). */
+export function configPathOf(dshHome: string): string {
+  return path.join(dshHome, 'plugins', 'dsh-home-network-model-guard', 'config.json')
+}
+
+function resolveDshHome(): string {
+  const explicit = process.env.DSH_HOME?.trim()
+  if (explicit !== undefined && explicit !== '') return explicit
+  return process.env.HOME ?? os.homedir()
+}
+
 /**
- * Cache TTL: the fallback upper bound for an unchanged fingerprint. The
- * fingerprint check already invalidates on reconnect, so this can afford to
- * be minutes-long (常态时几乎零外呼; 只有重启后首次判定会外呼一次).
+ * Build the verdict source from the live host config. The config is refreshed
+ * before every resolution; a config write changes the epoch which invalidates
+ * the cache, and the next resolution uses the new endpoints/blocklist.
  */
-const TTL_MS = 5 * 60_000
+function buildSource(configFile: string): VerdictSource {
+  let current: GuardConfig = loadGuardConfig(configFile)
+  return {
+    fingerprint: () => fingerprintOf(os.networkInterfaces()),
+    epoch: () => configEpochOf(configFile),
+    fetchCountry: (signal) => {
+      current = loadGuardConfig(configFile)
+      return new GeoCountrySource(current.geoEndpoints, fetch).resolveCountry(signal)
+    },
+    classify: (country) => classifyCountry(country, current.blockedCountries),
+  }
+}
 
-/** Abort a single egress fetch after this long; the verdict then degrades. */
-const FETCH_TIMEOUT_MS = 5_000
-
-/** Mount the `/dsh-home-network-model-guard` RPC channel when a host connection exists. */
+/** Mount the verdict cache, the `llm/stream` gate and the loopback RPC channel. */
 export function apply(ctx: Context): void {
+  const configFile = configPathOf(resolveDshHome())
+  const initial = loadGuardConfig(configFile)
+  const cache = new NetworkVerdictCache(
+    buildSource(configFile),
+    () => Date.now(),
+    {
+      ttlMs: initial.ttlMs,
+      fetchTimeoutMs: initial.timeoutMs,
+      backoffBaseMs: initial.backoffBaseMs,
+      backoffMaxMs: initial.backoffMaxMs,
+    },
+  )
+
+  // Host enforcement: refuse Claude from blocked/unknown egress before the
+  // provider adapter issues the request. Registers on the root context so
+  // headless compositions are guarded too. Non-Claude passes through.
+  ctx.on('llm/stream', createEgressGate(() => cache.check()))
+
   ctx.inject(['connection'], (child) => {
     const connection = child.get('connection')
     if (connection === undefined) return
-    const cache = new NetworkVerdictCache(
-      {
-        fingerprint: () => fingerprintOf(os.networkInterfaces()),
-        fetchIp: (signal) => fetchEgressIp(fetch, signal),
-        classify: (ip) => classifyIp(ip),
-      },
-      () => Date.now(),
-      { ttlMs: TTL_MS, fetchTimeoutMs: FETCH_TIMEOUT_MS },
-    )
     // 诊断信号:verdict 每次变化只记一行,从不含 IP/原文错误文本。
     const logger = ctx.logger('dsh-home-network-model-guard')
     let lastLogged: string | undefined
@@ -67,7 +111,7 @@ export function apply(ctx: Context): void {
       const line = degraded ? `${verdict} (degraded)` : verdict
       if (lastLogged === line) return
       lastLogged = line
-      logger.info(`network verdict -> ${line}`)
+      logger.info(`egress verdict -> ${line}`)
     }
     child.effect(() => connection.rpc.handle(
       GUARD_CHANNEL,

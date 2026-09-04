@@ -1,186 +1,201 @@
 ## MODIFIED Requirements
 
-### Requirement:网络位置真相源为Host本地可信出口事实
+### Requirement: 网络位置真相源为 Host 出口国家/地区判定
 
-系统SHALL仅依据DSHHost本地可观察的网络事实与用户显式配置的可信出口特征判定Claude请求是否允许，包括活动接口、默认路由、代理/VPN端点及用户配置的可信IP/CIDR。系统MUSTNOT为自动判定主动访问Anthropic、Cloudflare、ipinfo、ip-api或其他第三方地理定位服务，也MUSTNOT依据浏览器所在设备的地址、时区或浏览器信号推断出口可信度。
+系统 SHALL 依据 DSH Host 出口 IP 的国家/地区码判定 Claude 请求是否允许，判定来源为两个互为备份的第三方 IP 归属服务：主服务成功即使用其结果；主服务失败时切换备用服务。系统 MUST NOT 为自动判定主动访问 Anthropic、Cloudflare 或任何目标模型的诊断端点，也 MUST NOT 依据浏览器所在设备的地址、时区或浏览器信号推断出口位置。
 
-自动判定结果对外SHALL只暴露可信/不可信/未知分类与新鲜度、降级原因；系统MUSTNOT将原始公网IP、VPN凭据、代理凭据或完整本地网络配置写入持久化存储、会话历史或浏览器响应。
+自动判定结果对外 SHALL 只暴露阻断/放行/未知分类与新鲜度、降级原因；系统 MUST NOT 将原始公网 IP、VPN 凭据、代理凭据或完整本地网络配置写入持久化存储、会话历史或浏览器响应。
 
-#### Scenario:浏览器与Host不在同一台机器
+#### Scenario: 浏览器与 Host 不在同一台机器
 
-- **WHEN**用户经SSH隧道从另一台设备的浏览器访问DSHWebGUI，而DSHHost通过一个已配置的可信VPN出口访问Claude
-- **THEN**判定依据DSHHost的本地可信出口事实，与浏览器所在设备的网络无关
+- **WHEN** 用户经 SSH 隧道从另一台设备的浏览器访问 DSH Web GUI，而 DSH Host 位于家庭网络
+- **THEN** 判定依据 DSH Host 的出口国家/地区码，与浏览器所在设备无关
 
-#### Scenario:自动判定不访问Anthropic探测端点
+#### Scenario: 主服务失败后使用备用服务
 
-- **WHEN**Web客户端首次加载或缓存失效并请求当前出口判定
-- **THEN**系统只读取Host本地网络事实与本地可信配置，不向Anthropic、Cloudflare或第三方Geo服务发起探测请求
+- **WHEN** 主 Geo 服务不可达或返回无法解析的响应，而备用服务返回合法国家/地区码
+- **THEN** 系统采用备用服务结果继续判定，不因主服务失败直接进入未知
 
-#### Scenario:判定响应不泄漏原始网络事实
+#### Scenario: 自动判定不访问 Anthropic 探测端点
 
-- **WHEN**浏览器取得可信出口判定
-- **THEN**响应只包含分类、状态和新鲜度，不包含原始IP、VPNpeer、代理地址或凭据
+- **WHEN** Web 客户端首次加载或缓存失效并请求当前出口判定
+- **THEN** 系统只访问配置声明的两个 IP 归属服务，不向 Anthropic、Cloudflare 或目标模型的诊断端点发起探测
 
-### Requirement:可信出口判定按时间和网络指纹缓存
+#### Scenario: 判定响应不泄漏原始网络事实
 
-系统SHALL对Host本地可信出口判定进行内存缓存；在缓存TTL有效且本地网络指纹、默认路由和代理/VPN相关特征未变化时，重复判定SHALL直接使用缓存，不执行外部网络请求。
+- **WHEN** 浏览器取得出口判定
+- **THEN** 响应只包含分类、状态和新鲜度，不包含原始 IP、VPN peer、代理地址或凭据
 
-缓存SHALL在TTL过期或观测到主机网络配置变化时失效。系统SHALL合并并发判定请求，且缓存失效与刷新过程不得将任何原始网络事实写入持久化存储。
+### Requirement: 出口判定按时间、网络指纹和配置代际缓存
 
-#### Scenario:有效期内重复判定
+系统 SHALL 对 Host 出口判定结果进行内存缓存；在缓存 TTL 有效且本地网络指纹与配置代际未变化时，重复判定 SHALL 直接使用缓存。缓存 SHALL 在以下任一条件满足时失效并重新判定：TTL 过期、网络指纹变化、配置写入或配置内容变化。
 
-- **WHEN**本地可信配置和网络指纹未变化，且TTL尚未过期
-- **THEN**重复请求返回缓存结论，不产生外部网络请求
+系统 MUST NOT 把 Geo 响应中的原始 IP 或端点信息写入持久化存储；并发判定请求 SHALL 合并为一次。
 
-#### Scenario:网络切换后刷新
+#### Scenario: 有效期内重复判定
 
-- **WHEN**默认路由、活动接口、代理端点或VPNpeer发生变化，且TTL尚未过期
-- **THEN**缓存立即失效，下一次判定重新读取本地事实
+- **WHEN** TTL 尚未过期且网络指纹、配置代际均未变化
+- **THEN** 重复请求返回缓存结论，不产生外部网络请求
 
-#### Scenario:并发判定合并
+#### Scenario: 网络切换后刷新
 
-- **WHEN**缓存失效时同时到达多个判定请求
-- **THEN**系统只执行一次本地判定刷新，所有请求共享同一结论
+- **WHEN** 默认路由、活动接口或代理端点发生变化，且 TTL 尚未过期
+- **THEN** 缓存立即失效，下一次判定重新查询
 
-### Requirement:可信出口采用明确白名单语义
+#### Scenario: 配置变更后刷新
 
-系统SHALL只把明确命中用户可信出口配置的网络状态判定为可信。未命中、无法读取、配置为空、配置格式非法或检测到网络特征变化但尚未重新确认时，系统MUST判定为不可信或未知，绝不把未知反推为可信。
+- **WHEN** 用户写入新的阻断地区或 Geo 端点配置
+- **THEN** 缓存立即失效并重新判定，不沿用旧配置的结论
 
-已有家庭公网IP白名单SHALL迁移为可信出口配置；迁移未完成时，Claude请求默认不允许，非Claude模型不受影响。
+#### Scenario: 并发判定合并
 
-#### Scenario:命中可信VPN出口
+- **WHEN** 缓存失效时同时到达多个判定请求
+- **THEN** 系统只执行一次网络判定，所有请求共享同一结论
 
-- **WHEN**当前本地代理/VPN端点或出口IP/CIDR明确命中可信配置
-- **THEN**网络状态为可信，Claude请求可以继续进入模型选择和发送流程
+### Requirement: 阻断地区采用明确黑名单语义
 
-#### Scenario:未命中可信配置
+系统 SHALL 仅当出口国家/地区码命中配置的阻断清单（默认至少包含 `CN`）时判定为阻断。未命中阻断清单且判定成功时 SHALL 判定为放行；判定无法取得结论时 SHALL 判定为未知，绝不把未知反推为放行或阻断。
 
-- **WHEN**当前出口或网络特征未命中可信配置
-- **THEN**网络状态为不可信，Claude输入发送被禁止，Host侧Claude调用被拒绝
+配置为空、缺失或非法时，系统 SHALL 使用默认阻断清单（至少 `CN`）并继续按未知/阻断对 Claude fail-closed，除非用户显式关闭插件（`enabled: false`）。
 
-#### Scenario:配置为空或非法
+#### Scenario: 命中阻断地区
 
-- **WHEN**用户尚未配置可信出口，或配置无法通过校验
-- **THEN**Claude默认被禁止，非Claude模型仍可正常使用
+- **WHEN** 出口国家/地区码为 `CN` 且 `CN` 在阻断清单中
+- **THEN** 网络状态为阻断，Claude 输入发送被禁止，Host 侧 Claude 调用被拒绝
 
-### Requirement:可信出口与Claude系列同时成立时允许，否则禁用
+#### Scenario: 非阻断地区
 
-当且仅当当前会话选中Claude系列模型且当前网络状态为可信时，系统SHALL允许该会话的Claude输入继续发送。Claude系列模型在不可信或未知出口下SHALL被输入框禁用并显示本地化原因。
+- **WHEN** 出口国家/地区码（如 `SG`、`JP`、`US`）不在阻断清单中
+- **THEN** 网络状态为放行，Claude 请求可以进入模型选择和发送流程
 
-判定SHALL以会话为单位；一个会话被禁用MUSTNOT影响其他会话的非Claude输入。
+#### Scenario: 配置缺失时仍使用默认阻断清单
 
-#### Scenario:可信出口+Claude模型
+- **WHEN** 本机配置文件不存在或为空
+- **THEN** 系统使用默认阻断清单（`CN`）判定，Claude 未被显式允许
 
-- **WHEN**当前出口命中可信配置，且当前会话选中Claude系列模型
-- **THEN**输入框可正常发送，Host侧允许该Claude模型调用
+### Requirement: 非阻断地区与 Claude 系列同时成立时允许，否则禁用
 
-#### Scenario:不可信出口+Claude模型
+当且仅当当前会话选中 Claude 系列模型且当前网络状态为放行时，系统 SHALL 允许该会话的 Claude 输入继续发送。Claude 系列模型在阻断或未知出口下 SHALL 被输入框禁用并显示本地化原因。
 
-- **WHEN**当前出口未命中可信配置，且当前会话选中Claude系列模型
-- **THEN**输入框不可发送并显示原因，Host侧拒绝该Claude模型调用
+判定 SHALL 以会话为单位；一个会话被禁用 MUST NOT 影响其他会话的非 Claude 输入。
 
-#### Scenario:可信出口+非Claude模型
+#### Scenario: 非阻断出口 + Claude 模型
 
-- **WHEN**当前出口命中可信配置，且当前会话选中非Claude模型
-- **THEN**输入框可正常发送
+- **WHEN** 出口国家/地区码未命中阻断清单，且当前会话选中 Claude 系列模型
+- **THEN** 输入框可正常发送，Host 侧允许该 Claude 模型调用
 
-#### Scenario:不可信出口+非Claude模型
+#### Scenario: 阻断出口 + Claude 模型
 
-- **WHEN**当前出口未命中可信配置，且当前会话选中非Claude模型
-- **THEN**输入框可正常发送，不受Claude门禁影响
+- **WHEN** 出口国家/地区码命中阻断清单，且当前会话选中 Claude 系列模型
+- **THEN** 输入框不可发送并显示原因，Host 侧拒绝该 Claude 模型调用
 
-### Requirement:模型切换即时生效与解除
+#### Scenario: 非阻断出口 + 非 Claude 模型
 
-系统SHALL订阅官方per-session模型选择状态；用户切换模型或可信出口状态发生变化后，输入框门禁SHALL无需页面刷新或重启会话即可生效或解除。Host侧门禁SHALL使用同一份当前模型与可信出口结论。
+- **WHEN** 出口国家/地区码未命中阻断清单，且当前会话选中非 Claude 模型
+- **THEN** 输入框可正常发送
 
-#### Scenario:可信出口切换为未知出口
+#### Scenario: 阻断出口 + 非 Claude 模型
 
-- **WHEN**当前会话正在使用Claude，且本地检测到VPN节点、代理端点或默认路由变化
-- **THEN**Claude输入框立即禁用，后续HostClaude调用立即拒绝
+- **WHEN** 出口国家/地区码命中阻断清单，且当前会话选中非 Claude 模型
+- **THEN** 输入框可正常发送，不受 Claude 门禁影响
 
-#### Scenario:不可信出口切换为可信出口
+### Requirement: 模型切换即时生效与解除
 
-- **WHEN**用户确认并切换到已配置的可信VPN/代理出口
-- **THEN**Claude输入框恢复可发送，Host允许新的Claude调用
+系统 SHALL 订阅官方 per-session 模型选择状态；用户切换模型或出口判定状态发生变化后，输入框门禁 SHALL 无需页面刷新或重启会话即可生效或解除。Host 侧门禁 SHALL 使用同一份当前模型与出口判定结论。
 
-#### Scenario:切离Claude
+#### Scenario: 判定从放行切换为阻断/未知
 
-- **WHEN**输入框因不可信出口+Claude被禁用，用户切换为非Claude模型
-- **THEN**输入框立即恢复可发送
+- **WHEN** 当前会话正在使用 Claude，且出口判定变为阻断或未知
+- **THEN** Claude 输入框立即禁用，后续 Host Claude 调用立即拒绝
 
-#### Scenario:切到 Claude 后立即禁用
+#### Scenario: 切到 Claude 后立即禁用
 
-- **WHEN**当前出口不可信，用户把当前会话模型从非Claude切换为Claude系列
-- **THEN**输入框立即变为不可发送，Host拒绝新的Claude调用，无需刷新页面
+- **WHEN** 当前出口判定为阻断或未知，用户把当前会话模型从非 Claude 切换为 Claude 系列
+- **THEN** 输入框立即变为不可发送，Host 拒绝新的 Claude 调用，无需刷新页面
 
-#### Scenario:切离 Claude 后立即恢复
+#### Scenario: 切离 Claude 后立即恢复
 
-- **WHEN**输入框因不可信出口+Claude被禁用，用户把模型切换为非Claude系列
-- **THEN**输入框立即恢复可发送，非Claude调用不受门禁影响
+- **WHEN** 输入框因阻断/未知出口 + Claude 被禁用，用户把模型切换为非 Claude 系列
+- **THEN** 输入框立即恢复可发送，非 Claude 调用不受门禁影响
 
-### Requirement:未知出口对Claudefail-closed
+#### Scenario: 判定从阻断/未知恢复为放行
 
-当可信出口判定无法取得结论时——包括本地配置缺失、路由/VPN信息不可读、特征变化尚未确认、Hostchannel不可用或判定逻辑异常——系统SHALL对Claude系列模型fail-closed：输入框保持禁用，Host侧Claude调用拒绝。系统SHALL对非Claude模型fail-open，不得因Claude门禁故障而阻止非Claude使用。
+- **WHEN** 用户切换到非阻断出口，且系统对该出口完成放行判定
+- **THEN** Claude 输入框恢复可发送，Host 允许新的 Claude 调用
 
-系统SHALL暴露不包含敏感网络事实的诊断状态，并在后续网络或配置变化时重新判定。
+### Requirement: 未知出口对 Claude fail-closed
 
-#### Scenario:启动时尚未完成判定
+当出口判定无法取得结论时——包括两个 Geo 服务均不可达、响应无法解析、网络事实变化尚未确认、Host channel 不可用或判定逻辑异常——系统 SHALL 对 Claude 系列模型 fail-closed：输入框保持禁用，Host 侧 Claude 调用拒绝。系统 SHALL 对非 Claude 模型 fail-open，不得因 Claude 门禁故障而阻止非 Claude 使用。
 
-- **WHEN**页面加载后可信出口判定仍在进行
-- **THEN**Claude输入框保持禁用，非Claude输入不受影响
+系统 SHALL 暴露不包含敏感网络事实的诊断状态，并在 Geo 服务恢复后按退避策略持续重试判定，不得永久停留在降级态。
 
-#### Scenario:判定异常后恢复
+#### Scenario: 启动时尚未完成判定
 
-- **WHEN**一次本地判定异常，随后本地网络和可信配置恢复正常
-- **THEN**系统重新判定；命中可信配置后恢复Claude，否则继续禁止
+- **WHEN** 页面加载后出口判定仍在进行
+- **THEN** Claude 输入框保持禁用，非 Claude 输入不受影响
 
-#### Scenario:非Claude不受未知状态影响
+#### Scenario: 两个 Geo 服务均不可达
 
-- **WHEN**网络状态未知且当前会话选中非Claude模型
-- **THEN**非Claude输入仍可正常发送
+- **WHEN** 主备两个 Geo 服务都不可达或超时
+- **THEN** 系统判定为未知并持续按退避重试；恢复前 Claude 保持禁用
 
-### Requirement:门禁是Host强制边界并由客户端提前提示
+#### Scenario: 判定异常后恢复
 
-系统SHALL在Host的模型流开始前拒绝不可信或未知出口的Claude调用，不得仅依赖浏览器输入框状态。Web客户端SHALL使用composerblock提前提示用户，但客户端状态不是授权边界。
+- **WHEN** 一次判定异常，随后 Geo 服务恢复并返回非阻断国家/地区码
+- **THEN** 系统重新判定为放行，Claude 恢复可用
 
-该门禁MUST覆盖用户输入、CLI、subagent和其他经过HostLLM流的Claude调用；已在门禁建立前开始的调用是否完成由Host当前请求生命周期决定，不得声称可以撤回已经发出的请求。
+#### Scenario: 非 Claude 不受未知状态影响
 
-#### Scenario:绕过输入框调用Claude
+- **WHEN** 网络状态未知且当前会话选中非 Claude 模型
+- **THEN** 非 Claude 输入仍可正常发送
 
-- **WHEN**不可信出口下通过CLI、subagent或其他非Web输入路径发起Claude模型流
-- **THEN**Host在向模型提供方发出请求前拒绝该调用
+### Requirement: 门禁是 Host 强制边界并由客户端提前提示
 
-#### Scenario:非ClaudeHost调用
+系统 SHALL 在 Host 的模型流开始前拒绝阻断或未知出口的 Claude 调用，不得仅依赖浏览器输入框状态。Web 客户端 SHALL 使用 composer block 提前提示用户，但客户端状态不是授权边界。
 
-- **WHEN**不可信出口下发起非Claude模型调用
-- **THEN**Host不因本门禁拒绝该调用
+该门禁 MUST 覆盖用户输入、CLI、subagent 和其他经过 Host LLM 流的 Claude 调用；已在门禁建立前开始的调用是否完成由 Host 当前请求生命周期决定，不得声称可以撤回已经发出的请求。
+
+#### Scenario: 绕过输入框调用 Claude
+
+- **WHEN** 阻断或未知出口下通过 CLI、subagent 或其他非 Web 输入路径发起 Claude 模型流
+- **THEN** Host 在向模型提供方发出请求前拒绝该调用
+
+#### Scenario: 非 Claude Host 调用
+
+- **WHEN** 阻断或未知出口下发起非 Claude 模型调用
+- **THEN** Host 不因本门禁拒绝该调用
 
 ## ADDED Requirements
 
-### Requirement:可信出口配置可校验、可审计且不含凭据
+### Requirement: 阻断地区与 Geo 端点配置可校验、可审计且不含凭据
 
-系统SHALL提供本地可信出口配置，至少支持用户维护可信代理/VPN节点标识以及可信出口IP/CIDR。配置SHALL在写入前校验格式、去重和冲突；配置不得包含代理密码、VPN私钥、访问令牌或其他凭据。配置变更SHALL触发当前判定失效并重新评估。
+系统 SHALL 提供本机配置，至少支持维护阻断国家/地区清单（默认 `CN`）与两个互为备份的 Geo 服务端点。配置 SHALL 在写入前校验格式、去重和冲突；配置不得包含代理密码、VPN 私钥、访问令牌或其他凭据。配置变更 SHALL 触发当前判定失效并重新评估。
 
-#### Scenario:添加可信节点
+#### Scenario: 添加阻断地区
 
-- **WHEN**用户保存一个合法的可信节点或IP/CIDR配置
-- **THEN**配置持久化在本机，当前判定失效并重新评估，配置内容不发送到外部服务
+- **WHEN** 用户保存一个合法的阻断国家/地区码配置
+- **THEN** 配置持久化在本机，当前判定失效并重新评估，配置内容不发送到外部服务
 
-#### Scenario:配置包含凭据
+#### Scenario: 配置包含凭据
 
-- **WHEN**用户尝试把密码、私钥或令牌写入可信出口配置
-- **THEN**系统拒绝保存，并提示配置只接受节点标识、路由特征或IP/CIDR
+- **WHEN** 用户尝试把密码、私钥或令牌写入配置
+- **THEN** 系统拒绝保存，并提示配置只接受国家/地区码、端点 URL 和非秘密参数
 
-### Requirement:手动诊断与自动判定分离
+#### Scenario: 修改 Geo 端点
 
-系统MAY提供用户主动触发的网络诊断，但自动门禁MUSTNOT因诊断请求访问Anthropic或第三方Geo服务。手动诊断结果SHALL明确标注为诊断信息，不得自动把未配置的出口加入可信名单。
+- **WHEN** 用户替换其中一个 Geo 服务端点
+- **THEN** 新端点通过格式/HTTPS 校验后被采用，判定缓存失效并重新评估
 
-#### Scenario:用户主动诊断
+### Requirement: 手动诊断与自动判定分离
 
-- **WHEN**用户从设置页主动请求查看当前网络诊断
-- **THEN**系统展示脱敏后的本地判定与配置匹配结果，并明确不会自动修改可信配置
+系统 MAY 提供用户主动触发的网络诊断，但自动门禁 MUST NOT 因诊断请求访问 Anthropic 或第三方目标模型服务。手动诊断结果 SHALL 明确标注为诊断信息，不得自动把观察到的出口加入任何放行集合。
 
-#### Scenario:自动判定期间
+#### Scenario: 用户主动诊断
 
-- **WHEN**页面启动、模型切换或缓存失效触发自动判定
-- **THEN**系统不向Anthropic或第三方Geo服务发起探测
+- **WHEN** 用户从设置页主动请求查看当前网络诊断
+- **THEN** 系统展示脱敏后的国家/地区判定、所用服务与失败原因，并明确不会自动修改配置
+
+#### Scenario: 自动判定期间
+
+- **WHEN** 页面启动、模型切换或缓存失效触发自动判定
+- **THEN** 系统只访问配置声明的两个 IP 归属服务

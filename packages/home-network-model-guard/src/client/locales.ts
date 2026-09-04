@@ -16,12 +16,12 @@ export type GuardKey = 'homeNetworkClaudeBlocked'
 
 /** English strings (reference key set). */
 export const en: Record<GuardKey, string> = {
-  homeNetworkClaudeBlocked: 'Sending is disabled: home network with a Claude-family model selected',
+  homeNetworkClaudeBlocked: 'Sending is disabled: egress country is restricted',
 }
 
 /** Chinese strings, type-checked against the same key set. */
 export const zh: Record<GuardKey, string> = {
-  homeNetworkClaudeBlocked: '当前为家庭网络且选中 Claude 系列模型，已禁用发送',
+  homeNetworkClaudeBlocked: '当前出口位于受限地区，已禁用 Claude 发送',
 }
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
