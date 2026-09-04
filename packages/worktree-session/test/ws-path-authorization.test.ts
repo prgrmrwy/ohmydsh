@@ -47,12 +47,13 @@ describe('explicit ws path authorization', () => {
   })
 
   // 1.3 Fail closed: an absent provider is a refusal, never a silent fallback
-  // to the caller's own cwd.
+  // to the caller's own cwd. It is diagnosed as an unreachable channel and not
+  // as a user decision, because nobody was ever asked.
   it('fails closed when no questions provider is composed', async () => {
     await expect(authorizeExplicitPath({}, exec, { action: 'clean', path: '/repo' }))
-      .rejects.toThrow(/not authorized by the user/)
+      .rejects.toThrow(/did not reach a human/)
     await expect(authorizeExplicitPath({ get: () => undefined }, exec, { action: 'clean', path: '/repo' }))
-      .rejects.toThrow(/not authorized by the user/)
+      .rejects.toThrow(/did not reach a human/)
   })
 
   // 1.5 Authorization is single-use: a second call asks again.
