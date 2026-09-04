@@ -15,7 +15,7 @@
 - [x] 2.3 确认升级后 `dsh-width-tiers` 具备 `dsh.bundle`,因而由 `sync.mjs` 正常纳入 `dsh.profile.bundles`(此前因只有 `dsh.client` 而被有意排除)。
 - [x] 2.4 `node scripts/sync.mjs` 物化并连续两次确认幂等;确认生成的 `~/.dsh/profiles/web/cordis.patch.yml` 不再包含 width-tiers 片段。
 - [x] 2.5 验收重复加载不变量:`node scripts/plugin-list.mjs` 中 `dsh-width-tiers` **恰好出现一次**,且 `[patch]` 标注消失(改由 bundle 承载);交叉验证 `dsh --profile web --dump-config` 中该 id 的 loader 行同样只有一条。
-- [ ] 2.6 验收功能:Web 端确认对话区宽度五档切换仍可用且 localStorage 记忆正常。
+- [x] 2.6 验收功能:Web 端确认对话区宽度五档切换仍可用且 localStorage 记忆正常。
 - [x] 2.7 提交为独立 commit。
 
 ## 3. 阶段三:better-sidebar 升到兼容上界

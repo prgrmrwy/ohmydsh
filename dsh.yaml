@@ -181,12 +181,13 @@ customizations:
   - id: better-sidebar
     type: package
     source: remote
-    spec: dsh-better-sidebar@0.16.0
-    version: 0.16.0
-      # [2026-08-24] plugin-update: better-sidebar 0.15.2 -> 0.16.0(release notes 见 registry;审查记录请补进 note)
+    spec: dsh-better-sidebar@0.17.1
+    version: 0.17.1
+      # [2026-09-04] staged-dsh-and-plugin-upgrade 阶段三:better-sidebar 0.16.0 -> 0.17.1
+      #   (兼容上界,不是 0.18.0;准入条件见 note)
     enabled: true
     brief: 服务化侧边栏工作台框架(sidebar-qa 的前置依赖)
-    note: 'B007/sidebar-qa 前置;repo https://github.com/omdsh-dev/DSH-better-sidebar(MIT,2026-08-24 摘要审查);重型框架:右侧栏+底部面板双工作台(ctx.betterSidebar.registerTab 开放给生态,28+ 插件),内置文件管理/内嵌浏览器/真实终端(node-pty)/Git 面板/后台任务/侧边对话(beta,完整上下文继承=费 token 形态,可设置关闭);README 官宣支持 DSH 0.1.0-rc.8 / 0.1.1-rc.1 / 0.1.1-rc.2,peer ^0.1.0-rc.8 对运行体 0.1.1-rc.2 满足;信任面:终端/浏览器/可选工具注入(terminal_* / sidebar_open,默认关闭),比轻量插件重得多;仅为 sidebar-qa 引入,接入后只开所需 tab;部署侧信任决定(2026-08-24):profile pnpm `allowBuilds.node-pty: true` 已批准其原生构建脚本,否则安装被 ERR_PNPM_IGNORED_BUILDS 挡下'
+    note: 'B007/sidebar-qa 前置;repo https://github.com/omdsh-dev/DSH-better-sidebar(MIT);0.17.1(2026-09-04 升级,逐版本 npm view 核对 peer):**取 0.17.1 而非最新的 0.18.0,因为它是最后一个 peer 仍接受现役运行体的版本**——0.16.1 与 0.17.1 的 peer 均为 cordis ^4.0.1 + dsh-* ^0.1.0-rc.8(对运行体 0.1.1-rc.2 满足,已用 semver.satisfies 实算确认);0.18.0-alpha.0 起 dsh-* 跳到 ^0.1.2-alpha.2、0.18.0 正式版为 cordis ^4.0.2 + dsh-* ^0.1.2-rc.1,**均不被 0.1.1-rc.2 满足**,故 0.18.0 的准入条件是 change staged-dsh-and-plugin-upgrade 阶段四(运行体升到 0.1.2 线)完成。取 0.17.1 而非停在 0.16.0:该版本包含对 0.1.2 线的双向兼容层,是通往阶段四的过渡砖。附注:本机 cordis 实测已解析为 4.0.2(dsh 0.1.1-rc.2 依赖 ^4.0.1,范围自然上浮),故 0.18.0 两项阻塞中 cordis 一项其实已满足,真正的阻塞只剩 dsh-* 版本族。历史审查(2026-08-24 摘要审查,0.16.0):重型框架:右侧栏+底部面板双工作台(ctx.betterSidebar.registerTab 开放给生态,28+ 插件),内置文件管理/内嵌浏览器/真实终端(node-pty)/Git 面板/后台任务/侧边对话(beta,完整上下文继承=费 token 形态,可设置关闭);README 官宣支持 DSH 0.1.0-rc.8 / 0.1.1-rc.1 / 0.1.1-rc.2,peer ^0.1.0-rc.8 对运行体 0.1.1-rc.2 满足;信任面:终端/浏览器/可选工具注入(terminal_* / sidebar_open,默认关闭),比轻量插件重得多;仅为 sidebar-qa 引入,接入后只开所需 tab;部署侧信任决定(2026-08-24):profile pnpm `allowBuilds.node-pty: true` 已批准其原生构建脚本,否则安装被 ERR_PNPM_IGNORED_BUILDS 挡下'
   - id: sidebar-qa
     type: package
     source: remote
