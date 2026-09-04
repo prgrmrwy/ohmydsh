@@ -5,7 +5,9 @@
 
 范围 MUST 由调用显式声明，MUST NOT 由系统依调用方是否绑定 worktree 隐式改变：同一动作依上下文变更影响范围，会使用户无法从请求本身预见其后果。
 
-指定范围下的目标解析 MUST 沿用既有规则（调用 Session 自身的绑定，或经用户一次性授权的显式路径），MUST NOT 引入第三套目标语义。特别地，系统不具备"当前 worktree"这一独立概念：所谓指定，指的是按既有规则解析出的那一个 operation。
+指定范围下的目标解析 MUST 沿用既有规则，MUST NOT 引入第三套目标语义：调用方自身有 worktree 绑定时按该绑定解析；调用方提供经用户一次性授权的显式路径时，该路径 SHALL 被解析为它所属的那一个 worktree operation。系统不具备"当前 worktree"这一独立概念：所谓指定，指的是按上述规则解析出的那一个 operation。
+
+工作目录不在目标仓库内的调用方 MUST 能够使用该范围。这类调用方没有自身绑定可依据，其唯一可用事实就是授权路径；若要求"必须由自身绑定解析"，该范围对它们将不可达，而它们恰恰最需要单目标收尾。
 
 调用方自身仍绑定 worktree MUST NOT 成为拒绝该范围的理由——收尾自身工作区正是其适用场景；但这 MUST NOT 使它获得处置同仓库内其他 Worktree Session 的能力。
 
@@ -20,6 +22,14 @@
 #### Scenario: A bound Session may finish its own worktree
 - **WHEN** 仍绑定 worktree 的 Session 以指定范围发起清理
 - **THEN** 系统 SHALL 按其自身绑定解析目标并照常判定，MUST NOT 仅因调用方处于绑定状态而拒绝
+
+#### Scenario: A caller outside the repository finishes one worktree by path
+- **WHEN** 工作目录不在目标仓库内的调用方以指定范围发起清理，并提供经授权的 worktree 路径
+- **THEN** 系统 SHALL 将该路径解析为其所属的唯一 operation 并仅处置它，MUST NOT 因调用方无自身绑定而拒绝，也 MUST NOT 扩大为仓库级清扫
+
+#### Scenario: A path owned by no registered worktree is refused
+- **WHEN** 指定范围下给出的路径不属于任何已注册的 worktree
+- **THEN** 系统 SHALL 以明确诊断拒绝，MUST NOT 退化为仓库级清扫
 
 #### Scenario: The specified scope requires a resolvable target
 - **WHEN** 调用方请求指定范围，但既无自身绑定亦无授权路径可解析出 operation

@@ -79,6 +79,44 @@ describe('the specified scope handles exactly one operation', () => {
     await expect(access(peer.worktreePath)).resolves.toBeUndefined()
   }, 300_000)
 
+  // The route for a caller with a path but no binding of its own.
+  it('narrows to the operation owning a given worktree path', async () => {
+    const root = await fixture()
+    const mine = await candidate(root, 'operation-by-path', 'session-by-path')
+    const peer = await candidate(root, 'operation-by-path-peer', 'session-by-path-peer')
+    const confirm = vi.fn(async () => true)
+
+    const result = await wsCleanRepository(mine.worktreePath, {
+      archivedSessionIds: [],
+      activePaths: [],
+      activeBoundSessionIds: [],
+      cwd: root,
+      onlyWorktreePath: mine.worktreePath,
+      confirmArchive: confirm,
+      archiveSession: async () => undefined,
+    })
+
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(result.scanned).toBe(1)
+    expect(result.cleaned.map(entry => entry.operationId)).toEqual([mine.operationId])
+    await expect(access(peer.worktreePath)).resolves.toBeUndefined()
+  }, 300_000)
+
+  it('refuses a worktree path no registered operation owns', async () => {
+    const root = await fixture()
+    await candidate(root, 'operation-path-miss', 'session-path-miss')
+
+    await expect(wsCleanRepository(root, {
+      archivedSessionIds: [],
+      activePaths: [],
+      activeBoundSessionIds: [],
+      cwd: root,
+      onlyWorktreePath: join(root, '.worktrees', 'not-a-worktree'),
+      confirmArchive: async () => true,
+      archiveSession: async () => undefined,
+    })).rejects.toThrow()
+  }, 300_000)
+
   // 0.4 A scope that resolves to nothing is a failed request. Reporting an
   // empty sweep would read as success while the intended target survived.
   it('refuses when the session has no current binding', async () => {
@@ -155,11 +193,14 @@ describe('scope selection at the tool boundary', () => {
       .toThrow(/ordinary main-checkout Session/)
   })
 
-  // A path names a repository, not one operation. Accepting both would leave
-  // nothing to narrow from and silently widen back into a sweep.
-  it('refuses to combine the narrow scope with an explicit path', () => {
-    expect(() => cleanTargetFor(boundExec, { boundSessionIds: [], authorizedPath: '/elsewhere', specified: true }))
-      .toThrow(/cannot be combined with an explicit path/)
+  // A caller whose cwd is outside the repository has no binding of its own to
+  // narrow from — a Pet executor runs in the plugin workspace while the
+  // binding lives on its source Session. Under the narrow scope the path names
+  // the one worktree to finish; refusing the combination left the scope
+  // unreachable in exactly the setting it was built for.
+  it('reads an authorized path as the single worktree under the narrow scope', () => {
+    expect(cleanTargetFor({}, { boundSessionIds: [], authorizedPath: '/repo/.worktrees/task', specified: true }))
+      .toEqual({ worktreePath: '/repo/.worktrees/task' })
   })
 
   it('keeps the authorized path working for a sweep', () => {

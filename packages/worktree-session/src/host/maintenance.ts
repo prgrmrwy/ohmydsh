@@ -228,6 +228,16 @@ export interface RepoCleanOptions {
    * both express the same narrowed scope from different starting facts.
    */
   onlySourceSessionId?: string
+  /**
+   * Restrict the pass to the operation that owns this worktree path.
+   *
+   * The counterpart of `onlySourceSessionId` for a caller that holds a path
+   * but no binding of its own — a Pet executor, whose cwd is the plugin
+   * workspace while the binding lives on its source Session. All three
+   * `only*` options express one narrowed scope; they differ only in which
+   * fact the caller happens to have.
+   */
+  onlyWorktreePath?: string
 }
 
 /**
@@ -253,6 +263,11 @@ export async function wsCleanRepository(repoPath: string, options: RepoCleanOpti
   // empty sweep: reporting "nothing to do" would read as success while the
   // intended target went untouched.
   let onlyOperationId = options.onlyOperationId
+  if (options.onlyWorktreePath !== undefined) {
+    // Resolution is the existing path lookup, which proves a registered
+    // worktree owns the path before naming any operation.
+    onlyOperationId = (await resolveOperation(options.onlyWorktreePath, git)).operationId
+  }
   if (options.onlySourceSessionId !== undefined) {
     const bound = await findBySourceSession(repo.gitCommonDir, options.onlySourceSessionId)
     if (bound === undefined) throw new WsError('OPERATION_NOT_FOUND', `Session ${options.onlySourceSessionId} has no current Worktree Session binding in ${repo.repoRoot}`)

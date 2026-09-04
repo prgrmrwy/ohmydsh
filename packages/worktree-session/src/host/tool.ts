@@ -183,15 +183,17 @@ export function targetFor(
 export function cleanTargetFor(
   exec: { agent?: { session: { id: unknown; header: { cwd?: string } } } },
   context: { boundSessionIds: readonly string[]; authorizedPath?: string; specified?: boolean },
-): { repoPath: string; sessionId?: string } {
-  // An authorized path replaces only the SOURCE of the repository path. It is
-  // not a safety exemption: wsCleanRepository still proves the path is a
-  // repository main checkout and still runs every per-candidate gate.
+): { repoPath?: string; sessionId?: string; worktreePath?: string } {
+  // An authorized path replaces only the SOURCE of the target. It is not a
+  // safety exemption: every per-candidate gate still runs afterwards.
   if (context.authorizedPath !== undefined) {
-    // An authorized path names a repository, which is not a single operation.
-    // Narrowing has nothing to resolve from here, and silently widening back
-    // to a sweep would delete far more than the caller asked for.
-    if (context.specified === true) throw new Error('ws clean scope "specified" resolves the target from the calling Session binding, so it cannot be combined with an explicit path; omit the path, or omit the scope to sweep that repository')
+    // Under `specified` the path names the ONE worktree to finish rather than
+    // a repository to sweep. This is the only route open to a caller whose own
+    // cwd is not in the repository at all — a Pet executor runs in the plugin
+    // workspace while the binding lives on its source Session — so refusing
+    // the combination would make the narrow scope unreachable in exactly the
+    // setting it was built for.
+    if (context.specified === true) return { worktreePath: context.authorizedPath }
     return { repoPath: context.authorizedPath }
   }
   const agent = exec.agent
@@ -219,7 +221,7 @@ export function cleanTargetFor(
 export const WS_TOOL_PARAMETERS = {
   action: { type: 'string', required: true, enum: ['status', 'promote', 'clean'] as const, description: 'Maintenance action. status/promote target the exact calling Session binding; clean scans the calling repository.' },
   dry_run: { type: 'boolean', description: 'For clean only, preview the safety-proven actions without removing resources.' },
-  scope: { type: 'string', enum: ['repository', 'specified'] as const, description: "For clean only. 'repository' (default) scans every Worktree Session in the repository. 'specified' handles only the one bound to the calling Session — use it to finish that Session's own worktree without being asked about unrelated candidates. It resolves the target from the calling Session's binding, so it cannot be combined with an explicit path." },
+  scope: { type: 'string', enum: ['repository', 'specified'] as const, description: "For clean only. 'repository' (default) scans every Worktree Session in the repository. 'specified' handles exactly one, so finishing a single worktree asks one question instead of one per candidate: the target is the calling Session's own binding, or — when `path` is given — the worktree that path belongs to. Use the latter when your own working directory is outside the repository." },
   path: { type: 'string', description: "Optional absolute path targeting a repository main checkout (clean) or a worktree (status/promote) other than the calling Session's own. Every use requires one-shot user authorization, granted per call and never reused, and all safety gates still apply. Omit it whenever the calling Session already sits at the intended target." },
 } as const
 
@@ -252,17 +254,22 @@ export function registerWsTool(ctx: Context): () => void {
       if (args.action === 'clean') {
         const bound = activeBoundSessionIds(ctx)
         const specified = args.scope === 'specified'
-        const { repoPath, sessionId } = cleanTargetFor(exec, {
+        const { repoPath, sessionId, worktreePath } = cleanTargetFor(exec, {
           boundSessionIds: bound,
           ...(authorizedPath !== undefined ? { authorizedPath } : {}),
           ...(specified ? { specified: true } : {}),
         })
-        const result = await wsCleanRepository(repoPath, {
+        // A worktree path locates its own repository, so it doubles as the
+        // scan root; the narrowing below keeps the pass to that one operation.
+        const scanRoot = repoPath ?? worktreePath
+        if (scanRoot === undefined) throw new Error('ws clean could not resolve a target from this call')
+        const result = await wsCleanRepository(scanRoot, {
           dryRun: args.dry_run ?? false,
-          // The caller declares the scope. Without a session to resolve from,
-          // `specified` has nothing to narrow to and must not quietly widen
-          // into a repository sweep.
+          // The caller declares the scope; it is narrowed from whichever fact
+          // this call actually carries, and never silently widened back into a
+          // repository sweep.
           ...(specified && sessionId !== undefined ? { onlySourceSessionId: sessionId } : {}),
+          ...(specified && worktreePath !== undefined ? { onlyWorktreePath: worktreePath } : {}),
           archivedSessionIds: ctx.workspaceRegistry.archivedSessionIds.map(String),
           activePaths: ctx.sessions.list().flatMap(session => session.header.cwd === undefined ? [] : [session.header.cwd]),
           activeBoundSessionIds: bound,

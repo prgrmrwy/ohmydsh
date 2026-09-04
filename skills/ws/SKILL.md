@@ -72,14 +72,16 @@ repository's Worktree Sessions, cleaning every candidate whose source Session
 is already archived and whose worktree passes the existing safety gates. A
 Session still bound to a worktree cannot sweep — not itself, not its peers.
 
-`scope: 'specified'` handles only the operation bound to the calling Session,
-which is how a Session finishes its own worktree. Being bound is the normal
-case here rather than a refusal, and unrelated candidates are neither examined
-nor asked about — so finishing stays one question instead of one per worktree
-in the repository. It resolves the target from the calling Session's binding,
-so it cannot be combined with an explicit `path`, and a caller with no current
-binding is refused rather than quietly widened into a sweep. Every gate and the
-archive-then-clean offer work exactly as they do in a sweep.
+`scope: 'specified'` handles exactly one operation, which is how a single
+worktree gets finished: unrelated candidates are neither examined nor asked
+about, so finishing stays one question instead of one per worktree in the
+repository. The target comes from the calling Session's own binding — being
+bound is the normal case here, not a refusal — or, when `path` is given, from
+the worktree that path belongs to. Use that second form when your own working
+directory sits outside the repository, since then there is no binding of your
+own to resolve from. A target that resolves to nothing is refused rather than
+quietly widened into a sweep, and every gate and the archive-then-clean offer
+work exactly as they do in a sweep.
 
 A candidate whose source Session is **not** archived, but which is otherwise
 finished — task branch provably merged, worktree clean, operation prepared, no
