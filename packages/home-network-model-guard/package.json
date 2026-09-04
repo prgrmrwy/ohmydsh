@@ -1,7 +1,7 @@
 {
   "name": "dsh-home-network-model-guard",
   "version": "0.1.0",
-  "description": "Block sending to Claude-family models while the DSH host sits on a known home network (client-side affordance; host-sampled egress IP with TTL + fingerprint cache)",
+  "description": "Restrict Claude-family models when the DSH host egress country/region is blocked (default CN); dual-backup Geo judgment, host llm/stream enforcement, client composer block",
   "license": "MIT",
   "type": "module",
   "main": "./lib/index.js",
@@ -50,6 +50,7 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-llm": "^0.1.1-rc.2",
     "@deepseek-ai/dsh-client-runtime": "^0.1.1-rc.2",
     "@deepseek-ai/dsh-client-locale": "^0.1.1-rc.2",
     "@deepseek-ai/dsh-client-connection": "^0.1.1-rc.2",
@@ -58,6 +59,7 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-llm": "^0.1.1-rc.2",
     "@deepseek-ai/dsh-client-runtime": "^0.1.1-rc.2",
     "@deepseek-ai/dsh-client-locale": "^0.1.1-rc.2",
     "@deepseek-ai/dsh-client-connection": "^0.1.1-rc.2",
