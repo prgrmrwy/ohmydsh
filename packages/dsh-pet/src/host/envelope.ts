@@ -15,6 +15,19 @@ import type { PetInvocationRecord, PetSourceSnapshot, PetTaskRecord } from '../w
 const MAX_REQUEST_CHARS = 2000
 
 /**
+ * Plain statements of the source's observed availability.
+ *
+ * Facts only: each says what the source session currently is, and none says
+ * what to do about it. Whether a given state permits a given operation is the
+ * invoked capability's own gate to decide, not this envelope's.
+ */
+const SOURCE_AVAILABILITY_TEXT: Record<string, string> = {
+  available: '未归档',
+  archived: '已归档',
+  missing: '已不存在于注册表',
+}
+
+/**
  * Render the message dispatched for one Invocation.
  *
  * @param options - Task, Invocation, snapshot and whether this is the Task's
@@ -59,6 +72,14 @@ export function renderEnvelope(options: {
     // working directory — observed in practice: an agent refused to clean a
     // finished worktree believing it was standing in it, while this session's
     // cwd is the Pet workspace and is not a Git checkout at all.
+    if (snapshot.sourceKind === 'session') {
+      // The two sessions' lifecycles are independent facts, and an agent that
+      // cannot see the source one substitutes its own: observed in practice,
+      // an executor refused to finish a source session's worktree on the
+      // belief that session was still live and driving this task, when it had
+      // in fact already ended. Stating availability outright removes the guess.
+      lines.push(`- 来源会话（\`${task.sourceId}\`）当前状态：${SOURCE_AVAILABILITY_TEXT[task.sourceAvailability]}`)
+    }
     if (snapshot.cwd !== undefined) lines.push(`- 来源会话的仓库根目录：\`${snapshot.cwd}\``)
     if (snapshot.worktree !== undefined) {
       lines.push(`- 来源会话的受管执行根目录：\`${snapshot.worktree.executionRoot}\``)
@@ -85,9 +106,13 @@ export function renderEnvelope(options: {
 
   if (options.isFirst) {
     lines.push('')
+    // "这个会话" must be unmistakably THIS executor session. Read as the source
+    // session, the sentence becomes "the source keeps driving me", which has in
+    // practice been taken as proof that the source is still live.
     lines.push(
-      '这个会话是 Pet 执行会话，之后还会承载该任务的更多调用；' +
-        '完成本次调用不等于结束整个任务。',
+      '你所在的这个 Pet 执行会话之后还会承载该任务的更多调用；' +
+        '完成本次调用不等于结束整个任务。这描述的是本执行会话的生命周期，' +
+        '与来源会话是否仍在运行无关——两者相互独立。',
     )
   }
   return lines.join('\n')
