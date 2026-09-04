@@ -263,10 +263,18 @@ export async function wsCleanRepository(repoPath: string, options: RepoCleanOpti
   // empty sweep: reporting "nothing to do" would read as success while the
   // intended target went untouched.
   let onlyOperationId = options.onlyOperationId
+  // Entering through a worktree path makes `discoverRepo` report that worktree
+  // as the repository root — correct for Git, wrong to echo back here, where
+  // `repoRoot` means the main checkout the operations belong to. The operation
+  // record carries that value, so the report names the same repository however
+  // the call arrived.
+  let reportedRepoRoot = repo.repoRoot
   if (options.onlyWorktreePath !== undefined) {
     // Resolution is the existing path lookup, which proves a registered
     // worktree owns the path before naming any operation.
-    onlyOperationId = (await resolveOperation(options.onlyWorktreePath, git)).operationId
+    const owner = await resolveOperation(options.onlyWorktreePath, git)
+    onlyOperationId = owner.operationId
+    reportedRepoRoot = owner.repoRoot
   }
   if (options.onlySourceSessionId !== undefined) {
     const bound = await findBySourceSession(repo.gitCommonDir, options.onlySourceSessionId)
@@ -406,7 +414,7 @@ export async function wsCleanRepository(repoPath: string, options: RepoCleanOpti
     : 0
   return {
     dryRun: options.dryRun === true,
-    repoRoot: repo.repoRoot,
+    repoRoot: reportedRepoRoot,
     scanned: operationIds.length,
     cleaned,
     refused,

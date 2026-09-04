@@ -12,7 +12,17 @@
 - **THEN** 系统 SHALL 按既有 operator 语义执行，不因模型可见 `path` 的引入而改变目标解析或安全门
 
 ### Requirement: Agent explicit ws path is trusted only through one-shot user authorization
-模型可见的 `ws` 工具在 Agent 调用携带非空显式 `path` 时，SHALL 通过 DSH 平台的用户提问能力（`ctx.userQuestions`）向用户发起一次性确认，询问 MUST 明确包含被请求的 action 与确切路径，并提供可直接选择的同意与拒绝选项。系统 MUST NOT 使用 approval（沙箱提权授权）能力承载该确认：该能力在 `danger-full-access` 部署下 policy 为 `never`，会在无人应答的情况下自动拒绝，使确认在最需要它的部署中不可达。仅当用户明确选择同意项时，系统 SHALL 将该显式路径作为本次调用的目标来源；用户拒绝、未作答、仅给出自由文本、无可用提问 provider 或询问抛错时，系统 MUST 拒绝该调用并保持与既有拒绝一致的 fail-closed 行为，不得扫描、修改或删除任何 Worktree Session 资源。同意 MUST 只对当次调用生效，不得建立任何持久放权。省略 `path` 或空字符串 `path`（wire 兼容形态）的调用 MUST 保持既有解析语义完全不变。
+模型可见的 `ws` 工具在 Agent 调用携带非空显式 `path`、且该调用可能改变仓库状态时，SHALL 通过 DSH 平台的用户提问能力（`ctx.userQuestions`）向用户发起一次性确认，询问 MUST 明确包含被请求的 action 与确切路径，并提供可直接选择的同意与拒绝选项。
+
+只读预览（`clean` 且 `dry_run` 为真）MUST NOT 要求该确认：它不删除、不归档、不发起任何询问，此时确认所守护的只是一次读取。既有指引要求"先预览再决定"，若预览同样索取确认，一个流程在发生任何实质动作前就需两次作答；守护空无一物的提问会稀释真正守护破坏性动作的那一次。**真实运行仍必须确认**。不具备预览形态的 action（`status`、`promote`）MUST 对每次显式路径照常确认。系统 MUST NOT 使用 approval（沙箱提权授权）能力承载该确认：该能力在 `danger-full-access` 部署下 policy 为 `never`，会在无人应答的情况下自动拒绝，使确认在最需要它的部署中不可达。仅当用户明确选择同意项时，系统 SHALL 将该显式路径作为本次调用的目标来源；用户拒绝、未作答、仅给出自由文本、无可用提问 provider 或询问抛错时，系统 MUST 拒绝该调用并保持与既有拒绝一致的 fail-closed 行为，不得扫描、修改或删除任何 Worktree Session 资源。同意 MUST 只对当次调用生效，不得建立任何持久放权。省略 `path` 或空字符串 `path`（wire 兼容形态）的调用 MUST 保持既有解析语义完全不变。
+
+#### Scenario: A read-only preview is not gated
+- **WHEN** Agent 以显式 `path` 发起 `clean` 且 `dry_run` 为真
+- **THEN** 系统 SHALL 直接以该路径执行预览，MUST NOT 发起确认，且 MUST NOT 删除、归档或修改任何资源
+
+#### Scenario: The real run after a preview still asks
+- **WHEN** 同一 Agent 在预览之后以同一显式 `path` 发起真实清理
+- **THEN** 系统 SHALL 就该次调用发起确认，MUST NOT 因刚完成预览而免除
 
 #### Scenario: User agrees to an explicit path
 - **WHEN** Agent 调用 `ws` 携带非空显式 `path`，用户在确认中选择同意项
