@@ -1,5 +1,34 @@
 ## ADDED Requirements
 
+### Requirement: Cleanup scope is chosen by the caller, not inferred
+`ws clean` SHALL 支持两种明确的处理范围：默认的仓库级清扫，以及**只处理指定的那一个 operation**。请求后者时，系统 MUST NOT 扫描仓库内其他 Worktree Session，MUST NOT 就其他候选发起任何确认，也 MUST NOT 删除其他候选的任何资源；该 operation 的全部既有安全门与归档收尾编排照常适用。
+
+范围 MUST 由调用显式声明，MUST NOT 由系统依调用方是否绑定 worktree 隐式改变：同一动作依上下文变更影响范围，会使用户无法从请求本身预见其后果。
+
+指定范围下的目标解析 MUST 沿用既有规则（调用 Session 自身的绑定，或经用户一次性授权的显式路径），MUST NOT 引入第三套目标语义。特别地，系统不具备"当前 worktree"这一独立概念：所谓指定，指的是按既有规则解析出的那一个 operation。
+
+调用方自身仍绑定 worktree MUST NOT 成为拒绝该范围的理由——收尾自身工作区正是其适用场景；但这 MUST NOT 使它获得处置同仓库内其他 Worktree Session 的能力。
+
+#### Scenario: The specified scope targets exactly one operation
+- **WHEN** 调用方请求只处理指定的 operation，且目标可按既有规则解析
+- **THEN** 系统 SHALL 仅就该 operation 判定与处置，最多发起一次收尾确认，且结果中 MUST NOT 出现其他 operation
+
+#### Scenario: The specified scope never sweeps peers
+- **WHEN** 仓库内同时存在其他未归档且已完成的 Worktree Session
+- **THEN** 该调用 MUST NOT 就它们发起确认或删除其资源
+
+#### Scenario: A bound Session may finish its own worktree
+- **WHEN** 仍绑定 worktree 的 Session 以指定范围发起清理
+- **THEN** 系统 SHALL 按其自身绑定解析目标并照常判定，MUST NOT 仅因调用方处于绑定状态而拒绝
+
+#### Scenario: The specified scope requires a resolvable target
+- **WHEN** 调用方请求指定范围，但既无自身绑定亦无授权路径可解析出 operation
+- **THEN** 系统 SHALL 以明确诊断拒绝，MUST NOT 退化为仓库级清扫
+
+#### Scenario: Repository-wide cleanup is unchanged by default
+- **WHEN** 调用方未声明指定范围
+- **THEN** 系统 SHALL 保持既有仓库级扫描与逐候选判定语义不变
+
 ### Requirement: Unarchived candidates are offered archive-then-clean instead of a bare refusal
 仓库级 `ws clean` 遇到源 Session 未归档、但其余全部既有安全门均可通过的候选时，SHALL 通过一次性用户授权通道提出"归档并清理"的确认，而不是直接拒绝。确认信息 MUST 包含该候选的源 Session id、任务分支、worktree 路径，以及已判定的合入与洁净状态，使用户在确认前即可判断收尾是否安全。仅当用户明确确认时，系统 SHALL 先归档该源 Session，再对该候选执行既有清理；未确认时 MUST 保持既有 `not-archived` 拒绝语义，且不得归档、修改或删除任何资源。
 
