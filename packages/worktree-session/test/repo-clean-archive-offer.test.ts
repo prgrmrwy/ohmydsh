@@ -284,8 +284,13 @@ describe('archiving is never proposed to mask a gate', () => {
     // The advice must not send the user off to archive by hand what the next
     // real run would offer to do: read that way, a preview looks like
     // "nothing to do here" and the real run never happens.
-    expect(result.refused[0]?.reason).toMatch(/a real run would ask/)
+    expect(result.refused[0]?.reason).toMatch(/a real run asks/)
     expect(result.refused[0]?.reason).not.toMatch(/archive it before cleaning/)
+    // Sessions under danger-full-access are told "approval prompts are
+    // disabled". A reader took that to mean this offer would be auto-rejected,
+    // reported zero cleanable and never made the real run. The offer travels
+    // on the ask-a-human channel, so the reply itself must say so.
+    expect(result.refused[0]?.reason).toMatch(/ask-a-human channel, not approval/)
     await expect(access(target.worktreePath)).resolves.toBeUndefined()
   }, 300_000)
 

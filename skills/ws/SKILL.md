@@ -54,6 +54,10 @@ refused, which is the intended fail-closed behavior rather than a fault to work
 around. Do not ask for this permission in prose yourself: pass the `path` and
 let the tool raise the real prompt.
 
+This question uses the ask-a-human channel, not the approval/sandbox-escalation
+channel, so a session reporting approval prompts as disabled still receives it.
+"Approval prompts are disabled" is never a reason to skip passing `path`.
+
 Agreement only establishes where to look. It exempts nothing: the same
 active, dirty, in-flight, archived, lifecycle and merge-ancestry gates run
 afterwards, and a refusal from any of them still stands.
@@ -82,6 +86,12 @@ nothing. Every candidate listed as "not archived" is one a real run would offer
 to finish. Do not stop at the preview and conclude there is nothing to do:
 report which candidates the real run would ask about, and let the user decide
 whether to make that run.
+
+That question is asked through the ask-a-human channel, which is NOT the
+approval/sandbox-escalation channel. A session that reports approval prompts as
+disabled — every `danger-full-access` session does — still receives this
+question normally. Never reason that the offer would be auto-rejected and skip
+the real run on that basis: it reaches the user regardless of approval policy.
 
 That offer is never a way around a gate. A candidate that is unmerged, dirty,
 in-flight, malformed or still occupied is refused on that real reason and is
