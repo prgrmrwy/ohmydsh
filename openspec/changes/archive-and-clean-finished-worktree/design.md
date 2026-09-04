@@ -4,7 +4,7 @@
 
 归档能力在 Host 侧已存在：`ctx.workspaceRegistry.archiveSession(sessionId)`（`@deepseek-ai/dsh-workspace`），Web GUI 的归档走的正是这个调用（`dsh-host-apiproxy` 的 `workspace.archiveSession`）。其契约声明：会话可以是 live 也可以只存在于持久化中；归档不触碰 workspace accounting，归档集保留原有槽位以便取消归档时恢复。
 
-前置 change `authorize-explicit-ws-path` 已建立面向用户的一次性授权通道（`ctx.get('approval')` → `approval.request`），本 change 直接复用它作为确认手段，不新增交互机制。
+前置 change `authorize-explicit-ws-path` 已建立面向用户的一次性确认通道（`ctx.get('userQuestions')` → `ask()`），本 change 直接复用它作为确认手段，不新增交互机制。该通道刻意不使用 `ctx.approval`：那是沙箱提权授权，在 `danger-full-access` 部署下 policy 为 `never`，会在触达用户前自动拒绝。
 
 清理后的会话去向已有既定规范：`restore-cleaned-session-as-ordinary`（已归档）规定 cleaned 会话取消归档后绑定单调转为 `released`，会话以普通会话恢复，不创建替代资源。因此"归档 → 清理 → 需要时取消归档恢复为普通会话"是一条完整且已验收的生命周期，本 change 不改动它。
 
@@ -29,7 +29,7 @@
 
 ### 1. 归档动作由调用方注入，maintenance 层保持对 DSH registry 无依赖
 
-`wsCleanRepository` 目前只接收纯数据（`archivedSessionIds`、`activePaths`、`activeBoundSessionIds`），不认识 DSH 服务。保持这一点：新增两个可选注入项——一个"确认"回调与一个"归档"回调，由 `tool.ts` 从受信 Host 提供真实实现（approval 通道 + `ctx.workspaceRegistry.archiveSession`）。
+`wsCleanRepository` 目前只接收纯数据（`archivedSessionIds`、`activePaths`、`activeBoundSessionIds`），不认识 DSH 服务。保持这一点：新增两个可选注入项——一个"确认"回调与一个"归档"回调，由 `tool.ts` 从受信 Host 提供真实实现（`ctx.userQuestions` 确认 + `ctx.workspaceRegistry.archiveSession`）。
 
 **替代方案：** maintenance 直接 import DSH workspace 服务。否决：会让这一层从纯 Git/元数据逻辑变成依赖运行时服务，破坏其可独立测试性，也让 CLI 路径被迫携带它用不到的依赖。
 

@@ -141,12 +141,15 @@ stateDiagram-v2
 - 模型侧默认入口是普通主仓 Session:它扫描本仓库的 Worktree Session,逐项清理
   「源 Session 已归档 + 通过全部既有安全门」的候选;仍绑定 worktree 的 Session
   既不能清理自己也不能清扫同伴,会被拒绝并提示切换到主仓 Session。
-- 模型调用显式提供绝对 `path` 时，Host 先通过平台 approval 服务向用户展示精确
-  action 与路径；仅本次回答 `allowed-once` 才将该路径作为目标来源。该通道对调用方
-  类型无感知，且不改变默认 cwd/binding 解析：省略或传空 `path` 时不询问用户、仍走
-  默认入口。`rejected`、`cancelled`、`unavailable`、policy `never` 及审计写入失败
-  全部 fail closed；每次请求独立审计为 `approval/asked`/`approval/decided` 对，授权
-  不记忆也不跨调用复用。
+- 模型调用显式提供绝对 `path` 时，Host 先通过平台用户提问能力(`ctx.userQuestions`)
+  向用户展示精确 action 与路径,并给出可点选的同意/拒绝项;仅用户明确选中同意项才
+  将该路径作为目标来源。该通道对调用方类型无感知,且不改变默认 cwd/binding 解析:
+  省略或传空 `path` 时不询问用户、仍走默认入口。拒绝、未作答、仅自由文本、无 provider
+  与询问抛错全部 fail closed;同意不记忆也不跨调用复用。
+  ⚠ 刻意不使用 approval(沙箱提权授权):`danger-full-access` preset 绑定
+  `approval: never`,请求会在触达用户前被自动拒绝 —— 人类决定不属于提权通道。
+  代价是不再有 `approval/asked`/`approval/decided` 结构化审计对,问答改为留在
+  会话对话中可回溯。
 - 授权路径只替换目标来源，不创设新维护语义：`clean` 仍必须证明目标是仓库主
   checkout，再复用仓库级批量扫描；`status`/`promote` 仍复用既有显式路径单 operation
   语义。所有 active、dirty、in-flight、归档、schema 与 merge 安全门保持不变。`dsh-ws`

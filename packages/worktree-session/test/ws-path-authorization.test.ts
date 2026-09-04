@@ -3,24 +3,19 @@ import { authorizeExplicitPath, cleanTargetFor, targetFor, WS_TOOL_PARAMETERS } 
 
 /**
  * The explicit-path channel is generic: it is proven with a plain Agent-bound
- * execution and an approval seam, never with any caller-specific fixture.
- * The seam is consumed through `ctx.get('approval')` exactly like the official
- * tool `ask` policy, so a missing service is a fail-closed refusal, not a
- * cordis inject error.
+ * execution and a user-questions seam, never with any caller-specific fixture.
+ * How that seam behaves under a full-access deployment is covered separately
+ * in `ws-confirmation-channel.test.ts`.
  */
 const exec = {
   agent: { session: { id: 'session-caller', header: { cwd: '/pet/workspace' } } },
   callId: 'call-1',
 }
 
-/** Build a context double serving one fixed approval outcome via ctx.get. */
-function ctxWithApproval(approval: unknown) {
-  return { get: (name: string) => (name === 'approval' ? approval : undefined) }
-}
-
-/** Build an approval service double returning one fixed outcome. */
-function approvalReturning(outcome: string) {
-  return { request: vi.fn(async () => outcome) }
+/** Context double serving one fixed answer through ctx.get('userQuestions'). */
+function ctxAnswering(selected: string[]) {
+  const ask = vi.fn(async () => ({ answers: [{ id: 'ws-confirm', selected }] }))
+  return { ctx: { get: (name: string) => (name === 'userQuestions' ? { ask } : undefined) }, ask }
 }
 
 describe('explicit ws path is model-visible', () => {
@@ -37,60 +32,35 @@ describe('explicit ws path is model-visible', () => {
 
 describe('explicit ws path authorization', () => {
   // 1.1 A granted path becomes the trusted target source for this call.
-  it('accepts the explicit path when the user grants one-shot authorization', async () => {
-    const approval = approvalReturning('allowed-once')
-    await expect(authorizeExplicitPath(ctxWithApproval(approval), exec, { action: 'clean', path: '/repo' }))
+  it('accepts the explicit path when the user agrees', async () => {
+    const { ctx, ask } = ctxAnswering(['Yes, proceed'])
+    await expect(authorizeExplicitPath(ctx, exec, { action: 'clean', path: '/repo' }))
       .resolves.toBe('/repo')
-    expect(approval.request).toHaveBeenCalledTimes(1)
+    expect(ask).toHaveBeenCalledTimes(1)
   })
 
-  // 1.2 Refusal and withdrawal both refuse, before any resource is touched.
-  it('refuses a rejected or cancelled authorization', async () => {
-    await expect(authorizeExplicitPath(ctxWithApproval(approvalReturning('rejected')), exec, { action: 'clean', path: '/repo' }))
-      .rejects.toThrow(/not authorized by the user/)
-    await expect(authorizeExplicitPath(ctxWithApproval(approvalReturning('cancelled')), exec, { action: 'clean', path: '/repo' }))
+  // 1.2 Declining refuses before any resource is touched.
+  it('refuses a declined confirmation', async () => {
+    const { ctx } = ctxAnswering(['No, stop'])
+    await expect(authorizeExplicitPath(ctx, exec, { action: 'clean', path: '/repo' }))
       .rejects.toThrow(/not authorized by the user/)
   })
 
-  // 1.3 Fail closed: an unavailable answerer and an absent service are refusals,
-  // never a silent fallback to the caller's own cwd.
-  it('fails closed when no answerer is available or the service is absent', async () => {
-    await expect(authorizeExplicitPath(ctxWithApproval(approvalReturning('unavailable')), exec, { action: 'clean', path: '/repo' }))
-      .rejects.toThrow(/not authorized by the user/)
+  // 1.3 Fail closed: an absent provider is a refusal, never a silent fallback
+  // to the caller's own cwd.
+  it('fails closed when no questions provider is composed', async () => {
     await expect(authorizeExplicitPath({}, exec, { action: 'clean', path: '/repo' }))
       .rejects.toThrow(/not authorized by the user/)
     await expect(authorizeExplicitPath({ get: () => undefined }, exec, { action: 'clean', path: '/repo' }))
       .rejects.toThrow(/not authorized by the user/)
   })
 
-  // 1.3 A throwing service (e.g. no open turn) must not degrade into a grant.
-  it('fails closed when the approval service throws', async () => {
-    const approval = { request: vi.fn(async () => { throw new Error('no turn open') }) }
-    await expect(authorizeExplicitPath(ctxWithApproval(approval), exec, { action: 'clean', path: '/repo' }))
-      .rejects.toThrow(/not authorized by the user/)
-  })
-
-  // 2.3 The question must carry the exact action and path so the user can judge
-  // it, and must stay caller-agnostic.
-  it('asks with the exact action and path, bound to this tool call', async () => {
-    const approval = approvalReturning('allowed-once')
-    await authorizeExplicitPath(ctxWithApproval(approval), exec, { action: 'promote', path: '/repo/.worktrees/task' })
-    const request = approval.request.mock.calls[0]![0] as { toolName: string; callId: string; reason: string; agent: unknown }
-    expect(request.toolName).toBe('ws')
-    expect(request.callId).toBe('call-1')
-    expect(request.agent).toBe(exec.agent)
-    expect(request.reason).toContain('promote')
-    expect(request.reason).toContain('/repo/.worktrees/task')
-    expect(request.reason).toMatch(/once/i)
-  })
-
   // 1.5 Authorization is single-use: a second call asks again.
   it('asks again for every subsequent explicit-path call', async () => {
-    const approval = approvalReturning('allowed-once')
-    const ctx = ctxWithApproval(approval)
+    const { ctx, ask } = ctxAnswering(['Yes, proceed'])
     await authorizeExplicitPath(ctx, exec, { action: 'status', path: '/repo/.worktrees/task' })
     await authorizeExplicitPath(ctx, exec, { action: 'status', path: '/repo/.worktrees/task' })
-    expect(approval.request).toHaveBeenCalledTimes(2)
+    expect(ask).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -103,7 +73,7 @@ describe('default resolution is untouched by the authorization channel', () => {
     expect(cleanTargetFor(exec, { boundSessionIds: [] })).toEqual({ repoPath: '/pet/workspace' })
   })
 
-  // Operator (non-Agent) explicit paths keep working with no authorization.
+  // Operator (non-Agent) explicit paths keep working with no confirmation.
   it('keeps the operator explicit-path entry unauthenticated', () => {
     expect(targetFor({ path: '/repo/.worktrees/operator' }, {})).toBe('/repo/.worktrees/operator')
   })
