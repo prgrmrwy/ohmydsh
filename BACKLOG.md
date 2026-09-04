@@ -219,6 +219,27 @@
 
 ---
 
+## 待立项
+
+### [U001] DSH `0.1.2` host 半区 API 适配(运行体迁移前置)
+- **状态**: 待立项(spike 已完成,由 change `staged-dsh-and-plugin-upgrade` 产出)
+- **优先级**: P1
+- **背景**: change `staged-dsh-and-plugin-upgrade` 的阶段四原计划把 `dshVersion` 从 `0.1.1-rc.2` 升到 `0.1.2-rc.1`。实际执行到 6.5 时按 tasks 4.5 的阀门条款**停止并回退** —— spike 只审计了 client 半区,遗漏 host 半区;实测 8 个自研包中 **5 个无法构建**,破坏点均非「等价接线迁移」,超出该 change 的 Non-Goals 边界。
+- **已产出的输入(可直接复用,不必重做)**:
+  - **client 半区迁移方案已查清**:`dsh-client-runtime` 的 5 个服务面拆到 4 个包,服务名与 `ctx.<name>` 取用形态**不变** —— `sessions`→`dsh-api-session-controller`、`slots`→`dsh-client-ui-renderer`、`workspaces`→`dsh-api-workspace-controller`、`conversation`→`dsh-client-ui-conversation`;`ISessions` 保留 14 个成员,移除的 `currentProvideInfo`/`noteAgentPreset`/`provide` **本仓库无一使用**。详见该 change 的 design S1/S2;
+  - **能力基线**:`baseline.md`(自动化 951 例 + 人工清单)已固定并验证过归因作用;
+  - **后置插件准入**:`better-sidebar@0.18.0` 可放行;`sidebar-qa@0.5.0` 所需 7 个 `ctx.remote.session.*` 方法全部可得,但 `selectModel`/`modelCatalog` 由 `dsh-client-ui-model-selection` 提供(不在 session-controller 内),验收须确认该包加载,否则静默失效。详见 design S4。
+- **待解决的 host 半区破坏(新 change 的 spike 必须回答)**:
+  1. **`Session.events` 被移除**(影响 `dsh-pet`、`worktree-session`)—— 两包依赖它读会话事件流(取标题与水位、判定 blank session),替代读取方式未知;
+  2. **`connection.rpc.handle` 第三参数被移除**(影响 `system-clock`、`home-network-model-guard`、`session-links`)—— 逐字节对比两版 `dsh-client-connection/lib/types/rpc.d.ts` 确认:`handle(channel, handler, options)` → `handle(channel, handler)`,且 `ConnectionRpcHandlerOptions` 类型在 `0.1.2` 已完全不存在。**⚠ 安全相关**:被删的 `options` 正是本仓库三包统一传入的 `{ authority: 'loopback' }`(把 RPC 通道限制在本机回环的显式声明)。在查清 `0.1.2` 的等价机制前**不得机械删参** —— 那等于静默放弃一道安全边界,违反仓库「安全路径 fail closed」原则;
+  3. **`SubagentRuntime.registerContinuableSetup` 被移除**(影响 `worktree-session`)—— 承载 continuable subagent 建立策略,是 Worktree Session 核心路径;
+  4. **`SessionLogOffset` 类型收紧**(影响 `session-links`)—— `number` 不再可直接传入。
+  另有 `worktree-session` 3 例测试因 `no agent factory registered` 失败,需一并查明。
+- **准入要求**: 新 change 的 spike 必须**同时覆盖 host 与 client 两个半区**,不得再以「客户端包只影响客户端」为由缩小审计面 —— 这正是本次失误的根因。
+- **更新**: 2026-09-04 由 change `staged-dsh-and-plugin-upgrade` 阶段四停止时记录。
+
+---
+
 ## 待评估插件
 
 ### [P001] dsh-ego-browser:让 agent 自行完成 Web 端验收
