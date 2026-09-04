@@ -49,11 +49,12 @@ describe('explicit-path confirmation is routed to the human, not the permission 
     }
     const item = request.questions[0]!
     expect(item.question).toContain('promote')
-    // The title carries the identifying segment; a long absolute path would
-    // truncate in a narrow UI, so the full path lives in the detail body.
-    expect(item.question).toContain('task')
-    expect(item.detail).toContain('/repo/.worktrees/task')
-    expect(item.detail).toMatch(/仅授权本次调用/)
+    // Everything the user must read lives in `question`. The `detail` slot is
+    // deliberately unused: the current questions UI gives it a 2px horizontal
+    // margin, rendering those lines flush against the panel edge.
+    expect(item.detail).toBeUndefined()
+    expect(item.question).toContain('/repo/.worktrees/task')
+    expect(item.question).toMatch(/仅授权本次调用/)
     // A refusal must be selectable, never only expressible as free text.
     expect(item.options?.map(option => option.label)).toContain('取消')
     // The live agent is forwarded so the question reaches its owning session.

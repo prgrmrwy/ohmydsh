@@ -96,12 +96,16 @@ async function askUser(
   const questions = ctx.get?.('userQuestions') as UserQuestionsSeam | undefined
   if (questions === undefined) return false
   try {
-    // The Host owns the agent and signal; this seam forwards them verbatim.
+    // Everything the user must read goes in `question`, deliberately not in
+    // the `detail` slot: the current questions UI styles detail with a 2px
+    // horizontal margin, so those lines render flush against the panel edge
+    // while the title and options stay indented. Keeping one block avoids a
+    // decision being presented in a form that is harder to read than the
+    // options it belongs to.
     const answer = await questions.ask({
       questions: [{
         id: 'ws-confirm',
-        question,
-        detail,
+        question: `${question}\n\n${detail}`,
         header: 'Worktree Session',
         options: [
           { label: CONFIRM_LABEL, description: '仅执行本次这一个操作。' },
