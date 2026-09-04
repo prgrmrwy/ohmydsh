@@ -291,7 +291,36 @@ describe('archiving is never proposed to mask a gate', () => {
     // reported zero cleanable and never made the real run. The offer travels
     // on the ask-a-human channel, so the reply itself must say so.
     expect(result.refused[0]?.reason).toMatch(/ask-a-human channel, not approval/)
+    // `cleaned: []` on its own reads as "nothing to do here". The count says
+    // plainly that a real run has a decision to put to the user.
+    expect(result.wouldOfferToFinish).toBe(1)
     await expect(access(target.worktreePath)).resolves.toBeUndefined()
+  }, 300_000)
+
+  // The count belongs to previews that can actually make the offer. A real run
+  // does not preview anything, and a non-interactive caller has no offer.
+  it('omits the offer count when there is no offer to preview', async () => {
+    const root = await fixture()
+    await candidate(root, 'operation-offer-count-none', 'session-offer-count-none')
+
+    const nonInteractive = await wsCleanRepository(root, {
+      archivedSessionIds: [],
+      activePaths: [],
+      activeBoundSessionIds: [],
+      cwd: root,
+      dryRun: true,
+    })
+    expect(nonInteractive.wouldOfferToFinish).toBeUndefined()
+
+    const realRun = await wsCleanRepository(root, {
+      archivedSessionIds: [],
+      activePaths: [],
+      activeBoundSessionIds: [],
+      cwd: root,
+      confirmArchive: confirmer(false),
+      archiveSession: async () => undefined,
+    })
+    expect(realRun.wouldOfferToFinish).toBeUndefined()
   }, 300_000)
 
   // The non-interactive entrypoints have no offer to make, so for them the

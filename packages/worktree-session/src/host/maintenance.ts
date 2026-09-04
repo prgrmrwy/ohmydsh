@@ -342,6 +342,14 @@ export async function wsCleanRepository(repoPath: string, options: RepoCleanOpti
     }
   }
 
+  // A preview's `cleaned: []` was read as "nothing to do here" more than once,
+  // and the real run never happened — the offer the user is waiting for shows
+  // up only as a refusal, which reads like a dead end. Counting the offerable
+  // candidates makes the actionable outcome a first-class field instead of
+  // something to be inferred from refusal prose.
+  const wouldOfferToFinish = options.dryRun === true && options.confirmArchive !== undefined && options.archiveSession !== undefined
+    ? refused.filter(entry => entry.kind === 'not-archived').length
+    : 0
   return {
     dryRun: options.dryRun === true,
     repoRoot: repo.repoRoot,
@@ -349,5 +357,6 @@ export async function wsCleanRepository(repoPath: string, options: RepoCleanOpti
     cleaned,
     refused,
     ignored,
+    ...(wouldOfferToFinish > 0 ? { wouldOfferToFinish } : {}),
   }
 }
