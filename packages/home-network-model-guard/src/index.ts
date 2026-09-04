@@ -34,8 +34,8 @@ import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-llm'
 import os from 'node:os'
 import path from 'node:path'
-import { GUARD_CHANNEL, GUARD_CHECK_ENDPOINT } from './contract.js'
-import { configEpochOf, loadGuardConfig, type GuardConfig } from './config.js'
+import { GUARD_CHANNEL, GUARD_CHECK_ENDPOINT, GUARD_SET_CONFIG_ENDPOINT, GUARD_STATUS_ENDPOINT, type GuardStatus } from './contract.js'
+import { configEpochOf, loadGuardConfig, writeGuardConfig, type GuardConfig } from './config.js'
 import { createEgressGate } from './egress-gate.js'
 import { GeoCountrySource } from './geo.js'
 import { fingerprintOf, NetworkVerdictCache, type VerdictSource } from './network.js'
@@ -115,8 +115,37 @@ export function apply(ctx: Context): void {
     }
     child.effect(() => connection.rpc.handle(
       GUARD_CHANNEL,
-      async (endpoint) => {
-        if (endpoint !== GUARD_CHECK_ENDPOINT) {
+      async (endpoint, params?: unknown) => {
+        try {
+          if (endpoint === GUARD_CHECK_ENDPOINT) {
+            const result = await cache.check()
+            logTransition(result.verdict, result.degraded)
+            return { ok: true as const, value: result }
+          }
+          if (endpoint === GUARD_STATUS_ENDPOINT) {
+            const result = await cache.check()
+            const resolved = cache.diagnostics()
+            const config = loadGuardConfig(configFile)
+            const status: GuardStatus = {
+              verdict: result.verdict,
+              degraded: result.degraded,
+              ...(result.degradedReason !== undefined ? { degradedReason: result.degradedReason } : {}),
+              ...(resolved !== null ? { country: resolved.country, source: resolved.source, sampledAt: resolved.atMs } : {}),
+              config,
+              configEpoch: configEpochOf(configFile),
+            }
+            return { ok: true as const, value: status }
+          }
+          if (endpoint === GUARD_SET_CONFIG_ENDPOINT) {
+            const written = await writeGuardConfig(configFile, params)
+            if (!written.ok) {
+              return {
+                ok: false as const,
+                error: { code: 'internal' as const, message: `dsh-home-network-model-guard: invalid config: ${written.error}`, details: {} },
+              }
+            }
+            return { ok: true as const, value: { applied: true, configEpoch: configEpochOf(configFile) } }
+          }
           return {
             ok: false as const,
             error: {
@@ -125,17 +154,12 @@ export function apply(ctx: Context): void {
               details: {},
             },
           }
-        }
-        try {
-          const result = await cache.check()
-          logTransition(result.verdict, result.degraded)
-          return { ok: true as const, value: result }
         } catch (error) {
           return {
             ok: false as const,
             error: {
               code: 'internal',
-              message: `dsh-home-network-model-guard: check failed: ${error instanceof Error ? error.message : String(error)}`,
+              message: `dsh-home-network-model-guard: ${endpoint} failed: ${error instanceof Error ? error.message : String(error)}`,
               details: {},
             },
           }

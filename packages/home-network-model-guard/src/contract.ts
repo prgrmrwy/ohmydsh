@@ -16,6 +16,10 @@
 export const GUARD_CHANNEL = '/dsh-home-network-model-guard'
 /** The read-only endpoint answering with one {@link GuardCheckResult}. */
 export const GUARD_CHECK_ENDPOINT = 'check'
+/** The read-only endpoint answering with one {@link GuardStatus}. */
+export const GUARD_STATUS_ENDPOINT = 'status'
+/** The write endpoint applying a validated configuration. */
+export const GUARD_SET_CONFIG_ENDPOINT = 'set-config'
 
 /**
  * Host egress classification.
@@ -47,4 +51,33 @@ export interface GuardCheckResult {
    * principle carry the IP). Absent when not degraded.
    */
   degradedReason?: 'fetch-failed' | 'timeout' | 'invalid-response'
+}
+
+/**
+ * Diagnostics view for the settings page: the verdict plus the sanitized
+ * resolution facts and the current configuration. `country` is the resolved
+ * ISO code (a Geo conclusion, not an IP) and is shown only in the settings
+ * diagnosis; the automatic `check` response never carries it.
+ */
+export interface GuardStatus {
+  verdict: NetworkVerdict
+  sampledAt?: number
+  freshForMs?: number
+  degraded: boolean
+  degradedReason?: GuardCheckResult['degradedReason']
+  /** ISO country code of the latest successful resolution (diagnostics only). */
+  country?: string
+  /** Which Geo service answered the latest resolution. */
+  source?: 'primary' | 'fallback'
+  /** Current effective configuration (never contains secrets). */
+  config: {
+    blockedCountries: readonly string[]
+    geoEndpoints: readonly [string, string]
+    timeoutMs: number
+    ttlMs: number
+    backoffBaseMs: number
+    backoffMaxMs: number
+  }
+  /** Config-generation identity; changes when the config is written. */
+  configEpoch: string
 }
