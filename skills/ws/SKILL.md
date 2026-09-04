@@ -63,11 +63,23 @@ Agreement only establishes where to look. It exempts nothing: the same
 active, dirty, in-flight, archived, lifecycle and merge-ancestry gates run
 afterwards, and a refusal from any of them still stands.
 
-`action=clean` is repository-oriented, not binding-oriented. Run it from an
-ordinary Session whose working directory is the repository main checkout: it
-scans that repository's Worktree Sessions and cleans every candidate whose
-source Session is already archived and whose worktree passes the existing
-safety gates.
+`action=clean` covers two intents, chosen by `scope` rather than inferred from
+who is calling.
+
+`scope: 'repository'` (the default) sweeps: run it from an ordinary Session
+whose working directory is the repository main checkout, and it scans that
+repository's Worktree Sessions, cleaning every candidate whose source Session
+is already archived and whose worktree passes the existing safety gates. A
+Session still bound to a worktree cannot sweep — not itself, not its peers.
+
+`scope: 'specified'` handles only the operation bound to the calling Session,
+which is how a Session finishes its own worktree. Being bound is the normal
+case here rather than a refusal, and unrelated candidates are neither examined
+nor asked about — so finishing stays one question instead of one per worktree
+in the repository. It resolves the target from the calling Session's binding,
+so it cannot be combined with an explicit `path`, and a caller with no current
+binding is refused rather than quietly widened into a sweep. Every gate and the
+archive-then-clean offer work exactly as they do in a sweep.
 
 A candidate whose source Session is **not** archived, but which is otherwise
 finished — task branch provably merged, worktree clean, operation prepared, no
@@ -97,9 +109,9 @@ gate fails at that point the clean is refused and the archive is deliberately
 kept — report it honestly and tell the user the Session stays recoverable by
 unarchiving it, which restores it as an ordinary Session.
 
-A Session still bound to a worktree cannot clean itself or its
-peers and is refused with an instruction to switch to the main-checkout
-Session. Review status and `dry_run: true` first; all live Session paths and
+A Session still bound to a worktree is refused a sweep, with an instruction to
+switch to the main-checkout Session; finishing its own worktree is what
+`scope: 'specified'` is for. Review status and `dry_run: true` first; all live Session paths and
 bindings stay protected, and refused candidates are reported with reasons
 instead of being removed. An authorized `path` may name a different repository
 main checkout, and the scan then behaves exactly as it would from that
