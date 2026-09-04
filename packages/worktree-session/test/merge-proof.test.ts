@@ -84,6 +84,50 @@ describe('merge proof accepts patch equivalence after a rebase', () => {
     expect(result.mergeProof).toBe('patch-equivalent')
   }, 300_000)
 
+  // The proof has to survive contact with `git branch -d`, which re-derives
+  // "merged" from ancestry and so refuses a rebased branch. Observed for real
+  // (session-57d93f00): the worktree was removed, branch deletion failed, and
+  // the operation was left mid-lifecycle. Only a real run reaches this line,
+  // which is why a dry-run-only suite missed it.
+  it('actually removes a rebased branch instead of failing at deletion', async () => {
+    const root = await fixture()
+    const target = await candidate(root, 'operation-rebased-real', 'session-rebased-real')
+    await commitWork(target.worktreePath, 'feature.txt', 'landed work')
+    await landRewrittenOnMain(root, target.taskBranch)
+
+    const result = await wsClean(target.worktreePath, {
+      activePaths: [],
+      activeBoundSessionIds: [],
+      cwd: root,
+    })
+
+    expect(result.cleaned).toBe(true)
+    expect(result.mergeProof).toBe('patch-equivalent')
+    await expect(access(target.worktreePath)).rejects.toMatchObject({ code: 'ENOENT' })
+    // A surviving branch is the observed failure: both resources must be gone.
+    expect(await git(root, 'branch', '--list', target.taskBranch)).toBe('')
+  }, 300_000)
+
+  // An ancestry-proven branch keeps the safer `-d`, so Git's own check stays an
+  // independent second opinion instead of being bypassed everywhere.
+  it('deletes an ancestry-proven branch with the safe flag', async () => {
+    const root = await fixture()
+    const target = await candidate(root, 'operation-ancestor-real', 'session-ancestor-real')
+    await commitWork(target.worktreePath, 'feature.txt', 'merged work')
+    await git(root, 'merge', '--no-ff', target.taskBranch, '-m', 'merge task')
+
+    const result = await wsClean(target.worktreePath, {
+      activePaths: [],
+      activeBoundSessionIds: [],
+      cwd: root,
+    })
+
+    expect(result.cleaned).toBe(true)
+    expect(result.mergeProof).toBe('ancestor')
+    expect(result.actions.some(action => action.includes('branch -d '))).toBe(true)
+    expect(await git(root, 'branch', '--list', target.taskBranch)).toBe('')
+  }, 300_000)
+
   // 1.2 The safety case: work that never landed must still refuse.
   it('refuses when a commit has no upstream equivalent', async () => {
     const root = await fixture()
