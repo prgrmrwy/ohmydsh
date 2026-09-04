@@ -2,7 +2,7 @@
  * Pure guard decision: convert network + selection facts into a block action.
  *
  * Pure by construction (no cordis, no DOM, no clock), so the full spec
- * scenario table (home×Claude quadrants, fail open, official-yield) is
+ * scenario table (region×Claude quadrants, fail closed, official-yield) is
  * unit-testable offline.
  *
  * @module dsh-home-network-model-guard/judge
@@ -18,7 +18,10 @@ export interface SelectionFacts {
 
 /** Everything the guard needs to decide for one session. */
 export interface JudgeInput {
-  /** Host network classification (`'unknown'` = no conclusion → fail open). */
+  /**
+   * Host egress classification. `'blocked'` and `'unknown'` both fail closed
+   * for Claude; only `'allowed'` permits it.
+   */
   readonly network: NetworkVerdict
   /**
    * The official model-directory routable flag. `false` means the official
@@ -38,17 +41,18 @@ export type GuardAction = 'block' | 'yield-official' | 'none'
 /**
  * One pure decision.
  *
- * - `'block'`: home network ∧ Claude-family selection (routable not false).
+ * - `'block'`: Claude-family selection ∧ egress is NOT `'allowed'` (fail closed
+ *   on blocked AND unknown).
  * - `'yield-official'`: official non-routable block owns the slot.
- * - `'none'`: everything else (non-home, unknown network, non-Claude, no selection).
+ * - `'none'`: non-Claude selection, no selection, or an `'allowed'` egress.
  *
  * @param input - the facts snapshot for one session.
  * @returns the action to apply.
  */
 export function judge(input: JudgeInput): GuardAction {
   if (input.routable === false) return 'yield-official'
-  if (input.network !== 'home') return 'none'
   if (input.selection === null) return 'none'
   if (!isClaudeFamily(input.selection.provider, input.selection.model)) return 'none'
+  if (input.network === 'allowed') return 'none'
   return 'block'
 }
