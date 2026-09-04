@@ -30,11 +30,11 @@
 
 ## 4. 阶段四前置:spike 调研(门槛,不通过则停)
 
-- [ ] 4.1 查清 `@deepseek-ai/dsh-client-runtime` 在 `0.1.2` 线的接口承接方式:逐一确认 `dsh-api-session-controller`、`dsh-client-ui-session`、`dsh-client-ui-chat`、`dsh-client-ui-approval` 各自承接了哪些原接口面,并确认原 `ctx.connection.api.sessions.*` 的替代形态(已知 `0.1.2` 引入 `ctx.remote.session.*`)。
-- [ ] 4.2 逐包评估改动量:对 7 个 inject 了 `dsh-client-runtime` 的自研包(`dsh-pet`、`worktree-session`、`system-clock`、`session-links`、`session-title-copy`、`sidebar-session-provider-icon`、`home-network-model-guard`),分别列出需改的 inject 声明、调用点与预估改动规模;区分"仅改 inject 即可"与"需改写调用形态"两类。
-- [ ] 4.3 确认 spike 时点的 registry 实况:`@deepseek-ai/dsh` 的 `latest` 是否仍为 `0.1.2-rc.1`,据此确定阶段四的实际目标版本(design Open Questions 第三条)。
-- [ ] 4.4 复核阶段四放行项的准入:`better-sidebar@0.18.0` 与 `sidebar-qa@0.5.0`(或届时更新版)的 peer 与运行时服务需求是否被目标运行体满足;特别确认 `ctx.remote.session` 在目标运行体确实存在。
-- [ ] 4.5 输出 spike 结论:若改动量或不确定性超出可接受范围,在此停止并记录原因,不进入 4.6 之后的执行;结论写回本 change 的 design.md Open Questions。
+- [x] 4.1 查清 `@deepseek-ai/dsh-client-runtime` 在 `0.1.2` 线的接口承接方式:逐一确认 `dsh-api-session-controller`、`dsh-client-ui-session`、`dsh-client-ui-chat`、`dsh-client-ui-approval` 各自承接了哪些原接口面,并确认原 `ctx.connection.api.sessions.*` 的替代形态(已知 `0.1.2` 引入 `ctx.remote.session.*`)。
+- [x] 4.2 逐包评估改动量:对 7 个 inject 了 `dsh-client-runtime` 的自研包(`dsh-pet`、`worktree-session`、`system-clock`、`session-links`、`session-title-copy`、`sidebar-session-provider-icon`、`home-network-model-guard`),分别列出需改的 inject 声明、调用点与预估改动规模;区分"仅改 inject 即可"与"需改写调用形态"两类。
+- [x] 4.3 确认 spike 时点的 registry 实况:`@deepseek-ai/dsh` 的 `latest` 是否仍为 `0.1.2-rc.1`,据此确定阶段四的实际目标版本(design Open Questions 第三条)。
+- [x] 4.4 复核阶段四放行项的准入:`better-sidebar@0.18.0` 与 `sidebar-qa@0.5.0`(或届时更新版)的 peer 与运行时服务需求是否被目标运行体满足;特别确认 `ctx.remote.session` 在目标运行体确实存在。
+- [x] 4.5 输出 spike 结论:若改动量或不确定性超出可接受范围,在此停止并记录原因,不进入 4.6 之后的执行;结论写回本 change 的 design.md Open Questions。
 
 ## 5. 阶段四前置:固定升级前后的能力基线
 
