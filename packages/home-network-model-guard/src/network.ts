@@ -114,6 +114,10 @@ export interface VerdictCacheOptions {
   readonly ttlMs: number
   /** Abort an egress fetch after this long; the answer then degrades. */
   readonly fetchTimeoutMs: number
+  /** First backoff after a failed refresh; doubles on every failure. */
+  readonly backoffBaseMs?: number
+  /** Ceiling for the backoff interval (sustained retry cadence). */
+  readonly backoffMaxMs?: number
 }
 
 interface CacheEntry {
@@ -122,26 +126,43 @@ interface CacheEntry {
   fingerprint: string
 }
 
+/** Default sustained retry cadence: 2s → 4s → … → 60s, then keep trying. */
+const DEFAULT_BACKOFF_BASE_MS = 2_000
+const DEFAULT_BACKOFF_MAX_MS = 60_000
+
 /** Timeout elevated so the degradation reason maps to `'timeout'`. */
 class FetchTimedOutError extends Error {}
 
 /**
- * Cached, single-flight network verdict source.
+ * Cached, single-flight network verdict source with sustained retry.
  *
  * Hit condition: TTL not expired AND fingerprint unchanged. Any miss starts a
  * refresh; concurrent callers share one in-flight refresh (single-flight).
- * A failed refresh degrades to `'unknown'` and is deliberately NOT cached, so
- * the next request retries (spec: 降级后可恢复，不停留在降级态).
+ * A failed refresh degrades to `'unknown'` and is NOT cached, but the next
+ * outbound attempt is postponed by an exponential backoff (2s → 4s → … → cap,
+ * default 60s) so the host keeps retrying at most once per cap interval — the
+ * verdict self-heals as soon as the network recovers without hammering the
+ * endpoint (spec: 降级后可恢复，不停留在降级态).
+ *
+ * A fingerprint change (interface/reconnect) bypasses the backoff window and
+ * re-queries immediately: the old conclusion belonged to a different network.
  */
 export class NetworkVerdictCache {
   private cached: CacheEntry | null = null
   private flight: Promise<GuardCheckResult> | null = null
+  /** Fingerprint of the most recent refresh attempt (success or failure). */
+  private lastFingerprint: string | null = null
+  private nextAttemptAtMs = 0
+  private backoffMs: number
+  private lastReason: NonNullable<GuardCheckResult['degradedReason']> = 'fetch-failed'
 
   public constructor(
     private readonly source: VerdictSource,
     private readonly now: () => number,
     private readonly options: VerdictCacheOptions,
-  ) {}
+  ) {
+    this.backoffMs = options.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS
+  }
 
   /**
    * Answer the guard's network verdict, serving the cache when fresh.
@@ -161,6 +182,10 @@ export class NetworkVerdictCache {
         degraded: false,
       }
     }
+    // Same network that just failed: stay inside the backoff window.
+    if (this.flight === null && this.lastFingerprint === fingerprint && now < this.nextAttemptAtMs) {
+      return { verdict: 'unknown', degraded: true, degradedReason: this.lastReason }
+    }
     if (this.flight === null) {
       this.flight = this.refresh(fingerprint).finally(() => {
         this.flight = null
@@ -171,6 +196,7 @@ export class NetworkVerdictCache {
 
   private async refresh(fingerprint: string): Promise<GuardCheckResult> {
     const sampledAt = this.now()
+    this.lastFingerprint = fingerprint
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), this.options.fetchTimeoutMs)
     timer.unref?.()
@@ -186,17 +212,21 @@ export class NetworkVerdictCache {
       if (controller.signal.aborted) throw new FetchTimedOutError('egress fetch timed out')
       const verdict = this.source.classify(ip)
       this.cached = { verdict, fetchedAtMs: sampledAt, fingerprint }
+      this.nextAttemptAtMs = 0
+      this.backoffMs = this.options.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS
       return { verdict, sampledAt, freshForMs: this.options.ttlMs, degraded: false }
     } catch (error) {
-      return {
-        verdict: 'unknown',
-        degraded: true,
-        degradedReason: error instanceof FetchTimedOutError
-          ? 'timeout'
-          : error instanceof EgressInvalidResponseError
-            ? 'invalid-response'
-            : 'fetch-failed',
-      }
+      const reason = error instanceof FetchTimedOutError
+        ? 'timeout'
+        : error instanceof EgressInvalidResponseError
+          ? 'invalid-response'
+          : 'fetch-failed'
+      this.lastReason = reason
+      // Same network failed: back off. A later fingerprint change bypasses this.
+      const backoff = this.backoffMs
+      this.nextAttemptAtMs = sampledAt + backoff
+      this.backoffMs = Math.min(backoff * 2, this.options.backoffMaxMs ?? DEFAULT_BACKOFF_MAX_MS)
+      return { verdict: 'unknown', degraded: true, degradedReason: reason }
     } finally {
       clearTimeout(timer)
     }
