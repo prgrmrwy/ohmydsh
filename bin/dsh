@@ -332,12 +332,13 @@ print_plugins() {
 }
 
 # Append one startup record: timestamp, dsh version, port, loaded plugins
+# 插件清单走 plugin-list.mjs --names(与启动 msg 同一真相源:bundle 层 +
+# patch 层)。早先这里只读 dsh.profile.bundles,靠 patch insert 行接线的插件
+# (如 dsh-width-tiers)既不出现在启动 msg 里,也不出现在历史记录里。
 record_startup() {
-  local VER="$1" bundles=""
-  if [[ -f "$PROFILE_PKG" ]]; then
-    bundles="$(node -e 'const p=require(process.argv[1]);console.log((p.dsh&&p.dsh.profile&&p.dsh.profile.bundles||[]).join(", "))' "$PROFILE_PKG" 2>/dev/null || true)"
-  fi
-  printf '[%s] dshVersion=%s port=%s plugins=[%s]\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$VER" "$PORT" "$bundles" >>"$STARTUP_LOG"
+  local VER="$1" plugins=""
+  plugins="$(node "$REPO/scripts/plugin-list.mjs" --names 2>/dev/null || true)"
+  printf '[%s] dshVersion=%s port=%s plugins=[%s]\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$VER" "$PORT" "$plugins" >>"$STARTUP_LOG"
 }
 
 is_server_up() {
