@@ -20,13 +20,13 @@
 
 ## 3. 阶段三:better-sidebar 升到兼容上界
 
-- [ ] 3.1 复核 `dsh-better-sidebar@0.17.1` 的 peer 确实接受当前运行体(`@deepseek-ai/cordis ^4.0.1`、`dsh-* ^0.1.0-rc.8`),并确认 `0.18.0` 因 `cordis ^4.0.2` + `dsh-* ^0.1.2-rc.1` 不可用于当前阶段。
-- [ ] 3.2 `dsh.yaml` 将 `better-sidebar` 升到 `0.17.1`,note 补记该版本为 `0.1.2` 线双向兼容层(通往阶段四的过渡),以及 `0.18.0` 的准入条件。
-- [ ] 3.3 确认 `node-pty` 原生构建仍被 profile 的 `allowBuilds` 批准(既有部署侧信任决定),必要时按 pnpm 提示重新批准。
-- [ ] 3.4 `node scripts/sync.mjs` 物化并连续两次确认幂等。
+- [x] 3.1 复核 `dsh-better-sidebar@0.17.1` 的 peer 确实接受当前运行体(`@deepseek-ai/cordis ^4.0.1`、`dsh-* ^0.1.0-rc.8`),并确认 `0.18.0` 因 `cordis ^4.0.2` + `dsh-* ^0.1.2-rc.1` 不可用于当前阶段。
+- [x] 3.2 `dsh.yaml` 将 `better-sidebar` 升到 `0.17.1`,note 补记该版本为 `0.1.2` 线双向兼容层(通往阶段四的过渡),以及 `0.18.0` 的准入条件。
+- [x] 3.3 确认 `node-pty` 原生构建仍被 profile 的 `allowBuilds` 批准(既有部署侧信任决定),必要时按 pnpm 提示重新批准。
+- [x] 3.4 `node scripts/sync.mjs` 物化并连续两次确认幂等。
 - [ ] 3.5 验收:侧边栏各面板(文件/编辑器/终端/Git/浏览器)可开且无 console 报错;确认无 duplicate prefix route 报错(防与 aggregate bundle 双挂载)。
 - [ ] 3.6 回归依赖方:`session-links`(peer `dsh-better-sidebar ^0.16.0`)的「文档/资料」tab 仍正常注册与计数;`sidebar-qa@0.4.0` 划选提问仍可用。
-- [ ] 3.7 提交为独立 commit。
+- [x] 3.7 提交为独立 commit。
 
 ## 4. 阶段四前置:spike 调研(门槛,不通过则停)
 
