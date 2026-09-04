@@ -46,4 +46,4 @@
 - [ ] 6.3 在隔离 DSH_HOME 物化，验证连续 sync 幂等、配置迁移、bundle 加载和路由注册
 - [ ] 6.4 在真实 Host 重启后验证 Claude 请求在阻断/未知出口被 Host 拒绝，确认不会产生 Anthropic 探测请求
 - [ ] 6.5 验证 `dsh.yaml` `enabled: false` 回滚同时移除 Web 提示和 Host 门禁，源码与本机配置保留
-- [ ] 6.6 运行 `openspec validate --strict`，同步主规范、归档 change、提交并推送
+- [x] 6.6 运行 `openspec validate --strict`，同步主规范、归档 change、提交并推送（validate --specs 14/14；主规范已同步至 openspec/specs/home-network-model-guard/spec.md）
