@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { authorizeExplicitPath } from '../src/host/tool.js'
+import { authorizeExplicitPath, sessionLabel } from '../src/host/tool.js'
 
 /**
  * The confirmation runs on `ctx.userQuestions`, NOT `ctx.approval`.
@@ -87,5 +87,50 @@ describe('explicit-path confirmation is routed to the human, not the permission 
     const ask = async () => ({ answers: [{ id: 'ws-confirm', selected: [], custom: 'maybe later' }] })
     await expect(authorizeExplicitPath({ get: () => ({ ask }) }, exec, { action: 'clean', path: '/repo/main' }))
       .rejects.toThrow(/not authorized by the user/)
+  })
+})
+
+describe('the confirmation names the session the way a human knows it', () => {
+  // A bare `session-6456e0ce-6ded-47ba-9c79-...` identifies nothing to the
+  // person deciding; the title is what tells two sessions apart.
+  it('labels a titled session as title plus short id', () => {
+    expect(sessionLabel('session-6456e0ce-6ded-47ba-9c79-ac02cf871eb3', '简单测试消息，无具体任务'))
+      .toBe('简单测试消息，无具体任务（6456e0）')
+  })
+
+  // Titles are neither unique nor guaranteed, so the id stays as the
+  // tiebreaker rather than being dropped for prettiness.
+  it('still identifies a session that has no title', () => {
+    expect(sessionLabel('session-dfc5c3d3-7b85-4500-95ac-ff35905b8c73')).toBe('未命名会话（dfc5c3）')
+    expect(sessionLabel('session-dfc5c3d3-7b85-4500-95ac-ff35905b8c73', '   ')).toBe('未命名会话（dfc5c3）')
+  })
+
+  // Ids that do not carry the usual prefix must still shorten predictably.
+  it('shortens an id without the session- prefix', () => {
+    expect(sessionLabel('abcdef0123456789', 'x')).toBe('x（abcdef）')
+  })
+
+  it('asks about the worktree by name and identifies the session by title', async () => {
+    const ask = vi.fn(async () => ({ answers: [{ id: 'ws-confirm', selected: ['取消'] }] }))
+    const ctx = {
+      get: (name: string) => name === 'userQuestions' ? { ask } : undefined,
+      sessions: {
+        get: () => ({ events: [{ type: 'session/title', data: { title: '简单测试消息，无具体任务' } }] }),
+      },
+      workspaceRegistry: { archivedSessionIds: [], archiveSession: async () => {} },
+    }
+    const { confirmArchiveDetailFor } = await import('../src/host/tool.js')
+    const text = confirmArchiveDetailFor(ctx as never, {
+      sourceSessionId: 'session-6456e0ce-6ded-47ba-9c79-ac02cf871eb3',
+      worktreePath: '/repo/.worktrees/task-6aa8f49cc9',
+      taskBranch: 'ws/task-6aa8f49cc9',
+    } as never)
+
+    expect(text).toContain('task-6aa8f49cc9')
+    expect(text).toContain('简单测试消息，无具体任务（6456e0）')
+    // The undecipherable full id must not be what the human is asked about.
+    expect(text).not.toContain('session-6456e0ce-6ded-47ba-9c79-ac02cf871eb3')
+    // The exact path stays available for the reader who needs it.
+    expect(text).toContain('/repo/.worktrees/task-6aa8f49cc9')
   })
 })

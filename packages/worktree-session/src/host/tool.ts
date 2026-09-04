@@ -18,6 +18,79 @@ export function hasExplicitPath(path: string | undefined): path is string {
   return path !== undefined && path !== ''
 }
 
+/** Leading characters of a session id kept when labelling one for a human. */
+const SESSION_ID_PREFIX_LENGTH = 6
+
+/**
+ * Render a session as `<title>（<short id>）` for a question a human answers.
+ *
+ * A bare `session-6456e0ce-6ded-47ba-9c79-ac02cf871eb3` identifies nothing to
+ * the person deciding: the part that tells two sessions apart is the title
+ * they gave it. The short id stays because titles are neither unique nor
+ * guaranteed, so it remains the tiebreaker and the greppable handle.
+ *
+ * The `session-` prefix is dropped from the short form: it is on every id and
+ * so distinguishes nothing, while costing width in a narrow dialog.
+ *
+ * @param sessionId - The full durable session id.
+ * @param title - The session's latest title, when the Host can prove one.
+ * @returns a label safe to show even when no title exists.
+ */
+export function sessionLabel(sessionId: string, title?: string): string {
+  const short = sessionId.replace(/^session-/, '').slice(0, SESSION_ID_PREFIX_LENGTH)
+  const trimmed = title?.trim()
+  return trimmed === undefined || trimmed === '' ? `未命名会话（${short}）` : `${trimmed}（${short}）`
+}
+
+/**
+ * The facts a human weighs before finishing one Worktree Session.
+ *
+ * Exported so the wording is testable on its own: this text is the entire
+ * basis for an irreversible decision, and it must keep naming the session in
+ * human terms rather than by an id nobody can place.
+ *
+ * @param ctx - Carrier of the sessions service, used only to resolve a title.
+ * @param offer - The candidate's proven facts.
+ * @returns the detail block shown with the question.
+ */
+export function confirmArchiveDetailFor(
+  ctx: { sessions?: { get(id: never): unknown } },
+  offer: { sourceSessionId: string; taskBranch: string; worktreePath: string },
+): string {
+  return (
+    `源会话：${sessionLabel(offer.sourceSessionId, titleOfSession(ctx, offer.sourceSessionId))}\n` +
+    `任务分支：${offer.taskBranch}\n` +
+    `工作区路径：${offer.worktreePath}\n` +
+    '该分支已证明合入，工作区没有未提交改动。确认后将先归档该会话，再删除该工作区与本地任务分支。' +
+    '删除不可逆；被归档的会话本身仍可通过取消归档恢复为普通会话。'
+  )
+}
+
+/**
+ * The latest title a session recorded, or `undefined` when it has none.
+ *
+ * Titles are log-only `session/title` events rather than header fields, so the
+ * current one is the last such event. Read defensively: this is display copy,
+ * and an unreadable log must degrade to "no title", never fail the operation
+ * the question belongs to.
+ */
+function titleOfSession(ctx: { sessions?: { get(id: never): unknown } }, sessionId: string): string | undefined {
+  try {
+    const session = ctx.sessions?.get(sessionId as never) as { events?: readonly unknown[] } | undefined
+    const events = session?.events
+    if (events === undefined) return undefined
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index] as { type?: string; data?: { title?: unknown } } | undefined
+      if (event?.type !== 'session/title') continue
+      const title = event.data?.title
+      if (typeof title === 'string' && title.trim() !== '') return title
+    }
+    return undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** Minimal execution view the authorization seam reads. */
 interface ExplicitPathExecution {
   readonly agent?: unknown
@@ -315,12 +388,8 @@ export function registerWsTool(ctx: Context): () => void {
           // operator CLI and HTTP routes inject neither hook and keep the
           // historical refusal, having no trustworthy way to ask.
           confirmArchive: offer => askUser(ctx, exec,
-            `是否归档并清理 Worktree Session ${basename(offer.worktreePath)}？`,
-            `任务分支：${offer.taskBranch}\n` +
-            `工作区：${offer.worktreePath}\n` +
-            `源会话：${offer.sourceSessionId}\n` +
-            '该分支已证明合入，工作区没有未提交改动。确认后将先归档该会话，再删除该工作区与本地任务分支。' +
-            '删除不可逆；被归档的会话本身仍可通过取消归档恢复为普通会话。'),
+            `是否归档并清理工作区 ${basename(offer.worktreePath)}？`,
+            confirmArchiveDetailFor(ctx, offer)),
           archiveSession: async sourceSessionId => {
             await ctx.workspaceRegistry.archiveSession(sourceSessionId as never)
           },
