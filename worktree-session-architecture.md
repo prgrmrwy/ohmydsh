@@ -120,9 +120,12 @@ stateDiagram-v2
     [*] --> active : 首次提交绑定成功
     active --> uncertain : 提交 claimed 但未确认
     uncertain --> active : 重放校验确认 admission
-    active --> cleaned : ws clean(安全门通过)
+    active --> cleaned : ws clean(安全门通过,清理时未归档)
+    active --> cleanedArchived : ws clean(安全门通过,清理时已归档)
     cleaned --> cleanedArchived : 观察到进入归档集
     cleanedArchived --> released : 观察到取消归档
+    cleaned --> released : 恢复时托管 worktree 已不存在
+    cleanedArchived --> released : 恢复时托管 worktree 已不存在
     released --> released : 重复归档/取消归档
     note right of cleaned
         仅移除安全已证明的 worktree/branch 运行时资源
@@ -181,8 +184,12 @@ stateDiagram-v2
 
 ## 普通 Session 恢复(cleaned 历史 Session)
 
-- 清理后、归档转换发生前，重新打开历史 Session 仍保持 cleaned 防护：提示旧执行根已不存在，并拒绝复用被移除的路径或主 checkout。
-- cleaned Session 进入归档集后再取消归档时，Host 将绑定单调转换为 `released`：解除运行时 Worktree guard/context 和客户端残留状态，同时保留审计 tombstone。
+- 归属只看一个事实：**托管 worktree 现在是否仍然存在且身份可被证明**。恢复时通过既有身份校验（目录存在、位于 `.worktrees/` 分配根内、分支等于任务分支、Git common dir 一致）则保持 cleaned 防护；证明不了则单调转换为 `released` 并恢复为普通 Session。
+  - 判定 MUST NOT 退化为仅判断路径存在：删除后同名重建的目录不是同一个托管 worktree。
+  - 判定不依赖归档历史。二者无因果关系；以归档历史决定归属，会让两个 worktree 同样已删除的会话仅因归档往返与否而一个可恢复、另一个永久停在全工具拒绝。
+  - 该释放仅适用于 cleaned/cleanedArchived。**活动绑定**身份校验失败时含义相反——"无法确信自己在哪执行"——保持既有 fail-closed 拒绝，不得反而放宽为普通会话。
+- cleaned Session 进入归档集后再取消归档时，Host 同样将绑定单调转换为 `released`：解除运行时 Worktree guard/context 和客户端残留状态，同时保留审计 tombstone。
+- 清理写 tombstone 时即记录**清理时刻**的归档成员资格（已归档写 `cleanedArchived`）。归档与清理是两次独立持久写入，"先归档再清理"时归档发生在 tombstone 存在之前、对 `prepared` 记录无状态可推进；清理是较晚的一次，是唯一能同时看到两个事实的位置。该事实由受信 Host 传入，维护层不自行推断，故 operator CLI/HTTP 入口行为不变。
 - released operation 不再参与当前绑定查询、恢复、状态、策略或无 path 维护；对应非空白 Session 恢复普通输入行为，且不会创建 branch、worktree、Workspace、Session 或 operation，也不提供 `ws start`。
 - 重复归档/取消归档不会让 released 绑定回退；缺少 archive lifecycle marker 的 legacy schema-v2 cleaned tombstone 会在兼容对账时按当前归档成员关系 fail-closed 迁移。
 - 孤儿操作:用 `dsh-ws status <worktree>` 检查并保留/提交有用工作;
