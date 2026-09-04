@@ -289,6 +289,16 @@ export interface RepoCleanResult {
   cleaned: readonly CleanResult[]
   refused: readonly RepoCleanRefusal[]
   ignored: readonly RepoCleanIgnored[]
+  /**
+   * How many candidates a real run would offer to archive-and-finish. Present
+   * only on a preview that could make such an offer, and only when non-zero.
+   *
+   * A preview reports those candidates as refusals, so `cleaned: []` reads as
+   * "nothing to do here" even when a real run would put a real decision to the
+   * user. This states the actionable outcome outright instead of leaving it to
+   * be inferred from refusal prose.
+   */
+  wouldOfferToFinish?: number
 }
 
 export type WsErrorCode =

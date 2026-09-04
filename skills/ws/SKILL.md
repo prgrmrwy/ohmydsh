@@ -58,6 +58,10 @@ This question uses the ask-a-human channel, not the approval/sandbox-escalation
 channel, so a session reporting approval prompts as disabled still receives it.
 "Approval prompts are disabled" is never a reason to skip passing `path`.
 
+"One-shot" describes what agreement covers — this call only, never remembered —
+not a scarce quota. There is no budget of authorizations to conserve, so asking
+again for a further call costs nothing and is the intended flow.
+
 Agreement only establishes where to look. It exempts nothing: the same
 active, dirty, in-flight, archived, lifecycle and merge-ancestry gates run
 afterwards, and a refusal from any of them still stands.
@@ -92,6 +96,15 @@ approval/sandbox-escalation channel. A session that reports approval prompts as
 disabled — every `danger-full-access` session does — still receives this
 question normally. Never reason that the offer would be auto-rejected and skip
 the real run on that basis: it reaches the user regardless of approval policy.
+
+Needing the user's decision is the point of the real run, not a reason to avoid
+it. "It would only ask, so the count stays zero" is circular: the count stays
+zero precisely because the question was never put. When the user asked to clean
+and a candidate is offerable, make the real run and let them answer. Deciding
+on their behalf that they would rather not be asked — because the worktree
+belongs to a session they are using, or because you judge the moment wrong —
+takes the choice away from the person who asked for it. Report what you see and
+let them choose.
 
 That offer is never a way around a gate. A candidate that is unmerged, dirty,
 in-flight, malformed or still occupied is refused on that real reason and is
