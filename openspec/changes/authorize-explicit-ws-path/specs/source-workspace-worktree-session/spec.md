@@ -12,27 +12,31 @@
 - **THEN** 系统 SHALL 按既有 operator 语义执行，不因模型可见 `path` 的引入而改变目标解析或安全门
 
 ### Requirement: Agent explicit ws path is trusted only through one-shot user authorization
-模型可见的 `ws` 工具在 Agent 调用携带非空显式 `path` 时，SHALL 通过 DSH 平台 approval 能力向用户发起一次性授权询问，询问 MUST 明确包含被请求的 action 与确切路径，并关联到该次工具调用。仅当结果为一次性授权（`allowed-once`）时，系统 SHALL 将该显式路径作为本次调用的目标来源；`rejected`、`cancelled`、`unavailable` 及会话 approval policy 为 `never` 时，系统 MUST 拒绝该调用并保持与既有无授权拒绝一致的 fail-closed 行为，不得扫描、修改或删除任何 Worktree Session 资源。授权 MUST 只对当次调用生效，不得建立任何持久放权。省略 `path` 或空字符串 `path`（wire 兼容形态）的调用 MUST 保持既有解析语义完全不变。
+模型可见的 `ws` 工具在 Agent 调用携带非空显式 `path` 时，SHALL 通过 DSH 平台的用户提问能力（`ctx.userQuestions`）向用户发起一次性确认，询问 MUST 明确包含被请求的 action 与确切路径，并提供可直接选择的同意与拒绝选项。系统 MUST NOT 使用 approval（沙箱提权授权）能力承载该确认：该能力在 `danger-full-access` 部署下 policy 为 `never`，会在无人应答的情况下自动拒绝，使确认在最需要它的部署中不可达。仅当用户明确选择同意项时，系统 SHALL 将该显式路径作为本次调用的目标来源；用户拒绝、未作答、仅给出自由文本、无可用提问 provider 或询问抛错时，系统 MUST 拒绝该调用并保持与既有拒绝一致的 fail-closed 行为，不得扫描、修改或删除任何 Worktree Session 资源。同意 MUST 只对当次调用生效，不得建立任何持久放权。省略 `path` 或空字符串 `path`（wire 兼容形态）的调用 MUST 保持既有解析语义完全不变。
 
-#### Scenario: User grants one-shot authorization for an explicit path
-- **WHEN** Agent 调用 `ws` 携带非空显式 `path`，用户对授权询问回答 `allowed-once`
+#### Scenario: User agrees to an explicit path
+- **WHEN** Agent 调用 `ws` 携带非空显式 `path`，用户在确认中选择同意项
 - **THEN** 系统 SHALL 以该路径作为本次调用的目标来源继续执行，且后续全部既有安全门逐项照常评估
 
-#### Scenario: User rejects the authorization
-- **WHEN** Agent 调用 `ws` 携带非空显式 `path`，授权结果为 `rejected` 或 `cancelled`
+#### Scenario: User declines the confirmation
+- **WHEN** Agent 调用 `ws` 携带非空显式 `path`，用户选择拒绝项
 - **THEN** 系统 SHALL 拒绝本次调用并返回明确诊断，不得对任何 Worktree Session 资源产生读写以外的影响
 
-#### Scenario: No answerer is available or policy is never
-- **WHEN** Agent 调用 `ws` 携带非空显式 `path`，而会话无可用 approval answerer（`unavailable`）或 approval policy 为 `never`
-- **THEN** 系统 SHALL 确定性拒绝本次调用（fail closed），行为与授权被拒绝一致
+#### Scenario: Confirmation is unreachable or unanswered
+- **WHEN** 会话未组合用户提问 provider、询问抛错（如步骤被中止），或用户未选择任何选项
+- **THEN** 系统 SHALL 确定性拒绝本次调用（fail closed），且 MUST NOT 把沉默或自由文本当作同意
 
-#### Scenario: Authorization does not bypass safety gates
-- **WHEN** 用户已对显式路径授权 `allowed-once`，但目标候选未通过既有安全门（如 dirty、active、in-flight、未归档、未合并或 schema 不支持）
-- **THEN** 系统 SHALL 按既有安全门语义拒绝该候选并报告原因；授权 MUST 不构成任何安全门的豁免
+#### Scenario: Full-access deployment still receives the prompt
+- **WHEN** 部署以 `danger-full-access` 运行（approval policy 为 `never`），Agent 调用 `ws` 携带非空显式 `path`
+- **THEN** 系统 SHALL 仍通过用户提问能力向用户展示确认，MUST NOT 因 approval policy 而自动拒绝
 
-#### Scenario: Authorization is single-use
-- **WHEN** 同一 Agent 在一次 `allowed-once` 授权后再次调用 `ws` 携带显式 `path`
-- **THEN** 系统 SHALL 重新发起授权询问，不得复用先前授权
+#### Scenario: Agreement does not bypass safety gates
+- **WHEN** 用户已同意显式路径，但目标候选未通过既有安全门（如 dirty、active、in-flight、未归档、未合并或 schema 不支持）
+- **THEN** 系统 SHALL 按既有安全门语义拒绝该候选并报告原因；同意 MUST 不构成任何安全门的豁免
+
+#### Scenario: Agreement is single-use
+- **WHEN** 同一 Agent 在一次同意后再次调用 `ws` 携带显式 `path`
+- **THEN** 系统 SHALL 重新发起确认，不得复用先前同意
 
 #### Scenario: Omitted or empty path keeps existing resolution
 - **WHEN** Agent 调用 `ws` 省略 `path` 或传入空字符串
@@ -53,12 +57,16 @@
 - **WHEN** 用户授权后，`ws status` 或 `ws promote` 以有效 worktree 绝对路径为 `path` 执行
 - **THEN** 系统 SHALL 按既有显式路径单 operation 语义解析并执行，安全门与诊断不变
 
-### Requirement: Explicit-path authorization is audited on the calling session
-每次显式路径授权询问及其结果 SHALL 通过平台既有 approval 审计事件成对记录在发起调用的会话日志中，包含工具名、关联的工具调用与包含确切路径的原因说明；系统 MUST 不在无审计记录的情况下采纳任何显式路径。
+### Requirement: The confirmation is answerable and self-evident to the user
+每次显式路径确认 SHALL 由发起调用的会话中的真人作答，询问 MUST 自带判断所需的全部事实（被请求的 action 与确切绝对路径），MUST NOT 要求用户另行查阅上下文才能理解自己在批准什么，且 MUST 提供可直接选择的拒绝项，使拒绝无需输入自由文本。询问与作答由平台用户提问能力记录在该会话的对话中，构成可回溯的决定记录；系统 MUST NOT 在没有用户明确同意的情况下采纳任何显式路径。
 
-#### Scenario: Ask and outcome are logged as a pair
-- **WHEN** Agent 携带显式 `path` 调用 `ws` 触发授权询问
-- **THEN** 调用会话日志 SHALL 出现成对的 approval 审计事件，且原因说明包含被请求的 action 与确切路径
+#### Scenario: The question carries the deciding facts
+- **WHEN** Agent 携带显式 `path` 调用 `ws` 触发确认
+- **THEN** 询问 SHALL 包含被请求的 action 与确切路径，并说明同意仅对本次调用生效
+
+#### Scenario: Declining requires no free text
+- **WHEN** 用户希望拒绝一次显式路径确认
+- **THEN** 询问 SHALL 提供可直接选择的拒绝项，且选择它 MUST 使调用按 fail-closed 拒绝
 
 ## MODIFIED Requirements
 

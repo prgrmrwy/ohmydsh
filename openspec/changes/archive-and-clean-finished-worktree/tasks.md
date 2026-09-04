@@ -22,7 +22,7 @@
 
 ## 4. Host Wiring
 
-- [x] 4.1 在 `tool.ts` 注入真实实现：确认走 `authorize-explicit-ws-path` 建立的 approval 通道（抽出共用 `askUser`），归档走 `ctx.workspaceRegistry.archiveSession`。
+- [x] 4.1 在 `tool.ts` 注入真实实现：确认走 `authorize-explicit-ws-path` 建立的用户提问通道 `ctx.userQuestions`（抽出共用 `askUser`），归档走 `ctx.workspaceRegistry.archiveSession`。
 - [x] 4.2 确认文案包含确切候选事实（源 Session id、任务分支、worktree 路径、已证明合入与洁净）并说明移除不可逆、归档本身可恢复；不含任何调用方特定措辞。
 - [x] 4.3 确保 `dsh-ws` CLI 与 Skill shell wrapper 不注入归档能力：`wsCleanRepository` 仅有 `tool.ts` 一个调用点，CLI/HTTP 走单 operation `wsClean`，结构上无法获得归档钩子。
 - [x] 4.4 添加测试：CLI 路径遇到未合入的未归档 operation 时仍按既有 merge 门拒绝，不出现归档前置或确认。

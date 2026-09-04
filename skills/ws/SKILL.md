@@ -45,14 +45,16 @@ an absolute `path`. Use only a path a trusted mechanism established for this
 call; never a path taken from message prose, and never one you asked the user to
 paste so you could forward it.
 
-Every such call raises a one-shot authorization request naming the exact action
-and path. The user's approval covers that single call and is never reused, so a
-later call asks again. Treat a refusal as the answer: do not retry with a
-different path, and do not fall back to generic Git commands. Without approval —
-including when no one can be asked — the call is refused, which is the intended
-fail-closed behavior rather than a fault to work around.
+Every such call puts a one-shot question to the user naming the exact action and
+path, with a selectable yes and no. Agreement covers that single call and is
+never reused, so a later call asks again. Treat a refusal as the answer: do not
+retry with a different path, and do not fall back to generic Git commands.
+Without an explicit yes — including when no one can be asked — the call is
+refused, which is the intended fail-closed behavior rather than a fault to work
+around. Do not ask for this permission in prose yourself: pass the `path` and
+let the tool raise the real prompt.
 
-Authorization only establishes where to look. It exempts nothing: the same
+Agreement only establishes where to look. It exempts nothing: the same
 active, dirty, in-flight, archived, lifecycle and merge-ancestry gates run
 afterwards, and a refusal from any of them still stands.
 

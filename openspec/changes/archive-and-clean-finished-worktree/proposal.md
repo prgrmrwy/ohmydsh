@@ -26,7 +26,7 @@
 ## Impact
 
 - `packages/worktree-session/src/host/maintenance.ts`：`wsCleanRepository` 增加未归档候选的确认与归档编排接缝（归档动作由调用方注入，maintenance 层不直接依赖 DSH registry）。
-- `packages/worktree-session/src/host/tool.ts`：从受信 Host 注入 `archiveSession` 与用户确认实现，复用 `authorize-explicit-ws-path` 建立的 approval 通道。
+- `packages/worktree-session/src/host/tool.ts`：从受信 Host 注入 `archiveSession` 与用户确认实现，复用 `authorize-explicit-ws-path` 建立的用户提问（`ctx.userQuestions`）通道。
 - `packages/worktree-session/src/wire.ts`：按需补充"因未归档而提议归档"的汇总结果类型。
 - `packages/worktree-session/test/`：覆盖确认后归档并清理、拒绝确认、归档失败、归档后仍被安全门拒绝、以及其余候选不受影响。
 - `skills/ws/SKILL.md` 与架构文档：同步收尾退出的操作说明。

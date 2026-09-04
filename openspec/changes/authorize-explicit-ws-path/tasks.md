@@ -6,12 +6,12 @@
 - [x] 1.4 添加回归测试：省略 `path` 与空字符串 `path` 时不发起授权询问，且 `status`/`promote`/`clean` 的既有解析与诊断逐字不变。
 - [x] 1.5 添加回归测试：连续两次显式路径调用各自触发一次独立授权，不复用先前授权。
 
-## 2. Approval-Gated Path Resolution
+## 2. Confirmation-Gated Path Resolution
 
-- [x] 2.1 在 `packages/worktree-session/package.json` 的 peerDependencies 中按现有 pin 风格加入 `@deepseek-ai/dsh-user-approval`。
+- [x] 2.1 在 `packages/worktree-session/package.json` 的 peerDependencies 中按现有 pin 风格加入 `@deepseek-ai/dsh-user-questions`。首版误用 `dsh-user-approval`，真机验证发现 `danger-full-access` preset 绑定 `approval: never`，请求在触达用户前即被自动拒绝，弹窗从不出现，已切换为用户提问能力。
 - [x] 2.1a 在 `WS_TOOL_PARAMETERS` 中声明可选 `path`（描述含“绝对路径、每次需用户一次性授权”），更新工具描述，并同步调整断言其不存在的既有测试。
-- [x] 2.2 在 `tool.ts` 中实现单一授权辅助函数：接收 `exec`（提供 `agent`、`callId`、`signal`）与 action、path，调用 `ctx.approval.request`，仅 `allowed-once` 返回授权通过。
-- [x] 2.3 `reason` 文案包含确切 action 与完整路径，并说明这是一次性授权；不含任何调用方特定措辞。
+- [x] 2.2 在 `tool.ts` 中实现单一确认辅助函数 `askUser`：接收 `exec`（提供 `agent`、`signal`）与问题、细节，经 `ctx.get('userQuestions')` 发起 `ask()`，仅用户选中同意项才返回通过。
+- [x] 2.3 询问文案包含确切 action 与完整路径，并说明这是一次性同意，且附带可点选的拒绝项；不含任何调用方特定措辞。
 - [x] 2.4 触发条件严格复用现有判定 `path !== undefined && path !== ''`（提取为 `hasExplicitPath`），保持空字符串 wire 兼容语义。
 - [x] 2.5 未获授权时返回明确诊断，指出原因是“显式路径未获用户授权”，不复用绑定缺失文案。
 

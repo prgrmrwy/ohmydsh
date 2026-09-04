@@ -57,8 +57,8 @@ describe('authorized explicit path drives the real repository clean', () => {
     const first = await candidate(root, 'operation-authorized-1', 'session-authorized-1')
     const second = await candidate(root, 'operation-authorized-2', 'session-authorized-2')
 
-    const approval = { request: async () => 'allowed-once' }
-    const authorizedPath = await authorizeExplicitPath({ get: () => approval }, remoteCaller, { action: 'clean', path: root })
+    const questions = { ask: async () => ({ answers: [{ id: 'ws-confirm', selected: ['Yes, proceed'] }] }) }
+    const authorizedPath = await authorizeExplicitPath({ get: () => questions }, remoteCaller, { action: 'clean', path: root })
     const { repoPath } = cleanTargetFor(remoteCaller, { boundSessionIds: [], authorizedPath })
     expect(repoPath).toBe(root)
 
@@ -91,8 +91,8 @@ describe('authorized explicit path drives the real repository clean', () => {
     await git(unmerged.worktreePath, 'add', 'commit.txt')
     await git(unmerged.worktreePath, 'commit', '-m', 'unmerged task work')
 
-    const approval = { request: async () => 'allowed-once' }
-    const authorizedPath = await authorizeExplicitPath({ get: () => approval }, remoteCaller, { action: 'clean', path: root })
+    const questions = { ask: async () => ({ answers: [{ id: 'ws-confirm', selected: ['Yes, proceed'] }] }) }
+    const authorizedPath = await authorizeExplicitPath({ get: () => questions }, remoteCaller, { action: 'clean', path: root })
     const { repoPath } = cleanTargetFor(remoteCaller, { boundSessionIds: [], authorizedPath })
 
     const result = await wsCleanRepository(repoPath, {
@@ -117,8 +117,8 @@ describe('authorized explicit path drives the real repository clean', () => {
   it('refuses an authorized path that is not a repository', async () => {
     const outside = await mkdtemp(join(tmpdir(), 'ws-authorized-not-repo-')); roots.push(outside)
 
-    const approval = { request: async () => 'allowed-once' }
-    const authorizedPath = await authorizeExplicitPath({ get: () => approval }, remoteCaller, { action: 'clean', path: outside })
+    const questions = { ask: async () => ({ answers: [{ id: 'ws-confirm', selected: ['Yes, proceed'] }] }) }
+    const authorizedPath = await authorizeExplicitPath({ get: () => questions }, remoteCaller, { action: 'clean', path: outside })
     const { repoPath } = cleanTargetFor(remoteCaller, { boundSessionIds: [], authorizedPath })
 
     await expect(wsCleanRepository(repoPath, {
@@ -134,8 +134,8 @@ describe('authorized explicit path drives the real repository clean', () => {
     const root = await fixture()
     const target = await candidate(root, 'operation-auth-refused', 'session-auth-refused')
 
-    const approval = { request: async () => 'rejected' }
-    await expect(authorizeExplicitPath({ get: () => approval }, remoteCaller, { action: 'clean', path: root }))
+    const questions = { ask: async () => ({ answers: [{ id: 'ws-confirm', selected: ['No, stop'] }] }) }
+    await expect(authorizeExplicitPath({ get: () => questions }, remoteCaller, { action: 'clean', path: root }))
       .rejects.toThrow(/not authorized by the user/)
 
     // Without an authorized path the caller cannot even resolve a target: its
