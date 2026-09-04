@@ -10,6 +10,7 @@ import { createRoutes } from './host/http.js'
 import { registerArchiveLifecycle, reconcileSessionSnapshot } from './host/archive.js'
 import { activeBoundSessionIds as boundSessionIds, configureContinuableDelegationTools, registerSubagentInheritance, rememberBind } from './host/policy.js'
 import { WsError } from './host/errors.js'
+import { releaseMissingWorktreeBinding } from './host/operation.js'
 import { recoverBindingSync } from './host/recovery.js'
 import { registerWsTool } from './host/tool.js'
 import { bindingOf, type OperationRecord } from './wire.js'
@@ -40,6 +41,17 @@ export function apply(ctx: Context, config: Config = {}): void {
     if (agent === undefined) return
     const sourceSessionId = agent.session.id as string
     const recovered = recoverBindingSync(agent.session.header.cwd, sourceSessionId)
+    // The managed worktree is gone, so this is no longer a Worktree Session.
+    // Skip installing the binding at all: doing it here, synchronously, is what
+    // keeps the first turn from running under a deny-all guard that the async
+    // persistence below would only lift on some later session-start.
+    if (recovered?.worktreeGone === true) {
+      rememberBind(ctx, sourceSessionId, undefined)
+      void releaseMissingWorktreeBinding({ gitCommonDir: recovered.operation.gitCommonDir, sourceSessionId }).catch(error => {
+        ctx.logger.warn(`worktree-session release of missing worktree failed: ${error instanceof Error ? error.message : String(error)}`)
+      })
+      return
+    }
     // Legacy cleaned tombstones need the durable snapshot reconciled before any
     // old deny-all policy can be installed during the compatibility window.
     const recoveredBinding = recovered === undefined ? undefined : bindingOf(recovered.operation)
