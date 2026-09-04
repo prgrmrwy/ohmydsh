@@ -1,6 +1,6 @@
 import { readdir, realpath } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
-import type { CleanResult, OperationRecord, PromoteResult, RepoCleanArchiveOffer, RepoCleanIgnored, RepoCleanRefusal, RepoCleanResult, StatusResult } from '../wire.js'
+import type { CleanResult, MergeProof, OperationRecord, PromoteResult, RepoCleanArchiveOffer, RepoCleanIgnored, RepoCleanRefusal, RepoCleanResult, StatusResult } from '../wire.js'
 import { bindingOf } from '../wire.js'
 import { promotePnpmDependencies, promoteDependencies } from './dependencies.js'
 import { WsError, messageOf } from './errors.js'
@@ -129,8 +129,25 @@ export async function wsClean(targetInput: string | MaintenanceTarget, options: 
     const taskHead = await git.run(operation.repoRoot, ['rev-parse', '--verify', `${operation.taskBranch}^{commit}`])
     const hasProgress = await git.runner('git', ['merge-base', '--is-ancestor', operation.baseCommit, taskHead.trim()], { cwd: operation.repoRoot })
     if (hasProgress.code !== 0) throw new WsError('CLEAN_REFUSED', `Task branch ${operation.taskBranch} no longer descends from its recorded base commit`)
+    // Merge is proven two ways. Ancestry is the strongest and stays first, so
+    // the ordinary merge workflow is unchanged and costs nothing extra.
     const ancestor = await git.runner('git', ['merge-base', '--is-ancestor', taskHead.trim(), baseTip.trim()], { cwd: operation.repoRoot })
-    if (ancestor.code !== 0) throw new WsError('CLEAN_REFUSED', `Task branch ${operation.taskBranch} is not proven merged into ${operation.baseRef}`)
+    let mergeProof: MergeProof = 'ancestor'
+    if (ancestor.code !== 0) {
+      // A rebase rewrites commit hashes, so work that IS on the base ref stops
+      // being an ancestor of it. `git cherry` compares patch-ids instead:
+      // every commit it prefixes with `-` already exists upstream, and a `+`
+      // marks one that does not. Requiring the whole range to be `-` keeps the
+      // invariant that unlanded work is never deleted, while letting a rebased
+      // branch be recognised as landed.
+      const cherry = await git.runner('git', ['cherry', operation.baseRef, operation.taskBranch], { cwd: operation.repoRoot })
+      const lines = cherry.code === 0 ? cherry.stdout.split('\n').map(line => line.trim()).filter(line => line !== '') : undefined
+      // An empty range means the branch carries no commits of its own — there
+      // is nothing that could be unlanded. A failed command proves nothing.
+      const equivalent = lines !== undefined && lines.every(line => line.startsWith('-'))
+      if (!equivalent) throw new WsError('CLEAN_REFUSED', `Task branch ${operation.taskBranch} is not proven merged into ${operation.baseRef}`)
+      mergeProof = 'patch-equivalent'
+    }
     const sourceBinding = operation.schemaVersion === 2 && binding?.mode === 'source-session' ? binding : undefined
     if (sourceBinding === undefined) throw new WsError('CLEAN_REFUSED', `Operation ${operation.operationId} has an unsupported or malformed maintenance binding`)
     const actions = [
@@ -138,7 +155,7 @@ export async function wsClean(targetInput: string | MaintenanceTarget, options: 
       `git branch -d ${operation.taskBranch}`,
       `retain cleaned tombstone ${operationFile(operation.gitCommonDir, operation.operationId)}`,
     ]
-    if (options.dryRun === true) return { dryRun: true, operationId: operation.operationId, worktreePath: target, taskBranch: operation.taskBranch, actions, cleaned: false }
+    if (options.dryRun === true) return { dryRun: true, operationId: operation.operationId, worktreePath: target, taskBranch: operation.taskBranch, actions, cleaned: false, mergeProof }
     await git.run(operation.repoRoot, ['worktree', 'remove', target])
     await git.run(operation.repoRoot, ['branch', '-d', operation.taskBranch])
     const { diagnostics: _diagnostics, cacheNodeModules: _cacheNodeModules, ...tombstone } = operation
@@ -147,7 +164,7 @@ export async function wsClean(targetInput: string | MaintenanceTarget, options: 
       phase: 'cleaned',
       binding: { ...sourceBinding, state: 'cleaned', archiveLifecycle: { version: 1 }, updatedAt: new Date().toISOString() },
     })
-    return { dryRun: false, operationId: operation.operationId, worktreePath: target, taskBranch: operation.taskBranch, actions, cleaned: true }
+    return { dryRun: false, operationId: operation.operationId, worktreePath: target, taskBranch: operation.taskBranch, actions, cleaned: true, mergeProof }
   }, { timeoutMs: 30_000, staleMs: 30 * 60_000 })
 }
 

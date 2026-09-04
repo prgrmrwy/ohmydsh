@@ -169,6 +169,14 @@ stateDiagram-v2
   tombstone 记为 ignored,不重复删除也不回退生命周期。
 - 拒绝当前使用中、脏、未合并、active 绑定或 in-flight 的 worktree;
   从不删除远端分支或共享 npm 缓存;绝不越过安全拒绝强制清理。
+- 合入证明分两级:先判普通 Git 祖先关系(最强,常规 merge 工作流零变化、零额外
+  开销);祖先不成立时,再用 `git cherry <baseRef> <taskBranch>` 按 patch-id 判定
+  该分支相对 base 的**每一个** commit 是否在上游都有等价物。rebase 会重写 commit
+  hash,使已落地的工作不再是主干祖先,仅凭祖先关系会把它误判为未合入并永久拦住
+  清理;patch 等价正是为此。任一 commit 无上游等价物即按未合入拒绝 —— 内容被改动
+  (而非仅被重写)时 patch-id 不同,保守拒绝是正确结论。判定依据写入清理结果
+  (`mergeProof`: `ancestor` / `patch-equivalent`),因为清理不可逆,较弱的证明必须
+  可复核而不是被同一句话掩盖。判定只读本地 Git 对象,不查远端。
 - 成功清理保留 cleaned tombstone 与源 Workspace 下的历史 Session。
 
 ## 普通 Session 恢复(cleaned 历史 Session)

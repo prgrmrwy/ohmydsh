@@ -118,8 +118,15 @@ scripts/ws.sh clean /absolute/worktree/path
   Clean refuses a source Session that is not archived, the caller's current
   worktree, a live/executing source Session bound to it (even though that
   Session's immutable cwd is the repo), dirty state, in-flight operations, and
-  branches not proven merged by ordinary Git ancestry. It preserves remote
-  branches, shared caches, and already-cleaned tombstones.
+  branches whose merge cannot be proven. It preserves remote branches, shared
+  caches, and already-cleaned tombstones.
+- Merge is proven two ways. Ordinary Git ancestry comes first. When a rebase
+  has rewritten the branch's commits, ancestry no longer holds even though the
+  work is on the base ref, so the clean then requires every commit on the
+  branch to have a patch-identical counterpart upstream. A single commit
+  without one refuses the whole candidate — content that was modified rather
+  than merely rewritten is treated as unlanded, deliberately. The result
+  reports which proof applied, so read it back rather than assuming ancestry.
 - Repository cleanup is per candidate and best-effort: a refused or unreadable
   operation is reported with its reason and left untouched, and never blocks
   other candidates from being evaluated.

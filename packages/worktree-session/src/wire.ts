@@ -202,6 +202,18 @@ export interface PromoteResult extends StatusResult {
   dependencyMode: 'mutable'
 }
 
+/**
+ * How the task branch was proven to be merged.
+ *
+ * `ancestor` is ordinary Git ancestry — the strongest proof, and the only one
+ * a plain merge workflow ever needs. `patch-equivalent` means ancestry did NOT
+ * hold, yet every commit on the branch already exists upstream under a
+ * different hash (`git cherry` patch-id equality), which is exactly what a
+ * rebase produces. The weaker proof is reported rather than hidden: a clean is
+ * irreversible, so the basis for "already merged" must stay reviewable.
+ */
+export type MergeProof = 'ancestor' | 'patch-equivalent'
+
 export interface CleanResult {
   dryRun: boolean
   operationId: string
@@ -209,6 +221,8 @@ export interface CleanResult {
   taskBranch: string
   actions: readonly string[]
   cleaned: boolean
+  /** Which proof established that the task branch is merged. */
+  mergeProof: MergeProof
   /**
    * Present only when this candidate's source Session was archived as part of
    * THIS call, after the user confirmed finishing it. Absent for an
