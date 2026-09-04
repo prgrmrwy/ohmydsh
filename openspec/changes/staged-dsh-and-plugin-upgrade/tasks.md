@@ -38,9 +38,9 @@
 
 ## 5. 阶段四前置:固定升级前后的能力基线
 
-- [ ] 5.1 建立自动化基线并在**当前运行体**上先跑通一次、记录结果:仓库 `npm test`、`npm run check:artifacts`,以及各自研包自有的 build/typecheck/test(worktree-session 现为 29 文件 201 例)。
-- [ ] 5.2 建立人工验收清单,覆盖已知无自动化覆盖的行为,至少包含:`packages/worktree-session/src/index.ts` 的 `agent/session-start` 编排时序(同步跳过 guard 安装 + 异步落盘),来自 `2026-09-04-release-binding-when-worktree-is-gone` 归档记录;为每项写出可执行的验收步骤与预期结果。
-- [ ] 5.3 为每个自研包补充最小可观测的"插件确实加载并可用"判据(对抗静默不激活):明确每个包在 Web 端的可见证据(如 system-clock 的设置页时钟、session-title-copy 的标题徽标、sidebar-session-provider-icon 的会话行 logo 等)。
+- [x] 5.1 建立自动化基线并在**当前运行体**上先跑通一次、记录结果:仓库 `npm test`、`npm run check:artifacts`,以及各自研包自有的 build/typecheck/test(worktree-session 现为 29 文件 201 例)。
+- [x] 5.2 建立人工验收清单,覆盖已知无自动化覆盖的行为,至少包含:`packages/worktree-session/src/index.ts` 的 `agent/session-start` 编排时序(同步跳过 guard 安装 + 异步落盘),来自 `2026-09-04-release-binding-when-worktree-is-gone` 归档记录;为每项写出可执行的验收步骤与预期结果。
+- [x] 5.3 为每个自研包补充最小可观测的"插件确实加载并可用"判据(对抗静默不激活):明确每个包在 Web 端的可见证据(如 system-clock 的设置页时钟、session-title-copy 的标题徽标、sidebar-session-provider-icon 的会话行 logo 等)。
 - [ ] 5.4 在当前运行体上完整执行一次基线(自动化 + 人工),记录为升级前基准;未跑通的项必须在升级前标注为"升级前即失败",避免升级后误归因。
 
 ## 6. 阶段四:运行体迁移与自研包重接线
