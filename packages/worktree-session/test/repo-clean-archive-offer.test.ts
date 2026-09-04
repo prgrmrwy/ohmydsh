@@ -255,6 +255,35 @@ describe('archiving is never proposed to mask a gate', () => {
     await expect(access(target.worktreePath)).resolves.toBeUndefined()
   }, 300_000)
 
+  // A dry run previews; it must not ask the user to decide anything, and it
+  // must not archive. Observed in a real run (session-b637a080): a dry run
+  // reported `archivedBeforeClean: true`, meaning the confirmation and the
+  // archive call had both executed while the user only asked for a preview.
+  it('neither confirms nor archives during a dry run', async () => {
+    const root = await fixture()
+    const target = await candidate(root, 'operation-offer-dry', 'session-offer-dry')
+    const confirm = confirmer(true)
+    const archived: string[] = []
+
+    const result = await wsCleanRepository(root, {
+      archivedSessionIds: [],
+      activePaths: [],
+      activeBoundSessionIds: [],
+      cwd: root,
+      dryRun: true,
+      confirmArchive: confirm,
+      archiveSession: async (id: string) => { archived.push(id) },
+    })
+
+    expect(confirm).not.toHaveBeenCalled()
+    expect(archived).toEqual([])
+    // Still reported honestly, so a preview tells the user what a real run
+    // would ask about.
+    expect(result.cleaned).toEqual([])
+    expect(result.refused[0]).toMatchObject({ operationId: target.operationId, kind: 'not-archived' })
+    await expect(access(target.worktreePath)).resolves.toBeUndefined()
+  }, 300_000)
+
   // A Session finishing its OWN worktree is the whole point of the flow.
   // Archiving never unloads a Session, so its binding stays live throughout;
   // leaving that gate armed would refuse before the user is ever asked and no

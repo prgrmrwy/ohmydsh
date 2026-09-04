@@ -20,6 +20,12 @@
 
 "候选自身源 Session 仍加载"之所以不阻塞提议：归档只将 Session 加入归档集，从不卸载它，因此该门在收尾流程中永远不会自行清除；若保持武装，任何 Session 都无法收尾自己的 worktree —— 那是死锁而非防护。该豁免 MUST 严格限定为"用户在本次调用中明确确认收尾的那一个源 Session"，MUST NOT 扩展到其他 Session，更 MUST NOT 豁免"有会话正站在该 worktree 内"这一判定。
 
+预览（`dry_run`）MUST NOT 发起任何确认，也 MUST NOT 归档任何 Session：调用方要的是"真实执行会发生什么"，而不是就此开始执行。预览 SHALL 对未归档候选照常报告 `not-archived` 原因，使用户据此得知真实执行时将被询问的内容。
+
+#### Scenario: A dry run neither confirms nor archives
+- **WHEN** 以 `dry_run` 预览方式发起仓库级清理，且存在未归档但其余安全门均通过的候选
+- **THEN** 系统 MUST NOT 就该候选发起确认，MUST NOT 归档任何 Session，并 SHALL 按既有 `not-archived` 原因报告该候选
+
 #### Scenario: Unmerged or dirty candidate is refused without an offer
 - **WHEN** 未归档候选的任务分支未证明合入，或其 worktree 存在未提交修改
 - **THEN** 系统 SHALL 按既有原因拒绝该候选，且 MUST NOT 发起归档确认
