@@ -57,7 +57,7 @@ export interface VerdictSource {
    * Resolve the egress country code with primary→fallback failover.
    * @returns the country code, or `null` when BOTH services failed.
    */
-  fetchCountry(signal: AbortSignal): Promise<{ readonly country: string } | null>
+  fetchCountry(signal: AbortSignal): Promise<{ readonly country: string; readonly source: 'primary' | 'fallback' } | null>
   /** Map one resolved country code to a verdict (blocklist semantics). */
   classify(country: string): NetworkVerdict
 }
@@ -113,6 +113,8 @@ export class NetworkVerdictCache {
   private nextAttemptAtMs = 0
   private backoffMs: number
   private lastReason: NonNullable<GuardCheckResult['degradedReason']> = 'fetch-failed'
+  /** Latest successful resolution facts, kept for the settings diagnosis only. */
+  private lastResolution: { country: string; source: 'primary' | 'fallback'; atMs: number } | null = null
 
   public constructor(
     private readonly source: VerdictSource,
@@ -162,7 +164,7 @@ export class NetworkVerdictCache {
     const timer = setTimeout(() => controller.abort(), this.options.fetchTimeoutMs)
     timer.unref?.()
     try {
-      let result: { readonly country: string } | null
+      let result: { readonly country: string; readonly source: 'primary' | 'fallback' } | null
       try {
         result = await this.source.fetchCountry(controller.signal)
       } catch (error) {
@@ -173,6 +175,7 @@ export class NetworkVerdictCache {
       if (result === null) throw new Error('both geo services failed')
       const verdict = this.source.classify(result.country)
       this.cached = { verdict, fetchedAtMs: sampledAt, fingerprint, epoch }
+      this.lastResolution = { country: result.country, source: result.source, atMs: sampledAt }
       this.nextAttemptAtMs = 0
       this.backoffMs = this.options.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS
       return { verdict, sampledAt, freshForMs: this.options.ttlMs, degraded: false }
@@ -192,5 +195,14 @@ export class NetworkVerdictCache {
     } finally {
       clearTimeout(timer)
     }
+  }
+
+  /**
+   * Diagnostics facts for the settings page: the latest successful
+   * resolution (country + which service) and its age. Never contains the raw
+   * IP; returns `null` when nothing has resolved yet.
+   */
+  public diagnostics(): { country: string; source: 'primary' | 'fallback'; atMs: number } | null {
+    return this.lastResolution
   }
 }

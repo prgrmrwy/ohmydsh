@@ -26,9 +26,9 @@
 - [x] 4.1 将 `conversation.blocks` 客户端判定从 home/not-home 改为 allowed/blocked/unknown 语义，并保留官方 block 共存自检（`judge` 语义 + guard 控制器不变）
 - [x] 4.2 实现 Claude 阻断/未知时禁用、放行时恢复、非 Claude 始终不受影响的 per-session 行为（guard.test.ts 8 单测）
 - [x] 4.3 保留模型切换即时生效与 unknown 自愈重试；不在客户端发起 Geo 请求或猜测出口（心跳保留 + 文案更新 zh/en）
-- [ ] 4.4 在设置页提供脱敏网络诊断：判定结果、所用服务（主/备）、失败原因、缓存年龄和配置代际；不得展示/保存原始 IP
-- [ ] 4.5 提供 blockedCountries 与 Geo 端点的查看、校验、修改和显式应用流程；应用后立即失效缓存并重新评估
-- [ ] 4.6 提供手动诊断按钮但不自动将观察到的出口加入任何放行集合
+- [x] 4.4 在设置页提供脱敏网络诊断：判定结果、所用服务（主/备）、失败原因、缓存年龄和配置代际；不得展示/保存原始 IP（`status` RPC + GuardSettingsSection，含 country/source/degradedReason/configEpoch，无 IP）
+- [x] 4.5 提供 blockedCountries 与 Geo 端点的查看、校验、修改和显式应用流程；应用后立即失效缓存并重新评估（`set-config` RPC + 原子写，写后 epoch 变化驱动缓存失效）
+- [x] 4.6 提供手动诊断按钮但不自动将观察到的出口加入任何放行集合（页面「刷新」共用 Host 缓存，不写配置）
 
 ## 5. 测试与安全回归
 
