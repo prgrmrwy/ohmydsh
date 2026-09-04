@@ -102,6 +102,24 @@ export async function wsClean(targetInput: string | MaintenanceTarget, options: 
    * nobody is standing INSIDE the worktree, still runs unchanged.
    */
   finishedSourceSessionId?: string
+  /**
+   * Whether the trusted Host knows this operation's source Session to be in the
+   * archive set AT CLEAN TIME. Supplied, never inferred: the archive set is the
+   * Host's truth and this layer must not read DSH storage.
+   *
+   * The tombstone must carry it because archiving and cleaning are two separate
+   * durable writes. In the archive-then-clean finish, the archive happens while
+   * the operation is still `prepared`, so the lifecycle machine has no state to
+   * advance and that observation is spent for nothing. Cleaning is the later of
+   * the two events, so it is the only place that still sees both facts. Writing
+   * a bare `cleaned` here would overwrite an archive that already happened and
+   * strand the binding with no edge left to `released`.
+   *
+   * Omitted keeps the historical `cleaned` write, which is correct for the
+   * operator CLI and HTTP entrypoints: they refuse unarchived candidates
+   * outright, so they can never need the archived form.
+   */
+  sourceSessionArchived?: boolean
 } = {}): Promise<CleanResult> {
   const git = options.git ?? createGitClient()
   const initial = await resolveMaintenanceTarget(targetInput, git)
@@ -166,10 +184,14 @@ export async function wsClean(targetInput: string | MaintenanceTarget, options: 
     await git.run(operation.repoRoot, ['worktree', 'remove', target])
     await git.run(operation.repoRoot, ['branch', deleteFlag, operation.taskBranch])
     const { diagnostics: _diagnostics, cacheNodeModules: _cacheNodeModules, ...tombstone } = operation
+    // Record the archive membership as of THIS moment. A Session archived
+    // during the finish flow must land on `cleaned-archived`, or the unarchive
+    // edge it is about to need will not match.
+    const cleanedState = options.sourceSessionArchived === true ? 'cleaned-archived' : 'cleaned'
     await saveOperation({
       ...tombstone,
       phase: 'cleaned',
-      binding: { ...sourceBinding, state: 'cleaned', archiveLifecycle: { version: 1 }, updatedAt: new Date().toISOString() },
+      binding: { ...sourceBinding, state: cleanedState, archiveLifecycle: { version: 1 }, updatedAt: new Date().toISOString() },
     })
     return { dryRun: false, operationId: operation.operationId, worktreePath: target, taskBranch: operation.taskBranch, actions, cleaned: true, mergeProof }
   }, { timeoutMs: 30_000, staleMs: 30 * 60_000 })
@@ -392,6 +414,9 @@ export async function wsCleanRepository(repoPath: string, options: RepoCleanOpti
         // finishing in THIS call. An already-archived candidate never gets it:
         // its live-binding gate must still hold on its own.
         ...(archivedBeforeClean ? { finishedSourceSessionId: binding.sourceSessionId } : {}),
+        // Both routes to an archived Session must reach the tombstone: one
+        // archived before this sweep began, one archived by it just now.
+        sourceSessionArchived: archived.has(binding.sourceSessionId) || archivedBeforeClean,
         git,
       })
       cleaned.push(archivedBeforeClean ? { ...result, archivedBeforeClean: true } : result)

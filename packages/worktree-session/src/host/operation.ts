@@ -241,6 +241,42 @@ export async function findBySourceSession(gitCommonDir: string, sourceSessionId:
 export type ArchiveReconcileMode = 'archive-observed' | 'unarchive-observed' | 'current-snapshot'
 
 /**
+ * Release a cleaned binding whose managed worktree no longer exists, so the
+ * Session resumes as an ordinary one. The caller supplies the proof (the full
+ * managed-worktree identity check); this helper only persists the transition
+ * under the repository lock.
+ *
+ * Ownership follows one fact — is the execution directory still there — and
+ * never the archive history, which has no bearing on it. Monotonicity is kept:
+ * an already-released record is returned untouched, and a live (non-cleaned)
+ * binding is never released through this path, because for those the same
+ * failure means "cannot trust the directory I execute in" and must stay
+ * fail-closed rather than be granted ordinary-Session freedom.
+ *
+ * Creates, modifies and deletes nothing else: no branch, worktree, Workspace,
+ * Session, operation file removal, or tombstone deletion.
+ */
+export async function releaseMissingWorktreeBinding(options: {
+  gitCommonDir: string
+  sourceSessionId: string
+  now?: () => Date
+}): Promise<OperationRecord | undefined> {
+  const lock = join(options.gitCommonDir, 'ws', 'locks', 'repo.lock')
+  return withMkdirLock(lock, async () => {
+    const operation = await findHistoryBySourceSession(options.gitCommonDir, options.sourceSessionId)
+    if (operation === undefined) return undefined
+    const binding = bindingOf(operation)
+    if (binding?.mode !== 'source-session') return operation
+    if (binding.state !== 'cleaned' && binding.state !== 'cleaned-archived') return operation
+    const now = options.now?.() ?? new Date()
+    return saveOperation({
+      ...operation,
+      binding: { ...binding, state: 'released', archiveLifecycle: { version: 1 }, updatedAt: now.toISOString() },
+    }, now)
+  })
+}
+
+/**
  * Move a cleaned source binding monotonically through its archive lifecycle.
  * The caller supplies the current archive membership and holds no lock; this
  * helper takes the repository lock so event/status/recovery callers share one
