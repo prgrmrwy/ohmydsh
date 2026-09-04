@@ -28,4 +28,5 @@
 - [ ] 5.1 更新 `worktree-session-architecture.md` 的归档生命周期章节：说明 tombstone 承载清理时刻的归档事实，以及为何 `released` 仍只经由 `cleaned-archived` 抵达。
 - [ ] 5.2 运行 `packages/worktree-session` 的 build/typecheck/test 与仓库级 `npm test`、`npm run check:artifacts`，记录确切命令与结果。
 - [ ] 5.3 运行 `openspec validate clean-writes-archive-aware-binding-state --strict`，复核 diff 无范围蔓延。
-- [ ] 5.4 端到端验证：对真实卡死记录（`b7bfb1f7…` / `session-886cd908…`）确认其恢复为普通会话且 `bash` 可用。若用户已先行用"重新归档 → 取消归档"自愈，则改以一个新构造的 archive-then-clean 记录验证迁移路径，不得以自愈结果冒充迁移已验证。
+- [ ] 5.4 端到端验证：**已知前提——原卡死记录 `b7bfb1f7…` / `session-886cd908…` 已于 2026-09-04T11:27:23Z 由用户手动「重新归档 → 取消归档」自愈为 `released`，仓库内已无处于 `cleaned` + `archiveLifecycle:{version:1}` 死角的存量样本。** 因此迁移（第 3 节）MUST 以新构造的 archive-then-clean 记录验证，MUST NOT 以该次自愈结果冒充迁移已验证。
+- [ ] 5.5 端到端验证写入修复（第 2 节）：走一次真实的「确认 → 归档 → 清理」收尾，确认新写入的 tombstone 直接为 `cleaned-archived`（而非 `cleaned`），随后取消归档确认会话恢复为普通会话且工具可用——即证明该路径不再产生新的卡死记录。
