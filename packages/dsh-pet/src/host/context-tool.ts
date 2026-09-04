@@ -25,9 +25,17 @@ export interface PetContextResult {
     readonly workspaceId?: string
     readonly sessionTitle?: string
     readonly workspaceTitle?: string
-    /** Repository root from the source session header. */
+    /**
+     * The SOURCE session's repository root. This executor does not run there:
+     * its own cwd is the Pet workspace, which is not a Git checkout.
+     */
     readonly repositoryRoot?: string
-    /** Managed execution root, present only when a worktree binding exists. */
+    /**
+     * The SOURCE session's managed execution root, present only when that
+     * session has a worktree binding. It is never this executor's working
+     * directory — reading it as such has in practice led an agent to refuse
+     * work on the belief that it was standing inside that worktree.
+     */
     readonly executionRoot?: string
     readonly branch?: string
     readonly dependencyMode?: string
