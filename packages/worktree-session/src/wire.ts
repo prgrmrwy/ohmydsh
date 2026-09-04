@@ -250,13 +250,16 @@ export interface RepoCleanArchiveOffer {
 
 /**
  * Why one repository-clean candidate was not cleaned. `not-archived` is this
- * flow's own precondition (the user was not asked, or declined);
- * `archive-failed` marks a confirmed offer whose archive call failed, leaving
- * every resource intact; `refused` carries an existing single-operation
- * safety-gate rejection; `unreadable` marks metadata that could not be parsed
- * (including retired schema versions), which is reported and never mutated.
+ * flow's own precondition (the user was asked and declined);
+ * `confirmation-unavailable` marks a candidate that passed every safety gate
+ * but whose question could not reach a human at all, which is a different fact
+ * from a refusal and must not be reported as one; `archive-failed` marks a
+ * confirmed offer whose archive call failed, leaving every resource intact;
+ * `refused` carries an existing single-operation safety-gate rejection;
+ * `unreadable` marks metadata that could not be parsed (including retired
+ * schema versions), which is reported and never mutated.
  */
-export type RepoCleanRefusalKind = 'not-archived' | 'archive-failed' | 'refused' | 'unreadable'
+export type RepoCleanRefusalKind = 'not-archived' | 'confirmation-unavailable' | 'archive-failed' | 'refused' | 'unreadable'
 
 /** A candidate this run deliberately left untouched, with a stable reason. */
 export interface RepoCleanRefusal {

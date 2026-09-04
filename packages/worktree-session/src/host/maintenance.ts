@@ -222,8 +222,17 @@ export interface RepoCleanOptions {
    * candidate. Injected by the trusted Host (the approval channel); omitted on
    * the operator CLI and HTTP paths, which have no trustworthy way to ask and
    * therefore keep the historical `not-archived` refusal.
+   *
+   * Three outcomes, deliberately not two. `true` and `false` are the human's
+   * answer; `'unavailable'` means the question never reached a human at all
+   * (no provider, or a caller that structurally cannot be asked, such as a
+   * delegated child agent). Collapsing the third case into `false` reports
+   * "the user declined" for a decision the user never saw, which is both
+   * untrue and undiagnosable: the caller cannot tell a refusal from a dead
+   * channel, so a permanently unaskable setup looks like repeated rejection.
+   * All three still fail closed — nothing is archived or deleted.
    */
-  confirmArchive?: (offer: RepoCleanArchiveOffer) => Promise<boolean>
+  confirmArchive?: (offer: RepoCleanArchiveOffer) => Promise<boolean | 'unavailable'>
   /**
    * Archives one source Session. Injected alongside `confirmArchive` so this
    * layer stays free of any DSH registry dependency and remains testable
@@ -390,6 +399,21 @@ export async function wsCleanRepository(repoPath: string, options: RepoCleanOpti
         continue
       }
       const confirmed = await options.confirmArchive({ ...candidate, merged: true, clean: true })
+      if (confirmed === 'unavailable') {
+        // Every gate passed and the offer was warranted, but no human could be
+        // reached. Saying `not-archived` here would describe a decision that
+        // was never put to anyone, and would send the caller off to archive by
+        // hand when the real blocker is the channel.
+        refused.push({
+          ...candidate,
+          kind: 'confirmation-unavailable',
+          reason:
+            `Source Session ${binding.sourceSessionId} is not archived and the archive-and-finish question could not reach a human ` +
+            'from this caller, so nothing was archived or deleted. Run `ws clean` from a top-level Session in this repository ' +
+            '(a delegated or background agent has no answerer), or archive the Session first and clean again.',
+        })
+        continue
+      }
       if (!confirmed) {
         refused.push(notArchived)
         continue
