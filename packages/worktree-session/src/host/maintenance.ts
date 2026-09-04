@@ -150,14 +150,21 @@ export async function wsClean(targetInput: string | MaintenanceTarget, options: 
     }
     const sourceBinding = operation.schemaVersion === 2 && binding?.mode === 'source-session' ? binding : undefined
     if (sourceBinding === undefined) throw new WsError('CLEAN_REFUSED', `Operation ${operation.operationId} has an unsupported or malformed maintenance binding`)
+    // `git branch -d` re-derives "merged" from ancestry alone, so after a
+    // rebase it refuses a branch this clean has just proven landed by patch
+    // equivalence — removing the worktree and then leaving the branch and the
+    // lifecycle behind. Where our own proof is the stronger statement, `-D`
+    // carries it out; an ancestry-proven branch keeps `-d` so Git's check
+    // stays an independent second opinion.
+    const deleteFlag = mergeProof === 'patch-equivalent' ? '-D' : '-d'
     const actions = [
       `git worktree remove ${target}`,
-      `git branch -d ${operation.taskBranch}`,
+      `git branch ${deleteFlag} ${operation.taskBranch}`,
       `retain cleaned tombstone ${operationFile(operation.gitCommonDir, operation.operationId)}`,
     ]
     if (options.dryRun === true) return { dryRun: true, operationId: operation.operationId, worktreePath: target, taskBranch: operation.taskBranch, actions, cleaned: false, mergeProof }
     await git.run(operation.repoRoot, ['worktree', 'remove', target])
-    await git.run(operation.repoRoot, ['branch', '-d', operation.taskBranch])
+    await git.run(operation.repoRoot, ['branch', deleteFlag, operation.taskBranch])
     const { diagnostics: _diagnostics, cacheNodeModules: _cacheNodeModules, ...tombstone } = operation
     await saveOperation({
       ...tombstone,
