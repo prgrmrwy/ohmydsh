@@ -5,28 +5,30 @@ const CLAUDE = { provider: 'claude', model: 'claude-sonnet-4-5' }
 const DEEPSEEK = { provider: 'deepseek', model: 'deepseek-chat' }
 
 describe('judge (spec scenario table)', () => {
-  it('home + Claude → block', () => {
-    expect(judge({ network: 'home', routable: true, selection: CLAUDE })).toBe('block')
+  it('allowed egress + Claude → none (permitted)', () => {
+    expect(judge({ network: 'allowed', routable: true, selection: CLAUDE })).toBe('none')
   })
 
-  it('home + non-Claude → none', () => {
-    expect(judge({ network: 'home', routable: true, selection: DEEPSEEK })).toBe('none')
+  it('blocked egress + Claude → block', () => {
+    expect(judge({ network: 'blocked', routable: true, selection: CLAUDE })).toBe('block')
   })
 
-  it('not-home + Claude → none', () => {
-    expect(judge({ network: 'not-home', routable: true, selection: CLAUDE })).toBe('none')
+  it('unknown egress + Claude → block (fail closed)', () => {
+    expect(judge({ network: 'unknown', routable: true, selection: CLAUDE })).toBe('block')
   })
 
-  it('unknown network (fail open) + Claude → none', () => {
-    expect(judge({ network: 'unknown', routable: true, selection: CLAUDE })).toBe('none')
+  it('restricted egress + non-Claude → none', () => {
+    expect(judge({ network: 'blocked', routable: true, selection: DEEPSEEK })).toBe('none')
+    expect(judge({ network: 'unknown', routable: true, selection: DEEPSEEK })).toBe('none')
   })
 
-  it('no selection yet (current null) → none even at home', () => {
-    expect(judge({ network: 'home', routable: true, selection: null })).toBe('none')
+  it('no selection yet → none even when restricted', () => {
+    expect(judge({ network: 'blocked', routable: true, selection: null })).toBe('none')
+    expect(judge({ network: 'unknown', routable: true, selection: null })).toBe('none')
   })
 
   it('official non-routable block always yields, regardless of network/selection', () => {
-    expect(judge({ network: 'home', routable: false, selection: CLAUDE })).toBe('yield-official')
+    expect(judge({ network: 'allowed', routable: false, selection: CLAUDE })).toBe('yield-official')
     expect(judge({ network: 'unknown', routable: false, selection: null })).toBe('yield-official')
   })
 })

@@ -9,46 +9,18 @@
 import type { NetworkVerdict } from './contract.js'
 
 /**
- * The single fixed egress IP query endpoint.
+ * Classify one resolved egress country/region against the blocklist.
  *
- * Deliberately ONE endpoint: the host's egress address can rotate (large
- * NAT/load-balanced address pools rotate per request), so querying several
- * services returns mutually contradictory answers that cannot be voted on.
- * A failed query degrades to `'unknown'` (fail open); there is no fallback
- * endpoint, only retry on the next request.
+ * Blocklist semantics: ONLY an explicit hit counts as blocked. A successful
+ * resolution that is not in the blocklist is `'allowed'`; the caller maps any
+ * failed/absent resolution to `'unknown'` (fail closed for Claude) elsewhere.
  *
- * Selected empirically 2026-09-03: `api.ipify.org` was connection-refused
- * (≈66ms RST, filtered) both on the current office segment AND on the home
- * network (empty response), while `ifconfig.me/ip` answers on both. The
- * plain-text body is handled by `fetchEgressIp`.
+ * @param country - ISO 3166-1 alpha-2 country code from a Geo service.
+ * @param blocked - blocklist of country codes (default at least `CN`).
+ * @returns `'blocked'` iff `country` is in `blocked`, else `'allowed'`.
  */
-export const EGRESS_IP_ENDPOINT = 'https://ifconfig.me/ip'
-
-/**
- * Home-network allowlist: public egress IPs that count as "home".
- *
- * Measured 2026-09-03 on the home network (task 5.1 of openspec change
- * block-claude-on-home-network): `115.197.18.69` was stable across 8
- * consecutive queries (≈1s apart) and agreed with an ipinfo.io cross-check.
- * The ISP addresses this line with a static public-like assignment. If the ISP
- * ever renumbers this line, the guard fails open (`not-home`, never a false
- * block) — re-measure and update this list.
- */
-export const HOME_NETWORKS: readonly string[] = ['115.197.18.69']
-
-/**
- * Classify one measured egress IP against the allowlist (whitelist semantics).
- *
- * Only an explicit hit counts as home; anything else (including an empty
- * allowlist) is `'not-home'`. The guard MUST NOT invert this: "did not hit a
- * known non-home set" must never imply home, because egress pools rotate.
- *
- * @param ip - a measured public egress IP.
- * @param homeSet - allowlist; defaults to {@link HOME_NETWORKS}.
- * @returns `'home'` iff `ip` is in `homeSet`, else `'not-home'`.
- */
-export function classifyIp(ip: string, homeSet: readonly string[] = HOME_NETWORKS): NetworkVerdict {
-  return homeSet.includes(ip) ? 'home' : 'not-home'
+export function classifyCountry(country: string, blocked: readonly string[]): NetworkVerdict {
+  return blocked.includes(country.toUpperCase()) ? 'blocked' : 'allowed'
 }
 
 /**

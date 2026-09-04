@@ -45,9 +45,9 @@ describe('ComposerGuardController', () => {
   beforeEach(() => { vi.useFakeTimers() })
   afterEach(() => { vi.useRealTimers() })
 
-  it('writes its own block on home + Claude, and only then', () => {
+  it('writes its own block on blocked egress + Claude, and only then', () => {
     const w = new FakeWiring()
-    w.setNetwork('home')
+    w.setNetwork('blocked')
     w.setFacts('A', CLAUDE)
     expect(w.blocks.get('A')).toEqual({ reason: 'REASON' })
 
@@ -56,20 +56,24 @@ describe('ComposerGuardController', () => {
     expect(w.blocks.has('A')).toBe(false)
   })
 
-  it('does not write anything on non-home or unknown networks (fail open)', () => {
+  it('blocks on restricted or unknown egress for Claude (fail closed), never on allowed', () => {
     const w = new FakeWiring()
-    w.setNetwork('not-home')
+    w.setNetwork('blocked')
     w.setFacts('A', CLAUDE)
-    expect(w.blocks.has('A')).toBe(false)
+    expect(w.blocks.has('A')).toBe(true)
 
     w.setNetwork('unknown')
     w.setFacts('B', CLAUDE)
-    expect(w.blocks.has('B')).toBe(false)
+    expect(w.blocks.has('B')).toBe(true)
+
+    w.setNetwork('allowed')
+    w.setFacts('C', CLAUDE)
+    expect(w.blocks.has('C')).toBe(false)
   })
 
   it('yields to the official non-routable block and never clears its slot', () => {
     const w = new FakeWiring()
-    w.setNetwork('home')
+    w.setNetwork('blocked')
     // official wrote first (its publish runs before ours on store changes)
     w.blocks.set('A', { reason: 'OFFICIAL' }) // official's own reason in the slot
     w.readers.set('A', { selection: CLAUDE, routable: false })
@@ -98,7 +102,7 @@ describe('ComposerGuardController', () => {
 
   it('re-asserts its block after an official store change cleared it (self-check)', () => {
     const w = new FakeWiring()
-    w.setNetwork('home')
+    w.setNetwork('blocked')
     w.setFacts('A', CLAUDE)
     expect(w.blocks.get('A')).toEqual({ reason: 'REASON' })
 
@@ -113,7 +117,7 @@ describe('ComposerGuardController', () => {
 
   it('does not re-assert when the block already holds our reason', () => {
     const w = new FakeWiring()
-    w.setNetwork('home')
+    w.setNetwork('blocked')
     w.setFacts('A', CLAUDE)
     const before = w.setCalls.length
     w.guard.onBlockStoreChanged('A')
@@ -123,7 +127,7 @@ describe('ComposerGuardController', () => {
 
   it('keeps sessions independent', () => {
     const w = new FakeWiring()
-    w.setNetwork('home')
+    w.setNetwork('blocked')
     w.setFacts('A', CLAUDE)
     w.setFacts('B', DEEPSEEK)
     expect(w.blocks.get('A')).toEqual({ reason: 'REASON' })
@@ -132,7 +136,7 @@ describe('ComposerGuardController', () => {
 
   it('dispose clears only its own block', () => {
     const w = new FakeWiring()
-    w.setNetwork('home')
+    w.setNetwork('blocked')
     w.setFacts('A', CLAUDE)
     w.guard.dispose('A')
     expect(w.blocks.has('A')).toBe(false)
