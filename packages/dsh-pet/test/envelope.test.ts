@@ -98,3 +98,53 @@ describe('configured arguments ride on the skill token', () => {
     expect(text.split('\n')[0]).toBe('/demo --dry-run /a/b c "quoted"')
   })
 })
+
+describe('the two sessions are described as independent facts', () => {
+  const envelope = (availability: string, isFirst = true) => renderEnvelope({
+    task: { id: 'task-1', epoch: 1, sourceId: 'session-src', sourceAvailability: availability } as never,
+    invocation: { id: 'inv-1', capabilityId: 'ws', skillName: 'ws' } as never,
+    snapshot: {
+      id: 'snap-1', sourceKind: 'session', capturedAt: 1, sessionTitle: '测试会话',
+      cwd: '/repo', worktree: { executionRoot: '/repo/.worktrees/task-x', branch: 'ws/task-x' },
+    } as never,
+    isFirst,
+  })
+
+  // An executor that cannot see the source session's state substitutes a
+  // guess. Observed twice in practice: it refused to finish a source
+  // session's worktree believing that session was still live and driving the
+  // task, when the source had already ended.
+  it('states the source session availability outright', () => {
+    expect(envelope('available')).toContain('来源会话（`session-src`）当前状态：未归档')
+    expect(envelope('archived')).toContain('当前状态：已归档')
+    expect(envelope('missing')).toContain('当前状态：已不存在于注册表')
+  })
+
+  // The lifecycle sentence describes THIS executor. Read as the source
+  // session, it becomes "the source keeps driving me" — which is exactly the
+  // false premise behind the refusals above.
+  it('scopes the multi-invocation lifecycle to the executor session', () => {
+    const text = envelope('available')
+    expect(text).toContain('你所在的这个 Pet 执行会话')
+    expect(text).toMatch(/与来源会话是否仍在运行无关/)
+  })
+
+  // Facts, not instructions: the envelope must not tell the capability's
+  // gates what to conclude.
+  it('states availability without prescribing an action', () => {
+    const text = envelope('available')
+    expect(text).not.toMatch(/可以(直接)?(清理|归档|删除)/)
+    expect(text).not.toMatch(/应当|必须先/)
+  })
+
+  it('omits source availability for sourceless tasks', () => {
+    const text = renderEnvelope({
+      task: { id: 'task-1', epoch: 1, sourceAvailability: 'available' } as never,
+      invocation: { id: 'inv-1', capabilityId: 'demo', skillName: 'demo' } as never,
+      snapshot: { id: 'snap-1', sourceKind: 'none', capturedAt: 1 } as never,
+      isFirst: true,
+    })
+    expect(text).not.toContain('来源会话（')
+    expect(text).toContain('独立任务')
+  })
+})
