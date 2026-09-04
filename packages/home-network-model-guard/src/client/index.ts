@@ -1,48 +1,96 @@
 /**
  * dsh-home-network-model-guard web client half.
  *
- * Subscribes the official per-session model-directory store and the
- * composer-block registry (`ctx.conversation.blocks`), and applies the guard:
- * when the host verdict is `'home'` and the session selects a Claude-family
- * model, the session's composer becomes inert with our localized reason.
+ * Two surfaces:
  *
- * Network verdict is fetched from the host over the loopback RPC channel and
- * cached client-side; it is re-fetched when the tab becomes visible again
- * (catching reconnects that happened while hidden) and on a throttled retry
- * after degradation. A verdict of `'unknown'` fails open — no block.
+ * 1. **Composer guard**: subscribes the official per-session model-directory
+ *    store and the composer-block registry (`ctx.conversation.blocks`); when
+ *    the host verdict is `'blocked'`/`'unknown'` and the session selects a
+ *    Claude-family model, the session's composer becomes inert with our
+ *    localized reason. Fails CLOSED for Claude — only `'allowed'` permits.
+ *
+ * 2. **Settings page**: "Egress Guard" section showing the sanitized host
+ *    verdict and editing the local configuration (blocked countries, Geo
+ *    endpoints) through loopback RPC endpoints.
+ *
+ * Network verdicts are fetched from the host over the loopback RPC channel and
+ * cached client-side; re-fetched when the tab becomes visible again and on a
+ * throttled retry while unknown. The browser never performs its own Geo or IP
+ * lookups.
  *
  * @module dsh-home-network-model-guard/client
  */
 import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
-// Type-only merges: ctx.locale (dsh-client-locale) and ctx.connection
-// (dsh-client-connection/client — the browser ConnectionHandle).
+// Type-only merges: ctx.locale (dsh-client-locale), ctx.connection
+// (dsh-client-connection/client — the browser ConnectionHandle) and the
+// settings.section slot (dsh-client-ui-settings).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
+import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 // Type-only: ctx.conversation.blocks / ctx.modelDirectories merges.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import { GUARD_CHANNEL, GUARD_CHECK_ENDPOINT, type GuardCheckResult, type NetworkVerdict } from '../contract.js'
 import { ComposerGuardController, type ReasonBlock, type SessionGuardDeps } from './guard.js'
 import { NS, en, zh, type GuardKey } from './locales.js'
+import { GuardSettingsSection, type GuardSettingsInjected } from './settings.jsx'
 
-/** Required services: locale, connection RPC, sessions, composer blocks, model directories. */
-export const inject = ['locale', 'connection', 'sessions', 'conversation', 'modelDirectories']
+/** Required services: slots, locale, connection RPC, sessions, composer blocks, model directories. */
+export const inject = ['slots', 'locale', 'connection', 'sessions', 'conversation', 'modelDirectories']
 
 /** Minimum gap between client-side re-fetches of the host verdict (throttle). */
 const MIN_NETWORK_RETRY_MS = 10_000
 
+/** Style scope for the settings page (owned classes only). */
+const SETTINGS_CSS = `
+.dshg-root{display:flex;flex-direction:column;gap:10px;padding-top:6px}
+.dshg-group-title{margin:12px 0 6px;font-size:14px;font-weight:600;color:var(--dsw-alias-label-primary,#1f2329)}
+.dshg-status{margin:0;display:flex;flex-direction:column;gap:4px}
+.dshg-status div{display:flex;gap:8px}
+.dshg-status dt{min-width:90px;color:var(--dsw-alias-label-secondary,#646a73)}
+.dshg-status dd{margin:0}
+.dshg-verdict-allowed{color:var(--dsw-alias-success,#2ba471)}
+.dshg-verdict-blocked,.dshg-verdict-unknown{color:var(--dsw-alias-danger,#c0392b)}
+.dshg-action{width:fit-content;padding:6px 14px;border-radius:8px;border:1px solid var(--dsw-alias-border,#d0d3d9);background:var(--dsw-alias-bg,#fff);cursor:pointer;color:var(--dsw-alias-label-primary,#1f2329)}
+.dshg-action:hover{background:var(--dsw-alias-interactive-bg-hover,#0000000f)}
+.dshg-busy{opacity:.6;pointer-events:none}
+.dshg-field{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--dsw-alias-label-secondary,#646a73)}
+.dshg-input{padding:6px 8px;border-radius:8px;border:1px solid var(--dsw-alias-border,#d0d3d9);font:inherit}
+.dshg-notice{font-size:13px;margin:0}
+.dshg-notice-ok{color:var(--dsw-alias-success,#2ba471)}
+.dshg-notice-error{color:var(--dsw-alias-danger,#c0392b)}
+`
+
 /**
- * Mount the sending guard.
+ * Mount the sending guard and the Egress Guard settings page.
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-home-network-model-guard: dictionaries')
+  ctx.effect(() => {
+    const style = document.createElement('style')
+    style.setAttribute('data-plugin', 'dsh-home-network-model-guard')
+    style.textContent = SETTINGS_CSS
+    document.head.appendChild(style)
+    return () => style.remove()
+  }, 'dsh-home-network-model-guard: settings styles')
+
+  const t = ctx.locale.bind(NS)
+  ctx.slots.inject('settings.section', () => ctx.slots.register({
+    name: 'settings.section' as const,
+    id: 'egress-guard',
+    order: 290,
+    label: () => t('settingsNav'),
+    inject: (): GuardSettingsInjected => ({
+      rpc: ctx.get('connection').rpc,
+      t,
+    }),
+  }, GuardSettingsSection))
 
   // `connection` is typed as the host handle by some Context merges; in the
   // browser shell the same key holds the full client ConnectionHandle (the
   // same pattern dsh-system-clock relies on for its settings page).
   const connection = ctx.get('connection')
-  const t = ctx.locale.bind(NS)
 
   // ---- client-side verdict cache (host RPC) -------------------------------
   const networkState: {

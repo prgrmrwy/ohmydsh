@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_CONFIG, validateGuardConfig } from '../src/config.js'
+import { mkdtempSync, readFileSync, readdirSync, statSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { DEFAULT_CONFIG, validateGuardConfig, writeGuardConfig } from '../src/config.js'
 
 describe('validateGuardConfig', () => {
   it('accepts an empty object and falls back to defaults', () => {
@@ -61,3 +64,50 @@ describe('validateGuardConfig', () => {
     if (result.ok) expect(result.config.blockedCountries).toEqual(['CN', 'HK'])
   })
 })
+
+describe('writeGuardConfig', () => {
+  it('writes a validated config atomically with owner-only mode', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'dshg-'))
+    const target = path.join(dir, 'config', 'config.json')
+    try {
+      const result = await writeGuardConfig(target, { blockedCountries: ['CN', 'HK'] })
+      expect(result.ok).toBe(true)
+      const written = JSON.parse(readFileSync(target, 'utf8')) as { blockedCountries: string[] }
+      expect(written.blockedCountries).toEqual(['CN', 'HK'])
+      const mode = statSync(target).mode & 0o777
+      expect(mode).toBe(0o600)
+      // no leftover temp files
+      expect(readdirExploded(dir)).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses invalid configs without touching the target', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'dshg-'))
+    const target = path.join(dir, 'config.json')
+    try {
+      const result = await writeGuardConfig(target, { blockedCountries: ['C'], apiKey: 'x' })
+      expect(result.ok).toBe(false)
+      expect(statSyncSafe(target)).toBeUndefined()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+function readdirExploded(dir: string): boolean {
+  try {
+    return readdirSync(dir).some((name) => name.includes('.tmp-'))
+  } catch {
+    return true
+  }
+}
+
+function statSyncSafe(target: string): unknown {
+  try {
+    return statSync(target)
+  } catch {
+    return undefined
+  }
+}

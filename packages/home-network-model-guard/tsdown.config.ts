@@ -8,8 +8,11 @@ const external = [
   '@deepseek-ai/dsh-client-runtime',
   '@deepseek-ai/dsh-client-locale',
   '@deepseek-ai/dsh-client-connection',
+  '@deepseek-ai/dsh-client-ui-settings',
   '@deepseek-ai/dsh-client-ui-conversation',
   '@deepseek-ai/dsh-client-ui-model-selection',
+  'react',
+  'react/jsx-runtime',
 ]
 
 export default defineConfig({
