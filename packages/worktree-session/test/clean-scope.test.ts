@@ -1,12 +1,12 @@
 import { execFile } from 'node:child_process'
-import { access, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { wsCleanRepository } from '../src/host/maintenance.js'
 import { bindSource, startOperation } from '../src/host/operation.js'
-import { cleanTargetFor } from '../src/host/tool.js'
+import { cleanTargetFor, requiresPathAuthorization } from '../src/host/tool.js'
 
 /**
  * Cleanup scope is stated by the caller, never inferred from who is calling.
@@ -102,6 +102,26 @@ describe('the specified scope handles exactly one operation', () => {
     await expect(access(peer.worktreePath)).resolves.toBeUndefined()
   }, 300_000)
 
+  // Entering through a worktree path makes Git report that worktree as the
+  // repository root. Echoing it back would name the wrong repository in a
+  // report whose subject IS which repository was scanned.
+  it('reports the main checkout, not the worktree it was entered through', async () => {
+    const root = await fixture()
+    const mine = await candidate(root, 'operation-report-root', 'session-report-root')
+
+    const result = await wsCleanRepository(mine.worktreePath, {
+      archivedSessionIds: [],
+      activePaths: [],
+      activeBoundSessionIds: [],
+      cwd: root,
+      onlyWorktreePath: mine.worktreePath,
+      dryRun: true,
+    })
+
+    expect(result.repoRoot).not.toBe(mine.worktreePath)
+    expect(await realpath(result.repoRoot)).toBe(await realpath(root))
+  }, 300_000)
+
   it('refuses a worktree path no registered operation owns', async () => {
     const root = await fixture()
     await candidate(root, 'operation-path-miss', 'session-path-miss')
@@ -174,6 +194,26 @@ describe('the specified scope handles exactly one operation', () => {
     expect(result.refused[0]?.reason).toMatch(/dirty/)
     await expect(access(target.worktreePath)).resolves.toBeUndefined()
   }, 300_000)
+})
+
+describe('a preview does not need path authorization', () => {
+  // A preview reads. Guarding it with the same prompt as a deletion made the
+  // recommended flow cost two prompts before anything could happen, and a
+  // prompt that guards nothing devalues the one that guards the real run.
+  it('exempts a clean preview and nothing else', () => {
+    expect(requiresPathAuthorization({ action: 'clean', dry_run: true })).toBe(false)
+    expect(requiresPathAuthorization({ action: 'clean', dry_run: false })).toBe(true)
+    // An omitted dry_run means a real run.
+    expect(requiresPathAuthorization({ action: 'clean' })).toBe(true)
+  })
+
+  it('never exempts the actions that have no preview', () => {
+    for (const action of ['status', 'promote']) {
+      expect(requiresPathAuthorization({ action })).toBe(true)
+      // Even if a caller passes dry_run where it has no meaning.
+      expect(requiresPathAuthorization({ action, dry_run: true })).toBe(true)
+    }
+  })
 })
 
 describe('scope selection at the tool boundary', () => {

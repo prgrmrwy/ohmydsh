@@ -180,6 +180,25 @@ export function targetFor(
  * model can do so. The repository-level scan then applies exactly the same
  * main-checkout proof and per-candidate safety gates either way.
  */
+/**
+ * Whether an explicit path on this call needs one-shot user authorization.
+ *
+ * Everything that can change the repository does. A `clean` preview does not:
+ * it removes nothing, archives nothing and asks nothing, so the prompt would
+ * be guarding a read. Requiring it made the recommended flow — preview, then
+ * decide — cost two prompts before anything could happen, and prompts that
+ * guard nothing teach people to dismiss the ones that do.
+ *
+ * The prompt that matters is the one before the real run, and that one still
+ * asks. `status` and `promote` take no `dry_run`, so they keep asking for
+ * every explicit path.
+ * @param args - The tool arguments as received.
+ * @returns whether authorization must be obtained before resolving the path.
+ */
+export function requiresPathAuthorization(args: { action: string; dry_run?: boolean }): boolean {
+  return !(args.action === 'clean' && args.dry_run === true)
+}
+
 export function cleanTargetFor(
   exec: { agent?: { session: { id: unknown; header: { cwd?: string } } } },
   context: { boundSessionIds: readonly string[]; authorizedPath?: string; specified?: boolean },
@@ -245,9 +264,9 @@ export function registerWsTool(ctx: Context): () => void {
       // An Agent-supplied path is untrusted until the user authorizes THIS
       // call. Asking first means a refusal costs nothing: no operation is
       // scanned, resolved or deleted before the answer arrives.
-      const authorizedPath = hasExplicitPath(args.path) && exec.agent !== undefined
+      const authorizedPath = hasExplicitPath(args.path) && exec.agent !== undefined && requiresPathAuthorization(args)
         ? await authorizeExplicitPath(ctx, exec, { action: args.action, path: args.path })
-        : undefined
+        : hasExplicitPath(args.path) ? args.path : undefined
 
       // Clean is repository-oriented and takes its trusted inputs (archive
       // membership, live Session paths, protected bindings) from the Host.
