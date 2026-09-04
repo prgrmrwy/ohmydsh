@@ -281,18 +281,16 @@ describe('archiving is never proposed to mask a gate', () => {
     // would ask about.
     expect(result.cleaned).toEqual([])
     expect(result.refused[0]).toMatchObject({ operationId: target.operationId, kind: 'not-archived' })
-    // The advice must not send the user off to archive by hand what the next
-    // real run would offer to do: read that way, a preview looks like
-    // "nothing to do here" and the real run never happens.
+    // When this call could make the offer, pointing at a manual archive
+    // describes the wrong next step.
     expect(result.refused[0]?.reason).toMatch(/a real run asks/)
     expect(result.refused[0]?.reason).not.toMatch(/archive it before cleaning/)
-    // Sessions under danger-full-access are told "approval prompts are
-    // disabled". A reader took that to mean this offer would be auto-rejected,
-    // reported zero cleanable and never made the real run. The offer travels
-    // on the ask-a-human channel, so the reply itself must say so.
+    // A danger-full-access session is told "approval prompts are disabled",
+    // which says nothing about this channel; the reply carries that fact
+    // because the caller's own context does not.
     expect(result.refused[0]?.reason).toMatch(/ask-a-human channel, not approval/)
-    // `cleaned: []` on its own reads as "nothing to do here". The count says
-    // plainly that a real run has a decision to put to the user.
+    // These candidates appear only under `refused`, so the count is what makes
+    // a pending decision visible at all.
     expect(result.wouldOfferToFinish).toBe(1)
     await expect(access(target.worktreePath)).resolves.toBeUndefined()
   }, 300_000)

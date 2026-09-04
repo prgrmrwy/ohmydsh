@@ -51,16 +51,13 @@ never reused, so a later call asks again. Treat a refusal as the answer: do not
 retry with a different path, and do not fall back to generic Git commands.
 Without an explicit yes — including when no one can be asked — the call is
 refused, which is the intended fail-closed behavior rather than a fault to work
-around. Do not ask for this permission in prose yourself: pass the `path` and
-let the tool raise the real prompt.
+around. Passing `path` is what raises that prompt; asking for the same
+permission in prose instead does not reach it.
 
-This question uses the ask-a-human channel, not the approval/sandbox-escalation
-channel, so a session reporting approval prompts as disabled still receives it.
-"Approval prompts are disabled" is never a reason to skip passing `path`.
-
-"One-shot" describes what agreement covers — this call only, never remembered —
-not a scarce quota. There is no budget of authorizations to conserve, so asking
-again for a further call costs nothing and is the intended flow.
+The question travels on the ask-a-human channel rather than the approval /
+sandbox-escalation one, so a session reporting approval prompts as disabled
+still receives it. "One-shot" describes what agreement covers — this call only,
+never remembered — not a quota to conserve.
 
 Agreement only establishes where to look. It exempts nothing: the same
 active, dirty, in-flight, archived, lifecycle and merge-ancestry gates run
@@ -84,27 +81,14 @@ A `dry_run` preview never raises that offer and never archives anything: it
 reports such a candidate as "not archived" so you can see what a real run would
 ask about. Expect the question only on a real run.
 
-A preview and a real run therefore do NOT report the same thing here, and a
-preview that cleans nothing is not evidence that a real run would clean
-nothing. Every candidate listed as "not archived" is one a real run would offer
-to finish. Do not stop at the preview and conclude there is nothing to do:
-report which candidates the real run would ask about, and let the user decide
-whether to make that run.
+So a preview and a real run do not report the same thing: a candidate that a
+real run would offer to finish shows up in a preview only as a "not archived"
+refusal, never under `cleaned`. The preview counts them in
+`wouldOfferToFinish`.
 
-That question is asked through the ask-a-human channel, which is NOT the
-approval/sandbox-escalation channel. A session that reports approval prompts as
-disabled — every `danger-full-access` session does — still receives this
-question normally. Never reason that the offer would be auto-rejected and skip
-the real run on that basis: it reaches the user regardless of approval policy.
-
-Needing the user's decision is the point of the real run, not a reason to avoid
-it. "It would only ask, so the count stays zero" is circular: the count stays
-zero precisely because the question was never put. When the user asked to clean
-and a candidate is offerable, make the real run and let them answer. Deciding
-on their behalf that they would rather not be asked — because the worktree
-belongs to a session they are using, or because you judge the moment wrong —
-takes the choice away from the person who asked for it. Report what you see and
-let them choose.
+The question travels on the ask-a-human channel rather than the approval /
+sandbox-escalation one, so it is delivered even in a session that reports
+approval prompts as disabled — which every `danger-full-access` session does.
 
 That offer is never a way around a gate. A candidate that is unmerged, dirty,
 in-flight, malformed or still occupied is refused on that real reason and is

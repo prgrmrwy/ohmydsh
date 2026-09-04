@@ -259,12 +259,11 @@ export async function wsCleanRepository(repoPath: string, options: RepoCleanOpti
         ...candidate,
         kind: 'not-archived' as const,
         reason: offerable
-          // The channel is spelled out because a session running under
-          // danger-full-access is told "approval prompts are disabled", and a
-          // reader concluded the offer would be auto-rejected, reported "0
-          // cleanable" and never made the real run. The question does not
-          // travel on the approval seam, so that inference is wrong — and the
-          // correction has to live in the output, which every caller reads.
+          // The channel is named because a danger-full-access session is told
+          // "approval prompts are disabled", from which a caller can only
+          // conclude this offer would be auto-rejected too. It travels on the
+          // ask-a-human seam instead, and nothing else in the caller's context
+          // reveals that.
           ? `Source Session ${binding.sourceSessionId} is not archived; a real run asks the user whether to archive it and finish this Worktree Session. That question uses the ask-a-human channel, not approval, so it is delivered even when approval prompts are disabled.`
           : `Source Session ${binding.sourceSessionId} is not archived; archive it before cleaning its Worktree Session`,
       }
