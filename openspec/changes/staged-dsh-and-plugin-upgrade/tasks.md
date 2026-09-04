@@ -64,7 +64,7 @@
 
 ## 7. 收尾
 
-- [ ] 7.1 更新 `dsh.yaml` 各条目的审查记录,使 note 反映升级后的实际版本、信任面与已知约束。
-- [ ] 7.2 复核本 change 的 spec 是否已反映最终行为;如阶段四实际做法与 design 决策不一致,先更新 design/specs 再归档。
-- [ ] 7.3 `openspec validate staged-dsh-and-plugin-upgrade --strict` 通过;仓库 `npm test`、`npm run check:artifacts` 通过。
-- [ ] 7.4 归档本 change,并把 spike 中发现但未处理的事项(如后续插件升级、遗留兼容问题)写回 `BACKLOG.md`。
+- [x] 7.1 更新 `dsh.yaml` 各条目的审查记录,使 note 反映升级后的实际版本、信任面与已知约束。
+- [x] 7.2 复核本 change 的 spec 是否已反映最终行为;如阶段四实际做法与 design 决策不一致,先更新 design/specs 再归档。
+- [x] 7.3 `openspec validate staged-dsh-and-plugin-upgrade --strict` 通过;仓库 `npm test`、`npm run check:artifacts` 通过。
+- [x] 7.4 归档本 change,并把 spike 中发现但未处理的事项(如后续插件升级、遗留兼容问题)写回 `BACKLOG.md`。
