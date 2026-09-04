@@ -65,7 +65,10 @@ describe('repository-wide cleanup', () => {
       const repo = await discoverRepo(root)
       const record = await loadOperation(repo.gitCommonDir, entry.operationId)
       expect(record?.phase).toBe('cleaned')
-      expect(bindingOf(record!)?.state).toBe('cleaned')
+      // Both source Sessions were archived at clean time, so the tombstone
+      // records that fact. Writing a bare `cleaned` here used to discard it and
+      // strand the binding with no edge left to `released`.
+      expect(bindingOf(record!)?.state).toBe('cleaned-archived')
     }
   }, 300_000)
 
