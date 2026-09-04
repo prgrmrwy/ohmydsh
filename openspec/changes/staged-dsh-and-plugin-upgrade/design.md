@@ -122,6 +122,61 @@
 
 ## Open Questions
 
-- `dsh-client-runtime` 的各接口面在 `0.1.2` 线的**具体承接方式**为何?7 个自研包是逐一改 inject 即可,还是需要改写调用形态?(阶段四 spike 的核心产出)
-- 阶段四完成后,`sidebar-qa` 应升到 `0.5.0` 还是当时的更新版本?其"添加到对话"功能依赖 `conversation` 服务的可用性需在新运行体上复核
-- 是否需要在阶段四同时评估 `dsh` 的 `latest`(届时可能已非 `0.1.2-rc.1`)?建议以 spike 时点的实际 registry 状态决定,不预先锁定
+以下三条已由 2026-09-04 的阶段四 spike(tasks 4.1–4.5)解答,结论见下节。
+
+- ~~`dsh-client-runtime` 的各接口面在 `0.1.2` 线的**具体承接方式**为何?~~ → 已查清,见 S1/S2
+- ~~阶段四完成后,`sidebar-qa` 应升到 `0.5.0` 还是当时的更新版本?~~ → 已复核,见 S4
+- ~~是否需要在阶段四同时评估 `dsh` 的 `latest`?~~ → 已确认 `latest` 仍为 `0.1.2-rc.1`,见 S3
+
+## Spike 结论(2026-09-04,tasks 4.1–4.5)
+
+全部结论均以 npm 实际发布物的 `.d.ts` 与 `lib/*.js` 为证据,不依赖 release notes。
+
+### S1: 接口承接方式 —— 服务名不变,提供者换包(task 4.1)
+
+`@deepseek-ai/dsh-client-runtime@0.1.1-rc.2` 通过 cordis `Context` 增强提供 5 个服务面。`0.1.2-rc.1` 把它们拆到 4 个包,**服务名与取用形态(`ctx.<name>`)保持不变**:
+
+| 旧 `ctx.*`(client-runtime 提供) | `0.1.2` 的提供者 |
+|---|---|
+| `ctx.sessions`(`ISessions`) | `@deepseek-ai/dsh-api-session-controller` |
+| `ctx.slots`(`SlotRegistry`) | `@deepseek-ai/dsh-client-ui-renderer` |
+| `ctx.workspaces`(`IWorkspaces`) | `@deepseek-ai/dsh-api-workspace-controller` |
+| `ctx.conversation`(`IConversation`) | `@deepseek-ai/dsh-client-ui-conversation` |
+| `conversationEvents` / `conversationViews` | 同上(`uiConversation`) |
+
+`ISessions` 契约 diff(逐成员比对):**保留 14 个**(`list` `open` `openSubagent` `subagentAddress` `setSubagentCatalogOpen` `refreshSubagents` `clear` `search` `fork` `scope` `scopeOf` `sessionOf` `binding` `searchResultLimit`);新增 `create` / `refresh`;**移除 `currentProvideInfo` / `noteAgentPreset` / `provide`**。
+
+**关键结论:本仓库 7 个包无一使用这三个被移除的成员**(已全仓 grep 确认)。因此迁移形态是「**改 inject 声明,不改调用形态**」。
+
+### S2: 逐包改动量(task 4.2)
+
+按「client 半区实际取用的服务」分类,全部 7 个包落在**仅改 inject 声明**一类,无一需要改写调用形态:
+
+| 包 | client 半区实际用到 | 需替换的 inject |
+|---|---|---|
+| `session-title-copy` | `sessions` | runtime → session-controller |
+| `sidebar-session-provider-icon` | `sessions` | 同上 |
+| `session-links` | `sessions` | 同上 |
+| `system-clock` | `slots` `locale` `connection` | runtime → ui-renderer |
+| `home-network-model-guard` | `sessions` `slots` `locale` `connection` `conversation` | runtime → session-controller + ui-renderer |
+| `dsh-pet` | `sessions` `slots` `workspaces` | runtime → session-controller + ui-renderer + workspace-controller |
+| `worktree-session` | `sessions` `slots` `conversation` | runtime → session-controller + ui-renderer |
+
+注:`ctx.agents` 仅出现在 `dsh-pet` 与 `worktree-session` 的 **host 半区**(`src/index.ts`、`src/host/policy.ts`),不属于 client-runtime 的接口面,不受本次拆包影响。
+
+规模判断:改动集中在 7 个 `package.json` 的 `dsh.client.inject` 与 `peerDependencies`,加第 8 个包(`subscriptions-sandbox-shim`)的 peer 版本族同批更新(D6)。**属可接受范围,spike 通过,阶段四可继续**。
+
+### S3: registry 实况(task 4.3)
+
+`@deepseek-ai/dsh` dist-tags:`latest` = `next` = **`0.1.2-rc.1`**,`alpha` = `0.1.2-alpha.5`。与 proposal 预期一致,阶段四目标版本确定为 `0.1.2-rc.1`。
+
+`@deepseek-ai/dsh-client-runtime` 版本止于 `0.1.1-rc.2`,`latest` 回落至 `0.0.1-rc.1` —— 弃用形态确认,且 `dsh-web-app@0.1.2-rc.1` 的依赖清单中确实**不含**该包。
+
+### S4: 后置插件准入(task 4.4)
+
+- **`better-sidebar@0.18.0`**:peer 要求 cordis `^4.0.2` + dsh-* `^0.1.2-rc.1`。目标运行体满足两者(cordis 本机实测已是 `4.0.2`)。**可放行**。
+- **`sidebar-qa@0.5.0`**:其 `client-registry.js` 调用 `ctx.remote.session` 的 7 个方法。实测 `0.1.2-rc.1` **确实提供 `remote` 的 `session` 命名空间**(`namespace: 'session'`),其中 `follow` `rename` `fork` `prompt` `create` 由 `dsh-api-session-controller` 提供(该命名空间共 12 个方法);`selectModel` 与 `modelCatalog` **不在 session-controller 内**,而由 `@deepseek-ai/dsh-client-ui-model-selection@0.1.2-rc.1` 扩展到同一 `session` 命名空间上。**7 个方法全部可得,可放行**——但正因为它们分属两个包,阶段四验收必须确认 `dsh-client-ui-model-selection` 确实随 profile 加载,否则 `selectModel`/`modelCatalog` 会成为典型的「静默不激活」。
+
+### S5: 风险修正
+
+design 原假设「cordis `4.0.1` → `4.0.2` 是 host 升级的连带结果」与实况不符:本机 cordis **现已是 `4.0.2`**(`dsh@0.1.1-rc.2` 依赖 `^4.0.1`,范围自然上浮)。故 `0.18.0` 的两项阻塞中 cordis 一项在阶段三时点即已满足,真正的阻塞只有 dsh-* 版本族。该修正不改变阶段划分。
