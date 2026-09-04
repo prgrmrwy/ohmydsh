@@ -21,37 +21,49 @@
 - **WHEN** 调用方未提供该源 Session 的归档事实
 - **THEN** 系统 SHALL 保持既有"已清理"写入，MUST NOT 通过扫描归档集或其他旁路自行推断
 
-### Requirement: A wedged cleaned binding is released only when prior archiving can be proven
-系统 SHALL 修复历史上因清理覆盖归档事实而无法释放的绑定：对当前未归档、状态为"已清理"、且能被证明曾经进入过归档集的记录，SHALL 迁移为 released，使其源 Session 恢复为普通 Session。
+### Requirement: A binding whose managed worktree no longer exists is released
+恢复一个已清理绑定时，系统 SHALL 依据**该托管 worktree 当前是否仍然存在且身份可被证明**来决定其归属：仍存在且身份校验通过时，保持既有 Worktree Session 约束；已不存在或身份无法被证明时，SHALL 释放该绑定并以源 Workspace 中的普通 Session 行为恢复该会话。
 
-无法证明曾经归档时，系统 MUST 保持该记录为"已清理"，MUST NOT 释放。"清理后从未归档"的会话按既有要求本就应停在已清理状态；若仅凭"当前未归档"就释放，会把这两类记录混为一谈，从而破坏既有的重新打开语义。
+判定 SHALL 复用既有的托管 worktree 身份校验（目录存在、位于仓库的 worktree 分配根之内、当前分支等于任务分支、Git common dir 与 operation 元数据一致），MUST NOT 退化为只判断路径是否存在——一个被删除后又以同名重建的目录不构成同一个托管 worktree。
 
-该迁移 MUST NOT 创建、修改或删除任何 branch、worktree、Workspace、Session 或 Git 资源，MUST NOT 删除 tombstone，且 MUST 与既有 released 单调性一致：已 released 的记录不得回退。
+该判定 MUST NOT 依赖该 Session 是否曾经归档：worktree 是否还在与归档历史无关。以归档历史决定归属，会使两个执行目录同样已被删除的会话得到不同结果——其中一个永久停在全工具拒绝状态，而这与其执行目录的真实状态无关。
 
-#### Scenario: A binding wedged by the archive-then-clean order is released
-- **WHEN** 某记录状态为"已清理"、当前未归档，且存在可证明其曾进入归档集的依据
-- **THEN** 系统 SHALL 将其迁移为 released，并让该 Session 以普通会话恢复，同时不创建或删除任何 Git/DSH 资源
+释放 MUST NOT 创建、修改或删除任何 branch、worktree、Workspace、Session、operation 或其他 Git/DSH 资源，MUST NOT 删除 cleaned tombstone，且 MUST 与既有 released 单调性一致。
 
-#### Scenario: A cleaned-but-never-archived binding is left alone
-- **WHEN** 某记录状态为"已清理"、当前未归档，且无法证明其曾进入归档集
-- **THEN** 系统 SHALL 保持其"已清理"状态不变，MUST NOT 释放该绑定
+#### Scenario: A cleaned binding whose worktree is gone becomes an ordinary Session
+- **WHEN** 恢复一个已清理绑定，其托管 worktree 目录已不存在
+- **THEN** 系统 SHALL 释放该绑定并以普通 Session 行为恢复该会话，且 MUST NOT 创建或删除任何 Git/DSH 资源
 
-#### Scenario: Migration preserves released monotonicity
-- **WHEN** 迁移遇到一个已经处于 released 的记录
+#### Scenario: Release does not depend on archive history
+- **WHEN** 两个已清理绑定的托管 worktree 均已被删除，其中一个曾经历归档往返、另一个从未归档
+- **THEN** 系统 SHALL 对二者作出相同判定并均释放为普通 Session
+
+#### Scenario: A surviving managed worktree keeps its binding
+- **WHEN** 恢复一个绑定，其托管 worktree 仍然存在且通过既有身份校验
+- **THEN** 系统 SHALL 保持该 Worktree Session 绑定与其既有执行约束不变
+
+#### Scenario: An unprovable worktree identity is not treated as surviving
+- **WHEN** 目标路径存在，但其分支、Git common dir 或分配根不满足既有身份校验
+- **THEN** 系统 SHALL 判定该托管 worktree 不复存在并释放该绑定，MUST NOT 把该路径当作托管执行目录
+
+#### Scenario: Released monotonicity is preserved
+- **WHEN** 归档生命周期协调遇到一个已经处于 released 的记录
 - **THEN** 系统 SHALL 保持其 released 不变，MUST NOT 回退为任何更早的状态
 
 ## MODIFIED Requirements
 
 ### Requirement: Cleanup preserves source Workspace history
-安全清理 SHALL 只移除已证明可丢弃的 worktree 运行资源和 task branch，并将持久绑定标记为 cleaned；标记时 SHALL 一并记录该源 Session 在清理时刻的归档成员资格，使"归档后取消归档即恢复为普通 Session"这一转换对所有清理路径可达，而不仅对"清理前已归档"的路径可达。系统 MUST 保留原 Session、源 Workspace 归属及可审计的 cleaned operation 历史，且不得将 Session 移动到“未分组”。在 cleaned Session 完成一次归档后取消归档时，系统 SHALL 自动释放其当前 Worktree Session 绑定并将其恢复为普通 Session；该转换 MUST 不创建新的 branch、worktree、Workspace、Session 或 operation，也 MUST 不启用非 blank Session 的 Worktree 启动能力。
+安全清理 SHALL 只移除已证明可丢弃的 worktree 运行资源和 task branch，并将持久绑定标记为 cleaned；标记时 SHALL 一并记录该源 Session 在清理时刻的归档成员资格，使归档生命周期的后续判定不丢失该事实。系统 MUST 保留原 Session、源 Workspace 归属及可审计的 cleaned operation 历史，且不得将 Session 移动到“未分组”。
+
+当一个已清理绑定的托管 worktree 已不复存在时，系统 SHALL 自动释放该绑定并将会话恢复为普通 Session，无论其是否曾经归档；托管 worktree 仍然存在且身份可被证明时，SHALL 保持其既有 Worktree Session 约束。该转换 MUST 不创建新的 branch、worktree、Workspace、Session 或 operation，也 MUST 不启用非 blank Session 的 Worktree 启动能力。
 
 #### Scenario: Clean an archived completed Session
 - **WHEN** 绑定 Session 已归档、worktree 干净、无活动执行且 task branch 已被普通 Git ancestry 证明合并
 - **THEN** 系统 SHALL 删除 worktree 和安全可删的本地 task branch、标记绑定已清理，并保留 Session 在源 Workspace 下的历史记录
 
-#### Scenario: Reopen a cleaned historical Session
-- **WHEN** 用户重新打开一个已完成安全清理、但尚未发生归档后取消归档转换的历史 Session
-- **THEN** 系统 SHALL 保持 cleaned 历史状态，表明旧执行目录已不存在，并拒绝把旧路径或源仓库主 checkout 当作该绑定的托管执行目录
+#### Scenario: Reopen a cleaned historical Session whose worktree is gone
+- **WHEN** 用户重新打开一个已完成安全清理、且其托管 worktree 已不存在的历史 Session（无论是否曾经归档）
+- **THEN** 系统 SHALL 释放该绑定并以普通 Session 恢复该会话，且 MUST NOT 把旧 worktree 路径或源仓库主 checkout 当作该绑定的托管执行目录
 
 #### Scenario: Unarchive a cleaned historical Session
 - **WHEN** 一个 cleaned Session 已进入归档集，随后用户取消归档并重新打开该 Session
@@ -60,6 +72,10 @@
 #### Scenario: Unarchive after an archive-then-clean finish releases the Session
 - **WHEN** 一个候选经"确认 → 归档 → 清理"收尾后，用户取消归档并重新打开该源 Session
 - **THEN** 系统 SHALL 与"清理前已归档"路径一样自动释放该绑定并恢复为普通 Session，其工具策略 MUST NOT 继续按已清理绑定拒绝调用
+
+#### Scenario: A never-archived cleaned Session is released all the same
+- **WHEN** 一个已清理且从未进入过归档集的 Session 被重新打开，其托管 worktree 已不存在
+- **THEN** 系统 SHALL 同样释放该绑定并恢复为普通 Session，MUST NOT 因其缺少归档往返而使其停留在全工具拒绝状态
 
 #### Scenario: Unarchive creates no replacement worktree resources
 - **WHEN** cleaned Session 因取消归档恢复为普通 Session

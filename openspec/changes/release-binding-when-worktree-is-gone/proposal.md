@@ -18,10 +18,11 @@
 
 - 清理写 tombstone 时，`binding.state` SHALL 反映该源 Session 在清理时刻的真实归档成员资格：已归档写 `cleaned-archived`，未归档写 `cleaned`。归档事实由受信 Host 提供，MUST NOT 由维护层自行推断。
 - 归档成员资格的真相来源保持不变（仍是 Host 的归档集），因此 operator CLI 与 HTTP 入口的既有 `not-archived` 拒绝语义不受影响。
-- 补一次性迁移：对已经处于 `state: 'cleaned'` + `archiveLifecycle: {version: 1}` 且当前未归档、但**能被证明**曾经历过归档的记录，恢复为 `released`。若无法证明曾归档，MUST 保持 `cleaned` 不变——"清理后从未归档"的会话按现有 spec 本就应停在 `cleaned`。
+- 把"是否仍是 Worktree Session"的判定改为依据**托管 worktree 当前是否仍然存在且身份可被证明**，而不再依据归档历史：worktree 还在就保持既有约束，已不在就释放为普通 Session。判定复用既有的托管 worktree 身份校验（`recovery.ts` 的 `identityDiagnostic`），该校验今天对 cleaned 状态被直接短路跳过。
+- **BREAKING（行为）**：这会改变既有场景 `Reopen a cleaned historical Session`。此前"已清理但从未归档"的会话永久停留在全工具拒绝状态，此后同样按 worktree 是否存在判定并被释放。这是有意的规范收敛：worktree 是否还在与该会话有没有归档过毫无关系，而旧行为让两个执行目录同样已删除的会话仅因归档历史不同而得到不同归属。存量卡死记录也因此在下次打开时自愈，不需要单独的一次性迁移。
 - 补测试覆盖真实顺序：确认 → 归档 → 清理 → 取消归档 → 会话恢复为普通会话且工具不再被拒。
 
-不是 breaking change：状态取值集合、wire 格式、operation schema 版本与 CLI 行为均不变。
+格式层面不是 breaking：状态取值集合、wire 格式、operation schema 版本与 CLI 行为均不变；唯一的破坏性在上述行为收敛，且它只放宽归属判定，不放宽任何清理安全门。
 
 ## Capabilities
 
@@ -31,12 +32,13 @@
 
 ### Modified Capabilities
 
-- `source-workspace-worktree-session`: 收紧"清理保留源 Workspace 历史"这一 requirement，明确 tombstone 写入必须携带清理时刻的归档事实，使既有的取消归档释放路径对"归档并清理"编排同样可达；并补充一次性迁移在无法证明曾归档时保持保守。
+- `source-workspace-worktree-session`: 改写"清理保留源 Workspace 历史"这一 requirement——归属判定改由托管 worktree 是否仍然存在决定，不再依赖归档历史；并新增一条 requirement 明确该判定必须复用既有身份校验、不得退化为仅判断路径存在。
 
 ## Impact
 
+- `packages/worktree-session/src/host/recovery.ts`：`identityDiagnostic` 当前对 `cleaned`/`cleaned-archived` 直接返回 `undefined`（短路跳过校验），需使其对已清理绑定同样执行 worktree 身份校验。
+- `packages/worktree-session/src/index.ts` 与 `host/policy.ts`：将"worktree 已不存在"的判定结果接到释放与 guard 安装决策上。
 - `packages/worktree-session/src/host/maintenance.ts`：`wsClean` 的 tombstone 写入与 `wsCleanRepository` 的归档事实传递。
-- `packages/worktree-session/src/host/operation.ts`：`reconcileSourceArchiveLifecycle` 的迁移边。
-- `packages/worktree-session/test/`：新增覆盖 archive-then-clean → unarchive 的回归测试。
-- 不涉及：`dsh-pet`、operation schema 版本、HTTP route 契约、CLI 参数、Git 资源处置逻辑与任何安全门。
+- `packages/worktree-session/test/`：新增覆盖 archive-then-clean → unarchive、以及"从未归档但 worktree 已删除"的回归测试。
+- 不涉及：`dsh-pet`、operation schema 版本、HTTP route 契约、CLI 参数、Git 资源处置逻辑与任何清理安全门。
 - 受影响的既有卡死记录需由迁移或用户重新归档/取消归档修复；两者都不创建或删除任何 Git 资源。
