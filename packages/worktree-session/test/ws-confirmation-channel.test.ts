@@ -68,9 +68,17 @@ describe('explicit-path confirmation is routed to the human, not the permission 
     const throwing = { get: () => ({ ask: async () => { throw new Error('aborted') } }) }
     const absent = { get: () => undefined }
 
-    for (const ctx of [declined, unanswered, otherQuestion, throwing, absent, {}]) {
+    // A human saw the question and did not agree: their decision.
+    for (const ctx of [declined, unanswered, otherQuestion]) {
       await expect(authorizeExplicitPath(ctx, exec, { action: 'clean', path: '/repo/main' }))
         .rejects.toThrow(/not authorized by the user/)
+    }
+    // The question never reached anyone. Still fails closed, but reporting it
+    // as a user refusal would attribute a decision nobody made, and would hide
+    // the only actionable fact: this caller has no answerer.
+    for (const ctx of [throwing, absent, {}]) {
+      await expect(authorizeExplicitPath(ctx, exec, { action: 'clean', path: '/repo/main' }))
+        .rejects.toThrow(/did not reach a human/)
     }
   })
 
