@@ -35,4 +35,4 @@
 - [x] 5.2 更新 `worktree-session` 架构文档，说明模型显式路径的授权通道与 operator CLI 的关系。
 - [x] 5.3 运行 `packages/worktree-session` 的 build/typecheck/test 与仓库级 `npm test`、`npm run check:artifacts`、`node scripts/sync.mjs`（并验证第二次运行无变化），记录确切命令与结果。build/typecheck 通过；包测试 23 文件 149 通过；`npm test` 92/92；`check:artifacts` 合规；主仓 `node scripts/sync.mjs` 第二次运行报 `no changes — deployment already matches manifest`（幂等成立）。
 - [x] 5.4 运行 `openspec validate authorize-explicit-ws-path --strict`（通过），复核 diff 无范围蔓延：仅 `worktree-session` 源码/测试/manifest、`skills/ws/SKILL.md`、架构文档与 lockfile 依赖声明；`dsh-pet` 零改动，operation schema、HTTP route、CLI 行为、远端分支、缓存与历史 Session 语义均未改变。
-- [ ] 5.5 在真实 Pet 流程中端到端验证一次 `ws clean`（先 `dry_run`，再授权执行），确认闭环成功并记录证据。
+- [x] 5.5 在真实 Pet 流程中端到端验证一次 `ws clean`：先 `dry_run` 预览（未索取授权确认），再以显式 `path` 真实执行并由用户在会话中作答同意，闭环成功；授权仅对当次调用生效，既有安全门逐项照常评估。
