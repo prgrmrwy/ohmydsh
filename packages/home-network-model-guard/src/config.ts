@@ -10,6 +10,8 @@
  * @module dsh-home-network-model-guard/config
  */
 import { existsSync, readFileSync, statSync } from 'node:fs'
+import { chmod, mkdir, rename, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 
 /** Default blocklist: mainland-China egress is blocked until configured otherwise. */
 export const DEFAULT_BLOCKED_COUNTRIES: readonly string[] = ['CN']
@@ -171,4 +173,26 @@ export function configEpochOf(path: string): string {
   } catch {
     return 'default'
   }
+}
+
+/**
+ * Validate and atomically write the host config file.
+ *
+ * The write goes to a temp file in the same directory (owner-only mode),
+ * then renames over the target — a crash mid-write never leaves a truncated
+ * config behind. The config directory is created with owner-only access.
+ *
+ * @param path - host config file path.
+ * @param raw - parsed JSON value from the caller.
+ * @returns `{ ok: true }` or a validation error; throws only on fs failure.
+ */
+export async function writeGuardConfig(configFile: string, raw: unknown): Promise<{ ok: true } | { ok: false; error: string }> {
+  const result = validateGuardConfig(raw)
+  if (!result.ok) return result
+  await mkdir(path.dirname(configFile), { recursive: true, mode: 0o700 })
+  const tmp = `${configFile}.tmp-${process.pid}-${Date.now()}`
+  await writeFile(tmp, `${JSON.stringify(result.config, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
+  await chmod(tmp, 0o600)
+  await rename(tmp, configFile)
+  return { ok: true }
 }
