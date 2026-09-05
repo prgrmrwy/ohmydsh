@@ -221,6 +221,22 @@
 
 ## 待立项
 
+### [U004] dsh-cockpit 认证生命周期缺陷(token 轮换断连 + 已配置状态不可见)
+- **状态**: 待立项(2026-09-05 主 checkout 升级到 0.1.2 后用户实测发现)
+- **优先级**: **P1**(第 1 条为高频断连)
+- **归属**: `dsh-cockpit` 仓库(本仓库的运行体迁移已完整,这些是驾驶舱侧缺陷)
+- **问题**:
+  1. **DSH 重启即断连且不能自愈(P1)**:`0.1.2` 的 launch token **每进程新生成**,而 cockpit 持久化的是 token 而非 cookie(`registry.ts` 的 `dshLaunchToken`),且 `createDeviceProtocol` 在**每次连接/重连**时都用它重新 exchange(`device-lifecycle.ts:499`)。DSH 一重启:token 作废 → 连接断 → 重连拿旧 token 换 → **401** → `DSH_UNAVAILABLE`,退避重试多少次都是同一个作废 token。**已实测**:重启前 token 换 cookie 返回 401,当前 token 返回 303。
+     - 补充事实:签名密钥持久化在 DSH 凭据库(`credentialKey("client-connection","browser-session")`),故**已签发的 cookie 跨重启仍有效**(实测 200)——cockpit 用不上这个性质,只因为它每次重连都从 token 重来。
+  2. **已配置 token 不可见(P2)**:`draftFor()` 每次把编辑框置空,而公开面(`publicRecord` 已剥离 token)**连「是否已配置」的布尔标志都没有**。用户打开编辑看到空框,无法区分「从没配过」与「配过但不回显」——看起来像没保存成功。留空不提交该字段是有意设计(避免编辑显示名时误清 token),但缺少状态提示。
+  3. **无清除入口(P3)**:后端支持 `clearDshLaunchToken`,前端没有任何 UI 入口,配错了无法清除。
+- **建议方案**: 1 与 2 连着做 —— cookie 持久化进 0600 设备存储(重连先用 cookie,401 再回退 token),认证状态随之成为可展示事实(有无有效 cookie / 何时过期),顺势解决 2;3 补一个清除按钮。
+  - ⚠ 该方案会改动 cockpit 现有的明文承诺「cookie 仅在连接代内存中持有,绝不落盘」,须走正式 spec 修订并重新论证信任面(注:它本就持久化着能换取 cookie 的 token,信任面未实质扩大)。
+  - ❌ 不采用「cockpit 读 `~/.dsh` 取最新 token」:破坏其「绝不读 `~/.dsh`、日志或 provider credential」的边界承诺。
+- **临时规避**: DSH 重启后到驾驶舱设备编辑里重新粘贴当前启动 URL(`grep -o 'http://127.0.0.1:3080/?token=[A-Za-z0-9_-]*' ~/.dsh/dsh.log | tail -1`)。
+- **更新**: 2026-09-05 记录。
+
+
 ### [U003] `@tangzai/dsh-ui-archive-manager` 适配 DSH 0.1.2 后重新启用
 - **状态**: **待上游发布**(2026-09-05 因 0.1.2 不兼容而临时禁用;⚠ **上游已修好,只差发版**)
 - **优先级**: P2

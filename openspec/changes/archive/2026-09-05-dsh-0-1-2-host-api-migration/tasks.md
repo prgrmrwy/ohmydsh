@@ -47,4 +47,4 @@
 - [x] 6.3 更新 `dsh.yaml` 各条目的审查记录,使 note 反映升级后的实际版本、信任面与已知约束;特别记录 `authority` 语义在新运行体下的表达方式。
 - [x] 6.4 复核本 change 的 spec 是否已反映最终行为;如实际做法与 design 决策不一致,先更新 design/specs 再归档。
 - [x] 6.5 `openspec validate dsh-0-1-2-host-api-migration --strict` 通过;仓库 `npm test`、`npm run check:artifacts` 通过。
-- [ ] 6.6 归档本 change,并把发现但未处理的事项写回 `BACKLOG.md`(含 U001 的关闭或更新、P001 `dsh-ego-browser` 的重评估条件是否已满足)。
+- [x] 6.6 归档本 change,并把发现但未处理的事项写回 `BACKLOG.md`(含 U001 的关闭或更新、P001 `dsh-ego-browser` 的重评估条件是否已满足)。
