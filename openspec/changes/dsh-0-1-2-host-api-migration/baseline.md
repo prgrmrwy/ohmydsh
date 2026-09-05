@@ -185,6 +185,42 @@ client 模块清单里 8 个自研包的 `client.js` 全部在列:
 > 作为程序化等价证据;需要人眼确认的视觉项(时钟走秒、划选提问、tab 计数)
 > 仍留待用户在隔离实例 `http://127.0.0.1:3081` 上过一遍。
 
+### ⚠ 验收发现的**范围外破坏**:dsh-cockpit 无法连接 0.1.2 实例(2026-09-05,用户实测)
+
+用户用 `dsh-cockpit`(`../dsh-cockpit`,本仓库外的自研项目)连隔离实例 3081,
+报 `DSH_UNAVAILABLE: rc.2 host.describe HTTP 401`。已复现并定位:
+
+**根因:`/api` 通道在 0.1.2 从「非结构化 RPC 代理」换成了「typert 网关」,
+三处同时变**(实测对比 :3080 旧实例与 :3081 新实例):
+
+| 维度 | `0.1.1-rc.2`(:3080) | `0.1.2-rc.1`(:3081) |
+|---|---|---|
+| 认证 | `/api/*` **无需认证**即可调用 | 需浏览器会话认证,未认证 **401** |
+| 端点命名 | 点号 `host.describe` / `session.list` / `workspace.list` | 斜杠命名空间 `session/list`;`host.describe`、`workspace.list` **404** |
+| 载荷形状 | `{type,rpcId,method,payload:{}}` | `payload` 必须是 `{args:{…}}`,且 args 需匹配 descriptor(如 `session/list` 要求 `_request`) |
+
+cockpit 的 `rc2-client.ts` 依赖 `host.describe`(探活)、`session.list`、
+`workspace.list` 与 WebSocket `/api/events.<stream>`,三个 REST 端点在 0.1.2
+全部不可用;`host.describe` 甚至没有对应的新端点(host facts 改由网关 ready
+帧的 `$host` 承载,不再是 RPC 方法)。
+
+**判定**:这是**本 change 范围之外**的破坏 —— cockpit 是独立项目,不在本
+仓库 8 个自研包内,也不在归档基线 A/B 清单里(基线 B1.x 只覆盖
+`dsh-cockpit-bridge` 浏览器插件,而 bridge 走 postMessage + 驾驶舱自有
+协议,**不受影响**)。按 spec「适配无法保持原语义时应停止并作为设计问题
+上报」,此处不就地改 cockpit,而是作为显式决策交由用户处理。
+
+**影响面**:仅「驾驶舱能否观测该设备」;DSH 本体、8 个自研包、浏览器端
+全部正常(见上文 B1)。日常 GUI(:3080,仍 `0.1.1-rc.2`)不受影响,
+故**回主 checkout 物化前必须先决定 cockpit 的处理方式**,否则驾驶舱会
+在主机升级后失去对本机的观测。
+
+**待用户决策的选项**(均需独立 change,不在本 change 内做):
+1. cockpit 侧适配 0.1.2 网关(改端点命名 + 载荷形状 + 补认证;
+   `host.describe` 需改用其它探活方式,如 `session/list` 或 ready 帧);
+2. cockpit 侧做双协议兼容(按探测结果走 rc.2 或 0.1.2 两套);
+3. 暂时接受驾驶舱对已升级设备不可用,推迟到 cockpit 跟进后再升主机。
+
 ### B2.1/B2.2 `worktree-session` 编排与安全门(4.4)
 
 - **B2.1**:本 change 的全部实施过程都在这个 Worktree Session 内完成,
