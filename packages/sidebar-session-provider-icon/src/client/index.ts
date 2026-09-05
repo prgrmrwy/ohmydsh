@@ -15,7 +15,7 @@
  *
  * @module dsh-sidebar-session-provider-icon/client
  */
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import type { ProviderProjection } from '../types.ts'
 import { providerBySession, providerTitleIndex } from './provider-map.js'

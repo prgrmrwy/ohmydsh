@@ -1,5 +1,5 @@
 import { createElement } from 'react'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { WorktreeControls } from './controls.tsx'
 import { restoreAllSubmits } from './handoff.ts'

@@ -20,13 +20,18 @@
  *
  * @module dsh-home-network-model-guard/client
  */
-import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 // Type-only merges: ctx.locale (dsh-client-locale), ctx.connection
 // (dsh-client-connection/client — the browser ConnectionHandle) and the
 // settings.section slot (dsh-client-ui-settings).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+// Type-only: ctx.slots (0.1.2: dsh-client-ui-renderer) and ctx.sessions
+// (0.1.2: dsh-api-session-controller) Context merges.
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 // Type-only: ctx.conversation.blocks / ctx.modelDirectories merges.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'

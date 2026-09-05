@@ -2,7 +2,7 @@
 # 修改后运行 `dsh build`(或 `node scripts/sync.mjs`)物化到 ~/.dsh。
 # 约定:禁用(enabled: false)≠删除;手改一律回写本仓库。
 
-dshVersion: 0.1.1-rc.2     # 启动脚本 bin/dsh 运行时读取,单一版本来源
+dshVersion: 0.1.2-rc.1     # 启动脚本 bin/dsh 运行时读取,单一版本来源
 
 autoUpdate:                # 启动/构建前自动检测并升级 DSH 版本(channel = registry dist-tag)
   enabled: false           # 关闭:完全跳过检测,钉在 dshVersion(需手动升级时改回 true;env DSH_SKIP_UPDATE=1 等效)
@@ -77,7 +77,7 @@ customizations:
     version: 0.1.0
     enabled: true
     brief: 设置面板底部 DSH 主机系统时钟(24h + 时区 + hostname)
-    note: 'B019 落地;openspec change settings-system-clock;Host+Web bundle:host 经通用 connection RPC 通道 /dsh-system-clock(authority loopback,接线同 subscriptions /subscriptions-auth)暴露只读 now 采样(主机 epoch / IANA 时区 / UTC 偏移 / hostname);web 注册官方 settings.section(id system-clock,order 300→设置导航最底部),一次采样 + skew 引擎本地每秒 tick,Intl timeZone + hour12:false 渲染,DST 正确;60s 周期 + visibilitychange 重同步;采样不可达显式降级,不静默回退浏览器时间;只读、零配置、无外部网络外呼'
+    note: 'B019 落地;openspec change settings-system-clock + dsh-0-1-2-host-api-migration;Host+Web bundle:host 经通用 connection RPC 通道 /dsh-system-clock 暴露只读 now 采样(主机 epoch / IANA 时区 / UTC 偏移 / hostname);web 注册官方 settings.section(id system-clock,order 300→设置导航最底部),一次采样 + skew 引擎本地每秒 tick,Intl timeZone + hour12:false 渲染,DST 正确;60s 周期 + visibilitychange 重同步;采样不可达显式降级,不静默回退浏览器时间;只读、零配置、无外部网络外呼。⚠ 回环边界的表达方式随运行体变更(2026-09-05,change dsh-0-1-2-host-api-migration):`0.1.1-rc.2` 由注册时显式传入 `{authority:''loopback''}` 逐 channel 限定;`0.1.2` 线删除了该注册参数,改由 connection 层对**每个** channel 统一施加 Host fence(Host 非 loopback 且不在 `trustedHosts` 内即 403)加浏览器会话认证(未认证 401)。本部署未配置 `trustedHosts`,故边界与旧版等价且更严(两道)。**已实测**:LAN IP / 伪造域名 Host 一律 403,携带有效 cookie 也仍 403(fence 先于认证);回环+已认证才返回采样。⚠ 若将来给 profile 配置 `trustedHosts`,本 channel 会随之放宽——那是一次显式安全决策,不得顺手添加'
   # 自研(local):受限地区 × Claude 发送拦截(Web blocks + Host 出口国家码判定,双备份 Geo,未知 fail-closed)
   - id: home-network-model-guard
     type: package
@@ -85,7 +85,7 @@ customizations:
     version: 0.1.0
     enabled: true
     brief: 出口位于受限地区时禁用 Claude 系列模型发送(输入框禁用 + 原因文案)
-    note: 'openspec change block-claude-on-home-network 归档后更新为 trusted-egress-claude-guard;Host+Web bundle:host 经 loopback RPC /dsh-home-network-model-guard 提供出口判定(两个互为备份的 HTTPS Geo 服务读国家码:主失败切备,双失败 unknown 且指数退避持续重试 2s→60s;blockedCountries 默认 CN,本地配置 $DSH_HOME/plugins/dsh-home-network-model-guard/config.json 可改,不进仓库;TTL 5min + 本机 IPv4 指纹 + 配置代际失效,single-flight,响应只含分类/新鲜度不泄漏 IP);web 订阅官方 modelDirectories per-session store + conversation.blocks,Claude 家族识别 provider+model 双字段(claude/anthropic 路由 + claude-* 模型名),routable=false 让位官方,只清自己写入的 block,槽位自检防官方竞态;⚠ 信任面:仅访问两个声明过的 IP 归属服务,不主动探测 Anthropic/Cloudflare,不回传本地信息,不落盘 IP;blocked/unknown 对 Claude fail-closed(CLI/subagent 等 Host 流由 llm/stream 门禁兜底,实现中),非 Claude 不受影响;仅客户端 affordance 定位已升级为 Host 强制;DSH 升级需回归 blocks 共存语义(design Decisions 4)'
+    note: 'openspec change block-claude-on-home-network 归档后更新为 trusted-egress-claude-guard,运行体迁移见 dsh-0-1-2-host-api-migration;Host+Web bundle:host 经 connection RPC /dsh-home-network-model-guard(仅回环可达,表达方式见 system-clock 条目)提供出口判定(两个互为备份的 HTTPS Geo 服务读国家码:主失败切备,双失败 unknown 且指数退避持续重试 2s→60s;blockedCountries 默认 CN,本地配置 $DSH_HOME/plugins/dsh-home-network-model-guard/config.json 可改,不进仓库;TTL 5min + 本机 IPv4 指纹 + 配置代际失效,single-flight,响应只含分类/新鲜度不泄漏 IP);web 订阅官方 modelDirectories per-session store + conversation.blocks,Claude 家族识别 provider+model 双字段(claude/anthropic 路由 + claude-* 模型名),routable=false 让位官方,只清自己写入的 block,槽位自检防官方竞态;⚠ 信任面:仅访问两个声明过的 IP 归属服务,不主动探测 Anthropic/Cloudflare,不回传本地信息,不落盘 IP;blocked/unknown 对 Claude fail-closed(CLI/subagent 等 Host 流由 llm/stream 门禁兜底,实现中),非 Claude 不受影响;仅客户端 affordance 定位已升级为 Host 强制;DSH 升级需回归 blocks 共存语义(design Decisions 4)。[2026-09-05 运行体 0.1.2-rc.1 迁移]host 半区删除 `{authority:''loopback''}` 注册参数(该参数在 0.1.2 已不存在),回环边界改由 connection 层统一施加并**实测确认**(LAN Host 403);client 半区 inject 由 dsh-client-runtime 改为 dsh-api-session-controller + dsh-client-ui-renderer;56 例测试全过'
   # 自研(local):DSH Pet 常驻桌宠 Agent 入口(Host+Web 双半区)
   - id: dsh-pet
     type: package
@@ -176,26 +176,30 @@ customizations:
     version: 0.1.0
     enabled: true
     brief: 文档/资料面板(当前会话 MR/部署/meego/制品链接分类 + 本次产出文件)
-    note: 'B020 落地;openspec change session-links-panel;面板名「文档/资料」(2026-09-03 起,覆盖链接+产物文件;内部 id 仍为 session-links);纯浏览器插件(host 入口为 no-op loader 节点):经 ctx.betterSidebar.registerTab 注册 id session-links 工作台 tab(单实例,badge=当前会话链接计数);数据面=官方 runtime conversation snapshot(ctx.sessions.binding(id).session),按消息 seq 水位增量采集,仅收 user/assistant(仅正文 text,排除 reasoning/tool-call)/steering/context 的 text 块;分类规则表集中(src/client/links.ts CATEGORY_RULES,域名+路径特征,mr/deploy/meego/artifact/other 兜底不丢链接);去重保留最近一次并计数,组内时间倒序且同时间 assistant 优先;点击新标签打开不注入脚本;每个会话至多一次全量扫描,渲染防抖,不持久化(刷新重建),不出网、无 host 能力;宿主依赖 dsh-better-sidebar(peer ^0.16.0,client inject=betterSidebar 门禁,宿主缺失整体不激活;npm strict-peer 下 devDeps 不装 better-sidebar,类型面为本地镜像 src/client/better-sidebar.d.ts,升级宿主需回归该面);⚠ 宿主已于 2026-09-04 升到 0.17.1,**超出本包声明的 ^0.16.0 与 sidebar-qa@0.4.0 声明的 ^0.14.0**——两者均为声明滞后而非运行时断裂:profile 未开 strict-peer 且 autoInstallPeers=false,pnpm 实际只解析出**唯一一份** dsh-better-sidebar@0.17.1(pnpm why 确认无第二实例,即无双实例风险),且本包唯一使用的 API ctx.betterSidebar.registerTab 在 0.17.1 中仍存在;0.17.1 另自带 loader 自去重守卫(同 name 不同 id 的已启用条目存在时自禁用),可挡住双挂载。阶段四放行 0.18.0 时应一并复核这两处 peer 声明是否需要跟进;DSH 升级需回归 conversation 节点结构与 tab API'
+    note: 'B020 落地;openspec change session-links-panel;面板名「文档/资料」(2026-09-03 起,覆盖链接+产物文件;内部 id 仍为 session-links);纯浏览器插件(host 入口为 no-op loader 节点):经 ctx.betterSidebar.registerTab 注册 id session-links 工作台 tab(单实例,badge=当前会话链接计数);数据面=官方 runtime conversation snapshot(ctx.sessions.binding(id).session),按消息 seq 水位增量采集,仅收 user/assistant(仅正文 text,排除 reasoning/tool-call)/steering/context 的 text 块;分类规则表集中(src/client/links.ts CATEGORY_RULES,域名+路径特征,mr/deploy/meego/artifact/other 兜底不丢链接);去重保留最近一次并计数,组内时间倒序且同时间 assistant 优先;点击新标签打开不注入脚本;每个会话至多一次全量扫描,渲染防抖,不持久化(刷新重建),不出网、无 host 能力;宿主依赖 dsh-better-sidebar(peer ^0.16.0,client inject=betterSidebar 门禁,宿主缺失整体不激活;npm strict-peer 下 devDeps 不装 better-sidebar,类型面为本地镜像 src/client/better-sidebar.d.ts,升级宿主需回归该面);[2026-09-05 运行体 0.1.2-rc.1 迁移]host 半区:删除 `{authority:''loopback''}`(边界改由 connection 层统一施加,已实测 LAN Host 403),`persistence.readFrom` 的 offset 改用 branded `SessionLogOffset(0)`;client 半区:官方把节点装配从 `sessions.binding().session` 快照移到 `uiConversation.binding(id).target(''chat'')` 的 `legacy.nodes`,面板据此改接(折叠与水位语义不变),产出文件判定因 `ToolResultNode.callView` 被移除而改按调用头 + 官方 deliverables 同款词汇表(write/edit/str_replace_editor);peer `dsh-better-sidebar` 由 `^0.16.0` 放宽为 `>=0.16.0`(与 sidebar-qa@0.5.0 同风格;宿主已升 0.18.0,pnpm why 实测仍只有唯一一份实例);54 例测试全过。历史:⚠ 宿主曾于 2026-09-04 升到 0.17.1,**超出当时声明的 ^0.16.0 与 sidebar-qa@0.4.0 的 ^0.14.0**——两者均为声明滞后而非运行时断裂:profile 未开 strict-peer 且 autoInstallPeers=false,pnpm 实际只解析出**唯一一份** dsh-better-sidebar@0.17.1(pnpm why 确认无第二实例,即无双实例风险),且本包唯一使用的 API ctx.betterSidebar.registerTab 在 0.17.1 中仍存在;0.17.1 另自带 loader 自去重守卫(同 name 不同 id 的已启用条目存在时自禁用),可挡住双挂载。阶段四放行 0.18.0 时应一并复核这两处 peer 声明是否需要跟进;DSH 升级需回归 conversation 节点结构与 tab API'
   # 第三方(remote):B007 侧问答 — better-sidebar 侧边栏框架 + sidebar-qa 划选追问(压缩策略省 token)
   - id: better-sidebar
     type: package
     source: remote
-    spec: dsh-better-sidebar@0.17.1
-    version: 0.17.1
-      # [2026-09-04] staged-dsh-and-plugin-upgrade 阶段三:better-sidebar 0.16.0 -> 0.17.1
-      #   (兼容上界,不是 0.18.0;准入条件见 note)
+    spec: dsh-better-sidebar@0.18.0
+    version: 0.18.0
+      # [2026-09-05] dsh-0-1-2-host-api-migration:0.17.1 -> 0.18.0(准入条件
+      #   「运行体升到 0.1.2 线」已满足;且 0.17.1 在 0.1.2-rc.1 上启动即崩——
+      #   import 了 dsh-settings 已移除的 settingsNamespace,故必须同批放行)
     enabled: true
     brief: 服务化侧边栏工作台框架(sidebar-qa 的前置依赖)
-    note: 'B007/sidebar-qa 前置;repo https://github.com/omdsh-dev/DSH-better-sidebar(MIT);0.17.1(2026-09-04 升级,逐版本 npm view 核对 peer):**取 0.17.1 而非最新的 0.18.0,因为它是最后一个 peer 仍接受现役运行体的版本**——0.16.1 与 0.17.1 的 peer 均为 cordis ^4.0.1 + dsh-* ^0.1.0-rc.8(对运行体 0.1.1-rc.2 满足,已用 semver.satisfies 实算确认);0.18.0-alpha.0 起 dsh-* 跳到 ^0.1.2-alpha.2、0.18.0 正式版为 cordis ^4.0.2 + dsh-* ^0.1.2-rc.1,**均不被 0.1.1-rc.2 满足**,故 0.18.0 的准入条件是 change staged-dsh-and-plugin-upgrade 阶段四(运行体升到 0.1.2 线)完成。取 0.17.1 而非停在 0.16.0:该版本包含对 0.1.2 线的双向兼容层,是通往阶段四的过渡砖。附注:本机 cordis 实测已解析为 4.0.2(dsh 0.1.1-rc.2 依赖 ^4.0.1,范围自然上浮),故 0.18.0 两项阻塞中 cordis 一项其实已满足,真正的阻塞只剩 dsh-* 版本族。历史审查(2026-08-24 摘要审查,0.16.0):重型框架:右侧栏+底部面板双工作台(ctx.betterSidebar.registerTab 开放给生态,28+ 插件),内置文件管理/内嵌浏览器/真实终端(node-pty)/Git 面板/后台任务/侧边对话(beta,完整上下文继承=费 token 形态,可设置关闭);README 官宣支持 DSH 0.1.0-rc.8 / 0.1.1-rc.1 / 0.1.1-rc.2,peer ^0.1.0-rc.8 对运行体 0.1.1-rc.2 满足;信任面:终端/浏览器/可选工具注入(terminal_* / sidebar_open,默认关闭),比轻量插件重得多;仅为 sidebar-qa 引入,接入后只开所需 tab;部署侧信任决定(2026-08-24):profile pnpm `allowBuilds.node-pty: true` 已批准其原生构建脚本,否则安装被 ERR_PNPM_IGNORED_BUILDS 挡下'
+    note: 'B007/sidebar-qa 前置;repo https://github.com/omdsh-dev/DSH-better-sidebar(MIT);**0.18.0(2026-09-05 升级,change dsh-0-1-2-host-api-migration)**:peer 为 cordis ^4.0.2 + dsh-* ^0.1.2-rc.1,对运行体 0.1.2-rc.1 满足。⚠ 该升级不是可选收益而是**运行体升级的必要条件**——0.17.1 在 0.1.2-rc.1 上 `import { settingsNamespace } from ''@deepseek-ai/dsh-settings''`,而该导出在 0.1.2 已移除,loader 抛 SyntaxError 使整个 profile **启动即崩**(不是降级),故与 dshVersion 同批放行。0.18.0 新增 peer `@huanlin/dsh-plugin-better-locale ^0.1.0`(registry 有 0.1.0/0.3.0/0.3.1)。隔离实例实测:20 项启动清单全部加载、无 duplicate prefix route、pnpm why 只有唯一一份实例、registerTab API 仍在。历史(0.17.1,2026-09-04 逐版本 npm view 核对 peer):**取 0.17.1 而非最新的 0.18.0,因为它是最后一个 peer 仍接受现役运行体的版本**——0.16.1 与 0.17.1 的 peer 均为 cordis ^4.0.1 + dsh-* ^0.1.0-rc.8(对运行体 0.1.1-rc.2 满足,已用 semver.satisfies 实算确认);0.18.0-alpha.0 起 dsh-* 跳到 ^0.1.2-alpha.2、0.18.0 正式版为 cordis ^4.0.2 + dsh-* ^0.1.2-rc.1,**均不被 0.1.1-rc.2 满足**,故 0.18.0 的准入条件是 change staged-dsh-and-plugin-upgrade 阶段四(运行体升到 0.1.2 线)完成。取 0.17.1 而非停在 0.16.0:该版本包含对 0.1.2 线的双向兼容层,是通往阶段四的过渡砖。附注:本机 cordis 实测已解析为 4.0.2(dsh 0.1.1-rc.2 依赖 ^4.0.1,范围自然上浮),故 0.18.0 两项阻塞中 cordis 一项其实已满足,真正的阻塞只剩 dsh-* 版本族。历史审查(2026-08-24 摘要审查,0.16.0):重型框架:右侧栏+底部面板双工作台(ctx.betterSidebar.registerTab 开放给生态,28+ 插件),内置文件管理/内嵌浏览器/真实终端(node-pty)/Git 面板/后台任务/侧边对话(beta,完整上下文继承=费 token 形态,可设置关闭);README 官宣支持 DSH 0.1.0-rc.8 / 0.1.1-rc.1 / 0.1.1-rc.2,peer ^0.1.0-rc.8 对运行体 0.1.1-rc.2 满足;信任面:终端/浏览器/可选工具注入(terminal_* / sidebar_open,默认关闭),比轻量插件重得多;仅为 sidebar-qa 引入,接入后只开所需 tab;部署侧信任决定(2026-08-24):profile pnpm `allowBuilds.node-pty: true` 已批准其原生构建脚本,否则安装被 ERR_PNPM_IGNORED_BUILDS 挡下'
   - id: sidebar-qa
     type: package
     source: remote
-    spec: dsh-sidebar-qa@0.4.0
-    version: 0.4.0
+    spec: dsh-sidebar-qa@0.5.0
+    version: 0.5.0
+      # [2026-09-05] dsh-0-1-2-host-api-migration:0.4.0 -> 0.5.0(需 0.1.2 线
+      #   ctx.remote.session.*;selectModel/modelCatalog 由 dsh-client-ui-model-selection
+      #   提供,验收须确认该包实际加载,见 change design D6)
     enabled: true
     brief: 划选即问侧边栏问答(压缩上下文,省 token)
-    note: 'B007 终选(替代 dsh-air:fork 全量继承费 token,codex 订阅无缓存保障);repo https://github.com/ChenRuoT/dsh-sidebar-qa(MIT,2026-08-24 README+发布物审查);划选文本→「提问」→侧边栏内嵌问答,独立会话(❓<主题>)不中断主对话;三种上下文策略=全量继承(fork+前缀缓存)/压缩(快速模型压旧历史+近期原文,默认)/机械裁切(定长窗口),默认 compressed 解决侧问费 token 痛点;嵌套追问+追问记录树(归档/删除置灰);依赖 dsh-better-sidebar ^0.14.0(同批入 manifest);peer rc.8 系对运行体 0.1.1-rc.2 满足'
+    note: 'B007 终选(替代 dsh-air:fork 全量继承费 token,codex 订阅无缓存保障);repo https://github.com/ChenRuoT/dsh-sidebar-qa(MIT);**0.5.0(2026-09-05 升级,change dsh-0-1-2-host-api-migration)**:peer 为 dsh-client-locale/-ui-primitives ^0.1.0-rc.8 + dsh-better-sidebar >=0.16.0,对现役满足;所需 7 个 `ctx.remote.session.*` 方法全部可得,其中 `selectModel`/`modelCatalog` 由 `@deepseek-ai/dsh-client-ui-model-selection` 提供而非 session-controller —— **已实测确认该包的 client.js 出现在浏览器模块清单中**(未加载则划选提问的模型选择会静默消失,见 change design D6)。⚠ 划选提问的端到端可用性需人眼在 Web 端确认(基线 B3.1)。历史(2026-08-24 README+发布物审查,0.4.0);划选文本→「提问」→侧边栏内嵌问答,独立会话(❓<主题>)不中断主对话;三种上下文策略=全量继承(fork+前缀缓存)/压缩(快速模型压旧历史+近期原文,默认)/机械裁切(定长窗口),默认 compressed 解决侧问费 token 痛点;嵌套追问+追问记录树(归档/删除置灰);依赖 dsh-better-sidebar ^0.14.0(同批入 manifest);peer rc.8 系对运行体 0.1.1-rc.2 满足'
   # 自研(remote):B015 驾驶舱桥接 — DSH web 客户端上报会话点击给本机 dsh-cockpit
   - id: dsh-cockpit-bridge
     type: package

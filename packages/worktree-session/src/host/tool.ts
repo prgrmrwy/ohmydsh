@@ -76,8 +76,9 @@ export function confirmArchiveDetailFor(
  */
 function titleOfSession(ctx: { sessions?: { get(id: never): unknown } }, sessionId: string): string | undefined {
   try {
-    const session = ctx.sessions?.get(sessionId as never) as { events?: readonly unknown[] } | undefined
-    const events = session?.events
+    // 0.1.2 removed `Session.events`; `snapshotEvents()` is the immutable read.
+    const session = ctx.sessions?.get(sessionId as never) as { snapshotEvents?: () => readonly unknown[] } | undefined
+    const events = session?.snapshotEvents?.()
     if (events === undefined) return undefined
     for (let index = events.length - 1; index >= 0; index -= 1) {
       const event = events[index] as { type?: string; data?: { title?: unknown } } | undefined

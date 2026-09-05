@@ -11,8 +11,11 @@
  * plugin's inject list (headless compositions lack it), the channel is
  * registered lazily once the service exists, and every business outcome
  * returns an RpcResult (handlers never throw). Read-only: no files written,
- * no commands, no credentials, no model faces. `authority: 'loopback'` keeps
- * the channel confined to the trusted host fence.
+ * no commands, no credentials, no model faces. The channel stays confined to
+ * the loopback host fence: 0.1.1-rc.2 expressed this per-channel via
+ * `{ authority: 'loopback' }`; the 0.1.2 line enforces the same boundary in
+ * the Connection layer for every channel (403 non-loopback/untrusted Host,
+ * 401 unauthenticated), and this deployment configures no trustedHosts.
  *
  * @module dsh-session-links
  */
@@ -21,6 +24,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-connection'
 // Type-only: brings the host Context.sessionPersistence merge.
 import type {} from '@deepseek-ai/dsh-session-persistence'
+import { SessionLogOffset } from '@deepseek-ai/dsh-session'
 import { SESSION_LINKS_CHANNEL, SESSION_LINKS_ENTRIES_ENDPOINT, type SessionLinksRequest } from './contract.js'
 import { extractSession } from './host/extract.js'
 
@@ -83,7 +87,7 @@ export function apply(ctx: Context): void {
               },
             }
           }
-          const { events } = await persistence.readFrom(sessionId as never, 0)
+          const { events } = await persistence.readFrom(sessionId as never, SessionLogOffset(0))
           const tools = child.get('tools')
           const { entries, produced, maxSeq } = extractSession(events, (name, rawArgs) => {
             // Same render-intent seam as api-proxy; a missing tool or a parse
@@ -106,7 +110,6 @@ export function apply(ctx: Context): void {
           }
         }
       },
-      { authority: 'loopback' },
     ), 'dsh-session-links: /dsh-session-links rpc channel')
   })
 }

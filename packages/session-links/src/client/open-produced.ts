@@ -7,7 +7,9 @@
  * cwd-relative).
  */
 import type { Context } from '@deepseek-ai/cordis'
-import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
+// Type-only: ctx.sessions Context merge (0.1.2: dsh-api-session-controller).
+import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type { BetterSidebarService } from './better-sidebar.js'
 
 /** Resolve a (possibly cwd-relative) produced path against the session cwd. */

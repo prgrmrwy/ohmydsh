@@ -14,12 +14,17 @@
 
 import { createElement, useCallback, useSyncExternalStore } from 'react'
 import { createRoot } from 'react-dom/client'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 // Type-only merge: pulls the `shell.overlay` SlotMap declaration into this
 // program so the registration is compile-time checked.
 import type {} from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+// Type-only: ctx.slots (0.1.2: dsh-client-ui-renderer), ctx.sessions
+// (dsh-api-session-controller) and ctx.workspaces (dsh-api-workspace-controller).
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type {} from '@deepseek-ai/dsh-api-session-controller/client'
+import type {} from '@deepseek-ai/dsh-api-workspace-controller/client'
 import { PetOverlay, type SourceSelection } from './overlay.js'
 import {
   PetSettingsSection,
@@ -123,63 +128,50 @@ export function apply(ctx: ClientContext): void {
 
   // Publish the Host directory picker to the settings page. Pet asks for a
   // Host path (the machine running `dsh web`), so a browser file input would
-  // be wrong: it yields the USER's machine. `host.pickDirectory` is served
+  // be wrong: it yields the USER's machine. `directoryPicker/pick` is served
   // only under the `native` capability, so a remote deployment simply gets
   // no picker and keeps typing the path.
   // Two-tier: the OS picker when this deployment serves `native`, otherwise
   // the in-app browser (`browse`). The native call FAILS on a browse-only
   // deployment — which is why the button appeared to do nothing — so its
   // rejection must fall through rather than surface as an error.
+  //
+  // 0.1.2 note: the old `connection.api.host.*` proxy face was removed with
+  // dsh-host-apiproxy; the same Host verbs now live on the `remote` service's
+  // typed `directoryPicker` namespace (RemoteResult envelope, no `result`
+  // wrapper). Read lazily via `ctx.get` so a composition without the gateway
+  // degrades to "unsupported" instead of failing to load.
+  type RemoteDirectoryPicker = {
+    pick?: (signal?: AbortSignal) => Promise<unknown>
+    list?: (path: string | undefined, signal?: AbortSignal) => Promise<unknown>
+  }
+  const directoryPickerRemote = (): RemoteDirectoryPicker | undefined =>
+    (ctx.get('remote') as { directoryPicker?: RemoteDirectoryPicker } | undefined)?.directoryPicker
   setDirectoryPicker(async () => {
-    const connection = ctx.get('connection') as
-      | {
-          api?: {
-            host?: {
-              pickDirectory?: (payload: unknown) => Promise<unknown>
-            }
-          }
-        }
-      | undefined
-    // `host` hangs off `connection.api` (the IApiClient face), NOT
-    // `connection.rpc` — reading the wrong face yields `undefined` and the
-    // picker silently degrades to "unsupported".
-    const pick = connection?.api?.host?.pickDirectory
+    const pick = directoryPickerRemote()?.pick
     if (pick === undefined) return undefined
-    const response = (await pick({}).catch(() => undefined)) as
-      | { result?: { ok?: boolean; value?: { path?: string | null } } }
+    const response = (await pick().catch(() => undefined)) as
+      | { ok?: boolean; value?: string | null }
       | undefined
-    if (response?.result?.ok !== true) return undefined
-    return response.result.value?.path ?? undefined
+    if (response?.ok !== true) return undefined
+    return response.value ?? undefined
   })
 
   // Directory listing for the in-app browser, used when no OS picker exists.
   setDirectoryLister(async requested => {
-    const connection = ctx.get('connection') as
-      | {
-          api?: {
-            host?: {
-              listDirectory?: (payload: unknown) => Promise<unknown>
-            }
-          }
-        }
-      | undefined
-    const list = connection?.api?.host?.listDirectory
+    const list = directoryPickerRemote()?.list
     if (list === undefined) return undefined
-    const response = (await list(
-      requested === undefined ? {} : { path: requested },
-    ).catch(() => undefined)) as
+    const response = (await list(requested).catch(() => undefined)) as
       | {
-          result?: {
-            ok?: boolean
-            value?: {
-              path: string
-              entries: { name: string; path: string }[]
-              crumbs: { name: string; path: string }[]
-            }
+          ok?: boolean
+          value?: {
+            path: string
+            entries: { name: string; path: string }[]
+            crumbs: { name: string; path: string }[]
           }
         }
       | undefined
-    return response?.result?.ok === true ? response.result.value : undefined
+    return response?.ok === true ? response.value : undefined
   })
 
 

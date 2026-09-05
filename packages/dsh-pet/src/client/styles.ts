@@ -5,6 +5,16 @@
  * elements: no official DSH class is reused or overridden. Colors come from
  * DSH theme tokens with literal fallbacks so dark and light both stay legible
  * even if a token is missing.
+ *
+ * 0.1.2 token migration: the theme dropped `--dsw-alias-brand-primary`,
+ * `--dsw-alias-label-primary-foreground`, `--dsw-font-s-14`,
+ * `--dsw-alias-bg-layer-2` and the `button-primary-*` pair. Same-appearance
+ * remaps (verified against the 0.1.2 vocabulary the client.test suite derives
+ * from the installed bundles): badge chip = label-primary on bg-layer-1
+ * (inverts per theme like the old pair), body font = plain 14px/22px over
+ * `--dsw-font-family`, elevated surfaces = bg-layer-1 (the same light value
+ * the old layer-2 resolved to), primary buttons = `button-info-fill` /
+ * `button-info-hover` (the pair the official composer primary uses in 0.1.2).
  */
 
 export const PET_CSS = `
@@ -60,8 +70,8 @@ export const PET_CSS = `
 .dshpet-mascot[data-dragging="true"]{cursor:grabbing}
 .dshpet-badge{position:absolute;top:-2px;right:-2px;min-width:18px;height:18px;padding:0 5px;
   border-radius:9px;font-size:11px;line-height:18px;text-align:center;font-variant-numeric:tabular-nums;
-  background:var(--dsw-alias-brand-primary,#0f1115);
-  color:var(--dsw-alias-label-primary-foreground,#fff);pointer-events:none}
+  background:var(--dsw-alias-label-primary,#0f1115);
+  color:var(--dsw-alias-bg-layer-1,#fff);pointer-events:none}
 .dshpet-badge[data-state="degraded"]{background:var(--dsw-alias-state-error-primary,#f54a45)}
 .dshpet-visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;
   overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
@@ -167,12 +177,12 @@ export const PET_CSS = `
   display:flex;flex-direction:column;gap:8px;padding:16px 0}
 .dshpet-settings .dshpet-group:last-child{border-bottom:none}
 .dshpet-settings .dshpet-group-title{margin:0;
-  font:var(--dsw-font-s-14,400 14px/22px inherit);
+  font:400 14px/22px var(--dsw-font-family,inherit);
   color:var(--dsw-alias-label-primary,#0f1115)}
 /* Stack each label above its control: side-by-side labels made the inputs
    crowd their own text and left the column ragged. */
 .dshpet-settings .dshpet-field{display:flex;flex-direction:column;gap:4px;min-width:0;
-  font:var(--dsw-font-s-14,400 14px/22px inherit);
+  font:400 14px/22px var(--dsw-font-family,inherit);
   color:var(--dsw-alias-label-secondary,#61666b)}
 .dshpet-settings .dshpet-input{width:100%;max-width:360px;box-sizing:border-box;
   height:28px;padding:0 8px;font:inherit;font-size:14px;
@@ -190,11 +200,11 @@ export const PET_CSS = `
 /* Settings page typography follows DSH's own settings sections: 14px primary
    text on 22px line height, 13px secondary, 28px controls, 8px stack gap.
    The floating panel keeps its own compact scale — it is a HUD, not a page. */
-.dshpet-settings{font:var(--dsw-font-s-14,400 14px/22px inherit);
+.dshpet-settings{font:400 14px/22px var(--dsw-font-family,inherit);
   color:var(--dsw-alias-label-primary,#0f1115)}
 .dshpet-settings .dshpet-action{box-sizing:border-box;display:inline-flex;
   align-items:center;justify-content:center;gap:4px;height:32px;padding:0 12px;
-  border-radius:16px;font:var(--dsw-font-s-14,400 14px/22px inherit)}
+  border-radius:16px;font:400 14px/22px var(--dsw-font-family,inherit)}
 .dshpet-settings .dshpet-item-hint{font:var(--dsw-font-xxs-12,400 12px/18px inherit);
   max-width:560px}
 .dshpet-settings .dshpet-error{font:var(--dsw-font-xxs-12,400 12px/18px inherit)}
@@ -211,7 +221,7 @@ export const PET_CSS = `
   grid-template-columns:minmax(140px,1fr) minmax(160px,1.4fr) auto;
   gap:12px;align-items:center;padding:8px;border-radius:8px;
   border:1px solid var(--dsw-alias-border-l2,#0000001a);
-  background:var(--dsw-alias-bg-layer-2,#fff)}
+  background:var(--dsw-alias-bg-layer-1,#fff)}
 .dshpet-env-key{display:flex;flex-direction:column;gap:2px;min-width:0}
 .dshpet-env-name{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;
   color:var(--dsw-alias-label-primary,#1f2329);overflow:hidden;text-overflow:ellipsis}
@@ -251,7 +261,7 @@ export const PET_CSS = `
 /* In-app Host directory browser, used where no OS picker exists. */
 .dshpet-browser{display:flex;flex-direction:column;gap:8px;padding:12px;
   border:1px solid var(--dsw-alias-border-l2,#0000001a);border-radius:8px;
-  background:var(--dsw-alias-bg-layer-2,#fff)}
+  background:var(--dsw-alias-bg-layer-1,#fff)}
 .dshpet-crumbs{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
 .dshpet-browser-list{display:flex;flex-direction:column;gap:2px;
   max-height:220px;overflow:auto}
@@ -288,10 +298,10 @@ export const PET_CSS = `
    they must override — a single-class rule loses on specificity and the
    variant silently has no effect. */
 .dshpet-settings .dshpet-action-primary{
-  background:var(--dsw-alias-button-primary-fill,#0f1115);
-  color:var(--dsw-alias-label-primary-foreground,#fff)}
+  background:var(--dsw-alias-button-info-fill,#0f1115);
+  color:#fff}
 .dshpet-settings .dshpet-action-primary:hover:not(:disabled){
-  background:var(--dsw-alias-button-primary-hover,#2a2d33)}
+  background:var(--dsw-alias-button-info-hover,#2a2d33)}
 /* Destructive actions need a visual warning: Remove sat identical to Enable. */
 .dshpet-settings .dshpet-action-danger{
   color:var(--dsw-alias-state-error-primary,#ec1313)}
