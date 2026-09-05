@@ -1,17 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import { SessionLinksStore, type SnapshotSource } from '../src/client/collector.js'
-import type { ConversationSnapshot, ConversationNode } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ConversationNode } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { ConversationNodesSnapshot } from '../src/client/collector.js'
 
 /** A minimal mutable snapshot source standing in for a session's ObservableSnapshot. */
 class FakeSource implements SnapshotSource {
-  private snapshot: ConversationSnapshot
+  private snapshot: ConversationNodesSnapshot
   private readonly listeners = new Set<() => void>()
 
   constructor(nodes: ConversationNode[]) {
-    this.snapshot = { sessionId: 's1', nodes } as ConversationSnapshot
+    this.snapshot = { nodes } as ConversationNodesSnapshot
   }
 
-  getSnapshot(): ConversationSnapshot {
+  getSnapshot(): ConversationNodesSnapshot {
     return this.snapshot
   }
 
@@ -22,7 +23,7 @@ class FakeSource implements SnapshotSource {
 
   /** Update the snapshot and notify subscribers (one listener per FakeSource). */
   push(nodes: ConversationNode[]): void {
-    this.snapshot = { sessionId: 's1', nodes } as ConversationSnapshot
+    this.snapshot = { nodes } as ConversationNodesSnapshot
     for (const l of [...this.listeners]) l()
   }
 }
@@ -197,12 +198,10 @@ describe('SessionLinksStore', () => {
         seq: 20,
         time: 20_000,
         callId: 'c1',
-        call: { name: 'write', argsRaw: '{}' },
+        call: { name: 'write', argsRaw: JSON.stringify({ file_path: 'a/foo.ts', content: 'x' }) },
         callTime: 19_900,
         content: [],
         isError: false,
-        callView: { card: 'diff', title: 'Write', diffs: [], locations: [{ path: 'a/foo.ts' }] },
-        resultView: null,
         subCalls: [],
       } as unknown as ConversationNode,
       {
@@ -210,12 +209,10 @@ describe('SessionLinksStore', () => {
         seq: 21,
         time: 21_000,
         callId: 'c2',
-        call: { name: 'edit', argsRaw: '{}' },
+        call: { name: 'edit', argsRaw: JSON.stringify({ file_path: 'a/foo.ts', old_string: 'a', new_string: 'b' }) },
         callTime: 20_900,
         content: [],
         isError: false,
-        callView: { card: 'generic', title: 'Edit', kind: 'edit', locations: [{ path: 'a/foo.ts' }] },
-        resultView: null,
         subCalls: [],
       } as unknown as ConversationNode,
       {
@@ -223,12 +220,10 @@ describe('SessionLinksStore', () => {
         seq: 22,
         time: 22_000,
         callId: 'c3',
-        call: { name: 'read', argsRaw: '{}' },
+        call: { name: 'read', argsRaw: JSON.stringify({ file_path: 'b/read.ts' }) },
         callTime: 21_900,
         content: [],
         isError: false,
-        callView: { card: 'generic', title: 'Read', kind: 'read', locations: [{ path: 'b/read.ts' }] },
-        resultView: null,
         subCalls: [],
       } as unknown as ConversationNode,
     ])

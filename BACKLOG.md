@@ -221,9 +221,63 @@
 
 ## 待立项
 
+### [U003] `@tangzai/dsh-ui-archive-manager` 适配 DSH 0.1.2 后重新启用
+- **状态**: **待上游发布**(2026-09-05 因 0.1.2 不兼容而临时禁用;⚠ **上游已修好,只差发版**)
+- **优先级**: P2
+- **背景**: 该插件的 client bundle `require("@deepseek-ai/dsh-client-runtime/client")`,而该包在 DSH 0.1.2 线被上游移除。后果不是它自己失效,而是 **materialize 时抛错并中止整个 client module loader**,所有插件的浏览器半区一起不可用(由 dsh-cockpit 仓库 change `adapt-dsh-012-typert-gateway` 验收时实测发现)。
+- **处置**: `dsh.yaml` 中 `enabled: false`(禁用≠删除)。归档会话的查看/恢复功能暂缺——官方仍只有 `archiveSession` 无 unarchive(上游 Discussion #2613 的原始缺口依然存在)。
+- **上游修复现状(2026-09-05 clone 核实)**: `Neumannzc/dsh-archive-manager` 的 `main` 分支 tip commit `06ea996`「兼容最新版本」(9月4日)**已完成适配**,且 `plugin/package.json` 版本已 bump 到 `0.1.2-rc.1`:
+  - 根因只有一行 —— client bundle `require("@deepseek-ai/dsh-client-runtime/client")` 仅为取 `defineStore` 一个函数;0.1.2 把它搬到 `@deepseek-ai/dsh-client-store`,**签名逐字节相同**;
+  - 上游改动即 `import { defineStore, type StoreHandle } from '@deepseek-ai/dsh-client-store'`,并把 inject 换成 store / session-controller / workspace-controller 等实际承接包;
+  - **host 半区零改动,信任面未扩大**(仍是既有的 unarchive 幂等补丁 + webServer 路由信任防护)。
+- **阻塞点**: 该修复**未发布**到 npm(registry 仍只有 0.1.0 / 0.1.1),也未打 tag / release,故无可 pin 的发布物。
+- **重新启用条件(方案 A:等上游发布)**: upstream 把 `0.1.2-rc.1` 发到 npm 后,改 `dsh.yaml` 的 spec/version 并 `enabled: true`,按 `add-dsh-plugin` 流程复核发布物,再跑「loader 可执行」审计(见 change `dsh-0-1-2-host-api-migration` 的 baseline B1-补)。
+- **已否决的方案 B(从 git commit 自建安装)**: 上游仓库不含构建产物(`files: ["lib"…]` 但 git 无 `lib/`),需自行 `pnpm install && pnpm build` 再打包 —— 那会从「pin 一个发布物」变成「vendor 并自建」,与本仓库「remote 定制只存精确版本 pin、不 vendor 远端源码」的核心原则冲突。如确需提前启用,应作为一次显式记录的例外单独立项,而非顺手为之。
+- **数据安全**: 禁用不影响已归档会话本身(数据在 DSH 自有 session 存储),仅暂时失去查看/取消归档的 UI 入口(官方至今只有 `archiveSession` 无 unarchive —— 这正是该插件存在的理由)。
+- **更新**: 2026-09-05 记录。
+
+
+---
+
+## 待评估插件
+
+### [P001] dsh-ego-browser:让 agent 自行完成 Web 端验收
+- **状态**: 暂缓 —— **重评估条件部分满足(2026-09-05)**:运行体已到 `0.1.2` 线,但另两项前置仍未满足(见下),故维持暂缓
+- **优先级**: P2
+- **背景 / 动机**: 本仓库每次插件升级的 Web 端验收(设置页时钟、侧边栏面板、划选提问等)都必须由用户手动重启并肉眼确认,agent 无法自证。`dsh-ego-browser`(https://github.com/Fisfzy/dsh-ego-browser,MIT,npm `dsh-ego-browser@0.8.0`)提供 30+ 个 `ego_*` 工具(`ego_navigate` / `ego_snapshot` / `ego_click` / `ego_read_element` / `ego_screenshot` 等),内置 ego-lite 运行时驱动 Chromium,理论上可让 agent 自己打开 `127.0.0.1:3080` 完成这类验收,把"必须人工看"的验收项转为可自动化。
+- **暂缓理由(2026-09-04 审查 npm 0.8.0 发布物)**:
+  1. **peer 为精确 pin 且不满足任何目标运行体**:`@deepseek-ai/dsh-client-runtime` 等声明为 `0.1.0-rc.8`(精确写法,非范围),对现役 `0.1.1-rc.2` 与阶段四目标 `0.1.2-rc.1` 均不满足;本仓库 spec `repo-layout` 亦明确禁止运行体 peer 用精确 pin(升级后可能解析出第二份同名包,造成同一模块双实例);
+  2. **依赖 0.1.2 线已移除的包**:其 `dsh.client.inject` 含 `@deepseek-ai/dsh-client-runtime` —— 正是 change `staged-dsh-and-plugin-upgrade` 的 spike 确认在 `0.1.2` 线被上游移除的包。用它来验证"移除该包之后系统是否正常",等于用待验证对象验证其自身;
+  3. **引入时机会破坏故障二分**:它会 spawn Chromium、下载托管 FFmpeg 到 `~/.dsh/cache/ego-browser/`、vendored 整个浏览器运行时(1.2MB / 44 文件)。在运行体迁移期间引入,故障源会从"升级"变成"升级 + 新插件",与本 change 分阶段的初衷冲突。
+- **重评估条件**: 阶段四完成(运行体到 `0.1.2` 线)后,且上游已跟进 `0.1.2`(`dsh-client-runtime` 消失后其 inject 必须改)、peer 改为范围写法。届时按 `add-dsh-plugin` 流程走**独立 change**,重点审查信任面 —— 它是本仓库迄今信任面最重的候选(spawn 浏览器 + 下载并执行二进制 + CDP 完全控制 + 可读取任意页面内容),需要比普通插件更严格的准入论证。
+- **补充**: 平台不是障碍 —— README 显示其为全平台自适应(macOS 用 avfoundation),本机可用;最初"仅 Linux"的印象来自过时的搜索摘要,已按发布物纠正。
+- **更新**: 2026-09-04 用户提出、agent 审查发布物后记录;结论是"想法成立但当前不可用",非否决。2026-09-05 运行体迁移完成后复核:三项重评估条件中「运行体到 0.1.2 线」已满足,但 `dsh-ego-browser@0.8.0` 仍精确 pin `@deepseek-ai/dsh-client-runtime@0.1.0-rc.8`,而该包在 0.1.2 线已被上游移除 —— 现在它不只是 peer 不满足,而是依赖了一个不存在的运行体包,**在当前运行体上必然无法装载**。需上游先跟进 0.1.2(改 inject + peer 改范围写法)才可重评估;本次未做新的发布物审查。
+
+---
+
+## 已完成
+### [U002] dsh-cockpit 适配 DSH `0.1.2` 的 typert `/api` 网关
+- **状态**: **已完成(2026-09-05)** —— dsh-cockpit 仓库 change `adapt-dsh-012-typert-gateway` 已实现并归档(commit d24c0ef);bridge 随之发布 0.3.0,本仓库 manifest 已跟进
+- **优先级**: **P1 —— 阻塞主机升级落地**:主 checkout 一旦物化到 `0.1.2-rc.1`,驾驶舱即失去对本机的观测
+- **现象**: 驾驶舱连接 `0.1.2-rc.1` 实例报 `DSH_UNAVAILABLE: rc.2 host.describe HTTP 401`
+- **根因(已复现并逐项实测,对比 :3080 旧实例与 :3081 新实例)**: `/api` 通道由「非结构化 RPC 代理」换成「typert 网关」,三处同时变:
+  1. **认证**: `0.1.1-rc.2` 的 `/api/*` 无需认证;`0.1.2` 需浏览器会话认证,未认证一律 401;
+  2. **端点命名**: 点号 → 斜杠命名空间。`session.list` → `session/list`;`host.describe` 与 `workspace.list` 在新版**没有对应端点**(404);
+  3. **载荷形状**: `payload` 必须是 `{args:{…}}` 且字段需匹配 descriptor(如 `session/list` 要求 `_request`)。
+- **影响面**: 仅驾驶舱对设备的观测。`dsh-cockpit-bridge`(浏览器插件,走 postMessage + 驾驶舱自有协议)**不受影响**,已在隔离实例验证加载正常。DSH 本体与 8 个自研包全部正常。
+- **cockpit 侧受影响代码**: `packages/cockpit-server/src/connectivity/rc2-client.ts` —— 依赖 `host.describe`(探活)、`session.list`、`workspace.list` 与 WebSocket `/api/events.<stream>`
+- **待决方案(需独立 change)**:
+  1. 适配 0.1.2 网关(改端点 + 载荷 + 补认证;`host.describe` 需换探活方式 —— host facts 改由网关 ready 帧的 `$host` 承载,不再是 RPC 方法);
+  2. 双协议兼容(探测后走 rc.2 或 0.1.2 两套),适合多设备版本不一致的现实;
+  3. 暂时接受驾驶舱对已升级设备不可用,推迟主机升级。
+- **注意**: WebSocket 事件流(`/api/events.<stream>`)与 `workspace.list` 的新形态**尚未查证**,立项时需一并审计,不要假设只有 REST 三个端点受影响。
+- **更新**: 2026-09-05 记录并同日在 dsh-cockpit 立项(44e17c4)、实现归档(d24c0ef)。最终形态:协议探测双栈并存 + waterfall 立即回 next(不阻塞主机审批)+ pending 观测迁移 bridge 0.3.0 + workspace 基线改读 follow 流 + launch token 换 cookie。**本仓库的跟进动作**:`dsh.yaml` 的 bridge pin 0.2.1→0.3.0(旧版 inject 死包在 0.1.2 上永不激活),以及连带发现并禁用 archive-manager(见 U003)。**操作提醒**:主 checkout 升级后,驾驶舱内本机设备需重新粘贴一次带 token 的启动 URL。
+
+---
+
 ### [U001] DSH `0.1.2` host 半区 API 适配(运行体迁移前置)
-- **状态**: 待立项(spike 已完成,由 change `staged-dsh-and-plugin-upgrade` 产出)
-- **优先级**: P1
+- **状态**: **已关闭(2026-09-05)** —— 由 change `dsh-0-1-2-host-api-migration` 完成。运行体已升到 `0.1.2-rc.1`,5 个包 host 半区适配、7 包 client inject、8 包 peer 与两个后置插件(`better-sidebar@0.18.0` / `sidebar-qa@0.5.0`)同批合入。下列四个待解破坏点的结论:① `Session.events` → `snapshotEvents()` / `seq`;② `authority: 'loopback'` 的等价机制**存在** —— connection 层对每个 channel 统一施加 Host fence + 浏览器认证,本部署未配置 `trustedHosts` 故边界等价且更严,已用非回环 Host 实测 403 确认(含携带有效 cookie 仍 403);③ `registerContinuableSetup` → `agent/created` + `agent/disposed`;④ `SessionLogOffset(0)` 显式 brand;⑤ 3 例 `no agent factory registered` 是测试装置缺 `dsh-session-projection` 插件,非运行体行为变化。另有 5 处执行中新发现的破坏点已补记于该 change 的 design S-C2。
+- **优先级**: P1(已完成)
 - **背景**: change `staged-dsh-and-plugin-upgrade` 的阶段四原计划把 `dshVersion` 从 `0.1.1-rc.2` 升到 `0.1.2-rc.1`。实际执行到 6.5 时按 tasks 4.5 的阀门条款**停止并回退** —— spike 只审计了 client 半区,遗漏 host 半区;实测 8 个自研包中 **5 个无法构建**,破坏点均非「等价接线迁移」,超出该 change 的 Non-Goals 边界。
 - **已产出的输入(可直接复用,不必重做)**:
   - **client 半区迁移方案已查清**:`dsh-client-runtime` 的 5 个服务面拆到 4 个包,服务名与 `ctx.<name>` 取用形态**不变** —— `sessions`→`dsh-api-session-controller`、`slots`→`dsh-client-ui-renderer`、`workspaces`→`dsh-api-workspace-controller`、`conversation`→`dsh-client-ui-conversation`;`ISessions` 保留 14 个成员,移除的 `currentProvideInfo`/`noteAgentPreset`/`provide` **本仓库无一使用**。详见该 change 的 design S1/S2;
@@ -236,27 +290,10 @@
   4. **`SessionLogOffset` 类型收紧**(影响 `session-links`)—— `number` 不再可直接传入。
   另有 `worktree-session` 3 例测试因 `no agent factory registered` 失败,需一并查明。
 - **准入要求**: 新 change 的 spike 必须**同时覆盖 host 与 client 两个半区**,不得再以「客户端包只影响客户端」为由缩小审计面 —— 这正是本次失误的根因。
-- **更新**: 2026-09-04 由 change `staged-dsh-and-plugin-upgrade` 阶段四停止时记录。
+- **更新**: 2026-09-04 由 change `staged-dsh-and-plugin-upgrade` 阶段四停止时记录;2026-09-05 由 change `dsh-0-1-2-host-api-migration` 完成并关闭。
 
 ---
 
-## 待评估插件
-
-### [P001] dsh-ego-browser:让 agent 自行完成 Web 端验收
-- **状态**: 暂缓(阶段四完成后重评估)
-- **优先级**: P2
-- **背景 / 动机**: 本仓库每次插件升级的 Web 端验收(设置页时钟、侧边栏面板、划选提问等)都必须由用户手动重启并肉眼确认,agent 无法自证。`dsh-ego-browser`(https://github.com/Fisfzy/dsh-ego-browser,MIT,npm `dsh-ego-browser@0.8.0`)提供 30+ 个 `ego_*` 工具(`ego_navigate` / `ego_snapshot` / `ego_click` / `ego_read_element` / `ego_screenshot` 等),内置 ego-lite 运行时驱动 Chromium,理论上可让 agent 自己打开 `127.0.0.1:3080` 完成这类验收,把"必须人工看"的验收项转为可自动化。
-- **暂缓理由(2026-09-04 审查 npm 0.8.0 发布物)**:
-  1. **peer 为精确 pin 且不满足任何目标运行体**:`@deepseek-ai/dsh-client-runtime` 等声明为 `0.1.0-rc.8`(精确写法,非范围),对现役 `0.1.1-rc.2` 与阶段四目标 `0.1.2-rc.1` 均不满足;本仓库 spec `repo-layout` 亦明确禁止运行体 peer 用精确 pin(升级后可能解析出第二份同名包,造成同一模块双实例);
-  2. **依赖 0.1.2 线已移除的包**:其 `dsh.client.inject` 含 `@deepseek-ai/dsh-client-runtime` —— 正是 change `staged-dsh-and-plugin-upgrade` 的 spike 确认在 `0.1.2` 线被上游移除的包。用它来验证"移除该包之后系统是否正常",等于用待验证对象验证其自身;
-  3. **引入时机会破坏故障二分**:它会 spawn Chromium、下载托管 FFmpeg 到 `~/.dsh/cache/ego-browser/`、vendored 整个浏览器运行时(1.2MB / 44 文件)。在运行体迁移期间引入,故障源会从"升级"变成"升级 + 新插件",与本 change 分阶段的初衷冲突。
-- **重评估条件**: 阶段四完成(运行体到 `0.1.2` 线)后,且上游已跟进 `0.1.2`(`dsh-client-runtime` 消失后其 inject 必须改)、peer 改为范围写法。届时按 `add-dsh-plugin` 流程走**独立 change**,重点审查信任面 —— 它是本仓库迄今信任面最重的候选(spawn 浏览器 + 下载并执行二进制 + CDP 完全控制 + 可读取任意页面内容),需要比普通插件更严格的准入论证。
-- **补充**: 平台不是障碍 —— README 显示其为全平台自适应(macOS 用 avfoundation),本机可用;最初"仅 Linux"的印象来自过时的搜索摘要,已按发布物纠正。
-- **更新**: 2026-09-04 用户提出、agent 审查发布物后记录;结论是"想法成立但当前不可用",非否决。
-
----
-
-## 已完成
 ### [B015] 跨机器访问 DSH:局域网访问(secure context)
 - **状态**: 已完成(SSH 隧道方案;HTTPS 直连形态未采用,见下)
 - **优先级**: P1(2026-08-24 用户明确要推进:`dsh web` 支持 192.168 内网 IP 访问 + HTTPS)

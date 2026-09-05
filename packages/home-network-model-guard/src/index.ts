@@ -165,7 +165,11 @@ export function apply(ctx: Context): void {
           }
         }
       },
-      { authority: 'loopback' },
+      // Loopback boundary: the 0.1.1-rc.2 `{ authority: 'loopback' }` option was
+      // removed in 0.1.2; the Connection host fence now enforces the same
+      // boundary for every channel (403 non-loopback/untrusted Host, 401
+      // unauthenticated). This deployment configures no trustedHosts, keeping
+      // this channel loopback-only.
     ), 'dsh-home-network-model-guard: /dsh-home-network-model-guard rpc channel')
   })
 }

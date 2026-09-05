@@ -115,7 +115,7 @@ describe('the confirmation names the session the way a human knows it', () => {
     const ctx = {
       get: (name: string) => name === 'userQuestions' ? { ask } : undefined,
       sessions: {
-        get: () => ({ events: [{ type: 'session/title', data: { title: '简单测试消息，无具体任务' } }] }),
+        get: () => ({ snapshotEvents: () => [{ type: 'session/title', data: { title: '简单测试消息，无具体任务' } }] }),
       },
       workspaceRegistry: { archivedSessionIds: [], archiveSession: async () => {} },
     }
