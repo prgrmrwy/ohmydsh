@@ -16,7 +16,10 @@
  * @module dsh-sidebar-session-provider-icon/client
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'
+// Type-only: ctx.sessions Context merge (0.1.2: dsh-api-session-controller).
+import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type { ProviderProjection } from '../types.ts'
 import { providerBySession, providerTitleIndex } from './provider-map.js'
 import { badgeInnerHTML, badgeTitle } from './logos.js'
@@ -120,7 +123,9 @@ export function apply(ctx: ClientContext): void {
     try {
       stopDirectory = bindSelectionDirectory(
         id,
-        (sessionId) => ctx.modelDirectories.directoryFor(sessionId),
+        // The seam is id-shape-agnostic (plain string) so it stays testable
+        // without minting brands; the official face takes a branded SessionId.
+        (sessionId) => ctx.modelDirectories.directoryFor(sessionId as SessionId),
         selected,
         reconcile,
       )

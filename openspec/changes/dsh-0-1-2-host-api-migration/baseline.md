@@ -298,6 +298,51 @@ loader 可执行审计、RPC 回环边界、952 例测试)与人工可见证据�
 | 日常实例 | ✅ `dshVersion=0.1.2-rc.1`,启动清单 **19 项**,boot 后日志无 error | 21→19 = archive-manager 禁用、traex 本就未启用 |
 | E1 回环边界(日常 :3080) | ✅ 未认证 401 / 非回环 Host 403 | 与隔离实例一致 |
 
+### ⚠ 用户实测发现的迁移回归:输入框 Worktree 标记消失(2026-09-05)
+
+主 checkout 升级后,用户发现**输入框上的 Worktree Session 标记不见了**。
+这是一处**本次迁移引入的真实回归**,且我此前的全部验收都没抓到。
+
+**根因(两层)**:
+
+1. **表层 —— slot props 契约变更**:0.1.2 的 `scope: 'session'` 槽位提供
+   `useSession` / `sessionId` / `useProjection`;`0.1.1-rc.2` 的 `session` 值与
+   `useSessions` 列表 feed 均已移除。`WorktreeControls` 仍解构后者,
+   `useSessions(...)` 调用 undefined → 组件渲染即抛 → 标记消失。
+   插件本身加载正常(bundle 已服务、slot 注册成功),**死在渲染阶段**。
+   适配:改用 `useSession` 取生命周期状态;`cwd` 是列表行事实
+   (新 `SessionSnapshot` 不含),改经注入的 `sessions` 服务的 list store 读取。
+
+2. **深层 —— 该文件从未被 typecheck 过**:`tsconfig.json` 声明
+   `exclude: ["src/client"]`(host 构建不应编译浏览器代码),而
+   `tsconfig.client.json` 只 `extends` + 设 `include`、**未覆盖 `exclude`**,
+   两者相抵 —— `tsc` 编译 0 个 client 源文件并退出 0。
+   全仓扫描:`worktree-session` 与 `sidebar-session-provider-icon` 两个包
+   如此(其余 5 个写了 `exclude: []` 故正常)。**这意味着我此前报告的
+   「8 包 typecheck 全绿」对这两个包是假的** —— 检查器根本没看 client 代码。
+   `git show f55dbe3` 确认迁移前同样如此,故非本次引入,但正是它让
+   `useSessions` 这类错误得以一路通过。
+
+**修复后首次真实检查暴露 10 个类型错误**,已全部处理:
+`ctx.slots`/`ctx.sessions` 的 Context 合并缺 type-only import(0.1.2 拆包所致)、
+`ClientStage.error` 与 `Decoration.flight` 在 `exactOptionalPropertyTypes` 下
+需显式 `| undefined`(清除语义依赖 spread 覆盖)、`satisfies` 字面量收窄
+掩盖了后赋值属性、`directoryFor` 的 SessionId brand。
+
+**测试装置同步纠正**:`controls.test.ts` 原先自造 0.1.1 契约的 props
+(`session` + `useSessions`),因此在真实槽位已经抛错时仍全绿 —— 夹具改为
+镜像 0.1.2 真实契约后,反而先暴露了我修复中的 `useSyncExternalStore` 缺少
+server-snapshot 参数(静态渲染必需),一并修正。
+
+**新增回归守卫**:`tests/client-typecheck-coverage.test.mjs` —— 任何
+`tsconfig.client.json` 若解析出的 `exclude` 抵消了自己的 `include`,即失败。
+已双向验证(移除 `exclude: []` 时该守卫报错,恢复后通过)。
+
+**验收口径教训**:我此前以「bundle 被服务 + loader 可 materialize」作为
+「确实加载并可用」的程序化证据,但组件是在 **React 渲染时**才抛错的,
+比 materialize 晚一步 —— 程序化证据够不到的部分,必须由人工可见证据兜底
+(基线 B1 的原始判据本就如此,是我在 4.3 放松了口径)。
+
 ### B2.1/B2.2 `worktree-session` 编排与安全门(4.4)
 
 - **B2.1**:本 change 的全部实施过程都在这个 Worktree Session 内完成,

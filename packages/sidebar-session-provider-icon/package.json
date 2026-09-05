@@ -69,6 +69,8 @@
     "typescript": "^5.9.3",
     "vitest": "^3.2.4",
     "zod": "^4.4.3",
-    "@deepseek-ai/dsh-api-session-controller": "^0.1.2-rc.1"
+    "@deepseek-ai/dsh-api-session-controller": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-store": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-session": "^0.1.2-rc.1"
   }
 }
