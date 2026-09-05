@@ -11,6 +11,16 @@
  * returns an RpcResult value (handlers never throw). No files, commands,
  * credentials or model faces — only harmless host-fact sampling.
  *
+ * Loopback boundary: on DSH 0.1.1-rc.2 this channel passed
+ * `{ authority: 'loopback' }` at registration. The 0.1.2 line removed that
+ * per-channel parameter; the same boundary is now enforced by the Connection
+ * host fence itself — every registered channel rejects requests whose Host is
+ * neither loopback nor a configured `trustedHosts` authority (403) and
+ * requires an authenticated browser session (401). This deployment configures
+ * no `trustedHosts`, so the channel remains loopback-only; configuring
+ * `trustedHosts` would widen every channel and must be treated as a security
+ * decision (see openspec spec `settings-system-clock`).
+ *
  * @module dsh-system-clock
  */
 import type { Context } from '@deepseek-ai/cordis'
@@ -53,7 +63,6 @@ export function apply(ctx: Context): void {
           value: buildSystemClockSample(Date.now(), resolveHostIanaZone(), osHostname()),
         }
       },
-      { authority: 'loopback' },
     ), 'dsh-system-clock: /dsh-system-clock rpc channel')
   })
 }

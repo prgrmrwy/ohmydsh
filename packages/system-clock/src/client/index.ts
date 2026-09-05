@@ -9,7 +9,9 @@
  *
  * @module dsh-system-clock/client
  */
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+// Type-only: brings the ctx.slots Context merge (0.1.2: dsh-client-ui-renderer).
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 // Type-only merges: ctx.locale (dsh-client-locale) and ctx.connection
 // (dsh-client-connection/client — the browser ConnectionHandle).
 import type {} from '@deepseek-ai/dsh-client-locale/client'

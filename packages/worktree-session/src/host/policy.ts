@@ -51,15 +51,13 @@ export function refreshPolicy(ctx: Context, sourceSessionId: string): void {
 }
 
 /**
- * Compose the parent Worktree binding into every continuable subagent before its
- * publication/first step. The subagent runtime invokes this contribution for
- * fresh children and cold resumes. Missing or conflicting lineage throws during
- * unpublished setup, so the delegation is rolled back rather than starting in
- * the source checkout.
+ * Compose the parent Worktree binding into one delegated child Agent. Invoked
+ * at the child's publication boundary (and, in tests, from an explicit
+ * `agents.create` setup callback). Missing or conflicting lineage throws so
+ * the delegation is vetoed/rolled back rather than starting in the source
+ * checkout.
  */
-export function installSubagentInheritance(childCtx: Context): () => void {
-  const child = childCtx.agent
-  if (child === undefined) throw new Error('Worktree Session cannot install delegated policy without an unpublished child Agent')
+function installInheritanceForAgent(child: Agent): () => void {
   const parentId = child.session.header.parentSession as string | undefined
   if (parentId === undefined) return () => {}
   const operation = survey.get(parentId)
@@ -74,8 +72,39 @@ export function installSubagentInheritance(childCtx: Context): () => void {
   }
 }
 
+/**
+ * Compose the parent Worktree binding into a child during its unpublished
+ * creation window (`agents.create`/`resume` `setup` callback form).
+ */
+export function installSubagentInheritance(childCtx: Context): () => void {
+  const child = childCtx.agent
+  if (child === undefined) throw new Error('Worktree Session cannot install delegated policy without an unpublished child Agent')
+  return installInheritanceForAgent(child)
+}
+
+/**
+ * Register binding inheritance for every delegated child.
+ *
+ * DSH 0.1.2 removed `SubagentRuntime.registerContinuableSetup` (the public
+ * per-child setup registry); the equivalent composition point is the Agent
+ * publication boundary: `agent/created` is emitted synchronously for fresh
+ * creations AND cold resumes, before `agent/session-start` and the first
+ * prompt assembly, and a synchronous listener throw vetoes publication —
+ * preserving the old rollback-on-unprovable-lineage semantics. Cleanup that
+ * the setup registry used to run on child disposal moves to `agent/disposed`.
+ */
 export function registerSubagentInheritance(ctx: Context): () => void {
-  return ctx.subagents.registerContinuableSetup(installSubagentInheritance)
+  const cleanups = new WeakMap<Agent, () => void>()
+  const offCreated = ctx.on('agent/created', ({ agent }) => {
+    // Non-delegated agents (no bound parent lineage) install nothing.
+    if ((agent.session.header.parentSession as string | undefined) === undefined) return
+    cleanups.set(agent, installInheritanceForAgent(agent))
+  })
+  const offDisposed = ctx.on('agent/disposed', ({ agent }) => {
+    const cleanup = cleanups.get(agent)
+    if (cleanup !== undefined) { cleanups.delete(agent); cleanup() }
+  })
+  return () => { offCreated(); offDisposed() }
 }
 
 /** Source Sessions currently protected by a live Agent or retained live Session. */

@@ -4,7 +4,7 @@ import type { RepoStatusResult, SessionStatusResult } from '../wire.ts'
 import { post, ROUTES } from './api.ts'
 import { decorateSubmit, restoreSubmit } from './handoff.ts'
 import { getStage, resetStage, resetStageForCwd, setStage, subscribeStage, type ClientStage } from './stage-store.ts'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 
 export type WorktreeControlsProps = PropsRuntime<'conversation.input.left'> & {
   pluginContext: ClientContext

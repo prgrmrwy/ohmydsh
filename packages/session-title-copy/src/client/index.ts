@@ -18,7 +18,9 @@
  *
  * @module dsh-session-title-copy/client
  */
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+// Type-only: brings the ctx.sessions Context merge (0.1.2: dsh-api-session-controller).
+import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type { BadgeElementLike, CopyContext, CopyHooks } from './wiring.js'
 import { BADGE_MARKER, sessionSnippet, showCopiedHint, styleBadge, updateBadge, wireBadge, writeClipboard } from './wiring.js'
 import { findCrumbNav } from './title-locator.js'

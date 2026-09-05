@@ -262,7 +262,7 @@ describe('a real Invocation scopes its executor Agent', () => {
     })
     ctx.provide('sessions', {
       list: () => [],
-      get: (id: string) => (id === 'src-1' ? { header: { cwd: '/repo' }, events: [] } : undefined),
+      get: (id: string) => (id === 'src-1' ? { header: { cwd: '/repo' }, snapshotEvents: () => [], seq: 0 } : undefined),
     })
     ctx.provide('agents', {
       create: async (options: { sessionId: string }) => {
@@ -360,7 +360,7 @@ describe('dispatch uses the ordinary Agent lifecycle', () => {
     })
     ctx.provide('sessions', {
       list: () => [],
-      get: (id: string) => (id === 'src-1' ? { header: { cwd: '/repo' }, events: [] } : undefined),
+      get: (id: string) => (id === 'src-1' ? { header: { cwd: '/repo' }, snapshotEvents: () => [], seq: 0 } : undefined),
     })
     // A handle shaped like the real one: `.agent` carrying synchronous
     // `followup(UserMessage)` and an awaited `whenIdle()`.
@@ -473,7 +473,7 @@ describe('archiving from the Pet route syncs the executor session', () => {
     })
     ctx.provide('sessions', {
       list: () => [],
-      get: (id: string) => (id === 'src-1' ? { header: { cwd: '/repo' }, events: [] } : undefined),
+      get: (id: string) => (id === 'src-1' ? { header: { cwd: '/repo' }, snapshotEvents: () => [], seq: 0 } : undefined),
     })
     ctx.provide('agents', {
       create: async (options: { sessionId: string }) => ({ session: { id: options.sessionId } }),
@@ -577,7 +577,7 @@ describe('provider routability is proven before an executor is created', () => {
     })
     ctx.provide('sessions', {
       list: () => [],
-      get: (id: string) => (id === 'src-1' ? { header: { cwd: '/repo' }, events: [] } : undefined),
+      get: (id: string) => (id === 'src-1' ? { header: { cwd: '/repo' }, snapshotEvents: () => [], seq: 0 } : undefined),
     })
     // Only `anthropic` is routable in this Host.
     // The Host default names a provider this Host does not route.
@@ -856,13 +856,21 @@ describe('module-level client deps must be resolvable', () => {
     // none can never resolve, so the entry waits forever and its `apply`
     // never runs — styles appear but no surface mounts, with no error.
     // `@deepseek-ai/dsh-client-ui-slots` is exactly such a package.
-    const root = path.resolve(__dirname, '..', '..', '..', 'node_modules')
+    // npm may hoist a dependency to the workspace root or keep it nested
+    // under this package (peer-conflict isolation), so check both roots.
+    const roots = [
+      path.resolve(__dirname, '..', 'node_modules'),
+      path.resolve(__dirname, '..', '..', '..', 'node_modules'),
+    ]
     for (const id of declared) {
-      const bundle = path.join(root, id, 'lib', 'client.js')
-      const exists = await readFile(bundle, 'utf8').then(
-        () => true,
-        () => false,
-      )
+      let exists = false
+      for (const root of roots) {
+        exists = await readFile(path.join(root, id, 'lib', 'client.js'), 'utf8').then(
+          () => true,
+          () => false,
+        )
+        if (exists) break
+      }
       expect({ id, shipsClientBundle: exists }).toEqual({ id, shipsClientBundle: true })
     }
   })

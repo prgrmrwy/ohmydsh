@@ -32,7 +32,8 @@ export function apply(ctx: Context, config: Config = {}): void {
     const session = ctx.sessions.get(sourceSessionId as SessionId)
     if (session === undefined) throw new WsError('OPERATION_CONFLICT', `Source Session ${sourceSessionId} is not live`)
     if (session.header.cwd !== operation.repoRoot) throw new WsError('OPERATION_CONFLICT', `Source Session cwd ${session.header.cwd ?? '(none)'} does not equal repository ${operation.repoRoot}`)
-    if (options.requireBlank && session.events.some(event => event.type === 'turn/start')) throw new WsError('OPERATION_CONFLICT', 'Source Session is no longer blank')
+    // 0.1.2 removed `Session.events`; `snapshotEvents()` is the immutable full-log read.
+    if (options.requireBlank && session.snapshotEvents().some(event => event.type === 'turn/start')) throw new WsError('OPERATION_CONFLICT', 'Source Session is no longer blank')
     const agent = ctx.agents.get(sourceSessionId as SessionId)
     if (agent === undefined) throw new WsError('OPERATION_CONFLICT', `Source Agent ${sourceSessionId} is not live`)
     rememberBind(ctx, sourceSessionId, operation)
