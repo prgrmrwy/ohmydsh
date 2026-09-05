@@ -343,6 +343,23 @@ server-snapshot 参数(静态渲染必需),一并修正。
 比 materialize 晚一步 —— 程序化证据够不到的部分,必须由人工可见证据兜底
 (基线 B1 的原始判据本就如此,是我在 4.3 放松了口径)。
 
+### 回归修复后的重新物化与验证(2026-09-05)
+
+修复经 `ws-merge` 合入 `main`(fast-forward 到 `a3d46f0`),主 checkout
+`npm install` 后重新物化并重启日常实例。
+
+| 检查 | 结果 |
+|---|---|
+| 主 checkout 8 包 build / typecheck / test | ✅ 952 例;两个包的 client 源码**首次真正参与编译** |
+| 仓库 `npm test` | ✅ 97 例:96 通过 / 1 跳过(新增 client-typecheck 守卫) |
+| `node scripts/sync.mjs` ×2 | ✅ 第二次 `no changes` |
+| 部署物携带修复 | ✅ `~/.dsh` 的 client.js 中旧 `useSessions` 计数为 0 |
+| 日常实例 | ✅ `dshVersion=0.1.2-rc.1`,19 项启动清单,进程启动时间晚于新 bundle 物化时间 |
+| 浏览器实际收到的 bundle | ✅ 抓取 boot manifest 的 combo 批次实测:`useSessions` 0 次、`useSession` 2 次、`useSyncExternalStore` 1 次 |
+
+> 注:重启后必须核对**进程启动时间晚于 bundle mtime** —— 第一次重启命令
+> 未真正生效(进程仍是旧的),仅凭「端口通」会误判为已生效。
+
 ### B2.1/B2.2 `worktree-session` 编排与安全门(4.4)
 
 - **B2.1**:本 change 的全部实施过程都在这个 Worktree Session 内完成,
