@@ -36,13 +36,13 @@
 - [x] 5.1 `dsh.yaml` 将 `better-sidebar` 升到 `0.18.0`(或 1.4 确定的版本),确认侧边栏各面板可开且无 duplicate prefix route 报错。
 - [x] 5.2 `dsh.yaml` 将 `sidebar-qa` 升到 `0.5.0`(或 1.4 确定的版本);**确认 `dsh-client-ui-model-selection` 确实随 profile 加载**——`selectModel`/`modelCatalog` 由该包提供而非 `dsh-api-session-controller`,未加载则功能静默消失(design D6)。
 - [ ] 5.3 验证 sidebar-qa 划选提问实际可用,以及依赖方 `session-links` 的「文档/资料」tab 仍正常注册与计数。
-- [ ] 5.4 复核 `session-links`(peer `^0.16.0`)与 `sidebar-qa` 对 `dsh-better-sidebar` 的 peer 声明是否需要跟进(归档 change 已记录该声明滞后但运行时无双实例)。
+- [x] 5.4 复核 `session-links`(peer `^0.16.0`)与 `sidebar-qa` 对 `dsh-better-sidebar` 的 peer 声明是否需要跟进(归档 change 已记录该声明滞后但运行时无双实例)。
 
 ## 6. 回主 checkout 与收尾
 
 - [ ] 6.1 隔离环境验收通过后,回主 checkout 物化并复跑基线;确认日常 GUI 全部插件正常加载(启动清单项数与预期一致)。
-- [ ] 6.2 提交为独立 commit(`dshVersion`、5 包 host 适配、7 包 inject、8 包 peer 同批),使回滚粒度与批次一致。
-- [ ] 6.3 更新 `dsh.yaml` 各条目的审查记录,使 note 反映升级后的实际版本、信任面与已知约束;特别记录 `authority` 语义在新运行体下的表达方式。
-- [ ] 6.4 复核本 change 的 spec 是否已反映最终行为;如实际做法与 design 决策不一致,先更新 design/specs 再归档。
-- [ ] 6.5 `openspec validate dsh-0-1-2-host-api-migration --strict` 通过;仓库 `npm test`、`npm run check:artifacts` 通过。
+- [x] 6.2 提交为独立 commit(`dshVersion`、5 包 host 适配、7 包 inject、8 包 peer 同批),使回滚粒度与批次一致。
+- [x] 6.3 更新 `dsh.yaml` 各条目的审查记录,使 note 反映升级后的实际版本、信任面与已知约束;特别记录 `authority` 语义在新运行体下的表达方式。
+- [x] 6.4 复核本 change 的 spec 是否已反映最终行为;如实际做法与 design 决策不一致,先更新 design/specs 再归档。
+- [x] 6.5 `openspec validate dsh-0-1-2-host-api-migration --strict` 通过;仓库 `npm test`、`npm run check:artifacts` 通过。
 - [ ] 6.6 归档本 change,并把发现但未处理的事项写回 `BACKLOG.md`(含 U001 的关闭或更新、P001 `dsh-ego-browser` 的重评估条件是否已满足)。
