@@ -234,7 +234,7 @@
 - **重新启用条件(方案 A:等上游发布)**: upstream 把 `0.1.2-rc.1` 发到 npm 后,改 `dsh.yaml` 的 spec/version 并 `enabled: true`,按 `add-dsh-plugin` 流程复核发布物,再跑「loader 可执行」审计(见 change `dsh-0-1-2-host-api-migration` 的 baseline B1-补)。
 - **已否决的方案 B(从 git commit 自建安装)**: 上游仓库不含构建产物(`files: ["lib"…]` 但 git 无 `lib/`),需自行 `pnpm install && pnpm build` 再打包 —— 那会从「pin 一个发布物」变成「vendor 并自建」,与本仓库「remote 定制只存精确版本 pin、不 vendor 远端源码」的核心原则冲突。如确需提前启用,应作为一次显式记录的例外单独立项,而非顺手为之。
 - **数据安全**: 禁用不影响已归档会话本身(数据在 DSH 自有 session 存储),仅暂时失去查看/取消归档的 UI 入口(官方至今只有 `archiveSession` 无 unarchive —— 这正是该插件存在的理由)。
-- **更新**: 2026-09-05 记录。
+- **更新**: 2026-09-05 记录。主 checkout 已于同日升级到 `0.1.2-rc.1`(启动清单 19 项),该插件在日常部署中亦为禁用状态;上游发版后按上述条件恢复即可。
 
 
 ---
