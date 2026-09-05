@@ -236,7 +236,7 @@
   2. 双协议兼容(探测后走 rc.2 或 0.1.2 两套),适合多设备版本不一致的现实;
   3. 暂时接受驾驶舱对已升级设备不可用,推迟主机升级。
 - **注意**: WebSocket 事件流(`/api/events.<stream>`)与 `workspace.list` 的新形态**尚未查证**,立项时需一并审计,不要假设只有 REST 三个端点受影响。
-- **更新**: 2026-09-05 记录。
+- **更新**: 2026-09-05 记录;同日已在 dsh-cockpit 仓库立项为 change `adapt-dsh-012-typert-gateway`(方案:协议探测双栈 + waterfall 立即回 next + pending 观测迁移 bridge;commit 44e17c4),实现与验收在该仓库进行,本条目在其验收通过后关闭。
 
 ---
 
