@@ -270,6 +270,34 @@ archive-manager 已禁用)上确认下列可见证据**全部正常**:
 loader 可执行审计、RPC 回环边界、952 例测试)与人工可见证据互相印证,
 无一项以「无报错」代替「可见证据」。
 
+### 6.1 回主 checkout 物化与复跑(2026-09-05)
+
+任务分支经 `scripts/ws-merge.mjs --yes` 合入 `main`(merge commit `6c5c24a`),
+主 checkout `npm install` 后物化到日常 `~/.dsh` 并重启。
+
+**执行顺序更正(实施中发现)**:tasks 把 6.1 列在 6.2「提交 commit」之前,
+但真实依赖是**先合并、再物化** —— `~/.dsh` 的 local package 装的是
+`file:/…/ohmydsh/packages/*`(主 checkout 源码)。若在合并前物化,manifest 会
+声明 `0.1.2-rc.1` 而装入的却是未适配的旧代码,日常 GUI 必然起不来。
+
+**一次性环境准备**(与隔离 home 同因):`~/.npmrc` 指向内网 bnpm,公共包 404,
+首次物化 12 项失败。修法与隔离环境一致 —— 在 `~/.dsh/profiles/web/.npmrc`
+固定 `registry=https://registry.npmjs.org/`。**该失败是干净的**:pnpm 在变更前
+拒绝,`~/.dsh` 未进入中间态(复核 profile 各 pin 仍为升级前值),日常实例
+全程未中断。
+
+**升级后复跑结果**:
+
+| 检查 | 结果 | 与升级前比对 |
+|---|---|---|
+| 主 checkout `npm test` | ✅ 96:95 通过 / 1 跳过 | 一致 |
+| `npm run check:artifacts` | ✅ | 一致 |
+| 8 包 build / typecheck | ✅ 全过 | **A3 的 `dsh-pet` typecheck 环境漂移已消失**(install 刷新后 `@types/react-dom@18.3.7` 到位) |
+| 8 包 test | ✅ 952 例 | 与隔离环境一致 |
+| `node scripts/sync.mjs` ×2 | ✅ 第二次 `no changes` | 幂等 |
+| 日常实例 | ✅ `dshVersion=0.1.2-rc.1`,启动清单 **19 项**,boot 后日志无 error | 21→19 = archive-manager 禁用、traex 本就未启用 |
+| E1 回环边界(日常 :3080) | ✅ 未认证 401 / 非回环 Host 403 | 与隔离实例一致 |
+
 ### B2.1/B2.2 `worktree-session` 编排与安全门(4.4)
 
 - **B2.1**:本 change 的全部实施过程都在这个 Worktree Session 内完成,
