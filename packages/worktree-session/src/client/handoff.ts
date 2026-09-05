@@ -13,7 +13,8 @@ interface Decoration {
   original: InputFacade['submit']
   ownDescriptor?: PropertyDescriptor
   wrapper: InputFacade['submit']
-  flight?: Promise<void>
+  /** In-flight handoff, cleared back to `undefined` when it settles. */
+  flight?: Promise<void> | undefined
   restore(): void
 }
 
@@ -136,7 +137,10 @@ export function decorateSubmit(ctx: ClientContext, sessionId: string, cwd: strin
     throw new Error('SessionInput.submit is not compatible with Worktree Session')
   }
   const original = input.submit
-  const decoration = {
+  // Annotated (not `satisfies`): `flight` is assigned after construction, and a
+  // `satisfies` literal narrows the binding to its own keys — which silently
+  // hid the later `decoration.flight` reads from the compiler.
+  const decoration: Decoration = {
     input,
     original,
     ...(ownDescriptor === undefined ? {} : { ownDescriptor }),
@@ -147,7 +151,7 @@ export function decorateSubmit(ctx: ClientContext, sessionId: string, cwd: strin
       else Object.defineProperty(input, 'submit', decoration.ownDescriptor)
       decorations.delete(sessionId)
     },
-  } satisfies Decoration
+  }
   decoration.wrapper = function submit(mode?: SubmitMode): void {
     const current = getStage(sessionId, cwd)
     if (!current.enabled) { original.call(input, mode); return }

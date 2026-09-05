@@ -13,7 +13,16 @@ export interface ClientStage {
   packageManager?: PackageManager
   lifecycle?: SessionStatusResult['lifecycle']
   phase: 'idle' | 'validating' | 'host' | 'binding' | 'claim' | 'submit' | OperationPhase | 'error' | 'uncertain' | 'done'
-  error?: string
+  /**
+   * Last failure text, or `undefined` once cleared.
+   *
+   * Explicitly `| undefined` rather than optional-only: `setStage` merges by
+   * spread, so callers clear a stale failure by passing `error: undefined` —
+   * omitting the key would keep the previous value. Under
+   * `exactOptionalPropertyTypes` that assignment is only legal when the type
+   * admits `undefined`.
+   */
+  error?: string | undefined
   submitted: boolean
 }
 

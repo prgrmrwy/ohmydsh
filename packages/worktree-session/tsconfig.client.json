@@ -5,8 +5,18 @@
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "jsx": "react-jsx",
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "types": ["react"]
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "react"
+    ]
   },
-  "include": ["src/client", "src/wire.ts"]
+  "include": [
+    "src/client",
+    "src/wire.ts"
+  ],
+  "exclude": []
 }

@@ -1,6 +1,10 @@
 import { createElement } from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+// Type-only: ctx.slots (0.1.2: dsh-client-ui-renderer) and ctx.sessions
+// (dsh-api-session-controller) Context merges.
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import { WorktreeControls } from './controls.tsx'
 import { restoreAllSubmits } from './handoff.ts'
 

@@ -1,5 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+// Type-only: merges the 0.1.2 session-scoped slot props (useSession /
+// sessionId / useProjection) into PropsRuntime. Without this import the
+// merged interface stays EMPTY and destructuring a non-existent prop
+// typechecks fine — which is exactly how the useSessions regression shipped.
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
+// Type-only: brings ctx.sessions (list store) onto the client Context.
+import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type { RepoStatusResult, SessionStatusResult } from '../wire.ts'
 import { post, ROUTES } from './api.ts'
 import { decorateSubmit, restoreSubmit } from './handoff.ts'
@@ -86,9 +93,23 @@ export function openWorktreeInEditor(path: string): void {
   window.open(uri, '_blank')
 }
 
-export function WorktreeControls({ pluginContext: ctx, session, sessionId, useSessions, openWorktree = openWorktreeInEditor }: WorktreeControlsProps) {
-  const summary = useSessions(state => state.byId[sessionId])
-  const cwd = summary?.cwd
+export function WorktreeControls({ pluginContext: ctx, sessionId, useSession, openWorktree = openWorktreeInEditor }: WorktreeControlsProps) {
+  // DSH 0.1.2 slot contract: a `scope: 'session'` seat receives
+  // `useSession` / `sessionId` / `useProjection`. The 0.1.1-rc.2 props this
+  // component used — the `session` value and the `useSessions` list feed —
+  // no longer exist. Lifecycle state now comes from `useSession`, and `cwd`
+  // (a list-row fact, absent from SessionSnapshot) is read from the injected
+  // `sessions` service's list store.
+  const session = useSession(snapshot => snapshot)
+  const readCwd = (): string | undefined => ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd
+  // The third argument (server snapshot) is required by React whenever the
+  // tree may be rendered to static markup — this package's own tests do
+  // exactly that. The store is plain in-memory state, so the same read serves.
+  const cwd = useSyncExternalStore(
+    (onChange: () => void) => ctx.sessions.list.subscribe(onChange),
+    readCwd,
+    readCwd,
+  )
   const [revision, setRevision] = useState(0)
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
