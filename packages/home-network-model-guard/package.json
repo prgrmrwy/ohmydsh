@@ -71,7 +71,7 @@
     "@deepseek-ai/dsh-client-ui-model-selection": "^0.1.2-rc.1",
     "@deepseek-ai/dsh-client-ui-slots": "^0.1.2-rc.1",
     "@types/node": "^24.0.0",
-    "tsdown": "^0.14.2",
+    "tsdown": "^0.22.14",
     "typescript": "^5.9.3",
     "vitest": "^3.2.7",
     "@deepseek-ai/dsh-api-session-controller": "^0.1.2-rc.1",
