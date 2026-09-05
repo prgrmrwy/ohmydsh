@@ -250,6 +250,26 @@ loader 可完整 materialize ✅
 > (三者的 client bundle 均不 require 该包,runtime inject 用的是服务名)。
 > 真正致命的是 bundle 内的 `require()`。
 
+### B1/B3 人工可见证据(5.3,2026-09-05 用户在隔离实例逐项确认)
+
+用户在 `http://127.0.0.1:3081`(运行体 `0.1.2-rc.1`,bridge 0.3.0,
+archive-manager 已禁用)上确认下列可见证据**全部正常**:
+
+| # | 项 | 判据 | 结果 |
+|---|---|---|---|
+| B3.1 | `sidebar-qa@0.5.0` 划选提问 | 划选文本 → 出现「提问」→ 能开侧边问答会话 | ✅ |
+| B3.2 | 模型选择可用 | 侧边问答的模型选择未静默消失(`dsh-client-ui-model-selection` 实际生效) | ✅ |
+| B1.4 | `session-links`「文档/资料」tab | tab 注册成功,badge 计数正常 | ✅ |
+| B1.1 | `system-clock` | 设置页最底部时钟走秒 | ✅ |
+| B1.2 | `session-title-copy` | 标题旁 6 位 id 徽标 | ✅ |
+| B1.3 | `sidebar-session-provider-icon` | 侧边栏会话行模型 logo | ✅ |
+| B1.5 | `dsh-pet` | 桌宠浮层常驻可见 | ✅ |
+| B3.3 | `better-sidebar@0.18.0` | 各面板可开,无 duplicate prefix route | ✅ |
+
+至此隔离环境验收(任务 4.x / 5.x)全部完成:程序化证据(模块服务清单、
+loader 可执行审计、RPC 回环边界、952 例测试)与人工可见证据互相印证,
+无一项以「无报错」代替「可见证据」。
+
 ### B2.1/B2.2 `worktree-session` 编排与安全门(4.4)
 
 - **B2.1**:本 change 的全部实施过程都在这个 Worktree Session 内完成,

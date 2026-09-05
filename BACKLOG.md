@@ -222,11 +222,18 @@
 ## 待立项
 
 ### [U003] `@tangzai/dsh-ui-archive-manager` 适配 DSH 0.1.2 后重新启用
-- **状态**: 待上游(2026-09-05 因 0.1.2 不兼容而禁用)
+- **状态**: **待上游发布**(2026-09-05 因 0.1.2 不兼容而临时禁用;⚠ **上游已修好,只差发版**)
 - **优先级**: P2
 - **背景**: 该插件的 client bundle `require("@deepseek-ai/dsh-client-runtime/client")`,而该包在 DSH 0.1.2 线被上游移除。后果不是它自己失效,而是 **materialize 时抛错并中止整个 client module loader**,所有插件的浏览器半区一起不可用(由 dsh-cockpit 仓库 change `adapt-dsh-012-typert-gateway` 验收时实测发现)。
 - **处置**: `dsh.yaml` 中 `enabled: false`(禁用≠删除)。归档会话的查看/恢复功能暂缺——官方仍只有 `archiveSession` 无 unarchive(上游 Discussion #2613 的原始缺口依然存在)。
-- **重新启用条件**: upstream 发布适配 0.1.2 的版本(npm 现仅 0.1.0 / 0.1.1,均依赖已移除的包);届时按 `add-dsh-plugin` 流程复核信任面后改回 `enabled: true`,并跑「loader 可执行」审计(见 change `dsh-0-1-2-host-api-migration` 的 baseline B1-补)。
+- **上游修复现状(2026-09-05 clone 核实)**: `Neumannzc/dsh-archive-manager` 的 `main` 分支 tip commit `06ea996`「兼容最新版本」(9月4日)**已完成适配**,且 `plugin/package.json` 版本已 bump 到 `0.1.2-rc.1`:
+  - 根因只有一行 —— client bundle `require("@deepseek-ai/dsh-client-runtime/client")` 仅为取 `defineStore` 一个函数;0.1.2 把它搬到 `@deepseek-ai/dsh-client-store`,**签名逐字节相同**;
+  - 上游改动即 `import { defineStore, type StoreHandle } from '@deepseek-ai/dsh-client-store'`,并把 inject 换成 store / session-controller / workspace-controller 等实际承接包;
+  - **host 半区零改动,信任面未扩大**(仍是既有的 unarchive 幂等补丁 + webServer 路由信任防护)。
+- **阻塞点**: 该修复**未发布**到 npm(registry 仍只有 0.1.0 / 0.1.1),也未打 tag / release,故无可 pin 的发布物。
+- **重新启用条件(方案 A:等上游发布)**: upstream 把 `0.1.2-rc.1` 发到 npm 后,改 `dsh.yaml` 的 spec/version 并 `enabled: true`,按 `add-dsh-plugin` 流程复核发布物,再跑「loader 可执行」审计(见 change `dsh-0-1-2-host-api-migration` 的 baseline B1-补)。
+- **已否决的方案 B(从 git commit 自建安装)**: 上游仓库不含构建产物(`files: ["lib"…]` 但 git 无 `lib/`),需自行 `pnpm install && pnpm build` 再打包 —— 那会从「pin 一个发布物」变成「vendor 并自建」,与本仓库「remote 定制只存精确版本 pin、不 vendor 远端源码」的核心原则冲突。如确需提前启用,应作为一次显式记录的例外单独立项,而非顺手为之。
+- **数据安全**: 禁用不影响已归档会话本身(数据在 DSH 自有 session 存储),仅暂时失去查看/取消归档的 UI 入口(官方至今只有 `archiveSession` 无 unarchive —— 这正是该插件存在的理由)。
 - **更新**: 2026-09-05 记录。
 
 
