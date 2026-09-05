@@ -382,12 +382,14 @@ async function initialize(
       if (session === undefined) return undefined
       // Titles are not on the header: DSH records them as log-only
       // `session/title` events, so the latest one is the durable title.
-      const title = latestSessionTitle(session.events)
+      // 0.1.2 removed `Session.events`; `snapshotEvents()` is the immutable
+      // full-log read and `seq` is the next-event watermark (= log length).
+      const title = latestSessionTitle(session.snapshotEvents())
       return {
         id: sessionId,
         ...(title !== undefined ? { title } : {}),
         ...(session.header.cwd !== undefined ? { cwd: session.header.cwd } : {}),
-        asOfSeq: session.events.length,
+        asOfSeq: session.seq,
       }
     },
     getWorkspace: workspace => {

@@ -158,25 +158,35 @@ describe('overlay styles', () => {
   })
 
   it('uses DSH theme tokens with literal fallbacks for dark and light', () => {
+    // 0.1.2 dropped `--dsw-alias-brand-primary`; the badge chip now inverts
+    // through the live label-primary/bg-layer-1 pair (same invariant: theme
+    // tokens with literal fallbacks, never bare hard-coded colors).
     expect(PET_CSS).toContain('var(--dsw-alias-bg-layer-1,')
     expect(PET_CSS).toContain('var(--dsw-alias-label-primary,')
-    expect(PET_CSS).toContain('var(--dsw-alias-brand-primary,')
   })
 
   it('references only DSW tokens the installed DSH actually defines', async () => {
     const { readFile, readdir } = await import('node:fs/promises')
-    const root = path.resolve(__dirname, '..', '..', '..', 'node_modules', '@deepseek-ai')
+    // npm may hoist client packages to the workspace root or nest them under
+    // this package (peer-conflict isolation); the vocabulary is their union.
+    const roots = [
+      path.resolve(__dirname, '..', 'node_modules', '@deepseek-ai'),
+      path.resolve(__dirname, '..', '..', '..', 'node_modules', '@deepseek-ai'),
+    ]
 
     // Build the real vocabulary from the shipped client bundles. The previous
     // assertion only echoed the names Pet itself used, so four invented tokens
     // (`bg-float`, `primary`, `danger`, `line-divider`) passed for weeks while
     // silently falling back to hard-coded colors and ignoring the theme.
     const defined = new Set<string>()
-    for (const entry of await readdir(root)) {
-      const bundle = path.join(root, entry, 'lib', 'client.js')
-      const source = await readFile(bundle, 'utf8').catch(() => undefined)
-      if (source === undefined) continue
-      for (const match of source.matchAll(/--dsw-[a-z0-9-]+/g)) defined.add(match[0])
+    for (const root of roots) {
+      const entries = await readdir(root).catch(() => [] as string[])
+      for (const entry of entries) {
+        const bundle = path.join(root, entry, 'lib', 'client.js')
+        const source = await readFile(bundle, 'utf8').catch(() => undefined)
+        if (source === undefined) continue
+        for (const match of source.matchAll(/--dsw-[a-z0-9-]+/g)) defined.add(match[0])
+      }
     }
     expect(defined.size).toBeGreaterThan(20)
 
@@ -816,10 +826,12 @@ describe('hover, drag and dismissal behave independently', () => {
 
 describe('settings surface follows the DSH type scale', () => {
   it('uses the official font tokens instead of ad-hoc sizes', () => {
-    // Each `--dsw-font-*` token carries its own line-height; declaring a bare
-    // font-size left the vertical rhythm to the browser default, which is the
-    // main reason the panel read as cramped and inconsistent.
-    expect(PET_CSS).toContain('var(--dsw-font-s-14')
+    // Each font declaration pins its own line-height; a bare font-size left
+    // the vertical rhythm to the browser default, which is the main reason
+    // the panel read as cramped and inconsistent. 0.1.2 removed the
+    // `--dsw-font-s-14` shorthand, so body text states 14px/22px explicitly
+    // over the live `--dsw-font-family` token.
+    expect(PET_CSS).toContain('14px/22px var(--dsw-font-family')
     expect(PET_CSS).toContain('var(--dsw-font-xxs-12')
   })
 
@@ -1043,7 +1055,7 @@ describe('directory selection degrades to the in-app browser', () => {
       path.resolve(__dirname, '..', 'src', 'client', 'index.tsx'),
       'utf8',
     )
-    expect(entry).toContain('pick({}).catch(() => undefined)')
+    expect(entry).toContain('pick().catch(() => undefined)')
     expect(entry).toContain('setDirectoryLister')
   })
 })
@@ -1107,19 +1119,21 @@ describe('preset terminology cannot be confused with Pet context', () => {
 })
 
 describe('Host directory APIs are read from the right connection face', () => {
-  it('uses connection.api.host, not connection.rpc.host', async () => {
+  // 0.1.2 removed the dsh-host-apiproxy `connection.api.host.*` proxy face;
+  // the Host directory verbs now live on the typed Remote namespace
+  // `ctx.remote.directoryPicker`. The invariant these tests pin is unchanged:
+  // the client must read the face the installed library actually exposes, or
+  // both the picker and the browser silently degrade to "unsupported".
+  it('uses ctx.remote.directoryPicker, not the removed connection.api.host face', async () => {
     const { readFile } = await import('node:fs/promises')
     const entry = await readFile(
       path.resolve(__dirname, '..', 'src', 'client', 'index.tsx'),
       'utf8',
     )
 
-    // `host` hangs off the IApiClient face (`connection.api`). Reading
-    // `connection.rpc.host` yields `undefined`, so BOTH the OS picker and the
-    // in-app browser degrade to "this deployment does not support directory
-    // selection" even where listDirectory works fine.
-    expect(entry).toContain('connection?.api?.host?.pickDirectory')
-    expect(entry).toContain('connection?.api?.host?.listDirectory')
+    expect(entry).toContain("ctx.get('remote')")
+    expect(entry).toContain('directoryPicker')
+    expect(entry).not.toContain('connection?.api?.host')
     expect(entry).not.toContain('connection?.rpc?.host')
   })
 
@@ -1129,21 +1143,18 @@ describe('Host directory APIs are read from the right connection face', () => {
       path.resolve(
         __dirname,
         '..',
-        '..',
-        '..',
         'node_modules',
         '@deepseek-ai',
-        'dsh-host-apiproxy',
+        'dsh-api-workspace-controller',
         'lib',
-        'types',
-        'fetch',
-        'client.d.ts',
+        'typert.remote-client.d.ts',
       ),
       'utf8',
     )
 
     // Pin the assumption to the real contract rather than to memory.
-    expect(declared).toContain('listDirectory(payload: RequestPayload<\'host.listDirectory\'>')
+    expect(declared).toContain("'directoryPicker/pick'")
+    expect(declared).toContain("'directoryPicker/list'")
   })
 })
 

@@ -7,7 +7,8 @@
  * nothing renders. Everything observed lives in the browser; there is no
  * host capability and no network egress.
  */
-import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { BetterSidebarService } from './better-sidebar.js'
 import { SessionLinksStore } from './collector.js'
 import { Panel } from './Panel.jsx'

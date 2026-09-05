@@ -7,15 +7,27 @@
  * All state lives in the browser; nothing is persisted and nothing leaves
  * the page. The store is owned by the plugin fiber and disposed with it.
  */
-import type { ConversationSnapshot, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ConversationNode } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { collectLinksFromNode, compareEntries, type LinkEntry } from '../shared/links.js'
 import type { ProducedFile } from '../shared/produced.js'
 import { compareProduced, producedFromNode } from './produces.js'
 
+/**
+ * The transcript slice this store folds. On 0.1.1-rc.2 this was the
+ * `ConversationSnapshot` off `sessions.binding().session`; 0.1.2 moved node
+ * assembly to `uiConversation.binding().target('chat')`, whose `legacy.nodes`
+ * carries the same `ConversationNode` list. The Panel adapts either shape to
+ * this minimal face, keeping the fold and watermark semantics unchanged.
+ */
+export interface ConversationNodesSnapshot {
+  readonly nodes: readonly ConversationNode[]
+}
+
 /** The narrow observable face of a session's conversation snapshot. */
 export interface SnapshotSource {
   subscribe(listener: () => void): () => void
-  getSnapshot(): ConversationSnapshot
+  getSnapshot(): ConversationNodesSnapshot
 }
 
 /** Debounce window for subscriber notification (ingest is cheap; renders are not). */
@@ -80,7 +92,7 @@ class SessionLinksState {
     })
   }
 
-  private ingest(snap: ConversationSnapshot): void {
+  private ingest(snap: ConversationNodesSnapshot): void {
     let max = this.maxSeen
     for (const node of snap.nodes) {
       if (node.seq <= this.maxSeen) continue

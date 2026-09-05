@@ -5,7 +5,12 @@
  */
 import { useEffect, useState, type CSSProperties } from 'react'
 import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection/client'
-import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
+// Type-only: ctx.uiConversation Context merge (0.1.2 transcript assembly owner)
+// plus the `chat` view-target key (ConversationViewSnapshotMap augmentation).
+import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import {
   SESSION_LINKS_CHANNEL,
   SESSION_LINKS_ENTRIES_ENDPOINT,
@@ -13,7 +18,31 @@ import {
 } from '../contract.js'
 import { CATEGORY_LABELS, CATEGORY_ORDER, compareEntries, type LinkEntry } from '../shared/links.js'
 import type { ProducedFile } from './produces.js'
-import type { SessionLinksStore } from './collector.js'
+import type { SessionLinksStore, SnapshotSource } from './collector.js'
+
+/**
+ * Adapt the official transcript to the store's minimal snapshot face.
+ *
+ * 0.1.1-rc.2 exposed the node list directly on `sessions.binding().session`
+ * (an ObservableSnapshot<ConversationSnapshot>). 0.1.2 moved node assembly to
+ * the `uiConversation` service: the same `ConversationNode` list now rides the
+ * `chat` view target's `legacy.nodes`. The first subscriber activates that
+ * target — the official Chat pane has usually done so already.
+ */
+function transcriptSourceOf(ctx: ClientContext, sessionId: SessionId): SnapshotSource | undefined {
+  const conversation = ctx.get('uiConversation')
+  if (conversation === undefined) return undefined
+  try {
+    const target = conversation.binding(sessionId).target('chat')
+    return {
+      subscribe: (listener) => target.subscribe(listener),
+      getSnapshot: () => ({ nodes: target.getSnapshot()?.legacy.nodes ?? [] }),
+    }
+  } catch {
+    // Unknown session (not listed yet): degrade to the host baseline only.
+    return undefined
+  }
+}
 
 /** Relative-time label for a message timestamp. */
 export function formatLinkTime(time: number, now: number = Date.now()): string {
@@ -91,8 +120,7 @@ export function Panel({ ctx, store, sessionId, onOpenFile }: PanelProps) {
   useEffect(() => {
     if (!sessionId) return
     void ctx // ctx is stable by plugin design; kept out of deps to avoid effect churn
-    const binding = ctx.sessions?.binding(sessionId)
-    store.observe(sessionId, binding?.session)
+    store.observe(sessionId, transcriptSourceOf(ctx, sessionId))
     const sync = (): void => {
       setEntries(store.entriesOf(sessionId))
       setProduced(store.producedOf(sessionId))

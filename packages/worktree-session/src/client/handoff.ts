@@ -1,4 +1,5 @@
-import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ConversationController } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { BindSourceResult, PreparedOperationResult, StartOperationRequest } from '../wire.ts'
 import { post, ROUTES } from './api.ts'

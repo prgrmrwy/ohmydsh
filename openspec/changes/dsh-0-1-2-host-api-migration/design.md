@@ -71,7 +71,13 @@ spec 的意图是「该 channel 只对本机回环可用」,`authority: 'loopbac
 
 **一个必须保留的操作约束**:`scripts/sync.mjs` 在 `DSH_HOME` 缺省时回落 `~/.dsh`,而本分支的 `dshVersion` 已改 —— 漏传一次 env 就会把日常运行体升级掉。前次用 fail-closed 包装脚本解决,本次沿用。
 
-### D6: 后置插件放行放在最后且逐项验证激活
+### D7: 后置插件放行**并入同一批次**(执行中修订 D6 的次序假设)
+
+原计划把 `better-sidebar@0.18.0` / `sidebar-qa@0.5.0` 放在验收之后作为独立步骤。实测推翻了这个次序:`better-sidebar@0.17.1` 在 `0.1.2-rc.1` 上**启动即崩** —— 它 `import { settingsNamespace } from '@deepseek-ai/dsh-settings'`,而该导出在 0.1.2 已移除,loader 抛 `SyntaxError` 并使整个 profile 无法 boot(不是降级,是完全起不来)。
+
+因此 `0.18.0` 不是「可选收益」而是**运行体升级的必要条件**,必须与 `dshVersion` 同批。D6 的「逐项确认实际激活」要求不变,只是执行点从「验收后」提前到「与升级同批、随即验证」。
+
+### D6: 后置插件放行须逐项验证激活
 
 `sidebar-qa@0.5.0` 的 `selectModel`/`modelCatalog` 由 `dsh-client-ui-model-selection` 提供(**不在** `dsh-api-session-controller` 内)。若该包未随 profile 加载,功能会**静默消失而无任何报错**。因此放行后必须逐项确认实际激活,"无报错"不作为通过依据。
 
@@ -108,3 +114,65 @@ spike   逐项查清 5 个破坏点 + 在隔离环境让 5 包构建通过   ←
 - `SubagentRuntime.registerContinuableSetup` 的承接 API 为何?`worktree-session` 的 continuable subagent 建立策略是否需要改写形态而非仅换 API?
 - `worktree-session` 3 例 `no agent factory registered` 是测试装置问题还是运行体行为变化?
 - 后置插件是否应取 spike 时点的更新版本(`better-sidebar` 与 `sidebar-qa` 当前分别为 `0.18.0` / `0.5.0`,届时可能更新)?建议以实际 registry 状态决定,不预先锁定
+
+## Spike 结论(2026-09-05,基于 0.1.2-rc.1 发布物逐文件审读;2.6 构建验证结果见文末)
+
+审计面覆盖两个半区:host 半区结论为 S-H1…S-H5,client 半区确认沿用前次 S1/S2 映射并补充类型面迁移(S-C1)。
+
+### S-H1: `Session.events` → `snapshotEvents()` / `seq`(两包同一替代路径)
+
+`0.1.2` 的 `Session` 不再暴露 `events` 数组,读取面改为显式方法(`dsh-session/lib/types/index.d.ts`):
+- `snapshotEvents(fromSeq?, toSeqExclusive?)` — 不可变全量/区间快照(内部有缓存,append 前复用);
+- `seq` — 下一个事件的 seq = 日志长度(水位);
+- 另有 `eventAt(seq)` / `ownEvents()` / `isOwnSeq(seq)`。
+
+两包用法映射(同一替代路径,无需不同处理):
+- `dsh-pet` 取标题:`latestSessionTitle(session.events)` → `latestSessionTitle(session.snapshotEvents())`;取水位:`session.events.length` → `session.seq`。
+- `worktree-session` 判定 blank:`session.events.some(e => e.type === 'turn/start')` → `session.snapshotEvents().some(...)`;`tool.ts` 标题反查同 dsh-pet。
+
+### S-H2: `authority: 'loopback'` 的等价机制 —— 存在,为「连接级 Host fence + 浏览器认证」,且本部署下边界不弱于旧版
+
+逐字节审读两版 `dsh-client-connection` 发布物的实现:
+
+- **旧版(0.1.1-rc.2)**:`register(owner, channel, handler, options)` 中 `options.authority === 'loopback'` 的效果是对该 channel 以 `trustedHosts=[]` 执行 `isTrustedApiRequest`(Host 头必须是 loopback:localhost/[::1]/127.0.0.0-8),非回环一律 403。即 per-channel 的 loopback 限定。
+- **新版(0.1.2-rc.1)**:`register()` 不再接受 options,但**每个 channel 的 handler 前都强制执行 `requestRejection(req)`** = `isTrustedApiRequest(req, this.trustedHosts)`(失败 403)**加上** `browserAuth.isAuthenticated(req)`(失败 401)。`trustedHosts` 来自 connection 插件配置,schema 默认 `[]`。
+- **本部署实况**:profile 未配置任何 `trustedHosts`(隔离与日常 profile 的 cordis.yml/patch 均无该键),故运行时 `trustedHosts=[]` —— 所有 RPC channel 与旧版 loopback channel 走**完全相同的 Host fence 判定**(同一个 `isLoopbackHostname`),且额外多了一层浏览器会话认证(401)。**边界不弱于旧版,机制存在,变更不中止。**
+- **语义差异须记录**:约束的作用域从 per-channel 变为 connection 级 —— 若未来部署配置了 `trustedHosts`,旧版下 loopback channel 仍保持仅回环,新版下这些 channel 会随之接受受信 host。该约束写入 `dsh.yaml` 审查记录与 spec 表达(「部署不得配置 trustedHosts,否则该边界随之放宽」)。
+
+三个插件的适配形态:删除第三参数(该表达已不存在),边界由运行体连接层承接;验收改为对实际 HTTP 面做非回环反例实测(基线 E1)。
+
+### S-H3: `registerContinuableSetup` → `agent/created` scoped 事件监听(需改写调用形态)
+
+`0.1.2` 移除了 `SubagentActivationSetupRegistry` 公开注册面;continuation manager 改为内部经 `agents.create/resume` 的 `setup` 回调组装 child(`applyChildComposition`),**不再提供部署插件向所有 continuable child 创建上下文注入的公开 seam**。
+
+承接路径:`@deepseek-ai/dsh-agent` 的 cordis 事件 `'agent/created'`(publication 时同步派发,同步 listener 抛错可 veto publication;在 `agent/session-start` 与首次 prompt 组装之前)。`installSubagentInheritance` 本身自过滤(parentSession 无绑定即 no-op),因此改写形态为:root 级 `ctx.on('agent/created', ({agent}) => ...)`,对命中绑定的 child 安装 guard/context,并以 `'agent/disposed'` 承接原 disposer 清理。时序差异(创建前 vs 发布时)对本包语义无影响:child 在 `agent/session-start` 前不会执行工具,guard 安装点仍先于一切工具调用。
+
+### S-H4: `SessionLogOffset` 收紧为 branded number
+
+`0.1.2` 中 `SessionLogOffset` 是 `BrandedNumber<'SessionLogOffset'>`,裸 `number` 不再可赋值;同名构造函数 `SessionLogOffset(value)` 完成 brand。`session-links` 的 `persistence.readFrom(id, 0)` → `readFrom(id, SessionLogOffset(0))`(从 `@deepseek-ai/dsh-session` 导入)。
+
+### S-H5: `no agent factory registered` 3 例 —— 测试装置问题(已定位并修复)
+
+错误消息在两版 `dsh-agent` 中同文(create/resume 早于 factory 注册时抛出)。实测定位:`dsh-agent-loop` 的 `inject` 在 0.1.2 新增了 `sessionProjections`(由新包 `@deepseek-ai/dsh-session-projection` 提供)。`agent-loop-context.test.ts` 的 harness 未组入该插件,AgentLoop 因依赖不满足永不加载,factory 永不注册。**是测试装置的组合缺一个新插件,不是运行体行为变化**;harness 补 `ctx.plugin(SessionProjection)` 后全部通过,生产部署由 dsh-base bundle 自带该插件、不受影响。
+
+### S-C1: client 半区 —— 沿用 S1/S2 映射,补类型导入迁移
+
+服务映射不变(见前次 S1/S2)。补充:本仓库 14 处 `import type ... from '@deepseek-ai/dsh-client-runtime/client'` 的类型面迁移已核对 0.1.2 发布物:
+- `ClientContext` → `Context`(`@deepseek-ai/cordis`;0.1.2 官方客户端包内部即如此别名);
+- `SessionId` → `@deepseek-ai/dsh-session`(type-only,浏览器安全);
+- `SessionListState`/`ConversationSnapshot`(sessions 面) → `@deepseek-ai/dsh-api-session-controller/client`;
+- `ConversationNode`/`AssistantBlock`/`ToolResultNode`(conversation 面) → `@deepseek-ai/dsh-client-ui-conversation/client`。
+
+`@deepseek-ai/dsh-client-runtime` npm 版本止于 `0.1.1-rc.2`(前次 S3 已证),各包 inject/peers/devDeps 中该项按上述实际承接包替换,不写 `^0.1.2-rc.1`。
+
+### S-C2: 执行中新发现的破坏点(前次与本次 spike 均未预估,按 spec「审计发现的破坏面超出预估」补记)
+
+以下五项在 2.6 实际构建/跑测阶段才暴露,已逐项适配并补记为调研产出:
+
+1. **`ConversationSnapshot` 的节点面易主**(`session-links`):0.1.1-rc.2 的 `sessions.binding().session` 快照直接带 `nodes`;0.1.2 把节点装配移到 `uiConversation`,`ConversationSnapshot` 只剩 `views`/`activeTargets`,`ConversationNode[]` 改由 `chat` view target 的 `legacy.nodes` 承载。适配:Panel 用 `ctx.get('uiConversation').binding(id).target('chat')` 组一个只读 `{nodes}` 面喂给既有 collector,折叠与水位语义不变。
+2. **`ToolResultNode.callView` 移除**(`session-links`):host 计算的 render intent 不再随节点下发。适配:`producedFromNode` 改按节点自身的调用头(`call.name` + `call.argsRaw`)判定,采用 0.1.2 官方 `dsh-client-ui-deliverables` 的 `mutationPath` 同一词汇表(`write`/`edit`/`str_replace_editor`),「镜像官方 deliverables 词汇」这一既有语义不变,只是官方词汇的载体变了。
+3. **`connection.api.host.*` 代理面移除**(`dsh-pet`):`dsh-host-apiproxy` 在 0.1.2 线不存在(npm 版本止于 `0.1.1-rc.2`)。目录选择/列举改走 typed Remote 命名空间 `remote.directoryPicker`(`pick`/`list`,`RemoteResult` 信封,无 `result` 包裹),由 `dsh-api-workspace-controller` 提供;仍经 `ctx.get` 惰性读取,组合缺网关时降级为「本部署不支持目录选择」。
+4. **DSW 主题令牌词汇表变更**(`dsh-pet`):0.1.2 删除 `--dsw-alias-brand-primary`、`--dsw-alias-label-primary-foreground`、`--dsw-font-s-14`、`--dsw-alias-bg-layer-2`、`--dsw-alias-button-primary-fill/hover`。按等价外观重映射(徽标改用 label-primary/bg-layer-1 反相对,主按钮改用官方 composer 同款 `button-info-fill/hover`,正文字体显式 14px/22px + `--dsw-font-family`)。**该破坏由 dsh-pet 既有的「只引用运行体真实定义的令牌」测试自动抓到**,不是靠肉眼。
+5. **`CallId` 更名为 `ToolCallId`**(`worktree-session` 测试装置)。
+
+另有一处 npm 布局差异(非运行体破坏):0.1.2 的 peer 图使部分运行体包被装到 `packages/<pkg>/node_modules` 而非工作区根,`dsh-pet` 三个「从磁盘读取安装物」的元测试改为同时探测两个根。
