@@ -221,6 +221,30 @@
 
 ## 待立项
 
+### [U005] profile `.npmrc` 应由 sync 物化(全新 DSH_HOME 必然装不全)
+- **状态**: 待立项(2026-09-05 用全新 DSH_HOME 实测复现)
+- **优先级**: P2(不影响现役部署;影响换机器/重建 `~/.dsh`/新建隔离 home)
+- **实测复现**: 全新 `DSH_HOME` 跑 `node scripts/sync.mjs`,**4 个 remote 包安装失败**
+  (`dsh-better-sidebar` / `dsh-sidebar-qa` / `dsh-cockpit-bridge` / `dsh-setting-restart`),
+  全部是 `ERR_PNPM_FETCH_404 GET https://bnpm.byted.org/<pkg>` —— profile 的 pnpm
+  继承了用户级 `~/.npmrc` 的内网 registry,而这些是公共包。
+- **根因**: profile 目录的 `.npmrc` **不受 sync 管理、不在版本控制**,属手工文件。
+  仓库根 `.npmrc` 早已声明「统一 npmjs + 需要特殊源的包可追加 scope 级覆盖」,
+  但该策略从未下沉到 profile 层。
+- **正确内容(已手工写入现役 `~/.dsh/profiles/web/.npmrc`)**:
+  ```
+  registry=https://registry.npmjs.org/
+  @byted:registry=https://bnpm.byted.org
+  ```
+  两行缺一不可:只写第一行会让内网包 `@byted/dsh-traex-bridge` 404
+  (2026-09-05 实际踩过:6.1 物化时为修公共包 404 一刀切指向公共源,
+  反而打断了 `dsh build`);只依赖 `~/.npmrc` 则公共包 404。
+- **建议**: manifest 增加 registry 覆盖声明,由 sync 与 `cordis.patch.yml` 同待遇物化
+  (带 generated 标记头),使新建 home 开箱即可装全。
+- **临时规避**: 新建/重建 DSH_HOME 后手工写入上述两行再跑 sync。
+- **更新**: 2026-09-05 记录。
+
+
 ### [U004] dsh-cockpit 认证生命周期缺陷(token 轮换断连 + 已配置状态不可见)
 - **状态**: 待立项(2026-09-05 主 checkout 升级到 0.1.2 后用户实测发现)
 - **优先级**: **P1**(第 1 条为高频断连)
