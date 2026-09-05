@@ -36,6 +36,7 @@
 - [x] 5.1 `dsh.yaml` 将 `better-sidebar` 升到 `0.18.0`(或 1.4 确定的版本),确认侧边栏各面板可开且无 duplicate prefix route 报错。
 - [x] 5.2 `dsh.yaml` 将 `sidebar-qa` 升到 `0.5.0`(或 1.4 确定的版本);**确认 `dsh-client-ui-model-selection` 确实随 profile 加载**——`selectModel`/`modelCatalog` 由该包提供而非 `dsh-api-session-controller`,未加载则功能静默消失(design D6)。
 - [ ] 5.3 验证 sidebar-qa 划选提问实际可用,以及依赖方 `session-links` 的「文档/资料」tab 仍正常注册与计数。
+- [x] 5.5 (补)`dsh-cockpit-bridge` 升到 0.3.0(适配 0.1.2 + 承接 typert 设备的待审批观测),`@tangzai/dsh-ui-archive-manager` 禁用(其 client bundle require 已移除的 dsh-client-runtime,会中止整个浏览器 loader);补做「loader 可执行」审计,61 个已服务模块全部可解析。
 - [x] 5.4 复核 `session-links`(peer `^0.16.0`)与 `sidebar-qa` 对 `dsh-better-sidebar` 的 peer 声明是否需要跟进(归档 change 已记录该声明滞后但运行时无双实例)。
 
 ## 6. 回主 checkout 与收尾

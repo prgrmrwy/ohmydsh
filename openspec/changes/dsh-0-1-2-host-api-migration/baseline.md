@@ -221,6 +221,35 @@ cockpit 的 `rc2-client.ts` 依赖 `host.describe`(探活)、`session.list`、
 2. cockpit 侧做双协议兼容(按探测结果走 rc.2 或 0.1.2 两套);
 3. 暂时接受驾驶舱对已升级设备不可用,推迟到 cockpit 跟进后再升主机。
 
+### B1-补 「loader 可执行」审计(2026-09-05 补做,吸取 archive-manager 教训)
+
+原 4.3 只验证了「模块被服务到浏览器」,而 `@tangzai/dsh-ui-archive-manager` 证明
+这个口径不足:它被正常服务,但 `require("@deepseek-ai/dsh-client-runtime/client")`
+指向 0.1.2 已移除的包,materialize 时抛错并**中止整个 client module loader**
+(所有插件的浏览器半区一起死)。
+
+补做的判据是「**每个已服务模块的 require 目标都必须可解析**」。解析域由实测确定:
+
+- **seed 静态表 8 项**(shell bundle 的 `staticModules`,实测读出):
+  `react` / `react/jsx-runtime` / `react-dom` / `react-dom/client` /
+  `@deepseek-ai/cordis` / `@deepseek-ai/dsh-client-store` /
+  `@deepseek-ai/dsh-client-ui-slots` / `@deepseek-ai/dsh-client-ui-primitives`
+- **已注册模块 id**:实际抓取 boot manifest 的 combo 批次脚本,提取
+  `__ModuleLoader__.load({id})` 注册的全部 id(实测 376 个)
+
+**审计结果(0.1.2-rc.1 隔离实例,61 个已服务模块)**:全部 require 目标可解析,
+loader 可完整 materialize ✅
+
+**规则有效性双向验证**:同一规则对已禁用的 archive-manager 判定为命中死包 ❌ ——
+说明规则确实能抓到这类破坏,不是空过。
+
+> 重要区分(实测得出):`package.json` 的 `dsh.client.inject` 只是**模块图依赖边**,
+> 图里没有的 id 会被 `arriveGraphRow` 静默跳过,**不阻塞激活**。因此
+> `dsh-sidebar-qa` / `dsh-open-in-vscode` / `dsh-setting-restart` 仍在 inject 里
+> 声明已移除的 `@deepseek-ai/dsh-client-runtime` 属于**声明滞后而非故障**
+> (三者的 client bundle 均不 require 该包,runtime inject 用的是服务名)。
+> 真正致命的是 bundle 内的 `require()`。
+
 ### B2.1/B2.2 `worktree-session` 编排与安全门(4.4)
 
 - **B2.1**:本 change 的全部实施过程都在这个 Worktree Session 内完成,

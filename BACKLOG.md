@@ -221,22 +221,14 @@
 
 ## 待立项
 
-### [U002] dsh-cockpit 适配 DSH `0.1.2` 的 typert `/api` 网关
-- **状态**: 待立项(2026-09-05 由 change `dsh-0-1-2-host-api-migration` 验收时用户实测发现)
-- **优先级**: **P1 —— 阻塞主机升级落地**:主 checkout 一旦物化到 `0.1.2-rc.1`,驾驶舱即失去对本机的观测
-- **现象**: 驾驶舱连接 `0.1.2-rc.1` 实例报 `DSH_UNAVAILABLE: rc.2 host.describe HTTP 401`
-- **根因(已复现并逐项实测,对比 :3080 旧实例与 :3081 新实例)**: `/api` 通道由「非结构化 RPC 代理」换成「typert 网关」,三处同时变:
-  1. **认证**: `0.1.1-rc.2` 的 `/api/*` 无需认证;`0.1.2` 需浏览器会话认证,未认证一律 401;
-  2. **端点命名**: 点号 → 斜杠命名空间。`session.list` → `session/list`;`host.describe` 与 `workspace.list` 在新版**没有对应端点**(404);
-  3. **载荷形状**: `payload` 必须是 `{args:{…}}` 且字段需匹配 descriptor(如 `session/list` 要求 `_request`)。
-- **影响面**: 仅驾驶舱对设备的观测。`dsh-cockpit-bridge`(浏览器插件,走 postMessage + 驾驶舱自有协议)**不受影响**,已在隔离实例验证加载正常。DSH 本体与 8 个自研包全部正常。
-- **cockpit 侧受影响代码**: `packages/cockpit-server/src/connectivity/rc2-client.ts` —— 依赖 `host.describe`(探活)、`session.list`、`workspace.list` 与 WebSocket `/api/events.<stream>`
-- **待决方案(需独立 change)**:
-  1. 适配 0.1.2 网关(改端点 + 载荷 + 补认证;`host.describe` 需换探活方式 —— host facts 改由网关 ready 帧的 `$host` 承载,不再是 RPC 方法);
-  2. 双协议兼容(探测后走 rc.2 或 0.1.2 两套),适合多设备版本不一致的现实;
-  3. 暂时接受驾驶舱对已升级设备不可用,推迟主机升级。
-- **注意**: WebSocket 事件流(`/api/events.<stream>`)与 `workspace.list` 的新形态**尚未查证**,立项时需一并审计,不要假设只有 REST 三个端点受影响。
-- **更新**: 2026-09-05 记录;同日已在 dsh-cockpit 仓库立项为 change `adapt-dsh-012-typert-gateway`(方案:协议探测双栈 + waterfall 立即回 next + pending 观测迁移 bridge;commit 44e17c4),实现与验收在该仓库进行,本条目在其验收通过后关闭。
+### [U003] `@tangzai/dsh-ui-archive-manager` 适配 DSH 0.1.2 后重新启用
+- **状态**: 待上游(2026-09-05 因 0.1.2 不兼容而禁用)
+- **优先级**: P2
+- **背景**: 该插件的 client bundle `require("@deepseek-ai/dsh-client-runtime/client")`,而该包在 DSH 0.1.2 线被上游移除。后果不是它自己失效,而是 **materialize 时抛错并中止整个 client module loader**,所有插件的浏览器半区一起不可用(由 dsh-cockpit 仓库 change `adapt-dsh-012-typert-gateway` 验收时实测发现)。
+- **处置**: `dsh.yaml` 中 `enabled: false`(禁用≠删除)。归档会话的查看/恢复功能暂缺——官方仍只有 `archiveSession` 无 unarchive(上游 Discussion #2613 的原始缺口依然存在)。
+- **重新启用条件**: upstream 发布适配 0.1.2 的版本(npm 现仅 0.1.0 / 0.1.1,均依赖已移除的包);届时按 `add-dsh-plugin` 流程复核信任面后改回 `enabled: true`,并跑「loader 可执行」审计(见 change `dsh-0-1-2-host-api-migration` 的 baseline B1-补)。
+- **更新**: 2026-09-05 记录。
+
 
 ---
 
@@ -257,6 +249,25 @@
 ---
 
 ## 已完成
+### [U002] dsh-cockpit 适配 DSH `0.1.2` 的 typert `/api` 网关
+- **状态**: **已完成(2026-09-05)** —— dsh-cockpit 仓库 change `adapt-dsh-012-typert-gateway` 已实现并归档(commit d24c0ef);bridge 随之发布 0.3.0,本仓库 manifest 已跟进
+- **优先级**: **P1 —— 阻塞主机升级落地**:主 checkout 一旦物化到 `0.1.2-rc.1`,驾驶舱即失去对本机的观测
+- **现象**: 驾驶舱连接 `0.1.2-rc.1` 实例报 `DSH_UNAVAILABLE: rc.2 host.describe HTTP 401`
+- **根因(已复现并逐项实测,对比 :3080 旧实例与 :3081 新实例)**: `/api` 通道由「非结构化 RPC 代理」换成「typert 网关」,三处同时变:
+  1. **认证**: `0.1.1-rc.2` 的 `/api/*` 无需认证;`0.1.2` 需浏览器会话认证,未认证一律 401;
+  2. **端点命名**: 点号 → 斜杠命名空间。`session.list` → `session/list`;`host.describe` 与 `workspace.list` 在新版**没有对应端点**(404);
+  3. **载荷形状**: `payload` 必须是 `{args:{…}}` 且字段需匹配 descriptor(如 `session/list` 要求 `_request`)。
+- **影响面**: 仅驾驶舱对设备的观测。`dsh-cockpit-bridge`(浏览器插件,走 postMessage + 驾驶舱自有协议)**不受影响**,已在隔离实例验证加载正常。DSH 本体与 8 个自研包全部正常。
+- **cockpit 侧受影响代码**: `packages/cockpit-server/src/connectivity/rc2-client.ts` —— 依赖 `host.describe`(探活)、`session.list`、`workspace.list` 与 WebSocket `/api/events.<stream>`
+- **待决方案(需独立 change)**:
+  1. 适配 0.1.2 网关(改端点 + 载荷 + 补认证;`host.describe` 需换探活方式 —— host facts 改由网关 ready 帧的 `$host` 承载,不再是 RPC 方法);
+  2. 双协议兼容(探测后走 rc.2 或 0.1.2 两套),适合多设备版本不一致的现实;
+  3. 暂时接受驾驶舱对已升级设备不可用,推迟主机升级。
+- **注意**: WebSocket 事件流(`/api/events.<stream>`)与 `workspace.list` 的新形态**尚未查证**,立项时需一并审计,不要假设只有 REST 三个端点受影响。
+- **更新**: 2026-09-05 记录并同日在 dsh-cockpit 立项(44e17c4)、实现归档(d24c0ef)。最终形态:协议探测双栈并存 + waterfall 立即回 next(不阻塞主机审批)+ pending 观测迁移 bridge 0.3.0 + workspace 基线改读 follow 流 + launch token 换 cookie。**本仓库的跟进动作**:`dsh.yaml` 的 bridge pin 0.2.1→0.3.0(旧版 inject 死包在 0.1.2 上永不激活),以及连带发现并禁用 archive-manager(见 U003)。**操作提醒**:主 checkout 升级后,驾驶舱内本机设备需重新粘贴一次带 token 的启动 URL。
+
+---
+
 ### [U001] DSH `0.1.2` host 半区 API 适配(运行体迁移前置)
 - **状态**: **已关闭(2026-09-05)** —— 由 change `dsh-0-1-2-host-api-migration` 完成。运行体已升到 `0.1.2-rc.1`,5 个包 host 半区适配、7 包 client inject、8 包 peer 与两个后置插件(`better-sidebar@0.18.0` / `sidebar-qa@0.5.0`)同批合入。下列四个待解破坏点的结论:① `Session.events` → `snapshotEvents()` / `seq`;② `authority: 'loopback'` 的等价机制**存在** —— connection 层对每个 channel 统一施加 Host fence + 浏览器认证,本部署未配置 `trustedHosts` 故边界等价且更严,已用非回环 Host 实测 403 确认(含携带有效 cookie 仍 403);③ `registerContinuableSetup` → `agent/created` + `agent/disposed`;④ `SessionLogOffset(0)` 显式 brand;⑤ 3 例 `no agent factory registered` 是测试装置缺 `dsh-session-projection` 插件,非运行体行为变化。另有 5 处执行中新发现的破坏点已补记于该 change 的 design S-C2。
 - **优先级**: P1(已完成)
