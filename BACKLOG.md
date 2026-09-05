@@ -221,7 +221,22 @@
 
 ## 待立项
 
-(当前无待立项条目。)
+### [U002] dsh-cockpit 适配 DSH `0.1.2` 的 typert `/api` 网关
+- **状态**: 待立项(2026-09-05 由 change `dsh-0-1-2-host-api-migration` 验收时用户实测发现)
+- **优先级**: **P1 —— 阻塞主机升级落地**:主 checkout 一旦物化到 `0.1.2-rc.1`,驾驶舱即失去对本机的观测
+- **现象**: 驾驶舱连接 `0.1.2-rc.1` 实例报 `DSH_UNAVAILABLE: rc.2 host.describe HTTP 401`
+- **根因(已复现并逐项实测,对比 :3080 旧实例与 :3081 新实例)**: `/api` 通道由「非结构化 RPC 代理」换成「typert 网关」,三处同时变:
+  1. **认证**: `0.1.1-rc.2` 的 `/api/*` 无需认证;`0.1.2` 需浏览器会话认证,未认证一律 401;
+  2. **端点命名**: 点号 → 斜杠命名空间。`session.list` → `session/list`;`host.describe` 与 `workspace.list` 在新版**没有对应端点**(404);
+  3. **载荷形状**: `payload` 必须是 `{args:{…}}` 且字段需匹配 descriptor(如 `session/list` 要求 `_request`)。
+- **影响面**: 仅驾驶舱对设备的观测。`dsh-cockpit-bridge`(浏览器插件,走 postMessage + 驾驶舱自有协议)**不受影响**,已在隔离实例验证加载正常。DSH 本体与 8 个自研包全部正常。
+- **cockpit 侧受影响代码**: `packages/cockpit-server/src/connectivity/rc2-client.ts` —— 依赖 `host.describe`(探活)、`session.list`、`workspace.list` 与 WebSocket `/api/events.<stream>`
+- **待决方案(需独立 change)**:
+  1. 适配 0.1.2 网关(改端点 + 载荷 + 补认证;`host.describe` 需换探活方式 —— host facts 改由网关 ready 帧的 `$host` 承载,不再是 RPC 方法);
+  2. 双协议兼容(探测后走 rc.2 或 0.1.2 两套),适合多设备版本不一致的现实;
+  3. 暂时接受驾驶舱对已升级设备不可用,推迟主机升级。
+- **注意**: WebSocket 事件流(`/api/events.<stream>`)与 `workspace.list` 的新形态**尚未查证**,立项时需一并审计,不要假设只有 REST 三个端点受影响。
+- **更新**: 2026-09-05 记录。
 
 ---
 
