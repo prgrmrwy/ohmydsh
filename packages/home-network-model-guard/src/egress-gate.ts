@@ -30,6 +30,18 @@ type Next = () => AsyncIterable<StreamChunk>
 type Listener = (options: GenerateOptions, next: Next) => AsyncIterable<StreamChunk>
 
 /**
+ * Diagnostic sink for refused Claude calls.
+ *
+ * Deliberately narrow: it receives ONLY the already-sanitized verdict and
+ * degradation reason, so no IP, endpoint, response body or credential can
+ * reach a log sink through this path (design D4).
+ */
+export type RejectionObserver = (
+  verdict: GuardCheckResult['verdict'],
+  degradedReason: GuardCheckResult['degradedReason'],
+) => void
+
+/**
  * Build the `llm/stream` listener around an injected verdict reader.
  *
  * The verdict reader is invoked per Claude call (the cache answers from the
@@ -38,14 +50,25 @@ type Listener = (options: GenerateOptions, next: Next) => AsyncIterable<StreamCh
  * waterfall — `next()` is never called.
  *
  * @param check - verdict reader (the host network cache `check`).
+ * @param onReject - optional diagnostic sink for refusals; a throwing
+ * observer never affects the refusal itself.
  * @returns the waterfall listener.
  */
-export function createEgressGate(check: () => Promise<GuardCheckResult>): Listener {
+export function createEgressGate(check: () => Promise<GuardCheckResult>, onReject?: RejectionObserver): Listener {
   return (options, next) => {
     if (!isClaudeFamily(options.provider, options.model)) return next()
     const run = (async function* gate(): AsyncIterable<StreamChunk> {
       const result = await check()
-      if (result.verdict !== 'allowed') throw new EgressRestrictedError(result.verdict)
+      if (result.verdict !== 'allowed') {
+        // Observe before throwing, but never let a broken observer change the
+        // security outcome: the refusal stands regardless.
+        try {
+          onReject?.(result.verdict, result.degradedReason)
+        } catch {
+          // diagnostics are best-effort
+        }
+        throw new EgressRestrictedError(result.verdict)
+      }
       yield* next()
     })()
     return run

@@ -73,9 +73,9 @@ function buildSource(configFile: string): VerdictSource {
   return {
     fingerprint: () => fingerprintOf(os.networkInterfaces()),
     epoch: () => configEpochOf(configFile),
-    fetchCountry: (signal) => {
+    fetchCountry: (signal, perEndpointTimeoutMs) => {
       current = loadGuardConfig(configFile)
-      return new GeoCountrySource(current.geoEndpoints, fetch).resolveCountry(signal)
+      return new GeoCountrySource(current.geoEndpoints, fetch).resolveCountry(signal, perEndpointTimeoutMs)
     },
     classify: (country) => classifyCountry(country, current.blockedCountries),
   }
@@ -99,7 +99,23 @@ export function apply(ctx: Context): void {
   // Host enforcement: refuse Claude from blocked/unknown egress before the
   // provider adapter issues the request. Registers on the root context so
   // headless compositions are guarded too. Non-Claude passes through.
-  ctx.on('llm/stream', createEgressGate(() => cache.check()))
+  //
+  // The refusal logger lives HERE on the root context, not inside the
+  // `connection` branch below: the gate itself is root-scoped, so a refusal in
+  // a headless composition must still leave a record. Its de-duplication state
+  // is independent of the RPC path's `logTransition` — the two surfaces report
+  // different events and must not mask each other (design D4).
+  const gateLogger = ctx.logger('dsh-home-network-model-guard')
+  let lastRefusal: string | undefined
+  ctx.on('llm/stream', createEgressGate(
+    () => cache.check(),
+    (verdict, degradedReason) => {
+      const line = degradedReason === undefined ? verdict : `${verdict} (${degradedReason})`
+      if (lastRefusal === line) return
+      lastRefusal = line
+      gateLogger.info(`refused Claude egress -> ${line}`)
+    },
+  ))
 
   ctx.inject(['connection'], (child) => {
     const connection = child.get('connection')

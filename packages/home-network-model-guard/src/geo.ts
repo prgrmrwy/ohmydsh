@@ -22,8 +22,60 @@ export interface GeoCountryResult {
   readonly source: 'primary' | 'fallback'
 }
 
-/** Transport/parse failure for one Geo attempt. */
-export class GeoServiceError extends Error {}
+/**
+ * Why a resolution failed. Mirrors the `degradedReason` vocabulary so the
+ * cache can adopt the attribution verbatim instead of re-deriving it from
+ * error text (design D5).
+ */
+export type GeoFailureReason = 'timeout' | 'invalid-response' | 'fetch-failed'
+
+/**
+ * Transport/parse failure for one Geo attempt.
+ *
+ * `reason` feeds the cache's `degradedReason` verbatim (design D5).
+ * `transient` is an independent axis: it marks failures worth one immediate
+ * retry within the same endpoint budget (design D3). A malformed body is
+ * `invalid-response` but NOT transient — retrying yields the same answer.
+ */
+export class GeoServiceError extends Error {
+  public constructor(
+    message: string,
+    public readonly reason: GeoFailureReason = 'fetch-failed',
+    public readonly transient: boolean = true,
+  ) {
+    super(message)
+    this.name = 'GeoServiceError'
+  }
+}
+
+/** One endpoint exhausted its own budget (or the caller cancelled). */
+export class GeoTimedOutError extends GeoServiceError {
+  public constructor(message: string) {
+    super(message, 'timeout', false)
+    this.name = 'GeoTimedOutError'
+  }
+}
+
+/** The endpoint answered, but the answer is unusable. */
+export class GeoInvalidResponseError extends GeoServiceError {
+  public constructor(message: string, transient: boolean) {
+    super(message, 'invalid-response', transient)
+    this.name = 'GeoInvalidResponseError'
+  }
+}
+
+/** A failed resolution carrying its attribution. */
+export interface GeoFailure {
+  readonly reason: GeoFailureReason
+}
+
+/** Either a resolved country or an attributed failure. */
+export type GeoResolution = GeoCountryResult | GeoFailure
+
+/** Narrow a resolution to the success shape. */
+export function isGeoCountryResult(value: GeoResolution): value is GeoCountryResult {
+  return 'country' in value
+}
 
 /** Country-code candidates recognized across common Geo JSON payloads. */
 const COUNTRY_FIELD_KEYS = ['country', 'countryCode', 'country_code'] as const
@@ -62,18 +114,43 @@ export async function fetchCountryOf(fetchImpl: typeof fetch, endpoint: string, 
   try {
     response = await fetchImpl(endpoint, { signal })
   } catch (error) {
+    if (signal.aborted) throw new GeoTimedOutError('attempt aborted')
     throw new GeoServiceError(error instanceof Error ? error.message : 'transport failure')
   }
-  if (!response.ok) throw new GeoServiceError(`endpoint answered ${response.status}`)
+  // A non-2xx is worth one retry (the endpoint may be briefly degraded); a
+  // malformed body is deterministic and must NOT be retried (design D3).
+  if (!response.ok) throw new GeoInvalidResponseError(`endpoint answered ${response.status}`, true)
   let payload: unknown
   try {
     payload = JSON.parse(await response.text()) as unknown
   } catch {
-    throw new GeoServiceError('response body is not JSON')
+    throw new GeoInvalidResponseError('response body is not JSON', false)
   }
   const country = countryCodeOf(payload)
-  if (country === undefined) throw new GeoServiceError('response carried no country code')
+  if (country === undefined) throw new GeoInvalidResponseError('response carried no country code', false)
   return country
+}
+
+/** Default per-endpoint budget when the caller does not supply one. */
+const DEFAULT_PER_ENDPOINT_TIMEOUT_MS = 5_000
+
+/** Fixed pause before the single in-budget retry (design D3). */
+const RETRY_BACKOFF_MS = 150
+
+/** Sleep that resolves early when the signal aborts (never rejects). */
+function delay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    timer.unref?.()
+    function onAbort(): void {
+      clearTimeout(timer)
+      resolve()
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 /**
@@ -91,20 +168,56 @@ export class GeoCountrySource {
   /**
    * Resolve the egress country code with primary→fallback failover.
    *
-   * @param signal - caller-owned abort.
+   * Each endpoint gets its OWN timeout budget: a slow or hanging primary
+   * consumes only its own budget and can never starve the fallback of its
+   * attempt (spec: 任一端点的超时、挂起或耗时 MUST NOT 剥夺另一端点的尝试机会).
+   * Only the caller's own cancellation short-circuits the whole loop.
+   *
+   * @param signal - caller-owned abort (cancels every remaining attempt).
+   * @param perEndpointTimeoutMs - per-endpoint budget in ms.
    * @returns the resolved country and its source, or `null` when BOTH
-   * services failed (or the signal aborted).
+   * services failed (or the caller aborted).
    */
-  public async resolveCountry(signal: AbortSignal): Promise<GeoCountryResult | null> {
+  public async resolveCountry(
+    signal: AbortSignal,
+    perEndpointTimeoutMs: number = DEFAULT_PER_ENDPOINT_TIMEOUT_MS,
+  ): Promise<GeoResolution> {
+    let lastReason: GeoFailureReason = 'fetch-failed'
     for (const [index, endpoint] of this.endpoints.entries()) {
-      if (signal.aborted) return null
+      // Only the caller's cancellation skips the remaining endpoints; a
+      // previous endpoint's exhausted budget MUST NOT short-circuit here.
+      if (signal.aborted) return { reason: 'timeout' }
       try {
-        const country = await fetchCountryOf(this.fetchImpl, endpoint, signal)
+        const country = await this.attemptEndpoint(endpoint, signal, perEndpointTimeoutMs)
         return { country, source: index === 0 ? 'primary' : 'fallback' }
-      } catch {
+      } catch (error) {
+        // Attribution of the LAST endpoint wins: it is the final fact before
+        // the resolution gives up (design D5).
+        lastReason = error instanceof GeoServiceError ? error.reason : 'fetch-failed'
         // fall through to the next service (backup semantics)
       }
     }
-    return null
+    return { reason: lastReason }
+  }
+
+  /**
+   * One endpoint attempt bounded by its own budget, combined with the caller's
+   * signal so either source of cancellation aborts the in-flight request.
+   *
+   * A transient failure is retried at most once inside this same budget after
+   * a short fixed backoff (design D3). Budget exhaustion and deterministic
+   * bad bodies are never retried.
+   */
+  private async attemptEndpoint(endpoint: string, callerSignal: AbortSignal, budgetMs: number): Promise<string> {
+    const combined = AbortSignal.any([callerSignal, AbortSignal.timeout(budgetMs)])
+    try {
+      return await fetchCountryOf(this.fetchImpl, endpoint, combined)
+    } catch (error) {
+      const retriable = error instanceof GeoServiceError && error.transient && !combined.aborted
+      if (!retriable) throw error
+      await delay(RETRY_BACKOFF_MS, combined)
+      if (combined.aborted) throw new GeoTimedOutError('budget exhausted before retry')
+      return await fetchCountryOf(this.fetchImpl, endpoint, combined)
+    }
   }
 }

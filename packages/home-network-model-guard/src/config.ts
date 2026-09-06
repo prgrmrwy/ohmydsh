@@ -36,7 +36,13 @@ export interface GuardConfig {
   readonly blockedCountries: readonly string[]
   /** [primary, fallback] HTTPS Geo endpoints. */
   readonly geoEndpoints: readonly [string, string]
-  /** Per-request abort delay, ms. */
+  /**
+   * Per-ENDPOINT abort delay, ms. Each Geo endpoint receives its own budget,
+   * so a slow primary can never starve the fallback of its attempt; the
+   * worst-case whole-resolution time is therefore about `2 × timeoutMs`
+   * (design D1/D2). Within one endpoint's budget a single transient failure
+   * may be retried once (design D3).
+   */
   readonly timeoutMs: number
   /** Verdict cache TTL for an unchanged fingerprint/epoch, ms. */
   readonly ttlMs: number

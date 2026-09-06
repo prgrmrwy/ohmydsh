@@ -64,6 +64,20 @@ fallback tried? = false
 
 `NetworkVerdictCache` 层的指数退避（2s→60s）语义不变——那是**跨判定**的节流，与这里**判定内**的重试是不同层次，互不影响。
 
+### D5：失败归因随判定结果上行（实施中补充）
+
+D1 把超时下沉到 `geo.ts` 的每个端点后，暴露出一个 D1 原文未交代的层间缺口：`network.ts` 的失败归因仍停在旧模型上。`refresh()` 目前**完全依赖**那个整次判定的 controller 来识别超时——`'timeout'` 这个 `degradedReason` 只能由 `FetchTimedOutError` 产生，而后者只能由 `controller.signal.aborted` 触发。移除该 controller 后 `aborted` 恒为 false，双端点超时会落到 `resolveCountry` 返回的失败分支，被归因为 `'fetch-failed'`——`'timeout'` 语义静默退化，且 `network.test.ts` 既有断言转红。
+
+**选择**：让 `GeoCountrySource` 回传失败归因，而非仅返回 `null`。`resolveCountry` 的成功形状 `{ country, source }` 保持不变（既有断言不受影响），失败形状由 `null` 改为 `{ reason }`，`reason ∈ 'timeout' | 'invalid-response' | 'fetch-failed'`。`geo.ts` 内部据此区分三类失败：per-endpoint 超时信号触发 → `'timeout'`；非 2xx / 非 JSON / 无 country → `'invalid-response'`；transport 失败 → `'fetch-failed'`。`network.ts` 直接采用该归因，不再自建 controller。
+
+两端点失败原因不同时，采用**最后一个端点**的归因——它是判定放弃前的最终事实，与 `lastReason` 的既有语义一致。
+
+理由：超时预算与失败归因就此落在同一层。只有 `geo.ts` 知道究竟哪个端点、以何种方式失败，`'timeout'` 反而比改动前**更准确**（原先是「整体预算耗尽」，现在是「某端点确实超时」）。
+
+*备选*：`network.ts` 保留一个仅作归因、不作预算的外层 controller（超时设为 `2 × perEndpoint + 余量`）。被否——等于把刚拆掉的整体预算装回一个残影，与 D2 的「单端点预算」模型冲突，日后极易误读为真实预算。
+
+*为何不新增 `FetchTimedOutError` 之外的错误类型*：归因是**数据**而非异常路径，用返回值表达可避免 `network.ts` 再做一次字符串匹配（现有 `/not JSON|no country|non-2xx|status/` 正则正是这种脆弱耦合）。
+
 ### D4：gate 拒绝路径注入诊断回调，而非在 gate 内直接 `logger`
 
 `createEgressGate(check, onReject?)` 增加一个可选回调；`index.ts` 在 `apply()` 里用 `ctx.logger(...)` 接线。

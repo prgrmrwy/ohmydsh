@@ -61,6 +61,33 @@ describe('createEgressGate', () => {
     expect(chunks).toHaveLength(1)
   })
 
+  it('reports refusals to the diagnostic observer with sanitized fields only', async () => {
+    const observed: unknown[][] = []
+    const check = vi.fn(async () => resultOf('unknown'))
+    const gate = createEgressGate(check, (...args) => { observed.push(args) })
+    await expect(consume(gate(CLAUDE_OPTIONS as never, vi.fn(passthroughStream)))).rejects.toThrow()
+    expect(observed).toEqual([['unknown', 'fetch-failed']])
+    const serialized = JSON.stringify(observed)
+    expect(serialized).not.toMatch(/\d{1,3}(\.\d{1,3}){3}/) // no IP
+    expect(serialized).not.toMatch(/https?:/) // no endpoint
+  })
+
+  it('does not invoke the observer for allowed or non-Claude calls', async () => {
+    const onReject = vi.fn()
+    const allowedGate = createEgressGate(async () => resultOf('allowed'), onReject)
+    await consume(allowedGate(CLAUDE_OPTIONS as never, vi.fn(passthroughStream)))
+    const blockedGate = createEgressGate(async () => resultOf('blocked'), onReject)
+    await consume(blockedGate(OTHER_OPTIONS as never, vi.fn(passthroughStream)))
+    expect(onReject).not.toHaveBeenCalled()
+  })
+
+  it('still refuses when the observer throws — diagnostics never change the outcome', async () => {
+    const next = vi.fn(passthroughStream)
+    const gate = createEgressGate(async () => resultOf('blocked'), () => { throw new Error('log sink down') })
+    await expect(consume(gate(CLAUDE_OPTIONS as never, next))).rejects.toBeInstanceOf(EgressRestrictedError)
+    expect(next).not.toHaveBeenCalled()
+  })
+
   it('error text never leaks verdict internals beyond the stable marker', async () => {
     const check = vi.fn(async () => resultOf('unknown'))
     const gate = createEgressGate(check)
