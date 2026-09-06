@@ -59,6 +59,14 @@ export interface PetOverlayProps {
 type Mode = 'closed' | 'menu' | 'panel'
 
 /**
+ * Per-browser flag remembering that the user dismissed the channel hint.
+ *
+ * `localStorage`, like the mascot's position: this is display state for one
+ * browser, not configuration. Losing it merely shows the hint again.
+ */
+const CHANNEL_HINT_DISMISSED_KEY = 'dshpet.channelHintDismissed'
+
+/**
  * The Pet overlay surface.
  * @param props - Live DSH facts and navigation callbacks.
  * @returns the rendered overlay.
@@ -89,6 +97,18 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   const [busy, setBusy] = useState(false)
   const [hovered, setHovered] = useState<string | undefined>(undefined)
   const [sourceRemoved, setSourceRemoved] = useState(false)
+  const [botBound, setBotBound] = useState<boolean | undefined>(undefined)
+  const [channelHintDismissed, setChannelHintDismissed] = useState(() => {
+    try {
+      return globalThis.localStorage?.getItem(CHANNEL_HINT_DISMISSED_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  // Only once the Host has ANSWERED: while the answer is pending `botBound`
+  // is undefined, and flashing a "not connected" hint at a Pet that is in
+  // fact connected would be worse than showing nothing.
+  const showChannelHint = botBound === false && !channelHintDismissed
   const dragging = useRef<
     { pointerId: number; dx: number; dy: number; moved: boolean } | undefined
   >(undefined)
@@ -151,6 +171,11 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
         // `none` means a new Task starts unattached unless the user opts in,
         // so the current session is pre-removed rather than pre-selected.
         if (!cancelled && config.defaultContextPolicy === 'none') setSourceRemoved(true)
+        // Failure here leaves `botBound` undefined, which shows no hint at
+        // all: a Host without the channel composed must not be nagged to
+        // configure something it does not have.
+        const channel = await petApi.channel().catch(() => undefined)
+        if (!cancelled && channel !== undefined) setBotBound(channel.bot !== undefined)
       } catch (cause) {
         if (!cancelled) setDegraded(cause instanceof Error ? cause.message : String(cause))
       }
@@ -165,6 +190,14 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
         .capabilities()
         .then(list => {
           if (!cancelled) setCapabilities(list.capabilities)
+        })
+        .catch(() => undefined)
+      // Binding a bot happens in Settings, a separate mount point, so the
+      // hint must clear on the same broadcast rather than on a reload.
+      void petApi
+        .channel()
+        .then(channel => {
+          if (!cancelled) setBotBound(channel.bot !== undefined)
         })
         .catch(() => undefined)
     }
@@ -537,6 +570,33 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
               它就会出现在这里。
             </p>
           ) : null}
+          {/*
+            One hint at a time, and Skills win: a Pet with no capabilities
+            needs a Skill first, not a chat channel. The channel hint is
+            dismissible because the channel is optional — nobody should be
+            nagged forever about a feature they chose not to use — while the
+            Channel settings tab remains the permanent home for binding.
+          */}
+          {shortcuts.length > 0 && degraded === undefined && showChannelHint ? (
+            <p className="dshpet-wheel-note dshpet-empty">
+              还没有连接飞书 Bot，无法从飞书发起任务。
+              在「设置 → Pet → 飞书」连接后即可 @它。
+              <button
+                type="button"
+                className="dshpet-note-dismiss"
+                onClick={() => {
+                  setChannelHintDismissed(true)
+                  try {
+                    globalThis.localStorage?.setItem(CHANNEL_HINT_DISMISSED_KEY, '1')
+                  } catch {
+                    // A blocked storage only costs the user one more reminder.
+                  }
+                }}
+              >
+                不再提示
+              </button>
+            </p>
+          ) : null}
           {error !== undefined ? <p className="dshpet-wheel-note dshpet-error">{error}</p> : null}
         </div>
       ) : null}
@@ -559,6 +619,8 @@ interface TaskView {
   sourceId?: string
   sourceTitle?: string
   sourceAvailability?: string
+  /** Set when the executor runs inside the routed workspace itself. */
+  residentWorkspaceId?: string
   status: string
   archivedAt?: number
   executorSessionId: string
@@ -710,11 +772,26 @@ function TaskPanel(props: {
           <strong style={{ fontSize: 12 }}>
             {task.sourceKind === 'none'
               ? 'Independent task'
-              : `${task.sourceKind}: ${task.sourceTitle ?? task.sourceId ?? task.id}`}
+              : task.sourceKind === 'chat'
+                ? // Named as its origin rather than as `chat: oc_…`: an opaque
+                  // chat id tells the reader nothing about where the work
+                  // came from.
+                  `飞书：${task.sourceTitle ?? task.sourceId ?? task.id}`
+                : `${task.sourceKind}: ${task.sourceTitle ?? task.sourceId ?? task.id}`}
           </strong>
           <span className="dshpet-status" style={{ marginLeft: 6 }}>
             {task.status}
           </span>
+          {/*
+            A resident Task works directly inside the routed workspace, where
+            Pet's Skill projection and standing instructions do NOT apply.
+            Saying so here keeps the panel honest about which form is running.
+          */}
+          {task.residentWorkspaceId !== undefined ? (
+            <span className="dshpet-status" style={{ marginLeft: 4 }}>
+              工作区内执行
+            </span>
+          ) : null}
           {task.sourceAvailability === 'archived' ? (
             <span className="dshpet-status" style={{ marginLeft: 4 }}>
               source archived

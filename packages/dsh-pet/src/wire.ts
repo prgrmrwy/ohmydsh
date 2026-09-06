@@ -23,6 +23,16 @@ export const PET_WORKSPACE_TITLE = 'DSH Pet'
  */
 export const PET_EXECUTOR_PRESET = 'dsh-pet-executor'
 
+/**
+ * DSH's ordinary full coding-agent preset.
+ *
+ * Named explicitly for workspace-resident executors rather than left unset:
+ * an omitted preset is not recorded on the session header at all, so the UI
+ * has nothing to show and the session appears to have no mode. Saying
+ * `standard` states the intent and keeps it visible.
+ */
+export const STANDARD_PRESET = 'standard'
+
 export const ROUTES = {
   status: '/dsh-pet/api/status',
   config: '/dsh-pet/api/config',
@@ -45,6 +55,9 @@ export const ROUTES = {
   diagnostics: '/dsh-pet/api/diagnostics',
   petEnv: '/dsh-pet/api/env',
   petEnvMutate: '/dsh-pet/api/env-mutate',
+  channel: '/dsh-pet/api/channel',
+  channelMutate: '/dsh-pet/api/channel-mutate',
+  channelBind: '/dsh-pet/api/channel-bind',
 } as const
 
 /**
@@ -73,6 +86,74 @@ export interface PetWorkspaceChoice {
   readonly path?: string
 }
 
+// ---------------------------------------------------------------------------
+// Lark channel
+// ---------------------------------------------------------------------------
+
+/**
+ * Bound bot identity, as the management routes expose it.
+ *
+ * Identity facts only. There is deliberately no field for an app secret: the
+ * secret lives in lark-cli, and a shape that could carry one would eventually
+ * be filled in.
+ */
+export interface PetBotIdentity {
+  readonly appId: string
+  readonly name?: string
+  /** Absent until proven from a chat member list. */
+  readonly openId?: string
+}
+
+/** Progress of a bot-binding flow. */
+export type PetBindPhase = 'idle' | 'awaiting-authorization' | 'bound' | 'failed'
+
+/** Bot-binding flow state, safe to show in the UI. */
+export interface PetBindState {
+  readonly phase: PetBindPhase
+  /** One-time onboarding link; not a credential. */
+  readonly verificationUrl?: string
+  readonly appId?: string
+  readonly diagnostic?: string
+}
+
+/** Live connection state of the inbound subscription. */
+export type PetChannelPhase = 'stopped' | 'starting' | 'connected' | 'reconnecting' | 'down'
+
+/** One chat route, as the management routes exchange it. */
+export interface PetChatRoute {
+  readonly chatId: string
+  readonly chatType: 'p2p' | 'group'
+  readonly chatName?: string
+  readonly workspaceId: string
+  readonly activeTaskId?: string
+  readonly boundBy: 'auto' | 'user'
+  readonly boundAt: number
+}
+
+/** Everything the Channel settings tab renders. */
+export interface PetChannelView {
+  readonly enabled: boolean
+  /** Absent until a bot is bound. */
+  readonly bot?: PetBotIdentity
+  readonly allowOpenIds: readonly string[]
+  /**
+   * Display names for known open_ids, for presentation only.
+   *
+   * Admission compares ids; this exists so the list is readable.
+   */
+  readonly knownNames: Readonly<Record<string, string>>
+  readonly defaultWorkspaceId?: string
+  readonly routes: readonly PetChatRoute[]
+  readonly connection: {
+    readonly phase: PetChannelPhase
+    readonly diagnostic?: string
+    /** Invocations waiting behind current work, across all chats. */
+    readonly queueDepth: number
+  }
+  /** Present while a binding flow is running or has just failed. */
+  readonly binding?: PetBindState
+}
+
 /** Maximum accepted JSON request body for any Pet management route. */
 export const MAX_REQUEST_BODY_BYTES = 256 * 1024
 
@@ -98,11 +179,22 @@ export interface PetLifecycleState {
 // Source scope
 // ---------------------------------------------------------------------------
 
-/** The three supported Pet Task source kinds. */
-export type PetSourceKind = 'session' | 'workspace' | 'none'
+/**
+ * The supported Pet Task source kinds.
+ *
+ * `chat` is an external channel conversation (a Lark chat). It is a source
+ * kind of its own rather than a flavour of `workspace`: two chats routed to
+ * the same workspace MUST keep independent Tasks, which only holds when the
+ * chat id — not the route target — is what forms the scope key.
+ */
+export type PetSourceKind = 'session' | 'workspace' | 'none' | 'chat'
 
 /** Stable scope key that defines active-Task uniqueness. */
-export type PetScopeKey = `session:${string}` | `workspace:${string}` | 'independent:web:default'
+export type PetScopeKey =
+  | `session:${string}`
+  | `workspace:${string}`
+  | `chat:${string}`
+  | 'independent:web:default'
 
 /** The phase-one independent scope key. */
 export const INDEPENDENT_SCOPE_KEY: PetScopeKey = 'independent:web:default'
@@ -113,13 +205,15 @@ export const INDEPENDENT_SCOPE_KEY: PetScopeKey = 'independent:web:default'
  * The scope key is the only active-uniqueness authority; titles and start
  * messages are visible projections and are never parsed back into routing.
  * @param kind - Selected source kind.
- * @param id - Source session or workspace id; ignored for `none`.
+ * @param id - Source session, workspace or chat id; ignored for `none`.
  * @returns the canonical scope key.
  */
 export function scopeKeyOf(kind: PetSourceKind, id?: string): PetScopeKey {
   if (kind === 'none') return INDEPENDENT_SCOPE_KEY
   if (id === undefined || id === '') throw new Error(`Pet source kind ${kind} requires an id`)
-  return kind === 'session' ? `session:${id}` : `workspace:${id}`
+  if (kind === 'session') return `session:${id}`
+  if (kind === 'chat') return `chat:${id}`
+  return `workspace:${id}`
 }
 
 // ---------------------------------------------------------------------------
@@ -178,6 +272,16 @@ export interface PetTaskRecord {
   readonly sourceTitle?: string
   readonly sourceAvailability: PetSourceAvailability
   readonly executorSessionId: string
+  /**
+   * Workspace the executor session lives IN, for workspace-resident Tasks.
+   *
+   * Absent on every ordinary Task, whose executor runs in the dedicated
+   * `DSH Pet` workspace and reaches its source through the trusted snapshot.
+   * Present only when a channel route placed the executor directly inside a
+   * target workspace — a form in which Pet does NOT promise its Skill
+   * allowlist projection or standing instructions.
+   */
+  readonly residentWorkspaceId?: string
   readonly status: PetTaskStatus
   readonly diagnostic?: string
   readonly archivedAt?: number
@@ -191,13 +295,20 @@ export interface PetInvocationRecord {
   readonly id: string
   readonly taskId: string
   readonly capabilityId: string
-  /** Skill name resolved at acceptance time. */
-  readonly skillName: string
-  /** Immutable store digest fixed for this Invocation; upgrades never rewrite it. */
+  /**
+   * Skill name resolved at acceptance time.
+   *
+   * ABSENT for a conversational Invocation — one raised by an inbound channel
+   * message rather than by clicking a capability. Such an Invocation carries a
+   * question, not a Skill to run, so there is no name to pin, no `/<name>`
+   * token to lead the envelope with, and nothing for the pre-dispatch Skill
+   * check to verify.
+   */
+  readonly skillName?: string
   /** Registered directory at acceptance time, recorded for diagnostics. */
-  readonly skillSourcePath: string
+  readonly skillSourcePath?: string
   /** Pet skill-set generation active when the Invocation was accepted. */
-  readonly skillSetGeneration: number
+  readonly skillSetGeneration?: number
   readonly snapshotId: string
   /** Free-text user request, rendered into the visible envelope. */
   readonly request?: string

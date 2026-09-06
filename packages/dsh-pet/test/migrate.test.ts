@@ -178,6 +178,114 @@ describe('a healthy v2 medium upgrades to v3 without losing anything', () => {
   })
 })
 
+describe('a healthy v3 medium upgrades to v4 without losing anything', () => {
+  /** Build a database stamped v3 whose rows are already in the current shape. */
+  async function v3Database(): Promise<string> {
+    const dir = await mkdtemp(path.join(tmpdir(), 'pet-migrate-'))
+    const file = path.join(dir, 'state.sqlite')
+    const db = new DatabaseSync(file)
+    db.exec('CREATE TABLE units (name TEXT PRIMARY KEY, version INTEGER)')
+    db.prepare('INSERT INTO units VALUES (?, ?)').run('dsh_pet', 3)
+    for (const table of [
+      'skill_revisions',
+      'skill_selections',
+      'invocations',
+      'tasks',
+      'workspace_env',
+    ]) {
+      db.exec(`CREATE TABLE u_dsh_pet_${table} (key TEXT PRIMARY KEY, value TEXT)`)
+    }
+    db.prepare('INSERT INTO u_dsh_pet_skill_revisions VALUES (?, ?)').run(
+      'ws',
+      JSON.stringify({
+        skillName: 'ws',
+        sourcePath: '/tmp/ws',
+        description: 'Worktree Session operations',
+        provenance: { kind: 'local-link', sourcePath: '/tmp/ws', installedAt: 1 },
+        fileCount: 1,
+        totalBytes: 32,
+      }),
+    )
+    // A v3 Task carries no `residentWorkspaceId`: every pre-channel Task ran
+    // in the dedicated Pet workspace. The field is optional precisely so these
+    // rows keep validating.
+    db.prepare('INSERT INTO u_dsh_pet_tasks VALUES (?, ?)').run(
+      'task-1',
+      JSON.stringify({ id: 'task-1', status: 'idle', sourceKind: 'session' }),
+    )
+    db.prepare('INSERT INTO u_dsh_pet_workspace_env VALUES (?, ?)').run(
+      'global\u0000CR_GROUP',
+      JSON.stringify({ scope: 'global', key: 'CR_GROUP', value: 'oc_x', updatedAt: 1 }),
+    )
+    db.close()
+    return file
+  }
+
+  it('restamps v3 to v4 with nothing to clean', async () => {
+    const file = await v3Database()
+
+    const result = removeLegacyState(file)
+
+    // The channel bump only ADDS tables and optional fields, so no existing
+    // row is incompatible.
+    expect(result).toEqual({ removedRows: 0, clearedTables: [] })
+
+    const db = new DatabaseSync(file)
+    try {
+      const stamped = db.prepare('SELECT version FROM units WHERE name = ?').get('dsh_pet') as {
+        version: number
+      }
+      expect(stamped.version).toBe(PET_DOMAIN_VERSION)
+      expect(stamped.version).toBe(4)
+    } finally {
+      db.close()
+    }
+  })
+
+  it('keeps Tasks, Skills and environment entries across the channel bump', async () => {
+    const file = await v3Database()
+
+    removeLegacyState(file)
+
+    const db = new DatabaseSync(file)
+    try {
+      const tasks = db.prepare('SELECT COUNT(*) AS c FROM u_dsh_pet_tasks').get() as { c: number }
+      const skills = db.prepare('SELECT COUNT(*) AS c FROM u_dsh_pet_skill_revisions').get() as {
+        c: number
+      }
+      const env = db.prepare('SELECT COUNT(*) AS c FROM u_dsh_pet_workspace_env').get() as {
+        c: number
+      }
+
+      expect(tasks.c).toBe(1)
+      expect(skills.c).toBe(1)
+      expect(env.c).toBe(1)
+    } finally {
+      db.close()
+    }
+  })
+
+  it('is idempotent when run twice', async () => {
+    const file = await v3Database()
+
+    removeLegacyState(file)
+    const second = removeLegacyState(file)
+
+    expect(second).toEqual({ removedRows: 0, clearedTables: [] })
+    const db = new DatabaseSync(file)
+    try {
+      const stamped = db.prepare('SELECT version FROM units WHERE name = ?').get('dsh_pet') as {
+        version: number
+      }
+      expect(stamped.version).toBe(PET_DOMAIN_VERSION)
+      const tasks = db.prepare('SELECT COUNT(*) AS c FROM u_dsh_pet_tasks').get() as { c: number }
+      expect(tasks.c).toBe(1)
+    } finally {
+      db.close()
+    }
+  })
+})
+
 describe('cleanup never creates the database', () => {
   it('leaves an absent file absent', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'pet-migrate-'))

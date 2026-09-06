@@ -14,10 +14,16 @@ import {
   envKey,
   petDomainSpec,
   revisionKey,
+  PET_CHANNEL_CONFIG_KEY,
+  PET_CHAT_ID_PATTERN,
   PET_ENV_GLOBAL_SCOPE,
   PET_ENV_KEY_PATTERN,
+  PET_OPEN_ID_PATTERN,
+  type PetChannelConfig,
+  type PetChatBinding,
   type PetEnvEntry,
   type PetGlobalState,
+  type PetInvocationChannel,
 } from './spec.js'
 import {
   occupiesCurrentSlot,
@@ -604,5 +610,246 @@ export class PetRepository {
       }
     }
     return merged
+  }
+
+  // -- channel configuration ------------------------------------------------
+
+  /**
+   * Current Lark channel configuration.
+   *
+   * Returns a disabled, unbound configuration when nothing was ever written,
+   * so callers never branch on "row missing" versus "channel off" — both mean
+   * the channel does not run.
+   * @returns the stored configuration, or the disabled default.
+   */
+  getChannelConfig(): PetChannelConfig {
+    const stored = this.domain.table('channel_config').get(PET_CHANNEL_CONFIG_KEY) as
+      | PetChannelConfig
+      | undefined
+    return stored ?? { enabled: false, allowOpenIds: [], updatedAt: 0 }
+  }
+
+  /**
+   * Replace the channel configuration.
+   *
+   * Identifiers are validated HERE because they are the trust boundary: an
+   * allowlist entry that is not a real open_id can never match an inbound
+   * sender, so storing one would silently admit nobody while looking
+   * configured. Same for the bot's own open_id, without which group mention
+   * filtering cannot fail closed.
+   * @param config - The configuration to store.
+   * @returns the stored configuration.
+   * @throws PetError when an identifier is malformed.
+   */
+  async putChannelConfig(config: PetChannelConfig): Promise<PetChannelConfig> {
+    if (config.botOpenId !== undefined && !PET_OPEN_ID_PATTERN.test(config.botOpenId)) {
+      throw new PetError('BINDING_INVALID', `Bot open_id '${config.botOpenId}' is not an open id`)
+    }
+    for (const openId of config.allowOpenIds) {
+      if (!PET_OPEN_ID_PATTERN.test(openId)) {
+        throw new PetError(
+          'BINDING_INVALID',
+          `Allowlist entry '${openId}' is not a resolved open id`,
+        )
+      }
+    }
+    await this.domain.table('channel_config').put(PET_CHANNEL_CONFIG_KEY, config as never)
+    return config
+  }
+
+  // -- chat bindings --------------------------------------------------------
+
+  /**
+   * Every chat binding.
+   * @returns the bindings, ordered by chat id.
+   */
+  listChatBindings(): readonly PetChatBinding[] {
+    return [...this.domain.table('chat_bindings').entries()]
+      .map(([, value]) => value as PetChatBinding)
+      .sort((left, right) => left.chatId.localeCompare(right.chatId))
+  }
+
+  /**
+   * Look up one chat's binding.
+   * @param chatId - Lark chat id.
+   * @returns the binding, or `undefined` when the chat has never been routed.
+   */
+  getChatBinding(chatId: string): PetChatBinding | undefined {
+    return this.domain.table('chat_bindings').get(chatId) as PetChatBinding | undefined
+  }
+
+  /**
+   * Write one chat binding, replacing any existing row for that chat.
+   * @param binding - The binding to store.
+   * @returns the stored binding.
+   * @throws PetError when the chat id is malformed.
+   */
+  async putChatBinding(binding: PetChatBinding): Promise<PetChatBinding> {
+    if (!PET_CHAT_ID_PATTERN.test(binding.chatId)) {
+      throw new PetError('BINDING_INVALID', `Chat id '${binding.chatId}' is not a chat id`)
+    }
+    if (binding.workspaceId === '') {
+      throw new PetError('BINDING_INVALID', 'A chat binding needs a workspace')
+    }
+    await this.domain.table('chat_bindings').put(binding.chatId, binding as never)
+    return binding
+  }
+
+  /**
+   * Point a chat at the Task now serving it.
+   *
+   * Separate from {@link putChatBinding} so healing a stale pointer cannot
+   * accidentally rewrite the route or the `boundBy` provenance.
+   * @param chatId - Lark chat id.
+   * @param taskId - Task now serving the chat, or `undefined` to clear.
+   * @returns the updated binding, or `undefined` when the chat has no row.
+   */
+  async setChatActiveTask(
+    chatId: string,
+    taskId: string | undefined,
+  ): Promise<PetChatBinding | undefined> {
+    const existing = this.getChatBinding(chatId)
+    if (existing === undefined) return undefined
+    const next: PetChatBinding = { ...existing }
+    if (taskId === undefined) delete (next as { activeTaskId?: string }).activeTaskId
+    else next.activeTaskId = taskId
+    await this.domain.table('chat_bindings').put(chatId, next as never)
+    return next
+  }
+
+  /**
+   * Remove one chat binding.
+   * @param chatId - Lark chat id.
+   * @returns whether a row was removed.
+   */
+  async deleteChatBinding(chatId: string): Promise<boolean> {
+    const table = this.domain.table('chat_bindings')
+    if (table.get(chatId) === undefined) return false
+    await table.delete(chatId)
+    return true
+  }
+
+  // -- invocation channel bindings ------------------------------------------
+
+  /**
+   * Trusted reply target for one Invocation.
+   * @param invocationId - Invocation id.
+   * @returns the binding, or `undefined` when the Invocation is not
+   *   channel-triggered.
+   */
+  getInvocationChannel(invocationId: string): PetInvocationChannel | undefined {
+    return this.domain.table('invocation_channel').get(invocationId) as
+      | PetInvocationChannel
+      | undefined
+  }
+
+  /**
+   * Find the Invocation already created for a trigger message.
+   *
+   * This is the idempotency probe: Lark redelivers unacknowledged events after
+   * a reconnect, and creating a second Invocation for the same message would
+   * run the user's request twice.
+   * @param triggerMessageId - Lark message id that triggered the work.
+   * @returns the existing binding, or `undefined`.
+   */
+  findChannelByTriggerMessage(triggerMessageId: string): PetInvocationChannel | undefined {
+    for (const [, value] of this.domain.table('invocation_channel').entries()) {
+      const binding = value as PetInvocationChannel
+      if (binding.triggerMessageId === triggerMessageId) return binding
+    }
+    return undefined
+  }
+
+  /**
+   * The channel-triggered Invocation of one Task still awaiting its terminal
+   * feedback.
+   *
+   * Deliberately NOT `findCurrentInvocation`: that resolves the serial slot
+   * for the trusted context tool and only recognizes `running`/`waiting-user`.
+   * By the time a `turn/end` arrives the Invocation has usually already been
+   * settled to `succeeded`, so asking for the slot returns nothing and the
+   * reaction is never cleared — the in-progress and done marks then pile up
+   * on the same message.
+   *
+   * "Awaiting feedback" is defined by the binding itself: a reaction id that
+   * has not been cleared yet. That makes the lookup independent of Invocation
+   * status ordering entirely.
+   * @param taskId - Owning Task id.
+   * @returns the binding, or `undefined` when nothing is pending.
+   */
+  findPendingChannelFeedback(taskId: string): PetInvocationChannel | undefined {
+    const owned = new Set(this.listInvocations(taskId).map(invocation => invocation.id))
+    let latest: PetInvocationChannel | undefined
+    for (const [, value] of this.domain.table('invocation_channel').entries()) {
+      const binding = value as PetInvocationChannel
+      if (!owned.has(binding.invocationId)) continue
+      // Keyed on the explicit marker, NOT on `reactionId`: the reaction is
+      // written after dispatch, so a fast turn settles before it lands and
+      // "reaction present" would miss exactly the races it needs to catch.
+      if (binding.settledAt !== undefined) continue
+      // Newest wins: a Task accumulates bindings over its life, and the one
+      // just finished is the one this turn belongs to.
+      if (latest === undefined || binding.createdAt > latest.createdAt) latest = binding
+    }
+    return latest
+  }
+
+  /**
+   * Mark a channel binding as having received its terminal feedback.
+   * @param invocationId - Invocation id.
+   * @returns the updated binding, or `undefined` when no binding exists.
+   */
+  async markChannelSettled(invocationId: string): Promise<PetInvocationChannel | undefined> {
+    const existing = this.getInvocationChannel(invocationId)
+    if (existing === undefined) return undefined
+    const next: PetInvocationChannel = { ...existing, settledAt: Date.now() }
+    await this.domain.table('invocation_channel').put(invocationId, next as never)
+    return next
+  }
+
+  /**
+   * Record the reply target for a channel-triggered Invocation.
+   * @param binding - The binding to store.
+   * @returns the stored binding.
+   * @throws PetError when an identifier is malformed.
+   */
+  async putInvocationChannel(binding: PetInvocationChannel): Promise<PetInvocationChannel> {
+    if (!PET_CHAT_ID_PATTERN.test(binding.chatId)) {
+      throw new PetError('BINDING_INVALID', `Chat id '${binding.chatId}' is not a chat id`)
+    }
+    if (!PET_OPEN_ID_PATTERN.test(binding.senderOpenId)) {
+      throw new PetError(
+        'BINDING_INVALID',
+        `Sender '${binding.senderOpenId}' is not a resolved open id`,
+      )
+    }
+    if (binding.triggerMessageId === '') {
+      throw new PetError('BINDING_INVALID', 'A channel binding needs a trigger message')
+    }
+    await this.domain.table('invocation_channel').put(binding.invocationId, binding as never)
+    return binding
+  }
+
+  /**
+   * Attach the in-progress reaction id to an existing binding.
+   *
+   * Written separately from the binding itself because the reaction call is
+   * fail-soft: the Invocation is already created and running by the time Lark
+   * answers, and a failed reaction must not undo that.
+   * @param invocationId - Invocation id.
+   * @param reactionId - Reaction id returned by Lark, or `undefined` to clear.
+   * @returns the updated binding, or `undefined` when no binding exists.
+   */
+  async setInvocationReaction(
+    invocationId: string,
+    reactionId: string | undefined,
+  ): Promise<PetInvocationChannel | undefined> {
+    const existing = this.getInvocationChannel(invocationId)
+    if (existing === undefined) return undefined
+    const next: PetInvocationChannel = { ...existing }
+    if (reactionId === undefined) delete (next as { reactionId?: string }).reactionId
+    else next.reactionId = reactionId
+    await this.domain.table('invocation_channel').put(invocationId, next as never)
+    return next
   }
 }

@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto'
 import { PetError } from './errors.js'
 import type { PetRepository } from './repository.js'
 import { executorTitle, shortIdOf } from './workspace.js'
-import type { PetScopeKey, PetSourceKind, PetTaskRecord } from '../wire.js'
+import { STANDARD_PRESET, type PetScopeKey, type PetSourceKind, type PetTaskRecord } from '../wire.js'
 
 /** Validated Pet model routing, resolved from Pet settings. */
 export interface PetModelSelection {
@@ -115,24 +115,49 @@ export interface CreateExecutorOptions {
   readonly sourceTitle?: string
   readonly workspacePath: string
   /**
+   * Workspace id when the executor is to live INSIDE a target workspace.
+   *
+   * Presence flips the Task to the workspace-resident form: `workspacePath`
+   * is then the target workspace itself rather than the dedicated Pet
+   * workspace, and Pet performs NO workspace preparation there (see
+   * `ensureWorkspace`).
+   */
+  readonly residentWorkspaceId?: string
+  /**
    * Repairs the Workspace files an executor depends on, returning what could
    * not be fixed. Preparation runs once at boot, so a file deleted or left
    * stale afterwards must be caught here — at the moment a session actually
    * needs it — rather than silently producing an executor with no identity
    * briefing.
+   *
+   * SKIPPED for a workspace-resident Task even when supplied: repair writes
+   * Pet's own `AGENTS.md` and skill projection into the workspace it is given,
+   * and the target of a resident Task is the user's own repository. Pet must
+   * never write there, so a resident executor takes that workspace exactly as
+   * it is — which is also why Pet does not promise its Skill-allowlist
+   * boundary for this form.
    */
   readonly ensureWorkspace?: () => Promise<readonly string[]>
   /**
-   * Accounts the new executor session to the Pet Workspace.
+   * Accounts the new executor session to a workspace.
    *
    * Creating the session with the right `cwd` is not enough: DSH accounts a
    * session to a workspace explicitly, so without this the executor exists but
-   * never appears under DSH Pet in the sidebar.
+   * shows up unfiled in the sidebar.
+   *
+   * Receives the TARGET workspace id, which differs by Task form: ordinary
+   * Tasks are filed under the Pet workspace, a resident Task under the
+   * workspace it actually runs in.
    */
-  readonly attachToWorkspace?: (sessionId: string) => Promise<void>
+  readonly attachToWorkspace?: (sessionId: string, workspaceId?: string) => Promise<void>
   readonly selection: PetModelSelection
-  /** Scoped composition installed on the executor Agent (Pet skill provider, tools). */
-  readonly setup?: (agentCtx: unknown) => void | Promise<void>
+  /**
+   * Scoped composition installed on the executor Agent.
+   *
+   * Receives the preset id to compose: naming a preset in `meta` only records
+   * it on the session header, so the composition itself must be mounted here.
+   */
+  readonly setup?: (agentCtx: unknown, presetId?: string) => void | Promise<void>
 }
 
 /**
@@ -163,6 +188,9 @@ export async function createTaskWithExecutor(
     ...(options.sourceTitle !== undefined ? { sourceTitle: options.sourceTitle } : {}),
     sourceAvailability: 'available',
     executorSessionId: identity.executorSessionId,
+    ...(options.residentWorkspaceId !== undefined
+      ? { residentWorkspaceId: options.residentWorkspaceId }
+      : {}),
     status: 'creating-executor',
     createdAt: now,
     updatedAt: now,
@@ -173,25 +201,47 @@ export async function createTaskWithExecutor(
   // Self-heal before the session exists. A remaining problem is reported
   // rather than silently accepted: an executor without its standing
   // instructions does not know it is a Pet Task Agent.
-  const unresolved = (await options.ensureWorkspace?.()) ?? []
-  if (unresolved.length > 0) {
-    throw new PetError(
-      'WORKSPACE_UNHEALTHY',
-      `Pet Workspace is not usable: ${unresolved.join('; ')}`,
-    )
+  //
+  // Resident Tasks skip this entirely: repair would write Pet's files into
+  // the USER'S repository, which the spec forbids outright.
+  if (options.residentWorkspaceId === undefined) {
+    const unresolved = (await options.ensureWorkspace?.()) ?? []
+    if (unresolved.length > 0) {
+      throw new PetError(
+        'WORKSPACE_UNHEALTHY',
+        `Pet Workspace is not usable: ${unresolved.join('; ')}`,
+      )
+    }
   }
+
+  // A resident executor runs the ordinary preset: the Pet one exists to
+  // exclude local Skill discovery, which is the opposite of what this form
+  // wants. Both the header record and the actual mount use this one value, so
+  // what the session claims and what it runs cannot drift apart.
+  const effectivePreset =
+    options.residentWorkspaceId !== undefined ? STANDARD_PRESET : options.selection.agentPreset
 
   try {
     await agents.create({
       sessionId: identity.executorSessionId,
       meta: {
-        // The Pet Workspace, never the source repository: one Task may outlive
-        // or move across source snapshots. Source access is granted through
-        // trusted context and bounded tools instead.
+        // Ordinarily the Pet Workspace, never the source repository: one Task
+        // may outlive or move across source snapshots, and source access is
+        // granted through trusted context instead.
+        //
+        // A workspace-resident Task deliberately inverts this: the caller
+        // passes the routed target workspace, so the executor works directly
+        // inside the repository the chat is bound to.
         cwd: options.workspacePath,
-        ...(options.selection.agentPreset !== undefined
-          ? { agentPreset: options.selection.agentPreset }
-          : {}),
+        // The Pet executor preset exists to EXCLUDE local Skill discovery so
+        // the Skill surface is exactly Pet's allowlist. A resident Task wants
+        // the opposite by definition — the target workspace's own Skills and
+        // instructions — so it runs the ordinary `standard` preset instead.
+        //
+        // Named explicitly rather than omitted: an unset preset is not
+        // recorded on the session header, leaving the session with no visible
+        // mode at all.
+        ...(effectivePreset !== undefined ? { agentPreset: effectivePreset } : {}),
       },
       // `AgentOptions` is FLAT (`{ provider, model }`), not nested under a
       // `model` object. The nested shape type-checked only because the local
@@ -201,12 +251,16 @@ export async function createTaskWithExecutor(
         provider: options.selection.providerId,
         model: options.selection.modelId,
       },
-      ...(options.setup !== undefined ? { setup: options.setup } : {}),
+      ...(options.setup !== undefined
+        ? { setup: (agentCtx: unknown) => options.setup?.(agentCtx, effectivePreset) }
+        : {}),
     })
     // Account the session AFTER creation succeeds. A failure here is not fatal
     // to the Task — the executor works, it is only mis-filed in the sidebar —
     // so it must not roll back a usable session.
-    await options.attachToWorkspace?.(identity.executorSessionId).catch(() => undefined)
+    await options
+      .attachToWorkspace?.(identity.executorSessionId, options.residentWorkspaceId)
+      .catch(() => undefined)
   } catch (error) {
     await repository.setTaskStatus(
       identity.taskId,
