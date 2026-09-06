@@ -215,14 +215,28 @@ describe('NetworkVerdictCache', () => {
     expect(result.verdict).toBe('allowed')
   })
 
-  it('maps timeouts and invalid bodies to their stable diagnostic codes', async () => {
-    const timeoutSource = makeSource(vi.fn((_signal: AbortSignal) => new Promise<never>((_r, reject) => {
-      setTimeout(() => reject(new DOMException('aborted', 'AbortError')), 50)
-    })))
-    const slowCache = makeCache(timeoutSource.source, () => 1_000, 60_000, 5)
-    const timedOut = await slowCache.check()
+  it('adopts the geo layer attribution verbatim for its diagnostic codes', async () => {
+    // The Geo layer owns the per-endpoint budgets and therefore the
+    // attribution; the cache must surface it unchanged (design D5).
+    const timeoutSource = makeSource(vi.fn(async () => ({ reason: 'timeout' as const })))
+    const timedOut = await makeCache(timeoutSource.source, () => 1_000, 60_000, 5).check()
     expect(timedOut.degraded).toBe(true)
     expect(timedOut.degradedReason).toBe('timeout')
+
+    const invalidSource = makeSource(vi.fn(async () => ({ reason: 'invalid-response' as const })))
+    const invalid = await makeCache(invalidSource.source, () => 1_000).check()
+    expect(invalid.degradedReason).toBe('invalid-response')
+
+    const transportSource = makeSource(vi.fn(async () => ({ reason: 'fetch-failed' as const })))
+    const transport = await makeCache(transportSource.source, () => 1_000).check()
+    expect(transport.degradedReason).toBe('fetch-failed')
+  })
+
+  it('passes the configured per-endpoint budget down to the geo layer', async () => {
+    const fetchCountry = vi.fn(async () => ({ country: 'SG', source: 'primary' as const }))
+    const { source } = makeSource(fetchCountry)
+    await makeCache(source, () => 1_000, 60_000, 7_500).check()
+    expect(fetchCountry).toHaveBeenCalledWith(expect.anything(), 7_500)
   })
 
   it('never leaks the country of a null/unknown path — raw response text stays inside the source', async () => {

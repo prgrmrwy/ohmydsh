@@ -14,6 +14,7 @@
  * @module dsh-home-network-model-guard/network
  */
 import type { GuardCheckResult, NetworkVerdict } from './contract.js'
+import { isGeoCountryResult, type GeoResolution } from './geo.js'
 
 /** The subset of `os.NetworkInterfaceInfo` the fingerprint reads. */
 export interface NetworkInterfaceInfo {
@@ -54,10 +55,13 @@ export interface VerdictSource {
   /** Current config-generation identity (config writes invalidate verdicts). */
   epoch(): string
   /**
-   * Resolve the egress country code with primary→fallback failover.
-   * @returns the country code, or `null` when BOTH services failed.
+   * Resolve the egress country code with primary→fallback failover, giving
+   * each endpoint its own timeout budget.
+   *
+   * @returns the country plus its source, or an attributed failure when BOTH
+   * services failed (design D5).
    */
-  fetchCountry(signal: AbortSignal): Promise<{ readonly country: string; readonly source: 'primary' | 'fallback' } | null>
+  fetchCountry(signal: AbortSignal, perEndpointTimeoutMs: number): Promise<GeoResolution>
   /** Map one resolved country code to a verdict (blocklist semantics). */
   classify(country: string): NetworkVerdict
 }
@@ -85,8 +89,13 @@ interface CacheEntry {
 const DEFAULT_BACKOFF_BASE_MS = 2_000
 const DEFAULT_BACKOFF_MAX_MS = 60_000
 
-/** Timeout elevated so the degradation reason maps to `'timeout'`. */
-class FetchTimedOutError extends Error {}
+/** Carries the Geo layer's attribution up to the degradation mapping. */
+class GeoResolutionFailedError extends Error {
+  public constructor(public readonly reason: NonNullable<GuardCheckResult['degradedReason']>) {
+    super(`geo resolution failed (${reason})`)
+    this.name = 'GeoResolutionFailedError'
+  }
+}
 
 /**
  * Cached, single-flight network verdict source with sustained retry.
@@ -160,19 +169,18 @@ export class NetworkVerdictCache {
     const sampledAt = this.now()
     this.lastFingerprint = fingerprint
     this.lastEpoch = epoch
+    // No whole-resolution timeout here: each endpoint owns its budget inside
+    // the Geo source (design D1). This controller only carries cancellation.
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), this.options.fetchTimeoutMs)
-    timer.unref?.()
     try {
-      let result: { readonly country: string; readonly source: 'primary' | 'fallback' } | null
+      let result: GeoResolution
       try {
-        result = await this.source.fetchCountry(controller.signal)
+        result = await this.source.fetchCountry(controller.signal, this.options.fetchTimeoutMs)
       } catch (error) {
-        if (controller.signal.aborted) throw new FetchTimedOutError('geo fetch timed out')
+        // A throwing source is an unexpected path; treat it as transport-ish.
         throw new Error(error instanceof Error ? error.message : String(error))
       }
-      if (controller.signal.aborted) throw new FetchTimedOutError('geo fetch timed out')
-      if (result === null) throw new Error('both geo services failed')
+      if (!isGeoCountryResult(result)) throw new GeoResolutionFailedError(result.reason)
       const verdict = this.source.classify(result.country)
       this.cached = { verdict, fetchedAtMs: sampledAt, fingerprint, epoch }
       this.lastResolution = { country: result.country, source: result.source, atMs: sampledAt }
@@ -180,11 +188,9 @@ export class NetworkVerdictCache {
       this.backoffMs = this.options.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS
       return { verdict, sampledAt, freshForMs: this.options.ttlMs, degraded: false }
     } catch (error) {
-      const reason = error instanceof FetchTimedOutError
-        ? 'timeout'
-        : error instanceof Error && /not JSON|no country|non-2xx|status/.test(error.message)
-          ? 'invalid-response'
-          : 'fetch-failed'
+      // Attribution comes from the Geo layer verbatim — it is the only layer
+      // that knows which endpoint failed and how (design D5).
+      const reason = error instanceof GeoResolutionFailedError ? error.reason : 'fetch-failed'
       this.lastReason = reason
       // Same network + config failed: back off. A later fingerprint/epoch
       // change bypasses this.
@@ -192,8 +198,6 @@ export class NetworkVerdictCache {
       this.nextAttemptAtMs = sampledAt + backoff
       this.backoffMs = Math.min(backoff * 2, this.options.backoffMaxMs ?? DEFAULT_BACKOFF_MAX_MS)
       return { verdict: 'unknown', degraded: true, degradedReason: reason }
-    } finally {
-      clearTimeout(timer)
     }
   }
 

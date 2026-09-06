@@ -16,7 +16,11 @@ Claude 系列模型被双层拦截；非 Claude 模型不受影响。
   任一变化即失效重查，并发请求 single-flight 合并。
 - **双层拦截**：Web 用官方 `conversation.blocks` 提前禁用输入框；Host 在
   `llm/stream` waterfall 处拒绝非 `allowed` 的 Claude 调用（覆盖 CLI/subagent/
-  其他绕过输入框的路径），错误不包含 IP/Geo 原文/凭据。
+  其他绕过输入框的路径），错误不包含 IP/Geo 原文/凭据。拒绝在主机侧留下一行
+  去重后的诊断日志（仅分类 + 降级原因），不静默失败。
+- **故障转移**：主备端点各有独立超时预算，任一端点的挂起或耗时都不会剥夺另一个
+  的尝试机会；单端点预算内对瞬时失败（transport / 非 2xx）至多重试 1 次，
+  端点自身超时与确定性坏响应不重试。只有两个端点都失败才判定 `unknown`。
 - **家族识别**：同时匹配 provider 路由（`claude` / `anthropic`）与模型名（claude-*）。
 - **与官方共存**：官方 `routable === false` 的拦截让位不覆盖；本包只清除自己写入的 block；
   订阅 block 槽位自检，被官方发布清掉时防抖重新断言。
@@ -34,6 +38,8 @@ $DSH_HOME/plugins/dsh-home-network-model-guard/config.json
 - `blockedCountries`: ISO alpha-2 阻断清单（默认 `["CN"]`）
 - `geoEndpoints`: 主备两个 HTTPS Geo 端点（默认 `ipinfo.io/json` + `ipwho.is/`）
 - `timeoutMs` / `ttlMs` / `backoffBaseMs` / `backoffMaxMs`: 非秘密调参（可选）
+  - `timeoutMs` 是**单个端点**的预算（默认 5s），不是整次判定的总预算：主备各自
+    独享一份，慢主端点无法吞掉备端点的机会，最坏整体耗时约 `2 × timeoutMs`。
 
 配置缺失/非法 → 使用默认值（阻断清单 `CN`）并保持 Claude fail-closed。
 总开关：`dsh.yaml` 中本条目 `enabled: false` → 重新 build 后门禁与 Web 提示全部卸载。
