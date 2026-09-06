@@ -1,5 +1,5 @@
 /**
- * Pet settings section: four stable tabs.
+ * Pet settings section: five stable tabs.
  *
  * General, Skills and Diagnostics.
  * architecture — the overlay and Task panel deliberately do not duplicate
@@ -33,12 +33,14 @@ import type {
   PetEnvRecord,
   PetProjectionEntry,
   PetSkillRevision,
+  PetChannelPhase,
+  PetChannelView,
   PetSkillSelection,
   PetWorkspaceChoice,
 } from '../wire.js'
 
-/** The four stable tabs. */
-export const PET_SETTINGS_TABS = ['general', 'skills', 'env', 'diagnostics'] as const
+/** The five stable tabs. */
+export const PET_SETTINGS_TABS = ['general', 'skills', 'env', 'channel', 'diagnostics'] as const
 
 export type PetSettingsTab = (typeof PET_SETTINGS_TABS)[number]
 
@@ -195,6 +197,7 @@ const TAB_LABELS: Record<PetSettingsTab, string> = {
   general: '通用',
   skills: 'Skill',
   env: '环境变量',
+  channel: '飞书',
   diagnostics: '诊断',
 }
 
@@ -224,6 +227,7 @@ export function PetSettingsSection(props: { initialTab?: PetSettingsTab } = {}):
         {tab === 'general' ? <GeneralTab /> : null}
         {tab === 'skills' ? <SkillsTab /> : null}
         {tab === 'env' ? <EnvironmentTab /> : null}
+        {tab === 'channel' ? <ChannelTab /> : null}
         {tab === 'diagnostics' ? <DiagnosticsTab /> : null}
       </div>
     </div>
@@ -1264,6 +1268,404 @@ function Fact(props: { label: string; value: string; mono?: boolean }): JSX.Elem
 }
 
 /** Diagnostics: lifecycle, paths, digests, drift and explicit repair. */
+/** Human-readable connection phases. */
+/**
+ * An identity shown by name, with its open_id kept one interaction away.
+ *
+ * An `ou_…` string is unreadable, but it is still the value that matters when
+ * someone needs to check or share it — so it lives in the tooltip and on the
+ * clipboard rather than occupying the line.
+ * @param props - The id, and the display name when one is known.
+ * @returns the rendered chip.
+ */
+function IdentityChip(props: { id: string; name?: string }): JSX.Element {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      type="button"
+      className="dshpet-identity"
+      title={props.id}
+      onClick={() => {
+        void navigator.clipboard
+          ?.writeText(props.id)
+          .then(() => {
+            setCopied(true)
+            setTimeout(() => setCopied(false), 1200)
+          })
+          .catch(() => undefined)
+      }}
+    >
+      {props.name ?? props.id}
+      <span className="dshpet-identity-hint">{copied ? '已复制' : '点击复制 ID'}</span>
+    </button>
+  )
+}
+
+const CHANNEL_PHASE_LABELS: Record<PetChannelPhase, string> = {
+  stopped: '未启动',
+  starting: '启动中',
+  connected: '已连接',
+  reconnecting: '重连中',
+  down: '已断开',
+}
+
+/**
+ * Channel: bot binding, admission, routing.
+ *
+ * Binding is the first thing here because nothing else can be configured
+ * without an identity — an enabled channel with no bound bot could not tell
+ * an `@us` from an `@someone-else`.
+ * @returns the rendered tab.
+ */
+function ChannelTab(): JSX.Element {
+  const [view, setView] = useState<PetChannelView | undefined>(undefined)
+  const [workspaces, setWorkspaces] = useState<readonly PetWorkspaceChoice[]>([])
+  const [appId, setAppId] = useState('')
+  const [appSecret, setAppSecret] = useState('')
+  const [allowInput, setAllowInput] = useState('')
+  const [error, setError] = useState<string | undefined>(undefined)
+
+  const refresh = useCallback(async () => {
+    try {
+      setView(await petApi.channel())
+      setError(undefined)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+    void petApi
+      .petEnv()
+      .then(data => setWorkspaces(data.workspaces ?? []))
+      .catch(() => undefined)
+  }, [refresh])
+
+  // While the user authorizes in a browser the Host learns nothing until the
+  // CLI returns, so the view is polled until the flow settles.
+  useEffect(() => {
+    if (view?.binding?.phase !== 'awaiting-authorization') return undefined
+    const timer = setInterval(() => void refresh(), 2000)
+    return () => clearInterval(timer)
+  }, [view?.binding?.phase, refresh])
+
+  const mutate = async (input: Parameters<typeof petApi.mutateChannel>[0]): Promise<void> => {
+    try {
+      setView(await petApi.mutateChannel(input))
+      setError(undefined)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  const bind = async (input: Parameters<typeof petApi.bindBot>[0]): Promise<void> => {
+    try {
+      setView(await petApi.bindBot(input))
+      // Cleared immediately: the secret has been handed to the Host and this
+      // component must not keep a copy of it.
+      setAppSecret('')
+      setError(undefined)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+      setAppSecret('')
+    }
+  }
+
+  if (view === undefined) {
+    return (
+      <div className="dshpet-panel-body">
+        {error !== undefined ? <p className="dshpet-error">{error}</p> : <p>加载中…</p>}
+      </div>
+    )
+  }
+
+  const binding = view.binding
+  const allowList = view.allowOpenIds
+
+  return (
+    <div className="dshpet-panel-body">
+      <section className="dshpet-group">
+        <h3 className="dshpet-group-title">飞书 Bot</h3>
+        {view.bot === undefined ? (
+          <>
+            <p className="dshpet-item-hint">
+              Pet 还没有连接飞书 Bot。连接后即可在飞书里 @它发起任务。
+              凭据由 lark-cli 保管，Pet 不会保存或显示 App Secret。
+            </p>
+            {binding?.phase === 'awaiting-authorization' ? (
+              <p className="dshpet-item-hint">
+                等待你在浏览器完成授权…
+                {binding.verificationUrl !== undefined ? (
+                  <>
+                    {' '}
+                    <a href={binding.verificationUrl} target="_blank" rel="noreferrer">
+                      打开授权页面
+                    </a>
+                  </>
+                ) : null}
+                <button
+                  type="button"
+                  className="dshpet-action"
+                  onClick={() => void bind({ action: 'cancel' })}
+                >
+                  取消
+                </button>
+              </p>
+            ) : (
+              <div className="dshpet-actions">
+                <button
+                  type="button"
+                  className="dshpet-action"
+                  onClick={() => void bind({ action: 'create' })}
+                >
+                  创建新的 Bot
+                </button>
+              </div>
+            )}
+            <div className="dshpet-field">
+              <label htmlFor="dshpet-channel-appid">连接已有 Bot</label>
+              <input
+                className="dshpet-input"
+                id="dshpet-channel-appid"
+                value={appId}
+                placeholder="App ID（cli_…）"
+                onChange={event => setAppId(event.target.value)}
+              />
+              <input
+                className="dshpet-input"
+                type="password"
+                value={appSecret}
+                placeholder="App Secret（只转交给 lark-cli，不会被保存）"
+                onChange={event => setAppSecret(event.target.value)}
+              />
+              <button
+                type="button"
+                className="dshpet-action"
+                disabled={appId.trim() === '' || appSecret === ''}
+                onClick={() => void bind({ action: 'connect', appId, appSecret })}
+              >
+                连接
+              </button>
+            </div>
+          </>
+        ) : (
+          <dl className="dshpet-kv">
+            <dt>Bot</dt>
+            <dd>
+              <IdentityChip
+                id={view.bot.appId}
+                {...(view.bot.name !== undefined ? { name: view.bot.name } : {})}
+              />
+            </dd>
+            <dt>身份确认</dt>
+            <dd>
+              {view.bot.openId === undefined ? (
+                '尚未确认（首次在群里 @它后自动获取）'
+              ) : (
+                <IdentityChip id={view.bot.openId} name="已确认" />
+              )}
+            </dd>
+          </dl>
+        )}
+        {binding?.phase === 'failed' ? (
+          <p className="dshpet-error">{binding.diagnostic ?? '绑定失败'}</p>
+        ) : null}
+      </section>
+
+      <section className="dshpet-group">
+        <h3 className="dshpet-group-title">启用</h3>
+        <p className="dshpet-item-hint">
+          启用后 Pet 会订阅飞书消息。只有下方允许清单中的成员可以触发，其他人的消息一律忽略。
+        </p>
+        <label className="dshpet-check">
+          <input
+            className="dshpet-input"
+            type="checkbox"
+            checked={view.enabled}
+            onChange={event => void mutate({ action: 'set-enabled', enabled: event.target.checked })}
+          />
+          启用飞书接入
+        </label>
+        <p className="dshpet-item-hint">
+          连接状态：{CHANNEL_PHASE_LABELS[view.connection.phase]}
+          {view.connection.diagnostic !== undefined ? `（${view.connection.diagnostic}）` : ''}
+        </p>
+      </section>
+
+      <section className="dshpet-group">
+        <h3 className="dshpet-group-title">允许触发的成员</h3>
+        <p className="dshpet-item-hint">
+          填写 open_id（ou_ 开头）。留空表示没有人可以触发。
+          成员发过消息后会显示其姓名，点击可复制 open_id。
+        </p>
+        <ul className="dshpet-list">
+          {allowList.map(openId => (
+            <li key={openId} className="dshpet-item">
+              <IdentityChip
+                id={openId}
+                {...(view.knownNames[openId] !== undefined
+                  ? { name: view.knownNames[openId] }
+                  : {})}
+              />
+              <button
+                type="button"
+                className="dshpet-action"
+                onClick={() =>
+                  void mutate({
+                    action: 'set-allowlist',
+                    allowOpenIds: allowList.filter(entry => entry !== openId),
+                  })
+                }
+              >
+                移除
+              </button>
+            </li>
+          ))}
+        </ul>
+        <div className="dshpet-field">
+          <input
+            className="dshpet-input"
+            value={allowInput}
+            placeholder="ou_…"
+            onChange={event => setAllowInput(event.target.value)}
+          />
+          <button
+            type="button"
+            className="dshpet-action"
+            disabled={allowInput.trim() === ''}
+            onClick={() => {
+              void mutate({
+                action: 'set-allowlist',
+                allowOpenIds: [...allowList, allowInput.trim()],
+              }).then(() => setAllowInput(''))
+            }}
+          >
+            添加
+          </button>
+        </div>
+      </section>
+
+      <section className="dshpet-group">
+        <h3 className="dshpet-group-title">默认工作区</h3>
+        <p className="dshpet-item-hint">
+          没有单独绑定过的会话，都会在这个工作区里创建会话。
+        </p>
+        <select
+          value={view.defaultWorkspaceId ?? ''}
+          onChange={event =>
+            void mutate({ action: 'set-default-workspace', defaultWorkspaceId: event.target.value })
+          }
+        >
+          <option value="">（未设置）</option>
+          {workspaces.map(workspace => (
+            <option key={workspace.id} value={workspace.id}>
+              {workspace.title ?? workspace.id}
+            </option>
+          ))}
+        </select>
+      </section>
+
+      <section className="dshpet-group">
+        <h3 className="dshpet-group-title">会话路由</h3>
+        {view.routes.length === 0 ? (
+          <p className="dshpet-item-hint">
+            还没有会话记录。第一次有人在群里 @Bot（或单聊发消息）后，这里会自动出现一行。
+          </p>
+        ) : (
+          <ul className="dshpet-list">
+            {view.routes.map(route => (
+              <li key={route.chatId} className="dshpet-item">
+                <span>
+                  {route.chatName ?? route.chatId}
+                  {route.chatType === 'p2p' ? '（单聊）' : ''}
+                  {route.boundBy === 'auto' ? ' · 自动' : ' · 手动'}
+                </span>
+                <select
+                  value={route.workspaceId}
+                  onChange={event =>
+                    void mutate({
+                      action: 'rebind-chat',
+                      chatId: route.chatId,
+                      workspaceId: event.target.value,
+                    })
+                  }
+                >
+                  {workspaces.map(workspace => (
+                    <option key={workspace.id} value={workspace.id}>
+                      {workspace.title ?? workspace.id}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="dshpet-action"
+                  onClick={() => void mutate({ action: 'remove-chat', chatId: route.chatId })}
+                >
+                  移除
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
+    </div>
+  )
+}
+
+/** Channel connection state, surfaced inside Diagnostics. */
+function ChannelDiagnostics(): JSX.Element {
+  const [view, setView] = useState<PetChannelView | undefined>(undefined)
+
+  useEffect(() => {
+    void petApi
+      .channel()
+      .then(setView)
+      .catch(() => undefined)
+  }, [])
+
+  return (
+    <section className="dshpet-group">
+      <h3 className="dshpet-group-title">飞书接入</h3>
+      {view === undefined ? (
+        <p className="dshpet-item-hint">状态不可用。</p>
+      ) : (
+        <>
+          <dl className="dshpet-kv">
+            <dt>连接</dt>
+            <dd>
+              {CHANNEL_PHASE_LABELS[view.connection.phase]}
+              {view.connection.diagnostic !== undefined
+                ? `（${view.connection.diagnostic}）`
+                : ''}
+            </dd>
+            <dt>排队中的调用</dt>
+            <dd>{view.connection.queueDepth}</dd>
+            <dt>已绑定 Bot</dt>
+            <dd>{view.bot?.appId ?? '未绑定'}</dd>
+          </dl>
+          {view.connection.phase === 'down' ? (
+            <button
+              type="button"
+              className="dshpet-action"
+              onClick={() =>
+                void petApi
+                  .mutateChannel({ action: 'reconnect' })
+                  .then(setView)
+                  .catch(() => undefined)
+              }
+            >
+              重新连接
+            </button>
+          ) : null}
+        </>
+      )}
+    </section>
+  )
+}
+
 function DiagnosticsTab(): JSX.Element {
   const [data, setData] = useState<Record<string, unknown> | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
@@ -1365,13 +1767,7 @@ function DiagnosticsTab(): JSX.Element {
         {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
       </section>
 
-      <section className="dshpet-group">
-      <h3 className="dshpet-group-title">渠道</h3>
-      <p className="dshpet-item-hint">
-        Channel bindings and external replies are not part of this phase. Future channel secrets
-        will be stored as protected references and never displayed.
-      </p>
-      </section>
+      <ChannelDiagnostics />
     </div>
   )
 }

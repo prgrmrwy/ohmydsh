@@ -123,7 +123,10 @@ describe('executor Agents receive the Pet scope', () => {
     const call = create.mock.calls[0]?.[0] as { setup?: unknown; meta?: { cwd?: string } }
     // The scope must be handed to the factory, which awaits it BEFORE the
     // session and agent are published.
-    expect(call.setup).toBe(executorSetup)
+    // Invoked rather than compared: the callback is wrapped so it also
+    // receives the preset id to mount.
+    await call.setup({})
+    expect(executorSetup).toHaveBeenCalled()
     expect(call.meta?.cwd).toBe(paths.workspaceRoot)
   })
 

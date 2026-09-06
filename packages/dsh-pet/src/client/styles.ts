@@ -163,6 +163,18 @@ export const PET_CSS = `
   color:var(--dsw-alias-label-primary,#1f2329)}
 .dshpet-action:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6)}
 .dshpet-empty{font-size:12px;color:var(--dsw-alias-label-tertiary,#8f959e);padding:6px 0}
+/* Inline dismissal inside a wheel note: a link-weight affordance, so it
+   reads as secondary to the hint it sits in rather than as an action. */
+/* Identity chip: reads as the person, not the id. The id itself lives in the
+   title attribute and on the clipboard, so it costs no line width. */
+.dshpet-identity{border:0;background:none;padding:0;cursor:pointer;font:inherit;
+color:var(--dsw-alias-label-primary,#1f2329);text-align:left}
+.dshpet-identity:hover{text-decoration:underline}
+.dshpet-identity-hint{margin-left:6px;font-size:11px;
+color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
+.dshpet-identity:hover .dshpet-identity-hint,
+.dshpet-identity:focus-visible .dshpet-identity-hint{opacity:1}
+.dshpet-note-dismiss{margin-left:6px;border:0;background:none;padding:0;cursor:pointer;font:inherit;color:var(--dsw-alias-label-secondary,#646a73);text-decoration:underline}
 .dshpet-error{font-size:12px;color:var(--dsw-alias-state-error-primary,#f54a45);padding:6px 0}
 
 @media (max-width:520px){

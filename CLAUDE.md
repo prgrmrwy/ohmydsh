@@ -25,6 +25,10 @@
 
 若文档与实现不一致，不要静默选择一方：先指出差异，再根据当前 OpenSpec、已接受 ADR 和用户意图决定应修改规范还是实现。
 
+**接入 DSH 宿主能力前（创建 session/agent、拉长驻子进程、解析会话事件、调用 lark-cli），
+先读 `docs/notes/dsh-plugin-integration-pitfalls.md`。** 那里记录的是调用成功、类型通过、
+日志无异常，但实际没有生效的集成方式——已经重复踩过，不要再靠现场排查重新发现。
+
 ## 关键目录
 
 - `dsh.yaml`：总 manifest；DSH 版本、自动更新、Web 配置和全部定制的单一开关面。
