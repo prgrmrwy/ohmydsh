@@ -202,8 +202,10 @@ describe('first boot in an isolated DSH home', () => {
   })
 
 
-  it('exposes exactly the four stable tabs', () => {
-    expect(PET_SETTINGS_TABS).toEqual(['general', 'skills', 'env', 'diagnostics'])
+  it('exposes exactly the five stable tabs', () => {
+    // Channel joined the set with Lark inbound. It is stable rather than
+    // conditional: an unbound channel still needs a place to be bound from.
+    expect(PET_SETTINGS_TABS).toEqual(['general', 'skills', 'env', 'channel', 'diagnostics'])
   })
 })
 

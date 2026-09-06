@@ -32,6 +32,8 @@ import {
   type PetInvocationRecord,
   type PetInvocationStatus,
   type PetRunRecord,
+  type PetScopeKey,
+  type PetSourceSnapshot,
   type PetTaskRecord,
 } from '../wire.js'
 
@@ -56,8 +58,13 @@ export interface CoordinatorDeps {
   readonly workspacePath: string
   /** Repairs Workspace files before an executor session is created. */
   readonly ensureWorkspace?: () => Promise<readonly string[]>
-  /** Accounts a new executor session to the Pet Workspace. */
-  readonly attachToWorkspace?: (sessionId: string) => Promise<void>
+  /**
+   * Accounts a new executor session to a workspace.
+   *
+   * Receives the target workspace id when the Task is resident, so the
+   * session is filed under the project it runs in rather than under Pet.
+   */
+  readonly attachToWorkspace?: (sessionId: string, workspaceId?: string) => Promise<void>
   /** Resolves the validated Pet model selection at dispatch time. */
   readonly selection: () => PetModelSelection
   /**
@@ -68,7 +75,7 @@ export interface CoordinatorDeps {
    * Without it an executor would inherit DSH's global Skill discovery, and
    * the isolation boundary would exist only on paper.
    */
-  readonly executorSetup?: (agentCtx: unknown) => void | Promise<void>
+  readonly executorSetup?: (agentCtx: unknown, presetId?: string) => void | Promise<void>
   /**
    * Apply the generated relationship title to a freshly created executor.
    *
@@ -83,6 +90,24 @@ export interface CoordinatorDeps {
    * rather than reaching the Agent as ordinary prose.
    */
   readonly verifySkill?: (skillName: string) => Promise<void>
+}
+
+/** Everything needed to admit one inbound channel message. */
+export interface ConversationRequest {
+  /** Preallocated Invocation id; also the idempotency key. */
+  readonly invocationId: string
+  /** Canonical `chat:<chat-id>` scope key. */
+  readonly scopeKey: PetScopeKey
+  /** Originating chat id, recorded as the Task's source. */
+  readonly chatId: string
+  /** Human-readable chat name, for the visible title only. */
+  readonly chatName?: string
+  /** Routed workspace id. */
+  readonly workspaceId: string
+  /** Filesystem path of the routed workspace; becomes the executor's cwd. */
+  readonly workspacePath: string
+  /** Rendered prompt: the trigger message plus its bounded chat context. */
+  readonly prompt: string
 }
 
 /** Result of accepting a user invocation. */
@@ -156,6 +181,110 @@ export class PetCoordinator {
           ? `workspace:${capture.sourceWorkspaceId ?? ''}`
           : 'independent:web:default'
     return this.withScope(scopeKey, () => this.admit(capture))
+  }
+
+  /**
+   * Accept a conversational Invocation raised by an inbound channel message.
+   *
+   * Unlike {@link accept} this pins no Skill: the trigger is a question, not a
+   * capability, so there is no name to fix, no `/<name>` token to lead the
+   * envelope with and nothing for the pre-dispatch Skill check to verify.
+   *
+   * The Task is workspace-resident — its executor works directly inside the
+   * routed workspace — and shares the ordinary per-Task serial queue, so
+   * several messages arriving in a row run one after another rather than
+   * concurrently over one session.
+   * @param request - Everything needed to admit the message.
+   * @returns the accepted Task and Invocation.
+   */
+  async acceptConversation(request: ConversationRequest): Promise<AcceptResult> {
+    // Same per-scope serialization as capability invocations: two messages
+    // arriving together must not both decide "no active Task" and each create
+    // one.
+    return this.withScope(request.scopeKey, () => this.admitConversation(request))
+  }
+
+  /** The admission-critical section for {@link acceptConversation}. */
+  private async admitConversation(request: ConversationRequest): Promise<AcceptResult> {
+    const { repository } = this.deps
+
+    // Idempotency: Lark redelivers unacknowledged events after a reconnect,
+    // and a duplicate would run the user's request a second time.
+    const existing = repository.getInvocation(request.invocationId)
+    if (existing !== undefined) {
+      const owner = repository.getTask(existing.taskId)
+      if (owner === undefined) throw new PetError('TASK_NOT_FOUND', 'Invocation lost its Task')
+      return { task: owner, invocation: existing, started: existing.status !== 'queued' }
+    }
+
+    // Create-or-reuse, healing a stale pointer rather than failing on it: an
+    // archived or vanished Task must not stop the next message from being
+    // answered.
+    let task = repository.findActiveTaskByScope(request.scopeKey)
+    if (task === undefined) {
+      task = await createTaskWithExecutor(repository, this.deps.agents, {
+        scopeKey: request.scopeKey,
+        sourceKind: 'chat',
+        sourceId: request.chatId,
+        ...(request.chatName !== undefined ? { sourceTitle: request.chatName } : {}),
+        // The ROUTED workspace, not the Pet workspace: this is what makes the
+        // Task workspace-resident. No workspace preparation runs there.
+        workspacePath: request.workspacePath,
+        residentWorkspaceId: request.workspaceId,
+        ...(this.deps.attachToWorkspace !== undefined
+          ? { attachToWorkspace: this.deps.attachToWorkspace }
+          : {}),
+        selection: this.deps.selection(),
+        // `setup` is still passed: it is what MOUNTS the preset, without which
+        // the executor gets no bash, no file tools — nothing but what plugins
+        // register globally. It receives the resident preset id and skips the
+        // Pet allowlist provider for this form, so the executor sees the
+        // Skills of the workspace it lives in.
+        ...(this.deps.executorSetup !== undefined ? { setup: this.deps.executorSetup } : {}),
+      })
+
+      if (this.deps.renameExecutor !== undefined) {
+        try {
+          await this.deps.renameExecutor(task.executorSessionId, titleForTask(task))
+        } catch {
+          // Title is a projection; stored association remains authoritative.
+        }
+      }
+    }
+
+    const now = Date.now()
+    const snapshot: PetSourceSnapshot = {
+      id: `snap-${randomUUID()}`,
+      invocationId: request.invocationId,
+      sourceKind: 'chat',
+      sourceWorkspaceId: request.workspaceId,
+      ...(request.chatName !== undefined ? { workspaceTitle: request.chatName } : {}),
+      cwd: request.workspacePath,
+      capturedAt: now,
+    }
+    await repository.putSnapshot(snapshot)
+
+    const invocation = await repository.appendInvocation({
+      id: request.invocationId,
+      taskId: task.id,
+      // Names the trigger kind for display. This is NOT a Skill id and
+      // resolves to no capability: a conversational Invocation pins none.
+      capabilityId: 'lark-message',
+      snapshotId: snapshot.id,
+      request: request.prompt,
+      status: 'queued',
+      createdAt: now,
+      updatedAt: now,
+      revision: 0,
+    })
+
+    const started = await this.pump(task.id)
+    const current = repository.getInvocation(invocation.id) ?? invocation
+    return {
+      task: repository.getTask(task.id) ?? task,
+      invocation: current,
+      started: started?.id === invocation.id,
+    }
   }
 
   /** The admission-critical section, serialized per scope by {@link accept}. */
@@ -288,9 +417,14 @@ export class PetCoordinator {
     // Fail closed BEFORE any state moves: the digest fixed at acceptance must
     // still resolve, or the envelope's leading `/<name>` token would be sent
     // for a Skill the Agent cannot legitimately load.
-    if (this.deps.verifySkill !== undefined) {
+    //
+    // A conversational Invocation pins no Skill and its envelope emits no
+    // `/<name>` token, so there is nothing to verify and skipping the check
+    // widens no boundary.
+    const pinnedSkill = next.skillName
+    if (this.deps.verifySkill !== undefined && pinnedSkill !== undefined) {
       try {
-        await this.deps.verifySkill(next.skillName)
+        await this.deps.verifySkill(pinnedSkill)
       } catch (error) {
         await repository.updateInvocation(next.id, undefined, current => ({
           ...current,
@@ -326,8 +460,10 @@ export class PetCoordinator {
 
     // Carry the free-text arguments the user configured for this Skill. Pet
     // does not parse them: they are appended after the skill token and the
-    // Skill's own instructions decide what they mean.
-    const registration = repository.getSkillRevision(next.skillName)
+    // Skill's own instructions decide what they mean. A conversational
+    // Invocation has no Skill and therefore no configured arguments.
+    const registration =
+      pinnedSkill === undefined ? undefined : repository.getSkillRevision(pinnedSkill)
     const text = renderEnvelope({
       task,
       invocation: next,

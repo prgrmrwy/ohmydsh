@@ -228,8 +228,10 @@ describe('overlay styles', () => {
 })
 
 describe('settings information architecture', () => {
-  it('exposes exactly the four stable tabs', () => {
-    expect(PET_SETTINGS_TABS).toEqual(['general', 'skills', 'env', 'diagnostics'])
+  it('exposes exactly the five stable tabs', () => {
+    // Channel joined the set when Lark inbound landed; it is a stable tab,
+    // not a conditional one, so an unbound channel still has a home.
+    expect(PET_SETTINGS_TABS).toEqual(['general', 'skills', 'env', 'channel', 'diagnostics'])
   })
 
   it('renders an accessible tablist', () => {
@@ -285,13 +287,15 @@ describe('settings information architecture', () => {
     expect(markup).not.toMatch(/<input[^>]*value="[^"]*"[^>]*\/>[\s\S]{0,40}Model/)
   })
 
-  it('documents channel secrets as future protected references only', () => {
+  it('never renders an input that could hold an app secret in cleartext', () => {
     const markup = renderToStaticMarkup(
-      createElement(PetSettingsSection, { initialTab: 'diagnostics' as const }),
+      createElement(PetSettingsSection, { initialTab: 'channel' as const }),
     )
 
-    expect(markup).toContain('not part of this phase')
-    expect(markup).toContain('never displayed')
+    // The secret field exists, but only as a password input: it is handed
+    // straight to lark-cli and never stored, so it must not be readable on
+    // screen either.
+    expect(markup).not.toContain('type="text" placeholder="App Secret')
   })
 
 })

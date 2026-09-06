@@ -9,6 +9,7 @@
 import {
   ROUTES,
   type PetCapability,
+  type PetChannelView,
   type PetEnvRecord,
   type PetLifecycleState,
   type PetWorkspaceChoice,
@@ -133,6 +134,27 @@ export const petApi = {
     action: 'set' | 'remove'
     value?: string
   }): Promise<{ entries: PetEnvRecord[] }> => call(ROUTES.petEnvMutate, input),
+  channel: (): Promise<PetChannelView> => call(ROUTES.channel),
+  mutateChannel: (input: {
+    action:
+      | 'set-enabled'
+      | 'set-allowlist'
+      | 'set-default-workspace'
+      | 'rebind-chat'
+      | 'remove-chat'
+      | 'reconnect'
+    enabled?: boolean
+    allowOpenIds?: readonly string[]
+    defaultWorkspaceId?: string
+    chatId?: string
+    workspaceId?: string
+  }): Promise<PetChannelView> => call(ROUTES.channelMutate, input),
+  bindBot: (input: {
+    action: 'create' | 'connect' | 'cancel'
+    appId?: string
+    /** Sent once, never stored client-side and never echoed back. */
+    appSecret?: string
+  }): Promise<PetChannelView> => call(ROUTES.channelBind, input),
   tasks: (): Promise<Record<string, unknown>> => call(ROUTES.tasks),
   taskDetail: (taskId: string): Promise<Record<string, unknown>> =>
     call(ROUTES.taskDetail, { taskId }),

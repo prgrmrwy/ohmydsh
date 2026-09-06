@@ -52,7 +52,39 @@ Prompt text is **not** an authorization boundary. Two mechanisms are:
 
 Pet never reads, copies or stores provider credentials. It records only the
 selected provider/model **ids**; authentication stays with the DSH provider and
-subscription plugins.
+subscription plugins. The same holds for Lark: the app secret lives in
+`lark-cli`, and Pet only ever passes one *through* to that CLI on stdin when
+connecting an existing bot.
+
+## Lark channel
+
+Pet can take work from Lark: mention the bound bot in a group, or message it
+directly, and Pet opens or reuses a session in the workspace that chat routes
+to. It is **off by default** and needs an explicit binding first.
+
+Four properties are worth knowing before enabling it:
+
+- **Admission fails closed and stays silent.** A message must pass an
+  open_id allowlist, a mention check (groups only), message-id deduplication
+  and a start-up watermark. Anything refused is dropped with a log line and
+  nothing else — no reaction, no reply — so a bot sitting in an unrelated
+  group never reveals that an agent stands behind it.
+- **Identity is proven, not guessed.** The bot's own open_id is learned from
+  the first group message, but only after the chat's member list ties it to
+  the bound `app_id`. A display name can be copied; an app id cannot.
+- **Chat-triggered Tasks are workspace-resident.** Their executor works
+  directly inside the routed workspace, so Pet's Skill projection and standing
+  instructions do **not** apply there — that workspace's own configuration
+  does. The trust boundary is the explicit route plus the sender allowlist.
+  Pet writes nothing into your repository.
+- **Outbound is Host-driven.** Reactions (working → done/failed) and the
+  direct-chat reply are applied by the Host when an Invocation settles, never
+  by the model, and their destination comes only from the stored binding.
+  Group chats get reactions but no text in this phase.
+
+Chat context is captured once at trigger time — up to 20 messages before and
+10 after — and goes into the prompt fenced as reference material, never into
+Pet's database.
 
 ## Skill installation and isolation
 
@@ -173,7 +205,7 @@ responses are redacted before they reach the browser.
 
 ## Settings
 
-Four stable tabs:
+Five stable tabs:
 
 - **General** — appearance/position reset, provider/model, default context policy
 - **Skills** — local import, enable/disable, shortcut visibility, run
@@ -181,7 +213,10 @@ Four stable tabs:
   this list starts empty
 - **Environment** — key/value pairs in a `global` scope and per source
   workspace, injected into executor shell calls as `DSH_PET_*`
-- **Diagnostics** — lifecycle, paths, allowlist, drift, explicit rebuild
+- **Channel** — Lark bot binding, permitted senders, default workspace and the
+  chat-to-workspace routes
+- **Diagnostics** — lifecycle, paths, allowlist, drift, explicit rebuild,
+  channel connection state
 
 The floating Pet and Task panel handle only quick execution, source
 confirmation and day-to-day Task operations. Installation, environment and
