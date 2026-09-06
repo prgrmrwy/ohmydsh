@@ -1121,20 +1121,40 @@ describe('preset terminology cannot be confused with Pet context', () => {
 describe('Host directory APIs are read from the right connection face', () => {
   // 0.1.2 removed the dsh-host-apiproxy `connection.api.host.*` proxy face;
   // the Host directory verbs now live on the typed Remote namespace
-  // `ctx.remote.directoryPicker`. The invariant these tests pin is unchanged:
-  // the client must read the face the installed library actually exposes, or
-  // both the picker and the browser silently degrade to "unsupported".
-  it('uses ctx.remote.directoryPicker, not the removed connection.api.host face', async () => {
+  // `directoryPicker`. The invariant these tests pin is unchanged: the client
+  // must read the face the installed library actually exposes, or both the
+  // picker and the browser silently degrade to "unsupported".
+  //
+  // Behaviour lives in `directory-picker-face.test.ts`, which composes real
+  // cordis. These remain source-level guards against the removed face
+  // reappearing.
+  it('does not read the removed connection.api.host face', async () => {
     const { readFile } = await import('node:fs/promises')
     const entry = await readFile(
       path.resolve(__dirname, '..', 'src', 'client', 'index.tsx'),
       'utf8',
     )
 
-    expect(entry).toContain("ctx.get('remote')")
     expect(entry).toContain('directoryPicker')
     expect(entry).not.toContain('connection?.api?.host')
     expect(entry).not.toContain('connection?.rpc?.host')
+  })
+
+  it('names the dotted namespace service rather than a property of `remote`', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const entry = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'index.tsx'),
+      'utf8',
+    )
+
+    // A Remote namespace is its own service keyed `remote.<namespace>`.
+    // Reaching it as a property of the `remote` service throws
+    // `cannot get property "remote.directoryPicker" without inject`, because
+    // the traceable proxy re-routes the dotted name through the context proxy.
+    expect(entry).toContain("get(\n      'remote.directoryPicker',\n    )")
+    // The broken form, ignoring the comment block that explains it.
+    const code = entry.replace(/^\s*\/\/.*$/gm, '')
+    expect(code).not.toContain("ctx.get('remote')")
   })
 
   it('matches the face the installed client library actually exposes', async () => {

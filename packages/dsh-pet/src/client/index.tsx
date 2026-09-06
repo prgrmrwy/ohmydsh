@@ -139,14 +139,34 @@ export function apply(ctx: ClientContext): void {
   // 0.1.2 note: the old `connection.api.host.*` proxy face was removed with
   // dsh-host-apiproxy; the same Host verbs now live on the `remote` service's
   // typed `directoryPicker` namespace (RemoteResult envelope, no `result`
-  // wrapper). Read lazily via `ctx.get` so a composition without the gateway
-  // degrades to "unsupported" instead of failing to load.
+  // wrapper). Read lazily so a composition without the gateway degrades to
+  // "unsupported" instead of failing to load.
+  //
+  // The namespace is a SERVICE OF ITS OWN, registered under the dotted name
+  // `remote.directoryPicker` (dsh-api-gateway's `remoteServiceKey`), not a
+  // plain property of `remote`. That distinction is load-bearing: reading
+  // `ctx.get('remote').directoryPicker` looks equivalent but is not. The value
+  // `ctx.get('remote')` returns is a cordis traceable proxy, and its `get` trap
+  // re-routes any property that is a registered `<service>.<name>` back through
+  // the CONTEXT proxy — which enforces `inject`. Pet does not (and must not)
+  // inject the namespace, so that path threw
+  // `cannot get property "remote.directoryPicker" without inject`, and the
+  // rejection escaped the click handler as an uncaught promise error.
+  //
+  // `ctx.get(name)` is the documented inject-free store read, so naming the
+  // dotted service directly keeps the lazy, degradable semantics intended here.
+  // Injecting it instead would make Pet's whole client half fail to load on a
+  // deployment that serves no directory picker.
   type RemoteDirectoryPicker = {
     pick?: (signal?: AbortSignal) => Promise<unknown>
     list?: (path: string | undefined, signal?: AbortSignal) => Promise<unknown>
   }
+  // `ctx.get` is typed against `keyof Context`, which cannot express a dotted
+  // namespace key; the cast is confined to this one lookup.
   const directoryPickerRemote = (): RemoteDirectoryPicker | undefined =>
-    (ctx.get('remote') as { directoryPicker?: RemoteDirectoryPicker } | undefined)?.directoryPicker
+    (ctx as unknown as { get(name: string): RemoteDirectoryPicker | undefined }).get(
+      'remote.directoryPicker',
+    )
   setDirectoryPicker(async () => {
     const pick = directoryPickerRemote()?.pick
     if (pick === undefined) return undefined
