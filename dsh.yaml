@@ -150,15 +150,6 @@ customizations:
     enabled: true
     brief: 订阅 provider 工具面 sandbox 字段与 Responses 历史配对清洗(shim)
     note: 'D001/upstream https://github.com/V1ki/dsh-plugin-subscriptions/issues/7 部署侧缓解;适配器边界两层剥离(schema 出站 + arguments 入站),并清理中断 subagent settlement notice 注入父会话的孤立 tool-call(避免 Codex No tool output found HTTP 400);默认只作用 codex/grok,配置见 packages/subscriptions-sandbox-shim/README.md;⚠ sandbox 字段剥离仅限 danger-full-access + approval: never 部署,受限部署(read-only/workspace-write + ask)必须 enabled: false(合法升级通道会被误剥);上游修复后按 manifest 删除移除'
-  # 第三方(remote):归档会话查看/恢复 — 官方只有 archiveSession 无 unarchive(上游 Discussion #2613 已知缺口)
-  - id: ui-archive-manager
-    type: package
-    source: remote
-    spec: '@tangzai/dsh-ui-archive-manager@0.1.1'
-    version: 0.1.1
-    enabled: false
-    brief: 归档会话查看与恢复(设置页「归档管理」)
-    note: '⚠ **2026-09-05 禁用(change dsh-0-1-2-host-api-migration)**:其 client bundle import dsh-client-runtime/client,该包在 DSH 0.1.2 线已被上游移除,导致 0.1.2 运行体上**整个浏览器端 client module loader 中止**(拖死所有插件的浏览器半区,由 dsh-cockpit 仓库 change adapt-dsh-012-typert-gateway 验收时实测发现;本仓库 4.3 验收当时只验了「模块被服务」未验「loader 执行成功」,已补教训)。**上游已修好但未发版**:`Neumannzc/dsh-archive-manager` main 分支 tip commit 06ea996「兼容最新版本」已把 `defineStore` 的 import 从已移除的 dsh-client-runtime/client 换到 `@deepseek-ai/dsh-client-store`(签名逐字节相同,host 半区零改动、信任面未扩大),版本亦已 bump 到 0.1.2-rc.1 —— 但 npm registry 仍只有 0.1.0/0.1.1,也未打 tag/release,故无可 pin 的发布物。**重新启用条件**:上游把 0.1.2-rc.1 发到 npm 后改 spec/version 并 enabled:true,复核发布物 + 跑「loader 可执行」审计(见 BACKLOG U003)。禁用不影响已归档会话数据(数据在 DSH 自有 session 存储),仅暂时失去取消归档的 UI 入口。原记录:repo https://github.com/Neumannzc/dsh-archive-manager(MIT);用途:设置 → 归档管理,按工作区列出已归档会话,一键取消归档回侧边栏继续原会话;审查(2026-08-19):host 端幂等补丁 WorkspaceRegistry.unarchiveSession(官方未来提供则让位),unarchive 走 registry 自身 enqueueOperation/requireState/setState 状态路径,经官方 archived-sessions-changed 帧广播;webServer 路由带信任防护(Host fence 防 DNS rebinding + Origin 校验 + 8KiB body cap);无删除/破坏性功能;仅 react peer;本地 clone 验证 typecheck + 17 单测 + build 全过(CI 红叉仅为 pnpm 忽略 esbuild 构建脚本的环境问题);⚠ TRUSTED_HOSTS 默认空 → 仅限 loopback(127.0.0.1/localhost);DSH 升级后需回归验证'
   - id: width-tiers
     type: package
     source: remote
@@ -233,3 +224,21 @@ customizations:
     enabled: true
     brief: 设置→通用「一键重启」(自重启:分离 helper 等旧进程退出后原样重拉)
     note: 'repo https://github.com/893413974-bit/dsh-setting-restart(MIT,maintainer david_birch <893413974@qq.com>,1.0.0 发布于 2026-08-18,当前为唯一版本);用途:设置 → 通用 底部一行「一键重启」按钮,免去回终端敲 dsh restart。审查(2026-09-04,npm 1.0.0 发布物逐文件通读,共 454 行 4 个 js):Host+Web bundle。**Host 面**:注册 settingRestart Cordis 服务,经 typert 严格 invocation 暴露单一无参端点 settingRestart/restart(结果为 strict 联合 codec,只有 {ok:true,{scheduled:true}} 与 {ok:false,{code,message}} 两支);调用后先 spawn 一个 detached+unref 的 relaunch.js helper,再延迟 exitDelayMs(默认 1200ms)执行 process.exit(0);helper 以 process.kill(pid,0) 每 250ms 轮询旧进程,确认消失(或到 waitForExitMs 默认 30s 上限)后用 execPath + 原 argv + 原 cwd + 原 env 重新 spawn,自身随即退出。**信任面**:全部 4 个文件无任何 fetch/http/net、无文件读写、无 shell 字符串拼接——spawn 一律传 argv 数组,不经 shell;无 install/postinstall 脚本;依赖仅 cordis/schemastery/zod/dsh-typert-protocol。可配置项 exitDelayMs / waitForExitMs / respawn 均带 schemastery 上下界;单机部署由 supervisor(systemd/pm2/包装脚本)托管时应设 respawn:false,否则会与 supervisor 重复拉起。**能力实质**:这是一个可由浏览器 UI 触发「终止并重拉 Host 进程」的端点,权限等价于本机 loopback RPC 可达者——本仓库其余插件无此形态,故单列于此;它不读凭据、不出网、不落盘,风险集中在"可被触发重启"本身而非数据外带。**与本机启动器的兼容性**:实测线上进程 argv 为自包含形式(node …/@deepseek-ai/dsh/lib/bin.js web --port 3080 --no-open),故 execPath+argv 原样重拉可复现同一命令;但 bin/dsh 的 start_server 会先做环境清洗(server_env_strip_args 剥离 npm_config_*)、record_startup 记录启动清单、并在就绪后 print_plugins——**自重启走的是进程自身 argv,不经 bin/dsh**,因此该路径不会刷新 dsh history 启动记录,也不重跑 autoUpdate 检测;需要完整启动语义时仍应用 dsh restart。⚠ 客户端半区 package.json 的 dsh.client.inject 声明了 @deepseek-ai/dsh-client-runtime(以及 dsh-api-remotes / dsh-client-ui-sidebar / dsh-client-ui-settings-general),而 client.js 运行时实际只 inject ["slots","locale","connection"];dsh-client-runtime 在 DSH 0.1.2 线已被上游移除,故本条目属于 change staged-dsh-and-plugin-upgrade 阶段四(运行体迁移)的回归对象,届时需复核其声明面与实际加载。'
+  # 第三方(remote):dsh-web 系皮肤/主题中心(按需子插件,不安装聚合全家桶)
+  - id: skin-center
+    type: package
+    source: remote
+    spec: '@linxin666/dsh-client-ui-skin-center@0.3.16'
+    version: 0.3.16
+    enabled: true
+    brief: 设置→皮肤中心(主题试穿/自定义主题/壁纸;默认 blue-fantasy)
+    note: 'repo https://github.com/zhu1090093659/dsh-web(Apache-2.0,活跃);2026-09-06 审查 npm 0.3.16 发布物与 README:兼容 DSH >=0.1.2-rc.1;Host+Web bundle,内置 blue-fantasy,支持原子试穿/应用、自定义明暗主题、$DSH_HOME/skins 用户皮肤及可选 Wallpaper Engine 本机媒体桥。安全面:同源 Host 路由、皮肤目录 containment、CSS 强制 scope 且拒绝 @import/远程 URL/越界路径;但用户皮肤 patches.css 具整页样式能力,hooks.mjs 属受信代码逃生口(仅内置或 provenance/字节身份核验通过的官方市场内容执行);会读取本机 Wallpaper Engine/Steam 库并提供同源媒体流。隐私:浏览器每日向 dsh-market.com 发送一次匿名安装心跳(随机 localStorage id + 包名;上游声明服务端仅存 salted hash、不存 IP);新装默认激活 blue-fantasy。未搭配 @linxin666/dsh-i18n:该包只增加俄语,与皮肤功能无关。'
+  # 第三方(remote):dsh-web 系会话归档管理(按需子插件,不安装聚合全家桶)
+  - id: session-archive
+    type: package
+    source: remote
+    spec: '@linxin666/dsh-session-archive@0.3.16'
+    version: 0.3.16
+    enabled: true
+    brief: 会话归档管理(批量归档/恢复/预览/物理删除;自动维护默认关闭)
+    note: 'repo https://github.com/zhu1090093659/dsh-web(Apache-2.0,活跃);2026-09-06 审查 npm 0.3.16 README + 发布包所带 TypeScript 源码:兼容 DSH >=0.1.2-rc.1,Node ^22.19 || >=24(本机 v24.20.0 满足);替代并已移除旧版 @tangzai/dsh-ui-archive-manager 0.1.1(旧 client runtime 不兼容),支持完整会话清单/筛选/预览、批量归档与恢复、父子级联物理删除。⚠ 物理删除不可恢复:会改 workspace/archive 状态并删除 session 目录或 session-rdb 行、projection cache 与自身 ledger;自动归档/自动删除默认均关闭,建议保持关闭并只手动使用。防护:当前/运行中/attached/in-flight 会话与含受保护成员的整族跳过;大批删除二次确认且 host 重新规划,路由要求 loopback socket + loopback Host + same-origin marker,ID/请求体有界,session 目录 realpath containment 且拒绝越界 symlink,SQLite 指纹校验,变更串行。审查保留意见:删除跨 archive marker/workspace/storage/cache/ledger 多步且部分清理 best-effort,并非真正原子事务;异常中断仍可能出现索引与存储暂时不一致,不要把上游“不会半删除”宣传视为绝对保证。旧 ui-archive-manager 已从 manifest 删除,无双挂载。'
