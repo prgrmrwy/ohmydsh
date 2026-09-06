@@ -36,6 +36,7 @@ import { PetLifecycleMachine } from './host/lifecycle.js'
 import { ensurePetDirectories, resolvePetPaths, type PetPaths } from './host/paths.js'
 import { rebuildProjection } from './host/projection.js'
 import { PetRepository } from './host/repository.js'
+import { ChannelService } from './host/channel/service.js'
 import { createPetRoutes } from './host/routes.js'
 import { createPetEnvContributor } from './host/shell-env.js'
 import { createPetSkillProvider, resolveInvocationSkill } from './host/skill-provider.js'
@@ -322,8 +323,30 @@ async function initialize(
    * happens inside `setup`, which the factory awaits before the session and
    * agent are published, so it exists before the first prompt is assembled.
    */
-  const executorSetup = (agentCtx: unknown): void => {
+  const executorSetup = async (agentCtx: unknown, presetId?: string): Promise<void> => {
     const scoped = agentCtx as Context
+
+    // MOUNT THE PRESET FIRST. `meta.agentPreset` only records a name on the
+    // session header for display and reconstruction — it composes nothing.
+    // The plugins a preset names (bash, fs, search, jobs, …) exist only after
+    // `agentPresets.mount` runs here, inside the agent factory's `setup`.
+    //
+    // Pet ran for its whole first phase without this call, so every executor
+    // saw ONLY the tools plugins register globally — five of them — while its
+    // header claimed a preset. That was invisible while Pet's capabilities
+    // were Skills carrying their own tools; a resident executor asked to read
+    // a repository or run a command has nothing to work with.
+    // See docs/notes/dsh-plugin-integration-pitfalls.md §1.
+    //
+    // Failure rolls the agent creation back by contract, which is the right
+    // outcome: a half-composed executor would fail later and less legibly.
+    await ctx.agentPresets.mount(scoped as never, presetId as never)
+    // A resident executor stops here. Pet's allowlist provider exists to make
+    // the Skill surface exactly Pet's own list; this form promises the
+    // opposite — the Skills of the workspace it runs in — so installing it
+    // would contradict the boundary the spec says Pet does NOT claim here.
+    if (presetId !== undefined && presetId !== PET_EXECUTOR_PRESET) return
+
     // The agent context is a FRESH fiber: it does not inherit this plugin's
     // inject grants, so reading `scoped.skills` directly throws
     // `cannot get property "skills" without inject`. `ctx.inject` declares the
@@ -505,8 +528,12 @@ async function initialize(
     // Account each executor to the Pet Workspace. Creating it with the right
     // `cwd` is not enough: DSH accounts sessions explicitly, so without this
     // the executor never appears under DSH Pet in the sidebar.
-    attachToWorkspace: async sessionId => {
-      const workspace = ctx.workspaceRegistry.get(workspaceId as never)
+    attachToWorkspace: async (sessionId, targetWorkspaceId) => {
+      // Falls back to the Pet workspace, which is where an ordinary executor
+      // belongs; a resident Task passes the workspace it actually runs in, so
+      // it is filed under that project instead of appearing unfiled.
+      const target = targetWorkspaceId ?? workspaceId
+      const workspace = ctx.workspaceRegistry.get(target as never)
       await workspace?.attachSession(sessionId as never)
     },
     ensureWorkspace: async () => {
@@ -532,6 +559,26 @@ async function initialize(
   // Project Task/Invocation state from the durable session event firehose.
   // Without this nothing ever settles an Invocation: it would stay `running`
   // forever even after its turn completed.
+  // The Lark channel. Composed as one unit so it can be absent entirely, and
+  // built AFTER the coordinator it drives. Nothing here can reject into
+  // startup: a channel that cannot run leaves the rest of Pet untouched.
+  const channel = new ChannelService({
+    repository,
+    coordinator,
+    locator: {
+      locate: workspaceId => {
+        const match = ctx.workspaceRegistry
+          .list()
+          .find((item: { id: string }) => item.id === workspaceId) as
+          | { path?: string }
+          | undefined
+        return match?.path
+      },
+    },
+    onChange: () => changes.publish(),
+    log: message => ctx.logger.info(message),
+  })
+
   ctx.effect(
     () =>
       ctx.on('session/event', (session: { id: unknown }, event: { type: string; data?: unknown }) => {
@@ -556,14 +603,27 @@ async function initialize(
         }
         if (event.type !== 'turn/end') return
 
+        // Resolved by PENDING FEEDBACK, not by the serial slot: the slot only
+        // holds `running`/`waiting-user`, and by the time `turn/end` arrives
+        // the Invocation has usually already settled — asking for the slot
+        // returned nothing, so the in-progress reaction was never removed and
+        // both marks stayed on the message.
+        const settlingTask = repository.findTaskByExecutor(executorSessionId)
+        const settling =
+          settlingTask === undefined
+            ? undefined
+            : repository.findPendingChannelFeedback(settlingTask.id)?.invocationId
+
         const reason = (event.data as { reason?: { kind?: string; error?: { message?: string } } })
           ?.reason
         switch (reason?.kind) {
           case 'completed':
             void coordinator.onAgentEvent(executorSessionId, { kind: 'turn-complete' })
+            if (settling !== undefined) void channel?.settle(settling, 'succeeded')
             return
           case 'aborted':
             void coordinator.onAgentEvent(executorSessionId, { kind: 'cancelled' })
+            if (settling !== undefined) void channel?.settle(settling, 'failed')
             return
           default:
             // `failed`, `blocked` and any future reason settle as a failure
@@ -572,6 +632,7 @@ async function initialize(
               kind: 'turn-error',
               message: reason?.error?.message ?? `turn ended: ${reason?.kind ?? 'unknown'}`,
             })
+            if (settling !== undefined) void channel?.settle(settling, 'failed')
         }
       }),
     'dsh-pet: project Invocation state from session events',
@@ -596,6 +657,7 @@ async function initialize(
     archiveSink,
     inspectWorkspace: () => inspectWorkspace(paths),
     repairWorkspace: () => repairWorkspace(paths),
+    channel,
     listPresets: async () => {
       // Enumerate what this Host actually offers; a free-text preset name
       // could name a composition that does not exist.
@@ -632,8 +694,60 @@ async function initialize(
     )
   }
 
+  // Starts only when configuration says the channel is enabled, and stops
+  // with Pet: the consumer gets SIGTERM so lark-cli can clean up its
+  // server-side subscription. The shared bus daemon is left alone — it is not
+  // ours and other lark-cli users may still be attached.
+  ctx.effect(() => {
+    channel.start()
+    return () => channel.stop()
+  }, 'dsh-pet: lark channel subscription')
+
   lifecycle.markReady()
   ctx.logger.info(`dsh-pet ready (state: ${paths.stateRoot})`)
+}
+
+/**
+ * Read the last assistant message text from a session's event log.
+ *
+ * Currently unused by the channel: replying is the agent's own job, so no
+ * Host-side path needs the transcript tail. Kept and tested because reading
+ * this shape correctly is easy to get wrong (see the note referenced below)
+ * and a future model-driven reply tool will need exactly this.
+ *
+ * The shape is `assistant/message` events carrying
+ * `data.message.content[]` (verified against a real log; see
+ * docs/notes/dsh-plugin-integration-pitfalls.md §4), where the readable
+ * answer is the `text` parts —
+ * `reasoning` and `tool-call` parts sit in the same array and must not be
+ * sent to a chat. Returns `undefined` rather than guessing when nothing
+ * readable is present, in which case no reply is sent at all.
+ * @param events - The session's event log.
+ * @returns the final assistant text, or `undefined`.
+ */
+export function latestAssistantText(events: readonly unknown[]): string | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index] as
+      | { type?: string; data?: { message?: { role?: unknown; content?: unknown } } }
+      | undefined
+    if (event?.type !== 'assistant/message') continue
+    const message = event.data?.message
+    if (message?.role !== 'assistant') continue
+    const content = message.content
+    if (!Array.isArray(content)) continue
+
+    const parts: string[] = []
+    for (const part of content) {
+      if (typeof part !== 'object' || part === null) continue
+      const entry = part as { type?: unknown; text?: unknown }
+      // `text` only: reasoning is the model thinking aloud and a tool-call is
+      // machinery, neither of which belongs in a chat reply.
+      if (entry.type !== 'text') continue
+      if (typeof entry.text === 'string' && entry.text.trim() !== '') parts.push(entry.text)
+    }
+    if (parts.length > 0) return parts.join('\n\n')
+  }
+  return undefined
 }
 
 /**

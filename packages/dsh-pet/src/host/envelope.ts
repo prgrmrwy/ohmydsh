@@ -52,9 +52,15 @@ export function renderEnvelope(options: {
 
   // The leading token drives the real Skill injection path. Configured
   // arguments ride on the same line, exactly as if the user had typed them.
-  const args = options.skillArguments?.trim() ?? ''
-  lines.push(args === '' ? `/${invocation.skillName}` : `/${invocation.skillName} ${args}`)
-  lines.push('')
+  //
+  // A conversational Invocation pins no Skill, so it emits NO token: writing
+  // a bare `/undefined` would reach the Agent as ordinary prose and read as a
+  // malformed command.
+  if (invocation.skillName !== undefined) {
+    const args = options.skillArguments?.trim() ?? ''
+    lines.push(args === '' ? `/${invocation.skillName}` : `/${invocation.skillName} ${args}`)
+    lines.push('')
+  }
 
   lines.push(options.isFirst ? '## Pet 任务开始' : '## 下一次 Pet 调用')
   lines.push('')

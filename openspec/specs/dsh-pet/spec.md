@@ -95,7 +95,7 @@ hover Pet 本体或等价键盘操作 SHALL 展开轮盘；指向 Pet 本体之�
 
 Pet Task 归档后 MUST NOT 再接收新 Invocation。用户在同一来源 scope 再次使用 Pet 时，系统 SHALL 创建新的 Task epoch 和新的 executor session，并保留旧 Task 的历史。
 
-来源 scope SHALL 至少支持：指定 DSH session、指定 DSH workspace 和无关联的独立 scope。不同 scope 的 Task MUST NOT 被错误复用。
+来源 scope SHALL 至少支持：指定 DSH session、指定 DSH workspace、无关联的独立 scope，以及外部 channel 会话（如飞书 chat）。不同 scope 的 Task MUST NOT 被错误复用；两个不同 channel 会话即使路由到同一 workspace 也属于不同 scope。
 
 #### Scenario: 在同一 source session 多次调用能力
 - **WHEN** 用户在同一 DSH source session 依次调用 Create MR、Send CR 和 Clean Worktree，且其 Pet Task 未归档
@@ -108,6 +108,10 @@ Pet Task 归档后 MUST NOT 再接收新 Invocation。用户在同一来源 scop
 #### Scenario: 不同来源分别调用 Pet
 - **WHEN** 两个不同 DSH sessions 各自调用 Pet
 - **THEN** 系统为两个 source scope 分别维护活跃 Pet Task，不共享 executor session 或当前 Invocation
+
+#### Scenario: channel 会话构成独立 scope
+- **WHEN** 一个飞书群与一个本机浮层 workspace 来源分别触发同一 workspace 上的工作
+- **THEN** 两者各自维护独立的活跃 Pet Task，互不复用 executor session
 
 ### Requirement: 每次主动调用在发起位置捕获独立快照
 
@@ -155,7 +159,11 @@ session 时，系统 MUST NOT 隐式绑定最近使用的 session，而 SHALL �
 
 ### Requirement: Pet Task 使用专用 Workspace 中的普通 DSH executor session
 
-系统 SHALL 确保存在一个标题可识别的 `DSH Pet` Workspace，其路径位于 Pet 持久状态目录而非插件安装目录。每个 Pet Task SHALL 固定关联该 Workspace 下的一个普通 DSH root session，并复用同一 DSH Host 已装配的 Agent Loop、Skills、Tools、交互能力和 LLM provider；executor session SHALL 在原生 DSH 列表中可见并可打开。
+系统 SHALL 确保存在一个标题可识别的 `DSH Pet` Workspace，其路径位于 Pet 持久状态目录而非插件安装目录。浮层触发的 Pet Task SHALL 固定关联该 Workspace 下的一个普通 DSH root session，并复用同一 DSH Host 已装配的 Agent Loop、Skills、Tools、交互能力和 LLM provider；executor session SHALL 在原生 DSH 列表中可见并可打开。
+
+系统 SHALL 另支持 workspace-resident Task 形态：executor session 是路由目标 workspace 下的普通 DSH root session，其工作目录即该 workspace，且 SHALL 被登记到该目标 workspace（而非 Pet Workspace），使其在原生会话列表中归属于对应项目而不是显示为未分类。此形态 SHALL 仅由用户显式建立或显式可改的 channel 路由触发，信任来源是该显式路由加发送者 allowlist。
+
+此形态下 Pet MUST NOT 承诺 Pet Skill allowlist 投影与 standing instructions 边界——目标 workspace 自身的 Skill 目录与 Agent 指令生效。为与该承诺一致，系统 MUST NOT 为此形态施加 Pet 专用 executor preset，也 MUST NOT 安装 Pet 的 allowlist Skill provider：两者的作用都是把 Skill 面收窄为 Pet 的清单，与「使用目标 workspace 自身能力」直接矛盾。此形态 SHALL 显式使用 DSH 的 `standard` preset——而非省略 preset：未指定的 preset 不会记录在会话头上，会使该会话在原生界面中显示不出任何模式。Pet MUST NOT 向目标 workspace 仓库写入任何投影、指令或状态文件。
 
 创建 executor session 后，系统 SHALL 按 Pet 配置选择 Pet Agent composition 与模型。当前 Web profile 已注册的 subscription provider SHALL 可被 Pet executor session 正常选择，Pet MUST NOT 读取、复制或另行保存 provider token。模型或 Pet composition 不可用时 SHALL 让 Task 进入可诊断失败/等待配置状态，不得创建伪成功结果。
 
@@ -174,6 +182,23 @@ session 时，系统 MUST NOT 隐式绑定最近使用的 session，而 SHALL �
 #### Scenario: Pet Workspace 尚不存在
 - **WHEN** 第一次创建 Pet Task 且 `DSH Pet` Workspace 尚未注册
 - **THEN** 系统在 Pet 状态目录准备稳定 workspace 路径并幂等注册后再创建 executor session
+
+#### Scenario: channel 触发创建 workspace-resident executor
+- **WHEN** 飞书触发经路由命中 nexus workspace 且该 chat 无活跃 Task
+- **THEN** 系统在 nexus workspace 创建普通 executor session，该 session 使用 nexus 自身的 Skill 与 Agent 指令，Pet 不向 nexus 仓库写入任何文件
+
+#### Scenario: workspace-resident 不伪造投影边界
+- **WHEN** 用户在 Diagnostics 查看一个 workspace-resident Task
+- **THEN** 系统如实展示其形态与信任来源（显式路由 + allowlist），不显示 Pet Skill 投影对其生效
+
+#### Scenario: resident session 归属目标项目
+- **WHEN** 飞书触发在 nexus workspace 创建 executor session
+- **THEN** 该 session 在原生会话列表中归属 nexus，而非归属 Pet Workspace 或显示为未分类
+
+#### Scenario: resident 形态使用 workspace 自身能力
+- **WHEN** 系统为 resident Task 创建 executor
+- **THEN** 使用 `standard` preset、不安装 Pet allowlist Skill provider，
+      executor 可用的 Skill 由其所在 workspace 决定，且该会话在原生界面显示为标准模式
 
 ### Requirement: Executor session 明确展示与 source 和 Task 的关系
 
@@ -304,6 +329,16 @@ Skill。
 一期 SHALL 以两项能力验证该形态：`ws`（既有，Worktree Session 维护）与 `send-cr`
 （新增）。Create MR 不属于一期范围。
 
+系统 SHALL 另支持**对话式 Invocation**：由入站 channel 消息发起、不绑定任何 Skill
+的调用。此类 Invocation MUST NOT 固定 skill 名称、来源路径或 skill-set 代际，其
+envelope MUST NOT 发出 `/<skill-name>` 前导令牌，派发前的 Skill 校验 SHALL 因无可
+校验对象而跳过。这 MUST NOT 被解读为放宽 Skill 边界：对话式 Invocation 不引用任何
+Skill，因此不存在被绕过的授权检查；executor 可用的 Skill 面仍由其所在 workspace
+决定（workspace-resident 形态下即该 workspace 自身的 Skill）。
+
+Pet MUST NOT 为对话式 Invocation 自带、声明或隐式创建"内置 Skill"或伪能力来充当
+占位；无 Skill 就是无 Skill。
+
 Pet SHALL 允许 Agent 参与现场检查、信息补全、结果生成和用户澄清，但清理 worktree、
 发送外部消息等副作用 SHALL 通过确定性、有界且可审计的工具或现有安全门禁执行。
 
@@ -334,6 +369,15 @@ SHALL 自行在执行开始时校验（在 Pet 中运行时经 `pet_context` 获
 - **WHEN** Pet 首次启动且用户尚未导入任何 Skill
 - **THEN** 能力列表为空，用户需显式导入并启用后能力才出现
 
+#### Scenario: 飞书消息发起对话式 Invocation
+- **WHEN** allowlist 用户在已绑定的会话中触发一次分析请求
+- **THEN** Pet 创建不绑定 Skill 的 Invocation，其 envelope 不含 `/<skill-name>`
+      令牌，派发不因缺少 Skill 而失败
+
+#### Scenario: 对话式 Invocation 不产生占位能力
+- **WHEN** 用户在 Pet 设置的 Skills 页查看能力列表，且已发生过 channel 触发
+- **THEN** 列表中不出现任何 Pet 自带的对话或占位能力条目
+
 ### Requirement: Task 与 DSH session 归档语义保持一致且不误删历史
 
 归档 source session SHALL 只更新 Pet 中的来源可用状态，不得自动归档其 Pet Task。归档已进入终态的 executor session SHALL 自动归档对应 Pet Task；从 Pet 面板归档终态 Task SHALL 同步归档其 executor session。running 或 waiting-user Task MUST NOT 因 executor session 被归档而从活跃列表消失或被隐式取消。
@@ -356,14 +400,15 @@ SHALL 自行在执行开始时校验（在 Pet 中运行时经 `pet_context` 获
 - **WHEN** 用户对 waiting-user Task 发起归档但未确认取消
 - **THEN** 系统不归档 Task、不取消 Invocation，并提示需要先处理或取消当前工作
 
-### Requirement: Pet 设置采用固定的四页签信息架构且不接触 provider 凭据
+### Requirement: Pet 设置采用固定的页签信息架构且不接触 provider 凭据
 
-系统 SHALL 在 DSH Settings 注册独立 Pet section，并固定包含以下四个页签：
+系统 SHALL 在 DSH Settings 注册独立 Pet section，并固定包含以下五个页签：
 
 - **General**：Pet 外观/位置重置、默认 Agent composition、provider/model、新 Task 使用的默认上下文策略；
 - **Skills**：Skill 列表、本地目录导入、已安装版本、启用/禁用、快捷能力可见性、升级/卸载和 Workspace 投影同步状态；
 - **环境变量**：按全局与来源 workspace 两个作用域配置的键值，经官方 `ctx.shellEnv` 以 `DSH_PET_*` 注入 Pet executor 的每次 shell 调用；
-- **Diagnostics**：Host 生命周期、状态/Workspace/Skill store 与投影路径、版本摘要、同步漂移、依赖可用性以及显式修复/重建投影操作。
+- **Channel**：bot 绑定入口（创建新 Bot / 连接已有 Bot）与已绑定身份摘要、channel 启用开关、发送者 allowlist、default workspace、chat 到 workspace 的绑定列表（含自动写回的绑定行）与改绑/删除操作；
+- **Diagnostics**：Host 生命周期、状态/Workspace/Skill store 与投影路径、版本摘要、同步漂移、依赖可用性、channel 连接状态与队列深度，以及显式修复/重建投影/重连操作。
 
 环境变量页签 SHALL 提供全局与 workspace 两个作用域的编辑入口：全局配置对所有 Pet
 Task 生效，workspace 配置只对该来源生效并**覆盖**同名的全局配置；两者都没有时该
@@ -372,13 +417,35 @@ Task 生效，workspace 配置只对该来源生效并**覆盖**同名的全局�
 变量名，使用户知道在 Skill 中如何引用。系统 MUST NOT 为此引入自定义模板语法：
 Skill 侧就是普通的 `$DSH_PET_<KEY>` 环境变量引用。
 
-Pet 浮层与 Task 面板 SHALL 只提供快捷能力执行、调用前来源确认以及 Task/Invocation 的日常操作；它们 MUST NOT 承担 Skill 安装、版本管理、环境变量编辑或完整诊断配置。浮层 SHALL 提供进入相应 Settings 页签的明确入口。
+Pet 浮层与 Task 面板 SHALL 只提供快捷能力执行、调用前来源确认以及 Task/Invocation 的日常操作；它们 MUST NOT 承担 Skill 安装、版本管理、环境变量编辑、channel 配置或完整诊断配置。浮层 SHALL 提供进入相应 Settings 页签的明确入口。
 
-Pet SHALL 显示 provider/model 可用性，但 MUST NOT 读取、回传或保存 subscription token 和其它 provider credentials。环境变量页保存的值 MUST NOT 被当作凭据保管机制，页面 SHALL 提示其会进入子进程环境。配置写入失败 SHALL 保留用户输入并显示错误；需要重启才生效的配置 SHALL 明确提示。敏感 channel 字段在未来加入时 SHALL 以 secret reference 或等价受保护机制保存，管理读取不得回显明文。
+channel 尚未绑定 bot 时，浮层的提示区 SHALL 显示一条通向 Channel 页签的引导，且该
+引导 SHALL 可被用户永久关闭——channel 是可选增强，不使用它的用户 MUST NOT 被长期
+提示。关闭该引导 MUST NOT 影响 Channel 页签本身的可用性：绑定入口 SHALL 始终可从
+Settings 到达。提示区同时具备多条引导资格时 SHALL 只显示一条，且 Skill 引导优先于
+channel 引导——没有任何能力的 Pet 首先需要的是 Skill。
+
+#### Scenario: 已配置 Skill 但未绑定 Bot
+- **WHEN** 用户已启用至少一个 Skill 且尚未绑定飞书 bot，展开轮盘
+- **THEN** 提示区显示通向 Channel 页签的绑定引导
+
+#### Scenario: 既无 Skill 也未绑定 Bot
+- **WHEN** 全新安装的 Pet 展开轮盘
+- **THEN** 提示区只显示添加 Skill 的引导，不同时显示 channel 引导
+
+#### Scenario: 关闭 channel 引导后仍可绑定
+- **WHEN** 用户关闭浮层的 channel 引导，随后改变主意想绑定 bot
+- **THEN** 浮层不再显示该引导，Settings 的 Channel 页签仍提供完整绑定入口
+
+#### Scenario: 绑定完成后引导消失
+- **WHEN** 用户完成 bot 绑定
+- **THEN** 浮层不再显示 channel 引导，无需用户手动关闭
+
+Pet SHALL 显示 provider/model 可用性，但 MUST NOT 读取、回传或保存 subscription token 和其它 provider credentials。环境变量页保存的值 MUST NOT 被当作凭据保管机制，页面 SHALL 提示其会进入子进程环境。Channel 页 MUST NOT 展示或保存任何飞书凭据。配置写入失败 SHALL 保留用户输入并显示错误；需要重启才生效的配置 SHALL 明确提示。敏感 channel 字段在未来加入时 SHALL 以 secret reference 或等价受保护机制保存，管理读取不得回显明文。
 
 #### Scenario: 打开 Pet 设置
 - **WHEN** 用户从 Pet 浮层或 DSH Settings 打开 Pet 配置
-- **THEN** 用户看到 General、Skills、环境变量、Diagnostics 四个稳定页签，并能在 Skills 页完成安装、启用和投影诊断而无需进入 Task 执行面板
+- **THEN** 用户看到 General、Skills、环境变量、Channel、Diagnostics 五个稳定页签，并能在 Skills 页完成安装、启用和投影诊断而无需进入 Task 执行面板
 
 #### Scenario: Skill 投影发生漂移
 - **WHEN** Diagnostics 检测到已启用 allowlist 与 Workspace `.dsh/skills` 投影摘要不一致
@@ -404,13 +471,17 @@ Pet SHALL 显示 provider/model 可用性，但 MUST NOT 读取、回传或保�
 - **WHEN** 用户提交不合法的 key 或空 value
 - **THEN** 系统拒绝写入、保留表单输入并指出无效字段
 
-### Requirement: 一期由 ohmydsh 管理部署且不改变 Cockpit 和外部 transport 边界
+#### Scenario: 在 Channel 页改绑一个群
+- **WHEN** 用户把一个此前自动绑定到 default workspace 的群改绑到另一个已注册 workspace
+- **THEN** 后续该群的触发路由到新 workspace，改绑行标记为用户显式绑定
 
-本仓 SHALL 在 `packages/dsh-pet/` 保存一期插件源码，并以 `dsh.yaml` 中一个可逆的 local package customization 作为本机 profile 安装、启用和禁用的唯一真相源。sync/build SHALL 幂等物化该插件且不得把 Pet runtime database、Skill store、Workspace、生成 profile 或 package `lib/` 当作应提交源码。插件包本身 SHALL 保持可独立安装，运行时 MUST NOT 依赖 ohmydsh 脚本。
+### Requirement: 由 ohmydsh 管理部署且保持 Cockpit 与跨设备边界
 
-一期 Pet SHALL 仅在其所在 DSH 设备内创建 Task 和 executor session，不修改 dsh-cockpit 仓，不新增 Cockpit 对 DSH 的写代理，不修改 `dsh-cockpit-bridge` 只上报 active session ID 的契约，也不实现飞书入站 transport、同 bot 多设备竞争或 Cockpit Pet Hub。跨设备 Pet 聚合、设备路由、共享 Bot 或 Pet Hub SHALL 在需求出现时由 dsh-cockpit 的独立 change 负责。
+本仓 SHALL 在 `packages/dsh-pet/` 保存插件源码，并以 `dsh.yaml` 中一个可逆的 local package customization 作为本机 profile 安装、启用和禁用的唯一真相源。sync/build SHALL 幂等物化该插件且不得把 Pet runtime database、Skill store、Workspace、生成 profile 或 package `lib/` 当作应提交源码。插件包本身 SHALL 保持可独立安装，运行时 MUST NOT 依赖 ohmydsh 脚本。
 
-系统的持久模型 SHALL 允许未来为 Pet Task/Invocation增加可信 Channel Binding。未来外部回复能力 MUST 根据调用 executor session 和当前 Invocation 解析绑定目标，MUST NOT 接受模型生成的任意 chat/thread/user ID；该演进约束不要求一期提供可见 channel 功能。
+Pet SHALL 仅在其所在 DSH 设备内创建 Task 和 executor session，不修改 dsh-cockpit 仓，不新增 Cockpit 对 DSH 的写代理，不修改 `dsh-cockpit-bridge` 只上报 active session ID 的契约，也不实现同 bot 多设备竞争或 Cockpit Pet Hub。飞书入站 transport SHALL 按 `pet-lark-channel` 规范经本机 lark-cli 提供，MUST NOT 引入 lark-agent-bridge 或其它外部 bridge 运行时依赖。跨设备 Pet 聚合、设备路由、共享 Bot 或 Pet Hub SHALL 在需求出现时由 dsh-cockpit 的独立 change 负责。
+
+系统的持久模型 SHALL 为 channel 触发的 Invocation 保存可信 Channel Binding（chat、触发消息、发送者、表情标识）。外部回复能力 MUST 根据调用 executor session 和当前 Invocation 解析绑定目标，MUST NOT 接受模型生成的任意 chat/thread/user ID；本 change 内唯一的外部文字出站是 Host 侧单聊自动回复，模型主动回复工具由后续 change 承接。
 
 #### Scenario: ohmydsh 重复物化 Pet customization
 - **WHEN** 用户在相同 manifest 和源码下连续运行两次 sync/build
@@ -420,7 +491,7 @@ Pet SHALL 显示 provider/model 可用性，但 MUST NOT 读取、回传或保�
 - **WHEN** 用户通过 Cockpit iframe 使用已安装 Pet 的设备
 - **THEN** Pet 在该设备原生 DSH 页面内运行，Cockpit 仍不代理 Pet executor RPC、settings 或 provider credentials
 
-#### Scenario: 一期没有 Channel Binding
-- **WHEN** Agent 请求回复外部会话但当前一期部署没有 channel 能力
-- **THEN** 系统明确报告能力不存在，不允许 Agent 通过任意目标标识绕过边界
+#### Scenario: 模型请求任意外部回复目标
+- **WHEN** Agent 在 executor session 中试图以自由文本指定一个 chat/thread/user ID 要求回复
+- **THEN** 系统不存在接受该标识的通道，任何出站回复目标只能来自当前 Invocation 持久化的 Channel Binding
 

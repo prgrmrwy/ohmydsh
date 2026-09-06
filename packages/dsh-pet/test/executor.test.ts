@@ -279,9 +279,39 @@ describe('recoverable executor creation', () => {
       setup,
     })
 
+    // Invoked, not identical: the callback is wrapped so it also receives the
+    // preset id it must MOUNT — naming a preset in `meta` composes nothing.
     const call = (agents.create as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
-    expect(call.setup).toBe(setup)
+    await call.setup({})
+    expect(setup).toHaveBeenCalledWith({}, 'pet')
     expect(call.meta.agentPreset).toBe('pet')
+  })
+
+  it('asks setup to mount the same preset the header records', async () => {
+    harness = await openPetHarness()
+    const target = await mkdtemp(path.join(tmpdir(), 'nexus-'))
+    const agents = fakeAgents()
+    const setup = vi.fn()
+
+    await createTaskWithExecutor(harness.repository, agents, {
+      scopeKey: 'chat:oc_x',
+      sourceKind: 'chat',
+      sourceId: 'oc_x',
+      workspacePath: target,
+      residentWorkspaceId: 'ws-nexus',
+      selection: {
+        providerId: 'anthropic',
+        modelId: 'claude-opus-5',
+        agentPreset: 'dsh-pet-executor',
+      },
+      setup,
+    })
+
+    // What the session claims and what it actually composes must not drift.
+    const call = (agents.create as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
+    await call.setup({})
+    expect(call.meta.agentPreset).toBe('standard')
+    expect(setup).toHaveBeenCalledWith({}, 'standard')
   })
 })
 
