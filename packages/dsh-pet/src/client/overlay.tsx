@@ -67,6 +67,15 @@ type Mode = 'closed' | 'menu' | 'panel'
 const CHANNEL_HINT_DISMISSED_KEY = 'dshpet.channelHintDismissed'
 
 /**
+ * How long a success receipt stays on screen.
+ *
+ * Long enough to read a sentence, short enough that it never becomes part of
+ * the furniture: the note is absolutely positioned and would otherwise cover
+ * whatever sits beneath the wheel for the rest of the session.
+ */
+const NOTICE_DISMISS_MS = 6000
+
+/**
  * The Pet overlay surface.
  * @param props - Live DSH facts and navigation callbacks.
  * @returns the rendered overlay.
@@ -100,8 +109,19 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
    * A built-in action can succeed in two visibly different ways — creating a
    * QA group or handing back the existing one — and reporting that through
    * the error channel would dress a normal result as a failure.
+   *
+   * Auto-dismissed, unlike `error`: a receipt has been read the moment it is
+   * seen, and one that lingers becomes furniture that covers whatever sits
+   * below it. An error, by contrast, waits for the next attempt.
    */
   const [notice, setNotice] = useState<string | undefined>(undefined)
+  useEffect(() => {
+    if (notice === undefined) return
+    const timer = setTimeout(() => setNotice(undefined), NOTICE_DISMISS_MS)
+    // Cleared on replacement too, so a second notice restarts the clock
+    // instead of inheriting the remainder of the first one's.
+    return () => clearTimeout(timer)
+  }, [notice])
   const [busy, setBusy] = useState(false)
   const [hovered, setHovered] = useState<string | undefined>(undefined)
   const [sourceRemoved, setSourceRemoved] = useState(false)
@@ -644,7 +664,9 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
             </p>
           ) : null}
           {error !== undefined ? <p className="dshpet-wheel-note dshpet-error">{error}</p> : null}
-          {notice !== undefined ? <p className="dshpet-wheel-note">{notice}</p> : null}
+          {notice !== undefined ? (
+            <p className="dshpet-wheel-note dshpet-wheel-receipt">{notice}</p>
+          ) : null}
         </div>
       ) : null}
 

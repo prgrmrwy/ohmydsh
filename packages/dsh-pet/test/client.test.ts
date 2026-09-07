@@ -1582,3 +1582,32 @@ describe('the built-in Q&A action is wired end to end', () => {
     expect(settings).toContain('已失效')
   })
 })
+
+
+describe('a success receipt does not become furniture', () => {
+  it('auto-dismisses instead of waiting for the next click', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // Clearing it only on the next action left it on screen indefinitely,
+    // covering whatever sat below the wheel.
+    expect(overlay).toContain('NOTICE_DISMISS_MS')
+    expect(overlay).toContain('setNotice(undefined)')
+  })
+
+  it('does not intercept pointer events while visible', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const styles = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'styles.ts'),
+      'utf8',
+    )
+
+    // The note is absolutely positioned; a receipt that also swallowed clicks
+    // would block the controls underneath it.
+    expect(styles).toContain('dshpet-wheel-receipt')
+    expect(styles).toContain('pointer-events:none')
+  })
+})

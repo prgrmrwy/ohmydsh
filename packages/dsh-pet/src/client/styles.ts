@@ -129,6 +129,14 @@ export const PET_CSS = `
   transform:translateX(-50%);max-width:260px;padding:10px;
   border-radius:8px;background:var(--dsw-alias-bg-layer-1,#fff);
   box-shadow:0 8px 28px rgba(0,0,0,.22);font-size:13px;line-height:20px}
+.dshpet-wheel .dshpet-wheel-note.dshpet-wheel-receipt{
+  /* A receipt reports what already happened, so it must not sit in front of
+     anything the user might click next: it fades on its own and stays
+     transparent to the pointer while visible. */
+  pointer-events:none;
+  color:var(--dsw-alias-label-secondary,#646a73);
+  animation:dshpet-receipt-fade 6s ease-in forwards}
+@keyframes dshpet-receipt-fade{0%,72%{opacity:1}100%{opacity:0}}
 .dshpet-item-label{font-size:13px}
 .dshpet-item-hint{font-size:13px;line-height:20px;color:var(--dsw-alias-label-tertiary,#8f959e)}
 
