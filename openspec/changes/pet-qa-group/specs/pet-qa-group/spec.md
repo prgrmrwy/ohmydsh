@@ -56,6 +56,33 @@ mention bot 的消息即可触发。mention 命中自身 open_id、消息 ID 去
 - **WHEN** qa 群成员发送未 mention bot 的消息
 - **THEN** 消息不触发任何处理
 
+### Requirement: qa child 的工作目录约束是 prompt 级而非沙箱级
+
+源会话受 Worktree Session 绑定时，系统 SHALL 在建群时经该绑定契约解析受管执行
+根，持久化于 qa 绑定行，并在 **seed 与每一条提问的 prompt** 中声明：仓库根不是
+干活的地方、受管执行目录与任务分支为何、以及所有命令必须显式以该目录为
+workdir。系统 MUST NOT 从 `cwd` 推断执行根。
+
+系统 MUST NOT 宣称该约束改变了 child 进程的工作目录：fork 复制父会话的 `cwd`
+（Worktree Session 有意将其保留在仓库根），而绑定本身不被继承，因此 child 进程
+的默认 `cwd` 仍是主 checkout。约束的性质与父会话所受的约束相同——运行时上下文
+而非强制沙箱——遗留风险（某轮遗漏 workdir 即静默落在主 checkout）SHALL 被如实
+声明，MUST NOT 以"已修复"掩盖。
+
+源会话未绑定 Worktree Session 时，系统 MUST NOT 虚构任何目录约束。
+
+#### Scenario: 绑定 worktree 的源会话建群
+- **WHEN** 从一个 Worktree Session 绑定的会话点击 Q&A
+- **THEN** 绑定行记录受管执行根与任务分支，seed prompt 声明该目录且标注仓库根不可作为工作区
+
+#### Scenario: 每条提问都重述目录约束
+- **WHEN** 该群收到第二条及以后的提问
+- **THEN** 每条投递的 prompt 都重述受管执行目录，而不是仅在 seed 中声明一次
+
+#### Scenario: 未绑定 worktree 的源会话
+- **WHEN** 源会话没有 Worktree Session 绑定
+- **THEN** prompt 不包含目录约束段落，绑定行不记录执行根
+
 ### Requirement: qa 触发消息经宿主队列投递 child 且回复由 child 发出
 
 qa 群通过防线的消息 SHALL 由宿主排入 child 的收件队列成为独立 turn，按到达序
