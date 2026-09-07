@@ -18,8 +18,9 @@ chat_id 是本次调用的产物，以它为键的查找永远无法命中既往
 
 未命中复用时系统 SHALL 按序完成：① 对源会话 fork 一个 continuable 子代理
 （种子为源会话截至最近一个完成 turn 的前缀）；② 以 bot 身份创建仅含本人与
-bot 的飞书群；③ 写入 `kind: qa` 的绑定行（记录群 chat_id、child session、
-源 session）。任一步失败 SHALL 使整体失败：已建的 child SHALL 被回收，绑定行
+bot 的飞书群，且 SHALL 显式将**发起者本人**指定为群主——以 bot 身份建群会默认
+把群主归于 bot，使群的实际所有者无法改名、拉人、移除成员或解散自己的群；
+③ 写入 `kind: qa` 的绑定行（记录群 chat_id、child session、源 session）。任一步失败 SHALL 使整体失败：已建的 child SHALL 被回收，绑定行
 MUST NOT 写入；已建群无法回收时 SHALL 向用户明示残留群名。三步全部成功前，
 该群的入站消息 SHALL 按非 qa 路径处理。
 
@@ -31,7 +32,7 @@ fork 种子 MUST NOT 包含源会话未完成的 in-flight turn；Q&A 动作入�
 
 #### Scenario: 成功创建答疑群
 - **WHEN** 用户在一个有完成 turn 的会话来源上点击 Q&A 且三步均成功
-- **THEN** 飞书出现仅含本人与 bot 的新群，Pet 记录 qa 绑定，child 以源会话上下文为种子建立
+- **THEN** 飞书出现仅含本人与 bot 的新群且**群主是本人**，Pet 记录 qa 绑定，child 以源会话上下文为种子建立
 
 #### Scenario: 同一会话再次点击 Q&A
 - **WHEN** 某会话已有活跃答疑群，用户在该会话再次点击 Q&A
