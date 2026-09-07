@@ -60,8 +60,15 @@
 - [x] 6.1 `cd packages/dsh-pet && npm run typecheck && npm test`
 - [x] 6.2 仓库级 `npm test`、`npm run check:artifacts`、`node scripts/sync.mjs`
       二次运行无新增漂移
-- [ ] 6.3 真机：在一个既有群 `/bind` 一个会话 → 回执正确 → 非 allowlist 成员
-      @bot 能提问 → 表情 OnIt→DONE；对照确认 child 目录约束段落在位
+- [x] 6.3 真机通过（核心链路四项）：① `/bind` 成功，绑定行 `kind=qa`、
+      `origin=bound`、`qaParentSessionId` 正是预期会话；② 上下文继承成立——child
+      能准确复述本会话正在做什么（`/bind` 路径首次证明 fork 种子有效）；
+      ③ 目录约束在**提问路径**重述（非仅 seed）；④ **非 allowlist 成员提问成立**
+      ——`ou_a5fc5404…`（不在 allowOpenIds）@bot 后产生投递记录
+      `qa-133f4ef1…`，证明豁免在 `qaOrigin=bound` 上同样生效（此前仅在
+      `created` 上验过）。验收中发现并修复 8.2、8.3 两个缺陷。
+      遗留：表情 OnIt→DONE 待肉眼确认。
+
 - [ ] 6.4 真机：1:1 冲突两种方向各验一次；前缀多命中与无匹配的回执**逐字一致**
 - [ ] 6.5 真机：非 allowlist 成员发 `/bind` 完全静默（不回复、不打表情）
 - [ ] 6.8 真机：`/unbind` 解除后 @bot 不再回答；在 Q&A 创建的群发 `/unbind` 收到
@@ -101,3 +108,13 @@
       `rename` 一直在用）。补一条断言 `header?.title` 不再出现的回归测试。
       发现过程值得记：是 qa child 从自己的 seed 里看到群名是回退值、推断出两种可能
       并要求核实，才查出来的。
+- [x] 8.3 **`/bind` 给别人的群写了自拟名**。绑定行的 `chatName` 取
+      `qaGroupName(target.title)`（「答疑 · <会话标题>」），但 `/bind` 的群是他人的
+      既有群——设置页会显示一个飞书里根本不存在的名字，与「Pet 既非创建者亦非群主、
+      不承诺任何群管理能力」相矛盾。
+      修法：绑定行的群名改为经 `client.chatName` 读飞书真名，读不到则留空（回落到
+      chat id，至少是真的）；`qaGroupName` 仅保留给 Q&A 建群路径——那里群确实是 Pet
+      建的。child 的 label 仍用「答疑 · <群名>」，因为 child 是 Pet 自己的对象。
+      发现过程：child 对群名提出了一个**错误**的假说（以为沿用了旧绑定行缓存），
+      核实调用处后证伪（`chatName` 恒为 undefined），但这个追问促成了对「谁有权命名
+      这个群」的检查。
