@@ -75,7 +75,11 @@ export interface CoordinatorDeps {
    * Without it an executor would inherit DSH's global Skill discovery, and
    * the isolation boundary would exist only on paper.
    */
-  readonly executorSetup?: (agentCtx: unknown, presetId?: string) => void | Promise<void>
+  readonly executorSetup?: (
+    agentCtx: unknown,
+    presetId: string | undefined,
+    includeAllowlist: boolean,
+  ) => void | Promise<void>
   /**
    * Apply the generated relationship title to a freshly created executor.
    *

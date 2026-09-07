@@ -1495,13 +1495,15 @@ describe('resume carries the model route', () => {
     const { readFile } = await import('node:fs/promises')
     const entry = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
     const from = entry.indexOf('ctx.agents.resume(')
-    const block = entry.slice(from - 400, from + 400)
+    const end = entry.indexOf('} as never)', from)
+    const block = entry.slice(from, end)
 
     // Without a model route the persona template's {{model}} has no value and
     // assembly fails before the agent ever runs.
     expect(block).toContain('provider: current.providerId')
     expect(block).toContain('model: current.modelId')
-    // The preset is NOT repeated: it lives in the persisted session's meta.
+    // The preset is resolved from the session's persisted projection and
+    // mounted through setup, never repeated as a current-setting option.
     expect(block).not.toContain('agentPreset: current.agentPreset')
   })
 })

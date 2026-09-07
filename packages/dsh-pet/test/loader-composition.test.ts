@@ -54,7 +54,7 @@ function stubServices(ctx: Context, registered: { path: string }[]): void {
     currentSelection: () => ({ provider: 'anthropic', model: 'claude-opus-5' }),
   })
   // Declared in `inject`, so `apply` never runs without it.
-  ctx.provide('agentPresets', { list: async () => [] })
+  ctx.provide('agentPresets', { list: async () => [], mount: async () => {} })
   ctx.provide('llm', { listProviders: () => [{ id: 'anthropic', name: 'Anthropic' }] })
   ctx.provide('sessionTitle', { rename: () => ({}) })
   ctx.provide('tools', { register: () => () => {} })
@@ -275,7 +275,7 @@ describe('a real Invocation scopes its executor Agent', () => {
     ctx.provide('agentDefaultModel', {
       currentSelection: () => ({ provider: 'anthropic', model: 'claude-opus-5' }),
     })
-    ctx.provide('agentPresets', { list: async () => [] })
+    ctx.provide('agentPresets', { list: async () => [], mount: async () => {} })
     ctx.provide('llm', { listProviders: () => [{ id: 'anthropic', name: 'Anthropic' }] })
     ctx.provide('sessionTitle', { rename: () => ({}) })
     ctx.provide('tools', { register: () => () => {} })
@@ -364,8 +364,25 @@ describe('dispatch uses the ordinary Agent lifecycle', () => {
     })
     // A handle shaped like the real one: `.agent` carrying synchronous
     // `followup(UserMessage)` and an awaited `whenIdle()`.
+    //
+    // `ctx` is present because the real Agent has one, and creation awaits the
+    // caller's `setup` against it before publishing. Pet refuses to dispatch
+    // onto an executor whose scope it cannot account for, so a double without
+    // a context would model an agent DSH never actually produces.
+    const agentCtx = {
+      inject: (_services: string[], callback: (scoped: unknown) => void) => {
+        callback(agentCtx)
+      },
+      effect: (fn: () => unknown) => {
+        fn()
+        return () => {}
+      },
+      skills: { registerProvider: () => () => {} },
+      tools: { register: () => () => {} },
+    }
     const agentHandle = {
       agent: {
+        ctx: agentCtx,
         followup: (message: unknown) => {
           followups.push(message)
         },
@@ -375,14 +392,18 @@ describe('dispatch uses the ordinary Agent lifecycle', () => {
       },
     }
     ctx.provide('agents', {
-      create: async (options: { sessionId: string }) => ({ session: { id: options.sessionId } }),
+      create: async (options: { sessionId: string; setup?: (c: unknown) => void | Promise<void> }) => {
+        // The real factory awaits `setup` before publishing the agent.
+        await options.setup?.(agentCtx)
+        return { session: { id: options.sessionId } }
+      },
       get: () => agentHandle,
       list: () => [],
     })
     ctx.provide('agentDefaultModel', {
       currentSelection: () => ({ provider: 'anthropic', model: 'claude-opus-5' }),
     })
-    ctx.provide('agentPresets', { list: async () => [] })
+    ctx.provide('agentPresets', { list: async () => [], mount: async () => {} })
     ctx.provide('llm', { listProviders: () => [{ id: 'anthropic', name: 'Anthropic' }] })
     ctx.provide('sessionTitle', { rename: () => ({}) })
     ctx.provide('tools', { register: () => () => {} })
@@ -485,7 +506,7 @@ describe('archiving from the Pet route syncs the executor session', () => {
     ctx.provide('agentDefaultModel', {
       currentSelection: () => ({ provider: 'anthropic', model: 'claude-opus-5' }),
     })
-    ctx.provide('agentPresets', { list: async () => [] })
+    ctx.provide('agentPresets', { list: async () => [], mount: async () => {} })
     ctx.provide('llm', { listProviders: () => [{ id: 'anthropic', name: 'Anthropic' }] })
     ctx.provide('sessionTitle', { rename: () => ({}) })
     ctx.provide('tools', { register: () => () => {} })
@@ -584,7 +605,7 @@ describe('provider routability is proven before an executor is created', () => {
     ctx.provide('agentDefaultModel', {
       currentSelection: () => ({ provider: 'ghost-provider', model: 'whatever' }),
     })
-    ctx.provide('agentPresets', { list: async () => [] })
+    ctx.provide('agentPresets', { list: async () => [], mount: async () => {} })
     ctx.provide('llm', { listProviders: () => [{ id: 'anthropic', name: 'Anthropic' }] })
     ctx.provide('sessionTitle', { rename: () => ({}) })
     ctx.provide('tools', { register: () => () => {} })

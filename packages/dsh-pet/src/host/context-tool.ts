@@ -98,17 +98,8 @@ export function executePetContext(
   }
 }
 
-/** The tool definition registered on the Pet executor's scoped context. */
-export const petContextToolDefinition = {
-  name: PET_CONTEXT_TOOL,
-  description:
-    'Return the trusted source context of the Pet Invocation this session is currently ' +
-    'executing. Takes no arguments: the target is resolved from the calling session, so it ' +
-    'cannot be redirected. Call this at the start of every Invocation.',
-  // Zero-argument by contract: there is no selector to substitute.
-  parameters: {
-    type: 'object' as const,
-    properties: {},
-    additionalProperties: false as const,
-  },
-} as const
+// The registered tool definition lives in `host/tools.ts`, built through
+// `defineTool` so its schemas are checked at compile time. An unused duplicate
+// used to sit here carrying a RAW JSON Schema `parameters` object — the exact
+// shape `defineTool` rejects with `parameters.type must be a value schema
+// object` — which made a known-broken example the first thing a reader found.

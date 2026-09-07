@@ -283,7 +283,7 @@ describe('recoverable executor creation', () => {
     // preset id it must MOUNT — naming a preset in `meta` composes nothing.
     const call = (agents.create as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
     await call.setup({})
-    expect(setup).toHaveBeenCalledWith({}, 'pet')
+    expect(setup).toHaveBeenCalledWith({}, 'pet', true)
     expect(call.meta.agentPreset).toBe('pet')
   })
 
@@ -311,7 +311,7 @@ describe('recoverable executor creation', () => {
     const call = (agents.create as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
     await call.setup({})
     expect(call.meta.agentPreset).toBe('standard')
-    expect(setup).toHaveBeenCalledWith({}, 'standard')
+    expect(setup).toHaveBeenCalledWith({}, 'standard', false)
   })
 })
 
