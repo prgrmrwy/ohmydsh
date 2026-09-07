@@ -13,6 +13,7 @@ import type { LarkInboundEvent } from '../src/host/channel/event.js'
 import type { LarkClient } from '../src/host/channel/lark.js'
 import type { LiveAgentLike, SubagentSeam } from '../src/host/qa/subagents.js'
 import type { PetChatBinding } from '../src/host/spec.js'
+import { qaScopeKeyOf } from '../src/host/qa/occupancy.js'
 import { openPetHarness, type PetHarness } from './harness.js'
 
 let harness: PetHarness | undefined
@@ -36,10 +37,40 @@ function qaBinding(overrides: Partial<PetChatBinding> = {}): PetChatBinding {
     chatName: '答疑 · 登录问题',
     qaChildSessionId: CHILD,
     qaParentSessionId: PARENT,
+    qaOrigin: 'created',
+    activeTaskId: LIVE_TASK,
     boundBy: 'user',
     boundAt: 1,
     ...overrides,
   }
+}
+
+/** The Task id every served binding in this suite points at. */
+const LIVE_TASK = 'task-live'
+
+/**
+ * Give the harness the live Task that makes a binding SERVED.
+ *
+ * A row on its own is not a served group: `/unbind` and panel archiving both
+ * leave the row behind and retire the Task, so delivery decides on the Task.
+ * A fixture that wrote only the row would describe a released group and keep
+ * passing even after delivery correctly stopped answering it.
+ */
+async function withLiveTask(h: PetHarness): Promise<void> {
+  const scopeKey = qaScopeKeyOf(PARENT)
+  await h.repository.createTask({
+    id: LIVE_TASK,
+    scopeKey,
+    epoch: await h.repository.allocateEpoch(scopeKey),
+    sourceKind: 'qa-chat',
+    sourceId: QA_CHAT,
+    sourceAvailability: 'available',
+    executorSessionId: CHILD,
+    status: 'idle',
+    createdAt: 1,
+    updatedAt: 1,
+    revision: 0,
+  })
 }
 
 /** One admitted group question. */
@@ -151,6 +182,7 @@ async function build(
 describe('delivering a QA question', () => {
   it('queues the question as a child turn and marks it in progress', async () => {
     harness = await openPetHarness()
+    await withLiveTask(harness)
     const f = await build(harness)
 
     const outcome = await f.delivery.deliver(event(), '这个报错怎么解', qaBinding())
@@ -169,6 +201,7 @@ describe('delivering a QA question', () => {
 
   it('records the reply binding before queuing', async () => {
     harness = await openPetHarness()
+    await withLiveTask(harness)
     const f = await build(harness)
 
     const outcome = await f.delivery.deliver(event(), 'q', qaBinding())
@@ -186,6 +219,7 @@ describe('delivering a QA question', () => {
 
   it('resumes a parent that is no longer resident', async () => {
     harness = await openPetHarness()
+    await withLiveTask(harness)
     const f = await build(harness, { resident: false })
 
     const outcome = await f.delivery.deliver(event(), 'q', qaBinding())
@@ -198,6 +232,7 @@ describe('delivering a QA question', () => {
 
   it('reports a failed queue without invalidating the binding', async () => {
     harness = await openPetHarness()
+    await withLiveTask(harness)
     await harness.repository.putChatBinding(qaBinding())
     const f = await build(harness, { queueFails: new Error('inbox refused') })
 
@@ -214,6 +249,7 @@ describe('delivering a QA question', () => {
 describe('settling a QA turn', () => {
   it('replaces the working mark with a done mark', async () => {
     harness = await openPetHarness()
+    await withLiveTask(harness)
     const f = await build(harness)
     await f.delivery.deliver(event(), 'q', qaBinding())
     await harness.repository.putChatBinding(qaBinding())
@@ -226,6 +262,7 @@ describe('settling a QA turn', () => {
 
   it('marks a failed stop reason as failed', async () => {
     harness = await openPetHarness()
+    await withLiveTask(harness)
     const f = await build(harness)
     await f.delivery.deliver(event(), 'q', qaBinding())
     await harness.repository.putChatBinding(qaBinding())
@@ -237,6 +274,7 @@ describe('settling a QA turn', () => {
 
   it('settles queued questions in arrival order', async () => {
     harness = await openPetHarness()
+    await withLiveTask(harness)
     const f = await build(harness)
     await harness.repository.putChatBinding(qaBinding())
     const first = await f.delivery.deliver(event({ message_id: 'om_q1' }), 'one', qaBinding())
@@ -254,6 +292,7 @@ describe('settling a QA turn', () => {
 
   it('ignores a settlement for a child that is not a QA group', async () => {
     harness = await openPetHarness()
+    await withLiveTask(harness)
     const f = await build(harness)
     await f.delivery.deliver(event(), 'q', qaBinding())
     await harness.repository.putChatBinding(qaBinding())
@@ -267,6 +306,7 @@ describe('settling a QA turn', () => {
 
   it('ignores a settlement with nothing pending', async () => {
     harness = await openPetHarness()
+    await withLiveTask(harness)
     await harness.repository.putChatBinding(qaBinding())
     const f = await build(harness)
 
@@ -282,6 +322,7 @@ describe('settling a QA turn', () => {
 describe('a QA binding whose source session is gone', () => {
   it('invalidates and tells the group exactly once', async () => {
     harness = await openPetHarness()
+    await withLiveTask(harness)
     await harness.repository.putChatBinding(qaBinding())
     const f = await build(harness, { resident: false, resumeFails: true })
 
@@ -308,6 +349,7 @@ describe('a QA binding whose source session is gone', () => {
 
   it('keeps the child pointer so its history stays readable', async () => {
     harness = await openPetHarness()
+    await withLiveTask(harness)
     await harness.repository.putChatBinding(qaBinding())
     const f = await build(harness, { resident: false, resumeFails: true })
 
@@ -318,6 +360,7 @@ describe('a QA binding whose source session is gone', () => {
 
   it('records the invalidation even when the notice cannot be sent', async () => {
     harness = await openPetHarness()
+    await withLiveTask(harness)
     await harness.repository.putChatBinding(qaBinding())
     const f = await build(harness, { resident: false, resumeFails: true })
     vi.spyOn(
@@ -337,6 +380,7 @@ describe('a QA binding whose source session is gone', () => {
 describe('every question restates the working directory', () => {
   it('carries the stored execution root into each prompt', async () => {
     harness = await openPetHarness()
+    await withLiveTask(harness)
     const bound = qaBinding({
       qaExecutionRoot: '/repo/.worktrees/pet-2',
       qaBranch: 'ws/pet-2',
@@ -361,11 +405,46 @@ describe('every question restates the working directory', () => {
 
   it('omits the directory section for an unbound source session', async () => {
     harness = await openPetHarness()
+    await withLiveTask(harness)
     await harness.repository.putChatBinding(qaBinding())
     const f = await build(harness)
 
     await f.delivery.deliver(event(), 'q', qaBinding())
 
     expect(f.queued[0]?.text).not.toContain('受管执行目录')
+  })
+})
+
+describe('a released binding stops answering', () => {
+  it('ignores questions once the Task is archived', async () => {
+    harness = await openPetHarness()
+    await withLiveTask(harness)
+    await harness.repository.putChatBinding(qaBinding())
+    const f = await build(harness)
+    // Prove it answers first, so the second half cannot pass vacuously.
+    const before = await f.delivery.deliver(event(), 'q1', qaBinding())
+    expect(before.kind).toBe('accepted')
+
+    await harness.repository.archiveTask(LIVE_TASK)
+    const after = await f.delivery.deliver(event({ message_id: 'om_q2' }), 'q2', qaBinding())
+
+    // THE regression `/unbind` exposed: the binding row survives on purpose
+    // (it points at a child whose history stays readable), so delivery must
+    // decide on the Task. Reading the row alone kept a released group
+    // answering — and kept exempting strangers from the allowlist.
+    expect(after).toEqual({ kind: 'ignored', reason: 'qa binding released' })
+    expect(f.queued).toHaveLength(1)
+  })
+
+  it('ignores questions when the binding points at no Task', async () => {
+    harness = await openPetHarness()
+    const orphan = { ...qaBinding() }
+    delete (orphan as { activeTaskId?: string }).activeTaskId
+    await harness.repository.putChatBinding(orphan)
+    const f = await build(harness)
+
+    const outcome = await f.delivery.deliver(event(), 'q', orphan)
+
+    expect(outcome).toEqual({ kind: 'ignored', reason: 'qa binding released' })
   })
 })

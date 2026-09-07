@@ -18,6 +18,7 @@ import {
 } from './event.js'
 import { markInProgress } from './feedback.js'
 import { parseCommand } from '../qa/command.js'
+import { isQaChatLive } from '../qa/occupancy.js'
 import type { LarkClient } from './lark.js'
 import { routeChat, type WorkspaceLocator } from './route.js'
 import type { PetCoordinator } from '../coordinator.js'
@@ -147,7 +148,11 @@ export class InboundPipeline {
       // Any qa binding exempts the allowlist, INCLUDING an invalidated one:
       // the invalidated group owes its members a bounded notice (handled by
       // the qa delivery layer), and blocking them here would silence it.
-      isQaChat: chatId => repository.getChatBinding(chatId)?.kind === 'qa',
+      // LIVE, not merely present: a released or invalidated binding keeps its
+      // row (it points at a child whose history stays readable), and treating
+      // that as a qa chat would keep exempting strangers from the allowlist
+      // in a group nobody is serving any more.
+      isQaChat: chatId => isQaChatLive(repository, chatId),
     })
     if (!decision.admit) return this.report({ kind: 'ignored', reason: decision.reason }, event)
 
@@ -166,7 +171,10 @@ export class InboundPipeline {
     // conversation again, and re-parsing it would hijack ordinary questions.
     const bindTarget = this.deps.bindCommand
     if (bindTarget !== undefined) {
-      const isBound = repository.getChatBinding(event.chat_id)?.kind === 'qa'
+      // Live, not merely present: after `/unbind` the row remains but the
+      // group is free again, so `/bind` must work there and `/unbind` must
+      // not — the same distinction the exemption and delivery now make.
+      const isBound = isQaChatLive(repository, event.chat_id)
       const parsed = parseCommand(decision.text)
       // The two verbs live on opposite sides of the same condition: `/bind`
       // only makes sense where nothing is bound, `/unbind` only where

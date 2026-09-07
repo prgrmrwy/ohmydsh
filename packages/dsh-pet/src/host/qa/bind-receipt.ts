@@ -102,8 +102,12 @@ export function renderUnbindReceipt(outcome: UnbindOutcome): string {
   const where = outcome.chatName === undefined ? '本群' : `本群（${outcome.chatName}）`
   const source =
     outcome.sourceTitle === undefined ? '' : `与会话「${outcome.sourceTitle}」`
-  return (
-    `已解除${where}${source}的绑定，此后 @我不会再触发回答。\n` +
-    '之前的对话记录仍保留在 DSH 里，可随时查看。'
-  )
+  const lines = [`已解除${where}${source}的绑定，此后 @我不会再基于该会话回答。`]
+  if (outcome.restoredWorkspaceId !== undefined) {
+    // Say it outright: the group is not silent, it went back to what it was.
+    // Someone who only heard "unbound" would be surprised by the next reply.
+    lines.push('本群已恢复为绑定前的工作区路由。')
+  }
+  lines.push('之前的对话记录仍保留在 DSH 里，可随时查看。')
+  return lines.join('\n')
 }

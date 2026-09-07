@@ -19,6 +19,7 @@ import type { WorkspaceLocator } from '../src/host/channel/route.js'
 import { PetCoordinator, type PromptDispatcher } from '../src/host/coordinator.js'
 import type { AgentRegistryLike } from '../src/host/executor.js'
 import { ensurePetDirectories, resolvePetPaths } from '../src/host/paths.js'
+import { qaScopeKeyOf } from '../src/host/qa/occupancy.js'
 import { scopeKeyOf } from '../src/wire.js'
 import { openPetHarness, type PetHarness } from './harness.js'
 
@@ -462,6 +463,49 @@ describe('learning the bot open_id, proven by app id', () => {
   })
 })
 
+/**
+ * Create a LIVE qa pairing: the binding row plus the unarchived Task that
+ * makes the group actually served.
+ *
+ * Both halves matter. `/unbind` archives the Task and keeps the row — so a
+ * fixture that writes only the row describes a released group, and any test
+ * built on it would pass even after the group stopped being served.
+ */
+async function liveQaPairing(
+  f: Fixture,
+  chatId: string,
+  sourceSessionId: string,
+  origin: 'created' | 'bound' = 'created',
+): Promise<string> {
+  const scopeKey = qaScopeKeyOf(sourceSessionId)
+  const task = await f.harness.repository.createTask({
+    id: `task-${chatId.slice(3, 11)}`,
+    scopeKey,
+    epoch: await f.harness.repository.allocateEpoch(scopeKey),
+    sourceKind: 'qa-chat',
+    sourceId: chatId,
+    sourceAvailability: 'available',
+    executorSessionId: `session-child-${chatId.slice(3, 9)}`,
+    status: 'idle',
+    createdAt: 1,
+    updatedAt: 1,
+    revision: 0,
+  })
+  await f.harness.repository.putChatBinding({
+    chatId,
+    chatType: 'group',
+    kind: 'qa',
+    chatName: '答疑 · 测试',
+    qaChildSessionId: task.executorSessionId,
+    qaParentSessionId: sourceSessionId,
+    qaOrigin: origin,
+    activeTaskId: task.id,
+    boundBy: 'user',
+    boundAt: 1,
+  })
+  return task.id
+}
+
 describe('QA group bindings in the intake path', () => {
   const QA_CHAT = 'oc_qagroup00000000000000000000000'
 
@@ -472,16 +516,10 @@ describe('QA group bindings in the intake path', () => {
 
   /** Bind the QA chat to a child, so the intake path sees a qa route. */
   async function bindQa(f: Fixture): Promise<void> {
-    await f.harness.repository.putChatBinding({
-      chatId: QA_CHAT,
-      chatType: 'group',
-      kind: 'qa',
-      chatName: '答疑 · 测试',
-      qaChildSessionId: 'session-child',
-      qaParentSessionId: 'session-source',
-      boundBy: 'user',
-      boundAt: 1,
-    })
+    // A SERVED group is a row plus a live Task. Writing the row alone would
+    // reproduce the bug this fixture is meant to exercise around: after
+    // `/unbind` the row survives and only the Task is archived.
+    await liveQaPairing(f, QA_CHAT, 'session-source')
   }
 
   it('admits a sender outside the allowlist', async () => {
@@ -673,16 +711,7 @@ describe('the /bind command in the intake path', () => {
   it('stops recognising the command once the group is bound', async () => {
     const f = await fixture()
     harness = f.harness
-    await f.harness.repository.putChatBinding({
-      chatId: PLAIN,
-      chatType: 'group',
-      kind: 'qa',
-      qaChildSessionId: 'session-child',
-      qaParentSessionId: 'session-source',
-      qaOrigin: 'bound',
-      boundBy: 'user',
-      boundAt: 1,
-    })
+    await liveQaPairing(f, PLAIN, 'session-plain', 'bound')
     const delivered: string[] = []
     const pipeline = new InboundPipeline({
       repository: f.harness.repository,
@@ -728,16 +757,7 @@ describe('the /unbind command in the intake path', () => {
 
   /** Bind the group so `/unbind` has something to act on. */
   async function bindGroup(f: Fixture): Promise<void> {
-    await f.harness.repository.putChatBinding({
-      chatId: BOUND,
-      chatType: 'group',
-      kind: 'qa',
-      qaChildSessionId: 'session-child',
-      qaParentSessionId: 'session-source',
-      qaOrigin: 'bound',
-      boundBy: 'user',
-      boundAt: 1,
-    })
+    await liveQaPairing(f, BOUND, 'session-source', 'bound')
   }
 
   function withCommands(f: Fixture): {

@@ -129,3 +129,22 @@ export async function archiveStale(
   if (staleTaskId === undefined) return
   await repository.archiveTask(staleTaskId).catch(() => undefined)
 }
+
+/**
+ * Whether a chat is currently SERVED by a live QA pairing.
+ *
+ * Distinct from "has a qa row": the row survives `/unbind` and invalidation on
+ * purpose, because it holds the pointer to a child whose history stays
+ * readable. Treating the row's presence as service is what let a released
+ * group keep answering questions — and, worse, keep exempting non-allowlist
+ * senders from the allowlist.
+ *
+ * Every caller that asks "should this group get an answer / an exemption"
+ * MUST ask this, not the row.
+ * @param repository - Pet repository.
+ * @param chatId - Lark chat id.
+ * @returns whether the group is still served.
+ */
+export function isQaChatLive(repository: PetRepository, chatId: string): boolean {
+  return chatOccupancy(repository, chatId).held
+}

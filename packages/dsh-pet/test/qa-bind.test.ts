@@ -15,7 +15,7 @@ import {
   renderBindReceipt,
   renderUnbindReceipt,
 } from '../src/host/qa/bind-receipt.js'
-import { qaScopeKeyOf } from '../src/host/qa/occupancy.js'
+import { isQaChatLive, qaScopeKeyOf } from '../src/host/qa/occupancy.js'
 import type { LarkClient } from '../src/host/channel/lark.js'
 import type { BindableSession } from '../src/host/qa/resolve-session.js'
 import type { LiveAgentLike, SubagentSeam } from '../src/host/qa/subagents.js'
@@ -321,7 +321,7 @@ describe('unbinding a group', () => {
     expect(harness.repository.getTask(bound.taskId)?.archivedAt).toBeDefined()
   })
 
-  it('keeps the child and its history', async () => {
+  it('keeps the child session itself, which the binding row no longer holds', async () => {
     harness = await openPetHarness()
     const d = await deps(harness)
     const bound = await bindExistingGroup(d, { chatId: CHAT, prefix: 'abc123d' })
@@ -329,9 +329,13 @@ describe('unbinding a group', () => {
 
     await unbindGroup({ repository: harness.repository }, CHAT)
 
-    // Matching what invalidation does: the conversation stays readable in the
-    // GUI, it simply stops receiving the group's messages.
-    expect(harness.repository.getChatBinding(CHAT)?.qaChildSessionId).toBe(bound.childSessionId)
+    // The row is gone — the group is free again — but the child is not: its
+    // Task is archived rather than deleted, so the conversation stays
+    // readable in the GUI exactly as an archived Task's always does.
+    expect(harness.repository.getChatBinding(CHAT)).toBeUndefined()
+    const task = harness.repository.getTask(bound.taskId)
+    expect(task?.executorSessionId).toBe(bound.childSessionId)
+    expect(task?.archivedAt).toBeDefined()
   })
 
   it('frees both sides so the group can be bound again', async () => {
@@ -471,5 +475,108 @@ describe('replies never carry a full session id', () => {
 
     expect(outcome.ok).toBe(false)
     expect(renderBindReceipt(outcome)).not.toMatch(FULL_ID)
+  })
+})
+
+describe('a released group stops being served', () => {
+  it('is no longer a live qa chat after unbind', async () => {
+    harness = await openPetHarness()
+    const d = await deps(harness)
+    await bindExistingGroup(d, { chatId: CHAT, prefix: 'abc123d' })
+    expect(isQaChatLive(harness.repository, CHAT)).toBe(true)
+
+    await unbindGroup({ repository: harness.repository }, CHAT)
+
+    // THE regression: anything that asked "is there a qa row" — delivery, the
+    // allowlist exemption, command recognition — kept serving a group nobody
+    // had bound any more. The row is now removed on release, but the check
+    // must still rest on the Task: a row can also be left behind by
+    // invalidation, or by a workspace route being restored underneath it.
+    expect(isQaChatLive(harness.repository, CHAT)).toBe(false)
+  })
+
+  it('is no longer live once its Task is archived from the panel', async () => {
+    harness = await openPetHarness()
+    const d = await deps(harness)
+    const bound = await bindExistingGroup(d, { chatId: CHAT, prefix: 'abc123d' })
+    if (!bound.ok) return
+
+    await harness.repository.archiveTask(bound.taskId)
+
+    // Panel archiving and `/unbind` are the same mechanism, so they must
+    // produce the same visible result.
+    expect(isQaChatLive(harness.repository, CHAT)).toBe(false)
+  })
+
+  it('is not live while invalidated', async () => {
+    harness = await openPetHarness()
+    const d = await deps(harness)
+    await bindExistingGroup(d, { chatId: CHAT, prefix: 'abc123d' })
+
+    await harness.repository.invalidateQaBinding(CHAT, '源会话已不可用')
+
+    expect(isQaChatLive(harness.repository, CHAT)).toBe(false)
+  })
+})
+
+describe('unbinding hands the group back to what it was', () => {
+  it('restores a workspace route that /bind took over', async () => {
+    harness = await openPetHarness()
+    // The group was routing to a workspace before anyone bound it.
+    await harness.repository.putChatBinding({
+      chatId: CHAT,
+      chatType: 'group',
+      kind: 'workspace',
+      qaOrigin: 'created',
+      workspaceId: 'ws-nexus',
+      chatName: '项目讨论群',
+      boundBy: 'auto',
+      boundAt: 1,
+    })
+    const d = await deps(harness)
+    await bindExistingGroup(d, { chatId: CHAT, prefix: 'abc123d' })
+
+    const outcome = await unbindGroup({ repository: harness.repository }, CHAT)
+
+    // Leaving a mute `qa` row would be a third state — neither served nor
+    // free — and the group would silently stop working with no way back
+    // except re-binding.
+    expect(outcome.ok).toBe(true)
+    if (outcome.ok) expect(outcome.restoredWorkspaceId).toBe('ws-nexus')
+    const after = harness.repository.getChatBinding(CHAT)
+    expect(after?.kind).toBe('workspace')
+    expect(after?.workspaceId).toBe('ws-nexus')
+  })
+
+  it('says so in the receipt, because the group is not silent afterwards', async () => {
+    harness = await openPetHarness()
+    await harness.repository.putChatBinding({
+      chatId: CHAT,
+      chatType: 'group',
+      kind: 'workspace',
+      qaOrigin: 'created',
+      workspaceId: 'ws-nexus',
+      boundBy: 'auto',
+      boundAt: 1,
+    })
+    const d = await deps(harness)
+    await bindExistingGroup(d, { chatId: CHAT, prefix: 'abc123d' })
+
+    const outcome = await unbindGroup({ repository: harness.repository }, CHAT)
+
+    // Someone who only heard "unbound" would be surprised by the next reply.
+    expect(renderUnbindReceipt(outcome)).toContain('工作区路由')
+  })
+
+  it('removes the row entirely when there was nothing to restore', async () => {
+    harness = await openPetHarness()
+    const d = await deps(harness)
+    await bindExistingGroup(d, { chatId: CHAT, prefix: 'abc123d' })
+
+    await unbindGroup({ repository: harness.repository }, CHAT)
+
+    // A retained `qa` row would keep the group out of default routing
+    // forever; removing it is what makes the group truly free again.
+    expect(harness.repository.getChatBinding(CHAT)).toBeUndefined()
   })
 })
