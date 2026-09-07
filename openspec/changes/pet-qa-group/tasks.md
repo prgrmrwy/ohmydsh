@@ -146,3 +146,9 @@
       workdir 才落在 `.worktrees/pet-2` / `ws/pet-2`。残留风险（某轮遗漏 workdir
       即静默落在主 checkout，只读无害、写操作污染主 checkout）已作为独立
       Requirement 写入 `specs/pet-qa-group/spec.md`，不以「已修复」掩盖。
+      **订正**：两个 child 曾先后报告「runtime context 里也带了 Worktree Session
+      绑定块」，一度被视为第二重保障。第三个 child 在收到属于自己的权威 runtime
+      context 快照后自我推翻，并给出正确解释——fork 种子复制父会话 transcript，
+      其中夹带**父会话的**快照，被误读为自己的。代码侧交叉核实：`dsh-subagent`
+      全包**零处** worktree 注入。故 `workspaceLines()` 是 child 得知执行根的
+      **唯一**途径，残留风险严重度相应上调（无第二重提醒），spec 已按此措辞。
