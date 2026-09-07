@@ -8,12 +8,23 @@
 channel 已绑定且 bot 可用、且宿主 fork 能力可用时可用；不满足时 SHALL 禁用并
 展示可诊断原因。
 
-点击 Q&A 后系统 SHALL 按序完成：① 对源会话 fork 一个 continuable 子代理
+每个源会话 SHALL 至多拥有一个活跃答疑群。点击 Q&A 时系统 SHALL 先按**源会话**
+查找活跃 qa Task：命中且其绑定有效时 SHALL 返回既有群并标明属复用，MUST NOT
+新建群或新 child。作用域键 MUST 以源会话构成，MUST NOT 以 chat 构成——群的
+chat_id 是本次调用的产物，以它为键的查找永远无法命中既往群，每次点击都会再建
+一个。该键 SHALL 与普通 session 作用域相互独立，使同一会话可同时持有浮层 Task
+与答疑群。活跃 qa Task 存在但其绑定已失效或缺失时，系统 SHALL 归档该 Task 并
+新建，MUST NOT 返回一个无法应答的群。
+
+未命中复用时系统 SHALL 按序完成：① 对源会话 fork 一个 continuable 子代理
 （种子为源会话截至最近一个完成 turn 的前缀）；② 以 bot 身份创建仅含本人与
 bot 的飞书群；③ 写入 `kind: qa` 的绑定行（记录群 chat_id、child session、
 源 session）。任一步失败 SHALL 使整体失败：已建的 child SHALL 被回收，绑定行
 MUST NOT 写入；已建群无法回收时 SHALL 向用户明示残留群名。三步全部成功前，
 该群的入站消息 SHALL 按非 qa 路径处理。
+
+动作结果 SHALL 区分「新建」与「复用」并如实呈现给用户：两种结果外观相同会使
+用户在不知情时反复建群。
 
 fork 种子 MUST NOT 包含源会话未完成的 in-flight turn；Q&A 动作入口 SHALL 明示
 「以最近完成的一轮为准」。
@@ -21,6 +32,18 @@ fork 种子 MUST NOT 包含源会话未完成的 in-flight turn；Q&A 动作入�
 #### Scenario: 成功创建答疑群
 - **WHEN** 用户在一个有完成 turn 的会话来源上点击 Q&A 且三步均成功
 - **THEN** 飞书出现仅含本人与 bot 的新群，Pet 记录 qa 绑定，child 以源会话上下文为种子建立
+
+#### Scenario: 同一会话再次点击 Q&A
+- **WHEN** 某会话已有活跃答疑群，用户在该会话再次点击 Q&A
+- **THEN** 系统返回既有群并标明属复用，不创建新群、不 fork 新 child
+
+#### Scenario: 归档后重新建群
+- **WHEN** 用户归档某会话的 qa Task 后再次点击 Q&A
+- **THEN** 系统创建新的答疑群，旧群与其 child 历史保留
+
+#### Scenario: 另一会话各自建群
+- **WHEN** 另一个源会话点击 Q&A
+- **THEN** 它获得自己的答疑群，与前一会话的群互不复用
 
 #### Scenario: 建群失败回收 child
 - **WHEN** fork 成功但飞书建群调用失败
