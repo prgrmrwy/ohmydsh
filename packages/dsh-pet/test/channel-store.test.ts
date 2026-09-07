@@ -9,7 +9,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import type { PetChannelConfig, PetChatBinding, PetInvocationChannel } from '../src/host/spec.js'
-import { openPetHarness, type PetHarness } from './harness.js'
+import { emptyMedium, openPetHarness, type PetHarness } from './harness.js'
 
 let harness: PetHarness | undefined
 
@@ -37,8 +37,24 @@ function testBinding(overrides: Partial<PetChatBinding> = {}): PetChatBinding {
   return {
     chatId: 'oc_group0000000000000000000000000',
     chatType: 'group',
+    kind: 'workspace',
     workspaceId: 'ws-nexus',
     boundBy: 'auto',
+    boundAt: 1,
+    ...overrides,
+  }
+}
+
+/** A valid qa binding, overridable per test. */
+function testQaBinding(overrides: Partial<PetChatBinding> = {}): PetChatBinding {
+  return {
+    chatId: 'oc_qagroup00000000000000000000000',
+    chatType: 'group',
+    kind: 'qa',
+    chatName: '答疑 · 排查登录问题',
+    qaChildSessionId: 'session-child',
+    qaParentSessionId: 'session-source',
+    boundBy: 'user',
     boundAt: 1,
     ...overrides,
   }
@@ -239,5 +255,113 @@ describe('invocation channel bindings', () => {
     await repo.setInvocationReaction('inv-1', undefined)
 
     expect(repo.getInvocationChannel('inv-1')?.reactionId).toBeUndefined()
+  })
+})
+
+describe('qa bindings', () => {
+  it('stores a qa binding with its child and source session', async () => {
+    harness = await openPetHarness()
+    const repo = harness.repository
+
+    await repo.putChatBinding(testQaBinding())
+
+    const stored = repo.getChatBinding('oc_qagroup00000000000000000000000')
+    expect(stored?.kind).toBe('qa')
+    expect(stored?.qaChildSessionId).toBe('session-child')
+    expect(stored?.qaParentSessionId).toBe('session-source')
+    // A qa binding routes to its child, so it carries no workspace at all.
+    expect(stored?.workspaceId).toBeUndefined()
+  })
+
+  it('refuses a qa binding that names no child', async () => {
+    harness = await openPetHarness()
+    const broken = { ...testQaBinding() }
+    delete (broken as { qaChildSessionId?: string }).qaChildSessionId
+
+    // Fail loud at the author: a qa row with no child would route a group's
+    // questions nowhere while still exempting its members from the allowlist.
+    await expect(harness.repository.putChatBinding(broken)).rejects.toThrow(/child session/)
+  })
+
+  it('refuses a qa binding that names no source session', async () => {
+    harness = await openPetHarness()
+    const broken = { ...testQaBinding() }
+    delete (broken as { qaParentSessionId?: string }).qaParentSessionId
+
+    await expect(harness.repository.putChatBinding(broken)).rejects.toThrow(/source session/)
+  })
+
+  it('still requires a workspace for an ordinary binding', async () => {
+    harness = await openPetHarness()
+    const broken = { ...testBinding() }
+    delete (broken as { workspaceId?: string }).workspaceId
+
+    await expect(harness.repository.putChatBinding(broken)).rejects.toThrow(/workspace/)
+  })
+
+  it('reads a pre-v5 binding row as a workspace binding after a reopen', async () => {
+    // The real v4→v5 path: a row PERSISTED without `kind` (no such field
+    // existed then) and read back by the current schema. Writing and reading
+    // within one session would prove nothing — the value never round-trips
+    // through validation.
+    const medium = emptyMedium()
+    harness = await openPetHarness(medium)
+    const legacy = { ...testBinding() }
+    delete (legacy as { kind?: string }).kind
+    await harness.repository.putChatBinding(legacy as never)
+    await harness.close()
+
+    harness = await openPetHarness(medium)
+
+    const reopened = harness.repository.getChatBinding('oc_group0000000000000000000000000')
+    // Defaulted rather than rejected, which is what makes the bump additive:
+    // an existing route keeps working untouched.
+    expect(reopened?.kind).toBe('workspace')
+    expect(reopened?.workspaceId).toBe('ws-nexus')
+  })
+
+  it('marks a qa binding invalidated once and keeps the first reason', async () => {
+    harness = await openPetHarness()
+    const repo = harness.repository
+    await repo.putChatBinding(testQaBinding())
+
+    const first = await repo.invalidateQaBinding('oc_qagroup00000000000000000000000', '源会话已归档')
+    const second = await repo.invalidateQaBinding('oc_qagroup00000000000000000000000', '另一个原因')
+
+    // Idempotent by design: the timestamp records when messages actually
+    // stopped raising work, and the group is told exactly once.
+    expect(first?.qaInvalidatedReason).toBe('源会话已归档')
+    expect(second?.qaInvalidatedAt).toBe(first?.qaInvalidatedAt)
+    expect(second?.qaInvalidatedReason).toBe('源会话已归档')
+    // The child pointer survives: its history stays readable in the GUI.
+    expect(second?.qaChildSessionId).toBe('session-child')
+  })
+
+  it('ignores invalidation of a workspace binding', async () => {
+    harness = await openPetHarness()
+    const repo = harness.repository
+    await repo.putChatBinding(testBinding())
+
+    const result = await repo.invalidateQaBinding('oc_group0000000000000000000000000', 'x')
+
+    expect(result).toBeUndefined()
+    expect(repo.getChatBinding('oc_group0000000000000000000000000')?.qaInvalidatedAt).toBeUndefined()
+  })
+
+  it('finds the oldest unsettled delivery of a chat', async () => {
+    harness = await openPetHarness()
+    const repo = harness.repository
+    await repo.putInvocationChannel(testChannel({ invocationId: 'qa-1', createdAt: 10 }))
+    await repo.putInvocationChannel(testChannel({ invocationId: 'qa-2', createdAt: 20 }))
+
+    // FIFO: the child's inbox runs questions in arrival order, so the turn
+    // settling now belongs to the one that has waited longest.
+    expect(repo.findOldestPendingChannelForChat(testChannel().chatId)?.invocationId).toBe('qa-1')
+    expect(repo.countPendingChannelForChat(testChannel().chatId)).toBe(2)
+
+    await repo.markChannelSettled('qa-1')
+
+    expect(repo.findOldestPendingChannelForChat(testChannel().chatId)?.invocationId).toBe('qa-2')
+    expect(repo.countPendingChannelForChat(testChannel().chatId)).toBe(1)
   })
 })

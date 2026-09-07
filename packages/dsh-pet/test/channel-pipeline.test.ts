@@ -461,3 +461,112 @@ describe('learning the bot open_id, proven by app id', () => {
     expect(f.harness.repository.getChannelConfig().botOpenId).toBe(BOT)
   })
 })
+
+describe('QA group bindings in the intake path', () => {
+  const QA_CHAT = 'oc_qagroup00000000000000000000000'
+
+  /** A group line in the QA chat, mentioning the bot. */
+  function qaLine(overrides: Record<string, unknown> = {}): string {
+    return groupLine({ chat_id: QA_CHAT, message_id: 'om_qa1', ...overrides })
+  }
+
+  /** Bind the QA chat to a child, so the intake path sees a qa route. */
+  async function bindQa(f: Fixture): Promise<void> {
+    await f.harness.repository.putChatBinding({
+      chatId: QA_CHAT,
+      chatType: 'group',
+      kind: 'qa',
+      chatName: '答疑 · 测试',
+      qaChildSessionId: 'session-child',
+      qaParentSessionId: 'session-source',
+      boundBy: 'user',
+      boundAt: 1,
+    })
+  }
+
+  it('admits a sender outside the allowlist', async () => {
+    const f = await fixture()
+    harness = f.harness
+    await bindQa(f)
+    const delivered: string[] = []
+    const withQa = new InboundPipeline({
+      repository: f.harness.repository,
+      coordinator: f.coordinator,
+      client: f.client,
+      locator: { locate: () => undefined },
+      watermark: () => 1000,
+      qaDelivery: {
+        deliver: async event => {
+          delivered.push(event.message_id)
+          return { kind: 'accepted', invocationId: 'qa-1' }
+        },
+      },
+    })
+
+    const outcome = await withQa.handleLine(qaLine({ sender_id: STRANGER }))
+
+    // Membership is the credential: the owner pulled this person into a group
+    // the Host itself created.
+    expect(outcome.kind).toBe('accepted')
+    expect(delivered).toEqual(['om_qa1'])
+  })
+
+  it('does not extend that exemption to other chats', async () => {
+    const f = await fixture()
+    harness = f.harness
+    await bindQa(f)
+
+    const outcome = await f.pipeline.handleLine(groupLine({ sender_id: STRANGER }))
+
+    // Same sender, ordinary group: judged by the allowlist as always.
+    expect(outcome).toEqual({ kind: 'ignored', reason: 'not-allowed-sender' })
+  })
+
+  it('still requires a mention in a QA group', async () => {
+    const f = await fixture()
+    harness = f.harness
+    await bindQa(f)
+
+    const outcome = await f.pipeline.handleLine(
+      qaLine({ sender_id: STRANGER, mentions: [], content: '随口一说' }),
+    )
+
+    // Only the sender gate is exempted; a QA group is still a conversation
+    // people hold without addressing the bot.
+    expect(outcome).toEqual({ kind: 'ignored', reason: 'no-mention' })
+  })
+
+  it('refuses rather than falling back when QA delivery is absent', async () => {
+    const f = await fixture()
+    harness = f.harness
+    await bindQa(f)
+
+    const outcome = await f.pipeline.handleLine(qaLine())
+
+    // Falling through to workspace dispatch would answer the group from a
+    // fresh executor holding none of the inherited context.
+    expect(outcome.kind).toBe('unroutable')
+    expect(f.dispatched).toHaveLength(0)
+  })
+
+  it('never rewrites a qa binding through default routing', async () => {
+    const f = await fixture()
+    harness = f.harness
+    await bindQa(f)
+    const withQa = new InboundPipeline({
+      repository: f.harness.repository,
+      coordinator: f.coordinator,
+      client: f.client,
+      locator: { locate: () => undefined },
+      watermark: () => 1000,
+      qaDelivery: { deliver: async () => ({ kind: 'accepted', invocationId: 'qa-1' }) },
+    })
+
+    await withQa.handleLine(qaLine())
+
+    const binding = f.harness.repository.getChatBinding(QA_CHAT)
+    expect(binding?.kind).toBe('qa')
+    expect(binding?.workspaceId).toBeUndefined()
+    expect(binding?.boundBy).toBe('user')
+  })
+})

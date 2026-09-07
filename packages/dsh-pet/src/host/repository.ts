@@ -688,11 +688,43 @@ export class PetRepository {
     if (!PET_CHAT_ID_PATTERN.test(binding.chatId)) {
       throw new PetError('BINDING_INVALID', `Chat id '${binding.chatId}' is not a chat id`)
     }
-    if (binding.workspaceId === '') {
+    // Kind-specific shape, validated on WRITE so a broken row fails at its
+    // author instead of poisoning the next domain open (the schema enforces
+    // the same rules there).
+    if (binding.kind === 'qa') {
+      if (binding.qaChildSessionId === undefined || binding.qaChildSessionId === '') {
+        throw new PetError('BINDING_INVALID', 'A qa binding needs its child session')
+      }
+      if (binding.qaParentSessionId === undefined || binding.qaParentSessionId === '') {
+        throw new PetError('BINDING_INVALID', 'A qa binding needs its source session')
+      }
+    } else if (binding.workspaceId === undefined || binding.workspaceId === '') {
       throw new PetError('BINDING_INVALID', 'A chat binding needs a workspace')
     }
     await this.domain.table('chat_bindings').put(binding.chatId, binding as never)
     return binding
+  }
+
+  /**
+   * Mark a qa binding invalidated, keeping the row and its history pointers.
+   *
+   * One-way and idempotent: a second call keeps the FIRST timestamp and
+   * reason, because that is when messages actually stopped raising work.
+   * @param chatId - Lark chat id of the qa binding.
+   * @param reason - Human-readable cause shown in Settings and diagnostics.
+   * @returns the updated binding, or `undefined` when no qa row exists.
+   */
+  async invalidateQaBinding(chatId: string, reason: string): Promise<PetChatBinding | undefined> {
+    const existing = this.getChatBinding(chatId)
+    if (existing === undefined || existing.kind !== 'qa') return undefined
+    if (existing.qaInvalidatedAt !== undefined) return existing
+    const next: PetChatBinding = {
+      ...existing,
+      qaInvalidatedAt: Date.now(),
+      qaInvalidatedReason: reason,
+    }
+    await this.domain.table('chat_bindings').put(chatId, next as never)
+    return next
   }
 
   /**
@@ -792,6 +824,42 @@ export class PetRepository {
       if (latest === undefined || binding.createdAt > latest.createdAt) latest = binding
     }
     return latest
+  }
+
+  /**
+   * The OLDEST unsettled binding of one chat.
+   *
+   * The QA counterpart of {@link findPendingChannelFeedback}, and oldest-first
+   * rather than newest-first for a structural reason: QA turns are ordered by
+   * the child's own FIFO inbox, so the settlement arriving now belongs to the
+   * question that has been waiting longest. A Task-scoped lookup does not work
+   * there either — QA deliveries hang off a chat, and their turns are driven
+   * by the subagent runtime rather than Pet's serial queue.
+   * @param chatId - Lark chat id.
+   * @returns the binding, or `undefined` when nothing is pending.
+   */
+  findOldestPendingChannelForChat(chatId: string): PetInvocationChannel | undefined {
+    let oldest: PetInvocationChannel | undefined
+    for (const [, value] of this.domain.table('invocation_channel').entries()) {
+      const binding = value as PetInvocationChannel
+      if (binding.chatId !== chatId || binding.settledAt !== undefined) continue
+      if (oldest === undefined || binding.createdAt < oldest.createdAt) oldest = binding
+    }
+    return oldest
+  }
+
+  /**
+   * How many of one chat's deliveries are still awaiting settlement.
+   * @param chatId - Lark chat id.
+   * @returns the pending count, for diagnostics.
+   */
+  countPendingChannelForChat(chatId: string): number {
+    let count = 0
+    for (const [, value] of this.domain.table('invocation_channel').entries()) {
+      const binding = value as PetInvocationChannel
+      if (binding.chatId === chatId && binding.settledAt === undefined) count += 1
+    }
+    return count
   }
 
   /**

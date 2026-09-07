@@ -86,6 +86,39 @@ Chat context is captured once at trigger time — up to 20 messages before and
 10 after — and goes into the prompt fenced as reference material, never into
 Pet's database.
 
+## Q&A groups
+
+The Lark channel above brings work *in* to a workspace. A Q&A group goes the
+other way: it opens a session you have already been working in to other people.
+Click **答疑群** on the wheel and Pet forks the current session into a
+continuable subagent, creates a private Lark group holding only you and the
+bot, and binds the two. You then invite whoever should be able to ask; any
+member who mentions the bot gets an answer from a child that remembers the
+work — not from a fresh executor reading the code cold.
+
+It differs from an ordinary chat binding in four ways:
+
+- **Membership is the credential.** A Q&A group is exempt from the sender
+  allowlist, because the Host created the group and only insiders can invite.
+  The exemption is scoped to that chat: the same person elsewhere is judged by
+  the allowlist as always. Every other gate still applies.
+- **The child inherits, and inherits everything.** It carries the source
+  session's context *and* its composition, so it holds the same tools you did,
+  in a real working tree. Pet promises no Skill boundary here; the trust
+  boundary is that you created the group and chose its members. The child is
+  told to confirm before changing anything, which is a behaviour, not a
+  control.
+- **The seed stops at the last completed turn.** An in-flight turn cannot be
+  replayed into a child, so the group sees the session as of its most recent
+  finished round. Anything later you can tell the child yourself.
+- **Nothing new appears in your sidebar.** The child is collected under the
+  source session as a subagent. Expanding it and talking to it directly is an
+  ordinary conversation — it draws no reactions and sends nothing to Lark.
+
+If the source session is archived or can no longer be resumed, the binding is
+invalidated: the group is told once, then falls silent, and the child's history
+stays readable.
+
 ## Skill installation and isolation
 
 Pet does **not** inherit DSH's global Skill discovery, and it ships **no
