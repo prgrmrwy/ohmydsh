@@ -340,6 +340,22 @@ const petChatBinding = z
      */
     qaInvalidatedAt: z.number().int().optional(),
     qaInvalidatedReason: z.string().optional(),
+    /**
+     * Managed execution root the qa child must work in.
+     *
+     * Resolved ONCE at group creation from the source session's Worktree
+     * Session binding — never inferred from a `cwd`, which that plugin
+     * deliberately leaves at the repository root. Stored because every later
+     * question must restate it: a fork inherits no binding of its own, so
+     * without this the child's literal cwd (the main checkout) silently
+     * becomes its real working directory. Absent for an unbound source
+     * session, which is the ordinary non-worktree case.
+     */
+    qaExecutionRoot: z.string().min(1).optional(),
+    /** Task branch of that execution root, for the same prompt. */
+    qaBranch: z.string().min(1).optional(),
+    /** Repository root, named in the prompt as the place NOT to work in. */
+    qaRepositoryRoot: z.string().min(1).optional(),
     boundBy: z.enum(['auto', 'user']),
     boundAt: z.number().int(),
   })

@@ -147,6 +147,21 @@ export class QaDelivery {
       text,
       larkReady,
       isFirst: false,
+      // Restated on EVERY question rather than left to the seed: a standing
+      // constraint mentioned once drifts out of attention exactly as the
+      // conversation grows, and this one decides whether work lands in the
+      // task branch or in the main checkout.
+      ...(binding.qaExecutionRoot !== undefined
+        ? {
+            workspace: {
+              executionRoot: binding.qaExecutionRoot,
+              ...(binding.qaBranch !== undefined ? { branch: binding.qaBranch } : {}),
+              ...(binding.qaRepositoryRoot !== undefined
+                ? { repositoryRoot: binding.qaRepositoryRoot }
+                : {}),
+            },
+          }
+        : {}),
     })
 
     try {

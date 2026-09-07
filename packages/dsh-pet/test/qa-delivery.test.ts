@@ -332,3 +332,40 @@ describe('a QA binding whose source session is gone', () => {
     expect(harness.repository.getChatBinding(QA_CHAT)?.qaInvalidatedAt).toBeDefined()
   })
 })
+
+
+describe('every question restates the working directory', () => {
+  it('carries the stored execution root into each prompt', async () => {
+    harness = await openPetHarness()
+    const bound = qaBinding({
+      qaExecutionRoot: '/repo/.worktrees/pet-2',
+      qaBranch: 'ws/pet-2',
+      qaRepositoryRoot: '/repo',
+    })
+    await harness.repository.putChatBinding(bound)
+    const f = await build(harness)
+
+    await f.delivery.deliver(event(), 'q1', bound)
+    await f.delivery.deliver(event({ message_id: 'om_q2' }), 'q2', bound)
+
+    // Restated on EVERY question, not just the seed: a standing constraint
+    // mentioned once drifts out of attention as the conversation grows, and
+    // this one decides whether work lands in the task branch or the main
+    // checkout.
+    expect(f.queued).toHaveLength(2)
+    for (const entry of f.queued) {
+      expect(entry.text).toContain('/repo/.worktrees/pet-2')
+      expect(entry.text).toContain('ws/pet-2')
+    }
+  })
+
+  it('omits the directory section for an unbound source session', async () => {
+    harness = await openPetHarness()
+    await harness.repository.putChatBinding(qaBinding())
+    const f = await build(harness)
+
+    await f.delivery.deliver(event(), 'q', qaBinding())
+
+    expect(f.queued[0]?.text).not.toContain('受管执行目录')
+  })
+})
