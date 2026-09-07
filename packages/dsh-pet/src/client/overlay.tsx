@@ -94,6 +94,14 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   const [capabilities, setCapabilities] = useState<readonly PetCapability[]>([])
   const [degraded, setDegraded] = useState<string | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
+  /**
+   * A successful outcome worth stating, kept apart from `error`.
+   *
+   * A built-in action can succeed in two visibly different ways — creating a
+   * QA group or handing back the existing one — and reporting that through
+   * the error channel would dress a normal result as a failure.
+   */
+  const [notice, setNotice] = useState<string | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [hovered, setHovered] = useState<string | undefined>(undefined)
   const [sourceRemoved, setSourceRemoved] = useState(false)
@@ -323,6 +331,7 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   const run = useCallback(
     async (capability: PetCapability) => {
       setError(undefined)
+      setNotice(undefined)
       // One click runs the capability. Safety belongs to the Skill inside its
       // Pet Task: a blanket confirmation here cannot tell a destructive
       // capability from a harmless one, so it taxed every action without
@@ -342,10 +351,18 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
           if (effectiveSource.kind !== 'session' || effectiveSource.sessionId === undefined) {
             throw new PetApiError('INVALID_REQUEST', '答疑群需要一个当前会话作为来源')
           }
-          await petApi.createQaGroup({
+          const group = await petApi.createQaGroup({
             sourceSessionId: effectiveSource.sessionId,
             ...(effectiveSource.title !== undefined ? { sessionTitle: effectiveSource.title } : {}),
           })
+          // State WHICH of the two happened. Without it a second click looks
+          // exactly like the first — which is how three identically named
+          // groups came to exist before reuse was implemented.
+          setNotice(
+            group.reused === true
+              ? `本会话已有答疑群「${group.chatName}」，未新建。`
+              : `已创建答疑群「${group.chatName}」，现在可以拉人进群了。`,
+          )
           setMode('panel')
           return
         }
@@ -627,6 +644,7 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
             </p>
           ) : null}
           {error !== undefined ? <p className="dshpet-wheel-note dshpet-error">{error}</p> : null}
+          {notice !== undefined ? <p className="dshpet-wheel-note">{notice}</p> : null}
         </div>
       ) : null}
 
