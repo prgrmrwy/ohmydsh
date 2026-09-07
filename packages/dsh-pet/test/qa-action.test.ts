@@ -162,7 +162,7 @@ describe('creating a QA group', () => {
     expect(task?.status).toBe('idle')
   })
 
-  it('invites the owner so the group starts as owner-plus-bot', async () => {
+  it('invites the owner, and makes them the group owner', async () => {
     harness = await ready()
     const seam = seamStub()
     const client = larkStub()
@@ -172,7 +172,10 @@ describe('creating a QA group', () => {
       { sessionId: SOURCE_SESSION },
     )
 
-    expect(client.createChat).toHaveBeenCalledWith(expect.any(String), [OWNER])
+    // The owner is passed as OWNER as well as invitee: creating as the bot
+    // defaults ownership to the bot, which would leave the human unable to
+    // rename, invite, remove or disband their own group.
+    expect(client.createChat).toHaveBeenCalledWith(expect.any(String), [OWNER], OWNER)
   })
 
   it('files the child under the source session workspace', async () => {
