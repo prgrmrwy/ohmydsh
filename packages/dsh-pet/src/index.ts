@@ -37,6 +37,10 @@ import { ensurePetDirectories, resolvePetPaths, type PetPaths } from './host/pat
 import { rebuildProjection } from './host/projection.js'
 import { PetRepository } from './host/repository.js'
 import { ChannelService } from './host/channel/service.js'
+import { createLarkCliClient } from './host/channel/lark.js'
+import { createQaGroup } from './host/qa/action.js'
+import { QaDelivery } from './host/qa/delivery.js'
+import { probeSubagentSeam, type HostContextLike } from './host/qa/subagents.js'
 import { createPetRoutes } from './host/routes.js'
 import { createPetEnvContributor } from './host/shell-env.js'
 import { createPetSkillProvider, resolveInvocationSkill } from './host/skill-provider.js'
@@ -46,7 +50,7 @@ import { registerPetTools } from './host/tools.js'
 import { currentAllowlist } from './host/skill-provider.js'
 import { removeLegacyState } from './host/migrate.js'
 import { petDomainSpec } from './host/spec.js'
-import { PET_EXECUTOR_PRESET } from './wire.js'
+import { PET_EXECUTOR_PRESET, QA_GROUP_ACTION_ID } from './wire.js'
 import {
   ensurePetWorkspace,
   inspectWorkspace,
@@ -514,6 +518,24 @@ async function initialize(
   }
 
 
+  /**
+   * Account a session to a workspace.
+   *
+   * Creating a session with the right `cwd` is not enough: DSH accounts
+   * sessions explicitly, so without this an executor — or a QA child — exists
+   * but never appears under its project in the sidebar. Falls back to the Pet
+   * workspace, where an ordinary executor belongs; resident Tasks and QA
+   * children pass the workspace they actually relate to.
+   */
+  const attachSessionToWorkspace = async (
+    sessionId: string,
+    targetWorkspaceId?: string,
+  ): Promise<void> => {
+    const target = targetWorkspaceId ?? workspaceId
+    const workspace = ctx.workspaceRegistry.get(target as never)
+    await workspace?.attachSession(sessionId as never)
+  }
+
   const coordinator = new PetCoordinator({
     repository,
     capabilities,
@@ -528,14 +550,7 @@ async function initialize(
     // Account each executor to the Pet Workspace. Creating it with the right
     // `cwd` is not enough: DSH accounts sessions explicitly, so without this
     // the executor never appears under DSH Pet in the sidebar.
-    attachToWorkspace: async (sessionId, targetWorkspaceId) => {
-      // Falls back to the Pet workspace, which is where an ordinary executor
-      // belongs; a resident Task passes the workspace it actually runs in, so
-      // it is filed under that project instead of appearing unfiled.
-      const target = targetWorkspaceId ?? workspaceId
-      const workspace = ctx.workspaceRegistry.get(target as never)
-      await workspace?.attachSession(sessionId as never)
-    },
+    attachToWorkspace: attachSessionToWorkspace,
     ensureWorkspace: async () => {
       const health = await inspectWorkspace(paths)
       if (health.ok) return []
@@ -556,6 +571,61 @@ async function initialize(
     },
   })
 
+  // The subagent seam behind the QA group, PROBED rather than injected: a
+  // declared dependency this Host lacks would stop Pet from loading at all,
+  // which is the failure mode the lifecycle contract forbids. An absent seam
+  // means the QA action reports itself unavailable; everything else carries on.
+  const qaProbe = probeSubagentSeam(ctx as unknown as HostContextLike)
+  if (!qaProbe.available) {
+    ctx.logger.info(`dsh-pet: QA group unavailable — ${qaProbe.diagnostic}`)
+  }
+  const qaSeam = qaProbe.available ? qaProbe.seam : undefined
+
+  // One client shared by the channel and the QA paths, so a test double
+  // installed for one is not silently bypassed by the other.
+  const larkClient = createLarkCliClient()
+
+  // Owns the settlement subscription, so it is created once and disposed with
+  // Pet rather than rebuilt per message.
+  const qaDelivery =
+    qaSeam === undefined
+      ? undefined
+      : new QaDelivery({
+          repository,
+          client: larkClient,
+          seam: qaSeam,
+          onChange: () => changes.publish(),
+          log: message => ctx.logger.info(`dsh-pet qa: ${message}`),
+        })
+  if (qaDelivery !== undefined) {
+    ctx.effect(() => () => qaDelivery.dispose(), 'dsh-pet: qa settlement subscription')
+  }
+
+  // The Q&A wheel action. Registered unconditionally so the reason it cannot
+  // run is visible on the wheel itself; an action that simply vanished would
+  // read as a Pet bug rather than as missing configuration.
+  ctx.effect(
+    () =>
+      capabilities.registerBuiltin({
+        id: QA_GROUP_ACTION_ID,
+        label: '答疑群',
+        description:
+          '基于当前会话建一个飞书答疑群：把这段会话上下文 fork 成一个子代理，' +
+          '你再拉人进群，群成员 @bot 即可向它提问。' +
+          '子代理看到的是本会话最近一轮完成的内容；被你拉进群的人即视为可信。',
+        probe: () => {
+          if (qaSeam === undefined) {
+            return qaProbe.available ? undefined : qaProbe.diagnostic
+          }
+          const config = repository.getChannelConfig()
+          if (config.botAppId === undefined) return '尚未绑定飞书 bot（设置 → 飞书）'
+          if (config.allowOpenIds.length === 0) return '飞书 allowlist 为空，无法确定邀请谁'
+          return undefined
+        },
+      }),
+    'dsh-pet: qa builtin action',
+  )
+
   // Project Task/Invocation state from the durable session event firehose.
   // Without this nothing ever settles an Invocation: it would stay `running`
   // forever even after its turn completed.
@@ -565,6 +635,8 @@ async function initialize(
   const channel = new ChannelService({
     repository,
     coordinator,
+    client: larkClient,
+    ...(qaDelivery !== undefined ? { qaDelivery } : {}),
     locator: {
       locate: workspaceId => {
         const match = ctx.workspaceRegistry
@@ -658,6 +730,37 @@ async function initialize(
     inspectWorkspace: () => inspectWorkspace(paths),
     repairWorkspace: () => repairWorkspace(paths),
     channel,
+    // Present only with the seam: the route refuses outright rather than
+    // half-creating a group when this Host cannot fork.
+    ...(qaSeam === undefined
+      ? {}
+      : {
+          createQaGroup: async (source: { sessionId: string; title?: string }) => {
+            // The source session's workspace decides where the child is
+            // filed. Read from the Host registry rather than trusted from the
+            // browser: the client may name a workspace the session does not
+            // belong to.
+            const session = ctx.sessions.get(source.sessionId as never) as
+              | { workspaceId?: string }
+              | undefined
+            const sourceWorkspaceId =
+              typeof session?.workspaceId === 'string' ? session.workspaceId : undefined
+            return createQaGroup(
+              {
+                repository,
+                client: larkClient,
+                seam: qaSeam,
+                attachToWorkspace: attachSessionToWorkspace,
+                log: message => ctx.logger.info(`dsh-pet qa: ${message}`),
+              },
+              {
+                sessionId: source.sessionId,
+                ...(source.title !== undefined ? { title: source.title } : {}),
+                ...(sourceWorkspaceId !== undefined ? { workspaceId: sourceWorkspaceId } : {}),
+              },
+            )
+          },
+        }),
     listPresets: async () => {
       // Enumerate what this Host actually offers; a free-text preset name
       // could name a composition that does not exist.
@@ -702,6 +805,23 @@ async function initialize(
     channel.start()
     return () => channel.stop()
   }, 'dsh-pet: lark channel subscription')
+
+  // Flush the sessions QA work touched before Pet goes away. Session
+  // persistence writes in batches, so a Host that exits without this can lose
+  // the tail of a child's log — and a QA child's tail is the answer someone
+  // in the group is still reading. Best-effort by design: teardown must not
+  // fail because a flush did.
+  ctx.effect(
+    () => () => {
+      for (const binding of repository.listChatBindings()) {
+        if (binding.kind !== 'qa' || binding.qaChildSessionId === undefined) continue
+        const session = ctx.sessions.get(binding.qaChildSessionId as never)
+        if (session === undefined) continue
+        void ctx.sessions.flush(session).catch(() => undefined)
+      }
+    },
+    'dsh-pet: flush qa child sessions on stop',
+  )
 
   lifecycle.markReady()
   ctx.logger.info(`dsh-pet ready (state: ${paths.stateRoot})`)
