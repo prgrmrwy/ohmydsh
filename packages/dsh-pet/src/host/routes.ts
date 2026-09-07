@@ -31,6 +31,7 @@ import {
   type PetChannelPhase,
   type PetChannelView,
   type PetChatRoute,
+  type PetQaGroupResult,
   type PetSourceKind,
   type PetWorkspaceChoice,
 } from '../wire.js'
@@ -71,6 +72,16 @@ export interface RouteDeps {
    * the settings tab reports it unavailable instead of the Host failing.
    */
   readonly channel?: ChannelControl
+  /**
+   * Runs the Q&A action, when this Host has the subagent seam.
+   *
+   * Absent means the wheel entry is disabled with a reason; the route then
+   * refuses rather than pretending to have created anything.
+   */
+  readonly createQaGroup?: (source: {
+    sessionId: string
+    title?: string
+  }) => Promise<PetQaGroupResult>
 }
 
 /** What the channel routes drive. */
@@ -110,8 +121,19 @@ function channelView(
     chatId: binding.chatId,
     chatType: binding.chatType,
     ...(binding.chatName !== undefined ? { chatName: binding.chatName } : {}),
-    workspaceId: binding.workspaceId,
+    kind: binding.kind,
+    ...(binding.workspaceId !== undefined ? { workspaceId: binding.workspaceId } : {}),
     ...(binding.activeTaskId !== undefined ? { activeTaskId: binding.activeTaskId } : {}),
+    ...(binding.qaChildSessionId !== undefined
+      ? { qaChildSessionId: binding.qaChildSessionId }
+      : {}),
+    ...(binding.qaParentSessionId !== undefined
+      ? { qaParentSessionId: binding.qaParentSessionId }
+      : {}),
+    ...(binding.qaInvalidatedAt !== undefined ? { qaInvalidatedAt: binding.qaInvalidatedAt } : {}),
+    ...(binding.qaInvalidatedReason !== undefined
+      ? { qaInvalidatedReason: binding.qaInvalidatedReason }
+      : {}),
     boundBy: binding.boundBy,
     boundAt: binding.boundAt,
   }))
@@ -452,6 +474,28 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
       }
     }),
 
+    petRoute(ROUTES.qaGroupCreate, async ({ body }) => {
+      requireReady(lifecycle)
+      const record = strictBody(body, ['sourceSessionId', 'sessionTitle'])
+      const run = deps.createQaGroup
+      if (run === undefined) {
+        throw new PetError(
+          'INVALID_REQUEST',
+          '此 DSH Host 不支持答疑群（缺少 subagent 能力或飞书通道未就绪）。',
+        )
+      }
+      // A QA group is always rooted in a real session: the child is a fork of
+      // it, so a workspace or independent source has nothing to inherit.
+      const sourceSessionId = requireString(record, 'sourceSessionId')
+      const sessionTitle = optionalString(record, 'sessionTitle')
+      const result = await run({
+        sessionId: sourceSessionId,
+        ...(sessionTitle !== undefined ? { title: sessionTitle } : {}),
+      })
+      deps.changes.publish()
+      return result
+    }),
+
     petRoute(ROUTES.invocationCreate, async ({ body }) => {
       requireReady(lifecycle)
       const record = strictBody(body, [
@@ -642,6 +686,12 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
           if (existing === undefined) {
             throw new PetError('BINDING_INVALID', `Chat ${chatId} has no route to rebind.`)
           }
+          // A qa binding routes to a fork child, not a workspace; letting it
+          // be re-pointed at a workspace would silently discard the child and
+          // turn the QA group into an ordinary chat.
+          if (existing.kind === 'qa') {
+            throw new PetError('BINDING_INVALID', `Chat ${chatId} is a QA group binding and cannot be re-bound to a workspace.`)
+          }
           // Marked `user` so a later default-routed message never silently
           // overwrites a deliberate choice.
           await repository.putChatBinding({
@@ -721,6 +771,32 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
       allowlist: currentAllowlist(repository),
       drift: await detectProjectionDrift(paths, desiredProjection(repository)),
       skillSetGeneration: repository.global.skillSetGeneration,
+      // QA groups, listed apart from chat routes: their health is not the
+      // channel's — a perfectly connected subscription still cannot serve a
+      // group whose source session is gone — and a backlog here means
+      // questions are waiting on a child rather than on Pet's own queue.
+      qaGroups: repository
+        .listChatBindings()
+        .filter(binding => binding.kind === 'qa')
+        .map(binding => ({
+          chatId: binding.chatId,
+          ...(binding.chatName !== undefined ? { chatName: binding.chatName } : {}),
+          ...(binding.qaChildSessionId !== undefined
+            ? { childSessionId: binding.qaChildSessionId }
+            : {}),
+          ...(binding.qaParentSessionId !== undefined
+            ? { sourceSessionId: binding.qaParentSessionId }
+            : {}),
+          ...(binding.qaInvalidatedAt !== undefined
+            ? {
+                invalidatedAt: binding.qaInvalidatedAt,
+                ...(binding.qaInvalidatedReason !== undefined
+                  ? { invalidatedReason: binding.qaInvalidatedReason }
+                  : {}),
+              }
+            : {}),
+          pendingQuestions: repository.countPendingChannelForChat(binding.chatId),
+        })),
     })),
   ]
 }

@@ -21,16 +21,34 @@ import type { LarkClient } from './lark.js'
 import { routeChat, type WorkspaceLocator } from './route.js'
 import type { PetCoordinator } from '../coordinator.js'
 import type { PetRepository } from '../repository.js'
-import type { PetChannelConfig } from '../spec.js'
+import type { PetChannelConfig, PetChatBinding } from '../spec.js'
 import { scopeKeyOf } from '../../wire.js'
 
 /** What happened to one inbound line. */
 export type IntakeOutcome =
-  | { readonly kind: 'ignored'; readonly reason: AdmissionRefusal | 'unparsable' | 'disabled' }
+  | {
+      readonly kind: 'ignored'
+      readonly reason: AdmissionRefusal | 'unparsable' | 'disabled' | string
+    }
   | { readonly kind: 'unroutable'; readonly reason: string }
-  | { readonly kind: 'accepted'; readonly invocationId: string; readonly taskId: string }
+  | { readonly kind: 'accepted'; readonly invocationId: string; readonly taskId?: string }
   | { readonly kind: 'answered'; readonly taskId: string }
   | { readonly kind: 'error'; readonly reason: string }
+
+/** Delivers a QA group's messages into its fork child. */
+export interface QaDeliveryPort {
+  /**
+   * @param event - The admitted event.
+   * @param text - Admitted message text.
+   * @param binding - The qa binding this chat routed to.
+   * @returns what happened, in the pipeline's vocabulary.
+   */
+  deliver(
+    event: LarkInboundEvent,
+    text: string,
+    binding: PetChatBinding,
+  ): Promise<IntakeOutcome>
+}
 
 /** Everything the pipeline needs from its Host. */
 export interface PipelineDeps {
@@ -40,6 +58,15 @@ export interface PipelineDeps {
   readonly locator: WorkspaceLocator
   /** Replay watermark: messages older than this are redeliveries. */
   readonly watermark: () => number
+  /**
+   * QA delivery, when this Host composed it.
+   *
+   * Absent on a Host without the subagent seam. A qa binding then refuses
+   * rather than falling through to workspace dispatch: that would run a
+   * group's question in a fresh executor with none of the inherited context
+   * the group exists for.
+   */
+  readonly qaDelivery?: QaDeliveryPort
   /** Reports an outcome for diagnostics. */
   readonly onOutcome?: (outcome: IntakeOutcome, event?: LarkInboundEvent) => void
 }
@@ -93,6 +120,10 @@ export class InboundPipeline {
       ...(config.botOpenId !== undefined ? { botOpenId: config.botOpenId } : {}),
       watermark: this.deps.watermark(),
       isDuplicate: messageId => this.dedup.check(messageId),
+      // Any qa binding exempts the allowlist, INCLUDING an invalidated one:
+      // the invalidated group owes its members a bounded notice (handled by
+      // the qa delivery layer), and blocking them here would silence it.
+      isQaChat: chatId => repository.getChatBinding(chatId)?.kind === 'qa',
     })
     if (!decision.admit) return this.report({ kind: 'ignored', reason: decision.reason }, event)
 
@@ -107,7 +138,22 @@ export class InboundPipeline {
       { chatId: event.chat_id, chatType: event.chat_type },
       this.deps.client,
     )
-    if (!route.routed) return this.report({ kind: 'unroutable', reason: route.reason }, event)
+    if (route.routed === false) {
+      return this.report({ kind: 'unroutable', reason: route.reason }, event)
+    }
+    if (route.routed === 'qa') {
+      // QA groups have their own delivery path (a fork child fed through the
+      // host queue). Without that service wired, refusing is the fail-closed
+      // answer — a qa binding must never fall back to workspace dispatch.
+      const qa = this.deps.qaDelivery
+      if (qa === undefined) {
+        return this.report(
+          { kind: 'unroutable', reason: 'QA delivery is not available in this Host' },
+          event,
+        )
+      }
+      return this.report(await qa.deliver(event, decision.text, route.binding), event)
+    }
 
     try {
       return await this.admitToWork(event, decision.text, route)

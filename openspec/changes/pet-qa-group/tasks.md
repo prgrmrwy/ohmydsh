@@ -1,0 +1,102 @@
+# pet-qa-group Tasks
+
+## 1. Spike：宿主 fork continuable child 链路（已完成，实现前提）
+
+- [x] 1.1 验证宿主直接 `startContinuable({provider:'fork'})` 建 child、种子截到
+      最后完成 turn/end、硬依赖清单（agents+agentLoop/sessions/sessionPersistence/
+      fork provider）——全部通过，见 `spike/qa-subagent/FINDINGS.md` Q1
+- [x] 1.2 验证 `queueHostSubagentPrompt`（`dsh-subagent/internal`）把消息排成
+      child 独立 turn 且上下文完整——通过，见 FINDINGS Q2
+- [x] 1.3 验证 parent dispose 后 `agents.resume` 拉活再喂 child、跨进程 coldResume
+      （半夜路径）——通过，见 FINDINGS Q3
+- [x] 1.4 验证 `listChildren` 返回 GUI 收纳条目（需 sessionQuery）——通过，见
+      FINDINGS Q4
+- [x] 1.5 验证 parent in-flight turn 时种子截断行为——通过，见 FINDINGS Q5
+- [x] 1.6 实测坑清单（接受≠完成、flush、事件形状、turn 号延续、coldResume 的
+      provider 注册时序）回填 design.md D9——已回填
+
+## 2. 持久层：sqlite v4 → v5
+
+- [x] 2.1 `src/host/spec.ts`：`chat_bindings` 增 `kind`（缺省 workspace）、
+      `qaChildSessionId` / `qaParentSessionId` / `qaInvalidatedAt`；`tasks` 增
+      qa-child 形态所需 sourceKind `qa-chat`；domain 版本升至 5
+- [x] 2.2 `src/host/migrate.ts`：v4 → v5 ADDITIVE（不清表）；测试：v4 存量数据
+      升级后完整可读且存量绑定行读作 `kind: workspace`，二次升级幂等
+- [x] 2.3 `src/host/repository.ts`：qa 绑定 CRUD、按 chat_id 取 qa 绑定、失效
+      标记；`invocation_channel` 复用不改；测试覆盖
+
+## 3. 宿主依赖接入
+
+- [x] 3.1 以可选依赖姿态接入 `subagents`（含 internal 子路径导入）、
+      `sessionPersistence`、`sessionQuery`；缺失时探测为不可用并给出诊断，
+      MUST NOT 阻断 Pet 其余能力加载（沿用 shellEnv 教训：`ctx.get`/`ctx.inject`
+      回调，register 不进 effect）
+- [x] 3.2 Q&A 动作可用性探测：fork provider 在场 + sessionPersistence + channel
+      已绑定且 `botReady()` + 来源为未归档 session；测试覆盖各缺失分支的禁用
+      原因
+- [x] 3.3 Pet stopping 路径对相关会话 `sessions.flush`（design D9.2）；测试或
+      真机验证记录
+
+## 4. 建群事务（Q&A 动作 Host 端）
+
+- [x] 4.1 `LarkClient` 增 `createChat`（`im +chat-create --as bot --users <本人>`），
+      单点封装并测试（含失败形状）
+- [x] 4.2 事务编排：fork child（预分配 childId）→ 建群 → 写 qa 绑定行；任一步
+      失败整体回收（child 经 drain 释放 + Task 归档；群残留时错误信息含群名）；
+      测试覆盖三个失败点的回收与「三步完成前该群按非 qa 路径处理」
+- [x] 4.3 qa Task 建立：sourceKind `qa-chat`、executorSessionId 指向 child、
+      label「答疑群 · <群名>」；归档 qa Task = 绑定失效且不销毁 child；测试覆盖
+- [x] 4.4 管理面端点：POST qa 动作（loopback + same-origin、严格字段校验，沿用
+      既有路由约束）；来源快照按既有 capture 流程验证 session 存在
+
+## 5. 入站 qa 分支
+
+- [x] 5.1 admission 按绑定行 kind 分流：qa 群豁免 sender allowlist，其余防线
+      原样；测试：非 allowlist 群成员通过、同一人在非 qa chat 不放行、未 @bot
+      不触发
+- [x] 5.2 路由：qa 绑定直达 child，不参与 default 回退、不自动写回；失效绑定
+      按 D6 处理；测试覆盖
+- [x] 5.3 投递：渲染 qa prompt（提问者身份 + 只回本群 + 修改先确认）→ 写
+      `invocation_channel` 行 → 打 OnIt → `queueHostSubagentPrompt` 入队；
+      parent 非驻留时先 `agents.resume`；测试：投递接受不标记完成
+- [x] 5.4 冷恢复路径：DSH 重启后首条 qa 消息触发 resume + coldResume；provider
+      不可用时 fail closed + 指向性诊断；测试模拟 NOT_RESUMABLE 与 provider
+      缺失分支
+
+## 6. 终态观测与反馈
+
+- [x] 6.1 订阅 `subagent/end`（scope-filtered 到相关 parent）驱动表情：删 OnIt
+      → DONE/失败；按到达序匹配最早未 settled 的 `invocation_channel` 行，乱序
+      时 fail-soft 放弃并记 Diagnostics；测试覆盖成功/失败/乱序
+- [x] 6.2 源会话失效：resume 失败或归档时标记 `qaInvalidatedAt`、群内 bot 发
+      有限次失效提示后静默；测试：提示次数上限、失效后消息不触发工作
+- [x] 6.3 Diagnostics：qa 绑定状态、child 活性、待处理消息数单列
+
+## 7. 客户端
+
+- [x] 7.1 轮盘 Q&A 内置动作条目：仅会话来源可用、禁用态带原因、点击调管理面
+      端点；与 Skill 能力共同计入容量；测试（wheel 单测沿用既有模式）
+- [x] 7.2 动作入口明示「以最近完成的一轮为准」与建群后果（拉人即授信）
+- [x] 7.3 设置页 qa 绑定展示：kind 标识、源会话、失效状态、归档入口；不提供
+      改绑 workspace 操作
+- [x] 7.4 面板 qa Task 呈现：形态标识、指向 child 会话的入口
+
+## 8. 验证与收尾
+
+- [x] 8.1 `cd packages/dsh-pet && npm run typecheck && npm test`（全量含新旧用例）
+      —— host tsc 干净；vitest 796 passed，仅 2 项失败与 3 个文件加载失败为
+      worktree 缺依赖导致的既有基线问题（改动前同样失败）
+- [x] 8.2 仓库级 `npm test`（96 pass / 0 fail）、`npm run check:artifacts`
+      （合规）、`node scripts/sync.mjs` 二次运行无新增漂移（3 项失败与基线一致，
+      均为本 worktree 未装依赖所致）
+- [ ] 8.3 真机端到端：点 Q&A 建群 → 本人拉一名非 allowlist 用户 → 该用户 @bot
+      提问 → child 带源会话上下文回答且只回本群 → 表情 OnIt→DONE；对照源会话
+      验证 child 工具数量（D9.7，声明≠装配）；GUI 展开 child 私聊验证不出站
+- [ ] 8.4 真机重启演练：DSH 重启后群消息触发 coldResume 且上下文完整
+- [ ] 8.5 真机失效演练：归档源会话后群消息收到一次失效提示，后续静默
+- [ ] 8.6 记录 `+chat-create` 的群主/解散行为（design Open Question，仅记录）
+- [x] 8.7 更新 `dsh.yaml` dsh-pet 条目 note 与 `packages/dsh-pet/README.md`；
+      `spike/` 已加入 `.gitignore`（结论已进 design.md D9，脚本与原始输出不入
+      版本控制）
+- [x] 8.8 `openspec validate pet-qa-group --strict` 通过；复核 diff 无范围蔓延
+      （不触碰非 qa 入站链路、send-cr/ws skill、provider 凭据路径）

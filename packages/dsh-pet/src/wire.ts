@@ -58,7 +58,24 @@ export const ROUTES = {
   channel: '/dsh-pet/api/channel',
   channelMutate: '/dsh-pet/api/channel-mutate',
   channelBind: '/dsh-pet/api/channel-bind',
+  qaGroupCreate: '/dsh-pet/api/qa-group-create',
 } as const
+
+/**
+ * Wheel id of the built-in Q&A action.
+ *
+ * A `builtin` capability id, deliberately not a Skill name: nothing may
+ * resolve a Skill from it.
+ */
+export const QA_GROUP_ACTION_ID = 'qa-group'
+
+/** What the Q&A action returns once its group exists. */
+export interface PetQaGroupResult {
+  readonly chatId: string
+  readonly chatName: string
+  readonly childSessionId: string
+  readonly taskId: string
+}
 
 /**
  * Reserved scope naming the global environment set.
@@ -124,8 +141,18 @@ export interface PetChatRoute {
   readonly chatId: string
   readonly chatType: 'p2p' | 'group'
   readonly chatName?: string
-  readonly workspaceId: string
+  /** Binding kind; `workspace` routes to a workspace, `qa` to a fork child. */
+  readonly kind: 'workspace' | 'qa'
+  /** Present on `workspace` bindings only. */
+  readonly workspaceId?: string
   readonly activeTaskId?: string
+  /** Present on `qa` bindings: the fork child serving the group. */
+  readonly qaChildSessionId?: string
+  /** Present on `qa` bindings: the source session the child was forked from. */
+  readonly qaParentSessionId?: string
+  /** Present when a qa binding has been invalidated (no longer raises work). */
+  readonly qaInvalidatedAt?: number
+  readonly qaInvalidatedReason?: string
   readonly boundBy: 'auto' | 'user'
   readonly boundAt: number
 }
@@ -186,8 +213,14 @@ export interface PetLifecycleState {
  * kind of its own rather than a flavour of `workspace`: two chats routed to
  * the same workspace MUST keep independent Tasks, which only holds when the
  * chat id — not the route target — is what forms the scope key.
+ *
+ * `qa-chat` is a QA group, whose Task represents a fork child of a user
+ * session rather than an executor Pet created. Distinct from `chat` because
+ * the healing paths differ: a `chat` Task recovers from a stale pointer by
+ * creating a new executor, which a QA Task must never do — a fresh session
+ * would drop the inherited context the group exists for.
  */
-export type PetSourceKind = 'session' | 'workspace' | 'none' | 'chat'
+export type PetSourceKind = 'session' | 'workspace' | 'none' | 'chat' | 'qa-chat'
 
 /** Stable scope key that defines active-Task uniqueness. */
 export type PetScopeKey =
@@ -377,6 +410,17 @@ export interface PetCapability {
   readonly label: string
   readonly description: string
   readonly skillName: string
+  /**
+   * Where this wheel entry comes from.
+   *
+   * `skill` is the ordinary case: a Skill the user imported and enabled, run
+   * through the Invocation path. `builtin` is a Host action (Q&A) that is NOT
+   * a Skill at all — it never enters the allowlist model, emits no
+   * `/<skill-name>` envelope, and its availability is probed by the Host. The
+   * two share the wheel because the wheel is a shortcut surface, not a Skill
+   * listing.
+   */
+  readonly kind: 'skill' | 'builtin'
   /** Computed: a missing organization-specific dependency disables rather than breaks Pet. */
   readonly available: boolean
   readonly diagnostic?: string
