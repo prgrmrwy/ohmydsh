@@ -356,3 +356,90 @@ describe('the child is told where it may work', () => {
     expect(harness.repository.getChatBinding(result.chatId)?.qaExecutionRoot).toBeUndefined()
   })
 })
+
+
+describe('one source session owns at most one QA group', () => {
+  it('returns the existing group instead of building another', async () => {
+    harness = await ready()
+    const seam = seamStub()
+    const client = larkStub()
+    const deps = { repository: harness.repository, client, seam: seam.seam }
+
+    const first = await createQaGroup(deps, { sessionId: SOURCE_SESSION })
+    const second = await createQaGroup(deps, { sessionId: SOURCE_SESSION })
+
+    // The chat id does not exist until the group is created, so a chat-keyed
+    // scope could never match an earlier group — every click would build one.
+    // Keyed on the source session, the second click is "show me my group".
+    expect(second.chatId).toBe(first.chatId)
+    expect(second.taskId).toBe(first.taskId)
+    expect(second.childSessionId).toBe(first.childSessionId)
+    expect(second.reused).toBe(true)
+    expect(first.reused).toBeUndefined()
+    // Nothing was forked or created the second time round.
+    expect(seam.started).toHaveLength(1)
+    expect(client.createChat).toHaveBeenCalledTimes(1)
+    expect(harness.repository.listChatBindings()).toHaveLength(1)
+  })
+
+  it('lets a different source session open its own group', async () => {
+    harness = await ready()
+    const seam = seamStub()
+    const client = larkStub()
+    let created = 0
+    vi.mocked(client.createChat).mockImplementation(async () => {
+      created += 1
+      return `oc_created${String(created).padStart(22, '0')}`
+    })
+    const deps = { repository: harness.repository, client, seam: seam.seam }
+
+    await createQaGroup(deps, { sessionId: SOURCE_SESSION })
+    const other = await createQaGroup(deps, { sessionId: 'session-other' })
+
+    expect(other.reused).toBeUndefined()
+    expect(harness.repository.listChatBindings()).toHaveLength(2)
+  })
+
+  it('opens a new group once the previous Task is archived', async () => {
+    harness = await ready()
+    const seam = seamStub()
+    const client = larkStub()
+    let created = 0
+    vi.mocked(client.createChat).mockImplementation(async () => {
+      created += 1
+      return `oc_created${String(created).padStart(22, '0')}`
+    })
+    const deps = { repository: harness.repository, client, seam: seam.seam }
+    const first = await createQaGroup(deps, { sessionId: SOURCE_SESSION })
+
+    // Archiving is the documented way to end a QA group, so it must also be
+    // what frees the session to open another one.
+    await harness.repository.archiveTask(first.taskId)
+    const second = await createQaGroup(deps, { sessionId: SOURCE_SESSION })
+
+    expect(second.reused).toBeUndefined()
+    expect(second.chatId).not.toBe(first.chatId)
+  })
+
+  it('replaces a live Task whose binding was invalidated', async () => {
+    harness = await ready()
+    const seam = seamStub()
+    const client = larkStub()
+    let created = 0
+    vi.mocked(client.createChat).mockImplementation(async () => {
+      created += 1
+      return `oc_created${String(created).padStart(22, '0')}`
+    })
+    const deps = { repository: harness.repository, client, seam: seam.seam }
+    const first = await createQaGroup(deps, { sessionId: SOURCE_SESSION })
+    await harness.repository.invalidateQaBinding(first.chatId, '源会话已不可用')
+
+    const second = await createQaGroup(deps, { sessionId: SOURCE_SESSION })
+
+    // Handing back a group nobody can be answered in would be worse than
+    // building a working one.
+    expect(second.reused).toBeUndefined()
+    expect(second.chatId).not.toBe(first.chatId)
+    expect(harness.repository.getTask(first.taskId)?.archivedAt).toBeDefined()
+  })
+})
