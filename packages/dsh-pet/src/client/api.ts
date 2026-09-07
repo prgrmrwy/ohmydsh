@@ -12,6 +12,7 @@ import {
   type PetChannelView,
   type PetEnvRecord,
   type PetLifecycleState,
+  type PetQaGroupResult,
   type PetWorkspaceChoice,
 } from '../wire.js'
 
@@ -160,6 +161,17 @@ export const petApi = {
     call(ROUTES.taskDetail, { taskId }),
   createInvocation: (capture: Record<string, unknown>): Promise<Record<string, unknown>> =>
     call(ROUTES.invocationCreate, capture),
+  /**
+   * Run the built-in Q&A action for one source session.
+   *
+   * Not an Invocation: the Host forks the child, creates the Lark group and
+   * writes the binding itself, so there is no Skill to dispatch and no
+   * browser capture to freeze.
+   */
+  createQaGroup: (input: {
+    sourceSessionId: string
+    sessionTitle?: string
+  }): Promise<PetQaGroupResult> => call(ROUTES.qaGroupCreate, input),
   answer: (taskId: string, answer: string): Promise<unknown> =>
     call(ROUTES.invocationAnswer, { taskId, answer }),
   cancel: (taskId: string): Promise<unknown> => call(ROUTES.invocationCancel, { taskId }),

@@ -1540,3 +1540,45 @@ describe('a seam click cannot blur the wheel shut', () => {
     expect(block).toContain('<= wheelRadius) return')
   })
 })
+
+
+describe('the built-in Q&A action is wired end to end', () => {
+  it('routes a builtin capability away from the Invocation path', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // A built-in pins no Skill, so dispatching it as an Invocation would send
+    // a capability id the Host cannot resolve to anything.
+    expect(overlay).toContain("capability.kind === 'builtin'")
+    expect(overlay).toContain('petApi.createQaGroup')
+  })
+
+  it('requires a session source before the group can be created', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // Checked in BOTH places: `blocked` disables the sector, and `run`
+    // re-checks because the source can change between render and click.
+    expect(overlay).toContain('需要当前会话作为来源')
+    expect(overlay).toContain('答疑群需要一个当前会话作为来源')
+  })
+
+  it('never offers to re-bind a QA group to a workspace', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // The Host refuses the rebind; a picker here would promise something that
+    // cannot happen and imply the child is disposable.
+    expect(settings).toContain("route.kind === 'qa'")
+    expect(settings).toContain('已失效')
+  })
+})

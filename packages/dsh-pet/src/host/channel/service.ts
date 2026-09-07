@@ -14,7 +14,7 @@
 import { BotBootstrap, type BootstrapState, type SpawnLike } from './bootstrap.js'
 import { settleFeedback } from './feedback.js'
 import { createLarkCliClient, type LarkClient } from './lark.js'
-import { InboundPipeline, type IntakeOutcome } from './pipeline.js'
+import { InboundPipeline, type IntakeOutcome, type QaDeliveryPort } from './pipeline.js'
 import type { WorkspaceLocator } from './route.js'
 import { ChannelSubscription, type ChannelStatus } from './subscription.js'
 import type { PetCoordinator } from '../coordinator.js'
@@ -28,6 +28,14 @@ export interface ChannelServiceDeps {
   readonly locator: WorkspaceLocator
   /** Overridable for tests; defaults to the real lark-cli client. */
   readonly client?: LarkClient
+  /**
+   * QA delivery, when this Host composed the subagent seam.
+   *
+   * Absent on a Host without it: a qa binding then refuses rather than
+   * falling back to workspace dispatch, which would answer the group from a
+   * fresh executor holding none of the context it exists for.
+   */
+  readonly qaDelivery?: QaDeliveryPort
   /**
    * Overridable process spawn for the binding flow.
    *
@@ -69,6 +77,7 @@ export class ChannelService implements ChannelControl {
       coordinator: deps.coordinator,
       client: this.client,
       locator: deps.locator,
+      ...(deps.qaDelivery !== undefined ? { qaDelivery: deps.qaDelivery } : {}),
       watermark: () => this.subscription.watermark,
       onOutcome: outcome => this.onOutcome(outcome),
     })

@@ -40,13 +40,26 @@ export const PET_DOMAIN_NAME = 'dsh_pet'
 // which is absent on every pre-channel row, and the `chat` source kind that
 // only channel-created Tasks use). v3 data loads unchanged and migration MUST
 // NOT clear any table.
-export const PET_DOMAIN_VERSION = 4
+//
+// Bumped to 5 for the QA group: `chat_bindings` gains `kind` (defaulted to
+// `workspace` on read, so every v4 row keeps its meaning) plus the `qa*`
+// reference fields, and Tasks gain the `qa-chat` source kind. ADDITIVE like
+// v3→v4: no existing row references anything that disappeared, and migration
+// MUST NOT clear any table.
+export const PET_DOMAIN_VERSION = 5
 
 // `chat` joins the original three for Tasks created by an inbound Lark
 // message. It is a distinct scope kind rather than a flavour of `workspace`
 // on purpose: two chats routed to the same workspace must NOT share a Task,
 // and the spec requires chat scopes to be independent.
-const petSourceKind = z.enum(['session', 'workspace', 'none', 'chat'])
+//
+// `qa-chat` names a Task whose "executor" is a fork continuable child of a
+// user session rather than a Pet-created root session. Distinct from `chat`
+// because the two healing paths must never be confused: a `chat` Task heals
+// a stale pointer by creating a NEW executor, while a `qa-chat` Task can
+// never do that — a fresh executor would lose the inherited context that is
+// the whole point of the QA group.
+const petSourceKind = z.enum(['session', 'workspace', 'none', 'chat', 'qa-chat'])
 
 const petTaskStatus = z.enum([
   'creating-executor',
@@ -290,24 +303,59 @@ const petChannelConfig = z.object({
  *
  * p2p rows can ONLY be created by an inbound message: bot identity is barred
  * from listing p2p chats, so their `chatId` is unknowable until one arrives.
+ *
+ * Since v5 a binding carries a `kind`. `workspace` (the default every v4 row
+ * reads as) routes to a registered workspace and behaves exactly as before.
+ * `qa` routes to a fork continuable child of a user session: created ONLY by
+ * the Q&A action (never written back by an inbound message), exempt from the
+ * global sender allowlist, and never re-bindable to a workspace target. The
+ * kind-specific shape is enforced by `superRefine` rather than a union so a
+ * v4 row — which has no `kind` key at all — still parses through the default.
  */
-const petChatBinding = z.object({
-  chatId: z.string().regex(PET_CHAT_ID_PATTERN),
-  chatType: z.enum(['p2p', 'group']),
-  /** Route target. Always a workspace id, never a raw path. */
-  workspaceId: z.string().min(1),
-  /**
-   * Task currently serving this chat, when one exists.
-   *
-   * A POINTER, not ownership: it may go stale (archived, deleted). Consumers
-   * re-verify the Task and heal the pointer rather than trusting it.
-   */
-  activeTaskId: z.string().min(1).optional(),
-  /** Human-readable chat name, cached for the settings list only. */
-  chatName: z.string().optional(),
-  boundBy: z.enum(['auto', 'user']),
-  boundAt: z.number().int(),
-})
+const petChatBinding = z
+  .object({
+    chatId: z.string().regex(PET_CHAT_ID_PATTERN),
+    chatType: z.enum(['p2p', 'group']),
+    /** Binding kind; absent on every v4 row, which reads as `workspace`. */
+    kind: z.enum(['workspace', 'qa']).default('workspace'),
+    /** Route target for `workspace` rows. Always a workspace id, never a raw path. */
+    workspaceId: z.string().min(1).optional(),
+    /**
+     * Task currently serving this chat, when one exists.
+     *
+     * A POINTER, not ownership: it may go stale (archived, deleted). Consumers
+     * re-verify the Task and heal the pointer rather than trusting it.
+     */
+    activeTaskId: z.string().min(1).optional(),
+    /** Human-readable chat name, cached for the settings list only. */
+    chatName: z.string().optional(),
+    /** Fork child session serving a `qa` binding; the route target for qa rows. */
+    qaChildSessionId: z.string().min(1).optional(),
+    /** Source session the qa child was forked from; the resume target. */
+    qaParentSessionId: z.string().min(1).optional(),
+    /**
+     * When the qa binding was invalidated (source session gone, resume
+     * refused), with the reason. Presence means inbound messages no longer
+     * raise work; the child session and its history remain readable.
+     */
+    qaInvalidatedAt: z.number().int().optional(),
+    qaInvalidatedReason: z.string().optional(),
+    boundBy: z.enum(['auto', 'user']),
+    boundAt: z.number().int(),
+  })
+  .superRefine((row, issueCtx) => {
+    // Enforced at the durable boundary so a half-written row fails loud on
+    // open instead of silently routing nowhere.
+    if (row.kind === 'workspace' && (row.workspaceId === undefined || row.workspaceId === '')) {
+      issueCtx.addIssue({ code: 'custom', message: 'workspace binding requires workspaceId' })
+    }
+    if (row.kind === 'qa') {
+      if (row.qaChildSessionId === undefined)
+        issueCtx.addIssue({ code: 'custom', message: 'qa binding requires qaChildSessionId' })
+      if (row.qaParentSessionId === undefined)
+        issueCtx.addIssue({ code: 'custom', message: 'qa binding requires qaParentSessionId' })
+    }
+  })
 
 /**
  * Trusted reply target for one channel-triggered Invocation.
