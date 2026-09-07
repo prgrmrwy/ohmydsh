@@ -19,7 +19,7 @@ import { randomUUID } from 'node:crypto'
 import { PetError } from '../errors.js'
 import { forkQaChild, qaGroupName, type QaActionDeps, type QaSource } from './action.js'
 import { archiveStale, chatOccupancy, qaScopeKeyOf, sessionOccupancy } from './occupancy.js'
-import { resolveSessionByPrefix, type BindableSession } from './resolve-session.js'
+import { displayShortId, resolveSessionByPrefix, type BindableSession } from './resolve-session.js'
 import { TERMINAL_TASK_STATUSES, type PetTaskRecord } from '../../wire.js'
 
 /** How long the whole bind transaction may take before it is abandoned. */
@@ -88,10 +88,14 @@ export async function bindExistingGroup(
   // most likely to trip, since they are standing in the group as they type.
   const byChat = chatOccupancy(repository, request.chatId)
   if (byChat.held) {
+    // The reply goes to a GROUP, so it must not carry a full session id:
+    // everyone present would see an internal identifier they have no use for
+    // and no business holding. The short form is enough to recognise it.
+    const boundTo = byChat.occupant.binding.qaParentSessionId
     return {
       ok: false,
       reason: 'chat-occupied',
-      detail: byChat.occupant.binding.qaParentSessionId ?? '',
+      ...(boundTo !== undefined ? { detail: displayShortId(boundTo) } : {}),
     }
   }
 
@@ -112,7 +116,11 @@ export async function bindExistingGroup(
     return {
       ok: false,
       reason: 'session-occupied',
-      detail: bySession.occupant.binding.chatName ?? bySession.occupant.binding.chatId,
+      detail:
+        bySession.occupant.binding.chatName ??
+        // No cached name: say nothing identifying rather than printing a raw
+        // chat id into a different group's transcript.
+        '另一个群',
     }
   }
 
@@ -129,7 +137,11 @@ export async function bindExistingGroup(
       .then(handle => handle?.agent ?? deps.seam.agents.get(target.id))
       .catch(() => undefined))
   if (liveParent === undefined) {
-    return { ok: false, reason: 'source-unforkable', detail: target.title ?? target.id }
+    return {
+      ok: false,
+      reason: 'source-unforkable',
+      detail: target.title ?? displayShortId(target.id),
+    }
   }
 
   const worktree = await deps.resolveWorktree?.(target.id).catch(() => undefined)
@@ -197,8 +209,8 @@ export async function bindExistingGroup(
       chatId: request.chatId,
       childSessionId: childId,
       taskId: task.id,
-      sourceTitle: target.title ?? target.id,
-      sourceShortId: target.id.replace(/^session-/, '').slice(0, 6),
+      sourceTitle: target.title ?? displayShortId(target.id),
+      sourceShortId: displayShortId(target.id),
       ...(memberCount !== undefined ? { memberCount } : {}),
       ...(worktree !== undefined ? { executionRoot: worktree.executionRoot } : {}),
     }
