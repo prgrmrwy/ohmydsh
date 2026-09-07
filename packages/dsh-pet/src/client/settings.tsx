@@ -1579,24 +1579,43 @@ function ChannelTab(): JSX.Element {
                 <span>
                   {route.chatName ?? route.chatId}
                   {route.chatType === 'p2p' ? '（单聊）' : ''}
-                  {route.boundBy === 'auto' ? ' · 自动' : ' · 手动'}
+                  {route.kind === 'qa'
+                    ? ' · 答疑群'
+                    : route.boundBy === 'auto'
+                      ? ' · 自动'
+                      : ' · 手动'}
+                  {route.kind === 'qa' && route.qaInvalidatedAt !== undefined
+                    ? `（已失效：${route.qaInvalidatedReason ?? '源会话不可用'}）`
+                    : ''}
                 </span>
-                <select
-                  value={route.workspaceId}
-                  onChange={event =>
-                    void mutate({
-                      action: 'rebind-chat',
-                      chatId: route.chatId,
-                      workspaceId: event.target.value,
-                    })
-                  }
-                >
-                  {workspaces.map(workspace => (
-                    <option key={workspace.id} value={workspace.id}>
-                      {workspace.title ?? workspace.id}
-                    </option>
-                  ))}
-                </select>
+                {/*
+                  A qa group routes to its fork child, not to a workspace.
+                  Offering the picker would imply it can be re-pointed, which
+                  would discard the child holding the inherited context — the
+                  Host refuses that anyway, so the UI must not suggest it.
+                */}
+                {route.kind === 'qa' ? (
+                  <span className="dshpet-item-hint">
+                    绑定会话 {route.qaParentSessionId ?? '（未知）'}
+                  </span>
+                ) : (
+                  <select
+                    value={route.workspaceId ?? ''}
+                    onChange={event =>
+                      void mutate({
+                        action: 'rebind-chat',
+                        chatId: route.chatId,
+                        workspaceId: event.target.value,
+                      })
+                    }
+                  >
+                    {workspaces.map(workspace => (
+                      <option key={workspace.id} value={workspace.id}>
+                        {workspace.title ?? workspace.id}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <button
                   type="button"
                   className="dshpet-action"

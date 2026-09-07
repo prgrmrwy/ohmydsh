@@ -178,7 +178,7 @@ describe('a healthy v2 medium upgrades to v3 without losing anything', () => {
   })
 })
 
-describe('a healthy v3 medium upgrades to v4 without losing anything', () => {
+describe('a healthy older medium upgrades additively without losing anything', () => {
   /** Build a database stamped v3 whose rows are already in the current shape. */
   async function v3Database(): Promise<string> {
     const dir = await mkdtemp(path.join(tmpdir(), 'pet-migrate-'))
@@ -221,13 +221,13 @@ describe('a healthy v3 medium upgrades to v4 without losing anything', () => {
     return file
   }
 
-  it('restamps v3 to v4 with nothing to clean', async () => {
+  it('restamps v3 straight to the current version with nothing to clean', async () => {
     const file = await v3Database()
 
     const result = removeLegacyState(file)
 
-    // The channel bump only ADDS tables and optional fields, so no existing
-    // row is incompatible.
+    // The channel and QA bumps only ADD tables and optional fields, so no
+    // existing row is incompatible.
     expect(result).toEqual({ removedRows: 0, clearedTables: [] })
 
     const db = new DatabaseSync(file)
@@ -235,8 +235,11 @@ describe('a healthy v3 medium upgrades to v4 without losing anything', () => {
       const stamped = db.prepare('SELECT version FROM units WHERE name = ?').get('dsh_pet') as {
         version: number
       }
+      // Restamped to the CURRENT version rather than the next one: every bump
+      // since v3 has been additive, so the medium is readable as v5 without a
+      // row being touched.
       expect(stamped.version).toBe(PET_DOMAIN_VERSION)
-      expect(stamped.version).toBe(4)
+      expect(stamped.version).toBe(5)
     } finally {
       db.close()
     }

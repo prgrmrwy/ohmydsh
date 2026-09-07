@@ -91,6 +91,28 @@ export interface LarkClient {
    * @param text - Reply body.
    */
   reply(messageId: string, text: string): Promise<void>
+  /**
+   * Create a private group owned by the bot and invite the given users.
+   *
+   * NOT fail-soft, unlike the rest of this client: the QA group transaction
+   * treats a failure here as a reason to roll the whole action back, so an
+   * unusable result MUST raise rather than resolve to `undefined` and let a
+   * binding be written against a group that does not exist.
+   * @param name - Group name.
+   * @param userOpenIds - Members to invite besides the bot itself.
+   * @returns the new chat id.
+   * @throws when lark-cli refused or returned no chat id.
+   */
+  createChat(name: string, userOpenIds: readonly string[]): Promise<string>
+  /**
+   * Send a standalone message to a chat as the bot.
+   *
+   * Distinct from {@link reply}: a notice about an invalidated QA binding has
+   * no trigger message worth threading under.
+   * @param chatId - Target chat.
+   * @param text - Message body.
+   */
+  sendToChat(chatId: string, text: string): Promise<void>
 }
 
 /** How long any single lark-cli call may take. */
@@ -271,6 +293,48 @@ export function createLarkCliClient(binary = 'lark-cli'): LarkClient {
     async reply(messageId, text) {
       await callCli(
         ['im', '+messages-reply', '--as', 'bot', '--message-id', messageId, '--text', text],
+        binary,
+      )
+    },
+
+    async createChat(name, userOpenIds) {
+      // Deliberately NOT routed through `callCli`, which swallows every
+      // failure into `undefined`. A QA binding written against a group that
+      // was never created is exactly the silent breakage the transaction
+      // exists to prevent, so this one call reports why it failed.
+      const args = ['im', '+chat-create', '--as', 'bot', '--name', name]
+      if (userOpenIds.length > 0) args.push('--users', userOpenIds.join(','))
+      let stdout: string
+      try {
+        const result = await run(binary, args, {
+          timeout: CALL_TIMEOUT_MS,
+          maxBuffer: 8 * 1024 * 1024,
+        })
+        stdout = result.stdout
+      } catch (error) {
+        throw new Error(
+          `lark-cli could not create the group: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        )
+      }
+      let parsed: { ok?: boolean; data?: unknown }
+      try {
+        parsed = JSON.parse(stdout) as { ok?: boolean; data?: unknown }
+      } catch {
+        throw new Error('lark-cli returned an unreadable response for group creation')
+      }
+      if (parsed.ok !== true) throw new Error('lark-cli refused to create the group')
+      const chatId = (parsed.data as { chat_id?: unknown } | undefined)?.chat_id
+      if (typeof chatId !== 'string' || chatId === '') {
+        throw new Error('lark-cli created no group id')
+      }
+      return chatId
+    },
+
+    async sendToChat(chatId, text) {
+      await callCli(
+        ['im', '+messages-send', '--as', 'bot', '--chat-id', chatId, '--text', text],
         binary,
       )
     },
