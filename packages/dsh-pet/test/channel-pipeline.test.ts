@@ -708,11 +708,12 @@ describe('the /bind command in the intake path', () => {
     expect(handled).toHaveLength(1)
   })
 
-  it('stops recognising the command once the group is bound', async () => {
+  it('refuses /bind in an already bound group instead of answering it', async () => {
     const f = await fixture()
     harness = f.harness
     await liveQaPairing(f, PLAIN, 'session-plain', 'bound')
     const delivered: string[] = []
+    const handled: { chatId: string; prefix: string }[] = []
     const pipeline = new InboundPipeline({
       repository: f.harness.repository,
       coordinator: f.coordinator,
@@ -726,8 +727,9 @@ describe('the /bind command in the intake path', () => {
         },
       },
       bindCommand: {
-        handle: async () => {
-          throw new Error('bind must not run in an already-bound group')
+        handle: async (event, prefix) => {
+          handled.push({ chatId: event.chat_id, prefix })
+          return { kind: 'accepted', invocationId: 'bind-1' }
         },
         unbind: async () => ({ kind: 'accepted', invocationId: 'unbind-1' }),
       },
@@ -735,10 +737,13 @@ describe('the /bind command in the intake path', () => {
 
     const outcome = await pipeline.handleLine(bindLine())
 
-    // In a working QA group the same text is conversation again; re-parsing
-    // it would hijack an ordinary question.
+    // Gating RECOGNITION on the group's state made this fall through as an
+    // ordinary question: the user got whatever the child chose to say and
+    // never the one fact they needed. The command reaches the handler, which
+    // answers "this group is already bound".
     expect(outcome.kind).toBe('accepted')
-    expect(delivered).toEqual(['om_bind1'])
+    expect(handled).toEqual([{ chatId: PLAIN, prefix: 'abc123' }])
+    expect(delivered).toHaveLength(0)
   })
 
   it('leaves non-command messages in unbound groups untouched', async () => {
@@ -805,7 +810,7 @@ describe('the /unbind command in the intake path', () => {
     expect(delivered).toHaveLength(0)
   })
 
-  it('is ordinary text in an unbound group', async () => {
+  it('reaches the handler in an unbound group, which reports nothing to undo', async () => {
     const f = await fixture()
     harness = f.harness
     const { pipeline, unbound } = withCommands(f)
@@ -814,7 +819,10 @@ describe('the /unbind command in the intake path', () => {
       groupLine({ chat_id: 'oc_nothingbound0000000000000000', content: '@小小芒果 /unbind' }),
     )
 
-    expect(unbound).toHaveLength(0)
+    // An explicit verb aimed at the bot is a command attempt in any group;
+    // the handler answers "nothing is bound here" rather than the message
+    // being silently treated as conversation.
+    expect(unbound).toEqual(['oc_nothingbound0000000000000000'])
   })
 
   it('silently drops a non-allowlist sender', async () => {
@@ -850,5 +858,86 @@ describe('the /unbind command in the intake path', () => {
 
     expect(unbound).toHaveLength(0)
     expect(delivered).toEqual(['om_q9'])
+  })
+})
+
+describe('command refusals are mechanical, not delegated to the model', () => {
+  const BOUND2 = 'oc_mechanical0000000000000000000'
+
+  it('refuses a second /bind without involving the child at all', async () => {
+    const f = await fixture()
+    harness = f.harness
+    await liveQaPairing(f, BOUND2, 'session-already', 'bound')
+    const delivered: string[] = []
+    const handled: string[] = []
+    const pipeline = new InboundPipeline({
+      repository: f.harness.repository,
+      coordinator: f.coordinator,
+      client: f.client,
+      locator: { locate: () => undefined },
+      watermark: () => 1000,
+      qaDelivery: {
+        deliver: async event => {
+          delivered.push(event.message_id)
+          return { kind: 'accepted', invocationId: 'qa-1' }
+        },
+      },
+      bindCommand: {
+        handle: async event => {
+          handled.push(event.chat_id)
+          return { kind: 'accepted', invocationId: 'bind-1' }
+        },
+        unbind: async () => ({ kind: 'accepted', invocationId: 'unbind-1' }),
+      },
+    })
+
+    await pipeline.handleLine(
+      groupLine({ chat_id: BOUND2, message_id: 'om_rebind', content: '@小小芒果 /bind abc123' }),
+    )
+
+    // The real failure this guards: with recognition gated on the group's
+    // state, a second `/bind` fell through to the child, which spent a full
+    // turn reasoning its way to "that conflicts" — a correct answer produced
+    // by the wrong mechanism. It was slow, it was only as reliable as the
+    // model's judgement that turn, and the command's intent reached a model
+    // that had no business deciding it.
+    //
+    // Conflict is a database fact. It must be answered by a lookup.
+    expect(handled).toEqual([BOUND2])
+    expect(delivered).toHaveLength(0)
+  })
+
+  it('answers /unbind in an unbound group without involving the child', async () => {
+    const f = await fixture()
+    harness = f.harness
+    const unbound: string[] = []
+    const delivered: string[] = []
+    const pipeline = new InboundPipeline({
+      repository: f.harness.repository,
+      coordinator: f.coordinator,
+      client: f.client,
+      locator: { locate: () => undefined },
+      watermark: () => 1000,
+      qaDelivery: {
+        deliver: async event => {
+          delivered.push(event.message_id)
+          return { kind: 'accepted', invocationId: 'qa-1' }
+        },
+      },
+      bindCommand: {
+        handle: async () => ({ kind: 'accepted', invocationId: 'bind-1' }),
+        unbind: async event => {
+          unbound.push(event.chat_id)
+          return { kind: 'accepted', invocationId: 'unbind-1' }
+        },
+      },
+    })
+
+    await pipeline.handleLine(
+      groupLine({ chat_id: 'oc_freegroup000000000000000000', content: '@小小芒果 /unbind' }),
+    )
+
+    expect(unbound).toHaveLength(1)
+    expect(delivered).toHaveLength(0)
   })
 })
