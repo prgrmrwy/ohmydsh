@@ -19,6 +19,11 @@ export type RouteDecision =
       readonly workspacePath: string
       readonly binding: PetChatBinding
     }
+  | {
+      /** A qa binding: the target is its fork child, not a workspace. */
+      readonly routed: 'qa'
+      readonly binding: PetChatBinding
+    }
   | { readonly routed: false; readonly reason: string }
 
 /** Reads a chat's display name, for the route row and prompts. */
@@ -55,24 +60,29 @@ export async function routeChat(
 ): Promise<RouteDecision> {
   const existing = repository.getChatBinding(chat.chatId)
   if (existing !== undefined) {
+    // A qa binding routes to its fork child; the workspace machinery below
+    // does not apply. Deciding whether the binding is still serviceable
+    // (invalidation, parent resume) belongs to the qa delivery path, not here.
+    if (existing.kind === 'qa') return { routed: 'qa', binding: existing }
+    const boundWorkspace = existing.workspaceId ?? ''
     // Backfill a row created before the name could be read, so an older
     // binding stops showing as a bare `oc_…` forever.
     if (existing.chatName === undefined && namer !== undefined) {
       const resolved = await namer.chatName(chat.chatId)
       if (resolved !== undefined) {
         await repository.putChatBinding({ ...existing, chatName: resolved })
-        const path = locator.locate(existing.workspaceId)
+        const path = locator.locate(boundWorkspace)
         if (path !== undefined) {
           return {
             routed: true,
-            workspaceId: existing.workspaceId,
+            workspaceId: boundWorkspace,
             workspacePath: path,
             binding: { ...existing, chatName: resolved },
           }
         }
       }
     }
-    const path = locator.locate(existing.workspaceId)
+    const path = locator.locate(boundWorkspace)
     if (path === undefined) {
       // The binding still names a workspace, but that workspace is gone.
       // Silently re-routing to the default would run the user's request in a
@@ -80,11 +90,11 @@ export async function routeChat(
       return {
         routed: false,
         reason:
-          `Chat ${chat.chatId} is bound to workspace '${existing.workspaceId}', ` +
+          `Chat ${chat.chatId} is bound to workspace '${boundWorkspace}', ` +
           'which is no longer registered in this Host.',
       }
     }
-    return { routed: true, workspaceId: existing.workspaceId, workspacePath: path, binding: existing }
+    return { routed: true, workspaceId: boundWorkspace, workspacePath: path, binding: existing }
   }
 
   const config = repository.getChannelConfig()
@@ -117,6 +127,7 @@ export async function routeChat(
   const binding = await repository.putChatBinding({
     chatId: chat.chatId,
     chatType: chat.chatType,
+    kind: 'workspace',
     workspaceId: fallback,
     ...(resolvedName !== undefined ? { chatName: resolvedName } : {}),
     boundBy: 'auto',

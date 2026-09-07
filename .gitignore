@@ -15,6 +15,11 @@ packages/*/package-lock.json
 openspec/changes/**/checking/baselines/
 openspec/changes/**/checking/screenshots/
 
+# Host-capability spikes are throwaway probes. Their CONCLUSIONS live in the
+# owning change's design doc; the scripts and raw output are not artifacts the
+# repository needs to carry.
+spike/
+
 # Architecture source + one theme-aware SVG are tracked; duplicate exports are not.
 archify-out/*.png
 archify-out/*.html

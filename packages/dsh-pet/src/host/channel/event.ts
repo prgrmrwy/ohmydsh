@@ -83,6 +83,14 @@ export interface AdmissionContext {
   readonly watermark: number
   /** Whether this message id was already seen inside the dedup window. */
   readonly isDuplicate: (messageId: string) => boolean
+  /**
+   * Whether this chat is a QA group binding, which exempts the SENDER
+   * allowlist only. A QA group is created by the Host itself and its members
+   * can only be invited by people already inside (initially the owner), so
+   * membership is the admission credential. Every other gate — bot-sender,
+   * mention, dedup, watermark, message type — still applies unchanged.
+   */
+  readonly isQaChat?: (chatId: string) => boolean
 }
 
 /** Message types Pet can act on. Others are refused rather than guessed at. */
@@ -112,9 +120,14 @@ export function admitInboundEvent(
   }
 
   // Identity gate. An empty allowlist admits NOBODY: an unconfigured channel
-  // must not be an open one.
+  // must not be an open one. A QA group is the single exemption — membership
+  // is its credential (the Host created the group; only insiders can invite)
+  // — and the exemption is scoped to THIS chat: the same sender in any other
+  // conversation is still judged by the allowlist.
   const sender = event.sender_id ?? ''
-  if (sender === '' || !context.allowOpenIds.includes(sender)) {
+  if (sender === '') return { admit: false, reason: 'not-allowed-sender' }
+  const qaExempt = context.isQaChat?.(event.chat_id) === true
+  if (!qaExempt && !context.allowOpenIds.includes(sender)) {
     return { admit: false, reason: 'not-allowed-sender' }
   }
 

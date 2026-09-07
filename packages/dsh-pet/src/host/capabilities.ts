@@ -27,9 +27,34 @@ export interface CapabilityDeclaration {
   readonly probe?: () => string | undefined
 }
 
+/**
+ * A Host built-in action shown on the wheel.
+ *
+ * Not a capability and not a Skill: it runs Host code directly, so it has no
+ * skill name, no Invocation and no allowlist entry. It exists because some
+ * actions cannot be a Skill at all — the QA group must fork a live Agent and
+ * write a trusted binding, neither of which a Skill can reach — and hiding
+ * that behind a fake Skill would be the "two-tier Skill" the design forbids.
+ */
+export interface BuiltinActionDeclaration {
+  /** Stable action id; MUST NOT collide with a Skill name. */
+  readonly id: string
+  readonly label: string
+  readonly description: string
+  /**
+   * Whether the action can run right now.
+   *
+   * Returning a string disables it with that reason. Unlike a Skill probe
+   * this is the ONLY availability authority: there is no allowlist entry to
+   * fall back on.
+   */
+  readonly probe: () => string | undefined
+}
+
 /** Host-side registry of declared capabilities. */
 export class CapabilityRegistry {
   private readonly declarations = new Map<string, CapabilityDeclaration>()
+  private readonly builtins = new Map<string, BuiltinActionDeclaration>()
 
   /**
    * Declare a capability.
@@ -40,6 +65,18 @@ export class CapabilityRegistry {
     this.declarations.set(declaration.id, declaration)
     return () => {
       this.declarations.delete(declaration.id)
+    }
+  }
+
+  /**
+   * Declare a Host built-in action.
+   * @param action - The action declaration.
+   * @returns a disposer removing it.
+   */
+  registerBuiltin(action: BuiltinActionDeclaration): () => void {
+    this.builtins.set(action.id, action)
+    return () => {
+      this.builtins.delete(action.id)
     }
   }
 
@@ -98,6 +135,7 @@ export class CapabilityRegistry {
         label: selection.skillName,
         description: revision.description,
         skillName: selection.skillName,
+        kind: 'skill',
         available: true,
         showAsShortcut: selection.showAsShortcut ?? true,
       })
@@ -117,7 +155,31 @@ export class CapabilityRegistry {
       })
     }
 
-    return [...projected.values()].sort((left, right) => left.id.localeCompare(right.id))
+    // Built-in actions are the one wheel entry that is NOT a Skill. They are
+    // appended, never merged into the map above: sharing the id space with
+    // Skill names would let an imported Skill called `qa-group` collide with
+    // — or quietly shadow — a Host action.
+    const builtins: PetCapability[] = []
+    for (const action of this.builtins.values()) {
+      const diagnostic = action.probe()
+      builtins.push({
+        id: action.id,
+        label: action.label,
+        description: action.description,
+        // Kept for wire compatibility; a built-in resolves to no Skill, and
+        // nothing may look one up from this value.
+        skillName: '',
+        kind: 'builtin',
+        available: diagnostic === undefined,
+        ...(diagnostic !== undefined ? { diagnostic } : {}),
+        showAsShortcut: true,
+      })
+    }
+
+    return [
+      ...[...projected.values()].sort((left, right) => left.id.localeCompare(right.id)),
+      ...builtins.sort((left, right) => left.id.localeCompare(right.id)),
+    ]
   }
 
   /**

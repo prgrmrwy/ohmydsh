@@ -38,7 +38,7 @@ import {
   writePosition,
   type PetPosition,
 } from './position.js'
-import type { PetCapability, PetSourceKind } from '../wire.js'
+import { QA_GROUP_ACTION_ID, type PetCapability, type PetSourceKind } from '../wire.js'
 
 /** Current browser source selection, captured atomically on invoke. */
 export interface SourceSelection {
@@ -329,6 +329,26 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
       // actually protecting the dangerous ones.
       setBusy(true)
       try {
+        // A built-in action is not an Invocation and pins no Skill: the Host
+        // runs it directly, so there is no capture to freeze and no
+        // capability envelope to dispatch.
+        if (capability.kind === 'builtin') {
+          if (capability.id !== QA_GROUP_ACTION_ID) {
+            throw new PetApiError('INVALID_REQUEST', `未知的内置动作 ${capability.id}`)
+          }
+          // Re-checked here as well as in `blocked`: the source can change
+          // between render and click, and a QA group needs a real session to
+          // fork — a workspace or independent source has nothing to inherit.
+          if (effectiveSource.kind !== 'session' || effectiveSource.sessionId === undefined) {
+            throw new PetApiError('INVALID_REQUEST', '答疑群需要一个当前会话作为来源')
+          }
+          await petApi.createQaGroup({
+            sourceSessionId: effectiveSource.sessionId,
+            ...(effectiveSource.title !== undefined ? { sessionTitle: effectiveSource.title } : {}),
+          })
+          setMode('panel')
+          return
+        }
         // The atomic capture: whatever the browser shows RIGHT NOW is frozen
         // into the request. Later page switches cannot change this Invocation.
         await petApi.createInvocation({
@@ -363,8 +383,17 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   // declaring it, and such a declaration is exactly the Pet-adaptation this
   // design removes. A Skill that needs a session checks its own snapshot and
   // stops to ask, so the wheel stays live and the answer comes from the Skill.
-  const blocked = (capability: PetCapability): string | undefined =>
-    capability.available ? undefined : (capability.diagnostic ?? 'Unavailable')
+  //
+  // A BUILT-IN action is different, and gating it here is not a regression of
+  // that rule: it is Host code with a known, fixed requirement, not a Skill
+  // whose needs Pet would have to guess.
+  const blocked = (capability: PetCapability): string | undefined => {
+    if (!capability.available) return capability.diagnostic ?? 'Unavailable'
+    if (capability.kind === 'builtin' && capability.id === QA_GROUP_ACTION_ID) {
+      if (effectiveSource.kind !== 'session') return '需要当前会话作为来源'
+    }
+    return undefined
+  }
 
   return (
     <div
@@ -777,7 +806,12 @@ function TaskPanel(props: {
                   // chat id tells the reader nothing about where the work
                   // came from.
                   `飞书：${task.sourceTitle ?? task.sourceId ?? task.id}`
-                : `${task.sourceKind}: ${task.sourceTitle ?? task.sourceId ?? task.id}`}
+                : task.sourceKind === 'qa-chat'
+                  ? // A QA group's "executor" is a fork child of a user
+                    // session, so opening it lands in that child rather than
+                    // in a Pet-created executor.
+                    `答疑群：${task.sourceTitle ?? task.sourceId ?? task.id}`
+                  : `${task.sourceKind}: ${task.sourceTitle ?? task.sourceId ?? task.id}`}
           </strong>
           <span className="dshpet-status" style={{ marginLeft: 6 }}>
             {task.status}
@@ -787,9 +821,20 @@ function TaskPanel(props: {
             Pet's Skill projection and standing instructions do NOT apply.
             Saying so here keeps the panel honest about which form is running.
           */}
-          {task.residentWorkspaceId !== undefined ? (
+          {task.residentWorkspaceId !== undefined && task.sourceKind !== 'qa-chat' ? (
             <span className="dshpet-status" style={{ marginLeft: 4 }}>
               工作区内执行
+            </span>
+          ) : null}
+          {/*
+            A QA Task's executor is a fork child of a user session, not a
+            session Pet created: it inherits that session's composition and
+            context, and Pet promises no Skill boundary over it. Labelling it
+            as an ordinary resident Task would misstate both.
+          */}
+          {task.sourceKind === 'qa-chat' ? (
+            <span className="dshpet-status" style={{ marginLeft: 4 }}>
+              会话子代理
             </span>
           ) : null}
           {task.sourceAvailability === 'archived' ? (
