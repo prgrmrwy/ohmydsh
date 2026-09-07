@@ -134,21 +134,21 @@ export function renderChannelPrompt(trigger: TriggerFacts, context: ChatContext)
     )
     lines.push('')
     lines.push('```bash')
-    lines.push('lark-cli skills list                 # 有哪些能力（im/contact/doc/base/…）')
-    lines.push('lark-cli skills read lark-im         # 精读某个领域的完整用法')
-    lines.push('lark-cli <domain> --help             # 某个领域的命令清单')
+    lines.push('lark-cli --profile dsh-pet skills list       # 有哪些能力（im/contact/doc/base/…）')
+    lines.push('lark-cli --profile dsh-pet skills read lark-im # 精读某个领域的完整用法')
+    lines.push('lark-cli --profile dsh-pet <domain> --help   # 某个领域的命令清单')
     lines.push('```')
     lines.push('')
     lines.push(
       '**回复也由你发出**：分析完成后请主动把结论回到本会话，' +
-        `回复到触发消息 \`${trigger.messageId}\` 上（例如 \`lark-cli im +messages-reply\`）。` +
+        `回复到触发消息 \`${trigger.messageId}\` 上（例如 \`lark-cli --profile dsh-pet im +messages-reply\`）。` +
         '系统不会代你发送任何内容——你不发，用户就收不到。',
     )
     lines.push('')
     lines.push(
       '几条硬性要求：' +
         `**只发到本次会话** \`${trigger.chatId}\`，不要发往任何其它群或个人；` +
-        '所有调用显式带 `--as bot`（user 身份会让消息以用户本人名义发出）；' +
+        '所有调用都使用 `--profile dsh-pet` 并显式带 `--as bot`（user 身份会让消息以用户本人名义发出）；' +
         '结论较长或含结构化内容时优先用消息卡片，普通结论用文本即可；' +
         '不要把中间过程逐条播报，一次说清即可。',
     )

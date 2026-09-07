@@ -12,9 +12,9 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process'
+import { PET_CLI_PROFILE, petConfigInitArgs } from './cli.js'
 
-/** lark-cli profile Pet keeps its own bot in. */
-export const PET_CLI_PROFILE = 'dsh-pet'
+export { PET_CLI_PROFILE } from './cli.js'
 
 /** Progress of a create-new-bot flow. */
 export type BootstrapPhase = 'idle' | 'awaiting-authorization' | 'bound' | 'failed'
@@ -84,7 +84,8 @@ export function findAppId(text: string): string | undefined {
 export class BotBootstrap {
   private child: ChildProcess | undefined
   private state: BootstrapState = { phase: 'idle' }
-  private output = ''
+  /** Fences cancellation and replacement of an in-flight binding attempt. */
+  private generation = 0
 
   /**
    * @param options - Binding inputs.
@@ -104,7 +105,7 @@ export class BotBootstrap {
    * @returns the terminal state.
    */
   async createNew(): Promise<BootstrapState> {
-    return this.run(['config', 'init', '--new', '--profile', this.profile])
+    return this.run(petConfigInitArgs(['--new'], this.profile))
   }
 
   /**
@@ -125,13 +126,14 @@ export class BotBootstrap {
       return this.settle({ phase: 'failed', diagnostic: 'App Secret is required.' })
     }
     return this.run(
-      ['config', 'init', '--app-id', appId, '--app-secret-stdin', '--profile', this.profile],
+      petConfigInitArgs(['--app-id', appId, '--app-secret-stdin'], this.profile),
       appSecret,
     )
   }
 
   /** Abort an in-flight flow. */
   cancel(): void {
+    this.generation += 1
     const child = this.child
     this.child = undefined
     if (child !== undefined && child.exitCode === null) child.kill('SIGTERM')
@@ -158,7 +160,14 @@ export class BotBootstrap {
       ((command: string, commandArgs: readonly string[]) =>
         spawn(command, [...commandArgs], { stdio: ['pipe', 'pipe', 'pipe'] }))
 
-    this.output = ''
+    // Starting a replacement attempt explicitly cancels the prior one. Its
+    // callbacks are generation-fenced below and cannot mutate the new state.
+    const previous = this.child
+    this.generation += 1
+    const generation = this.generation
+    this.child = undefined
+    if (previous !== undefined && previous.exitCode === null) previous.kill('SIGTERM')
+    let output = ''
     this.settle({ phase: 'awaiting-authorization' })
 
     let child: ChildProcess
@@ -181,7 +190,8 @@ export class BotBootstrap {
     }
 
     const absorb = (chunk: string): void => {
-      this.output += chunk
+      if (generation !== this.generation || child !== this.child) return
+      output += chunk
       if (this.state.phase !== 'awaiting-authorization') return
       const url = findVerificationUrl(chunk)
       // Surface the link as soon as it appears; the process keeps running
@@ -196,29 +206,40 @@ export class BotBootstrap {
     child.stderr?.on('data', absorb)
 
     return new Promise<BootstrapState>(resolve => {
-      child.on('error', error =>
-        resolve(this.settle({ phase: 'failed', diagnostic: describe(error) })),
-      )
-      child.on('exit', code => {
+      let resolved = false
+      const finish = (state: BootstrapState): void => {
+        if (resolved) return
+        resolved = true
+        resolve(state)
+      }
+      child.on('error', error => {
+        if (generation !== this.generation || child !== this.child) {
+          finish({ phase: 'idle' })
+          return
+        }
         this.child = undefined
-        const captured = this.output
-        // Never retain the output: for the connect path it was fed a secret,
-        // and the CLI may echo parts of its input on error.
-        this.output = ''
+        finish(this.settle({ phase: 'failed', diagnostic: describe(error) }))
+      })
+      child.on('exit', code => {
+        if (generation !== this.generation || child !== this.child) {
+          finish({ phase: 'idle' })
+          return
+        }
+        this.child = undefined
+        const captured = output
+        output = ''
         if (code !== 0) {
-          resolve(
+          finish(
             this.settle({
               phase: 'failed',
-              diagnostic: summarizeFailure(captured, code),
+              diagnostic: summarizeFailure(captured, code, stdinPayload),
             }),
           )
           return
         }
         const appId = findAppId(captured)
         if (appId === undefined) {
-          // Exit code says success but nothing identifies the app: reporting
-          // "bound" here would leave a configuration Pet cannot describe.
-          resolve(
+          finish(
             this.settle({
               phase: 'failed',
               diagnostic: 'lark-cli reported success but no App ID could be read from its output.',
@@ -226,7 +247,7 @@ export class BotBootstrap {
           )
           return
         }
-        resolve(this.settle({ phase: 'bound', appId }))
+        finish(this.settle({ phase: 'bound', appId }))
       })
     })
   }
@@ -238,17 +259,27 @@ export class BotBootstrap {
  * @param code - Exit code.
  * @returns the diagnostic.
  */
-function summarizeFailure(output: string, code: number | null): string {
-  // Only lines that look like messages, and only a couple of them: the raw
-  // stream may contain fragments of whatever was piped in.
+function summarizeFailure(
+  output: string,
+  code: number | null,
+  secret?: string,
+): string {
   const line = output
     .split('\n')
     .map(entry => entry.trim())
     .filter(entry => entry !== '' && !entry.startsWith('{'))
     .at(-1)
-  return line !== undefined && line !== ''
-    ? `lark-cli exited with code ${code}: ${line}`
-    : `lark-cli exited with code ${code}.`
+  // A CLI is allowed to echo stdin on failure. Never surface any free-form
+  // line containing the submitted secret (or fragments for very short input).
+  const unsafe =
+    line === undefined ||
+    line === '' ||
+    // Connect flows feed a secret on stdin; never surface ANY free-form CLI
+    // line from that process because it may echo an arbitrary secret fragment.
+    secret !== undefined
+  return unsafe
+    ? `lark-cli exited with code ${code}. Check the App ID/Secret and lark-cli version.`
+    : `lark-cli exited with code ${code}: ${line}`
 }
 
 /**

@@ -44,6 +44,8 @@ export type PetDomain = Domain<typeof petDomainSpec>
 /** Durable Pet data access with domain invariants enforced on every write. */
 export class PetRepository {
   private readonly domain: PetDomain
+  /** Serializes read-modify-write channel updates to prevent stale row replacement. */
+  private channelConfigWrite: Promise<void> = Promise.resolve()
 
   /**
    * @param domain - The opened `dsh-pet` domain handle.
@@ -655,6 +657,23 @@ export class PetRepository {
     }
     await this.domain.table('channel_config').put(PET_CHANNEL_CONFIG_KEY, config as never)
     return config
+  }
+
+  /** Atomically transform the latest channel row within this Host process. */
+  async updateChannelConfig(
+    transform: (current: PetChannelConfig) => PetChannelConfig,
+  ): Promise<PetChannelConfig> {
+    let result: PetChannelConfig | undefined
+    const operation = this.channelConfigWrite.then(async () => {
+      result = await this.putChannelConfig(transform(this.getChannelConfig()))
+    })
+    this.channelConfigWrite = operation.then(
+      () => undefined,
+      () => undefined,
+    )
+    await operation
+    if (result === undefined) throw new PetError('INTERNAL', 'Channel configuration update failed.')
+    return result
   }
 
   // -- chat bindings --------------------------------------------------------

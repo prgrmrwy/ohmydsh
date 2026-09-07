@@ -14,8 +14,15 @@
 
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { PET_CLI_PROFILE, petCliArgs } from './cli.js'
 
 const run = promisify(execFile)
+
+export type LarkCliRunner = (
+  binary: string,
+  args: readonly string[],
+  options: { timeout: number; maxBuffer: number },
+) => Promise<{ stdout: string; stderr?: string }>
 
 /** One historical message, reduced to what the prompt needs. */
 export interface LarkHistoryMessage {
@@ -36,8 +43,35 @@ export interface LarkChatBot {
   readonly name: string
 }
 
+/** Non-secret identity proven by `auth status --verify`. */
+export interface LarkBotIdentity {
+  readonly appId: string
+  readonly openId: string
+  readonly name?: string
+}
+
+/** Safe subset of a structured lark-cli authorization error. */
+export interface LarkPermissionDiagnostic {
+  readonly code?: number
+  readonly missingScopes: readonly string[]
+  readonly consoleUrl?: string
+}
+
+/** Result of an identity probe; failures never guess an identity. */
+export type LarkIdentityProbe =
+  | { readonly kind: 'ready'; readonly identity: LarkBotIdentity }
+  | { readonly kind: 'unavailable'; readonly diagnostic: string }
+
+/** Result of listing bot members without collapsing permission failures. */
+export type LarkChatBotsResult =
+  | { readonly kind: 'ok'; readonly bots: readonly LarkChatBot[] }
+  | { readonly kind: 'permission-denied'; readonly diagnostic: LarkPermissionDiagnostic }
+  | { readonly kind: 'error' }
+
 /** Bot-identity Lark operations Pet depends on. */
 export interface LarkClient {
+  /** Detect whether the installed CLI exposes the identity contract Pet needs. */
+  cliVersion?(): Promise<{ readonly supported: boolean; readonly version?: string }>
   /**
    * Add a reaction to a message.
    * @param messageId - Target message.
@@ -66,6 +100,8 @@ export interface LarkClient {
    * @returns whether bot-identity calls are usable.
    */
   botReady(): Promise<boolean>
+  /** Prove the bound bot's non-secret identity from the selected profile. */
+  botIdentity?(expectedAppId: string): Promise<LarkIdentityProbe>
   /**
    * Read a chat's display name.
    *
@@ -84,7 +120,7 @@ export interface LarkClient {
    * @param chatId - Target chat.
    * @returns the bot members; empty on failure.
    */
-  listChatBots(chatId: string): Promise<readonly LarkChatBot[]>
+  listChatBots(chatId: string): Promise<LarkChatBotsResult | readonly LarkChatBot[]>
   /**
    * Reply to a message as the bot.
    * @param messageId - Message being replied to.
@@ -137,41 +173,150 @@ export interface LarkClient {
 /** How long any single lark-cli call may take. */
 const CALL_TIMEOUT_MS = 20_000
 
+interface CliJsonResult {
+  readonly ok: boolean
+  readonly value?: unknown
+}
+
 /**
- * Invoke `lark-cli` and parse its JSON envelope.
- * @param args - CLI arguments after the executable.
- * @param binary - lark-cli executable name or path.
- * @returns the parsed `data` payload, or `undefined` on any failure.
+ * Parse a CLI JSON document even when stderr prepends progress lines.
+ *
+ * lark-cli shortcuts may emit lines such as `[page 1] fetching...` before the
+ * final structured error. Only a successfully parsed JSON suffix escapes this
+ * function; progress text and raw errors are never retained.
  */
-async function callEnvelope(args: readonly string[], binary: string): Promise<unknown> {
+function parseCliJson(text: string): unknown {
+  const trimmed = text.trim()
   try {
-    const result = await run(binary, [...args], {
-      timeout: CALL_TIMEOUT_MS,
-      maxBuffer: 8 * 1024 * 1024,
-    })
-    return JSON.parse(result.stdout)
+    return JSON.parse(trimmed)
   } catch {
+    // Try every line boundary from the end. Pretty-printed JSON begins with a
+    // `{`/`[` at a line boundary, while any earlier progress output is ignored.
+    const lines = trimmed.split(/\r?\n/)
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      const first = lines[index]?.trimStart()[0]
+      if (first !== '{' && first !== '[') continue
+      try {
+        return JSON.parse(lines.slice(index).join('\n'))
+      } catch {
+        // The candidate was nested JSON or still included non-JSON output.
+      }
+    }
     return undefined
   }
 }
 
-async function callCli(args: readonly string[], binary: string): Promise<unknown> {
-  let stdout: string
+/** Invoke lark-cli and retain a structured error response without raw text. */
+async function callJson(
+  args: readonly string[],
+  binary: string,
+  runner: LarkCliRunner,
+): Promise<CliJsonResult> {
+  let text: string | undefined
+  let ok = true
   try {
-    const result = await run(binary, [...args], {
+    const result = await runner(binary, petCliArgs(args), {
       timeout: CALL_TIMEOUT_MS,
       maxBuffer: 8 * 1024 * 1024,
     })
-    stdout = result.stdout
-  } catch {
-    return undefined
+    text = result.stdout
+  } catch (error) {
+    ok = false
+    const failure = error as { stdout?: unknown; stderr?: unknown }
+    text =
+      typeof failure.stdout === 'string' && failure.stdout.trim() !== ''
+        ? failure.stdout
+        : typeof failure.stderr === 'string'
+          ? failure.stderr
+          : undefined
   }
-  try {
-    const parsed = JSON.parse(stdout) as { ok?: boolean; data?: unknown }
-    if (parsed.ok !== true) return undefined
-    return parsed.data
-  } catch {
-    return undefined
+  if (text === undefined) return { ok: false }
+  const value = parseCliJson(text)
+  return value === undefined ? { ok: false } : { ok, value }
+}
+
+/** Read the usual `{ok,data}` lark-cli envelope. */
+async function callCli(
+  args: readonly string[],
+  binary: string,
+  runner: LarkCliRunner,
+): Promise<unknown> {
+  const result = await callJson(args, binary, runner)
+  if (!result.ok) return undefined
+  const parsed = result.value as { ok?: boolean; data?: unknown } | undefined
+  return parsed?.ok === true ? parsed.data : undefined
+}
+
+/** Parse and verify the top-level `auth status` response. */
+export function parseBotIdentity(value: unknown, expectedAppId: string): LarkIdentityProbe {
+  if (typeof value !== 'object' || value === null) {
+    return { kind: 'unavailable', diagnostic: 'lark-cli returned an unreadable bot identity.' }
+  }
+  const record = value as Record<string, unknown>
+  const appId = record['appId']
+  const identities = record['identities']
+  const bot =
+    typeof identities === 'object' && identities !== null
+      ? (identities as Record<string, unknown>)['bot']
+      : undefined
+  if (typeof appId !== 'string' || appId !== expectedAppId) {
+    return { kind: 'unavailable', diagnostic: 'The Pet lark-cli profile belongs to another app.' }
+  }
+  if (typeof bot !== 'object' || bot === null) {
+    return { kind: 'unavailable', diagnostic: 'The Pet lark-cli profile has no bot identity.' }
+  }
+  const identity = bot as Record<string, unknown>
+  if (
+    identity['status'] !== 'ready' ||
+    identity['available'] !== true ||
+    record['verified'] !== true
+  ) {
+    return { kind: 'unavailable', diagnostic: 'The Pet bot identity is not ready or verified.' }
+  }
+  const openId = identity['openId']
+  if (typeof openId !== 'string' || !/^ou_[A-Za-z0-9]+$/.test(openId)) {
+    return { kind: 'unavailable', diagnostic: 'The verified Pet bot identity has no open_id.' }
+  }
+  const appName = identity['appName']
+  return {
+    kind: 'ready',
+    identity: {
+      appId,
+      openId,
+      ...(typeof appName === 'string' && appName.trim() !== '' ? { name: appName } : {}),
+    },
+  }
+}
+
+/** Extract only safe fields from a lark-cli permission response. */
+export function permissionDiagnostic(value: unknown): LarkPermissionDiagnostic | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const outer = value as Record<string, unknown>
+  const raw =
+    typeof outer['error'] === 'object' && outer['error'] !== null
+      ? (outer['error'] as Record<string, unknown>)
+      : outer
+  const subtype = raw['subtype']
+  const scopes = raw['missing_scopes']
+  if (subtype !== 'app_scope_not_applied' && !Array.isArray(scopes)) return undefined
+  const missingScopes = Array.isArray(scopes)
+    ? scopes.filter((scope): scope is string => typeof scope === 'string')
+    : []
+  const url = raw['console_url']
+  let consoleUrl: string | undefined
+  if (typeof url === 'string') {
+    try {
+      const parsed = new URL(url)
+      if (parsed.protocol === 'https:' && parsed.hostname === 'open.feishu.cn') consoleUrl = url
+    } catch {
+      // An untrusted or malformed URL is deliberately omitted.
+    }
+  }
+  const code = raw['code']
+  return {
+    ...(typeof code === 'number' ? { code } : {}),
+    missingScopes,
+    ...(consoleUrl !== undefined ? { consoleUrl } : {}),
   }
 }
 
@@ -184,8 +329,31 @@ async function callCli(args: readonly string[], binary: string): Promise<unknown
  * @param binary - lark-cli executable, overridable for tests.
  * @returns the client.
  */
-export function createLarkCliClient(binary = 'lark-cli'): LarkClient {
+export function createLarkCliClient(
+  binary = 'lark-cli',
+  runner: LarkCliRunner = run as unknown as LarkCliRunner,
+): LarkClient {
   return {
+    async cliVersion() {
+      try {
+        const result = await runner(binary, ['--version'], {
+          timeout: CALL_TIMEOUT_MS,
+          maxBuffer: 1024 * 1024,
+        })
+        const match = /(?:^|\s)(\d+)\.(\d+)\.(\d+)(?:\s|$)/.exec(result.stdout.trim())
+        if (match === null) return { supported: false }
+        const major = Number(match[1])
+        const minor = Number(match[2])
+        const patch = Number(match[3])
+        return {
+          supported: major > 1 || (major === 1 && (minor > 0 || patch >= 93)),
+          version: `${major}.${minor}.${patch}`,
+        }
+      } catch {
+        return { supported: false }
+      }
+    },
+
     async addReaction(messageId, emoji) {
       const data = await callCli(
         [
@@ -200,6 +368,7 @@ export function createLarkCliClient(binary = 'lark-cli'): LarkClient {
           JSON.stringify({ reaction_type: { emoji_type: emoji } }),
         ],
         binary,
+        runner,
       )
       const reactionId = (data as { reaction_id?: unknown } | undefined)?.reaction_id
       return typeof reactionId === 'string' ? reactionId : undefined
@@ -219,6 +388,7 @@ export function createLarkCliClient(binary = 'lark-cli'): LarkClient {
           reactionId,
         ],
         binary,
+        runner,
       )
     },
 
@@ -237,6 +407,7 @@ export function createLarkCliClient(binary = 'lark-cli'): LarkClient {
           String(limit),
         ],
         binary,
+        runner,
       )
       const messages = (data as { messages?: unknown } | undefined)?.messages
       if (!Array.isArray(messages)) return []
@@ -262,23 +433,36 @@ export function createLarkCliClient(binary = 'lark-cli'): LarkClient {
       // `auth status` answers at the TOP LEVEL, not inside the usual `data`
       // envelope, so the ordinary reader would find nothing here.
       // See docs/notes/dsh-plugin-integration-pitfalls.md §3.
-      const envelope = await callEnvelope(['auth', 'status'], binary)
-      const bot = (envelope as { identities?: { bot?: { available?: unknown } } } | undefined)
-        ?.identities?.bot
-      return bot?.available === true
+      const result = await callJson(['auth', 'status', '--json', '--verify'], binary, runner)
+      const bot = (
+        result.value as { identities?: { bot?: { available?: unknown; status?: unknown } } } | undefined
+      )?.identities?.bot
+      return result.ok && bot?.available === true && bot.status === 'ready'
+    },
+
+    async botIdentity(expectedAppId) {
+      const result = await callJson(['auth', 'status', '--json', '--verify'], binary, runner)
+      if (!result.ok) {
+        return {
+          kind: 'unavailable',
+          diagnostic: '无法验证 dsh-pet 专属 lark-cli profile；请用 App Secret 重新连接。',
+        }
+      }
+      return parseBotIdentity(result.value, expectedAppId)
     },
 
     async chatName(chatId) {
       const data = await callCli(
         ['im', 'chats', 'get', '--as', 'bot', '--chat-id', chatId],
         binary,
+        runner,
       )
       const name = (data as { name?: unknown } | undefined)?.name
       return typeof name === 'string' && name.trim() !== '' ? name : undefined
     },
 
     async listChatBots(chatId) {
-      const data = await callCli(
+      const result = await callJson(
         [
           'im',
           '+chat-members-list',
@@ -290,9 +474,18 @@ export function createLarkCliClient(binary = 'lark-cli'): LarkClient {
           'bot',
         ],
         binary,
+        runner,
       )
-      const bots = (data as { bots?: unknown } | undefined)?.bots
-      if (!Array.isArray(bots)) return []
+      if (!result.ok) {
+        const diagnostic = permissionDiagnostic(result.value)
+        return diagnostic === undefined
+          ? { kind: 'error' }
+          : { kind: 'permission-denied', diagnostic }
+      }
+      const envelope = result.value as { ok?: boolean; data?: unknown } | undefined
+      if (envelope?.ok !== true) return { kind: 'error' }
+      const bots = (envelope.data as { bots?: unknown } | undefined)?.bots
+      if (!Array.isArray(bots)) return { kind: 'ok', bots: [] }
       const parsed: LarkChatBot[] = []
       for (const entry of bots) {
         if (typeof entry !== 'object' || entry === null) continue
@@ -306,13 +499,14 @@ export function createLarkCliClient(binary = 'lark-cli'): LarkClient {
           name: typeof record['name'] === 'string' ? record['name'] : '',
         })
       }
-      return parsed
+      return { kind: 'ok', bots: parsed }
     },
 
     async reply(messageId, text) {
       await callCli(
         ['im', '+messages-reply', '--as', 'bot', '--message-id', messageId, '--text', text],
         binary,
+        runner,
       )
     },
 
@@ -329,7 +523,7 @@ export function createLarkCliClient(binary = 'lark-cli'): LarkClient {
       if (ownerOpenId !== undefined && ownerOpenId !== '') args.push('--owner', ownerOpenId)
       let stdout: string
       try {
-        const result = await run(binary, args, {
+        const result = await runner(binary, petCliArgs(args), {
           timeout: CALL_TIMEOUT_MS,
           maxBuffer: 8 * 1024 * 1024,
         })
@@ -359,6 +553,7 @@ export function createLarkCliClient(binary = 'lark-cli'): LarkClient {
       const data = await callCli(
         ['im', '+chat-members-list', '--as', 'bot', '--chat-id', chatId, '--page-all'],
         binary,
+        runner,
       )
       const users = (data as { users?: unknown } | undefined)?.users
       return Array.isArray(users) ? users.length : undefined
@@ -368,6 +563,7 @@ export function createLarkCliClient(binary = 'lark-cli'): LarkClient {
       await callCli(
         ['im', '+messages-send', '--as', 'bot', '--chat-id', chatId, '--text', text],
         binary,
+        runner,
       )
     },
   }

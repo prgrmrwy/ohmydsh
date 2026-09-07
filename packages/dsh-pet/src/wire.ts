@@ -126,7 +126,7 @@ export interface PetWorkspaceChoice {
 export interface PetBotIdentity {
   readonly appId: string
   readonly name?: string
-  /** Absent until proven from a chat member list. */
+  /** Absent until the supported lark-cli proves the bot identity. */
   readonly openId?: string
 }
 
@@ -172,6 +172,23 @@ export interface PetChatRoute {
   readonly boundAt: number
 }
 
+/** Stable onboarding blocker understood by both Host and settings UI. */
+export type PetChannelBlockerCode =
+  | 'bot-unbound'
+  | 'bot-identity-unresolved'
+  | 'allowlist-empty'
+  | 'default-workspace-missing'
+  | 'default-workspace-unavailable'
+  | 'profile-unavailable'
+  | 'permission-missing'
+
+export interface PetChannelBlocker {
+  readonly code: PetChannelBlockerCode
+  readonly message: string
+  readonly missingScopes?: readonly string[]
+  readonly consoleUrl?: string
+}
+
 /** Everything the Channel settings tab renders. */
 export interface PetChannelView {
   readonly enabled: boolean
@@ -186,6 +203,16 @@ export interface PetChannelView {
   readonly knownNames: Readonly<Record<string, string>>
   readonly defaultWorkspaceId?: string
   readonly routes: readonly PetChatRoute[]
+  /** Ordered readiness checks; the first blocker is the next action. */
+  readonly onboarding: {
+    readonly ready: boolean
+    readonly steps: readonly {
+      readonly id: 'bot' | 'identity' | 'allowlist' | 'workspace' | 'subscription'
+      readonly label: string
+      readonly complete: boolean
+    }[]
+    readonly blockers: readonly PetChannelBlocker[]
+  }
   readonly connection: {
     readonly phase: PetChannelPhase
     readonly diagnostic?: string

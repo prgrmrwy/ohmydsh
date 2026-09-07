@@ -28,6 +28,7 @@ import {
   ROUTES,
   PET_ENV_GLOBAL,
   type PetBindState,
+  type PetChannelBlocker,
   type PetChannelPhase,
   type PetChannelView,
   type PetChatRoute,
@@ -87,11 +88,18 @@ export interface RouteDeps {
 /** What the channel routes drive. */
 export interface ChannelControl {
   /** Live connection state for diagnostics. */
-  status(): { phase: PetChannelPhase; diagnostic?: string }
+  status(): {
+    phase: PetChannelPhase
+    diagnostic?: string
+    permission?: { code?: number; missingScopes: readonly string[]; consoleUrl?: string }
+    identityDiagnostic?: string
+  }
+  /** Whether a configured workspace still resolves in the Host registry. */
+  workspaceAvailable?(workspaceId: string): boolean
   /** Apply an enabled/disabled decision, starting or stopping the consumer. */
   setEnabled(enabled: boolean): Promise<void>
-  /** Restart a downed subscription on explicit request. */
-  reconnect(): void
+  /** Revalidate readiness and restart a downed subscription. */
+  reconnect(): Promise<void>
   /** Current binding-flow state, when one has run. */
   bindState(): PetBindState | undefined
   /** Begin creating a new Lark app; resolves when the flow settles. */
@@ -151,6 +159,33 @@ function channelView(
 
   const status = channel?.status() ?? { phase: 'stopped' as const }
   const binding = channel?.bindState()
+  const blockers: PetChannelBlocker[] = []
+  if (config.botAppId === undefined) {
+    blockers.push({ code: 'bot-unbound', message: '请先绑定飞书 Bot。' })
+  } else if (config.botOpenId === undefined) {
+    blockers.push({ code: 'bot-identity-unresolved', message: '尚未确认 Bot 身份，请重新连接 Bot。' })
+  }
+  if (config.allowOpenIds.length === 0) {
+    blockers.push({ code: 'allowlist-empty', message: '请先添加至少一位允许触发的成员。' })
+  }
+  if (config.defaultWorkspaceId === undefined) {
+    blockers.push({ code: 'default-workspace-missing', message: '请选择默认工作区。' })
+  } else if (channel?.workspaceAvailable?.(config.defaultWorkspaceId) === false) {
+    blockers.push({ code: 'default-workspace-unavailable', message: '默认工作区已不可用，请重新选择。' })
+  }
+  if (status.identityDiagnostic !== undefined) {
+    blockers.push({ code: 'profile-unavailable', message: status.identityDiagnostic })
+  }
+  if (status.permission !== undefined && config.botOpenId === undefined) {
+    blockers.push({
+      code: 'permission-missing',
+      message: '飞书 Bot 缺少读取群成员所需的权限。',
+      missingScopes: status.permission.missingScopes,
+      ...(status.permission.consoleUrl !== undefined
+        ? { consoleUrl: status.permission.consoleUrl }
+        : {}),
+    })
+  }
   return {
     enabled: config.enabled,
     ...(config.botAppId !== undefined
@@ -168,6 +203,27 @@ function channelView(
       ? { defaultWorkspaceId: config.defaultWorkspaceId }
       : {}),
     routes,
+    onboarding: {
+      ready: blockers.length === 0,
+      steps: [
+        { id: 'bot', label: '绑定 Bot', complete: config.botAppId !== undefined },
+        { id: 'identity', label: '确认 Bot 身份', complete: config.botOpenId !== undefined },
+        { id: 'allowlist', label: '配置允许成员', complete: config.allowOpenIds.length > 0 },
+        {
+          id: 'workspace',
+          label: '选择默认工作区',
+          complete:
+            config.defaultWorkspaceId !== undefined &&
+            channel?.workspaceAvailable?.(config.defaultWorkspaceId) !== false,
+        },
+        {
+          id: 'subscription',
+          label: '启用并连接',
+          complete: config.enabled && status.phase === 'connected',
+        },
+      ],
+      blockers,
+    },
     connection: {
       phase: status.phase,
       ...(status.diagnostic !== undefined ? { diagnostic: status.diagnostic } : {}),
@@ -647,14 +703,43 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
           if (enabled && config.botAppId === undefined) {
             throw new PetError('BINDING_INVALID', 'Bind a Lark bot before enabling the channel.')
           }
+          if (enabled && config.botOpenId === undefined) {
+            throw new PetError('BINDING_INVALID', 'Confirm the Lark bot identity before enabling.')
+          }
           if (enabled && config.allowOpenIds.length === 0) {
             throw new PetError(
               'BINDING_INVALID',
               'Add at least one permitted sender before enabling the channel.',
             )
           }
-          await repository.putChannelConfig({ ...config, enabled, updatedAt: Date.now() })
-          await deps.channel?.setEnabled(enabled)
+          if (enabled && config.defaultWorkspaceId === undefined) {
+            throw new PetError('BINDING_INVALID', 'Choose a default workspace before enabling.')
+          }
+          const defaultWorkspaceId = config.defaultWorkspaceId
+          if (
+            enabled &&
+            defaultWorkspaceId !== undefined &&
+            deps.channel?.workspaceAvailable?.(defaultWorkspaceId) === false
+          ) {
+            throw new PetError('BINDING_INVALID', 'The default workspace is unavailable.')
+          }
+          await repository.updateChannelConfig(current => ({
+            ...current,
+            enabled,
+            updatedAt: Date.now(),
+          }))
+          try {
+            await deps.channel?.setEnabled(enabled)
+          } catch (error) {
+            if (enabled) {
+              await repository.updateChannelConfig(current => ({
+                ...current,
+                enabled: false,
+                updatedAt: Date.now(),
+              }))
+            }
+            throw error
+          }
           break
         }
         case 'set-allowlist': {
@@ -664,19 +749,36 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
           }
           // The repository rejects anything that is not a resolved open id, so
           // an unusable allowlist cannot be stored looking configured.
-          await repository.putChannelConfig({
-            ...config,
-            allowOpenIds: raw as string[],
-            updatedAt: Date.now(),
+          await repository.updateChannelConfig(current => {
+            if (current.enabled && raw.length === 0) {
+              throw new PetError(
+                'BINDING_INVALID',
+                'Disable the channel before clearing its allowlist.',
+              )
+            }
+            return { ...current, allowOpenIds: raw as string[], updatedAt: Date.now() }
           })
           break
         }
         case 'set-default-workspace': {
           const workspaceId = optionalString(record, 'defaultWorkspaceId')
-          await repository.putChannelConfig({
-            ...config,
-            ...(workspaceId === undefined ? {} : { defaultWorkspaceId: workspaceId }),
-            updatedAt: Date.now(),
+          await repository.updateChannelConfig(current => {
+            if (
+              current.enabled &&
+              (workspaceId === undefined ||
+                deps.channel?.workspaceAvailable?.(workspaceId) === false)
+            ) {
+              throw new PetError(
+                'BINDING_INVALID',
+                'Disable the channel before removing or invalidating its default workspace.',
+              )
+            }
+            const { defaultWorkspaceId: _previous, ...withoutDefault } = current
+            return {
+              ...withoutDefault,
+              ...(workspaceId === undefined ? {} : { defaultWorkspaceId: workspaceId }),
+              updatedAt: Date.now(),
+            }
           })
           break
         }
@@ -708,7 +810,7 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
           break
         }
         case 'reconnect': {
-          deps.channel?.reconnect()
+          await deps.channel?.reconnect()
           break
         }
         default:
@@ -733,7 +835,10 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
           // Deliberately not awaited: creating blocks until the user finishes
           // authorizing in a browser, and the client needs the verification
           // link long before that. Progress is polled through `channel`.
-          void channel.beginCreate()
+          void channel.beginCreate().catch(() => {
+            // Binding diagnostics are projected through bindState; never let a
+            // background authorization failure reject into the Host process.
+          })
           break
         }
         case 'connect': {

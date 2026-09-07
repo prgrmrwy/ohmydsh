@@ -106,7 +106,7 @@ describe('creating a new bot', () => {
       'config',
       'init',
       '--new',
-      '--profile',
+      '--name',
       PET_CLI_PROFILE,
     ])
   })
@@ -199,6 +199,15 @@ describe('connecting an existing bot', () => {
     const args = h.commands[0]?.args ?? []
     expect(args.join(' ')).not.toContain(SECRET)
     expect(args).toContain('--app-secret-stdin')
+    expect(args).toEqual([
+      'config',
+      'init',
+      '--app-id',
+      'cli_existing01',
+      '--app-secret-stdin',
+      '--name',
+      PET_CLI_PROFILE,
+    ])
   })
 
   it('feeds the secret through stdin and closes it', async () => {
@@ -236,6 +245,54 @@ describe('connecting an existing bot', () => {
 
     expect(state.phase).toBe('failed')
     expect(state.diagnostic).not.toContain(SECRET)
+  })
+
+  it('redacts the secret when it is the final failure line', async () => {
+    const h = harness()
+    const settled = h.bootstrap.connectExisting('cli_existing01', SECRET)
+    h.children[0]?.out(`invalid secret: ${SECRET}\n`)
+    h.children[0]?.end(1)
+
+    const state = await settled
+
+    expect(JSON.stringify(state)).not.toContain(SECRET)
+    expect(JSON.stringify(h.states)).not.toContain(SECRET)
+  })
+
+  it('does not surface even a fragment of a submitted secret', async () => {
+    const h = harness()
+    const settled = h.bootstrap.connectExisting('cli_existing01', SECRET)
+    h.children[0]?.out(`invalid prefix: ${SECRET.slice(0, 8)}\n`)
+    h.children[0]?.end(1)
+
+    expect(JSON.stringify(await settled)).not.toContain(SECRET.slice(0, 8))
+  })
+
+  it('cancels a replaced attempt and ignores its late success', async () => {
+    const h = harness()
+    const first = h.bootstrap.connectExisting('cli_first', 'first-secret')
+    const second = h.bootstrap.connectExisting('cli_second', 'second-secret')
+
+    expect(h.children[0]?.signals).toEqual(['SIGTERM'])
+    h.children[0]?.out('App ID: cli_first\n')
+    h.children[0]?.end(0)
+    h.children[1]?.out('App ID: cli_second\n')
+    h.children[1]?.end(0)
+
+    expect(await first).toEqual({ phase: 'idle' })
+    expect(await second).toEqual({ phase: 'bound', appId: 'cli_second' })
+    expect(h.bootstrap.current).toEqual({ phase: 'bound', appId: 'cli_second' })
+  })
+
+  it('keeps a cancelled attempt idle after its late exit', async () => {
+    const h = harness()
+    const settled = h.bootstrap.connectExisting('cli_existing01', SECRET)
+    h.bootstrap.cancel()
+    h.children[0]?.out('App ID: cli_existing01\n')
+    h.children[0]?.end(0)
+
+    expect(await settled).toEqual({ phase: 'idle' })
+    expect(h.bootstrap.current).toEqual({ phase: 'idle' })
   })
 
   it('refuses an empty app id or secret without spawning anything', async () => {

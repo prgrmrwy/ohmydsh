@@ -115,8 +115,8 @@ describe('the agent is told to read and to reply itself', () => {
 
     // lark-cli ships its own agent documentation; listing then reading it
     // beats a hand-written command list that goes stale.
-    expect(prompt).toContain('lark-cli skills list')
-    expect(prompt).toContain('lark-cli skills read')
+    expect(prompt).toContain('lark-cli --profile dsh-pet skills list')
+    expect(prompt).toContain('lark-cli --profile dsh-pet skills read')
     expect(prompt).toContain('按需读取')
   })
 

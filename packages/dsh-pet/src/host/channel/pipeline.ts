@@ -19,18 +19,19 @@ import {
 import { markInProgress } from './feedback.js'
 import { parseCommand } from '../qa/command.js'
 import { isQaChatLive } from '../qa/occupancy.js'
-import type { LarkClient } from './lark.js'
+import type { LarkClient, LarkPermissionDiagnostic } from './lark.js'
 import { routeChat, type WorkspaceLocator } from './route.js'
 import type { PetCoordinator } from '../coordinator.js'
 import type { PetRepository } from '../repository.js'
-import type { PetChannelConfig, PetChatBinding } from '../spec.js'
+import type { PetChatBinding } from '../spec.js'
 import { scopeKeyOf } from '../../wire.js'
 
 /** What happened to one inbound line. */
 export type IntakeOutcome =
   | {
       readonly kind: 'ignored'
-      readonly reason: AdmissionRefusal | 'unparsable' | 'disabled' | string
+      readonly reason: AdmissionRefusal | 'unparsable' | 'disabled' | 'bot-identity-unresolved' | string
+      readonly diagnostic?: LarkPermissionDiagnostic
     }
   | { readonly kind: 'unroutable'; readonly reason: string }
   | { readonly kind: 'accepted'; readonly invocationId: string; readonly taskId?: string }
@@ -128,16 +129,10 @@ export class InboundPipeline {
    */
   async handleEvent(event: LarkInboundEvent): Promise<IntakeOutcome> {
     const { repository } = this.deps
-    let config = repository.getChannelConfig()
+    const config = repository.getChannelConfig()
     if (!config.enabled) return this.report({ kind: 'ignored', reason: 'disabled' }, event)
-
-    // A freshly created bot belongs to no group, so its open_id cannot be read
-    // from a member list. It CAN be read from the first message that mentions
-    // it — group triggers always carry mentions. Until then group admission
-    // stays fail-closed, so learning here opens no gap.
-    if (config.botOpenId === undefined && event.chat_type === 'group') {
-      const learned = await this.learnBotOpenId(event, config)
-      if (learned !== undefined) config = learned
+    if (config.botOpenId === undefined) {
+      return this.report({ kind: 'ignored', reason: 'bot-identity-unresolved' }, event)
     }
 
     const decision = admitInboundEvent(event, {
@@ -287,11 +282,11 @@ export class InboundPipeline {
     if (senderName !== undefined && sender !== '') {
       const current = repository.getChannelConfig()
       if (current.knownNames?.[sender] !== senderName) {
-        await repository.putChannelConfig({
-          ...current,
-          knownNames: { ...(current.knownNames ?? {}), [sender]: senderName },
+        await repository.updateChannelConfig(latest => ({
+          ...latest,
+          knownNames: { ...(latest.knownNames ?? {}), [sender]: senderName },
           updatedAt: Date.now(),
-        })
+        }))
       }
     }
     // Probed per Invocation rather than cached: a bot login can expire between
@@ -332,53 +327,6 @@ export class InboundPipeline {
       { kind: 'accepted', invocationId: accepted.invocation.id, taskId: accepted.task.id },
       event,
     )
-  }
-
-  /**
-   * Learn the bound bot's own open_id, once, and PROVE it before storing.
-   *
-   * A freshly created bot belongs to no group, so its open_id cannot be read
-   * from a member list up front. But receiving a group message proves the bot
-   * is now in that group — which makes the member list available after all.
-   *
-   * The mention is therefore only a candidate source, never the authority:
-   * the open_id is accepted solely when the chat's member list ties it to the
-   * bound `app_id`. A display name can be impersonated; an app id cannot.
-   * @param event - The inbound group event.
-   * @param config - Current configuration.
-   * @returns the updated configuration, or `undefined` when nothing was proven.
-   */
-  private async learnBotOpenId(
-    event: LarkInboundEvent,
-    config: PetChannelConfig,
-  ): Promise<PetChannelConfig | undefined> {
-    const appId = config.botAppId?.trim()
-    // Without a bound app id there is nothing to prove an identity against.
-    if (appId === undefined || appId === '') return undefined
-
-    const mentioned = new Set(
-      (event.mentions ?? [])
-        .map(mention => mention.id)
-        .filter((id): id is string => typeof id === 'string' && id.startsWith('ou_')),
-    )
-    if (mentioned.size === 0) return undefined
-
-    const bots = await this.deps.client.listChatBots(event.chat_id)
-    // Both halves matter: the app id proves which bot is us, and the mention
-    // proves this message was actually addressed to that bot.
-    const proven = bots.filter(bot => bot.appId === appId && mentioned.has(bot.openId))
-    if (proven.length !== 1) return undefined
-    const learned = proven[0]
-    if (learned === undefined) return undefined
-
-    const next: PetChannelConfig = {
-      ...config,
-      botOpenId: learned.openId,
-      ...(config.botName === undefined && learned.name !== '' ? { botName: learned.name } : {}),
-      updatedAt: Date.now(),
-    }
-    await this.deps.repository.putChannelConfig(next)
-    return next
   }
 
   /** Publish an outcome and return it. */
