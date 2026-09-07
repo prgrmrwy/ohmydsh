@@ -103,11 +103,17 @@ export function renderUnbindReceipt(outcome: UnbindOutcome): string {
   const source =
     outcome.sourceTitle === undefined ? '' : `与会话「${outcome.sourceTitle}」`
   const lines = [`已解除${where}${source}的绑定，此后 @我不会再基于该会话回答。`]
-  if (outcome.restoredWorkspaceId !== undefined) {
-    // Say it outright: the group is not silent, it went back to what it was.
-    // Someone who only heard "unbound" would be surprised by the next reply.
-    lines.push('本群已恢复为绑定前的工作区路由。')
-  }
+  // Say what happens NEXT, not just what stopped. "Unbound" reads as "the bot
+  // has left", but the group returns to whatever it did before — which in
+  // both cases still answers, just as a different thing. Someone who only
+  // heard the first half would be surprised by the next reply.
+  lines.push(
+    outcome.restoredWorkspaceId === undefined
+      ? '本群已回到默认处理方式：之后 @我仍会响应，但会按默认工作区新开会话回答，' +
+        '不再带有原会话的上下文。'
+      : '本群已恢复为绑定前的工作区路由：之后 @我仍会响应，但会在该工作区里回答，' +
+        '不再带有原会话的上下文。',
+  )
   lines.push('之前的对话记录仍保留在 DSH 里，可随时查看。')
   return lines.join('\n')
 }
