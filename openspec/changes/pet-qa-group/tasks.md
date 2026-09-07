@@ -128,6 +128,13 @@
       面对的是主 checkout 而非任务分支；③ **child 若执行写操作会写进主 checkout**
       ——正是 AGENTS.md 明令禁止当作工作区编辑的位置。目前未爆是因为群友只问了
       只读问题。
-      修法：`startContinuable` 的 request 显式传入源会话的真实执行目录（Pet 侧可从
-      worktree 绑定解析），使 child 落在与父一致的目录；补回归测试断言 child cwd
-      等于源会话执行根而非仓库根，并重跑一轮真机。
+      修法（已实施）：`startContinuable` 不接受 cwd 覆盖（meta 由
+      `childSessionMeta(parent)` 决定），且父会话自身的 worktree 规则本就是
+      runtime context 而非强制沙箱——故采用同一机制，不为 child 发明更弱的保证：
+      建群时经既有 Worktree Session 契约解析执行根（**绝不从 cwd 推断**），写入
+      seed prompt 并持久化到绑定行（`qaExecutionRoot`/`qaBranch`/
+      `qaRepositoryRoot`）；每条群消息的 prompt 重述一次（只说一遍的约束会随对话
+      增长淡出注意力，而这条决定改动落在任务分支还是主 checkout）；源会话未绑定
+      worktree 时不虚构约束。schema 仅加三个可选字段，仍为加性。
+      新增 5 个回归测试（执行根进 seed、持久化到绑定行、每条消息重述、未绑定时
+      不虚构）；已合入并物化，**待真机复验**（与 8.4 重启演练合并进行）。
