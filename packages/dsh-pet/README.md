@@ -142,8 +142,15 @@ Two things differ, deliberately:
 A prefix that matches nothing and a prefix that matches several produce the
 *same* reply: no count, no hint that any other session exists.
 
+To release a bound group, say `@bot /unbind` in it — same side it was entered
+from. That works only for groups attached with `/bind`: one Pet created from
+the wheel is ended from the panel, because a group Pet owns should not be left
+dangling by a message inside it. Unbinding archives the same Task the panel
+would, refuses while the child is mid-answer rather than interrupting it, and
+keeps the child's history readable.
+
 One group holds one session and one session holds one group. To re-point
-either, archive the corresponding Task first. The success reply states the
+either, release it first (`/unbind`, or archive the Task in the panel). The success reply states the
 group's current member count — from that moment every one of them can put work
 into a real repository through the bot, which is worth seeing at the moment you
 choose it.

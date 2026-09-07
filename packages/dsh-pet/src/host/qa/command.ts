@@ -12,13 +12,15 @@
  * command is not a bypass, it is a destination.
  */
 
-/** The command verb, matched at the start of the message body. */
+/** The command verbs, matched at the start of the message body. */
 const BIND_VERB = '/bind'
+const UNBIND_VERB = '/unbind'
 
 /** What one message turned out to be. */
 export type CommandParse =
   | { readonly kind: 'bind'; readonly prefix: string }
   | { readonly kind: 'bind-missing-prefix' }
+  | { readonly kind: 'unbind' }
   | { readonly kind: 'none' }
 
 /**
@@ -41,7 +43,21 @@ function withoutMentions(text: string): string {
  */
 export function parseCommand(text: string): CommandParse {
   const cleaned = withoutMentions(text)
-  if (!cleaned.toLowerCase().startsWith(BIND_VERB)) return { kind: 'none' }
+  const lowered = cleaned.toLowerCase()
+
+  // Checked BEFORE `/bind`, because `/unbind` starts with neither the same
+  // letters nor a prefix relationship — but ordering it first keeps the
+  // intent obvious to a reader and immune to a future rename that does
+  // introduce one.
+  if (lowered.startsWith(UNBIND_VERB)) {
+    const rest = cleaned.slice(UNBIND_VERB.length)
+    if (rest !== '' && !/^\s/.test(rest)) return { kind: 'none' }
+    // Takes no argument: the group already knows what it is bound to, and
+    // accepting one would invite "unbind someone else's group".
+    return { kind: 'unbind' }
+  }
+
+  if (!lowered.startsWith(BIND_VERB)) return { kind: 'none' }
 
   const rest = cleaned.slice(BIND_VERB.length)
   // `/bindings are hard` is prose, not a command: the verb must be a whole

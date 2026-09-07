@@ -87,6 +87,12 @@ export interface BindCommandPort {
    * @returns what happened, for diagnostics.
    */
   handle(event: LarkInboundEvent, prefix: string): Promise<IntakeOutcome>
+  /**
+   * Release a group that `/bind` attached.
+   * @param event - The admitted event carrying the command.
+   * @returns what happened, for diagnostics.
+   */
+  unbind(event: LarkInboundEvent): Promise<IntakeOutcome>
 }
 
 /**
@@ -159,21 +165,30 @@ export class InboundPipeline {
     // Only in groups with no QA binding: once bound, the same text is
     // conversation again, and re-parsing it would hijack ordinary questions.
     const bindTarget = this.deps.bindCommand
-    if (bindTarget !== undefined && repository.getChatBinding(event.chat_id)?.kind !== 'qa') {
+    if (bindTarget !== undefined) {
+      const isBound = repository.getChatBinding(event.chat_id)?.kind === 'qa'
       const parsed = parseCommand(decision.text)
-      if (parsed.kind !== 'none') {
+      // The two verbs live on opposite sides of the same condition: `/bind`
+      // only makes sense where nothing is bound, `/unbind` only where
+      // something is. Outside its own case each is ordinary text — which is
+      // what keeps a bound group's questions from being parsed as commands.
+      const applies =
+        (parsed.kind === 'unbind' && isBound) || (parsed.kind !== 'unbind' && !isBound)
+      if (parsed.kind !== 'none' && applies) {
         // The exemption that lets any member ask questions does NOT extend to
-        // binding: an existing group's members were never vetted by the owner
-        // for this purpose. A non-allowlist sender is dropped in silence, like
-        // every other refusal — answering "you may not" would confirm to an
-        // unauthorised person that an agent stands behind this bot.
+        // binding or unbinding: an existing group's members were never vetted
+        // by the owner for that. A non-allowlist sender is dropped in silence,
+        // like every other refusal — answering "you may not" would confirm to
+        // an unauthorised person that an agent stands behind this bot.
         const config = repository.getChannelConfig()
         const sender = event.sender_id ?? ''
         if (!config.allowOpenIds.includes(sender)) {
           return this.report({ kind: 'ignored', reason: 'not-allowed-sender' }, event)
         }
         return this.report(
-          await bindTarget.handle(event, parsed.kind === 'bind' ? parsed.prefix : ''),
+          parsed.kind === 'unbind'
+            ? await bindTarget.unbind(event)
+            : await bindTarget.handle(event, parsed.kind === 'bind' ? parsed.prefix : ''),
           event,
         )
       }

@@ -20,7 +20,7 @@ import { PetError } from '../errors.js'
 import { forkQaChild, qaGroupName, type QaActionDeps, type QaSource } from './action.js'
 import { archiveStale, chatOccupancy, qaScopeKeyOf, sessionOccupancy } from './occupancy.js'
 import { resolveSessionByPrefix, type BindableSession } from './resolve-session.js'
-import type { PetTaskRecord } from '../../wire.js'
+import { TERMINAL_TASK_STATUSES, type PetTaskRecord } from '../../wire.js'
 
 /** How long the whole bind transaction may take before it is abandoned. */
 const BIND_TIMEOUT_MS = 60_000
@@ -236,4 +236,74 @@ async function createBoundTask(
     updatedAt: now,
     revision: 0,
   })
+}
+
+/** What `/unbind` decided. */
+export type UnbindOutcome =
+  | { readonly ok: true; readonly chatName?: string; readonly sourceTitle?: string }
+  | {
+      readonly ok: false
+      /**
+       * Why it refused.
+       *
+       * `not-bound` also covers a group bound to nothing meaningful; the
+       * caller treats it as "nothing to undo".
+       */
+      readonly reason: 'not-bound' | 'not-unbindable' | 'busy'
+    }
+
+/**
+ * Release a group that was attached with `/bind`.
+ *
+ * Deliberately narrower than "undo any QA binding": a group Pet CREATED is
+ * entered from the GUI and must be ended there, while a group Pet merely
+ * joined was entered from the group and can be left from it. Keeping the exit
+ * on the same side as the entrance is what stops `/unbind` from becoming a
+ * way to dismantle, from inside a chat, something set up elsewhere.
+ *
+ * Archiving is the single mechanism underneath — the same one the panel uses
+ * — so there is still only one notion of "this pairing is over".
+ * @param deps - Host collaborators.
+ * @param chatId - The group asking to be released.
+ * @returns the outcome; refusals do not throw.
+ */
+export async function unbindGroup(
+  deps: Pick<BindDeps, 'repository'>,
+  chatId: string,
+): Promise<UnbindOutcome> {
+  const binding = deps.repository.getChatBinding(chatId)
+  if (binding === undefined || binding.kind !== 'qa') return { ok: false, reason: 'not-bound' }
+
+  // The entrance decides the exit. A `created` group belongs to the Q&A
+  // action that built it; unbinding it here would leave a group Pet owns with
+  // nothing pointing at it, and the user would have no way back in.
+  if (binding.qaOrigin !== 'bound') return { ok: false, reason: 'not-unbindable' }
+
+  const taskId = binding.activeTaskId
+  const task = taskId === undefined ? undefined : deps.repository.getTask(taskId)
+  if (task === undefined || task.archivedAt !== undefined) {
+    // Nothing live to retire: the pairing is already over, so report success
+    // rather than inventing an error for a state the user asked for anyway.
+    return {
+      ok: true,
+      ...(binding.chatName !== undefined ? { chatName: binding.chatName } : {}),
+    }
+  }
+
+  // Archiving requires a settled Task. Refusing while the child is mid-answer
+  // is deliberate: interrupting an agent that may be part-way through writing
+  // files is a worse failure than asking the user to try again in a moment.
+  if (!TERMINAL_TASK_STATUSES.includes(task.status)) {
+    return { ok: false, reason: 'busy' }
+  }
+
+  await deps.repository.archiveTask(task.id)
+  // The child and its history are kept, matching what invalidation does: the
+  // conversation stays readable in the GUI, it simply stops receiving the
+  // group's messages.
+  return {
+    ok: true,
+    ...(binding.chatName !== undefined ? { chatName: binding.chatName } : {}),
+    ...(task.sourceTitle !== undefined ? { sourceTitle: task.sourceTitle } : {}),
+  }
 }

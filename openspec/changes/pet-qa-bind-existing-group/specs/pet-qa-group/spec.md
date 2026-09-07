@@ -43,6 +43,46 @@ SHALL 使用显式动词而非裸 token：绑定后群内正常对话中出现�
 - **WHEN** 已绑定群中有人 @bot 发送一条恰好含有类似前缀字符串的普通提问
 - **THEN** 该消息作为提问投递给 child，MUST NOT 被解释为绑定命令
 
+### Requirement: `/unbind` 仅解除由 `/bind` 建立的绑定
+
+系统 SHALL 支持在已绑定的群内通过 `@bot /unbind` 解除绑定。该命令 MUST 不接受
+任何参数——群自身已知其绑定对象，接受参数等于开放「解除别的群」的可能。
+
+`/unbind` MUST 仅由全局 allowlist 内的发送者触发，与 `/bind` 对称：提问权可以
+让渡给全体群成员，撤销所有者的授权则不可以。非 allowlist 发送者的 `/unbind`
+SHALL 被静默丢弃。
+
+系统 MUST 仅允许解除**由 `/bind` 建立**的绑定（来源标记为「绑定既有群」）。由
+Q&A 动作创建的群 SHALL 拒绝并指向面板归档：该群由 Pet 从 GUI 创建，也应从 GUI
+结束；在群内解除会留下一个 Pet 拥有却无人指向的群。入口与出口 SHALL 保持在同一侧。
+
+qa Task 未处于终态（正在回答）时，`/unbind` SHALL 拒绝并说明稍后重试，MUST NOT
+中断进行中的执行——中断一个可能正在写文件的 agent 比让用户稍等风险更高。
+
+解除 SHALL 通过归档该 qa Task 实现，与面板归档同一机制。child 会话及其历史
+SHALL 保留可查，仅停止接收群消息。解除结果 SHALL 在群内回执：群成员既然被告知
+agent 加入，也应被告知它已退出。
+
+#### Scenario: 解除由 /bind 建立的绑定
+- **WHEN** allowlist 用户在一个经 `/bind` 绑定的群内发送 `@bot /unbind`，且 child 空闲
+- **THEN** 对应 qa Task 被归档、群内收到回执，child 会话与历史保留
+
+#### Scenario: 拒绝解除 Pet 创建的答疑群
+- **WHEN** allowlist 用户在一个由 Q&A 动作创建的群内发送 `@bot /unbind`
+- **THEN** 系统拒绝并提示前往 Pet 面板归档，绑定保持不变
+
+#### Scenario: child 正在回答时解除
+- **WHEN** 该群的 qa Task 处于非终态时收到 `/unbind`
+- **THEN** 系统拒绝并提示稍后重试，不中断进行中的执行，Task 未被归档
+
+#### Scenario: 非 allowlist 成员尝试解除
+- **WHEN** 一个不在 allowlist 的群成员发送 `@bot /unbind`
+- **THEN** 消息被静默丢弃，绑定保持不变
+
+#### Scenario: 解除后可重新绑定
+- **WHEN** 某群解除绑定后，allowlist 用户在该群再次 `/bind` 另一个会话
+- **THEN** 绑定成功，群与会话两侧均不再被先前的绑定占用
+
 ### Requirement: 会话前缀解析 fail closed 且不泄露
 
 系统 SHALL 以 ≥6 位的会话 id 前缀解析目标会话，长度与界面上展示的短 id 一致，并
@@ -74,8 +114,9 @@ channel 已绑定且 bot 可用、且宿主 fork 能力可用时可用；不满�
 
 群与源会话 SHALL 保持**双向 1:1**：一个源会话至多拥有一个活跃答疑群，一个群至多
 绑定一个源会话。任一侧已被占用时，新的绑定请求 SHALL 固定失败并说明原因。占用的
-判据是对应作用域存在**未归档** Task；归档 qa Task 是解绑的唯一正式手段，系统
-MUST NOT 引入第二种解绑概念。绑定行已失效（记录了失效时间）时视为未占用，系统
+判据是对应作用域存在**未归档** Task。释放一侧的方式 SHALL 只有归档该 qa Task
+一种机制：面板归档与群内 `/unbind` 都 MUST 落到同一次归档上，系统 MUST NOT
+引入第二种「结束绑定」的概念。绑定行已失效（记录了失效时间）时视为未占用，系统
 SHALL 归档其 Task 后继续，MUST NOT 把一个无法应答的死绑定当作占用。
 
 点击 Q&A 时系统 SHALL 先按**源会话**查找活跃 qa Task：命中且其绑定有效时 SHALL

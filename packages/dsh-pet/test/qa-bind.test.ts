@@ -9,8 +9,12 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { bindExistingGroup, type BindDeps } from '../src/host/qa/bind.js'
-import { PREFIX_UNRESOLVED_TEXT, renderBindReceipt } from '../src/host/qa/bind-receipt.js'
+import { bindExistingGroup, unbindGroup, type BindDeps } from '../src/host/qa/bind.js'
+import {
+  PREFIX_UNRESOLVED_TEXT,
+  renderBindReceipt,
+  renderUnbindReceipt,
+} from '../src/host/qa/bind-receipt.js'
 import { qaScopeKeyOf } from '../src/host/qa/occupancy.js'
 import type { LarkClient } from '../src/host/channel/lark.js'
 import type { BindableSession } from '../src/host/qa/resolve-session.js'
@@ -271,5 +275,111 @@ describe('scope key sanity', () => {
     // Same scope the Q&A path uses, which is what makes the session side of
     // the 1:1 invariant work across both entry points.
     expect(harness.repository.findActiveTaskByScope(qaScopeKeyOf(TARGET))).toBeDefined()
+  })
+})
+
+describe('unbinding a group', () => {
+  it('releases a group that /bind attached', async () => {
+    harness = await openPetHarness()
+    const d = await deps(harness)
+    const bound = await bindExistingGroup(d, { chatId: CHAT, prefix: 'abc123d' })
+    expect(bound.ok).toBe(true)
+    if (!bound.ok) return
+
+    const outcome = await unbindGroup({ repository: harness.repository }, CHAT)
+
+    expect(outcome.ok).toBe(true)
+    // Archiving is the one mechanism underneath, the same the panel uses, so
+    // there is still only one notion of "this pairing is over".
+    expect(harness.repository.getTask(bound.taskId)?.archivedAt).toBeDefined()
+  })
+
+  it('keeps the child and its history', async () => {
+    harness = await openPetHarness()
+    const d = await deps(harness)
+    const bound = await bindExistingGroup(d, { chatId: CHAT, prefix: 'abc123d' })
+    if (!bound.ok) return
+
+    await unbindGroup({ repository: harness.repository }, CHAT)
+
+    // Matching what invalidation does: the conversation stays readable in the
+    // GUI, it simply stops receiving the group's messages.
+    expect(harness.repository.getChatBinding(CHAT)?.qaChildSessionId).toBe(bound.childSessionId)
+  })
+
+  it('frees both sides so the group can be bound again', async () => {
+    harness = await openPetHarness()
+    const d = await deps(harness)
+    await bindExistingGroup(d, { chatId: CHAT, prefix: 'abc123d' })
+
+    await unbindGroup({ repository: harness.repository }, CHAT)
+    const again = await bindExistingGroup(d, { chatId: CHAT, prefix: 'def456' })
+
+    expect(again.ok).toBe(true)
+  })
+
+  it('refuses to unbind a group Pet created', async () => {
+    harness = await openPetHarness()
+    // A `created` group is entered from the GUI and must end there; undoing it
+    // from inside the chat would strand a group Pet owns with nothing pointing
+    // at it.
+    await harness.repository.putChatBinding({
+      chatId: CHAT,
+      chatType: 'group',
+      kind: 'qa',
+      qaChildSessionId: 'session-child',
+      qaParentSessionId: TARGET,
+      qaOrigin: 'created',
+      boundBy: 'user',
+      boundAt: 1,
+    })
+
+    const outcome = await unbindGroup({ repository: harness.repository }, CHAT)
+
+    expect(outcome.ok).toBe(false)
+    if (!outcome.ok) expect(outcome.reason).toBe('not-unbindable')
+    expect(renderUnbindReceipt(outcome)).toContain('Pet 面板归档')
+  })
+
+  it('refuses while the child is mid-answer', async () => {
+    harness = await openPetHarness()
+    const d = await deps(harness)
+    const bound = await bindExistingGroup(d, { chatId: CHAT, prefix: 'abc123d' })
+    if (!bound.ok) return
+    await harness.repository.updateTask(bound.taskId, undefined, task => ({
+      ...task,
+      status: 'running',
+    }))
+
+    const outcome = await unbindGroup({ repository: harness.repository }, CHAT)
+
+    // Refusing beats interrupting an agent that may be part-way through
+    // writing files; this is not an urgent operation.
+    expect(outcome.ok).toBe(false)
+    if (!outcome.ok) expect(outcome.reason).toBe('busy')
+    expect(harness.repository.getTask(bound.taskId)?.archivedAt).toBeUndefined()
+  })
+
+  it('reports an unbound group as nothing to undo', async () => {
+    harness = await openPetHarness()
+
+    const outcome = await unbindGroup({ repository: harness.repository }, CHAT)
+
+    expect(outcome.ok).toBe(false)
+    if (!outcome.ok) expect(outcome.reason).toBe('not-bound')
+  })
+
+  it('treats an already-archived pairing as success', async () => {
+    harness = await openPetHarness()
+    const d = await deps(harness)
+    const bound = await bindExistingGroup(d, { chatId: CHAT, prefix: 'abc123d' })
+    if (!bound.ok) return
+    await harness.repository.archiveTask(bound.taskId)
+
+    const outcome = await unbindGroup({ repository: harness.repository }, CHAT)
+
+    // The user asked for a state that already holds; inventing an error for
+    // that would be pedantic.
+    expect(outcome.ok).toBe(true)
   })
 })

@@ -13,7 +13,7 @@
  *    survives a "both fail" test.
  */
 
-import type { BindOutcome } from './bind.js'
+import type { BindOutcome, UnbindOutcome } from './bind.js'
 
 /**
  * The single message used for BOTH "no such session" and "several matched".
@@ -72,4 +72,38 @@ export function renderBindReceipt(outcome: BindOutcome): string {
     lines.push('之后**任何群成员** @我都可以提问。')
   }
   return lines.join('\n')
+}
+
+/**
+ * Render the group reply for one unbind outcome.
+ * @param outcome - What the unbind flow decided.
+ * @returns the message text to send into the group.
+ */
+export function renderUnbindReceipt(outcome: UnbindOutcome): string {
+  if (!outcome.ok) {
+    switch (outcome.reason) {
+      case 'not-bound':
+        return '本群没有绑定任何会话。'
+      case 'not-unbindable':
+        // The group Pet created is entered from the GUI and ends there. Say
+        // where to go rather than leaving the user to guess why the same
+        // command works in one group and not another.
+        return (
+          '本群是由 Pet 创建的答疑群，不能在群内解绑。' +
+          '如需结束，请在 Pet 面板归档对应任务。'
+        )
+      case 'busy':
+        // Refusing beats interrupting: the child may be part-way through
+        // writing files, and this is not an urgent operation.
+        return '我正在处理上一个问题，稍后再试一次解绑。'
+    }
+  }
+
+  const where = outcome.chatName === undefined ? '本群' : `本群（${outcome.chatName}）`
+  const source =
+    outcome.sourceTitle === undefined ? '' : `与会话「${outcome.sourceTitle}」`
+  return (
+    `已解除${where}${source}的绑定，此后 @我不会再触发回答。\n` +
+    '之前的对话记录仍保留在 DSH 里，可随时查看。'
+  )
 }

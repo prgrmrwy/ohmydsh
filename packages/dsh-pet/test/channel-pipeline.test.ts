@@ -591,6 +591,7 @@ describe('the /bind command in the intake path', () => {
           handled.push({ chatId: event.chat_id, prefix })
           return { kind: 'accepted', invocationId: 'bind-1' }
         },
+        unbind: async () => ({ kind: 'accepted', invocationId: 'unbind-1' }),
       },
     })
     return { pipeline, handled }
@@ -699,6 +700,7 @@ describe('the /bind command in the intake path', () => {
         handle: async () => {
           throw new Error('bind must not run in an already-bound group')
         },
+        unbind: async () => ({ kind: 'accepted', invocationId: 'unbind-1' }),
       },
     })
 
@@ -718,5 +720,115 @@ describe('the /bind command in the intake path', () => {
     await pipeline.handleLine(groupLine({ chat_id: PLAIN, content: '@_user_1 看看这个' }))
 
     expect(handled).toHaveLength(0)
+  })
+})
+
+describe('the /unbind command in the intake path', () => {
+  const BOUND = 'oc_boundgroup00000000000000000000'
+
+  /** Bind the group so `/unbind` has something to act on. */
+  async function bindGroup(f: Fixture): Promise<void> {
+    await f.harness.repository.putChatBinding({
+      chatId: BOUND,
+      chatType: 'group',
+      kind: 'qa',
+      qaChildSessionId: 'session-child',
+      qaParentSessionId: 'session-source',
+      qaOrigin: 'bound',
+      boundBy: 'user',
+      boundAt: 1,
+    })
+  }
+
+  function withCommands(f: Fixture): {
+    pipeline: InboundPipeline
+    unbound: string[]
+    delivered: string[]
+  } {
+    const unbound: string[] = []
+    const delivered: string[] = []
+    const pipeline = new InboundPipeline({
+      repository: f.harness.repository,
+      coordinator: f.coordinator,
+      client: f.client,
+      locator: { locate: () => undefined },
+      watermark: () => 1000,
+      qaDelivery: {
+        deliver: async event => {
+          delivered.push(event.message_id)
+          return { kind: 'accepted', invocationId: 'qa-1' }
+        },
+      },
+      bindCommand: {
+        handle: async () => ({ kind: 'accepted', invocationId: 'bind-1' }),
+        unbind: async event => {
+          unbound.push(event.chat_id)
+          return { kind: 'accepted', invocationId: 'unbind-1' }
+        },
+      },
+    })
+    return { pipeline, unbound, delivered }
+  }
+
+  it('is recognised in a bound group', async () => {
+    const f = await fixture()
+    harness = f.harness
+    await bindGroup(f)
+    const { pipeline, unbound, delivered } = withCommands(f)
+
+    await pipeline.handleLine(
+      groupLine({ chat_id: BOUND, message_id: 'om_u1', content: '@_user_1 /unbind' }),
+    )
+
+    // The two verbs live on opposite sides of the same condition.
+    expect(unbound).toEqual([BOUND])
+    expect(delivered).toHaveLength(0)
+  })
+
+  it('is ordinary text in an unbound group', async () => {
+    const f = await fixture()
+    harness = f.harness
+    const { pipeline, unbound } = withCommands(f)
+
+    await pipeline.handleLine(
+      groupLine({ chat_id: 'oc_nothingbound0000000000000000', content: '@_user_1 /unbind' }),
+    )
+
+    expect(unbound).toHaveLength(0)
+  })
+
+  it('silently drops a non-allowlist sender', async () => {
+    const f = await fixture()
+    harness = f.harness
+    await bindGroup(f)
+    const { pipeline, unbound } = withCommands(f)
+
+    const outcome = await pipeline.handleLine(
+      groupLine({
+        chat_id: BOUND,
+        message_id: 'om_u2',
+        content: '@_user_1 /unbind',
+        sender_id: STRANGER,
+      }),
+    )
+
+    // Asking questions is exempt from the allowlist in a QA group; ending the
+    // binding is not.
+    expect(outcome).toEqual({ kind: 'ignored', reason: 'not-allowed-sender' })
+    expect(unbound).toHaveLength(0)
+  })
+
+  it('leaves ordinary questions in a bound group alone', async () => {
+    const f = await fixture()
+    harness = f.harness
+    await bindGroup(f)
+    const { pipeline, unbound, delivered } = withCommands(f)
+
+    await pipeline.handleLine(
+      groupLine({ chat_id: BOUND, message_id: 'om_q9', content: '@_user_1 这个怎么解' }),
+    )
+
+    expect(unbound).toHaveLength(0)
+    expect(delivered).toEqual(['om_q9'])
   })
 })

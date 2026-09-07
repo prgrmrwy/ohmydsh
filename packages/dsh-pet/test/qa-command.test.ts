@@ -48,3 +48,25 @@ describe('what is NOT a command', () => {
     expect(parseCommand('我刚才用了 /bind abc123').kind).toBe('none')
   })
 })
+
+describe('parsing the unbind verb', () => {
+  it('takes no argument', () => {
+    // The group already knows what it is bound to; accepting an argument
+    // would invite "unbind someone else's group".
+    expect(parseCommand('/unbind')).toEqual({ kind: 'unbind' })
+    expect(parseCommand('@_user_1 /unbind')).toEqual({ kind: 'unbind' })
+  })
+
+  it('ignores trailing words', () => {
+    expect(parseCommand('/unbind 谢谢')).toEqual({ kind: 'unbind' })
+  })
+
+  it('is not confused with /bind', () => {
+    expect(parseCommand('/bind abc123').kind).toBe('bind')
+    expect(parseCommand('/unbind').kind).toBe('unbind')
+  })
+
+  it('requires the verb to be a whole token', () => {
+    expect(parseCommand('/unbinding').kind).toBe('none')
+  })
+})
