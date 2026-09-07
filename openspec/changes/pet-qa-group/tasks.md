@@ -146,12 +146,21 @@
       workdir 才落在 `.worktrees/pet-2` / `ws/pet-2`。残留风险（某轮遗漏 workdir
       即静默落在主 checkout，只读无害、写操作污染主 checkout）已作为独立
       Requirement 写入 `specs/pet-qa-group/spec.md`，不以「已修复」掩盖。
-      **订正**：两个 child 曾先后报告「runtime context 里也带了 Worktree Session
-      绑定块」，一度被视为第二重保障。第三个 child 在收到属于自己的权威 runtime
-      context 快照后自我推翻，并给出正确解释——fork 种子复制父会话 transcript，
-      其中夹带**父会话的**快照，被误读为自己的。代码侧交叉核实：`dsh-subagent`
-      全包**零处** worktree 注入。故 `workspaceLines()` 是 child 得知执行根的
-      **唯一**途径，残留风险严重度相应上调（无第二重提醒），spec 已按此措辞。
+      **两次订正的经过（值得完整保留）**：三个 child 先后报告「runtime context 里
+      也带了 Worktree Session 绑定块」，随后又都自我推翻（理由是新快照里没有，
+      判定为读到了 fork 种子里夹带的父会话快照）。我一度采信撤回，据此把 spec 写成
+      「workspaceLines() 是唯一途径、无第二重保障」——依据是 `dsh-subagent` 全包
+      零处 worktree 注入。
+      **但该核查不完整：注入方根本不是 subagent 层。** 复核
+      `dsh-worktree-session/lib/host/policy.js:registerSubagentInheritance` 可见它
+      监听 `agent/created`，且**专挑** `parentSession !== undefined` 的 Agent 调
+      `installInheritanceForAgent` → `installContext` →
+      `agent.ctx.systemPrompt.context({name:'worktree-session'})`；注入文本见
+      `context.js:activeBindingContext`，与三个 child 描述的段落逐字一致。
+      故结论是：**child 的第一次报告为真，三次撤回均误**。spec 已第二次订正为
+      「prompt 声明是 Pet 可控的那一重，且不得以另一插件的注入为前提」。
+      元教训：不采信 child 对自身上下文的自述是对的，但「代码核查」必须查到真正的
+      注入方——只证明 A 不注入，不能推出无人注入。
 
 - [x] 9.2 **重复点击 Q&A 会不断新建答疑群**。真机上同一源会话累积出三个同名群。
       根因：qa Task 的 scope 键取自 `scopeKeyOf('chat', chatId)`，而 chatId 是本次
