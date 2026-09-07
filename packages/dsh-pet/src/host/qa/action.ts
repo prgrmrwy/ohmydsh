@@ -231,10 +231,13 @@ export async function createQaGroup(
     }
   }
 
-  // Step 2: the group.
+  // Step 2: the group. The owner is both its sole invitee and its OWNER:
+  // creating as the bot would otherwise leave the bot in charge, and the
+  // person whose group it is could not rename, invite, remove or disband it
+  // without asking an agent to act for them.
   let chatId: string
   try {
-    chatId = await deps.client.createChat(chatName, [owner])
+    chatId = await deps.client.createChat(chatName, [owner], owner)
   } catch (error) {
     await releaseChild(deps, liveParent, childId)
     throw new PetError(
