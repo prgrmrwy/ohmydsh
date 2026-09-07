@@ -105,15 +105,25 @@
       **遗留**：GUI 私聊不出站一项待界面确认；发现 child cwd 缺陷见 8.9。
 - [x] 8.4 真机重启演练通过：DSH 重启后群消息触发 coldResume，child 从持久化
       Session + descriptor 重建，上下文完整（spike Q3 的真机对应验证）
-- [ ] 8.5 真机失效演练：归档源会话后群消息收到一次失效提示，后续静默
+- [x] 8.5 真机失效演练通过。素材构造：把最早那个 qa 绑定的 `qaParentSessionId`
+      改为不存在的 session id（源会话即当前对话，直接归档会中断验收本身），使
+      `resolveLiveParent` 必然失败——走的是与真实失效完全相同的代码分支，仅成因
+      是构造的。结果：第一条消息触发群内提示一次，第二条完全静默；持久层确证
+      `qaInvalidatedAt` 已落、`qaInvalidatedReason` 为「源会话已不可用（无法恢复）」、
+      `qaChildSessionId` 保留（child 历史仍可查）。库已先备份到
+      `/tmp/pet-state.before-8.5.sqlite`。
 - [x] 8.6 已记录（结论须按时间线分述，勿一句话带过）：
       ① **群主**——`--owner` 不传时默认归 bot（帮助文本明写）。修复 9.3 之后新建的
       群已显式指定发起者本人，**真机确认**（第四个群，建于该修复后 75 秒）。修复前
-      建的三个群群主**推测**为 bot，但**未获证实**：`im chats get --as bot` 不返回
-      `owner_id`，两个 manager 列表均空；试图用 `chat.managers add_managers` 反证
-      归属的实验也失败了——请求在**到达权限判定之前**就被 scope 检查挡下
-      （`99991672 app_scope_not_applied`，缺 `im:chat`、
-      `im:chat.managers:write_only`），因此该结果不能推断任何归属关系。
+      建的群群主为 **bot**，**已确证**：在 `oc_cf5e1951`（建于 08:22:32，早于该修复）
+      上以 bot 身份执行 `chat.managers add_managers` **成功并改变了服务端状态**
+      （`user_manager_id_list` 复核含目标 open_id），而该 API 契约为「只有群主能加
+      管理员」，故 bot 即群主。
+      过程中的两次弯路值得留痕：① 首次执行返回 `99991672 app_scope_not_applied`
+      （缺 `im:chat`、`im:chat.managers:write_only`），被 scope 挡在权限判定之前，
+      不能推断归属——补齐 scope 后才成功；② 期间有一次以 `--dry-run` 通过为据断言
+      「bot 是群主」，但 `--dry-run` 的语义是 *print request without executing*，
+      不发请求、不校验权限，该推断无效。**只有真实执行并改变服务端状态才算证据。**
       ② **解散**——**bot 不能解散群**：`lark-cli im chats` 仅
       create/get/link/update，全局无 delete/disband。这把 design D2 里「bot 无解散
       群 API」从未验证假设升级为已确证，反向印证「fork 排在建群之前」是对的：群建好
