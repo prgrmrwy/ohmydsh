@@ -1611,3 +1611,20 @@ describe('a success receipt does not become furniture', () => {
     expect(styles).toContain('pointer-events:none')
   })
 })
+
+
+describe('a bound group is not presented as one Pet owns', () => {
+  it('states that Pet is not the owner of a /bind group', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // Pet joined such a group rather than building it, so it can manage
+    // nothing there. Without this the UI reads identically to a group Pet
+    // created and owns.
+    expect(settings).toContain("route.qaOrigin === 'bound'")
+    expect(settings).toContain('Pet 非群主')
+  })
+})

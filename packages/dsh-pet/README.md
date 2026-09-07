@@ -119,6 +119,35 @@ If the source session is archived or can no longer be resumed, the binding is
 invalidated: the group is told once, then falls silent, and the child's history
 stays readable.
 
+### Binding a group that already exists
+
+The reverse also works. When the group is already there — a project channel, a
+working group — say `@bot /bind <session-prefix>` in it and Pet attaches that
+group to an existing session. The prefix is the six-character short id shown on
+the session badge; give a longer one if it collides. From then on the group
+behaves exactly like one Pet created.
+
+Two things differ, deliberately:
+
+- **Only you can issue the command.** The members of an existing group were not
+  gathered by you for this, so "membership is the credential" does not hold
+  here: `/bind` itself is restricted to the allowlist. The group inherits the
+  question exemption only *after* binding, and on a different basis — you
+  explicitly bound this group. An unauthorised `/bind` is dropped in silence;
+  replying "you may not" would tell a stranger that an agent stands behind the
+  bot.
+- **Pet controls nothing in such a group.** It is neither creator nor owner
+  there, and Settings says so rather than implying otherwise.
+
+A prefix that matches nothing and a prefix that matches several produce the
+*same* reply: no count, no hint that any other session exists.
+
+One group holds one session and one session holds one group. To re-point
+either, archive the corresponding Task first. The success reply states the
+group's current member count — from that moment every one of them can put work
+into a real repository through the bot, which is worth seeing at the moment you
+choose it.
+
 ## Skill installation and isolation
 
 Pet does **not** inherit DSH's global Skill discovery, and it ships **no

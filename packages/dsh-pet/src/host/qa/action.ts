@@ -24,7 +24,8 @@ import { renderQaSeedPrompt } from './prompt.js'
 import { FORK_PROVIDER, type LiveAgentLike, type SubagentSeam } from './subagents.js'
 import type { LarkClient } from '../channel/lark.js'
 import type { PetRepository } from '../repository.js'
-import type { PetScopeKey, PetTaskRecord } from '../../wire.js'
+import { archiveStale, qaScopeKeyOf, sessionOccupancy } from './occupancy.js'
+import type { PetTaskRecord } from '../../wire.js'
 
 /** How long the whole transaction may take before it is abandoned. */
 const ACTION_TIMEOUT_MS = 60_000
@@ -97,20 +98,77 @@ export function qaGroupName(title: string | undefined): string {
 }
 
 /**
- * The QA scope key for one source session.
+ * Fork the QA child for one source session and file it beside its parent.
  *
- * Keyed on the SOURCE SESSION, not on the chat: the chat id does not exist
- * until the group has been created, so a chat-keyed lookup could never match
- * an earlier group and every click would build another one.
- *
- * Namespaced apart from the ordinary `session:` scope so a source session may
- * hold both an overlay Task and a QA group at once — running `ws` from a
- * session must not make it impossible to open a QA group from it.
- * @param sessionId - Source session id.
- * @returns the scope key.
+ * Shared by both entry points: the Q&A action creates a group around the
+ * child it forks, while `/bind` attaches one that already exists. Only the
+ * group step differs, so keeping the fork here means the seed prompt, the
+ * execution-root statement and the filing behaviour cannot drift between the
+ * two paths.
+ * @param deps - Host collaborators.
+ * @param options - Child identity, its label, the live parent, and the source.
+ * @throws whatever the subagent seam raises; the caller owns rollback.
  */
-export function qaScopeKeyOf(sessionId: string): PetScopeKey {
-  return `qa:${sessionId}` as PetScopeKey
+export async function forkQaChild(
+  deps: QaActionDeps,
+  options: {
+    childId: string
+    label: string
+    parent: LiveAgentLike
+    source: QaSource
+    signal: AbortSignal
+  },
+): Promise<void> {
+  const { source } = options
+  // The seed is the source session's completed-turn prefix; an in-flight turn
+  // is excluded by the fork provider, which is why both entry points tell the
+  // user the child sees "the most recent completed round".
+  await deps.seam.subagents.startContinuable({
+    provider: FORK_PROVIDER,
+    label: options.label,
+    childId: options.childId,
+    request: {
+      // The seed states the execution root as well: the owner can talk to the
+      // child directly in the GUI, and that path carries no trigger prompt to
+      // remind it where it stands.
+      prompt: [
+        {
+          type: 'text',
+          text: renderQaSeedPrompt(
+            options.label,
+            source.worktree === undefined
+              ? undefined
+              : {
+                  executionRoot: source.worktree.executionRoot,
+                  ...(source.worktree.branch !== undefined
+                    ? { branch: source.worktree.branch }
+                    : {}),
+                  ...(source.worktree.repositoryRoot !== undefined
+                    ? { repositoryRoot: source.worktree.repositoryRoot }
+                    : {}),
+                },
+          ),
+        },
+      ],
+      parent: options.parent,
+    },
+    signal: options.signal,
+  })
+
+  // File the child where its parent lives, so it appears under the same
+  // project rather than unfiled.
+  if (deps.attachToWorkspace !== undefined) {
+    try {
+      await deps.attachToWorkspace(options.childId, source.workspaceId)
+    } catch (error) {
+      // Filing is presentation; the stored binding remains authoritative.
+      deps.log?.(
+        `qa child ${options.childId} could not be filed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+    }
+  }
 }
 
 /**
@@ -128,29 +186,22 @@ export async function createQaGroup(
   const config = repository.getChannelConfig()
 
   // Reuse before creating anything. One source session owns at most one live
-  // QA group, matching Pet's standing rule that a scope holds at most one
-  // active Task; clicking again is "show me my group", not "make another".
-  // "Live" is decided by the Task being unarchived, so archiving it — the
-  // documented way to end a QA group — frees the session to open a new one.
-  const existing = repository.findActiveTaskByScope(qaScopeKeyOf(source.sessionId))
-  if (existing !== undefined) {
-    const binding = repository
-      .listChatBindings()
-      .find(row => row.kind === 'qa' && row.activeTaskId === existing.id)
-    if (binding?.qaChildSessionId !== undefined && binding.qaInvalidatedAt === undefined) {
-      return {
-        chatId: binding.chatId,
-        chatName: binding.chatName ?? qaGroupName(source.title),
-        childSessionId: binding.qaChildSessionId,
-        taskId: existing.id,
-        reused: true,
-      }
+  // QA group, so clicking again is "show me my group", not "make another".
+  // A stale pairing (Task alive, binding gone or invalidated) is retired
+  // rather than handed back: returning a chat nobody can be answered in would
+  // be worse than building a working one.
+  const occupied = sessionOccupancy(repository, source.sessionId)
+  if (occupied.held) {
+    const { task, binding } = occupied.occupant
+    return {
+      chatId: binding.chatId,
+      chatName: binding.chatName ?? qaGroupName(source.title),
+      childSessionId: binding.qaChildSessionId ?? '',
+      taskId: task.id,
+      reused: true,
     }
-    // A live Task whose binding is gone or invalidated is a broken pair, not a
-    // group to hand back: archive it so this click can build a working one
-    // rather than returning a chat nobody can be answered in.
-    await repository.archiveTask(existing.id).catch(() => undefined)
   }
+  await archiveStale(repository, occupied)
 
   // The owner is the only member invited at creation; everyone else is pulled
   // in by them afterwards, which is precisely what the admission exemption
@@ -181,55 +232,8 @@ export async function createQaGroup(
   const childId = `session-${randomUUID()}`
   const signal = AbortSignal.timeout(ACTION_TIMEOUT_MS)
 
-  // Step 1: fork. The seed is the source session's completed-turn prefix; an
-  // in-flight turn is excluded by the fork provider, which is why the action
-  // surface tells the user the child sees "the most recent completed round".
-  await deps.seam.subagents.startContinuable({
-    provider: FORK_PROVIDER,
-    label: chatName,
-    childId,
-    request: {
-      // The seed states the execution root as well: the owner can talk to the
-      // child directly in the GUI, and that path carries no trigger prompt to
-      // remind it where it stands.
-      prompt: [
-        {
-          type: 'text',
-          text: renderQaSeedPrompt(
-            chatName,
-            source.worktree === undefined
-              ? undefined
-              : {
-                  executionRoot: source.worktree.executionRoot,
-                  ...(source.worktree.branch !== undefined
-                    ? { branch: source.worktree.branch }
-                    : {}),
-                  ...(source.worktree.repositoryRoot !== undefined
-                    ? { repositoryRoot: source.worktree.repositoryRoot }
-                    : {}),
-                },
-          ),
-        },
-      ],
-      parent: liveParent,
-    },
-    signal,
-  })
-
-  // File the child where its parent lives, so it appears under the same
-  // project rather than unfiled.
-  if (deps.attachToWorkspace !== undefined) {
-    try {
-      await deps.attachToWorkspace(childId, source.workspaceId)
-    } catch (error) {
-      // Filing is presentation; the stored binding remains authoritative.
-      deps.log?.(
-        `qa child ${childId} could not be filed: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      )
-    }
-  }
+  // Step 1: fork.
+  await forkQaChild(deps, { childId, label: chatName, parent: liveParent, source, signal })
 
   // Step 2: the group. The owner is both its sole invitee and its OWNER:
   // creating as the bot would otherwise leave the bot in charge, and the
@@ -262,6 +266,9 @@ export async function createQaGroup(
       chatName,
       qaChildSessionId: childId,
       qaParentSessionId: source.sessionId,
+      // Pet built this group, so it is the creator and the invited user owns
+      // it — as opposed to a group merely attached with `/bind`.
+      qaOrigin: 'created',
       // Captured now, not re-derived per question: the binding is where a
       // later message learns which directory the child may work in, and
       // re-resolving would make every question depend on the worktree plugin

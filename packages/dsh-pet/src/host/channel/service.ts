@@ -14,7 +14,12 @@
 import { BotBootstrap, type BootstrapState, type SpawnLike } from './bootstrap.js'
 import { settleFeedback } from './feedback.js'
 import { createLarkCliClient, type LarkClient } from './lark.js'
-import { InboundPipeline, type IntakeOutcome, type QaDeliveryPort } from './pipeline.js'
+import {
+  InboundPipeline,
+  type BindCommandPort,
+  type IntakeOutcome,
+  type QaDeliveryPort,
+} from './pipeline.js'
 import type { WorkspaceLocator } from './route.js'
 import { ChannelSubscription, type ChannelStatus } from './subscription.js'
 import type { PetCoordinator } from '../coordinator.js'
@@ -36,6 +41,13 @@ export interface ChannelServiceDeps {
    * fresh executor holding none of the context it exists for.
    */
   readonly qaDelivery?: QaDeliveryPort
+  /**
+   * Handles `/bind` in groups with no QA binding yet.
+   *
+   * Absent on a Host without QA support, in which case the command is never
+   * recognised and those groups behave exactly as before.
+   */
+  readonly bindCommand?: BindCommandPort
   /**
    * Overridable process spawn for the binding flow.
    *
@@ -78,6 +90,7 @@ export class ChannelService implements ChannelControl {
       client: this.client,
       locator: deps.locator,
       ...(deps.qaDelivery !== undefined ? { qaDelivery: deps.qaDelivery } : {}),
+      ...(deps.bindCommand !== undefined ? { bindCommand: deps.bindCommand } : {}),
       watermark: () => this.subscription.watermark,
       onOutcome: outcome => this.onOutcome(outcome),
     })
