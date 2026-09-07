@@ -75,6 +75,15 @@ export interface PetQaGroupResult {
   readonly chatName: string
   readonly childSessionId: string
   readonly taskId: string
+  /**
+   * Whether an existing group was returned instead of a new one created.
+   *
+   * One source session owns at most one live QA group, so a second click is
+   * "show me my group". The client must be able to say which happened: two
+   * identical-looking outcomes are how several identically named groups came
+   * to exist before reuse was implemented.
+   */
+  readonly reused?: boolean
 }
 
 /**
@@ -222,11 +231,20 @@ export interface PetLifecycleState {
  */
 export type PetSourceKind = 'session' | 'workspace' | 'none' | 'chat' | 'qa-chat'
 
-/** Stable scope key that defines active-Task uniqueness. */
+/**
+ * Stable scope key that defines active-Task uniqueness.
+ *
+ * `qa:` is keyed on the SOURCE SESSION rather than on the chat, because a QA
+ * group's chat id does not exist until that group has been created — a
+ * chat-keyed scope could never match an earlier group, so every click would
+ * build another one. Namespaced apart from `session:` so one source session
+ * can hold an overlay Task and a QA group at the same time.
+ */
 export type PetScopeKey =
   | `session:${string}`
   | `workspace:${string}`
   | `chat:${string}`
+  | `qa:${string}`
   | 'independent:web:default'
 
 /** The phase-one independent scope key. */
