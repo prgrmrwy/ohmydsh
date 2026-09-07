@@ -41,6 +41,20 @@
       不具备群管理能力
 - [x] 5.2 面板 qa Task 呈现兼容两种来源
 
+## 7. `/unbind`（并入本 change）
+
+- [x] 7.1 `unbindGroup`：仅解除 `qaOrigin === 'bound'` 的绑定；Q&A 创建的群拒绝并
+      指向面板归档（入口与出口同侧）；Task 非终态时拒绝而不中断；解除即归档该
+      Task（与面板同一机制），child 与历史保留
+- [x] 7.2 `/unbind` 命令解析：不接受参数（群自知其绑定对象，接受参数等于开放
+      「解除别的群」）；`/unbinding` 之类不误触
+- [x] 7.3 pipeline 按绑定状态互斥识别两个命令：`/bind` 仅未绑定群、`/unbind` 仅
+      已绑定群；不适用的一侧按普通文本处理，使已绑定群的正常提问不被解析为命令；
+      `/unbind` 同样仅限 allowlist，非 allowlist 静默丢弃
+- [x] 7.4 回执在群内发出（成员既被告知 agent 加入，也应被告知它退出）
+- [x] 7.5 测试：解除后可重新绑定、拒绝解除 created 群、忙时拒绝且不归档、
+      非 allowlist 静默、已绑定群的提问不被当作命令
+
 ## 6. 验证与收尾
 
 - [x] 6.1 `cd packages/dsh-pet && npm run typecheck && npm test`
@@ -50,6 +64,8 @@
       @bot 能提问 → 表情 OnIt→DONE；对照确认 child 目录约束段落在位
 - [ ] 6.4 真机：1:1 冲突两种方向各验一次；前缀多命中与无匹配的回执**逐字一致**
 - [ ] 6.5 真机：非 allowlist 成员发 `/bind` 完全静默（不回复、不打表情）
+- [ ] 6.8 真机：`/unbind` 解除后 @bot 不再回答；在 Q&A 创建的群发 `/unbind` 收到
+      「请在面板归档」；解除后可重新 `/bind`
 - [x] 6.6 更新 `dsh.yaml` dsh-pet 条目 note 与 `packages/dsh-pet/README.md`
 - [x] 6.7 `openspec validate pet-qa-bind-existing-group --strict --type change` 通过；
       复核 diff 无范围蔓延（不触碰 Q&A 动作、投递/表情/失效链路、非 qa 入站路径）

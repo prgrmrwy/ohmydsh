@@ -39,8 +39,8 @@ import { PetRepository } from './host/repository.js'
 import { ChannelService } from './host/channel/service.js'
 import { createLarkCliClient } from './host/channel/lark.js'
 import { createQaGroup } from './host/qa/action.js'
-import { bindExistingGroup } from './host/qa/bind.js'
-import { renderBindReceipt } from './host/qa/bind-receipt.js'
+import { bindExistingGroup, unbindGroup } from './host/qa/bind.js'
+import { renderBindReceipt, renderUnbindReceipt } from './host/qa/bind-receipt.js'
 import { QaDelivery } from './host/qa/delivery.js'
 import { probeSubagentSeam, type HostContextLike } from './host/qa/subagents.js'
 import { createPetRoutes } from './host/routes.js'
@@ -679,6 +679,22 @@ async function initialize(
             // someone else's working context.
             await larkClient.reply(event.message_id, text).catch(() => undefined)
             return { kind: 'accepted', invocationId: `bind-${event.message_id}` }
+          },
+          unbind: async (event: {
+            chat_id: string
+            message_id: string
+          }): Promise<{ kind: 'accepted'; invocationId: string }> => {
+            let text: string
+            try {
+              text = renderUnbindReceipt(await unbindGroup({ repository }, event.chat_id))
+              changes.publish()
+            } catch (error) {
+              text = `解绑失败：${error instanceof Error ? error.message : String(error)}`
+            }
+            // Announced in the group for the same reason binding is: the
+            // members were told an agent joined, so they are told it left.
+            await larkClient.reply(event.message_id, text).catch(() => undefined)
+            return { kind: 'accepted', invocationId: `unbind-${event.message_id}` }
           },
         }
 
