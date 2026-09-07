@@ -121,6 +121,33 @@ describe('binding an existing group', () => {
     expect(renderBindReceipt(outcome)).toContain('12 人')
   })
 
+  it('records the group\u2019s real name, never one Pet invents', async () => {
+    harness = await openPetHarness()
+    const client = larkStub()
+    vi.mocked(client.chatName).mockResolvedValue('Nexus 前端讨论')
+    const d = await deps(harness, { client })
+
+    await bindExistingGroup(d, { chatId: CHAT, prefix: 'abc123d' })
+
+    // A `/bind` group belongs to someone else. Storing an invented name would
+    // make Settings show something nobody sees in Lark, and would contradict
+    // the standing rule that Pet manages nothing in such a group.
+    expect(harness.repository.getChatBinding(CHAT)?.chatName).toBe('Nexus 前端讨论')
+  })
+
+  it('stores no name at all when Lark will not say', async () => {
+    harness = await openPetHarness()
+    const client = larkStub()
+    vi.mocked(client.chatName).mockResolvedValue(undefined)
+    const d = await deps(harness, { client })
+
+    await bindExistingGroup(d, { chatId: CHAT, prefix: 'abc123d' })
+
+    // Absent beats fabricated: the settings list falls back to the chat id,
+    // which is at least true.
+    expect(harness.repository.getChatBinding(CHAT)?.chatName).toBeUndefined()
+  })
+
   it('carries the execution root into the binding', async () => {
     harness = await openPetHarness()
     const d = await deps(harness, {

@@ -133,7 +133,17 @@ export async function bindExistingGroup(
   }
 
   const worktree = await deps.resolveWorktree?.(target.id).catch(() => undefined)
-  const label = request.chatName ?? qaGroupName(target.title)
+  // The group's OWN name, read from Lark — never one Pet invents. A `/bind`
+  // group belongs to someone else: renaming it (even only in Pet's own
+  // display) would contradict the standing rule that Pet promises no
+  // group-management capability there, and would leave Settings showing a
+  // name nobody sees in Lark. `qaGroupName` is the Q&A action's business,
+  // where Pet actually created the group.
+  const chatName =
+    request.chatName ?? (await deps.client.chatName(request.chatId).catch(() => undefined))
+  // The CHILD's label is a different thing: it is Pet's own object, shown in
+  // the subagent list, so naming it after the group it serves is right.
+  const label = chatName === undefined ? qaGroupName(target.title) : `答疑 · ${chatName}`
   const childId = `session-${randomUUID()}`
   const source: QaSource = {
     sessionId: target.id,
@@ -160,7 +170,8 @@ export async function bindExistingGroup(
       chatId: request.chatId,
       chatType: 'group',
       kind: 'qa',
-      chatName: label,
+      // The group's real name, or nothing — never an invented one.
+      ...(chatName !== undefined ? { chatName } : {}),
       qaChildSessionId: childId,
       qaParentSessionId: target.id,
       // Pet joined this group rather than creating it: it is neither creator
