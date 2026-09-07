@@ -15,10 +15,15 @@ workspace 回退，设置页 MUST NOT 允许将其改绑为 workspace 目标。�
 读作 `kind: workspace`。
 
 群内命令 SHALL 在按既有规则丢弃或路由**之前**被识别，并 SHALL 发生在 mention、
-去重、水位与消息类型防线**之后**：命令不豁免任何一道既有防线。两个命令按绑定
-状态互斥识别——`/bind` 仅在**尚无** qa 绑定的群中成立，`/unbind` 仅在**已有**
-qa 绑定的群中成立；不适用的一侧 SHALL 按普通文本处理，使已绑定群里的正常提问
-不被解析为命令。该识别 MUST NOT 改变非 qa 群或单聊的任何既有行为。
+去重、水位与消息类型防线**之后**：命令不豁免任何一道既有防线。
+
+命令 SHALL 无论该群当前是否已绑定都被识别，由绑定流程给出确定性结果；
+MUST NOT 因群的绑定状态而不识别命令、使其作为普通提问投递给 child。冲突与
+「无可解绑」都是数据库事实，SHALL 由一次查询机械判定并立即回执，MUST NOT 交由
+模型推理得出——委派给模型会使结果取决于该轮判断、耗费一次完整推理，且把命令
+意图送入本不该由其裁决的上下文。
+
+命令识别 MUST NOT 改变非 qa 群或单聊的任何既有行为。
 
 路由目标 MUST 是当前 Host 已注册的 workspace（`kind: workspace`）或有效的 qa
 绑定（`kind: qa`）。default workspace 未配置且无绑定行、或目标 workspace 已不
@@ -57,6 +62,10 @@ qa 绑定已失效时按其失效语义处理。
 - **WHEN** 一个已有 qa 绑定的群中，allowlist 用户 @bot 发送 `/unbind`
 - **THEN** 消息进入解绑流程，不作为提问投递给 child
 
-#### Scenario: 命令在不适用的一侧是普通文本
-- **WHEN** 未绑定群中出现 `/unbind`，或已绑定群中出现 `/bind`
-- **THEN** 该消息按该群的既有规则处理，不触发任何命令流程
+#### Scenario: 已绑定群中的 /bind 被机械拒绝
+- **WHEN** 一个已有 qa 绑定的群中，allowlist 用户 @bot 发送 `/bind <前缀>`
+- **THEN** 系统立即回执「本群已绑定」，该消息不投递给 child，不经模型推理
+
+#### Scenario: 未绑定群中的 /unbind 被机械拒绝
+- **WHEN** 一个无 qa 绑定的群中，allowlist 用户 @bot 发送 `/unbind`
+- **THEN** 系统立即回执「本群没有绑定任何会话」，该消息不投递给 child

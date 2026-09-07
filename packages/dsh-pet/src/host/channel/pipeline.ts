@@ -171,18 +171,18 @@ export class InboundPipeline {
     // conversation again, and re-parsing it would hijack ordinary questions.
     const bindTarget = this.deps.bindCommand
     if (bindTarget !== undefined) {
-      // Live, not merely present: after `/unbind` the row remains but the
-      // group is free again, so `/bind` must work there and `/unbind` must
-      // not — the same distinction the exemption and delivery now make.
-      const isBound = isQaChatLive(repository, event.chat_id)
       const parsed = parseCommand(decision.text)
-      // The two verbs live on opposite sides of the same condition: `/bind`
-      // only makes sense where nothing is bound, `/unbind` only where
-      // something is. Outside its own case each is ordinary text — which is
-      // what keeps a bound group's questions from being parsed as commands.
-      const applies =
-        (parsed.kind === 'unbind' && isBound) || (parsed.kind !== 'unbind' && !isBound)
-      if (parsed.kind !== 'none' && applies) {
+      // Recognised on BOTH sides, then refused with a reason. Gating
+      // recognition on the group's state instead made `/bind` in an already
+      // bound group fall through as an ordinary question: the user got
+      // whatever the child chose to say and never the one fact they needed
+      // ("this group is already bound"), while the `chat-occupied` branch
+      // became unreachable — a refusal nobody could ever see.
+      //
+      // An explicit verb aimed at the bot is a command attempt in any group.
+      // Answering "you cannot do that here" is both more useful and more
+      // honest than silently treating it as conversation.
+      if (parsed.kind !== 'none') {
         // The exemption that lets any member ask questions does NOT extend to
         // binding or unbinding: an existing group's members were never vetted
         // by the owner for that. A non-allowlist sender is dropped in silence,
