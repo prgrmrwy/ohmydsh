@@ -647,16 +647,23 @@ async function initialize(
               attachToWorkspace: attachSessionToWorkspace,
               log: (message: string) => ctx.logger.info(`dsh-pet bind: ${message}`),
               listSessions: () =>
-                (ctx.sessions.list() as unknown as {
-                  id: string
-                  header?: { title?: string; parentSession?: string }
-                }[]).map(session => ({
-                  id: String(session.id),
-                  ...(session.header?.title !== undefined ? { title: session.header.title } : {}),
-                  ...(session.header?.parentSession !== undefined
-                    ? { parentSession: session.header.parentSession }
-                    : {}),
-                })),
+                ctx.sessions.list().map(session => {
+                  const header = (session as unknown as { header?: { parentSession?: string } })
+                    .header
+                  // The title is NOT on the header — it is maintained by the
+                  // session-title service in the session log, and reading
+                  // `header.title` silently yields `undefined` for every
+                  // session, which showed up as every bound group being named
+                  // "答疑 · DSH" and every receipt naming a raw id.
+                  const title = ctx.sessionTitle.get(session)?.title
+                  return {
+                    id: String(session.id),
+                    ...(title !== undefined && title !== '' ? { title } : {}),
+                    ...(header?.parentSession !== undefined
+                      ? { parentSession: header.parentSession }
+                      : {}),
+                  }
+                }),
               resolveWorktree: resolveSourceWorktree,
               // Best-effort: the receipt states the blast radius when it can,
               // and omits the line when Lark will not say.
