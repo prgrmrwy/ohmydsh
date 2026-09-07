@@ -92,7 +92,7 @@ export interface LarkClient {
    */
   reply(messageId: string, text: string): Promise<void>
   /**
-   * Create a private group owned by the bot and invite the given users.
+   * Create a private group and invite the given users.
    *
    * NOT fail-soft, unlike the rest of this client: the QA group transaction
    * treats a failure here as a reason to roll the whole action back, so an
@@ -100,10 +100,18 @@ export interface LarkClient {
    * binding be written against a group that does not exist.
    * @param name - Group name.
    * @param userOpenIds - Members to invite besides the bot itself.
+   * @param ownerOpenId - Who owns the group. Creating as the bot defaults
+   * ownership TO the bot, which would leave the human unable to rename,
+   * invite, remove, or disband their own group — they would have to ask an
+   * agent to do it. Pass the owner explicitly.
    * @returns the new chat id.
    * @throws when lark-cli refused or returned no chat id.
    */
-  createChat(name: string, userOpenIds: readonly string[]): Promise<string>
+  createChat(
+    name: string,
+    userOpenIds: readonly string[],
+    ownerOpenId?: string,
+  ): Promise<string>
   /**
    * Send a standalone message to a chat as the bot.
    *
@@ -297,13 +305,17 @@ export function createLarkCliClient(binary = 'lark-cli'): LarkClient {
       )
     },
 
-    async createChat(name, userOpenIds) {
+    async createChat(name, userOpenIds, ownerOpenId) {
       // Deliberately NOT routed through `callCli`, which swallows every
       // failure into `undefined`. A QA binding written against a group that
       // was never created is exactly the silent breakage the transaction
       // exists to prevent, so this one call reports why it failed.
       const args = ['im', '+chat-create', '--as', 'bot', '--name', name]
       if (userOpenIds.length > 0) args.push('--users', userOpenIds.join(','))
+      // Ownership is a capability, not a label: only the owner can rename,
+      // invite, remove members or disband. Creating as the bot defaults it to
+      // the bot, which would put an agent in charge of the user's own group.
+      if (ownerOpenId !== undefined && ownerOpenId !== '') args.push('--owner', ownerOpenId)
       let stdout: string
       try {
         const result = await run(binary, args, {
