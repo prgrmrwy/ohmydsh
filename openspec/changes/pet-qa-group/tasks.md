@@ -114,7 +114,7 @@
 
 ## 9. 真机验收发现的缺陷
 
-- [ ] 9.1 **child 落在错误的工作目录**。真机 child header：
+- [x] 9.1 **child 落在错误的工作目录**。真机 child header：
       `cwd=/Users/prgrmrwy/opensource/ohmydsh`（主 checkout），而父会话实际工作在
       `.worktrees/pet-2`。
       根因（实测澄清）：**fork 没有出错**——父会话 header 的 `cwd` 本来就是仓库根，
@@ -137,4 +137,12 @@
       增长淡出注意力，而这条决定改动落在任务分支还是主 checkout）；源会话未绑定
       worktree 时不虚构约束。schema 仅加三个可选字段，仍为加性。
       新增 5 个回归测试（执行根进 seed、持久化到绑定行、每条消息重述、未绑定时
-      不虚构）；已合入并物化，**待真机复验**（与 8.4 重启演练合并进行）。
+      不虚构）。
+      **真机复验通过**：新建群绑定行三字段齐全（execRoot=`…/.worktrees/pet-2`、
+      branch=`ws/pet-2`、repoRoot=仓库根），与修复前那条（三字段全缺）恰成对照；
+      seed 与提问 prompt 均含「### 你的工作目录」小节。
+      ⚠ **措辞必须准确**：修的是「child 是否知道该去哪干活」，**不是 cwd 被纠正**。
+      child 实测对照：不传 workdir 时 `pwd` = 主 checkout 且分支为 `main`；显式传
+      workdir 才落在 `.worktrees/pet-2` / `ws/pet-2`。残留风险（某轮遗漏 workdir
+      即静默落在主 checkout，只读无害、写操作污染主 checkout）已作为独立
+      Requirement 写入 `specs/pet-qa-group/spec.md`，不以「已修复」掩盖。
