@@ -175,7 +175,7 @@ DSH 官方 `standard` preset 会自动加载,无需复制出 `ohmydsh` preset。
 - 升级 = 改 pin 重跑 sync(默认由 `autoUpdate` 自动完成,见上方「自动升级」;`DSH_SKIP_UPDATE=1` 恢复纯手工改 pin 模式)。
 - **安全提醒**:插件即第三方代码(社区列表明示警告),安装前先看源码,`note` 记录来源与审查结论。
 - **`dsh-traex-bridge`(内部专属包)**:来自 bnpm/内网(`code.byted.org`),鉴权与推理流量走 ByteDance 内网服务,仓库默认 `enabled: false` + `enabledEnv: DSH_TRAEX_BRIDGE`(见上方「定制项按需开关」)。克隆本仓库的机器默认不装它;有内网权限时,本机 `.env.local`(gitignored)加一行 `DSH_TRAEX_BRIDGE=1` 后 `dsh build` 即可启用,详见 `dsh.yaml` 条目 `note`。
-- **`llm-subscriptions` 订阅 provider 插件**(`dsh-plugin-subscriptions`,当前 pin `0.5.2+pr40.d927e3a` = 上游 PR #40「按模型默认推理档」临时 fork tarball,设置页每模型默认档列表收起,详见 `dsh.yaml` 条目 note;上游合并发版后切回 npm):Claude 登录 = 导入本机 Claude Code 凭据(秒登录,不弹 OAuth),升级与选型细见 change `openspec/changes/2026-08-20-llm-subscriptions-upgrade`(含 ADR-0001)。**回滚**:`dsh.yaml` 该条目 `spec`/`version` 改回 `dsh-plugin-subscriptions@0.5.2` / `0.5.2`(或删除临时条目) → `dsh build` → 重启;codex 会话不受影响,可无损回滚。
+- **`llm-subscriptions` 订阅 provider 插件**(`dsh-plugin-subscriptions`,当前 pin `0.8.0`,详见 `dsh.yaml` 条目 note):Claude 登录 = 导入本机 Claude Code 凭据(秒登录,不弹 OAuth),选型细见 change `openspec/changes/2026-08-20-llm-subscriptions-upgrade`(含 ADR-0001)。**codex 模型目录与 pin 强耦合**:ChatGPT 后端按请求里的 `client_version` 分流可见模型,旧 pin 会静默少几个新模型(如 `0.147.0` 看不到 GPT-6-Astra);`0.8.0` 起该版本号改为从公开 npm 元数据动态解析(不带凭据、失败回退内置 `0.153.4`),也可用插件配置 `codexClientVersion` 固定。**回滚**:该条目 `spec`/`version` 改回 `dsh-plugin-subscriptions@0.6.0` / `0.6.0` → `dsh build` → 重启;`auth.json` 不被升级改写,登录态与既有会话无损。
 
 ## 开发流
 
