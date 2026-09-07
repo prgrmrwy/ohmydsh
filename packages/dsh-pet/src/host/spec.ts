@@ -356,6 +356,21 @@ const petChatBinding = z
     qaBranch: z.string().min(1).optional(),
     /** Repository root, named in the prompt as the place NOT to work in. */
     qaRepositoryRoot: z.string().min(1).optional(),
+    /**
+     * How this qa binding came to exist.
+     *
+     * `created` — Pet built the group itself through the Q&A action, so it is
+     * the creator and the group is owned by the user Pet invited.
+     * `bound` — an existing group was attached with `/bind`; Pet is neither
+     * its creator nor its owner and holds no group-management capability
+     * there.
+     *
+     * Purely presentational: no downstream behaviour branches on it. It exists
+     * so Settings and diagnostics can state which case a row is instead of
+     * implying Pet can manage a group it merely joined. Absent on every
+     * pre-`/bind` row, which reads as `created`.
+     */
+    qaOrigin: z.enum(['created', 'bound']).default('created'),
     boundBy: z.enum(['auto', 'user']),
     boundAt: z.number().int(),
   })

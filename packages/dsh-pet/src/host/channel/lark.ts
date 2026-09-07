@@ -113,6 +113,17 @@ export interface LarkClient {
     ownerOpenId?: string,
   ): Promise<string>
   /**
+   * Count the human members of a chat.
+   *
+   * Used to state the blast radius when binding an existing group: from that
+   * moment every one of them can put work into a real repository through the
+   * bot, and the owner should see that number at the moment they choose it.
+   * Fail-soft — an unknown count omits the line rather than blocking a bind.
+   * @param chatId - Target chat.
+   * @returns the member count, or `undefined` when it cannot be read.
+   */
+  memberCount(chatId: string): Promise<number | undefined>
+  /**
    * Send a standalone message to a chat as the bot.
    *
    * Distinct from {@link reply}: a notice about an invalidated QA binding has
@@ -342,6 +353,15 @@ export function createLarkCliClient(binary = 'lark-cli'): LarkClient {
         throw new Error('lark-cli created no group id')
       }
       return chatId
+    },
+
+    async memberCount(chatId) {
+      const data = await callCli(
+        ['im', '+chat-members-list', '--as', 'bot', '--chat-id', chatId, '--page-all'],
+        binary,
+      )
+      const users = (data as { users?: unknown } | undefined)?.users
+      return Array.isArray(users) ? users.length : undefined
     },
 
     async sendToChat(chatId, text) {

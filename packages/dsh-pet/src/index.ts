@@ -39,6 +39,8 @@ import { PetRepository } from './host/repository.js'
 import { ChannelService } from './host/channel/service.js'
 import { createLarkCliClient } from './host/channel/lark.js'
 import { createQaGroup } from './host/qa/action.js'
+import { bindExistingGroup } from './host/qa/bind.js'
+import { renderBindReceipt } from './host/qa/bind-receipt.js'
 import { QaDelivery } from './host/qa/delivery.js'
 import { probeSubagentSeam, type HostContextLike } from './host/qa/subagents.js'
 import { createPetRoutes } from './host/routes.js'
@@ -601,6 +603,85 @@ async function initialize(
     ctx.effect(() => () => qaDelivery.dispose(), 'dsh-pet: qa settlement subscription')
   }
 
+  /**
+   * Resolve a source session's managed execution facts.
+   *
+   * Shared by both QA entry points, and always through the Worktree Session
+   * contract — never inferred from a `cwd`, which that plugin deliberately
+   * leaves at the repository root.
+   */
+  const resolveSourceWorktree = async (
+    sessionId: string,
+  ): Promise<
+    { executionRoot: string; branch?: string; repositoryRoot?: string } | undefined
+  > => {
+    const session = ctx.sessions.get(sessionId as never) as { header?: { cwd?: string } } | undefined
+    const repoPath = session?.header?.cwd
+    if (maintenance === undefined || repoPath === undefined) return undefined
+    return maintenance
+      .wsStatus({ sessionId, repoPath })
+      .then(status => ({
+        executionRoot: status.worktreePath,
+        ...(status.taskBranch !== '' ? { branch: status.taskBranch } : {}),
+        repositoryRoot: repoPath,
+      }))
+      // An unbound session is the ordinary non-worktree case, not a fault.
+      .catch(() => undefined)
+  }
+
+  // `/bind`: attach an existing group to an existing session. Present only
+  // with the seam, exactly like the Q&A action — without it the command is
+  // never recognised and unbound groups behave as before.
+  const bindCommand =
+    qaSeam === undefined
+      ? undefined
+      : {
+          handle: async (
+            event: { chat_id: string; message_id: string },
+            prefix: string,
+          ): Promise<{ kind: 'accepted'; invocationId: string } | { kind: 'error'; reason: string }> => {
+            const bindDeps = {
+              repository,
+              client: larkClient,
+              seam: qaSeam,
+              attachToWorkspace: attachSessionToWorkspace,
+              log: (message: string) => ctx.logger.info(`dsh-pet bind: ${message}`),
+              listSessions: () =>
+                (ctx.sessions.list() as unknown as {
+                  id: string
+                  header?: { title?: string; parentSession?: string }
+                }[]).map(session => ({
+                  id: String(session.id),
+                  ...(session.header?.title !== undefined ? { title: session.header.title } : {}),
+                  ...(session.header?.parentSession !== undefined
+                    ? { parentSession: session.header.parentSession }
+                    : {}),
+                })),
+              resolveWorktree: resolveSourceWorktree,
+              // Best-effort: the receipt states the blast radius when it can,
+              // and omits the line when Lark will not say.
+              memberCount: (chatId: string) =>
+                larkClient.memberCount(chatId).catch(() => undefined),
+            }
+            let text: string
+            try {
+              const outcome = await bindExistingGroup(bindDeps as never, {
+                chatId: event.chat_id,
+                prefix,
+              })
+              text = renderBindReceipt(outcome)
+              if (outcome.ok) changes.publish()
+            } catch (error) {
+              text = `绑定失败：${error instanceof Error ? error.message : String(error)}`
+            }
+            // The reply goes to the GROUP, not to whoever typed: members have
+            // a right to know their group just gained an agent carrying
+            // someone else's working context.
+            await larkClient.reply(event.message_id, text).catch(() => undefined)
+            return { kind: 'accepted', invocationId: `bind-${event.message_id}` }
+          },
+        }
+
   // The Q&A wheel action. Registered unconditionally so the reason it cannot
   // run is visible on the wheel itself; an action that simply vanished would
   // read as a Pet bug rather than as missing configuration.
@@ -637,6 +718,7 @@ async function initialize(
     coordinator,
     client: larkClient,
     ...(qaDelivery !== undefined ? { qaDelivery } : {}),
+    ...(bindCommand !== undefined ? { bindCommand } : {}),
     locator: {
       locate: workspaceId => {
         const match = ctx.workspaceRegistry

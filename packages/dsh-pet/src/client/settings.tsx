@@ -1597,6 +1597,13 @@ function ChannelTab(): JSX.Element {
                 {route.kind === 'qa' ? (
                   <span className="dshpet-item-hint">
                     绑定会话 {route.qaParentSessionId ?? '（未知）'}
+                    {/*
+                      A bound group is one Pet joined, not one it built: it is
+                      neither creator nor owner there and can manage nothing.
+                      Saying so prevents the reasonable-but-wrong assumption
+                      that Pet could rename or clean up such a group.
+                    */}
+                    {route.qaOrigin === 'bound' ? '（绑定既有群，Pet 非群主）' : ''}
                   </span>
                 ) : (
                   <select

@@ -17,6 +17,7 @@ import {
   type LarkInboundEvent,
 } from './event.js'
 import { markInProgress } from './feedback.js'
+import { parseCommand } from '../qa/command.js'
 import type { LarkClient } from './lark.js'
 import { routeChat, type WorkspaceLocator } from './route.js'
 import type { PetCoordinator } from '../coordinator.js'
@@ -67,8 +68,25 @@ export interface PipelineDeps {
    * the group exists for.
    */
   readonly qaDelivery?: QaDeliveryPort
+  /**
+   * Handles `/bind` in groups that have no QA binding yet.
+   *
+   * Absent on a Host without QA support, in which case the command is never
+   * recognised and such groups behave exactly as before.
+   */
+  readonly bindCommand?: BindCommandPort
   /** Reports an outcome for diagnostics. */
   readonly onOutcome?: (outcome: IntakeOutcome, event?: LarkInboundEvent) => void
+}
+
+/** Runs one `/bind` and reports back in the pipeline's vocabulary. */
+export interface BindCommandPort {
+  /**
+   * @param event - The admitted event carrying the command.
+   * @param prefix - The session prefix as typed; empty when none was given.
+   * @returns what happened, for diagnostics.
+   */
+  handle(event: LarkInboundEvent, prefix: string): Promise<IntakeOutcome>
 }
 
 /**
@@ -131,6 +149,35 @@ export class InboundPipeline {
     // redelivery after a restart finds the window empty but the row present.
     const known = repository.findChannelByTriggerMessage(event.message_id)
     if (known !== undefined) return this.report({ kind: 'ignored', reason: 'duplicate' }, event)
+
+    // Command recognition sits AFTER the whole gauntlet and BEFORE routing.
+    // After, because a command is not a bypass — mention, dedup, watermark and
+    // message type all still decide first. Before, because an unbound group's
+    // messages would otherwise be discarded or routed to a workspace, and
+    // `/bind` would never reach anything.
+    //
+    // Only in groups with no QA binding: once bound, the same text is
+    // conversation again, and re-parsing it would hijack ordinary questions.
+    const bindTarget = this.deps.bindCommand
+    if (bindTarget !== undefined && repository.getChatBinding(event.chat_id)?.kind !== 'qa') {
+      const parsed = parseCommand(decision.text)
+      if (parsed.kind !== 'none') {
+        // The exemption that lets any member ask questions does NOT extend to
+        // binding: an existing group's members were never vetted by the owner
+        // for this purpose. A non-allowlist sender is dropped in silence, like
+        // every other refusal — answering "you may not" would confirm to an
+        // unauthorised person that an agent stands behind this bot.
+        const config = repository.getChannelConfig()
+        const sender = event.sender_id ?? ''
+        if (!config.allowOpenIds.includes(sender)) {
+          return this.report({ kind: 'ignored', reason: 'not-allowed-sender' }, event)
+        }
+        return this.report(
+          await bindTarget.handle(event, parsed.kind === 'bind' ? parsed.prefix : ''),
+          event,
+        )
+      }
+    }
 
     const route = await routeChat(
       repository,

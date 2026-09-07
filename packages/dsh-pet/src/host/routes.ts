@@ -130,6 +130,7 @@ function channelView(
     ...(binding.qaParentSessionId !== undefined
       ? { qaParentSessionId: binding.qaParentSessionId }
       : {}),
+    ...(binding.kind === 'qa' ? { qaOrigin: binding.qaOrigin } : {}),
     ...(binding.qaInvalidatedAt !== undefined ? { qaInvalidatedAt: binding.qaInvalidatedAt } : {}),
     ...(binding.qaInvalidatedReason !== undefined
       ? { qaInvalidatedReason: binding.qaInvalidatedReason }

@@ -159,6 +159,12 @@ export interface PetChatRoute {
   readonly qaChildSessionId?: string
   /** Present on `qa` bindings: the source session the child was forked from. */
   readonly qaParentSessionId?: string
+  /**
+   * How a `qa` binding came to exist: Pet created the group, or an existing
+   * group was attached with `/bind`. Presentational only — it exists so the
+   * UI can avoid implying Pet can manage a group it merely joined.
+   */
+  readonly qaOrigin?: 'created' | 'bound'
   /** Present when a qa binding has been invalidated (no longer raises work). */
   readonly qaInvalidatedAt?: number
   readonly qaInvalidatedReason?: string

@@ -128,6 +128,9 @@ export async function routeChat(
     chatId: chat.chatId,
     chatType: chat.chatType,
     kind: 'workspace',
+    // Only meaningful for qa rows; stated explicitly because the field is
+    // defaulted on read, not on write.
+    qaOrigin: 'created',
     workspaceId: fallback,
     ...(resolvedName !== undefined ? { chatName: resolvedName } : {}),
     boundBy: 'auto',

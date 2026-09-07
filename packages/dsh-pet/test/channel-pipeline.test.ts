@@ -570,3 +570,153 @@ describe('QA group bindings in the intake path', () => {
     expect(binding?.boundBy).toBe('user')
   })
 })
+
+describe('the /bind command in the intake path', () => {
+  const PLAIN = 'oc_plaingroup00000000000000000000'
+
+  /** A pipeline with bind wired, recording what reached the command port. */
+  function withBind(f: Fixture): {
+    pipeline: InboundPipeline
+    handled: { chatId: string; prefix: string }[]
+  } {
+    const handled: { chatId: string; prefix: string }[] = []
+    const pipeline = new InboundPipeline({
+      repository: f.harness.repository,
+      coordinator: f.coordinator,
+      client: f.client,
+      locator: { locate: () => undefined },
+      watermark: () => 1000,
+      bindCommand: {
+        handle: async (event, prefix) => {
+          handled.push({ chatId: event.chat_id, prefix })
+          return { kind: 'accepted', invocationId: 'bind-1' }
+        },
+      },
+    })
+    return { pipeline, handled }
+  }
+
+  /** A group line carrying a bind command. */
+  function bindLine(overrides: Record<string, unknown> = {}): string {
+    return groupLine({
+      chat_id: PLAIN,
+      message_id: 'om_bind1',
+      content: '@_user_1 /bind abc123',
+      ...overrides,
+    })
+  }
+
+  it('routes an allowlist member\u2019s command to the bind flow', async () => {
+    const f = await fixture()
+    harness = f.harness
+    const { pipeline, handled } = withBind(f)
+
+    const outcome = await pipeline.handleLine(bindLine())
+
+    expect(outcome.kind).toBe('accepted')
+    expect(handled).toEqual([{ chatId: PLAIN, prefix: 'abc123' }])
+    // It must not also fall through to workspace dispatch.
+    expect(f.dispatched).toHaveLength(0)
+  })
+
+  it('silently drops a command from a non-allowlist sender', async () => {
+    const f = await fixture()
+    harness = f.harness
+    const { pipeline, handled } = withBind(f)
+
+    const outcome = await pipeline.handleLine(bindLine({ sender_id: STRANGER }))
+
+    // The question exemption does NOT extend to binding: an existing group's
+    // members were never vetted for this. And the refusal stays silent —
+    // answering "you may not" would confirm an agent stands behind the bot.
+    expect(outcome).toEqual({ kind: 'ignored', reason: 'not-allowed-sender' })
+    expect(handled).toHaveLength(0)
+  })
+
+  it('does not bypass the mention gate', async () => {
+    const f = await fixture()
+    harness = f.harness
+    const { pipeline, handled } = withBind(f)
+
+    const outcome = await pipeline.handleLine(
+      bindLine({ mentions: [], content: '/bind abc123' }),
+    )
+
+    expect(outcome).toEqual({ kind: 'ignored', reason: 'no-mention' })
+    expect(handled).toHaveLength(0)
+  })
+
+  it('does not bypass the start-up watermark', async () => {
+    const f = await fixture()
+    harness = f.harness
+    const { pipeline, handled } = withBind(f)
+
+    const outcome = await pipeline.handleLine(bindLine({ create_time: '500' }))
+
+    expect(outcome).toEqual({ kind: 'ignored', reason: 'before-watermark' })
+    expect(handled).toHaveLength(0)
+  })
+
+  it('does not bypass deduplication', async () => {
+    const f = await fixture()
+    harness = f.harness
+    const { pipeline, handled } = withBind(f)
+
+    await pipeline.handleLine(bindLine())
+    const second = await pipeline.handleLine(bindLine())
+
+    expect(second).toEqual({ kind: 'ignored', reason: 'duplicate' })
+    expect(handled).toHaveLength(1)
+  })
+
+  it('stops recognising the command once the group is bound', async () => {
+    const f = await fixture()
+    harness = f.harness
+    await f.harness.repository.putChatBinding({
+      chatId: PLAIN,
+      chatType: 'group',
+      kind: 'qa',
+      qaChildSessionId: 'session-child',
+      qaParentSessionId: 'session-source',
+      qaOrigin: 'bound',
+      boundBy: 'user',
+      boundAt: 1,
+    })
+    const delivered: string[] = []
+    const pipeline = new InboundPipeline({
+      repository: f.harness.repository,
+      coordinator: f.coordinator,
+      client: f.client,
+      locator: { locate: () => undefined },
+      watermark: () => 1000,
+      qaDelivery: {
+        deliver: async event => {
+          delivered.push(event.message_id)
+          return { kind: 'accepted', invocationId: 'qa-1' }
+        },
+      },
+      bindCommand: {
+        handle: async () => {
+          throw new Error('bind must not run in an already-bound group')
+        },
+      },
+    })
+
+    const outcome = await pipeline.handleLine(bindLine())
+
+    // In a working QA group the same text is conversation again; re-parsing
+    // it would hijack an ordinary question.
+    expect(outcome.kind).toBe('accepted')
+    expect(delivered).toEqual(['om_bind1'])
+  })
+
+  it('leaves non-command messages in unbound groups untouched', async () => {
+    const f = await fixture()
+    harness = f.harness
+    const { pipeline, handled } = withBind(f)
+
+    await pipeline.handleLine(groupLine({ chat_id: PLAIN, content: '@_user_1 看看这个' }))
+
+    expect(handled).toHaveLength(0)
+  })
+})
