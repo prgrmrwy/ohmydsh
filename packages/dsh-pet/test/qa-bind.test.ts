@@ -410,3 +410,66 @@ describe('unbinding a group', () => {
     expect(outcome.ok).toBe(true)
   })
 })
+
+describe('replies never carry a full session id', () => {
+  /** A full id looks like `session-<uuid>`; the short form is six chars. */
+  const FULL_ID = /session-[0-9a-f]{8}-[0-9a-f]{4}/i
+
+  it('uses the short id in a success receipt', async () => {
+    harness = await openPetHarness()
+    const d = await deps(harness)
+
+    const outcome = await bindExistingGroup(d, { chatId: CHAT, prefix: 'abc123d' })
+
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) return
+    const text = renderBindReceipt(outcome)
+    // The reply lands in a GROUP: everyone present would see an internal
+    // identifier they have no use for and no business holding.
+    expect(text).not.toMatch(FULL_ID)
+    expect(outcome.sourceShortId).toHaveLength(6)
+  })
+
+  it('does not echo the bound session id when the group is taken', async () => {
+    harness = await openPetHarness()
+    const d = await deps(harness)
+    await bindExistingGroup(d, { chatId: CHAT, prefix: 'abc123d' })
+
+    const second = await bindExistingGroup(d, { chatId: CHAT, prefix: 'def456' })
+
+    expect(second.ok).toBe(false)
+    expect(JSON.stringify(second)).not.toMatch(FULL_ID)
+    expect(renderBindReceipt(second)).not.toMatch(FULL_ID)
+  })
+
+  it('names no chat id when the session is taken', async () => {
+    harness = await openPetHarness()
+    const d = await deps(harness)
+    await bindExistingGroup(d, { chatId: CHAT, prefix: 'abc123d' })
+
+    const other = await bindExistingGroup(d, {
+      chatId: 'oc_another000000000000000000000000'.slice(0, 33),
+      prefix: 'abc123d',
+    })
+
+    expect(other.ok).toBe(false)
+    // Printing the other group's raw chat id into THIS group's transcript
+    // would leak across conversations.
+    expect(renderBindReceipt(other)).not.toMatch(/oc_[A-Za-z0-9]{10,}/)
+  })
+
+  it('falls back to a short id when a session has no title', async () => {
+    harness = await openPetHarness()
+    const stub = seamStub({ resumeFails: true })
+    stub.seam.agents.get = () => undefined
+    const d = await deps(harness, {
+      seam: stub.seam,
+      listSessions: () => [{ id: 'session-99887766-0000-0000-0000-00000000000a' }],
+    })
+
+    const outcome = await bindExistingGroup(d, { chatId: CHAT, prefix: '998877' })
+
+    expect(outcome.ok).toBe(false)
+    expect(renderBindReceipt(outcome)).not.toMatch(FULL_ID)
+  })
+})
