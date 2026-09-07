@@ -65,9 +65,14 @@ workdir。系统 MUST NOT 从 `cwd` 推断执行根。
 
 系统 MUST NOT 宣称该约束改变了 child 进程的工作目录：fork 复制父会话的 `cwd`
 （Worktree Session 有意将其保留在仓库根），而绑定本身不被继承，因此 child 进程
-的默认 `cwd` 仍是主 checkout。约束的性质与父会话所受的约束相同——运行时上下文
-而非强制沙箱——遗留风险（某轮遗漏 workdir 即静默落在主 checkout）SHALL 被如实
-声明，MUST NOT 以"已修复"掩盖。
+的默认 `cwd` 仍是主 checkout。
+
+该 prompt 声明 SHALL 被视为 child 得知执行根的**唯一**途径，而非第二重保障：
+子代理层不注入任何 Worktree Session 运行时上下文，child 自身的 runtime context
+中不存在该绑定。（fork 种子会复制父会话 transcript，其中夹带**父会话的** runtime
+context 快照，极易被误读为 child 自己的——真机上两个 child 先后发生过这一误读。）
+因此遗留风险 SHALL 按「无第二重提醒」如实声明：某轮遗漏 workdir 即为纯粹的静默
+失误，只读无害而写操作会污染主 checkout；MUST NOT 以「已修复」掩盖。
 
 源会话未绑定 Worktree Session 时，系统 MUST NOT 虚构任何目录约束。
 
