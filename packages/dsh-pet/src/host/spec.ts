@@ -371,6 +371,15 @@ const petChatBinding = z
      * pre-`/bind` row, which reads as `created`.
      */
     qaOrigin: z.enum(['created', 'bound']).default('created'),
+    /**
+     * The workspace this chat routed to before `/bind` took it over.
+     *
+     * Present only when `/bind` overwrote an existing `workspace` row.
+     * `/unbind` restores it, so releasing a group hands it back to whatever
+     * it was doing rather than leaving it permanently mute — a group that was
+     * a workspace group before should be one again afterwards.
+     */
+    qaPriorWorkspaceId: z.string().min(1).optional(),
     boundBy: z.enum(['auto', 'user']),
     boundAt: z.number().int(),
   })

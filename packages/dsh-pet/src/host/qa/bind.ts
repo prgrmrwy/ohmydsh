@@ -86,6 +86,16 @@ export async function bindExistingGroup(
 
   // The group side first: it is the cheapest check and the one the user is
   // most likely to trip, since they are standing in the group as they type.
+  // What this chat was BEFORE `/bind` — kept so `/unbind` can hand it back
+  // rather than leaving a group permanently mute. A group that was routing to
+  // a workspace should return to doing so; one that had no binding at all
+  // should return to having none.
+  const priorBinding = repository.getChatBinding(request.chatId)
+  const priorWorkspaceId =
+    priorBinding !== undefined && priorBinding.kind === 'workspace'
+      ? priorBinding.workspaceId
+      : undefined
+
   const byChat = chatOccupancy(repository, request.chatId)
   if (byChat.held) {
     // The reply goes to a GROUP, so it must not carry a full session id:
@@ -189,6 +199,8 @@ export async function bindExistingGroup(
       // Pet joined this group rather than creating it: it is neither creator
       // nor owner here, and Settings must be able to say so.
       qaOrigin: 'bound',
+      // Carried, not discarded: releasing the binding restores this route.
+      ...(priorWorkspaceId !== undefined ? { qaPriorWorkspaceId: priorWorkspaceId } : {}),
       ...(worktree !== undefined
         ? {
             qaExecutionRoot: worktree.executionRoot,
@@ -263,7 +275,13 @@ async function createBoundTask(
 
 /** What `/unbind` decided. */
 export type UnbindOutcome =
-  | { readonly ok: true; readonly chatName?: string; readonly sourceTitle?: string }
+  | {
+      readonly ok: true
+      readonly chatName?: string
+      readonly sourceTitle?: string
+      /** Present when the group was handed back to a workspace route. */
+      readonly restoredWorkspaceId?: string
+    }
   | {
       readonly ok: false
       /**
@@ -321,12 +339,36 @@ export async function unbindGroup(
   }
 
   await deps.repository.archiveTask(task.id)
-  // The child and its history are kept, matching what invalidation does: the
-  // conversation stays readable in the GUI, it simply stops receiving the
-  // group's messages.
+
+  // Hand the group back to whatever it was doing before `/bind` took it over.
+  // Leaving it as a mute `qa` row would be a third state — neither served nor
+  // free — and a group that used to route to a workspace would silently stop
+  // working with no way back except re-binding.
+  const restored = binding.qaPriorWorkspaceId
+  if (restored !== undefined) {
+    await deps.repository.putChatBinding({
+      chatId: binding.chatId,
+      chatType: binding.chatType,
+      kind: 'workspace',
+      workspaceId: restored,
+      ...(binding.chatName !== undefined ? { chatName: binding.chatName } : {}),
+      qaOrigin: 'created',
+      boundBy: 'user',
+      boundAt: Date.now(),
+    })
+  } else {
+    // Nothing to restore: the group had no binding before, so it should have
+    // none now. Removing the row is what makes it truly free again — a
+    // retained `qa` row would keep it out of default routing forever.
+    await deps.repository.deleteChatBinding(binding.chatId)
+  }
+
+  // The child and its history survive either way: the session remains
+  // readable in the GUI, it simply stops receiving this group's messages.
   return {
     ok: true,
     ...(binding.chatName !== undefined ? { chatName: binding.chatName } : {}),
     ...(task.sourceTitle !== undefined ? { sourceTitle: task.sourceTitle } : {}),
+    ...(restored !== undefined ? { restoredWorkspaceId: restored } : {}),
   }
 }

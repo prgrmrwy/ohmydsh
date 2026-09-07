@@ -110,6 +110,16 @@ export class QaDelivery {
       return { kind: 'ignored', reason: 'qa binding invalidated' }
     }
 
+    // A released pairing must stop answering. The binding row survives
+    // `/unbind` on purpose — it keeps the pointer to the child whose history
+    // stays readable — so "there is a qa row" cannot mean "this group is
+    // still served". The Task is what decides that, exactly as it decides
+    // occupancy; checking only the row let an unbound group keep replying.
+    const task = binding.activeTaskId === undefined ? undefined : repository.getTask(binding.activeTaskId)
+    if (task === undefined || task.archivedAt !== undefined) {
+      return { kind: 'ignored', reason: 'qa binding released' }
+    }
+
     const parent = await resolveLiveParent(this.deps.seam, parentId)
     if (parent === undefined) {
       await this.invalidate(binding, '源会话已不可用（无法恢复）')
