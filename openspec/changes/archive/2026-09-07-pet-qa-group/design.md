@@ -234,8 +234,9 @@ fork provider 需在部署组合启用；probe 不到时同样禁用动作。
   帮助文本）**：不传 `--owner` 时群主默认为 **bot**（帮助文本明写 "defaults to
   bot"）。这不是可接受的默认——群主是权限而非称谓，只有群主能改名、拉人踢人、
   解散与转让，等于让 agent 代管用户自己的群。已改为显式把发起者本人指定为群主
-  （见 tasks 9.3；修复后新建的群已真机确认群主为本人，修复前建的群群主推测为 bot
-  但未获证实——bot 视角读不到 `owner_id`，且反证实验被 scope 拦在权限判定之前）。
+  （见 tasks 9.3；两半均已确证：修复后新建的群群主为发起者本人，修复前建的群群主
+  为 bot——在这样一个群上以 bot 身份 `chat.managers add_managers` 执行成功并改变
+  了服务端状态，而该 API 要求群主身份）。
   **解散能力已确证：bot 不能解散群**——`im chats` 仅 create/get/link/update，无
   delete/disband。本设计不依赖它（绑定失效走 fail closed，残留群由用户手工处理），
   且该事实正是 D2 把 fork 排在建群之前的依据。
