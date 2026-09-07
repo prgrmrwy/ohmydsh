@@ -11,10 +11,32 @@ describe('parsing the bind verb', () => {
     expect(parseCommand('/bind abc123')).toEqual({ kind: 'bind', prefix: 'abc123' })
   })
 
-  it('sees through the mention markup a group trigger carries', () => {
-    // A group message arrives as `@_user_1 /bind abc123`; a naive startsWith
-    // would never fire and the command would silently never work.
+  it('sees through the mention a group trigger carries', () => {
+    // A group message never starts with the verb; without stripping the
+    // mention a naive startsWith never fires.
     expect(parseCommand('@_user_1 /bind abc123')).toEqual({ kind: 'bind', prefix: 'abc123' })
+  })
+
+  it('sees through a DISPLAY-NAME mention, which is what real events carry', () => {
+    // The regression that shipped: the stripper only knew `@_user_N`, while
+    // real inbound bodies carry the bot's display name. The command silently
+    // fell through to workspace routing and created a session in the wrong
+    // place — the failure looked like "bind ignored my session id".
+    expect(parseCommand('@小小芒果 /bind abc123')).toEqual({ kind: 'bind', prefix: 'abc123' })
+    expect(parseCommand('@小小芒果 /unbind')).toEqual({ kind: 'unbind' })
+  })
+
+  it('handles several leading mentions', () => {
+    expect(parseCommand('@小小芒果 @张勇 /bind abc123')).toEqual({
+      kind: 'bind',
+      prefix: 'abc123',
+    })
+  })
+
+  it('leaves an @ inside the argument alone', () => {
+    // Only LEADING mentions are stripped; the rest of the line is content.
+    expect(parseCommand('@小小芒果 /bind abc123')).toEqual({ kind: 'bind', prefix: 'abc123' })
+    expect(parseCommand('/bind abc123 @someone')).toEqual({ kind: 'bind', prefix: 'abc123' })
   })
 
   it('ignores extra words after the prefix', () => {

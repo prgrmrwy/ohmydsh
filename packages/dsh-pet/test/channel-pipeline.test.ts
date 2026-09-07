@@ -602,7 +602,7 @@ describe('the /bind command in the intake path', () => {
     return groupLine({
       chat_id: PLAIN,
       message_id: 'om_bind1',
-      content: '@_user_1 /bind abc123',
+      content: '@小小芒果 /bind abc123',
       ...overrides,
     })
   }
@@ -717,7 +717,7 @@ describe('the /bind command in the intake path', () => {
     harness = f.harness
     const { pipeline, handled } = withBind(f)
 
-    await pipeline.handleLine(groupLine({ chat_id: PLAIN, content: '@_user_1 看看这个' }))
+    await pipeline.handleLine(groupLine({ chat_id: PLAIN, content: '@小小芒果 看看这个' }))
 
     expect(handled).toHaveLength(0)
   })
@@ -777,7 +777,7 @@ describe('the /unbind command in the intake path', () => {
     const { pipeline, unbound, delivered } = withCommands(f)
 
     await pipeline.handleLine(
-      groupLine({ chat_id: BOUND, message_id: 'om_u1', content: '@_user_1 /unbind' }),
+      groupLine({ chat_id: BOUND, message_id: 'om_u1', content: '@小小芒果 /unbind' }),
     )
 
     // The two verbs live on opposite sides of the same condition.
@@ -791,7 +791,7 @@ describe('the /unbind command in the intake path', () => {
     const { pipeline, unbound } = withCommands(f)
 
     await pipeline.handleLine(
-      groupLine({ chat_id: 'oc_nothingbound0000000000000000', content: '@_user_1 /unbind' }),
+      groupLine({ chat_id: 'oc_nothingbound0000000000000000', content: '@小小芒果 /unbind' }),
     )
 
     expect(unbound).toHaveLength(0)
@@ -807,7 +807,7 @@ describe('the /unbind command in the intake path', () => {
       groupLine({
         chat_id: BOUND,
         message_id: 'om_u2',
-        content: '@_user_1 /unbind',
+        content: '@小小芒果 /unbind',
         sender_id: STRANGER,
       }),
     )
@@ -825,7 +825,7 @@ describe('the /unbind command in the intake path', () => {
     const { pipeline, unbound, delivered } = withCommands(f)
 
     await pipeline.handleLine(
-      groupLine({ chat_id: BOUND, message_id: 'om_q9', content: '@_user_1 这个怎么解' }),
+      groupLine({ chat_id: BOUND, message_id: 'om_q9', content: '@小小芒果 这个怎么解' }),
     )
 
     expect(unbound).toHaveLength(0)
