@@ -12,6 +12,49 @@
  * control. Phase 2.1 reached the same conclusion for its own dispatch.
  */
 
+/**
+ * Where a QA child must actually work.
+ *
+ * Needed because a fork inherits the parent's `cwd`, and Worktree Session
+ * deliberately leaves that at the REPOSITORY ROOT while the managed execution
+ * root lives in its per-session binding. The child gets no such binding, so
+ * its literal `cwd` — the main checkout — would otherwise become its real
+ * working directory: the parent is governed, the child runs bare.
+ *
+ * Stating it in the prompt is the SAME mechanism that governs the parent (its
+ * worktree rules are runtime context, not an enforced sandbox), so this makes
+ * the two symmetric instead of inventing a weaker guarantee for the child.
+ */
+export interface QaWorkspaceFacts {
+  /** Managed execution root the child must use for every command. */
+  readonly executionRoot: string
+  /** Task branch, when the binding names one. */
+  readonly branch?: string
+  /** Repository root, which is explicitly NOT where work belongs. */
+  readonly repositoryRoot?: string
+}
+
+/**
+ * Render the standing directory constraint carried by every QA prompt.
+ * @param workspace - Execution facts, absent when the source is unbound.
+ * @returns the lines to append, empty when there is no managed root.
+ */
+function workspaceLines(workspace: QaWorkspaceFacts | undefined): string[] {
+  if (workspace === undefined) return []
+  return [
+    '### 你的工作目录',
+    '',
+    `本会话由一个 **Worktree Session** fork 而来。你的 \`cwd\` 字面值是仓库根` +
+      `${workspace.repositoryRoot === undefined ? '' : `（\`${workspace.repositoryRoot}\`）`}，` +
+      '**但那不是你该干活的地方**——它是主 checkout，仓库规则明确禁止把它当作工作区编辑。',
+    '',
+    `受管执行目录是 \`${workspace.executionRoot}\`` +
+      `${workspace.branch === undefined ? '' : `（任务分支 \`${workspace.branch}\`）`}。` +
+      '**所有 bash 调用必须显式用它作为 workdir**，文件与搜索操作一律使用它之下的绝对路径。',
+    '',
+  ]
+}
+
 /** Facts about one QA trigger that the prompt states outright. */
 export interface QaTriggerFacts {
   /** Group the question arrived in; the only permitted reply target. */
@@ -30,6 +73,15 @@ export interface QaTriggerFacts {
   readonly larkReady: boolean
   /** Whether this is the first question since the group was created. */
   readonly isFirst: boolean
+  /**
+   * Managed execution facts, when the source session is worktree-bound.
+   *
+   * Repeated on EVERY question, not just the first: a standing constraint
+   * stated once at creation drifts out of the model's attention exactly as
+   * the conversation grows, and this one is the difference between working in
+   * the task branch and writing into the main checkout.
+   */
+  readonly workspace?: QaWorkspaceFacts
 }
 
 /**
@@ -64,6 +116,10 @@ export function renderQaPrompt(trigger: QaTriggerFacts): string {
   lines.push('')
   lines.push(trigger.text)
   lines.push('')
+
+  // Before the capability briefing, not after: by the time the model reads
+  // "you can run lark-cli" it must already know which directory it stands in.
+  lines.push(...workspaceLines(trigger.workspace))
 
   if (trigger.larkReady) {
     lines.push('### 回复由你自己发出')
@@ -107,15 +163,23 @@ export function renderQaPrompt(trigger: QaTriggerFacts): string {
  * anything: it exists so the child's state is settled and its label
  * meaningful when the first group message arrives.
  * @param chatName - Group name.
+ * @param workspace - Execution facts, when the source session is worktree-bound.
  * @returns the prompt text.
  */
-export function renderQaSeedPrompt(chatName: string): string {
+export function renderQaSeedPrompt(
+  chatName: string,
+  workspace?: QaWorkspaceFacts,
+): string {
   return [
     '## 答疑群已建立',
     '',
     `你所在的这个会话继承了刚才那段工作的上下文，现在被接入飞书群「${chatName}」作为答疑代理。`,
     '群成员随后会向你提问，每个问题会作为新的一轮消息送到你这里，并注明提问者。',
     '',
+    // Stated at creation as well as on every question: the child may act on
+    // its own between questions (the owner can talk to it directly in the
+    // GUI), and that path carries no trigger prompt to remind it.
+    ...workspaceLines(workspace),
     '现在**不要做任何事，也不要调用任何工具**，只回复一句简短的确认（一行即可）。',
     '真正的工作从第一个提问开始。',
   ].join('\n')
