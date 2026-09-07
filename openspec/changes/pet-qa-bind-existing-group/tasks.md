@@ -69,3 +69,21 @@
 - [x] 6.6 更新 `dsh.yaml` dsh-pet 条目 note 与 `packages/dsh-pet/README.md`
 - [x] 6.7 `openspec validate pet-qa-bind-existing-group --strict --type change` 通过；
       复核 diff 无范围蔓延（不触碰 Q&A 动作、投递/表情/失效链路、非 qa 入站路径）
+
+## 8. 真机发现并修复的缺陷
+
+- [x] 8.1 **`/bind` 从未被识别，消息落到 workspace 路由**。真机现象：在群里发
+      `@小小芒果 /bind <会话前缀>`，Pet 却在 nexus workspace 下建了新 session，
+      绑定行写成 `kind=workspace`。
+      根因：`withoutMentions` 只剥 `@_user_N` 占位符，而真实入站正文携带的是
+      **显示名**（`@小小芒果 …`）。剥不掉 mention，`startsWith('/bind')` 永远为假，
+      命令被当成普通消息，于是走了二期1 的 default workspace 回退。
+      讽刺的是证据一直都在：本仓既有的 pipeline 测试样例就写着
+      `content: '@小小芒果 看看这个'`，我却按推断的占位符形态写了正则——正是
+      pitfalls 里「按推断的结构解析而非按真实样本」那一类。
+      修法：改为剥除**行首连续的 `@token`**（`/^(?:\s*@\S+)+/`），覆盖占位符、
+      显示名、`@all` 及未来任何拼法；只剥行首，参数中的 `@` 不动。
+      测试：新增显示名、多个 mention、参数含 `@` 三组用例；并把既有 pipeline
+      用例统一改为显示名形态（此前用占位符，恰好绕过了这个 bug）。
+      已用旧实现回跑验证这批测试确实会失败（7 项），避免写出「修完才通过、
+      改坏也通过」的测试。

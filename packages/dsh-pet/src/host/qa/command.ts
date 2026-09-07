@@ -24,15 +24,24 @@ export type CommandParse =
   | { readonly kind: 'none' }
 
 /**
- * Strip the mention markup Lark leaves in a group message body.
+ * Strip the leading mentions from a group message body.
  *
- * A group trigger arrives as something like `@_user_1 /bind abc123`, so the
- * verb is not at index 0 and a naive `startsWith` would never fire.
+ * A group trigger never starts with the verb: the body arrives with the
+ * mention still in it, so a naive `startsWith` never fires.
+ *
+ * The shape of that mention is NOT `@_user_N` in practice. Real inbound
+ * bodies carry the DISPLAY NAME — `@小小芒果 /bind abc123` — and a placeholder
+ * pattern silently matched nothing, which is exactly how `/bind` fell through
+ * to workspace routing and created a session in the wrong place. So this
+ * strips leading `@token` runs generically rather than guessing one encoding,
+ * and only at the START: an `@` inside the argument is left alone.
  * @param text - Raw message text.
- * @returns the text with leading mention tokens removed.
+ * @returns the text with its leading mentions removed.
  */
 function withoutMentions(text: string): string {
-  return text.replace(/@_user_\d+/g, ' ').replace(/\s+/g, ' ').trim()
+  // `@` followed by anything that is not whitespace, repeatedly, anchored at
+  // the front. Covers `@_user_1`, `@显示名`, `@all` and any future spelling.
+  return text.replace(/^(?:\s*@\S+)+/, '').replace(/\s+/g, ' ').trim()
 }
 
 /**
