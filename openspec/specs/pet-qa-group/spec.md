@@ -19,13 +19,18 @@ closed 语义、child 的工作目录约束，以及 GUI 收纳与私聊通道�
 channel 已绑定且 bot 可用、且宿主 fork 能力可用时可用；不满足时 SHALL 禁用并
 展示可诊断原因。
 
-每个源会话 SHALL 至多拥有一个活跃答疑群。点击 Q&A 时系统 SHALL 先按**源会话**
-查找活跃 qa Task：命中且其绑定有效时 SHALL 返回既有群并标明属复用，MUST NOT
-新建群或新 child。作用域键 MUST 以源会话构成，MUST NOT 以 chat 构成——群的
-chat_id 是本次调用的产物，以它为键的查找永远无法命中既往群，每次点击都会再建
-一个。该键 SHALL 与普通 session 作用域相互独立，使同一会话可同时持有浮层 Task
-与答疑群。活跃 qa Task 存在但其绑定已失效或缺失时，系统 SHALL 归档该 Task 并
-新建，MUST NOT 返回一个无法应答的群。
+群与源会话 SHALL 保持**双向 1:1**：一个源会话至多拥有一个活跃答疑群，一个群至多
+绑定一个源会话。任一侧已被占用时，新的绑定请求 SHALL 固定失败并说明原因。占用的
+判据是对应作用域存在**未归档** Task。释放一侧的方式 SHALL 只有归档该 qa Task
+一种机制：面板归档与群内 `/unbind` 都 MUST 落到同一次归档上，系统 MUST NOT
+引入第二种「结束绑定」的概念。绑定行已失效（记录了失效时间）时视为未占用，系统
+SHALL 归档其 Task 后继续，MUST NOT 把一个无法应答的死绑定当作占用。
+
+点击 Q&A 时系统 SHALL 先按**源会话**查找活跃 qa Task：命中且其绑定有效时 SHALL
+返回既有群并标明属复用，MUST NOT 新建群或新 child。作用域键 MUST 以源会话构成，
+MUST NOT 以 chat 构成——群的 chat_id 是本次调用的产物，以它为键的查找永远无法命中
+既往群，每次点击都会再建一个。该键 SHALL 与普通 session 作用域相互独立，使同一
+会话可同时持有浮层 Task 与答疑群。
 
 未命中复用时系统 SHALL 按序完成：① 对源会话 fork 一个 continuable 子代理
 （种子为源会话截至最近一个完成 turn 的前缀）；② 以 bot 身份创建仅含本人与
@@ -37,9 +42,6 @@ MUST NOT 写入；已建群无法回收时 SHALL 向用户明示残留群名。�
 
 动作结果 SHALL 区分「新建」与「复用」并如实呈现给用户：两种结果外观相同会使
 用户在不知情时反复建群。
-
-fork 种子 MUST NOT 包含源会话未完成的 in-flight turn；Q&A 动作入口 SHALL 明示
-「以最近完成的一轮为准」。
 
 #### Scenario: 成功创建答疑群
 - **WHEN** 用户在一个有完成 turn 的会话来源上点击 Q&A 且三步均成功
@@ -57,17 +59,21 @@ fork 种子 MUST NOT 包含源会话未完成的 in-flight turn；Q&A 动作入�
 - **WHEN** 另一个源会话点击 Q&A
 - **THEN** 它获得自己的答疑群，与前一会话的群互不复用
 
-#### Scenario: 建群失败回收 child
-- **WHEN** fork 成功但飞书建群调用失败
-- **THEN** 系统回收已建 child，不写绑定行，向用户报告失败原因
+#### Scenario: 会话侧已被占用时绑定既有群
+- **WHEN** 某会话已有活跃答疑群，allowlist 用户在另一个群 `/bind` 该会话
+- **THEN** 绑定固定失败并说明该会话已有答疑群，需先归档
 
-#### Scenario: 源会话正在执行 turn 时点击
-- **WHEN** 用户在源会话一个 turn 尚未完成时点击 Q&A
-- **THEN** child 种子截至上一个完成 turn，进行中内容不进种子，动作正常完成
+#### Scenario: 群侧已被占用时再次绑定
+- **WHEN** 某群已绑定会话 A，allowlist 用户在该群 `/bind` 会话 B
+- **THEN** 绑定固定失败并说明该群已绑定，需先归档
 
-#### Scenario: 依赖不可用时动作禁用
-- **WHEN** 宿主缺少 fork provider、会话持久化或 channel 未绑定
-- **THEN** Q&A 动作显示为禁用并给出指向性原因，不产生任何副作用
+#### Scenario: 失效绑定不构成占用
+- **WHEN** 某群的 qa 绑定已失效，allowlist 用户在该群重新 `/bind` 一个会话
+- **THEN** 系统归档失效绑定的 Task 后完成新绑定
+
+#### Scenario: 创建失败不留部分状态
+- **WHEN** Q&A 动作的 fork 成功但后续步骤失败
+- **THEN** 已建 child 被回收，不写入绑定行
 
 ### Requirement: qa 群成员即触发许可且其余防线原样适用
 
@@ -195,3 +201,151 @@ qa child SHALL 以 continuable 子代理形态收纳在源会话名下（原生�
 #### Scenario: 私聊补充的上下文对群生效
 - **WHEN** 用户私聊告知 child 新进展后，群成员再次 @bot
 - **THEN** child 处理群消息时可见私聊补充的内容
+
+### Requirement: 既有群经 `/bind` 绑定到已存在的会话
+
+系统 SHALL 支持在一个尚无 qa 绑定的群内，通过 `@bot /bind <会话前缀>` 把该群绑定到
+一个已存在的 DSH 会话，并 fork 出与 Q&A 动作同形态的 continuable 子代理。命令
+SHALL 使用显式动词而非裸 token：绑定后群内正常对话中出现的同形字符串 MUST NOT 被
+解释为命令。
+
+`/bind` 命令本身 MUST 仅由全局 allowlist 内的发送者触发。既有群的成员不是被本人
+为此目的拉入的，`kind: qa` 豁免 allowlist 所依赖的「成员即可信」前提在此不成立；
+非 allowlist 发送者的 `/bind` SHALL 被**静默丢弃**，MUST NOT 回复无权提示——那等于
+向未授权者确认 bot 背后存在 agent。
+
+绑定成功后，该群 SHALL 继承 `kind: qa` 的群成员提问权：此后任何群成员 @bot 均可
+提问。该继承的信任依据是「所有者显式绑定了这个群」，与 Q&A 场景中「所有者亲手建群」
+等价；系统 MUST NOT 因此宣称任何能力边界。
+
+**能力可以让渡给群成员，边界不可以。** 群成员 SHALL 可以请求工作（提问、排查，
+以及经确认后的修改），但 MUST NOT 通过提出需求改变 child 的行为边界。当一项请求
+与既有安全约定冲突时，child SHALL 说明冲突并交由所有者裁定，MUST NOT 自行放宽；
+提出请求者不是边界的裁定者。该原则与「`/bind` 仅限 allowlist」是同一条规则的两面：
+授权的行使可以共享，授权的范围只能由所有者变更。
+
+绑定流程 SHALL 复用建群事务除建群外的步骤（fork child → 写 `kind: qa` 绑定行），
+失败时同样回收已建 child。绑定行记录的群名 MUST 取自飞书该群的真实名称，系统
+MUST NOT 为其编造名称——该群属于他人，自拟名称会使设置页显示一个飞书中并不存在
+的名字，与「Pet 不承诺任何群管理能力」相矛盾；读不到时 SHALL 留空而非回退到
+自拟名。绑定行 SHALL 记录该绑定的来源（Pet 建群 / 绑定既有群），
+仅用于如实展示——`/bind` 的群 Pet 既非创建者亦非群主，系统 MUST NOT 承诺对其的任何
+群管理能力。
+
+绑定成功与失败的回执 SHALL 发送在群内而非私聊发起者：群成员有权知道本群已接入一个
+持有某段工作上下文、并能在真实工作区执行命令的 agent。成功回执 SHALL 说明 child 以
+源会话**最近一个完成 turn** 为准。
+
+#### Scenario: allowlist 用户在既有群绑定会话
+- **WHEN** allowlist 用户在一个无 qa 绑定的群中发送 `@bot /bind <唯一前缀>`
+- **THEN** 系统 fork 该会话的子代理、写入 qa 绑定行，并在群内回执说明绑定结果与种子边界
+
+#### Scenario: 非 allowlist 成员尝试绑定
+- **WHEN** 一个不在 allowlist 的群成员发送 `@bot /bind <前缀>`
+- **THEN** 消息被静默丢弃，不绑定、不回复、不暴露 bot 背后存在 agent
+
+#### Scenario: 绑定后群成员提问
+- **WHEN** 绑定完成后，一个不在 allowlist 的群成员 @bot 提问
+- **THEN** 该提问按 qa 路径投递给 child，与 Q&A 建群的群行为一致
+
+#### Scenario: 群成员要求放宽既有约定
+- **WHEN** 群成员请求 child 执行与既有安全约定冲突的操作（如列出本机会话清单）
+- **THEN** child 说明冲突并交由所有者裁定，不自行放宽，也不先执行再说明
+
+#### Scenario: 绑定后同形文本不再被当作命令
+- **WHEN** 已绑定群中有人 @bot 发送一条恰好含有类似前缀字符串的普通提问
+- **THEN** 该消息作为提问投递给 child，MUST NOT 被解释为绑定命令
+
+### Requirement: `/unbind` 仅解除由 `/bind` 建立的绑定
+
+系统 SHALL 支持在已绑定的群内通过 `@bot /unbind` 解除绑定。该命令 MUST 不接受
+任何参数——群自身已知其绑定对象，接受参数等于开放「解除别的群」的可能。
+
+`/unbind` MUST 仅由全局 allowlist 内的发送者触发，与 `/bind` 对称：提问权可以
+让渡给全体群成员，撤销所有者的授权则不可以。非 allowlist 发送者的 `/unbind`
+SHALL 被静默丢弃。
+
+系统 MUST 仅允许解除**由 `/bind` 建立**的绑定（来源标记为「绑定既有群」）。由
+Q&A 动作创建的群 SHALL 拒绝并指向面板归档：该群由 Pet 从 GUI 创建，也应从 GUI
+结束；在群内解除会留下一个 Pet 拥有却无人指向的群。入口与出口 SHALL 保持在同一侧。
+
+qa Task 未处于终态（正在回答）时，`/unbind` SHALL 拒绝并说明稍后重试，MUST NOT
+中断进行中的执行——中断一个可能正在写文件的 agent 比让用户稍等风险更高。
+
+解除 SHALL 通过归档该 qa Task 实现，与面板归档同一机制。child 会话及其历史
+SHALL 保留可查，仅停止接收群消息。
+
+解除后该群 SHALL 恢复到绑定前的状态，而非停留在一个既不服务也不自由的中间态：
+`/bind` 覆盖了 workspace 绑定时 SHALL 还原该路由，此前无绑定时 SHALL 删除绑定行
+使其回到 default 路由。
+
+两种情形下该群此后**仍会响应** @bot，只是改由普通入站链路处理（在对应 workspace
+新开会话，不再携带原会话上下文）。回执 SHALL 说明这一后续行为，MUST NOT 只报告
+「已解绑」——只听到前半句的人会预期沉默，却在下一次 @bot 时收到一个陌生身份的
+回答。
+
+判定一个群是否仍被服务 MUST 以其 Task 是否未归档为准，MUST NOT 以「存在 qa 绑定
+行」为准：绑定行会因失效而保留，投递、准入豁免与命令识别若以行的存在为据，会让
+一个已释放的群继续应答、并继续豁免名单外发送者。所有群内回执 MUST NOT 包含完整的 session id 或其它群的 chat id：回执发送在群里，
+在场每个人都会看到，而完整标识既非他们所需也不应由他们持有。需要指代某个会话时
+SHALL 使用界面同款的短 id 或其标题；无标题时 SHALL 回退到短 id 而非完整 id。
+
+解除结果 SHALL 在群内回执：群成员既然被告知
+agent 加入，也应被告知它已退出。
+
+#### Scenario: 解除由 /bind 建立的绑定
+- **WHEN** allowlist 用户在一个经 `/bind` 绑定的群内发送 `@bot /unbind`，且 child 空闲
+- **THEN** 对应 qa Task 被归档、群内收到回执，child 会话与历史保留
+
+#### Scenario: 拒绝解除 Pet 创建的答疑群
+- **WHEN** allowlist 用户在一个由 Q&A 动作创建的群内发送 `@bot /unbind`
+- **THEN** 系统拒绝并提示前往 Pet 面板归档，绑定保持不变
+
+#### Scenario: child 正在回答时解除
+- **WHEN** 该群的 qa Task 处于非终态时收到 `/unbind`
+- **THEN** 系统拒绝并提示稍后重试，不中断进行中的执行，Task 未被归档
+
+#### Scenario: 非 allowlist 成员尝试解除
+- **WHEN** 一个不在 allowlist 的群成员发送 `@bot /unbind`
+- **THEN** 消息被静默丢弃，绑定保持不变
+
+#### Scenario: 解除后恢复原有 workspace 路由
+- **WHEN** `/bind` 覆盖了一个 workspace 绑定的群，随后该群被 `/unbind`
+- **THEN** 该群恢复为原 workspace 路由，回执说明这一点
+
+#### Scenario: 解除后释放此前无绑定的群
+- **WHEN** 一个此前无任何绑定的群被 `/bind` 后又被 `/unbind`
+- **THEN** 绑定行被删除，该群回到 default 路由，child 的 Task 归档但会话可查
+
+#### Scenario: 解除回执说明后续行为
+- **WHEN** 任一 `/unbind` 成功
+- **THEN** 回执除说明已解绑外，还说明该群此后仍会响应 @bot、但不再携带原会话上下文
+
+#### Scenario: 已释放的群不再被服务也不再豁免
+- **WHEN** 某群的 qa Task 已归档，其成员（不在 allowlist）@bot 提问
+- **THEN** 消息不投递给 child，且该发送者不再获得 allowlist 豁免
+
+#### Scenario: 解除后可重新绑定
+- **WHEN** 某群解除绑定后，allowlist 用户在该群再次 `/bind` 另一个会话
+- **THEN** 绑定成功，群与会话两侧均不再被先前的绑定占用
+
+### Requirement: 会话前缀解析 fail closed 且不泄露
+
+系统 SHALL 以 ≥6 位的会话 id 前缀解析目标会话，长度与界面上展示的短 id 一致，并
+SHALL 接受更长前缀以化解重复。匹配范围 SHALL 限于未归档会话。
+
+前缀无匹配与匹配到多个 SHALL 返回**同一句**回执，MUST NOT 透露匹配数量，MUST NOT
+透露任何未命中会话的存在或其属性。前缀 MUST 仅用于查找，MUST NOT 作为任何其它
+操作的输入。
+
+#### Scenario: 前缀唯一命中
+- **WHEN** allowlist 用户提供的前缀恰好命中一个未归档会话
+- **THEN** 系统绑定该会话，并在回执中给出其标题供发起者当场核对
+
+#### Scenario: 前缀命中多个会话
+- **WHEN** 提供的前缀命中两个及以上未归档会话
+- **THEN** 系统不绑定，回执提示未能唯一确定会话、请提供更长前缀，且不透露命中数量
+
+#### Scenario: 前缀无匹配
+- **WHEN** 提供的前缀不匹配任何未归档会话
+- **THEN** 系统不绑定，回执与命中多个时**完全相同**，使两种情形不可区分
