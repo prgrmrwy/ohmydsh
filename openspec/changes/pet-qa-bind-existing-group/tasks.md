@@ -87,3 +87,17 @@
       用例统一改为显示名形态（此前用占位符，恰好绕过了这个 bug）。
       已用旧实现回跑验证这批测试确实会失败（7 项），避免写出「修完才通过、
       改坏也通过」的测试。
+- [x] 8.2 **`/bind` 的群名与回执取不到会话标题**。真机现象：绑定成功（`kind=qa`、
+      `origin=bound`、parent 正确），但群名是 `答疑 · DSH`——即 `qaGroupName(undefined)`
+      的回退值。
+      根因：`listSessions()` 从 `session.header.title` 取标题，而**该字段不存在**。
+      标题由 `dsh-session-title` 服务维护在会话日志里（实测源会话 header 只有
+      `{type,version,id,createdAt,cwd,delegationDepth,agentPreset}`，且 title 事件数
+      为 0）。读一个不存在的字段不会报错，只会对**每个**会话都返回 `undefined`，
+      于是所有 `/bind` 的群名退化成同一个默认值、回执里的标题显示成 id。
+      与 8.1 同一形态：按推断的结构取值，而非按真实数据。差别是这次连测试都测不到
+      ——它是宿主数据形状问题，只有真机才暴露。
+      修法：改用 `ctx.sessionTitle.get(session)?.title`（Pet 早已 inject 该服务，
+      `rename` 一直在用）。补一条断言 `header?.title` 不再出现的回归测试。
+      发现过程值得记：是 qa child 从自己的 seed 里看到群名是回退值、推断出两种可能
+      并要求核实，才查出来的。

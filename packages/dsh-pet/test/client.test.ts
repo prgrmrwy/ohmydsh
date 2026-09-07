@@ -1628,3 +1628,19 @@ describe('a bound group is not presented as one Pet owns', () => {
     expect(settings).toContain('Pet 非群主')
   })
 })
+
+
+describe('session titles come from the title service, not the header', () => {
+  it('does not read a title off the session header', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const index = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
+
+    // `header.title` does not exist: the title is maintained by the
+    // session-title service in the log. Reading the header silently yields
+    // `undefined` for EVERY session, which surfaced as every bound group
+    // being named "答疑 · DSH" and every receipt naming a raw id — a failure
+    // that looks like "bind picked the wrong session".
+    expect(index).not.toContain('header?.title')
+    expect(index).toContain('ctx.sessionTitle.get(session)')
+  })
+})
