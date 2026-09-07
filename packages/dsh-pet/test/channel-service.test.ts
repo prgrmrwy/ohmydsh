@@ -28,9 +28,11 @@ afterEach(async () => {
 interface Fixture {
   readonly service: ChannelService
   readonly harness: PetHarness
+  readonly client: LarkClient
   readonly added: { messageId: string; emoji: string }[]
   readonly replies: { messageId: string; text: string }[]
   readonly changes: number[]
+  readonly logs: string[]
 }
 
 /** A lark-cli stand-in that reports one canned outcome. */
@@ -59,6 +61,7 @@ async function fixture(
   const added: { messageId: string; emoji: string }[] = []
   const replies: { messageId: string; text: string }[] = []
   const changes: number[] = []
+  const logs: string[] = []
 
   const client: LarkClient = {
     addReaction: vi.fn(async (messageId: string, emoji: string) => {
@@ -72,7 +75,16 @@ async function fixture(
     listMessages: vi.fn(async () => []),
     listChatBots: vi.fn(async () => []),
     chatName: vi.fn(async () => undefined),
+    cliVersion: vi.fn(async () => ({ supported: true, version: '1.0.93' })),
     botReady: vi.fn(async () => true),
+    botIdentity: vi.fn(async expectedAppId => ({
+      kind: 'ready' as const,
+      identity: {
+        appId: expectedAppId,
+        openId: 'ou_petbot00000000000000000000000',
+        name: 'Pet Bot',
+      },
+    })),
     reply: vi.fn(async (messageId: string, text: string) => {
       if (options.failing === true) throw new Error('lark is down')
       replies.push({ messageId, text })
@@ -100,8 +112,9 @@ async function fixture(
     client,
     spawnProcess: () => fakeCli(options.cliOutput ?? 'App ID: cli_bound01\n', options.cliExit ?? 0),
     onChange: () => changes.push(Date.now()),
+    log: message => logs.push(message),
   })
-  return { service, harness: created, added, replies, changes }
+  return { service, harness: created, client, added, replies, changes, logs }
 }
 
 describe('lifecycle', () => {
@@ -112,6 +125,37 @@ describe('lifecycle', () => {
     f.service.start()
 
     // Upgrading Pet must not silently begin consuming Lark events.
+    expect(f.service.status().phase).toBe('stopped')
+  })
+
+  it('does not start after disable wins an in-flight identity probe', async () => {
+    const f = await fixture()
+    harness = f.harness
+    await f.harness.repository.putChannelConfig({
+      enabled: true,
+      botAppId: 'cli_bound01',
+      botOpenId: 'ou_petbot00000000000000000000000',
+      allowOpenIds: ['ou_allowed0000000000000000000000'],
+      defaultWorkspaceId: 'ws-nexus',
+      updatedAt: 1,
+    })
+    let release: ((value: Awaited<ReturnType<NonNullable<LarkClient['botIdentity']>>>) => void) | undefined
+    vi.mocked(f.client.botIdentity!).mockImplementation(
+      async () => new Promise(resolve => { release = resolve }),
+    )
+
+    const enabling = f.service.setEnabled(true)
+    await f.service.setEnabled(false)
+    await f.harness.repository.updateChannelConfig(current => ({ ...current, enabled: false }))
+    release?.({
+      kind: 'ready',
+      identity: {
+        appId: 'cli_bound01',
+        openId: 'ou_petbot00000000000000000000000',
+      },
+    })
+    await enabling
+
     expect(f.service.status().phase).toBe('stopped')
   })
 
@@ -200,6 +244,42 @@ describe('settling an Invocation', () => {
   })
 })
 
+describe('safe intake diagnostics', () => {
+  it('logs a low-cardinality reason without event identifiers or content', async () => {
+    const f = await fixture()
+    harness = f.harness
+    await f.harness.repository.putChannelConfig({
+      enabled: true,
+      botAppId: 'cli_bound01',
+      botOpenId: 'ou_petbot00000000000000000000000',
+      allowOpenIds: ['ou_allowed0000000000000000000000'],
+      defaultWorkspaceId: 'ws-nexus',
+      updatedAt: 1,
+    })
+
+    const pipeline = (f.service as unknown as { pipeline: { handleLine(line: string): Promise<unknown> } })
+      .pipeline
+    await pipeline.handleLine(
+      JSON.stringify({
+        type: 'im.message.receive_v1',
+        message_id: 'om_secret_message',
+        chat_id: 'oc_secret_chat',
+        chat_type: 'p2p',
+        message_type: 'text',
+        content: 'private payload',
+        sender_id: 'ou_stranger_secret',
+        sender_type: 'user',
+      }),
+    )
+
+    expect(f.logs).toContain('dsh-pet channel: inbound ignored: not-allowed-sender')
+    const text = f.logs.join('\n')
+    for (const forbidden of ['private payload', 'om_secret_message', 'oc_secret_chat', 'ou_stranger_secret']) {
+      expect(text).not.toContain(forbidden)
+    }
+  })
+})
+
 describe('binding results', () => {
   it('records the app id after a successful bind', async () => {
     const f = await fixture()
@@ -207,10 +287,43 @@ describe('binding results', () => {
 
     await f.service.connectExisting('cli_bound01', 'secret')
 
-    // Only the app id: the bot's own open_id is proven later, from the first
-    // group message, against this very value.
+    // Binding is committed only after the named profile proves all identity facts.
     const config = f.harness.repository.getChannelConfig()
     expect(config.botAppId).toBe('cli_bound01')
+    expect(config.botOpenId).toBe('ou_petbot00000000000000000000000')
+    expect(config.botName).toBe('Pet Bot')
+  })
+
+  it('resumes a pre-upgrade enabled channel after the named profile is rebuilt', async () => {
+    const f = await fixture()
+    harness = f.harness
+    await f.harness.repository.putChannelConfig({
+      enabled: true,
+      botAppId: 'cli_bound01',
+      botOpenId: 'ou_petbot00000000000000000000000',
+      allowOpenIds: ['ou_allowed0000000000000000000000'],
+      defaultWorkspaceId: 'ws-nexus',
+      updatedAt: 1,
+    })
+
+    await f.service.connectExisting('cli_bound01', 'secret')
+
+    expect(f.service.status().phase).toBe('starting')
+  })
+
+  it('writes nothing when identity verification fails', async () => {
+    const f = await fixture()
+    harness = f.harness
+    vi.mocked(f.client.botIdentity!).mockResolvedValue({
+      kind: 'unavailable',
+      diagnostic: 'The Pet lark-cli profile belongs to another app.',
+    })
+
+    const state = await f.service.connectExisting('cli_bound01', 'secret')
+
+    expect(state.phase).toBe('failed')
+    const config = f.harness.repository.getChannelConfig()
+    expect(config.botAppId).toBeUndefined()
     expect(config.botOpenId).toBeUndefined()
   })
 

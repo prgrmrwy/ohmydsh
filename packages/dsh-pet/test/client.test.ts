@@ -19,7 +19,13 @@ import {
   POSITION_KEY,
 } from '../src/client/position.js'
 import { PET_CSS } from '../src/client/styles.js'
-import { PET_SETTINGS_TABS, PetSettingsSection } from '../src/client/settings.js'
+import {
+  PET_SETTINGS_TABS,
+  PetSettingsSection,
+  shouldRefreshChannel,
+  watchChannelTransition,
+} from '../src/client/settings.js'
+import type { PetChannelView, PetChannelPhase } from '../src/wire.js'
 import { PetOverlay } from '../src/client/overlay.js'
 
 // Pet never polls on render; fetch is stubbed so effects cannot escape.
@@ -37,6 +43,99 @@ function memoryStorage(): Pick<Storage, 'getItem' | 'setItem'> & { map: Map<stri
     },
   }
 }
+
+describe('channel connection convergence', () => {
+  const view = (phase: PetChannelPhase): PetChannelView => ({
+    enabled: true,
+    allowOpenIds: [],
+    knownNames: {},
+    routes: [],
+    onboarding: { ready: true, steps: [], blockers: [] },
+    connection: { phase, queueDepth: 0 },
+  })
+
+  it('recognises only transitional states', () => {
+    expect(shouldRefreshChannel('starting')).toBe(true)
+    expect(shouldRefreshChannel('reconnecting')).toBe(true)
+    expect(shouldRefreshChannel('connected')).toBe(false)
+    expect(shouldRefreshChannel('down')).toBe(false)
+    expect(shouldRefreshChannel('stopped')).toBe(false)
+  })
+
+  it('refreshes a missed ready edge and stops at connected', async () => {
+    const scheduled: (() => void)[] = []
+    const applied: PetChannelPhase[] = []
+    const stop = watchChannelTransition(
+      vi.fn(async () => view('connected')),
+      next => applied.push(next.connection.phase),
+      1,
+      callback => {
+        scheduled.push(callback)
+        return 1 as unknown as ReturnType<typeof setTimeout>
+      },
+      vi.fn(),
+    )
+
+    scheduled.shift()?.()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(applied).toEqual(['connected'])
+    expect(scheduled).toHaveLength(0)
+    stop()
+  })
+
+  it('stops after a bounded number of unsuccessful refreshes', async () => {
+    const scheduled: (() => void)[] = []
+    watchChannelTransition(
+      vi.fn(async () => Promise.reject(new Error('offline'))),
+      vi.fn(),
+      1,
+      callback => {
+        scheduled.push(callback)
+        return scheduled.length as unknown as ReturnType<typeof setTimeout>
+      },
+      vi.fn(),
+      2,
+    )
+
+    scheduled.shift()?.()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(scheduled).toHaveLength(1)
+    scheduled.shift()?.()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    // The second failed load consumes the final permitted attempt.
+    expect(scheduled).toHaveLength(0)
+  })
+
+  it('continues through reconnecting and cancellation stops future polls', async () => {
+    const scheduled: (() => void)[] = []
+    const phases: PetChannelPhase[] = ['reconnecting', 'down']
+    const applied: PetChannelPhase[] = []
+    const cancelled: unknown[] = []
+    const stop = watchChannelTransition(
+      vi.fn(async () => view(phases.shift() ?? 'down')),
+      next => applied.push(next.connection.phase),
+      1,
+      callback => {
+        scheduled.push(callback)
+        return scheduled.length as unknown as ReturnType<typeof setTimeout>
+      },
+      timer => cancelled.push(timer),
+    )
+
+    scheduled.shift()?.()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(applied).toEqual(['reconnecting'])
+    stop()
+    scheduled.shift()?.()
+    await Promise.resolve()
+    expect(applied).toEqual(['reconnecting'])
+    expect(cancelled).toHaveLength(1)
+  })
+})
 
 describe('overlay position persistence', () => {
   let storage: ReturnType<typeof memoryStorage>

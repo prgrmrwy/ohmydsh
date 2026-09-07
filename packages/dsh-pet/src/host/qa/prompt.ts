@@ -126,13 +126,13 @@ export function renderQaPrompt(trigger: QaTriggerFacts): string {
     lines.push('')
     lines.push(
       '本机已安装并授权 `lark-cli`，你可以用它以 **bot 身份**读写飞书；' +
-        '需要更多群内上下文时自行读取（`lark-cli skills read lark-im`）。',
+        '需要更多群内上下文时自行读取（`lark-cli --profile dsh-pet skills read lark-im`）。',
     )
     lines.push('')
     lines.push(
       '几条硬性要求：' +
         `**只发到本群** \`${trigger.chatId}\`（回复到消息 \`${trigger.messageId}\`），` +
-        '不要发往任何其它群或个人；所有调用显式带 `--as bot`；' +
+        '不要发往任何其它群或个人；所有调用都使用 `--profile dsh-pet` 并显式带 `--as bot`；' +
         '结论较长或含结构化内容时优先用消息卡片；不要逐条播报中间过程。' +
         '系统不会代你发送任何内容——你不发，提问者就收不到。',
     )

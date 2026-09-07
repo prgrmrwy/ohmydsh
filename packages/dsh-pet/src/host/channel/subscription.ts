@@ -14,6 +14,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process'
+import { PET_CLI_PROFILE, petCliArgs } from './cli.js'
 
 /** Connection state, reported independently of Pet's own lifecycle. */
 export type ChannelPhase = 'stopped' | 'starting' | 'connected' | 'reconnecting' | 'down'
@@ -35,6 +36,8 @@ export interface SubscriptionOptions {
   readonly binary?: string
   /** Event key to consume. */
   readonly eventKey?: string
+  /** Stable lark-cli profile selected for the consumer. */
+  readonly profile?: string
   /** Receives one parsed NDJSON line at a time. */
   readonly onLine: (line: string) => void
   /** Notified on every state change. */
@@ -60,7 +63,9 @@ const DEFAULT_BACKOFF = [1_000, 2_000, 5_000, 15_000, 30_000] as const
 export class ChannelSubscription {
   private child: ChildProcess | undefined
   private status: ChannelStatus = { phase: 'stopped', failures: 0 }
-  private stopping = false
+  private active = false
+  /** Fences late child exits and retry timers from earlier start/stop cycles. */
+  private generation = 0
   private buffer = ''
 
   /**
@@ -86,9 +91,10 @@ export class ChannelSubscription {
 
   /** Start the subscription, or do nothing when already running. */
   start(): void {
-    if (this.child !== undefined) return
-    this.stopping = false
-    this.spawnOnce()
+    if (this.active) return
+    this.active = true
+    this.generation += 1
+    this.spawnOnce(this.generation)
   }
 
   /**
@@ -100,17 +106,18 @@ export class ChannelSubscription {
    * machine may still be attached to it.
    */
   stop(): void {
-    this.stopping = true
+    this.active = false
+    this.generation += 1
     const child = this.child
     this.child = undefined
+    this.buffer = ''
     if (child !== undefined && child.exitCode === null) child.kill('SIGTERM')
     this.setStatus({ phase: 'stopped', failures: 0 })
   }
 
-  /** Reset the failure count and try again immediately. */
+  /** Reset the failure count and replace the active consumer immediately. */
   reconnect(): void {
     this.stop()
-    this.setStatus({ phase: 'stopped', failures: 0 })
     this.start()
   }
 
@@ -121,10 +128,13 @@ export class ChannelSubscription {
   }
 
   /** Spawn one consumer attempt and wire its streams. */
-  private spawnOnce(): void {
+  private spawnOnce(generation: number): void {
     const binary = this.options.binary ?? 'lark-cli'
     const eventKey = this.options.eventKey ?? 'im.message.receive_v1'
-    const args = ['event', 'consume', eventKey, '--as', 'bot']
+    const args = petCliArgs(
+      ['event', 'consume', eventKey, '--as', 'bot'],
+      this.options.profile ?? PET_CLI_PROFILE,
+    )
     this.setStatus({ ...this.status, phase: 'starting' })
 
     const spawnProcess =
@@ -143,29 +153,43 @@ export class ChannelSubscription {
     try {
       child = spawnProcess(binary, args)
     } catch (error) {
-      this.handleExit(`Could not start ${binary}: ${describe(error)}`)
+      this.handleExit(generation, undefined, `Could not start ${binary}: ${describe(error)}`)
+      return
+    }
+    if (!this.active || generation !== this.generation) {
+      if (child.exitCode === null) child.kill('SIGTERM')
       return
     }
     this.child = child
 
     child.stdout?.setEncoding('utf8')
-    child.stdout?.on('data', (chunk: string) => this.consume(chunk))
+    child.stdout?.on('data', (chunk: string) => {
+      if (generation === this.generation && child === this.child) this.consume(chunk)
+    })
 
     child.stderr?.setEncoding('utf8')
     child.stderr?.on('data', (chunk: string) => {
       // The readiness marker is the only stderr line with meaning here: it is
       // how lark-cli says the subscription is actually attached, as opposed to
       // the process merely having started.
-      if (chunk.includes('] ready event_key=')) {
+      if (
+        generation === this.generation &&
+        child === this.child &&
+        chunk.includes('] ready event_key=')
+      ) {
         this.setStatus({ phase: 'connected', failures: 0, readyAt: Date.now() })
       }
     })
 
-    child.on('error', error => this.handleExit(describe(error)))
+    let settled = false
+    const finish = (reason: string): void => {
+      if (settled) return
+      settled = true
+      this.handleExit(generation, child, reason)
+    }
+    child.on('error', error => finish(describe(error)))
     child.on('exit', (code, signal) => {
-      this.handleExit(
-        signal !== null ? `consumer terminated by ${signal}` : `consumer exited with code ${code}`,
-      )
+      finish(signal !== null ? `consumer terminated by ${signal}` : `consumer exited with code ${code}`)
     })
   }
 
@@ -188,10 +212,15 @@ export class ChannelSubscription {
   }
 
   /** Apply restart policy after the child goes away. */
-  private handleExit(reason: string): void {
+  private handleExit(
+    generation: number,
+    child: ChildProcess | undefined,
+    reason: string,
+  ): void {
+    if (generation !== this.generation || !this.active) return
+    if (child !== undefined && child !== this.child) return
     this.child = undefined
     this.buffer = ''
-    if (this.stopping) return
 
     const failures = this.status.failures + 1
     const backoff = this.options.backoffMs ?? DEFAULT_BACKOFF
@@ -218,7 +247,9 @@ export class ChannelSubscription {
         timer.unref?.()
       })
     schedule(() => {
-      if (!this.stopping) this.spawnOnce()
+      if (this.active && generation === this.generation && this.child === undefined) {
+        this.spawnOnce(generation)
+      }
     }, delay)
   }
 }

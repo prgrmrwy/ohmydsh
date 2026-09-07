@@ -290,6 +290,16 @@ const petChannelConfig = z.object({
    * `ou_…` string tells a reader nothing about who it is.
    */
   knownNames: z.record(z.string(), z.string()).optional(),
+  /** Persisted safe subset of a recoverable channel failure. */
+  channelDiagnostic: z
+    .object({
+      kind: z.literal('permission-missing'),
+      code: z.number().int().optional(),
+      missingScopes: z.array(z.string()),
+      consoleUrl: z.string().optional(),
+      updatedAt: z.number().int(),
+    })
+    .optional(),
   updatedAt: z.number().int(),
 })
 

@@ -94,6 +94,8 @@ describe('starting the consumer', () => {
     // own visibility and reply as the person.
     expect(h.commands[0]?.command).toBe('lark-cli')
     expect(h.commands[0]?.args).toEqual([
+      '--profile',
+      'dsh-pet',
       'event',
       'consume',
       'im.message.receive_v1',
@@ -191,6 +193,42 @@ describe('restart policy', () => {
 
     h.timers[0]?.fn()
     expect(h.children).toHaveLength(2)
+  })
+
+  it('ignores the old child exit after explicit reconnect', () => {
+    const h = harness()
+    h.subscription.start()
+    const old = h.children[0]
+
+    h.subscription.reconnect()
+    old?.end(null, 'SIGTERM')
+
+    expect(h.children).toHaveLength(2)
+    expect(h.timers).toHaveLength(0)
+    expect(h.subscription.current.phase).toBe('starting')
+  })
+
+  it('fences a retry timer across stop and a later start', () => {
+    const h = harness()
+    h.subscription.start()
+    h.children[0]?.end(1)
+    const staleRetry = h.timers[0]
+
+    h.subscription.stop()
+    h.subscription.start()
+    staleRetry?.fn()
+
+    expect(h.children).toHaveLength(2)
+  })
+
+  it('handles error plus exit only once', () => {
+    const h = harness()
+    h.subscription.start()
+    h.children[0]?.emit('error', new Error('broken'))
+    h.children[0]?.end(1)
+
+    expect(h.timers).toHaveLength(1)
+    expect(h.subscription.current.failures).toBe(1)
   })
 
   it('lengthens the delay on repeated failure', () => {

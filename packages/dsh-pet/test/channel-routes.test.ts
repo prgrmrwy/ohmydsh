@@ -99,9 +99,10 @@ beforeEach(async () => {
     setEnabled: vi.fn(async (enabled: boolean) => {
       calls.push(`setEnabled:${enabled}`)
     }),
-    reconnect: vi.fn(() => {
+    reconnect: vi.fn(async () => {
       calls.push('reconnect')
     }),
+    workspaceAvailable: workspaceId => workspaceId === 'ws-nexus',
     bindState: () => bindState,
     beginCreate: vi.fn(async () => {
       calls.push('beginCreate')
@@ -146,6 +147,12 @@ describe('reading the channel view', () => {
     expect(view.bot).toBeUndefined()
     expect(view.allowOpenIds).toEqual([])
     expect(view.routes).toEqual([])
+    expect(view.onboarding.ready).toBe(false)
+    expect(view.onboarding.blockers.map(item => item.code)).toEqual([
+      'bot-unbound',
+      'allowlist-empty',
+      'default-workspace-missing',
+    ])
   })
 
   it('never exposes a credential-shaped field', async () => {
@@ -200,6 +207,8 @@ describe('enabling the channel', () => {
     await harness?.repository.putChannelConfig({
       enabled: false,
       botAppId: 'cli_test',
+      botOpenId: 'ou_petbot00000000000000000000000',
+      defaultWorkspaceId: 'ws-nexus',
       allowOpenIds: [],
       updatedAt: 1,
     })
@@ -214,7 +223,9 @@ describe('enabling the channel', () => {
     await harness?.repository.putChannelConfig({
       enabled: false,
       botAppId: 'cli_test',
+      botOpenId: 'ou_petbot00000000000000000000000',
       allowOpenIds: [OWNER],
+      defaultWorkspaceId: 'ws-nexus',
       updatedAt: 1,
     })
 
@@ -223,6 +234,36 @@ describe('enabling the channel', () => {
     expect(reply.ok).toBe(true)
     expect(harness?.repository.getChannelConfig().enabled).toBe(true)
     expect(calls).toContain('setEnabled:true')
+  })
+
+  it('refuses while the bot identity is unresolved', async () => {
+    await harness?.repository.putChannelConfig({
+      enabled: false,
+      botAppId: 'cli_test',
+      allowOpenIds: [OWNER],
+      defaultWorkspaceId: 'ws-nexus',
+      updatedAt: 1,
+    })
+
+    const reply = await call(ROUTES.channelMutate, { action: 'set-enabled', enabled: true })
+
+    expect(reply.ok).toBe(false)
+    expect(reply.message).toMatch(/Confirm the Lark bot identity/)
+  })
+
+  it('refuses while the default workspace is missing', async () => {
+    await harness?.repository.putChannelConfig({
+      enabled: false,
+      botAppId: 'cli_test',
+      botOpenId: 'ou_petbot00000000000000000000000',
+      allowOpenIds: [OWNER],
+      updatedAt: 1,
+    })
+
+    const reply = await call(ROUTES.channelMutate, { action: 'set-enabled', enabled: true })
+
+    expect(reply.ok).toBe(false)
+    expect(reply.message).toMatch(/default workspace/)
   })
 
   it('always allows disabling', async () => {
@@ -254,6 +295,35 @@ describe('configuring routing and senders', () => {
 
     expect(reply.ok).toBe(true)
     expect(harness?.repository.getChannelConfig().allowOpenIds).toEqual([OWNER])
+  })
+
+  it('refuses to clear active readiness prerequisites', async () => {
+    await harness?.repository.putChannelConfig({
+      enabled: true,
+      botAppId: 'cli_test',
+      botOpenId: 'ou_petbot00000000000000000000000',
+      allowOpenIds: [OWNER],
+      defaultWorkspaceId: 'ws-nexus',
+      updatedAt: 1,
+    })
+
+    const allowlist = await call(ROUTES.channelMutate, {
+      action: 'set-allowlist',
+      allowOpenIds: [],
+    })
+    const workspace = await call(ROUTES.channelMutate, {
+      action: 'set-default-workspace',
+    })
+    const unavailableWorkspace = await call(ROUTES.channelMutate, {
+      action: 'set-default-workspace',
+      defaultWorkspaceId: 'ws-missing',
+    })
+
+    expect(allowlist.ok).toBe(false)
+    expect(workspace.ok).toBe(false)
+    expect(unavailableWorkspace.ok).toBe(false)
+    expect(harness?.repository.getChannelConfig().allowOpenIds).toEqual([OWNER])
+    expect(harness?.repository.getChannelConfig().defaultWorkspaceId).toBe('ws-nexus')
   })
 
   it('rebinds a chat and marks it as a user decision', async () => {

@@ -346,110 +346,21 @@ describe('remembering who asked', () => {
   })
 })
 
-describe('learning the bot open_id, proven by app id', () => {
-  /** A fixture whose bound bot has an app id but no known open_id yet. */
-  async function unknownBotFixture(
-    chatBots?: readonly LarkChatBot[],
-  ): Promise<Fixture> {
-    const f = await fixture(chatBots === undefined ? {} : { chatBots })
-    const config = f.harness.repository.getChannelConfig()
-    await f.harness.repository.putChannelConfig({
-      ...config,
-      botAppId: 'cli_test',
-      botOpenId: undefined as unknown as string,
-    })
-    return f
-  }
-
-  it('learns the open_id when the member list ties it to the bound app', async () => {
-    const f = await unknownBotFixture()
-    harness = f.harness
-
-    const outcome = await f.pipeline.handleLine(groupLine())
-
-    // Receiving a group message proves the bot is in that group, which makes
-    // the member list — and therefore the app_id proof — available.
-    expect(f.harness.repository.getChannelConfig().botOpenId).toBe(BOT)
-    expect(outcome.kind).toBe('accepted')
-  })
-
-  it('refuses an impostor who merely copied the display name', async () => {
-    // The mention names our bot, but the member list says that open_id
-    // belongs to a different app. A name can be copied; an app id cannot.
-    const f = await unknownBotFixture([
-      { appId: 'cli_someone_else', openId: 'ou_impostor0000000000000000000', name: '小小芒果' },
-      { appId: 'cli_test', openId: BOT, name: '小小芒果' },
-    ])
-    harness = f.harness
-
-    const outcome = await f.pipeline.handleLine(
-      groupLine({
-        mentions: [{ id: 'ou_impostor0000000000000000000', key: '@_user_1', name: '小小芒果' }],
-      }),
-    )
-
-    expect(f.harness.repository.getChannelConfig().botOpenId).toBeUndefined()
-    expect(outcome).toEqual({ kind: 'ignored', reason: 'no-mention' })
-  })
-
-  it('stays fail-closed when our app is not in the chat at all', async () => {
-    const f = await unknownBotFixture([
-      { appId: 'cli_other', openId: 'ou_other00000000000000000000000', name: 'Aily' },
-    ])
-    harness = f.harness
-
-    const outcome = await f.pipeline.handleLine(groupLine())
-
-    expect(f.harness.repository.getChannelConfig().botOpenId).toBeUndefined()
-    expect(outcome).toEqual({ kind: 'ignored', reason: 'no-mention' })
-  })
-
-  it('stays fail-closed when the member list cannot be read', async () => {
-    const f = await unknownBotFixture([])
-    harness = f.harness
-
-    const outcome = await f.pipeline.handleLine(groupLine())
-
-    // No proof, no identity: an unreadable member list must not degrade into
-    // trusting the mention.
-    expect(f.harness.repository.getChannelConfig().botOpenId).toBeUndefined()
-    expect(outcome).toEqual({ kind: 'ignored', reason: 'no-mention' })
-  })
-
-  it('does not learn from a mention of some other bot', async () => {
-    const f = await unknownBotFixture()
-    harness = f.harness
-
-    await f.pipeline.handleLine(
-      groupLine({ mentions: [{ id: 'ou_other00000000000000000000000', name: 'Aily' }] }),
-    )
-
-    // Our bot is in the chat, but this message was not addressed to it.
-    expect(f.harness.repository.getChannelConfig().botOpenId).toBeUndefined()
-  })
-
-  it('does not learn without a bound app id', async () => {
+describe('verified bot identity requirement', () => {
+  it('fails closed when a legacy record has no verified bot open_id', async () => {
     const f = await fixture()
     harness = f.harness
     const config = f.harness.repository.getChannelConfig()
     await f.harness.repository.putChannelConfig({
       ...config,
-      botAppId: undefined as unknown as string,
+      botAppId: 'cli_legacy',
       botOpenId: undefined as unknown as string,
     })
 
-    await f.pipeline.handleLine(groupLine())
+    const outcome = await f.pipeline.handleLine(groupLine())
 
-    expect(f.harness.repository.getChannelConfig().botOpenId).toBeUndefined()
-  })
-
-  it('does not learn from a p2p message', async () => {
-    const f = await unknownBotFixture()
-    harness = f.harness
-
-    await f.pipeline.handleLine(p2pLine())
-
-    // p2p events carry no mentions, so there is no candidate to prove.
+    expect(outcome).toEqual({ kind: 'ignored', reason: 'bot-identity-unresolved' })
+    expect(f.client.listChatBots).not.toHaveBeenCalled()
     expect(f.harness.repository.getChannelConfig().botOpenId).toBeUndefined()
   })
 
