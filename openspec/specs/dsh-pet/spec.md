@@ -27,6 +27,11 @@ Pet Host 初始化或可选依赖失败时 SHALL 进入可诊断的 degraded 状
 
 快捷能力 SHALL 呈现为以 Pet 本体为圆心的同心圆环轮盘。轮盘 SHALL 由内向外填充，每圈填满后才启用下一圈，最多三圈，容量依次为 6、8、10，合计上限 24 个能力；超出上限的能力 MUST NOT 渲染，且 MUST NOT 因此报错或阻断其余能力。
 
+轮盘条目 SHALL 支持两类来源：用户导入并启用的 Pet Skill（既有），以及 Host 内置
+动作（如 Q&A）。内置动作 MUST NOT 进入 Skill 安装/启用清单模型，MUST NOT 产生
+`/<skill-name>` envelope，其可用性由 Host 按各自依赖探测计算；不可用时 SHALL
+以禁用态呈现并展示原因。内置动作与 Skill 能力共同计入轮盘容量。
+
 hover Pet 本体或等价键盘操作 SHALL 展开轮盘；指向 Pet 本体之外的区域 MUST NOT 唤起轮盘。展开后，从圆心到最外侧已渲染圆环之间的整个圆盘 SHALL 视为轮盘的可保持区域，其中包含圆环之间的间隙与扇区接缝；指针离开该区域 SHALL 立即收起轮盘。可保持区域的半径 SHALL 按实际渲染的圈数计算，MUST NOT 按最大圈数计算。
 
 轮盘 SHALL 逐圈渐入：第一圈在展开时立即可见，其后每圈依次延迟出现，使层次可被感知而不显著推迟可操作时间。
@@ -71,6 +76,14 @@ hover Pet 本体或等价键盘操作 SHALL 展开轮盘；指向 Pet 本体之�
 - **WHEN** 键盘用户聚焦 Pet 并打开快捷能力
 - **THEN** 用户可以遍历、选择或关闭能力轮盘，焦点状态和能力禁用原因均可感知
 
+#### Scenario: 内置动作与 Skill 能力并列呈现
+- **WHEN** 用户在会话来源下展开轮盘，且 Q&A 动作依赖探测通过
+- **THEN** Q&A 与已启用 Skill 能力并列出现在轮盘上，点击后执行 Host 内置流程而非派发 Skill
+
+#### Scenario: 内置动作依赖不可用
+- **WHEN** 宿主缺少 Q&A 动作所需依赖（如 fork provider 或 channel 未绑定）
+- **THEN** 该动作以禁用态呈现并可感知原因，其余轮盘条目不受影响
+
 ### Requirement: Pet 使用自有持久化任务模型
 
 系统 SHALL 将 Pet Task、Pet Invocation、source snapshot、执行尝试、executor session 关联和归档状态持久化在 Pet 自有状态目录中。Pet Task ID SHALL 是关联关系的主身份；DSH session 标题、启动消息和其它可见文案仅作为投影，系统 MUST NOT 通过解析这些文案恢复或授权关联。
@@ -95,7 +108,7 @@ hover Pet 本体或等价键盘操作 SHALL 展开轮盘；指向 Pet 本体之�
 
 Pet Task 归档后 MUST NOT 再接收新 Invocation。用户在同一来源 scope 再次使用 Pet 时，系统 SHALL 创建新的 Task epoch 和新的 executor session，并保留旧 Task 的历史。
 
-来源 scope SHALL 至少支持：指定 DSH session、指定 DSH workspace、无关联的独立 scope，以及外部 channel 会话（如飞书 chat）。不同 scope 的 Task MUST NOT 被错误复用；两个不同 channel 会话即使路由到同一 workspace 也属于不同 scope。
+来源 scope SHALL 至少支持：指定 DSH session、指定 DSH workspace、无关联的独立 scope、外部 channel 会话（如飞书 chat），以及 qa 答疑群会话。不同 scope 的 Task MUST NOT 被错误复用；两个不同 channel 会话即使路由到同一 workspace 也属于不同 scope。每个 qa 答疑群 SHALL 对应至多一个活跃 Task，其固定"executor"即该群绑定的 fork child 会话；qa Task 归档 SHALL 使对应 qa 绑定失效，MUST NOT 销毁 child 会话历史。
 
 #### Scenario: 在同一 source session 多次调用能力
 - **WHEN** 用户在同一 DSH source session 依次调用 Create MR、Send CR 和 Clean Worktree，且其 Pet Task 未归档
@@ -112,6 +125,14 @@ Pet Task 归档后 MUST NOT 再接收新 Invocation。用户在同一来源 scop
 #### Scenario: channel 会话构成独立 scope
 - **WHEN** 一个飞书群与一个本机浮层 workspace 来源分别触发同一 workspace 上的工作
 - **THEN** 两者各自维护独立的活跃 Pet Task，互不复用 executor session
+
+#### Scenario: qa 群与源会话的浮层 Task 相互独立
+- **WHEN** 用户在源会话上既有浮层触发的活跃 Task，又通过 Q&A 建立了答疑群
+- **THEN** 浮层 Task 与 qa Task 各自独立存在，qa 群消息只进入 child，不影响浮层 Task 的 executor
+
+#### Scenario: 归档 qa Task
+- **WHEN** 用户在面板归档一个 qa Task
+- **THEN** 对应 qa 绑定失效、群消息不再触发工作，child 会话及其历史保留可查
 
 ### Requirement: 每次主动调用在发起位置捕获独立快照
 
@@ -165,14 +186,21 @@ session 时，系统 MUST NOT 隐式绑定最近使用的 session，而 SHALL �
 
 此形态下 Pet MUST NOT 承诺 Pet Skill allowlist 投影与 standing instructions 边界——目标 workspace 自身的 Skill 目录与 Agent 指令生效。为与该承诺一致，系统 MUST NOT 为此形态施加 Pet 专用 executor preset，也 MUST NOT 安装 Pet 的 allowlist Skill provider：两者的作用都是把 Skill 面收窄为 Pet 的清单，与「使用目标 workspace 自身能力」直接矛盾。此形态 SHALL 显式使用 DSH 的 `standard` preset——而非省略 preset：未指定的 preset 不会记录在会话头上，会使该会话在原生界面中显示不出任何模式。Pet MUST NOT 向目标 workspace 仓库写入任何投影、指令或状态文件。
 
-创建 executor session 后，系统 SHALL 按 Pet 配置选择 Pet Agent composition 与模型。当前 Web profile 已注册的 subscription provider SHALL 可被 Pet executor session 正常选择，Pet MUST NOT 读取、复制或另行保存 provider token。模型或 Pet composition 不可用时 SHALL 让 Task 进入可诊断失败/等待配置状态，不得创建伪成功结果。
+系统 SHALL 再支持 qa-child Task 形态：其"executor"是源会话的 fork continuable
+子代理会话，由 DSH 子代理机制组合与驱动。此形态下 Pet MUST NOT 自建 root
+session、MUST NOT 施加任何 preset、MUST NOT 安装 Pet allowlist Skill provider
+——child 的组合与工具面继承自源会话。信任来源是「本人显式创建答疑群 + 本人亲手
+拉人入群」；Pet MUST NOT 承诺任何 Pet Skill 边界对 child 生效。child SHALL 收纳
+在源会话名下的原生子代理列表中，MUST NOT 作为独立 root session 出现在会话列表。
+
+创建 executor session 后，系统 SHALL 按 Pet 配置选择 Pet Agent composition 与模型。当前 Web profile 已注册的 subscription provider SHALL 可被 Pet executor session 正常选择，Pet MUST NOT 读取、复制或另行保存 provider token。模型或 Pet composition 不可用时 SHALL 让 Task 进入可诊断失败/等待配置状态，不得创建伪成功结果。qa-child 形态的模型选择 SHALL 继承自源会话（fork 快照），不适用 Pet 配置的模型选择。
 
 #### Scenario: 首次为 source scope 启动 Task
 - **WHEN** 用户首次从某 source scope 调用 Pet 能力
 - **THEN** 系统在 `DSH Pet` Workspace 创建一个普通 executor session、保存双向关联并将 Invocation 投递给该 session
 
 #### Scenario: 打开完整执行过程
-- **WHEN** 用户从 Pet Task 面板点击“打开完整过程”
+- **WHEN** 用户从 Pet Task 面板点击"打开完整过程"
 - **THEN** DSH 打开该 Task 固定关联的原生 executor session，用户可查看历史、回答问题、取消或继续会话
 
 #### Scenario: 使用订阅 provider
@@ -199,6 +227,14 @@ session 时，系统 MUST NOT 隐式绑定最近使用的 session，而 SHALL �
 - **WHEN** 系统为 resident Task 创建 executor
 - **THEN** 使用 `standard` preset、不安装 Pet allowlist Skill provider，
       executor 可用的 Skill 由其所在 workspace 决定，且该会话在原生界面显示为标准模式
+
+#### Scenario: qa-child 形态继承源会话组合
+- **WHEN** Q&A 动作对源会话 fork 出 child 并有群成员触发工作
+- **THEN** child 以源会话的组合与工具面执行，Pet 不为其装配 preset 或 allowlist provider
+
+#### Scenario: qa-child 不出现在 root 会话列表
+- **WHEN** 用户查看源会话所在 workspace 的会话列表
+- **THEN** qa child 收纳于源会话名下的子代理折叠列表，不作为独立 root 会话出现
 
 ### Requirement: Executor session 明确展示与 source 和 Task 的关系
 
