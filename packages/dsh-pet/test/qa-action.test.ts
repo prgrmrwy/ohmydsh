@@ -284,3 +284,75 @@ describe('a QA group transaction that fails', () => {
     expect(seam.started).toHaveLength(0)
   })
 })
+
+
+describe('the child is told where it may work', () => {
+  const WORKTREE = {
+    executionRoot: '/repo/.worktrees/pet-2',
+    branch: 'ws/pet-2',
+    repositoryRoot: '/repo',
+  }
+
+  it('states the managed execution root in the seed prompt', async () => {
+    harness = await ready()
+    const seam = seamStub()
+    const prompts: string[] = []
+    vi.mocked(seam.seam.subagents.startContinuable).mockImplementation(
+      async (spec: { childId?: string; request: { prompt: { text: string }[] } }) => {
+        prompts.push(spec.request.prompt[0]?.text ?? '')
+        return { childId: spec.childId ?? 'c' }
+      },
+    )
+
+    await createQaGroup(
+      { repository: harness.repository, client: larkStub(), seam: seam.seam },
+      { sessionId: SOURCE_SESSION, worktree: WORKTREE },
+    )
+
+    // A fork copies the parent's `cwd`, which Worktree Session keeps at the
+    // REPOSITORY ROOT while the real execution root lives in a binding the
+    // child does not inherit. Without this statement the child would take the
+    // main checkout for its working directory.
+    expect(prompts[0]).toContain('/repo/.worktrees/pet-2')
+    expect(prompts[0]).toContain('ws/pet-2')
+    expect(prompts[0]).toContain('不是你该干活的地方')
+  })
+
+  it('persists the execution root on the binding', async () => {
+    harness = await ready()
+
+    const result = await createQaGroup(
+      { repository: harness.repository, client: larkStub(), seam: seamStub().seam },
+      { sessionId: SOURCE_SESSION, worktree: WORKTREE },
+    )
+
+    // Stored rather than re-derived per question: a later message must not
+    // depend on the worktree plugin still answering.
+    const binding = harness.repository.getChatBinding(result.chatId)
+    expect(binding?.qaExecutionRoot).toBe('/repo/.worktrees/pet-2')
+    expect(binding?.qaBranch).toBe('ws/pet-2')
+    expect(binding?.qaRepositoryRoot).toBe('/repo')
+  })
+
+  it('says nothing about directories for an unbound source session', async () => {
+    harness = await ready()
+    const seam = seamStub()
+    const prompts: string[] = []
+    vi.mocked(seam.seam.subagents.startContinuable).mockImplementation(
+      async (spec: { childId?: string; request: { prompt: { text: string }[] } }) => {
+        prompts.push(spec.request.prompt[0]?.text ?? '')
+        return { childId: spec.childId ?? 'c' }
+      },
+    )
+
+    const result = await createQaGroup(
+      { repository: harness.repository, client: larkStub(), seam: seam.seam },
+      { sessionId: SOURCE_SESSION },
+    )
+
+    // The ordinary non-worktree case: the child works where its cwd points,
+    // and inventing a constraint would be wrong.
+    expect(prompts[0]).not.toContain('受管执行目录')
+    expect(harness.repository.getChatBinding(result.chatId)?.qaExecutionRoot).toBeUndefined()
+  })
+})

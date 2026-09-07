@@ -89,9 +89,20 @@
 - [x] 8.2 仓库级 `npm test`（96 pass / 0 fail）、`npm run check:artifacts`
       （合规）、`node scripts/sync.mjs` 二次运行无新增漂移（3 项失败与基线一致，
       均为本 worktree 未装依赖所致）
-- [ ] 8.3 真机端到端：点 Q&A 建群 → 本人拉一名非 allowlist 用户 → 该用户 @bot
-      提问 → child 带源会话上下文回答且只回本群 → 表情 OnIt→DONE；对照源会话
-      验证 child 工具数量（D9.7，声明≠装配）；GUI 展开 child 私聊验证不出站
+- [x] 8.3 真机端到端（六条 Requirement 全部取得真机证据）：
+      ① 建群三步事务通过，群名取源会话标题；② fork 种子带上父会话完成 turn，
+      child 可复述完整实现过程；③ **D9.7 通过** —— child 工具面完整
+      （bash/fs/search/subagent/job/ws…），未复现一期「声称 standard 实际 5 个
+      工具」的装配坑，机制为 `applyChildComposition` 首行的
+      `agentPresets.composeFrom`；④ 投递成 child 独立 turn，prompt 含提问者身份／
+      chat_id／trigger id／只回本群与改动先确认条款；⑤ 表情 OnIt→DONE 由
+      `subagent/end` 驱动，先删 OnIt 再打终态、无堆叠；⑥ **准入豁免真机成立**
+      —— 非 allowlist 的 `ou_1050bd76…`（由所有者拉入）@bot 后产生投递记录
+      `qa-66d430eb-…`，而 `allowOpenIds` 全程未变，证明放行来自 `kind=qa` 绑定
+      行且不外溢。出站回复 `reply_to` 正确、`sender_type=app`、系统未代发。
+      额外收获：库中两条二期1 存量绑定行 `kind` 缺失仍正常读取，真机确证
+      v4→v5 默认值迁移对存量无破坏（覆盖 2.2 的意图）。
+      **遗留**：GUI 私聊不出站一项待界面确认；发现 child cwd 缺陷见 8.9。
 - [ ] 8.4 真机重启演练：DSH 重启后群消息触发 coldResume 且上下文完整
 - [ ] 8.5 真机失效演练：归档源会话后群消息收到一次失效提示，后续静默
 - [ ] 8.6 记录 `+chat-create` 的群主/解散行为（design Open Question，仅记录）
@@ -100,3 +111,23 @@
       版本控制）
 - [x] 8.8 `openspec validate pet-qa-group --strict` 通过；复核 diff 无范围蔓延
       （不触碰非 qa 入站链路、send-cr/ws skill、provider 凭据路径）
+
+## 9. 真机验收发现的缺陷
+
+- [ ] 9.1 **child 落在错误的工作目录**。真机 child header：
+      `cwd=/Users/prgrmrwy/opensource/ohmydsh`（主 checkout），而父会话实际工作在
+      `.worktrees/pet-2`。
+      根因（实测澄清）：**fork 没有出错**——父会话 header 的 `cwd` 本来就是仓库根，
+      child 忠实继承了它。Worktree Session 是**有意**把 `header.cwd` 留在仓库根、
+      把受管执行根另存于绑定状态（见 `worktree-adapter.ts` 开头的不变量：Pet MUST
+      NOT 从 `cwd` 推断执行根）。父会话靠「绑定 + 每次显式 workdir」自我约束，而
+      child **没有继承那层绑定**，于是它 cwd 的字面值（= 主 checkout）就成了它真实
+      的工作目录。一句话：父受管，子裸奔。
+      后果三条，第三条最严重：① child 看不到 skill 目录（`skill-filesystem` 按
+      `findProjectRoot(cwd)` 扫，落到主 checkout 的 `.agents/skills/`）；② `ws`
+      面对的是主 checkout 而非任务分支；③ **child 若执行写操作会写进主 checkout**
+      ——正是 AGENTS.md 明令禁止当作工作区编辑的位置。目前未爆是因为群友只问了
+      只读问题。
+      修法：`startContinuable` 的 request 显式传入源会话的真实执行目录（Pet 侧可从
+      worktree 绑定解析），使 child 落在与父一致的目录；补回归测试断言 child cwd
+      等于源会话执行根而非仓库根，并重跑一轮真机。
