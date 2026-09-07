@@ -564,8 +564,11 @@ describe('unbinding hands the group back to what it was', () => {
 
     const outcome = await unbindGroup({ repository: harness.repository }, CHAT)
 
-    // Someone who only heard "unbound" would be surprised by the next reply.
-    expect(renderUnbindReceipt(outcome)).toContain('工作区路由')
+    // Someone who only heard "unbound" would be surprised by the next reply:
+    // the group still answers, it just answers as something else.
+    const text = renderUnbindReceipt(outcome)
+    expect(text).toContain('工作区路由')
+    expect(text).toContain('仍会响应')
   })
 
   it('removes the row entirely when there was nothing to restore', async () => {
@@ -578,5 +581,20 @@ describe('unbinding hands the group back to what it was', () => {
     // A retained `qa` row would keep the group out of default routing
     // forever; removing it is what makes the group truly free again.
     expect(harness.repository.getChatBinding(CHAT)).toBeUndefined()
+  })
+
+  it('warns that the group still answers, as something else', async () => {
+    harness = await openPetHarness()
+    const d = await deps(harness)
+    await bindExistingGroup(d, { chatId: CHAT, prefix: 'abc123d' })
+
+    const outcome = await unbindGroup({ repository: harness.repository }, CHAT)
+
+    // Returning to default routing means the next @bot builds a session in
+    // the default workspace. Reporting only "unbound" would let the user
+    // expect silence and get an answer from a stranger instead.
+    const text = renderUnbindReceipt(outcome)
+    expect(text).toContain('仍会响应')
+    expect(text).toContain('不再带有原会话的上下文')
   })
 })
