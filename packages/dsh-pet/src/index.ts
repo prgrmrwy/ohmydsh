@@ -52,7 +52,7 @@ import { registerPetTools } from './host/tools.js'
 import { currentAllowlist } from './host/skill-provider.js'
 import { removeLegacyState } from './host/migrate.js'
 import { petDomainSpec } from './host/spec.js'
-import { PET_EXECUTOR_PRESET, QA_GROUP_ACTION_ID } from './wire.js'
+import { PET_EXECUTOR_PRESET, QA_GROUP_ACTION_ID, STANDARD_PRESET } from './wire.js'
 import {
   ensurePetWorkspace,
   inspectWorkspace,
@@ -281,13 +281,6 @@ async function initialize(
 
   const capabilities = new CapabilityRegistry()
 
-  // Pet tools are registered on the Host context so Pet executor Agents can
-  // reach them; both resolve their target from the calling session.
-  ctx.effect(
-    () => registerPetTools(ctx, { repository }),
-    'dsh-pet: caller-bound Agent tools',
-  )
-
   // Publish configured values as ordinary `DSH_PET_*` variables on every shell
   // call an executor makes. Deliberately OPTIONAL: a Host without the
   // shell-env registry injects nothing and a Skill needing a value reports it
@@ -321,55 +314,122 @@ async function initialize(
   }
 
   /**
-   * Scope every Pet executor Agent at creation time.
+   * Agent contexts already carrying the Pet composition.
    *
-   * Registering the allowlist provider on the AGENT context (not the Host
-   * context) is what makes Pet's isolation real: only Pet executors see it,
-   * and they see exactly the explicitly enabled revisions. The registration
-   * happens inside `setup`, which the factory awaits before the session and
-   * agent are published, so it exists before the first prompt is assembled.
+   * The SAME executor Agent can be offered this composition more than once:
+   * Pet installs it through `setup`, and the `agent/created` observer below
+   * covers agents Pet did not start. A second registration of the same tool
+   * name throws `tool "..." is already registered in this scope`, so this set
+   * is the deduplication — deliberately an explicit marker rather than a
+   * swallowed exception, because that is precisely how the `shellEnv` incident
+   * cost the executor its `bash` tool.
+   *
+   * Weak so a disposed Agent's context does not pin memory here.
    */
-  const executorSetup = async (agentCtx: unknown, presetId?: string): Promise<void> => {
+  const composedAgents = new WeakSet<object>()
+  const allowlistAgents = new WeakSet<object>()
+  const contextToolAgents = new WeakSet<object>()
+
+  /** Install the Pet-owned scoped surface on one live executor Agent.
+   *
+   * Every Pet Task executor receives `pet_context`. Only the dedicated Pet
+   * executor form also receives the allowlist Skill provider; a
+   * workspace-resident executor deliberately uses its workspace's Skills.
+   * The marker makes repeated installation idempotent without swallowing a
+   * duplicate-registration error.
+   */
+  const installPetScope = (agentCtx: unknown, includeAllowlist: boolean): void => {
     const scoped = agentCtx as Context
+    const key = scoped as unknown as object
+    if (composedAgents.has(key)) return
 
-    // MOUNT THE PRESET FIRST. `meta.agentPreset` only records a name on the
-    // session header for display and reconstruction — it composes nothing.
-    // The plugins a preset names (bash, fs, search, jobs, …) exist only after
-    // `agentPresets.mount` runs here, inside the agent factory's `setup`.
-    //
-    // Pet ran for its whole first phase without this call, so every executor
-    // saw ONLY the tools plugins register globally — five of them — while its
-    // header claimed a preset. That was invisible while Pet's capabilities
-    // were Skills carrying their own tools; a resident executor asked to read
-    // a repository or run a command has nothing to work with.
-    // See docs/notes/dsh-plugin-integration-pitfalls.md §1.
-    //
-    // Failure rolls the agent creation back by contract, which is the right
-    // outcome: a half-composed executor would fail later and less legibly.
-    await ctx.agentPresets.mount(scoped as never, presetId as never)
-    // A resident executor stops here. Pet's allowlist provider exists to make
-    // the Skill surface exactly Pet's own list; this form promises the
-    // opposite — the Skills of the workspace it runs in — so installing it
-    // would contradict the boundary the spec says Pet does NOT claim here.
-    if (presetId !== undefined && presetId !== PET_EXECUTOR_PRESET) return
+    // Agent contexts are fresh fibers and do not inherit this plugin's inject
+    // grants, so each scoped registration declares its dependency locally.
+    // Mark each component only after its registration succeeds: a partial
+    // failure can then be retried without duplicating the component that
+    // already exists.
+    if (includeAllowlist && !allowlistAgents.has(key)) {
+      scoped.inject(['skills'], skillCtx => {
+        skillCtx.effect(
+          () =>
+            skillCtx.skills.registerProvider(() => createPetSkillProvider(repository, paths)),
+          'dsh-pet: scoped allowlist Skill provider',
+        )
+        allowlistAgents.add(key)
+      })
+    }
 
-    // The agent context is a FRESH fiber: it does not inherit this plugin's
-    // inject grants, so reading `scoped.skills` directly throws
-    // `cannot get property "skills" without inject`. `ctx.inject` declares the
-    // dependency for the callback body, which is where the registration runs.
-    //
-    // `registerProvider` (a factory receiving the registration control) — NOT
-    // `register`, which contributes one single runtime skill. Registering from
-    // the SCOPED agent context is what confines the allowlist to Pet executors
-    // instead of publishing it globally.
-    scoped.inject(['skills'], skillCtx => {
-      skillCtx.effect(
-        () =>
-          skillCtx.skills.registerProvider(() => createPetSkillProvider(repository, paths)),
-        'dsh-pet: scoped allowlist Skill provider',
-      )
-    })
+    // `tools.register()` chooses its layer from the CALLING context's scope
+    // tag. Calling it on the Host silently publishes globally, which is the
+    // original leak this change fixes.
+    if (!contextToolAgents.has(key)) {
+      scoped.inject(['tools'], toolCtx => {
+        toolCtx.effect(
+          () => registerPetTools(toolCtx, { repository }),
+          'dsh-pet: scoped caller-bound Agent tools',
+        )
+        contextToolAgents.add(key)
+      })
+    }
+    if (!contextToolAgents.has(key) || (includeAllowlist && !allowlistAgents.has(key))) {
+      throw new PetError('INTERNAL', 'Pet scoped surface dependencies were not installed')
+    }
+    composedAgents.add(key)
   }
+
+  /** Mount the selected preset, then install the Pet-owned scoped surface.
+   *
+   * `meta.agentPreset` only records a name; actual composition requires
+   * `agentPresets.mount` inside setup. Preset mounting must happen before
+   * scoped providers are registered (see the integration pitfalls note).
+   */
+  const executorSetup = async (
+    agentCtx: unknown,
+    presetId: string | undefined,
+    includeAllowlist: boolean,
+  ): Promise<void> => {
+    const scoped = agentCtx as Context
+    await ctx.agentPresets.mount(scoped as never, presetId as never)
+    installPetScope(scoped, includeAllowlist)
+  }
+
+  /** Whether an Agent already carries the Pet-owned scoped surface. */
+  const isComposed = (agent: unknown): boolean => {
+    const agentCtx = (agent as { ctx?: unknown } | undefined)?.ctx
+    return agentCtx !== undefined && composedAgents.has(agentCtx as object)
+  }
+
+  /**
+   * Scope an executor loaded by DSH itself without mounting its preset again.
+   * The native session controller already mounted the persisted preset before
+   * publication; Pet only contributes `pet_context` and, for non-resident
+   * Tasks, its allowlist provider. Listener failures are contained because a
+   * synchronous throw from `agent/created` would veto publication.
+   */
+  const composeForeignExecutor = (agent: unknown): void => {
+    const view = agent as { session?: { id?: unknown }; ctx?: unknown } | undefined
+    const sessionId = view?.session?.id
+    if (sessionId === undefined || view?.ctx === undefined) return
+    const task = repository.findTaskByExecutor(String(sessionId))
+    if (task === undefined || composedAgents.has(view.ctx as object)) return
+    try {
+      installPetScope(view.ctx, task.residentWorkspaceId === undefined)
+    } catch (error) {
+      ctx.logger.warn(
+        `dsh-pet: could not scope externally loaded executor ${String(sessionId)} (${
+          error instanceof Error ? error.message : String(error)
+        })`,
+      )
+    }
+  }
+
+  ctx.effect(
+    () =>
+      ctx.on('agent/created', (payload: { agent?: unknown }) => {
+        composeForeignExecutor(payload?.agent)
+      }),
+    'dsh-pet: scope externally loaded executors',
+  )
   const contextProviders = new SourceContextRegistry()
 
   // Optional Worktree Session enrichment: snapshot context only, no effects.
@@ -471,6 +531,49 @@ async function initialize(
     )
   }
 
+  /** Resolve the preset that the persisted session actually runs.
+   *
+   * A user may change preset while a session is blank, so the creation header
+   * is only a fallback; the `agentPreset` projection is authoritative. This
+   * mirrors the native session controller's resume path instead of guessing
+   * from Pet's current setting.
+   */
+  const persistedPresetFor = async (sessionId: string): Promise<string> => {
+    const query = ctx.get('sessionQuery') as
+      | {
+          observeSession(
+            id: string,
+            options: { projectionMode: 'all' },
+          ): Promise<{
+            header: { agentPreset?: unknown }
+            projections?: { values?: { agentPreset?: unknown } }
+            [Symbol.dispose]?: () => void
+          }>
+        }
+      | undefined
+    if (query === undefined) {
+      throw new PetError(
+        'INTERNAL',
+        `Pet executor session ${sessionId} cannot be resumed because sessionQuery is unavailable`,
+      )
+    }
+
+    const observation = await query.observeSession(sessionId, { projectionMode: 'all' })
+    try {
+      const projected = observation.projections?.values?.agentPreset
+      const stored = typeof projected === 'string' ? projected : observation.header.agentPreset
+      if (typeof stored !== 'string' || stored.trim() === '') {
+        throw new PetError(
+          'INTERNAL',
+          `Pet executor session ${sessionId} has no persisted Agent preset`,
+        )
+      }
+      return stored
+    } finally {
+      observation[Symbol.dispose]?.()
+    }
+  }
+
   const dispatcher: PromptDispatcher = {
     dispatch: async (executorSessionId, text) => {
       // `agents.get` only finds a LOADED agent. DSH unloads idle ones, so a
@@ -486,14 +589,36 @@ async function initialize(
       if (handle === undefined) {
         try {
           const current = selection()
+          const task = repository.findTaskByExecutor(executorSessionId)
+          if (task === undefined) {
+            throw new PetError(
+              'TASK_NOT_FOUND',
+              `Pet executor session ${executorSessionId} is not bound to a Task`,
+            )
+          }
+          const presetId = await persistedPresetFor(executorSessionId)
+          const expectedFormPreset =
+            task.residentWorkspaceId === undefined ? undefined : STANDARD_PRESET
+          if (expectedFormPreset !== undefined && presetId !== expectedFormPreset) {
+            throw new PetError(
+              'INTERNAL',
+              `Workspace-resident Pet executor ${executorSessionId} persisted unexpected preset ${presetId}`,
+            )
+          }
           handle = await ctx.agents.resume({
             resumeSessionId: executorSessionId as never,
-            // Same flat shape as creation. The preset is NOT repeated here:
-            // it lives in the persisted session's meta, which resume reloads.
+            // Same flat model shape as creation. The preset name is persisted
+            // for display, but setup still needs the resolved id because
+            // `agentPresets.mount` is what actually composes its tools.
             agentOptions: {
               provider: current.providerId,
               model: current.modelId,
             },
+            // Resume mints a BRAND NEW agent scope. Mount the Task form's
+            // preset, then restore `pet_context`; only dedicated Pet executors
+            // regain the allowlist provider.
+            setup: (agentCtx: unknown) =>
+              executorSetup(agentCtx, presetId, task.residentWorkspaceId === undefined),
           } as never)
         } catch (error) {
           throw new PetError(
@@ -509,6 +634,28 @@ async function initialize(
       // string — so the envelope rides the same path a native client uses and
       // the Skill pre-step sees the leading `/skill-name` token.
       const agent = (handle as { agent?: unknown }).agent ?? handle
+
+      // Fail closed on the isolation boundary.
+      //
+      // A live agent here may have been loaded by DSH itself rather than by
+      // Pet — the user opening the executor from the native session list does
+      // exactly that, and the official session controller composes it with a
+      // preset-only setup. The `agent/created` observer normally scopes such
+      // an agent; this is the check that makes a miss visible instead of
+      // silently running an Invocation with Host-wide Skill discovery.
+      if (!isComposed(agent)) {
+        // Late, best-effort repair for an agent that predates the observer
+        // (registered after Pet's own initialization) before refusing.
+        composeForeignExecutor(agent)
+      }
+      if (!isComposed(agent)) {
+        throw new PetError(
+          'INTERNAL',
+          `Pet executor session ${executorSessionId} is missing its Pet scoped surface, so this ` +
+            'Invocation would run without trusted context or its Task-form boundary. Reopen ' +
+            'the Task to have Pet load the executor itself.',
+        )
+      }
       const message = createUserMessage({
         content: [{ type: 'text', text }],
         source: { kind: 'user' },

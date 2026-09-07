@@ -156,8 +156,14 @@ export interface CreateExecutorOptions {
    *
    * Receives the preset id to compose: naming a preset in `meta` only records
    * it on the session header, so the composition itself must be mounted here.
+   * `includeAllowlist` is the Task-form boundary, kept separate from preset
+   * identity so a user-selected Pet preset is not mistaken for resident mode.
    */
-  readonly setup?: (agentCtx: unknown, presetId?: string) => void | Promise<void>
+  readonly setup?: (
+    agentCtx: unknown,
+    presetId: string | undefined,
+    includeAllowlist: boolean,
+  ) => void | Promise<void>
 }
 
 /**
@@ -252,7 +258,14 @@ export async function createTaskWithExecutor(
         model: options.selection.modelId,
       },
       ...(options.setup !== undefined
-        ? { setup: (agentCtx: unknown) => options.setup?.(agentCtx, effectivePreset) }
+        ? {
+            setup: (agentCtx: unknown) =>
+              options.setup?.(
+                agentCtx,
+                effectivePreset,
+                options.residentWorkspaceId === undefined,
+              ),
+          }
         : {}),
     })
     // Account the session AFTER creation succeeds. A failure here is not fatal

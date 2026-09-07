@@ -274,7 +274,12 @@ describe('Pet tool schemas match the real defineTool contract', () => {
     // A capability is an installed Skill driving ordinary DSH tools. Adding a
     // per-capability Pet tool would put the runtime back in the business of
     // shipping code for each capability.
-    expect([...tools.matchAll(/ctx\.tools\.register\(/g)]).toHaveLength(1)
+    //
+    // Comments are stripped first: the file documents the registration
+    // contract by name, and prose mentioning `ctx.tools.register()` must not
+    // be counted as a second registration.
+    const code = tools.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+    expect([...code.matchAll(/ctx\.tools\.register\(/g)]).toHaveLength(1)
     expect(tools).toContain('PET_CONTEXT_TOOL')
     expect(tools).not.toContain('pet_create_mr')
     expect(tools).not.toContain('pet_send_cr')
@@ -417,14 +422,18 @@ describe('the agent context is a fresh fiber without inherited grants', () => {
       path.resolve(__dirname, '..', 'src', 'index.ts'),
       'utf8',
     )
-    const setup = source.slice(source.indexOf('const executorSetup'))
+    const install = source.slice(
+      source.indexOf('const installPetScope'),
+      source.indexOf('const executorSetup'),
+    )
 
-    // Reading `scoped.skills` directly throws
-    // `cannot get property "skills" without inject` in a REAL Host, because
-    // the agent context does not inherit the plugin's inject grants. Only a
-    // booted Host surfaces this, so the shape is pinned here.
-    expect(setup).toContain("scoped.inject(['skills']")
-    expect(setup).not.toMatch(/scoped\.skills\.registerProvider/)
+    // Reading `scoped.skills` or `scoped.tools` directly throws in a REAL
+    // Host because the fresh agent context does not inherit this plugin's
+    // inject grants. Pin both declarations at the extracted scoped installer.
+    expect(install).toContain("scoped.inject(['skills']")
+    expect(install).toContain("scoped.inject(['tools']")
+    expect(install).not.toMatch(/scoped\.skills\.registerProvider/)
+    expect(install).not.toMatch(/scoped\.tools\.register/)
   })
 })
 

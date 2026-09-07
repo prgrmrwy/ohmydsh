@@ -11,6 +11,14 @@
  * argument, and declares no parameters at all — so a model cannot substitute
  * a different Task or session.
  *
+ * SCOPE IS PART OF THE CONTRACT. `ctx.tools.register()` resolves its target
+ * layer from the CALLING context's scope tag and falls back to the GLOBAL
+ * layer when there is none — silently, with no error. Registering from the
+ * Host plugin context therefore published `pet_context` to every ordinary DSH
+ * session, whose model was offered a tool that can only ever answer
+ * `NOT_A_PET_SESSION`. Always register through a Pet executor's scoped agent
+ * context (`executorSetup` in `src/index.ts`), never the Host context.
+ *
  * Registration goes through `defineTool` so the parameter and output schemas
  * are checked at compile time. `parameters` is a FLAT property map (an
  * implicit open object root with per-property `required: true`), not a raw
@@ -37,6 +45,12 @@ interface ExecutionLike {
 
 /**
  * Resolve the executing session id, failing closed when absent.
+ *
+ * Scoping the registration means a non-Pet session no longer even sees this
+ * tool, so this guard is no longer the primary defense. It is kept because it
+ * covers a DIFFERENT invariant: an execution that reaches the body with no
+ * owning agent has no caller identity to resolve, and inventing one would be
+ * the only way to answer. That must fail, whatever the tool's visibility.
  * @param exec - The tool execution.
  * @returns the executing session id.
  * @throws PetError when the call has no owning agent.
@@ -58,7 +72,9 @@ function callerSessionId(exec: ExecutionLike): string {
  * There is exactly ONE: `pet_context`. Pet is a runtime, not a catalog of
  * per-capability adapters — an installed Skill drives ordinary DSH tools and
  * owns its own bounded behavior, so adding a capability never adds a tool.
- * @param ctx - The scoped agent context (or Host context).
+ * @param ctx - A Pet executor's SCOPED agent context. Passing an unscoped
+ * context (such as the Host plugin context) does not fail — it publishes the
+ * tool to the global layer, where every ordinary session sees it.
  * @param deps - Repository supplying the caller's authorized Invocation.
  * @returns a disposer removing the registration.
  */
