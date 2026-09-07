@@ -106,8 +106,23 @@
 - [x] 8.4 真机重启演练通过：DSH 重启后群消息触发 coldResume，child 从持久化
       Session + descriptor 重建，上下文完整（spike Q3 的真机对应验证）
 - [ ] 8.5 真机失效演练：归档源会话后群消息收到一次失效提示，后续静默
-- [x] 8.6 已记录：群主行为见 9.3——`--owner` 不传时默认归 bot，现已显式指定
-      发起者本人；解散能力的观察结果待补一句（不影响主链路，本设计不依赖解散）
+- [x] 8.6 已记录（结论须按时间线分述，勿一句话带过）：
+      ① **群主**——`--owner` 不传时默认归 bot（帮助文本明写）。修复 9.3 之后新建的
+      群已显式指定发起者本人，**真机确认**（第四个群，建于该修复后 75 秒）。修复前
+      建的三个群群主**推测**为 bot，但**未获证实**：`im chats get --as bot` 不返回
+      `owner_id`，两个 manager 列表均空；试图用 `chat.managers add_managers` 反证
+      归属的实验也失败了——请求在**到达权限判定之前**就被 scope 检查挡下
+      （`99991672 app_scope_not_applied`，缺 `im:chat`、
+      `im:chat.managers:write_only`），因此该结果不能推断任何归属关系。
+      ② **解散**——**bot 不能解散群**：`lark-cli im chats` 仅
+      create/get/link/update，全局无 delete/disband。这把 design D2 里「bot 无解散
+      群 API」从未验证假设升级为已确证，反向印证「fork 排在建群之前」是对的：群建好
+      而后续失败时 bot 确实收不了场。
+      ③ 顺带确证一条 scope 事实：**同一 `im` 域内不同能力的 scope 分开授予**——
+      `+chat-create` 可用不代表 `chat.managers` 可用。这是二期1「以真实调用为准、
+      不要从文档推断 scope」的又一次印证。对本能力无影响（建群/发消息/表情/拉历史
+      都在已有 scope 内），但 Pet 将来若要做任何群管理动作（转让、踢人、解散、设
+      管理员）都须先确认 scope，不可假定「bot 建的群 bot 就能管」。
 - [x] 8.7 更新 `dsh.yaml` dsh-pet 条目 note 与 `packages/dsh-pet/README.md`；
       `spike/` 已加入 `.gitignore`（结论已进 design.md D9，脚本与原始输出不入
       版本控制）
@@ -198,3 +213,9 @@
       `pointer-events:none` 使其可见期间不拦截点击，配合淡出动画。
       新增 2 个回归测试（自动消失、不拦截指针）。
 - [x] 9.5 真机确认 9.3：新建群的群主是发起者本人。
+- [x] 9.6 **群主修复未覆盖存量**（真机发现，记录而非修复）。9.3 只改变新建群的
+      行为，修复前建的三个群仍挂在 bot 名下，且**没有迁移路径**：`im chats update`
+      无 owner 参数，`im chats` 无转让命令，`chat.managers add_managers` 又缺
+      scope。用户只能在飞书客户端手工转让，或解散重建。
+      按用户「以后正确就行」的既定口径不做迁移；此处留痕是因为「修复只覆盖新增、
+      不覆盖存量」是一类容易被忽略的形态，值得在类似修复中先问一句。
