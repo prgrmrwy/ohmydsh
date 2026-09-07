@@ -741,10 +741,32 @@ async function initialize(
             // browser: the client may name a workspace the session does not
             // belong to.
             const session = ctx.sessions.get(source.sessionId as never) as
-              | { workspaceId?: string }
+              | { workspaceId?: string; header?: { cwd?: string } }
               | undefined
             const sourceWorkspaceId =
               typeof session?.workspaceId === 'string' ? session.workspaceId : undefined
+
+            // Resolve the managed execution root through the Worktree Session
+            // contract — never from `cwd`, which that plugin deliberately
+            // leaves at the repository root. A fork copies the parent's cwd
+            // verbatim but inherits no binding, so without this the child
+            // would treat the MAIN CHECKOUT as its working directory: the
+            // parent is governed by its binding, the child would run bare.
+            const repoPath = session?.header?.cwd
+            let worktree: { executionRoot: string; branch?: string; repositoryRoot?: string } | undefined
+            if (maintenance !== undefined && repoPath !== undefined) {
+              worktree = await maintenance
+                .wsStatus({ sessionId: source.sessionId, repoPath })
+                .then(status => ({
+                  executionRoot: status.worktreePath,
+                  ...(status.taskBranch !== '' ? { branch: status.taskBranch } : {}),
+                  repositoryRoot: repoPath,
+                }))
+                // An unbound session is the ordinary non-worktree case, not a
+                // fault: the child then simply works where its cwd points.
+                .catch(() => undefined)
+            }
+
             return createQaGroup(
               {
                 repository,
@@ -757,6 +779,7 @@ async function initialize(
                 sessionId: source.sessionId,
                 ...(source.title !== undefined ? { title: source.title } : {}),
                 ...(sourceWorkspaceId !== undefined ? { workspaceId: sourceWorkspaceId } : {}),
+                ...(worktree !== undefined ? { worktree } : {}),
               },
             )
           },

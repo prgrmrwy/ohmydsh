@@ -60,6 +60,19 @@ export interface QaSource {
   readonly sessionId: string
   readonly title?: string
   readonly workspaceId?: string
+  /**
+   * Managed execution facts of the source session, when it is worktree-bound.
+   *
+   * Resolved by the caller through the Worktree Session contract and NEVER
+   * from a `cwd`: that plugin keeps `header.cwd` at the repository root on
+   * purpose, and a fork copies exactly that. Without these facts the child
+   * would take the main checkout for its working directory.
+   */
+  readonly worktree?: {
+    readonly executionRoot: string
+    readonly branch?: string
+    readonly repositoryRoot?: string
+  }
 }
 
 /**
@@ -126,7 +139,28 @@ export async function createQaGroup(
     label: chatName,
     childId,
     request: {
-      prompt: [{ type: 'text', text: renderQaSeedPrompt(chatName) }],
+      // The seed states the execution root as well: the owner can talk to the
+      // child directly in the GUI, and that path carries no trigger prompt to
+      // remind it where it stands.
+      prompt: [
+        {
+          type: 'text',
+          text: renderQaSeedPrompt(
+            chatName,
+            source.worktree === undefined
+              ? undefined
+              : {
+                  executionRoot: source.worktree.executionRoot,
+                  ...(source.worktree.branch !== undefined
+                    ? { branch: source.worktree.branch }
+                    : {}),
+                  ...(source.worktree.repositoryRoot !== undefined
+                    ? { repositoryRoot: source.worktree.repositoryRoot }
+                    : {}),
+                },
+          ),
+        },
+      ],
       parent: liveParent,
     },
     signal,
@@ -174,6 +208,19 @@ export async function createQaGroup(
       chatName,
       qaChildSessionId: childId,
       qaParentSessionId: source.sessionId,
+      // Captured now, not re-derived per question: the binding is where a
+      // later message learns which directory the child may work in, and
+      // re-resolving would make every question depend on the worktree plugin
+      // still answering.
+      ...(source.worktree !== undefined
+        ? {
+            qaExecutionRoot: source.worktree.executionRoot,
+            ...(source.worktree.branch !== undefined ? { qaBranch: source.worktree.branch } : {}),
+            ...(source.worktree.repositoryRoot !== undefined
+              ? { qaRepositoryRoot: source.worktree.repositoryRoot }
+              : {}),
+          }
+        : {}),
       activeTaskId: task.id,
       // `user`: this binding exists because the user asked for it, and must
       // never be overwritten by default routing.
