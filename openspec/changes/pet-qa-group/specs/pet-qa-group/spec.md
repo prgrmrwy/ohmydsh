@@ -91,12 +91,15 @@ workdir。系统 MUST NOT 从 `cwd` 推断执行根。
 （Worktree Session 有意将其保留在仓库根），而绑定本身不被继承，因此 child 进程
 的默认 `cwd` 仍是主 checkout。
 
-该 prompt 声明 SHALL 被视为 child 得知执行根的**唯一**途径，而非第二重保障：
-子代理层不注入任何 Worktree Session 运行时上下文，child 自身的 runtime context
-中不存在该绑定。（fork 种子会复制父会话 transcript，其中夹带**父会话的** runtime
-context 快照，极易被误读为 child 自己的——真机上两个 child 先后发生过这一误读。）
-因此遗留风险 SHALL 按「无第二重提醒」如实声明：某轮遗漏 workdir 即为纯粹的静默
-失误，只读无害而写操作会污染主 checkout；MUST NOT 以「已修复」掩盖。
+该 prompt 声明是 Pet 可控的那一重保障，且 MUST NOT 依赖宿主插件的存在：当
+`dsh-worktree-session` 已安装时，它自身会在 `agent/created` 上为带
+`parentSession` 的 Agent 注入受管执行目录运行时上下文，因而 child 通常还有第二
+重提醒；但该注入属于另一插件的实现，Pet MUST NOT 以其为前提——插件缺席、未绑定
+或实现变更时，本 Requirement 的 prompt 声明就是 child 得知执行根的唯一途径。
+
+无论几重提醒，二者皆为运行时上下文而非强制沙箱。遗留风险 SHALL 如实声明：某轮
+遗漏 workdir 即静默落在主 checkout，只读无害而写操作会污染它；MUST NOT 以
+「已修复」掩盖。
 
 源会话未绑定 Worktree Session 时，系统 MUST NOT 虚构任何目录约束。
 
