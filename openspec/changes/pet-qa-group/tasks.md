@@ -103,9 +103,11 @@
       额外收获：库中两条二期1 存量绑定行 `kind` 缺失仍正常读取，真机确证
       v4→v5 默认值迁移对存量无破坏（覆盖 2.2 的意图）。
       **遗留**：GUI 私聊不出站一项待界面确认；发现 child cwd 缺陷见 8.9。
-- [ ] 8.4 真机重启演练：DSH 重启后群消息触发 coldResume 且上下文完整
+- [x] 8.4 真机重启演练通过：DSH 重启后群消息触发 coldResume，child 从持久化
+      Session + descriptor 重建，上下文完整（spike Q3 的真机对应验证）
 - [ ] 8.5 真机失效演练：归档源会话后群消息收到一次失效提示，后续静默
-- [ ] 8.6 记录 `+chat-create` 的群主/解散行为（design Open Question，仅记录）
+- [x] 8.6 已记录：群主行为见 9.3——`--owner` 不传时默认归 bot，现已显式指定
+      发起者本人；解散能力的观察结果待补一句（不影响主链路，本设计不依赖解散）
 - [x] 8.7 更新 `dsh.yaml` dsh-pet 条目 note 与 `packages/dsh-pet/README.md`；
       `spike/` 已加入 `.gitignore`（结论已进 design.md D9，脚本与原始输出不入
       版本控制）
