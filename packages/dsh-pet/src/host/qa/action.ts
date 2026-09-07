@@ -24,7 +24,7 @@ import { renderQaSeedPrompt } from './prompt.js'
 import { FORK_PROVIDER, type LiveAgentLike, type SubagentSeam } from './subagents.js'
 import type { LarkClient } from '../channel/lark.js'
 import type { PetRepository } from '../repository.js'
-import { scopeKeyOf, type PetTaskRecord } from '../../wire.js'
+import type { PetScopeKey, PetTaskRecord } from '../../wire.js'
 
 /** How long the whole transaction may take before it is abandoned. */
 const ACTION_TIMEOUT_MS = 60_000
@@ -38,6 +38,14 @@ export interface QaGroupResult {
   readonly chatName: string
   readonly childSessionId: string
   readonly taskId: string
+  /**
+   * Whether an existing group was handed back instead of a new one created.
+   *
+   * The client needs the difference: "here is your group" and "a group was
+   * just created" call for different words, and silently showing the second
+   * for the first is how three identically named groups appeared in practice.
+   */
+  readonly reused?: boolean
 }
 
 /** Everything the QA action needs from its Host. */
@@ -89,10 +97,27 @@ export function qaGroupName(title: string | undefined): string {
 }
 
 /**
- * Create a QA group for one source session.
+ * The QA scope key for one source session.
+ *
+ * Keyed on the SOURCE SESSION, not on the chat: the chat id does not exist
+ * until the group has been created, so a chat-keyed lookup could never match
+ * an earlier group and every click would build another one.
+ *
+ * Namespaced apart from the ordinary `session:` scope so a source session may
+ * hold both an overlay Task and a QA group at once — running `ws` from a
+ * session must not make it impossible to open a QA group from it.
+ * @param sessionId - Source session id.
+ * @returns the scope key.
+ */
+export function qaScopeKeyOf(sessionId: string): PetScopeKey {
+  return `qa:${sessionId}` as PetScopeKey
+}
+
+/**
+ * Create a QA group for one source session, or return the one it already has.
  * @param deps - Host collaborators.
  * @param source - The source session to fork from.
- * @returns the created group, child and Task.
+ * @returns the created — or existing — group, child and Task.
  * @throws PetError when any step refuses; nothing partial is left bound.
  */
 export async function createQaGroup(
@@ -101,6 +126,31 @@ export async function createQaGroup(
 ): Promise<QaGroupResult> {
   const { repository } = deps
   const config = repository.getChannelConfig()
+
+  // Reuse before creating anything. One source session owns at most one live
+  // QA group, matching Pet's standing rule that a scope holds at most one
+  // active Task; clicking again is "show me my group", not "make another".
+  // "Live" is decided by the Task being unarchived, so archiving it — the
+  // documented way to end a QA group — frees the session to open a new one.
+  const existing = repository.findActiveTaskByScope(qaScopeKeyOf(source.sessionId))
+  if (existing !== undefined) {
+    const binding = repository
+      .listChatBindings()
+      .find(row => row.kind === 'qa' && row.activeTaskId === existing.id)
+    if (binding?.qaChildSessionId !== undefined && binding.qaInvalidatedAt === undefined) {
+      return {
+        chatId: binding.chatId,
+        chatName: binding.chatName ?? qaGroupName(source.title),
+        childSessionId: binding.qaChildSessionId,
+        taskId: existing.id,
+        reused: true,
+      }
+    }
+    // A live Task whose binding is gone or invalidated is a broken pair, not a
+    // group to hand back: archive it so this click can build a working one
+    // rather than returning a chat nobody can be answered in.
+    await repository.archiveTask(existing.id).catch(() => undefined)
+  }
 
   // The owner is the only member invited at creation; everyone else is pulled
   // in by them afterwards, which is precisely what the admission exemption
@@ -199,6 +249,7 @@ export async function createQaGroup(
       chatId,
       chatName,
       childSessionId: childId,
+      sourceSessionId: source.sessionId,
       ...(source.workspaceId !== undefined ? { workspaceId: source.workspaceId } : {}),
     })
     await repository.putChatBinding({
@@ -245,10 +296,14 @@ async function createQaTask(
     chatId: string
     chatName: string
     childSessionId: string
+    sourceSessionId: string
     workspaceId?: string
   },
 ): Promise<PetTaskRecord> {
-  const scopeKey = scopeKeyOf('chat', options.chatId)
+  // Scoped to the SOURCE SESSION, which is what makes reuse possible: the
+  // chat id is a product of this very call, so a chat-keyed scope could never
+  // match an earlier group and every click would create another one.
+  const scopeKey = qaScopeKeyOf(options.sourceSessionId)
   const now = Date.now()
   // Committed as `idle` immediately, unlike an ordinary Task: there is no
   // executor to create — the child already exists — so `creating-executor`
