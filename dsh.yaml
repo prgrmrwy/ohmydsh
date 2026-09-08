@@ -246,4 +246,12 @@ customizations:
     version: 0.3.16
     enabled: true
     brief: 会话归档管理(批量归档/恢复/预览/物理删除;自动维护默认关闭)
-    note: 'repo https://github.com/zhu1090093659/dsh-web(Apache-2.0,活跃);2026-09-06 审查 npm 0.3.16 README + 发布包所带 TypeScript 源码:兼容 DSH >=0.1.2-rc.1,Node ^22.19 || >=24(本机 v24.20.0 满足);替代并已移除旧版 @tangzai/dsh-ui-archive-manager 0.1.1(旧 client runtime 不兼容),支持完整会话清单/筛选/预览、批量归档与恢复、父子级联物理删除。⚠ 物理删除不可恢复:会改 workspace/archive 状态并删除 session 目录或 session-rdb 行、projection cache 与自身 ledger;自动归档/自动删除默认均关闭,建议保持关闭并只手动使用。防护:当前/运行中/attached/in-flight 会话与含受保护成员的整族跳过;大批删除二次确认且 host 重新规划,路由要求 loopback socket + loopback Host + same-origin marker,ID/请求体有界,session 目录 realpath containment 且拒绝越界 symlink,SQLite 指纹校验,变更串行。审查保留意见:删除跨 archive marker/workspace/storage/cache/ledger 多步且部分清理 best-effort,并非真正原子事务;异常中断仍可能出现索引与存储暂时不一致,不要把上游“不会半删除”宣传视为绝对保证。旧 ui-archive-manager 已从 manifest 删除,无双挂载。'
+  # 第三方(remote):OpenCode Go 400 MissingSessionID 补丁(社区插件,非官方;官方适配发布后评估移除)
+  - id: dsh-opencode-session-header
+    type: package
+    source: remote
+    spec: dsh-opencode-session-header@0.1.0
+    version: 0.1.0
+    enabled: true
+    brief: OpenCode Go 注入 x-opencode-session(修复 400 MissingSessionID;仅作用于 opencode.ai)
+    note: 'repo https://github.com/beihzb/dsh-opencode-session-header(MIT;0.1.0 发布于 2026-09-07,目前唯一版本,新仓单提交);背景:OpenCode Go 网关自 2026-09-05 起强制 x-opencode-session 头(路由/提示词缓存),DSH 0.1.2-rc.1 各适配器路径均不发该头,上游适配讨论 https://github.com/deepseek-ai/deepseek-harness/discussions/5495 尚未发布。审查(2026-09-09,npm 0.1.0 发布物 lib/index.js 逐行通读,262 行,零运行时依赖):Host 面 cordis 插件——llm/stream waterfall 观察者以 AsyncLocalStorage 携带 GenerateOptions.sessionId(每会话稳定,新会话/fork/子代理各自全新);fetch 管线机制取自 @aizigao/pi-fetch-pipeline v1.0.1(MIT,经 dsh-custom-header),以独立 Symbol.for key 隔离,不与其他插件互相覆盖;仅当请求 host 命中白名单(默认 opencode.ai 及子域)时注入 x-opencode-session,其余请求一个字节不改;值默认取当前会话 id(无上下文时 dsh-default)。运行时开关 $DSH_HOME/plugins/dsh-opencode-session-header.json(文件缺失=开;{"enabled":false}=关),每次请求实时重读,免重启。信任面:无网络外发/子进程/文件写入/凭据读取,唯一 fs 只读该开关 JSON,无 install/postinstall 脚本,Node >=20。☝ 注意:插件在 DSH Host 进程全局 patch fetch,仅匹配主机加头;第三方非官方,后续官方适配合入后可移除。'
