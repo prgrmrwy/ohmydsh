@@ -10,6 +10,7 @@
  * persists or renders a token.
  */
 
+import type { ReactNode } from 'react'
 import { useCallback, useEffect, useState } from 'react'
 import {
   DEFAULT_GLYPH,
@@ -201,12 +202,67 @@ const TAB_LABELS: Record<PetSettingsTab, string> = {
   diagnostics: '诊断',
 }
 
+/**
+ * A titled section of a tab.
+ *
+ * The single unit of grouping on this page. Every control belongs to exactly
+ * one, so a tab reads as a few named concerns instead of one long column of
+ * equally weighted rows.
+ * @param props - Title, optional collapsed default, an optional one-line
+ *   summary shown on the closed header, and the section body.
+ * @returns the rendered group.
+ */
+function Group(props: {
+  readonly title: string
+  /**
+   * Render collapsed behind a disclosure.
+   *
+   * For reference material — import instructions, file health, security
+   * notes — which the user consults occasionally but which otherwise
+   * dominates the page simply by being printed in full. Primary controls are
+   * never folded: a setting you cannot see is a setting you cannot find.
+   */
+  readonly collapsible?: boolean
+  /** Open on first render; only meaningful with `collapsible`. */
+  readonly defaultOpen?: boolean
+  /** A short status shown on the header, so a closed group can be judged. */
+  readonly note?: string
+  readonly children: ReactNode
+}): JSX.Element {
+  if (props.collapsible !== true) {
+    return (
+      <section className="dshpet-group">
+        <h3 className="dshpet-group-title">{props.title}</h3>
+        {props.children}
+      </section>
+    )
+  }
+
+  // `<details>` rather than a state-driven div: the open/closed state, the
+  // keyboard activation and the ARIA expanded semantics are all native, so
+  // there is nothing here to get wrong or to leave out.
+  return (
+    <details className="dshpet-group dshpet-fold" open={props.defaultOpen ?? false}>
+      <summary className="dshpet-fold-head">
+        <span className="dshpet-fold-mark" aria-hidden="true">
+          ›
+        </span>
+        <span className="dshpet-fold-title">{props.title}</span>
+        {props.note !== undefined ? (
+          <span className="dshpet-fold-note">{props.note}</span>
+        ) : null}
+      </summary>
+      <div className="dshpet-fold-body">{props.children}</div>
+    </details>
+  )
+}
+
 export function PetSettingsSection(props: { initialTab?: PetSettingsTab } = {}): JSX.Element {
   const [tab, setTab] = useState<PetSettingsTab>(props.initialTab ?? 'general')
 
   return (
     <div className="dshpet-settings">
-      <div className="dshpet-tabs" role="tablist" aria-label="Pet settings">
+      <div className="dshpet-settings-tabs" role="tablist" aria-label="Pet settings">
         {PET_SETTINGS_TABS.map(name => (
           <button
             key={name}
@@ -215,7 +271,7 @@ export function PetSettingsSection(props: { initialTab?: PetSettingsTab } = {}):
             id={`dshpet-tab-${name}`}
             aria-selected={tab === name}
             aria-controls={`dshpet-panel-${name}`}
-            className="dshpet-tab"
+            className="dshpet-settings-tab"
             onClick={() => setTab(name)}
           >
             {TAB_LABELS[name]}
@@ -277,8 +333,7 @@ function GeneralTab(): JSX.Element {
 
   return (
     <div className="dshpet-settings">
-      <section className="dshpet-group">
-        <h3 className="dshpet-group-title">模型</h3>
+      <Group title="模型">
         <p className="dshpet-item-hint">
           Pet 执行会话跟随 DSH 的默认模型。在「设置 → 模型」修改后，下一次调用即生效，
           Pet 侧无需另行配置，也不会出现两处不一致。
@@ -291,23 +346,19 @@ function GeneralTab(): JSX.Element {
           </span>
         </div>
         {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
-      </section>
+      </Group>
 
-      <section className="dshpet-group">
-        <h3 className="dshpet-group-title">Agent 预设</h3>
+      <Group title="Agent 预设">
         <p className="dshpet-item-hint">
           Agent 预设决定执行会话装载哪些插件与工具。默认使用
           <strong>「Pet 执行会话」</strong>——它与官方 standard 的唯一差别是
           不加载本地 Skill 发现，因此只有你在 Pet 里启用的 Skill 对执行会话可见。
         </p>
-        <p className="dshpet-error">
+        {/* A warning about widening the authorization boundary, not a failure
+            that already happened: plain red body text read as the latter. */}
+        <p className="dshpet-callout" data-tone="warn">
           改成 standard 等其它预设会让全局安装的 Skill 也对执行会话可见，
           相当于放宽授权范围。除非你明确需要，否则保持默认。
-        </p>
-        <p className="dshpet-item-hint">
-          Pet 自己的上下文由常驻指令和每次调用的任务信封提供：告诉执行会话它是 Pet
-          任务会话、一个会话会串行承载多次调用、以及本次调用的来源与快照。
-          这些始终生效，与这里选什么预设无关。
         </p>
         <StoredField
           label="预设"
@@ -323,10 +374,14 @@ function GeneralTab(): JSX.Element {
             setConfig(updated)
           }}
         />
-      </section>
+        <p className="dshpet-item-hint">
+          Pet 自己的上下文由常驻指令和每次调用的任务信封提供：告诉执行会话它是 Pet
+          任务会话、一个会话会串行承载多次调用、以及本次调用的来源与快照。
+          这些始终生效，与这里选什么预设无关。
+        </p>
+      </Group>
 
-      <section className="dshpet-group">
-        <h3 className="dshpet-group-title">外观</h3>
+      <Group title="外观">
         <p className="dshpet-item-hint">
           桌宠配色。保存在本浏览器中，不影响其他设备。
         </p>
@@ -389,6 +444,9 @@ function GeneralTab(): JSX.Element {
           一个 emoji 或字符。留空或点「恢复默认」都会回到 {DEFAULT_GLYPH}。
         </p>
 
+        {/* Two single-select appearance controls; side by side they read as
+            one "shape" concern instead of two unrelated full-width rows. */}
+        <div className="dshpet-row">
         <label className="dshpet-field">
           尺寸
           <select
@@ -442,14 +500,14 @@ function GeneralTab(): JSX.Element {
             ))}
           </select>
         </label>
+        </div>
         <p className="dshpet-item-hint">
           能力轮盘的圆环底色跟随上面的配色，由内向外逐圈变淡。
           「默认」配色本身是白色，任何档位下圆环都靠描边区分。
         </p>
-      </section>
+      </Group>
 
-      <section className="dshpet-group">
-        <h3 className="dshpet-group-title">新建任务</h3>
+      <Group title="新建任务">
         <p className="dshpet-item-hint">
           新任务默认关联哪个来源。选择「不关联」时任务独立运行，
           除非你在调用前手动指定来源。
@@ -468,7 +526,7 @@ function GeneralTab(): JSX.Element {
             setConfig(updated)
           }}
         />
-      </section>
+      </Group>
     </div>
   )
 }
@@ -563,8 +621,16 @@ function SkillsTab(): JSX.Element {
 
   return (
     <div className="dshpet-settings">
-      <section className="dshpet-group">
-      <h3 className="dshpet-group-title">从本机导入</h3>
+      {/* Open by default only while there is nothing installed: a new Pet has
+          no capabilities and importing one is the whole task. Once Skills
+          exist, the list below is what the user came for and this multi-step
+          form is just noise until it is wanted again. */}
+      <Group
+        title="从本机导入"
+        collapsible
+        defaultOpen={state.revisions.length === 0}
+        note="添加一个 Skill 目录"
+      >
       <p className="dshpet-item-hint">
         填运行 <code className="dshpet-code">dsh web</code> 那台机器上的绝对路径，
         不是你当前浏览器所在的机器。会先只读检查并展示内容，确认后再加入；
@@ -708,13 +774,17 @@ function SkillsTab(): JSX.Element {
       </button>
 
       {preview !== undefined ? (
-        <div>
-          <p>
-            <strong>{String(preview['skillName'])}</strong> — {String(preview['description'])}
-          </p>
-          <p className="dshpet-item-hint">
-            {String(preview['fileCount'])} 个文件，{String(preview['totalBytes'])} 字节
-          </p>
+        // The inspection result is a distinct object the user is being asked
+        // to approve, so it gets a card rather than dissolving into the form
+        // it was triggered from.
+        <div className="dshpet-card">
+          <div className="dshpet-card-head">
+            <span className="dshpet-card-name">{String(preview['skillName'])}</span>
+            <span className="dshpet-status">
+              {String(preview['fileCount'])} 个文件 · {String(preview['totalBytes'])} 字节
+            </span>
+          </div>
+          <p className="dshpet-item-hint">{String(preview['description'])}</p>
           <p className="dshpet-item-hint">
             将链接到 <code className="dshpet-code">{String(preview['canonicalSourcePath'])}</code>
           </p>
@@ -731,13 +801,15 @@ function SkillsTab(): JSX.Element {
             调用时直接拼在 <code className="dshpet-code">/{String(preview['skillName'])}</code>{' '}
             后面，由 Skill 自己理解，Pet 不做解析。加入后仍可修改。
           </p>
-          <p className="dshpet-error">
+          {/* A caution about what importing means, not an error: this is the
+              trust decision the two-step flow exists to make deliberate. */}
+          <p className="dshpet-callout" data-tone="warn">
             Skill 是会被 Agent 执行的指令内容，只加入你信任的目录。
             加入后 Pet 直接链接该目录，你之后对它的修改会立即生效。
           </p>
           <button
             type="button"
-            className="dshpet-action"
+            className="dshpet-action dshpet-action-primary"
             onClick={() => {
               // Step 2: separately confirmed registration of the exact
               // directory the user was shown.
@@ -752,14 +824,13 @@ function SkillsTab(): JSX.Element {
                 )
             }}
           >
-            Confirm import
+            确认加入
           </button>
         </div>
       ) : null}
-      </section>
+      </Group>
 
-      <section className="dshpet-group">
-      <h3 className="dshpet-group-title">已安装</h3>
+      <Group title="已安装">
       <p className="dshpet-item-hint">
         加入的 Skill 直接链接到你给的目录，Pet 不做复制。
         因此你改动该目录会立即生效，无需重新加入；
@@ -769,6 +840,7 @@ function SkillsTab(): JSX.Element {
       {state.revisions.length === 0 ? (
         <p className="dshpet-empty">尚未加入任何 Skill。</p>
       ) : null}
+      <div className="dshpet-cards">
       {state.revisions.map(revision => {
         const selection = state.selections.find(item => item.skillName === revision.skillName)
         const enabled = selection?.enabled === true
@@ -776,12 +848,20 @@ function SkillsTab(): JSX.Element {
           state.selections.filter(item => item.enabled === true).length >= WHEEL_CAPACITY
 
         return (
-          <div key={revision.skillName} className="dshpet-task">
-            <div className="dshpet-task-head">
-              <strong className="dshpet-task-name">{revision.skillName}</strong>
+          // A card per Skill. These were bare rows divided only by a hairline,
+          // so a handful of them read as one undifferentiated block and the
+          // per-Skill actions looked like they belonged to the whole list.
+          <div key={revision.skillName} className="dshpet-card">
+            <div className="dshpet-card-head">
+              <span className="dshpet-card-name">{revision.skillName}</span>
               <span className="dshpet-status" data-tone={enabled ? 'enabled' : undefined}>
                 {enabled ? '已启用' : '未启用'}
               </span>
+              {/* Enabled but hidden is easy to forget and hard to explain from
+                  the wheel alone, so the card states it. */}
+              {enabled && selection?.showAsShortcut === false ? (
+                <span className="dshpet-status">已从菜单隐藏</span>
+              ) : null}
             </div>
             <p className="dshpet-item-hint">
               <code className="dshpet-code">{revision.sourcePath}</code>
@@ -863,10 +943,18 @@ function SkillsTab(): JSX.Element {
           </div>
         )
       })}
-      </section>
+      </div>
+      </Group>
 
-      <section className="dshpet-group">
-      <h3 className="dshpet-group-title">Skill 文件状态</h3>
+      {/* Self-maintaining plumbing: folded while healthy, but forced open when
+          a link is broken — a fault the user must act on cannot be allowed to
+          hide behind a closed disclosure. */}
+      <Group
+        title="Skill 文件状态"
+        collapsible
+        defaultOpen={state.projection.length > 0}
+        note={state.projection.length === 0 ? '正常' : `${state.projection.length} 个异常`}
+      >
       <p className="dshpet-item-hint">
         已启用的 Skill 会以链接的形式出现在 Pet 工作区里，供执行会话读取。
         这些链接由 Pet 自己维护——正常情况下你不需要管它。
@@ -901,7 +989,7 @@ function SkillsTab(): JSX.Element {
         会保持拒绝状态——需要修好该目录，或移除后重新加入。
       </p>
       {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
-      </section>
+      </Group>
     </div>
   )
 }
@@ -1089,8 +1177,7 @@ function EnvironmentTab(): JSX.Element {
 
   return (
     <div className="dshpet-settings">
-      <section className="dshpet-group">
-        <h3 className="dshpet-group-title">全局</h3>
+      <Group title="全局">
         <p className="dshpet-item-hint">
           对<strong>所有</strong> Pet 任务生效，包括没有关联工作区的独立任务。
           下面工作区里的同名变量会覆盖这里的值。
@@ -1098,14 +1185,16 @@ function EnvironmentTab(): JSX.Element {
         {globalEntries.length === 0 ? (
           <p className="dshpet-empty">尚未配置全局变量。</p>
         ) : (
-          globalEntries.map(entry => (
-            <EnvRow
-              key={entry.key}
-              entry={entry}
-              prefix={prefix}
-              onRemove={() => mutate({ scope: globalScope, key: entry.key, action: 'remove' })}
-            />
-          ))
+          <div className="dshpet-cards">
+            {globalEntries.map(entry => (
+              <EnvRow
+                key={entry.key}
+                entry={entry}
+                prefix={prefix}
+                onRemove={() => mutate({ scope: globalScope, key: entry.key, action: 'remove' })}
+              />
+            ))}
+          </div>
         )}
         <EnvAddRow
           onAdd={(key, value) => mutate({ scope: globalScope, key, action: 'set', value })}
@@ -1114,10 +1203,9 @@ function EnvironmentTab(): JSX.Element {
           变量名需为大写蛇形（A-Z、数字、下划线），注入时自动加{' '}
           <code className="dshpet-code">{prefix}</code> 前缀。
         </p>
-      </section>
+      </Group>
 
-      <section className="dshpet-group">
-        <h3 className="dshpet-group-title">工作区</h3>
+      <Group title="工作区">
         <p className="dshpet-item-hint">
           只对来源于所选工作区的任务生效，<strong>覆盖</strong>同名的全局变量。
         </p>
@@ -1137,27 +1225,39 @@ function EnvironmentTab(): JSX.Element {
             ))}
           </select>
         </div>
-        <div className="dshpet-row">
-          <div className="dshpet-field">
-            <span>或手工输入工作区 id</span>
-            <input
-              className="dshpet-input"
-              value={manualId}
-              placeholder="尚未列出的 workspace id"
-              onChange={event => setManualId(event.target.value)}
-            />
+        {/* The escape hatch for a workspace the Host has not listed. It is the
+            exception, so it no longer sits between the picker and the values
+            it applies to. */}
+        <details className="dshpet-fold">
+          <summary className="dshpet-fold-head">
+            <span className="dshpet-fold-mark" aria-hidden="true">
+              ›
+            </span>
+            <span className="dshpet-fold-title">或手工输入工作区 id</span>
+          </summary>
+          <div className="dshpet-fold-body">
+            <div className="dshpet-row">
+              <div className="dshpet-field">
+                <input
+                  className="dshpet-input"
+                  value={manualId}
+                  placeholder="尚未列出的 workspace id"
+                  onChange={event => setManualId(event.target.value)}
+                />
+              </div>
+              <button
+                type="button"
+                className="dshpet-action"
+                onClick={() => {
+                  const trimmed = manualId.trim()
+                  if (trimmed !== '') setSelected(trimmed)
+                }}
+              >
+                使用
+              </button>
+            </div>
           </div>
-          <button
-            type="button"
-            className="dshpet-action"
-            onClick={() => {
-              const trimmed = manualId.trim()
-              if (trimmed !== '') setSelected(trimmed)
-            }}
-          >
-            使用
-          </button>
-        </div>
+        </details>
 
         {scope === undefined ? (
           <p className="dshpet-empty">先选择或填写一个工作区。</p>
@@ -1166,24 +1266,33 @@ function EnvironmentTab(): JSX.Element {
             {workspaceEntries.length === 0 ? (
               <p className="dshpet-empty">该工作区尚未配置变量。</p>
             ) : (
-              workspaceEntries.map(entry => (
-                <EnvRow
-                  key={entry.key}
-                  entry={entry}
-                  prefix={prefix}
-                  overridesGlobal={globalKeys.has(entry.key)}
-                  onRemove={() => mutate({ scope, key: entry.key, action: 'remove' })}
-                />
-              ))
+              <div className="dshpet-cards">
+                {workspaceEntries.map(entry => (
+                  <EnvRow
+                    key={entry.key}
+                    entry={entry}
+                    prefix={prefix}
+                    overridesGlobal={globalKeys.has(entry.key)}
+                    onRemove={() => mutate({ scope, key: entry.key, action: 'remove' })}
+                  />
+                ))}
+              </div>
             )}
             <EnvAddRow onAdd={(key, value) => mutate({ scope, key, action: 'set', value })} />
           </>
         )}
-      </section>
+      </Group>
 
       {scope === undefined ? null : (
-        <section className="dshpet-group">
-          <h3 className="dshpet-group-title">生效结果</h3>
+        // Derived, read-only: nothing here is edited, it only answers "what
+        // does this workspace actually see". Folded by default with the count
+        // on the header, so the answer is one click away instead of doubling
+        // the page height with rows already shown above.
+        <Group
+          title="生效结果"
+          collapsible
+          note={`${effective.size} 个变量`}
+        >
           <p className="dshpet-item-hint">
             来源于该工作区的任务，其命令实际能读到的变量。
           </p>
@@ -1228,12 +1337,14 @@ function EnvironmentTab(): JSX.Element {
                 <span />
               </div>
             ))}
-        </section>
+        </Group>
       )}
 
-      <section className="dshpet-group">
-        <h3 className="dshpet-group-title">关于安全</h3>
-        <p className="dshpet-item-hint">
+      <Group title="关于安全" collapsible note="值会进入子进程环境">
+        {/* Stated as a caution rather than as body prose: it describes what
+            these values can reach, which is the one thing on this tab a user
+            must not skim past. */}
+        <p className="dshpet-callout" data-tone="warn">
           这些值会进入 Pet 执行命令时的子进程环境，该会话里跑的任何命令都能读到。
           这里不是凭据保管处，请不要存放高敏 token；列表中的值默认打码只为避免
           共享屏幕时泄露，不改变存储与注入方式。
@@ -1242,8 +1353,8 @@ function EnvironmentTab(): JSX.Element {
           某个变量在全局与工作区都没有配置时，它不会存在于环境中；
           使用它的 Skill 应当自行停下来询问，而不是猜一个值。
         </p>
-        {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
-      </section>
+      </Group>
+      {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
     </div>
   )
 }
@@ -1421,9 +1532,13 @@ function ChannelTab(): JSX.Element {
     }
   }
 
+  // `dshpet-settings`, NOT `dshpet-panel-body`. Every settings rule is scoped
+  // under `.dshpet-settings`, so this tab was rendering its inputs, buttons,
+  // groups and lists completely unstyled — the reason it looked nothing like
+  // the other four.
   if (view === undefined) {
     return (
-      <div className="dshpet-panel-body">
+      <div className="dshpet-settings">
         {error !== undefined ? <p className="dshpet-error">{error}</p> : <p>加载中…</p>}
       </div>
     )
@@ -1431,27 +1546,35 @@ function ChannelTab(): JSX.Element {
 
   const binding = view.binding
   const allowList = view.allowOpenIds
+  const doneSteps = view.onboarding.steps.filter(step => step.complete).length
 
   return (
-    <div className="dshpet-panel-body">
-      <section className="dshpet-group">
-        <h3 className="dshpet-group-title">接入进度</h3>
+    <div className="dshpet-settings">
+      <Group
+        title="接入进度"
+        note={`${doneSteps}/${view.onboarding.steps.length}`}
+      >
         <ol className="dshpet-list">
           {view.onboarding.steps.map(step => (
-            <li key={step.id} className="dshpet-item">
-              <span>{step.complete ? '✓' : '○'} {step.label}</span>
+            <li key={step.id} className="dshpet-item" data-complete={step.complete}>
+              <span className="dshpet-step-mark" aria-hidden="true">
+                {step.complete ? '✓' : '○'}
+              </span>
+              <span className="dshpet-item-text">{step.label}</span>
             </li>
           ))}
         </ol>
         {view.onboarding.ready ? (
-          <p className="dshpet-item-hint">配置已就绪，可以启用飞书接入。</p>
+          <p className="dshpet-callout">配置已就绪，可以启用飞书接入。</p>
         ) : (
+          // A blocker is the thing standing between the user and a working
+          // channel, so it reads as a warning rather than as another step.
           <ol className="dshpet-list">
             {view.onboarding.blockers.map(blocker => (
-              <li key={blocker.code} className="dshpet-item">
+              <li key={blocker.code} className="dshpet-callout" data-tone="warn">
                 <span>{blocker.message}</span>
                 {blocker.missingScopes !== undefined && blocker.missingScopes.length > 0 ? (
-                  <code>{blocker.missingScopes.join(', ')}</code>
+                  <code className="dshpet-code">{blocker.missingScopes.join(', ')}</code>
                 ) : null}
                 {blocker.consoleUrl !== undefined ? (
                   <a href={blocker.consoleUrl} target="_blank" rel="noreferrer">
@@ -1462,9 +1585,8 @@ function ChannelTab(): JSX.Element {
             ))}
           </ol>
         )}
-      </section>
-      <section className="dshpet-group">
-        <h3 className="dshpet-group-title">飞书 Bot</h3>
+      </Group>
+      <Group title="飞书 Bot">
         {view.bot === undefined ? (
           <>
             <p className="dshpet-item-hint">
@@ -1494,38 +1616,57 @@ function ChannelTab(): JSX.Element {
               <div className="dshpet-actions">
                 <button
                   type="button"
-                  className="dshpet-action"
+                  className="dshpet-action dshpet-action-primary"
                   onClick={() => void bind({ action: 'create' })}
                 >
                   创建新的 Bot
                 </button>
               </div>
             )}
-            <div className="dshpet-field">
-              <label htmlFor="dshpet-channel-appid">连接已有 Bot</label>
-              <input
-                className="dshpet-input"
-                id="dshpet-channel-appid"
-                value={appId}
-                placeholder="App ID（cli_…）"
-                onChange={event => setAppId(event.target.value)}
-              />
-              <input
-                className="dshpet-input"
-                type="password"
-                value={appSecret}
-                placeholder="App Secret（只转交给 lark-cli，不会被保存）"
-                onChange={event => setAppSecret(event.target.value)}
-              />
-              <button
-                type="button"
-                className="dshpet-action"
-                disabled={appId.trim() === '' || appSecret === ''}
-                onClick={() => void bind({ action: 'connect', appId, appSecret })}
-              >
-                连接
-              </button>
-            </div>
+            {/* The secondary path. Presented flat, its two credential inputs
+                competed with "create a new Bot" and made the tab open on a
+                form most users never fill in. */}
+            <details className="dshpet-fold">
+              <summary className="dshpet-fold-head">
+                <span className="dshpet-fold-mark" aria-hidden="true">
+                  ›
+                </span>
+                <span className="dshpet-fold-title">连接已有 Bot</span>
+              </summary>
+              <div className="dshpet-fold-body">
+                <div className="dshpet-field">
+                  <label htmlFor="dshpet-channel-appid">App ID</label>
+                  <input
+                    className="dshpet-input"
+                    id="dshpet-channel-appid"
+                    value={appId}
+                    placeholder="App ID（cli_…）"
+                    onChange={event => setAppId(event.target.value)}
+                  />
+                </div>
+                <div className="dshpet-field">
+                  <label htmlFor="dshpet-channel-appsecret">App Secret</label>
+                  <input
+                    className="dshpet-input"
+                    id="dshpet-channel-appsecret"
+                    type="password"
+                    value={appSecret}
+                    placeholder="只转交给 lark-cli，不会被保存"
+                    onChange={event => setAppSecret(event.target.value)}
+                  />
+                </div>
+                <div className="dshpet-actions">
+                  <button
+                    type="button"
+                    className="dshpet-action"
+                    disabled={appId.trim() === '' || appSecret === ''}
+                    onClick={() => void bind({ action: 'connect', appId, appSecret })}
+                  >
+                    连接
+                  </button>
+                </div>
+              </div>
+            </details>
           </>
         ) : (
           <>
@@ -1549,35 +1690,42 @@ function ChannelTab(): JSX.Element {
             {view.onboarding.blockers.some(blocker =>
               blocker.code === 'profile-unavailable' || blocker.code === 'bot-identity-unresolved',
             ) ? (
-              <div className="dshpet-field">
-                <input
-                  className="dshpet-input"
-                  type="password"
-                  value={appSecret}
-                  placeholder="App Secret（用于重建 dsh-pet 专属 profile，不会保存）"
-                  onChange={event => setAppSecret(event.target.value)}
-                />
-                <button
-                  type="button"
-                  className="dshpet-action"
-                  disabled={appSecret === ''}
-                  onClick={() =>
-                    void bind({ action: 'connect', appId: view.bot?.appId ?? '', appSecret })
-                  }
-                >
-                  重新连接专属 profile
-                </button>
-              </div>
+              <>
+                <div className="dshpet-field">
+                  <label htmlFor="dshpet-channel-reconnect">App Secret</label>
+                  <input
+                    className="dshpet-input"
+                    id="dshpet-channel-reconnect"
+                    type="password"
+                    value={appSecret}
+                    placeholder="用于重建 dsh-pet 专属 profile，不会保存"
+                    onChange={event => setAppSecret(event.target.value)}
+                  />
+                </div>
+                <div className="dshpet-actions">
+                  <button
+                    type="button"
+                    className="dshpet-action"
+                    disabled={appSecret === ''}
+                    onClick={() =>
+                      void bind({ action: 'connect', appId: view.bot?.appId ?? '', appSecret })
+                    }
+                  >
+                    重新连接专属 profile
+                  </button>
+                </div>
+              </>
             ) : null}
           </>
         )}
         {binding?.phase === 'failed' ? (
-          <p className="dshpet-error">{binding.diagnostic ?? '绑定失败'}</p>
+          <p className="dshpet-callout" data-tone="danger">
+            {binding.diagnostic ?? '绑定失败'}
+          </p>
         ) : null}
-      </section>
+      </Group>
 
-      <section className="dshpet-group">
-        <h3 className="dshpet-group-title">允许触发的成员</h3>
+      <Group title="允许触发的成员" note={`${allowList.length} 人`}>
         <p className="dshpet-item-hint">
           填写已确认的 open_id（ou_ 开头）。可从目标群的群主/管理员信息或组织查询中取得；
           Pet 不会把观察到的陌生发送者自动加入允许清单。留空表示没有人可以触发。
@@ -1606,13 +1754,18 @@ function ChannelTab(): JSX.Element {
             </li>
           ))}
         </ul>
-        <div className="dshpet-field">
-          <input
-            className="dshpet-input"
-            value={allowInput}
-            placeholder="ou_…"
-            onChange={event => setAllowInput(event.target.value)}
-          />
+        {allowList.length === 0 ? (
+          <p className="dshpet-empty">清单为空，当前没有人可以触发。</p>
+        ) : null}
+        <div className="dshpet-row">
+          <div className="dshpet-field">
+            <input
+              className="dshpet-input"
+              value={allowInput}
+              placeholder="ou_…"
+              onChange={event => setAllowInput(event.target.value)}
+            />
+          </div>
           <button
             type="button"
             className="dshpet-action"
@@ -1627,30 +1780,36 @@ function ChannelTab(): JSX.Element {
             添加
           </button>
         </div>
-      </section>
+      </Group>
 
-      <section className="dshpet-group">
-        <h3 className="dshpet-group-title">默认工作区</h3>
+      <Group title="默认工作区">
         <p className="dshpet-item-hint">
           没有单独绑定过的会话，都会在这个工作区里创建会话。
         </p>
-        <select
-          value={view.defaultWorkspaceId ?? ''}
-          onChange={event =>
-            void mutate({ action: 'set-default-workspace', defaultWorkspaceId: event.target.value })
-          }
-        >
-          <option value="">（未设置）</option>
-          {workspaces.map(workspace => (
-            <option key={workspace.id} value={workspace.id}>
-              {workspace.title ?? workspace.id}
-            </option>
-          ))}
-        </select>
-      </section>
+        {/* Was a bare `<select>`: with no `dshpet-input` class it fell back to
+            the browser's native control, which matched nothing else here. */}
+        <div className="dshpet-field">
+          <select
+            className="dshpet-input"
+            value={view.defaultWorkspaceId ?? ''}
+            onChange={event =>
+              void mutate({
+                action: 'set-default-workspace',
+                defaultWorkspaceId: event.target.value,
+              })
+            }
+          >
+            <option value="">（未设置）</option>
+            {workspaces.map(workspace => (
+              <option key={workspace.id} value={workspace.id}>
+                {workspace.title ?? workspace.id}
+              </option>
+            ))}
+          </select>
+        </div>
+      </Group>
 
-      <section className="dshpet-group">
-        <h3 className="dshpet-group-title">启用与连接</h3>
+      <Group title="启用与连接">
         <p className="dshpet-item-hint">
           完成以上步骤后启用。只有允许清单中的成员可以触发，其他人的消息在飞书侧静默忽略。
         </p>
@@ -1664,81 +1823,133 @@ function ChannelTab(): JSX.Element {
           />
           启用飞书接入
         </label>
-        <p className="dshpet-item-hint">
-          连接状态：{CHANNEL_PHASE_LABELS[view.connection.phase]}
-          {view.connection.diagnostic !== undefined ? `（${view.connection.diagnostic}）` : ''}
-        </p>
-      </section>
+        {/* Connection state is a status, not prose: as a grey hint line it was
+            indistinguishable from the explanatory text above it. */}
+        <div className="dshpet-fact">
+          <span className="dshpet-fact-key">连接状态</span>
+          <span className="dshpet-fact-value">
+            <span
+              className="dshpet-status"
+              data-tone={
+                view.connection.phase === 'connected'
+                  ? 'enabled'
+                  : view.connection.phase === 'down'
+                    ? 'danger'
+                    : view.connection.phase === 'stopped'
+                      ? undefined
+                      : 'warn'
+              }
+            >
+              {CHANNEL_PHASE_LABELS[view.connection.phase]}
+            </span>
+            {view.connection.diagnostic !== undefined
+              ? `（${view.connection.diagnostic}）`
+              : ''}
+          </span>
+        </div>
+      </Group>
 
-      <section className="dshpet-group">
-        <h3 className="dshpet-group-title">会话路由</h3>
+      <Group title="会话路由" note={`${view.routes.length} 个会话`}>
         {view.routes.length === 0 ? (
           <p className="dshpet-item-hint">
             还没有会话记录。第一次有人在群里 @Bot（或单聊发消息）后，这里会自动出现一行。
           </p>
         ) : (
-          <ul className="dshpet-list">
-            {view.routes.map(route => (
-              <li key={route.chatId} className="dshpet-item">
-                <span>
-                  {route.chatName ?? route.chatId}
-                  {route.chatType === 'p2p' ? '（单聊）' : ''}
-                  {route.kind === 'qa'
-                    ? ' · 答疑群'
-                    : route.boundBy === 'auto'
-                      ? ' · 自动'
-                      : ' · 手动'}
-                  {route.kind === 'qa' && route.qaInvalidatedAt !== undefined
-                    ? `（已失效：${route.qaInvalidatedReason ?? '源会话不可用'}）`
-                    : ''}
-                </span>
-                {/*
-                  A qa group routes to its fork child, not to a workspace.
-                  Offering the picker would imply it can be re-pointed, which
-                  would discard the child holding the inherited context — the
-                  Host refuses that anyway, so the UI must not suggest it.
-                */}
-                {route.kind === 'qa' ? (
-                  <span className="dshpet-item-hint">
-                    绑定会话 {route.qaParentSessionId ?? '（未知）'}
-                    {/*
-                      A bound group is one Pet joined, not one it built: it is
-                      neither creator nor owner there and can manage nothing.
-                      Saying so prevents the reasonable-but-wrong assumption
-                      that Pet could rename or clean up such a group.
-                    */}
-                    {route.qaOrigin === 'bound' ? '（绑定既有群，Pet 非群主）' : ''}
-                  </span>
-                ) : (
-                  <select
-                    value={route.workspaceId ?? ''}
-                    onChange={event =>
-                      void mutate({
-                        action: 'rebind-chat',
-                        chatId: route.chatId,
-                        workspaceId: event.target.value,
-                      })
-                    }
-                  >
-                    {workspaces.map(workspace => (
-                      <option key={workspace.id} value={workspace.id}>
-                        {workspace.title ?? workspace.id}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                <button
-                  type="button"
-                  className="dshpet-action"
-                  onClick={() => void mutate({ action: 'remove-chat', chatId: route.chatId })}
-                >
-                  移除
-                </button>
-              </li>
-            ))}
+          // A card per chat. As flex rows, the name, the kind, the workspace
+          // picker and Remove all sat on one line at the same weight, so a
+          // handful of routes read as an unparseable wall.
+          <ul className="dshpet-cards">
+            {view.routes.map(route => {
+              const invalidated =
+                route.kind === 'qa' && route.qaInvalidatedAt !== undefined
+              return (
+                <li key={route.chatId} className="dshpet-card">
+                  <div className="dshpet-card-head">
+                    <span className="dshpet-card-name">
+                      {route.chatName ?? route.chatId}
+                    </span>
+                    {route.chatType === 'p2p' ? (
+                      <span className="dshpet-status">单聊</span>
+                    ) : null}
+                    <span className="dshpet-status">
+                      {route.kind === 'qa'
+                        ? '答疑群'
+                        : route.boundBy === 'auto'
+                          ? '自动绑定'
+                          : '手动绑定'}
+                    </span>
+                    {invalidated ? (
+                      <span className="dshpet-status" data-tone="danger">
+                        已失效
+                      </span>
+                    ) : null}
+                    <div className="dshpet-card-tail">
+                      <button
+                        type="button"
+                        className="dshpet-action dshpet-action-sm dshpet-action-danger"
+                        onClick={() =>
+                          void mutate({ action: 'remove-chat', chatId: route.chatId })
+                        }
+                      >
+                        移除
+                      </button>
+                    </div>
+                  </div>
+                  {/*
+                    A qa group routes to its fork child, not to a workspace.
+                    Offering the picker would imply it can be re-pointed, which
+                    would discard the child holding the inherited context — the
+                    Host refuses that anyway, so the UI must not suggest it.
+                  */}
+                  {route.kind === 'qa' ? (
+                    <>
+                      <p className="dshpet-item-hint">
+                        绑定会话 {route.qaParentSessionId ?? '（未知）'}
+                        {/*
+                          A bound group is one Pet joined, not one it built: it
+                          is neither creator nor owner there and can manage
+                          nothing. Saying so prevents the reasonable-but-wrong
+                          assumption that Pet could rename or clean up such a
+                          group.
+                        */}
+                        {route.qaOrigin === 'bound' ? '（绑定既有群，Pet 非群主）' : ''}
+                      </p>
+                      {invalidated ? (
+                        <p className="dshpet-callout" data-tone="warn">
+                          {route.qaInvalidatedReason ?? '源会话不可用'}
+                        </p>
+                      ) : null}
+                    </>
+                  ) : (
+                    <div className="dshpet-field">
+                      <span>工作区</span>
+                      {/* Was a bare `<select>`, rendering as a native control
+                          amid styled ones. */}
+                      <select
+                        className="dshpet-input"
+                        value={route.workspaceId ?? ''}
+                        onChange={event =>
+                          void mutate({
+                            action: 'rebind-chat',
+                            chatId: route.chatId,
+                            workspaceId: event.target.value,
+                          })
+                        }
+                      >
+                        {workspaces.map(workspace => (
+                          <option key={workspace.id} value={workspace.id}>
+                            {workspace.title ?? workspace.id}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </li>
+              )
+            })}
           </ul>
         )}
-      </section>
+      </Group>
 
       {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
     </div>
@@ -1762,42 +1973,56 @@ function ChannelDiagnostics(): JSX.Element {
   }, [view?.connection.phase])
 
   return (
-    <section className="dshpet-group">
-      <h3 className="dshpet-group-title">飞书接入</h3>
+    <Group title="飞书接入">
       {view === undefined ? (
         <p className="dshpet-item-hint">状态不可用。</p>
       ) : (
         <>
-          <dl className="dshpet-kv">
-            <dt>连接</dt>
-            <dd>
-              {CHANNEL_PHASE_LABELS[view.connection.phase]}
-              {view.connection.diagnostic !== undefined
-                ? `（${view.connection.diagnostic}）`
-                : ''}
-            </dd>
-            <dt>排队中的调用</dt>
-            <dd>{view.connection.queueDepth}</dd>
-            <dt>已绑定 Bot</dt>
-            <dd>{view.bot?.appId ?? '未绑定'}</dd>
-          </dl>
+          <div className="dshpet-facts">
+            <div className="dshpet-fact">
+              <span className="dshpet-fact-key">连接</span>
+              <span className="dshpet-fact-value">
+                <span
+                  className="dshpet-status"
+                  data-tone={
+                    view.connection.phase === 'connected'
+                      ? 'enabled'
+                      : view.connection.phase === 'down'
+                        ? 'danger'
+                        : view.connection.phase === 'stopped'
+                          ? undefined
+                          : 'warn'
+                  }
+                >
+                  {CHANNEL_PHASE_LABELS[view.connection.phase]}
+                </span>
+                {view.connection.diagnostic !== undefined
+                  ? `（${view.connection.diagnostic}）`
+                  : ''}
+              </span>
+            </div>
+            <Fact label="排队中的调用" value={String(view.connection.queueDepth)} />
+            <Fact label="已绑定 Bot" value={view.bot?.appId ?? '未绑定'} mono />
+          </div>
           {view.connection.phase === 'down' ? (
-            <button
-              type="button"
-              className="dshpet-action"
-              onClick={() =>
-                void petApi
-                  .mutateChannel({ action: 'reconnect' })
-                  .then(setView)
-                  .catch(() => undefined)
-              }
-            >
-              重新连接
-            </button>
+            <div className="dshpet-actions">
+              <button
+                type="button"
+                className="dshpet-action"
+                onClick={() =>
+                  void petApi
+                    .mutateChannel({ action: 'reconnect' })
+                    .then(setView)
+                    .catch(() => undefined)
+                }
+              >
+                重新连接
+              </button>
+            </div>
           ) : null}
         </>
       )}
-    </section>
+    </Group>
   )
 }
 
@@ -1833,8 +2058,7 @@ function DiagnosticsTab(): JSX.Element {
 
   return (
     <div className="dshpet-settings">
-      <section className="dshpet-group">
-        <h3 className="dshpet-group-title">运行状态</h3>
+      <Group title="运行状态">
         <div className="dshpet-facts">
           <Fact label="生命周期" value={lifecycle?.phase ?? '…'} />
           {lifecycle?.diagnostic !== undefined ? (
@@ -1864,29 +2088,32 @@ function DiagnosticsTab(): JSX.Element {
           />
         </div>
         {drift.length > 0 ? (
-          <div className="dshpet-facts">
+          <div className="dshpet-callout" data-tone="warn">
             {drift.map(entry => (
-              <Fact
-                key={entry.skillName}
-                label={entry.skillName}
-                value={entry.diagnostic ?? entry.status}
-              />
+              <span key={entry.skillName}>
+                {entry.skillName} — {entry.diagnostic ?? entry.status}
+              </span>
             ))}
           </div>
         ) : null}
-      </section>
+      </Group>
 
-      <section className="dshpet-group">
-        <h3 className="dshpet-group-title">存储路径</h3>
+      {/* Absolute paths on disk: worth having, never worth reading first. They
+          are the longest block on the tab and pushed the actions below the
+          fold. */}
+      <Group
+        title="存储路径"
+        collapsible
+        note={`${Object.keys(paths).length} 条`}
+      >
         <div className="dshpet-facts">
           {Object.entries(paths).map(([key, value]) => (
             <Fact key={key} label={key} value={String(value)} mono />
           ))}
         </div>
-      </section>
+      </Group>
 
-      <section className="dshpet-group">
-        <h3 className="dshpet-group-title">操作</h3>
+      <Group title="操作">
         <div className="dshpet-actions">
           <button
             type="button"
@@ -1895,12 +2122,13 @@ function DiagnosticsTab(): JSX.Element {
           >
             重新生成 Skill 链接
           </button>
+          {/* Was "Refresh": the only English control left on a Chinese page. */}
           <button type="button" className="dshpet-action" onClick={() => void refresh()}>
-            Refresh
+            刷新
           </button>
         </div>
         {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
-      </section>
+      </Group>
 
       <ChannelDiagnostics />
     </div>
