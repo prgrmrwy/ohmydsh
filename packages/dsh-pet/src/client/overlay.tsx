@@ -388,7 +388,7 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
         }
         // The atomic capture: whatever the browser shows RIGHT NOW is frozen
         // into the request. Later page switches cannot change this Invocation.
-        await petApi.createInvocation({
+        const accepted = await petApi.createInvocation({
           clientInvocationId: `inv-${crypto.randomUUID()}`,
           capabilityId: capability.id,
           sourceKind: effectiveSource.kind,
@@ -399,6 +399,19 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
             ? { sourceWorkspaceId: effectiveSource.workspaceId }
             : {}),
         })
+        // Accepting only QUEUES the Invocation; dispatch runs afterwards and
+        // reports through the Task record. Saying which of the two happened
+        // stops a queued-but-undispatched capability from reading as a dead
+        // button — the panel below then carries the outcome.
+        //
+        // Read defensively: the route returns an untyped record, so a Host
+        // that omits the field must degrade to the neutral wording rather
+        // than claim the work started.
+        setNotice(
+          (accepted as { started?: unknown }).started === true
+            ? `已开始执行 ${capability.label}。`
+            : `${capability.label} 已排队，稍后在下方面板查看结果。`,
+        )
         setMode('panel')
       } catch (cause) {
         setError(cause instanceof PetApiError ? cause.message : String(cause))
@@ -886,6 +899,19 @@ function TaskPanel(props: {
             <span className="dshpet-status" style={{ marginLeft: 4 }}>
               source archived
             </span>
+          ) : null}
+          {/*
+            The Task's own diagnostic. Dispatch happens AFTER the create call
+            returns, so a failure there cannot surface as a rejected request:
+            the wheel closed on success and the reason was written only to
+            this field, which nothing rendered. That is the whole of "clicking
+            does nothing" — the Task was sitting in `recovering` with the
+            explanation attached, invisible.
+          */}
+          {task.diagnostic !== undefined ? (
+            <p className="dshpet-error" style={{ margin: '4px 0 0' }}>
+              {task.diagnostic}
+            </p>
           ) : null}
           {(task.invocations ?? []).map(invocation => (
             <div key={invocation.id} className="dshpet-inv">

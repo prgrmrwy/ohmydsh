@@ -30,6 +30,7 @@ import {
   PetSettingsSection,
   setDirectoryPicker,
   setDirectoryLister,
+  setSessionOpener,
 } from './settings.js'
 import {
   PET_SETTINGS_NAV_CSS,
@@ -125,6 +126,13 @@ export function apply(ctx: ClientContext): void {
       PetSettingsSection,
     ),
   )
+
+  // The settings section is registered as a bare component and never receives
+  // this context, so the one shell capability it needs — navigating to a
+  // session — is published to it, exactly as the directory picker is.
+  setSessionOpener(sessionId => {
+    openSession(ctx, sessionId)
+  })
 
   // Publish the Host directory picker to the settings page. Pet asks for a
   // Host path (the machine running `dsh web`), so a browser file input would

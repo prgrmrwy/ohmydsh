@@ -132,6 +132,17 @@ function channelView(
     kind: binding.kind,
     ...(binding.workspaceId !== undefined ? { workspaceId: binding.workspaceId } : {}),
     ...(binding.activeTaskId !== undefined ? { activeTaskId: binding.activeTaskId } : {}),
+    // Resolve the task to its executor session: the settings page offers
+    // "open the session", and a task id is not something the shell can route
+    // to. A task that no longer exists simply yields no id, so the button
+    // does not appear rather than leading nowhere.
+    ...(() => {
+      if (binding.activeTaskId === undefined) return {}
+      const task = repository.getTask(binding.activeTaskId)
+      return task === undefined
+        ? {}
+        : { activeExecutorSessionId: task.executorSessionId }
+    })(),
     ...(binding.qaChildSessionId !== undefined
       ? { qaChildSessionId: binding.qaChildSessionId }
       : {}),
