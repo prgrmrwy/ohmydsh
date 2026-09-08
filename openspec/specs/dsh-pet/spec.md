@@ -294,6 +294,8 @@ Pet 创建和管理的 root executor SHALL 在**每一次** Agent 进入活跃�
 
 由于 root executor session 按既有要求在原生 DSH 列表中可见并可打开，Pet MUST NOT 假定自己是 executor Agent 的唯一加载者：由 DSH 自身加载时，原生 session controller 已按持久化 metadata mount preset，Pet 的加载观察者 SHALL 只补 scoped surface，MUST NOT 重复 mount preset。系统 SHALL 根据 Task 记录判断是否安装 allowlist；重复安装 scoped surface SHALL 幂等，同一 Agent 被多次触发安装 MUST NOT 因重复注册而失败或中断加载。
 
+该加载观察者对 Host 发布的**每一个** Agent 触发，并以 executor session id 反查 Task；而 qa-child 形态恰好把 child 会话 id 记在同一个 `executorSessionId` 字段上。因此"能按 executor session id 查到 Task"**不足以**证明该 Agent 可由 Pet 组合：观察者 SHALL 在安装任何 scoped surface **之前**先按 Task 的 source kind 排除 fork-child 形态，命中 qa-child 时 MUST NOT 安装可信上下文能力，也 MUST NOT 安装 Pet allowlist Skill provider。
+
 若恢复路径无法完成该 Task 形态要求的 preset 或 scoped surface，系统 SHALL fail closed：拒绝在组合不完整的 executor 上派发 Invocation，并给出可诊断说明；MUST NOT 退化为缺少可信上下文能力的 executor，专用 Pet executor 也 MUST NOT 退化为 Host 全局 Skill 发现结果。
 
 #### Scenario: 闲置后被恢复的 executor 仍具备可信上下文能力
@@ -315,6 +317,14 @@ Pet 创建和管理的 root executor SHALL 在**每一次** Agent 进入活跃�
 #### Scenario: 同一 executor 被重复触发组合安装
 - **WHEN** 同一 executor Agent 在其生命周期内被多次触发作用域组合安装
 - **THEN** 安装幂等，不因重复注册同名能力而报错或中断该 Agent 的加载
+
+#### Scenario: 加载观察者遇到 qa-child 不施加 Pet 组合
+- **WHEN** Host 发布某答疑群绑定的 fork child Agent，Pet 的加载观察者按其 session id 查到对应的 qa-child Task
+- **THEN** 系统跳过该 Agent，不安装可信上下文能力、也不安装 Pet allowlist provider；该 child 的工具面与 Skill 目录仍完全继承自源会话
+
+#### Scenario: qa-child 不被诱导调用可信上下文能力
+- **WHEN** 群成员向答疑群提问，该问题作为一轮消息进入 child
+- **THEN** child 的工具清单中不含 Pet 可信上下文能力，模型没有可调用入口，不会因该形态天然没有 Invocation 记录而收到"没有正在运行或等待的 Invocation"这类错误
 
 #### Scenario: 作用域组合缺失或安装失败
 - **WHEN** 系统无法确认某 executor 已具备 Pet 作用域组合，或安装过程失败
