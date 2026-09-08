@@ -440,12 +440,17 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
       style={{
         left: `${position.x}px`,
         top: `${position.y}px`,
-        // The wheel notes are anchored to the MASCOT's edge (see
-        // `.dshpet-wheel-note` in styles.ts), but the wheel box is sized for
-        // its widest ring while the mascot is resizable — so the size is
-        // published here for the CSS rules to read. @types/react has no
-        // custom-property signature, hence the cast.
+        // The wheel notes clear the RINGS (see `.dshpet-wheel-note` in
+        // styles.ts), but the wheel box is sized for its widest possible ring
+        // while the mascot is resizable and the ring count follows the
+        // capability list — so both measurements are published here for the
+        // CSS to read. @types/react has no custom-property signature, hence
+        // the cast.
         '--dshpet-mascot-size': `${size}px`,
+        // Outer edge of the rings ACTUALLY drawn. A note anchored to the
+        // mascot alone landed ON TOP of the rings, because the mascot is only
+        // the innermost 72px of a disc that reaches ~170px.
+        '--dshpet-wheel-radius': `${wheelRadius}px`,
       } as CSSProperties}
       // Focus is the keyboard equivalent of hover, so a keyboard user reaches
       // the capability wheel the same way a pointer user does.
