@@ -148,6 +148,55 @@ Pet 用 `spawn()` 拉起 `lark-cli event consume` 订阅飞书消息。子进程
 
 ---
 
+## `ctx.inject()` 的回调是异步的，不能紧跟同步断言
+
+### 现象
+
+轮盘执行任何能力（`send-cr`、答疑群）都抛
+`Pet scoped surface dependencies were not installed`（`src/index.ts`）。
+
+### 真相
+
+`installPetScope()` 用 `scoped.inject(['tools'], cb)` 注册作用域工具，并在
+`cb` 里把该 agent 记进 `contextToolAgents`；紧接着**同步**检查这个集合，
+没命中就抛错。
+
+但 `inject()` 并不同步执行回调。cordis 里它直接委托给 `plugin()`：
+
+```js
+inject(inject, callback) {
+  return this.plugin({ inject, apply: callback, name: callback.name })
+}
+```
+
+返回的是 **fiber**，包内注释写明 "awaiting it settles once loading finished"。
+用真实 cordis 实测（非 mock）：
+
+| 时机 | 回调是否已执行 |
+|---|---|
+| `inject()` 返回后立即检查 | 否 |
+| 等待一个 tick | 否 |
+| `await fiber` 之后 | 否（fiber `state=0`） |
+
+也就是说"注册后立刻断言注册已完成"这个模式本身不成立。
+
+### 为什么测试全绿却真机失败
+
+`test/executor-scope.test.ts` 对这段逻辑只做**源码字符串匹配**
+（`expect(install).toContain("scoped.inject(['tools']")`），从未真正执行过
+`installPetScope`。断言的是"代码长这样"，不是"代码能工作"。
+
+### 规则
+
+1. `ctx.inject()` / `ctx.plugin()` 的回调是异步的。**不要**在其后同步检查
+   回调内设置的状态；要么把校验挪进回调，要么改由消费方在使用时判定。
+2. 涉及授权边界的组合逻辑，必须有**真正执行它**的测试。源码字符串匹配可以
+   钉住写法，但对"是否生效"零覆盖——本条目就是这样漏出去的。
+3. 判断依赖包的同步性时，以实测为准：写一个最小 harness 跑真实依赖，
+   而不是依赖 mock 的行为（mock 通常是同步的，正好掩盖这类缺陷）。
+
+---
+
 ## 排查这类问题的通用顺序
 
 1. **先证伪最省事的假设**：换个值、去掉这个字段——如果结果完全不变，
