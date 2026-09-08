@@ -265,6 +265,35 @@ export interface PetLifecycleState {
 export type PetSourceKind = 'session' | 'workspace' | 'none' | 'chat' | 'qa-chat'
 
 /**
+ * Whether a Task's "executor" is a fork child rather than a Pet root executor.
+ *
+ * The distinction decides whether Pet may compose that Agent at all. A
+ * `qa-chat` Task points at a continuable child of a USER session: DSH's
+ * subagent machinery composes and drives it, and its value comes entirely
+ * from the tool surface and context it INHERITED from its parent. Pet
+ * therefore installs neither a preset, nor its allowlist Skill provider, nor
+ * `pet_context` on it.
+ *
+ * Named as a predicate rather than written inline because the condition is
+ * subtle and the field it reads is shared: a `qa-chat` Task stores its child's
+ * session id in the SAME `executorSessionId` field a root executor uses, so
+ * ANY lookup by that id matches both forms. A future site that resolves a Task
+ * from a live Agent must ask this question before composing anything.
+ *
+ * Skipping it cost exactly that: Pet's `agent/created` observer matched a QA
+ * child, installed `pet_context` on it, and the model — told by the tool's own
+ * description to call it at the start of every Invocation — got
+ * `NO_CURRENT_INVOCATION`. QA delivery queues a child turn straight into the
+ * inbox and never creates an Invocation, so that lookup cannot succeed for
+ * this form at all.
+ * @param sourceKind - The Task's source kind.
+ * @returns whether Pet must leave this Agent's composition alone.
+ */
+export function isForkChildTaskForm(sourceKind: PetSourceKind): boolean {
+  return sourceKind === 'qa-chat'
+}
+
+/**
  * Stable scope key that defines active-Task uniqueness.
  *
  * `qa:` is keyed on the SOURCE SESSION rather than on the chat, because a QA
