@@ -290,18 +290,30 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 
 /* Callout: a warning or a note that must not read as body prose. Pet used
    ".dshpet-error" (plain red text) for security warnings, which looked like a
-   failure that had already happened rather than a caution. */
+   failure that had already happened rather than a caution.
+
+   Neutral surface, ordinary label colour, and the TONE carried by a 3px rule
+   down the leading edge. The first attempt filled the whole block with the
+   state colour and coloured the text with a neighbouring step of the same
+   ramp, which failed twice over: "state-warn-secondary" is amber-400
+   (#f7ad31), a full-strength fill rather than the tint its name suggests, and
+   pairing it with "state-warn-label" (amber-600, #dd8629) left body text at a
+   1.46:1 contrast ratio — far under the 4.5:1 minimum, and glaring besides.
+   The ramps offer no darker amber to fix the text with, so the fill itself is
+   the wrong instrument.
+
+   Keeping the surface neutral also fixes this for dark mode for free: both
+   the background and the label resolve per theme, whereas a static amber fill
+   does not. */
 .dshpet-settings .dshpet-callout{display:flex;flex-direction:column;gap:4px;
-  padding:10px 12px;border-radius:12px;
+  padding:10px 12px;border-radius:8px;border-left:3px solid transparent;
   font:var(--dsw-font-xxs-12,400 12px/18px inherit);
   background:var(--dsw-alias-bg-module-platform,#0000000a);
   color:var(--dsw-alias-label-secondary,#61666b)}
 .dshpet-settings .dshpet-callout[data-tone="warn"]{
-  background:var(--dsw-alias-state-warn-secondary,#ff8f1c1a);
-  color:var(--dsw-alias-state-warn-label,#8f5100)}
+  border-left-color:var(--dsw-alias-state-warn-primary,#f59e0b)}
 .dshpet-settings .dshpet-callout[data-tone="danger"]{
-  background:var(--dsw-alias-state-error-secondary,#f54a451a);
-  color:var(--dsw-alias-state-error-primary,#f54a45)}
+  border-left-color:var(--dsw-alias-state-error-primary,#ec1313)}
 
 /* Stack each label above its control: side-by-side labels made the inputs
    crowd their own text and left the column ragged. */
@@ -348,15 +360,30 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
   padding:1px 8px;border-radius:999px;font-size:11px;font-weight:500;line-height:17px;
   background:var(--dsw-alias-bg-module-platform,#0000000a);
   color:var(--dsw-alias-label-secondary,#61666b)}
+/* A toned pill keeps the neutral surface and states its tone with a dot plus
+   the label colour. Filling the pill with "state-*-secondary" looked like a
+   button and was unreadable: that token is the 400 step of its ramp (green
+   #4ed17e, amber #f7ad31) — a solid colour, not the tint the name implies —
+   so "已启用" sat at 1.17:1 against its own background.
+
+   The dot carries the saturated colour instead. It is the one element that
+   needs no contrast against the text, so the signal survives while the label
+   stays legible on the neutral chip in either theme. */
+.dshpet-settings .dshpet-status[data-tone]::before{content:"";flex:none;
+  width:6px;height:6px;margin-right:5px;border-radius:50%;display:inline-block;
+  vertical-align:1px;background:var(--dshpet-tone,currentColor)}
+/* The dot is tinted; the LABEL stays the ordinary secondary text colour.
+   Colouring 11px text with the ramp itself does not survive the check —
+   amber-600 (#dd8629) is the darkest orange available and still lands at
+   2.58:1 on the neutral chip, under the 4.5:1 minimum, with no darker step to
+   reach for. Since the dot needs no contrast against the label, moving the
+   hue there keeps the state readable at a glance AND legible. */
 .dshpet-settings .dshpet-status[data-tone="enabled"]{
-  background:var(--dsw-alias-state-success-secondary,#1a7f371a);
-  color:var(--dsw-alias-state-success-primary,#1a7f37)}
+  --dshpet-tone:var(--dsw-alias-state-success-primary,#1a7f37)}
 .dshpet-settings .dshpet-status[data-tone="warn"]{
-  background:var(--dsw-alias-state-warn-secondary,#ff8f1c1a);
-  color:var(--dsw-alias-state-warn-label,#8f5100)}
+  --dshpet-tone:var(--dsw-alias-state-warn-primary,#f59e0b)}
 .dshpet-settings .dshpet-status[data-tone="danger"]{
-  background:var(--dsw-alias-state-error-secondary,#f54a451a);
-  color:var(--dsw-alias-state-error-primary,#f54a45)}
+  --dshpet-tone:var(--dsw-alias-state-error-primary,#ec1313)}
 /* Read-only value display: a binding shows its value until you choose Edit. */
 .dshpet-readonly{display:inline-flex;align-items:center;min-height:28px;padding:0 8px;
   font-size:14px;color:var(--dsw-alias-label-primary,#1f2329);
