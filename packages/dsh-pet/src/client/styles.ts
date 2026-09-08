@@ -258,7 +258,8 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
   outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:2px}
 /* Own chevron rather than the platform triangle, which differs per browser
    and cannot be positioned. It rotates to point down while open. */
-.dshpet-settings .dshpet-fold-mark{flex:none;width:14px;text-align:center;
+.dshpet-settings .dshpet-fold-mark{flex:none;display:inline-flex;
+  align-items:center;justify-content:center;width:14px;height:22px;
   font-size:11px;line-height:1;transition:transform .16s ease;
   color:var(--dsw-alias-label-tertiary,#8f959e)}
 .dshpet-settings .dshpet-fold[open] .dshpet-fold-mark{transform:rotate(90deg)}
@@ -320,8 +321,12 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-field{display:flex;flex-direction:column;gap:4px;min-width:0;
   font:400 14px/22px var(--dsw-font-family,inherit);
   color:var(--dsw-alias-label-secondary,#61666b)}
+/* One control height for the whole page: 32px, shared by the input, the
+   action button and the read-only value. They previously stood at 34 / 32 /
+   28, so any row combining them (every stored field, every add form) met at
+   mismatched edges and put their text on three different lines. */
 .dshpet-settings .dshpet-input{width:100%;max-width:360px;box-sizing:border-box;
-  height:34px;padding:0 12px;font:inherit;font-size:13px;
+  height:32px;padding:0 10px;font:inherit;font-size:13px;line-height:20px;
   color:var(--dsw-alias-label-primary,#1f2329);
   background:var(--dsw-alias-bg-layer-3,#fff);
   border:.5px solid var(--dsw-alias-border-l4,#0000001a);border-radius:8px;outline:none}
@@ -335,7 +340,14 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-check{display:inline-flex;align-items:center;gap:8px;
   font:400 14px/22px var(--dsw-font-family,inherit);
   color:var(--dsw-alias-label-primary,#0f1115);cursor:pointer}
-/* Two related controls share a row without stretching the whole column. */
+/* Two related controls share a row without stretching the whole column.
+
+   "flex-end" was load-bearing only while a labelled field (label stacked over
+   its control) had to line its INPUT up with a bare sibling button. Now that
+   every control is 32px, bottom-alignment does nothing useful and actively
+   hurts: a row mixing a 32px control with a taller wrapped one pins them to
+   their bottom edges instead of their text. "end" on the baseline axis keeps
+   the labelled-field case working while equal-height controls simply agree. */
 .dshpet-settings .dshpet-row{display:flex;flex-direction:row;gap:12px;
   align-items:flex-end;flex-wrap:wrap}
 .dshpet-settings .dshpet-row .dshpet-field{flex:1;min-width:140px}
@@ -355,9 +367,17 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
   color:var(--dsw-alias-state-error-primary,#f54a45)}
 .dshpet-settings .dshpet-empty{font:var(--dsw-font-xs-13,400 13px/20px inherit);
   color:var(--dsw-alias-label-tertiary,#8f959e);padding:6px 0}
-/* Status pill, matching the badge shipped in the plugins settings section. */
-.dshpet-settings .dshpet-status{flex:none;white-space:nowrap;
-  padding:1px 8px;border-radius:999px;font-size:11px;font-weight:500;line-height:17px;
+/* Status pill, matching the badge shipped in the plugins settings section.
+
+   "inline-flex" with its own centred cross axis, rather than a bare inline
+   box: the pill carries a dot pseudo-element and 11px text inside a row of
+   14px text, and as an inline box its own line-height decided where the dot
+   and the label landed relative to each other. Centring inside the pill makes
+   that internal alignment explicit; the row it sits in is responsible only
+   for placing the pill as a whole. */
+.dshpet-settings .dshpet-status{display:inline-flex;align-items:center;
+  flex:none;white-space:nowrap;box-sizing:border-box;height:20px;
+  padding:0 8px;border-radius:999px;font-size:11px;font-weight:500;line-height:1;
   background:var(--dsw-alias-bg-module-platform,#0000000a);
   color:var(--dsw-alias-label-secondary,#61666b)}
 /* A toned pill keeps the neutral surface and states its tone with a dot plus
@@ -369,9 +389,14 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
    The dot carries the saturated colour instead. It is the one element that
    needs no contrast against the text, so the signal survives while the label
    stays legible on the neutral chip in either theme. */
+/* The pill is a flex container, so the dot is a flex ITEM: "vertical-align"
+   (which the first version used to nudge it onto the text) does not apply to
+   flex items at all and was silently ignored. The parent's "align-items"
+   centres it instead, which is also the only way it stays centred when the
+   label wraps to a different cap height. */
 .dshpet-settings .dshpet-status[data-tone]::before{content:"";flex:none;
-  width:6px;height:6px;margin-right:5px;border-radius:50%;display:inline-block;
-  vertical-align:1px;background:var(--dshpet-tone,currentColor)}
+  width:6px;height:6px;margin-right:5px;border-radius:50%;
+  background:var(--dshpet-tone,currentColor)}
 /* The dot is tinted; the LABEL stays the ordinary secondary text colour.
    Colouring 11px text with the ramp itself does not survive the check —
    amber-600 (#dd8629) is the darkest orange available and still lands at
@@ -384,9 +409,15 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
   --dshpet-tone:var(--dsw-alias-state-warn-primary,#f59e0b)}
 .dshpet-settings .dshpet-status[data-tone="danger"]{
   --dshpet-tone:var(--dsw-alias-state-error-primary,#ec1313)}
-/* Read-only value display: a binding shows its value until you choose Edit. */
-.dshpet-readonly{display:inline-flex;align-items:center;min-height:28px;padding:0 8px;
-  font-size:14px;color:var(--dsw-alias-label-primary,#1f2329);
+/* Read-only value display: a binding shows its value until you choose Edit.
+
+   32px like every other control. At 28px next to a 32px Edit button in a
+   bottom-aligned row, the two boxes agreed only at their bottom edge, leaving
+   the value's text sitting ~2px below its own button — visible on every
+   stored field ("运行参数", "预设", "默认上下文策略"). */
+.dshpet-readonly{display:inline-flex;align-items:center;box-sizing:border-box;
+  height:32px;padding:0 10px;font-size:14px;line-height:22px;
+  color:var(--dsw-alias-label-primary,#1f2329);
   background:var(--dsw-alias-bg-module-platform,#0000000a);border-radius:8px}
 .dshpet-readonly[data-empty="true"]{color:var(--dsw-alias-label-tertiary,#8f959e)}
 
@@ -404,18 +435,27 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-item[data-complete="true"]{
   color:var(--dsw-alias-label-tertiary,#8f959e);border-color:transparent;
   background:var(--dsw-alias-bg-module-platform,#0000000a)}
-.dshpet-settings .dshpet-step-mark{flex:none;width:16px;text-align:center}
+/* The mark is a glyph swap (○ → ✓) between two very different shapes, so it
+   is given a fixed box and centred inside it. Left to flow, the two glyphs'
+   unequal heights moved the step's text baseline as steps completed. */
+.dshpet-settings .dshpet-step-mark{flex:none;display:inline-flex;
+  align-items:center;justify-content:center;width:16px;height:20px;
+  font-size:12px;line-height:1}
 .dshpet-settings .dshpet-item[data-complete="true"] .dshpet-step-mark{
   color:var(--dsw-alias-state-success-primary,#1a7f37)}
 .dshpet-settings .dshpet-item-text{flex:1;min-width:0}
 .dshpet-settings .dshpet-item .dshpet-action{margin-left:auto}
 /* Definition list for bot identity and connection facts. Bare "dl" markup
    inherited the UA's 40px margin and stacked term over value. */
+/* Both columns share one line-height. A "dd" here often holds an IdentityChip
+   — a padded button, not text — and baseline-aligning a padded box against a
+   bare term put the two columns on different lines. Centring each row on a
+   common 22px line keeps them level whether the value is text or a control. */
 .dshpet-settings .dshpet-kv{display:grid;grid-template-columns:auto 1fr;
-  gap:6px 16px;margin:0;align-items:baseline}
-.dshpet-settings .dshpet-kv dt{font-size:13px;
+  gap:8px 16px;margin:0;align-items:center}
+.dshpet-settings .dshpet-kv dt{font-size:13px;line-height:22px;
   color:var(--dsw-alias-label-secondary,#61666b)}
-.dshpet-settings .dshpet-kv dd{margin:0;min-width:0;font-size:13px;
+.dshpet-settings .dshpet-kv dd{margin:0;min-width:0;font-size:13px;line-height:22px;
   color:var(--dsw-alias-label-primary,#0f1115)}
 
 /* Environment rows: name + injected name, masked value, actions. The grid keeps
@@ -426,25 +466,42 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
   border:.5px solid var(--dsw-alias-border-l4,#0000001a);
   background:var(--dsw-alias-bg-layer-3,#fff)}
 .dshpet-env-key{display:flex;flex-direction:column;gap:2px;min-width:0}
-.dshpet-env-name{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;
-  color:var(--dsw-alias-label-primary,#1f2329);overflow:hidden;text-overflow:ellipsis}
+/* The name carries an inline badge ("覆盖全局" / "已被覆盖"), so it is a flex
+   row on a fixed 20px line: as a bare block it inherited a normal
+   line-height from a monospace font and the badge — an inline-block with its
+   own padding — grew the line, pushing the injected name underneath out of
+   step with the value column beside it. */
+.dshpet-env-name{display:flex;align-items:center;gap:6px;min-width:0;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;
+  line-height:20px;color:var(--dsw-alias-label-primary,#1f2329)}
 .dshpet-env-inject{font-size:11px;line-height:16px;
   color:var(--dsw-alias-label-tertiary,#8f959e);
   font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .dshpet-env-value{display:flex;align-items:center;gap:8px;min-width:0}
 .dshpet-env-secret{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  line-height:20px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   color:var(--dsw-alias-label-primary,#1f2329)}
-.dshpet-settings .dshpet-reveal{flex:none;height:22px;padding:0 8px;font-size:11px;
-  line-height:20px;border-radius:11px;cursor:pointer;
+/* Centred by flex rather than by a hand-tuned line-height: 22px of box with a
+   20px line and a .5px border left the label a fraction of a pixel high, and
+   "box-sizing" was never stated so the border grew the box past its own
+   declared height. */
+.dshpet-settings .dshpet-reveal{flex:none;box-sizing:border-box;
+  display:inline-flex;align-items:center;justify-content:center;
+  height:22px;padding:0 8px;font-size:11px;line-height:1;
+  border-radius:11px;cursor:pointer;
   border:.5px solid var(--dsw-alias-border-l4,#0000001a);
   background:0 0;color:var(--dsw-alias-label-secondary,#61666b)}
 .dshpet-settings .dshpet-reveal:hover{background:var(--dsw-alias-interactive-bg-hover,#0000000a)}
-.dshpet-badge-override{display:inline-block;margin-left:6px;padding:0 8px;
-  line-height:17px;font-size:11px;font-weight:500;border-radius:999px;white-space:nowrap;
+/* Both badges are flex items of .dshpet-env-name now, so they align by that
+   row's cross axis instead of by a hand-set line-height, and the margin that
+   used to separate them is the row's gap. */
+.dshpet-badge-override{display:inline-flex;align-items:center;flex:none;
+  box-sizing:border-box;height:18px;padding:0 8px;
+  font-size:11px;font-weight:500;line-height:1;border-radius:999px;white-space:nowrap;
   background:var(--dsw-alias-state-business-primary,#4176e6);color:#fff}
-.dshpet-badge-shadowed{display:inline-block;margin-left:6px;padding:0 8px;
-  line-height:17px;font-size:11px;border-radius:999px;white-space:nowrap;
+.dshpet-badge-shadowed{display:inline-flex;align-items:center;flex:none;
+  box-sizing:border-box;height:18px;padding:0 8px;
+  font-size:11px;line-height:1;border-radius:999px;white-space:nowrap;
   background:var(--dsw-alias-bg-module-platform,#0000000a);
   color:var(--dsw-alias-label-tertiary,#8f959e)}
 /* A shadowed global entry stays visible but reads as inert, so the override is
@@ -454,12 +511,22 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 
 /* Diagnostics rows: label + value pairs instead of a raw JSON dump. */
 .dshpet-facts{display:flex;flex-direction:column;gap:8px;margin:0}
-.dshpet-fact{display:flex;gap:12px;align-items:baseline}
-.dshpet-fact-key{flex:none;min-width:132px;font-size:13px;
+/* Label/value pair. Both columns declare the SAME 22px line so their text
+   agrees; with that in place, centring and baseline coincide for ordinary
+   text, and centring additionally holds when the value is a CONTROL rather
+   than text. Baseline did not: a 20px connection-state pill against the 22px
+   label sat 2px low (measured in Chrome via CDP, not reasoned about). */
+.dshpet-fact{display:flex;gap:12px;align-items:center}
+.dshpet-fact-key{flex:none;min-width:132px;font-size:13px;line-height:22px;
   color:var(--dsw-alias-label-secondary,#646a73)}
-.dshpet-fact-value{font-size:14px;word-break:break-all;
-  color:var(--dsw-alias-label-primary,#1f2329)}
+.dshpet-fact-value{min-width:0;font-size:14px;line-height:22px;
+  word-break:break-all;color:var(--dsw-alias-label-primary,#1f2329)}
 .dshpet-fact-value code{font-size:13px}
+/* A value carrying a pill opts in explicitly rather than through ":has()",
+   whose support this stylesheet cannot assume. An inline-flex chip on a
+   baseline-aligned row contributes its own margin edge as the baseline, which
+   dropped "连接状态" out of line with its label. */
+.dshpet-fact-value[data-chip="true"]{display:flex;align-items:center;gap:6px}
 /* In-app Host directory browser, used where no OS picker exists. */
 .dshpet-browser{display:flex;flex-direction:column;gap:8px;padding:12px;
   border:.5px solid var(--dsw-alias-border-l4,#0000001a);border-radius:12px;
@@ -514,7 +581,15 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-actions{display:flex;gap:8px;flex-wrap:wrap;
   align-items:center;margin-top:0}
 /* Inline code, for paths and identifiers. */
-.dshpet-code{display:inline-flex;align-items:center;padding:0 5px;border-radius:6px;
+/* Inline code, for paths and identifiers.
+
+   Plain "inline", NOT "inline-flex". An inline-flex box takes its baseline
+   from its own flex line rather than from the text it sits in, so every
+   inline path ("dsh web", the Skill source path, the injected variable name)
+   rode above the sentence around it. Padding is horizontal only for the same
+   reason: vertical padding on an inline box does not grow the line, so it
+   would overlap the lines above and below instead of spacing them. */
+.dshpet-code{display:inline;padding:1px 5px;border-radius:6px;
   font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:.875em;
   background:var(--dsw-alias-bg-module-platform,#0000000a)}
 /* Installed-Skill row heading. */

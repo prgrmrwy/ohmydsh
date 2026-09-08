@@ -1827,7 +1827,7 @@ function ChannelTab(): JSX.Element {
             indistinguishable from the explanatory text above it. */}
         <div className="dshpet-fact">
           <span className="dshpet-fact-key">连接状态</span>
-          <span className="dshpet-fact-value">
+          <span className="dshpet-fact-value" data-chip="true">
             <span
               className="dshpet-status"
               data-tone={
@@ -1981,7 +1981,7 @@ function ChannelDiagnostics(): JSX.Element {
           <div className="dshpet-facts">
             <div className="dshpet-fact">
               <span className="dshpet-fact-key">连接</span>
-              <span className="dshpet-fact-value">
+              <span className="dshpet-fact-value" data-chip="true">
                 <span
                   className="dshpet-status"
                   data-tone={
