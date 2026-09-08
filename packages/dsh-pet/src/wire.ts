@@ -172,6 +172,48 @@ export interface PetChatRoute {
   readonly boundAt: number
 }
 
+/**
+ * How the settings page groups chat routes.
+ *
+ * `kind` and `chatType` are independent axes — a workspace binding may be a
+ * group or a p2p conversation — so neither alone yields a set of tabs that
+ * partitions the list. QA groups are split off first because they are a
+ * different routing target entirely (a fork child, not a workspace), and the
+ * remainder divides by conversation shape.
+ */
+export type PetRouteGroup = 'qa' | 'workspace' | 'direct'
+
+/**
+ * Classify a route into exactly one settings group.
+ * @param route - The route to classify.
+ * @returns its group; the three groups are mutually exclusive and total.
+ */
+export function routeGroupOf(
+  route: Pick<PetChatRoute, 'kind' | 'chatType'>,
+): PetRouteGroup {
+  if (route.kind === 'qa') return 'qa'
+  return route.chatType === 'p2p' ? 'direct' : 'workspace'
+}
+
+/**
+ * Lark AppLink that opens a conversation in the Lark client.
+ *
+ * A generic AppLink rather than a share link from `im chats link`: it needs no
+ * request, no permission on the chat and no validity period, and it works for
+ * a p2p conversation — which the share-link API explicitly refuses ("单聊、
+ * 密聊、团队群不支持分享群链接"). Pet only ever holds an `oc_…` id, which is
+ * exactly what this protocol takes.
+ * @param chatId - The `oc_…` chat id.
+ * @returns the AppLink, or `undefined` when the id is not usable.
+ */
+export function chatAppLink(chatId: string): string | undefined {
+  const trimmed = chatId.trim()
+  // Guard the shape rather than trusting the caller: a blank or non-chat id
+  // would otherwise produce a link that silently opens nothing.
+  if (!trimmed.startsWith('oc_')) return undefined
+  return `https://applink.feishu.cn/client/chat/open?openChatId=${encodeURIComponent(trimmed)}`
+}
+
 /** Stable onboarding blocker understood by both Host and settings UI. */
 export type PetChannelBlockerCode =
   | 'bot-unbound'

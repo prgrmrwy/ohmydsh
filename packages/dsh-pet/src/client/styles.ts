@@ -241,6 +241,31 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
   font:500 14px/22px var(--dsw-font-family,inherit);
   color:var(--dsw-alias-label-primary,#0f1115)}
 
+/* Segmented control for filtering a list WITHIN a group.
+
+   Deliberately a different shape from the page tab strip above it: that one
+   underlines to say "you are on a different page", while this one is a filled
+   segment that says "you are looking at a subset of one list". Reusing the
+   underline here would have read as a second, competing level of navigation. */
+.dshpet-settings .dshpet-subtabs{display:inline-flex;align-items:center;gap:2px;
+  padding:2px;border-radius:10px;align-self:flex-start;
+  background:var(--dsw-alias-bg-module-platform,#0000000a)}
+.dshpet-settings .dshpet-subtab{display:inline-flex;align-items:center;gap:6px;
+  box-sizing:border-box;height:28px;padding:0 12px;border:0;border-radius:8px;
+  background:0 0;cursor:pointer;font:400 13px/20px var(--dsw-font-family,inherit);
+  color:var(--dsw-alias-label-secondary,#61666b)}
+.dshpet-settings .dshpet-subtab:hover{color:var(--dsw-alias-label-primary,#0f1115)}
+.dshpet-settings .dshpet-subtab[aria-selected="true"]{
+  background:var(--dsw-alias-bg-layer-3,#fff);
+  color:var(--dsw-alias-label-primary,#0f1115);font-weight:500}
+.dshpet-settings .dshpet-subtab:focus-visible{
+  outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:1px}
+/* The count rides the tab so an empty group is visible before it is opened. */
+.dshpet-settings .dshpet-subtab-count{font-size:11px;font-variant-numeric:tabular-nums;
+  color:var(--dsw-alias-label-tertiary,#8f959e)}
+.dshpet-settings .dshpet-subtab[aria-selected="true"] .dshpet-subtab-count{
+  color:var(--dsw-alias-label-secondary,#61666b)}
+
 /* Collapsible group.
 
    Not every group is a control the user came for: import instructions, file
@@ -352,12 +377,16 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
   align-items:flex-end;flex-wrap:wrap}
 .dshpet-settings .dshpet-row .dshpet-field{flex:1;min-width:140px}
 
+/* Also applied to an "a" (the "打开飞书" AppLink), so the anchor defaults a
+   button does not carry — underline, visited colour, inherited link blue —
+   are neutralised here rather than in a separate variant. */
 .dshpet-settings .dshpet-action{box-sizing:border-box;display:inline-flex;
   align-items:center;justify-content:center;gap:4px;height:32px;padding:0 14px;
-  border-radius:16px;cursor:pointer;
+  border-radius:16px;cursor:pointer;text-decoration:none;white-space:nowrap;
   border:.5px solid var(--dsw-alias-border-l3,#0000001f);
   background:0 0;color:var(--dsw-alias-label-primary,#0f1115);
   font:400 13px/20px var(--dsw-font-family,inherit)}
+.dshpet-settings a.dshpet-action:visited{color:var(--dsw-alias-label-primary,#0f1115)}
 .dshpet-settings .dshpet-action:hover:not(:disabled){
   background:var(--dsw-alias-interactive-bg-hover,#0000000a)}
 .dshpet-settings .dshpet-action:disabled{opacity:.45;cursor:not-allowed}
