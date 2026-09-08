@@ -258,12 +258,40 @@ async function initialize(
 
   // Compare stored archive state against the durable archived set before any
   // new Invocation is accepted.
+  //
+  // The probe extends the set comparison with DELETION: a session can be gone
+  // from disk without ever having been archived, and without this a Task
+  // bound to it sat in `recovering` forever. `observeSession` reads persisted
+  // state, so it is the check that separates this from a merely unloaded
+  // session — verified against the actual failure (send-cr: three executors
+  // absent from both disk and the archive ledger). Probing is best-effort:
+  // a transient probe failure keeps the Task active rather than destroying
+  // it on a flaky service.
+  const probeExecutor = async (sessionId: string): Promise<boolean> => {
+    const query = ctx.get('sessionQuery') as
+      | {
+          observeSession(
+            id: string,
+            options: { projectionMode: 'all' },
+          ): Promise<{ [Symbol.dispose]?: () => void }>
+        }
+      | undefined
+    if (query === undefined) return true
+    try {
+      const observation = await query.observeSession(sessionId, { projectionMode: 'all' })
+      observation[Symbol.dispose]?.()
+      return true
+    } catch {
+      return false
+    }
+  }
   await lifecycle.contain('Pet archive reconciliation', () =>
     reconcileArchives(
       repository,
       new Set(
         (ctx.workspaceRegistry.archivedSessionIds as readonly string[]).map(id => String(id)),
       ),
+      probeExecutor,
     ),
   )
 
@@ -278,9 +306,11 @@ async function initialize(
   }
 
   // Live archive edges, not just the startup snapshot: a user archiving an
-  // executor natively must be reflected without waiting for a restart.
+  // executor natively must be reflected without waiting for a restart. The
+  // same probe as startup reconciliation runs on every edge, so a DELETED
+  // executor is also settled live — not just on the next restart.
   ctx.effect(
-    () => registerArchiveObserver(ctx, repository, archiveSink),
+    () => registerArchiveObserver(ctx, repository, archiveSink, probeExecutor),
     'dsh-pet: observe durable archive lifecycle',
   )
 

@@ -363,3 +363,69 @@ describe('archiving the executor settles a recovering Task', () => {
     expect(harness.repository.getTask(task.id)?.archivedAt).toBeUndefined()
   })
 })
+
+describe('a DELETED executor (never archived) settles too', () => {
+  it('ends a recovering Task whose session vanished without being archived', async () => {
+    harness = await openPetHarness()
+    const task = await harness.repository.createTask({
+      scopeKey: 'session:src-3',
+      sourceKind: 'session',
+      sourceId: 'src-3',
+      executorSessionId: 'exec-3',
+    } as never)
+    await harness.repository.appendInvocation({
+      id: 'inv-b',
+      taskId: task.id,
+      clientInvocationId: 'client-b',
+      capabilityId: 'send-cr',
+      skillName: 'send-cr',
+      snapshotId: 'snap-2',
+      status: 'recovering',
+      epoch: task.epoch,
+      createdAt: Date.now(),
+    } as never)
+    await harness.repository.setTaskStatus(task.id, 'recovering', 'stranded')
+
+    // The session is absent from the archived set AND absent from disk:
+    // that is deletion, the exact situation reported for send-cr.
+    await reconcileArchives(harness.repository, new Set(), async id => id !== 'exec-3')
+
+    expect(harness.repository.getTask(task.id)?.archivedAt).toBeDefined()
+    expect(harness.repository.getInvocation('inv-b')?.status).toBe('failed')
+    // The diagnostic states the expected next action, not just the cause.
+    expect(harness.repository.getTask(task.id)?.diagnostic).toContain('再次点击')
+  })
+
+  it('leaves the Task active when the probe is merely unavailable', async () => {
+    harness = await openPetHarness()
+    const task = await harness.repository.createTask({
+      scopeKey: 'session:src-4',
+      sourceKind: 'session',
+      sourceId: 'src-4',
+      executorSessionId: 'exec-4',
+    } as never)
+    await harness.repository.setTaskStatus(task.id, 'recovering', 'stranded')
+
+    // A transient probe failure must not destroy a Task on a flaky service.
+    await reconcileArchives(harness.repository, new Set(), async () => {
+      throw new Error('service down')
+    })
+
+    expect(harness.repository.getTask(task.id)?.archivedAt).toBeUndefined()
+  })
+
+  it('treats an archived session as before when no probe is given', async () => {
+    harness = await openPetHarness()
+    const task = await harness.repository.createTask({
+      scopeKey: 'session:src-5',
+      sourceKind: 'session',
+      sourceId: 'src-5',
+      executorSessionId: 'exec-5',
+    } as never)
+    await harness.repository.setTaskStatus(task.id, 'recovering', 'stranded')
+
+    await reconcileArchives(harness.repository, new Set(['exec-5']))
+
+    expect(harness.repository.getTask(task.id)?.archivedAt).toBeDefined()
+  })
+})

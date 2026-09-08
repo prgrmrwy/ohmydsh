@@ -28,6 +28,18 @@ export interface ArchiveSink {
   archiveSession(sessionId: string): Promise<void>
 }
 
+/**
+ * Probe whether a session still exists on disk.
+ *
+ * `sessionQuery.observeSession` reads PERSISTED state, so it is the only
+ * check that separates "unloaded" (DSH unloads idle sessions; resumable)
+ * from "deleted" (gone from disk; not resumable). It rejects for a session
+ * that no longer exists.
+ * @param sessionId - The session to probe.
+ * @returns whether the session exists.
+ */
+export type SessionProbe = (sessionId: string) => Promise<boolean>
+
 /** One reconciliation decision, for diagnostics and tests. */
 export interface ArchiveOutcome {
   readonly taskId: string
@@ -37,6 +49,7 @@ export interface ArchiveOutcome {
     | 'executor-archived'
     | 'kept-active'
     | 'noop'
+    | 'task-lost'
   readonly diagnostic?: string
 }
 
@@ -52,6 +65,7 @@ export interface ArchiveOutcome {
 export async function reconcileArchives(
   repository: PetRepository,
   archivedSessionIds: ReadonlySet<string>,
+  probe?: SessionProbe,
 ): Promise<readonly ArchiveOutcome[]> {
   const outcomes: ArchiveOutcome[] = []
 
@@ -70,7 +84,29 @@ export async function reconcileArchives(
     if (task.archivedAt !== undefined) continue
 
     // --- executor side ----------------------------------------------------
-    if (!archivedSessionIds.has(task.executorSessionId)) continue
+    // Deletion, not only archival, strands a Task. `archivedSessionIds`
+    // never contains a session that was DELETED — deletion is what happens to
+    // a session that was never archived, or whose archive was later purged —
+    // so without this probe such a Task sat in `recovering` forever, its
+    // status reporting a work reason while the real cause was that its
+    // executor no longer exists. The probe reads PERSISTED state, which is
+    // the only thing that separates this from a merely unloaded session.
+    //
+    // `probe` is optional so existing callers and tests can keep behaving as
+    // before; when absent, only the archived set is consulted.
+    // Reason needs to be distinguishable later: an archived session is a
+    // known, accounted-for loss; a probed-missing one is an unaccounted
+    // deletion (the situation the user hit, and the one that needs the
+    // "click again" message).
+    const wasArchived = archivedSessionIds.has(task.executorSessionId)
+    let wasDeleted = false
+    if (!wasArchived && probe !== undefined && !TERMINAL_TASK_STATUSES.includes(task.status)) {
+      // A probe failure is NOT evidence of deletion: it may be a transient
+      // service problem, so fall back to "exists" (keep the Task active)
+      // rather than destroying it on a flaky probe.
+      wasDeleted = !(await probe(task.executorSessionId).catch(() => true))
+    }
+    if (!wasArchived && !wasDeleted) continue
 
     if (TERMINAL_TASK_STATUSES.includes(task.status)) {
       await repository.archiveTask(task.id)
@@ -78,30 +114,47 @@ export async function reconcileArchives(
       continue
     }
 
-    // `recovering` is the one non-terminal status the executor's archival
-    // does settle: the work was already unprovable, and the session it would
-    // resume into is now gone, so nothing can ever advance it. Leaving it
-    // active strands the Task — its slot stays occupied and every later
-    // capability queues behind it forever.
+    // `recovering` is the one non-terminal status a lost executor settles:
+    // the work was already unprovable, and the session it would resume into
+    // is now gone, so nothing can ever advance it. Leaving it active strands
+    // the Task — its slot stays occupied and every later capability queues
+    // behind it forever.
     if (task.status === 'recovering') {
       for (const invocation of repository.listInvocations(task.id)) {
         if (!TERMINAL_INVOCATION_STATUSES.includes(invocation.status)) {
           await repository.setInvocationStatus(invocation.id, 'failed')
         }
       }
+      // The diagnostic states the EXPECTED NEXT ACTION when the session was
+      // deleted, so the user running into the send-cr failure is told to
+      // click again rather than left with a cause and no path forward.
+      // Archived and deleted share the same disposition, but not the same
+      // message — archival was accounted for, deletion was not.
       await repository.setTaskStatus(
         task.id,
         'failed',
-        `Executor session ${task.executorSessionId} was archived while this Task was ` +
-          'recovering, so its work can no longer be resumed.',
+        wasDeleted
+          ? `Executor session ${task.executorSessionId} no longer exists, so this ` +
+            'Task was ended rather than left stuck. 再次点击该能力将创建新的 Task。'
+          : `Executor session ${task.executorSessionId} was archived while this Task was ` +
+            'recovering, so its work can no longer be resumed.',
       )
       await repository.archiveTask(task.id)
-      outcomes.push({ taskId: task.id, action: 'task-archived' })
+      outcomes.push({
+        taskId: task.id,
+        action: wasDeleted ? 'task-lost' : 'task-archived',
+        ...(wasDeleted
+          ? {
+              diagnostic: `Executor session ${task.executorSessionId} no longer exists`,
+            }
+          : {}),
+      })
       continue
     }
 
     // Any other non-terminal status: keep the Task active and visible.
-    // Archiving the executor externally is not proof the work was cancelled.
+    // Archiving (or deleting) the executor externally is not proof the work
+    // was cancelled.
     const diagnostic =
       `Executor session ${task.executorSessionId} was archived while this Task was ` +
       `${task.status}. The Task remains active; cancel it explicitly or recover the ` +
@@ -178,6 +231,7 @@ export function registerArchiveObserver(
   ctx: Context,
   repository: PetRepository,
   sink: ArchiveSink,
+  probe?: SessionProbe,
 ): () => void {
   void sink
   let previous = new Set(ctx.workspaceRegistry.archivedSessionIds.map(String))
@@ -186,7 +240,7 @@ export function registerArchiveObserver(
   const enqueue = (archived: ReadonlySet<string>): void => {
     tail = tail
       .then(async () => {
-        await reconcileArchives(repository, archived)
+        await reconcileArchives(repository, archived, probe)
       })
       .catch((error: unknown) => {
         ctx.logger.warn(
