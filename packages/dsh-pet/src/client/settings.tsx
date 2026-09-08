@@ -28,7 +28,7 @@ import {
   type PetSizeId,
 } from './accent.js'
 import { petApi, type PetConfig } from './api.js'
-import { PET_EXECUTOR_PRESET } from '../wire.js'
+import { PET_EXECUTOR_PRESET, chatAppLink, routeGroupOf } from '../wire.js'
 import { WHEEL_CAPACITY } from './wheel.js'
 import type {
   PetEnvRecord,
@@ -36,6 +36,7 @@ import type {
   PetSkillRevision,
   PetChannelPhase,
   PetChannelView,
+  PetRouteGroup,
   PetSkillSelection,
   PetWorkspaceChoice,
 } from '../wire.js'
@@ -1450,6 +1451,27 @@ export function watchChannelTransition(
   }
 }
 
+/** Route groups, in the order the settings page offers them. */
+const ROUTE_GROUPS = ['qa', 'workspace', 'direct'] as const
+
+const ROUTE_GROUP_LABELS: Record<PetRouteGroup, string> = {
+  qa: '答疑群',
+  workspace: '工作区群',
+  direct: '单聊',
+}
+
+/**
+ * What an empty group means, stated per group.
+ *
+ * A shared "no routes" line would be unhelpful here: each group is empty for
+ * its own reason, and only one of them is something the user can act on.
+ */
+const ROUTE_GROUP_EMPTY: Record<PetRouteGroup, string> = {
+  qa: '还没有答疑群。从浮层轮盘的「答疑群」可以基于当前会话创建一个。',
+  workspace: '还没有群聊绑定。有人在群里 @Bot 后会自动出现一行。',
+  direct: '还没有单聊。allowlist 中的成员与 Bot 单聊即可触发，无需 @。',
+}
+
 const CHANNEL_PHASE_LABELS: Record<PetChannelPhase, string> = {
   stopped: '未启动',
   starting: '启动中',
@@ -1472,6 +1494,10 @@ function ChannelTab(): JSX.Element {
   const [appId, setAppId] = useState('')
   const [appSecret, setAppSecret] = useState('')
   const [allowInput, setAllowInput] = useState('')
+  // No default group is chosen here: an unset tab means "follow the data", so
+  // the section opens on a group that actually has routes rather than on an
+  // empty one. An explicit click pins the choice.
+  const [routeTab, setRouteTab] = useState<PetRouteGroup | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
 
   const refresh = useCallback(async () => {
@@ -1547,6 +1573,14 @@ function ChannelTab(): JSX.Element {
   const binding = view.binding
   const allowList = view.allowOpenIds
   const doneSteps = view.onboarding.steps.filter(step => step.complete).length
+  // Fall back to the first group that has any routes, so a deployment using
+  // only QA groups (or only direct chats) does not open on an empty list and
+  // read as "no routes at all".
+  const activeRouteTab =
+    routeTab ??
+    ROUTE_GROUPS.find(group => view.routes.some(item => routeGroupOf(item) === group)) ??
+    'qa'
+  const visibleRoutes = view.routes.filter(item => routeGroupOf(item) === activeRouteTab)
 
   return (
     <div className="dshpet-settings">
@@ -1855,99 +1889,150 @@ function ChannelTab(): JSX.Element {
             还没有会话记录。第一次有人在群里 @Bot（或单聊发消息）后，这里会自动出现一行。
           </p>
         ) : (
-          // A card per chat. As flex rows, the name, the kind, the workspace
-          // picker and Remove all sat on one line at the same weight, so a
-          // handful of routes read as an unparseable wall.
-          <ul className="dshpet-cards">
-            {view.routes.map(route => {
-              const invalidated =
-                route.kind === 'qa' && route.qaInvalidatedAt !== undefined
-              return (
-                <li key={route.chatId} className="dshpet-card">
-                  <div className="dshpet-card-head">
-                    <span className="dshpet-card-name">
-                      {route.chatName ?? route.chatId}
-                    </span>
-                    {route.chatType === 'p2p' ? (
-                      <span className="dshpet-status">单聊</span>
-                    ) : null}
-                    <span className="dshpet-status">
-                      {route.kind === 'qa'
-                        ? '答疑群'
-                        : route.boundBy === 'auto'
-                          ? '自动绑定'
-                          : '手动绑定'}
-                    </span>
-                    {invalidated ? (
-                      <span className="dshpet-status" data-tone="danger">
-                        已失效
-                      </span>
-                    ) : null}
-                    <div className="dshpet-card-tail">
-                      <button
-                        type="button"
-                        className="dshpet-action dshpet-action-sm dshpet-action-danger"
-                        onClick={() =>
-                          void mutate({ action: 'remove-chat', chatId: route.chatId })
-                        }
-                      >
-                        移除
-                      </button>
-                    </div>
-                  </div>
-                  {/*
-                    A qa group routes to its fork child, not to a workspace.
-                    Offering the picker would imply it can be re-pointed, which
-                    would discard the child holding the inherited context — the
-                    Host refuses that anyway, so the UI must not suggest it.
-                  */}
-                  {route.kind === 'qa' ? (
-                    <>
-                      <p className="dshpet-item-hint">
-                        绑定会话 {route.qaParentSessionId ?? '（未知）'}
-                        {/*
-                          A bound group is one Pet joined, not one it built: it
-                          is neither creator nor owner there and can manage
-                          nothing. Saying so prevents the reasonable-but-wrong
-                          assumption that Pet could rename or clean up such a
-                          group.
-                        */}
-                        {route.qaOrigin === 'bound' ? '（绑定既有群，Pet 非群主）' : ''}
-                      </p>
-                      {invalidated ? (
-                        <p className="dshpet-callout" data-tone="warn">
-                          {route.qaInvalidatedReason ?? '源会话不可用'}
-                        </p>
-                      ) : null}
-                    </>
-                  ) : (
-                    <div className="dshpet-field">
-                      <span>工作区</span>
-                      {/* Was a bare `<select>`, rendering as a native control
-                          amid styled ones. */}
-                      <select
-                        className="dshpet-input"
-                        value={route.workspaceId ?? ''}
-                        onChange={event =>
-                          void mutate({
-                            action: 'rebind-chat',
-                            chatId: route.chatId,
-                            workspaceId: event.target.value,
-                          })
-                        }
-                      >
-                        {workspaces.map(workspace => (
-                          <option key={workspace.id} value={workspace.id}>
-                            {workspace.title ?? workspace.id}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                </li>
-              )
-            })}
-          </ul>
+          <>
+            {/* Three groups, because `kind` and `chatType` are independent
+                axes and neither alone partitions the list: a QA group routes
+                to a fork child, a workspace group and a p2p conversation both
+                route to a workspace but behave differently (a group needs an
+                @mention, a direct chat triggers on every message and is the
+                only kind Pet replies to in text). */}
+            <div className="dshpet-subtabs" role="tablist" aria-label="会话路由分类">
+              {ROUTE_GROUPS.map(group => {
+                const count = view.routes.filter(
+                  item => routeGroupOf(item) === group,
+                ).length
+                return (
+                  <button
+                    key={group}
+                    type="button"
+                    role="tab"
+                    aria-selected={activeRouteTab === group}
+                    className="dshpet-subtab"
+                    onClick={() => setRouteTab(group)}
+                  >
+                    {ROUTE_GROUP_LABELS[group]}
+                    <span className="dshpet-subtab-count">{count}</span>
+                  </button>
+                )
+              })}
+            </div>
+            {visibleRoutes.length === 0 ? (
+              <p className="dshpet-empty">{ROUTE_GROUP_EMPTY[activeRouteTab]}</p>
+            ) : (
+              // A card per chat. As flex rows, the name, the kind, the
+              // workspace picker and Remove all sat on one line at the same
+              // weight, so a handful of routes read as an unparseable wall.
+              <ul className="dshpet-cards">
+                {visibleRoutes.map(route => {
+                  const invalidated =
+                    route.kind === 'qa' && route.qaInvalidatedAt !== undefined
+                  const appLink = chatAppLink(route.chatId)
+                  return (
+                    <li key={route.chatId} className="dshpet-card">
+                      <div className="dshpet-card-head">
+                        <span className="dshpet-card-name">
+                          {route.chatName ?? route.chatId}
+                        </span>
+                        {/* The kind is already the selected tab, so only the
+                            facts the tab does NOT imply are worth a pill. */}
+                        {route.kind !== 'qa' ? (
+                          <span className="dshpet-status">
+                            {route.boundBy === 'auto' ? '自动绑定' : '手动绑定'}
+                          </span>
+                        ) : null}
+                        {invalidated ? (
+                          <span className="dshpet-status" data-tone="danger">
+                            已失效
+                          </span>
+                        ) : null}
+                        <div className="dshpet-card-tail">
+                          {/*
+                            A generic AppLink, built from the chat id Pet
+                            already holds. Deliberately not the share link
+                            from `im chats link`: that is a write call needing
+                            membership (and owner/admin rights when sharing is
+                            restricted), it burns a validity period, and its
+                            API refuses p2p conversations outright — so it
+                            could not serve this row at all.
+                          */}
+                          {appLink !== undefined ? (
+                            <a
+                              className="dshpet-action dshpet-action-sm"
+                              href={appLink}
+                              target="_blank"
+                              rel="noreferrer"
+                              title="在飞书中打开"
+                            >
+                              打开飞书
+                            </a>
+                          ) : null}
+                          <button
+                            type="button"
+                            className="dshpet-action dshpet-action-sm dshpet-action-danger"
+                            onClick={() =>
+                              void mutate({ action: 'remove-chat', chatId: route.chatId })
+                            }
+                          >
+                            移除
+                          </button>
+                        </div>
+                      </div>
+                      {/*
+                        A qa group routes to its fork child, not to a
+                        workspace. Offering the picker would imply it can be
+                        re-pointed, which would discard the child holding the
+                        inherited context — the Host refuses that anyway, so
+                        the UI must not suggest it.
+                      */}
+                      {route.kind === 'qa' ? (
+                        <>
+                          <p className="dshpet-item-hint">
+                            绑定会话 {route.qaParentSessionId ?? '（未知）'}
+                            {/*
+                              A bound group is one Pet joined, not one it
+                              built: it is neither creator nor owner there and
+                              can manage nothing. Saying so prevents the
+                              reasonable-but-wrong assumption that Pet could
+                              rename or clean up such a group.
+                            */}
+                            {route.qaOrigin === 'bound' ? '（绑定既有群，Pet 非群主）' : ''}
+                          </p>
+                          {invalidated ? (
+                            <p className="dshpet-callout" data-tone="warn">
+                              {route.qaInvalidatedReason ?? '源会话不可用'}
+                            </p>
+                          ) : null}
+                        </>
+                      ) : (
+                        <div className="dshpet-field">
+                          <span>工作区</span>
+                          {/* Was a bare `<select>`, rendering as a native
+                              control amid styled ones. */}
+                          <select
+                            className="dshpet-input"
+                            value={route.workspaceId ?? ''}
+                            onChange={event =>
+                              void mutate({
+                                action: 'rebind-chat',
+                                chatId: route.chatId,
+                                workspaceId: event.target.value,
+                              })
+                            }
+                          >
+                            {workspaces.map(workspace => (
+                              <option key={workspace.id} value={workspace.id}>
+                                {workspace.title ?? workspace.id}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </>
         )}
       </Group>
 
