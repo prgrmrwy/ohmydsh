@@ -189,59 +189,215 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
   .dshpet-panel{width:calc(100vw - 32px)}
 }
 
-/* Settings rhythm mirroring the shipped DSH sections (ui-theme's AppearanceRow):
-   a bordered group per heading, 8px internal gap, 16px vertical padding.
-   Every selector stays under an owned dshpet- class and targets an owned
-   class, so nothing here can reach a DSH element. */
-.dshpet-settings .dshpet-group{border-bottom:1px solid var(--dsw-alias-border-l2,#1f232914);
-  display:flex;flex-direction:column;gap:8px;padding:16px 0}
+/* ─────────────────────────────────────────────────────────────────────────
+   Settings surface.
+
+   The rhythm mirrors the shipped DSH settings sections rather than inventing
+   one: "dsh-client-ui-settings-plugins" underlines its active tab instead of
+   filling a chip, "dsh-client-ui-settings-models" groups related controls in
+   a ".5px" bordered card at radius 16, and "dsh-client-ui-theme" separates
+   stacked groups with a ".5px" divider. Pet had none of that — every tab was
+   one flat, undifferentiated column of rows at a single visual weight, so
+   nothing indicated which control belonged to which concern.
+
+   Three depth levels carry that hierarchy now, and they are the whole system:
+
+     1. tab strip   — underlined, 13px, the page's top-level switch
+     2. group       — a titled section; collapsible when it is reference
+                      material rather than a primary control
+     3. card / row  — one bordered object inside a group (a Skill, an
+                      env var, an onboarding step, a chat route)
+
+   Every selector stays under an owned "dshpet-" class and targets an owned
+   class, so nothing here can reach a DSH element.
+   ───────────────────────────────────────────────────────────────────────── */
+.dshpet-settings{font:400 14px/22px var(--dsw-font-family,inherit);
+  color:var(--dsw-alias-label-primary,#0f1115);max-width:760px;
+  display:flex;flex-direction:column;gap:2px}
+
+/* Tab strip: an underline marks the active tab, matching the shipped plugins
+   settings section. The old filled chip read as a button rather than as
+   navigation, and at 12px it competed with the group titles below it. */
+.dshpet-settings-tabs{display:flex;align-items:flex-end;gap:22px;
+  margin:0 0 4px;border-bottom:.5px solid var(--dsw-alias-border-l2,#1f232914)}
+.dshpet-settings-tab{position:relative;border:0;background:0 0;font:inherit;
+  font-size:13px;line-height:20px;padding:7px 1px 9px;cursor:pointer;
+  color:var(--dsw-alias-label-tertiary,#8f959e)}
+.dshpet-settings-tab:hover,
+.dshpet-settings-tab[aria-selected="true"]{color:var(--dsw-alias-label-primary,#0f1115)}
+.dshpet-settings-tab[aria-selected="true"]::after{content:"";position:absolute;
+  left:0;right:0;bottom:-1px;height:2px;border-radius:2px 2px 0 0;
+  background:var(--dsw-alias-label-primary,#0f1115)}
+.dshpet-settings-tab:focus-visible{border-radius:2px;
+  color:var(--dsw-alias-label-primary,#0f1115);
+  outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:2px}
+
+/* A group is a titled section. The divider is ".5px" like DSH's own, not the
+   heavier 1px rule Pet used, so stacked groups separate without banding. */
+.dshpet-settings .dshpet-group{display:flex;flex-direction:column;gap:8px;
+  padding:16px 0;border-bottom:.5px solid var(--dsw-alias-border-l2,#1f232914)}
 .dshpet-settings .dshpet-group:last-child{border-bottom:none}
 .dshpet-settings .dshpet-group-title{margin:0;
-  font:400 14px/22px var(--dsw-font-family,inherit);
+  font:500 14px/22px var(--dsw-font-family,inherit);
   color:var(--dsw-alias-label-primary,#0f1115)}
+
+/* Collapsible group.
+
+   Not every group is a control the user came for: import instructions, file
+   health, security notes and effective-value tables are reference material
+   that dominated the page purely by being printed in full. "<details>" keeps
+   them one click away and, being native, needs no state, no ARIA wiring and
+   no keyboard handler of its own. Primary controls stay expanded. */
+.dshpet-settings .dshpet-fold{display:block;padding:0;gap:0}
+.dshpet-settings .dshpet-fold-head{display:flex;align-items:center;gap:8px;
+  list-style:none;cursor:pointer;padding:16px 0;
+  font:500 14px/22px var(--dsw-font-family,inherit);
+  color:var(--dsw-alias-label-primary,#0f1115)}
+.dshpet-settings .dshpet-fold-head::-webkit-details-marker{display:none}
+.dshpet-settings .dshpet-fold-head:focus-visible{border-radius:8px;
+  outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:2px}
+/* Own chevron rather than the platform triangle, which differs per browser
+   and cannot be positioned. It rotates to point down while open. */
+.dshpet-settings .dshpet-fold-mark{flex:none;width:14px;text-align:center;
+  font-size:11px;line-height:1;transition:transform .16s ease;
+  color:var(--dsw-alias-label-tertiary,#8f959e)}
+.dshpet-settings .dshpet-fold[open] .dshpet-fold-mark{transform:rotate(90deg)}
+.dshpet-settings .dshpet-fold-title{flex:1;min-width:0}
+/* A one-line summary of what is inside, so the group can be judged closed. */
+.dshpet-settings .dshpet-fold-note{flex:none;
+  font:var(--dsw-font-xxs-12,400 12px/18px inherit);
+  color:var(--dsw-alias-label-tertiary,#8f959e)}
+.dshpet-settings .dshpet-fold-body{display:flex;flex-direction:column;gap:8px;
+  padding:0 0 16px}
+
+/* Card: one bordered object inside a group — a Skill, an env var, a chat
+   route. Previously these were bare rows separated only by a top border, so a
+   list of them read as one undifferentiated block. */
+.dshpet-settings .dshpet-card{display:flex;flex-direction:column;gap:10px;
+  padding:12px 14px;border-radius:16px;
+  border:.5px solid var(--dsw-alias-border-l4,#0000001a);
+  background:var(--dsw-alias-bg-layer-3,#fff)}
+.dshpet-settings .dshpet-card-head{display:flex;align-items:center;gap:10px;
+  flex-wrap:wrap}
+.dshpet-settings .dshpet-card-name{min-width:0;
+  font:500 14px/22px var(--dsw-font-family,inherit);
+  color:var(--dsw-alias-label-primary,#0f1115)}
+/* Actions sit at the trailing edge so every card exposes the same hit line. */
+.dshpet-settings .dshpet-card-tail{display:inline-flex;align-items:center;
+  gap:4px;margin-left:auto}
+.dshpet-settings .dshpet-cards{display:flex;flex-direction:column;gap:8px;
+  margin:0;padding:0;list-style:none}
+
+/* Callout: a warning or a note that must not read as body prose. Pet used
+   ".dshpet-error" (plain red text) for security warnings, which looked like a
+   failure that had already happened rather than a caution. */
+.dshpet-settings .dshpet-callout{display:flex;flex-direction:column;gap:4px;
+  padding:10px 12px;border-radius:12px;
+  font:var(--dsw-font-xxs-12,400 12px/18px inherit);
+  background:var(--dsw-alias-bg-module-platform,#0000000a);
+  color:var(--dsw-alias-label-secondary,#61666b)}
+.dshpet-settings .dshpet-callout[data-tone="warn"]{
+  background:var(--dsw-alias-state-warn-secondary,#ff8f1c1a);
+  color:var(--dsw-alias-state-warn-label,#8f5100)}
+.dshpet-settings .dshpet-callout[data-tone="danger"]{
+  background:var(--dsw-alias-state-error-secondary,#f54a451a);
+  color:var(--dsw-alias-state-error-primary,#f54a45)}
+
 /* Stack each label above its control: side-by-side labels made the inputs
    crowd their own text and left the column ragged. */
 .dshpet-settings .dshpet-field{display:flex;flex-direction:column;gap:4px;min-width:0;
   font:400 14px/22px var(--dsw-font-family,inherit);
   color:var(--dsw-alias-label-secondary,#61666b)}
 .dshpet-settings .dshpet-input{width:100%;max-width:360px;box-sizing:border-box;
-  height:28px;padding:0 8px;font:inherit;font-size:14px;
+  height:34px;padding:0 12px;font:inherit;font-size:13px;
   color:var(--dsw-alias-label-primary,#1f2329);
-  background:var(--dsw-alias-bg-layer-1,#fff);
-  border:1px solid var(--dsw-alias-border-l2,#0000001a);border-radius:8px;outline:none}
+  background:var(--dsw-alias-bg-layer-3,#fff);
+  border:.5px solid var(--dsw-alias-border-l4,#0000001a);border-radius:8px;outline:none}
 .dshpet-settings .dshpet-input::placeholder{color:var(--dsw-alias-label-dimmed,#cfd3d6)}
 .dshpet-settings .dshpet-input:focus,.dshpet-settings .dshpet-input:focus-visible{
   border-color:var(--dsw-alias-state-business-primary,#4176e6)}
+/* A checkbox is not a text box: the shared input sizing stretched it into a
+   34px-tall block. */
+.dshpet-settings .dshpet-input[type="checkbox"]{width:16px;height:16px;
+  max-width:16px;padding:0;flex:none;accent-color:var(--dsw-alias-label-primary,#0f1115)}
+.dshpet-settings .dshpet-check{display:inline-flex;align-items:center;gap:8px;
+  font:400 14px/22px var(--dsw-font-family,inherit);
+  color:var(--dsw-alias-label-primary,#0f1115);cursor:pointer}
 /* Two related controls share a row without stretching the whole column. */
 .dshpet-settings .dshpet-row{display:flex;flex-direction:row;gap:12px;
   align-items:flex-end;flex-wrap:wrap}
 .dshpet-settings .dshpet-row .dshpet-field{flex:1;min-width:140px}
 
-/* Settings page typography follows DSH's own settings sections: 14px primary
-   text on 22px line height, 13px secondary, 28px controls, 8px stack gap.
-   The floating panel keeps its own compact scale — it is a HUD, not a page. */
-.dshpet-settings{font:400 14px/22px var(--dsw-font-family,inherit);
-  color:var(--dsw-alias-label-primary,#0f1115)}
 .dshpet-settings .dshpet-action{box-sizing:border-box;display:inline-flex;
-  align-items:center;justify-content:center;gap:4px;height:32px;padding:0 12px;
-  border-radius:16px;font:400 14px/22px var(--dsw-font-family,inherit)}
+  align-items:center;justify-content:center;gap:4px;height:32px;padding:0 14px;
+  border-radius:16px;cursor:pointer;
+  border:.5px solid var(--dsw-alias-border-l3,#0000001f);
+  background:0 0;color:var(--dsw-alias-label-primary,#0f1115);
+  font:400 13px/20px var(--dsw-font-family,inherit)}
+.dshpet-settings .dshpet-action:hover:not(:disabled){
+  background:var(--dsw-alias-interactive-bg-hover,#0000000a)}
+.dshpet-settings .dshpet-action:disabled{opacity:.45;cursor:not-allowed}
 .dshpet-settings .dshpet-item-hint{font:var(--dsw-font-xxs-12,400 12px/18px inherit);
-  max-width:560px}
-.dshpet-settings .dshpet-error{font:var(--dsw-font-xxs-12,400 12px/18px inherit)}
-.dshpet-settings .dshpet-empty{font:var(--dsw-font-xs-13,400 13px/20px inherit)}
-.dshpet-settings .dshpet-status{font-size:12px;line-height:18px}
+  color:var(--dsw-alias-label-tertiary,#8f959e);max-width:620px;margin:0}
+.dshpet-settings .dshpet-error{font:var(--dsw-font-xxs-12,400 12px/18px inherit);
+  color:var(--dsw-alias-state-error-primary,#f54a45)}
+.dshpet-settings .dshpet-empty{font:var(--dsw-font-xs-13,400 13px/20px inherit);
+  color:var(--dsw-alias-label-tertiary,#8f959e);padding:6px 0}
+/* Status pill, matching the badge shipped in the plugins settings section. */
+.dshpet-settings .dshpet-status{flex:none;white-space:nowrap;
+  padding:1px 8px;border-radius:999px;font-size:11px;font-weight:500;line-height:17px;
+  background:var(--dsw-alias-bg-module-platform,#0000000a);
+  color:var(--dsw-alias-label-secondary,#61666b)}
+.dshpet-settings .dshpet-status[data-tone="enabled"]{
+  background:var(--dsw-alias-state-success-secondary,#1a7f371a);
+  color:var(--dsw-alias-state-success-primary,#1a7f37)}
+.dshpet-settings .dshpet-status[data-tone="warn"]{
+  background:var(--dsw-alias-state-warn-secondary,#ff8f1c1a);
+  color:var(--dsw-alias-state-warn-label,#8f5100)}
+.dshpet-settings .dshpet-status[data-tone="danger"]{
+  background:var(--dsw-alias-state-error-secondary,#f54a451a);
+  color:var(--dsw-alias-state-error-primary,#f54a45)}
 /* Read-only value display: a binding shows its value until you choose Edit. */
 .dshpet-readonly{display:inline-flex;align-items:center;min-height:28px;padding:0 8px;
   font-size:14px;color:var(--dsw-alias-label-primary,#1f2329);
-  background:var(--dsw-alias-interactive-bg-hover,#0000000a);border-radius:6px}
+  background:var(--dsw-alias-bg-module-platform,#0000000a);border-radius:8px}
 .dshpet-readonly[data-empty="true"]{color:var(--dsw-alias-label-tertiary,#8f959e)}
+
+/* Ordered onboarding / allowlist / route lists. These carried no styles at
+   all, so they rendered with the browser's default disc markers and 40px
+   indent — the single most out-of-place thing on the Channel tab. */
+.dshpet-settings .dshpet-list{display:flex;flex-direction:column;gap:6px;
+  margin:0;padding:0;list-style:none}
+.dshpet-settings .dshpet-item{display:flex;align-items:center;gap:10px;
+  flex-wrap:wrap;min-width:0;padding:8px 12px;border-radius:12px;
+  border:.5px solid var(--dsw-alias-border-l4,#0000001a);
+  font:400 13px/20px var(--dsw-font-family,inherit)}
+/* A completed onboarding step is quieter than an outstanding one: the point
+   of the list is to show what is LEFT. */
+.dshpet-settings .dshpet-item[data-complete="true"]{
+  color:var(--dsw-alias-label-tertiary,#8f959e);border-color:transparent;
+  background:var(--dsw-alias-bg-module-platform,#0000000a)}
+.dshpet-settings .dshpet-step-mark{flex:none;width:16px;text-align:center}
+.dshpet-settings .dshpet-item[data-complete="true"] .dshpet-step-mark{
+  color:var(--dsw-alias-state-success-primary,#1a7f37)}
+.dshpet-settings .dshpet-item-text{flex:1;min-width:0}
+.dshpet-settings .dshpet-item .dshpet-action{margin-left:auto}
+/* Definition list for bot identity and connection facts. Bare "dl" markup
+   inherited the UA's 40px margin and stacked term over value. */
+.dshpet-settings .dshpet-kv{display:grid;grid-template-columns:auto 1fr;
+  gap:6px 16px;margin:0;align-items:baseline}
+.dshpet-settings .dshpet-kv dt{font-size:13px;
+  color:var(--dsw-alias-label-secondary,#61666b)}
+.dshpet-settings .dshpet-kv dd{margin:0;min-width:0;font-size:13px;
+  color:var(--dsw-alias-label-primary,#0f1115)}
+
 /* Environment rows: name + injected name, masked value, actions. The grid keeps
    the three columns aligned across both scopes and the effective view. */
 .dshpet-settings .dshpet-env-row{display:grid;
   grid-template-columns:minmax(140px,1fr) minmax(160px,1.4fr) auto;
-  gap:12px;align-items:center;padding:8px;border-radius:8px;
-  border:1px solid var(--dsw-alias-border-l2,#0000001a);
-  background:var(--dsw-alias-bg-layer-1,#fff)}
+  gap:12px;align-items:center;padding:10px 12px;border-radius:12px;
+  border:.5px solid var(--dsw-alias-border-l4,#0000001a);
+  background:var(--dsw-alias-bg-layer-3,#fff)}
 .dshpet-env-key{display:flex;flex-direction:column;gap:2px;min-width:0}
 .dshpet-env-name{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;
   color:var(--dsw-alias-label-primary,#1f2329);overflow:hidden;text-overflow:ellipsis}
@@ -254,16 +410,15 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
   color:var(--dsw-alias-label-primary,#1f2329)}
 .dshpet-settings .dshpet-reveal{flex:none;height:22px;padding:0 8px;font-size:11px;
   line-height:20px;border-radius:11px;cursor:pointer;
-  border:1px solid var(--dsw-alias-border-l2,#0000001a);
-  background:var(--dsw-alias-bg-layer-1,#fff);
-  color:var(--dsw-alias-label-secondary,#61666b)}
+  border:.5px solid var(--dsw-alias-border-l4,#0000001a);
+  background:0 0;color:var(--dsw-alias-label-secondary,#61666b)}
 .dshpet-settings .dshpet-reveal:hover{background:var(--dsw-alias-interactive-bg-hover,#0000000a)}
-.dshpet-badge-override{display:inline-block;margin-left:6px;padding:0 6px;height:18px;
-  line-height:18px;font-size:11px;border-radius:9px;white-space:nowrap;
+.dshpet-badge-override{display:inline-block;margin-left:6px;padding:0 8px;
+  line-height:17px;font-size:11px;font-weight:500;border-radius:999px;white-space:nowrap;
   background:var(--dsw-alias-state-business-primary,#4176e6);color:#fff}
-.dshpet-badge-shadowed{display:inline-block;margin-left:6px;padding:0 6px;height:18px;
-  line-height:18px;font-size:11px;border-radius:9px;white-space:nowrap;
-  background:var(--dsw-alias-interactive-bg-hover,#0000000a);
+.dshpet-badge-shadowed{display:inline-block;margin-left:6px;padding:0 8px;
+  line-height:17px;font-size:11px;border-radius:999px;white-space:nowrap;
+  background:var(--dsw-alias-bg-module-platform,#0000000a);
   color:var(--dsw-alias-label-tertiary,#8f959e)}
 /* A shadowed global entry stays visible but reads as inert, so the override is
    obvious without hiding what it replaced. */
@@ -280,8 +435,8 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-fact-value code{font-size:13px}
 /* In-app Host directory browser, used where no OS picker exists. */
 .dshpet-browser{display:flex;flex-direction:column;gap:8px;padding:12px;
-  border:1px solid var(--dsw-alias-border-l2,#0000001a);border-radius:8px;
-  background:var(--dsw-alias-bg-layer-1,#fff)}
+  border:.5px solid var(--dsw-alias-border-l4,#0000001a);border-radius:12px;
+  background:var(--dsw-alias-bg-layer-3,#fff)}
 .dshpet-crumbs{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
 .dshpet-browser-list{display:flex;flex-direction:column;gap:2px;
   max-height:220px;overflow:auto}
@@ -289,7 +444,7 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
    label. A single-class rule loses on specificity, which is why the entries
    rendered centered instead of as a left-aligned list. */
 .dshpet-settings .dshpet-browser-entry{justify-content:flex-start;text-align:left;
-  width:100%;background:0 0;height:32px;padding:0 8px;border-radius:6px;
+  width:100%;background:0 0;border:0;height:32px;padding:0 8px;border-radius:8px;
   color:var(--dsw-alias-label-primary,#0f1115)}
 .dshpet-settings .dshpet-browser-entry:hover{
   background:var(--dsw-alias-interactive-bg-hover,#0000000a)}
@@ -317,7 +472,7 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 /* Button variants. Two-level selectors, matching the settings action rule
    they must override — a single-class rule loses on specificity and the
    variant silently has no effect. */
-.dshpet-settings .dshpet-action-primary{
+.dshpet-settings .dshpet-action-primary{border-color:transparent;
   background:var(--dsw-alias-button-info-fill,#0f1115);
   color:#fff}
 .dshpet-settings .dshpet-action-primary:hover:not(:disabled){
@@ -329,16 +484,15 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
   background:var(--dsw-alias-interactive-bg-hover-danger,#ec13131a)}
 .dshpet-settings .dshpet-action-sm{height:28px;padding:0 10px;border-radius:14px;
   font:var(--dsw-font-xxs-12,400 12px/18px inherit)}
+.dshpet-settings .dshpet-actions{display:flex;gap:8px;flex-wrap:wrap;
+  align-items:center;margin-top:0}
 /* Inline code, for paths and identifiers. */
 .dshpet-code{display:inline-flex;align-items:center;padding:0 5px;border-radius:6px;
   font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:.875em;
-  background:var(--dsw-alias-interactive-bg-hover,#0000000a)}
+  background:var(--dsw-alias-bg-module-platform,#0000000a)}
 /* Installed-Skill row heading. */
 .dshpet-settings .dshpet-task-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .dshpet-settings .dshpet-task-name{
   font:var(--dsw-font-s-strong-14,500 14px/22px inherit);
   color:var(--dsw-alias-label-primary,#0f1115)}
-/* Enabled state must be visually distinct from not-enabled. */
-.dshpet-settings .dshpet-status[data-tone="enabled"]{
-  color:var(--dsw-alias-state-success-primary,#1a7f37)}
 `
