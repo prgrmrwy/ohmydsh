@@ -155,6 +155,14 @@ export interface PetChatRoute {
   /** Present on `workspace` bindings only. */
   readonly workspaceId?: string
   readonly activeTaskId?: string
+  /**
+   * Executor session of the active Task, when one exists.
+   *
+   * Projected alongside `activeTaskId` because a task id alone cannot be
+   * navigated to: the settings page offers "open the session" and needs the
+   * session id the shell actually routes on.
+   */
+  readonly activeExecutorSessionId?: string
   /** Present on `qa` bindings: the fork child serving the group. */
   readonly qaChildSessionId?: string
   /** Present on `qa` bindings: the source session the child was forked from. */

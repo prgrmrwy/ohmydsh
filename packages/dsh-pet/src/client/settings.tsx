@@ -577,6 +577,24 @@ export function setDirectoryPicker(
   directoryPicker = picker
 }
 
+/**
+ * Navigate to a native DSH session.
+ *
+ * Published by the client entry the same way the directory picker is: this
+ * section is registered as a bare component in a slot and never receives the
+ * client context, so the one shell capability it needs is handed in rather
+ * than reached for.
+ */
+let sessionOpener: ((sessionId: string) => void) | undefined
+
+/**
+ * Publish the session navigator.
+ * @param opener - Opens a session by id, or `undefined` where unsupported.
+ */
+export function setSessionOpener(opener: ((sessionId: string) => void) | undefined): void {
+  sessionOpener = opener
+}
+
 /** Skills: install, enable/disable, shortcut visibility and projection status. */
 function SkillsTab(): JSX.Element {
   const [state, setState] = useState<{
@@ -1927,6 +1945,16 @@ function ChannelTab(): JSX.Element {
                   const invalidated =
                     route.kind === 'qa' && route.qaInvalidatedAt !== undefined
                   const appLink = chatAppLink(route.chatId)
+                  // Which session this chat leads to. For a QA group that is
+                  // the PARENT it was forked from — the conversation the group
+                  // was opened onto, and the one worth reading. For any other
+                  // route it is the executor of its active Task, which exists
+                  // only once a message has actually raised work; until then
+                  // the button does not appear rather than leading nowhere.
+                  const sessionTarget =
+                    route.kind === 'qa'
+                      ? route.qaParentSessionId
+                      : route.activeExecutorSessionId
                   return (
                     <li key={route.chatId} className="dshpet-card">
                       <div className="dshpet-card-head">
@@ -1966,6 +1994,24 @@ function ChannelTab(): JSX.Element {
                               打开飞书
                             </a>
                           ) : null}
+                          {/*
+                            The other half of "where does this chat lead":
+                            Lark on one side, the DSH session on the other. A
+                            QA group is served by a fork child, so opening the
+                            PARENT is what lets the user read the conversation
+                            the group inherited. Only rendered when the id is
+                            known and the shell published a navigator.
+                          */}
+                          {sessionTarget !== undefined && sessionOpener !== undefined ? (
+                            <button
+                              type="button"
+                              className="dshpet-action dshpet-action-sm"
+                              title={`打开会话 ${sessionTarget}`}
+                              onClick={() => sessionOpener?.(sessionTarget)}
+                            >
+                              打开会话
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             className="dshpet-action dshpet-action-sm dshpet-action-danger"
@@ -1986,15 +2032,20 @@ function ChannelTab(): JSX.Element {
                       */}
                       {route.kind === 'qa' ? (
                         <>
+                          {/*
+                            The raw session id used to be printed here; "打开
+                            会话" now reaches it directly, so the line states
+                            only what the button cannot: whether Pet owns this
+                            group. A bound group is one Pet joined, not one it
+                            built — it is neither creator nor owner and can
+                            manage nothing there, which prevents the
+                            reasonable-but-wrong assumption that Pet could
+                            rename or clean it up.
+                          */}
                           <p className="dshpet-item-hint">
-                            绑定会话 {route.qaParentSessionId ?? '（未知）'}
-                            {/*
-                              A bound group is one Pet joined, not one it
-                              built: it is neither creator nor owner there and
-                              can manage nothing. Saying so prevents the
-                              reasonable-but-wrong assumption that Pet could
-                              rename or clean up such a group.
-                            */}
+                            {route.qaParentSessionId === undefined
+                              ? '绑定会话未知'
+                              : '已绑定到一个会话'}
                             {route.qaOrigin === 'bound' ? '（绑定既有群，Pet 非群主）' : ''}
                           </p>
                           {invalidated ? (

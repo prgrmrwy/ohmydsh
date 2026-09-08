@@ -188,3 +188,70 @@ describe('every chat offers a way into Lark', () => {
     expect(link.getAttribute('rel')).toBe('noreferrer')
   })
 })
+
+describe('a chat leads to its session, not just to Lark', () => {
+  it('opens the parent session a QA group was forked from', async () => {
+    const opened: string[] = []
+    const { setSessionOpener } = await import('../src/client/settings.js')
+    setSessionOpener(id => opened.push(id))
+    stubChannel(ROUTES)
+    const host = await mountChannel()
+
+    const open = [...host.querySelectorAll('button')].find(
+      item => item.textContent === '打开会话',
+    ) as HTMLButtonElement | undefined
+    await act(async () => {
+      open?.click()
+    })
+
+    // The parent, not the fork child: it is the conversation the group was
+    // opened onto and the one worth reading.
+    expect(opened).toEqual(['s1'])
+    setSessionOpener(undefined)
+  })
+
+  it('offers no session button where no session exists yet', async () => {
+    const { setSessionOpener } = await import('../src/client/settings.js')
+    setSessionOpener(() => {})
+    // A workspace group with no active Task has no executor to open.
+    stubChannel([ROUTES[1]])
+    const host = await mountChannel()
+
+    expect(
+      [...host.querySelectorAll('button')].some(item => item.textContent === '打开会话'),
+    ).toBe(false)
+    setSessionOpener(undefined)
+  })
+
+  it('opens the executor of an active Task for an ordinary chat', async () => {
+    const opened: string[] = []
+    const { setSessionOpener } = await import('../src/client/settings.js')
+    setSessionOpener(id => opened.push(id))
+    stubChannel([
+      { ...ROUTES[1], activeTaskId: 't1', activeExecutorSessionId: 'exec-9' },
+    ])
+    const host = await mountChannel()
+
+    const open = [...host.querySelectorAll('button')].find(
+      item => item.textContent === '打开会话',
+    ) as HTMLButtonElement | undefined
+    await act(async () => {
+      open?.click()
+    })
+
+    expect(opened).toEqual(['exec-9'])
+    setSessionOpener(undefined)
+  })
+
+  it('hides the button when the shell published no navigator', async () => {
+    const { setSessionOpener } = await import('../src/client/settings.js')
+    setSessionOpener(undefined)
+    stubChannel(ROUTES)
+    const host = await mountChannel()
+
+    // A deployment without session navigation must not render a dead control.
+    expect(
+      [...host.querySelectorAll('button')].some(item => item.textContent === '打开会话'),
+    ).toBe(false)
+  })
+})
