@@ -52,7 +52,12 @@ import { registerPetTools } from './host/tools.js'
 import { currentAllowlist } from './host/skill-provider.js'
 import { removeLegacyState } from './host/migrate.js'
 import { petDomainSpec } from './host/spec.js'
-import { PET_EXECUTOR_PRESET, QA_GROUP_ACTION_ID, STANDARD_PRESET } from './wire.js'
+import {
+  isForkChildTaskForm,
+  PET_EXECUTOR_PRESET,
+  QA_GROUP_ACTION_ID,
+  STANDARD_PRESET,
+} from './wire.js'
 import {
   ensurePetWorkspace,
   inspectWorkspace,
@@ -412,6 +417,25 @@ async function initialize(
     if (sessionId === undefined || view?.ctx === undefined) return
     const task = repository.findTaskByExecutor(String(sessionId))
     if (task === undefined || composedAgents.has(view.ctx as object)) return
+    // A `qa-chat` Task's "executor" is a fork CHILD of a user session, not a
+    // Pet root executor: it is composed and driven by DSH's subagent
+    // machinery, and its whole reason to exist is the tool surface it
+    // INHERITED from its parent. Pet must contribute nothing to it.
+    //
+    // This listener fires for every agent DSH publishes, and a QA child's
+    // session id is stored as `executorSessionId`, so without this guard the
+    // lookup above matched and Pet installed its scoped surface on the child:
+    //
+    // - `pet_context` became visible, so the model called it as instructed and
+    //   got `NO_CURRENT_INVOCATION` ("has no running or waiting Invocation") —
+    //   QA delivery queues a child turn directly and never creates an
+    //   Invocation record, so that lookup can never succeed for this form.
+    // - worse, a QA Task carries no `residentWorkspaceId` (always for `/bind`,
+    //   and whenever the source session is unfiled), so `includeAllowlist` was
+    //   true and the Pet allowlist provider REPLACED the child's inherited
+    //   Skill catalog — the exact boundary the spec forbids Pet to impose on
+    //   this form.
+    if (isForkChildTaskForm(task.sourceKind)) return
     try {
       installPetScope(view.ctx, task.residentWorkspaceId === undefined)
     } catch (error) {
