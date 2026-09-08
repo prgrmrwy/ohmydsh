@@ -110,14 +110,22 @@ export const PET_CSS = `
 .dshpet-wheel-item:focus-visible{position:static;width:auto;height:auto;margin:0;
   overflow:visible;clip:auto;white-space:normal;padding:6px 10px;border-radius:8px;
   pointer-events:auto;outline:2px solid var(--dsw-alias-state-business-primary,#4176e6)}
-/* Anchor the notes to the MASCOT's bottom edge, not the wheel box. The wheel
-   box is sized for the widest ring (356px), so a top:100% anchor parked the
-   note at that far edge — ~140px below the mascot when the wheel was empty,
-   which read as a stray tooltip. The wheel is centred on the fixed 72px root
-   box, so in wheel coordinates the note's top is the wheel centre (50%) plus
-   the mascot's offset from the root centre ((mascot − root)/2), plus the
-   mascot radius, plus an 8px gap. --dshpet-mascot-size is set inline on the
-   root by the overlay, matching the resizable mascot.
+/* Anchor the notes below the RINGS, not below the mascot and not to the wheel
+   box.
+
+   Two wrong anchors preceded this one. "top:100%" used the wheel BOX, which is
+   sized for the widest ring it could ever draw (356px), parking the note far
+   below a wheel that usually draws fewer rings. Anchoring to the mascot's
+   bottom edge fixed that but overcorrected: the mascot is only the innermost
+   72px of a disc that reaches 94px with one ring and 170px with three, so the
+   note sat ON TOP of the rings (44px from the centre against a 132px ring
+   edge in the two-ring case).
+
+   The correct clearance is the radius of the rings actually drawn, which the
+   overlay computes for its own hover test and publishes as
+   --dshpet-wheel-radius. The fallback is the one-ring radius rather than the
+   mascot, so a missing variable still clears something.
+
    Scoped to .dshpet-wheel and kept as a TWO-class selector on purpose: the
    note also carries dshpet-empty/dshpet-error, whose padding:6px 0 rules
    come later in source order at the same single-class specificity and
@@ -125,7 +133,11 @@ export const PET_CSS = `
    ("no margin" bug). */
 .dshpet-wheel .dshpet-wheel-note{pointer-events:auto;position:absolute;
   left:calc(50% + (var(--dshpet-mascot-size,72px) - 72px) / 2);
-  top:calc(50% + var(--dshpet-mascot-size,72px) - 72px / 2 + 8px);
+  top:calc(50% + var(--dshpet-wheel-radius,94px) + 12px);
+  /* The note is a "p": its UA margin (13px here) would add itself to the gap
+     above, making the computed clearance drift with the browser's default
+     rather than being the 12px this rule states. */
+  margin:0;
   transform:translateX(-50%);max-width:260px;padding:10px;
   border-radius:8px;background:var(--dsw-alias-bg-layer-1,#fff);
   box-shadow:0 8px 28px rgba(0,0,0,.22);font-size:13px;line-height:20px}

@@ -298,14 +298,36 @@ describe('overlay styles', () => {
     expect(PET_CSS).toContain('.dshpet-wheel-item:focus-visible')
   })
 
-  it('anchors wheel notes to the mascot edge, not the wheel box', () => {
-    // The wheel box is sized for its widest ring (356px); `top:100%` parked
-    // the note at that far edge, ~140px below the mascot (the reported bug:
-    // the empty hint appeared far from the pet).
+  it('clears the drawn rings instead of covering them', () => {
+    // Two wrong anchors preceded this. `top:100%` used the wheel BOX, sized
+    // for the widest ring it could ever draw (356px), parking the note far
+    // below a wheel that usually draws fewer. Anchoring to the mascot's edge
+    // overcorrected: the mascot is only the innermost 72px of a disc reaching
+    // 170px, so the note landed ON the rings (measured in Chrome: 37–113px of
+    // overlap depending on ring count).
     const noteRule = PET_CSS.match(/\.dshpet-wheel \.dshpet-wheel-note\{[^}]*\}/)?.[0] ?? ''
-    expect(noteRule).toContain('--dshpet-mascot-size')
+    // The clearance must follow the rings ACTUALLY drawn, which only the
+    // overlay knows; it publishes the radius it already computes for its own
+    // hover test.
+    expect(noteRule).toContain('--dshpet-wheel-radius')
     expect(noteRule).toContain('top:calc(50%')
     expect(noteRule).not.toContain('top:100%')
+    // A `p` carries a UA margin that would silently add itself to the gap.
+    expect(noteRule).toContain('margin:0')
+  })
+
+  it('publishes the drawn ring radius the note anchors to', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // The CSS cannot compute this: the radius depends on how many rings the
+    // capability list produced. Publishing the value the overlay already uses
+    // for `hoverRadius` keeps the visible edge and the note in agreement.
+    expect(overlay).toContain("'--dshpet-wheel-radius'")
+    expect(overlay).toContain('${wheelRadius}px')
   })
 
   it('scopes the note rule above the shared empty/error paddings', () => {
@@ -1743,5 +1765,26 @@ describe('session titles come from the title service, not the header', () => {
     // that looks like "bind picked the wrong session".
     expect(index).not.toContain('header?.title')
     expect(index).toContain('ctx.sessionTitle.get(session)')
+  })
+})
+
+describe('the stylesheet stays a valid template literal', () => {
+  it('contains no backtick inside PET_CSS', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const source = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'styles.ts'),
+      'utf8',
+    )
+
+    // `PET_CSS` is a template literal, so a backtick anywhere inside it —
+    // including in a prose comment quoting a class or token name — terminates
+    // the string early. The failure mode is nasty: `tsdown` parses it as
+    // broken TypeScript AFTER `npm run clean` has already deleted `lib/`, so
+    // the package is left with NO build output and the deployed bundle
+    // silently keeps whatever it had. This has happened four times; quote
+    // with double quotes in these comments instead.
+    const body = source.slice(source.indexOf('export const PET_CSS = `') + 24, -2)
+
+    expect(body).not.toContain('`')
   })
 })
