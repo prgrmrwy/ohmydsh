@@ -429,3 +429,23 @@ describe('a DELETED executor (never archived) settles too', () => {
     expect(harness.repository.getTask(task.id)?.archivedAt).toBeDefined()
   })
 })
+
+describe('an unverifiable executor is deferred, not guessed', () => {
+  it('keeps the Task active and reports probe-unknown', async () => {
+    harness = await openPetHarness()
+    const task = await harness.repository.createTask({
+      scopeKey: 'session:src-6',
+      sourceKind: 'session',
+      sourceId: 'src-6',
+      executorSessionId: 'exec-6',
+    } as never)
+    await harness.repository.setTaskStatus(task.id, 'recovering', 'stranded')
+
+    // The probing service is not registered yet: no information, so the Task
+    // must survive and the caller must get a retry signal.
+    const outcomes = await reconcileArchives(harness.repository, new Set(), async () => 'unknown')
+
+    expect(harness.repository.getTask(task.id)?.archivedAt).toBeUndefined()
+    expect(outcomes.some(o => o.action === 'probe-unknown')).toBe(true)
+  })
+})
