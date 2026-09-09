@@ -46,7 +46,10 @@ export const inject = ['slots', 'locale', 'connection', 'sessions', 'conversatio
 /** Minimum gap between client-side re-fetches of the host verdict (throttle). */
 const MIN_NETWORK_RETRY_MS = 10_000
 
-/** Style scope for the settings page (owned classes only). */
+/**
+ * Styles this plugin injects: the settings page (own `.dshg-*` classes) plus
+ * one compensation rule for a runtime regression (see COMPOSER_FALLBACK_CSS).
+ */
 const SETTINGS_CSS = `
 .dshg-root{display:flex;flex-direction:column;gap:10px;padding-top:6px}
 .dshg-group-title{margin:12px 0 6px;font-size:14px;font-weight:600;color:var(--dsw-alias-label-primary,#1f2329)}
@@ -67,6 +70,36 @@ const SETTINGS_CSS = `
 `
 
 /**
+ * TEMPORARY compensation for a DSH 0.1.2-rc.1 composer regression.
+ *
+ * The runtime moved the composer from a native `<textarea>` to a Lexical
+ * contenteditable and dropped the hidden mirror element that used to carry the
+ * height (its content was `draft + "\n"`, so an empty draft still occupied one
+ * line). Height now comes solely from the `<p>` Lexical renders, and the only
+ * `min-height` rule left is scoped to the hero (centred) composer. With a
+ * composer block raised AND an empty draft there is no `<p>`: the content box
+ * collapses to 0, and the absolutely-positioned reason text — the whole point
+ * of a block — is clipped away by the scroller's `overflow-y`.
+ *
+ * The floor below restores one line of height. It is deliberately:
+ * - anchored on the runtime's stable `data-*` attributes, never on build-time
+ *   hashed class names (those change on every runtime rebuild);
+ * - applied to the content wrapper rather than the editor itself, so it never
+ *   competes with the official `.hero .input{min-height:52px}` rule;
+ * - a floor, not an override: 24px equals one `line-height`, so states that
+ *   already have height (a non-empty draft, the hero composer, normal editing)
+ *   are unaffected.
+ *
+ * REMOVE THIS once the runtime again guarantees a minimum height for the
+ * non-hero composer content area (or restores an equivalent mirror). Verify by
+ * checking whether a blocked composer with an empty draft still renders its
+ * reason text after the fallback is removed.
+ */
+export const COMPOSER_FALLBACK_CSS = `
+[data-input-scroll] > div{min-height:24px}
+`
+
+/**
  * Mount the sending guard and the Egress Guard settings page.
  * @param ctx - client root context.
  */
@@ -75,7 +108,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
     const style = document.createElement('style')
     style.setAttribute('data-plugin', 'dsh-home-network-model-guard')
-    style.textContent = SETTINGS_CSS
+    style.textContent = `${SETTINGS_CSS}${COMPOSER_FALLBACK_CSS}`
     document.head.appendChild(style)
     return () => style.remove()
   }, 'dsh-home-network-model-guard: settings styles')

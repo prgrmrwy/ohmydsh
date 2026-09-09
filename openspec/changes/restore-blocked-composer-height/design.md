@@ -37,9 +37,13 @@ DOM 现状：
 children: `${draft}\n`   // 空 draft 时那个 \n 仍保证一行
 ```
 
-迁移时 mirror 被删除，高度改由 Lexical 产出的 `<p>` 承担；`editable=false` 时不产出 `<p>` → 归零。
+迁移时 mirror 被删除，高度改由 Lexical 产出的 `<p>` 承担；空草稿 + `editable=false` 时不产出 `<p>` → 归零。
 
-**关键澄清**：placeholder 有无与塌陷无关——它在两种状态下都是 `position:absolute`、都不贡献高度。正常态不塌是因为有 `<p>`（`line-height:24px`）。
+**关键澄清 1 — 触发条件是 blocked + 空草稿**：`draft` 取自 input store，与 blocked 无关，因此「有草稿时禁用且保留内容」正常工作（草稿撑起 `<p>`，且 placeholder 渲染条件 `empty && !claimActive` 为 false 本就不渲染）。仅空草稿时无 `<p>` 才塌。本 change 不触碰有草稿的路径。
+
+**关键澄清 2 — placeholder 有无与塌陷无关**：它在任何状态下都是 `position:absolute`、都不贡献高度。正常态不塌是因为有 `<p>`（`line-height:24px`）。
+
+**关键澄清 3 — 文案不可见是塌陷的后果**：placeholder 定位于 `top:4px`，其定位参照 `.grow` 已塌为 0，外层 `.scroll` 带 `overflow-y:auto`，文案溢出零高度容器后被裁切。故恢复高度即同时恢复文案可见性，无需为文案单独补偿。
 
 约束：不得修改 `~/.npm/_npx/**` 下的运行体产物（脱离 manifest 真相源、升级即失效、`dsh build` 不可复现）；不得触碰 fail-closed 语义；本仓库出口为 `allowed`，本地无法复现 blocked 态。
 
