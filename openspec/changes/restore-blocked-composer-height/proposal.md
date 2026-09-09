@@ -1,8 +1,17 @@
 ## Why
 
-DSH 运行体升级到 0.1.2-rc.1 后，`home-network-model-guard` 触发 composer block 时，输入框**塌陷成一条几乎不可见的细线**：禁用文案「当前出口位于受限地区，已禁用 Claude 发送」虽然渲染在 DOM 里，但整块输入区高度归零，用户看到的是一个残缺的输入条。
+DSH 运行体升级到 0.1.2-rc.1 后，`home-network-model-guard` 触发 composer block 且**草稿为空**时，输入框**塌陷成一条几乎不可见的细线**，禁用原因文案也看不到。
 
-受限机器实机取证（DevTools）确认了完整机制：
+触发条件是 **blocked + 空草稿**，并非所有 blocked 态：
+
+| 状态 | Lexical `<p>` | placeholder | 表现 |
+|---|---|---|---|
+| blocked + 有草稿 | 有（草稿内容撑高） | 不渲染（渲染条件是 `empty && !claimActive`） | **正常**：禁用但内容保留、高度不变 |
+| blocked + 空草稿 | **无** | 渲染，但被溢出裁切 | **塌陷**：高度归零、文案不可见 |
+
+「有草稿时禁用且保留内容」是符合预期的行为（`draft` 取自 input store，与 blocked 无关），本 change 不触碰它。
+
+受限机器实机取证（DevTools，空草稿态）确认了完整机制：
 
 ```html
 <div contenteditable="false" data-composer-input="true"
@@ -18,9 +27,11 @@ DSH 运行体升级到 0.1.2-rc.1 后，`home-network-model-guard` 触发 compos
 | 版本 | 撑高机制 | blocked 态表现 |
 |---|---|---|
 | 0.1.1-rc.2 | 隐藏 mirror，内容为 `draft + "\n"`，那个换行符保证至少一行；placeholder 是 textarea 原生属性 | 正常显示文案，高度不变 |
-| 0.1.2-rc.1 | mirror 已删除；高度全靠 Lexical 产出的 `<p>`；唯一 `min-height` 规则是 `.hero .input{min-height:52px}`（仅首屏居中态匹配） | `editable=false` 时 Lexical 不产出 `<p>` → 高度归零 |
+| 0.1.2-rc.1 | mirror 已删除；高度全靠 Lexical 产出的 `<p>`；唯一 `min-height` 规则是 `.hero .input{min-height:52px}`（仅首屏居中态匹配） | 空草稿 + `editable=false` 时无 `<p>` → 高度归零 |
 
-placeholder 本身是 `position:absolute`（脱离文档流），正常态与 blocked 态都不贡献高度——差异只在于正常态有 `<p>` 而 blocked 态没有。
+placeholder 本身是 `position:absolute`（脱离文档流），任何状态下都不贡献高度——差异只在于有无 `<p>`。
+
+**文案看不见是塌陷的后果，而非独立缺陷**：placeholder 定位于 `top:4px`，其定位参照 `.grow` 高度已为 0，而外层 `.scroll` 带 `overflow-y:auto` —— 文案整体溢出零高度容器后被裁切。所以它在 DOM 中存在却不可见。恢复高度即同时恢复文案可见性，无需单独处理。
 
 这是**官方回归**，不是本包的缺陷：两版 `ComposerBlock` 契约（`{ reason }`）与 blocked 分支传参（`blocked` + `placeholder`）逐字一致，本包只调用 `ctx.conversation.blocks.set(id, { reason })`，不参与渲染。官方自己的 `ui-model-selection` 在 `routable === false` 时走同一条 blocked 分支，同样会塌——本包只是最容易触发它的使用方。
 
