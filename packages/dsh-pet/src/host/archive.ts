@@ -35,10 +35,16 @@ export interface ArchiveSink {
  * check that separates "unloaded" (DSH unloads idle sessions; resumable)
  * from "deleted" (gone from disk; not resumable). It rejects for a session
  * that no longer exists.
+ *
+ * `unknown` is a first-class answer, not a fallback: when the probing
+ * service is not yet registered there is NO information, and deciding
+ * either way would be a guess. The caller keeps the Task active and marks it
+ * for a later re-probe rather than destroying live work on a startup
+ * ordering quirk.
  * @param sessionId - The session to probe.
- * @returns whether the session exists.
+ * @returns whether the session exists, or `unknown` when unverifiable.
  */
-export type SessionProbe = (sessionId: string) => Promise<boolean>
+export type SessionProbe = (sessionId: string) => Promise<boolean | 'unknown'>
 
 /** One reconciliation decision, for diagnostics and tests. */
 export interface ArchiveOutcome {
@@ -48,6 +54,7 @@ export interface ArchiveOutcome {
     | 'task-archived'
     | 'executor-archived'
     | 'kept-active'
+    | 'probe-unknown'
     | 'noop'
     | 'task-lost'
   readonly diagnostic?: string
@@ -100,11 +107,24 @@ export async function reconcileArchives(
     // "click again" message).
     const wasArchived = archivedSessionIds.has(task.executorSessionId)
     let wasDeleted = false
+    // A probe failure is NOT evidence of deletion: it may be a transient
+    // service problem, so fall back to "exists" (keep the Task active)
+    // rather than destroying it on a flaky probe.
+    let probeResult: boolean | 'unknown' | undefined
     if (!wasArchived && probe !== undefined && !TERMINAL_TASK_STATUSES.includes(task.status)) {
-      // A probe failure is NOT evidence of deletion: it may be a transient
-      // service problem, so fall back to "exists" (keep the Task active)
-      // rather than destroying it on a flaky probe.
-      wasDeleted = !(await probe(task.executorSessionId).catch(() => true))
+      probeResult = await probe(task.executorSessionId).catch(() => 'unknown' as const)
+      wasDeleted = probeResult === false
+    }
+    // `unknown` keeps the Task active AND defers the decision: the probing
+    // service was not ready when this run happened, so nothing here can be
+    // concluded. The caller (startup reconciliation) is responsible for
+    // re-running; this branch must not silently destroy live work on a
+    // startup ordering quirk.
+    if (probeResult === 'unknown') {
+      // A distinct action so the startup caller can tell "nothing known yet,
+      // re-probe later" from "normal keep-active (e.g. archived mid-run)".
+      outcomes.push({ taskId: task.id, action: 'probe-unknown' })
+      continue
     }
     if (!wasArchived && !wasDeleted) continue
 
@@ -232,6 +252,7 @@ export function registerArchiveObserver(
   repository: PetRepository,
   sink: ArchiveSink,
   probe?: SessionProbe,
+  onIndeterminate?: () => void,
 ): () => void {
   void sink
   let previous = new Set(ctx.workspaceRegistry.archivedSessionIds.map(String))
@@ -240,7 +261,10 @@ export function registerArchiveObserver(
   const enqueue = (archived: ReadonlySet<string>): void => {
     tail = tail
       .then(async () => {
-        await reconcileArchives(repository, archived, probe)
+        const outcomes = await reconcileArchives(repository, archived, probe)
+        if (outcomes.some(outcome => outcome.action === 'probe-unknown')) {
+          onIndeterminate?.()
+        }
       })
       .catch((error: unknown) => {
         ctx.logger.warn(

@@ -267,7 +267,7 @@ async function initialize(
   // absent from both disk and the archive ledger). Probing is best-effort:
   // a transient probe failure keeps the Task active rather than destroying
   // it on a flaky service.
-  const probeExecutor = async (sessionId: string): Promise<boolean> => {
+  const probeExecutor = async (sessionId: string): Promise<boolean | 'unknown'> => {
     const query = ctx.get('sessionQuery') as
       | {
           observeSession(
@@ -276,7 +276,16 @@ async function initialize(
           ): Promise<{ [Symbol.dispose]?: () => void }>
         }
       | undefined
-    if (query === undefined) return true
+    // `sessionQuery` is an injectable service, and this plugin does NOT
+    // declare it (it is probed lazily on purpose). At Pet's own startup step
+    // the service may not be registered yet — the plugins offering it load in
+    // the same startup wave. Treating that as "session exists" (the previous
+    // `undefined → true`) skipped EVERY task during the startup reconciliation
+    // and the miss was never revisited: the delete-only observer only re-runs
+    // on archive changes. Treating it as "gone" would destroy live tasks on an
+    // early service hole. The honest answer is "unknown": the probe reports
+    // that, and the caller retries rather than deciding.
+    if (query === undefined) return 'unknown'
     try {
       const observation = await query.observeSession(sessionId, { projectionMode: 'all' })
       observation[Symbol.dispose]?.()
@@ -285,15 +294,33 @@ async function initialize(
       return false
     }
   }
-  await lifecycle.contain('Pet archive reconciliation', () =>
-    reconcileArchives(
+  // Startup reconciliation. A probe that returns `unknown` means the
+  // sessionQuery service was not registered yet — the plugins offering it
+  // load in the same startup wave — so this run concluded nothing; schedule
+  // one retry after the wave settles, then give up (a still-unknown result at
+  // that point keeps the Task active rather than guessing either way).
+  const reconcileOnce = async (): Promise<boolean> => {
+    const outcomes = await reconcileArchives(
       repository,
       new Set(
         (ctx.workspaceRegistry.archivedSessionIds as readonly string[]).map(id => String(id)),
       ),
       probeExecutor,
-    ),
-  )
+    )
+    return outcomes.some(outcome => outcome.action === 'probe-unknown')
+  }
+  const reconcileTimers: ReturnType<typeof setTimeout>[] = []
+  const scheduleReconcileRetry = (): void => {
+    // The service registration has settled by then in practice, but a bounded
+    // timer keeps this from looping forever on a host that never registers
+    // the service. A still-unknown result at that point leaves the Task
+    // active rather than guessing either way.
+    reconcileTimers.push(setTimeout(() => void reconcileOnce(), 15_000))
+  }
+  await lifecycle.contain('Pet archive reconciliation', async () => {
+    const indeterminate = await reconcileOnce()
+    if (indeterminate) scheduleReconcileRetry()
+  })
 
   const changes = new PetChangeFeed()
 
@@ -310,7 +337,16 @@ async function initialize(
   // same probe as startup reconciliation runs on every edge, so a DELETED
   // executor is also settled live — not just on the next restart.
   ctx.effect(
-    () => registerArchiveObserver(ctx, repository, archiveSink, probeExecutor),
+    () =>
+      registerArchiveObserver(
+        ctx,
+        repository,
+        archiveSink,
+        probeExecutor,
+        // Same bounded retry as startup: an edge arriving while the probing
+        // service is still registering must not produce a permanent miss.
+        scheduleReconcileRetry,
+      ),
     'dsh-pet: observe durable archive lifecycle',
   )
 
