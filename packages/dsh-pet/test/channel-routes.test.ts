@@ -43,6 +43,9 @@ let paths: PetPaths
 let channel: ChannelControl
 let calls: string[]
 let bindState: PetBindState | undefined
+// Mutable per test: lets a case declare a session archived without
+// rebuilding the route table with private beforeEach locals.
+let archivedIds: string[] = []
 
 async function call(routePath: string, body: unknown): Promise<Reply> {
   const route = routes.find(item => item.path === routePath)
@@ -70,6 +73,7 @@ async function call(routePath: string, body: unknown): Promise<Reply> {
 }
 
 beforeEach(async () => {
+  archivedIds = []
   harness = await openPetHarness()
   const home = await mkdtemp(path.join(tmpdir(), 'pet-channel-routes-'))
   paths = resolvePetPaths(home)
@@ -130,6 +134,7 @@ beforeEach(async () => {
     changes: new PetChangeFeed(),
     archiveSink: async () => {},
     channel,
+    archivedSessionIds: () => archivedIds,
   } as never)
 })
 
@@ -439,5 +444,43 @@ describe('binding a bot', () => {
 
   it('rejects an unknown bind action', async () => {
     expect((await call(ROUTES.channelBind, { action: 'exfiltrate' })).ok).toBe(false)
+  })
+})
+
+describe('a route reports whether its session is reachable', () => {
+  it('marks the qa parent archived so the UI can refuse before navigating', async () => {
+    await harness!.repository.putChatBinding({
+      chatId: 'oc_qa',
+      chatType: 'group',
+      kind: 'qa',
+      qaChildSessionId: 'session-child',
+      qaParentSessionId: 'session-parent',
+      boundBy: 'user',
+      boundAt: 1,
+    } as never)
+    // Same registry the shell routes on: an archived id lands on the home
+    // page, so the view must say so rather than offering a live-looking
+    // control.
+    archivedIds = ['session-parent']
+
+    const view = (await call(ROUTES.channel, {})).data as unknown as PetChannelView
+
+    expect(view.routes[0]?.sessionArchived).toBe(true)
+  })
+
+  it('leaves the flag off when the session is live', async () => {
+    await harness!.repository.putChatBinding({
+      chatId: 'oc_qa2',
+      chatType: 'group',
+      kind: 'qa',
+      qaChildSessionId: 'session-child2',
+      qaParentSessionId: 'session-live',
+      boundBy: 'user',
+      boundAt: 1,
+    } as never)
+
+    const view = (await call(ROUTES.channel, {})).data as unknown as PetChannelView
+
+    expect(view.routes[0]?.sessionArchived).toBeUndefined()
   })
 })

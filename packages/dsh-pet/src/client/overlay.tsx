@@ -709,6 +709,14 @@ interface TaskView {
   /** Set when the executor runs inside the routed workspace itself. */
   residentWorkspaceId?: string
   status: string
+  /**
+   * Why the Task is in its current status.
+   *
+   * Dispatch happens after the create call returns, so a failure there is
+   * reported only here — the panel renders it, otherwise a failed capability
+   * looks like a button that did nothing.
+   */
+  diagnostic?: string
   archivedAt?: number
   executorSessionId: string
   revision: number

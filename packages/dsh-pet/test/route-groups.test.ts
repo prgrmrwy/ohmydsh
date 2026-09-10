@@ -255,3 +255,51 @@ describe('a chat leads to its session, not just to Lark', () => {
     ).toBe(false)
   })
 })
+
+describe('an archived session is refused before the click, not after', () => {
+  it('disables the control and says why', async () => {
+    const opened: string[] = []
+    const { setSessionOpener } = await import('../src/client/settings.js')
+    setSessionOpener(id => opened.push(id))
+    // The Host marks the route: the shell silently lands on the home page for
+    // an archived id, so the reason must be visible without clicking.
+    stubChannel([{ ...ROUTES[0], sessionArchived: true }])
+    const host = await mountChannel()
+
+    const button = [...host.querySelectorAll('button')].find(
+      item => item.textContent === '会话已归档',
+    ) as HTMLButtonElement | undefined
+    expect(button).toBeDefined()
+    expect(button?.disabled).toBe(true)
+    expect(button?.title).toContain('已归档')
+
+    await act(async () => {
+      button?.click()
+    })
+    // Even if a click reaches it, no navigation is attempted.
+    expect(opened).toEqual([])
+    setSessionOpener(undefined)
+  })
+
+  it('still opens and dismisses the panel when the session is live', async () => {
+    const opened: string[] = []
+    const closed: number[] = []
+    const { setSessionOpener, setSettingsCloser } = await import('../src/client/settings.js')
+    setSessionOpener(id => opened.push(id))
+    setSettingsCloser(() => closed.push(1))
+    stubChannel(ROUTES)
+    const host = await mountChannel()
+
+    await act(async () => {
+      ;([...host.querySelectorAll('button')].find(
+        item => item.textContent === '打开会话',
+      ) as HTMLButtonElement | undefined)?.click()
+    })
+
+    expect(opened).toEqual(['s1'])
+    // Navigating behind the modal panel would leave it covering the target.
+    expect(closed).toEqual([1])
+    setSessionOpener(undefined)
+    setSettingsCloser(undefined)
+  })
+})
