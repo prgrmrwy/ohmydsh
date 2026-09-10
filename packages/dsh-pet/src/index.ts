@@ -408,6 +408,24 @@ async function initialize(
    * workspace-resident executor deliberately uses its workspace's Skills.
    * The marker makes repeated installation idempotent without swallowing a
    * duplicate-registration error.
+   *
+   * Registration is ASYNCHRONOUS and this function does not wait for it.
+   * `ctx.inject()` delegates to `ctx.plugin()`, whose callback runs on a new
+   * fiber — verified against the real cordis: the callback has not run when
+   * `inject` returns, after a tick, or even after awaiting the returned
+   * fiber. An earlier version asserted the callback's own bookkeeping
+   * immediately after calling it, which therefore ALWAYS threw and, because
+   * this runs inside the `agents.create` setup, failed executor creation
+   * outright: the session was never persisted while its Task row was, so
+   * every later dispatch tried to resume a session that did not exist
+   * ("could not be resumed: not found"). See
+   * docs/notes/dsh-plugin-integration-pitfalls.md.
+   *
+   * Nothing is weakened by dropping that assertion. The real gate is
+   * `isComposed`, checked before every dispatch: it reads `composedAgents`,
+   * which is only marked by the callbacks below once their registration
+   * actually succeeded, and it refuses to dispatch an executor that is not
+   * composed rather than letting one run with Host-wide Skill visibility.
    */
   const installPetScope = (agentCtx: unknown, includeAllowlist: boolean): void => {
     const scoped = agentCtx as Context
@@ -419,6 +437,16 @@ async function initialize(
     // Mark each component only after its registration succeeds: a partial
     // failure can then be retried without duplicating the component that
     // already exists.
+    //
+    // `composedAgents` is marked from INSIDE the callbacks, for the same
+    // reason: it is what `isComposed` consults, so it must record that the
+    // surface is really installed, never that installation was requested.
+    const markComposed = (): void => {
+      if (!contextToolAgents.has(key)) return
+      if (includeAllowlist && !allowlistAgents.has(key)) return
+      composedAgents.add(key)
+    }
+
     if (includeAllowlist && !allowlistAgents.has(key)) {
       scoped.inject(['skills'], skillCtx => {
         skillCtx.effect(
@@ -427,6 +455,7 @@ async function initialize(
           'dsh-pet: scoped allowlist Skill provider',
         )
         allowlistAgents.add(key)
+        markComposed()
       })
     }
 
@@ -440,12 +469,12 @@ async function initialize(
           'dsh-pet: scoped caller-bound Agent tools',
         )
         contextToolAgents.add(key)
+        markComposed()
       })
     }
-    if (!contextToolAgents.has(key) || (includeAllowlist && !allowlistAgents.has(key))) {
-      throw new PetError('INTERNAL', 'Pet scoped surface dependencies were not installed')
-    }
-    composedAgents.add(key)
+    // Both components may already have been installed by an earlier call
+    // whose callbacks have since run; this covers that case without waiting.
+    markComposed()
   }
 
   /** Mount the selected preset, then install the Pet-owned scoped surface.
