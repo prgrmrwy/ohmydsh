@@ -302,7 +302,9 @@ function makeAgentContext(): FakeAgentContext {
     injected: [],
     inject(services, callback) {
       ctx.injected.push(...services)
-      callback(ctx)
+      // Real Cordis schedules injected plugin callbacks asynchronously. A
+      // synchronous double hid the production-only setup failure.
+      queueMicrotask(() => callback(ctx))
     },
     effect(fn) {
       fn()

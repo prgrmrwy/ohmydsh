@@ -145,6 +145,21 @@ export interface PetBindState {
 /** Live connection state of the inbound subscription. */
 export type PetChannelPhase = 'stopped' | 'starting' | 'connected' | 'reconnecting' | 'down'
 
+/**
+ * Ephemeral allowlist pairing state safe to expose to authenticated Settings.
+ *
+ * Only `waiting` carries the one-time command. Terminal states deliberately do
+ * not: once a code has been claimed or failed it must no longer be reusable or
+ * recoverable from a later management response.
+ */
+export type PetPairingState =
+  | { readonly phase: 'starting' }
+  | { readonly phase: 'waiting'; readonly command: string; readonly expiresAt: number }
+  | { readonly phase: 'claiming'; readonly expiresAt: number }
+  | { readonly phase: 'succeeded'; readonly openId: string; readonly name?: string }
+  | { readonly phase: 'expired' }
+  | { readonly phase: 'failed'; readonly diagnostic: string }
+
 /** One chat route, as the management routes exchange it. */
 export interface PetChatRoute {
   readonly chatId: string
@@ -260,6 +275,8 @@ export interface PetChannelView {
    * Admission compares ids; this exists so the list is readable.
    */
   readonly knownNames: Readonly<Record<string, string>>
+  /** Current Host-owned allowlist pairing, absent after restart or cancel. */
+  readonly pairing?: PetPairingState
   readonly defaultWorkspaceId?: string
   readonly routes: readonly PetChatRoute[]
   /** Ordered readiness checks; the first blocker is the next action. */

@@ -400,6 +400,8 @@ async function initialize(
   const composedAgents = new WeakSet<object>()
   const allowlistAgents = new WeakSet<object>()
   const contextToolAgents = new WeakSet<object>()
+  /** In-flight async inject callbacks, deduplicated per fresh Agent scope. */
+  const composingAgents = new WeakMap<object, Promise<void>>()
 
   /** Install the Pet-owned scoped surface on one live executor Agent.
    *
@@ -408,73 +410,76 @@ async function initialize(
    * workspace-resident executor deliberately uses its workspace's Skills.
    * The marker makes repeated installation idempotent without swallowing a
    * duplicate-registration error.
-   *
-   * Registration is ASYNCHRONOUS and this function does not wait for it.
-   * `ctx.inject()` delegates to `ctx.plugin()`, whose callback runs on a new
-   * fiber — verified against the real cordis: the callback has not run when
-   * `inject` returns, after a tick, or even after awaiting the returned
-   * fiber. An earlier version asserted the callback's own bookkeeping
-   * immediately after calling it, which therefore ALWAYS threw and, because
-   * this runs inside the `agents.create` setup, failed executor creation
-   * outright: the session was never persisted while its Task row was, so
-   * every later dispatch tried to resume a session that did not exist
-   * ("could not be resumed: not found"). See
-   * docs/notes/dsh-plugin-integration-pitfalls.md.
-   *
-   * Nothing is weakened by dropping that assertion. The real gate is
-   * `isComposed`, checked before every dispatch: it reads `composedAgents`,
-   * which is only marked by the callbacks below once their registration
-   * actually succeeded, and it refuses to dispatch an executor that is not
-   * composed rather than letting one run with Host-wide Skill visibility.
    */
-  const installPetScope = (agentCtx: unknown, includeAllowlist: boolean): void => {
+  const installPetScope = (agentCtx: unknown, includeAllowlist: boolean): Promise<void> => {
     const scoped = agentCtx as Context
     const key = scoped as unknown as object
-    if (composedAgents.has(key)) return
+    if (composedAgents.has(key)) return Promise.resolve()
+    const existing = composingAgents.get(key)
+    if (existing !== undefined) return existing
 
+    const pending: Promise<void>[] = []
     // Agent contexts are fresh fibers and do not inherit this plugin's inject
-    // grants, so each scoped registration declares its dependency locally.
-    // Mark each component only after its registration succeeds: a partial
-    // failure can then be retried without duplicating the component that
-    // already exists.
-    //
-    // `composedAgents` is marked from INSIDE the callbacks, for the same
-    // reason: it is what `isComposed` consults, so it must record that the
-    // surface is really installed, never that installation was requested.
-    const markComposed = (): void => {
-      if (!contextToolAgents.has(key)) return
-      if (includeAllowlist && !allowlistAgents.has(key)) return
-      composedAgents.add(key)
-    }
-
+    // grants. `inject()` schedules its callback asynchronously, so setup must
+    // await an explicit callback-owned promise — checking a WeakSet directly
+    // after `inject()` is guaranteed to race on the real Cordis runtime.
     if (includeAllowlist && !allowlistAgents.has(key)) {
-      scoped.inject(['skills'], skillCtx => {
-        skillCtx.effect(
-          () =>
-            skillCtx.skills.registerProvider(() => createPetSkillProvider(repository, paths)),
-          'dsh-pet: scoped allowlist Skill provider',
-        )
-        allowlistAgents.add(key)
-        markComposed()
-      })
+      pending.push(new Promise<void>((resolve, reject) => {
+        scoped.inject(['skills'], skillCtx => {
+          try {
+            skillCtx.effect(
+              () =>
+                skillCtx.skills.registerProvider(() => createPetSkillProvider(repository, paths)),
+              'dsh-pet: scoped allowlist Skill provider',
+            )
+            allowlistAgents.add(key)
+            resolve()
+          } catch (error) {
+            reject(error)
+          }
+        })
+      }))
     }
 
     // `tools.register()` chooses its layer from the CALLING context's scope
     // tag. Calling it on the Host silently publishes globally, which is the
     // original leak this change fixes.
     if (!contextToolAgents.has(key)) {
-      scoped.inject(['tools'], toolCtx => {
-        toolCtx.effect(
-          () => registerPetTools(toolCtx, { repository }),
-          'dsh-pet: scoped caller-bound Agent tools',
-        )
-        contextToolAgents.add(key)
-        markComposed()
-      })
+      pending.push(new Promise<void>((resolve, reject) => {
+        scoped.inject(['tools'], toolCtx => {
+          try {
+            toolCtx.effect(
+              () => registerPetTools(toolCtx, { repository }),
+              'dsh-pet: scoped caller-bound Agent tools',
+            )
+            contextToolAgents.add(key)
+            resolve()
+          } catch (error) {
+            reject(error)
+          }
+        })
+      }))
     }
-    // Both components may already have been installed by an earlier call
-    // whose callbacks have since run; this covers that case without waiting.
-    markComposed()
+
+    const ready = Promise.race([
+      Promise.all(pending).then(() => undefined),
+      new Promise<never>((_resolve, reject) => {
+        const timer = setTimeout(() => reject(new PetError(
+          'INTERNAL',
+          'Pet scoped surface dependencies did not become available',
+        )), 5_000)
+        timer.unref?.()
+      }),
+    ]).then(() => {
+      if (!contextToolAgents.has(key) || (includeAllowlist && !allowlistAgents.has(key))) {
+        throw new PetError('INTERNAL', 'Pet scoped surface dependencies were not installed')
+      }
+      composedAgents.add(key)
+    }).finally(() => {
+      composingAgents.delete(key)
+    })
+    composingAgents.set(key, ready)
+    return ready
   }
 
   /** Mount the selected preset, then install the Pet-owned scoped surface.
@@ -490,7 +495,7 @@ async function initialize(
   ): Promise<void> => {
     const scoped = agentCtx as Context
     await ctx.agentPresets.mount(scoped as never, presetId as never)
-    installPetScope(scoped, includeAllowlist)
+    await installPetScope(scoped, includeAllowlist)
   }
 
   /** Whether an Agent already carries the Pet-owned scoped surface. */
@@ -506,7 +511,7 @@ async function initialize(
    * Tasks, its allowlist provider. Listener failures are contained because a
    * synchronous throw from `agent/created` would veto publication.
    */
-  const composeForeignExecutor = (agent: unknown): void => {
+  const composeForeignExecutor = async (agent: unknown): Promise<void> => {
     const view = agent as { session?: { id?: unknown }; ctx?: unknown } | undefined
     const sessionId = view?.session?.id
     if (sessionId === undefined || view?.ctx === undefined) return
@@ -532,7 +537,7 @@ async function initialize(
     //   this form.
     if (isForkChildTaskForm(task.sourceKind)) return
     try {
-      installPetScope(view.ctx, task.residentWorkspaceId === undefined)
+      await installPetScope(view.ctx, task.residentWorkspaceId === undefined)
     } catch (error) {
       ctx.logger.warn(
         `dsh-pet: could not scope externally loaded executor ${String(sessionId)} (${
@@ -545,7 +550,7 @@ async function initialize(
   ctx.effect(
     () =>
       ctx.on('agent/created', (payload: { agent?: unknown }) => {
-        composeForeignExecutor(payload?.agent)
+        void composeForeignExecutor(payload?.agent)
       }),
     'dsh-pet: scope externally loaded executors',
   )
@@ -763,9 +768,9 @@ async function initialize(
       // an agent; this is the check that makes a miss visible instead of
       // silently running an Invocation with Host-wide Skill discovery.
       if (!isComposed(agent)) {
-        // Late, best-effort repair for an agent that predates the observer
-        // (registered after Pet's own initialization) before refusing.
-        composeForeignExecutor(agent)
+        // Late repair for an agent that predates the observer. Await the real
+        // async inject callbacks before deciding whether the boundary exists.
+        await composeForeignExecutor(agent)
       }
       if (!isComposed(agent)) {
         throw new PetError(
@@ -1100,11 +1105,6 @@ async function initialize(
     archiveSink,
     inspectWorkspace: () => inspectWorkspace(paths),
     repairWorkspace: () => repairWorkspace(paths),
-    // Lets the settings page disable "open the session" for an archived one:
-    // the shell navigates to the home page in that case, which reads as the
-    // button being broken.
-    archivedSessionIds: () =>
-      (ctx.workspaceRegistry.archivedSessionIds as readonly string[]).map(id => String(id)),
     channel,
     // Present only with the seam: the route refuses outright rather than
     // half-creating a group when this Host cannot fork.
