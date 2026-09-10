@@ -40,6 +40,6 @@
 
 - [x] 6.1 重启 DSH，在 Channel 关闭、allowlist 为空、default workspace 未设置的真实环境生成配对码；确认唯一 consumer 到达 ready 后页面才显示 `/pair xxxx-xxxx`。
 - [x] 6.2 用真实飞书账号单聊发送正确命令，确认固定成功回执、Settings 出现姓名/open_id、allowlist 持久化，并核对无 Task、Invocation、chat binding、channel association 或任务表情产生。
-- [ ] 6.3 真机演练错误码、群聊正确码、过期、取消、重新生成与 pairing-only consumer 回收；确认未授权路径全部静默且进程以 SIGTERM 清理。
+- [x] 6.3 真机演练错误码、群聊正确码、过期、取消、重新生成与 pairing-only consumer 回收；确认未授权路径全部静默且进程以 SIGTERM 清理。
 - [x] 6.4 更新 `packages/dsh-pet/README.md`、`dsh.yaml` Pet 审查 note 和相关集成陷阱说明（若实现发现新陷阱），并用文档审查确认“bearer code 首个发送者获权”和回滚语义写清。
 - [x] 6.5 修复真机暴露的 Cordis 异步 `inject()` 组合竞态并退役空的失败 executor 壳；异步组合路径测试、全量测试与重发消息真机验收均通过。
