@@ -62,29 +62,39 @@ Pet can take work from Lark: mention the bound bot in a group, or message it
 directly, and Pet opens or reuses a session in the workspace that chat routes
 to. It is **off by default** and needs an explicit binding first.
 
-Four properties are worth knowing before enabling it:
+Five properties are worth knowing before enabling it:
 
 - **Admission fails closed and stays silent.** A message must pass an
   open_id allowlist, a mention check (groups only), message-id deduplication
-  and a start-up watermark. Anything refused is dropped with a log line and
-  nothing else — no reaction, no reply — so a bot sitting in an unrelated
-  group never reveals that an agent stands behind it.
-- **Identity is proven, not guessed.** The bot's own open_id is learned from
-  the first group message, but only after the chat's member list ties it to
-  the bound `app_id`. A display name can be copied; an app id cannot.
+  and a start-up watermark. Anything refused is dropped with a low-cardinality
+  diagnostic and nothing else — no reaction, no reply — so a bot sitting in an
+  unrelated group never reveals that an agent stands behind it.
+- **Identity is proven, not guessed.** Binding immediately verifies the named
+  lark-cli profile and stores the bound app's own open_id; display names are
+  presentation only and never become an authorization key.
+- **The first allowed member can pair instead of finding an open_id.** Settings
+  mints a five-minute `/pair xxxx-xxxx` bearer command. The first user to send
+  that exact command in a direct chat is atomically added to the allowlist.
+  Do not forward it to somebody you do not intend to authorize. The code lives
+  only in Host memory, is single-use, and a restart/cancel/replacement expires
+  it. Pairing temporarily reuses the one supervised event consumer but never
+  creates a Task, Invocation or chat route. Manual open_id entry remains an
+  advanced fallback.
 - **Chat-triggered Tasks are workspace-resident.** Their executor works
   directly inside the routed workspace, so Pet's Skill projection and standing
   instructions do **not** apply there — that workspace's own configuration
   does. The trust boundary is the explicit route plus the sender allowlist.
   Pet writes nothing into your repository.
-- **Outbound is Host-driven.** Reactions (working → done/failed) and the
-  direct-chat reply are applied by the Host when an Invocation settles, never
-  by the model, and their destination comes only from the stored binding.
-  Group chats get reactions but no text in this phase.
+- **The Agent owns business replies.** The Host maintains working → done/failed
+  reactions, while the Agent reads the original Lark content it needs and sends
+  its own answer to the exact triggering conversation. The only Host text
+  exception is the fixed control-plane acknowledgement after a pairing commit.
 
-Chat context is captured once at trigger time — up to 20 messages before and
-10 after — and goes into the prompt fenced as reference material, never into
-Pet's database.
+Pet deliberately does not flatten chat history into the prompt. It may read the
+trigger record to resolve a display name, then supplies only the trigger text,
+sender and conversation/message identifiers. The Agent uses lark-cli as the
+bound bot to fetch any richer context on demand; that transient lookup is not
+stored in Pet's database.
 
 ## Q&A groups
 
