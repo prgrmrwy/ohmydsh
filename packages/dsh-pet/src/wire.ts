@@ -163,6 +163,15 @@ export interface PetChatRoute {
    * session id the shell actually routes on.
    */
   readonly activeExecutorSessionId?: string
+  /**
+   * Whether the session this route would open has been archived.
+   *
+   * The shell silently navigates to the home page when asked to open an
+   * archived session, so the settings page needs to know BEFORE offering the
+   * control: a button that looks live and quietly does the wrong thing is
+   * worse than a disabled one that says why.
+   */
+  readonly sessionArchived?: boolean
   /** Present on `qa` bindings: the fork child serving the group. */
   readonly qaChildSessionId?: string
   /** Present on `qa` bindings: the source session the child was forked from. */

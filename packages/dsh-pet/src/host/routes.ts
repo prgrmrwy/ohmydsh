@@ -83,6 +83,16 @@ export interface RouteDeps {
     sessionId: string
     title?: string
   }) => Promise<PetQaGroupResult>
+  /**
+   * Session ids DSH has archived.
+   *
+   * Used to mark a route's session unreachable BEFORE the user clicks: the
+   * shell silently lands on the home page when asked to open an archived
+   * session, so a button that looks live is worse than one that explains
+   * itself. Optional, so a Host without the registry simply offers the
+   * button unqualified rather than losing the whole view.
+   */
+  readonly archivedSessionIds?: () => readonly string[]
 }
 
 /** What the channel routes drive. */
@@ -118,11 +128,14 @@ export interface ChannelControl {
  * hold one.
  * @param repository - Pet repository.
  * @param channel - Channel control, when composed.
+ * @param archivedSessionIds - Session ids DSH has archived, for marking a
+ *   route's session unreachable before it is clicked.
  * @returns the view.
  */
 function channelView(
   repository: PetRepository,
   channel: ChannelControl | undefined,
+  archivedSessionIds: ReadonlySet<string> = new Set(),
 ): PetChannelView {
   const config = repository.getChannelConfig()
   const routes: PetChatRoute[] = repository.listChatBindings().map(binding => ({
@@ -142,6 +155,20 @@ function channelView(
       return task === undefined
         ? {}
         : { activeExecutorSessionId: task.executorSessionId }
+    })(),
+    // Whether the session "open the session" would navigate to is archived.
+    // Computed against the SAME session the client picks for that control: a
+    // qa route opens its parent, any other route opens its active executor.
+    ...(() => {
+      const target =
+        binding.kind === 'qa'
+          ? binding.qaParentSessionId
+          : binding.activeTaskId === undefined
+            ? undefined
+            : repository.getTask(binding.activeTaskId)?.executorSessionId
+      return target !== undefined && archivedSessionIds.has(target)
+        ? { sessionArchived: true }
+        : {}
     })(),
     ...(binding.qaChildSessionId !== undefined
       ? { qaChildSessionId: binding.qaChildSessionId }
@@ -274,6 +301,12 @@ function requireReady(lifecycle: PetLifecycleMachine): void {
  */
 export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
   const { repository, capabilities, coordinator, lifecycle, paths } = deps
+
+  // Read fresh on every request rather than captured once: a session archived
+  // while the settings page is open must be reflected on the next refresh, and
+  // this view is re-fetched by the change feed anyway.
+  const archivedSet = (): ReadonlySet<string> =>
+    new Set(deps.archivedSessionIds?.() ?? [])
 
   return [
     petRoute(ROUTES.status, async ({ body }) => {
@@ -687,7 +720,7 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
       return { entries: repository.listEnvEntries() }
     }),
 
-    petRoute(ROUTES.channel, async () => channelView(repository, deps.channel)),
+    petRoute(ROUTES.channel, async () => channelView(repository, deps.channel, archivedSet())),
 
     petRoute(ROUTES.channelMutate, async ({ body }) => {
       requireReady(lifecycle)
@@ -829,7 +862,7 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
       }
 
       deps.changes.publish()
-      return channelView(repository, deps.channel)
+      return channelView(repository, deps.channel, archivedSet())
     }),
 
     petRoute(ROUTES.channelBind, async ({ body }) => {
@@ -872,7 +905,7 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
       }
 
       deps.changes.publish()
-      return channelView(repository, channel)
+      return channelView(repository, channel, archivedSet())
     }),
 
     petRoute(ROUTES.diagnostics, async () => ({

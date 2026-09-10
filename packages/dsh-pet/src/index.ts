@@ -1071,6 +1071,11 @@ async function initialize(
     archiveSink,
     inspectWorkspace: () => inspectWorkspace(paths),
     repairWorkspace: () => repairWorkspace(paths),
+    // Lets the settings page disable "open the session" for an archived one:
+    // the shell navigates to the home page in that case, which reads as the
+    // button being broken.
+    archivedSessionIds: () =>
+      (ctx.workspaceRegistry.archivedSessionIds as readonly string[]).map(id => String(id)),
     channel,
     // Present only with the seam: the route refuses outright rather than
     // half-creating a group when this Host cannot fork.

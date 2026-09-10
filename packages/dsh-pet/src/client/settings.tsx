@@ -595,6 +595,23 @@ export function setSessionOpener(opener: ((sessionId: string) => void) | undefin
   sessionOpener = opener
 }
 
+/**
+ * Dismiss the settings overlay.
+ *
+ * Needed because navigating to a session from inside a modal panel otherwise
+ * leaves that panel covering the destination. Published like the navigator:
+ * the section never receives the client context.
+ */
+let closeSettings: (() => void) | undefined
+
+/**
+ * Publish the settings-overlay dismisser.
+ * @param close - Closes the overlay, or `undefined` where unsupported.
+ */
+export function setSettingsCloser(close: (() => void) | undefined): void {
+  closeSettings = close
+}
+
 /** Skills: install, enable/disable, shortcut visibility and projection status. */
 function SkillsTab(): JSX.Element {
   const [state, setState] = useState<{
@@ -2003,13 +2020,31 @@ function ChannelTab(): JSX.Element {
                             known and the shell published a navigator.
                           */}
                           {sessionTarget !== undefined && sessionOpener !== undefined ? (
+                            // Disabled when the session is archived: the shell
+                            // silently lands on the home page for an archived
+                            // id, so a live-looking button would quietly do
+                            // the wrong thing. The reason rides the label and
+                            // the tooltip rather than needing a click to
+                            // discover.
                             <button
                               type="button"
                               className="dshpet-action dshpet-action-sm"
-                              title={`打开会话 ${sessionTarget}`}
-                              onClick={() => sessionOpener?.(sessionTarget)}
+                              disabled={route.sessionArchived === true}
+                              title={
+                                route.sessionArchived === true
+                                  ? `会话 ${sessionTarget} 已归档，无法打开`
+                                  : `打开会话 ${sessionTarget}`
+                              }
+                              onClick={() => {
+                                if (route.sessionArchived === true) return
+                                sessionOpener?.(sessionTarget)
+                                // Leaving the modal settings panel open would
+                                // park the user in front of the panel they
+                                // just navigated out from.
+                                closeSettings?.()
+                              }}
                             >
-                              打开会话
+                              {route.sessionArchived === true ? '会话已归档' : '打开会话'}
                             </button>
                           ) : null}
                           <button
