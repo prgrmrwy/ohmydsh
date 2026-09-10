@@ -17,7 +17,12 @@ import { PetCoordinator } from '../src/host/coordinator.js'
 import { PetLifecycleMachine } from '../src/host/lifecycle.js'
 import { ensurePetDirectories, resolvePetPaths, type PetPaths } from '../src/host/paths.js'
 import { createPetRoutes, type ChannelControl } from '../src/host/routes.js'
-import { ROUTES, type PetBindState, type PetChannelView } from '../src/wire.js'
+import {
+  ROUTES,
+  type PetBindState,
+  type PetChannelView,
+  type PetPairingState,
+} from '../src/wire.js'
 import { openPetHarness, type PetHarness } from './harness.js'
 
 const SECRET = 'secret-must-never-surface'
@@ -43,6 +48,7 @@ let paths: PetPaths
 let channel: ChannelControl
 let calls: string[]
 let bindState: PetBindState | undefined
+let pairingState: PetPairingState | undefined
 
 async function call(routePath: string, body: unknown): Promise<Reply> {
   const route = routes.find(item => item.path === routePath)
@@ -94,6 +100,7 @@ beforeEach(async () => {
 
   calls = []
   bindState = undefined
+  pairingState = undefined
   channel = {
     status: () => ({ phase: 'connected' }),
     setEnabled: vi.fn(async (enabled: boolean) => {
@@ -101,6 +108,15 @@ beforeEach(async () => {
     }),
     reconnect: vi.fn(async () => {
       calls.push('reconnect')
+    }),
+    pairingState: () => pairingState,
+    startPairing: vi.fn(async () => {
+      calls.push('startPairing')
+      pairingState = { phase: 'waiting', command: '/pair 2345-6789', expiresAt: 301_000 }
+    }),
+    cancelPairing: vi.fn(() => {
+      calls.push('cancelPairing')
+      pairingState = undefined
     }),
     workspaceAvailable: workspaceId => workspaceId === 'ws-nexus',
     bindState: () => bindState,
@@ -189,6 +205,40 @@ describe('reading the channel view', () => {
     expect(view.routes).toHaveLength(1)
     expect(view.routes[0]?.workspaceId).toBe('ws-nexus')
     expect(view.connection).toMatchObject({ phase: 'connected', queueDepth: 0 })
+  })
+})
+
+describe('pairing an allowed member', () => {
+  it('starts and cancels pairing through action-only bodies', async () => {
+    const started = await call(ROUTES.channelMutate, { action: 'pair-start' })
+    expect(started.ok).toBe(true)
+    expect((started.data as unknown as PetChannelView).pairing).toEqual({
+      phase: 'waiting',
+      command: '/pair 2345-6789',
+      expiresAt: 301_000,
+    })
+    expect(calls).toContain('startPairing')
+
+    const cancelled = await call(ROUTES.channelMutate, { action: 'pair-cancel' })
+    expect(cancelled.ok).toBe(true)
+    expect((cancelled.data as unknown as PetChannelView).pairing).toBeUndefined()
+    expect(calls).toContain('cancelPairing')
+  })
+
+  it.each(['code', 'senderOpenId', 'expiresAt', 'chatId'])(
+    'rejects caller-controlled pairing field %s',
+    async field => {
+      const reply = await call(ROUTES.channelMutate, { action: 'pair-start', [field]: 'forged' })
+      expect(reply.ok).toBe(false)
+      expect(calls).not.toContain('startPairing')
+    },
+  )
+
+  it('never exposes a command in terminal pairing states', async () => {
+    pairingState = { phase: 'succeeded', openId: OWNER, name: 'Owner' }
+    const view = (await call(ROUTES.channel, {})).data as unknown as PetChannelView
+    expect(view.pairing).toEqual({ phase: 'succeeded', openId: OWNER, name: 'Owner' })
+    expect(JSON.stringify(view.pairing)).not.toContain('/pair')
   })
 })
 

@@ -255,6 +255,35 @@ describe('answering a waiting Invocation from the channel', () => {
 })
 
 describe('healing a stale active-Task pointer', () => {
+  it('retires an empty failed executor shell and creates a fresh epoch', async () => {
+    const f = await fixture()
+    harness = f.harness
+    const brokenScope = scopeKeyOf('chat', 'oc_group')
+    const brokenEpoch = await f.harness.repository.allocateEpoch(brokenScope)
+    const broken = await f.harness.repository.createTask({
+      id: 'task-broken',
+      scopeKey: brokenScope,
+      epoch: brokenEpoch,
+      sourceKind: 'chat',
+      sourceId: 'oc_group',
+      sourceAvailability: 'available',
+      executorSessionId: 'session-broken',
+      residentWorkspaceId: 'ws-nexus',
+      status: 'failed',
+      diagnostic: 'Executor session creation failed',
+      createdAt: 1,
+      updatedAt: 1,
+      revision: 0,
+    })
+
+    const result = await f.coordinator.acceptConversation(request(f))
+
+    expect(f.harness.repository.getTask(broken.id)?.archivedAt).toBeDefined()
+    expect(result.task.id).not.toBe(broken.id)
+    expect(result.task.epoch).toBe(2)
+    expect(result.started).toBe(true)
+  })
+
   it('creates a new Task epoch after the previous one is archived', async () => {
     const f = await fixture()
     harness = f.harness

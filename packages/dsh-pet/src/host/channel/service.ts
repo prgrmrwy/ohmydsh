@@ -24,8 +24,14 @@ import {
   type IntakeOutcome,
   type QaDeliveryPort,
 } from './pipeline.js'
+import { parseInboundLine } from './event.js'
+import { PairingController, type PairingControllerOptions } from './pairing.js'
 import type { WorkspaceLocator } from './route.js'
-import { ChannelSubscription, type ChannelStatus } from './subscription.js'
+import {
+  ChannelSubscription,
+  type ChannelStatus,
+  type SubscriptionOptions,
+} from './subscription.js'
 import type { PetCoordinator } from '../coordinator.js'
 import type { PetRepository } from '../repository.js'
 import type { PetChannelConfig } from '../spec.js'
@@ -60,6 +66,11 @@ export interface ChannelServiceDeps {
    * without launching a real authorization flow.
    */
   readonly spawnProcess?: SpawnLike
+  /** Injectable event-consumer process/timer seams for service integration tests. */
+  readonly subscriptionSpawnProcess?: SubscriptionOptions['spawnProcess']
+  readonly subscriptionSchedule?: SubscriptionOptions['schedule']
+  /** Injectable pairing randomness/clock/timer seams for deterministic tests. */
+  readonly pairing?: Pick<PairingControllerOptions, 'now' | 'randomBytes' | 'schedule'>
   /** Notified whenever channel state changes, so the UI can refresh. */
   readonly onChange?: () => void
   /** Structured logging sink. */
@@ -71,13 +82,18 @@ export class ChannelService implements ChannelControl {
   private readonly client: LarkClient
   private readonly subscription: ChannelSubscription
   private readonly pipeline: InboundPipeline
+  private readonly pairing: PairingController
   private readonly bootstrap: BotBootstrap
   private binding: BootstrapState | undefined
   private permission: LarkPermissionDiagnostic | undefined
   private identityDiagnostic: string | undefined
   private readonly ignoredAt = new Map<string, number>()
+  /** The formal Channel reason is armed only after its latest identity probe. */
+  private formalReady = false
   /** Fences async identity probes after disable, teardown, or a newer request. */
   private operationGeneration = 0
+  /** Fences pairing start probes independently from formal enable/binding work. */
+  private pairingGeneration = 0
 
   /**
    * @param deps - Host collaborators.
@@ -88,11 +104,17 @@ export class ChannelService implements ChannelControl {
       onLine: line => {
         // Fire-and-forget: intake is async, and the consumer stream must not
         // wait on Pet's storage or an Agent dispatch.
-        void this.pipeline.handleLine(line).catch(error => {
+        void this.dispatchLine(line).catch(error => {
           this.log(`intake failed: ${error instanceof Error ? error.message : String(error)}`)
         })
       },
       onStatus: status => this.onStatus(status),
+      ...(deps.subscriptionSpawnProcess !== undefined
+        ? { spawnProcess: deps.subscriptionSpawnProcess }
+        : {}),
+      ...(deps.subscriptionSchedule !== undefined
+        ? { schedule: deps.subscriptionSchedule }
+        : {}),
     })
     this.pipeline = new InboundPipeline({
       repository: deps.repository,
@@ -103,6 +125,18 @@ export class ChannelService implements ChannelControl {
       ...(deps.bindCommand !== undefined ? { bindCommand: deps.bindCommand } : {}),
       watermark: () => this.subscription.watermark,
       onOutcome: outcome => this.onOutcome(outcome),
+    })
+    this.pairing = new PairingController({
+      repository: deps.repository,
+      client: this.client,
+      ...(deps.pairing?.now !== undefined ? { now: deps.pairing.now } : {}),
+      ...(deps.pairing?.randomBytes !== undefined
+        ? { randomBytes: deps.pairing.randomBytes }
+        : {}),
+      ...(deps.pairing?.schedule !== undefined ? { schedule: deps.pairing.schedule } : {}),
+      onChange: () => deps.onChange?.(),
+      onRunReasonChange: () => this.reconcileSubscription(),
+      log: reason => this.log(reason),
     })
     this.bootstrap = new BotBootstrap({
       ...(deps.spawnProcess !== undefined ? { spawnProcess: deps.spawnProcess } : {}),
@@ -131,7 +165,11 @@ export class ChannelService implements ChannelControl {
   /** Stop the subscription and release the consumer. */
   stop(): void {
     this.operationGeneration += 1
+    this.pairingGeneration += 1
+    this.formalReady = false
     this.bootstrap.cancel()
+    this.pairing.stop()
+    // Stop receiving new events even when a durable claim must finish.
     this.subscription.stop()
   }
 
@@ -166,12 +204,69 @@ export class ChannelService implements ChannelControl {
     return this.deps.locator.locate(workspaceId) !== undefined
   }
 
+  pairingState() {
+    return this.pairing.publicState
+  }
+
+  async startPairing(): Promise<void> {
+    const generation = ++this.pairingGeneration
+    // Replacement invalidates the old bearer synchronously, before network
+    // preflight can yield and leave it usable longer than the user intended.
+    if (!this.pairing.cancel()) {
+      throw new Error('Pairing is already committing an allowed member; wait for it to finish.')
+    }
+    const config = this.deps.repository.getChannelConfig()
+    if (config.botAppId === undefined || config.botOpenId === undefined) {
+      throw new Error('Bind and verify a Lark bot before starting pairing.')
+    }
+    const version = await this.client.cliVersion?.()
+    if (generation !== this.pairingGeneration) return
+    if (version !== undefined && !version.supported) {
+      const found = version.version === undefined ? 'unknown' : version.version
+      throw new Error(`lark-cli ${found} is unsupported; upgrade to 1.0.93 or later.`)
+    }
+    const probe = this.client.botIdentity
+    if (probe === undefined) throw new Error('The Pet lark-cli profile cannot verify the bound bot.')
+    const identity = await probe.call(this.client, config.botAppId)
+    if (generation !== this.pairingGeneration) return
+    if (identity.kind !== 'ready' || identity.identity.openId !== config.botOpenId) {
+      throw new Error(
+        identity.kind === 'ready'
+          ? 'The verified Pet bot identity does not match the configured bot.'
+          : identity.diagnostic,
+      )
+    }
+    // Re-read the mutable identity after the network await. A reconnect may
+    // have replaced the bound app while the probe was running.
+    const latest = this.deps.repository.getChannelConfig()
+    if (latest.botAppId !== config.botAppId || latest.botOpenId !== config.botOpenId) {
+      throw new Error('The configured bot changed while pairing was starting.')
+    }
+    this.pairing.start()
+    // Pair start is an explicit user operation and may recover a supervisor
+    // that previously exhausted its retry budget.
+    if (this.subscription.current.phase === 'down') this.subscription.reconnect()
+    else if (this.subscription.current.phase === 'connected') this.pairing.activate()
+  }
+
+  cancelPairing(): void {
+    if (!this.pairing.cancel()) {
+      throw new Error('Pairing is already committing an allowed member; wait for it to finish.')
+    }
+    this.pairingGeneration += 1
+  }
+
   async setEnabled(enabled: boolean, replace = false): Promise<void> {
     const generation = ++this.operationGeneration
     if (!enabled) {
-      this.subscription.stop()
+      this.formalReady = false
+      this.reconcileSubscription()
       return
     }
+    // Revalidation is itself fail-closed: an already-running formal consumer
+    // loses that run reason until the latest identity proof succeeds.
+    this.formalReady = false
+    this.reconcileSubscription()
     const config = this.requireReadyConfig()
     const version = await this.client.cliVersion?.()
     if (generation !== this.operationGeneration) return
@@ -205,8 +300,9 @@ export class ChannelService implements ChannelControl {
     })
     if (generation !== this.operationGeneration) return
     if (!this.deps.repository.getChannelConfig().enabled) return
-    if (replace) this.subscription.reconnect()
-    else this.subscription.start()
+    this.formalReady = true
+    if (replace && this.subscription.current.phase !== 'stopped') this.subscription.reconnect()
+    else this.reconcileSubscription()
   }
 
   async reconnect(): Promise<void> {
@@ -258,9 +354,14 @@ export class ChannelService implements ChannelControl {
 
   private async prepareBinding(): Promise<{ generation: number; resume: boolean }> {
     const generation = ++this.operationGeneration
+    if (!this.pairing.cancel()) {
+      throw new Error('Pairing is already committing an allowed member; wait before reconnecting the bot.')
+    }
+    this.pairingGeneration += 1
     const resume = this.deps.repository.getChannelConfig().enabled
+    this.formalReady = false
+    this.reconcileSubscription()
     if (resume) {
-      this.subscription.stop()
       await this.deps.repository.updateChannelConfig(current =>
         generation === this.operationGeneration
           ? { ...current, enabled: false, updatedAt: Date.now() }
@@ -356,12 +457,42 @@ export class ChannelService implements ChannelControl {
     this.permission = undefined
     this.deps.onChange?.()
     // The profile may now identify another app: always replace a live consumer.
+    this.formalReady = resume
     if (resume) this.subscription.reconnect()
+    else this.reconcileSubscription()
+  }
+
+  /** Parse once, give pairing first refusal, then preserve ordinary intake. */
+  private async dispatchLine(line: string): Promise<void> {
+    const event = parseInboundLine(line)
+    if (event === undefined) {
+      await this.pipeline.handleLine(line)
+      return
+    }
+    if (await this.pairing.handle(event)) return
+    await this.pipeline.handleEvent(event)
+  }
+
+  /** Start or stop the ONE consumer from the union of active run reasons. */
+  private reconcileSubscription(): void {
+    const shouldRun = this.formalReady || this.pairing.requiresConsumer
+    if (shouldRun) {
+      // `down` is terminal until an explicit user operation calls reconnect;
+      // pairing cleanup must not reset the supervisor's failure budget.
+      if (this.subscription.current.phase !== 'down') this.subscription.start()
+      if (this.subscription.current.phase === 'connected') this.pairing.activate()
+    } else {
+      this.subscription.stop()
+    }
   }
 
   /** React to a subscription state change. */
   private onStatus(status: ChannelStatus): void {
     this.log(`subscription ${status.phase}${status.diagnostic !== undefined ? `: ${status.diagnostic}` : ''}`)
+    if (status.phase === 'connected') this.pairing.activate()
+    if (status.phase === 'down' && this.pairing.requiresConsumer) {
+      this.pairing.fail(status.diagnostic ?? '无法连接飞书事件订阅，请稍后重试。')
+    }
     this.deps.onChange?.()
   }
 
