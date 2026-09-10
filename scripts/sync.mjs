@@ -787,6 +787,32 @@ async function syncPackages(manifest, items) {
   // bytes. Build-input and install-content identities are deliberately separate.
   const previousLocalHashes = state.localPackageHashes ?? {}
   const previousBuildInputs = state.localPackageBuildInputs ?? {}
+  // What the last successful build actually PRODUCED: `{ input, output }` per
+  // package, where `output` is the publishable content hash of the artifacts
+  // that build emitted. Distinct from `localPackageBuildInputs`, which records
+  // the input of the last successful DEPLOYMENT and therefore answers "did the
+  // source move since we last shipped", never "are these the outputs we built".
+  //
+  // Recording the OUTPUT rather than where or from what it was built is
+  // deliberate, and was reached by falsifying two indirect designs during
+  // implementation: keying on the source hash alone cannot tell one checkout's
+  // artifacts from another's built from identical source (the 2026-09-08
+  // shape), and adding the source directory still missed artifacts replaced in
+  // place. Both proxied "what produced it" for "what it is", and a proxy
+  // always leaves a way around it. The bytes do not.
+  //
+  // This does not require reproducible builds: it records what a build DID
+  // emit, not what a source SHOULD emit, so nondeterminism in the output is
+  // irrelevant as long as nobody replaced it afterwards.
+  //
+  // Absent (older ledger, `dsh reset`) means unprovable, which forces a build.
+  const previousBuiltFrom = state.localPackageBuiltFrom ?? {}
+  /** Whether the recorded build output still matches what is on disk. */
+  const builtOutputMatches = (record, output) =>
+    record !== undefined &&
+    record !== null &&
+    typeof record === 'object' &&
+    record.output === output
   const previousCompatHashes = state.compatDependencyHashes ?? {}
   // Packages proven incomplete at their source, keyed by the identity that was
   // proven bad (local content hash / remote spec). Keeping the identity means a
@@ -800,6 +826,11 @@ async function syncPackages(manifest, items) {
   const nextLocalHashes = Object.fromEntries(Object.entries(previousLocalHashes)
     .filter(([packageName]) => enabledNameSet.has(packageName)))
   const nextBuildInputs = Object.fromEntries(Object.entries(previousBuildInputs)
+    .filter(([packageName]) => enabledNameSet.has(packageName)))
+  // Carried for the same reason, but it tracks a different fact: the source
+  // `lib/` survives a failed deployment untouched, so what built it is still
+  // true and must not be forgotten. Rewritten per package as builds succeed.
+  const nextBuiltFrom = Object.fromEntries(Object.entries(previousBuiltFrom)
     .filter(([packageName]) => enabledNameSet.has(packageName)))
   const enabledCompatNames = new Set(enabled.flatMap(item =>
     (item.compatDependencies ?? []).map(entry => entry.name)))
@@ -823,15 +854,44 @@ async function syncPackages(manifest, items) {
     if (localDir !== undefined) {
       const localPkg = readJson(path.join(localDir, 'package.json'))
       buildInputHash = await localBuildInputHash(localDir, item.buildInputs ?? [])
-      const needsBuild = typeof localPkg?.scripts?.build === 'string' && (
-        previousBuildInputs[name] !== buildInputHash || !localBuildOutputsExist(localDir, localPkg)
+      const buildable = typeof localPkg?.scripts?.build === 'string'
+      const outputsPresent = localBuildOutputsExist(localDir, localPkg)
+      // Hash the artifacts BEFORE deciding, so the decision can rest on what
+      // they actually are. The first two conditions below only describe the
+      // input side — whether the source moved since the last deployment, and
+      // whether outputs exist at all — and neither can rule out outputs that
+      // exist but are not the ones this build produced.
+      //
+      // Unprovable rebuilds rather than assumes. The alternative failed
+      // silently: sync skipped the build, then the deployment check compared
+      // the stale deployed copy against the equally stale source artifact,
+      // found them identical, and shipped it with exit code 0.
+      const currentOutput = buildable && outputsPresent
+        ? await localInstallContentHash(localDir)
+        : undefined
+      const needsBuild = buildable && (
+        previousBuildInputs[name] !== buildInputHash ||
+        !outputsPresent ||
+        !builtOutputMatches(nextBuiltFrom[name], currentOutput)
       )
-      if (needsBuild && !runLocalBuild(item, localDir)) continue
+      if (needsBuild) {
+        // Drop the claim BEFORE building: a build that dies partway leaves
+        // outputs of unknown provenance, and a surviving record would certify
+        // them as current on the next run — making this defect permanent.
+        delete nextBuiltFrom[name]
+        if (!runLocalBuild(item, localDir)) continue
+      }
       if (!localBuildOutputsExist(localDir, localPkg)) {
         fail(`local package ${name}: build outputs are missing after build readiness check`)
         continue
       }
       localHash = await localInstallContentHash(localDir)
+      // Recorded on build success, not deployment success: it describes the
+      // source artifacts, which exist regardless of whether deployment later
+      // succeeds. Tying it to deployment would rebuild needlessly after any
+      // deployment failure. `localHash` is the same publishable-content hash
+      // the comparison above uses, so the two can never drift apart.
+      if (buildable && needsBuild) nextBuiltFrom[name] = { input: buildInputHash, output: localHash }
     }
     const compatEntries = localDir === undefined ? [] : (compatByOwner.get(name) ?? [])
     const compatSpecs = []
@@ -999,6 +1059,7 @@ async function syncPackages(manifest, items) {
   }
   state.localPackageHashes = nextLocalHashes
   state.localPackageBuildInputs = nextBuildInputs
+  state.localPackageBuiltFrom = nextBuiltFrom
   state.compatDependencyHashes = nextCompatHashes
   state.managedCompatDependencies = nextManagedCompat
   // Rebuilt from scratch each run: a package that no longer reports missing
@@ -1081,6 +1142,9 @@ async function doReset(manifest) {
   delete state.managedPackages
   delete state.localPackageHashes
   delete state.localPackageBuildInputs
+  // Reset discards the deployment, so a surviving provenance claim would be
+  // evidence about a state that no longer exists.
+  delete state.localPackageBuiltFrom
   delete state.compatDependencyHashes
   delete state.managedCompatDependencies
   delete state.managedDependencies
