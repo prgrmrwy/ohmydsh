@@ -110,6 +110,12 @@ export interface ChannelControl {
   setEnabled(enabled: boolean): Promise<void>
   /** Revalidate readiness and restart a downed subscription. */
   reconnect(): Promise<void>
+  /** Current ephemeral allowlist pairing projection. */
+  pairingState(): PetChannelView['pairing']
+  /** Generate a fresh pairing after verifying the bound bot identity. */
+  startPairing(): Promise<void>
+  /** Invalidate the current pairing, if any. */
+  cancelPairing(): void
   /** Current binding-flow state, when one has run. */
   bindState(): PetBindState | undefined
   /** Begin creating a new Lark app; resolves when the flow settles. */
@@ -197,6 +203,7 @@ function channelView(
 
   const status = channel?.status() ?? { phase: 'stopped' as const }
   const binding = channel?.bindState()
+  const pairing = channel?.pairingState()
   const blockers: PetChannelBlocker[] = []
   if (config.botAppId === undefined) {
     blockers.push({ code: 'bot-unbound', message: '请先绑定飞书 Bot。' })
@@ -237,6 +244,7 @@ function channelView(
       : {}),
     allowOpenIds: config.allowOpenIds,
     knownNames: config.knownNames ?? {},
+    ...(pairing !== undefined ? { pairing } : {}),
     ...(config.defaultWorkspaceId !== undefined
       ? { defaultWorkspaceId: config.defaultWorkspaceId }
       : {}),
@@ -734,9 +742,12 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
       ])
       const action = requireString(record, 'action')
       const config = repository.getChannelConfig()
+      const actionBody = (...fields: string[]): Record<string, unknown> =>
+        strictBody(record, ['action', ...fields])
 
       switch (action) {
         case 'set-enabled': {
+          actionBody('enabled')
           const enabled = record['enabled']
           if (typeof enabled !== 'boolean') {
             throw new PetError('BINDING_INVALID', 'enabled must be a boolean')
@@ -787,6 +798,7 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
           break
         }
         case 'set-allowlist': {
+          actionBody('allowOpenIds')
           const raw = record['allowOpenIds']
           if (!Array.isArray(raw) || raw.some(entry => typeof entry !== 'string')) {
             throw new PetError('BINDING_INVALID', 'allowOpenIds must be an array of open ids')
@@ -805,6 +817,7 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
           break
         }
         case 'set-default-workspace': {
+          actionBody('defaultWorkspaceId')
           const workspaceId = optionalString(record, 'defaultWorkspaceId')
           await repository.updateChannelConfig(current => {
             if (
@@ -827,6 +840,7 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
           break
         }
         case 'rebind-chat': {
+          actionBody('chatId', 'workspaceId')
           const chatId = requireString(record, 'chatId')
           const workspaceId = requireString(record, 'workspaceId')
           const existing = repository.getChatBinding(chatId)
@@ -850,11 +864,29 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
           break
         }
         case 'remove-chat': {
+          actionBody('chatId')
           await repository.deleteChatBinding(requireString(record, 'chatId'))
           break
         }
         case 'reconnect': {
+          actionBody()
           await deps.channel?.reconnect()
+          break
+        }
+        case 'pair-start': {
+          actionBody()
+          if (deps.channel === undefined) {
+            throw new PetError('BINDING_INVALID', 'This Pet Host has no Lark channel.')
+          }
+          await deps.channel.startPairing()
+          break
+        }
+        case 'pair-cancel': {
+          actionBody()
+          if (deps.channel === undefined) {
+            throw new PetError('BINDING_INVALID', 'This Pet Host has no Lark channel.')
+          }
+          deps.channel.cancelPairing()
           break
         }
         default:

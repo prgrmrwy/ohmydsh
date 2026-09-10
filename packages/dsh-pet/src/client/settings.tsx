@@ -1452,6 +1452,16 @@ export function shouldRefreshChannel(phase: PetChannelPhase): boolean {
   return phase === 'starting' || phase === 'reconnecting'
 }
 
+export function shouldRefreshPairing(view: PetChannelView): boolean {
+  const phase = view.pairing?.phase
+  return (
+    shouldRefreshChannel(view.connection.phase) ||
+    phase === 'starting' ||
+    phase === 'waiting' ||
+    phase === 'claiming'
+  )
+}
+
 /** Track a transitional Host state without relying on a change-feed edge. */
 export function watchChannelTransition(
   load: () => Promise<PetChannelView>,
@@ -1460,6 +1470,8 @@ export function watchChannelTransition(
   schedule: (callback: () => void, delay: number) => ReturnType<typeof setTimeout> = setTimeout,
   cancel: (timer: ReturnType<typeof setTimeout>) => void = clearTimeout,
   maxAttempts = 40,
+  shouldContinue: (view: PetChannelView) => boolean = view =>
+    shouldRefreshChannel(view.connection.phase),
 ): () => void {
   let stopped = false
   let attempts = 0
@@ -1472,7 +1484,7 @@ export function watchChannelTransition(
         .then(next => {
           if (stopped) return
           apply(next)
-          if (shouldRefreshChannel(next.connection.phase)) tick()
+          if (shouldContinue(next)) tick()
         })
         .catch(() => {
           if (!stopped) tick()
@@ -1529,6 +1541,8 @@ function ChannelTab(): JSX.Element {
   const [appId, setAppId] = useState('')
   const [appSecret, setAppSecret] = useState('')
   const [allowInput, setAllowInput] = useState('')
+  const [pairNow, setPairNow] = useState(() => Date.now())
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle')
   // No default group is chosen here: an unset tab means "follow the data", so
   // the section opens on a group that actually has routes rather than on an
   // empty one. An explicit click pins the choice.
@@ -1564,9 +1578,28 @@ function ChannelTab(): JSX.Element {
   // arrive before this component can wait on the next change generation. Read
   // current state while transitional so that a missed edge still converges.
   useEffect(() => {
-    if (view === undefined || !shouldRefreshChannel(view.connection.phase)) return undefined
-    return watchChannelTransition(petApi.channel, setView)
-  }, [view?.connection.phase])
+    if (view === undefined || !shouldRefreshPairing(view)) return undefined
+    return watchChannelTransition(
+      petApi.channel,
+      setView,
+      750,
+      setTimeout,
+      clearTimeout,
+      440,
+      shouldRefreshPairing,
+    )
+  }, [view?.connection.phase, view?.pairing?.phase])
+
+  useEffect(() => {
+    setCopyStatus('idle')
+  }, [view?.pairing?.phase, view?.pairing?.phase === 'waiting' ? view.pairing.command : undefined])
+
+  useEffect(() => {
+    if (view?.pairing?.phase !== 'waiting' && view?.pairing?.phase !== 'claiming') return undefined
+    setPairNow(Date.now())
+    const timer = setInterval(() => setPairNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [view?.pairing?.phase, view?.pairing?.phase === 'waiting' ? view.pairing.expiresAt : undefined])
 
   const mutate = async (input: Parameters<typeof petApi.mutateChannel>[0]): Promise<void> => {
     try {
@@ -1607,6 +1640,19 @@ function ChannelTab(): JSX.Element {
 
   const binding = view.binding
   const allowList = view.allowOpenIds
+  const pairing = view.pairing
+  const pairingExpiresAt =
+    pairing?.phase === 'waiting' || pairing?.phase === 'claiming'
+      ? pairing.expiresAt
+      : undefined
+  const pairingSeconds =
+    pairingExpiresAt === undefined ? 0 : Math.max(0, Math.ceil((pairingExpiresAt - pairNow) / 1000))
+  const pairingTime = `${Math.floor(pairingSeconds / 60)}:${String(pairingSeconds % 60).padStart(2, '0')}`
+  const canPair =
+    view.bot?.openId !== undefined &&
+    !view.onboarding.blockers.some(blocker =>
+      blocker.code === 'profile-unavailable' || blocker.code === 'bot-identity-unresolved',
+    )
   const doneSteps = view.onboarding.steps.filter(step => step.complete).length
   // Fall back to the first group that has any routes, so a deployment using
   // only QA groups (or only direct chats) does not open on an empty list and
@@ -1796,9 +1842,79 @@ function ChannelTab(): JSX.Element {
 
       <Group title="允许触发的成员" note={`${allowList.length} 人`}>
         <p className="dshpet-item-hint">
-          填写已确认的 open_id（ou_ 开头）。可从目标群的群主/管理员信息或组织查询中取得；
-          Pet 不会把观察到的陌生发送者自动加入允许清单。留空表示没有人可以触发。
+          生成一次性配对码后，把完整命令私聊发送给 Bot。配对码是 5 分钟有效的 bearer
+          凭证：第一个正确发送者会立即获得触发权限，请勿转发给无关人员。
         </p>
+        {pairing === undefined ? (
+          <div className="dshpet-actions">
+            <button
+              type="button"
+              className="dshpet-action dshpet-action-primary"
+              disabled={!canPair}
+              onClick={() => void mutate({ action: 'pair-start' })}
+            >
+              生成配对码
+            </button>
+          </div>
+        ) : pairing.phase === 'starting' ? (
+          <p className="dshpet-callout">正在连接飞书事件通道，连接完成后显示配对命令…</p>
+        ) : pairing.phase === 'waiting' ? (
+          <div className="dshpet-callout">
+            <span>请在 {pairingTime} 内私聊 Bot 发送：</span>
+            <code className="dshpet-code">{pairing.command}</code>
+            <span className="dshpet-actions">
+              <button
+                type="button"
+                className="dshpet-action"
+                onClick={() => {
+                  if (navigator.clipboard === undefined) {
+                    setCopyStatus('failed')
+                    return
+                  }
+                  void navigator.clipboard
+                    .writeText(pairing.command)
+                    .then(() => setCopyStatus('copied'))
+                    .catch(() => setCopyStatus('failed'))
+                }}
+              >
+                复制命令
+              </button>
+              <button type="button" className="dshpet-action" onClick={() => void mutate({ action: 'pair-start' })}>
+                重新生成
+              </button>
+              <button type="button" className="dshpet-action" onClick={() => void mutate({ action: 'pair-cancel' })}>
+                取消
+              </button>
+            </span>
+            <span role="status">
+              {copyStatus === 'copied' ? '已复制' : copyStatus === 'failed' ? '复制失败，请手动选择命令' : ''}
+            </span>
+          </div>
+        ) : pairing.phase === 'claiming' ? (
+          <p className="dshpet-callout">已匹配，正在安全写入允许成员…</p>
+        ) : pairing.phase === 'succeeded' ? (
+          <div className="dshpet-callout">
+            <span>✓ 配对成功</span>
+            <IdentityChip id={pairing.openId} {...(pairing.name === undefined ? {} : { name: pairing.name })} />
+            <button type="button" className="dshpet-action" onClick={() => void mutate({ action: 'pair-start' })}>
+              添加另一位成员
+            </button>
+          </div>
+        ) : pairing.phase === 'expired' ? (
+          <div className="dshpet-callout" data-tone="warn">
+            <span>配对码已过期。</span>
+            <button type="button" className="dshpet-action" onClick={() => void mutate({ action: 'pair-start' })}>
+              重新生成
+            </button>
+          </div>
+        ) : (
+          <div className="dshpet-callout" data-tone="danger">
+            <span>{pairing.diagnostic}</span>
+            <button type="button" className="dshpet-action" onClick={() => void mutate({ action: 'pair-start' })}>
+              重试
+            </button>
+          </div>
+        )}
         <ul className="dshpet-list">
           {allowList.map(openId => (
             <li key={openId} className="dshpet-item">
@@ -1826,29 +1942,39 @@ function ChannelTab(): JSX.Element {
         {allowList.length === 0 ? (
           <p className="dshpet-empty">清单为空，当前没有人可以触发。</p>
         ) : null}
-        <div className="dshpet-row">
-          <div className="dshpet-field">
-            <input
-              className="dshpet-input"
-              value={allowInput}
-              placeholder="ou_…"
-              onChange={event => setAllowInput(event.target.value)}
-            />
+        <details className="dshpet-fold">
+          <summary className="dshpet-fold-head">
+            <span className="dshpet-fold-mark" aria-hidden="true">›</span>
+            <span className="dshpet-fold-title">高级：手动添加 open_id</span>
+          </summary>
+          <div className="dshpet-fold-body">
+            <p className="dshpet-item-hint">仅填写已经确认的 ou_…；无法证明身份的值不会生效。</p>
+            <div className="dshpet-row">
+              <div className="dshpet-field">
+                <input
+                  className="dshpet-input"
+                  aria-label="成员 open_id"
+                  value={allowInput}
+                  placeholder="ou_…"
+                  onChange={event => setAllowInput(event.target.value)}
+                />
+              </div>
+              <button
+                type="button"
+                className="dshpet-action"
+                disabled={allowInput.trim() === ''}
+                onClick={() => {
+                  void mutate({
+                    action: 'set-allowlist',
+                    allowOpenIds: [...allowList, allowInput.trim()],
+                  }).then(() => setAllowInput(''))
+                }}
+              >
+                添加
+              </button>
+            </div>
           </div>
-          <button
-            type="button"
-            className="dshpet-action"
-            disabled={allowInput.trim() === ''}
-            onClick={() => {
-              void mutate({
-                action: 'set-allowlist',
-                allowOpenIds: [...allowList, allowInput.trim()],
-              }).then(() => setAllowInput(''))
-            }}
-          >
-            添加
-          </button>
-        </div>
+        </details>
       </Group>
 
       <Group title="默认工作区">
@@ -1909,7 +2035,9 @@ function ChannelTab(): JSX.Element {
                       : 'warn'
               }
             >
-              {CHANNEL_PHASE_LABELS[view.connection.phase]}
+              {!view.enabled && shouldRefreshPairing(view)
+                ? `配对临时${CHANNEL_PHASE_LABELS[view.connection.phase]}`
+                : CHANNEL_PHASE_LABELS[view.connection.phase]}
             </span>
             {view.connection.diagnostic !== undefined
               ? `（${view.connection.diagnostic}）`

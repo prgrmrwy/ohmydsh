@@ -144,6 +144,8 @@ export const petApi = {
       | 'rebind-chat'
       | 'remove-chat'
       | 'reconnect'
+      | 'pair-start'
+      | 'pair-cancel'
     enabled?: boolean
     allowOpenIds?: readonly string[]
     defaultWorkspaceId?: string

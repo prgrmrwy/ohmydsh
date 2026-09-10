@@ -268,7 +268,7 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
   color:var(--dsw-alias-label-secondary,#61666b)}
 .dshpet-settings .dshpet-subtab:hover{color:var(--dsw-alias-label-primary,#0f1115)}
 .dshpet-settings .dshpet-subtab[aria-selected="true"]{
-  background:var(--dsw-alias-bg-layer-3,#fff);
+  background:var(--dsw-alias-bg-layer-1,#fff);
   color:var(--dsw-alias-label-primary,#0f1115);font-weight:500}
 .dshpet-settings .dshpet-subtab:focus-visible{
   outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:1px}
@@ -314,7 +314,7 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-card{display:flex;flex-direction:column;gap:10px;
   padding:12px 14px;border-radius:16px;
   border:.5px solid var(--dsw-alias-border-l4,#0000001a);
-  background:var(--dsw-alias-bg-layer-3,#fff)}
+  background:var(--dsw-alias-bg-layer-1,#fff)}
 .dshpet-settings .dshpet-card-head{display:flex;align-items:center;gap:10px;
   flex-wrap:wrap}
 .dshpet-settings .dshpet-card-name{min-width:0;
@@ -365,7 +365,7 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-input{width:100%;max-width:360px;box-sizing:border-box;
   height:32px;padding:0 10px;font:inherit;font-size:13px;line-height:20px;
   color:var(--dsw-alias-label-primary,#1f2329);
-  background:var(--dsw-alias-bg-layer-3,#fff);
+  background:var(--dsw-alias-bg-layer-1,#fff);
   border:.5px solid var(--dsw-alias-border-l4,#0000001a);border-radius:8px;outline:none}
 .dshpet-settings .dshpet-input::placeholder{color:var(--dsw-alias-label-dimmed,#cfd3d6)}
 .dshpet-settings .dshpet-input:focus,.dshpet-settings .dshpet-input:focus-visible{
@@ -505,7 +505,7 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
   grid-template-columns:minmax(140px,1fr) minmax(160px,1.4fr) auto;
   gap:12px;align-items:center;padding:10px 12px;border-radius:12px;
   border:.5px solid var(--dsw-alias-border-l4,#0000001a);
-  background:var(--dsw-alias-bg-layer-3,#fff)}
+  background:var(--dsw-alias-bg-layer-1,#fff)}
 .dshpet-env-key{display:flex;flex-direction:column;gap:2px;min-width:0}
 /* The name carries an inline badge ("覆盖全局" / "已被覆盖"), so it is a flex
    row on a fixed 20px line: as a bare block it inherited a normal
@@ -571,7 +571,7 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 /* In-app Host directory browser, used where no OS picker exists. */
 .dshpet-browser{display:flex;flex-direction:column;gap:8px;padding:12px;
   border:.5px solid var(--dsw-alias-border-l4,#0000001a);border-radius:12px;
-  background:var(--dsw-alias-bg-layer-3,#fff)}
+  background:var(--dsw-alias-bg-layer-1,#fff)}
 .dshpet-crumbs{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
 .dshpet-browser-list{display:flex;flex-direction:column;gap:2px;
   max-height:220px;overflow:auto}

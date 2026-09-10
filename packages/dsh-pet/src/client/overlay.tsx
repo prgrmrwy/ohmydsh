@@ -741,6 +741,8 @@ interface TaskView {
   sourceAvailability?: string
   /** Set when the executor runs inside the routed workspace itself. */
   residentWorkspaceId?: string
+  /** Host-side dispatch/recovery failure shown on the Task itself. */
+  diagnostic?: string
   status: string
   /**
    * Why the Task is in its current status.

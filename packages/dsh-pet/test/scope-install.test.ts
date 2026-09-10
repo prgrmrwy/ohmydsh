@@ -146,12 +146,28 @@ describe('the shipped installer matches the contract these tests encode', () => 
     // The mirrored function above proves the ORDERING is sound; this pins the
     // shipped one to that same ordering, which a behavioural test cannot
     // reach without constructing an entire Host.
+    //
+    // What must hold is the INVARIANT, not one spelling of it: bookkeeping
+    // happens inside the inject callback, and `composedAgents` is marked only
+    // after those callbacks have actually run. The shipped installer now
+    // expresses this by resolving a callback-owned promise and awaiting it,
+    // having replaced an earlier `markComposed()` helper; both satisfy the
+    // same rule, so asserting the helper's name would pin the syntax rather
+    // than the contract.
     const toolsCallback = install.slice(install.indexOf("scoped.inject(['tools']"))
     expect(toolsCallback).toContain('contextToolAgents.add(key)')
-    expect(toolsCallback).toContain('markComposed()')
+    expect(toolsCallback).toContain('resolve()')
 
-    // And the assertion that could never hold is gone for good.
-    expect(install).not.toContain('were not installed')
+    // `composedAgents` must never be marked synchronously alongside the
+    // `inject()` calls — only after the awaited callbacks settle.
+    const marking = install.indexOf('composedAgents.add(key)')
+    expect(marking).toBeGreaterThan(install.indexOf('Promise.all(pending)'))
+
+    // And the assertion that could never hold — a SYNCHRONOUS check right
+    // after `inject()` — is gone for good. The surviving check with this
+    // message runs inside `.then()`, after the callbacks have resolved.
+    const sync = install.slice(0, install.indexOf('const ready'))
+    expect(sync).not.toContain('were not installed')
   })
 
   it('keeps the pre-dispatch gate that actually enforces the boundary', async () => {

@@ -225,6 +225,13 @@ export class PetCoordinator {
     // archived or vanished Task must not stop the next message from being
     // answered.
     let task = repository.findActiveTaskByScope(request.scopeKey)
+    // A failed shell left by executor CREATION owns the scope but has no work
+    // to preserve and no usable session to resume. Retire only that provable
+    // empty shell; failed Tasks with any Invocation remain durable history.
+    if (task?.status === 'failed' && repository.listInvocations(task.id).length === 0) {
+      await repository.archiveTask(task.id, task.revision)
+      task = undefined
+    }
     if (task === undefined) {
       task = await createTaskWithExecutor(repository, this.deps.agents, {
         scopeKey: request.scopeKey,

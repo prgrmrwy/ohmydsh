@@ -23,6 +23,7 @@ import {
   PET_SETTINGS_TABS,
   PetSettingsSection,
   shouldRefreshChannel,
+  shouldRefreshPairing,
   watchChannelTransition,
 } from '../src/client/settings.js'
 import type { PetChannelView, PetChannelPhase } from '../src/wire.js'
@@ -60,6 +61,23 @@ describe('channel connection convergence', () => {
     expect(shouldRefreshChannel('connected')).toBe(false)
     expect(shouldRefreshChannel('down')).toBe(false)
     expect(shouldRefreshChannel('stopped')).toBe(false)
+  })
+
+  it('keeps refreshing for every nonterminal pairing phase', () => {
+    expect(shouldRefreshPairing({ ...view('stopped'), pairing: { phase: 'starting' } })).toBe(true)
+    expect(shouldRefreshPairing({
+      ...view('stopped'),
+      pairing: { phase: 'waiting', command: '/pair 2345-6789', expiresAt: Date.now() + 1 },
+    })).toBe(true)
+    expect(shouldRefreshPairing({
+      ...view('stopped'),
+      pairing: { phase: 'claiming', expiresAt: Date.now() + 1 },
+    })).toBe(true)
+    expect(shouldRefreshPairing({ ...view('stopped'), pairing: { phase: 'expired' } })).toBe(false)
+    expect(shouldRefreshPairing({
+      ...view('stopped'),
+      pairing: { phase: 'succeeded', openId: 'ou_member' },
+    })).toBe(false)
   })
 
   it('refreshes a missed ready edge and stops at connected', async () => {
