@@ -45,21 +45,25 @@ test('the patch carries behavior, compatibility, and a runtime capability marker
   assert.match(patch, /if \(activation\.settlementNotice === 'silent'\) return/)
 })
 
-test('the launcher overrides one transitive package rather than vendoring DSH', async () => {
+test('the launcher installs reviewed overrides and atomically publishes a self-contained runtime', async () => {
   const launcher = await text('build-launcher.cjs')
 
   assert.match(launcher, /'@deepseek-ai\/dsh': version/)
-  assert.match(launcher, /'@deepseek-ai\/dsh-subagent': `file:\$\{here\}`/)
+  assert.match(launcher, /'@deepseek-ai\/dsh-subagent': `file:\$\{join\(compatPackages, 'subagent'\)\}`/)
   assert.match(launcher, /'@deepseek-ai\/dsh-storage-domain': `file:/)
   assert.match(launcher, /'@deepseek-ai\/dsh-storage-sqlite': `file:/)
-  assert.match(launcher, /npm', \['ls', '@deepseek-ai\/dsh-subagent'\]/)
+  assert.match(launcher, /run\('npm', \['ls', '@deepseek-ai\/dsh-subagent', \.\.\.expectedRuntimeStorage\]/)
+  assert.match(launcher, /renameSync\(staging, buildDir\)/)
+  assert.match(launcher, /renameSync\(nextLink, launcher\)/)
+  assert.match(launcher, /realpathSync\(here\)/)
+  assert.match(launcher, /acquireCompatBuildLock/)
   assert.doesNotMatch(launcher, /node_modules\/\.npm\/_npx/)
 })
 
 test('generated runtime and launcher files remain out of version control', async () => {
   const ignore = await text('.gitignore')
 
-  for (const entry of ['lib/', '.upstream/', '.launcher/', 'package.json']) {
+  for (const entry of ['lib/', '.upstream/', '.launcher', '.launcher-builds/', 'package.json']) {
     assert.match(ignore, new RegExp(`^${entry.replaceAll('.', '\\.').replace('/', '\\/')}$`, 'm'))
   }
 })

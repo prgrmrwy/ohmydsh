@@ -10,6 +10,7 @@ import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import yaml from 'js-yaml'
 import { runDshCli } from './lib/dsh-cli.mjs'
+import { declaredHostRuntimeFromManifest } from './lib/dsh-host-runtime.mjs'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DSH_HOME = resolveDshHome(process.env.DSH_HOME)
@@ -63,6 +64,10 @@ function loadManifest() {
   if (typeof doc !== 'object' || doc === null) throw new Error(`manifest ${file} is empty or not a YAML mapping`)
   if (typeof doc.dshVersion !== 'string' || doc.dshVersion === '') throw new Error('manifest: dshVersion is required')
   if (!Array.isArray(doc.customizations)) throw new Error('manifest: customizations must be a list')
+  // Version-fence the reviewed Host overlay before even normalizing the rest of
+  // the manifest. loadManifest itself is side-effect free, and main performs no
+  // profile/state operation until this entire validation returns.
+  declaredHostRuntimeFromManifest(doc, { repo: REPO, env: process.env })
 
   // top-level dependencies: bundle-less support packages (exact-version npm specs)
   const deps = (doc.dependencies ?? []).map((spec, index) => {

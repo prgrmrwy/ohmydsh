@@ -32,6 +32,7 @@ async function fixture({ build = true } = {}) {
   await writeFile(path.join(repo, 'scripts', 'sync.mjs'), await readFile(SYNC_SCRIPT))
   await mkdir(path.join(repo, 'scripts', 'lib'), { recursive: true })
   await writeFile(path.join(repo, 'scripts', 'lib', 'dsh-cli.mjs'), await readFile(path.join(REPO, 'scripts', 'lib', 'dsh-cli.mjs')))
+  await writeFile(path.join(repo, 'scripts', 'lib', 'dsh-host-runtime.mjs'), await readFile(path.join(REPO, 'scripts', 'lib', 'dsh-host-runtime.mjs')))
   await symlink(path.join(REPO, 'node_modules'), path.join(repo, 'node_modules'), 'dir')
   await writeFile(path.join(repo, 'package.json'), JSON.stringify({
     name: 'fixture-root', private: true, type: 'module', workspaces: ['packages/*'],

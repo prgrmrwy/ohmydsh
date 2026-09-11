@@ -309,13 +309,15 @@ completion from the standalone locus tests.
 了缺显式类型的公开 marker，修为 `readonly ...: true = true` 后才通过，
 没有绕过生成器。
 
-**Pet 的 `compatDependencies` 直接覆盖仍不可行**：profile 与 DSH 主包是
-两个依赖根，装进 profile 的副本不会替换主包传递依赖。新的可行方案不是
-fork 223 个包，而是仓库已有 `DSH_BIN` 逃生门配合一个隔离 root package：
+**Pet 的 `compatDependencies` 直接覆盖主包仍不可行**：profile 与 DSH 主包是
+两个依赖根，装进 profile 的副本不会替换主包传递依赖。可行方案不是 fork
+223 个包，而是一个隔离 root package；当前已进一步从每机 `DSH_BIN` 收敛为
+`dsh-pet.hostRuntimeCompatibility` 声明：
 
 1. root 精确依赖官方 `@deepseek-ai/dsh@0.1.2-rc.1`；
-2. npm `overrides` 只把传递依赖 `@deepseek-ai/dsh-subagent` 指向补丁产物；
-3. `DSH_BIN=<launcher>/node_modules/.bin/dsh` 让 `bin/dsh` 使用这个依赖根。
+2. npm `overrides` 把主包所需 Subagent/Storage 传递依赖指向 reviewed 补丁产物；
+3. 仅 `scripts/dsh-server-bin.mjs` 为长期 Host 准备/选择该依赖根；官方一次性 CLI
+   仍走 `dshVersion` 精确版本。
 
 已执行的隔离验证：
 
@@ -325,12 +327,14 @@ fork 223 个包，而是仓库已有 `DSH_BIN` 逃生门配合一个隔离 root 
 - 实际 `SubagentRuntime` 实例的 `supportsSettlementNotice === true`；
 - 加载代码包含 `silent` 早退，descriptor 的 `silent` 持久化、`notify`
   默认形态不变；
-- `scripts/dsh-server-bin.mjs` 通过 `DSH_BIN` 返回该 launcher；
-- launcher 对现有 web profile 成功执行 `--dump-config`，未启动替代服务器，
-  未修改 npm 缓存或现有安装目录。
+- `scripts/dsh-server-bin.mjs` 无显式覆盖时按 Pet 声明返回该 launcher 的真实
+  `lib/bin.js`；
+- 官方 CLI 对现有 web profile 成功执行 `--dump-config`，且未构建/加载 launcher；
+- launcher 以共享锁、bounded process group、sibling staging 和原子 publish
+  固化构建，失败保留旧成品；fingerprint 含 checkout canonical path。
 
-`build-launcher.cjs` 已固化上述构建和依赖树检查；`.launcher/` 被 gitignore。
-`.env.local` 当前在本 Worktree Session 中指向它，删除该行即可回到官方包。
+`.launcher/` 被 gitignore，Pet 不再要求 `.env.local DSH_BIN`。旧机器残留的当前
+checkout 历史值会由 `bin/dsh` 精确识别并迁移忽略；人类显式 `DSH_BIN` 不受影响。
 
 仍拒绝的替代方案：外部 shim 会同时破坏真实父子消息；直接修改 npm 缓存
 不可审查且升级即失效。上游一旦发布该能力，应删除 override 与本目录。

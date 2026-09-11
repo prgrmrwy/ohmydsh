@@ -10,6 +10,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, readFile, writeFile, rm, chmod, cp } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
+import { computeNpxCacheKey } from '../scripts/lib/dsh-cli.mjs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -65,6 +66,70 @@ async function withStubBin(sb) {
   await chmod(wrapper, 0o755)
   return { ...sb, stub: wrapper }
 }
+
+async function installOfficialCacheStub(sb) {
+  const spec = '@deepseek-ai/dsh@0.1.2-rc.1'
+  const cacheRoot = path.join(sb.dir, 'npm-cache')
+  const bin = path.join(cacheRoot, '_npx', computeNpxCacheKey([spec]), 'node_modules/@deepseek-ai/dsh/lib/bin.js')
+  await mkdir(path.dirname(bin), { recursive: true })
+  await writeFile(bin, `for (const a of process.argv.slice(2)) console.log('OFFICIAL_ARG:' + a)\n`)
+  return cacheRoot
+}
+
+test('旧 Pet DSH_BIN 若由 .env.local 注入则忽略，plugin 仍走官方精确 cache', async t => {
+  const sb = await sandbox()
+  t.after(() => rm(sb.dir, { recursive: true, force: true }))
+  const legacy = path.join(sb.dir, 'packages/dsh-pet/compat/subagent/.launcher/node_modules/.bin/dsh')
+  await mkdir(path.dirname(legacy), { recursive: true })
+  await writeFile(legacy, '#!/usr/bin/env bash\necho LEGACY_SHOULD_NOT_RUN\n')
+  await chmod(legacy, 0o755)
+  await writeFile(path.join(sb.dir, '.env.local'), `DSH_BIN="$REPO/packages/dsh-pet/compat/subagent/.launcher/node_modules/.bin/dsh"\n`)
+  const npmCache = await installOfficialCacheStub(sb)
+  const r = spawnSync('bash', [sb.bin, 'plugin', '--profile', 'web', 'list'], {
+    encoding: 'utf8',
+    env: { ...process.env, DSH_BIN: undefined, npm_config_cache: npmCache, XDG_CACHE_HOME: path.join(sb.dir, 'xdg'), DSH_SKIP_UPDATE: '1', DSH_HOME: path.join(sb.dir, 'h'), HOME: sb.dir },
+  })
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stderr, /忽略 \.env\.local 中旧 dsh-pet DSH_BIN/)
+  assert.match(r.stdout, /OFFICIAL_ARG:plugin/)
+  assert.doesNotMatch(r.stdout, /LEGACY_SHOULD_NOT_RUN/)
+})
+
+test('调用方显式同一历史 Pet 路径时仍保留最高优先级', async t => {
+  const sb = await sandbox()
+  t.after(() => rm(sb.dir, { recursive: true, force: true }))
+  const legacy = path.join(sb.dir, 'packages/dsh-pet/compat/subagent/.launcher/node_modules/.bin/dsh')
+  await mkdir(path.dirname(legacy), { recursive: true })
+  await writeFile(legacy, '#!/usr/bin/env bash\necho EXPLICIT_LEGACY "$@"\n')
+  await chmod(legacy, 0o755)
+  await writeFile(path.join(sb.dir, '.env.local'), `DSH_BIN="$REPO/packages/dsh-pet/compat/subagent/.launcher/node_modules/.bin/dsh"\n`)
+  const r = spawnSync('bash', [sb.bin, '--dump-config'], {
+    encoding: 'utf8',
+    env: { ...process.env, DSH_BIN: legacy, DSH_SKIP_UPDATE: '1', DSH_HOME: path.join(sb.dir, 'h'), HOME: sb.dir },
+  })
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /EXPLICIT_LEGACY --dump-config/)
+  assert.doesNotMatch(r.stderr, /忽略 \.env\.local/)
+})
+
+test('.env.local 不得覆盖调用方显式的其它 DSH_BIN', async t => {
+  const sb = await sandbox()
+  t.after(() => rm(sb.dir, { recursive: true, force: true }))
+  const localValue = path.join(sb.dir, 'local-dsh')
+  const callerValue = path.join(sb.dir, 'caller-dsh')
+  await writeFile(localValue, '#!/usr/bin/env bash\necho LOCAL_SHOULD_NOT_RUN\n')
+  await chmod(localValue, 0o755)
+  await writeFile(callerValue, '#!/usr/bin/env bash\necho CALLER_OVERRIDE "$@"\n')
+  await chmod(callerValue, 0o755)
+  await writeFile(path.join(sb.dir, '.env.local'), `DSH_BIN=${JSON.stringify(localValue)}\n`)
+  const r = spawnSync('bash', [sb.bin, '--dump-config'], {
+    encoding: 'utf8',
+    env: { ...process.env, DSH_BIN: callerValue, DSH_SKIP_UPDATE: '1', DSH_HOME: path.join(sb.dir, 'h'), HOME: sb.dir },
+  })
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /CALLER_OVERRIDE --dump-config/)
+  assert.doesNotMatch(r.stdout, /LOCAL_SHOULD_NOT_RUN/)
+})
 
 test('官方 plugin 子命令被原样转交给 CLI,不再污染 web argv', async (t) => {
   const sb = await withStubBin(await sandbox())

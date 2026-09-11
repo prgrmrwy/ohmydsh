@@ -1,66 +1,75 @@
-# `settlementNotice` 固定源码补丁
+# Pet Locus 固定源码兼容运行时
 
 ## 这是什么
 
-`settlement-notice.patch` 为 DSH 的 continuable 子会话增加可选开关，使指定
-子会话的**自动结算结论不写入父会话**。Pet locus 子会话在自己的飞书入口
-回答，其结论不应自动灌进主会话。
+当前 `dsh.yaml` 固定 DSH `0.1.2-rc.1`，但 Pet unified locus 还需要该正式包
+尚未发布的两组宿主能力：
 
-补丁只改 3 个源文件；默认值 `notify` 与改动前逐字节一致，并保留读取旧版
-descriptor，使既有子会话仍可恢复。上游侧验证：`packages/subagent` 31 文件 /
-778 测试通过，oxlint 0 问题。
+- continuable child 可选择 `settlementNotice: silent`，且能创建 idle child、在
+  continuation owner 内访问准确 child Session；
+- Storage/Domain/SQLite/JSON 的原子 batch/transaction，其中 SQLite 可取得介质
+  独占所有权。
 
-`build.mjs` 物化补丁包，自带四道防护：补丁哈希校验、补丁可应用性检查、
-构建后实际调用产物自证能力，以及供 Pet 结构化探测的字面量 marker。任一不
-满足即拒绝产出。
+本目录保存固定 upstream tag、可审查 patch/hash 与可重建脚本。生成的
+`.upstream/`、`.storage-upstream/`、`storage-artifacts/`、`lib/`、`.launcher/`
+均不是部署真相，不进入 Git。
 
-## 为什么 Pet compatDependencies 不能直接替换它
+## 声明式选择与作用域
 
-`@deepseek-ai/dsh-subagent` 是 `@deepseek-ai/dsh` 主包的传递依赖；普通
-profile 插件装在另一个依赖根。把兼容包挂在 Pet 的 `compatDependencies`
-会把包装进 profile，却不会替换主包依赖树里的那一份。
+`dsh.yaml` 的本地 `dsh-pet` customization 声明：
 
-这不等于必须 fork 整个 DSH。此前“需要自建全部 223 个运行时包”的判断
-**不准确，已由隔离实测纠正**。
+```yaml
+hostRuntimeCompatibility:
+  kind: pet-unified-locus-v1
+  supportedDshVersion: 0.1.2-rc.1
+```
 
-## 已实测可行：根 launcher override + DSH_BIN
+该声明表达“Pet 请求 Host 级兼容运行时”，技术效果是整个长期 `dsh web` Host
+使用隔离 DSH 依赖根；它不是只影响 Pet 插件内部的局部替换。
 
-在一个隔离 root package 中：
+只有 `scripts/dsh-server-bin.mjs` 解析此声明。`dsh build`、sync、plugin、
+`--dump-config` 等一次性命令在没有人类显式 `DSH_BIN` 时仍使用 `dshVersion`
+指定的官方精确 CLI，不构建、不加载该 overlay。`DSH_BIN` 仍是跨命令紧急逃生门，
+不再是 Pet 的正常持久配置。
 
-1. 固定依赖官方 `@deepseek-ai/dsh@0.1.2-rc.1`；
-2. 用 npm `overrides` 将传递依赖 `@deepseek-ai/dsh-subagent` 指向本目录的
-   补丁产物；
-3. 通过仓库已有的显式逃生门 `DSH_BIN=<launcher>/node_modules/.bin/dsh`
-   启动。
+旧机器若 `.env.local` 仍含当前 checkout 的历史 Pet launcher 路径，`bin/dsh`
+会识别由该文件新注入的精确值、打印迁移告警并忽略；调用方在 shell 中显式设置
+同一路径时仍优先，其他路径绝不猜测或删除。
 
-执行 `node build-launcher.cjs` 可完整重建。生成的 `.launcher/`、上游检出、
-`lib/` 与生成 manifest 均 gitignored；被跟踪的只有补丁、构建脚本与模板。
+## 构建与安全边界
 
-实测结果：
+Host 首次准备会执行 `build-launcher.cjs`；fingerprint 命中时只做轻量自证，
+不 clone、build、install 或访问 registry。fingerprint 覆盖：
 
-- `npm ls @deepseek-ai/dsh-subagent` 显示主包、base、fork、driver、SDK、
-  web-app 与全部工具**共用一个**补丁版本，无双副本；
-- `require.resolve()` 解析到本目录，版本与补丁 SHA 来源标记正确；
-- 实际 `SubagentRuntime` 实例发布 `supportsSettlementNotice === true`，Pet
-  只在看到该 marker 时放行；
-- 实际加载代码包含 `settlementNotice === "silent"` 早退；
-- `silent` descriptor 持久记录该字段，`notify` 保持旧默认形态；
-- `DSH_BIN` 经 `scripts/dsh-server-bin.mjs` 返回隔离 launcher 的 bin；
-- 补丁 launcher 能对现有 web profile 成功执行 `--dump-config`，证明完整
-  DSH 主包可以组合现有插件层；未启动替代服务器、未改 npm 缓存；
-- npm 默认跳过的 5 个安装脚本（subprocess helper、PTY/native 等）由构建脚本
-  按锁定版本显式批准并执行，随后 `npm install-scripts ls` 确认为空，避免
-  出现“能 dump config、实际运行时缺 native helper”的假成功；
-- 连续重建得到相同的 `package-lock.json` SHA-256：
-  `a16d2b7f773b80579274281f9e04707774dc60fd4203d35db5f3c7d437c377b2`。
+- 固定 DSH 版本与 checkout canonical path；
+- 两份 patch 及其固定 SHA；
+- Subagent/Storage/launcher/lock/timeout builders；
+- package template。
 
-因此可部署方案不是“fork 223 个包”，而是**保留官方主包，只在独立依赖根
-覆盖一个传递依赖**。
+重建时使用一把跨进程、可恢复 stale owner 的共享锁，覆盖 Subagent 源码、Storage
+artifacts 与 launcher 整条链。所有外部 git/corepack/npm 子进程通过有界 supervisor
+运行，超时会终止进程组。launcher 在同文件系统 sibling staging 中完成：
 
-## 当前状态与回退
+1. 固定 tag 构建并验证 patch capability marker；
+2. 安装官方 `@deepseek-ai/dsh@0.1.2-rc.1` 与五个 reviewed overrides；
+3. 显式审批固定 install scripts；
+4. 验证依赖树唯一性、package identity/version/provenance、实际能力与 DSH
+   `--version`；
+5. 把 file links 转为自包含 package copies，再原子发布。
 
-本 Worktree Session 的 gitignored `.env.local` 已指向生成 launcher。删除
-该 `DSH_BIN` 行即可回到 `dshVersion` 指定的官方包。现有 Web 进程尚未重启，
-所以当前页面仍运行旧 runtime；按项目约定，实际切换须在用户同意后重启。
+任一步失败都不会删除已有 `.launcher`；本次 Host 启动 fail closed，不静默回退
+官方 runtime。启动控制台和 `dsh-startup.log` 会记录 runtime kind、owner、compat
+kind 与版本。
 
-上游正式发布后，应删除 override、该环境变量和本目录，恢复官方依赖。
+## 版本升级与移除
+
+`supportedDshVersion` 必须精确等于 `dshVersion`。sync 在任何 profile 副作用前
+校验，plain Host start 也独立复核。自动升级只改官方 pin，故新版本会有意触发
+mismatch、sync rollback 和停止启动；绝不会自动把旧 patch 套到未知新源码。
+
+升级前必须重新审查 upstream：
+
+1. 若官方已发布全部能力，删除 `hostRuntimeCompatibility` 和本目录相关 overlay；
+2. 否则针对新固定 tag 重新推导 patch、hash、能力验证与 compatibility kind/version。
+
+不要仅修改版本字符串让构建继续。
