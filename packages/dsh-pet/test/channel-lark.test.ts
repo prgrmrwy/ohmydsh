@@ -2,12 +2,14 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   createLarkCliClient,
   parseBotIdentity,
+  parseUserIdentity,
   permissionDiagnostic,
   type LarkCliRunner,
 } from '../src/host/channel/lark.js'
 
 const APP = 'cli_aa14740a43f81cd4'
 const BOT = 'ou_58c5c01075637418a8b934e58e5e1400'
+const USER = 'ou_currenthuman'
 
 const READY = {
   appId: APP,
@@ -19,6 +21,14 @@ const READY = {
       verified: true,
       openId: BOT,
       appName: 'Pet Bot',
+    },
+    user: {
+      status: 'ready',
+      available: true,
+      verified: true,
+      openId: USER,
+      userName: 'Current Human',
+      tokenStatus: 'ready',
     },
   },
 }
@@ -55,6 +65,55 @@ describe('verified bot identity parsing', () => {
     ['non-json shape', 'not-json'],
   ])('fails closed for %s', (_label, value) => {
     expect(parseBotIdentity(value, APP).kind).toBe('unavailable')
+  })
+})
+
+describe('verified current-user identity parsing', () => {
+  it('reads the real top-level auth status shape', () => {
+    expect(parseUserIdentity(READY, APP)).toEqual({
+      kind: 'ready',
+      identity: { appId: APP, openId: USER, name: 'Current Human' },
+    })
+  })
+
+  it.each([
+    ['another app', { ...READY, appId: 'cli_other' }],
+    ['missing login', { ...READY, identities: { ...READY.identities, user: { status: 'missing', available: false } } }],
+    ['unready token', { ...READY, identities: { ...READY.identities, user: { ...READY.identities.user, tokenStatus: 'expired' } } }],
+    ['unverified response', { ...READY, verified: false }],
+    ['no open id', { ...READY, identities: { ...READY.identities, user: { ...READY.identities.user, openId: undefined } } }],
+    ['malformed open id', { ...READY, identities: { ...READY.identities, user: { ...READY.identities.user, openId: 'not-open-id' } } }],
+  ])('fails closed for %s', (_label, value) => {
+    expect(parseUserIdentity(value, APP).kind).toBe('unavailable')
+  })
+})
+
+describe('default Q&A owner proof', () => {
+  it('returns only the verified current user when that exact open_id is allowlisted', async () => {
+    const runner = vi.fn(async () => ({ stdout: JSON.stringify(READY) })) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner)
+
+    await expect(client.defaultQaOwner?.(APP, [BOT, USER])).resolves.toEqual({
+      kind: 'ready', ownerId: USER,
+    })
+  })
+
+  it('fails closed when user auth is missing or the verified user is not allowlisted', async () => {
+    const missingUser = {
+      ...READY,
+      identities: { ...READY.identities, user: { status: 'missing', available: false } },
+    }
+    const missingClient = createLarkCliClient(
+      'lark-cli',
+      vi.fn(async () => ({ stdout: JSON.stringify(missingUser) })) as unknown as LarkCliRunner,
+    )
+    const notAllowedClient = createLarkCliClient(
+      'lark-cli',
+      vi.fn(async () => ({ stdout: JSON.stringify(READY) })) as unknown as LarkCliRunner,
+    )
+
+    await expect(missingClient.defaultQaOwner?.(APP, [USER])).resolves.toMatchObject({ kind: 'unavailable' })
+    await expect(notAllowedClient.defaultQaOwner?.(APP, [BOT])).resolves.toMatchObject({ kind: 'unavailable' })
   })
 })
 
@@ -149,6 +208,8 @@ describe('Pet profile isolation', () => {
     await client.listMessages('oc_1', 5)
     await client.botReady()
     await client.botIdentity?.(APP)
+    await client.userIdentity?.(APP)
+    await client.defaultQaOwner?.(APP, [USER])
     await client.chatName('oc_1')
     await client.listChatBots('oc_1')
     await client.reply('om_1', 'hi')
@@ -157,7 +218,7 @@ describe('Pet profile isolation', () => {
     await client.memberCount?.('oc_1')
     await client.sendToChat?.('oc_1', 'notice')
 
-    expect(mutableCalls).toHaveLength(12)
+    expect(mutableCalls).toHaveLength(14)
     for (const args of mutableCalls) {
       expect(args.slice(0, 2)).toEqual(['--profile', 'dsh-pet'])
     }

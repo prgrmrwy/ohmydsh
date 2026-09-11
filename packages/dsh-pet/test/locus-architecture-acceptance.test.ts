@@ -153,11 +153,17 @@ describe('design architecture acceptance A-F focused gaps', () => {
         } as never,
         child: {
           ensureChild: locus => ({ parentSessionId: locus.parentSessionId, childSessionId: locus.childSessionId }),
+          withChildSession: async input => ({ ok: true as const, value: await input.operation({ id: 'session-child' }) }),
           queueChild: input => {
             queued.push({ childSessionId: input.child.childSessionId, prompt: input.prompt })
-            return { accepted: true as const, executionId: input.executionId }
+            return {
+              accepted: true as const,
+              executionId: input.executionId,
+              inboxMessageId: `inbox-${input.executionId}`,
+            }
           },
         },
+        resolveLivePolicy: () => ({ mode: 'read-only', workspaceRoot: '/repo' }),
         turns: { perTurnCorrelation: true, subscribe: () => () => {} },
         admissionContext: {
           botOpenId: 'ou-bot', allowOpenIds: ['ou-owner'], watermark: 1000,
@@ -171,6 +177,21 @@ describe('design architecture acceptance A-F focused gaps', () => {
       expect(durable.findDeliveryByMessageId('om-material')).toBeUndefined()
 
       await expect(controller.handle(inbound('om-question', '@Pet choose A or B'))).resolves.toMatchObject({ kind: 'accepted' })
+      const first = durable.findDeliveryByMessageId('om-question')!
+      await durable.bindTurn({
+        deliveryId: first.deliveryId,
+        executionId: first.executionId!,
+        correlation: first,
+        turnId: 'session-child#1',
+        startedAt: Date.now(),
+      })
+      await durable.settleByTurn({
+        deliveryId: first.deliveryId,
+        executionId: first.executionId!,
+        correlation: { ...first, turnId: 'session-child#1' },
+        outcome: 'settled',
+        settledAt: Date.now(),
+      })
       await expect(controller.handle(inbound('om-answer', '@Pet B'))).resolves.toMatchObject({ kind: 'accepted' })
       expect(queued.map(item => item.childSessionId)).toEqual(['session-child', 'session-child'])
       expect(durable.findDeliveryByMessageId('om-question')?.replyTarget?.messageId).toBe('om-question')

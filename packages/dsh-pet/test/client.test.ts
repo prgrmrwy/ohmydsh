@@ -457,8 +457,8 @@ describe('settings information architecture', () => {
     expect(settings).toContain('locusArchive')
     expect(settings).toContain('locusStop')
     expect(settings).toContain('warningText')
-    expect(settings).toContain('首位必须是你本人')
-    expect(settings).toContain('默认 Q&A 新群的所有者')
+    expect(settings).toContain('默认 Q&A 新群的所有者来自 dsh-pet profile 实时核验的当前飞书用户')
+    expect(settings).toContain('列表顺序和浏览器输入都不能声明“本人”')
     expect(settings).not.toContain('ownerId:')
   })
 

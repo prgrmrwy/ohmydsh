@@ -598,6 +598,14 @@ export const petLocusDelivery = z.object({
   /** Optional host-proven turn/execution identity for settlement correlation. */
   turnId: z.string().min(1).optional(),
   executionId: z.string().min(1).optional(),
+  /** DSH inbox message identity; never the platform message_id. */
+  inboxMessageId: z.string().min(1).optional(),
+  /** Durable fail-closed startup decision; never execution proof. */
+  startupDisposition: z.enum(['unqueued', 'execution-unrecoverable']).optional(),
+  /** Explicit durable debt while an old queued/running turn cannot be stopped. */
+  startupRecoveryDebt: z.string().min(1).optional(),
+  /** Definitive pre-turn refusal; terminal evidence without fabricated turn proof. */
+  dispatchFailure: z.enum(['not-queued', 'queued-not-started']).optional(),
   dispatchId: z.string().min(1).optional(),
   inProgressReactionId: z.string().min(1).optional(),
   terminalFeedbackAt: z.number().int().nonnegative().optional(),
@@ -605,20 +613,54 @@ export const petLocusDelivery = z.object({
 }).superRefine((delivery, issueCtx) => {
   const hasExecution = delivery.executionId !== undefined
   const hasTurn = delivery.turnId !== undefined
-  if (delivery.status === 'accepted' && (hasExecution || hasTurn)) {
-    issueCtx.addIssue({ code: 'custom', message: 'accepted Delivery cannot carry execution or turn proof' })
+  const hasInboxMessage = delivery.inboxMessageId !== undefined
+  if (delivery.status === 'accepted' && (hasExecution || hasTurn || hasInboxMessage)) {
+    issueCtx.addIssue({ code: 'custom', message: 'accepted Delivery cannot carry inbox, execution or turn proof' })
   }
-  if (delivery.status === 'queued' && (!hasExecution || hasTurn || delivery.queuedAt === undefined)) {
-    issueCtx.addIssue({ code: 'custom', message: 'queued Delivery requires execution proof and queuedAt, but no turn proof' })
+  if (delivery.status === 'queued' && (!hasExecution || !hasInboxMessage || hasTurn || delivery.queuedAt === undefined)) {
+    issueCtx.addIssue({ code: 'custom', message: 'queued Delivery requires inbox/execution proof and queuedAt, but no turn proof' })
   }
-  if ((delivery.status === 'running' || delivery.status === 'settled' || delivery.status === 'failed') &&
-      (!hasExecution || !hasTurn)) {
-    issueCtx.addIssue({ code: 'custom', message: 'running/terminal Delivery requires execution and turn proof' })
+  if ((delivery.status === 'running' || delivery.status === 'settled') &&
+      (!hasExecution || !hasInboxMessage || !hasTurn)) {
+    issueCtx.addIssue({ code: 'custom', message: 'running/settled Delivery requires inbox, execution and turn proof' })
+  }
+  if (delivery.status === 'failed') {
+    const startupFailure = delivery.startupDisposition !== undefined
+    const dispatchFailure = delivery.dispatchFailure !== undefined
+    if (!startupFailure && !dispatchFailure && (!hasExecution || !hasInboxMessage || !hasTurn)) {
+      issueCtx.addIssue({ code: 'custom', message: 'ordinary failed Delivery requires inbox, execution and turn proof' })
+    }
+    if (delivery.startupDisposition === 'unqueued' && (hasExecution || hasInboxMessage || hasTurn)) {
+      issueCtx.addIssue({ code: 'custom', message: 'unqueued startup failure cannot carry execution proof' })
+    }
+    if (delivery.startupDisposition === 'execution-unrecoverable' && (!hasExecution || !hasInboxMessage)) {
+      issueCtx.addIssue({ code: 'custom', message: 'execution-unrecoverable startup failure requires prior inbox/execution proof' })
+    }
+    if (delivery.dispatchFailure === 'not-queued' && (startupFailure || hasExecution || hasInboxMessage || hasTurn)) {
+      issueCtx.addIssue({ code: 'custom', message: 'not-queued dispatch failure cannot carry startup, inbox, execution or turn proof' })
+    }
+    if (delivery.dispatchFailure === 'queued-not-started' &&
+        (startupFailure || !hasExecution || !hasInboxMessage || hasTurn || delivery.queuedAt === undefined)) {
+      issueCtx.addIssue({ code: 'custom', message: 'queued-not-started dispatch failure requires inbox/execution proof and queuedAt, but no startup or turn proof' })
+    }
+  } else {
+    if (delivery.startupDisposition !== undefined) {
+      issueCtx.addIssue({ code: 'custom', message: 'startupDisposition is only valid on failed Delivery' })
+    }
+    if (delivery.dispatchFailure !== undefined) {
+      issueCtx.addIssue({ code: 'custom', message: 'dispatchFailure is only valid on failed Delivery' })
+    }
+  }
+  if (delivery.startupRecoveryDebt !== undefined && delivery.status !== 'queued' && delivery.status !== 'running') {
+    issueCtx.addIssue({ code: 'custom', message: 'startupRecoveryDebt requires queued/running Delivery' })
   }
   const root = delivery.rootMessageId ?? delivery.replyTarget?.rootMessageId ?? delivery.feedbackTarget.rootMessageId
   if ((delivery.status === 'accepted' || delivery.status === 'queued') &&
       (delivery.startedAt !== undefined || delivery.settledAt !== undefined || delivery.failedAt !== undefined)) {
     issueCtx.addIssue({ code: 'custom', message: 'pre-turn Delivery cannot carry started or terminal timestamps' })
+  }
+  if (delivery.status === 'failed' && delivery.dispatchFailure !== undefined && delivery.startedAt !== undefined) {
+    issueCtx.addIssue({ code: 'custom', message: 'pre-turn dispatch failure cannot carry startedAt' })
   }
   if ((delivery.status === 'settled' || delivery.status === 'failed') && delivery.settledAt === undefined && delivery.failedAt === undefined) {
     issueCtx.addIssue({ code: 'custom', message: 'terminal Delivery requires a terminal timestamp' })
@@ -757,6 +799,10 @@ export const petLocusOperation = z.object({
   step: z.number().int().nonnegative(),
   attempts: z.number().int().nonnegative(),
   lastError: z.string().optional(),
+  /** Resource kinds already deterministically compensated during recovery. */
+  compensatedResources: z.array(z.enum(['chat', 'child-session', 'main-session'])).optional(),
+  /** Explicit debt that blocks another create for the same endpoint. */
+  manualRecoveryReason: z.string().min(1).optional(),
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
   completedAt: z.number().int().nonnegative().optional(),

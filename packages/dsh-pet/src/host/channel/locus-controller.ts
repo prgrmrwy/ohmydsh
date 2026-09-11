@@ -33,12 +33,18 @@ import {
 
 /** The minimum prefix accepted by the channel control surface. */
 export const MIN_BIND_PREFIX_LENGTH = 6
-import { normalizeLocusEndpoint, type LocusEndpoint } from '../locus/aggregate.js'
+import {
+  normalizeLocusEndpoint,
+  type LocusContextAnchor,
+  type LocusEndpoint,
+  type LocusPermission,
+} from '../locus/aggregate.js'
 import {
   isSafeLocusReplyTarget,
   type LocusReplyTarget,
 } from '../locus/context.js'
 import type { LarkInboundEvent } from './event.js'
+import { verifyLocusLivePolicy } from '../locus/policy-verification.js'
 import type {
   DeliveryAcceptance,
   DeliveryCorrelation,
@@ -121,6 +127,10 @@ export interface ActiveLocus {
   readonly childSessionId: string
   readonly workspaceId: string
   readonly state: 'active'
+  /** Durable policy projection that every ordinary Delivery must re-verify. */
+  readonly permission?: LocusPermission
+  /** Separately Host-authorized root required by effective write. */
+  readonly contextAnchor?: NonNullable<LocusContextAnchor>
 }
 
 /** Request used when ensuring an endpoint's current locus. */
@@ -154,6 +164,15 @@ export interface LocusChildDeliveryPort {
     locus: ActiveLocus,
     signal: AbortSignal,
   ): Awaitable<LocusChildIdentity>
+  /**
+   * Read the exact live Session through its continuation owner after adoption.
+   * Generic session routing is not authoritative for continuable children.
+   */
+  withChildSession?<T>(input: {
+    readonly identity: LocusChildIdentity
+    readonly operation: (session: unknown) => T | Promise<T>
+    readonly signal?: AbortSignal
+  }): Awaitable<{ readonly ok: true; readonly value: T } | { readonly ok: false; readonly reason: string }>
   queueChild(input: {
     readonly locus: ActiveLocus
     readonly child: LocusChildIdentity
@@ -164,7 +183,7 @@ export interface LocusChildDeliveryPort {
     readonly replyTarget: LocusReplyTarget
     readonly signal: AbortSignal
   }): Awaitable<
-    | { readonly accepted: true; readonly executionId: string }
+    | { readonly accepted: true; readonly executionId: string; readonly inboxMessageId: string }
     | { readonly accepted: false; readonly reason: string }
   >
 }
@@ -200,6 +219,7 @@ export interface LocusDeliveryLedgerPort {
     readonly deliveryId: string
     readonly correlation: DeliveryCorrelation
     readonly executionId: string
+    readonly inboxMessageId: string
     readonly queuedAt?: number
   }): Awaitable<DeliveryRecord | undefined>
   /** Bind the trusted per-turn identity once the inbox claim is observed. */
@@ -235,6 +255,11 @@ export interface LocusDeliveryLedgerPort {
 export interface LocusTurnCorrelationObserver {
   readonly perTurnCorrelation: true
   subscribe(listener: (event: LocusTurnCorrelationEvent) => void): (() => void)
+  /** Wake an exact claim after its durable inbox-message binding commits. */
+  deliveryAvailable?(input: {
+    readonly childSessionId: string
+    readonly messageId: string
+  }): void
 }
 
 /** Per-turn execution identity emitted by a trusted host adapter. */
@@ -268,6 +293,19 @@ export interface LocusControllerDeps {
   readonly locus: LocusResolutionPort
   readonly deliveries: LocusDeliveryLedgerPort
   readonly child: LocusChildDeliveryPort
+  /**
+   * Resolve the complete live sandbox policy for the exact Session handle.
+   * Called only inside child.withChildSession, immediately before acceptance.
+   */
+  readonly resolveLivePolicy?: (session: unknown) => Awaitable<{
+    readonly mode?: string
+    readonly workspaceRoot?: string
+  } | undefined>
+  /** Persistently pause/invalid the current generation when policy proof drifts. */
+  readonly invalidatePolicyDrift?: (input: {
+    readonly locus: ActiveLocus
+    readonly reason: string
+  }) => Awaitable<void>
   /**
    * Render the Host-bound per-delivery taskbook. Production supplies this so
    * the child sees the exact immutable reply target and locus facts instead of
@@ -304,6 +342,7 @@ export type LocusControllerDiagnostic =
   | 'locus-unavailable'
   | 'child-unavailable'
   | 'child-identity-mismatch'
+  | 'policy-drift'
   | 'delivery-persistence-failed'
   | 'delivery-conflict'
   | 'duplicate-delivery'
@@ -343,6 +382,7 @@ export type LocusControllerRefusal =
   | 'locus-unavailable'
   | 'child-unavailable'
   | 'child-identity-mismatch'
+  | 'policy-drift'
   | 'delivery-persistence-failed'
   | 'delivery-conflict'
   | 'queue-failed'
@@ -442,6 +482,15 @@ function normalizeActiveLocus(raw: unknown, expected: LocusEndpoint): ActiveLocu
   if (!nonEmpty(raw.parentSessionId) || !nonEmpty(raw.childSessionId) || !nonEmpty(raw.workspaceId)) {
     return undefined
   }
+  const permission = raw.permission
+  if (
+    !isRecord(permission) ||
+    (permission.desired !== 'read' && permission.desired !== 'write') ||
+    (permission.effective !== 'read' && permission.effective !== 'write')
+  ) return undefined
+  const contextAnchor = isRecord(raw.contextAnchor)
+    ? raw.contextAnchor as unknown as NonNullable<LocusContextAnchor>
+    : undefined
   return {
     ...(id !== undefined ? { id } : {}),
     ...(locusId !== undefined ? { locusId } : {}),
@@ -451,6 +500,8 @@ function normalizeActiveLocus(raw: unknown, expected: LocusEndpoint): ActiveLocu
     childSessionId: raw.childSessionId.trim(),
     workspaceId: raw.workspaceId.trim(),
     state: 'active',
+    permission: permission as unknown as LocusPermission,
+    ...(contextAnchor === undefined ? {} : { contextAnchor }),
   }
 }
 
@@ -726,6 +777,19 @@ export class LocusChannelController {
       childSessionId: child.childSessionId.trim(),
     }
 
+    // Adoption proves the exact durable child, but not that its current policy
+    // still matches the database. Resolve through the continuation owner at
+    // this operation boundary, before creating ANY Delivery/reaction/queue.
+    const policyVerification = await this.verifyLivePolicy(locus, child, signal)
+    if (!policyVerification.ok) {
+      try {
+        await this.deps.invalidatePolicyDrift?.({ locus, reason: policyVerification.diagnostic })
+      } catch {
+        // Failure to persist the pause is still fail closed for this request.
+      }
+      return this.refuse('policy-drift')
+    }
+
     const locusId = locusIdOf(locus)
     if (locusId === undefined) return this.refuse('locus-unavailable')
     const correlation: DeliveryCorrelation = {
@@ -809,7 +873,7 @@ export class LocusChannelController {
     this.pending.set(pending.deliveryId, pending)
 
     let queued:
-      | { readonly accepted: true; readonly executionId: string }
+      | { readonly accepted: true; readonly executionId: string; readonly inboxMessageId: string }
       | { readonly accepted: false; readonly reason: string }
     try {
       queued = await this.deps.child.queueChild({
@@ -830,7 +894,11 @@ export class LocusChannelController {
       const reason = isRecord(queued) && typeof queued.reason === 'string' ? queued.reason : 'queue-refused'
       return this.definitiveQueueFailure(pending, reason)
     }
-    if (!nonEmpty(queued.executionId) || queued.executionId.trim() !== pending.executionId) {
+    if (
+      !nonEmpty(queued.executionId) ||
+      queued.executionId.trim() !== pending.executionId ||
+      !nonEmpty(queued.inboxMessageId)
+    ) {
       this.pending.delete(pending.deliveryId)
       return this.dispatchUnknown(pending)
     }
@@ -841,6 +909,7 @@ export class LocusChannelController {
         deliveryId: pending.deliveryId,
         correlation,
         executionId: pending.executionId,
+        inboxMessageId: queued.inboxMessageId.trim(),
         queuedAt: this.now(),
       })
     } catch {
@@ -852,6 +921,18 @@ export class LocusChannelController {
       return this.dispatchUnknown(pending)
     }
     // Only now is the child inbox acceptance durably bound to the host token.
+    // Wake exactly this message: its claim/end may have arrived before the
+    // durable bind and remained unresolved without a polling deadline.
+    try {
+      this.deps.turns?.deliveryAvailable?.({
+        childSessionId: bound.childSessionId,
+        messageId: queued.inboxMessageId.trim(),
+      })
+    } catch {
+      // The observer keeps fail-closed state; a wake failure cannot authorize a
+      // guessed turn or make queue acceptance itself terminal.
+      this.log('settlement-ignored')
+    }
     // A queue refusal or bind failure must not leave an in-progress reaction.
     await this.receiptAccepted(bound.feedbackTarget ?? pending.target)
     pending.dispatching = false
@@ -879,6 +960,40 @@ export class LocusChannelController {
       executionId: pending.executionId,
       locusId: bound.locusId,
       generation: bound.generation,
+    }
+  }
+
+  private async verifyLivePolicy(
+    locus: ActiveLocus,
+    child: LocusChildIdentity,
+    signal: AbortSignal,
+  ): Promise<{ readonly ok: true } | { readonly ok: false; readonly diagnostic: string }> {
+    if (
+      locus.permission === undefined ||
+      this.deps.child.withChildSession === undefined ||
+      this.deps.resolveLivePolicy === undefined
+    ) {
+      return { ok: false, diagnostic: 'live sandbox policy verification capability is unavailable' }
+    }
+    try {
+      const result = await this.deps.child.withChildSession({
+        identity: child,
+        signal,
+        operation: async session => await this.deps.resolveLivePolicy!(session),
+      })
+      if (!result.ok) {
+        return { ok: false, diagnostic: `continuation owner rejected live policy read (${result.reason})` }
+      }
+      const livePolicy = result.value as { readonly mode?: string; readonly workspaceRoot?: string } | undefined
+      const verified = verifyLocusLivePolicy({
+        permission: locus.permission,
+        ...(locus.contextAnchor === undefined ? {} : { contextAnchor: locus.contextAnchor }),
+      }, livePolicy)
+      return verified.ok
+        ? { ok: true }
+        : { ok: false, diagnostic: verified.diagnostic }
+    } catch {
+      return { ok: false, diagnostic: 'live sandbox policy read failed' }
     }
   }
 

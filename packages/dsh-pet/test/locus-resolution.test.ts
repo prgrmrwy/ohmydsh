@@ -59,6 +59,7 @@ describe('durable locus resolution', () => {
       childSessionId: 'child-1',
       workspaceId: 'ws-1',
       state: 'active',
+      permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
     })
   })
 

@@ -2597,9 +2597,10 @@ function ChannelTab(): JSX.Element {
 
       <Group title="允许触发的成员" note={`${allowList.length} 人`}>
         <p className="dshpet-item-hint">
-          填写已确认的 open_id（ou_ 开头）。可从目标群的群主/管理员信息或组织查询中取得；
-          <strong>首位必须是你本人</strong>，它也是默认 Q&A 新群的所有者。Pet 不会把观察到的
-          陌生发送者自动加入允许清单。留空表示没有人可以触发。
+          填写已确认的 open_id（ou_ 开头）。可从目标群的群主/管理员信息或组织查询中取得。
+          默认 Q&A 新群的所有者来自 dsh-pet profile 实时核验的当前飞书用户，且该用户必须在此
+          allowlist 中；列表顺序和浏览器输入都不能声明“本人”。Pet 不会把观察到的陌生发送者
+          自动加入允许清单。留空表示没有人可以触发。
         </p>
         <ul className="dshpet-list">
           {allowList.map(openId => (

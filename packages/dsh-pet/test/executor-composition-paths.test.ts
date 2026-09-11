@@ -117,6 +117,7 @@ async function composeHost(): Promise<ComposedHost> {
       return () => {}
     },
   })
+  ctx.provide('connection', { requestRejection: () => undefined })
   ctx.provide('workspaceRegistry', {
     create: async (p: string) => ({ id: 'ws-pet', path: p, title: 'DSH Pet' }),
     list: () => [],

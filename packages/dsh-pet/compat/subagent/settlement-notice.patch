@@ -1,5 +1,5 @@
 diff --git a/packages/subagent/subagent/src/continuation.ts b/packages/subagent/subagent/src/continuation.ts
-index 2103ce227..b14fdeb66 100644
+index 2103ce2..4ad2672 100644
 --- a/packages/subagent/subagent/src/continuation.ts
 +++ b/packages/subagent/subagent/src/continuation.ts
 @@ -38,7 +38,7 @@ import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
@@ -31,7 +31,7 @@ index 2103ce227..b14fdeb66 100644
    /** Caller cancellation, owning the operation only until inbox acceptance. */
    readonly signal: AbortSignal
  }
-@@ -117,6 +130,48 @@ export interface ContinuableStart {
+@@ -117,6 +130,58 @@ export interface ContinuableStart {
    readonly messageId: MessageId
  }
  
@@ -63,6 +63,16 @@ index 2103ce227..b14fdeb66 100644
 +  readonly childId: SessionId
 +}
 +
++/** Exact identity used by a Host while operating on a continuable child's live Session. */
++export interface ContinuableChildSessionSpec {
++  /** Exact live direct parent that authorizes child access. */
++  readonly parent: Agent
++  /** Durable direct-child session id. */
++  readonly childId: SessionId
++  /** Caller cancellation bounding cold resume and the Host operation. */
++  readonly signal: AbortSignal
++}
++
 +/** Normalized inputs shared by prompted and idle fresh-child creation. */
 +interface FreshContinuableSpec {
 +  readonly childId?: SessionId | undefined
@@ -80,7 +90,7 @@ index 2103ce227..b14fdeb66 100644
  /**
   * Authority under which one interrupt request is admitted. `user` carries the
   * durable direct-parent address a human client presented; `ancestor` carries
-@@ -224,6 +279,12 @@ interface Activation {
+@@ -224,6 +289,12 @@ interface Activation {
     * not exist, so its teardown owes the parent no settlement account.
     */
    announced: boolean
@@ -93,7 +103,7 @@ index 2103ce227..b14fdeb66 100644
    /** Renewed whenever a settlement watcher must re-observe quiescence. */
    poke: PromiseWithResolvers<void>
  }
-@@ -248,6 +309,8 @@ interface MaterializeInputs {
+@@ -248,6 +319,8 @@ interface MaterializeInputs {
    }
    agentOptions: AgentOptions
    composition: { persona?: string | undefined; toolFilter?: ToolRestriction | undefined }
@@ -102,7 +112,7 @@ index 2103ce227..b14fdeb66 100644
    signal: AbortSignal
  }
  
-@@ -428,16 +491,65 @@ export class SubagentContinuationManager {
+@@ -428,16 +501,147 @@ export class SubagentContinuationManager {
     */
    async startContinuable(spec: ContinuableStartSpec): Promise<ContinuableStart> {
      const request = spec.request
@@ -147,6 +157,88 @@ index 2103ce227..b14fdeb66 100644
 +  }
 +
 +  /**
++   * Run one Host operation against the exact Session of a continuable direct
++   * child. This is intentionally owned by the continuation manager: generic
++   * Session routing rejects subagent-owned identities, while this manager can
++   * authorize the exact live parent and retained or cold-resumed child handle.
++   * The per-child lock prevents settlement disposal from racing the operation;
++   * the Session is flushed before the capability returns.
++   * @param spec - exact live parent, durable child id, and caller cancellation.
++   * @param operation - Host operation against the authorized child Session.
++   * @returns the operation's exact awaited return value.
++   */
++  withLiveChildSession<T>(
++    spec: ContinuableChildSessionSpec,
++    operation: (session: Agent['session']) => T | Promise<T>,
++  ): Promise<T> {
++    this.assertAdmitting(spec.parent)
++    return this.locks.run(spec.childId, async () => {
++      spec.signal.throwIfAborted()
++      const activation = await this.resolveChildForHostOperation(spec)
++      spec.signal.throwIfAborted()
++      const child = activation.handle.agent
++      this.authorizeLineage(spec.parent, spec.childId, child.session.header.parentSession)
++      if (activation.parentSession !== spec.parent.id
++        || this.ctx.agents.get(child.id) !== child
++        || child.id !== spec.childId) {
++        throw new SubagentError(`subagent "${spec.childId}" has no exact live agent`, 'UNAUTHORIZED')
++      }
++      const result = await operation(child.session)
++      spec.signal.throwIfAborted()
++      await child.ctx.sessions.flush(child.session)
++      return result
++    })
++  }
++
++  /** Resolve the retained child Activation or cold-resume it without opening a turn. */
++  private async resolveChildForHostOperation(spec: ContinuableChildSessionSpec): Promise<Activation> {
++    const resident = this.activations.get(spec.childId)
++    if (resident !== undefined) {
++      if (resident.disposal !== undefined) await resident.disposal.catch(() => undefined)
++      else return resident
++    }
++    const query = this.requireSessionQuery()
++    let observation: SessionObservation
++    try {
++      observation = await query.observeSession(spec.childId, { signal: spec.signal })
++    } catch (error: unknown) {
++      spec.signal.throwIfAborted()
++      throw new SubagentError(`subagent "${spec.childId}" is unavailable`, 'NOT_RESUMABLE', { cause: error })
++    }
++    using source = observation
++    this.assertAdmitting(spec.parent)
++    this.authorizeLineage(spec.parent, spec.childId, source.header.parentSession)
++    const descriptor = foldSubagentDescriptor(source.events.slice(source.inheritedEventCount))
++    if (descriptor === undefined || descriptor.mode !== 'continuable') {
++      throw new SubagentError(
++        `subagent "${spec.childId}" has no supported continuation state and cannot be resumed`,
++        'NOT_RESUMABLE',
++      )
++    }
++    try {
++      return await this.materialize({
++        childId: spec.childId,
++        provider: descriptor.provider,
++        parent: spec.parent,
++        agentOptions: {
++          ...descriptor.agentProvider !== undefined ? { provider: descriptor.agentProvider } : {},
++          ...descriptor.agentModel !== undefined ? { model: descriptor.agentModel } : {},
++          ...descriptor.agentReasoningEffort !== undefined
++            ? { reasoningEffort: ReasoningEffortId(descriptor.agentReasoningEffort) }
++            : {},
++        },
++        composition: { persona: descriptor.persona, toolFilter: descriptor.toolFilter },
++        settlementNotice: descriptor.settlementNotice,
++        signal: spec.signal,
++      })
++    } catch (error: unknown) {
++      spec.signal.throwIfAborted()
++      if (error instanceof SubagentError) throw error
++      throw new SubagentError(`subagent "${spec.childId}" is unavailable`, 'NOT_RESUMABLE', { cause: error })
++    }
++  }
++
++  /**
 +   * Prepare and materialize one fresh continuable child under its per-id lock,
 +   * then run the caller's publication action before releasing that lock.
 +   * Synchronous descriptor and delegated-policy capture remains before the first
@@ -172,7 +264,7 @@ index 2103ce227..b14fdeb66 100644
      const agentProvider = agentOptions.provider
      const agentModel = agentOptions.model
      const agentReasoningEffort = agentOptions.reasoningEffort
-@@ -448,8 +560,9 @@ export class SubagentContinuationManager {
+@@ -448,8 +652,9 @@ export class SubagentContinuationManager {
        ...agentProvider !== undefined ? { agentProvider } : {},
        ...agentModel !== undefined ? { agentModel } : {},
        ...agentReasoningEffort !== undefined ? { agentReasoningEffort } : {},
@@ -184,7 +276,7 @@ index 2103ce227..b14fdeb66 100644
      })
      // Capture before the first await: a later parent switch belongs to the
      // parent's future, not to this child.
-@@ -465,7 +578,7 @@ export class SubagentContinuationManager {
+@@ -465,7 +670,7 @@ export class SubagentContinuationManager {
  
      const inheritedEventCount = SessionLogOffset(prepared.seed?.length ?? 0)
      const seed = seedDescriptorTurn(childId, prepared.seed, descriptor)
@@ -193,7 +285,7 @@ index 2103ce227..b14fdeb66 100644
        spec.signal.throwIfAborted()
        this.assertAdmitting(parent)
        this.assertChildIdAvailable(childId)
-@@ -489,19 +602,22 @@ export class SubagentContinuationManager {
+@@ -489,19 +694,22 @@ export class SubagentContinuationManager {
            delegatedPolicies,
          },
          agentOptions,
@@ -226,7 +318,7 @@ index 2103ce227..b14fdeb66 100644
    }
  
    /** Reject one child identity already owned by a live Agent or Session. */
-@@ -1016,6 +1132,7 @@ export class SubagentContinuationManager {
+@@ -1016,6 +1224,7 @@ export class SubagentContinuationManager {
              : {},
          },
          composition: { persona: descriptor.persona, toolFilter: descriptor.toolFilter },
@@ -234,7 +326,7 @@ index 2103ce227..b14fdeb66 100644
          signal: options.signal,
        })
      } catch (error: unknown) {
-@@ -1029,7 +1146,7 @@ export class SubagentContinuationManager {
+@@ -1029,7 +1238,7 @@ export class SubagentContinuationManager {
    /**
     * Submit to a freshly materialized Activation or roll it back completely.
     * @param activation - the just-published Activation to admit or release.
@@ -243,7 +335,7 @@ index 2103ce227..b14fdeb66 100644
     * @param options - durable source, scheduling, and pre-acceptance cancellation.
     * @param parent - the live direct parent authorizing admission.
     * @returns the accepted inbox message id.
-@@ -1041,16 +1158,7 @@ export class SubagentContinuationManager {
+@@ -1041,16 +1250,7 @@ export class SubagentContinuationManager {
      parent: Agent,
    ): Promise<MessageId> {
      try {
@@ -261,7 +353,7 @@ index 2103ce227..b14fdeb66 100644
      } catch (error: unknown) {
        /* v8 ignore next -- rollback disposal failures must not mask the
         * pre-acceptance signal, drain, or lifecycle failure. */
-@@ -1059,6 +1167,25 @@ export class SubagentContinuationManager {
+@@ -1059,6 +1259,25 @@ export class SubagentContinuationManager {
      }
    }
  
@@ -287,7 +379,7 @@ index 2103ce227..b14fdeb66 100644
    /**
     * Refuse image content addressed to a child whose model accepts text only.
     * Callers guard with `contentHasImage`, so text-only delivery never awaits.
-@@ -1169,6 +1296,7 @@ export class SubagentContinuationManager {
+@@ -1169,6 +1388,7 @@ export class SubagentContinuationManager {
        disposal: undefined,
        accepted: new Set(),
        announced: false,
@@ -295,7 +387,7 @@ index 2103ce227..b14fdeb66 100644
        poke: Promise.withResolvers<void>(),
      }
      // After transfer, any failure must dispose the created handle, remove the
-@@ -1516,10 +1644,11 @@ export class SubagentContinuationManager {
+@@ -1516,10 +1736,11 @@ export class SubagentContinuationManager {
  
    /**
     * Tell the durable direct parent that this child produced everything it is
@@ -311,7 +403,7 @@ index 2103ce227..b14fdeb66 100644
     * rolled back before its first acceptance stays silent, since the caller was
     * told that child was not established. A parent that is no longer live is not
     * an error; the child's own Session remains the durable record either way.
-@@ -1534,6 +1663,13 @@ export class SubagentContinuationManager {
+@@ -1534,6 +1755,13 @@ export class SubagentContinuationManager {
     */
    private notifySettlement(activation: Activation, terminal: ActivationTerminal): void {
      if (!activation.announced) return
@@ -326,7 +418,7 @@ index 2103ce227..b14fdeb66 100644
        const parent = this.ctx.agents.get(activation.parentSession)
        if (parent === undefined) return
 diff --git a/packages/subagent/subagent/src/descriptor.ts b/packages/subagent/subagent/src/descriptor.ts
-index de9191cc5..0ce16cdac 100644
+index de9191c..0ce16cd 100644
 --- a/packages/subagent/subagent/src/descriptor.ts
 +++ b/packages/subagent/subagent/src/descriptor.ts
 @@ -45,7 +45,37 @@ declare module '@deepseek-ai/dsh-session/types' {
@@ -504,11 +596,14 @@ index de9191cc5..0ce16cdac 100644
   *   declared schema.
   */
 diff --git a/packages/subagent/subagent/src/index.ts b/packages/subagent/subagent/src/index.ts
-index 28e50930c..a52f91c94 100644
+index 28e5093..7240b0e 100644
 --- a/packages/subagent/subagent/src/index.ts
 +++ b/packages/subagent/subagent/src/index.ts
-@@ -68,6 +68,8 @@ import SubagentContinuationManager from './continuation.ts'
+@@ -66,8 +66,11 @@ import { createActivationObserver, createLifecycleEmitter, observeRun } from './
+ import type { ActivationObserver, LifecycleEmitter } from './lifecycle.ts'
+ import SubagentContinuationManager from './continuation.ts'
  import type {
++  ContinuableChildSessionSpec,
    ContinuableStart,
    ContinuableStartSpec,
 +  IdleContinuableCreateResult,
@@ -516,7 +611,7 @@ index 28e50930c..a52f91c94 100644
    SubagentInterruptAuthority,
    SubagentSendMessageOptions,
  } from './continuation.ts'
-@@ -104,6 +106,7 @@ export type {
+@@ -104,6 +107,7 @@ export type {
    OneShotSubagentDescriptorInput,
    SubagentDescriptorData,
    SubagentDescriptorInput,
@@ -524,8 +619,11 @@ index 28e50930c..a52f91c94 100644
  } from './descriptor.ts'
  export { seedDescriptorTurn } from './descriptor-seed.ts'
  export { SubagentError } from './error.ts'
-@@ -124,6 +127,8 @@ export type {
+@@ -122,8 +126,11 @@ export {
+ export type { ChildComposition, DelegatedPolicyOverrides } from './child-agent.ts'
+ export type {
    AgentMessageSource,
++  ContinuableChildSessionSpec,
    ContinuableStart,
    ContinuableStartSpec,
 +  IdleContinuableCreateResult,
@@ -533,7 +631,7 @@ index 28e50930c..a52f91c94 100644
    SubagentInterruptAuthority,
    SubagentSendMessageOptions,
    SubagentSettledMessageSource,
-@@ -189,6 +194,16 @@ interface BrowserPromptSource {
+@@ -189,6 +196,19 @@ interface BrowserPromptSource {
  
  /** Named provider registry with one-shot runs, durable discovery, and continuable-child operations. */
  export class SubagentRuntime extends TypertRemoteService {
@@ -547,10 +645,13 @@ index 28e50930c..a52f91c94 100644
 +  /** Literal marker for hosts that depend on two-phase continuable provisioning. */
 +  readonly supportsIdleContinuableCreate: true = true
 +
++  /** Literal marker for exact parent-authorized live child Session access. */
++  readonly supportsLiveContinuableChildSession: true = true
++
    private providers = new Map<string, SubagentProvider>()
    private continuations: SubagentContinuationManager | undefined
    /**
-@@ -231,6 +246,22 @@ export class SubagentRuntime extends TypertRemoteService {
+@@ -231,6 +251,38 @@ export class SubagentRuntime extends TypertRemoteService {
      return this.requireContinuations().startContinuable(spec)
    }
  
@@ -568,6 +669,22 @@ index 28e50930c..a52f91c94 100644
 +   */
 +  async createIdleContinuable(spec: IdleContinuableCreateSpec): Promise<IdleContinuableCreateResult> {
 +    return this.requireContinuations().createIdleContinuable(spec)
++  }
++
++  /**
++   * Run one synchronous Host operation against the exact live Session of a
++   * continuable direct child. Generic Session routing intentionally refuses
++   * these identities; the continuation owner alone can validate the retained
++   * Activation handle and exact live parent.
++   * @param spec - exact parent/child identity and cancellation.
++   * @param operation - operation receiving only the child Session.
++   * @returns the operation's exact awaited return value after Session flush.
++   */
++  withLiveContinuableChildSession<T>(
++    spec: ContinuableChildSessionSpec,
++    operation: (session: Agent['session']) => T | Promise<T>,
++  ): Promise<T> {
++    return this.requireContinuations().withLiveChildSession(spec, operation)
 +  }
 +
    /**

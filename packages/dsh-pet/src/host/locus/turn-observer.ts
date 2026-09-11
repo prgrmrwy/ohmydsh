@@ -101,6 +101,10 @@ export type LocusTurnObserverDiagnostic =
   | 'turn-invalid'
   /** The same turn ended twice; only the first settles. */
   | 'turn-already-ended'
+  /** Retention bounds evicted an unproven turn; it can no longer correlate. */
+  | 'correlation-evicted'
+  /** One turn exceeded its message-granular claim bound and is fail-closed. */
+  | 'turn-claim-limit'
 
 /** The observer the unified locus controller accepts. */
 export interface LocusTurnCorrelationObserver {
@@ -115,13 +119,60 @@ export interface LocusTurnCorrelationObserver {
   currentForChild?(childSessionId: string):
     | { readonly executionId: string; readonly turnId: string }
     | undefined
-  /** Release the runtime subscriptions. */
+  /**
+   * Wake exactly one durable inbox-message lookup after `bindQueued` commits.
+   * This is the event-driven half of claim-before-persistence correlation: an
+   * unresolved claim is retained without a short polling deadline, then this
+   * exact child/message notification retries only that claim.
+   */
+  deliveryAvailable?(input: {
+    readonly childSessionId: string
+    readonly messageId: string
+  }): void
+  /** Release the runtime subscriptions and all retained correlation state. */
   dispose(): void
 }
 
-/** One in-flight turn: the Delivery it claimed, keyed by session and turn. */
+/** Resource limits for retained, not-yet-provable runtime facts. */
+export interface LocusTurnObserverLimits {
+  /** Complete turn records retained at once, including end-before-bind turns. */
+  readonly maxObservedTurns?: number
+  /** Distinct message claims retained for one exact turn. */
+  readonly maxClaimsPerTurn?: number
+  /** Recently completed turn keys retained for duplicate-end diagnostics. */
+  readonly maxEndedTurnKeys?: number
+}
+
+/** One Delivery claim resolved for an in-flight turn. */
 interface PendingTurn extends LocusClaimedDelivery {
   readonly turnId: string
+}
+
+/** One claim whose durable Delivery binding may not be visible yet. */
+interface UnresolvedClaim {
+  readonly claim: LocusInboxClaim
+}
+
+/**
+ * Every claim observed for one exact `(child, turn)` pair.
+ *
+ * `mixed` is a sticky safety fuse. Once a claim cannot immediately be proven
+ * to be the sole Delivery, that turn must never regain a model-facing reply
+ * target even if a retry later resolves it.
+ */
+interface ObservedTurn {
+  readonly childSessionId: string
+  readonly turn: number
+  readonly turnId: string
+  readonly deliveries: Map<string, PendingTurn>
+  readonly unresolved: Map<string, UnresolvedClaim>
+  readonly foreign: Set<string>
+  /** Delivery message ids whose terminal fact was already emitted. */
+  readonly terminalEmitted: Set<string>
+  /** Sticky overflow fuse; excess ids are never retained. */
+  saturated: boolean
+  mixed: boolean
+  end?: LocusTurnEnd
 }
 
 /** Join key for one session's turn. A turn number is per session, not global. */
@@ -134,12 +185,23 @@ function turnIdOf(childSessionId: string, turn: number): string {
   return `${childSessionId}#${String(turn)}`
 }
 
+/** Exact message key; inbox message ids are only unique with their child. */
+function messageKey(childSessionId: string, messageId: string): string {
+  return `${childSessionId}\u0000${messageId}`
+}
+
 function isNonEmpty(value: unknown): value is string {
   return typeof value === 'string' && value.trim() !== ''
 }
 
 function isTurn(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
+}
+
+function positiveLimit(value: number | undefined, fallback: number, name: string): number {
+  if (value === undefined) return fallback
+  if (!Number.isSafeInteger(value) || value < 1) throw new TypeError(`${name} must be a positive integer`)
+  return value
 }
 
 /**
@@ -153,11 +215,17 @@ function isTurn(value: unknown): value is number {
  */
 export function createLocusTurnObserver(
   ports: LocusTurnObserverPorts,
+  limits: LocusTurnObserverLimits = {},
 ): LocusTurnCorrelationObserver {
+  const maxObservedTurns = positiveLimit(limits.maxObservedTurns, 1_024, 'maxObservedTurns')
+  const maxClaimsPerTurn = positiveLimit(limits.maxClaimsPerTurn, 32, 'maxClaimsPerTurn')
+  const maxEndedTurnKeys = positiveLimit(limits.maxEndedTurnKeys, 1_024, 'maxEndedTurnKeys')
   const listeners = new Set<(event: LocusTurnCorrelationEvent) => void>()
-  /** Turns that claimed a Delivery and have not ended yet. */
-  const pending = new Map<string, PendingTurn>()
-  /** Turns already settled, so a duplicate end cannot settle twice. */
+  /** Complete claim sets for all observed `(child, turn)` pairs, oldest first. */
+  const turns = new Map<string, ObservedTurn>()
+  /** Exact child/message -> turn keys awaiting durable Delivery visibility. */
+  const unresolvedByMessage = new Map<string, Set<string>>()
+  /** Turns already settled, oldest first, so duplicate-end memory is bounded. */
   const ended = new Set<string>()
   let disposed = false
 
@@ -172,7 +240,126 @@ export function createLocusTurnObserver(
     }
   }
 
-  const releaseClaimed = ports.onClaimed((claim) => {
+  const unindexClaim = (key: string, claim: LocusInboxClaim): void => {
+    const indexKey = messageKey(claim.childSessionId, claim.messageId)
+    const keys = unresolvedByMessage.get(indexKey)
+    if (keys === undefined) return
+    keys.delete(key)
+    if (keys.size === 0) unresolvedByMessage.delete(indexKey)
+  }
+
+  const clearTurn = (key: string): void => {
+    const observed = turns.get(key)
+    if (observed !== undefined) {
+      for (const unresolved of observed.unresolved.values()) unindexClaim(key, unresolved.claim)
+    }
+    turns.delete(key)
+  }
+
+  const rememberEnded = (key: string): void => {
+    ended.add(key)
+    while (ended.size > maxEndedTurnKeys) {
+      const oldest = ended.values().next().value as string | undefined
+      if (oldest === undefined) break
+      ended.delete(oldest)
+    }
+  }
+
+  const ensureTurn = (claim: LocusInboxClaim): ObservedTurn => {
+    const key = turnKey(claim.childSessionId, claim.turn)
+    let observed = turns.get(key)
+    if (observed === undefined) {
+      while (turns.size >= maxObservedTurns) {
+        const oldest = turns.entries().next().value as [string, ObservedTurn] | undefined
+        if (oldest === undefined) break
+        clearTurn(oldest[0])
+        ports.log?.('correlation-evicted')
+      }
+      observed = {
+        childSessionId: claim.childSessionId,
+        turn: claim.turn,
+        turnId: turnIdOf(claim.childSessionId, claim.turn),
+        deliveries: new Map(),
+        unresolved: new Map(),
+        foreign: new Set(),
+        terminalEmitted: new Set(),
+        saturated: false,
+        mixed: false,
+      }
+      turns.set(key, observed)
+    }
+    return observed
+  }
+
+  const settleTurn = (key: string, observed: ObservedTurn): void => {
+    const end = observed.end
+    if (end === undefined) return
+    // Emit each proven Delivery's terminal fact immediately, even when another
+    // claim on the same turn remains unresolved/foreign. Mixedness blocks reply
+    // authority, not exact settlement. A later exact wake emits started plus
+    // this retained terminal once for that newly proven Delivery.
+    for (const [messageId, claimed] of observed.deliveries) {
+      if (observed.terminalEmitted.has(messageId)) continue
+      observed.terminalEmitted.add(messageId)
+      emit({
+        phase: end.outcome === 'completed' ? 'completed' : 'failed',
+        deliveryId: claimed.deliveryId,
+        executionId: claimed.executionId,
+        turnId: claimed.turnId,
+        correlation: claimed.correlation,
+        ...(end.outcome === 'completed'
+          ? {}
+          : { reason: isNonEmpty(end.reason) ? end.reason : end.outcome }),
+      })
+    }
+    if (observed.unresolved.size > 0) return
+    clearTurn(key)
+    rememberEnded(key)
+  }
+
+  const resolveClaim = (key: string, messageId: string): void => {
+    if (disposed) return
+    const observed = turns.get(key)
+    const unresolved = observed?.unresolved.get(messageId)
+    if (observed === undefined || unresolved === undefined) return
+    let delivery: LocusClaimedDelivery | undefined
+    try {
+      delivery = ports.lookup.find({
+        childSessionId: unresolved.claim.childSessionId,
+        messageId: unresolved.claim.messageId,
+      })
+    } catch {
+      // Lookup failures are foreign/unproven for reply authorization. They may
+      // not be retried into an apparently clean Delivery-only turn.
+      observed.unresolved.delete(messageId)
+      unindexClaim(key, unresolved.claim)
+      observed.foreign.add(messageId)
+      ports.log?.('claim-invalid')
+      settleTurn(key, observed)
+      return
+    }
+    if (delivery !== undefined) {
+      observed.unresolved.delete(messageId)
+      unindexClaim(key, unresolved.claim)
+      const claimed = { ...delivery, turnId: observed.turnId }
+      observed.deliveries.set(messageId, claimed)
+      if (observed.deliveries.size > 1) observed.mixed = true
+      emit({
+        phase: 'started',
+        deliveryId: delivery.deliveryId,
+        executionId: delivery.executionId,
+        turnId: observed.turnId,
+        correlation: delivery.correlation,
+      })
+      settleTurn(key, observed)
+      return
+    }
+    // Absence is not proof that the message is foreign: `bindQueued` may still
+    // be committing. Keep this exact message unresolved until its matching
+    // deliveryAvailable notification, bounded eviction, or disposal.
+  }
+
+  const handleClaim = (claim: LocusInboxClaim): void => {
     if (disposed) return
     if (
       claim === null || typeof claim !== 'object' ||
@@ -181,6 +368,17 @@ export function createLocusTurnObserver(
       ports.log?.('claim-invalid')
       return
     }
+    const key = turnKey(claim.childSessionId, claim.turn)
+    if (ended.has(key)) return
+    const observed = ensureTurn(claim)
+    // Runtime duplicate notifications for the same message are idempotent;
+    // distinct message ids are distinct claims and must never overwrite.
+    if (
+      observed.deliveries.has(claim.messageId) ||
+      observed.unresolved.has(claim.messageId) ||
+      observed.foreign.has(claim.messageId)
+    ) return
+
     let delivery: LocusClaimedDelivery | undefined
     try {
       delivery = ports.lookup.find({
@@ -188,30 +386,50 @@ export function createLocusTurnObserver(
         messageId: claim.messageId,
       })
     } catch {
-      // An unusable lookup cannot prove this message is a Delivery, and a
-      // guessed binding would settle the wrong Feishu message.
+      observed.foreign.add(claim.messageId)
+      observed.mixed = true
       ports.log?.('claim-invalid')
+      settleTurn(key, observed)
       return
     }
-    if (delivery === undefined) {
-      // Initialization, a GUI turn, or a genuine parent/child message: it must
-      // not consume any Delivery's pending feedback.
-      ports.log?.('claim-not-a-delivery')
+    if (delivery !== undefined) {
+      const claimed = { ...delivery, turnId: observed.turnId }
+      observed.deliveries.set(claim.messageId, claimed)
+      if (observed.deliveries.size > 1 || observed.unresolved.size > 0 || observed.foreign.size > 0) {
+        observed.mixed = true
+      }
+      emit({
+        phase: 'started',
+        deliveryId: delivery.deliveryId,
+        executionId: delivery.executionId,
+        turnId: observed.turnId,
+        correlation: delivery.correlation,
+      })
+      settleTurn(key, observed)
       return
     }
-    const key = turnKey(claim.childSessionId, claim.turn)
-    const turnId = turnIdOf(claim.childSessionId, claim.turn)
-    pending.set(key, { ...delivery, turnId })
-    emit({
-      phase: 'started',
-      deliveryId: delivery.deliveryId,
-      executionId: delivery.executionId,
-      turnId,
-      correlation: delivery.correlation,
-    })
-  })
 
-  const releaseTurnEnd = ports.onTurnEnd((end) => {
+    // Withhold from the very first unresolved observation. Even if persistence
+    // catches up, this turn remains sticky-mixed because another claim may be a
+    // GUI/parent steer rather than a Delivery.
+    observed.mixed = true
+    const claimCount = observed.deliveries.size + observed.unresolved.size + observed.foreign.size
+    if (claimCount >= maxClaimsPerTurn) {
+      observed.saturated = true
+      ports.log?.('turn-claim-limit')
+      return
+    }
+    // No polling deadline: bindQueued will wake this exact child/message pair.
+    observed.unresolved.set(claim.messageId, { claim })
+    const indexKey = messageKey(claim.childSessionId, claim.messageId)
+    const indexed = unresolvedByMessage.get(indexKey) ?? new Set<string>()
+    indexed.add(key)
+    unresolvedByMessage.set(indexKey, indexed)
+  }
+
+  const releaseClaimed = ports.onClaimed(handleClaim)
+
+  function handleTurnEnd(end: LocusTurnEnd): void {
     if (disposed) return
     if (
       end === null || typeof end !== 'object' ||
@@ -221,28 +439,20 @@ export function createLocusTurnObserver(
       return
     }
     const key = turnKey(end.childSessionId, end.turn)
-    const claimed = pending.get(key)
-    if (claimed === undefined) {
-      // Either this turn ran no Delivery, or its end was already reported.
+    const observed = turns.get(key)
+    if (observed === undefined) {
       ports.log?.(ended.has(key) ? 'turn-already-ended' : 'turn-without-delivery')
       return
     }
-    // Consume the pending entry FIRST: a duplicate end must not settle twice,
-    // and a late end for a replaced generation must not find a live binding.
-    pending.delete(key)
-    ended.add(key)
-    emit({
-      phase: end.outcome === 'completed' ? 'completed' : 'failed',
-      deliveryId: claimed.deliveryId,
-      executionId: claimed.executionId,
-      turnId: claimed.turnId,
-      correlation: claimed.correlation,
-      // Only a non-completion carries a reason; a completed turn has none.
-      ...(end.outcome === 'completed'
-        ? {}
-        : { reason: isNonEmpty(end.reason) ? end.reason : end.outcome }),
-    })
-  })
+    if (observed.end !== undefined) {
+      ports.log?.('turn-already-ended')
+      return
+    }
+    observed.end = end
+    settleTurn(key, observed)
+  }
+
+  const releaseTurnEnd = ports.onTurnEnd(handleTurnEnd)
 
   return {
     perTurnCorrelation: true,
@@ -253,20 +463,37 @@ export function createLocusTurnObserver(
       }
     },
     currentForChild(childSessionId) {
-      const matches = [...pending.values()].filter(item =>
-        item.correlation.childSessionId === childSessionId,
+      const active = [...turns.values()].filter(observed =>
+        observed.childSessionId === childSessionId && observed.end === undefined,
       )
-      if (matches.length !== 1) return undefined
-      return {
-        executionId: matches[0]!.executionId,
-        turnId: matches[0]!.turnId,
-      }
+      // Every active claim set participates in the child-bound decision. One
+      // clean Delivery turn cannot hide another mixed/unresolved active turn.
+      if (active.length !== 1) return undefined
+      const observed = active[0]!
+      if (
+        observed.mixed ||
+        observed.saturated ||
+        observed.deliveries.size !== 1 ||
+        observed.unresolved.size !== 0 ||
+        observed.foreign.size !== 0
+      ) return undefined
+      const claimed = observed.deliveries.values().next().value as PendingTurn | undefined
+      if (claimed === undefined) return undefined
+      return { executionId: claimed.executionId, turnId: claimed.turnId }
+    },
+    deliveryAvailable(input) {
+      if (disposed || !isNonEmpty(input?.childSessionId) || !isNonEmpty(input?.messageId)) return
+      // Message-granular wake-up: never scan by FIFO or choose another child.
+      const keys = unresolvedByMessage.get(messageKey(input.childSessionId, input.messageId))
+      if (keys === undefined) return
+      for (const key of [...keys]) resolveClaim(key, input.messageId)
     },
     dispose() {
       if (disposed) return
       disposed = true
       listeners.clear()
-      pending.clear()
+      for (const key of [...turns.keys()]) clearTurn(key)
+      unresolvedByMessage.clear()
       ended.clear()
       try {
         releaseClaimed()

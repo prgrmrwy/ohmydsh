@@ -408,6 +408,72 @@ describe('controller to durable locus repository write boundary', () => {
     await harness.close()
   })
 
+  it('compensates only durable operation-owned resources after restart and then unblocks creation', async () => {
+    const harness = await openPetHarness()
+    enableAtomicTransactions(harness)
+    const durable = new DurableLocusRepository(harness.domain)
+    const adapter = new ControllerLocusRepositoryAdapter(durable)
+    await adapter.beginProvisioning({
+      provisioningId: 'provisioning-crash',
+      kind: 'group',
+      endpoint: { chatId: 'oc_crash' },
+      startedAt: 10,
+    })
+    await adapter.recordProvisioningResource('provisioning-crash', { mainSessionId: 'main-created' })
+    await adapter.recordProvisioningResource('provisioning-crash', { childSessionId: 'child-created' })
+
+    const cleaned: string[] = []
+    const report = await durable.reconcileStartup({
+      now: 20,
+      compensators: {
+        childSession: async ({ childSessionId }) => { cleaned.push(`child:${childSessionId}`) },
+        mainSession: async ({ mainSessionId }) => { cleaned.push(`main:${mainSessionId}`) },
+      },
+    })
+    expect(cleaned).toEqual(['child:child-created', 'main:main-created'])
+    expect(report.compensatedOperations).toEqual([
+      expect.objectContaining({ id: 'provisioning-crash', phase: 'compensated' }),
+    ])
+    expect(durable.getOperation('provisioning-crash')).toMatchObject({
+      phase: 'compensated',
+      compensatedResources: ['child-session', 'main-session'],
+    })
+    await expect(adapter.beginProvisioning({
+      provisioningId: 'provisioning-after-recovery',
+      kind: 'group',
+      endpoint: { chatId: 'oc_crash' },
+      startedAt: 21,
+    })).resolves.toBeUndefined()
+    await harness.close()
+  })
+
+  it('persists manual provisioning debt and blocks duplicate creation when cleanup is unprovable', async () => {
+    const harness = await openPetHarness()
+    enableAtomicTransactions(harness)
+    const durable = new DurableLocusRepository(harness.domain)
+    const adapter = new ControllerLocusRepositoryAdapter(durable)
+    await adapter.beginProvisioning({
+      provisioningId: 'provisioning-manual',
+      kind: 'group',
+      endpoint: { chatId: 'oc_manual' },
+      startedAt: 10,
+    })
+    await adapter.recordProvisioningResource('provisioning-manual', { childSessionId: 'child-owner-unknown' })
+
+    const report = await durable.reconcileStartup({ now: 20 })
+    expect(report.manualOperations).toEqual([
+      expect.objectContaining({ id: 'provisioning-manual', phase: 'needs-recovery' }),
+    ])
+    expect(durable.getOperation('provisioning-manual')?.manualRecoveryReason).toContain('ownership')
+    await expect(adapter.beginProvisioning({
+      provisioningId: 'provisioning-duplicate',
+      kind: 'group',
+      endpoint: { chatId: 'oc_manual' },
+      startedAt: 21,
+    })).rejects.toMatchObject({ code: 'PROVISIONING_CONFLICT' })
+    await harness.close()
+  })
+
   it('atomically rebuilds a stopped default Q&A pointer to a fresh read generation', async () => {
     const harness = await openPetHarness()
     enableAtomicTransactions(harness)
@@ -591,42 +657,29 @@ describe('controller to durable locus repository write boundary', () => {
     await harness.close()
   })
 
-  it('conditionally rejects a second provisioning winner for the same endpoint', async () => {
+  it('blocks a second provisioning intent while the endpoint has unresolved recovery debt', async () => {
     const harness = await openPetHarness()
     enableAtomicTransactions(harness)
     const durable = new DurableLocusRepository(harness.domain)
     const adapter = new ControllerLocusRepositoryAdapter(durable)
-    const makeCommit = (suffix: string): LocusProvisioningCommit => ({
-      provisioningId: `provisioning-${suffix}`,
-      locus: controllerRecord({
-        locusId: `locus-${suffix}`,
-        childSessionId: `child-${suffix}`,
-      }),
-      group: {
-        chatId: 'oc_controller', workspaceId: 'workspace-main', mainSessionId: 'session-main',
-        mainSource: 'auto', state: 'active', createdAt: 10, updatedAt: 10,
-      },
+    await adapter.beginProvisioning({
+      provisioningId: 'provisioning-a',
+      kind: 'group',
+      endpoint: { chatId: 'oc_controller' },
+      startedAt: 10,
     })
-    for (const suffix of ['a', 'b']) {
-      await adapter.beginProvisioning({
-        provisioningId: `provisioning-${suffix}`,
-        kind: 'group',
-        endpoint: { chatId: 'oc_controller' },
-        startedAt: 10,
-      })
-      await adapter.recordProvisioningResource(`provisioning-${suffix}`, { mainSessionId: 'session-main' })
-      await adapter.recordProvisioningResource(`provisioning-${suffix}`, { childSessionId: `child-${suffix}` })
-    }
+    await adapter.recordProvisioningResource('provisioning-a', { mainSessionId: 'session-main' })
+    await adapter.recordProvisioningResource('provisioning-a', { childSessionId: 'child-a' })
 
-    const results = await Promise.allSettled([
-      adapter.commitProvisioning(makeCommit('a')),
-      adapter.commitProvisioning(makeCommit('b')),
-    ])
-    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
-    expect(results.filter(result => result.status === 'rejected')).toHaveLength(1)
-    expect(durable.listLoci()).toHaveLength(1)
-    expect(durable.getLatestLocusByEndpoint({ chatId: 'oc_controller' })?.id).toBe('locus-a')
-    expect(durable.getOperation('provisioning-b')?.phase).toBe('provisioning')
+    await expect(adapter.beginProvisioning({
+      provisioningId: 'provisioning-b',
+      kind: 'group',
+      endpoint: { chatId: 'oc_controller' },
+      startedAt: 11,
+    })).rejects.toMatchObject({ code: 'PROVISIONING_CONFLICT' })
+    expect(durable.getOperation('provisioning-a')?.phase).toBe('provisioning')
+    expect(durable.getOperation('provisioning-b')).toBeUndefined()
+    expect(durable.listLoci()).toEqual([])
     await harness.close()
   })
 

@@ -202,7 +202,14 @@ Delivery 的轮次结束则保持 `queued`。
 ### 管理面已接入生产路由（真实路由验证）
 
 `index.ts` 现在组装 `createLocusManagementPort` 并传入 `createPetRoutes`，
-身份由 Host 提供（`locusIdentity`），浏览器请求体中的 actor 一律拒绝。
+管理动作的审计身份由 Host 提供（`locusIdentity`），浏览器请求体中的 actor 一律拒绝。
+`connection.requestRejection()` 只证明该浏览器持有当前 DSH Host 的 authority-bound
+cookie，并不携带人员主体或飞书 open_id；因此它不能证明默认 Q&A 的“本人群主”。
+默认 Q&A 创建会在副作用前通过固定 `dsh-pet` profile 执行已验证的
+`lark-cli auth status --json --verify`，只接受 ready/available/verified 的
+`identities.user.openId`，且该精确 open_id 还必须在 allowlist 中。用户登录缺失、
+profile app 不一致、身份未验证、open_id 缺失或不在 allowlist 均 fail closed；不会
+信任 request body、allowlist 首位或设置页文案。
 
 已接通：所有者视图、endpoint/parent/child 三向发现、durable stop/archive/
 scope 生命周期转换。**未接通**：bind、default Q&A、rebuild —— 它们需要真实

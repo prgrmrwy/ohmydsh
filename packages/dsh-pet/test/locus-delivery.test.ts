@@ -91,6 +91,28 @@ describe('unified locus Delivery correlation', () => {
     expect(getDelivery(replay.state, 'delivery-attacker-chosen')).toBeUndefined()
   })
 
+  it('fails closed when two Deliveries are assigned the same DSH inbox message id', () => {
+    const first = acceptDelivery(createDeliveryLedger(), {
+      ...correlation(), messageId: 'message-inbox-first',
+    })
+    const second = acceptDelivery(first.state, {
+      ...correlation(), messageId: 'message-inbox-second',
+    })
+    const firstBound = bindQueued(second.state, {
+      ...correlation(), deliveryId: first.record.deliveryId,
+      executionId: 'execution-inbox-first', inboxMessageId: 'inbox-duplicate',
+    })
+    const collision = bindQueued(firstBound.state, {
+      ...correlation(), deliveryId: second.record.deliveryId,
+      executionId: 'execution-inbox-second', inboxMessageId: 'inbox-duplicate',
+    })
+
+    expect(collision.changed).toBe(false)
+    expect(collision.reason).toBe('inbox-message-conflict')
+    expect(collision.record?.status).toBe('accepted')
+    expect(collision.state.byDeliveryId[first.record.deliveryId]?.status).toBe('queued')
+  })
+
   it('tracks accepted, queued, running, and terminal states without mutating prior snapshots', () => {
     const accepted = acceptDelivery(createDeliveryLedger(), {
       ...correlation(),
@@ -100,6 +122,7 @@ describe('unified locus Delivery correlation', () => {
       ...correlation(),
       deliveryId: accepted.record.deliveryId,
       executionId: EXECUTION,
+      inboxMessageId: `inbox-${EXECUTION}`,
       queuedAt: 20,
     })
     const running = bindTurn(queued.state, {
@@ -136,6 +159,7 @@ describe('unified locus Delivery correlation', () => {
       ...correlation(),
       deliveryId: accepted.record.deliveryId,
       executionId: EXECUTION,
+      inboxMessageId: `inbox-${EXECUTION}`,
     })
     const running = bindTurn(queued.state, {
       ...correlation(),
@@ -170,27 +194,27 @@ describe('unified locus Delivery correlation', () => {
       ...correlation(),
       deliveryId: first.record.deliveryId,
       turnId: 'turn-first',
-      executionId: 'execution-first',
+      executionId: 'execution-first', inboxMessageId: 'inbox-execution-first',
     })
     state = firstBound.state
     const secondBound = bindDeliveryTurn(state, {
       ...correlation(),
       deliveryId: second.record.deliveryId,
       turnId: 'turn-second',
-      executionId: 'execution-second',
+      executionId: 'execution-second', inboxMessageId: 'inbox-execution-second',
     })
     state = secondBound.state
     const firstSettlement = settleNextDelivery(state, {
       ...correlation(),
       turnId: 'turn-first',
-      executionId: 'execution-first',
+      executionId: 'execution-first', inboxMessageId: 'inbox-execution-first',
       outcome: 'settled',
       settledAt: 60,
     })
     const secondSettlement = settleNextDelivery(firstSettlement.state, {
       ...correlation(),
       turnId: 'turn-second',
-      executionId: 'execution-second',
+      executionId: 'execution-second', inboxMessageId: 'inbox-execution-second',
       outcome: 'failed',
       settledAt: 70,
       failureReason: 'second failed',
@@ -221,6 +245,7 @@ describe('unified locus Delivery correlation', () => {
       deliveryId: threadB.record.deliveryId,
       turnId: TURN,
       executionId: EXECUTION,
+      inboxMessageId: `inbox-${EXECUTION}`,
     })
     const settledB = settleNextDelivery(threadBBound.state, {
       endpoint: { chatId: ENDPOINT.chatId, threadId: 'thread-b' },
@@ -249,6 +274,7 @@ describe('unified locus Delivery correlation', () => {
       ...correlation(),
       deliveryId: second.record.deliveryId,
       executionId: EXECUTION,
+      inboxMessageId: `inbox-${EXECUTION}`,
     })
     const secondBound = bindTurn(secondQueued.state, {
       ...correlation(),
@@ -297,14 +323,14 @@ describe('unified locus Delivery correlation', () => {
     const oldBound = bindDeliveryTurn(state, {
       ...correlation({ generation: 1, childSessionId: 'child-old' }),
       deliveryId: old.record.deliveryId,
-      executionId: 'execution-old',
+      executionId: 'execution-old', inboxMessageId: 'inbox-execution-old',
       turnId: 'turn-old',
     })
     state = oldBound.state
     const newBound = bindDeliveryTurn(state, {
       ...correlation({ generation: 2, childSessionId: 'child-new' }),
       deliveryId: replacement.record.deliveryId,
-      executionId: 'execution-new',
+      executionId: 'execution-new', inboxMessageId: 'inbox-execution-new',
       turnId: 'turn-new',
     })
     state = newBound.state
@@ -313,7 +339,7 @@ describe('unified locus Delivery correlation', () => {
     // exact, so it settles only the old request and cannot consume the new one.
     const oldSettlement = settleNextDelivery(state, {
       ...correlation({ generation: 1, childSessionId: 'child-old' }),
-      executionId: 'execution-old',
+      executionId: 'execution-old', inboxMessageId: 'inbox-execution-old',
       turnId: 'turn-old',
       outcome: 'settled',
     })
@@ -324,7 +350,7 @@ describe('unified locus Delivery correlation', () => {
     const wrongGeneration = settleDelivery(oldSettlement.state, {
       deliveryId: replacement.record.deliveryId,
       outcome: 'settled',
-      executionId: 'execution-new',
+      executionId: 'execution-new', inboxMessageId: 'inbox-execution-new',
       turnId: 'turn-new',
       correlation: { ...correlation({ generation: 1, childSessionId: 'child-old' }), turnId: 'turn-new' },
       settledAt: 40,
@@ -342,7 +368,7 @@ describe('unified locus Delivery correlation', () => {
 
     const late = settleNextDelivery(accepted.state, {
       ...correlation({ generation: 1, childSessionId: 'child-old' }),
-      executionId: 'execution-old',
+      executionId: 'execution-old', inboxMessageId: 'inbox-execution-old',
       turnId: 'turn-old',
       outcome: 'settled',
     })
@@ -361,6 +387,7 @@ describe('unified locus Delivery correlation', () => {
       ...correlation(),
       deliveryId: accepted.record.deliveryId,
       executionId: EXECUTION,
+      inboxMessageId: `inbox-${EXECUTION}`,
     })
     const bound = bindTurn(queued.state, {
       ...correlation(),

@@ -1,4 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
+import { asLocusContextRepository } from '../src/host/locus/context-repository.js'
+import {
+  createLocusTurnObserver,
+  type LocusInboxClaim,
+} from '../src/host/locus/turn-observer.js'
 import { PET_LOCUS_REPLY_TOOL, registerPetTools } from '../src/host/tools.js'
 
 function contextRecord(current = true) {
@@ -80,5 +85,75 @@ describe('caller-bound Feishu reply tool', () => {
       signal: new AbortController().signal,
     })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
     expect(reply).not.toHaveBeenCalled()
+  })
+
+  it('refuses to send after the same child turn claims a Delivery and a steer', async () => {
+    vi.useFakeTimers()
+    try {
+      const claimListeners: Array<(claim: LocusInboxClaim) => void> = []
+      const observer = createLocusTurnObserver({
+        onClaimed: listener => { claimListeners.push(listener); return () => {} },
+        onTurnEnd: () => () => {},
+        lookup: {
+          find: ({ messageId }) => messageId === 'delivery-message'
+            ? {
+                deliveryId: 'delivery-1',
+                executionId: 'execution-1',
+                correlation: {
+                  endpoint: { chatId: 'oc-1', threadId: 'omt-1' },
+                  locusId: 'locus-1',
+                  generation: 2,
+                  childSessionId: 'child-1',
+                },
+              }
+            : undefined,
+        },
+      })
+      const aggregate = {
+        findByChildSession: () => ({
+          id: 'locus-1', generation: 2,
+          endpoint: { chatId: 'oc-1', threadId: 'omt-1' },
+          parentSessionId: 'parent-1', childSessionId: 'child-1', workspaceId: 'workspace-1',
+          source: 'explicit' as const, state: 'active' as const, busy: true,
+          permission: { desired: 'read' as const, effective: 'read' as const },
+          createdAt: 1, updatedAt: 2,
+        }),
+        findCurrentDelivery: ({ executionId }: { executionId?: string }) => executionId === 'execution-1'
+          ? contextRecord(true).currentDelivery
+          : undefined,
+      }
+      const repository = asLocusContextRepository(
+        aggregate,
+        childSessionId => observer.currentForChild?.(childSessionId),
+      )
+      const definitions: Array<{ name: string; execute(args: unknown, exec: unknown): Promise<unknown> }> = []
+      const reply = vi.fn(async () => undefined)
+      registerPetTools({
+        tools: { register: (definition: never) => { definitions.push(definition); return () => {} } },
+      } as never, {
+        repository: {} as never,
+        locusRepository: repository,
+        locusReply: { locusRepository: repository, lark: { reply, replyExact: reply } },
+      })
+      const tool = definitions.find(item => item.name === PET_LOCUS_REPLY_TOOL)!
+      const exec = {
+        agent: { session: { id: 'child-1' } },
+        signal: new AbortController().signal,
+      }
+      const claim = (value: LocusInboxClaim) => claimListeners.forEach(listener => listener(value))
+
+      claim({ childSessionId: 'child-1', messageId: 'delivery-message', turn: 7 })
+      await expect(tool.execute({ text: 'first' }, exec)).resolves.toEqual({ sent: true })
+      claim({ childSessionId: 'child-1', messageId: 'gui-steer', turn: 7 })
+      await expect(tool.execute({ text: 'must not leak' }, exec))
+        .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+      await vi.runAllTimersAsync()
+      await expect(tool.execute({ text: 'still must not leak' }, exec))
+        .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+      expect(reply).toHaveBeenCalledTimes(1)
+      observer.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

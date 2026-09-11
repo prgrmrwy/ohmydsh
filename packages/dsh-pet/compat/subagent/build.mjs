@@ -38,7 +38,7 @@ const UPSTREAM = {
   tag: 'dsh-v0.1.2-rc.1',
   packageDir: 'packages/subagent/subagent',
   /** sha256 of `settlement-notice.patch`, so a silently edited patch fails. */
-  patchSha256:'abf9689904f04c0abc79bc9d444db63e75dcdb7005ef30b2eaecd2384ca21457',
+  patchSha256: '97ef5189f726799c13bdd7622aa37292a7451fe13981fac77de4d82161e14b28',
 }
 
 const run = (command, args, cwd) =>
@@ -116,7 +116,7 @@ const manifest = {
   }`,
   dsh_compat: {
     replaces: `@deepseek-ai/dsh-subagent@${upstreamPkg.version}`,
-    reason: 'adds the opt-in settlementNotice so a locus child never reports into its main session',
+    reason: 'adds silent settlement, idle creation, and exact continuation-owned child Session access for unified locus',
     upstreamTag: UPSTREAM.tag,
     upstreamBase: head,
     patchSha256: UPSTREAM.patchSha256,
@@ -145,6 +145,12 @@ if (
 ) {
   fail('built artifact has no idle-continuable capability; safe two-phase provisioning is unavailable')
 }
+if (
+  !runtimeSource.includes('supportsLiveContinuableChildSession')
+  || !runtimeSource.includes('withLiveContinuableChildSession')
+) {
+  fail('built artifact has no continuation-owned child Session capability; policy mutation is unavailable')
+}
 // Instantiate the actual service object Pet probes. A string in the bundle is
 // not enough: the marker must be present on the runtime instance returned by
 // `ctx.get('subagents')`.
@@ -155,7 +161,9 @@ const runtime = new descriptor.default(new cordis.Context())
 if (
   runtime.supportsSettlementNotice !== true
   || runtime.supportsIdleContinuableCreate !== true
+  || runtime.supportsLiveContinuableChildSession !== true
   || typeof runtime.createIdleContinuable !== 'function'
+  || typeof runtime.withLiveContinuableChildSession !== 'function'
 ) {
   fail('built SubagentRuntime instance does not expose the required capabilities')
 }
