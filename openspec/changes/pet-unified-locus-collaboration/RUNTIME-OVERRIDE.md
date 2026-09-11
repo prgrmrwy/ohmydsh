@@ -45,7 +45,7 @@ sync 在任何 profile 副作用前、Host plain start 在运行前都要求
 - Subagent upstream：31 文件 / 778 测试；实际 runtime marker 和 silent 分支验证；
 - Storage upstream：原子 batch/transaction 与 SQLite exclusive 的范围测试；
 - 隔离 launcher：官方 DSH 主包 + reviewed transitive overrides，无双副本；
-- npm 固定 install scripts 显式审批；
+- builder 经 corepack 固定 `npm@11.19.0`，install scripts 必须显式审批；
 - server-bin 返回真实 `node_modules/@deepseek-ai/dsh/lib/bin.js`，不返回 `.bin` shim。
 
 现有 GUI 是否已使用新 runtime 只由下一次人类执行的正常 restart 决定；本次部署不
