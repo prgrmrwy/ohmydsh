@@ -193,6 +193,205 @@ describe('a capability runs on a single click', () => {
   })
 })
 
+describe('dragging moves Pet on the compositor, not through layout', () => {
+  it('writes transform and never left/top', async () => {
+    stubFetch({ capabilities: [], lifecycle: { phase: 'ready' } })
+    const { host, root } = await mountPet()
+    const mascot = mascotOf(host)
+    mascot.setPointerCapture = () => {}
+    mascot.releasePointerCapture = () => {}
+
+    const before = root.style.transform
+    mascot.dispatchEvent(pointer('pointerdown', 100, 100))
+    mascot.dispatchEvent(pointer('pointermove', 160, 140))
+    // The move is painted from a rAF, so the write lands a frame later.
+    await settle()
+
+    expect(root.style.transform).toContain('translate3d')
+    expect(root.style.transform).not.toBe(before)
+    // The whole point of the change: `left`/`top` force a layout per pointer
+    // event. A stray write here would restore that cost invisibly, since the
+    // transform would still make Pet LOOK like it moved correctly.
+    expect(root.style.left).toBe('')
+    expect(root.style.top).toBe('')
+
+    mascot.dispatchEvent(pointer('pointerup', 160, 140))
+    await settle()
+
+    // React owns the position again after the commit, and must render the
+    // same value the drag last painted — otherwise Pet jumps on release.
+    expect(root.style.transform).toContain('translate3d')
+  })
+
+  it('keeps the wheel mounted across a drag without rebuilding it', async () => {
+    stubFetch({
+      lifecycle: { phase: 'ready' },
+      capabilities: [
+        {
+          id: 'clean',
+          label: '清理',
+          description: '',
+          skillName: 'clean',
+          contextRequirement: 'none',
+          available: true,
+          showAsShortcut: true,
+        },
+      ],
+      tasks: [],
+    })
+    const { host } = await mountPet()
+    const mascot = mascotOf(host)
+    mascot.setPointerCapture = () => {}
+    mascot.releasePointerCapture = () => {}
+
+    // Hovering to grab Pet is what opens the wheel, so a drag with the wheel
+    // open is the normal case rather than an edge one.
+    mascot.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    await settle()
+    const slice = host.querySelector('.dshpet-slot')
+    expect(slice).not.toBeNull()
+
+    mascot.dispatchEvent(pointer('pointerdown', 100, 100))
+    mascot.dispatchEvent(pointer('pointermove', 150, 130))
+    mascot.dispatchEvent(pointer('pointermove', 200, 170))
+    await settle()
+
+    // Identity, not just presence: a re-render of the SVG tree would replace
+    // the node. The drag must not touch it at all — the slices do not depend
+    // on Pet's coordinates.
+    expect(host.querySelector('.dshpet-slot')).toBe(slice)
+  })
+
+  it('keeps where an interrupted drag got to', async () => {
+    stubFetch({ capabilities: [], lifecycle: { phase: 'ready' } })
+    const { host, root } = await mountPet()
+    const mascot = mascotOf(host)
+    mascot.setPointerCapture = () => {}
+    mascot.releasePointerCapture = () => {}
+
+    mascot.dispatchEvent(pointer('pointerdown', 100, 100))
+    mascot.dispatchEvent(pointer('pointermove', 170, 150))
+    await settle()
+    const moved = root.style.transform
+
+    // A cancelled gesture still commits: springing back to the grab point
+    // would silently discard the move the user already saw happen.
+    mascot.dispatchEvent(pointer('pointercancel', 170, 150))
+    await settle()
+
+    expect(root.style.transform).toBe(moved)
+  })
+})
+
+describe('the wheel never shows a stale hover highlight', () => {
+  /** Mount with one shortcut and open the wheel hovering its slice. */
+  async function hoverFirstSlice(): Promise<{ host: HTMLElement; slice: Element }> {
+    const { host } = await mountPet()
+    mascotOf(host).dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    await settle()
+    const slice = host.querySelector('.dshpet-slot')
+    if (slice === null) throw new Error('wheel did not render a slice')
+    // `mouseover`, not `mouseenter`: React synthesizes its enter/leave pair
+    // from the over/out natives, so a dispatched `mouseenter` reaches no
+    // handler at all (the same reason the mascot cases above use mouseover).
+    slice.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    await settle()
+    expect(slice.getAttribute('data-hovered')).toBe('true')
+    return { host, slice }
+  }
+
+  const oneCapability = {
+    lifecycle: { phase: 'ready' },
+    capabilities: [
+      {
+        id: 'clean',
+        label: '清理',
+        description: '',
+        skillName: 'clean',
+        contextRequirement: 'none',
+        available: true,
+        showAsShortcut: true,
+      },
+    ],
+    tasks: [],
+  }
+
+  it('drops the highlight when the wheel closes with the pointer still on a slice', async () => {
+    stubFetch(oneCapability)
+    const { host } = await hoverFirstSlice()
+
+    // Escape closes the wheel while the pointer is still resting on the
+    // slice, so its `mouseleave` never arrives. That is the exact path that
+    // used to strand `hovered` and bring the highlight back on the next open.
+    host
+      .querySelector('.dshpet-root')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await settle()
+
+    mascotOf(host).dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    await settle()
+
+    expect(host.querySelector('.dshpet-slot')).not.toBeNull()
+    expect(host.querySelector('[data-hovered="true"]')).toBeNull()
+  })
+
+  it('drops the highlight when a drag starts on top of a slice', async () => {
+    stubFetch(oneCapability)
+    const { host, slice } = await hoverFirstSlice()
+    const mascot = mascotOf(host)
+    mascot.setPointerCapture = () => {}
+    mascot.releasePointerCapture = () => {}
+
+    // Grabbing Pet means "move this", not "I am pointing at 清理". A drag
+    // leaves `mode` alone, so this path needs its own explicit clear.
+    mascot.dispatchEvent(pointer('pointerdown', 100, 100))
+    await settle()
+
+    expect(slice.getAttribute('data-hovered')).not.toBe('true')
+  })
+
+  it('does not hand a vanished capability\'s highlight to its replacement', async () => {
+    stubFetch(oneCapability)
+    const { host } = await hoverFirstSlice()
+
+    // Slice geometry comes from the index while the highlight matches by id,
+    // so a refreshed catalog must not leave the first position lit up for a
+    // different capability than the one the pointer was on.
+    stubFetch({
+      lifecycle: { phase: 'ready' },
+      capabilities: [
+        {
+          id: 'other',
+          label: '别的',
+          description: '',
+          skillName: 'other',
+          contextRequirement: 'none',
+          available: true,
+          showAsShortcut: true,
+        },
+      ],
+      tasks: [],
+    })
+    // The overlay re-reads the catalog on this broadcast. Imported rather
+    // than spelled out, so renaming the event cannot leave this test
+    // passing against an event nobody listens to.
+    const { PET_SKILLS_EVENT } = await import('../src/client/accent.js')
+    globalThis.dispatchEvent(new Event(PET_SKILLS_EVENT))
+    await settle()
+
+    expect(host.textContent).toContain('别的')
+    expect(host.querySelector('[data-hovered="true"]')).toBeNull()
+  })
+
+  it('still highlights the slice actually under the pointer', async () => {
+    stubFetch(oneCapability)
+    const { slice } = await hoverFirstSlice()
+
+    // The fix must not have turned the highlight off altogether.
+    expect(slice.getAttribute('data-hovered')).toBe('true')
+  })
+})
+
 describe('empty catalog hint', () => {
   it('shows the hint inside the wheel when no capability is enabled', async () => {
     // The single-click test above replaced the module stub with a one-entry
