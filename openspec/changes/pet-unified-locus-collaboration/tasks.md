@@ -63,7 +63,7 @@
 - [x] 8.3 移除运行中的旧飞书分支与旧设置入口，不全局删除普通 snapshot 仍使用的共享模块
 - [x] 8.4 更新部署说明和 breaking-change 文档；演练停止新消费后的版本回滚，不对新数据做有损降维，不自动清理旧资源
 - [x] 8.5 将 additive Pet domain 版本升级收敛为显式离线 CLI：Host 只 degraded 并记录可复制命令，人工逐机 stop/dry-run/--yes/start；迁移先备份、锁占用/未知版本 fail closed、重复执行幂等，不转换旧关联
-- [ ] 8.6 将 Pet Locus 临时宿主能力收敛为 dsh-pet 声明式 Host runtime：只影响长期 web Host，官方 build/plugin/dump-config 保持精确 pin；兼容版本变化 fail closed，builder 共享锁、staging 原子发布、失败保留旧成品，迁移旧 `.env.local` 值但保留人类显式 `DSH_BIN`，完成多机器部署、审计日志与幂等验证
+- [x] 8.6 将 Pet Locus 临时宿主能力收敛为 dsh-pet 声明式 Host runtime：只影响长期 web Host，官方 build/plugin/dump-config 保持精确 pin；兼容版本变化 fail closed，builder 共享锁、staging 原子发布、失败保留旧成品，迁移旧 `.env.local` 值但保留人类显式 `DSH_BIN`，完成多机器部署、审计日志与幂等验证
 
 ## 9. 整体验收
 
