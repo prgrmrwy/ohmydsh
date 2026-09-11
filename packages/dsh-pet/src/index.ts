@@ -144,6 +144,29 @@ export interface Config {
 }
 
 /**
+ * Operator-facing Pet log line.
+ *
+ * Deliberately `console`, not `ctx.logger`: under `dsh web` the Host logger's
+ * output does not reach `$DSH_HOME/dsh.log`, while plugin stdout/stderr does.
+ * These diagnostics exist to be read during an incident, so they are written
+ * where an operator can actually grep them. The prefix makes
+ * `grep '\[dsh-pet\]'` return Pet's own records rather than unrelated stack
+ * frames that merely mention the package path.
+ * @param message - Operator-facing text; must not contain secrets.
+ */
+function petLog(message: string): void {
+  console.log(`[dsh-pet] ${message}`)
+}
+
+/**
+ * Operator-facing Pet warning; same sink and reasoning as {@link petLog}.
+ * @param message - Operator-facing text; must not contain secrets.
+ */
+function petWarn(message: string): void {
+  console.warn(`[dsh-pet] ${message}`)
+}
+
+/**
  * Register the Pet Host.
  *
  * Contract: this function performs no fallible I/O. It registers lifecycle
@@ -157,8 +180,14 @@ export function apply(ctx: Context, config: Config = {}): void {
   // aborts initialization before `createPetRoutes` runs is invisible: each Pet
   // route answers 405, the Web client can only say "not registered", and no
   // record exists anywhere of which step actually failed.
+  //
+  // `console.warn`, NOT `ctx.logger`: under `dsh web` the Host's logger output
+  // does not reach `$DSH_HOME/dsh.log`, while stderr from the plugin process
+  // does. An operator-facing failure that only a debugger can read is the same
+  // blind spot this reporter exists to remove, so the sink is chosen for where
+  // it actually lands rather than for looking idiomatic.
   const lifecycle = new PetLifecycleMachine(diagnostic => {
-    ctx.logger.warn(`dsh-pet degraded: ${diagnostic}`)
+    petWarn(`degraded: ${diagnostic}`)
   })
   const paths = resolvePetPaths(config.home)
 
@@ -201,17 +230,17 @@ async function initialize(
   })
   if (directories === undefined) return
 
-  // Ownership before records: routing is by backend NAME, so a foreign
-  // composition owning `sqlite` would silently capture Pet's data.
-  const ownership = await verifyBackendOwnership(ctx, paths)
-  if (!ownership.ok) {
-    lifecycle.markDegraded(ownership.diagnostic ?? 'Pet storage backend ownership unproven')
-    return
-  }
-
-  // Clear state written by the previous Skill model BEFORE opening: the
-  // domain validates every stored record up front, so one legacy row would
-  // fail the open and degrade a Host that used to work.
+  // Migrate BEFORE the backend exists.
+  //
+  // Ordering is load-bearing, not stylistic. `ctx.storage.backend.get` below
+  // INSTANTIATES the sqlite backend, whose constructor opens the database with
+  // `locking_mode = EXCLUSIVE`. Any later attempt to open the same file — even
+  // from this very process — is refused, so a migration placed after the
+  // ownership proof can never acquire the medium it has to restamp.
+  //
+  // The cleanup also has to precede `storageDomain.open` on its own merits:
+  // the domain validates every stored record and compares the stamped version
+  // up front, so an un-migrated medium fails that open outright.
   const cleanup = await lifecycle.contain('Pet legacy state cleanup', async () =>
     removeLegacyState(paths.databaseFile),
   )
@@ -221,10 +250,20 @@ async function initialize(
   // wrong step, which is exactly how this failure stayed undiagnosed.
   if (cleanup === undefined) return
   if (cleanup.removedRows > 0) {
-    ctx.logger.info(
-      `dsh-pet cleared ${cleanup.removedRows} row(s) from the previous Skill model ` +
+    petLog(
+      `cleared ${cleanup.removedRows} row(s) from the previous Skill model ` +
         `(${cleanup.clearedTables.join(', ')}); re-add the Skills you want`,
     )
+  }
+
+  // Ownership before records: routing is by backend NAME, so a foreign
+  // composition owning `sqlite` would silently capture Pet's data. This runs
+  // AFTER the migration above because resolving the backend opens the database
+  // exclusively; see the ordering note there.
+  const ownership = await verifyBackendOwnership(ctx, paths)
+  if (!ownership.ok) {
+    lifecycle.markDegraded(ownership.diagnostic ?? 'Pet storage backend ownership unproven')
+    return
   }
 
   const domain = await lifecycle.contain('Pet storage domain', () =>
@@ -439,7 +478,7 @@ async function initialize(
     | { register(contributor: never): () => void }
     | undefined
   if (shellEnv === undefined) {
-    ctx.logger.info('dsh-pet: shellEnv unavailable; DSH_PET_* variables are not injected')
+    petLog('dsh-pet: shellEnv unavailable; DSH_PET_* variables are not injected')
   } else {
     // Called DIRECTLY, not wrapped in `ctx.effect`. `register` already runs
     // inside its own effect and owns its disposal, so an extra wrapper only
@@ -451,7 +490,7 @@ async function initialize(
     try {
       shellEnv.register(createPetEnvContributor(repository) as never)
     } catch (error) {
-      ctx.logger.warn(
+      petWarn(
         `dsh-pet: DSH_PET_* injection unavailable (${
           error instanceof Error ? error.message : String(error)
         })`,
@@ -613,7 +652,7 @@ async function initialize(
     try {
       await installPetScope(view.ctx, task.residentWorkspaceId === undefined)
     } catch (error) {
-      ctx.logger.warn(
+      petWarn(
         `dsh-pet: could not scope externally loaded executor ${String(sessionId)} (${
           error instanceof Error ? error.message : String(error)
         })`,
@@ -1116,12 +1155,12 @@ async function initialize(
               },
             },
           }),
-        log: code => ctx.logger.info(`dsh-pet locus reconcile: ${code}`),
+        log: code => petLog(`dsh-pet locus reconcile: ${code}`),
       },
       locusReconcileAbort.signal,
     )
     if (report.invalidated.length > 0 || report.busyCleared.length > 0) {
-      ctx.logger.info(
+      petLog(
         `dsh-pet: locus reconciliation invalidated ${String(report.invalidated.length)}`
         + `, cleared ${String(report.busyCleared.length)} stale busy fence(s)`,
       )
@@ -1134,7 +1173,7 @@ async function initialize(
   if (locusReconciled === undefined) return
 
   if (!locusChildProbe.available) {
-    ctx.logger.info(`dsh-pet: unified locus child seam unavailable — ${locusChildProbe.diagnostic}`)
+    petLog(`dsh-pet: unified locus child seam unavailable — ${locusChildProbe.diagnostic}`)
   }
   const idleChildProvisioning = locusChildProbe.available
     && locusChildProbe.ports.subagent.supportsSettlementNotice === true
@@ -1225,11 +1264,11 @@ async function initialize(
         repository: new ControllerLocusRepositoryAdapter(locusRepository),
         dsh,
         lark: locusLarkPort,
-        log: message => ctx.logger.info(`dsh-pet locus provisioning: ${message}`),
+        log: message => petLog(`dsh-pet locus provisioning: ${message}`),
       })
       return { controller, dsh }
     } catch (error) {
-      ctx.logger.info(
+      petLog(
         `dsh-pet: locus provisioning composition failed (${
           error instanceof Error ? error.message : String(error)
         })`,
@@ -1284,7 +1323,7 @@ async function initialize(
           },
         },
       }),
-    log: reason => ctx.logger.info(`dsh-pet locus resolve: ${reason}`),
+    log: reason => petLog(`dsh-pet locus resolve: ${reason}`),
   })
 
   const locusPermissionMutation = (() => {
@@ -1499,10 +1538,10 @@ async function initialize(
             }
           },
         },
-        log: code => ctx.logger.info(`dsh-pet locus turn: ${code}`),
+        log: code => petLog(`dsh-pet locus turn: ${code}`),
       })
     } catch (error) {
-      ctx.logger.info(
+      petLog(
         `dsh-pet: unified locus turn observer unavailable (${
           error instanceof Error ? error.message : String(error)
         })`,
@@ -1616,7 +1655,7 @@ async function initialize(
   )
   if (locusStartup === undefined) return
   if (locusStartup.pendingDeliveries.length > 0 || locusStartup.recoverableOperations.length > 0) {
-    ctx.logger.info(
+    petLog(
       `dsh-pet locus recovery: ${String(locusStartup.pendingDeliveries.length)} pending Deliveries, ` +
       `${String(locusStartup.recoverableOperations.length)} recoverable operations; no side effect replayed`,
     )
@@ -1789,7 +1828,7 @@ async function initialize(
       ...(locusControlDispatch === undefined ? {} : { controlDispatch: locusControlDispatch }),
       // Admission is supplied by InboundPipeline for every event so its
       // watermark belongs to the currently connected subscription generation.
-      log: (code: string) => ctx.logger.info(`dsh-pet locus channel: ${code}`),
+      log: (code: string) => petLog(`dsh-pet locus channel: ${code}`),
     })
     : unavailableLocusChannelCapability(
       locusChannelGaps.length === 0
@@ -1797,7 +1836,7 @@ async function initialize(
         : locusChannelGaps.join('; '),
     )
   if (locusChannel.status === 'unavailable') {
-    ctx.logger.info(
+    petLog(
       `dsh-pet: unified Feishu channel stays unavailable — ${locusChannel.diagnostic}`,
     )
   } else {
@@ -1837,7 +1876,7 @@ async function initialize(
             })
           }
           void persist().catch((error: unknown) => {
-            ctx.logger.info(
+            petLog(
               `dsh-pet locus turn: could not recover ${event.phase} (${
                 error instanceof Error ? error.message : String(error)
               })`,
@@ -2078,7 +2117,7 @@ async function initialize(
       },
     },
     onChange: () => changes.publish(),
-    log: message => ctx.logger.info(message),
+    log: message => petLog(message),
   })
 
   ctx.effect(
@@ -2250,7 +2289,10 @@ async function initialize(
 
 
   lifecycle.markReady()
-  ctx.logger.info(`dsh-pet ready (state: ${paths.stateRoot})`)
+  // Same sink as the degraded reporter: a readiness line an operator can
+  // actually grep is what distinguishes "Pet started and registered its
+  // routes" from "Pet never ran at all", which otherwise look identical.
+  petLog(`ready — routes registered (state: ${paths.stateRoot})`)
 }
 
 /**

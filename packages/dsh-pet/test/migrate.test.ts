@@ -469,3 +469,47 @@ describe('an unprovable migration fails loudly', () => {
     }
   })
 })
+
+/**
+ * Regression: the migration must run BEFORE the sqlite backend is resolved.
+ *
+ * The backend constructor opens Pet's database with `locking_mode = EXCLUSIVE`,
+ * which refuses every later open — including one from the same process. A
+ * migration ordered after that proof therefore always failed to acquire the
+ * medium it had to restamp, so Pet aborted initialization on every boot and
+ * never registered its routes.
+ */
+describe('migration ordering against an exclusive medium', () => {
+  it('cannot restamp once the medium is held exclusively', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'pet-migrate-order-'))
+    const file = path.join(dir, 'state.sqlite')
+    const seed = new DatabaseSync(file)
+    seed.exec('CREATE TABLE units (name TEXT PRIMARY KEY, version INTEGER)')
+    seed.prepare('INSERT INTO units VALUES (?, ?)').run('dsh_pet', 5)
+    seed.close()
+
+    // Stand in for the backend constructor.
+    const backend = new DatabaseSync(file)
+    backend.exec('PRAGMA locking_mode = EXCLUSIVE')
+    backend.exec('BEGIN IMMEDIATE')
+
+    try {
+      expect(() => removeLegacyState(file)).toThrow(/could not be opened or updated/)
+    } finally {
+      backend.exec('ROLLBACK')
+      backend.close()
+    }
+
+    // Same database, same call — it only succeeds while nothing holds the file,
+    // which is precisely why the cleanup is ordered first in `initialize`.
+    expect(removeLegacyState(file).removedRows).toBe(0)
+    const after = new DatabaseSync(file)
+    try {
+      const stamped = after.prepare('SELECT version FROM units WHERE name = ?')
+        .get('dsh_pet') as { version: number }
+      expect(stamped.version).toBe(PET_DOMAIN_VERSION)
+    } finally {
+      after.close()
+    }
+  })
+})

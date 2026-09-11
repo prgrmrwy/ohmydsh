@@ -1554,7 +1554,12 @@ describe('the unified Feishu channel stays gated on real capabilities', () => {
       listChildren: async () => [],
       [Symbol.for('dsh.subagent.queuePrompt')]: async () => 'message-1',
     })
-    ctx.logger.info = (text: string) => { logs.push(text) }
+    // Capture the sink Pet actually writes to. Pet reports through `console`
+    // rather than `ctx.logger`, because the Host logger's output never reaches
+    // `$DSH_HOME/dsh.log` under `dsh web`; stubbing the logger here would
+    // assert on a channel no operator can read.
+    const restoreConsoleLog = console.log
+    console.log = (...args: unknown[]) => { logs.push(args.map(String).join(' ')) }
 
     await ctx.plugin({
       name: 'default-backend',
@@ -1579,16 +1584,22 @@ describe('the unified Feishu channel stays gated on real capabilities', () => {
     await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: 'sqlite' } })
     await ctx.plugin(petPlugin, { home, version: '0.1.0' })
 
-    const deadline = Date.now() + 15_000
-    while (Date.now() < deadline && routes.length === 0) {
-      await new Promise(resolve => setTimeout(resolve, 50))
-    }
+    try {
+      const deadline = Date.now() + 15_000
+      while (Date.now() < deadline && routes.length === 0) {
+        await new Promise(resolve => setTimeout(resolve, 50))
+      }
 
-    // The gate must name the missing capability, so an operator can tell
-    // "not wired yet" from "wired and broken".
-    const gate = logs.find(line => line.includes('unified Feishu channel stays unavailable'))
-    expect(gate).toBeDefined()
-    expect(gate).toContain('suppress')
+      // The gate must name the missing capability, so an operator can tell
+      // "not wired yet" from "wired and broken".
+      const gate = logs.find(line => line.includes('unified Feishu channel stays unavailable'))
+      expect(gate).toBeDefined()
+      expect(gate).toContain('suppress')
+    } finally {
+      // Restore unconditionally: a patched `console.log` leaking out of this
+      // case would silently swallow output from every later test.
+      console.log = restoreConsoleLog
+    }
   })
 })
 
