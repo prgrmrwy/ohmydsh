@@ -88,7 +88,6 @@ import {
   type LocusCompositionPorts,
 } from './host/locus/composition.js'
 import { currentAllowlist } from './host/skill-provider.js'
-import { removeLegacyState } from './host/migrate.js'
 import { petDomainSpec } from './host/spec.js'
 import {
   isForkChildTaskForm,
@@ -230,36 +229,15 @@ async function initialize(
   })
   if (directories === undefined) return
 
-  // Migrate BEFORE the backend exists.
-  //
-  // Ordering is load-bearing, not stylistic. `ctx.storage.backend.get` below
-  // INSTANTIATES the sqlite backend, whose constructor opens the database with
-  // `locking_mode = EXCLUSIVE`. Any later attempt to open the same file — even
-  // from this very process — is refused, so a migration placed after the
-  // ownership proof can never acquire the medium it has to restamp.
-  //
-  // The cleanup also has to precede `storageDomain.open` on its own merits:
-  // the domain validates every stored record and compares the stamped version
-  // up front, so an un-migrated medium fails that open outright.
-  const cleanup = await lifecycle.contain('Pet legacy state cleanup', async () =>
-    removeLegacyState(paths.databaseFile),
-  )
-  // An unproven migration must stop initialization here. Continuing would hit
-  // `storageDomain.open` with a medium still stamped at the old version, whose
-  // mismatch aborts Pet anyway — but several steps later and attributed to the
-  // wrong step, which is exactly how this failure stayed undiagnosed.
-  if (cleanup === undefined) return
-  if (cleanup.removedRows > 0) {
-    petLog(
-      `cleared ${cleanup.removedRows} row(s) from the previous Skill model ` +
-        `(${cleanup.clearedTables.join(', ')}); re-add the Skills you want`,
-    )
-  }
+  // Do not open Pet's SQLite file directly from Host initialization. The
+  // bundle's dedicated backend is already constructed with
+  // `locking_mode = EXCLUSIVE` before this plugin's `apply` runs, so a second
+  // connection from this process is guaranteed to fail. Historical schema
+  // transitions that require file-level access are explicit offline cutovers;
+  // normal startup only opens the CURRENT domain through its owning backend.
 
   // Ownership before records: routing is by backend NAME, so a foreign
-  // composition owning `sqlite` would silently capture Pet's data. This runs
-  // AFTER the migration above because resolving the backend opens the database
-  // exclusively; see the ordering note there.
+  // composition owning `sqlite` would silently capture Pet's data.
   const ownership = await verifyBackendOwnership(ctx, paths)
   if (!ownership.ok) {
     lifecycle.markDegraded(ownership.diagnostic ?? 'Pet storage backend ownership unproven')
