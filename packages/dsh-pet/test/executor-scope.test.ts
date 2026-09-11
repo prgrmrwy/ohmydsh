@@ -264,23 +264,21 @@ describe('Pet tool schemas match the real defineTool contract', () => {
     })
   })
 
-  it('registers exactly one tool, because Pet ships no capability adapters', async () => {
+  it('registers only trusted context and the caller-bound Feishu reply adapter', async () => {
     const { readFile } = await import('node:fs/promises')
     const tools = await readFile(
       path.resolve(__dirname, '..', 'src', 'host', 'tools.ts'),
       'utf8',
     )
 
-    // A capability is an installed Skill driving ordinary DSH tools. Adding a
-    // per-capability Pet tool would put the runtime back in the business of
-    // shipping code for each capability.
-    //
-    // Comments are stripped first: the file documents the registration
-    // contract by name, and prose mentioning `ctx.tools.register()` must not
-    // be counted as a second registration.
+    // Pet still does not ship one tool per arbitrary capability. The only
+    // second adapter is security-critical: it resolves the exact current
+    // Delivery from the caller/turn proof and deliberately accepts no target.
+    // Comments are stripped so prose mentioning registration is not counted.
     const code = tools.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-    expect([...code.matchAll(/ctx\.tools\.register\(/g)]).toHaveLength(1)
+    expect([...code.matchAll(/ctx\.tools\.register\(/g)]).toHaveLength(2)
     expect(tools).toContain('PET_CONTEXT_TOOL')
+    expect(tools).toContain('PET_LOCUS_REPLY_TOOL')
     expect(tools).not.toContain('pet_create_mr')
     expect(tools).not.toContain('pet_send_cr')
     expect(tools).not.toContain('pet_clean_worktree')

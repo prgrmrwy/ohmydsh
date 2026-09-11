@@ -27,7 +27,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Storage, { storageBackendServiceKey } from '@deepseek-ai/dsh-storage'
 import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
 import * as StorageSqlite from '@deepseek-ai/dsh-storage-sqlite'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import * as petPlugin from '../src/index.js'
 import { PET_DOMAIN_NAME } from '../src/host/spec.js'
 import { ROUTES } from '../src/wire.js'
@@ -126,6 +126,10 @@ async function composeHost(): Promise<ComposedHost> {
     list: () => [],
     get: (id: string) =>
       id === 'src-1' ? { header: { cwd: '/repo' }, snapshotEvents: () => [], seq: 0 } : undefined,
+  })
+  ctx.provide('sessionController', {
+    inspect: async () => ({ session: undefined }),
+    resolveAgent: async () => undefined,
   })
   ctx.provide('sessionQuery', {
     observeSession: async () => ({
@@ -283,7 +287,14 @@ function taskOf(accepted: { data?: unknown }): string {
 interface FakeAgentContext {
   /** Service names the composition injected, in order. */
   injected: string[]
-  inject(services: string[], callback: (ctx: FakeAgentContext) => void): void
+  /** Mirrors Cordis: inject returns an awaitable fiber whose callback is async. */
+  inject(services: string[], callback: (ctx: FakeAgentContext) => void): Promise<void>
+  /**
+   * Mirrors the real `Context.get`, which resolves a service synchronously and
+   * without an inject grant. Omitting it here previously let the double accept
+   * a composition path the real runtime does not have.
+   */
+  get(service: string): unknown
   effect(fn: () => unknown): () => void
   skills: { registerProvider(create: () => unknown): () => void }
   tools: { register(definition: unknown): () => void }
@@ -300,9 +311,16 @@ interface FakeAgentContext {
 function makeAgentContext(): FakeAgentContext {
   const ctx: FakeAgentContext = {
     injected: [],
-    inject(services, callback) {
+    async inject(services, callback) {
       ctx.injected.push(...services)
+      await Promise.resolve()
       callback(ctx)
+    },
+    get(service) {
+      // Resolution only. Pet registers through `inject` so the fresh agent
+      // fiber declares its dependency; recording here would misattribute a
+      // plain probe as an installation.
+      return service === 'tools' ? ctx.tools : service === 'skills' ? ctx.skills : undefined
     },
     effect(fn) {
       fn()
@@ -315,6 +333,16 @@ function makeAgentContext(): FakeAgentContext {
 }
 
 describe('path 1: Pet creates the executor', () => {
+  it('awaits asynchronous scoped inject callbacks before publishing the Agent', async () => {
+    const host = await composeHost()
+    await registerSkill(host.routes, 'demo')
+
+    const first = await invoke(host, 'inv-async-scope')
+    expect(first.ok).toBe(true)
+    expect(host.created).toHaveLength(1)
+    expect(host.mountedPresets).toEqual(['dsh-pet-executor'])
+  })
+
   it('hands the Pet composition to Agent creation', async () => {
     const host = await composeHost()
     await registerSkill(host.routes, 'demo')
@@ -432,10 +460,17 @@ describe('path 3: DSH itself loaded the executor', () => {
     }
     host.ctx.emit('agent/created' as never, { agent: foreign } as never)
 
-    // Asserted BEFORE any dispatch: the observer alone must have installed the
+    // Asserted before any dispatch: the observer alone must install the
     // composition. Checking only that a later Invocation ran would also pass
     // on dispatch's late repair, hiding a missing observer.
-    expect(foreign.ctx.injected).toEqual(['skills', 'tools'])
+    //
+    // `inject` settles its callback asynchronously (see the integration note),
+    // so the installation completes on a later microtask rather than inside
+    // `emit`. Awaiting that is the honest assertion; requiring it synchronously
+    // would demand a registration shape the real fiber does not support.
+    await vi.waitFor(() => {
+      expect(foreign.ctx.injected).toEqual(['skills', 'tools'])
+    })
 
     host.setLiveAgent(foreign)
     expect((await invoke(host, 'inv-2')).ok).toBe(true)
@@ -468,7 +503,11 @@ describe('path 3: DSH itself loaded the executor', () => {
       host.ctx.emit('agent/created' as never, { agent: foreign } as never)
     }).not.toThrow()
 
-    // Registered exactly once.
+    // Registered exactly once, once both asynchronous installations settle.
+    await vi.waitFor(() => {
+      expect(foreign.ctx.injected).toEqual(['skills', 'tools'])
+    })
+    await new Promise(resolve => setTimeout(resolve, 50))
     expect(foreign.ctx.injected).toEqual(['skills', 'tools'])
   })
 

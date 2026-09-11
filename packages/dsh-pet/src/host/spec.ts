@@ -46,7 +46,26 @@ export const PET_DOMAIN_NAME = 'dsh_pet'
 // reference fields, and Tasks gain the `qa-chat` source kind. ADDITIVE like
 // v3→v4: no existing row references anything that disappeared, and migration
 // MUST NOT clear any table.
-export const PET_DOMAIN_VERSION = 5
+//
+// Bumped to 6 for the unified locus model. The new `loci`, `locus_indexes`,
+// `locus_deliveries`, and `locus_operations` tables are additive: ordinary Pet
+// rows (`tasks`, `invocations`, `snapshots`, `runs`, Skills, environment, and
+// channel history) remain untouched and continue to validate as before. The new
+// locus repository deliberately never reads `chat_bindings` or
+// `invocation_channel`; those legacy tables remain in the medium as preserved
+// history and are not converted, deleted, or used as a routing fallback.
+//
+// Bumped to 7 for durable source-switch notices (`locus_switch_notices`),
+// additive in the same way: one new table, nothing converted or cleared. The
+// notice has to outlive a restart because an endpoint whose source changed may
+// not dispatch ordinary work until the entry has been told; a notice held only
+// in memory would turn a crash into exactly the silent switch the spec forbids.
+// Bumped to 8 for the append-only `locus_permission_audit` table. Additive
+// in the same way: the locus row still holds the current permission, and the
+// audit rows are the history that a later downgrade would otherwise erase.
+// Bumped to 9 for owner-confirmed context anchor facts and the `anchor` WAL
+// kind. Additive: existing locus rows remain valid and no history is rewritten.
+export const PET_DOMAIN_VERSION = 9
 
 // `chat` joins the original three for Tasks created by an inbound Lark
 // message. It is a distinct scope kind rather than a flavour of `workspace`
@@ -300,6 +319,13 @@ const petChannelConfig = z.object({
       updatedAt: z.number().int(),
     })
     .optional(),
+  /** Durable owner-facing evidence that bot-added authorization was unproven. */
+  lifecycleDiagnostic: z
+    .object({
+      kind: z.literal('bot-added-unverified'),
+      updatedAt: z.number().int(),
+    })
+    .optional(),
   updatedAt: z.number().int(),
 })
 
@@ -454,6 +480,288 @@ const petInvocationChannel = z.object({
  * `initial` is non-null by contract: backends use `null` as the "never
  * written" sentinel, so a nullable global could not survive a reopen.
  */
+/**
+ * Unified locus endpoint and permission records. These schemas intentionally
+ * live beside the new tables instead of changing the legacy channel rows: the
+ * locus model is a new durable surface and does not reinterpret old bindings.
+ */
+export const petLocusEndpoint = z.object({
+  chatId: z.string().min(1).refine(value => !value.includes('\u0000'), 'chatId may not contain NUL'),
+  threadId: z
+    .string()
+    .min(1)
+    .refine(value => !value.includes('\u0000'), 'threadId may not contain NUL')
+    .optional(),
+})
+
+export const petLocusPermission = z
+  .object({
+    desired: z.enum(['read', 'write']),
+    effective: z.enum(['read', 'write']),
+    verifiedAt: z.number().int().nonnegative().optional(),
+    grantedBy: z.string().min(1).optional(),
+  })
+  .superRefine((permission, issueCtx) => {
+    if (permission.effective === 'write' && permission.desired !== 'write') {
+      issueCtx.addIssue({ code: 'custom', message: 'effective write requires desired write' })
+    }
+    if (permission.effective === 'write' && permission.verifiedAt === undefined) {
+      issueCtx.addIssue({ code: 'custom', message: 'effective write requires verifiedAt' })
+    }
+  })
+
+/** One immutable-or-transitioned generation of a unified locus association. */
+export const petLocusRecord = z.object({
+  id: z.string().min(1),
+  generation: z.number().int().positive(),
+  endpoint: petLocusEndpoint,
+  parentSessionId: z.string().min(1),
+  childSessionId: z.string().min(1).optional(),
+  workspaceId: z.string().min(1),
+  parentLocusId: z.string().min(1).optional(),
+  source: z.enum(['auto', 'inherited', 'explicit', 'qa-created']),
+  state: z.enum(['provisioning', 'active', 'switching', 'invalid', 'stopped', 'retired']),
+  permission: petLocusPermission,
+  /** Optional optimistic fence; old/new pure locus records may omit it. */
+  revision: z.number().int().nonnegative().optional(),
+  /** Confirmed caller-bound execution anchor, never inferred from cwd. */
+  contextAnchor: z
+    .object({
+      status: z.enum(['confirmed', 'missing', 'unknown']),
+      existence: z.enum(['exists', 'missing', 'unknown']).optional(),
+      authorization: z.enum(['authorized', 'unauthorized', 'unknown']).optional(),
+      executionRoot: z.string().min(1).optional(),
+      projectResources: z.array(z.string().min(1)).optional(),
+      constraints: z.array(z.string()).optional(),
+      provenance: z.string().min(1).optional(),
+      confirmedAt: z.number().int().nonnegative().optional(),
+    })
+    .optional(),
+  busy: z.boolean(),
+  createdAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
+  retiredAt: z.number().int().nonnegative().optional(),
+  stoppedAt: z.number().int().nonnegative().optional(),
+  invalidReason: z.string().optional(),
+  replacesLocusId: z.string().min(1).optional(),
+}).superRefine((record, issueCtx) => {
+  if (record.endpoint.threadId !== undefined && record.parentLocusId === undefined) {
+    issueCtx.addIssue({ code: 'custom', message: 'topic locus requires parentLocusId' })
+  }
+  if (record.endpoint.threadId === undefined && record.parentLocusId !== undefined) {
+    issueCtx.addIssue({ code: 'custom', message: 'chat-level locus cannot carry parentLocusId' })
+  }
+})
+
+/**
+ * A materialized reverse/current index. The repository treats `loci` as the
+ * source of truth and rebuilds these records on every locus mutation.
+ */
+export const petLocusIndex = z.object({
+  kind: z.enum(['endpoint-current', 'parent-loci', 'child-locus', 'default-qa']),
+  key: z.string().min(1),
+  locusIds: z.array(z.string().min(1)).min(1),
+  updatedAt: z.number().int().nonnegative(),
+})
+
+/** Durable association between one accepted platform message and one child turn. */
+export const petLocusDelivery = z.object({
+  deliveryId: z.string().min(1),
+  messageId: z.string().min(1),
+  endpoint: petLocusEndpoint,
+  locusId: z.string().min(1),
+  generation: z.number().int().positive(),
+  childSessionId: z.string().min(1),
+  senderOpenId: z.string().min(1),
+  senderName: z.string().optional(),
+  text: z.string().min(1).optional(),
+  replyTarget: petLocusEndpoint.extend({
+    messageId: z.string().min(1),
+    rootMessageId: z.string().min(1).optional(),
+  }).optional(),
+  rootMessageId: z.string().min(1).optional(),
+  replyToMessageId: z.string().min(1).optional(),
+  sequence: z.number().int().positive(),
+  status: z.enum(['accepted', 'queued', 'running', 'settled', 'failed']),
+  /** Accepted rows have no proof; queued binds execution; running/terminal bind turn. */
+  feedbackTarget: petLocusEndpoint.extend({
+    messageId: z.string().min(1),
+    rootMessageId: z.string().min(1).optional(),
+  }),
+  acceptedAt: z.number().int().nonnegative().optional(),
+  queuedAt: z.number().int().nonnegative().optional(),
+  startedAt: z.number().int().nonnegative().optional(),
+  settledAt: z.number().int().nonnegative().optional(),
+  failedAt: z.number().int().nonnegative().optional(),
+  failureReason: z.string().optional(),
+  /** Sender facts are retained; message bodies and history are not. */
+  /** Optional host-proven turn/execution identity for settlement correlation. */
+  turnId: z.string().min(1).optional(),
+  executionId: z.string().min(1).optional(),
+  dispatchId: z.string().min(1).optional(),
+  inProgressReactionId: z.string().min(1).optional(),
+  terminalFeedbackAt: z.number().int().nonnegative().optional(),
+  terminalFeedbackError: z.string().optional(),
+}).superRefine((delivery, issueCtx) => {
+  const hasExecution = delivery.executionId !== undefined
+  const hasTurn = delivery.turnId !== undefined
+  if (delivery.status === 'accepted' && (hasExecution || hasTurn)) {
+    issueCtx.addIssue({ code: 'custom', message: 'accepted Delivery cannot carry execution or turn proof' })
+  }
+  if (delivery.status === 'queued' && (!hasExecution || hasTurn || delivery.queuedAt === undefined)) {
+    issueCtx.addIssue({ code: 'custom', message: 'queued Delivery requires execution proof and queuedAt, but no turn proof' })
+  }
+  if ((delivery.status === 'running' || delivery.status === 'settled' || delivery.status === 'failed') &&
+      (!hasExecution || !hasTurn)) {
+    issueCtx.addIssue({ code: 'custom', message: 'running/terminal Delivery requires execution and turn proof' })
+  }
+  const root = delivery.rootMessageId ?? delivery.replyTarget?.rootMessageId ?? delivery.feedbackTarget.rootMessageId
+  if ((delivery.status === 'accepted' || delivery.status === 'queued') &&
+      (delivery.startedAt !== undefined || delivery.settledAt !== undefined || delivery.failedAt !== undefined)) {
+    issueCtx.addIssue({ code: 'custom', message: 'pre-turn Delivery cannot carry started or terminal timestamps' })
+  }
+  if ((delivery.status === 'settled' || delivery.status === 'failed') && delivery.settledAt === undefined && delivery.failedAt === undefined) {
+    issueCtx.addIssue({ code: 'custom', message: 'terminal Delivery requires a terminal timestamp' })
+  }
+  if (delivery.queuedAt !== undefined && delivery.acceptedAt !== undefined && delivery.queuedAt < delivery.acceptedAt) {
+    issueCtx.addIssue({ code: 'custom', message: 'queuedAt must not precede acceptedAt' })
+  }
+  if (delivery.startedAt !== undefined && delivery.queuedAt !== undefined && delivery.startedAt < delivery.queuedAt) {
+    issueCtx.addIssue({ code: 'custom', message: 'startedAt must not precede queuedAt' })
+  }
+  const terminalAt = delivery.settledAt ?? delivery.failedAt
+  if (terminalAt !== undefined && delivery.startedAt !== undefined && terminalAt < delivery.startedAt) {
+    issueCtx.addIssue({ code: 'custom', message: 'terminal timestamp must not precede startedAt' })
+  }
+  if (delivery.rootMessageId !== undefined && delivery.replyTarget?.rootMessageId !== undefined &&
+      delivery.rootMessageId !== delivery.replyTarget.rootMessageId) {
+    issueCtx.addIssue({ code: 'custom', message: 'Delivery rootMessageId conflicts with replyTarget' })
+  }
+  if (delivery.rootMessageId !== undefined && delivery.feedbackTarget.rootMessageId !== undefined &&
+      delivery.rootMessageId !== delivery.feedbackTarget.rootMessageId) {
+    issueCtx.addIssue({ code: 'custom', message: 'Delivery rootMessageId conflicts with feedbackTarget' })
+  }
+  if (root !== undefined && delivery.replyTarget?.rootMessageId !== undefined && root !== delivery.replyTarget.rootMessageId) {
+    issueCtx.addIssue({ code: 'custom', message: 'Delivery reply root is inconsistent' })
+  }
+  if (delivery.replyTarget !== undefined &&
+      (delivery.replyTarget.chatId !== delivery.endpoint.chatId ||
+       (delivery.replyTarget.threadId ?? undefined) !== (delivery.endpoint.threadId ?? undefined) ||
+       delivery.replyTarget.messageId !== delivery.messageId)) {
+    issueCtx.addIssue({ code: 'custom', message: 'Delivery replyTarget must derive from endpoint/message' })
+  }
+  if (delivery.feedbackTarget.chatId !== delivery.endpoint.chatId ||
+      (delivery.feedbackTarget.threadId ?? undefined) !== (delivery.endpoint.threadId ?? undefined) ||
+      delivery.feedbackTarget.messageId !== delivery.messageId) {
+    issueCtx.addIssue({ code: 'custom', message: 'Delivery feedbackTarget must derive from endpoint/message' })
+  }
+})
+
+/**
+ * One source-switch notice an endpoint is still owed.
+ *
+ * Keyed by locus generation, because a later switch supersedes an earlier
+ * one's debt rather than merging with it. While a row exists the generation
+ * must not dispatch ordinary work: answering before the entry has been told
+ * would present a different source as if nothing had changed.
+ */
+export const petLocusSwitchNotice = z.object({
+  locusId: z.string().min(1),
+  generation: z.number().int().positive(),
+  endpoint: petLocusEndpoint,
+  /** Rendered once at switch time so a retry cannot reword it. */
+  text: z.string().min(1),
+  createdAt: z.number().int().nonnegative(),
+  attempts: z.number().int().nonnegative(),
+  lastError: z.string().optional(),
+})
+
+/**
+ * One append-only permission-grant record.
+ *
+ * The locus itself keeps only the CURRENT permission, which cannot answer
+ * "who granted write, when, and was it ever actually in effect" after a later
+ * downgrade overwrote it. Sharing a work root is exactly the decision that
+ * needs an auditable trail, so each accepted change appends a row here.
+ *
+ * Append-only by contract: rows are never rewritten or deleted, and a
+ * rebuilt/replaced generation gets its own rows rather than inheriting any.
+ */
+export const petLocusPermissionAudit = z.object({
+  /** `<locusId>\u0000<generation>\u0000<sequence>`; stable and sortable. */
+  id: z.string().min(1),
+  locusId: z.string().min(1),
+  generation: z.number().int().positive(),
+  /** Monotonic per locus generation, so ordering never depends on the clock. */
+  sequence: z.number().int().positive(),
+  /** What the owner asked for. */
+  desired: z.enum(['read', 'write']),
+  /** What the Host actually verified; a refused escalation records `read`. */
+  effective: z.enum(['read', 'write']),
+  /** Host-derived operator; never taken from a browser body. */
+  grantedBy: z.string().min(1),
+  verifiedAt: z.number().int().nonnegative(),
+  /** Present when the request was not granted as asked. */
+  refusedReason: z.string().optional(),
+})
+
+/** A durable WAL/compensation record for multi-table locus operations. */
+export const petLocusOperation = z.object({
+  id: z.string().min(1),
+  kind: z.enum([
+    'ensure',
+    'ensure-default-qa',
+    'replace',
+    'rebuild',
+    'busy',
+    'stop',
+    'retire',
+    'invalidate',
+    'permission',
+    'anchor',
+    'delivery',
+  ]),
+  phase: z.enum([
+    'prepared',
+    'provisioning',
+    'publishing',
+    'committed',
+    'failed',
+    'compensating',
+    'compensated',
+    'needs-recovery',
+  ]),
+  locusId: z.string().min(1).optional(),
+  oldLocusId: z.string().min(1).optional(),
+  newLocusId: z.string().min(1).optional(),
+  /** Concrete mutation label retained in the WAL beside the broad kind. */
+  operation: z.string().min(1).optional(),
+  deliveryId: z.string().min(1).optional(),
+  oldDeliveryId: z.string().min(1).optional(),
+  newDeliveryId: z.string().min(1).optional(),
+  expectedRevision: z.number().int().nonnegative().optional(),
+  endpointKey: z.string().min(1).optional(),
+  /** Stable hashes for idempotent begin/commit retries with the same id. */
+  provisioningIntentHash: z.string().min(1).optional(),
+  commitIntentHash: z.string().min(1).optional(),
+  resourceRefs: z
+    .object({
+      chatId: z.string().min(1).optional(),
+      threadId: z.string().min(1).optional(),
+      parentSessionId: z.string().min(1).optional(),
+      mainSessionId: z.string().min(1).optional(),
+      childSessionId: z.string().min(1).optional(),
+      workspaceId: z.string().min(1).optional(),
+    })
+    .optional(),
+  step: z.number().int().nonnegative(),
+  attempts: z.number().int().nonnegative(),
+  lastError: z.string().optional(),
+  createdAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
+  completedAt: z.number().int().nonnegative().optional(),
+})
+
 const petGlobalState = z.object({
   /** Bumped whenever the enabled skill selection changes. */
   skillSetGeneration: z.number().int().nonnegative(),
@@ -512,6 +820,15 @@ export const petDomainSpec = defineDomain({
     chat_bindings: domainTable<string, z.infer<typeof petChatBinding>>(petChatBinding),
     invocation_channel:
       domainTable<string, z.infer<typeof petInvocationChannel>>(petInvocationChannel),
+    // Unified locus storage is deliberately additive. The legacy channel tables
+    // above remain declared so existing rows can be opened and preserved; the
+    // locus adapter below never reads or mutates them.
+    loci: domainTable<string, z.infer<typeof petLocusRecord>>(petLocusRecord),
+    locus_indexes: domainTable<string, z.infer<typeof petLocusIndex>>(petLocusIndex),
+    locus_deliveries: domainTable<string, z.infer<typeof petLocusDelivery>>(petLocusDelivery),
+    locus_operations: domainTable<string, z.infer<typeof petLocusOperation>>(petLocusOperation),
+    locus_switch_notices: domainTable<string, z.infer<typeof petLocusSwitchNotice>>(petLocusSwitchNotice),
+    locus_permission_audit: domainTable<string, z.infer<typeof petLocusPermissionAudit>>(petLocusPermissionAudit),
   },
 })
 
@@ -529,6 +846,16 @@ export type PetChatBinding = z.infer<typeof petChatBinding>
 
 /** Trusted reply target for one channel-triggered Invocation. */
 export type PetInvocationChannel = z.infer<typeof petInvocationChannel>
+
+/** Unified locus records and persistence payloads. */
+export type PetLocusEndpoint = z.infer<typeof petLocusEndpoint>
+export type PetLocusPermission = z.infer<typeof petLocusPermission>
+export type PetLocusRecord = z.infer<typeof petLocusRecord>
+export type PetLocusIndex = z.infer<typeof petLocusIndex>
+export type PetLocusDelivery = z.infer<typeof petLocusDelivery>
+export type PetLocusOperation = z.infer<typeof petLocusOperation>
+export type PetLocusSwitchNotice = z.infer<typeof petLocusSwitchNotice>
+export type PetLocusPermissionAudit = z.infer<typeof petLocusPermissionAudit>
 
 
 /**

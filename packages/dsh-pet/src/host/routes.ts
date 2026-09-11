@@ -21,6 +21,10 @@ import type { PetLifecycleMachine } from './lifecycle.js'
 import type { PetPaths } from './paths.js'
 import { detectProjectionDrift, rebuildProjection } from './projection.js'
 import type { PetRepository } from './repository.js'
+import {
+  LocusManagementError,
+  type LocusManagementPort,
+} from './locus/management.js'
 import { inspectBundle } from './skill-bundle.js'
 import { currentAllowlist } from './skill-provider.js'
 import { PET_ENV_PREFIX } from './shell-env.js'
@@ -32,9 +36,16 @@ import {
   type PetChannelPhase,
   type PetChannelView,
   type PetChatRoute,
-  type PetQaGroupResult,
+  type PetUnifiedLocusReadiness,
   type PetSourceKind,
   type PetWorkspaceChoice,
+  LOCUS_ROUTES,
+  type PetLocusActionRequest,
+  type PetLocusDiscoveryRequest,
+  type PetLocusEndpointInput,
+  type PetLocusEndpointView,
+  type PetLocusManagementView,
+  type PetLocusView,
 } from '../wire.js'
 
 /** Everything the routes read from the Host. */
@@ -73,16 +84,19 @@ export interface RouteDeps {
    * the settings tab reports it unavailable instead of the Host failing.
    */
   readonly channel?: ChannelControl
+  /** Unified locus management capability; absent routes fail closed. */
+  readonly locus?: LocusManagementPort
   /**
-   * Runs the Q&A action, when this Host has the subagent seam.
+   * Owner-facing message -> generation -> child -> execution chains.
    *
-   * Absent means the wheel entry is disabled with a reason; the route then
-   * refuses rather than pretending to have created anything.
+   * Absent when this Host composed no unified locus, which is why the
+   * diagnostics payload omits the field entirely rather than reporting an
+   * empty list: "no unified entries" and "not available here" need different
+   * answers. Implementations must not include message text or credentials.
    */
-  readonly createQaGroup?: (source: {
-    sessionId: string
-    title?: string
-  }) => Promise<PetQaGroupResult>
+  readonly locusDiagnostics?: () => Promise<unknown> | unknown
+  /** Host-authenticated operator identity; never read from request bodies. */
+  readonly locusIdentity?: () => { readonly actorId?: string } | undefined
 }
 
 /** What the channel routes drive. */
@@ -93,6 +107,8 @@ export interface ChannelControl {
     diagnostic?: string
     permission?: { code?: number; missingScopes: readonly string[]; consoleUrl?: string }
     identityDiagnostic?: string
+    /** Fail-closed proof for the unified child-session execution path. */
+    unifiedLocus?: PetUnifiedLocusReadiness
   }
   /** Whether a configured workspace still resolves in the Host registry. */
   workspaceAvailable?(workspaceId: string): boolean
@@ -169,6 +185,12 @@ function channelView(
   }
 
   const status = channel?.status() ?? { phase: 'stopped' as const }
+  const unifiedLocus: PetUnifiedLocusReadiness = status.unifiedLocus ?? {
+    childSession: 'unavailable',
+    defaultPermission: 'read',
+    readVerification: 'unavailable',
+    diagnostic: '当前 Host 尚未核验统一子会话与默认只读策略。',
+  }
   const binding = channel?.bindState()
   const blockers: PetChannelBlocker[] = []
   if (config.botAppId === undefined) {
@@ -180,9 +202,15 @@ function channelView(
     blockers.push({ code: 'allowlist-empty', message: '请先添加至少一位允许触发的成员。' })
   }
   if (config.defaultWorkspaceId === undefined) {
-    blockers.push({ code: 'default-workspace-missing', message: '请选择默认工作区。' })
+    blockers.push({ code: 'default-workspace-missing', message: '请选择自动主会话的默认工作区。' })
   } else if (channel?.workspaceAvailable?.(config.defaultWorkspaceId) === false) {
     blockers.push({ code: 'default-workspace-unavailable', message: '默认工作区已不可用，请重新选择。' })
+  }
+  if (unifiedLocus.childSession !== 'verified' || unifiedLocus.readVerification !== 'verified') {
+    blockers.push({
+      code: 'unified-locus-unavailable',
+      message: unifiedLocus.diagnostic ?? '统一子会话或默认只读策略尚未通过 Host 核验。',
+    })
   }
   if (status.identityDiagnostic !== undefined) {
     blockers.push({ code: 'profile-unavailable', message: status.identityDiagnostic })
@@ -214,6 +242,7 @@ function channelView(
       ? { defaultWorkspaceId: config.defaultWorkspaceId }
       : {}),
     routes,
+    unifiedLocus,
     onboarding: {
       ready: blockers.length === 0,
       steps: [
@@ -222,10 +251,17 @@ function channelView(
         { id: 'allowlist', label: '配置允许成员', complete: config.allowOpenIds.length > 0 },
         {
           id: 'workspace',
-          label: '选择默认工作区',
+          label: '选择自动主会话的默认工作区',
           complete:
             config.defaultWorkspaceId !== undefined &&
             channel?.workspaceAvailable?.(config.defaultWorkspaceId) !== false,
+        },
+        {
+          id: 'locus',
+          label: '核验统一子会话与默认只读策略',
+          complete:
+            unifiedLocus.childSession === 'verified' &&
+            unifiedLocus.readVerification === 'verified',
         },
         {
           id: 'subscription',
@@ -267,6 +303,153 @@ function requireReady(lifecycle: PetLifecycleMachine): void {
   }
 }
 
+const LOCUS_FENCE_FIELDS = ['expectedGeneration', 'expectedLocusId', 'expectedUpdatedAt'] as const
+const LOCUS_ACTION_FIELDS: Readonly<Record<PetLocusActionRequest['action'], readonly string[]>> = {
+  bind: ['action', 'endpoint', 'parentSessionId', 'workspaceId', 'parentLocusId', ...LOCUS_FENCE_FIELDS],
+  unbind: ['action', 'endpoint', 'locusId', ...LOCUS_FENCE_FIELDS],
+  scope: ['action', 'locusId', 'mode', ...LOCUS_FENCE_FIELDS],
+  'confirm-anchor': [
+    'action', 'endpoint', 'locusId', 'executionRoot', 'projectResources', 'constraints', 'existence',
+    ...LOCUS_FENCE_FIELDS,
+  ],
+  rebuild: ['action', 'endpoint', 'parentSessionId', 'workspaceId', 'parentLocusId', 'asDefaultQa', ...LOCUS_FENCE_FIELDS],
+  archive: ['action', 'endpoint', 'locusId', ...LOCUS_FENCE_FIELDS],
+  stop: ['action', 'endpoint', 'locusId', ...LOCUS_FENCE_FIELDS],
+}
+
+function optionalFiniteInteger(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key]
+  if (value === undefined) return undefined
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new PetError('INVALID_REQUEST', `${key} must be a non-negative safe integer`)
+  }
+  return value
+}
+
+function optionalBoolean(record: Record<string, unknown>, key: string): boolean | undefined {
+  const value = record[key]
+  if (value === undefined) return undefined
+  if (typeof value !== 'boolean') throw new PetError('INVALID_REQUEST', `${key} must be a boolean`)
+  return value
+}
+
+function optionalStringArray(record: Record<string, unknown>, key: string): readonly string[] | undefined {
+  const value = record[key]
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.some(item => typeof item !== 'string' || item.trim() === '')) {
+    throw new PetError('INVALID_REQUEST', `${key} must be an array of non-empty strings`)
+  }
+  return value.map(item => String(item).trim())
+}
+
+function locusEndpointInput(value: unknown): PetLocusEndpointInput {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new PetError('INVALID_REQUEST', 'endpoint must be an object')
+  }
+  const record = value as Record<string, unknown>
+  for (const key of Object.keys(record)) {
+    if (key !== 'chatId' && key !== 'threadId') {
+      throw new PetError('INVALID_REQUEST', `Unknown endpoint field '${key}'`)
+    }
+  }
+  const threadId = optionalString(record, 'threadId')
+  const chatId = requireString(record, 'chatId').trim()
+  const normalizedThreadId = threadId?.trim()
+  if (chatId.includes('\u0000') || normalizedThreadId?.includes('\u0000') === true) {
+    throw new PetError('INVALID_REQUEST', 'endpoint identifiers may not contain NUL')
+  }
+  return {
+    chatId,
+    ...(normalizedThreadId === undefined ? {} : { threadId: normalizedThreadId }),
+  }
+}
+
+function parseLocusAction(body: unknown, expectedAction?: PetLocusActionRequest['action']): PetLocusActionRequest {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    throw new PetError('INVALID_REQUEST', 'Request body must be a JSON object')
+  }
+  const action = requireString(body as Record<string, unknown>, 'action')
+  if (action !== 'bind' && action !== 'unbind' && action !== 'scope' && action !== 'confirm-anchor' && action !== 'rebuild' && action !== 'archive' && action !== 'stop') {
+    throw new PetError('INVALID_REQUEST', `Unknown locus action '${action}'`)
+  }
+  if (expectedAction !== undefined && action !== expectedAction) {
+    throw new PetError('INVALID_REQUEST', `Expected locus action '${expectedAction}'`)
+  }
+  const record = strictBody(body, LOCUS_ACTION_FIELDS[action])
+  const expectedGeneration = optionalFiniteInteger(record, 'expectedGeneration')
+  const expectedUpdatedAt = optionalFiniteInteger(record, 'expectedUpdatedAt')
+  const expectedLocusId = optionalString(record, 'expectedLocusId')
+  const fence = {
+    ...(expectedGeneration === undefined ? {} : { expectedGeneration }),
+    ...(expectedLocusId === undefined ? {} : { expectedLocusId: expectedLocusId.trim() }),
+    ...(expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt }),
+  }
+  switch (action) {
+    case 'bind':
+      return {
+        action,
+        endpoint: locusEndpointInput(record['endpoint']),
+        parentSessionId: requireString(record, 'parentSessionId').trim(),
+        ...(optionalString(record, 'workspaceId') === undefined ? {} : { workspaceId: optionalString(record, 'workspaceId')!.trim() }),
+        ...(optionalString(record, 'parentLocusId') === undefined ? {} : { parentLocusId: optionalString(record, 'parentLocusId')!.trim() }),
+        ...fence,
+      }
+    case 'rebuild': {
+      const asDefaultQa = optionalBoolean(record, 'asDefaultQa')
+      return {
+        action,
+        endpoint: locusEndpointInput(record['endpoint']),
+        parentSessionId: requireString(record, 'parentSessionId').trim(),
+        ...(optionalString(record, 'workspaceId') === undefined ? {} : { workspaceId: optionalString(record, 'workspaceId')!.trim() }),
+        ...(optionalString(record, 'parentLocusId') === undefined ? {} : { parentLocusId: optionalString(record, 'parentLocusId')!.trim() }),
+        ...(asDefaultQa === undefined ? {} : { asDefaultQa }),
+        ...fence,
+      }
+    }
+    case 'unbind':
+      return {
+        action,
+        locusId: requireString(record, 'locusId').trim(),
+        endpoint: locusEndpointInput(record['endpoint']),
+        ...fence,
+      }
+    case 'scope': {
+      const mode = requireString(record, 'mode')
+      if (mode !== 'read' && mode !== 'write') throw new PetError('INVALID_REQUEST', 'mode must be read or write')
+      return { action, locusId: requireString(record, 'locusId').trim(), mode, ...fence }
+    }
+    case 'confirm-anchor': {
+      const existence = optionalString(record, 'existence')
+      if (existence !== undefined && existence !== 'exists' && existence !== 'missing' && existence !== 'unknown') {
+        throw new PetError('INVALID_REQUEST', 'existence must be exists, missing, or unknown')
+      }
+      const executionRoot = optionalString(record, 'executionRoot')?.trim()
+      return {
+        action,
+        locusId: requireString(record, 'locusId').trim(),
+        endpoint: locusEndpointInput(record['endpoint']),
+        ...(executionRoot === undefined ? {} : { executionRoot }),
+        ...(optionalStringArray(record, 'projectResources') === undefined
+          ? {}
+          : { projectResources: optionalStringArray(record, 'projectResources')! }),
+        ...(optionalStringArray(record, 'constraints') === undefined
+          ? {}
+          : { constraints: optionalStringArray(record, 'constraints')! }),
+        ...(existence === undefined ? {} : { existence }),
+        ...fence,
+      }
+    }
+    case 'archive':
+    case 'stop':
+      return {
+        action,
+        locusId: requireString(record, 'locusId').trim(),
+        endpoint: locusEndpointInput(record['endpoint']),
+        ...fence,
+      }
+  }
+}
+
 /**
  * Build every Pet management route.
  * @param deps - Host dependencies.
@@ -275,7 +458,166 @@ function requireReady(lifecycle: PetLifecycleMachine): void {
 export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
   const { repository, capabilities, coordinator, lifecycle, paths } = deps
 
+  const locusUnavailable = (): never => {
+    throw new PetError('LOCUS_UNAVAILABLE', 'Unified locus management is unavailable in this Host.')
+  }
+  const requireLocusActor = (): string => {
+    const actorId = deps.locusIdentity?.()?.actorId?.trim()
+    if (actorId === undefined || actorId === '') {
+      throw new PetError('LOCUS_UNAVAILABLE', 'Host owner identity is unavailable.')
+    }
+    return actorId
+  }
+  const invokeLocus = async <T>(operation: string, run: () => T | Promise<T>): Promise<T> => {
+    try {
+      return await run()
+    } catch (error) {
+      if (error instanceof LocusManagementError) {
+        const code = error.code === 'CAPABILITY_UNAVAILABLE' || error.code === 'ACTION_UNAVAILABLE'
+          ? 'LOCUS_UNAVAILABLE'
+          : error.code === 'LOCUS_NOT_FOUND'
+            ? 'LOCUS_NOT_FOUND'
+            : error.code === 'LOCUS_BUSY'
+              ? 'LOCUS_BUSY'
+              : error.code === 'LOCUS_INVALID'
+                ? 'LOCUS_INVALID'
+                : error.code === 'LOCUS_STOPPED'
+                  ? 'LOCUS_STOPPED'
+                  : error.code === 'REVISION_CONFLICT'
+                  ? 'LOCUS_CONFLICT'
+                  : error.code === 'INVALID_REQUEST'
+                    ? 'INVALID_REQUEST'
+                    : 'INTERNAL'
+        throw new PetError(code, `${operation}：${error.message}`)
+      }
+      throw error
+    }
+  }
+  const requireLocus = (): LocusManagementPort => deps.locus ?? locusUnavailable()
+
   return [
+    petRoute(LOCUS_ROUTES.view, async () => {
+      requireReady(lifecycle)
+      requireLocusActor()
+      return invokeLocus('读取 locus', () => requireLocus().view())
+    }),
+    petRoute(LOCUS_ROUTES.discovery, async ({ body }) => {
+      const record = strictBody(body, ['endpoint', 'parentSessionId', 'childSessionId'])
+      const endpoint = record['endpoint']
+      const parentSessionId = record['parentSessionId']
+      const childSessionId = record['childSessionId']
+      const selectorCount = [endpoint, parentSessionId, childSessionId].filter(value => value !== undefined).length
+      if (selectorCount !== 1) {
+        throw new PetError('INVALID_REQUEST', 'Exactly one locus discovery selector is required')
+      }
+      requireReady(lifecycle)
+      requireLocusActor()
+      if (endpoint !== undefined) {
+        if (typeof endpoint !== 'object' || endpoint === null || Array.isArray(endpoint)) {
+          throw new PetError('INVALID_REQUEST', 'endpoint must be an object')
+        }
+        const candidate = endpoint as Record<string, unknown>
+        for (const key of Object.keys(candidate)) {
+          if (key !== 'chatId' && key !== 'threadId') {
+            throw new PetError('INVALID_REQUEST', `Unknown endpoint field '${key}'`)
+          }
+        }
+        const threadId = optionalString(candidate, 'threadId')
+        const chatId = requireString(candidate, 'chatId')
+        if (chatId.includes('\u0000') || threadId?.includes('\u0000') === true) {
+          throw new PetError('INVALID_REQUEST', 'endpoint identifiers may not contain NUL')
+        }
+        return invokeLocus('查询 locus endpoint', () => requireLocus().discovery({ endpoint: {
+          chatId,
+          ...(threadId === undefined ? {} : { threadId }),
+        } }))
+      }
+      if (typeof parentSessionId === 'string' && parentSessionId.trim() !== '') {
+        return invokeLocus('查询 locus parent', () => requireLocus().discovery({ parentSessionId: parentSessionId.trim() }))
+      }
+      if (typeof childSessionId === 'string' && childSessionId.trim() !== '') {
+        return invokeLocus('查询 locus child', () => requireLocus().discovery({ childSessionId: childSessionId.trim() }))
+      }
+      throw new PetError('INVALID_REQUEST', 'Discovery selector must be a non-empty string')
+    }),
+    petRoute(LOCUS_ROUTES.defaultQa, async ({ body }) => {
+      const record = strictBody(body, ['parentSessionId', 'groupName'])
+      requireReady(lifecycle)
+      const handler = requireLocus().defaultQa
+      if (handler === undefined) return locusUnavailable()
+      const actorId = requireLocusActor()
+      return invokeLocus('创建或打开默认 Q&A', () => handler({
+        parentSessionId: requireString(record, 'parentSessionId'),
+        actorId,
+        ...(typeof record['groupName'] === 'string' ? { groupName: record['groupName'] } : {}),
+      }, { actorId }))
+    }),
+    petRoute(LOCUS_ROUTES.action, async ({ body }) => {
+      const request = parseLocusAction(body)
+      requireReady(lifecycle)
+      const handler = requireLocus().action
+      if (handler === undefined) return locusUnavailable()
+      return invokeLocus(`执行 locus ${request.action}`, () => handler(request, {
+        actorId: requireLocusActor(),
+      }))
+    }),
+    petRoute(LOCUS_ROUTES.bind, async ({ body }) => {
+      const request = parseLocusAction(body, 'bind')
+      requireReady(lifecycle)
+      const handler = requireLocus().bind
+      if (handler === undefined) return locusUnavailable()
+      return invokeLocus('绑定 locus', () => handler(
+        request as Extract<PetLocusActionRequest, { action: 'bind' }>,
+        { actorId: requireLocusActor() },
+      ))
+    }),
+    petRoute(LOCUS_ROUTES.unbind, async ({ body }) => {
+      const request = parseLocusAction(body, 'unbind')
+      requireReady(lifecycle)
+      const handler = requireLocus().unbind
+      if (handler === undefined) return locusUnavailable()
+      return invokeLocus('解除 locus', () => handler(
+        request as Extract<PetLocusActionRequest, { action: 'unbind' }>,
+        { actorId: requireLocusActor() },
+      ))
+    }),
+    petRoute(LOCUS_ROUTES.scope, async ({ body }) => {
+      const request = parseLocusAction(body, 'scope')
+      requireReady(lifecycle)
+      const handler = requireLocus().scope
+      if (handler === undefined) return locusUnavailable()
+      return invokeLocus('修改 locus 权限', () => handler(
+        request as Extract<PetLocusActionRequest, { action: 'scope' }>,
+        { actorId: requireLocusActor() },
+      ))
+    }),
+    petRoute(LOCUS_ROUTES.rebuild, async ({ body }) => {
+      const request = parseLocusAction(body, 'rebuild')
+      requireReady(lifecycle)
+      const handler = requireLocus().rebuild
+      if (handler === undefined) return locusUnavailable()
+      return invokeLocus('重建 locus', () => handler(
+        request as Extract<PetLocusActionRequest, { action: 'rebuild' }>,
+        { actorId: requireLocusActor() },
+      ))
+    }),
+    petRoute(LOCUS_ROUTES.archive, async ({ body }) => {
+      const request = parseLocusAction(body, 'archive')
+      requireReady(lifecycle)
+      const port = requireLocus()
+      const handler = port.archive ?? port.action
+      if (handler === undefined) return locusUnavailable()
+      return invokeLocus('归档 locus', () => handler(request as never, { actorId: requireLocusActor() }))
+    }),
+    petRoute(LOCUS_ROUTES.stop, async ({ body }) => {
+      const request = parseLocusAction(body, 'stop')
+      requireReady(lifecycle)
+      const port = requireLocus()
+      const handler = port.stop ?? port.action
+      if (handler === undefined) return locusUnavailable()
+      return invokeLocus('停止 locus', () => handler(request as never, { actorId: requireLocusActor() }))
+    }),
+
     petRoute(ROUTES.status, async ({ body }) => {
       const record = strictBody(body, ['seenGeneration'])
       const seen = record['seenGeneration']
@@ -343,7 +685,7 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
       // "unset" to a reader using `??`, and DSH rejects it as a preset name.
       const rawPreset = optionalString(record, 'agentPreset')
       const agentPreset = rawPreset?.trim() === '' ? undefined : rawPreset
-      const updated = await repository.updateGlobal(current => ({
+      await repository.updateGlobal(current => ({
         ...current,
         ...(agentPreset !== undefined ? { agentPreset } : {}),
         ...(policy !== undefined ? { defaultContextPolicy: policy } : {}),
@@ -352,12 +694,17 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
           ? { appearance: { ...(current.appearance ?? {}), ...appearance } }
           : {}),
       }))
+      // Re-read the durable projection instead of echoing the request: a
+      // rejected or normalized field must never be reported as stored.
+      const updated = repository.global
+      const followed = deps.followedModel?.()
       return {
-        providerId: updated.providerId,
-        modelId: updated.modelId,
+        providerId: followed?.providerId,
+        modelId: followed?.modelId,
         agentPreset: updated.agentPreset,
         appearance: updated.appearance,
         defaultContextPolicy: updated.defaultContextPolicy,
+        workspaceId: updated.workspaceId,
       }
     }),
 
@@ -542,28 +889,6 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
       }
     }),
 
-    petRoute(ROUTES.qaGroupCreate, async ({ body }) => {
-      requireReady(lifecycle)
-      const record = strictBody(body, ['sourceSessionId', 'sessionTitle'])
-      const run = deps.createQaGroup
-      if (run === undefined) {
-        throw new PetError(
-          'INVALID_REQUEST',
-          '此 DSH Host 不支持答疑群（缺少 subagent 能力或飞书通道未就绪）。',
-        )
-      }
-      // A QA group is always rooted in a real session: the child is a fork of
-      // it, so a workspace or independent source has nothing to inherit.
-      const sourceSessionId = requireString(record, 'sourceSessionId')
-      const sessionTitle = optionalString(record, 'sessionTitle')
-      const result = await run({
-        sessionId: sourceSessionId,
-        ...(sessionTitle !== undefined ? { title: sessionTitle } : {}),
-      })
-      deps.changes.publish()
-      return result
-    }),
-
     petRoute(ROUTES.invocationCreate, async ({ body }) => {
       requireReady(lifecycle)
       const record = strictBody(body, [
@@ -733,6 +1058,19 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
             deps.channel?.workspaceAvailable?.(defaultWorkspaceId) === false
           ) {
             throw new PetError('BINDING_INVALID', 'The default workspace is unavailable.')
+          }
+          if (enabled) {
+            const unifiedLocus = deps.channel?.status().unifiedLocus
+            if (
+              unifiedLocus?.childSession !== 'verified' ||
+              unifiedLocus.readVerification !== 'verified'
+            ) {
+              throw new PetError(
+                'BINDING_INVALID',
+                unifiedLocus?.diagnostic ??
+                  'Verify unified child-session creation and the effective read policy before enabling.',
+              )
+            }
           }
           await repository.updateChannelConfig(current => ({
             ...current,
@@ -914,6 +1252,12 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
             : {}),
           pendingQuestions: repository.countPendingChannelForChat(binding.chatId),
         })),
+      // Unified locus chains: message -> generation -> child -> execution.
+      // Absent when this Host composed no locus diagnostics, so the field
+      // distinguishes "no unified entries" from "not available here".
+      ...(deps.locusDiagnostics === undefined
+        ? {}
+        : { locus: await deps.locusDiagnostics() }),
     })),
   ]
 }

@@ -141,7 +141,7 @@ export function requireString(record: Record<string, unknown>, key: string): str
       [key]: 'required',
     })
   }
-  return value
+  return value.trim()
 }
 
 /**
@@ -159,7 +159,8 @@ export function optionalString(
   if (typeof value !== 'string') {
     throw new PetError('INVALID_REQUEST', `Field '${key}' must be a string`, { [key]: 'invalid' })
   }
-  return value
+  const trimmed = value.trim()
+  return trimmed === '' ? undefined : trimmed
 }
 
 /** Keys whose values must never be echoed back to a client. */

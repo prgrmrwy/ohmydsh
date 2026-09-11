@@ -19,7 +19,7 @@ import { createScope } from '@deepseek-ai/dsh-scope'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import { PET_CONTEXT_TOOL } from '../src/host/context-tool.js'
-import { registerPetTools } from '../src/host/tools.js'
+import { PET_LOCUS_REPLY_TOOL, registerPetTools } from '../src/host/tools.js'
 import type { PetRepository } from '../src/host/repository.js'
 import { openPetHarness, type PetHarness } from './harness.js'
 
@@ -92,6 +92,32 @@ describe('the Pet trusted-context tool is scoped to Pet executors', () => {
     await installOnScope(scope.ctx, harness.repository)
 
     expect(visibleTools(ctx, key)).toContain(PET_CONTEXT_TOOL)
+  })
+
+  it('publishes the locus reply tool only when a caller-bound reply port is installed', async () => {
+    harness = await openPetHarness()
+    const ctx = await hostContext()
+    const key = {} as never
+    const scope = createScope(ctx, key)
+    await new Promise<void>((resolve, reject) => {
+      scope.ctx.inject(['tools'], toolCtx => {
+        try {
+          registerPetTools(toolCtx, {
+            repository: harness!.repository,
+            locusRepository: { findByChildSessionId: () => [] },
+            locusReply: {
+              locusRepository: { findByChildSessionId: () => [] },
+              lark: { reply: async () => {}, replyExact: async () => {} },
+            },
+          })
+          resolve()
+        } catch (error) {
+          reject(error)
+        }
+      })
+    })
+    expect(visibleTools(ctx, key)).toContain(PET_LOCUS_REPLY_TOOL)
+    expect(visibleTools(ctx)).not.toContain(PET_LOCUS_REPLY_TOOL)
   })
 
   it('is absent from an unrelated agent scope', async () => {

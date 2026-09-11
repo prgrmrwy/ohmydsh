@@ -27,9 +27,14 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { executePetContext, PET_CONTEXT_TOOL } from './context-tool.js'
+import {
+  executePetContext,
+  PET_CONTEXT_TOOL,
+  type PetContextDependencies,
+} from './context-tool.js'
 import { PetError } from './errors.js'
 import type { PetRepository } from './repository.js'
+import type { LarkClient } from './channel/lark.js'
 
 
 
@@ -37,6 +42,14 @@ import type { PetRepository } from './repository.js'
  * Zero-argument by contract: there is no selector for a model to substitute.
  */
 export const PET_CONTEXT_PARAMETERS = {} as const
+export const PET_LOCUS_REPLY_TOOL = 'pet_locus_reply'
+
+export interface PetLocusReplyDependencies {
+  /** The same caller-bound context resolver used by pet_context. */
+  readonly locusRepository: NonNullable<PetContextDependencies['locusRepository']>
+  /** Bot client fixed to the dsh-pet profile and bot identity. */
+  readonly lark: Pick<LarkClient, 'reply' | 'replyExact'>
+}
 
 /** Minimal execution view Pet reads; the agent loop sets `agent`. */
 interface ExecutionLike {
@@ -69,18 +82,22 @@ function callerSessionId(exec: ExecutionLike): string {
 /**
  * Register Pet's Agent-facing tools.
  *
- * There is exactly ONE: `pet_context`. Pet is a runtime, not a catalog of
- * per-capability adapters — an installed Skill drives ordinary DSH tools and
+ * The stable surface is `pet_context` plus the optional caller-bound
+ * `pet_locus_reply`. Pet is not a catalog of per-capability adapters — an
+ * installed Skill drives ordinary DSH tools and
  * owns its own bounded behavior, so adding a capability never adds a tool.
  * @param ctx - A Pet executor's SCOPED agent context. Passing an unscoped
  * context (such as the Host plugin context) does not fail — it publishes the
  * tool to the global layer, where every ordinary session sees it.
- * @param deps - Repository supplying the caller's authorized Invocation.
+ * @param deps - Repository supplying the caller's authorized Invocation and,
+ *   when integrated, an optional reverse locus lookup.
  * @returns a disposer removing the registration.
  */
 export function registerPetTools(
   ctx: Context,
-  deps: { readonly repository: PetRepository },
+  deps: { readonly repository: PetRepository } & PetContextDependencies & {
+    readonly locusReply?: PetLocusReplyDependencies
+  },
 ): () => void {
   const disposers: (() => void)[] = []
 
@@ -89,9 +106,10 @@ export function registerPetTools(
       defineTool({
         name: PET_CONTEXT_TOOL,
         description:
-          'Return the trusted source context of the Pet Invocation this session is currently ' +
-          'executing. Takes no arguments: the target is resolved from the calling session and ' +
-          'cannot be redirected. Call this at the start of every Invocation.',
+          'Return trusted caller-bound Pet context for this session. For an ordinary Pet ' +
+          'executor this is the current Invocation snapshot; for a unified locus child it is ' +
+          'the active locus, permission, anchor, and current Delivery when present. Takes no ' +
+          'arguments: the target is resolved from the calling session and cannot be redirected.',
         parameters: PET_CONTEXT_PARAMETERS,
         output: {
           schema: {
@@ -102,14 +120,64 @@ export function registerPetTools(
           render: (_args, value) => [{ type: 'text', text: value.json }],
         },
         async execute(_args, exec) {
-          const context = executePetContext(deps.repository, {
-            agent: { session: { id: callerSessionId(exec as ExecutionLike) } },
-          })
+          const context = executePetContext(
+            deps.repository,
+            { agent: { session: { id: callerSessionId(exec as ExecutionLike) } } },
+            deps,
+          )
           return { json: JSON.stringify(context, null, 2) }
         },
       }),
     ),
   )
+
+  if (deps.locusReply !== undefined) {
+    disposers.push(
+      ctx.tools.register(
+        defineTool({
+          name: PET_LOCUS_REPLY_TOOL,
+          description:
+            'Reply as the Pet bot to the exact current Feishu Delivery. Takes only the business ' +
+            'text: chat/thread/message targets are resolved from the caller child and current turn, ' +
+            'and the tool is unavailable to GUI, initialization, or stale turns.',
+          parameters: {
+            text: { type: 'string', required: true },
+          },
+          output: {
+            schema: {
+              type: 'object',
+              additionalProperties: false,
+              properties: { sent: { type: 'boolean', required: true } },
+            },
+            render: (_args, value) => [{ type: 'text', text: value.sent ? '已发送到当前飞书入口。' : '未发送。' }],
+          },
+          async execute(args, exec) {
+            const childSessionId = callerSessionId(exec as ExecutionLike)
+            const matches = deps.locusReply!.locusRepository.findByChildSessionId(childSessionId)
+            if (matches.length !== 1 || matches[0]?.locus.state !== 'active') {
+              throw new PetError('NOT_A_PET_SESSION', 'Current child has no unique active locus.')
+            }
+            const delivery = matches[0].currentDelivery
+            if (delivery?.replyTarget === undefined) {
+              throw new PetError(
+                'INVALID_REQUEST',
+                'This turn has no exact Feishu Delivery reply target; GUI and stale turns cannot send.',
+              )
+            }
+            const exact = deps.locusReply!.lark.replyExact
+            if (exact === undefined) {
+              throw new PetError(
+                'INTERNAL',
+                'The Host has no strict Feishu reply adapter; refusing an unverified send.',
+              )
+            }
+            await exact(delivery.replyTarget.messageId, args.text)
+            return { sent: true }
+          },
+        }),
+      ),
+    )
+  }
 
   return () => {
     for (const dispose of disposers.splice(0)) dispose()

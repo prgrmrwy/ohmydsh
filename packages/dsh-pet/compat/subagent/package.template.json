@@ -1,0 +1,10 @@
+{
+  "name": "@deepseek-ai/dsh-subagent",
+  "version": "0.1.2-rc.1-locus-settlement-notice.0",
+  "private": true,
+  "type": "module",
+  "description": "Fixed-source compatibility artifact: adds the opt-in settlementNotice so a locus child never reports into its main session. Run `node build.mjs` to materialize it from the pinned upstream source.",
+  "scripts": {
+    "build": "node build.mjs"
+  }
+}

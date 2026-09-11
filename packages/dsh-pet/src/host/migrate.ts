@@ -81,6 +81,21 @@ export function removeLegacyState(databaseFile: string): LegacyStateCleanup {
   }
 
   try {
+    // Inspect version before touching any rows. A future/unknown schema is
+    // not an older Skill model and must never be restamped or cleaned.
+    const stamped = db.prepare('SELECT version FROM units WHERE name = ?')
+      .get(PET_DOMAIN_NAME) as { version?: number } | undefined
+    if (stamped === undefined) return { removedRows: 0, clearedTables: [] }
+    if (stamped.version === PET_DOMAIN_VERSION) return { removedRows: 0, clearedTables: [] }
+    if (![1, 2, 3, 4, 5, 6, 7, 8].includes(stamped.version as number)) {
+      throw new Error(`Unsupported Pet storage version ${String(stamped.version)}; refusing migration`)
+    }
+    // v2+ upgrades are additive. Even malformed rows are retained for domain
+    // validation to diagnose, never interpreted as permission to erase history.
+    if (stamped.version !== 1) {
+      db.prepare('UPDATE units SET version = ? WHERE name = ?').run(PET_DOMAIN_VERSION, PET_DOMAIN_NAME)
+      return { removedRows: 0, clearedTables: [] }
+    }
     const clearedTables: string[] = []
     let removedRows = 0
     let sawLegacyWork = false
@@ -130,26 +145,12 @@ export function removeLegacyState(databaseFile: string): LegacyStateCleanup {
       }
     }
 
-    // Restamp the medium AFTER any incompatible rows are gone, so a failure
-    // part-way through leaves the old version in place and the cleanup simply
-    // runs again on the next boot.
-    //
-    // Deliberately NOT conditional on `removedRows > 0`. The v2→v3 bump is
-    // purely additive (a new table, plus two dropped keys that zod strips on
-    // read), so a healthy v2 medium has nothing to clean and would otherwise
-    // keep its old stamp — and `storageDomain.open` rejects a version
-    // mismatch, degrading a Host that was working fine. Restamping every
-    // openable medium whose rows are compatible is what makes the upgrade a
-    // no-op instead of a failure.
-    const stamped = db
-      .prepare(`SELECT version FROM units WHERE name = ?`)
-      .get(PET_DOMAIN_NAME) as { version?: number } | undefined
-    if (stamped !== undefined && stamped.version !== PET_DOMAIN_VERSION) {
-      db.prepare(`UPDATE units SET version = ? WHERE name = ?`).run(
-        PET_DOMAIN_VERSION,
-        PET_DOMAIN_NAME,
-      )
-    }
+    // Only the explicitly supported v1 cleanup reaches this point. Restamp
+    // after cleanup; never use row shape to authorize a version downgrade.
+    db.prepare('UPDATE units SET version = ? WHERE name = ?').run(
+      PET_DOMAIN_VERSION,
+      PET_DOMAIN_NAME,
+    )
 
     return { removedRows, clearedTables }
   } finally {

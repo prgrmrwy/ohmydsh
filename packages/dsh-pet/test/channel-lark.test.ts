@@ -134,6 +134,9 @@ describe('Pet profile isolation', () => {
       if (args.includes('+chat-members-list')) {
         return { stdout: JSON.stringify({ ok: true, data: { bots: [], users: [] } }) }
       }
+      if (args.includes('+messages-reply') && args.includes('--json')) {
+        return { stdout: JSON.stringify({ ok: true, data: { message_id: 'om_reply' } }) }
+      }
       if (args.includes('create') && args.includes('reactions')) {
         return { stdout: JSON.stringify({ ok: true, data: { reaction_id: 'r1' } }) }
       }
@@ -149,11 +152,12 @@ describe('Pet profile isolation', () => {
     await client.chatName('oc_1')
     await client.listChatBots('oc_1')
     await client.reply('om_1', 'hi')
+    await client.replyExact?.('om_1', 'verified hi')
     await client.createChat?.('qa', [BOT], BOT)
     await client.memberCount?.('oc_1')
     await client.sendToChat?.('oc_1', 'notice')
 
-    expect(mutableCalls).toHaveLength(11)
+    expect(mutableCalls).toHaveLength(12)
     for (const args of mutableCalls) {
       expect(args.slice(0, 2)).toEqual(['--profile', 'dsh-pet'])
     }
