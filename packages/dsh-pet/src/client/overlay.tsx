@@ -351,6 +351,23 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
       : hoverRadius(rings, size)
 
   /**
+   * Clearance the wheel notes must leave, which is NOT `wheelRadius`.
+   *
+   * `wheelRadius` is a HIT-TESTING radius: with no capabilities it is held at
+   * one ring's width so the wheel does not collapse to the mascot and snap
+   * shut on the first hover after a restart (see above). Nothing is drawn out
+   * there, though — so a note pushed past it floated in blank space, visibly
+   * detached from the mascot it belongs to. That is exactly the "Pet 未就绪"
+   * case, where there are no rings at all.
+   *
+   * The note must clear what is actually PAINTED: the outermost drawn ring,
+   * or the mascot's own edge when no ring is drawn. Keeping the two radii
+   * separate is deliberate — collapsing them would either reopen the
+   * snap-shut bug or put the note back on top of the rings.
+   */
+  const noteClearance = rings.length === 0 ? size / 2 : hoverRadius(rings, size)
+
+  /**
    * The capability actually under the pointer right now.
    *
    * A highlight means "the pointer is on this slice", so it must not outlive
@@ -642,10 +659,15 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
         // CSS to read. @types/react has no custom-property signature, hence
         // the cast.
         '--dshpet-mascot-size': `${size}px`,
-        // Outer edge of the rings ACTUALLY drawn. A note anchored to the
-        // mascot alone landed ON TOP of the rings, because the mascot is only
-        // the innermost 72px of a disc that reaches ~170px.
-        '--dshpet-wheel-radius': `${wheelRadius}px`,
+        // Outer edge of what is actually PAINTED, which is what the notes have
+        // to clear. A note anchored to the mascot alone landed ON TOP of the
+        // rings (the mascot is only the innermost 72px of a disc reaching
+        // ~170px); anchoring it to the hit-testing radius instead left it
+        // floating in blank space whenever no ring was drawn, since that
+        // radius is deliberately held at one ring's width even with an empty
+        // wheel. `noteClearance` is neither — it follows the rings drawn, and
+        // falls back to the mascot's edge when there are none.
+        '--dshpet-wheel-radius': `${noteClearance}px`,
       } as CSSProperties}
       // Focus is the keyboard equivalent of hover, so a keyboard user reaches
       // the capability wheel the same way a pointer user does.

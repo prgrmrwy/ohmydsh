@@ -338,10 +338,41 @@ describe('overlay styles', () => {
     )
 
     // The CSS cannot compute this: the radius depends on how many rings the
-    // capability list produced. Publishing the value the overlay already uses
-    // for `hoverRadius` keeps the visible edge and the note in agreement.
+    // capability list produced.
     expect(overlay).toContain("'--dshpet-wheel-radius'")
-    expect(overlay).toContain('${wheelRadius}px')
+    // Published from `noteClearance`, NOT `wheelRadius`. The latter is a
+    // hit-testing radius held at one ring's width even when the wheel is
+    // empty, so that an empty wheel cannot collapse onto the mascot and snap
+    // shut on first hover. Nothing is painted out there, so anchoring the
+    // note to it left the "Pet 未就绪" message floating in blank space.
+    expect(overlay).toContain('${noteClearance}px')
+    expect(overlay).not.toContain('${wheelRadius}px')
+  })
+
+  it('measures note clearance from the rings drawn, not the hover disc', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // The two radii must stay separate. Collapsing them reintroduces one of
+    // two bugs: reuse `wheelRadius` and the note floats away from a ringless
+    // wheel; make `wheelRadius` follow the rings and an empty wheel snaps
+    // shut the moment the pointer leaves the mascot's face.
+    const clearance = /const noteClearance =[^\n]*\n?[^\n]*/.exec(overlay)?.[0] ?? ''
+    expect(clearance).toContain('rings.length === 0')
+    // Falls back to the mascot's own edge when nothing is drawn.
+    expect(clearance).toContain('size / 2')
+  })
+
+  it('falls back to the mascot edge, not a ring, when the variable is missing', () => {
+    // A note is only pushed out to a ring when the overlay says one was
+    // drawn, so the safe default is the tighter radius. The old 94px fallback
+    // was one ring's width and would strand the note if the variable ever
+    // failed to reach the CSS.
+    const noteRule = PET_CSS.match(/\.dshpet-wheel \.dshpet-wheel-note\{[^}]*\}/)?.[0] ?? ''
+    expect(noteRule).toContain('var(--dshpet-wheel-radius,36px)')
   })
 
   it('scopes the note rule above the shared empty/error paddings', () => {

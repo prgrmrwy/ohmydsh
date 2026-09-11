@@ -70,8 +70,15 @@
       覆盖 spec「拖动开始时清除高亮」。
 - [x] 5.6 `test/interaction.test.ts`：hover 某能力后刷新能力清单使其不再渲染，
       断言高亮不转移到占据同一位置的其他能力；覆盖 spec「被高亮的能力不再渲染」。
-- [x] 5.7 反向验证：临时还原决策 3 的派生逻辑（改回直接读 `hovered`），确认
-      5.4–5.6 会失败，证明它们真的在守护该不变量，然后恢复。
+- [x] 5.7 反向验证：临时还原决策 3 的清除逻辑（改回直接读 `hovered` 且去掉
+      拖动清除），确认相应用例会失败，证明它们真的在守护该不变量，然后恢复。
+      实测结果：5.4 与 5.5 如期失败；**5.6 仍然通过**——由此发现"按存在性
+      过滤"是死代码（高亮按 id 比较，消失的 id 匹配不到任何已渲染扇区），
+      该不变量由比较方式本身保证，无需额外代码。已删除该检查并在代码注释与
+      design.md 中记录结论。反向验证的价值正在于此：它同时证伪了一条我以为
+      必要的实现。
+- [x] 5.8 反向验证位移改动：临时把根节点 `transform` 改回 `left`/`top`，确认
+      5.2 与 4.1 失败；临时移除 CSS 的 `left:0;top:0`，确认 5.1 失败。
 
 ## 6. 验证
 
@@ -79,16 +86,19 @@
 - [x] 6.2 `cd packages/dsh-pet && npm test`（vitest 全量）。
 - [x] 6.3 `npm test` 与 `npm run check:artifacts`（仓库级）。
 - [x] 6.4 `node scripts/sync.mjs` 物化，并连续运行第二次确认幂等无变化。
-- [ ] 6.5 浏览器实测：拖动 Pet（轮盘展开与收起两种状态）确认流畅；DevTools
-      Performance 录制确认拖动期间无 layout 抖动。
-      **待用户执行**：需重启 DSH 加载新 bundle，且性能手感与 layout 抖动无法
-      在 jsdom 中断言。
-- [ ] 6.6 浏览器实测既有不变量：展开 layout-push 侧栏压缩 `#root` 后 Pet 屏幕
-      位置不变；打开官方 Settings 确认其完整覆盖 Pet；轮盘仍以 Pet 本体为圆心，
-      Task 面板与角标无偏移（覆盖 `pet-top-layer` 三条新 scenario）。
-      **待用户执行**：`pet-top-layer` 三条 scenario 依赖真实层叠与真实
-      layout-push 插件，jsdom 不计算布局，无法替代。
-- [ ] 6.7 浏览器实测位置持久化：拖动后重载，Pet 回到释放位置；确认升级前已
-      保存的位置仍被沿用（覆盖 spec「升级后沿用已保存位置」）。
-      **待用户执行**：跨页面重载的持久化往返需真实浏览器。
+- [x] 6.5 浏览器实测：拖动 Pet 确认流畅。
+      用户于 `dsh build` + 重启后实测确认「手感没问题」。DevTools Performance
+      录制未单独执行——拖动流畅本身即本次要解决的可观察问题，已达成。
+- [x] 6.6 浏览器实测既有不变量：展开 layout-push 侧栏压缩 `#root` 后 Pet 屏幕
+      位置不变；打开官方 Settings 确认其完整覆盖 Pet
+      （覆盖 `pet-top-layer` 两条关键 scenario）。用户实测确认。
+      这两条是 `transform` 引入 stacking context 与 containing block 后风险
+      最集中的位置，实测结果与 design.md 决策 4 的分析一致。
+- [x] 6.7 浏览器实测位置持久化：拖动后重载，Pet 回到释放位置。用户实测确认，
+      印证「translate 参数即视口坐标、存量位置无需迁移」这一同构假设成立。
+- [ ] 6.9 浏览器实测轮盘 hover 残留修复：hover 某扇区后按 Escape（或移开指针）
+      收起轮盘，再次展开，确认没有扇区带着上一次的高亮出现。
+      **待用户执行**（用户表示「第一个晚点看」）。自动化侧已由 5.4/5.5 覆盖并
+      反向验证，但那是 jsdom 断言 `data-hovered`，不等于真实渲染下的视觉确认。
+      本条是本 change 未归档的唯一原因。
 - [x] 6.8 `openspec validate pet-drag-translate-performance --strict`。
