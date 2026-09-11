@@ -79,8 +79,27 @@
 - [ ] 10.1 调查 DSH continuable child 的模型选择、持久化、恢复与 owner 可控接缝；形成与“不得静默切换模型或来源”一致的方案，明确是显式切换、Locus 首选模型/有序降级列表，还是宿主能力缺口
 - [ ] 10.2 在规范与设计中定义模型不可用的可判定分类、降级适用边界、审计字段、防重复执行、费用/出口策略，以及 network-model-guard fail-closed 不可绕过约束
 - [ ] 10.3 实现 Locus 子会话模型恢复能力及相关 Host/管理面，确保已有失败 Delivery 不被重放、同一 child 上下文连续且任何模型变化对所有者可见
-- [ ] 10.4 调查并修复空白自动主会话的导航/身份呈现：它已挂入目标 Workspace，但 0-turn blank session 打开后与“新会话”不可区分；跳转后必须能证明主会话、Workspace 和 Locus 身份，不得伪报可用
+- [x] 10.4 调查并修复空白自动主会话的导航/身份呈现：它已挂入目标 Workspace，但 0-turn blank session 打开后与“新会话”不可区分；跳转后必须能证明主会话、Workspace 和 Locus 身份，不得伪报可用
+  - 根因：主会话以零事件发布。宿主 `blank` 判据是「折叠前缀中无 `turn/start`」，blank 会被 `sessionTitle()` 清空标题渲染成「新会话」、被 `hideChrome` 隐藏会话标识，并且 `connectWorkspace()` 会复用任意 blank 会话——用户点「新建会话」可能被直接交付该 Locus 主会话。实证：真实 T2 主会话 `session-3a7e5b90` 日志仅有 permission/sandbox/approval/title 四条，无任何 `turn/start`
+  - 修复：`composeLocusMainBriefing` 在创建时经**常规**会话生命周期（`followup` + 真实 `UserMessage`，与 Pet executor 同一接缝）投递一条开场说明，写明 chat/workspace/执行根，并明确「只是陈述上下文、不是任务、回复了解后 standby」。不特化会话日志、不手工构造事件——主会话就是常规 session
+  - 副作用即修复：loop 开轮次时在**任何模型调用之前**写入 `turn/start`，因此即使模型不可用该会话也已脱离 blank 类；locus 发布依据创建事实，不等待模型回复
+  - 验证：真实 launcher runtime 实测消息被 `createUserMessage`/`Session.append` 接受、`turn/start` 后 `blank=false`；Pet 1626 测试与仓库 120 测试全绿
+  - 第二个独立缺陷（伪报**不可用**）：管理面 `describeSession` 以 `ctx.sessions.get()` 判存在性，而该 API 契约只查「当前已加载到内存」的会话。Host 重启后无人打开过 locus 主/子会话 → 全被判 `missing`，UI 显示「不可用」；且读数随加载/卸载漂移，不能作验收证据。实证：`session-3a7e5b90`/`session-a12149c6` 日志均在磁盘且可读
+  - 修复：抽出 `createLocusSessionDescriber`，改以 `sessionController.inspect` 冷读判定，与 `dsh-port.ts` 既有规则（existence 来自 inspect、绝不来自 live registry）同源；已归档优先于可读性；无冷读能力时省略事实而非断言缺失
+  - 验证：以真实会话日志实测 —— 主会话 `available` 且带标题、子会话 `available`、不存在者 `missing`；顺带修正两处测试替身（`inspect` 原返回无 events 的假形状，掩盖了真实契约）
+- [x] 10.9 修复子会话首条飞书消息永远回不出去：`pet_locus_reply` 报「no exact Feishu Delivery reply target」，但子会话执行完全正常（`turn/end` 为 `completed`、正确调用回复工具）
+  - 根因：`agent/inbox/claimed` 对**每条**进入该步的 inbox 消息触发，而 DSH 在**每个会话首轮**注入三条上下文（`agent-instructions` / `plugin` / `skill-catalog`）。turn-observer 查不到它们对应的 Delivery，归入 `unresolved`/`foreign` 并把该轮标记 `mixed`；`currentForChild()` 因 `mixed` 返回 `undefined` → `currentDelivery` 无法解析 → 回复工具 fail closed。故障只在首轮复现，第二条消息起正常
+  - 实证：真实子会话 `session-a12149c6` turn 1 的 inbox 含 4 条 `user/message`，仅 `aa7a67df`（`source.kind=user`）是 Delivery，其余三条为宿主注入；同轮 `pet_context` 输出确实缺少 `currentDelivery` 字段
+  - 修复：claim 事件携带 `message.source.kind`；`isHostInjectedClaim` 豁免宿主自注入来源（直接忽略，不建轮次、不计入 foreign）。`user` 永不豁免——查不到 Delivery 的 `user` 消息是 GUI 提问或父会话 steer，可能指向其它目标，继续 fail closed；来源缺失同样按参与者流量处理
+  - 验证：照抄真实首轮 claim 序列（1 Delivery + 3 注入）写回归测试，移除守卫后 4 条用例失败、恢复后全绿；Pet 1639 测试与仓库 120 测试全绿。陷阱已记入 `docs/notes/dsh-plugin-integration-pitfalls.md` 第 5 节
+- [x] 10.10 修复第二层根因（重启验证时 turn 2 仅 1 条消息仍失败）：入队即唤醒 → claim 结构性先于 `bindQueued` 落库 → `handleClaim` 在挂 `unresolved` 的同时把该轮 sticky 置 `mixed`（永不清除）→ `deliveryAvailable` 补救链虽全部成功（绑定/事件/settle 均正确），但 `currentForChild()` 因 `mixed` 永久拒绝 → 每条 Delivery 都回不出去
+  - 实证：delivery-2 与 turn 2 完美对应（accepted 03:19:40.879 → queued .897 → started .494，工具调用 03:19:48 时 delivery 正处 running），inbox 仅 1 条消息，仍报同一错误；控制器代码自己注释承认「its claim/end may have arrived before the durable bind」
+  - 修复：`mixed` 只由**已证实的污染**置位（同轮第二条 Delivery、lookup 基础设施失败、证实为外部流量）；「暂时查不到」只进 `unresolved`，未决期间由 `unresolved.size !== 0` 照常拒发（安全边界不变），解析证实唯一 Delivery 后授权恢复
+  - 验证：新增复现真实时序的回归（claim 先到 → deliveryAvailable 后到 → 授权恢复）+ 三个对照（GUI 混入 / 双 Delivery / lookup 失败 → 永不恢复）；恢复旧 sticky 行为后竞态用例失败、修复后 35/35；Pet 1644 测试全绿。陷阱记入 pitfalls 第 6 节（含「Host stdout 指向 /dev/null，诊断日志未落盘」的教训）
 - [ ] 10.5 定义并实现 Delivery 失败的安全 Host 控制面回执：只回当前 caller-bound 飞书入口，低敏、幂等、可行动，不代发业务正文
 - [ ] 10.6 为模型恢复、空白主会话跳转与失败回执补相关测试，运行 Pet typecheck/范围测试/build，并经主仓 dsh build 部署
-- [ ] 10.7 从 checking/T2-C3 原地恢复人工验收：保留首次 Claude restricted 失败事实，验证修复后的同 Locus/child 恢复或显式代际变化，再继续 T3–T8
+- [x] 10.7 从 checking/T2-C3 原地恢复人工验收：保留首次 Claude restricted 失败事实，验证修复后的同 Locus/child 恢复或显式代际变化，再继续 T3–T8
+  - T2-C3 重测 PASS：失败事实完整保留在同一 checkpoint（首次 FAIL + 重测 PASS 并列记录），未以重发掩盖。复用群级 gen 2 locus 与同一 child `session-c9af096f`，Delivery 04:02:47→04:02:55 settled，effective read，child 成功回复且 `pet_locus_reply` 零拒绝
+  - T3 全部 4 个 checkpoint PASS：话题 A 建立独立 topic locus 与专属 child；同话题第二条复用同一 locus/代际/child（同 session 内 turn 1→2 递增为硬证据）；群级/话题 A/话题 B 三个不同 child 互为兄弟、全部直属同一主会话、无孙辈；缺失 thread_id 一项按计划维持 manual，以 53 项自动化测试作辅证，不冒充真实异常事件
+  - 验收方法修正：改用中性问法（只问事实、不在 prompt 中提示期待结论），避免以被测对象的自述验证其自身行为；所有判定以 Host 持久层为准，子会话自报仅作交叉核对（本轮逐项一致）
 - [ ] 10.8 收敛验收期 UX backlog B026–B028；验收完成后统一评估，不在修复期间扩散非阻塞视觉优化
