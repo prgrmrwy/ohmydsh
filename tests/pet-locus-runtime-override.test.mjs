@@ -23,7 +23,9 @@ test('the runtime patch is pinned to the manifest DSH version', async () => {
   assert.match(launcher, /const version = '0\.1\.2-rc\.1'/)
   assert.match(builder, /tag: 'dsh-v0\.1\.2-rc\.1'/)
   assert.match(builder, /commit: 'a66e4702047846cdaa10c66c9d3df3951f5ea70d'/)
-  assert.match(builder, /const run = \(command, args, cwd = here\)/)
+  assert.match(builder, /const run = \(command, args, cwd = here, options\)/)
+  assert.match(builder, /pnpm@11\.7\.0', 'install', '--prefer-offline'\], checkout, \{ env: \{ CI: 'true' \} \}/)
+  assert.match(builder, /reviewed DSH source requires Node \^22\.19\.0 or >=24\.0\.0/)
 })
 
 test('the recorded patch hashes match the reviewable patches on disk', async () => {
@@ -36,6 +38,8 @@ test('the recorded patch hashes match the reviewable patches on disk', async () 
 
   assert.match(builder, new RegExp(`patchSha256:\\s*'${actual}'`))
   assert.match(storageBuilder, new RegExp(`patchSha256 = '${storageActual}'`))
+  assert.match(storageBuilder, /pnpm@11\.7\.0', 'install', '--prefer-offline'\], checkout, \{ env: \{ CI: 'true' \} \}/)
+  assert.match(storageBuilder, /reviewed DSH source requires Node \^22\.19\.0 or >=24\.0\.0/)
 })
 
 test('the patch carries behavior, compatibility, and a runtime capability marker', async () => {
