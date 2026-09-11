@@ -56,4 +56,42 @@ describe('a non-JSON response is reported as what it is', () => {
 
     await expect(petApi.config()).resolves.toMatchObject({ providerId: 'claude' })
   })
+
+  it('uses dedicated archive/stop locus routes without browser actor identity', async () => {
+    const calls: { path: string; body: Record<string, unknown> }[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: string, init: RequestInit) => {
+      calls.push({ path: input, body: JSON.parse(String(init.body)) as Record<string, unknown> })
+      return { status: 200, text: async () => JSON.stringify({ ok: true, data: { action: calls.at(-1)?.body.action } }) }
+    }))
+
+    const fence = {
+      locusId: 'locus-1',
+      endpoint: { chatId: 'oc-chat' },
+      expectedGeneration: 2,
+      expectedLocusId: 'locus-1',
+      expectedUpdatedAt: 9,
+    } as const
+    await petApi.locusArchive({ action: 'archive', ...fence })
+    await petApi.locusStop({ action: 'stop', ...fence })
+
+    expect(calls.map(call => call.path)).toEqual([
+      '/dsh-pet/api/locus-archive',
+      '/dsh-pet/api/locus-stop',
+    ])
+    expect(calls.every(call => !('actorId' in call.body))).toBe(true)
+    expect(calls.map(call => call.body.expectedUpdatedAt)).toEqual([9, 9])
+  })
+
+  it.each([
+    ['{}', 200],
+    ['null', 200],
+    ['[]', 200],
+    ['{"ok":true}', 200],
+    ['{"ok":true,"data":{}}', 500],
+    ['{"ok":false}', 400],
+    ['{"ok":false,"error":"","message":"bad"}', 400],
+  ])('rejects malformed or status-inconsistent envelopes (%s, HTTP %s)', async (body, status) => {
+    respond(status, body)
+    await expect(petApi.config()).rejects.toMatchObject({ code: 'PET_UNAVAILABLE' })
+  })
 })

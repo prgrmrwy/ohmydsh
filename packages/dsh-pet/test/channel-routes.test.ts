@@ -41,6 +41,7 @@ interface Reply {
 let routes: readonly Route[]
 let paths: PetPaths
 let channel: ChannelControl
+let channelStatus: ReturnType<ChannelControl['status']>
 let calls: string[]
 let bindState: PetBindState | undefined
 
@@ -94,8 +95,16 @@ beforeEach(async () => {
 
   calls = []
   bindState = undefined
+  channelStatus = {
+    phase: 'connected',
+    unifiedLocus: {
+      childSession: 'verified',
+      defaultPermission: 'read',
+      readVerification: 'verified',
+    },
+  }
   channel = {
-    status: () => ({ phase: 'connected' }),
+    status: () => channelStatus,
     setEnabled: vi.fn(async (enabled: boolean) => {
       calls.push(`setEnabled:${enabled}`)
     }),
@@ -153,6 +162,51 @@ describe('reading the channel view', () => {
       'allowlist-empty',
       'default-workspace-missing',
     ])
+    expect(view.unifiedLocus).toEqual({
+      childSession: 'verified',
+      defaultPermission: 'read',
+      readVerification: 'verified',
+    })
+    expect(view.onboarding.steps.map(step => step.id)).toEqual([
+      'bot',
+      'identity',
+      'allowlist',
+      'workspace',
+      'locus',
+      'subscription',
+    ])
+  })
+
+  it('blocks readiness when unified child-session/read proof is unavailable', async () => {
+    channelStatus = {
+      phase: 'stopped',
+      unifiedLocus: {
+        childSession: 'unavailable',
+        defaultPermission: 'read',
+        readVerification: 'unavailable',
+        diagnostic: 'sandbox readback unavailable',
+      },
+    }
+    await harness?.repository.putChannelConfig({
+      enabled: false,
+      botAppId: 'cli_test',
+      botOpenId: 'ou_petbot00000000000000000000000',
+      allowOpenIds: [OWNER],
+      defaultWorkspaceId: 'ws-nexus',
+      updatedAt: 1,
+    })
+
+    const view = (await call(ROUTES.channel, {})).data as unknown as PetChannelView
+
+    expect(view.onboarding.ready).toBe(false)
+    expect(view.onboarding.steps.find(step => step.id === 'locus')).toMatchObject({
+      label: '核验统一子会话与默认只读策略',
+      complete: false,
+    })
+    expect(view.onboarding.blockers).toContainEqual({
+      code: 'unified-locus-unavailable',
+      message: 'sandbox readback unavailable',
+    })
   })
 
   it('never exposes a credential-shaped field', async () => {
@@ -264,6 +318,32 @@ describe('enabling the channel', () => {
 
     expect(reply.ok).toBe(false)
     expect(reply.message).toMatch(/default workspace/)
+  })
+
+  it('refuses enabling when the unified child-session/read proof regresses', async () => {
+    channelStatus = {
+      phase: 'stopped',
+      unifiedLocus: {
+        childSession: 'verified',
+        defaultPermission: 'read',
+        readVerification: 'unavailable',
+        diagnostic: 'effective read policy cannot be confirmed',
+      },
+    }
+    await harness?.repository.putChannelConfig({
+      enabled: false,
+      botAppId: 'cli_test',
+      botOpenId: 'ou_petbot00000000000000000000000',
+      allowOpenIds: [OWNER],
+      defaultWorkspaceId: 'ws-nexus',
+      updatedAt: 1,
+    })
+
+    const reply = await call(ROUTES.channelMutate, { action: 'set-enabled', enabled: true })
+
+    expect(reply.ok).toBe(false)
+    expect(reply.message).toContain('effective read policy')
+    expect(harness?.repository.getChannelConfig().enabled).toBe(false)
   })
 
   it('always allows disabling', async () => {

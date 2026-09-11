@@ -15,6 +15,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { PET_CLI_PROFILE, petCliArgs } from './cli.js'
+import type { LocusLarkPort } from '../locus/controller.js'
 
 const run = promisify(execFile)
 
@@ -127,6 +128,12 @@ export interface LarkClient {
    * @param text - Reply body.
    */
   reply(messageId: string, text: string): Promise<void>
+  /**
+   * Reply with strict process/envelope/identifier verification.
+   * Used only by caller-bound locus business replies so the child is not told
+   * a message was sent when lark-cli failed softly.
+   */
+  replyExact?(messageId: string, text: string): Promise<void>
   /**
    * Create a private group and invite the given users.
    *
@@ -245,6 +252,85 @@ async function callCli(
   if (!result.ok) return undefined
   const parsed = result.value as { ok?: boolean; data?: unknown } | undefined
   return parsed?.ok === true ? parsed.data : undefined
+}
+
+function recordOf(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined
+}
+
+/**
+ * Read a successful CLI process and its successful Lark envelope.
+ *
+ * This is intentionally separate from {@link callCli}.  Most channel
+ * decoration is fail-soft, but a locus provisioning/control transaction must
+ * never mistake an exit failure, malformed JSON, or `{ok:false}` for success.
+ */
+function strictEnvelopeData(result: CliJsonResult, operation: string): unknown {
+  if (!result.ok) throw new Error(`${operation}: lark-cli process failed`)
+  const envelope = recordOf(result.value)
+  if (envelope?.['ok'] !== true) throw new Error(`${operation}: lark-cli envelope was not ok`)
+  return envelope['data']
+}
+
+function requireInput(value: string, field: string): string {
+  const normalized = value.trim()
+  if (normalized === '') throw new Error(`${field} must be a non-empty string`)
+  return normalized
+}
+
+function requireOpenId(value: string, field: string): string {
+  const normalized = requireInput(value, field)
+  if (!/^ou_[A-Za-z0-9]+$/.test(normalized)) throw new Error(`${field} must be an open_id`)
+  return normalized
+}
+
+function requireChatId(value: unknown, operation: string): string {
+  if (typeof value !== 'string' || !/^oc_[A-Za-z0-9]+$/.test(value)) {
+    throw new Error(`${operation}: lark-cli returned no valid chat id`)
+  }
+  return value
+}
+
+function requireMessageId(value: unknown, operation: string): string {
+  if (typeof value !== 'string' || !/^om_[A-Za-z0-9]+$/.test(value)) {
+    throw new Error(`${operation}: lark-cli returned no valid message id`)
+  }
+  return value
+}
+
+/** Only the documented "chat already deleted" code is an idempotent delete. */
+function envelopeErrorCode(value: unknown): number | undefined {
+  const envelope = recordOf(value)
+  const error = recordOf(envelope?.['error'])
+  const data = recordOf(envelope?.['data'])
+  for (const candidate of [error?.['code'], envelope?.['code'], data?.['code']]) {
+    if (typeof candidate === 'number' && Number.isSafeInteger(candidate)) return candidate
+    if (typeof candidate === 'string' && /^\d+$/.test(candidate)) return Number(candidate)
+  }
+  return undefined
+}
+
+async function createChatStrict(
+  input: {
+    readonly name: string
+    readonly userOpenIds: readonly string[]
+    readonly ownerOpenId?: string
+  },
+  binary: string,
+  runner: LarkCliRunner,
+): Promise<string> {
+  const name = requireInput(input.name, 'group name')
+  const users = input.userOpenIds.map((id, index) => requireOpenId(id, `group user ${index + 1}`))
+  const owner = input.ownerOpenId === undefined
+    ? undefined
+    : requireOpenId(input.ownerOpenId, 'group owner')
+  const args = ['im', '+chat-create', '--as', 'bot', '--name', name]
+  if (users.length > 0) args.push('--users', users.join(','))
+  if (owner !== undefined) args.push('--owner', owner)
+  args.push('--json')
+  const result = await callJson(args, binary, runner)
+  const data = recordOf(strictEnvelopeData(result, 'create group'))
+  return requireChatId(data?.['chat_id'], 'create group')
 }
 
 /** Parse and verify the top-level `auth status` response. */
@@ -510,43 +596,28 @@ export function createLarkCliClient(
       )
     },
 
+    async replyExact(messageIdInput, textInput) {
+      const messageId = requireMessageId(requireInput(messageIdInput, 'message id'), 'reply exact')
+      const text = requireInput(textInput, 'reply text')
+      const result = await callJson(
+        ['im', '+messages-reply', '--as', 'bot', '--message-id', messageId, '--text', text, '--json'],
+        binary,
+        runner,
+      )
+      const data = recordOf(strictEnvelopeData(result, 'reply exact'))
+      requireMessageId(data?.['message_id'], 'reply exact')
+    },
+
     async createChat(name, userOpenIds, ownerOpenId) {
       // Deliberately NOT routed through `callCli`, which swallows every
       // failure into `undefined`. A QA binding written against a group that
       // was never created is exactly the silent breakage the transaction
-      // exists to prevent, so this one call reports why it failed.
-      const args = ['im', '+chat-create', '--as', 'bot', '--name', name]
-      if (userOpenIds.length > 0) args.push('--users', userOpenIds.join(','))
-      // Ownership is a capability, not a label: only the owner can rename,
-      // invite, remove members or disband. Creating as the bot defaults it to
-      // the bot, which would put an agent in charge of the user's own group.
-      if (ownerOpenId !== undefined && ownerOpenId !== '') args.push('--owner', ownerOpenId)
-      let stdout: string
-      try {
-        const result = await runner(binary, petCliArgs(args), {
-          timeout: CALL_TIMEOUT_MS,
-          maxBuffer: 8 * 1024 * 1024,
-        })
-        stdout = result.stdout
-      } catch (error) {
-        throw new Error(
-          `lark-cli could not create the group: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        )
-      }
-      let parsed: { ok?: boolean; data?: unknown }
-      try {
-        parsed = JSON.parse(stdout) as { ok?: boolean; data?: unknown }
-      } catch {
-        throw new Error('lark-cli returned an unreadable response for group creation')
-      }
-      if (parsed.ok !== true) throw new Error('lark-cli refused to create the group')
-      const chatId = (parsed.data as { chat_id?: unknown } | undefined)?.chat_id
-      if (typeof chatId !== 'string' || chatId === '') {
-        throw new Error('lark-cli created no group id')
-      }
-      return chatId
+      // exists to prevent, so this call uses the shared strict creation path.
+      return createChatStrict(
+        { name, userOpenIds, ...(ownerOpenId === undefined ? {} : { ownerOpenId }) },
+        binary,
+        runner,
+      )
     },
 
     async memberCount(chatId) {
@@ -566,5 +637,81 @@ export function createLarkCliClient(
         runner,
       )
     },
+  }
+}
+
+/**
+ * Strict Lark transaction port for the unified locus controller.
+ *
+ * The ordinary channel client is intentionally fail-soft.  This port is the
+ * opposite: group provisioning, source-switch receipts, and rollback are
+ * transaction boundaries, so every process/envelope/identifier mismatch is a
+ * rejected promise.  It still remains credential-zero-touch — calls always go
+ * through Pet's fixed lark-cli profile and explicit bot identity.
+ *
+ * Kept as a factory in this module (rather than wired in `index.ts`) so the
+ * controller integration can adopt it without coupling this isolated adapter
+ * to Host composition.
+ */
+export function createLocusLarkPort(
+  binary = 'lark-cli',
+  runner: LarkCliRunner = run as unknown as LarkCliRunner,
+): LocusLarkPort {
+  const deleteGroup = async (chatIdInput: string): Promise<void> => {
+    const chatId = requireChatId(requireInput(chatIdInput, 'chat id'), 'delete group')
+    const result = await callJson(
+      ['api', 'DELETE', `/open-apis/im/v1/chats/${encodeURIComponent(chatId)}`, '--as', 'bot', '--json'],
+      binary,
+      runner,
+    )
+    // Feishu 232009 means the chat is already deleted/not found.  Treat that
+    // one documented state as an idempotent rollback; permission failures and
+    // every other API/process failure must reach the controller so it can
+    // report a possibly residual group.
+    if (envelopeErrorCode(result.value) === 232009) return
+    strictEnvelopeData(result, 'delete group')
+  }
+
+  return {
+    async createGroup(input) {
+      const ownerId = requireOpenId(input.ownerId, 'group owner')
+      const name = requireInput(input.name, 'group name')
+      const chatId = await createChatStrict(
+        // Both flags are explicit.  The human owner is also the only invited
+        // user; relying on creator defaults would leave the bot as owner.
+        { name, ownerOpenId: ownerId, userOpenIds: [ownerId] },
+        binary,
+        runner,
+      )
+      return {
+        chatId,
+        chatName: name,
+        rollback: () => deleteGroup(chatId),
+      }
+    },
+
+    async sendControlMessage(input) {
+      const chatId = requireChatId(requireInput(input.endpoint.chatId, 'chat id'), 'send control message')
+      if (input.endpoint.threadId !== undefined) {
+        // This port has no message/root id with which to prove a thread reply.
+        // Widening it to the parent chat would put a source-switch warning in
+        // the wrong collaboration entry, so fail closed.
+        throw new Error('send control message: thread endpoint has no safe reply target')
+      }
+      const text = requireInput(input.text, 'control message text')
+      const result = await callJson(
+        ['im', '+messages-send', '--as', 'bot', '--chat-id', chatId, '--text', text, '--json'],
+        binary,
+        runner,
+      )
+      const data = recordOf(strictEnvelopeData(result, 'send control message'))
+      requireMessageId(data?.['message_id'], 'send control message')
+      const returnedChatId = requireChatId(data?.['chat_id'], 'send control message')
+      if (returnedChatId !== chatId) {
+        throw new Error('send control message: lark-cli returned a different chat id')
+      }
+    },
+
+    deleteGroup,
   }
 }

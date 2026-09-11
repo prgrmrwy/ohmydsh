@@ -12,23 +12,25 @@
  */
 
 import { BotBootstrap, type BootstrapState, type SpawnLike } from './bootstrap.js'
-import { settleFeedback } from './feedback.js'
 import {
   createLarkCliClient,
   type LarkClient,
   type LarkPermissionDiagnostic,
 } from './lark.js'
-import {
-  InboundPipeline,
-  type BindCommandPort,
-  type IntakeOutcome,
-  type QaDeliveryPort,
-} from './pipeline.js'
+import { InboundPipeline, type IntakeOutcome } from './pipeline.js'
+import type { LocusChannelControllerPort } from './locus-capability.js'
 import type { WorkspaceLocator } from './route.js'
 import { ChannelSubscription, type ChannelStatus } from './subscription.js'
+import {
+  BOT_ADDED_EVENT_KEY,
+  BotLifecycleIntake,
+  type BotLifecycleInitializer,
+} from './bot-lifecycle.js'
 import type { PetCoordinator } from '../coordinator.js'
 import type { PetRepository } from '../repository.js'
 import type { PetChannelConfig } from '../spec.js'
+import type { PetUnifiedLocusReadiness } from '../../wire.js'
+import type { LocusAuthorizationResolver } from '../locus/admission.js'
 import type { ChannelControl } from '../routes.js'
 
 /** What the channel needs from its Host. */
@@ -39,20 +41,32 @@ export interface ChannelServiceDeps {
   /** Overridable for tests; defaults to the real lark-cli client. */
   readonly client?: LarkClient
   /**
-   * QA delivery, when this Host composed the subagent seam.
-   *
-   * Absent on a Host without it: a qa binding then refuses rather than
-   * falling back to workspace dispatch, which would answer the group from a
-   * fresh executor holding none of the context it exists for.
+   * Opt-in unified locus path. When present, InboundPipeline routes every
+   * Feishu business message through this controller and never consults the
+   * legacy QA/chat/Invocation path.
    */
-  readonly qaDelivery?: QaDeliveryPort
+  readonly locusController?: LocusChannelControllerPort
+  /** Durable unified/legacy-retirement authorization for exact endpoints. */
+  readonly locusAuthorization?: LocusAuthorizationResolver
   /**
-   * Handles `/bind` in groups with no QA binding yet.
-   *
-   * Absent on a Host without QA support, in which case the command is never
-   * recognised and those groups behave exactly as before.
+   * Optional diagnostic for a Host that knows unified locus was requested but
+   * could not compose its durable/observer/child capability. It is surfaced
+   * without changing bootstrap or subscription semantics; absent capability
+   * still means no unified route is published.
    */
-  readonly bindCommand?: BindCommandPort
+  readonly locusDiagnostic?: string
+  /**
+   * Explicit Host capability proof. Production normally derives this from the
+   * fully composed controller; tests/adapters may provide the same proof
+   * directly without fabricating a controller.
+   */
+  readonly unifiedLocusReadiness?: PetUnifiedLocusReadiness
+  /** Independent chat-level initialization for verified bot-added events. */
+  readonly botLifecycleInitializer?: BotLifecycleInitializer
+  /** Explicit catalog/provisioning diagnostic when lifecycle intake is unavailable. */
+  readonly botLifecycleDiagnostic?: string
+  /** Shared injectable spawn for event consumers in tests. */
+  readonly subscriptionSpawnProcess?: ConstructorParameters<typeof ChannelSubscription>[0]['spawnProcess']
   /**
    * Overridable process spawn for the binding flow.
    *
@@ -70,11 +84,14 @@ export interface ChannelServiceDeps {
 export class ChannelService implements ChannelControl {
   private readonly client: LarkClient
   private readonly subscription: ChannelSubscription
+  private readonly lifecycleSubscription: ChannelSubscription | undefined
+  private readonly lifecycleIntake: BotLifecycleIntake | undefined
   private readonly pipeline: InboundPipeline
   private readonly bootstrap: BotBootstrap
   private binding: BootstrapState | undefined
   private permission: LarkPermissionDiagnostic | undefined
   private identityDiagnostic: string | undefined
+  private lifecycleDiagnostic: string | undefined
   private readonly ignoredAt = new Map<string, number>()
   /** Fences async identity probes after disable, teardown, or a newer request. */
   private operationGeneration = 0
@@ -85,6 +102,7 @@ export class ChannelService implements ChannelControl {
   constructor(private readonly deps: ChannelServiceDeps) {
     this.client = deps.client ?? createLarkCliClient()
     this.subscription = new ChannelSubscription({
+      ...(deps.subscriptionSpawnProcess === undefined ? {} : { spawnProcess: deps.subscriptionSpawnProcess }),
       onLine: line => {
         // Fire-and-forget: intake is async, and the consumer stream must not
         // wait on Pet's storage or an Agent dispatch.
@@ -94,13 +112,53 @@ export class ChannelService implements ChannelControl {
       },
       onStatus: status => this.onStatus(status),
     })
+    this.lifecycleIntake = deps.botLifecycleInitializer === undefined
+      ? undefined
+      : new BotLifecycleIntake({
+        allowOpenIds: () => deps.repository.getChannelConfig().allowOpenIds,
+        initializer: deps.botLifecycleInitializer,
+      })
+    this.lifecycleSubscription = this.lifecycleIntake === undefined
+      ? undefined
+      : new ChannelSubscription({
+        eventKey: BOT_ADDED_EVENT_KEY,
+        ...(deps.subscriptionSpawnProcess === undefined ? {} : { spawnProcess: deps.subscriptionSpawnProcess }),
+        onLine: line => {
+          void this.lifecycleIntake!.handleLine(line).then(outcome => {
+            if (outcome.kind === 'unverified') {
+              this.lifecycleDiagnostic =
+                'Bot 入群事件缺少 allowlist 操作者证明；该群保持待建立，首次 allowlist @ 可补齐。'
+              void deps.repository.updateChannelConfig(current => ({
+                ...current,
+                lifecycleDiagnostic: { kind: 'bot-added-unverified', updatedAt: Date.now() },
+              })).catch(() => undefined)
+              this.log('bot-added event lacked allowlisted operator proof; first allowlist @ remains required')
+              deps.onChange?.()
+            } else if (outcome.kind === 'initialized') {
+              this.lifecycleDiagnostic = undefined
+              void deps.repository.updateChannelConfig(current => {
+                const { lifecycleDiagnostic: _cleared, ...rest } = current
+                return rest
+              }).catch(() => undefined)
+              deps.onChange?.()
+            }
+          }).catch(error => {
+            this.log(`bot lifecycle intake failed: ${error instanceof Error ? error.message : String(error)}`)
+          })
+        },
+        onStatus: () => deps.onChange?.(),
+      })
     this.pipeline = new InboundPipeline({
       repository: deps.repository,
       coordinator: deps.coordinator,
       client: this.client,
       locator: deps.locator,
-      ...(deps.qaDelivery !== undefined ? { qaDelivery: deps.qaDelivery } : {}),
-      ...(deps.bindCommand !== undefined ? { bindCommand: deps.bindCommand } : {}),
+      ...(deps.locusController !== undefined ? { locusController: deps.locusController } : {}),
+      // Production is a breaking cutover: an absent unified controller is an
+      // unavailable channel, never permission to enter the retained legacy
+      // root/Invocation/QA branches below the pipeline boundary.
+      requireLocus: true,
+      ...(deps.locusAuthorization !== undefined ? { locusAuthorization: deps.locusAuthorization } : {}),
       watermark: () => this.subscription.watermark,
       onOutcome: outcome => this.onOutcome(outcome),
     })
@@ -133,6 +191,14 @@ export class ChannelService implements ChannelControl {
     this.operationGeneration += 1
     this.bootstrap.cancel()
     this.subscription.stop()
+    this.lifecycleSubscription?.stop()
+    // The unified controller owns only its observer subscription/pending map;
+    // disposing it never releases a locus child or sends parent/business text.
+    try {
+      this.deps.locusController?.dispose()
+    } catch {
+      // Teardown is fail-soft like the subscription itself.
+    }
   }
 
   status(): {
@@ -140,9 +206,21 @@ export class ChannelService implements ChannelControl {
     diagnostic?: string
     permission?: LarkPermissionDiagnostic
     identityDiagnostic?: string
+    unifiedLocus: PetUnifiedLocusReadiness
   } {
     const current = this.subscription.current
-    const stored = this.deps.repository.getChannelConfig().channelDiagnostic
+    const config = this.deps.repository.getChannelConfig()
+    const stored = config.channelDiagnostic
+    const durableLifecycle = config.lifecycleDiagnostic?.kind === 'bot-added-unverified'
+      ? 'Bot 入群事件缺少 allowlist 操作者证明；该群保持待建立，首次 allowlist @ 可补齐。'
+      : undefined
+    const diagnostic =
+      this.deps.locusDiagnostic ??
+      current.diagnostic ??
+      this.lifecycleSubscription?.current.diagnostic ??
+      this.lifecycleDiagnostic ??
+      durableLifecycle ??
+      this.deps.botLifecycleDiagnostic
     const permission =
       this.permission ??
       (stored?.kind === 'permission-missing'
@@ -152,13 +230,30 @@ export class ChannelService implements ChannelControl {
             ...(stored.consoleUrl !== undefined ? { consoleUrl: stored.consoleUrl } : {}),
           }
         : undefined)
+    const unifiedLocus: PetUnifiedLocusReadiness =
+      this.deps.unifiedLocusReadiness ??
+      (this.deps.locusController === undefined
+        ? {
+            childSession: 'unavailable',
+            defaultPermission: 'read',
+            readVerification: 'unavailable',
+            diagnostic:
+              this.deps.locusDiagnostic ??
+              '当前 Host 尚未发布完整的统一子会话、轮次关联与只读策略核验能力。',
+          }
+        : {
+            childSession: 'verified',
+            defaultPermission: 'read',
+            readVerification: 'verified',
+          })
     return {
       phase: current.phase,
-      ...(current.diagnostic !== undefined ? { diagnostic: current.diagnostic } : {}),
+      ...(diagnostic !== undefined ? { diagnostic } : {}),
       ...(permission !== undefined ? { permission } : {}),
       ...(this.identityDiagnostic !== undefined
         ? { identityDiagnostic: this.identityDiagnostic }
         : {}),
+      unifiedLocus,
     }
   }
 
@@ -170,6 +265,7 @@ export class ChannelService implements ChannelControl {
     const generation = ++this.operationGeneration
     if (!enabled) {
       this.subscription.stop()
+      this.lifecycleSubscription?.stop()
       return
     }
     const config = this.requireReadyConfig()
@@ -205,8 +301,13 @@ export class ChannelService implements ChannelControl {
     })
     if (generation !== this.operationGeneration) return
     if (!this.deps.repository.getChannelConfig().enabled) return
-    if (replace) this.subscription.reconnect()
-    else this.subscription.start()
+    if (replace) {
+      this.subscription.reconnect()
+      this.lifecycleSubscription?.reconnect()
+    } else {
+      this.subscription.start()
+      this.lifecycleSubscription?.start()
+    }
   }
 
   async reconnect(): Promise<void> {
@@ -227,7 +328,17 @@ export class ChannelService implements ChannelControl {
       config.defaultWorkspaceId === undefined ||
       !this.workspaceAvailable(config.defaultWorkspaceId)
     ) {
-      throw new Error('Choose an available default workspace.')
+      throw new Error('Choose an available default workspace for automatic main sessions.')
+    }
+    const unifiedLocus = this.status().unifiedLocus
+    if (
+      unifiedLocus.childSession !== 'verified' ||
+      unifiedLocus.readVerification !== 'verified'
+    ) {
+      throw new Error(
+        unifiedLocus.diagnostic ??
+        'Verify unified child-session creation and the effective read policy before enabling the channel.',
+      )
     }
     return config as PetChannelConfig & { readonly botAppId: string; readonly botOpenId: string }
   }
@@ -261,6 +372,7 @@ export class ChannelService implements ChannelControl {
     const resume = this.deps.repository.getChannelConfig().enabled
     if (resume) {
       this.subscription.stop()
+      this.lifecycleSubscription?.stop()
       await this.deps.repository.updateChannelConfig(current =>
         generation === this.operationGeneration
           ? { ...current, enabled: false, updatedAt: Date.now() }
@@ -283,14 +395,11 @@ export class ChannelService implements ChannelControl {
    * @param invocationId - The settled Invocation.
    * @param outcome - How it ended.
    */
-  async settle(invocationId: string, outcome: 'succeeded' | 'failed'): Promise<void> {
-    try {
-      await settleFeedback(this.deps.repository, this.client, invocationId, outcome)
-    } catch (error) {
-      // Feedback decorates work that already happened; a Lark failure must
-      // never rewrite the outcome of that work.
-      this.log(`feedback failed: ${error instanceof Error ? error.message : String(error)}`)
-    }
+  async settle(_invocationId: string, _outcome: 'succeeded' | 'failed'): Promise<void> {
+    // Ordinary Pet Invocation events still exist for the wheel, but production
+    // Feishu work no longer creates invocation_channel rows. Unified Delivery
+    // feedback is owned exclusively by LocusChannelController's exact turn
+    // observer, so this compatibility hook must never consume legacy rows.
   }
 
   /** Persist identity facts only after the named profile proves them. */
@@ -400,6 +509,11 @@ export class ChannelService implements ChannelControl {
     }
     if (outcome.kind === 'unroutable' || outcome.kind === 'error') {
       this.log(`inbound ${outcome.kind}: ${outcome.reason}`)
+      return
+    }
+    if (outcome.kind === 'control') {
+      if (!outcome.ok) this.log(`control refused: ${outcome.reason ?? 'unknown'}`)
+      this.deps.onChange?.()
       return
     }
     this.deps.onChange?.()

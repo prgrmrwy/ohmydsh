@@ -37,10 +37,20 @@ export function emptyMedium(): MemoryMedium {
 export interface MediumFaults {
   /** Reject every write with this error. */
   failWrites?: Error
+  /** Reject the Nth write, allowing failure-injection compensation tests. */
+  failOnWriteNumber?: number
+  /** Optional injected error for the counted write. */
+  failOnWriteError?: Error
+  /**
+   * Model a medium WITHOUT atomic batches, so a test can prove the adapter's
+   * behavior on a Host whose storage layer predates the capability.
+   */
+  noTransaction?: boolean
 }
 
 class MemoryUnit implements KvUnit {
   private closed = false
+  private writes = 0
 
   constructor(
     private readonly medium: MemoryMedium,
@@ -54,7 +64,11 @@ class MemoryUnit implements KvUnit {
 
   private assertWritable(): void {
     this.assertOpen()
+    this.writes += 1
     if (this.faults.failWrites !== undefined) throw this.faults.failWrites
+    if (this.faults.failOnWriteNumber !== undefined && this.writes === this.faults.failOnWriteNumber) {
+      throw this.faults.failOnWriteError ?? new Error(`injected write failure #${this.writes}`)
+    }
   }
 
   async loadAll(): Promise<{ tables: Record<string, Record<string, unknown>>; global: unknown }> {
@@ -91,6 +105,36 @@ class MemoryUnit implements KvUnit {
     this.medium.global = JSON.stringify(value)
   }
 
+  /**
+   * Commit a batch atomically: staged into a copy first, so an injected
+   * failure leaves the medium exactly as it was. This is what lets a test
+   * distinguish a real transaction from a compensated write sequence.
+   */
+  async applyBatch(writes: readonly {
+    kind: 'put' | 'delete' | 'global'
+    table?: string
+    key?: string
+    value?: unknown
+  }[]): Promise<void> {
+    this.assertOpen()
+    if (writes.length === 0) return
+    const tables: Record<string, Record<string, string>> = {}
+    for (const [table, bucket] of Object.entries(this.medium.tables)) tables[table] = { ...bucket }
+    let global = this.medium.global
+    for (const write of writes) {
+      this.assertWritable()
+      if (write.kind === 'global') {
+        global = JSON.stringify(write.value)
+        continue
+      }
+      const bucket = (tables[write.table as string] ??= {})
+      if (write.kind === 'delete') delete bucket[write.key as string]
+      else bucket[write.key as string] = JSON.stringify(write.value)
+    }
+    this.medium.tables = tables
+    this.medium.global = global
+  }
+
   async close(): Promise<void> {
     this.closed = true
   }
@@ -113,7 +157,21 @@ export class MemoryBackend {
         if (this.medium.version === undefined) this.medium.version = descriptor.version
         else if (this.medium.version !== descriptor.version) throw new Error('version-mismatch')
         this.open.add(descriptor.name)
-        return new MemoryUnit(this.medium, descriptor, this.faults)
+        const unit = new MemoryUnit(this.medium, descriptor, this.faults)
+        if (this.faults.noTransaction === true) {
+          // Omit the optional member exactly as such a backend would, rather
+          // than leaving a method that reports being unavailable.
+          const { applyBatch: _omitted, ...rest } = unit
+          return Object.assign(Object.create(Object.getPrototypeOf(unit) as object), rest, {
+            loadAll: () => unit.loadAll(),
+            putRecord: (table: string, key: string, value: unknown) => unit.putRecord(table, key, value),
+            deleteRecord: (table: string, key: string) => unit.deleteRecord(table, key),
+            setGlobal: (value: unknown) => unit.setGlobal(value),
+            close: () => unit.close(),
+            applyBatch: undefined,
+          }) as KvUnit
+        }
+        return unit
       },
     }
   }

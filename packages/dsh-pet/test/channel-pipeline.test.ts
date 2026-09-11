@@ -197,6 +197,159 @@ describe('accepting an inbound message', () => {
   })
 })
 
+describe('unified locus precedence', () => {
+  it('delegates exclusively to the locus controller when composed', async () => {
+    const f = await fixture()
+    harness = f.harness
+    const handle = vi.fn(async () => ({
+      kind: 'accepted' as const,
+      deliveryId: 'delivery-1',
+      executionId: 'execution-1',
+      locusId: 'locus-1',
+      generation: 1,
+    }))
+    const pipeline = new InboundPipeline({
+      repository: f.harness.repository,
+      coordinator: f.coordinator,
+      client: f.client,
+      locator: { locate: () => '/should-not-be-read' },
+      watermark: () => 1000,
+      qaDelivery: { deliver: vi.fn(async () => ({ kind: 'accepted', invocationId: 'legacy-1' })) },
+      locusController: { handle },
+      locusAuthorization: () => 'uninitialized',
+    })
+
+    const outcome = await pipeline.handleLine(p2pLine())
+
+    expect(outcome).toEqual({
+      kind: 'locus-accepted',
+      deliveryId: 'delivery-1',
+      executionId: 'execution-1',
+      locusId: 'locus-1',
+      generation: 1,
+    })
+    expect(handle).toHaveBeenCalledTimes(1)
+    const productionAdmission = handle.mock.calls[0]?.[1]
+    expect(productionAdmission).toMatchObject({ allowOpenIds: [OWNER], watermark: 1000 })
+    expect(typeof productionAdmission?.isDuplicate).toBe('function')
+    expect(productionAdmission?.authorization?.({ chatId: P2P, key: P2P })).toBe('uninitialized')
+    expect(f.dispatched).toEqual([])
+    expect(f.reactions).toEqual([])
+    expect(f.harness.repository.listTasks()).toHaveLength(0)
+    expect(f.harness.repository.getChatBinding(P2P)).toBeUndefined()
+  })
+
+  it('sends one bounded rebuild notice for an explicitly retired legacy endpoint', async () => {
+    const f = await fixture()
+    harness = f.harness
+    const handle = vi.fn(async () => ({ kind: 'ignored' as const, reason: 'legacy-endpoint' }))
+    const pipeline = new InboundPipeline({
+      repository: f.harness.repository,
+      coordinator: f.coordinator,
+      client: f.client,
+      locator: { locate: () => '/should-not-be-read' },
+      watermark: () => 1000,
+      locusController: { handle },
+      locusAuthorization: () => 'legacy',
+    })
+
+    await expect(pipeline.handleLine(p2pLine())).resolves.toEqual({
+      kind: 'ignored', reason: 'legacy-endpoint',
+    })
+    expect(f.client.reply).toHaveBeenCalledWith(
+      'om_1',
+      expect.stringContaining('显式重建'),
+    )
+    expect(f.dispatched).toEqual([])
+    expect(f.harness.repository.listTasks()).toHaveLength(0)
+
+    f.client.reply.mockClear()
+    await pipeline.handleLine(p2pLine({ message_id: 'om_non_owner', sender_id: 'ou_not_allowed' }))
+    expect(f.client.reply).not.toHaveBeenCalled()
+  })
+
+  it('maps an admitted control result without creating legacy work', async () => {
+    const f = await fixture()
+    harness = f.harness
+    const handle = vi.fn(async () => ({
+      kind: 'control' as const,
+      command: { kind: 'scope' as const, mode: 'write' as const },
+      ok: true,
+      text: 'scope updated',
+    }))
+    const pipeline = new InboundPipeline({
+      repository: f.harness.repository,
+      coordinator: f.coordinator,
+      client: f.client,
+      locator: { locate: () => '/should-not-be-read' },
+      watermark: () => 1000,
+      locusController: { handle },
+      locusAuthorization: () => 'uninitialized',
+    })
+
+    await expect(pipeline.handleLine(p2pLine({ content: '@Pet /scope write' }))).resolves.toEqual({
+      kind: 'control',
+      command: { kind: 'scope', mode: 'write' },
+      ok: true,
+      text: 'scope updated',
+    })
+    expect(handle).toHaveBeenCalledTimes(1)
+    expect(f.dispatched).toEqual([])
+    expect(f.reactions).toEqual([])
+    expect(f.harness.repository.listTasks()).toHaveLength(0)
+  })
+
+  it('fails closed without invoking legacy routing when locus handling throws', async () => {
+    const f = await fixture()
+    harness = f.harness
+    const pipeline = new InboundPipeline({
+      repository: f.harness.repository,
+      coordinator: f.coordinator,
+      client: f.client,
+      locator: { locate: () => '/should-not-be-read' },
+      watermark: () => 1000,
+      locusController: {
+        handle: vi.fn(async () => {
+          throw new Error('adapter-private-detail')
+        }),
+      },
+      locusAuthorization: () => 'uninitialized',
+    })
+
+    const outcome = await pipeline.handleLine(p2pLine())
+
+    expect(outcome.kind).toBe('unroutable')
+    expect(outcome).toMatchObject({ reason: 'Unified locus channel failed closed: adapter-private-detail' })
+    expect(f.dispatched).toEqual([])
+    expect(f.harness.repository.listTasks()).toHaveLength(0)
+    expect(f.harness.repository.getChatBinding(P2P)).toBeUndefined()
+  })
+})
+
+describe('unified admission production context', () => {
+  it('fails closed when production authorization is absent and never falls back to legacy routing', async () => {
+    const f = await fixture()
+    harness = f.harness
+    const handle = vi.fn()
+    const pipeline = new InboundPipeline({
+      repository: f.harness.repository,
+      coordinator: f.coordinator,
+      client: f.client,
+      locator: { locate: () => '/should-not-be-read' },
+      watermark: () => 4242,
+      locusController: { handle },
+    })
+
+    await expect(pipeline.handleLine(p2pLine())).resolves.toEqual({
+      kind: 'unroutable',
+      reason: 'Unified locus authorization is unavailable.',
+    })
+    expect(handle).not.toHaveBeenCalled()
+    expect(f.dispatched).toEqual([])
+    expect(f.harness.repository.listTasks()).toHaveLength(0)
+  })
+})
+
 describe('refusals leave no trace', () => {
   it('ignores a stranger without reacting or storing anything', async () => {
     const f = await fixture()

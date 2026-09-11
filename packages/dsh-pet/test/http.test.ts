@@ -106,15 +106,16 @@ describe('strict field validation', () => {
     expect(() => strictBody('text', ['a'])).toThrow(/must be a JSON object/)
   })
 
-  it('requires non-empty strings', () => {
+  it('requires non-empty strings and trims identifiers', () => {
     expect(() => requireString({ a: '' }, 'a')).toThrow(/non-empty string/)
     expect(() => requireString({}, 'a')).toThrow(/non-empty string/)
-    expect(requireString({ a: 'value' }, 'a')).toBe('value')
+    expect(requireString({ a: '  value  ' }, 'a')).toBe('value')
   })
 
   it('permits absent optional strings but rejects wrong types', () => {
     expect(optionalString({}, 'a')).toBeUndefined()
-    expect(optionalString({ a: 'v' }, 'a')).toBe('v')
+    expect(optionalString({ a: '  v  ' }, 'a')).toBe('v')
+    expect(optionalString({ a: '   ' }, 'a')).toBeUndefined()
     expect(() => optionalString({ a: 5 }, 'a')).toThrow(/must be a string/)
   })
 })

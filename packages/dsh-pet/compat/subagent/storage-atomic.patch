@@ -1,0 +1,1028 @@
+diff --git a/packages/storage/storage-domain/src/domain.ts b/packages/storage/storage-domain/src/domain.ts
+index c4087d6dd..eda9921bd 100644
+--- a/packages/storage/storage-domain/src/domain.ts
++++ b/packages/storage/storage-domain/src/domain.ts
+@@ -12,9 +12,33 @@
+ import type { Context } from '@deepseek-ai/cordis'
+ import type { KvUnit } from '@deepseek-ai/dsh-storage'
+ import { DomainError } from './error.ts'
+-import type { DomainSpec, DomainGlobalSpec, TableKeyOf, TableValueOf } from './spec.ts'
++import type { DomainSpec, DomainGlobalSpec, GlobalValueOf, TableKeyOf, TableValueOf } from './spec.ts'
+ import type { DomainChanged } from './events.ts'
+ 
++/**
++ * One staged write inside {@link Domain.transaction}. Values are the full new
++ * records, exactly as `put`/`delete` take them.
++ */
++export type DomainWrite<S extends DomainSpec> = {
++  readonly [N in keyof S['tables'] & string]:
++    | { readonly table: N; readonly operation: 'put'; readonly key: TableKeyOf<S, N>; readonly value: TableValueOf<S, N> }
++    | { readonly table: N; readonly operation: 'delete'; readonly key: TableKeyOf<S, N> }
++}[keyof S['tables'] & string]
++
++/**
++ * The staging surface a transaction body writes into. It records the intended
++ * writes; nothing is durable or visible until the body returns and the whole
++ * batch commits.
++ */
++export interface DomainTransaction<S extends DomainSpec> {
++  /** Stage one record insert or overwrite. */
++  put<N extends keyof S['tables'] & string>(table: N, key: TableKeyOf<S, N>, value: TableValueOf<S, N>): void
++  /** Stage one record deletion. A key that is absent at commit is a no-op. */
++  delete<N extends keyof S['tables'] & string>(table: N, key: TableKeyOf<S, N>): void
++  /** Stage the global singleton; only valid when the spec declares one. */
++  setGlobal(value: GlobalValueOf<S>): void
++}
++
+ /** Handle on a domain's global singleton. */
+ export interface DomainGlobal<G> {
+   /**
+@@ -107,6 +131,31 @@ export interface Domain<S extends DomainSpec> {
+    */
+   table<N extends keyof S['tables'] & string>(name: N): KvTable<TableKeyOf<S, N>, TableValueOf<S, N>>
+ 
++  /**
++   * Commit several writes across tables as ONE atomic, durable unit.
++   *
++   * The body runs on the domain's write chain, so it reads the state current
++   * at its slot with no concurrent write interleaving, and stages writes
++   * instead of performing them. When it returns, the whole batch is handed to
++   * the backend as one commit: after resolution the medium and memory hold
++   * every write, and on rejection — including a crash mid-commit — they hold
++   * none of them. This is what records that must agree with each other need;
++   * separate `put` calls cannot express it, because a crash between two of
++   * them leaves the domain half-updated.
++   *
++   * Change events for the batch emit after that single commit, in staged
++   * order. A body that throws commits nothing and propagates. Rejects with
++   * `transaction-unsupported` when the routed backend cannot commit multiple
++   * records atomically, so a caller that requires atomicity fails loud
++   * instead of receiving a best-effort sequence.
++   * @param body - Synchronous staging function; it must not perform IO.
++   * @returns resolution after the whole batch is durable and its events emitted.
++   */
++  transaction(body: (tx: DomainTransaction<S>) => void): Promise<void>
++
++  /** Whether the routed backend can commit {@link transaction} atomically. */
++  readonly supportsTransaction: boolean
++
+   /**
+    * Close this domain: reject new writes immediately, drain already-queued
+    * writes (their events still emit), release the backend unit, then free
+@@ -132,6 +181,12 @@ interface TableHost {
+ 
+ const noop = () => {}
+ 
++/** One write staged by a transaction body, in the backend's batch vocabulary. */
++type StagedWrite =
++  | { readonly kind: 'put'; readonly table: string; readonly key: string; readonly value: unknown }
++  | { readonly kind: 'delete'; readonly table: string; readonly key: string }
++  | { readonly kind: 'global'; readonly value: unknown }
++
+ /**
+  * The single domain implementation behind the {@link Domain} interface. The
+  * facility constructs it from a validated `loadAll` snapshot and erases it to
+@@ -200,6 +255,67 @@ export class DomainImpl {
+     }
+   }
+ 
++  /** Whether the routed backend can commit a multi-record batch atomically. */
++  get supportsTransaction(): boolean {
++    return typeof this.unit.applyBatch === 'function'
++  }
++
++  /**
++   * Commit several writes across tables as one atomic unit. Staging runs on
++   * the write chain, so the body observes the state at its own slot; the
++   * backend batch is the single commit point for medium AND memory.
++   * @param body - Synchronous staging function.
++   * @returns resolution after durability and event emission.
++   */
++  transaction(body: (tx: unknown) => void): Promise<void> {
++    return this.enqueue(async () => {
++      if (!this.supportsTransaction) {
++        throw new DomainError(
++          'transaction-unsupported',
++          `domain '${this.name}' is routed to a backend that cannot commit a multi-record batch atomically`,
++        )
++      }
++      const staged: StagedWrite[] = []
++      body({
++        put: (table: string, key: string, value: unknown) => {
++          // Resolve now so an undeclared table rejects the whole transaction
++          // before anything is committed.
++          this.tableImpl(table)
++          staged.push({ kind: 'put', table, key, value })
++        },
++        delete: (table: string, key: string) => {
++          this.tableImpl(table)
++          staged.push({ kind: 'delete', table, key })
++        },
++        setGlobal: (value: unknown) => {
++          if (this.globalHandle === undefined) {
++            throw new Error(`domain '${this.name}' declares no global`)
++          }
++          staged.push({ kind: 'global', value })
++        },
++      })
++      if (staged.length === 0) return
++      // One backend call: durability for the whole batch or for none of it.
++      await this.unit.applyBatch?.(staged)
++      // Memory follows the medium, exactly as the single primitives do, so a
++      // rejected commit above leaves reads consistent with the medium.
++      for (const write of staged) {
++        if (write.kind === 'global') this.globalValue = write.value
++        else if (write.kind === 'delete') this.tableImpl(write.table).applyDelete(write.key)
++        else this.tableImpl(write.table).applyPut(write.key, write.value)
++      }
++      for (const write of staged) {
++        this.emitChanged(
++          write.kind === 'global'
++            ? { domain: this.name, table: '', key: '', operation: 'put', value: write.value }
++            : write.kind === 'delete'
++              ? { domain: this.name, table: write.table, key: write.key, operation: 'deleted' }
++              : { domain: this.name, table: write.table, key: write.key, operation: 'put', value: write.value },
++        )
++      }
++    })
++  }
++
+   /** Global singleton handle; accessing it on a spec that declares no global is a caller bug and throws. */
+   get global(): DomainGlobal<unknown> {
+     if (this.globalHandle === undefined) {
+@@ -215,6 +331,11 @@ export class DomainImpl {
+    * @returns the stable table handle.
+    */
+   table(name: string): KvTable<string, unknown> {
++    return this.tableImpl(name)
++  }
++
++  /** Resolve one declared table's runtime; an undeclared name is a caller bug. */
++  private tableImpl(name: string): KvTableImpl<string, unknown> {
+     const table = this.tables.get(name)
+     if (table === undefined) {
+       throw new Error(`domain '${this.name}' declares no table '${name}'`)
+@@ -345,6 +466,20 @@ class KvTableImpl<K extends string, V> implements KvTable<K, V> {
+     })
+   }
+ 
++  /**
++   * Land one already-durable put into memory. Used by the domain's
++   * transaction commit, which owns durability and event emission for the
++   * whole batch; the single-write path keeps using `put`.
++   */
++  applyPut(key: string, value: unknown): void {
++    this.records.set(key, value)
++  }
++
++  /** Land one already-durable delete into memory. */
++  applyDelete(key: string): void {
++    this.records.delete(key)
++  }
++
+   private emitPut(key: K, value: V): void {
+     this.host.emitChanged({
+       domain: this.host.domainName,
+diff --git a/packages/storage/storage-domain/src/error.ts b/packages/storage/storage-domain/src/error.ts
+index b768c2af3..b729b7d84 100644
+--- a/packages/storage/storage-domain/src/error.ts
++++ b/packages/storage/storage-domain/src/error.ts
+@@ -9,6 +9,7 @@ export type DomainErrorCode =
+   | 'facet-unsupported'
+   | 'invalid-record'
+   | 'missing-key'
++  | 'transaction-unsupported'
+   | 'closed'
+ 
+ /** Location of the record that failed schema validation at the durable boundary. */
+diff --git a/packages/storage/storage-domain/src/index.ts b/packages/storage/storage-domain/src/index.ts
+index 7e0be5e15..564ca5c79 100644
+--- a/packages/storage/storage-domain/src/index.ts
++++ b/packages/storage/storage-domain/src/index.ts
+@@ -24,7 +24,9 @@ export type {
+   TableKeyOf, TableValueOf, GlobalValueOf,
+ } from './spec.ts'
+ export type { DomainChanged } from './events.ts'
+-export type { Domain, DomainGlobal, DomainGlobalHandleOf, KvTable } from './domain.ts'
++export type {
++  Domain, DomainGlobal, DomainGlobalHandleOf, DomainTransaction, DomainWrite, KvTable,
++} from './domain.ts'
+ 
+ declare module '@deepseek-ai/dsh-storage' {
+   interface StorageForms {
+diff --git a/packages/storage/storage-domain/tests/domain.spec.ts b/packages/storage/storage-domain/tests/domain.spec.ts
+index b21ec0faf..49f339810 100644
+--- a/packages/storage/storage-domain/tests/domain.spec.ts
++++ b/packages/storage/storage-domain/tests/domain.spec.ts
+@@ -296,6 +296,150 @@ describe('KvTable writes', () => {
+   })
+ })
+ 
++describe('Domain.transaction', () => {
++  it('commits writes across tables and the global as one durable unit', async () => {
++    const pool = new MemoryMediaPool()
++    const { facility, changes } = await harness({ pool })
++    const domain = await facility.open(spec)
++    const table = domain.table('items')
++    await table.put('stale', { label: 'old', count: 1 })
++    const seen = changes.length
++
++    expect(domain.supportsTransaction).toBe(true)
++    await domain.transaction((tx) => {
++      tx.put('items', 'stale', { label: 'new', count: 2 })
++      tx.put('items', 'fresh', { label: 'added', count: 3 })
++      tx.setGlobal({ theme: 'dark' })
++    })
++
++    // Memory, medium and events all reflect the same single commit.
++    expect(table.get('stale')).toEqual({ label: 'new', count: 2 })
++    expect(table.get('fresh')).toEqual({ label: 'added', count: 3 })
++    expect(domain.global.get()).toEqual({ theme: 'dark' })
++    const medium = pool.media.get('demo')!
++    expect(medium.tables.get('items')!.get('fresh')).toEqual({ label: 'added', count: 3 })
++    expect(medium.global).toEqual({ theme: 'dark' })
++    expect(changes.slice(seen)).toEqual([
++      { domain: 'demo', table: 'items', key: 'stale', operation: 'put', value: { label: 'new', count: 2 } },
++      { domain: 'demo', table: 'items', key: 'fresh', operation: 'put', value: { label: 'added', count: 3 } },
++      { domain: 'demo', table: '', key: '', operation: 'put', value: { theme: 'dark' } },
++    ])
++  })
++
++  it('stages deletions and applies an empty transaction as a no-op', async () => {
++    const { facility, changes } = await harness()
++    const domain = await facility.open(spec)
++    const table = domain.table('items')
++    await table.put('gone', { label: 'x', count: 1 })
++    const seen = changes.length
++
++    await domain.transaction((tx) => { tx.delete('items', 'gone') })
++    expect(table.get('gone')).toBeUndefined()
++    await domain.transaction(() => {})
++
++    expect(changes.slice(seen)).toEqual([
++      { domain: 'demo', table: 'items', key: 'gone', operation: 'deleted' },
++    ])
++  })
++
++  it('leaves memory, medium and events untouched when the commit rejects', async () => {
++    const pool = new MemoryMediaPool()
++    const { facility, changes } = await harness({ pool })
++    const domain = await facility.open(spec)
++    const table = domain.table('items')
++    await table.put('a', { label: 'x', count: 1 })
++    const seen = changes.length
++
++    // One injected failure inside the batch: a non-atomic implementation
++    // would already have published whatever it applied before it.
++    pool.failNextWrites = 1
++    await expect(domain.transaction((tx) => {
++      tx.put('items', 'a', { label: 'x', count: 99 })
++      tx.put('items', 'b', { label: 'y', count: 5 })
++    })).rejects.toThrow(/injected/)
++
++    expect(table.get('a')).toEqual({ label: 'x', count: 1 })
++    expect(table.get('b')).toBeUndefined()
++    const items = pool.media.get('demo')!.tables.get('items')!
++    expect(items.get('a')).toEqual({ label: 'x', count: 1 })
++    expect(items.has('b')).toBe(false)
++    expect(changes).toHaveLength(seen)
++
++    // The chain survives a rejected transaction.
++    await domain.transaction((tx) => { tx.put('items', 'b', { label: 'y', count: 5 }) })
++    expect(table.get('b')).toEqual({ label: 'y', count: 5 })
++  })
++
++  it('commits nothing when the body throws or stages an undeclared target', async () => {
++    const pool = new MemoryMediaPool()
++    const { facility, changes } = await harness({ pool })
++    const domain = await facility.open(spec)
++    const seen = changes.length
++
++    await expect(domain.transaction((tx) => {
++      tx.put('items', 'a', { label: 'x', count: 1 })
++      throw new Error('body gave up')
++    })).rejects.toThrow('body gave up')
++    await expect(domain.transaction((tx) => {
++      tx.put('ghost' as 'items', 'a', { label: 'x', count: 1 })
++    })).rejects.toThrow(/declares no table/)
++
++    expect(domain.table('items').get('a')).toBeUndefined()
++    expect(pool.media.get('demo')!.tables.get('items')?.has('a') ?? false).toBe(false)
++    expect(changes).toHaveLength(seen)
++  })
++
++  it('rejects a global write on a spec that declares none', async () => {
++    const { facility } = await harness()
++    const domain = await facility.open(bareSpec)
++    await expect(domain.transaction((tx) => { tx.setGlobal(undefined as never) }))
++      .rejects.toThrow(/declares no global/)
++  })
++
++  it('serializes against ordinary writes on the same chain', async () => {
++    const { facility } = await harness()
++    const domain = await facility.open(spec)
++    const table = domain.table('items')
++    await table.put('counter', { label: 'c', count: 0 })
++
++    // Interleaved transactions and updates must not lose increments: the body
++    // reads the value current at its own queue slot.
++    await Promise.all([
++      ...Array.from({ length: 10 }, () =>
++        table.update('counter', current => ({ ...current, count: current.count + 1 }))),
++      ...Array.from({ length: 10 }, () => domain.transaction((tx) => {
++        const current = table.get('counter')!
++        tx.put('items', 'counter', { ...current, count: current.count + 1 })
++      })),
++    ])
++    expect(table.get('counter')).toEqual({ label: 'c', count: 20 })
++  })
++
++  it('fails loud instead of degrading when the backend cannot commit atomically', async () => {
++    const pool = new MemoryMediaPool()
++    pool.supportsBatch = false
++    const { facility, changes } = await harness({ pool })
++    const domain = await facility.open(spec)
++    const seen = changes.length
++
++    expect(domain.supportsTransaction).toBe(false)
++    // A best-effort sequence would be worse than a refusal: the caller asked
++    // for all-or-nothing precisely because a half-applied batch is unsafe.
++    await expect(domain.transaction((tx) => { tx.put('items', 'a', { label: 'x', count: 1 }) }))
++      .rejects.toMatchObject({ code: 'transaction-unsupported' })
++    expect(domain.table('items').get('a')).toBeUndefined()
++    expect(changes).toHaveLength(seen)
++  })
++
++  it('rejects a transaction once the domain is closing', async () => {
++    const { facility } = await harness()
++    const domain = await facility.open(spec)
++    await domain.close()
++    await expect(domain.transaction((tx) => { tx.put('items', 'a', { label: 'x', count: 1 }) }))
++      .rejects.toMatchObject({ code: 'closed' })
++  })
++})
++
+ describe('durability failure', () => {
+   it('leaves memory untouched and emits nothing when the backend rejects a write', async () => {
+     const pool = new MemoryMediaPool()
+diff --git a/packages/storage/storage-domain/tests/helpers/memory-backend.ts b/packages/storage/storage-domain/tests/helpers/memory-backend.ts
+index 3c8547d28..f6486ff49 100644
+--- a/packages/storage/storage-domain/tests/helpers/memory-backend.ts
++++ b/packages/storage/storage-domain/tests/helpers/memory-backend.ts
+@@ -16,10 +16,11 @@
+  */
+ 
+ import { StorageError } from '@deepseek-ai/dsh-storage'
+-import type { KvFacet, KvUnit, KvUnitDescriptor, StorageBackend } from '@deepseek-ai/dsh-storage'
++import type { KvFacet, KvUnit, KvUnitDescriptor, KvWrite, StorageBackend } from '@deepseek-ai/dsh-storage'
+ 
+ /** One unit's medium: tables of records plus the global slot (`null` = never written). */
+ export interface MemoryMedium {
++  /** Replaced wholesale by an atomic batch, so a failed one leaves it intact. */
+   tables: Map<string, Map<string, unknown>>
+   global: unknown
+ }
+@@ -43,6 +44,12 @@ export class MemoryMediaPool {
+    * untouched after a durability failure.
+    */
+   failNextWrites = 0
++  /**
++   * Whether opened units expose `applyBatch`. Set it to `false` to model a
++   * medium that cannot commit several records atomically, so callers can
++   * assert they fail loud instead of degrading to a write sequence.
++   */
++  supportsBatch = true
+ 
+   /** Consume one injected failure, throwing in a rejected write's place. */
+   consumeInjectedFailure(): void {
+@@ -102,6 +109,36 @@ class MemoryKvUnit implements KvUnit {
+     this.medium.global = value
+   }
+ 
++  /**
++   * Commit a batch atomically. Present only when the pool enables it, so the
++   * suite can also exercise a backend that omits the capability entirely.
++   * Applies to a copy first, so an injected failure leaves the medium exactly
++   * as it was — the all-or-nothing clause of the contract.
++   */
++  async applyBatch(writes: readonly KvWrite[]): Promise<void> {
++    this.assertOpen()
++    if (writes.length === 0) return
++    const tables = new Map<string, Map<string, unknown>>()
++    for (const [table, records] of this.medium.tables) tables.set(table, new Map(records))
++    let global = this.medium.global
++    for (const write of writes) {
++      this.pool.consumeInjectedFailure()
++      if (write.kind === 'global') {
++        global = write.value
++        continue
++      }
++      let records = tables.get(write.table)
++      if (records === undefined) {
++        records = new Map()
++        tables.set(write.table, records)
++      }
++      if (write.kind === 'delete') records.delete(write.key)
++      else records.set(write.key, write.value)
++    }
++    this.medium.tables = tables
++    this.medium.global = global
++  }
++
+   async close(): Promise<void> {
+     if (this.closed) return
+     this.closed = true
+@@ -148,7 +185,20 @@ export class MemoryStorageBackend implements StorageBackend {
+           this.pool.media.set(descriptor.name, medium)
+         }
+         this.openUnits.add(descriptor.name)
+-        return new MemoryKvUnit(this.pool, medium, descriptor, () => this.openUnits.delete(descriptor.name))
++        const unit = new MemoryKvUnit(this.pool, medium, descriptor, () => this.openUnits.delete(descriptor.name))
++        // Model a medium that cannot commit several documents together by
++        // omitting the optional member, exactly as such a backend would.
++        if (!this.pool.supportsBatch) {
++          const withoutBatch: KvUnit = {
++            loadAll: () => unit.loadAll(),
++            putRecord: (table, key, value) => unit.putRecord(table, key, value),
++            deleteRecord: (table, key) => unit.deleteRecord(table, key),
++            setGlobal: value => unit.setGlobal(value),
++            close: () => unit.close(),
++          }
++          return withoutBatch
++        }
++        return unit
+       },
+     }
+   }
+diff --git a/packages/storage/storage-json/src/per-record-unit.ts b/packages/storage/storage-json/src/per-record-unit.ts
+index 346c7a0d6..1d90063bd 100644
+--- a/packages/storage/storage-json/src/per-record-unit.ts
++++ b/packages/storage/storage-json/src/per-record-unit.ts
+@@ -9,6 +9,12 @@
+  * rollback — a failed write simply leaves both the file and the domain's
+  * memory unchanged.
+  *
++ * No atomic batch: each record is its own file, so several writes cannot be
++ * committed as one unit — a crash between two `rename`s leaves the tree
++ * half-updated. This unit therefore omits `applyBatch` instead of emulating
++ * it, so a caller that needs all-or-nothing fails loud and can choose a
++ * medium that provides it, rather than believing a best-effort sequence.
++ *
+  * Per-record contract: a record document that is malformed or stamped with a
+  * version outside the accepted set (the descriptor's current version plus
+  * its `compatibleVersions`) reads as an absent record — one bad or stale
+diff --git a/packages/storage/storage-json/src/single-unit.ts b/packages/storage/storage-json/src/single-unit.ts
+index 085b37cfc..dbeb4e0b2 100644
+--- a/packages/storage/storage-json/src/single-unit.ts
++++ b/packages/storage/storage-json/src/single-unit.ts
+@@ -12,7 +12,7 @@
+ import { readFile } from 'node:fs/promises'
+ import { join } from 'node:path'
+ import { StorageError } from '@deepseek-ai/dsh-storage'
+-import type { KvUnit, KvUnitDescriptor } from '@deepseek-ai/dsh-storage'
++import type { KvUnit, KvUnitDescriptor, KvWrite } from '@deepseek-ai/dsh-storage'
+ import { writeAtomic } from './atomic.ts'
+ import { parse, serialize } from './format.ts'
+ import type { UnitState } from './format.ts'
+@@ -111,6 +111,42 @@ class SingleJsonUnit implements KvUnit {
+     })
+   }
+ 
++  /**
++   * Apply several writes as one unit. This layout publishes the whole unit as
++   * a single atomic file replacement, so one publish after all the in-memory
++   * edits IS the batch commit; a failed publish restores the pre-batch state.
++   */
++  async applyBatch(writes: readonly KvWrite[]): Promise<void> {
++    this.assertOpen()
++    if (writes.length === 0) return
++    // Validate before mutating: an undeclared table or an undeclared global
++    // slot must reject without leaving a partial edit in memory.
++    for (const write of writes) {
++      if (write.kind === 'global') {
++        if (!this.descriptor.hasGlobal) {
++          throw new Error(`unit '${this.descriptor.name}' does not declare a global slot`)
++        }
++        continue
++      }
++      this.records(write.table)
++    }
++    const restoreTables = new Map<string, Map<string, unknown>>()
++    for (const [table, records] of this.state.tables) {
++      restoreTables.set(table, new Map(records))
++    }
++    const restoreGlobal = this.state.global
++    for (const write of writes) {
++      if (write.kind === 'global') this.state.global = write.value
++      else if (write.kind === 'delete') this.records(write.table).delete(write.key)
++      else this.records(write.table).set(write.key, write.value)
++    }
++    await this.publish().catch((error: unknown) => {
++      for (const [table, records] of restoreTables) this.state.tables.set(table, records)
++      this.state.global = restoreGlobal
++      throw error
++    })
++  }
++
+   /* jscpd:ignore-start -- the two unit classes are standalone; the drain/guard lifecycle mirrors the shared KvUnit contract */
+   async close(): Promise<void> {
+     if (this.closed) {
+diff --git a/packages/storage/storage-sqlite/src/index.ts b/packages/storage/storage-sqlite/src/index.ts
+index 5cd59cadc..cefb114b1 100644
+--- a/packages/storage/storage-sqlite/src/index.ts
++++ b/packages/storage/storage-sqlite/src/index.ts
+@@ -39,12 +39,26 @@ export interface Config {
+    * {@link JournalMode}.
+    */
+   journalMode?: JournalMode
++  /**
++   * Take the medium's OS-level write lock for this connection's whole life,
++   * so exactly one process owns the database. Opening rejects with
++   * `medium-locked` when another process already holds it, instead of letting
++   * a second writer read stale state, overwrite the owner's updates, or
++   * process the same durable work twice.
++   *
++   * Off by default: shared read/write access stays available for deployments
++   * that expect several processes. Ownership is held by the operating system,
++   * so it is released when the owning process exits — including an ungraceful
++   * kill — and recovery needs no lease, PID heuristic, or manual cleanup.
++   */
++  exclusive?: boolean
+ }
+ 
+ /** Schemastery validator for {@link Config}. */
+ export const Config: z<Config> = z.object({
+   path: z.string().required(),
+   journalMode: z.union(['wal', 'delete', 'truncate', 'persist'] as const).default('wal'),
++  exclusive: z.boolean().default(false),
+ })
+ 
+ /**
+@@ -65,7 +79,8 @@ export class SqliteStorageBackend implements StorageBackend {
+    * @param config - Validated plugin configuration.
+    */
+   constructor(config: Config) {
+-    this.ready = openDatabase(config.path, (config as Required<Config>).journalMode)
++    const settled = config as Required<Config>
++    this.ready = openDatabase(config.path, settled.journalMode, settled.exclusive)
+     // Mark the rejection handled: every primitive re-awaits `ready`, so an
+     // open failure still surfaces to each caller; this guard only prevents an
+     // unhandled-rejection crash when the failure precedes the first use.
+diff --git a/packages/storage/storage-sqlite/src/schema.ts b/packages/storage/storage-sqlite/src/schema.ts
+index 65f9d289b..d5e671e63 100644
+--- a/packages/storage/storage-sqlite/src/schema.ts
++++ b/packages/storage/storage-sqlite/src/schema.ts
+@@ -57,7 +57,11 @@ async function createDatabaseFile(path: string): Promise<void> {
+  * @param journalMode - validated journal pragma.
+  * @returns the open handle with pragmas applied and the unit metadata tables ensured.
+  */
+-export async function openDatabase(path: string, journalMode: JournalMode): Promise<DatabaseSync> {
++export async function openDatabase(
++  path: string,
++  journalMode: JournalMode,
++  exclusive = false,
++): Promise<DatabaseSync> {
+   const actual = path === ':memory:' ? path : resolve(path)
+   if (actual !== ':memory:') {
+     await mkdir(dirname(actual), { recursive: true, mode: 0o700 })
+@@ -65,18 +69,53 @@ export async function openDatabase(path: string, journalMode: JournalMode): Prom
+   }
+   const db = new DatabaseSync(actual)
+   try {
+-    configureDatabase(db, actual, journalMode)
++    configureDatabase(db, actual, journalMode, exclusive)
+     return db
+   } catch (error: unknown) {
+     db.close()
+-    throw error
++    // Any step of the open sequence can be the one that trips over another
++    // process's lock — the journal pragma already needs the medium — so the
++    // ownership diagnosis is applied to the whole sequence rather than only
++    // to the acquisition probe.
++    throw exclusive ? asOwnershipFailure(error, actual) : error
+   }
+ }
+ 
+-function configureDatabase(db: DatabaseSync, path: string, journalMode: JournalMode): void {
++/** Present a lock collision during open as the ownership failure it is. */
++function asOwnershipFailure(error: unknown, path: string): unknown {
++  if (error instanceof StorageError) return error
++  const message = error instanceof Error ? error.message : String(error)
++  if (!/lock|busy/i.test(message)) return error
++  return new StorageError(
++    'medium-locked',
++    `storage database at "${path}" is held exclusively by another process; `
++    + 'only one writer may own it at a time',
++    { cause: error },
++  )
++}
++
++function configureDatabase(
++  db: DatabaseSync,
++  path: string,
++  journalMode: JournalMode,
++  exclusive: boolean,
++): void {
+   db.exec('PRAGMA foreign_keys = ON')
+   // The validated union is safe to interpolate into a non-bindable PRAGMA.
+   db.exec(`PRAGMA journal_mode = ${journalMode.toUpperCase()}`)
++  if (exclusive) {
++    // Take the medium's OS-level lock and keep it for this connection's whole
++    // life, so a second process cannot read stale state, write over this
++    // one's updates, or process the same durable work twice. Ownership is
++    // held by the operating system: it is released when this process exits,
++    // including an ungraceful kill, so recovery needs no lease, no PID
++    // guessing, and no operator cleanup of a stale marker.
++    db.exec('PRAGMA locking_mode = EXCLUSIVE')
++    // The pragma alone only promises to take the lock at the next read; force
++    // it now so a losing opener fails HERE instead of at its first write,
++    // when it may already have decided it owns the state.
++    assertExclusiveOwnership(db, path)
++  }
+   // `PRAGMA user_version` always returns exactly one row { user_version }.
+   const { user_version: onDisk } = db.prepare('PRAGMA user_version').get() as { user_version: number }
+   if (onDisk !== 0 && onDisk !== STORAGE_SQLITE_SCHEMA_VERSION) {
+@@ -106,6 +145,31 @@ function configureDatabase(db: DatabaseSync, path: string, journalMode: JournalM
+   }
+ }
+ 
++/**
++ * Acquire the exclusive write lock now, converting a competing owner into a
++ * loud open failure. A trivial write transaction is what forces SQLite to
++ * take (and, under `locking_mode = EXCLUSIVE`, retain) the lock.
++ */
++function assertExclusiveOwnership(db: DatabaseSync, path: string): void {
++  try {
++    db.exec('BEGIN IMMEDIATE')
++    db.exec('COMMIT')
++  } catch (error: unknown) {
++    try { db.exec('ROLLBACK') } catch { /* report the acquisition failure */ }
++    throw new StorageError(
++      'medium-locked',
++      `storage database at "${path}" is held exclusively by another process; `
++      + 'only one writer may own it at a time',
++      { cause: error },
++    )
++  }
++}
++
++/** Whether a failure is another process holding the medium. */
++export function isMediumLocked(error: unknown): boolean {
++  return error instanceof StorageError && error.code === 'medium-locked'
++}
++
+ /**
+  * Physical table name for one unit table. Both segments are validated against
+  * `UNIT_NAME_RE` before reaching this, so the result is safe to interpolate
+diff --git a/packages/storage/storage-sqlite/src/unit.ts b/packages/storage/storage-sqlite/src/unit.ts
+index d8260b310..2b1e3e1ed 100644
+--- a/packages/storage/storage-sqlite/src/unit.ts
++++ b/packages/storage/storage-sqlite/src/unit.ts
+@@ -2,14 +2,15 @@
+  * One opened SQLite KV unit: prepared per-table statements over the
+  * `u_<unit>_<table>` record tables plus this unit's row in the shared
+  * `unit_globals` table. Each primitive is a single statement, so atomicity
+- * comes from SQLite itself — no explicit transactions, and no write queue
+- * (write ordering is the caller's responsibility per the KV contract).
++ * comes from SQLite itself; a multi-write batch wraps its statements in one
++ * explicit transaction. There is no write queue — write ordering is the
++ * caller's responsibility per the KV contract.
+  * @module @deepseek-ai/dsh-storage-sqlite/unit
+  */
+ 
+ import type { DatabaseSync, StatementSync } from 'node:sqlite'
+ import { StorageError } from '@deepseek-ai/dsh-storage'
+-import type { KvUnit, KvUnitDescriptor } from '@deepseek-ai/dsh-storage'
++import type { KvUnit, KvUnitDescriptor, KvWrite } from '@deepseek-ai/dsh-storage'
+ import { recordTableName } from './schema.ts'
+ 
+ /** Prepared statements for one declared table. */
+@@ -36,7 +37,7 @@ export class SqliteKvUnit implements KvUnit {
+    * @param onClose - Backend callback releasing this unit's open-name slot.
+    */
+   constructor(
+-    db: DatabaseSync,
++    private readonly db: DatabaseSync,
+     private readonly descriptor: KvUnitDescriptor,
+     private readonly onClose: () => void,
+   ) {
+@@ -117,6 +118,43 @@ export class SqliteKvUnit implements KvUnit {
+     })
+   }
+ 
++  /**
++   * Commit several writes in one SQLite transaction: the medium either holds
++   * the whole batch or none of it, including across a crash. Validation runs
++   * before `BEGIN`, so a rejected batch never opens a transaction; a failure
++   * inside one rolls back every statement already applied.
++   */
++  applyBatch(writes: readonly KvWrite[]): Promise<void> {
++    return this.settle(() => {
++      if (writes.length === 0) return
++      // Resolve every statement first: an undeclared table or an undeclared
++      // global slot must reject without touching the medium at all.
++      const planned = writes.map((write) => {
++        if (write.kind === 'global') {
++          const globalUpsert = this.globalUpsert
++          if (globalUpsert === undefined) {
++            throw new Error(`kv unit '${this.descriptor.name}' declared no global slot`)
++          }
++          return () => globalUpsert.run(this.descriptor.name, JSON.stringify(write.value))
++        }
++        const statements = this.statementsFor(write.table)
++        return write.kind === 'delete'
++          ? () => statements.remove.run(write.key)
++          : () => statements.upsert.run(write.key, JSON.stringify(write.value))
++      })
++      this.db.exec('BEGIN IMMEDIATE')
++      try {
++        for (const run of planned) run()
++        this.db.exec('COMMIT')
++      } catch (error) {
++        // Roll back to the pre-batch state. A failing ROLLBACK would mean the
++        // connection is unusable, so the original failure is what propagates.
++        try { this.db.exec('ROLLBACK') } catch { /* report the real cause */ }
++        throw error
++      }
++    })
++  }
++
+   close(): Promise<void> {
+     if (!this.closed) {
+       this.closed = true
+diff --git a/packages/storage/storage-sqlite/tests/sqlite-backend.spec.ts b/packages/storage/storage-sqlite/tests/sqlite-backend.spec.ts
+index f2fd65ee4..8ed12214f 100644
+--- a/packages/storage/storage-sqlite/tests/sqlite-backend.spec.ts
++++ b/packages/storage/storage-sqlite/tests/sqlite-backend.spec.ts
+@@ -4,6 +4,7 @@ import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
+ import { tmpdir } from 'node:os'
+ import { join } from 'node:path'
+ import { DatabaseSync } from 'node:sqlite'
++import { spawn } from 'node:child_process'
+ import Storage, { storageBackendServiceKey } from '@deepseek-ai/dsh-storage'
+ import type { KvUnitDescriptor } from '@deepseek-ai/dsh-storage'
+ import { runKvBackendContract } from '../../storage/tests/contract.ts'
+@@ -41,6 +42,108 @@ const DESCRIPTOR: KvUnitDescriptor = {
+   hasGlobal: true,
+ }
+ 
++describe('exclusive medium ownership', () => {
++  it('shares the medium between processes by default', async () => {
++    const path = await freshDbPath()
++    const owner = backendAt(path)
++    const unit = await owner.kv.open(DESCRIPTOR)
++    await unit.putRecord('records', 'k', { n: 1 })
++
++    // Off by default: a deployment expecting several processes is unaffected.
++    const second = backendAt(path)
++    const unit2 = await second.kv.open(DESCRIPTOR)
++    await expect(unit2.putRecord('records', 'other', { n: 2 })).resolves.toBeUndefined()
++    await second.close()
++    await owner.close()
++  })
++
++  it('refuses a second writer while an exclusive owner holds the medium', async () => {
++    const path = await freshDbPath()
++    const owner = new SqliteStorageBackend(new Config({ path, exclusive: true }))
++    const unit = await owner.kv.open(DESCRIPTOR)
++    await unit.putRecord('records', 'k', { n: 1 })
++
++    // Rejected at OPEN, not at the first write: a loser that believed it
++    // owned the state could already have acted on a stale read.
++    const loser = new SqliteStorageBackend(new Config({ path, exclusive: true }))
++    await expect(loser.kv.open(DESCRIPTOR)).rejects.toMatchObject({
++      name: 'StorageError',
++      code: 'medium-locked',
++    })
++    await loser.close()
++
++    // A non-exclusive opener cannot slip past the owner's lock either.
++    const sharedLoser = backendAt(path)
++    const sharedUnit = await sharedLoser.kv.open(DESCRIPTOR).catch(() => undefined)
++    if (sharedUnit !== undefined) {
++      await expect(sharedUnit.putRecord('records', 'intruder', { n: 3 })).rejects.toThrow()
++    }
++    await sharedLoser.close()
++
++    // The owner keeps working throughout.
++    await unit.putRecord('records', 'k', { n: 2 })
++    expect((await unit.loadAll()).tables['records']).toEqual({ k: { n: 2 } })
++    await owner.close()
++  })
++
++  it('recovers ownership after the holder is killed, with no manual cleanup', async () => {
++    const path = await freshDbPath()
++    // A REAL second process: an in-process double could not prove that the
++    // lock is held by the OS rather than by this runtime's bookkeeping, which
++    // is the whole reason an ungraceful kill needs no lease or stale marker.
++    const holder = spawn(process.execPath, ['--input-type=module', '-e', `
++      const { DatabaseSync } = await import('node:sqlite')
++      const db = new DatabaseSync(${JSON.stringify(path)})
++      db.exec('PRAGMA journal_mode = WAL')
++      db.exec('PRAGMA locking_mode = EXCLUSIVE')
++      db.exec('BEGIN IMMEDIATE'); db.exec('COMMIT')
++      console.log('holding')
++      setInterval(() => {}, 1000)
++    `], { stdio: ['ignore', 'pipe', 'inherit'] })
++    try {
++      await new Promise<void>((resolve, reject) => {
++        holder.stdout.on('data', (chunk: Buffer) => {
++          if (chunk.toString().includes('holding')) resolve()
++        })
++        holder.once('error', reject)
++        holder.once('exit', (code) => { reject(new Error(`holder exited early with ${String(code)}`)) })
++      })
++
++      const blocked = new SqliteStorageBackend(new Config({ path, exclusive: true }))
++      await expect(blocked.kv.open(DESCRIPTOR)).rejects.toMatchObject({ code: 'medium-locked' })
++      await blocked.close()
++
++      // SIGKILL: no disposer, no flush, no chance to release anything.
++      holder.kill('SIGKILL')
++      await new Promise<void>((resolve) => { holder.once('exit', () => { resolve() }) })
++    } finally {
++      holder.kill('SIGKILL')
++    }
++
++    // The next start simply works. Nothing had to expire and no operator had
++    // to remove a leftover marker.
++    const recovered = new SqliteStorageBackend(new Config({ path, exclusive: true }))
++    const unit = await recovered.kv.open(DESCRIPTOR)
++    await unit.putRecord('records', 'after-crash', { ok: true })
++    expect((await unit.loadAll()).tables['records']).toEqual({ 'after-crash': { ok: true } })
++    await recovered.close()
++  })
++
++  it('hands ownership to the next opener once the owner releases it', async () => {
++    const path = await freshDbPath()
++    const first = new SqliteStorageBackend(new Config({ path, exclusive: true }))
++    const unit = await first.kv.open(DESCRIPTOR)
++    await unit.putRecord('records', 'k', { n: 1 })
++    await first.close()
++
++    const second = new SqliteStorageBackend(new Config({ path, exclusive: true }))
++    const unit2 = await second.kv.open(DESCRIPTOR)
++    await unit2.putRecord('records', 'k', { n: 2 })
++    expect((await unit2.loadAll()).tables['records']).toEqual({ k: { n: 2 } })
++    await second.close()
++  })
++})
++
+ describe('sqlite backend specifics', () => {
+   it('opens an in-memory database', async () => {
+     const backend = backendAt(':memory:')
+diff --git a/packages/storage/storage/src/backend.ts b/packages/storage/storage/src/backend.ts
+index 4a8e0ac2d..cd7feb0a2 100644
+--- a/packages/storage/storage/src/backend.ts
++++ b/packages/storage/storage/src/backend.ts
+@@ -42,6 +42,15 @@ export interface KvFacet {
+   open(descriptor: KvUnitDescriptor): Promise<KvUnit>
+ }
+ 
++/**
++ * One write inside an atomic batch. `value` is opaque JSON for `put`; a
++ * `delete` of a missing key is a no-op, exactly as for the single primitive.
++ */
++export type KvWrite =
++  | { readonly kind: 'put'; readonly table: string; readonly key: string; readonly value: unknown }
++  | { readonly kind: 'delete'; readonly table: string; readonly key: string }
++  | { readonly kind: 'global'; readonly value: unknown }
++
+ /** Static identity and shape of one KV unit, projected from its owner's spec. */
+ export interface KvUnitDescriptor {
+   /** Unit name; must match {@link UNIT_NAME_RE}. Also the file-name / SQL-identifier segment. */
+@@ -130,6 +139,25 @@ export interface KvUnit {
+    */
+   setGlobal(value: unknown): Promise<void>
+ 
++  /**
++   * Apply several writes as ONE atomic, durable unit: after resolution the
++   * medium holds all of them, and after a rejection — including a crash
++   * mid-way — a later {@link loadAll} observes none of them. This is what a
++   * caller needs when records that must agree live in different tables; the
++   * single primitives cannot express it, because a crash between two of them
++   * leaves the medium half-updated.
++   *
++   * Optional: a backend whose medium cannot commit multiple documents
++   * atomically (one file per record) OMITS this member rather than emulating
++   * it, so a caller that requires atomicity fails loud instead of silently
++   * getting a best-effort sequence. Same clauses as the single primitives
++   * otherwise: undeclared table or a global write without `hasGlobal` rejects,
++   * a `delete` of a missing key is a no-op, and an empty batch is a no-op.
++   * @param writes - The writes to commit together, applied in order.
++   * @returns resolution after the whole batch is durable.
++   */
++  applyBatch?(writes: readonly KvWrite[]): Promise<void>
++
+   /**
+    * Drain this unit's in-flight writes and release it. Idempotent.
+    * @returns resolution after the unit is released.
+diff --git a/packages/storage/storage/src/error.ts b/packages/storage/storage/src/error.ts
+index 9e3424db5..7db11afb6 100644
+--- a/packages/storage/storage/src/error.ts
++++ b/packages/storage/storage/src/error.ts
+@@ -11,6 +11,8 @@ export type StorageErrorCode =
+   | 'duplicate-mount'
+   | 'version-mismatch'
+   | 'malformed-medium'
++  /** The medium is owned exclusively by another process; this opener is not the writer. */
++  | 'medium-locked'
+   | 'closed'
+ 
+ /**
+diff --git a/packages/storage/storage/src/index.ts b/packages/storage/storage/src/index.ts
+index 9344558e0..6a006b480 100644
+--- a/packages/storage/storage/src/index.ts
++++ b/packages/storage/storage/src/index.ts
+@@ -13,7 +13,7 @@ export { BackendRegistry } from './registry.ts'
+ export { StorageError } from './error.ts'
+ export type { StorageErrorCode } from './error.ts'
+ export { UNIT_NAME_RE } from './backend.ts'
+-export type { StorageBackend, KvFacet, KvUnit, KvUnitDescriptor } from './backend.ts'
++export type { StorageBackend, KvFacet, KvUnit, KvUnitDescriptor, KvWrite } from './backend.ts'
+ 
+ /**
+  * Derive the Cordis lifecycle service that one named backend plugin provides.
+diff --git a/packages/storage/storage/tests/contract.ts b/packages/storage/storage/tests/contract.ts
+index d173918dc..fde7729ad 100644
+--- a/packages/storage/storage/tests/contract.ts
++++ b/packages/storage/storage/tests/contract.ts
+@@ -88,6 +88,67 @@ export function runKvBackendContract(label: string, create: () => Promise<KvBack
+       await reopened.close()
+     })
+ 
++    it('commits a multi-table batch atomically or omits the capability', async () => {
++      const harness = await create()
++      const unit = await harness.backend.kv!.open(DESCRIPTOR)
++      if (unit.applyBatch === undefined) {
++        // Omission is a valid answer: a medium that cannot commit several
++        // documents together must not emulate atomicity. The caller then
++        // fails loud rather than trusting a best-effort sequence.
++        await harness.backend.close()
++        return
++      }
++      await unit.putRecord('alpha', 'stale', { v: 'old' })
++      await unit.putRecord('beta', 'gone', { v: 'present' })
++
++      await unit.applyBatch([
++        { kind: 'put', table: 'alpha', key: 'stale', value: { v: 'new' } },
++        { kind: 'put', table: 'beta', key: 'fresh', value: { v: 'added' } },
++        { kind: 'delete', table: 'beta', key: 'gone' },
++        { kind: 'global', value: { committed: true } },
++      ])
++      await harness.backend.close()
++
++      // Durable as one unit: a reopen sees every write, across both tables.
++      const reopened = await harness.reopen()
++      const unit2 = await reopened.kv!.open(DESCRIPTOR)
++      const snapshot = await unit2.loadAll()
++      expect(snapshot.tables['alpha']).toEqual({ stale: { v: 'new' } })
++      expect(snapshot.tables['beta']).toEqual({ fresh: { v: 'added' } })
++      expect(snapshot.global).toEqual({ committed: true })
++      await reopened.close()
++    })
++
++    it('leaves nothing behind when a batch rejects, before or after a valid write', async () => {
++      const harness = await create()
++      const unit = await harness.backend.kv!.open(DESCRIPTOR)
++      if (unit.applyBatch === undefined) {
++        await harness.backend.close()
++        return
++      }
++      await unit.putRecord('alpha', 'k', { v: 'original' })
++
++      // The invalid write is LAST, so an implementation without a real
++      // transaction would already have applied the earlier ones.
++      await expect(unit.applyBatch([
++        { kind: 'put', table: 'alpha', key: 'k', value: { v: 'rolled back' } },
++        { kind: 'put', table: 'alpha', key: 'added', value: { v: 'rolled back' } },
++        { kind: 'delete', table: 'undeclared', key: 'k' },
++      ])).rejects.toThrow()
++      expect((await unit.loadAll()).tables['alpha']).toEqual({ k: { v: 'original' } })
++
++      await expect(unit.applyBatch([{ kind: 'put', table: 'alpha', key: 'x', value: {} }, { kind: 'global', value: 1 }]))
++        .resolves.toBeUndefined()
++      await unit.applyBatch([])
++      await harness.backend.close()
++
++      // The rejected batch is absent from the medium too, not just memory.
++      const reopened = await harness.reopen()
++      const unit2 = await reopened.kv!.open(DESCRIPTOR)
++      expect((await unit2.loadAll()).tables['alpha']).toEqual({ k: { v: 'original' }, x: {} })
++      await reopened.close()
++    })
++
+     it('rejects operations after unit close, and close is idempotent', async () => {
+       const { backend } = await create()
+       const unit = await backend.kv!.open(DESCRIPTOR)
+@@ -95,6 +156,10 @@ export function runKvBackendContract(label: string, create: () => Promise<KvBack
+       await unit.close()
+       await expect(unit.putRecord('alpha', 'k', {})).rejects.toMatchObject({ code: 'closed' })
+       await expect(unit.loadAll()).rejects.toMatchObject({ code: 'closed' })
++      if (unit.applyBatch !== undefined) {
++        await expect(unit.applyBatch([{ kind: 'put', table: 'alpha', key: 'k', value: {} }]))
++          .rejects.toMatchObject({ code: 'closed' })
++      }
+       await backend.close()
+       await backend.close()
+     })

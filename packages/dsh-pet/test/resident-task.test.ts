@@ -44,6 +44,11 @@ describe('chat scope keys', () => {
     expect(scopeKeyOf('chat', 'oc_a')).not.toBe(scopeKeyOf('workspace', 'ws-nexus'))
   })
 
+  it('keeps QA source scopes separate from workspace scopes', () => {
+    expect(scopeKeyOf('qa-chat', 'source-1')).toBe('qa:source-1')
+    expect(scopeKeyOf('qa-chat', 'source-1')).not.toBe(scopeKeyOf('workspace', 'source-1'))
+  })
+
   it('refuses a chat scope with no chat id', () => {
     expect(() => scopeKeyOf('chat')).toThrow(/requires an id/)
   })

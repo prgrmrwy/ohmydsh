@@ -1,5 +1,5 @@
 /**
- * The inbound pipeline: one Lark event to one Invocation.
+ * The inbound pipeline: one Lark event to one legacy Invocation, or one unified locus Delivery.
  *
  * This is the join between the pure decisions (parse, admit, route, render)
  * and Pet's durable model. It stays deliberately linear — every stage may
@@ -24,6 +24,9 @@ import { routeChat, type WorkspaceLocator } from './route.js'
 import type { PetCoordinator } from '../coordinator.js'
 import type { PetRepository } from '../repository.js'
 import type { PetChatBinding } from '../spec.js'
+import type { LocusChannelControllerPort } from './locus-capability.js'
+import type { LocusAuthorizationResolver } from '../locus/admission.js'
+import type { LocusChannelEvent, LocusControllerResult } from './locus-controller.js'
 import { scopeKeyOf } from '../../wire.js'
 
 /** What happened to one inbound line. */
@@ -35,6 +38,28 @@ export type IntakeOutcome =
     }
   | { readonly kind: 'unroutable'; readonly reason: string }
   | { readonly kind: 'accepted'; readonly invocationId: string; readonly taskId?: string }
+  | {
+      /** A unified locus Delivery; deliberately not represented as an Invocation. */
+      readonly kind: 'locus-accepted'
+      readonly deliveryId: string
+      readonly executionId: string
+      readonly locusId: string
+      readonly generation: number
+    }
+  | {
+      readonly kind: 'locus-duplicate'
+      readonly deliveryId: string
+      readonly locusId: string
+      readonly generation: number
+    }
+  | {
+      /** A control command handled without creating a Delivery. */
+      readonly kind: 'control'
+      readonly command: Extract<LocusControllerResult, { kind: 'control' }>['command']
+      readonly ok: boolean
+      readonly reason?: string
+      readonly text?: string
+    }
   | { readonly kind: 'answered'; readonly taskId: string }
   | { readonly kind: 'error'; readonly reason: string }
 
@@ -77,6 +102,21 @@ export interface PipelineDeps {
    * recognised and such groups behave exactly as before.
    */
   readonly bindCommand?: BindCommandPort
+  /**
+   * Optional unified locus channel. When supplied it is the exclusive Feishu
+   * business path: legacy route/chat_bindings/Invocation/QA delivery are not
+   * consulted. The controller itself fails closed when its turn observer is
+   * absent.
+   */
+  readonly locusController?: Pick<LocusChannelControllerPort, 'handle'>
+  /**
+   * Breaking-cutover fence used by production. When true, an absent unified
+   * controller is an unavailable channel, never permission to enter the
+   * retained legacy test/migration pipeline below.
+   */
+  readonly requireLocus?: boolean
+  /** Durable authorization lookup for the exact unified endpoint. */
+  readonly locusAuthorization?: LocusAuthorizationResolver
   /** Reports an outcome for diagnostics. */
   readonly onOutcome?: (outcome: IntakeOutcome, event?: LarkInboundEvent) => void
 }
@@ -131,6 +171,66 @@ export class InboundPipeline {
     const { repository } = this.deps
     const config = repository.getChannelConfig()
     if (!config.enabled) return this.report({ kind: 'ignored', reason: 'disabled' }, event)
+
+    // Unified locus is an opt-in replacement, not a side route. Once composed,
+    // every Feishu business event goes through the exact endpoint/locus/child
+    // controller; no legacy binding, Invocation, or QA delivery lookup may
+    // inspect the event. Bootstrap/subscription lifecycle remains owned by the
+    // surrounding ChannelService.
+    if (this.deps.locusController !== undefined) {
+      // Bot auth/profile can expire after onboarding. Re-probe for every
+      // unified Delivery before accepting durable work; otherwise the child
+      // would be told it can read/reply while the platform identity is gone.
+      if (!await this.deps.client.botReady().catch(() => false)) {
+        return this.report({ kind: 'unroutable', reason: 'The Pet bot identity is unavailable.' }, event)
+      }
+      const authorization = this.deps.locusAuthorization
+      if (authorization === undefined) {
+        return this.report({ kind: 'unroutable', reason: 'Unified locus authorization is unavailable.' }, event)
+      }
+      try {
+        const outcome = mapLocusOutcome(await this.deps.locusController.handle(event, {
+          ...(config.botOpenId === undefined ? {} : { botOpenId: config.botOpenId }),
+          allowOpenIds: config.allowOpenIds,
+          watermark: this.deps.watermark(),
+          isDuplicate: messageId => this.dedup.check(messageId),
+          authorization,
+        }))
+        if (
+          outcome.kind === 'ignored'
+          && (outcome.reason === 'legacy-endpoint' || outcome.reason === 'retired-endpoint')
+          && typeof event.message_id === 'string'
+          && event.message_id !== ''
+          && typeof event.sender_id === 'string'
+          && config.allowOpenIds.includes(event.sender_id)
+        ) {
+          // Breaking cutover is visible rather than silently taking the old
+          // endpoint under the default main. This is a bounded Host diagnostic,
+          // not a business answer; failure stays fail-soft.
+          await this.deps.client.reply(
+            event.message_id,
+            '该入口属于已退役的旧飞书模型，未接管也未迁移历史。请由允许的所有者在 Pet 管理面显式重建；新入口将从 read 权限开始。',
+          ).catch(() => undefined)
+        }
+        return this.report(outcome, event)
+      } catch (error) {
+        return this.report(
+          {
+            kind: 'unroutable',
+            reason: `Unified locus channel failed closed: ${error instanceof Error ? error.message : String(error)}`,
+          },
+          event,
+        )
+      }
+    }
+
+    if (this.deps.requireLocus === true) {
+      return this.report(
+        { kind: 'unroutable', reason: 'Unified locus capability is unavailable; legacy Feishu execution is retired.' },
+        event,
+      )
+    }
+
     if (config.botOpenId === undefined) {
       return this.report({ kind: 'ignored', reason: 'bot-identity-unresolved' }, event)
     }
@@ -333,5 +433,38 @@ export class InboundPipeline {
   private report(outcome: IntakeOutcome, event?: LarkInboundEvent): IntakeOutcome {
     this.deps.onOutcome?.(outcome, event)
     return outcome
+  }
+}
+
+/** Keep the public channel intake vocabulary free of Invocation semantics. */
+function mapLocusOutcome(result: LocusControllerResult): IntakeOutcome {
+  switch (result.kind) {
+    case 'accepted':
+      return {
+        kind: 'locus-accepted',
+        deliveryId: result.deliveryId,
+        executionId: result.executionId,
+        locusId: result.locusId,
+        generation: result.generation,
+      }
+    case 'duplicate':
+      return {
+        kind: 'locus-duplicate',
+        deliveryId: result.deliveryId,
+        locusId: result.locusId,
+        generation: result.generation,
+      }
+    case 'ignored':
+      return { kind: 'ignored', reason: result.reason }
+    case 'control':
+      return {
+        kind: 'control',
+        command: result.command,
+        ok: result.ok === true,
+        ...(result.reason === undefined ? {} : { reason: result.reason }),
+        ...(result.text === undefined ? {} : { text: result.text }),
+      }
+    case 'refused':
+      return { kind: 'unroutable', reason: result.reason }
   }
 }
