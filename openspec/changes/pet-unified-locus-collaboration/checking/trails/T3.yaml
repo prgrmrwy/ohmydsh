@@ -6,7 +6,7 @@ parallel_group: G3
 conflicts_with: [T1, T2, T4, T5, T6, T7, T8]
 precondition: T2 已建立活跃群级 Locus；用户可以在验收群中创建话题；已有真实 topic positive sample 的 thread_id/root_id/reply_to 均非空。
 ask_user_if_blocked: true
-status: pending
+status: passed
 blocked_reason: null
 mock_setup:
   required: true
@@ -49,8 +49,8 @@ steps:
         expected_text: "话题；Thread；专属子会话；与群级 child 不同"
         expected_attrs: null
         expected_visible: true
-        result: null
-        result_detail: null
+        result: pass
+        result_detail: "真实话题 A 事件含稳定非空 thread_id `omt_19c187a0d08f9b9b`，Host 建立精确 topic locus（gen 1、active、source inherited），并分配专属 child `session-155a7796`，与群级 child `session-c9af096f` 不同；Delivery 03:51:43 精确投递到话题 child 且 thread 与事件一致，未串投群级 child。"
   - seq: 2
     description: 用户在话题 A 再次 mention Bot 继续同一问题
     action: wait_for
@@ -77,8 +77,8 @@ steps:
         expected_text: "Locus ID、代际、子会话均与发送前相同；新增 Delivery 已结算"
         expected_attrs: null
         expected_visible: true
-        result: null
-        result_detail: null
+        result: pass
+        result_detail: "话题 A 第二条消息回读同一 locus（thread `omt_19c187a0d08f9b9b`、gen 1）与同一 child `session-155a7796`，未新建任何记录；新增 Delivery 03:55:51 已 settled。更硬的证据：该 child 会话日志内 turn 1（03:51:43→03:51:58）与 turn 2（03:55:51→03:56:03）在同一 session 内递增，证明是持续交互而非同名新建。两轮 pet_locus_reply 各调用一次且均未被拒（前置的注入污染与 sticky-mixed 缺陷已闭环）。"
   - seq: 3
     description: 用户创建话题 B 并 mention Bot，随后在 Locus 管理查看 parent 与 child 索引
     action: wait_for
@@ -105,8 +105,8 @@ steps:
         expected_text: "同一主会话；3 个 locus；3 个不同子会话；所属 locus 唯一"
         expected_attrs: null
         expected_visible: true
-        result: null
-        result_detail: null
+        result: pass
+        result_detail: "话题 B 建立第三个独立 locus（thread `omt_19c1d586810f1bba`、gen 1、active）与第三个 child `session-ee6614ab`。群级 `c9af096f`、话题 A `155a7796`、话题 B `ee6614ab` 三个 child 互不相同，header 均为 parentSession=`session-3a7e5b90`、origin=subagent，互为兄弟；无任何 child 出现在 parent 位置，不存在孙辈。话题 A 记录未受影响。采用中性问法（只问事实、不提示结论）避免诱导，子会话自报的 locus id/generation/state/child/main 与 Host 持久层逐项一致，交叉核对通过。"
   - seq: 4
     description: 人工核对缺失 thread_id 的拒绝证据，不向真实飞书注入畸形事件
     action: wait_for
@@ -131,5 +131,5 @@ steps:
         reviewer_notes: 手工证据包需含真实正样本 thread_id 非空、自动测试名称/结果及无群级 Delivery 的断言；不计自动 PASS。
         target_area: "evidence-ledger:topic-positive-and-missing-thread-tests"
         inspect_notes: "核对缺字段路径明确 fail closed，且没有通过 chatId-only 降级寻址。"
-        result: null
-        result_detail: null
+        result: pass
+        result_detail: "按计划维持 manual：不向真实飞书注入畸形事件。辅证为自动化测试 `packages/dsh-pet/test/locus-admission.test.ts`（31 项）与 `channel-lark.test.ts`（22 项）全通过，其中 `extractLocusEndpoint` 对仅有 root_id/reply_to 判定 `ambiguous-thread`、对畸形 thread_id 判定 `invalid-thread`、对畸形 chat_id 判定 `invalid-chat`，均 fail closed；且 chat-only 与 topic 的 endpoint key 保持互异，不会回退或串投群级入口。本项为人工判定，不冒充真实异常事件证据。"
