@@ -140,10 +140,20 @@ export const PET_CSS = `
    note sat ON TOP of the rings (44px from the centre against a 132px ring
    edge in the two-ring case).
 
-   The correct clearance is the radius of the rings actually drawn, which the
-   overlay computes for its own hover test and publishes as
-   --dshpet-wheel-radius. The fallback is the one-ring radius rather than the
-   mascot, so a missing variable still clears something.
+   The correct clearance is the radius of what is actually DRAWN, which the
+   overlay publishes as --dshpet-wheel-radius.
+
+   Note that this is NOT the same number as the wheel's hit-testing radius,
+   even though both start from the rings. With an empty wheel the hit radius
+   is deliberately held at one ring's width so the wheel cannot collapse onto
+   the mascot and snap shut on first hover — but nothing is painted out there,
+   so a note anchored to it floated in blank space, detached from the mascot
+   it belongs to. That is the "Pet 未就绪" case, which draws no rings at all.
+   The overlay therefore computes a separate noteClearance.
+
+   The fallback is the MASCOT's radius, not a ring's: a note is only ever
+   pushed out to a ring when the overlay says one was drawn, so if the
+   variable goes missing the safe guess is the tighter of the two.
 
    Scoped to .dshpet-wheel and kept as a TWO-class selector on purpose: the
    note also carries dshpet-empty/dshpet-error, whose padding:6px 0 rules
@@ -152,7 +162,7 @@ export const PET_CSS = `
    ("no margin" bug). */
 .dshpet-wheel .dshpet-wheel-note{pointer-events:auto;position:absolute;
   left:calc(50% + (var(--dshpet-mascot-size,72px) - 72px) / 2);
-  top:calc(50% + var(--dshpet-wheel-radius,94px) + 12px);
+  top:calc(50% + var(--dshpet-wheel-radius,36px) + 12px);
   /* The note is a "p": its UA margin (13px here) would add itself to the gap
      above, making the computed clearance drift with the browser's default
      rather than being the 12px this rule states. */
