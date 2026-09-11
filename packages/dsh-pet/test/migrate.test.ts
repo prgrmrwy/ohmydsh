@@ -409,3 +409,63 @@ describe('cleanup never creates the database', () => {
     expect(existsSync(file)).toBe(false)
   })
 })
+
+/**
+ * Regression: an unopenable database used to be reported as "nothing to
+ * migrate".
+ *
+ * The SQLite backend holds Pet's medium with `locking_mode = EXCLUSIVE`, so a
+ * running Host makes this cleanup fail. Returning an empty result silently
+ * skipped the version restamp, after which `storageDomain.open` failed on every
+ * boot with a version mismatch and aborted Pet before its routes registered —
+ * with no log line anywhere.
+ */
+describe('an unprovable migration fails loudly', () => {
+  it('throws instead of reporting an empty cleanup when the medium is locked', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'pet-migrate-locked-'))
+    const file = path.join(dir, 'state.sqlite')
+
+    const holder = new DatabaseSync(file)
+    holder.exec('CREATE TABLE units (name TEXT PRIMARY KEY, version INTEGER)')
+    holder.prepare('INSERT INTO units VALUES (?, ?)').run('dsh_pet', 5)
+    // Take the same exclusive lock the production backend takes.
+    holder.exec('PRAGMA locking_mode = EXCLUSIVE')
+    holder.exec('BEGIN IMMEDIATE')
+
+    try {
+      expect(() => removeLegacyState(file)).toThrow(/could not be opened or updated/)
+    } finally {
+      holder.exec('ROLLBACK')
+      holder.close()
+    }
+  })
+
+  it('restamps an additive version once the medium is available', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'pet-migrate-additive-'))
+    const file = path.join(dir, 'state.sqlite')
+    const db = new DatabaseSync(file)
+    db.exec('CREATE TABLE units (name TEXT PRIMARY KEY, version INTEGER)')
+    db.prepare('INSERT INTO units VALUES (?, ?)').run('dsh_pet', 5)
+    db.exec('CREATE TABLE u_dsh_pet_tasks (key TEXT PRIMARY KEY, value TEXT)')
+    db.prepare('INSERT INTO u_dsh_pet_tasks VALUES (?, ?)').run('t1', '{"id":"t1"}')
+    db.close()
+
+    const result = removeLegacyState(file)
+
+    // v2..v8 -> current is additive: restamp only, never a row removal.
+    expect(result.removedRows).toBe(0)
+    expect(result.clearedTables).toEqual([])
+
+    const after = new DatabaseSync(file)
+    try {
+      const stamped = after.prepare('SELECT version FROM units WHERE name = ?')
+        .get('dsh_pet') as { version: number }
+      expect(stamped.version).toBe(PET_DOMAIN_VERSION)
+      const rows = after.prepare('SELECT count(*) AS c FROM u_dsh_pet_tasks')
+        .get() as { c: number }
+      expect(rows.c).toBe(1)
+    } finally {
+      after.close()
+    }
+  })
+})

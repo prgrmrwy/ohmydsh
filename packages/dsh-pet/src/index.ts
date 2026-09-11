@@ -153,7 +153,13 @@ export interface Config {
  * @param config - Validated plugin configuration.
  */
 export function apply(ctx: Context, config: Config = {}): void {
-  const lifecycle = new PetLifecycleMachine()
+  // Route every contained failure to the DSH log. Without this a step that
+  // aborts initialization before `createPetRoutes` runs is invisible: each Pet
+  // route answers 405, the Web client can only say "not registered", and no
+  // record exists anywhere of which step actually failed.
+  const lifecycle = new PetLifecycleMachine(diagnostic => {
+    ctx.logger.warn(`dsh-pet degraded: ${diagnostic}`)
+  })
   const paths = resolvePetPaths(config.home)
 
   ctx.effect(() => () => {
@@ -164,8 +170,10 @@ export function apply(ctx: Context, config: Config = {}): void {
   // the lifecycle machine instead of rejecting the Host's plugin apply.
   void initialize(ctx, lifecycle, paths, config).catch((error: unknown) => {
     const reason = error instanceof Error ? error.message : String(error)
+    // `markDegraded` now reports through the sink above, so logging here too
+    // would duplicate the line for this one path while leaving every contained
+    // step unlogged.
     lifecycle.markDegraded(`Pet initialization failed: ${reason}`)
-    ctx.logger.warn(`dsh-pet degraded: ${reason}`)
   })
 }
 
@@ -207,7 +215,12 @@ async function initialize(
   const cleanup = await lifecycle.contain('Pet legacy state cleanup', async () =>
     removeLegacyState(paths.databaseFile),
   )
-  if (cleanup !== undefined && cleanup.removedRows > 0) {
+  // An unproven migration must stop initialization here. Continuing would hit
+  // `storageDomain.open` with a medium still stamped at the old version, whose
+  // mismatch aborts Pet anyway — but several steps later and attributed to the
+  // wrong step, which is exactly how this failure stayed undiagnosed.
+  if (cleanup === undefined) return
+  if (cleanup.removedRows > 0) {
     ctx.logger.info(
       `dsh-pet cleared ${cleanup.removedRows} row(s) from the previous Skill model ` +
         `(${cleanup.clearedTables.join(', ')}); re-add the Skills you want`,
