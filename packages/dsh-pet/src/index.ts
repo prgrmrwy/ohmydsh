@@ -35,6 +35,7 @@ import {
 } from './host/executor.js'
 import { PetError } from './host/errors.js'
 import { PetLifecycleMachine } from './host/lifecycle.js'
+import { withOfflinePetStateMigrationGuidance } from './host/migration-guidance.js'
 import { ensurePetDirectories, resolvePetPaths, type PetPaths } from './host/paths.js'
 import { rebuildProjection } from './host/projection.js'
 import { PetRepository } from './host/repository.js'
@@ -186,7 +187,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   // blind spot this reporter exists to remove, so the sink is chosen for where
   // it actually lands rather than for looking idiomatic.
   const lifecycle = new PetLifecycleMachine(diagnostic => {
-    petWarn(`degraded: ${diagnostic}`)
+    petWarn(`degraded: ${withOfflinePetStateMigrationGuidance(diagnostic)}`)
   })
   const paths = resolvePetPaths(config.home)
 

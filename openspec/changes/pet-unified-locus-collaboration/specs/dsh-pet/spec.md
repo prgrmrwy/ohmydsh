@@ -39,6 +39,24 @@
 - **WHEN** 子会话已向当前 locus 的飞书入口提出决策问题且该轮结束，用户随后 `@bot` 回复
 - **THEN** 回复作为同一子会话的后续轮次处理，关联自身 Delivery，不创建或续进飞书 waiting-user Invocation
 
+### Requirement: Pet domain 版本迁移只能由人类离线执行
+
+当 Pet 持久介质的 `dsh_pet` domain stamp 低于当前 descriptor 且属于实现明确列出的 additive 版本时，Host SHALL 仅将 Pet 标记为 `degraded`，保留原始版本错误，并在 `[dsh-pet]` 日志给出可复制的离线检查、显式确认迁移和重新启动步骤。正常 Host 启动 MUST NOT 为检测或修复版本而直接打开、重标或清理 `state.sqlite`；运行中的 SQLite backend 对该介质保持唯一所有权。
+
+离线迁移 SHALL 要求先停止 DSH，并在写入前要求明确确认；SHALL 在介质旁建立带来源版本和时间的备份；SHALL 对已是当前版本幂等成功。未知版本、需要清理旧行而非纯 additive restamp 的版本、缺少可信 unit stamp、文件缺失或锁仍被占用时 MUST fail closed，不猜测、不创建新数据库、不自动清理历史。该 domain stamp 操作 MUST NOT 被解释为把旧 QA/chat route/飞书 Invocation 转换成统一 Locus；旧关联隔离规则不变。
+
+#### Scenario: 启动发现可迁移的旧 stamp
+- **WHEN** Host 打开 `dsh_pet` domain 时发现介质版本属于已知 additive 旧版本
+- **THEN** Pet 进入 degraded，日志保留版本不兼容根因并给出“停止 DSH、dry-run、显式确认迁移、重新启动”的人工步骤；Host 本身不迁移介质
+
+#### Scenario: 人工离线迁移多台机器
+- **WHEN** 操作者在每台机器停止 DSH 后依次执行检查和显式确认迁移
+- **THEN** 工具针对该机器的 active `DSH_HOME` 建立备份并只更新允许的 domain stamp；重复执行成功且不产生第二份迁移备份
+
+#### Scenario: 版本或所有权无法证明
+- **WHEN** 介质版本未知、需要非 additive 清理、没有 `dsh_pet` stamp，或仍被运行中的 Host 锁定
+- **THEN** 工具拒绝写入并给出诊断，不创建数据库、不改写版本、不删除记录
+
 ## MODIFIED Requirements
 
 ### Requirement: Pet Agent 获得稳定身份前馈和可信的当前 Invocation 上下文
