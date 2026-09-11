@@ -54,7 +54,7 @@ meta:
         status: manual
   execution_strategy:
     recommendation: single_only
-    selected: null
+    selected: single_agent
     reason:
       - 八条 trail 共享同一个正式验收群、同一 channel consumer 与同一持久 locus 状态
       - bind、scope、retire 与冷恢复存在严格顺序和共享写状态
@@ -100,7 +100,7 @@ trails:
     file: trails/T1.yaml
     device: pc
     parallel_group: G1
-    status: pending
+    status: passed
     blocked_reason: null
     checkpoint_count: 3
     summary: 验证现有 GUI、onboarding 前置和统一 capability 已就绪
@@ -109,8 +109,8 @@ trails:
     file: trails/T2.yaml
     device: pc
     parallel_group: G2
-    status: pending
-    blocked_reason: null
+    status: failed
+    blocked_reason: "群级 mention 已准入并投递到正确 child，但 child 固定为 claude-opus-5；本机 network-model-guard 在生成前以 restricted 拒绝，且当前 child 无模型恢复入口。"
     checkpoint_count: 3
     summary: 捕获 bot-added，并验证非 mention 与 mention 的业务边界
   - id: T3
