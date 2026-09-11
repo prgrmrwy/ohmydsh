@@ -451,8 +451,8 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
     // swallows the NEXT click or keyboard activation.
     draggedRef.current = false
     // A grabbed Pet is not a hovered capability. Unlike the ways the wheel
-    // CLOSES, which `activeHover` already covers by reading `mode`, a drag
-    // leaves `mode` untouched (Pet is draggable with the wheel open), so the
+    // CLOSES, which the `mode` effect above already covers, a drag leaves
+    // `mode` untouched (Pet is draggable with the wheel open), so the
     // highlight has to be dropped explicitly here.
     setHovered(undefined)
     // Pointer capture keeps the drag attached even when the cursor leaves the
@@ -555,18 +555,12 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
           if (effectiveSource.kind !== 'session' || effectiveSource.sessionId === undefined) {
             throw new PetApiError('INVALID_REQUEST', '答疑群需要一个当前会话作为来源')
           }
-          const group = await petApi.createQaGroup({
-            sourceSessionId: effectiveSource.sessionId,
-            ...(effectiveSource.title !== undefined ? { sessionTitle: effectiveSource.title } : {}),
+          const result = await petApi.locusDefaultQa({
+            parentSessionId: effectiveSource.sessionId,
           })
-          // State WHICH of the two happened. Without it a second click looks
-          // exactly like the first — which is how three identically named
-          // groups came to exist before reuse was implemented.
-          setNotice(
-            group.reused === true
-              ? `本会话已有答疑群「${group.chatName}」，未新建。`
-              : `已创建答疑群「${group.chatName}」，现在可以拉人进群了。`,
-          )
+          const chatName = result.locus.endpoint.chatName
+          const label = chatName === undefined ? '默认答疑入口' : `答疑群「${chatName}」`
+          setNotice(result.reused === true ? `已打开本会话的${label}。` : `已创建${label}。`)
           setMode('panel')
           return
         }
@@ -877,10 +871,16 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
       ) : null}
 
       {mode === 'panel' ? (
-        <TaskPanel
-          currentSource={effectiveSource}
-          {...(props.openSession !== undefined ? { openSession: props.openSession } : {})}
-        />
+        <>
+          <TaskPanel
+            currentSource={effectiveSource}
+            {...(props.openSession !== undefined ? { openSession: props.openSession } : {})}
+          />
+          {error !== undefined ? <p className="dshpet-panel-receipt dshpet-error">{error}</p> : null}
+          {notice !== undefined ? (
+            <p className="dshpet-panel-receipt dshpet-wheel-receipt">{notice}</p>
+          ) : null}
+        </>
       ) : null}
     </div>
   )
@@ -897,6 +897,7 @@ interface TaskView {
   /** Set when the executor runs inside the routed workspace itself. */
   residentWorkspaceId?: string
   status: string
+  diagnostic?: string
   archivedAt?: number
   executorSessionId: string
   revision: number
@@ -909,7 +910,17 @@ interface TaskView {
   }[]
 }
 
-/** The compact Task panel: invocation/source/task operations only. */
+/**
+ * The compact Task/Invocation panel belongs only to the ordinary Pet wheel.
+ * Legacy Feishu Task projections are preserved by the Host for history, but
+ * the unified channel has its own locus management surface and must never make
+ * those rows look live again.
+ */
+export function ordinaryPetTasks(tasks: readonly TaskView[]): TaskView[] {
+  return tasks.filter(task => task.sourceKind !== 'chat' && task.sourceKind !== 'qa-chat')
+}
+
+/** The compact Task panel: ordinary invocation/source/task operations only. */
 function TaskPanel(props: {
   currentSource: SourceSelection
   openSession?: (sessionId: string) => void
@@ -929,7 +940,7 @@ function TaskPanel(props: {
       // `tasks.filter`. The overlay is a `list` slot, so the error boundary
       // abdicates the entry — the mascot silently disappears until reload,
       // which is harder to notice than a blank panel.
-      setTasks(Array.isArray(result?.tasks) ? result.tasks : [])
+      setTasks(Array.isArray(result?.tasks) ? ordinaryPetTasks(result.tasks) : [])
       setError(undefined)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -1047,40 +1058,18 @@ function TaskPanel(props: {
           <strong style={{ fontSize: 12 }}>
             {task.sourceKind === 'none'
               ? 'Independent task'
-              : task.sourceKind === 'chat'
-                ? // Named as its origin rather than as `chat: oc_…`: an opaque
-                  // chat id tells the reader nothing about where the work
-                  // came from.
-                  `飞书：${task.sourceTitle ?? task.sourceId ?? task.id}`
-                : task.sourceKind === 'qa-chat'
-                  ? // A QA group's "executor" is a fork child of a user
-                    // session, so opening it lands in that child rather than
-                    // in a Pet-created executor.
-                    `答疑群：${task.sourceTitle ?? task.sourceId ?? task.id}`
-                  : `${task.sourceKind}: ${task.sourceTitle ?? task.sourceId ?? task.id}`}
+              : `${task.sourceKind}: ${task.sourceTitle ?? task.sourceId ?? task.id}`}
           </strong>
           <span className="dshpet-status" style={{ marginLeft: 6 }}>
             {task.status}
           </span>
           {/*
-            A resident Task works directly inside the routed workspace, where
-            Pet's Skill projection and standing instructions do NOT apply.
-            Saying so here keeps the panel honest about which form is running.
+            A resident ordinary Pet Task works directly inside its workspace,
+            where Pet's Skill projection and standing instructions do not apply.
           */}
-          {task.residentWorkspaceId !== undefined && task.sourceKind !== 'qa-chat' ? (
+          {task.residentWorkspaceId !== undefined ? (
             <span className="dshpet-status" style={{ marginLeft: 4 }}>
               工作区内执行
-            </span>
-          ) : null}
-          {/*
-            A QA Task's executor is a fork child of a user session, not a
-            session Pet created: it inherits that session's composition and
-            context, and Pet promises no Skill boundary over it. Labelling it
-            as an ordinary resident Task would misstate both.
-          */}
-          {task.sourceKind === 'qa-chat' ? (
-            <span className="dshpet-status" style={{ marginLeft: 4 }}>
-              会话子代理
             </span>
           ) : null}
           {task.sourceAvailability === 'archived' ? (

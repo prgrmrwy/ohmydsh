@@ -202,10 +202,17 @@ describe('first boot in an isolated DSH home', () => {
   })
 
 
-  it('exposes exactly the five stable tabs', () => {
-    // Channel joined the set with Lark inbound. It is stable rather than
-    // conditional: an unbound channel still needs a place to be bound from.
-    expect(PET_SETTINGS_TABS).toEqual(['general', 'skills', 'env', 'channel', 'diagnostics'])
+  it('exposes exactly the six stable tabs', () => {
+    // Locus is a stable management surface; the ordinary settings and legacy
+    // channel tabs remain available alongside it.
+    expect(PET_SETTINGS_TABS).toEqual([
+      'general',
+      'skills',
+      'locus',
+      'env',
+      'channel',
+      'diagnostics',
+    ])
   })
 })
 

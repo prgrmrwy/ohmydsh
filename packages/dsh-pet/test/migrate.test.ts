@@ -236,10 +236,11 @@ describe('a healthy older medium upgrades additively without losing anything', (
         version: number
       }
       // Restamped to the CURRENT version rather than the next one: every bump
-      // since v3 has been additive, so the medium is readable as v5 without a
-      // row being touched.
+      // since v3 has been additive, so the medium is readable at the current
+      // schema without a row being touched. Asserted against the constant, so
+      // a later additive bump needs no edit here — a hardcoded number would
+      // only re-fail on every bump without proving anything extra.
       expect(stamped.version).toBe(PET_DOMAIN_VERSION)
-      expect(stamped.version).toBe(5)
     } finally {
       db.close()
     }
@@ -285,6 +286,111 @@ describe('a healthy older medium upgrades additively without losing anything', (
       expect(tasks.c).toBe(1)
     } finally {
       db.close()
+    }
+  })
+})
+
+describe('v6 upgrades additively to the switch-notice schema', () => {
+  it('restamps a v6 medium and keeps its locus rows intact', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'pet-migrate-'))
+    const file = path.join(dir, 'state.sqlite')
+    const db = new DatabaseSync(file)
+    db.exec('CREATE TABLE units (name TEXT PRIMARY KEY, version INTEGER)')
+    db.prepare('INSERT INTO units VALUES (?, ?)').run('dsh_pet', 6)
+    // A medium already carrying unified locus data: the new notice table is
+    // additive, so none of this may be touched.
+    for (const table of ['loci', 'locus_indexes', 'locus_deliveries', 'tasks']) {
+      db.exec(`CREATE TABLE u_dsh_pet_${table} (key TEXT PRIMARY KEY, value TEXT)`)
+    }
+    db.prepare('INSERT INTO u_dsh_pet_loci VALUES (?, ?)').run(
+      'locus-1',
+      JSON.stringify({ id: 'locus-1', generation: 1, state: 'active' }),
+    )
+    db.prepare('INSERT INTO u_dsh_pet_tasks VALUES (?, ?)').run('task-1', JSON.stringify({ id: 'task-1' }))
+    db.close()
+
+    expect(removeLegacyState(file)).toEqual({ removedRows: 0, clearedTables: [] })
+
+    const after = new DatabaseSync(file, { readOnly: true })
+    try {
+      expect(after.prepare('SELECT version FROM units WHERE name = ?').get('dsh_pet'))
+        .toEqual({ version: PET_DOMAIN_VERSION })
+      // Both the locus row and the ordinary Pet row survive verbatim.
+      expect(after.prepare('SELECT COUNT(*) AS c FROM u_dsh_pet_loci').get()).toEqual({ c: 1 })
+      expect(after.prepare('SELECT COUNT(*) AS c FROM u_dsh_pet_tasks').get()).toEqual({ c: 1 })
+    } finally {
+      after.close()
+    }
+  })
+})
+
+describe('every additive locus version upgrades without data loss', () => {
+  it.each([6, 7, 8])('restamps a v%s medium and keeps its rows intact', async (from) => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'pet-migrate-'))
+    const file = path.join(dir, 'state.sqlite')
+    const db = new DatabaseSync(file)
+    db.exec('CREATE TABLE units (name TEXT PRIMARY KEY, version INTEGER)')
+    db.prepare('INSERT INTO units VALUES (?, ?)').run('dsh_pet', from)
+    for (const table of ['loci', 'locus_switch_notices', 'tasks']) {
+      db.exec(`CREATE TABLE u_dsh_pet_${table} (key TEXT PRIMARY KEY, value TEXT)`)
+    }
+    db.prepare('INSERT INTO u_dsh_pet_loci VALUES (?, ?)').run('locus-1', JSON.stringify({ id: 'locus-1' }))
+    db.prepare('INSERT INTO u_dsh_pet_tasks VALUES (?, ?)').run('task-1', JSON.stringify({ id: 'task-1' }))
+    db.close()
+
+    expect(removeLegacyState(file)).toEqual({ removedRows: 0, clearedTables: [] })
+
+    const after = new DatabaseSync(file, { readOnly: true })
+    try {
+      expect(after.prepare('SELECT version FROM units WHERE name = ?').get('dsh_pet'))
+        .toEqual({ version: PET_DOMAIN_VERSION })
+      // Locus data and ordinary Pet data both survive an additive bump.
+      expect(after.prepare('SELECT COUNT(*) AS c FROM u_dsh_pet_loci').get()).toEqual({ c: 1 })
+      expect(after.prepare('SELECT COUNT(*) AS c FROM u_dsh_pet_tasks').get()).toEqual({ c: 1 })
+    } finally {
+      after.close()
+    }
+  })
+})
+
+describe('migration version fence protects retained history', () => {
+  it.each([0, -1, 99])('rejects unsupported version %s before deleting or restamping', async version => {
+    const file = await legacyDatabase()
+    const before = new DatabaseSync(file)
+    before.prepare('UPDATE units SET version = ? WHERE name = ?').run(version, 'dsh_pet')
+    const rows = before.prepare('SELECT * FROM u_dsh_pet_invocations').all()
+    before.close()
+
+    expect(() => removeLegacyState(file)).toThrow(/Unsupported Pet storage version/)
+
+    const after = new DatabaseSync(file, { readOnly: true })
+    try {
+      expect(after.prepare('SELECT version FROM units WHERE name = ?').get('dsh_pet')).toEqual({ version })
+      expect(after.prepare('SELECT * FROM u_dsh_pet_invocations').all()).toEqual(rows)
+      expect(after.prepare('SELECT COUNT(*) AS c FROM u_dsh_pet_tasks').get()).toEqual({ c: 1 })
+    } finally {
+      after.close()
+    }
+  })
+
+  it.each([2, 3, 4, 5, PET_DOMAIN_VERSION])('never runs destructive v1 cleanup for version %s', async version => {
+    // Even a row with old/malformed shape must be retained in a newer medium.
+    // Domain validation may reject it, but upgrade is not deletion authority.
+    const file = await legacyDatabase()
+    const before = new DatabaseSync(file)
+    before.prepare('UPDATE units SET version = ? WHERE name = ?').run(version, 'dsh_pet')
+    const rows = before.prepare('SELECT * FROM u_dsh_pet_invocations').all()
+    before.close()
+
+    expect(removeLegacyState(file)).toEqual({ removedRows: 0, clearedTables: [] })
+
+    const after = new DatabaseSync(file, { readOnly: true })
+    try {
+      expect(after.prepare('SELECT version FROM units WHERE name = ?').get('dsh_pet')).toEqual({ version: PET_DOMAIN_VERSION })
+      expect(after.prepare('SELECT * FROM u_dsh_pet_invocations').all()).toEqual(rows)
+      expect(after.prepare('SELECT COUNT(*) AS c FROM u_dsh_pet_tasks').get()).toEqual({ c: 1 })
+    } finally {
+      after.close()
     }
   })
 })

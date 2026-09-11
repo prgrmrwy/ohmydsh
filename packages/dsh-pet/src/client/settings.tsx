@@ -1,17 +1,18 @@
 /**
- * Pet settings section: five stable tabs.
+ * Pet settings section: six stable tabs.
  *
- * General, Skills and Diagnostics.
- * architecture — the overlay and Task panel deliberately do not duplicate
- * installation, binding editing or diagnostics.
+ * General, Skills, Locus, Environment, Channel and Diagnostics.
+ * The overlay and Task panel deliberately do not duplicate installation,
+ * locus management, binding editing or diagnostics.
  *
  * Provider credentials are owned by DSH provider/subscription plugins. This
  * page displays provider/model availability by id only and never reads,
- * persists or renders a token.
+ * persists or renders a token. The locus surface likewise never accepts a
+ * browser-supplied owner identity: Host authority is fail-closed.
  */
 
 import type { ReactNode } from 'react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   DEFAULT_GLYPH,
   PET_ACCENT_EVENT,
@@ -28,7 +29,7 @@ import {
   type PetSizeId,
 } from './accent.js'
 import { petApi, type PetConfig } from './api.js'
-import { PET_EXECUTOR_PRESET, chatAppLink, routeGroupOf } from '../wire.js'
+import { PET_EXECUTOR_PRESET } from '../wire.js'
 import { WHEEL_CAPACITY } from './wheel.js'
 import type {
   PetEnvRecord,
@@ -36,13 +37,24 @@ import type {
   PetSkillRevision,
   PetChannelPhase,
   PetChannelView,
-  PetRouteGroup,
+  PetLocusDiscoveryView,
+  PetLocusManagementView,
+  PetLocusPermissionMode,
+  PetLocusView,
   PetSkillSelection,
+  PetUnifiedLocusReadiness,
   PetWorkspaceChoice,
 } from '../wire.js'
 
-/** The five stable tabs. */
-export const PET_SETTINGS_TABS = ['general', 'skills', 'env', 'channel', 'diagnostics'] as const
+/** The six stable tabs. */
+export const PET_SETTINGS_TABS = [
+  'general',
+  'skills',
+  'locus',
+  'env',
+  'channel',
+  'diagnostics',
+] as const
 
 export type PetSettingsTab = (typeof PET_SETTINGS_TABS)[number]
 
@@ -198,6 +210,7 @@ function StoredField(props: {
 const TAB_LABELS: Record<PetSettingsTab, string> = {
   general: '通用',
   skills: 'Skill',
+  locus: 'Locus 管理',
   env: '环境变量',
   channel: '飞书',
   diagnostics: '诊断',
@@ -283,6 +296,7 @@ export function PetSettingsSection(props: { initialTab?: PetSettingsTab } = {}):
       <div role="tabpanel" id={`dshpet-panel-${tab}`} aria-labelledby={`dshpet-tab-${tab}`}>
         {tab === 'general' ? <GeneralTab /> : null}
         {tab === 'skills' ? <SkillsTab /> : null}
+        {tab === 'locus' ? <LocusTab /> : null}
         {tab === 'env' ? <EnvironmentTab /> : null}
         {tab === 'channel' ? <ChannelTab /> : null}
         {tab === 'diagnostics' ? <DiagnosticsTab /> : null}
@@ -528,6 +542,803 @@ function GeneralTab(): JSX.Element {
           }}
         />
       </Group>
+    </div>
+  )
+}
+
+const LOCUS_STATE_LABELS: Record<PetLocusView['state']['state'], string> = {
+  provisioning: '准备中',
+  active: '活跃',
+  switching: '切换中',
+  invalid: '失效',
+  stopped: '已停止',
+  retired: '已退役',
+}
+
+const LOCUS_SOURCE_LABELS: Record<PetLocusView['source'], string> = {
+  auto: '自动建立',
+  inherited: '继承群级来源',
+  explicit: '显式绑定',
+  'qa-created': '默认 Q&A',
+}
+
+const LOCUS_PERMISSION_LABELS: Record<PetLocusPermissionMode, string> = {
+  read: '只读',
+  write: '可写',
+}
+
+function locusEndpointInput(endpoint: PetLocusView['endpoint']): {
+  chatId: string
+  threadId?: string
+} {
+  return endpoint.threadId === undefined
+    ? { chatId: endpoint.chatId }
+    : { chatId: endpoint.chatId, threadId: endpoint.threadId }
+}
+
+function locusStatusTone(state: PetLocusView['state']['state']): 'enabled' | 'warn' | 'danger' | undefined {
+  if (state === 'active') return 'enabled'
+  if (state === 'invalid' || state === 'retired') return 'danger'
+  if (state === 'stopped' || state === 'provisioning' || state === 'switching') return 'warn'
+  return undefined
+}
+
+function locusAvailabilityLabel(
+  availability: PetLocusView['main']['availability'] | PetLocusView['child']['availability'],
+): string {
+  if (availability === 'available') return '可用'
+  if (availability === 'archived') return '已归档'
+  if (availability === 'missing') return '不可用'
+  return '未核验'
+}
+
+/**
+ * One owner-facing locus card. It intentionally renders only the Host
+ * projection: no credential, browser identity, or guessed capability is
+ * introduced here.
+ */
+function LocusCard(props: {
+  readonly locus: PetLocusView
+  readonly showActions?: boolean | undefined
+  readonly busyKey?: string | undefined
+  readonly onAction?: ((key: string, operation: () => Promise<unknown>) => void) | undefined
+}): JSX.Element {
+  const locus = props.locus
+  const actionBusy = props.busyKey !== undefined
+  const [anchorRoot, setAnchorRoot] = useState(locus.contextAnchor?.executionRoot ?? '')
+  const [anchorResources, setAnchorResources] = useState(
+    locus.contextAnchor?.projectResources?.join('\n') ?? '',
+  )
+  const [anchorConstraints, setAnchorConstraints] = useState(
+    locus.contextAnchor?.constraints?.join('\n') ?? '',
+  )
+  const canRebuild =
+    locus.state.state === 'invalid' || locus.state.state === 'stopped' || locus.state.state === 'retired'
+  const canStop =
+    locus.state.state === 'provisioning' || locus.state.state === 'active' || locus.state.state === 'switching'
+  const canArchive =
+    locus.state.state === 'provisioning' || locus.state.state === 'active' || locus.state.state === 'switching'
+  const canManageCurrent = locus.state.state === 'active'
+  const run = (name: string, operation: () => Promise<unknown>): (() => void) => () => {
+    props.onAction?.(`${locus.locusId}:${name}`, operation)
+  }
+
+  return (
+    <article className="dshpet-card">
+      <div className="dshpet-card-head">
+        <span className="dshpet-card-name">
+          {locus.endpoint.chatName ?? locus.endpoint.chatId}
+          {locus.endpoint.threadId === undefined ? '' : ' · 话题'}
+        </span>
+        <span className="dshpet-status" data-tone={locusStatusTone(locus.state.state)}>
+          {LOCUS_STATE_LABELS[locus.state.state]}
+        </span>
+        {locus.isDefaultQa ? <span className="dshpet-status">默认 Q&A</span> : null}
+        <span className="dshpet-status">第 {locus.generation} 代</span>
+      </div>
+      <div className="dshpet-facts">
+        <Fact label="Locus ID" value={locus.locusId} mono />
+        <Fact label="Endpoint" value={locus.endpoint.chatId} mono />
+        {locus.endpoint.threadId !== undefined ? (
+          <Fact label="Thread" value={locus.endpoint.threadId} mono />
+        ) : null}
+        <Fact
+          label="主会话"
+          value={`${locus.main.title ?? locus.main.sessionId}（${locus.main.sessionId}，${locusAvailabilityLabel(locus.main.availability)}）`}
+        />
+        <Fact
+          label="子会话"
+          value={
+            locus.child.sessionId === undefined
+              ? `尚未创建（${locusAvailabilityLabel(locus.child.availability)}）`
+              : `${locus.child.title ?? locus.child.sessionId}（${locus.child.sessionId}，${locusAvailabilityLabel(locus.child.availability)}）`
+          }
+        />
+        <Fact label="来源" value={LOCUS_SOURCE_LABELS[locus.source]} />
+        <Fact
+          label="状态"
+          value={`${LOCUS_STATE_LABELS[locus.state.state]}${locus.state.busy ? ' · 有在途工作' : ''}`}
+        />
+        {locus.state.invalidReason !== undefined ? (
+          <Fact label="失效原因" value={locus.state.invalidReason} />
+        ) : null}
+        <Fact
+          label="权限"
+          value={`期望 ${LOCUS_PERMISSION_LABELS[locus.permission.desired]} · 实际 ${LOCUS_PERMISSION_LABELS[locus.permission.effective]}`}
+        />
+        <Fact
+          label="Workspace"
+          value={`${locus.workspace.title ?? locus.workspace.workspaceId}（${locus.workspace.workspaceId}）`}
+        />
+        {locus.workspace.path !== undefined ? (
+          <Fact label="工作区路径" value={locus.workspace.path} mono />
+        ) : null}
+        {locus.workspace.executionRoot !== undefined ? (
+          <Fact label="执行根（展示）" value={locus.workspace.executionRoot} mono />
+        ) : null}
+        {locus.contextAnchor !== undefined ? (
+          <Fact
+            label="上下文锚点"
+            value={`${locus.contextAnchor.status}${
+              locus.contextAnchor.executionRoot === undefined
+                ? ''
+                : ` · ${locus.contextAnchor.executionRoot}`
+            }`}
+          />
+        ) : null}
+      </div>
+      {locus.contextAnchor?.status !== 'confirmed' && locus.contextAnchor !== undefined ? (
+        <p className="dshpet-callout" data-tone="warn">
+          当前执行根锚点尚未确认；路径展示不等于授权，Pet 不会据此宣称可写。
+        </p>
+      ) : null}
+      {props.showActions !== false && props.onAction !== undefined && canManageCurrent ? (
+        <details className="dshpet-card">
+          <summary>确认上下文锚点</summary>
+          <p className="dshpet-muted">
+            这是所有者对当前 locus 事实的确认，不授予文件权限，也不会创建 worktree。
+            资料入口与约束每行一项。
+          </p>
+          <label className="dshpet-field">
+            <span>执行根（可留空）</span>
+            <input className="dshpet-input" value={anchorRoot} onChange={event => setAnchorRoot(event.currentTarget.value)} />
+          </label>
+          <label className="dshpet-field">
+            <span>项目资料入口</span>
+            <textarea className="dshpet-input" value={anchorResources} onChange={event => setAnchorResources(event.currentTarget.value)} />
+          </label>
+          <label className="dshpet-field">
+            <span>工作约束</span>
+            <textarea className="dshpet-input" value={anchorConstraints} onChange={event => setAnchorConstraints(event.currentTarget.value)} />
+          </label>
+          <button
+            type="button"
+            className="dshpet-action dshpet-action-sm"
+            disabled={actionBusy || locus.state.busy}
+            onClick={run('confirm-anchor', () => petApi.locusConfirmAnchor({
+              action: 'confirm-anchor',
+              locusId: locus.locusId,
+              endpoint: locusEndpointInput(locus.endpoint),
+              ...(anchorRoot.trim() === '' ? {} : { executionRoot: anchorRoot.trim() }),
+              projectResources: anchorResources.split('\n').map(item => item.trim()).filter(Boolean),
+              constraints: anchorConstraints.split('\n').map(item => item.trim()).filter(Boolean),
+              existence: 'unknown',
+              expectedGeneration: locus.generation,
+              expectedLocusId: locus.locusId,
+              expectedUpdatedAt: locus.state.updatedAt,
+            }))}
+          >
+            确认锚点（不授权）
+          </button>
+        </details>
+      ) : null}
+      {props.showActions !== false && props.onAction !== undefined ? (
+        <div className="dshpet-actions">
+          {sessionOpener !== undefined && locus.main.sessionId !== '' ? (
+            <button
+              type="button"
+              className="dshpet-action dshpet-action-sm"
+              disabled={actionBusy}
+              onClick={() => sessionOpener?.(locus.main.sessionId)}
+            >
+              打开主会话
+            </button>
+          ) : null}
+          {sessionOpener !== undefined && locus.child.sessionId !== undefined ? (
+            <button
+              type="button"
+              className="dshpet-action dshpet-action-sm"
+              disabled={actionBusy}
+              onClick={() => sessionOpener?.(locus.child.sessionId ?? '')}
+            >
+              打开子会话
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="dshpet-action dshpet-action-sm"
+            disabled={actionBusy || locus.state.busy || !canManageCurrent}
+            onClick={run('unbind', () =>
+              petApi.locusUnbind({
+                action: 'unbind',
+                locusId: locus.locusId,
+                endpoint: locusEndpointInput(locus.endpoint),
+                expectedGeneration: locus.generation,
+                expectedLocusId: locus.locusId,
+                expectedUpdatedAt: locus.state.updatedAt,
+              }),
+            )}
+          >
+            解绑
+          </button>
+          <button
+            type="button"
+            className="dshpet-action dshpet-action-sm"
+            disabled={actionBusy || locus.state.busy || !canManageCurrent || locus.permission.effective === 'read'}
+            onClick={run('scope-read', () =>
+              petApi.locusScope({
+                action: 'scope',
+                locusId: locus.locusId,
+                mode: 'read',
+                expectedGeneration: locus.generation,
+                expectedLocusId: locus.locusId,
+                expectedUpdatedAt: locus.state.updatedAt,
+              }),
+            )}
+          >
+            设为只读
+          </button>
+          <button
+            type="button"
+            className="dshpet-action dshpet-action-sm"
+            disabled={actionBusy || locus.state.busy || !canManageCurrent || locus.permission.effective === 'write'}
+            title="Host 必须先核验真实写入范围；核验失败会保持只读。"
+            onClick={run('scope-write', () =>
+              petApi.locusScope({
+                action: 'scope',
+                locusId: locus.locusId,
+                mode: 'write',
+                expectedGeneration: locus.generation,
+                expectedLocusId: locus.locusId,
+                expectedUpdatedAt: locus.state.updatedAt,
+              }),
+            )}
+          >
+            请求可写
+          </button>
+          <button
+            type="button"
+            className="dshpet-action dshpet-action-sm"
+            disabled={actionBusy || locus.state.busy || !canArchive}
+            title={!canArchive ? '只有活跃或切换中的 locus 可归档。' : undefined}
+            onClick={run('archive', () =>
+              petApi.locusArchive({
+                action: 'archive',
+                locusId: locus.locusId,
+                endpoint: locusEndpointInput(locus.endpoint),
+                expectedGeneration: locus.generation,
+                expectedLocusId: locus.locusId,
+                expectedUpdatedAt: locus.state.updatedAt,
+              }),
+            )}
+          >
+            归档
+          </button>
+          <button
+            type="button"
+            className="dshpet-action dshpet-action-sm"
+            disabled={actionBusy || locus.state.busy || !canStop}
+            title={!canStop ? '只有仍在服务的 locus 可停止。' : undefined}
+            onClick={run('stop', () =>
+              petApi.locusStop({
+                action: 'stop',
+                locusId: locus.locusId,
+                endpoint: locusEndpointInput(locus.endpoint),
+                expectedGeneration: locus.generation,
+                expectedLocusId: locus.locusId,
+                expectedUpdatedAt: locus.state.updatedAt,
+              }),
+            )}
+          >
+            停止
+          </button>
+          <button
+            type="button"
+            className="dshpet-action dshpet-action-sm"
+            disabled={actionBusy || locus.state.busy || !canRebuild}
+            title={!canRebuild ? '只有失效、停止或退役的 locus 可显式重建。' : undefined}
+            onClick={run('rebuild', () =>
+              petApi.locusRebuild({
+                action: 'rebuild',
+                endpoint: locusEndpointInput(locus.endpoint),
+                parentSessionId: locus.main.sessionId,
+                ...(locus.workspace.workspaceId === '' ? {} : { workspaceId: locus.workspace.workspaceId }),
+                ...(locus.parentLocusId === undefined ? {} : { parentLocusId: locus.parentLocusId }),
+                ...(locus.isDefaultQa ? { asDefaultQa: true } : {}),
+                expectedGeneration: locus.generation,
+                expectedLocusId: locus.locusId,
+                expectedUpdatedAt: locus.state.updatedAt,
+              }),
+            )}
+          >
+            重建（默认只读）
+          </button>
+        </div>
+      ) : null}
+    </article>
+  )
+}
+
+function requireLocusSnapshot(value: unknown): PetLocusManagementView {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('Host 返回的 locus 快照格式无效，已拒绝显示。')
+  }
+  const isRecord = (item: unknown): item is Record<string, unknown> =>
+    typeof item === 'object' && item !== null && !Array.isArray(item)
+  const isNonEmptyString = (item: unknown): item is string => typeof item === 'string' && item.trim() !== ''
+  const isFiniteNonNegative = (item: unknown): item is number =>
+    typeof item === 'number' && Number.isSafeInteger(item) && item >= 0
+  const isEndpoint = (item: unknown): boolean =>
+    isRecord(item) && isNonEmptyString(item.chatId) &&
+    (item.threadId === undefined || isNonEmptyString(item.threadId)) &&
+    (item.chatType === undefined || item.chatType === 'p2p' || item.chatType === 'group') &&
+    (item.chatName === undefined || typeof item.chatName === 'string')
+  const isLocus = (item: unknown): item is PetLocusView => {
+    if (!isRecord(item) || !isNonEmptyString(item.locusId) || typeof item.generation !== 'number' || !Number.isSafeInteger(item.generation) || item.generation < 1 || !isEndpoint(item.endpoint)) return false
+    if (!isRecord(item.main) || !isNonEmptyString(item.main.sessionId) ||
+        (item.main.title !== undefined && typeof item.main.title !== 'string') ||
+        (item.main.source !== undefined && !['auto', 'inherited', 'explicit', 'qa-created'].includes(String(item.main.source))) ||
+        (item.main.availability !== undefined && !['available', 'archived', 'missing'].includes(String(item.main.availability)))) return false
+    if (!isRecord(item.child) || (item.child.sessionId !== undefined && !isNonEmptyString(item.child.sessionId)) ||
+        (item.child.title !== undefined && typeof item.child.title !== 'string') ||
+        (item.child.availability !== undefined && !['available', 'archived', 'missing'].includes(String(item.child.availability)))) return false
+    if (!isRecord(item.workspace) || !isNonEmptyString(item.workspace.workspaceId) ||
+        (item.workspace.title !== undefined && typeof item.workspace.title !== 'string') ||
+        (item.workspace.path !== undefined && typeof item.workspace.path !== 'string') ||
+        (item.workspace.executionRoot !== undefined && typeof item.workspace.executionRoot !== 'string')) return false
+    if (item.contextAnchor !== undefined && (!isRecord(item.contextAnchor) ||
+        !['confirmed', 'missing', 'unknown'].includes(String(item.contextAnchor.status)) ||
+        (item.contextAnchor.executionRoot !== undefined && typeof item.contextAnchor.executionRoot !== 'string') ||
+        (item.contextAnchor.constraints !== undefined && (!Array.isArray(item.contextAnchor.constraints) || !item.contextAnchor.constraints.every(value => typeof value === 'string'))) ||
+        (item.contextAnchor.provenance !== undefined && typeof item.contextAnchor.provenance !== 'string') ||
+        (item.contextAnchor.confirmedAt !== undefined && !isFiniteNonNegative(item.contextAnchor.confirmedAt)))) return false
+    if (!isRecord(item.permission) || !['read', 'write'].includes(String(item.permission.desired)) || !['read', 'write'].includes(String(item.permission.effective)) ||
+        (item.permission.verifiedAt !== undefined && !isFiniteNonNegative(item.permission.verifiedAt)) ||
+        (item.permission.grantedBy !== undefined && !isNonEmptyString(item.permission.grantedBy)) ||
+        (item.permission.effective === 'write' && (item.permission.desired !== 'write' || item.permission.verifiedAt === undefined))) return false
+    if (!isRecord(item.state) || !['provisioning', 'active', 'switching', 'invalid', 'stopped', 'retired'].includes(String(item.state.state)) || typeof item.state.busy !== 'boolean') return false
+    if (!isFiniteNonNegative(item.state.createdAt) || !isFiniteNonNegative(item.state.updatedAt) || item.state.updatedAt < item.state.createdAt ||
+        (item.state.stoppedAt !== undefined && (!isFiniteNonNegative(item.state.stoppedAt) || item.state.stoppedAt > item.state.updatedAt)) ||
+        (item.state.retiredAt !== undefined && (!isFiniteNonNegative(item.state.retiredAt) || item.state.retiredAt > item.state.updatedAt)) ||
+        (['invalid', 'stopped', 'retired'].includes(String(item.state.state)) && item.state.busy)) return false
+    return ['auto', 'inherited', 'explicit', 'qa-created'].includes(String(item.source)) &&
+      (item.parentLocusId === undefined || isNonEmptyString(item.parentLocusId)) &&
+      typeof item.isDefaultQa === 'boolean' && (item.defaultQa === undefined || item.defaultQa === item.isDefaultQa)
+  }
+  const candidate = value as Partial<PetLocusManagementView>
+  const discovery = candidate.discovery
+  if (!Array.isArray(candidate.loci) || !candidate.loci.every(isLocus) ||
+      !Array.isArray(candidate.defaultQa) || !candidate.defaultQa.every(item =>
+        isRecord(item) && isNonEmptyString(item.parentSessionId) &&
+        (item.locus === undefined || (isLocus(item.locus) && item.locus.main.sessionId === item.parentSessionId))) ||
+      !isFiniteNonNegative(candidate.generation) || !isRecord(discovery) ||
+      !Array.isArray(discovery.byEndpoint) || !discovery.byEndpoint.every(item =>
+        isRecord(item) && isEndpoint(item.endpoint) && Array.isArray(item.history) && item.history.every(isLocus) &&
+        (item.current === undefined || (isLocus(item.current) && item.history.some(history => history.locusId === (item.current as { locusId: string }).locusId)))) ||
+      !Array.isArray(discovery.byParent) || !discovery.byParent.every(item =>
+        isRecord(item) && isNonEmptyString(item.parentSessionId) && Array.isArray(item.loci) && item.loci.every(isLocus) &&
+        (item.defaultQa === undefined || isLocus(item.defaultQa))) ||
+      !Array.isArray(discovery.byChild) || !discovery.byChild.every(item =>
+        isRecord(item) && isNonEmptyString(item.childSessionId) && Array.isArray(item.history) && item.history.every(isLocus) &&
+        item.history.every(history => history.child.sessionId === item.childSessionId) &&
+        (item.locus === undefined || (isLocus(item.locus) && item.locus.child.sessionId === item.childSessionId)))) {
+    throw new Error('Host 返回的 locus 快照不完整或字段无效，已拒绝显示。')
+  }
+  return value as PetLocusManagementView
+}
+
+/**
+ * Unified locus management. This is intentionally separate from the ordinary
+ * Task/Invocation and legacy channel tabs: an unavailable locus Host seam is
+ * rendered as an error, never silently backed by legacy data.
+ */
+function LocusTab(): JSX.Element {
+  const [snapshot, setSnapshot] = useState<PetLocusManagementView | undefined>(undefined)
+  const [discoveryResult, setDiscoveryResult] = useState<PetLocusDiscoveryView | undefined>(undefined)
+  const [error, setError] = useState<string | undefined>(undefined)
+  const [busyKey, setBusyKey] = useState<string | undefined>(undefined)
+  const [actionWarning, setActionWarning] = useState<string | undefined>(undefined)
+  const actionInFlight = useRef(false)
+  const [selector, setSelector] = useState<'endpoint' | 'parent' | 'child'>('endpoint')
+  const [discoveryChatId, setDiscoveryChatId] = useState('')
+  const [discoveryThreadId, setDiscoveryThreadId] = useState('')
+  const [discoveryParentId, setDiscoveryParentId] = useState('')
+  const [discoveryChildId, setDiscoveryChildId] = useState('')
+  const [bindChatId, setBindChatId] = useState('')
+  const [bindThreadId, setBindThreadId] = useState('')
+  const [bindParentId, setBindParentId] = useState('')
+  const [bindWorkspaceId, setBindWorkspaceId] = useState('')
+  const [bindParentLocusId, setBindParentLocusId] = useState('')
+
+  const load = useCallback(async (): Promise<PetLocusManagementView> => {
+    return requireLocusSnapshot(await petApi.locus())
+  }, [])
+
+  const refresh = useCallback(async (): Promise<void> => {
+    try {
+      setSnapshot(await load())
+      setError(undefined)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }, [load])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const runAction = useCallback(
+    async (key: string, operation: () => Promise<unknown>): Promise<void> => {
+      if (actionInFlight.current) return
+      actionInFlight.current = true
+      setBusyKey(key)
+      setError(undefined)
+      setActionWarning(undefined)
+      try {
+        const result = await operation()
+        if (typeof result === 'object' && result !== null) {
+          const warningText = (result as { warningText?: unknown }).warningText
+          if (typeof warningText === 'string' && warningText.trim() !== '') {
+            setActionWarning(warningText)
+          }
+        }
+        setSnapshot(await load())
+      } catch (cause) {
+        // A rejected Host action never changes the displayed snapshot. This is
+        // deliberately fail-closed: no optimistic read/write or binding state.
+        setError(cause instanceof Error ? cause.message : String(cause))
+      } finally {
+        actionInFlight.current = false
+        setBusyKey(undefined)
+      }
+    },
+    [load],
+  )
+
+  const loci = snapshot?.loci ?? []
+  const parentIds = [...new Set(loci.map(locus => locus.main.sessionId))]
+  const defaultQa = snapshot?.defaultQa ?? []
+
+  const runDiscovery = (): void => {
+    setDiscoveryResult(undefined)
+    setError(undefined)
+    const operation =
+      selector === 'endpoint'
+        ? discoveryChatId.trim() === ''
+          ? undefined
+          : petApi.locusDiscovery({
+              endpoint: {
+                chatId: discoveryChatId.trim(),
+                ...(discoveryThreadId.trim() === '' ? {} : { threadId: discoveryThreadId.trim() }),
+              },
+            })
+        : selector === 'parent'
+          ? discoveryParentId.trim() === ''
+            ? undefined
+            : petApi.locusDiscovery({ parentSessionId: discoveryParentId.trim() })
+          : discoveryChildId.trim() === ''
+            ? undefined
+            : petApi.locusDiscovery({ childSessionId: discoveryChildId.trim() })
+    if (operation === undefined) {
+      setError('请输入一个完整的发现选择器；未发送空查询。')
+      return
+    }
+    void runAction('discovery', async () => {
+      setDiscoveryResult(await operation)
+    })
+  }
+
+  const createDefaultQa = (parentSessionId: string): void => {
+    if (parentSessionId.trim() === '') {
+      setError('主会话标识为空，未发送默认 Q&A 请求。')
+      return
+    }
+    void runAction(`default-qa:${parentSessionId}`, () => petApi.locusDefaultQa({ parentSessionId }))
+  }
+
+  const bind = (): void => {
+    const chatId = bindChatId.trim()
+    const parentSessionId = bindParentId.trim()
+    if (chatId === '' || parentSessionId === '') {
+      setError('绑定需要 endpoint chat ID 和已知的主会话 ID；未发送不完整请求。')
+      return
+    }
+    void runAction('bind', () =>
+      petApi.locusBind({
+        action: 'bind',
+        endpoint: {
+          chatId,
+          ...(bindThreadId.trim() === '' ? {} : { threadId: bindThreadId.trim() }),
+        },
+        parentSessionId,
+        ...(bindWorkspaceId.trim() === '' ? {} : { workspaceId: bindWorkspaceId.trim() }),
+        ...(bindParentLocusId.trim() === '' ? {} : { parentLocusId: bindParentLocusId.trim() }),
+      }),
+    )
+  }
+
+  if (snapshot === undefined) {
+    return (
+      <div className="dshpet-settings">
+        <Group title="Locus 管理">
+          {error === undefined ? (
+            <p className="dshpet-item-hint">正在读取 Host 的统一 locus 管理快照…</p>
+          ) : (
+            <p className="dshpet-error">{error}</p>
+          )}
+          <p className="dshpet-item-hint">
+            统一 locus 接口不可用时不会回退到旧 Task、Invocation 或普通飞书路由。
+          </p>
+        </Group>
+      </div>
+    )
+  }
+
+  return (
+    <div className="dshpet-settings">
+      <Group title="管理快照" note={`generation ${snapshot.generation} · ${loci.length} 个 locus`}>
+        <p className="dshpet-item-hint">
+          这里是 Host 提供的统一关联投影；它不读取凭据，也不把浏览器身份当作所有者授权。
+          只有 Host 返回成功后的真实状态才会显示为已生效。
+        </p>
+        {loci.length === 0 ? (
+          <p className="dshpet-empty">当前没有可显示的统一 locus。</p>
+        ) : (
+          <div className="dshpet-cards">
+            {loci.map(locus => (
+              <LocusCard
+                key={`${locus.locusId}:${locus.generation}`}
+                locus={locus}
+                busyKey={busyKey}
+                onAction={runAction}
+              />
+            ))}
+          </div>
+        )}
+      </Group>
+
+      <Group title="默认 Q&A" note={`${defaultQa.length} 个主会话入口`}>
+        <p className="dshpet-item-hint">
+          默认 Q&A 是每个主会话自己的稳定入口；其它群或话题不会改变它。创建/打开需要
+          Host 验证的所有者身份，浏览器不会猜测、收集或发送 owner identity。
+        </p>
+        {defaultQa.length === 0 ? (
+          <p className="dshpet-empty">Host 尚未返回默认 Q&A 入口。</p>
+        ) : (
+          <div className="dshpet-cards">
+            {defaultQa.map(entry => (
+              <div className="dshpet-card" key={entry.parentSessionId}>
+                <Fact label="主会话" value={entry.parentSessionId} mono />
+                {entry.locus === undefined ? (
+                  <p className="dshpet-callout" data-tone="warn">
+                    默认入口存在索引记录，但当前 locus 不可用；不会静默切换到其它入口。
+                  </p>
+                ) : (
+                  <LocusCard locus={entry.locus} showActions={false} />
+                )}
+                <button
+                  type="button"
+                  className="dshpet-action dshpet-action-sm"
+                  disabled={busyKey !== undefined}
+                  onClick={() => createDefaultQa(entry.parentSessionId)}
+                >
+                  创建/打开默认 Q&A（此主会话）
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {defaultQa.length === 0 && parentIds.length > 0 ? (
+          <div className="dshpet-actions">
+            {parentIds.map(parentSessionId => (
+              <button
+                key={parentSessionId}
+                type="button"
+                className="dshpet-action dshpet-action-sm"
+                disabled={busyKey !== undefined}
+                onClick={() => createDefaultQa(parentSessionId)}
+              >
+                创建/打开默认 Q&A（{parentSessionId}）
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </Group>
+
+      <Group title="发现关联" note="endpoint / 主会话 / 子会话">
+        <p className="dshpet-item-hint">
+          发现查询只返回所选索引，不会因为查到一个 locus 就授予读取、写入或其它入口权限。
+        </p>
+        <label className="dshpet-field">
+          选择器
+          <select
+            className="dshpet-input"
+            value={selector}
+            onChange={event => setSelector(event.target.value as typeof selector)}
+          >
+            <option value="endpoint">Endpoint（chat / thread）</option>
+            <option value="parent">主会话 ID</option>
+            <option value="child">子会话 ID</option>
+          </select>
+        </label>
+        {selector === 'endpoint' ? (
+          <div className="dshpet-row">
+            <label className="dshpet-field">
+              Chat ID
+              <input
+                className="dshpet-input"
+                value={discoveryChatId}
+                placeholder="oc_…"
+                onChange={event => setDiscoveryChatId(event.target.value)}
+              />
+            </label>
+            <label className="dshpet-field">
+              Thread ID（可选）
+              <input
+                className="dshpet-input"
+                value={discoveryThreadId}
+                placeholder="omt_…"
+                onChange={event => setDiscoveryThreadId(event.target.value)}
+              />
+            </label>
+          </div>
+        ) : selector === 'parent' ? (
+          <label className="dshpet-field">
+            主会话 ID
+            <input
+              className="dshpet-input"
+              value={discoveryParentId}
+              placeholder="由 Host 校验的主会话 ID"
+              onChange={event => setDiscoveryParentId(event.target.value)}
+            />
+          </label>
+        ) : (
+          <label className="dshpet-field">
+            子会话 ID
+            <input
+              className="dshpet-input"
+              value={discoveryChildId}
+              placeholder="由 Host 校验的子会话 ID"
+              onChange={event => setDiscoveryChildId(event.target.value)}
+            />
+          </label>
+        )}
+        <div className="dshpet-actions">
+          <button
+            type="button"
+            className="dshpet-action dshpet-action-primary"
+            disabled={busyKey !== undefined}
+            onClick={runDiscovery}
+          >
+            查询
+          </button>
+        </div>
+        {discoveryResult !== undefined ? (
+          <div className="dshpet-cards">
+            {discoveryResult.byEndpoint.map(item => (
+              <div className="dshpet-card" key={`endpoint:${item.endpoint.chatId}:${item.endpoint.threadId ?? ''}`}>
+                <div className="dshpet-card-head">
+                  <span className="dshpet-card-name">Endpoint 结果</span>
+                  <span className="dshpet-status">历史 {item.history.length} 代</span>
+                </div>
+                <Fact label="Chat ID" value={item.endpoint.chatId} mono />
+                {item.endpoint.threadId !== undefined ? (
+                  <Fact label="Thread ID" value={item.endpoint.threadId} mono />
+                ) : null}
+                <Fact label="当前 locus" value={item.current?.locusId ?? '无'} mono />
+              </div>
+            ))}
+            {discoveryResult.byParent.map(item => (
+              <div className="dshpet-card" key={`parent:${item.parentSessionId}`}>
+                <div className="dshpet-card-head">
+                  <span className="dshpet-card-name">主会话结果</span>
+                  <span className="dshpet-status">关联 {item.loci.length} 个</span>
+                </div>
+                <Fact label="主会话 ID" value={item.parentSessionId} mono />
+                <Fact label="默认 Q&A" value={item.defaultQa?.locusId ?? '未设置'} mono />
+              </div>
+            ))}
+            {discoveryResult.byChild.map(item => (
+              <div className="dshpet-card" key={`child:${item.childSessionId}`}>
+                <div className="dshpet-card-head">
+                  <span className="dshpet-card-name">子会话结果</span>
+                  <span className="dshpet-status">历史 {item.history?.length ?? 0} 代</span>
+                </div>
+                <Fact label="子会话 ID" value={item.childSessionId} mono />
+                <Fact label="所属 locus" value={item.locus?.locusId ?? '无'} mono />
+              </div>
+            ))}
+            {discoveryResult.byEndpoint.length === 0 &&
+            discoveryResult.byParent.length === 0 &&
+            discoveryResult.byChild.length === 0 ? (
+              <p className="dshpet-empty">没有匹配的关联。</p>
+            ) : null}
+          </div>
+        ) : null}
+      </Group>
+
+      <Group title="绑定新的 endpoint">
+        <p className="dshpet-item-hint">
+          新绑定始终请求只读；主会话、工作区和父级关系由 Host 再次校验。这里不接受任何
+          App Secret、provider token 或浏览器所有者身份。
+        </p>
+        <div className="dshpet-row">
+          <label className="dshpet-field">
+            Chat ID
+            <input
+              className="dshpet-input"
+              value={bindChatId}
+              placeholder="oc_…"
+              onChange={event => setBindChatId(event.target.value)}
+            />
+          </label>
+          <label className="dshpet-field">
+            Thread ID（可选）
+            <input
+              className="dshpet-input"
+              value={bindThreadId}
+              placeholder="omt_…"
+              onChange={event => setBindThreadId(event.target.value)}
+            />
+          </label>
+        </div>
+        <label className="dshpet-field">
+          主会话 ID
+          <input
+            className="dshpet-input"
+            value={bindParentId}
+            placeholder={parentIds[0] ?? '由 Host 校验的主会话 ID'}
+            onChange={event => setBindParentId(event.target.value)}
+          />
+        </label>
+        <div className="dshpet-row">
+          <label className="dshpet-field">
+            Workspace ID（可选）
+            <input
+              className="dshpet-input"
+              value={bindWorkspaceId}
+              placeholder="留空则由主会话推导"
+              onChange={event => setBindWorkspaceId(event.target.value)}
+            />
+          </label>
+          <label className="dshpet-field">
+            父级 locus ID（可选）
+            <input
+              className="dshpet-input"
+              value={bindParentLocusId}
+              placeholder="话题可填写群级 locus"
+              onChange={event => setBindParentLocusId(event.target.value)}
+            />
+          </label>
+        </div>
+        <div className="dshpet-actions">
+          <button
+            type="button"
+            className="dshpet-action dshpet-action-primary"
+            disabled={busyKey !== undefined}
+            onClick={bind}
+          >
+            绑定（默认只读）
+          </button>
+        </div>
+      </Group>
+
+      {actionWarning !== undefined ? (
+        <p className="dshpet-callout" data-tone="warn">
+          {actionWarning}
+        </p>
+      ) : null}
+      {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
     </div>
   )
 }
@@ -1435,6 +2246,41 @@ export function shouldRefreshChannel(phase: PetChannelPhase): boolean {
   return phase === 'starting' || phase === 'reconnecting'
 }
 
+/**
+ * Build the channel mutation used by the default-workspace selector.
+ *
+ * The empty option means "clear the default". It must be represented by an
+ * omitted field: the Host route uses `undefined` to remove the persisted key,
+ * while an empty string is still a present (and invalid) workspace id.
+ * @param value - The selected workspace id, or the empty clear option.
+ * @returns the exact mutation payload accepted by the Host route.
+ */
+export function defaultWorkspaceMutation(
+  value: string,
+): Parameters<typeof petApi.mutateChannel>[0] {
+  const defaultWorkspaceId = value.trim()
+  return defaultWorkspaceId === ''
+    ? { action: 'set-default-workspace' }
+    : { action: 'set-default-workspace', defaultWorkspaceId }
+}
+
+/** Treat an absent/malformed proof as unavailable; never infer readiness in Web. */
+export function unifiedLocusReadiness(
+  value: PetChannelView['unifiedLocus'] | undefined,
+): PetUnifiedLocusReadiness {
+  if (
+    value?.defaultPermission === 'read' &&
+    (value.childSession === 'verified' || value.childSession === 'unavailable') &&
+    (value.readVerification === 'verified' || value.readVerification === 'unavailable')
+  ) return value
+  return {
+    childSession: 'unavailable',
+    defaultPermission: 'read',
+    readVerification: 'unavailable',
+    diagnostic: 'Host 未返回完整的统一子会话与默认只读核验证明。',
+  }
+}
+
 /** Track a transitional Host state without relying on a change-feed edge. */
 export function watchChannelTransition(
   load: () => Promise<PetChannelView>,
@@ -1469,27 +2315,6 @@ export function watchChannelTransition(
   }
 }
 
-/** Route groups, in the order the settings page offers them. */
-const ROUTE_GROUPS = ['qa', 'workspace', 'direct'] as const
-
-const ROUTE_GROUP_LABELS: Record<PetRouteGroup, string> = {
-  qa: '答疑群',
-  workspace: '工作区群',
-  direct: '单聊',
-}
-
-/**
- * What an empty group means, stated per group.
- *
- * A shared "no routes" line would be unhelpful here: each group is empty for
- * its own reason, and only one of them is something the user can act on.
- */
-const ROUTE_GROUP_EMPTY: Record<PetRouteGroup, string> = {
-  qa: '还没有答疑群。从浮层轮盘的「答疑群」可以基于当前会话创建一个。',
-  workspace: '还没有群聊绑定。有人在群里 @Bot 后会自动出现一行。',
-  direct: '还没有单聊。allowlist 中的成员与 Bot 单聊即可触发，无需 @。',
-}
-
 const CHANNEL_PHASE_LABELS: Record<PetChannelPhase, string> = {
   stopped: '未启动',
   starting: '启动中',
@@ -1499,7 +2324,7 @@ const CHANNEL_PHASE_LABELS: Record<PetChannelPhase, string> = {
 }
 
 /**
- * Channel: bot binding, admission, routing.
+ * Channel: bot binding, admission and unified-locus readiness.
  *
  * Binding is the first thing here because nothing else can be configured
  * without an identity — an enabled channel with no bound bot could not tell
@@ -1512,10 +2337,6 @@ function ChannelTab(): JSX.Element {
   const [appId, setAppId] = useState('')
   const [appSecret, setAppSecret] = useState('')
   const [allowInput, setAllowInput] = useState('')
-  // No default group is chosen here: an unset tab means "follow the data", so
-  // the section opens on a group that actually has routes rather than on an
-  // empty one. An explicit click pins the choice.
-  const [routeTab, setRouteTab] = useState<PetRouteGroup | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
 
   const refresh = useCallback(async () => {
@@ -1590,15 +2411,12 @@ function ChannelTab(): JSX.Element {
 
   const binding = view.binding
   const allowList = view.allowOpenIds
+  const locusReadiness = unifiedLocusReadiness(view.unifiedLocus)
+  const onboardingReady =
+    view.onboarding.ready &&
+    locusReadiness.childSession === 'verified' &&
+    locusReadiness.readVerification === 'verified'
   const doneSteps = view.onboarding.steps.filter(step => step.complete).length
-  // Fall back to the first group that has any routes, so a deployment using
-  // only QA groups (or only direct chats) does not open on an empty list and
-  // read as "no routes at all".
-  const activeRouteTab =
-    routeTab ??
-    ROUTE_GROUPS.find(group => view.routes.some(item => routeGroupOf(item) === group)) ??
-    'qa'
-  const visibleRoutes = view.routes.filter(item => routeGroupOf(item) === activeRouteTab)
 
   return (
     <div className="dshpet-settings">
@@ -1616,8 +2434,8 @@ function ChannelTab(): JSX.Element {
             </li>
           ))}
         </ol>
-        {view.onboarding.ready ? (
-          <p className="dshpet-callout">配置已就绪，可以启用飞书接入。</p>
+        {onboardingReady ? (
+          <p className="dshpet-callout">配置与统一子会话能力均已就绪，可以启用飞书接入。</p>
         ) : (
           // A blocker is the thing standing between the user and a working
           // channel, so it reads as a warning rather than as another step.
@@ -1642,8 +2460,8 @@ function ChannelTab(): JSX.Element {
         {view.bot === undefined ? (
           <>
             <p className="dshpet-item-hint">
-              Pet 还没有连接飞书 Bot。连接后还需配置允许成员、默认工作区并启用接入。
-              凭据由 lark-cli 保管，Pet 不会保存或显示 App Secret。
+              Pet 还没有连接飞书 Bot。连接后还需配置允许成员、自动主会话的默认工作区，
+              并通过统一子会话/默认只读核验后启用接入。凭据由 lark-cli 保管，Pet 不会保存或显示 App Secret。
             </p>
             {binding?.phase === 'awaiting-authorization' ? (
               <p className="dshpet-item-hint">
@@ -1779,8 +2597,10 @@ function ChannelTab(): JSX.Element {
 
       <Group title="允许触发的成员" note={`${allowList.length} 人`}>
         <p className="dshpet-item-hint">
-          填写已确认的 open_id（ou_ 开头）。可从目标群的群主/管理员信息或组织查询中取得；
-          Pet 不会把观察到的陌生发送者自动加入允许清单。留空表示没有人可以触发。
+          填写已确认的 open_id（ou_ 开头）。可从目标群的群主/管理员信息或组织查询中取得。
+          默认 Q&A 新群的所有者来自 dsh-pet profile 实时核验的当前飞书用户，且该用户必须在此
+          allowlist 中；列表顺序和浏览器输入都不能声明“本人”。Pet 不会把观察到的陌生发送者
+          自动加入允许清单。留空表示没有人可以触发。
         </p>
         <ul className="dshpet-list">
           {allowList.map(openId => (
@@ -1834,9 +2654,10 @@ function ChannelTab(): JSX.Element {
         </div>
       </Group>
 
-      <Group title="默认工作区">
+      <Group title="自动主会话默认工作区">
         <p className="dshpet-item-hint">
-          没有单独绑定过的会话，都会在这个工作区里创建会话。
+          仅用于 project 群首次建立协作时创建该群专属的默认主会话。每个群独立复用自己的主会话；
+          此选择不是群级执行路由，也不会改写任何已有 locus 的 workspace 或主会话。
         </p>
         {/* Was a bare `<select>`: with no `dshpet-input` class it fell back to
             the browser's native control, which matched nothing else here. */}
@@ -1845,10 +2666,7 @@ function ChannelTab(): JSX.Element {
             className="dshpet-input"
             value={view.defaultWorkspaceId ?? ''}
             onChange={event =>
-              void mutate({
-                action: 'set-default-workspace',
-                defaultWorkspaceId: event.target.value,
-              })
+              void mutate(defaultWorkspaceMutation(event.target.value))
             }
           >
             <option value="">（未设置）</option>
@@ -1861,16 +2679,40 @@ function ChannelTab(): JSX.Element {
         </div>
       </Group>
 
+      <Group title="统一子会话能力">
+        <p className="dshpet-item-hint">
+          所有新飞书工作必须进入当前 locus 的专属子会话；不会创建飞书 root executor、
+          Pet Invocation 或 waiting-user 分支。新关联始终从只读开始，并以 Host 的实际策略回读为准。
+        </p>
+        <div className="dshpet-facts">
+          <Fact
+            label="专属子会话"
+            value={locusReadiness.childSession === 'verified' ? '已核验' : '不可用'}
+          />
+          <Fact label="新关联默认权限" value="只读（read）" />
+          <Fact
+            label="只读策略回读"
+            value={locusReadiness.readVerification === 'verified' ? '已核验' : '不可用'}
+          />
+        </div>
+        {locusReadiness.diagnostic !== undefined ? (
+          <p className="dshpet-callout" data-tone="warn">
+            {locusReadiness.diagnostic}
+          </p>
+        ) : null}
+      </Group>
+
       <Group title="启用与连接">
         <p className="dshpet-item-hint">
-          完成以上步骤后启用。只有允许清单中的成员可以触发，其他人的消息在飞书侧静默忽略。
+          完成以上步骤后启用。只有允许清单成员可初始化未建立的入口；已授权 locus 的群成员可在当前入口
+          @Bot 提问。任何新飞书消息都只走统一主会话/locus/子会话流程。
         </p>
         <label className="dshpet-check">
           <input
             className="dshpet-input"
             type="checkbox"
             checked={view.enabled}
-            disabled={!view.enabled && !view.onboarding.ready}
+            disabled={!view.enabled && !onboardingReady}
             onChange={event => void mutate({ action: 'set-enabled', enabled: event.target.checked })}
           />
           启用飞书接入
@@ -1901,192 +2743,6 @@ function ChannelTab(): JSX.Element {
         </div>
       </Group>
 
-      <Group title="会话路由" note={`${view.routes.length} 个会话`}>
-        {view.routes.length === 0 ? (
-          <p className="dshpet-item-hint">
-            还没有会话记录。第一次有人在群里 @Bot（或单聊发消息）后，这里会自动出现一行。
-          </p>
-        ) : (
-          <>
-            {/* Three groups, because `kind` and `chatType` are independent
-                axes and neither alone partitions the list: a QA group routes
-                to a fork child, a workspace group and a p2p conversation both
-                route to a workspace but behave differently (a group needs an
-                @mention, a direct chat triggers on every message and is the
-                only kind Pet replies to in text). */}
-            <div className="dshpet-subtabs" role="tablist" aria-label="会话路由分类">
-              {ROUTE_GROUPS.map(group => {
-                const count = view.routes.filter(
-                  item => routeGroupOf(item) === group,
-                ).length
-                return (
-                  <button
-                    key={group}
-                    type="button"
-                    role="tab"
-                    aria-selected={activeRouteTab === group}
-                    className="dshpet-subtab"
-                    onClick={() => setRouteTab(group)}
-                  >
-                    {ROUTE_GROUP_LABELS[group]}
-                    <span className="dshpet-subtab-count">{count}</span>
-                  </button>
-                )
-              })}
-            </div>
-            {visibleRoutes.length === 0 ? (
-              <p className="dshpet-empty">{ROUTE_GROUP_EMPTY[activeRouteTab]}</p>
-            ) : (
-              // A card per chat. As flex rows, the name, the kind, the
-              // workspace picker and Remove all sat on one line at the same
-              // weight, so a handful of routes read as an unparseable wall.
-              <ul className="dshpet-cards">
-                {visibleRoutes.map(route => {
-                  const invalidated =
-                    route.kind === 'qa' && route.qaInvalidatedAt !== undefined
-                  const appLink = chatAppLink(route.chatId)
-                  // Which session this chat leads to. For a QA group that is
-                  // the PARENT it was forked from — the conversation the group
-                  // was opened onto, and the one worth reading. For any other
-                  // route it is the executor of its active Task, which exists
-                  // only once a message has actually raised work; until then
-                  // the button does not appear rather than leading nowhere.
-                  const sessionTarget =
-                    route.kind === 'qa'
-                      ? route.qaParentSessionId
-                      : route.activeExecutorSessionId
-                  return (
-                    <li key={route.chatId} className="dshpet-card">
-                      <div className="dshpet-card-head">
-                        <span className="dshpet-card-name">
-                          {route.chatName ?? route.chatId}
-                        </span>
-                        {/* The kind is already the selected tab, so only the
-                            facts the tab does NOT imply are worth a pill. */}
-                        {route.kind !== 'qa' ? (
-                          <span className="dshpet-status">
-                            {route.boundBy === 'auto' ? '自动绑定' : '手动绑定'}
-                          </span>
-                        ) : null}
-                        {invalidated ? (
-                          <span className="dshpet-status" data-tone="danger">
-                            已失效
-                          </span>
-                        ) : null}
-                        <div className="dshpet-card-tail">
-                          {/*
-                            A generic AppLink, built from the chat id Pet
-                            already holds. Deliberately not the share link
-                            from `im chats link`: that is a write call needing
-                            membership (and owner/admin rights when sharing is
-                            restricted), it burns a validity period, and its
-                            API refuses p2p conversations outright — so it
-                            could not serve this row at all.
-                          */}
-                          {appLink !== undefined ? (
-                            <a
-                              className="dshpet-action dshpet-action-sm"
-                              href={appLink}
-                              target="_blank"
-                              rel="noreferrer"
-                              title="在飞书中打开"
-                            >
-                              打开飞书
-                            </a>
-                          ) : null}
-                          {/*
-                            The other half of "where does this chat lead":
-                            Lark on one side, the DSH session on the other. A
-                            QA group is served by a fork child, so opening the
-                            PARENT is what lets the user read the conversation
-                            the group inherited. Only rendered when the id is
-                            known and the shell published a navigator.
-                          */}
-                          {sessionTarget !== undefined && sessionOpener !== undefined ? (
-                            <button
-                              type="button"
-                              className="dshpet-action dshpet-action-sm"
-                              title={`打开会话 ${sessionTarget}`}
-                              onClick={() => sessionOpener?.(sessionTarget)}
-                            >
-                              打开会话
-                            </button>
-                          ) : null}
-                          <button
-                            type="button"
-                            className="dshpet-action dshpet-action-sm dshpet-action-danger"
-                            onClick={() =>
-                              void mutate({ action: 'remove-chat', chatId: route.chatId })
-                            }
-                          >
-                            移除
-                          </button>
-                        </div>
-                      </div>
-                      {/*
-                        A qa group routes to its fork child, not to a
-                        workspace. Offering the picker would imply it can be
-                        re-pointed, which would discard the child holding the
-                        inherited context — the Host refuses that anyway, so
-                        the UI must not suggest it.
-                      */}
-                      {route.kind === 'qa' ? (
-                        <>
-                          {/*
-                            The raw session id used to be printed here; "打开
-                            会话" now reaches it directly, so the line states
-                            only what the button cannot: whether Pet owns this
-                            group. A bound group is one Pet joined, not one it
-                            built — it is neither creator nor owner and can
-                            manage nothing there, which prevents the
-                            reasonable-but-wrong assumption that Pet could
-                            rename or clean it up.
-                          */}
-                          <p className="dshpet-item-hint">
-                            {route.qaParentSessionId === undefined
-                              ? '绑定会话未知'
-                              : '已绑定到一个会话'}
-                            {route.qaOrigin === 'bound' ? '（绑定既有群，Pet 非群主）' : ''}
-                          </p>
-                          {invalidated ? (
-                            <p className="dshpet-callout" data-tone="warn">
-                              {route.qaInvalidatedReason ?? '源会话不可用'}
-                            </p>
-                          ) : null}
-                        </>
-                      ) : (
-                        <div className="dshpet-field">
-                          <span>工作区</span>
-                          {/* Was a bare `<select>`, rendering as a native
-                              control amid styled ones. */}
-                          <select
-                            className="dshpet-input"
-                            value={route.workspaceId ?? ''}
-                            onChange={event =>
-                              void mutate({
-                                action: 'rebind-chat',
-                                chatId: route.chatId,
-                                workspaceId: event.target.value,
-                              })
-                            }
-                          >
-                            {workspaces.map(workspace => (
-                              <option key={workspace.id} value={workspace.id}>
-                                {workspace.title ?? workspace.id}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-          </>
-        )}
-      </Group>
-
       {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
     </div>
   )
@@ -2107,6 +2763,8 @@ function ChannelDiagnostics(): JSX.Element {
     if (view === undefined || !shouldRefreshChannel(view.connection.phase)) return undefined
     return watchChannelTransition(petApi.channel, setView)
   }, [view?.connection.phase])
+
+  const locusReadiness = unifiedLocusReadiness(view?.unifiedLocus)
 
   return (
     <Group title="飞书接入">
@@ -2137,7 +2795,14 @@ function ChannelDiagnostics(): JSX.Element {
                   : ''}
               </span>
             </div>
-            <Fact label="排队中的调用" value={String(view.connection.queueDepth)} />
+            <Fact
+              label="统一子会话"
+              value={locusReadiness.childSession === 'verified' ? '已核验' : '不可用'}
+            />
+            <Fact
+              label="默认只读策略"
+              value={locusReadiness.readVerification === 'verified' ? '已核验' : '不可用'}
+            />
             <Fact label="已绑定 Bot" value={view.bot?.appId ?? '未绑定'} mono />
           </div>
           {view.connection.phase === 'down' ? (
