@@ -23,6 +23,7 @@ const launcher = join(here, '.launcher')
 const builds = join(here, '.launcher-builds')
 const root = resolve(here, '../../../..')
 const version = '0.1.2-rc.1'
+const npmVersion = '11.19.0'
 const reviewedCommit = 'a66e4702047846cdaa10c66c9d3df3951f5ea70d'
 const subagentPatchSha256 = '97ef5189f726799c13bdd7622aa37292a7451fe13981fac77de4d82161e14b28'
 const storagePatchSha256 = '18ec93c5240612b513871d65db2d100ee6165ea1ba251dbf91e670963dd35bed'
@@ -34,6 +35,10 @@ const expectedRuntimeStorage = [
 
 function run(command, args, cwd, capture = false) {
   return runCompatCommand(command, args, cwd, { capture })
+}
+
+function runNpm(args, cwd, capture = false) {
+  return run('corepack', [`npm@${npmVersion}`, ...args], cwd, capture)
 }
 
 function fail(message) {
@@ -123,11 +128,11 @@ function verifyLauncher(directory, fingerprint) {
     if (!domainSource.includes('transaction-unsupported') || !domainSource.includes('applyBatch')) return undefined
     if (!jsonSource.includes('applyBatch') || !sqliteSource.includes('applyBatch')) return undefined
     if (!sqliteSource.includes('exclusive write lock') || !storageTypes.includes('applyBatch?')) return undefined
-    const installScripts = run('npm', ['install-scripts', 'ls'], directory, true).trim()
+    const installScripts = runNpm(['install-scripts', 'ls'], directory, true).trim()
     if (!/^No packages with unreviewed install scripts\.?$/.test(installScripts)) return undefined
     // Validate the exact published shape, not just npm's temporary absolute
     // file links before they are converted to self-contained relative links.
-    run('npm', ['ls', '--all', '--json'], directory, true)
+    runNpm(['ls', '--all', '--json'], directory, true)
     return realpathSync(realBin)
   } catch {
     // A moved checkout can leave valid-looking fingerprints beside broken
@@ -146,6 +151,7 @@ try {
 
   const fingerprint = createHash('sha256')
     .update(version)
+    .update(npmVersion)
     // Generated npm manifests contain absolute file: paths. Moving/cloning the
     // repository must invalidate the cache even when source bytes are equal.
     .update(realpathSync(here))
@@ -206,11 +212,11 @@ try {
       }, null, 2)}\n`)
 
       console.log('[compat/subagent-launcher] installing isolated DSH Host dependency root')
-      run('npm', ['install'], staging)
-      run('npm', ['install-scripts', 'approve', '--all', '--allow-scripts-pin'], staging)
+      runNpm(['install'], staging)
+      runNpm(['install-scripts', 'approve', '--all', '--allow-scripts-pin'], staging)
       // Prove npm resolved one reviewed override tree while its file links still
       // match the install metadata. The links are converted to real copies next.
-      run('npm', ['ls', '@deepseek-ai/dsh-subagent', ...expectedRuntimeStorage], staging)
+      runNpm(['ls', '@deepseek-ai/dsh-subagent', ...expectedRuntimeStorage], staging)
       const packageCopies = new Map([
         ['@deepseek-ai/dsh-subagent', 'subagent'],
         ['@deepseek-ai/dsh-storage', 'storage'],

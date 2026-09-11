@@ -47,7 +47,7 @@ Host 首次准备会执行 `build-launcher.cjs`；fingerprint 命中时只做轻
 - package template。
 
 重建时使用一把跨进程、可恢复 stale owner 的共享锁，覆盖 Subagent 源码、Storage
-artifacts 与 launcher 整条链。所有外部 git/corepack/npm 子进程通过有界 supervisor
+artifacts 与 launcher 整条链，并固定 `npm@11.19.0`（经 corepack 调用）以消除机器全局 npm 能力漂移。所有外部 git/corepack/npm 子进程通过有界 supervisor
 运行，超时会终止进程组。launcher 在同文件系统 sibling staging 中完成：
 
 1. 固定 tag 构建并验证 patch capability marker；

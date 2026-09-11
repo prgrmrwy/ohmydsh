@@ -51,10 +51,12 @@ test('the launcher installs reviewed overrides and atomically publishes a self-c
   const launcher = await text('build-launcher.cjs')
 
   assert.match(launcher, /'@deepseek-ai\/dsh': version/)
+  assert.match(launcher, /const npmVersion = '11\.19\.0'/)
+  assert.match(launcher, /run\('corepack', \[`npm@\$\{npmVersion\}`/)
   assert.match(launcher, /'@deepseek-ai\/dsh-subagent': `file:\$\{join\(compatPackages, 'subagent'\)\}`/)
   assert.match(launcher, /'@deepseek-ai\/dsh-storage-domain': `file:/)
   assert.match(launcher, /'@deepseek-ai\/dsh-storage-sqlite': `file:/)
-  assert.match(launcher, /run\('npm', \['ls', '@deepseek-ai\/dsh-subagent', \.\.\.expectedRuntimeStorage\]/)
+  assert.match(launcher, /runNpm\(\['ls', '@deepseek-ai\/dsh-subagent', \.\.\.expectedRuntimeStorage\]/)
   assert.match(launcher, /renameSync\(staging, buildDir\)/)
   assert.match(launcher, /renameSync\(nextLink, launcher\)/)
   assert.match(launcher, /realpathSync\(here\)/)
