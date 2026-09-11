@@ -6,7 +6,7 @@ parallel_group: G1
 conflicts_with: [T2, T3, T4, T5, T6, T7, T8]
 precondition: 用户已手动启动现有 DSH Web，浏览器已登录 http://127.0.0.1:3080；Pet 已部署且不再运行 build/sync。
 ask_user_if_blocked: true
-status: pending
+status: passed
 blocked_reason: null
 mock_setup:
   required: false
@@ -44,8 +44,8 @@ steps:
         class: deterministic
         reviewer_notes: URL 必须保持现有 127.0.0.1:3080 origin，若跳转登录则 blocked 而非通过。
         expected_pattern: http://127.0.0.1:3080/**
-        result: null
-        result_detail: null
+        result: pass
+        result_detail: "GUI 于 http://127.0.0.1:3080 正常加载 Pet 设置，非登录页或启动错误页。"
   - seq: 2
     description: 选择飞书设置并读取 Host 返回的 onboarding 状态
     action: wait_for
@@ -72,8 +72,8 @@ steps:
         expected_text: "Bot；允许清单；默认 Workspace"
         expected_attrs: null
         expected_visible: true
-        result: null
-        result_detail: null
+        result: pass
+        result_detail: "飞书 onboarding 五步（Bot/身份/允许成员/默认 Workspace/启用）状态均符合预期，用户人工确认。"
       - id: T1-C3
         description: 统一 Locus capability 回显 child session 与只读核验均为已核验，且不包含 legacy fallback 可用状态
         focus: integration
@@ -93,5 +93,5 @@ steps:
         expected_text: "专属子会话；已核验；只读；已核验"
         expected_attrs: null
         expected_visible: true
-        result: null
-        result_detail: null
+        result: pass
+        result_detail: "统一子会话能力与只读策略回读均显示已核验，无 legacy fallback 可用状态。"

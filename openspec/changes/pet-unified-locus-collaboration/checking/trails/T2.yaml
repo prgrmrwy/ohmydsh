@@ -6,7 +6,7 @@ parallel_group: G2
 conflicts_with: [T1, T3, T4, T5, T6, T7, T8]
 precondition: 验收群仅有用户本人，Bot 尚未加入；channel 已 connected；事件监听必须先出现 ready，飞书写操作逐步取得用户确认。
 ask_user_if_blocked: true
-status: pending
+status: failed
 blocked_reason: null
 mock_setup:
   required: false
@@ -48,8 +48,8 @@ steps:
         expected_params: null
         expected_status: 200
         expected_response: "目标 chat_id；bot app/open id；operator id；无业务 Delivery"
-        result: null
-        result_detail: null
+        result: pass
+        result_detail: "真实 bot-added 事件已确认目标群、绑定 Bot app_id 与操作者；移除后在无外部 consumer 竞争时重新加入，Locus 管理仍只有同一群级 locus-runtime-1789135290602-6c81a711ad8478、第 1 代、同一主/子会话与只读权限，未新增业务 Locus，证明初始化幂等。"
   - seq: 2
     description: 用户在群主对话发送不含 Bot mention 的普通资料消息
     action: wait_for
@@ -76,8 +76,8 @@ steps:
         expected_text: "管理快照数量与发送前一致；无新增 Delivery；群内无 Bot 业务回复"
         expected_attrs: null
         expected_visible: true
-        result: null
-        result_detail: null
+        result: pass
+        result_detail: "用户在验收群主对话发送非 mention 资料消息；等待并刷新后仍只有同一 locus-runtime-1789135290602-6c81a711ad8478、第 1 代、同一主/子会话与只读权限；用户确认无 Bot 文字回复、无任务表情，Channel 仍正常。"
   - seq: 3
     description: 用户在群主对话发送一条明确 mention Bot 的群级验收问题
     action: wait_for
@@ -104,5 +104,5 @@ steps:
         expected_text: "活跃；Endpoint；子会话；实际 只读；消息已结算；无飞书 Invocation"
         expected_attrs: null
         expected_visible: true
-        result: null
-        result_detail: null
+        result: fail
+        result_detail: "真实群级 mention 已被准入并投递到正确 child：触发消息先出现处理中表情，随后转为‘泣不成声’；caller-bound prompt 中的 chat/locus/message/child/read 权限均正确。child 原始 turn/end 为 dsh-home-network-model-guard: Claude egress is restricted (blocked)，0 token、0 工具调用、空响应；该 child 固定为 claude-opus-5 且当前无模型切换入口。管理快照仍为同一群级 locus-runtime-1789135290602-6c81a711ad8478、第 1 代、active、effective read。禁止以重发掩盖失败，修复后从本 checkpoint 继续。"
