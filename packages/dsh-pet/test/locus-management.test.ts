@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { buildLocusRecord, type LocusRecord } from '../src/host/locus/aggregate.js'
 import {
   createLocusManagementPort,
+  createLocusSessionDescriber,
   LocusManagementError,
   type LocusManagementRepository,
 } from '../src/host/locus/management.js'
@@ -379,5 +380,97 @@ describe('locus management projection adapter', () => {
       action: 'rebuild', endpoint: stopped.endpoint, parentSessionId: stopped.parentSessionId,
       expectedLocusId: stopped.id, expectedGeneration: stopped.generation, expectedUpdatedAt: stopped.updatedAt,
     }, { actorId: 'owner' })).resolves.toMatchObject({ action: 'rebuild' })
+  })
+})
+
+describe('locus session describer', () => {
+  const titled = (title: string) => [{ type: 'session/title', data: { title } }]
+  const foldTitle = (events: readonly unknown[]): string | undefined => {
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const event = events[i] as { type?: string; data?: { title?: unknown } }
+      if (event?.type === 'session/title' && typeof event.data?.title === 'string') {
+        return event.data.title
+      }
+    }
+    return undefined
+  }
+
+  it('reports an unloaded but readable session as available, not missing', async () => {
+    // The regression: a Host restart leaves every locus main unloaded, and
+    // reading existence from the live registry reported them all unavailable.
+    const inspect = vi.fn(async () => ({ events: titled('Locus 主会话 · oc_project') }))
+    const describe = createLocusSessionDescriber({
+      inspect,
+      archivedSessionIds: () => [],
+      foldTitle,
+    })
+
+    await expect(describe('session-cold')).resolves.toEqual({
+      availability: 'available',
+      title: 'Locus 主会话 · oc_project',
+    })
+    expect(inspect).toHaveBeenCalledWith('session-cold')
+  })
+
+  it('reports an archived session as archived without inspecting it', async () => {
+    // Archived must outrank readability: its log still inspects fine, so
+    // checking readability first would call it ordinarily available.
+    const inspect = vi.fn(async () => ({ events: titled('Archived') }))
+    const describe = createLocusSessionDescriber({
+      inspect,
+      archivedSessionIds: () => ['session-archived'],
+      foldTitle,
+    })
+
+    await expect(describe('session-archived')).resolves.toEqual({ availability: 'archived' })
+    expect(inspect).not.toHaveBeenCalled()
+  })
+
+  it('reports an unreadable session as missing', async () => {
+    const describe = createLocusSessionDescriber({
+      inspect: vi.fn(async () => {
+        throw new Error('session "session-gone" not found')
+      }),
+      archivedSessionIds: () => [],
+      foldTitle,
+    })
+
+    await expect(describe('session-gone')).resolves.toEqual({ availability: 'missing' })
+  })
+
+  it('omits availability when the Host cannot cold-read at all', async () => {
+    // A Host limitation is not evidence about the session; claiming `missing`
+    // here would invent a fact.
+    const describe = createLocusSessionDescriber({
+      inspect: undefined,
+      archivedSessionIds: () => [],
+      foldTitle,
+    })
+
+    await expect(describe('session-any')).resolves.toBeUndefined()
+  })
+
+  it('reports a readable but untitled session as available without a title', async () => {
+    const describe = createLocusSessionDescriber({
+      inspect: vi.fn(async () => ({ events: [] })),
+      archivedSessionIds: () => [],
+      foldTitle,
+    })
+
+    await expect(describe('session-untitled')).resolves.toEqual({ availability: 'available' })
+  })
+
+  it('does not let load state change the answer for the same session', async () => {
+    // The live-registry answer flipped as sessions loaded and unloaded, which
+    // made it useless as acceptance evidence.
+    const describe = createLocusSessionDescriber({
+      inspect: vi.fn(async () => ({ events: titled('Stable') })),
+      archivedSessionIds: () => [],
+      foldTitle,
+    })
+
+    const first = await describe('session-stable')
+    const second = await describe('session-stable')
+    expect(first).toEqual(second)
   })
 })

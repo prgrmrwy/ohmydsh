@@ -57,12 +57,52 @@ export interface LocusDeliveryClaimLookup {
   }): LocusClaimedDelivery | undefined
 }
 
+/**
+ * Message-source kinds the Host itself injects into an inbox.
+ *
+ * These are not messages a participant sent: DSH seeds every session's first
+ * step with workspace instructions, a runtime-context snapshot and the skill
+ * catalog. They carry no reply target of their own and cannot redirect a
+ * Delivery, so they must not count as foreign traffic sharing the turn.
+ *
+ * Treating them as foreign is what made the FIRST Feishu message of every
+ * locus child unanswerable: the turn was marked mixed, reply authority was
+ * withheld, and `pet_locus_reply` reported "no exact Delivery reply target"
+ * while the child had in fact been addressed correctly.
+ */
+const HOST_INJECTED_SOURCE_KINDS: ReadonlySet<string> = new Set([
+  'agent-instructions',
+  'plugin',
+  'skill-catalog',
+])
+
+/**
+ * Whether a claimed message was injected by the Host rather than sent by a
+ * participant.
+ *
+ * `user` is deliberately absent: a `user`-sourced message that resolves to no
+ * Delivery is a GUI prompt or a parent steer, which CAN carry another target
+ * and therefore must still poison reply authority.
+ *
+ * @param sourceKind - the claimed message's `source.kind`, when reported.
+ * @returns whether the claim is Host-injected context.
+ */
+export function isHostInjectedClaim(sourceKind: string | undefined): boolean {
+  return sourceKind !== undefined && HOST_INJECTED_SOURCE_KINDS.has(sourceKind)
+}
+
 /** One inbox claim reported by the runtime. */
 export interface LocusInboxClaim {
   readonly childSessionId: string
   readonly messageId: string
   /** The turn that claimed the message; a turn is per session, not global. */
   readonly turn: number
+  /**
+   * The claimed message's `source.kind`, when the runtime reported one.
+   * Absent is treated as participant traffic: an unknown source must stay
+   * fail-closed rather than silently gain reply authority.
+   */
+  readonly sourceKind?: string
 }
 
 /** One turn end reported by the runtime. */
@@ -105,6 +145,8 @@ export type LocusTurnObserverDiagnostic =
   | 'correlation-evicted'
   /** One turn exceeded its message-granular claim bound and is fail-closed. */
   | 'turn-claim-limit'
+  /** Host-injected context shared the turn; ignored, not treated as foreign. */
+  | 'claim-host-context'
 
 /** The observer the unified locus controller accepts. */
 export interface LocusTurnCorrelationObserver {
@@ -156,9 +198,12 @@ interface UnresolvedClaim {
 /**
  * Every claim observed for one exact `(child, turn)` pair.
  *
- * `mixed` is a sticky safety fuse. Once a claim cannot immediately be proven
- * to be the sole Delivery, that turn must never regain a model-facing reply
- * target even if a retry later resolves it.
+ * `mixed` is a sticky fuse for PROVEN pollution: a second Delivery sharing the
+ * turn, a lookup failure, or participant traffic that resolved to no Delivery.
+ * A merely-unresolved claim does not brand the turn — the structural
+ * queue-before-bind race makes almost every legitimate Delivery claim arrive
+ * before its durable row, and reply authority is already withheld through
+ * `unresolved.size !== 0` until the claim resolves one way or the other.
  */
 interface ObservedTurn {
   readonly childSessionId: string
@@ -343,7 +388,8 @@ export function createLocusTurnObserver(
       unindexClaim(key, unresolved.claim)
       const claimed = { ...delivery, turnId: observed.turnId }
       observed.deliveries.set(messageId, claimed)
-      if (observed.deliveries.size > 1) observed.mixed = true
+      // Same proven-pollution rule as the immediate-resolve path.
+      if (observed.deliveries.size > 1 || observed.foreign.size > 0) observed.mixed = true
       emit({
         phase: 'started',
         deliveryId: delivery.deliveryId,
@@ -370,6 +416,17 @@ export function createLocusTurnObserver(
     }
     const key = turnKey(claim.childSessionId, claim.turn)
     if (ended.has(key)) return
+    // Host-injected context (workspace instructions, the runtime snapshot, the
+    // skill catalog) shares the child's first step but is not participant
+    // traffic and carries no target of its own. Ignore it entirely: retaining
+    // it as unresolved/foreign marked the turn mixed and silently stripped
+    // reply authority from the FIRST Feishu message of every locus child.
+    // Ignoring is safe precisely because it can never become a Delivery — a
+    // durable Delivery is always claimed as `user`.
+    if (isHostInjectedClaim(claim.sourceKind)) {
+      ports.log?.('claim-host-context')
+      return
+    }
     const observed = ensureTurn(claim)
     // Runtime duplicate notifications for the same message are idempotent;
     // distinct message ids are distinct claims and must never overwrite.
@@ -395,7 +452,9 @@ export function createLocusTurnObserver(
     if (delivery !== undefined) {
       const claimed = { ...delivery, turnId: observed.turnId }
       observed.deliveries.set(claim.messageId, claimed)
-      if (observed.deliveries.size > 1 || observed.unresolved.size > 0 || observed.foreign.size > 0) {
+      // A coexisting unresolved claim withholds authority on its own and may
+      // still be this race's OTHER ordering; only proven facts brand the turn.
+      if (observed.deliveries.size > 1 || observed.foreign.size > 0) {
         observed.mixed = true
       }
       emit({
@@ -409,10 +468,19 @@ export function createLocusTurnObserver(
       return
     }
 
-    // Withhold from the very first unresolved observation. Even if persistence
-    // catches up, this turn remains sticky-mixed because another claim may be a
-    // GUI/parent steer rather than a Delivery.
-    observed.mixed = true
+    // Withhold while unresolved, but do NOT brand the turn mixed yet: reply
+    // authority is already withheld by `unresolved.size !== 0`, and this exact
+    // race is STRUCTURAL, not exceptional — `queueChild` wakes the driver the
+    // moment the prompt enters the inbox, while `bindQueued` persists the
+    // inbox-message binding only after that call returns, so the claim usually
+    // fires before the Delivery row is visible. Branding here made every locus
+    // Delivery permanently unanswerable, because nothing ever cleared the flag
+    // after `deliveryAvailable` proved the claim WAS this turn's one Delivery.
+    //
+    // Mixedness stays reserved for proven pollution: a second Delivery, a
+    // failed lookup, or a claim that resolves to no Delivery at all (a GUI
+    // prompt or parent steer simply never resolves, so it keeps the turn
+    // withheld through `unresolved` until eviction — fail closed either way).
     const claimCount = observed.deliveries.size + observed.unresolved.size + observed.foreign.size
     if (claimCount >= maxClaimsPerTurn) {
       observed.saturated = true

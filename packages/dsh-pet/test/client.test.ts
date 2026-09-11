@@ -1945,7 +1945,16 @@ describe('session titles come from the title service, not the header', () => {
     // being named "答疑 · DSH" and every receipt naming a raw id — a failure
     // that looks like "bind picked the wrong session".
     expect(index).not.toContain('header?.title')
-    expect(index).toContain('ctx.sessionTitle.get(session)')
+
+    // The title must still come from the LOG. Two log-backed readers are
+    // legitimate: the live title service, and folding `session/title` events
+    // out of a cold inspection (which is what lets an unloaded locus main keep
+    // its name). Requiring the live service specifically would have forced the
+    // management view back onto the live registry.
+    expect(
+      index.includes('ctx.sessionTitle.get(session)')
+        || index.includes('foldTitle: latestSessionTitle'),
+    ).toBe(true)
   })
 })
 

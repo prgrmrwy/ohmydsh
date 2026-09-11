@@ -417,3 +417,164 @@ describe('observer subscription order', () => {
     observer.dispose()
   })
 })
+
+describe('Host-injected context does not poison reply authority', () => {
+  // DSH seeds every session's FIRST step with workspace instructions, a
+  // runtime-context snapshot and the skill catalog. They ride the same
+  // `agent/inbox/claimed` feed as real traffic, so the observer used to mark
+  // the turn mixed and withhold reply authority — which made the FIRST Feishu
+  // message of every locus child unanswerable.
+  const HOST_KINDS = ['agent-instructions', 'plugin', 'skill-catalog'] as const
+
+  it('keeps reply authority when the real first turn carries Host context', () => {
+    const h = harness()
+
+    // Exactly the observed production sequence: one Delivery plus the three
+    // injected messages, all claimed into turn 1.
+    h.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 1, sourceKind: 'user' })
+    for (const [index, kind] of HOST_KINDS.entries()) {
+      h.claim({ childSessionId: CHILD, messageId: `injected-${String(index)}`, turn: 1, sourceKind: kind })
+    }
+
+    expect(h.observer.currentForChild?.(CHILD)).toEqual({
+      executionId: 'execution-1',
+      turnId: `${CHILD}#1`,
+    })
+  })
+
+  it.each(HOST_KINDS)('ignores a %s claim instead of retaining it as foreign', (kind) => {
+    const h = harness()
+
+    h.claim({ childSessionId: CHILD, messageId: 'injected', turn: 1, sourceKind: kind })
+
+    // Ignored outright: it never creates a turn, so a turn that only ever saw
+    // Host context still reports no Delivery.
+    expect(h.diagnostics).toContain('claim-host-context')
+    expect(h.observer.currentForChild?.(CHILD)).toBeUndefined()
+  })
+
+  it('still settles the Delivery normally when Host context shared the turn', () => {
+    const h = harness()
+
+    h.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 1, sourceKind: 'user' })
+    h.claim({ childSessionId: CHILD, messageId: 'injected', turn: 1, sourceKind: 'plugin' })
+    h.end({ childSessionId: CHILD, turn: 1, outcome: 'completed' })
+
+    expect(h.events.map(event => event.phase)).toEqual(['started', 'completed'])
+  })
+
+  it('still withholds authority for a user-sourced non-Delivery (GUI or parent steer)', () => {
+    const h = harness()
+
+    // The guard must stay fail-closed for traffic that CAN carry another
+    // target. Only Host-injected context is exempt.
+    h.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 1, sourceKind: 'user' })
+    h.claim({ childSessionId: CHILD, messageId: 'gui-prompt', turn: 1, sourceKind: 'user' })
+
+    expect(h.observer.currentForChild?.(CHILD)).toBeUndefined()
+  })
+
+  it('treats an unreported source as participant traffic', () => {
+    const h = harness()
+
+    // An unknown source must not silently gain reply authority.
+    h.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 1, sourceKind: 'user' })
+    h.claim({ childSessionId: CHILD, messageId: 'unknown-source', turn: 1 })
+
+    expect(h.observer.currentForChild?.(CHILD)).toBeUndefined()
+  })
+})
+
+describe('queue-before-bind race does not permanently strip reply authority', () => {
+  // The structural ordering: `queueChild` wakes the driver the moment the
+  // prompt enters the inbox, while `bindQueued` persists the inbox-message
+  // binding only after that call returns. The claim therefore usually fires
+  // BEFORE the Delivery row is visible. Branding the turn mixed at that
+  // instant made every locus Delivery permanently unanswerable — observed in
+  // production twice in a row (child session-a12149c6, turns 1 and 2).
+  it('restores authority once deliveryAvailable proves the sole claim was this Delivery', () => {
+    const deliveries: Record<string, { deliveryId: string; executionId: string }> = {}
+    const h = harness({ deliveries })
+
+    // Claim arrives first: the durable row is not visible yet.
+    h.claim({ childSessionId: CHILD, messageId: 'raced', turn: 1, sourceKind: 'user' })
+    // While unresolved, authority is withheld — fail closed.
+    expect(h.observer.currentForChild?.(CHILD)).toBeUndefined()
+
+    // bindQueued commits, then wakes this exact message.
+    deliveries['raced'] = { deliveryId: 'delivery-raced', executionId: 'execution-raced' }
+    h.available('raced')
+
+    // The turn is mid-flight (no end yet) with exactly one proven Delivery:
+    // the reply tool must regain its target.
+    expect(h.observer.currentForChild?.(CHILD)).toEqual({
+      executionId: 'execution-raced',
+      turnId: `${CHILD}#1`,
+    })
+    expect(h.events).toEqual([
+      expect.objectContaining({ phase: 'started', deliveryId: 'delivery-raced' }),
+    ])
+  })
+
+  it('keeps withholding while the claim is still unresolved', () => {
+    const h = harness({ deliveries: {} })
+
+    h.claim({ childSessionId: CHILD, messageId: 'still-pending', turn: 1, sourceKind: 'user' })
+
+    // Not branded mixed, but not authorized either: unresolved withholds.
+    expect(h.observer.currentForChild?.(CHILD)).toBeUndefined()
+  })
+
+  it('never restores authority for participant traffic that resolves to no Delivery', () => {
+    const deliveries: Record<string, { deliveryId: string; executionId: string }> = {
+      'om-message-1': { deliveryId: 'delivery-1', executionId: 'execution-1' },
+    }
+    const h = harness({ deliveries })
+
+    // One real Delivery plus one GUI prompt in the same turn. The GUI claim
+    // never gains a durable row, so it stays unresolved and keeps the turn
+    // withheld even after the real Delivery resolves.
+    h.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 1, sourceKind: 'user' })
+    h.claim({ childSessionId: CHILD, messageId: 'gui-prompt', turn: 1, sourceKind: 'user' })
+    h.available('om-message-1')
+
+    expect(h.observer.currentForChild?.(CHILD)).toBeUndefined()
+  })
+
+  it('brands the turn once a second Delivery is proven, and never unbrands', () => {
+    const deliveries: Record<string, { deliveryId: string; executionId: string }> = {
+      'om-a': { deliveryId: 'delivery-a', executionId: 'execution-a' },
+      'om-b': { deliveryId: 'delivery-b', executionId: 'execution-b' },
+    }
+    const h = harness({ deliveries })
+
+    h.claim({ childSessionId: CHILD, messageId: 'om-a', turn: 1, sourceKind: 'user' })
+    h.claim({ childSessionId: CHILD, messageId: 'om-b', turn: 1, sourceKind: 'user' })
+
+    // Two proven Deliveries in one turn is real pollution: no reply authority.
+    expect(h.observer.currentForChild?.(CHILD)).toBeUndefined()
+  })
+
+  it('a lookup failure still brands the turn permanently', () => {
+    const h = harness()
+    const raced = { deliveryId: 'delivery-raced', executionId: 'execution-raced' }
+    const deliveries: Record<string, { deliveryId: string; executionId: string } | undefined> = {}
+
+    const throwing = harness({
+      deliveries: new Proxy({}, {
+        get: (_t, key: string) => {
+          if (key === 'boom') throw new Error('lookup infrastructure failed')
+          return deliveries[key]
+        },
+      }) as never,
+    })
+
+    throwing.claim({ childSessionId: CHILD, messageId: 'boom', turn: 1, sourceKind: 'user' })
+    // Failure is proven pollution: even a later clean Delivery cannot restore.
+    deliveries['om-late'] = raced
+    throwing.claim({ childSessionId: CHILD, messageId: 'om-late', turn: 1, sourceKind: 'user' })
+
+    expect(throwing.observer.currentForChild?.(CHILD)).toBeUndefined()
+    void h
+  })
+})

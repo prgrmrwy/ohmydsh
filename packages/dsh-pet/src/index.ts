@@ -65,7 +65,7 @@ import {
   unavailableLocusChannelCapability,
 } from './host/channel/locus-capability.js'
 import { createLocusTurnObserver } from './host/locus/turn-observer.js'
-import { createLocusManagementPort } from './host/locus/management.js'
+import { createLocusManagementPort, createLocusSessionDescriber } from './host/locus/management.js'
 import { createLocusResolution } from './host/locus/resolution.js'
 import { createLocusController } from './host/locus/controller.js'
 import { ControllerLocusRepositoryAdapter } from './host/locus/controller-persistence-adapter.js'
@@ -1240,7 +1240,24 @@ async function initialize(
         repository,
         sessionController: sessionController as never,
         workspaceRegistry: ctx.workspaceRegistry as never,
-        agents: ctx.agents as never,
+        agents: {
+          // Delegate explicitly rather than spreading or inheriting from the
+          // service: `ctx.agents` is a Cordis service whose `create` relies on
+          // its own receiver, so it must keep being called on itself.
+          create: (options: unknown) =>
+            (ctx.agents as { create(input: unknown): unknown }).create(options),
+          // Same seam the Pet executor uses: a real UserMessage through
+          // `followup`, never a raw string, so the briefing rides the path a
+          // native client uses. Not awaited — see the port's `brief` doc.
+          brief: (agent: unknown, text: string) => {
+            ;(agent as { followup(input: unknown): void }).followup(
+              createUserMessage({
+                content: [{ type: 'text', text }],
+                source: { kind: 'user' },
+              }),
+            )
+          },
+        } as never,
         agentPresets: ctx.agentPresets as never,
         agentDefaultModel: ctx.agentDefaultModel as never,
         sessions: ctx.sessions as never,
@@ -1472,14 +1489,24 @@ async function initialize(
         onClaimed: listener =>
           ctx.on(claimEvent as never, ((payload: {
             agent?: { session?: { id?: unknown } }
-            message?: { id?: unknown }
+            message?: { id?: unknown; source?: { kind?: unknown } }
             turn?: unknown
           }) => {
             const childSessionId = payload?.agent?.session?.id
             const messageId = payload?.message?.id
             if (typeof childSessionId !== 'string' || typeof messageId !== 'string') return
             if (typeof payload.turn !== 'number') return
-            listener({ childSessionId, messageId, turn: payload.turn })
+            // The claim carries the whole UserMessage, so its source is
+            // available here. The observer needs it to tell Host-injected
+            // context apart from participant traffic; a non-string source stays
+            // absent and is therefore treated as participant traffic.
+            const sourceKind = payload.message?.source?.kind
+            listener({
+              childSessionId,
+              messageId,
+              turn: payload.turn,
+              ...(typeof sourceKind === 'string' ? { sourceKind } : {}),
+            })
           }) as never),
         onTurnEnd: listener =>
           ctx.on(sessionEvent as never, ((
@@ -1888,31 +1915,25 @@ async function initialize(
    * Session and workspace metadata is resolved from the Host registries. A
    * fact the Host cannot resolve stays absent rather than being guessed from
    * an id, which is what keeps "missing" distinguishable from "unnamed".
+   *
+   * Existence is proven by cold inspection rather than the live registry; see
+   * `createLocusSessionDescriber` for why the live answer is the wrong question.
    */
-  const describeSession = (sessionId: string): {
-    readonly title?: string
-    readonly availability?: 'available' | 'archived' | 'missing'
-  } | undefined => {
-    const session = ctx.sessions.get(sessionId as never)
-    if (session === undefined) {
-      // Absent from the live registry only proves it is not loaded. The
-      // workspace's archived account is the durable evidence.
-      const archived = (ctx.workspaceRegistry.archivedSessionIds ?? []) as readonly unknown[]
-      return archived.some(id => String(id) === sessionId)
-        ? { availability: 'archived' }
-        : { availability: 'missing' }
-    }
-    // The title lives in the session log via the title service. A session
-    // header has no `title`, so reading one there yields `undefined` for
-    // EVERY session — the exact failure that once made every bound group
-    // display the same fallback name.
-    const resolved: unknown = ctx.sessionTitle.get(session)
-    const title = typeof resolved === 'string' && resolved.trim() !== '' ? resolved : undefined
-    return {
-      availability: 'available',
-      ...(title === undefined ? {} : { title }),
-    }
-  }
+  const describeSession = createLocusSessionDescriber({
+    inspect: (() => {
+      const controller = ctx.get('sessionController') as
+        | { inspect?: (id: unknown, signal?: AbortSignal) => Promise<unknown> }
+        | undefined
+      const inspect = controller?.inspect
+      if (typeof inspect !== 'function') return undefined
+      // Keep the receiver: `inspect` is a service method that uses `this`.
+      return async (sessionId: string) =>
+        await inspect.call(controller, sessionId) as { readonly events?: readonly unknown[] }
+    })(),
+    archivedSessionIds: () =>
+      ((ctx.workspaceRegistry.archivedSessionIds ?? []) as readonly unknown[]).map(String),
+    foldTitle: latestSessionTitle,
+  })
 
   let locusManagement!: ReturnType<typeof createLocusManagementPort>
   locusManagement = createLocusManagementPort({

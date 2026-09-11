@@ -3,6 +3,7 @@ import { SessionId, type Session, type SessionEvent } from '@deepseek-ai/dsh-ses
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  composeLocusMainBriefing,
   createProductionLocusDshPort,
   LocusDshCapabilityUnavailableError,
   type LocusWorkspaceEntity,
@@ -423,6 +424,99 @@ describe('production LocusDshPort main creation', () => {
       chatId: 'oc_project',
     })).rejects.toThrow('rename failed')
     expect(order).toEqual(['attach', 'rename', 'detach', 'dispose'])
+  })
+})
+
+describe('locus main opening briefing', () => {
+  const facts = {
+    chatId: 'oc_project',
+    workspaceId: 'ws-default',
+    workspacePath: '/workspaces/ws-default',
+    label: 'Locus 主会话 · Project',
+  }
+
+  it('states the identity facts an owner needs to tell this session apart', () => {
+    const text = composeLocusMainBriefing(facts)
+
+    expect(text).toContain(facts.label)
+    expect(text).toContain(facts.chatId)
+    expect(text).toContain(facts.workspaceId)
+    expect(text).toContain(facts.workspacePath)
+  })
+
+  it('frames itself as context and asks the main to acknowledge and stand by', () => {
+    const text = composeLocusMainBriefing(facts)
+
+    // A capable model handed a project path would otherwise start working.
+    expect(text).toContain('只是陈述上下文')
+    expect(text).toContain('不是任务')
+    expect(text).toMatch(/了解|知道了/)
+    expect(text).toContain('待命')
+    // The main must not believe it will be fed the Feishu traffic.
+    expect(text).toContain('不会自动回传')
+  })
+
+  it('briefs through the ordinary follow-up turn, after the durable rename', async () => {
+    const order: string[] = []
+    const ws = workspace('ws-default', { order })
+    const brief = vi.fn(() => {
+      order.push('brief')
+    })
+    const deps = harness({
+      workspaceRegistry: {
+        get: id => (id === ws.id ? ws : undefined),
+        list: () => [ws],
+        archivedSessionIds: [],
+      },
+      agents: {
+        create: vi.fn(async options => ({
+          agent: { session: fakeSession(String(options.sessionId)) },
+          dispose: vi.fn(async () => undefined),
+        })),
+        brief,
+      } as unknown as ProductionLocusDshPortDeps['agents'],
+      sessionTitle: {
+        rename: vi.fn((_session, title) => {
+          order.push('rename')
+          return { title }
+        }),
+      },
+      sessions: {
+        flush: vi.fn(async () => {
+          order.push('flush')
+          return true
+        }),
+      },
+    })
+
+    await createProductionLocusDshPort(deps).createMainSession({
+      workspaceId: 'ws-default',
+      label: facts.label,
+      chatId: facts.chatId,
+    })
+
+    expect(order).toEqual(['attach', 'rename', 'brief', 'flush'])
+    expect(brief).toHaveBeenCalledWith(
+      expect.objectContaining({ session: expect.anything() }),
+      composeLocusMainBriefing(facts),
+    )
+  })
+
+  it('still provisions a main when the Host exposes no briefing seam', async () => {
+    const deps = harness({
+      agents: {
+        create: vi.fn(async options => ({
+          agent: { session: fakeSession(String(options.sessionId)) },
+          dispose: vi.fn(async () => undefined),
+        })),
+      } as unknown as ProductionLocusDshPortDeps['agents'],
+    })
+
+    await expect(createProductionLocusDshPort(deps).createMainSession({
+      workspaceId: 'ws-default',
+      label: facts.label,
+      chatId: facts.chatId,
+    })).resolves.toMatchObject({ id: 'session-created-main' })
   })
 })
 
