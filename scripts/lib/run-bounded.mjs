@@ -18,12 +18,16 @@ try {
   fail(`invalid request: ${error instanceof Error ? error.message : String(error)}`)
 }
 
-const { command, args, cwd, timeoutMs, killGraceMs } = request ?? {}
+const { command, args, cwd, timeoutMs, killGraceMs, env: envOverlay } = request ?? {}
 if (typeof command !== 'string' || command === '' || !Array.isArray(args)
   || args.some(value => typeof value !== 'string') || typeof cwd !== 'string'
   || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1
-  || !Number.isSafeInteger(killGraceMs) || killGraceMs < 1) {
-  fail('request must contain command, string args, cwd, timeoutMs and killGraceMs')
+  || !Number.isSafeInteger(killGraceMs) || killGraceMs < 1
+  || (envOverlay !== undefined && (
+    typeof envOverlay !== 'object' || envOverlay === null || Array.isArray(envOverlay)
+    || Object.values(envOverlay).some(value => typeof value !== 'string')
+  ))) {
+  fail('request must contain command, string args, cwd, timeoutMs and killGraceMs; env must be string values')
 }
 
 const detached = process.platform !== 'win32'
@@ -35,7 +39,7 @@ let finishTimer
 
 const child = spawn(command, args, {
   cwd,
-  env: process.env,
+  env: envOverlay === undefined ? process.env : { ...process.env, ...envOverlay },
   stdio: 'inherit',
   detached,
 })

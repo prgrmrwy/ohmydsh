@@ -46,7 +46,7 @@ const UPSTREAM = {
   patchSha256: '97ef5189f726799c13bdd7622aa37292a7451fe13981fac77de4d82161e14b28',
 }
 
-const run = (command, args, cwd = here) => runCompatCommand(command, args, cwd)
+const run = (command, args, cwd = here, options) => runCompatCommand(command, args, cwd, options)
 const capture = (command, args, cwd = here) => runCompatCommand(command, args, cwd, { capture: true })
 
 function fail(message) {
@@ -54,6 +54,14 @@ function fail(message) {
   process.exit(1)
 }
 
+function assertSupportedNode() {
+  const [major = 0, minor = 0] = process.versions.node.split('.').map(Number)
+  if (major < 22 || (major === 22 && minor < 19)) {
+    fail(`Node ${process.versions.node} is unsupported; reviewed DSH source requires Node ^22.19.0 or >=24.0.0`)
+  }
+}
+
+assertSupportedNode()
 const actualPatchHash = createHash('sha256').update(readFileSync(patchFile)).digest('hex')
 if (actualPatchHash !== UPSTREAM.patchSha256) {
   fail(
@@ -92,8 +100,9 @@ try {
 run('git', ['apply', patchFile], checkout)
 
 console.log('[compat/subagent] building upstream host libraries')
-run('corepack', ['pnpm', 'install', '--prefer-offline'], checkout)
-run('corepack', ['pnpm', 'run', 'build:lib:host'], checkout)
+run('corepack', ['pnpm@11.7.0', 'install', '--prefer-offline'], checkout, { env: { CI: 'true' } })
+run(process.execPath, ['--max-old-space-size=4096', './node_modules/typescript/bin/tsc', '-b', 'tsconfig.host.json'], checkout)
+run(process.execPath, ['./node_modules/tsdown/dist/run.mjs', '--env.DSH_BUILD_FACE', 'host'], checkout)
 
 const built = join(checkout, UPSTREAM.packageDir)
 const libSource = join(built, 'lib')

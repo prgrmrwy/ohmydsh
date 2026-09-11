@@ -39,11 +39,17 @@ const packages = [
   ['storage/storage-json', 'storage-json'],
 ]
 
-function run(command, args, cwd) {
-  return runCompatCommand(command, args, cwd)
+function run(command, args, cwd, options) {
+  return runCompatCommand(command, args, cwd, options)
 }
 function fail(message) {
   throw new Error(`[compat/storage] ${message}`)
+}
+function assertSupportedNode() {
+  const [major = 0, minor = 0] = process.versions.node.split('.').map(Number)
+  if (major < 22 || (major === 22 && minor < 19)) {
+    fail(`Node ${process.versions.node} is unsupported; reviewed DSH source requires Node ^22.19.0 or >=24.0.0`)
+  }
 }
 function hashFile(file) {
   return createHash('sha256').update(readFileSync(file)).digest('hex')
@@ -111,6 +117,7 @@ function validArtifactSet(root, fingerprint) {
 }
 
 try {
+assertSupportedNode()
 if (hashFile(patchFile) !== patchSha256) fail('storage patch hash mismatch')
 const fingerprint = createHash('sha256')
   .update(tag)
@@ -131,8 +138,11 @@ run('git', ['checkout', '--detach', reviewedCommit], checkout)
 run('git', ['checkout', '--', '.'], checkout)
 run('git', ['apply', '--check', patchFile], checkout)
 run('git', ['apply', patchFile], checkout)
-run('corepack', ['pnpm', 'install', '--prefer-offline'], checkout)
-run('corepack', ['pnpm', 'run', 'build:lib:host'], checkout)
+// This checkout is build input, not a developer worktree. CI skips only the
+// repository's lefthook installer while preserving dependency install scripts.
+run('corepack', ['pnpm@11.7.0', 'install', '--prefer-offline'], checkout, { env: { CI: 'true' } })
+run(process.execPath, ['--max-old-space-size=4096', './node_modules/typescript/bin/tsc', '-b', 'tsconfig.host.json'], checkout)
+run(process.execPath, ['./node_modules/tsdown/dist/run.mjs', '--env.DSH_BUILD_FACE', 'host'], checkout)
 
 const versions = walkPackageJson(join(checkout, 'packages'))
 walkPackageJson(join(checkout, 'vendor'), versions)

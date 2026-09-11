@@ -153,6 +153,23 @@ test('bounded provision reports success and non-zero exit', async t => {
   assert.equal(bad.status, 7)
 })
 
+test('bounded provision 只给目标子进程叠加显式环境', async t => {
+  const cwd = await temp(t)
+  const supervisor = path.resolve('scripts/lib/run-bounded.mjs')
+  const request = JSON.stringify({
+    command: process.execPath,
+    args: ['-e', 'process.stdout.write(`${process.env.DSH_TEST_OVERLAY}:${process.env.PATH === undefined ? "missing" : "kept"}`)'],
+    cwd,
+    timeoutMs: 2_000,
+    killGraceMs: 50,
+    env: { DSH_TEST_OVERLAY: 'scoped' },
+  })
+  const result = spawnSync(process.execPath, [supervisor], { input: request, encoding: 'utf8' })
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(result.stdout, 'scoped:kept')
+  assert.equal(process.env.DSH_TEST_OVERLAY, undefined)
+})
+
 test('bounded provision 超时终止完整进程组', async t => {
   const cwd = await temp(t)
   const marker = path.join(cwd, 'descendant-survived')
