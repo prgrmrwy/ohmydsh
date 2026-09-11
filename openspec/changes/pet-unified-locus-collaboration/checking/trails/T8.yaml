@@ -1,0 +1,105 @@
+id: T8
+name: 退出重建冷恢复与旧模型隔离
+description: 验证单入口退出与显式重建保留历史且不继承 write；记录状态后由用户手动冷重启；最终核对无 legacy fallback。
+device: pc
+parallel_group: G8
+conflicts_with: [T1, T2, T3, T4, T5, T6, T7]
+precondition: 选择可牺牲的验收话题 Locus 且当前空闲；重启前保存 parent/child/locus/generation/permission/workspace/Delivery 证据；仅用户可以重启 Host。
+ask_user_if_blocked: true
+status: pending
+blocked_reason: null
+mock_setup:
+  required: false
+  status: not_needed
+  scenario_id: null
+  surface: host-recovery
+  data_source: Persisted Pet locus/session state and legacy tables
+  evidence: []
+  enable:
+    command: null
+    env: null
+    notes: 使用正式持久状态；冷恢复为用户控制的 manual checkpoint，不启用 mock。
+  user_decision: null
+steps:
+  - seq: 1
+    description: 在 Locus 管理中对选定话题执行解除或归档，再显式重建该 endpoint
+    action: click
+    target: "button:has-text('解除'), button:has-text('显式重建')"
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: T8-C1
+        description: 旧 Locus 转为 retired 并保留历史；显式重建生成更高代际和新 child，实际权限从 read 开始且不复活旧 child
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: retire-rebuild
+        surface: pet-locus-management
+        data_source: Pet locus generations and child sessions
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 解除后先回读 retired，再点击重建；破坏性操作需逐步确认，重建后比较 generation、child、permission 与历史列表。
+        selector: .dshpet-settings
+        expected_text: "退役历史保留；新一代；新子会话；期望 只读 · 实际 只读；旧子会话未复活"
+        expected_attrs: null
+        expected_visible: true
+        result: null
+        result_detail: null
+  - seq: 2
+    description: 记录恢复前快照，暂停并请用户手动重启现有 DSH，用户确认后刷新 GUI 回读
+    action: wait_for
+    target: "user-action:manual-restart-confirmation"
+    value: "用户手动重启并回复已重启"
+    url_needs_input: false
+    checkpoints:
+      - id: T8-C2
+        description: 用户手动冷恢复后原 parent、当前 child、Locus 代际、workspace、read 权限和 scoped context 与恢复前一致，未完成 Delivery 未被重放
+        focus: integration
+        verify: visual_inspect
+        automation: manual
+        data_scenario_required: true
+        data_scenario: manual-cold-restart
+        surface: host-recovery
+        data_source: Persisted locus repository and DSH session runtime
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: agent 禁止重启；必须先保存恢复前证据，用户操作后再逐字段比较。无法精确证明的 execution 保留 pending/manual debt，不允许重放 prompt。
+        target_area: ".dshpet-settings"
+        inspect_notes: "人工核对恢复前后 parent/child/locus/generation/workspace/permission/context 和 Delivery 状态对账。"
+        result: null
+        result_detail: null
+  - seq: 3
+    description: 在最终管理快照和诊断中核对旧模型隔离与统一链路
+    action: wait_for
+    target: .dshpet-settings
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: T8-C3
+        description: 新验收消息只存在 message 到 Locus generation 到 child 到 turn 的诊断链，不新增旧 chat binding、invocation channel、飞书 Task/Invocation 或 root executor
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: legacy-isolation
+        surface: pet-locus-management
+        data_source: Pet diagnostics and preserved legacy storage
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 以验收前后计数/标识差异证明；旧历史可以仍存在，但不得有本轮新行或 fallback 路由。
+        selector: .dshpet-settings
+        expected_text: "消息 → locus 代际 → 子会话 → 执行；无新增 chat_bindings；无新增 invocation_channel；无飞书 Task/Invocation；无 root executor"
+        expected_attrs: null
+        expected_visible: true
+        result: null
+        result_detail: null

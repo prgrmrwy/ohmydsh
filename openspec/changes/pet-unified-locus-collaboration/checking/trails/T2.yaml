@@ -1,0 +1,108 @@
+id: T2
+name: 真实 Bot 入群与 Mention 准入
+description: 在验收专用普通私密群中捕获真实 bot-added，并验证入群只初始化、非 mention 不推理、mention 才建立群级协作入口。
+device: pc
+parallel_group: G2
+conflicts_with: [T1, T3, T4, T5, T6, T7, T8]
+precondition: 验收群仅有用户本人，Bot 尚未加入；channel 已 connected；事件监听必须先出现 ready，飞书写操作逐步取得用户确认。
+ask_user_if_blocked: true
+status: pending
+blocked_reason: null
+mock_setup:
+  required: false
+  status: not_needed
+  scenario_id: null
+  surface: feishu-acceptance-chat
+  data_source: Feishu real-time events and Pet Host
+  evidence: []
+  enable:
+    command: null
+    env: null
+    notes: 使用真实 im.chat.member.bot.added_v1 与 im.message.receive_v1，不启用 mock。
+  user_decision: null
+steps:
+  - seq: 1
+    description: 启动一条事件上限的 bot-added 监听并等待明确 ready，再请用户把 Bot 加入验收群
+    action: wait_for
+    target: "stderr:[event] ready event_key=im.chat.member.bot.added_v1"
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: T2-C1
+        description: 捕获的真实 bot-added 事件包含目标群、Bot 身份和操作者，且入群后只更新初始化状态而不创建业务 Delivery
+        focus: integration
+        verify: assert_network
+        automation: partial
+        data_scenario_required: true
+        data_scenario: bot-added
+        surface: feishu-acceptance-chat
+        data_source: Feishu im.chat.member.bot.added_v1 and Pet diagnostics
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 飞书加 Bot 是用户确认后的真实写操作；事件由 CLI 证据与 GUI/诊断回读联合判断，不接受监听零事件。
+        expected_url: event://im.chat.member.bot.added_v1
+        expected_method: RECEIVE
+        expected_params: null
+        expected_status: 200
+        expected_response: "目标 chat_id；bot app/open id；operator id；无业务 Delivery"
+        result: null
+        result_detail: null
+  - seq: 2
+    description: 用户在群主对话发送不含 Bot mention 的普通资料消息
+    action: wait_for
+    target: "user-action:send-non-mention-message"
+    value: "这是非 mention 资料消息，不应触发推理"
+    url_needs_input: false
+    checkpoints:
+      - id: T2-C2
+        description: 非 mention 消息后 Locus 和 Delivery 数量保持不变，群内也没有 Bot 业务回复
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: non-mention
+        surface: pet-locus-management
+        data_source: Pet locus snapshot and Feishu chat
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 操作前后记录管理快照 generation/locus 数量与群消息；仅“没有看到回复”不足，必须联合 Host 快照证明无准入。
+        selector: .dshpet-settings
+        expected_text: "管理快照数量与发送前一致；无新增 Delivery；群内无 Bot 业务回复"
+        expected_attrs: null
+        expected_visible: true
+        result: null
+        result_detail: null
+  - seq: 3
+    description: 用户在群主对话发送一条明确 mention Bot 的群级验收问题
+    action: wait_for
+    target: "user-action:send-group-mention"
+    value: "@Bot 请确认这是群级入口验收"
+    url_needs_input: false
+    checkpoints:
+      - id: T2-C3
+        description: mention 后创建或复用群级 Locus 与专属 child，初始有效权限为 read，Delivery 结算并由 child 回复
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: group-mention
+        surface: pet-locus-management
+        data_source: Pet locus snapshot, Delivery diagnostics and Feishu chat
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 回读必须包含 endpoint 无 thread、child session 非空、active、第 1 代或当前代、effective read，并确认无飞书 root Task/Invocation。
+        selector: .dshpet-settings
+        expected_text: "活跃；Endpoint；子会话；实际 只读；消息已结算；无飞书 Invocation"
+        expected_attrs: null
+        expected_visible: true
+        result: null
+        result_detail: null

@@ -1,0 +1,135 @@
+id: T6
+name: Read Write 与 Caller-bound Context
+description: 在专用 canary 目录验证默认 read、授权 write、降权后的真实文件效果，并核验 pet_context 只绑定实际 child。
+device: pc
+parallel_group: G6
+conflicts_with: [T1, T2, T3, T4, T5, T7, T8]
+precondition: 当前群级 S1 Locus 空闲；default workspace 与 canonical canary 根已确认；只操作 .pet-locus-acceptance/ 下的测试文件。
+ask_user_if_blocked: true
+status: pending
+blocked_reason: null
+mock_setup:
+  required: false
+  status: not_needed
+  scenario_id: null
+  surface: pet-locus-management
+  data_source: Pet sandbox policy, context and real workspace filesystem
+  evidence: []
+  enable:
+    command: null
+    env: null
+    notes: 使用正式 workspace 与 canary 文件，不启用 mock。
+  user_decision: null
+steps:
+  - seq: 1
+    description: 在默认 read 状态让群级 child 读取已知 canary 文件并尝试创建 read-denied.txt
+    action: wait_for
+    target: "user-action:mention-read-and-write-probe"
+    value: "@Bot 读取验收 canary，并尝试创建 .pet-locus-acceptance/read-denied.txt"
+    url_needs_input: false
+    checkpoints:
+      - id: T6-C1
+        description: read 状态可读取根内已知文件，但创建操作明确失败且文件回读不存在，Locus 有效权限仍为 read
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: permission-read
+        surface: pet-locus-management
+        data_source: Pet sandbox policy and workspace filesystem
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 必须以文件存在性回读证明拒绝，不只依赖模型口头说明；禁止操作 canary 根外文件。
+        selector: .dshpet-settings
+        expected_text: "期望 只读 · 实际 只读；读取成功；read-denied.txt 不存在；写入被拒绝"
+        expected_attrs: null
+        expected_visible: true
+        result: null
+        result_detail: null
+  - seq: 2
+    description: 由 allowlist 用户发送 scope write，随后让 child 创建 write-canary.txt
+    action: wait_for
+    target: "user-action:scope-write-and-create-canary"
+    value: "@Bot -s write；随后 @Bot 创建 .pet-locus-acceptance/write-canary.txt"
+    url_needs_input: false
+    checkpoints:
+      - id: T6-C2
+        description: Host 核验 canonical root 与 workspace-write 后回显实际 write，且 write-canary.txt 在精确根内创建并可回读
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: permission-write
+        surface: pet-locus-management
+        data_source: Pet permission mutation and workspace filesystem
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: desired/write 与 effective/write 必须同时出现；若 Host 不支持必须明确拒绝，不能只改持久字段。
+        selector: .dshpet-settings
+        expected_text: "期望 可写 · 实际 可写；锚点已确认；write-canary.txt 已创建并回读"
+        expected_attrs: null
+        expected_visible: true
+        result: null
+        result_detail: null
+  - seq: 3
+    description: 由 allowlist 用户切回 scope read，再让 child 尝试创建 downgraded-denied.txt
+    action: wait_for
+    target: "user-action:scope-read-and-write-probe"
+    value: "@Bot -s read；随后 @Bot 尝试创建 .pet-locus-acceptance/downgraded-denied.txt"
+    url_needs_input: false
+    checkpoints:
+      - id: T6-C3
+        description: 降权后实际权限回到 read，既有 canary 可读但新文件创建被拒绝且回读不存在
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: permission-downgrade
+        surface: pet-locus-management
+        data_source: Pet permission mutation and workspace filesystem
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 验证实际 sandbox 效果与持久状态一致；不得把旧 write 沿用到降权后的轮次。
+        selector: .dshpet-settings
+        expected_text: "期望 只读 · 实际 只读；write-canary.txt 可读；downgraded-denied.txt 不存在"
+        expected_attrs: null
+        expected_visible: true
+        result: null
+        result_detail: null
+  - seq: 4
+    description: 在当前飞书 child 调用零参数 pet_context 并核对返回事实
+    action: wait_for
+    target: "user-action:invoke-pet-context-from-locus-child"
+    value: "@Bot 调用 pet_context，仅报告当前入口、workspace、权限和确认锚点"
+    url_needs_input: false
+    checkpoints:
+      - id: T6-C4
+        description: pet_context 按实际 child 返回唯一当前 Locus、正确 workspace、effective read 与确认锚点，且不包含 taskId/invocationId 或其它入口
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: caller-bound-context
+        surface: feishu-child-interaction
+        data_source: scoped pet_context and locus repository
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 模型不提供任何 chat/thread/session/path 参数；联合 Locus 管理回读验证返回值属于实际 caller child。
+        selector: .dshpet-settings
+        expected_text: "当前 locus 与 child 匹配；workspace 正确；实际 只读；锚点 confirmed；不包含 taskId；不包含 invocationId"
+        expected_attrs: null
+        expected_visible: true
+        result: null
+        result_detail: null

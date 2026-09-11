@@ -1,0 +1,135 @@
+id: T3
+name: 群与话题精确寻址
+description: 在普通群内建立两个真实话题，验证群/话题层级、兄弟 child、同话题复用和缺失 thread_id 的 fail-closed 人工证据边界。
+device: pc
+parallel_group: G3
+conflicts_with: [T1, T2, T4, T5, T6, T7, T8]
+precondition: T2 已建立活跃群级 Locus；用户可以在验收群中创建话题；已有真实 topic positive sample 的 thread_id/root_id/reply_to 均非空。
+ask_user_if_blocked: true
+status: pending
+blocked_reason: null
+mock_setup:
+  required: true
+  status: missing
+  scenario_id: missing-thread-id
+  surface: malformed-thread-admission
+  data_source: Feishu im.message.receive_v1
+  evidence:
+    - 用户明确选择不做 mock 探测、不启用 mock；真实正常 topic 事件不可安全制造缺失 thread_id
+    - packages/dsh-pet/test/channel-lark.test.ts 与 locus admission 测试提供自动化 fail-closed 辅证，但不冒充正式真实异常事件
+  enable:
+    command: null
+    env: null
+    notes: 正常群/话题使用真实环境；缺失 thread_id 单项按用户决定改为 manual。
+  user_decision: manual
+steps:
+  - seq: 1
+    description: 用户创建话题 A 并在话题中 mention Bot 发送第一条消息
+    action: wait_for
+    target: "user-action:create-topic-A-and-send-mention"
+    value: "@Bot 请确认这是话题级入口验收"
+    url_needs_input: false
+    checkpoints:
+      - id: T3-C1
+        description: 话题 A 的真实事件含稳定非空 thread_id，并建立精确 topic Locus 与独立 child，不投递群级 child
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: topic-mention
+        surface: pet-locus-management
+        data_source: Feishu event and Pet locus snapshot
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 联合事件 NDJSON 与 Locus 卡片 Thread 字段；话题 child 与群 child 必须不同。
+        selector: .dshpet-settings
+        expected_text: "话题；Thread；专属子会话；与群级 child 不同"
+        expected_attrs: null
+        expected_visible: true
+        result: null
+        result_detail: null
+  - seq: 2
+    description: 用户在话题 A 再次 mention Bot 继续同一问题
+    action: wait_for
+    target: "user-action:send-second-topic-A-mention"
+    value: "@Bot 请继续刚才的话题，不要新建会话"
+    url_needs_input: false
+    checkpoints:
+      - id: T3-C2
+        description: 第二条话题 A 消息回读同一 Locus ID、generation 与 child session，且新增 Delivery 已结算
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: same-topic-reuse
+        surface: pet-locus-management
+        data_source: Pet locus snapshot and Delivery diagnostics
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 发送前记录三个标识，发送后精确比较，不以回复文本相似作为复用证明。
+        selector: .dshpet-settings
+        expected_text: "Locus ID、代际、子会话均与发送前相同；新增 Delivery 已结算"
+        expected_attrs: null
+        expected_visible: true
+        result: null
+        result_detail: null
+  - seq: 3
+    description: 用户创建话题 B 并 mention Bot，随后在 Locus 管理查看 parent 与 child 索引
+    action: wait_for
+    target: "user-action:create-topic-B-and-send-mention"
+    value: "@Bot 请建立第二个独立话题入口"
+    url_needs_input: false
+    checkpoints:
+      - id: T3-C3
+        description: 群级、话题 A、话题 B 三个入口具有三个不同 child，全部直属同一主会话且不存在孙辈 child
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: sibling-topics
+        surface: pet-locus-management
+        data_source: Pet parent and child discovery indexes
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: parent discovery 列出三 Locus；逐 child 反查唯一 Locus；层级均为 parent 的直接 child。
+        selector: .dshpet-settings
+        expected_text: "同一主会话；3 个 locus；3 个不同子会话；所属 locus 唯一"
+        expected_attrs: null
+        expected_visible: true
+        result: null
+        result_detail: null
+  - seq: 4
+    description: 人工核对缺失 thread_id 的拒绝证据，不向真实飞书注入畸形事件
+    action: wait_for
+    target: "manual:evidence-review-missing-thread"
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: T3-C4
+        description: 缺失 thread_id 的话题身份不确定输入必须拒绝，不能回退或串投群级入口
+        focus: integration
+        verify: visual_inspect
+        automation: manual
+        data_scenario_required: true
+        data_scenario: missing-thread-id
+        surface: malformed-thread-admission
+        data_source: Existing real positive sample and automated admission evidence
+        mock_scenario_id: missing-thread-id
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 手工证据包需含真实正样本 thread_id 非空、自动测试名称/结果及无群级 Delivery 的断言；不计自动 PASS。
+        target_area: "evidence-ledger:topic-positive-and-missing-thread-tests"
+        inspect_notes: "核对缺字段路径明确 fail closed，且没有通过 chatId-only 降级寻址。"
+        result: null
+        result_detail: null
