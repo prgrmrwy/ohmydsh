@@ -148,6 +148,101 @@ Pet 用 `spawn()` 拉起 `lark-cli event consume` 订阅飞书消息。子进程
 
 ---
 
+## 5. `agent/inbox/claimed` 里混着 Host 自注入的上下文
+
+### 现象
+
+Locus 子会话收到飞书消息后执行完全正常——正确解析、正确调用回复工具、
+`turn/end` 为 `completed`——但 `pet_locus_reply` 报错：
+
+```
+This turn has no exact Feishu Delivery reply target; GUI and stale turns cannot send.
+```
+
+飞书侧只看到一个失败表情，一个字都发不出去。而且**只有每个子会话的第一条
+消息会这样，第二条开始就正常**。
+
+### 根因
+
+`agent/inbox/claimed` 对**进入这一步的每条 inbox 消息**都会触发，而 DSH 在
+每个会话的**首轮**都会注入三条标准上下文：
+
+| `source.kind` | 内容 |
+| --- | --- |
+| `agent-instructions` | AGENTS.md / CLAUDE.md 注入 |
+| `plugin` | runtime context 快照（sandbox / approval 等）|
+| `skill-catalog` | 可用 skill 目录 |
+
+turn-observer 拿到这些 claim 后去 Delivery 表里查，查不到 → 归入
+`unresolved` / `foreign` → 把该轮标记为 **`mixed`** → `currentForChild()`
+返回 `undefined` → `currentDelivery` 解析不出来 → 回复工具拒绝发送。
+
+`mixed` 判据本身是对的（防止 GUI 输入或父会话 steer 混入飞书轮次，把业务
+正文发到错误目标），错在**没区分两类非 Delivery 消息**：
+
+- **真危险**：`user` 来源但不在 Delivery 表里 = GUI 提问、父会话 steer，
+  可能指向别的目标，必须继续 fail closed；
+- **无害**：Host 自注入的上下文，根本不是谁发的消息，没有任何 reply target，
+  也永远不可能变成 Delivery。
+
+### 规则
+
+1. 消费 `agent/inbox/claimed` 时，**必须读 `payload.message.source.kind`**，
+   不能假设 claim 都是参与者发来的消息。事件里带的是完整 `UserMessage`。
+2. 按来源区分豁免，而不是按「查不到就当污染」一刀切；豁免名单只放 Host
+   自注入的类型，`user` 永远不在其中。
+3. 来源缺失时按参与者流量处理（fail closed），不能因为读不到来源就放行。
+4. 这类「首轮才复现」的缺陷，测试必须**照抄真实首轮的完整 claim 序列**
+   （1 条 Delivery + 3 条注入）。只测单条 claim 会全绿，但真机必挂。
+
+---
+
+## 6. 入队即唤醒：claim 结构性地先于持久绑定到达
+
+### 现象
+
+修掉第 5 节的注入污染后，同一子会话的**每一条**飞书消息仍然回不出去，
+`pet_locus_reply` 报同一错误。这次 turn 的 inbox 里只有 1 条消息、
+delivery 记录完美匹配、工具调用时 delivery 正处于 `running`——
+一切看起来都对，仍然失败。
+
+### 根因
+
+调用链的固有顺序决定了竞态**必然发生**，而不是小概率：
+
+```
+Host:  queueChild()          ← followup 进 inbox，driver 立刻被唤醒
+         (await 返回 messageId)
+       bindQueued()          ← inboxMessageId 此时才写入持久层
+       deliveryAvailable()   ← 唤醒 observer 重查
+
+Agent: turn/start → inbox.claim → agent/inbox/claimed → observer 查表
+```
+
+claim 触发时 `bindQueued` 还没落库，observer 查不到 → 挂 `unresolved`。
+这本身没问题——`deliveryAvailable` 的唤醒补救是完整的，绑定最终会成功。
+
+**真正的 bug 是一行提前置位**：`handleClaim` 在挂 `unresolved` 的同时把
+该轮标记 `mixed`（sticky，永不清除）。补救链条随后全部成功，但
+`currentForChild()` 第一条判据 `if (mixed) return undefined` 让回复授权
+**永久丢失**。防「混入」的标记把「暂时查不到」也当成了「已证实混入」。
+
+### 规则
+
+1. 「入队」和「持久绑定」之间必然有窗口；**消费 inbox claim 的一侧必须把
+   「暂时查不到」和「证实不是」当作两种状态**，不能在前者上做不可逆决定。
+2. 永久性标记（fuse）只能由**已证实的事实**置位：第二条 Delivery、lookup
+   基础设施失败、确认为外部流量。安全边界交给「未决即拒绝」
+   （`unresolved.size !== 0`）承担，它天然随解析结果收敛。
+3. 测试必须复现**真实时序**：claim 先到 → `deliveryAvailable` 后到 →
+   断言授权恢复；并配对照（GUI 混入 / 双 Delivery / lookup 失败）断言
+   永不恢复。只测「查得到」的顺路径会全绿，真机必挂。
+4. 诊断日志走 `console.log` 时要确认 Host 的 stdout 实际落盘——本次排查中
+   Host stdout 指向 `/dev/null`，运行时诊断全部丢失，只能靠持久层时间戳
+   与代码结构反推。
+
+---
+
 ## `ctx.inject()` 的回调是异步的，不能紧跟同步断言
 
 ### 现象
