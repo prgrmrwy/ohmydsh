@@ -39,7 +39,12 @@ const require = createRequire(import.meta.url)
 function stubServices(
   ctx: Context,
   registered: { path: string }[],
-  overrides: { sessions?: unknown } = {},
+  overrides: {
+    sessions?: unknown
+    agents?: unknown
+    sessionController?: unknown
+    connection?: { requestRejection(req: unknown): 401 | 403 | undefined }
+  } = {},
 ): void {
   ctx.provide('webServer', {
     register: (route: { path: string }) => {
@@ -47,6 +52,7 @@ function stubServices(
       return () => {}
     },
   })
+  ctx.provide('connection', overrides.connection ?? { requestRejection: () => undefined })
   ctx.provide('workspaceRegistry', {
     create: async (p: string) => ({ id: 'ws-pet', path: p, title: 'DSH Pet' }),
     list: () => [],
@@ -56,13 +62,13 @@ function stubServices(
     archivedSessionIds: [],
   })
   ctx.provide('sessions', overrides.sessions ?? { list: () => [], get: () => undefined })
-  ctx.provide('sessionController', {
+  ctx.provide('sessionController', overrides.sessionController ?? {
     inspect: async () => ({ session: undefined }),
     resolveAgent: async () => undefined,
   })
   // `resume` mirrors the real registry. Omitting it made the locus child
   // probe stop at parent resolution, masking every later capability gate.
-  ctx.provide('agents', {
+  ctx.provide('agents', overrides.agents ?? {
     create: async () => ({ session: { id: 'x' } }),
     get: () => undefined,
     resume: async () => undefined,
@@ -88,16 +94,20 @@ function stubServices(
 }
 
 /** Compose Pet exactly as the profile patch does, over an isolated home. */
-async function composeHost(options: { withSqlite?: boolean; settleMs?: number } = {}): Promise<{
+async function composeHost(options: {
+  withSqlite?: boolean
+  settleMs?: number
+  connection?: { requestRejection(req: unknown): 401 | 403 | undefined }
+} = {}): Promise<{
   ctx: Context
   home: string
-  routes: { path: string }[]
+  routes: { path: string; handler?: (req: never, res: never) => Promise<void> | void }[]
 }> {
   const home = await mkdtemp(path.join(tmpdir(), 'pet-loader-'))
-  const routes: { path: string }[] = []
+  const routes: { path: string; handler?: (req: never, res: never) => Promise<void> | void }[] = []
   const ctx = new Context()
   await ctx.plugin(Storage)
-  stubServices(ctx, routes)
+  stubServices(ctx, routes, options.connection === undefined ? {} : { connection: options.connection })
 
   // The profile's default JSON-equivalent backend.
   await ctx.plugin({
@@ -204,6 +214,39 @@ describe('Host service loads through the loader', () => {
     for (const route of paths) expect(route.startsWith('/dsh-pet/api/')).toBe(true)
   })
 
+  it('applies the real Connection browser-auth fence to every exact route', async () => {
+    let authChecks = 0
+    const { routes } = await composeHost({
+      connection: {
+        requestRejection: () => {
+          authChecks += 1
+          return 401
+        },
+      },
+    })
+    const status = routes.find(route => route.path === ROUTES.status)
+    expect(status?.handler).toBeTypeOf('function')
+
+    let statusCode: number | undefined
+    let payload: string | undefined
+    await status!.handler!(
+      { method: 'POST', headers: { host: '127.0.0.1:3080' } } as never,
+      {
+        writeHead(status: number) {
+          statusCode = status
+          return this
+        },
+        end(body: string) {
+          payload = body
+        },
+      } as never,
+    )
+
+    expect(authChecks).toBe(1)
+    expect(statusCode).toBe(401)
+    expect(payload).toBe('unauthorized')
+  })
+
   it('creates its owner-only state tree under the given DSH home', async () => {
     const { home } = await composeHost()
     const { readdir } = await import('node:fs/promises')
@@ -281,6 +324,7 @@ describe('a real Invocation scopes its executor Agent', () => {
         return () => {}
       },
     })
+    ctx.provide('connection', { requestRejection: () => undefined })
     ctx.provide('workspaceRegistry', {
       create: async (p: string) => ({ id: 'ws-pet', path: p, title: 'DSH Pet' }),
       list: () => [],
@@ -380,6 +424,7 @@ describe('dispatch uses the ordinary Agent lifecycle', () => {
         return () => {}
       },
     })
+    ctx.provide('connection', { requestRejection: () => undefined })
     ctx.provide('workspaceRegistry', {
       create: async (p: string) => ({ id: 'ws-pet', path: p, title: 'DSH Pet' }),
       list: () => [],
@@ -512,6 +557,7 @@ describe('archiving from the Pet route syncs the executor session', () => {
         return () => {}
       },
     })
+    ctx.provide('connection', { requestRejection: () => undefined })
     ctx.provide('workspaceRegistry', {
       create: async (p: string) => ({ id: 'ws-pet', path: p, title: 'DSH Pet' }),
       list: () => [],
@@ -619,6 +665,7 @@ describe('provider routability is proven before an executor is created', () => {
         return () => {}
       },
     })
+    ctx.provide('connection', { requestRejection: () => undefined })
     ctx.provide('workspaceRegistry', {
       create: async (p: string) => ({ id: 'ws-pet', path: p, title: 'DSH Pet' }),
       list: () => [],
@@ -997,7 +1044,7 @@ describe('the per-turn correlation observer is wired to real runtime events', ()
     await repository.bindQueued({
       deliveryId: accepted.record.deliveryId,
       correlation: { endpoint, locusId: 'locus-live', generation: 1, childSessionId: 'child-live' },
-      executionId: 'execution-live',
+      executionId: 'execution-live', inboxMessageId: 'inbox-execution-live',
       queuedAt: 3,
     })
     return { ctx, repository }
@@ -1009,7 +1056,7 @@ describe('the per-turn correlation observer is wired to real runtime events', ()
     // Exactly the two events DSH emits, with their real payload shapes.
     host.ctx.emit('agent/inbox/claimed' as never, {
       agent: { session: { id: 'child-live' } },
-      message: { id: 'om-live' },
+      message: { id: 'inbox-execution-live' },
       turn: 1,
     } as never)
     host.ctx.emit('session/event' as never, { id: 'child-live' } as never, {
@@ -1041,22 +1088,88 @@ describe('the per-turn correlation observer is wired to real runtime events', ()
 
 describe('owner-facing locus management is served by the real routes', () => {
   /** Compose Pet and seed two locus generations on one endpoint. */
-  async function hostWithLoci() {
+  async function hostWithLoci(options: { scopeRuntime?: boolean } = {}) {
     const home = await mkdtemp(path.join(tmpdir(), 'pet-loader-'))
     const routes: { path: string; handler: (req: never, res: never) => Promise<void> | void }[] = []
     const ctx = new Context()
     await ctx.plugin(Storage)
+    const modes = new Map<string, string>()
+    const sessions = new Map<string, {
+      id: string
+      title: string
+      header: { cwd: string; parentSession?: string; origin?: string }
+      snapshotEvents(): never[]
+      seq: number
+      append(type: string, data: { mode?: string }): void
+    }>()
+    const sessionOf = (id: string) => {
+      let session = sessions.get(id)
+      if (session !== undefined) return session
+      session = {
+        id,
+        title: id === 'main-live' ? '研发主会话' : '项目子会话',
+        header: id === 'child-live'
+          ? { cwd: '/repo', parentSession: 'main-live', origin: 'subagent' }
+          : { cwd: '/repo' },
+        snapshotEvents: () => [],
+        seq: 0,
+        append(type, data) {
+          if (type === 'sandbox/mode' && data.mode !== undefined) modes.set(id, data.mode)
+        },
+      }
+      sessions.set(id, session)
+      return session
+    }
+    const main = { id: 'main-live', session: sessionOf('main-live') }
+    const ordinaryControllerResolve = vi.fn(async () => ({ error: new Error('owned by subagent routing') }))
     stubServices(ctx, routes, {
       sessions: {
         list: () => [],
-        get: (id: string) =>
-          id === 'main-live'
-            ? { id, title: '研发主会话', header: { cwd: '/repo' }, snapshotEvents: () => [], seq: 0 }
-            : id === 'child-live'
-              ? { id, title: '项目子会话', header: { cwd: '/repo' }, snapshotEvents: () => [], seq: 0 }
-              : undefined,
+        get: (id: string) => id === 'main-live' || id === 'child-live' ? sessionOf(id) : undefined,
       },
+      ...(options.scopeRuntime === true
+        ? {
+          agents: {
+            create: async () => ({ session: { id: 'x' } }),
+            get: (id: string) => id === 'main-live' ? main : undefined,
+            resume: async () => undefined,
+            list: () => [main],
+          },
+          sessionController: {
+            inspect: async () => ({ session: undefined }),
+            resolveAgent: ordinaryControllerResolve,
+          },
+        }
+        : {}),
     })
+    if (options.scopeRuntime === true) {
+      // The API controller correctly refuses this subagent-owned child. Scope
+      // must therefore use the continuation owner instead.
+      ctx.provide('sandboxPolicy', {
+        resolve: ({ session }: { session: { id: string } }) => ({ mode: modes.get(session.id) }),
+      })
+      ctx.provide('subagents', {
+        startContinuable: async () => ({ childId: 'child-live' }),
+        createIdleContinuable: async () => ({ childId: 'child-live' }),
+        supportsSettlementNotice: true,
+        supportsIdleContinuableCreate: true,
+        supportsLiveContinuableChildSession: true,
+        listChildren: async (_parentSessionId: string) => {
+          return [{
+            id: 'child-live', childSessionId: 'child-live', parentSessionId: 'main-live', kind: 'child', mode: 'continuable',
+          }]
+        },
+        withLiveContinuableChildSession: async (
+          spec: { parent: unknown; childId: string },
+          operation: (session: unknown) => unknown,
+        ) => {
+          expect(spec.parent).toBe(main)
+          expect(spec.childId).toBe('child-live')
+          return operation(sessionOf('child-live'))
+        },
+        [Symbol.for('dsh.subagent.queuePrompt')]: async () => 'message-1',
+      })
+    }
 
     await ctx.plugin({
       name: 'default-backend',
@@ -1104,7 +1217,7 @@ describe('owner-facing locus management is served by the real routes', () => {
       updatedAt: 1,
     })
     const route = (target: string) => routes.find(r => r.path === target)!
-    return { ctx, repository, route, endpoint }
+    return { ctx, repository, route, endpoint, modes }
   }
 
   it('projects the owner view with resolved session and workspace facts', async () => {
@@ -1183,7 +1296,7 @@ describe('owner-facing locus management is served by the real routes', () => {
       correlation: {
         endpoint: host.endpoint, locusId: 'locus-live', generation: 1, childSessionId: 'child-live',
       },
-      executionId: 'execution-private',
+      executionId: 'execution-private', inboxMessageId: 'inbox-execution-private',
       queuedAt: 6,
     })
 
@@ -1231,6 +1344,25 @@ describe('owner-facing locus management is served by the real routes', () => {
       parentSessionId: 'main-live',
     })
     expect(refusedQa.ok).toBe(false)
+  })
+
+  it('uses the exact continuation-owned child but rejects write without a Host-authorized root', async () => {
+    const host = await hostWithLoci({ scopeRuntime: true })
+
+    const result = await callRoute(host.route(LOCUS_ROUTES.scope), {
+      action: 'scope',
+      locusId: 'locus-live',
+      mode: 'write',
+    })
+
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: false })
+    expect(result.error).toBe('WRITE_UNSUPPORTED')
+    expect(result.message).toContain('Host-derived')
+    expect(host.modes.get('child-live')).toBe('read-only')
+    expect(host.repository.getLocus('locus-live')?.permission).toMatchObject({
+      desired: 'read', effective: 'read',
+    })
+    expect((host.ctx.sessionController as { resolveAgent: ReturnType<typeof vi.fn> }).resolveAgent).not.toHaveBeenCalled()
   })
 
   it('never accepts an operator identity from the request body', async () => {

@@ -35,6 +35,7 @@ export type LocusManagementErrorCode =
   | 'LOCUS_NOT_FOUND'
   | 'LOCUS_BUSY'
   | 'LOCUS_INVALID'
+  | 'WRITE_UNSUPPORTED'
   | 'LOCUS_STOPPED'
   | 'REVISION_CONFLICT'
   | 'ACTION_UNAVAILABLE'
@@ -258,7 +259,10 @@ function managementError(error: unknown, operation: string): LocusManagementErro
   if (code === 'LOCUS_NOT_FOUND') return new LocusManagementError('LOCUS_NOT_FOUND', safeErrorMessage(error), error)
   if (code === 'LOCUS_BUSY') return new LocusManagementError('LOCUS_BUSY', safeErrorMessage(error), error)
   if (code === 'LOCUS_STOPPED') return new LocusManagementError('LOCUS_STOPPED', safeErrorMessage(error), error)
-  if (code === 'LOCUS_INVALID' || code === 'LOCUS_NOT_CURRENT' || code === 'INVALID_STATE' || code === 'INVALID_PERMISSION' || code === 'WRITE_UNSUPPORTED' || code === 'POLICY_APPLY_FAILED' || code === 'POLICY_VERIFY_FAILED') {
+  if (code === 'WRITE_UNSUPPORTED') {
+    return new LocusManagementError('WRITE_UNSUPPORTED', safeErrorMessage(error), error)
+  }
+  if (code === 'LOCUS_INVALID' || code === 'LOCUS_NOT_CURRENT' || code === 'INVALID_STATE' || code === 'INVALID_PERMISSION' || code === 'POLICY_APPLY_FAILED' || code === 'POLICY_VERIFY_FAILED') {
     return new LocusManagementError('LOCUS_INVALID', safeErrorMessage(error), error)
   }
   return new LocusManagementError('INTEGRATION_FAILED', `${operation} 失败：${safeErrorMessage(error)}`, error)

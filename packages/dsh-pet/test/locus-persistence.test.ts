@@ -10,6 +10,33 @@ import {
 } from '../src/host/locus/persistence.js'
 import { emptyMedium, openPetHarness, type MemoryMedium } from './harness.js'
 
+function enableAtomicTransactions(harness: Awaited<ReturnType<typeof openPetHarness>>): void {
+  const domain = harness.domain as unknown as {
+    supportsTransaction?: boolean
+    transaction?: (body: (tx: {
+      put(table: string, key: string, value: unknown): void
+      delete(table: string, key: string): void
+    }) => void) => Promise<void>
+    table(name: string): {
+      get(key: string): unknown
+      put(key: string, value: unknown): Promise<void>
+      delete(key: string): Promise<boolean>
+    }
+  }
+  Object.defineProperty(domain, 'supportsTransaction', { value: true, configurable: true })
+  domain.transaction = async body => {
+    const writes: Array<{ kind: 'put' | 'delete'; table: string; key: string; value?: unknown }> = []
+    body({
+      put: (table, key, value) => { writes.push({ kind: 'put', table, key, value }) },
+      delete: (table, key) => { writes.push({ kind: 'delete', table, key }) },
+    })
+    for (const write of writes) {
+      if (write.kind === 'delete') await domain.table(write.table).delete(write.key)
+      else await domain.table(write.table).put(write.key, write.value)
+    }
+  }
+}
+
 function record(overrides: Partial<Parameters<typeof buildLocusRecord>[0]> = {}): LocusRecord {
   return buildLocusRecord({
     id: 'locus-group',
@@ -290,7 +317,127 @@ describe('durable unified locus repository', () => {
     await first.close()
   })
 
-  it('restores only pending proof-free Deliveries and preserves the busy fence', async () => {
+  it('accepts overlapping same-locus messages into one durable FIFO backlog while controls stay busy', async () => {
+    const harness = await openPetHarness()
+    const repository = new DurableLocusRepository(harness.domain)
+    const locus = await repository.putLocus(record())
+    const base = {
+      endpoint: locus.endpoint,
+      locusId: locus.id,
+      generation: locus.generation,
+      childSessionId: locus.childSessionId as string,
+      senderOpenId: 'ou_overlap',
+    }
+
+    const [first, second] = await Promise.all([
+      repository.acceptDelivery({ ...base, messageId: 'message-overlap-1', deliveryId: 'delivery-overlap-1', acceptedAt: 2 }),
+      repository.acceptDelivery({ ...base, messageId: 'message-overlap-2', deliveryId: 'delivery-overlap-2', acceptedAt: 3 }),
+    ])
+
+    expect(first.duplicate).toBe(false)
+    expect(second.duplicate).toBe(false)
+    expect(repository.listDeliveries(locus.id).map(item => item.messageId)).toEqual([
+      'message-overlap-1',
+      'message-overlap-2',
+    ])
+    expect(repository.getLocus(locus.id)?.busy).toBe(true)
+    await expect(repository.retireLocus(locus.id, 4)).rejects.toMatchObject({ code: 'LOCUS_BUSY' })
+    await expect(repository.setLocusPermission(locus.id, {
+      desired: 'write', effective: 'write', verifiedAt: 4, grantedBy: 'owner',
+    }, 4)).rejects.toMatchObject({ code: 'LOCUS_BUSY' })
+    await harness.close()
+  })
+
+  it('persists definitive queue failure, releases busy, and accepts a retry message', async () => {
+    const harness = await openPetHarness()
+    const repository = new DurableLocusRepository(harness.domain)
+    const locus = await repository.putLocus(record())
+    const correlation = {
+      endpoint: locus.endpoint,
+      locusId: locus.id,
+      generation: locus.generation,
+      childSessionId: locus.childSessionId as string,
+    }
+    const accepted = await repository.acceptDelivery({
+      ...correlation,
+      deliveryId: 'delivery-queue-failed',
+      messageId: 'message-queue-failed',
+      senderOpenId: 'ou_queue_failed',
+      acceptedAt: 2,
+    })
+
+    await expect(repository.fail({
+      deliveryId: accepted.record.deliveryId,
+      correlation,
+      executionId: 'execution-not-queued',
+      reason: 'inbox-failed',
+    })).resolves.toBe(true)
+    expect(repository.getDelivery(accepted.record.deliveryId)).toMatchObject({
+      status: 'failed',
+      dispatchFailure: 'not-queued',
+      failureReason: 'inbox-failed',
+    })
+    expect(repository.getDelivery(accepted.record.deliveryId)).not.toHaveProperty('executionId')
+    expect(repository.getDelivery(accepted.record.deliveryId)).not.toHaveProperty('turnId')
+    expect(repository.getLocus(locus.id)?.busy).toBe(false)
+
+    await expect(repository.acceptDelivery({
+      ...correlation,
+      deliveryId: 'delivery-queue-retry',
+      messageId: 'message-queue-retry',
+      senderOpenId: 'ou_queue_failed',
+      acceptedAt: 4,
+    })).resolves.toMatchObject({ duplicate: false, record: { status: 'accepted' } })
+    expect(repository.getLocus(locus.id)?.busy).toBe(true)
+    await harness.close()
+  })
+
+  it('rejects duplicate inbox message ids and fails closed on corrupt multi-match lookup', async () => {
+    const harness = await openPetHarness()
+    const repository = new DurableLocusRepository(harness.domain)
+    const locus = await repository.putLocus(record())
+    const correlation = {
+      endpoint: locus.endpoint,
+      locusId: locus.id,
+      generation: locus.generation,
+      childSessionId: locus.childSessionId as string,
+    }
+    const first = await repository.acceptDelivery({
+      ...correlation, deliveryId: 'delivery-inbox-first', messageId: 'message-inbox-first',
+      senderOpenId: 'ou_inbox', acceptedAt: 2,
+    })
+    const second = await repository.acceptDelivery({
+      ...correlation, deliveryId: 'delivery-inbox-second', messageId: 'message-inbox-second',
+      senderOpenId: 'ou_inbox', acceptedAt: 3,
+    })
+    await repository.bindQueued({
+      deliveryId: first.record.deliveryId, correlation,
+      executionId: 'execution-inbox-first', inboxMessageId: 'inbox-duplicate', queuedAt: 4,
+    })
+    await expect(repository.bindQueued({
+      deliveryId: second.record.deliveryId, correlation,
+      executionId: 'execution-inbox-second', inboxMessageId: 'inbox-duplicate', queuedAt: 5,
+    })).rejects.toMatchObject({ code: 'INVALID_LOCUS' })
+    expect(repository.getDelivery(second.record.deliveryId)?.status).toBe('accepted')
+
+    const corrupt = {
+      ...first.record,
+      deliveryId: 'delivery-inbox-corrupt',
+      messageId: 'message-inbox-corrupt',
+      sequence: 99,
+      status: 'queued' as const,
+      executionId: 'execution-inbox-corrupt',
+      inboxMessageId: 'inbox-duplicate',
+      queuedAt: 4,
+    }
+    await harness.domain.table('locus_deliveries').put(corrupt.deliveryId, corrupt)
+    expect(() => repository.findDeliveryByInboxMessageId('inbox-duplicate')).toThrowError(
+      expect.objectContaining({ code: 'INVALID_LOCUS' }),
+    )
+    await harness.close()
+  })
+
+  it('restores multiple pending proof-free Deliveries and preserves the busy fence', async () => {
     const harness = await openPetHarness()
     const repository = new DurableLocusRepository(harness.domain)
     const locus = await repository.putLocus(record())
@@ -310,7 +457,19 @@ describe('durable unified locus repository', () => {
       code: 'INVALID_LOCUS',
     })
     const restored = await repository.putDelivery(pending)
+    const secondPending = {
+      ...pending,
+      deliveryId: 'delivery-restore-second',
+      messageId: 'message-restore-second',
+      sequence: 2,
+      feedbackTarget: { chatId: locus.endpoint.chatId, messageId: 'message-restore-second' },
+    }
+    const secondRestored = await repository.putDelivery(secondPending)
     expect(restored).toEqual(pending)
+    expect(secondRestored).toEqual(secondPending)
+    expect(repository.listDeliveries(locus.id).map(item => item.deliveryId)).toEqual([
+      'delivery-restore', 'delivery-restore-second',
+    ])
     expect(repository.getLocus(locus.id)).toMatchObject({ busy: true })
     await expect(repository.putDelivery({ ...pending, status: 'queued' as const, queuedAt: 1, executionId: undefined })).rejects.toMatchObject({
       code: 'INVALID_LOCUS',
@@ -505,7 +664,7 @@ describe('durable unified locus repository', () => {
     await reopened.close()
   })
 
-  it('reopens an accepted Delivery, binds exact execution/turn proof, and settles it', async () => {
+  it('fails an accepted-but-unqueued Delivery on restart without replay and clears busy', async () => {
     const medium = emptyMedium()
     const first = await openPetHarness(medium)
     const firstRepository = new DurableLocusRepository(first.domain)
@@ -523,37 +682,200 @@ describe('durable unified locus repository', () => {
     await first.close()
 
     const second = await reopen(medium)
+    enableAtomicTransactions(second)
     const restarted = new DurableLocusRepository(second.domain)
     const report = await restarted.reconcileStartup({ now: 3 })
-    expect(report.pendingDeliveries.map(item => item.deliveryId)).toEqual(['delivery-reopen'])
-    const restored = await restarted.putDelivery(accepted.record)
-    expect(restored.status).toBe('accepted')
+    expect(report.pendingDeliveries).toEqual([])
+    expect(report.failedDeliveries).toEqual([
+      expect.objectContaining({
+        deliveryId: accepted.record.deliveryId,
+        status: 'failed',
+        startupDisposition: 'unqueued',
+      }),
+    ])
+    expect(restarted.getDelivery(accepted.record.deliveryId)).toMatchObject({
+      status: 'failed',
+      startupDisposition: 'unqueued',
+    })
+    expect(restarted.getLocus(locus.id)).toMatchObject({ busy: false })
+    await second.close()
+  })
+
+  it('retains a queued Delivery only with exact live-turn proof across restart', async () => {
+    const medium = emptyMedium()
+    const first = await openPetHarness(medium)
+    const repository = new DurableLocusRepository(first.domain)
+    const locus = await repository.putLocus(record())
+    const accepted = await repository.acceptDelivery({
+      endpoint: locus.endpoint,
+      locusId: locus.id,
+      generation: locus.generation,
+      childSessionId: locus.childSessionId as string,
+      messageId: 'message-live',
+      deliveryId: 'delivery-live',
+      senderOpenId: 'ou_live',
+      acceptedAt: 2,
+    })
     const correlation = {
       endpoint: locus.endpoint,
       locusId: locus.id,
       generation: locus.generation,
       childSessionId: locus.childSessionId as string,
     }
-    const queued = await restarted.bindQueued({ deliveryId: restored.deliveryId, correlation, executionId: 'execution-reopen', queuedAt: 4 })
-    expect(queued?.status).toBe('queued')
-    const running = await restarted.bindTurn({
-      deliveryId: restored.deliveryId,
+    await repository.bindQueued({
+      deliveryId: accepted.record.deliveryId,
       correlation,
-      executionId: 'execution-reopen',
-      turnId: 'turn-reopen',
-      startedAt: 5,
+      executionId: 'execution-live',
+      inboxMessageId: 'inbox-live',
+      queuedAt: 3,
     })
-    expect(running?.status).toBe('running')
-    const settled = await restarted.settleByTurn({
-      deliveryId: restored.deliveryId,
-      executionId: 'execution-reopen',
-      correlation: { ...correlation, turnId: 'turn-reopen' },
-      outcome: 'settled',
-      settledAt: 6,
+    await first.close()
+
+    const second = await reopen(medium)
+    enableAtomicTransactions(second)
+    const restarted = new DurableLocusRepository(second.domain)
+    const report = await restarted.reconcileStartup({
+      now: 4,
+      deliveryProof: async delivery => ({
+        deliveryId: delivery.deliveryId,
+        executionId: 'execution-live',
+        turnId: 'turn-live',
+        state: 'running',
+      }),
     })
-    expect(settled.record?.status).toBe('settled')
-    expect(restarted.getLocus(locus.id)).toMatchObject({ busy: false })
+    expect(report.failedDeliveries).toEqual([])
+    expect(report.retainedDeliveries).toEqual([
+      expect.objectContaining({ deliveryId: 'delivery-live', status: 'running', turnId: 'turn-live' }),
+    ])
+    expect(restarted.getLocus(locus.id)?.busy).toBe(true)
+
+    const repeated = await restarted.reconcileStartup({
+      now: 5,
+      deliveryProof: async delivery => ({
+        deliveryId: delivery.deliveryId,
+        executionId: 'execution-live',
+        turnId: 'turn-live',
+        state: 'running',
+      }),
+    })
+    expect(repeated.retainedDeliveries).toHaveLength(1)
+    expect(restarted.getDelivery('delivery-live')).toMatchObject({ status: 'running', turnId: 'turn-live' })
     await second.close()
+  })
+
+  it('keeps queued work busy as explicit manual debt when termination is unavailable', async () => {
+    const medium = emptyMedium()
+    const first = await openPetHarness(medium)
+    const repository = new DurableLocusRepository(first.domain)
+    const locus = await repository.putLocus(record())
+    const accepted = await repository.acceptDelivery({
+      endpoint: locus.endpoint,
+      locusId: locus.id,
+      generation: locus.generation,
+      childSessionId: locus.childSessionId as string,
+      messageId: 'message-manual',
+      deliveryId: 'delivery-manual',
+      senderOpenId: 'ou_manual',
+      acceptedAt: 2,
+    })
+    await repository.bindQueued({
+      deliveryId: accepted.record.deliveryId,
+      correlation: {
+        endpoint: locus.endpoint, locusId: locus.id, generation: locus.generation,
+        childSessionId: locus.childSessionId as string,
+      },
+      executionId: 'execution-manual',
+      inboxMessageId: 'inbox-manual',
+      queuedAt: 3,
+    })
+    await first.close()
+
+    const second = await reopen(medium)
+    enableAtomicTransactions(second)
+    const restarted = new DurableLocusRepository(second.domain)
+    const report = await restarted.reconcileStartup({ now: 4 })
+    expect(report.manualDeliveries).toEqual([
+      expect.objectContaining({ deliveryId: 'delivery-manual', status: 'queued' }),
+    ])
+    expect(restarted.getDelivery('delivery-manual')?.startupRecoveryDebt).toContain('manual recovery')
+    expect(restarted.getLocus(locus.id)?.busy).toBe(true)
+    await second.close()
+  })
+
+  it('fails queued work after exact termination, invalidates the locus, and never replays', async () => {
+    const medium = emptyMedium()
+    const first = await openPetHarness(medium)
+    const repository = new DurableLocusRepository(first.domain)
+    const locus = await repository.putLocus(record())
+    const accepted = await repository.acceptDelivery({
+      endpoint: locus.endpoint,
+      locusId: locus.id,
+      generation: locus.generation,
+      childSessionId: locus.childSessionId as string,
+      messageId: 'message-terminated',
+      deliveryId: 'delivery-terminated',
+      senderOpenId: 'ou_terminated',
+      acceptedAt: 2,
+    })
+    await repository.bindQueued({
+      deliveryId: accepted.record.deliveryId,
+      correlation: {
+        endpoint: locus.endpoint, locusId: locus.id, generation: locus.generation,
+        childSessionId: locus.childSessionId as string,
+      },
+      executionId: 'execution-terminated',
+      inboxMessageId: 'inbox-terminated',
+      queuedAt: 3,
+    })
+    await first.close()
+
+    const second = await reopen(medium)
+    enableAtomicTransactions(second)
+    const restarted = new DurableLocusRepository(second.domain)
+    const terminated: string[] = []
+    const report = await restarted.reconcileStartup({
+      now: 4,
+      terminateDelivery: async delivery => { terminated.push(delivery.deliveryId) },
+    })
+    expect(terminated).toEqual(['delivery-terminated'])
+    expect(report.failedDeliveries).toEqual([
+      expect.objectContaining({
+        deliveryId: 'delivery-terminated', status: 'failed',
+        startupDisposition: 'execution-unrecoverable',
+      }),
+    ])
+    expect(restarted.getLocus(locus.id)).toMatchObject({ state: 'invalid', busy: false })
+    const duplicate = await restarted.acceptDelivery({
+      endpoint: locus.endpoint,
+      locusId: locus.id,
+      generation: locus.generation,
+      childSessionId: locus.childSessionId as string,
+      messageId: 'message-terminated',
+      senderOpenId: 'ou_terminated',
+      acceptedAt: 5,
+    })
+    expect(duplicate).toMatchObject({ duplicate: true, conflict: false })
+    expect(restarted.listDeliveries()).toHaveLength(1)
+    await second.close()
+
+    // The execution was queued but had not yet opened a durable turn. The
+    // startup terminal record must still pass the same repository assertion on
+    // a subsequent reopen; schema and imperative validation intentionally agree.
+    const third = await reopen(medium)
+    enableAtomicTransactions(third)
+    const reopened = new DurableLocusRepository(third.domain)
+    await expect(reopened.reconcileStartup({ now: 5 })).resolves.toMatchObject({
+      failedDeliveries: [],
+      pendingDeliveries: [],
+    })
+    expect(reopened.getDelivery('delivery-terminated')).toMatchObject({
+      status: 'failed',
+      startupDisposition: 'execution-unrecoverable',
+      executionId: 'execution-terminated',
+      inboxMessageId: 'inbox-terminated',
+    })
+    expect(reopened.getDelivery('delivery-terminated')?.turnId).toBeUndefined()
+    await third.close()
   })
 
   it('rebuilds stale indexes and reports pending work without replaying side effects', async () => {
@@ -600,16 +922,17 @@ describe('durable unified locus repository', () => {
     }
     await harness.domain.table('locus_operations').put(operation.id, operation)
 
-    const beforeDelivery = repository.getDelivery('delivery-pending')
+    enableAtomicTransactions(harness)
     const report = await repository.reconcileStartup({ now: 99 })
 
     expect(report.indexStatus).toBe('rebuilt')
     expect(report.indexChanges).toBeGreaterThanOrEqual(2)
-    expect(report.pendingDeliveries.map(item => item.deliveryId)).toEqual(['delivery-pending'])
+    expect(report.pendingDeliveries).toEqual([])
+    expect(report.failedDeliveries.map(item => item.deliveryId)).toEqual(['delivery-pending'])
     expect(report.recoverableOperations.map(item => item.id)).toContain('operation-pending')
     expect(report.sideEffectsReplayed).toBe(false)
-    expect(repository.getDelivery('delivery-pending')).toEqual(beforeDelivery)
-    expect(repository.getDelivery('delivery-pending')?.status).toBe('accepted')
+    expect(repository.getDelivery('delivery-pending')?.status).toBe('failed')
+    expect(repository.getDelivery('delivery-pending')?.startupDisposition).toBe('unqueued')
     expect(repository.getDelivery('delivery-pending')?.rootMessageId).toBe('root-pending')
     expect(repository.getDelivery('delivery-pending')?.replyTarget).toEqual({
       chatId: locus.endpoint.chatId,
@@ -617,7 +940,7 @@ describe('durable unified locus repository', () => {
       rootMessageId: 'root-pending',
     })
     expect(repository.getDelivery('delivery-pending')?.replyToMessageId).toBe('reply-parent')
-    expect(repository.getCurrentLocus(locus.endpoint)).toMatchObject({ ...locus, busy: true, updatedAt: 4 })
+    expect(repository.getCurrentLocus(locus.endpoint)).toMatchObject({ ...locus, busy: false, updatedAt: 99 })
     expect(indexes.get(endpointIndexKey(locus.endpoint))?.locusIds).toEqual([locus.id])
     expect(indexes.get(parentIndexKey(locus.parentSessionId))?.locusIds).toEqual([locus.id])
     await harness.close()

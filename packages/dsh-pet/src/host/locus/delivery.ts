@@ -107,6 +107,20 @@ export interface DeliveryRecord extends DeliveryCorrelation {
   readonly turnId?: string
   /** Host execution token, when an exact queue binding has been proven. */
   readonly executionId?: string
+  /** Exact DSH inbox message id returned by queueing; distinct from platform messageId. */
+  readonly inboxMessageId?: string
+  /**
+   * Fail-closed restart disposition when safe continuation cannot be proven.
+   * This records a Host decision without fabricating execution/turn proof.
+   */
+  readonly startupDisposition?: 'unqueued' | 'execution-unrecoverable'
+  /** Explicit durable debt when the old child execution could not be stopped. */
+  readonly startupRecoveryDebt?: string
+  /**
+   * Trusted Host disposition for a definitive refusal before any child turn.
+   * It is terminal evidence, not fabricated inbox/execution/turn proof.
+   */
+  readonly dispatchFailure?: 'not-queued' | 'queued-not-started'
   /** Monotonic acceptance order, used for FIFO settlement. */
   readonly sequence: number
   readonly status: DeliveryStatus
@@ -145,6 +159,7 @@ export type DeliveryMutationReason =
   | 'invalid-transition'
   | 'execution-proof-required'
   | 'no-pending-delivery'
+  | 'inbox-message-conflict'
 
 /** Result of a progress or settlement operation. */
 export interface DeliveryMutation {
@@ -277,7 +292,13 @@ export function queueDelivery(
   executionId?: string,
 ): DeliveryMutation {
   if (executionId === undefined) return unchanged(state, 'execution-proof-required', state.byDeliveryId[deliveryId])
-  return bindQueued(state, { ...correlation, deliveryId, executionId, ...(queuedAt !== undefined ? { queuedAt } : {}) })
+  return bindQueued(state, {
+    ...correlation,
+    deliveryId,
+    executionId,
+    inboxMessageId: executionId,
+    ...(queuedAt !== undefined ? { queuedAt } : {}),
+  })
 }
 
 /** @deprecated Use bindTurn with a queued execution token. */
@@ -318,6 +339,8 @@ export interface DeliveryTransitionInput {
 export interface DeliveryQueuedBindingInput extends DeliveryCorrelation {
   readonly deliveryId: string
   readonly executionId: string
+  /** Exact message id assigned by the DSH inbox queue. */
+  readonly inboxMessageId: string
   /** Optional caller-owned timestamp for the queued transition. */
   readonly queuedAt?: number
 }
@@ -337,6 +360,7 @@ export function bindQueued(
   assertIdentifier(input.deliveryId, 'deliveryId')
   validateCorrelation(input)
   assertIdentifier(input.executionId, 'executionId')
+  assertIdentifier(input.inboxMessageId, 'inboxMessageId')
   validateAt(input.queuedAt, 'queuedAt')
 
   const current = state.byDeliveryId[input.deliveryId]
@@ -345,6 +369,10 @@ export function bindQueued(
   if (current.executionId !== undefined && current.executionId !== input.executionId) {
     return unchanged(state, 'correlation-mismatch', current)
   }
+  const inboxMatches = Object.values(state.byDeliveryId).filter(record =>
+    record.deliveryId !== current.deliveryId && record.inboxMessageId === input.inboxMessageId,
+  )
+  if (inboxMatches.length > 0) return unchanged(state, 'inbox-message-conflict', current)
   if (TERMINAL_STATUSES.has(current.status)) return unchanged(state, 'already-terminal', current)
   if (current.status === 'queued' && current.executionId === input.executionId) {
     return unchanged(state, 'already-in-state', current)
@@ -357,6 +385,7 @@ export function bindQueued(
   return changed(state, freezeRecord({
     ...current,
     executionId: input.executionId,
+    inboxMessageId: input.inboxMessageId,
     status: 'queued',
     ...(input.queuedAt !== undefined ? { queuedAt: input.queuedAt } : {}),
   }))
@@ -412,6 +441,7 @@ export function bindDeliveryTurn(
     generation: input.generation,
     childSessionId: input.childSessionId,
     executionId: input.executionId,
+    inboxMessageId: input.executionId,
   })
   if (queued.changed || queued.reason === 'already-in-state') {
     return bindTurn(queued.state, input)
@@ -443,6 +473,7 @@ export function transitionDelivery(
       deliveryId: input.deliveryId,
       ...(input.correlation as DeliveryCorrelation),
       executionId: input.executionId,
+      inboxMessageId: input.executionId,
       ...(input.at !== undefined ? { queuedAt: input.at } : {}),
     })
   }

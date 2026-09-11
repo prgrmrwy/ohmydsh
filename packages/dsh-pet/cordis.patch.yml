@@ -58,3 +58,6 @@
         # `src/index.ts` instead, so an absent registry simply means no
         # `DSH_PET_*` injection.
         - webServer
+        # host-webserver deliberately has no Harness auth concepts. Pet's raw
+        # management routes must pass Connection's signed browser-cookie fence.
+        - connection

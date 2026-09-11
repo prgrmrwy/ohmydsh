@@ -302,6 +302,62 @@ describe('generic locus child adapter', () => {
     expect(adopted.activeChild).toEqual({ parentSessionId: PARENT_ID, childSessionId: CHILD_ID })
   })
 
+  it('uses the continuation owner to expose only the exact adopted child Session', async () => {
+    const liveParent = parent()
+    const session = { id: CHILD_ID, header: { parentSession: PARENT_ID } }
+    const access = vi.fn(async (
+      spec: { parent: LocusLiveParent; childId: string },
+      operation: (candidate: unknown) => unknown,
+    ) => operation(session))
+    const adapter = createLocusChildAdapter({
+      parent: parentPort({ resident: liveParent }),
+      subagent: {
+        ...subagentPort(),
+        supportsLiveContinuableChildSession: true,
+        withLiveContinuableChildSession: access,
+      },
+      inbox: inboxPort(),
+      proof: {
+        findChild: vi.fn(async (parentSessionId, childSessionId) => ({ parentSessionId, childSessionId })),
+      },
+    })
+    const identity = { parentSessionId: PARENT_ID, childSessionId: CHILD_ID }
+    await adapter.adoptChild(identity)
+
+    await expect(adapter.withChildSession({
+      identity,
+      operation: candidate => (candidate as typeof session).id,
+    })).resolves.toEqual({ ok: true, value: CHILD_ID, identity })
+    expect(access).toHaveBeenCalledWith(
+      { parent: liveParent, childId: CHILD_ID, signal: expect.any(AbortSignal) },
+      expect.any(Function),
+    )
+
+    await expect(adapter.withChildSession({
+      identity: { parentSessionId: 'other-parent', childSessionId: CHILD_ID },
+      operation: () => 'must not run',
+    })).resolves.toEqual({ ok: false, reason: 'child-identity-mismatch' })
+    expect(access).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps child Session access unavailable without the literal runtime marker', async () => {
+    const access = vi.fn(async () => 'unsafe')
+    const adapter = createLocusChildAdapter({
+      parent: parentPort({ resident: parent() }),
+      subagent: { ...subagentPort(), withLiveContinuableChildSession: access },
+      inbox: inboxPort(),
+      proof: {
+        findChild: vi.fn(async (parentSessionId, childSessionId) => ({ parentSessionId, childSessionId })),
+      },
+    })
+    const identity = { parentSessionId: PARENT_ID, childSessionId: CHILD_ID }
+    await adapter.adoptChild(identity)
+
+    await expect(adapter.withChildSession({ identity, operation: () => 'unsafe' }))
+      .resolves.toEqual({ ok: false, reason: 'child-session-access-unsupported' })
+    expect(access).not.toHaveBeenCalled()
+  })
+
   it('rejects a proof that belongs to another parent or cannot find the child', async () => {
     const adapter = createLocusChildAdapter({
       parent: parentPort({ resident: parent() }),
@@ -666,6 +722,7 @@ describe('probed host child seams', () => {
     /** Literal capability marker from the runtime actually loaded. */
     readonly supportsSettlementNotice?: boolean
     readonly supportsIdleContinuableCreate?: boolean
+    readonly supportsLiveContinuableChildSession?: boolean
   } = {}) {
     const services: Record<string, unknown> = {
       // A resident parent, so a creation test exercises the capability gate
@@ -674,12 +731,19 @@ describe('probed host child seams', () => {
       subagents: {
         startContinuable: async () => ({ childId: CHILD_ID }),
         createIdleContinuable: async (spec: { childId: string }) => ({ childId: spec.childId }),
+        withLiveContinuableChildSession: async (
+          _spec: unknown,
+          operation: (session: unknown) => unknown,
+        ) => operation({ id: CHILD_ID }),
         listChildren: async () => overrides.children ?? [],
         ...(overrides.supportsSettlementNotice === true
           ? { supportsSettlementNotice: true }
           : {}),
         ...(overrides.supportsIdleContinuableCreate === true
           ? { supportsIdleContinuableCreate: true }
+          : {}),
+        ...(overrides.supportsLiveContinuableChildSession === true
+          ? { supportsLiveContinuableChildSession: true }
           : {}),
         [LOCUS_QUEUE_PROMPT_SYMBOL]: async () => 'message-1',
       },
@@ -719,6 +783,20 @@ describe('probed host child seams', () => {
     await expect(bare.available
       ? bare.ports.parent.resume({ resumeSessionId: PARENT_ID })
       : undefined).resolves.toBeUndefined()
+  })
+
+  it('adapts continuation-owned child Session access only with its runtime marker', async () => {
+    const marked = probeLocusChildPorts(hostCtx({ supportsLiveContinuableChildSession: true }))
+    expect(marked.available && marked.ports.subagent.supportsLiveContinuableChildSession).toBe(true)
+    await expect(marked.available
+      ? marked.ports.subagent.withLiveContinuableChildSession?.(
+        { parent: parent(), childId: CHILD_ID, signal: new AbortController().signal },
+        session => (session as { id: string }).id,
+      )
+      : undefined).resolves.toBe(CHILD_ID)
+
+    const unmarked = probeLocusChildPorts(hostCtx())
+    expect(unmarked.available && unmarked.ports.subagent.supportsLiveContinuableChildSession).toBeUndefined()
   })
 
   it('creates a child once the loaded runtime proves it can suppress the parent report', async () => {

@@ -8,6 +8,7 @@
  */
 
 import type { LocusMutationFence, LocusPermissionMode, LocusRecord } from './aggregate.js'
+import { verifyLocusLivePolicy, type LocusLiveSandboxPolicy } from './policy-verification.js'
 
 export type LocusSandboxMode = 'read-only' | 'workspace-write'
 
@@ -80,8 +81,8 @@ export interface LocusPermissionSessionPort {
 export interface LocusPermissionPolicyPort {
   /** Apply only `read-only` or `workspace-write`; no wider mode is representable. */
   apply(session: LocusPermissionSession, mode: LocusSandboxMode): Promise<void> | void
-  /** Return the effective Host mode for this exact session. */
-  resolve(session: LocusPermissionSession): Promise<string | undefined> | string | undefined
+  /** Return the complete effective Host policy for this exact live session. */
+  resolve(session: LocusPermissionSession): Promise<LocusLiveSandboxPolicy | undefined> | LocusLiveSandboxPolicy | undefined
 }
 
 export interface LocusPermissionMutationRequest {
@@ -97,12 +98,6 @@ export interface LocusPermissionMutationPort {
 
 function modeFor(permission: LocusPermissionMode): LocusSandboxMode {
   return permission === 'write' ? 'workspace-write' : 'read-only'
-}
-
-function effectivePermission(mode: string | undefined): LocusPermissionMode | undefined {
-  if (mode === 'read-only') return 'read'
-  if (mode === 'workspace-write') return 'write'
-  return undefined
 }
 
 function exactCurrent(
@@ -132,14 +127,15 @@ function exactCurrent(
 async function restorePolicy(
   policy: LocusPermissionPolicyPort,
   session: LocusPermissionSession,
-  previous: LocusPermissionMode,
+  locus: LocusRecord,
   cause: unknown,
   releaseFence: () => Promise<void>,
 ): Promise<never> {
+  const previous = locus.permission.effective
   try {
     await policy.apply(session, modeFor(previous))
-    const restored = effectivePermission(await policy.resolve(session))
-    if (restored !== previous) throw new Error(`Host 回读为 ${String(restored)}`)
+    const restored = verifyLocusLivePolicy(locus, await policy.resolve(session))
+    if (!restored.ok) throw new Error(`Host 回读未恢复：${restored.reason}`)
   } catch (rollbackError) {
     // Keep the durable fence closed when the effective sandbox is unknown.
     throw new LocusPermissionMutationError(
@@ -246,30 +242,34 @@ export function createLocusPermissionMutation(options: {
         )
       }
 
-      let verified: LocusPermissionMode | undefined
+      let verification
       try {
-        verified = effectivePermission(await policy.resolve(session))
+        verification = verifyLocusLivePolicy(
+          { ...previous, permission: { ...previous.permission, desired: request.mode, effective: request.mode } },
+          await policy.resolve(session),
+        )
       } catch (error) {
         return restorePolicy(
           policy,
           session,
-          previous.permission.effective,
+          previous,
           new LocusPermissionMutationError('POLICY_VERIFY_FAILED', 'sandbox 回读失败，权限未修改。', error),
           releaseFence,
         )
       }
-      if (verified !== request.mode) {
+      if (!verification.ok) {
         const error = request.mode === 'write'
           ? new LocusPermissionMutationError(
             'WRITE_UNSUPPORTED',
-            '当前 Host 无法为该工作根核验 workspace-write；已维持原 effective/read，未扩大权限。',
+            `${verification.diagnostic} 已维持原 effective/read，未扩大权限。`,
           )
           : new LocusPermissionMutationError(
             'POLICY_VERIFY_FAILED',
-            'Host 未核验 read-only 生效；权限未修改。',
+            verification.diagnostic,
           )
-        return restorePolicy(policy, session, previous.permission.effective, error, releaseFence)
+        return restorePolicy(policy, session, previous, error, releaseFence)
       }
+      const verified = verification.effective
 
       const verifiedAt = now()
       try {
@@ -294,7 +294,7 @@ export function createLocusPermissionMutation(options: {
         return restorePolicy(
           policy,
           session,
-          previous.permission.effective,
+          previous,
           new LocusPermissionMutationError('PERSISTENCE_FAILED', 'sandbox 已核验但持久化失败；已尝试恢复原策略。', error),
           releaseFence,
         )

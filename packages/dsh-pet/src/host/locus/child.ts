@@ -80,6 +80,21 @@ export interface LocusSubagentPort {
   /** Literal proof that idle creation is implemented by this runtime. */
   readonly supportsIdleContinuableCreate?: boolean
   /**
+   * Run one operation against the exact continuation-owned child Session.
+   * The runtime validates both exact live parent identity and durable child
+   * lineage; generic Session routing intentionally cannot resolve this child.
+   */
+  withLiveContinuableChildSession?<T>(
+    spec: {
+      readonly parent: LocusLiveParent
+      readonly childId: string
+      readonly signal: AbortSignal
+    },
+    operation: (session: unknown) => T | Promise<T>,
+  ): Promise<T>
+  /** Literal proof that exact child Session access is implemented. */
+  readonly supportsLiveContinuableChildSession?: boolean
+  /**
    * Whether this Host runtime honors `settlementNotice`. Absent means unknown,
    * and an unknown capability is treated as unsupported: a locus child must
    * not be established when its conclusions would be pushed into the main
@@ -235,6 +250,8 @@ export type LocusChildFailureReason =
   | 'child-parent-mismatch'
   | 'child-proof-unavailable'
   | 'child-proof-failed'
+  | 'child-session-access-unsupported'
+  | 'child-session-access-failed'
 
 /** A fail-closed diagnostic returned by an adapter operation. */
 export interface LocusChildFailure {
@@ -259,6 +276,11 @@ export type LocusChildCreateResult =
 /** Result of accepting one host-authored prompt into an active child inbox. */
 export type LocusChildQueueResult =
   | { readonly ok: true; readonly messageId: string; readonly identity: LocusChildIdentity }
+  | LocusChildFailure
+
+/** Result of one operation on an exact continuation-owned child Session. */
+export type LocusChildSessionResult<T> =
+  | { readonly ok: true; readonly value: T; readonly identity: LocusChildIdentity }
   | LocusChildFailure
 
 /** Result of compensating one active child. */
@@ -935,6 +957,68 @@ export class LocusChildAdapter {
   queueChildPrompt = this.queuePrompt.bind(this)
 
   /**
+   * Run one Host operation against this adapter's exact continuation-owned
+   * child Session. Parent resolution supplies the current exact live parent;
+   * the runtime owner then validates direct lineage and the retained child
+   * Agent identity before exposing the Session to the callback.
+   */
+  async withChildSession<T>(input: {
+    readonly identity: LocusChildIdentity
+    readonly operation: (session: unknown) => T | Promise<T>
+    readonly signal?: AbortSignal
+  }): Promise<LocusChildSessionResult<T>> {
+    const signal = input.signal ?? EMPTY_SIGNAL
+    if (signal.aborted) return { ok: false, reason: 'aborted' }
+    return this.enqueueLifecycleMutation(() => this.withChildSessionLocked(input, signal))
+  }
+
+  private async withChildSessionLocked<T>(
+    input: {
+      readonly identity: LocusChildIdentity
+      readonly operation: (session: unknown) => T | Promise<T>
+    },
+    signal: AbortSignal,
+  ): Promise<LocusChildSessionResult<T>> {
+    if (this.disposed) return { ok: false, reason: 'adapter-disposed' }
+    const active = this.active
+    if (active === undefined) return { ok: false, reason: 'no-active-child' }
+    const identity = { parentSessionId: active.parentSessionId, childSessionId: active.childSessionId }
+    if (!sameLocusChildIdentity(input.identity, identity)) {
+      return { ok: false, reason: 'child-identity-mismatch' }
+    }
+    const access = this.ports.subagent.withLiveContinuableChildSession as
+      | (<R>(
+          spec: { parent: LocusLiveParent; childId: string; signal: AbortSignal },
+          operation: (session: unknown) => R | Promise<R>,
+        ) => Promise<R>)
+      | undefined
+    if (
+      this.ports.subagent.supportsLiveContinuableChildSession !== true
+      || typeof access !== 'function'
+    ) return { ok: false, reason: 'child-session-access-unsupported' }
+
+    const parentResult = await this.resolveParent(active.parentSessionId, signal)
+    if (!parentResult.ok) return parentResult
+    if (
+      this.disposed
+      || this.active === undefined
+      || !sameLocusChildIdentity(this.active, active)
+    ) return { ok: false, reason: this.disposed ? 'adapter-disposed' : 'child-identity-mismatch' }
+    try {
+      const value = await access.call(
+        this.ports.subagent,
+        { parent: parentResult.parent, childId: active.childSessionId, signal },
+        input.operation,
+      ) as T
+      if (signal.aborted) return { ok: false, reason: 'aborted' }
+      return { ok: true, value, identity }
+    } catch {
+      if (signal.aborted) return { ok: false, reason: 'aborted' }
+      return { ok: false, reason: 'child-session-access-failed' }
+    }
+  }
+
+  /**
    * Compensate the currently active child, if its identity still matches.
    *
    * Compensation is explicit because a queue refusal is not proof that a child
@@ -1200,11 +1284,13 @@ export function probeLocusChildPorts(
   const subagentRecord = subagentService as {
     startContinuable?: unknown
     createIdleContinuable?: unknown
+    withLiveContinuableChildSession?: unknown
     drainContinuableChildren?: unknown
     listChildren?: unknown
     /** Literal markers published only by a runtime that owns the behavior. */
     supportsSettlementNotice?: unknown
     supportsIdleContinuableCreate?: unknown
+    supportsLiveContinuableChildSession?: unknown
   }
   if (typeof subagentRecord.startContinuable !== 'function') {
     return { available: false, diagnostic: 'subagent-service-unavailable' }
@@ -1257,6 +1343,22 @@ export function probeLocusChildPorts(
       : {}),
     ...(subagentRecord.supportsIdleContinuableCreate === true
       ? { supportsIdleContinuableCreate: true }
+      : {}),
+    ...(typeof subagentRecord.withLiveContinuableChildSession === 'function'
+      ? {
+        withLiveContinuableChildSession: <T>(
+          spec: unknown,
+          operation: (session: unknown) => T | Promise<T>,
+        ) => Promise.resolve(
+          (subagentRecord.withLiveContinuableChildSession as (
+            spec: unknown,
+            operation: (session: unknown) => T | Promise<T>,
+          ) => T | Promise<T>).call(subagentService, spec, operation),
+        ),
+      }
+      : {}),
+    ...(subagentRecord.supportsLiveContinuableChildSession === true
+      ? { supportsLiveContinuableChildSession: true }
       : {}),
     // Accept either an explicit composition proof (tests/older adapters) or
     // the literal marker on the runtime actually loaded by the Host. Never

@@ -48,7 +48,7 @@ describe('message to execution diagnostic chain', () => {
       delivery({ deliveryId: 'd1', sequence: 1, status: 'accepted' }),
       delivery({
         deliveryId: 'd2', sequence: 2, status: 'queued',
-        messageId: 'om_second', executionId: 'exec-2', queuedAt: 20,
+        messageId: 'om_second', executionId: 'exec-2', inboxMessageId: 'inbox-exec-2', queuedAt: 20,
       }),
       delivery({
         deliveryId: 'd3', sequence: 3, status: 'settled',
@@ -97,7 +97,7 @@ describe('message to execution diagnostic chain', () => {
 
   it('tells the owner what to check for a queued but unclaimed message', () => {
     const report = buildLocusDiagnostics(locus(), [
-      delivery({ status: 'queued', executionId: 'exec-1', queuedAt: 20 }),
+      delivery({ status: 'queued', executionId: 'exec-1', inboxMessageId: 'inbox-exec-1', queuedAt: 20 }),
     ])
 
     // This is the case that used to look like "the message vanished".

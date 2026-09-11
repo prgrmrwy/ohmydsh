@@ -133,7 +133,7 @@ describe('a shared main session does not merge sibling children', () => {
         correlation: {
           endpoint: ALPHA, locusId: 'locus-alpha', generation: 1, childSessionId: 'child-alpha',
         },
-        executionId: 'exec-alpha',
+        executionId: 'exec-alpha', inboxMessageId: 'inbox-exec-alpha',
         queuedAt: 3,
       })
 

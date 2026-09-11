@@ -6,8 +6,9 @@
  * arbitrary filesystem path outside the dedicated validated import operation,
  * and no channel destination pass-through.
  *
- * Trust model mirrors the audited Worktree Session seam: loopback host plus a
- * same-origin check, both failing closed.
+ * Trust model has two layers: DSH's official Connection fence proves the
+ * persistent browser session before dispatch, then Pet independently requires
+ * a loopback Host plus same-origin browser markers. Both fail closed.
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -18,6 +19,14 @@ import { MAX_REQUEST_BODY_BYTES } from '../wire.js'
 export interface RouteRegistration {
   readonly path: string
   readonly handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>
+}
+
+/** Official DSH Connection verdict for another Web route. */
+export type BrowserAuthRejection = 401 | 403 | undefined
+
+/** Minimal Connection auth surface required by Pet's raw HTTP routes. */
+export interface BrowserAuthFence {
+  requestRejection(req: IncomingMessage): BrowserAuthRejection
 }
 
 /**
@@ -34,6 +43,51 @@ export function sendJson(res: ServerResponse, status: number, body: unknown): vo
     'content-length': Buffer.byteLength(encoded),
   })
   res.end(encoded)
+}
+
+/**
+ * Apply DSH's browser-session fence before a raw WebServer route dispatches.
+ *
+ * `requestRejection` is the same official seam used by API Gateway upgrade
+ * routes in DSH 0.1.2-rc.1. Pet keeps the response deliberately minimal and
+ * does not expose whether an exact management route exists.
+ * @param fence - Active Host Connection service.
+ * @param req - Incoming request.
+ * @param res - Response owned on rejection.
+ * @returns true only when the signed, authority-bound browser cookie is valid.
+ */
+export function authorizeBrowserRequest(
+  fence: BrowserAuthFence,
+  req: IncomingMessage,
+  res: ServerResponse,
+): boolean {
+  const rejection = fence.requestRejection(req)
+  if (rejection === undefined) return true
+  res.writeHead(rejection, {
+    'cache-control': 'no-store',
+    'content-type': 'text/plain; charset=utf-8',
+  })
+  res.end(req.method === 'HEAD' ? undefined : rejection === 401 ? 'unauthorized' : 'forbidden')
+  return false
+}
+
+/**
+ * Wrap a raw Pet route with DSH's persistent browser-session authentication.
+ * @param route - Exact Pet route registration.
+ * @param fence - Active Host Connection service.
+ * @returns a registration safe to mount directly on Host WebServer.
+ */
+export function withBrowserAuth(
+  route: RouteRegistration,
+  fence: BrowserAuthFence,
+): RouteRegistration {
+  return {
+    path: route.path,
+    handler: async (req, res): Promise<void> => {
+      if (!authorizeBrowserRequest(fence, req, res)) return
+      await route.handler(req, res)
+    },
+  }
 }
 
 /**

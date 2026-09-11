@@ -26,12 +26,12 @@ export interface LocusDeliveryTarget {
 
 /** Result of queueing one delivery turn. */
 export type LocusQueueResult =
-  | { readonly accepted: true; readonly executionId: string }
+  | { readonly accepted: true; readonly executionId: string; readonly inboxMessageId: string }
   | { readonly accepted: false; readonly reason: string }
 
 type LocusDeliveryAdapter = Pick<
   LocusChildAdapter,
-  'createChild' | 'adoptChild' | 'queuePrompt' | 'activeChild' | 'dispose'
+  'createChild' | 'adoptChild' | 'queuePrompt' | 'withChildSession' | 'activeChild' | 'dispose'
 >
 
 export interface LocusChildDeliveryPorts {
@@ -66,6 +66,11 @@ export function createLocusChildDelivery(ports: LocusChildDeliveryPorts): {
     readonly replyTarget: LocusReplyTarget
     readonly signal: AbortSignal
   }): Promise<LocusQueueResult>
+  withChildSession<T>(input: {
+    readonly identity: LocusChildIdentity
+    readonly operation: (session: unknown) => T | Promise<T>
+    readonly signal?: AbortSignal
+  }): Promise<{ readonly ok: true; readonly value: T } | { readonly ok: false; readonly reason: string }>
   dispose(): void
 } {
   if ((ports.adapter === undefined) === (ports.createAdapter === undefined)) {
@@ -133,9 +138,22 @@ export function createLocusChildDelivery(ports: LocusChildDeliveryPorts): {
         ports.log?.(queued.reason)
         return { accepted: false, reason: queued.reason }
       }
-      // The controller armed this token before queueing; returning it verbatim
-      // is what lets the observer bind the exact execution later.
-      return { accepted: true, executionId: input.executionId }
+      // Keep both identities: executionId is controller-generated, while this
+      // queue-assigned messageId is what `agent/inbox/claimed` later emits.
+      return {
+        accepted: true,
+        executionId: input.executionId,
+        inboxMessageId: queued.messageId,
+      }
+    },
+
+    async withChildSession(input) {
+      const adapter = adapters.get(input.identity.childSessionId)
+      if (adapter === undefined) return { ok: false, reason: 'child-not-adopted' }
+      const result = await adapter.withChildSession(input)
+      return result.ok
+        ? { ok: true, value: result.value }
+        : { ok: false, reason: result.reason }
     },
 
     dispose() {

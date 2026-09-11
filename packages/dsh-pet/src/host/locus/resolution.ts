@@ -32,6 +32,8 @@ export interface ResolvedActiveLocus {
   readonly childSessionId: string
   readonly workspaceId: string
   readonly state: 'active'
+  readonly permission: LocusRecord['permission']
+  readonly contextAnchor?: NonNullable<LocusRecord['contextAnchor']>
 }
 
 /** The durable reads this adapter needs. */
@@ -139,6 +141,8 @@ function toActive(record: LocusRecord): ResolvedActiveLocus {
     childSessionId: record.childSessionId,
     workspaceId: record.workspaceId,
     state: 'active',
+    permission: record.permission,
+    ...(record.contextAnchor === undefined ? {} : { contextAnchor: record.contextAnchor }),
   }
 }
 

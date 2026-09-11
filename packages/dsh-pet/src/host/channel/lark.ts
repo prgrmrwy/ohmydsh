@@ -44,8 +44,15 @@ export interface LarkChatBot {
   readonly name: string
 }
 
-/** Non-secret identity proven by `auth status --verify`. */
+/** Non-secret bot identity proven by `auth status --verify`. */
 export interface LarkBotIdentity {
+  readonly appId: string
+  readonly openId: string
+  readonly name?: string
+}
+
+/** Non-secret current-user identity proven by the fixed profile's live auth status. */
+export interface LarkUserIdentity {
   readonly appId: string
   readonly openId: string
   readonly name?: string
@@ -58,9 +65,19 @@ export interface LarkPermissionDiagnostic {
   readonly consoleUrl?: string
 }
 
-/** Result of an identity probe; failures never guess an identity. */
+/** Result of a bot identity probe; failures never guess an identity. */
 export type LarkIdentityProbe =
   | { readonly kind: 'ready'; readonly identity: LarkBotIdentity }
+  | { readonly kind: 'unavailable'; readonly diagnostic: string }
+
+/** Result of a current-user identity probe; failures never trust configuration text. */
+export type LarkUserIdentityProbe =
+  | { readonly kind: 'ready'; readonly identity: LarkUserIdentity }
+  | { readonly kind: 'unavailable'; readonly diagnostic: string }
+
+/** Current human owner proof for a default Q&A group. */
+export type LarkDefaultQaOwnerProbe =
+  | { readonly kind: 'ready'; readonly ownerId: string }
   | { readonly kind: 'unavailable'; readonly diagnostic: string }
 
 /** Result of listing bot members without collapsing permission failures. */
@@ -103,6 +120,16 @@ export interface LarkClient {
   botReady(): Promise<boolean>
   /** Prove the bound bot's non-secret identity from the selected profile. */
   botIdentity?(expectedAppId: string): Promise<LarkIdentityProbe>
+  /**
+   * Prove the currently logged-in human from this same fixed profile.
+   * Browser authentication and a configured allowlist are not identity proof.
+   */
+  userIdentity?(expectedAppId: string): Promise<LarkUserIdentityProbe>
+  /** Prove that the current human is also explicitly present in the configured allowlist. */
+  defaultQaOwner?(
+    expectedAppId: string,
+    allowOpenIds: readonly string[],
+  ): Promise<LarkDefaultQaOwnerProbe>
   /**
    * Read a chat's display name.
    *
@@ -374,6 +401,48 @@ export function parseBotIdentity(value: unknown, expectedAppId: string): LarkIde
   }
 }
 
+/** Parse the verified current-user identity from the real top-level auth status shape. */
+export function parseUserIdentity(value: unknown, expectedAppId: string): LarkUserIdentityProbe {
+  if (typeof value !== 'object' || value === null) {
+    return { kind: 'unavailable', diagnostic: 'lark-cli returned an unreadable user identity.' }
+  }
+  const record = value as Record<string, unknown>
+  const appId = record['appId']
+  const identities = record['identities']
+  const user =
+    typeof identities === 'object' && identities !== null
+      ? (identities as Record<string, unknown>)['user']
+      : undefined
+  if (typeof appId !== 'string' || appId !== expectedAppId) {
+    return { kind: 'unavailable', diagnostic: 'The Pet lark-cli profile belongs to another app.' }
+  }
+  if (typeof user !== 'object' || user === null) {
+    return { kind: 'unavailable', diagnostic: 'The Pet lark-cli profile has no current user identity.' }
+  }
+  const identity = user as Record<string, unknown>
+  if (
+    identity['status'] !== 'ready' ||
+    identity['available'] !== true ||
+    identity['tokenStatus'] !== 'ready' ||
+    record['verified'] !== true
+  ) {
+    return { kind: 'unavailable', diagnostic: 'The Pet user identity is not ready or verified.' }
+  }
+  const openId = identity['openId']
+  if (typeof openId !== 'string' || !/^ou_[A-Za-z0-9]+$/.test(openId)) {
+    return { kind: 'unavailable', diagnostic: 'The verified Pet user identity has no open_id.' }
+  }
+  const userName = identity['userName']
+  return {
+    kind: 'ready',
+    identity: {
+      appId,
+      openId,
+      ...(typeof userName === 'string' && userName.trim() !== '' ? { name: userName } : {}),
+    },
+  }
+}
+
 /** Extract only safe fields from a lark-cli permission response. */
 export function permissionDiagnostic(value: unknown): LarkPermissionDiagnostic | undefined {
   if (typeof value !== 'object' || value === null) return undefined
@@ -535,6 +604,36 @@ export function createLarkCliClient(
         }
       }
       return parseBotIdentity(result.value, expectedAppId)
+    },
+
+    async userIdentity(expectedAppId) {
+      const result = await callJson(['auth', 'status', '--json', '--verify'], binary, runner)
+      if (!result.ok) {
+        return {
+          kind: 'unavailable',
+          diagnostic: '无法验证 dsh-pet 专属 lark-cli profile 的当前用户身份。',
+        }
+      }
+      return parseUserIdentity(result.value, expectedAppId)
+    },
+
+    async defaultQaOwner(expectedAppId, allowOpenIds) {
+      const result = await callJson(['auth', 'status', '--json', '--verify'], binary, runner)
+      if (!result.ok) {
+        return {
+          kind: 'unavailable',
+          diagnostic: '无法验证 dsh-pet 专属 lark-cli profile 的当前用户身份。',
+        }
+      }
+      const user = parseUserIdentity(result.value, expectedAppId)
+      if (user.kind !== 'ready') return user
+      if (!allowOpenIds.includes(user.identity.openId)) {
+        return {
+          kind: 'unavailable',
+          diagnostic: '当前已验证飞书用户不在 Pet allowlist 中。',
+        }
+      }
+      return { kind: 'ready', ownerId: user.identity.openId }
     },
 
     async chatName(chatId) {

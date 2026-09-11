@@ -17,6 +17,13 @@ function activeRepository() {
     childSessionId: 'session-child',
     source: 'auto',
     permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
+    contextAnchor: {
+      status: 'confirmed',
+      authorization: 'authorized',
+      executionRoot: '/repo',
+      provenance: 'host:test',
+      confirmedAt: 1,
+    },
     state: 'active',
     createdAt: 1,
   })
@@ -35,7 +42,7 @@ function harness(options: {
     if (options.applyError !== undefined) throw options.applyError
     effective = options.afterApply?.(mode) ?? mode
   })
-  const resolve = vi.fn(() => effective)
+  const resolve = vi.fn(() => ({ mode: effective, workspaceRoot: '/repo' }))
   const mutation = createLocusPermissionMutation({
     repository: {
       getLocus: id => repository.getLocus(id),
@@ -95,6 +102,58 @@ describe('locus permission mutation', () => {
     expect(repository.getLocus('locus-current')?.permission).toMatchObject({ desired: 'read', effective: 'read' })
   })
 
+  it.each([
+    {
+      name: 'authorization unknown',
+      anchor: { status: 'confirmed' as const, authorization: 'unknown' as const, executionRoot: '/repo', provenance: 'owner:ou-owner' },
+      workspaceRoot: '/repo',
+    },
+    {
+      name: 'missing execution root',
+      anchor: { status: 'confirmed' as const, authorization: 'authorized' as const, provenance: 'host:test' },
+      workspaceRoot: '/repo',
+    },
+    {
+      name: 'non-Host authorized root',
+      anchor: { status: 'confirmed' as const, authorization: 'authorized' as const, executionRoot: '/repo', provenance: 'owner:ou-owner' },
+      workspaceRoot: '/repo',
+    },
+    {
+      name: 'canonical root mismatch',
+      anchor: { status: 'confirmed' as const, authorization: 'authorized' as const, executionRoot: '/repo', provenance: 'host:test' },
+      workspaceRoot: '/repo-sibling',
+    },
+  ])('rejects write for $name and rolls the live policy back to read', async ({ anchor, workspaceRoot }) => {
+    const repository = new LocusRepository()
+    repository.ensureLocus({
+      id: 'locus-current', endpoint: { chatId: 'oc_scope' }, workspaceId: 'workspace-a',
+      parentSessionId: 'session-parent', childSessionId: 'session-child', source: 'auto',
+      permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
+      contextAnchor: anchor, state: 'active', createdAt: 1,
+    })
+    let effective = 'read-only'
+    const apply = vi.fn((_session: { id: string }, mode: string) => { effective = mode })
+    const mutation = createLocusPermissionMutation({
+      repository: {
+        getLocus: id => repository.getLocus(id),
+        getCurrentLocus: endpoint => repository.getCurrent(endpoint),
+        getLocusByChild: child => repository.getLocusByChild(child),
+        beginPermissionMutation: (id, now) => repository.beginPermissionMutation(id, now),
+        abortPermissionMutation: (id, now) => repository.abortPermissionMutation(id, now),
+        commitPermissionMutation: (id, permission, now) => repository.commitPermissionMutation(id, permission, now),
+      },
+      sessions: { resolve: () => ({ id: 'session-child' }) },
+      policy: { apply, resolve: () => ({ mode: effective, workspaceRoot }) },
+      now: () => 10,
+    })
+
+    await expect(mutation.mutate({ locusId: 'locus-current', actorId: 'ou-owner', mode: 'write' }))
+      .rejects.toMatchObject({ code: 'WRITE_UNSUPPORTED' })
+    expect(apply.mock.calls.map(call => call[1])).toEqual(['workspace-write', 'read-only'])
+    expect(effective).toBe('read-only')
+    expect(repository.getLocus('locus-current')?.permission.effective).toBe('read')
+  })
+
   it('does not persist when setSandboxMode fails', async () => {
     const { repository, mutation } = harness({ applyError: new Error('policy denied') })
     await expect(mutation.mutate({ locusId: 'locus-current', actorId: 'ou-owner', mode: 'write' }))
@@ -116,7 +175,7 @@ describe('locus permission mutation', () => {
         commitPermissionMutation: async () => { throw new Error('revision raced') },
       },
       sessions: { resolve: () => ({ id: 'session-child' }) },
-      policy: { apply, resolve: () => effective },
+      policy: { apply, resolve: () => ({ mode: effective, workspaceRoot: '/repo' }) },
       now: () => 10,
     })
 
@@ -152,7 +211,7 @@ describe('locus permission mutation', () => {
     const mutation = createLocusPermissionMutation({
       repository,
       sessions: { resolve: () => ({ id: 'session-child' }) },
-      policy: { apply, resolve: () => effective },
+      policy: { apply, resolve: () => ({ mode: effective, workspaceRoot: '/repo' }) },
       now: () => 20,
     })
 
@@ -188,7 +247,7 @@ describe('locus permission mutation', () => {
       sessions: { resolve: () => ({ id: 'session-child' }) },
       policy: {
         apply: (_session, mode) => { effective = mode },
-        resolve: () => effective,
+        resolve: () => ({ mode: effective, workspaceRoot: '/repo' }),
       },
       now: () => 20,
     })

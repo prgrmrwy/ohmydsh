@@ -151,6 +151,7 @@ export interface LocusDeliveryMutation {
     | 'invalid-transition'
     | 'execution-proof-required'
     | 'no-pending-delivery'
+    | 'inbox-message-conflict'
 }
 
 /** A durable operation snapshot exposed for restart diagnostics. */
@@ -200,20 +201,52 @@ export interface DurableProvisioningCommit {
   }
 }
 
-/**
- * Read-only report returned by startup reconciliation.
- *
- * The only write performed by this action is rebuilding materialized locus
- * indexes from the durable `loci` aggregate (when they differ). Pending
- * Deliveries and incomplete operations are reported for an outer Host
- * decision; this repository deliberately does not resume a child, settle a
- * Delivery, rerun a provisioning step, or call any external system.
- */
+/** Proof supplied by the live Host for one interrupted Delivery. */
+export interface LocusStartupDeliveryProof {
+  readonly deliveryId: string
+  readonly executionId: string
+  readonly turnId: string
+  /** Only a still-live turn may remain pending across startup. */
+  readonly state: 'running'
+}
+
+/** External resource compensators used only for durable provisioning refs. */
+export interface LocusStartupCompensators {
+  readonly childSession?: (input: {
+    readonly parentSessionId: string
+    readonly childSessionId: string
+    readonly operationId: string
+  }) => Promise<void>
+  readonly mainSession?: (input: {
+    readonly mainSessionId: string
+    readonly operationId: string
+  }) => Promise<void>
+  readonly chat?: (input: { readonly chatId: string; readonly operationId: string }) => Promise<void>
+}
+
+export interface LocusStartupRecoveryOptions {
+  readonly now?: number
+  /** Absent/undefined proof means the old execution cannot safely continue. */
+  readonly deliveryProof?: (delivery: DeliveryRecord) => Promise<LocusStartupDeliveryProof | undefined>
+  /** Must stop/drain the exact child so an old inbox item cannot run later. */
+  readonly terminateDelivery?: (delivery: DeliveryRecord) => Promise<void>
+  readonly compensators?: LocusStartupCompensators
+}
+
+/** One deterministic fail-closed decision made during startup. */
 export interface LocusStartupRecoveryReport {
   readonly indexStatus: 'unchanged' | 'rebuilt'
   readonly indexChanges: number
+  /** Deliveries whose exact live turn was proven and deliberately retained. */
   readonly pendingDeliveries: readonly DeliveryRecord[]
+  /** Operations still requiring an explicit owner action; they gate creation. */
   readonly recoverableOperations: readonly LocusOperation[]
+  readonly failedDeliveries: readonly DeliveryRecord[]
+  readonly retainedDeliveries: readonly DeliveryRecord[]
+  /** Still pending/busy because exact termination could not be proven. */
+  readonly manualDeliveries: readonly DeliveryRecord[]
+  readonly compensatedOperations: readonly LocusOperation[]
+  readonly manualOperations: readonly LocusOperation[]
   readonly sideEffectsReplayed: false
 }
 
@@ -316,6 +349,14 @@ export class LocusRepository {
       if (existing !== undefined) {
         this.assertSameProvisioningIntent(existing, input, intentHash)
         return existing
+      }
+      const endpointKey = endpointKeyOf(input.endpoint)
+      const blocking = this.findBlockingProvisioningOperation(endpointKey, input.parentSessionId)
+      if (blocking !== undefined) {
+        throw new LocusProvisioningError(
+          'PROVISIONING_CONFLICT',
+          `Endpoint ${endpointKey} has unresolved provisioning ${blocking.id} (${blocking.phase})`,
+        )
       }
       const operation: PetLocusOperation = {
         id: input.provisioningId,
@@ -1447,6 +1488,21 @@ export class LocusRepository {
     return this.deliveries().get(deliveryId) as unknown as DeliveryRecord | undefined
   }
 
+  /**
+   * Find a Delivery by its exact DSH inbox message identity.
+   *
+   * A historical duplicate is durable corruption: returning an arbitrary first
+   * match would bind a trusted inbox claim to the wrong platform message.
+   */
+  findDeliveryByInboxMessageId(inboxMessageId: string): DeliveryRecord | undefined {
+    assertIdentifier(inboxMessageId, 'inboxMessageId')
+    const matches = this.listDeliveries().filter(record => record.inboxMessageId === inboxMessageId)
+    if (matches.length > 1) {
+      throw new LocusError('INVALID_LOCUS', `Inbox message ${inboxMessageId} is attached to multiple Deliveries`)
+    }
+    return matches[0]
+  }
+
   /** Find a Delivery by the platform message idempotency key. */
   findDeliveryByMessage(messageId: string): DeliveryRecord | undefined {
     assertIdentifier(messageId, 'messageId')
@@ -1485,9 +1541,6 @@ export class LocusRepository {
       if (locus === undefined) throw new LocusError('LOCUS_NOT_FOUND', `Locus ${input.locusId} does not exist`)
       if (!isCurrentLocusState(locus.state) || locus.state !== 'active') {
         throw new LocusError('LOCUS_INVALID', `Locus ${input.locusId} is not active`)
-      }
-      if (locus.busy || this.hasPendingDelivery(locus.id, locus.generation)) {
-        throw new LocusError('LOCUS_BUSY', `Locus ${input.locusId} cannot accept another Delivery`)
       }
       if (this.getSwitchNotice(locus.id, locus.generation) !== undefined) {
         throw new LocusError('LOCUS_INVALID', `Locus ${input.locusId} has a pending source-switch notice`)
@@ -1593,9 +1646,6 @@ export class LocusRepository {
         throw new LocusError('INVALID_LOCUS', `Delivery ${record.deliveryId} already exists`)
       }
       if (existing !== undefined) return existing
-      if (locus.busy || this.hasPendingDelivery(locus.id, locus.generation)) {
-        throw new LocusError('LOCUS_BUSY', `Locus ${locus.id} already has pending Delivery work`)
-      }
       const pending = ACTIVE_BUSY_DELIVERY_STATUSES.has(record.status)
       const busyAt = Math.max(record.acceptedAt ?? Date.now(), locus.updatedAt)
       const busyLocus = pending && !locus.busy ? withLocusBusy(locus, true, busyAt) : undefined
@@ -1781,21 +1831,34 @@ export class LocusRepository {
     readonly deliveryId: string
     readonly correlation: DeliveryCorrelation
     readonly executionId: string
+    readonly inboxMessageId: string
     readonly queuedAt?: number
   }): Promise<DeliveryRecord | undefined> {
     return this.enqueue(async () => {
       assertIdentifier(input.executionId, 'executionId')
+      assertIdentifier(input.inboxMessageId, 'inboxMessageId')
       assertCorrelation(input.correlation)
       const current = this.getDelivery(input.deliveryId)
       if (current === undefined || !deliveryCorrelates(current, input.correlation)) return undefined
-      if (current.status === 'queued' && current.executionId === input.executionId) return current
+      if (
+        current.status === 'queued' &&
+        current.executionId === input.executionId &&
+        current.inboxMessageId === input.inboxMessageId
+      ) return current
       if (input.queuedAt !== undefined && current.acceptedAt !== undefined && input.queuedAt < current.acceptedAt) {
         throw new LocusError('INVALID_LOCUS', 'queuedAt must not precede acceptedAt')
       }
       if (current.status !== 'accepted' || current.executionId !== undefined) return undefined
+      const inboxMatches = this.listDeliveries().filter(record =>
+        record.deliveryId !== current.deliveryId && record.inboxMessageId === input.inboxMessageId,
+      )
+      if (inboxMatches.length > 0) {
+        throw new LocusError('INVALID_LOCUS', `Inbox message ${input.inboxMessageId} is already attached to another Delivery`)
+      }
       const next: DeliveryRecord = Object.freeze({
         ...current,
         executionId: input.executionId,
+        inboxMessageId: input.inboxMessageId,
         status: 'queued',
         queuedAt: input.queuedAt ?? Date.now(),
       })
@@ -1812,16 +1875,18 @@ export class LocusRepository {
     readonly deliveryId: string
     readonly correlation: DeliveryCorrelation
     readonly executionId: string
+    readonly inboxMessageId: string
     readonly queuedAt?: number
   }): Promise<DeliveryRecord | undefined> {
     return this.bindQueued(input)
   }
 
   /**
-   * A queue refusal has no trusted child turn and therefore cannot become a
-   * terminal Delivery. Keep the exact accepted/queued row pending; the caller
-   * can report dispatch state unknown/refused without emitting a false terminal
-   * reaction or writing a schema-invalid failed row.
+   * Persist a definitive Host refusal before a child turn starts.
+   *
+   * The exact Delivery id/correlation and, for queued rows, execution token are
+   * required. This is terminal dispatch evidence; it deliberately records no
+   * turn id and never promotes an ambiguous/unknown queue outcome to failed.
    */
   async failBeforeDispatch(input: {
     readonly deliveryId: string
@@ -1838,9 +1903,36 @@ export class LocusRepository {
       if (input.failedAt !== undefined) assertTimestamp(input.failedAt, 'failedAt')
       const current = this.getDelivery(input.deliveryId)
       if (current === undefined || !deliveryCorrelates(current, input.correlation)) return false
+      if (current.status === 'failed' && current.dispatchFailure !== undefined) return true
       if (current.status !== 'accepted' && current.status !== 'queued') return false
-      if (input.executionId !== undefined && current.executionId !== undefined && current.executionId !== input.executionId) return false
-      return false
+      if (current.status === 'queued') {
+        if (input.executionId === undefined || current.executionId !== input.executionId) return false
+      } else if (current.executionId !== undefined || current.inboxMessageId !== undefined) {
+        return false
+      }
+      const failedAt = Math.max(
+        input.failedAt ?? Date.now(),
+        current.queuedAt ?? current.acceptedAt ?? 0,
+      )
+      const next: DeliveryRecord = Object.freeze({
+        ...current,
+        status: 'failed',
+        dispatchFailure: current.status === 'queued' ? 'queued-not-started' : 'not-queued',
+        failedAt,
+        failureReason: input.reason,
+      })
+      const locus = this.getLocus(current.locusId)
+      const afterLocus = locus !== undefined && locus.busy &&
+          !this.hasPendingDelivery(current.locusId, current.generation, current.deliveryId)
+        ? withLocusBusy(locus, false, Math.max(failedAt, locus.updatedAt))
+        : undefined
+      await this.persistDeliveryMutation('delivery-dispatch-failed', current, next, {
+        operation: 'delivery-dispatch-failed',
+        deliveryId: current.deliveryId,
+        locusId: current.locusId,
+        endpointKey: endpointKeyOf(current.endpoint),
+      }, locus, afterLocus)
+      return true
     })
   }
 
@@ -1849,8 +1941,8 @@ export class LocusRepository {
     readonly correlation: DeliveryCorrelation
     readonly reason: string
     readonly executionId?: string
-  }): Promise<void> {
-    await this.failBeforeDispatch(input)
+  }): Promise<boolean> {
+    return this.failBeforeDispatch(input)
   }
 
   /** Settle one uniquely matching running Delivery in an exact proof scope. */
@@ -1960,7 +2052,7 @@ export class LocusRepository {
       .sort((left, right) => left.createdAt - right.createdAt)
   }
 
-  /** Prepared/publishing/failed operation rows are visible for recovery. */
+  /** Incomplete/manual operation rows are visible for recovery. */
   listRecoverableOperations(): readonly LocusOperation[] {
     return this.listOperations().filter(operation =>
       operation.phase === 'prepared' ||
@@ -1969,6 +2061,15 @@ export class LocusRepository {
       operation.phase === 'compensating' ||
       operation.phase === 'failed' ||
       operation.phase === 'needs-recovery',
+    )
+  }
+
+  /** Explicit endpoint creation debts exposed to controllers and diagnostics. */
+  listBlockingProvisioningOperations(): readonly LocusOperation[] {
+    return this.listOperations().filter(operation =>
+      operation.provisioningIntentHash !== undefined &&
+      operation.phase !== 'committed' &&
+      operation.phase !== 'compensated',
     )
   }
 
@@ -1989,54 +2090,287 @@ export class LocusRepository {
   }
 
   /**
-   * Reconcile the durable locus surface after a process restart.
+   * Deterministically dispose interrupted work before channel intake starts.
    *
-   * `loci` is the aggregate source of truth. This action rebuilds only the
-   * materialized endpoint/parent/child/default-Q&A indexes, then reports
-   * pending Delivery and operation rows. It never resumes execution, settles
-   * a Delivery, invokes DSH/Lark, or retries an external side effect.
+   * This method never queues a prompt, recreates a resource, or sends business
+   * output. Accepted-but-unqueued work is failed immediately. Queued/running
+   * work is retained only with exact live-turn proof; otherwise the Host must
+   * first terminate the old child execution. If termination cannot be proven,
+   * the Delivery remains pending/busy with explicit durable manual debt.
+   *
+   * Unpublished provisioning resources are compensated only from durable
+   * operation-owned refs. Missing ownership/capability or cleanup failure is
+   * persisted as `needs-recovery`, which also blocks a new provisioning begin
+   * for the endpoint.
    */
-  async reconcileStartup(options: { readonly now?: number } = {}): Promise<LocusStartupRecoveryReport> {
+  async reconcileStartup(options: LocusStartupRecoveryOptions = {}): Promise<LocusStartupRecoveryReport> {
     return this.enqueue(async () => {
-      const pendingDeliveries = this.listPendingDeliveries()
-      const recoverableOperations = this.listRecoverableOperations()
-      const beforeLoci = this.collectLoci()
-      assertLocusSet(beforeLoci)
-      // The locus aggregate is authoritative for endpoint/parent/child
-      // membership. Default-Q&A is an explicit pointer, so preserve its
-      // durable pointer while rebuilding the materialized indexes.
-      const existingIndexes = this.collectIndexes()
-      const defaults = this.collectDefaultPointers(existingIndexes)
+      const requireTransaction = (): NonNullable<LocusDomain['transaction']> =>
+        this.requireProvisioningTransaction('reconcileStartup')
+      const now = options.now ?? Date.now()
+      const failedDeliveries: DeliveryRecord[] = []
+      const retainedDeliveries: DeliveryRecord[] = []
+      const manualDeliveries: DeliveryRecord[] = []
+      const compensatedOperations: LocusOperation[] = []
+      const manualOperations: LocusOperation[] = []
+      const initialLoci = this.collectLoci()
+      assertLocusSet(initialLoci)
+      const initialIndexes = this.collectIndexes()
+      const initialExpectedIndexes = preserveEquivalentIndexTimestamps(
+        initialIndexes,
+        deriveIndexes(initialLoci, this.collectDefaultPointers(initialIndexes), now),
+      )
+      const initialIndexChanges = diffIndexTable(initialIndexes, initialExpectedIndexes)
+      if (initialIndexChanges.length > 0) {
+        const transaction = requireTransaction()
+        await transaction.call(this.domain, tx => {
+          for (const change of initialIndexChanges) {
+            if (change.value === undefined) tx.delete(change.table, change.key)
+            else tx.put(change.table, change.key, change.value)
+          }
+        })
+      }
 
-      const derivedIndexes = deriveIndexes(beforeLoci, defaults, options.now ?? Date.now())
-      const expectedIndexes = preserveEquivalentIndexTimestamps(existingIndexes, derivedIndexes)
-      const changes = diffIndexTable(existingIndexes, expectedIndexes)
-      if (changes.length === 0) {
-        return {
-          indexStatus: 'unchanged',
-          indexChanges: 0,
-          pendingDeliveries,
-          recoverableOperations,
-          sideEffectsReplayed: false,
+      const writeDelivery = async (
+        current: DeliveryRecord,
+        next: DeliveryRecord,
+        invalidateLocus: boolean,
+      ): Promise<void> => {
+        const loci = this.collectLoci()
+        const locus = loci.get(current.locusId)
+        const remaining = this.listPendingDeliveries(current.locusId).some(item =>
+          item.deliveryId !== current.deliveryId && item.generation === current.generation,
+        )
+        let nextLocus: LocusRecord | undefined
+        if (locus !== undefined && locus.generation === current.generation) {
+          if (invalidateLocus && locus.state === 'active') {
+            const idle = locus.busy
+              ? withLocusBusy(locus, false, Math.max(now, locus.updatedAt))
+              : locus
+            nextLocus = transitionLocus(idle, 'invalid', Math.max(now, idle.updatedAt), {
+              invalidReason: '启动恢复已终止无法证明可恢复的旧子会话执行；需要所有者显式重建。',
+            })
+          } else if (!remaining && locus.busy && !PENDING_DELIVERY_STATUSES.has(next.status)) {
+            nextLocus = withLocusBusy(locus, false, Math.max(now, locus.updatedAt))
+          }
+        }
+        const changes: TableChange[] = [{ table: 'locus_deliveries', key: next.deliveryId, value: next }]
+        if (nextLocus !== undefined) {
+          const after = new Map(loci).set(nextLocus.id, nextLocus)
+          changes.push(
+            ...diffLocusTable(loci, after),
+            ...diffIndexTable(this.collectIndexes(), this.deriveIndexes(after, this.collectDefaultPointers(), now)),
+          )
+        }
+        const transaction = requireTransaction()
+        await transaction.call(this.domain, tx => {
+          for (const change of changes.filter(change => this.changesState(change))) {
+            if (change.value === undefined) tx.delete(change.table, change.key)
+            else tx.put(change.table, change.key, change.value)
+          }
+        })
+      }
+
+      for (const snapshot of this.listPendingDeliveries()) {
+        const current = this.getDelivery(snapshot.deliveryId)
+        if (current === undefined || !PENDING_DELIVERY_STATUSES.has(current.status)) continue
+        if (current.status === 'accepted') {
+          const failedAt = Math.max(now, current.acceptedAt ?? 0)
+          const failed: DeliveryRecord = Object.freeze({
+            ...current,
+            status: 'failed',
+            startupDisposition: 'unqueued',
+            failureReason: 'Host restarted before the accepted Delivery was durably queued; work was not replayed.',
+            failedAt,
+          })
+          await writeDelivery(current, failed, false)
+          failedDeliveries.push(failed)
+          continue
+        }
+
+        let proof: LocusStartupDeliveryProof | undefined
+        try {
+          proof = await options.deliveryProof?.(current)
+        } catch {
+          proof = undefined
+        }
+        const matchingProof = proof !== undefined &&
+          proof.deliveryId === current.deliveryId &&
+          proof.executionId === current.executionId &&
+          (current.turnId === undefined || proof.turnId === current.turnId)
+          ? proof
+          : undefined
+        if (matchingProof !== undefined) {
+          let retained: DeliveryRecord = current
+          if (current.status === 'queued') {
+            const { startupRecoveryDebt: _debt, ...rest } = current
+            retained = Object.freeze({
+              ...rest,
+              status: 'running',
+              turnId: matchingProof.turnId,
+              startedAt: Math.max(now, current.queuedAt ?? 0),
+            })
+            await writeDelivery(current, retained, false)
+          }
+          retainedDeliveries.push(retained)
+          continue
+        }
+
+        let terminated = false
+        try {
+          if (options.terminateDelivery !== undefined) {
+            await options.terminateDelivery(current)
+            terminated = true
+          }
+        } catch {
+          terminated = false
+        }
+        if (!terminated) {
+          const debt = Object.freeze({
+            ...current,
+            startupRecoveryDebt: 'Exact live-turn proof and safe termination are unavailable; manual recovery is required.',
+          })
+          if (!recordsEqual(current, debt)) await writeDelivery(current, debt, false)
+          manualDeliveries.push(debt)
+          continue
+        }
+        const failedAt = Math.max(now, current.startedAt ?? current.queuedAt ?? current.acceptedAt ?? 0)
+        const { startupRecoveryDebt: _debt, ...withoutDebt } = current
+        const failed: DeliveryRecord = Object.freeze({
+          ...withoutDebt,
+          status: 'failed',
+          startupDisposition: 'execution-unrecoverable',
+          failureReason: 'Host restarted without exact recoverable turn proof; the old child execution was terminated and work was not replayed.',
+          failedAt,
+        })
+        await writeDelivery(current, failed, true)
+        failedDeliveries.push(failed)
+      }
+
+      const saveOperation = async (operation: PetLocusOperation): Promise<void> => {
+        const transaction = requireTransaction()
+        await transaction.call(this.domain, tx => { tx.put('locus_operations', operation.id, operation) })
+      }
+      for (const snapshot of this.listRecoverableOperations()) {
+        let operation = this.getOperation(snapshot.id)
+        if (operation === undefined || operation.provisioningIntentHash === undefined) {
+          if (operation !== undefined) manualOperations.push(operation)
+          continue
+        }
+        if (operation.phase === 'needs-recovery' && operation.manualRecoveryReason !== undefined) {
+          manualOperations.push(operation)
+          continue
+        }
+        const refs = operation.resourceRefs ?? {}
+        const required: Array<'chat' | 'child-session' | 'main-session'> = []
+        // Only Q&A provisioning owns a created chat. Group/topic endpoint chats
+        // pre-exist and must never be deleted as compensation.
+        if (operation.operation === 'provisioning:qa' && refs.chatId !== undefined) required.push('chat')
+        if (refs.childSessionId !== undefined) required.push('child-session')
+        if (refs.mainSessionId !== undefined) required.push('main-session')
+        const completed = new Set(operation.compensatedResources ?? [])
+        operation = {
+          ...operation,
+          phase: 'compensating',
+          attempts: operation.attempts + 1,
+          manualRecoveryReason: undefined,
+          updatedAt: Math.max(now, operation.updatedAt),
+        }
+        await saveOperation(operation)
+        let manualReason: string | undefined
+        for (const resource of required) {
+          if (completed.has(resource)) continue
+          try {
+            if (resource === 'chat') {
+              if (options.compensators?.chat === undefined || refs.chatId === undefined) throw new Error('chat compensator unavailable')
+              await options.compensators.chat({ chatId: refs.chatId, operationId: operation.id })
+            } else if (resource === 'child-session') {
+              const parentSessionId = refs.parentSessionId ?? refs.mainSessionId
+              if (options.compensators?.childSession === undefined || refs.childSessionId === undefined || parentSessionId === undefined) {
+                throw new Error('child-session ownership or compensator unavailable')
+              }
+              await options.compensators.childSession({
+                parentSessionId,
+                childSessionId: refs.childSessionId,
+                operationId: operation.id,
+              })
+            } else {
+              if (options.compensators?.mainSession === undefined || refs.mainSessionId === undefined) throw new Error('main-session compensator unavailable')
+              await options.compensators.mainSession({ mainSessionId: refs.mainSessionId, operationId: operation.id })
+            }
+            completed.add(resource)
+            operation = {
+              ...operation,
+              compensatedResources: [...completed],
+              step: operation.step + 1,
+              updatedAt: Math.max(now, operation.updatedAt),
+            }
+            await saveOperation(operation)
+          } catch (error) {
+            manualReason = error instanceof Error ? error.message : String(error)
+            break
+          }
+        }
+        if (manualReason === undefined) {
+          operation = {
+            ...operation,
+            phase: 'compensated',
+            compensatedResources: [...completed],
+            completedAt: Math.max(now, operation.updatedAt),
+            updatedAt: Math.max(now, operation.updatedAt),
+          }
+          await saveOperation(operation)
+          compensatedOperations.push(operation)
+        } else {
+          operation = {
+            ...operation,
+            phase: 'needs-recovery',
+            manualRecoveryReason: manualReason.slice(0, 500),
+            lastError: manualReason.slice(0, 500),
+            updatedAt: Math.max(now, operation.updatedAt),
+          }
+          await saveOperation(operation)
+          manualOperations.push(operation)
         }
       }
 
-      await this.persistChanges('rebuild', changes, {
-        reason: 'startup-index-reconciliation',
-        indexChanges: String(changes.length),
-      })
+      const beforeLoci = this.collectLoci()
+      assertLocusSet(beforeLoci)
+      const existingIndexes = this.collectIndexes()
+      const expectedIndexes = preserveEquivalentIndexTimestamps(
+        existingIndexes,
+        deriveIndexes(beforeLoci, this.collectDefaultPointers(existingIndexes), now),
+      )
+      const changes = diffIndexTable(existingIndexes, expectedIndexes)
+      if (changes.length > 0) {
+        const transaction = requireTransaction()
+        await transaction.call(this.domain, tx => {
+          for (const change of changes) {
+            if (change.value === undefined) tx.delete(change.table, change.key)
+            else tx.put(change.table, change.key, change.value)
+          }
+        })
+      }
+      const pendingDeliveries = this.listPendingDeliveries()
+      const recoverableOperations = this.listRecoverableOperations()
+      const indexChanges = initialIndexChanges.length + changes.length
       return {
-        indexStatus: 'rebuilt',
-        indexChanges: changes.length,
+        indexStatus: indexChanges === 0 ? 'unchanged' : 'rebuilt',
+        indexChanges,
         pendingDeliveries,
         recoverableOperations,
+        failedDeliveries,
+        retainedDeliveries,
+        manualDeliveries,
+        compensatedOperations,
+        manualOperations,
         sideEffectsReplayed: false,
       }
     })
   }
 
   /** Alias for startup callers that prefer recovery terminology. */
-  startupRecovery(options: { readonly now?: number } = {}): Promise<LocusStartupRecoveryReport> {
+  startupRecovery(options: LocusStartupRecoveryOptions = {}): Promise<LocusStartupRecoveryReport> {
     return this.reconcileStartup(options)
   }
 
@@ -2367,6 +2701,26 @@ export class LocusRepository {
       )
     }
     return operation
+  }
+
+  private findBlockingProvisioningOperation(
+    endpointKey: string,
+    parentSessionId?: string,
+  ): PetLocusOperation | undefined {
+    return this.listOperations().find(operation => {
+      if (
+        operation.provisioningIntentHash === undefined ||
+        operation.phase === 'committed' ||
+        operation.phase === 'compensated'
+      ) return false
+      if (operation.endpointKey === endpointKey) return true
+      // Q&A begins against a deterministic pending endpoint before Feishu
+      // allocates chatId. Parent identity is therefore its stable uniqueness
+      // fence across restart/manual debt.
+      return operation.operation === 'provisioning:qa' &&
+        parentSessionId !== undefined &&
+        operation.resourceRefs?.parentSessionId === parentSessionId
+    })
   }
 
   private assertSameProvisioningIntent(
@@ -3057,15 +3411,39 @@ function assertDeliveryRecord(record: DeliveryRecord): void {
   if (record.feedbackTarget.chatId !== record.endpoint.chatId || record.feedbackTarget.messageId !== record.messageId) {
     throw new LocusError('INVALID_LOCUS', 'Delivery feedback target must derive from the accepted endpoint/message')
   }
-  if (record.status === 'accepted' && (record.executionId !== undefined || record.turnId !== undefined)) {
-    throw new LocusError('INVALID_LOCUS', 'Accepted Delivery cannot contain execution/turn proof')
+  if (record.status === 'accepted' &&
+      (record.executionId !== undefined || record.inboxMessageId !== undefined || record.turnId !== undefined)) {
+    throw new LocusError('INVALID_LOCUS', 'Accepted Delivery cannot contain inbox/execution/turn proof')
   }
-  if (record.status === 'queued' && (record.executionId === undefined || record.turnId !== undefined || record.queuedAt === undefined)) {
-    throw new LocusError('INVALID_LOCUS', 'Queued Delivery requires execution proof and no turn proof')
+  if (record.status === 'queued' &&
+      (record.executionId === undefined || record.inboxMessageId === undefined ||
+       record.turnId !== undefined || record.queuedAt === undefined)) {
+    throw new LocusError('INVALID_LOCUS', 'Queued Delivery requires inbox/execution proof and no turn proof')
   }
-  if ((record.status === 'running' || record.status === 'settled' || record.status === 'failed') &&
-      (record.executionId === undefined || record.turnId === undefined)) {
-    throw new LocusError('INVALID_LOCUS', 'Running/terminal Delivery requires execution and turn proof')
+  if ((record.status === 'running' || record.status === 'settled') &&
+      (record.executionId === undefined || record.inboxMessageId === undefined || record.turnId === undefined)) {
+    throw new LocusError('INVALID_LOCUS', 'Running/settled Delivery requires inbox, execution and turn proof')
+  }
+  if (record.status === 'failed') {
+    if (record.startupDisposition === 'unqueued') {
+      if (record.executionId !== undefined || record.inboxMessageId !== undefined || record.turnId !== undefined) {
+        throw new LocusError('INVALID_LOCUS', 'Unqueued startup failure cannot contain inbox/execution/turn proof')
+      }
+    } else if (record.startupDisposition === 'execution-unrecoverable') {
+      if (record.executionId === undefined || record.inboxMessageId === undefined) {
+        throw new LocusError('INVALID_LOCUS', 'Execution-unrecoverable startup failure requires prior inbox/execution proof')
+      }
+    } else if (record.dispatchFailure === 'not-queued') {
+      if (record.executionId !== undefined || record.inboxMessageId !== undefined || record.turnId !== undefined || record.startedAt !== undefined) {
+        throw new LocusError('INVALID_LOCUS', 'Not-queued dispatch failure cannot contain inbox/execution/turn proof')
+      }
+    } else if (record.dispatchFailure === 'queued-not-started') {
+      if (record.executionId === undefined || record.inboxMessageId === undefined || record.turnId !== undefined || record.queuedAt === undefined || record.startedAt !== undefined) {
+        throw new LocusError('INVALID_LOCUS', 'Queued dispatch failure requires inbox/execution proof and no turn proof')
+      }
+    } else if (record.executionId === undefined || record.inboxMessageId === undefined || record.turnId === undefined) {
+      throw new LocusError('INVALID_LOCUS', 'Ordinary failed Delivery requires inbox, execution and turn proof')
+    }
   }
   if ((record.feedbackTarget.rootMessageId ?? undefined) !== (record.rootMessageId ?? undefined)) {
     throw new LocusError('INVALID_LOCUS', 'Delivery feedback root must match rootMessageId')

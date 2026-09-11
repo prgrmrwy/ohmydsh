@@ -5,6 +5,7 @@ import {
   type LocusTurnCorrelationEvent,
   type LocusTurnEnd,
   type LocusTurnObserverDiagnostic,
+  type LocusTurnObserverLimits,
 } from '../src/host/locus/turn-observer.js'
 
 const CHILD = 'child-1'
@@ -19,6 +20,7 @@ const correlation = {
 /** Wire the observer to controllable runtime subscriptions. */
 function harness(options: {
   readonly deliveries?: Record<string, { deliveryId: string; executionId: string }>
+  readonly limits?: LocusTurnObserverLimits
 } = {}) {
   const claimListeners: ((claim: LocusInboxClaim) => void)[] = []
   const endListeners: ((end: LocusTurnEnd) => void)[] = []
@@ -46,7 +48,7 @@ function harness(options: {
       },
     },
     log: (code) => { diagnostics.push(code) },
-  })
+  }, options.limits)
   observer.subscribe(event => { events.push(event) })
 
   return {
@@ -56,6 +58,9 @@ function harness(options: {
     released,
     claim: (claim: LocusInboxClaim) => { for (const listener of claimListeners) listener(claim) },
     end: (end: LocusTurnEnd) => { for (const listener of endListeners) listener(end) },
+    available: (messageId: string, childSessionId = CHILD) => {
+      observer.deliveryAvailable?.({ childSessionId, messageId })
+    },
   }
 }
 
@@ -112,6 +117,67 @@ describe('per-turn Delivery correlation', () => {
     expect(h.observer.currentForChild?.(CHILD)).toBeUndefined()
   })
 
+  it('keeps a Delivery-plus-foreign turn fail-closed while settling the proven Delivery', () => {
+    const h = harness()
+    h.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 5 })
+    expect(h.observer.currentForChild?.(CHILD)).toEqual({
+      executionId: 'execution-1',
+      turnId: `${CHILD}#5`,
+    })
+
+    h.claim({ childSessionId: CHILD, messageId: 'gui-steer', turn: 5 })
+    expect(h.observer.currentForChild?.(CHILD)).toBeUndefined()
+    h.end({ childSessionId: CHILD, turn: 5, outcome: 'completed' })
+
+    expect(h.observer.currentForChild?.(CHILD)).toBeUndefined()
+    expect(h.events.filter(event => event.phase === 'completed')).toHaveLength(1)
+    expect(h.diagnostics).not.toContain('claim-not-a-delivery')
+  })
+
+  it('keeps a steer-first turn mixed when a proven Delivery claim follows', () => {
+    const h = harness()
+    h.claim({ childSessionId: CHILD, messageId: 'parent-steer', turn: 6 })
+    h.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 6 })
+    expect(h.observer.currentForChild?.(CHILD)).toBeUndefined()
+
+    h.end({ childSessionId: CHILD, turn: 6, outcome: 'completed' })
+    expect(h.events.filter(event => event.phase === 'completed')).toHaveLength(1)
+  })
+
+  it('tracks unresolved claims by exact message instead of overwriting by turn', () => {
+    const deliveries: Record<string, { deliveryId: string; executionId: string }> = {}
+    const h = harness({ deliveries })
+    h.claim({ childSessionId: CHILD, messageId: 'early-delivery', turn: 8 })
+    h.claim({ childSessionId: CHILD, messageId: 'foreign-steer', turn: 8 })
+    h.end({ childSessionId: CHILD, turn: 8, outcome: 'completed' })
+
+    deliveries['early-delivery'] = { deliveryId: 'delivery-early', executionId: 'execution-early' }
+    h.available('early-delivery')
+    expect(h.events).toEqual([
+      expect.objectContaining({ phase: 'started', deliveryId: 'delivery-early', turnId: `${CHILD}#8` }),
+      expect.objectContaining({ phase: 'completed', deliveryId: 'delivery-early', turnId: `${CHILD}#8` }),
+    ])
+    // A notification for another message cannot consume the retained steer.
+    h.available('foreign-steer', 'other-child')
+    expect(h.events).toHaveLength(2)
+  })
+
+  it('withholds a turn that claims more than one Delivery message', () => {
+    const h = harness({
+      deliveries: {
+        'om-message-1': { deliveryId: 'delivery-1', executionId: 'execution-1' },
+        'om-message-2': { deliveryId: 'delivery-2', executionId: 'execution-2' },
+      },
+    })
+    h.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 9 })
+    expect(h.observer.currentForChild?.(CHILD)).toEqual({
+      executionId: 'execution-1', turnId: `${CHILD}#9`,
+    })
+
+    h.claim({ childSessionId: CHILD, messageId: 'om-message-2', turn: 9 })
+    expect(h.observer.currentForChild?.(CHILD)).toBeUndefined()
+  })
+
   it('reports a non-completed turn as failed with its runtime reason', () => {
     for (const [outcome, reason] of [
       ['aborted', 'user cancelled'],
@@ -164,15 +230,35 @@ describe('per-turn Delivery correlation', () => {
     ])
   })
 
-  it('never consumes a Delivery for initialization, a GUI turn, or a real message', () => {
+  it('never consumes a Delivery for initialization, a GUI turn, or a real message', async () => {
     const h = harness()
 
-    // A claimed message the lookup does not recognize as a Delivery.
     h.claim({ childSessionId: CHILD, messageId: 'om-initialization', turn: 1 })
     h.end({ childSessionId: CHILD, turn: 1, outcome: 'completed' })
+    await new Promise(resolve => setTimeout(resolve, 280))
 
     expect(h.events).toEqual([])
-    expect(h.diagnostics).toEqual(['claim-not-a-delivery', 'turn-without-delivery'])
+    // Time does not guess that an unresolved claim is foreign.
+    expect(h.diagnostics).toEqual([])
+  })
+
+  it('correlates end-before-bind after a delay beyond the former 200ms window', async () => {
+    const deliveries: Record<string, { deliveryId: string; executionId: string }> = {}
+    const h = harness({ deliveries })
+
+    h.claim({ childSessionId: CHILD, messageId: 'inbox-race', turn: 3 })
+    h.end({ childSessionId: CHILD, turn: 3, outcome: 'completed' })
+    await new Promise(resolve => setTimeout(resolve, 250))
+    expect(h.events).toEqual([])
+
+    deliveries['inbox-race'] = { deliveryId: 'delivery-race', executionId: 'execution-race' }
+    h.available('inbox-race')
+
+    expect(h.observer.currentForChild?.(CHILD)).toBeUndefined()
+    expect(h.events).toEqual([
+      expect.objectContaining({ phase: 'started', deliveryId: 'delivery-race', turnId: `${CHILD}#3` }),
+      expect.objectContaining({ phase: 'completed', deliveryId: 'delivery-race', turnId: `${CHILD}#3` }),
+    ])
   })
 
   it('does not settle a turn that never claimed a Delivery', () => {
@@ -260,16 +346,40 @@ describe('per-turn Delivery correlation', () => {
     expect(seen).toEqual(['started', 'completed'])
   })
 
-  it('releases both runtime subscriptions on dispose and stops emitting', () => {
-    const h = harness()
-    h.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 1 })
+  it('bounds retained turns and evicts the oldest correlation fail-closed', () => {
+    const deliveries: Record<string, { deliveryId: string; executionId: string }> = {}
+    const h = harness({ deliveries, limits: { maxObservedTurns: 2 } })
+    h.claim({ childSessionId: CHILD, messageId: 'old', turn: 1 })
+    h.claim({ childSessionId: CHILD, messageId: 'middle', turn: 2 })
+    h.claim({ childSessionId: CHILD, messageId: 'new', turn: 3 })
+    expect(h.diagnostics).toEqual(['correlation-evicted'])
 
-    h.observer.dispose()
-    h.observer.dispose()
+    deliveries.old = { deliveryId: 'delivery-old', executionId: 'execution-old' }
+    h.available('old')
+    expect(h.events).toEqual([])
+  })
+
+  it('bounds claims per turn without promoting overflow to a Delivery', () => {
+    const h = harness({ deliveries: {}, limits: { maxClaimsPerTurn: 2 } })
+    h.claim({ childSessionId: CHILD, messageId: 'one', turn: 1 })
+    h.claim({ childSessionId: CHILD, messageId: 'two', turn: 1 })
+    h.claim({ childSessionId: CHILD, messageId: 'three', turn: 1 })
+    expect(h.diagnostics).toEqual(['turn-claim-limit'])
+  })
+
+  it('releases subscriptions and drops unresolved indexes on dispose', () => {
+    const deliveries: Record<string, { deliveryId: string; executionId: string }> = {}
+    const h = harness({ deliveries })
+    h.claim({ childSessionId: CHILD, messageId: 'late', turn: 1 })
     h.end({ childSessionId: CHILD, turn: 1, outcome: 'completed' })
 
+    h.observer.dispose()
+    h.observer.dispose()
+    deliveries.late = { deliveryId: 'delivery-late', executionId: 'execution-late' }
+    h.available('late')
+
     expect(h.released).toEqual(['claimed', 'turn-end'])
-    expect(h.events.filter(event => event.phase !== 'started')).toEqual([])
+    expect(h.events).toEqual([])
   })
 
   it('declares itself as a per-turn observer', () => {
