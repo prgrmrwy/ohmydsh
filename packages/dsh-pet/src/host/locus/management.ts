@@ -134,6 +134,76 @@ export interface LocusManagementResolvers {
     | undefined
 }
 
+/** One session's owner-facing metadata, as resolved from durable evidence. */
+export interface LocusSessionDescription {
+  readonly title?: string
+  readonly availability?: 'available' | 'archived' | 'missing'
+}
+
+/** Narrow Host capabilities needed to describe a session without loading it. */
+export interface LocusSessionDescriberDeps {
+  /**
+   * Cold-readable session inspection. Resolves for a session whose durable log
+   * exists — loaded or not — and rejects when it cannot be read.
+   */
+  readonly inspect: ((sessionId: string) => Promise<{ readonly events?: readonly unknown[] }>) | undefined
+  /** Durable archive account, the only evidence that outranks readability. */
+  readonly archivedSessionIds: () => readonly string[]
+  /** Fold the durable title out of a session's events. */
+  readonly foldTitle: (events: readonly unknown[]) => string | undefined
+}
+
+/**
+ * Describe one session for the owner-facing management view.
+ *
+ * Existence is proven by COLD inspection, never by the live registry.
+ * "Is this session loaded in memory right now" is a different question from
+ * "does this session exist": after a Host restart nobody has opened a locus
+ * main yet, so a healthy session whose log sits on disk would be reported
+ * `missing` and the owner would be told their active locus is unavailable.
+ * That answer also flips as sessions load and unload, so it cannot serve as
+ * acceptance evidence. This mirrors the rule `dsh-port.ts` already states for
+ * provisioning: existence comes from cold inspection, never from the live
+ * registries.
+ *
+ * @param deps - narrow Host capabilities.
+ * @returns a resolver suitable for {@link LocusManagementResolvers}.
+ */
+export function createLocusSessionDescriber(
+  deps: LocusSessionDescriberDeps,
+): (sessionId: string) => Promise<LocusSessionDescription | undefined> {
+  return async sessionId => {
+    // Archived outranks readability: an archived session's log still inspects
+    // fine, so checking it second would report it as ordinarily available.
+    if (deps.archivedSessionIds().some(id => id === sessionId)) {
+      return { availability: 'archived' }
+    }
+    // No cold-read capability: report nothing rather than guess. An omitted
+    // availability reads as unknown, which is honest; claiming `missing` would
+    // invent a fact out of a Host limitation.
+    if (deps.inspect === undefined) return undefined
+
+    let inspection: { readonly events?: readonly unknown[] } | undefined
+    try {
+      inspection = await deps.inspect(sessionId)
+    } catch {
+      // Missing, corrupt and temporarily unreadable are all "cannot open this"
+      // to an owner deciding whether to click through.
+      return { availability: 'missing' }
+    }
+    if (inspection === undefined) return { availability: 'missing' }
+
+    // Titles are log-only `session/title` events, never header fields: reading
+    // the header yields undefined for EVERY session, the exact failure that
+    // once made every bound group display one fallback name.
+    const title = deps.foldTitle(inspection.events ?? [])
+    return {
+      availability: 'available',
+      ...(title === undefined ? {} : { title }),
+    }
+  }
+}
+
 /** Host-authenticated context supplied to an external management action. */
 export interface LocusManagementActionContext {
   /** Trusted Host actor; never taken from the browser request body. */

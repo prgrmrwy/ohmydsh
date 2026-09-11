@@ -63,7 +63,17 @@ function stubServices(
   })
   ctx.provide('sessions', overrides.sessions ?? { list: () => [], get: () => undefined })
   ctx.provide('sessionController', overrides.sessionController ?? {
-    inspect: async () => ({ session: undefined }),
+    // The real `inspect` cold-reads a durable log and returns its events —
+    // which is where `session/title` lives — and REJECTS for a session that
+    // does not exist. The known locus sessions resolve with their titles;
+    // anything else rejects, so "missing" stays reachable.
+    inspect: async (id: string) => {
+      const title = id === 'main-live'
+        ? '研发主会话'
+        : id === 'child-live' ? '项目子会话' : undefined
+      if (title === undefined) throw new Error(`session "${id}" not found`)
+      return { meta: { id }, events: [{ type: 'session/title', data: { title } }] }
+    },
     resolveAgent: async () => undefined,
   })
   // `resume` mirrors the real registry. Omitting it made the locus child
@@ -1136,7 +1146,13 @@ describe('owner-facing locus management is served by the real routes', () => {
             list: () => [main],
           },
           sessionController: {
-            inspect: async () => ({ session: undefined }),
+            // Mirror the real contract: `inspect` cold-reads a durable log and
+            // returns its events, which is where the title lives. A
+            // session-less stub shape made every locus look untitled.
+            inspect: async (id: string) => ({
+              meta: { id },
+              events: [{ type: 'session/title', data: { title: sessionOf(id).title } }],
+            }),
             resolveAgent: ordinaryControllerResolve,
           },
         }

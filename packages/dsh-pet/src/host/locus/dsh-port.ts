@@ -73,6 +73,15 @@ export interface ProductionLocusDshPortDeps {
   }
   readonly agents: {
     create(options: CreateAgentOptions): Promise<LocusAgentHandle>
+    /**
+     * Submit the opening briefing as an ordinary follow-up turn.
+     *
+     * Deliberately fire-and-forget: `followup` is synchronous and void, and
+     * provisioning must not block on a model round trip — the durable locus is
+     * published from the creation facts, not from whatever the main replies.
+     * Absent keeps creation working without a briefing.
+     */
+    brief?(agent: LocusAgentHandle['agent'], text: string): void
   }
   readonly agentPresets: {
     readonly defaultId: string
@@ -118,6 +127,47 @@ export interface ProductionLocusDshPortDeps {
 export class LocusDshCapabilityUnavailableError extends Error {
   override readonly name = 'LocusDshCapabilityUnavailableError'
   readonly code = 'CAPABILITY_UNAVAILABLE' as const
+}
+
+/** Facts stated to a locus main in its opening briefing. */
+export interface LocusMainBriefingInput {
+  /** Feishu chat this main was provisioned for. */
+  readonly chatId: string
+  /** Workspace the main is accounted to. */
+  readonly workspaceId: string
+  /** Absolute execution root of that workspace. */
+  readonly workspacePath: string
+  /** The durable title this main is renamed to. */
+  readonly label: string
+}
+
+/**
+ * Compose the locus main's opening briefing.
+ *
+ * This is context, not a task. The main exists to be a collaboration root —
+ * the Feishu traffic is served by its child sessions — so the briefing states
+ * what this session is and explicitly tells the model to acknowledge and stand
+ * by rather than start work. Without that instruction a capable model reads a
+ * project path plus a workspace and helpfully begins investigating, which
+ * would burn a real turn and, worse, make the main look like it had opinions
+ * nobody asked for.
+ *
+ * @param input - the identity facts to state.
+ * @returns the briefing prompt text.
+ */
+export function composeLocusMainBriefing(input: LocusMainBriefingInput): string {
+  return [
+    `你是 Pet 统一 Locus 协作模型自动创建的主会话：${input.label}`,
+    '',
+    `- 飞书入口 chat：${input.chatId}`,
+    `- 工作区：${input.workspaceId}`,
+    `- 执行根：${input.workspacePath}`,
+    '',
+    '这条消息只是陈述上下文，让你了解自己的身份与背景，不是任务，也不需要你应答或开始任何工作。',
+    '飞书侧的消息由本主会话下的专属子会话处理，不会自动回传到这里；你不需要主动分析项目、读取文件或给出结论。',
+    '',
+    '请只回复「了解」或「知道了」，然后保持待命（standby），等待所有者后续的显式指令。',
+  ].join('\n')
 }
 
 function normalized(value: string | undefined): string | undefined {
@@ -280,6 +330,26 @@ export function createProductionLocusDshPort(
         // attach. Rename only after that proof is durable.
         await workspace.attachSession(sessionId)
         title = (await deps.sessionTitle.rename(handle.agent.session, input.label)).title
+
+        // Brief the main through the ORDINARY lifecycle: an identified user
+        // message through `followup`, exactly as a native client sends one.
+        //
+        // This is also what stops the main from looking like an unused "新会话".
+        // DSH classifies a session with no logged `turn/start` as blank, and
+        // blank is not cosmetic: it blanks the sidebar label, hides the
+        // conversation header, and — the real hazard — makes the session
+        // eligible for `connectWorkspace()` reuse, so a user pressing
+        // "New Session" in this workspace could be handed the collaboration
+        // root and type into it. The loop appends `turn/start` when it opens
+        // the turn, BEFORE any model call, so the session leaves the blank
+        // class even where the model itself is unavailable.
+        deps.agents.brief?.(handle.agent, composeLocusMainBriefing({
+          chatId,
+          workspaceId,
+          workspacePath: workspace.path,
+          label: input.label,
+        }))
+
         if (!(await deps.sessions.flush(handle.agent.session))) {
           throw new LocusDshCapabilityUnavailableError(
             `Session ${sessionId} has no durability listener, so it cannot be published as a locus main`,
