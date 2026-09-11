@@ -18,7 +18,7 @@ import { PetLifecycleMachine } from '../src/host/lifecycle.js'
 import { ensurePetDirectories, resolvePetPaths, type PetPaths } from '../src/host/paths.js'
 import { createPetRoutes } from '../src/host/routes.js'
 import { SourceContextRegistry } from '../src/host/capture.js'
-import { ROUTES } from '../src/wire.js'
+import { LOCUS_ROUTES, ROUTES } from '../src/wire.js'
 import { openPetHarness, type PetHarness } from './harness.js'
 
 let harness: PetHarness | undefined
@@ -117,9 +117,26 @@ describe('every documented route is registered', () => {
     // A duplicate would shadow one handler and a missing one would 405 with
     // no diagnostic — both invisible without calling the factory.
     expect(new Set(registered).size).toBe(registered.length)
-    for (const declared of Object.values(ROUTES)) {
+    for (const declared of [...Object.values(ROUTES), ...Object.values(LOCUS_ROUTES)]) {
       expect(registered).toContain(declared)
     }
+  })
+})
+
+describe('unified locus routes fail closed without the optional capability', () => {
+  it('reports capability absence and leaves legacy routes usable', async () => {
+    const locus = await call(LOCUS_ROUTES.view, {})
+    expect(locus.ok).toBe(false)
+    expect(locus.error).toBe('LOCUS_UNAVAILABLE')
+
+    const status = await call(ROUTES.status, {})
+    expect(status.ok).toBe(true)
+  })
+
+  it('rejects malformed discovery selectors before invoking the capability', async () => {
+    const reply = await call(LOCUS_ROUTES.discovery, { parentSessionId: 'main', childSessionId: 'child' })
+    expect(reply.ok).toBe(false)
+    expect(reply.error).toBe('INVALID_REQUEST')
   })
 })
 

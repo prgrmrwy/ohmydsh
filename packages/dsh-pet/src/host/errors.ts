@@ -55,6 +55,7 @@ export function statusOf(code: PetErrorCode): number {
     case 'INVALID_REQUEST':
     case 'SKILL_IMPORT_REJECTED':
     case 'BINDING_INVALID':
+    case 'LOCUS_INVALID':
       return 400
     case 'UNKNOWN_CAPABILITY':
     case 'SOURCE_NOT_FOUND':
@@ -70,13 +71,20 @@ export function statusOf(code: PetErrorCode): number {
     case 'PROJECTION_DRIFT':
     case 'NO_CURRENT_INVOCATION':
     case 'AMBIGUOUS_CURRENT_INVOCATION':
+    case 'LOCUS_BUSY':
+    case 'LOCUS_CONFLICT':
+    case 'LOCUS_STOPPED':
       return 409
     case 'NOT_A_PET_SESSION':
     case 'CONTEXT_REQUIRED':
     case 'CAPABILITY_UNAVAILABLE':
+    case 'LOCUS_PERMISSION_DENIED':
+    case 'WRITE_UNSUPPORTED':
       return 403
     case 'PET_DEGRADED':
     case 'MODEL_UNAVAILABLE':
+    case 'LOCUS_UNAVAILABLE':
+    case 'LOCUS_NOT_FOUND':
       return 503
     default:
       return 500

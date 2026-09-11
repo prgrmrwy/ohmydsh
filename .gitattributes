@@ -1,0 +1,3 @@
+# Unified diff context lines may consist of one required leading space. Do not
+# treat that syntax byte as trailing whitespace when checking the repository.
+packages/dsh-pet/compat/subagent/*.patch -whitespace

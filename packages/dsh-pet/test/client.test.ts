@@ -23,10 +23,11 @@ import {
   PET_SETTINGS_TABS,
   PetSettingsSection,
   shouldRefreshChannel,
+  unifiedLocusReadiness,
   watchChannelTransition,
 } from '../src/client/settings.js'
 import type { PetChannelView, PetChannelPhase } from '../src/wire.js'
-import { PetOverlay } from '../src/client/overlay.js'
+import { ordinaryPetTasks, PetOverlay } from '../src/client/overlay.js'
 
 // Pet never polls on render; fetch is stubbed so effects cannot escape.
 vi.stubGlobal('fetch', vi.fn(async () => ({ json: async () => ({ ok: true, data: {} }) })))
@@ -50,6 +51,11 @@ describe('channel connection convergence', () => {
     allowOpenIds: [],
     knownNames: {},
     routes: [],
+    unifiedLocus: {
+      childSession: 'verified',
+      defaultPermission: 'read',
+      readVerification: 'verified',
+    },
     onboarding: { ready: true, steps: [], blockers: [] },
     connection: { phase, queueDepth: 0 },
   })
@@ -265,10 +271,10 @@ describe('overlay styles', () => {
   })
 
   it('uses DSH theme tokens with literal fallbacks for dark and light', () => {
-    // 0.1.2 dropped `--dsw-alias-brand-primary`; the badge chip now inverts
-    // through the live label-primary/bg-layer-1 pair (same invariant: theme
-    // tokens with literal fallbacks, never bare hard-coded colors).
-    expect(PET_CSS).toContain('var(--dsw-alias-bg-layer-1,')
+    // Use names present in the installed DSH vocabulary. `bg-layer-1` was
+    // never defined here and only appeared to work because every declaration
+    // carried a literal fallback.
+    expect(PET_CSS).toContain('var(--dsw-specific-menu,')
     expect(PET_CSS).toContain('var(--dsw-alias-label-primary,')
   })
 
@@ -357,10 +363,17 @@ describe('overlay styles', () => {
 })
 
 describe('settings information architecture', () => {
-  it('exposes exactly the five stable tabs', () => {
-    // Channel joined the set when Lark inbound landed; it is a stable tab,
-    // not a conditional one, so an unbound channel still has a home.
-    expect(PET_SETTINGS_TABS).toEqual(['general', 'skills', 'env', 'channel', 'diagnostics'])
+  it('exposes exactly the six stable tabs', () => {
+    // Locus is a stable management surface, not a conditional replacement for
+    // ordinary settings or the legacy channel tab.
+    expect(PET_SETTINGS_TABS).toEqual([
+      'general',
+      'skills',
+      'locus',
+      'env',
+      'channel',
+      'diagnostics',
+    ])
   })
 
   it('renders an accessible tablist', () => {
@@ -382,6 +395,12 @@ describe('settings information architecture', () => {
       createElement(PetSettingsSection, { initialTab: 'skills' as const }),
     )
     expect(skills).toContain('id="dshpet-panel-skills"')
+
+    const locus = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'locus' as const }),
+    )
+    expect(locus).toContain('id="dshpet-panel-locus"')
+    expect(locus).toContain('Locus 管理')
   })
 
   it('states that Skill import paths are Host paths, not browser paths', () => {
@@ -425,6 +444,30 @@ describe('settings information architecture', () => {
     // straight to lark-cli and never stored, so it must not be readable on
     // screen either.
     expect(markup).not.toContain('type="text" placeholder="App Secret')
+  })
+
+  it('keeps locus owner identity fail-closed and exposes management concepts', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // Static markup intentionally stops at a Host snapshot loading state; the
+    // controls below are rendered only after the typed Host route succeeds.
+    // Assert the source contract so this test does not pretend useEffect ran on
+    // the server or expose ownerId as a browser capability.
+    expect(settings).toContain('统一 locus 接口不可用时不会回退')
+    expect(settings).toContain('创建/打开默认 Q&A')
+    expect(settings).toContain('发现关联')
+    expect(settings).toContain('绑定新的 endpoint')
+    expect(settings).toContain('locusDefaultQa({ parentSessionId })')
+    expect(settings).toContain('locusArchive')
+    expect(settings).toContain('locusStop')
+    expect(settings).toContain('warningText')
+    expect(settings).toContain('默认 Q&A 新群的所有者来自 dsh-pet profile 实时核验的当前飞书用户')
+    expect(settings).toContain('列表顺序和浏览器输入都不能声明“本人”')
+    expect(settings).not.toContain('ownerId:')
   })
 
 })
@@ -608,6 +651,30 @@ describe('task panel can answer a waiting Invocation', () => {
     expect(overlay).toContain('dshpet-answer')
     // Labelled for assistive technology.
     expect(overlay).toContain('aria-label={`Answer the question waiting in')
+  })
+})
+
+describe('the Task panel retires only legacy Feishu Invocation rows', () => {
+  it('keeps ordinary wheel Tasks and filters chat/qa-chat projections', () => {
+    const task = (sourceKind: string, id: string) => ({
+      id,
+      scopeKey: `${sourceKind}:${id}`,
+      sourceKind,
+      status: 'succeeded',
+      executorSessionId: `session-${id}`,
+      revision: 1,
+      invocations: [{ id: `inv-${id}`, capabilityId: 'ws', status: 'succeeded' }],
+    })
+
+    expect(
+      ordinaryPetTasks([
+        task('session', 'session'),
+        task('workspace', 'workspace'),
+        task('none', 'none'),
+        task('chat', 'legacy-chat'),
+        task('qa-chat', 'legacy-qa'),
+      ]).map(item => item.id),
+    ).toEqual(['session', 'workspace', 'none'])
   })
 })
 
@@ -978,11 +1045,11 @@ describe('settings surface follows the DSH type scale', () => {
   it('uses the official font tokens instead of ad-hoc sizes', () => {
     // Each font declaration pins its own line-height; a bare font-size left
     // the vertical rhythm to the browser default, which is the main reason
-    // the panel read as cramped and inconsistent. 0.1.2 removed the
-    // `--dsw-font-s-14` shorthand, so body text states 14px/22px explicitly
-    // over the live `--dsw-font-family` token.
+    // the panel read as cramped and inconsistent. Body text states 14px/22px
+    // over the live family token, while compact labels use the shipped 13px
+    // shorthand rather than the removed `--dsw-font-xxs-12` token.
     expect(PET_CSS).toContain('14px/22px var(--dsw-font-family')
-    expect(PET_CSS).toContain('var(--dsw-font-xxs-12')
+    expect(PET_CSS).toContain('var(--dsw-font-xs-13')
   })
 
   it('uses the business accent for focus rings, not the neutral brand token', () => {
@@ -1207,6 +1274,28 @@ describe('directory selection degrades to the in-app browser', () => {
     )
     expect(entry).toContain('pick().catch(() => undefined)')
     expect(entry).toContain('setDirectoryLister')
+  })
+})
+
+describe('channel settings mutation payloads', () => {
+  it('fails closed when the Host omits the unified-locus proof', () => {
+    expect(unifiedLocusReadiness(undefined)).toEqual({
+      childSession: 'unavailable',
+      defaultPermission: 'read',
+      readVerification: 'unavailable',
+      diagnostic: 'Host 未返回完整的统一子会话与默认只读核验证明。',
+    })
+  })
+
+  it('omits the workspace id when clearing the default', async () => {
+    const { defaultWorkspaceMutation } = await import('../src/client/settings.js')
+
+    expect(defaultWorkspaceMutation('')).toEqual({ action: 'set-default-workspace' })
+    expect(defaultWorkspaceMutation('  ')).toEqual({ action: 'set-default-workspace' })
+    expect(defaultWorkspaceMutation(' ws-nexus ')).toEqual({
+      action: 'set-default-workspace',
+      defaultWorkspaceId: 'ws-nexus',
+    })
   })
 })
 
@@ -1701,7 +1790,8 @@ describe('the built-in Q&A action is wired end to end', () => {
     // A built-in pins no Skill, so dispatching it as an Invocation would send
     // a capability id the Host cannot resolve to anything.
     expect(overlay).toContain("capability.kind === 'builtin'")
-    expect(overlay).toContain('petApi.createQaGroup')
+    expect(overlay).toContain('petApi.locusDefaultQa')
+    expect(overlay).not.toContain('petApi.createQaGroup')
   })
 
   it('requires a session source before the group can be created', async () => {
@@ -1717,17 +1807,19 @@ describe('the built-in Q&A action is wired end to end', () => {
     expect(overlay).toContain('答疑群需要一个当前会话作为来源')
   })
 
-  it('never offers to re-bind a QA group to a workspace', async () => {
+  it('keeps the ordinary wheel action while removing legacy Channel routes', async () => {
     const { readFile } = await import('node:fs/promises')
-    const settings = await readFile(
-      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
-      'utf8',
-    )
+    const [settings, overlay] = await Promise.all([
+      readFile(path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'), 'utf8'),
+      readFile(path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'), 'utf8'),
+    ])
 
-    // The Host refuses the rebind; a picker here would promise something that
-    // cannot happen and imply the child is disposable.
-    expect(settings).toContain("route.kind === 'qa'")
-    expect(settings).toContain('已失效')
+    // The ordinary Pet wheel is not the retired Feishu Invocation UI: Q&A
+    // remains a wheel action while Channel no longer exposes chat→workspace.
+    expect(overlay).toContain("capability.kind === 'builtin'")
+    expect(settings).not.toContain("action: 'rebind-chat'")
+    expect(settings).not.toContain("action: 'remove-chat'")
+    expect(settings).not.toContain('会话路由')
   })
 })
 
@@ -1761,19 +1853,34 @@ describe('a success receipt does not become furniture', () => {
 })
 
 
-describe('a bound group is not presented as one Pet owns', () => {
-  it('states that Pet is not the owner of a /bind group', async () => {
+describe('Channel onboarding describes the unified execution model', () => {
+  it('presents the default workspace only as automatic main-session placement', async () => {
     const { readFile } = await import('node:fs/promises')
     const settings = await readFile(
       path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
       'utf8',
     )
 
-    // Pet joined such a group rather than building it, so it can manage
-    // nothing there. Without this the UI reads identically to a group Pet
-    // created and owns.
-    expect(settings).toContain("route.qaOrigin === 'bound'")
-    expect(settings).toContain('Pet 非群主')
+    expect(settings).toContain('自动主会话默认工作区')
+    expect(settings).toContain('每个群独立复用自己的主会话')
+    expect(settings).toContain('不是群级执行路由')
+    expect(settings).toContain('不会改写任何已有 locus')
+  })
+
+  it('shows unified child and effective read checks without Invocation wording', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    expect(settings).toContain('统一子会话能力')
+    expect(settings).toContain("locusReadiness.childSession === 'verified'")
+    expect(settings).toContain("locusReadiness.readVerification === 'verified'")
+    expect(settings).toContain('新关联默认权限')
+    expect(settings).toContain('只读（read）')
+    expect(settings).toContain('不会创建飞书 root executor')
+    expect(settings).not.toContain('排队中的调用')
   })
 })
 

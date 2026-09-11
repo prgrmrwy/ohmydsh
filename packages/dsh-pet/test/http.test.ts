@@ -1,10 +1,14 @@
 import { EventEmitter } from 'node:events'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { Context } from '@deepseek-ai/cordis'
+import * as ConnectionPlugin from '@deepseek-ai/dsh-client-connection'
+import WebServer from '@deepseek-ai/dsh-host-webserver'
 import { describe, expect, it } from 'vitest'
 import {
   isTrustedRequest,
   optionalString,
   petRoute,
+  withBrowserAuth,
   readJsonBody,
   redactSecrets,
   requireString,
@@ -36,7 +40,13 @@ function response(): ServerResponse & { statusCode?: number; payload?: unknown }
       return this
     },
     end(text: string) {
-      ;(this as { payload?: unknown }).payload = JSON.parse(text)
+      let payload: unknown = text
+      try {
+        payload = JSON.parse(text)
+      } catch {
+        // Browser-auth rejections intentionally use DSH's minimal text body.
+      }
+      ;(this as { payload?: unknown }).payload = payload
     },
   }
   return res as unknown as ServerResponse & { statusCode?: number; payload?: unknown }
@@ -106,15 +116,16 @@ describe('strict field validation', () => {
     expect(() => strictBody('text', ['a'])).toThrow(/must be a JSON object/)
   })
 
-  it('requires non-empty strings', () => {
+  it('requires non-empty strings and trims identifiers', () => {
     expect(() => requireString({ a: '' }, 'a')).toThrow(/non-empty string/)
     expect(() => requireString({}, 'a')).toThrow(/non-empty string/)
-    expect(requireString({ a: 'value' }, 'a')).toBe('value')
+    expect(requireString({ a: '  value  ' }, 'a')).toBe('value')
   })
 
   it('permits absent optional strings but rejects wrong types', () => {
     expect(optionalString({}, 'a')).toBeUndefined()
-    expect(optionalString({ a: 'v' }, 'a')).toBe('v')
+    expect(optionalString({ a: '  v  ' }, 'a')).toBe('v')
+    expect(optionalString({ a: '   ' }, 'a')).toBeUndefined()
     expect(() => optionalString({ a: 5 }, 'a')).toThrow(/must be a string/)
   })
 })
@@ -188,6 +199,119 @@ describe('secret redaction', () => {
       apiKey: '[redacted]',
       invocations: [{ id: 'inv-1', skillDigest: 'sha256:a' }],
     })
+  })
+})
+
+describe('browser auth fence', () => {
+  it('uses pinned Connection auth over real HTTP: no cookie 401, minted cookie 200', async () => {
+    const records = new Map<unknown, unknown>()
+    const ctx = new Context()
+    ctx.provide('credentials', {
+      async modifyRecord(key: unknown, mutate: (current: unknown) => Promise<unknown>) {
+        const next = await mutate(records.get(key))
+        if (next !== undefined) records.set(key, next)
+        return records.get(key)
+      },
+    })
+    const webFiber = ctx.plugin(WebServer, { host: '127.0.0.1', port: 0 })
+    await webFiber
+    const connectionFiber = ctx.plugin(ConnectionPlugin)
+    await connectionFiber
+    ctx.webServer.register({
+      kind: 'exact',
+      ...withBrowserAuth(
+        petRoute('/dsh-pet/api/status', async () => ({ phase: 'ready' })),
+        ctx.connection,
+      ),
+    })
+    ctx.webServer.registerFallback((req, res) => {
+      if (!ctx.connection.authorizeIndex(req, res)) return
+      res.writeHead(200, { 'content-type': 'text/html' })
+      res.end('<!doctype html>')
+    })
+
+    const base = `http://127.0.0.1:${ctx.webServer.port}`
+    try {
+      const raw = await fetch(`${base}/dsh-pet/api/status`, { method: 'POST', body: '{}' })
+      expect(raw.status).toBe(401)
+      expect(await raw.text()).toBe('unauthorized')
+
+      const login = await fetch(ctx.connection.authenticatedUrl(base), { redirect: 'manual' })
+      expect(login.status).toBe(303)
+      const cookie = login.headers.get('set-cookie')?.split(';', 1)[0]
+      expect(cookie).toMatch(/^dsh-auth-/)
+
+      const gui = await fetch(`${base}/dsh-pet/api/status`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          origin: base,
+          cookie: cookie!,
+        },
+        body: '{}',
+      })
+      expect(gui.status).toBe(200)
+      expect(await gui.json()).toEqual({ ok: true, data: { phase: 'ready' } })
+    } finally {
+      await connectionFiber.dispose()
+      await webFiber.dispose()
+    }
+  })
+
+  it('returns 401 before dispatch for a loopback request without a browser cookie', async () => {
+    let dispatched = false
+    const route = withBrowserAuth(
+      petRoute('/dsh-pet/api/status', async () => {
+        dispatched = true
+        return { phase: 'ready' }
+      }),
+      { requestRejection: () => 401 },
+    )
+    const res = response()
+
+    await route.handler(request({ host: '127.0.0.1:3080' }), res)
+
+    expect(res.statusCode).toBe(401)
+    expect(res.payload).toBe('unauthorized')
+    expect(dispatched).toBe(false)
+  })
+
+  it('lets an authenticated GUI request reach the existing Pet trust and handler', async () => {
+    const route = withBrowserAuth(
+      petRoute('/dsh-pet/api/status', async () => ({ phase: 'ready' })),
+      { requestRejection: () => undefined },
+    )
+    const res = response()
+
+    await route.handler(
+      request({
+        host: '127.0.0.1:3080',
+        origin: 'http://127.0.0.1:3080',
+        cookie: 'dsh-auth-test=signed-browser-session',
+      }, '{}'),
+      res,
+    )
+
+    expect(res.statusCode).toBe(200)
+    expect(res.payload).toEqual({ ok: true, data: { phase: 'ready' } })
+  })
+
+  it('preserves the official 403 verdict before Pet dispatch', async () => {
+    let dispatched = false
+    const route = withBrowserAuth(
+      petRoute('/dsh-pet/api/status', async () => {
+        dispatched = true
+        return { phase: 'ready' }
+      }),
+      { requestRejection: () => 403 },
+    )
+    const res = response()
+
+    await route.handler(request({ host: 'evil.example.com' }), res)
+
+    expect(res.statusCode).toBe(403)
+    expect(res.payload).toBe('forbidden')
+    expect(dispatched).toBe(false)
   })
 })
 

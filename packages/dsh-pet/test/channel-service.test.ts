@@ -29,6 +29,7 @@ interface Fixture {
   readonly service: ChannelService
   readonly harness: PetHarness
   readonly client: LarkClient
+  readonly coordinator: PetCoordinator
   readonly added: { messageId: string; emoji: string }[]
   readonly replies: { messageId: string; text: string }[]
   readonly changes: number[]
@@ -55,7 +56,13 @@ function fakeCli(output: string, exitCode: number): ChildProcess {
 }
 
 async function fixture(
-  options: { failing?: boolean; cliOutput?: string; cliExit?: number } = {},
+  options: {
+    failing?: boolean
+    cliOutput?: string
+    cliExit?: number
+    subscriptionSpawnProcess?: (command: string, args: readonly string[]) => ChildProcess
+    botLifecycleInitializer?: { ensureAuthorizedChat(input: { chatId: string; eventId: string; operatorOpenId: string }): Promise<void> }
+  } = {},
 ): Promise<Fixture> {
   const created = await openPetHarness()
   const added: { messageId: string; emoji: string }[] = []
@@ -110,11 +117,18 @@ async function fixture(
     coordinator,
     locator: { locate: () => '/repos/nexus' },
     client,
+    unifiedLocusReadiness: {
+      childSession: 'verified',
+      defaultPermission: 'read',
+      readVerification: 'verified',
+    },
+    ...(options.subscriptionSpawnProcess === undefined ? {} : { subscriptionSpawnProcess: options.subscriptionSpawnProcess }),
+    ...(options.botLifecycleInitializer === undefined ? {} : { botLifecycleInitializer: options.botLifecycleInitializer }),
     spawnProcess: () => fakeCli(options.cliOutput ?? 'App ID: cli_bound01\n', options.cliExit ?? 0),
     onChange: () => changes.push(Date.now()),
     log: message => logs.push(message),
   })
-  return { service, harness: created, client, added, replies, changes, logs }
+  return { service, harness: created, client, coordinator, added, replies, changes, logs }
 }
 
 describe('lifecycle', () => {
@@ -126,6 +140,71 @@ describe('lifecycle', () => {
 
     // Upgrading Pet must not silently begin consuming Lark events.
     expect(f.service.status().phase).toBe('stopped')
+  })
+
+  it('starts a separate bot-added consumer only while enabled and never creates business work', async () => {
+    const children: Array<{ args: readonly string[]; child: EventEmitter & Record<string, unknown>; stdout: EventEmitter }> = []
+    const spawnConsumer = (_command: string, args: readonly string[]): ChildProcess => {
+      const child = new EventEmitter() as EventEmitter & Record<string, unknown>
+      const stdout = new EventEmitter() as EventEmitter & { setEncoding(e: string): void }
+      const stderr = new EventEmitter() as EventEmitter & { setEncoding(e: string): void }
+      stdout.setEncoding = () => undefined
+      stderr.setEncoding = () => undefined
+      child['stdout'] = stdout
+      child['stderr'] = stderr
+      child['stdin'] = { end: () => undefined }
+      child['exitCode'] = null
+      child['kill'] = vi.fn(() => true)
+      children.push({ args, child, stdout })
+      return child as unknown as ChildProcess
+    }
+    const ensureAuthorizedChat = vi.fn(async () => undefined)
+    const f = await fixture({
+      subscriptionSpawnProcess: spawnConsumer,
+      botLifecycleInitializer: { ensureAuthorizedChat },
+    })
+    harness = f.harness
+    f.service.start()
+    expect(children).toHaveLength(0)
+
+    await f.harness.repository.putChannelConfig({
+      enabled: true,
+      botAppId: 'cli_bound01',
+      botOpenId: 'ou_petbot00000000000000000000000',
+      allowOpenIds: ['ou_allowed0000000000000000000000'],
+      defaultWorkspaceId: 'ws-nexus',
+      updatedAt: 1,
+    })
+    await f.service.setEnabled(true)
+    expect(children).toHaveLength(2)
+    const lifecycle = children.find(item => item.args.includes('im.chat.member.bot.added_v1'))
+    expect(lifecycle).toBeDefined()
+    lifecycle!.stdout.emit('data', JSON.stringify({
+      schema: '2.0',
+      header: { event_type: 'im.chat.member.bot.added_v1', event_id: 'evt-add-1' },
+      event: {
+        chat_id: 'oc-project',
+        operator_id: { open_id: 'ou_allowed0000000000000000000000' },
+      },
+    }) + '\n')
+    await vi.waitFor(() => expect(ensureAuthorizedChat).toHaveBeenCalledTimes(1))
+    expect(f.harness.repository.listTasks()).toHaveLength(0)
+    expect(f.harness.repository.listInvocations()).toHaveLength(0)
+
+    const unverified = children.find(item => item.args.includes('im.chat.member.bot.added_v1'))!
+    unverified.stdout.emit('data', JSON.stringify({
+      schema: '2.0',
+      header: { event_type: 'im.chat.member.bot.added_v1', event_id: 'evt-add-unverified' },
+      event: { chat_id: 'oc-unverified' },
+    }) + '\n')
+    await vi.waitFor(() => {
+      expect(f.harness.repository.getChannelConfig().lifecycleDiagnostic)
+        .toMatchObject({ kind: 'bot-added-unverified' })
+    })
+    expect(f.service.status().diagnostic).toContain('首次 allowlist @ 可补齐')
+
+    await f.service.setEnabled(false)
+    for (const item of children) expect(item.child['kill']).toHaveBeenCalledWith('SIGTERM')
   })
 
   it('does not start after disable wins an in-flight identity probe', async () => {
@@ -163,7 +242,14 @@ describe('lifecycle', () => {
     const f = await fixture()
     harness = f.harness
 
-    expect(f.service.status()).toEqual({ phase: 'stopped' })
+    expect(f.service.status()).toEqual({
+      phase: 'stopped',
+      unifiedLocus: {
+        childSession: 'verified',
+        defaultPermission: 'read',
+        readVerification: 'verified',
+      },
+    })
     expect(f.service.bindState()).toBeUndefined()
   })
 
@@ -196,8 +282,9 @@ describe('settling an Invocation', () => {
 
     await f.service.settle('inv-1', 'succeeded')
 
-    // The agent replies; the Host only reflects state.
-    expect(f.added).toEqual([{ messageId: 'om_trigger', emoji: 'DONE' }])
+    // Legacy Feishu Invocation feedback is retired; ordinary wheel settlement
+    // must not consume an invocation_channel row.
+    expect(f.added).toEqual([])
     expect(f.replies).toEqual([])
   })
 
@@ -208,7 +295,7 @@ describe('settling an Invocation', () => {
 
     await f.service.settle('inv-1', 'succeeded')
 
-    expect(f.added).toEqual([{ messageId: 'om_trigger', emoji: 'DONE' }])
+    expect(f.added).toEqual([])
     expect(f.replies).toEqual([])
   })
 
@@ -219,7 +306,7 @@ describe('settling an Invocation', () => {
 
     await f.service.settle('inv-1', 'failed')
 
-    expect(f.added).toEqual([{ messageId: 'om_trigger', emoji: 'CRY' }])
+    expect(f.added).toEqual([])
     expect(f.replies).toEqual([])
   })
 
@@ -241,6 +328,53 @@ describe('settling an Invocation', () => {
     // The caller is the event projection that also settles Pet's own state;
     // an exception here would strand the Task.
     await expect(f.service.settle('inv-1', 'succeeded')).resolves.toBeUndefined()
+  })
+})
+
+describe('unified locus lifecycle seam', () => {
+  it('surfaces a Host-provided unavailable diagnostic without enabling a controller', async () => {
+    const f = await fixture()
+    harness = f.harness
+    const service = new ChannelService({
+      repository: f.harness.repository,
+      coordinator: f.coordinator,
+      locator: { locate: () => '/repos/nexus' },
+      client: f.client,
+      locusDiagnostic: 'Unified locus child adapter is not available.',
+      log: message => f.logs.push(message),
+    })
+
+    expect(service.status()).toEqual({
+      phase: 'stopped',
+      diagnostic: 'Unified locus child adapter is not available.',
+      unifiedLocus: {
+        childSession: 'unavailable',
+        defaultPermission: 'read',
+        readVerification: 'unavailable',
+        diagnostic: 'Unified locus child adapter is not available.',
+      },
+    })
+  })
+
+  it('disposes the locus observer without changing channel shutdown', async () => {
+    const f = await fixture()
+    harness = f.harness
+    const dispose = vi.fn()
+    const handle = vi.fn(async () => ({ kind: 'refused' as const, reason: 'turn-correlation-unavailable' as const }))
+    const service = new ChannelService({
+      repository: f.harness.repository,
+      coordinator: f.coordinator,
+      locator: { locate: () => '/repos/nexus' },
+      client: f.client,
+      locusController: { handle, dispose },
+      log: message => f.logs.push(message),
+    })
+
+    expect(service.status().phase).toBe('stopped')
+    service.stop()
+
+    expect(dispose).toHaveBeenCalledTimes(1)
+    expect(service.status().phase).toBe('stopped')
   })
 })
 
@@ -272,7 +406,7 @@ describe('safe intake diagnostics', () => {
       }),
     )
 
-    expect(f.logs).toContain('dsh-pet channel: inbound ignored: not-allowed-sender')
+    expect(f.logs).toContain('dsh-pet channel: inbound unroutable: Unified locus capability is unavailable; legacy Feishu execution is retired.')
     const text = f.logs.join('\n')
     for (const forbidden of ['private payload', 'om_secret_message', 'oc_secret_chat', 'ou_stranger_secret']) {
       expect(text).not.toContain(forbidden)

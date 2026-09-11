@@ -81,7 +81,7 @@ export const PET_CSS = `
 .dshpet-mascot{position:relative;z-index:3;
   width:72px;height:72px;border:none;padding:0;border-radius:50%;cursor:grab;
   display:flex;align-items:center;justify-content:center;font-size:38px;line-height:1;
-  background:var(--dsw-alias-bg-layer-1,#ffffff);
+  background:var(--dsw-specific-menu,#ffffff);
   color:var(--dsw-alias-label-primary,#1f2329);
   box-shadow:0 4px 16px rgba(0,0,0,.18);transition:transform .12s ease,box-shadow .12s ease}
 .dshpet-mascot:hover{transform:scale(1.06);box-shadow:0 6px 22px rgba(0,0,0,.24)}
@@ -90,7 +90,7 @@ export const PET_CSS = `
 .dshpet-badge{position:absolute;top:-2px;right:-2px;min-width:18px;height:18px;padding:0 5px;
   border-radius:9px;font-size:11px;line-height:18px;text-align:center;font-variant-numeric:tabular-nums;
   background:var(--dsw-alias-label-primary,#0f1115);
-  color:var(--dsw-alias-bg-layer-1,#fff);pointer-events:none}
+  color:var(--dsw-specific-menu,#fff);pointer-events:none}
 .dshpet-badge[data-state="degraded"]{background:var(--dsw-alias-state-error-primary,#f54a45)}
 .dshpet-visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;
   overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
@@ -107,7 +107,7 @@ export const PET_CSS = `
 .dshpet-slot{pointer-events:auto;cursor:pointer;opacity:0;
   animation:dshpet-slot-in .28s ease forwards}
 @keyframes dshpet-slot-in{from{opacity:0}to{opacity:1}}
-.dshpet-slot-face{fill:var(--dsw-alias-bg-layer-1,#ffffff);
+.dshpet-slot-face{fill:var(--dsw-specific-menu,#ffffff);
   stroke:var(--dsw-alias-border-l1,#e4e6eb);stroke-width:1;transition:fill .12s ease}
 /* Hover reads as a slightly deeper fill: enough to locate the slice without
    competing with the content the wheel floats over. */
@@ -125,7 +125,7 @@ export const PET_CSS = `
   display:flex;flex-direction:column;gap:2px;pointer-events:none}
 .dshpet-wheel-item{position:absolute;width:1px;height:1px;padding:0;margin:-1px;
   overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0;
-  background:var(--dsw-alias-bg-layer-1,#fff);font:inherit;font-size:13px;cursor:pointer}
+  background:var(--dsw-specific-menu,#fff);font:inherit;font-size:13px;cursor:pointer}
 .dshpet-wheel-item:focus-visible{position:static;width:auto;height:auto;margin:0;
   overflow:visible;clip:auto;white-space:normal;padding:6px 10px;border-radius:8px;
   pointer-events:auto;outline:2px solid var(--dsw-alias-state-business-primary,#4176e6)}
@@ -158,7 +158,7 @@ export const PET_CSS = `
      rather than being the 12px this rule states. */
   margin:0;
   transform:translateX(-50%);max-width:260px;padding:10px;
-  border-radius:8px;background:var(--dsw-alias-bg-layer-1,#fff);
+  border-radius:8px;background:var(--dsw-specific-menu,#fff);
   box-shadow:0 8px 28px rgba(0,0,0,.22);font-size:13px;line-height:20px}
 .dshpet-wheel .dshpet-wheel-note.dshpet-wheel-receipt{
   /* A receipt reports what already happened, so it must not sit in front of
@@ -173,9 +173,14 @@ export const PET_CSS = `
 
 
 .dshpet-panel{position:absolute;bottom:78px;right:0;width:340px;max-height:60vh;overflow:auto;
-  padding:12px;border-radius:12px;background:var(--dsw-alias-bg-layer-1,#ffffff);
+  padding:12px;border-radius:12px;background:var(--dsw-specific-menu,#ffffff);
   box-shadow:0 8px 28px rgba(0,0,0,.22);color:var(--dsw-alias-label-primary,#1f2329)}
 .dshpet-panel h2{font-size:13px;margin:0 0 8px;font-weight:600}
+.dshpet-panel-receipt{position:absolute;bottom:48px;right:0;width:340px;box-sizing:border-box;
+  margin:0;padding:8px 10px;border-radius:8px;background:var(--dsw-specific-menu,#ffffff);
+  box-shadow:0 4px 16px rgba(0,0,0,.18);font-size:12px;line-height:18px}
+.dshpet-panel-receipt.dshpet-wheel-receipt{color:var(--dsw-alias-state-success-primary,#34a853);
+  animation:dshpet-receipt-fade 6s ease-in forwards}
 .dshpet-tabs{display:flex;gap:4px;margin-bottom:8px}
 .dshpet-tab{border:none;background:transparent;font:inherit;font-size:12px;padding:4px 8px;
   border-radius:6px;cursor:pointer;color:var(--dsw-alias-label-secondary,#646a73)}
@@ -195,7 +200,7 @@ export const PET_CSS = `
 .dshpet-actions{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;align-items:center}
 .dshpet-answer{flex:1;min-width:140px;font:inherit;font-size:12px;padding:4px 8px;border-radius:6px;
   border:1px solid var(--dsw-alias-border-l2,#1f232914);
-  background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-label-primary,#1f2329)}
+  background:var(--dsw-specific-menu,#fff);color:var(--dsw-alias-label-primary,#1f2329)}
 .dshpet-answer:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:1px}
 .dshpet-action{border:none;font:inherit;font-size:12px;padding:4px 8px;border-radius:6px;
   cursor:pointer;background:var(--dsw-alias-interactive-bg-hover,#0000000f);
@@ -287,7 +292,7 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
   color:var(--dsw-alias-label-secondary,#61666b)}
 .dshpet-settings .dshpet-subtab:hover{color:var(--dsw-alias-label-primary,#0f1115)}
 .dshpet-settings .dshpet-subtab[aria-selected="true"]{
-  background:var(--dsw-alias-bg-layer-3,#fff);
+  background:var(--dsw-specific-tip,#fff);
   color:var(--dsw-alias-label-primary,#0f1115);font-weight:500}
 .dshpet-settings .dshpet-subtab:focus-visible{
   outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:1px}
@@ -322,7 +327,7 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-fold-title{flex:1;min-width:0}
 /* A one-line summary of what is inside, so the group can be judged closed. */
 .dshpet-settings .dshpet-fold-note{flex:none;
-  font:var(--dsw-font-xxs-12,400 12px/18px inherit);
+  font:var(--dsw-font-xs-13,400 12px/18px inherit);
   color:var(--dsw-alias-label-tertiary,#8f959e)}
 .dshpet-settings .dshpet-fold-body{display:flex;flex-direction:column;gap:8px;
   padding:0 0 16px}
@@ -333,7 +338,7 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-card{display:flex;flex-direction:column;gap:10px;
   padding:12px 14px;border-radius:16px;
   border:.5px solid var(--dsw-alias-border-l4,#0000001a);
-  background:var(--dsw-alias-bg-layer-3,#fff)}
+  background:var(--dsw-specific-tip,#fff)}
 .dshpet-settings .dshpet-card-head{display:flex;align-items:center;gap:10px;
   flex-wrap:wrap}
 .dshpet-settings .dshpet-card-name{min-width:0;
@@ -364,11 +369,11 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
    does not. */
 .dshpet-settings .dshpet-callout{display:flex;flex-direction:column;gap:4px;
   padding:10px 12px;border-radius:8px;border-left:3px solid transparent;
-  font:var(--dsw-font-xxs-12,400 12px/18px inherit);
+  font:var(--dsw-font-xs-13,400 12px/18px inherit);
   background:var(--dsw-alias-bg-module-platform,#0000000a);
   color:var(--dsw-alias-label-secondary,#61666b)}
 .dshpet-settings .dshpet-callout[data-tone="warn"]{
-  border-left-color:var(--dsw-alias-state-warn-primary,#f59e0b)}
+  border-left-color:var(--dsw-alias-state-warn-label,#f59e0b)}
 .dshpet-settings .dshpet-callout[data-tone="danger"]{
   border-left-color:var(--dsw-alias-state-error-primary,#ec1313)}
 
@@ -384,7 +389,7 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-input{width:100%;max-width:360px;box-sizing:border-box;
   height:32px;padding:0 10px;font:inherit;font-size:13px;line-height:20px;
   color:var(--dsw-alias-label-primary,#1f2329);
-  background:var(--dsw-alias-bg-layer-3,#fff);
+  background:var(--dsw-specific-tip,#fff);
   border:.5px solid var(--dsw-alias-border-l4,#0000001a);border-radius:8px;outline:none}
 .dshpet-settings .dshpet-input::placeholder{color:var(--dsw-alias-label-dimmed,#cfd3d6)}
 .dshpet-settings .dshpet-input:focus,.dshpet-settings .dshpet-input:focus-visible{
@@ -421,9 +426,9 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-action:hover:not(:disabled){
   background:var(--dsw-alias-interactive-bg-hover,#0000000a)}
 .dshpet-settings .dshpet-action:disabled{opacity:.45;cursor:not-allowed}
-.dshpet-settings .dshpet-item-hint{font:var(--dsw-font-xxs-12,400 12px/18px inherit);
+.dshpet-settings .dshpet-item-hint{font:var(--dsw-font-xs-13,400 12px/18px inherit);
   color:var(--dsw-alias-label-tertiary,#8f959e);max-width:620px;margin:0}
-.dshpet-settings .dshpet-error{font:var(--dsw-font-xxs-12,400 12px/18px inherit);
+.dshpet-settings .dshpet-error{font:var(--dsw-font-xs-13,400 12px/18px inherit);
   color:var(--dsw-alias-state-error-primary,#f54a45)}
 .dshpet-settings .dshpet-empty{font:var(--dsw-font-xs-13,400 13px/20px inherit);
   color:var(--dsw-alias-label-tertiary,#8f959e);padding:6px 0}
@@ -466,7 +471,7 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-status[data-tone="enabled"]{
   --dshpet-tone:var(--dsw-alias-state-success-primary,#1a7f37)}
 .dshpet-settings .dshpet-status[data-tone="warn"]{
-  --dshpet-tone:var(--dsw-alias-state-warn-primary,#f59e0b)}
+  --dshpet-tone:var(--dsw-alias-state-warn-label,#f59e0b)}
 .dshpet-settings .dshpet-status[data-tone="danger"]{
   --dshpet-tone:var(--dsw-alias-state-error-primary,#ec1313)}
 /* Read-only value display: a binding shows its value until you choose Edit.
@@ -524,7 +529,7 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
   grid-template-columns:minmax(140px,1fr) minmax(160px,1.4fr) auto;
   gap:12px;align-items:center;padding:10px 12px;border-radius:12px;
   border:.5px solid var(--dsw-alias-border-l4,#0000001a);
-  background:var(--dsw-alias-bg-layer-3,#fff)}
+  background:var(--dsw-specific-tip,#fff)}
 .dshpet-env-key{display:flex;flex-direction:column;gap:2px;min-width:0}
 /* The name carries an inline badge ("覆盖全局" / "已被覆盖"), so it is a flex
    row on a fixed 20px line: as a bare block it inherited a normal
@@ -590,7 +595,7 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 /* In-app Host directory browser, used where no OS picker exists. */
 .dshpet-browser{display:flex;flex-direction:column;gap:8px;padding:12px;
   border:.5px solid var(--dsw-alias-border-l4,#0000001a);border-radius:12px;
-  background:var(--dsw-alias-bg-layer-3,#fff)}
+  background:var(--dsw-specific-tip,#fff)}
 .dshpet-crumbs{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
 .dshpet-browser-list{display:flex;flex-direction:column;gap:2px;
   max-height:220px;overflow:auto}
@@ -613,7 +618,7 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
    surface, so the chip previews exactly what the mascot will look like. */
 .dshpet-swatches{display:flex;flex-wrap:wrap;gap:8px}
 .dshpet-settings .dshpet-swatch{width:36px;height:36px;padding:0;border-radius:50%;
-  background:var(--dsw-alias-bg-layer-1,#fff);
+  background:var(--dsw-specific-menu,#fff);
   display:inline-flex;align-items:center;justify-content:center;font-size:17px;
   line-height:1;cursor:pointer;
   border:1px solid var(--dsw-alias-border-l2,#0000001a);
@@ -635,9 +640,9 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-action-danger{
   color:var(--dsw-alias-state-error-primary,#ec1313)}
 .dshpet-settings .dshpet-action-danger:hover:not(:disabled){
-  background:var(--dsw-alias-interactive-bg-hover-danger,#ec13131a)}
+  background:#ec13131a}
 .dshpet-settings .dshpet-action-sm{height:28px;padding:0 10px;border-radius:14px;
-  font:var(--dsw-font-xxs-12,400 12px/18px inherit)}
+  font:var(--dsw-font-xs-13,400 12px/18px inherit)}
 .dshpet-settings .dshpet-actions{display:flex;gap:8px;flex-wrap:wrap;
   align-items:center;margin-top:0}
 /* Inline code, for paths and identifiers. */
@@ -655,6 +660,6 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 /* Installed-Skill row heading. */
 .dshpet-settings .dshpet-task-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .dshpet-settings .dshpet-task-name{
-  font:var(--dsw-font-s-strong-14,500 14px/22px inherit);
+  font:500 14px/22px var(--dsw-font-family,inherit);
   color:var(--dsw-alias-label-primary,#0f1115)}
 `

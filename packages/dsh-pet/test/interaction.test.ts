@@ -193,6 +193,69 @@ describe('a capability runs on a single click', () => {
   })
 })
 
+describe('default Q&A interaction', () => {
+  it('calls the unified route with the current session and renders a reuse receipt', async () => {
+    const calls: Array<{ url: string; body?: string }> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({ url: String(url), ...(typeof init?.body === 'string' ? { body: init.body } : {}) })
+        if (String(url).includes('locus-default-qa')) {
+          return {
+            status: 200,
+            text: async () => JSON.stringify({
+              ok: true,
+              data: {
+                action: 'default-qa',
+                created: false,
+                reused: true,
+                locus: { endpoint: { chatId: 'oc_qa', chatName: '研发答疑' } },
+              },
+            }),
+          }
+        }
+        return {
+          status: 200,
+          text: async () => JSON.stringify({
+            ok: true,
+            data: {
+              lifecycle: { phase: 'ready' },
+              capabilities: [{
+                id: 'qa-group', label: '答疑群', description: '统一 locus Q&A', skillName: 'qa-group',
+                kind: 'builtin', available: true, showAsShortcut: true,
+              }],
+              tasks: [],
+            },
+          }),
+        }
+      }),
+    )
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const reactRoot = createRoot(host)
+    mounted = { root: reactRoot, host }
+    reactRoot.render(createElement(PetOverlay, {
+      currentSource: { kind: 'session', sessionId: 'main-live', title: '研发主会话' },
+    } as never))
+    await settle()
+
+    mascotOf(host).dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    await settle()
+    const item = [...host.querySelectorAll('button')].find(button =>
+      (button.textContent ?? '').includes('答疑群'),
+    )
+    expect(item).toBeDefined()
+    item?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await settle()
+
+    const request = calls.find(call => call.url.includes('locus-default-qa'))
+    expect(request).toBeDefined()
+    expect(JSON.parse(request?.body ?? '{}')).toEqual({ parentSessionId: 'main-live' })
+    expect(host.textContent).toContain('已打开本会话的答疑群「研发答疑」')
+    expect(calls.some(call => call.url.includes('invocation-create'))).toBe(false)
+  })
+})
+
 describe('dragging moves Pet on the compositor, not through layout', () => {
   it('writes transform and never left/top', async () => {
     stubFetch({ capabilities: [], lifecycle: { phase: 'ready' } })

@@ -10,11 +10,13 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-host-webserver'
+import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-presets'
 import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-session-title'
+import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-skill'
 import type {} from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@deepseek-ai/dsh-tools'
@@ -37,18 +39,54 @@ import { ensurePetDirectories, resolvePetPaths, type PetPaths } from './host/pat
 import { rebuildProjection } from './host/projection.js'
 import { PetRepository } from './host/repository.js'
 import { ChannelService } from './host/channel/service.js'
-import { createLarkCliClient } from './host/channel/lark.js'
-import { createQaGroup } from './host/qa/action.js'
-import { bindExistingGroup, unbindGroup } from './host/qa/bind.js'
-import { renderBindReceipt, renderUnbindReceipt } from './host/qa/bind-receipt.js'
-import { QaDelivery } from './host/qa/delivery.js'
-import { probeSubagentSeam, type HostContextLike } from './host/qa/subagents.js'
+import { createLarkCliClient, createLocusLarkPort } from './host/channel/lark.js'
 import { createPetRoutes } from './host/routes.js'
+import { withBrowserAuth } from './host/http.js'
 import { createPetEnvContributor } from './host/shell-env.js'
 import { createPetSkillProvider, resolveInvocationSkill } from './host/skill-provider.js'
 import { createWorktreeProvider } from './host/worktree-adapter.js'
 import { loadWorktreeStatus } from './host/worktree-status.js'
 import { registerPetTools } from './host/tools.js'
+import {
+  LocusRepository,
+  type LocusStartupCompensators,
+} from './host/locus/persistence.js'
+import type { DeliveryRecord } from './host/locus/delivery.js'
+import { proveLiveStartupDelivery } from './host/locus/startup-recovery.js'
+import {
+  createLocusChildAdapter,
+  probeLocusChildPorts,
+  type LocusHostContextLike,
+} from './host/locus/child.js'
+import { createLocusChildDelivery } from './host/locus/child-delivery.js'
+import {
+  createLocusChannelCapability,
+  unavailableLocusChannelCapability,
+} from './host/channel/locus-capability.js'
+import { createLocusTurnObserver } from './host/locus/turn-observer.js'
+import { createLocusManagementPort } from './host/locus/management.js'
+import { createLocusResolution } from './host/locus/resolution.js'
+import { createLocusController } from './host/locus/controller.js'
+import { ControllerLocusRepositoryAdapter } from './host/locus/controller-persistence-adapter.js'
+import { createProductionLocusDshPort } from './host/locus/dsh-port.js'
+import { buildLocusDiagnostics } from './host/locus/diagnostics.js'
+import { reconcileLocusChildren } from './host/locus/reconcile.js'
+import {
+  createPrepublicationCompositionLookup,
+  LocusPrepublicationStagingRegistry,
+} from './host/locus/prepublication-staging.js'
+import { asRetiredAssociationStore } from './host/locus/retirement.js'
+import { createDurableLocusAuthorizationResolver } from './host/locus/admission.js'
+import { createLocusControlDispatcher } from './host/locus/control.js'
+import { createLocusPermissionMutation } from './host/locus/permission-mutation.js'
+import { asLocusContextRepository } from './host/locus/context-repository.js'
+import { renderLocusDeliveryPrompt } from './host/locus/context.js'
+import {
+  composeLocusChild,
+  type LocusChildPermission,
+  type LocusCandidateAgent,
+  type LocusCompositionPorts,
+} from './host/locus/composition.js'
 import { currentAllowlist } from './host/skill-provider.js'
 import { removeLegacyState } from './host/migrate.js'
 import { petDomainSpec } from './host/spec.js'
@@ -75,6 +113,10 @@ export const inject = [
   'storageDomain',
   'workspaceRegistry',
   'sessions',
+  // Unified locus provisioning/recovery uses the Host business API, not a
+  // display-only session registry. Declaring it prevents Pet from racing ahead
+  // of the service and silently publishing a permanently unavailable channel.
+  'sessionController',
   // Renaming the executor is a visible projection only; a missing service
   // would break Agent creation, so it is declared like every other inject.
   'sessionTitle',
@@ -88,6 +130,9 @@ export const inject = [
   'tools',
   'skills',
   'webServer',
+  // Raw WebServer routes do not inherit DSH browser-session auth. Requiring
+  // Connection lets every Pet management route use its official fence.
+  'connection',
 ]
 
 /** Pet Host plugin configuration. */
@@ -190,6 +235,23 @@ async function initialize(
   }, 'dsh-pet: close durable domain')
 
   const repository = new PetRepository(domain)
+  // The additive locus store is a separate source of truth. It is opened on
+  // the same durable domain but never falls back to legacy chat bindings.
+  const locusRepository = new LocusRepository(domain)
+  // Startup recovery is deliberately deferred until the exact child runtime,
+  // turn observer and operation-owned compensation ports have been composed.
+  // Running it here with no options would persist manual debt before the Host
+  // has had a chance to prove a live turn or safely compensate owned resources.
+  // Shared by scoped locus replies, control receipts, and channel probes. It is
+  // fixed to the dsh-pet profile and bot identity by the Lark adapter.
+  const larkClient = createLarkCliClient()
+  let currentLocusTurnProof: (childSessionId: string) =>
+    | { readonly executionId: string; readonly turnId: string }
+    | undefined = () => undefined
+  const locusContextRepository = asLocusContextRepository(
+    locusRepository,
+    childSessionId => currentLocusTurnProof(childSessionId),
+  )
 
   const workspaceId = await lifecycle.contain('Pet Workspace', () =>
     ensurePetWorkspace(ctx.workspaceRegistry as never, paths),
@@ -400,6 +462,14 @@ async function initialize(
   const composedAgents = new WeakSet<object>()
   const allowlistAgents = new WeakSet<object>()
   const contextToolAgents = new WeakSet<object>()
+  /**
+   * `Context.inject()` starts an asynchronous Cordis fiber. Keep one promise
+   * per live Agent context so concurrent create/resume/observer paths cannot
+   * register the same scoped service twice or observe a half-installed scope.
+   */
+  const installingScopes = new WeakMap<object, Promise<void>>()
+  const scopeComplete = (key: object, includeAllowlist: boolean): boolean =>
+    contextToolAgents.has(key) && (!includeAllowlist || allowlistAgents.has(key))
 
   /** Install the Pet-owned scoped surface on one live executor Agent.
    *
@@ -407,45 +477,70 @@ async function initialize(
    * executor form also receives the allowlist Skill provider; a
    * workspace-resident executor deliberately uses its workspace's Skills.
    * The marker makes repeated installation idempotent without swallowing a
-   * duplicate-registration error.
+   * duplicate-registration error. The returned promise settles only after
+   * every `inject()` fiber has run its callback and the markers are true.
    */
-  const installPetScope = (agentCtx: unknown, includeAllowlist: boolean): void => {
+  const installPetScope = async (agentCtx: unknown, includeAllowlist: boolean): Promise<void> => {
     const scoped = agentCtx as Context
     const key = scoped as unknown as object
-    if (composedAgents.has(key)) return
+    if (scopeComplete(key, includeAllowlist)) return
 
-    // Agent contexts are fresh fibers and do not inherit this plugin's inject
-    // grants, so each scoped registration declares its dependency locally.
-    // Mark each component only after its registration succeeds: a partial
-    // failure can then be retried without duplicating the component that
-    // already exists.
-    if (includeAllowlist && !allowlistAgents.has(key)) {
-      scoped.inject(['skills'], skillCtx => {
-        skillCtx.effect(
-          () =>
-            skillCtx.skills.registerProvider(() => createPetSkillProvider(repository, paths)),
-          'dsh-pet: scoped allowlist Skill provider',
-        )
-        allowlistAgents.add(key)
-      })
-    }
+    const previous = installingScopes.get(key)
+    if (previous !== undefined) await previous
+    if (scopeComplete(key, includeAllowlist)) return
 
-    // `tools.register()` chooses its layer from the CALLING context's scope
-    // tag. Calling it on the Host silently publishes globally, which is the
-    // original leak this change fixes.
-    if (!contextToolAgents.has(key)) {
-      scoped.inject(['tools'], toolCtx => {
-        toolCtx.effect(
-          () => registerPetTools(toolCtx, { repository }),
-          'dsh-pet: scoped caller-bound Agent tools',
+    const installation = (async (): Promise<void> => {
+      // Another caller may have completed while this request was waiting on a
+      // prior installation. Re-check before touching either registry.
+      if (scopeComplete(key, includeAllowlist)) return
+
+      // Agent contexts are fresh fibers and do not inherit this plugin's inject
+      // grants, so each scoped registration declares its dependency locally.
+      // Mark each component only after its registration succeeds: a partial
+      // failure can then be retried without duplicating the component that
+      // already exists.
+      if (includeAllowlist && !allowlistAgents.has(key)) {
+        await Promise.resolve(
+          scoped.inject(['skills'], skillCtx => {
+            skillCtx.effect(
+              () =>
+                skillCtx.skills.registerProvider(() => createPetSkillProvider(repository, paths)),
+              'dsh-pet: scoped allowlist Skill provider',
+            )
+            allowlistAgents.add(key)
+          }),
         )
-        contextToolAgents.add(key)
-      })
+      }
+
+      // `tools.register()` chooses its layer from the CALLING context's scope
+      // tag. Calling it on the Host silently publishes globally, which is the
+      // original leak this change fixes.
+      if (!contextToolAgents.has(key)) {
+        await Promise.resolve(
+          scoped.inject(['tools'], toolCtx => {
+            toolCtx.effect(
+              () => registerPetTools(toolCtx, {
+                repository,
+                locusRepository: locusContextRepository,
+              }),
+              'dsh-pet: scoped caller-bound Agent tools',
+            )
+            contextToolAgents.add(key)
+          }),
+        )
+      }
+
+      if (!contextToolAgents.has(key) || (includeAllowlist && !allowlistAgents.has(key))) {
+        throw new PetError('INTERNAL', 'Pet scoped surface dependencies were not installed')
+      }
+      composedAgents.add(key)
+    })()
+    installingScopes.set(key, installation)
+    try {
+      await installation
+    } finally {
+      if (installingScopes.get(key) === installation) installingScopes.delete(key)
     }
-    if (!contextToolAgents.has(key) || (includeAllowlist && !allowlistAgents.has(key))) {
-      throw new PetError('INTERNAL', 'Pet scoped surface dependencies were not installed')
-    }
-    composedAgents.add(key)
   }
 
   /** Mount the selected preset, then install the Pet-owned scoped surface.
@@ -461,7 +556,7 @@ async function initialize(
   ): Promise<void> => {
     const scoped = agentCtx as Context
     await ctx.agentPresets.mount(scoped as never, presetId as never)
-    installPetScope(scoped, includeAllowlist)
+    await installPetScope(scoped, includeAllowlist)
   }
 
   /** Whether an Agent already carries the Pet-owned scoped surface. */
@@ -477,7 +572,7 @@ async function initialize(
    * Tasks, its allowlist provider. Listener failures are contained because a
    * synchronous throw from `agent/created` would veto publication.
    */
-  const composeForeignExecutor = (agent: unknown): void => {
+  const composeForeignExecutor = async (agent: unknown): Promise<void> => {
     const view = agent as { session?: { id?: unknown }; ctx?: unknown } | undefined
     const sessionId = view?.session?.id
     if (sessionId === undefined || view?.ctx === undefined) return
@@ -503,7 +598,7 @@ async function initialize(
     //   this form.
     if (isForkChildTaskForm(task.sourceKind)) return
     try {
-      installPetScope(view.ctx, task.residentWorkspaceId === undefined)
+      await installPetScope(view.ctx, task.residentWorkspaceId === undefined)
     } catch (error) {
       ctx.logger.warn(
         `dsh-pet: could not scope externally loaded executor ${String(sessionId)} (${
@@ -513,10 +608,132 @@ async function initialize(
     }
   }
 
+  /**
+   * Compose a unified locus child while the runtime is still creating it.
+   *
+   * This branch is SYNCHRONOUS on purpose: at this boundary a throw vetoes
+   * publication and rolls the agent back, so a locus child can never start
+   * its first turn without its caller-bound surface or with a file policy
+   * wider than its locus was granted. The ordinary Pet executor path stays
+   * asynchronous below — it repairs an already-published agent, which is a
+   * different guarantee.
+   */
+  const locusPrepublication = new LocusPrepublicationStagingRegistry()
+  ctx.effect(
+    () => () => { locusPrepublication.dispose() },
+    'dsh-pet: dispose locus pre-publication staging',
+  )
+  const durableLocusCompositionLookup = {
+    find: (sessionId: string) => {
+      const matches = locusRepository.findByChildSessionId(sessionId)
+      // Exactly one active generation may own a child. Anything else is
+      // unproven identity, and the composer refuses rather than guessing.
+      if (matches.length !== 1) return undefined
+      const record = matches[0]
+      if (record === undefined || record.state !== 'active') return undefined
+      if (record.childSessionId !== sessionId) return undefined
+      return {
+        parentSessionId: record.parentSessionId,
+        childSessionId: sessionId,
+        locusId: record.id,
+        generation: record.generation,
+        permission: record.permission.effective,
+      }
+    },
+  }
+  const locusCompositionPorts: LocusCompositionPorts = {
+    // Durable rows serve restores; the one-shot staging fallback serves the
+    // fresh `agent/created` emitted before active publication.
+    lookup: createPrepublicationCompositionLookup({
+      durable: durableLocusCompositionLookup,
+      staging: locusPrepublication,
+    }),
+    // The scoped surface is registered on the CHILD's own scope: resolving
+    // `tools` from the Host scope would publish `pet_context` globally.
+    surface: {
+      install: (agent) => {
+        const scope = agent.scope as unknown as {
+          get(service: string): { register(definition: unknown): unknown } | undefined
+        }
+        const tools = scope.get('tools')
+        if (tools === undefined) {
+          throw new PetError('INTERNAL', 'Agent scope exposes no tools service')
+        }
+        registerPetTools(agent.scope as never, {
+          repository,
+          locusRepository: locusContextRepository,
+          locusReply: {
+            locusRepository: locusContextRepository,
+            lark: larkClient,
+          },
+        })
+      },
+    },
+    ...(() => {
+      const policy = ctx.get('sandboxPolicy') as
+        | { resolve?: (input: { session: unknown }) => { mode?: string } | undefined }
+        | undefined
+      const sessions = ctx.get('sessions') as { get?: (id: never) => unknown } | undefined
+      if (policy?.resolve === undefined || sessions?.get === undefined) {
+        // Absent policy seam keeps locus children unavailable rather than
+        // publishing one whose file access was never verified.
+        return {}
+      }
+      const modeOf = (permission: LocusChildPermission): string =>
+        permission === 'write' ? 'workspace-write' : 'read-only'
+      return {
+        policy: {
+          apply: (sessionId: string, permission: LocusChildPermission) => {
+            const session = sessions.get?.(sessionId as never)
+            if (session === undefined) {
+              throw new PetError('INTERNAL', `Session ${sessionId} is not resolvable`)
+            }
+            // The official write seam is a free function exported by
+            // dsh-sandbox-policy. The service itself only resolves policy;
+            // inventing `service.setMode` type-checks against a test double but
+            // is absent in the real Host and leaves every locus child
+            // uncomposed.
+            setSandboxMode(session as never, modeOf(permission) as never)
+          },
+          resolve: (sessionId: string): LocusChildPermission | undefined => {
+            const session = sessions.get?.(sessionId as never)
+            if (session === undefined) return undefined
+            const resolved = policy.resolve?.({ session })?.mode
+            if (resolved === 'read-only') return 'read'
+            return resolved === 'workspace-write' ? 'write' : undefined
+          },
+        },
+      }
+    })(),
+  }
+
   ctx.effect(
     () =>
       ctx.on('agent/created', (payload: { agent?: unknown }) => {
-        composeForeignExecutor(payload?.agent)
+        const agent = payload?.agent as
+          | { session?: { id?: unknown }; ctx?: unknown }
+          | undefined
+        const sessionId = agent?.session?.id
+        // Call the locus composer exactly ONCE. A durable lookup is reusable,
+        // but the fresh-child staging fallback is a one-shot claim; a
+        // preliminary "is locus?" probe would consume it and make the real
+        // composition fail as a duplicate publication. `composed:false` is
+        // the ordinary-session answer and falls through unchanged.
+        if (typeof sessionId === 'string' && agent?.ctx !== undefined) {
+          const candidate: LocusCandidateAgent = { sessionId, scope: agent.ctx as never }
+          // Rethrown deliberately: only a candidate that matched durable or
+          // staged locus identity may veto publication.
+          const result = composeLocusChild(candidate, locusCompositionPorts)
+          if (result.composed) {
+            composedAgents.add(agent.ctx as object)
+            contextToolAgents.add(agent.ctx as object)
+            return
+          }
+        }
+        // Cordis event listeners are observe-only here. Await the scoped
+        // installation without allowing an async rejection to escape into the
+        // event dispatcher; dispatch itself performs a late fail-closed check.
+        void composeForeignExecutor(payload?.agent)
       }),
     'dsh-pet: scope externally loaded executors',
   )
@@ -734,9 +951,11 @@ async function initialize(
       // an agent; this is the check that makes a miss visible instead of
       // silently running an Invocation with Host-wide Skill discovery.
       if (!isComposed(agent)) {
-        // Late, best-effort repair for an agent that predates the observer
-        // (registered after Pet's own initialization) before refusing.
-        composeForeignExecutor(agent)
+        // Late repair is asynchronous because scoped `inject()` callbacks
+        // are Cordis fibers. Await it before the fail-closed decision so a
+        // native-loaded executor is never dispatched during a half-installed
+        // scope.
+        await composeForeignExecutor(agent)
       }
       if (!isComposed(agent)) {
         throw new PetError(
@@ -810,175 +1029,1031 @@ async function initialize(
     },
   })
 
-  // The subagent seam behind the QA group, PROBED rather than injected: a
-  // declared dependency this Host lacks would stop Pet from loading at all,
-  // which is the failure mode the lifecycle contract forbids. An absent seam
-  // means the QA action reports itself unavailable; everything else carries on.
-  const qaProbe = probeSubagentSeam(ctx as unknown as HostContextLike)
-  if (!qaProbe.available) {
-    ctx.logger.info(`dsh-pet: QA group unavailable — ${qaProbe.diagnostic}`)
-  }
-  const qaSeam = qaProbe.available ? qaProbe.seam : undefined
-
-  // One client shared by the channel and the QA paths, so a test double
-  // installed for one is not silently bypassed by the other.
-  const larkClient = createLarkCliClient()
-
-  // Owns the settlement subscription, so it is created once and disposed with
-  // Pet rather than rebuilt per message.
-  const qaDelivery =
-    qaSeam === undefined
-      ? undefined
-      : new QaDelivery({
-          repository,
-          client: larkClient,
-          seam: qaSeam,
-          onChange: () => changes.publish(),
-          log: message => ctx.logger.info(`dsh-pet qa: ${message}`),
-        })
-  if (qaDelivery !== undefined) {
-    ctx.effect(() => () => qaDelivery.dispose(), 'dsh-pet: qa settlement subscription')
+  /**
+   * Probe the unified locus child seams and the per-turn correlation observer.
+   *
+   * Both are required together. The observer is what lets a Delivery settle
+   * against the exact child turn that ran it, and the locus controller refuses
+   * to accept work without it — so a Host missing either seam keeps the
+   * unified capability unavailable rather than accepting Feishu work it could
+   * never settle. Settlement-notice support is proved from a literal marker
+   * on the runtime instance the Host actually loaded. The reviewed local
+   * launcher publishes it; the official pinned package does not, and remains
+   * fail closed rather than relying on version strings or unknown fields.
+   */
+  const locusChildProbe = probeLocusChildPorts(ctx as unknown as LocusHostContextLike)
+  const locusChildDelivery = locusChildProbe.available
+    ? createLocusChildDelivery({
+      // One adapter owns exactly one active child; use a factory so sibling
+      // loci under the same main session do not contend for one singleton.
+      createAdapter: () => createLocusChildAdapter(locusChildProbe.ports),
+    })
+    : undefined
+  if (locusChildDelivery !== undefined) {
+    ctx.effect(
+      () => () => { locusChildDelivery.dispose() },
+      'dsh-pet: dispose per-locus child adapters',
+    )
   }
 
   /**
-   * Resolve a source session's managed execution facts.
+   * Reconcile durable locus rows against the live runtime, once at startup.
    *
-   * Shared by both QA entry points, and always through the Worktree Session
-   * contract — never inferred from a `cwd`, which that plugin deliberately
-   * leaves at the repository root.
+   * Without this a locus whose child no longer exists still looks serviceable,
+   * and the next Feishu message waits forever with no visible cause. The pass
+   * only records facts: an unusable child is marked invalid with a reason and
+   * never silently re-created, and a runtime that cannot answer leaves the row
+   * untouched. Fire-and-forget, so a slow probe cannot delay Pet's readiness.
    */
-  const resolveSourceWorktree = async (
-    sessionId: string,
-  ): Promise<
-    { executionRoot: string; branch?: string; repositoryRoot?: string } | undefined
-  > => {
-    const session = ctx.sessions.get(sessionId as never) as { header?: { cwd?: string } } | undefined
-    const repoPath = session?.header?.cwd
-    if (maintenance === undefined || repoPath === undefined) return undefined
-    return maintenance
-      .wsStatus({ sessionId, repoPath })
-      .then(status => ({
-        executionRoot: status.worktreePath,
-        ...(status.taskBranch !== '' ? { branch: status.taskBranch } : {}),
-        repositoryRoot: repoPath,
-      }))
-      // An unbound session is the ordinary non-worktree case, not a fault.
-      .catch(() => undefined)
+  const locusReconcileAbort = new AbortController()
+  ctx.effect(
+    () => () => { locusReconcileAbort.abort() },
+    'dsh-pet: cancel locus startup reconciliation',
+  )
+  const locusReconciled = await lifecycle.contain('Locus child reconciliation', async () => {
+    const proof = locusChildProbe.available ? locusChildProbe.ports.proof : undefined
+    const report = await reconcileLocusChildren(
+      locusRepository.listLoci(),
+      {
+        store: {
+          invalidate: async (locusId, reason, at) => {
+            // The child is proven gone, so its pending Deliveries can never
+            // complete. Honouring the pending-work guard here would leave the
+            // endpoint permanently stuck with no diagnosis.
+            await locusRepository.invalidateLocus(locusId, reason, at, undefined, {
+              evenWithPendingWork: true,
+            })
+          },
+          hasPendingDelivery: locusId => locusRepository.listPendingDeliveries(locusId).length > 0,
+          clearBusy: async (locusId, at) => {
+            await locusRepository.setLocusBusy(locusId, false, at)
+          },
+        },
+        ...(proof === undefined
+          ? {}
+          : {
+            probe: {
+              check: async ({ parentSessionId, childSessionId, signal }) => {
+                const found = await proof.findChild(parentSessionId, childSessionId, signal)
+                // An explicit absence from the runtime's own child listing is
+                // evidence; anything else must stay unproven.
+                return found === undefined
+                  ? { kind: 'unusable', reason: '子会话在运行时中已不存在，需要所有者重新建立。' }
+                  : { kind: 'usable' }
+              },
+            },
+          }),
+        log: code => ctx.logger.info(`dsh-pet locus reconcile: ${code}`),
+      },
+      locusReconcileAbort.signal,
+    )
+    if (report.invalidated.length > 0 || report.busyCleared.length > 0) {
+      ctx.logger.info(
+        `dsh-pet: locus reconciliation invalidated ${String(report.invalidated.length)}`
+        + `, cleared ${String(report.busyCleared.length)} stale busy fence(s)`,
+      )
+    }
+    return report
+  })
+  // Do not publish/start the channel ahead of its child and busy-fence truth.
+  // Lookup uncertainty is represented inside the report and remains fail-closed;
+  // a reconciliation infrastructure failure degrades Pet before intake starts.
+  if (locusReconciled === undefined) return
+
+  if (!locusChildProbe.available) {
+    ctx.logger.info(`dsh-pet: unified locus child seam unavailable — ${locusChildProbe.diagnostic}`)
+  }
+  const idleChildProvisioning = locusChildProbe.available
+    && locusChildProbe.ports.subagent.supportsSettlementNotice === true
+    && locusChildProbe.ports.subagent.supportsIdleContinuableCreate === true
+    ? {
+      create: async (input: {
+        parentSessionId: string
+        workspaceId: string
+        locusId: string
+        generation: number
+        label: string
+        permission: 'read'
+      }) => {
+        const reservation = locusPrepublication.reserve({
+          parentSessionId: input.parentSessionId,
+          locusId: input.locusId,
+          generation: input.generation,
+          permission: input.permission,
+        })
+        const adapter = createLocusChildAdapter(locusChildProbe.ports)
+        try {
+          const created = await adapter.createIdleChild({
+            parentSessionId: input.parentSessionId,
+            childId: reservation.childSessionId,
+            label: input.label,
+          })
+          if (!created.ok) throw new Error(`Idle locus child creation failed (${created.reason})`)
+          // createIdleContinuable returns only after agent/created. That event
+          // must have consumed the one-shot composition claim before we expose
+          // the resource to the durable controller.
+          if (locusPrepublication.inspect(reservation.childSessionId)?.state !== 'claimed') {
+            throw new Error('Idle locus child was created without synchronous scoped composition')
+          }
+          let finalized = false
+          return {
+            childSessionId: reservation.childSessionId,
+            commit: () => {
+              if (finalized) return
+              locusPrepublication.commit(reservation)
+              finalized = true
+              adapter.dispose()
+            },
+            rollback: async () => {
+              if (!finalized && locusPrepublication.inspect(reservation.childSessionId) !== undefined) {
+                locusPrepublication.abort(reservation)
+              }
+              const released = await adapter.compensateChild({
+                identity: created.identity,
+                reason: 'locus provisioning rollback',
+              })
+              adapter.dispose()
+              if (!released.ok) throw new Error(`Could not roll back locus child (${released.reason})`)
+            },
+          }
+        } catch (error) {
+          if (locusPrepublication.inspect(reservation.childSessionId) !== undefined) {
+            locusPrepublication.abort(reservation)
+          }
+          adapter.dispose()
+          throw error
+        }
+      },
+    }
+    : undefined
+
+  const locusLarkPort = createLocusLarkPort()
+  const locusProvisioning = (() => {
+    if (idleChildProvisioning === undefined || !locusRepository.supportsAtomicProvisioning()) {
+      return undefined
+    }
+    const sessionController = ctx.get('sessionController') as
+      | { inspect?: (sessionId: unknown) => Promise<unknown> }
+      | undefined
+    if (typeof sessionController?.inspect !== 'function') return undefined
+    try {
+      const dsh = createProductionLocusDshPort({
+        repository,
+        sessionController: sessionController as never,
+        workspaceRegistry: ctx.workspaceRegistry as never,
+        agents: ctx.agents as never,
+        agentPresets: ctx.agentPresets as never,
+        agentDefaultModel: ctx.agentDefaultModel as never,
+        sessions: ctx.sessions as never,
+        sessionTitle: ctx.sessionTitle as never,
+        idleChildren: idleChildProvisioning,
+      })
+      const controller = createLocusController({
+        repository: new ControllerLocusRepositoryAdapter(locusRepository),
+        dsh,
+        lark: locusLarkPort,
+        log: message => ctx.logger.info(`dsh-pet locus provisioning: ${message}`),
+      })
+      return { controller, dsh }
+    } catch (error) {
+      ctx.logger.info(
+        `dsh-pet: locus provisioning composition failed (${
+          error instanceof Error ? error.message : String(error)
+        })`,
+      )
+      return undefined
+    }
+  })()
+  const locusProvisioningController = locusProvisioning?.controller
+  const locusDshPort = locusProvisioning?.dsh
+
+  // Legacy rows participate only as a terminal retirement marker. They never
+  // supply routing, session identity, workspace or permission to the new path.
+  const retiredAssociations = asRetiredAssociationStore(repository)
+  const locusAuthorization = createDurableLocusAuthorizationResolver(
+    locusRepository,
+    retiredAssociations,
+  )
+  const locusResolution = createLocusResolution({
+    store: locusRepository,
+    retired: retiredAssociations,
+    ...(locusProvisioningController === undefined
+      ? {}
+      : {
+        provisioning: {
+          ensureForDelivery: async ({ endpoint }) => {
+            const ensured = endpoint.threadId === undefined
+              ? await locusProvisioningController.ensureGroup({ chatId: endpoint.chatId })
+              : await locusProvisioningController.ensureTopic({
+                chatId: endpoint.chatId,
+                threadId: endpoint.threadId,
+              })
+            const record = ensured.locus
+            if (record.state !== 'active') {
+              throw new Error(`Provisioned locus is ${record.state}, not active`)
+            }
+            return {
+              id: record.locusId,
+              endpoint: record.endpoint,
+              generation: record.generation,
+              parentSessionId: record.parentSessionId,
+              childSessionId: record.childSessionId,
+              workspaceId: record.workspaceId,
+              state: 'active' as const,
+              permission: {
+                desired: record.permission,
+                effective: record.permission,
+                // Controller generations are published only after Host policy
+                // verification; write still needs a separate authorized root.
+                verifiedAt: Date.now(),
+              },
+            }
+          },
+        },
+      }),
+    log: reason => ctx.logger.info(`dsh-pet locus resolve: ${reason}`),
+  })
+
+  const locusPermissionMutation = (() => {
+    const policy = ctx.get('sandboxPolicy') as
+      | { resolve?: (input: { session: unknown }) => { mode?: string; workspaceRoot?: string } | undefined }
+      | undefined
+    if (policy?.resolve === undefined || locusChildDelivery === undefined) return undefined
+    return createLocusPermissionMutation({
+      repository: locusRepository,
+      sessions: {
+        resolve: async (childSessionId) => {
+          const locus = locusRepository.getLocusByChild(childSessionId)
+          if (
+            locus === undefined
+            || (locus.state !== 'active' && locus.state !== 'switching')
+            || locus.childSessionId !== childSessionId
+          ) return undefined
+          const identity = {
+            parentSessionId: locus.parentSessionId,
+            childSessionId,
+          }
+          try {
+            const adopted = await locusChildDelivery.ensureChild({
+              id: locus.id,
+              parentSessionId: locus.parentSessionId,
+              childSessionId,
+            }, new AbortController().signal)
+            if (
+              adopted.parentSessionId !== identity.parentSessionId
+              || adopted.childSessionId !== identity.childSessionId
+            ) return undefined
+          } catch {
+            return undefined
+          }
+          return { id: childSessionId, handle: identity }
+        },
+      },
+      policy: {
+        apply: async (resolved, mode) => {
+          const identity = resolved.handle as
+            | { parentSessionId?: unknown; childSessionId?: unknown }
+            | undefined
+          if (
+            identity?.parentSessionId === undefined
+            || identity.childSessionId !== resolved.id
+          ) throw new Error('Resolved child identity is incomplete')
+          const result = await locusChildDelivery.withChildSession({
+            identity: {
+              parentSessionId: String(identity.parentSessionId),
+              childSessionId: resolved.id,
+            },
+            operation: session => { setSandboxMode(session as never, mode as never) },
+          })
+          if (!result.ok) throw new Error(`Continuation owner rejected child Session (${result.reason})`)
+        },
+        resolve: async (resolved) => {
+          const identity = resolved.handle as
+            | { parentSessionId?: unknown; childSessionId?: unknown }
+            | undefined
+          if (
+            identity?.parentSessionId === undefined
+            || identity.childSessionId !== resolved.id
+          ) return undefined
+          const result = await locusChildDelivery.withChildSession({
+            identity: {
+              parentSessionId: String(identity.parentSessionId),
+              childSessionId: resolved.id,
+            },
+            operation: session => policy.resolve!({ session }),
+          })
+          return result.ok ? result.value : undefined
+        },
+      },
+    })
+  })()
+
+  const locusControlDispatch = locusProvisioningController === undefined || locusDshPort === undefined || locusPermissionMutation === undefined
+    ? undefined
+    : createLocusControlDispatcher({
+      allowOpenIds: () => repository.getChannelConfig().allowOpenIds,
+      listSessions: async () => {
+        const ids = new Set<string>()
+        for (const workspace of ctx.workspaceRegistry.list()) {
+          for (const id of workspace.sessionIds ?? []) ids.add(String(id))
+        }
+        const resolved = await Promise.all([...ids].map(id => locusDshPort.resolveSession(id)))
+        return resolved.filter((session): session is NonNullable<typeof session> => session !== undefined)
+      },
+      bind: {
+        bind: ({ endpoint, parentSessionId, chatName }) =>
+          endpoint.threadId === undefined
+            ? locusProvisioningController.ensureGroup({
+              chatId: endpoint.chatId,
+              parentSessionId,
+              ...(chatName === undefined ? {} : { chatName }),
+            })
+            : locusProvisioningController.ensureTopic({
+              chatId: endpoint.chatId,
+              threadId: endpoint.threadId,
+              parentSessionId,
+              ...(chatName === undefined ? {} : { chatName }),
+            }),
+        rebuildProtected: ({ endpoint, parentSessionId, chatName, marker }) => {
+          if (marker === 'legacy') {
+            return locusProvisioningController.rebuildLegacyEndpoint({
+              endpoint,
+              parentSessionId,
+              ...(chatName === undefined ? {} : { chatName }),
+            })
+          }
+          const previous = locusRepository.getLatestLocusByEndpoint(endpoint)
+          if (previous === undefined || previous.state === 'active') {
+            throw new Error('Protected unified generation is unavailable for explicit rebuild')
+          }
+          return locusProvisioningController.rebuildExplicit({
+            endpoint,
+            previousLocusId: previous.id,
+            parentSessionId,
+          })
+        },
+      },
+      exit: {
+        unbindCurrent: async ({ endpoint }) => {
+          const current = locusRepository.getCurrentLocus(endpoint)
+          if (current === undefined) throw new Error('Current locus does not exist')
+          const stopped = await locusRepository.stopLocus(current.id)
+          if (stopped.state !== 'stopped') throw new Error('Locus did not reach stopped state')
+          return { state: 'stopped' as const, busy: false as const }
+        },
+      },
+      scope: {
+        setCurrentMode: async ({ endpoint, actorId, mode }) => {
+          const current = locusRepository.getCurrentLocus(endpoint)
+          if (current === undefined) throw new Error('Current locus does not exist')
+          const updated = await locusPermissionMutation.mutate({
+            locusId: current.id,
+            actorId,
+            mode,
+            fence: {
+              expectedLocusId: current.id,
+              expectedGeneration: current.generation,
+              expectedUpdatedAt: current.updatedAt,
+            },
+          })
+          return { mode: updated.permission.effective }
+        },
+      },
+      chatName: chatId => larkClient.chatName(chatId),
+    })
+
+  const locusTurnObserver = (() => {
+    // Subscribe before anything can be queued: a claim may be reported before
+    // the queueing call resolves, and a missed claim leaves that Delivery
+    // permanently unable to settle.
+    const claimEvent = 'agent/inbox/claimed'
+    const sessionEvent = 'session/event'
+    try {
+      return createLocusTurnObserver({
+        onClaimed: listener =>
+          ctx.on(claimEvent as never, ((payload: {
+            agent?: { session?: { id?: unknown } }
+            message?: { id?: unknown }
+            turn?: unknown
+          }) => {
+            const childSessionId = payload?.agent?.session?.id
+            const messageId = payload?.message?.id
+            if (typeof childSessionId !== 'string' || typeof messageId !== 'string') return
+            if (typeof payload.turn !== 'number') return
+            listener({ childSessionId, messageId, turn: payload.turn })
+          }) as never),
+        onTurnEnd: listener =>
+          ctx.on(sessionEvent as never, ((
+            session: { id?: unknown },
+            event: { type?: unknown; data?: { turn?: unknown; reason?: { kind?: unknown; error?: { message?: unknown } } } },
+          ) => {
+            if (event?.type !== 'turn/end') return
+            const childSessionId = session?.id
+            const turn = event.data?.turn
+            if (typeof childSessionId !== 'string' || typeof turn !== 'number') return
+            const kind = event.data?.reason?.kind
+            const message = event.data?.reason?.error?.message
+            listener({
+              childSessionId,
+              turn,
+              outcome: kind === 'completed'
+                ? 'completed'
+                : kind === 'aborted'
+                  ? 'aborted'
+                  : kind === 'blocked'
+                    ? 'blocked'
+                    : 'failed',
+              ...(typeof message === 'string' ? { reason: message } : {}),
+            })
+          }) as never),
+        lookup: {
+          find: ({ childSessionId, messageId }) => {
+            const record = locusRepository.findDeliveryByInboxMessageId(messageId)
+            // Child identity AND an execution binding are both required: a
+            // claim for another child, or for a Delivery that was never
+            // queued, must not become a settlement proof.
+            if (record === undefined || record.childSessionId !== childSessionId) return undefined
+            if (record.executionId === undefined) return undefined
+            return {
+              deliveryId: record.deliveryId,
+              executionId: record.executionId,
+              correlation: {
+                endpoint: record.endpoint,
+                locusId: record.locusId,
+                generation: record.generation,
+                childSessionId: record.childSessionId,
+              },
+            }
+          },
+        },
+        log: code => ctx.logger.info(`dsh-pet locus turn: ${code}`),
+      })
+    } catch (error) {
+      ctx.logger.info(
+        `dsh-pet: unified locus turn observer unavailable (${
+          error instanceof Error ? error.message : String(error)
+        })`,
+      )
+      return undefined
+    }
+  })()
+  if (locusTurnObserver !== undefined) {
+    currentLocusTurnProof = childSessionId => locusTurnObserver.currentForChild?.(childSessionId)
   }
 
-  // `/bind`: attach an existing group to an existing session. Present only
-  // with the seam, exactly like the Q&A action — without it the command is
-  // never recognised and unbound groups behave as before.
-  const bindCommand =
-    qaSeam === undefined
-      ? undefined
+  /**
+   * Finish the ONE durable startup recovery pass only after its authoritative
+   * runtime seams exist, and before the channel can accept a new event.
+   *
+   * A live observer claim is used when available; otherwise the exact
+   * continuation-owned Session log must show one open turn that entered this
+   * Delivery's inbox UUID. No proof is inferred from child liveness, FIFO order,
+   * or text. This Host has no exact-execution termination seam, so queued work
+   * without proof remains durable manual debt rather than draining the child.
+   * Operation-owned unpublished child resources may still use the independently
+   * fenced child compensator. Main-session cleanup has no durable
+   * creator handle in this Host, so it deliberately remains manual. Chat cleanup
+   * is restricted inside the repository to operation-owned Q&A refs.
+   */
+  const canCompensateDurableChild = locusChildProbe.available
+    && locusChildProbe.ports.proof !== undefined
+    && locusChildProbe.ports.compensation !== undefined
+  const compensateDurableChild = canCompensateDurableChild && locusChildProbe.available
+    ? async (input: {
+      readonly parentSessionId: string
+      readonly childSessionId: string
+      readonly reason: string
+    }): Promise<void> => {
+      const adapter = createLocusChildAdapter(locusChildProbe.ports)
+      try {
+        const adopted = await adapter.adoptChild({
+          parentSessionId: input.parentSessionId,
+          childSessionId: input.childSessionId,
+        })
+        if (!adopted.ok) throw new Error(`durable child ownership is unproven (${adopted.reason})`)
+        const compensated = await adapter.compensateChild({
+          identity: adopted.identity,
+          reason: input.reason,
+        })
+        if (!compensated.ok) throw new Error(`durable child compensation failed (${compensated.reason})`)
+      } finally {
+        adapter.dispose()
+      }
+    }
+    : undefined
+  const startupCompensators: LocusStartupCompensators = {
+    ...(compensateDurableChild === undefined
+      ? {}
       : {
-          handle: async (
-            event: { chat_id: string; message_id: string },
-            prefix: string,
-          ): Promise<{ kind: 'accepted'; invocationId: string } | { kind: 'error'; reason: string }> => {
-            const bindDeps = {
-              repository,
-              client: larkClient,
-              seam: qaSeam,
-              attachToWorkspace: attachSessionToWorkspace,
-              log: (message: string) => ctx.logger.info(`dsh-pet bind: ${message}`),
-              listSessions: () =>
-                ctx.sessions.list().map(session => {
-                  const header = (session as unknown as { header?: { parentSession?: string } })
-                    .header
-                  // The title is NOT on the header — it is maintained by the
-                  // session-title service in the session log, and reading
-                  // `header.title` silently yields `undefined` for every
-                  // session, which showed up as every bound group being named
-                  // "答疑 · DSH" and every receipt naming a raw id.
-                  const title = ctx.sessionTitle.get(session)?.title
-                  return {
-                    id: String(session.id),
-                    ...(title !== undefined && title !== '' ? { title } : {}),
-                    ...(header?.parentSession !== undefined
-                      ? { parentSession: header.parentSession }
-                      : {}),
-                  }
-                }),
-              resolveWorktree: resolveSourceWorktree,
-              // Best-effort: the receipt states the blast radius when it can,
-              // and omits the line when Lark will not say.
-              memberCount: (chatId: string) =>
-                larkClient.memberCount(chatId).catch(() => undefined),
-            }
-            let text: string
-            try {
-              const outcome = await bindExistingGroup(bindDeps as never, {
-                chatId: event.chat_id,
-                prefix,
-              })
-              text = renderBindReceipt(outcome)
-              if (outcome.ok) changes.publish()
-            } catch (error) {
-              text = `绑定失败：${error instanceof Error ? error.message : String(error)}`
-            }
-            // The reply goes to the GROUP, not to whoever typed: members have
-            // a right to know their group just gained an agent carrying
-            // someone else's working context.
-            await larkClient.reply(event.message_id, text).catch(() => undefined)
-            return { kind: 'accepted', invocationId: `bind-${event.message_id}` }
-          },
-          unbind: async (event: {
-            chat_id: string
-            message_id: string
-          }): Promise<{ kind: 'accepted'; invocationId: string }> => {
-            let text: string
-            try {
-              text = renderUnbindReceipt(await unbindGroup({ repository }, event.chat_id))
-              changes.publish()
-            } catch (error) {
-              text = `解绑失败：${error instanceof Error ? error.message : String(error)}`
-            }
-            // Announced in the group for the same reason binding is: the
-            // members were told an agent joined, so they are told it left.
-            await larkClient.reply(event.message_id, text).catch(() => undefined)
-            return { kind: 'accepted', invocationId: `unbind-${event.message_id}` }
-          },
+        childSession: ({ parentSessionId, childSessionId, operationId }) =>
+          compensateDurableChild({
+            parentSessionId,
+            childSessionId,
+            reason: `startup provisioning compensation ${operationId}`,
+          }),
+      }),
+    ...(locusLarkPort.deleteGroup === undefined
+      ? {}
+      : {
+        chat: ({ chatId }) => locusLarkPort.deleteGroup!(chatId),
+      }),
+  }
+  const locusStartup = await lifecycle.contain('Locus startup reconciliation', () =>
+    locusRepository.reconcileStartup({
+      deliveryProof: async (delivery: DeliveryRecord) => {
+        const observed = locusTurnObserver?.currentForChild?.(delivery.childSessionId)
+        if (observed !== undefined && observed.executionId === delivery.executionId) {
+          return {
+            deliveryId: delivery.deliveryId,
+            executionId: observed.executionId,
+            turnId: observed.turnId,
+            state: 'running' as const,
+          }
         }
+        if (!locusChildProbe.available || locusChildDelivery === undefined) return undefined
+        const locus = locusRepository.getLocus(delivery.locusId)
+        if (
+          locus === undefined ||
+          locus.generation !== delivery.generation ||
+          locus.parentSessionId.trim() === '' ||
+          locus.childSessionId !== delivery.childSessionId
+        ) return undefined
+        const identity = { parentSessionId: locus.parentSessionId, childSessionId: delivery.childSessionId }
+        try {
+          const adopted = await locusChildDelivery.ensureChild({
+            id: locus.id,
+            parentSessionId: identity.parentSessionId,
+            childSessionId: identity.childSessionId,
+          }, new AbortController().signal)
+          if (
+            adopted.parentSessionId !== identity.parentSessionId ||
+            adopted.childSessionId !== identity.childSessionId
+          ) return undefined
+          const result = await locusChildDelivery.withChildSession({
+            identity,
+            operation: session => proveLiveStartupDelivery(delivery, session),
+          })
+          return result.ok ? result.value : undefined
+        } catch {
+          return undefined
+        }
+      },
+      compensators: startupCompensators,
+    }),
+  )
+  if (locusStartup === undefined) return
+  if (locusStartup.pendingDeliveries.length > 0 || locusStartup.recoverableOperations.length > 0) {
+    ctx.logger.info(
+      `dsh-pet locus recovery: ${String(locusStartup.pendingDeliveries.length)} pending Deliveries, ` +
+      `${String(locusStartup.recoverableOperations.length)} recoverable operations; no side effect replayed`,
+    )
+  }
+  /**
+   * Why the unified Feishu channel is not published yet.
+   *
+   * Recorded explicitly rather than left implicit in "nothing was wired": the
+   * owner-facing diagnostics must be able to say which capability is missing,
+   * and a future composition must not be able to publish the channel while any
+   * of these is still true.
+   */
+  const locusChannelGaps: string[] = []
+  if (!locusRepository.supportsAtomicProvisioning()) {
+    // Delivery acceptance, queue proof, settlement, and the locus busy fence
+    // are one cross-table lifecycle. The compatibility fallback is useful for
+    // offline inspection, but a rollback failure could otherwise publish a
+    // half mutation that startup recovery cannot safely infer. Production
+    // intake therefore requires the same atomic Domain capability as locus
+    // provisioning rather than exposing a weaker Delivery-only path.
+    locusChannelGaps.push('atomic locus storage unavailable')
+  }
+  if (!locusChildProbe.available) {
+    locusChannelGaps.push(`child seam unavailable (${locusChildProbe.diagnostic})`)
+  }
+  if (locusCompositionPorts.policy === undefined) {
+    // The real Host exposes setSandboxMode as a free function and resolve on
+    // the service. If either side is unavailable, a child could run wider (or
+    // narrower) than the locus grant and the unified path must stay off.
+    locusChannelGaps.push('sandbox policy apply/readback unavailable')
+  }
+  if (locusTurnObserver === undefined) {
+    locusChannelGaps.push('per-turn correlation observer unavailable')
+  }
+  if (locusProvisioningController === undefined) {
+    // Do not let the runtime patch alone switch every Feishu event to the new
+    // exclusive path. New endpoints need the durable provisioning bridge;
+    // otherwise every never-seen group would become unavailable.
+    locusChannelGaps.push('durable locus provisioning is not composed')
+  }
+  if (locusControlDispatch === undefined) {
+    locusChannelGaps.push('unified locus controls are not composed')
+  }
+  // A locus child answers in its own Feishu entry, so the runtime must be able
+  // to keep its automatic settlement report out of the main session. Until the
+  // runtime carrying that option is the pinned one, creating a locus child
+  // would violate the "no automatic report to the parent" boundary.
+  if (locusChildProbe.available && locusChildProbe.ports.subagent.supportsSettlementNotice !== true) {
+    locusChannelGaps.push('runtime cannot suppress a child\'s automatic parent report')
+  }
+  if (locusChildProbe.available && locusChildProbe.ports.subagent.supportsIdleContinuableCreate !== true) {
+    // Without idle creation the only API submits a real prompt before the
+    // active locus can commit, reopening the fresh-child composition race.
+    locusChannelGaps.push('runtime cannot create an idle continuable child')
+  }
+  if (locusChildProbe.available
+    && locusChildProbe.ports.subagent.supportsLiveContinuableChildSession !== true) {
+    // Generic Session routing rejects subagent-owned children. Scope mutation
+    // therefore needs the continuation owner to expose the exact live Session
+    // after validating both parent and child identities.
+    locusChannelGaps.push('runtime cannot authorize a live continuable child Session')
+  }
+  /**
+   * Compose the unified channel controller only when every gate is closed.
+   *
+   * `createLocusChannelCapability` refuses on its own when the observer is
+   * missing, so this is defence in depth rather than the only check: the
+   * point here is that a Host missing ANY gate keeps the legacy path instead
+   * of publishing a controller that could accept Feishu work it cannot
+   * settle, or create a child that would report into the main session.
+   */
+  const locusChannel = locusChannelGaps.length === 0
+    && locusChildProbe.available
+    && locusTurnObserver !== undefined
+    && locusChildDelivery !== undefined
+    ? createLocusChannelCapability({
+      locus: locusResolution,
+      deliveries: {
+        findByMessageId: messageId => locusRepository.findDeliveryByMessageId(messageId),
+        getById: deliveryId => locusRepository.getDelivery(deliveryId),
+        accept: input => locusRepository.acceptDelivery(input),
+        bindQueued: input => locusRepository.bindQueued(input),
+        bindTurn: input => locusRepository.bindTurn(input),
+        settleByTurn: input => locusRepository.settleByTurn(input),
+        fail: input => locusRepository.fail(input),
+      },
+      child: locusChildDelivery,
+      resolveLivePolicy: session => {
+        const policy = ctx.get('sandboxPolicy') as
+          | { resolve?: (input: { session: unknown }) => { mode?: string; workspaceRoot?: string } | undefined }
+          | undefined
+        return policy?.resolve?.({ session })
+      },
+      invalidatePolicyDrift: async ({ locus, reason }) => {
+        const current = locusRepository.getLocus(locus.id ?? locus.locusId ?? '')
+        if (
+          current === undefined || current.state !== 'active' ||
+          current.generation !== locus.generation ||
+          current.childSessionId !== locus.childSessionId
+        ) return
+        await locusRepository.invalidateLocus(
+          current.id,
+          reason,
+          Date.now(),
+          {
+            expectedLocusId: current.id,
+            expectedGeneration: current.generation,
+            expectedUpdatedAt: current.updatedAt,
+            ...(current.revision === undefined ? {} : { expectedRevision: current.revision }),
+          },
+        )
+      },
+      receipts: (() => {
+        const inProgressReactions = new Map<string, string>()
+        return {
+          markAccepted: async (target: { messageId: string }) => {
+            const reactionId = await larkClient.addReaction(target.messageId, 'OnIt')
+            if (reactionId !== undefined) inProgressReactions.set(target.messageId, reactionId)
+          },
+          markSettled: async (
+            target: { messageId: string },
+            outcome: 'settled' | 'failed',
+          ) => {
+            const reactionId = inProgressReactions.get(target.messageId)
+            if (reactionId !== undefined) {
+              inProgressReactions.delete(target.messageId)
+              await larkClient.removeReaction(target.messageId, reactionId)
+            }
+            await larkClient.addReaction(
+              target.messageId,
+              outcome === 'settled' ? 'DONE' : 'CRY',
+            )
+          },
+          sendControl: (target: { messageId: string }, text: string) =>
+            larkClient.reply(target.messageId, text),
+        }
+      })(),
+      renderPrompt: ({ locus, message }) => {
+        const locusId = locus.id ?? locus.locusId
+        if (locusId === undefined) throw new Error('Active locus is missing its durable id')
+        const record = locusRepository.getLocus(locusId)
+        if (
+          record === undefined || record.state !== 'active' ||
+          record.childSessionId !== locus.childSessionId ||
+          record.generation !== locus.generation
+        ) {
+          throw new Error('Active locus changed before delivery prompt rendering')
+        }
+        return renderLocusDeliveryPrompt({
+          endpoint: record.endpoint,
+          locus: { locusId: record.id, generation: record.generation, state: record.state },
+          main: { sessionId: record.parentSessionId },
+          child: { sessionId: record.childSessionId },
+          workspace: { workspaceId: record.workspaceId },
+          permission: record.permission,
+          contextAnchor: record.contextAnchor ?? { status: 'unknown' },
+          request: {
+            messageId: message.messageId,
+            senderOpenId: message.senderOpenId,
+            ...(message.senderName === undefined ? {} : { senderName: message.senderName }),
+            text: message.text,
+            ...(message.replyToMessageId === undefined
+              ? {}
+              : { replyToMessageId: message.replyToMessageId }),
+            replyTarget: message.replyTarget,
+          },
+        })
+      },
+      turns: locusTurnObserver,
+      ...(locusControlDispatch === undefined ? {} : { controlDispatch: locusControlDispatch }),
+      // Admission is supplied by InboundPipeline for every event so its
+      // watermark belongs to the currently connected subscription generation.
+      log: (code: string) => ctx.logger.info(`dsh-pet locus channel: ${code}`),
+    })
+    : unavailableLocusChannelCapability(
+      locusChannelGaps.length === 0
+        ? 'Unified locus channel dependencies are incomplete.'
+        : locusChannelGaps.join('; '),
+    )
+  if (locusChannel.status === 'unavailable') {
+    ctx.logger.info(
+      `dsh-pet: unified Feishu channel stays unavailable — ${locusChannel.diagnostic}`,
+    )
+  } else {
+    ctx.effect(() => () => { locusChannel.controller.dispose() }, 'dsh-pet: locus channel controller')
+  }
 
-  // The Q&A wheel action. Registered unconditionally so the reason it cannot
-  // run is visible on the wheel itself; an action that simply vanished would
-  // read as a Pet bug rather than as missing configuration.
+  if (locusTurnObserver !== undefined) {
+    ctx.effect(() => () => { locusTurnObserver.dispose() }, 'dsh-pet: locus turn observer')
+    // In production LocusChannelController is the sole turn-correlation
+    // consumer: it binds, settles and emits the reaction as one ordered
+    // operation. A second subscriber could win the settle race and make the
+    // controller observe `changed:false`, silently omitting DONE/CRY.
+    //
+    // When the unified capability is unavailable no controller is subscribed.
+    // Keep a ledger-only recovery consumer for already queued rows (for
+    // example a Host downgraded before restart); it emits no reaction and
+    // cannot race an active controller.
+    if (locusChannel.status === 'unavailable') {
+      ctx.effect(
+        () => locusTurnObserver.subscribe((event) => {
+          const persist = async (): Promise<void> => {
+            await locusRepository.bindTurn({
+              deliveryId: event.deliveryId,
+              correlation: event.correlation,
+              executionId: event.executionId,
+              turnId: event.turnId,
+              startedAt: Date.now(),
+            })
+            if (event.phase === 'started') return
+            await locusRepository.settleByTurn({
+              deliveryId: event.deliveryId,
+              executionId: event.executionId,
+              correlation: { ...event.correlation, turnId: event.turnId },
+              outcome: event.phase === 'completed' ? 'settled' : 'failed',
+              settledAt: Date.now(),
+              ...(event.reason === undefined ? {} : { failureReason: event.reason }),
+            })
+          }
+          void persist().catch((error: unknown) => {
+            ctx.logger.info(
+              `dsh-pet locus turn: could not recover ${event.phase} (${
+                error instanceof Error ? error.message : String(error)
+              })`,
+            )
+          })
+        }),
+        'dsh-pet: recover queued locus turn without channel controller',
+      )
+    }
+  }
+
+  /**
+   * Owner-facing unified locus management.
+   *
+   * Composed unconditionally, because it is read-and-lifecycle only: the
+   * bidirectional view, endpoint/parent/child discovery, and the durable
+   * stop/archive/scope transitions all resolve from Pet's own store. Actions
+   * that would create an external resource (bind, default Q&A, rebuild) are
+   * deliberately NOT supplied, so those routes keep reporting themselves
+   * unavailable instead of half-creating a group.
+   *
+   * Session and workspace metadata is resolved from the Host registries. A
+   * fact the Host cannot resolve stays absent rather than being guessed from
+   * an id, which is what keeps "missing" distinguishable from "unnamed".
+   */
+  const describeSession = (sessionId: string): {
+    readonly title?: string
+    readonly availability?: 'available' | 'archived' | 'missing'
+  } | undefined => {
+    const session = ctx.sessions.get(sessionId as never)
+    if (session === undefined) {
+      // Absent from the live registry only proves it is not loaded. The
+      // workspace's archived account is the durable evidence.
+      const archived = (ctx.workspaceRegistry.archivedSessionIds ?? []) as readonly unknown[]
+      return archived.some(id => String(id) === sessionId)
+        ? { availability: 'archived' }
+        : { availability: 'missing' }
+    }
+    // The title lives in the session log via the title service. A session
+    // header has no `title`, so reading one there yields `undefined` for
+    // EVERY session — the exact failure that once made every bound group
+    // display the same fallback name.
+    const resolved: unknown = ctx.sessionTitle.get(session)
+    const title = typeof resolved === 'string' && resolved.trim() !== '' ? resolved : undefined
+    return {
+      availability: 'available',
+      ...(title === undefined ? {} : { title }),
+    }
+  }
+
+  let locusManagement!: ReturnType<typeof createLocusManagementPort>
+  locusManagement = createLocusManagementPort({
+    repository: locusRepository as never,
+    resolvers: {
+      main: describeSession,
+      child: describeSession,
+      workspace: (id) => {
+        const workspace = ctx.workspaceRegistry.get(id as never) as
+          | { title?: unknown; path?: unknown }
+          | undefined
+        if (workspace === undefined) return undefined
+        return {
+          ...(typeof workspace.title === 'string' ? { title: workspace.title } : {}),
+          // Display-only. It is never an execution-root authorization: a
+          // confirmed anchor is a separate, independently proven fact.
+          ...(typeof workspace.path === 'string' ? { path: workspace.path } : {}),
+        }
+      },
+    },
+    ...(locusPermissionMutation === undefined ? {} : { permissionMutation: locusPermissionMutation }),
+    ...(locusProvisioningController === undefined
+      ? {}
+      : {
+        actions: {
+          bind: async (request) => {
+            const endpoint = request.endpoint.threadId === undefined
+              ? { chatId: request.endpoint.chatId }
+              : { chatId: request.endpoint.chatId, threadId: request.endpoint.threadId }
+            const before = locusRepository.getLatestLocusByEndpoint(endpoint)
+            const result = endpoint.threadId === undefined
+              ? await locusProvisioningController.ensureGroup({
+                chatId: endpoint.chatId,
+                parentSessionId: request.parentSessionId,
+              })
+              : await locusProvisioningController.ensureTopic({
+                chatId: endpoint.chatId,
+                threadId: endpoint.threadId,
+                parentSessionId: request.parentSessionId,
+              })
+            const view = await locusManagement.view()
+            const locus = view.loci.find(item => item.locusId === result.locus.locusId)
+            const previousLocus = before === undefined
+              ? undefined
+              : view.loci.find(item => item.locusId === before.id)
+            if (locus === undefined) {
+              throw new PetError('INTERNAL', 'Bound locus is absent from the durable view')
+            }
+            return {
+              action: 'bind' as const,
+              locus,
+              ...(previousLocus === undefined ? {} : { previousLocus }),
+              created: result.created,
+              reused: result.reused,
+              ...('warningText' in result && typeof result.warningText === 'string'
+                ? { warningText: result.warningText }
+                : {}),
+            }
+          },
+          defaultQa: async (request) => {
+            const config = repository.getChannelConfig()
+            if (config.botAppId === undefined || larkClient.defaultQaOwner === undefined) {
+              throw new PetError('BINDING_INVALID', '无法核验当前飞书用户身份，不能创建默认 Q&A 群。')
+            }
+            const owner = await larkClient.defaultQaOwner(config.botAppId, config.allowOpenIds)
+            if (owner.kind !== 'ready') {
+              throw new PetError(
+                'BINDING_INVALID',
+                `无法核验当前飞书用户身份，不能创建默认 Q&A 群：${owner.diagnostic}`,
+              )
+            }
+            const result = await locusProvisioningController.createOrOpenDefaultQa({
+              parentSessionId: request.parentSessionId,
+              ownerId: owner.ownerId,
+              ...(request.groupName === undefined ? {} : { groupName: request.groupName }),
+            })
+            const view = await locusManagement.view()
+            const locus = view.loci.find(item => item.locusId === result.locus.locusId)
+            if (locus === undefined) {
+              throw new PetError('INTERNAL', 'Default Q&A locus is absent from the durable view')
+            }
+            return {
+              action: 'default-qa' as const,
+              locus,
+              created: result.created,
+              reused: result.reused,
+            }
+          },
+          rebuild: async (request) => {
+            const rebuilt = await locusProvisioningController.rebuildExplicit({
+              endpoint: request.endpoint,
+              previousLocusId: request.expectedLocusId!,
+              parentSessionId: request.parentSessionId,
+              ...(request.asDefaultQa === undefined ? {} : { asDefaultQa: request.asDefaultQa }),
+            })
+            const view = await locusManagement.view()
+            const locus = view.loci.find(item => item.locusId === rebuilt.locus.locusId)
+            const previousLocus = view.loci.find(item => item.locusId === rebuilt.previousLocus.locusId)
+            if (locus === undefined || previousLocus === undefined) {
+              throw new PetError('INTERNAL', 'Rebuilt locus generations are absent from the durable view')
+            }
+            return {
+              action: 'rebuild' as const,
+              locus,
+              previousLocus,
+              created: true,
+              reused: false,
+            }
+          },
+        },
+      }),
+    // Host service identity authorizes this loopback/same-origin management
+    // surface. Q&A resource ownership is resolved separately from verified
+    // lark-cli user auth and never from the browser or an allowlist position.
+    identity: () => ({ actorId: 'host:dsh-pet' }),
+  })
+
+  // Q&A ownership is re-probed from the fixed profile's verified current-user
+  // identity at the operation boundary. Browser auth proves only access to this
+  // Host, while allowlist configuration alone cannot prove "本人" ownership.
   ctx.effect(
     () =>
       capabilities.registerBuiltin({
         id: QA_GROUP_ACTION_ID,
         label: '答疑群',
-        description:
-          '基于当前会话建一个飞书答疑群：把这段会话上下文 fork 成一个子代理，' +
-          '你再拉人进群，群成员 @bot 即可向它提问。' +
-          '子代理看到的是本会话最近一轮完成的内容；被你拉进群的人即视为可信。',
+        description: '通过统一 locus default-Q&A 创建或打开本会话的答疑入口。',
         probe: () => {
-          if (qaSeam === undefined) {
-            return qaProbe.available ? undefined : qaProbe.diagnostic
-          }
+          if (locusProvisioningController === undefined) return '统一 locus 创建能力不可用。'
           const config = repository.getChannelConfig()
-          if (config.botAppId === undefined) return '尚未绑定飞书 bot（设置 → 飞书）'
-          if (config.allowOpenIds.length === 0) return '飞书 allowlist 为空，无法确定邀请谁'
+          if (config.botAppId === undefined || config.allowOpenIds.length === 0) {
+            return '请先绑定 Bot，并在 Pet 设置中配置本人 allowlist。'
+          }
           return undefined
         },
       }),
-    'dsh-pet: qa builtin action',
+    'dsh-pet: locus default-Q&A builtin action',
   )
 
   // Project Task/Invocation state from the durable session event firehose.
   // Without this nothing ever settles an Invocation: it would stay `running`
   // forever even after its turn completed.
-  // The Lark channel. Composed as one unit so it can be absent entirely, and
-  // built AFTER the coordinator it drives. Nothing here can reject into
-  // startup: a channel that cannot run leaves the rest of Pet untouched.
+  // The Lark channel. Unified locus is the only production Feishu execution
+  // path. If its capability gates are open, ChannelService refuses enablement
+  // and every inbound event fails closed; no legacy root/Invocation/QA branch
+  // is wired as a fallback.
   const channel = new ChannelService({
     repository,
     coordinator,
     client: larkClient,
-    ...(qaDelivery !== undefined ? { qaDelivery } : {}),
-    ...(bindCommand !== undefined ? { bindCommand } : {}),
+    ...(locusChannel.status === 'available'
+      ? {
+        locusController: locusChannel.controller,
+        locusAuthorization,
+        ...(locusProvisioningController === undefined
+          ? {
+            botLifecycleDiagnostic:
+              'Bot-added initialization is unavailable; first allowlist @ will initialize the locus.',
+          }
+          : {
+            botLifecycleInitializer: {
+              ensureAuthorizedChat: async ({ chatId }: { chatId: string }) => {
+                await locusProvisioningController.ensureGroup({ chatId })
+              },
+            },
+          }),
+        unifiedLocusReadiness: {
+          childSession: 'verified' as const,
+          defaultPermission: 'read' as const,
+          readVerification: 'verified' as const,
+        },
+      }
+      : {
+        locusDiagnostic: locusChannel.diagnostic,
+        unifiedLocusReadiness: {
+          childSession: 'unavailable' as const,
+          defaultPermission: 'read' as const,
+          readVerification: 'unavailable' as const,
+          diagnostic: locusChannel.diagnostic,
+        },
+      }),
     locator: {
       locate: workspaceId => {
         const match = ctx.workspaceRegistry
@@ -1052,11 +2127,36 @@ async function initialize(
     'dsh-pet: project Invocation state from session events',
   )
 
-  // Drain queues left by a restart. Reconciliation frees the Invocation slot,
-  // but nothing re-dispatches on its own: a Task whose slot just opened would
-  // otherwise sit with queued work until the user invoked something new.
+  // Retire old Feishu Invocation work before draining ordinary Pet queues.
+  // The retained invocation_channel row is history plus a cutover classifier;
+  // it is never permission to dispatch the old root-executor path again.
   for (const task of repository.listTasks()) {
     if (task.archivedAt !== undefined) continue
+    const legacy = repository.listInvocations(task.id).filter(invocation =>
+      repository.getInvocationChannel(invocation.id) !== undefined &&
+      (invocation.status === 'queued' ||
+        invocation.status === 'dispatching' ||
+        invocation.status === 'running' ||
+        invocation.status === 'waiting-user' ||
+        invocation.status === 'recovering'),
+    )
+    for (const invocation of legacy) {
+      await repository.updateInvocation(invocation.id, invocation.revision, current => ({
+        ...current,
+        status: 'failed',
+        errorSummary: '旧飞书 Invocation 已在统一 locus 破坏性切换中停止；未自动重放。',
+      }))
+      await repository.markChannelSettled(invocation.id)
+    }
+    if (legacy.length > 0) {
+      await repository.setTaskStatus(
+        task.id,
+        'failed',
+        '旧飞书在途工作已停止并标记待核查；不会进入统一 locus 或自动重放。',
+      )
+      continue
+    }
+    // Reconciliation frees ordinary wheel slots; those still resume normally.
     void coordinator.pump(task.id).catch(() => undefined)
   }
 
@@ -1072,60 +2172,17 @@ async function initialize(
     inspectWorkspace: () => inspectWorkspace(paths),
     repairWorkspace: () => repairWorkspace(paths),
     channel,
-    // Present only with the seam: the route refuses outright rather than
-    // half-creating a group when this Host cannot fork.
-    ...(qaSeam === undefined
-      ? {}
-      : {
-          createQaGroup: async (source: { sessionId: string; title?: string }) => {
-            // The source session's workspace decides where the child is
-            // filed. Read from the Host registry rather than trusted from the
-            // browser: the client may name a workspace the session does not
-            // belong to.
-            const session = ctx.sessions.get(source.sessionId as never) as
-              | { workspaceId?: string; header?: { cwd?: string } }
-              | undefined
-            const sourceWorkspaceId =
-              typeof session?.workspaceId === 'string' ? session.workspaceId : undefined
-
-            // Resolve the managed execution root through the Worktree Session
-            // contract — never from `cwd`, which that plugin deliberately
-            // leaves at the repository root. A fork copies the parent's cwd
-            // verbatim but inherits no binding, so without this the child
-            // would treat the MAIN CHECKOUT as its working directory: the
-            // parent is governed by its binding, the child would run bare.
-            const repoPath = session?.header?.cwd
-            let worktree: { executionRoot: string; branch?: string; repositoryRoot?: string } | undefined
-            if (maintenance !== undefined && repoPath !== undefined) {
-              worktree = await maintenance
-                .wsStatus({ sessionId: source.sessionId, repoPath })
-                .then(status => ({
-                  executionRoot: status.worktreePath,
-                  ...(status.taskBranch !== '' ? { branch: status.taskBranch } : {}),
-                  repositoryRoot: repoPath,
-                }))
-                // An unbound session is the ordinary non-worktree case, not a
-                // fault: the child then simply works where its cwd points.
-                .catch(() => undefined)
-            }
-
-            return createQaGroup(
-              {
-                repository,
-                client: larkClient,
-                seam: qaSeam,
-                attachToWorkspace: attachSessionToWorkspace,
-                log: message => ctx.logger.info(`dsh-pet qa: ${message}`),
-              },
-              {
-                sessionId: source.sessionId,
-                ...(source.title !== undefined ? { title: source.title } : {}),
-                ...(sourceWorkspaceId !== undefined ? { workspaceId: sourceWorkspaceId } : {}),
-                ...(worktree !== undefined ? { worktree } : {}),
-              },
-            )
-          },
-        }),
+    // Owner-facing locus view/discovery and durable lifecycle transitions.
+    // The identity is Host-derived; routes reject any actor a browser sends.
+    locus: locusManagement,
+    locusIdentity: () => ({ actorId: 'host:dsh-pet' }),
+    // One chain per current generation, assembled from durable records only.
+    // Retired generations are omitted: the owner is diagnosing what an entry
+    // does now, and listing superseded rows would obscure that.
+    locusDiagnostics: () => locusRepository
+      .listLoci()
+      .filter(record => record.state === 'active' || record.state === 'invalid')
+      .map(record => buildLocusDiagnostics(record, locusRepository.listDeliveries(record.id))),
     listPresets: async () => {
       // Enumerate what this Host actually offers; a free-text preset name
       // could name a composition that does not exist.
@@ -1157,7 +2214,14 @@ async function initialize(
     },
   })) {
     ctx.effect(
-      () => ctx.webServer.register({ kind: 'exact', path: route.path, handler: route.handler }),
+      () => {
+        const protectedRoute = withBrowserAuth(route, ctx.connection)
+        return ctx.webServer.register({
+          kind: 'exact',
+          path: protectedRoute.path,
+          handler: protectedRoute.handler,
+        })
+      },
       `dsh-pet: ${route.path}`,
     )
   }
@@ -1171,22 +2235,6 @@ async function initialize(
     return () => channel.stop()
   }, 'dsh-pet: lark channel subscription')
 
-  // Flush the sessions QA work touched before Pet goes away. Session
-  // persistence writes in batches, so a Host that exits without this can lose
-  // the tail of a child's log — and a QA child's tail is the answer someone
-  // in the group is still reading. Best-effort by design: teardown must not
-  // fail because a flush did.
-  ctx.effect(
-    () => () => {
-      for (const binding of repository.listChatBindings()) {
-        if (binding.kind !== 'qa' || binding.qaChildSessionId === undefined) continue
-        const session = ctx.sessions.get(binding.qaChildSessionId as never)
-        if (session === undefined) continue
-        void ctx.sessions.flush(session).catch(() => undefined)
-      }
-    },
-    'dsh-pet: flush qa child sessions on stop',
-  )
 
   lifecycle.markReady()
   ctx.logger.info(`dsh-pet ready (state: ${paths.stateRoot})`)

@@ -15,6 +15,9 @@
         # loader helper the base Web profile uses for `storage-json`, so a
         # `$DSH_HOME` override moves Pet state with the rest of the harness.
         path: !!js dshHomePath('plugins', 'dsh-pet', 'state.sqlite')
+        # Transactions prevent partial locus publication; exclusive ownership
+        # separately prevents two Host processes from processing the same work.
+        exclusive: true
 # A patch row is a top-level entry naming the row it overrides by `id`; a
 # `patch:` wrapper is not a thing and fails composition with
 # "id is required for non-insert patches".
@@ -41,6 +44,7 @@
         - storageDomain
         - workspaceRegistry
         - sessions
+        - sessionController
         - sessionTitle
         - llm
         - agentDefaultModel
@@ -54,3 +58,6 @@
         # `src/index.ts` instead, so an absent registry simply means no
         # `DSH_PET_*` injection.
         - webServer
+        # host-webserver deliberately has no Harness auth concepts. Pet's raw
+        # management routes must pass Connection's signed browser-cookie fence.
+        - connection
