@@ -26,18 +26,28 @@ import os from 'node:os'
 /** Domain identity; must match src/host/spec.ts. */
 const PET_DOMAIN_NAME = 'dsh_pet'
 const PET_DOMAIN_VERSION = 9
-/** Versions this script is allowed to restamp. v1 needs the in-process
- * cleanup path because its rows reference a store layout that is gone. */
+/** Versions this script is allowed to restamp. v1 needs a separate explicit
+ * cleanup because its rows reference a store layout that is gone. */
 const RESTAMPABLE = [2, 3, 4, 5, 6, 7, 8]
 
 function parseArgs(argv) {
-  const args = { dryRun: false, yes: false, db: undefined }
+  const args = { dryRun: false, yes: false, db: undefined, help: false }
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
     if (arg === '--dry-run') args.dryRun = true
     else if (arg === '--yes' || arg === '-y') args.yes = true
-    else if (arg === '--db') { args.db = argv[i + 1]; i += 1 }
-    else if (arg === '--help' || arg === '-h') args.help = true
+    else if (arg === '--db') {
+      const value = argv[i + 1]
+      if (value === undefined || value.startsWith('-')) {
+        throw new Error('--db requires a path value.')
+      }
+      args.db = value
+      i += 1
+    } else if (arg === '--help' || arg === '-h') args.help = true
+    else throw new Error(`Unknown argument: ${arg}`)
+  }
+  if (args.dryRun && args.yes) {
+    throw new Error('Choose either --dry-run or --yes, not both.')
   }
   return args
 }
@@ -52,7 +62,12 @@ function fail(message) {
   process.exit(1)
 }
 
-const args = parseArgs(process.argv.slice(2))
+let args
+try {
+  args = parseArgs(process.argv.slice(2))
+} catch (error) {
+  fail(error.message)
+}
 if (args.help) {
   console.log('Usage: node scripts/migrate-state-version.mjs [--db <path>] [--dry-run] [--yes]')
   process.exit(0)
@@ -118,8 +133,8 @@ try {
   }
   if (current === 1) {
     fail(
-      'Version 1 requires the in-process legacy cleanup (it drops rows that ' +
-      'reference a removed store layout); this script only restamps v2..v8.',
+      'Version 1 requires a separate explicit legacy cleanup (it drops rows ' +
+      'that reference a removed store layout); this CLI only restamps v2..v8.',
     )
   }
   if (!RESTAMPABLE.includes(current)) {
@@ -133,22 +148,52 @@ try {
 
   if (args.dryRun) {
     console.log(`\n[dry-run] Would restamp ${current} → ${PET_DOMAIN_VERSION}. No write performed.`)
+    console.log('Re-run with --yes while DSH remains stopped to perform the migration.')
     process.exit(0)
   }
 
-  // Back up before the only mutating statement. The restamp itself is a single
-  // integer update, but a recoverable copy makes the operation reversible even
-  // if the later backend open surfaces an unrelated problem.
+  // A migration may be run on several machines by an operator following a log
+  // line. Never turn an omitted flag or a pasted partial command into a write.
+  if (!args.yes) {
+    fail(
+      `Migration ${current} → ${PET_DOMAIN_VERSION} is ready but not confirmed.\n` +
+      '  No write was performed. Re-run with --yes while DSH remains stopped.',
+    )
+  }
+
+  // Fold committed WAL frames into the main file before copying it. A stopped
+  // Host should leave none, but backup correctness must not depend on that
+  // assumption. An exclusive lock proves no writer can race the copy.
+  try {
+    db.exec('PRAGMA locking_mode = EXCLUSIVE')
+    db.exec('BEGIN IMMEDIATE')
+    db.exec('COMMIT')
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
+  } catch (error) {
+    failIfLocked(error)
+    throw error
+  }
+
+  // Back up before the only mutating transaction. The restamp itself is a
+  // single integer update, but a recoverable copy makes the operation
+  // reversible if the later backend open surfaces an unrelated problem.
   const backup = `${databaseFile}.v${current}.bak-${Date.now()}`
   copyFileSync(databaseFile, backup)
   console.log(`Backup written: ${backup}`)
 
-  db.prepare('UPDATE units SET version = ? WHERE name = ?')
-    .run(PET_DOMAIN_VERSION, PET_DOMAIN_NAME)
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    db.prepare('UPDATE units SET version = ? WHERE name = ?')
+      .run(PET_DOMAIN_VERSION, PET_DOMAIN_NAME)
 
-  const after = db.prepare('SELECT version FROM units WHERE name = ?').get(PET_DOMAIN_NAME)
-  if (after?.version !== PET_DOMAIN_VERSION) {
-    fail(`Restamp did not take effect (still ${after?.version}).`)
+    const after = db.prepare('SELECT version FROM units WHERE name = ?').get(PET_DOMAIN_NAME)
+    if (after?.version !== PET_DOMAIN_VERSION) {
+      throw new Error(`Restamp did not take effect (still ${after?.version}).`)
+    }
+    db.exec('COMMIT')
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
   }
 
   console.log(`✓ Restamped ${current} → ${PET_DOMAIN_VERSION}`)

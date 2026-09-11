@@ -260,6 +260,27 @@ degrades rather than writing into a foreign medium.
 > stay safe as a filename and an unescaped SQL identifier, so hyphens are
 > rejected. The route key in `cordis.patch.yml` must match exactly.
 
+### Offline state-version migration
+
+A Host may degrade after an upgrade when an existing `dsh_pet` unit is stamped
+with an older, known-additive domain version. Normal startup deliberately never
+opens `state.sqlite` itself: the SQLite backend already owns it exclusively.
+Migrate each DSH home explicitly while its Host is stopped:
+
+```bash
+dsh stop
+"${DSH_HOME:-$HOME/.dsh}/profiles/web/node_modules/.bin/dsh-pet-migrate-state" --dry-run
+"${DSH_HOME:-$HOME/.dsh}/profiles/web/node_modules/.bin/dsh-pet-migrate-state" --yes
+dsh
+```
+
+The write requires `--yes`, creates a timestamped backup beside the database,
+and only restamps versions proven additive by the current package. An already
+current database is a successful no-op. Unknown versions, v1 legacy cleanup,
+a missing unit stamp, or a still-running Host fail closed. When startup detects
+the matching version-stamp error, the `[dsh-pet] degraded` log prints the same
+copy/paste procedure; it never performs the migration automatically.
+
 ## Host lifecycle
 
 The Host runs as a service inside the existing `dsh web` process — not a

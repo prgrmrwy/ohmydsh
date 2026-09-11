@@ -62,6 +62,7 @@
 - [x] 8.2 实现旧入口不可用提示与显式重建保护，不无提示以 default 身份接管；保留旧群/session/历史和普通轮盘数据
 - [x] 8.3 移除运行中的旧飞书分支与旧设置入口，不全局删除普通 snapshot 仍使用的共享模块
 - [x] 8.4 更新部署说明和 breaking-change 文档；演练停止新消费后的版本回滚，不对新数据做有损降维，不自动清理旧资源
+- [x] 8.5 将 additive Pet domain 版本升级收敛为显式离线 CLI：Host 只 degraded 并记录可复制命令，人工逐机 stop/dry-run/--yes/start；迁移先备份、锁占用/未知版本 fail closed、重复执行幂等，不转换旧关联
 
 ## 9. 整体验收
 

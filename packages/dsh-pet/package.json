@@ -23,8 +23,12 @@
     "README.md",
     "cordis.patch.yml",
     "executor-instructions.md",
+    "scripts/migrate-state-version.mjs",
     "lib"
   ],
+  "bin": {
+    "dsh-pet-migrate-state": "./scripts/migrate-state-version.mjs"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -51,6 +55,7 @@
     "test:watch": "vitest",
     "cutover:backup": "node scripts/cutover-backup.mjs",
     "migrate:state": "node scripts/migrate-state-version.mjs",
+    "migrate:state:check": "node scripts/migrate-state-version.mjs --dry-run",
     "prepack": "npm run build"
   },
   "engines": {
