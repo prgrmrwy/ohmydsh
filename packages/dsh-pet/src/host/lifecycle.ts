@@ -19,11 +19,30 @@ export type PetLifecycleListener = (state: PetLifecycleState) => void
  * `ready`/`degraded` reports from in-flight initialization work are ignored so
  * a slow async step cannot resurrect a shut-down Pet.
  */
+/**
+ * Operator-visible sink for degraded transitions.
+ *
+ * The machine stays a pure state holder and never imports a Context: the Host
+ * passes only this narrow callback. Without it a contained failure is visible
+ * ONLY in the in-memory projection, so an initialization step that aborts Pet
+ * before its routes register leaves no trace in the DSH log at all.
+ */
+export type PetLifecycleDegradedReporter = (diagnostic: string) => void
+
 export class PetLifecycleMachine {
   private phase: PetLifecycle = 'starting'
   private diagnostic: string | undefined
   private generation = 1
   private readonly listeners = new Set<PetLifecycleListener>()
+  private readonly reportDegraded: PetLifecycleDegradedReporter | undefined
+
+  /**
+   * @param reportDegraded - Optional operator-facing sink for degraded
+   * diagnostics. Optional so existing tests construct the machine unchanged.
+   */
+  constructor(reportDegraded?: PetLifecycleDegradedReporter) {
+    this.reportDegraded = reportDegraded
+  }
 
   /** Current immutable lifecycle projection. */
   get state(): PetLifecycleState {
@@ -61,6 +80,9 @@ export class PetLifecycleMachine {
    */
   markDegraded(diagnostic: string): void {
     if (this.phase === 'stopping') return
+    // Report before transitioning: a listener that throws must not be able to
+    // swallow the operator-facing record of why Pet degraded.
+    this.emitDegraded(diagnostic)
     this.transition('degraded', diagnostic)
   }
 
@@ -85,6 +107,23 @@ export class PetLifecycleMachine {
       const reason = error instanceof Error ? error.message : String(error)
       this.markDegraded(`${label}: ${reason}`)
       return undefined
+    }
+  }
+
+  /**
+   * Emit one degraded diagnostic to the operator sink.
+   *
+   * Deliberately independent of `transition`, which early-returns when the
+   * phase and diagnostic are unchanged: a SECOND distinct failure while
+   * already degraded must still be recorded, and a repeated identical one
+   * must not be able to hide behind the first.
+   */
+  private emitDegraded(diagnostic: string): void {
+    if (this.reportDegraded === undefined) return
+    try {
+      this.reportDegraded(diagnostic)
+    } catch {
+      // Reporting is best-effort; a failing logger must never abort Pet.
     }
   }
 

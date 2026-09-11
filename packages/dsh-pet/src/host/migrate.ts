@@ -31,6 +31,37 @@ const INCOMPATIBLE_TABLES = [
   'runs',
 ] as const
 
+/**
+ * How long to wait for a competing writer before giving up.
+ *
+ * Deliberately short: an ordinary overlap clears in milliseconds, while a
+ * running Host holds the medium exclusively and no timeout would help.
+ */
+const MIGRATION_BUSY_TIMEOUT_MS = 3000
+
+/**
+ * A migration that could not be PROVEN to have run.
+ *
+ * Distinct from "there was nothing to migrate": the caller contains this and
+ * degrades Pet with a visible diagnostic instead of continuing to an open that
+ * is now guaranteed to fail on a version mismatch.
+ */
+export class PetMigrationError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options as ErrorOptions)
+    this.name = 'PetMigrationError'
+  }
+}
+
+/**
+ * Extract a human-readable reason from an unknown thrown value.
+ * @param error - The caught value.
+ * @returns its message.
+ */
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 /** What the cleanup removed, for the operator-facing log line. */
 export interface LegacyStateCleanup {
   /** Total rows dropped across every incompatible table. */
@@ -65,6 +96,48 @@ function isLegacyRow(table: string, row: Record<string, unknown>): boolean {
  * @returns what was removed.
  */
 export function removeLegacyState(databaseFile: string): LegacyStateCleanup {
+  try {
+    return runLegacyStateCleanup(databaseFile)
+  } catch (error) {
+    // Already classified (unsupported version, etc.) — keep it as is.
+    if (error instanceof PetMigrationError) throw error
+    // An inaccessible medium is NOT "nothing to migrate". The exclusive lock
+    // the SQLite backend takes surfaces at whichever statement first needs it —
+    // open, read, or the restamp write — so the whole pass is classified here
+    // rather than at one guessed site. Reporting this as an empty cleanup let a
+    // locked medium silently skip the version restamp, after which
+    // `storageDomain.open` failed on every boot with a version mismatch and
+    // aborted Pet before its routes registered, with no log line anywhere.
+    if (isMediumUnavailable(error)) {
+      throw new PetMigrationError(
+        `Pet database at ${databaseFile} exists but could not be opened or updated: ` +
+        `${messageOf(error)}. A running DSH Host holds it exclusively; stop DSH and retry.`,
+        { cause: error },
+      )
+    }
+    throw error
+  }
+}
+
+/**
+ * Whether a thrown value means the medium could not be used at all.
+ *
+ * Matched on SQLite's own busy/locked signals rather than on message text
+ * alone, so a genuine schema error is never misreported as a lock.
+ */
+function isMediumUnavailable(error: unknown): boolean {
+  const code = (error as { errcode?: number } | undefined)?.errcode
+  // SQLITE_BUSY (5) and SQLITE_LOCKED (6).
+  if (code === 5 || code === 6) return true
+  return /\b(locked|busy)\b/i.test(messageOf(error))
+}
+
+/**
+ * The actual cleanup pass, run against an open database.
+ * @param databaseFile - Path to Pet's SQLite file.
+ * @returns what was removed.
+ */
+function runLegacyStateCleanup(databaseFile: string): LegacyStateCleanup {
   // Never CREATE the file. `new DatabaseSync(path)` creates it when absent,
   // which would defeat the ownership proof that runs later: that check treats
   // "the file exists after a durable write" as evidence the write landed at
@@ -72,13 +145,10 @@ export function removeLegacyState(databaseFile: string): LegacyStateCleanup {
   // the records actually went to a foreign medium.
   if (!existsSync(databaseFile)) return { removedRows: 0, clearedTables: [] }
 
-  let db: DatabaseSync
-  try {
-    db = new DatabaseSync(databaseFile)
-  } catch {
-    // Present but unopenable: nothing this cleanup can do.
-    return { removedRows: 0, clearedTables: [] }
-  }
+  // A busy timeout lets a brief writer overlap resolve itself. It does NOT
+  // rescue the exclusive case: the SQLite backend opens Pet's medium with
+  // `locking_mode = EXCLUSIVE`, so a running Host never yields the file.
+  const db = new DatabaseSync(databaseFile, { timeout: MIGRATION_BUSY_TIMEOUT_MS })
 
   try {
     // Inspect version before touching any rows. A future/unknown schema is
@@ -88,7 +158,9 @@ export function removeLegacyState(databaseFile: string): LegacyStateCleanup {
     if (stamped === undefined) return { removedRows: 0, clearedTables: [] }
     if (stamped.version === PET_DOMAIN_VERSION) return { removedRows: 0, clearedTables: [] }
     if (![1, 2, 3, 4, 5, 6, 7, 8].includes(stamped.version as number)) {
-      throw new Error(`Unsupported Pet storage version ${String(stamped.version)}; refusing migration`)
+      throw new PetMigrationError(
+        `Unsupported Pet storage version ${String(stamped.version)}; refusing migration`,
+      )
     }
     // v2+ upgrades are additive. Even malformed rows are retained for domain
     // validation to diagnose, never interpreted as permission to erase history.
