@@ -1,0 +1,97 @@
+id: T1
+name: Host 与 Channel 就绪基线
+description: 在现有 DSH GUI 中核验统一 Locus 的 onboarding、身份、默认 workspace 与运行时 capability，不执行重启。
+device: pc
+parallel_group: G1
+conflicts_with: [T2, T3, T4, T5, T6, T7, T8]
+precondition: 用户已手动启动现有 DSH Web，浏览器已登录 http://127.0.0.1:3080；Pet 已部署且不再运行 build/sync。
+ask_user_if_blocked: true
+status: pending
+blocked_reason: null
+mock_setup:
+  required: false
+  status: not_needed
+  scenario_id: null
+  surface: pet-channel-settings
+  data_source: Pet Host management API
+  evidence: []
+  enable:
+    command: null
+    env: null
+    notes: 使用正式 Host 与真实持久状态，不启用 mock。
+  user_decision: null
+steps:
+  - seq: 1
+    description: 导航到现有 DSH GUI 并打开 Pet 设置页
+    action: navigate
+    target: http://127.0.0.1:3080
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: T1-C1
+        description: 现有 GUI 成功加载 Pet 设置，页面不是登录页或启动错误页
+        focus: integration
+        verify: assert_url
+        automation: full
+        data_scenario_required: false
+        data_scenario: null
+        surface: pet-settings
+        data_source: DSH Web
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: URL 必须保持现有 127.0.0.1:3080 origin，若跳转登录则 blocked 而非通过。
+        expected_pattern: http://127.0.0.1:3080/**
+        result: null
+        result_detail: null
+  - seq: 2
+    description: 选择飞书设置并读取 Host 返回的 onboarding 状态
+    action: wait_for
+    target: .dshpet-settings
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: T1-C2
+        description: 飞书 onboarding 回显已确认的 Bot、非空 allowlist、可用 default workspace 与可启用连接状态
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: ready-runtime
+        surface: pet-channel-settings
+        data_source: Pet Host channel view
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 同时核对身份、allowlist、default workspace；任一前置失败都不得把 channel 显示为可用。
+        selector: .dshpet-settings
+        expected_text: "Bot；允许清单；默认 Workspace"
+        expected_attrs: null
+        expected_visible: true
+        result: null
+        result_detail: null
+      - id: T1-C3
+        description: 统一 Locus capability 回显 child session 与只读核验均为已核验，且不包含 legacy fallback 可用状态
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: ready-runtime
+        surface: pet-channel-settings
+        data_source: Pet Host unifiedLocus readiness
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 若 capability 不可用，应明确 fail closed；正式验收要求两个能力项均回显已核验。
+        selector: .dshpet-settings
+        expected_text: "专属子会话；已核验；只读；已核验"
+        expected_attrs: null
+        expected_visible: true
+        result: null
+        result_detail: null

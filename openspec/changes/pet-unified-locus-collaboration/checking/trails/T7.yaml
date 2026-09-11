@@ -1,0 +1,107 @@
+id: T7
+name: Delivery 决策往返与私聊隔离
+description: 验证同一 child 的多消息 FIFO、飞书决策后续轮次，以及 GUI 私聊不继承当前飞书回复授权。
+device: pc
+parallel_group: G7
+conflicts_with: [T1, T2, T3, T4, T5, T6, T8]
+precondition: 选择一个 active、read、空闲的验收 Locus；已记录其 child session ID；浏览器可从 Locus 管理打开该 child。
+ask_user_if_blocked: true
+status: pending
+blocked_reason: null
+mock_setup:
+  required: false
+  status: not_needed
+  scenario_id: null
+  surface: feishu-child-interaction
+  data_source: Delivery ledger, child inbox and Feishu replies
+  evidence: []
+  enable:
+    command: null
+    env: null
+    notes: 使用真实消息和现有 GUI，不启用 mock。
+  user_decision: null
+steps:
+  - seq: 1
+    description: 用户快速连续发送两条 mention 消息，在 child 会话和诊断中等待两条均结算
+    action: wait_for
+    target: "user-action:send-two-mentions-in-order"
+    value: "第一条：@Bot 记住顺序一；第二条：@Bot 记住顺序二并说明先后"
+    url_needs_input: false
+    checkpoints:
+      - id: T7-C1
+        description: 两条消息各有唯一 Delivery 和 inbox UUID，按接受顺序进入同一 child，均终态且没有错配或重复结算
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: fifo-two-messages
+        surface: feishu-child-interaction
+        data_source: Delivery diagnostics and child session log
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 以 messageId→Delivery→inbox UUID→turn 链核对顺序，不以 Bot 回复先后文本单独证明。
+        selector: .dshpet-settings
+        expected_text: "2 条不同 Delivery；同一子会话；接受顺序一致；2 条已结算；无重复 inbox"
+        expected_attrs: null
+        expected_visible: true
+        result: null
+        result_detail: null
+  - seq: 2
+    description: 让 child 提出一个需要用户选择的澄清问题，再由用户在飞书回复选择
+    action: wait_for
+    target: "user-action:decision-roundtrip"
+    value: "@Bot 请在两个安全选项中向我提问，收到回答后继续；用户随后回复选项一"
+    url_needs_input: false
+    checkpoints:
+      - id: T7-C2
+        description: 用户回答作为同一 child 的后续普通轮次继续并完成，未创建飞书 Invocation 或 waiting-user 执行链
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: decision-roundtrip
+        surface: feishu-child-interaction
+        data_source: Child inbox/session and legacy model diagnostics
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 记录提问前后 child ID；回答必须形成新 Delivery 到同 child，并核对旧 Invocation/Task 表数量不增加。
+        selector: .dshpet-settings
+        expected_text: "同一子会话；后续轮次已结算；无飞书 Invocation；无 waiting-user"
+        expected_attrs: null
+        expected_visible: true
+        result: null
+        result_detail: null
+  - seq: 3
+    description: 从 Locus 管理打开该 child，在 GUI 中直接发送不含飞书回复请求的私聊消息
+    action: click
+    target: "button:has-text('打开子会话')"
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: T7-C3
+        description: GUI 私聊在同一 child 产生本地轮次，但飞书群消息数量不更新且 pet_locus_reply 当前轮授权不可用
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: gui-private-turn
+        surface: dsh-child-conversation
+        data_source: DSH child session and Feishu chat history
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 点击后还需在 GUI 输入并发送“仅在 GUI 回答”；联合群消息前后数量和 tool 可用性证明无飞书出站。
+        selector: .dsh-conversation, main
+        expected_text: "仅在 GUI 回答；本地轮次完成；飞书消息数量未更新；当前飞书回复授权不可用"
+        expected_attrs: null
+        expected_visible: true
+        result: null
+        result_detail: null

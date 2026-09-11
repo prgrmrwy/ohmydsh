@@ -1,0 +1,169 @@
+meta:
+  feature: pet-unified-locus-collaboration
+  base_branch: main
+  base_commit: bc5e2dc8a9a818bd2ef09d255abc47f8da6ae098
+  created: "2026-09-11T17:20:00+08:00"
+  device: pc
+  device_profile: null
+  sources:
+    git_diff: true
+    openspec: true
+    prd: false
+    ui_specs: false
+    figma: false
+  mock:
+    status: partial
+    evidence_count: 0
+    user_decision_required: false
+    surface_scenario_matrix:
+      - surface: pet-channel-settings
+        data_source: Pet Host management API
+        scenarios: [ready-runtime]
+        covered: true
+        trail_ids: [T1]
+        status: planned
+      - surface: feishu-acceptance-chat
+        data_source: Feishu real-time events
+        scenarios: [bot-added, non-mention, group-mention, topic-mention]
+        covered: true
+        trail_ids: [T2, T3]
+        status: planned
+      - surface: malformed-thread-admission
+        data_source: Feishu message event
+        scenarios: [missing-thread-id]
+        covered: false
+        trail_ids: [T3]
+        status: manual
+      - surface: pet-locus-management
+        data_source: Pet locus management API
+        scenarios: [qa-default, bidirectional-discovery, bind-switch, permission-state]
+        covered: true
+        trail_ids: [T4, T5, T6]
+        status: planned
+      - surface: feishu-child-interaction
+        data_source: Delivery and child-session runtime
+        scenarios: [fifo, decision-roundtrip, gui-private-turn]
+        covered: true
+        trail_ids: [T7]
+        status: planned
+      - surface: host-recovery
+        data_source: persisted locus and session state
+        scenarios: [manual-cold-restart, retire-rebuild, legacy-isolation]
+        covered: true
+        trail_ids: [T8]
+        status: manual
+  execution_strategy:
+    recommendation: single_only
+    selected: null
+    reason:
+      - 八条 trail 共享同一个正式验收群、同一 channel consumer 与同一持久 locus 状态
+      - bind、scope、retire 与冷恢复存在严格顺序和共享写状态
+      - bot-added 事件只能由一个有界监听者消费，禁止多 agent 竞争
+    risks:
+      - 飞书写操作与加 Bot 需逐步由用户确认
+      - 冷恢复必须由用户手动重启，agent 禁止重启 Host
+      - Oracle 仅来自 OpenSpec，独立性低，最终最高为 needs-human
+    agent_assignments: []
+  stats:
+    total_trails: 8
+    total_checkpoints: 27
+    by_focus:
+      integration: 27
+      interaction: 0
+      visual: 0
+    by_automation:
+      full: 24
+      partial: 1
+      manual: 2
+  report_path: null
+  feishu_url: null
+
+manuals:
+  - id: M1
+    description: 缺失 thread_id 的真实异常事件必须 fail closed
+    reason: 用户明确拒绝 mock，正常真实 topic 事件无法安全制造缺字段
+    how: 采用已有真实 topic 正样本加自动测试证据人工核对，不计入本轮浏览器自动 PASS
+    focus: integration
+    related_trail: T3
+    mock_related: true
+  - id: M2
+    description: Host 冷恢复后保持原 parent/child、权限与 scoped context
+    reason: agent 被禁止重启 DSH，必须由用户在指定步骤手动重启
+    how: 记录重启前状态，用户手动重启并确认后继续回读比较
+    focus: integration
+    related_trail: T8
+    mock_related: false
+
+trails:
+  - id: T1
+    name: Host 与 Channel 就绪基线
+    file: trails/T1.yaml
+    device: pc
+    parallel_group: G1
+    status: pending
+    blocked_reason: null
+    checkpoint_count: 3
+    summary: 验证现有 GUI、onboarding 前置和统一 capability 已就绪
+  - id: T2
+    name: 真实 Bot 入群与 Mention 准入
+    file: trails/T2.yaml
+    device: pc
+    parallel_group: G2
+    status: pending
+    blocked_reason: null
+    checkpoint_count: 3
+    summary: 捕获 bot-added，并验证非 mention 与 mention 的业务边界
+  - id: T3
+    name: 群与话题精确寻址
+    file: trails/T3.yaml
+    device: pc
+    parallel_group: G3
+    status: pending
+    blocked_reason: null
+    checkpoint_count: 4
+    summary: 验证群/话题兄弟 child、复用与 missing-thread 人工边界
+  - id: T4
+    name: 默认 Q&A 与双向发现
+    file: trails/T4.yaml
+    device: pc
+    parallel_group: G4
+    status: pending
+    blocked_reason: null
+    checkpoint_count: 3
+    summary: 验证本人群主 Q&A 幂等及入口、parent、child 双向一致
+  - id: T5
+    name: 显式绑定与来源切换
+    file: trails/T5.yaml
+    device: pc
+    parallel_group: G5
+    status: pending
+    blocked_reason: null
+    checkpoint_count: 4
+    summary: 验证 S0 到 S1 警告、代际和既有/新话题来源
+  - id: T6
+    name: Read Write 与 Caller-bound Context
+    file: trails/T6.yaml
+    device: pc
+    parallel_group: G6
+    status: pending
+    blocked_reason: null
+    checkpoint_count: 4
+    summary: 用 canary 验证真实权限、降权和 caller-bound 上下文
+  - id: T7
+    name: Delivery 决策往返与私聊隔离
+    file: trails/T7.yaml
+    device: pc
+    parallel_group: G7
+    status: pending
+    blocked_reason: null
+    checkpoint_count: 3
+    summary: 验证 FIFO、同 child 决策往返及 GUI 不串飞书
+  - id: T8
+    name: 退出重建冷恢复与旧模型隔离
+    file: trails/T8.yaml
+    device: pc
+    parallel_group: G8
+    status: pending
+    blocked_reason: null
+    checkpoint_count: 3
+    summary: 验证 retire/rebuild、用户手动冷恢复和 legacy 不回退

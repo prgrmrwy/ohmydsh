@@ -1,0 +1,107 @@
+id: T4
+name: 默认 Q&A 与双向发现
+description: 从主会话创建或打开本人群主的默认 Q&A，并核验 endpoint、parent、child 三种方向的同源发现。
+device: pc
+parallel_group: G4
+conflicts_with: [T1, T2, T3, T5, T6, T7, T8]
+precondition: dsh-pet 固定 profile 的 user identity 已 verified 且等于 allowlist 所有者；浏览器当前主会话可作为 Q&A parent。
+ask_user_if_blocked: true
+status: pending
+blocked_reason: null
+mock_setup:
+  required: false
+  status: not_needed
+  scenario_id: null
+  surface: pet-locus-management
+  data_source: Pet locus management API and real Feishu group
+  evidence: []
+  enable:
+    command: null
+    env: null
+    notes: 使用真实 user identity 与真实 Q&A 群，不启用 mock。
+  user_decision: null
+steps:
+  - seq: 1
+    description: 在 Locus 管理中对当前主会话执行创建或打开默认 Q&A
+    action: click
+    target: "button:has-text('创建或打开默认 Q&A')"
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: T4-C1
+        description: 操作完成后默认 Q&A 回显 active Locus、本人群主的群入口、独立 child 与有效 read 权限
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: qa-default-first-use
+        surface: pet-locus-management
+        data_source: Pet default-Q&A index and Feishu group
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 必须核对固定 dsh-pet user owner，而不是浏览器 cookie holder 或 Bot owner；创建失败不得发布半成品。
+        selector: .dshpet-settings
+        expected_text: "默认 Q&A；活跃；群主为当前 dsh-pet 用户；实际 只读；子会话"
+        expected_attrs: null
+        expected_visible: true
+        result: null
+        result_detail: null
+  - seq: 2
+    description: 再次对同一主会话执行创建或打开默认 Q&A
+    action: click
+    target: "button:has-text('创建或打开默认 Q&A')"
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: T4-C2
+        description: 重复操作回读同一默认 Q&A chat、Locus、generation 与 child，数量没有增加
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: qa-default-idempotent
+        surface: pet-locus-management
+        data_source: Pet default-Q&A index
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 第一次操作后记录四个标识及 Locus 总数，第二次精确比较。
+        selector: .dshpet-settings
+        expected_text: "默认入口仍为同一 Locus；代际与子会话未变化；locus 数量未增加"
+        expected_attrs: null
+        expected_visible: true
+        result: null
+        result_detail: null
+  - seq: 3
+    description: 分别按 Q&A endpoint、parent session 和 child session 执行发现查询
+    action: fill
+    target: "input[placeholder*='Chat ID'], input[placeholder*='主会话'], input[placeholder*='子会话']"
+    value: "使用刚创建的精确 endpoint、parent 与 child 标识逐项查询"
+    url_needs_input: false
+    checkpoints:
+      - id: T4-C3
+        description: endpoint 查询命中当前代，parent 查询包含默认 Q&A 与全部关联 Locus，child 查询只反查唯一所属 Locus
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: bidirectional-discovery
+        surface: pet-locus-management
+        data_source: Pet locus discovery indexes
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 每次填入后必须点击查询并回读结果；查询本身不得授予其它入口权限或枚举到无关 parent。
+        selector: .dshpet-settings
+        expected_text: "当前 locus；默认 Q&A；所属 locus；查询结果相互一致"
+        expected_attrs: null
+        expected_visible: true
+        result: null
+        result_detail: null

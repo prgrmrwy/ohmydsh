@@ -1,0 +1,135 @@
+id: T5
+name: 显式绑定与来源切换
+description: 将自动来源 S0 的群级入口显式绑定到 S1，验证切换警告、代际 read 重置，以及旧话题/新话题来源分离。
+device: pc
+parallel_group: G5
+conflicts_with: [T1, T2, T3, T4, T6, T7, T8]
+precondition: T3 已有群级 S0、话题 A/B；准备一个有效且非 child 的 S1 主会话短 ID；所有相关 Delivery 已空闲。
+ask_user_if_blocked: true
+status: pending
+blocked_reason: null
+mock_setup:
+  required: false
+  status: not_needed
+  scenario_id: null
+  surface: pet-locus-management
+  data_source: Pet bind/switch management and Feishu control receipt
+  evidence: []
+  enable:
+    command: null
+    env: null
+    notes: 使用真实主会话与验收群，不启用 mock。
+  user_decision: null
+steps:
+  - seq: 1
+    description: 由 allowlist 用户在群级入口发送绑定 S1 的控制命令
+    action: wait_for
+    target: "user-action:send-bind-command"
+    value: "@Bot -b <S1至少六位短ID>"
+    url_needs_input: true
+    checkpoints:
+      - id: T5-C1
+        description: 绑定完成后群级入口更新为新一代 S1 Locus，并收到明确 S0 到 S1、历史不自动合并的持久切换回执
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: bind-switch-S0-S1
+        surface: pet-locus-management
+        data_source: Pet locus generation and Feishu control receipt
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 操作前记录 S0 locus/generation；回读新 parent=S1、generation 增加、旧代历史仍存在，并保存飞书回执证据。
+        selector: .dshpet-settings
+        expected_text: "S0 → S1；上下文来源已改变；旧对话未自动合并；第 2 代；主会话 S1"
+        expected_attrs: null
+        expected_visible: true
+        result: null
+        result_detail: null
+  - seq: 2
+    description: 再次发送相同 S1 绑定命令
+    action: wait_for
+    target: "user-action:retry-same-bind-command"
+    value: "@Bot -b <同一S1短ID>"
+    url_needs_input: true
+    checkpoints:
+      - id: T5-C2
+        description: 同源绑定重试回显已绑定且 Locus ID、generation、child 与总数均不再变化
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: bind-idempotent
+        surface: pet-locus-management
+        data_source: Pet locus snapshot
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 不允许相同命令创建第三代或额外 child。
+        selector: .dshpet-settings
+        expected_text: "已绑定同一来源；Locus ID、代际、子会话与数量未变化"
+        expected_attrs: null
+        expected_visible: true
+        result: null
+        result_detail: null
+  - seq: 3
+    description: 回读切换前话题 A/B 的 parent 与权限，再创建话题 C 并 mention Bot
+    action: wait_for
+    target: "user-action:create-topic-C-after-switch"
+    value: "@Bot 请确认这是切换后的新话题"
+    url_needs_input: false
+    checkpoints:
+      - id: T5-C3
+        description: 旧话题 A/B 仍固定到 S0，新话题 C 使用 S1，群级新代和话题 C 的有效权限均为 read
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: old-new-topic-source-split
+        surface: pet-locus-management
+        data_source: Pet parent discovery and permission state
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 逐 endpoint 核对，不以群默认来源推断既有话题；话题 C 必须是 S1 的直接 child。
+        selector: .dshpet-settings
+        expected_text: "话题 A 主会话 S0；话题 B 主会话 S0；话题 C 主会话 S1；实际 只读"
+        expected_attrs: null
+        expected_visible: true
+        result: null
+        result_detail: null
+  - seq: 4
+    description: 使用不存在或不足六位的来源短 ID 发送失败绑定命令
+    action: wait_for
+    target: "user-action:send-invalid-bind-command"
+    value: "@Bot -b 12345"
+    url_needs_input: false
+    checkpoints:
+      - id: T5-C4
+        description: 无效短 ID 收到明确失败回执，当前 Locus、代际、parent、child 和权限状态均保持不变
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: invalid-bind-prefix
+        surface: pet-locus-management
+        data_source: Pet bind resolution and Feishu control receipt
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 失败后必须回读状态不变；错误回执不得泄露完整候选 session ID。
+        selector: .dshpet-settings
+        expected_text: "绑定失败；至少六位；当前 Locus、代际、主会话、子会话与权限未变化"
+        expected_attrs: null
+        expected_visible: true
+        result: null
+        result_detail: null
