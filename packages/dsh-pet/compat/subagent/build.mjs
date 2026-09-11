@@ -46,8 +46,8 @@ const UPSTREAM = {
   patchSha256: '97ef5189f726799c13bdd7622aa37292a7451fe13981fac77de4d82161e14b28',
 }
 
-const run = (command, args, cwd) => runCompatCommand(command, args, cwd)
-const capture = (command, args, cwd) => runCompatCommand(command, args, cwd, { capture: true })
+const run = (command, args, cwd = here) => runCompatCommand(command, args, cwd)
+const capture = (command, args, cwd = here) => runCompatCommand(command, args, cwd, { capture: true })
 
 function fail(message) {
   console.error(`[compat/subagent] ${message}`)

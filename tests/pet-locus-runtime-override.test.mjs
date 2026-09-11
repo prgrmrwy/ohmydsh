@@ -22,6 +22,8 @@ test('the runtime patch is pinned to the manifest DSH version', async () => {
   assert.equal(manifest.dshVersion, '0.1.2-rc.1')
   assert.match(launcher, /const version = '0\.1\.2-rc\.1'/)
   assert.match(builder, /tag: 'dsh-v0\.1\.2-rc\.1'/)
+  assert.match(builder, /commit: 'a66e4702047846cdaa10c66c9d3df3951f5ea70d'/)
+  assert.match(builder, /const run = \(command, args, cwd = here\)/)
 })
 
 test('the recorded patch hashes match the reviewable patches on disk', async () => {
