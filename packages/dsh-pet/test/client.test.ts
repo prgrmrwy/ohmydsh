@@ -219,8 +219,16 @@ describe('overlay markup and accessibility', () => {
     )
 
     expect(markup).toContain('dshpet-root')
-    expect(markup).toMatch(/left:\d+px/)
-    expect(markup).toMatch(/top:\d+px/)
+    // Offset rides `transform`, not `left`/`top`: those two invalidate Pet's
+    // geometry on every write, so dragging paid a layout and a paint per
+    // pointer event. The CSS rule pins them to 0 (asserted separately), which
+    // is what makes these translate arguments viewport coordinates.
+    expect(markup).toMatch(/transform:translate3d\(\d+px, ?\d+px, ?0\)/)
+    // The old form must not creep back in alongside the new one: a stray
+    // `left`/`top` would re-introduce the layout cost while the transform
+    // made everything still LOOK correct.
+    expect(markup).not.toMatch(/style="[^"]*left:\d+px/)
+    expect(markup).not.toMatch(/style="[^"]*top:\d+px/)
   })
 
   it('publishes the resizable mascot size to the wheel-note anchor rules', () => {
@@ -815,10 +823,27 @@ describe('Pet is a top layer that yields to no layout', () => {
     const declared = /PET_SIZE = (\d+)/.exec(position)?.[1]
 
     expect(declared).toBeDefined()
+    // Matched within the rule rather than immediately after `z-index`, since
+    // the offset pinning (`left:0;top:0`) now sits between them. The
+    // invariant being guarded is that the CSS box and `PET_SIZE` agree — the
+    // clamp would otherwise let a larger Pet be dragged partly off-screen.
     expect(PET_CSS).toMatch(
-      new RegExp(`\\.dshpet-root\\{position:fixed;z-index:\\d+;width:${declared}px`),
+      new RegExp(`\\.dshpet-root\\{position:fixed;z-index:\\d+;[^}]*width:${declared}px`),
     )
     expect(PET_CSS).toContain(`width:${declared}px;height:${declared}px`)
+  })
+
+  it('pins the offset origin so a translate lands in viewport coordinates', () => {
+    // `left:0;top:0` is load-bearing, not tidiness. A `position:fixed` element
+    // with both at `auto` resolves from its STATIC position, which for this
+    // node depends on the flow of `document.body` under Pet's host wrapper —
+    // not a dependable (0,0). Without the pinning, `translate3d(x, y, 0)`
+    // would be an offset from an arbitrary origin, so the stored `{x, y}`
+    // (unchanged, hence no migration) would no longer mean viewport pixels
+    // and Pet would restore to the wrong spot.
+    const rule = PET_CSS.match(/\.dshpet-root\{[^}]*\}/)?.[0] ?? ''
+    expect(rule).toContain('left:0')
+    expect(rule).toContain('top:0')
   })
 
   it('sits at the exact z-index chosen to stay below the Settings overlay', () => {

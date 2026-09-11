@@ -53,8 +53,27 @@ export const PET_CSS = `
    "top-layer modal" tier (Settings, attachment lightbox/drop mask, this
    deployment's better-sidebar mermaid modal — all 1000+). A future plugin
    value landing between 100 and 999 is a real risk this constant alone
-   cannot detect; see that design doc for the full survey and rationale. */
-.dshpet-root{position:fixed;z-index:999;width:72px;height:72px;
+   cannot detect; see that design doc for the full survey and rationale.
+
+   Using transform for the offset does NOT change that stacking comparison,
+   and the z-index above must not be "fixed" upward on account of it: this
+   element is ALREADY a stacking context by virtue of being position:fixed
+   with a non-auto z-index, so translating it merely satisfies a second
+   condition for something it already was. Pet and Settings still compare
+   directly at 999 against 1000 in the root stacking context. The
+   containing-block side effect is a tautology for the same reason: the
+   wheel, panel and badge already resolve their absolute offsets against
+   this node, since a fixed element is a containing block too. Nothing
+   re-anchors and nothing shifts.
+
+   left:0;top:0 is REQUIRED, not decoration. With both left at auto a fixed
+   element falls back to its STATIC position, and this node's static position
+   depends on the flow of document.body under our host wrapper — not a
+   dependable (0,0). Pinning both to zero makes the translate arguments equal
+   to viewport coordinates, which is exactly what localStorage already stores
+   as the x/y pair; that identity is why moving to transform needs no
+   migration of saved positions. */
+.dshpet-root{position:fixed;z-index:999;left:0;top:0;width:72px;height:72px;
   pointer-events:auto;touch-action:none}
 /* No hover bridge: the wheel is a continuous disc centred on the mascot, so
    there is no dead space to span. The rectangular menu's bridge was a 268px

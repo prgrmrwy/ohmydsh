@@ -76,6 +76,29 @@ const CHANNEL_HINT_DISMISSED_KEY = 'dshpet.channelHintDismissed'
 const NOTICE_DISMISS_MS = 6000
 
 /**
+ * Render a position as Pet's `transform` value.
+ *
+ * One helper for both writers — React's render and the drag's direct DOM
+ * write — so the two can never disagree on the format; the commit at the end
+ * of a drag produces the identical string React then renders, which is what
+ * makes the handover invisible.
+ *
+ * `translate3d`, not `translate`: the third axis is the conventional hint that
+ * puts the element on its own compositor layer. `will-change:transform` is
+ * deliberately NOT used — Pet is a permanent overlay, so a standing hint would
+ * hold a layer for the entire session to speed up an occasional drag.
+ *
+ * Rounded because a fractional offset makes the mascot's emoji glyph render
+ * blurry. Inputs are integer pointer deltas today, so this only guards against
+ * a fractional viewport or size arriving from elsewhere.
+ * @param position - Viewport position in CSS pixels.
+ * @returns the `transform` value to apply.
+ */
+function translateFor(position: PetPosition): string {
+  return `translate3d(${Math.round(position.x)}px, ${Math.round(position.y)}px, 0)`
+}
+
+/**
  * The Pet overlay surface.
  * @param props - Live DSH facts and navigation callbacks.
  * @returns the rendered overlay.
@@ -137,9 +160,39 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   // is undefined, and flashing a "not connected" hint at a Pet that is in
   // fact connected would be worse than showing nothing.
   const showChannelHint = botBound === false && !channelHintDismissed
+  /**
+   * The in-flight drag gesture, in ABSOLUTE form.
+   *
+   * `origin` is Pet's position at pointerdown and `startX/startY` the pointer
+   * that grabbed it, so every move computes `origin + (pointer - start)`
+   * outright. The previous shape accumulated a per-event delta onto the
+   * current position instead, which no longer works now that `position` is
+   * frozen for the duration of the gesture (see `onPointerMove`) — every
+   * increment would land on the same stale base.
+   *
+   * Absolute also fixes a bug the incremental form had: past the viewport
+   * edge the clamp discarded the overflow while `dx/dy` still advanced to the
+   * latest pointer, so dragging back inward moved Pet immediately rather than
+   * waiting for the pointer to return to where it left the edge. Clamping is
+   * a pure function of an absolute candidate, so nothing accumulates.
+   *
+   * `pending` is the clamped position awaiting commit. It is kept here rather
+   * than parsed back out of `style.transform` so the string format never
+   * becomes an implicit contract.
+   */
   const dragging = useRef<
-    { pointerId: number; dx: number; dy: number; moved: boolean } | undefined
+    | {
+        pointerId: number
+        startX: number
+        startY: number
+        origin: PetPosition
+        pending: PetPosition
+        moved: boolean
+      }
+    | undefined
   >(undefined)
+  /** In-flight rAF handle for the drag's single write-per-frame. */
+  const frameRef = useRef<number | undefined>(undefined)
   /** True when the gesture that just ended actually moved Pet. */
   const draggedRef = useRef(false)
   // Last known pointer position, for the blur-vs-fall-through decision.
@@ -174,11 +227,45 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   }, [])
 
 
+  /**
+   * Clamp inputs, mirrored into refs for the drag path.
+   *
+   * A drag now runs outside React (see `onPointerMove`), so its handlers stay
+   * alive for the whole gesture instead of being recreated per render. Reading
+   * `viewport` / `size` from the closure would therefore clamp against
+   * whatever those were when the gesture STARTED, and `onPointerUp` would
+   * persist that out-of-bounds result — the exact hazard the dependency lists
+   * on the old handlers warned about, made worse by the longer lifetime. A ref
+   * always reads current, so resizing the mascot mid-drag clamps correctly.
+   */
+  const viewportRef = useRef(viewport)
+  const sizeRef = useRef(size)
+  useEffect(() => {
+    viewportRef.current = viewport
+    sizeRef.current = size
+  }, [viewport, size])
+
+  /**
+   * Pet's committed position, for the drag to snapshot at pointerdown.
+   *
+   * Assigned during render rather than in an effect: `onPointerDown` must see
+   * the position the user is looking at, and an effect would still be pending
+   * if the pointer goes down in the same frame as a re-clamp.
+   */
+  const positionRef = useRef(position)
+  positionRef.current = position
+
   // Re-clamp whenever the viewport changes so Pet can never be stranded.
   // Deliberately does NOT persist: a temporary narrow layout would otherwise
   // overwrite the user's chosen spot, and it could never be recovered when
   // the layout widened again. Only a real drag writes the position.
   useEffect(() => {
+    // Skipped mid-drag: this would `setPosition` and let React paint a
+    // `transform` over the value the drag writes straight to the DOM, which
+    // reads as Pet snapping backwards under the pointer. Nothing is lost by
+    // waiting — the drag already clamps against the current viewport and size
+    // through the refs above, and its commit lands on a clamped value.
+    if (dragging.current !== undefined) return
     setPosition(current => clampPosition(current, viewport, size))
     // `size` included: growing the mascot near an edge must pull it back
     // into view rather than leave it partly off-screen.
@@ -263,6 +350,41 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
       ? size / 2 + RING_GAP + RING_WIDTH
       : hoverRadius(rings, size)
 
+  /**
+   * The capability actually under the pointer right now.
+   *
+   * A highlight means "the pointer is on this slice", so it must not outlive
+   * the wheel. `hovered` used to be cleared only by a slice's own
+   * `mouseleave` and the a11y button's `blur`, so whenever the wheel closed
+   * with the pointer still resting on a slice — the distance check, Escape,
+   * focus leaving, a drag — that `mouseleave` never arrived and the stale id
+   * survived into the next open. A slice then looked selected that the user
+   * was not pointing at, on a wheel where a click runs the capability
+   * immediately.
+   *
+   * The effect below clears the state on every close, whatever caused it.
+   * Deliberately one place keyed on `mode` rather than a
+   * `setHovered(undefined)` bolted onto each closing branch: that would be
+   * four call sites to keep in sync, and a fifth closing path added later
+   * would regress in exactly the way this bug did. Gating only the READ on
+   * `mode` was tried first and is NOT enough — it hides the stale value
+   * while the wheel is closed, then hands it straight back when re-opening
+   * sets `mode` to `menu` again.
+   *
+   * A capability vanishing from a refreshed catalog needs no guard of its
+   * own: slice geometry comes from the index, but the highlight is compared
+   * by id, so a departed id matches no rendered slice and cannot be
+   * inherited by whichever capability now occupies that position. An
+   * explicit `shortcuts.some(...)` check was written here and then removed
+   * as dead code — its regression test passes without it, which is how the
+   * redundancy was found. `activeHover` stays as the single named read so
+   * the two call sites below cannot drift apart.
+   */
+  const activeHover = hovered
+  useEffect(() => {
+    if (mode !== 'menu') setHovered(undefined)
+  }, [mode])
+
   // Closing is decided by distance from the centre, not by `mouseleave`: the
   // breathing gap and the seams between slices are all inside the disc, so a
   // continuous exit path never reports a false departure — which is exactly
@@ -296,19 +418,54 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
     return () => document.removeEventListener('pointerdown', onPointerDownOutside, true)
   }, [mode])
 
+  /**
+   * Paint the drag's latest position, at most once per frame.
+   *
+   * Writes `transform` STRAIGHT to the DOM and deliberately skips React. The
+   * old handler called `setPosition` on every `pointermove`, which re-rendered
+   * the whole overlay — including the wheel's entire SVG tree, up to 24
+   * slices, none of which depend on Pet's coordinates. The wheel is usually
+   * open while dragging, because hovering the mascot to grab it is what opens
+   * it, so that was the common case rather than an edge one.
+   *
+   * DOM and React state are therefore knowingly out of step for the duration
+   * of one gesture, and only for `transform`. `onPointerUp` commits the same
+   * value it last painted, so the handover renders identically and Pet does
+   * not jump; any in-flight frame is cancelled first so a stale one cannot
+   * repaint over the commit.
+   */
+  const paintDrag = useCallback(() => {
+    frameRef.current = undefined
+    const state = dragging.current
+    const node = rootRef.current
+    // Both can vanish between scheduling and running: the gesture may have
+    // ended, or the component may have unmounted.
+    if (state === undefined || node === null) return
+    node.style.transform = translateFor(state.pending)
+  }, [])
+
   const onPointerDown = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
-      // Reset here so each gesture owns its own flag. Relying on the click
-      // handler to clear it strands `true` whenever a drag ends without a
-      // click (pointercancel, or release outside the element), which then
-      // swallows the NEXT click or keyboard activation.
-      draggedRef.current = false
+    // Reset here so each gesture owns its own flag. Relying on the click
+    // handler to clear it strands `true` whenever a drag ends without a
+    // click (pointercancel, or release outside the element), which then
+    // swallows the NEXT click or keyboard activation.
+    draggedRef.current = false
+    // A grabbed Pet is not a hovered capability. Unlike the ways the wheel
+    // CLOSES, which `activeHover` already covers by reading `mode`, a drag
+    // leaves `mode` untouched (Pet is draggable with the wheel open), so the
+    // highlight has to be dropped explicitly here.
+    setHovered(undefined)
     // Pointer capture keeps the drag attached even when the cursor leaves the
     // element or crosses an iframe boundary.
     event.currentTarget.setPointerCapture(event.pointerId)
     dragging.current = {
       pointerId: event.pointerId,
-      dx: event.clientX,
-      dy: event.clientY,
+      startX: event.clientX,
+      startY: event.clientY,
+      // Snapshot the base once. Every move is measured from this, so the
+      // gesture needs no position updates from React while it runs.
+      origin: positionRef.current,
+      pending: positionRef.current,
       moved: false,
     }
   }, [])
@@ -317,18 +474,24 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
     (event: React.PointerEvent<HTMLButtonElement>) => {
       const state = dragging.current
       if (state === undefined || state.pointerId !== event.pointerId) return
-      const deltaX = event.clientX - state.dx
-      const deltaY = event.clientY - state.dy
+      const deltaX = event.clientX - state.startX
+      const deltaY = event.clientY - state.startY
+      // Below the threshold this is still a click, not a drag.
       if (Math.abs(deltaX) < 2 && Math.abs(deltaY) < 2) return
-      dragging.current = { ...state, dx: event.clientX, dy: event.clientY, moved: true }
-      setPosition(current =>
-        clampPosition({ x: current.x + deltaX, y: current.y + deltaY }, viewport, size),
+      const pending = clampPosition(
+        { x: state.origin.x + deltaX, y: state.origin.y + deltaY },
+        // Refs, not closure values: see `viewportRef` above.
+        viewportRef.current,
+        sizeRef.current,
       )
+      dragging.current = { ...state, pending, moved: true }
+      // Coalesce to one write per frame. Pointer events can outpace the
+      // display — a high-rate mouse fires several per frame — and every extra
+      // write past the first is discarded by the compositor anyway.
+      if (frameRef.current !== undefined) return
+      frameRef.current = requestAnimationFrame(paintDrag)
     },
-    // `size` is read inside, so it must be a dependency: a stale closure
-    // clamps against the previous diameter and `onPointerUp` then PERSISTS
-    // that out-of-bounds position.
-    [viewport, size],
+    [paintDrag],
   )
 
   const onPointerUp = useCallback(
@@ -336,16 +499,37 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
       const state = dragging.current
       dragging.current = undefined
       if (state === undefined) return
+      // Cancel before committing: a frame still queued would otherwise fire
+      // after React has taken the position back and repaint the old value.
+      if (frameRef.current !== undefined) {
+        cancelAnimationFrame(frameRef.current)
+        frameRef.current = undefined
+      }
       event.currentTarget.releasePointerCapture(event.pointerId)
       // A drag must not also count as a click: releasing at the new position
       // would otherwise toggle the panel open every time Pet is moved.
       draggedRef.current = state.moved
-      setPosition(current => writePosition(current, viewport, globalThis.localStorage, size))
+      // Hand the gesture's final position back to React and persist it. Also
+      // the `pointercancel` path, so an interrupted drag keeps where it got to
+      // instead of springing back to where it started.
+      const committed = writePosition(
+        state.pending,
+        viewportRef.current,
+        globalThis.localStorage,
+        sizeRef.current,
+      )
+      setPosition(committed)
     },
-    // `size` is read inside, so it must be a dependency: a stale closure
-    // clamps against the previous diameter and `onPointerUp` then PERSISTS
-    // that out-of-bounds position.
-    [viewport, size],
+    [],
+  )
+
+  // A queued frame must not outlive the component: it would touch a detached
+  // node, and on a fast unmount `rootRef` is already null.
+  useEffect(
+    () => () => {
+      if (frameRef.current !== undefined) cancelAnimationFrame(frameRef.current)
+    },
+    [],
   )
 
   const run = useCallback(
@@ -451,8 +635,12 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
       className="dshpet-root"
       data-open={mode !== 'closed'}
       style={{
-        left: `${position.x}px`,
-        top: `${position.y}px`,
+        // `transform`, not `left`/`top`: the compositor can move a layer
+        // without a layout pass, whereas every `left`/`top` write invalidates
+        // Pet's geometry and forces layout plus paint on each pointer event.
+        // The CSS rule pins `left:0;top:0` so these are viewport coordinates
+        // (see styles.ts for why that pinning is required).
+        transform: translateFor(position),
         // The wheel notes clear the RINGS (see `.dshpet-wheel-note` in
         // styles.ts), but the wheel box is sized for its widest possible ring
         // while the mascot is resizable and the ring count follows the
@@ -572,7 +760,7 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
                   className="dshpet-slot"
                   data-ring={slot.ring}
                   data-disabled={reason !== undefined || busy}
-                  data-hovered={hovered === capability.id}
+                  data-hovered={activeHover === capability.id}
                   // Staggered by ring so the layers read as depth; ring one is
                   // immediate because the most-used capability lives there and
                   // must not wait on an animation.
@@ -598,7 +786,7 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
                     // Hover rides the same channel for that reason.
                     style={{
                       fill:
-                        hovered === capability.id
+                        activeHover === capability.id
                           ? hoverFill(ringFill(accent.background, slot.ring, ringStyle))
                           : ringFill(accent.background, slot.ring, ringStyle),
                     }}
