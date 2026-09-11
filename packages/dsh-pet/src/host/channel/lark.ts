@@ -162,6 +162,12 @@ export interface LarkClient {
    */
   replyExact?(messageId: string, text: string): Promise<void>
   /**
+   * Send a control-plane receipt and report delivery failure to the caller.
+   * Ordinary Agent work keeps using fail-soft {@link reply}; pairing needs to
+   * know whether its post-commit acknowledgement was delivered.
+   */
+  replyStrict?(messageId: string, text: string): Promise<void>
+  /**
    * Create a private group and invite the given users.
    *
    * NOT fail-soft, unlike the rest of this client: the QA group transaction
@@ -705,6 +711,18 @@ export function createLarkCliClient(
       )
       const data = recordOf(strictEnvelopeData(result, 'reply exact'))
       requireMessageId(data?.['message_id'], 'reply exact')
+    },
+
+    async replyStrict(messageId, text) {
+      const result = await callJson(
+        ['im', '+messages-reply', '--as', 'bot', '--message-id', messageId, '--text', text],
+        binary,
+        runner,
+      )
+      const envelope = result.value as { ok?: unknown } | undefined
+      if (!result.ok || envelope?.ok !== true) {
+        throw new Error('lark-cli could not send the pairing receipt')
+      }
     },
 
     async createChat(name, userOpenIds, ownerOpenId) {

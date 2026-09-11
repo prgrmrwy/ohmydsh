@@ -180,6 +180,36 @@ describe('real shortcut error output', () => {
   })
 })
 
+describe('strict control-plane receipt', () => {
+  it('rejects a zero-exit ok:false pairing acknowledgement', async () => {
+    const client = createLarkCliClient(
+      'lark-cli',
+      vi.fn(async () => ({
+        stdout: JSON.stringify({ ok: false, error: { type: 'business', message: 'refused' } }),
+      })) as unknown as LarkCliRunner,
+    )
+
+    await expect(client.replyStrict?.('om_pair', 'paired')).rejects.toThrow(
+      'could not send the pairing receipt',
+    )
+  })
+
+  it('rejects when lark-cli refuses the pairing acknowledgement', async () => {
+    const failure = Object.assign(new Error('command failed'), {
+      stdout: '',
+      stderr: JSON.stringify({ ok: false, error: { type: 'network', message: 'offline' } }),
+    })
+    const client = createLarkCliClient(
+      'lark-cli',
+      vi.fn(async () => Promise.reject(failure)) as unknown as LarkCliRunner,
+    )
+
+    await expect(client.replyStrict?.('om_pair', 'paired')).rejects.toThrow(
+      'could not send the pairing receipt',
+    )
+  })
+})
+
 describe('Pet profile isolation', () => {
   it('prefixes every Host-owned operation with the named profile', async () => {
     const calls: readonly string[][] = []
@@ -214,11 +244,12 @@ describe('Pet profile isolation', () => {
     await client.listChatBots('oc_1')
     await client.reply('om_1', 'hi')
     await client.replyExact?.('om_1', 'verified hi')
+    await client.replyStrict?.('om_1', 'paired')
     await client.createChat?.('qa', [BOT], BOT)
     await client.memberCount?.('oc_1')
     await client.sendToChat?.('oc_1', 'notice')
 
-    expect(mutableCalls).toHaveLength(14)
+    expect(mutableCalls).toHaveLength(15)
     for (const args of mutableCalls) {
       expect(args.slice(0, 2)).toEqual(['--profile', 'dsh-pet'])
     }

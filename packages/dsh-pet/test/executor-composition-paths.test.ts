@@ -314,8 +314,14 @@ function makeAgentContext(): FakeAgentContext {
     injected: [],
     async inject(services, callback) {
       ctx.injected.push(...services)
-      await Promise.resolve()
-      callback(ctx)
+      // Real Cordis schedules injected plugin callbacks asynchronously. A
+      // synchronous double hid the production-only setup failure.
+      await new Promise<void>(resolve => {
+        queueMicrotask(() => {
+          callback(ctx)
+          resolve()
+        })
+      })
     },
     get(service) {
       // Resolution only. Pet registers through `inject` so the fresh agent

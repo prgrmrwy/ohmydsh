@@ -492,12 +492,8 @@ async function initialize(
   const composedAgents = new WeakSet<object>()
   const allowlistAgents = new WeakSet<object>()
   const contextToolAgents = new WeakSet<object>()
-  /**
-   * `Context.inject()` starts an asynchronous Cordis fiber. Keep one promise
-   * per live Agent context so concurrent create/resume/observer paths cannot
-   * register the same scoped service twice or observe a half-installed scope.
-   */
-  const installingScopes = new WeakMap<object, Promise<void>>()
+  /** In-flight async inject callbacks, deduplicated per fresh Agent scope. */
+  const composingAgents = new WeakMap<object, Promise<void>>()
   const scopeComplete = (key: object, includeAllowlist: boolean): boolean =>
     contextToolAgents.has(key) && (!includeAllowlist || allowlistAgents.has(key))
 
@@ -510,44 +506,45 @@ async function initialize(
    * duplicate-registration error. The returned promise settles only after
    * every `inject()` fiber has run its callback and the markers are true.
    */
-  const installPetScope = async (agentCtx: unknown, includeAllowlist: boolean): Promise<void> => {
+  const installPetScope = (agentCtx: unknown, includeAllowlist: boolean): Promise<void> => {
     const scoped = agentCtx as Context
     const key = scoped as unknown as object
-    if (scopeComplete(key, includeAllowlist)) return
+    if (scopeComplete(key, includeAllowlist)) return Promise.resolve()
+    const existing = composingAgents.get(key)
+    if (existing !== undefined) {
+      return existing.then(() => installPetScope(scoped, includeAllowlist))
+    }
 
-    const previous = installingScopes.get(key)
-    if (previous !== undefined) await previous
-    if (scopeComplete(key, includeAllowlist)) return
-
-    const installation = (async (): Promise<void> => {
-      // Another caller may have completed while this request was waiting on a
-      // prior installation. Re-check before touching either registry.
-      if (scopeComplete(key, includeAllowlist)) return
-
-      // Agent contexts are fresh fibers and do not inherit this plugin's inject
-      // grants, so each scoped registration declares its dependency locally.
-      // Mark each component only after its registration succeeds: a partial
-      // failure can then be retried without duplicating the component that
-      // already exists.
-      if (includeAllowlist && !allowlistAgents.has(key)) {
-        await Promise.resolve(
-          scoped.inject(['skills'], skillCtx => {
+    const pending: Promise<void>[] = []
+    // Agent contexts are fresh fibers and do not inherit this plugin's inject
+    // grants. `inject()` schedules its callback asynchronously, so setup must
+    // await an explicit callback-owned promise — checking a WeakSet directly
+    // after `inject()` is guaranteed to race on the real Cordis runtime.
+    if (includeAllowlist && !allowlistAgents.has(key)) {
+      pending.push(new Promise<void>((resolve, reject) => {
+        scoped.inject(['skills'], skillCtx => {
+          try {
             skillCtx.effect(
               () =>
                 skillCtx.skills.registerProvider(() => createPetSkillProvider(repository, paths)),
               'dsh-pet: scoped allowlist Skill provider',
             )
             allowlistAgents.add(key)
-          }),
-        )
-      }
+            resolve()
+          } catch (error) {
+            reject(error)
+          }
+        })
+      }))
+    }
 
-      // `tools.register()` chooses its layer from the CALLING context's scope
-      // tag. Calling it on the Host silently publishes globally, which is the
-      // original leak this change fixes.
-      if (!contextToolAgents.has(key)) {
-        await Promise.resolve(
-          scoped.inject(['tools'], toolCtx => {
+    // `tools.register()` chooses its layer from the CALLING context's scope
+    // tag. Calling it on the Host silently publishes globally, which is the
+    // original leak this change fixes.
+    if (!contextToolAgents.has(key)) {
+      pending.push(new Promise<void>((resolve, reject) => {
+        scoped.inject(['tools'], toolCtx => {
+          try {
             toolCtx.effect(
               () => registerPetTools(toolCtx, {
                 repository,
@@ -556,21 +553,33 @@ async function initialize(
               'dsh-pet: scoped caller-bound Agent tools',
             )
             contextToolAgents.add(key)
-          }),
-        )
-      }
+            resolve()
+          } catch (error) {
+            reject(error)
+          }
+        })
+      }))
+    }
 
+    const ready = Promise.race([
+      Promise.all(pending).then(() => undefined),
+      new Promise<never>((_resolve, reject) => {
+        const timer = setTimeout(() => reject(new PetError(
+          'INTERNAL',
+          'Pet scoped surface dependencies did not become available',
+        )), 5_000)
+        timer.unref?.()
+      }),
+    ]).then(() => {
       if (!contextToolAgents.has(key) || (includeAllowlist && !allowlistAgents.has(key))) {
         throw new PetError('INTERNAL', 'Pet scoped surface dependencies were not installed')
       }
       composedAgents.add(key)
-    })()
-    installingScopes.set(key, installation)
-    try {
-      await installation
-    } finally {
-      if (installingScopes.get(key) === installation) installingScopes.delete(key)
-    }
+    }).finally(() => {
+      composingAgents.delete(key)
+    })
+    composingAgents.set(key, ready)
+    return ready
   }
 
   /** Mount the selected preset, then install the Pet-owned scoped surface.
@@ -982,9 +991,8 @@ async function initialize(
       // silently running an Invocation with Host-wide Skill discovery.
       if (!isComposed(agent)) {
         // Late repair is asynchronous because scoped `inject()` callbacks
-        // are Cordis fibers. Await it before the fail-closed decision so a
-        // native-loaded executor is never dispatched during a half-installed
-        // scope.
+        // are Cordis fibers. Await the real callback completion before the
+        // fail-closed decision so an executor never runs half-composed.
         await composeForeignExecutor(agent)
       }
       if (!isComposed(agent)) {
@@ -2202,6 +2210,8 @@ async function initialize(
     inspectWorkspace: () => inspectWorkspace(paths),
     repairWorkspace: () => repairWorkspace(paths),
     channel,
+    archivedSessionIds: () =>
+      ((ctx.workspaceRegistry.archivedSessionIds ?? []) as readonly unknown[]).map(id => String(id)),
     // Owner-facing locus view/discovery and durable lifecycle transitions.
     // The identity is Host-derived; routes reject any actor a browser sends.
     locus: locusManagement,
