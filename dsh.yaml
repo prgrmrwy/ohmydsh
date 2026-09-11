@@ -92,6 +92,11 @@ customizations:
     source: local
     version: 0.1.0
     enabled: true
+    # 仅长期 dsh web Host 使用的 Pet Locus 兼容运行时；build/plugin 等官方
+    # CLI 仍按 dshVersion 走官方精确版本。版本变化必须重新审查，不自动套补丁。
+    hostRuntimeCompatibility:
+      kind: pet-unified-locus-v1
+      supportedDshVersion: 0.1.2-rc.1
     compatDependencies:
       # 与根 launcher 使用同一固定 storage patch。profile 中显式加载的
       # SQLite backend 也必须支持 applyBatch，否则 Domain transaction 会

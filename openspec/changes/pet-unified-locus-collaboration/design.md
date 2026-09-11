@@ -344,7 +344,9 @@ GUI 私聊不产生飞书回复；在群/话题视图展示主/子会话与来�
 4. 若消息入口命中仍可识别的旧关联，在所有者确认重建前不悄悄以 default 新身份接管，给出重建提示；这只是版本退役保护，不提供旧执行兼容。
 5. 新建关联从 read 开始，走统一验收。回滚停新消费后恢复匹配旧程序的备份，不将新多位点数据有损降维。
 6. 多机器已有 Pet 介质若只需已证明 additive 的 domain version restamp，正常 Host 启动只 degraded 并通过 `[dsh-pet]` 日志给出离线命令，不直接打开第二条 SQLite 连接。操作者逐机停止 DSH，先 dry-run，再显式确认；工具先备份、未知版本/锁占用 fail closed、重复执行幂等。该 restamp 只允许当前实现列出的版本，不转换旧关联或清理历史。
-7. 旧草案标记被本 change 替代，不作完成归档；实际删除/清理另需授权。
+7. Pet 需要的临时 DSH transitive override 由 `dsh-pet` customization 在 `dsh.yaml` 声明固定 compatibility kind 与已审查版本；仅长期 `dsh web` Host 解析并使用该 Host-wide runtime。build/plugin/dump-config/sync 在没有人类显式 `DSH_BIN` 时始终使用官方精确 pin。旧 `.env.local` Pet launcher 值仅在确认为该文件新注入时迁移移除，调用方显式 `DSH_BIN` 仍是全命令紧急覆盖。
+8. compatibility builder 由固定 kind 映射，不接受 manifest 任意执行路径；以共享跨进程锁串行 compat 源码、Storage artifact 和 launcher 构建，在 sibling staging 完成依赖树、能力、provenance、install scripts 与精确版本验证后原子发布，失败保留旧成品。fingerprint 包含代码、补丁和 checkout canonical path，移动仓库或任一输入变化都会重建。版本不匹配在 sync 任何副作用前以及 plain Host start 时独立 fail closed；升级工具不联动改写 compatibility pin，从而迫使重新审查或移除 overlay。
+9. 旧草案标记被本 change 替代，不作完成归档；实际删除/清理另需授权。
 
 ## 架构验收场景
 

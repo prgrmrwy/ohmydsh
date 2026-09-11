@@ -39,12 +39,33 @@ REPO="$(cd "$(dirname "$SOURCE")/.." && pwd)"
 # shellcheck disable=SC1091
 source "$REPO/scripts/lib/dsh-runtime.sh"
 
-# Local overrides (gitignored; optional)
+# Local overrides (gitignored; optional). Snapshot DSH_BIN first so migration
+# of the old Pet-only .env.local value never swallows an identical value that
+# the caller deliberately exported for this invocation.
+CALLER_DSH_BIN_SET=0
+CALLER_DSH_BIN=""
+if [[ -n "${DSH_BIN+x}" ]]; then
+  CALLER_DSH_BIN_SET=1
+  CALLER_DSH_BIN="$DSH_BIN"
+fi
 if [[ -f "$REPO/.env.local" ]]; then
   set -a
   # shellcheck disable=SC1091
   source "$REPO/.env.local"
   set +a
+fi
+
+# The first Pet Locus deployment selected its generated Host runtime through the
+# process-wide DSH_BIN escape hatch. That also retargeted build/plugin commands
+# and could pin a stale official version forever. Migrate only the exact value
+# newly sourced from this checkout's .env.local; every caller-supplied DSH_BIN
+# keeps its original highest-priority meaning.
+LEGACY_PET_DSH_BIN="$REPO/packages/dsh-pet/compat/subagent/.launcher/node_modules/.bin/dsh"
+if [[ $CALLER_DSH_BIN_SET -eq 1 ]]; then
+  DSH_BIN="$CALLER_DSH_BIN"
+elif [[ "${DSH_BIN:-}" == "$LEGACY_PET_DSH_BIN" ]]; then
+  echo "info: 忽略 .env.local 中旧 dsh-pet DSH_BIN；Host runtime 现由 dsh.yaml 声明管理" >&2
+  unset DSH_BIN
 fi
 
 # Snapshot the user's explicit registry override before this launcher runs any
@@ -336,9 +357,10 @@ print_plugins() {
 # patch 层)。早先这里只读 dsh.profile.bundles,靠 patch insert 行接线的插件
 # (如 dsh-width-tiers)既不出现在启动 msg 里,也不出现在历史记录里。
 record_startup() {
-  local VER="$1" plugins=""
+  local VER="$1" runtime_kind="$2" runtime_owner="$3" runtime_compat="$4" runtime_fingerprint="$5" plugins=""
   plugins="$(node "$REPO/scripts/plugin-list.mjs" --names 2>/dev/null || true)"
-  printf '[%s] dshVersion=%s port=%s plugins=[%s]\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$VER" "$PORT" "$plugins" >>"$STARTUP_LOG"
+  printf '[%s] dshVersion=%s runtime=%s owner=%s compat=%s fingerprint=%s port=%s plugins=[%s]\n' \
+    "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$VER" "$runtime_kind" "$runtime_owner" "$runtime_compat" "$runtime_fingerprint" "$PORT" "$plugins" >>"$STARTUP_LOG"
 }
 
 is_server_up() {
@@ -472,41 +494,56 @@ server_env_strip_args() {
   done < <(compgen -e | grep -E '^npm_(config_|lifecycle_|package_)|^npm_(command|execpath|node_execpath)$' || true)
 }
 
+PREPARED_DSH_VERSION=""
+PREPARED_SERVER_BIN=""
+PREPARED_RUNTIME_KIND=""
+PREPARED_RUNTIME_OWNER=""
+PREPARED_RUNTIME_COMPAT=""
+PREPARED_RUNTIME_FINGERPRINT=""
+
+prepare_server_runtime() {
+  local resolve_out
+  PREPARED_DSH_VERSION="$(dsh_version)"
+  if [[ -z "$PREPARED_DSH_VERSION" ]]; then
+    echo "error: dshVersion missing in $REPO/dsh.yaml" >&2
+    return 1
+  fi
+  mkdir -p "$DSH_HOME"
+  if ! resolve_out="$(DSH_CLI_VERSION="$PREPARED_DSH_VERSION" DSH_REPO_ROOT="$REPO" with_repo_registry node "$REPO/scripts/dsh-server-bin.mjs")"; then
+    echo "error: 无法解析 DSH Host runtime(@deepseek-ai/dsh@$PREPARED_DSH_VERSION)" >&2
+    return 1
+  fi
+  PREPARED_SERVER_BIN="$(printf '%s\n' "$resolve_out" | sed -n 's/^DSH_SERVER_BIN=//p' | tail -1)"
+  PREPARED_RUNTIME_KIND="$(printf '%s\n' "$resolve_out" | sed -n 's/^DSH_RUNTIME_KIND=//p' | tail -1)"
+  PREPARED_RUNTIME_OWNER="$(printf '%s\n' "$resolve_out" | sed -n 's/^DSH_RUNTIME_OWNER=//p' | tail -1)"
+  PREPARED_RUNTIME_COMPAT="$(printf '%s\n' "$resolve_out" | sed -n 's/^DSH_RUNTIME_COMPAT=//p' | tail -1)"
+  PREPARED_RUNTIME_FINGERPRINT="$(printf '%s\n' "$resolve_out" | sed -n 's/^DSH_RUNTIME_FINGERPRINT=//p' | tail -1)"
+  if [[ -z "$PREPARED_SERVER_BIN" ]]; then
+    echo "error: Host runtime 解析未返回 bin 路径(@deepseek-ai/dsh@$PREPARED_DSH_VERSION)" >&2
+    return 1
+  fi
+}
+
 start_server() {
-  local VER pid server_bin resolve_out
+  local VER pid server_bin runtime_kind runtime_owner runtime_compat runtime_fingerprint
   local -a env_args=() strip=()
   # 官方 dsh-web-app 默认也会打开浏览器。始终给官方 CLI 传 --no-open，
   # 确保本启动器的 open_ui 是唯一 UI opener（否则一次 dsh 会打开两个 tab）。
-  VER="$(dsh_version)"
-  if [[ -z "$VER" ]]; then
-    echo "error: dshVersion missing in $REPO/dsh.yaml" >&2
-    exit 1
-  fi
-  mkdir -p "$DSH_HOME"
-
-  # Resolve the CLI entry (DSH_BIN → npx cache → pnpm dir → install channels).
-  # Resolution may install, so it runs with the repo registry applied; the
-  # server itself is then launched with a clean environment.
-  #
-  # A cold start installs the CLI first, and those installers stream progress
-  # onto this same stdout, so read the DSH_SERVER_BIN= marker line instead of
-  # treating the whole capture as a path.
-  if ! resolve_out="$(DSH_CLI_VERSION="$VER" with_repo_registry node "$REPO/scripts/dsh-server-bin.mjs")"; then
-    echo "error: 无法解析 DSH CLI(@deepseek-ai/dsh@$VER)" >&2
-    exit 1
-  fi
-  server_bin="$(printf '%s\n' "$resolve_out" | sed -n 's/^DSH_SERVER_BIN=//p' | tail -1)"
-  if [[ -z "$server_bin" ]]; then
-    echo "error: DSH CLI 解析未返回 bin 路径(@deepseek-ai/dsh@$VER)" >&2
-    exit 1
-  fi
+  if [[ -z "$PREPARED_SERVER_BIN" ]]; then prepare_server_runtime || exit 1; fi
+  VER="$PREPARED_DSH_VERSION"
+  server_bin="$PREPARED_SERVER_BIN"
+  runtime_kind="$PREPARED_RUNTIME_KIND"
+  runtime_owner="$PREPARED_RUNTIME_OWNER"
+  runtime_compat="$PREPARED_RUNTIME_COMPAT"
+  runtime_fingerprint="$PREPARED_RUNTIME_FINGERPRINT"
 
   while IFS= read -r -d '' arg; do strip+=("$arg"); done < <(server_env_strip_args)
   env_args=(env "${strip[@]+"${strip[@]}"}")
   # Re-apply the user's own override on top of the cleaned environment.
   [[ -n "$DSH_USER_REGISTRY" ]] && env_args+=("npm_config_registry=$DSH_USER_REGISTRY")
 
-  record_startup "$VER"
+  echo "Host runtime: kind=${runtime_kind:-unknown} owner=${runtime_owner:-none} compat=${runtime_compat:-none} fingerprint=${runtime_fingerprint:-none} dshVersion=$VER"
+  record_startup "$VER" "${runtime_kind:-unknown}" "${runtime_owner:-none}" "${runtime_compat:-none}" "${runtime_fingerprint:-none}"
   if [[ $FOREGROUND -eq 1 ]]; then
     "${env_args[@]}" node "$server_bin" web --port "$PORT" --no-open ${PASSTHRU[@]+"${PASSTHRU[@]}"} &
     pid=$!
@@ -665,6 +702,8 @@ if [[ $BUILD -eq 1 ]]; then
 fi
 
 if [[ $RESTART -eq 1 ]]; then
+  # Validate/build the replacement runtime before stopping a healthy Host.
+  prepare_server_runtime || exit 1
   do_restart
 fi
 

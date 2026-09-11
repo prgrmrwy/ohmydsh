@@ -62,6 +62,6 @@ Locus 不是第三种 Agent，而是完整的协作关联：飞书入口、works
 - Host：channel 接入/解析、locus 控制器与持久索引、主会话初始化、子会话创建恢复、消息关联与结算、权限适配、context 工具。
 - Web：按主会话与按飞书入口的双向管理视图、默认 Q&A、来源切换警告、初始化/失效/权限诊断。
 - 数据：新模型独立版本，旧关联只作不可用历史；无旧关联转换器、无双执行兼容分支。
-- DSH 集成：复用 continuable 子会话接缝，必须验证首次 fork/冷恢复、零业务历史的自动主会话、真实 sandbox 策略、子会话结算与父通知。不把旧 spike 的类型/README 检查当作端到端验证。
+- DSH 集成：复用 continuable 子会话接缝，必须验证首次 fork/冷恢复、零业务历史的自动主会话、真实 sandbox 策略、子会话结算与父通知。不把旧 spike 的类型/README 检查当作端到端验证。Pet 临时依赖的宿主补丁由自身 customization 声明为版本锁定、仅长期 Web Host 生效的 compatibility runtime；一次性官方 CLI 不受影响，未来 DSH 版本不得自动继承旧补丁。
 - 飞书：增加入群生命周期接入；保留现有 bot 凭据零接触。无法证明初始化授权的入群事件不授予群级提问资格，首次 allowlist `@bot` 可幂等补齐。
 - 本变更仅规划；实际写入权限的宿主适配需能力核验，不假定 `workspace-write` 能写到 sw 兄弟目录，也不隐式采用 unrestricted 模式。

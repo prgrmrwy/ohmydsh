@@ -22,7 +22,6 @@
  * depend on the official package again.
  */
 
-import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -30,6 +29,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 
 const here = dirname(fileURLToPath(import.meta.url))
+const requireHere = createRequire(import.meta.url)
+const compatBuildLock = requireHere('./compat-build-lock.cjs').acquireCompatBuildLock()
+const { runCompatCommand } = requireHere('./compat-run.cjs')
+process.once('exit', () => compatBuildLock.release())
 const patchFile = join(here, 'settlement-notice.patch')
 
 /** Pinned upstream identity. A drift here must fail the build, never adapt. */
@@ -37,12 +40,14 @@ const UPSTREAM = {
   repository: 'https://github.com/deepseek-ai/deepseek-harness.git',
   tag: 'dsh-v0.1.2-rc.1',
   packageDir: 'packages/subagent/subagent',
+  /** Reviewed commit behind dsh-v0.1.2-rc.1; a moved tag/local checkout fails. */
+  commit: 'a66e4702047846cdaa10c66c9d3df3951f5ea70d',
   /** sha256 of `settlement-notice.patch`, so a silently edited patch fails. */
   patchSha256: '97ef5189f726799c13bdd7622aa37292a7451fe13981fac77de4d82161e14b28',
 }
 
-const run = (command, args, cwd) =>
-  execFileSync(command, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] })
+const run = (command, args, cwd) => runCompatCommand(command, args, cwd)
+const capture = (command, args, cwd) => runCompatCommand(command, args, cwd, { capture: true })
 
 function fail(message) {
   console.error(`[compat/subagent] ${message}`)
@@ -66,14 +71,13 @@ if (!existsSync(join(checkout, '.git'))) {
     'clone', '--depth', '1', '--branch', UPSTREAM.tag,
     UPSTREAM.repository, checkout,
   ])
-} else {
-  // Reset any previous application so the build is reproducible.
-  run('git', ['checkout', '--', '.'], checkout)
 }
-
-// Verify the pinned tag really is what is checked out: a moved tag would
-// otherwise silently change the base the patch applies to.
-const head = run('git', ['rev-parse', 'HEAD'], checkout).trim()
+// Reset both an existing checkout and a freshly cloned/movable tag to the exact
+// reviewed commit. The commit must already be present in the shallow clone.
+run('git', ['checkout', '--detach', UPSTREAM.commit], checkout)
+run('git', ['checkout', '--', '.'], checkout)
+const head = capture('git', ['rev-parse', 'HEAD'], checkout).trim()
+if (head !== UPSTREAM.commit) fail(`reviewed upstream commit mismatch: ${head}`)
 console.log(`[compat/subagent] base ${head}`)
 
 try {
