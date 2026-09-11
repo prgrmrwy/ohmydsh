@@ -145,7 +145,16 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
     // instead of inheriting the remainder of the first one's.
     return () => clearTimeout(timer)
   }, [notice])
-  const [busy, setBusy] = useState(false)
+  /**
+   * Capabilities whose click is still in flight, by id.
+   *
+   * Per capability rather than one shared flag: a single boolean disabled the
+   * WHOLE wheel while any one capability was submitting, which is wrong on
+   * its own terms — different sources own different Tasks and have no reason
+   * to block each other — and turned a missed reset into a wheel that stayed
+   * entirely dead until the page was reloaded.
+   */
+  const [submitting, setSubmitting] = useState<ReadonlySet<string>>(() => new Set())
   const [hovered, setHovered] = useState<string | undefined>(undefined)
   const [sourceRemoved, setSourceRemoved] = useState(false)
   const [botBound, setBotBound] = useState<boolean | undefined>(undefined)
@@ -328,6 +337,25 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
 
   const effectiveSource: SourceSelection =
     sourceRemoved || props.currentSource === undefined ? { kind: 'none' } : props.currentSource
+
+  // Safety net for the in-flight marks.
+  //
+  // `run`'s `finally` is the normal release, but Pet lives on its own React
+  // root and survives session and workspace switches, so a mark that was
+  // somehow not released would sit there forever and the affected capability
+  // would look permanently disabled — recoverable only by reloading the page.
+  // Changing the source means any earlier click no longer applies to what the
+  // wheel now offers, so clearing here costs nothing and removes that class
+  // of dead end entirely.
+  const sourceKey =
+    effectiveSource.kind === 'session'
+      ? `session:${effectiveSource.sessionId ?? ''}`
+      : effectiveSource.kind === 'workspace'
+        ? `workspace:${effectiveSource.workspaceId ?? ''}`
+        : 'none'
+  useEffect(() => {
+    setSubmitting(current => (current.size === 0 ? current : new Set()))
+  }, [sourceKey])
 
   // The panel is click-opened, so it needs a click-driven way out. Without
   // this it could only be closed by clicking the mascot again, which reads as
@@ -557,7 +585,8 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
       // Pet Task: a blanket confirmation here cannot tell a destructive
       // capability from a harmless one, so it taxed every action without
       // actually protecting the dangerous ones.
-      setBusy(true)
+      const marking = capability.id
+      setSubmitting(current => new Set(current).add(marking))
       try {
         // A built-in action is not an Invocation and pins no Skill: the Host
         // runs it directly, so there is no capture to freeze and no
@@ -611,7 +640,11 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
       } catch (cause) {
         setError(cause instanceof PetApiError ? cause.message : String(cause))
       } finally {
-        setBusy(false)
+        setSubmitting(current => {
+          const next = new Set(current)
+          next.delete(marking)
+          return next
+        })
       }
     },
     // `effectiveSource` is read inside, so it must be a dependency: a stale
@@ -775,14 +808,14 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
                   key={capability.id}
                   className="dshpet-slot"
                   data-ring={slot.ring}
-                  data-disabled={reason !== undefined || busy}
+                  data-disabled={reason !== undefined || submitting.has(capability.id)}
                   data-hovered={activeHover === capability.id}
                   // Staggered by ring so the layers read as depth; ring one is
                   // immediate because the most-used capability lives there and
                   // must not wait on an animation.
                   style={{ animationDelay: `${slot.ring * 0.08}s` }}
                   onClick={() => {
-                    if (reason === undefined && !busy) void run(capability)
+                    if (reason === undefined && !submitting.has(capability.id)) void run(capability)
                   }}
                   onMouseEnter={() => setHovered(capability.id)}
                   onMouseLeave={() => setHovered(undefined)}
@@ -833,7 +866,7 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
                   type="button"
                   role="menuitem"
                   className="dshpet-wheel-item"
-                  disabled={reason !== undefined || busy}
+                  disabled={reason !== undefined || submitting.has(capability.id)}
                   title={reason}
                   aria-describedby={reason !== undefined ? `${capability.id}-reason` : undefined}
                   onClick={() => void run(capability)}
@@ -919,6 +952,13 @@ interface TaskView {
   /** Set when the executor runs inside the routed workspace itself. */
   residentWorkspaceId?: string
   status: string
+  /**
+   * Why the Task is in its current status.
+   *
+   * Dispatch happens after the create call returns, so a failure there is
+   * reported only here — the panel renders it, otherwise a failed capability
+   * looks like a button that did nothing.
+   */
   diagnostic?: string
   archivedAt?: number
   executorSessionId: string

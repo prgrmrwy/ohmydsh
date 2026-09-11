@@ -98,21 +98,53 @@ function stubChannel(unifiedLocus: unknown = READY_LOCUS, enabled = true): void 
   )
 }
 
-async function mountChannel(): Promise<HTMLElement> {
+async function mountTab(initialTab: 'channel' | 'locus' = 'channel'): Promise<HTMLElement> {
   const host = document.createElement('div')
   document.body.appendChild(host)
   await act(async () => {
     createRoot(host).render(
-      createElement(PetSettingsSection, { initialTab: 'channel' as const }),
+      createElement(PetSettingsSection, { initialTab }),
     )
   })
   return host
 }
 
+const LOCUS_VIEW = {
+  locusId: 'locus-1',
+  generation: 1,
+  endpoint: { chatId: 'oc_qa', chatType: 'group', chatName: '答疑群' },
+  main: { sessionId: 's1', title: '主会话', availability: 'available' },
+  child: { sessionId: 'child-1', title: '子会话', availability: 'available' },
+  workspace: { workspaceId: 'ws-1', title: '项目A' },
+  permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
+  state: { state: 'active', busy: false, createdAt: 1, updatedAt: 1 },
+  source: 'explicit',
+  isDefaultQa: false,
+} as const
+
+/** Reply to the owner-facing locus route with one current generation. */
+function stubLocus(locus = LOCUS_VIEW): void {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({
+      status: 200,
+      text: async () => JSON.stringify({
+        ok: true,
+        data: {
+          generation: 1,
+          loci: [locus],
+          defaultQa: [],
+          discovery: { byEndpoint: [], byParent: [], byChild: [] },
+        },
+      }),
+    })),
+  )
+}
+
 describe('Channel settings use unified onboarding only', () => {
   it('shows main-session placement plus child/read proof', async () => {
     stubChannel()
-    const host = await mountChannel()
+    const host = await mountTab()
 
     expect(host.textContent).toContain('自动主会话默认工作区')
     expect(host.textContent).toContain('仅用于 project 群首次建立协作')
@@ -124,7 +156,7 @@ describe('Channel settings use unified onboarding only', () => {
 
   it('fails closed when an older Host omits the capability proof', async () => {
     stubChannel(null, false)
-    const host = await mountChannel()
+    const host = await mountTab()
     const enabled = host.querySelector('input[type="checkbox"]') as HTMLInputElement
 
     expect(enabled.disabled).toBe(true)
@@ -133,12 +165,61 @@ describe('Channel settings use unified onboarding only', () => {
 
   it('does not render legacy routes, workspace overrides or Invocation backlog', async () => {
     stubChannel()
-    const host = await mountChannel()
+    const host = await mountTab()
 
     expect(host.textContent).not.toContain('旧答疑群')
     expect(host.textContent).not.toContain('旧工作区群')
     expect(host.textContent).not.toContain('会话路由')
     expect(host.textContent).not.toContain('排队中的调用')
     expect(host.querySelector('[aria-label="会话路由分类"]')).toBeNull()
+  })
+})
+
+describe('an archived session is refused before the click, not after', () => {
+  it('disables the control and says why', async () => {
+    const opened: string[] = []
+    const { setSessionOpener } = await import('../src/client/settings.js')
+    setSessionOpener(id => opened.push(id))
+    // The Host marks the current Locus session: the shell silently lands on
+    // the home page for an archived id, so the reason must be visible without
+    // clicking. The retired legacy route projection stays absent from UI.
+    stubLocus({ ...LOCUS_VIEW, main: { ...LOCUS_VIEW.main, availability: 'archived' as const } })
+    const host = await mountTab('locus')
+
+    const button = [...host.querySelectorAll('button')].find(
+      item => item.textContent === '主会话已归档',
+    ) as HTMLButtonElement | undefined
+    expect(button).toBeDefined()
+    expect(button?.disabled).toBe(true)
+    expect(button?.title).toContain('已归档')
+
+    await act(async () => {
+      button?.click()
+    })
+    // Even if a click reaches it, no navigation is attempted.
+    expect(opened).toEqual([])
+    setSessionOpener(undefined)
+  })
+
+  it('still opens and dismisses the panel when the session is live', async () => {
+    const opened: string[] = []
+    const closed: number[] = []
+    const { setSessionOpener, setSettingsCloser } = await import('../src/client/settings.js')
+    setSessionOpener(id => opened.push(id))
+    setSettingsCloser(() => closed.push(1))
+    stubLocus()
+    const host = await mountTab('locus')
+
+    await act(async () => {
+      ;([...host.querySelectorAll('button')].find(
+        item => item.textContent === '打开主会话',
+      ) as HTMLButtonElement | undefined)?.click()
+    })
+
+    expect(opened).toEqual(['s1'])
+    // Navigating behind the modal panel would leave it covering the target.
+    expect(closed).toEqual([1])
+    setSessionOpener(undefined)
+    setSettingsCloser(undefined)
   })
 })

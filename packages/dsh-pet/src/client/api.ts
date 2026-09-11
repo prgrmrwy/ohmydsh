@@ -196,7 +196,13 @@ export const petApi = {
   }): Promise<{ entries: PetEnvRecord[] }> => call(ROUTES.petEnvMutate, input),
   channel: (): Promise<PetChannelView> => call(ROUTES.channel),
   mutateChannel: (input: {
-    action: 'set-enabled' | 'set-allowlist' | 'set-default-workspace' | 'reconnect'
+    action:
+      | 'set-enabled'
+      | 'set-allowlist'
+      | 'set-default-workspace'
+      | 'reconnect'
+      | 'pair-start'
+      | 'pair-cancel'
     enabled?: boolean
     allowOpenIds?: readonly string[]
     defaultWorkspaceId?: string

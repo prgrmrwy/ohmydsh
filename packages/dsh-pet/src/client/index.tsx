@@ -31,6 +31,7 @@ import {
   setDirectoryPicker,
   setDirectoryLister,
   setSessionOpener,
+  setSettingsCloser,
 } from './settings.js'
 import {
   PET_SETTINGS_NAV_CSS,
@@ -132,6 +133,22 @@ export function apply(ctx: ClientContext): void {
   // session — is published to it, exactly as the directory picker is.
   setSessionOpener(sessionId => {
     openSession(ctx, sessionId)
+  })
+
+  // Dismiss the settings overlay after navigating out of it.
+  //
+  // The shipped panel owns its open state privately and publishes no close
+  // service, but it documents three ways to close: the header button, a mask
+  // click, and a document-level Escape whose listener is mounted only while
+  // the panel is open (verified in
+  // `dsh-client-ui-settings-general`'s SettingsPanel). Synthesising that
+  // keypress uses a supported path rather than reaching into private state:
+  // when no panel is open there is no listener, so the event is a harmless
+  // no-op instead of an error.
+  setSettingsCloser(() => {
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+    )
   })
 
   // Publish the Host directory picker to the settings page. Pet asks for a
