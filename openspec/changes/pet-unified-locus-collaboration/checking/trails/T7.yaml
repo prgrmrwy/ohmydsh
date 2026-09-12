@@ -6,8 +6,8 @@ parallel_group: G7
 conflicts_with: [T1, T2, T3, T4, T5, T6, T8]
 precondition: 选择一个 active、read、空闲的验收 Locus；已记录其 child session ID；浏览器可从 Locus 管理打开该 child。
 ask_user_if_blocked: true
-status: pending
-blocked_reason: null
+status: blocked
+blocked_reason: "T7-C3 无法按原设计执行：从管理面打开 Locus 子会话失败。Pet 使用 ctx.sessions.open(sessionId)，而官方对 origin=subagent 的会话刻意拒绝普通 session 地址（session/agent-busy），正确入口是 openSubagent({parentSessionId, childSessionId, mode})。同时子会话标题被投递样板覆盖（fallback 取首条消息开头），在 GUI 中无法辨识。两处缺陷记为 B032，修复后可原地恢复 C3。C1/C2 已通过，不受影响。"
 mock_setup:
   required: false
   status: not_needed
@@ -47,8 +47,8 @@ steps:
         expected_text: "2 条不同 Delivery；同一子会话；接受顺序一致；2 条已结算；无重复 inbox"
         expected_attrs: null
         expected_visible: true
-        result: null
-        result_detail: null
+        result: pass
+        result_detail: "真实快速连发两条群级 mention：两条各有唯一 Delivery（sequence 10/11）、唯一 messageId（om_...aca11a51 / om_...a4139cd4）、唯一 inbox UUID（91939c7e / e7f11736），按接受顺序进入同一 child session-c9af096f 的 turn 4 与 turn 5，均 settled，无错配或重复结算。严格串行的硬证据：第二条 00:52:12.476 即已 accepted/queued，但直到第一条所在 turn 4 结束的同一毫秒（00:52:24.853）才开始 turn 5。语义证据：第二条回复准确引用了第一条的 messageId 与内容（「问的是『现在几点』」），乱序或错配都无法作答。"
   - seq: 2
     description: 让 child 在真实防腐任务中遇到无法自行判定的点并提问，再由用户在飞书答复
     action: wait_for
@@ -75,8 +75,8 @@ steps:
         expected_text: "同一子会话；后续轮次已结算；无飞书 Invocation；无 waiting-user"
         expected_attrs: null
         expected_visible: true
-        result: null
-        result_detail: null
+        result: pass
+        result_detail: "澄清往返完成且上下文连续：提问轮 seq 13 / turn 7 settled，用户答复 seq 14 / turn 8 settled，同为 child session-c9af096f，turn 号连续递增，未新建 child。turn 8 直接接住 turn 7 的调研结论给出定稿文案（未重新提问、未丢失上下文），证明答复是作为同一 child 的后续普通轮次继续，而非另起执行链。旧模型表在整条 trail 期间零增长（invocations 56、tasks 15、invocation_channel 46，与基线逐项一致），未创建飞书 Invocation 或 waiting-user 分支。pet_locus_reply 累计 8 次调用 0 次被拒。附带观察：子会话在 read 权限下主动声明「无法直接改 README，请你自己粘贴或换有写权限的会话」，如实报告权限边界而未尝试硬改。"
   - seq: 3
     description: 从 Locus 管理打开该 child，在 GUI 中直接发送不含飞书回复请求的私聊消息
     action: click
@@ -104,4 +104,4 @@ steps:
         expected_attrs: null
         expected_visible: true
         result: null
-        result_detail: null
+        result_detail: "BLOCKED（非失败）：无法从管理面打开该 child 执行 GUI 私聊。官方对 origin=subagent 的会话刻意拒绝普通 session 地址，Pet 的打开入口未使用 openSubagent，且子会话标题被投递样板覆盖导致在 GUI 中不可辨识（B032）。原设计前提『能打开并在其中发消息』当前不成立。附带事实：该拒绝本身构成比原判据更强的隔离——GUI 侧信道根本无法操作 subagent 会话。修复 B032 后从本 checkpoint 原地恢复，不以任何方式绕过验证。"

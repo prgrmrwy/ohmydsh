@@ -106,4 +106,8 @@
   - 改为融入真实开发流程：T6 用 nexus 仓库真实的 README 防腐任务承载 read 拒写 / 授权 write / 降权立即生效三个判据，判定仍以文件系统与 `git diff` 为准而非模型自述；T7 的澄清往返改由真实无法自行判定的点触发（README 对 `rush init-vitest` 生成物的描述，其真相源不在仓库内）
   - 额外覆盖到靶子式设计无法验证的能力：子会话能否读懂真实仓库、改动是否正确且范围最小、diff 是否干净
   - 隔离与可还原：nexus 工作树切至一次性分支 `pet-locus-acceptance`（基线 `973e272dfe`），验收变更可随时 `git checkout` 还原，不污染 master
+- [x] 10.12 验收发现 Locus 子会话在 GUI 侧完全不可用（记为 B032，未修复）：
+  - 标题被投递样板覆盖——子会话唯一 `session/title` 为 `"## 当前 unified locus 投递（caller-"`、`source: fallback`，因 Pet 创建 child 后未显式 rename，标题由兜底生成器取首条消息（约 1950 字符的投递头）开头。主会话创建路径有 rename，子会话漏了，属对称性缺失；与 B031 同源
+  - 打开方式不符合官方 subagent 契约——Pet `openSession()` 调 `ctx.sessions.open(sessionId)`，而官方 `validateAddress` 对 `origin=subagent` 刻意拒绝普通 session 地址（`session/agent-busy`，非 DSH bug）。正确入口为 `ctx.sessions.openSubagent({ parentSessionId, childSessionId, mode })`，Pet 侧三项事实齐备（locus 有 parent/child，descriptor 有 `mode: continuable`）
+  - 影响：T7-C3 标记 blocked 而非 failed（原设计前提「能打开 child 并在其中发消息」当前不成立），修复后原地恢复；T6 中依赖从管理面打开 child 的步骤同样需要复核
 - [ ] 10.8 收敛验收期 UX backlog B026–B028；验收完成后统一评估，不在修复期间扩散非阻塞视觉优化

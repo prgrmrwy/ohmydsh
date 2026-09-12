@@ -177,6 +177,25 @@
   - 与“恢复使用原主/子会话、不静默切换模型或来源”的统一 Locus 规范协调；实施前应建立独立 OpenSpec change。
 - **更新**: 2026-09-11 在 Claude egress 被拒且子会话不可切模型后记录；当前只记录，不修改验收主线。
 
+### [B032] Locus 子会话在 GUI 侧不可用：标题被样板覆盖且打开方式错误
+- **状态**: 已设计
+- **优先级**: P1
+- **背景 / 动机**: T7-C3 验收时从管理面点「打开子会话」失败，暴露两个独立缺陷，共同导致所有者无法从 GUI 侧查看 Locus 子会话。
+- **缺陷一：标题被 prompt 样板覆盖（Pet 侧，确定是 bug）**
+  - 实测子会话 `session-c9af096f` 的唯一 `session/title` 事件为 `"## 当前 unified locus 投递（caller-"`，`source: fallback`——DSH 的兜底标题生成器取了首条用户消息开头，而首条消息正是那段约 1950 字符的 caller-bound 投递头。
+  - `subagent/descriptor` 里其实带着正确 label（`Locus 子会话 · <chat> · <主会话标题>`），但 Pet 创建 child 后**没有显式 rename**，把标题让给了 fallback。主会话创建路径有 rename（`Locus 主会话 · <chat>`），子会话漏了，属对称性缺失。
+  - 后果：侧栏与管理面都认不出这是哪个 Locus 的子会话；所有者按「Locus 子会话 · xxx」去找会以为它不存在。
+  - 与 B031 同源：投递头越长，兜底标题取到的样板越多。即使修了标题，B031 仍应独立收敛。
+- **缺陷二：打开方式不符合官方 subagent 契约（Pet 侧，非 DSH bug）**
+  - 报错 `session/agent-busy: subagent Sessions require their durable parent address` 与 `session "..." is owned by subagent routing`，均来自官方 `dsh-api-session-controller`，是**刻意的所有权保护**：`validateAddress` 对 `header.origin === 'subagent'` 的会话拒绝普通 session 地址。
+  - Pet 的 `openSession()`（`packages/dsh-pet/src/client/index.tsx`）调用 `ctx.sessions.open(sessionId)`，对主会话正确，对子会话必然被拒。
+  - 官方提供了正确入口 `ctx.sessions.openSubagent(address)`，`SubagentAddress = { parentSessionId, childSessionId, mode: 'one-shot' | 'continuable' }`。Pet 侧三项事实齐备：locus 记录有 parent/child，descriptor 记录 `mode: continuable`。
+  - 修复方向：管理面「打开子会话」改走 `openSubagent`，并按目标是主会话还是子会话分流；`mode` 必须取自持久事实而非猜测。目标不可达时保持 fail closed 并解释原因，不得静默降级为 `open()` 再报底层错。
+- **要点**:
+  - 两处都应补测试：标题需断言创建后存在 Pet 显式 rename 且不等于投递头前缀；打开路径需断言 subagent 目标使用 `openSubagent` 且携带正确 parent/child/mode。
+  - 与 B026 / B030（管理面可辨识性与聚合）相关：标题修好后，管理面与侧栏才可能按名称辨识，聚合展示也才有意义。
+- **更新**: 2026-09-13 在 T7-C3 验收中发现并定位；两个缺陷均未修复，T7-C3 因此无法按原设计执行。
+
 ### [B031] Locus 投递 prompt 头过长且逐条重复
 - **状态**: 想法
 - **优先级**: P2
