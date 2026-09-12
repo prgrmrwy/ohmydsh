@@ -6,7 +6,7 @@ parallel_group: G5
 conflicts_with: [T1, T2, T3, T4, T6, T7, T8]
 precondition: T3 已有群级 S0、话题 A/B；准备一个有效且非 child 的 S1 主会话短 ID；所有相关 Delivery 已空闲。
 ask_user_if_blocked: true
-status: pending
+status: passed
 blocked_reason: null
 mock_setup:
   required: false
@@ -47,8 +47,8 @@ steps:
         expected_text: "S0 → S1；上下文来源已改变；旧对话未自动合并；第 2 代；主会话 S1"
         expected_attrs: null
         expected_visible: true
-        result: null
-        result_detail: null
+        result: pass
+        result_detail: "先验证到一条未预期但正确的安全边界：首次直接发 `-b 85620d77` 被拒——「当前入口已显式绑定其它主会话，请先解除后再绑定」。根因是群级 gen 2 的 source 为 explicit（由此前断网中断后的显式重建产生），而 controller 仅在 mainSource === 'auto' 时允许直接替换，否则抛 EXPLICIT_PARENT_CONFLICT。这正是 4.2「已有显式不同来源拒绝覆盖」，不是失败。改走 /unbind → -b 后成功：群级产生 gen 3、主会话由 S0(session-3a7e5b90) 切换为 S1(session-85620d77)、source=explicit、新 child session-41bfec40、有效权限重置为 read；旧 gen 2 转为 stopped 且历史保留；话题 A/B 未被级联影响（仍 main=S0、gen 1）。切换回执包含 S0→S1、上下文来源已改变、旧对话未自动合并三要素。附带证实 B032 标题修复生效：新 child 的 session/title 为「Locus 子会话 · oc_46c3... · 查看伙伴对话调」且 source=user（Pet 显式 rename），不再是 fallback 取投递头的「## 当前 unified locus 投递（caller-」。新 child 继承 S1 已完成前缀（1840 事件、end-seed 在 seq 13452），符合「子会话继承主会话可用的已完成前缀」。"
   - seq: 2
     description: 再次发送相同 S1 绑定命令
     action: wait_for
@@ -75,8 +75,8 @@ steps:
         expected_text: "已绑定同一来源；Locus ID、代际、子会话与数量未变化"
         expected_attrs: null
         expected_visible: true
-        result: null
-        result_detail: null
+        result: pass
+        result_detail: "同源重试完全幂等：再次发送相同 `-b 85620d77`，回执明确「已绑定主会话『查看伙伴对话调整2期需求文档』（85620d），本次未重复创建；当前共享权限为 read」。持久层与上一 checkpoint 逐项一致——locus 总数 5、活跃 3、群级仍 gen 3、child 仍 session-41bfec40、权限仍 read、Delivery 总数保持 14 未变（控制命令走 Host 控制面，不占业务投递）。与 C1 的异源拒绝构成一对完整边界：重试无害，换源需显式解除。"
   - seq: 3
     description: 回读切换前话题 A/B 的 parent 与权限，再创建话题 C 并 mention Bot
     action: wait_for
@@ -103,8 +103,8 @@ steps:
         expected_text: "话题 A 主会话 S0；话题 B 主会话 S0；话题 C 主会话 S1；实际 只读"
         expected_attrs: null
         expected_visible: true
-        result: null
-        result_detail: null
+        result: pass
+        result_detail: "新旧话题来源分离，这是本 trail 的核心判据。切换后新建话题 C（omt_19c007b1bd0f1cb1）继承群当前主会话 S1、source=inherited、新 child session-21559121、权限 read；而切换前建立的话题 A（omt_19c187a0）与话题 B（omt_19c1d586）仍固定 main=S0、generation 1 未变，未发生迁移。四个活跃 child 互不相同。子会话自报的 main/child/locus/generation/thread/权限/锚点状态与 Host 持久层逐项一致（采用中性问法，只问事实不提示结论）。符合「已有话题 MUST NOT 自动迁移，新话题 SHALL 默认使用新群主会话」。"
   - seq: 4
     description: 使用不存在或不足六位的来源短 ID 发送失败绑定命令
     action: wait_for
@@ -131,5 +131,5 @@ steps:
         expected_text: "绑定失败；至少六位；当前 Locus、代际、主会话、子会话与权限未变化"
         expected_attrs: null
         expected_visible: true
-        result: null
-        result_detail: null
+        result: pass
+        result_detail: "无效短 ID 安全拒绝：发送 `-b abc` 得到回执「会话 id 前缀太短，请至少提供 6 位。」——只陈述规则，未列出任何候选会话、未暴露其它 locus 或 session 标识，符合「无匹配/多匹配同一句回执，不暴露其它会话」。持久层完全未变：locus 总数 6、活跃 4、群级 gen 3 与 child session-41bfec40 未动、三个话题的 parent/generation/权限均未变、Delivery 总数保持 15。"
