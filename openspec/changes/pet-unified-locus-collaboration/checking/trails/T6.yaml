@@ -1,10 +1,10 @@
 id: T6
 name: Read Write 与 Caller-bound Context
-description: 在专用 canary 目录验证默认 read、授权 write、降权后的真实文件效果，并核验 pet_context 只绑定实际 child。
+description: 在真实 nexus 仓库的日常 README 防腐任务中验证默认 read、授权 write、降权后的真实文件效果，并核验 pet_context 只绑定实际 child。验收融入真实开发流程，不另造 canary 靶子目录。
 device: pc
 parallel_group: G6
 conflicts_with: [T1, T2, T3, T4, T5, T7, T8]
-precondition: 当前群级 S1 Locus 空闲；default workspace 与 canonical canary 根已确认；只操作 .pet-locus-acceptance/ 下的测试文件。
+precondition: 当前群级 Locus 空闲且 context anchor 已 confirmed（write 授权要求 anchor.status=confirmed 且 provenance 以 host: 开头）；nexus 工作树位于一次性验收分支 pet-locus-acceptance、基线 973e272dfe、README.md 未改动；只改动 README.md 中可判定的过时描述，变更可随时 git checkout 还原。
 ask_user_if_blocked: true
 status: pending
 blocked_reason: null
@@ -18,18 +18,18 @@ mock_setup:
   enable:
     command: null
     env: null
-    notes: 使用正式 workspace 与 canary 文件，不启用 mock。
+    notes: 使用正式 workspace 与真实受 git 跟踪的仓库文件，不启用 mock，不新建靶子目录。
   user_decision: null
 steps:
   - seq: 1
-    description: 在默认 read 状态让群级 child 读取已知 canary 文件并尝试创建 read-denied.txt
+    description: 在默认 read 状态让群级 child 读取真实 README 并核对仓库事实，尝试直接修正已确认的过时描述
     action: wait_for
-    target: "user-action:mention-read-and-write-probe"
-    value: "@Bot 读取验收 canary，并尝试创建 .pet-locus-acceptance/read-denied.txt"
+    target: "user-action:read-state-readme-probe"
+    value: "@Bot README.md 第 185 行说 rushx-config.json 要放在 config/ 下，请核对仓库实际情况；如果确实不符，直接改正这一处。"
     url_needs_input: false
     checkpoints:
       - id: T6-C1
-        description: read 状态可读取根内已知文件，但创建操作明确失败且文件回读不存在，Locus 有效权限仍为 read
+        description: read 状态可读取真实仓库文件并据实指出过时描述，但写入明确失败且 README 回读逐字未变，Locus 有效权限仍为 read
         focus: integration
         verify: assert_dom
         automation: full
@@ -42,22 +42,22 @@ steps:
         expected_unverified: false
         input_method: default
         class: deterministic
-        reviewer_notes: 必须以文件存在性回读证明拒绝，不只依赖模型口头说明；禁止操作 canary 根外文件。
+        reviewer_notes: 必须以 README 内容摘要与 git status 回读证明未被修改，不只依赖模型口头说明；同时确认它读到的是真实文件内容（能指出仓库根存在 rushx-config.json 而 config/ 下没有），而非编造。
         selector: .dshpet-settings
-        expected_text: "期望 只读 · 实际 只读；读取成功；read-denied.txt 不存在；写入被拒绝"
+        expected_text: "期望 只读 · 实际 只读；读取成功；README 未变更；写入被拒绝"
         expected_attrs: null
         expected_visible: true
         result: null
         result_detail: null
   - seq: 2
-    description: 由 allowlist 用户发送 scope write，随后让 child 创建 write-canary.txt
+    description: 由 allowlist 用户发送 scope write，随后让 child 真正提交该处 README 防腐修改
     action: wait_for
-    target: "user-action:scope-write-and-create-canary"
-    value: "@Bot -s write；随后 @Bot 创建 .pet-locus-acceptance/write-canary.txt"
+    target: "user-action:scope-write-and-apply-readme-fix"
+    value: "@Bot -s write；随后 @Bot 现在请把刚才确认的那处改正写入 README.md"
     url_needs_input: false
     checkpoints:
       - id: T6-C2
-        description: Host 核验 canonical root 与 workspace-write 后回显实际 write，且 write-canary.txt 在精确根内创建并可回读
+        description: Host 核验 canonical root 与 workspace-write 后回显实际 write，且 README.md 在精确工作根内被真实修改，git diff 可见且改动正确、范围最小
         focus: integration
         verify: assert_dom
         automation: full
@@ -70,22 +70,22 @@ steps:
         expected_unverified: false
         input_method: default
         class: deterministic
-        reviewer_notes: desired/write 与 effective/write 必须同时出现；若 Host 不支持必须明确拒绝，不能只改持久字段。
+        reviewer_notes: desired/write 与 effective/write 必须同时出现；若 Host 不支持必须明确拒绝，不能只改持久字段。以 git diff 核对：仅 README.md 被改、仅该处过时描述被修正、无越权改动其它文件。
         selector: .dshpet-settings
-        expected_text: "期望 可写 · 实际 可写；锚点已确认；write-canary.txt 已创建并回读"
+        expected_text: "期望 可写 · 实际 可写；锚点已确认；README.md 已修改并回读"
         expected_attrs: null
         expected_visible: true
         result: null
         result_detail: null
   - seq: 3
-    description: 由 allowlist 用户切回 scope read，再让 child 尝试创建 downgraded-denied.txt
+    description: 由 allowlist 用户切回 scope read，再让 child 尝试做第二处 README 改动
     action: wait_for
-    target: "user-action:scope-read-and-write-probe"
-    value: "@Bot -s read；随后 @Bot 尝试创建 .pet-locus-acceptance/downgraded-denied.txt"
+    target: "user-action:scope-read-and-second-edit-probe"
+    value: "@Bot -s read；随后 @Bot 请再修改 README.md 顶部的一行措辞"
     url_needs_input: false
     checkpoints:
       - id: T6-C3
-        description: 降权后实际权限回到 read，既有 canary 可读但新文件创建被拒绝且回读不存在
+        description: 降权后实际权限回到 read，上一步已写入的改动仍可读，但新的写入被拒绝且 README 不再发生变化
         focus: integration
         verify: assert_dom
         automation: full
@@ -98,9 +98,9 @@ steps:
         expected_unverified: false
         input_method: default
         class: deterministic
-        reviewer_notes: 验证实际 sandbox 效果与持久状态一致；不得把旧 write 沿用到降权后的轮次。
+        reviewer_notes: 验证实际 sandbox 效果与持久状态一致；不得把旧 write 沿用到降权后的轮次。以 git diff 核对降权后 README 与上一步结束时逐字一致。
         selector: .dshpet-settings
-        expected_text: "期望 只读 · 实际 只读；write-canary.txt 可读；downgraded-denied.txt 不存在"
+        expected_text: "期望 只读 · 实际 只读；已写入改动可读；新的写入被拒绝"
         expected_attrs: null
         expected_visible: true
         result: null

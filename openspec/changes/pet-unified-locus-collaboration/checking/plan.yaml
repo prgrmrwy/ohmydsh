@@ -148,7 +148,7 @@ trails:
     status: pending
     blocked_reason: null
     checkpoint_count: 4
-    summary: 用 canary 验证真实权限、降权和 caller-bound 上下文
+    summary: 在真实仓库防腐任务中验证权限、降权和 caller-bound 上下文
   - id: T7
     name: Delivery 决策往返与私聊隔离
     file: trails/T7.yaml

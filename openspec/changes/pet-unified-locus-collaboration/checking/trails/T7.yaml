@@ -1,6 +1,6 @@
 id: T7
 name: Delivery 决策往返与私聊隔离
-description: 验证同一 child 的多消息 FIFO、飞书决策后续轮次，以及 GUI 私聊不继承当前飞书回复授权。
+description: 在真实防腐任务流程中验证同一 child 的多消息 FIFO、飞书决策后续轮次，以及 GUI 私聊不继承当前飞书回复授权。
 device: pc
 parallel_group: G7
 conflicts_with: [T1, T2, T3, T4, T5, T6, T8]
@@ -50,10 +50,10 @@ steps:
         result: null
         result_detail: null
   - seq: 2
-    description: 让 child 提出一个需要用户选择的澄清问题，再由用户在飞书回复选择
+    description: 让 child 在真实防腐任务中遇到无法自行判定的点并提问，再由用户在飞书答复
     action: wait_for
     target: "user-action:decision-roundtrip"
-    value: "@Bot 请在两个安全选项中向我提问，收到回答后继续；用户随后回复选项一"
+    value: "@Bot README.md 第 114-116 行描述 rush init-vitest 会生成 index.test.ts / react.test.tsx / setupTests.tsx，请核对是否仍然准确；不确定就先问我，不要擅自改。"
     url_needs_input: false
     checkpoints:
       - id: T7-C2
@@ -70,7 +70,7 @@ steps:
         expected_unverified: false
         input_method: default
         class: deterministic
-        reviewer_notes: 记录提问前后 child ID；回答必须形成新 Delivery 到同 child，并核对旧 Invocation/Task 表数量不增加。
+        reviewer_notes: 记录提问前后 child ID；回答必须形成新 Delivery 到同 child，并核对旧 Invocation/Task 表数量不增加。澄清点来自真实仓库事实（该命令模板的真相源不在仓库内，child 无法自行判定），不是为触发往返而硬造的提问。
         selector: .dshpet-settings
         expected_text: "同一子会话；后续轮次已结算；无飞书 Invocation；无 waiting-user"
         expected_attrs: null

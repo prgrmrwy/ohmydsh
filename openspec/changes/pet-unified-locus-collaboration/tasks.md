@@ -102,4 +102,8 @@
   - T2-C3 重测 PASS：失败事实完整保留在同一 checkpoint（首次 FAIL + 重测 PASS 并列记录），未以重发掩盖。复用群级 gen 2 locus 与同一 child `session-c9af096f`，Delivery 04:02:47→04:02:55 settled，effective read，child 成功回复且 `pet_locus_reply` 零拒绝
   - T3 全部 4 个 checkpoint PASS：话题 A 建立独立 topic locus 与专属 child；同话题第二条复用同一 locus/代际/child（同 session 内 turn 1→2 递增为硬证据）；群级/话题 A/话题 B 三个不同 child 互为兄弟、全部直属同一主会话、无孙辈；缺失 thread_id 一项按计划维持 manual，以 53 项自动化测试作辅证，不冒充真实异常事件
   - 验收方法修正：改用中性问法（只问事实、不在 prompt 中提示期待结论），避免以被测对象的自述验证其自身行为；所有判定以 Host 持久层为准，子会话自报仅作交叉核对（本轮逐项一致）
+- [x] 10.11 修正验收形态：T6/T7 原设计为「造靶子再打靶子」（新建 `.pet-locus-acceptance/` 目录写 canary 文件、以及为触发决策往返而硬造提问），验的是可由单测覆盖的写系统调用穿透性，而非真实协作模型是否可用
+  - 改为融入真实开发流程：T6 用 nexus 仓库真实的 README 防腐任务承载 read 拒写 / 授权 write / 降权立即生效三个判据，判定仍以文件系统与 `git diff` 为准而非模型自述；T7 的澄清往返改由真实无法自行判定的点触发（README 对 `rush init-vitest` 生成物的描述，其真相源不在仓库内）
+  - 额外覆盖到靶子式设计无法验证的能力：子会话能否读懂真实仓库、改动是否正确且范围最小、diff 是否干净
+  - 隔离与可还原：nexus 工作树切至一次性分支 `pet-locus-acceptance`（基线 `973e272dfe`），验收变更可随时 `git checkout` 还原，不污染 master
 - [ ] 10.8 收敛验收期 UX backlog B026–B028；验收完成后统一评估，不在修复期间扩散非阻塞视觉优化
