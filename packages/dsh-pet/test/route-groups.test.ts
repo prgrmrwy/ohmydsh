@@ -179,7 +179,7 @@ describe('an archived session is refused before the click, not after', () => {
   it('disables the control and says why', async () => {
     const opened: string[] = []
     const { setSessionOpener } = await import('../src/client/settings.js')
-    setSessionOpener(id => opened.push(id))
+    setSessionOpener(target => opened.push(JSON.stringify(target)))
     // The Host marks the current Locus session: the shell silently lands on
     // the home page for an archived id, so the reason must be visible without
     // clicking. The retired legacy route projection stays absent from UI.
@@ -205,7 +205,7 @@ describe('an archived session is refused before the click, not after', () => {
     const opened: string[] = []
     const closed: number[] = []
     const { setSessionOpener, setSettingsCloser } = await import('../src/client/settings.js')
-    setSessionOpener(id => opened.push(id))
+    setSessionOpener(target => opened.push(JSON.stringify(target)))
     setSettingsCloser(() => closed.push(1))
     stubLocus()
     const host = await mountTab('locus')
@@ -216,9 +216,59 @@ describe('an archived session is refused before the click, not after', () => {
       ) as HTMLButtonElement | undefined)?.click()
     })
 
-    expect(opened).toEqual(['s1'])
+    expect(opened).toEqual([JSON.stringify({ kind: 'session', sessionId: 's1' })])
     // Navigating behind the modal panel would leave it covering the target.
     expect(closed).toEqual([1])
+    setSessionOpener(undefined)
+    setSettingsCloser(undefined)
+  })
+})
+
+describe('a locus child opens through its durable parent address', () => {
+  it('addresses the subagent child by parent, never by bare session id', async () => {
+    // The Host refuses `origin === 'subagent'` addressed by bare session id
+    // (`session/agent-busy`: owned by subagent routing). Opening a locus child
+    // by its own id therefore always failed, and the management view was the
+    // only way in — so the owner could not reach the child at all.
+    const opened: unknown[] = []
+    const { setSessionOpener, setSettingsCloser } = await import('../src/client/settings.js')
+    setSessionOpener(target => opened.push(target))
+    setSettingsCloser(() => undefined)
+    stubLocus()
+    const host = await mountTab('locus')
+
+    await act(async () => {
+      ;([...host.querySelectorAll('button')].find(
+        item => item.textContent === '打开子会话',
+      ) as HTMLButtonElement | undefined)?.click()
+    })
+
+    expect(opened).toEqual([{
+      kind: 'subagent',
+      parentSessionId: 's1',
+      childSessionId: 'child-1',
+    }])
+    setSessionOpener(undefined)
+    setSettingsCloser(undefined)
+  })
+
+  it('refuses rather than falling back to a bare id when the parent is unknown', async () => {
+    // A missing parent makes the child unaddressable. Falling back to the bare
+    // id would only reproduce the Host refusal as a confusing runtime error.
+    const opened: unknown[] = []
+    const { setSessionOpener, setSettingsCloser } = await import('../src/client/settings.js')
+    setSessionOpener(target => opened.push(target))
+    setSettingsCloser(() => undefined)
+    stubLocus({ ...LOCUS_VIEW, main: { ...LOCUS_VIEW.main, sessionId: '' } })
+    const host = await mountTab('locus')
+
+    await act(async () => {
+      ;([...host.querySelectorAll('button')].find(
+        item => item.textContent === '打开子会话',
+      ) as HTMLButtonElement | undefined)?.click()
+    })
+
+    expect(opened).toEqual([])
     setSessionOpener(undefined)
     setSettingsCloser(undefined)
   })

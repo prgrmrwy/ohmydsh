@@ -31,6 +31,7 @@ import {
   setDirectoryPicker,
   setDirectoryLister,
   setSessionOpener,
+  type PetSessionTarget,
   setSettingsCloser,
 } from './settings.js'
 import {
@@ -131,8 +132,8 @@ export function apply(ctx: ClientContext): void {
   // The settings section is registered as a bare component and never receives
   // this context, so the one shell capability it needs — navigating to a
   // session — is published to it, exactly as the directory picker is.
-  setSessionOpener(sessionId => {
-    openSession(ctx, sessionId)
+  setSessionOpener(target => {
+    openSession(ctx, target)
   })
 
   // Dismiss the settings overlay after navigating out of it.
@@ -297,7 +298,7 @@ function PetOverlaySurface(): JSX.Element | null {
     <PetOverlay
       currentSource={source}
       openSession={sessionId => {
-        openSession(ctx, sessionId)
+        openSession(ctx, { kind: 'session', sessionId })
       }}
     />
   )
@@ -343,9 +344,25 @@ function readCurrentSource(ctx: ClientContext): SourceSelection | undefined {
  *
  * Uses the typed sessions face rather than an untyped `ctx.get` lookup, so a
  * contract change fails the build instead of silently no-opping.
+ *
+ * A subagent child MUST go through `openSubagent`: the Host rejects a bare
+ * session id for `origin === 'subagent'` with `session/agent-busy`, because
+ * such a Session is owned by subagent routing. `mode` is `continuable` because
+ * that is exactly what the locus child provisioner creates and records in its
+ * descriptor — a locus child is never a one-shot delegation.
+ *
  * @param ctx - Client context.
- * @param sessionId - Target session.
+ * @param target - Navigation target, carrying the parent address when needed.
  */
-function openSession(ctx: ClientContext, sessionId: string): void {
-  ctx.sessions.open(sessionId as Parameters<ClientContext['sessions']['open']>[0])
+function openSession(ctx: ClientContext, target: PetSessionTarget): void {
+  if (target.kind === 'subagent') {
+    type SubagentAddress = Parameters<ClientContext['sessions']['openSubagent']>[0]
+    ctx.sessions.openSubagent({
+      parentSessionId: target.parentSessionId,
+      childSessionId: target.childSessionId,
+      mode: 'continuable',
+    } as unknown as SubagentAddress)
+    return
+  }
+  ctx.sessions.open(target.sessionId as Parameters<ClientContext['sessions']['open']>[0])
 }

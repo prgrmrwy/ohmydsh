@@ -1978,3 +1978,22 @@ describe('the stylesheet stays a valid template literal', () => {
     expect(body).not.toContain('`')
   })
 })
+
+describe('a locus child gets its own durable title', () => {
+  it('renames the child instead of leaving it to the fallback generator', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const index = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
+
+    // Without an explicit rename, DSH derives a title from the first user
+    // message — which for a locus child is the long caller-bound delivery
+    // header. Every child then displayed as "## 当前 unified locus 投递（caller-"
+    // and was indistinguishable in the sidebar and the management view, even
+    // though the subagent descriptor already carried the right label.
+    const provisioning = index.slice(index.indexOf('const idleChildProvisioning'))
+    const scope = provisioning.slice(0, provisioning.indexOf('const locusLarkPort'))
+    expect(scope).toContain('ctx.sessionTitle.rename')
+    expect(scope).toContain('input.label')
+    // Naming must not undo a child that is already durably created.
+    expect(scope).toContain('could not be titled')
+  })
+})
