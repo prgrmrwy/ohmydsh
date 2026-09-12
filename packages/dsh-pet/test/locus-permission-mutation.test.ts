@@ -17,11 +17,14 @@ function activeRepository() {
     childSessionId: 'session-child',
     source: 'auto',
     permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
+    // Exactly what the owner-facing confirm operation persists: confirmed
+    // intent with owner provenance and no stored authorization. Write
+    // authority is derived from live-root agreement at verification time.
     contextAnchor: {
       status: 'confirmed',
-      authorization: 'authorized',
+      authorization: 'unknown',
       executionRoot: '/repo',
-      provenance: 'host:test',
+      provenance: 'owner:ou-owner',
       confirmedAt: 1,
     },
     state: 'active',
@@ -104,24 +107,29 @@ describe('locus permission mutation', () => {
 
   it.each([
     {
-      name: 'authorization unknown',
-      anchor: { status: 'confirmed' as const, authorization: 'unknown' as const, executionRoot: '/repo', provenance: 'owner:ou-owner' },
+      name: 'unconfirmed root',
+      anchor: { status: 'unknown' as const, executionRoot: '/repo', provenance: 'owner:ou-owner' },
       workspaceRoot: '/repo',
     },
     {
       name: 'missing execution root',
-      anchor: { status: 'confirmed' as const, authorization: 'authorized' as const, provenance: 'host:test' },
+      anchor: { status: 'confirmed' as const, provenance: 'owner:ou-owner' },
       workspaceRoot: '/repo',
     },
     {
-      name: 'non-Host authorized root',
-      anchor: { status: 'confirmed' as const, authorization: 'authorized' as const, executionRoot: '/repo', provenance: 'owner:ou-owner' },
+      name: 'owner revoked the root',
+      anchor: { status: 'confirmed' as const, authorization: 'unauthorized' as const, executionRoot: '/repo', provenance: 'owner:ou-owner' },
       workspaceRoot: '/repo',
     },
     {
       name: 'canonical root mismatch',
-      anchor: { status: 'confirmed' as const, authorization: 'authorized' as const, executionRoot: '/repo', provenance: 'host:test' },
+      anchor: { status: 'confirmed' as const, executionRoot: '/repo', provenance: 'owner:ou-owner' },
       workspaceRoot: '/repo-sibling',
+    },
+    {
+      name: 'live sandbox reports no workspace root',
+      anchor: { status: 'confirmed' as const, executionRoot: '/repo', provenance: 'owner:ou-owner' },
+      workspaceRoot: undefined,
     },
   ])('rejects write for $name and rolls the live policy back to read', async ({ anchor, workspaceRoot }) => {
     const repository = new LocusRepository()

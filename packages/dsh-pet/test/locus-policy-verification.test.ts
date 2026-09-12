@@ -7,12 +7,17 @@ import { canonicalExecutionRoot, verifyLocusLivePolicy } from '../src/host/locus
 const read = { desired: 'read' as const, effective: 'read' as const, verifiedAt: 1 }
 const write = { desired: 'write' as const, effective: 'write' as const, verifiedAt: 1, grantedBy: 'host:test' }
 
-function authorized(executionRoot: string) {
+/**
+ * An anchor exactly as the owner-facing confirm operation persists it:
+ * `status: 'confirmed'`, owner provenance, and NO stored authorization.
+ * Write authority is derived at verification time from live-root agreement.
+ */
+function confirmed(executionRoot: string) {
   return {
     status: 'confirmed' as const,
-    authorization: 'authorized' as const,
+    authorization: 'unknown' as const,
     executionRoot,
-    provenance: 'host:sandbox-policy',
+    provenance: 'owner:ou-owner',
     confirmedAt: 1,
   }
 }
@@ -27,16 +32,49 @@ describe('locus live sandbox policy verification', () => {
       .toMatchObject({ ok: false, reason: 'policy-unavailable' })
   })
 
-  it('rejects owner-confirmed or authorization-unknown roots for write', () => {
-    expect(verifyLocusLivePolicy({
-      permission: write,
-      contextAnchor: { ...authorized('/repo'), authorization: 'unknown', provenance: 'owner:ou-owner' },
-    }, { mode: 'workspace-write', workspaceRoot: '/repo' }))
-      .toMatchObject({ ok: false, reason: 'write-root-unauthorized' })
+  it('derives write authority from live root agreement, not a stored grant', () => {
+    // The owner-facing confirm operation persists exactly this shape. Requiring
+    // an additional stored `authorization: 'authorized'` made write
+    // unreachable: nothing in the Host ever wrote that value, so every
+    // legitimate grant failed closed.
+    expect(verifyLocusLivePolicy(
+      { permission: write, contextAnchor: confirmed('/repo') },
+      { mode: 'workspace-write', workspaceRoot: '/repo' },
+    )).toEqual({ ok: true, effective: 'write' })
+  })
+
+  it('refuses write without an owner-confirmed root', () => {
+    // Intent is still mandatory: agreement alone cannot authorize a root the
+    // owner never confirmed.
+    for (const anchor of [
+      undefined,
+      { status: 'unknown' as const, executionRoot: '/repo' },
+      { status: 'confirmed' as const },
+    ]) {
+      expect(verifyLocusLivePolicy(
+        { permission: write, ...(anchor === undefined ? {} : { contextAnchor: anchor }) },
+        { mode: 'workspace-write', workspaceRoot: '/repo' },
+      )).toMatchObject({ ok: false, reason: 'write-root-unauthorized' })
+    }
+  })
+
+  it('honors an explicit owner revocation over an agreeing root', () => {
+    expect(verifyLocusLivePolicy(
+      { permission: write, contextAnchor: { ...confirmed('/repo'), authorization: 'unauthorized' } },
+      { mode: 'workspace-write', workspaceRoot: '/repo' },
+    )).toMatchObject({ ok: false, reason: 'write-root-unauthorized' })
+  })
+
+  it('refuses write when the live sandbox reports no workspace root', () => {
+    // Without a live root there is no Host derivation to rely on.
+    expect(verifyLocusLivePolicy(
+      { permission: write, contextAnchor: confirmed('/repo') },
+      { mode: 'workspace-write' },
+    )).toMatchObject({ ok: false, reason: 'write-root-mismatch' })
   })
 
   it('requires canonical root equality and rejects a sibling root', () => {
-    expect(verifyLocusLivePolicy({ permission: write, contextAnchor: authorized('/repo') }, {
+    expect(verifyLocusLivePolicy({ permission: write, contextAnchor: confirmed('/repo') }, {
       mode: 'workspace-write', workspaceRoot: '/repo-sibling',
     })).toMatchObject({ ok: false, reason: 'write-root-mismatch' })
   })
@@ -48,7 +86,7 @@ describe('locus live sandbox policy verification', () => {
     await mkdir(root)
     await symlink(root, link)
     expect(canonicalExecutionRoot(link)).toBe(await realpath(root))
-    expect(verifyLocusLivePolicy({ permission: write, contextAnchor: authorized(link) }, {
+    expect(verifyLocusLivePolicy({ permission: write, contextAnchor: confirmed(link) }, {
       mode: 'workspace-write', workspaceRoot: root,
     })).toEqual({ ok: true, effective: 'write' })
   })
