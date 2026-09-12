@@ -1380,8 +1380,13 @@ export class LocusRepository {
       assertIdentifier(confirmedBy, 'confirmedBy')
       const contextAnchor = {
         ...anchor,
-        // Explicit owner confirmation records provenance, but deliberately
-        // cannot grant filesystem authority. Policy verification is separate.
+        // Confirmation records the owner's INTENT — where work belongs — and
+        // deliberately grants no filesystem authority on its own. Authority is
+        // derived per verification by `verifyLocusLivePolicy`, which requires
+        // the live sandbox to report this exact path as its workspace root. So
+        // authorization stays `unknown` here: a stored grant could go stale and
+        // then outrank the live sandbox, which is exactly what must not happen.
+        // An owner-side `unauthorized` is honored as a hard refusal.
         authorization: 'unknown' as const,
         provenance: `owner:${confirmedBy}`,
         confirmedAt: now,

@@ -113,4 +113,10 @@
   - **已修复并原地恢复（2026-09-13）**：创建 child 后显式 `ctx.sessionTitle.rename(session, input.label)`，best-effort（child 已 durably 创建且 locus 身份已记录，命名失败不回滚可用 child，只记日志）；打开路径引入 `PetSessionTarget` 判别联合，子会话走 `openSubagent({ parentSessionId, childSessionId, mode: 'continuable' })`，parent 缺失时拒绝导航而非回退裸 id。新增两条回归（移除 subagent 分支后失败）+ 命名接线断言；Pet 1647 项通过，已部署
   - T7-C3 重测 PASS：GUI 私聊产生本地 turn 9，飞书 Delivery 保持 14 条未变，`pet_locus_reply` 调用数保持 8 次未变。同时交叉验证 10.10 的授权修复未放宽错边界
   - 遗留：标题修复只对**新建** child 生效，存量三个 child 标题不变；T6 中依赖从管理面打开 child 的步骤现已可用
+- [x] 10.13 修复 write 授权无法达成的实现缺口（T6 前置阻塞）
+  - 缺口：`policy-verification.ts` 要求锚点同时满足 `authorization === 'authorized'` 且 `provenance` 以 `host:` 开头，但唯一的写入点 `persistence.ts confirmContextAnchor` 硬编码 `authorization: 'unknown'`、`provenance: 'owner:<id>'`。全局无任何代码路径能产生这两个值，因此 `-s write` **在任何情况下都必然被拒**——是 fail closed，但不存在可成功路径
+  - 修复：write 授权改为**每次核验时派生**，不再依赖持久标记。要求两个独立事实同时成立——所有者已确认执行根（意图，只有 owner-facing confirm 能写入），且 live sandbox 回读的 workspace root 与之规范化后精确相等（权威，由 Host 构造性派生）。所有者显式 `unauthorized` 作为硬拒绝优先于 root 一致
+  - 为何不补一个「授权」写入点：已存储的授权会过期——sandbox root 可能在标记写入后改变，而持久化的「是」会凌驾于 live 真相之上。派生式判定保持新鲜且 fail closed
+  - 安全边界不变：仅 root 一致而无所有者确认仍拒绝；仅有确认而 live root 不一致或缺失仍拒绝；canonical 比较仍抵抗符号链接与非规范路径；提权失败仍回滚 live policy 并维持 read
+  - 验证：policy-verification 测试重写为派生模型（7 项），削弱守卫后用例失败、恢复后全绿；permission-mutation 拒绝表更新为新模型的五类拒绝场景，替身锚点改为 Host 真实持久化形状；Pet 1651 项与仓库 121 项通过，已部署
 - [ ] 10.8 收敛验收期 UX backlog B026–B028；验收完成后统一评估，不在修复期间扩散非阻塞视觉优化

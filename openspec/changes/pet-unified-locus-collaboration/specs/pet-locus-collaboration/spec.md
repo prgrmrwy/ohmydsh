@@ -198,9 +198,25 @@ GUI Q&A SHALL 仅接受未归档主会话，验证 bot、所有者及宿主能�
 - **WHEN** allowlist 在空闲 locus 提权且宿主支持已确认工作根
 - **THEN** 核验生效后回执并记录授权；该入口后续成员请求共享该档位
 
+写授权 SHALL 在每次核验时派生，MUST NOT 以持久标记代替。派生 SHALL 同时要求两个独立事实：所有者已显式确认执行根（意图），且 live sandbox 回读的 workspace root 与该根规范化后精确相等（权威）。二者缺一不可：仅有 live root 一致而无所有者确认 SHALL 拒绝；仅有所有者确认而 live root 不一致或缺失 SHALL 拒绝。所有者显式撤销 SHALL 优先于 root 一致。
+
+持久化的锚点确认 MUST NOT 写入可直接满足写授权的标记，因为已存储的授权可能过期并凌驾于 live sandbox 之上。
+
 #### Scenario: 宿主写范围不支持
 - **WHEN** 工作根位于当前可写范围之外
 - **THEN** 明确说明无法授予该范围，保持 read，不把 prompt 当作解除限制
+
+#### Scenario: 授权按 live root 派生
+- **WHEN** 所有者已确认执行根，且 live sandbox 回读的 workspace root 与其规范化后一致
+- **THEN** 授予 write 并记录授权人、时间与生效结果，不依赖任何已存储的授权标记
+
+#### Scenario: 仅有 root 一致不足以授权
+- **WHEN** live sandbox 的 workspace root 与某路径一致，但所有者从未确认该执行根
+- **THEN** 拒绝提权并维持 read，提示需先确认上下文锚点
+
+#### Scenario: 所有者撤销优先
+- **WHEN** 所有者已显式撤销该执行根的写授权，而 live root 仍与其一致
+- **THEN** 拒绝提权并维持 read
 
 #### Scenario: 冷恢复或降权
 - **WHEN** 子会话恢复或空闲时被设置 read

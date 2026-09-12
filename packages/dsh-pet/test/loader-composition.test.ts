@@ -1362,7 +1362,7 @@ describe('owner-facing locus management is served by the real routes', () => {
     expect(refusedQa.ok).toBe(false)
   })
 
-  it('uses the exact continuation-owned child but rejects write without a Host-authorized root', async () => {
+  it('uses the exact continuation-owned child but rejects write without a confirmed root', async () => {
     const host = await hostWithLoci({ scopeRuntime: true })
 
     const result = await callRoute(host.route(LOCUS_ROUTES.scope), {
@@ -1373,7 +1373,9 @@ describe('owner-facing locus management is served by the real routes', () => {
 
     expect(result, JSON.stringify(result)).toMatchObject({ ok: false })
     expect(result.error).toBe('WRITE_UNSUPPORTED')
-    expect(result.message).toContain('Host-derived')
+    // This locus has no context anchor at all, so intent was never expressed:
+    // live-root agreement alone can never authorize write.
+    expect(result.message).toContain('所有者已确认的 execution root')
     expect(host.modes.get('child-live')).toBe('read-only')
     expect(host.repository.getLocus('locus-live')?.permission).toMatchObject({
       desired: 'read', effective: 'read',
