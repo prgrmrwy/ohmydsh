@@ -109,5 +109,8 @@
 - [x] 10.12 验收发现 Locus 子会话在 GUI 侧完全不可用（记为 B032，未修复）：
   - 标题被投递样板覆盖——子会话唯一 `session/title` 为 `"## 当前 unified locus 投递（caller-"`、`source: fallback`，因 Pet 创建 child 后未显式 rename，标题由兜底生成器取首条消息（约 1950 字符的投递头）开头。主会话创建路径有 rename，子会话漏了，属对称性缺失；与 B031 同源
   - 打开方式不符合官方 subagent 契约——Pet `openSession()` 调 `ctx.sessions.open(sessionId)`，而官方 `validateAddress` 对 `origin=subagent` 刻意拒绝普通 session 地址（`session/agent-busy`，非 DSH bug）。正确入口为 `ctx.sessions.openSubagent({ parentSessionId, childSessionId, mode })`，Pet 侧三项事实齐备（locus 有 parent/child，descriptor 有 `mode: continuable`）
-  - 影响：T7-C3 标记 blocked 而非 failed（原设计前提「能打开 child 并在其中发消息」当前不成立），修复后原地恢复；T6 中依赖从管理面打开 child 的步骤同样需要复核
+  - 影响：T7-C3 曾标记 blocked 而非 failed（原设计前提「能打开 child 并在其中发消息」当时不成立）
+  - **已修复并原地恢复（2026-09-13）**：创建 child 后显式 `ctx.sessionTitle.rename(session, input.label)`，best-effort（child 已 durably 创建且 locus 身份已记录，命名失败不回滚可用 child，只记日志）；打开路径引入 `PetSessionTarget` 判别联合，子会话走 `openSubagent({ parentSessionId, childSessionId, mode: 'continuable' })`，parent 缺失时拒绝导航而非回退裸 id。新增两条回归（移除 subagent 分支后失败）+ 命名接线断言；Pet 1647 项通过，已部署
+  - T7-C3 重测 PASS：GUI 私聊产生本地 turn 9，飞书 Delivery 保持 14 条未变，`pet_locus_reply` 调用数保持 8 次未变。同时交叉验证 10.10 的授权修复未放宽错边界
+  - 遗留：标题修复只对**新建** child 生效，存量三个 child 标题不变；T6 中依赖从管理面打开 child 的步骤现已可用
 - [ ] 10.8 收敛验收期 UX backlog B026–B028；验收完成后统一评估，不在修复期间扩散非阻塞视觉优化
