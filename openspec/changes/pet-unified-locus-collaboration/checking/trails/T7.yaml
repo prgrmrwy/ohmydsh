@@ -6,8 +6,8 @@ parallel_group: G7
 conflicts_with: [T1, T2, T3, T4, T5, T6, T8]
 precondition: 选择一个 active、read、空闲的验收 Locus；已记录其 child session ID；浏览器可从 Locus 管理打开该 child。
 ask_user_if_blocked: true
-status: blocked
-blocked_reason: "T7-C3 无法按原设计执行：从管理面打开 Locus 子会话失败。Pet 使用 ctx.sessions.open(sessionId)，而官方对 origin=subagent 的会话刻意拒绝普通 session 地址（session/agent-busy），正确入口是 openSubagent({parentSessionId, childSessionId, mode})。同时子会话标题被投递样板覆盖（fallback 取首条消息开头），在 GUI 中无法辨识。两处缺陷记为 B032，修复后可原地恢复 C3。C1/C2 已通过，不受影响。"
+status: passed
+blocked_reason_history: "曾阻塞于 T7-C3：从管理面打开 Locus 子会话失败。Pet 使用 ctx.sessions.open(sessionId)，而官方对 origin=subagent 的会话刻意拒绝普通 session 地址（session/agent-busy），正确入口是 openSubagent({parentSessionId, childSessionId, mode})。同时子会话标题被投递样板覆盖（fallback 取首条消息开头），在 GUI 中无法辨识。两处缺陷记为 B032，修复后可原地恢复 C3。C1/C2 已通过，不受影响。"
 mock_setup:
   required: false
   status: not_needed
@@ -103,5 +103,5 @@ steps:
         expected_text: "仅在 GUI 回答；本地轮次完成；飞书消息数量未更新；当前飞书回复授权不可用"
         expected_attrs: null
         expected_visible: true
-        result: null
-        result_detail: "BLOCKED（非失败）：无法从管理面打开该 child 执行 GUI 私聊。官方对 origin=subagent 的会话刻意拒绝普通 session 地址，Pet 的打开入口未使用 openSubagent，且子会话标题被投递样板覆盖导致在 GUI 中不可辨识（B032）。原设计前提『能打开并在其中发消息』当前不成立。附带事实：该拒绝本身构成比原判据更强的隔离——GUI 侧信道根本无法操作 subagent 会话。修复 B032 后从本 checkpoint 原地恢复，不以任何方式绕过验证。"
+        result: pass
+        result_detail: "首次 BLOCKED（2026-09-13，事实保留）：无法从管理面打开该 child——Pet 使用 ctx.sessions.open(bare id)，而 Host 对 origin=subagent 刻意拒绝（session/agent-busy），且子会话标题被投递样板覆盖导致 GUI 中不可辨识。两处缺陷记为 B032。\n重测 PASS（2026-09-13，修复 B032 后原地恢复）：打开路径改走 openSubagent({parentSessionId, childSessionId, mode: continuable})，用户确认可正常打开。随后在 GUI 中发送不含飞书回复请求的私聊「现在是什么权限？」，三项判据全部成立——(1) 在同一 child session-c9af096f 产生本地 turn 9（01:35:52→01:36:02 completed），输入 source.kind=user；(2) 飞书侧零投递，Delivery 总数保持 14 条未变，无新增记录；(3) 该轮无 Delivery 绑定，pet_locus_reply 调用数保持 8 次未变，当轮授权不可用。附带观察：模型在回复中自述「可以回复飞书消息」，但实际该轮并无授权——隔离由 Host 侧强制，不依赖模型自觉。本项同时交叉验证 10.10 的授权判定修复未放宽错边界：未决claim 已不再 sticky 置 mixed，但 GUI 轮次依然拿不到回复授权。"
