@@ -1194,6 +1194,31 @@ async function initialize(
           if (locusPrepublication.inspect(reservation.childSessionId)?.state !== 'claimed') {
             throw new Error('Idle locus child was created without synchronous scoped composition')
           }
+
+          // Give the child its own durable title, exactly as the main creation
+          // path does. The subagent descriptor already carries this label, but
+          // a descriptor is not a Session title: leaving the title unset lets
+          // DSH's fallback generator derive one from the first user message —
+          // which is the long caller-bound delivery header — so every locus
+          // child showed up as "## 当前 unified locus 投递（caller-" and was
+          // indistinguishable in the sidebar and the management view.
+          //
+          // Best-effort by design: the child is already durably created and its
+          // locus identity lives in Pet's own records, so a naming failure must
+          // not roll back a usable child. It is logged, not swallowed silently.
+          const childSession = ctx.sessions.get(reservation.childSessionId as never)
+          if (childSession !== undefined) {
+            try {
+              ctx.sessionTitle.rename(childSession, input.label)
+            } catch (error) {
+              petLog(
+                `dsh-pet: locus child ${reservation.childSessionId} could not be titled (${
+                  error instanceof Error ? error.message : String(error)
+                })`,
+              )
+            }
+          }
+
           let finalized = false
           return {
             childSessionId: reservation.childSessionId,

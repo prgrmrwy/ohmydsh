@@ -746,7 +746,7 @@ function LocusCard(props: {
               }
               onClick={() => {
                 if (locus.main.availability === 'archived') return
-                sessionOpener?.(locus.main.sessionId)
+                sessionOpener?.({ kind: 'session', sessionId: locus.main.sessionId })
                 closeSettings?.()
               }}
             >
@@ -765,7 +765,16 @@ function LocusCard(props: {
               }
               onClick={() => {
                 if (locus.child.availability === 'archived') return
-                sessionOpener?.(locus.child.sessionId ?? '')
+                const childSessionId = locus.child.sessionId
+                // Both ids come from the durable locus record. Without the
+                // parent the Host cannot address a subagent child at all, so a
+                // missing main is a refusal rather than a bare-id fallback.
+                if (childSessionId === undefined || locus.main.sessionId === '') return
+                sessionOpener?.({
+                  kind: 'subagent',
+                  parentSessionId: locus.main.sessionId,
+                  childSessionId,
+                })
                 closeSettings?.()
               }}
             >
@@ -1407,6 +1416,23 @@ export function setDirectoryPicker(
 }
 
 /**
+ * A navigation target for the native session shell.
+ *
+ * A locus child is a subagent Session, and the Host refuses to address one by
+ * its bare session id: `validateAddress` rejects `origin === 'subagent'` with
+ * `session/agent-busy`, because such a Session is owned by subagent routing.
+ * Opening it needs its durable PARENT address, so the target carries that
+ * parent explicitly instead of leaving the shell to rediscover it.
+ */
+export type PetSessionTarget =
+  | { readonly kind: 'session'; readonly sessionId: string }
+  | {
+    readonly kind: 'subagent'
+    readonly parentSessionId: string
+    readonly childSessionId: string
+  }
+
+/**
  * Navigate to a native DSH session.
  *
  * Published by the client entry the same way the directory picker is: this
@@ -1414,13 +1440,15 @@ export function setDirectoryPicker(
  * client context, so the one shell capability it needs is handed in rather
  * than reached for.
  */
-let sessionOpener: ((sessionId: string) => void) | undefined
+let sessionOpener: ((target: PetSessionTarget) => void) | undefined
 
 /**
  * Publish the session navigator.
- * @param opener - Opens a session by id, or `undefined` where unsupported.
+ * @param opener - Opens a navigation target, or `undefined` where unsupported.
  */
-export function setSessionOpener(opener: ((sessionId: string) => void) | undefined): void {
+export function setSessionOpener(
+  opener: ((target: PetSessionTarget) => void) | undefined,
+): void {
   sessionOpener = opener
 }
 

@@ -194,7 +194,9 @@
 - **要点**:
   - 两处都应补测试：标题需断言创建后存在 Pet 显式 rename 且不等于投递头前缀；打开路径需断言 subagent 目标使用 `openSubagent` 且携带正确 parent/child/mode。
   - 与 B026 / B030（管理面可辨识性与聚合）相关：标题修好后，管理面与侧栏才可能按名称辨识，聚合展示也才有意义。
-- **更新**: 2026-09-13 在 T7-C3 验收中发现并定位；两个缺陷均未修复，T7-C3 因此无法按原设计执行。
+- **更新**:
+  - 2026-09-13 在 T7-C3 验收中发现并定位。
+  - 2026-09-13 两处均已修复：创建 child 后显式 `ctx.sessionTitle.rename(session, input.label)`（best-effort，命名失败只记日志、不回滚已创建的 child）；管理面打开路径引入 `PetSessionTarget` 判别联合，子会话走 `ctx.sessions.openSubagent({ parentSessionId, childSessionId, mode: 'continuable' })`，parent 缺失时拒绝而非回退裸 id。已补回归（移除 subagent 分支后用例失败）与命名接线断言；Pet 1647 项测试通过，已部署。标题修复只对**新建** child 生效，存量 child 标题不变。
 
 ### [B031] Locus 投递 prompt 头过长且逐条重复
 - **状态**: 想法
