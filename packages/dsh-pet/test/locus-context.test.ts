@@ -215,3 +215,58 @@ describe('locus endpoint and reply target safety', () => {
     ).toThrow('outside the caller-bound endpoint')
   })
 })
+
+describe('the routing preamble is sent once per child', () => {
+  // A locus child is a continuing conversation. Repeating the full routing
+  // preamble every turn spends context budget restating facts the child
+  // already holds, and the spec forbids it: "后续投递只带必要请求事实和查询
+  // 引导，MUST NOT 每次重复全部目录说明".
+  it('keeps the full preamble on the first delivery', () => {
+    const first = renderLocusDeliveryPrompt(deliveryContext(), { position: 'first' })
+
+    expect(first).toContain('### Endpoint')
+    expect(first).toContain('### Locus')
+    expect(first).toContain('### Workspace')
+    expect(first).toContain('### Context anchor')
+    expect(first).toContain('### 按需读取')
+  })
+
+  it('defaults to the full preamble when no position is supplied', () => {
+    expect(renderLocusDeliveryPrompt(deliveryContext()))
+      .toEqual(renderLocusDeliveryPrompt(deliveryContext(), { position: 'first' }))
+  })
+
+  it('drops the durable routing sections on a follow-up delivery', () => {
+    const next = renderLocusDeliveryPrompt(deliveryContext(), { position: 'subsequent' })
+
+    for (const section of ['### Endpoint', '### Locus', '### Main / child', '### Workspace', '### Permission', '### Context anchor']) {
+      expect(next).not.toContain(section)
+    }
+    // Omitted facts stay retrievable from the Host rather than inferred.
+    expect(next).toContain('pet_context')
+  })
+
+  it('still carries every per-delivery fact on a follow-up', () => {
+    const context = deliveryContext()
+    const next = renderLocusDeliveryPrompt(context, { position: 'subsequent' })
+
+    // The request and its reply correlation change per delivery.
+    expect(next).toContain(context.request.messageId)
+    expect(next).toContain(context.request.text)
+    expect(next).toContain('<current-request>')
+    // The reply target is delivery-bound and must never be inherited.
+    expect(next).toContain('### Reply target (current delivery only)')
+    expect(next).toContain('pet_locus_reply')
+    expect(next).toContain('不要把业务正文伪装成 Host 控制回执')
+  })
+
+  it('materially reduces the follow-up payload', () => {
+    const context = deliveryContext()
+    const first = renderLocusDeliveryPrompt(context, { position: 'first' })
+    const next = renderLocusDeliveryPrompt(context, { position: 'subsequent' })
+
+    // Guards the actual goal rather than a formatting detail: a follow-up must
+    // be a small fraction of the preamble-bearing delivery.
+    expect(next.length).toBeLessThan(first.length / 2)
+  })
+})

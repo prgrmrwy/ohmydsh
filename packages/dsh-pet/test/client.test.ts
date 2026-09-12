@@ -1997,3 +1997,20 @@ describe('a locus child gets its own durable title', () => {
     expect(scope).toContain('could not be titled')
   })
 })
+
+describe('the delivery preamble position comes from durable history', () => {
+  it('derives position from persisted Deliveries, not a runtime counter', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const index = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
+
+    const render = index.slice(index.indexOf('renderPrompt: ({ locus, message })'))
+    const scope = render.slice(0, render.indexOf('turns: locusTurnObserver'))
+
+    // A runtime counter would reset on Host restart and re-send the preamble
+    // mid-conversation; durable Delivery history survives restarts.
+    expect(scope).toContain('listDeliveries')
+    expect(scope).toContain('childSessionId === record.childSessionId')
+    expect(scope).toContain("'subsequent'")
+    expect(scope).toContain("'first'")
+  })
+})
