@@ -1843,6 +1843,16 @@ async function initialize(
         ) {
           throw new Error('Active locus changed before delivery prompt rendering')
         }
+        // Send the routing preamble only on a child's FIRST delivery. The
+        // position is derived from durable Delivery history for this exact
+        // child, not from a runtime counter: after a Host restart a counter
+        // would reset and re-send the preamble mid-conversation, and a child
+        // that genuinely has no history must still receive it. Any settled or
+        // in-flight prior Delivery proves the preamble was already delivered.
+        const priorDeliveries = locusRepository
+          .listDeliveries(record.id)
+          .filter(delivery => delivery.childSessionId === record.childSessionId)
+        const position = priorDeliveries.length > 1 ? 'subsequent' : 'first'
         return renderLocusDeliveryPrompt({
           endpoint: record.endpoint,
           locus: { locusId: record.id, generation: record.generation, state: record.state },
@@ -1861,7 +1871,7 @@ async function initialize(
               : { replyToMessageId: message.replyToMessageId }),
             replyTarget: message.replyTarget,
           },
-        })
+        }, { position })
       },
       turns: locusTurnObserver,
       ...(locusControlDispatch === undefined ? {} : { controlDispatch: locusControlDispatch }),
