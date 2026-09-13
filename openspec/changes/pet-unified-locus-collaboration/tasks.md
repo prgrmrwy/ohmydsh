@@ -119,4 +119,9 @@
   - 为何不补一个「授权」写入点：已存储的授权会过期——sandbox root 可能在标记写入后改变，而持久化的「是」会凌驾于 live 真相之上。派生式判定保持新鲜且 fail closed
   - 安全边界不变：仅 root 一致而无所有者确认仍拒绝；仅有确认而 live root 不一致或缺失仍拒绝；canonical 比较仍抵抗符号链接与非规范路径；提权失败仍回滚 live policy 并维持 read
   - 验证：policy-verification 测试重写为派生模型（7 项），削弱守卫后用例失败、恢复后全绿；permission-mutation 拒绝表更新为新模型的五类拒绝场景，替身锚点改为 Host 真实持久化形状；Pet 1651 项与仓库 121 项通过，已部署
+- [x] 10.14 修复默认 Q&A 因 tokenStatus 字面量猜错而永不可用（T4 前置阻塞）
+  - 缺口：`parseUserIdentity` 要求 `identity.tokenStatus === 'ready'`，而 lark-cli 对可用 token 实际返回 `'valid'`。因同一对象里 `status` 是 `'ready'` 便类推 `tokenStatus` 同值，该闸门永远不可能通过，默认 Q&A 在任何情况下都建不出来——与 10.13 同类：判据要求的值真实系统从不产生
+  - 掩盖原因：测试替身同样写了 `tokenStatus: 'ready'`，与错误实现犯同一个错，测试长期全绿
+  - 修复：不 pin 该字面量（取值域无文档，pin 任何单值都可能再次锁死），改为依据 `status`（过期时为 `needs_refresh`，承载新鲜度）与 `--verify` 返回的 `verified`，`available` 继续保留。stale 与 unverified 仍 fail closed
+  - 验证：替身改为照抄真实响应；新增词表回归（tokenStatus 取 valid/ready/active/undefined 均应通过），恢复旧判据后该用例失败；Pet 1663 项通过。陷阱记入 pitfalls 第 7 节，含识别信号「功能从来没成功过时应优先怀疑判据而非环境」
 - [ ] 10.8 收敛验收期 UX backlog B026–B028；验收完成后统一评估，不在修复期间扩散非阻塞视觉优化
