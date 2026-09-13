@@ -426,10 +426,19 @@ export function parseUserIdentity(value: unknown, expectedAppId: string): LarkUs
     return { kind: 'unavailable', diagnostic: 'The Pet lark-cli profile has no current user identity.' }
   }
   const identity = user as Record<string, unknown>
+  // `status` carries freshness: a stale profile reports `needs_refresh` here,
+  // and `--verify` proves the credential was actually exercised rather than
+  // read from disk. `tokenStatus` is deliberately NOT compared against a
+  // literal — lark-cli reports `valid` (not `ready`) for a usable token, and
+  // its full vocabulary is undocumented, so pinning any single value would
+  // again make this gate unsatisfiable the moment the vocabulary shifts. The
+  // two checks below are the ones whose accepted values are observable and
+  // load-bearing; `available` additionally guards the identity being usable
+  // at all. See docs/notes/dsh-plugin-integration-pitfalls.md §4: field
+  // vocabularies must be measured, never inferred.
   if (
     identity['status'] !== 'ready' ||
     identity['available'] !== true ||
-    identity['tokenStatus'] !== 'ready' ||
     record['verified'] !== true
   ) {
     return { kind: 'unavailable', diagnostic: 'The Pet user identity is not ready or verified.' }

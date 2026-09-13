@@ -28,7 +28,12 @@ const READY = {
       verified: true,
       openId: USER,
       userName: 'Current Human',
-      tokenStatus: 'ready',
+      // The real lark-cli reports `valid` here, not `ready`. The fixture used
+      // to say `ready`, which made this suite agree with a wrong implementation
+      // and hid the fact that Q&A creation could never succeed on a real host.
+      tokenStatus: 'valid',
+      scope: 'im:chat',
+      expiresAt: '2026-09-13T01:51:51-07:00',
     },
   },
 }
@@ -79,12 +84,47 @@ describe('verified current-user identity parsing', () => {
   it.each([
     ['another app', { ...READY, appId: 'cli_other' }],
     ['missing login', { ...READY, identities: { ...READY.identities, user: { status: 'missing', available: false } } }],
-    ['unready token', { ...READY, identities: { ...READY.identities, user: { ...READY.identities.user, tokenStatus: 'expired' } } }],
+    ['stale login', { ...READY, identities: { ...READY.identities, user: { ...READY.identities.user, status: 'needs_refresh' } } }],
+    ['unavailable identity', { ...READY, identities: { ...READY.identities, user: { ...READY.identities.user, available: false } } }],
     ['unverified response', { ...READY, verified: false }],
     ['no open id', { ...READY, identities: { ...READY.identities, user: { ...READY.identities.user, openId: undefined } } }],
     ['malformed open id', { ...READY, identities: { ...READY.identities, user: { ...READY.identities.user, openId: 'not-open-id' } } }],
   ])('fails closed for %s', (_label, value) => {
     expect(parseUserIdentity(value, APP).kind).toBe('unavailable')
+  })
+})
+
+describe('token vocabulary is measured, not inferred', () => {
+  // Regression: the gate required `tokenStatus === 'ready'`, but lark-cli
+  // reports `valid` for a usable token. Every real Q&A creation therefore
+  // failed with "The Pet user identity is not ready or verified" even though
+  // the profile was freshly logged in and allowlisted. Freshness is carried by
+  // `status` (`needs_refresh` when stale), so the gate must not pin an
+  // undocumented `tokenStatus` literal.
+  it.each(['valid', 'ready', 'active', undefined])(
+    'accepts a verified, ready identity whatever tokenStatus reads (%s)',
+    (tokenStatus) => {
+      const value = {
+        ...READY,
+        identities: {
+          ...READY.identities,
+          user: { ...READY.identities.user, tokenStatus },
+        },
+      }
+      expect(parseUserIdentity(value, APP).kind).toBe('ready')
+    },
+  )
+
+  it('still fails closed when the profile itself is stale or unverified', () => {
+    const stale = {
+      ...READY,
+      identities: {
+        ...READY.identities,
+        user: { ...READY.identities.user, status: 'needs_refresh' },
+      },
+    }
+    expect(parseUserIdentity(stale, APP).kind).toBe('unavailable')
+    expect(parseUserIdentity({ ...READY, verified: false }, APP).kind).toBe('unavailable')
   })
 })
 
