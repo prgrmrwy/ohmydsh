@@ -128,6 +128,12 @@ customizations:
   - id: remove-dsh-plugin
     type: skill
     enabled: true
+  # 第三方 Skill 的 DSH 按需适配:只有用户显式调用时才启用该会话的 ADHD 友好输出模式
+  - id: i-have-adhd
+    type: skill
+    enabled: true
+    brief: ADHD 友好按需输出模式(答案优先/短步骤/显式进度/少跑题)
+    note: '上游 https://github.com/ayghri/i-have-adhd (MIT,约 43.9k stars,活跃);依据 commit 6f1f982d0a47c65899af3c5a7450b7098bc65325 的 skills/i-have-adhd/SKILL.md 做 DSH 原生中文适配。用途仅为改变模型回答结构,不新增工具、模型、Host/Web 代码、Hook、网络访问、文件权限或依赖。上游未发布 npm 包(package.json private:true),npm i-have-adhd 查询为 404,且 INSTALL.md 尚无 DSH 专项说明;本仓库按既有 type:skill 通道由 sync 复制到 ~/.dsh/skills/i-have-adhd。默认按需:whenToUse 要求用户显式调用 i-have-adhd / ADHD mode,普通“简洁一点”不触发;启用后在当前会话持续,用户说 stop adhd mode / normal mode 时退出。更新需人工复核上游新 commit 后同步适配内容与本记录。'
   # 自研 skill:沙箱/权限升级避坑(sandbox_permissions 正确用法 + core 缺陷绕过)
   - id: dsh-sandbox-notes
     type: skill
