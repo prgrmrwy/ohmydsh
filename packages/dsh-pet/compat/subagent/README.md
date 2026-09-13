@@ -57,6 +57,8 @@ artifacts 与 launcher 整条链，并固定 `npm@11.19.0`（launcher）及上�
    `--version`；
 5. 把 file links 转为自包含 package copies，再原子发布。
 
+锁回收只针对同一目录 inode、同一 token/PID 且已确认死亡的 owner。`mkdir` 后尚未写出 owner 的目录即便很旧，也不是进程死亡证明；缺失/损坏 owner 或遗留 `.reclaim-*` 会有界等待后报错，不自动删除。遇到这些情况须由操作人员先确认所有构建进程已停止，再清理明确的锁残留；禁止在不确定时绕过锁启动第二个构建。锁测试复制源文件到临时目录运行，不清理实际 builder 的锁。升级此锁实现后，应确认没有仍加载旧实现的 builder/waiter 进程，再开始新的并发构建；磁盘改动不会更新已运行进程。
+
 任一步失败都不会删除已有 `.launcher`；本次 Host 启动 fail closed，不静默回退
 官方 runtime。启动控制台和 `dsh-startup.log` 会记录 runtime kind、owner、compat
 kind 与版本。

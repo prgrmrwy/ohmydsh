@@ -49,6 +49,11 @@ test('the patch carries behavior, compatibility, and a runtime capability marker
   assert.match(patch, /SUPPORTED_DESCRIPTOR_VERSIONS/)
   assert.match(patch, /supportsSettlementNotice/)
   assert.match(patch, /if \(activation\.settlementNotice === 'silent'\) return/)
+  // The isolated claim must never touch next-step, and must refuse to isolate
+  // when no turn is queued — otherwise parked GUI input is stranded.
+  assert.match(patch, /isolateQueuedTurn/)
+  assert.match(patch, /supportsIsolatedQueuedTurnClaim/)
+  assert.match(patch, /this\.nextTurn\.length > 0/)
 })
 
 test('the launcher installs reviewed overrides and atomically publishes a self-contained runtime', async () => {
@@ -60,7 +65,13 @@ test('the launcher installs reviewed overrides and atomically publishes a self-c
   assert.match(launcher, /'@deepseek-ai\/dsh-subagent': `file:\$\{join\(compatPackages, 'subagent'\)\}`/)
   assert.match(launcher, /'@deepseek-ai\/dsh-storage-domain': `file:/)
   assert.match(launcher, /'@deepseek-ai\/dsh-storage-sqlite': `file:/)
-  assert.match(launcher, /runNpm\(\['ls', '@deepseek-ai\/dsh-subagent', \.\.\.expectedRuntimeStorage\]/)
+  // The dependency proof must cover EVERY overridden package, including the
+  // agent pair carrying the isolated queued-turn claim. An override that is
+  // staged but never proven present would leave Pet believing the seam exists
+  // while running the unpatched registry build.
+  assert.match(launcher, /runNpm\(\['ls', '@deepseek-ai\/dsh-subagent', \.\.\.expectedRuntimeAgent, \.\.\.expectedRuntimeStorage\]/)
+  assert.match(launcher, /'@deepseek-ai\/dsh-agent': `file:/)
+  assert.match(launcher, /'@deepseek-ai\/dsh-agent-loop': `file:/)
   assert.match(launcher, /renameSync\(staging, buildDir\)/)
   assert.match(launcher, /renameSync\(nextLink, launcher\)/)
   assert.match(launcher, /realpathSync\(here\)/)
@@ -71,7 +82,7 @@ test('the launcher installs reviewed overrides and atomically publishes a self-c
 test('generated runtime and launcher files remain out of version control', async () => {
   const ignore = await text('.gitignore')
 
-  for (const entry of ['lib/', '.upstream/', '.launcher', '.launcher-builds/', 'package.json']) {
+  for (const entry of ['lib/', '.upstream/', '.launcher', '.launcher-builds/', 'package.json', 'agent-artifacts/']) {
     assert.match(ignore, new RegExp(`^${entry.replaceAll('.', '\\.').replace('/', '\\/')}$`, 'm'))
   }
 })

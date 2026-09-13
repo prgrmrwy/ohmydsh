@@ -59,25 +59,32 @@ function acquireCompatBuildLock(options = {}) {
     } catch (error) {
       if (error?.code !== 'EEXIST') throw error
     }
+    let observed
+    let observedStat
     let stale = false
     try {
-      const owner = readOwner()
-      // Give the creator a brief window to write owner.json; after that a dead
-      // PID is sufficient proof that a killed build left a stale lock.
-      stale = Date.now() - statSync(LOCK_DIR).mtimeMs > staleAfterMs && !ownerAlive(owner)
+      observed = readOwner()
+      observedStat = statSync(LOCK_DIR)
+      // An absent/malformed owner may be a creator paused after mkdir. Age is
+      // not proof that this creator died: leave it for explicit recovery.
+      stale = Number.isSafeInteger(observed?.pid) && observed.pid > 0
+        && typeof observed.token === 'string' && /^[a-zA-Z0-9-]+$/.test(observed.token)
+        && Date.now() - observedStat.mtimeMs > staleAfterMs && !ownerAlive(observed)
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error
     }
     if (stale) {
       // Multiple waiters may observe the same stale owner. Only one may claim
       // reclamation; losers loop and must not delete the winner's fresh lock.
-      const observed = readOwner()
-      const claim = `${LOCK_DIR}.reclaim-${String(observed?.token ?? 'unknown')}`
+      const claim = `${LOCK_DIR}.reclaim-${observed.token}`
       try {
         const fd = openSync(claim, 'wx')
         closeSync(fd)
       } catch (error) {
         if (error?.code === 'EEXIST') {
+          if (Date.now() - started >= waitMs) {
+            throw new Error(`timed out waiting for Pet compatibility build lock: ${LOCK_DIR}`)
+          }
           sleep(POLL_MS)
           continue
         }
@@ -85,9 +92,14 @@ function acquireCompatBuildLock(options = {}) {
       }
       try {
         const current = readOwner()
-        if (current?.token === observed?.token && !ownerAlive(current)) {
+        const currentStat = statSync(LOCK_DIR)
+        if (current?.token === observed.token && current.pid === observed.pid
+          && currentStat.dev === observedStat.dev && currentStat.ino === observedStat.ino
+          && !ownerAlive(current)) {
           rmSync(LOCK_DIR, { recursive: true, force: true })
         }
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error
       } finally {
         rmSync(claim, { force: true })
       }
