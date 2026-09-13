@@ -2,28 +2,27 @@
 /**
  * Build the fixed-source `@deepseek-ai/dsh-subagent` compatibility artifact.
  *
- * Why this exists: a locus child answers in its own Feishu entry, so the
- * runtime must NOT push its automatic settlement account into the main
- * session. The pinned 0.1.2-rc.1 runtime has no switch for that, and there is
- * no safe way to add one from outside it — the automatic notice and a genuine
- * child-to-parent message resolve the parent through the same call, so any
- * external interception would break the child's ability to ask its parent a
- * question (verified, not assumed).
+ * Why this exists: Pet's locus children need narrow Host-owned continuable
+ * runtime seams that the pinned 0.1.2-rc.1 package does not expose: silent
+ * settlement, idle creation, independent-v1 context with a saved preset, and
+ * continuation-owned child Session access. The settlement notice and a genuine
+ * child-to-parent message resolve the parent through the same call, so external
+ * interception would break child questions (verified, not assumed).
  *
- * So the capability is added at the source, against a PINNED upstream commit,
- * and this script is the reproducible path from that source to the artifact:
+ * These capabilities are added at source against a PINNED upstream commit, and
+ * this script is the reproducible path from that source to the artifact:
  *
- *   fetch pinned tag -> verify the patch applies -> build -> verify capability
+ *   fetch pinned tag -> verify the patch applies -> build -> verify capabilities
  *
  * Nothing here is tracked except the patch: the built `lib/` is a generated
  * artifact and stays out of version control, matching the repository policy.
  *
- * Remove this whole directory once upstream publishes `settlementNotice`, and
- * depend on the official package again.
+ * Remove this whole directory only once upstream publishes every compatibility
+ * capability recorded by this patch, then depend on the official package again.
  */
 
 import { createHash } from 'node:crypto'
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
@@ -43,7 +42,7 @@ const UPSTREAM = {
   /** Reviewed commit behind dsh-v0.1.2-rc.1; a moved tag/local checkout fails. */
   commit: 'a66e4702047846cdaa10c66c9d3df3951f5ea70d',
   /** sha256 of `settlement-notice.patch`, so a silently edited patch fails. */
-  patchSha256: '97ef5189f726799c13bdd7622aa37292a7451fe13981fac77de4d82161e14b28',
+  patchSha256: '4b70988900e69aaf806a8c5e4d8c517bd17479e95ce25131ea87dc02e688c941',
 }
 
 const run = (command, args, cwd = here, options) => runCompatCommand(command, args, cwd, options)
@@ -117,6 +116,36 @@ for (const stale of ['lib/tsconfig.tsbuildinfo', 'lib/types/tsconfig.tsbuildinfo
   rmSync(join(target, stale), { force: true })
 }
 
+// The isolated-claim seam is patched into `dsh-agent` and `dsh-agent-loop`, so
+// those built packages must be published beside the subagent artifact: the
+// launcher overrides them by path, and a launcher resolving the unpatched
+// registry build would leave Pet's inquiry queue unavailable.
+const agentArtifacts = join(here, 'agent-artifacts')
+rmSync(agentArtifacts, { recursive: true, force: true })
+for (const [sourceDir, artifactName] of [['packages/core/agent', 'agent'], ['packages/core/agent-loop', 'agent-loop']]) {
+  const sourcePackage = join(checkout, sourceDir)
+  const artifact = join(agentArtifacts, artifactName)
+  mkdirSync(artifact, { recursive: true })
+  cpSync(join(sourcePackage, 'lib'), join(artifact, 'lib'), { recursive: true })
+  for (const stale of ['lib/tsconfig.tsbuildinfo', 'lib/types/tsconfig.tsbuildinfo']) {
+    rmSync(join(artifact, stale), { force: true })
+  }
+  const pkg = JSON.parse(readFileSync(join(sourcePackage, 'package.json'), 'utf8'))
+  delete pkg.devDependencies
+  delete pkg.publishConfig
+  const baseVersion = pkg.version
+  pkg.version = `${baseVersion}-locus-isolated-claim.1`
+  pkg.dsh_compat = {
+    replaces: `${pkg.name}@${baseVersion}`,
+    reason: 'adds the opt-in isolated queued-turn claim so an inquiry turn has one provable origin without discarding pending next-step input',
+    upstreamTag: UPSTREAM.tag,
+    upstreamBase: head,
+    patchSha256: UPSTREAM.patchSha256,
+    removeWhen: 'upstream publishes the isolated queued-turn claim; then delete compat/subagent and use the official packages',
+  }
+  writeFileSync(join(artifact, 'package.json'), `${JSON.stringify(pkg, null, 2)}\n`)
+}
+
 const upstreamPkg = JSON.parse(readFileSync(join(built, 'package.json'), 'utf8'))
 const trackedSkeleton = JSON.parse(readFileSync(join(target, 'package.template.json'), 'utf8'))
 const { devDependencies: _dev, publishConfig: _publish, ...rest } = upstreamPkg
@@ -129,14 +158,13 @@ const manifest = {
   }`,
   dsh_compat: {
     replaces: `@deepseek-ai/dsh-subagent@${upstreamPkg.version}`,
-    reason: 'adds silent settlement, idle creation, and exact continuation-owned child Session access for unified locus',
+    reason: 'adds silent settlement, idle creation, independent-v1 continuable children, and exact continuation-owned child Session access for unified locus',
     upstreamTag: UPSTREAM.tag,
     upstreamBase: head,
     patchSha256: UPSTREAM.patchSha256,
-    removeWhen: 'upstream publishes settlementNotice; then delete compat/subagent and use the official package',
+    removeWhen: 'upstream publishes settlementNotice and independent-v1; then delete compat/subagent and use the official package',
   },
 }
-const { writeFileSync } = await import('node:fs')
 // `sync.mjs` installs this directory by path and checks that its manifest
 // declares the official package name, so the built manifest replaces the
 // skeleton in the working tree. It is gitignored, which is why a build leaves
@@ -149,8 +177,11 @@ const runtimeSource = readFileSync(join(target, 'lib', 'index.js'), 'utf8')
 if (!/settlementNotice\s*===\s*["']silent["']/.test(runtimeSource)) {
   fail('built artifact has no silent-settlement guard; refusing to publish it')
 }
-if (!runtimeSource.includes('supportsSettlementNotice')) {
-  fail('built artifact has no structural capability marker; Pet would keep it unavailable')
+if (
+  !runtimeSource.includes('supportsSettlementNotice')
+  || !runtimeSource.includes('supportsIndependentContinuableCreate')
+) {
+  fail('built artifact has no structural settlement/independent capability marker; Pet would keep it unavailable')
 }
 if (
   !runtimeSource.includes('supportsIdleContinuableCreate')
@@ -164,6 +195,64 @@ if (
 ) {
   fail('built artifact has no continuation-owned child Session capability; policy mutation is unavailable')
 }
+
+// The isolated-claim seam lives in `dsh-agent` (`Inbox.claim`) and
+// `dsh-agent-loop` (the opt-in and its marker), NOT in this published package.
+// Verify the artifacts just published above; `build-launcher.cjs` owns proving
+// that they actually reach the launcher's dependency graph.
+const agentRuntimeEntry = join(agentArtifacts, 'agent', 'lib', 'index.js')
+const agentRuntimeSource = readFileSync(agentRuntimeEntry, 'utf8')
+const agentLoopRuntimeSource = readFileSync(join(agentArtifacts, 'agent-loop', 'lib', 'index.js'), 'utf8')
+if (!agentRuntimeSource.includes('isolateQueuedTurn') || !/claim\(target,\s*turn,\s*options\)/.test(agentRuntimeSource)) {
+  fail('built dsh-agent has no isolated-claim seam; a non-steering inquiry queue would silently destroy GUI next-step input')
+}
+if (
+  !agentLoopRuntimeSource.includes('supportsIsolatedQueuedTurnClaim')
+  || !agentLoopRuntimeSource.includes('isolateQueuedTurnClaim')
+) {
+  fail('built dsh-agent-loop has no isolated-claim opt-in or capability marker; Pet would keep the inquiry queue unavailable')
+}
+// Exercise the real Inbox: a string in the bundle does not prove that an
+// isolated claim leaves pending next-step input pending and publishes a
+// claimed notification for exactly the message it took.
+const { Inbox: BuiltInbox } = await import(pathToFileURL(agentRuntimeEntry).href)
+{
+  const events = []
+  const claimed = []
+  const sink = {
+    ownEvents: () => events,
+    append(type, data) {
+      const event = { type, data, seq: events.length }
+      events.push(event)
+      return event
+    },
+  }
+  const probeInbox = new BuiltInbox(sink, {
+    inserted() {}, discarded() {},
+    claimed(message) { claimed.push(message.id) },
+  })
+  const message = id => ({ id, role: 'user', content: [{ type: 'text', text: id }], source: { kind: 'user' } })
+  probeInbox.append('next-step', message('gui-steer'))
+  probeInbox.append('next-turn', message('inquiry'))
+  const isolated = probeInbox.claim('next-turn', 1, { isolateQueuedTurn: true }).map(entry => entry.id)
+  if (
+    isolated.length !== 1 || isolated[0] !== 'inquiry'
+    || probeInbox.nextStep.length !== 1 || probeInbox.nextStep[0].id !== 'gui-steer'
+    || claimed.length !== 1 || claimed[0] !== 'inquiry'
+  ) {
+    fail('built Inbox does not isolate a queued-turn claim; refusing to publish it')
+  }
+  // The default path must stay byte-identical: one combined batch.
+  const legacyInbox = new BuiltInbox({ ownEvents: () => [], append: (type, data) => ({ type, data, seq: 0 }) }, {
+    inserted() {}, discarded() {}, claimed() {},
+  })
+  legacyInbox.append('next-step', message('gui-steer'))
+  legacyInbox.append('next-turn', message('inquiry'))
+  const legacy = legacyInbox.claim('next-turn', 1).map(entry => entry.id)
+  if (legacy.length !== 2 || legacy[0] !== 'gui-steer' || legacy[1] !== 'inquiry') {
+    fail('built Inbox changed the default claim batch; refusing to publish it')
+  }
+}
 // Instantiate the actual service object Pet probes. A string in the bundle is
 // not enough: the marker must be present on the runtime instance returned by
 // `ctx.get('subagents')`.
@@ -175,6 +264,7 @@ if (
   runtime.supportsSettlementNotice !== true
   || runtime.supportsIdleContinuableCreate !== true
   || runtime.supportsLiveContinuableChildSession !== true
+  || runtime.supportsIndependentContinuableCreate !== true
   || typeof runtime.createIdleContinuable !== 'function'
   || typeof runtime.withLiveContinuableChildSession !== 'function'
 ) {
@@ -189,7 +279,18 @@ if (probe.settlementNotice !== 'silent') {
 const control = descriptor.snapshotSubagentDescriptor({
   mode: 'continuable', provider: 'fork', label: 'probe', settlementNotice: 'notify',
 })
-if ('settlementNotice' in control) {
-  fail('built artifact changed the default payload shape; refusing to publish it')
+if (control.version !== 4 || 'settlementNotice' in control || 'contextMode' in control || 'agentPreset' in control) {
+  fail('built artifact changed the legacy descriptor shape; refusing to publish it')
+}
+const independent = descriptor.snapshotSubagentDescriptor({
+  mode: 'continuable', provider: 'spawn', label: 'independent-probe',
+  agentProvider: 'deepseek', agentModel: 'chat', contextMode: 'independent-v1', agentPreset: 'default',
+})
+if (
+  independent.version !== 5
+  || independent.contextMode !== 'independent-v1'
+  || independent.agentPreset !== 'default'
+) {
+  fail('built artifact does not record the independent-v1 descriptor pair; refusing to publish it')
 }
 console.log(`[compat/subagent] ready: ${manifest.name}@${manifest.version}`)
