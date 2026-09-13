@@ -6,7 +6,7 @@ parallel_group: G8
 conflicts_with: [T1, T2, T3, T4, T5, T6, T7]
 precondition: 选择可牺牲的验收话题 Locus 且当前空闲；重启前保存 parent/child/locus/generation/permission/workspace/Delivery 证据；仅用户可以重启 Host。
 ask_user_if_blocked: true
-status: pending
+status: passed
 blocked_reason: null
 mock_setup:
   required: false
@@ -47,8 +47,8 @@ steps:
         expected_text: "退役历史保留；新一代；新子会话；期望 只读 · 实际 只读；旧子会话未复活"
         expected_attrs: null
         expected_visible: true
-        result: null
-        result_detail: null
+        result: pass
+        result_detail: "对话题 B（thread omt_19c1d586810f1bba，即所有者在 T3-C3 以中性问法「这是哪个 locus？child session id 是什么？」建立的话题）执行归档后显式重建。旧 locus gen 1 转为 stopped 且 child session-ee6614ab 记录完整保留，历史可查；显式重建生成 gen 2、source=explicit、state=active 与全新 child session-50350dd7，旧 child 未被复活。权限从 read 开始且无任何 grantedBy 残留——该话题的 parent 为 S0，而群级入口在 T6 中曾被授予 write，此处未继承，符合「重新建立关联 MUST NOT 继承旧 write」。其余 4 条活跃 locus 未受影响。归档前「重建（默认只读）」按钮为禁用态，归档后方可点击，与「只对 invalid/stopped/retired 开放显式重建」一致。"
   - seq: 2
     description: 记录恢复前快照，暂停并请用户手动重启现有 DSH，用户确认后刷新 GUI 回读
     action: wait_for
@@ -73,8 +73,8 @@ steps:
         reviewer_notes: agent 禁止重启；必须先保存恢复前证据，用户操作后再逐字段比较。无法精确证明的 execution 保留 pending/manual debt，不允许重放 prompt。
         target_area: ".dshpet-settings"
         inspect_notes: "人工核对恢复前后 parent/child/locus/generation/workspace/permission/context 和 Delivery 状态对账。"
-        result: null
-        result_detail: null
+        result: pass
+        result_detail: "由所有者手动冷重启 Host，agent 未参与重启。恢复前后逐条比对 8 条 locus 的 7 个字段（generation/state/parentSession/childSession/workspace/permission/contextAnchor），全部逐字段一致，无丢失、无状态漂移。Delivery 总数 20 → 20 未新增，状态分布 settled 19 + failed 1 完全不变，逐条比对状态无一改动——已结算与已失败的投递均未被重放（其中那条 failed 来自断网中断，重启后仍保持 failed，未被重试）。工作现场完好：nexus 仓库 README.md 的 2 行改动（T6 的真实产物）在重启后仍然存在。重建产生的 child session-50350dd7 与群级 child session-41bfec40 的血缘（parentSession/origin=subagent）与显式标题均完好。局限如实记录：本次重启时未结算 Delivery 为 0 条，因此「未完成 Delivery 未被重放」这一子项**未被覆盖**——制造该场景需在投递执行中途强杀 Host，风险不可控，故未实施；已覆盖的是「已结算/已失败投递不被重放」，两者相关但不等同。"
   - seq: 3
     description: 在最终管理快照和诊断中核对旧模型隔离与统一链路
     action: wait_for
@@ -101,5 +101,5 @@ steps:
         expected_text: "消息 → locus 代际 → 子会话 → 执行；无新增 chat_bindings；无新增 invocation_channel；无飞书 Task/Invocation；无 root executor"
         expected_attrs: null
         expected_visible: true
-        result: null
-        result_detail: null
+        result: pass
+        result_detail: "恢复后向重建的话题 B 发送新消息，诊断链完整且精确：message om_x100b6551c38a98a0 → locus ...191a7f9afb7c7 gen 2 → child session-50350dd7 → turn 1，投递 settled。投到的是重建后的新 child 而非旧 child session-ee6614ab，代际正确为 2，turnId 绑定到新 child。子会话自报的 locus/代际/状态/child/入口/权限与 Host 持久层逐项一致。旧模型隔离成立：chat_bindings 5、invocation_channel 46、invocations 56、tasks 15，与统一 locus 启用前的基线完全一致；按创建时间过滤，统一 locus 启用后 invocations 与 tasks 均为 0 条新增，重启与新消息都未触发任何 legacy fallback，未新增旧 chat binding、invocation channel 或飞书 Task/Invocation。"
