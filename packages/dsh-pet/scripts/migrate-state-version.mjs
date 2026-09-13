@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * One-off Pet state version restamp (v2..v8 -> current PET_DOMAIN_VERSION).
+ * One-off Pet state version restamp (v2..v10 -> current PET_DOMAIN_VERSION).
  *
  * Why this exists as a standalone script rather than only as in-process
  * migration: the SQLite backend opens Pet's database with
@@ -10,9 +10,12 @@
  * on every boot, which silently aborts Pet initialization before its routes
  * are registered. This script performs the restamp while DSH is STOPPED.
  *
- * The restamp is safe because v2..v8 -> v9 is purely additive (see
- * src/host/spec.ts): the new locus tables are created by the storage backend
- * on first open, and no existing row is converted, cleared, or rewritten.
+ * The restamp is safe because v2..v10 -> v11 is purely additive (see
+ * src/host/spec.ts): new locus/public-context/inquiry tables are created by the
+ * storage backend on first open. No existing row or log is converted, cleared,
+ * or rewritten; local anchors are not promoted and context modes are not
+ * guessed. The inquiry ledger starts empty by design: a pre-v11 medium holds no
+ * accepted inquiry, so there is nothing to reconstruct and nothing to re-run.
  *
  * Usage:
  *   node scripts/migrate-state-version.mjs [--db <path>] [--dry-run] [--yes]
@@ -25,10 +28,10 @@ import os from 'node:os'
 
 /** Domain identity; must match src/host/spec.ts. */
 const PET_DOMAIN_NAME = 'dsh_pet'
-const PET_DOMAIN_VERSION = 9
+const PET_DOMAIN_VERSION = 11
 /** Versions this script is allowed to restamp. v1 needs a separate explicit
  * cleanup because its rows reference a store layout that is gone. */
-const RESTAMPABLE = [2, 3, 4, 5, 6, 7, 8]
+const RESTAMPABLE = [2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 function parseArgs(argv) {
   const args = { dryRun: false, yes: false, db: undefined, help: false }
@@ -134,7 +137,7 @@ try {
   if (current === 1) {
     fail(
       'Version 1 requires a separate explicit legacy cleanup (it drops rows ' +
-      'that reference a removed store layout); this CLI only restamps v2..v8.',
+      'that reference a removed store layout); this CLI only restamps v2..v10.',
     )
   }
   if (!RESTAMPABLE.includes(current)) {
@@ -198,7 +201,7 @@ try {
 
   console.log(`✓ Restamped ${current} → ${PET_DOMAIN_VERSION}`)
   console.log(
-    '\nThe storage backend creates the additive locus tables on its next open.\n' +
+    '\nThe storage backend creates the additive locus/public-context/inquiry tables on its next open.\n' +
     'Start DSH and confirm the Pet settings tabs load.',
   )
 } finally {

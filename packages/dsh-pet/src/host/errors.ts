@@ -74,6 +74,7 @@ export function statusOf(code: PetErrorCode): number {
     case 'LOCUS_BUSY':
     case 'LOCUS_CONFLICT':
     case 'LOCUS_STOPPED':
+    case 'COLLABORATION_REVISION_CONFLICT':
       return 409
     case 'NOT_A_PET_SESSION':
     case 'CONTEXT_REQUIRED':

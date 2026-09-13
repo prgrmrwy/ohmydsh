@@ -9,6 +9,8 @@
 
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import { z } from 'zod'
+import { parseCollaborationContext } from './collaboration/context.js'
+import { parseInquiry } from './inquiry/ledger.js'
 
 /**
  * Domain name; also the backend unit name and the storage-domain route key.
@@ -65,7 +67,14 @@ export const PET_DOMAIN_NAME = 'dsh_pet'
 // audit rows are the history that a later downgrade would otherwise erase.
 // Bumped to 9 for owner-confirmed context anchor facts and the `anchor` WAL
 // kind. Additive: existing locus rows remain valid and no history is rewritten.
-export const PET_DOMAIN_VERSION = 9
+// Bumped to 10 for parent-owned public context and full revision audit records.
+// Additive: no local anchors are promoted, no modes guessed, no logs rewritten.
+// Bumped to 11 for the durable inquiry ledger (`inquiries`). Additive in the
+// same way as v9→v10: one new table, nothing converted, cleared or rewritten.
+// The ledger has to outlive a restart because an accepted inquiry that only
+// existed in memory would come back as neither dispatchable nor reviewable —
+// exactly the "blindly re-run it" outcome design D8 forbids.
+export const PET_DOMAIN_VERSION = 11
 
 // `chat` joins the original three for Tasks created by an inbound Lark
 // message. It is a distinct scope kind rather than a flavour of `workspace`
@@ -808,6 +817,45 @@ export const petLocusOperation = z.object({
   completedAt: z.number().int().nonnegative().optional(),
 })
 
+/**
+ * One full public-context revision, shared by current and owner-audit tables.
+ * Delegate to the pure exact-shape validator (including the unknown/confirmed
+ * discriminator), rather than stripping keys or asserting an unchecked type.
+ * Parsing yields a detached frozen value; validation is not owner authorization.
+ */
+export const petCollaborationContextRecord = z.unknown().transform((input, issueCtx) => {
+  try {
+    return parseCollaborationContext(input)
+  } catch {
+    // Never leak public content, caller-controlled errors, or another parent's ID.
+    issueCtx.addIssue({ code: 'custom', message: 'Invalid public context record.' })
+    return z.NEVER
+  }
+})
+
+/**
+ * One durable inquiry-ledger record, keyed by inquiryId.
+ *
+ * Delegates to the pure exact-shape validator instead of restating the record
+ * in zod: a second declaration would let a field rename pass one check and
+ * fail the other, and only the pure model knows the transition/trace/deadline
+ * invariants that make a row meaningful. Parsing yields a detached frozen
+ * value; validation is not acceptance and grants no authorization.
+ *
+ * By contract this table holds the question and its purpose — the queued
+ * request must survive a restart — and never an answer, a message body or any
+ * other delivered content.
+ */
+export const petInquiryRecord = z.unknown().transform((input, issueCtx) => {
+  try {
+    return parseInquiry(input)
+  } catch {
+    // Never leak the question, purpose, chat id or another member's identity.
+    issueCtx.addIssue({ code: 'custom', message: 'Invalid inquiry record.' })
+    return z.NEVER
+  }
+})
+
 const petGlobalState = z.object({
   /** Bumped whenever the enabled skill selection changes. */
   skillSetGeneration: z.number().int().nonnegative(),
@@ -875,6 +923,14 @@ export const petDomainSpec = defineDomain({
     locus_operations: domainTable<string, z.infer<typeof petLocusOperation>>(petLocusOperation),
     locus_switch_notices: domainTable<string, z.infer<typeof petLocusSwitchNotice>>(petLocusSwitchNotice),
     locus_permission_audit: domainTable<string, z.infer<typeof petLocusPermissionAudit>>(petLocusPermissionAudit),
+    // Current record keyed by parentSessionId; audit keyed by
+    // JSON.stringify([parentSessionId, revision]). Both retain the full record.
+    collaboration_contexts: domainTable<string, z.infer<typeof petCollaborationContextRecord>>(petCollaborationContextRecord),
+    collaboration_context_revisions: domainTable<string, z.infer<typeof petCollaborationContextRecord>>(petCollaborationContextRecord),
+    // Durable inquiry ledger, keyed by inquiryId. Additive at v11; the store
+    // above it recounts budgets and rechecks state inside one Domain
+    // transaction, so this table is the single truth for accepted inquiries.
+    inquiries: domainTable<string, z.infer<typeof petInquiryRecord>>(petInquiryRecord),
   },
 })
 
@@ -902,6 +958,10 @@ export type PetLocusDelivery = z.infer<typeof petLocusDelivery>
 export type PetLocusOperation = z.infer<typeof petLocusOperation>
 export type PetLocusSwitchNotice = z.infer<typeof petLocusSwitchNotice>
 export type PetLocusPermissionAudit = z.infer<typeof petLocusPermissionAudit>
+export type PetCollaborationContextRecord = z.infer<typeof petCollaborationContextRecord>
+
+/** One durable inquiry-ledger record as stored. */
+export type PetInquiryRecord = z.infer<typeof petInquiryRecord>
 
 
 /**

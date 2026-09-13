@@ -88,6 +88,10 @@ export const LOCUS_ROUTES = {
   stop: '/dsh-pet/api/locus-stop',
   scope: '/dsh-pet/api/locus-scope',
   rebuild: '/dsh-pet/api/locus-rebuild',
+  // NOTE: the optional owner view/correction surface for shared facts is
+  // deliberately NOT declared here yet. A declared route must be registered
+  // exactly once, and shared facts are now written by in-scope agents, so this
+  // operator surface stays undeclared until it is actually mounted.
 } as const
 
 /** Alias for callers that name the object after the management surface. */
@@ -1161,6 +1165,8 @@ export type PetErrorCode =
   | 'WRITE_UNSUPPORTED'
   | 'LOCUS_INVALID'
   | 'LOCUS_STOPPED'
+  | 'COLLABORATION_UNAVAILABLE'
+  | 'COLLABORATION_REVISION_CONFLICT'
   | 'INTERNAL'
 
 /** Uniform error body returned by Pet management routes. */
