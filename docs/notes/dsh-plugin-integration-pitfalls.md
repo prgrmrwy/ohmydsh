@@ -243,6 +243,52 @@ claim 触发时 `bindQueued` 还没落库，observer 查不到 → 挂 `unresolv
 
 ---
 
+## 7. 字段取值必须实测：`tokenStatus` 是 `valid` 不是 `ready`
+
+### 现象
+
+`lark-cli --profile dsh-pet auth status --verify` 明明显示用户身份 `ready`、
+openId 正确且在 allowlist 中，Pet 轮盘点「答疑群」仍报：
+
+```
+无法核验当前飞书用户身份，不能创建默认 Q&A 群：
+The Pet user identity is not ready or verified.
+```
+
+### 根因
+
+判据里有一个字面量猜错了：
+
+```js
+identity['status']      !== 'ready' ||   // ✅ 实际就是 'ready'
+identity['available']   !== true    ||   // ✅
+identity['tokenStatus'] !== 'ready' ||   // ❌ 实际是 'valid'
+record['verified']      !== true         // ✅
+```
+
+因为 `status` 用的是 `ready`，就想当然认为同一对象里的 `tokenStatus` 也是
+`ready`。实测 lark-cli 对可用 token 返回的是 **`valid`**，所以这个闸门
+**永远不可能通过**，默认 Q&A 在任何情况下都建不出来。
+
+更糟的是**测试替身也写了 `tokenStatus: 'ready'`**，与错误实现犯同一个错，
+于是测试长期全绿却掩盖了真机必挂。
+
+### 规则
+
+1. **字段取值域必须从真实输出读出来**，不能因为同一对象里另一个字段是某值就
+   类推。同一响应里 `status: 'ready'` 与 `tokenStatus: 'valid'` 并存。
+2. 取值域**没有文档时不要 pin 单一字面量**。这里改为依据 `status`
+   （过期时为 `needs_refresh`）与 `--verify` 的 `verified`——这两个的取值可观察
+   且语义明确；`tokenStatus` 不再参与判定。
+3. **替身必须照抄真实响应**，包括那些当前判据用不到的字段。凡是替身里出现
+   而真实系统不会产生的值，都是一个正在被掩盖的缺陷。本轮同类问题已出现三次
+   （`sessionController.inspect` 的假形状、context anchor 的
+   `authorization: 'authorized'`、以及本节的 `tokenStatus`）。
+4. 这类「判据要求的值真实系统从不产生」的缺陷，表现是**功能在任何情况下都
+   失败**而非偶发。遇到「从来没成功过」的能力，优先怀疑判据而不是环境。
+
+---
+
 ## `ctx.inject()` 的回调是异步的，不能紧跟同步断言
 
 ### 现象
