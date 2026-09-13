@@ -325,7 +325,7 @@ describe('v6 upgrades additively to the switch-notice schema', () => {
 })
 
 describe('every additive locus version upgrades without data loss', () => {
-  it.each([6, 7, 8])('restamps a v%s medium and keeps its rows intact', async (from) => {
+  it.each([6, 7, 8, 9, 10])('restamps a v%s medium and keeps its rows intact', async (from) => {
     const dir = await mkdtemp(path.join(tmpdir(), 'pet-migrate-'))
     const file = path.join(dir, 'state.sqlite')
     const db = new DatabaseSync(file)
@@ -354,7 +354,7 @@ describe('every additive locus version upgrades without data loss', () => {
 })
 
 describe('migration version fence protects retained history', () => {
-  it.each([0, -1, 99])('rejects unsupported version %s before deleting or restamping', async version => {
+  it.each([0, -1, 99, PET_DOMAIN_VERSION + 1])('rejects unsupported version %s before deleting or restamping', async version => {
     const file = await legacyDatabase()
     const before = new DatabaseSync(file)
     before.prepare('UPDATE units SET version = ? WHERE name = ?').run(version, 'dsh_pet')
@@ -373,7 +373,7 @@ describe('migration version fence protects retained history', () => {
     }
   })
 
-  it.each([2, 3, 4, 5, PET_DOMAIN_VERSION])('never runs destructive v1 cleanup for version %s', async version => {
+  it.each([2, 3, 4, 5, 6, 7, 8, 9, 10, PET_DOMAIN_VERSION])('never runs destructive v1 cleanup for version %s', async version => {
     // Even a row with old/malformed shape must be retained in a newer medium.
     // Domain validation may reject it, but upgrade is not deletion authority.
     const file = await legacyDatabase()
@@ -452,7 +452,7 @@ describe('an unprovable migration fails loudly', () => {
 
     const result = removeLegacyState(file)
 
-    // v2..v8 -> current is additive: restamp only, never a row removal.
+    // v2..v9 -> current is additive: restamp only, never a row removal.
     expect(result.removedRows).toBe(0)
     expect(result.clearedTables).toEqual([])
 
