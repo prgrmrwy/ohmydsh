@@ -78,12 +78,26 @@
 - [x] 9.4 验收场景 E/F：飞书决策往返、双向发现、恢复、scope 失败、无自动父回报、私聊不串出站
 - [x] 9.5 注入创建/切换/通知/权限/恢复各阶段失败，证明不会发布半成品、重复创建、错配结算或静默扩大权限
 - [ ] 9.6 严格校验完整 change 并核对新 capability 与旧要求的替代边界；只有所有宿主适配与产品场景验收完成才标记实施完成
+  - **进行中（2026-09-13）**：本条含两半，前半已完成并修复一处真实缺陷，后半仍有依赖，故**保持未勾除**
+  - **已完成的前半：capability 清单核对，发现并修复缺项**。`proposal.md` 的 Capabilities 只列了 4 个能力（`pet-locus-collaboration` / `pet-qa-group` / `pet-lark-channel` / `dsh-pet`），而 `specs/` 下实际有 **5** 个 delta 目录——遗漏 `dsh-runtime-provisioning`。该 delta 承接任务 8.6，对应 `dsh.yaml:97` 的 `hostRuntimeCompatibility`（`kind: pet-unified-locus-v1`，`supportedDshVersion: 0.1.2-rc.1`）版本锁定声明，含两条 ADDED 要求
+  - 为何必须修：`openspec validate --strict` 对此**不报错**（校验以 `specs/` 为准，不比对 proposal 叙述），归档以 delta 目录为输入，因此清单缺项不会被任何自动检查拦住；但 proposal 是人类审阅归档范围的入口，缺项会让「本 change 改了运行时选择规则」这一事实在评审时不可见。已补入 Modified Capabilities（`dsh-runtime-provisioning` 在 `openspec/specs/` 下已存在，故归 Modified 而非 New），并注明不变的四条既有要求与本 delta 的作用边界
+  - **未完成的后半：仍依赖 10.x**。本条要求「只有所有宿主适配与产品场景验收完成才标记实施完成」。当前 10.1/10.2/10.3/10.5 已判 NOT APPLICABLE 并移交 B027/B028，10.6 已拆分且其（a）半已证；剩余未决项为 10.6(d) 的部署子句（仓库内无部署审计记录可证）。该子句结清前，本条不得勾除
+  - 严格校验现状（本次实际执行）：`openspec validate pet-unified-locus-collaboration --strict` 与 `openspec validate pet-locus-independent-agent-inquiries --strict` 均通过，`git diff --check` 通过
 
 ## 10. 人工验收发现与收敛待办（2026-09-11）
 
-- [ ] 10.1 调查 DSH continuable child 的模型选择、持久化、恢复与 owner 可控接缝；形成与“不得静默切换模型或来源”一致的方案，明确是显式切换、Locus 首选模型/有序降级列表，还是宿主能力缺口
-- [ ] 10.2 在规范与设计中定义模型不可用的可判定分类、降级适用边界、审计字段、防重复执行、费用/出口策略，以及 network-model-guard fail-closed 不可绕过约束
-- [ ] 10.3 实现 Locus 子会话模型恢复能力及相关 Host/管理面，确保已有失败 Delivery 不被重放、同一 child 上下文连续且任何模型变化对所有者可见
+- [~] 10.1 调查 DSH continuable child 的模型选择、持久化、恢复与 owner 可控接缝；形成与“不得静默切换模型或来源”一致的方案，明确是显式切换、Locus 首选模型/有序降级列表，还是宿主能力缺口
+  - **NOT APPLICABLE（移交 B028，2026-09-13）**：原任务文本保留在上方不做改写。本条的全部范围（模型选择接缝调查、显式切换 vs 有序降级的方案定型）归属 backlog `B028` Locus 子会话显式模型策略与可审计降级，不在本 change 交付
+  - 依据：`openspec/changes/pet-locus-independent-agent-inquiries/proposal.md:36` —「B028 的显式模型切换/降级不在本期，新独立 child 须显式保留经核验的创建模型策略，不能因换 provider 静默换模型」。该行确立 B027/B028 对 B035 出范围，本 change（B035 的前置统一模型）同样不承接
+  - 未被移交、仍然成立的约束：本 change 规范中「恢复使用原主/子会话、不得静默切换模型或来源」保持有效且已实现——它是**禁止**条款，不要求存在切换能力；B028 未落地期间的行为是 fail closed（模型不可用即 Delivery `failed`，不换模型重试），已在 T3 断网验收中实测（见 B027 条目 2026-09-12 更新）
+  - 归档影响：本条不构成归档阻塞，但 B028 必须在 backlog 中保持未完成状态，不得因本条勾除而丢失
+- [~] 10.2 在规范与设计中定义模型不可用的可判定分类、降级适用边界、审计字段、防重复执行、费用/出口策略，以及 network-model-guard fail-closed 不可绕过约束
+  - **NOT APPLICABLE（移交 B028，2026-09-13）**：同 10.1，依据 `openspec/changes/pet-locus-independent-agent-inquiries/proposal.md:36`。可判定分类、降级边界、审计字段与费用/出口策略只有在 B028 决定「是否存在降级」之后才有定义对象，先于该决定写入规范会把一个未定方案固化为基线
+  - 唯一不移交的子句是 network-model-guard 的 fail-closed 不可绕过：该约束由现有 capability `home-network-model-guard` 独立承载，不依赖本条；本 change 从未引入任何绕过该守卫的路径，B028 实施时须继承此边界
+- [~] 10.3 实现 Locus 子会话模型恢复能力及相关 Host/管理面，确保已有失败 Delivery 不被重放、同一 child 上下文连续且任何模型变化对所有者可见
+  - **NOT APPLICABLE（移交 B028，2026-09-13）**：实现部分随 10.1/10.2 一并移交，依据同上
+  - **但其中两项不变量已在本 change 内独立实现并验收，不随移交流失**：（a）已失败/已结算 Delivery 不被重放——见 10.15 记录（覆盖「已结算/已失败投递不被重放」，其中「重启时未结算 Delivery 不被重放」明确记为未覆盖）；（b）同一 child 上下文连续——T2-C3 重测复用同一 child `session-c9af096f` 且 turn 递增（见 10.7），成员变动后仍连续（见 B029 实测证据）
+  - 仅「模型恢复能力」与「模型变化对所有者可见」两项移交 B028
 - [x] 10.4 调查并修复空白自动主会话的导航/身份呈现：它已挂入目标 Workspace，但 0-turn blank session 打开后与“新会话”不可区分；跳转后必须能证明主会话、Workspace 和 Locus 身份，不得伪报可用
   - 根因：主会话以零事件发布。宿主 `blank` 判据是「折叠前缀中无 `turn/start`」，blank 会被 `sessionTitle()` 清空标题渲染成「新会话」、被 `hideChrome` 隐藏会话标识，并且 `connectWorkspace()` 会复用任意 blank 会话——用户点「新建会话」可能被直接交付该 Locus 主会话。实证：真实 T2 主会话 `session-3a7e5b90` 日志仅有 permission/sandbox/approval/title 四条，无任何 `turn/start`
   - 修复：`composeLocusMainBriefing` 在创建时经**常规**会话生命周期（`followup` + 真实 `UserMessage`，与 Pet executor 同一接缝）投递一条开场说明，写明 chat/workspace/执行根，并明确「只是陈述上下文、不是任务、回复了解后 standby」。不特化会话日志、不手工构造事件——主会话就是常规 session
@@ -101,8 +115,21 @@
   - 实证：delivery-2 与 turn 2 完美对应（accepted 03:19:40.879 → queued .897 → started .494，工具调用 03:19:48 时 delivery 正处 running），inbox 仅 1 条消息，仍报同一错误；控制器代码自己注释承认「its claim/end may have arrived before the durable bind」
   - 修复：`mixed` 只由**已证实的污染**置位（同轮第二条 Delivery、lookup 基础设施失败、证实为外部流量）；「暂时查不到」只进 `unresolved`，未决期间由 `unresolved.size !== 0` 照常拒发（安全边界不变），解析证实唯一 Delivery 后授权恢复
   - 验证：新增复现真实时序的回归（claim 先到 → deliveryAvailable 后到 → 授权恢复）+ 三个对照（GUI 混入 / 双 Delivery / lookup 失败 → 永不恢复）；恢复旧 sticky 行为后竞态用例失败、修复后 35/35；Pet 1644 测试全绿。陷阱记入 pitfalls 第 6 节（含「Host stdout 指向 /dev/null，诊断日志未落盘」的教训）
-- [ ] 10.5 定义并实现 Delivery 失败的安全 Host 控制面回执：只回当前 caller-bound 飞书入口，低敏、幂等、可行动，不代发业务正文
-- [ ] 10.6 为模型恢复、空白主会话跳转与失败回执补相关测试，运行 Pet typecheck/范围测试/build，并经主仓 dsh build 部署
+- [~] 10.5 定义并实现 Delivery 失败的安全 Host 控制面回执：只回当前 caller-bound 飞书入口，低敏、幂等、可行动，不代发业务正文
+  - **NOT APPLICABLE（移交 B027，2026-09-13）**：原任务文本保留在上方不做改写。通用安全失败文字回执归属 backlog `B027` Pet Delivery 失败向原飞书入口返回安全诊断，不在本 change 交付
+  - 依据其一：`openspec/changes/pet-locus-independent-agent-inquiries/proposal.md:36` —「B027 负责通用安全失败回执，本 change 定义未回复/询问失败的事实和诊断接缝，不扩展 Host 代发业务正文」
+  - 依据其二：`openspec/changes/pet-locus-independent-agent-inquiries/specs/pet-locus-collaboration/spec.md:71` —「通用失败文字回执由独立 B027 承接，本要求不授权 Host 代发业务正文」。该行是后继 change 的规范正文，已把通用回执明确排除在 Host 职责之外；本 change 若就地实现，会与后继基线直接冲突
+  - 本 change 已交付且不移交的部分：失败表情 fail-soft、Delivery `failed` 状态不重放、结算与发送结果分离（任务 5.5、10.15）。缺口是「飞书侧只有表情、没有可读诊断」，该缺口在 B027 中已有真实证据（2026-09-12 T3 断网实测）
+  - 归档影响：本条不构成归档阻塞；B027 必须在 backlog 中保持未完成状态
+- [~] 10.6 为模型恢复、空白主会话跳转与失败回执补相关测试，运行 Pet typecheck/范围测试/build，并经主仓 dsh build 部署
+  - **SPLIT（2026-09-13）**：原任务把三件互不相干的事捆在一条里，整体勾除会虚报两项，整体留空会埋没一项真实成果。逐半分述，原任务文本保留不改写
+  - **（a）空白主会话跳转测试 —— 已完成，本次独立复核通过**。这一半是 10.4 的测试面，确实已落地：
+    - `packages/dsh-pet/test/locus-dsh-port.test.ts:430` `describe('locus main opening briefing')` 覆盖开场说明本身——`:438` 断言 briefing 含 chatId/workspaceId/workspacePath/label 四项身份事实；`:447` 断言其自述为「只是陈述上下文」「不是任务」「待命」「不会自动回传」；`:459` 断言 briefing 经**常规** `followup` 接缝投递且顺序为 `attach → rename → brief → flush`（即 rename 持久化先于 briefing）；`:505` 断言宿主无 briefing 接缝时主会话仍能创建，不因可选能力缺失而阻塞发布
+    - `packages/dsh-pet/test/locus-management.test.ts:386` `describe('locus session describer')` 覆盖 10.4 的第二个缺陷（管理面伪报不可用）——`:398` 未加载但可冷读的会话判为 `available` 而非 `missing`；`:415` 已归档优先于可读性且不调用 inspect；`:429` 不可读判为 `missing`；`:441` 宿主无冷读能力时省略 availability 而不断言缺失；`:453` 可读无标题仍为 `available`；`:463` 同一会话的判定不随加载状态漂移
+    - 复核实测：`npx vitest run test/locus-dsh-port.test.ts test/locus-management.test.ts` → 2 files / **41 tests passed**，exit 0
+  - **（b）模型恢复测试 —— NOT APPLICABLE，随 10.1–10.3 移交 B028**。被测对象（模型恢复能力）本身已移交且不存在，无法也不应为其补测试
+  - **（c）失败回执测试 —— NOT APPLICABLE，随 10.5 移交 B027**。同上，被测对象已移交
+  - **（d）部署子句 —— 无法从仓库证明，如实记录为未证实**。本条要求「经主仓 dsh build 部署」，但仓库内不存在任何部署审计记录可供核对：`dsh build` 的产物落在 `~/.dsh` 部署目录而非版本控制内，本仓库也没有留存部署时间戳或指纹的文件。10.12/10.13/10.14 条目中的「已部署」自述是当时的执行记录，**不是可复核的证据**。因此不勾除该子句，也不据自述记为已完成；归档前若需要该保证，应由所有者当场执行 `dsh build` 并另行记录，而不是从现有任务文本追认
 - [x] 10.7 从 checking/T2-C3 原地恢复人工验收：保留首次 Claude restricted 失败事实，验证修复后的同 Locus/child 恢复或显式代际变化，再继续 T3–T8
   - T2-C3 重测 PASS：失败事实完整保留在同一 checkpoint（首次 FAIL + 重测 PASS 并列记录），未以重发掩盖。复用群级 gen 2 locus 与同一 child `session-c9af096f`，Delivery 04:02:47→04:02:55 settled，effective read，child 成功回复且 `pet_locus_reply` 零拒绝
   - T3 全部 4 个 checkpoint PASS：话题 A 建立独立 topic locus 与专属 child；同话题第二条复用同一 locus/代际/child（同 session 内 turn 1→2 递增为硬证据）；群级/话题 A/话题 B 三个不同 child 互为兄弟、全部直属同一主会话、无孙辈；缺失 thread_id 一项按计划维持 manual，以 53 项自动化测试作辅证，不冒充真实异常事件
@@ -134,4 +161,15 @@
   - 验收期间发现并修复 7 处真实缺陷：空白主会话（10.4）、管理面伪报不可用（10.4）、宿主注入上下文污染回复授权（10.9）、入队即唤醒导致 sticky-mixed（10.10）、write 授权无可达路径（10.13）、子会话 GUI 不可用（B032）、默认 Q&A 因 tokenStatus 字面量猜错而永不可用（10.14）
   - 方法论修正：验收载体由「造靶子再打靶子」改为融入真实开发流程（10.11）；问法由提示结论改为中性只问事实，判定一律以 Host 持久层与文件系统为准，子会话自报仅作交叉核对
   - **未覆盖项（如实记录，不含糊）**：T8-C2 的「未完成 Delivery 未被重放」子项未验证——重启时未结算 Delivery 为 0，制造该场景需在投递执行中途强杀 Host，风险不可控。已覆盖的是「已结算/已失败投递不被重放」，两者相关但不等同
-- [ ] 10.8 收敛验收期 UX backlog B026–B028、B030–B034；验收完成后统一评估，不在修复期间扩散非阻塞视觉优化
+- [x] 10.8 收敛验收期 UX backlog B026–B028、B030–B034；验收完成后统一评估，不在修复期间扩散非阻塞视觉优化
+  - 本条要求的是**收敛评估**（逐条定去向并如实记录），不是「全部实现」——后半句「不在修复期间扩散非阻塞视觉优化」正是反对就地实现。评估已完成，八条去向如下，全部已回写 `BACKLOG.md`
+  - **已完成（2 条，本次逐条复核源码，非采信条目自述）**：
+    - `B031` 投递 prompt 头过长且逐条重复 → 已实现。证据：`packages/dsh-pet/src/host/locus/context.ts:245` 注释与实现确立「routing preamble is sent ONCE per child」，`:258` 的 `subsequent` 选项省略一次性前言，`:352` 为已收到前言的 child 渲染后续投递
+    - `B032` 子会话在 GUI 侧不可用 → 两处缺陷均已修复。证据：标题——`packages/dsh-pet/src/index.ts:1224` 在 child 创建后显式 `ctx.sessionTitle.rename(childSession, input.label)`，best-effort 且失败只记日志（`:1213–1222` 注释说明为何不回滚）；打开路径——`packages/dsh-pet/src/client/index.tsx:360` 走 `ctx.sessions.openSubagent(...)`，`:348` 注释记录官方契约拒绝裸 session 地址
+  - **移交相邻 backlog（2 条）**：`B027` ← 本清单 10.5；`B028` ← 本清单 10.1/10.2/10.3。依据见各条目所引 `pet-locus-independent-agent-inquiries` proposal 与 spec 行号。两条**仍为未完成**，移出本 change 不等于关闭
+  - **确认仍未实现，本期不做（4 条，逐条复核源码确认缺口真实存在）**：
+    - `B026` 管理面可辨识性与「第 N 代」说明 → 未实现。`settings.tsx` 中无任何代际概念说明或名称优先呈现的实现
+    - `B030` 管理面按入口聚合 → 未实现。`settings.tsx` 中搜不到聚合/折叠/分层结构，仍为平铺
+    - `B033` 设置页不应提供按主会话创建默认 Q&A 的入口 → 未实现。缺口仍在原位：`packages/dsh-pet/src/client/settings.tsx:1168` 的 `defaultQa.length === 0 && parentIds.length > 0` 分支仍按裸 session id 渲染创建按钮（`:1178`），条目卡片上的「创建/打开默认 Q&A（此主会话）」按钮亦仍在（`:1160–1162`）
+    - `B034` 面板与操作回执重叠 → 未实现。`packages/dsh-pet/src/client/styles.ts:185` `.dshpet-panel{bottom:78px}` 与 `:189` `.dshpet-panel-receipt{bottom:48px}` 仍是两个互不感知的硬编码定位，根因未动
+  - 这四条均为**非阻塞 UX**，不影响协作模型正确性或安全边界，按本条后半句的约束不在本 change 实现；已在 `BACKLOG.md` 各自条目记录当前真实状态与上述证据

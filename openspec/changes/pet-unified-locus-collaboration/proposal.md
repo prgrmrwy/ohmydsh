@@ -56,6 +56,7 @@ Locus 不是第三种 Agent，而是完整的协作关联：飞书入口、works
 - `pet-qa-group`: 撤销原 QA 独立模型要求；其产品入口与保留的安全约束由统一协作规范接替。
 - `pet-lark-channel`: 保留 bot/profile/凭据与 channel 生命周期边界；替换旧准入、workspace 路由、Invocation 派发及反馈规范，更新 onboarding 到统一子会话流程。
 - `dsh-pet`: scoped context 覆盖统一协作子会话；普通轮盘 root executor 的 Invocation/Snapshot 和 Skill 边界不变。
+- `dsh-runtime-provisioning`: 新增「Customization 请求的兼容运行时仅作用于长期 Host」与「Pet Host compatibility 版本与产物必须 fail closed」两条要求，承接任务 8.6 把 Pet 临时宿主能力收敛为 `dsh.yaml` 中版本锁定的 `hostRuntimeCompatibility` 声明。既有精确 pin、缓存直执、有界 provision 与临时策略可集中删除四条要求不变；本 delta 只约束 `dsh web` 长期 Host 的运行时选择，`dsh build`／plugin／dump-config 等一次性官方 CLI 仍按 `dshVersion` 走官方精确版本。
 
 ## Impact
 
