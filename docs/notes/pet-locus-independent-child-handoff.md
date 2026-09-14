@@ -79,9 +79,10 @@
 - 本次修复 `openspec validate pet-locus-independent-child --strict` 与 `git diff --check` 通过
 - **但**：`DSH_PET_TEST_RUNTIME` 探针为诊断用途，不建立 Agent/Session/模型/飞书链路
 - **且**：`DSH_PET_TEST_ATOMIC_DOMAIN=1` 下事务组失败（`TRANSACTION_UNAVAILABLE`），当前 runtime 无可用 transaction seam
-- **仍未做**：本次代码改动后的 `dsh build` 物化、Host 重启和真实答疑群复测；不能把本地回归等同于飞书实机验收
+- 本次代码改动后的首次 `dsh build` 已完成：仅原子重装 `dsh-pet`；第二次 `dsh build` 输出 `no changes — deployment already matches manifest`，部署物化已验证幂等
+- **仍未做**：Host 重启和真实答疑群复测；不能把本地回归等同于飞书实机验收。为避免中断当前 GUI/答疑群，本轮没有自动重启
 
-命令级全绿不等于 runtime 验收；部署与真实问父验收仍未完成。
+命令级全绿不等于 runtime 验收；部署已物化，真实问父验收仍未完成。
 
 ## 本期承接范围
 
