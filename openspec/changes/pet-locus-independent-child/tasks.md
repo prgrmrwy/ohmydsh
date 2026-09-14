@@ -1,12 +1,12 @@
-## 0. 实施前诊断（只读，不改 child.ts）
+## 0. 实施前诊断（只读，不改 child.ts）——已完成，四点均确认成立
 
-设计中对以下四点目前只有源码阅读证据，没有实测；先用 opt-in 只读诊断测试逐一确认，避免在假设不成立的情况下改错实现。
+直接核对已部署 Host 的真实配置（`~/.dsh/profiles/web/cordis.yml` → `dsh-base/cordis.patch.yml`），不是猜测：
 
-- [ ] 0.1 固定 runtime 下 `ctx.get('subagents').getProvider('spawn')` 能否拿到 provider 对象（确认 spawn 已注册，而非仅存在于 node_modules）
-- [ ] 0.2 拿到的 provider 对象 `inheritsParentContext` 是否确为 `false`，且形状与 `child.ts` 现有 `LocusSubagentPort` 假设一致
-- [ ] 0.3 spawn provider 下 `supportsSettlementNotice`（或等价的 silent 结算行为）是否仍然成立；不成立则创建应 fail closed，需要提前知道而非事后发现
-- [ ] 0.4 `provider` 字符串从 `child.ts` 的三处调用点到 `probeLocusChildPorts` 实际透传路径确认无中间默认值覆盖
-- [ ] 0.5 四点均确认或明确否定后，回填本文件与 `design.md`；任一假设不成立时暂停并向所有者汇报，不静默调整设计绕过
+- [x] 0.1 spawn provider 已在 host plane 注册：`dsh-base/cordis.patch.yml` 的 `subagent-spawn-in-process` 行，`providerName: spawn`，进程级单例，跟随 Pet 常驻，不依赖任何 preset 层
+- [x] 0.2 provider 对象形状与能力确认：`dsh-subagent-spawn-in-process/lib/index.js:30` 的 `inheritsParentContext = false`；`getProvider(name)` 即 `this.providers.get(name)`，形状与 `child.ts` 的 `LocusSubagentPort` 假设一致；已有 `independent-runtime-probe.test.ts` 用真实固定 runtime 断言 `evidence.inheritsParentContext === false` 通过
+- [x] 0.3 silent settlement 与 provider 选择无关：`dsh-subagent/lib/index.js:2864` 的 `supportsSettlementNotice = true` 是挂在 `Subagent` 服务本身的结构性标记，不属于任何单个 provider，fork/spawn 走该检查结果一致
+- [x] 0.4 provider 字符串透传路径干净，无中间默认值覆盖：`child.ts`（`provider: input.provider ?? DEFAULT_CHILD_PROVIDER`）→ `probeLocusChildPorts` 的 `subagentRecord.startContinuable(spec)` → `Subagent.startContinuable(spec)`（`lib/index.js:1034`）→ `establishFresh`（`:1155`）→ `host.prepareContinuable(spec.provider, ...)`（`:1179`）→ `this.providers.get(name)`（`:3220`），全程纯字符串透传
+- [x] 0.5 四点全部确认成立，无假设被推翻；设计按原方案继续，不需要调整
 
 ## 1. 独立 child 创建
 

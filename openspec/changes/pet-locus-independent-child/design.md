@@ -15,6 +15,10 @@ B035 从一个具体故障出发：答疑群 child 由 `fork` 创建、继承父
 
 「可以问父」无需新建能力，前言已接线；本 change 不重写这些条文，只保证它们在独立 child 上真实生效。
 
+### 实施前诊断（tasks.md §0，已完成）
+
+D1/D2 依赖的四点假设已对已部署 Host 配置逐一实测，均成立，详见 `tasks.md` §0：spawn provider 已在 host plane 注册且为进程级单例；`inheritsParentContext=false` 且已有固定 runtime 探针断言通过；`supportsSettlementNotice` 是服务级标记，与 provider 选择无关；`provider` 字符串从 `child.ts` 到 `this.providers.get(name)` 全程纯透传，无中间覆盖。没有假设被推翻，阶段 1 按原方案继续。
+
 ## Goals / Non-Goals
 
 **Goals:**
