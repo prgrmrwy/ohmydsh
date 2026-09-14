@@ -592,6 +592,55 @@ function locusAvailabilityLabel(
   return '未核验'
 }
 
+function ownerModeLabel(mode: string | undefined): string {
+  if (mode === 'fork-prefix-v1') return '旧 fork 上下文'
+  if (mode === 'independent-v1') return '独立上下文'
+  return '未知'
+}
+
+function ownerInquiryStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    queued: '排队中', executing: '执行中', answered: '已回答', 'result-delivered': '结果已续进',
+    rejected: '已拒绝', unavailable: '不可用', cancelled: '已取消', 'needs-review': '待核查', unknown: '未知',
+  }
+  return labels[status] ?? '未知'
+}
+
+function OwnerProjectionFacts(props: { readonly owner: PetLocusView['owner'] | undefined }): JSX.Element | null {
+  const owner = props.owner
+  if (owner === undefined) return null
+  const inquiry = owner.inquiry
+  return (
+    <div className="dshpet-owner-facts">
+      <Fact label="上下文模式" value={ownerModeLabel(owner.mode)} />
+      {owner.publicContext !== undefined ? (
+        <Fact
+          label="公共事实"
+          value={owner.publicContext.status === 'authored'
+            ? `r${owner.publicContext.revision ?? '?'} · ${owner.publicContext.writer ?? '来源未知'}`
+            : '未知 / 未确认'}
+        />
+      ) : null}
+      {inquiry === undefined ? (
+        <p className="dshpet-item-hint">询问状态：Host 未提供真实台账快照，不能伪造询问记录。</p>
+      ) : (
+        <>
+          <Fact label="询问派发" value={inquiry.dispatchCapability === 'available' ? '可用' : inquiry.dispatchCapability === 'unavailable' ? '不可用' : '未知'} />
+          {inquiry.snapshotStatus === 'available' && inquiry.inquiries !== undefined ? (
+            inquiry.inquiries.length === 0
+              ? <p className="dshpet-item-hint">当前没有在途询问。</p>
+              : inquiry.inquiries.map(row => (
+                <Fact key={row.inquiryId ?? `${row.createdAt}:${row.status}`} label="询问" value={`${ownerInquiryStatusLabel(row.status)} · ${row.reason ?? '无诊断'}`} />
+              ))
+          ) : (
+            <p className="dshpet-item-hint">询问状态：Host 尚未提供可验证快照，当前显示未知。</p>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 /**
  * One owner-facing locus card. It intentionally renders only the Host
  * projection: no credential, browser identity, or guessed capability is
@@ -687,6 +736,7 @@ function LocusCard(props: {
           />
         ) : null}
       </div>
+      <OwnerProjectionFacts owner={locus.owner} />
       {locus.contextAnchor?.status !== 'confirmed' && locus.contextAnchor !== undefined ? (
         <p className="dshpet-callout" data-tone="warn">
           当前执行根锚点尚未确认；路径展示不等于授权，Pet 不会据此宣称可写。

@@ -1,41 +1,70 @@
 /**
  * Deterministic Pet-side effect fence for one inquiry turn (partial G4).
  *
- * WHY THIS EXISTS
+ * WHAT THIS FENCE ENFORCES
  *
- * `openspec/changes/pet-locus-independent-agent-inquiries` design D6 requires
- * that an inquiry MUST NOT become an authorization to modify files, perform
- * external writes, change permissions/bindings, or have the target execute
- * work on the requester's behalf — and that the Host enforce that limit with
- * an EXECUTABLE restriction, not a prompt reminder.
+ * Two independent rules, both required, neither sufficient alone:
  *
- * The reviewed runtime already offers a scoped monotonic `tools.guard()`, but
- * `test/inquiry-runtime-probe.test.ts` records two observed gaps. The one this
- * module answers directly:
+ *  1. AN INQUIRY GRANTS NO NEW AUTHORITY. The inquiry turn runs with the
+ *     target's own normal tool snapshot — its existing permission ceiling —
+ *     and nothing else. The snapshot is supplied by the dispatcher; a name
+ *     absent from it is refused. The fence never infers that an unlisted or
+ *     newly registered tool is safe.
+ *  2. AN INQUIRY MAY NOT TRANSFER IDENTITY OR COMMUNICATION AUTHORITY. A hard
+ *     floor of names is refused even when the target legitimately holds them,
+ *     because using them inside an inquiry turn would let the turn speak or
+ *     act AS the target toward third parties, or re-shape who the target is.
  *
- *   CURRENT GAP: the guard is evaluated at PREPARATION. If a revocation lands
- *   while an async `tools/execute` wrapper is suspended, the runtime does NOT
- *   re-check the guard before `dispatchToolBody` runs — the body executes once
- *   anyway, and only the NEXT call is refused.
+ * Rule 1 is the reason this is not an allowlist of "tools proven safe to
+ * read". Deciding safety per tool was the earlier design and it was wrong: it
+ * silently redefined what the target is allowed to do, and it made every new
+ * plugin tool unavailable to ordinary work that had always been permitted.
+ * The inquiry path should not widen the ceiling, and it should not narrow it
+ * into a different product either.
  *
- * So this fence deliberately does not trust a preparation-time decision. Its
- * whole point is `run()`: it re-validates immediately before invoking the body,
- * with NO `await` between the final check and the call. A decision returned by
- * `decide()` is an observation, never a bearer token.
+ * Rule 2 is narrow ON PURPOSE. `pet_collaboration_context_update` is NOT on
+ * the floor: updating the shared public record is ordinary collaboration work
+ * guarded by its own caller-bound membership check and revision CAS, and those
+ * checks do not weaken just because the caller is answering a question.
+ *
+ * WHY `run()` RE-VALIDATES
+ *
+ * `test/inquiry-runtime-probe.test.ts` records the observed CURRENT GAP that
+ * the reviewed runtime evaluates its scoped monotonic `tools.guard()` at
+ * PREPARATION only: when a revocation lands while an async `tools/execute`
+ * wrapper is suspended, the runtime does NOT re-check before the tool body
+ * runs — the body executes once anyway and only the NEXT call is refused.
+ *
+ * So this fence never trusts a preparation-time decision. `run()` validates,
+ * yields, then validates AGAIN with no suspension point before invoking the
+ * body. A decision from `decide()` is an observation, never a bearer token.
  *
  * WHAT THIS MODULE IS NOT (do not overclaim G4)
  *
- * - It is not a sandbox. It constrains calls that are actually routed THROUGH
- *   it. Anything that reaches a tool by another path — a tool the dispatcher
- *   forgot to wrap, an ambient capability inside an already-running body, code
- *   the model causes to run elsewhere — is out of scope by construction.
- * - It cannot cancel work already inside a body. `close()` refuses later
- *   entries; it does not unwind an effect in flight. Cancellation needs a real
- *   runtime seam (abort signal propagation).
- * - It does not see the runtime's own tool registry, so "unknown tool" here
- *   means "not in the allowlist handed to this fence", which is exactly why it
- *   fails closed instead of inferring safety.
- * - The remaining G4 gap therefore still needs a runtime-side seam: dsh-tools
+ * - It is not a sandbox. It constrains calls actually routed THROUGH it.
+ *   Anything reaching a tool by another path — a tool the dispatcher forgot to
+ *   wrap, an ambient capability inside an already-running body, code the model
+ *   causes to run elsewhere — is out of scope by construction.
+ * - It cannot cancel a body already running. `close()` refuses later entries;
+ *   it does not unwind an effect in flight. That needs a runtime seam (abort
+ *   signal propagation).
+ * - It does not intersect the target's snapshot with the requester's ceiling,
+ *   and it is not supposed to: under the approved semantics the target answers
+ *   using its OWN normal permissions, and doing so is not a transfer of those
+ *   permissions to the requester. What the spec forbids — an inquiry becoming
+ *   an authorization for the target to carry out the requester's work — is
+ *   held by rule 2 plus the inquiry protocol itself (purpose, audience and
+ *   answer binding), not by shrinking the target's ceiling here.
+ * - The floor lists surfaces that EXIST today plus the runtime's messaging and
+ *   delegation tools. Pet exposes no model-facing permission/scope/binding
+ *   mutation tool at present, so that part of rule 2 is carried by
+ *   `alsoForbid`: a dispatcher adding such a surface must add its name there.
+ *   A future tool nobody lists is governed only by rule 1.
+ * - Content applicability — answering only what suits the stated purpose and
+ *   audience — stays a model-behavior constraint. This fence does not inspect
+ *   arguments or results and MUST NOT be described as an information-flow
+ *   sandbox.
+ * - The remaining G4 gap still needs a runtime-side seam: dsh-tools
  *   re-checking the monotonic guard after tool resolution and before
  *   `bodyInvoked`. Until a dispatcher wraps the real tools service with this
  *   fence AND that seam exists, G4 is not satisfied.
@@ -54,8 +83,18 @@ export interface InquiryEffectFenceTool {
 
 /** Stable, machine-readable refusal codes. Never include caller data. */
 export type InquiryEffectRefusalReason =
-  /** The tool is not proven safe for an inquiry turn (unknown, effectful, delegating, or outbound). */
-  | 'effect-not-permitted-in-inquiry-turn'
+  /**
+   * Rule 2: the name transfers identity or communication authority (outbound
+   * Feishu delivery, cross-agent messaging, delegation, permission/binding
+   * change). Refused even when the target itself holds the tool.
+   */
+  | 'authority-transfer-not-permitted-in-inquiry-turn'
+  /**
+   * Rule 1: the name is not part of the target's inherited tool snapshot, so
+   * running it would grant authority the inquiry never had. Unknown and newly
+   * registered tools land here — the fence never assumes they are safe.
+   */
+  | 'tool-outside-inherited-authority'
   /** The inquiry turn's authority was revoked or could not be proven while the call was in flight. */
   | 'inquiry-turn-revoked'
   /** The inquiry turn has ended; no further preparation or effect is permitted. */
@@ -68,52 +107,39 @@ export type InquiryEffectDecision =
   | { readonly allowed: false; readonly reason: InquiryEffectRefusalReason }
 
 /**
- * Tools that can never run in an inquiry turn, even if a caller lists them.
+ * The hard floor: names refused in an inquiry turn even when the target's own
+ * snapshot contains them, because an inquiry must not become a way to speak or
+ * act AS the target toward anyone else.
  *
- * This is a hard floor UNDER the allowlist, not a replacement for it: the
- * allowlist is still closed-by-default, so a tool absent from both is refused.
- * The floor exists so that a future dispatcher bug — a widened allowlist, a
- * config typo, an allowlist merged from somewhere less trusted — cannot turn an
- * inquiry into an execution channel.
+ * This is deliberately NOT a list of effectful tools. File writes, shell and
+ * network reach are governed by rule 1 (the inherited snapshot), because they
+ * are ordinary work the target may already be permitted to do and an inquiry
+ * neither widens nor narrows that.
  *
- * `pet_locus_reply` and `pet_collaboration_context_update` are listed because
- * they carry the TARGET's own authority: a reply would consume the target's
- * Feishu Delivery for someone else's question, and a public-record update would
- * let an inquiry mutate shared project facts.
+ * Absent on purpose: `pet_collaboration_context_update`. The shared public
+ * record has its own caller-bound membership derivation and revision CAS; an
+ * inquiry turn updating it is ordinary collaboration, not authority transfer.
  */
 export const INQUIRY_FORBIDDEN_TOOLS: readonly string[] = Object.freeze([
-  // Local filesystem / process effects.
-  'apply_patch',
-  'bash',
-  'edit',
-  'multi_edit',
-  'notebook_edit',
-  'shell',
-  'write',
-  // Outbound / network reach.
-  'browser',
-  'fetch',
-  'image_generate',
-  'video_generate',
-  'web_fetch',
-  'web_search',
-  'x_search',
-  // Delegation and cross-agent control: laundering an effect through another
-  // agent is still the effect.
-  'agent',
+  // Outbound delivery under the target's identity: an inquiry must never
+  // consume the target's own Feishu Delivery to answer someone else.
+  'pet_locus_reply',
+  // Ordinary cross-agent messaging. The inquiry protocol is the only
+  // sanctioned channel; native messaging would bypass its ledger, budget and
+  // cycle checks, and produces no answer binding.
   'interrupt_agent',
-  'ralph',
   'send_message',
+  // Delegation. Laundering work through another agent is still the work, and
+  // it escapes this turn's fence entirely.
+  'agent',
+  'ralph',
   'subagent',
   'subagent_fork',
   'task',
   'workflow',
-  // Target-authority Pet surfaces.
-  'pet_collaboration_context_update',
-  'pet_locus_reply',
 ])
 
-const FORBIDDEN = new Set(INQUIRY_FORBIDDEN_TOOLS)
+const STATIC_FLOOR: ReadonlySet<string> = new Set(INQUIRY_FORBIDDEN_TOOLS)
 
 /**
  * Exactly the identifier shape we accept: lowercase letters/digits with single
@@ -125,11 +151,23 @@ const TOOL_NAME_PATTERN = /^[a-z0-9]+(?:_[a-z0-9]+)*$/
 
 export interface InquiryEffectFenceOptions {
   /**
-   * Tool names proven safe for an inquiry turn. Copied at construction; later
-   * mutation of the caller's array has no effect. Everything absent from it is
-   * refused, so an empty allowlist means "no tools at all".
+   * The target's NORMAL tool snapshot — its existing permission ceiling for
+   * this turn. Copied at construction; later mutation of the caller's iterable
+   * has no effect. A name absent from it is refused, so the fence never grants
+   * authority the target did not already have, and never guesses about a tool
+   * it has not been told exists.
+   *
+   * This is the target's own snapshot, NOT an intersection with the
+   * requester's ceiling: the target answers with its normal permissions.
    */
-  readonly allow: Iterable<string>
+  readonly inherited: Iterable<string>
+  /**
+   * Extra names to refuse alongside `INQUIRY_FORBIDDEN_TOOLS`. Pet currently
+   * exposes no model-facing permission/scope/Locus binding or generation
+   * mutation tool; when one is added, its name belongs here so the floor keeps
+   * covering rule 2 without this module having to predict the name.
+   */
+  readonly alsoForbid?: Iterable<string>
   /**
    * Liveness of the inquiry turn's authority, consulted on EVERY decide and
    * TWICE per run (before and after the wrapper window). A dispatcher binds
@@ -208,29 +246,37 @@ function readToolName(tool: InquiryEffectFenceTool): string | undefined {
   return name
 }
 
-export function createInquiryEffectFence(options: InquiryEffectFenceOptions): InquiryEffectFence {
-  // Snapshot the allowlist, dropping names that could never be honoured anyway
-  // so a misconfigured entry cannot look allowed at any later point.
-  const allow = new Set<string>()
-  for (const entry of options.allow) {
-    if (typeof entry !== 'string') continue
-    if (!TOOL_NAME_PATTERN.test(entry)) continue
-    if (FORBIDDEN.has(entry)) continue
-    allow.add(entry)
+/** Snapshot a caller iterable, keeping only exactly-normalized identifiers. */
+function snapshotNames(values: Iterable<string> | undefined): Set<string> {
+  const names = new Set<string>()
+  if (values === undefined) return names
+  for (const value of values) {
+    if (typeof value !== 'string') continue
+    if (!TOOL_NAME_PATTERN.test(value)) continue
+    names.add(value)
   }
+  return names
+}
+
+export function createInquiryEffectFence(options: InquiryEffectFenceOptions): InquiryEffectFence {
+  // Snapshot both inputs so a later mutation of the caller's arrays cannot
+  // change what this turn is permitted to do.
+  const inherited = snapshotNames(options.inherited)
+  const extraFloor = snapshotNames(options.alsoForbid)
 
   const isActive = options.isActive
   const settle = options.settle
   let closed = false
+
+  const forbidden = (name: string): boolean => STATIC_FLOOR.has(name) || extraFloor.has(name)
 
   /** The single source of truth for both boundaries; called fresh every time. */
   function validate(tool: InquiryEffectFenceTool): InquiryEffectDecision {
     if (closed) return refuse('inquiry-turn-closed')
     const name = readToolName(tool)
     if (name === undefined) return refuse('tool-reference-unusable')
-    // Liveness is checked BEFORE the allowlist on purpose: once the turn is
-    // revoked, every tool refuses identically, so the refusal cannot be used
-    // to probe which tools the turn had been granted.
+    // Liveness is checked before the name rules so that a revoked turn refuses
+    // identically for every tool: the refusal cannot be used to probe anything.
     if (isActive !== undefined) {
       let active: boolean
       try {
@@ -241,9 +287,11 @@ export function createInquiryEffectFence(options: InquiryEffectFenceOptions): In
       }
       if (!active) return refuse('inquiry-turn-revoked')
     }
-    if (FORBIDDEN.has(name)) return refuse('effect-not-permitted-in-inquiry-turn')
-    // Closed by default: unknown and new tools land here.
-    if (!allow.has(name)) return refuse('effect-not-permitted-in-inquiry-turn')
+    // Rule 2 first: the floor holds even for a name the target legitimately
+    // has, so a snapshot that includes it must not be able to override this.
+    if (forbidden(name)) return refuse('authority-transfer-not-permitted-in-inquiry-turn')
+    // Rule 1: no new authority. Unknown and newly registered tools land here.
+    if (!inherited.has(name)) return refuse('tool-outside-inherited-authority')
     return ALLOWED
   }
 

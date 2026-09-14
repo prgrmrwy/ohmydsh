@@ -199,6 +199,90 @@ export interface PetLocusGenerationView {
   readonly replacesLocusId?: string
 }
 
+// ---------------------------------------------------------------------------
+// Optional B035 owner presentation facts
+// ---------------------------------------------------------------------------
+
+/**
+ * How a locus child obtained its conversation context.  This is a display
+ * classification only: it never changes the child permission or execution
+ * policy.  Missing evidence is deliberately represented as `unknown`.
+ */
+export type PetLocusContextMode = 'fork-prefix-v1' | 'independent-v1' | 'unknown'
+
+/** Host capability to dispatch an isolated inquiry turn. */
+export type PetLocusInquiryDispatchCapability = 'available' | 'unavailable' | 'unknown'
+
+/** Whether the Host could provide a current inquiry snapshot. */
+export type PetLocusInquirySnapshotStatus = 'available' | 'unavailable' | 'unknown'
+
+/** Durable inquiry states safe to display without exposing question/answer text. */
+export type PetLocusInquiryStatus =
+  | 'queued'
+  | 'executing'
+  | 'answered'
+  | 'result-delivered'
+  | 'rejected'
+  | 'unavailable'
+  | 'cancelled'
+  | 'needs-review'
+  | 'unknown'
+
+/** Machine diagnostic code; prose, question and answer bodies never cross this seam. */
+export interface PetLocusDiagnosticView {
+  readonly code: string
+  readonly at?: number
+}
+
+/** One owner-visible inquiry status row, when a real Host snapshot exists. */
+export interface PetLocusInquiryView {
+  /** Stable opaque id for owner diagnosis; never sent to Feishu. */
+  readonly inquiryId?: string
+  readonly status: PetLocusInquiryStatus
+  /** Acceptance time; the client derives waiting age from this value. */
+  readonly createdAt: number
+  /** Stable failure/review code, not a human message. */
+  readonly reason?: string
+  readonly diagnostics?: readonly PetLocusDiagnosticView[]
+}
+
+/** Additive, typed seam for B035 inquiry presentation. */
+export interface PetLocusInquiryProjection {
+  readonly dispatchCapability?: PetLocusInquiryDispatchCapability
+  readonly snapshotStatus?: PetLocusInquirySnapshotStatus
+  /** Omitted when no real inquiry ledger/diagnostic snapshot is available. */
+  readonly inquiries?: readonly PetLocusInquiryView[]
+  readonly diagnostics?: readonly PetLocusDiagnosticView[]
+}
+
+/**
+ * Owner-only public collaboration facts.  These are separate from the local
+ * context anchor below so shared notes cannot be mistaken for execution-root
+ * or permission authority.  The source list contains provenance labels only;
+ * it is not a member list or a downloaded resource.
+ */
+export interface PetLocusPublicContextView {
+  readonly status?: 'authored' | 'unknown'
+  readonly revision?: number
+  readonly writer?: string
+  readonly source?: readonly string[]
+  readonly sharingScope?: string
+  readonly workDescription?: string | null
+  readonly resourceReferences?: readonly string[] | null
+  readonly commonConstraints?: readonly string[] | null
+}
+
+/**
+ * Optional owner-management facts.  The Host may omit this whole object when
+ * B035 evidence is not composed; clients must then render unknown/unavailable
+ * rather than manufacturing inquiry rows or context revisions.
+ */
+export interface PetLocusOwnerProjection {
+  readonly mode?: PetLocusContextMode
+  readonly inquiry?: PetLocusInquiryProjection
+  readonly publicContext?: PetLocusPublicContextView
+}
+
 /**
  * Complete owner-facing projection of one locus generation.
  *
@@ -224,6 +308,8 @@ export interface PetLocusView {
   readonly isDefaultQa: boolean
   /** Compatibility spelling retained for early staged consumers. */
   readonly defaultQa?: boolean
+  /** Optional B035 owner facts; absent means the capability was not composed. */
+  readonly owner?: PetLocusOwnerProjection
 }
 
 /** Stable endpoint-index projection: current generation plus immutable history. */
@@ -271,12 +357,22 @@ export interface PetLocusDefaultQaView {
 }
 
 /** Complete locus management snapshot returned by the new view route. */
+export interface PetLocusOwnerManagementView {
+  /** One optional owner projection per durable main-session scope. */
+  readonly byParent: readonly {
+    readonly parentSessionId: string
+    readonly projection: PetLocusOwnerProjection
+  }[]
+}
+
 export interface PetLocusManagementView {
   /** Monotonic snapshot generation, separate from each locus's generation. */
   readonly generation: number
   readonly loci: readonly PetLocusView[]
   readonly defaultQa: readonly PetLocusDefaultQaView[]
   readonly discovery: PetLocusDiscoveryView
+  /** Optional aggregate owner facts grouped by main session. */
+  readonly owner?: PetLocusOwnerManagementView
 }
 
 /**

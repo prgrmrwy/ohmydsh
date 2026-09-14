@@ -3,11 +3,10 @@
  * (design D8; spec `pet-agent-inquiries`, "询问链可恢复可诊断且防重复防循环").
  *
  * Both durable stores already CLASSIFY their unsettled work — `restartDisposition()`
- * on each — but a classification nobody acts on leaves two holes open across a
- * restart: an inquiry that passed its absolute deadline while the Host was down
- * stays queued forever, and a dispatched inquiry whose outcome was never proven
- * stays non-terminal, so the requester's original work waits on a result that
- * will never arrive. This module closes exactly those two holes and nothing else.
+ * on each — but a dispatched inquiry whose outcome was never proven stays
+ * non-terminal across a restart, so the requester's original work waits on a
+ * result that will never arrive. This module closes exactly that hole and
+ * nothing else.
  *
  * It follows the shape of `../locus/reconcile.ts`, and for the same reasons the
  * cheap alternatives are all wrong:
@@ -15,17 +14,13 @@
  *  - DURABLE STATE IS THE ONLY EVIDENCE. There is no runtime probe here on
  *    purpose. "Is that inquiry turn still running?" cannot be answered after a
  *    restart, and a seam that appeared to answer it would be guessing.
- *  - PROVABLY UNDISPATCHED WORK SURVIVES. A `queued` row inside its deadline is
- *    left untouched and stays dispatchable. Re-accepting or re-stamping it would
- *    lose its accepted order and, worse, move its deadline.
+ *  - PROVABLY UNDISPATCHED WORK SURVIVES. Every `queued` row is left untouched
+ *    and stays dispatchable regardless of age. `createdAt` remains diagnostic
+ *    display data, never an expiry clock.
  *  - DISPATCHED-BUT-UNKNOWN IS NEVER RETRIED. An `executing`/`answered` row with
  *    no durable result is settled `needs-review`, which the pure transition table
  *    has no edge out of. This module cannot re-dispatch anything: it never
  *    emits a `dispatch` event and holds no scheduler, inbox or agent seam.
- *  - DEADLINES ARE ABSOLUTE. Expiry is read from the stored `deadlineAt`, and the
- *    settlement is DATED AT THE DEADLINE, not at restart. A restart therefore
- *    cannot extend, reset or re-stamp one, and a second pass computes the same
- *    instant from the same row.
  *  - NOBODY IS STRANDED. Every settlement this pass performs first queues a
  *    correlatable FAILURE result for the requester, so the original work has
  *    something to resume with instead of silently vanishing. Queue-then-settle
@@ -41,7 +36,7 @@
  *
  * What this module must never do, and structurally cannot: wake a model, start a
  * turn, claim an inbox message, send anything outbound, or create/consume a
- * Feishu delivery. Its ports expose two durable stores and a clock. The summary
+ * Feishu delivery. Its ports expose two durable stores and an observation clock. The summary
  * it produces carries counts only — never a question, purpose, answer, chat id
  * or member identity — because it is meant for an operator log line.
  */
@@ -50,8 +45,6 @@ import type { InquiryOutboxRecord } from './outbox.js'
 
 /** Machine codes this pass writes as the `reason` of a settled inquiry. */
 export const INQUIRY_RESTART_REASONS = Object.freeze({
-  /** The stored absolute deadline had already passed when the Host came back. */
-  deadlinePassed: 'restart-deadline-passed',
   /** Dispatched before the restart; the Host cannot prove what came of it. */
   dispatchOutcomeUnknown: 'restart-dispatch-outcome-unknown',
 } as const)
@@ -83,7 +76,7 @@ export interface InquiryReconcileOutbox {
 export interface InquiryReconcilePorts {
   readonly ledger: InquiryReconcileLedger
   readonly outbox: InquiryReconcileOutbox
-  /** Host clock, read once. Never used to recompute a deadline. */
+  /** Host observation clock used only to date needs-review settlement. */
   readonly now?: () => number
   readonly log?: (code: InquiryReconcileDiagnostic) => void
 }
@@ -93,7 +86,6 @@ export type InquiryReconcileDiagnostic =
   | 'outbox-unreadable'
   | 'outbox-write-failed'
   | 'ledger-write-failed'
-  | 'inquiry-expired'
   | 'inquiry-needs-review'
   | 'inquiry-inconsistent'
 
@@ -112,10 +104,8 @@ export interface InquiryReconcileFault {
 
 /** Counts per disposition. Suitable for an operator log line; no content. */
 export interface InquiryReconcileCounts {
-  /** Provably undispatched, inside its deadline: untouched and still dispatchable. */
+  /** Provably undispatched: untouched and still dispatchable regardless of age. */
   readonly recoverable: number
-  /** Past its absolute deadline at restart: settled `expired` with a failure result. */
-  readonly expired: number
   /** Dispatched, outcome unproven: settled `needs-review`, never retried. */
   readonly needsReview: number
   /** Dispatched and its result already survived durably: left to the hand-back path. */
@@ -157,7 +147,7 @@ function faultCode(error: unknown): string {
 }
 
 const empty: InquiryReconcileCounts = Object.freeze({
-  recoverable: 0, expired: 0, needsReview: 0, correlated: 0, inconsistent: 0,
+  recoverable: 0, needsReview: 0, correlated: 0, inconsistent: 0,
 })
 
 /**
@@ -216,7 +206,7 @@ export async function reconcileInquiriesAtStartup(
 
   const now = (ports.now ?? Date.now)()
   const counts = {
-    recoverable: 0, expired: 0, needsReview: 0, correlated: 0, inconsistent: 0,
+    recoverable: 0, needsReview: 0, correlated: 0, inconsistent: 0,
   }
   const results = {
     // Pending results are read-only facts here: a provably undelivered result
@@ -239,18 +229,14 @@ export async function reconcileInquiriesAtStartup(
   }
 
   /**
-   * Settle ONE inquiry: queue its correlatable failure result first, then move
-   * the ledger row to its terminal status.
-   *
-   * `at` is the settlement instant and is derived from the ROW (its deadline or
-   * its own statusAt), never from a fresh budget, so a second pass computes the
-   * same value. Both ids are deterministic, so a redelivered event is a no-op
-   * in the pure model rather than a second advance.
+   * Settle ONE dispatched-unknown inquiry: queue its correlatable failure
+   * result first, then move the ledger row to its terminal status. The event id
+   * is deterministic, so a redelivery is a no-op rather than a second advance.
    */
   const settle = async (
     record: InquiryRecord,
-    type: 'expire' | 'needs-review',
-    failure: 'expired' | 'needs-review',
+    type: 'needs-review',
+    failure: 'needs-review',
     reason: string,
     at: number,
     existing: InquiryOutboxRecord | undefined,
@@ -290,40 +276,10 @@ export async function reconcileInquiriesAtStartup(
     return true
   }
 
-  // ---- Provably undispatched work. ---------------------------------------
-  for (const record of ledgerState.recoverable) {
-    // Expiry is the STORED absolute deadline being reached. Nothing here
-    // recomputes it, and the settlement is dated at that deadline so the
-    // restart cannot move it forward.
-    if (now < record.deadlineAt) {
-      counts.recoverable += 1
-      continue
-    }
-    const found = existingResult(record.id)
-    if (!found.ok) return done(counts, results, applied)
-    const existing = found.row
-    if (existing !== undefined && existing.status !== 'pending') {
-      // The result already had its single hand-back while the ledger row never
-      // advanced. Advancing it now would claim a continuation this pass did not
-      // observe; report the pair instead.
-      counts.inconsistent += 1
-      log('inquiry-inconsistent')
-      continue
-    }
-    if (existing !== undefined
-      && (existing.result.kind !== 'failure' || existing.result.failure !== 'expired')) {
-      // A queued inquiry cannot legitimately have produced an answer.
-      counts.inconsistent += 1
-      log('inquiry-inconsistent')
-      continue
-    }
-    if (!await settle(
-      record, 'expire', 'expired', INQUIRY_RESTART_REASONS.deadlinePassed,
-      record.deadlineAt, existing,
-    )) return done(counts, results, applied)
-    counts.expired += 1
-    log('inquiry-expired')
-  }
+  // Every provably undispatched row survives, regardless of wait age. No
+  // result lookup or durable write is needed because elapsed time is not an
+  // inconsistency and cannot manufacture an outcome.
+  counts.recoverable = ledgerState.recoverable.length
 
   // ---- Dispatched work whose outcome the Host cannot prove. ---------------
   for (const record of ledgerState.needsReview) {
@@ -368,7 +324,6 @@ export function summarizeInquiryReconciliation(report: InquiryReconcileReport): 
   const parts = [
     `inquiry-reconcile ${report.ok ? 'ok' : 'faulted'}`,
     `recoverable=${String(inquiries.recoverable)}`,
-    `expired=${String(inquiries.expired)}`,
     `needs-review=${String(inquiries.needsReview)}`,
     `correlated=${String(inquiries.correlated)}`,
     `inconsistent=${String(inquiries.inconsistent)}`,

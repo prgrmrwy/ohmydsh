@@ -96,11 +96,10 @@ export type InquiryLimitCode =
   | 'TARGET_ALREADY_VISITED'
   | 'ROOT_BUDGET_EXCEEDED'
   | 'PENDING_BUDGET_EXCEEDED'
-  | 'DEADLINE_EXCEEDED'
 
 const LIMIT_CODES: readonly string[] = Object.freeze([
   'CHAIN_DEPTH_EXCEEDED', 'TARGET_ALREADY_VISITED',
-  'ROOT_BUDGET_EXCEEDED', 'PENDING_BUDGET_EXCEEDED', 'DEADLINE_EXCEEDED',
+  'ROOT_BUDGET_EXCEEDED', 'PENDING_BUDGET_EXCEEDED',
 ])
 
 export class InquiryLimitError extends Error {
@@ -110,7 +109,6 @@ export class InquiryLimitError extends Error {
       TARGET_ALREADY_VISITED: 'This member is already on the current inquiry chain.',
       ROOT_BUDGET_EXCEEDED: 'This inquiry chain has spent its inquiry budget.',
       PENDING_BUDGET_EXCEEDED: 'That member already has as many pending inquiries as it can hold.',
-      DEADLINE_EXCEEDED: 'This inquiry chain has no time left before its absolute deadline.',
     }[code])
     this.name = 'InquiryLimitError'
   }
@@ -130,7 +128,6 @@ export interface InquiryAcceptance {
   /** Echo of the accepted roster reference, so the caller can correlate. */
   readonly target: string
   readonly acceptedAt: number
-  readonly deadlineAt: number
   readonly note: string
 }
 
@@ -294,7 +291,6 @@ export async function acceptInquiryFromCaller(
     inquiryId: record.id,
     target: reference,
     acceptedAt: record.createdAt,
-    deadlineAt: record.deadlineAt,
     note: ACCEPTED_NOTE,
   })
 }

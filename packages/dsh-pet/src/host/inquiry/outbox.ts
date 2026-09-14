@@ -26,11 +26,11 @@
  *
  * Computing a record commits nothing and authorizes nothing. Every fact —
  * the ledger row, the current requester, the original work's settlement state,
- * the permission verdict and the clock — is an INPUT, proven by the Host
- * before this module runs.
+ * and the permission verdict — is an INPUT, proven by the Host before this
+ * module runs.
  */
 import {
-  inquiryMemberKey, isInquiryExpired,
+  inquiryMemberKey,
   type InquiryOrigin, type InquiryRecord, type InquiryScope,
 } from './ledger.js'
 
@@ -57,7 +57,7 @@ export type InquiryResultFailure = (typeof INQUIRY_RESULT_FAILURES)[number]
 /** Why a result was refused, retained or flagged. Stable codes, never prose. */
 export const INQUIRY_OUTBOX_DIAGNOSTIC_CODES = Object.freeze([
   'requester-rebuilt', 'requester-absent', 'work-settled', 'work-mismatch',
-  'work-unknown', 'answer-expired', 'inquiry-mismatch', 'permission-revoked',
+  'work-unknown', 'inquiry-mismatch', 'permission-revoked',
   'result-not-pending', 'late-result', 'duplicate-result',
   'delivery-outcome-unknown',
 ] as const)
@@ -506,7 +506,6 @@ export interface ContinuationWorkState {
 
 /** Everything the fence needs, all of it Host-proven before this module runs. */
 export interface ContinuationEvidence {
-  readonly now: number
   /** The durable ledger row for this inquiry, as stored. */
   readonly inquiry: InquiryRecord
   /** The member that is the CURRENT child of that locus, or null if none is. */
@@ -524,7 +523,6 @@ export type ContinuationRefusalCode =
   | 'work-unknown'
   | 'work-mismatch'
   | 'work-settled'
-  | 'answer-expired'
   | 'permission-revoked'
 
 export type ContinuationVerdict =
@@ -555,9 +553,8 @@ const FAILURE_STATUS: Readonly<Record<InquiryResultFailure, string>> = Object.fr
  *  4. The original work is the one recorded at accept time and is NOT settled.
  *     A different, more recent anchor is `work-mismatch` — never a rebind — and
  *     an unprovable anchor is `work-unknown`, never a default to the latest.
- *  5. The answer has not expired, read from the inquiry's own absolute
- *     deadline rather than recomputed from the current clock.
- *  6. Permission still holds.
+ *  5. Permission still holds. Elapsed wall time is deliberately not evidence
+ *     and cannot refuse a continuation.
  *
  * On success the caller receives the origin to resume, which is a COPY of the
  * one captured at accept. On failure it receives a stable code and nothing
@@ -565,8 +562,7 @@ const FAILURE_STATUS: Readonly<Record<InquiryResultFailure, string>> = Object.fr
  */
 export function verifyInquiryContinuation(record: unknown, evidence: unknown): ContinuationVerdict {
   const current = parseInquiryOutboxRecord(record)
-  const facts = object(evidence, ['now', 'inquiry', 'currentRequester', 'work', 'permitted'])
-  const now = integer(facts.now)
+  const facts = object(evidence, ['inquiry', 'currentRequester', 'work', 'permitted'])
   const permitted = flag(facts.permitted)
   const inquiry = facts.inquiry as InquiryRecord
   if (inquiry === null || typeof inquiry !== 'object') invalid()
@@ -606,13 +602,6 @@ export function verifyInquiryContinuation(record: unknown, evidence: unknown): C
   // A settled Delivery is never reopened and never replaced by a newer one.
   if (work.settled) return refuse('work-settled')
 
-  // Expiry comes from the stored absolute deadline, not from a fresh budget.
-  // It bounds an ANSWER only: a failure result is the terminal outcome the
-  // spec promises the requester ("询问到期...时 SHALL 向请求方提供可关联的失败
-  // 结果"), and an `expired` failure is necessarily past that deadline. Applying
-  // the check to it would strand the original work with no result at all.
-  if (current.result.kind === 'answer' && isInquiryExpired(inquiry, now)) return refuse('answer-expired')
-
   if (!permitted) return refuse('permission-revoked')
 
   return Object.freeze({ ok: true as const, resume: current.resumeWork })
@@ -622,7 +611,7 @@ export function verifyInquiryContinuation(record: unknown, evidence: unknown): C
  * What the Host should DO with a verdict, as a separate decision.
  *
  * A refusal that means "the request is already over" (`work-settled`,
- * `answer-expired`, `result-not-pending`) is retained as inert evidence; every
+ * `result-not-pending`) is retained as inert evidence; every
  * other refusal is a failed re-verification and is recorded as such. Neither
  * disposition wakes anybody or appends a Feishu message.
  */
@@ -633,7 +622,7 @@ export function continuationDisposition(verdict: unknown): 'deliver' | 'refuse' 
   if (ok.value === true) return 'deliver'
   const code = Object.getOwnPropertyDescriptor(verdict, 'code')
   if (!code || !('value' in code)) invalid()
-  return ['work-settled', 'answer-expired', 'result-not-pending'].includes(code.value as string)
+  return ['work-settled', 'result-not-pending'].includes(code.value as string)
     ? 'retain'
     : 'refuse'
 }

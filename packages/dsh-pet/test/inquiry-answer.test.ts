@@ -195,20 +195,20 @@ describe('caller-bound inquiry answer', () => {
     expect(f.inquiries.get('inquiry-1')!.diagnostics.map(d => d.kind)).toEqual(['duplicate-answer'])
   })
 
-  it('refuses an answer after a terminal state but retains it as a diagnostic', async () => {
-    const expired = applyInquiryEvent(
+  it('refuses an answer after explicit cancellation but retains it as a diagnostic', async () => {
+    const cancelled = applyInquiryEvent(
       dispatch(queued('inquiry-1', childA, childB)),
-      { type: 'expire', eventId: 'expire-1', at: t0 + 300_000, reason: 'deadline-reached' },
+      { type: 'cancel', eventId: 'cancel-1', at: t0 + 300_000, reason: 'caller-cancelled' },
     )
-    const f = fixture(undefined, [expired])
+    const f = fixture(undefined, [cancelled])
     const error = await answer('child-b', body(), f).catch((cause: unknown) => cause)
     expect(error).toBeInstanceOf(InquiryAnswerClosedError)
     expect((error as InquiryAnswerClosedError).retainedAsDiagnostic).toBe(true)
     const after = f.inquiries.get('inquiry-1')!
     // Terminal facts are preserved exactly: no revival, no continuation.
-    expect(after.status).toBe('expired')
+    expect(after.status).toBe('cancelled')
     expect(after.statusAt).toBe(t0 + 300_000)
-    expect(after.reason).toBe('deadline-reached')
+    expect(after.reason).toBe('caller-cancelled')
     expect(after.diagnostics.map(d => d.kind)).toEqual(['late-answer'])
     // The refused body itself is never persisted.
     expect(f.answers.size).toBe(0)

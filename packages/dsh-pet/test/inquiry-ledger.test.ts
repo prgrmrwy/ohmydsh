@@ -6,19 +6,17 @@ import {
   InquiryLedgerError,
   applyInquiryEvent,
   createInquiry,
-  inquiryDeadlineFor,
   inquiryMemberKey,
   inquiryRootHasCapacity,
   inquirySeatKey,
   inquirySessionHasCapacity,
   inquiryTargetIsUnvisited,
-  isInquiryExpired,
   isTerminalInquiryStatus,
   parseInquiry,
   recordInquiryDiagnostic,
   type InquiryEvent,
   type InquiryRecord,
-  type InquiryStatus,
+  type InquiryRecordStatus,
 } from '../src/host/inquiry/ledger.js'
 
 const circle = 'session-main'
@@ -51,7 +49,7 @@ const context = (over: Record<string, unknown> = {}) => ({
   ...over,
 })
 
-const failureEvents = ['reject', 'unavailable', 'expire', 'cancel', 'needs-review']
+const failureEvents = ['reject', 'unavailable', 'cancel', 'needs-review']
 const event = (type: string, over: Record<string, unknown> = {}) => ({
   type,
   eventId: `event-${type}`,
@@ -69,12 +67,19 @@ const eventForStatus: Record<string, string> = {
   'result-delivered': 'deliver-result',
   rejected: 'reject',
   unavailable: 'unavailable',
-  expired: 'expire',
   cancelled: 'cancel',
   'needs-review': 'needs-review',
 }
 
-function recordAt(status: InquiryStatus): InquiryRecord {
+function legacyExpired(): InquiryRecord {
+  const row = createInquiry(request(), context())
+  return parseInquiry({
+    ...row, deadlineAt: t0 + 300_000, status: 'expired', statusAt: t0 + 300_000,
+    reason: 'legacy-deadline-reached', appliedEventIds: ['legacy-expire'],
+  })
+}
+
+function recordAt(status: InquiryRecordStatus): InquiryRecord {
   const queued = createInquiry(request(), context())
   switch (status) {
     case 'queued': return queued
@@ -82,7 +87,7 @@ function recordAt(status: InquiryStatus): InquiryRecord {
     case 'answered': return advance(advance(queued, 'dispatch'), 'answer')
     case 'result-delivered': return advance(advance(advance(queued, 'dispatch'), 'answer'), 'deliver-result')
     case 'needs-review': return advance(advance(queued, 'dispatch'), 'needs-review')
-    case 'expired': return advance(queued, 'expire', { at: t0 + limits.absoluteDeadlineMs })
+    case 'expired': return legacyExpired()
     default: return advance(queued, eventForStatus[status]!)
   }
 }
@@ -99,11 +104,11 @@ describe('inquiry ledger values', () => {
     expect(limits.maxChainEdges).toBe(3)
     expect(limits.maxInquiriesPerRoot).toBe(16)
     expect(limits.maxPendingPerSession).toBe(32)
-    expect(limits.absoluteDeadlineMs).toBe(300_000)
+    expect(limits).not.toHaveProperty('absoluteDeadlineMs')
     expect(Object.isFrozen(limits)).toBe(true)
     expect(INQUIRY_STATUSES).toEqual([
       'queued', 'executing', 'answered', 'result-delivered',
-      'rejected', 'unavailable', 'expired', 'cancelled', 'needs-review',
+      'rejected', 'unavailable', 'cancelled', 'needs-review',
     ])
   })
 
@@ -120,7 +125,6 @@ describe('inquiry ledger values', () => {
       audience: chat,
       trace: { rootInquiryId: 'inquiry-1', depth: 1, visited: [childA, childB] },
       createdAt: t0,
-      deadlineAt: t0 + limits.absoluteDeadlineMs,
       status: 'queued',
       statusAt: t0,
       reason: null,
@@ -299,12 +303,6 @@ describe('inquiry budget predicates', () => {
     expect(inquirySessionHasCapacity(limits.maxPendingPerSession)).toBe(false)
   })
 
-  it('clamps a nested deadline to the ancestor and never extends it', () => {
-    expect(inquiryDeadlineFor(t0, null)).toBe(t0 + limits.absoluteDeadlineMs)
-    expect(inquiryDeadlineFor(t0, t0 + 10_000)).toBe(t0 + 10_000)
-    expect(inquiryDeadlineFor(t0, t0 + 10 * limits.absoluteDeadlineMs)).toBe(t0 + limits.absoluteDeadlineMs)
-  })
-
   it('treats a visited member as visited by locus seat, not only by generation', () => {
     const visited = [childA, childB]
     expect(inquiryTargetIsUnvisited(visited, childC)).toBe(true)
@@ -321,16 +319,11 @@ describe('inquiry budget predicates', () => {
     expect(inquirySeatKey(main)).not.toBe(inquirySeatKey(childA))
   })
 
-  it('reports expiry purely from the stored deadline', () => {
-    const record = createInquiry(request(), context())
-    expect(isInquiryExpired(record, record.deadlineAt - 1)).toBe(false)
-    expect(isInquiryExpired(record, record.deadlineAt)).toBe(true)
-  })
-
   it('names exactly the terminal statuses', () => {
     expect(INQUIRY_STATUSES.filter(isTerminalInquiryStatus)).toEqual([
-      'result-delivered', 'rejected', 'unavailable', 'expired', 'cancelled', 'needs-review',
+      'result-delivered', 'rejected', 'unavailable', 'cancelled', 'needs-review',
     ])
+    expect(isTerminalInquiryStatus('expired')).toBe(true)
   })
 })
 
@@ -373,16 +366,12 @@ describe('nested inquiry chains inherit the ancestor budget', () => {
     expect(record.trace.visited).toEqual([childA, childB, childC])
   })
 
-  it('clamps the nested deadline to the ancestor deadline', () => {
-    const record = nested()
-    expect(record.deadlineAt).toBe(t0 + limits.absoluteDeadlineMs)
-    expect(record.deadlineAt).toBeLessThan(record.createdAt + limits.absoluteDeadlineMs)
-    const late = nested({ createdAt: t0 + limits.absoluteDeadlineMs - 5 })
-    expect(late.deadlineAt).toBe(t0 + limits.absoluteDeadlineMs)
-  })
-
-  it('refuses a nested inquiry once the ancestor deadline has passed', () => {
-    rejects(() => nested({ createdAt: t0 + limits.absoluteDeadlineMs }), 'DEADLINE_EXCEEDED')
+  it('allows a nested inquiry days later while inheriting only trace and count budgets', () => {
+    const daysLater = t0 + 7 * 24 * 60 * 60 * 1_000
+    const record = nested({ createdAt: daysLater })
+    expect(record.createdAt).toBe(daysLater)
+    expect(record.trace).toEqual({ rootInquiryId: 'inquiry-1', depth: 2, visited: [childA, childB, childC] })
+    expect(record).not.toHaveProperty('deadlineAt')
   })
 
   it('refuses a member already visited on this chain, including the original requester', () => {
@@ -508,9 +497,13 @@ describe('inquiry status transitions', () => {
     expect(unknown.reason).toBe('host-observed-fact')
   })
 
-  it('accepts cancellation and expiry of an answered but undelivered inquiry', () => {
-    expect(advance(recordAt('answered'), 'cancel', { at: t0 + 2_000 }).status).toBe('cancelled')
-    expect(advance(recordAt('answered'), 'expire', { at: t0 + limits.absoluteDeadlineMs }).status).toBe('expired')
+  it('accepts cancellation of an answered but undelivered inquiry after a long wait', () => {
+    const cancelled = advance(recordAt('answered'), 'cancel', {
+      at: t0 + 7 * 24 * 60 * 60 * 1_000, reason: 'owner-cancelled',
+    })
+    expect(cancelled).toMatchObject({ status: 'cancelled', reason: 'owner-cancelled' })
+    expect(advance(cancelled, 'cancel', { eventId: 'cancel-repeat', at: cancelled.statusAt + 1, reason: 'other' }))
+      .toEqual(cancelled)
   })
 
   it('requires a stable reason code for failures and forbids one for successes', () => {
@@ -532,11 +525,14 @@ describe('inquiry status transitions', () => {
     rejects(() => advance(recordAt('executing'), 'answer', { at: t0 - 1 }), 'ILLEGAL_TRANSITION')
   })
 
-  it('refuses to expire before the deadline and refuses success events at or after it', () => {
-    rejects(() => advance(recordAt('queued'), 'expire', { at: t0 + 1 }), 'ILLEGAL_TRANSITION')
-    rejects(() => advance(recordAt('queued'), 'dispatch', { at: t0 + limits.absoluteDeadlineMs }), 'ILLEGAL_TRANSITION')
-    rejects(() => advance(recordAt('executing'), 'answer', { at: t0 + limits.absoluteDeadlineMs + 1 }), 'ILLEGAL_TRANSITION')
-    expect(advance(recordAt('queued'), 'unavailable', { at: t0 + limits.absoluteDeadlineMs + 1 }).status).toBe('unavailable')
+  it('allows progress events days later but still enforces monotonic statusAt', () => {
+    const daysLater = t0 + 7 * 24 * 60 * 60 * 1_000
+    const executing = advance(recordAt('queued'), 'dispatch', { at: daysLater })
+    const answered = advance(executing, 'answer', { at: daysLater + 1 })
+    const delivered = advance(answered, 'deliver-result', { at: daysLater + 2 })
+    expect(delivered.status).toBe('result-delivered')
+    rejects(() => advance(executing, 'answer', { at: daysLater - 1 }), 'ILLEGAL_TRANSITION')
+    rejects(() => advance(recordAt('queued'), 'expire', { at: daysLater }), 'INVALID_INQUIRY_INPUT')
   })
 })
 
@@ -614,19 +610,19 @@ describe('late answers after a terminal state stay diagnostics', () => {
   })
 })
 
-describe('inquiry records survive a restart as values, not as fresh clocks', () => {
-  it('re-reads a persisted queued inquiry without moving its deadline', () => {
+describe('inquiry records survive a restart as durable values', () => {
+  it('re-reads a persisted queued inquiry with createdAt and no deadline', () => {
     const queued = createInquiry(request(), context())
     const revived = reread(queued)
     expect(revived).toEqual(queued)
-    expect(revived.deadlineAt).toBe(t0 + limits.absoluteDeadlineMs)
-    expect(isInquiryExpired(revived, t0 + limits.absoluteDeadlineMs)).toBe(true)
-    expect(reread(revived).deadlineAt).toBe(queued.deadlineAt)
+    expect(revived.createdAt).toBe(t0)
+    expect(revived).not.toHaveProperty('deadlineAt')
   })
 
-  it('keeps an expired inquiry expired and undispatchable after re-reading it', () => {
-    const expired = reread(recordAt('expired'))
+  it('normalizes an exact legacy v12 row while retaining expired terminal evidence', () => {
+    const expired = recordAt('expired')
     expect(expired.status).toBe('expired')
+    expect(expired).not.toHaveProperty('deadlineAt')
     rejects(() => advance(expired, 'dispatch', { at: t0 + 400_000 }), 'ILLEGAL_TRANSITION')
     expect(reread(expired).status).toBe('expired')
   })
@@ -666,11 +662,11 @@ describe('inquiry records survive a restart as values, not as fresh clocks', () 
     }))
   })
 
-  it('refuses a persisted record with an impossible status, deadline or counter', () => {
+  it('refuses impossible current or legacy status, deadline, and counter values', () => {
     const root = createInquiry(request(), context())
     rejects(() => parseInquiry({ ...root, status: 'done' }))
     rejects(() => parseInquiry({ ...root, deadlineAt: root.createdAt }))
-    rejects(() => parseInquiry({ ...root, deadlineAt: root.createdAt + limits.absoluteDeadlineMs + 1 }))
+    rejects(() => parseInquiry({ ...root, deadlineAt: root.createdAt + 300_001 }))
     rejects(() => parseInquiry({ ...root, statusAt: root.createdAt - 1 }))
     rejects(() => parseInquiry({ ...root, droppedDiagnostics: -1 }))
     rejects(() => parseInquiry({ ...root, reason: 'Owner said stop' }))

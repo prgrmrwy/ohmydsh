@@ -2,10 +2,9 @@
  * Startup reconciliation for inquiries (design D8).
  *
  * The two durable stores already CLASSIFY unsettled work — `restartDisposition()`
- * on both — but nobody acts on that classification, so a restart currently leaves
- * an expired inquiry queued forever and a dispatched-but-unknown one indefinitely
- * non-terminal. This suite pins the one pass that closes those two holes, and —
- * just as importantly — pins everything it must NOT do.
+ * on both. A restart must preserve every queued row regardless of age while
+ * settling dispatched-but-unknown work needs-review. This suite pins that policy
+ * and, just as importantly, everything reconciliation must NOT do.
  *
  * Every store here is an in-memory row map whose every decision is delegated to
  * the REAL pure models (`ledger.ts`, `outbox.ts`), so an invariant that only
@@ -24,7 +23,6 @@ import {
   applyInquiryEvent,
   createInquiry,
   isTerminalInquiryStatus,
-  INQUIRY_LIMITS as limits,
   type InquiryRecord,
 } from '../src/host/inquiry/ledger.js'
 import {
@@ -37,7 +35,7 @@ const circle = 'session-main'
 const childA = { kind: 'child', sessionId: 'session-a', locusId: 'locus-a', generation: 2 } as const
 const childB = { kind: 'child', sessionId: 'session-b', locusId: 'locus-b', generation: 1 } as const
 const t0 = 1_800_000_000_000
-const deadline = t0 + limits.absoluteDeadlineMs
+const daysLater = t0 + 7 * 24 * 60 * 60 * 1_000
 const delivery = { kind: 'feishu-delivery', deliveryId: 'delivery-1' } as const
 const chat = { kind: 'feishu-chat', chatId: 'oc-example' } as const
 
@@ -217,22 +215,22 @@ const touchedOf = (value: InquiryReconcilePorts): readonly string[] =>
   (value as unknown as { __touched: readonly string[] }).__touched
 
 describe('inquiry startup reconciliation classifies durable state and settles nothing else', () => {
-  it('leaves a queued inquiry within its deadline untouched and still dispatchable', async () => {
+  it('leaves a queued inquiry untouched and dispatchable after days', async () => {
     const ledger = memoryLedger([queued()])
     const outbox = memoryOutbox()
     const before = ledger.snapshot()
 
-    const report = await reconcileInquiriesAtStartup(ports(ledger, outbox, t0 + 1_000))
+    const report = await reconcileInquiriesAtStartup(ports(ledger, outbox, daysLater))
 
     expect(report.ok).toBe(true)
     expect(report.applied).toBe(0)
-    expect(report.inquiries).toMatchObject({ recoverable: 1, expired: 0, needsReview: 0 })
+    expect(report.inquiries).toMatchObject({ recoverable: 1, needsReview: 0 })
     expect(report.results).toMatchObject({ pending: 0, created: 0 })
     expect(ledger.snapshot()).toBe(before)
     expect(outbox.rows.size).toBe(0)
 
     // "Recoverable" has to MEAN dispatchable: the row still accepts a dispatch.
-    const dispatched = await ledger.applyEvent('inquiry-1', event('dispatch', t0 + 2_000, null))
+    const dispatched = await ledger.applyEvent('inquiry-1', event('dispatch', daysLater + 1, null))
     expect(dispatched.status).toBe('executing')
   })
 
@@ -244,7 +242,7 @@ describe('inquiry startup reconciliation classifies durable state and settles no
     const report = await reconcileInquiriesAtStartup(p)
 
     expect(report.ok).toBe(true)
-    expect(report.inquiries).toMatchObject({ recoverable: 0, expired: 0, needsReview: 1, correlated: 0 })
+    expect(report.inquiries).toMatchObject({ recoverable: 0, needsReview: 1, correlated: 0 })
     // `needs-review` is terminal and has NO edge back to queued, so this row can
     // never be picked up and run a second time.
     const row = ledger.rows.get('inquiry-1')!
@@ -268,31 +266,17 @@ describe('inquiry startup reconciliation classifies durable state and settles no
     expect(touchedOf(p)).toEqual([])
   })
 
-  it('settles an inquiry already past its deadline as expired without moving the deadline', async () => {
+  it('keeps an old queued inquiry recoverable with no manufactured result', async () => {
     const ledger = memoryLedger([queued()])
     const outbox = memoryOutbox()
+    const before = ledger.snapshot()
 
-    const report = await reconcileInquiriesAtStartup(ports(ledger, outbox, deadline + 60_000))
+    const report = await reconcileInquiriesAtStartup(ports(ledger, outbox, daysLater))
 
-    expect(report.ok).toBe(true)
-    expect(report.inquiries).toMatchObject({ recoverable: 0, expired: 1, needsReview: 0 })
-    expect(report.results.created).toBe(1)
-    const row = ledger.rows.get('inquiry-1')!
-    expect(row.status).toBe('expired')
-    expect(row.reason).toBe('restart-deadline-passed')
-    // A restart must never extend, reset or re-stamp an absolute deadline, and
-    // the settlement is dated at the deadline itself rather than at restart.
-    expect(row.createdAt).toBe(t0)
-    expect(row.deadlineAt).toBe(deadline)
-    expect(row.statusAt).toBe(deadline)
-
-    const result = outbox.findByInquiry('inquiry-1')!
-    expect(result.result).toEqual({
-      kind: 'failure', failure: 'expired', reason: 'restart-deadline-passed', failedAt: deadline,
-    })
-    expect(result.createdAt).toBe(deadline)
-    expect(result.status).toBe('pending')
-    expect(row.appliedEventIds).toEqual(['restart:inquiry-1:expired'])
+    expect(report).toMatchObject({ ok: true, applied: 0, inquiries: { recoverable: 1 }, results: { created: 0 } })
+    expect(ledger.snapshot()).toBe(before)
+    expect(ledger.rows.get('inquiry-1')).toMatchObject({ status: 'queued', createdAt: t0, statusAt: t0 })
+    expect(outbox.findByInquiry('inquiry-1')).toBeUndefined()
   })
 
   it('derives its settlement events from the row, so a replay cannot double-advance', async () => {
@@ -385,56 +369,30 @@ describe('inquiry startup reconciliation classifies durable state and settles no
     expect(outbox.snapshot()).toBe(before)
   })
 
-  it('is idempotent: a second pass applies nothing and leaves byte-identical durable state', async () => {
-    // One of each disposition, so the repeat run has to be a no-op for all of
-    // them rather than for the easy one.
+  it('is idempotent across arbitrarily later restarts and preserves queued rows', async () => {
     const ledger = memoryLedger([
-      // Past its deadline at restart → expired.
       queued(),
-      // Accepted 10s later, so still inside its own absolute deadline → survives.
       queued({ inquiryId: 'inquiry-2', createdAt: t0 + 10_000 }),
-      // Dispatched, no durable result → needs-review.
       applyInquiryEvent(
         queued({ inquiryId: 'inquiry-3', createdAt: t0 + 20_000 }),
         event('dispatch', t0 + 21_000, null),
       ),
     ])
     const outbox = memoryOutbox()
-    const at = deadline + 1
 
-    const first = await reconcileInquiriesAtStartup(ports(ledger, outbox, at))
-    expect(first.ok).toBe(true)
-    expect(first.inquiries).toMatchObject({ recoverable: 1, expired: 1, needsReview: 1 })
-    // Two settlements, each one result plus one ledger event.
-    expect(first.applied).toBe(4)
-    expect(ledger.rows.get('inquiry-1')!.status).toBe('expired')
+    const first = await reconcileInquiriesAtStartup(ports(ledger, outbox, daysLater))
+    expect(first).toMatchObject({ ok: true, applied: 2, inquiries: { recoverable: 2, needsReview: 1 } })
+    expect(ledger.rows.get('inquiry-1')!.status).toBe('queued')
     expect(ledger.rows.get('inquiry-2')!.status).toBe('queued')
     expect(ledger.rows.get('inquiry-3')!.status).toBe('needs-review')
     const state = { ledger: ledger.snapshot(), outbox: outbox.snapshot() }
 
-    const second = await reconcileInquiriesAtStartup(ports(ledger, outbox, at))
-
-    expect(second.ok).toBe(true)
-    // No double-apply, no double-expire, no second result for one inquiry.
-    expect(second.applied).toBe(0)
+    const second = await reconcileInquiriesAtStartup(ports(ledger, outbox, daysLater + 30 * 24 * 60 * 60 * 1_000))
+    expect(second).toMatchObject({ ok: true, applied: 0, inquiries: { recoverable: 2, needsReview: 0 } })
     expect(second.results.created).toBe(0)
-    expect(second.inquiries).toMatchObject({ recoverable: 1, expired: 0, needsReview: 0 })
     expect(ledger.snapshot()).toBe(state.ledger)
     expect(outbox.snapshot()).toBe(state.outbox)
-    expect(outbox.rows.size).toBe(2)
-
-    // A third pass at a much LATER clock settles the survivor — whose own
-    // absolute deadline has genuinely passed by then — and re-stamps neither of
-    // the rows already settled, because their settlement instants come from the
-    // rows rather than from whatever clock the restart happened to see.
-    const third = await reconcileInquiriesAtStartup(ports(ledger, outbox, at + 600_000))
-    expect(third.inquiries).toMatchObject({ recoverable: 0, expired: 1, needsReview: 0 })
-    expect(ledger.rows.get('inquiry-1')).toEqual(JSON.parse(state.ledger)
-      .find(([key]: [string]) => key === 'inquiry-1')[1])
-    expect(ledger.rows.get('inquiry-1')!.statusAt).toBe(deadline)
-    expect(ledger.rows.get('inquiry-3')!.statusAt).toBe(at)
-    // The survivor expires at ITS OWN stored deadline, not at this clock.
-    expect(ledger.rows.get('inquiry-2')!.statusAt).toBe(t0 + 10_000 + limits.absoluteDeadlineMs)
+    expect(outbox.rows.size).toBe(1)
   })
 
   it('resumes a pass that crashed between queueing the result and settling the ledger', async () => {
@@ -463,12 +421,12 @@ describe('inquiry startup reconciliation classifies durable state and settles no
     const before = ledger.snapshot()
     const codes: string[] = []
 
-    const report = await reconcileInquiriesAtStartup(ports(ledger, outbox, deadline + 1, code => codes.push(code)))
+    const report = await reconcileInquiriesAtStartup(ports(ledger, outbox, daysLater, code => codes.push(code)))
 
     expect(report.ok).toBe(false)
     expect(report.faults).toEqual([{ stage: 'ledger-unreadable', code: 'INQUIRY_CORRUPT' }])
     expect(report.applied).toBe(0)
-    expect(report.inquiries).toEqual({ recoverable: 0, expired: 0, needsReview: 0, correlated: 0, inconsistent: 0 })
+    expect(report.inquiries).toEqual({ recoverable: 0, needsReview: 0, correlated: 0, inconsistent: 0 })
     expect(codes).toContain('ledger-unreadable')
     // Never delete or rewrite a row to make reconciliation succeed.
     expect(ledger.rows.size).toBe(1)
@@ -481,7 +439,7 @@ describe('inquiry startup reconciliation classifies durable state and settles no
     outbox.state.unreadable = 'RESULT_CORRUPT'
     const before = ledger.snapshot()
 
-    const report = await reconcileInquiriesAtStartup(ports(ledger, outbox, deadline + 1))
+    const report = await reconcileInquiriesAtStartup(ports(ledger, outbox, daysLater))
 
     expect(report.ok).toBe(false)
     expect(report.faults).toEqual([{ stage: 'outbox-unreadable', code: 'RESULT_CORRUPT' }])
@@ -489,18 +447,15 @@ describe('inquiry startup reconciliation classifies durable state and settles no
     expect(ledger.snapshot()).toBe(before)
   })
 
-  it('fails closed on a refused durable write and does not settle the ledger anyway', async () => {
+  it('does not touch outbox writes while preserving old queued work', async () => {
     const ledger = memoryLedger([queued()])
     const outbox = memoryOutbox()
     outbox.state.writeFails = 'TRANSACTION_UNAVAILABLE'
     const before = ledger.snapshot()
 
-    const report = await reconcileInquiriesAtStartup(ports(ledger, outbox, deadline + 1))
+    const report = await reconcileInquiriesAtStartup(ports(ledger, outbox, daysLater))
 
-    expect(report.ok).toBe(false)
-    expect(report.faults).toEqual([{ stage: 'outbox-write-failed', code: 'TRANSACTION_UNAVAILABLE' }])
-    // The ledger row is NOT expired: a settled inquiry with no result would
-    // strand the requester with nothing to correlate.
+    expect(report).toMatchObject({ ok: true, applied: 0, inquiries: { recoverable: 1 }, faults: [] })
     expect(ledger.snapshot()).toBe(before)
     expect(ledger.rows.get('inquiry-1')!.status).toBe('queued')
   })
@@ -510,7 +465,7 @@ describe('inquiry startup reconciliation classifies durable state and settles no
     const report = await reconcileInquiriesAtStartup({
       ledger,
       outbox: undefined as never,
-      now: () => deadline + 1,
+      now: () => daysLater,
     })
 
     expect(report.ok).toBe(false)
