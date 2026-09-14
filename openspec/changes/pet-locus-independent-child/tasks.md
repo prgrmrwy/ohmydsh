@@ -41,8 +41,9 @@
 
 ## 4. 部署与真实验收（需所有者授权）
 
-- [ ] 4.1 确认目标 home 与兼容 runtime，执行 `dsh build` 物化，验证第二次 sync 无变化
-- [ ] 4.2 重启 DSH（由所有者确认时机）
+- [x] 4.1 确认目标 home 与兼容 runtime，执行 `dsh build` 物化，验证第二次 sync 无变化
+  - 证据：2026-09-14 首次 `dsh build` 在当前目标 home / `0.1.2-rc.1` runtime 下仅原子重装 `dsh-pet`；第二次 `dsh build` 输出 `no changes — deployment already matches manifest`。
+- [ ] 4.2 重启 DSH（由所有者确认时机；当前未自动执行，避免中断正在运行的 GUI 与答疑群）
 - [ ] 4.3 真实答疑群验收：提问后 child 使用独立上下文，且实际收到飞书回复
 - [ ] 4.4 验收 child 在锚点不足时经原生 `send_message` 问父，而不是猜测或自行创建工作目录
   - 2026-09-14 首次实测已完成问父前半段：child `session-a380ee7b` 的 `identity.isSeeded=false`，调用 `send_message` 后询问准确到达 caller-bound main，父回复也以 `agent-message/relay` 回到同一 child；但暴露回复出口 bug，尚不能勾选：observer 把父回复当非 Delivery 流量，`pet_locus_reply` 被拒绝，飞书无正文。
