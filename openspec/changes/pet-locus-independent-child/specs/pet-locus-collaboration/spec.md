@@ -16,6 +16,8 @@
 
 初始化任务书 SHALL 告知子会话在工作根、约束或相关事实不足时，可通过宿主原生消息能力询问 caller-bound 主会话，MUST NOT 允许指定其它 parent 或 locus。主会话回复只是对话事实，SHALL NOT 因此成为持久授权；锚点仍须由所有者在管理面显式确认后写入。答复只提供上下文事实；路径存在性不等于写授权。
 
+父子或 agent 间的 `agent-message` SHALL 只作为子会话上下文通信，不参与 Delivery 路由判定：它 MUST NOT 建立、修改、替换或撤销当前 Delivery 已由 Host 绑定的回复目标。当前 turn 没有唯一活跃 Delivery 时，`agent-message` MUST NOT 自行产生飞书回复能力。GUI/user steer、来源不明的参与者消息与第二条 Delivery 仍 SHALL 参与歧义判定并 fail closed。
+
 caller-bound `pet_context` SHALL 提供当前 locus、局部项目入口、已确认局部锚点与权限，不允许模型指定其它目标。后续投递只带必要请求事实和查询引导，MUST NOT 每次重复全部说明。未知锚点 SHALL 如实报告。系统 MUST NOT 自动汇总或把子会话结论回传主会话；对实际询问的定向答复不属于自动结算回报。所有者可主动查阅，项目资料 SHALL 按需读取，不自动共享兄弟子会话历史。
 
 主会话 SHALL 被表述为工作归属与可询问的上下文来源，MUST NOT 因其父节点身份宣称已统合所有协作现场的最新认知。用户显式发起的查阅与汇总不属于自动回传；系统 SHALL 区分可发现、可读取与已采纳，缺少历史读取能力或权限时如实说明。当前模型 MUST NOT 宣称已提供 project 级自动知识同步或多人分布式协同。
@@ -41,6 +43,18 @@ caller-bound `pet_context` SHALL 提供当前 locus、局部项目入口、已�
 #### Scenario: 主会话无法回答
 - **WHEN** 补问信息无法取得
 - **THEN** 报告未确认，不把请求接受当作已收到答复，不放宽权限
+
+#### Scenario: 父回复不撤销原 Delivery 回复目标
+- **WHEN** child 在处理唯一飞书 Delivery 的当前 turn 内经原生消息询问父会话，父回复以 `agent-message` 进入该 turn
+- **THEN** 该消息只补充 child 上下文，不参与 Delivery 路由判定，child 仍可通过 `pet_locus_reply` 使用原 Delivery 的 Host 绑定目标回复飞书
+
+#### Scenario: 单独的 agent 消息不能获得飞书回复能力
+- **WHEN** child 当前没有唯一活跃 Delivery 而只收到一条 `agent-message`
+- **THEN** 该上下文消息不建立飞书回复目标，`pet_locus_reply` 仍须拒绝发送
+
+#### Scenario: GUI 流量仍使回复目标失效
+- **WHEN** 同一 child turn 同时包含飞书 Delivery 与 GUI/user steer、来源不明的参与者消息或第二条 Delivery
+- **THEN** 系统继续 fail closed，不得借原 Delivery 目标发送混合任务的正文
 
 #### Scenario: 新话题上下文
 - **WHEN** 群子会话已积累讨论而新话题子会话建立

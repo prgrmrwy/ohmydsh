@@ -24,7 +24,7 @@ D1/D2 依赖的四点假设已对已部署 Host 配置逐一实测，均成立�
 **Goals:**
 - 新建与显式重建的 child 零父 transcript、零默认父摘要。
 - 创建前可失败地核验 provider 确实不继承父上下文。
-- 飞书回复出口可靠：能在真实答疑群走通一次问答。
+- 飞书回复出口可靠：能在真实答疑群走通一次问答，包括 child 经原生 `send_message` 获取父会话上下文后仍使用原 Delivery 目标回复飞书。
 
 **Non-Goals:**
 - 上下文模式标记与其持久化、展示（见 D4：所有者明确决定不要这层可观测性，也不做新旧模式共存的历史兼容）。
@@ -73,13 +73,26 @@ D1/D2 依赖的四点假设已对已部署 Host 配置逐一实测，均成立�
 - 旧 fork child 不会被本 change 的代码路径重新创建，所以它们的行为和历史天然不受影响，不需要用一个字段去"保护"它们不被静默改造。
 - 如果后续实际需要区分新旧 child（例如做管理面展示），应作为独立的小 change，届时按需决定接入哪一层，而不是现在预先猜测。
 
-因此本 change 不改 `spec.ts` schema、不改 domain 版本、不改 `controller.ts`/`dsh-port.ts`/`index.ts` 的创建编排链路，只改 `child.ts` 的 provider 默认值与创建前能力核验。
+因此独立创建本体不改 `spec.ts` schema、不改 domain 版本、不改 `controller.ts`/`dsh-port.ts`/`index.ts` 的创建编排链路，只改 `child.ts` 的 provider 默认值与创建前能力核验。真实问父验收后来发现的 `agent-message`/Delivery 分类缺陷由 D5 单独收敛在 `turn-observer.ts`（以及必要的 `index.ts` 事件接线类型/注释），不扩张创建编排或持久化范围。
 
-### D5. 公共事实本期由「问父」替代
+### D5. 公共事实本期由「问父」替代；父子消息是纯上下文通道
 
 child 缺少背景时通过原生 `send_message` 询问主会话；主会话若需要，再自行询问其它 child。这条链路已在前言接线，且不需要新的持久层或新的授权面。
 
-代价：跨 child 的事实不共享、不版本化，父会话可能成为瓶颈。这是所有者明确接受的本期取舍，不是遗漏。
+2026-09-14 真实答疑群验收暴露了现有实现与该设计的冲突：飞书 Delivery 先以 `next-turn` 进入 child；child 调用 `send_message` 后，父回复以 `source.kind='agent-message'`、`form='relay'` 插入同一个正在运行的 turn 的 `next-step`。`turn-observer` 只豁免 Host 注入的 instructions/plugin/skill-catalog，却把父回复当成非 Delivery 参与者流量，于是 `currentForChild()` 撤销原 Delivery 的回复证明。child 随后正确调用 `pet_locus_reply({ text: 'MANGO-SPAWN-0914' })`，仍被拒绝为 `This turn has no exact Feishu Delivery reply target`；Delivery 最终 settled，但飞书无正文。
+
+本期采用所有者确认的语义：**所有 `agent-message` 都是父子/agent 间的上下文通信，不参与 Delivery 路由判定**。它可以影响 child 的上下文和答复内容，但：
+
+- 不建立、替换、修改或撤销当前 Delivery 已由 Host 绑定的 `chatId`/`messageId`/`threadId`；
+- 没有活跃 Delivery 时，也不能凭 `agent-message` 获得飞书回复能力；
+- `user` 来源的 GUI/parent steer、来源缺失的参与者流量、第二条 Delivery 仍参与歧义判定并 fail closed；
+- 父会话只看到 child 显式发送的文字与 child session id，不接收 locus/Delivery/飞书目标，本设计不把父会话耦合进路由。
+
+实现保持窄：事件适配层继续只把 `source.kind` 传给 observer；将 Host 注入上下文与 `agent-message` 统一分类为「非路由上下文 claim」并忽略。无需传 `senderSessionId`，因为本期语义不是核验哪个 parent，而是 agent 间消息这一通道本身不拥有飞书路由语义。无活跃 Delivery 的单独 `agent-message` 被忽略后仍没有 observed Delivery，因此 `currentForChild()` 返回 `undefined`。
+
+代价：父在 child 处理飞书 Delivery 时主动发来的 agent 消息可能影响同一 turn 的答复内容；这是 DSH 原生 `send_message` 对运行中目标采用 nearest-step steer 的既有语义，也是所有者明确接受的方案 1。本期不引入 request/reply correlation 或跨轮 continuation；后者仍属于暂停的 B035 扩展范围。
+
+跨 child 的事实不共享、不版本化，父会话可能成为瓶颈。这是所有者明确接受的本期取舍，不是遗漏。
 
 ## Risks / Trade-offs
 
