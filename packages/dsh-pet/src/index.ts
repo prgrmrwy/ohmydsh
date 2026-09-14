@@ -48,6 +48,15 @@ import { createPetSkillProvider, resolveInvocationSkill } from './host/skill-pro
 import { createWorktreeProvider } from './host/worktree-adapter.js'
 import { loadWorktreeStatus } from './host/worktree-status.js'
 import { registerPetTools } from './host/tools.js'
+import { CollaborationContextStore } from './host/collaboration/context-store.js'
+import { createCollaborationHostIdentity } from './host/collaboration/host-identity.js'
+import { createCollaborationContextRoutes } from './host/collaboration/routes.js'
+import {
+  composeCollaborationSurface,
+  type CollaborationAssembly,
+} from './host/collaboration/assembly.js'
+import { InquiryLedgerStore } from './host/inquiry/ledger-store.js'
+import type { InquiryOriginProof } from './host/inquiry/ask.js'
 import {
   LocusRepository,
   type LocusStartupCompensators,
@@ -269,6 +278,11 @@ async function initialize(
   // The additive locus store is a separate source of truth. It is opened on
   // the same durable domain but never falls back to legacy chat bindings.
   const locusRepository = new LocusRepository(domain)
+  const collaborationContextStore = new CollaborationContextStore(domain as never)
+  const collaborationHostIdentity = createCollaborationHostIdentity({
+    sessionController: ctx.get('sessionController') as never,
+    workspaceRegistry: ctx.workspaceRegistry as never,
+  })
   // Startup recovery is deliberately deferred until the exact child runtime,
   // turn observer and operation-owned compensation ports have been composed.
   // Running it here with no options would persist manual debt before the Host
@@ -283,6 +297,187 @@ async function initialize(
     locusRepository,
     childSessionId => currentLocusTurnProof(childSessionId),
   )
+
+  /**
+   * Agent scopes already carrying the scoped collaboration + inquiry surface.
+   *
+   * A fourth marker alongside `composedAgents`/`allowlistAgents`/
+   * `contextToolAgents` below, following the same discipline for the same
+   * reason: the SAME agent can be offered this surface from more than one
+   * entry point (the synchronous locus-child boundary, the `agent/created`
+   * fall-through, the live-parent repair after a first locus is published),
+   * and a second registration of the same tool name throws
+   * `tool "..." is already registered in this scope`. An explicit weak marker
+   * is the deduplication; swallowing a duplicate-registration error is exactly
+   * how the `shellEnv` incident cost the executor its `bash` tool.
+   *
+   * Declared here rather than beside the others because the assembly that
+   * consumes it is composed before them.
+   */
+  const collaborationAgents = new WeakSet<object>()
+
+  /**
+   * Durable inquiry ledger over the same opened domain.
+   *
+   * Constructed unconditionally: it proves the atomic-batch capability itself
+   * on every call and rejects without it, and the assembly below refuses to
+   * publish anything when that capability is absent.
+   */
+  const inquiryLedgerStore = new InquiryLedgerStore(domain as never)
+
+  /**
+   * Synchronous, cheap durable description of one circle member.
+   *
+   * The roster contract forbids reading or summarizing a member's history, and
+   * requires a SYNCHRONOUS answer, so the owner-facing
+   * `createLocusSessionDescriber` (an async cold log read used for the
+   * management view) is deliberately not reused here. `sessions.get` means
+   * LOADED, not "exists" — which is precisely the distinction the roster wants:
+   * a durable member DSH has unloaded is `unloaded`, i.e. `needs-restore`, not
+   * missing. Archived members never reach this function; the caller resolver
+   * excludes them from the circle first.
+   */
+  const describeCollaborator = (sessionId: string): { title?: string; availability?: 'available' | 'unloaded' } => {
+    const session = ctx.sessions.get(sessionId as never)
+    if (session === undefined) return { availability: 'unloaded' }
+    // Titles are log-only `session/title` events, never header fields.
+    const snapshot = ctx.sessionTitle.get(session as never) as { title?: unknown } | undefined
+    const title = typeof snapshot?.title === 'string' && snapshot.title.trim() !== ''
+      ? snapshot.title
+      : undefined
+    return { availability: 'available', ...(title === undefined ? {} : { title }) }
+  }
+
+  /**
+   * Host-proven origin and audience of the work one caller is serving.
+   *
+   * Derived from the executing session's durable facts, never from an argument:
+   * a child serving a Feishu Delivery cannot relabel that work as private local
+   * work to widen what an answer may contain. A locus child whose current
+   * Delivery cannot be proven gets `local` origin with an `unknown` audience —
+   * honest rather than a claim of privacy — and a main session gets a genuinely
+   * local origin, because a main session has no Feishu outbound at all.
+   */
+  const resolveInquiryOrigin = (callerSessionId: string): InquiryOriginProof | undefined => {
+    try {
+      const owned = locusRepository.findByChildSessionId(callerSessionId)
+      if (owned.length > 1) return undefined
+      const row = owned[0]
+      if (row === undefined) {
+        // Not a locus child: a main session's work is local to its own session.
+        if (locusRepository.getLocusByChild(callerSessionId) !== undefined) return undefined
+        return {
+          origin: { kind: 'local' },
+          audience: { kind: 'local-session', sessionId: callerSessionId },
+        }
+      }
+      if (row.state !== 'active' || row.childSessionId !== callerSessionId) return undefined
+      const proof = currentLocusTurnProof(callerSessionId)
+      const delivery = proof === undefined
+        ? undefined
+        : locusRepository
+          .listPendingDeliveries(row.id)
+          .find(record =>
+            record.childSessionId === callerSessionId
+            && record.executionId === proof.executionId)
+      if (delivery === undefined) {
+        // No provable Feishu request behind this segment. `unknown` tightens
+        // disclosure instead of asserting a private local audience.
+        return { origin: { kind: 'local' }, audience: { kind: 'unknown' } }
+      }
+      return {
+        origin: { kind: 'feishu-delivery', deliveryId: delivery.deliveryId },
+        audience: { kind: 'feishu-chat', chatId: delivery.endpoint.chatId },
+      }
+    } catch {
+      // An unreadable index proves nothing; refusing is the only safe answer.
+      return undefined
+    }
+  }
+
+  /**
+   * The scoped collaboration + inquiry surface, or nothing.
+   *
+   * `undefined` here means a required seam is missing and Pet keeps behaving
+   * exactly as before — no tool is published and no diagnostic path changes.
+   *
+   * Inquiry DISPATCH stays unavailable on this Host by construction: the real
+   * detector reads the isolated queued-turn claim marker off the agent driver,
+   * and the pinned runtime carries no such marker (the seam exists only as a
+   * tracked compatibility patch that this Host does not load). No probe is
+   * supplied either, because a probe built from a `dsh-agent` copy other than
+   * the one the Host actually loaded proves nothing — the capability audit
+   * records exactly that failure. The verdict is therefore passed to the
+   * scheduler as-is; nothing here fakes it available.
+   */
+  const collaborationSurface: CollaborationAssembly | undefined = composeCollaborationSurface({
+    atomicStorage: locusRepository.supportsAtomicProvisioning(),
+    loci: locusRepository,
+    identity: collaborationHostIdentity,
+    contextStore: collaborationContextStore,
+    ledger: inquiryLedgerStore,
+    describe: describeCollaborator,
+    origin: resolveInquiryOrigin,
+    // `ctx.get` rather than property access: `agentLoop` is not in this
+    // plugin's `inject`, and cordis throws on undeclared property access.
+    agentLoop: ctx.get('agentLoop'),
+    installed: collaborationAgents,
+  })
+  if (collaborationSurface === undefined) {
+    petLog('dsh-pet: scoped collaboration/inquiry surface unavailable — required seams are missing')
+  } else if (!collaborationSurface.inquiryDispatch.available) {
+    petLog(
+      'dsh-pet: inquiry dispatch stays unavailable '
+      + `(${collaborationSurface.inquiryDispatch.reason}); members are reported as not inquirable`,
+    )
+  }
+
+  /**
+   * Install the collaboration surface on ONE live agent scope, if it belongs.
+   *
+   * Eligibility is a durable hint used to decide whether to install at all;
+   * every tool body still re-derives the caller and re-authorizes, so a revoked
+   * child cannot use a tool that merely remains visible to it. Returns whether
+   * anything was installed, and THROWS on a real installation failure so the
+   * synchronous locus boundary can veto publication; asynchronous callers
+   * contain it themselves.
+   * @param agentCtx - the agent's own scope; never the Host context.
+   * @param sessionId - the agent's session id.
+   * @returns whether the surface is now present on that scope.
+   */
+  const installCollaborationScope = (agentCtx: unknown, sessionId: string): boolean => {
+    if (collaborationSurface === undefined) return false
+    if (agentCtx === null || typeof agentCtx !== 'object') return false
+    if (collaborationSurface.isInstalled(agentCtx)) return true
+    if (!collaborationSurface.eligible(sessionId)) return false
+    collaborationSurface.install(agentCtx)
+    return true
+  }
+
+  /** Same installation, contained: for paths that repair a PUBLISHED agent. */
+  const repairCollaborationScope = (agentCtx: unknown, sessionId: string): void => {
+    try {
+      installCollaborationScope(agentCtx, sessionId)
+    } catch (error) {
+      petWarn(
+        `dsh-pet: could not install the collaboration surface on ${sessionId} (${
+          error instanceof Error ? error.message : String(error)
+        })`,
+      )
+    }
+  }
+
+  /** The live agent's own scope for one session, when DSH has it loaded. */
+  const liveAgentScope = (sessionId: string): unknown => {
+    try {
+      const handle = ctx.agents.get(sessionId as never) as
+        | { ctx?: unknown; agent?: { ctx?: unknown } }
+        | undefined
+      return handle?.ctx ?? handle?.agent?.ctx
+    } catch {
+      return undefined
+    }
+  }
 
   const workspaceId = await lifecycle.contain('Pet Workspace', () =>
     ensurePetWorkspace(ctx.workspaceRegistry as never, paths),
@@ -599,6 +794,12 @@ async function initialize(
     await installPetScope(scoped, includeAllowlist)
   }
 
+  // This is intentionally a separate Host owner proof from locusIdentity
+  // (`host:dsh-pet` is a plugin identity, not a browser principal). Until the
+  // Connection service exposes a target-parent local-owner verdict, the route
+  // stays unmounted rather than upgrading an allowlist or agent label.
+  const collaborationOwnerIdentity = (): undefined => undefined
+
   /** Whether an Agent already carries the Pet-owned scoped surface. */
   const isComposed = (agent: unknown): boolean => {
     const agentCtx = (agent as { ctx?: unknown } | undefined)?.ctx
@@ -646,6 +847,15 @@ async function initialize(
         })`,
       )
     }
+    // A Pet executor session can also be the MAIN session of a circle — an
+    // owner may bind a Feishu entry to it like any other session. Eligibility
+    // decides; an ordinary executor with no locus and no shared record gets
+    // nothing, which is the "do not change existing behaviour" case.
+    //
+    // Separately contained from the Pet scope above: losing the circle surface
+    // must never cost an executor `pet_context`, and a failure here must not
+    // make the fail-closed dispatch check below reject a usable Invocation.
+    repairCollaborationScope(view.ctx, String(sessionId))
   }
 
   /**
@@ -707,6 +917,19 @@ async function initialize(
             lark: larkClient,
           },
         })
+        // The circle surface rides the SAME synchronous boundary, so a locus
+        // child never starts its first turn able to read shared facts but not
+        // to list its collaborators, or the reverse. Installed unconditionally
+        // rather than through the durable eligibility hint: the composer has
+        // already proven this exact session is a current locus child, and for a
+        // FRESH child the durable row is not active yet, so the hint would say
+        // no precisely when the surface matters most.
+        //
+        // A throw here vetoes publication, which is the same guarantee the
+        // caller-bound surface above already has. An absent assembly is not a
+        // failure: the whole surface is simply not published and the child
+        // behaves exactly as it did before this existed.
+        collaborationSurface?.install(agent.scope)
       },
     },
     ...(() => {
@@ -767,8 +990,25 @@ async function initialize(
           if (result.composed) {
             composedAgents.add(agent.ctx as object)
             contextToolAgents.add(agent.ctx as object)
+            // The circle marker is deliberately NOT set here. `install()` adds
+            // it itself, and only after every registration succeeded; setting
+            // it from outside would record a surface that may never have been
+            // installed at all — for example when no assembly composed — and
+            // then permanently suppress the repair paths that would fix it.
             return
           }
+          // This is the COLD RESTORE and NATIVE GUI LOAD entry point for a main
+          // session, and for a locus child whose durable row was already active
+          // when DSH republished it. Neither is a Pet Task executor, so the
+          // foreign-executor path below leaves both untouched.
+          //
+          // Contained rather than rethrown: unlike a fresh locus child, this
+          // agent is an ordinary user session that DSH is publishing for its own
+          // reasons. Vetoing that publication because Pet could not add its
+          // circle tools would take the user's session away over an additive
+          // capability. The surface is simply absent and every tool body would
+          // have refused anyway.
+          repairCollaborationScope(agent.ctx, sessionId)
         }
         // Cordis event listeners are observe-only here. Await the scoped
         // installation without allowing an async rejection to escape into the
@@ -1227,6 +1467,21 @@ async function initialize(
               locusPrepublication.commit(reservation)
               finalized = true
               adapter.dispose()
+              // The controller calls this only AFTER the active locus row is
+              // durably committed, so this is the first instant the main
+              // session is provably a circle parent. Install its circle
+              // surface now, while it is loaded, so the tools are present in
+              // its NEXT tool snapshot rather than after a failed call.
+              //
+              // Deliberately does NOT start a turn, send a message, mount a
+              // preset or touch the main session's existing composition: the
+              // spec forbids waking the parent model to announce a membership
+              // change. An unloaded parent is simply repaired by the
+              // `agent/created` path when DSH next publishes it.
+              const parentScope = liveAgentScope(input.parentSessionId)
+              if (parentScope !== undefined) {
+                repairCollaborationScope(parentScope, input.parentSessionId)
+              }
             },
             rollback: async () => {
               if (!finalized && locusPrepublication.inspect(reservation.childSessionId) !== undefined) {
@@ -2255,7 +2510,16 @@ async function initialize(
     void coordinator.pump(task.id).catch(() => undefined)
   }
 
-  for (const route of createPetRoutes({
+  const collaborationRoutes = collaborationOwnerIdentity() === undefined
+    ? []
+    : createCollaborationContextRoutes({
+        store: collaborationContextStore,
+        browserAuth: ctx.connection,
+        ownerIdentity: collaborationOwnerIdentity,
+        now: Date.now,
+      })
+
+  for (const route of [...createPetRoutes({
     repository,
     capabilities,
     coordinator,
@@ -2309,10 +2573,15 @@ async function initialize(
         return undefined
       }
     },
-  })) {
+  }), ...collaborationRoutes]) {
     ctx.effect(
       () => {
-        const protectedRoute = withBrowserAuth(route, ctx.connection)
+        // Collaboration routes are already fenced by their factory; applying
+        // the standard fence twice is harmless but would obscure the explicit
+        // owner-proof boundary in tests and diagnostics.
+        const protectedRoute = collaborationRoutes.includes(route)
+          ? route
+          : withBrowserAuth(route, ctx.connection)
         return ctx.webServer.register({
           kind: 'exact',
           path: protectedRoute.path,
