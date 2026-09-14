@@ -8,41 +8,40 @@
 - [x] 0.4 provider 字符串透传路径干净，无中间默认值覆盖：`child.ts`（`provider: input.provider ?? DEFAULT_CHILD_PROVIDER`）→ `probeLocusChildPorts` 的 `subagentRecord.startContinuable(spec)` → `Subagent.startContinuable(spec)`（`lib/index.js:1034`）→ `establishFresh`（`:1155`）→ `host.prepareContinuable(spec.provider, ...)`（`:1179`）→ `this.providers.get(name)`（`:3220`），全程纯字符串透传
 - [x] 0.5 四点全部确认成立，无假设被推翻；设计按原方案继续，不需要调整
 
-## 1. 独立 child 创建
+## 1. 独立 child 创建 —— 已完成
 
-- [ ] 1.1 把 `DEFAULT_CHILD_PROVIDER` 改为零父上下文的 provider，三条创建路径共用同一常量；调用方显式传入的 provider 语义不变
-- [ ] 1.2 创建前核验 provider 的 `inheritsParentContext === false`，无法证明时返回稳定失败码并拒绝创建，不静默退回 fork
-- [ ] 1.3 测试：默认创建/idle 创建/重建都使用独立 provider；能力不可证明时三条路径均 fail closed；显式传 provider 仍可覆盖
+- [x] 1.1 把 `DEFAULT_CHILD_PROVIDER` 改为零父上下文的 provider，三条创建路径共用同一常量；调用方显式传入的 provider 语义不变
+  - 证据：`child.ts:331` 改为 `'spawn'`；三条路径（`startChild`/`runReservedIdleCreate`/重建）共用该常量，未新增并行创建函数
+- [x] 1.2 创建前核验 provider 的 `inheritsParentContext === false`，无法证明时返回稳定失败码并拒绝创建，不静默退回 fork
+  - 证据：`defaultProviderProvenIndependent()` + `independent-context-unproven` 失败码，接入 `startChild`/`runReservedIdleCreate` 两条路径，仅在 `input.provider === undefined` 时触发；同时修复了 `probeLocusChildPorts()` 未透传 `getProvider` 的真实集成缺口（若不修，生产环境该核验会永远失败）
+- [x] 1.3 测试：默认创建/idle 创建/重建都使用独立 provider；能力不可证明时三条路径均 fail closed；显式传 provider 仍可覆盖
+  - 证据：`locus-child.test.ts` 新增 8 项（D2 四种 fail-closed 变体含 idle 路径、D1 显式 provider 绕过核验、`getProvider` 透传 3 种子场景），完整 red→green 验证（临时删除核验代码确认新测试失败，diff 字节级恢复）；全文件 38/38 通过
 
-## 2. 上下文模式持久化
+**范围决定（所有者 2026-03-23）**：不引入上下文模式标记（`fork-prefix-v1`/`independent-v1`/`unknown`）及其 schema 持久化。实施时发现要让该字段真正生效，需要把独立性核验结果一路传递穿过 `index.ts`→`dsh-port.ts`→`controller.ts`（6 处调用点）→`controller-persistence-adapter.ts` 才能到达 `buildLocusRecord()`，与"加一个字段"的预期规模不对等；且该字段只是可观测性，不影响独立性本身是否生效。详见 `design.md` D4。原第 2 节（schema 持久化）整节移除，不做新旧模式共存的历史兼容层。
 
-- [ ] 2.1 locus 记录新增可选上下文模式字段（`fork-prefix-v1` / `independent-v1` / `unknown`），按 additive 规则演进 schema，不转换或清除既有行
-- [ ] 2.2 新建与显式重建写入 `independent-v1`；既有行保持未知，不按创建时间或 provider 默认值推断
-- [ ] 2.3 测试：新建写入独立模式、既有行保持未知、旧 fork child 记录与历史不变、离线迁移路径不删除行
+## 2. 回复出口与问父路径回归
 
-## 3. 回复出口与问父路径回归
+- [ ] 2.1 回归 `pet_locus_reply` 为业务正文唯一出口，turn 结束未发送时仍如实诊断为未回复
+- [ ] 2.2 回归首轮前言仍包含「按需问 caller-bound 主会话」「parent 回复不构成持久授权」「不自动回传结论」三条边界
+- [ ] 2.3 测试：独立 child 首轮不含父 transcript 哨兵、lineage 正确、silent settlement 行为不变
 
-- [ ] 3.1 回归 `pet_locus_reply` 为业务正文唯一出口，turn 结束未发送时仍如实诊断为未回复
-- [ ] 3.2 回归首轮前言仍包含「按需问 caller-bound 主会话」「parent 回复不构成持久授权」「不自动回传结论」三条边界
-- [ ] 3.3 测试：独立 child 首轮不含父 transcript 哨兵、lineage 正确、silent settlement 行为不变
+## 3. 本地验证
 
-## 4. 本地验证
+- [ ] 3.1 运行 `npm run typecheck --workspace=dsh-pet`、`npm run test --workspace=dsh-pet`、`npm run build --workspace=dsh-pet`
+- [ ] 3.2 运行仓库 `npm test`、`npm run check:artifacts`、`git diff --check`
+- [ ] 3.3 `openspec validate pet-locus-independent-child --strict`
 
-- [ ] 4.1 运行 `npm run typecheck --workspace=dsh-pet`、`npm run test --workspace=dsh-pet`、`npm run build --workspace=dsh-pet`
-- [ ] 4.2 运行仓库 `npm test`、`npm run check:artifacts`、`git diff --check`
-- [ ] 4.3 `openspec validate pet-locus-independent-child --strict`
+## 4. 部署与真实验收（需所有者授权）
 
-## 5. 部署与真实验收（需所有者授权）
+- [ ] 4.1 确认目标 home 与兼容 runtime，执行 `dsh build` 物化，验证第二次 sync 无变化
+- [ ] 4.2 重启 DSH（由所有者确认时机）
+- [ ] 4.3 真实答疑群验收：提问后 child 使用独立上下文，且实际收到飞书回复
+- [ ] 4.4 验收 child 在锚点不足时经原生 `send_message` 问父，而不是猜测或自行创建工作目录
+- [ ] 4.5 验收主会话未被自动灌入 child 结论
+- [ ] 4.6 验收旧 fork child 仍正常服务，历史未被裁剪
 
-- [ ] 5.1 确认目标 home 与兼容 runtime，执行 `dsh build` 物化，验证第二次 sync 无变化
-- [ ] 5.2 重启 DSH（由所有者确认时机）
-- [ ] 5.3 真实答疑群验收：提问后 child 使用独立上下文，且实际收到飞书回复
-- [ ] 5.4 验收 child 在锚点不足时经原生 `send_message` 问父，而不是猜测或自行创建工作目录
-- [ ] 5.5 验收主会话未被自动灌入 child 结论
-- [ ] 5.6 验收旧 fork child 仍正常服务，历史未被裁剪
+## 5. 收尾
 
-## 6. 收尾
-
-- [ ] 6.1 回填真实证据到 `docs/notes/pet-locus-independent-child-handoff.md`，只记录实际执行过的命令与结果
-- [ ] 6.2 更新 BACKLOG B035 状态，说明本 change 承接范围与 B035 剩余范围的边界
-- [ ] 6.3 与 `pet-unified-locus-collaboration`、`pet-locus-independent-agent-inquiries` 对齐归档顺序；两个 change 修改同一条 requirement，按实际实现顺序重新对齐后再归档
+- [ ] 5.1 回填真实证据到 `docs/notes/pet-locus-independent-child-handoff.md`，只记录实际执行过的命令与结果
+- [ ] 5.2 更新 BACKLOG B035 状态，说明本 change 承接范围与 B035 剩余范围的边界
+- [ ] 5.3 与 `pet-unified-locus-collaboration`、`pet-locus-independent-agent-inquiries` 对齐归档顺序；两个 change 修改同一条 requirement，按实际实现顺序重新对齐后再归档

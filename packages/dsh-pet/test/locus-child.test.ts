@@ -38,11 +38,23 @@ function subagentPort(
   start: LocusSubagentPort['startContinuable'] = async spec => ({
     childId: spec.childId ?? CHILD_ID,
   }),
-  options: { readonly supportsSettlementNotice?: boolean } = {},
+  options: {
+    readonly supportsSettlementNotice?: boolean
+    /**
+     * Whether `getProvider(LOCUS_CHILD_PROVIDER)` proves independence, exactly
+     * as the real `spawn` provider does (`inheritsParentContext: false`).
+     * Defaults to proven: most fixtures exercise ordinary creation, and this
+     * mirrors the production runtime rather than a pinned-runtime gap.
+     */
+    readonly independentContextProven?: boolean
+  } = {},
 ): LocusSubagentPort {
+  const proven = options.independentContextProven ?? true
   return {
     startContinuable: vi.fn(start),
     supportsSettlementNotice: options.supportsSettlementNotice ?? true,
+    getProvider: vi.fn((name: string) =>
+      proven && name === LOCUS_CHILD_PROVIDER ? { inheritsParentContext: false } : undefined),
   }
 }
 
@@ -181,6 +193,72 @@ describe('generic locus child adapter', () => {
       expect(start.startContinuable).not.toHaveBeenCalled()
       expect(adapter.activeChild).toBeUndefined()
     }
+  })
+
+  it('refuses to create with the default provider when its independence is unproven (D2 fail closed)', async () => {
+    // Three ways a runtime can fail to prove it: no lookup method at all, the
+    // lookup returning nothing, and a provider object that positively claims
+    // inheritance. None may silently produce a child.
+    const variants: LocusSubagentPort[] = [
+      subagentPort(undefined, { independentContextProven: false }),
+      { ...subagentPort(), getProvider: undefined },
+      { ...subagentPort(), getProvider: () => ({ inheritsParentContext: true }) },
+      { ...subagentPort(), getProvider: () => { throw new Error('registry unavailable') } },
+    ]
+    for (const start of variants) {
+      const startSpy = vi.spyOn(start, 'startContinuable')
+      const adapter = createLocusChildAdapter({
+        parent: parentPort({ resident: parent() }),
+        subagent: start,
+        inbox: inboxPort(),
+      })
+      await expect(adapter.createChild({
+        parentSessionId: PARENT_ID,
+        label: 'child',
+        prompt: 'seed',
+      })).resolves.toEqual({ ok: false, reason: 'independent-context-unproven' })
+      expect(startSpy).not.toHaveBeenCalled()
+      expect(adapter.activeChild).toBeUndefined()
+
+      const idleStart = { ...subagentPort(), createIdleContinuable: vi.fn(async (spec: { childId: string }) => ({ childId: spec.childId })) }
+      const idleVariant: LocusSubagentPort = {
+        ...idleStart,
+        supportsIdleContinuableCreate: true,
+        getProvider: start.getProvider,
+      }
+      const idleAdapter = createLocusChildAdapter({
+        parent: parentPort({ resident: parent() }),
+        subagent: idleVariant,
+        inbox: inboxPort(),
+      })
+      await expect(idleAdapter.createIdleChild({
+        parentSessionId: PARENT_ID,
+        childId: 'reserved-id',
+        label: 'child',
+      })).resolves.toEqual({ ok: false, reason: 'independent-context-unproven' })
+      expect(idleStart.createIdleContinuable).not.toHaveBeenCalled()
+    }
+  })
+
+  it('never re-verifies independence for an explicitly named provider (D1: explicit choice stands)', async () => {
+    // The caller named `fork` on purpose (compatibility/tests); the D2 guard
+    // exists to stop a SILENT default fallback, not to second-guess an
+    // explicit choice — even one the default-provider check would refuse.
+    const start = subagentPort(undefined, { independentContextProven: false })
+    const adapter = createLocusChildAdapter({
+      parent: parentPort({ resident: parent() }),
+      subagent: start,
+      inbox: inboxPort(),
+    })
+    await expect(adapter.createChild({
+      parentSessionId: PARENT_ID,
+      label: 'child',
+      prompt: 'seed',
+      provider: 'fork',
+    })).resolves.toMatchObject({ ok: true, created: true })
+    expect(start.startContinuable).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: 'fork' }),
+    )
   })
 
   it('rejects a second parent while an active child exists', async () => {
@@ -723,6 +801,12 @@ describe('probed host child seams', () => {
     readonly supportsSettlementNotice?: boolean
     readonly supportsIdleContinuableCreate?: boolean
     readonly supportsLiveContinuableChildSession?: boolean
+    /**
+     * Whether `getProvider(LOCUS_CHILD_PROVIDER)` proves independence. Off by
+     * default like the other markers here, so a test asserting success must
+     * opt every required capability in explicitly.
+     */
+    readonly independentContextProven?: boolean
   } = {}) {
     const services: Record<string, unknown> = {
       // A resident parent, so a creation test exercises the capability gate
@@ -736,6 +820,10 @@ describe('probed host child seams', () => {
           operation: (session: unknown) => unknown,
         ) => operation({ id: CHILD_ID }),
         listChildren: async () => overrides.children ?? [],
+        getProvider: (name: string) =>
+          overrides.independentContextProven === true && name === LOCUS_CHILD_PROVIDER
+            ? { inheritsParentContext: false }
+            : undefined,
         ...(overrides.supportsSettlementNotice === true
           ? { supportsSettlementNotice: true }
           : {}),
@@ -799,11 +887,44 @@ describe('probed host child seams', () => {
     expect(unmarked.available && unmarked.ports.subagent.supportsLiveContinuableChildSession).toBeUndefined()
   })
 
+  it('binds getProvider to the exact loaded subagent service, so creation can prove independence', async () => {
+    const marked = probeLocusChildPorts(hostCtx({ independentContextProven: true }))
+    expect(marked.available && typeof marked.ports.subagent.getProvider).toBe('function')
+    expect(
+      marked.available ? marked.ports.subagent.getProvider!(LOCUS_CHILD_PROVIDER) : undefined,
+    ).toEqual({ inheritsParentContext: false })
+    expect(
+      marked.available ? marked.ports.subagent.getProvider!('fork') : undefined,
+    ).toBeUndefined()
+
+    // Same host method, unproven lookup result: the port still exposes the
+    // real function rather than fabricating an always-unproven stand-in, and
+    // the caller (defaultProviderProvenIndependent) is what decides unproven.
+    const unmarked = probeLocusChildPorts(hostCtx())
+    expect(
+      unmarked.available ? unmarked.ports.subagent.getProvider!(LOCUS_CHILD_PROVIDER) : 'unavailable',
+    ).toBeUndefined()
+
+    // No such method on the loaded runtime at all: the port omits it entirely
+    // rather than fabricating any stand-in, matching the createIdleContinuable
+    // precedent above.
+    const noMethod = probeLocusChildPorts({
+      get: (name: string) => (name === 'subagents'
+        ? { startContinuable: async () => ({ childId: CHILD_ID }), [LOCUS_QUEUE_PROMPT_SYMBOL]: async () => 'm' }
+        : name === 'agents' ? { get: () => undefined, resume: async () => undefined } : undefined),
+      on: () => () => {},
+    })
+    expect(noMethod.available && noMethod.ports.subagent.getProvider).toBeUndefined()
+  })
+
   it('creates a child once the loaded runtime proves it can suppress the parent report', async () => {
     // The literal belongs to the runtime instance the Host actually loaded.
     // An official older runtime has no marker, even though JavaScript would
     // accept and silently ignore an unknown `settlementNotice` field.
-    const probe = probeLocusChildPorts(hostCtx({ supportsSettlementNotice: true }))
+    const probe = probeLocusChildPorts(hostCtx({
+      supportsSettlementNotice: true,
+      independentContextProven: true,
+    }))
     expect(probe.available).toBe(true)
     expect(probe.available && probe.ports.subagent.supportsSettlementNotice).toBe(true)
 
@@ -819,6 +940,7 @@ describe('probed host child seams', () => {
     const probe = probeLocusChildPorts(hostCtx({
       supportsSettlementNotice: true,
       supportsIdleContinuableCreate: true,
+      independentContextProven: true,
     }))
     expect(probe.available).toBe(true)
     const adapter = createLocusChildAdapter(probe.available ? probe.ports : ({} as never))

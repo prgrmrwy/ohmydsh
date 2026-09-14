@@ -24,10 +24,10 @@ D1/D2 依赖的四点假设已对已部署 Host 配置逐一实测，均成立�
 **Goals:**
 - 新建与显式重建的 child 零父 transcript、零默认父摘要。
 - 创建前可失败地核验 provider 确实不继承父上下文。
-- 持久化上下文模式，旧 child 不被静默改造。
 - 飞书回复出口可靠：能在真实答疑群走通一次问答。
 
 **Non-Goals:**
+- 上下文模式标记与其持久化、展示（见 D4：所有者明确决定不要这层可观测性，也不做新旧模式共存的历史兼容）。
 - 公共事实持久层、协作者名单、异步询问、结果续进、owner projection。
 - G3/G4/G5 runtime 门槛。
 - child 与父解耦的 preset 加固 patch（见 D3；本期不需要，非当前 bug）。
@@ -63,15 +63,17 @@ D1/D2 依赖的四点假设已对已部署 Host 配置逐一实测，均成立�
 
 旧审计笔记的原始措辞保留不改（作为历史记录），但引用它的结论时以本节复核为准。
 
-### D4. 上下文模式是 additive 字段，未知不猜测
+### D4. 不引入上下文模式标记（所有者 2026-03-23 明确决定）
 
-locus 记录新增可选模式字段，取值 `fork-prefix-v1` / `independent-v1` / `unknown`。
+最初设计打算给 locus 记录加一个可选模式字段（`fork-prefix-v1` / `independent-v1` / `unknown`），让数据库里能区分新旧两种 child。实施时发现：要让这个字段真正被写入，需要把「独立性是否被证明」这个事实从 `child.ts` 的核验结果，一路向上传递穿过 `index.ts` 的创建入口、`dsh-port.ts` 的 `LocusDshPort` 接口、`controller.ts` 的 6 处 `createChildSession()` 调用点、`controller-persistence-adapter.ts` 的 `projectProvisioningCommit()`，才能到达 `buildLocusRecord()`。这与「只加一个字段」的预期规模明显不对等。
 
-- 新建/重建走独立路径时写 `independent-v1`。
-- 既有行不回填、不推断，保持未知。
-- 不按创建时间或 provider 默认值反推：那会把「我们改了默认值」误报成「这个 child 当时就是独立的」。
+所有者复核后明确决定：**不要这个标记，也不做新旧模式共存的历史兼容层**。理由：
 
-schema 版本按现有 additive 规则演进；不转换、不清除既有行。
+- 它只是可观测性（让人从数据里看出哪些 child 是新方式建的），不影响独立性本身是否生效——D1/D2 已经让新建/重建的 child 真正不再 fork、能力不可证明时真正拒绝创建，这两件事与该字段完全无关。
+- 旧 fork child 不会被本 change 的代码路径重新创建，所以它们的行为和历史天然不受影响，不需要用一个字段去"保护"它们不被静默改造。
+- 如果后续实际需要区分新旧 child（例如做管理面展示），应作为独立的小 change，届时按需决定接入哪一层，而不是现在预先猜测。
+
+因此本 change 不改 `spec.ts` schema、不改 domain 版本、不改 `controller.ts`/`dsh-port.ts`/`index.ts` 的创建编排链路，只改 `child.ts` 的 provider 默认值与创建前能力核验。
 
 ### D5. 公共事实本期由「问父」替代
 
@@ -99,4 +101,4 @@ child 缺少背景时通过原生 `send_message` 询问主会话；主会话若�
 ## Open Questions
 
 - 独立 child 在真实使用中是否频繁需要问父？若是，B035 的公共事实优先级应上调。
-- 是否需要在管理面展示上下文模式？本期只要求持久化，展示可延后。
+- 若后续确实需要区分新旧 child（如管理面展示），作为独立 change 再设计接入层，不在本 change 范围内预留。

@@ -101,6 +101,14 @@ export interface LocusSubagentPort {
    * session automatically.
    */
   readonly supportsSettlementNotice?: boolean
+  /**
+   * Look up one registered provider by name, when the runtime exposes its
+   * provider registry synchronously. Used only to prove
+   * `inheritsParentContext` before creating with the DEFAULT provider; an
+   * absent method or an unproven provider keeps creation unavailable rather
+   * than assuming independence.
+   */
+  getProvider?(name: string): { readonly inheritsParentContext?: boolean } | undefined
 }
 
 /** Source metadata for a host-authored inbox message. */
@@ -236,6 +244,12 @@ export type LocusChildFailureReason =
   | 'child-create-failed'
   | 'settlement-notice-unsupported'
   | 'idle-child-create-unsupported'
+  /**
+   * The default provider's independent-context capability could not be
+   * proven on this runtime. Only reached when the caller omitted an explicit
+   * `provider`; an explicit choice is never second-guessed here.
+   */
+  | 'independent-context-unproven'
   | 'child-identity-invalid'
   | 'adapter-disposed'
   | 'aborted'
@@ -300,7 +314,21 @@ export type LocusChildAdoptionResult =
   | { readonly ok: true; readonly adopted: boolean; readonly identity: LocusChildIdentity }
   | LocusChildFailure
 
-const DEFAULT_CHILD_PROVIDER = 'fork'
+/**
+ * Default provider for new and explicitly rebuilt locus children.
+ *
+ * `spawn` (not `fork`) is the independent-context default: the host's
+ * `dsh-subagent-spawn-in-process` provider declares `inheritsParentContext
+ * === false` and its `prepareContinuable()` returns no seed, so a child
+ * created here starts with no copy of the parent's transcript. This is the
+ * B035 fix — a child created under the previous `fork` default inherited the
+ * parent's full history and answered as if it were the parent, including
+ * skipping `pet_locus_reply`. Existing fork children are unaffected: this
+ * only changes the value new/explicit-rebuild callers get when they omit an
+ * explicit `provider`, never their own recorded identity or history. Callers
+ * needing the old behavior may still pass `provider: 'fork'` explicitly.
+ */
+const DEFAULT_CHILD_PROVIDER = 'spawn'
 const EMPTY_SIGNAL = new AbortController().signal
 
 function isAborted(signal: AbortSignal | undefined): boolean {
@@ -309,6 +337,32 @@ function isAborted(signal: AbortSignal | undefined): boolean {
 
 /** Default provider used for the in-process continuable child backend. */
 export const LOCUS_CHILD_PROVIDER = DEFAULT_CHILD_PROVIDER
+
+/**
+ * Whether the DEFAULT provider's independent-context capability is proven,
+ * fail closed.
+ *
+ * Only called when the caller omitted an explicit `provider` — an explicit
+ * choice (including the legacy `'fork'`) is never re-verified here, since a
+ * caller naming a provider by hand has already made that decision. This is
+ * the D2 guard: a silent fallback to a history-inheriting provider is exactly
+ * the shape of the original B035 failure, so an unprovable capability must
+ * refuse creation rather than produce a child that only looks independent.
+ *
+ * Requires an ACTUAL function at `getProvider` and an ACTUAL provider object
+ * with `inheritsParentContext === false`; a missing port, a missing lookup
+ * result, or any other value is unproven.
+ */
+function defaultProviderProvenIndependent(subagent: LocusSubagentPort): boolean {
+  if (typeof subagent.getProvider !== 'function') return false
+  let provider: { readonly inheritsParentContext?: boolean } | undefined
+  try {
+    provider = subagent.getProvider(DEFAULT_CHILD_PROVIDER)
+  } catch {
+    return false
+  }
+  return provider !== undefined && provider !== null && provider.inheritsParentContext === false
+}
 
 /** Return whether an object has a usable non-empty identifier. */
 function isIdentifier(value: unknown): value is string {
@@ -709,6 +763,13 @@ export class LocusChildAdapter {
         this.ports.subagent.supportsIdleContinuableCreate !== true
         || create === undefined
       ) return { ok: false, reason: 'idle-child-create-unsupported' }
+      // Fail closed BEFORE creating anything: only the caller's own explicit
+      // provider choice skips this — silently falling back to a provider
+      // whose independence is unproven is the shape of the original failure.
+      if (
+        input.provider === undefined
+        && !defaultProviderProvenIndependent(this.ports.subagent)
+      ) return { ok: false, reason: 'independent-context-unproven' }
       const parentResult = await this.resolveParent(input.parentSessionId, signal)
       if (!parentResult.ok) return parentResult
       let result: { readonly childId: string }
@@ -809,6 +870,14 @@ export class LocusChildAdapter {
     if (this.ports.subagent.supportsSettlementNotice !== true) {
       return { ok: false, reason: 'settlement-notice-unsupported' }
     }
+    // Same fail-closed discipline for the DEFAULT provider's independence: a
+    // caller that named a provider explicitly has already decided, but a
+    // caller relying on the default must not silently get a history-inheriting
+    // child when that capability cannot be proven on this runtime.
+    if (
+      input.provider === undefined
+      && !defaultProviderProvenIndependent(this.ports.subagent)
+    ) return { ok: false, reason: 'independent-context-unproven' }
 
     let result: { readonly childId: string }
     try {
@@ -1287,6 +1356,7 @@ export function probeLocusChildPorts(
     withLiveContinuableChildSession?: unknown
     drainContinuableChildren?: unknown
     listChildren?: unknown
+    getProvider?: unknown
     /** Literal markers published only by a runtime that owns the behavior. */
     supportsSettlementNotice?: unknown
     supportsIdleContinuableCreate?: unknown
@@ -1365,6 +1435,15 @@ export function probeLocusChildPorts(
     // infer from accepting an unknown field: older JS silently ignores it.
     ...(options.settlementNoticeSupported === true || subagentRecord.supportsSettlementNotice === true
       ? { supportsSettlementNotice: true }
+      : {}),
+    // Bound to the exact loaded service, so `defaultProviderProvenIndependent`
+    // reads this runtime's own provider registry rather than a copy.
+    ...(typeof subagentRecord.getProvider === 'function'
+      ? {
+        getProvider: (name: string) => (subagentRecord.getProvider as (
+          name: string,
+        ) => { readonly inheritsParentContext?: boolean } | undefined).call(subagentService, name),
+      }
       : {}),
   }
   const compensation: LocusChildDrainPort | undefined =
