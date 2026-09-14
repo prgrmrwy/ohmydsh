@@ -50,6 +50,12 @@ import {
   detectIsolatedQueuedTurnClaim,
   type IsolatedQueuedTurnClaimSupport,
 } from '../inquiry/capability.js'
+import {
+  reconcileInquiriesAtStartup,
+  type InquiryReconcileLedger,
+  type InquiryReconcileOutbox,
+  type InquiryReconcileReport,
+} from '../inquiry/reconcile.js'
 import { InquiryScheduler } from '../inquiry/scheduler.js'
 import { registerInquiryAnswerTool, registerInquiryAskTool } from '../inquiry/tools.js'
 
@@ -70,6 +76,13 @@ export interface InquiryLedgerLike {
   get(inquiryId: string): InquiryRecord | undefined
   applyEvent(inquiryId: string, event: unknown): Promise<InquiryRecord>
   recordDiagnostic(inquiryId: string, entry: unknown): Promise<InquiryRecord>
+  /**
+   * Restart classification (design D8). Optional here only because a Host may
+   * compose a ledger that predates it; a missing one makes
+   * {@link CollaborationAssembly.reconcileInquiries} report a fault rather than
+   * reconcile on a guess.
+   */
+  restartDisposition?: InquiryReconcileLedger['restartDisposition']
 }
 
 /** Host seams this assembly needs. A missing one keeps the surface unpublished. */
@@ -89,6 +102,15 @@ export interface CollaborationAssemblySeams {
     | undefined
   readonly contextStore: CollaborationContextStoreLike | undefined
   readonly ledger: InquiryLedgerLike | undefined
+  /**
+   * Durable result outbox, used ONLY by startup reconciliation here.
+   *
+   * Not required for composition: the ask/answer tools never touch it, so a
+   * Host without one still publishes the surface — it just cannot reconcile,
+   * and {@link CollaborationAssembly.reconcileInquiries} reports that as a
+   * fault instead of settling inquiries with no result for the requester.
+   */
+  readonly resultOutbox?: InquiryReconcileOutbox
   /**
    * Cheap durable description of one member. MUST NOT read or summarize the
    * member's history; a throw is reported by the roster as `unknown`.
@@ -148,6 +170,18 @@ export interface CollaborationAssembly {
    * still re-derive and re-authorize the caller on every call.
    */
   eligible(sessionId: string): boolean
+  /**
+   * Reconcile durable inquiry state once at startup (design D8).
+   *
+   * Diagnostics only: it classifies unsettled rows from durable state, settles
+   * the ones whose absolute deadline already passed and the ones that were
+   * dispatched with an unprovable outcome, and gives each a correlatable
+   * failure result. It never dispatches, wakes a model, starts a turn or sends
+   * anything outbound — see `../inquiry/reconcile.ts`.
+   *
+   * Safe to call more than once: a repeat pass applies nothing.
+   */
+  reconcileInquiries(): Promise<InquiryReconcileReport>
   /** Whether this exact agent scope already carries the surface. */
   isInstalled(scope: unknown): boolean
   /**
@@ -267,6 +301,21 @@ export function composeCollaborationSurface(
     }
   }
 
+  /**
+   * Startup reconciliation, wired to the SAME durable stores the tools use.
+   *
+   * A missing `restartDisposition` or a missing outbox is passed through as-is
+   * rather than shimmed: the reconciler's own fail-closed path then reports an
+   * unreadable store, which is the honest answer. Faking either would settle
+   * inquiries with nothing for the requester to correlate.
+   */
+  const reconcileInquiries = (): Promise<InquiryReconcileReport> =>
+    reconcileInquiriesAtStartup({
+      ledger: ledger as unknown as InquiryReconcileLedger,
+      outbox: seams.resultOutbox as InquiryReconcileOutbox,
+      now,
+    })
+
   const isInstalled = (scope: unknown): boolean =>
     typeof scope === 'object' && scope !== null && installed.has(scope)
 
@@ -328,5 +377,5 @@ export function composeCollaborationSurface(
     installed.add(scope)
   }
 
-  return { inquiryDispatch, scheduler, eligible, isInstalled, install }
+  return { inquiryDispatch, scheduler, eligible, reconcileInquiries, isInstalled, install }
 }

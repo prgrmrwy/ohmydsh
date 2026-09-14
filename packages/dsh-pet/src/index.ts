@@ -56,6 +56,8 @@ import {
   type CollaborationAssembly,
 } from './host/collaboration/assembly.js'
 import { InquiryLedgerStore } from './host/inquiry/ledger-store.js'
+import { InquiryOutboxStore } from './host/inquiry/outbox-store.js'
+import { summarizeInquiryReconciliation } from './host/inquiry/reconcile.js'
 import type { InquiryOriginProof } from './host/inquiry/ask.js'
 import {
   LocusRepository,
@@ -324,6 +326,10 @@ async function initialize(
    * publish anything when that capability is absent.
    */
   const inquiryLedgerStore = new InquiryLedgerStore(domain as never)
+  // The result outbox is the other half of restart reconciliation: without it
+  // the pass can classify inquiries but cannot see whether a result already
+  // exists, so it would report a fault instead of reconciling on a guess.
+  const inquiryOutboxStore = new InquiryOutboxStore(domain as never)
 
   /**
    * Synchronous, cheap durable description of one circle member.
@@ -416,6 +422,7 @@ async function initialize(
     identity: collaborationHostIdentity,
     contextStore: collaborationContextStore,
     ledger: inquiryLedgerStore,
+    resultOutbox: inquiryOutboxStore,
     describe: describeCollaborator,
     origin: resolveInquiryOrigin,
     // `ctx.get` rather than property access: `agentLoop` is not in this
@@ -430,6 +437,25 @@ async function initialize(
       'dsh-pet: inquiry dispatch stays unavailable '
       + `(${collaborationSurface.inquiryDispatch.reason}); members are reported as not inquirable`,
     )
+  }
+
+  /**
+   * Settle durable inquiry work left behind by the previous process.
+   *
+   * Runs BEFORE the channel starts so a recovered request is never raced by new
+   * intake. It only classifies and settles from durable rows: provably
+   * undispatched work stays dispatchable, dispatched-but-unknown work becomes
+   * needs-review and is never auto-retried, and an absolute deadline that
+   * passed while the Host was down settles at the deadline rather than at this
+   * restart. It wakes no model, starts no turn and sends nothing outbound, so a
+   * failure here degrades diagnostics — not intake.
+   */
+  if (collaborationSurface !== undefined) {
+    const reconciled = await lifecycle.contain('Pet inquiry reconciliation', () =>
+      collaborationSurface.reconcileInquiries())
+    if (reconciled !== undefined) {
+      petLog(`dsh-pet: ${summarizeInquiryReconciliation(reconciled)}`)
+    }
   }
 
   /**
