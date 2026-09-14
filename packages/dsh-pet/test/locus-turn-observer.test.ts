@@ -418,7 +418,7 @@ describe('observer subscription order', () => {
   })
 })
 
-describe('Host-injected context does not poison reply authority', () => {
+describe('Non-routing context does not poison reply authority', () => {
   // DSH seeds every session's FIRST step with workspace instructions, a
   // runtime-context snapshot and the skill catalog. They ride the same
   // `agent/inbox/claimed` feed as real traffic, so the observer used to mark
@@ -463,11 +463,35 @@ describe('Host-injected context does not poison reply authority', () => {
     expect(h.events.map(event => event.phase)).toEqual(['started', 'completed'])
   })
 
-  it('still withholds authority for a user-sourced non-Delivery (GUI or parent steer)', () => {
+  it('keeps authority when an agent-message context reply shares the Delivery turn', () => {
     const h = harness()
 
-    // The guard must stay fail-closed for traffic that CAN carry another
-    // target. Only Host-injected context is exempt.
+    // send_message uses the running target's nearest-step boundary, so a
+    // caller-bound parent answer can share the Delivery's current turn. It is
+    // context-only traffic and must not revoke the already proven reply target.
+    h.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 1, sourceKind: 'user' })
+    h.claim({ childSessionId: CHILD, messageId: 'parent-answer', turn: 1, sourceKind: 'agent-message' })
+
+    expect(h.diagnostics).toContain('claim-agent-context')
+    expect(h.observer.currentForChild?.(CHILD)).toEqual({
+      executionId: 'execution-1',
+      turnId: `${CHILD}#1`,
+    })
+  })
+
+  it('does not create authority from an agent-message without a Delivery', () => {
+    const h = harness()
+
+    h.claim({ childSessionId: CHILD, messageId: 'parent-answer', turn: 1, sourceKind: 'agent-message' })
+
+    expect(h.observer.currentForChild?.(CHILD)).toBeUndefined()
+  })
+
+  it('still withholds authority for a user-sourced non-Delivery GUI steer', () => {
+    const h = harness()
+
+    // `user` is intentionally not context-only: a GUI steer can belong to a
+    // different target and must keep the turn fail-closed.
     h.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 1, sourceKind: 'user' })
     h.claim({ childSessionId: CHILD, messageId: 'gui-prompt', turn: 1, sourceKind: 'user' })
 

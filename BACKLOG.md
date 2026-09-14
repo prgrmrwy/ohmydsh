@@ -220,7 +220,7 @@
   - 实施前仍须建立独立 OpenSpec change（原要点末条），本条尚未建立。注意与 `pet-locus-independent-agent-inquiries` 的边界：后者要求新独立 child 显式保留经核验的创建模型策略，本条若引入降级列表，不得使该策略被静默改写。
 
 ### [B035] Locus 子会话 fork 全部父历史，削弱 locus 同构并导致回复出口失效
-- **状态**: 已设计（OpenSpec 提案已建立，未实施）
+- **状态**: 实施中（独立 child 与父子 `agent-message` 回复出口已本地实现并回归；真实部署/飞书验收待完成）
 - **优先级**: P0
 - **背景 / 动机**: 所有者在答疑群提问后，子会话「只 done 没回复」。排查确认：该 child 由轮盘「答疑群」创建，parent 恰是所有者与 agent 正在进行验收的活跃会话，`provider: 'fork'` 使其**继承了全部 77 轮历史**。于是它在 turn 74 接着那段历史继续扮演「正在做验收的 agent」——连跑 5 次 bash 复制 state.sqlite、查 locus、调 lark-cli，最后把结论写成 assistant 文本 `## T4-C1 ✅ 通过`，**唯独没有调用 `pet_locus_reply`**。Delivery 因 turn 正常结束而 settled，飞书侧却一个字都没收到。它不是不懂规则，是**以为自己仍在 GUI 里与所有者对话**。
 - **这不只是 prompt 强度问题**: 投递前言明写「业务正文必须调用 `pet_locus_reply` 发送」，但该指令位于 77 轮继承历史的末尾，压不住前面积累的强行为模式。继承历史越长，回复出口越容易失效；而 Q&A 群恰恰最容易踩到——它 fork 的正是一个人类正在使用的活跃会话。

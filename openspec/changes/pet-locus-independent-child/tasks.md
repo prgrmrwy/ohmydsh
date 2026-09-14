@@ -46,8 +46,10 @@
 - [ ] 4.3 真实答疑群验收：提问后 child 使用独立上下文，且实际收到飞书回复
 - [ ] 4.4 验收 child 在锚点不足时经原生 `send_message` 问父，而不是猜测或自行创建工作目录
   - 2026-09-14 首次实测已完成问父前半段：child `session-a380ee7b` 的 `identity.isSeeded=false`，调用 `send_message` 后询问准确到达 caller-bound main，父回复也以 `agent-message/relay` 回到同一 child；但暴露回复出口 bug，尚不能勾选：observer 把父回复当非 Delivery 流量，`pet_locus_reply` 被拒绝，飞书无正文。
-- [ ] 4.4a 修复父子纯上下文通信与 Delivery 路由的错误耦合：`agent-message` 不建立、修改或撤销当前 Host 绑定回复目标；无活跃 Delivery 时仍不能获得飞书回复能力；GUI/user steer、来源不明消息和第二条 Delivery 保持 fail closed
-- [ ] 4.4b TDD 回归真实顺序：Delivery claim → `agent-message` claim → `pet_locus_reply` 仍成功；并覆盖单独 agent-message 无权限、GUI steer 与第二 Delivery 仍拒绝
+- [x] 4.4a 修复父子纯上下文通信与 Delivery 路由的错误耦合：`agent-message` 不建立、修改或撤销当前 Host 绑定回复目标；无活跃 Delivery 时仍不能获得飞书回复能力；GUI/user steer、来源不明消息和第二条 Delivery 保持 fail closed
+  - 证据：`turn-observer.ts` 将 `agent-message` 与 Host 注入归入 `isNonRoutingContextClaim()`；它们被忽略，不创建 observed turn，也不改变已有 Delivery 的 `mixed`/`foreign` 状态。`user`、来源缺失、第二 Delivery 路径未豁免。
+- [x] 4.4b TDD 回归真实顺序：Delivery claim → `agent-message` claim → `pet_locus_reply` 仍成功；并覆盖单独 agent-message 无权限、GUI steer 与第二 Delivery 仍拒绝
+  - 证据：`locus-turn-observer.test.ts` 37/37、`locus-reply-tool.test.ts` 5/5；新增真实顺序用例断言原 `om-current` 目标仍发送 `MANGO-SPAWN-0914`，单独 agent-message 无权、GUI steer 与第二 Delivery 仍 fail closed。
 - [ ] 4.5 验收主会话未被自动灌入 child 结论
 - [ ] 4.6 验收旧 fork child 仍正常服务，历史未被裁剪
 
