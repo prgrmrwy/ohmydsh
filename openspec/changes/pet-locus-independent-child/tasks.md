@@ -1,3 +1,13 @@
+## 0. 实施前诊断（只读，不改 child.ts）
+
+设计中对以下四点目前只有源码阅读证据，没有实测；先用 opt-in 只读诊断测试逐一确认，避免在假设不成立的情况下改错实现。
+
+- [ ] 0.1 固定 runtime 下 `ctx.get('subagents').getProvider('spawn')` 能否拿到 provider 对象（确认 spawn 已注册，而非仅存在于 node_modules）
+- [ ] 0.2 拿到的 provider 对象 `inheritsParentContext` 是否确为 `false`，且形状与 `child.ts` 现有 `LocusSubagentPort` 假设一致
+- [ ] 0.3 spawn provider 下 `supportsSettlementNotice`（或等价的 silent 结算行为）是否仍然成立；不成立则创建应 fail closed，需要提前知道而非事后发现
+- [ ] 0.4 `provider` 字符串从 `child.ts` 的三处调用点到 `probeLocusChildPorts` 实际透传路径确认无中间默认值覆盖
+- [ ] 0.5 四点均确认或明确否定后，回填本文件与 `design.md`；任一假设不成立时暂停并向所有者汇报，不静默调整设计绕过
+
 ## 1. 独立 child 创建
 
 - [ ] 1.1 把 `DEFAULT_CHILD_PROVIDER` 改为零父上下文的 provider，三条创建路径共用同一常量；调用方显式传入的 provider 语义不变
