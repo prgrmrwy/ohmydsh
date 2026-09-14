@@ -79,7 +79,7 @@ describe('dsh-pet-migrate-state CLI', () => {
     expect(stamped(file)).toBe(5)
   })
 
-  it.each([2, 3, 4, 5, 6, 7, 8, 9, 10])('backs up v%s, restamps to the current version without changing history, and is idempotent', version => {
+  it.each([2, 3, 4, 5, 6, 7, 8, 9, 10, 11])('backs up v%s, restamps to the current version without changing history, and is idempotent', version => {
     const { dir, file } = database(version)
     const seed = new DatabaseSync(file)
     // Include opaque malformed history and local facts: restamping is not

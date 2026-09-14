@@ -31,8 +31,10 @@ const tables = ['collaboration_contexts', 'collaboration_context_revisions'] as 
 describe('public context durable schema', () => {
   it('exports the exact pure discriminated union and the current additive descriptor', () => {
     expectTypeOf<PetCollaborationContextRecord>().toEqualTypeOf<CollaborationContextRecord>()
-    // Public context arrived at v10 and survives every later additive bump.
-    expect(PET_DOMAIN_VERSION).toBeGreaterThanOrEqual(10)
+    // Public context arrived at v10 and survives every later additive bump —
+    // v11 added the inquiry ledger, v12 the inquiry result outbox, and neither
+    // converted, cleared or reshaped a public-context row.
+    expect(PET_DOMAIN_VERSION).toBeGreaterThanOrEqual(12)
   })
 
   it.each([
