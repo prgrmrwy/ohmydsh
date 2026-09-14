@@ -173,10 +173,9 @@ export interface CollaborationAssembly {
   /**
    * Reconcile durable inquiry state once at startup (design D8).
    *
-   * Diagnostics only: it classifies unsettled rows from durable state, settles
-   * the ones whose absolute deadline already passed and the ones that were
-   * dispatched with an unprovable outcome, and gives each a correlatable
-   * failure result. It never dispatches, wakes a model, starts a turn or sends
+   * Diagnostics only: it preserves long-waiting queued rows, while rows that
+   * were dispatched with an unprovable outcome become needs-review and receive
+   * a correlatable failure result. It never dispatches, wakes a model, starts a turn or sends
    * anything outbound — see `../inquiry/reconcile.ts`.
    *
    * Safe to call more than once: a repeat pass applies nothing.

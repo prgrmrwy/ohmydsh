@@ -49,10 +49,17 @@ export type InquiryOutboxStatus = (typeof INQUIRY_OUTBOX_STATUSES)[number]
 
 /** Failure outcomes that are DELIVERED to the requester exactly like an answer. */
 export const INQUIRY_RESULT_FAILURES = Object.freeze([
-  'rejected', 'unavailable', 'expired', 'cancelled', 'needs-review',
+  'rejected', 'unavailable', 'cancelled', 'needs-review',
 ] as const)
 
 export type InquiryResultFailure = (typeof INQUIRY_RESULT_FAILURES)[number]
+
+/**
+ * Parser-only compatibility for a result emitted by domain v12. Current v13
+ * writers never emit `expired`; legacy rows are accepted only when a storage
+ * adapter explicitly normalizes them before calling current transitions.
+ */
+export type LegacyInquiryResultFailure = InquiryResultFailure | 'expired'
 
 /** Why a result was refused, retained or flagged. Stable codes, never prose. */
 export const INQUIRY_OUTBOX_DIAGNOSTIC_CODES = Object.freeze([

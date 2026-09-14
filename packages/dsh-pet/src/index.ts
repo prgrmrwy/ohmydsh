@@ -445,9 +445,10 @@ async function initialize(
    * Runs BEFORE the channel starts so a recovered request is never raced by new
    * intake. It only classifies and settles from durable rows: provably
    * undispatched work stays dispatchable, dispatched-but-unknown work becomes
-   * needs-review and is never auto-retried, and an absolute deadline that
-   * passed while the Host was down settles at the deadline rather than at this
-   * restart. It wakes no model, starts no turn and sends nothing outbound, so a
+   * needs-review and is never auto-retried. Long-waiting queued work remains
+   * recoverable regardless of downtime; only explicit cancellation or a
+   * Host-proven unknown dispatch changes its disposition. It wakes no model,
+   * starts no turn and sends nothing outbound, so a
    * failure here degrades diagnostics — not intake.
    */
   if (collaborationSurface !== undefined) {
