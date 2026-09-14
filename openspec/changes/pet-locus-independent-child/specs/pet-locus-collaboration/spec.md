@@ -2,7 +2,7 @@
 
 本 delta 的 MODIFIED 条文完整取自前置 change `pet-unified-locus-collaboration/specs/pet-locus-collaboration/spec.md`。该 capability 尚未进入 current specs；必须先合并前置规范再应用本 delta，禁止倒序归档或将本文件误当全量 spec。
 
-与 `pet-locus-independent-agent-inquiries` 的边界：本 change 只承接「新 child 不复制父历史」与「上下文模式可见」两点；公共事实持久层、协作者名单、异步询问与跨轮续进仍归 B035，本文件不对其作出任何条文承诺。两个 change 修改同一条 requirement，归档时必须按实际实现顺序重新对齐，不得把本文件当作 B035 的替代。
+与 `pet-locus-independent-agent-inquiries` 的边界：本 change 只承接「新 child 不复制父历史」一点；不引入上下文模式标记或其持久化/展示（所有者 2026-03-23 明确决定不要，见 `design.md` D4）；公共事实持久层、协作者名单、异步询问与跨轮续进仍归 B035，本文件不对其作出任何条文承诺。两个 change 修改同一条 requirement，归档时必须按实际实现顺序重新对齐，不得把本文件当作 B035 的替代。
 
 ## MODIFIED Requirements
 
@@ -12,7 +12,7 @@
 
 系统 SHALL 在创建前核验所用 provider 确实不继承父上下文；无法证明时 SHALL 拒绝创建并如实报告，MUST NOT 静默退回复制父历史的 provider，也 MUST NOT 把拒绝表述为已建立独立 child。
 
-每个 locus SHALL 持久化其子会话的上下文模式，至少区分继承父前缀、独立上下文与证据不足三种取值。缺乏证据时 SHALL 记为未知，MUST NOT 猜测；已有 fork child SHALL 保留原模式与全部历史，MUST NOT 被静默改造或裁剪日志。
+已有 fork child 不受本条影响：它们不会被本 change 的创建路径重新创建，其历史 MUST NOT 被裁剪或静默改造。
 
 初始化任务书 SHALL 告知子会话在工作根、约束或相关事实不足时，可通过宿主原生消息能力询问 caller-bound 主会话，MUST NOT 允许指定其它 parent 或 locus。主会话回复只是对话事实，SHALL NOT 因此成为持久授权；锚点仍须由所有者在管理面显式确认后写入。答复只提供上下文事实；路径存在性不等于写授权。
 
@@ -58,10 +58,6 @@ caller-bound `pet_context` SHALL 提供当前 locus、局部项目入口、已�
 - **WHEN** 独立 child 已有自己的多轮对话，Host 重启后恢复
 - **THEN** 恢复同一 child 的历史，不插入恢复时的父历史，不更换身份
 
-#### Scenario: 旧 fork child 保留原模式
+#### Scenario: 旧 fork child 不受影响
 - **WHEN** 已有继承父前缀的 child 继续服务其入口
-- **THEN** 其上下文模式仍记为继承父前缀，历史不被裁剪，行为不被静默改造
-
-#### Scenario: 证据不足的既有记录不猜测模式
-- **WHEN** 既有 locus 行没有足以判定上下文模式的证据
-- **THEN** 记为未知并如实展示，不按创建时间或 provider 默认值推断为独立上下文
+- **THEN** 其历史和行为不被裁剪或静默改造，因为它不会被本 change 的创建路径重新创建
