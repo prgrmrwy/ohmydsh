@@ -20,13 +20,15 @@
  * claim beyond checking that the claim matches the Host-derived fact.
  */
 
-/** Ordered from the accepted path to the terminal failures. */
+/** Ordered from the accepted path to terminal states new code may create. */
 export const INQUIRY_STATUSES = Object.freeze([
   'queued', 'executing', 'answered', 'result-delivered',
-  'rejected', 'unavailable', 'expired', 'cancelled', 'needs-review',
+  'rejected', 'unavailable', 'cancelled', 'needs-review',
 ] as const)
 
 export type InquiryStatus = (typeof INQUIRY_STATUSES)[number]
+/** Parser-only compatibility for terminal evidence written by domain v12. */
+export type InquiryRecordStatus = InquiryStatus | 'expired'
 
 /** Outcomes retained for the owner only; they never revive a terminal record. */
 export const INQUIRY_DIAGNOSTIC_KINDS = Object.freeze([
@@ -44,8 +46,6 @@ export const INQUIRY_LIMITS = Object.freeze({
   maxChainEdges: 3,
   maxInquiriesPerRoot: 16,
   maxPendingPerSession: 32,
-  /** Absolute, from createdAt; a nested inquiry can only be earlier. */
-  absoluteDeadlineMs: 300_000,
   identifierLength: 256,
   questionLength: 4_096,
   purposeLength: 1_024,
@@ -107,10 +107,9 @@ export interface InquiryRecord {
   readonly origin: InquiryOrigin
   readonly audience: InquiryAudience
   readonly trace: InquiryTrace
+  /** Retained for wait-age display and diagnostics; never a refusal clock. */
   readonly createdAt: number
-  /** Absolute and immutable: a restart re-reads it, it is never recomputed. */
-  readonly deadlineAt: number
-  readonly status: InquiryStatus
+  readonly status: InquiryRecordStatus
   readonly statusAt: number
   /** Stable machine code for a failure status; null for the accepted path. */
   readonly reason: string | null
@@ -144,7 +143,7 @@ export interface InquiryContext {
 
 export type InquiryEventType =
   | 'dispatch' | 'answer' | 'deliver-result'
-  | 'reject' | 'unavailable' | 'expire' | 'cancel' | 'needs-review'
+  | 'reject' | 'unavailable' | 'cancel' | 'needs-review'
 
 export interface InquiryEvent {
   readonly type: InquiryEventType
@@ -163,7 +162,6 @@ export type InquiryLedgerErrorCode =
   | 'TARGET_ALREADY_VISITED'
   | 'ROOT_BUDGET_EXCEEDED'
   | 'PENDING_BUDGET_EXCEEDED'
-  | 'DEADLINE_EXCEEDED'
 
 export class InquiryLedgerError extends Error {
   constructor(readonly code: InquiryLedgerErrorCode) {
@@ -178,7 +176,6 @@ export class InquiryLedgerError extends Error {
       TARGET_ALREADY_VISITED: 'Inquiry target is already on this chain.',
       ROOT_BUDGET_EXCEEDED: 'Inquiry budget for this chain root is exhausted.',
       PENDING_BUDGET_EXCEEDED: 'Pending inquiry budget for this session is exhausted.',
-      DEADLINE_EXCEEDED: 'Inquiry cannot be created past its ancestor deadline.',
     }[code])
     this.name = 'InquiryLedgerError'
   }
@@ -320,28 +317,16 @@ export function inquirySessionHasCapacity(pending: unknown): boolean {
   return integer(pending) < limits.maxPendingPerSession
 }
 
-/** A nested inquiry inherits the ancestor deadline and can only be earlier. */
-export function inquiryDeadlineFor(createdAt: unknown, ancestorDeadlineAt: unknown): number {
-  const start = integer(createdAt)
-  const own = start + limits.absoluteDeadlineMs
-  if (!Number.isSafeInteger(own)) invalid()
-  if (ancestorDeadlineAt === null) return own
-  return Math.min(own, integer(ancestorDeadlineAt))
-}
-
 export function inquiryTargetIsUnvisited(visited: unknown, target: unknown): boolean {
   const seats = items(visited, limits.maxChainEdges + 1).map(inquirySeatKey)
   return !seats.includes(inquirySeatKey(target))
 }
 
 export function isTerminalInquiryStatus(status: unknown): boolean {
-  return status !== 'queued' && status !== 'executing' && status !== 'answered'
-    && INQUIRY_STATUSES.includes(status as InquiryStatus)
-}
-
-/** Expiry is read from the stored absolute deadline, never recomputed from now. */
-export function isInquiryExpired(record: unknown, now: unknown): boolean {
-  return integer(now) >= parseInquiry(record).deadlineAt
+  // `expired` remains terminal solely as historical v12 evidence. No transition
+  // in the current machine can create it.
+  return status === 'expired' || (status !== 'queued' && status !== 'executing' && status !== 'answered'
+    && INQUIRY_STATUSES.includes(status as InquiryStatus))
 }
 
 // ---------------------------------------------------------------------------
@@ -350,9 +335,12 @@ export function isInquiryExpired(record: unknown, now: unknown): boolean {
 
 const recordKeys = [
   'id', 'requester', 'target', 'circleParentSessionId', 'question', 'purpose',
-  'origin', 'audience', 'trace', 'createdAt', 'deadlineAt', 'status', 'statusAt',
+  'origin', 'audience', 'trace', 'createdAt', 'status', 'statusAt',
   'reason', 'appliedEventIds', 'diagnostics', 'droppedDiagnostics',
 ] as const
+const legacyRecordKeys = [...recordKeys, 'deadlineAt'] as const
+/** The immutable bound used only to validate, then strip, a v12 row. */
+const LEGACY_ABSOLUTE_DEADLINE_MS = 300_000
 
 function diagnostic(input: unknown): InquiryDiagnostic {
   const value = object(input, ['kind', 'at', 'eventId'])
@@ -368,18 +356,24 @@ function uniqueIds(input: unknown, max: number): readonly string[] {
 
 /** Validate actual runtime values, not just a TypeScript-declared shape. */
 export function parseInquiry(input: unknown): InquiryRecord {
-  const value = object(input, recordKeys)
+  // Domain v13 writes the deadline-free shape. A v12 row is accepted only in
+  // its exact old shape, validated under the old bound, and normalized in
+  // memory without rewriting or losing the durable historical row.
+  const hasLegacyDeadline = input !== null && typeof input === 'object'
+    && Object.prototype.hasOwnProperty.call(input, 'deadlineAt')
+  const value = object(input, hasLegacyDeadline ? legacyRecordKeys : recordKeys)
   const id = identifier(value.id)
   const circleParentSessionId = identifier(value.circleParentSessionId)
   const requester = scope(value.requester, circleParentSessionId)
   const target = scope(value.target, circleParentSessionId)
   const createdAt = integer(value.createdAt)
-  const deadlineAt = integer(value.deadlineAt)
+  if (hasLegacyDeadline) {
+    const deadlineAt = integer(value.deadlineAt)
+    if (deadlineAt <= createdAt || deadlineAt > createdAt + LEGACY_ABSOLUTE_DEADLINE_MS) invalid()
+  }
   const statusAt = integer(value.statusAt)
-  const status = value.status as InquiryStatus
-  if (!INQUIRY_STATUSES.includes(status)) invalid()
-  // A deadline is absolute and bounded; it can only be at or before the budget.
-  if (deadlineAt <= createdAt || deadlineAt > createdAt + limits.absoluteDeadlineMs) invalid()
+  const status = value.status as InquiryRecordStatus
+  if (status !== 'expired' && !INQUIRY_STATUSES.includes(status as InquiryStatus)) invalid()
   if (statusAt < createdAt) invalid()
   const recordOrigin = origin(value.origin)
   const recordAudience = audience(value.audience)
@@ -407,7 +401,7 @@ export function parseInquiry(input: unknown): InquiryRecord {
     purpose: text(value.purpose, limits.purposeLength),
     origin: recordOrigin, audience: recordAudience,
     trace: Object.freeze({ rootInquiryId, depth, visited: Object.freeze(visited) }),
-    createdAt, deadlineAt, status, statusAt, reason,
+    createdAt, status, statusAt, reason,
     appliedEventIds: uniqueIds(value.appliedEventIds, limits.appliedEvents),
     diagnostics: Object.freeze(items(value.diagnostics, limits.diagnostics).map(diagnostic)),
     droppedDiagnostics: integer(value.droppedDiagnostics),
@@ -473,9 +467,6 @@ export function createInquiry(request: unknown, context: unknown): InquiryRecord
   const depth = parent === null ? 1 : parent.trace.depth + 1
   if (depth > limits.maxChainEdges) fail('CHAIN_DEPTH_EXCEEDED')
 
-  const deadlineAt = inquiryDeadlineFor(createdAt, parent === null ? null : parent.deadlineAt)
-  if (deadlineAt <= createdAt) fail('DEADLINE_EXCEEDED')
-
   const inherited = parent === null ? [requester] : [...parent.trace.visited]
   if (!inquiryTargetIsUnvisited(inherited, target)) fail('TARGET_ALREADY_VISITED')
   const visited = Object.freeze([...inherited, target])
@@ -487,7 +478,7 @@ export function createInquiry(request: unknown, context: unknown): InquiryRecord
     id, requester, target, circleParentSessionId, question, purpose,
     origin: boundOrigin, audience: boundAudience,
     trace: Object.freeze({ rootInquiryId, depth, visited }),
-    createdAt, deadlineAt,
+    createdAt,
     // Accepted only means accepted; it never means answered.
     status: 'queued' as const, statusAt: createdAt, reason: null,
     appliedEventIds: Object.freeze([]), diagnostics: Object.freeze([]), droppedDiagnostics: 0,
@@ -509,11 +500,10 @@ const transitions: Readonly<Record<InquiryEventType, { readonly from: readonly I
   'deliver-result': { from: ['answered'], to: 'result-delivered' },
   reject: { from: ['queued', 'executing'], to: 'rejected' },
   unavailable: { from: ['queued', 'executing'], to: 'unavailable' },
-  expire: { from: ['queued', 'executing', 'answered'], to: 'expired' },
   cancel: { from: ['queued', 'executing', 'answered'], to: 'cancelled' },
   'needs-review': { from: ['executing', 'answered'], to: 'needs-review' },
 })
-/** These three claim progress, so they must happen strictly before the deadline. */
+/** These three are the reason-free progress events. */
 const progressEvents: readonly InquiryEventType[] = Object.freeze(['dispatch', 'answer', 'deliver-result'])
 
 function parseEvent(input: unknown): InquiryEvent {
@@ -532,9 +522,9 @@ function parseEvent(input: unknown): InquiryEvent {
  * Re-applying an event that already reached the current status is a no-op that
  * returns an equal record: a redelivered dispatch, answer or failure cannot
  * double-advance the machine or overwrite the first recorded outcome. An
- * illegal transition — including any attempt to leave a terminal status, to
- * move time backwards, or to claim progress at or after the deadline — throws
- * ILLEGAL_TRANSITION. This module decides legality only; the store must still
+ * illegal transition — including any attempt to leave a terminal status or to
+ * move time backwards — throws ILLEGAL_TRANSITION. Elapsed wall time is never
+ * a transition condition. This module decides legality only; the store must still
  * commit the result together with its own dedup log.
  */
 export function applyInquiryEvent(record: unknown, event: unknown): InquiryRecord {
@@ -545,11 +535,8 @@ export function applyInquiryEvent(record: unknown, event: unknown): InquiryRecor
   // Idempotence first: the same outcome, however it is redelivered, changes nothing.
   if (to === current.status) return current
   if (current.appliedEventIds.includes(applied.eventId)) fail('ILLEGAL_TRANSITION')
-  if (!from.includes(current.status)) fail('ILLEGAL_TRANSITION')
+  if (!from.includes(current.status as InquiryStatus)) fail('ILLEGAL_TRANSITION')
   if (applied.at < current.statusAt) fail('ILLEGAL_TRANSITION')
-  // Expiry is the deadline being reached; progress must beat it.
-  if (applied.type === 'expire' && applied.at < current.deadlineAt) fail('ILLEGAL_TRANSITION')
-  if (progressEvents.includes(applied.type) && applied.at >= current.deadlineAt) fail('ILLEGAL_TRANSITION')
   if (current.appliedEventIds.length >= limits.appliedEvents) invalid()
 
   return Object.freeze({

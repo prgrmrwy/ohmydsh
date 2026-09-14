@@ -1065,19 +1065,17 @@ describe.skipIf(!atomicArtifactsPresent())('the real plugin entry installs the s
   /**
    * Reconciliation must RUN at startup, not merely exist.
    *
-   * A queued inquiry whose absolute deadline elapsed while the Host was down
-   * must settle from durable state alone. Asserting on the reopened medium
-   * proves the pass executed inside the real plugin entry: the module is
-   * otherwise dormant, which is exactly how a wired-looking capability ends up
-   * never being invoked.
+   * A queued inquiry remains recoverable regardless of how long the Host was
+   * down. Asserting on the reopened medium proves the startup path read the
+   * durable ledger and preserved the row rather than manufacturing a timeout.
    */
-  it('settles inquiry work left behind by a previous process', async () => {
+  it('preserves long-waiting inquiry work left behind by a previous process', async () => {
     const home = await mkdtemp(path.join(tmpdir(), 'pet-reconcile-'))
     const statePath = path.join(home, 'plugins', 'dsh-pet', 'state.sqlite')
     await mkdir(path.dirname(statePath), { recursive: true })
 
-    // Seed a queued inquiry that is already past its deadline, as a crashed
-    // process would have left it.
+    // Seed a queued inquiry created days ago, as a crashed process would have
+    // left it. Age is diagnostic only and must not auto-expire it.
     const seedCtx = await openDomainOnly(statePath)
     try {
       const store = new InquiryLedgerStore(await seedCtx.storageDomain.open(petDomainSpec) as never)
@@ -1099,12 +1097,12 @@ describe.skipIf(!atomicArtifactsPresent())('the real plugin entry installs the s
       try {
         const domain = await reopened.storageDomain.open(petDomainSpec)
         const settled = new InquiryLedgerStore(domain as never).get('inq-stale')
-        // Settled at its stored deadline, never extended by the restart.
-        expect(settled?.status).toBe('expired')
-        expect(settled?.statusAt).toBe(settled?.deadlineAt)
-        // And the requester has a correlatable failure result to resume with.
-        expect(new InquiryOutboxStore(domain as never).findByInquiry('inq-stale')?.result)
-          .toMatchObject({ kind: 'failure' })
+        // Startup reconciliation preserves queued work regardless of age.
+        expect(settled?.status).toBe('queued')
+        expect(settled).not.toHaveProperty('deadlineAt')
+        // No synthetic failure result is manufactured; normal dispatch remains
+        // responsible for the queued inquiry once the target is runnable.
+        expect(new InquiryOutboxStore(domain as never).findByInquiry('inq-stale')).toBeUndefined()
       } finally {
         await reopened.fiber.dispose()
       }

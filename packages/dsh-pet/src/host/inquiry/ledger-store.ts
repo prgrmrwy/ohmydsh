@@ -119,9 +119,9 @@ function detach(input: unknown, keys: readonly string[]): Record<string, unknown
 /** The fields an acceptance fixes forever; a redelivery must match all of them. */
 function identity(record: InquiryRecord): string {
   const { id, requester, target, circleParentSessionId, question, purpose,
-    origin, audience, trace, createdAt, deadlineAt } = record
+    origin, audience, trace, createdAt } = record
   return JSON.stringify([id, requester, target, circleParentSessionId, question,
-    purpose, origin, audience, trace, createdAt, deadlineAt])
+    purpose, origin, audience, trace, createdAt])
 }
 
 export class InquiryLedgerStore {

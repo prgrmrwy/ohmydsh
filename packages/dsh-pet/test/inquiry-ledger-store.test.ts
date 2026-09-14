@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { InquiryLedgerStore } from '../src/host/inquiry/ledger-store.js'
-import { INQUIRY_LIMITS as limits } from '../src/host/inquiry/ledger.js'
+import { INQUIRY_LIMITS as limits, parseInquiry } from '../src/host/inquiry/ledger.js'
 import { emptyMedium, openPetHarness } from './harness.js'
 
 const atomic = process.env.DSH_PET_TEST_ATOMIC_DOMAIN === '1'
@@ -44,7 +44,7 @@ const event = (type: string, over: Record<string, unknown> = {}) => ({
   type,
   eventId: `event-${type}`,
   at: t0 + 1_000,
-  reason: ['reject', 'unavailable', 'expire', 'cancel', 'needs-review'].includes(type)
+  reason: ['reject', 'unavailable', 'cancel', 'needs-review'].includes(type)
     ? 'host-observed-fact'
     : null,
   ...over,
@@ -71,7 +71,7 @@ describe('inquiry ledger store capability boundary', () => {
 })
 
 describe.skipIf(!atomic)('inquiry ledger store with real reviewed atomic Domain (opt-in config)', () => {
-  it('accepts a queued record, keeps the absolute deadline across a restart and is idempotent per id', async () => {
+  it('accepts a queued record, keeps it recoverable across a long restart and is idempotent per id', async () => {
     const medium = emptyMedium()
     const h = await openPetHarness(medium)
     let accepted
@@ -80,7 +80,7 @@ describe.skipIf(!atomic)('inquiry ledger store with real reviewed atomic Domain 
       accepted = await store.accept(request(), facts())
       expect(accepted).toMatchObject({
         id: 'inquiry-1', status: 'queued', statusAt: t0, reason: null,
-        createdAt: t0, deadlineAt: t0 + limits.absoluteDeadlineMs,
+        createdAt: t0,
         appliedEventIds: [], diagnostics: [], droppedDiagnostics: 0,
       })
       expect(accepted.trace).toEqual({ rootInquiryId: 'inquiry-1', depth: 1, visited: [childA, childB] })
@@ -91,13 +91,15 @@ describe.skipIf(!atomic)('inquiry ledger store with real reviewed atomic Domain 
       expect(store.listPending('session-a')).toEqual([])
     } finally { await h.close() }
 
-    // Restart: the deadline is re-read, never recomputed from the new clock.
+    // Restart: no wall-clock deadline is recomputed or enforced.
     const reopened = await openPetHarness(medium)
     try {
       const store = new InquiryLedgerStore(reopened.domain)
       expect(store.get('inquiry-1')).toEqual(accepted)
-      expect(store.get('inquiry-1')?.deadlineAt).toBe(t0 + limits.absoluteDeadlineMs)
+      expect(store.get('inquiry-1')).not.toHaveProperty('deadlineAt')
       expect(store.restartDisposition()).toEqual({ recoverable: [accepted], needsReview: [] })
+      const longAfterRestart = await store.applyEvent('inquiry-1', event('dispatch', { at: t0 + 30 * 24 * 60 * 60 * 1_000 }))
+      expect(longAfterRestart.status).toBe('executing')
     } finally { await reopened.close() }
   })
 
@@ -133,7 +135,7 @@ describe.skipIf(!atomic)('inquiry ledger store with real reviewed atomic Domain 
 
       const child = await store.accept(...nested())
       expect(child.trace).toEqual({ rootInquiryId: 'inquiry-1', depth: 2, visited: [childA, childB, childC] })
-      expect(child.deadlineAt).toBe(t0 + limits.absoluteDeadlineMs)
+      expect(child).not.toHaveProperty('deadlineAt')
       // Re-asking a seat already on this chain is a loop, whatever id is used.
       await expect(store.accept(
         request({ target: childA, declaredOrigin: null }),
@@ -230,16 +232,16 @@ describe.skipIf(!atomic)('inquiry ledger store with real reviewed atomic Domain 
     } finally { await h.close() }
   })
 
-  it('keeps a late answer as an owner diagnostic without reviving the terminal record', async () => {
+  it('keeps a late answer after explicit cancellation as an owner diagnostic', async () => {
     const h = await openPetHarness()
     try {
       const store = new InquiryLedgerStore(h.domain)
       await store.accept(request(), facts())
       await store.applyEvent('inquiry-1', event('dispatch'))
-      const expired = await store.applyEvent('inquiry-1', event('expire', { at: t0 + limits.absoluteDeadlineMs }))
-      const late = { kind: 'late-answer' as const, at: t0 + limits.absoluteDeadlineMs + 1, eventId: 'answer-late' }
+      const cancelled = await store.applyEvent('inquiry-1', event('cancel', { at: t0 + 30 * 24 * 60 * 60 * 1_000 }))
+      const late = { kind: 'late-answer' as const, at: t0 + 31 * 24 * 60 * 60 * 1_000, eventId: 'answer-late' }
       const noted = await store.recordDiagnostic('inquiry-1', late)
-      expect(noted).toMatchObject({ status: expired.status, statusAt: expired.statusAt, reason: expired.reason })
+      expect(noted).toMatchObject({ status: cancelled.status, statusAt: cancelled.statusAt, reason: cancelled.reason })
       expect(noted.diagnostics).toEqual([late])
       // A redelivered diagnostic is retained once and writes nothing further.
       expect(await store.recordDiagnostic('inquiry-1', { ...late })).toEqual(noted)
@@ -316,8 +318,7 @@ describe.skipIf(!atomic)('inquiry ledger store with real reviewed atomic Domain 
 
     for (const corrupt of [
       { ...stored, answer: 'the answer body must never live here' },
-      { ...stored, deadline: stored.deadlineAt, deadlineAt: undefined },
-      { ...stored, deadlineAt: stored.createdAt + limits.absoluteDeadlineMs + 1 },
+      { ...stored, deadline: stored.createdAt },
       { ...stored, appliedEventIds: ['dup', 'dup'] },
     ]) {
       const broken = emptyMedium()
@@ -325,5 +326,18 @@ describe.skipIf(!atomic)('inquiry ledger store with real reviewed atomic Domain 
       broken.tables.inquiries = { 'inquiry-1': JSON.stringify(corrupt) }
       await expect(openPetHarness(broken)).rejects.toThrow()
     }
+
+    // Exact v12 rows remain readable as historical evidence. The old deadline
+    // is validated and stripped in memory; no migration test may erase it.
+    const legacy = { ...stored,
+      deadlineAt: stored.createdAt + 300_000,
+      status: 'expired' as const,
+      statusAt: stored.createdAt + 300_000,
+      reason: 'legacy-deadline-reached',
+      appliedEventIds: ['legacy-expire'],
+    }
+    const parsedLegacy = parseInquiry(legacy)
+    expect(parsedLegacy).toMatchObject({ status: 'expired' })
+    expect(parsedLegacy).not.toHaveProperty('deadlineAt')
   })
 })

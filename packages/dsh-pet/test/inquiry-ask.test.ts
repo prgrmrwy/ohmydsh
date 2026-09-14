@@ -108,7 +108,7 @@ describe('caller-bound inquiry accept', () => {
     expect(f.store.rows.size).toBe(1)
     expect(result).toMatchObject({
       status: 'accepted', answered: false, inquiryId: 'inquiry-1',
-      acceptedAt: t0, deadlineAt: t0 + INQUIRY_LIMITS.absoluteDeadlineMs,
+      acceptedAt: t0,
     })
     const stored = f.store.rows.get('inquiry-1')!
     expect(stored.status).toBe('queued')
@@ -281,7 +281,7 @@ describe('caller-bound inquiry accept', () => {
     const result = await ask('main', request(childKey('a', 1, 'child-a')), f)
     expect(result.answered).toBe(false)
     expect(Object.keys(result).sort()).toEqual(
-      ['acceptedAt', 'answered', 'deadlineAt', 'inquiryId', 'note', 'status', 'target'].sort(),
+      ['acceptedAt', 'answered', 'inquiryId', 'note', 'status', 'target'].sort(),
     )
     expect(result.note.toLowerCase()).toContain('not an answer')
     expect(JSON.stringify(result)).not.toMatch(/chatId|deliveryId|messageId/)

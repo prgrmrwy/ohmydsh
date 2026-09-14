@@ -586,6 +586,7 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 
 /* Diagnostics rows: label + value pairs instead of a raw JSON dump. */
 .dshpet-facts{display:flex;flex-direction:column;gap:8px;margin:0}
+.dshpet-owner-facts{display:flex;flex-direction:column;gap:8px;margin-top:10px;padding-top:10px;border-top:.5px solid var(--dsw-alias-border-l4,#0000001a)}
 /* Label/value pair. Both columns declare the SAME 22px line so their text
    agrees; with that in place, centring and baseline coincide for ordinary
    text, and centring additionally holds when the value is a CONTROL rather

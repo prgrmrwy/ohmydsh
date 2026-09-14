@@ -83,7 +83,11 @@ export const PET_DOMAIN_NAME = 'dsh_pet'
 // waiting on a continuation that no longer exists anywhere. The table holds no
 // answer body and no chat/message identifier, so it can never become a way to
 // create or consume a Feishu delivery for the answerer.
-export const PET_DOMAIN_VERSION = 12
+// Bumped to 13 because new inquiry rows omit the retired `deadlineAt` field.
+// The parser still accepts the exact v12 row shape, validates its historical
+// deadline under the old fixed bound, and normalizes it without deleting or
+// rewriting the stored row. Legacy `expired` stays terminal evidence only.
+export const PET_DOMAIN_VERSION = 13
 
 // `chat` joins the original three for Tasks created by an inbound Lark
 // message. It is a distinct scope kind rather than a flavour of `workspace`
@@ -847,8 +851,8 @@ export const petCollaborationContextRecord = z.unknown().transform((input, issue
  *
  * Delegates to the pure exact-shape validator instead of restating the record
  * in zod: a second declaration would let a field rename pass one check and
- * fail the other, and only the pure model knows the transition/trace/deadline
- * invariants that make a row meaningful. Parsing yields a detached frozen
+ * fail the other, and only the pure model knows the transition/trace and legacy
+ * compatibility invariants that make a row meaningful. Parsing yields a detached frozen
  * value; validation is not acceptance and grants no authorization.
  *
  * By contract this table holds the question and its purpose — the queued

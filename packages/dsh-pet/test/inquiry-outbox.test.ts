@@ -76,7 +76,6 @@ const facts = (over: Record<string, unknown> = {}) => ({
 })
 
 const evidence = (over: Record<string, unknown> = {}) => ({
-  now: t0 + 3_000,
   inquiry: answeredInquiry(),
   currentRequester: childA,
   work: { ref: 'delivery-1', settled: false },
@@ -204,7 +203,7 @@ describe('outbox transitions', () => {
 })
 
 describe('continuation re-verification (design D7)', () => {
-  it('admits a result whose delivery, requester, inquiry, deadline and permission all still hold', () => {
+  it('admits a result whose delivery, requester, inquiry and permission all still hold', () => {
     const verdict = verifyInquiryContinuation(createInquiryResult(facts()), evidence())
     expect(verdict).toEqual({ ok: true, resume: delivery })
     expect(continuationDisposition(verdict)).toBe('deliver')
@@ -238,30 +237,19 @@ describe('continuation re-verification (design D7)', () => {
       .toEqual({ ok: false, code: 'work-unknown' })
   })
 
-  it('refuses an expired answer, read from the inquiry deadline rather than recomputed', () => {
-    const record = createInquiryResult(facts())
-    const inquiry = answeredInquiry()
-    expect(verifyInquiryContinuation(record, evidence({ now: inquiry.deadlineAt })))
-      .toEqual({ ok: false, code: 'answer-expired' })
-    expect(verifyInquiryContinuation(record, evidence({ now: inquiry.deadlineAt - 1 })))
-      .toMatchObject({ ok: true })
-  })
-
-  it('still delivers the EXPIRED failure result past the deadline, so the work is not stranded', () => {
-    const expiredLedger = applyInquiryEvent(
-      applyInquiryEvent(queued(), { type: 'dispatch', eventId: 'd', at: t0 + 1_000, reason: null }),
-      { type: 'expire', eventId: 'f', at: t0 + 300_000, reason: 'deadline-reached' },
+  it('admits an answer continuation after days because elapsed time is not evidence', () => {
+    const daysLater = t0 + 7 * 24 * 60 * 60 * 1_000
+    const inquiry = applyInquiryEvent(
+      applyInquiryEvent(queued(), { type: 'dispatch', eventId: 'd', at: daysLater, reason: null }),
+      { type: 'answer', eventId: 'a', at: daysLater + 1, reason: null },
     )
     const record = createInquiryResult(facts({
-      result: failureResult('expired', t0 + 300_000), createdAt: t0 + 300_000,
+      result: { kind: 'answer', answeredAt: daysLater + 1 }, createdAt: daysLater + 1,
     }))
-    // The deadline check bounds an ANSWER; the timeout FAILURE is exactly the
-    // correlatable result the requester is promised, so it still lands.
-    expect(verifyInquiryContinuation(record, evidence({ inquiry: expiredLedger, now: t0 + 300_001 })))
+    expect(verifyInquiryContinuation(record, evidence({ inquiry })))
       .toEqual({ ok: true, resume: delivery })
-    // An ANSWER at the same moment is refused.
-    expect(verifyInquiryContinuation(createInquiryResult(facts()), evidence({ now: t0 + 300_001 })))
-      .toEqual({ ok: false, code: 'answer-expired' })
+    expect(() => verifyInquiryContinuation(record, { ...evidence({ inquiry }), now: daysLater }))
+      .toThrow(InquiryOutboxError)
   })
 
   it('refuses a mismatched inquiry, a mismatched result kind and a revoked permission', () => {
@@ -282,20 +270,19 @@ describe('continuation re-verification (design D7)', () => {
     expect(verifyInquiryContinuation(delivered, evidence())).toEqual({ ok: false, code: 'result-not-pending' })
   })
 
-  it.each(['rejected', 'unavailable', 'expired'] as const)('verifies a %s failure result against its own ledger status', failure => {
-    // The ledger EVENT name differs from the resulting status for `rejected`.
-    const eventType = { rejected: 'reject', unavailable: 'unavailable', expired: 'expire' }[failure]
+  it.each(['rejected', 'unavailable', 'cancelled'] as const)('verifies a %s failure result against its own ledger status', failure => {
+    const eventType = { rejected: 'reject', unavailable: 'unavailable', cancelled: 'cancel' }[failure]
     const failedLedger = applyInquiryEvent(
       applyInquiryEvent(queued(), { type: 'dispatch', eventId: 'd', at: t0 + 1_000, reason: null }),
-      { type: eventType, eventId: 'f', at: t0 + (failure === 'expired' ? 300_000 : 2_000), reason: 'host-observed-fact' },
+      { type: eventType, eventId: 'f', at: t0 + 2_000, reason: 'host-observed-fact' },
     )
     const record = createInquiryResult(facts({ result: failureResult(failure) }))
-    const verdict = verifyInquiryContinuation(record, evidence({ inquiry: failedLedger, now: t0 + 2_500 }))
+    const verdict = verifyInquiryContinuation(record, evidence({ inquiry: failedLedger }))
     expect(verdict).toEqual({ ok: true, resume: delivery })
     // The failure result of a DIFFERENT failure is not interchangeable.
     expect(verifyInquiryContinuation(
       createInquiryResult(facts({ result: failureResult(failure === 'rejected' ? 'cancelled' : 'rejected') })),
-      evidence({ inquiry: failedLedger, now: t0 + 2_500 }),
+      evidence({ inquiry: failedLedger }),
     )).toEqual({ ok: false, code: 'inquiry-mismatch' })
   })
 
@@ -341,7 +328,7 @@ describe('continuation re-verification (design D7)', () => {
       result: { kind: 'answer', answeredAt: t0 + 3_500 }, createdAt: t0 + 3_500,
     }))
     expect(verifyInquiryContinuation(record, {
-      now: t0 + 4_000, inquiry: nested, currentRequester: childB,
+      inquiry: nested, currentRequester: childB,
       work: { ref: 'inquiry-1', settled: false }, permitted: true,
     })).toEqual({ ok: true, resume: { kind: 'inquiry', parentInquiryId: 'inquiry-1' } })
   })

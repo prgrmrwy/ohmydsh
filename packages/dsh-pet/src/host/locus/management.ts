@@ -25,6 +25,7 @@ import type {
   PetLocusDiscoveryView,
   PetLocusEndpointView,
   PetLocusManagementView,
+  PetLocusOwnerProjection,
   PetLocusView,
 } from '../../wire.js'
 
@@ -299,6 +300,15 @@ export interface LocusManagementDiagnostics {
 export interface CreateLocusManagementPortOptions {
   readonly repository: LocusManagementRepository
   readonly resolvers?: LocusManagementResolvers
+  /**
+   * Optional B035 owner projection seam. The callback must return a snapshot
+   * derived from real Host evidence; when absent the owner UI renders unknown
+   * rather than querying legacy Task/Invocation rows or inventing inquiries.
+   */
+  readonly ownerProjection?: (input: {
+    readonly locus: LocusRecord
+    readonly parentSessionId: string
+  }) => Promise<PetLocusOwnerProjection | undefined> | PetLocusOwnerProjection | undefined
   readonly actions?: LocusManagementActions
   /** Host change generation, when one exists; otherwise the adapter revision is used. */
   readonly generation?: () => number
@@ -385,11 +395,13 @@ async function projectRecord(
   record: LocusRecord,
   isDefaultQa: boolean,
   resolvers: LocusManagementResolvers | undefined,
+  ownerProjection: CreateLocusManagementPortOptions['ownerProjection'] | undefined,
 ): Promise<PetLocusView> {
-  const [main, child, workspace] = await Promise.all([
+  const [main, child, workspace, owner] = await Promise.all([
     resolvers?.main?.(record.parentSessionId),
     record.childSessionId === undefined ? undefined : resolvers?.child?.(record.childSessionId),
     resolvers?.workspace?.(record.workspaceId),
+    ownerProjection?.({ locus: record, parentSessionId: record.parentSessionId }),
   ])
   return {
     locusId: record.id,
@@ -432,6 +444,7 @@ async function projectRecord(
     },
     state: stateView(record),
     source: record.source,
+    ...(owner === undefined ? {} : { owner }),
     ...(record.parentLocusId === undefined ? {} : { parentLocusId: record.parentLocusId }),
     isDefaultQa,
     defaultQa: isDefaultQa,
@@ -573,7 +586,7 @@ export function createLocusManagementPort(
     return undefined
   }
   const project = async (record: LocusRecord, isDefaultQa = false): Promise<PetLocusView> =>
-    projectRecord(record, isDefaultQa, resolvers)
+    projectRecord(record, isDefaultQa, resolvers, options.ownerProjection)
   const actionResult = async (
     action: PetLocusActionRequest['action'],
     record: LocusRecord,
@@ -646,6 +659,11 @@ export function createLocusManagementPort(
         }
       }),
     }
+    const ownerByParent = [...parentIds].sort().flatMap(parentSessionId => {
+      const representative = all.find(record => record.parentSessionId === parentSessionId)
+      const projection = representative === undefined ? undefined : projected.get(representative.id)?.owner
+      return projection === undefined ? [] : [{ parentSessionId, projection }]
+    })
     return {
       generation: options.generation?.() ?? revision,
       loci: all.map(requireProjected),
@@ -653,6 +671,7 @@ export function createLocusManagementPort(
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([parentSessionId, record]) => ({ parentSessionId, locus: requireProjected(record) })),
       discovery,
+      ...(ownerByParent.length === 0 ? {} : { owner: { byParent: ownerByParent } }),
     }
   }
 

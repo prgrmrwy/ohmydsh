@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * One-off Pet state version restamp (v2..v11 -> current PET_DOMAIN_VERSION).
+ * One-off Pet state version restamp (v2..v12 -> current PET_DOMAIN_VERSION).
  *
  * Why this exists as a standalone script rather than only as in-process
  * migration: the SQLite backend opens Pet's database with
@@ -10,13 +10,12 @@
  * on every boot, which silently aborts Pet initialization before its routes
  * are registered. This script performs the restamp while DSH is STOPPED.
  *
- * The restamp is safe because v2..v11 -> v12 is purely additive (see
- * src/host/spec.ts): new locus/public-context/inquiry tables are created by the
- * storage backend on first open. No existing row or log is converted, cleared,
- * or rewritten; local anchors are not promoted and context modes are not
- * guessed. The inquiry ledger and its result outbox start empty by design: a
- * pre-v12 medium holds no accepted inquiry and therefore no undelivered result,
- * so there is nothing to reconstruct and no continuation to re-run.
+ * The restamp is safe because v2..v11 add tables without changing old rows,
+ * while v12 inquiry rows are explicitly parser-compatible at v13 (see
+ * src/host/spec.ts and inquiry/ledger.ts). No existing row or log is converted,
+ * cleared, or rewritten; a legacy deadline is validated and stripped only from
+ * the in-memory value. Local anchors are not promoted and context modes are not
+ * guessed.
  *
  * Usage:
  *   node scripts/migrate-state-version.mjs [--db <path>] [--dry-run] [--yes]
@@ -29,10 +28,10 @@ import os from 'node:os'
 
 /** Domain identity; must match src/host/spec.ts. */
 const PET_DOMAIN_NAME = 'dsh_pet'
-const PET_DOMAIN_VERSION = 12
+const PET_DOMAIN_VERSION = 13
 /** Versions this script is allowed to restamp. v1 needs a separate explicit
  * cleanup because its rows reference a store layout that is gone. */
-const RESTAMPABLE = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+const RESTAMPABLE = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 
 function parseArgs(argv) {
   const args = { dryRun: false, yes: false, db: undefined, help: false }
@@ -138,7 +137,7 @@ try {
   if (current === 1) {
     fail(
       'Version 1 requires a separate explicit legacy cleanup (it drops rows ' +
-      'that reference a removed store layout); this CLI only restamps v2..v11.',
+      'that reference a removed store layout); this CLI only restamps v2..v12.',
     )
   }
   if (!RESTAMPABLE.includes(current)) {
