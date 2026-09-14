@@ -72,13 +72,16 @@
 
 ### 验证证据的边界
 
-- Pet 全量：131 文件通过、2312 passed、31 skipped
-- 仓库 `npm test`：124 passed、1 skipped
-- typecheck / build / `check:artifacts` / strict validate / `git diff --check` 均通过
+- Pet 全量：131 文件通过、2312 passed、31 skipped（修复前的既有基线）
+- 本次修复定向回归：`locus-turn-observer.test.ts` 37/37、`locus-reply-tool.test.ts` 5/5；覆盖 Delivery → `agent-message` → `pet_locus_reply` 原目标发送，以及单独 agent-message 无权、GUI steer/来源不明/第二 Delivery fail closed
+- 本次修复 `npm run typecheck --workspace=dsh-pet` 通过
+- 仓库 `npm test`：124 passed、1 skipped；本次修复后未改仓库级源码
+- 本次修复 `openspec validate pet-locus-independent-child --strict` 与 `git diff --check` 通过
 - **但**：`DSH_PET_TEST_RUNTIME` 探针为诊断用途，不建立 Agent/Session/模型/飞书链路
 - **且**：`DSH_PET_TEST_ATOMIC_DOMAIN=1` 下事务组失败（`TRANSACTION_UNAVAILABLE`），当前 runtime 无可用 transaction seam
+- **仍未做**：本次代码改动后的 `dsh build` 物化、Host 重启和真实答疑群复测；不能把本地回归等同于飞书实机验收
 
-命令级全绿不等于 runtime 验收；G1–G5 一项都未通过。
+命令级全绿不等于 runtime 验收；部署与真实问父验收仍未完成。
 
 ## 本期承接范围
 
@@ -86,9 +89,9 @@
 
 只做三件事：
 
-1. 新建/重建 locus child 不再 fork 父 transcript（`child.ts:303` 的 `DEFAULT_CHILD_PROVIDER = 'fork'` 是根因，三处创建路径共用）
-2. 持久化 `contextMode`（`fork-prefix-v1` / `independent-v1` / `unknown`），旧 child 不被静默改造
-3. 真实验收：答疑群提问后确实收到飞书回复
+1. 新建/重建 locus child 不再 fork 父 transcript（`child.ts` 的 `DEFAULT_CHILD_PROVIDER` 是根因，三处创建路径共用）
+2. 创建前证明 provider 独立；无法证明时 fail closed；不引入 `contextMode` 持久化，也不静默改造旧 child
+3. 真实验收：答疑群提问后确实收到飞书回复；父子 `agent-message` 只作为上下文，不撤销原 Delivery 回复目标
 
 「可以问父」无需新建能力：`host/locus/context.ts:343` 已指导使用原生 `send_message` 询问 caller-bound main session，`:339` 已固定 `pet_locus_reply` 为唯一业务出口，`:345` 已禁止自动回传结论。
 

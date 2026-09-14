@@ -64,11 +64,6 @@ export interface LocusDeliveryClaimLookup {
  * step with workspace instructions, a runtime-context snapshot and the skill
  * catalog. They carry no reply target of their own and cannot redirect a
  * Delivery, so they must not count as foreign traffic sharing the turn.
- *
- * Treating them as foreign is what made the FIRST Feishu message of every
- * locus child unanswerable: the turn was marked mixed, reply authority was
- * withheld, and `pet_locus_reply` reported "no exact Delivery reply target"
- * while the child had in fact been addressed correctly.
  */
 const HOST_INJECTED_SOURCE_KINDS: ReadonlySet<string> = new Set([
   'agent-instructions',
@@ -80,15 +75,24 @@ const HOST_INJECTED_SOURCE_KINDS: ReadonlySet<string> = new Set([
  * Whether a claimed message was injected by the Host rather than sent by a
  * participant.
  *
- * `user` is deliberately absent: a `user`-sourced message that resolves to no
- * Delivery is a GUI prompt or a parent steer, which CAN carry another target
- * and therefore must still poison reply authority.
- *
  * @param sourceKind - the claimed message's `source.kind`, when reported.
  * @returns whether the claim is Host-injected context.
  */
 export function isHostInjectedClaim(sourceKind: string | undefined): boolean {
   return sourceKind !== undefined && HOST_INJECTED_SOURCE_KINDS.has(sourceKind)
+}
+
+/**
+ * Whether a claimed message is context-only and has no routing semantics.
+ *
+ * Agent-to-agent relays are context-only: `send_message` delivers them at the
+ * target's nearest step boundary, but they do not carry a Feishu reply target
+ * of their own and cannot redirect a Delivery already running in that turn.
+ * `user` is deliberately absent: a user-sourced message that resolves to no
+ * Delivery is GUI traffic or a parent steer and must remain fail-closed.
+ */
+export function isNonRoutingContextClaim(sourceKind: string | undefined): boolean {
+  return isHostInjectedClaim(sourceKind) || sourceKind === 'agent-message'
 }
 
 /** One inbox claim reported by the runtime. */
@@ -147,6 +151,8 @@ export type LocusTurnObserverDiagnostic =
   | 'turn-claim-limit'
   /** Host-injected context shared the turn; ignored, not treated as foreign. */
   | 'claim-host-context'
+  /** Agent-to-agent context shared the turn; ignored, not treated as foreign. */
+  | 'claim-agent-context'
 
 /** The observer the unified locus controller accepts. */
 export interface LocusTurnCorrelationObserver {
@@ -416,15 +422,13 @@ export function createLocusTurnObserver(
     }
     const key = turnKey(claim.childSessionId, claim.turn)
     if (ended.has(key)) return
-    // Host-injected context (workspace instructions, the runtime snapshot, the
-    // skill catalog) shares the child's first step but is not participant
-    // traffic and carries no target of its own. Ignore it entirely: retaining
-    // it as unresolved/foreign marked the turn mixed and silently stripped
-    // reply authority from the FIRST Feishu message of every locus child.
-    // Ignoring is safe precisely because it can never become a Delivery — a
-    // durable Delivery is always claimed as `user`.
-    if (isHostInjectedClaim(claim.sourceKind)) {
-      ports.log?.('claim-host-context')
+    // Host-injected context and agent-to-agent relays share the child's turn
+    // but have no Feishu routing target of their own. Ignore them entirely:
+    // retaining either as unresolved/foreign would mark the turn mixed and
+    // strip reply authority from an otherwise valid Delivery. Ignoring is safe
+    // because a durable Feishu Delivery is always claimed as `user`.
+    if (isNonRoutingContextClaim(claim.sourceKind)) {
+      ports.log?.(claim.sourceKind === 'agent-message' ? 'claim-agent-context' : 'claim-host-context')
       return
     }
     const observed = ensureTurn(claim)

@@ -87,6 +87,67 @@ describe('caller-bound Feishu reply tool', () => {
     expect(reply).not.toHaveBeenCalled()
   })
 
+  it('sends through the original Delivery after a parent agent-message reply', async () => {
+    const claimListeners: Array<(claim: LocusInboxClaim) => void> = []
+    const observer = createLocusTurnObserver({
+      onClaimed: listener => { claimListeners.push(listener); return () => {} },
+      onTurnEnd: () => () => {},
+      lookup: {
+        find: ({ messageId }) => messageId === 'delivery-message'
+          ? {
+              deliveryId: 'delivery-1',
+              executionId: 'execution-1',
+              correlation: {
+                endpoint: { chatId: 'oc-1', threadId: 'omt-1' },
+                locusId: 'locus-1',
+                generation: 2,
+                childSessionId: 'child-1',
+              },
+            }
+          : undefined,
+      },
+    })
+    const aggregate = {
+      findByChildSession: () => ({
+        id: 'locus-1', generation: 2,
+        endpoint: { chatId: 'oc-1', threadId: 'omt-1' },
+        parentSessionId: 'parent-1', childSessionId: 'child-1', workspaceId: 'workspace-1',
+        source: 'explicit' as const, state: 'active' as const, busy: true,
+        permission: { desired: 'read' as const, effective: 'read' as const },
+        createdAt: 1, updatedAt: 2,
+      }),
+      findCurrentDelivery: ({ executionId }: { executionId?: string }) => executionId === 'execution-1'
+        ? contextRecord(true).currentDelivery
+        : undefined,
+    }
+    const repository = asLocusContextRepository(
+      aggregate,
+      childSessionId => observer.currentForChild?.(childSessionId),
+    )
+    const definitions: Array<{ name: string; execute(args: unknown, exec: unknown): Promise<unknown> }> = []
+    const reply = vi.fn(async () => undefined)
+    registerPetTools({
+      tools: { register: (definition: never) => { definitions.push(definition); return () => {} } },
+    } as never, {
+      repository: {} as never,
+      locusRepository: repository,
+      locusReply: { locusRepository: repository, lark: { reply, replyExact: reply } },
+    })
+    const tool = definitions.find(item => item.name === PET_LOCUS_REPLY_TOOL)!
+    const exec = {
+      agent: { session: { id: 'child-1' } },
+      signal: new AbortController().signal,
+    }
+    const claim = (value: LocusInboxClaim) => claimListeners.forEach(listener => listener(value))
+
+    claim({ childSessionId: 'child-1', messageId: 'delivery-message', turn: 7, sourceKind: 'user' })
+    claim({ childSessionId: 'child-1', messageId: 'parent-answer', turn: 7, sourceKind: 'agent-message' })
+
+    await expect(tool.execute({ text: 'MANGO-SPAWN-0914' }, exec)).resolves.toEqual({ sent: true })
+    expect(reply).toHaveBeenCalledWith('om-current', 'MANGO-SPAWN-0914')
+    observer.dispose()
+  })
+
   it('refuses to send after the same child turn claims a Delivery and a steer', async () => {
     vi.useFakeTimers()
     try {
