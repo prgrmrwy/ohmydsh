@@ -32,11 +32,30 @@ const expectedRuntimeStorage = [
   '@deepseek-ai/dsh-storage-domain',
   '@deepseek-ai/dsh-storage-json',
 ]
+/**
+ * Whether this launcher overrides `dsh-agent`/`dsh-agent-loop` with the
+ * reviewed isolated-queued-turn-claim build.
+ *
+ * Currently OFF. That seam exists only to serve B035's non-steering inquiry
+ * queue, and B035 is paused with inquiry dispatch deliberately fail-closed
+ * (see `docs/notes/pet-locus-independent-child-handoff.md`), so nothing in the
+ * shipped Host can reach it. Keeping the override off also avoids an npm
+ * 11.19.0 arborist crash — `TypeError: Cannot read properties of null
+ * (reading 'matches')` at `Link.matches` → `CanPlaceDep.canPlacePeers` — that
+ * this exact combination of `file:` overrides plus peer ranges triggers while
+ * building the isolated dependency root.
+ *
+ * Turning it back on is one edit here, plus re-proving the seam: the artifacts,
+ * the patch, and every verification below are retained unchanged. Do NOT flip
+ * this on without also resolving that install failure, and never let a failed
+ * agent override silently fall back to the unpatched registry build — Pet must
+ * keep the inquiry queue unavailable rather than destroy GUI next-step input.
+ */
+const overrideRuntimeAgent = false
 /** Reviewed agent packages carrying the opt-in isolated queued-turn claim. */
-const expectedRuntimeAgent = [
-  '@deepseek-ai/dsh-agent',
-  '@deepseek-ai/dsh-agent-loop',
-]
+const expectedRuntimeAgent = overrideRuntimeAgent
+  ? ['@deepseek-ai/dsh-agent', '@deepseek-ai/dsh-agent-loop']
+  : []
 const agentPatchVersion = `${version}-locus-isolated-claim.1`
 
 function run(command, args, cwd, capture = false) {
@@ -113,60 +132,62 @@ function verifyLauncher(directory, fingerprint) {
     ]) {
       if (!runtimeSource.includes(marker)) return undefined
     }
-    // The isolated-claim seam is patched into `dsh-agent`/`dsh-agent-loop`, so
-    // verify the packages this launcher actually resolves. Those two are NOT
-    // overridden yet, so this check currently rejects a launcher whose agent
-    // runtime is the unpatched registry build: without the seam, refusing a
-    // mixed inquiry claim would silently destroy the user's GUI next-step
-    // input, and Pet must stay fail-closed instead.
-    const agentSource = readFileSync(
-      join(dirname(requireFromLauncher.resolve('@deepseek-ai/dsh-agent/package.json')), 'lib', 'index.js'),
-      'utf8',
-    )
-    if (!agentSource.includes('isolateQueuedTurn')) return undefined
-    if (!/claim\(target,\s*turn,\s*options\)/.test(agentSource)) return undefined
-    const agentLoopSource = readFileSync(
-      join(dirname(requireFromLauncher.resolve('@deepseek-ai/dsh-agent-loop/package.json')), 'lib', 'index.js'),
-      'utf8',
-    )
-    if (!agentLoopSource.includes('supportsIsolatedQueuedTurnClaim')) return undefined
-    if (!agentLoopSource.includes('isolateQueuedTurnClaim')) return undefined
-    for (const name of expectedRuntimeAgent) {
-      const manifest = readJson(requireFromLauncher.resolve(`${name}/package.json`))
-      if (manifest.name !== name || manifest.version !== agentPatchVersion) return undefined
-      if (manifest.dsh_compat?.patchSha256 !== subagentPatchSha256) return undefined
-      if (manifest.dsh_compat?.replaces !== `${name}@${version}`) return undefined
-      if (manifest.dsh_compat?.upstreamBase !== reviewedCommit) return undefined
+    // The isolated-claim seam is patched into `dsh-agent`/`dsh-agent-loop`.
+    // While `overrideRuntimeAgent` is off those two resolve to the unpatched
+    // registry build on purpose, so none of the proofs below apply: requiring
+    // them would reject every launcher and rebuild forever. Pet already treats
+    // a missing seam as "inquiry queue unavailable" and stays fail-closed, so
+    // an unpatched agent is a supported configuration rather than a defect.
+    if (overrideRuntimeAgent) {
+      const agentSource = readFileSync(
+        join(dirname(requireFromLauncher.resolve('@deepseek-ai/dsh-agent/package.json')), 'lib', 'index.js'),
+        'utf8',
+      )
+      if (!agentSource.includes('isolateQueuedTurn')) return undefined
+      if (!/claim\(target,\s*turn,\s*options\)/.test(agentSource)) return undefined
+      const agentLoopSource = readFileSync(
+        join(dirname(requireFromLauncher.resolve('@deepseek-ai/dsh-agent-loop/package.json')), 'lib', 'index.js'),
+        'utf8',
+      )
+      if (!agentLoopSource.includes('supportsIsolatedQueuedTurnClaim')) return undefined
+      if (!agentLoopSource.includes('isolateQueuedTurnClaim')) return undefined
+      for (const name of expectedRuntimeAgent) {
+        const manifest = readJson(requireFromLauncher.resolve(`${name}/package.json`))
+        if (manifest.name !== name || manifest.version !== agentPatchVersion) return undefined
+        if (manifest.dsh_compat?.patchSha256 !== subagentPatchSha256) return undefined
+        if (manifest.dsh_compat?.replaces !== `${name}@${version}`) return undefined
+        if (manifest.dsh_compat?.upstreamBase !== reviewedCommit) return undefined
+      }
+      // Prove the behavior on the actual Inbox this launcher would load: an
+      // isolated claim takes only the queued turn and leaves next-step pending,
+      // while the default claim keeps its combined batch.
+      const { Inbox } = require(requireFromLauncher.resolve('@deepseek-ai/dsh-agent'))
+      const inboxMessage = id => ({ id, role: 'user', content: [{ type: 'text', text: id }], source: { kind: 'user' } })
+      const buildInbox = (claimed) => {
+        const events = []
+        return new Inbox({
+          ownEvents: () => events,
+          append(type, data) {
+            const event = { type, data, seq: events.length }
+            events.push(event)
+            return event
+          },
+        }, { inserted() {}, discarded() {}, claimed(message) { claimed.push(message.id) } })
+      }
+      const isolatedClaimed = []
+      const isolatedInbox = buildInbox(isolatedClaimed)
+      isolatedInbox.append('next-step', inboxMessage('gui-steer'))
+      isolatedInbox.append('next-turn', inboxMessage('inquiry'))
+      const isolated = isolatedInbox.claim('next-turn', 1, { isolateQueuedTurn: true }).map(entry => entry.id)
+      if (isolated.length !== 1 || isolated[0] !== 'inquiry') return undefined
+      if (isolatedInbox.nextStep.length !== 1 || isolatedInbox.nextStep[0].id !== 'gui-steer') return undefined
+      if (isolatedClaimed.length !== 1 || isolatedClaimed[0] !== 'inquiry') return undefined
+      const legacyInbox = buildInbox([])
+      legacyInbox.append('next-step', inboxMessage('gui-steer'))
+      legacyInbox.append('next-turn', inboxMessage('inquiry'))
+      const legacy = legacyInbox.claim('next-turn', 1).map(entry => entry.id)
+      if (legacy.length !== 2 || legacy[0] !== 'gui-steer' || legacy[1] !== 'inquiry') return undefined
     }
-    // Prove the behavior on the actual Inbox this launcher would load: an
-    // isolated claim takes only the queued turn and leaves next-step pending,
-    // while the default claim keeps its combined batch.
-    const { Inbox } = require(requireFromLauncher.resolve('@deepseek-ai/dsh-agent'))
-    const inboxMessage = id => ({ id, role: 'user', content: [{ type: 'text', text: id }], source: { kind: 'user' } })
-    const buildInbox = (claimed) => {
-      const events = []
-      return new Inbox({
-        ownEvents: () => events,
-        append(type, data) {
-          const event = { type, data, seq: events.length }
-          events.push(event)
-          return event
-        },
-      }, { inserted() {}, discarded() {}, claimed(message) { claimed.push(message.id) } })
-    }
-    const isolatedClaimed = []
-    const isolatedInbox = buildInbox(isolatedClaimed)
-    isolatedInbox.append('next-step', inboxMessage('gui-steer'))
-    isolatedInbox.append('next-turn', inboxMessage('inquiry'))
-    const isolated = isolatedInbox.claim('next-turn', 1, { isolateQueuedTurn: true }).map(entry => entry.id)
-    if (isolated.length !== 1 || isolated[0] !== 'inquiry') return undefined
-    if (isolatedInbox.nextStep.length !== 1 || isolatedInbox.nextStep[0].id !== 'gui-steer') return undefined
-    if (isolatedClaimed.length !== 1 || isolatedClaimed[0] !== 'inquiry') return undefined
-    const legacyInbox = buildInbox([])
-    legacyInbox.append('next-step', inboxMessage('gui-steer'))
-    legacyInbox.append('next-turn', inboxMessage('inquiry'))
-    const legacy = legacyInbox.claim('next-turn', 1).map(entry => entry.id)
-    if (legacy.length !== 2 || legacy[0] !== 'gui-steer' || legacy[1] !== 'inquiry') return undefined
     for (const name of expectedRuntimeStorage) {
       const manifest = readJson(requireFromLauncher.resolve(`${name}/package.json`))
       if (manifest.name !== name || manifest.dsh_compat?.patchSha256 !== storagePatchSha256) return undefined
@@ -254,11 +275,15 @@ try {
       for (const name of ['storage', 'storage-domain', 'storage-json', 'storage-sqlite']) {
         cpSync(join(here, 'storage-artifacts', name), join(compatPackages, name), { recursive: true })
       }
-      // The isolated queued-turn claim is patched into these two packages, so
-      // the launcher must resolve the reviewed builds instead of the registry.
-      for (const name of ['agent', 'agent-loop']) {
-        cpSync(join(here, 'agent-artifacts', name), join(compatPackages, name), { recursive: true })
-        materializeWorkspaceRanges(join(compatPackages, name), versions)
+      // The isolated queued-turn claim is patched into these two packages. It
+      // is staged only when `overrideRuntimeAgent` is on; otherwise the
+      // launcher resolves the registry build and Pet keeps the inquiry queue
+      // unavailable, which is the current B035-paused configuration.
+      if (overrideRuntimeAgent) {
+        for (const name of ['agent', 'agent-loop']) {
+          cpSync(join(here, 'agent-artifacts', name), join(compatPackages, name), { recursive: true })
+          materializeWorkspaceRanges(join(compatPackages, name), versions)
+        }
       }
       writeFileSync(join(staging, 'package.json'), `${JSON.stringify({
         name: 'dsh-pet-locus-launcher',
@@ -272,8 +297,12 @@ try {
         // package copies before publish so the final launcher is self-contained.
         overrides: {
           '@deepseek-ai/dsh-subagent': `file:${join(compatPackages, 'subagent')}`,
-          '@deepseek-ai/dsh-agent': `file:${join(compatPackages, 'agent')}`,
-          '@deepseek-ai/dsh-agent-loop': `file:${join(compatPackages, 'agent-loop')}`,
+          ...(overrideRuntimeAgent
+            ? {
+              '@deepseek-ai/dsh-agent': `file:${join(compatPackages, 'agent')}`,
+              '@deepseek-ai/dsh-agent-loop': `file:${join(compatPackages, 'agent-loop')}`,
+            }
+            : {}),
           '@deepseek-ai/dsh-storage': `file:${join(compatPackages, 'storage')}`,
           '@deepseek-ai/dsh-storage-domain': `file:${join(compatPackages, 'storage-domain')}`,
           '@deepseek-ai/dsh-storage-json': `file:${join(compatPackages, 'storage-json')}`,
@@ -289,8 +318,9 @@ try {
       runNpm(['ls', '@deepseek-ai/dsh-subagent', ...expectedRuntimeAgent, ...expectedRuntimeStorage], staging)
       const packageCopies = new Map([
         ['@deepseek-ai/dsh-subagent', 'subagent'],
-        ['@deepseek-ai/dsh-agent', 'agent'],
-        ['@deepseek-ai/dsh-agent-loop', 'agent-loop'],
+        ...(overrideRuntimeAgent
+          ? [['@deepseek-ai/dsh-agent', 'agent'], ['@deepseek-ai/dsh-agent-loop', 'agent-loop']]
+          : []),
         ['@deepseek-ai/dsh-storage', 'storage'],
         ['@deepseek-ai/dsh-storage-domain', 'storage-domain'],
         ['@deepseek-ai/dsh-storage-json', 'storage-json'],
