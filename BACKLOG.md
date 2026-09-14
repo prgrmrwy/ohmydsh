@@ -32,7 +32,7 @@
   - 同时影响 `locus_deliveries` 的首投递路径与 `locus-prepublication` 预留逻辑（`reservation.childSessionId` 目前在发布前就要求存在）。
   - 空 child 是否出现在侧边栏待确认；若不可见则纯属资源占用，优先级可维持 P2。
 - **不在范围**: 与 `pet-locus-independent-child`（只改新 child 的 provider 选择，使其不再 fork 父历史）正交，该 change 不承接本条。
-- **更新**: 2026-09-14 空库验证中发现并确认。同批实测了两条 main 来源，**均未复现 blank main**：答疑群入口复用当前会话（11.8 MB 真实历史）；拉 bot 进新群走 `source=auto` 自动新建 main（`session-4629eb39`），所有者在侧边栏确认其含介绍与 standby 要求、有实际 turn，不是 blank。注意「未复现」不等于「blank main 已不可能发生」——该问题的确切触发条件仍未知，不能据此关闭。本条聚焦的 child 提前创建则两条路径都稳定复现。
+- **更新**: 2026-09-14 空库端到端验证中发现并确认。同批顺带验证了历史上的 blank main 问题——该问题此前已修复但一直未实测，本次两条 main 来源**均未复现，确认修复生效**：答疑群入口复用当前会话（11.8 MB 真实历史）；拉 bot 进新群走 `source=auto` 自动新建 main（`session-4629eb39`），所有者在侧边栏确认其含介绍与 standby 要求、有实际 turn。因此当前 locus provisioning 的唯一已知缺陷就是本条描述的无条件预建空 child，两条路径均稳定复现。
 
 ### [B019] 设置面板底部 DSH 主机系统时钟（24 小时制 + 时区）
 - **状态**: 实施中
