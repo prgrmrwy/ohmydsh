@@ -19,17 +19,25 @@
 
 **范围决定（所有者 2026-03-23）**：不引入上下文模式标记（`fork-prefix-v1`/`independent-v1`/`unknown`）及其 schema 持久化。实施时发现要让该字段真正生效，需要把独立性核验结果一路传递穿过 `index.ts`→`dsh-port.ts`→`controller.ts`（6 处调用点）→`controller-persistence-adapter.ts` 才能到达 `buildLocusRecord()`，与"加一个字段"的预期规模不对等；且该字段只是可观测性，不影响独立性本身是否生效。详见 `design.md` D4。原第 2 节（schema 持久化）整节移除，不做新旧模式共存的历史兼容层。
 
-## 2. 回复出口与问父路径回归
+## 2. 回复出口与问父路径回归 —— 已完成
 
-- [ ] 2.1 回归 `pet_locus_reply` 为业务正文唯一出口，turn 结束未发送时仍如实诊断为未回复
-- [ ] 2.2 回归首轮前言仍包含「按需问 caller-bound 主会话」「parent 回复不构成持久授权」「不自动回传结论」三条边界
-- [ ] 2.3 测试：独立 child 首轮不含父 transcript 哨兵、lineage 正确、silent settlement 行为不变
+复核确认这一层与阶段 1（provider 选择/独立性核验）完全解耦：`LocusDeliveryContext`/`renderLocusDeliveryPrompt()` 是纯函数，不含 provider 字段，前言内容不依赖 child 是用 fork 还是 spawn 创建的。因此任务性质是回归确认既有覆盖仍然成立，而非新写测试；已有覆盖具体如下。
 
-## 3. 本地验证
+- [x] 2.1 回归 `pet_locus_reply` 为业务正文唯一出口，turn 结束未发送时仍如实诊断为未回复
+  - 证据：`locus-context.test.ts` 第 96/259 行 `pet_locus_reply` 断言、第 91–97 行「回复只能回到上述当前目标」；本 change 未改动 `context.ts`，14/14 回归通过
+- [x] 2.2 回归首轮前言仍包含「按需问 caller-bound 主会话」「parent 回复不构成持久授权」「不自动回传结论」三条边界
+  - 证据：`locus-context.test.ts:105-144`「does not flatten history」+「does not guess an unconfirmed anchor」两个既有用例，逐字断言 `send_message`、「必须由所有者在管理面显式确认」、「不要自动把本 child 的结论、摘要或状态回传 main session」
+- [x] 2.3 测试：独立 child 首轮不含父 transcript 哨兵、lineage 正确、silent settlement 行为不变
+  - 证据：`independent-runtime-probe.test.ts` 用固定 runtime 重跑 3/3 通过，`inheritsParentContext === false` 且 `prepared === {}`（spawn provider 从不读父 `snapshotEvents()`）；lineage/silent settlement 由阶段 1 `locus-child.test.ts` 的 `settlementNotice: 'silent'` 断言与 `supportsSettlementNotice` fail-closed 覆盖，与本节共享同一创建路径
 
-- [ ] 3.1 运行 `npm run typecheck --workspace=dsh-pet`、`npm run test --workspace=dsh-pet`、`npm run build --workspace=dsh-pet`
-- [ ] 3.2 运行仓库 `npm test`、`npm run check:artifacts`、`git diff --check`
-- [ ] 3.3 `openspec validate pet-locus-independent-child --strict`
+## 3. 本地验证 —— 已完成
+
+- [x] 3.1 运行 `npm run typecheck --workspace=dsh-pet`、`npm run test --workspace=dsh-pet`、`npm run build --workspace=dsh-pet`
+  - 结果：typecheck 通过；test 131 文件/2315 测试通过，31 skipped（既有 opt-in runtime probe），0 failed；build 的 host/client/runtime-compat 全部成功，仅既有 ESM/CJS 与 tsdown 配置警告，与本次改动无关
+- [x] 3.2 运行仓库 `npm test`、`npm run check:artifacts`、`git diff --check`
+  - 结果：`npm test` 124 passed/1 skipped/0 failed；`check:artifacts` 通过；`git diff --check` 通过
+- [x] 3.3 `openspec validate pet-locus-independent-child --strict`
+  - 结果：通过
 
 ## 4. 部署与真实验收（需所有者授权）
 
