@@ -17,6 +17,21 @@
 
 ## 讨论中
 
+### [B037] Locus 独立 child 的按需检索须受 caller-bound 协作范围约束
+- **状态**: 想法
+- **优先级**: P1
+- **背景 / 动机**: 2026-09-14 空库实机验收中，独立 child 收到「你知道我们之前聊过什么吗？比如 B035、locus 迁移这些」后，虽正确证明了自己没有 fork 父历史，却在一个 turn 内执行 37 steps / 40 次工具调用（其中 31 次 bash）、输出 69,335 tokens、耗时约 17 分钟、成本约 $1.51；主动加载 `lark-im-live`，检索当前群、多个无关群、旧话题、全局飞书消息及所有者与 bot 的私聊。
+- **实测关键事实**:
+  - child 的 `request/header` 明确提供了 `send_message`、`pet_inquire`、`pet_collaborators`；它通过 `pet_context` 得到 caller-bound main `session-4629eb39`，并通过 `pet_collaborators` 看见该 parent，但实际 `send_message=0`、`pet_inquire=0`。
+  - `identity.isSeeded=false`、`inheritedEventCount=0`，且 child 不知道 B035；这正向证明 `pet-locus-independent-child` 的 spawn 独立上下文生效。问题不在隔离，而在独立后如何补齐上下文。
+  - 当前 prompt 只说「需要的资料请通过当前已授权的读取能力按需读取原始内容」，只在 execution root/resources/constraints 未确认时建议问父；未定义「先父/兄弟/当前 workspace，禁止无关群/私聊/全局 IM，范围内无结果即停止」的搜索顺序与硬边界。
+- **要点**:
+  - 默认顺序应是 caller-bound parent → 当前 locus 可达 siblings（若有且权限允许）→ 当前 session 对应 workspace/repository；范围内无结果就如实返回并向所有者索要线索。
+  - 不得主动读取无关飞书群、与所有者的私聊、全局消息历史或其它 workspace；即便底层 skill/工具在权限层面可用，也不代表本次 locus 请求授权了跨域检索。
+  - 需要判断约束应只靠 prompt，还是要增加工具级 scope：仅靠 prompt 可能被 `lark-im-live` 等 skill 的自主搜索指引覆盖；工具级限制更可靠，但要避免破坏用户明确要求跨群检索的合法场景。
+  - 验收需使用会诱发历史补齐的真实问题，不能只用刻意自包含的问题把越界风险隐藏掉；同时普通链路测试应优先用自包含、可判定问题，避免无关成本噪声。
+- **更新**: 2026-09-14 实机验收确认；完整调用证据在 session `session-7b41abe2-f878-4d5c-9cf0-a6b548219c1a` 的多帧 zstd 日志中，不提交 raw session evidence。
+
 ### [B036] Locus 子会话应按 @ 创建/复用，而非建群时预先占位
 - **状态**: 想法
 - **优先级**: P2
