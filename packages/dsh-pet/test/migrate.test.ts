@@ -325,7 +325,7 @@ describe('v6 upgrades additively to the switch-notice schema', () => {
 })
 
 describe('every additive locus version upgrades without data loss', () => {
-  it.each([6, 7, 8, 9, 10])('restamps a v%s medium and keeps its rows intact', async (from) => {
+  it.each([6, 7, 8, 9, 10, 11])('restamps a v%s medium and keeps its rows intact', async (from) => {
     const dir = await mkdtemp(path.join(tmpdir(), 'pet-migrate-'))
     const file = path.join(dir, 'state.sqlite')
     const db = new DatabaseSync(file)
@@ -373,7 +373,7 @@ describe('migration version fence protects retained history', () => {
     }
   })
 
-  it.each([2, 3, 4, 5, 6, 7, 8, 9, 10, PET_DOMAIN_VERSION])('never runs destructive v1 cleanup for version %s', async version => {
+  it.each([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, PET_DOMAIN_VERSION])('never runs destructive v1 cleanup for version %s', async version => {
     // Even a row with old/malformed shape must be retained in a newer medium.
     // Domain validation may reject it, but upgrade is not deletion authority.
     const file = await legacyDatabase()

@@ -157,7 +157,7 @@ function runLegacyStateCleanup(databaseFile: string): LegacyStateCleanup {
       .get(PET_DOMAIN_NAME) as { version?: number } | undefined
     if (stamped === undefined) return { removedRows: 0, clearedTables: [] }
     if (stamped.version === PET_DOMAIN_VERSION) return { removedRows: 0, clearedTables: [] }
-    if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(stamped.version as number)) {
+    if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(stamped.version as number)) {
       throw new PetMigrationError(
         `Unsupported Pet storage version ${String(stamped.version)}; refusing migration`,
       )

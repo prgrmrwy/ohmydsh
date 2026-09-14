@@ -23,6 +23,7 @@ export default defineConfig({
     include: [
       'test/collaboration-context-store.test.ts',
       'test/inquiry-ledger-store.test.ts',
+      'test/inquiry-outbox-store.test.ts',
     ],
     fileParallelism: false,
     testTimeout: 30_000,

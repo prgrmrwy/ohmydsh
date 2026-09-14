@@ -11,6 +11,7 @@ import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import { z } from 'zod'
 import { parseCollaborationContext } from './collaboration/context.js'
 import { parseInquiry } from './inquiry/ledger.js'
+import { parseInquiryOutboxRecord } from './inquiry/outbox.js'
 
 /**
  * Domain name; also the backend unit name and the storage-domain route key.
@@ -74,7 +75,15 @@ export const PET_DOMAIN_NAME = 'dsh_pet'
 // The ledger has to outlive a restart because an accepted inquiry that only
 // existed in memory would come back as neither dispatchable nor reviewable —
 // exactly the "blindly re-run it" outcome design D8 forbids.
-export const PET_DOMAIN_VERSION = 11
+// Bumped to 12 for the durable inquiry result outbox (`inquiry_results`).
+// Additive in the same way as v10→v11: one new table, nothing converted,
+// cleared or rewritten. The outbox has to outlive a restart because the
+// requester has already ENDED the segment that asked the question (design D5),
+// so an answer or failure held only in memory would leave the original work
+// waiting on a continuation that no longer exists anywhere. The table holds no
+// answer body and no chat/message identifier, so it can never become a way to
+// create or consume a Feishu delivery for the answerer.
+export const PET_DOMAIN_VERSION = 12
 
 // `chat` joins the original three for Tasks created by an inbound Lark
 // message. It is a distinct scope kind rather than a flavour of `workspace`
@@ -856,6 +865,28 @@ export const petInquiryRecord = z.unknown().transform((input, issueCtx) => {
   }
 })
 
+/**
+ * One durable inquiry result-outbox record, keyed by its derived dedup key.
+ *
+ * Delegates to the pure exact-shape validator for the same reason the ledger
+ * row does: a second zod declaration would let a field rename pass one check
+ * and fail the other, and only the pure model knows the derived-key, status and
+ * delivered-segment invariants that make a row meaningful.
+ *
+ * By contract this table holds WHO the result is for, WHICH work it resumes and
+ * whether it was handed back — never an answer body, a message body, a chat id
+ * or anything identifying the ANSWERER's channel.
+ */
+export const petInquiryResultRecord = z.unknown().transform((input, issueCtx) => {
+  try {
+    return parseInquiryOutboxRecord(input)
+  } catch {
+    // Never leak an inquiry id, a delivery id or another member's identity.
+    issueCtx.addIssue({ code: 'custom', message: 'Invalid inquiry result record.' })
+    return z.NEVER
+  }
+})
+
 const petGlobalState = z.object({
   /** Bumped whenever the enabled skill selection changes. */
   skillSetGeneration: z.number().int().nonnegative(),
@@ -931,6 +962,11 @@ export const petDomainSpec = defineDomain({
     // above it recounts budgets and rechecks state inside one Domain
     // transaction, so this table is the single truth for accepted inquiries.
     inquiries: domainTable<string, z.infer<typeof petInquiryRecord>>(petInquiryRecord),
+    // Durable result outbox, keyed by the DERIVED dedup key rather than by the
+    // inquiry id. Additive at v12. The key is the idempotency fact itself, so a
+    // redelivered result collides with its own row instead of queueing a second
+    // continuation for the same question.
+    inquiry_results: domainTable<string, z.infer<typeof petInquiryResultRecord>>(petInquiryResultRecord),
   },
 })
 
@@ -962,6 +998,9 @@ export type PetCollaborationContextRecord = z.infer<typeof petCollaborationConte
 
 /** One durable inquiry-ledger record as stored. */
 export type PetInquiryRecord = z.infer<typeof petInquiryRecord>
+
+/** One durable inquiry result-outbox record as stored. */
+export type PetInquiryResultRecord = z.infer<typeof petInquiryResultRecord>
 
 
 /**
