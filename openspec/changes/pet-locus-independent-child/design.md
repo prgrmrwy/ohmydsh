@@ -26,7 +26,7 @@ B035 从一个具体故障出发：答疑群 child 由 `fork` 创建、继承父
 **Non-Goals:**
 - 公共事实持久层、协作者名单、异步询问、结果续进、owner projection。
 - G3/G4/G5 runtime 门槛。
-- 冷恢复时 preset 漂移的修复（见 D3）。
+- child 与父解耦的 preset 加固 patch（见 D3；本期不需要，非当前 bug）。
 - 旧 fork child 的自动升级。
 
 ## Decisions
@@ -47,13 +47,17 @@ B035 从一个具体故障出发：答疑群 child 由 `fork` 创建、继承父
 
 失败原因使用稳定机器码，与既有 `settlement-notice-unsupported` 等保持同一风格。
 
-### D3. 冷恢复 preset 漂移是已知且被接受的限制
+### D3. 冷恢复不存在 preset 漂移；旧审计笔记的描述有误
 
-固定 runtime 的 cold composition 当前无条件重取父 live preset。修复它需要 compat patch、builder、manifest pin 与部署，属于独立的 runtime change。
+`docs/notes/pet-independent-agent-capability-audit.md` 曾记录「cold composition 无条件重取父 live preset」为 G1 缺口，本 change 最初据此把它列为已接受的限制。复核固定 runtime 的实际编译产物后，这个描述不成立，需要在此更正：
 
-本期不声称已解决，也不在 spec 中承诺。scenario「冷恢复保留独立历史」只要求恢复同一 child 的历史与身份，不要求冻结创建时的 preset。
+- `dsh-agent-presets/lib/index.js` 的 `swap()` 在主会话产生过任何一轮 turn 后即拒绝切换：`boundary.openTurnStartSeq !== null || boundary.lastTurn > 0` 时抛 `agent-preset/locked`。也就是说**主会话一旦开始工作，自己的 preset 选择就被 runtime 锁死**，不存在「父会话切换 preset 后 child 冷恢复被带偏」这个场景。
+- child 创建与冷恢复统一走 `composeFrom(childCtx, parentCtx)`：不是复制父创建时刻的一份快照，而是直接绑定到父此刻实际在用的 standing composition。因为父自己不可切换，这个绑定在 Host 不重启期间是稳定的。
+- 唯一残留的理论风险是运维操作级别的：Host 重启期间有人直接在磁盘上编辑了该 preset 的 `.cordis.yml` 文件内容（不是切换 id），下次 mount 会读到新一代 composition。但这对父会话自己同样成立，不是 child 独有的问题，也不是「child 该不该用独立上下文」要解决的范畴。
 
-这是范围收敛的代价，必须显式记录而不是悄悄放过。
+结论：本期不需要为此单独加固，也不依赖旧 change 里记录的那个 compat patch（`compat-implementation-plan.md`）。该 patch 面向的是「即使以后有人改了预设文件，child 也应该继续用自己创建时那份，与父解耦」——这是面向未来的加固项，不是当前 bug 修复，留给后续 runtime change 视需要再做。
+
+旧审计笔记的原始措辞保留不改（作为历史记录），但引用它的结论时以本节复核为准。
 
 ### D4. 上下文模式是 additive 字段，未知不猜测
 
@@ -74,7 +78,6 @@ child 缺少背景时通过原生 `send_message` 询问主会话；主会话若�
 ## Risks / Trade-offs
 
 - [child 失去父背景后答非所问] → 前言已指导按需问父；本期以真实答疑群验收判断是否够用，不预先加共享层。
-- [冷恢复 preset 漂移] → D3 显式承认；若实际使用中出现问题，再启动 runtime change。
 - [两个 change 修改同一条 requirement] → 归档时按实际实现顺序重新对齐；本 delta 已在 Baseline 中声明边界。
 - [默认值变更影响既有调用方] → 调用方仍可显式传 provider；旧 child 记录与行为不变。
 - [独立 child 首轮能力不完整] → D2 fail closed，不发布半成品 child。
