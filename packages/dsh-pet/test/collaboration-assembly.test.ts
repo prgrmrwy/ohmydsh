@@ -26,7 +26,7 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs'
-import { mkdtemp } from 'node:fs/promises'
+import { mkdir, mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -61,9 +61,11 @@ import {
   type CollaborationContextRecord,
 } from '../src/host/collaboration/context.js'
 import { createInquiry, type InquiryRecord } from '../src/host/inquiry/ledger.js'
+import { InquiryLedgerStore } from '../src/host/inquiry/ledger-store.js'
+import { InquiryOutboxStore } from '../src/host/inquiry/outbox-store.js'
+import { PET_DOMAIN_NAME, petDomainSpec } from '../src/host/spec.js'
 import { openPetHarness, type PetHarness } from './harness.js'
 import * as petPlugin from '../src/index.js'
-import { PET_DOMAIN_NAME, petDomainSpec } from '../src/host/spec.js'
 
 const MAIN = 'main-1'
 const CHILD_A = 'child-a'
@@ -800,13 +802,57 @@ interface LoadedHost {
  * rows that already existed, it does not create them.
  * @param seed - locus rows to make durable before Pet initializes.
  */
-async function loadPetHost(seed: readonly LocusRecord[] = []): Promise<LoadedHost> {
+/**
+ * Open ONLY the reviewed atomic storage stack against an existing medium.
+ *
+ * Used to seed durable rows before the Host starts and to re-read them after it
+ * stopped, so an assertion reflects what actually landed on disk rather than
+ * in-process state the Host still holds.
+ * @param statePath - the Pet state medium to attach to.
+ * @returns a context owning that storage stack; dispose it when done.
+ */
+async function openDomainOnly(statePath: string): Promise<Context> {
   const [Storage, Sqlite, Domain] = await Promise.all([
     loadAtomicArtifact('storage'),
     loadAtomicArtifact('storage-sqlite'),
     loadAtomicArtifact('storage-domain'),
   ])
-  const home = await mkdtemp(path.join(tmpdir(), 'pet-assembly-'))
+  const ctx = new Context()
+  await ctx.plugin(Storage.default as never)
+  await ctx.plugin({
+    name: 'seed-backend',
+    inject: ['storage'],
+    async apply(outer: Context) {
+      await outer.plugin(
+        {
+          name: 'seed-backend-inner',
+          inject: ['storage'],
+          apply(inner: Context, config: unknown) {
+            const backend = new (Sqlite.SqliteStorageBackend as new (c: unknown) => unknown)(config)
+            inner.effect(() => inner.storage.backend.register('json', backend as never))
+            inner.provide(
+              (Storage.storageBackendServiceKey as (n: string) => string)('json'),
+              backend,
+            )
+          },
+          Config: Sqlite.Config,
+        } as never,
+        { path: ':memory:' },
+      )
+    },
+  })
+  await ctx.plugin(Sqlite as never, { path: statePath })
+  await ctx.plugin(Domain as never, { backend: 'json', routes: { [PET_DOMAIN_NAME]: 'sqlite' } })
+  return ctx
+}
+
+async function loadPetHost(seed: readonly LocusRecord[] = [], existingHome?: string): Promise<LoadedHost> {
+  const [Storage, Sqlite, Domain] = await Promise.all([
+    loadAtomicArtifact('storage'),
+    loadAtomicArtifact('storage-sqlite'),
+    loadAtomicArtifact('storage-domain'),
+  ])
+  const home = existingHome ?? await mkdtemp(path.join(tmpdir(), 'pet-assembly-'))
   const routes: { path: string }[] = []
   const live = new Map<string, { ctx: Context; session: { id: string } }>()
 
@@ -1011,6 +1057,57 @@ describe.skipIf(!atomicArtifactsPresent())('the real plugin entry installs the s
       await new Promise(resolve => setTimeout(resolve, 50))
 
       expect(host.toolNames(main.key)).toEqual([])
+    } finally {
+      await host.close()
+    }
+  })
+
+  /**
+   * Reconciliation must RUN at startup, not merely exist.
+   *
+   * A queued inquiry whose absolute deadline elapsed while the Host was down
+   * must settle from durable state alone. Asserting on the reopened medium
+   * proves the pass executed inside the real plugin entry: the module is
+   * otherwise dormant, which is exactly how a wired-looking capability ends up
+   * never being invoked.
+   */
+  it('settles inquiry work left behind by a previous process', async () => {
+    const home = await mkdtemp(path.join(tmpdir(), 'pet-reconcile-'))
+    const statePath = path.join(home, 'plugins', 'dsh-pet', 'state.sqlite')
+    await mkdir(path.dirname(statePath), { recursive: true })
+
+    // Seed a queued inquiry that is already past its deadline, as a crashed
+    // process would have left it.
+    const seedCtx = await openDomainOnly(statePath)
+    try {
+      const store = new InquiryLedgerStore(await seedCtx.storageDomain.open(petDomainSpec) as never)
+      await store.accept(
+        { target: { kind: 'child', sessionId: CHILD_A, locusId: 'a', generation: 1 }, question: 'q', purpose: 'p', declaredOrigin: null },
+        {
+          inquiryId: 'inq-stale', requester: { kind: 'main', sessionId: MAIN },
+          circleParentSessionId: MAIN, origin: { kind: 'local' }, audience: { kind: 'local-session', sessionId: MAIN },
+          createdAt: Date.now() - 600_000,
+        },
+      )
+    } finally {
+      await seedCtx.fiber.dispose()
+    }
+
+    const host = await loadPetHost([locus('a', CHILD_A)], home)
+    try {
+      const reopened = await openDomainOnly(statePath)
+      try {
+        const domain = await reopened.storageDomain.open(petDomainSpec)
+        const settled = new InquiryLedgerStore(domain as never).get('inq-stale')
+        // Settled at its stored deadline, never extended by the restart.
+        expect(settled?.status).toBe('expired')
+        expect(settled?.statusAt).toBe(settled?.deadlineAt)
+        // And the requester has a correlatable failure result to resume with.
+        expect(new InquiryOutboxStore(domain as never).findByInquiry('inq-stale')?.result)
+          .toMatchObject({ kind: 'failure' })
+      } finally {
+        await reopened.fiber.dispose()
+      }
     } finally {
       await host.close()
     }
