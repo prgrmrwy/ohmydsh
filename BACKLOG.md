@@ -17,6 +17,19 @@
 
 ## 讨论中
 
+### [B036] Locus 子会话应按 @ 创建/复用，而非建群时预先占位
+- **状态**: 想法
+- **优先级**: P2
+- **背景 / 动机**: 2026-09-14 从空库端到端验证时实测：创建默认 Q&A 群的瞬间就产生了一个**空的** child session（`session-9f6ae48b`，801 字节，解压后仅 1 条 `session` 事件），此时群里还没有任何人 @ 过 bot。所有者预期是「子会话跟着 @ 创建或复用」，建群阶段不应存在子会话。
+- **现状与根因**: 这是当前两阶段 provisioning 的设计，不是回归缺陷。`src/index.ts` 的 `idleChildProvisioning.create()` 在建群时调用 `adapter.createIdleChild()`（`host/locus/child.ts`），该路径刻意不投递初始 prompt——注释写明「No artificial initialization prompt is allowed: the first prompt will be the first real Delivery」——但确实提前占用了一个 child 身份。控制器随后 `commitProvisioning` 发布 active locus，首次真实 Delivery 再经 inbox 投递给这个已存在的 child。
+- **要点**:
+  - 目标时机：建群/绑定时只发布 locus 与 main 归属，**不**创建 child；首个 @ 到达时才创建，后续 @ 复用；群内每个话题各自持有自己的 child。
+  - 两阶段 provisioning 的存在理由要先查清：当初分离「先建 child、再发布 locus」很可能是为了让发布失败时有可回滚的资源句柄（`rollback`/`compensateChild`），改成按需创建需要重新设计失败补偿，不能只把创建调用后移。
+  - 同时影响 `locus_deliveries` 的首投递路径与 `locus-prepublication` 预留逻辑（`reservation.childSessionId` 目前在发布前就要求存在）。
+  - 空 child 是否出现在侧边栏待确认；若不可见则纯属资源占用，优先级可维持 P2。
+- **不在范围**: 与 `pet-locus-independent-child`（只改新 child 的 provider 选择，使其不再 fork 父历史）正交，该 change 不承接本条。
+- **更新**: 2026-09-14 空库验证中发现并确认；同批验证排除了「建群产生 blank main」的疑虑——实测 main 正确复用当前会话（11.8 MB 真实历史），不是空会话。
+
 ### [B019] 设置面板底部 DSH 主机系统时钟（24 小时制 + 时区）
 - **状态**: 实施中
 - **优先级**: P2
