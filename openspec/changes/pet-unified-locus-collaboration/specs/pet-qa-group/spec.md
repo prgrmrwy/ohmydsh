@@ -1,3 +1,9 @@
+> **本 delta 已于 2026-09-15 应用，不要再次应用。**
+>
+> 依据 `docs/adr/ADR-0004-consolidate-locus-specs-into-pet-locus-collaboration.md`：10 条 REMOVED 与主 spec 原有 10 条一一对应、无遗漏无多余，移除后该 capability 不再持有任何需求，故 `openspec/specs/pet-qa-group/` 整个目录已删除而非留空壳。接替能力见 `openspec/specs/pet-locus-collaboration/spec.md`。
+>
+> 应用前已核实旧 QA 实现确为死代码：`src/host/qa/` 未被 `src/index.ts` 装配，唯一引用它的 `src/host/channel/pipeline.ts` 自身也无任何生产调用方。代码清理另行处理，不属于本次规范收敛。
+
 ## REMOVED Requirements
 
 ### Requirement: Q&A 动作原子地创建答疑群并 fork 源会话子代理

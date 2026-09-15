@@ -148,6 +148,16 @@
 
 ## 想法
 
+### [B039] 清理旧 QA 模型的死代码
+- **状态**: 想法
+- **优先级**: P2
+- **背景 / 动机**: 2026-09-15 应用 `pet-unified-locus-collaboration` 的 `pet-qa-group` REMOVED delta 时确认：旧 QA 模型的 10 条需求已全部被 `pet-locus-collaboration` 接替，主 spec 目录已删除。但**实现仍留在仓库里且已是死代码**——`src/host/qa/`（9 个文件）未被 `src/index.ts` 装配，唯一引用它的 `src/host/channel/pipeline.ts` 自身也没有任何生产调用方，合计约 2336 行。
+- **要点**:
+  - 删除范围待确认：`src/host/qa/` 全部 9 个文件、`src/host/channel/pipeline.ts`，以及对应的 9 个测试文件（`qa-*.test.ts`、`channel-pipeline.test.ts`）。
+  - 删除前需逐个确认无其它引用，特别是 `locus/controller.ts` 中的 `qa-created` / `kind: 'qa'` 等标识——那些是 **locus 自己的** 来源枚举，不属于旧 QA 模型，不能一并删掉。
+  - 规范侧已完成，本条纯粹是实现清理；不影响任何在跑的行为。
+- **更新**: 2026-09-15 从 `pet-qa-group` 规范退役中分离出来。规范与实现分开处置，避免把「删规范」和「删代码」混成一次高风险改动。
+
 ### [B038] Locus Delivery 崩溃窗口的 fault-injection 测试矩阵
 - **状态**: 想法
 - **优先级**: P1
