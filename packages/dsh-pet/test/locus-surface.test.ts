@@ -110,6 +110,9 @@ describe('locus surface', () => {
     expect(markup).toContain('aria-expanded="false"')
     // Folded by default: identifiers are not printed on first paint.
     expect(markup).not.toContain('locus-runtime-1789394541339-2f853e76111d38')
+    // Rebuild is legal only on a tombstone, so a served row never renders the
+    // control — a permanently disabled button is not an action.
+    expect(markup).not.toContain('>重建<')
   })
 
   it('nests a topic under the chat entry it inherits from', () => {
@@ -117,6 +120,28 @@ describe('locus surface', () => {
     expect(markup).toContain('data-nested="true"')
     // The nesting has to be legible as a fact, not only as indentation.
     expect(markup).toContain('继承自 入口 · a27b')
+  })
+
+  it('hides a stopped entry by default and points at the way back', () => {
+    const stopped = locusFixture({
+      locusId: 'locus-runtime-7-cccc3333',
+      chatId: 'oc_stopped',
+      parentSessionId: 'session-1',
+      parentAvailability: 'available',
+      childSessionId: 'session-2',
+      state: 'stopped',
+    })
+    const markup = render(snapshotOf([stopped], [stopped.locusId]))
+    // The Host refuses this endpoint until an explicit rebuild, so the default
+    // list must not show it as live — but it must not read as deleted either.
+    expect(count(markup, 'class="dshpet-locus-row"')).toBe(0)
+    expect(markup).toContain('已隐藏 1 个入口')
+    expect(markup).toContain('（按状态：已停止 1）')
+    expect(markup).toContain('显示全部')
+    // The empty screen names the exit instead of leaving the entry unexplained.
+    expect(markup).toContain('被隐藏的入口（含已停止、可重建的）在下面的「显示全部」里')
+    // No empty work header is left behind for a session with nothing to show.
+    expect(markup).not.toContain('dshpet-work-name')
   })
 
   it('renders an empty state that points at the manual lookup', () => {
