@@ -867,7 +867,11 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 /* A dropdown, not a block: opening the filter must not push the list down and
    reflow everything the owner was reading. It is anchored to the header it
    belongs to and floats above the rows. */
-.dshpet-settings .dshpet-locus-filter{position:absolute;right:0;top:34px;z-index:2;
+/* The anchor wraps the button only, so the panel can sit 3px under it without
+   joining the header's flex column: an extra flow child there (even at zero
+   height) adds a gap and shifts the whole list whenever it opens. */
+.dshpet-settings .dshpet-locus-filter-anchor{position:relative;display:inline-flex}
+.dshpet-settings .dshpet-locus-filter{position:absolute;right:0;top:calc(100% + 3px);z-index:2;
   width:236px;padding:10px 12px 12px;border-radius:12px;
   background:var(--dsw-specific-menu,#fff);
   border:.5px solid var(--dsw-alias-border-l4,#00000029);

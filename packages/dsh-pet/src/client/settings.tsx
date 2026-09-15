@@ -1699,7 +1699,6 @@ export function LocusSurface(props: {
     setter(current => (current.includes(key) ? current.filter(item => item !== key) : [...current, key]))
   }, [])
   const filterRef = useRef<HTMLDivElement | null>(null)
-  const filterButtonRef = useRef<HTMLButtonElement | null>(null)
   useEffect(() => {
     if (!filterOpen) return undefined
     // Closing is by clicking anywhere else — the panel owns no dismiss button
@@ -1708,7 +1707,6 @@ export function LocusSurface(props: {
       const target = event.target
       if (!(target instanceof Node)) return
       if (filterRef.current?.contains(target) === true) return
-      if (filterButtonRef.current?.contains(target) === true) return
       setFilterOpen(false)
     }
     document.addEventListener('mousedown', onPointer)
@@ -1764,9 +1762,9 @@ export function LocusSurface(props: {
             {updatedAt === 0 ? '' : ` · 状态更新 ${formatRelative(updatedAt, now)}`}
           </span>
           <span className="dshpet-locus-headtail">
+            <span className="dshpet-locus-filter-anchor" ref={filterRef}>
             <button
               type="button"
-              ref={filterButtonRef}
               className="dshpet-jump"
               aria-pressed={filterOpen}
               aria-expanded={filterOpen}
@@ -1787,6 +1785,15 @@ export function LocusSurface(props: {
                 ? PARENT_AVAILABILITY_LABELS[filter.parentAvailability[0]]
                 : `已选 ${filter.parentAvailability.length} 类`}
             </button>
+            {filterOpen ? (
+              <LocusFilterPanel
+                filter={filter}
+                parentCounts={counts.parent}
+                entryCounts={counts.entry}
+                onChange={setFilter}
+              />
+            ) : null}
+            </span>
           </span>
         </div>
         <div className="dshpet-locus-tools">
@@ -1818,16 +1825,6 @@ export function LocusSurface(props: {
             onChange={event => setQuery(event.target.value)}
           />
         </div>
-        {filterOpen ? (
-          <div ref={filterRef}>
-          <LocusFilterPanel
-            filter={filter}
-            parentCounts={counts.parent}
-            entryCounts={counts.entry}
-            onChange={setFilter}
-          />
-          </div>
-        ) : null}
       </section>
 
       {reading === 'work'
