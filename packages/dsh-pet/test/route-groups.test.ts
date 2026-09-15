@@ -186,22 +186,33 @@ describe('an archived session is refused before the click, not after', () => {
     stubLocus({ ...LOCUS_VIEW, main: { ...LOCUS_VIEW.main, availability: 'archived' as const } })
     const host = await mountTab('locus')
 
-    const button = [...host.querySelectorAll('button')].find(
-      item => item.textContent === '主会话已归档',
-    ) as HTMLButtonElement | undefined
-    expect(button).toBeDefined()
-    expect(button?.disabled).toBe(true)
-    expect(button?.title).toContain('已归档')
+    // An archived parent is hidden by default, so what the owner sees first is
+    // the reason and a way back — not a control that looks live but refuses.
+    expect(host.textContent).toContain('已隐藏 1 个父会话（已归档）')
+    expect(host.querySelector('.dshpet-work-name')).toBeNull()
 
+    const reveal = [...host.querySelectorAll('button')].find(
+      item => item.textContent?.startsWith('显示全部'),
+    ) as HTMLButtonElement | undefined
+    expect(reveal).toBeDefined()
     await act(async () => {
-      button?.click()
+      reveal?.click()
     })
-    // Even if a click reaches it, no navigation is attempted.
+
+    // Revealed, the parent session still is not offered as a control: the title
+    // becomes a static label carrying the reason, and the availability is stated
+    // in words beside it, so the reason needs no hover either.
+    const name = host.querySelector('.dshpet-work-name') as HTMLElement | undefined
+    expect(name).toBeDefined()
+    expect(name?.dataset.static).toBe('true')
+    expect(name?.title).toContain('已归档')
+    expect([...host.querySelectorAll('.dshpet-meta')].some(node => node.textContent === '已归档')).toBe(true)
+    // Nothing navigated, and no click can: there is no button for it.
     expect(opened).toEqual([])
     setSessionOpener(undefined)
   })
 
-  it('still opens and dismisses the panel when the session is live', async () => {
+    it('still opens and dismisses the panel when the session is live', async () => {
     const opened: string[] = []
     const closed: number[] = []
     const { setSessionOpener, setSettingsCloser } = await import('../src/client/settings.js')
@@ -212,7 +223,7 @@ describe('an archived session is refused before the click, not after', () => {
 
     await act(async () => {
       ;([...host.querySelectorAll('button')].find(
-        item => item.textContent === '打开主会话',
+        item => item.classList.contains('dshpet-work-name'),
       ) as HTMLButtonElement | undefined)?.click()
     })
 
@@ -239,7 +250,7 @@ describe('a locus child opens through its durable parent address', () => {
 
     await act(async () => {
       ;([...host.querySelectorAll('button')].find(
-        item => item.textContent === '打开子会话',
+        item => item.textContent?.startsWith('会话') && item.classList.contains('dshpet-jump'),
       ) as HTMLButtonElement | undefined)?.click()
     })
 
@@ -264,7 +275,7 @@ describe('a locus child opens through its durable parent address', () => {
 
     await act(async () => {
       ;([...host.querySelectorAll('button')].find(
-        item => item.textContent === '打开子会话',
+        item => item.textContent?.startsWith('会话') && item.classList.contains('dshpet-jump'),
       ) as HTMLButtonElement | undefined)?.click()
     })
 
