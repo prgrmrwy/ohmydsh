@@ -159,6 +159,7 @@
   - 三条路径的崩溃点：(a) accept → claim current → bind 之间任意一步；(b) finish CAS → 发送 → 落账；(c) expiry CAS → 推进下一条。
   - 每条的核心断言：重启后**不重复投递**同一 Delivery、**不重复发送**飞书正文、**不漏掉**可安全投递的 backlog、队列**不永久卡死**。
   - 注意 interrupt 部分无法覆盖：expiry 路径目前对仍在运行的 Agent turn 不做任何中断尝试（无可用 runtime 接缝），这是 design.md 已记录的风险取舍，不是本条能补的测试空白。
+  - **同时承接 tasks 8.4 的剩余项**：重启后不重复投递 current 的专项回归。`claimCurrentDeliveryMutation` 的 occupancy 检查在逻辑上防止了它，但缺少「重启 → 再次 dispatch」的端到端断言；属于同一类崩溃/重启窗口，与上述三条路径一并覆盖。8.4 的另一半（scheduler 到期与并发 finish 不重复推进）已在归档前完成，见 `locus-expiry-scheduler.test.ts`。
   - 工作量估计半天左右（finish/dispatch 路径各 5–8 个注入用例）。
 - **更新**: 2026-09-15 从 `pet-locus-independent-child` tasks 8.3 转入。同批还发现并已修复另一处真实测试空白（Delivery 到期定时器完全无测试覆盖，已抽取为 `host/locus/expiry-scheduler.ts` 并补 9 例 + 三次变异验证），说明「有相关测试」不等于「关键路径被覆盖」，定时器/回调/崩溃窗口这类需要外部触发的接缝尤其容易漏掉。
 
