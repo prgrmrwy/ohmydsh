@@ -1539,7 +1539,7 @@ function DiscoveryFold(props: {
           ? parentId.trim() === '' ? undefined : { parentSessionId: parentId.trim() }
           : childId.trim() === '' ? undefined : { childSessionId: childId.trim() }
     if (request === undefined) {
-      setHint('请先粘贴一个完整标识；空查询不会发送。')
+      setHint('先粘贴一个完整 ID；空查询不会发送。')
       return
     }
     void props.run(request).then(value => {
@@ -1551,12 +1551,21 @@ function DiscoveryFold(props: {
     <details className="dshpet-locus-discovery">
       <summary className="dshpet-locus-discovery-head">
         <span className="dshpet-locus-discovery-mark" aria-hidden="true">›</span>
-        <span>发现关联（按索引精确查询）</span>
-        <span className="dshpet-meta">endpoint / 父会话 / 会话</span>
+        <span>反查关联</span>
+        <span className="dshpet-meta">入口 / 父会话 / 会话</span>
       </summary>
       <div className="dshpet-locus-discovery-body">
+        {/* This is the owner's only way in when all they hold is an ID: the
+            list above is organised by entry and by work, so an ID copied from
+            elsewhere has nowhere to be pasted. The wording defines 入口 — the
+            owner-facing word for what the code calls an endpoint — instead of
+            assuming it, and states that matching is exact. */}
+        <p className="dshpet-item-hint">
+          入口 = 飞书里的一个群，或群里的一个话题。只知道 ID 时用它反查归属：粘贴完整 ID，
+          精确匹配（短码和模糊搜索都不行）。
+        </p>
         <div className="dshpet-locus-discovery-controls">
-          <div className="dshpet-subtabs" role="tablist" aria-label="查询索引">
+          <div className="dshpet-subtabs" role="tablist" aria-label="反查依据">
             {(['endpoint', 'parent', 'child'] as const).map(value => (
               <button
                 key={value}
@@ -1566,7 +1575,7 @@ function DiscoveryFold(props: {
                 className="dshpet-subtab"
                 onClick={() => setSelector(value)}
               >
-                {value === 'endpoint' ? 'Endpoint' : value === 'parent' ? '父会话' : '会话'}
+                {value === 'endpoint' ? '入口' : value === 'parent' ? '父会话' : '会话'}
               </button>
             ))}
           </div>
@@ -1575,13 +1584,13 @@ function DiscoveryFold(props: {
               <input
                 className="dshpet-input"
                 value={chatId}
-                placeholder="粘贴 oc_…"
+                placeholder="群 ID（oc_…）"
                 onChange={event => setChatId(event.target.value)}
               />
               <input
                 className="dshpet-input"
                 value={threadId}
-                placeholder="粘贴 omt_…（可选）"
+                placeholder="话题 ID（omt_…，可选）"
                 onChange={event => setThreadId(event.target.value)}
               />
             </>
@@ -1589,14 +1598,14 @@ function DiscoveryFold(props: {
             <input
               className="dshpet-input"
               value={parentId}
-              placeholder="粘贴 session-…"
+              placeholder="父会话 ID（session-…）"
               onChange={event => setParentId(event.target.value)}
             />
           ) : (
             <input
               className="dshpet-input"
               value={childId}
-              placeholder="粘贴 session-…"
+              placeholder="会话 ID（session-…）"
               onChange={event => setChildId(event.target.value)}
             />
           )}
@@ -1653,7 +1662,7 @@ function DiscoveryFold(props: {
               </div>
             ))}
             {result.byEndpoint.length === 0 && result.byParent.length === 0 && result.byChild.length === 0 ? (
-              <p className="dshpet-empty">没有匹配的关联。</p>
+              <p className="dshpet-empty">没有匹配的关联。这个 ID 不在当前 Host 的关联里，或粘贴得不完整。</p>
             ) : null}
           </div>
         )}
@@ -1875,7 +1884,7 @@ export function LocusSurface(props: {
       {empty ? (
         <p className="dshpet-empty">
           {query.trim() !== ''
-            ? '没有匹配的关联。可以在下面的按索引查询里粘贴完整标识。'
+            ? '没有匹配的关联。可以在下面的「反查关联」里粘贴完整 ID。'
             : '当前筛选下没有关联。可以放宽上面的筛选（已停止的入口要在入口状态里勾上），或用下面的按索引查询。'}
         </p>
       ) : null}

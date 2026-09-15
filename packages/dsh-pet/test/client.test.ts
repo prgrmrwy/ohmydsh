@@ -507,7 +507,12 @@ describe('settings information architecture', () => {
     // Assert the source contract so this test does not pretend useEffect ran on
     // the server or expose ownerId as a browser capability.
     expect(settings).toContain('统一 locus 接口不可用时不会回退')
-    expect(settings).toContain('发现关联')
+    // The reverse lookup is the only path for an owner who holds just an ID.
+    expect(settings).toContain('反查关联')
+    expect(settings).toContain('petApi.locusDiscovery')
+    // Our word for an entry is 入口; "endpoint" is bookkeeping, so it must not
+    // appear as a label anywhere the owner reads.
+    expect(settings).not.toContain("'Endpoint'")
     expect(settings).toContain('locusStop')
     expect(settings).toContain('warningText')
     expect(settings).toContain('默认 Q&A 新群的所有者来自 dsh-pet profile 实时核验的当前飞书用户')
