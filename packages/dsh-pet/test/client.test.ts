@@ -508,7 +508,6 @@ describe('settings information architecture', () => {
     // the server or expose ownerId as a browser capability.
     expect(settings).toContain('统一 locus 接口不可用时不会回退')
     expect(settings).toContain('发现关联')
-    expect(settings).toContain('locusArchive')
     expect(settings).toContain('locusStop')
     expect(settings).toContain('warningText')
     expect(settings).toContain('默认 Q&A 新群的所有者来自 dsh-pet profile 实时核验的当前飞书用户')
@@ -534,8 +533,12 @@ describe('settings information architecture', () => {
     expect(settings).not.toContain('创建/打开默认 Q&A')
     // The read-only replacement still tells the owner where creation lives.
     expect(settings).toContain('请在目标会话里用 Pet 轮盘的「答疑群」创建')
-    // Lifecycle actions stay reachable.
+    // Lifecycle actions stay reachable, and the single exit replaces the three
+    // names that used to land in the same state.
     expect(settings).toContain('locusRebuild')
+    expect(settings).toContain('locusStop')
+    expect(settings).not.toContain('locusUnbind')
+    expect(settings).not.toContain('locusArchive')
     expect(settings).toContain('locusScope')
     expect(settings).toContain('locusConfirmAnchor')
   })
