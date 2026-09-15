@@ -220,6 +220,65 @@ describe('real shortcut error output', () => {
   })
 })
 
+describe('strict Delivery-target reply', () => {
+  it('replies to a group Delivery message and validates the returned message id', async () => {
+    const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
+      expect(args).toEqual([
+        '--profile', 'dsh-pet', 'im', '+messages-reply', '--as', 'bot',
+        '--message-id', 'om_current', '--text', 'done', '--json',
+      ])
+      return { stdout: JSON.stringify({ ok: true, data: { message_id: 'om_reply', chat_id: 'oc_group' } }) }
+    }) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner)
+
+    await expect(client.replyToTarget?.({ chatId: 'oc_group', messageId: 'om_current' }, 'done'))
+      .resolves.toEqual({ messageId: 'om_reply' })
+  })
+
+  it('uses explicit thread reply semantics for a topic Delivery', async () => {
+    const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
+      expect(args).toEqual([
+        '--profile', 'dsh-pet', 'im', '+messages-reply', '--as', 'bot',
+        '--message-id', 'om_topic', '--text', 'threaded', '--reply-in-thread', '--json',
+      ])
+      return { stdout: JSON.stringify({ ok: true, data: { message_id: 'om_threadreply', chat_id: 'oc_group' } }) }
+    }) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner)
+
+    await expect(client.replyToTarget?.({ chatId: 'oc_group', threadId: 'omt_topic', messageId: 'om_topic' }, 'threaded'))
+      .resolves.toEqual({ messageId: 'om_threadreply' })
+  })
+
+  it('rejects an invalid target chat before sending', async () => {
+    const runner = vi.fn(async () => ({ stdout: JSON.stringify({ ok: true, data: { message_id: 'om_reply' } }) })) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner)
+
+    await expect(client.replyToTarget?.({ chatId: 'not-a-chat', messageId: 'om_current' }, 'done'))
+      .rejects.toThrow('reply target: lark-cli returned no valid chat id')
+    expect(runner).not.toHaveBeenCalled()
+  })
+
+  it('rejects a successful-looking response without a valid returned message id', async () => {
+    const client = createLarkCliClient(
+      'lark-cli',
+      vi.fn(async () => ({ stdout: JSON.stringify({ ok: true, data: { chat_id: 'oc_group' } }) })) as unknown as LarkCliRunner,
+    )
+
+    await expect(client.replyToTarget?.({ chatId: 'oc_group', messageId: 'om_current' }, 'done'))
+      .rejects.toThrow('reply to target: lark-cli returned no valid message id')
+  })
+
+  it('rejects a response for a different chat', async () => {
+    const client = createLarkCliClient(
+      'lark-cli',
+      vi.fn(async () => ({ stdout: JSON.stringify({ ok: true, data: { message_id: 'om_reply', chat_id: 'oc_other' } }) })) as unknown as LarkCliRunner,
+    )
+
+    await expect(client.replyToTarget?.({ chatId: 'oc_group', messageId: 'om_current' }, 'done'))
+      .rejects.toThrow('reply to target: lark-cli returned a different chat id')
+  })
+})
+
 describe('strict control-plane receipt', () => {
   it('rejects a zero-exit ok:false pairing acknowledgement', async () => {
     const client = createLarkCliClient(

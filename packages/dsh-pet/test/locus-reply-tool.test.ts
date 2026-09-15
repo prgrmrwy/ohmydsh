@@ -4,12 +4,16 @@ import {
   createLocusTurnObserver,
   type LocusInboxClaim,
 } from '../src/host/locus/turn-observer.js'
-import { PET_LOCUS_REPLY_TOOL, registerPetTools } from '../src/host/tools.js'
+import {
+  PET_LOCUS_FINISH_TOOL,
+  PET_LOCUS_WAIT_TOOL,
+  registerPetTools,
+} from '../src/host/tools.js'
 
 function contextRecord(current = true) {
   return {
     endpoint: { chatId: 'oc-1', threadId: 'omt-1' },
-    locus: { id: 'locus-1', generation: 2, source: 'automatic' as const, state: 'active' as const },
+    locus: { locusId: 'locus-1', generation: 2, source: 'automatic' as const, state: 'active' as const },
     main: { sessionId: 'parent-1' },
     child: { sessionId: 'child-1' },
     workspace: { workspaceId: 'workspace-1' },
@@ -24,6 +28,8 @@ function contextRecord(current = true) {
             locusId: 'locus-1',
             generation: 2,
             childSessionId: 'child-1',
+            status: 'current' as const,
+            queueState: 'current' as const,
             replyTarget: { chatId: 'oc-1', threadId: 'omt-1', messageId: 'om-current' },
           },
         }
@@ -31,60 +37,129 @@ function contextRecord(current = true) {
   }
 }
 
-function replyTool(current = true) {
+function lifecycleTools(current = true, overrides: {
+  readonly authorizeCurrentDelivery?: (input: { childSessionId: string; operation: 'finish' | 'wait'; proof?: unknown }) => unknown
+  readonly currentCapability?: (childSessionId: string) => unknown
+  readonly finishCurrentDelivery?: (input: unknown) => unknown
+  readonly waitCurrentDelivery?: (input: unknown) => unknown
+} = {}) {
   const definitions: Array<{ name: string; parameters: unknown; execute(args: unknown, exec: unknown): Promise<unknown> }> = []
-  const repository = { findByChildSessionId: () => [contextRecord(current)] }
-  const reply = vi.fn(async () => undefined)
+  const authorizeCurrentDelivery = overrides.authorizeCurrentDelivery ?? (() => current ? contextRecord(true) : undefined)
+  const repository = {
+    findByChildSessionId: () => [contextRecord(current)],
+    authorizeCurrentDelivery,
+  }
+  const replyExact = vi.fn(async () => undefined)
+  const currentCapability = overrides.currentCapability ?? (() => current ? {
+    deliveryId: 'delivery-1',
+    executionId: 'execution-1',
+    turnId: 'child-1#0',
+    source: 'delivery' as const,
+  } : undefined)
   registerPetTools({ tools: { register: (definition: never) => { definitions.push(definition); return () => {} } } } as never, {
     repository: {} as never,
     locusRepository: repository,
-    locusReply: { locusRepository: repository, lark: { reply, replyExact: reply } },
+    locusLifecycle: {
+      locusRepository: repository,
+      authorizeCurrentDelivery,
+      lark: { reply: replyExact, replyExact },
+      currentCapability,
+      ...(overrides.finishCurrentDelivery === undefined ? {} : { finishCurrentDelivery: overrides.finishCurrentDelivery }),
+      ...(overrides.waitCurrentDelivery === undefined ? {} : { waitCurrentDelivery: overrides.waitCurrentDelivery }),
+    },
   })
   return {
-    tool: definitions.find(item => item.name === PET_LOCUS_REPLY_TOOL)!,
-    reply,
+    finish: definitions.find(item => item.name === PET_LOCUS_FINISH_TOOL)!,
+    wait: definitions.find(item => item.name === PET_LOCUS_WAIT_TOOL)!,
+    replyExact,
   }
 }
 
-describe('caller-bound Feishu reply tool', () => {
-  it('accepts only text and sends to the exact current Delivery message', async () => {
-    const { tool, reply } = replyTool()
-    expect(tool.parameters).toEqual({
+const childExec = {
+  agent: { session: { id: 'child-1' } },
+  signal: new AbortController().signal,
+}
+
+describe('caller-bound Feishu lifecycle tools', () => {
+  it('registers finish and wait, with no legacy reply alias or routing selector', () => {
+    const { finish, wait } = lifecycleTools()
+    expect(finish).toBeDefined()
+    expect(wait).toBeDefined()
+    expect(finish.parameters).toEqual({
       type: 'object',
-      properties: { text: { type: 'string' } },
-      required: ['text'],
+      properties: {
+        outcome: { type: 'string', enum: ['reply', 'no-reply'] },
+        text: { type: 'string' },
+        reason: { type: 'string' },
+      },
+      required: ['outcome'],
     })
-    await expect(tool.execute({ text: 'answer' }, {
-      agent: { session: { id: 'child-1' } },
-      signal: new AbortController().signal,
-    })).resolves.toEqual({ sent: true })
-    expect(reply).toHaveBeenCalledWith('om-current', 'answer')
+    expect(wait.parameters).toEqual({
+      type: 'object',
+      properties: { waitMinutes: { type: 'number' }, reason: { type: 'string' } },
+      required: ['waitMinutes'],
+    })
   })
 
-  it('does not claim success when the strict Host reply fails', async () => {
-    const definitions: Array<{ name: string; execute(args: unknown, exec: unknown): Promise<unknown> }> = []
-    const repository = { findByChildSessionId: () => [contextRecord(true)] }
-    registerPetTools({ tools: { register: (definition: never) => { definitions.push(definition); return () => {} } } } as never, {
-      repository: {} as never,
-      locusRepository: repository,
-      locusReply: {
-        locusRepository: repository,
-        lark: { reply: async () => {}, replyExact: async () => { throw new Error('send failed') } },
-      },
-    })
-    const tool = definitions.find(item => item.name === PET_LOCUS_REPLY_TOOL)!
-    await expect(tool.execute({ text: 'answer' }, {
-      agent: { session: { id: 'child-1' } }, signal: new AbortController().signal,
-    })).rejects.toThrow('send failed')
+  it('accepts reply and sends to the exact current Delivery message', async () => {
+    const finishCurrentDelivery = vi.fn(async () => ({ sent: true, outcome: 'reply' as const }))
+    const { finish } = lifecycleTools(true, { finishCurrentDelivery })
+    await expect(finish.execute({ outcome: 'reply', text: 'answer' }, childExec)).resolves.toEqual({ sent: true, outcome: 'reply' })
+    expect(finishCurrentDelivery).toHaveBeenCalledWith(expect.objectContaining({
+      childSessionId: 'child-1',
+      outcome: 'reply',
+      text: 'answer',
+    }))
+  })
+
+  it('accepts no-reply only with a non-empty reason', async () => {
+    const finishCurrentDelivery = vi.fn(async () => ({ sent: false, outcome: 'no-reply' as const }))
+    const { finish } = lifecycleTools(true, { finishCurrentDelivery })
+    await expect(finish.execute({ outcome: 'no-reply', reason: 'not applicable' }, childExec)).resolves.toEqual({ sent: false, outcome: 'no-reply' })
+    await expect(finish.execute({ outcome: 'reply', reason: 'wrong branch', text: 'answer' }, childExec)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await expect(finish.execute({ outcome: 'no-reply', text: 'must not send' }, childExec)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(finishCurrentDelivery).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects unknown finish keys before caller authorization or lifecycle dispatch', async () => {
+    const authorize = vi.fn(async () => contextRecord(true))
+    const finishCurrentDelivery = vi.fn(async () => ({ sent: true, outcome: 'reply' as const }))
+    const { finish } = lifecycleTools(true, { authorizeCurrentDelivery: authorize, finishCurrentDelivery })
+    await expect(finish.execute({ outcome: 'reply', text: 'answer', messageId: 'model-selector' }, childExec)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(authorize).not.toHaveBeenCalled()
+    expect(finishCurrentDelivery).not.toHaveBeenCalled()
+  })
+
+  it('rejects null and non-plain finish arguments before authorization', async () => {
+    const authorize = vi.fn(async () => contextRecord(true))
+    const { finish } = lifecycleTools(true, { authorizeCurrentDelivery: authorize })
+    await expect(finish.execute(null, childExec)).rejects.toMatchObject({ code: expect.stringMatching(/INVALID_(REQUEST|ARGS)/) })
+    await expect(finish.execute({ outcome: 'reply', text: null }, childExec)).rejects.toMatchObject({ code: expect.stringMatching(/INVALID_(REQUEST|ARGS)/) })
+    await expect(finish.execute(Object.assign(Object.create(null), { outcome: 'reply', text: 'answer' }), childExec)).rejects.toMatchObject({ code: 'INTERNAL' })
+    expect(authorize).toHaveBeenCalledTimes(1)
+  })
+
+  it('never falls back to a direct Lark adapter when durable finish is absent', async () => {
+    const { finish, replyExact } = lifecycleTools(true)
+    await expect(finish.execute({ outcome: 'reply', text: 'answer' }, childExec)).rejects.toMatchObject({ code: 'INTERNAL' })
+    expect(replyExact).not.toHaveBeenCalled()
+  })
+
+  it('rejects unknown wait keys and invalid reason before lifecycle dispatch', async () => {
+    const authorize = vi.fn(async () => contextRecord(true))
+    const waitCurrentDelivery = vi.fn(async () => ({ accepted: true, deadline: 10, remainingMinutes: 10, capped: false }))
+    const { wait } = lifecycleTools(true, { authorizeCurrentDelivery: authorize, waitCurrentDelivery })
+    await expect(wait.execute({ waitMinutes: 5, deliveryId: 'model-selector' }, childExec)).rejects.toMatchObject({ code: expect.stringMatching(/INVALID_(REQUEST|ARGS)/) })
+    await expect(wait.execute({ waitMinutes: 5, reason: null }, childExec)).rejects.toMatchObject({ code: expect.stringMatching(/INVALID_(REQUEST|ARGS)/) })
+    expect(authorize).not.toHaveBeenCalled()
+    expect(waitCurrentDelivery).not.toHaveBeenCalled()
   })
 
   it('refuses a GUI or initialization turn instead of reusing the prior target', async () => {
-    const { tool, reply } = replyTool(false)
-    await expect(tool.execute({ text: 'must not leak' }, {
-      agent: { session: { id: 'child-1' } },
-      signal: new AbortController().signal,
-    })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
-    expect(reply).not.toHaveBeenCalled()
+    const { finish, wait, replyExact } = lifecycleTools(false)
+    await expect(finish.execute({ outcome: 'reply', text: 'must not leak' }, childExec)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await expect(wait.execute({ waitMinutes: 10 }, childExec)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(replyExact).not.toHaveBeenCalled()
   })
 
   it('sends through the original Delivery after a parent agent-message reply', async () => {
@@ -131,9 +206,14 @@ describe('caller-bound Feishu reply tool', () => {
     } as never, {
       repository: {} as never,
       locusRepository: repository,
-      locusReply: { locusRepository: repository, lark: { reply, replyExact: reply } },
+      locusLifecycle: {
+        locusRepository: repository,
+        authorizeCurrentDelivery: async () => contextRecord(true),
+        currentCapability: () => ({ deliveryId: 'delivery-1', executionId: 'execution-1', turnId: 'child-1#7', source: 'delivery' as const }),
+        finishCurrentDelivery: async () => ({ sent: true, outcome: 'reply' as const }),
+      },
     })
-    const tool = definitions.find(item => item.name === PET_LOCUS_REPLY_TOOL)!
+    const tool = definitions.find(item => item.name === PET_LOCUS_FINISH_TOOL)!
     const exec = {
       agent: { session: { id: 'child-1' } },
       signal: new AbortController().signal,
@@ -143,8 +223,8 @@ describe('caller-bound Feishu reply tool', () => {
     claim({ childSessionId: 'child-1', messageId: 'delivery-message', turn: 7, sourceKind: 'user' })
     claim({ childSessionId: 'child-1', messageId: 'parent-answer', turn: 7, sourceKind: 'agent-message' })
 
-    await expect(tool.execute({ text: 'MANGO-SPAWN-0914' }, exec)).resolves.toEqual({ sent: true })
-    expect(reply).toHaveBeenCalledWith('om-current', 'MANGO-SPAWN-0914')
+    await expect(tool.execute({ outcome: 'reply', text: 'MANGO-SPAWN-0914' }, exec)).resolves.toEqual({ sent: true, outcome: 'reply' })
+    expect(reply).not.toHaveBeenCalled()
     observer.dispose()
   })
 
@@ -194,24 +274,34 @@ describe('caller-bound Feishu reply tool', () => {
       } as never, {
         repository: {} as never,
         locusRepository: repository,
-        locusReply: { locusRepository: repository, lark: { reply, replyExact: reply } },
+        locusLifecycle: {
+          locusRepository: repository,
+          authorizeCurrentDelivery: async () => contextRecord(true),
+          currentCapability: () => {
+            const proof = observer.currentForChild?.('child-1')
+            return proof === undefined
+              ? undefined
+              : { deliveryId: 'delivery-1', ...proof, source: 'delivery' as const }
+          },
+          finishCurrentDelivery: async () => ({ sent: true, outcome: 'reply' as const }),
+        },
       })
-      const tool = definitions.find(item => item.name === PET_LOCUS_REPLY_TOOL)!
+      const tool = definitions.find(item => item.name === PET_LOCUS_FINISH_TOOL)!
       const exec = {
         agent: { session: { id: 'child-1' } },
         signal: new AbortController().signal,
       }
-      const claim = (value: LocusInboxClaim) => claimListeners.forEach(listener => listener(value))
+      const claim = (value: LocusInboxClaim) => claimListeners.forEach(listener => listener({ sourceKind: 'user', ...value }))
 
       claim({ childSessionId: 'child-1', messageId: 'delivery-message', turn: 7 })
-      await expect(tool.execute({ text: 'first' }, exec)).resolves.toEqual({ sent: true })
+      await expect(tool.execute({ outcome: 'reply', text: 'first' }, exec)).resolves.toEqual({ sent: true, outcome: 'reply' })
       claim({ childSessionId: 'child-1', messageId: 'gui-steer', turn: 7 })
-      await expect(tool.execute({ text: 'must not leak' }, exec))
+      await expect(tool.execute({ outcome: 'reply', text: 'must not leak' }, exec))
         .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
       await vi.runAllTimersAsync()
-      await expect(tool.execute({ text: 'still must not leak' }, exec))
+      await expect(tool.execute({ outcome: 'reply', text: 'still must not leak' }, exec))
         .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
-      expect(reply).toHaveBeenCalledTimes(1)
+      expect(reply).not.toHaveBeenCalled()
       observer.dispose()
     } finally {
       vi.useRealTimers()

@@ -223,7 +223,7 @@ index 228b9de..e384855 100644
  export interface DelegatedPolicyOverrides {
    /** The parent session's explicit sandbox-mode override, or `undefined` without one. */
 diff --git a/packages/subagent/subagent/src/continuation.ts b/packages/subagent/subagent/src/continuation.ts
-index 2103ce2..8152fa3 100644
+index 2103ce2..42bed2c 100644
 --- a/packages/subagent/subagent/src/continuation.ts
 +++ b/packages/subagent/subagent/src/continuation.ts
 @@ -38,10 +38,16 @@ import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
@@ -376,7 +376,43 @@ index 2103ce2..8152fa3 100644
    signal: AbortSignal
  }
  
-@@ -428,32 +522,198 @@ export class SubagentContinuationManager {
+@@ -292,6 +386,35 @@ function agentMessage(sender: Agent, content: ContentBlock[]) {
+   })
+ }
+ 
++/**
++ * Build a child-to-parent message that states how the parent can answer.
++ *
++ * `continuableInitialPrompt` tells a child its parent's id and that reaching
++ * the parent requires `send_message`. The reverse direction carried no such
++ * statement: a parent saw only `Agent <id> sent a message:` and had no recorded
++ * way to learn that ordinary assistant text never reaches the sender and that
++ * answering requires `send_message` with this exact id. A parent that answered
++ * in plain text therefore failed silently — it considered the question
++ * answered while the child kept waiting for a reply that was never delivered.
++ */
++function parentFacingAgentMessage(sender: Agent, content: ContentBlock[]) {
++  const encodedSenderId = JSON.stringify(sender.id)
++  return createUserMessage({
++    content: [
++      { type: 'text' as const, text: `Agent ${sender.id} sent a message:` },
++      ...content,
++      {
++        type: 'text' as const,
++        text: `Reply to this agent with send_message({ agent_id: ${encodedSenderId}, `
++          + 'message: "<self-contained answer>" }). Assistant text in your own turn does not '
++          + 'reach it: that agent only observes messages delivered through send_message, and it '
++          + 'may be blocked waiting for this answer. Sending a message does not end your turn.',
++      },
++    ],
++    source: agentMessageSource(sender),
++  })
++}
++
+ /** Append adjacent-Agent return guidance to a continuable child's initial task. */
+ function continuableInitialPrompt(parentId: SessionId, prompt: ContentBlock[]): ContentBlock[] {
+   const encodedParentId = JSON.stringify(parentId)
+@@ -428,32 +551,198 @@ export class SubagentContinuationManager {
     */
    async startContinuable(spec: ContinuableStartSpec): Promise<ContinuableStart> {
      const request = spec.request
@@ -583,7 +619,7 @@ index 2103ce2..8152fa3 100644
  
      const prepared = await this.host.prepareContinuable(spec.provider, {
        sessionId: childId,
-@@ -462,10 +722,13 @@ export class SubagentContinuationManager {
+@@ -462,10 +751,13 @@ export class SubagentContinuationManager {
      })
      spec.signal.throwIfAborted()
      this.assertAdmitting(parent)
@@ -600,7 +636,7 @@ index 2103ce2..8152fa3 100644
        spec.signal.throwIfAborted()
        this.assertAdmitting(parent)
        this.assertChildIdAvailable(childId)
-@@ -484,24 +747,29 @@ export class SubagentContinuationManager {
+@@ -484,24 +776,29 @@ export class SubagentContinuationManager {
          parent,
          create: {
            seed,
@@ -641,7 +677,16 @@ index 2103ce2..8152fa3 100644
    }
  
    /** Reject one child identity already owned by a live Agent or Session. */
-@@ -1016,6 +1284,9 @@ export class SubagentContinuationManager {
+@@ -704,7 +1001,7 @@ export class SubagentContinuationManager {
+         'PARENT_UNAVAILABLE',
+       )
+     }
+-    const message = agentMessage(sender, content)
++    const message = parentFacingAgentMessage(sender, content)
+     this.sendWaking(parent, message, () => { this.sendAgentMessage(parent, message) })
+     return message.id
+   }
+@@ -1016,6 +1313,9 @@ export class SubagentContinuationManager {
              : {},
          },
          composition: { persona: descriptor.persona, toolFilter: descriptor.toolFilter },
@@ -651,7 +696,7 @@ index 2103ce2..8152fa3 100644
          signal: options.signal,
        })
      } catch (error: unknown) {
-@@ -1029,7 +1300,7 @@ export class SubagentContinuationManager {
+@@ -1029,7 +1329,7 @@ export class SubagentContinuationManager {
    /**
     * Submit to a freshly materialized Activation or roll it back completely.
     * @param activation - the just-published Activation to admit or release.
@@ -660,7 +705,7 @@ index 2103ce2..8152fa3 100644
     * @param options - durable source, scheduling, and pre-acceptance cancellation.
     * @param parent - the live direct parent authorizing admission.
     * @returns the accepted inbox message id.
-@@ -1041,16 +1312,7 @@ export class SubagentContinuationManager {
+@@ -1041,16 +1341,7 @@ export class SubagentContinuationManager {
      parent: Agent,
    ): Promise<MessageId> {
      try {
@@ -678,7 +723,7 @@ index 2103ce2..8152fa3 100644
      } catch (error: unknown) {
        /* v8 ignore next -- rollback disposal failures must not mask the
         * pre-acceptance signal, drain, or lifecycle failure. */
-@@ -1059,6 +1321,25 @@ export class SubagentContinuationManager {
+@@ -1059,6 +1350,25 @@ export class SubagentContinuationManager {
      }
    }
  
@@ -704,7 +749,7 @@ index 2103ce2..8152fa3 100644
    /**
     * Refuse image content addressed to a child whose model accepts text only.
     * Callers guard with `contentHasImage`, so text-only delivery never awaits.
-@@ -1126,15 +1407,26 @@ export class SubagentContinuationManager {
+@@ -1126,15 +1436,26 @@ export class SubagentContinuationManager {
      // `AgentRegistry.enter()` is the authoritative collision boundary for an id
      // some other owner holds — a duplicate would reject there with rollback.
      inputs.signal.throwIfAborted()
@@ -739,7 +784,7 @@ index 2103ce2..8152fa3 100644
      const observer = this.host.observeActivation(provider, childId, parent)
      // Agent creation owns rollback before handle transfer. A rejection leaves
      // no resident Activation and therefore publishes no lifecycle edge.
-@@ -1169,6 +1461,7 @@ export class SubagentContinuationManager {
+@@ -1169,6 +1490,7 @@ export class SubagentContinuationManager {
        disposal: undefined,
        accepted: new Set(),
        announced: false,
@@ -747,7 +792,7 @@ index 2103ce2..8152fa3 100644
        poke: Promise.withResolvers<void>(),
      }
      // After transfer, any failure must dispose the created handle, remove the
-@@ -1516,10 +1809,11 @@ export class SubagentContinuationManager {
+@@ -1516,10 +1838,11 @@ export class SubagentContinuationManager {
  
    /**
     * Tell the durable direct parent that this child produced everything it is
@@ -763,7 +808,7 @@ index 2103ce2..8152fa3 100644
     * rolled back before its first acceptance stays silent, since the caller was
     * told that child was not established. A parent that is no longer live is not
     * an error; the child's own Session remains the durable record either way.
-@@ -1534,6 +1828,13 @@ export class SubagentContinuationManager {
+@@ -1534,6 +1857,13 @@ export class SubagentContinuationManager {
     */
    private notifySettlement(activation: Activation, terminal: ActivationTerminal): void {
      if (!activation.announced) return

@@ -114,7 +114,8 @@ describe('inquiry turn effect fence', () => {
 
   describe('rule 2: an inquiry may not transfer identity or communication authority', () => {
     it.each([
-      'pet_locus_reply',
+      'pet_locus_finish',
+      'pet_locus_wait',
       'send_message',
       'interrupt_agent',
       'subagent',
@@ -137,8 +138,12 @@ describe('inquiry turn effect fence', () => {
     })
 
     it('never lets an inquiry consume the target own Feishu delivery', () => {
-      const fence = createInquiryEffectFence({ inherited: ['pet_locus_reply', 'pet_inquiry_answer'] })
-      expect(fence.decide(tool('pet_locus_reply'))).toMatchObject({
+      const fence = createInquiryEffectFence({ inherited: ['pet_locus_finish', 'pet_locus_wait', 'pet_inquiry_answer'] })
+      expect(fence.decide(tool('pet_locus_finish'))).toMatchObject({
+        allowed: false,
+        reason: 'authority-transfer-not-permitted-in-inquiry-turn',
+      })
+      expect(fence.decide(tool('pet_locus_wait'))).toMatchObject({
         allowed: false,
         reason: 'authority-transfer-not-permitted-in-inquiry-turn',
       })
@@ -147,7 +152,8 @@ describe('inquiry turn effect fence', () => {
     })
 
     it('exposes the floor as a stable constant limited to transfer surfaces', () => {
-      expect(INQUIRY_FORBIDDEN_TOOLS).toContain('pet_locus_reply')
+      expect(INQUIRY_FORBIDDEN_TOOLS).toContain('pet_locus_finish')
+      expect(INQUIRY_FORBIDDEN_TOOLS).toContain('pet_locus_wait')
       expect(INQUIRY_FORBIDDEN_TOOLS).toContain('send_message')
       expect(INQUIRY_FORBIDDEN_TOOLS).toContain('subagent')
       // Ordinary effectful work is rule 1's business, not the floor's.

@@ -1,61 +1,84 @@
-## 0. 实施前诊断（只读，不改 child.ts）——已完成，四点均确认成立
+## 0. 已完成的独立 child 诊断
 
-直接核对已部署 Host 的真实配置（`~/.dsh/profiles/web/cordis.yml` → `dsh-base/cordis.patch.yml`），不是猜测：
+- [x] 0.1 核对部署 Host 的 spawn provider 注册、`inheritsParentContext=false`、silent settlement 能力与 provider 字符串透传路径
+- [x] 0.2 确认默认 provider 独立性不可证明时必须 fail closed，显式 provider 覆盖保持既有语义
+- [x] 0.3 用固定 runtime probe 证明 spawn 初始化为空、没有父 transcript 前缀，且 caller-bound lineage 保持正确
 
-- [x] 0.1 spawn provider 已在 host plane 注册：`dsh-base/cordis.patch.yml` 的 `subagent-spawn-in-process` 行，`providerName: spawn`，进程级单例，跟随 Pet 常驻，不依赖任何 preset 层
-- [x] 0.2 provider 对象形状与能力确认：`dsh-subagent-spawn-in-process/lib/index.js:30` 的 `inheritsParentContext = false`；`getProvider(name)` 即 `this.providers.get(name)`，形状与 `child.ts` 的 `LocusSubagentPort` 假设一致；已有 `independent-runtime-probe.test.ts` 用真实固定 runtime 断言 `evidence.inheritsParentContext === false` 通过
-- [x] 0.3 silent settlement 与 provider 选择无关：`dsh-subagent/lib/index.js:2864` 的 `supportsSettlementNotice = true` 是挂在 `Subagent` 服务本身的结构性标记，不属于任何单个 provider，fork/spawn 走该检查结果一致
-- [x] 0.4 provider 字符串透传路径干净，无中间默认值覆盖：`child.ts`（`provider: input.provider ?? DEFAULT_CHILD_PROVIDER`）→ `probeLocusChildPorts` 的 `subagentRecord.startContinuable(spec)` → `Subagent.startContinuable(spec)`（`lib/index.js:1034`）→ `establishFresh`（`:1155`）→ `host.prepareContinuable(spec.provider, ...)`（`:1179`）→ `this.providers.get(name)`（`:3220`），全程纯字符串透传
-- [x] 0.5 四点全部确认成立，无假设被推翻；设计按原方案继续，不需要调整
+## 1. 已完成的独立 child 实现
 
-## 1. 独立 child 创建 —— 已完成
+- [x] 1.1 将 `DEFAULT_CHILD_PROVIDER` 改为 `spawn`，覆盖普通创建、idle 创建和显式重建的共享默认路径
+- [x] 1.2 创建前核验默认 provider 的 `inheritsParentContext === false`，无法证明时返回稳定 `independent-context-unproven` 并拒绝创建
+- [x] 1.3 保持显式 provider 覆盖和旧 child 历史不变，不增加 context mode/schema 兼容字段
+- [x] 1.4 增加默认创建、idle 创建、重建、显式覆盖及 fail-closed 测试；固定 runtime probe 验证 `isSeeded=false` 与零继承事件
 
-- [x] 1.1 把 `DEFAULT_CHILD_PROVIDER` 改为零父上下文的 provider，三条创建路径共用同一常量；调用方显式传入的 provider 语义不变
-  - 证据：`child.ts:331` 改为 `'spawn'`；三条路径（`startChild`/`runReservedIdleCreate`/重建）共用该常量，未新增并行创建函数
-- [x] 1.2 创建前核验 provider 的 `inheritsParentContext === false`，无法证明时返回稳定失败码并拒绝创建，不静默退回 fork
-  - 证据：`defaultProviderProvenIndependent()` + `independent-context-unproven` 失败码，接入 `startChild`/`runReservedIdleCreate` 两条路径，仅在 `input.provider === undefined` 时触发；同时修复了 `probeLocusChildPorts()` 未透传 `getProvider` 的真实集成缺口（若不修，生产环境该核验会永远失败）
-- [x] 1.3 测试：默认创建/idle 创建/重建都使用独立 provider；能力不可证明时三条路径均 fail closed；显式传 provider 仍可覆盖
-  - 证据：`locus-child.test.ts` 新增 8 项（D2 四种 fail-closed 变体含 idle 路径、D1 显式 provider 绕过核验、`getProvider` 透传 3 种子场景），完整 red→green 验证（临时删除核验代码确认新测试失败，diff 字节级恢复）；全文件 38/38 通过
+## 2. 已完成的首次回复出口诊断
 
-**范围决定（所有者 2026-03-23）**：不引入上下文模式标记（`fork-prefix-v1`/`independent-v1`/`unknown`）及其 schema 持久化。实施时发现要让该字段真正生效，需要把独立性核验结果一路传递穿过 `index.ts`→`dsh-port.ts`→`controller.ts`（6 处调用点）→`controller-persistence-adapter.ts` 才能到达 `buildLocusRecord()`，与"加一个字段"的预期规模不对等；且该字段只是可观测性，不影响独立性本身是否生效。详见 `design.md` D4。原第 2 节（schema 持久化）整节移除，不做新旧模式共存的历史兼容层。
+- [x] 2.1 用真实首轮 claim 序列修复 Host 注入上下文被误判为参与者流量的问题，并保持 GUI/user/未知来源 fail closed
+- [x] 2.2 修复 claim 先于 `bindQueued` 的结构性竞态：暂时 unresolved 不置永久 mixed fuse，绑定可证明后恢复原 turn proof
+- [x] 2.3 将 `agent-message` 定义并实现为非路由上下文：同 turn 不撤销已有 Delivery，无 Delivery 时也不产生回复能力
+- [x] 2.4 增加 observer/reply-tool 回归，覆盖 Delivery claim→agent-message→reply、standalone agent-message、GUI steer、未知来源和第二 Delivery
+- [x] 2.5 首次完整本地验证通过：Pet typecheck/test/build、仓库 test/artifact check、diff check 与 OpenSpec strict；首次 `dsh build` 后第二次同步无变化
 
-## 2. 回复出口与问父路径回归 —— 已完成
+## 3. 第二次真实验收与设计修正
 
-复核确认这一层与阶段 1（provider 选择/独立性核验）完全解耦：`LocusDeliveryContext`/`renderLocusDeliveryPrompt()` 是纯函数，不含 provider 字段，前言内容不依赖 child 是用 fork 还是 spawn 创建的。因此任务性质是回归确认既有覆盖仍然成立，而非新写测试；已有覆盖具体如下。
+- [x] 3.1 重启既有 DSH Host 并确认部署产物包含 `agent-message` 分类修复
+- [x] 3.2 在真实答疑群复现跨 turn 失败：Delivery turn 问父后结束，父回答在后续 turn 到达，`pet_locus_reply` 因原 Delivery 已结算被拒绝，飞书无正文
+- [x] 3.3 解码 child 多帧 zstd 日志并确认精确顺序；记录 `turn/end` 不能等同 Delivery 完成，且 DSH `next-step` 会与下一条 `next-turn` 合批的事实
+- [x] 3.4 与所有者确认新边界：每 locus 单 current Delivery、统一 finish、相对 wait、接收起 24 小时硬上限、超时复用同一 child session；`/new` 与 send-message pair 延后
 
-- [x] 2.1 回归 `pet_locus_reply` 为业务正文唯一出口，turn 结束未发送时仍如实诊断为未回复
-  - 证据：`locus-context.test.ts` 第 96/259 行 `pet_locus_reply` 断言、第 91–97 行「回复只能回到上述当前目标」；本 change 未改动 `context.ts`，14/14 回归通过
-- [x] 2.2 回归首轮前言仍包含「按需问 caller-bound 主会话」「parent 回复不构成持久授权」「不自动回传结论」三条边界
-  - 证据：`locus-context.test.ts:105-144`「does not flatten history」+「does not guess an unconfirmed anchor」两个既有用例，逐字断言 `send_message`、「必须由所有者在管理面显式确认」、「不要自动把本 child 的结论、摘要或状态回传 main session」
-- [x] 2.3 测试：独立 child 首轮不含父 transcript 哨兵、lineage 正确、silent settlement 行为不变
-  - 证据：`independent-runtime-probe.test.ts` 用固定 runtime 重跑 3/3 通过，`inheritsParentContext === false` 且 `prepared === {}`（spawn provider 从不读父 `snapshotEvents()`）；lineage/silent settlement 由阶段 1 `locus-child.test.ts` 的 `settlementNotice: 'silent'` 断言与 `supportsSettlementNotice` fail-closed 覆盖，与本节共享同一创建路径
+## 4. Delivery 持久状态与原子不变量
 
-## 3. 本地验证 —— 已完成
+- [x] 4.1 为 Delivery 增加 additive 持久字段/状态：接受顺序、current/backlog、deadline、finish outcome 与 outbound result；`PET_DOMAIN_VERSION` 已到 14，未知版本 fail closed（既有 `migrate.test.ts`/`migrate-cli.test.ts` 57/57）
+- [x] 4.2 实现每 locus 至多一个 current 的事务不变量，以及 accepted/queued→current、current→finishing/no-reply/expired、finishing→replied/failed/unknown-terminal 的 CAS 转换（`delivery.ts`/`persistence.ts`）；`claimCurrentDeliveryMutation`/`claimCurrentDelivery` 均严格按接受序选取，显式非最旧 `deliveryId` 返回 `not-oldest` 而不越序
+- [x] 4.3 保持平台 `messageId` 幂等接受（重复消息返回原不可变记录）；`markDeliveryFinishing`/`completeCurrentDelivery`/`expireCurrentDelivery` 均以 `expectedRevision` CAS，迟到或重复调用只能在原 current 上一次性终结，不能作用于后继 Delivery
+- [x] 4.4 增加纯状态机（`locus-delivery.test.ts` 19/19，含显式 FIFO leapfrog 拒绝、CAS 一次性竞争、exact-deadline 边界）与真实持久 repository 测试（`locus-persistence.test.ts` 33/33，含 accepted 绑定后必须变为 `queued`、显式非最旧 durable 拒绝、重复 inbox id fail closed）。未覆盖：多进程/两个 repository 实例并发写入同一 SQLite 文件的显式竞争测试（当前 repository 文档声明为单写者，未验证跨进程 CAS）
 
-- [x] 3.1 运行 `npm run typecheck --workspace=dsh-pet`、`npm run test --workspace=dsh-pet`、`npm run build --workspace=dsh-pet`
-  - 结果：typecheck 通过；test 131 文件/2315 测试通过，31 skipped（既有 opt-in runtime probe），0 failed；build 的 host/client/runtime-compat 全部成功，仅既有 ESM/CJS 与 tsdown 配置警告，与本次改动无关
-- [x] 3.2 运行仓库 `npm test`、`npm run check:artifacts`、`git diff --check`
-  - 结果：`npm test` 124 passed/1 skipped/0 failed；`check:artifacts` 通过；`git diff --check` 通过
-- [x] 3.3 `openspec validate pet-locus-independent-child --strict`
-  - 结果：通过
+## 5. 串行 dispatcher 与租约调度
 
-## 4. 部署与真实验收（需所有者授权）
+- [x] 5.1 intake 改为先持久接受（`acceptDelivery`）；只有通过 `deliveryDispatch.claimCurrent` 成功 CAS 后才物理投递给 child，其余消息保持 `accepted`/`queued` 留在 backlog；生产 `LocusControllerDeps.deliveryDispatch` 为必需依赖，无回退的 eager 兼容路径
+- [x] 5.2 已从业务终结移除 `turn/end` 语义：controller `observe()` 对 `completed`/`failed` 事件只记录诊断（`settlement-ignored`），不再调用任何 settle/complete API；唯一终结入口是 `pet_locus_finish` 对应的 `markDeliveryFinishing`/`completeCurrentDelivery`
+- [x] 5.3 实现统一幂等 `LocusChannelController.dispatchNext(correlation)`：CAS 声明 current 后按同一 queue/bind/observer 流程物理投递；`finish`（`finishAndAdvance`）、deadline 到期（`scheduleCurrentDelivery` 的定时器）、定义性 queue 拒绝（`definitiveQueueFailure`）与启动恢复均调用同一入口；backlog 声明时用持久 `acceptedAt+24h` 硬上限跳过已过期项
+- [x] 5.4 实现持久 deadline 驱动的内存 scheduler（`index.ts` 的 `scheduleCurrentDelivery`）：默认 `acceptedAt+1h`，到期后走 `expireCurrentDelivery` CAS，成功后调用 `finishAndAdvance` 推进；复用同一 child session，不新建/不清历史。**已知缺口**：expiry 路径没有对仍在运行的 Agent turn 做任何 interrupt 尝试（无可用 runtime 中断接缝），只依赖 CAS 撤销 finish 能力，符合 design.md 已记录的风险取舍（"超时 interrupt 不立即停止旧 run"），但不满足"尽力 interrupt"这半句的字面实现
+- [x] 5.5 测试覆盖：A current 时 B 只入 backlog 不进 DSH inbox（`locus-controller-races.test.ts`/`locus-settlement-integration.test.ts`）、A 完成后严格按接受序投递 B（`dispatchNext` 专项测试与端到端集成测试）、定义性 refuse 后仍推进 backlog。**未覆盖**：deadline 到期的定时器路径本身（`scheduleCurrentDelivery`/`setTimeout`）没有专项单测，只有其调用的 pure/durable expiry CAS 被测试覆盖；interrupt 失败场景因无 interrupt 实现而无法测试
 
-- [x] 4.1 确认目标 home 与兼容 runtime，执行 `dsh build` 物化，验证第二次 sync 无变化
-  - 证据：2026-09-14 首次 `dsh build` 在当前目标 home / `0.1.2-rc.1` runtime 下仅原子重装 `dsh-pet`；第二次 `dsh build` 输出 `no changes — deployment already matches manifest`。
-- [ ] 4.2 重启 DSH（由所有者确认时机；当前未自动执行，避免中断正在运行的 GUI 与答疑群）
-- [ ] 4.3 真实答疑群验收：提问后 child 使用独立上下文，且实际收到飞书回复
-- [ ] 4.4 验收 child 在锚点不足时经原生 `send_message` 问父，而不是猜测或自行创建工作目录
-  - 2026-09-14 首次实测已完成问父前半段：child `session-a380ee7b` 的 `identity.isSeeded=false`，调用 `send_message` 后询问准确到达 caller-bound main，父回复也以 `agent-message/relay` 回到同一 child；但暴露回复出口 bug，尚不能勾选：observer 把父回复当非 Delivery 流量，`pet_locus_reply` 被拒绝，飞书无正文。
-- [x] 4.4a 修复父子纯上下文通信与 Delivery 路由的错误耦合：`agent-message` 不建立、修改或撤销当前 Host 绑定回复目标；无活跃 Delivery 时仍不能获得飞书回复能力；GUI/user steer、来源不明消息和第二条 Delivery 保持 fail closed
-  - 证据：`turn-observer.ts` 将 `agent-message` 与 Host 注入归入 `isNonRoutingContextClaim()`；它们被忽略，不创建 observed turn，也不改变已有 Delivery 的 `mixed`/`foreign` 状态。`user`、来源缺失、第二 Delivery 路径未豁免。
-- [x] 4.4b TDD 回归真实顺序：Delivery claim → `agent-message` claim → `pet_locus_reply` 仍成功；并覆盖单独 agent-message 无权限、GUI steer 与第二 Delivery 仍拒绝
-  - 证据：`locus-turn-observer.test.ts` 37/37、`locus-reply-tool.test.ts` 5/5；新增真实顺序用例断言原 `om-current` 目标仍发送 `MANGO-SPAWN-0914`，单独 agent-message 无权、GUI steer 与第二 Delivery 仍 fail closed。
-- [ ] 4.5 验收主会话未被自动灌入 child 结论
-- [ ] 4.6 验收旧 fork child 仍正常服务，历史未被裁剪
+## 6. 统一 Agent 工具与飞书发送
 
-## 5. 收尾
+- [x] 6.1 `pet_locus_finish` 替换 `pet_locus_reply`：`reply`/`no-reply` 互斥 schema（`requireKnownArguments`/参数校验），拒绝任何路由 selector，无兼容别名（`PET_LOCUS_REPLY_TOOL` 已从生产源码整体移除）
+- [x] 6.2 实现 `pet_locus_wait({ waitMinutes, reason? })`：正整数分钟、`1..1440`、可重复只延长；durable `waitDelivery`/`waitCurrentDelivery` 按 `min(max(current, now+wait), acceptedAt+24h)` 计算，重复声明不可越过硬上限（`locus-delivery.test.ts` 覆盖）
+- [x] 6.3 finish/wait 共用 `resolveAuthorized`：要求唯一 active locus child、`locus.state==='active'`、generation/permission 精确、current 状态与队列位一致，否则 `INVALID_REQUEST`
+- [x] 6.4 更新 Delivery prompt（`context.ts`）与 `pet_context`：显式说明 turn/`send_message`/assistant 文本不完成请求，`pet_locus_finish` 二选一语义，`pet_locus_wait` 相对时间与 Host 返回的期限/剩余分钟/是否触顶（`locus-context.test.ts` 14/14）
+- [x] 6.5 strict Lark reply adapter（`channel/lark.ts` 的 `replyToTarget`）：群级/话题级均引用触发 `messageId`；话题显式传 `--reply-in-thread`；验证返回 `message_id`/`chat_id`。**已知缺口**：未验证返回的 thread/root 身份（适配器只检查 chat_id 回显，不核对话题归属），真实话题落位仍需人工验收
+- [x] 6.6 reply 的 at-most-once 终结：`markDeliveryFinishing` 先 CAS 进入 `finishing`（并固化 `finishOutcome:'reply'` 避免 restart 时 schema 校验失败）；`larkClient.replyToTarget` 成功→`success`，抛出→`unknown`（当前适配器无法可靠区分"确定失败"与"结果未知"，保守全部归为 unknown）；`unknown-terminal`/重启遗留 `finishing` 均不自动重发
+- [x] 6.7 工具与发送测试：参数互斥/无 selector（`locus-reply-tool.test.ts`）、错误 caller/no current（`resolveAuthorized` 校验路径）、wait 硬上限（`locus-delivery.test.ts`）、群/话题引用回复（`channel-lark.test.ts` 33/33）。**未覆盖**：重复/迟到 finish 调用的端到端工具层测试（pure/durable 层已覆盖 CAS 竞争，但未从 `pet_locus_finish` 工具入口发起两次并发调用验证）、发送确认丢失的工具层断言（已在 durable 层验证 `unknown-terminal`，未从工具返回值验证 `sent:false`）
 
-- [ ] 5.1 回填真实证据到 `docs/notes/pet-locus-independent-child-handoff.md`，只记录实际执行过的命令与结果
-- [ ] 5.2 更新 BACKLOG B035 状态，说明本 change 承接范围与 B035 剩余范围的边界
-- [ ] 5.3 与 `pet-unified-locus-collaboration`、`pet-locus-independent-agent-inquiries` 对齐归档顺序；两个 change 修改同一条 requirement，按实际实现顺序重新对齐后再归档
+## 7. 跨 turn 来源安全与运行时集成
+
+- [x] 7.1 `LocusTurnCorrelationObserver.currentCapabilityForChild`：原始 Delivery turn 存续期间或 current 存续期间由信任 `agent-message` 唤醒的后续 turn 均可用；`restoreCurrentCapability` 让启动恢复保留的 current 重新具备来源证明
+- [x] 7.2 继续拒绝：GUI/user（`isNonRoutingContextClaim`/`sourceKind!=='user'`→foreign/mixed）、来源缺失/未知、standalone agent-message（无 retained current 时 `claim-agent-context` 诊断且不授权）、第二个 Delivery（`mixed` fuse）、非 active child/旧 generation/terminal Delivery（`resolveAuthorized` 校验）
+- [x] 7.3 旧 A 的迟到 finish：`loadCurrentDelivery` 精确比对 `deliveryId`/`status==='current'`/`queueState==='current'`，A expired 后旧调用命中 `INVALID_REQUEST`，不能发送到 A/B，不能终结 B（`locus-delivery.test.ts` 的 finish-vs-expiry 一胜竞争覆盖 pure/durable 层；`locus-reply-tool.test.ts` 覆盖工具层拒绝）
+- [x] 7.4 使用真实 `createLocusTurnObserver`/`LocusChannelController`（非纯函数替身）的集成测试覆盖：Delivery claim→agent-message 唤醒→原目标 finish（`locus-reply-tool.test.ts`）、Host 首轮注入不被误判为参与者流量、GUI steer 混入不消费 current（`locus-context-repository.test.ts`）、claim 先于 `bindQueued` 的结构性竞态（`locus-settlement-integration.test.ts` 的 end-before-bind 用例，真实延迟超过历史 200ms 轮询窗口）。**未覆盖**：`next-step`/`next-turn` 合批边界的运行时级验证（依赖真实 DSH inbox 语义，本地测试只能模拟claim/end事件顺序，不能证明真实合批行为）
+
+- [x] 7.5 补齐 child→parent 的父侧回复指引（真实验收暴露的阻塞缺陷，非计划内）。上游 `continuableInitialPrompt` 只单向告诉 child「你的 parent id 是 X，用 `send_message` 回结果」；父侧收到的却是裸的 `Agent <id> sent a message:`，既无可回复的 agent id，也无「普通 assistant 文本不会送达」的说明。父用文本作答即**静默失败**：父认为已答复，child 等到租约超时后被迫 `no-reply`。这使本 change「child 不 fork 父历史、缺上下文就问父」的前提不成立，故在 `settlement-notice.patch` 中对称补齐：新增 `parentFacingAgentMessage` 并只用于 `sendToParent`（child→parent），`steer`（parent→child）保持原 `agentMessage` 不变，避免把「回复我」注入父对子的转向消息。已更新 `build.mjs`/`build-launcher.cjs` 记录的 patch sha256 与 `compat/subagent/README.md`；从 pinned commit 全量重建通过（含 descriptor 能力探针）
+
+## 8. 启动恢复与故障窗口
+
+- [x] 8.1 `reconcileStartup` 在 intake 开启前运行：`current`/backlog 各自超过 `acceptedAt+24h`（current 另受 `min(deadlineAt, hard)` 约束）→`expired`；遗留 `finishing`→`unknown-terminal` 且不重放发送；未过期 `current` 按精确 locus/generation/child/endpoint 身份保留（不要求开放 turn）；无 current 时 `index.ts` 的启动 dispatch 循环对每个有 backlog 且无 current/无 in-flight legacy 行的 locus 调用一次 `dispatchNext`
+- [x] 8.2 恢复只复用持久记录中的同一 child session；`queued`/`running` 只在精确 `deliveryProof`（`executionId`+`turnId`+`state:'running'`）匹配时保留为 `running`（不促成 `current`，避免与同 locus 真实 current 行冲突）；无法证明 locus/generation/child/endpoint 一致时标记 `startupRecoveryDebt` 并阻塞该 locus 的后续 backlog 派发，不新建替代 session、不猜 FIFO
+- [ ] 8.3 未实现：accept/current dispatch/bind、finish CAS/飞书调用/结果落账、expiry/interrupt/next dispatch 各崩溃窗口的系统性 fault-injection 测试矩阵。现状：仅有 provisioning 相关的 `failOnWriteNumber` 崩溃窗口测试（`locus-persistence.test.ts`），未针对 Delivery finish/dispatch 路径做等价的中途失败注入
+- [ ] 8.4 未做独立验证：重启不重复投递 current（`claimCurrentDeliveryMutation` 的 occupancy 检查理论上防止，但无重启后 double-dispatch 的专项回归）、scheduler 到期与 normal completion 并发只推进一次（两者共用同一 `withLocusDispatchLane`/`enqueueDispatchLane` 串行化，但无显式并发竞争测试证明）
+
+## 9. 文档明确延后项
+
+- [x] 9.1 已在 `docs/notes/pet-locus-independent-child-handoff.md`「2026-03-24 第二轮范围收敛」记录：`/new`/`skip` 只保留为未来同 session 的重清理逃生设计，本期不注册命令，也不预先锁定未超时项和 backlog 的清理范围
+- [x] 9.2 已在同一节记录原生 `send_message` pair/correlation 为可选后续 change：只有 runtime 提供不可伪造 metadata/可信接缝时才实现，不以 sender、正文、时间或最近询问猜关联；已记录迟到父消息影响后续 turn 的已知低概率语义风险
+- [x] 9.3 已在同一节明确完整 B035 公共事实/inquiry/answer store/result outbox/continuation segment 继续暂停；确认本轮未改动 `host/collaboration/*`、`host/inquiry/*`（仅 `effect-fence.ts` 禁止工具名单同步重命名），不声称满足 G3/G4/G5
+
+## 10. 完整验证、部署与真实验收
+
+- [x] 10.1 `npm run typecheck --workspace=dsh-pet` 通过；`npm run build --workspace=dsh-pet` 通过（含 `build:host`/`build:client`）；Pet 全量 `npx vitest run`：2330 passed、31 skipped、11 failed——11 项失败经 `git stash` 与干净 HEAD 逐条比对，与本 change 引入的代码改动无关，是先于本 change 已存在的 `dsh-scope`/`ToolRuntime` 工具可见性基础设施缺陷（影响 `collaboration-assembly.test.ts`/`collaboration-tool-scope.test.ts`/`inquiry-tool-scope.test.ts`/`tool-scope.test.ts` 中与本 change 无关的用例），未在本 change 范围内修复
+- [x] 10.2 仓库 `npm test`：124 passed、1 skipped、0 failed；`npm run check:artifacts` 通过；`git diff --check` 通过；`openspec validate pet-locus-independent-child --strict` 通过
+- [ ] 10.3 经所有者确认后执行 `dsh build`，验证第二次构建无变化；再次确认后重启现有 3080 Host，不启动替代 server
+- [ ] 10.4 真实群验收：独立 child 跨 turn 问父后通过 `pet_locus_finish(reply)` 引用原 `@bot` 消息回复，主会话未被自动灌入 child 结论
+- [ ] 10.5 真实话题验收：回复留在原话题并引用该 Delivery 的触发消息，不落到群主时间线
+- [ ] 10.6 真实队列/租约验收：A 未 finish 时 B 不进入 child；wait 延长但不突破 acceptedAt+24h；测试配置下到期自动推进且不更换 child session
+- [ ] 10.7 回填 handoff/BACKLOG 的实际命令与证据，并与 `pet-unified-locus-collaboration`、`pet-locus-independent-agent-inquiries` 对齐归档顺序

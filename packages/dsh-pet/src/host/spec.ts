@@ -87,7 +87,12 @@ export const PET_DOMAIN_NAME = 'dsh_pet'
 // The parser still accepts the exact v12 row shape, validates its historical
 // deadline under the old fixed bound, and normalizes it without deleting or
 // rewriting the stored row. Legacy `expired` stays terminal evidence only.
-export const PET_DOMAIN_VERSION = 13
+//
+// Bumped to 14 for serialized locus Delivery leases. The new fields are
+// additive, but old pending rows are never guessed into a current slot by the
+// runtime; startup reconciliation must prove or conservatively terminalize
+// them before intake.
+export const PET_DOMAIN_VERSION = 14
 
 // `chat` joins the original three for Tasks created by an inbound Lark
 // message. It is a distinct scope kind rather than a flavour of `workspace`
@@ -604,7 +609,23 @@ export const petLocusDelivery = z.object({
   rootMessageId: z.string().min(1).optional(),
   replyToMessageId: z.string().min(1).optional(),
   sequence: z.number().int().positive(),
-  status: z.enum(['accepted', 'queued', 'running', 'settled', 'failed']),
+  status: z.enum([
+    'accepted', 'queued', 'running', 'settled', 'failed',
+    'current', 'finishing', 'replied', 'no-reply', 'expired', 'unknown-terminal',
+  ]),
+  /** Additive serialized queue/deadline/finish facts. */
+  queueState: z.enum(['backlog', 'current']).optional(),
+  deadlineAt: z.number().int().nonnegative().optional(),
+  hardDeadlineAt: z.number().int().nonnegative().optional(),
+  revision: z.number().int().nonnegative().optional(),
+  stateRevision: z.number().int().nonnegative().optional(),
+  finishOutcome: z.enum(['reply', 'no-reply']).optional(),
+  outboundResult: z.enum(['none', 'success', 'failure', 'unknown']).optional(),
+  outboundAttemptedAt: z.number().int().nonnegative().optional(),
+  outboundResultAt: z.number().int().nonnegative().optional(),
+  outboundDiagnostic: z.string().optional(),
+  finishedAt: z.number().int().nonnegative().optional(),
+  expiredAt: z.number().int().nonnegative().optional(),
   /** Accepted rows have no proof; queued binds execution; running/terminal bind turn. */
   feedbackTarget: petLocusEndpoint.extend({
     messageId: z.string().min(1),
@@ -636,17 +657,90 @@ export const petLocusDelivery = z.object({
   const hasExecution = delivery.executionId !== undefined
   const hasTurn = delivery.turnId !== undefined
   const hasInboxMessage = delivery.inboxMessageId !== undefined
-  if (delivery.status === 'accepted' && (hasExecution || hasTurn || hasInboxMessage)) {
+  const modern = delivery.queueState !== undefined || delivery.deadlineAt !== undefined ||
+    delivery.finishOutcome !== undefined || delivery.outboundResult !== undefined ||
+    delivery.status === 'current' || delivery.status === 'finishing' ||
+    delivery.status === 'replied' || delivery.status === 'no-reply' ||
+    delivery.status === 'expired' || delivery.status === 'unknown-terminal'
+  if (modern && delivery.acceptedAt === undefined) {
+    issueCtx.addIssue({ code: 'custom', message: 'serialized Delivery lease requires acceptedAt' })
+  }
+  if (modern && delivery.status === 'accepted' && (hasExecution || hasTurn || hasInboxMessage)) {
+    issueCtx.addIssue({ code: 'custom', message: 'modern accepted Delivery cannot carry execution, inbox, or turn proof' })
+  }
+  if (modern && delivery.status === 'queued' && (!hasExecution || !hasInboxMessage || hasTurn || delivery.queuedAt === undefined)) {
+    issueCtx.addIssue({ code: 'custom', message: 'modern queued Delivery requires inbox/execution proof and queuedAt, but no turn proof' })
+  }
+  if (modern && delivery.status === 'current' && (delivery.queueState !== 'current' || delivery.deadlineAt === undefined || delivery.hardDeadlineAt === undefined || delivery.revision === undefined || delivery.stateRevision === undefined)) {
+    issueCtx.addIssue({ code: 'custom', message: 'modern current Delivery requires current queue, lease deadlines, and revisions' })
+  }
+  if (modern && delivery.status === 'finishing' && (delivery.queueState !== 'current' || delivery.deadlineAt === undefined || delivery.hardDeadlineAt === undefined || delivery.revision === undefined || delivery.stateRevision === undefined || delivery.finishOutcome !== 'reply')) {
+    issueCtx.addIssue({ code: 'custom', message: 'modern finishing Delivery requires current queue, lease deadlines, revisions, and reply outcome' })
+  }
+  if (modern && ['replied', 'unknown-terminal'].includes(delivery.status) && (delivery.queueState !== undefined || delivery.finishOutcome !== 'reply' || delivery.outboundResult === undefined || !['success', 'unknown'].includes(delivery.outboundResult))) {
+    issueCtx.addIssue({ code: 'custom', message: 'reply terminal Delivery has inconsistent queue, finish, or outbound result facts' })
+  }
+  if (modern && delivery.status === 'no-reply' && (delivery.queueState !== undefined || delivery.finishOutcome !== 'no-reply' || delivery.outboundResult !== 'none')) {
+    issueCtx.addIssue({ code: 'custom', message: 'no-reply terminal Delivery has inconsistent queue, finish, or outbound result facts' })
+  }
+  // An expired Delivery was never finished, so it carries no finish outcome and
+  // holds no queue slot. It MAY still carry `outboundResult: 'none'`: that value
+  // is written at acceptance and truthfully means "no outbound attempt was ever
+  // made", which is exactly an expired row's situation. Only a value asserting
+  // that an attempt happened is inconsistent with never having finished.
+  if (modern && delivery.status === 'expired' && (
+    delivery.queueState !== undefined ||
+    delivery.finishOutcome !== undefined ||
+    (delivery.outboundResult !== undefined && delivery.outboundResult !== 'none')
+  )) {
+    issueCtx.addIssue({ code: 'custom', message: 'expired Delivery cannot carry queue, finish, or attempted-outbound facts' })
+  }
+  if (modern && delivery.stateRevision !== undefined && delivery.revision !== undefined && delivery.stateRevision !== delivery.revision) {
+    issueCtx.addIssue({ code: 'custom', message: 'Delivery revision and stateRevision must agree' })
+  }
+  if (delivery.deadlineAt !== undefined && delivery.acceptedAt !== undefined && delivery.deadlineAt < delivery.acceptedAt) {
+    issueCtx.addIssue({ code: 'custom', message: 'deadlineAt must not precede acceptedAt' })
+  }
+  if (delivery.hardDeadlineAt !== undefined && delivery.acceptedAt !== undefined &&
+      delivery.hardDeadlineAt !== delivery.acceptedAt + 24 * 60 * 60 * 1000) {
+    issueCtx.addIssue({ code: 'custom', message: 'hardDeadlineAt must equal acceptedAt plus 24 hours' })
+  }
+  if (delivery.deadlineAt !== undefined && delivery.hardDeadlineAt !== undefined && delivery.deadlineAt > delivery.hardDeadlineAt) {
+    issueCtx.addIssue({ code: 'custom', message: 'deadlineAt must not exceed hardDeadlineAt' })
+  }
+  if (modern && delivery.queueState === 'current' && !['current', 'finishing'].includes(delivery.status)) {
+    issueCtx.addIssue({ code: 'custom', message: 'current queueState requires current or finishing status' })
+  }
+  if (modern && delivery.queueState === 'backlog' && ['current', 'finishing'].includes(delivery.status)) {
+    issueCtx.addIssue({ code: 'custom', message: 'backlog queueState cannot carry current/finishing status' })
+  }
+  if (modern && delivery.finishOutcome === 'no-reply' && delivery.outboundResult !== undefined && delivery.outboundResult !== 'none') {
+    issueCtx.addIssue({ code: 'custom', message: 'no-reply Delivery cannot carry an outbound send result' })
+  }
+  if (modern && delivery.status === 'no-reply' && delivery.finishOutcome !== 'no-reply') {
+    issueCtx.addIssue({ code: 'custom', message: 'no-reply status requires no-reply finishOutcome' })
+  }
+  if (modern && (delivery.status === 'replied' || delivery.status === 'unknown-terminal') &&
+      delivery.finishOutcome !== 'reply') {
+    issueCtx.addIssue({ code: 'custom', message: 'reply terminal status requires reply finishOutcome' })
+  }
+  if (modern && delivery.status === 'failed' && delivery.finishOutcome !== undefined && delivery.finishOutcome !== 'reply') {
+    issueCtx.addIssue({ code: 'custom', message: 'failed reply Delivery cannot carry no-reply finishOutcome' })
+  }
+  if (modern && delivery.status === 'expired' && delivery.finishOutcome !== undefined) {
+    issueCtx.addIssue({ code: 'custom', message: 'expired Delivery cannot carry a finishOutcome' })
+  }
+  if (delivery.status === 'accepted' && !modern && (hasExecution || hasTurn || hasInboxMessage)) {
     issueCtx.addIssue({ code: 'custom', message: 'accepted Delivery cannot carry inbox, execution or turn proof' })
   }
-  if (delivery.status === 'queued' && (!hasExecution || !hasInboxMessage || hasTurn || delivery.queuedAt === undefined)) {
+  if (!modern && delivery.status === 'queued' && (!hasExecution || !hasInboxMessage || hasTurn || delivery.queuedAt === undefined)) {
     issueCtx.addIssue({ code: 'custom', message: 'queued Delivery requires inbox/execution proof and queuedAt, but no turn proof' })
   }
-  if ((delivery.status === 'running' || delivery.status === 'settled') &&
+  if (!modern && (delivery.status === 'running' || delivery.status === 'settled') &&
       (!hasExecution || !hasInboxMessage || !hasTurn)) {
     issueCtx.addIssue({ code: 'custom', message: 'running/settled Delivery requires inbox, execution and turn proof' })
   }
-  if (delivery.status === 'failed') {
+  if (!modern && delivery.status === 'failed') {
     const startupFailure = delivery.startupDisposition !== undefined
     const dispatchFailure = delivery.dispatchFailure !== undefined
     if (!startupFailure && !dispatchFailure && (!hasExecution || !hasInboxMessage || !hasTurn)) {
@@ -665,7 +759,7 @@ export const petLocusDelivery = z.object({
         (startupFailure || !hasExecution || !hasInboxMessage || hasTurn || delivery.queuedAt === undefined)) {
       issueCtx.addIssue({ code: 'custom', message: 'queued-not-started dispatch failure requires inbox/execution proof and queuedAt, but no startup or turn proof' })
     }
-  } else {
+  } else if (!modern) {
     if (delivery.startupDisposition !== undefined) {
       issueCtx.addIssue({ code: 'custom', message: 'startupDisposition is only valid on failed Delivery' })
     }
@@ -673,8 +767,9 @@ export const petLocusDelivery = z.object({
       issueCtx.addIssue({ code: 'custom', message: 'dispatchFailure is only valid on failed Delivery' })
     }
   }
-  if (delivery.startupRecoveryDebt !== undefined && delivery.status !== 'queued' && delivery.status !== 'running') {
-    issueCtx.addIssue({ code: 'custom', message: 'startupRecoveryDebt requires queued/running Delivery' })
+  if (delivery.startupRecoveryDebt !== undefined &&
+      delivery.status !== 'queued' && delivery.status !== 'running' && delivery.status !== 'current' && delivery.status !== 'finishing') {
+    issueCtx.addIssue({ code: 'custom', message: 'startupRecoveryDebt requires an in-flight Delivery' })
   }
   const root = delivery.rootMessageId ?? delivery.replyTarget?.rootMessageId ?? delivery.feedbackTarget.rootMessageId
   if ((delivery.status === 'accepted' || delivery.status === 'queued') &&

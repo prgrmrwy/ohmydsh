@@ -123,7 +123,8 @@ export type InquiryEffectDecision =
 export const INQUIRY_FORBIDDEN_TOOLS: readonly string[] = Object.freeze([
   // Outbound delivery under the target's identity: an inquiry must never
   // consume the target's own Feishu Delivery to answer someone else.
-  'pet_locus_reply',
+  'pet_locus_finish',
+  'pet_locus_wait',
   // Ordinary cross-agent messaging. The inquiry protocol is the only
   // sanctioned channel; native messaging would bypass its ledger, budget and
   // cycle checks, and produces no answer binding.

@@ -9,12 +9,17 @@
  *
  * The publish order is deliberately one-way:
  *
- *   admission -> active locus -> exact child -> Delivery.accept -> queue child
+ *   admission -> active locus -> exact child -> Delivery.accept
+ *     -> current-claim -> queue child (or durable backlog)
  *
  * A turn observer is a hard capability gate.  A child activation observer (or
  * a child id/FIFO heuristic) cannot prove which Delivery ran, so this module
  * refuses before admission and persistence when the per-turn observer is not
- * available.
+ * available.  `deliveryDispatch.claimCurrent` is a REQUIRED production seam
+ * (see `LocusControllerDeps`): admission is durable before dispatch, and a
+ * busy locus retains the new Delivery in its backlog instead of injecting it
+ * into the child inbox.  There is no eager/legacy fallback dispatch path in
+ * production; a missing dispatcher refuses the whole admission.
  */
 
 import { randomUUID } from 'node:crypto'
@@ -203,6 +208,41 @@ type LocusDeliveryAcceptance = Pick<
   'record' | 'duplicate' | 'conflict'
 >
 
+/**
+ * Durable current-Delivery serialization seam.
+ *
+ * `LocusControllerDeps.deliveryDispatch` is REQUIRED in production: one
+ * locus/generation/child/endpoint tuple may have at most one Delivery
+ * in-flight at a time, and only a durable CAS claim can enforce that across
+ * concurrent Feishu events, finish, expiry, and startup recovery. An isolated
+ * unit test may still construct a controller with only `hasCurrent` (a
+ * read-only probe) for cases that never exercise physical dispatch, but that
+ * shape MUST NOT be composed by a production Host.
+ */
+export interface LocusDeliveryDispatchPort {
+  /**
+   * Atomically claim the exact accepted Delivery as current. A missing result
+   * is not safe: the controller must leave the row in backlog rather than
+   * enqueueing a second request. The returned record is the durable claim.
+   */
+  claimCurrent?(input: {
+    readonly correlation: DeliveryCorrelation
+    readonly deliveryId?: string
+    readonly now: number
+  }): Awaitable<DeliveryRecord | undefined>
+  /** Read-only occupancy probe for isolated test adapters; never a claim. */
+  hasCurrent?(correlation: DeliveryCorrelation): Awaitable<boolean>
+  /** Optional notification after a Delivery reaches a business terminal state. */
+  currentFinished?(input: {
+    readonly deliveryId: string
+    readonly correlation: DeliveryCorrelation
+  }): Awaitable<void>
+  /** Dispatch the next durable backlog item after a terminal transition. */
+  dispatchNext?(correlation: DeliveryCorrelation): Awaitable<void>
+  /** Arm the Host deadline scheduler after a current row is durably bound. */
+  scheduleCurrent?(record: DeliveryRecord): Awaitable<void>
+}
+
 /** Atomic Delivery persistence and exact per-turn settlement port. */
 export interface LocusDeliveryLedgerPort {
   /** Optional early idempotency probe; it must return the immutable original row. */
@@ -242,6 +282,12 @@ export interface LocusDeliveryLedgerPort {
     readonly settledAt: number
     readonly failureReason?: string
   }): Awaitable<{ readonly changed: boolean; readonly record: DeliveryRecord | undefined; readonly reason?: string }>
+  /** Atomically promote one accepted/backlog Delivery to current. */
+  claimCurrent?(input: {
+    readonly correlation: DeliveryCorrelation
+    readonly deliveryId: string
+    readonly now: number
+  }): Awaitable<DeliveryRecord | undefined>
   /** Optional queue-refusal probe; it must not claim terminal turn failure. */
   fail?(input: {
     readonly deliveryId: string
@@ -292,6 +338,8 @@ export interface LocusBusinessReplyPort {
 export interface LocusControllerDeps {
   readonly locus: LocusResolutionPort
   readonly deliveries: LocusDeliveryLedgerPort
+  /** Required current/backlog dispatcher seam for serialized locus intake. */
+  readonly deliveryDispatch: LocusDeliveryDispatchPort
   readonly child: LocusChildDeliveryPort
   /**
    * Resolve the complete live sandbox policy for the exact Session handle.
@@ -338,6 +386,17 @@ export type LocusControllerDiagnostic =
   | 'turn-correlation-unavailable'
   | 'invalid-event'
   | 'admission-rejected'
+  /**
+   * Admission refusals, reported with their exact reason.
+   *
+   * `admission-rejected` alone cannot be acted on: every refusal looks the
+   * same in the log, so an operator cannot tell a genuine non-mention from a
+   * watermark/dedup/authorization problem without attaching a debugger. Each
+   * reason below is already a closed, stable code carrying no message body
+   * and no external identifier, so surfacing it keeps the same privacy
+   * boundary as the rest of this union.
+   */
+  | `admission-rejected:${LocusAdmissionRefusal | 'unsafe-reply-target' | 'invalid-event'}`
   | 'control-command'
   | 'locus-unavailable'
   | 'child-unavailable'
@@ -389,12 +448,6 @@ export type LocusControllerRefusal =
   | 'dispatch-state-unknown'
   | 'aborted'
 
-interface PendingTerminal {
-  readonly phase: 'completed' | 'failed'
-  readonly turnId: string
-  readonly reason?: string
-}
-
 interface PendingTurn {
   readonly deliveryId: string
   readonly executionId: string
@@ -404,9 +457,7 @@ interface PendingTurn {
   dispatching: boolean
   /** The first exact turn identity observed for this execution. */
   startedTurnId?: string
-  /** Terminal observation retained across a queue/bind race. */
-  terminal?: PendingTerminal
-  /** Conflicting observer evidence permanently blocks settlement. */
+  /** Conflicting observer evidence permanently blocks turn binding. */
   conflicted?: boolean
   /** Serialize observer callbacks for this delivery. */
   operation?: Promise<void>
@@ -690,6 +741,16 @@ function deliveryIdOf(locus: ActiveLocus): string {
   return id
 }
 
+/** Stable local lane key; the durable locus/generation/child tuple remains authoritative. */
+function dispatchLaneKey(correlation: DeliveryCorrelation): string {
+  return [
+    correlation.locusId,
+    String(correlation.generation),
+    correlation.childSessionId,
+    endpointKey(correlation.endpoint),
+  ].join('\u0000')
+}
+
 /**
  * Controller for ordinary Feishu deliveries into a unified locus child.
  */
@@ -697,6 +758,8 @@ export class LocusChannelController {
   private readonly now: () => number
   private readonly signal: AbortSignal
   private readonly pending = new Map<string, PendingTurn>()
+  /** Serialize acceptance and physical dispatch for one exact locus locally. */
+  private readonly dispatchTails = new Map<string, Promise<void>>()
   private readonly unsubscribe: (() => void) | undefined
   private observerReady: boolean
 
@@ -713,6 +776,118 @@ export class LocusChannelController {
     return this.observerReady
   }
 
+  /**
+   * Remove the in-memory execution binding after a business terminal CAS.
+   * `turn/end` is intentionally not used here: only the durable lifecycle owns
+   * this transition.  The mechanical receipt is best-effort and never changes
+   * the durable result.
+   */
+  currentFinished(input: {
+    readonly deliveryId: string
+    readonly correlation: DeliveryCorrelation
+    readonly outcome?: 'settled' | 'failed'
+  }): void {
+    const pending = this.pending.get(input.deliveryId)
+    if (pending === undefined || !exactCorrelation(pending.correlation, input.correlation)) return
+    this.pending.delete(input.deliveryId)
+    void this.receiptSettled(pending.target, input.outcome ?? 'settled')
+  }
+
+  /**
+   * Claim and queue the oldest durable backlog Delivery after a terminal or
+   * expiry transition.  This is the same queue/bind/observer fence used by
+   * intake; calling `handle()` with the stored message would hit idempotency
+   * and never physically dispatch the backlog row.
+   */
+  async dispatchNext(correlation: DeliveryCorrelation): Promise<void> {
+    if (!this.available || this.signal.aborted) return
+    await this.enqueueDispatchLane(correlation, async () => {
+      let claimed: DeliveryRecord | undefined
+      try {
+        claimed = await this.deps.deliveryDispatch.claimCurrent?.({
+          correlation,
+          now: this.now(),
+        })
+      } catch {
+        this.log('delivery-persistence-failed')
+        return
+      }
+      if (
+        claimed === undefined ||
+        claimed.status !== 'current' ||
+        claimed.queueState !== 'current' ||
+        !exactCorrelation(claimed, correlation)
+      ) return
+      // Arm the durable lease before runtime lookup or child/policy checks. If
+      // dispatch cannot bind the inbox, expiry still revokes this current claim
+      // and a later dispatcher pass can make progress.
+      try {
+        await this.deps.deliveryDispatch.scheduleCurrent?.(claimed)
+      } catch {
+        this.log('delivery-persistence-failed')
+      }
+      const locus = await this.resolveLocus(correlation.endpoint, {
+        kind: 'message',
+        messageId: claimed.messageId,
+        endpoint: { ...correlation.endpoint },
+        chatType: 'group',
+        senderOpenId: claimed.senderOpenId ?? '',
+        text: claimed.text ?? '',
+        replyTarget: { ...claimed.feedbackTarget },
+        ...(claimed.replyToMessageId === undefined ? {} : { replyToMessageId: claimed.replyToMessageId }),
+        ...(claimed.acceptedAt === undefined ? {} : { createdAt: claimed.acceptedAt }),
+      }, false, this.signal)
+      if (
+        locus === undefined ||
+        locus.childSessionId !== claimed.childSessionId ||
+        locus.generation !== claimed.generation ||
+        locusIdOf(locus) !== claimed.locusId ||
+        !nonEmpty(claimed.senderOpenId) ||
+        !nonEmpty(claimed.text)
+      ) {
+        this.log('dispatch-state-unknown')
+        return
+      }
+      let child: LocusChildIdentity
+      try {
+        child = await this.deps.child.ensureChild(locus, this.signal)
+      } catch {
+        this.log('child-unavailable')
+        return
+      }
+      if (
+        child.parentSessionId !== locus.parentSessionId ||
+        child.childSessionId !== claimed.childSessionId
+      ) {
+        this.log('child-identity-mismatch')
+        return
+      }
+      const policy = await this.verifyLivePolicy(locus, child, this.signal)
+      if (!policy.ok) {
+        this.log('policy-drift')
+        return
+      }
+      const result = await this.queueClaimedDelivery({
+        locus,
+        child,
+        record: claimed,
+        message: {
+          kind: 'message',
+          messageId: claimed.messageId,
+          endpoint: { ...correlation.endpoint },
+          chatType: 'group',
+          senderOpenId: claimed.senderOpenId,
+          ...(claimed.senderName === undefined ? {} : { senderName: claimed.senderName }),
+          text: claimed.text,
+          replyTarget: { ...claimed.feedbackTarget },
+          ...(claimed.replyToMessageId === undefined ? {} : { replyToMessageId: claimed.replyToMessageId }),
+          ...(claimed.acceptedAt === undefined ? {} : { createdAt: claimed.acceptedAt }),
+        },
+        signal: this.signal,
+      })
+    })
+  }
+
   dispose(): void {
     try {
       this.unsubscribe?.()
@@ -720,6 +895,7 @@ export class LocusChannelController {
       // Host teardown is fail-soft and never sends a parent/business message.
     }
     this.pending.clear()
+    this.dispatchTails.clear()
     this.observerReady = false
   }
 
@@ -744,7 +920,11 @@ export class LocusChannelController {
     if (!this.available) return this.refuse('turn-correlation-unavailable')
     if (this.signal.aborted) return this.refuse('aborted')
     if (admission.kind === 'rejected') {
-      this.log('admission-rejected')
+      // Report the exact reason: a bare `admission-rejected` makes a genuine
+      // non-mention indistinguishable from a watermark, dedup or authorization
+      // problem, which is precisely the ambiguity that made a live refusal
+      // impossible to diagnose from the log alone.
+      this.log(`admission-rejected:${admission.reason}`)
       return { kind: 'ignored', reason: admission.reason }
     }
     if (admission.kind === 'control') {
@@ -812,30 +992,34 @@ export class LocusChannelController {
       ...(message.replyToMessageId !== undefined ? { replyToMessageId: message.replyToMessageId } : {}),
     }
 
-    // Probe the durable message index before resolving/queueing a duplicate.
-    // The atomic accept below remains authoritative for concurrent deliveries;
-    // this early check only prevents avoidable child side effects on replay.
-    if (this.deps.deliveries.findByMessageId !== undefined) {
-      let existing: DeliveryRecord | undefined
-      try {
-        existing = await this.deps.deliveries.findByMessageId.call(
-          this.deps.deliveries,
-          message.messageId,
-        )
-      } catch {
-        return this.refuse('delivery-persistence-failed')
-      }
-      if (existing !== undefined) {
-        if (!exactCorrelation(existing, correlation)) return this.refuse('delivery-conflict')
-        this.log('duplicate-delivery')
-        return {
-          kind: 'duplicate',
-          deliveryId: existing.deliveryId,
-          locusId: existing.locusId,
-          generation: existing.generation,
+    // Serialize the durable acceptance and any physical dispatch per exact lane.
+    // Resolution/adoption/policy checks above are read-only; the acceptance and
+    // queue side effect below must not overlap for one locus in this Host.
+    return this.enqueueDispatchLane(correlation, async () => {
+      // Probe the durable message index before resolving/queueing a duplicate.
+      // The atomic accept below remains authoritative for concurrent deliveries;
+      // this early check only prevents avoidable child side effects on replay.
+      if (this.deps.deliveries.findByMessageId !== undefined) {
+        let existing: DeliveryRecord | undefined
+        try {
+          existing = await this.deps.deliveries.findByMessageId.call(
+            this.deps.deliveries,
+            message.messageId,
+          )
+        } catch {
+          return this.refuse('delivery-persistence-failed')
+        }
+        if (existing !== undefined) {
+          if (!exactCorrelation(existing, correlation)) return this.refuse('delivery-conflict')
+          this.log('duplicate-delivery')
+          return {
+            kind: 'duplicate',
+            deliveryId: existing.deliveryId,
+            locusId: existing.locusId,
+            generation: existing.generation,
+          }
         }
       }
-    }
 
     let accepted: LocusDeliveryAcceptance
     try {
@@ -855,6 +1039,66 @@ export class LocusChannelController {
         locusId: accepted.record.locusId,
         generation: accepted.record.generation,
       }
+    }
+
+    // Acceptance is the durable admission boundary. Only the composed dispatcher
+    // may authorize an inbox injection; a busy locus leaves this row in backlog.
+    // There is intentionally no eager compatibility path in the production
+    // controller: one-current FIFO is a safety invariant, not an optimization.
+    const dispatch = this.deps.deliveryDispatch
+    if (dispatch === undefined) return this.refuse('dispatch-state-unknown')
+    if (dispatch.claimCurrent !== undefined) {
+      let claimed: DeliveryRecord | undefined
+      try {
+        claimed = await dispatch.claimCurrent({
+          correlation,
+          deliveryId: accepted.record.deliveryId,
+          now: this.now(),
+        })
+      } catch {
+        return this.refuse('delivery-persistence-failed')
+      }
+      if (claimed === undefined) {
+        await this.receiptAccepted(accepted.record.feedbackTarget)
+        return {
+          kind: 'accepted',
+          deliveryId: accepted.record.deliveryId,
+          executionId: '',
+          locusId: accepted.record.locusId,
+          generation: accepted.record.generation,
+        }
+      }
+      // A dispatcher result is a physical-dispatch authorization only when it
+      // is the exact accepted row and a durable current claim. Never queue the
+      // accepted row after a custom adapter returns another row.
+      if (
+        claimed.deliveryId !== accepted.record.deliveryId ||
+        !exactCorrelation(claimed, correlation) ||
+        claimed.status !== 'current' ||
+        claimed.queueState !== 'current'
+      ) return this.refuse('dispatch-state-unknown')
+      return this.queueClaimedDelivery({ locus, child, record: claimed, message, signal })
+    } else if (dispatch.hasCurrent !== undefined) {
+      // A read-only probe cannot establish a durable one-current invariant.
+      // Keep compatibility adapters backlog-only rather than risking a second
+      // inbox injection; production composes claimCurrent below.
+      let occupied: boolean
+      try {
+        occupied = await dispatch.hasCurrent(correlation)
+      } catch {
+        return this.refuse('delivery-persistence-failed')
+      }
+      if (occupied) {
+        await this.receiptAccepted(accepted.record.feedbackTarget)
+        return {
+          kind: 'accepted',
+          deliveryId: accepted.record.deliveryId,
+          executionId: '',
+          locusId: accepted.record.locusId,
+          generation: accepted.record.generation,
+        }
+      }
+      return this.refuse('dispatch-state-unknown')
     }
 
     // The token is generated before queueing and registered before queueing, so
@@ -936,23 +1180,13 @@ export class LocusChannelController {
     // A queue refusal or bind failure must not leave an in-progress reaction.
     await this.receiptAccepted(bound.feedbackTarget ?? pending.target)
     pending.dispatching = false
-    // Queue acceptance is now durably established. Drain all facts recorded by
-    // synchronous observer callbacks in their serialized order before returning.
+    // Queue acceptance is now durably established. Drain any exact started-turn
+    // evidence recorded synchronously during queueing. `completed`/`failed`
+    // observer events are diagnostics only and never settle the Delivery.
     await pending.operation
-    if (pending.conflicted) {
-      this.log('settlement-ignored')
-      return {
-        kind: 'accepted',
-        deliveryId: bound.deliveryId,
-        executionId: pending.executionId,
-        locusId: bound.locusId,
-        generation: bound.generation,
-      }
-    }
-    const observedTurnId = pending.startedTurnId ?? pending.terminal?.turnId
-    if (observedTurnId !== undefined) await this.bindObservedTurn(pending, observedTurnId)
-    if (pending.terminal !== undefined && pending.terminal.turnId === observedTurnId) {
-      await this.settleObservedTerminal(pending, pending.terminal)
+    if (pending.conflicted) this.log('settlement-ignored')
+    if (pending.startedTurnId !== undefined) {
+      await this.bindObservedTurn(pending, pending.startedTurnId)
     }
     return {
       kind: 'accepted',
@@ -961,6 +1195,128 @@ export class LocusChannelController {
       locusId: bound.locusId,
       generation: bound.generation,
     }
+    })
+  }
+
+  /**
+   * Queue one acceptance/dispatch operation behind the prior operation for the
+   * exact locus generation. This is intentionally process-local: durable
+   * current claiming still belongs to the repository/dispatcher seam.
+   */
+  private async queueClaimedDelivery(input: {
+    readonly locus: ActiveLocus
+    readonly child: LocusChildIdentity
+    readonly record: DeliveryRecord
+    readonly message: NormalizedLocusMessage
+    readonly signal: AbortSignal
+  }): Promise<LocusControllerResult> {
+    const executionId = randomUUID()
+    const correlation: DeliveryCorrelation = {
+      endpoint: input.record.endpoint,
+      locusId: input.record.locusId,
+      generation: input.record.generation,
+      childSessionId: input.record.childSessionId,
+    }
+    const pending: PendingTurn = {
+      deliveryId: input.record.deliveryId,
+      executionId,
+      correlation,
+      target: input.record.feedbackTarget,
+      dispatching: true,
+    }
+    this.pending.set(pending.deliveryId, pending)
+    let queued:
+      | { readonly accepted: true; readonly executionId: string; readonly inboxMessageId: string }
+      | { readonly accepted: false; readonly reason: string }
+    try {
+      queued = await this.deps.child.queueChild({
+        locus: input.locus,
+        child: input.child,
+        deliveryId: pending.deliveryId,
+        executionId,
+        prompt: this.deps.renderPrompt?.({ locus: input.locus, message: input.message }) ?? input.message.text,
+        replyTarget: input.message.replyTarget,
+        signal: input.signal,
+      })
+    } catch {
+      this.pending.delete(pending.deliveryId)
+      return this.dispatchUnknown(pending)
+    }
+    if (!isRecord(queued) || queued.accepted !== true) {
+      this.pending.delete(pending.deliveryId)
+      const reason = isRecord(queued) && typeof queued.reason === 'string' ? queued.reason : 'queue-refused'
+      return this.definitiveQueueFailure(pending, reason)
+    }
+    if (!nonEmpty(queued.executionId) || queued.executionId.trim() !== executionId || !nonEmpty(queued.inboxMessageId)) {
+      this.pending.delete(pending.deliveryId)
+      return this.dispatchUnknown(pending)
+    }
+    let bound: DeliveryRecord | undefined
+    try {
+      bound = await this.deps.deliveries.bindQueued({
+        deliveryId: pending.deliveryId,
+        correlation,
+        executionId,
+        inboxMessageId: queued.inboxMessageId.trim(),
+        queuedAt: this.now(),
+      })
+    } catch {
+      this.pending.delete(pending.deliveryId)
+      return this.dispatchUnknown(pending)
+    }
+    if (
+      bound === undefined ||
+      bound.deliveryId !== pending.deliveryId ||
+      !exactCorrelation(bound, correlation) ||
+      bound.status !== 'current' ||
+      bound.queueState !== 'current'
+    ) {
+      this.pending.delete(pending.deliveryId)
+      return this.dispatchUnknown(pending)
+    }
+    try {
+      this.deps.turns?.deliveryAvailable?.({
+        childSessionId: bound.childSessionId,
+        messageId: queued.inboxMessageId.trim(),
+      })
+    } catch {
+      this.log('settlement-ignored')
+    }
+    await this.receiptAccepted(bound.feedbackTarget)
+    try {
+      await this.deps.deliveryDispatch.scheduleCurrent?.(bound)
+    } catch {
+      this.log('delivery-persistence-failed')
+    }
+    pending.dispatching = false
+    await pending.operation
+    if (pending.conflicted) this.log('settlement-ignored')
+    if (pending.startedTurnId !== undefined) await this.bindObservedTurn(pending, pending.startedTurnId)
+    return {
+      kind: 'accepted',
+      deliveryId: bound.deliveryId,
+      executionId,
+      locusId: bound.locusId,
+      generation: bound.generation,
+    }
+  }
+
+  private enqueueDispatchLane<T>(
+    correlation: DeliveryCorrelation,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const key = dispatchLaneKey(correlation)
+    const previous = this.dispatchTails.get(key) ?? Promise.resolve()
+    const current = previous.then(operation, operation)
+    const tail = current.then(
+      () => undefined,
+      () => undefined,
+    )
+    this.dispatchTails.set(key, tail)
+    void tail.then(() => {
+      if (this.dispatchTails.get(key) === tail) this.dispatchTails.delete(key)
+    })
+    return current
   }
 
   private async verifyLivePolicy(
@@ -1160,7 +1516,7 @@ export class LocusChannelController {
       }
       if (
         durable !== undefined &&
-        (durable.status === 'queued' || durable.status === 'running') &&
+        (durable.status === 'queued' || durable.status === 'running' || durable.status === 'current') &&
         durable.executionId === event.executionId &&
         exactCorrelation(durable, event.correlation)
       ) {
@@ -1183,45 +1539,26 @@ export class LocusChannelController {
       this.log('settlement-ignored')
       return
     }
+    // `turn/end` is execution evidence only. It is deliberately ignored below;
+    // keeping the exact pending record allows a later parent/agent-message turn
+    // to continue the same current Delivery.
     const operation = async (): Promise<void> => {
-      const turnId = event.turnId.trim()
-      if (event.phase === 'started') {
-        if (pending.startedTurnId !== undefined && pending.startedTurnId !== turnId) {
-          pending.conflicted = true
-          this.log('settlement-ignored')
-          return
-        }
-        if (pending.terminal !== undefined && pending.terminal.turnId !== turnId) {
-          pending.conflicted = true
-          this.log('settlement-ignored')
-          return
-        }
-        // While dispatching, observer facts are only buffered. Persisting a
-        // turn before bindQueued would make the later queue bind ambiguous.
-        pending.startedTurnId = turnId
-        if (!pending.dispatching) await this.bindObservedTurn(pending, turnId)
+      // A model turn is only execution evidence. It never completes the
+      // locus-level Delivery; only the explicit finish operation may do that.
+      if (event.phase !== 'started') {
+        this.log('settlement-ignored')
         return
       }
+      const turnId = event.turnId.trim()
       if (pending.startedTurnId !== undefined && pending.startedTurnId !== turnId) {
         pending.conflicted = true
         this.log('settlement-ignored')
         return
       }
-      if (pending.terminal !== undefined &&
-          (pending.terminal.turnId !== turnId || pending.terminal.phase !== event.phase)) {
-        pending.conflicted = true
-        this.log('settlement-ignored')
-        return
-      }
-      pending.terminal = {
-        phase: event.phase,
-        turnId,
-        ...(event.reason !== undefined ? { reason: event.reason } : {}),
-      }
-      if (!pending.dispatching) {
-        await this.bindObservedTurn(pending, turnId)
-        await this.settleObservedTerminal(pending, pending.terminal)
-      }
+      // While dispatching, observer facts are only buffered. Persisting a turn
+      // before bindQueued would make the later queue bind ambiguous.
+      pending.startedTurnId = turnId
+      if (!pending.dispatching) await this.bindObservedTurn(pending, turnId)
     }
     const previous = pending.operation ?? Promise.resolve()
     pending.operation = previous.then(operation, operation)
@@ -1249,39 +1586,6 @@ export class LocusChannelController {
     }
   }
 
-  private async settleObservedTerminal(pending: PendingTurn, terminal: PendingTerminal): Promise<void> {
-    if (pending.conflicted) return
-    if (pending.startedTurnId !== undefined && pending.startedTurnId !== terminal.turnId) return
-    const turnCorrelation: DeliveryTurnCorrelation = {
-      ...pending.correlation,
-      turnId: terminal.turnId,
-    }
-    let settled: {
-      readonly changed: boolean
-      readonly record: DeliveryRecord | undefined
-      readonly reason?: string
-    }
-    try {
-      settled = await this.deps.deliveries.settleByTurn({
-        deliveryId: pending.deliveryId,
-        executionId: pending.executionId,
-        correlation: turnCorrelation,
-        outcome: terminal.phase === 'failed' ? 'failed' : 'settled',
-        settledAt: this.now(),
-        ...(terminal.reason !== undefined ? { failureReason: terminal.reason } : {}),
-      })
-    } catch {
-      this.log('settlement-ignored')
-      return
-    }
-    if (!settled.changed) return
-    this.pending.delete(pending.deliveryId)
-    await this.receiptSettled(
-      settled.record?.feedbackTarget ?? pending.target,
-      terminal.phase === 'failed' ? 'failed' : 'settled',
-    )
-  }
-
   private async definitiveQueueFailure(pending: PendingTurn, reason: string): Promise<LocusControllerResult> {
     if (this.deps.deliveries.fail === undefined) {
       return this.dispatchUnknown(pending)
@@ -1302,6 +1606,28 @@ export class LocusChannelController {
       return this.dispatchUnknown(pending)
     }
     await this.receiptSettled(pending.target, 'failed')
+    // A definitive pre-dispatch refusal on a durably claimed current must
+    // still advance the locus: without this, a queue/bind refusal on the
+    // physical-dispatch fence would strand every later backlog Delivery until
+    // the (unreachable, since the row is now terminal) deadline timer fires.
+    //
+    // This method always runs INSIDE `enqueueDispatchLane` for this exact
+    // correlation (both callers hold it), and `dispatchNext` re-enters the
+    // very same per-locus lane. Awaiting it here would deadlock: the lane's
+    // queued continuation could only run after this operation returns, and
+    // this operation is awaiting that continuation. Detach it instead so it
+    // is scheduled behind the current lane operation without blocking on it.
+    try {
+      this.deps.deliveryDispatch.currentFinished?.({
+        deliveryId: pending.deliveryId,
+        correlation: pending.correlation,
+      })
+      void Promise.resolve(this.deps.deliveryDispatch.dispatchNext?.(pending.correlation)).catch(() => {
+        this.log('delivery-persistence-failed')
+      })
+    } catch {
+      this.log('delivery-persistence-failed')
+    }
     this.log('queue-failed')
     return { kind: 'refused', reason: 'queue-failed' }
   }

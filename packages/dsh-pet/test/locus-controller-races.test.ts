@@ -14,13 +14,12 @@ import {
   acceptDelivery,
   bindQueued,
   bindTurn,
+  claimCurrentDelivery,
   createDeliveryLedger,
-  settleByTurn,
   type DeliveryAcceptance,
   type DeliveryCorrelation,
   type DeliveryLedgerState,
   type DeliveryRecord,
-  type DeliveryTurnCorrelation,
 } from '../src/host/locus/delivery.js'
 import type { LocusReplyTarget } from '../src/host/locus/context.js'
 
@@ -59,23 +58,34 @@ class SynchronousTurnObserver {
 
 /**
  * A storage-shaped ledger backed by the pure Delivery state machine. Keeping
- * this seam real catches controller tests that accidentally skip a transition
- * or settle without first persisting the queue/turn proof.
+ * this seam real catches controller tests that accidentally skip a
+ * transition or dispatch without first persisting the queue proof.
+ *
+ * This also implements the durable current-claim seam
+ * (`claimCurrent`/`currentFinished`/`dispatchNext`/`scheduleCurrent`)
+ * required by `LocusControllerDeps.deliveryDispatch` in production: the
+ * controller refuses admission with `dispatch-state-unknown` when that
+ * dependency is absent, so every fixture in this file must supply it.
  */
 class MemoryDeliveryLedger {
   state: DeliveryLedgerState = createDeliveryLedger()
   readonly calls: string[] = []
   readonly history: DeliveryRecord[] = []
+  readonly scheduled: DeliveryRecord[] = []
 
   findByMessageId(messageId: string): DeliveryRecord | undefined {
     return this.state.byMessageId[messageId]
+  }
+
+  getById(deliveryId: string): DeliveryRecord | undefined {
+    return this.state.byDeliveryId[deliveryId]
   }
 
   accept(input: Parameters<typeof acceptDelivery>[1]): DeliveryAcceptance {
     this.calls.push('accept')
     const mutation = acceptDelivery(this.state, input)
     this.state = mutation.state
-    this.history.push(mutation.record)
+    if (!mutation.duplicate) this.history.push(mutation.record)
     return mutation
   }
 
@@ -128,7 +138,14 @@ class MemoryDeliveryLedger {
   }): boolean {
     this.calls.push('fail')
     const current = this.state.byDeliveryId[input.deliveryId]
-    if (current === undefined || current.status !== 'accepted') return false
+    // Matches production `failBeforeDispatch`: a definitive pre-dispatch
+    // refusal is valid from `accepted`, `queued`, OR a durably claimed
+    // `current` row (this fixture's `claimCurrent` promotes accepted ->
+    // current before `queueChild` is even attempted).
+    if (
+      current === undefined ||
+      (current.status !== 'accepted' && current.status !== 'queued' && current.status !== 'current')
+    ) return false
     if (
       current.locusId !== input.correlation.locusId ||
       current.generation !== input.correlation.generation ||
@@ -136,10 +153,11 @@ class MemoryDeliveryLedger {
       current.endpoint.chatId !== input.correlation.endpoint.chatId ||
       current.endpoint.threadId !== input.correlation.endpoint.threadId
     ) return false
+    const { queueState: _queueState, ...withoutQueueState } = current
     const failed = Object.freeze({
-      ...current,
+      ...withoutQueueState,
       status: 'failed' as const,
-      dispatchFailure: 'not-queued' as const,
+      dispatchFailure: current.status === 'queued' ? 'queued-not-started' as const : 'not-queued' as const,
       failureReason: input.reason,
       failedAt: 100,
     })
@@ -152,30 +170,34 @@ class MemoryDeliveryLedger {
     return true
   }
 
-  settleByTurn(input: {
-    readonly deliveryId: string
-    readonly executionId: string
-    readonly correlation: DeliveryTurnCorrelation
-    readonly outcome: 'settled' | 'failed'
-    readonly settledAt: number
-    readonly failureReason?: string
-  }): {
-    changed: boolean
-    record?: DeliveryRecord
-    reason?: string
-  } {
-    this.calls.push('settleByTurn')
-    const mutation = settleByTurn(this.state, {
-      ...input,
-      turnId: input.correlation.turnId,
+  /** Durable current-claim seam consumed by `LocusControllerDeps.deliveryDispatch`. */
+  claimCurrent(input: {
+    readonly correlation: DeliveryCorrelation
+    readonly deliveryId?: string
+    readonly now: number
+  }): DeliveryRecord | undefined {
+    this.calls.push('claimCurrent')
+    const mutation = claimCurrentDelivery(this.state, {
+      ...input.correlation,
+      now: input.now,
+      ...(input.deliveryId === undefined ? {} : { deliveryId: input.deliveryId }),
     })
     this.state = mutation.state
-    if (mutation.record !== undefined && mutation.changed) this.history.push(mutation.record)
-    return {
-      changed: mutation.changed,
-      ...(mutation.record !== undefined ? { record: mutation.record } : {}),
-      ...(mutation.reason !== undefined ? { reason: mutation.reason } : {}),
-    }
+    if (mutation.changed && mutation.record !== undefined) this.history.push(mutation.record)
+    return mutation.changed && mutation.record?.status === 'current' ? mutation.record : undefined
+  }
+
+  currentFinished(): void {
+    this.calls.push('currentFinished')
+  }
+
+  async dispatchNext(): Promise<void> {
+    this.calls.push('dispatchNext')
+  }
+
+  scheduleCurrent(record: DeliveryRecord): void {
+    this.calls.push('scheduleCurrent')
+    this.scheduled.push(record)
   }
 }
 
@@ -189,13 +211,12 @@ interface Harness {
   readonly diagnostics: string[]
 }
 
-function correlation(turnId?: string): DeliveryCorrelation | DeliveryTurnCorrelation {
+function correlation(): DeliveryCorrelation {
   return {
     endpoint: ENDPOINT,
     locusId: LOCUS.id!,
     generation: LOCUS.generation,
     childSessionId: LOCUS.childSessionId,
-    ...(turnId !== undefined ? { turnId } : {}),
   }
 }
 
@@ -209,7 +230,7 @@ function eventFor(
     deliveryId: input.deliveryId,
     executionId: input.executionId,
     turnId,
-    correlation: correlation(turnId) as DeliveryTurnCorrelation,
+    correlation: correlation(),
     ...(phase === 'failed' ? { reason: 'child failed' } : {}),
   }
 }
@@ -248,6 +269,22 @@ function controlAdmission(command: LocusControlCommand = { kind: 'scope', mode: 
   }
 }
 
+/** Base deps shared by every fixture in this file; override per-test as needed. */
+function baseDeps(ledger: MemoryDeliveryLedger, observer: SynchronousTurnObserver): Pick<
+  LocusControllerDeps,
+  'locus' | 'deliveries' | 'deliveryDispatch' | 'turns'
+> {
+  return {
+    locus: {
+      resolveCurrent: () => LOCUS,
+      ensureForDelivery: () => LOCUS,
+    },
+    deliveries: ledger,
+    deliveryDispatch: ledger,
+    turns: observer,
+  }
+}
+
 function makeHarness(
   queue: (
     input: Parameters<LocusChildDeliveryPort['queueChild']>[0],
@@ -274,14 +311,9 @@ function makeHarness(
     },
   }
   const deps: LocusControllerDeps = {
-    locus: {
-      resolveCurrent: () => LOCUS,
-      ensureForDelivery: () => LOCUS,
-    },
-    deliveries: ledger,
+    ...baseDeps(ledger, observer),
     child,
     resolveLivePolicy: () => ({ mode: 'read-only', workspaceRoot: '/repo' }),
-    turns: observer,
     receipts: { markAccepted, markSettled },
     now: (() => {
       let value = 100
@@ -302,7 +334,7 @@ function makeHarness(
 
 describe('LocusChannelController queue/turn races', () => {
   it.each(['started', 'completed', 'failed'] as const)(
-    'buffers a synchronous %s observer event emitted before queue bind',
+    'buffers a synchronous %s observer event emitted before queue bind, which never settles the Delivery',
     async phase => {
       const harness = makeHarness((input, observer) => {
         observer.emit(eventFor(input, phase, 'turn-sync'))
@@ -312,26 +344,31 @@ describe('LocusChannelController queue/turn races', () => {
       const result = await harness.controller.handleAdmission(acceptedAdmission())
 
       expect(result.kind).toBe('accepted')
+      // `claimCurrent` promotes accepted -> current before queueing. Only a
+      // `started` observer event binds the exact turn id; `completed`/`failed`
+      // are diagnostic-only execution evidence and MUST NOT transition the
+      // locus-level Delivery — only `pet_locus_finish` (via
+      // `markDeliveryFinishing`/`completeCurrentDelivery`, not exercised by
+      // this controller-only harness) or deadline expiry may terminate it.
       expect(harness.ledger.calls).toEqual([
-        'accept',
-        'bindQueued',
-        'bindTurn',
-        ...(phase === 'started' ? [] : ['settleByTurn']),
+        'accept', 'claimCurrent', 'bindQueued', 'scheduleCurrent',
+        ...(phase === 'started' ? ['bindTurn'] : []),
       ])
       expect(harness.ledger.history.map(record => record.status)).toEqual([
-        'accepted',
-        'queued',
-        'running',
-        ...(phase === 'started' ? [] : [phase === 'completed' ? 'settled' : 'failed']),
+        'accepted', 'current', 'current',
+        ...(phase === 'started' ? ['current'] : []),
       ])
+      expect(harness.ledger.state.byDeliveryId['delivery-1']?.status).toBe('current')
       expect(harness.markAccepted).toHaveBeenCalledOnce()
-      if (phase === 'started') expect(harness.markSettled).not.toHaveBeenCalled()
-      else expect(harness.markSettled).toHaveBeenCalledWith(REPLY_TARGET, phase === 'completed' ? 'settled' : 'failed')
+      // Only durable acceptance produces a receipt; observer phase is not a
+      // business settlement and therefore never produces a settled receipt.
+      expect(harness.markSettled).not.toHaveBeenCalled()
+      if (phase !== 'started') expect(harness.diagnostics).toContain('settlement-ignored')
     },
   )
 
   it.each(['completed', 'failed'] as const)(
-    'handles terminal-%s-before-start without losing the exact turn',
+    'handles terminal-%s-before-start without losing the exact turn, and still does not settle the Delivery',
     async phase => {
       const harness = makeHarness((input, observer) => {
         observer.emit(eventFor(input, phase, 'turn-terminal-first'))
@@ -342,17 +379,13 @@ describe('LocusChannelController queue/turn races', () => {
       await expect(harness.controller.handleAdmission(acceptedAdmission())).resolves.toMatchObject({
         kind: 'accepted',
       })
-      expect(harness.ledger.history.map(record => record.status)).toEqual([
-        'accepted',
-        'queued',
-        'running',
-        phase === 'completed' ? 'settled' : 'failed',
-      ])
+      expect(harness.ledger.state.byDeliveryId['delivery-1']?.status).toBe('current')
       expect(harness.ledger.state.byDeliveryId['delivery-1']?.turnId).toBe('turn-terminal-first')
+      expect(harness.markSettled).not.toHaveBeenCalled()
     },
   )
 
-  it('blocks settlement when observer evidence contains conflicting turn ids', async () => {
+  it('keeps the Delivery current when observer evidence contains conflicting turn ids', async () => {
     const harness = makeHarness((input, observer) => {
       observer.emit(eventFor(input, 'started', 'turn-a'))
       observer.emit(eventFor(input, 'completed', 'turn-b'))
@@ -362,8 +395,12 @@ describe('LocusChannelController queue/turn races', () => {
     const result = await harness.controller.handleAdmission(acceptedAdmission())
 
     expect(result.kind).toBe('accepted')
-    expect(harness.ledger.calls).toEqual(['accept', 'bindQueued'])
-    expect(harness.ledger.state.byDeliveryId['delivery-1']?.status).toBe('queued')
+    // `turn-a` (`started`) binds successfully; the later `completed` event
+    // names a DIFFERENT turn id and is rejected as conflicting evidence
+    // rather than silently overwriting the bound turn.
+    expect(harness.ledger.calls).toEqual(['accept', 'claimCurrent', 'bindQueued', 'scheduleCurrent', 'bindTurn'])
+    expect(harness.ledger.state.byDeliveryId['delivery-1']?.turnId).toBe('turn-a')
+    expect(harness.ledger.state.byDeliveryId['delivery-1']?.status).toBe('current')
     expect(harness.markSettled).not.toHaveBeenCalled()
     expect(harness.diagnostics).toContain('settlement-ignored')
   })
@@ -383,13 +420,13 @@ describe('LocusChannelController queue/turn races', () => {
     await expect(harness.controller.handleAdmission(acceptedAdmission())).resolves.toMatchObject({
       kind: 'accepted',
     })
-    expect(harness.ledger.calls).toEqual(['accept', 'bindQueued'])
-    expect(harness.ledger.state.byDeliveryId['delivery-1']?.status).toBe('queued')
+    expect(harness.ledger.calls).toEqual(['accept', 'claimCurrent', 'bindQueued', 'scheduleCurrent'])
+    expect(harness.ledger.state.byDeliveryId['delivery-1']?.status).toBe('current')
     expect(harness.markSettled).not.toHaveBeenCalled()
     expect(harness.diagnostics).toContain('settlement-ignored')
   })
 
-  it('persists exactly accepted -> queued -> running -> settled across the bind race', async () => {
+  it('persists exactly accepted -> current -> queued -> running across the bind race, with no auto-settlement', async () => {
     const harness = makeHarness((input, observer) => {
       observer.emit(eventFor(input, 'started', 'turn-exact'))
       observer.emit(eventFor(input, 'completed', 'turn-exact'))
@@ -399,19 +436,17 @@ describe('LocusChannelController queue/turn races', () => {
       kind: 'accepted',
     })
 
-    // The observer may ask for an idempotent bind/settle retry while the
-    // controller drains facts captured during queueing. The durable history,
-    // rather than the number of retry calls, is the exact state-machine proof.
+    // The observer may ask for an idempotent bind retry while the controller
+    // drains facts captured during queueing. The durable history, rather than
+    // the number of retry calls, is the exact state-machine proof.
     expect(harness.ledger.calls.filter(call => call === 'bindQueued')).toHaveLength(1)
     expect(harness.ledger.history.map(record => record.status)).toEqual([
-      'accepted',
-      'queued',
-      'running',
-      'settled',
+      'accepted', 'current', 'current', 'current',
     ])
-    const [, queued, running, settled] = harness.ledger.history
-    expect(queued?.queuedAt).toBeLessThan(running?.startedAt ?? Number.POSITIVE_INFINITY)
-    expect(running?.startedAt).toBeLessThan(settled?.settledAt ?? Number.POSITIVE_INFINITY)
+    const record = harness.ledger.state.byDeliveryId['delivery-1']
+    expect(record?.status).toBe('current')
+    expect(record?.turnId).toBe('turn-exact')
+    expect(record?.queuedAt).toBeLessThanOrEqual(record?.startedAt ?? Number.POSITIVE_INFINITY)
   })
 })
 
@@ -427,8 +462,7 @@ describe('LocusChannelController live policy gate', () => {
     const marked = vi.fn()
     const invalidate = vi.fn()
     const controller = new LocusChannelController({
-      locus: { resolveCurrent: () => LOCUS, ensureForDelivery: () => LOCUS },
-      deliveries: ledger,
+      ...baseDeps(ledger, observer),
       child: {
         ensureChild: () => ({ parentSessionId: LOCUS.parentSessionId, childSessionId: LOCUS.childSessionId }),
         withChildSession: async input => ({ ok: true as const, value: await input.operation({ id: LOCUS.childSessionId }) }),
@@ -436,7 +470,6 @@ describe('LocusChannelController live policy gate', () => {
       },
       resolveLivePolicy: () => live,
       invalidatePolicyDrift: invalidate,
-      turns: observer,
       receipts: { markAccepted: marked, markSettled: vi.fn() },
     })
 
@@ -464,8 +497,8 @@ describe('LocusChannelController live policy gate', () => {
     const marked = vi.fn()
     const persisted: string[] = []
     const controller = new LocusChannelController({
+      ...baseDeps(ledger, observer),
       locus: { resolveCurrent: () => writeLocus, ensureForDelivery: () => writeLocus },
-      deliveries: ledger,
       child: {
         ensureChild: () => ({ parentSessionId: writeLocus.parentSessionId, childSessionId: writeLocus.childSessionId }),
         withChildSession: async input => ({ ok: true as const, value: await input.operation({ id: writeLocus.childSessionId }) }),
@@ -473,7 +506,6 @@ describe('LocusChannelController live policy gate', () => {
       },
       resolveLivePolicy: () => ({ mode: 'workspace-write', workspaceRoot: '/other' }),
       invalidatePolicyDrift: ({ reason }) => { persisted.push(reason) },
-      turns: observer,
       receipts: { markAccepted: marked, markSettled: vi.fn() },
     })
 
@@ -496,16 +528,11 @@ describe('LocusChannelController control commands', () => {
     }))
     const receipts = vi.fn()
     const controller = new LocusChannelController({
-      locus: {
-        resolveCurrent: () => LOCUS,
-        ensureForDelivery: () => LOCUS,
-      },
-      deliveries: harness.ledger,
+      ...baseDeps(harness.ledger, harness.observer),
       child: {
         ensureChild: () => ({ parentSessionId: LOCUS.parentSessionId, childSessionId: LOCUS.childSessionId }),
         queueChild: input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }),
       },
-      turns: harness.observer,
       controlDispatch: { dispatch },
       receipts: { sendControl: receipts },
     })
@@ -534,13 +561,12 @@ describe('LocusChannelController control commands', () => {
     const harness = makeHarness(input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }))
     const dispatch = vi.fn(async () => ({ ok: true as const, text: 'rebuilt read locus' }))
     const controller = new LocusChannelController({
+      ...baseDeps(harness.ledger, harness.observer),
       locus: { resolveCurrent: () => undefined, ensureForDelivery: () => LOCUS },
-      deliveries: harness.ledger,
       child: {
         ensureChild: () => ({ parentSessionId: LOCUS.parentSessionId, childSessionId: LOCUS.childSessionId }),
         queueChild: input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }),
       },
-      turns: harness.observer,
       controlDispatch: { dispatch },
     })
 
@@ -563,13 +589,11 @@ describe('LocusChannelController control commands', () => {
     const dispatch = vi.fn(async () => ({ ok: true as const, text: `${command.kind} applied` }))
     const receipts = vi.fn()
     const controller = new LocusChannelController({
-      locus: { resolveCurrent: () => LOCUS, ensureForDelivery: () => LOCUS },
-      deliveries: harness.ledger,
+      ...baseDeps(harness.ledger, harness.observer),
       child: {
         ensureChild: () => ({ parentSessionId: LOCUS.parentSessionId, childSessionId: LOCUS.childSessionId }),
         queueChild: input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }),
       },
-      turns: harness.observer,
       controlDispatch: { dispatch },
       receipts: { sendControl: receipts },
     })
@@ -592,13 +616,11 @@ describe('LocusChannelController control commands', () => {
     const harness = makeHarness(input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }))
     const receipts = vi.fn()
     const controller = new LocusChannelController({
-      locus: { resolveCurrent: () => LOCUS, ensureForDelivery: () => LOCUS },
-      deliveries: harness.ledger,
+      ...baseDeps(harness.ledger, harness.observer),
       child: {
         ensureChild: () => ({ parentSessionId: LOCUS.parentSessionId, childSessionId: LOCUS.childSessionId }),
         queueChild: input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }),
       },
-      turns: harness.observer,
       controlDispatch: { dispatch: async () => ({ ok: false, reason: 'not-allowed', silent: true }) },
       receipts: { sendControl: receipts },
     })
@@ -613,14 +635,19 @@ describe('LocusChannelController control commands', () => {
     controller.dispose()
   })
 
-  it('durably fails the exact accepted Delivery when queueing definitively refuses', async () => {
+  it('durably fails the exact accepted Delivery when queueing definitively refuses, and advances the locus', async () => {
     const harness = makeHarness(() => ({ accepted: false, reason: 'queue-refused' }))
     const controller = harness.controller
     const result = await controller.handleAdmission(acceptedAdmission())
     expect(result).toMatchObject({ kind: 'refused', reason: 'queue-failed' })
     expect(harness.markAccepted).not.toHaveBeenCalled()
     expect(harness.markSettled).toHaveBeenCalledWith(REPLY_TARGET, 'failed')
-    expect(harness.ledger.calls).toEqual(['accept', 'fail'])
+    // `queueChild` fails immediately, before `bindQueued`/`scheduleCurrent` are
+    // ever reached; `claimCurrent` already promoted the row to `current`, so
+    // `fail` must durably fail it FROM `current` (matching production
+    // `failBeforeDispatch`), then advance the locus so a later backlog row is
+    // not permanently stranded behind this refusal.
+    expect(harness.ledger.calls).toEqual(['accept', 'claimCurrent', 'fail', 'currentFinished', 'dispatchNext'])
     expect(harness.ledger.state.byMessageId['message-race']).toMatchObject({
       status: 'failed', dispatchFailure: 'not-queued', failureReason: 'queue-refused',
     })
@@ -631,13 +658,11 @@ describe('LocusChannelController control commands', () => {
     const harness = makeHarness(input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }))
     const dispatch = vi.fn()
     const controller = new LocusChannelController({
-      locus: { resolveCurrent: () => LOCUS, ensureForDelivery: () => LOCUS },
-      deliveries: harness.ledger,
+      ...baseDeps(harness.ledger, harness.observer),
       child: {
         ensureChild: () => ({ parentSessionId: LOCUS.parentSessionId, childSessionId: LOCUS.childSessionId }),
         queueChild: input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }),
       },
-      turns: harness.observer,
       controlDispatch: { dispatch },
       receipts: { sendControl: vi.fn() },
     })
@@ -658,13 +683,11 @@ describe('LocusChannelController control commands', () => {
     const harness = makeHarness(input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }))
     const dispatch = vi.fn()
     const controller = new LocusChannelController({
-      locus: { resolveCurrent: () => LOCUS, ensureForDelivery: () => LOCUS },
-      deliveries: harness.ledger,
+      ...baseDeps(harness.ledger, harness.observer),
       child: {
         ensureChild: () => ({ parentSessionId: LOCUS.parentSessionId, childSessionId: LOCUS.childSessionId }),
         queueChild: input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }),
       },
-      turns: harness.observer,
       controlDispatch: { dispatch },
       receipts: { sendControl: vi.fn() },
     })
@@ -685,13 +708,11 @@ describe('LocusChannelController control commands', () => {
     const harness = makeHarness(input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }))
     const dispatch = vi.fn()
     const controller = new LocusChannelController({
-      locus: { resolveCurrent: () => LOCUS, ensureForDelivery: () => LOCUS },
-      deliveries: harness.ledger,
+      ...baseDeps(harness.ledger, harness.observer),
       child: {
         ensureChild: () => ({ parentSessionId: LOCUS.parentSessionId, childSessionId: LOCUS.childSessionId }),
         queueChild: input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }),
       },
-      turns: harness.observer,
       controlDispatch: { dispatch },
       receipts: { sendControl: vi.fn() },
     })
@@ -706,5 +727,68 @@ describe('LocusChannelController control commands', () => {
     expect(harness.ledger.calls).toEqual([])
     expect(harness.queueInputs).toHaveLength(0)
     controller.dispose()
+  })
+})
+
+describe('LocusChannelController dispatchNext / currentFinished / scheduleCurrent', () => {
+  it('claims and queues the oldest backlog Delivery after a terminal transition, exactly once', async () => {
+    const harness = makeHarness(input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }))
+    // Seed A as current and B as backlog directly on the durable ledger, the
+    // way persistence would look after A was claimed and B arrived later.
+    const acceptedA = acceptDelivery(harness.ledger.state, {
+      ...correlation(), messageId: 'message-a', acceptedAt: 1, senderOpenId: 'ou-owner', text: 'message a',
+    })
+    const acceptedB = acceptDelivery(acceptedA.state, {
+      ...correlation(), messageId: 'message-b', acceptedAt: 2, senderOpenId: 'ou-owner', text: 'message b',
+    })
+    const claimedA = claimCurrentDelivery(acceptedB.state, { ...correlation(), now: 3 })
+    harness.ledger.state = claimedA.state
+
+    await harness.controller.dispatchNext(correlation())
+
+    // With A still current, dispatchNext must not claim/queue B.
+    expect(harness.queueInputs).toHaveLength(0)
+    expect(harness.ledger.state.byMessageId['message-b']?.status).toBe('accepted')
+
+    // Now finish A through the exact same durable transitions the Host
+    // lifecycle uses, then dispatch again.
+    const finishedA = { ...harness.ledger.state.byDeliveryId[claimedA.record!.deliveryId]! }
+    const finishedState = Object.freeze({ ...finishedA, status: 'replied' as const, queueState: undefined })
+    harness.ledger.state = {
+      ...harness.ledger.state,
+      byDeliveryId: Object.freeze({
+        ...harness.ledger.state.byDeliveryId,
+        [finishedA.deliveryId]: finishedState,
+      }),
+      byMessageId: Object.freeze({
+        ...harness.ledger.state.byMessageId,
+        [finishedA.messageId]: finishedState,
+      }),
+    }
+
+    await harness.controller.dispatchNext(correlation())
+    expect(harness.queueInputs).toHaveLength(1)
+    expect(harness.queueInputs[0]?.deliveryId).toBe(acceptedB.record.deliveryId)
+    expect(harness.ledger.state.byDeliveryId[acceptedB.record.deliveryId]?.status).toBe('current')
+
+    // A second dispatchNext call while B is already current must not queue a
+    // duplicate physical dispatch.
+    await harness.controller.dispatchNext(correlation())
+    expect(harness.queueInputs).toHaveLength(1)
+  })
+
+  it('removes in-memory pending state and never sends business text when currentFinished is called', async () => {
+    const harness = makeHarness(input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }))
+    await harness.controller.handleAdmission(acceptedAdmission())
+    const deliveryId = 'delivery-1'
+
+    harness.controller.currentFinished({ deliveryId, correlation: correlation(), outcome: 'settled' })
+
+    expect(harness.markSettled).toHaveBeenCalledWith(REPLY_TARGET, 'settled')
+    // A second call for the same, already-removed pending entry is a no-op:
+    // it must not emit a duplicate receipt.
+    harness.markSettled.mockClear()
+    harness.controller.currentFinished({ deliveryId, correlation: correlation(), outcome: 'settled' })
+    expect(harness.markSettled).not.toHaveBeenCalled()
   })
 })

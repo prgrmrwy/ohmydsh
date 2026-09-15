@@ -10,6 +10,7 @@
  */
 
 import { endpointKeyOf } from './aggregate.js'
+import type { DeliveryStatus } from './delivery.js'
 
 /** The platform endpoint associated with one locus generation. */
 export interface LocusEndpoint {
@@ -161,7 +162,12 @@ export interface LocusContextRecord {
     readonly locusId: string
     readonly generation: number
     readonly childSessionId: string
-    readonly status?: 'accepted' | 'queued' | 'running' | 'settled' | 'failed'
+    readonly status?: DeliveryStatus
+    readonly queueState?: 'backlog' | 'current'
+    readonly deadlineAt?: number
+    readonly hardDeadlineAt?: number
+    readonly finishOutcome?: 'reply' | 'no-reply'
+    readonly outboundResult?: 'none' | 'success' | 'failure' | 'unknown'
     readonly senderOpenId?: string
     readonly senderName?: string
     readonly text?: string
@@ -336,7 +342,7 @@ export function renderLocusDeliveryPrompt(
     '',
     '### Reply target (current delivery only)',
     ...replyTargetLines(context.endpoint, context.request.replyTarget),
-    '业务正文必须调用当前 child 的 `pet_locus_reply` 工具发送；该工具只接受 text，并由 Host 从本轮 Delivery 绑定目标。不要把业务正文伪装成 Host 控制回执，也不要自行传 chat/message/thread id。',
+    '业务完成必须调用当前 child 的 `pet_locus_finish`：选择 `reply` 并提供非空正文，或选择 `no-reply` 并提供非空原因。普通 assistant 文本、原生 `send_message` 和 `turn/end` 都不完成 Delivery；不得提供 delivery/chat/message/thread target selector。若仍需等待，调用 `pet_locus_wait({ waitMinutes, reason? })`，分钟数相对调用时刻且受 Host 返回的 acceptedAt+24h 硬上限约束。',
     '',
     '### 按需读取',
     '本次 prompt 刻意不携带压平的聊天记录、项目资料、兄弟 child 历史或父会话摘要。需要的资料请通过当前已授权的读取能力按需读取原始内容；收到资料不等于已采纳。',
@@ -382,7 +388,7 @@ function renderSubsequentDeliveryPrompt(context: LocusDeliveryContext): string {
     '',
     '### Reply target (current delivery only)',
     ...replyTargetLines(context.endpoint, context.request.replyTarget),
-    '业务正文必须调用当前 child 的 `pet_locus_reply` 工具发送；该工具只接受 text，并由 Host 从本轮 Delivery 绑定目标。不要把业务正文伪装成 Host 控制回执，也不要自行传 chat/message/thread id。',
+    '业务完成必须调用当前 child 的 `pet_locus_finish`：选择 `reply` 并提供非空正文，或选择 `no-reply` 并提供非空原因。普通 assistant 文本、原生 `send_message` 和 `turn/end` 都不完成 Delivery；不得提供 delivery/chat/message/thread target selector。若仍需等待，调用 `pet_locus_wait({ waitMinutes, reason? })`，分钟数相对调用时刻且受 Host 返回的 acceptedAt+24h 硬上限约束。',
   ]
   return lines.join('\n')
 }

@@ -296,6 +296,12 @@ function validateLocusContextRecord(
       `Current Delivery for child ${childSessionId} does not match its active locus generation.`,
     )
   }
+  if (delivery.status !== undefined && ['accepted', 'queued', 'running', 'current', 'finishing'].includes(delivery.status) === false) {
+    throw new PetError(
+      'NOT_A_PET_SESSION',
+      `Current Delivery for child ${childSessionId} is terminal and cannot be consumed.`,
+    )
+  }
   if (delivery.replyTarget !== undefined && !isSafeLocusReplyTarget(match.endpoint, delivery.replyTarget)) {
     throw new PetError(
       'NOT_A_PET_SESSION',

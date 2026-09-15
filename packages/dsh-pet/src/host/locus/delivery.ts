@@ -52,16 +52,51 @@ export interface DeliveryExecutionProof {
   readonly turnId: string
 }
 
-/** Terminal outcome represented by the Delivery state machine. */
+/** Legacy terminal outcome represented by the original Delivery state machine. */
 export type DeliveryOutcome = 'settled' | 'failed'
 
-/** States of one accepted Delivery. */
+/** Explicit business outcome submitted by the unified finish operation. */
+export type DeliveryFinishOutcome = 'reply' | 'no-reply'
+
+/** Durable result of an outbound business-message attempt. */
+export type DeliveryOutboundResult = 'none' | 'success' | 'failure' | 'unknown'
+/** Explicit terminal variants used by integrations that model outbound state. */
+export const DELIVERY_OUTBOUND_RESULTS = Object.freeze(['none', 'success', 'failure', 'unknown'] as const)
+
+/** Durable queue membership for the additive locus Delivery model. */
+export type DeliveryQueueState = 'backlog' | 'current'
+/** Compatibility spelling for consumers that call this a queue position. */
+export type DeliveryQueuePosition = DeliveryQueueState
+
+/** Default and hard maximum lease lengths for a Delivery. */
+export const DEFAULT_DELIVERY_LEASE_MS = 60 * 60 * 1000
+export const MAX_DELIVERY_LEASE_MS = 24 * 60 * 60 * 1000
+/** Descriptive aliases used by scheduler/persistence integrations. */
+export const DELIVERY_DEFAULT_DEADLINE_MS = DEFAULT_DELIVERY_LEASE_MS
+export const DELIVERY_HARD_DEADLINE_MS = MAX_DELIVERY_LEASE_MS
+
+/** Durable completion/outbound facts for the unified Delivery model. */
+export type DeliveryFinishState = 'reply' | 'no-reply'
+export type DeliveryOutboundState = DeliveryOutboundResult
+
+/** States of one accepted Delivery.
+ *
+ * The first five values are retained for the pre-locus-queue API. The later
+ * values are additive and describe a locus-level Delivery, which is not
+ * completed merely because one child turn ended.
+ */
 export type DeliveryStatus =
   | 'accepted'
   | 'queued'
   | 'running'
   | 'settled'
   | 'failed'
+  | 'current'
+  | 'finishing'
+  | 'replied'
+  | 'no-reply'
+  | 'expired'
+  | 'unknown-terminal'
 
 /** A target derived from the accepted message, never supplied by settlement. */
 export interface DeliveryFeedbackTarget extends DeliveryEndpoint {
@@ -91,6 +126,8 @@ export interface DeliveryInput extends DeliveryCorrelation {
 }
 
 /** One immutable Delivery record. */
+export type DeliveryRecordStatus = DeliveryStatus
+
 export interface DeliveryRecord extends DeliveryCorrelation {
   readonly deliveryId: string
   readonly messageId: string
@@ -123,13 +160,26 @@ export interface DeliveryRecord extends DeliveryCorrelation {
   readonly dispatchFailure?: 'not-queued' | 'queued-not-started'
   /** Monotonic acceptance order, used for FIFO settlement. */
   readonly sequence: number
-  readonly status: DeliveryStatus
+  readonly status: DeliveryRecordStatus
   readonly feedbackTarget: DeliveryFeedbackTarget
+  /** Additive serialized queue/deadline facts. */
+  readonly queueState?: DeliveryQueueState
+  readonly deadlineAt?: number
+  readonly hardDeadlineAt?: number
+  readonly revision?: number
+  readonly stateRevision?: number
+  readonly finishOutcome?: DeliveryFinishState
+  readonly outboundResult?: DeliveryOutboundState
+  readonly outboundAttemptedAt?: number
+  readonly outboundResultAt?: number
+  readonly outboundDiagnostic?: string
   readonly acceptedAt?: number
   readonly queuedAt?: number
   readonly startedAt?: number
   readonly settledAt?: number
   readonly failedAt?: number
+  readonly finishedAt?: number
+  readonly expiredAt?: number
   readonly failureReason?: string
 }
 
@@ -138,6 +188,16 @@ export interface DeliveryLedgerState {
   readonly byMessageId: Readonly<Record<string, DeliveryRecord>>
   readonly byDeliveryId: Readonly<Record<string, DeliveryRecord>>
   readonly nextDeliverySequence: number
+}
+
+/** Return whether a status is a terminal business state. */
+export function isTerminalDeliveryStatus(status: DeliveryStatus): boolean {
+  return TERMINAL_STATUSES.has(status)
+}
+
+/** Return whether a status can still consume/hold a Delivery lease. */
+export function isPendingDeliveryStatus(status: DeliveryStatus): boolean {
+  return PENDING_STATUSES.has(status)
 }
 
 /** Result of accepting a message. Duplicate acceptance returns the old record. */
@@ -150,6 +210,33 @@ export interface DeliveryAcceptance {
   readonly conflict: boolean
 }
 
+/** Claim the oldest backlog item as the one current Delivery for a locus. */
+export interface DeliveryCurrentClaimInput extends DeliveryCorrelation {
+  readonly now: number
+  readonly deliveryId?: string
+  readonly expectedRevision?: number
+}
+
+/** CAS input shared by finish/wait/expiry operations. */
+export interface DeliveryLeaseInput extends DeliveryCorrelation {
+  readonly deliveryId: string
+  readonly now: number
+  readonly expectedRevision?: number
+}
+
+export interface DeliveryWaitInput extends DeliveryLeaseInput {
+  /** Additional minutes from now, never an absolute timestamp. */
+  readonly waitMinutes: number
+}
+
+export interface DeliveryFinishInput extends DeliveryLeaseInput {
+  readonly outcome: DeliveryFinishOutcome
+  readonly outboundResult?: DeliveryOutboundState
+  readonly outboundDiagnostic?: string
+  /** Optional non-sensitive diagnostic for a no-reply completion. */
+  readonly reason?: string
+}
+
 /** Why a state transition was not applied. */
 export type DeliveryMutationReason =
   | 'unknown-delivery'
@@ -160,6 +247,18 @@ export type DeliveryMutationReason =
   | 'execution-proof-required'
   | 'no-pending-delivery'
   | 'inbox-message-conflict'
+  | 'current-occupied'
+  | 'not-oldest'
+  | 'revision-mismatch'
+  | 'deadline-expired'
+  | 'deadline-not-reached'
+  /**
+   * A wait whose requested horizon is already covered by the current lease.
+   * The request is SATISFIED, not refused: the caller may keep working and the
+   * record is deliberately left untouched so no revision is burned.
+   */
+  | 'deadline-already-sufficient'
+  | 'invalid-wait'
 
 /** Result of a progress or settlement operation. */
 export interface DeliveryMutation {
@@ -169,6 +268,237 @@ export interface DeliveryMutation {
   readonly feedbackTarget?: DeliveryFeedbackTarget
   readonly changed: boolean
   readonly reason: DeliveryMutationReason | undefined
+}
+
+function currentForCorrelation(
+  state: DeliveryLedgerState,
+  correlation: DeliveryCorrelation,
+): { readonly record?: DeliveryRecord; readonly ambiguous: boolean } {
+  const matches = Object.values(state.byDeliveryId).filter(record =>
+    record.locusId === correlation.locusId &&
+    record.generation === correlation.generation &&
+    record.childSessionId === correlation.childSessionId &&
+    sameEndpoint(record.endpoint, correlation.endpoint) &&
+    CURRENT_STATUSES.has(record.status),
+  )
+  return matches.length > 1
+    ? { ambiguous: true }
+    : { ambiguous: false, ...(matches[0] === undefined ? {} : { record: matches[0] }) }
+}
+
+/** Promote only the oldest unexpired backlog item when no current exists. */
+export function claimCurrentDelivery(
+  state: DeliveryLedgerState,
+  input: DeliveryCurrentClaimInput,
+): DeliveryMutation {
+  validateCorrelation(input)
+  validateAt(input.now, 'now')
+  if (input.expectedRevision !== undefined &&
+      (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0)) {
+    throw new TypeError('expectedRevision must be a non-negative safe integer')
+  }
+  const existing = currentForCorrelation(state, input)
+  if (existing.ambiguous) return unchanged(state, 'current-occupied')
+  if (existing.record !== undefined) return unchanged(state, 'current-occupied', existing.record)
+  const candidates = Object.values(state.byDeliveryId)
+    .filter(record =>
+      correlates(record, input) && QUEUED_STATUSES.has(record.status),
+    )
+    .sort((left, right) => left.sequence - right.sequence)
+  const next = candidates[0]
+  if (next === undefined) return unchanged(state, 'no-pending-delivery')
+  if (input.deliveryId !== undefined && next.deliveryId !== input.deliveryId) {
+    return unchanged(state, 'not-oldest', next)
+  }
+  const hard = next.hardDeadlineAt ?? ((next.acceptedAt ?? 0) + MAX_DELIVERY_LEASE_MS)
+  // Backlog rows have no active execution deadline; they remain eligible until
+  // the acceptedAt+24h hard cap. Only current rows are governed by deadlineAt.
+  if (input.now >= hard) {
+    return expireDelivery(state, {
+      ...input,
+      deliveryId: next.deliveryId,
+      now: input.now,
+      ...(next.revision === undefined ? {} : { expectedRevision: next.revision }),
+    })
+  }
+  if (input.expectedRevision !== undefined &&
+      (next.revision ?? 0) !== input.expectedRevision) {
+    return unchanged(state, 'revision-mismatch', next)
+  }
+  const record = freezeRecord({
+    ...next,
+    status: 'current',
+    queueState: 'current',
+    revision: nextRevision(next),
+  })
+  return changed(state, record)
+}
+
+/** Enter finishing exactly once before an external reply attempt. */
+export function markFinishing(
+  state: DeliveryLedgerState,
+  input: DeliveryLeaseInput,
+): DeliveryMutation {
+  validateLeaseInput(input)
+  const current = state.byDeliveryId[input.deliveryId]
+  if (current === undefined) return unchanged(state, 'unknown-delivery')
+  if (!correlates(current, input)) return unchanged(state, 'correlation-mismatch', current)
+  if (input.expectedRevision !== undefined && (current.revision ?? 0) !== input.expectedRevision) {
+    return unchanged(state, 'revision-mismatch', current)
+  }
+  if (current.status === 'finishing') return unchanged(state, 'already-in-state', current)
+  if (current.status !== 'current') return unchanged(state, TERMINAL_STATUSES.has(current.status) ? 'already-terminal' : 'invalid-transition', current)
+  if (isDeliveryExpiredAt(current, input.now)) return unchanged(state, 'deadline-expired', current)
+  return changed(state, freezeRecord({
+    ...current,
+    status: 'finishing',
+    // `finishing` is exclusively the pre-send fence for a `reply` outcome: a
+    // `no-reply` completion never leaves `current`. Recording the outcome here
+    // (rather than only at `completeDelivery`) keeps every persisted modern
+    // `finishing` row schema-valid on its own, including across a restart that
+    // observes this row before its terminal completion is written.
+    finishOutcome: 'reply',
+    revision: nextRevision(current),
+    finishedAt: input.now,
+  }))
+}
+
+/** Complete a no-reply or outbound attempt with explicit at-most-once result. */
+export function completeDelivery(
+  state: DeliveryLedgerState,
+  input: DeliveryFinishInput,
+): DeliveryMutation {
+  validateLeaseInput(input)
+  const current = state.byDeliveryId[input.deliveryId]
+  if (current === undefined) return unchanged(state, 'unknown-delivery')
+  if (input.outcome === 'no-reply') {
+    if (input.outboundResult !== undefined && input.outboundResult !== 'none') {
+      return unchanged(state, 'invalid-transition', current)
+    }
+    if (input.reason === undefined || input.reason.trim() === '') {
+      return unchanged(state, 'invalid-transition', current)
+    }
+  } else if (input.outboundResult === undefined || input.outboundResult === 'none') {
+    return unchanged(state, 'invalid-transition', current)
+  }
+  if (!correlates(current, input)) return unchanged(state, 'correlation-mismatch', current)
+  if (input.expectedRevision !== undefined && current.revision !== input.expectedRevision) return unchanged(state, 'revision-mismatch', current)
+  if (TERMINAL_STATUSES.has(current.status)) return unchanged(state, 'already-terminal', current)
+  if (current.status !== 'finishing' && !(input.outcome === 'no-reply' && current.status === 'current')) return unchanged(state, 'invalid-transition', current)
+  // A direct no-reply completion from `current` skips `markFinishing`, which
+  // is the only other place the deadline CAS is enforced. Without this check
+  // a no-reply call could win a finish/expiry race purely by choosing an
+  // outcome that bypasses the pre-send fence, defeating D6's one-winner rule.
+  if (current.status === 'current' && isDeliveryExpiredAt(current, input.now)) {
+    return unchanged(state, 'deadline-expired', current)
+  }
+  const result = input.outboundResult ?? (input.outcome === 'no-reply' ? 'none' : 'unknown')
+  const status: DeliveryStatus = input.outcome === 'no-reply'
+    ? 'no-reply'
+    : result === 'success' ? 'replied' : result === 'unknown' ? 'unknown-terminal' : 'failed'
+  const { queueState: _queueState, ...withoutQueueState } = current
+  const next: DeliveryRecord = {
+    ...withoutQueueState,
+    status,
+    finishOutcome: input.outcome,
+    outboundResult: result,
+    ...(result !== 'none' ? { outboundAttemptedAt: current.finishedAt ?? input.now, outboundResultAt: input.now } : {}),
+    ...(input.outcome === 'no-reply'
+      ? (input.reason === undefined ? {} : { outboundDiagnostic: input.reason })
+      : (input.outboundDiagnostic === undefined ? {} : { outboundDiagnostic: input.outboundDiagnostic })),
+    revision: nextRevision(current),
+  }
+  return changed(state, freezeRecord(next))
+}
+
+/** Expire a current or backlog Delivery; expiry revokes its finish capability. */
+export function expireDelivery(
+  state: DeliveryLedgerState,
+  input: DeliveryLeaseInput,
+): DeliveryMutation {
+  validateLeaseInput(input)
+  const current = state.byDeliveryId[input.deliveryId]
+  if (current === undefined) return unchanged(state, 'unknown-delivery')
+  if (!correlates(current, input)) return unchanged(state, 'correlation-mismatch', current)
+  if (input.expectedRevision !== undefined && current.revision !== input.expectedRevision) return unchanged(state, 'revision-mismatch', current)
+  if (TERMINAL_STATUSES.has(current.status)) return unchanged(state, 'already-terminal', current)
+  if (!PENDING_STATUSES.has(current.status)) return unchanged(state, 'invalid-transition', current)
+  const hardCap = current.hardDeadlineAt ?? (current.acceptedAt === undefined ? undefined : current.acceptedAt + MAX_DELIVERY_LEASE_MS)
+  // A current/finishing row's effective deadline is never later than its own
+  // hard cap: a corrupt or stale `deadlineAt` beyond `acceptedAt + 24h` must
+  // not grant it a longer lease than an ordinary backlog row.
+  const dueAt = current.status === 'current' || current.status === 'finishing'
+    ? (hardCap === undefined ? current.deadlineAt : current.deadlineAt === undefined ? hardCap : Math.min(current.deadlineAt, hardCap))
+    : hardCap
+  if (dueAt === undefined || input.now < dueAt) return unchanged(state, 'deadline-not-reached', current)
+  if (current.status === 'finishing') return unchanged(state, 'invalid-transition', current)
+  const { queueState: _queueState, ...withoutQueueState } = current
+  return changed(state, freezeRecord({
+    ...withoutQueueState,
+    status: 'expired',
+    expiredAt: input.now,
+    revision: nextRevision(current),
+    failureReason: current.failureReason ?? 'delivery deadline expired',
+  }))
+}
+
+/** Extend only the current deadline from now, bounded by acceptedAt + 24h. */
+export function waitDelivery(
+  state: DeliveryLedgerState,
+  input: DeliveryWaitInput,
+): DeliveryMutation {
+  validateLeaseInput(input)
+  if (!Number.isSafeInteger(input.waitMinutes) || input.waitMinutes < 1 || input.waitMinutes > 1440) {
+    return unchanged(state, 'invalid-wait', state.byDeliveryId[input.deliveryId])
+  }
+  const current = state.byDeliveryId[input.deliveryId]
+  if (current === undefined) return unchanged(state, 'unknown-delivery')
+  if (!correlates(current, input)) return unchanged(state, 'correlation-mismatch', current)
+  if (input.expectedRevision !== undefined && current.revision !== input.expectedRevision) return unchanged(state, 'revision-mismatch', current)
+  if (current.status !== 'current') return unchanged(state, TERMINAL_STATUSES.has(current.status) ? 'already-terminal' : 'invalid-transition', current)
+  if (isDeliveryExpiredAt(current, input.now)) return unchanged(state, 'deadline-expired', current)
+  const hard = current.hardDeadlineAt ?? ((current.acceptedAt ?? input.now) + MAX_DELIVERY_LEASE_MS)
+  const requested = input.now + input.waitMinutes * 60 * 1000
+  const existing = current.deadlineAt ?? input.now
+  const effective = Math.min(Math.max(existing, requested), hard)
+  // `wait` only ever extends. Asking for an horizon that is already covered by
+  // the current lease (the common case early in a lease: "wait 30 more minutes"
+  // while 55 minutes remain) is a satisfied request, NOT a failure — and it is
+  // certainly not `deadline-expired`, which would tell the child its Delivery
+  // is dead and push it into an unnecessary no-reply. Report the unchanged,
+  // already-sufficient deadline as success and leave the record untouched so no
+  // revision is burned.
+  if (effective <= existing) {
+    return unchanged(state, 'deadline-already-sufficient', current)
+  }
+  return changed(state, freezeRecord({
+    ...current,
+    deadlineAt: effective,
+    hardDeadlineAt: hard,
+    revision: nextRevision(current),
+  }))
+}
+
+function nextRevision(record: DeliveryRecord): number {
+  const revision = record.revision ?? 0
+  if (!Number.isSafeInteger(revision) || revision < 0 || revision === Number.MAX_SAFE_INTEGER) {
+    throw new RangeError('Delivery revision must be a non-negative safe integer below MAX_SAFE_INTEGER')
+  }
+  return revision + 1
+}
+
+function isDeliveryExpiredAt(record: DeliveryRecord, now: number): boolean {
+  const hard = record.hardDeadlineAt ?? (
+    record.acceptedAt === undefined ? undefined : record.acceptedAt + MAX_DELIVERY_LEASE_MS
+  )
+  return (record.deadlineAt !== undefined && now >= record.deadlineAt) ||
+    (hard !== undefined && now >= hard)
+}
+
+function validateLeaseInput(input: DeliveryLeaseInput): void {
+  validateCorrelation(input)
+  assertIdentifier(input.deliveryId, 'deliveryId')
+  validateAt(input.now, 'now')
 }
 
 /** A settlement event with an optional explicit delivery id. */
@@ -188,8 +518,14 @@ export interface DeliverySettlementInput extends DeliveryExecutionProof {
 /** Correlation required for FIFO lookup before a per-turn proof is available. */
 export type DeliveryQueueCorrelation = DeliveryCorrelation
 
-const TERMINAL_STATUSES = new Set<DeliveryStatus>(['settled', 'failed'])
-const PENDING_STATUSES = new Set<DeliveryStatus>(['accepted', 'queued', 'running'])
+const TERMINAL_STATUSES = new Set<DeliveryStatus>([
+  'settled', 'failed', 'replied', 'no-reply', 'expired', 'unknown-terminal',
+])
+const PENDING_STATUSES = new Set<DeliveryStatus>([
+  'accepted', 'queued', 'running', 'current', 'finishing',
+])
+const QUEUED_STATUSES = new Set<DeliveryStatus>(['accepted', 'queued'])
+const CURRENT_STATUSES = new Set<DeliveryStatus>(['current', 'finishing'])
 const EMPTY_INDEX: Readonly<Record<string, DeliveryRecord>> = Object.freeze(
   Object.create(null) as Record<string, DeliveryRecord>,
 )
@@ -243,6 +579,7 @@ export function acceptDelivery(
   if (!Number.isSafeInteger(sequence) || sequence < 1) {
     throw new RangeError('nextDeliverySequence must be a positive safe integer')
   }
+  const acceptedAt = input.acceptedAt ?? Date.now()
 
   const rootMessageId = input.rootMessageId ?? input.replyTarget?.rootMessageId
   const record = freezeRecord({
@@ -260,8 +597,13 @@ export function acceptDelivery(
     ...(input.replyToMessageId !== undefined ? { replyToMessageId: input.replyToMessageId } : {}),
     sequence,
     status: 'accepted',
+    queueState: 'backlog',
+    acceptedAt,
+    deadlineAt: acceptedAt + DEFAULT_DELIVERY_LEASE_MS,
+    hardDeadlineAt: acceptedAt + MAX_DELIVERY_LEASE_MS,
+    revision: 0,
+    outboundResult: 'none',
     feedbackTarget: cloneFeedbackTarget(input.endpoint, input.messageId, rootMessageId),
-    ...(input.acceptedAt !== undefined ? { acceptedAt: input.acceptedAt } : {}),
   })
 
   const byMessageId = addToIndex(state.byMessageId, input.messageId, record)
@@ -380,13 +722,13 @@ export function bindQueued(
   if (input.queuedAt !== undefined && current.acceptedAt !== undefined && input.queuedAt < current.acceptedAt) {
     throw new TypeError('queuedAt must not precede acceptedAt')
   }
-  if (current.status !== 'accepted') return unchanged(state, 'invalid-transition', current)
+  if (current.status !== 'accepted' && current.status !== 'current') return unchanged(state, 'invalid-transition', current)
 
   return changed(state, freezeRecord({
     ...current,
     executionId: input.executionId,
     inboxMessageId: input.inboxMessageId,
-    status: 'queued',
+    ...(current.status === 'current' ? {} : { status: 'queued' as const }),
     ...(input.queuedAt !== undefined ? { queuedAt: input.queuedAt } : {}),
   }))
 }
@@ -416,12 +758,12 @@ export function bindTurn(
   if (input.startedAt !== undefined && current.queuedAt !== undefined && input.startedAt < current.queuedAt) {
     throw new TypeError('startedAt must not precede queuedAt')
   }
-  if (current.status !== 'queued') return unchanged(state, 'invalid-transition', current)
+  if (current.status !== 'queued' && current.status !== 'current') return unchanged(state, 'invalid-transition', current)
 
   return changed(state, freezeRecord({
     ...current,
     turnId: input.turnId,
-    status: 'running',
+    ...(current.status === 'current' ? {} : { status: 'running' as const }),
     ...(input.startedAt !== undefined ? { startedAt: input.startedAt } : {}),
   }))
 }
@@ -784,8 +1126,8 @@ function validateCorrelation(correlation: DeliveryCorrelation): void {
 }
 
 function validateAt(value: number | undefined, name: string): void {
-  if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
-    throw new TypeError(`${name} must be a non-negative finite number`)
+  if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) {
+    throw new TypeError(`${name} must be a non-negative safe integer`)
   }
 }
 

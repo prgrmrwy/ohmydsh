@@ -42,18 +42,109 @@ import type { LarkClient } from './channel/lark.js'
  * Zero-argument by contract: there is no selector for a model to substitute.
  */
 export const PET_CONTEXT_PARAMETERS = {} as const
-export const PET_LOCUS_REPLY_TOOL = 'pet_locus_reply'
+export const PET_LOCUS_FINISH_TOOL = 'pet_locus_finish'
+export const PET_LOCUS_WAIT_TOOL = 'pet_locus_wait'
 
-export interface PetLocusReplyDependencies {
-  /** The same caller-bound context resolver used by pet_context. */
+export type PetLocusFinishOutcome = 'reply' | 'no-reply'
+
+export interface PetLocusFinishInput {
+  readonly childSessionId: string
+  readonly locus: import('./locus/context-repository.js').LocusContextRecord
+  readonly delivery: import('./locus/context-repository.js').LocusCurrentDelivery
+  readonly outcome: PetLocusFinishOutcome
+  readonly text?: string
+  readonly reason?: string
+}
+
+export interface PetLocusFinishResult { readonly sent: boolean; readonly outcome: PetLocusFinishOutcome }
+export interface PetLocusWaitInput {
+  readonly childSessionId: string
+  readonly locus: import('./locus/context-repository.js').LocusContextRecord
+  readonly delivery: import('./locus/context-repository.js').LocusCurrentDelivery
+  readonly waitMinutes: number
+  readonly reason?: string
+}
+export interface PetLocusWaitResult {
+  readonly accepted: boolean
+  readonly deadline: number
+  readonly remainingMinutes: number
+  readonly capped: boolean
+}
+
+export interface PetLocusLifecycleDependencies {
   readonly locusRepository: NonNullable<PetContextDependencies['locusRepository']>
-  /** Bot client fixed to the dsh-pet profile and bot identity. */
-  readonly lark: Pick<LarkClient, 'reply' | 'replyExact'>
+  readonly authorizeCurrentDelivery?: (
+    input: {
+      readonly childSessionId: string
+      readonly operation: 'finish' | 'wait'
+      readonly proof?: {
+        readonly deliveryId: string
+        readonly executionId: string
+        readonly turnId: string
+        readonly source: 'delivery' | 'agent-message'
+        readonly locusId: string
+        readonly generation: number
+        readonly childSessionId: string
+      }
+    },
+  ) => import('./locus/context-repository.js').LocusContextRecord | undefined | Promise<import('./locus/context-repository.js').LocusContextRecord | undefined>
+  readonly currentCapability?: (childSessionId: string) => {
+    readonly deliveryId: string
+    readonly executionId: string
+    readonly turnId: string
+    readonly source: 'delivery' | 'agent-message'
+    readonly locusId?: string
+    readonly generation?: number
+  } | undefined
+  readonly finishCurrentDelivery?: (input: PetLocusFinishInput) => PetLocusFinishResult | Promise<PetLocusFinishResult>
+  readonly waitCurrentDelivery?: (input: PetLocusWaitInput) => PetLocusWaitResult | Promise<PetLocusWaitResult>
+}
+
+export interface PetLocusFinishDependencies extends PetLocusLifecycleDependencies {
+  /**
+   * Retained only as a composition-time capability description. The tool never
+   * calls this adapter directly: finish must go through the durable lifecycle
+   * callback so the Host can perform its finishing CAS and queue advancement.
+   */
+  readonly lark?: Pick<LarkClient, 'replyToTarget'>
 }
 
 /** Minimal execution view Pet reads; the agent loop sets `agent`. */
 interface ExecutionLike {
   readonly agent?: { readonly session: { readonly id: unknown } }
+}
+
+type ToolArguments = Record<string, unknown>
+
+/**
+ * Validate the raw argument boundary even when a definition is invoked
+ * directly by a test or an embedded caller instead of through ToolRuntime.
+ * ToolRuntime also validates the schema, but this explicit check prevents a
+ * selector or routing field from ever reaching a lifecycle callback when a
+ * caller bypasses that pipeline.
+ */
+function requireKnownArguments(
+  args: unknown,
+  allowed: readonly string[],
+  toolName: string,
+): ToolArguments {
+  if (args === null || typeof args !== 'object' || Array.isArray(args)) {
+    throw new PetError('INVALID_REQUEST', `${toolName} arguments must be an object.`)
+  }
+  const prototype = Object.getPrototypeOf(args)
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new PetError('INVALID_REQUEST', `${toolName} arguments must be a plain object.`)
+  }
+  for (const key of Reflect.ownKeys(args)) {
+    if (typeof key !== 'string' || !allowed.includes(key)) {
+      throw new PetError('INVALID_REQUEST', `${toolName} does not accept argument '${String(key)}'.`)
+    }
+  }
+  return args as ToolArguments
+}
+
+function hasOwnArgument(args: ToolArguments, name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(args, name)
 }
 
 /**
@@ -82,8 +173,8 @@ function callerSessionId(exec: ExecutionLike): string {
 /**
  * Register Pet's Agent-facing tools.
  *
- * The stable surface is `pet_context` plus the optional caller-bound
- * `pet_locus_reply`. Pet is not a catalog of per-capability adapters — an
+ * The stable surface is `pet_context` plus the caller-bound
+ * `pet_locus_finish` and `pet_locus_wait` tools. Pet is not a catalog of per-capability adapters — an
  * installed Skill drives ordinary DSH tools and
  * owns its own bounded behavior, so adding a capability never adds a tool.
  * @param ctx - A Pet executor's SCOPED agent context. Passing an unscoped
@@ -96,7 +187,7 @@ function callerSessionId(exec: ExecutionLike): string {
 export function registerPetTools(
   ctx: Context,
   deps: { readonly repository: PetRepository } & PetContextDependencies & {
-    readonly locusReply?: PetLocusReplyDependencies
+    readonly locusLifecycle?: PetLocusFinishDependencies
   },
 ): () => void {
   const disposers: (() => void)[] = []
@@ -131,52 +222,95 @@ export function registerPetTools(
     ),
   )
 
-  if (deps.locusReply !== undefined) {
-    disposers.push(
-      ctx.tools.register(
-        defineTool({
-          name: PET_LOCUS_REPLY_TOOL,
-          description:
-            'Reply as the Pet bot to the exact current Feishu Delivery. Takes only the business ' +
-            'text: chat/thread/message targets are resolved from the caller child and current turn, ' +
-            'and the tool is unavailable to GUI, initialization, or stale turns.',
-          parameters: {
-            text: { type: 'string', required: true },
-          },
-          output: {
-            schema: {
-              type: 'object',
-              additionalProperties: false,
-              properties: { sent: { type: 'boolean', required: true } },
-            },
-            render: (_args, value) => [{ type: 'text', text: value.sent ? '已发送到当前飞书入口。' : '未发送。' }],
-          },
-          async execute(args, exec) {
-            const childSessionId = callerSessionId(exec as ExecutionLike)
-            const matches = deps.locusReply!.locusRepository.findByChildSessionId(childSessionId)
-            if (matches.length !== 1 || matches[0]?.locus.state !== 'active') {
-              throw new PetError('NOT_A_PET_SESSION', 'Current child has no unique active locus.')
-            }
-            const delivery = matches[0].currentDelivery
-            if (delivery?.replyTarget === undefined) {
-              throw new PetError(
-                'INVALID_REQUEST',
-                'This turn has no exact Feishu Delivery reply target; GUI and stale turns cannot send.',
-              )
-            }
-            const exact = deps.locusReply!.lark.replyExact
-            if (exact === undefined) {
-              throw new PetError(
-                'INTERNAL',
-                'The Host has no strict Feishu reply adapter; refusing an unverified send.',
-              )
-            }
-            await exact(delivery.replyTarget.messageId, args.text)
-            return { sent: true }
-          },
-        }),
-      ),
-    )
+  const lifecycle = deps.locusLifecycle
+  if (lifecycle !== undefined) {
+    const resolveAuthorized = async (childSessionId: string, operation: 'finish' | 'wait') => {
+      const authorize = lifecycle.authorizeCurrentDelivery ?? lifecycle.locusRepository.authorizeCurrentDelivery
+      if (authorize === undefined) throw new PetError('INTERNAL', 'The Host has no caller/source authorization capability.')
+      const proof = lifecycle.currentCapability?.(childSessionId)
+      if (proof === undefined) throw new PetError('INVALID_REQUEST', 'This child has no current caller-authorized Feishu Delivery.')
+      const authorized = await authorize({ childSessionId, operation, proof })
+      if (authorized === undefined || authorized.locus.state !== 'active' || authorized.currentDelivery === undefined) {
+        throw new PetError('INVALID_REQUEST', 'This child has no current caller-authorized Feishu Delivery.')
+      }
+      const delivery = authorized.currentDelivery
+      // Keep the final boundary defensive even when a repository supplies its
+      // own authorizer: no stale generation, backlog row, or malformed caller
+      // projection may reach a lifecycle adapter.
+      if (
+        authorized.legacy === true ||
+        authorized.source === 'legacy' ||
+        authorized.child.sessionId !== childSessionId ||
+        authorized.locus.locusId.trim() === '' ||
+        !Number.isSafeInteger(authorized.locus.generation) ||
+        authorized.locus.generation < 1 ||
+        (authorized.permission.effective !== 'read' && authorized.permission.effective !== 'write') ||
+        delivery.childSessionId !== childSessionId ||
+        delivery.locusId !== authorized.locus.locusId ||
+        delivery.generation !== authorized.locus.generation ||
+        delivery.status !== 'current' ||
+        (delivery.queueState !== undefined && delivery.queueState !== 'current')
+      ) {
+        throw new PetError('INVALID_REQUEST', 'This Delivery is no longer current or caller-authorized.')
+      }
+      return authorized
+    }
+
+    disposers.push(ctx.tools.register(defineTool({
+      name: PET_LOCUS_FINISH_TOOL,
+      description: 'Finish the exact current Feishu Delivery with reply text or a no-reply reason. The Host derives all routing targets; do not provide ids.',
+      parameters: {
+        outcome: { type: 'string', enum: ['reply', 'no-reply'], required: true },
+        text: { type: 'string' },
+        reason: { type: 'string' },
+      },
+      output: {
+        schema: { type: 'object', additionalProperties: false, properties: {
+          sent: { type: 'boolean', required: true }, outcome: { type: 'string', required: true },
+        } },
+        render: (_args, value) => [{ type: 'text', text: value.sent ? '已提交当前飞书请求。' : '当前请求未发送正文。' }],
+      },
+      async execute(args, exec) {
+        const input = requireKnownArguments(args, ['outcome', 'text', 'reason'], PET_LOCUS_FINISH_TOOL)
+        const outcome = input.outcome
+        const text = typeof input.text === 'string' ? input.text : undefined
+        const reason = typeof input.reason === 'string' ? input.reason : undefined
+        if (outcome !== 'reply' && outcome !== 'no-reply') throw new PetError('INVALID_REQUEST', 'outcome must be reply or no-reply.')
+        if (outcome === 'reply' && (!hasOwnArgument(input, 'text') || text === undefined || text.trim() === '' || hasOwnArgument(input, 'reason'))) throw new PetError('INVALID_REQUEST', 'reply requires non-empty text and no reason.')
+        if (outcome === 'no-reply' && (hasOwnArgument(input, 'text') || !hasOwnArgument(input, 'reason') || reason === undefined || reason.trim() === '')) throw new PetError('INVALID_REQUEST', 'no-reply requires non-empty reason and no text.')
+        const locus = await resolveAuthorized(callerSessionId(exec as ExecutionLike), 'finish')
+        const delivery = locus.currentDelivery!
+        if (lifecycle.finishCurrentDelivery === undefined) {
+          // A direct Lark fallback would send without the durable finishing CAS,
+          // result ledger, or queue advancement. Refuse instead of weakening
+          // at-most-once semantics during partial composition.
+          throw new PetError('INTERNAL', 'The Host has no durable Delivery finish capability.')
+        }
+        return lifecycle.finishCurrentDelivery({ childSessionId: delivery.childSessionId, locus, delivery, outcome, ...(text === undefined ? {} : { text }), ...(reason === undefined ? {} : { reason }) })
+      },
+    })))
+
+    disposers.push(ctx.tools.register(defineTool({
+      name: PET_LOCUS_WAIT_TOOL,
+      description: 'Extend the current Delivery lease by positive minutes from now, bounded by the acceptedAt plus 24 hour hard cap.',
+      parameters: { waitMinutes: { type: 'number', required: true }, reason: { type: 'string' } },
+      output: {
+        schema: { type: 'object', additionalProperties: false, properties: {
+          accepted: { type: 'boolean', required: true }, deadline: { type: 'number', required: true }, remainingMinutes: { type: 'number', required: true }, capped: { type: 'boolean', required: true },
+        } },
+        render: (_args, value) => [{ type: 'text', text: `等待期限：${String(value.deadline)}` }],
+      },
+      async execute(args, exec) {
+        const input = requireKnownArguments(args, ['waitMinutes', 'reason'], PET_LOCUS_WAIT_TOOL)
+        const waitMinutes = input.waitMinutes
+        if (typeof waitMinutes !== 'number' || !Number.isSafeInteger(waitMinutes) || waitMinutes < 1 || waitMinutes > 1440) throw new PetError('INVALID_REQUEST', 'waitMinutes must be an integer from 1 through 1440.')
+        if (hasOwnArgument(input, 'reason') && typeof input.reason !== 'string') throw new PetError('INVALID_REQUEST', 'reason must be a string when provided.')
+        const locus = await resolveAuthorized(callerSessionId(exec as ExecutionLike), 'wait')
+        if (lifecycle.waitCurrentDelivery === undefined) throw new PetError('INTERNAL', 'The Host has no durable Delivery wait lease.')
+        const reason = typeof input.reason === 'string' ? input.reason : undefined
+        return lifecycle.waitCurrentDelivery({ childSessionId: locus.currentDelivery!.childSessionId, locus, delivery: locus.currentDelivery!, waitMinutes, ...(reason === undefined ? {} : { reason }) })
+      },
+    })))
   }
 
   return () => {

@@ -115,3 +115,28 @@
 5. 公共事实与 inquiry 在装配层解耦，使前者可独立发布
 
 在此之前不得归档 B035，也不得因单测通过而勾选 G1–G5。
+
+## 2026-03-24 第二轮范围收敛：串行 Delivery 队列
+
+在「独立 child + 首次回复出口」验收后，真实答疑群复现了新故障：Delivery turn 问父后结束，父回答在后续 turn 到达，`pet_locus_reply` 因原 Delivery 已随 `turn/end` 结算被拒绝，飞书无正文（详见本文件冻结点之后、`design.md` Context 一节记录的精确日志序列）。所有者据此进一步收敛边界：每个 locus 维护单一 current Delivery 的持久串行队列，`turn/end` 永不结算业务请求，完成只经统一 `pet_locus_finish`/`pet_locus_wait`。
+
+### 明确延后（本期不做）
+
+- **`/new`、`/skip` 等管理面清理命令**：本期不注册任何新命令。未来如需实现，只应作为「保留同一 child session、清理已超时或明确卡住的 current/backlog 后继续调度」的逃生通道，而非 session 重建；具体命令名、可强制取消的未超时项范围、backlog 清理边界均不在本 change 预先定死，需要真实需求出现后另开 change 设计。
+- **原生 `send_message` 的 request/reply pair/correlation**：本期不拦截、不追踪 `send_message` 的语义配对。已知取舍：若 current A 问父后超时、B 成为新 current，父对 A 的迟到回复可能进入同一 child 处理 B 的 turn，Host 路由仍只使用 current B 的触发消息，但文字可能影响模型理解——所有者接受该低概率语义风险以换取实现面收敛。未来增强必须依赖 runtime 提供不可伪造的 opaque metadata 或受信调用接缝，不得用 sender、正文、时间或 FIFO 猜测 answer 关联。
+- **完整 B035 公共事实/inquiry/answer store/result outbox/continuation segment**：本轮改动完全未触碰 `host/collaboration/*`、`host/inquiry/*`（除 `effect-fence.ts` 的禁止工具名单同步重命名 `pet_locus_finish`/`pet_locus_wait` 外）；这些模块继续保持"已实现但无生产调用方/fail closed"的既有状态，本 change 不声称满足 B035 的 G3（公共事实持久层）、G4（效果围栏生产接入）、G5（result outbox/continuation runtime 门槛）中的任何一项。
+
+### 本轮实现范围（回顾）
+
+- Delivery 持久状态机与原子 CAS（current/backlog/finishing/终态）
+- 统一 `pet_locus_finish`/`pet_locus_wait` 工具，移除 `pet_locus_reply`（无兼容别名）
+- 串行 dispatcher（`dispatchNext`）+ deadline scheduler，超时复用同一 child session 推进
+- 跨 turn 来源安全（current capability 而非 sticky turn proof）
+- 启动恢复对齐新模型：current 按身份保留、`finishing`收敛为 `unknown-terminal`、backlog 硬上限过期
+
+### 本轮验证证据
+
+- `npm run typecheck --workspace=dsh-pet` 通过；`npm run build --workspace=dsh-pet` 通过
+- Pet 全量 `npx vitest run`：2330 passed / 31 skipped / 11 failed。11 项失败经 `git stash` 逐条比对干净 HEAD，确认与本轮改动无关，是既有 `dsh-scope`/`ToolRuntime` 工具可见性基础设施缺陷（`collaboration-assembly`/`collaboration-tool-scope`/`inquiry-tool-scope`/`tool-scope` 中与 Delivery 模型无关的用例），未在本 change 范围内修复
+- 仓库 `npm test`：124 passed / 1 skipped / 0 failed；`npm run check:artifacts`、`git diff --check`、`openspec validate pet-locus-independent-child --strict` 均通过
+- **仍未做**：`dsh build` 幂等验证、Host 重启、真实群/话题/队列租约验收（tasks.md 10.3–10.7）

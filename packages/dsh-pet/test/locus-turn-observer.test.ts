@@ -56,7 +56,12 @@ function harness(options: {
     events,
     diagnostics,
     released,
-    claim: (claim: LocusInboxClaim) => { for (const listener of claimListeners) listener(claim) },
+    claim: (claim: LocusInboxClaim) => {
+      // Current runtime source metadata is explicit. Historical fixtures that
+      // model a participant claim use `user`; unknown-source coverage opts out
+      // with an explicit non-user source below.
+      for (const listener of claimListeners) listener({ sourceKind: 'user', ...claim })
+    },
     end: (end: LocusTurnEnd) => { for (const listener of endListeners) listener(end) },
     available: (messageId: string, childSessionId = CHILD) => {
       observer.deliveryAvailable?.({ childSessionId, messageId })
@@ -65,37 +70,49 @@ function harness(options: {
 }
 
 describe('per-turn Delivery correlation', () => {
-  it('binds a claimed message to its exact turn and settles that turn', () => {
+  it('binds a claimed message to its exact turn without business settlement at turn/end', () => {
     const h = harness()
 
     h.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 1 })
     h.end({ childSessionId: CHILD, turn: 1, outcome: 'completed' })
 
-    expect(h.events).toEqual([
-      {
-        phase: 'started',
+    expect(h.events).toEqual([{
+      phase: 'started',
+      deliveryId: 'delivery-1',
+      executionId: 'execution-1',
+      turnId: `${CHILD}#1`,
+      correlation,
+    }])
+    expect(h.diagnostics).toContain('turn-ended')
+  })
+
+  it('restores a durable current lineage without granting arbitrary fresh-turn authority', () => {
+    const h = harness()
+    h.observer.restoreCurrentCapability?.({
+      delivery: {
         deliveryId: 'delivery-1',
         executionId: 'execution-1',
-        turnId: `${CHILD}#1`,
+        turnId: `${CHILD}#4`,
         correlation,
+        status: 'current',
       },
-      {
-        phase: 'completed',
-        deliveryId: 'delivery-1',
-        executionId: 'execution-1',
-        turnId: `${CHILD}#1`,
-        correlation,
-      },
-    ])
-    // A completed turn carries no failure reason.
-    expect(h.events[1]).not.toHaveProperty('reason')
+    })
+    expect(h.observer.currentCapabilityForChild?.(CHILD)).toBeUndefined()
+    h.claim({ childSessionId: CHILD, messageId: 'parent-answer', turn: 5, sourceKind: 'agent-message' })
+    expect(h.observer.currentCapabilityForChild?.(CHILD)).toEqual({
+      deliveryId: 'delivery-1',
+      executionId: 'execution-1',
+      turnId: `${CHILD}#5`,
+      correlation,
+      source: 'agent-message',
+    })
   })
 
   it('exposes an exact current-turn proof only while one Delivery is active', () => {
     const h = harness()
     expect(h.observer.currentForChild?.(CHILD)).toBeUndefined()
 
-    h.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 4 })
+    h.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 4, sourceKind: 'user' })
     expect(h.observer.currentForChild?.(CHILD)).toEqual({
       executionId: 'execution-1',
       turnId: `${CHILD}#4`,
@@ -119,7 +136,7 @@ describe('per-turn Delivery correlation', () => {
 
   it('keeps a Delivery-plus-foreign turn fail-closed while settling the proven Delivery', () => {
     const h = harness()
-    h.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 5 })
+    h.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 5, sourceKind: 'user' })
     expect(h.observer.currentForChild?.(CHILD)).toEqual({
       executionId: 'execution-1',
       turnId: `${CHILD}#5`,
@@ -130,7 +147,8 @@ describe('per-turn Delivery correlation', () => {
     h.end({ childSessionId: CHILD, turn: 5, outcome: 'completed' })
 
     expect(h.observer.currentForChild?.(CHILD)).toBeUndefined()
-    expect(h.events.filter(event => event.phase === 'completed')).toHaveLength(1)
+    expect(h.events.filter(event => event.phase !== 'started')).toHaveLength(0)
+    expect(h.diagnostics).toContain('turn-ended')
     expect(h.diagnostics).not.toContain('claim-not-a-delivery')
   })
 
@@ -141,7 +159,8 @@ describe('per-turn Delivery correlation', () => {
     expect(h.observer.currentForChild?.(CHILD)).toBeUndefined()
 
     h.end({ childSessionId: CHILD, turn: 6, outcome: 'completed' })
-    expect(h.events.filter(event => event.phase === 'completed')).toHaveLength(1)
+    expect(h.events.filter(event => event.phase !== 'started')).toHaveLength(0)
+    expect(h.diagnostics).toContain('turn-ended')
   })
 
   it('tracks unresolved claims by exact message instead of overwriting by turn', () => {
@@ -155,11 +174,11 @@ describe('per-turn Delivery correlation', () => {
     h.available('early-delivery')
     expect(h.events).toEqual([
       expect.objectContaining({ phase: 'started', deliveryId: 'delivery-early', turnId: `${CHILD}#8` }),
-      expect.objectContaining({ phase: 'completed', deliveryId: 'delivery-early', turnId: `${CHILD}#8` }),
     ])
+    expect(h.diagnostics).toContain('turn-ended')
     // A notification for another message cannot consume the retained steer.
     h.available('foreign-steer', 'other-child')
-    expect(h.events).toHaveLength(2)
+    expect(h.events).toHaveLength(1)
   })
 
   it('withholds a turn that claims more than one Delivery message', () => {
@@ -178,7 +197,7 @@ describe('per-turn Delivery correlation', () => {
     expect(h.observer.currentForChild?.(CHILD)).toBeUndefined()
   })
 
-  it('reports a non-completed turn as failed with its runtime reason', () => {
+  it('does not turn an aborted or failed segment into business settlement', () => {
     for (const [outcome, reason] of [
       ['aborted', 'user cancelled'],
       ['failed', undefined],
@@ -188,12 +207,9 @@ describe('per-turn Delivery correlation', () => {
       h.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 1 })
       h.end({ childSessionId: CHILD, turn: 1, outcome, ...(reason === undefined ? {} : { reason }) })
 
-      expect(h.events.at(-1)).toMatchObject({
-        phase: 'failed',
-        deliveryId: 'delivery-1',
-        // Falls back to the outcome so a diagnosis is never empty.
-        reason: reason ?? outcome,
-      })
+      expect(h.events).toHaveLength(1)
+      expect(h.events[0]).toMatchObject({ phase: 'started', deliveryId: 'delivery-1' })
+      expect(h.diagnostics).toContain('turn-ended')
     }
   })
 
@@ -211,23 +227,9 @@ describe('per-turn Delivery correlation', () => {
     h.end({ childSessionId: CHILD, turn: 2, outcome: 'completed' })
     h.end({ childSessionId: CHILD, turn: 1, outcome: 'failed' })
 
-    expect(h.events.filter(event => event.phase !== 'started')).toEqual([
-      {
-        phase: 'completed',
-        deliveryId: 'delivery-second',
-        executionId: 'execution-second',
-        turnId: `${CHILD}#2`,
-        correlation,
-      },
-      {
-        phase: 'failed',
-        deliveryId: 'delivery-first',
-        executionId: 'execution-first',
-        turnId: `${CHILD}#1`,
-        correlation,
-        reason: 'failed',
-      },
-    ])
+    expect(h.events.filter(event => event.phase !== 'started')).toEqual([])
+    expect(h.events.filter(event => event.phase === 'started')).toHaveLength(2)
+    expect(h.diagnostics.filter(code => code === 'turn-ended')).toHaveLength(2)
   })
 
   it('never consumes a Delivery for initialization, a GUI turn, or a real message', async () => {
@@ -239,7 +241,7 @@ describe('per-turn Delivery correlation', () => {
 
     expect(h.events).toEqual([])
     // Time does not guess that an unresolved claim is foreign.
-    expect(h.diagnostics).toEqual([])
+    expect(h.diagnostics).toEqual(['turn-ended'])
   })
 
   it('correlates end-before-bind after a delay beyond the former 200ms window', async () => {
@@ -257,7 +259,6 @@ describe('per-turn Delivery correlation', () => {
     expect(h.observer.currentForChild?.(CHILD)).toBeUndefined()
     expect(h.events).toEqual([
       expect.objectContaining({ phase: 'started', deliveryId: 'delivery-race', turnId: `${CHILD}#3` }),
-      expect.objectContaining({ phase: 'completed', deliveryId: 'delivery-race', turnId: `${CHILD}#3` }),
     ])
   })
 
@@ -277,9 +278,9 @@ describe('per-turn Delivery correlation', () => {
     h.end({ childSessionId: CHILD, turn: 1, outcome: 'completed' })
     h.end({ childSessionId: CHILD, turn: 1, outcome: 'failed' })
 
-    // A late duplicate must not overwrite a settled Delivery's outcome.
-    expect(h.events.filter(event => event.phase !== 'started')).toHaveLength(1)
-    expect(h.diagnostics).toEqual(['turn-already-ended'])
+    // A late duplicate must not produce another business event.
+    expect(h.events.filter(event => event.phase !== 'started')).toHaveLength(0)
+    expect(h.diagnostics).toEqual(['turn-ended', 'turn-already-ended'])
   })
 
   it('keeps turns of different children apart', () => {
@@ -343,7 +344,7 @@ describe('per-turn Delivery correlation', () => {
     h.claim({ childSessionId: CHILD, messageId: 'om-first', turn: 1 })
     h.end({ childSessionId: CHILD, turn: 1, outcome: 'completed' })
 
-    expect(seen).toEqual(['started', 'completed'])
+    expect(seen).toEqual(['started'])
   })
 
   it('bounds retained turns and evicts the oldest correlation fail-closed', () => {
@@ -460,7 +461,7 @@ describe('Non-routing context does not poison reply authority', () => {
     h.claim({ childSessionId: CHILD, messageId: 'injected', turn: 1, sourceKind: 'plugin' })
     h.end({ childSessionId: CHILD, turn: 1, outcome: 'completed' })
 
-    expect(h.events.map(event => event.phase)).toEqual(['started', 'completed'])
+    expect(h.events.map(event => event.phase)).toEqual(['started'])
   })
 
   it('keeps authority when an agent-message context reply shares the Delivery turn', () => {

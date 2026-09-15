@@ -3,10 +3,18 @@
 ## 这是什么
 
 当前 `dsh.yaml` 固定 DSH `0.1.2-rc.1`，但 Pet unified locus 还需要该正式包
-尚未发布的两组宿主能力：
+尚未发布的三组宿主能力：
 
 - continuable child 可选择 `settlementNotice: silent`，且能创建 idle child、在
   continuation owner 内访问准确 child Session；
+- child→parent 消息携带对称的回复指引。上游只给 child 注入
+  `continuableInitialPrompt`（"你的 parent id 是 X，用 `send_message` 发结果"），
+  父侧却只收到裸的 `Agent <id> sent a message:`：既没有可用于回复的 agent id，
+  也没有说明普通 assistant 文本不会送达。父用文本作答时**静默失败**——父认为
+  已答复，child 却一直等到租约超时。locus child 不继承父历史、必须靠"问父"补齐
+  上下文，这条链路断裂会让独立 child 变成信息孤岛，因此补齐父侧指引。补丁只改
+  `sendToParent`（child→parent），不改 `steer`（parent→child），避免把"回复我"
+  注入到父对子的转向消息里；
 - Storage/Domain/SQLite/JSON 的原子 batch/transaction，其中 SQLite 可取得介质
   独占所有权。
 
