@@ -285,6 +285,7 @@
     - 更新 2026-09-13 T4-C3（发现结果卡必须自证「查到了什么」）→ **收编**，设计稿 I 区：结果卡固定三行 = 入口（角色 + 名称 + 群级/话题/继承关系）→ 代际与状态 → 父会话/会话，最后才是跳转；空结果如实说「没有匹配的关联」，不退回裸 ID 列表。
     - 落地载体：`openspec/changes/pet-locus-management-redesign/`（proposal / design / specs delta / tasks）。评审用的可视稿是临时产物、不入库，其结论已收敛进该 change 的 design.md 与本条目。
 
+    - 2026-09-15 **已实施**（openspec change `pet-locus-management-redesign`）：呈现层重写完成，`packages/dsh-pet/src/client/locus-view.ts`（纯函数）+ `settings.tsx` 的 Locus 区 + 样式；证据见该 change 的 tasks。
 ### [B027] Pet Delivery 失败向原飞书入口返回安全诊断
 - **状态**: 想法
 - **优先级**: P1
@@ -375,6 +376,7 @@
     - 要点 5（与 B030 一并设计；设置页收敛为「展示 + 导航 + 生命周期动作」，**新建外部资源**一律不放在设置页）→ **满足**：绑定 endpoint 表单也一并移除（所有者 2026-09-15 确认），设置页不再有任何「新建外部资源」入口。生命周期动作（解绑/归档/停止/重建/权限/确认执行根）保留在每行「操作」折叠区。
     - **与本次范围约束的关系**：以上全部是**移除 UI 入口**，不是新增能力，因此符合「本轮只有面板调整、不新增 Host / wire 能力」的约束。
 
+    - 2026-09-15 **已实施**（openspec change `pet-locus-management-redesign`）：呈现层重写完成，`packages/dsh-pet/src/client/locus-view.ts`（纯函数）+ `settings.tsx` 的 Locus 区 + 样式；证据见该 change 的 tasks。
 ### [B032] Locus 子会话在 GUI 侧不可用：标题被样板覆盖且打开方式错误
 - **状态**: 已完成
 - **优先级**: P1
@@ -464,6 +466,7 @@
     - **本 change 在两条目之外的增量**（所有者 2026-09-15 逐轮确认）：短码体例、关系轨（父会话—locus—会话 的可见关系）、按工作/按入口双读法、父会话状态筛选（默认只看可用，归档的折成底部一行出口）、群名主动刷新入口、**移除面板里的绑定表单**（关联只能由飞书消息建立，手输 id 无人会用）。
     - 落地载体：`openspec/changes/pet-locus-management-redesign/`（proposal / design / specs delta / tasks）。评审用的可视稿是临时产物、不入库，其结论已收敛进该 change 的 design.md 与本条目。
 
+    - 2026-09-15 **已实施**（openspec change `pet-locus-management-redesign`）：呈现层重写完成，`packages/dsh-pet/src/client/locus-view.ts`（纯函数）+ `settings.tsx` 的 Locus 区 + 样式；证据见该 change 的 tasks。
 ### [B002] 飞书助手:任务中 @ 助手,在飞书群发消息
 - **状态**: 想法
 - **背景 / 动机**: 理想情况是能在任务中 @ 助手,然后在飞书群里发消息,把 DSH 任务与飞书 IM 打通。
