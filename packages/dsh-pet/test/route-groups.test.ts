@@ -247,6 +247,29 @@ describe('an archived session is refused before the click, not after', () => {
   })
 })
 
+describe('the locus header reads title, condition, description, controls', () => {
+  it('puts the filter on the title row and the counts under it', async () => {
+    stubLocus()
+    const host = await mountTab('locus')
+
+    // The control that changes the reading belongs with the title; the counts
+    // describe the snapshot, so they get their own line instead of competing
+    // with the title for the same row.
+    const headline = host.querySelector('.dshpet-locus-headline') as HTMLElement | undefined
+    expect(headline?.textContent).toContain('父会话：可用 · 入口：在服务')
+    expect(headline?.textContent).not.toContain('个入口')
+    const lead = host.querySelector('.dshpet-locus-lead') as HTMLElement | undefined
+    expect(lead?.textContent).toContain('个入口')
+    expect(lead?.querySelector('.dshpet-locus-headline')).not.toBeNull()
+
+    // Tools stay a separate row, so neither the counts nor the filter can push
+    // the reading tabs or the search box around.
+    const tools = host.querySelector('.dshpet-locus-tools') as HTMLElement | undefined
+    expect(tools?.querySelector('.dshpet-locus-filter-anchor')).toBeNull()
+    expect(tools?.querySelector('.dshpet-locus-search')).not.toBeNull()
+  })
+})
+
 describe('a stopped entry is hidden by default yet recoverable', () => {
   it('reveals the tombstone with a rebuild control on its row', async () => {
     // The Host refuses a stopped endpoint until an explicit rebuild
