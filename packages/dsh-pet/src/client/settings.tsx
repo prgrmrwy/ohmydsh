@@ -33,6 +33,7 @@ import {
   DEFAULT_LOCUS_FILTER,
   ENTRY_STATE_OPTIONS,
   PARENT_AVAILABILITY_LABELS,
+  SHOW_ALL_LOCUS_FILTER,
   applyLocusFilter,
   applyQuery,
   collectHandleCodes,
@@ -41,6 +42,7 @@ import {
   endpointKey,
   entryDisplayName,
   endpointHandleLabel,
+  entryStateFilterLabel,
   familyHead,
   handleCode,
   handleLabel,
@@ -766,6 +768,50 @@ function OwnerProjectionFacts(props: { readonly owner: PetLocusView['owner'] | u
   )
 }
 
+/**
+ * Whether a generation can still serve work.
+ *
+ * The unavailable trio is exactly the set the Host refuses
+ * (`repository.ts`: *explicitly rebuild it before accepting work*), and the set
+ * this surface hides by default — so the row shortcut below is what keeps a
+ * hidden entry from becoming an unreachable one.
+ */
+function isTerminalLocusState(state: PetLocusState): boolean {
+  return state === 'invalid' || state === 'stopped' || state === 'retired'
+}
+
+/** The optimistic fence every mutation of one generation carries. */
+function locusFence(head: PetLocusView): {
+  readonly locusId: string
+  readonly expectedGeneration: number
+  readonly expectedLocusId: string
+  readonly expectedUpdatedAt: number
+} {
+  return {
+    locusId: head.locusId,
+    expectedGeneration: head.generation,
+    expectedLocusId: head.locusId,
+    expectedUpdatedAt: head.state.updatedAt,
+  }
+}
+
+/**
+ * The one rebuild payload, shared by the row shortcut and the 更多 disclosure.
+ * Two copies of a mutation payload drift; a rebuild that addressed a different
+ * generation than the one on screen would be a silent replacement.
+ */
+function locusRebuildRequest(head: PetLocusView): Parameters<typeof petApi.locusRebuild>[0] {
+  return {
+    action: 'rebuild',
+    endpoint: locusEndpointInput(head.endpoint),
+    parentSessionId: head.main.sessionId,
+    ...(head.workspace.workspaceId === '' ? {} : { workspaceId: head.workspace.workspaceId }),
+    ...(head.parentLocusId === undefined ? {} : { parentLocusId: head.parentLocusId }),
+    ...(head.isDefaultQa ? { asDefaultQa: true } : {}),
+    ...locusFence(head),
+  }
+}
+
 /** One entry's disclosure: identifiers, provenance, permission and actions. */
 function LocusDetails(props: {
   readonly family: LocusFamily
@@ -790,19 +836,12 @@ function LocusDetails(props: {
     : handleLabel('session', props.codes.session.get(childSessionId) ?? '')
 
   const endpoint = locusEndpointInput(head.endpoint)
-  const fence = {
-    locusId: head.locusId,
-    expectedGeneration: head.generation,
-    expectedLocusId: head.locusId,
-    expectedUpdatedAt: head.state.updatedAt,
-  }
+  const fence = locusFence(head)
   const run = (name: string, operation: () => Promise<unknown>): (() => void) => () =>
     props.onAction(`${head.locusId}:${name}`, operation)
 
   const blocked = props.busyKey !== undefined || props.busy
   const canManageCurrent = head.state.state === 'active'
-  const canRebuild =
-    head.state.state === 'invalid' || head.state.state === 'stopped' || head.state.state === 'retired'
   const canStop =
     head.state.state === 'provisioning' || head.state.state === 'active' || head.state.state === 'switching'
   const anchorUnconfirmed = head.contextAnchor?.status !== 'confirmed'
@@ -903,25 +942,6 @@ function LocusDetails(props: {
             确认执行根
           </button>
         ) : null}
-        <button
-          type="button"
-          className="dshpet-action dshpet-action-sm"
-          disabled={blocked || !canRebuild}
-          title={canRebuild ? '重建为新一代，新代默认只读' : '只有失效、停止或退役的代次可以重建'}
-          onClick={run('rebuild', () =>
-            petApi.locusRebuild({
-              action: 'rebuild',
-              endpoint,
-              parentSessionId: head.main.sessionId,
-              ...(head.workspace.workspaceId === '' ? {} : { workspaceId: head.workspace.workspaceId }),
-              ...(head.parentLocusId === undefined ? {} : { parentLocusId: head.parentLocusId }),
-              ...(head.isDefaultQa ? { asDefaultQa: true } : {}),
-              ...fence,
-            }),
-          )}
-        >
-          重建
-        </button>
         <button
           type="button"
           className="dshpet-action dshpet-action-sm dshpet-action-danger"
@@ -1135,6 +1155,22 @@ function LocusRow(props: {
             disabled={feishuLink === undefined}
             {...(feishuLink === undefined ? {} : { href: feishuLink })}
           />
+          {isTerminalLocusState(head.state.state) ? (
+            // Rebuild is the only action left on a tombstone, and it is legal
+            // ONLY on a tombstone, so it lives on the row rather than inside
+            // 更多: the default filter hides terminal entries, and burying
+            // their one way back two disclosures deep would make the default a
+            // dead end. Every other state would render it permanently disabled.
+            <button
+              type="button"
+              className="dshpet-action dshpet-action-sm"
+              disabled={props.busyKey !== undefined || head.state.busy}
+              title="重建为新一代，新代默认只读"
+              onClick={() => props.onAction(`${head.locusId}:rebuild`, () => petApi.locusRebuild(locusRebuildRequest(head)))}
+            >
+              重建
+            </button>
+          ) : null}
           <button
             type="button"
             className="dshpet-locus-more"
@@ -1324,9 +1360,11 @@ function LocusFilterPanel(props: {
 /**
  * What the filter removed, stated in the list rather than by an empty screen.
  *
- * An archived parent can still own active entries, so a silent removal would
- * read as "my entry disappeared" — the previous surface had no filter at all
- * precisely because hiding without saying so is worse than scrolling.
+ * An archived parent can still own active entries, and a stopped entry is the
+ * only place its 重建 button lives — a silent removal would read as "my entry
+ * disappeared" (or worse, as "my entry was deleted"). The previous surface had
+ * no filter at all precisely because hiding without saying so is worse than
+ * scrolling.
  */
 function HiddenNote(props: {
   readonly hidden: HiddenSummary
@@ -1334,18 +1372,27 @@ function HiddenNote(props: {
 }): JSX.Element | null {
   const { hidden } = props
   if (hidden.parentSessions === 0 && hidden.entries === 0) return null
-  const reasons = hidden.parentReasons.map(reason => reason.label).join(' · ')
+  const parentPart = hidden.parentSessions === 0
+    ? ''
+    : `已隐藏 ${hidden.parentSessions} 个父会话（${hidden.parentReasons.map(reason => reason.label).join(' · ')}）`
   const stateReasons = hidden.entryStates.map(item => `${item.label} ${item.entries}`).join(' · ')
+  const entryPart = hidden.entries === 0
+    ? ''
+    // With no hidden parent, the entries are hidden by their own lifecycle, so
+    // they are the whole count rather than something "under" the parent.
+    : hidden.parentSessions === 0
+      ? `已隐藏 ${hidden.entries} 个入口`
+      : `其下或本身共 ${hidden.entries} 个入口未显示`
   return (
     <div className="dshpet-locus-hidden">
       <button type="button" className="dshpet-jump" data-disabled="false" onClick={props.onShow}>
         显示全部 <span aria-hidden="true">▾</span>
       </button>
       <span className="dshpet-meta">
-        {hidden.parentSessions === 0 ? '' : `已隐藏 ${hidden.parentSessions} 个父会话（${reasons}）`}
-        {hidden.parentSessions !== 0 && hidden.entries !== 0 ? '，' : ''}
-        {hidden.entries === 0 ? '' : `其下或本身共 ${hidden.entries} 个入口未显示`}
-        {stateReasons === '' ? '' : `（按状态隐藏：${stateReasons}）`}
+        {parentPart}
+        {parentPart !== '' && entryPart !== '' ? '，' : ''}
+        {entryPart}
+        {stateReasons === '' ? '' : `（按状态：${stateReasons}）`}
       </span>
     </div>
   )
@@ -1717,9 +1764,16 @@ export function LocusSurface(props: {
     () => (props.snapshot === undefined ? undefined : countLocusFilterOptions(props.snapshot)),
     [props.snapshot],
   )
-  const summary = useMemo(() => (visible === undefined ? undefined : summarizeLocusView(visible)), [visible])
+  // What EXISTS, as opposed to what this filter and search currently show. The
+  // headline states the first: "关联 0 个入口" over an association the filter
+  // hid would read as "it is gone", which is the one reading this surface must
+  // never produce for a stopped entry that still owns its 重建 button.
+  const totals = useMemo(
+    () => (props.snapshot === undefined ? undefined : summarizeLocusView(applyLocusFilter(props.snapshot, SHOW_ALL_LOCUS_FILTER))),
+    [props.snapshot],
+  )
 
-  if (codes === undefined || visible === undefined || counts === undefined || summary === undefined) {
+  if (codes === undefined || visible === undefined || counts === undefined || totals === undefined) {
     return <div className="dshpet-settings" />
   }
 
@@ -1741,7 +1795,7 @@ export function LocusSurface(props: {
         <div className="dshpet-locus-headline">
           <span className="dshpet-locus-title">关联</span>
           <span className="dshpet-meta">
-            {summary.entries} 个入口 · {summary.chats} 个飞书入口 · {summary.works} 个父会话
+            {totals.entries} 个入口 · {totals.chats} 个飞书入口 · {totals.works} 个父会话
             {updatedAt === 0 ? '' : ` · 状态更新 ${formatRelative(updatedAt, now)}`}
           </span>
           <span className="dshpet-locus-headtail">
@@ -1767,6 +1821,7 @@ export function LocusSurface(props: {
               {filter.parentAvailability.length === 1 && filter.parentAvailability[0] !== undefined
                 ? PARENT_AVAILABILITY_LABELS[filter.parentAvailability[0]]
                 : `已选 ${filter.parentAvailability.length} 类`}
+              {` · 入口：${entryStateFilterLabel(filter.entryStates)}`}
             </button>
             {filterOpen ? (
               <LocusFilterPanel
@@ -1856,20 +1911,25 @@ export function LocusSurface(props: {
 
       {empty ? (
         <p className="dshpet-empty">
-          {query.trim() === ''
-            ? '当前筛选下没有关联。可以放宽筛选，或用下面的按索引查询。'
-            : '没有匹配的关联。可以在下面的按索引查询里粘贴完整标识。'}
+          {query.trim() !== ''
+            ? '没有匹配的关联。可以在下面的按索引查询里粘贴完整标识。'
+            // A stopped entry is where its 重建 button lives, so an empty screen
+            // has to name the exit instead of letting the entry read as deleted.
+            : visible.hidden.entries !== 0
+              ? '当前筛选下没有关联。被隐藏的入口（含已停止、可重建的）在下面的「显示全部」里。'
+              : '当前筛选下没有关联。可以放宽筛选，或用下面的按索引查询。'}
         </p>
       ) : null}
 
       <HiddenNote
         hidden={visible.hidden}
-        onShow={() => setFilter({ parentAvailability: ['available', 'archived', 'unverified'], entryStates: [...DEFAULT_LOCUS_FILTER.entryStates] })}
+        onShow={() => setFilter(SHOW_ALL_LOCUS_FILTER)}
       />
 
       <p className="dshpet-item-hint dshpet-locus-nodelete">
         这里没有「删除」，是刻意的：停止关联只停止服务，保留主/子会话历史与飞书资源 ——
         消息 → 代际 → 会话 → 轮次的诊断链必须可追溯，所以历史只会被聚合和折叠，不会被清掉。
+        停止后的入口默认收在上面的「显示全部」里，在那里可以直接「重建」。
       </p>
 
       <DiscoveryFold codes={codes} disabled={props.busyKey !== undefined} run={props.runQuery} />
