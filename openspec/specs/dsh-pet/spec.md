@@ -488,10 +488,11 @@ SHALL 自行在执行开始时校验（在 Pet 中运行时经 `pet_context` 获
 
 ### Requirement: Pet 设置采用固定的页签信息架构且不接触 provider 凭据
 
-系统 SHALL 在 DSH Settings 注册独立 Pet section，并固定包含以下五个页签：
+系统 SHALL 在 DSH Settings 注册独立 Pet section，并固定包含以下六个页签：
 
 - **General**：Pet 外观/位置重置、默认 Agent composition、provider/model、新 Task 使用的默认上下文策略；
 - **Skills**：Skill 列表、本地目录导入、已安装版本、启用/禁用、快捷能力可见性、升级/卸载和 Workspace 投影同步状态；
+- **Locus**：飞书入口与 DSH 会话关联的**只读展示、导航与生命周期动作**——按入口（群/话题）聚合当前代并折叠历史代际、展示来源与默认 Q&A、权限、工作根与状态，并提供跳转到对应飞书入口与主/子会话的入口，以及解绑/归档/停止/重建/权限确认等动作。该页签 MUST NOT 提供任何**新建外部资源**的入口（绑定新入口、创建答疑群），关联 SHALL 由飞书消息建立、答疑群 SHALL 由 Pet 轮盘建立；
 - **环境变量**：按全局与来源 workspace 两个作用域配置的键值，经官方 `ctx.shellEnv` 以 `DSH_PET_*` 注入 Pet executor 的每次 shell 调用；
 - **Channel**：bot 绑定入口（创建新 Bot / 连接已有 Bot）与已绑定身份摘要、channel 启用开关、发送者 allowlist、default workspace、chat 到 workspace 的绑定列表（含自动写回的绑定行）与改绑/删除操作；
 - **Diagnostics**：Host 生命周期、状态/Workspace/Skill store 与投影路径、版本摘要、同步漂移、依赖可用性、channel 连接状态与队列深度，以及显式修复/重建投影/重连操作。
@@ -531,7 +532,11 @@ Pet SHALL 显示 provider/model 可用性，但 MUST NOT 读取、回传或保�
 
 #### Scenario: 打开 Pet 设置
 - **WHEN** 用户从 Pet 浮层或 DSH Settings 打开 Pet 配置
-- **THEN** 用户看到 General、Skills、环境变量、Channel、Diagnostics 五个稳定页签，并能在 Skills 页完成安装、启用和投影诊断而无需进入 Task 执行面板
+- **THEN** 用户看到 General、Skills、Locus、环境变量、Channel、Diagnostics 六个稳定页签，并能在 Skills 页完成安装、启用和投影诊断而无需进入 Task 执行面板
+
+#### Scenario: Locus 页签不提供新建外部资源的入口
+- **WHEN** 用户打开 Locus 页签
+- **THEN** 页面只提供既有入口的展示、导航与生命周期动作，不出现绑定新入口或创建答疑群的控件；两者分别由飞书消息与 Pet 轮盘建立
 
 #### Scenario: Skill 投影发生漂移
 - **WHEN** Diagnostics 检测到已启用 allowlist 与 Workspace `.dsh/skills` 投影摘要不一致
