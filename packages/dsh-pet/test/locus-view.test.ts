@@ -439,16 +439,13 @@ describe('filtering', () => {
     expect(Object.keys(PARENT_AVAILABILITY_LABELS).sort()).toEqual(['archived', 'available', 'unverified'])
   })
 
-  it('hides archived work by default and reports what it hid', () => {
+  it('hides archived work by default', () => {
     const view = applyLocusFilter(realisticSnapshot())
     expect(view.works).toHaveLength(1)
     expect(view.works[0]?.parentSessionId).toBe('session-906220d3-ecee-41d0-9320-f425f17edefe')
-    expect(view.hidden.parentSessions).toBe(1)
-    expect(view.hidden.entries).toBe(2)
-    expect(view.hidden.parentReasons[0]?.label).toBe('已归档')
   })
 
-  it('never hides silently when the entry-state filter is narrowed', () => {
+  it('removes exactly the entries the entry-state filter excludes', () => {
     const chat = locus({
       locusId: 'locus-runtime-1-aaaa1111',
       chatId: 'oc_a',
@@ -462,38 +459,20 @@ describe('filtering', () => {
       parentAvailability: 'available',
       state: 'stopped',
     })
-    const view = applyLocusFilter(snapshot([chat, stopped], [chat.locusId, stopped.locusId]), {
-      parentAvailability: ['available'],
-      entryStates: ['active'],
-    })
-    expect(view.works[0]?.families).toHaveLength(1)
-    expect(view.hidden.entryStates).toEqual([{ state: 'stopped', label: '已停止', entries: 1 }])
+    const base = snapshot([chat, stopped], [chat.locusId, stopped.locusId])
+
+    expect(applyLocusFilter(base).works.flatMap(work => work.families).map(family => family.key))
+      .toEqual([endpointKey({ chatId: 'oc_a' })])
+    expect(
+      applyLocusFilter(base, { parentAvailability: ['available'], entryStates: ['stopped'] })
+        .works.flatMap(work => work.families).map(family => family.key),
+    ).toEqual([endpointKey({ chatId: 'oc_b' })])
+    // The whole snapshot, for the reading that asks what exists.
+    expect(applyLocusFilter(base, SHOW_ALL_LOCUS_FILTER).works.flatMap(work => work.families))
+      .toHaveLength(2)
   })
 
-  it('hides an entry the Host no longer serves, and names the state it hid', () => {
-    const live = locus({
-      locusId: 'locus-runtime-1-aaaa1111',
-      chatId: 'oc_live',
-      parentSessionId: 'session-1',
-      parentAvailability: 'available',
-    })
-    const stopped = locus({
-      locusId: 'locus-runtime-2-bbbb2222',
-      chatId: 'oc_stopped',
-      parentSessionId: 'session-1',
-      parentAvailability: 'available',
-      state: 'stopped',
-    })
-    const view = applyLocusFilter(snapshot([live, stopped], [live.locusId, stopped.locusId]))
-    expect(view.works.flatMap(work => work.families).map(family => family.key)).toEqual([
-      endpointKey({ chatId: 'oc_live' }),
-    ])
-    // The reason must be the entry's own lifecycle, never the parent's.
-    expect(view.hidden.parentSessions).toBe(0)
-    expect(view.hidden.entryStates).toEqual([{ state: 'stopped', label: '已停止', entries: 1 }])
-  })
-
-  it('reports hidden entries even when no work section survives', () => {
+  it('drops a work section whose entries are all filtered out', () => {
     const stopped = locus({
       locusId: 'locus-runtime-1-aaaa1111',
       chatId: 'oc_a',
@@ -509,15 +488,11 @@ describe('filtering', () => {
       state: 'retired',
     })
     const base = snapshot([stopped, retired], [])
-    const hidden = applyLocusFilter(base)
-    // An empty list, but never a silent one: both entries are accounted for.
-    expect(hidden.works).toHaveLength(0)
-    expect(hidden.hidden.entries).toBe(2)
-    expect(hidden.hidden.entryStates.map(item => item.label)).toEqual(['已停止', '已退役'])
-
-    const all = applyLocusFilter(base, SHOW_ALL_LOCUS_FILTER)
-    expect(all.hidden.entries).toBe(0)
-    expect(all.works.flatMap(work => work.families)).toHaveLength(2)
+    // An empty header is not a reading: the condition is stated on the filter
+    // control, so the list shows nothing rather than a nameless section.
+    expect(applyLocusFilter(base).works).toHaveLength(0)
+    expect(applyLocusFilter(base, SHOW_ALL_LOCUS_FILTER).works.flatMap(work => work.families))
+      .toHaveLength(2)
   })
 
   it('leaves exactly the terminal buckets unchecked in the default filter', () => {

@@ -53,7 +53,6 @@ import {
   sessionAvailabilityLabel,
   summarizeLocusView,
   type HandleCodes,
-  type HiddenSummary,
   type LocusFamily,
   type LocusFamilyNode,
   type LocusFilter,
@@ -1357,47 +1356,6 @@ function LocusFilterPanel(props: {
   )
 }
 
-/**
- * What the filter removed, stated in the list rather than by an empty screen.
- *
- * An archived parent can still own active entries, and a stopped entry is the
- * only place its 重建 button lives — a silent removal would read as "my entry
- * disappeared" (or worse, as "my entry was deleted"). The previous surface had
- * no filter at all precisely because hiding without saying so is worse than
- * scrolling.
- */
-function HiddenNote(props: {
-  readonly hidden: HiddenSummary
-  readonly onShow: () => void
-}): JSX.Element | null {
-  const { hidden } = props
-  if (hidden.parentSessions === 0 && hidden.entries === 0) return null
-  const parentPart = hidden.parentSessions === 0
-    ? ''
-    : `已隐藏 ${hidden.parentSessions} 个父会话（${hidden.parentReasons.map(reason => reason.label).join(' · ')}）`
-  const stateReasons = hidden.entryStates.map(item => `${item.label} ${item.entries}`).join(' · ')
-  const entryPart = hidden.entries === 0
-    ? ''
-    // With no hidden parent, the entries are hidden by their own lifecycle, so
-    // they are the whole count rather than something "under" the parent.
-    : hidden.parentSessions === 0
-      ? `已隐藏 ${hidden.entries} 个入口`
-      : `其下或本身共 ${hidden.entries} 个入口未显示`
-  return (
-    <div className="dshpet-locus-hidden">
-      <button type="button" className="dshpet-jump" data-disabled="false" onClick={props.onShow}>
-        显示全部 <span aria-hidden="true">▾</span>
-      </button>
-      <span className="dshpet-meta">
-        {parentPart}
-        {parentPart !== '' && entryPart !== '' ? '，' : ''}
-        {entryPart}
-        {stateReasons === '' ? '' : `（按状态：${stateReasons}）`}
-      </span>
-    </div>
-  )
-}
-
 /** One discovery result, rendered with the same information rules as a row. */
 function DiscoveryCard(props: {
   readonly locus: PetLocusView
@@ -1798,8 +1756,12 @@ export function LocusSurface(props: {
             {totals.entries} 个入口 · {totals.chats} 个飞书入口 · {totals.works} 个父会话
             {updatedAt === 0 ? '' : ` · 状态更新 ${formatRelative(updatedAt, now)}`}
           </span>
-          <span className="dshpet-locus-headtail">
-            <span className="dshpet-locus-filter-anchor" ref={filterRef}>
+        </div>
+        {/* The filter keeps its own line instead of sharing the title line: it
+            is a wide control, and sharing squeezed the title to one character
+            per line while the counts kept their space. */}
+        <div className="dshpet-locus-filterrow">
+          <span className="dshpet-locus-filter-anchor" ref={filterRef}>
             <button
               type="button"
               className="dshpet-jump"
@@ -1831,7 +1793,6 @@ export function LocusSurface(props: {
                 onChange={setFilter}
               />
             ) : null}
-            </span>
           </span>
         </div>
         <div className="dshpet-locus-tools">
@@ -1913,23 +1874,14 @@ export function LocusSurface(props: {
         <p className="dshpet-empty">
           {query.trim() !== ''
             ? '没有匹配的关联。可以在下面的按索引查询里粘贴完整标识。'
-            // A stopped entry is where its 重建 button lives, so an empty screen
-            // has to name the exit instead of letting the entry read as deleted.
-            : visible.hidden.entries !== 0
-              ? '当前筛选下没有关联。被隐藏的入口（含已停止、可重建的）在下面的「显示全部」里。'
-              : '当前筛选下没有关联。可以放宽筛选，或用下面的按索引查询。'}
+            : '当前筛选下没有关联。可以放宽上面的筛选（已停止的入口要在入口状态里勾上），或用下面的按索引查询。'}
         </p>
       ) : null}
-
-      <HiddenNote
-        hidden={visible.hidden}
-        onShow={() => setFilter(SHOW_ALL_LOCUS_FILTER)}
-      />
 
       <p className="dshpet-item-hint dshpet-locus-nodelete">
         这里没有「删除」，是刻意的：停止关联只停止服务，保留主/子会话历史与飞书资源 ——
         消息 → 代际 → 会话 → 轮次的诊断链必须可追溯，所以历史只会被聚合和折叠，不会被清掉。
-        停止后的入口默认收在上面的「显示全部」里，在那里可以直接「重建」。
+        停止后的入口默认不在列表里（筛选默认只看在服务的），在筛选里勾上「已停止 / 已失效」即可直接「重建」。
       </p>
 
       <DiscoveryFold codes={codes} disabled={props.busyKey !== undefined} run={props.runQuery} />

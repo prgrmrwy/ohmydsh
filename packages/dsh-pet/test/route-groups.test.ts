@@ -176,7 +176,7 @@ describe('Channel settings use unified onboarding only', () => {
 })
 
 describe('an archived session is refused before the click, not after', () => {
-  it('disables the control and says why', async () => {
+  it('disables the control and says why, once the filter is told to show it', async () => {
     const opened: string[] = []
     const { setSessionOpener } = await import('../src/client/settings.js')
     setSessionOpener(target => opened.push(JSON.stringify(target)))
@@ -186,20 +186,32 @@ describe('an archived session is refused before the click, not after', () => {
     stubLocus({ ...LOCUS_VIEW, main: { ...LOCUS_VIEW.main, availability: 'archived' as const } })
     const host = await mountTab('locus')
 
-    // An archived parent is hidden by default, so what the owner sees first is
-    // the reason and a way back — not a control that looks live but refuses.
-    expect(host.textContent).toContain('已隐藏 1 个父会话（已归档）')
+    // An archived parent is hidden by default. The list adds no second row for
+    // that: the filter control states the condition, and its popover is where
+    // the reason and the count live.
     expect(host.querySelector('.dshpet-work-name')).toBeNull()
+    expect(host.textContent).not.toContain('dshpet-locus-hidden')
 
-    const reveal = [...host.querySelectorAll('button')].find(
-      item => item.textContent?.startsWith('显示全部'),
+    const filter = [...host.querySelectorAll('button')].find(
+      item => item.textContent?.startsWith('父会话：'),
     ) as HTMLButtonElement | undefined
-    expect(reveal).toBeDefined()
+    expect(filter).toBeDefined()
     await act(async () => {
-      reveal?.click()
+      filter?.click()
+    })
+    expect(host.textContent).toContain('父会话状态')
+    expect(host.textContent).toContain('已归档')
+
+    // Checking the bucket is the way back — the only one.
+    const bucket = [...host.querySelectorAll('.dshpet-locus-filter-row')].find(
+      row => row.textContent?.startsWith('已归档'),
+    ) as HTMLLabelElement | undefined
+    expect(bucket).toBeDefined()
+    await act(async () => {
+      bucket?.querySelector('input')?.click()
     })
 
-    // Revealed, the parent session still is not offered as a control: the title
+    // Shown, the parent session still is not offered as a control: the title
     // becomes a static label carrying the reason, and the availability is stated
     // in words beside it, so the reason needs no hover either.
     const name = host.querySelector('.dshpet-work-name') as HTMLElement | undefined
@@ -239,8 +251,9 @@ describe('a stopped entry is hidden by default yet recoverable', () => {
   it('reveals the tombstone with a rebuild control on its row', async () => {
     // The Host refuses a stopped endpoint until an explicit rebuild
     // (`repository.ts`), so the default list must not show it as live. It must
-    // also not read as deleted: 显示全部 is the only way to the row, and 重建 —
-    // the only way out — has to be on that row rather than two disclosures deep.
+    // also not read as deleted: the filter states the condition, and its
+    // 入口状态 bucket is the way back — and 重建, the only way out, has to be on
+    // the row itself rather than two disclosures deep.
     const bodies: string[] = []
     const stopped = {
       ...LOCUS_VIEW,
@@ -267,19 +280,27 @@ describe('a stopped entry is hidden by default yet recoverable', () => {
     )
     const host = await mountTab('locus')
 
-    expect(host.textContent).toContain('已隐藏 1 个入口')
-    expect(host.textContent).toContain('（按状态：已停止 1）')
     expect(host.querySelector('.dshpet-locus-row')).toBeNull()
     // The filter button states the condition even while the popover is shut, so
     // a missing entry is explained without opening anything.
     expect(host.textContent).toContain('入口：在服务')
+    // The empty screen names the bucket to check instead of leaving the entry
+    // looking deleted.
+    expect(host.textContent).toContain('已停止的入口要在入口状态里勾上')
 
-    const reveal = [...host.querySelectorAll('button')].find(
-      item => item.textContent?.startsWith('显示全部'),
+    const filter = [...host.querySelectorAll('button')].find(
+      item => item.textContent?.startsWith('父会话：'),
     ) as HTMLButtonElement | undefined
-    expect(reveal).toBeDefined()
+    expect(filter).toBeDefined()
     await act(async () => {
-      reveal?.click()
+      filter?.click()
+    })
+    const bucket = [...host.querySelectorAll('.dshpet-locus-filter-row')].find(
+      row => row.textContent?.startsWith('已停止 / 已失效'),
+    ) as HTMLLabelElement | undefined
+    expect(bucket).toBeDefined()
+    await act(async () => {
+      bucket?.querySelector('input')?.click()
     })
 
     expect(host.querySelector('.dshpet-locus-row')).not.toBeNull()

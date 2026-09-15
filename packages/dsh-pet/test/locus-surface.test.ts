@@ -58,20 +58,25 @@ describe('locus surface', () => {
     expect(markup).toContain('a27b')
   })
 
-  it('hides an archived parent by default and says so in the list', () => {
+  it('hides an archived parent by default, with the condition on the filter', () => {
     const markup = render(surfaceSnapshot())
-    // The entry under the archived parent is not rendered...
+    // The entry under the archived parent is not rendered, and the list adds no
+    // second "hidden" row for it: the filter control states the condition and
+    // its popover counts every bucket, so one disclosure is enough.
     expect(markup).not.toContain('oc_b1fa')
-    // ...but it is not silently gone either.
-    expect(markup).toContain('已隐藏 1 个父会话（已归档）')
-    expect(markup).toContain('显示全部')
+    expect(markup).not.toContain('dshpet-locus-hidden')
+    expect(markup).not.toContain('显示全部')
+    expect(markup).toContain('父会话：可用 · 入口：在服务')
   })
 
-  it('states every lifecycle state in words', () => {
+  it('names the states it shows in words, and keeps the rest out of the list', () => {
     const markup = render(surfaceSnapshot())
     expect(markup).toContain('活跃')
-    // The archived parent is named, not just counted.
-    expect(markup).toContain('已归档')
+    // States the default condition excludes are named by the filter popover
+    // (asserted where it can actually be opened), not smuggled into the list as
+    // a second disclosure row.
+    expect(markup).not.toContain('已归档')
+    expect(markup).not.toContain('dshpet-locus-hidden')
   })
 
   it('names a generation under construction when it is shown', () => {
@@ -122,7 +127,7 @@ describe('locus surface', () => {
     expect(markup).toContain('继承自 入口 · a27b')
   })
 
-  it('hides a stopped entry by default and points at the way back', () => {
+  it('hides a stopped entry by default and points at the filter', () => {
     const stopped = locusFixture({
       locusId: 'locus-runtime-7-cccc3333',
       chatId: 'oc_stopped',
@@ -133,14 +138,15 @@ describe('locus surface', () => {
     })
     const markup = render(snapshotOf([stopped], [stopped.locusId]))
     // The Host refuses this endpoint until an explicit rebuild, so the default
-    // list must not show it as live — but it must not read as deleted either.
+    // list must not show it as live — and the filter, not an extra row, is what
+    // says where it went.
     expect(count(markup, 'class="dshpet-locus-row"')).toBe(0)
-    expect(markup).toContain('已隐藏 1 个入口')
-    expect(markup).toContain('（按状态：已停止 1）')
-    expect(markup).toContain('显示全部')
-    // The empty screen names the exit instead of leaving the entry unexplained.
-    expect(markup).toContain('被隐藏的入口（含已停止、可重建的）在下面的「显示全部」里')
-    // No empty work header is left behind for a session with nothing to show.
+    expect(markup).not.toContain('dshpet-locus-hidden')
+    expect(markup).toContain('父会话：可用 · 入口：在服务')
+    // The empty screen names the condition to relax, and no empty work header is
+    // left behind for a session with nothing to show.
+    expect(markup).toContain('当前筛选下没有关联')
+    expect(markup).toContain('已停止的入口要在入口状态里勾上')
     expect(markup).not.toContain('dshpet-work-name')
   })
 

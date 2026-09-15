@@ -695,12 +695,21 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-locus-head{display:flex;flex-direction:column;gap:10px;
   padding:16px 0 12px;border-bottom:.5px solid var(--dsw-alias-border-l2,#0000001a);
   position:relative}
-.dshpet-settings .dshpet-locus-headline{display:flex;align-items:baseline;gap:8px}
+/* The title never shrinks and never wraps: when the row ran out of room it used
+   to be squeezed to one character per line ("关" over "联") while the counts and
+   the filter kept their space. The counts move to a second line instead. */
+.dshpet-settings .dshpet-locus-headline{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
 .dshpet-settings .dshpet-locus-title{font:500 14px/22px var(--dsw-font-family,inherit);
+  flex:none;white-space:nowrap;
   color:var(--dsw-alias-label-primary,#0f1115)}
-.dshpet-settings .dshpet-locus-headtail{margin-left:auto;display:inline-flex;align-items:center;gap:6px}
-.dshpet-settings .dshpet-locus-tools{display:flex;align-items:center;gap:8px}
-.dshpet-settings .dshpet-locus-search{flex:1;min-width:0;height:32px;max-width:none}
+/* The condition gets its own line, right-aligned where the control used to sit
+   in the title row. It costs nothing vertically: the row it replaces (the
+   in-list hidden exit) is gone. */
+.dshpet-settings .dshpet-locus-filterrow{display:flex;justify-content:flex-end}
+/* Tools wrap rather than compress: the search takes a real basis, so an
+   over-narrow panel moves the input under the tabs instead of crushing it. */
+.dshpet-settings .dshpet-locus-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dshpet-settings .dshpet-locus-search{flex:1 1 180px;min-width:180px;height:32px;max-width:none}
 
 /* Shared inline vocabulary: one meta size, one chip, one handle. */
 .dshpet-settings .dshpet-meta{font:var(--dsw-font-xs-13,400 12px/18px inherit);
@@ -855,12 +864,6 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-locus-generation-no{flex:none;font-variant-numeric:tabular-nums;
   color:var(--dsw-alias-label-tertiary,#81858c)}
 
-/* What the filter removed, stated in the list instead of by an empty screen. */
-.dshpet-settings .dshpet-locus-hidden{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
-  margin-top:12px;padding-top:10px;
-  border-top:.5px solid var(--dsw-alias-border-l2,#0000001a)}
-.dshpet-settings .dshpet-locus-hidden .dshpet-meta{
-  color:var(--dsw-alias-label-tertiary,#81858c);white-space:normal}
 .dshpet-settings .dshpet-locus-nodelete{margin-top:12px;max-width:620px}
 
 /* The filter panel. */
