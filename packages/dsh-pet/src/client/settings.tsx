@@ -925,28 +925,11 @@ function LocusDetails(props: {
         <button
           type="button"
           className="dshpet-action dshpet-action-sm dshpet-action-danger"
-          disabled={blocked || !canManageCurrent}
-          onClick={run('unbind', () => petApi.locusUnbind({ action: 'unbind', endpoint, ...fence }))}
-        >
-          解绑
-        </button>
-        <button
-          type="button"
-          className="dshpet-action dshpet-action-sm dshpet-action-danger"
           disabled={blocked || !canStop}
-          title={canStop ? '停止服务并保留历史与飞书资源' : '只有仍在服务的入口可归档'}
-          onClick={run('archive', () => petApi.locusArchive({ action: 'archive', endpoint, ...fence }))}
-        >
-          归档
-        </button>
-        <button
-          type="button"
-          className="dshpet-action dshpet-action-sm dshpet-action-danger"
-          disabled={blocked || !canStop}
-          title={canStop ? '停止服务并保留入口停止标记' : '只有仍在服务的入口可停止'}
+          title="停止服务并保留入口停止标记；历史与飞书资源保留，恢复用重建"
           onClick={run('stop', () => petApi.locusStop({ action: 'stop', endpoint, ...fence }))}
         >
-          停止
+          停止关联
         </button>
       </dd>
     </dl>
@@ -1885,7 +1868,7 @@ export function LocusSurface(props: {
       />
 
       <p className="dshpet-item-hint dshpet-locus-nodelete">
-        这里没有「删除」，是刻意的：解绑、归档、停止都只停止服务，保留主/子会话历史与飞书资源 ——
+        这里没有「删除」，是刻意的：停止关联只停止服务，保留主/子会话历史与飞书资源 ——
         消息 → 代际 → 会话 → 轮次的诊断链必须可追溯，所以历史只会被聚合和折叠，不会被清掉。
       </p>
 
