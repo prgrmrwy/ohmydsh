@@ -150,15 +150,16 @@ describe('locus surface', () => {
     expect(markup).not.toContain('dshpet-work-name')
   })
 
-  it('renders an empty state that points at the reverse lookup', () => {
+  it('renders an empty state that points at search and filter, with the lookup fold off', () => {
     const markup = render(snapshotOf([]))
     expect(markup).toContain('没有关联')
-    // Named by what it does for the owner, and described without the internal
-    // word for an entry ("endpoint") or for storage ("index").
-    expect(markup).toContain('反查关联')
-    expect(markup).toContain('入口 = 飞书里的一个群')
+    // The reverse-lookup fold is disabled by owner decision: an owner with an ID
+    // outside the snapshot has no UI path for now, and nothing claims otherwise.
+    expect(markup).not.toContain('dshpet-locus-discovery')
+    expect(markup).not.toContain('反查关联')
     expect(markup).not.toContain('Endpoint')
-    expect(markup).not.toContain('按索引精确查询')
+    // What is left to relax is named: with no search running, that is the filter.
+    expect(markup).toContain('放宽上面的筛选')
   })
 
   it('shows a topic-only endpoint without inventing a chat entry', () => {
