@@ -603,6 +603,12 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
           }
           const result = await petApi.locusDefaultQa({
             parentSessionId: effectiveSource.sessionId,
+            // Name the group after the source session's own title so the
+            // owner can tell multiple default Q&A groups apart at a glance.
+            // A session without a title yet (e.g. still generating) falls
+            // through to the Host's own fallback ("答疑 · DSH") by omitting
+            // the field rather than sending an empty string.
+            ...(effectiveSource.title === undefined ? {} : { groupName: effectiveSource.title }),
           })
           const chatName = result.locus.endpoint.chatName
           const label = chatName === undefined ? '默认答疑入口' : `答疑群「${chatName}」`

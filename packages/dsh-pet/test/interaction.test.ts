@@ -250,9 +250,82 @@ describe('default Q&A interaction', () => {
 
     const request = calls.find(call => call.url.includes('locus-default-qa'))
     expect(request).toBeDefined()
-    expect(JSON.parse(request?.body ?? '{}')).toEqual({ parentSessionId: 'main-live' })
+    // The source session's own title rides along as `groupName` so the Host
+    // names a newly created default Q&A group after it, rather than the
+    // fixed "答疑 · DSH" fallback — see `overlay.tsx`'s `run()`.
+    expect(JSON.parse(request?.body ?? '{}')).toEqual({
+      parentSessionId: 'main-live',
+      groupName: '研发主会话',
+    })
     expect(host.textContent).toContain('已打开本会话的答疑群「研发答疑」')
     expect(calls.some(call => call.url.includes('invocation-create'))).toBe(false)
+  })
+
+  it('omits groupName when the source session has no title yet, so the Host falls back on its own', async () => {
+    const calls: Array<{ url: string; body?: string }> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({ url: String(url), ...(typeof init?.body === 'string' ? { body: init.body } : {}) })
+        if (String(url).includes('locus-default-qa')) {
+          return {
+            status: 200,
+            text: async () => JSON.stringify({
+              ok: true,
+              data: {
+                action: 'default-qa',
+                created: true,
+                reused: false,
+                locus: { endpoint: { chatId: 'oc_qa', chatName: '答疑 · DSH' } },
+              },
+            }),
+          }
+        }
+        return {
+          status: 200,
+          text: async () => JSON.stringify({
+            ok: true,
+            data: {
+              lifecycle: { phase: 'ready' },
+              capabilities: [{
+                id: 'qa-group', label: '答疑群', description: '统一 locus Q&A', skillName: 'qa-group',
+                kind: 'builtin', available: true, showAsShortcut: true,
+              }],
+              tasks: [],
+            },
+          }),
+        }
+      }),
+    )
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const reactRoot = createRoot(host)
+    mounted = { root: reactRoot, host }
+    // No `title` — the session hasn't produced one yet (e.g. brand new,
+    // still generating). `effectiveSource.title` is `undefined` here.
+    reactRoot.render(createElement(PetOverlay, {
+      currentSource: { kind: 'session', sessionId: 'main-live' },
+    } as never))
+    await settle()
+
+    mascotOf(host).dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    await settle()
+    const item = [...host.querySelectorAll('button')].find(button =>
+      (button.textContent ?? '').includes('答疑群'),
+    )
+    item?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await settle()
+
+    const request = calls.find(call => call.url.includes('locus-default-qa'))
+    expect(request).toBeDefined()
+    const body = JSON.parse(request?.body ?? '{}')
+    // The field must be ABSENT, not sent as an empty string: the Host's own
+    // `qaGroupName()` fallback only triggers on a missing/blank groupName,
+    // and an explicit empty string would still take that same path, but
+    // omission is what `overlay.tsx` actually does and what the wire type
+    // (`groupName?: string`) expects for "no name given".
+    expect('groupName' in body).toBe(false)
+    expect(body).toEqual({ parentSessionId: 'main-live' })
   })
 })
 
