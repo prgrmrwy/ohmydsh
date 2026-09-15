@@ -150,10 +150,15 @@ describe('locus surface', () => {
     expect(markup).not.toContain('dshpet-work-name')
   })
 
-  it('renders an empty state that points at the manual lookup', () => {
+  it('renders an empty state that points at the reverse lookup', () => {
     const markup = render(snapshotOf([]))
     expect(markup).toContain('没有关联')
-    expect(markup).toContain('发现关联')
+    // Named by what it does for the owner, and described without the internal
+    // word for an entry ("endpoint") or for storage ("index").
+    expect(markup).toContain('反查关联')
+    expect(markup).toContain('入口 = 飞书里的一个群')
+    expect(markup).not.toContain('Endpoint')
+    expect(markup).not.toContain('按索引精确查询')
   })
 
   it('shows a topic-only endpoint without inventing a chat entry', () => {
