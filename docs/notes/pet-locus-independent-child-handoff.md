@@ -137,6 +137,19 @@
 ### 本轮验证证据
 
 - `npm run typecheck --workspace=dsh-pet` 通过；`npm run build --workspace=dsh-pet` 通过
-- Pet 全量 `npx vitest run`：2330 passed / 31 skipped / 11 failed。11 项失败经 `git stash` 逐条比对干净 HEAD，确认与本轮改动无关，是既有 `dsh-scope`/`ToolRuntime` 工具可见性基础设施缺陷（`collaboration-assembly`/`collaboration-tool-scope`/`inquiry-tool-scope`/`tool-scope` 中与 Delivery 模型无关的用例），未在本 change 范围内修复
+- Pet 全量 `npx vitest run`：2333 passed / 31 skipped / 11 failed。11 项失败经 `git stash` 逐条比对干净 HEAD，确认与本轮改动无关，是既有 `dsh-scope`/`ToolRuntime` 工具可见性基础设施缺陷（`collaboration-assembly`/`collaboration-tool-scope`/`inquiry-tool-scope`/`tool-scope` 中与 Delivery 模型无关的用例），未在本 change 范围内修复
 - 仓库 `npm test`：124 passed / 1 skipped / 0 failed；`npm run check:artifacts`、`git diff --check`、`openspec validate pet-locus-independent-child --strict` 均通过
-- **仍未做**：`dsh build` 幂等验证、Host 重启、真实群/话题/队列租约验收（tasks.md 10.3–10.7）
+
+### 真实飞书验收（2026-09-15）
+
+10.3 部署与重启、10.4 跨 turn 问父、10.5 话题落位、10.6a 串行 backlog **均已通过**，逐项证据（deliveryId、时间戳、终态字段）记于 tasks.md 对应条目。10.6b（wait 硬上限）与 10.6c（到期自动推进，默认租约 1 小时且无可调短的配置项）仍未验收。
+
+最有价值的部分是：**验收暴露了三个本地测试无法发现、只有真实链路才会命中的缺陷**。
+
+1. **`expired` 行的 schema 自相矛盾**：`acceptDelivery` 在接受时即写入 `outboundResult: 'none'`，而新加的校验规则禁止 `expired` 行携带任何 `outboundResult`。后果是任一 Delivery 过期后，**下次重启** domain 校验失败、Pet 整体降级、路由消失（`/dsh-pet/api/*` 返回 404）——这正是所有者报告的「pet 看不到 locus」。校验发生在 domain open 而非写入时，所以写的时候毫无征兆。
+2. **`wait` 误报过期**：`waitDelivery` 把「请求期限已被现有租约覆盖」判为 `deadline-expired`。租约刚建立时还剩近一小时，child 说「再等 30 分钟」请求的是更短的期限，于是必然失败；child 据此认为 Delivery 已死，放弃回复改用 `no-reply`。
+3. **child↔parent 回复指引单向**（DSH 平台层，非 Pet）：`continuableInitialPrompt` 只告诉 child「你的 parent id 是 X，用 `send_message` 回」；父侧收到的却是裸的 `Agent <id> sent a message:`，既无可回复的 agent id，也无「普通 assistant 文本不会送达」的说明。父用文本作答即**静默失败**——父以为答了，child 等到超时。这让「不 fork 父历史、缺上下文就问父」的设计前提不成立，是阻塞级缺陷。已在 `settlement-notice.patch` 中对称补齐 `parentFacingAgentMessage`，只用于 `sendToParent`，`steer`（parent→child）保持原样。
+
+前两个各配了**反向验证过**的回归测试（临时撤掉修复后，测试确实失败并复现原始报错）；第三个经 pinned commit 全量重建验证，patch sha256 已在 `build.mjs` 与 `build-launcher.cjs` 两处同步更新。
+
+方法论教训：这三个缺陷都不是"逻辑写错"，而是**跨越边界的不一致**——写入方与校验方对同一字段的期望不同、语义命名与实际含义不符、双向协议只实现了一侧。这类问题在单测里各自都是对的，只有真实端到端链路才会暴露。
