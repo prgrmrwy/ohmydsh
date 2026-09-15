@@ -64,7 +64,7 @@
 
 - [x] 8.1 `reconcileStartup` 在 intake 开启前运行：`current`/backlog 各自超过 `acceptedAt+24h`（current 另受 `min(deadlineAt, hard)` 约束）→`expired`；遗留 `finishing`→`unknown-terminal` 且不重放发送；未过期 `current` 按精确 locus/generation/child/endpoint 身份保留（不要求开放 turn）；无 current 时 `index.ts` 的启动 dispatch 循环对每个有 backlog 且无 current/无 in-flight legacy 行的 locus 调用一次 `dispatchNext`
 - [x] 8.2 恢复只复用持久记录中的同一 child session；`queued`/`running` 只在精确 `deliveryProof`（`executionId`+`turnId`+`state:'running'`）匹配时保留为 `running`（不促成 `current`，避免与同 locus 真实 current 行冲突）；无法证明 locus/generation/child/endpoint 一致时标记 `startupRecoveryDebt` 并阻塞该 locus 的后续 backlog 派发，不新建替代 session、不猜 FIFO
-- [ ] 8.3 未实现：accept/current dispatch/bind、finish CAS/飞书调用/结果落账、expiry/interrupt/next dispatch 各崩溃窗口的系统性 fault-injection 测试矩阵。现状：仅有 provisioning 相关的 `failOnWriteNumber` 崩溃窗口测试（`locus-persistence.test.ts`），未针对 Delivery finish/dispatch 路径做等价的中途失败注入
+- [ ] 8.3 **未实现，已转入 BACKLOG B038**：accept/current dispatch/bind、finish CAS/飞书调用/结果落账、expiry/next dispatch 各崩溃窗口的系统性 fault-injection 测试矩阵。现状仅有 provisioning 相关的 `failOnWriteNumber` 崩溃窗口测试（`locus-persistence.test.ts`），未针对 Delivery finish/dispatch 路径做等价的中途失败注入。实现侧已有保守设计与逻辑层单测覆盖（`finishing` 持久栅栏 + 重启收敛 `unknown-terminal` 不重发、全程 `expectedRevision` CAS、恢复要求精确身份否则挂起并记 debt），缺的是**在真实中途写失败下**验证这些不变量。注：任务原文中的 interrupt 部分无法覆盖——expiry 路径对仍在运行的 Agent turn 不做中断尝试（无可用 runtime 接缝），这是 design.md 已记录的风险取舍而非测试空白，故 B038 不含该项
 - [ ] 8.4 未做独立验证：重启不重复投递 current（`claimCurrentDeliveryMutation` 的 occupancy 检查理论上防止，但无重启后 double-dispatch 的专项回归）、scheduler 到期与 normal completion 并发只推进一次（两者共用同一 `withLocusDispatchLane`/`enqueueDispatchLane` 串行化，但无显式并发竞争测试证明）
 
 ## 9. 文档明确延后项
