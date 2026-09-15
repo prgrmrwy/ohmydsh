@@ -507,7 +507,10 @@ describe('settings information architecture', () => {
     // Assert the source contract so this test does not pretend useEffect ran on
     // the server or expose ownerId as a browser capability.
     expect(settings).toContain('统一 locus 接口不可用时不会回退')
-    // The reverse lookup is the only path for an owner who holds just an ID.
+    // The reverse-lookup fold is disabled by owner decision, not deleted: the
+    // component and the Host route it calls stay compiled behind one switch, so
+    // re-enabling it is a one-line change instead of a rewrite.
+    expect(settings).toContain('DISCOVERY_FOLD_ENABLED: boolean = false')
     expect(settings).toContain('反查关联')
     expect(settings).toContain('petApi.locusDiscovery')
     // Our word for an entry is 入口; "endpoint" is bookkeeping, so it must not
