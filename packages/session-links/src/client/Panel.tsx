@@ -82,6 +82,45 @@ export interface PanelProps {
   onOpenFile?: ((path: string) => void) | undefined
 }
 
+/**
+ * The panel root must be its own scroll container.
+ *
+ * better-sidebar hands each tab a `.paneTab` cell (`flex:1; min-height:0`,
+ * column flex) inside a `.paneContent` with `overflow: hidden` — the host
+ * never scrolls tab bodies, so a tab whose root is an intrinsic-height box
+ * is simply CLIPPED once its content outgrows the pane. Every builtin view
+ * honors the same contract (see `.subagentBody`): claim the cell's height
+ * with `flex:1; min-height:0` and own the overflow. `min-width: 0` keeps
+ * long single-line rows (link titles) ellipsizing instead of forcing a
+ * horizontal scrollbar; `overflow-x: hidden` is the belt-and-braces half.
+ */
+const ROOT_STYLE: CSSProperties = {
+  flex: 1,
+  minHeight: 0,
+  minWidth: 0,
+  overflowY: 'auto',
+  overflowX: 'hidden',
+  paddingBottom: 8,
+}
+
+/** Group heading: sticks to the top of the scroll container while its
+ *  section scrolls past, so the category of the visible rows stays legible.
+ *  Needs an opaque background (the rows scroll underneath it) — the same
+ *  layer token better-sidebar paints its own panel chrome with. */
+const HEADING_STYLE: CSSProperties = {
+  position: 'sticky',
+  top: 0,
+  zIndex: 1,
+  margin: 0,
+  padding: '10px 10px 4px',
+  fontSize: 12,
+  fontWeight: 600,
+  color: 'var(--dsw-alias-label-tertiary)',
+  textTransform: 'uppercase',
+  letterSpacing: 0.4,
+  background: 'var(--dsw-alias-bg-layer-1)',
+}
+
 const ROW_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
@@ -162,7 +201,7 @@ export function Panel({ ctx, store, sessionId, onOpenFile }: PanelProps) {
 
   if (!sessionId || (entries.length === 0 && produced.length === 0)) {
     return (
-      <div style={{ padding: '16px 12px', fontSize: 13, color: 'var(--dsw-alias-label-tertiary)' }}>
+      <div style={{ ...ROOT_STYLE, padding: '16px 12px', fontSize: 13, color: 'var(--dsw-alias-label-tertiary)' }}>
         当前会话暂无文档/资料 —— MR、部署、Meego、制品链接与本次产出的文件会在这里展示。
       </div>
     )
@@ -171,22 +210,10 @@ export function Panel({ ctx, store, sessionId, onOpenFile }: PanelProps) {
   const now = Date.now()
 
   return (
-    <div>
+    <div style={ROOT_STYLE}>
       {produced.length > 0 && (
         <section>
-          <h4
-            style={{
-              margin: 0,
-              padding: '10px 10px 4px',
-              fontSize: 12,
-              fontWeight: 600,
-              color: 'var(--dsw-alias-label-tertiary)',
-              textTransform: 'uppercase',
-              letterSpacing: 0.4,
-            }}
-          >
-            本次产出 · {produced.length}
-          </h4>
+          <h4 style={HEADING_STYLE}>本次产出 · {produced.length}</h4>
           {produced.map((file) => (
             <div key={file.path} style={ROW_STYLE} title={file.path}>
               <button
@@ -206,17 +233,7 @@ export function Panel({ ctx, store, sessionId, onOpenFile }: PanelProps) {
         if (items.length === 0) return null
         return (
           <section key={category}>
-            <h4
-              style={{
-                margin: 0,
-                padding: '10px 10px 4px',
-                fontSize: 12,
-                fontWeight: 600,
-                color: 'var(--dsw-alias-label-tertiary)',
-                textTransform: 'uppercase',
-                letterSpacing: 0.4,
-              }}
-            >
+            <h4 style={HEADING_STYLE}>
               {CATEGORY_LABELS[category]} · {items.length}
             </h4>
             {items.map((entry) => (
