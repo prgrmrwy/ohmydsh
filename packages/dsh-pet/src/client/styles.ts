@@ -695,17 +695,18 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-locus-head{display:flex;flex-direction:column;gap:10px;
   padding:16px 0 12px;border-bottom:.5px solid var(--dsw-alias-border-l2,#0000001a);
   position:relative}
-/* The title never shrinks and never wraps: when the row ran out of room it used
-   to be squeezed to one character per line ("关" over "联") while the counts and
-   the filter kept their space. The counts move to a second line instead. */
-.dshpet-settings .dshpet-locus-headline{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+/* Title and description are one tight block: the title row carries the filter
+   at its far end, the counts read as the line under it. The title never shrinks
+   and never wraps — when the row ran out of room it used to be squeezed to one
+   character per line ("关" over "联") while the counts kept their space. */
+.dshpet-settings .dshpet-locus-lead{display:flex;flex-direction:column;gap:4px}
+.dshpet-settings .dshpet-locus-headline{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .dshpet-settings .dshpet-locus-title{font:500 14px/22px var(--dsw-font-family,inherit);
   flex:none;white-space:nowrap;
   color:var(--dsw-alias-label-primary,#0f1115)}
-/* The condition gets its own line, right-aligned where the control used to sit
-   in the title row. It costs nothing vertically: the row it replaces (the
-   in-list hidden exit) is gone. */
-.dshpet-settings .dshpet-locus-filterrow{display:flex;justify-content:flex-end}
+/* The filter rides with the title; if the row cannot hold both, it wraps to its
+   own line rather than compressing the title. */
+.dshpet-settings .dshpet-locus-headline .dshpet-locus-filter-anchor{margin-left:auto}
 /* Tools wrap rather than compress: the search takes a real basis, so an
    over-narrow panel moves the input under the tabs instead of crushing it. */
 .dshpet-settings .dshpet-locus-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
