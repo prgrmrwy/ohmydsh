@@ -283,7 +283,7 @@
     - 更新 2026-09-13 T8 的**回执侧**诉求（「验收对话里只能用 `omt_…` 指代话题」，要求管理面**与回执**都提供人类可对照标识）→ **超出本次 scope，按无效需求处理**。本 change 只动 settings 面板；回执文案在 channel 层（`channel/feedback.ts`、`locus/switch-notice.ts`）。如仍需，单开一条。
     - 更新 2026-09-13 T8 的**话题名 / 首条消息摘要** → **超出本次 scope，按无效需求处理**。实测无数据来源：lark 端口只有 `chatName(chatId)`（`channel/lark.ts:143`），没有话题标题接口；首条消息摘要需要新增飞书读取能力。当前只能显示 `话题 · 19cd` + 所属群名。
     - 更新 2026-09-13 T4-C3（发现结果卡必须自证「查到了什么」）→ **收编**，设计稿 I 区：结果卡固定三行 = 入口（角色 + 名称 + 群级/话题/继承关系）→ 代际与状态 → 父会话/会话，最后才是跳转；空结果如实说「没有匹配的关联」，不退回裸 ID 列表。
-    - 落地载体：`openspec/changes/pet-locus-management-redesign/`（proposal / design / specs delta / tasks）。评审用的可视稿是临时产物、不入库，其结论已收敛进该 change 的 design.md 与本条目。
+    - 落地载体：`openspec/changes/archive/2026-09-15-pet-locus-management-redesign/`（已于 2026-09-15 归档）（proposal / design / specs delta / tasks）。评审用的可视稿是临时产物、不入库，其结论已收敛进该 change 的 design.md 与本条目。
 
     - 2026-09-15 **已实施**（openspec change `pet-locus-management-redesign`）：呈现层重写完成，`packages/dsh-pet/src/client/locus-view.ts`（纯函数）+ `settings.tsx` 的 Locus 区 + 样式；证据见该 change 的 tasks。
 ### [B027] Pet Delivery 失败向原飞书入口返回安全诊断
@@ -464,7 +464,7 @@
     - 要点 6（与 B026 合并设计，不在前端按 ID 或时间猜测）→ **满足**：B026 与 B030 现由同一份设计承载，分区与层级全部取自 Host 返回的 `endpoint` / `state` / `parentLocusId`。
     - 要点 7（保持 owner-only 与 Host 真相源，不引入前端本地状态覆盖 Host 结论）→ **收编为不变量**；Host 拒绝动作后不做乐观更新（沿用现有 `runAction` 语义）。
     - **本 change 在两条目之外的增量**（所有者 2026-09-15 逐轮确认）：短码体例、关系轨（父会话—locus—会话 的可见关系）、按工作/按入口双读法、父会话状态筛选（默认只看可用，归档的折成底部一行出口）、群名主动刷新入口、**移除面板里的绑定表单**（关联只能由飞书消息建立，手输 id 无人会用）。
-    - 落地载体：`openspec/changes/pet-locus-management-redesign/`（proposal / design / specs delta / tasks）。评审用的可视稿是临时产物、不入库，其结论已收敛进该 change 的 design.md 与本条目。
+    - 落地载体：`openspec/changes/archive/2026-09-15-pet-locus-management-redesign/`（已于 2026-09-15 归档）（proposal / design / specs delta / tasks）。评审用的可视稿是临时产物、不入库，其结论已收敛进该 change 的 design.md 与本条目。
 
     - 2026-09-15 **已实施**（openspec change `pet-locus-management-redesign`）：呈现层重写完成，`packages/dsh-pet/src/client/locus-view.ts`（纯函数）+ `settings.tsx` 的 Locus 区 + 样式；证据见该 change 的 tasks。
 ### [B002] 飞书助手:任务中 @ 助手,在飞书群发消息
