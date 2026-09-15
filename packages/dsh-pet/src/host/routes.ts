@@ -339,7 +339,17 @@ function requireReady(lifecycle: PetLifecycleMachine): void {
 }
 
 const LOCUS_FENCE_FIELDS = ['expectedGeneration', 'expectedLocusId', 'expectedUpdatedAt'] as const
-const LOCUS_ACTION_FIELDS: Readonly<Record<PetLocusActionRequest['action'], readonly string[]>> = {
+
+/**
+ * The exact request fields each locus action accepts.
+ *
+ * Exported so a test can hold the client's payloads against the same list the
+ * route enforces. TypeScript cannot: a spread of an object literal is not
+ * excess-property-checked, so a client that spreads a shared fence carrying a
+ * field this action does not accept still compiles — and then the route answers
+ * `Unknown request field 'locusId'` at runtime.
+ */
+export const LOCUS_ACTION_FIELDS: Readonly<Record<PetLocusActionRequest['action'], readonly string[]>> = {
   bind: ['action', 'endpoint', 'parentSessionId', 'workspaceId', 'parentLocusId', ...LOCUS_FENCE_FIELDS],
   unbind: ['action', 'endpoint', 'locusId', ...LOCUS_FENCE_FIELDS],
   scope: ['action', 'locusId', 'mode', ...LOCUS_FENCE_FIELDS],

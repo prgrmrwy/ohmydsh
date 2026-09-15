@@ -63,3 +63,8 @@
 - [x] 8.1 1 复核 `openspec/specs/pet-locus-collaboration/spec.md` 与 `openspec/specs/dsh-pet/spec.md` 在归档后反映最终行为；确认本 change 未改动 `src/host/**` 与 `src/wire.ts`（`git diff --stat` 证明）。
 - [x] 8.2 回填 BACKLOG：B026 / B030 / B033 状态推进（实施后转「已完成」并注明落地位置）；本 change 未覆盖项（群名 / 话题名 / `chatType` 的获取）保持原条目与决定记录不变。
 - [x] 8.3 核对 backlog 编号：本 change 登记的「父会话归档回执」条目已编号为 **B042**（主干 `pet-locus-on-demand-tree` 已占用 B040 用于 provisioning 补偿阻塞、B041 用于侧栏 workspace 时序），合入时不得再产生重号。
+
+## 9. 回归修复
+
+- [x] 9.1 修复「重建」被 Host 拒绝 `Unknown request field 'locusId'`：本 change 重写面板时把共享的 mutation fence（含 `locusId`）用 spread 一并塞进了 rebuild，而 rebuild 的 action schema 用 `endpoint` + `expectedLocusId` 定位代际、没有 `locusId` 字段。TypeScript 不会对 spread 属性做过量属性检查，所以编译通过、运行时被 `strictBody` 拒绝。这是本次重写引入的回归（`d6f8a8b` 的旧实现只发三个 `expected*` 字段）。
+- [x] 9.2 补上两侧契约的守卫：`LOCUS_ACTION_FIELDS` 由 `src/host/routes.ts` 导出，`test/route-groups.test.ts` 走真实点击、把面板能发出的每个 action 载荷与其允许字段逐一比对（rebuild 走终止态行，scope / confirm-anchor / stop 走「更多」）。反向验证：临时把 spread 放回去，两条用例如期失败。
