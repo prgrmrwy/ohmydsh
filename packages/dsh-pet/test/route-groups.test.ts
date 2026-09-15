@@ -235,6 +235,79 @@ describe('an archived session is refused before the click, not after', () => {
   })
 })
 
+describe('a stopped entry is hidden by default yet recoverable', () => {
+  it('reveals the tombstone with a rebuild control on its row', async () => {
+    // The Host refuses a stopped endpoint until an explicit rebuild
+    // (`repository.ts`), so the default list must not show it as live. It must
+    // also not read as deleted: 显示全部 is the only way to the row, and 重建 —
+    // the only way out — has to be on that row rather than two disclosures deep.
+    const bodies: string[] = []
+    const stopped = {
+      ...LOCUS_VIEW,
+      endpoint: { ...LOCUS_VIEW.endpoint, chatId: 'oc_stopped' },
+      state: { state: 'stopped', busy: false, createdAt: 1, updatedAt: 2, stoppedAt: 2 },
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_path: string, init?: { readonly body?: string }) => {
+        if (init?.body !== undefined) bodies.push(init.body)
+        return {
+          status: 200,
+          text: async () => JSON.stringify({
+            ok: true,
+            data: {
+              generation: 1,
+              loci: [stopped],
+              defaultQa: [],
+              discovery: { byEndpoint: [], byParent: [], byChild: [] },
+            },
+          }),
+        }
+      }),
+    )
+    const host = await mountTab('locus')
+
+    expect(host.textContent).toContain('已隐藏 1 个入口')
+    expect(host.textContent).toContain('（按状态：已停止 1）')
+    expect(host.querySelector('.dshpet-locus-row')).toBeNull()
+    // The filter button states the condition even while the popover is shut, so
+    // a missing entry is explained without opening anything.
+    expect(host.textContent).toContain('入口：在服务')
+
+    const reveal = [...host.querySelectorAll('button')].find(
+      item => item.textContent?.startsWith('显示全部'),
+    ) as HTMLButtonElement | undefined
+    expect(reveal).toBeDefined()
+    await act(async () => {
+      reveal?.click()
+    })
+
+    expect(host.querySelector('.dshpet-locus-row')).not.toBeNull()
+    const rebuild = [...host.querySelectorAll('button')].find(
+      item => item.textContent === '重建',
+    ) as HTMLButtonElement | undefined
+    expect(rebuild).toBeDefined()
+    expect(rebuild?.disabled).toBe(false)
+
+    await act(async () => {
+      rebuild?.click()
+    })
+
+    const sent = bodies.map(body => JSON.parse(body) as Record<string, unknown>).find(
+      body => body['action'] === 'rebuild',
+    )
+    // The fence addresses the generation on screen: a rebuild that hit a
+    // different one would be a silent replacement.
+    expect(sent).toMatchObject({
+      action: 'rebuild',
+      locusId: 'locus-1',
+      expectedGeneration: 1,
+      expectedUpdatedAt: 2,
+      parentSessionId: 's1',
+    })
+  })
+})
+
 describe('a locus child opens through its durable parent address', () => {
   it('addresses the subagent child by parent, never by bare session id', async () => {
     // The Host refuses `origin === 'subagent'` addressed by bare session id

@@ -251,6 +251,28 @@ export function locusSourceLabel(source: PetLocusSource | string): string {
   return LOCUS_SOURCE_LABELS[source as PetLocusSource] ?? '未知来源'
 }
 
+/**
+ * How the entry-state half of the filter reads on the collapsed filter button.
+ *
+ * A filter that hides terminal entries by default must say so in its closed
+ * state too: the button is the only thing on screen while the popover is shut,
+ * and an owner whose stopped entry is missing needs to see that entry states —
+ * not only parent states — are part of the condition.
+ * @param states - Entry states currently selected.
+ * @returns the short owner-facing condition label.
+ */
+export function entryStateFilterLabel(states: readonly PetLocusState[]): string {
+  const selected = new Set(states)
+  if (ALL_ENTRY_STATES.every(state => selected.has(state))) return '全部'
+  if (
+    selected.size === SERVABLE_ENTRY_STATES.length &&
+    SERVABLE_ENTRY_STATES.every(state => selected.has(state))
+  ) {
+    return '在服务'
+  }
+  return `${selected.size}/${ALL_ENTRY_STATES.length} 类`
+}
+
 /** Parent-session availability collapsed into the filter's three buckets. */
 export type ParentAvailability = 'available' | 'archived' | 'unverified'
 
@@ -660,17 +682,45 @@ export interface LocusFilter {
   readonly entryStates: readonly PetLocusState[]
 }
 
+/** Every lifecycle state, in the order this surface ranks them. */
+export const ALL_ENTRY_STATES: readonly PetLocusState[] = [
+  'active',
+  'provisioning',
+  'switching',
+  'stopped',
+  'invalid',
+  'retired',
+]
+
 /**
- * The default condition: only work that is usable, and every entry state.
+ * The states whose entries are still being served.
  *
- * Hiding archived parents by default keeps the live surface short. It is safe
- * only because {@link applyLocusFilter} also reports what it hid — an archived
- * parent can still own active entries, so a silent removal would read as "my
- * entry disappeared".
+ * The complement is exactly the unavailable trio (`stopped` / `invalid` /
+ * `retired`): the Host refuses work for those endpoints and the only way
+ * forward is an explicit rebuild (`repository.ts`: *explicitly rebuild it
+ * before accepting work*).
+ */
+export const SERVABLE_ENTRY_STATES: readonly PetLocusState[] = ['active', 'provisioning', 'switching']
+
+/** The "nothing is hidden" condition, used by the in-list 显示全部 exit. */
+export const SHOW_ALL_LOCUS_FILTER: LocusFilter = {
+  parentAvailability: ['available', 'archived', 'unverified'],
+  entryStates: [...ALL_ENTRY_STATES],
+}
+
+/**
+ * The default condition: usable work, and entries that are still being served.
+ *
+ * Both halves hide something, and both are safe only because
+ * {@link applyLocusFilter} reports what it removed and the list offers
+ * 显示全部 in the same breath: an archived parent can still own active entries,
+ * and a stopped entry is the only place its 重建 button lives — hiding it by
+ * default must never be the same thing as losing the one way back for an
+ * endpoint the Host now refuses.
  */
 export const DEFAULT_LOCUS_FILTER: LocusFilter = {
   parentAvailability: ['available'],
-  entryStates: ['active', 'provisioning', 'switching', 'stopped', 'invalid', 'retired'],
+  entryStates: [...SERVABLE_ENTRY_STATES],
 }
 
 /** What the filter removed, phrased for the in-list disclosure. */
@@ -753,6 +803,10 @@ export function applyLocusFilter(
     const nodes = filterNodes(work.nodes, states)
     const families = flattenNodes(nodes)
     hiddenEntries += work.families.length - families.length
+    // A work section with nothing under it is not a reading; its hidden entries
+    // are already accounted for below, and an empty header would push the
+    // owner to look for what is missing instead of reading the disclosure.
+    if (families.length === 0) continue
     works.push({ ...work, nodes, families })
   }
 
