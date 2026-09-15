@@ -29,14 +29,16 @@
 
 ## Decisions
 
-### D1. 移除 `botLifecycleInitializer`，而非保留为空操作
+### D1. 只移除 `index.ts` 的装配，保留 `BotLifecycleInitializer` 接口与 `BotLifecycleIntake`
 
-**决定**：整体移除该 initializer 的 provisioning 调用；若移除后接口再无实现内容，一并移除接口本身。
+**决定**：只在 `index.ts` 不再向 `PetChannelServiceDeps` 传入 `botLifecycleInitializer`；不删除 `bot-lifecycle.ts` 中的接口、`BotLifecycleIntake` 类或事件解析。
 
-**理由**：其接口契约写的是 "Ensure only the chat-level structure. Must not create a Delivery or queue work."——当前实现虽未建 Delivery，却建了 main 与 child，已超出该契约。移除后没有任何需要在入群时刻完成的工作，保留一个空壳接口是为假想需求预留结构。
+**核实依据**（原开放问题 1 已确认）：`botLifecycleInitializer` 在 `PetChannelServiceDeps` 中是可选字段（`readonly botLifecycleInitializer?: BotLifecycleInitializer`），`service.ts` 的构造逻辑是 `deps.botLifecycleInitializer === undefined ? undefined : new BotLifecycleIntake({...})`——不传即不构造，整条订阅链路（事件解析、去重、allowlist 校验）自然停用，不需要删除任何类型或类。`BotLifecycleIntake` 本身（事件解析 `parseBotAddedEvent`、去重、`BotLifecycleOutcome`）是独立于 provisioning 调用的完好能力，删除它是缩小 D1 范围之外的额外改动，不在本 change 内。
+
+**意外证据**：系统已存在"群保持待建立"这一正常状态——当入群事件的 `operatorOpenId` 不在 allowlist 时，`service.ts` 现有诊断语就是「该群保持待建立，首次 allowlist @ 可补齐」。本 change 不是引入新状态，只是让这条既有路径成为唯一路径。
 
 **备选**：
-- 保留接口、实现改为空操作 —— 否决：留下什么都不做的接口，读者需要额外推断它为何存在。
+- 删除 `ensureAuthorizedChat` 的唯一调用者所在分支后一并删除接口 —— 否决：接口与 `BotLifecycleIntake` 在生产代码中零调用方之外（仅 `service.ts` 一处装配），删除属于未经请求的范围扩大，且会连带删除仍然正确的事件解析/去重逻辑。
 - 保留并改为"只记录授权事实" —— 否决，见 D2。
 
 ### D2. 不记录"bot 在哪些群"，平台即真相源
@@ -87,5 +89,9 @@
 
 ## Open Questions
 
-- `BotLifecycleInitializer` 接口在移除 provisioning 调用后是否还有其它实现内容或调用方？实施首步需确认；若确无，按 D1 一并移除接口与其装配。
-- 是否存在依赖"入群即有 locus"的测试或管理面代码路径？实施时以搜索为准，不预设。
+两项原有开放问题已在规划阶段核实，结论并入 D1：
+
+- `BotLifecycleInitializer` 除 `ensureAuthorizedChat` 外无其它成员，但它是 `service.ts` 的可选依赖；不传即整条链路自然停用，接口与 `BotLifecycleIntake` 均保留。
+- 代码搜索确认：`findGroup`/`requireActiveLocus` 在 controller 之外零调用方；测试侧仅 `channel-service.test.ts`、`bot-lifecycle.test.ts`、`locus-real-event-shapes.test.ts` 涉及 bot-added 事件，且均不依赖建树结果——`channel-service.test.ts` 现有用例断言的正是「starts a separate bot-added consumer only while enabled and never creates business work」。不存在需要因本 change 而改的既有依赖。
+
+无遗留开放问题。
