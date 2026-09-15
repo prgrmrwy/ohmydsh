@@ -37,8 +37,9 @@
 
 - [x] 5.1 `npm run typecheck --workspace=dsh-pet` 通过（`tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit` 均无输出）。`cd packages/dsh-pet && npx vitest run`：4 failed / 129 passed / 2 skipped（135 文件），11 failed / 2351 passed / 31 skipped（2393 测试）。11 个失败逐一核实为既有基线缺陷（详见 4.7 的严格对比方法），本 change 未引入新失败、未消除既有失败——新增的 9 个测试（`locus-on-demand-provisioning.test.ts`）全部通过
 - [x] 5.2 `npm test`：125 tests，124 pass，0 fail，1 skipped。`npm run check:artifacts`：`[artifacts] tracked paths comply with repository policy`。`git diff --check`：clean。`openspec validate pet-locus-on-demand-tree --strict`：`Change 'pet-locus-on-demand-tree' is valid`
-- [ ] 5.3 经所有者确认后 `dsh build` 并重启现有 3080 Host，不启动替代 server
-- [ ] 5.4 真实验收：把 bot 拉进一个新群，确认 GUI 侧栏与管理面均未出现新会话，数据库无新 locus 记录
-- [ ] 5.5 真实验收：在该群发首条 @ 消息，确认建树并正常回复；记录首条消息的端到端耗时，与话题入口现有体验对照
-- [ ] 5.6 真实验收：另起一个新群，拉入 bot 后直接 `/bind <prefix>`，确认一次建对——显式来源、无自动 main、无上下文变更警告
-- [ ] 5.7 回填 handoff/BACKLOG：更新 B036 状态，记录实测证据与本次未处置项（入群时刻记录、管理面 UI、bot 移出可达性）
+- [x] 5.3 所有者已 `dsh build` 并重启现有 3080 Host。日志确认：`[dsh-pet] ready — routes registered`，channel 订阅正常连接；全局 grep `bot-added`/`lifecycle` 在 `dsh.log` 中零命中，确认该订阅链路确实未被构造（与设计一致，不是遗漏排查）
+- [x] 5.4 真实验收通过。所有者用 user 身份新建群「验收-B036-拉bot零副作用」（`oc_2983702a8515d3176ae5a62c6be39bc1`，仅所有者一人，不含 bot），记录基线：`u_dsh_pet_loci`/`locus_indexes`/`locus_operations` 三表中该 chatId 均为 0 条，系统总 loci 数为 4。拉 bot 入群后重新核对：三表仍为 0 条，总数仍为 4，`dsh.log` 新增内容与该群无关（仅两条无关的 `turn-ended`）。**入群零副作用得证**
+- [x] 5.5 真实验收通过。同群内所有者发送「@小小芒果 你好」，机器人正常回复（`reply_to` 精确指向该消息，附 `DONE` 表情反馈）。数据库确认该次 admission 内建立完整 locus：`{"parentSessionId":"session-b2f11bae-...","childSessionId":"session-dfb4c72e-...","source":"auto","state":"active"}`，`createdAt` 与 `updatedAt` 相差约 12.7 秒，为建树到首轮回复完成的端到端耗时，与话题入口现有体验量级一致。**验收过程中发现一个独立的 GUI 时序问题**（见下方说明，不阻塞本条，已转 BACKLOG）
+- [x] 5.6 真实验收通过。另建群「验收-B036-bind一次建对」（`oc_646eb4b031519fde4c47c41592d348ce`，同样不含 bot），拉入 bot 后所有者直接发送 `/bind b2f11b`（引用 5.5 建立的活跃主会话）。回执：「群「验收-B036-bind一次建对」已绑定主会话「Locus 主会话 · oc_2983702a8515d3176ae5a62c6be39bc1」（b2f11b）；已创建新的只读子会话。」**无任何「S0→S1」上下文变更警告文案**。数据库确认新记录 `{"source":"explicit","parentSessionId":"session-b2f11bae-...","generation":1}`，系统总 loci 数由 5 精确增至 6（无多余 auto 记录混入），证实为首代直建而非替换。
+      验收过程中一次误报已排查澄清：先用另一会话 id 前缀 `4629eb` 测试收到「没有匹配到唯一的会话」，解压该 session 的压缩事件日志（`session.jsonl.zstd`）确认其末尾事件为 `session/end-seed`（已结束），`/bind` 拒绝一个已结束的会话是正确行为，不是本 change 或既有代码的缺陷，是测试目标选取错误
+- [x] 5.7 已回填。`docs/notes/pet-locus-on-demand-tree-handoff.md` 记录三步真实验收的完整证据链（含数据库 dump、日志比对、误报排查过程）；`BACKLOG.md` B036 状态更新为已完成并附证据摘要；新增 B041 记录验收中发现的 GUI 时序问题（自动建 main 挂载到已有 workspace 后，侧栏短暂显示未分组，刷新后自愈）

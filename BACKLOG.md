@@ -33,7 +33,7 @@
 - **更新**: 2026-09-14 实机验收确认；完整调用证据在 session `session-7b41abe2-f878-4d5c-9cf0-a6b548219c1a` 的多帧 zstd 日志中，不提交 raw session evidence。
 
 ### [B036] 拉 bot / 建群不应有任何 locus 副作用，整棵树按首个 @ 构建
-- **状态**: 想法
+- **状态**: 已完成
 - **优先级**: P2
 - **背景 / 动机**: 2026-09-14 从空库端到端验证时实测：创建默认 Q&A 群的瞬间就产生了一个**空的** child session（`session-9f6ae48b`，801 字节，解压后仅 1 条 `session` 事件），此时群里还没有任何人 @ 过 bot。所有者预期是「子会话跟着 @ 创建或复用」，建群阶段不应存在子会话。
 - **现状与根因**: 这是当前两阶段 provisioning 的设计，不是回归缺陷。`src/index.ts` 的 `idleChildProvisioning.create()` 在建群时调用 `adapter.createIdleChild()`（`host/locus/child.ts`），该路径刻意不投递初始 prompt——注释写明「No artificial initialization prompt is allowed: the first prompt will be the first real Delivery」——但确实提前占用了一个 child 身份。控制器随后 `commitProvisioning` 发布 active locus，首次真实 Delivery 再经 inbox 投递给这个已存在的 child。
@@ -55,6 +55,7 @@
 - **不在范围**: 与 `pet-locus-independent-child`（只改新 child 的 provider 选择，使其不再 fork 父历史）正交，该 change 不承接本条。
 - **更新**: 2026-09-14 空库端到端验证中发现并确认。同批顺带验证了历史上的 blank main 问题——该问题此前已修复但一直未实测，本次两条 main 来源**均未复现，确认修复生效**：答疑群入口复用当前会话（11.8 MB 真实历史）；拉 bot 进新群走 `source=auto` 自动新建 main（`session-4629eb39`），所有者在侧边栏确认其含介绍与 standby 要求、有实际 turn。因此当前 locus provisioning 的唯一已知缺陷就是本条描述的无条件预建空 child，两条路径均稳定复现。
 - **更新**: 2026-09-15 `pet-locus-independent-child` 真实验收期间，所有者重申并扩大了目标语义：不只是「不预建 child」，而是**拉 bot 不应有任何处理**，main 与 locus 同样不应在此刻创建；同时明确 Q&A 与普通 @、`at` 与 `at + bind` 在树形态上无差别，main 归属应由 bind 显式决定并可改写。标题与要点已按此更新。注意本条与自动新建 main 的关系：上一条更新确认「自动新建的 main 非 blank、有实际 turn」，那是**修复生效**的证据；但按新语义，问题不在于该 main 是否为空，而在于**它根本不该在拉 bot 时被创建**。
+- **更新**: 2026-09-15 **已完成并真实验收**（openspec change `pet-locus-on-demand-tree`，22/22 任务）。移除 `index.ts` 中 `im.chat.member.bot.added_v1` 对 provisioning 的调用；`botLifecycleInitializer` 是 `PetChannelServiceDeps` 的可选字段，不传即 `BotLifecycleIntake` 不被构造，订阅链路自然停用，接口与解析代码原样保留未删除。核实发现 `/bind` 在未建 locus 入口一次建对（`mainSource: 'explicit'`、无自动 main、无警告）这条行为**生产代码本就正确**，未改动 `controller.ts`，只补了端到端测试固定该行为。9 个新测试全部用真实 `LocusController`+真实 `LocusChannelController`+共享真实 repository，用未改动的 `index.ts`（HEAD 版本）重跑同批测试确认零回归。三步真实飞书验收全部通过（入群零副作用、首个 @ 建树+回复、`/bind` 一次建对），证据详见 `docs/notes/pet-locus-on-demand-tree-handoff.md`。验收中额外发现两处：一是既有 provisioning 补偿机制的真实缺陷（`failProvisioning` 后同一 endpoint 需重启 Host 才能重试，非本次引入），转入 B040；二是 GUI 侧栏对自动建 main 挂载已有 workspace 存在短暂展示时序问题，转入 B041。
 
 ### [B019] 设置面板底部 DSH 主机系统时钟（24 小时制 + 时区）
 - **状态**: 实施中
@@ -147,6 +148,18 @@
 ---
 
 ## 想法
+
+### [B041] GUI 侧栏对自动建 main 挂载已有 workspace 存在展示时序问题
+- **状态**: 想法
+- **优先级**: P2
+- **背景 / 动机**: 2026-09-15 真实验收 `pet-locus-on-demand-tree` 时所有者反馈：拉 bot 进新群、首个 @ 触发自动建 main（`mainSource: 'auto'`）后，新会话在 GUI 侧栏短暂显示为「未分组」，刷新页面后才正确归入所属 workspace 分组。
+- **已确认数据层面从一开始就是对的**：`createMainSession`（`host/locus/dsh-port.ts`）内 `await workspace.attachSession(sessionId)` 已正确执行——直接读取 `~/.dsh/storages/workspace.json` 确认目标 workspace 的 `sessionIds` 列表里从一开始就含有新建的 session id。问题在 GUI 侧栏读取/渲染这份数据的时序，不在数据本身。
+- **不是本 change 引入的新逻辑**：`createMainSession` 这条自动建 main 的路径在旧模型下同样存在（旧模型下由 `im.chat.member.bot.added_v1` → `ensureGroup` 触发），只是旧模型触发时机是「拉 bot 那一刻」——所有者通常不会紧盯侧栏；`pet-locus-on-demand-tree` 把触发时机改到「首个 @ 到达那一刻」，所有者大概率正看着页面，因此更容易注意到这个一直存在的时序问题。
+- **要点**:
+  - 需要先定位 GUI 侧是靠什么信号刷新 workspace 分组视图——是否存在一次实时推送/事件通知，`attachSession` 是否触发了对应的广播；还是纯前端轮询/缓存导致的滞后。
+  - 影响面不止 locus：任何「代码路径写完 workspace.json 后没有显式触发侧栏刷新」的场景都可能复现，值得先确认这是否是一个更通用的 workspace 变更通知缺口，而不是 locus 专属问题。
+  - 复现步骤已在 `docs/notes/pet-locus-on-demand-tree-handoff.md` 记录：新建群 → bot 首个 @ 触发自动建 main → 观察侧栏 → 手动刷新对比。
+- **更新**: 2026-09-15 从 `pet-locus-on-demand-tree` 真实验收中发现，转入本条独立处理。
 
 ### [B040] Locus provisioning 失败补偿只在 Host 重启时跑，运行中永久阻塞同一 endpoint
 - **状态**: 想法
