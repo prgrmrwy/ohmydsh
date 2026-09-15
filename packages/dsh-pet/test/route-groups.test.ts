@@ -11,6 +11,7 @@ import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { chatAppLink, routeGroupOf } from '../src/wire.js'
+import { LOCUS_ACTION_FIELDS } from '../src/host/routes.js'
 import { PetSettingsSection } from '../src/client/settings.js'
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean })
@@ -270,6 +271,62 @@ describe('the locus header reads title, condition, description, controls', () =>
   })
 })
 
+describe('the panel sends only fields its route accepts', () => {
+  it('fits every action payload inside the route field list', async () => {
+    // `strictBody` rejects unknown fields, and TypeScript cannot catch this for
+    // us: spreading an object literal into a payload is not excess-checked. A
+    // shared fence spread into rebuild shipped `locusId` to a route that does
+    // not accept it, and the owner saw `Unknown request field 'locusId'` after
+    // clicking 重建. This walks every action the panel can send in one place.
+    const bodies: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_path: string, init?: { readonly body?: string }) => {
+        if (init?.body !== undefined) bodies.push(init.body)
+        return {
+          status: 200,
+          text: async () => JSON.stringify({
+            ok: true,
+            data: {
+              generation: 1,
+              loci: [LOCUS_VIEW],
+              defaultQa: [],
+              discovery: { byEndpoint: [], byParent: [], byChild: [] },
+            },
+          }),
+        }
+      }),
+    )
+    const host = await mountTab('locus')
+
+    await act(async () => {
+      ;(host.querySelector('.dshpet-locus-more') as HTMLButtonElement | null)?.click()
+    })
+    for (const label of ['可写', '确认执行根', '停止关联']) {
+      const button = [...host.querySelectorAll('button')].find(
+        item => item.textContent === label,
+      ) as HTMLButtonElement | undefined
+      expect(button, `${label} must be reachable`).toBeDefined()
+      await act(async () => {
+        button?.click()
+      })
+    }
+
+    const actions = bodies
+      .map(body => JSON.parse(body) as Record<string, unknown>)
+      .filter(body => typeof body['action'] === 'string' && body['action'] in LOCUS_ACTION_FIELDS)
+    expect(actions.map(body => body['action']).sort()).toEqual(
+      ['confirm-anchor', 'scope', 'stop'],
+    )
+    for (const body of actions) {
+      const action = body['action'] as string
+      const allowed = LOCUS_ACTION_FIELDS[action as keyof typeof LOCUS_ACTION_FIELDS]
+      const unknown = Object.keys(body).filter(key => !allowed.includes(key))
+      expect(unknown, `${action} sent fields the route rejects`).toEqual([])
+    }
+  })
+})
+
 describe('a stopped entry is hidden by default yet recoverable', () => {
   it('reveals the tombstone with a rebuild control on its row', async () => {
     // The Host refuses a stopped endpoint until an explicit rebuild
@@ -344,11 +401,16 @@ describe('a stopped entry is hidden by default yet recoverable', () => {
     // different one would be a silent replacement.
     expect(sent).toMatchObject({
       action: 'rebuild',
-      locusId: 'locus-1',
+      expectedLocusId: 'locus-1',
       expectedGeneration: 1,
       expectedUpdatedAt: 2,
       parentSessionId: 's1',
     })
+    // …and it must carry nothing the route does not accept. `locusId` here was
+    // rejected with `Unknown request field 'locusId'`: rebuild addresses its
+    // generation through `expectedLocusId`, and a spread is not excess-checked.
+    expect(Object.keys(sent ?? {}).filter(key => !LOCUS_ACTION_FIELDS.rebuild.includes(key))).toEqual([])
+    expect(sent?.['locusId']).toBeUndefined()
   })
 })
 
