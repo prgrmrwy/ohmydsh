@@ -148,6 +148,20 @@
 
 ## 想法
 
+### [B038] Locus Delivery 崩溃窗口的 fault-injection 测试矩阵
+- **状态**: 想法
+- **优先级**: P1
+- **背景 / 动机**: `pet-locus-independent-child` 的 tasks 8.3 要求「为 accept/current dispatch/bind、finish CAS/飞书调用/结果落账、expiry/interrupt/next dispatch 各崩溃窗口增加 fault-injection 测试」，实施时**未完成**，归档时如实标记为未实现并转入本条。当前只有 provisioning 相关的两个注入用例（`locus-persistence.test.ts` 的 `leaves no partial state on the medium when a mutation fails`、`leaves neither the switch nor its notice when the commit fails`），Delivery 的 finish/dispatch 路径没有等价覆盖。
+- **为什么值得做**: 这三条路径都是「多步写入 + 外部副作用」，进程在步与步之间挂掉是真实会发生的。其中 **finish CAS → 飞书发送 → 结果落账** 最危险：CAS 成功但发送前崩、或发送成功但落账前崩，重启后若判断错误，用户要么收到**重复回复**，要么明明已发出却被记成失败。2026-09-15 的真实验收已经证明，这类「跨越边界的不一致」正是单测最容易漏掉、而真实链路必然命中的一类问题。
+- **现状不是毫无防护**: 实现侧已做保守设计并有逻辑层单测覆盖——`finishing` 是发送前的持久栅栏，重启时一律收敛为 `unknown-terminal` 且**绝不自动重发**（宁可漏发不重发）；所有状态迁移用 `expectedRevision` 做 CAS，重放不生效；启动恢复要求精确身份匹配，证不出来就挂起该 locus 并记 `startupRecoveryDebt`。本条要补的是更强的一层：**在真实的中途写失败下**验证这些不变量仍成立，而非仅在理想路径下成立。
+- **要点**:
+  - 复用现成机制：`test/harness.ts` 已支持 `failOnWriteNumber`（第 N 次写入必定失败）与 `failWrites`，不需要新建基础设施。
+  - 三条路径的崩溃点：(a) accept → claim current → bind 之间任意一步；(b) finish CAS → 发送 → 落账；(c) expiry CAS → 推进下一条。
+  - 每条的核心断言：重启后**不重复投递**同一 Delivery、**不重复发送**飞书正文、**不漏掉**可安全投递的 backlog、队列**不永久卡死**。
+  - 注意 interrupt 部分无法覆盖：expiry 路径目前对仍在运行的 Agent turn 不做任何中断尝试（无可用 runtime 接缝），这是 design.md 已记录的风险取舍，不是本条能补的测试空白。
+  - 工作量估计半天左右（finish/dispatch 路径各 5–8 个注入用例）。
+- **更新**: 2026-09-15 从 `pet-locus-independent-child` tasks 8.3 转入。同批还发现并已修复另一处真实测试空白（Delivery 到期定时器完全无测试覆盖，已抽取为 `host/locus/expiry-scheduler.ts` 并补 9 例 + 三次变异验证），说明「有相关测试」不等于「关键路径被覆盖」，定时器/回调/崩溃窗口这类需要外部触发的接缝尤其容易漏掉。
+
 ### [B023] 自研插件独立性体检：可单独发布、无插件间依赖
 - **状态**: 想法
 - **背景 / 动机**: 逐项确认自研插件能否脱离 ohmydsh 仓库和其他插件单独发布、安装与运行，避免只能在当前整套定制组合中使用。
