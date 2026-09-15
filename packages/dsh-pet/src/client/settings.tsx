@@ -796,8 +796,12 @@ function locusFence(head: PetLocusView): {
 
 /**
  * The one rebuild payload, shared by the row shortcut and the 更多 disclosure.
- * Two copies of a mutation payload drift; a rebuild that addressed a different
- * generation than the one on screen would be a silent replacement.
+ *
+ * It deliberately does NOT spread {@link locusFence}: rebuild addresses a
+ * generation through `endpoint` + `expectedLocusId`, and its action schema has
+ * no `locusId` field. Spreading the whole fence compiled — TypeScript does not
+ * excess-check spread properties — and the Host's `strictBody` answered
+ * `Unknown request field 'locusId'` the moment an owner clicked 重建.
  */
 function locusRebuildRequest(head: PetLocusView): Parameters<typeof petApi.locusRebuild>[0] {
   return {
@@ -807,7 +811,9 @@ function locusRebuildRequest(head: PetLocusView): Parameters<typeof petApi.locus
     ...(head.workspace.workspaceId === '' ? {} : { workspaceId: head.workspace.workspaceId }),
     ...(head.parentLocusId === undefined ? {} : { parentLocusId: head.parentLocusId }),
     ...(head.isDefaultQa ? { asDefaultQa: true } : {}),
-    ...locusFence(head),
+    expectedGeneration: head.generation,
+    expectedLocusId: head.locusId,
+    expectedUpdatedAt: head.state.updatedAt,
   }
 }
 
