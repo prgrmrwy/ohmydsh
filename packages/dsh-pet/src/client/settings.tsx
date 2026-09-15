@@ -1702,6 +1702,32 @@ export function LocusSurface(props: {
   const toggle = useCallback((setter: typeof setOpenKeys) => (key: string) => {
     setter(current => (current.includes(key) ? current.filter(item => item !== key) : [...current, key]))
   }, [])
+  const filterRef = useRef<HTMLDivElement | null>(null)
+  const filterButtonRef = useRef<HTMLButtonElement | null>(null)
+  useEffect(() => {
+    if (!filterOpen) return undefined
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      setFilterOpen(false)
+      // Focus returns to the control that opened the panel, so the keyboard
+      // path does not end in the middle of the document.
+      filterButtonRef.current?.focus()
+    }
+    const onPointer = (event: MouseEvent): void => {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (filterRef.current?.contains(target) === true) return
+      if (filterButtonRef.current?.contains(target) === true) return
+      setFilterOpen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('mousedown', onPointer)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('mousedown', onPointer)
+    }
+  }, [filterOpen])
+
   const toggleOpen = useMemo(() => toggle(setOpenKeys), [toggle])
   const toggleHistory = useMemo(() => toggle(setHistoryKeys), [toggle])
 
@@ -1751,8 +1777,10 @@ export function LocusSurface(props: {
           <span className="dshpet-locus-headtail">
             <button
               type="button"
+              ref={filterButtonRef}
               className="dshpet-jump"
               aria-pressed={filterOpen}
+              aria-expanded={filterOpen}
               title="按父会话状态与入口状态筛选"
               onClick={() => setFilterOpen(current => !current)}
             >
@@ -1802,6 +1830,7 @@ export function LocusSurface(props: {
           />
         </div>
         {filterOpen ? (
+          <div ref={filterRef}>
           <LocusFilterPanel
             filter={filter}
             parentCounts={counts.parent}
@@ -1809,6 +1838,7 @@ export function LocusSurface(props: {
             onChange={setFilter}
             onClose={() => setFilterOpen(false)}
           />
+          </div>
         ) : null}
       </section>
 

@@ -720,9 +720,15 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
   color:var(--dsw-alias-label-secondary,#61666b);
   font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:11px;line-height:1;
   letter-spacing:.02em;font-variant-numeric:tabular-nums}
-.dshpet-settings .dshpet-handle:hover{background:var(--dsw-alias-interactive-bg-hover,#0000000a);
-  color:var(--dsw-alias-label-primary,#0f1115)}
-.dshpet-settings .dshpet-handle:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6)}
+/* A code is DATA, not a control. The hover feedback stays inside the text
+   itself (slightly darker, underlined) instead of filling a box: a chip that
+   lights up on hover reads as a toggle or a selected option, which is exactly
+   what an identifier is not. Click-to-copy still works and is announced by the
+   cursor and the tooltip. */
+.dshpet-settings .dshpet-handle:hover{color:var(--dsw-alias-label-primary,#0f1115);
+  text-decoration:underline}
+.dshpet-settings .dshpet-handle:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);
+  outline-offset:1px}
 
 /* Navigation (a jump) and mutation (a bordered action) must not look alike. */
 .dshpet-settings .dshpet-jump{display:inline-flex;align-items:center;gap:4px;flex:none;
@@ -858,7 +864,11 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-locus-nodelete{margin-top:12px;max-width:620px}
 
 /* The filter panel. */
-.dshpet-settings .dshpet-locus-filter{width:236px;padding:10px 12px 12px;border-radius:12px;
+/* A dropdown, not a block: opening the filter must not push the list down and
+   reflow everything the owner was reading. It is anchored to the header it
+   belongs to and floats above the rows. */
+.dshpet-settings .dshpet-locus-filter{position:absolute;right:0;top:34px;z-index:2;
+  width:236px;padding:10px 12px 12px;border-radius:12px;
   background:var(--dsw-specific-menu,#fff);
   border:.5px solid var(--dsw-alias-border-l4,#00000029);
   box-shadow:0 6px 20px #0000001f;
