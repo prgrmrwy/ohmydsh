@@ -32,7 +32,7 @@
   - 验收需使用会诱发历史补齐的真实问题，不能只用刻意自包含的问题把越界风险隐藏掉；同时普通链路测试应优先用自包含、可判定问题，避免无关成本噪声。
 - **更新**: 2026-09-14 实机验收确认；完整调用证据在 session `session-7b41abe2-f878-4d5c-9cf0-a6b548219c1a` 的多帧 zstd 日志中，不提交 raw session evidence。
 
-### [B036] Locus 子会话应按 @ 创建/复用，而非建群时预先占位
+### [B036] 拉 bot / 建群不应有任何 locus 副作用，整棵树按首个 @ 构建
 - **状态**: 想法
 - **优先级**: P2
 - **背景 / 动机**: 2026-09-14 从空库端到端验证时实测：创建默认 Q&A 群的瞬间就产生了一个**空的** child session（`session-9f6ae48b`，801 字节，解压后仅 1 条 `session` 事件），此时群里还没有任何人 @ 过 bot。所有者预期是「子会话跟着 @ 创建或复用」，建群阶段不应存在子会话。
@@ -40,14 +40,21 @@
 - **影响面比首次观察更广（拉 bot 进存量群同样命中）**: `im.chat.member.bot.added_v1` → `botLifecycleInitializer.ensureAuthorizedChat()`（`src/index.ts:2413`）→ `locusProvisioningController.ensureGroup({ chatId })`，与答疑群共用同一条 provisioning 链，因此**把 bot 拉进任何存量群也会立刻产生 blank 子会话**。注意 `BotLifecycleInitializer` 的接口契约写的是「Ensure only the chat-level structure. Must not create a Delivery or queue work.」——当前实现确实没建 Delivery、没排队工作，但建了 child，与「only the chat-level structure」的意图存在张力。
 - **两条入口的 main 来源不同，需分别验证**:
   - 答疑群（Pet 面板发起）：带 `parentSessionId`，复用**当前会话**作 main——已实测正确（11.8 MB 真实历史，非空）。
-  - 拉 bot 进群：`ensureGroup({ chatId })` 不带 `parentSessionId`，走 `controller.ts:975-981` 的 `mainSource = 'auto'` 分支**自动新建 main**，随后无条件 `createChildSession`。这条路径才是「自动 main 是否为 blank、是否被侧边栏当成新会话」的真正验证场景，尚未实测。
+  - 拉 bot 进群：`ensureGroup({ chatId })` 不带 `parentSessionId`，走 `controller.ts:975-981` 的 `mainSource = 'auto'` 分支**自动新建 main**，随后无条件 `createChildSession`。已于 2026-09-14 实测（见下方更新）：自动 main 非 blank、有实际 turn；但按 2026-09-15 确认的语义，它根本不应在此刻被创建。
+- **所有者确认的目标语义（2026-09-15）**: 比「不预建 child」更彻底——**拉 bot 进群应当零副作用：不建 child、不建 main、不发布 locus**，只在需要时记录授权事实。整棵 locus 树完全由**首个 @** 按需构建。推论：
+  - **Q&A 群与普通群在 @ 之后没有区别**。答疑群的特殊性只在「由 Pet 面板主动建群并指定 main 归属」这一发起动作上；一旦进入 @ 驱动的正常流程，两者的 locus 树结构、child 创建/复用规则、话题各自持有 child 的行为完全一致，不应存在两套路径。
+  - **`at` 与 `at + bind` 得到的 locus 树也没有区别**。bind 不是另一种建树方式，只是**指定/改写 main 归属**；树的形态由 @ 决定。
+  - **main session 可通过 bind 重新绑定**。因此建群阶段「顺手自动建一个 main」既不必要也不可取：它在所有者尚未表达意图时就固化了归属，而正确做法是让归属可由 bind 显式决定与改写。
+- **可行性：按需初始化的路径已经存在，本条主要是「去掉多余的提前触发」**: `admission.ts` 已有 `needsInitialization` 语义，且 `index.ts:2723` 在 provisioning 不可用时的 diagnostic 明写「first allowlist @ will initialize the locus」——即首个 @ 自行初始化本就是受支持的分支。所以方向不是新建能力，而是让 `im.chat.member.bot.added_v1` 不再调用 `ensureGroup`，把建树统一收敛到 @ 路径。这也与 `BotLifecycleInitializer` 自身的接口契约（`bot-lifecycle.ts:25`「Ensure only the chat-level structure. Must not create a Delivery or queue work.」）更一致——当前实现虽未建 Delivery，却建了 child 与 main，已超出「chat-level structure」。
 - **要点**:
-  - 目标时机：建群/绑定时只发布 locus 与 main 归属，**不**创建 child；首个 @ 到达时才创建，后续 @ 复用；群内每个话题各自持有自己的 child。
+  - 目标时机：拉 bot / 建群不产生任何 session 与 locus；首个 @ 到达时一次性建立所需节点，后续 @ 复用；群内每个话题各自持有自己的 child。
   - 两阶段 provisioning 的存在理由要先查清：当初分离「先建 child、再发布 locus」很可能是为了让发布失败时有可回滚的资源句柄（`rollback`/`compensateChild`），改成按需创建需要重新设计失败补偿，不能只把创建调用后移。
   - 同时影响 `locus_deliveries` 的首投递路径与 `locus-prepublication` 预留逻辑（`reservation.childSessionId` 目前在发布前就要求存在）。
+  - 需同时确认：Pet 面板「创建默认 Q&A 群」在不预建 main/child 后，面板 UI 还需要展示什么、`getDefaultQaLocus` 的语义是否要改为「尚未建立」。
   - 空 child 是否出现在侧边栏待确认；若不可见则纯属资源占用，优先级可维持 P2。
 - **不在范围**: 与 `pet-locus-independent-child`（只改新 child 的 provider 选择，使其不再 fork 父历史）正交，该 change 不承接本条。
 - **更新**: 2026-09-14 空库端到端验证中发现并确认。同批顺带验证了历史上的 blank main 问题——该问题此前已修复但一直未实测，本次两条 main 来源**均未复现，确认修复生效**：答疑群入口复用当前会话（11.8 MB 真实历史）；拉 bot 进新群走 `source=auto` 自动新建 main（`session-4629eb39`），所有者在侧边栏确认其含介绍与 standby 要求、有实际 turn。因此当前 locus provisioning 的唯一已知缺陷就是本条描述的无条件预建空 child，两条路径均稳定复现。
+- **更新**: 2026-09-15 `pet-locus-independent-child` 真实验收期间，所有者重申并扩大了目标语义：不只是「不预建 child」，而是**拉 bot 不应有任何处理**，main 与 locus 同样不应在此刻创建；同时明确 Q&A 与普通 @、`at` 与 `at + bind` 在树形态上无差别，main 归属应由 bind 显式决定并可改写。标题与要点已按此更新。注意本条与自动新建 main 的关系：上一条更新确认「自动新建的 main 非 blank、有实际 turn」，那是**修复生效**的证据；但按新语义，问题不在于该 main 是否为空，而在于**它根本不该在拉 bot 时被创建**。
 
 ### [B019] 设置面板底部 DSH 主机系统时钟（24 小时制 + 时区）
 - **状态**: 实施中
