@@ -148,6 +148,19 @@
 
 ## 想法
 
+### [B040] Locus provisioning 失败补偿只在 Host 重启时跑，运行中永久阻塞同一 endpoint
+- **状态**: 想法
+- **优先级**: P1
+- **背景 / 动机**: 2026-09-15 实施 `pet-locus-on-demand-tree` 时端到端测试暴露：`createChildSession` 等外部创建失败后，`failProvisioning` 把该 provisioning 操作标记为 `phase: 'failed'`，但 `findBlockingProvisioningOperation`（`persistence.ts:3124`）判定"阻塞"只排除 `committed`/`compensated` 两种 phase——`failed` 依然阻塞。而全仓库唯一把 `phase` 从 `failed`/`needs-recovery` 转成 `compensated` 的代码路径是 `reconcileStartup`（`persistence.ts:2735`），且需要 `options.compensators`（chat/childSession/mainSession 三个回调）。生产环境确实接了这三个 compensator（`index.ts:2153` 的 `startupCompensators`），但 `reconcileStartup` 只在 Host 启动时调用一次。**结论：同一 endpoint 一旦建树失败一次，运行期间永久阻塞，必须重启 Host 才能恢复**，不是重试几次、等一会儿就能好。
+- **不是本 change 引入**：这是 provisioning 补偿机制的既有特征，同一套 `beginProvisioning`/`failProvisioning`/`findBlockingProvisioningOperation` 在旧模型下同样适用——群走 `bot-added → ensureGroup`、话题一直走 `ensureForDelivery → ensureTopic`，失败后都会命中同一个永久阻塞。`pet-locus-on-demand-tree` 只是把群的建树时机从入群挪到首个 @，触发路径变了，阻塞机制本身没变也没变严重。
+- **所有者提出的方向**：失败的 provisioning 操作应该有超时丢弃语义——`failed` 超过一定时长后不再计入 `findBlockingProvisioningOperation` 的阻塞集合，下一次 @ 到达时正常按"无 locus"重新走一遍首次创建检测与建立，不需要等 Host 重启。
+- **要点（留给后续设计，本条不预先定死）**:
+  - `petLocusOperation` schema 已有 `createdAt`/`updatedAt`（`spec.ts:923-924`），超时判据的字段现成，不需要新增持久结构。
+  - 需要先回答：超时之后是"允许直接跳过阻塞检测覆盖建新的"，还是"仍需要跑一遍资源清理（关联的 main/child 若已创建部分要不要收）"——这决定了是纯放宽阻塞判定，还是要在运行期间也接入 compensator 调用，而非只在启动时。
+  - 需要确认 `failed` 操作遗留的 `resourceRefs` 里如果已经创建了部分资源（比如 main 建成但 child 建失败），超时丢弃是否会让这些半成品资源变成孤儿——现状下 `reconcileStartup` 会清理，运行期跳过阻塞判定但不清理就可能不会。
+  - 影响面不止群/话题建树，`replaceAutomaticGroupParent`（改绑）、`createOrOpenDefaultQa`（默认 Q&A）等所有走 `beginProvisioning` 的路径都共享同一套阻塞判定，方案需要对全部 provisioning kind 一致。
+- **更新**: 2026-09-15 从 `pet-locus-on-demand-tree` 实施阶段的端到端测试中发现并确认根因；所有者提出超时丢弃方向，转入本条留待独立设计与实施。
+
 ### [B039] 清理旧 QA 模型的死代码
 - **状态**: 想法
 - **优先级**: P2

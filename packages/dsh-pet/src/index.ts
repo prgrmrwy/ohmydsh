@@ -2674,18 +2674,16 @@ async function initialize(
       ? {
         locusController: locusChannel.controller,
         locusAuthorization,
-        ...(locusProvisioningController === undefined
-          ? {
-            botLifecycleDiagnostic:
-              'Bot-added initialization is unavailable; first allowlist @ will initialize the locus.',
-          }
-          : {
-            botLifecycleInitializer: {
-              ensureAuthorizedChat: async ({ chatId }: { chatId: string }) => {
-                await locusProvisioningController.ensureGroup({ chatId })
-              },
-            },
-          }),
+        // Bot-added produces no locus of its own: the whole tree is built on
+        // demand by the first qualifying @ message, the same seam a group and
+        // a topic both already use. `botLifecycleInitializer` stays
+        // deliberately unset — `ChannelService` treats it as optional and
+        // never constructs `BotLifecycleIntake` without it, so the bot-added
+        // subscription itself is never started. This is not a degraded state:
+        // it is the only path, whether or not `locusProvisioningController`
+        // exists.
+        botLifecycleDiagnostic:
+          'Bot-added does not initialize a locus; the first allowlist @ will.',
         unifiedLocusReadiness: {
           childSession: 'verified' as const,
           defaultPermission: 'read' as const,
