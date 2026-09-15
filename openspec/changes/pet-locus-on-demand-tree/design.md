@@ -73,7 +73,7 @@
 
 **[首个 @ 的端到端延迟增加]** → 该延迟从入群时刻挪到首条消息，总耗时不变，且与话题入口现有行为一致。建树与投递同在一次 `handleAdmission` 内完成，补偿路径不变。验收时记录实测耗时，异常再单独处理。
 
-**[首次建树失败会连带首条消息未被处理]** → 当前实现下 `resolveLocus` 捕获 `ensureForDelivery` 抛错后返回 `undefined`，controller 以 `locus-unavailable` 诊断拒绝该次投递，不发布半成品。风险是用户看不到明确原因。本 change 不扩大该行为，但需在验收中确认诊断可见。
+**[首次建树失败会连带首条消息未被处理，且同一 endpoint 需重启 Host 才能恢复]** → 当前实现下 `resolveLocus` 捕获 `ensureForDelivery` 抛错后返回 `undefined`，controller 以 `locus-unavailable` 诊断拒绝该次投递，不发布半成品，端到端测试已验证。**实施阶段发现比最初评估更严重**：`failProvisioning` 只把操作标记为 `failed`，而该 phase 仍计入 `findBlockingProvisioningOperation` 的阻塞集合；唯一把 `failed` 转为 `compensated`（解除阻塞）的代码路径是 `reconcileStartup`，只在 Host 启动时运行一次。因此同一 endpoint 建树失败一次后，**运行期间永久阻塞，必须重启 Host 才能重试**，不是"稍后重试即可恢复"。这是 provisioning 补偿机制的既有特征（旧模型下群/话题各自的建树失败同样命中同一阻塞），本 change 把群的触发路径从入群挪到首个 @ 并不改变、也不扩大这一行为——只是首次真实端到端测试才发现它。已转入 BACKLOG B040 留待独立设计（不在本 change 范围内修复）。
 
 **[管理面短期内出现"群在但无 locus"的空档]** → 这是预期的新常态而非缺陷。UI 侧渲染归 B030/B026；在其完成前，管理面只是不展示该群，与"展示一个空 session"相比信息量不减。
 
