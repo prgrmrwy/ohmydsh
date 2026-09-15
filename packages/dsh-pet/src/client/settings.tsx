@@ -1272,7 +1272,6 @@ function LocusFilterPanel(props: {
   readonly parentCounts: ReadonlyMap<ParentAvailability, number>
   readonly entryCounts: ReadonlyMap<string, number>
   readonly onChange: (next: LocusFilter) => void
-  readonly onClose: () => void
 }): JSX.Element {
   const parentOptions: readonly ParentAvailability[] = ['available', 'archived', 'unverified']
   const toggleParent = (value: ParentAvailability): void => {
@@ -1332,9 +1331,6 @@ function LocusFilterPanel(props: {
           onClick={() => props.onChange(DEFAULT_LOCUS_FILTER)}
         >
           重置默认
-        </button>
-        <button type="button" className="dshpet-action dshpet-action-sm" onClick={props.onClose}>
-          收起
         </button>
         <span className="dshpet-meta">只影响显示</span>
       </div>
@@ -1706,13 +1702,8 @@ export function LocusSurface(props: {
   const filterButtonRef = useRef<HTMLButtonElement | null>(null)
   useEffect(() => {
     if (!filterOpen) return undefined
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape') return
-      setFilterOpen(false)
-      // Focus returns to the control that opened the panel, so the keyboard
-      // path does not end in the middle of the document.
-      filterButtonRef.current?.focus()
-    }
+    // Closing is by clicking anywhere else — the panel owns no dismiss button
+    // and no key binding, so there is exactly one way to put it away.
     const onPointer = (event: MouseEvent): void => {
       const target = event.target
       if (!(target instanceof Node)) return
@@ -1720,10 +1711,8 @@ export function LocusSurface(props: {
       if (filterButtonRef.current?.contains(target) === true) return
       setFilterOpen(false)
     }
-    document.addEventListener('keydown', onKey)
     document.addEventListener('mousedown', onPointer)
     return () => {
-      document.removeEventListener('keydown', onKey)
       document.removeEventListener('mousedown', onPointer)
     }
   }, [filterOpen])
@@ -1836,7 +1825,6 @@ export function LocusSurface(props: {
             parentCounts={counts.parent}
             entryCounts={counts.entry}
             onChange={setFilter}
-            onClose={() => setFilterOpen(false)}
           />
           </div>
         ) : null}
