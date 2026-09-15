@@ -256,16 +256,43 @@ describe('unified locus precedence', () => {
     await expect(pipeline.handleLine(p2pLine())).resolves.toEqual({
       kind: 'ignored', reason: 'legacy-endpoint',
     })
-    expect(f.client.reply).toHaveBeenCalledWith(
-      'om_1',
-      expect.stringContaining('显式重建'),
-    )
+    // An endpoint that exists only in the old model has nothing to rebuild in
+    // the owner surface, so the notice names the repair that actually works —
+    // and stays out of our bookkeeping ("which model the row came from").
+    expect(f.client.reply).toHaveBeenCalledWith('om_1', expect.stringContaining('发送 /bind'))
+    expect(f.client.reply).toHaveBeenCalledWith('om_1', expect.stringContaining('只读（read）权限'))
+    expect(f.client.reply).toHaveBeenCalledWith('om_1', expect.not.stringContaining('旧飞书模型'))
+    expect(f.client.reply).toHaveBeenCalledWith('om_1', expect.not.stringContaining('未接管也未迁移历史'))
     expect(f.dispatched).toEqual([])
     expect(f.harness.repository.listTasks()).toHaveLength(0)
 
     f.client.reply.mockClear()
     await pipeline.handleLine(p2pLine({ message_id: 'om_non_owner', sender_id: 'ou_not_allowed' }))
     expect(f.client.reply).not.toHaveBeenCalled()
+  })
+
+  it('points a stopped entry at the owner surface instead of the chat command', async () => {
+    const f = await fixture()
+    harness = f.harness
+    // `retired-endpoint` means a unified generation exists but is not active, so
+    // the entry already has a row — with its own 「重建」 — in the owner surface.
+    const handle = vi.fn(async () => ({ kind: 'ignored' as const, reason: 'retired-endpoint' }))
+    const pipeline = new InboundPipeline({
+      repository: f.harness.repository,
+      coordinator: f.coordinator,
+      client: f.client,
+      locator: { locate: () => '/should-not-be-read' },
+      watermark: () => 1000,
+      locusController: { handle },
+      locusAuthorization: () => 'retired',
+    })
+
+    await expect(pipeline.handleLine(p2pLine())).resolves.toEqual({
+      kind: 'ignored', reason: 'retired-endpoint',
+    })
+    expect(f.client.reply).toHaveBeenCalledWith('om_1', expect.stringContaining('Pet 设置页'))
+    expect(f.client.reply).toHaveBeenCalledWith('om_1', expect.stringContaining('「重建」'))
+    expect(f.dispatched).toEqual([])
   })
 
   it('maps an admitted control result without creating legacy work', async () => {

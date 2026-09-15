@@ -138,6 +138,34 @@ export interface BindCommandPort {
 }
 
 /**
+ * The one reply for an endpoint the unified model refuses to serve.
+ *
+ * Two admission reasons share this reply site and they have two DIFFERENT
+ * repairs, so they must not share one sentence:
+ *
+ *  - `retired-endpoint` — a unified generation exists but is not active
+ *    (`createDurableLocusAuthorizationResolver`), so the entry is already
+ *    visible in the owner surface, where 「重建」 is the discoverable way back.
+ *  - `legacy-endpoint` — only old-model associations exist, so there is nothing
+ *    in that surface to rebuild; the repair is the allowlisted in-chat bind
+ *    command (`admission.ts`: *a dedicated rebuild adapter can create a fresh
+ *    read locus without consuming any legacy parent/workspace/permission
+ *    identity*).
+ *
+ * Naming the wrong repair is worse than saying nothing: the owner follows it and
+ * nothing happens. Both texts stay in the owner's vocabulary — which model or
+ * store a row came from is our bookkeeping, not their problem.
+ */
+export function renderLocusUnavailableReply(reason: 'legacy-endpoint' | 'retired-endpoint'): string {
+  if (reason === 'legacy-endpoint') {
+    return '这个入口还是旧版关联，现在不会应答（历史消息与会话都保留）。'
+      + '请在本入口 @ 机器人并发送 /bind 加目标会话 id 前缀（至少 6 位）重新建立关联；新入口从只读（read）权限开始。'
+  }
+  return '这个入口已停止服务，需要重建后才会继续应答。'
+    + '请在 Pet 设置页「Locus 管理」里找到它并点「重建」；新入口从只读（read）权限开始。'
+}
+
+/**
  * Consumes inbound lines and turns the admissible ones into work.
  *
  * Holds the dedup window, which is why it is an object rather than a function:
@@ -209,7 +237,9 @@ export class InboundPipeline {
           // not a business answer; failure stays fail-soft.
           await this.deps.client.reply(
             event.message_id,
-            '该入口属于已退役的旧飞书模型，未接管也未迁移历史。请由允许的所有者在 Pet 管理面显式重建；新入口将从 read 权限开始。',
+            renderLocusUnavailableReply(
+              outcome.reason === 'legacy-endpoint' ? 'legacy-endpoint' : 'retired-endpoint',
+            ),
           ).catch(() => undefined)
         }
         return this.report(outcome, event)
