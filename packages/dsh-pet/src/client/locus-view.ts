@@ -702,7 +702,7 @@ export const ALL_ENTRY_STATES: readonly PetLocusState[] = [
  */
 export const SERVABLE_ENTRY_STATES: readonly PetLocusState[] = ['active', 'provisioning', 'switching']
 
-/** The "nothing is hidden" condition, used by the in-list 显示全部 exit. */
+/** The unfiltered condition: every parent state and every entry state. */
 export const SHOW_ALL_LOCUS_FILTER: LocusFilter = {
   parentAvailability: ['available', 'archived', 'unverified'],
   entryStates: [...ALL_ENTRY_STATES],
@@ -711,39 +711,21 @@ export const SHOW_ALL_LOCUS_FILTER: LocusFilter = {
 /**
  * The default condition: usable work, and entries that are still being served.
  *
- * Both halves hide something, and both are safe only because
- * {@link applyLocusFilter} reports what it removed and the list offers
- * 显示全部 in the same breath: an archived parent can still own active entries,
- * and a stopped entry is the only place its 重建 button lives — hiding it by
- * default must never be the same thing as losing the one way back for an
- * endpoint the Host now refuses.
+ * Both halves hide something. The disclosure is the filter control itself — it
+ * states the current condition on its own face and its popover counts every
+ * bucket over the whole snapshot — so the list adds no separate "hidden" row:
+ * an inline exit for something the filter already names was noise, and the row
+ * it occupied pushed the entries down.
  */
 export const DEFAULT_LOCUS_FILTER: LocusFilter = {
   parentAvailability: ['available'],
   entryStates: [...SERVABLE_ENTRY_STATES],
 }
 
-/** What the filter removed, phrased for the in-list disclosure. */
-export interface HiddenSummary {
-  readonly parentSessions: number
-  readonly entries: number
-  readonly parentReasons: readonly {
-    readonly availability: ParentAvailability
-    readonly label: string
-    readonly parentSessions: number
-  }[]
-  readonly entryStates: readonly {
-    readonly state: PetLocusState
-    readonly label: string
-    readonly entries: number
-  }[]
-}
-
-/** The snapshot after filtering, plus the disclosure of what was removed. */
+/** A snapshot narrowed to what the current condition shows. */
 export interface FilteredLocusView {
   readonly works: readonly WorkGroup[]
   readonly entries: readonly EntryGroup[]
-  readonly hidden: HiddenSummary
 }
 
 function keepFamily(family: LocusFamily, states: ReadonlySet<PetLocusState>): boolean {
@@ -773,7 +755,7 @@ function filterNodes(
  * nothing about filtering can be mistaken for a data change.
  * @param snapshot - Complete management snapshot.
  * @param filter - The condition to apply.
- * @returns the visible readings plus the hidden summary.
+ * @returns the readings the condition keeps.
  */
 export function applyLocusFilter(
   snapshot: PetLocusManagementView,
@@ -784,42 +766,19 @@ export function applyLocusFilter(
   const allWorks = groupByWork(snapshot)
 
   const works: WorkGroup[] = []
-  const parentReasonCounts = new Map<ParentAvailability, number>()
-  // Entries removed with their parent session are reported ONCE, as a hidden
-  // parent. Counting them again as "hidden by state" would blame the entry's
-  // own lifecycle for a decision the parent filter made.
-  const hiddenWithParent = new Set<string>()
-  let hiddenParents = 0
-  let hiddenEntries = 0
 
   for (const work of allWorks) {
-    if (!availability.has(work.availability)) {
-      hiddenParents += 1
-      hiddenEntries += work.families.length
-      for (const family of work.families) hiddenWithParent.add(family.key)
-      parentReasonCounts.set(work.availability, (parentReasonCounts.get(work.availability) ?? 0) + 1)
-      continue
-    }
+    if (!availability.has(work.availability)) continue
     const nodes = filterNodes(work.nodes, states)
     const families = flattenNodes(nodes)
-    hiddenEntries += work.families.length - families.length
-    // A work section with nothing under it is not a reading; its hidden entries
-    // are already accounted for below, and an empty header would push the
-    // owner to look for what is missing instead of reading the disclosure.
+    // A work section with nothing under it is not a reading: an empty header
+    // would push the owner to hunt for what is missing instead of reading the
+    // condition stated on the filter control.
     if (families.length === 0) continue
     works.push({ ...work, nodes, families })
   }
 
-  const visibleFamilies = works.flatMap(work => work.families)
-  const visibleKeys = new Set(visibleFamilies.map(family => family.key))
-  const entryStateCounts = new Map<PetLocusState, number>()
-  for (const family of groupLociByEndpoint(snapshot)) {
-    if (visibleKeys.has(family.key)) continue
-    if (hiddenWithParent.has(family.key)) continue
-    const head = familyHead(family)
-    if (head === undefined) continue
-    entryStateCounts.set(head.state.state, (entryStateCounts.get(head.state.state) ?? 0) + 1)
-  }
+  const visibleKeys = new Set(works.flatMap(work => work.families).map(family => family.key))
 
   const allEntries = groupByEntry(snapshot)
   const entries = allEntries
@@ -830,28 +789,7 @@ export function applyLocusFilter(
     }))
     .filter(group => group.families.length > 0)
 
-  return {
-    works,
-    entries,
-    hidden: {
-      parentSessions: hiddenParents,
-      entries: hiddenEntries,
-      parentReasons: [...parentReasonCounts.entries()]
-        .sort((left, right) => availabilityRank(left[0]) - availabilityRank(right[0]))
-        .map(([reason, count]) => ({
-          availability: reason,
-          label: PARENT_AVAILABILITY_LABELS[reason],
-          parentSessions: count,
-        })),
-      entryStates: [...entryStateCounts.entries()]
-        .sort((left, right) => (STATE_RANK[left[0]] ?? 9) - (STATE_RANK[right[0]] ?? 9))
-        .map(([state, count]) => ({
-          state,
-          label: locusStateLabel(state),
-          entries: count,
-        })),
-    },
-  }
+  return { works, entries }
 }
 
 function flattenNodes(nodes: readonly LocusFamilyNode[]): readonly LocusFamily[] {
@@ -916,7 +854,7 @@ export function applyQuery(view: FilteredLocusView, codes: HandleCodes, query: s
     })
     .filter(group => group.families.length > 0)
 
-  return { works, entries, hidden: view.hidden }
+  return { works, entries }
 }
 
 // ---------------------------------------------------------------------------
