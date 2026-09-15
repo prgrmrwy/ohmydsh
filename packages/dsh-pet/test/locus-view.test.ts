@@ -10,14 +10,17 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  ALL_ENTRY_STATES,
   DEFAULT_LOCUS_FILTER,
   ENTRY_STATE_OPTIONS,
   LOCUS_STATE_LABELS,
   PARENT_AVAILABILITY_LABELS,
+  SHOW_ALL_LOCUS_FILTER,
   applyLocusFilter,
   assignHandleCodes,
   collectHandleCodes,
   entryMatchesQuery,
+  entryStateFilterLabel,
   endpointKey,
   entryDisplayName,
   familyHead,
@@ -465,6 +468,68 @@ describe('filtering', () => {
     })
     expect(view.works[0]?.families).toHaveLength(1)
     expect(view.hidden.entryStates).toEqual([{ state: 'stopped', label: '已停止', entries: 1 }])
+  })
+
+  it('hides an entry the Host no longer serves, and names the state it hid', () => {
+    const live = locus({
+      locusId: 'locus-runtime-1-aaaa1111',
+      chatId: 'oc_live',
+      parentSessionId: 'session-1',
+      parentAvailability: 'available',
+    })
+    const stopped = locus({
+      locusId: 'locus-runtime-2-bbbb2222',
+      chatId: 'oc_stopped',
+      parentSessionId: 'session-1',
+      parentAvailability: 'available',
+      state: 'stopped',
+    })
+    const view = applyLocusFilter(snapshot([live, stopped], [live.locusId, stopped.locusId]))
+    expect(view.works.flatMap(work => work.families).map(family => family.key)).toEqual([
+      endpointKey({ chatId: 'oc_live' }),
+    ])
+    // The reason must be the entry's own lifecycle, never the parent's.
+    expect(view.hidden.parentSessions).toBe(0)
+    expect(view.hidden.entryStates).toEqual([{ state: 'stopped', label: '已停止', entries: 1 }])
+  })
+
+  it('reports hidden entries even when no work section survives', () => {
+    const stopped = locus({
+      locusId: 'locus-runtime-1-aaaa1111',
+      chatId: 'oc_a',
+      parentSessionId: 'session-1',
+      parentAvailability: 'available',
+      state: 'stopped',
+    })
+    const retired = locus({
+      locusId: 'locus-runtime-2-bbbb2222',
+      chatId: 'oc_b',
+      parentSessionId: 'session-1',
+      parentAvailability: 'available',
+      state: 'retired',
+    })
+    const base = snapshot([stopped, retired], [])
+    const hidden = applyLocusFilter(base)
+    // An empty list, but never a silent one: both entries are accounted for.
+    expect(hidden.works).toHaveLength(0)
+    expect(hidden.hidden.entries).toBe(2)
+    expect(hidden.hidden.entryStates.map(item => item.label)).toEqual(['已停止', '已退役'])
+
+    const all = applyLocusFilter(base, SHOW_ALL_LOCUS_FILTER)
+    expect(all.hidden.entries).toBe(0)
+    expect(all.works.flatMap(work => work.families)).toHaveLength(2)
+  })
+
+  it('leaves exactly the terminal buckets unchecked in the default filter', () => {
+    const off = ENTRY_STATE_OPTIONS.filter(
+      option => !option.states.every(state => DEFAULT_LOCUS_FILTER.entryStates.includes(state)),
+    )
+    expect(off.map(option => option.id)).toEqual(['stopped', 'retired'])
+    expect(SHOW_ALL_LOCUS_FILTER.entryStates).toEqual([...ALL_ENTRY_STATES])
+    expect(entryStateFilterLabel(ALL_ENTRY_STATES)).toBe('全部')
+    expect(entryStateFilterLabel(DEFAULT_LOCUS_FILTER.entryStates)).toBe('在服务')
+    expect(entryStateFilterLabel(['active'])).toBe('1/6 类')
+    expect(entryStateFilterLabel([])).toBe('0/6 类')
   })
 
   it('keeps an active topic visible when its chat entry is filtered out', () => {
