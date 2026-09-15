@@ -76,6 +76,7 @@ import {
   type DeliveryFinishInput,
   type DeliveryRecord,
 } from './host/locus/delivery.js'
+import { createExpiryScheduler } from './host/locus/expiry-scheduler.js'
 import { proveLiveStartupDelivery } from './host/locus/startup-recovery.js'
 import {
   createLocusChildAdapter,
@@ -316,7 +317,6 @@ async function initialize(
     readonly generation?: number
   } | undefined = () => undefined
   const locusDispatchLanes = new Map<string, Promise<void>>()
-  const locusExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>()
   const locusDispatchKey = (correlation: DeliveryCorrelation): string => [
     correlation.locusId,
     String(correlation.generation),
@@ -2002,58 +2002,15 @@ async function initialize(
     await locusChannelController?.dispatchNext?.(correlation)
   }
 
-  // A current row's effective deadline is never later than its own hard cap:
-  // a corrupt or stale `deadlineAt` beyond `acceptedAt + 24h` must not delay
-  // the timer past the hard cap either. Mirrors the same normalization in the
-  // pure/durable expiry CAS.
-  const effectiveDeadline = (record: DeliveryRecord): number | undefined => {
-    const hard = record.hardDeadlineAt ?? (record.acceptedAt === undefined ? undefined : record.acceptedAt + MAX_DELIVERY_LEASE_MS)
-    if (hard === undefined) return record.deadlineAt
-    return record.deadlineAt === undefined ? hard : Math.min(record.deadlineAt, hard)
-  }
-  scheduleCurrentDelivery = (record: DeliveryRecord): void => {
-    const deadline = effectiveDeadline(record)
-    if (record.status !== 'current' || deadline === undefined) return
-    const correlation: DeliveryCorrelation = {
-      endpoint: { ...record.endpoint },
-      locusId: record.locusId,
-      generation: record.generation,
-      childSessionId: record.childSessionId,
-    }
-    const key = `${record.deliveryId}\u0000${record.generation}`
-    const previous = locusExpiryTimers.get(key)
-    if (previous !== undefined) clearTimeout(previous)
-    const delay = Math.max(0, Math.min(deadline - Date.now(), 2_147_483_647))
-    const timer = setTimeout(() => {
-      void withLocusDispatchLane(correlation, async () => {
-        const current = locusRepository.getDelivery(record.deliveryId)
-        if (
-          current === undefined ||
-          current.status !== 'current' ||
-          current.queueState !== 'current' ||
-          current.revision === undefined
-        ) return
-        const now = Date.now()
-        const currentDeadline = effectiveDeadline(current)
-        if (currentDeadline !== undefined && now < currentDeadline) {
-          scheduleCurrentDelivery(current)
-          return
-        }
-        const expired = await locusRepository.expireCurrentDelivery({
-          ...correlation,
-          deliveryId: current.deliveryId,
-          now,
-          expectedRevision: current.revision,
-        })
-        if (!expired.changed || expired.record === undefined) return
-        await finishAndAdvance(expired.record, correlation, 'failed')
-      }).finally(() => {
-        if (locusExpiryTimers.get(key) === timer) locusExpiryTimers.delete(key)
-      })
-    }, delay)
-    timer.unref?.()
-    locusExpiryTimers.set(key, timer)
-  }
+  // The lease deadline is durable, but only a live timer notices the moment it
+  // passes. `createExpiryScheduler` owns that timing behavior so it can be
+  // driven directly in tests; expiry itself stays the durable CAS below it.
+  const expiryScheduler = createExpiryScheduler({
+    repository: locusRepository,
+    withDispatchLane: withLocusDispatchLane,
+    finishAndAdvance,
+  })
+  scheduleCurrentDelivery = (record: DeliveryRecord): void => { expiryScheduler.schedule(record) }
 
   finishCurrentDelivery = async (input: PetLocusFinishInput): Promise<PetLocusFinishResult> => {
     const correlation = deliveryCorrelation(input)
