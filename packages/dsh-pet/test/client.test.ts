@@ -507,16 +507,55 @@ describe('settings information architecture', () => {
     // Assert the source contract so this test does not pretend useEffect ran on
     // the server or expose ownerId as a browser capability.
     expect(settings).toContain('统一 locus 接口不可用时不会回退')
-    expect(settings).toContain('创建/打开默认 Q&A')
     expect(settings).toContain('发现关联')
-    expect(settings).toContain('绑定新的 endpoint')
-    expect(settings).toContain('locusDefaultQa({ parentSessionId })')
     expect(settings).toContain('locusArchive')
     expect(settings).toContain('locusStop')
     expect(settings).toContain('warningText')
     expect(settings).toContain('默认 Q&A 新群的所有者来自 dsh-pet profile 实时核验的当前飞书用户')
     expect(settings).toContain('列表顺序和浏览器输入都不能声明“本人”')
     expect(settings).not.toContain('ownerId:')
+  })
+
+  it('creates no external resource from the locus tab', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // Binding an endpoint by hand and creating a Q&A group are both removed:
+    // the second is an irreversible external side effect (a real group, with a
+    // real owner), and it used to be rendered as parallel buttons that differed
+    // only by a bare session id. The regression this guards is the control
+    // coming BACK, so absence is what gets asserted — not wording.
+    expect(settings).not.toContain('locusDefaultQa')
+    expect(settings).not.toContain('locusBind')
+    expect(settings).not.toContain('绑定新的 endpoint')
+    expect(settings).not.toContain('创建/打开默认 Q&A')
+    // The read-only replacement still tells the owner where creation lives.
+    expect(settings).toContain('请在目标会话里用 Pet 轮盘的「答疑群」创建')
+    // Lifecycle actions stay reachable.
+    expect(settings).toContain('locusRebuild')
+    expect(settings).toContain('locusScope')
+    expect(settings).toContain('locusConfirmAnchor')
+  })
+
+  it('presents entries through the shared presentation model', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // A rebuilt entry used to be a full card per RECORD, so one entry could
+    // appear several times. Aggregation and naming now live in locus-view.ts
+    // (where they are tested against real snapshots); this asserts the surface
+    // actually goes through it rather than re-implementing a per-record card.
+    expect(settings).not.toContain('function LocusCard')
+    expect(settings).toContain('applyLocusFilter')
+    expect(settings).toContain('collectHandleCodes')
+    expect(settings).toContain('entryDisplayName(endpoint, endpointCode)')
+    expect(settings).toContain('familyHead')
   })
 
 })

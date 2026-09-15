@@ -673,4 +673,234 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-task-name{
   font:500 14px/22px var(--dsw-font-family,inherit);
   color:var(--dsw-alias-label-primary,#0f1115)}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Locus management surface.
+
+   The previous layout drew one bordered card per locus RECORD: 4 records made
+   the tab 3444px tall, every fact carried the same weight, and the headline was
+   a raw chat id. Three things changed, and they are the whole design:
+
+     1. a row is an ENTRY (one endpoint), with its generations folded into
+        "历史 N 代" instead of one card each;
+     2. the parent session appears once, and the rail under it carries the
+        1—N—1 relationship the old cards repeated per row;
+     3. identity is a name plus a short code, and the raw identifier lives one
+        disclosure away where it can still be copied.
+
+   Colours come from the same DSH tokens as the rest of this file; nothing here
+   introduces a value the theme does not define.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.dshpet-settings .dshpet-locus-head{display:flex;flex-direction:column;gap:10px;
+  padding:16px 0 12px;border-bottom:.5px solid var(--dsw-alias-border-l2,#0000001a);
+  position:relative}
+.dshpet-settings .dshpet-locus-headline{display:flex;align-items:baseline;gap:8px}
+.dshpet-settings .dshpet-locus-title{font:500 14px/22px var(--dsw-font-family,inherit);
+  color:var(--dsw-alias-label-primary,#0f1115)}
+.dshpet-settings .dshpet-locus-headtail{margin-left:auto;display:inline-flex;align-items:center;gap:6px}
+.dshpet-settings .dshpet-locus-tools{display:flex;align-items:center;gap:8px}
+.dshpet-settings .dshpet-locus-search{flex:1;min-width:0;height:32px;max-width:none}
+
+/* Shared inline vocabulary: one meta size, one chip, one handle. */
+.dshpet-settings .dshpet-meta{font:var(--dsw-font-xs-13,400 12px/18px inherit);
+  color:var(--dsw-alias-label-secondary,#61666b);font-variant-numeric:tabular-nums;
+  min-width:0;overflow-wrap:anywhere}
+.dshpet-settings .dshpet-chip{display:inline-flex;align-items:center;flex:none;height:18px;
+  padding:0 7px;border-radius:999px;font-size:11px;line-height:1;letter-spacing:.02em;
+  white-space:nowrap;background:var(--dsw-alias-bg-module-platform,#0000000a);
+  color:var(--dsw-alias-label-secondary,#61666b)}
+.dshpet-settings .dshpet-chip[data-tone="qa"]{background:#4176e61a;color:#2f5cc4;font-weight:500}
+.dshpet-settings .dshpet-chip[data-tone="busy"]{background:#dd86291a;color:#a35f16}
+.dshpet-settings .dshpet-chip[data-tone="muted"]{margin-right:6px;
+  color:var(--dsw-alias-label-tertiary,#81858c)}
+.dshpet-settings .dshpet-handle{display:inline-flex;align-items:center;flex:none;height:18px;
+  padding:0 6px;border:0;border-radius:5px;cursor:copy;white-space:nowrap;
+  background:var(--dsw-alias-bg-module-platform,#0000000a);
+  color:var(--dsw-alias-label-secondary,#61666b);
+  font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:11px;line-height:1;
+  letter-spacing:.02em;font-variant-numeric:tabular-nums}
+.dshpet-settings .dshpet-handle:hover{background:var(--dsw-alias-interactive-bg-hover,#0000000a);
+  color:var(--dsw-alias-label-primary,#0f1115)}
+.dshpet-settings .dshpet-handle:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6)}
+
+/* Navigation (a jump) and mutation (a bordered action) must not look alike. */
+.dshpet-settings .dshpet-jump{display:inline-flex;align-items:center;gap:4px;flex:none;
+  box-sizing:border-box;height:24px;padding:0 9px;border-radius:12px;cursor:pointer;
+  white-space:nowrap;text-decoration:none;
+  border:.5px solid var(--dsw-alias-border-l3,#0000001f);background:0 0;
+  color:var(--dsw-alias-label-primary,#0f1115);
+  font:400 12px/18px var(--dsw-font-family,inherit)}
+.dshpet-settings .dshpet-jump:hover{background:var(--dsw-alias-interactive-bg-hover,#0000000a)}
+.dshpet-settings .dshpet-jump:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6)}
+.dshpet-settings .dshpet-jump[data-disabled="true"]{border-color:transparent;
+  color:var(--dsw-alias-label-tertiary,#81858c);cursor:not-allowed}
+.dshpet-settings .dshpet-jump svg{flex:none}
+
+/* One parent session: rendered once, with its entries railed underneath. */
+.dshpet-settings .dshpet-work{padding:14px 0 0;display:flex;flex-direction:column}
+.dshpet-settings .dshpet-work-head{display:flex;align-items:baseline;gap:8px}
+.dshpet-settings .dshpet-work-mark{flex:none;width:3px;height:13px;border-radius:2px;
+  margin-right:2px;transform:translateY(1px);
+  background:var(--dsw-alias-label-primary,#0f1115)}
+.dshpet-settings .dshpet-work-name{display:inline-flex;align-items:baseline;gap:4px;
+  min-width:0;padding:0;border:0;background:0 0;cursor:pointer;text-align:left;
+  font:500 14px/22px var(--dsw-font-family,inherit);
+  color:var(--dsw-alias-label-primary,#0f1115);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dshpet-settings .dshpet-work-name:hover{text-decoration:underline}
+.dshpet-settings .dshpet-work-name[data-static="true"]{color:var(--dsw-alias-label-secondary,#61666b)}
+.dshpet-settings .dshpet-work-name:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);
+  outline-offset:2px;border-radius:4px}
+.dshpet-settings .dshpet-work-tail{margin-left:auto;flex:none;display:inline-flex;
+  align-items:baseline;gap:8px}
+.dshpet-settings .dshpet-work-sub{display:flex;align-items:baseline;gap:8px;margin:3px 0 0 13px;
+  font:var(--dsw-font-xs-13,400 12px/18px inherit);
+  color:var(--dsw-alias-label-tertiary,#81858c);min-width:0;flex-wrap:wrap}
+.dshpet-settings .dshpet-work-sub code{font-size:11px;overflow-wrap:anywhere}
+.dshpet-settings .dshpet-work-note{margin:3px 0 0 13px;
+  font:var(--dsw-font-xs-13,400 12px/18px inherit);
+  color:var(--dsw-alias-label-tertiary,#81858c)}
+
+/* The rail: a 1px line with a node per row. The node IS the status, so the row
+   no longer needs a separate pill to say the same thing twice. */
+.dshpet-settings .dshpet-rail{margin:6px 0 0 6px;border-left:1px solid var(--dsw-alias-border-l2,#0000001a)}
+.dshpet-settings .dshpet-locus-row{position:relative;display:grid;
+  grid-template-columns:minmax(0,1fr) auto;column-gap:10px;padding:7px 0 7px 16px}
+.dshpet-settings .dshpet-locus-row + .dshpet-locus-row,
+.dshpet-settings .dshpet-locus-row + .dshpet-locus-generations,
+.dshpet-settings .dshpet-locus-generations + .dshpet-locus-row{
+  border-top:.5px solid var(--dsw-alias-border-l2,#0000001a)}
+.dshpet-settings .dshpet-locus-row:hover{background:var(--dsw-alias-interactive-bg-hover,#0000000a)}
+.dshpet-settings .dshpet-locus-row[data-nested="true"]{padding-left:32px}
+.dshpet-settings .dshpet-locus-row[data-open="true"]{background:var(--dsw-alias-interactive-bg-hover,#0000000a)}
+.dshpet-settings .dshpet-locus-node{position:absolute;left:-4px;top:13px;width:7px;height:7px;
+  border-radius:2px;background:var(--dsw-alias-label-tertiary,#81858c)}
+.dshpet-settings .dshpet-locus-row[data-nested="true"] .dshpet-locus-node{left:12px}
+.dshpet-settings .dshpet-locus-node[data-tone="on"]{background:var(--dsw-alias-state-success-primary,#22c55e)}
+.dshpet-settings .dshpet-locus-node[data-tone="warn"]{background:var(--dsw-alias-state-warn-label,#dd8629)}
+.dshpet-settings .dshpet-locus-node[data-tone="off"]{background:var(--dsw-alias-state-error-primary,#ec1313)}
+.dshpet-settings .dshpet-locus-node[data-tone="gone"]{background:#c3c8cf}
+/* A current generation gets a ring, and default Q&A additionally a word: colour
+   alone never carries either fact. The inner colour reuses the panel-surface
+   token this sheet already proved, so no new token is introduced here. */
+.dshpet-settings .dshpet-locus-node[data-current="true"]{
+  box-shadow:0 0 0 2px var(--dsw-specific-menu,#fff)}
+.dshpet-settings .dshpet-locus-row-body{display:flex;flex-direction:column;gap:1px;min-width:0}
+.dshpet-settings .dshpet-locus-row-line{display:flex;align-items:baseline;gap:8px;
+  min-width:0;flex-wrap:wrap}
+.dshpet-settings .dshpet-locus-name{font:500 14px/22px var(--dsw-font-family,inherit);
+  color:var(--dsw-alias-label-primary,#0f1115);
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 0 auto;
+  max-width:22em}
+/* A fallback name is not a real name: it reads quieter and says so in the list. */
+.dshpet-settings .dshpet-locus-name[data-placeholder="true"]{
+  font-weight:400;color:var(--dsw-alias-label-secondary,#61666b)}
+/* A session title is shown on one line and clipped: an auto-generated child
+   title can run to 80 characters, and letting it wrap pushed the code chip onto
+   a third line, away from the fact it belongs to. */
+.dshpet-settings .dshpet-locus-session-title{flex:0 1 auto;min-width:0;max-width:14em;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dshpet-settings .dshpet-locus-row-tail{display:inline-flex;align-items:center;gap:6px;
+  flex:none;align-self:start}
+.dshpet-settings .dshpet-locus-more{border:0;background:0 0;padding:0 2px;cursor:pointer;
+  font:var(--dsw-font-xs-13,400 12px/18px inherit);
+  color:var(--dsw-alias-label-secondary,#61666b);white-space:nowrap}
+.dshpet-settings .dshpet-locus-more:hover{color:var(--dsw-alias-label-primary,#0f1115);
+  text-decoration:underline}
+.dshpet-settings .dshpet-locus-more:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6)}
+
+/* Folded facts. Everything the old card printed at full weight lives here. */
+.dshpet-settings .dshpet-locus-details{display:grid;grid-template-columns:60px minmax(0,1fr);
+  gap:7px 12px;margin:2px 0 8px 16px;padding:10px 12px;border-radius:10px;
+  background:var(--dsw-alias-bg-module-platform,#0000000a);
+  font:var(--dsw-font-xs-13,400 12px/18px inherit)}
+.dshpet-settings .dshpet-locus-details dt{color:var(--dsw-alias-label-tertiary,#81858c)}
+.dshpet-settings .dshpet-locus-details dd{margin:0;min-width:0;
+  color:var(--dsw-alias-label-primary,#0f1115);overflow-wrap:anywhere;
+  display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+.dshpet-settings .dshpet-locus-owner-facts{display:inline-flex;flex-wrap:wrap;gap:6px 12px}
+.dshpet-settings .dshpet-locus-ops{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.dshpet-settings .dshpet-locus-perm{display:inline-flex;align-items:center;gap:2px;padding:1px;
+  border-radius:10px;background:var(--dsw-alias-bg-module-platform,#0000000a)}
+.dshpet-settings .dshpet-locus-perm button{height:22px;padding:0 9px;border:0;border-radius:8px;
+  background:0 0;cursor:pointer;font:400 11px/18px var(--dsw-font-family,inherit);
+  color:var(--dsw-alias-label-secondary,#61666b)}
+.dshpet-settings .dshpet-locus-perm button[aria-pressed="true"]{
+  background:var(--dsw-specific-menu,#fff);color:var(--dsw-alias-label-primary,#0f1115);
+  font-weight:500}
+.dshpet-settings .dshpet-locus-perm button:disabled{opacity:.45;cursor:not-allowed}
+.dshpet-settings .dshpet-locus-perm button:focus-visible{
+  outline:2px solid var(--dsw-alias-state-business-primary,#4176e6)}
+
+/* Historical generations: disclosed, countable, never a second card. */
+.dshpet-settings .dshpet-locus-generations{margin:0 0 8px 32px;padding:2px 0 2px 12px;
+  border-left:1px dashed var(--dsw-alias-border-l4,#00000029);
+  display:flex;flex-direction:column;gap:6px}
+.dshpet-settings .dshpet-locus-history-toggle{align-self:flex-start;padding:0;border:0;
+  background:0 0;cursor:pointer;font:400 11px/18px var(--dsw-font-family,inherit);
+  color:var(--dsw-alias-label-secondary,#61666b)}
+.dshpet-settings .dshpet-locus-history-toggle:hover{color:var(--dsw-alias-label-primary,#0f1115);
+  text-decoration:underline}
+.dshpet-settings .dshpet-locus-generation{display:flex;align-items:center;gap:8px;
+  flex-wrap:wrap;font:var(--dsw-font-xs-13,400 12px/18px inherit);
+  color:var(--dsw-alias-label-secondary,#61666b)}
+.dshpet-settings .dshpet-locus-generation .dshpet-locus-node{position:static;flex:none}
+.dshpet-settings .dshpet-locus-generation-no{flex:none;font-variant-numeric:tabular-nums;
+  color:var(--dsw-alias-label-tertiary,#81858c)}
+
+/* What the filter removed, stated in the list instead of by an empty screen. */
+.dshpet-settings .dshpet-locus-hidden{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  margin-top:12px;padding-top:10px;
+  border-top:.5px solid var(--dsw-alias-border-l2,#0000001a)}
+.dshpet-settings .dshpet-locus-hidden .dshpet-meta{
+  color:var(--dsw-alias-label-tertiary,#81858c);white-space:normal}
+.dshpet-settings .dshpet-locus-nodelete{margin-top:12px;max-width:620px}
+
+/* The filter panel. */
+.dshpet-settings .dshpet-locus-filter{width:236px;padding:10px 12px 12px;border-radius:12px;
+  background:var(--dsw-specific-menu,#fff);
+  border:.5px solid var(--dsw-alias-border-l4,#00000029);
+  box-shadow:0 6px 20px #0000001f;
+  display:flex;flex-direction:column;gap:6px}
+.dshpet-settings .dshpet-locus-filter-cap{font-size:11px;line-height:16px;
+  color:var(--dsw-alias-label-tertiary,#81858c);letter-spacing:.02em}
+.dshpet-settings .dshpet-locus-filter-row{display:flex;align-items:center;gap:8px;
+  font:400 13px/20px var(--dsw-font-family,inherit);
+  color:var(--dsw-alias-label-primary,#0f1115);cursor:pointer}
+.dshpet-settings .dshpet-locus-filter-row[data-empty="true"]{opacity:.45}
+.dshpet-settings .dshpet-locus-filter-count{margin-left:auto;font-size:11px;
+  color:var(--dsw-alias-label-tertiary,#81858c);font-variant-numeric:tabular-nums}
+.dshpet-settings .dshpet-locus-filter-hr{height:.5px;
+  background:var(--dsw-alias-border-l2,#0000001a);margin:2px 0}
+.dshpet-settings .dshpet-locus-filter-foot{display:flex;align-items:center;gap:8px;
+  margin-top:2px;flex-wrap:wrap}
+
+/* The folded manual lookup, and its self-describing results. */
+.dshpet-settings .dshpet-locus-discovery{display:block;margin-top:14px;
+  border-top:.5px solid var(--dsw-alias-border-l2,#0000001a)}
+.dshpet-settings .dshpet-locus-discovery-head{display:flex;align-items:center;gap:8px;
+  list-style:none;cursor:pointer;padding:13px 0;
+  font:500 14px/22px var(--dsw-font-family,inherit);
+  color:var(--dsw-alias-label-primary,#0f1115)}
+.dshpet-settings .dshpet-locus-discovery-head::-webkit-details-marker{display:none}
+.dshpet-settings .dshpet-locus-discovery-mark{flex:none;font-size:11px;line-height:1;
+  color:var(--dsw-alias-label-tertiary,#81858c);transition:transform .16s ease}
+.dshpet-settings .dshpet-locus-discovery[open] .dshpet-locus-discovery-mark{transform:rotate(90deg)}
+.dshpet-settings .dshpet-locus-discovery-head .dshpet-meta{margin-left:auto;flex:none;
+  color:var(--dsw-alias-label-tertiary,#81858c)}
+.dshpet-settings .dshpet-locus-discovery-head:focus-visible{border-radius:8px;
+  outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:2px}
+.dshpet-settings .dshpet-locus-discovery-body{display:flex;flex-direction:column;
+  gap:10px;padding:0 0 14px}
+.dshpet-settings .dshpet-locus-discovery-controls{display:flex;align-items:center;gap:8px;
+  flex-wrap:wrap}
+.dshpet-settings .dshpet-locus-discovery-controls .dshpet-input{flex:1;min-width:140px;
+  max-width:280px}
+.dshpet-settings .dshpet-locus-discovery-results{display:flex;flex-direction:column;gap:8px}
+.dshpet-settings .dshpet-locus-discovery-group{display:flex;flex-direction:column;gap:6px}
+.dshpet-settings .dshpet-locus-discovery-card{display:flex;flex-direction:column;gap:5px;
+  padding:10px 12px;border-radius:12px;
+  border:.5px solid var(--dsw-alias-border-l4,#00000029);
+  background:var(--dsw-specific-menu,#fff)}
 `
