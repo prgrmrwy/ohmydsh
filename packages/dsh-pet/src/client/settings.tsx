@@ -1750,49 +1750,51 @@ export function LocusSurface(props: {
   return (
     <div className="dshpet-settings">
       <section className="dshpet-locus-head">
-        <div className="dshpet-locus-headline">
-          <span className="dshpet-locus-title">关联</span>
+        {/* Title row: the title, and the filter at the far end — the control
+            that changes the reading belongs with the heading, not with the
+            description of what is currently counted. */}
+        <div className="dshpet-locus-lead">
+          <div className="dshpet-locus-headline">
+            <span className="dshpet-locus-title">关联</span>
+            <span className="dshpet-locus-filter-anchor" ref={filterRef}>
+              <button
+                type="button"
+                className="dshpet-jump"
+                aria-pressed={filterOpen}
+                aria-expanded={filterOpen}
+                title="按父会话状态与入口状态筛选"
+                onClick={() => setFilterOpen(current => !current)}
+              >
+                <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+                  <path
+                    d="M1 2.2h10L7.2 6.6v3.6L4.8 11V6.6L1 2.2z"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.1"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                父会话：
+                {filter.parentAvailability.length === 1 && filter.parentAvailability[0] !== undefined
+                  ? PARENT_AVAILABILITY_LABELS[filter.parentAvailability[0]]
+                  : `已选 ${filter.parentAvailability.length} 类`}
+                {` · 入口：${entryStateFilterLabel(filter.entryStates)}`}
+              </button>
+              {filterOpen ? (
+                <LocusFilterPanel
+                  filter={filter}
+                  parentCounts={counts.parent}
+                  entryCounts={counts.entry}
+                  onChange={setFilter}
+                />
+              ) : null}
+            </span>
+          </div>
+          {/* The counts describe the snapshot, so they sit under the title on
+              their own line and wrap there instead of squeezing it. */}
           <span className="dshpet-meta">
             {totals.entries} 个入口 · {totals.chats} 个飞书入口 · {totals.works} 个父会话
             {updatedAt === 0 ? '' : ` · 状态更新 ${formatRelative(updatedAt, now)}`}
-          </span>
-        </div>
-        {/* The filter keeps its own line instead of sharing the title line: it
-            is a wide control, and sharing squeezed the title to one character
-            per line while the counts kept their space. */}
-        <div className="dshpet-locus-filterrow">
-          <span className="dshpet-locus-filter-anchor" ref={filterRef}>
-            <button
-              type="button"
-              className="dshpet-jump"
-              aria-pressed={filterOpen}
-              aria-expanded={filterOpen}
-              title="按父会话状态与入口状态筛选"
-              onClick={() => setFilterOpen(current => !current)}
-            >
-              <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
-                <path
-                  d="M1 2.2h10L7.2 6.6v3.6L4.8 11V6.6L1 2.2z"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.1"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              父会话：
-              {filter.parentAvailability.length === 1 && filter.parentAvailability[0] !== undefined
-                ? PARENT_AVAILABILITY_LABELS[filter.parentAvailability[0]]
-                : `已选 ${filter.parentAvailability.length} 类`}
-              {` · 入口：${entryStateFilterLabel(filter.entryStates)}`}
-            </button>
-            {filterOpen ? (
-              <LocusFilterPanel
-                filter={filter}
-                parentCounts={counts.parent}
-                entryCounts={counts.entry}
-                onChange={setFilter}
-              />
-            ) : null}
           </span>
         </div>
         <div className="dshpet-locus-tools">
