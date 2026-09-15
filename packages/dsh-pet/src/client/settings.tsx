@@ -1514,6 +1514,21 @@ function requireLocusSnapshot(value: unknown): PetLocusManagementView {
 }
 
 /**
+ * Whether the reverse-lookup fold is offered.
+ *
+ * Off by owner decision (2026-09-15): it answers exactly one question the rest
+ * of the surface cannot — "what does this ID belong to" for an ID that is not in
+ * the snapshot at all — and that question has no owner right now. The search box
+ * already matches raw ids, display codes and titles across the visible entries,
+ * so reverse lookup of anything on screen still works without it.
+ *
+ * Disabled, not deleted, on the same rule as `enabled: false` in `dsh.yaml`:
+ * the source stays compiled and type-checked so it cannot rot silently. Flip
+ * this to true to bring it back; the Host route behind it is untouched.
+ */
+const DISCOVERY_FOLD_ENABLED: boolean = false
+
+/**
  * The folded manual lookup.
  *
  * Kept because the Host contract it exercises — one explicit index selector,
@@ -1890,8 +1905,8 @@ export function LocusSurface(props: {
       {empty ? (
         <p className="dshpet-empty">
           {query.trim() !== ''
-            ? '没有匹配的关联。可以在下面的「反查关联」里粘贴完整 ID。'
-            : '当前筛选下没有关联。可以放宽上面的筛选（已停止的入口要在入口状态里勾上），或用下面的按索引查询。'}
+            ? '没有匹配的关联。清空搜索，或放宽上面的筛选。'
+            : '当前筛选下没有关联。可以放宽上面的筛选（已停止的入口要在入口状态里勾上）。'}
         </p>
       ) : null}
 
@@ -1901,7 +1916,9 @@ export function LocusSurface(props: {
         停止后的入口默认不在列表里（筛选默认只看在服务的），在筛选里勾上「已停止 / 已失效」即可直接「重建」。
       </p>
 
-      <DiscoveryFold codes={codes} disabled={props.busyKey !== undefined} run={props.runQuery} />
+      {DISCOVERY_FOLD_ENABLED
+        ? <DiscoveryFold codes={codes} disabled={props.busyKey !== undefined} run={props.runQuery} />
+        : null}
 
       {props.warning === undefined ? null : <p className="dshpet-callout" data-tone="warn">{props.warning}</p>}
       {props.error === undefined ? null : <p className="dshpet-error">{props.error}</p>}
