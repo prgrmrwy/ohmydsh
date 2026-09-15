@@ -131,7 +131,7 @@ describe('design architecture acceptance A-F focused gaps', () => {
     }
   })
 
-  it('B/E: non-at has zero side effects; later decision turns reuse one child and never create Invocation rows', async () => {
+  it('B/E: non-at has zero side effects; later decision turns reuse one child, serialize FIFO, and never create Invocation rows', async () => {
     const harness = await openPetHarness()
     try {
       const durable = new DurableLocusRepository(harness.domain)
@@ -146,11 +146,20 @@ describe('design architecture acceptance A-F focused gaps', () => {
         locus: createLocusResolution({ store: durable }) as never,
         deliveries: {
           findByMessageId: id => durable.findDeliveryByMessageId(id),
+          getById: id => durable.getDelivery(id),
           accept: input => durable.acceptDelivery(input),
           bindQueued: input => durable.bindQueued(input),
           bindTurn: input => durable.bindTurn(input),
-          settleByTurn: input => durable.settleByTurn(input),
         } as never,
+        // The required durable current/backlog claim seam: D2's one-current
+        // FIFO serialization is exactly what this test exercises across two
+        // decision-turn Deliveries on the same locus/child.
+        deliveryDispatch: {
+          claimCurrent: input => durable.claimCurrentDelivery(input),
+          currentFinished: () => {},
+          dispatchNext: async correlation => { await controller.dispatchNext(correlation) },
+          scheduleCurrent: () => {},
+        },
         child: {
           ensureChild: locus => ({ parentSessionId: locus.parentSessionId, childSessionId: locus.childSessionId }),
           withChildSession: async input => ({ ok: true as const, value: await input.operation({ id: 'session-child' }) }),
@@ -177,24 +186,34 @@ describe('design architecture acceptance A-F focused gaps', () => {
       expect(durable.findDeliveryByMessageId('om-material')).toBeUndefined()
 
       await expect(controller.handle(inbound('om-question', '@Pet choose A or B'))).resolves.toMatchObject({ kind: 'accepted' })
+      const correlation = {
+        endpoint: { chatId: 'oc-decision' },
+        locusId: 'locus-decision',
+        generation: 1,
+        childSessionId: 'session-child',
+      }
       const first = durable.findDeliveryByMessageId('om-question')!
-      await durable.bindTurn({
+      expect(first.status).toBe('current')
+      // `turn/end` never settles a Delivery: only the durable finish operation
+      // (what the Host lifecycle callback performs for `pet_locus_finish`)
+      // does. `no-reply` completes directly from `current`.
+      await durable.completeCurrentDelivery({
+        ...correlation,
         deliveryId: first.deliveryId,
-        executionId: first.executionId!,
-        correlation: first,
-        turnId: 'session-child#1',
-        startedAt: Date.now(),
+        now: Date.now(),
+        outcome: 'no-reply',
+        outboundResult: 'none',
+        reason: 'decision recorded, no separate reply needed',
+        ...(first.revision === undefined ? {} : { expectedRevision: first.revision }),
       })
-      await durable.settleByTurn({
-        deliveryId: first.deliveryId,
-        executionId: first.executionId!,
-        correlation: { ...first, turnId: 'session-child#1' },
-        outcome: 'settled',
-        settledAt: Date.now(),
-      })
+      controller.currentFinished({ deliveryId: first.deliveryId, correlation })
+      await controller.dispatchNext(correlation)
+
       await expect(controller.handle(inbound('om-answer', '@Pet B'))).resolves.toMatchObject({ kind: 'accepted' })
       expect(queued.map(item => item.childSessionId)).toEqual(['session-child', 'session-child'])
+      expect(durable.findDeliveryByMessageId('om-question')?.status).toBe('no-reply')
       expect(durable.findDeliveryByMessageId('om-question')?.replyTarget?.messageId).toBe('om-question')
+      expect(durable.findDeliveryByMessageId('om-answer')?.status).toBe('current')
       expect(durable.findDeliveryByMessageId('om-answer')?.replyTarget?.messageId).toBe('om-answer')
       expect(harness.domain.table('invocations').size).toBe(0)
       expect(harness.domain.table('invocation_channel').size).toBe(0)

@@ -25,7 +25,7 @@ const root = resolve(here, '../../../..')
 const version = '0.1.2-rc.1'
 const npmVersion = '11.19.0'
 const reviewedCommit = 'a66e4702047846cdaa10c66c9d3df3951f5ea70d'
-const subagentPatchSha256 = '4b70988900e69aaf806a8c5e4d8c517bd17479e95ce25131ea87dc02e688c941'
+const subagentPatchSha256 = 'e27fce5e45801cc321961fb4cb9a7b8c60f16c27419cc674b8830eae49c609e6'
 const storagePatchSha256 = '18ec93c5240612b513871d65db2d100ee6165ea1ba251dbf91e670963dd35bed'
 const expectedRuntimeStorage = [
   '@deepseek-ai/dsh-storage',

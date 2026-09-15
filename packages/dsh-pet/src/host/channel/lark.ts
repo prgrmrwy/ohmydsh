@@ -16,6 +16,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { PET_CLI_PROFILE, petCliArgs } from './cli.js'
 import type { LocusLarkPort } from '../locus/controller.js'
+import type { LocusReplyTarget } from '../locus/context.js'
 
 const run = promisify(execFile)
 
@@ -161,6 +162,12 @@ export interface LarkClient {
    * a message was sent when lark-cli failed softly.
    */
   replyExact?(messageId: string, text: string): Promise<void>
+  /**
+   * Reply to a Host-resolved Delivery target, preserving topic semantics.
+   * The model never supplies this target: the Host derives it from the
+   * accepted Delivery. The returned id is checked before this resolves.
+   */
+  replyToTarget?(target: LocusReplyTarget, text: string): Promise<{ readonly messageId: string }>
   /**
    * Send a control-plane receipt and report delivery failure to the caller.
    * Ordinary Agent work keeps using fail-soft {@link reply}; pairing needs to
@@ -720,6 +727,39 @@ export function createLarkCliClient(
       )
       const data = recordOf(strictEnvelopeData(result, 'reply exact'))
       requireMessageId(data?.['message_id'], 'reply exact')
+    },
+
+    async replyToTarget(target, text) {
+      const targetChatId = requireChatId(target.chatId, 'reply target')
+      if (target.threadId !== undefined) requireInput(target.threadId, 'reply target thread id')
+      const targetMessageId = requireMessageId(
+        requireInput(target.messageId, 'reply target message id'),
+        'reply target',
+      )
+      const replyText = requireInput(text, 'reply text')
+      const args = [
+        'im',
+        '+messages-reply',
+        '--as',
+        'bot',
+        '--message-id',
+        targetMessageId,
+        '--text',
+        replyText,
+      ]
+      // A thread id is Host-verified context. The CLI flag is still required
+      // to select the platform's thread reply path; retaining the id in the
+      // target is not itself proof that this request stays in the topic.
+      if (target.threadId !== undefined) args.push('--reply-in-thread')
+      args.push('--json')
+      const result = await callJson(args, binary, runner)
+      const data = recordOf(strictEnvelopeData(result, 'reply to target'))
+      const messageId = requireMessageId(data?.['message_id'], 'reply to target')
+      const returnedChatId = requireChatId(data?.['chat_id'], 'reply to target')
+      if (returnedChatId !== targetChatId) {
+        throw new Error('reply to target: lark-cli returned a different chat id')
+      }
+      return { messageId }
     },
 
     async replyStrict(messageId, text) {

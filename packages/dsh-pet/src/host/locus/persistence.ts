@@ -38,15 +38,25 @@ import {
   type LocusSource,
   type NewLocusInput,
 } from './aggregate.js'
-import type {
-  DeliveryCorrelation,
-  DeliveryFeedbackTarget,
-  DeliveryInput,
-  DeliveryTurnCorrelation,
-  DeliveryOutcome,
-  DeliveryRecord,
-  DeliverySettlementInput,
-  DeliveryStatus,
+import {
+  DEFAULT_DELIVERY_LEASE_MS,
+  MAX_DELIVERY_LEASE_MS,
+  claimCurrentDelivery as applyClaimCurrentDelivery,
+  completeDelivery as applyCompleteDelivery,
+  expireDelivery as applyExpireDelivery,
+  markFinishing as applyMarkFinishing,
+  waitDelivery as applyWaitDelivery,
+  type DeliveryCorrelation,
+  type DeliveryFeedbackTarget,
+  type DeliveryInput,
+  type DeliveryTurnCorrelation,
+  type DeliveryOutcome,
+  type DeliveryRecord,
+  type DeliverySettlementInput,
+  type DeliveryStatus,
+  type DeliveryFinishInput,
+  type DeliveryLeaseInput,
+  type DeliveryWaitInput,
 } from './delivery.js'
 import { LocusError } from './aggregate.js'
 import type { LocusContextAnchorFacts } from './context.js'
@@ -152,6 +162,14 @@ export interface LocusDeliveryMutation {
     | 'execution-proof-required'
     | 'no-pending-delivery'
     | 'inbox-message-conflict'
+    | 'current-occupied'
+    | 'not-oldest'
+    | 'revision-mismatch'
+    | 'deadline-expired'
+    | 'deadline-not-reached'
+    /** The requested wait horizon is already covered; the request is satisfied. */
+    | 'deadline-already-sufficient'
+    | 'invalid-wait'
 }
 
 /** A durable operation snapshot exposed for restart diagnostics. */
@@ -201,7 +219,12 @@ export interface DurableProvisioningCommit {
   }
 }
 
-/** Proof supplied by the live Host for one interrupted Delivery. */
+/**
+ * Proof supplied by the live Host for one interrupted `queued`/`running`
+ * Delivery. A durably serialized `current` row does not need this proof to be
+ * retained: it is retained by exact locus/generation/child/endpoint identity
+ * alone, because `current` is already the physical-dispatch fence.
+ */
 export interface LocusStartupDeliveryProof {
   readonly deliveryId: string
   readonly executionId: string
@@ -237,7 +260,13 @@ export interface LocusStartupRecoveryOptions {
 export interface LocusStartupRecoveryReport {
   readonly indexStatus: 'unchanged' | 'rebuilt'
   readonly indexChanges: number
-  /** Deliveries whose exact live turn was proven and deliberately retained. */
+  /**
+   * Every Delivery still in a pending status AFTER this reconciliation pass
+   * (current/accepted/queued/running/manual debt) — not only proven-live
+   * turns. Callers must not treat a `pendingDeliveries` entry as a dispatch
+   * permission by itself: consult `retainedDeliveries`/`manualDeliveries` and
+   * this locus's own state before deciding whether it can be drained now.
+   */
   readonly pendingDeliveries: readonly DeliveryRecord[]
   /** Operations still requiring an explicit owner action; they gate creation. */
   readonly recoverableOperations: readonly LocusOperation[]
@@ -250,19 +279,25 @@ export interface LocusStartupRecoveryReport {
   readonly sideEffectsReplayed: false
 }
 
-const TERMINAL_DELIVERY_STATUSES: ReadonlySet<DeliveryStatus> = new Set(['settled', 'failed'])
+const TERMINAL_DELIVERY_STATUSES: ReadonlySet<DeliveryStatus> = new Set([
+  'settled', 'failed', 'replied', 'no-reply', 'expired', 'unknown-terminal',
+])
 const PENDING_DELIVERY_STATUSES: ReadonlySet<DeliveryStatus> = new Set([
-  'accepted',
-  'queued',
-  'running',
+  'accepted', 'queued', 'running', 'current', 'finishing',
 ])
 const ACTIVE_BUSY_DELIVERY_STATUSES: ReadonlySet<DeliveryStatus> = PENDING_DELIVERY_STATUSES
 const DELIVERY_TRANSITIONS: Readonly<Record<DeliveryStatus, readonly DeliveryStatus[]>> = {
-  accepted: ['queued'],
-  queued: ['running'],
-  running: ['settled', 'failed'],
+  accepted: ['queued', 'current', 'expired'],
+  queued: ['running', 'current', 'expired'],
+  running: ['current', 'finishing', 'expired'],
+  current: ['finishing', 'no-reply', 'expired'],
+  finishing: ['replied', 'failed', 'unknown-terminal'],
   settled: [],
   failed: [],
+  replied: [],
+  'no-reply': [],
+  expired: [],
+  'unknown-terminal': [],
 }
 
 /** Prefixes used by the materialized index table. */
@@ -1493,6 +1528,45 @@ export class LocusRepository {
     return this.deliveries().get(deliveryId) as unknown as DeliveryRecord | undefined
   }
 
+  /** Atomically claim one accepted/backlog Delivery as the exact locus current. */
+  async claimCurrentDelivery(input: {
+    readonly correlation: DeliveryCorrelation
+    readonly deliveryId?: string
+    readonly now: number
+    readonly expectedRevision?: number
+  }): Promise<DeliveryRecord | undefined> {
+    // A claim result is a physical-dispatch permission only when this call
+    // changed the durable row. Returning an already-current row would make the
+    // controller enqueue a second inbox message for the same locus.
+    for (let attempt = 0; attempt < 1_024; attempt += 1) {
+      const result = await this.claimCurrentDeliveryMutation({
+        ...input.correlation,
+        ...(input.deliveryId === undefined ? {} : { deliveryId: input.deliveryId }),
+        now: input.now,
+        ...(input.expectedRevision === undefined ? {} : { expectedRevision: input.expectedRevision }),
+      })
+      if (result.changed && result.record?.status === 'current') return result.record
+      // The oldest backlog row may already have crossed its hard deadline. The
+      // mutation expires one such row at a time; keep claiming until a live row
+      // is found or the locus is occupied/empty.
+      if (result.changed && result.record?.status === 'expired') continue
+      return undefined
+    }
+    throw new LocusError('INVALID_LOCUS', 'Delivery claim exceeded the backlog expiry bound')
+  }
+
+  /** Return whether this exact locus currently owns a serialized Delivery. */
+  hasCurrentDelivery(correlation: DeliveryCorrelation): boolean {
+    assertCorrelation(correlation)
+    const matches = this.listDeliveries().filter(record =>
+      (record.status === 'current' || record.status === 'finishing') &&
+      record.queueState === 'current' &&
+      deliveryCorrelates(record, correlation),
+    )
+    if (matches.length > 1) throw new LocusError('INVALID_LOCUS', 'Multiple current Deliveries for one locus')
+    return matches.length === 1
+  }
+
   /**
    * Find a Delivery by its exact DSH inbox message identity.
    *
@@ -1511,11 +1585,11 @@ export class LocusRepository {
   /** Find a Delivery by the platform message idempotency key. */
   findDeliveryByMessage(messageId: string): DeliveryRecord | undefined {
     assertIdentifier(messageId, 'messageId')
-    for (const [, value] of this.deliveries().entries()) {
-      const record = value as unknown as DeliveryRecord
-      if (record.messageId === messageId) return record
+    const matches = this.listDeliveries().filter(record => record.messageId === messageId)
+    if (matches.length > 1) {
+      throw new LocusError('INVALID_LOCUS', `Message ${messageId} is attached to multiple Deliveries`)
     }
-    return undefined
+    return matches[0]
   }
 
   findDeliveryByMessageId(messageId: string): DeliveryRecord | undefined {
@@ -1561,6 +1635,7 @@ export class LocusRepository {
       }
       const normalizedEndpoint = normalizeLocusEndpoint(input.endpoint).endpoint
        const sequence = this.nextDeliverySequence()
+       const acceptedAt = input.acceptedAt ?? Date.now()
        const rootMessageId = input.rootMessageId ?? input.replyTarget?.rootMessageId
       const feedbackTarget: DeliveryFeedbackTarget = Object.freeze({
         chatId: normalizedEndpoint.chatId,
@@ -1586,13 +1661,19 @@ export class LocusRepository {
         ...(input.replyToMessageId !== undefined ? { replyToMessageId: input.replyToMessageId } : {}),
         sequence,
         status: 'accepted',
+        queueState: 'backlog',
+        acceptedAt,
+        deadlineAt: acceptedAt + DEFAULT_DELIVERY_LEASE_MS,
+        hardDeadlineAt: acceptedAt + MAX_DELIVERY_LEASE_MS,
+        revision: 0,
+        stateRevision: 0,
+        outboundResult: 'none',
         feedbackTarget,
-        ...(input.acceptedAt !== undefined ? { acceptedAt: input.acceptedAt } : {}),
       })
       if (this.getDelivery(record.deliveryId) !== undefined) {
         throw new LocusError('INVALID_LOCUS', `Delivery id ${record.deliveryId} already exists`)
       }
-      const busyAt = Math.max(input.acceptedAt ?? Date.now(), locus.updatedAt)
+      const busyAt = Math.max(acceptedAt, locus.updatedAt)
       const busyLocus = locus.busy ? undefined : withLocusBusy(locus, true, busyAt)
       await this.persistDeliveryMutation('delivery-accept', undefined, record, {
         deliveryId: record.deliveryId,
@@ -1668,6 +1749,171 @@ export class LocusRepository {
         ...(record.endpoint.threadId !== undefined ? { threadId: record.endpoint.threadId } : {}),
       }, locus, busyLocus)
       return record
+    })
+  }
+
+  /** Atomically promote the oldest unexpired backlog Delivery to current. */
+  async claimCurrentDeliveryMutation(input: DeliveryCorrelation & { readonly now: number; readonly deliveryId?: string; readonly expectedRevision?: number }): Promise<LocusDeliveryMutation> {
+    return this.enqueue(async () => {
+      assertCorrelation(input)
+      assertTimestamp(input.now, 'now')
+      const currentRows = this.listDeliveries().filter(record =>
+        deliveryCorrelates(record, input) && (record.status === 'current' || record.status === 'finishing') && record.queueState === 'current',
+      )
+      if (currentRows.length > 1) throw new LocusError('INVALID_LOCUS', 'Multiple current Deliveries for one locus')
+      if (currentRows.length === 1) return mutation(currentRows[0], false, 'current-occupied')
+      // A legacy `queued`/`running` row (an already-dispatched-to-child
+      // execution predating this locus's current/backlog model, or retained
+      // across restart by exact live-turn proof) also occupies the child: the
+      // product invariant is at most one Delivery in flight per locus at a
+      // time, not merely at most one `current`-status row.
+      const inFlightLegacy = this.listDeliveries().filter(record =>
+        deliveryCorrelates(record, input) && (record.status === 'queued' || record.status === 'running'),
+      )
+      if (inFlightLegacy.length > 0) {
+        return mutation(inFlightLegacy.sort((left, right) => left.sequence - right.sequence)[0], false, 'current-occupied')
+      }
+      const candidates = this.listDeliveries().filter(record =>
+        deliveryCorrelates(record, input) &&
+        (record.status === 'accepted' || record.status === 'queued'),
+      )
+      const next = candidates.sort((left, right) => left.sequence - right.sequence)[0]
+      if (next === undefined) return mutation(undefined, false, 'no-pending-delivery')
+      if (input.deliveryId !== undefined && next.deliveryId !== input.deliveryId) {
+        return mutation(next, false, 'not-oldest')
+      }
+      if (input.expectedRevision !== undefined && (next.revision ?? next.stateRevision ?? 0) !== input.expectedRevision) {
+        return mutation(next, false, 'revision-mismatch')
+      }
+      // A missing acceptedAt on a modern row is a corrupt/legacy state, not
+      // license to invent a fresh 24h lease from `now`: fail closed the same
+      // way the pure state machine does, by treating it as already overdue.
+      const hard = next.hardDeadlineAt ?? ((next.acceptedAt ?? 0) + MAX_DELIVERY_LEASE_MS)
+      // Backlog rows wait for the acceptedAt+24h hard cap; deadlineAt is the
+      // active current lease and must not discard a queued follow-up at 1h.
+      if (input.now >= hard) {
+        const expired = applyExpireDelivery(
+          { byMessageId: { [next.messageId]: next }, byDeliveryId: { [next.deliveryId]: next }, nextDeliverySequence: next.sequence + 1 },
+          {
+            ...input,
+            deliveryId: next.deliveryId,
+            now: input.now,
+            ...(next.revision === undefined ? {} : { expectedRevision: next.revision }),
+          },
+        )
+        const expiredRecord = expired.record
+        if (expiredRecord === undefined) return mutation(next, false, 'deadline-expired')
+        const locus = this.getLocus(next.locusId)
+        const afterLocus = locus !== undefined && locus.busy && !this.hasPendingDelivery(next.locusId, next.generation, next.deliveryId)
+          ? withLocusBusy(locus, false, Math.max(input.now, locus.updatedAt))
+          : undefined
+        await this.persistDeliveryMutation('delivery-expired', next, expiredRecord, { deliveryId: next.deliveryId, locusId: next.locusId, endpointKey: endpointKeyOf(next.endpoint) }, locus, afterLocus)
+        return mutation(expiredRecord, true)
+      }
+      const claimed = Object.freeze({ ...next, status: 'current' as const, queueState: 'current' as const, revision: (next.revision ?? next.stateRevision ?? 0) + 1, stateRevision: (next.revision ?? next.stateRevision ?? 0) + 1 })
+      await this.persistDeliveryMutation('delivery-current', next, claimed, { deliveryId: next.deliveryId, locusId: next.locusId, endpointKey: endpointKeyOf(next.endpoint) })
+      return mutation(claimed, true)
+    })
+  }
+
+  /** Begin an at-most-once outbound finish attempt. */
+  async markDeliveryFinishing(input: DeliveryLeaseInput): Promise<LocusDeliveryMutation> {
+    return this.enqueue(async () => {
+      assertCorrelation(input)
+      assertIdentifier(input.deliveryId, 'deliveryId')
+      assertTimestamp(input.now, 'now')
+      const current = this.getDelivery(input.deliveryId)
+      if (current === undefined) return mutation(undefined, false, 'unknown-delivery')
+      if (!deliveryCorrelates(current, input)) return mutation(current, false, 'correlation-mismatch')
+      if (input.expectedRevision !== undefined && (current.revision ?? current.stateRevision ?? 0) !== input.expectedRevision) return mutation(current, false, 'revision-mismatch')
+      const applied = applyMarkFinishing({ byMessageId: { [current.messageId]: current }, byDeliveryId: { [current.deliveryId]: current }, nextDeliverySequence: current.sequence + 1 }, input)
+      if (!applied.changed || applied.record === undefined) return mutation(current, false, applied.reason === 'already-terminal' ? 'already-terminal' : applied.reason === 'deadline-expired' ? 'deadline-expired' : applied.reason === 'deadline-not-reached' ? 'deadline-not-reached' : applied.reason === 'already-in-state' ? 'already-in-state' : 'invalid-transition')
+      const next = Object.freeze({
+        ...applied.record,
+        ...(applied.record.revision === undefined ? {} : { stateRevision: applied.record.revision }),
+      })
+      await this.persistDeliveryMutation('delivery-finishing', current, next, { deliveryId: current.deliveryId, locusId: current.locusId, endpointKey: endpointKeyOf(current.endpoint) })
+      return mutation(next, true)
+    })
+  }
+
+  /** Complete a reply/no-reply finish with explicit outbound result. */
+  async completeCurrentDelivery(input: DeliveryFinishInput): Promise<LocusDeliveryMutation> {
+    return this.enqueue(async () => {
+      assertCorrelation(input)
+      assertIdentifier(input.deliveryId, 'deliveryId')
+      assertTimestamp(input.now, 'now')
+      const current = this.getDelivery(input.deliveryId)
+      if (current === undefined) return mutation(undefined, false, 'unknown-delivery')
+      if (!deliveryCorrelates(current, input)) return mutation(current, false, 'correlation-mismatch')
+      if (input.expectedRevision !== undefined && (current.revision ?? current.stateRevision ?? 0) !== input.expectedRevision) {
+        return mutation(current, false, 'revision-mismatch')
+      }
+      const applied = applyCompleteDelivery({ byMessageId: { [current.messageId]: current }, byDeliveryId: { [current.deliveryId]: current }, nextDeliverySequence: current.sequence + 1 }, input)
+      if (!applied.changed || applied.record === undefined) return mutation(current, false, applied.reason === 'already-terminal' ? 'already-terminal' : applied.reason === 'revision-mismatch' ? 'revision-mismatch' : 'invalid-transition')
+      const next = Object.freeze({
+        ...applied.record,
+        ...(applied.record.revision === undefined ? {} : { stateRevision: applied.record.revision }),
+      })
+      const locus = this.getLocus(current.locusId)
+      const afterLocus = locus !== undefined && locus.busy && !this.hasPendingDelivery(current.locusId, current.generation, current.deliveryId)
+        ? withLocusBusy(locus, false, Math.max(input.now, locus.updatedAt))
+        : undefined
+      await this.persistDeliveryMutation('delivery-finished', current, next, { deliveryId: current.deliveryId, locusId: current.locusId, endpointKey: endpointKeyOf(current.endpoint) }, locus, afterLocus)
+      return mutation(next, true)
+    })
+  }
+
+  /** Extend a current Delivery lease using the pure relative wait rule. */
+  async waitCurrentDelivery(input: DeliveryWaitInput): Promise<LocusDeliveryMutation> {
+    return this.enqueue(async () => {
+      assertCorrelation(input)
+      assertIdentifier(input.deliveryId, 'deliveryId')
+      assertTimestamp(input.now, 'now')
+      const current = this.getDelivery(input.deliveryId)
+      if (current === undefined) return mutation(undefined, false, 'unknown-delivery')
+      if (!deliveryCorrelates(current, input)) return mutation(current, false, 'correlation-mismatch')
+      if (current.status !== 'current') return mutation(current, false, TERMINAL_DELIVERY_STATUSES.has(current.status) ? 'already-terminal' : 'invalid-transition')
+      const applied = applyWaitDelivery({ byMessageId: { [current.messageId]: current }, byDeliveryId: { [current.deliveryId]: current }, nextDeliverySequence: current.sequence + 1 }, input)
+      // A wait already covered by the live lease is SATISFIED, not refused:
+      // report it with the untouched record so the caller can answer with the
+      // real deadline. Persisting nothing here is deliberate — no state moved,
+      // so no revision may be burned and no WAL entry is warranted.
+      if (applied.reason === 'deadline-already-sufficient') {
+        return mutation(current, false, 'deadline-already-sufficient')
+      }
+      if (!applied.changed || applied.record === undefined) return mutation(current, false, applied.reason === 'already-terminal' ? 'already-terminal' : applied.reason === 'deadline-expired' ? 'deadline-expired' : applied.reason === 'deadline-not-reached' ? 'deadline-not-reached' : 'invalid-wait')
+      const next = Object.freeze({
+        ...applied.record,
+        ...(applied.record.revision === undefined ? {} : { stateRevision: applied.record.revision }),
+      })
+      await this.persistDeliveryMutation('delivery-wait', current, next, { deliveryId: current.deliveryId, locusId: current.locusId, endpointKey: endpointKeyOf(current.endpoint) })
+      return mutation(next, true)
+    })
+  }
+
+  /** CAS-expire a current or backlog Delivery and release its busy fence when empty. */
+  async expireCurrentDelivery(input: DeliveryLeaseInput): Promise<LocusDeliveryMutation> {
+    return this.enqueue(async () => {
+      assertCorrelation(input)
+      assertIdentifier(input.deliveryId, 'deliveryId')
+      assertTimestamp(input.now, 'now')
+      const current = this.getDelivery(input.deliveryId)
+      if (current === undefined) return mutation(undefined, false, 'unknown-delivery')
+      if (!deliveryCorrelates(current, input)) return mutation(current, false, 'correlation-mismatch')
+      if (current.status === 'finishing') return mutation(current, false, 'invalid-transition')
+      const applied = applyExpireDelivery({ byMessageId: { [current.messageId]: current }, byDeliveryId: { [current.deliveryId]: current }, nextDeliverySequence: current.sequence + 1 }, input)
+      if (!applied.changed || applied.record === undefined) return mutation(current, false, applied.reason === 'already-terminal' ? 'already-terminal' : applied.reason === 'revision-mismatch' ? 'revision-mismatch' : 'invalid-transition')
+      const next = Object.freeze({
+        ...applied.record,
+        ...(applied.record.revision === undefined ? {} : { stateRevision: applied.record.revision }),
+      })
+      const locus = this.getLocus(current.locusId)
+      const afterLocus = locus !== undefined && locus.busy && !this.hasPendingDelivery(current.locusId, current.generation, current.deliveryId)
+        ? withLocusBusy(locus, false, Math.max(input.now, locus.updatedAt))
+        : undefined
+      await this.persistDeliveryMutation('delivery-expired', current, next, { deliveryId: current.deliveryId, locusId: current.locusId, endpointKey: endpointKeyOf(current.endpoint) }, locus, afterLocus)
+      return mutation(next, true)
     })
   }
 
@@ -1805,12 +2051,12 @@ export class LocusRepository {
       if (input.startedAt !== undefined && current.queuedAt !== undefined && input.startedAt < current.queuedAt) {
         throw new LocusError('INVALID_LOCUS', 'startedAt must not precede queuedAt')
       }
-      if (current.status !== 'queued') return undefined
+      if (current.status !== 'queued' && current.status !== 'current') return undefined
       const next: DeliveryRecord = Object.freeze({
         ...current,
         executionId: input.executionId,
         turnId: input.turnId,
-        status: 'running',
+        ...(current.status === 'current' ? {} : { status: 'running' as const }),
         ...(input.startedAt !== undefined ? { startedAt: input.startedAt } : {}),
       })
       if (recordsEqual(current, next)) return current
@@ -1853,7 +2099,8 @@ export class LocusRepository {
       if (input.queuedAt !== undefined && current.acceptedAt !== undefined && input.queuedAt < current.acceptedAt) {
         throw new LocusError('INVALID_LOCUS', 'queuedAt must not precede acceptedAt')
       }
-      if (current.status !== 'accepted' || current.executionId !== undefined) return undefined
+      if (current.status !== 'accepted' && current.status !== 'current') return undefined
+       if (current.executionId !== undefined) return undefined
       const inboxMatches = this.listDeliveries().filter(record =>
         record.deliveryId !== current.deliveryId && record.inboxMessageId === input.inboxMessageId,
       )
@@ -1864,7 +2111,10 @@ export class LocusRepository {
         ...current,
         executionId: input.executionId,
         inboxMessageId: input.inboxMessageId,
-        status: 'queued',
+        // A durable current claim must remain current while its queue proof is
+        // bound; ordinary accepted backlog rows become queued once dispatch
+        // has produced an execution/inbox proof.
+        status: current.status === 'accepted' ? 'queued' as const : current.status,
         queuedAt: input.queuedAt ?? Date.now(),
       })
       await this.persistDeliveryMutation('delivery-queued', current, next, {
@@ -1909,7 +2159,7 @@ export class LocusRepository {
       const current = this.getDelivery(input.deliveryId)
       if (current === undefined || !deliveryCorrelates(current, input.correlation)) return false
       if (current.status === 'failed' && current.dispatchFailure !== undefined) return true
-      if (current.status !== 'accepted' && current.status !== 'queued') return false
+      if (current.status !== 'accepted' && current.status !== 'queued' && current.status !== 'current') return false
       if (current.status === 'queued') {
         if (input.executionId === undefined || current.executionId !== input.executionId) return false
       } else if (current.executionId !== undefined || current.inboxMessageId !== undefined) {
@@ -1919,8 +2169,9 @@ export class LocusRepository {
         input.failedAt ?? Date.now(),
         current.queuedAt ?? current.acceptedAt ?? 0,
       )
+      const { queueState: _queueState, ...withoutQueueState } = current
       const next: DeliveryRecord = Object.freeze({
-        ...current,
+        ...withoutQueueState,
         status: 'failed',
         dispatchFailure: current.status === 'queued' ? 'queued-not-started' : 'not-queued',
         failedAt,
@@ -2011,7 +2262,8 @@ export class LocusRepository {
       record.locusId === input.locusId &&
       record.generation === input.generation &&
       record.executionId === input.executionId &&
-      record.turnId === input.turnId,
+      (record.turnId === input.turnId ||
+        ((record.status === 'current' || record.status === 'finishing') && record.turnId !== undefined)),
     )
     if (matches.length !== 1) return undefined
     const record = matches[0]!
@@ -2030,6 +2282,56 @@ export class LocusRepository {
         ? { replyToMessageId: record.replyToMessageId }
         : {}),
       ...(record.replyTarget !== undefined ? { replyTarget: { ...record.replyTarget } } : {}),
+    }
+  }
+
+  /** Find the one serialized current Delivery without requiring a turn proof. */
+  findCurrentSerializedDelivery(input: {
+    readonly childSessionId: string
+    readonly locusId: string
+    readonly generation: number
+  }): LocusCurrentDelivery | undefined {
+    assertIdentifier(input.childSessionId, 'childSessionId')
+    assertIdentifier(input.locusId, 'locusId')
+    if (!Number.isSafeInteger(input.generation) || input.generation < 1) {
+      throw new LocusError('INVALID_LOCUS', 'generation must be a positive safe integer')
+    }
+    const matches = this.listDeliveries().filter(record =>
+      (record.status === 'current' || record.status === 'finishing') &&
+      record.queueState === 'current' &&
+      record.childSessionId === input.childSessionId &&
+      record.locusId === input.locusId &&
+      record.generation === input.generation,
+    )
+    if (matches.length !== 1) return undefined
+    const record = matches[0]!
+    return {
+      deliveryId: record.deliveryId,
+      messageId: record.messageId,
+      endpoint: { ...record.endpoint },
+      locusId: record.locusId,
+      generation: record.generation,
+      childSessionId: record.childSessionId,
+      status: record.status,
+      ...(record.queueState === undefined ? {} : { queueState: record.queueState }),
+      ...(record.deadlineAt === undefined ? {} : { deadlineAt: record.deadlineAt }),
+      ...(record.hardDeadlineAt === undefined ? {} : { hardDeadlineAt: record.hardDeadlineAt }),
+      ...(record.revision === undefined ? {} : { revision: record.revision }),
+      ...(record.stateRevision === undefined ? {} : { stateRevision: record.stateRevision }),
+      ...(record.executionId === undefined ? {} : { executionId: record.executionId }),
+      ...(record.turnId === undefined ? {} : { turnId: record.turnId }),
+      ...(record.inboxMessageId === undefined ? {} : { inboxMessageId: record.inboxMessageId }),
+      ...(record.feedbackTarget === undefined ? {} : { feedbackTarget: { ...record.feedbackTarget } }),
+      ...(record.finishOutcome === undefined ? {} : { finishOutcome: record.finishOutcome }),
+      ...(record.outboundResult === undefined ? {} : { outboundResult: record.outboundResult }),
+      ...(record.acceptedAt === undefined ? {} : { acceptedAt: record.acceptedAt }),
+      ...(record.finishedAt === undefined ? {} : { finishedAt: record.finishedAt }),
+      ...(record.expiredAt === undefined ? {} : { expiredAt: record.expiredAt }),
+      ...(record.senderOpenId === undefined ? {} : { senderOpenId: record.senderOpenId }),
+      ...(record.senderName === undefined ? {} : { senderName: record.senderName }),
+      ...(record.text === undefined ? {} : { text: record.text }),
+      ...(record.replyToMessageId === undefined ? {} : { replyToMessageId: record.replyToMessageId }),
+      ...(record.replyTarget === undefined ? {} : { replyTarget: { ...record.replyTarget } }),
     }
   }
 
@@ -2095,13 +2397,20 @@ export class LocusRepository {
   }
 
   /**
-   * Deterministically dispose interrupted work before channel intake starts.
+   * Deterministically converge Delivery state before channel intake starts.
    *
    * This method never queues a prompt, recreates a resource, or sends business
-   * output. Accepted-but-unqueued work is failed immediately. Queued/running
-   * work is retained only with exact live-turn proof; otherwise the Host must
-   * first terminate the old child execution. If termination cannot be proven,
-   * the Delivery remains pending/busy with explicit durable manual debt.
+   * output. A leftover `finishing` row (outbound result unknown after a crash)
+   * converges to `unknown-terminal` without resending. A `current`/backlog row
+   * past its own deadline (current lease) or hard 24h cap (backlog) expires. An
+   * unexpired `current` is retained by exact locus/generation/child/endpoint
+   * identity alone — an open turn is not required, since current is already
+   * the durable physical-dispatch fence. An unexpired `accepted` backlog row is
+   * retained as-is for the shared dispatcher to claim later. A `queued`/
+   * `running` row (an already-issued inbox execution) is retained only with
+   * exact live-turn proof; otherwise the Host must first terminate the old
+   * child execution, and if termination cannot be proven the Delivery remains
+   * pending/busy with explicit durable manual debt.
    *
    * Unpublished provisioning resources are compensated only from durable
    * operation-owned refs. Missing ownership/capability or cleanup failure is
@@ -2176,23 +2485,120 @@ export class LocusRepository {
         })
       }
 
+      const expireForRecovery = async (current: DeliveryRecord): Promise<DeliveryRecord | undefined> => {
+        const revision = current.revision ?? current.stateRevision
+        const applied = applyExpireDelivery(
+          {
+            byMessageId: { [current.messageId]: current },
+            byDeliveryId: { [current.deliveryId]: current },
+            nextDeliverySequence: current.sequence + 1,
+          },
+          {
+            endpoint: current.endpoint,
+            locusId: current.locusId,
+            generation: current.generation,
+            childSessionId: current.childSessionId,
+            deliveryId: current.deliveryId,
+            now,
+            ...(revision === undefined ? {} : { expectedRevision: revision }),
+          },
+        )
+        if (!applied.changed || applied.record === undefined) return undefined
+        const expired = Object.freeze({
+          ...applied.record,
+          ...(applied.record.revision === undefined ? {} : { stateRevision: applied.record.revision }),
+        })
+        await writeDelivery(current, expired, false)
+        failedDeliveries.push(expired)
+        return expired
+      }
+
       for (const snapshot of this.listPendingDeliveries()) {
         const current = this.getDelivery(snapshot.deliveryId)
         if (current === undefined || !PENDING_DELIVERY_STATUSES.has(current.status)) continue
-        if (current.status === 'accepted') {
-          const failedAt = Math.max(now, current.acceptedAt ?? 0)
-          const failed: DeliveryRecord = Object.freeze({
-            ...current,
-            status: 'failed',
-            startupDisposition: 'unqueued',
-            failureReason: 'Host restarted before the accepted Delivery was durably queued; work was not replayed.',
-            failedAt,
+
+        // A process may have died after the outbound request was issued. Never
+        // inspect proof or send again: finishing is an at-most-once unknown
+        // terminal on every restart.
+        if (current.status === 'finishing') {
+          const { queueState: _queueState, ...withoutQueueState } = current
+          const revision = (current.revision ?? current.stateRevision ?? 0) + 1
+          const unknown = Object.freeze({
+            ...withoutQueueState,
+            status: 'unknown-terminal' as const,
+            finishOutcome: 'reply' as const,
+            outboundResult: 'unknown' as const,
+            outboundResultAt: now,
+            outboundAttemptedAt: current.outboundAttemptedAt ?? current.finishedAt ?? now,
+            finishedAt: current.finishedAt ?? now,
+            revision,
+            stateRevision: revision,
+            outboundDiagnostic: current.outboundDiagnostic ?? 'Host restarted while outbound reply result was unknown.',
           })
-          await writeDelivery(current, failed, false)
-          failedDeliveries.push(failed)
+          await writeDelivery(current, unknown, false)
           continue
         }
 
+        const locus = this.getLocus(current.locusId)
+        const identityProven = locus !== undefined &&
+          locus.state === 'active' &&
+          locus.generation === current.generation &&
+          locus.childSessionId === current.childSessionId &&
+          endpointKeyOf(locus.endpoint) === endpointKeyOf(current.endpoint)
+        if (!identityProven) {
+          const debt = Object.freeze({
+            ...current,
+            startupRecoveryDebt: 'Locus, generation, child, or endpoint identity could not be proven during startup; manual recovery is required.',
+          })
+          if (!recordsEqual(current, debt)) await writeDelivery(current, debt, true)
+          manualDeliveries.push(debt)
+          continue
+        }
+
+        const hardDeadline = current.hardDeadlineAt ?? (
+          current.acceptedAt === undefined ? undefined : current.acceptedAt + MAX_DELIVERY_LEASE_MS
+        )
+        // A current row's effective deadline is never later than its own hard
+        // cap: a corrupt or stale `deadlineAt` beyond `acceptedAt + 24h` must
+        // not grant it a longer lease than every other Delivery.
+        const currentDeadline = hardDeadline === undefined
+          ? current.deadlineAt
+          : current.deadlineAt === undefined ? hardDeadline : Math.min(current.deadlineAt, hardDeadline)
+        if (
+          (current.status === 'current' && currentDeadline !== undefined && now >= currentDeadline) ||
+          (current.status !== 'current' && hardDeadline !== undefined && now >= hardDeadline)
+        ) {
+          await expireForRecovery(current)
+          continue
+        }
+
+        // A serialized current is already the physical-dispatch fence. It does
+        // not need an open turn proof to survive restart; the Host will rebuild
+        // its deadline timer and the observer/runtime may prove the next turn.
+        if (current.status === 'current') {
+          const retained = Object.freeze({
+            ...current,
+            queueState: 'current' as const,
+            ...(current.revision === undefined && current.stateRevision !== undefined
+              ? { revision: current.stateRevision }
+              : {}),
+          })
+          if (!recordsEqual(current, retained)) await writeDelivery(current, retained, false)
+          retainedDeliveries.push(retained)
+          continue
+        }
+
+        // Accepted rows are durable backlog admission, not a failed dispatch.
+        // Keep them for the common dispatcher; only the hard 24-hour cap expires
+        // backlog during this pass.
+        if (current.status === 'accepted') {
+          retainedDeliveries.push(current)
+          continue
+        }
+
+        // A queued/running row has an already-issued inbox execution. Retain it
+        // only with exact proof; replaying an unproven queue entry could inject
+        // the same request twice, so unresolved rows remain explicit debt.
         let proof: LocusStartupDeliveryProof | undefined
         try {
           proof = await options.deliveryProof?.(current)
@@ -2200,23 +2606,30 @@ export class LocusRepository {
           proof = undefined
         }
         const matchingProof = proof !== undefined &&
+          proof.state === 'running' &&
           proof.deliveryId === current.deliveryId &&
           proof.executionId === current.executionId &&
           (current.turnId === undefined || proof.turnId === current.turnId)
           ? proof
           : undefined
         if (matchingProof !== undefined) {
-          let retained: DeliveryRecord = current
-          if (current.status === 'queued') {
-            const { startupRecoveryDebt: _debt, ...rest } = current
-            retained = Object.freeze({
-              ...rest,
-              status: 'running',
+          // Retain the exact `running` status rather than promoting to
+          // `current`: a genuine current row for this same locus is possible
+          // if a prior modern Delivery is also durably serialized (the two
+          // never conflict inside this loop, which processes rows
+          // independently with no locus-level dedup across them). Backlog
+          // dispatch never touches a `running` row, and the exact live-turn
+          // proof means the child is still genuinely executing it, so no
+          // successor is claimed while this row remains pending.
+          const retained: DeliveryRecord = current.status === 'running'
+            ? current
+            : Object.freeze({
+              ...current,
+              status: 'running' as const,
               turnId: matchingProof.turnId,
-              startedAt: Math.max(now, current.queuedAt ?? 0),
+              startedAt: Math.max(now, current.queuedAt ?? current.acceptedAt ?? 0),
             })
-            await writeDelivery(current, retained, false)
-          }
+          if (!recordsEqual(current, retained)) await writeDelivery(current, retained, false)
           retainedDeliveries.push(retained)
           continue
         }
@@ -2596,7 +3009,7 @@ export class LocusRepository {
       newDeliveryId: after.deliveryId,
       oldLocusId: beforeLocus?.id,
       newLocusId: afterLocus?.id,
-      expectedRevision: before?.sequence,
+      expectedRevision: before?.revision ?? before?.stateRevision ?? beforeLocus?.revision ?? beforeLocus?.updatedAt,
     })
   }
 

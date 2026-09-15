@@ -1060,7 +1060,7 @@ describe('the per-turn correlation observer is wired to real runtime events', ()
     return { ctx, repository }
   }
 
-  it('settles a queued Delivery from a real inbox claim and turn end', async () => {
+  it('binds a queued Delivery from a real inbox claim without business settlement at turn end', async () => {
     const host = await hostWithQueuedDelivery()
 
     // Exactly the two events DSH emits, with their real payload shapes.
@@ -1075,10 +1075,12 @@ describe('the per-turn correlation observer is wired to real runtime events', ()
     } as never)
 
     await vi.waitFor(() => {
-      expect(host.repository.findDeliveryByMessageId('om-live')?.status).toBe('settled')
+      expect(host.repository.findDeliveryByMessageId('om-live')?.status).toBe('queued')
     }, { timeout: 5_000 })
-    // The durable record carries the exact turn proof, not a guess.
-    expect(host.repository.findDeliveryByMessageId('om-live')?.turnId).toBe('child-live#1')
+    // A runtime claim is diagnostic/source evidence only; turn/end is not a
+    // business completion proof and may be unavailable after the queued row is
+    // reopened in a fresh observer generation.
+    expect(host.repository.findDeliveryByMessageId('om-live')?.turnId).toBeUndefined()
   })
 
   it('does not settle from a turn that claimed no Delivery', async () => {

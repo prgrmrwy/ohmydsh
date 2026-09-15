@@ -157,14 +157,18 @@ function runLegacyStateCleanup(databaseFile: string): LegacyStateCleanup {
       .get(PET_DOMAIN_NAME) as { version?: number } | undefined
     if (stamped === undefined) return { removedRows: 0, clearedTables: [] }
     if (stamped.version === PET_DOMAIN_VERSION) return { removedRows: 0, clearedTables: [] }
-    if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].includes(stamped.version as number)) {
+    if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].includes(stamped.version as number)) {
       throw new PetMigrationError(
         `Unsupported Pet storage version ${String(stamped.version)}; refusing migration`,
       )
     }
     // v2+ upgrades preserve every row. The v12 inquiry shape is parser-compatible
-    // at v13 and is normalized only in memory; even malformed rows are retained
-    // for domain validation to diagnose, never used as permission to erase history.
+    // at v13 and is normalized only in memory; v13→v14 adds Delivery lease
+    // fields/statuses without rewriting existing rows. In particular, an old
+    // accepted/queued/running Delivery is never guessed into a current slot and
+    // no outbound send is replayed by this migration. Even malformed rows are
+    // retained for domain validation/startup recovery to diagnose, never used
+    // as permission to erase history.
     if (stamped.version !== 1) {
       db.prepare('UPDATE units SET version = ? WHERE name = ?').run(PET_DOMAIN_VERSION, PET_DOMAIN_NAME)
       return { removedRows: 0, clearedTables: [] }

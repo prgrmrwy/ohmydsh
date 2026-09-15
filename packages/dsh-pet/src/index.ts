@@ -59,11 +59,23 @@ import { InquiryLedgerStore } from './host/inquiry/ledger-store.js'
 import { InquiryOutboxStore } from './host/inquiry/outbox-store.js'
 import { summarizeInquiryReconciliation } from './host/inquiry/reconcile.js'
 import type { InquiryOriginProof } from './host/inquiry/ask.js'
+import type {
+  PetLocusFinishInput,
+  PetLocusFinishResult,
+  PetLocusWaitInput,
+  PetLocusWaitResult,
+} from './host/tools.js'
 import {
   LocusRepository,
   type LocusStartupCompensators,
 } from './host/locus/persistence.js'
-import type { DeliveryRecord } from './host/locus/delivery.js'
+import {
+  DEFAULT_DELIVERY_LEASE_MS,
+  MAX_DELIVERY_LEASE_MS,
+  type DeliveryCorrelation,
+  type DeliveryFinishInput,
+  type DeliveryRecord,
+} from './host/locus/delivery.js'
 import { proveLiveStartupDelivery } from './host/locus/startup-recovery.js'
 import {
   createLocusChildAdapter,
@@ -91,7 +103,7 @@ import { asRetiredAssociationStore } from './host/locus/retirement.js'
 import { createDurableLocusAuthorizationResolver } from './host/locus/admission.js'
 import { createLocusControlDispatcher } from './host/locus/control.js'
 import { createLocusPermissionMutation } from './host/locus/permission-mutation.js'
-import { asLocusContextRepository } from './host/locus/context-repository.js'
+import { asLocusContextRepository, type LocusContextRepository } from './host/locus/context-repository.js'
 import { renderLocusDeliveryPrompt } from './host/locus/context.js'
 import {
   composeLocusChild,
@@ -295,6 +307,49 @@ async function initialize(
   let currentLocusTurnProof: (childSessionId: string) =>
     | { readonly executionId: string; readonly turnId: string }
     | undefined = () => undefined
+  let currentLocusCapability: (childSessionId: string) => {
+    readonly deliveryId: string
+    readonly executionId: string
+    readonly turnId: string
+    readonly source: 'delivery' | 'agent-message'
+    readonly locusId?: string
+    readonly generation?: number
+  } | undefined = () => undefined
+  const locusDispatchLanes = new Map<string, Promise<void>>()
+  const locusExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const locusDispatchKey = (correlation: DeliveryCorrelation): string => [
+    correlation.locusId,
+    String(correlation.generation),
+    correlation.childSessionId,
+    correlation.endpoint.chatId,
+    correlation.endpoint.threadId ?? '',
+  ].join('\u0000')
+  const withLocusDispatchLane = <T>(correlation: DeliveryCorrelation, operation: () => Promise<T>): Promise<T> => {
+    const key = locusDispatchKey(correlation)
+    const previous = locusDispatchLanes.get(key) ?? Promise.resolve()
+    const next = previous.catch(() => undefined).then(operation)
+    const tail = next.then(() => undefined, () => undefined)
+    locusDispatchLanes.set(key, tail)
+    void tail.then(() => {
+      if (locusDispatchLanes.get(key) === tail) locusDispatchLanes.delete(key)
+    })
+    return next
+  }
+  let finishCurrentDelivery: (input: PetLocusFinishInput) => Promise<PetLocusFinishResult> = async () => {
+    throw new PetError('INTERNAL', 'The Host has no durable Delivery finish capability.')
+  }
+  let waitCurrentDelivery: (input: PetLocusWaitInput) => Promise<PetLocusWaitResult> = async () => {
+    throw new PetError('INTERNAL', 'The Host has no durable Delivery wait lease.')
+  }
+  let scheduleCurrentDelivery: (record: DeliveryRecord) => void = () => undefined
+  let locusChannelController: {
+    readonly currentFinished?: (input: {
+      readonly deliveryId: string
+      readonly correlation: DeliveryCorrelation
+      readonly outcome?: 'settled' | 'failed'
+    }) => void
+    readonly dispatchNext?: (correlation: DeliveryCorrelation) => Promise<void>
+  } | undefined
   const locusContextRepository = asLocusContextRepository(
     locusRepository,
     childSessionId => currentLocusTurnProof(childSessionId),
@@ -939,9 +994,22 @@ async function initialize(
         registerPetTools(agent.scope as never, {
           repository,
           locusRepository: locusContextRepository,
-          locusReply: {
+          locusLifecycle: {
             locusRepository: locusContextRepository,
             lark: larkClient,
+            currentCapability: childSessionId => currentLocusCapability(childSessionId),
+            authorizeCurrentDelivery: input => {
+              const proof = currentLocusCapability(input.childSessionId)
+              return locusContextRepository.authorizeCurrentDelivery?.({
+                ...input,
+                ...(proof === undefined ? {} : { proof }),
+              })
+            },
+            // Delegate through mutable Host-owned closures. The scoped Agent
+            // may be composed before the channel controller is published; the
+            // wrapper must not capture the initial unavailable stub.
+            finishCurrentDelivery: input => finishCurrentDelivery(input),
+            waitCurrentDelivery: input => waitCurrentDelivery(input),
           },
         })
         // The circle surface rides the SAME synchronous boundary, so a locus
@@ -1872,6 +1940,217 @@ async function initialize(
   })()
   if (locusTurnObserver !== undefined) {
     currentLocusTurnProof = childSessionId => locusTurnObserver.currentForChild?.(childSessionId)
+    currentLocusCapability = childSessionId => {
+      const capability = locusTurnObserver.currentCapabilityForChild?.(childSessionId)
+      return capability === undefined ? undefined : {
+        deliveryId: capability.deliveryId,
+        executionId: capability.executionId,
+        turnId: capability.turnId,
+        source: capability.source,
+        locusId: capability.correlation.locusId,
+        generation: capability.correlation.generation,
+      }
+    }
+  }
+
+  const deliveryCorrelation = (input: {
+    readonly childSessionId: string
+    readonly locus: PetLocusFinishInput['locus'] | PetLocusWaitInput['locus']
+    readonly delivery: PetLocusFinishInput['delivery'] | PetLocusWaitInput['delivery']
+  }): DeliveryCorrelation => ({
+    endpoint: {
+      chatId: input.delivery.endpoint.chatId,
+      ...(input.delivery.endpoint.threadId === undefined ? {} : { threadId: input.delivery.endpoint.threadId }),
+    },
+    locusId: input.locus.locus.locusId,
+    generation: input.locus.locus.generation,
+    childSessionId: input.childSessionId,
+  })
+
+  const loadCurrentDelivery = (correlation: DeliveryCorrelation, deliveryId: string): DeliveryRecord => {
+    const record = locusRepository.getDelivery(deliveryId)
+    if (
+      record === undefined ||
+      record.deliveryId !== deliveryId ||
+      record.status !== 'current' ||
+      record.queueState !== 'current' ||
+      record.locusId !== correlation.locusId ||
+      record.generation !== correlation.generation ||
+      record.childSessionId !== correlation.childSessionId ||
+      record.endpoint.chatId !== correlation.endpoint.chatId ||
+      (record.endpoint.threadId ?? undefined) !== (correlation.endpoint.threadId ?? undefined)
+    ) {
+      throw new PetError('INVALID_REQUEST', 'This Delivery is no longer current or caller-authorized.')
+    }
+    return record
+  }
+
+  const finishAndAdvance = async (
+    record: DeliveryRecord,
+    correlation: DeliveryCorrelation,
+    outcome: 'settled' | 'failed',
+  ): Promise<void> => {
+    locusTurnObserver?.revokeCurrentCapability?.({
+      childSessionId: correlation.childSessionId,
+      deliveryId: record.deliveryId,
+    })
+    locusChannelController?.currentFinished?.({
+      deliveryId: record.deliveryId,
+      correlation,
+      outcome,
+    })
+    await locusChannelController?.dispatchNext?.(correlation)
+  }
+
+  // A current row's effective deadline is never later than its own hard cap:
+  // a corrupt or stale `deadlineAt` beyond `acceptedAt + 24h` must not delay
+  // the timer past the hard cap either. Mirrors the same normalization in the
+  // pure/durable expiry CAS.
+  const effectiveDeadline = (record: DeliveryRecord): number | undefined => {
+    const hard = record.hardDeadlineAt ?? (record.acceptedAt === undefined ? undefined : record.acceptedAt + MAX_DELIVERY_LEASE_MS)
+    if (hard === undefined) return record.deadlineAt
+    return record.deadlineAt === undefined ? hard : Math.min(record.deadlineAt, hard)
+  }
+  scheduleCurrentDelivery = (record: DeliveryRecord): void => {
+    const deadline = effectiveDeadline(record)
+    if (record.status !== 'current' || deadline === undefined) return
+    const correlation: DeliveryCorrelation = {
+      endpoint: { ...record.endpoint },
+      locusId: record.locusId,
+      generation: record.generation,
+      childSessionId: record.childSessionId,
+    }
+    const key = `${record.deliveryId}\u0000${record.generation}`
+    const previous = locusExpiryTimers.get(key)
+    if (previous !== undefined) clearTimeout(previous)
+    const delay = Math.max(0, Math.min(deadline - Date.now(), 2_147_483_647))
+    const timer = setTimeout(() => {
+      void withLocusDispatchLane(correlation, async () => {
+        const current = locusRepository.getDelivery(record.deliveryId)
+        if (
+          current === undefined ||
+          current.status !== 'current' ||
+          current.queueState !== 'current' ||
+          current.revision === undefined
+        ) return
+        const now = Date.now()
+        const currentDeadline = effectiveDeadline(current)
+        if (currentDeadline !== undefined && now < currentDeadline) {
+          scheduleCurrentDelivery(current)
+          return
+        }
+        const expired = await locusRepository.expireCurrentDelivery({
+          ...correlation,
+          deliveryId: current.deliveryId,
+          now,
+          expectedRevision: current.revision,
+        })
+        if (!expired.changed || expired.record === undefined) return
+        await finishAndAdvance(expired.record, correlation, 'failed')
+      }).finally(() => {
+        if (locusExpiryTimers.get(key) === timer) locusExpiryTimers.delete(key)
+      })
+    }, delay)
+    timer.unref?.()
+    locusExpiryTimers.set(key, timer)
+  }
+
+  finishCurrentDelivery = async (input: PetLocusFinishInput): Promise<PetLocusFinishResult> => {
+    const correlation = deliveryCorrelation(input)
+    return withLocusDispatchLane(correlation, async () => {
+      const current = loadCurrentDelivery(correlation, input.delivery.deliveryId)
+      const now = Date.now()
+      if (input.outcome === 'no-reply') {
+        const completed = await locusRepository.completeCurrentDelivery({
+          ...correlation,
+          deliveryId: current.deliveryId,
+          now,
+          outcome: 'no-reply',
+          outboundResult: 'none',
+          ...(input.reason === undefined ? {} : { reason: input.reason }),
+          ...(current.revision === undefined ? {} : { expectedRevision: current.revision }),
+        })
+        if (!completed.changed || completed.record === undefined) {
+          throw new PetError('INVALID_REQUEST', 'This Delivery could not be completed because it changed state.')
+        }
+        await finishAndAdvance(completed.record, correlation, 'settled')
+        return { sent: false, outcome: 'no-reply' }
+      }
+
+      const finishing = await locusRepository.markDeliveryFinishing({
+        ...correlation,
+        deliveryId: current.deliveryId,
+        now,
+        ...(current.revision === undefined ? {} : { expectedRevision: current.revision }),
+      })
+      if (!finishing.changed || finishing.record === undefined) {
+        throw new PetError('INVALID_REQUEST', 'This Delivery could not be reserved for reply.')
+      }
+      const target = current.replyTarget ?? current.feedbackTarget
+      let outboundResult: 'success' | 'unknown' = 'unknown'
+      if (typeof larkClient.replyToTarget === 'function') {
+        try {
+          await larkClient.replyToTarget(target, input.text ?? '')
+          outboundResult = 'success'
+        } catch {
+          // The current adapter cannot prove whether a process/envelope failure
+          // happened before or after platform acceptance. Never retry it.
+          outboundResult = 'unknown'
+        }
+      }
+      const completed = await locusRepository.completeCurrentDelivery({
+        ...correlation,
+        deliveryId: current.deliveryId,
+        now: Date.now(),
+        outcome: 'reply',
+        outboundResult,
+        ...(outboundResult === 'unknown' ? { outboundDiagnostic: 'reply result was not reliably confirmed' } : {}),
+        ...(finishing.record.revision === undefined && finishing.record.stateRevision === undefined
+          ? {}
+          : { expectedRevision: finishing.record.revision ?? finishing.record.stateRevision }),
+      })
+      if (!completed.changed || completed.record === undefined) {
+        throw new PetError('INTERNAL', 'Delivery reply result could not be durably recorded.')
+      }
+      await finishAndAdvance(completed.record, correlation, outboundResult === 'success' ? 'settled' : 'failed')
+      return { sent: outboundResult === 'success', outcome: 'reply' }
+    })
+  }
+
+  waitCurrentDelivery = async (input: PetLocusWaitInput): Promise<PetLocusWaitResult> => {
+    const correlation = deliveryCorrelation(input)
+    return withLocusDispatchLane(correlation, async () => {
+      const current = loadCurrentDelivery(correlation, input.delivery.deliveryId)
+      const now = Date.now()
+      const waited = await locusRepository.waitCurrentDelivery({
+        ...correlation,
+        deliveryId: current.deliveryId,
+        now,
+        waitMinutes: input.waitMinutes,
+        ...(current.revision === undefined ? {} : { expectedRevision: current.revision }),
+      })
+      // `deadline-already-sufficient` means the live lease ALREADY covers the
+      // requested horizon, so the child may simply keep waiting. Treating that
+      // as a refusal was an outright defect: early in a lease every ordinary
+      // "wait a bit longer" request lands here, and the resulting error made
+      // the child believe its Delivery was unusable and answer `no-reply`
+      // instead of the real reply. Report the untouched deadline as accepted.
+      const settled = waited.reason === 'deadline-already-sufficient' ? waited.record ?? current : waited.record
+      if (settled === undefined || settled.deadlineAt === undefined) {
+        throw new PetError('INVALID_REQUEST', 'This Delivery wait lease could not be extended.')
+      }
+      if (!waited.changed && waited.reason !== 'deadline-already-sufficient') {
+        throw new PetError('INVALID_REQUEST', 'This Delivery wait lease could not be extended.')
+      }
+      scheduleCurrentDelivery(settled)
+      const hard = settled.hardDeadlineAt ?? settled.deadlineAt
+      return {
+        accepted: true,
+        deadline: settled.deadlineAt,
+        remainingMinutes: Math.ceil(Math.max(0, settled.deadlineAt - Date.now()) / 60_000),
+        capped: settled.deadlineAt >= hard,
+      }
+    })
   }
 
   /**
@@ -2020,6 +2299,9 @@ async function initialize(
   if (locusControlDispatch === undefined) {
     locusChannelGaps.push('unified locus controls are not composed')
   }
+  if (typeof locusRepository.claimCurrentDelivery !== 'function') {
+    locusChannelGaps.push('durable Delivery dispatcher is not composed')
+  }
   // A locus child answers in its own Feishu entry, so the runtime must be able
   // to keep its automatic settlement report out of the main session. Until the
   // runtime carrying that option is the pinned one, creating a locus child
@@ -2048,6 +2330,11 @@ async function initialize(
    * of publishing a controller that could accept Feishu work it cannot
    * settle, or create a child that would report into the main session.
    */
+  // The unified channel is only safe when the durable current/backlog claim
+  // and lifecycle callbacks are present. The callbacks below are intentionally
+  // Host-owned: tools must never send directly or infer a target from model
+  // text. A missing seam keeps intake unavailable rather than reverting to the
+  // eager legacy queue path.
   const locusChannel = locusChannelGaps.length === 0
     && locusChildProbe.available
     && locusTurnObserver !== undefined
@@ -2063,6 +2350,12 @@ async function initialize(
         settleByTurn: input => locusRepository.settleByTurn(input),
         fail: input => locusRepository.fail(input),
       },
+      deliveryDispatch: {
+         claimCurrent: input => locusRepository.claimCurrentDelivery(input),
+         currentFinished: input => locusChannelController?.currentFinished?.(input),
+         dispatchNext: input => locusChannelController?.dispatchNext?.(input),
+         scheduleCurrent: input => scheduleCurrentDelivery(input),
+       },
       child: locusChildDelivery,
       resolveLivePolicy: session => {
         const policy = ctx.get('sandboxPolicy') as
@@ -2134,7 +2427,7 @@ async function initialize(
         const priorDeliveries = locusRepository
           .listDeliveries(record.id)
           .filter(delivery => delivery.childSessionId === record.childSessionId)
-        const position = priorDeliveries.length > 1 ? 'subsequent' : 'first'
+        const position = priorDeliveries.length > 0 ? 'subsequent' : 'first'
         return renderLocusDeliveryPrompt({
           endpoint: record.endpoint,
           locus: { locusId: record.id, generation: record.generation, state: record.state },
@@ -2166,6 +2459,63 @@ async function initialize(
         ? 'Unified locus channel dependencies are incomplete.'
         : locusChannelGaps.join('; '),
     )
+  if (locusChannel.status === 'available') {
+    locusChannelController = locusChannel.controller
+
+    // Reconciliation runs before the controller is composed so it can safely
+    // inspect/repair durable rows without opening intake. Once the exact
+    // controller exists, rebuild the in-memory deadline timers for retained
+    // currents and drain each locus that has backlog but no current. This is
+    // deliberately one pass before `channel.start()`; normal finish/expiry
+    // uses the same controller dispatcher and per-locus lane.
+    await lifecycle.contain('Locus Delivery startup dispatch', async () => {
+      const blockedLoci = new Set(locusStartup.manualDeliveries.map(delivery => delivery.locusId))
+      const pendingByLocus = new Map<string, DeliveryCorrelation>()
+      for (const delivery of locusStartup.retainedDeliveries) {
+        if (delivery.status !== 'current' || delivery.queueState !== 'current') continue
+        scheduleCurrentDelivery(delivery)
+        if (delivery.executionId !== undefined && delivery.turnId !== undefined) {
+          locusTurnObserver?.restoreCurrentCapability?.({
+            delivery: {
+              deliveryId: delivery.deliveryId,
+              executionId: delivery.executionId,
+              turnId: delivery.turnId,
+              correlation: {
+                endpoint: { ...delivery.endpoint },
+                locusId: delivery.locusId,
+                generation: delivery.generation,
+                childSessionId: delivery.childSessionId,
+              },
+              status: delivery.status,
+            },
+          })
+        }
+      }
+      for (const delivery of locusRepository.listDeliveries()) {
+        if (delivery.status !== 'accepted' && delivery.status !== 'queued') continue
+        if (blockedLoci.has(delivery.locusId)) continue
+        const correlation: DeliveryCorrelation = {
+          endpoint: { ...delivery.endpoint },
+          locusId: delivery.locusId,
+          generation: delivery.generation,
+          childSessionId: delivery.childSessionId,
+        }
+        pendingByLocus.set(locusDispatchKey(correlation), correlation)
+      }
+      for (const correlation of pendingByLocus.values()) {
+        // A legacy `queued`/`running` row retained by exact live-turn proof is
+        // an already-dispatched-to-child execution too: it must block a
+        // startup successor dispatch the same way `claimCurrentDeliveryMutation`
+        // now refuses to claim over one.
+        const hasInFlight = locusRepository.listDeliveries(correlation.locusId).some(delivery =>
+          delivery.status === 'current' || delivery.status === 'finishing' ||
+          delivery.status === 'queued' || delivery.status === 'running',
+        )
+        if (hasInFlight) continue
+        await locusChannelController?.dispatchNext?.(correlation)
+      }
+    })
+  }
   if (locusChannel.status === 'unavailable') {
     petLog(
       `dsh-pet: unified Feishu channel stays unavailable — ${locusChannel.diagnostic}`,
@@ -2176,47 +2526,10 @@ async function initialize(
 
   if (locusTurnObserver !== undefined) {
     ctx.effect(() => () => { locusTurnObserver.dispose() }, 'dsh-pet: locus turn observer')
-    // In production LocusChannelController is the sole turn-correlation
-    // consumer: it binds, settles and emits the reaction as one ordered
-    // operation. A second subscriber could win the settle race and make the
-    // controller observe `changed:false`, silently omitting DONE/CRY.
-    //
-    // When the unified capability is unavailable no controller is subscribed.
-    // Keep a ledger-only recovery consumer for already queued rows (for
-    // example a Host downgraded before restart); it emits no reaction and
-    // cannot race an active controller.
-    if (locusChannel.status === 'unavailable') {
-      ctx.effect(
-        () => locusTurnObserver.subscribe((event) => {
-          const persist = async (): Promise<void> => {
-            await locusRepository.bindTurn({
-              deliveryId: event.deliveryId,
-              correlation: event.correlation,
-              executionId: event.executionId,
-              turnId: event.turnId,
-              startedAt: Date.now(),
-            })
-            if (event.phase === 'started') return
-            await locusRepository.settleByTurn({
-              deliveryId: event.deliveryId,
-              executionId: event.executionId,
-              correlation: { ...event.correlation, turnId: event.turnId },
-              outcome: event.phase === 'completed' ? 'settled' : 'failed',
-              settledAt: Date.now(),
-              ...(event.reason === undefined ? {} : { failureReason: event.reason }),
-            })
-          }
-          void persist().catch((error: unknown) => {
-            petLog(
-              `dsh-pet locus turn: could not recover ${event.phase} (${
-                error instanceof Error ? error.message : String(error)
-              })`,
-            )
-          })
-        }),
-        'dsh-pet: recover queued locus turn without channel controller',
-      )
-    }
+    // The controller is the sole turn-correlation consumer when available.
+    // A model turn is only execution evidence; it is not the business Delivery
+    // boundary, so an unavailable controller must not install a fallback that
+    // settles Deliveries from `turn/end`.
   }
 
   /**

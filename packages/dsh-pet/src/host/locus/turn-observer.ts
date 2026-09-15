@@ -7,23 +7,30 @@
  * - an inbox claim, which names the queued message AND the turn that took it;
  * - a session turn end, which names the turn and how it finished.
  *
- * Neither alone is enough. The claim proves which message a turn is running
- * but not its outcome; the turn end proves an outcome but not which message it
- * belonged to. This module joins them on the exact `(childSessionId, turn)`
- * pair, so a settlement is reported only for a Delivery whose own turn ended.
+ * Neither alone is enough. The claim proves which message a turn is running;
+ * the turn end only proves that this execution segment stopped. This module
+ * joins claims on the exact `(childSessionId, turn)` pair and reports the
+ * `started` execution fact. It deliberately does not turn `turn/end` into a
+ * business Delivery outcome: a Delivery may continue in a later turn after a
+ * trusted `agent-message` wake-up.
  *
  * What it deliberately does NOT do:
  *
  * - guess by FIFO order, "the oldest pending Delivery", or child id alone;
  * - treat an activation-level end (the child session finishing) as a turn;
+ * - settle, expire, or otherwise mutate a Delivery from `turn/end`;
  * - report an outcome for a message that was discarded without running.
  *
  * The runtime seams are injected, so this module imports no Cordis or DSH.
  */
 
-import type { DeliveryCorrelation } from './delivery.js'
+import {
+  isPendingDeliveryStatus,
+  type DeliveryCorrelation,
+  type DeliveryStatus,
+} from './delivery.js'
 
-/** How one observed turn ended. */
+/** Observer facts emitted for a proven Delivery execution segment. */
 export type LocusTurnPhase = 'started' | 'completed' | 'failed'
 
 /** One correlation event, in the shape the locus controller consumes. */
@@ -33,7 +40,26 @@ export interface LocusTurnCorrelationEvent {
   readonly executionId: string
   readonly turnId: string
   readonly correlation: DeliveryCorrelation
-  readonly reason?: string
+}
+
+/** The source proof accepted for a caller-bound current capability. */
+export type LocusCurrentCapabilitySource = 'delivery' | 'agent-message'
+
+/**
+ * A current capability proof for the caller-bound lifecycle tools.
+ *
+ * `turn/end` never creates or revokes the business capability. The proof is
+ * retained only while the exact current Delivery remains represented by the
+ * observer and a subsequent turn is explicitly woken by a trusted
+ * `agent-message` claim. The observer has no authority to inspect or select a
+ * Feishu target; that remains Host/persistence-owned.
+ */
+export interface LocusCurrentCapability {
+  readonly deliveryId: string
+  readonly executionId: string
+  readonly turnId: string
+  readonly correlation: DeliveryCorrelation
+  readonly source: LocusCurrentCapabilitySource
 }
 
 /** The durable Delivery facts a claimed inbox message resolves to. */
@@ -41,6 +67,8 @@ export interface LocusClaimedDelivery {
   readonly deliveryId: string
   readonly executionId: string
   readonly correlation: DeliveryCorrelation
+  /** Optional durable status; explicit terminal rows never gain capability. */
+  readonly status?: DeliveryStatus
 }
 
 /**
@@ -143,8 +171,10 @@ export type LocusTurnObserverDiagnostic =
   | 'turn-without-delivery'
   /** A turn end was malformed and cannot prove which turn finished. */
   | 'turn-invalid'
-  /** The same turn ended twice; only the first settles. */
+  /** A turn end was observed after the turn had already ended. */
   | 'turn-already-ended'
+  /** A turn ended; this is diagnostic evidence, not business settlement. */
+  | 'turn-ended'
   /** Retention bounds evicted an unproven turn; it can no longer correlate. */
   | 'correlation-evicted'
   /** One turn exceeded its message-granular claim bound and is fail-closed. */
@@ -168,6 +198,13 @@ export interface LocusTurnCorrelationObserver {
     | { readonly executionId: string; readonly turnId: string }
     | undefined
   /**
+   * Return a caller-bound current capability with explicit source lineage.
+   * The original Delivery turn is accepted while active; after it ends, only
+   * a later exact turn containing a trusted `agent-message` claim is accepted.
+   * Arbitrary later turns never inherit the proof.
+   */
+  currentCapabilityForChild?(childSessionId: string): LocusCurrentCapability | undefined
+  /**
    * Wake exactly one durable inbox-message lookup after `bindQueued` commits.
    * This is the event-driven half of claim-before-persistence correlation: an
    * unresolved claim is retained without a short polling deadline, then this
@@ -177,6 +214,18 @@ export interface LocusTurnCorrelationObserver {
     readonly childSessionId: string
     readonly messageId: string
   }): void
+  /**
+   * Restore one durable current lineage after Host startup. This restores only
+   * the exact prior execution/turn identity; it does not itself authorize a
+   * new arbitrary turn. A same-turn runtime claim or a later trusted
+   * `agent-message` is still required before `currentCapabilityForChild`
+   * returns proof.
+   */
+  restoreCurrentCapability?(input: {
+    readonly delivery: LocusClaimedDelivery & { readonly turnId: string }
+  }): void
+  /** Revoke one retained lineage after durable finish/expiry or successor claim. */
+  revokeCurrentCapability?(input: { readonly childSessionId: string; readonly deliveryId?: string }): void
   /** Release the runtime subscriptions and all retained correlation state. */
   dispose(): void
 }
@@ -189,6 +238,8 @@ export interface LocusTurnObserverLimits {
   readonly maxClaimsPerTurn?: number
   /** Recently completed turn keys retained for duplicate-end diagnostics. */
   readonly maxEndedTurnKeys?: number
+  /** Maximum ended Delivery lineages retained for trusted agent-message continuation. */
+  readonly maxRetainedCurrents?: number
 }
 
 /** One Delivery claim resolved for an in-flight turn. */
@@ -218,12 +269,31 @@ interface ObservedTurn {
   readonly deliveries: Map<string, PendingTurn>
   readonly unresolved: Map<string, UnresolvedClaim>
   readonly foreign: Set<string>
-  /** Delivery message ids whose terminal fact was already emitted. */
-  readonly terminalEmitted: Set<string>
+  /** Trusted agent-message claims admitted to continue retained lineage. */
+  readonly agentMessages: Set<string>
   /** Sticky overflow fuse; excess ids are never retained. */
   saturated: boolean
   mixed: boolean
+  /** A segment end is retained only to distinguish duplicate claims/ends. */
   end?: LocusTurnEnd
+}
+
+/**
+ * One exact current Delivery lineage retained across execution segments.
+ *
+ * This is deliberately separate from `ObservedTurn`: ended turns are no longer
+ * active turns, but a current Delivery may still be consumed by a later,
+ * source-proven context turn. No status/terminal fact is stored here because
+ * turn endings are not business endings.
+ */
+interface RetainedCurrent {
+  readonly delivery: PendingTurn
+  /** The original Delivery segment's exact numeric turn. */
+  readonly originalTurn: number
+  /** The latest execution segment admitted by a trusted agent-message. */
+  continuationTurnId?: string
+  /** Latest segment number seen for this retained lineage. */
+  lastTurn: number
 }
 
 /** Join key for one session's turn. A turn number is per session, not global. */
@@ -271,6 +341,7 @@ export function createLocusTurnObserver(
   const maxObservedTurns = positiveLimit(limits.maxObservedTurns, 1_024, 'maxObservedTurns')
   const maxClaimsPerTurn = positiveLimit(limits.maxClaimsPerTurn, 32, 'maxClaimsPerTurn')
   const maxEndedTurnKeys = positiveLimit(limits.maxEndedTurnKeys, 1_024, 'maxEndedTurnKeys')
+  const maxRetainedCurrents = positiveLimit(limits.maxRetainedCurrents, 1_024, 'maxRetainedCurrents')
   const listeners = new Set<(event: LocusTurnCorrelationEvent) => void>()
   /** Complete claim sets for all observed `(child, turn)` pairs, oldest first. */
   const turns = new Map<string, ObservedTurn>()
@@ -278,6 +349,10 @@ export function createLocusTurnObserver(
   const unresolvedByMessage = new Map<string, Set<string>>()
   /** Turns already settled, oldest first, so duplicate-end memory is bounded. */
   const ended = new Set<string>()
+  /** Ended Delivery lineages, bounded and keyed by exact ended turn. */
+  const retained = new Map<string, RetainedCurrent>()
+  /** A retained current may have at most one admitted continuation turn. */
+  const continuationByChild = new Map<string, string>()
   let disposed = false
 
   const emit = (event: LocusTurnCorrelationEvent): void => {
@@ -316,6 +391,56 @@ export function createLocusTurnObserver(
     }
   }
 
+  const clearRetained = (childSessionId: string): void => {
+    const currentKey = continuationByChild.get(childSessionId)
+    if (currentKey !== undefined) {
+      retained.delete(currentKey)
+      continuationByChild.delete(childSessionId)
+    }
+  }
+
+  const retainRestoredCurrent = (delivery: PendingTurn): void => {
+    const key = turnKey(delivery.correlation.childSessionId, Number(delivery.turnId.slice(delivery.turnId.lastIndexOf('#') + 1)))
+    const originalTurn = Number(delivery.turnId.slice(delivery.turnId.lastIndexOf('#') + 1))
+    if (!Number.isSafeInteger(originalTurn) || originalTurn < 1) return
+    const childSessionId = delivery.correlation.childSessionId
+    const existingKey = continuationByChild.get(childSessionId)
+    if (existingKey !== undefined && existingKey !== key) return
+    retained.set(key, { delivery, originalTurn, lastTurn: originalTurn })
+    continuationByChild.set(childSessionId, key)
+    while (retained.size > maxRetainedCurrents) {
+      const oldest = retained.keys().next().value as string | undefined
+      if (oldest === undefined) break
+      const oldestEntry = retained.get(oldest)
+      retained.delete(oldest)
+      if (oldestEntry !== undefined && continuationByChild.get(oldestEntry.delivery.correlation.childSessionId) === oldest) {
+        continuationByChild.delete(oldestEntry.delivery.correlation.childSessionId)
+      }
+    }
+  }
+
+  const retainCurrent = (key: string, delivery: PendingTurn): void => {
+    // There is one current Delivery per child in the product model. Replacing
+    // an existing entry would hide an ambiguity, so refuse to retain another
+    // lineage until the old one is explicitly removed by the Host lifecycle.
+    const childSessionId = delivery.correlation.childSessionId
+    const existingKey = continuationByChild.get(childSessionId)
+    if (existingKey !== undefined && existingKey !== key) return
+    const originalTurn = Number(delivery.turnId.slice(delivery.turnId.lastIndexOf('#') + 1))
+    if (!Number.isSafeInteger(originalTurn) || originalTurn < 1) return
+    retained.set(key, { delivery, originalTurn, lastTurn: originalTurn })
+    continuationByChild.set(childSessionId, key)
+    while (retained.size > maxRetainedCurrents) {
+      const oldest = retained.keys().next().value as string | undefined
+      if (oldest === undefined) break
+      const oldestEntry = retained.get(oldest)
+      retained.delete(oldest)
+      if (oldestEntry !== undefined && continuationByChild.get(oldestEntry.delivery.correlation.childSessionId) === oldest) {
+        continuationByChild.delete(oldestEntry.delivery.correlation.childSessionId)
+      }
+    }
+  }
+
   const ensureTurn = (claim: LocusInboxClaim): ObservedTurn => {
     const key = turnKey(claim.childSessionId, claim.turn)
     let observed = turns.get(key)
@@ -333,7 +458,7 @@ export function createLocusTurnObserver(
         deliveries: new Map(),
         unresolved: new Map(),
         foreign: new Set(),
-        terminalEmitted: new Set(),
+        agentMessages: new Set(),
         saturated: false,
         mixed: false,
       }
@@ -343,27 +468,17 @@ export function createLocusTurnObserver(
   }
 
   const settleTurn = (key: string, observed: ObservedTurn): void => {
-    const end = observed.end
-    if (end === undefined) return
-    // Emit each proven Delivery's terminal fact immediately, even when another
-    // claim on the same turn remains unresolved/foreign. Mixedness blocks reply
-    // authority, not exact settlement. A later exact wake emits started plus
-    // this retained terminal once for that newly proven Delivery.
-    for (const [messageId, claimed] of observed.deliveries) {
-      if (observed.terminalEmitted.has(messageId)) continue
-      observed.terminalEmitted.add(messageId)
-      emit({
-        phase: end.outcome === 'completed' ? 'completed' : 'failed',
-        deliveryId: claimed.deliveryId,
-        executionId: claimed.executionId,
-        turnId: claimed.turnId,
-        correlation: claimed.correlation,
-        ...(end.outcome === 'completed'
-          ? {}
-          : { reason: isNonEmpty(end.reason) ? end.reason : end.outcome }),
-      })
-    }
+    // A segment end is diagnostic only. It never emits a terminal business
+    // event and never clears the current Delivery lineage; a later trusted
+    // agent-message may continue the same current request.
+    if (observed.end === undefined) return
     if (observed.unresolved.size > 0) return
+    const claimed = observed.deliveries.size === 1 && !observed.mixed && !observed.saturated
+      ? observed.deliveries.values().next().value as PendingTurn | undefined
+      : undefined
+    if (claimed !== undefined && (claimed.status === undefined || isPendingDeliveryStatus(claimed.status))) {
+      retainCurrent(key, claimed)
+    }
     clearTurn(key)
     rememberEnded(key)
   }
@@ -411,6 +526,45 @@ export function createLocusTurnObserver(
     // deliveryAvailable notification, bounded eviction, or disposal.
   }
 
+  const admitAgentContinuation = (claim: LocusInboxClaim): void => {
+    if (
+      claim === null || typeof claim !== 'object' ||
+      !isNonEmpty(claim.childSessionId) || !isNonEmpty(claim.messageId) || !isTurn(claim.turn)
+    ) {
+      ports.log?.('claim-invalid')
+      return
+    }
+    const currentKey = continuationByChild.get(claim.childSessionId)
+    if (currentKey === undefined) {
+      ports.log?.('claim-agent-context')
+      return
+    }
+    const retainedCurrent = retained.get(currentKey)
+    if (retainedCurrent === undefined) {
+      continuationByChild.delete(claim.childSessionId)
+      ports.log?.('claim-agent-context')
+      return
+    }
+    const key = turnKey(claim.childSessionId, claim.turn)
+    if (key === currentKey || ended.has(key)) return
+    // A continuation must be a strictly later execution segment. This rejects
+    // stale/old agent relays and prevents a claimed relay from authorizing an
+    // arbitrary turn that reuses or precedes the original turn number.
+    if (retainedCurrent.lastTurn < 1 || claim.turn <= retainedCurrent.lastTurn) {
+      ports.log?.('claim-agent-context')
+      return
+    }
+    if (retainedCurrent.continuationTurnId !== undefined && retainedCurrent.continuationTurnId !== turnIdOf(claim.childSessionId, claim.turn)) {
+      ports.log?.('claim-agent-context')
+      return
+    }
+    const observed = ensureTurn(claim)
+    if (observed.agentMessages.has(claim.messageId)) return
+    observed.agentMessages.add(claim.messageId)
+    retainedCurrent.continuationTurnId = observed.turnId
+    retainedCurrent.lastTurn = claim.turn
+  }
+
   const handleClaim = (claim: LocusInboxClaim): void => {
     if (disposed) return
     if (
@@ -429,6 +583,17 @@ export function createLocusTurnObserver(
     // because a durable Feishu Delivery is always claimed as `user`.
     if (isNonRoutingContextClaim(claim.sourceKind)) {
       ports.log?.(claim.sourceKind === 'agent-message' ? 'claim-agent-context' : 'claim-host-context')
+      return
+    }
+    // A Delivery claim must carry the explicit participant source. Missing or
+    // unknown source metadata is not proof of a Feishu/user message and must
+    // never be upgraded by a matching inbox id into lifecycle authority.
+    if (claim.sourceKind !== 'user') {
+      const observed = ensureTurn(claim)
+      observed.foreign.add(claim.messageId)
+      observed.mixed = true
+      ports.log?.('claim-invalid')
+      settleTurn(key, observed)
       return
     }
     const observed = ensureTurn(claim)
@@ -499,7 +664,13 @@ export function createLocusTurnObserver(
     unresolvedByMessage.set(indexKey, indexed)
   }
 
-  const releaseClaimed = ports.onClaimed(handleClaim)
+  const releaseClaimed = ports.onClaimed((claim: LocusInboxClaim) => {
+    if (claim !== null && typeof claim === 'object' && claim.sourceKind === 'agent-message') {
+      admitAgentContinuation(claim)
+      return
+    }
+    handleClaim(claim)
+  })
 
   function handleTurnEnd(end: LocusTurnEnd): void {
     if (disposed) return
@@ -521,6 +692,7 @@ export function createLocusTurnObserver(
       return
     }
     observed.end = end
+    ports.log?.('turn-ended')
     settleTurn(key, observed)
   }
 
@@ -528,6 +700,67 @@ export function createLocusTurnObserver(
 
   return {
     perTurnCorrelation: true,
+    restoreCurrentCapability(input) {
+      if (disposed || input === null || typeof input !== 'object') return
+      const delivery = input.delivery
+      if (delivery === null || typeof delivery !== 'object' ||
+          !isNonEmpty(delivery.deliveryId) || !isNonEmpty(delivery.executionId) ||
+          !isNonEmpty(delivery.turnId) || delivery.status !== undefined && !isPendingDeliveryStatus(delivery.status)) return
+      const turnPrefix = `${delivery.correlation.childSessionId}#`
+      if (!delivery.turnId.startsWith(turnPrefix)) return
+      const turn = Number(delivery.turnId.slice(turnPrefix.length))
+      if (!Number.isSafeInteger(turn) || turn < 1) return
+      retainRestoredCurrent({ ...delivery, turnId: delivery.turnId })
+    },
+    currentCapabilityForChild(childSessionId) {
+      if (!isNonEmpty(childSessionId)) return undefined
+      const active = [...turns.values()].filter(observed =>
+        observed.childSessionId === childSessionId && observed.end === undefined,
+      )
+      if (active.length === 1) {
+        const observed = active[0]!
+        if (!observed.mixed && !observed.saturated && observed.deliveries.size === 1 &&
+            observed.unresolved.size === 0 && observed.foreign.size === 0) {
+          const claimed = observed.deliveries.values().next().value as PendingTurn | undefined
+          if (claimed !== undefined && (claimed.status === undefined || isPendingDeliveryStatus(claimed.status))) return {
+            deliveryId: claimed.deliveryId,
+            executionId: claimed.executionId,
+            turnId: claimed.turnId,
+            correlation: claimed.correlation,
+            source: 'delivery' as const,
+          }
+        }
+      }
+      const currentKey = continuationByChild.get(childSessionId)
+      if (currentKey === undefined) return undefined
+      const retainedCurrent = retained.get(currentKey)
+      if (retainedCurrent?.continuationTurnId === undefined ||
+          (retainedCurrent.delivery.status !== undefined && !isPendingDeliveryStatus(retainedCurrent.delivery.status))) return undefined
+      const activeForChild = [...turns.values()].filter(observed =>
+        observed.childSessionId === childSessionId && observed.end === undefined,
+      )
+      if (activeForChild.length !== 1) return undefined
+      const activeContinuation = activeForChild.filter(observed =>
+        observed.turnId === retainedCurrent.continuationTurnId,
+      )
+      if (activeContinuation.length !== 1) return undefined
+      const continuation = activeContinuation[0]!
+      if (continuation.mixed || continuation.saturated || continuation.deliveries.size !== 0 || continuation.unresolved.size !== 0 || continuation.foreign.size !== 0 || continuation.agentMessages.size === 0) return undefined
+      return {
+        deliveryId: retainedCurrent.delivery.deliveryId,
+        executionId: retainedCurrent.delivery.executionId,
+        turnId: retainedCurrent.continuationTurnId,
+        correlation: retainedCurrent.delivery.correlation,
+        source: 'agent-message' as const,
+      }
+    },
+    revokeCurrentCapability(input) {
+      const currentKey = continuationByChild.get(input.childSessionId)
+      if (currentKey === undefined) return
+      const retainedCurrent = retained.get(currentKey)
+      if (input.deliveryId !== undefined && retainedCurrent?.delivery.deliveryId !== input.deliveryId) return
+      clearRetained(input.childSessionId)
+    },
     subscribe(listener) {
       listeners.add(listener)
       return () => {
@@ -538,20 +771,32 @@ export function createLocusTurnObserver(
       const active = [...turns.values()].filter(observed =>
         observed.childSessionId === childSessionId && observed.end === undefined,
       )
-      // Every active claim set participates in the child-bound decision. One
-      // clean Delivery turn cannot hide another mixed/unresolved active turn.
-      if (active.length !== 1) return undefined
-      const observed = active[0]!
-      if (
-        observed.mixed ||
-        observed.saturated ||
-        observed.deliveries.size !== 1 ||
-        observed.unresolved.size !== 0 ||
-        observed.foreign.size !== 0
-      ) return undefined
-      const claimed = observed.deliveries.values().next().value as PendingTurn | undefined
-      if (claimed === undefined) return undefined
-      return { executionId: claimed.executionId, turnId: claimed.turnId }
+      if (active.length === 1) {
+        const observed = active[0]!
+        if (
+          !observed.mixed &&
+          !observed.saturated &&
+          observed.deliveries.size === 1 &&
+          observed.unresolved.size === 0 &&
+          observed.foreign.size === 0
+        ) {
+          const claimed = observed.deliveries.values().next().value as PendingTurn | undefined
+          if (claimed !== undefined) return { executionId: claimed.executionId, turnId: claimed.turnId }
+        }
+      }
+      // An ended segment has no caller capability until a trusted agent-message
+      // explicitly admits the next turn. Never reuse the original turn proof for
+      // an arbitrary later GUI/user/initialization turn.
+      const currentKey = continuationByChild.get(childSessionId)
+      const current = currentKey === undefined ? undefined : retained.get(currentKey)
+      if (current?.continuationTurnId === undefined) return undefined
+      const activeForChild = [...turns.values()].filter(observed =>
+        observed.childSessionId === childSessionId && observed.end === undefined,
+      )
+      if (activeForChild.length !== 1) return undefined
+      const continuation = activeForChild.find(observed => observed.turnId === current.continuationTurnId)
+      if (continuation === undefined || continuation.mixed || continuation.saturated || continuation.deliveries.size !== 0 || continuation.unresolved.size !== 0 || continuation.foreign.size !== 0 || continuation.agentMessages.size === 0) return undefined
+      return { executionId: current.delivery.executionId, turnId: current.continuationTurnId }
     },
     deliveryAvailable(input) {
       if (disposed || !isNonEmpty(input?.childSessionId) || !isNonEmpty(input?.messageId)) return
@@ -567,6 +812,8 @@ export function createLocusTurnObserver(
       for (const key of [...turns.keys()]) clearTurn(key)
       unresolvedByMessage.clear()
       ended.clear()
+      retained.clear()
+      continuationByChild.clear()
       try {
         releaseClaimed()
       } catch {

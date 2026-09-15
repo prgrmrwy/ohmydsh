@@ -112,13 +112,13 @@ describe('caller-bound locus context repository', () => {
       )
       const claim = (value: LocusInboxClaim) => claimListeners.forEach(listener => listener(value))
 
-      claim({ childSessionId: record.childSessionId, messageId: 'delivery-message', turn: 4 })
+      claim({ childSessionId: record.childSessionId, messageId: 'delivery-message', turn: 4, sourceKind: 'user' })
       expect(repository.findByChildSessionId(record.childSessionId)[0]).toHaveProperty(
         'currentDelivery.deliveryId',
         'delivery-1',
       )
 
-      claim({ childSessionId: record.childSessionId, messageId: 'gui-steer', turn: 4 })
+      claim({ childSessionId: record.childSessionId, messageId: 'gui-steer', turn: 4, sourceKind: 'gui' })
       expect(repository.findByChildSessionId(record.childSessionId)[0]).not.toHaveProperty('currentDelivery')
       await vi.runAllTimersAsync()
       expect(repository.findByChildSessionId(record.childSessionId)[0]).not.toHaveProperty('currentDelivery')

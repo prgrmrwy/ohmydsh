@@ -14,6 +14,12 @@ import {
   bindQueued,
   bindTurn,
   settleByTurn,
+  claimCurrentDelivery,
+  completeDelivery,
+  expireDelivery,
+  markFinishing,
+  waitDelivery,
+  DEFAULT_DELIVERY_LEASE_MS,
   type DeliveryCorrelation,
   type DeliveryLedgerState,
   type DeliveryRecord,
@@ -117,6 +123,7 @@ describe('unified locus Delivery correlation', () => {
     const accepted = acceptDelivery(createDeliveryLedger(), {
       ...correlation(),
       messageId: 'message-state',
+      acceptedAt: 10,
     })
     const queued = bindQueued(accepted.state, {
       ...correlation(),
@@ -154,18 +161,21 @@ describe('unified locus Delivery correlation', () => {
     const accepted = acceptDelivery(createDeliveryLedger(), {
       ...correlation(),
       messageId: 'message-failed',
+      acceptedAt: 10,
     })
     const queued = bindQueued(accepted.state, {
       ...correlation(),
       deliveryId: accepted.record.deliveryId,
       executionId: EXECUTION,
       inboxMessageId: `inbox-${EXECUTION}`,
+      queuedAt: 20,
     })
     const running = bindTurn(queued.state, {
       ...correlation(),
       deliveryId: accepted.record.deliveryId,
       executionId: EXECUTION,
       turnId: TURN,
+      startedAt: 30,
     })
     const failed = settleByTurn(running.state, {
       deliveryId: accepted.record.deliveryId,
@@ -185,9 +195,9 @@ describe('unified locus Delivery correlation', () => {
 
   it('settles the oldest pending delivery first within one exact endpoint and generation', () => {
     let state = createDeliveryLedger()
-    const first = accept(state, 'message-first')
+    const first = acceptDelivery(state, { ...correlation(), messageId: 'message-first', acceptedAt: 1 })
     state = first.state
-    const second = accept(state, 'message-second')
+    const second = acceptDelivery(state, { ...correlation(), messageId: 'message-second', acceptedAt: 2 })
     state = second.state
 
     const firstBound = bindDeliveryTurn(state, {
@@ -195,6 +205,7 @@ describe('unified locus Delivery correlation', () => {
       deliveryId: first.record.deliveryId,
       turnId: 'turn-first',
       executionId: 'execution-first', inboxMessageId: 'inbox-execution-first',
+      startedAt: 10,
     })
     state = firstBound.state
     const secondBound = bindDeliveryTurn(state, {
@@ -202,6 +213,7 @@ describe('unified locus Delivery correlation', () => {
       deliveryId: second.record.deliveryId,
       turnId: 'turn-second',
       executionId: 'execution-second', inboxMessageId: 'inbox-execution-second',
+      startedAt: 20,
     })
     state = secondBound.state
     const firstSettlement = settleNextDelivery(state, {
@@ -265,22 +277,26 @@ describe('unified locus Delivery correlation', () => {
     const accepted = acceptDelivery(createDeliveryLedger(), {
       ...correlation(),
       messageId: 'message-explicit-first',
+      acceptedAt: 1,
     })
     const second = acceptDelivery(accepted.state, {
       ...correlation(),
       messageId: 'message-explicit-second',
+      acceptedAt: 2,
     })
     const secondQueued = bindQueued(second.state, {
       ...correlation(),
       deliveryId: second.record.deliveryId,
       executionId: EXECUTION,
       inboxMessageId: `inbox-${EXECUTION}`,
+      queuedAt: 10,
     })
     const secondBound = bindTurn(secondQueued.state, {
       ...correlation(),
       deliveryId: second.record.deliveryId,
       executionId: EXECUTION,
       turnId: TURN,
+      startedAt: 20,
     })
 
     const settled = settleDelivery(secondBound.state, {
@@ -442,5 +458,208 @@ describe('unified locus Delivery correlation', () => {
     expect(mismatch.changed).toBe(false)
     expect(mismatch.reason).toBe('correlation-mismatch')
     expect(mismatch.record?.status).toBe('accepted')
+  })
+
+  it('never lets an explicit newer delivery id leapfrog the oldest backlog row', () => {
+    const first = acceptDelivery(createDeliveryLedger(), {
+      ...correlation(), messageId: 'message-oldest', acceptedAt: 1_000,
+    })
+    const second = acceptDelivery(first.state, {
+      ...correlation(), messageId: 'message-newer', acceptedAt: 1_001,
+    })
+    const claim = claimCurrentDelivery(second.state, {
+      ...correlation(), deliveryId: second.record.deliveryId, now: 2_000,
+    })
+    expect(claim.changed).toBe(false)
+    expect(claim.reason).toBe('not-oldest')
+    expect(claim.record?.deliveryId).toBe(first.record.deliveryId)
+    expect(claim.state.byDeliveryId[first.record.deliveryId]?.status).toBe('accepted')
+    expect(claim.state.byDeliveryId[second.record.deliveryId]?.status).toBe('accepted')
+  })
+
+  it('promotes one FIFO backlog item to current and keeps the next item queued', () => {
+    const first = acceptDelivery(createDeliveryLedger(), {
+      ...correlation(), messageId: 'message-current-a', acceptedAt: 1_000,
+    })
+    const second = acceptDelivery(first.state, {
+      ...correlation(), messageId: 'message-current-b', acceptedAt: 1_001,
+    })
+    const claimed = claimCurrentDelivery(second.state, {
+      ...correlation(), now: 2_000,
+    })
+
+    expect(claimed.changed).toBe(true)
+    expect(claimed.record?.status).toBe('current')
+    expect(claimed.record?.queueState).toBe('current')
+    expect(claimed.record?.revision).toBe(1)
+    expect(claimed.state.byMessageId['message-current-b']?.status).toBe('accepted')
+
+    const duplicateClaim = claimCurrentDelivery(claimed.state, {
+      ...correlation(), now: 2_001,
+    })
+    expect(duplicateClaim.changed).toBe(false)
+    expect(duplicateClaim.reason).toBe('current-occupied')
+    expect(duplicateClaim.record?.messageId).toBe('message-current-a')
+  })
+
+  it('uses the fixed acceptance deadline and hard 24-hour cap for repeated waits', () => {
+    const accepted = acceptDelivery(createDeliveryLedger(), {
+      ...correlation(), messageId: 'message-deadline', acceptedAt: 10_000,
+    })
+    expect(accepted.record.deadlineAt).toBe(10_000 + 60 * 60 * 1000)
+    expect(accepted.record.hardDeadlineAt).toBe(10_000 + 24 * 60 * 60 * 1000)
+    const current = claimCurrentDelivery(accepted.state, {
+      ...correlation(), now: 10_001,
+    })
+    const waited = waitDelivery(current.state, {
+      ...correlation(), deliveryId: current.record!.deliveryId, now: 20_000,
+      waitMinutes: 1_440, expectedRevision: current.record!.revision,
+    })
+
+    expect(waited.changed).toBe(true)
+    expect(waited.record?.deadlineAt).toBe(10_000 + 24 * 60 * 60 * 1000)
+    // Already pinned to the hard cap: a further wait cannot extend anything,
+    // but it is SATISFIED rather than refused, and it must not be reported as
+    // `deadline-expired` — the Delivery is very much alive.
+    const repeated = waitDelivery(waited.state, {
+      ...correlation(), deliveryId: waited.record!.deliveryId, now: 21_000,
+      waitMinutes: 1_440, expectedRevision: waited.record!.revision,
+    })
+    expect(repeated.changed).toBe(false)
+    expect(repeated.reason).toBe('deadline-already-sufficient')
+    expect(repeated.record).toBe(waited.record)
+  })
+
+  it('treats a wait already covered by the live lease as satisfied, not as an expiry', () => {
+    // Regression for a real acceptance failure. Right after a claim the lease
+    // already runs for a full hour, so an ordinary "wait 30 more minutes" asks
+    // for LESS than what is already granted. That returned `deadline-expired`,
+    // which the Host surfaced as a hard tool error; the child concluded its
+    // Delivery was unusable and answered `no-reply` instead of the real reply.
+    const acceptedAt = 10_000
+    const accepted = acceptDelivery(createDeliveryLedger(), {
+      ...correlation(), messageId: 'message-wait-covered', acceptedAt,
+    })
+    const current = claimCurrentDelivery(accepted.state, { ...correlation(), now: acceptedAt + 1 })
+    const existingDeadline = current.record!.deadlineAt
+
+    const shorter = waitDelivery(current.state, {
+      ...correlation(), deliveryId: current.record!.deliveryId, now: acceptedAt + 2,
+      waitMinutes: 30, expectedRevision: current.record!.revision,
+    })
+
+    expect(shorter.reason).toBe('deadline-already-sufficient')
+    expect(shorter.reason).not.toBe('deadline-expired')
+    // The live deadline is reported untouched, and no revision is burned, so a
+    // later CAS by the holder still matches.
+    expect(shorter.record?.deadlineAt).toBe(existingDeadline)
+    expect(shorter.record?.revision).toBe(current.record!.revision)
+
+    // A genuinely longer horizon still extends normally.
+    const longer = waitDelivery(current.state, {
+      ...correlation(), deliveryId: current.record!.deliveryId, now: acceptedAt + 2,
+      waitMinutes: 120, expectedRevision: current.record!.revision,
+    })
+    expect(longer.changed).toBe(true)
+    expect(longer.record!.deadlineAt).toBeGreaterThan(existingDeadline!)
+  })
+
+  it('uses CAS to make finish versus expiry a one-winner race', () => {
+    const acceptedAt = 100
+    const dueAt = acceptedAt + DEFAULT_DELIVERY_LEASE_MS
+    const accepted = acceptDelivery(createDeliveryLedger(), {
+      ...correlation(), messageId: 'message-cas', acceptedAt,
+    })
+    const current = claimCurrentDelivery(accepted.state, { ...correlation(), now: acceptedAt + 1 })
+    const finishing = markFinishing(current.state, {
+      ...correlation(), deliveryId: current.record!.deliveryId, now: acceptedAt + 2,
+      expectedRevision: current.record!.revision,
+    })
+    expect(finishing.record?.status).toBe('finishing')
+
+    // Fork from the pre-finishing snapshot to simulate a concurrent deadline
+    // expiry racing against the finish CAS above: both start from revision 1,
+    // but only one mutation is ever actually persisted.
+    const staleExpiry = expireDelivery(current.state, {
+      ...correlation(), deliveryId: current.record!.deliveryId, now: dueAt,
+      expectedRevision: current.record!.revision,
+    })
+    expect(staleExpiry.changed).toBe(true)
+    expect(staleExpiry.record?.status).toBe('expired')
+    expect(completeDelivery(staleExpiry.state, {
+      ...correlation(), deliveryId: staleExpiry.record!.deliveryId, now: dueAt + 1,
+      outcome: 'no-reply', reason: 'already expired', expectedRevision: staleExpiry.record!.revision,
+    }).reason).toBe('already-terminal')
+
+    const replied = completeDelivery(finishing.state, {
+      ...correlation(), deliveryId: finishing.record!.deliveryId, now: acceptedAt + 3,
+      outcome: 'reply', outboundResult: 'success', expectedRevision: finishing.record!.revision,
+    })
+    expect(replied.changed).toBe(true)
+    expect(replied.record?.status).toBe('replied')
+    expect(replied.record?.finishOutcome).toBe('reply')
+    expect(replied.record?.outboundResult).toBe('success')
+    expect(expireDelivery(replied.state, {
+      ...correlation(), deliveryId: replied.record!.deliveryId, now: dueAt + 2,
+    }).reason).toBe('already-terminal')
+  })
+
+  it('refuses to expire a current or backlog Delivery before its own deadline is due', () => {
+    const acceptedAt = 1_000
+    const accepted = acceptDelivery(createDeliveryLedger(), {
+      ...correlation(), messageId: 'message-not-due', acceptedAt,
+    })
+    const backlogEarly = expireDelivery(accepted.state, {
+      ...correlation(), deliveryId: accepted.record.deliveryId, now: acceptedAt + 1,
+    })
+    expect(backlogEarly.changed).toBe(false)
+    expect(backlogEarly.reason).toBe('deadline-not-reached')
+
+    const current = claimCurrentDelivery(accepted.state, { ...correlation(), now: acceptedAt + 2 })
+    const currentEarly = expireDelivery(current.state, {
+      ...correlation(), deliveryId: current.record!.deliveryId, now: acceptedAt + DEFAULT_DELIVERY_LEASE_MS - 1,
+      expectedRevision: current.record!.revision,
+    })
+    expect(currentEarly.changed).toBe(false)
+    expect(currentEarly.reason).toBe('deadline-not-reached')
+
+    const currentDue = expireDelivery(current.state, {
+      ...correlation(), deliveryId: current.record!.deliveryId, now: acceptedAt + DEFAULT_DELIVERY_LEASE_MS,
+      expectedRevision: current.record!.revision,
+    })
+    expect(currentDue.changed).toBe(true)
+    expect(currentDue.record?.status).toBe('expired')
+  })
+
+  it('records explicit no-reply, failed, and unknown outbound outcomes without replay', () => {
+    const accepted = acceptDelivery(createDeliveryLedger(), {
+      ...correlation(), messageId: 'message-outbound', acceptedAt: 100,
+    })
+    const current = claimCurrentDelivery(accepted.state, { ...correlation(), now: 101 })
+    const noReply = completeDelivery(current.state, {
+      ...correlation(), deliveryId: current.record!.deliveryId, now: 102,
+      outcome: 'no-reply', reason: 'not actionable',
+    })
+    expect(noReply.record?.status).toBe('no-reply')
+    expect(noReply.record?.outboundResult).toBe('none')
+
+    const next = acceptDelivery(noReply.state, {
+      ...correlation(), messageId: 'message-outbound-unknown', acceptedAt: 200,
+    })
+    const nextCurrent = claimCurrentDelivery(next.state, { ...correlation(), now: 201 })
+    const finishing = markFinishing(nextCurrent.state, {
+      ...correlation(), deliveryId: nextCurrent.record!.deliveryId, now: 202,
+    })
+    const unknown = completeDelivery(finishing.state, {
+      ...correlation(), deliveryId: finishing.record!.deliveryId, now: 203,
+      outcome: 'reply', outboundResult: 'unknown', outboundDiagnostic: 'confirmation lost',
+      expectedRevision: finishing.record!.revision,
+    })
+    expect(unknown.record?.status).toBe('unknown-terminal')
+    expect(unknown.record?.outboundResult).toBe('unknown')
+    expect(completeDelivery(unknown.state, {
+      ...correlation(), deliveryId: unknown.record!.deliveryId, now: 204,
+      outcome: 'reply', outboundResult: 'success', expectedRevision: unknown.record!.revision,
+    }).changed).toBe(false)
   })
 })

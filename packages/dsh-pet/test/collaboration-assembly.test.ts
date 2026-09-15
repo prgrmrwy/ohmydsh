@@ -51,7 +51,7 @@ import {
   registerInquiryAskTool,
 } from '../src/host/inquiry/tools.js'
 import { PET_CONTEXT_TOOL } from '../src/host/context-tool.js'
-import { PET_LOCUS_REPLY_TOOL, registerPetTools } from '../src/host/tools.js'
+import { PET_LOCUS_FINISH_TOOL, PET_LOCUS_WAIT_TOOL, registerPetTools } from '../src/host/tools.js'
 import { buildLocusRecord, type LocusRecord } from '../src/host/locus/aggregate.js'
 import { LocusRepository } from '../src/host/locus/persistence.js'
 import {
@@ -367,16 +367,16 @@ describe('the collaboration surface installs on circle scopes only', () => {
     registerPetTools(child.scope, {
       repository: harness.repository,
       locusRepository: { findByChildSessionId: () => [] },
-      locusReply: {
+      locusLifecycle: {
         locusRepository: { findByChildSessionId: () => [] },
-        lark: { reply: async () => {}, replyExact: async () => {} },
       },
     })
     assembly.install(child.scope)
 
     const names = visibleTools(ctx, child.key)
     expect(names).toContain(PET_CONTEXT_TOOL)
-    expect(names).toContain(PET_LOCUS_REPLY_TOOL)
+    expect(names).toContain(PET_LOCUS_FINISH_TOOL)
+    expect(names).toContain(PET_LOCUS_WAIT_TOOL)
     for (const name of CIRCLE_TOOLS) expect(names).toContain(name)
     await ctx.fiber.dispose()
   })
@@ -391,7 +391,8 @@ describe('the collaboration surface installs on circle scopes only', () => {
     // A parent is not a Pet root executor and has no Feishu outbound: the
     // surface must not turn it into one.
     expect(visibleTools(ctx, main.key)).not.toContain(PET_CONTEXT_TOOL)
-    expect(visibleTools(ctx, main.key)).not.toContain(PET_LOCUS_REPLY_TOOL)
+    expect(visibleTools(ctx, main.key)).not.toContain(PET_LOCUS_FINISH_TOOL)
+    expect(visibleTools(ctx, main.key)).not.toContain(PET_LOCUS_WAIT_TOOL)
     await ctx.fiber.dispose()
   })
 
@@ -1020,7 +1021,8 @@ describe.skipIf(!atomicArtifactsPresent())('the real plugin entry installs the s
       }
       // A main session is not a Pet root executor and gets no Delivery reply.
       expect(host.toolNames(main.key)).not.toContain(PET_CONTEXT_TOOL)
-      expect(host.toolNames(main.key)).not.toContain(PET_LOCUS_REPLY_TOOL)
+      expect(host.toolNames(main.key)).not.toContain(PET_LOCUS_FINISH_TOOL)
+      expect(host.toolNames(main.key)).not.toContain(PET_LOCUS_WAIT_TOOL)
     } finally {
       await host.close()
     }

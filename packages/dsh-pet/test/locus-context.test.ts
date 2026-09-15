@@ -93,8 +93,10 @@ describe('unified locus delivery context', () => {
     expect(prompt).toContain('当前 thread')
     expect(prompt).toContain('om_root-1')
     expect(prompt).toContain('回复只能回到上述当前目标')
-    expect(prompt).toContain('`pet_locus_reply`')
-    expect(prompt).toContain('只接受 text')
+    expect(prompt).toContain('`pet_locus_finish`')
+    expect(prompt).toContain('`pet_locus_wait(')
+    expect(prompt).toContain('reply` 并提供非空正文')
+    expect(prompt).toContain('no-reply` 并提供非空原因')
   })
 
   it('keeps the exported short alias equivalent', () => {
@@ -256,8 +258,9 @@ describe('the routing preamble is sent once per child', () => {
     expect(next).toContain('<current-request>')
     // The reply target is delivery-bound and must never be inherited.
     expect(next).toContain('### Reply target (current delivery only)')
-    expect(next).toContain('pet_locus_reply')
-    expect(next).toContain('不要把业务正文伪装成 Host 控制回执')
+    expect(next).toContain('pet_locus_finish')
+    expect(next).toContain('pet_locus_wait')
+    expect(next).toContain('不得提供 delivery/chat/message/thread target selector')
   })
 
   it('materially reduces the follow-up payload', () => {

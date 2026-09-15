@@ -348,6 +348,60 @@ describe('durable unified locus repository', () => {
     await harness.close()
   })
 
+  it('binds an accepted Delivery as queued and never leaves accepted execution proof', async () => {
+    const harness = await openPetHarness()
+    const repository = new DurableLocusRepository(harness.domain)
+    const locus = await repository.putLocus(record())
+    const correlation = {
+      endpoint: locus.endpoint,
+      locusId: locus.id,
+      generation: locus.generation,
+      childSessionId: locus.childSessionId as string,
+    }
+    const accepted = await repository.acceptDelivery({
+      ...correlation,
+      deliveryId: 'delivery-bind-accepted',
+      messageId: 'message-bind-accepted',
+      senderOpenId: 'ou_bind',
+      acceptedAt: 2,
+    })
+    const bound = await repository.bindQueued({
+      deliveryId: accepted.record.deliveryId,
+      correlation,
+      executionId: 'execution-bind-accepted',
+      inboxMessageId: 'inbox-bind-accepted',
+      queuedAt: 3,
+    })
+    expect(bound).toMatchObject({ status: 'queued', executionId: 'execution-bind-accepted' })
+    expect(repository.getDelivery(accepted.record.deliveryId)).toMatchObject({ status: 'queued' })
+    await harness.close()
+  })
+
+  it('never lets an explicit newer durable delivery id leapfrog the oldest row', async () => {
+    const harness = await openPetHarness()
+    const repository = new DurableLocusRepository(harness.domain)
+    const locus = await repository.putLocus(record())
+    const correlation = {
+      endpoint: locus.endpoint,
+      locusId: locus.id,
+      generation: locus.generation,
+      childSessionId: locus.childSessionId as string,
+    }
+    const first = await repository.acceptDelivery({
+      ...correlation, deliveryId: 'delivery-oldest', messageId: 'message-oldest', senderOpenId: 'ou_fifo', acceptedAt: 2,
+    })
+    const second = await repository.acceptDelivery({
+      ...correlation, deliveryId: 'delivery-newer', messageId: 'message-newer', senderOpenId: 'ou_fifo', acceptedAt: 3,
+    })
+    const claim = await repository.claimCurrentDelivery({
+      correlation, deliveryId: second.record.deliveryId, now: 4,
+    })
+    expect(claim).toBeUndefined()
+    expect(repository.getDelivery(first.record.deliveryId)?.status).toBe('accepted')
+    expect(repository.getDelivery(second.record.deliveryId)?.status).toBe('accepted')
+    await harness.close()
+  })
+
   it('persists definitive queue failure, releases busy, and accepts a retry message', async () => {
     const harness = await openPetHarness()
     const repository = new DurableLocusRepository(harness.domain)
@@ -664,7 +718,7 @@ describe('durable unified locus repository', () => {
     await reopened.close()
   })
 
-  it('fails an accepted-but-unqueued Delivery on restart without replay and clears busy', async () => {
+  it('retains an accepted backlog Delivery across restart as durable dispatchable admission', async () => {
     const medium = emptyMedium()
     const first = await openPetHarness(medium)
     const firstRepository = new DurableLocusRepository(first.domain)
@@ -685,20 +739,140 @@ describe('durable unified locus repository', () => {
     enableAtomicTransactions(second)
     const restarted = new DurableLocusRepository(second.domain)
     const report = await restarted.reconcileStartup({ now: 3 })
-    expect(report.pendingDeliveries).toEqual([])
-    expect(report.failedDeliveries).toEqual([
-      expect.objectContaining({
-        deliveryId: accepted.record.deliveryId,
-        status: 'failed',
-        startupDisposition: 'unqueued',
-      }),
+    expect(report.failedDeliveries).toEqual([])
+    expect(report.retainedDeliveries).toEqual([
+      expect.objectContaining({ deliveryId: accepted.record.deliveryId, status: 'accepted' }),
     ])
-    expect(restarted.getDelivery(accepted.record.deliveryId)).toMatchObject({
-      status: 'failed',
-      startupDisposition: 'unqueued',
-    })
-    expect(restarted.getLocus(locus.id)).toMatchObject({ busy: false })
+    expect(restarted.getDelivery(accepted.record.deliveryId)).toMatchObject({ status: 'accepted' })
+    // Unqueued backlog admission is not a failed dispatch: the busy fence stays
+    // set so the common dispatcher can still claim and deliver this row.
+    expect(restarted.getLocus(locus.id)).toMatchObject({ busy: true })
     await second.close()
+  })
+
+  it('expires an accepted backlog Delivery on restart once it crosses its own 24-hour hard cap', async () => {
+    const medium = emptyMedium()
+    const first = await openPetHarness(medium)
+    const firstRepository = new DurableLocusRepository(first.domain)
+    const locus = await firstRepository.putLocus(record())
+    const accepted = await firstRepository.acceptDelivery({
+      endpoint: locus.endpoint,
+      locusId: locus.id,
+      generation: locus.generation,
+      childSessionId: locus.childSessionId as string,
+      messageId: 'message-stale-backlog',
+      deliveryId: 'delivery-stale-backlog',
+      senderOpenId: 'ou_stale',
+      acceptedAt: 2,
+    })
+    await first.close()
+
+    const second = await reopen(medium)
+    enableAtomicTransactions(second)
+    const restarted = new DurableLocusRepository(second.domain)
+    const hardDeadline = accepted.record.hardDeadlineAt!
+    const report = await restarted.reconcileStartup({ now: hardDeadline })
+    expect(report.retainedDeliveries).toEqual([])
+    expect(report.failedDeliveries).toEqual([
+      expect.objectContaining({ deliveryId: accepted.record.deliveryId, status: 'expired' }),
+    ])
+    expect(restarted.getDelivery(accepted.record.deliveryId)).toMatchObject({ status: 'expired' })
+    await second.close()
+  })
+
+  it('reopens cleanly after a current Delivery expires, instead of degrading on its own record', async () => {
+    // Regression for a real production outage: `acceptDelivery` writes
+    // `outboundResult: 'none'` (truthfully: no outbound was ever attempted),
+    // and expiry clears only `queueState`. A schema rule that rejected ANY
+    // `outboundResult` on an expired row therefore made every expiry produce a
+    // record the domain refused on the next boot, degrading the whole plugin
+    // with `stored record ... does not match its schema`. The medium is
+    // reopened here because that validation runs at domain open, not at write.
+    const medium = emptyMedium()
+    const first = await openPetHarness(medium)
+    enableAtomicTransactions(first)
+    const firstRepository = new DurableLocusRepository(first.domain)
+    const locus = await firstRepository.putLocus(record())
+    const correlation = {
+      endpoint: locus.endpoint,
+      locusId: locus.id,
+      generation: locus.generation,
+      childSessionId: locus.childSessionId as string,
+    }
+    const accepted = await firstRepository.acceptDelivery({
+      ...correlation,
+      messageId: 'message-expire-reopen',
+      deliveryId: 'delivery-expire-reopen',
+      senderOpenId: 'ou_expire',
+      text: 'please answer',
+      acceptedAt: 2,
+    })
+    const claimed = await firstRepository.claimCurrentDelivery({ correlation, now: 3 })
+    expect(claimed?.status).toBe('current')
+    const expired = await firstRepository.expireCurrentDelivery({
+      ...correlation,
+      deliveryId: accepted.record.deliveryId,
+      now: claimed!.deadlineAt!,
+      expectedRevision: claimed!.revision!,
+    })
+    expect(expired.changed).toBe(true)
+    expect(expired.record).toMatchObject({ status: 'expired', outboundResult: 'none' })
+    expect(expired.record).not.toHaveProperty('queueState')
+    await first.close()
+
+    // The whole point: reopening must succeed. Before the fix this threw
+    // during domain open and Pet degraded with no routes registered.
+    const second = await reopen(medium)
+    const restarted = new DurableLocusRepository(second.domain)
+    expect(restarted.getDelivery('delivery-expire-reopen')).toMatchObject({
+      status: 'expired',
+      outboundResult: 'none',
+    })
+    await second.close()
+  })
+
+  it('answers a wait already covered by the live lease with the intact deadline', async () => {
+    // Durable half of a real acceptance regression: the child asks to wait
+    // less than the lease already grants. That must come back as satisfied
+    // with the real deadline, never as a refusal, and it must persist nothing
+    // so the holder's `expectedRevision` still matches on its next CAS.
+    const harness = await openPetHarness(emptyMedium())
+    enableAtomicTransactions(harness)
+    const repository = new DurableLocusRepository(harness.domain)
+    const locus = await repository.putLocus(record())
+    const correlation = {
+      endpoint: locus.endpoint,
+      locusId: locus.id,
+      generation: locus.generation,
+      childSessionId: locus.childSessionId as string,
+    }
+    const accepted = await repository.acceptDelivery({
+      ...correlation,
+      messageId: 'message-wait-covered',
+      deliveryId: 'delivery-wait-covered',
+      senderOpenId: 'ou_wait',
+      text: 'ask the parent',
+      acceptedAt: 1_000,
+    })
+    const claimed = await repository.claimCurrentDelivery({ correlation, now: 1_100 })
+
+    const waited = await repository.waitCurrentDelivery({
+      ...correlation,
+      deliveryId: accepted.record.deliveryId,
+      now: 1_200,
+      waitMinutes: 30,
+      expectedRevision: claimed!.revision!,
+    })
+
+    expect(waited.reason).toBe('deadline-already-sufficient')
+    expect(waited.record?.deadlineAt).toBe(claimed!.deadlineAt)
+    // Nothing moved, so the stored row and its revision stay untouched.
+    expect(repository.getDelivery(accepted.record.deliveryId)).toMatchObject({
+      status: 'current',
+      revision: claimed!.revision,
+      deadlineAt: claimed!.deadlineAt,
+    })
+    await harness.close()
   })
 
   it('retains a queued Delivery only with exact live-turn proof across restart', async () => {
@@ -927,12 +1101,15 @@ describe('durable unified locus repository', () => {
 
     expect(report.indexStatus).toBe('rebuilt')
     expect(report.indexChanges).toBeGreaterThanOrEqual(2)
-    expect(report.pendingDeliveries).toEqual([])
-    expect(report.failedDeliveries.map(item => item.deliveryId)).toEqual(['delivery-pending'])
+    expect(report.failedDeliveries).toEqual([])
+    expect(report.pendingDeliveries.map(item => item.deliveryId)).toEqual(['delivery-pending'])
+    expect(report.retainedDeliveries.map(item => item.deliveryId)).toEqual(['delivery-pending'])
     expect(report.recoverableOperations.map(item => item.id)).toContain('operation-pending')
     expect(report.sideEffectsReplayed).toBe(false)
-    expect(repository.getDelivery('delivery-pending')?.status).toBe('failed')
-    expect(repository.getDelivery('delivery-pending')?.startupDisposition).toBe('unqueued')
+    // An unexpired accepted backlog row is durable dispatchable admission, not
+    // a failed dispatch: it is retained as-is for the shared dispatcher.
+    expect(repository.getDelivery('delivery-pending')?.status).toBe('accepted')
+    expect(repository.getDelivery('delivery-pending')).not.toHaveProperty('startupDisposition')
     expect(repository.getDelivery('delivery-pending')?.rootMessageId).toBe('root-pending')
     expect(repository.getDelivery('delivery-pending')?.replyTarget).toEqual({
       chatId: locus.endpoint.chatId,
@@ -940,7 +1117,8 @@ describe('durable unified locus repository', () => {
       rootMessageId: 'root-pending',
     })
     expect(repository.getDelivery('delivery-pending')?.replyToMessageId).toBe('reply-parent')
-    expect(repository.getCurrentLocus(locus.endpoint)).toMatchObject({ ...locus, busy: false, updatedAt: 99 })
+    // Still-pending backlog work keeps the locus busy fence set.
+    expect(repository.getCurrentLocus(locus.endpoint)).toMatchObject({ id: locus.id, busy: true })
     expect(indexes.get(endpointIndexKey(locus.endpoint))?.locusIds).toEqual([locus.id])
     expect(indexes.get(parentIndexKey(locus.parentSessionId))?.locusIds).toEqual([locus.id])
     await harness.close()

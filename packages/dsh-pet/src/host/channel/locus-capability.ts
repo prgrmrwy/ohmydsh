@@ -19,6 +19,10 @@ import {
 /** The narrow controller surface consumed by ChannelService/Pipeline. */
 export interface LocusChannelControllerPort {
   handle(input: LocusChannelEvent, context?: LocusAdmissionContext): Promise<LocusControllerResult>
+  /** Remove a terminal Delivery's observer/pending state. */
+  currentFinished?(input: { readonly deliveryId: string; readonly correlation: import('../locus/delivery.js').DeliveryCorrelation }): void
+  /** Claim and physically queue the next FIFO Delivery for this locus. */
+  dispatchNext?(correlation: import('../locus/delivery.js').DeliveryCorrelation): Promise<void>
   dispose(): void
 }
 
