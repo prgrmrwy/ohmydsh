@@ -240,6 +240,42 @@ describe('locus execution-root confirmation', () => {
     expect(markup).toContain('/Users/prgrmrwy/corp/nexus')
   })
 
+  it('states that write means unbounded access shared by the entry', () => {
+    // The label is the only place the owner is told what the grant really is;
+    // hiding it behind a bare "可写" is the quiet widening this change removes.
+    const locus = locusFixture({
+      locusId: 'locus-runtime-full',
+      chatId: 'oc_full',
+      parentSessionId: 'session-parent',
+      childSessionId: 'session-child',
+      executionRoot: '/Users/prgrmrwy/corp/nexus',
+      permission: { desired: 'write', effective: 'write', verifiedAt: 1, grantedBy: 'ou-owner' },
+    })
+    const snapshot = snapshotOf([locus], [locus.locusId])
+    const markup = renderToStaticMarkup(
+      createElement(LocusDetails, {
+        family: groupByWork(snapshot)[0]!.families[0]!,
+        codes: collectHandleCodes(snapshot),
+        busy: false,
+        busyKey: undefined,
+        onAction: () => undefined,
+      }),
+    )
+
+    expect(markup).toContain('可写（完全访问）')
+    expect(markup).toContain('该入口成员共享整机写权限')
+    expect(markup).toContain('不再受目录范围限制')
+  })
+
+  it('presents the execution root as context, not as an escalation gate', () => {
+    const markup = ownerMarkup({ executionRoot: '/Users/prgrmrwy/corp/nexus' })
+
+    expect(markup).toContain('上下文事实')
+    expect(markup).toContain('不门控提权')
+    // The old wording told the owner escalation was blocked on this; it is not.
+    expect(markup).not.toContain('提权到可写需要先有可确认的执行根')
+  })
+
   it('says why nothing can be confirmed when the Host resolved no root', () => {
     const markup = ownerMarkup({})
 
