@@ -33,6 +33,10 @@ export const REAL_ID_SHAPES = {
   messageId: 'om_x000000000000001',
   /** A second message in the same thread, for FIFO ordering assertions. */
   nextMessageId: 'om_x000000000000002',
+  /** A third message id: the one a timeline quote points at. */
+  quotedMessageId: 'om_x000000000000003',
+  /** A fourth message id: a reply posted inside a topic. */
+  topicReplyMessageId: 'om_x000000000000004',
   /** Open id: `ou_` + 32 hex. */
   senderOpenId: 'ou_00000000000000000000000000000001',
   /** The Pet bot's own open id, which must never be treated as a sender. */
@@ -42,15 +46,25 @@ export const REAL_ID_SHAPES = {
 /**
  * A group-level mention, the shape that opens a group locus.
  * Structural fact: no `thread_id`, and `parent_id`/`root_id` are absent.
+ *
+ * Field names follow the CONSUMER contract, not the raw OAPI payload:
+ * `lark-cli` flattens the V2 envelope for this key, so facts sit at the top
+ * level, the sender is `sender_id` (open_id only, no name), `mentions[].id` is
+ * the open_id STRING, and `.content` is PRE-RENDERED text for `text`/`post`
+ * (mentions already resolved to display names) rather than the raw JSON body.
+ * A fixture written from the raw payload passes prefix validators while
+ * describing an event the consumer never emits.
  */
 export const REAL_GROUP_MENTION = {
+  type: 'im.message.receive_v1',
   message_id: REAL_ID_SHAPES.messageId,
   chat_id: REAL_ID_SHAPES.groupChatId,
   chat_type: 'group',
   message_type: 'text',
-  sender_open_id: REAL_ID_SHAPES.senderOpenId,
-  mentions: [{ key: '@_user_1', id: { open_id: REAL_ID_SHAPES.botOpenId } }],
-  content: '{"text":"@_user_1 <redacted>"}',
+  sender_id: REAL_ID_SHAPES.senderOpenId,
+  sender_type: 'user',
+  mentions: [{ key: '@_user_1', name: '<redacted>', id: REAL_ID_SHAPES.botOpenId }],
+  content: '@<redacted bot name> <redacted>',
 } as const
 
 /**
@@ -63,6 +77,68 @@ export const REAL_TOPIC_MENTION = {
   ...REAL_GROUP_MENTION,
   message_id: REAL_ID_SHAPES.nextMessageId,
   thread_id: REAL_ID_SHAPES.threadId,
+} as const
+
+/**
+ * A QUOTE/REPLY on a regular group's timeline — the shape measured on
+ * 2026-09-16 (see `docs/notes/dsh-plugin-integration-pitfalls.md`).
+ *
+ * Structural facts, all measured on the live tenant:
+ * - the group is `chat_mode: group` (NOT a topic group);
+ * - quoting a message sets BOTH `root_id` and `parent_id` to the quoted
+ *   message id and sets NO `thread_id`;
+ * - messages inside a topic DO carry `thread_id` (see REAL_TOPIC_MENTION), and
+ *   the tenant's own thread listing showed the quoted message is not in that
+ *   topic — it is a chat-timeline message that happens to reference another.
+ *
+ * The consumer's `reply_to` is the platform's direct parent (`parent_id`); the
+ * two are equal here because this message replies straight to the quoted one.
+ * `REAL_CHAINED_GROUP_REPLY` is the other measured variant — a reply to the
+ * second message of a reply chain, where `root_id` is the chain root and
+ * `reply_to` the direct parent (different ids, still no `thread_id`).
+ */
+export const REAL_QUOTED_GROUP_MENTION = {
+  ...REAL_GROUP_MENTION,
+  message_id: REAL_ID_SHAPES.nextMessageId,
+  root_id: REAL_ID_SHAPES.quotedMessageId,
+  reply_to: REAL_ID_SHAPES.quotedMessageId,
+} as const
+
+/** A reply deeper in a chat-timeline reply chain: root and parent differ. */
+export const REAL_CHAINED_GROUP_REPLY = {
+  ...REAL_GROUP_MENTION,
+  message_id: REAL_ID_SHAPES.nextMessageId,
+  root_id: REAL_ID_SHAPES.quotedMessageId,
+  reply_to: REAL_ID_SHAPES.messageId,
+} as const
+
+/**
+ * The same quote carrying an unusable reply id (leading space).
+ *
+ * The consumer normalizes transport strings, so this is a MALFORMED-event
+ * sample rather than an observed one: it pins the rule that a corrupted
+ * OPTIONAL context fact must not be able to drop an otherwise valid request.
+ */
+export const REAL_QUOTED_GROUP_MENTION_WITH_BAD_REPLY = {
+  ...REAL_QUOTED_GROUP_MENTION,
+  reply_to: ` ${REAL_ID_SHAPES.quotedMessageId}`,
+} as const
+
+/**
+ * A reply INSIDE a topic, the counterpart that must stay on the topic entry.
+ *
+ * Measured via the Delivery the Host durably recorded for such a message: the
+ * event carried both `thread_id` (the topic) and `root_id` (that topic's root
+ * message), which is exactly why `thread_id` — not `root_id` — decides the
+ * entry, and why `root_id` may be recorded as the topic's root message here.
+ * `reply_to` equals the root because this is the topic's first reply (the
+ * tenant's thread listing shows it at `thread_position: 0`).
+ */
+export const REAL_TOPIC_REPLY_MENTION = {
+  ...REAL_TOPIC_MENTION,
+  message_id: REAL_ID_SHAPES.topicReplyMessageId,
+  root_id: REAL_ID_SHAPES.messageId,
+  reply_to: REAL_ID_SHAPES.messageId,
 } as const
 
 /**

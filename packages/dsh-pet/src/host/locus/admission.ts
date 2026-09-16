@@ -24,7 +24,6 @@ export interface LocusEndpoint {
 export type EndpointRefusal =
   | 'invalid-chat'
   | 'invalid-thread'
-  | 'ambiguous-thread'
 
 /** Result of extracting a Locus address from one inbound event. */
 export type EndpointExtraction =
@@ -154,7 +153,6 @@ export type LocusAdmissionRefusal =
   | 'not-a-message'
   | 'missing-message-id'
   | 'invalid-endpoint'
-  | 'ambiguous-thread'
   | 'bot-sender'
   | 'not-allowed-sender'
   | 'no-mention'
@@ -244,13 +242,19 @@ function normalizeId(value: unknown): string | undefined {
 /**
  * Extract the exact Locus endpoint represented by an event.
  *
- * `thread_id` is authoritative when present.  `root_id` is inspected only as
- * evidence that a thread may exist: it is a message id, not a stable topic id,
- * so an event that has a root/reply fact but no canonical `thread_id` is
- * ambiguous and MUST NOT be silently treated as the chat-level endpoint.  A
- * normal event containing both a stable `thread_id` and a different root
- * message id is not ambiguous: the stable thread id wins and the root is merely
- * message context.
+ * The platform's `thread_id` is the ONLY proof of thread membership, and it is
+ * therefore the only fact that may put an event on a topic endpoint.  `root_id`
+ * and `reply_to` are MESSAGE-level reply/quote facts: in a regular group a
+ * quote carries both (equal to the quoted message id) while `thread_id` is
+ * absent, and a reply inside a topic carries `thread_id` as well.  Reading them
+ * as thread evidence used to refuse every quoted group message as
+ * `ambiguous-thread`, which silently dropped the most common way a person asks
+ * the bot something.  They must not derive, change, or veto an endpoint.
+ *
+ * Unusable values are handled by kind rather than by convenience: a corrupted
+ * `thread_id` is a corrupted IDENTITY fact, so the event fails closed; a
+ * corrupted `root_id`/`reply_to` is a missing optional CONTEXT fact, so only
+ * that fact is dropped and the message is still addressed normally.
  */
 export function extractLocusEndpoint(event: LarkInboundEvent): EndpointExtraction {
   const chatId = normalizeId(event.chat_id)
@@ -258,16 +262,6 @@ export function extractLocusEndpoint(event: LarkInboundEvent): EndpointExtractio
 
   const threadId = event.thread_id === undefined ? undefined : normalizeId(event.thread_id)
   if (event.thread_id !== undefined && event.thread_id !== '' && threadId === undefined) {
-    return { ok: false, reason: 'invalid-thread' }
-  }
-
-  const rootId = event.root_id === undefined ? undefined : normalizeId(event.root_id)
-  if (event.root_id !== undefined && event.root_id !== '' && rootId === undefined) {
-    return { ok: false, reason: 'invalid-thread' }
-  }
-
-  const replyTo = event.reply_to === undefined ? undefined : normalizeId(event.reply_to)
-  if (event.reply_to !== undefined && event.reply_to !== '' && replyTo === undefined) {
     return { ok: false, reason: 'invalid-thread' }
   }
 
@@ -280,13 +274,6 @@ export function extractLocusEndpoint(event: LarkInboundEvent): EndpointExtractio
         key: locusEndpointKey(chatId, threadId),
       },
     }
-  }
-
-  // Without the canonical thread id, two different message-root candidates do
-  // not prove one stable topic.  Refusing here prevents a reply in topic A
-  // from being sent to the chat-level locus or topic B.
-  if (rootId !== undefined || replyTo !== undefined) {
-    return { ok: false, reason: 'ambiguous-thread' }
   }
 
   return { ok: true, endpoint: { chatId, key: locusEndpointKey(chatId) } }
@@ -450,10 +437,7 @@ export function admitLocusEvent(
 
   const extracted = extractLocusEndpoint(event)
   if (!extracted.ok) {
-    return {
-      admit: false,
-      reason: extracted.reason === 'ambiguous-thread' ? 'ambiguous-thread' : 'invalid-endpoint',
-    }
+    return { admit: false, reason: 'invalid-endpoint' }
   }
   const endpoint = extracted.endpoint
 

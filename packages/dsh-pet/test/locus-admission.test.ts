@@ -128,21 +128,32 @@ describe('Locus endpoint extraction', () => {
     expect(topic.ok && chat.ok && topic.endpoint.key).not.toBe(chat.ok && chat.endpoint.key)
   })
 
-  it('fails closed when only root_id or reply_to is available', () => {
+  // A quote/reply on a regular group's timeline sets `root_id`/`reply_to` to
+  // the quoted message and sets NO `thread_id` (measured 2026-09-16). Those are
+  // message-level facts, so such a message still belongs to the CHAT entry;
+  // reading them as thread evidence is what silently dropped every quoted
+  // question.
+  it('keeps a quoted group message on the chat entry', () => {
     expect(extractLocusEndpoint(groupEvent({ root_id: ROOT }))).toEqual({
-      ok: false,
-      reason: 'ambiguous-thread',
+      ok: true,
+      endpoint: { chatId: GROUP, key: locusEndpointKey(GROUP) },
     })
     expect(extractLocusEndpoint(groupEvent({ reply_to: 'om_reply_without_thread' }))).toEqual({
-      ok: false,
-      reason: 'ambiguous-thread',
+      ok: true,
+      endpoint: { chatId: GROUP, key: locusEndpointKey(GROUP) },
     })
   })
 
-  it('refuses conflicting fallback thread facts', () => {
+  it('keeps a chained timeline reply on the chat entry when root and parent differ', () => {
     expect(
       extractLocusEndpoint(groupEvent({ root_id: ROOT, reply_to: 'om_other_root' })),
-    ).toEqual({ ok: false, reason: 'ambiguous-thread' })
+    ).toEqual({ ok: true, endpoint: { chatId: GROUP, key: locusEndpointKey(GROUP) } })
+  })
+
+  it('drops an unusable optional reply fact instead of the whole message', () => {
+    expect(
+      extractLocusEndpoint(groupEvent({ root_id: ROOT, reply_to: ' om_bad' })),
+    ).toEqual({ ok: true, endpoint: { chatId: GROUP, key: locusEndpointKey(GROUP) } })
   })
 
   it('does not let an incidental root message override a canonical thread id', () => {

@@ -289,6 +289,52 @@ record['verified']      !== true         // ✅
 
 ---
 
+## 8. 引用消息的字段形态必须实测：`root_id`/`parent_id` 不是 thread 证据
+
+### 现象
+
+群里「引用一条消息 + @bot」提问完全没有反应：飞书侧不打表情、不回复，
+`dsh.log` 只有一行 `admission-rejected:ambiguous-thread`（该原因在
+`channel/service.ts` 的低基数词表里归入 `other`，所以旧日志只显示
+`inbound ignored: other`）。同一个群里直接在话题里 @bot 则一切正常。
+
+### 根因
+
+准入把**消息级引用事实**当成了**入口身份证据**：
+`extractLocusEndpoint` 见到 `root_id`/`reply_to` 而没有 `thread_id` 就拒绝。
+实测（2026-09-16，真实租户，bot 身份读原始消息字段）：
+
+| 场景 | `thread_id` | `root_id` | `parent_id` |
+| --- | --- | --- | --- |
+| 群时间线普通发言 | 无 | 无 | 无 |
+| **群时间线引用某条消息发言** | **无** | **= 被引用消息** | **= 被引用消息** |
+| 群时间线回复引用链中的第二条 | 无 | 引用链根 | 直接父消息 |
+| 话题内发言 / 话题根 | `omt_*` | 无或话题根 | 无或直接父 |
+
+也就是说：**普通群（`chat_mode: group`）里引用别人的消息，平台固定给
+`root_id`/`parent_id` 而不给 `thread_id`**；只有话题内消息才带 `thread_id`。
+按「有 root 无 thread 就是丢了字段的话题消息」推断，会把最常见的提问方式
+全部判成畸形事件。
+
+### 规则
+
+1. **入口身份只认平台规范字段**。`thread_id` 是入口级稳定身份；
+   `root_id`/`parent_id` 是消息级引用关系，二者不可互换。用 messageId 去
+   否决入口，等于把它提升为入口键（`design.md` 早已写明 messageId 属于投递）。
+2. **区分身份事实与可选事实的失败方式**。身份事实（`chat_id`、`thread_id`）
+   不可归一化时 fail closed；可选上下文事实（`root_id`、`reply_to`）不可用时
+   只丢该事实，**不得**因此丢掉整条消息——本次故障正是「可选事实有否决权」。
+3. **反证要在同一租户上用平台事实做**。本轮判定「它不是话题消息」靠的不是
+   推理，而是话题消息列表里没有它、且列表内每条都带 `thread_id`。
+4. **替身必须照抄消费端契约**。`lark-cli event consume` 对
+   `im.message.receive_v1` 做了扁平化与预处理：字段在顶层、发送者是
+   `sender_id`（仅 open_id）、`mentions[].id` 是 open_id 字符串、`.content`
+   对 `text`/`post` 是**已渲染文本**（不是原始 OAPI JSON）。原先的样例写的是
+   原始 payload（`sender_open_id`、`mentions[].id.open_id`、JSON 字符串
+   content），能通过前缀校验却描述了一个消费端从不发出的事件。
+
+---
+
 ## `ctx.inject()` 的回调是异步的，不能紧跟同步断言
 
 ### 现象

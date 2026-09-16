@@ -640,11 +640,19 @@ function messageFromAdmission(
     chatId: decision.endpoint.chatId,
     ...(decision.endpoint.threadId !== undefined ? { threadId: decision.endpoint.threadId } : {}),
   }
+  // `root_id` is a THREAD fact only where a thread exists: inside a topic it is
+  // that topic's root message.  On the chat timeline a quoted message also sets
+  // `root_id`, but there it is the root of a reply chain — not a thread root —
+  // so recording it would both mislabel the Delivery and make the child prompt
+  // claim a thread that does not exist.  The quoted message itself still travels
+  // as `replyToMessageId`.
   const replyTarget: LocusReplyTarget = {
     chatId: endpoint.chatId,
     messageId: event.messageId,
     ...(endpoint.threadId !== undefined ? { threadId: endpoint.threadId } : {}),
-    ...(event.rootId !== undefined ? { rootMessageId: event.rootId } : {}),
+    ...(endpoint.threadId !== undefined && event.rootId !== undefined
+      ? { rootMessageId: event.rootId }
+      : {}),
   }
   if (!isSafeLocusReplyTarget(endpoint, replyTarget)) return undefined
   return {
