@@ -304,7 +304,10 @@ async function initialize(
   // has had a chance to prove a live turn or safely compensate owned resources.
   // Shared by scoped locus replies, control receipts, and channel probes. It is
   // fixed to the dsh-pet profile and bot identity by the Lark adapter.
-  const larkClient = createLarkCliClient()
+  // Pet's namespaced logger is passed through so fail-soft channel
+  // degradations (mention rendering, member reads) are greppable in dsh.log
+  // instead of silent.
+  const larkClient = createLarkCliClient(undefined, undefined, petLog)
   let currentLocusTurnProof: (childSessionId: string) =>
     | { readonly executionId: string; readonly turnId: string }
     | undefined = () => undefined

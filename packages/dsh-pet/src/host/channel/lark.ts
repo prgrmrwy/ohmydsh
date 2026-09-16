@@ -17,6 +17,7 @@ import { promisify } from 'node:util'
 import { PET_CLI_PROFILE, petCliArgs } from './cli.js'
 import type { LocusLarkPort } from '../locus/controller.js'
 import type { LocusReplyTarget } from '../locus/context.js'
+import { hasMentionCandidate, renderMentions, type MentionMember } from './mentions.js'
 
 const run = promisify(execFile)
 
@@ -207,6 +208,17 @@ export interface LarkClient {
    */
   memberCount(chatId: string): Promise<number | undefined>
   /**
+   * Read the human members of one chat, for mention rendering.
+   *
+   * Same command and same bot identity as {@link memberCount}: the mapping from
+   * a display name to an open id only exists inside the chat, and resolving it
+   * anywhere else (tenant-wide search, user identity) would both widen the read
+   * surface and break the outbound-identity rule.
+   * @param chatId - Target chat.
+   * @returns members, or `undefined` when they cannot be read.
+   */
+  listChatMembers?(chatId: string): Promise<readonly MentionMember[] | undefined>
+  /**
    * Send a standalone message to a chat as the bot.
    *
    * Distinct from {@link reply}: a notice about an invalidated QA binding has
@@ -219,6 +231,9 @@ export interface LarkClient {
 
 /** How long any single lark-cli call may take. */
 const CALL_TIMEOUT_MS = 20_000
+
+/** How long one chat's member list is reused for mention rendering. */
+const MEMBER_CACHE_TTL_MS = 5 * 60_000
 
 interface CliJsonResult {
   readonly ok: boolean
@@ -504,12 +519,81 @@ export function permissionDiagnostic(value: unknown): LarkPermissionDiagnostic |
  * decoration around work that has already been accepted, so a Lark outage
  * degrades presentation instead of dropping the user's request.
  * @param binary - lark-cli executable, overridable for tests.
+ * @param runner - process runner, overridable for tests.
+ * @param log - operator diagnostic sink for fail-soft degradations.
  * @returns the client.
  */
 export function createLarkCliClient(
   binary = 'lark-cli',
   runner: LarkCliRunner = run as unknown as LarkCliRunner,
+  /**
+   * Operator diagnostic sink. Optional so every existing caller keeps its
+   * behaviour; index.ts passes Pet's namespaced logger. Messages must stay
+   * low-cardinality — never a member name, open id, chat id or body.
+   */
+  log: (message: string) => void = () => {},
 ): LarkClient {
+  /**
+   * Read one chat's human members, cached briefly per chat.
+   *
+   * The member list is what makes mention rendering exact, and it changes
+   * rarely; a short TTL keeps the extra call off the common path without
+   * letting the mapping go stale for long. Any failure resolves to `undefined`
+   * so callers degrade instead of blocking on a read they do not require.
+   */
+  const memberCache = new Map<string, { readonly at: number; readonly members: readonly MentionMember[] }>()
+  async function memberList(chatId: string): Promise<readonly MentionMember[] | undefined> {
+    const cached = memberCache.get(chatId)
+    const now = Date.now()
+    if (cached !== undefined && now - cached.at < MEMBER_CACHE_TTL_MS) return cached.members
+    const data = await callCli(
+      ['im', '+chat-members-list', '--as', 'bot', '--chat-id', chatId, '--member-types', 'user', '--page-all'],
+      binary,
+      runner,
+    )
+    const users = (data as { users?: unknown } | undefined)?.users
+    if (!Array.isArray(users)) return undefined
+    const members: MentionMember[] = []
+    for (const entry of users) {
+      if (typeof entry !== 'object' || entry === null) continue
+      const record = entry as { member_id?: unknown; name?: unknown }
+      if (typeof record.member_id !== 'string' || typeof record.name !== 'string') continue
+      if (record.member_id.trim() === '' || record.name.trim() === '') continue
+      members.push({ openId: record.member_id.trim(), name: record.name.trim() })
+    }
+    memberCache.set(chatId, { at: now, members })
+    return members
+  }
+
+  /**
+   * Turn the agent's `@display-name` references into real mentions.
+   *
+   * Fail-soft on purpose: rendering is an enhancement, and a member-list read
+   * that fails must not cost the user their answer. Diagnostics stay
+   * low-cardinality — a count and a reason class, never a name or open id.
+   */
+  async function renderReplyMentions(chatId: string, text: string): Promise<string> {
+    if (!hasMentionCandidate(text)) return text
+    try {
+      const members = await memberList(chatId)
+      if (members === undefined) {
+        log('lark reply mentions: member list unavailable; sending text unchanged')
+        return text
+      }
+      const rendered = renderMentions(text, members)
+      if (rendered.rendered === 0) {
+        if (rendered.skipped !== undefined) {
+          log(`lark reply mentions: unchanged (${rendered.skipped})`)
+        }
+        return text
+      }
+      log(`lark reply mentions: rendered ${String(rendered.rendered)}`)
+      return rendered.text
+    } catch {
+      log('lark reply mentions: rendering failed; sending text unchanged')
+      return text
+    }
+  }
   return {
     async cliVersion() {
       try {
@@ -736,7 +820,7 @@ export function createLarkCliClient(
         requireInput(target.messageId, 'reply target message id'),
         'reply target',
       )
-      const replyText = requireInput(text, 'reply text')
+      const replyText = await renderReplyMentions(targetChatId, requireInput(text, 'reply text'))
       const args = [
         'im',
         '+messages-reply',
@@ -787,13 +871,12 @@ export function createLarkCliClient(
     },
 
     async memberCount(chatId) {
-      const data = await callCli(
-        ['im', '+chat-members-list', '--as', 'bot', '--chat-id', chatId, '--page-all'],
-        binary,
-        runner,
-      )
-      const users = (data as { users?: unknown } | undefined)?.users
-      return Array.isArray(users) ? users.length : undefined
+      const members = await memberList(chatId)
+      return members === undefined ? undefined : members.length
+    },
+
+    async listChatMembers(chatId) {
+      return memberList(chatId)
     },
 
     async sendToChat(chatId, text) {
@@ -804,6 +887,7 @@ export function createLarkCliClient(
       )
     },
   }
+
 }
 
 /**

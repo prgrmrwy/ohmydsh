@@ -104,6 +104,21 @@ describe('unified locus delivery context', () => {
     expect(renderLocusPrompt(context)).toBe(renderLocusDeliveryPrompt(context))
   })
 
+  it('states the platform mention contract in both delivery variants', () => {
+    // Inbound text pre-renders mentions to display names, so an agent that
+    // copies that form writes plain text and nobody is notified. The prompt has
+    // to state the outbound rule (and that the Host renders whole display
+    // names), or the asymmetry is invisible to the model.
+    const first = renderLocusDeliveryPrompt(deliveryContext())
+    const subsequent = renderLocusDeliveryPrompt(deliveryContext(), { position: 'subsequent' })
+
+    for (const prompt of [first, subsequent]) {
+      expect(prompt).toContain('@对方显示名')
+      expect(prompt).toContain('<at user_id="ou_…">')
+      expect(prompt).toContain('渲染成真实提醒')
+    }
+  })
+
   it('does not flatten history or invent a parent summary', () => {
     const context = deliveryContext({
       request: {

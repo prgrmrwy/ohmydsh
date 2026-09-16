@@ -343,6 +343,7 @@ export function renderLocusDeliveryPrompt(
     '### Reply target (current delivery only)',
     ...replyTargetLines(context.endpoint, context.request.replyTarget),
     '业务完成必须调用当前 child 的 `pet_locus_finish`：选择 `reply` 并提供非空正文，或选择 `no-reply` 并提供非空原因。普通 assistant 文本、原生 `send_message` 和 `turn/end` 都不完成 Delivery；不得提供 delivery/chat/message/thread target selector。若仍需等待，调用 `pet_locus_wait({ waitMinutes, reason? })`，分钟数相对调用时刻且受 Host 返回的 acceptedAt+24h 硬上限约束。',
+    '正文会作为飞书文本消息发出，因此群内 @ 人直接写 `@对方显示名` 即可，Host 会在发送前把它渲染成真实提醒（对方会收到通知）；只有当你用的是别名/备注名、而群里显示名不同时，才需要自己写 `<at user_id="ou_…">显示名</at>`（@所有人是 `<at user_id="all"></at>`）。注意入站正文里的 `@名字` 是平台预渲染的结果，出站照抄不会产生提醒。',
     '',
     '### 按需读取',
     '本次 prompt 刻意不携带压平的聊天记录、项目资料、兄弟 child 历史或父会话摘要。需要的资料请通过当前已授权的读取能力按需读取原始内容；收到资料不等于已采纳。',
@@ -389,6 +390,7 @@ function renderSubsequentDeliveryPrompt(context: LocusDeliveryContext): string {
     '### Reply target (current delivery only)',
     ...replyTargetLines(context.endpoint, context.request.replyTarget),
     '业务完成必须调用当前 child 的 `pet_locus_finish`：选择 `reply` 并提供非空正文，或选择 `no-reply` 并提供非空原因。普通 assistant 文本、原生 `send_message` 和 `turn/end` 都不完成 Delivery；不得提供 delivery/chat/message/thread target selector。若仍需等待，调用 `pet_locus_wait({ waitMinutes, reason? })`，分钟数相对调用时刻且受 Host 返回的 acceptedAt+24h 硬上限约束。',
+    '正文会作为飞书文本消息发出，因此群内 @ 人直接写 `@对方显示名` 即可，Host 会在发送前把它渲染成真实提醒（对方会收到通知）；只有当你用的是别名/备注名、而群里显示名不同时，才需要自己写 `<at user_id="ou_…">显示名</at>`（@所有人是 `<at user_id="all"></at>`）。注意入站正文里的 `@名字` 是平台预渲染的结果，出站照抄不会产生提醒。',
   ]
   return lines.join('\n')
 }
