@@ -25,6 +25,7 @@
  */
 
 import type {
+  PetLocusConfirmAnchorAction,
   PetLocusChildSessionView,
   PetLocusEndpointView,
   PetLocusMainSessionView,
@@ -1007,5 +1008,71 @@ export function collectHandleCodes(snapshot: PetLocusManagementView): HandleCode
     session: assignHandleCodes(sessionIds, 'session'),
     endpoint: assignHandleCodes(endpointIds, 'endpoint'),
     workspace: assignHandleCodes(workspaceIds, 'workspace'),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Execution-root confirmation
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether the owner still has to confirm an execution root for this locus.
+ *
+ * Keyed on the ROOT, not on the anchor's status. An anchor can be `confirmed`
+ * while carrying no `executionRoot` (confirming context facts is a separate
+ * act), and the write gate needs the root specifically — so hiding the action
+ * on `status === 'confirmed'` removed the only way to ever supply it.
+ *
+ * @param locus - One locus view from the Host snapshot.
+ * @returns true while a root still has to be confirmed.
+ */
+export function locusNeedsExecutionRoot(locus: PetLocusView): boolean {
+  const confirmed = locus.contextAnchor?.executionRoot?.trim()
+  return confirmed === undefined || confirmed === ''
+}
+
+/**
+ * The execution root the owner may confirm: the Host's own resolved candidate.
+ *
+ * Never invented here. An absent candidate means the action is unavailable and
+ * says why, rather than recording a path nobody proved.
+ *
+ * @param locus - One locus view from the Host snapshot.
+ * @returns the candidate path, or `undefined` when the Host resolved none.
+ */
+export function locusConfirmCandidate(locus: PetLocusView): string | undefined {
+  const candidate = locus.workspace.executionRoot?.trim()
+  return candidate === undefined || candidate === '' ? undefined : candidate
+}
+
+/**
+ * The one anchor-confirmation payload for a locus.
+ *
+ * Built here, as a pure function of the view, so the execution root cannot be
+ * dropped by a component edit without failing a test: the previous inline
+ * literal in the surface sent the fence plus two empty arrays and no root at
+ * all, which marked the anchor confirmed while satisfying neither half of the
+ * write gate. The candidate is carried as INTENT only — authority is still
+ * derived per verification against the live sandbox root.
+ *
+ * @param locus - One locus view from the Host snapshot.
+ * @returns the `confirm-anchor` request body.
+ */
+export function locusAnchorConfirmRequest(locus: PetLocusView): PetLocusConfirmAnchorAction {
+  const candidate = locusConfirmCandidate(locus)
+  return {
+    action: 'confirm-anchor',
+    locusId: locus.locusId,
+    expectedGeneration: locus.generation,
+    expectedLocusId: locus.locusId,
+    expectedUpdatedAt: locus.state.updatedAt,
+    endpoint: {
+      chatId: locus.endpoint.chatId,
+      ...(locus.endpoint.threadId === undefined ? {} : { threadId: locus.endpoint.threadId }),
+    },
+    projectResources: [],
+    constraints: [],
+    existence: 'unknown',
+    ...(candidate === undefined ? {} : { executionRoot: candidate }),
   }
 }

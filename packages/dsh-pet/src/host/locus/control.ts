@@ -21,6 +21,7 @@ import {
   type EnsureTopicResult,
   type LocusEndpoint,
 } from './controller.js'
+import { LocusPermissionMutationError } from './permission-mutation.js'
 
 export const MIN_LOCUS_BIND_PREFIX_LENGTH = 6
 export const LOCUS_BIND_UNRESOLVED_TEXT =
@@ -160,7 +161,52 @@ function safeControlError(error: unknown): LocusControlDispatchResult {
   if (error instanceof LocusControllerError && error.code === 'PARENT_NOT_ALLOWED') {
     return failure('prefix-unresolved', LOCUS_BIND_UNRESOLVED_TEXT)
   }
+  if (error instanceof LocusPermissionMutationError) {
+    return permissionFailure(error)
+  }
   return failure('control-failed', '控制命令执行失败，请稍后重试。')
+}
+
+/**
+ * Report WHY a permission change did not take effect.
+ *
+ * A blanket "try again later" is wrong for every one of these: the refusal is a
+ * deterministic fact (the owner never confirmed an execution root, the
+ * confirmed root is not the one the live sandbox grants, the child cannot be
+ * resolved). The owner retries, nothing changes, and the actual reason stays
+ * locked inside the management surface they were not looking at. The
+ * verification diagnostics are already owner-facing Chinese sentences and carry
+ * no path, session id or credential, so they are passed through verbatim.
+ */
+function permissionFailure(error: LocusPermissionMutationError): LocusControlDispatchResult {
+  switch (error.code) {
+    case 'WRITE_UNSUPPORTED':
+      // The diagnostic already distinguishes "no confirmed root" from "the
+      // confirmed root is not what the sandbox grants"; it only lacked the
+      // place to act on it.
+      return failure(
+        'write-unsupported',
+        `${error.message} 可在 Pet 设置页「Locus 管理」里确认执行根后重试。`,
+      )
+    case 'CHILD_SESSION_UNAVAILABLE':
+      return failure('child-unavailable', '无法解析当前入口的子会话，权限未修改。')
+    case 'POLICY_APPLY_FAILED':
+      return failure('policy-apply-failed', '宿主拒绝应用该文件权限，权限未修改。')
+    case 'POLICY_VERIFY_FAILED':
+      return failure('policy-verify-failed', '无法从宿主回读该入口的实际文件策略，权限未修改。')
+    case 'PERSISTENCE_FAILED':
+      return failure('persistence-failed', '权限未持久化，已尝试恢复原策略；请稍后重试。')
+    case 'POLICY_ROLLBACK_FAILED':
+      return failure('rollback-failed', '权限变更失败且原策略无法恢复，该入口已暂停，需要人工核验。')
+    case 'LOCUS_NOT_CURRENT':
+      return failure('not-current', '当前入口的代际已变化，请刷新后重试。')
+    case 'LOCUS_NOT_FOUND':
+      return failure('not-found', '当前入口不存在或已失效。')
+    case 'LOCUS_INVALID':
+      return failure('invalid', '当前入口不可服务或缺少专属子会话，权限未修改。')
+    case 'LOCUS_BUSY':
+      return failure('busy', '当前入口仍有执行中或排队消息，请稍后重试。')
+  }
 }
 
 function bindReceipt(

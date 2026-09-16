@@ -6,6 +6,7 @@ import {
   resolveLocusBindPrefix,
   type LocusBindableSession,
 } from '../src/host/locus/control.js'
+import { LocusPermissionMutationError } from '../src/host/locus/permission-mutation.js'
 
 const ENDPOINT = { chatId: 'oc-project', key: 'oc-project' } as const
 const OWNER = 'ou-owner'
@@ -239,5 +240,69 @@ describe('unified locus command dispatcher', () => {
     })
     await expect(dispatcher.dispatch({ command: { kind: 'unbind' }, endpoint: ENDPOINT, senderId: OWNER }))
       .resolves.toEqual({ ok: false, reason: 'busy', text: '当前入口仍有执行中或排队消息，请稍后重试。' })
+  })
+
+  it('reports the real reason a write grant was refused, not a retry hint', async () => {
+    // The live failure: the owner got 「控制命令执行失败，请稍后重试。」 for a
+    // deterministic refusal (no owner-confirmed execution root), so retrying
+    // could never help and the reason stayed hidden in another surface.
+    const dispatcher = createLocusControlDispatcher({
+      allowOpenIds: () => [OWNER],
+      listSessions: () => [],
+      bind: { bind: vi.fn() },
+      exit: { unbindCurrent: vi.fn() },
+      scope: {
+        setCurrentMode: async () => {
+          throw new LocusPermissionMutationError(
+            'WRITE_UNSUPPORTED',
+            '缺少所有者已确认的 execution root；请先确认上下文锚点再提权。 已维持原 effective/read，未扩大权限。',
+          )
+        },
+      },
+    })
+
+    const result = await dispatcher.dispatch({
+      command: { kind: 'scope', mode: 'write' },
+      endpoint: ENDPOINT,
+      senderId: OWNER,
+    })
+
+    expect(result).toMatchObject({ ok: false, reason: 'write-unsupported' })
+    expect(result.ok === false && result.text).toContain('缺少所有者已确认的 execution root')
+    expect(result.ok === false && result.text).toContain('Locus 管理')
+    expect(result.ok === false && result.text).not.toContain('请稍后重试')
+  })
+
+  it('keeps per-code permission failures distinguishable and secret-free', async () => {
+    const dispatchWith = async (error: unknown) => {
+      const dispatcher = createLocusControlDispatcher({
+        allowOpenIds: () => [OWNER],
+        listSessions: () => [],
+        bind: { bind: vi.fn() },
+        exit: { unbindCurrent: vi.fn() },
+        scope: { setCurrentMode: async () => { throw error } },
+      })
+      return dispatcher.dispatch({
+        command: { kind: 'scope', mode: 'write' },
+        endpoint: ENDPOINT,
+        senderId: OWNER,
+      })
+    }
+
+    await expect(dispatchWith(new LocusPermissionMutationError(
+      'CHILD_SESSION_UNAVAILABLE',
+      '无法解析当前 locus 的 exact child session，权限未修改。',
+    ))).resolves.toMatchObject({ ok: false, reason: 'child-unavailable' })
+    await expect(dispatchWith(new LocusPermissionMutationError(
+      'POLICY_ROLLBACK_FAILED',
+      '权限变更失败且无法恢复原 sandbox；该 locus 保持暂停，必须人工核验。',
+    ))).resolves.toMatchObject({ ok: false, reason: 'rollback-failed' })
+    // An unknown failure still degrades to the generic receipt rather than
+    // leaking an arbitrary message into a group chat.
+    await expect(dispatchWith(new Error('boom /Users/owner/private'))).resolves.toEqual({
+      ok: false,
+      reason: 'control-failed',
+      text: '控制命令执行失败，请稍后重试。',
+    })
   })
 })

@@ -22,6 +22,13 @@ interface LocusInput {
   readonly childAvailability?: 'available' | 'archived' | 'missing'
   readonly workspaceId?: string
   readonly workspaceTitle?: string
+  /**
+   * The Host-resolved execution-root CANDIDATE (the child session's own working
+   * boundary). Offered for owner confirmation; never an authorization.
+   */
+  readonly executionRoot?: string
+  /** Already-confirmed anchor facts, when the owner confirmed some of them. */
+  readonly contextAnchor?: PetLocusView['contextAnchor']
   readonly state?: PetLocusState
   readonly source?: PetLocusSource
   readonly parentLocusId?: string
@@ -53,10 +60,12 @@ export function locusFixture(input: LocusInput): PetLocusView {
     workspace: {
       workspaceId: input.workspaceId ?? 'd5d2ebd5-7296-42c9-a34a-16753deb417b',
       ...(input.workspaceTitle === undefined ? {} : { title: input.workspaceTitle }),
+      ...(input.executionRoot === undefined ? {} : { executionRoot: input.executionRoot }),
     },
     permission: { desired: 'read', effective: 'read' },
     state: { state: input.state ?? 'active', busy: false, createdAt: 1, updatedAt: 2 },
     source,
+    ...(input.contextAnchor === undefined ? {} : { contextAnchor: input.contextAnchor }),
     ...(input.parentLocusId === undefined ? {} : { parentLocusId: input.parentLocusId }),
     isDefaultQa: input.isDefaultQa ?? false,
   }

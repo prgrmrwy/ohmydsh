@@ -2515,7 +2515,13 @@ async function initialize(
       if (typeof inspect !== 'function') return undefined
       // Keep the receiver: `inspect` is a service method that uses `this`.
       return async (sessionId: string) =>
-        await inspect.call(controller, sessionId) as { readonly events?: readonly unknown[] }
+        await inspect.call(controller, sessionId) as {
+          readonly events?: readonly unknown[]
+          // The immutable header carries `cwd` — the session's workspace-write
+          // boundary. It must reach the describer, or the owner has no
+          // confirmable execution root and a write grant is unreachable.
+          readonly meta?: { readonly cwd?: unknown }
+        }
     })(),
     archivedSessionIds: () =>
       ((ctx.workspaceRegistry.archivedSessionIds ?? []) as readonly unknown[]).map(String),
