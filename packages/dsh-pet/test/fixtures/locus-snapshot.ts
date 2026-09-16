@@ -29,6 +29,8 @@ interface LocusInput {
   readonly executionRoot?: string
   /** Already-confirmed anchor facts, when the owner confirmed some of them. */
   readonly contextAnchor?: PetLocusView['contextAnchor']
+  /** Granted permission, when the case needs a write grant. */
+  readonly permission?: PetLocusView['permission']
   readonly state?: PetLocusState
   readonly source?: PetLocusSource
   readonly parentLocusId?: string
@@ -62,7 +64,7 @@ export function locusFixture(input: LocusInput): PetLocusView {
       ...(input.workspaceTitle === undefined ? {} : { title: input.workspaceTitle }),
       ...(input.executionRoot === undefined ? {} : { executionRoot: input.executionRoot }),
     },
-    permission: { desired: 'read', effective: 'read' },
+    permission: input.permission ?? { desired: 'read', effective: 'read' },
     state: { state: input.state ?? 'active', busy: false, createdAt: 1, updatedAt: 2 },
     source,
     ...(input.contextAnchor === undefined ? {} : { contextAnchor: input.contextAnchor }),

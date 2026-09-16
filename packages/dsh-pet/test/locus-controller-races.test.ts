@@ -504,6 +504,9 @@ describe('LocusChannelController live policy gate', () => {
         withChildSession: async input => ({ ok: true as const, value: await input.operation({ id: writeLocus.childSessionId }) }),
         queueChild: queued,
       },
+      // The locus is granted `write`, which means full access: a live policy
+      // that reports anything narrower is drift, and drift must stop dispatch
+      // before any Delivery side effect (ADR-0005).
       resolveLivePolicy: () => ({ mode: 'workspace-write', workspaceRoot: '/other' }),
       invalidatePolicyDrift: ({ reason }) => { persisted.push(reason) },
       receipts: { markAccepted: marked, markSettled: vi.fn() },
@@ -512,7 +515,7 @@ describe('LocusChannelController live policy gate', () => {
     await expect(controller.handleAdmission(acceptedAdmission('message-root-drift'))).resolves.toEqual({
       kind: 'refused', reason: 'policy-drift',
     })
-    expect(persisted).toEqual([expect.stringContaining('不精确一致')])
+    expect(persisted).toEqual([expect.stringContaining('不是完全访问')])
     expect(ledger.calls).toEqual([])
     expect(queued).not.toHaveBeenCalled()
     expect(marked).not.toHaveBeenCalled()

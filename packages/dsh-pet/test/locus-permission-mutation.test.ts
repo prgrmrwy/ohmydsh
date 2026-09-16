@@ -17,9 +17,9 @@ function activeRepository() {
     childSessionId: 'session-child',
     source: 'auto',
     permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
-    // Exactly what the owner-facing confirm operation persists: confirmed
-    // intent with owner provenance and no stored authorization. Write
-    // authority is derived from live-root agreement at verification time.
+    // An anchor exactly as the owner-facing confirm operation persists it. It
+    // is a CONTEXT fact (where work belongs) and no longer participates in the
+    // write decision (ADR-0005): that is decided by the live sandbox mode.
     contextAnchor: {
       status: 'confirmed',
       authorization: 'unknown',
@@ -67,11 +67,13 @@ function harness(options: {
 }
 
 describe('locus permission mutation', () => {
-  it('applies and reads back exact child policy before persisting write', async () => {
+  it('applies full access and reads it back before persisting write', async () => {
     const { repository, mutation, apply, resolve } = harness()
     const next = await mutation.mutate({ locusId: 'locus-current', actorId: 'ou-owner', mode: 'write' })
 
-    expect(apply).toHaveBeenCalledWith({ id: 'session-child' }, 'workspace-write')
+    // `write` means full access: a child's cwd is its parent's cwd, so a
+    // directory-bounded mode could never reach the owner's worktrees.
+    expect(apply).toHaveBeenCalledWith({ id: 'session-child' }, 'danger-full-access')
     expect(resolve).toHaveBeenCalledWith({ id: 'session-child' })
     expect(next.permission).toMatchObject({ desired: 'write', effective: 'write', grantedBy: 'ou-owner', verifiedAt: 10 })
     expect(repository.getLocus('locus-current')?.permission.effective).toBe('write')
@@ -93,73 +95,65 @@ describe('locus permission mutation', () => {
     expect(repository.getLocus('locus-current')?.permission.effective).toBe('read')
   })
 
-  it('rejects unsupported write, restores read-only, and never persists desired write', async () => {
+  it('rejects write the Host does not actually grant, restoring read-only', async () => {
+    // A Host that accepts the call but reads back something narrower is the
+    // case that matters: the durable record must not claim write.
     const { repository, mutation, apply, effective } = harness({
-      afterApply: mode => mode === 'workspace-write' ? 'read-only' : mode,
+      afterApply: mode => mode === 'danger-full-access' ? 'read-only' : mode,
     })
     await expect(mutation.mutate({ locusId: 'locus-current', actorId: 'ou-owner', mode: 'write' }))
       .rejects.toMatchObject({ code: 'WRITE_UNSUPPORTED' })
 
-    expect(apply.mock.calls.map(call => call[1])).toEqual(['workspace-write', 'read-only'])
+    expect(apply.mock.calls.map(call => call[1])).toEqual(['danger-full-access', 'read-only'])
     expect(effective()).toBe('read-only')
     expect(repository.getLocus('locus-current')?.permission).toMatchObject({ desired: 'read', effective: 'read' })
   })
 
-  it.each([
-    {
-      name: 'unconfirmed root',
-      anchor: { status: 'unknown' as const, executionRoot: '/repo', provenance: 'owner:ou-owner' },
-      workspaceRoot: '/repo',
-    },
-    {
-      name: 'missing execution root',
-      anchor: { status: 'confirmed' as const, provenance: 'owner:ou-owner' },
-      workspaceRoot: '/repo',
-    },
-    {
-      name: 'owner revoked the root',
-      anchor: { status: 'confirmed' as const, authorization: 'unauthorized' as const, executionRoot: '/repo', provenance: 'owner:ou-owner' },
-      workspaceRoot: '/repo',
-    },
-    {
-      name: 'canonical root mismatch',
-      anchor: { status: 'confirmed' as const, executionRoot: '/repo', provenance: 'owner:ou-owner' },
-      workspaceRoot: '/repo-sibling',
-    },
-    {
-      name: 'live sandbox reports no workspace root',
-      anchor: { status: 'confirmed' as const, executionRoot: '/repo', provenance: 'owner:ou-owner' },
-      workspaceRoot: undefined,
-    },
-  ])('rejects write for $name and rolls the live policy back to read', async ({ anchor, workspaceRoot }) => {
-    const repository = new LocusRepository()
-    repository.ensureLocus({
-      id: 'locus-current', endpoint: { chatId: 'oc_scope' }, workspaceId: 'workspace-a',
-      parentSessionId: 'session-parent', childSessionId: 'session-child', source: 'auto',
-      permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
-      contextAnchor: anchor, state: 'active', createdAt: 1,
-    })
-    let effective = 'read-only'
-    const apply = vi.fn((_session: { id: string }, mode: string) => { effective = mode })
-    const mutation = createLocusPermissionMutation({
-      repository: {
-        getLocus: id => repository.getLocus(id),
-        getCurrentLocus: endpoint => repository.getCurrent(endpoint),
-        getLocusByChild: child => repository.getLocusByChild(child),
-        beginPermissionMutation: (id, now) => repository.beginPermissionMutation(id, now),
-        abortPermissionMutation: (id, now) => repository.abortPermissionMutation(id, now),
-        commitPermissionMutation: (id, permission, now) => repository.commitPermissionMutation(id, permission, now),
+  it('grants write whatever the anchor says, because the anchor is context', async () => {
+    // Before ADR-0005 this decision required an owner-confirmed execution root
+    // equal to the live workspace root; those anchors are now context facts and
+    // must not be able to block an escalation.
+    for (const contextAnchor of [
+      undefined,
+      { status: 'unknown' as const, executionRoot: '/repo', provenance: 'owner:ou-owner' },
+      { status: 'confirmed' as const, provenance: 'owner:ou-owner' },
+      {
+        status: 'confirmed' as const,
+        authorization: 'unauthorized' as const,
+        executionRoot: '/repo-sibling',
+        provenance: 'owner:ou-owner',
       },
-      sessions: { resolve: () => ({ id: 'session-child' }) },
-      policy: { apply, resolve: () => ({ mode: effective, workspaceRoot }) },
-      now: () => 10,
-    })
+    ]) {
+      const repository = new LocusRepository()
+      repository.ensureLocus({
+        id: 'locus-current', endpoint: { chatId: 'oc_scope' }, workspaceId: 'workspace-a',
+        parentSessionId: 'session-parent', childSessionId: 'session-child', source: 'auto',
+        permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
+        ...(contextAnchor === undefined ? {} : { contextAnchor }),
+        state: 'active', createdAt: 1,
+      })
+      let effective = 'read-only'
+      const apply = vi.fn((_session: { id: string }, mode: string) => { effective = mode })
+      const mutation = createLocusPermissionMutation({
+        repository: {
+          getLocus: id => repository.getLocus(id),
+          getCurrentLocus: endpoint => repository.getCurrent(endpoint),
+          getLocusByChild: child => repository.getLocusByChild(child),
+          beginPermissionMutation: (id, now) => repository.beginPermissionMutation(id, now),
+          abortPermissionMutation: (id, now) => repository.abortPermissionMutation(id, now),
+          commitPermissionMutation: (id, permission, now) => repository.commitPermissionMutation(id, permission, now),
+        },
+        sessions: { resolve: () => ({ id: 'session-child' }) },
+        // A live workspace root that matches nothing the anchor claims: it must
+        // stay irrelevant.
+        policy: { apply, resolve: () => ({ mode: effective, workspaceRoot: '/somewhere-else' }) },
+        now: () => 10,
+      })
 
-    await expect(mutation.mutate({ locusId: 'locus-current', actorId: 'ou-owner', mode: 'write' }))
-      .rejects.toMatchObject({ code: 'WRITE_UNSUPPORTED' })
-    expect(apply.mock.calls.map(call => call[1])).toEqual(['workspace-write', 'read-only'])
-    expect(effective).toBe('read-only')
-    expect(repository.getLocus('locus-current')?.permission.effective).toBe('read')
+      await expect(mutation.mutate({ locusId: 'locus-current', actorId: 'ou-owner', mode: 'write' }))
+        .resolves.toMatchObject({ permission: { desired: 'write', effective: 'write' } })
+      expect(repository.getLocus('locus-current')?.permission.effective).toBe('write')
+    }
   })
 
   it('does not persist when setSandboxMode fails', async () => {
@@ -189,14 +183,14 @@ describe('locus permission mutation', () => {
 
     await expect(mutation.mutate({ locusId: 'locus-current', actorId: 'ou-owner', mode: 'write' }))
       .rejects.toBeInstanceOf(LocusPermissionMutationError)
-    expect(apply.mock.calls.map(call => call[1])).toEqual(['workspace-write', 'read-only'])
+    expect(apply.mock.calls.map(call => call[1])).toEqual(['danger-full-access', 'read-only'])
     expect(effective).toBe('read-only')
     expect(repository.getLocus('locus-current')?.permission.effective).toBe('read')
   })
 
   it.each([
-    { from: 'read' as const, to: 'write' as const, initial: 'read-only', requested: 'workspace-write' },
-    { from: 'write' as const, to: 'read' as const, initial: 'workspace-write', requested: 'read-only' },
+    { from: 'read' as const, to: 'write' as const, initial: 'read-only', requested: 'danger-full-access' },
+    { from: 'write' as const, to: 'read' as const, initial: 'danger-full-access', requested: 'read-only' },
   ])('durably pauses Delivery intake during $from → $to Host policy I/O', async ({ from, to, initial, requested }) => {
     const storage = await openPetHarness()
     const repository = new DurableLocusRepository(storage.domain)
@@ -270,14 +264,19 @@ describe('locus permission mutation', () => {
     await storage.close()
   })
 
-  it('never accepts unrestricted or danger-full-access as a verified mode', async () => {
-    for (const resolvedMode of ['unrestricted', 'danger-full-access']) {
-      const { repository, mutation } = harness({
-        afterApply: mode => mode === 'workspace-write' ? resolvedMode : mode,
-      })
-      await expect(mutation.mutate({ locusId: 'locus-current', actorId: 'ou-owner', mode: 'write' }))
-        .rejects.toMatchObject({ code: 'WRITE_UNSUPPORTED' })
-      expect(repository.getLocus('locus-current')?.permission.effective).toBe('read')
-    }
+  it('accepts full access as the write mode and refuses an unknown wider mode', async () => {
+    // Danger-full-access IS the write mode now (ADR-0005). An unrecognised mode
+    // string still fails closed: the durable record must never claim a grant
+    // the Host did not report in its own vocabulary.
+    const accepted = harness({ afterApply: mode => mode })
+    await expect(accepted.mutation.mutate({ locusId: 'locus-current', actorId: 'ou-owner', mode: 'write' }))
+      .resolves.toMatchObject({ permission: { desired: 'write', effective: 'write' } })
+
+    const unknown = harness({
+      afterApply: mode => mode === 'danger-full-access' ? 'unrestricted' : mode,
+    })
+    await expect(unknown.mutation.mutate({ locusId: 'locus-current', actorId: 'ou-owner', mode: 'write' }))
+      .rejects.toMatchObject({ code: 'WRITE_UNSUPPORTED' })
+    expect(unknown.repository.getLocus('locus-current')?.permission.effective).toBe('read')
   })
 })

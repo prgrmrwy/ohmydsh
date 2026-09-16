@@ -1040,8 +1040,11 @@ async function initialize(
         // publishing one whose file access was never verified.
         return {}
       }
+      // `write` means FULL access by explicit owner decision (ADR-0005): a
+      // locus child's cwd is its parent's cwd, so `workspace-write` could never
+      // cover the sibling worktrees the owner actually works in.
       const modeOf = (permission: LocusChildPermission): string =>
-        permission === 'write' ? 'workspace-write' : 'read-only'
+        permission === 'write' ? 'danger-full-access' : 'read-only'
       return {
         policy: {
           apply: (sessionId: string, permission: LocusChildPermission) => {
@@ -1061,7 +1064,7 @@ async function initialize(
             if (session === undefined) return undefined
             const resolved = policy.resolve?.({ session })?.mode
             if (resolved === 'read-only') return 'read'
-            return resolved === 'workspace-write' ? 'write' : undefined
+            return resolved === 'danger-full-access' ? 'write' : undefined
           },
         },
       }

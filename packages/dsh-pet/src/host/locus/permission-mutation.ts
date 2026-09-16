@@ -10,7 +10,17 @@
 import type { LocusMutationFence, LocusPermissionMode, LocusRecord } from './aggregate.js'
 import { verifyLocusLivePolicy, type LocusLiveSandboxPolicy } from './policy-verification.js'
 
-export type LocusSandboxMode = 'read-only' | 'workspace-write'
+/**
+ * The two sandbox modes a locus may run under.
+ *
+ * `write` maps to FULL access on purpose: a locus child's cwd is fixed at
+ * creation to its parent session's cwd, so `workspace-write` — whose boundary
+ * IS that cwd — can never cover the sibling worktrees an owner actually works
+ * in (see `docs/adr/ADR-0005-locus-write-grants-full-access.md`). The entry's
+ * members therefore share an unbounded write capability while the grant is
+ * live, which is exactly what the owner explicitly chose; the panel states it.
+ */
+export type LocusSandboxMode = 'read-only' | 'danger-full-access'
 
 export type LocusPermissionMutationErrorCode =
   | 'LOCUS_NOT_FOUND'
@@ -79,7 +89,7 @@ export interface LocusPermissionSessionPort {
 }
 
 export interface LocusPermissionPolicyPort {
-  /** Apply only `read-only` or `workspace-write`; no wider mode is representable. */
+  /** Apply one of exactly two modes: `read-only`, or full access for `write`. */
   apply(session: LocusPermissionSession, mode: LocusSandboxMode): Promise<void> | void
   /** Return the complete effective Host policy for this exact live session. */
   resolve(session: LocusPermissionSession): Promise<LocusLiveSandboxPolicy | undefined> | LocusLiveSandboxPolicy | undefined
@@ -97,7 +107,7 @@ export interface LocusPermissionMutationPort {
 }
 
 function modeFor(permission: LocusPermissionMode): LocusSandboxMode {
-  return permission === 'write' ? 'workspace-write' : 'read-only'
+  return permission === 'write' ? 'danger-full-access' : 'read-only'
 }
 
 function exactCurrent(

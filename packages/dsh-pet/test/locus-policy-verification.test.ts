@@ -1,16 +1,15 @@
-import { mkdtemp, mkdir, realpath, symlink } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { canonicalExecutionRoot, verifyLocusLivePolicy } from '../src/host/locus/policy-verification.js'
+import { verifyLocusLivePolicy } from '../src/host/locus/policy-verification.js'
 
 const read = { desired: 'read' as const, effective: 'read' as const, verifiedAt: 1 }
 const write = { desired: 'write' as const, effective: 'write' as const, verifiedAt: 1, grantedBy: 'host:test' }
 
 /**
- * An anchor exactly as the owner-facing confirm operation persists it:
- * `status: 'confirmed'`, owner provenance, and NO stored authorization.
- * Write authority is derived at verification time from live-root agreement.
+ * An anchor exactly as the owner-facing confirm operation persists it.
+ *
+ * Since ADR-0005 the anchor is a CONTEXT fact — where the work belongs — and is
+ * not consulted when deciding a write grant. These cases exist to pin that:
+ * the write decision must depend only on the live sandbox mode.
  */
 function confirmed(executionRoot: string) {
   return {
@@ -28,66 +27,66 @@ describe('locus live sandbox policy verification', () => {
       .toEqual({ ok: true, effective: 'read' })
     expect(verifyLocusLivePolicy({ permission: read }, { mode: 'workspace-write', workspaceRoot: '/repo' }))
       .toMatchObject({ ok: false, reason: 'mode-mismatch' })
+    // Full access is strictly wider than read, so it is a drift too.
+    expect(verifyLocusLivePolicy({ permission: read }, { mode: 'danger-full-access' }))
+      .toMatchObject({ ok: false, reason: 'mode-mismatch' })
     expect(verifyLocusLivePolicy({ permission: read }, undefined))
       .toMatchObject({ ok: false, reason: 'policy-unavailable' })
   })
 
-  it('derives write authority from live root agreement, not a stored grant', () => {
-    // The owner-facing confirm operation persists exactly this shape. Requiring
-    // an additional stored `authorization: 'authorized'` made write
-    // unreachable: nothing in the Host ever wrote that value, so every
-    // legitimate grant failed closed.
-    expect(verifyLocusLivePolicy(
-      { permission: write, contextAnchor: confirmed('/repo') },
-      { mode: 'workspace-write', workspaceRoot: '/repo' },
-    )).toEqual({ ok: true, effective: 'write' })
+  it('derives write authority from the live mode being full access', () => {
+    // `write` means full access by explicit owner decision (ADR-0005): a locus
+    // child's cwd is fixed to its parent's cwd, so `workspace-write` — whose
+    // boundary IS that cwd — can never cover the sibling worktrees the owner
+    // actually works in.
+    expect(verifyLocusLivePolicy({ permission: write }, { mode: 'danger-full-access' }))
+      .toEqual({ ok: true, effective: 'write' })
   })
 
-  it('refuses write without an owner-confirmed root', () => {
-    // Intent is still mandatory: agreement alone cannot authorize a root the
-    // owner never confirmed.
-    for (const anchor of [
+  it('never accepts a narrower live mode for write', () => {
+    for (const mode of ['read-only', 'workspace-write']) {
+      expect(verifyLocusLivePolicy({ permission: write }, { mode, workspaceRoot: '/repo' }))
+        .toMatchObject({ ok: false, reason: 'mode-mismatch' })
+    }
+    expect(verifyLocusLivePolicy({ permission: write }, undefined))
+      .toMatchObject({ ok: false, reason: 'policy-unavailable' })
+  })
+
+  it('does not let an execution root decide the grant either way', () => {
+    // Intent used to be mandatory and the root had to equal the live workspace
+    // root; that rule was unreachable in practice (nothing could set a usable
+    // root) and wrong for worktree workflows. The anchor is now context only.
+    for (const contextAnchor of [
       undefined,
       { status: 'unknown' as const, executionRoot: '/repo' },
       { status: 'confirmed' as const },
+      confirmed('/repo'),
+      confirmed('/repo-sibling'),
+      { ...confirmed('/repo'), authorization: 'unauthorized' as const },
     ]) {
       expect(verifyLocusLivePolicy(
-        { permission: write, ...(anchor === undefined ? {} : { contextAnchor: anchor }) },
-        { mode: 'workspace-write', workspaceRoot: '/repo' },
-      )).toMatchObject({ ok: false, reason: 'write-root-unauthorized' })
+        { permission: write, ...(contextAnchor === undefined ? {} : { contextAnchor }) },
+        { mode: 'danger-full-access', workspaceRoot: '/repo' },
+      )).toEqual({ ok: true, effective: 'write' })
     }
   })
 
-  it('honors an explicit owner revocation over an agreeing root', () => {
-    expect(verifyLocusLivePolicy(
-      { permission: write, contextAnchor: { ...confirmed('/repo'), authorization: 'unauthorized' } },
-      { mode: 'workspace-write', workspaceRoot: '/repo' },
-    )).toMatchObject({ ok: false, reason: 'write-root-unauthorized' })
+  it('reports drift without a workspace root, because full access has none', () => {
+    // A deployment that reports no workspace root is not a write blocker any
+    // more; only the mode decides.
+    expect(verifyLocusLivePolicy({ permission: write }, { mode: 'danger-full-access' }))
+      .toEqual({ ok: true, effective: 'write' })
+    expect(verifyLocusLivePolicy({ permission: write }, { mode: 'read-only' }))
+      .toMatchObject({ ok: false, reason: 'mode-mismatch' })
   })
 
-  it('refuses write when the live sandbox reports no workspace root', () => {
-    // Without a live root there is no Host derivation to rely on.
-    expect(verifyLocusLivePolicy(
-      { permission: write, contextAnchor: confirmed('/repo') },
-      { mode: 'workspace-write' },
-    )).toMatchObject({ ok: false, reason: 'write-root-mismatch' })
-  })
-
-  it('requires canonical root equality and rejects a sibling root', () => {
-    expect(verifyLocusLivePolicy({ permission: write, contextAnchor: confirmed('/repo') }, {
-      mode: 'workspace-write', workspaceRoot: '/repo-sibling',
-    })).toMatchObject({ ok: false, reason: 'write-root-mismatch' })
-  })
-
-  it('accepts different spellings only when canonical identity is equal', async () => {
-    const base = await mkdtemp(join(tmpdir(), 'dsh-pet-policy-'))
-    const root = join(base, 'root')
-    const link = join(base, 'link')
-    await mkdir(root)
-    await symlink(root, link)
-    expect(canonicalExecutionRoot(link)).toBe(await realpath(root))
-    expect(verifyLocusLivePolicy({ permission: write, contextAnchor: confirmed(link) }, {
-      mode: 'workspace-write', workspaceRoot: root,
-    })).toEqual({ ok: true, effective: 'write' })
+  it('keeps the runtime read-back path free of any root reasoning', () => {
+    // Guards against reintroducing a directory boundary into the write
+    // decision: a wide root with a narrow mode must still be refused, and a
+    // full-access mode must be accepted regardless of the reported root.
+    expect(verifyLocusLivePolicy({ permission: write }, { mode: 'workspace-write', workspaceRoot: '/' }))
+      .toMatchObject({ ok: false, reason: 'mode-mismatch' })
+    expect(verifyLocusLivePolicy({ permission: write }, { mode: 'danger-full-access', workspaceRoot: '/' }))
+      .toEqual({ ok: true, effective: 'write' })
   })
 })

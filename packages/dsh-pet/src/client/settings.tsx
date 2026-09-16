@@ -600,10 +600,17 @@ function GeneralTab(): JSX.Element {
 /** Which reading of the same associations is on screen. */
 type LocusReading = 'work' | 'entry'
 
-/** Owner-facing label for one permission mode. */
+/**
+ * Owner-facing label for one permission mode.
+ *
+ * `write` says what it grants rather than "writable": it is complete file
+ * access, unbounded and shared by every member of the entry (ADR-0005). A label
+ * that hid that would be the kind of quiet widening this panel exists to make
+ * visible.
+ */
 const LOCUS_PERMISSION_LABELS: Record<PetLocusPermissionMode, string> = {
   read: '只读',
-  write: '可写',
+  write: '可写（完全访问）',
 }
 
 /** The endpoint fields an action may carry; display facts are excluded. */
@@ -901,6 +908,9 @@ export function LocusDetails(props: {
         {head.permission.verifiedAt === undefined
           ? ' · 未核验'
           : ` · ${formatAbsolute(head.permission.verifiedAt)} 核验`}
+        {writable
+          ? ' · 该入口成员共享整机写权限（含仓库之外的任何文件），不再受目录范围限制'
+          : ''}
       </dd>
 
       <dt>执行根</dt>
@@ -909,11 +919,11 @@ export function LocusDetails(props: {
           <>
             <span className="dshpet-chip" data-tone="muted">未确认</span>
             {confirmCandidate === undefined
-              ? '宿主未能解析这个入口的执行根；提权到可写需要先有可确认的执行根，路径展示不等于授权'
+              ? '宿主未能解析这个入口的执行根；它只是给子会话的上下文事实（工作归属），不影响能否提权'
               : (
                 <>
-                  宿主解析到 <code className="dshpet-code">{confirmCandidate}</code>，
-                  确认后仍需与宿主实际回读的范围一致才会生效
+                  宿主解析到 <code className="dshpet-code">{confirmCandidate}</code>
+                  ，确认后作为子会话的上下文事实；它不再门控提权（可写即完全访问）
                 </>
               )}
           </>
@@ -947,9 +957,8 @@ export function LocusDetails(props: {
             type="button"
             aria-pressed={writable}
             disabled={blocked || !canManageCurrent || writable}
-            title={needsExecutionRoot
-              ? '需要先确认执行根，且与宿主实际回读的范围一致'
-              : 'Host 必须先核验真实写入范围；核验失败会保持只读。'}
+            title={'完全访问：该入口成员可在本机任意位置读写文件（不受目录范围限制）。'
+              + '宿主必须回读为完全访问才生效；核验失败会保持只读。'}
             onClick={run('scope-write', () => petApi.locusScope({ action: 'scope', mode: 'write', ...fence }))}
           >
             可写
@@ -962,7 +971,7 @@ export function LocusDetails(props: {
             disabled={blocked || confirmCandidate === undefined}
             title={confirmCandidate === undefined
               ? '宿主无法解析该入口的执行根，不能伪造一个来确认'
-              : `确认执行根 ${confirmCandidate}`}
+              : `确认执行根 ${confirmCandidate}（上下文事实，不门控提权）`}
             onClick={run('confirm-anchor', () =>
               petApi.locusConfirmAnchor(locusAnchorConfirmRequest(head)),
             )}
