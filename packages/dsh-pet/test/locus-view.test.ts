@@ -34,8 +34,12 @@ import {
   parentAvailabilityOf,
   summarizeLocusView,
   endpointHandleLabel,
-  handleLabel
+  handleLabel,
+  locusAnchorConfirmRequest,
+  locusConfirmCandidate,
+  locusNeedsExecutionRoot,
 } from '../src/client/locus-view.js'
+import { locusFixture } from './fixtures/locus-snapshot.js'
 import type {
   PetLocusManagementView,
   PetLocusSource,
@@ -573,5 +577,69 @@ describe('filtering', () => {
     expect(summary.entries).toBe(1)
     expect(summary.chats).toBe(1)
     expect(summary.works).toBe(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Execution-root confirmation
+// ---------------------------------------------------------------------------
+
+describe('execution-root confirmation', () => {
+  const withRoot = (executionRoot?: string, anchor?: PetLocusView['contextAnchor']): PetLocusView =>
+    locusFixture({
+      locusId: 'locus-runtime-1789543241305-c8db4d8e783e28',
+      generation: 3,
+      chatId: 'oc_3c57889c7808eae69b5ad1dd9ddc8ace',
+      threadId: 'omt_19cfc89238cf5bb5',
+      parentSessionId: 'session-85620d77-e1a8-4d80-b5d9-66a481bda3c5',
+      childSessionId: 'session-f3b5bd15-9e04-40e5-a515-dbce24c3dff7',
+      ...(executionRoot === undefined ? {} : { executionRoot }),
+      ...(anchor === undefined ? {} : { contextAnchor: anchor }),
+    })
+
+  it('still needs a root while the anchor carries none', () => {
+    // The dead end this change removes: an anchor can be `confirmed` after
+    // confirming context facts, and the write gate still has no root. Keying
+    // the action on `status` alone hid the only way to supply it.
+    expect(locusNeedsExecutionRoot(withRoot('/repo'))).toBe(true)
+    expect(locusNeedsExecutionRoot(withRoot('/repo', { status: 'confirmed' }))).toBe(true)
+    expect(locusNeedsExecutionRoot(withRoot('/repo', {
+      status: 'confirmed',
+      executionRoot: '/Users/prgrmrwy/corp/nexus',
+    }))).toBe(false)
+  })
+
+  it('offers only the candidate the Host resolved', () => {
+    expect(locusConfirmCandidate(withRoot('/Users/prgrmrwy/corp/nexus')))
+      .toBe('/Users/prgrmrwy/corp/nexus')
+    expect(locusConfirmCandidate(withRoot())).toBeUndefined()
+    expect(locusConfirmCandidate(withRoot('   '))).toBeUndefined()
+  })
+
+  it('carries the resolved root in the confirm request', () => {
+    const request = locusAnchorConfirmRequest(withRoot('/Users/prgrmrwy/corp/nexus'))
+
+    expect(request).toMatchObject({
+      action: 'confirm-anchor',
+      locusId: 'locus-runtime-1789543241305-c8db4d8e783e28',
+      executionRoot: '/Users/prgrmrwy/corp/nexus',
+      expectedGeneration: 3,
+      expectedLocusId: 'locus-runtime-1789543241305-c8db4d8e783e28',
+      expectedUpdatedAt: 2,
+      endpoint: {
+        chatId: 'oc_3c57889c7808eae69b5ad1dd9ddc8ace',
+        threadId: 'omt_19cfc89238cf5bb5',
+      },
+    })
+    // Confirming context facts still must not claim any authority.
+    expect(request).not.toHaveProperty('authorization')
+    expect(request.endpoint).not.toHaveProperty('chatType')
+  })
+
+  it('never invents a root when the Host resolved none', () => {
+    const request = locusAnchorConfirmRequest(withRoot())
+
+    expect(request).not.toHaveProperty('executionRoot')
+    expect(request.action).toBe('confirm-anchor')
   })
 })

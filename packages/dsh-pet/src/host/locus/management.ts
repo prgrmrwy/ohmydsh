@@ -118,14 +118,14 @@ export interface LocusManagementResolvers {
   readonly main?: (
     sessionId: string,
   ) =>
-    | Promise<{ readonly title?: string; readonly availability?: 'available' | 'archived' | 'missing' } | undefined>
-    | { readonly title?: string; readonly availability?: 'available' | 'archived' | 'missing' }
+    | Promise<LocusSessionDescription | undefined>
+    | LocusSessionDescription
     | undefined
   readonly child?: (
     sessionId: string,
   ) =>
-    | Promise<{ readonly title?: string; readonly availability?: 'available' | 'archived' | 'missing' } | undefined>
-    | { readonly title?: string; readonly availability?: 'available' | 'archived' | 'missing' }
+    | Promise<LocusSessionDescription | undefined>
+    | LocusSessionDescription
     | undefined
   readonly workspace?: (
     workspaceId: string,
@@ -139,6 +139,13 @@ export interface LocusManagementResolvers {
 export interface LocusSessionDescription {
   readonly title?: string
   readonly availability?: 'available' | 'archived' | 'missing'
+  /**
+   * The session's immutable working directory, i.e. its `workspace-write`
+   * boundary in DSH's own contract (`sandboxPolicy.resolve()` reports this as
+   * `workspaceRoot`). Offered as the CONFIRM CANDIDATE for a locus execution
+   * root; it is never an authorization by itself.
+   */
+  readonly executionRoot?: string
 }
 
 /** Narrow Host capabilities needed to describe a session without loading it. */
@@ -147,7 +154,11 @@ export interface LocusSessionDescriberDeps {
    * Cold-readable session inspection. Resolves for a session whose durable log
    * exists — loaded or not — and rejects when it cannot be read.
    */
-  readonly inspect: ((sessionId: string) => Promise<{ readonly events?: readonly unknown[] }>) | undefined
+  readonly inspect: ((sessionId: string) => Promise<{
+    readonly events?: readonly unknown[]
+    /** Immutable session header; `cwd` is the working-boundary fact. */
+    readonly meta?: { readonly cwd?: unknown }
+  }>) | undefined
   /** Durable archive account, the only evidence that outranks readability. */
   readonly archivedSessionIds: () => readonly string[]
   /** Fold the durable title out of a session's events. */
@@ -184,7 +195,10 @@ export function createLocusSessionDescriber(
     // invent a fact out of a Host limitation.
     if (deps.inspect === undefined) return undefined
 
-    let inspection: { readonly events?: readonly unknown[] } | undefined
+    let inspection: {
+      readonly events?: readonly unknown[]
+      readonly meta?: { readonly cwd?: unknown }
+    } | undefined
     try {
       inspection = await deps.inspect(sessionId)
     } catch {
@@ -198,9 +212,17 @@ export function createLocusSessionDescriber(
     // the header yields undefined for EVERY session, the exact failure that
     // once made every bound group display one fallback name.
     const title = deps.foldTitle(inspection.events ?? [])
+    // The header's `cwd` IS the session's workspace-write boundary (DSH's
+    // `sandboxPolicy.resolve` reports it as `workspaceRoot`), so it is the only
+    // honest candidate for an owner-confirmed locus execution root. A missing
+    // or unusable value stays absent: guessing one here is what the whole
+    // derivation exists to prevent.
+    const cwd = inspection.meta?.cwd
+    const executionRoot = typeof cwd === 'string' && cwd.trim() !== '' ? cwd.trim() : undefined
     return {
       availability: 'available',
       ...(title === undefined ? {} : { title }),
+      ...(executionRoot === undefined ? {} : { executionRoot }),
     }
   }
 }
@@ -403,6 +425,11 @@ async function projectRecord(
     resolvers?.workspace?.(record.workspaceId),
     ownerProjection?.({ locus: record, parentSessionId: record.parentSessionId }),
   ])
+  // The child serves this endpoint, so its working boundary is the candidate;
+  // the workspace resolver's own value is the last resort for integrations that
+  // only know a workspace.
+  const candidateExecutionRoot =
+    child?.executionRoot ?? main?.executionRoot ?? workspace?.executionRoot
   return {
     locusId: record.id,
     generation: record.generation,
@@ -422,7 +449,13 @@ async function projectRecord(
       workspaceId: record.workspaceId,
       ...(workspace?.title === undefined ? {} : { title: workspace.title }),
       ...(workspace?.path === undefined ? {} : { path: workspace.path }),
-      ...(workspace?.executionRoot === undefined ? {} : { executionRoot: workspace.executionRoot }),
+      // The execution-root CANDIDATE the owner may confirm. The child's own
+      // working directory is the exact boundary the sandbox will report, so it
+      // wins; the main session's cwd is the fallback because a locus child
+      // inherits it when forked. This is display/confirmation input only —
+      // write authority stays derived per verification and never comes from
+      // this field.
+      ...(candidateExecutionRoot === undefined ? {} : { executionRoot: candidateExecutionRoot }),
     },
     ...(record.contextAnchor === undefined ? {} : {
       contextAnchor: {

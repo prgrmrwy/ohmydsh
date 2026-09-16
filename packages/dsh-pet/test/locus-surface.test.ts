@@ -10,7 +10,8 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { LocusSurface } from '../src/client/settings.js'
+import { LocusDetails, LocusSurface } from '../src/client/settings.js'
+import { collectHandleCodes, groupByWork } from '../src/client/locus-view.js'
 import { locusFixture, snapshotOf, surfaceSnapshot } from './fixtures/locus-snapshot.js'
 import type { PetLocusManagementView } from '../src/wire.js'
 
@@ -178,5 +179,73 @@ describe('locus surface', () => {
     // A parent without a default Q&A states where creation happens instead of
     // offering a control that creates a real Feishu group.
     expect(markup).toContain('请在目标会话里用 Pet 轮盘的「答疑群」创建')
+  })
+})
+
+describe('locus execution-root confirmation', () => {
+  const ownerMarkup = (input: {
+    readonly executionRoot?: string
+    readonly anchor?: Parameters<typeof locusFixture>[0]['contextAnchor']
+  }): string => {
+    const locus = locusFixture({
+      locusId: 'locus-runtime-1789543241305-c8db4d8e783e28',
+      chatId: 'oc_3c57889c7808eae69b5ad1dd9ddc8ace',
+      parentSessionId: 'session-85620d77-e1a8-4d80-b5d9-66a481bda3c5',
+      parentAvailability: 'available',
+      childSessionId: 'session-f3b5bd15-9e04-40e5-a515-dbce24c3dff7',
+      ...(input.executionRoot === undefined ? {} : { executionRoot: input.executionRoot }),
+      ...(input.anchor === undefined ? {} : { contextAnchor: input.anchor }),
+    })
+    const snapshot = snapshotOf([locus], [locus.locusId])
+    // The permission controls live inside the collapsed 「更多」 disclosure, so
+    // render that block itself rather than an unopened row.
+    return renderToStaticMarkup(
+      createElement(LocusDetails, {
+        family: groupByWork(snapshot)[0]!.families[0]!,
+        codes: collectHandleCodes(snapshot),
+        busy: false,
+        busyKey: undefined,
+        onAction: () => undefined,
+      }),
+    )
+  }
+
+  it('shows the Host-resolved root and offers to confirm it', () => {
+    const markup = ownerMarkup({ executionRoot: '/Users/prgrmrwy/corp/nexus' })
+
+    expect(markup).toContain('确认执行根')
+    expect(markup).toContain('/Users/prgrmrwy/corp/nexus')
+    expect(markup).toContain('宿主解析到')
+  })
+
+  it('keeps the action when the anchor is confirmed but has no execution root', () => {
+    // The regression this change fixes: the button used to disappear on
+    // `status === 'confirmed'`, so the root it never sent could never be added.
+    const markup = ownerMarkup({
+      executionRoot: '/Users/prgrmrwy/corp/nexus',
+      anchor: { status: 'confirmed', projectResources: [], constraints: [] },
+    })
+
+    expect(markup).toContain('确认执行根')
+    expect(markup).toContain('/Users/prgrmrwy/corp/nexus')
+  })
+
+  it('drops the action once a root is confirmed', () => {
+    const markup = ownerMarkup({
+      executionRoot: '/Users/prgrmrwy/corp/nexus',
+      anchor: { status: 'confirmed', executionRoot: '/Users/prgrmrwy/corp/nexus' },
+    })
+
+    expect(markup).not.toContain('确认执行根')
+    expect(markup).toContain('/Users/prgrmrwy/corp/nexus')
+  })
+
+  it('says why nothing can be confirmed when the Host resolved no root', () => {
+    const markup = ownerMarkup({})
+
+    expect(markup).toContain('宿主未能解析这个入口的执行根')
+    // The control is rendered but inert: no path is invented to confirm.
+    expect(markup).toContain('确认执行根')
+    expect(markup).toMatch(/<button[^>]*disabled[^>]*>确认执行根/)
   })
 })

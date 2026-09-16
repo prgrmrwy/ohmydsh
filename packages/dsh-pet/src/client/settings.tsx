@@ -47,6 +47,9 @@ import {
   handleCode,
   handleLabel,
   isHostCurrent,
+  locusAnchorConfirmRequest,
+  locusConfirmCandidate,
+  locusNeedsExecutionRoot,
   locusSourceLabel,
   locusStateLabel,
   locusStateTone,
@@ -817,8 +820,21 @@ function locusRebuildRequest(head: PetLocusView): Parameters<typeof petApi.locus
   }
 }
 
-/** One entry's disclosure: identifiers, provenance, permission and actions. */
-function LocusDetails(props: {
+/**
+ * The one anchor-confirmation payload is built by the presentation model
+ * (`locusAnchorConfirmRequest`), so the execution root that the write gate
+ * needs cannot be dropped here without failing a test.
+ */
+
+/**
+ * One entry's disclosure: identifiers, provenance, permission and actions.
+ *
+ * Exported for the rendering test: the disclosure is collapsed until the owner
+ * opens it, so a surface-level snapshot cannot see the permission controls at
+ * all. Rendering this block directly is the only way to assert what the owner
+ * is offered there.
+ */
+export function LocusDetails(props: {
   readonly family: LocusFamily
   readonly codes: HandleCodes
   readonly busy: boolean
@@ -849,9 +865,13 @@ function LocusDetails(props: {
   const canManageCurrent = head.state.state === 'active'
   const canStop =
     head.state.state === 'provisioning' || head.state.state === 'active' || head.state.state === 'switching'
-  const anchorUnconfirmed = head.contextAnchor?.status !== 'confirmed'
   const writable = head.permission.effective === 'write'
   const permissionDrift = head.permission.desired !== head.permission.effective
+  // The write gate needs a CONFIRMED ROOT, not merely a confirmed anchor: an
+  // anchor confirmed without one still cannot authorize write, so the action
+  // must stay available until the root itself exists.
+  const needsExecutionRoot = locusNeedsExecutionRoot(head)
+  const confirmCandidate = locusConfirmCandidate(head)
 
   return (
     <dl className="dshpet-locus-details">
@@ -885,10 +905,17 @@ function LocusDetails(props: {
 
       <dt>执行根</dt>
       <dd>
-        {anchorUnconfirmed ? (
+        {needsExecutionRoot ? (
           <>
             <span className="dshpet-chip" data-tone="muted">未确认</span>
-            提权到可写需要先确认执行根；路径展示不等于授权
+            {confirmCandidate === undefined
+              ? '宿主未能解析这个入口的执行根；提权到可写需要先有可确认的执行根，路径展示不等于授权'
+              : (
+                <>
+                  宿主解析到 <code className="dshpet-code">{confirmCandidate}</code>，
+                  确认后仍需与宿主实际回读的范围一致才会生效
+                </>
+              )}
           </>
         ) : (
           <>
@@ -920,7 +947,7 @@ function LocusDetails(props: {
             type="button"
             aria-pressed={writable}
             disabled={blocked || !canManageCurrent || writable}
-            title={anchorUnconfirmed
+            title={needsExecutionRoot
               ? '需要先确认执行根，且与宿主实际回读的范围一致'
               : 'Host 必须先核验真实写入范围；核验失败会保持只读。'}
             onClick={run('scope-write', () => petApi.locusScope({ action: 'scope', mode: 'write', ...fence }))}
@@ -928,20 +955,16 @@ function LocusDetails(props: {
             可写
           </button>
         </span>
-        {canManageCurrent && anchorUnconfirmed ? (
+        {canManageCurrent && needsExecutionRoot ? (
           <button
             type="button"
             className="dshpet-action dshpet-action-sm"
-            disabled={blocked}
+            disabled={blocked || confirmCandidate === undefined}
+            title={confirmCandidate === undefined
+              ? '宿主无法解析该入口的执行根，不能伪造一个来确认'
+              : `确认执行根 ${confirmCandidate}`}
             onClick={run('confirm-anchor', () =>
-              petApi.locusConfirmAnchor({
-                action: 'confirm-anchor',
-                ...fence,
-                endpoint,
-                projectResources: [],
-                constraints: [],
-                existence: 'unknown',
-              }),
+              petApi.locusConfirmAnchor(locusAnchorConfirmRequest(head)),
             )}
           >
             确认执行根

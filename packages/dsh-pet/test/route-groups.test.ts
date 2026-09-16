@@ -116,7 +116,10 @@ const LOCUS_VIEW = {
   endpoint: { chatId: 'oc_qa', chatType: 'group', chatName: '答疑群' },
   main: { sessionId: 's1', title: '主会话', availability: 'available' },
   child: { sessionId: 'child-1', title: '子会话', availability: 'available' },
-  workspace: { workspaceId: 'ws-1', title: '项目A' },
+  // The execution-root candidate the Host resolves from the child session's
+  // working boundary. Without it the confirm control is deliberately inert, so
+  // this fixture carries the production shape rather than an empty one.
+  workspace: { workspaceId: 'ws-1', title: '项目A', executionRoot: '/repo/nexus' },
   permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
   state: { state: 'active', busy: false, createdAt: 1, updatedAt: 1 },
   source: 'explicit',

@@ -473,4 +473,100 @@ describe('locus session describer', () => {
     const second = await describe('session-stable')
     expect(first).toEqual(second)
   })
+
+  it('offers the session working boundary as the confirmable execution root', async () => {
+    // Without this the write gate has no reachable intent fact: the only writer
+    // of `executionRoot` is the owner-facing confirm, and the surface had
+    // nothing to send it.
+    const describe = createLocusSessionDescriber({
+      inspect: vi.fn(async () => ({
+        events: titled('Locus 子会话'),
+        meta: { cwd: '/Users/prgrmrwy/corp/nexus' },
+      })),
+      archivedSessionIds: () => [],
+      foldTitle,
+    })
+
+    await expect(describe('session-child')).resolves.toEqual({
+      availability: 'available',
+      title: 'Locus 子会话',
+      executionRoot: '/Users/prgrmrwy/corp/nexus',
+    })
+  })
+
+  it('omits the execution root rather than guessing one', async () => {
+    const make = (inspection: unknown) => createLocusSessionDescriber({
+      inspect: vi.fn(async () => inspection),
+      archivedSessionIds: () => [],
+      foldTitle,
+    })
+
+    await expect(make({ events: [] })('session-any')).resolves.toEqual({ availability: 'available' })
+    await expect(make({ events: [], meta: { cwd: '   ' } })('session-any'))
+      .resolves.toEqual({ availability: 'available' })
+    await expect(make({ events: [], meta: { cwd: 42 } })('session-any'))
+      .resolves.toEqual({ availability: 'available' })
+  })
+
+  it('projects the child working boundary as the locus confirm candidate', async () => {
+    const record = {
+      id: 'locus-topic',
+      generation: 1,
+      endpoint: { chatId: 'oc-project', threadId: 'omt_review' },
+      parentSessionId: 'session-parent',
+      childSessionId: 'session-child',
+      workspaceId: 'ws-1',
+      state: 'active',
+      source: 'inherited',
+      permission: { desired: 'read', effective: 'read' },
+      updatedAt: 5,
+      createdAt: 1,
+    }
+    const port = createLocusManagementPort({
+      repository: memory([record as never]),
+      resolvers: {
+        main: () => ({ title: 'main', executionRoot: '/parent/root' }),
+        child: () => ({ title: 'child', executionRoot: '/child/root' }),
+      },
+    })
+
+    const view = await port.view!()
+    // The child serves the endpoint, so its boundary wins; the workspace entry
+    // carries no root of its own here.
+    expect(view.loci[0]?.workspace.executionRoot).toBe('/child/root')
+    expect(view.loci[0]?.contextAnchor).toBeUndefined()
+  })
+
+  it('falls back to the main session boundary and omits the candidate when neither resolves', async () => {
+    const record = {
+      id: 'locus-group',
+      generation: 1,
+      endpoint: { chatId: 'oc-project' },
+      parentSessionId: 'session-parent',
+      childSessionId: 'session-child',
+      workspaceId: 'ws-1',
+      state: 'active',
+      source: 'auto',
+      permission: { desired: 'read', effective: 'read' },
+      updatedAt: 5,
+      createdAt: 1,
+    }
+    const fromParent = createLocusManagementPort({
+      repository: memory([record as never]),
+      resolvers: {
+        main: () => ({ executionRoot: '/parent/root' }),
+        child: () => ({ title: 'child' }),
+      },
+    })
+    const fromNothing = createLocusManagementPort({
+      repository: memory([record as never]),
+      resolvers: { main: () => ({}), child: () => ({}) },
+    })
+
+    await expect(fromParent.view!()).resolves.toMatchObject({
+      loci: [{ workspace: { executionRoot: '/parent/root' } }],
+    })
+    const bare = await fromNothing.view!()
+    expect(bare.loci[0]?.workspace).not.toHaveProperty('executionRoot')
+  })
 })
