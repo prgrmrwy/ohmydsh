@@ -258,7 +258,14 @@ export function registerPetTools(
 
     disposers.push(ctx.tools.register(defineTool({
       name: PET_LOCUS_FINISH_TOOL,
-      description: 'Finish the exact current Feishu Delivery with reply text or a no-reply reason. The Host derives all routing targets; do not provide ids.',
+      description:
+        'Finish the exact current Feishu Delivery with reply text or a no-reply reason. ' +
+        'The Host derives all routing targets; do not provide ids. ' +
+        'The text is sent as a Feishu text message: write `@Display Name` to mention a chat ' +
+        'member and the Host renders it into a real mention before sending, so the person is ' +
+        'notified. Only when the name you use differs from the group display name, write ' +
+        '`<at user_id="ou_…">Name</at>` yourself (`<at user_id="all"></at>` mentions everyone). ' +
+        'Copying the `@Name` form seen in inbound text produces plain text with no notification.',
       parameters: {
         outcome: { type: 'string', enum: ['reply', 'no-reply'], required: true },
         text: { type: 'string' },

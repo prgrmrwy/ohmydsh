@@ -277,6 +277,72 @@ describe('strict Delivery-target reply', () => {
     await expect(client.replyToTarget?.({ chatId: 'oc_group', messageId: 'om_current' }, 'done'))
       .rejects.toThrow('reply to target: lark-cli returned a different chat id')
   })
+
+  it('renders a plain @display-name into a real mention before sending', async () => {
+    const calls: string[][] = []
+    const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
+      calls.push([...args])
+      if (args.includes('+chat-members-list')) {
+        return {
+          stdout: JSON.stringify({
+            ok: true,
+            data: { users: [{ member_id: 'ou_reviewer_02', name: '赵鸿珂' }] },
+          }),
+        }
+      }
+      return { stdout: JSON.stringify({ ok: true, data: { message_id: 'om_reply', chat_id: 'oc_group' } }) }
+    }) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner)
+
+    await expect(
+      client.replyToTarget?.({ chatId: 'oc_group', messageId: 'om_current' }, '@赵鸿珂 看完了'),
+    ).resolves.toEqual({ messageId: 'om_reply' })
+
+    expect(calls[0]).toEqual([
+      '--profile', 'dsh-pet', 'im', '+chat-members-list', '--as', 'bot',
+      '--chat-id', 'oc_group', '--member-types', 'user', '--page-all',
+    ])
+    expect(calls[1]).toEqual([
+      '--profile', 'dsh-pet', 'im', '+messages-reply', '--as', 'bot',
+      '--message-id', 'om_current',
+      '--text', '<at user_id="ou_reviewer_02">赵鸿珂</at> 看完了', '--json',
+    ])
+  })
+
+  it('sends the original text when the member list cannot be read', async () => {
+    const calls: string[][] = []
+    const logs: string[] = []
+    const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
+      calls.push([...args])
+      if (args.includes('+chat-members-list')) throw new Error('lark-cli exploded')
+      return { stdout: JSON.stringify({ ok: true, data: { message_id: 'om_reply', chat_id: 'oc_group' } }) }
+    }) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner, message => logs.push(message))
+
+    await expect(
+      client.replyToTarget?.({ chatId: 'oc_group', messageId: 'om_current' }, '@赵鸿珂 看完了'),
+    ).resolves.toEqual({ messageId: 'om_reply' })
+
+    expect(calls[1]).toContain('@赵鸿珂 看完了')
+    // Diagnostics stay low-cardinality: no name, id or body.
+    expect(logs.join('\n')).not.toContain('赵鸿珂')
+    expect(logs.join('\n')).not.toContain('ou_')
+  })
+
+  it('reads no member list at all when the reply addresses nobody', async () => {
+    const calls: string[][] = []
+    const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
+      calls.push([...args])
+      return { stdout: JSON.stringify({ ok: true, data: { message_id: 'om_reply', chat_id: 'oc_group' } }) }
+    }) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner)
+
+    await expect(client.replyToTarget?.({ chatId: 'oc_group', messageId: 'om_current' }, '看完了'))
+      .resolves.toEqual({ messageId: 'om_reply' })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).not.toContain('+chat-members-list')
+  })
 })
 
 describe('strict control-plane receipt', () => {

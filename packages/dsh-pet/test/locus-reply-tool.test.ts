@@ -81,6 +81,18 @@ const childExec = {
 }
 
 describe('caller-bound Feishu lifecycle tools', () => {
+  it('tells the model that a plain @display-name becomes a real mention', () => {
+    // The tool schema travels with every turn, so this is where the outbound
+    // mention contract has to be visible: inbound text shows `@名字` (platform
+    // pre-rendering), and an agent that copies that form notifies nobody.
+    const { finish } = lifecycleTools()
+
+    expect(finish.description).toContain('@Display Name')
+    expect(finish.description).toContain('real mention')
+    expect(finish.description).toContain('<at user_id="ou_…">')
+    expect(finish.description).toContain('no notification')
+  })
+
   it('registers finish and wait, with no legacy reply alias or routing selector', () => {
     const { finish, wait } = lifecycleTools()
     expect(finish).toBeDefined()
