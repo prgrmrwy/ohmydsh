@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * One-off Pet state version restamp (v2..v13 -> current PET_DOMAIN_VERSION).
+ * One-off Pet state version restamp (v2..v14 -> current PET_DOMAIN_VERSION).
  *
  * Why this exists as a standalone script rather than only as in-process
  * migration: the SQLite backend opens Pet's database with
@@ -11,13 +11,17 @@
  * are registered. This script performs the restamp while DSH is STOPPED.
  *
  * The restamp is safe because v2..v11 add tables without changing old rows,
- * while v12 inquiry rows are explicitly parser-compatible at v13 and v13 → v14
- * adds only serialized Delivery lease fields/statuses (see src/host/spec.ts and
- * inquiry/ledger.ts). No existing row or log is converted, cleared, or rewritten;
- * a legacy deadline is validated and stripped only from the in-memory value.
- * Existing Delivery rows are not guessed into a current slot and no outbound
- * send is replayed by this script. Local anchors are not promoted and context
- * modes are not guessed.
+ * while v12 inquiry rows are explicitly parser-compatible at v13, v13 → v14
+ * adds only serialized Delivery lease fields/statuses, and v14 → v15 adds the
+ * `shared_fact_ledger`/`ledger_item` tables (see src/host/spec.ts,
+ * inquiry/ledger.ts and ledger/todo.ts). No existing row or log is converted,
+ * cleared, or rewritten; a legacy deadline is validated and stripped only
+ * from the in-memory value. Existing Delivery rows are not guessed into a
+ * current slot and no outbound send is replayed by this script. Local
+ * anchors are not promoted and context modes are not guessed. A todo
+ * references locus identity (locusId + endpoint), never a locus instance
+ * (generation), so no existing locus/delivery row is read or interpreted
+ * differently by the v15 bump.
  *
  * Usage:
  *   node scripts/migrate-state-version.mjs [--db <path>] [--dry-run] [--yes]
@@ -30,10 +34,10 @@ import os from 'node:os'
 
 /** Domain identity; must match src/host/spec.ts. */
 const PET_DOMAIN_NAME = 'dsh_pet'
-const PET_DOMAIN_VERSION = 14
+const PET_DOMAIN_VERSION = 15
 /** Versions this script is allowed to restamp. v1 needs a separate explicit
  * cleanup because its rows reference a store layout that is gone. */
-const RESTAMPABLE = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+const RESTAMPABLE = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
 
 function parseArgs(argv) {
   const args = { dryRun: false, yes: false, db: undefined, help: false }

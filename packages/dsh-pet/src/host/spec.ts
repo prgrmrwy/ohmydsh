@@ -12,6 +12,7 @@ import { z } from 'zod'
 import { parseCollaborationContext } from './collaboration/context.js'
 import { parseInquiry } from './inquiry/ledger.js'
 import { parseInquiryOutboxRecord } from './inquiry/outbox.js'
+import { parseTodoRecord } from './ledger/todo.js'
 
 /**
  * Domain name; also the backend unit name and the storage-domain route key.
@@ -92,7 +93,15 @@ export const PET_DOMAIN_NAME = 'dsh_pet'
 // additive, but old pending rows are never guessed into a current slot by the
 // runtime; startup reconciliation must prove or conservatively terminalize
 // them before intake.
-export const PET_DOMAIN_VERSION = 14
+//
+// Bumped to 15 for the shared-fact ledger (`shared_fact_ledger`, keyed by
+// parentSessionId) and its todo items (`ledger_item`, keyed by itemId,
+// currently only `kind: 'todo'` rows). Additive in the same way as v10→v11:
+// two new tables, nothing converted, cleared or rewritten. A todo references
+// locus IDENTITY (locusId + endpoint), never a locus INSTANCE (generation) —
+// see `ledger/todo.ts` design D6 — so no existing locus/delivery row is read
+// or interpreted differently by this bump.
+export const PET_DOMAIN_VERSION = 15
 
 // `chat` joins the original three for Tasks created by an inbound Lark
 // message. It is a distinct scope kind rather than a flavour of `workspace`
@@ -986,6 +995,56 @@ export const petInquiryResultRecord = z.unknown().transform((input, issueCtx) =>
   }
 })
 
+/**
+ * One durable shared-fact-ledger record, keyed by parentSessionId.
+ *
+ * The record has exactly two fields (`parentSessionId`, `createdAt`); it is
+ * still routed through `z.unknown()` rather than a bespoke `z.object` so a
+ * malformed row fails the exact same way every other table in this domain
+ * does, and so any future field this ledger gains stays governed by a single
+ * parse function rather than growing a second zod declaration to keep in sync.
+ */
+export const petSharedFactLedgerRecord = z.unknown().transform((input, issueCtx) => {
+  if (
+    input !== null && typeof input === 'object' && !Array.isArray(input) &&
+    typeof (input as Record<string, unknown>).parentSessionId === 'string' &&
+    (input as Record<string, unknown>).parentSessionId !== '' &&
+    Number.isSafeInteger((input as Record<string, unknown>).createdAt)
+  ) {
+    return {
+      parentSessionId: (input as Record<string, unknown>).parentSessionId as string,
+      createdAt: (input as Record<string, unknown>).createdAt as number,
+    }
+  }
+  issueCtx.addIssue({ code: 'custom', message: 'Invalid shared-fact-ledger record.' })
+  return z.NEVER
+})
+
+/**
+ * One durable ledger-item record, keyed by itemId.
+ *
+ * Delegates to the pure exact-shape validator for the same reason
+ * `petInquiryRecord` does: a second zod declaration would let a field rename
+ * pass one check and fail the other, and only the pure model in
+ * `ledger/todo.ts` knows the status-transition and locus-identity-vs-instance
+ * invariants that make a row meaningful. Today every row is `kind: 'todo'`;
+ * a future kind (design D4) gets its own parser branch here, not a rewrite of
+ * this one.
+ *
+ * By contract this table holds a todo's summary/evidence/requestedBy — bounded
+ * fields already validated by the pure model — and never a chat message body,
+ * a full transcript excerpt or a sibling locus's history.
+ */
+export const petLedgerItemRecord = z.unknown().transform((input, issueCtx) => {
+  try {
+    return parseTodoRecord(input)
+  } catch {
+    // Never leak a todo's summary, evidence or requestedBy.
+    issueCtx.addIssue({ code: 'custom', message: 'Invalid ledger item record.' })
+    return z.NEVER
+  }
+})
+
 const petGlobalState = z.object({
   /** Bumped whenever the enabled skill selection changes. */
   skillSetGeneration: z.number().int().nonnegative(),
@@ -1066,6 +1125,14 @@ export const petDomainSpec = defineDomain({
     // redelivered result collides with its own row instead of queueing a second
     // continuation for the same question.
     inquiry_results: domainTable<string, z.infer<typeof petInquiryResultRecord>>(petInquiryResultRecord),
+    // Shared-fact ledger, keyed by parentSessionId. Additive at v15. One row
+    // per main session that has ever registered a ledger item; ensured
+    // idempotently and never deleted, including when its last item is removed.
+    shared_fact_ledger: domainTable<string, z.infer<typeof petSharedFactLedgerRecord>>(petSharedFactLedgerRecord),
+    // Ledger items, keyed by itemId. Additive at v15. Every row today is
+    // `kind: 'todo'`; the field is a namespace partition (design D4), not a
+    // discriminated union this table's schema branches on.
+    ledger_item: domainTable<string, z.infer<typeof petLedgerItemRecord>>(petLedgerItemRecord),
   },
 })
 
