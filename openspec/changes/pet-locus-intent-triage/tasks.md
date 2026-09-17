@@ -103,6 +103,8 @@
     2. 全量套件（148 个测试文件）跑出 12 个既有失败（`tool-scope.test.ts`/`collaboration-assembly.test.ts`/`collaboration-tool-scope.test.ts`/`inquiry-tool-scope.test.ts`/`loader-composition.test.ts`），用 `git stash` 在完全干净的 HEAD 上复现同样的 12 个失败——**确认与本 change 无关的既有环境缺陷**，不属于本 change 引入。
     3. **发现并修复了一处真实自我回归**：`scripts/migrate-state-version.mjs` 是一个独立于 TS 构建、不 import `spec.ts` 的 CLI 脚本（`node:sqlite` 直接读写，注释明确写着"must match src/host/spec.ts"，要求手动同步），其硬编码的 `PET_DOMAIN_VERSION = 14` 与 `RESTAMPABLE` 清单（`[2..13]`）在我把 `spec.ts` 升到 15 时未同步更新，导致 `test/migrate-cli.test.ts` 10 个用例失败（脚本仍输出"target: 14"）。已同步更新为 `PET_DOMAIN_VERSION = 15`、`RESTAMPABLE` 扩到含 14、头部注释补充 v14→v15 的 additive 说明；修复后 21/21 通过。**这是 design.md 里"PET_DOMAIN_VERSION 将从 14 升至 15"这条判断的一个未被记录的联动点，值得记进 design 供以后再次升版本时参照。**
     4. 全量套件最终状态：148 个文件中 141 通过、5 个失败（与步骤 2 的既有基线完全一致，数量不变）、2537 个测试通过、12 个既有失败（同上）、42 个 skip（未设置 `DSH_PET_TEST_RUNTIME` 时的真实事务测试）。
+    5. **部署后实机发现的第二层问题（比 3. 更根本，已回填 design）**：修好迁移脚本只保证"脚本会输出正确的目标版本号"，**不等于存量数据库已经迁移**。所有者用本 change 的代码 `dsh build` 并重启后，Pet 整体降级：`[dsh-pet] degraded: Pet storage domain: kv unit 'dsh_pet' is stamped version 14 on the medium, incompatible with descriptor version 15`。这是既有 fail-closed 设计的正确行为，但意味着**本 change 对存量部署要求一次显式停机迁移**，而 design.md 的 Migration Plan 当时写的是"无数据迁移"——该表述已订正，并在 Risks 中新增该风险条目。
+       **方法论教训**：这类问题在本次实施的任何一层验证里都不会暴露——`tsc --noEmit`、`vitest`（含真实 Domain 事务，但每次用新建的内存 medium）、仓库级 `npm test`（124/125）、`npm run check:artifacts`、`dsh-pet` 自身 `npm run build` 全部通过。它只在"面对一个已经盖着旧版本戳的真实数据库"时出现。后续任何改动 `PET_DOMAIN_VERSION` 的 change，都应把"在有存量数据的环境实际部署一次"列为独立验收项。
 
 ## 8. 管理面待办视图
 

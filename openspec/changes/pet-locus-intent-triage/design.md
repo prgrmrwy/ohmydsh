@@ -164,15 +164,26 @@ todo_item (kind='todo' 的条目内容)
 - **[跨 locus 读取扩大检索面]** → 台账只暴露结构化条目，不暴露对话历史与入口枚举；B037 记录的过度检索问题源于开放式历史检索，本设计不引入该面。
 - **[证据快照过时]** → 明确标注为登记时刻事实，不自动刷新；所有者接手时自行核对。不做自动刷新是因为刷新需要重新执行排查，成本与收益不成比例。
 - **[宿主缺冷读能力]** → 查阅工具以不可用呈现并说明原因，其余能力不受影响；不猜测、不降级为提问。
+- **[存量部署升级后 Pet 整体降级]** → `PET_DOMAIN_VERSION` 14→15 使存量数据库版本戳与 descriptor 不符，Pet fail closed 降级、全部路由不注册（不只是新功能不可用）。缓解：见下方 Migration Plan 的停机迁移步骤。**这类风险只在真实存量环境暴露**——`tsc --noEmit`、`vitest`（含真实 Domain 事务，但用的是每次新建的内存 medium）、仓库级 `npm test` 与 `check:artifacts` 全绿也不会发现它，因为它们都不面对一个「已经盖着旧版本戳的真实数据库」。任何后续改动 `PET_DOMAIN_VERSION` 的 change 都应把「在有存量数据的环境实际部署一次」列为验收项，而不是只依赖测试套件。
 
 ## Migration Plan
 
-纯增量，无破坏性变更，无数据迁移。
+表结构是纯增量（additive），不改写任何存量行；但 **`PET_DOMAIN_VERSION` 从 14 升至 15，因此存量部署必须执行一次显式的离线迁移**，且该迁移**要求停机**。
 
-1. 新增台账与条目表（additive），存量行不动。
-2. 装配三个 scoped 工具，验证普通会话工具面不变。
-3. 管理面新增待办视图；无待办时呈现空状态，不影响既有视图。
-4. 回滚：移除工具注册与视图即可；已登记待办作为历史数据保留，不自动删除。
+> ⚠️ 本节早先写作「纯增量，无破坏性变更，**无数据迁移**」，这是错的，已在实机部署时被证伪：Pet 在 `storageDomain.open` 检测到 medium 仍盖着 v14 的版本戳与 descriptor v15 不符，按既有 fail-closed 设计降级，日志为
+> `[dsh-pet] degraded: Pet storage domain: kv unit 'dsh_pet' is stamped version 14 on the medium, incompatible with descriptor version 15`。
+> 这是正确行为而非缺陷——但「代码正确」不等于「存量数据库已迁移」，本节此前混淆了这两件事。
+
+**存量部署的升级步骤**（必须按序，且 2–3 步必须在 DSH 停止时执行）：
+
+1. `dsh build`：物化新代码（此步不动数据库）。
+2. `dsh stop` → `dsh-pet-migrate-state --dry-run`：确认识别到 `14 → 15`。数据库被 Host 以 `PRAGMA locking_mode = EXCLUSIVE` 独占持有，脚本在 DSH 运行时会正确 fail closed 拒绝（`✗ Pet database is locked`），不会半途写入。
+3. `dsh-pet-migrate-state --yes`：脚本先备份为 `state.sqlite.v14.bak-<时间戳>` 再改戳，v14→v15 只改 `units.version`，不转换、不清空、不重写任何行。
+4. `dsh`：重启后 Pet 正常加载，两张新表由存储后端在下次 open 时创建。
+
+**全新部署**无需任何迁移：首次 open 直接按 v15 建库。
+
+**回滚**：移除工具注册与视图即可回到旧行为；已登记待办作为历史数据保留，不自动删除。注意版本戳一旦升到 15 就不会自动降回 14，回滚代码时若需同时回退数据库版本，应从第 3 步产生的备份恢复，而不是手工改戳。
 
 ## Open Questions
 
