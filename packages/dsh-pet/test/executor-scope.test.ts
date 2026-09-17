@@ -264,23 +264,28 @@ describe('Pet tool schemas match the real defineTool contract', () => {
     })
   })
 
-  it('registers only trusted context and the caller-bound Feishu finish/wait adapters', async () => {
+  it('registers only trusted context, the caller-bound Feishu finish/wait adapters, and the caller-bound intent-triage tools — never an arbitrary per-capability catalog', async () => {
     const { readFile } = await import('node:fs/promises')
     const tools = await readFile(
       path.resolve(__dirname, '..', 'src', 'host', 'tools.ts'),
       'utf8',
     )
 
-    // Pet still does not ship one tool per arbitrary capability. The other two
-    // adapters are the single security-critical Delivery lifecycle surface:
-    // finish and wait, both resolved from the caller/turn proof and both
-    // deliberately accepting no target selector.
+    // Pet still does not ship one tool per arbitrary capability. Six is the
+    // full set today: `pet_context`; the security-critical Delivery lifecycle
+    // pair (finish/wait), both resolved from the caller/turn proof and
+    // deliberately accepting no target selector; and the three
+    // `pet-locus-intent-triage` tools (read-only parent lookup, ledger read,
+    // `pet_locus_track`), each equally caller-bound with no target selector.
     // Comments are stripped so prose mentioning registration is not counted.
     const code = tools.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-    expect([...code.matchAll(/ctx\.tools\.register\(/g)]).toHaveLength(3)
+    expect([...code.matchAll(/ctx\.tools\.register\(/g)]).toHaveLength(6)
     expect(tools).toContain('PET_CONTEXT_TOOL')
     expect(tools).toContain('PET_LOCUS_FINISH_TOOL')
     expect(tools).toContain('PET_LOCUS_WAIT_TOOL')
+    expect(tools).toContain('PET_LOCUS_PARENT_LOOKUP_TOOL')
+    expect(tools).toContain('PET_LOCUS_LEDGER_READ_TOOL')
+    expect(tools).toContain('PET_LOCUS_TRACK_TOOL')
     expect(tools).not.toContain('pet_create_mr')
     expect(tools).not.toContain('pet_send_cr')
     expect(tools).not.toContain('pet_clean_worktree')
