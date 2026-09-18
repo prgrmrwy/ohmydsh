@@ -180,8 +180,12 @@ describe('owner-facing todo routes are actually wired (regression guards)', () =
   it('the settings panel renders the fold and dispatches through the pure model', async () => {
     const fs = await import('node:fs')
     const settings = fs.readFileSync(new URL('../src/client/settings.tsx', import.meta.url), 'utf8')
-    expect(settings).toContain('<TodoLedgerFold')
-    expect(settings).toContain('function TodoLedgerFold')
+    // Todos render inside each parent session's block, not as a standalone
+    // section: one ledger read at panel level, redistributed per session.
+    expect(settings).toContain('<WorkTodos')
+    expect(settings).toContain('function WorkTodos')
+    expect(settings).toContain('function useTodoLedger')
+    expect(settings).toContain('todos.byParent.get(work.parentSessionId)')
     // Display decisions must come from ledger-view.ts, not be re-derived here.
     for (const fn of ['groupTodosByLocus', 'todoStatusLabel', 'availableTodoActions', 'resolveFeishuJumpTarget', 'resolveSessionJumpTarget']) {
       expect(settings).toContain(fn)
