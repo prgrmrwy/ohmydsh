@@ -216,41 +216,74 @@ GUI Q&A SHALL 仅接受未归档主会话，验证 bot、所有者及宿主能�
 
 ### Requirement: 默认 read 与 allowlist 授权独立于绑定
 
-所有新建及替换后的 locus SHALL 默认 read，并在接受工作前核验宿主实际文件只读策略；MUST NOT 仅依赖部署默认或数据库标签。`-s/--scope read|write` SHALL 仅由 allowlist 改变当前 locus 的共享档位，记录人、时间与生效结果；不存在关联时机械拒绝，未知值拒绝。
+所有新建及替换后的 locus SHALL 默认 read，并在接受工作前核验宿主实际文件策略；MUST NOT 仅依赖部署默认或数据库标签。`-s/--scope read|write` SHALL 仅由 allowlist 改变当前 locus 的共享档位，记录人、时间与生效结果；不存在关联时机械拒绝，未知值拒绝。
 
-写能力或目标工作根无法被当前宿主策略支持时 SHALL 明确拒绝提权并维持 read，MUST NOT 隐式选择更广模式。忙时变更 SHALL 拒绝并提示稍后；应用失败 MUST NOT 回执成功。read/write MUST NOT 被宣称为外部 API 全部副作用的控制。重新建立关联 MUST NOT 继承旧 write。
+写档 SHALL 映射为宿主的完全访问模式（`danger-full-access`）：授予 write 即代表该入口的成员共享**整机无边界**的文件写能力。系统 SHALL 在管理面与飞书回执中如实说明这一点，MUST NOT 声称写范围等于某个目录。
+
+更广模式 SHALL 由所有者显式选择，MUST NOT 由系统隐式采用；显式选择 SHALL 可审计（记录操作者、时间、期望值与生效值）。授予前 SHALL 确认该入口空闲；应用失败 MUST NOT 回执成功。宿主拒绝应用该模式、回读模式不符或持久化失败时 SHALL 拒绝提权并维持/回到 read，并给出可行动原因。read 档 MUST NOT 因此放宽任何既有约束。重新建立关联 MUST NOT 继承旧 write。
+
+写档的权威事实 SHALL 是「宿主回读的 live 文件策略恰为完全访问」；它 MUST NOT 依赖任何持久授权标记。上下文锚点（执行根、约束、资料入口）SHALL 只作为上下文事实注入子会话与展示，MUST NOT 门控提权；`unauthorized` 之类的锚点值若存在，MUST NOT 被当作唯一授权真相。
+
+系统 SHALL 提供一个全局写档开关，**当前默认关闭**。关闭期间：新的 write 请求 SHALL 在入口处（飞书控制面与管理面）被直接拒绝并说明真实原因，MUST NOT 先授予再降级；既有 write 记录 SHALL 在下次核验时按 read 生效并继续服务，MUST NOT 使该入口失效或暂停。降级 SHALL 只发生在派生层，durable 记录 SHALL 保留所有者原本的授权意图，使开关恢复后无需重新授予。
+
+关闭的理由 SHALL 被如实说明：多个 locus 子会话共享同一份工作目录，而 write 即完全访问，并发写入尚无协商机制。系统 MUST NOT 把该拒绝表述为宿主故障或可重试的临时失败。管理面的提权控件 SHALL 在关闭期间不可用并就地说明原因，MUST NOT 呈现为可用而在提交时才失败。
+
+提权被拒绝时 SHALL 给出可行动的确定性原因——无论拒绝发生在飞书控制面还是管理面。MUST NOT 以「执行失败，请稍后重试」一类重试提示代替确定性原因：写档已停用、宿主拒绝应用、入口忙、持久化失败都是可判定的稳定事实，重试不会改变结论。
+
+管理面 SHALL 把宿主解析出的执行根作为可确认事实呈现，并 SHALL 让所有者据此完成确认。锚点已确认但尚无执行根时，确认入口 SHALL 保持可用，使所有者仍能补上该事实。该确认 SHALL 只产生上下文事实，MUST NOT 门控提权。
 
 #### Scenario: 写父会话创建只读子会话
 - **WHEN** 来源主会话当前允许文件写入，新建 locus
 - **THEN** 子会话在工作前确认 read，不静默继承 write
 
 #### Scenario: 授予共享 write
-- **WHEN** allowlist 在空闲 locus 提权且宿主支持已确认工作根
-- **THEN** 核验生效后回执并记录授权；该入口后续成员请求共享该档位
+- **WHEN** allowlist 在空闲 locus 提权，且宿主接受完全访问模式
+- **THEN** 核验 live 模式为完全访问后回执并记录授权；该入口后续成员共享该档位，管理面明确写出"整机无边界、入口成员共享"
 
-写授权 SHALL 在每次核验时派生，MUST NOT 以持久标记代替。派生 SHALL 同时要求两个独立事实：所有者已显式确认执行根（意图），且 live sandbox 回读的 workspace root 与该根规范化后精确相等（权威）。二者缺一不可：仅有 live root 一致而无所有者确认 SHALL 拒绝；仅有所有者确认而 live root 不一致或缺失 SHALL 拒绝。所有者显式撤销 SHALL 优先于 root 一致。
+#### Scenario: 宿主拒绝完全访问
+- **WHEN** 宿主拒绝应用完全访问模式，或回读到的模式不是完全访问
+- **THEN** 拒绝提权并维持 read，说明该拒绝是宿主策略所致，不把 prompt 当作解除限制
 
-持久化的锚点确认 MUST NOT 写入可直接满足写授权的标记，因为已存储的授权可能过期并凌驾于 live sandbox 之上。
+#### Scenario: 提权不依赖执行根确认
+- **WHEN** 所有者在空闲 locus 提权，而该入口从未确认过执行根
+- **THEN** 提权照常进行并只受闲置与 mode 核验约束；锚点缺失不构成拒绝理由
 
-#### Scenario: 宿主写范围不支持
-- **WHEN** 工作根位于当前可写范围之外
-- **THEN** 明确说明无法授予该范围，保持 read，不把 prompt 当作解除限制
+#### Scenario: 授权按 live 模式派生
+- **WHEN** 所有者已授予 write，且宿主回读的 live 模式为完全访问
+- **THEN** 生效 write 并记录授权人、时间与生效结果，不依赖任何已存储的授权标记
 
-#### Scenario: 授权按 live root 派生
-- **WHEN** 所有者已确认执行根，且 live sandbox 回读的 workspace root 与其规范化后一致
-- **THEN** 授予 write 并记录授权人、时间与生效结果，不依赖任何已存储的授权标记
+#### Scenario: live 模式漂移
+- **WHEN** 某入口已授予 write，但宿主回读的模式不再是完全访问
+- **THEN** 按既有策略漂移路径暂停该入口并诊断，MUST NOT 静默继续按 write 服务
 
-#### Scenario: 仅有 root 一致不足以授权
-- **WHEN** live sandbox 的 workspace root 与某路径一致，但所有者从未确认该执行根
-- **THEN** 拒绝提权并维持 read，提示需先确认上下文锚点
+#### Scenario: 写档开关关闭时拒绝新提权
+- **WHEN** 写档开关关闭，allowlist 在空闲 locus 请求 write
+- **THEN** 请求在入口处被拒绝并说明是写档已全局停用及其并发写理由，不进入授予流程，也不表述为宿主故障或可重试失败
 
-#### Scenario: 所有者撤销优先
-- **WHEN** 所有者已显式撤销该执行根的写授权，而 live root 仍与其一致
-- **THEN** 拒绝提权并维持 read
+#### Scenario: 开关关闭时既有 write 降为只读且继续服务
+- **WHEN** 某入口此前已授予 write，此后写档开关被关闭
+- **THEN** 该入口在下次核验时按 read 生效并继续服务，不被暂停或失效；对外呈现的生效档位是 read，不是记录中的 write
+
+#### Scenario: 降级不改写授权意图
+- **WHEN** 某 write 入口因开关关闭而降级，随后开关被重新打开
+- **THEN** 该入口恢复按其原有授权记录生效，无需所有者重新授予
+
+#### Scenario: 关闭期间提权控件不可用
+- **WHEN** 所有者在开关关闭期间打开管理面
+- **THEN** 提权控件不可用并就地说明原因，MUST NOT 呈现为可用而在提交时才失败
+
+#### Scenario: 已确认但缺执行根仍可补确认
+- **WHEN** 锚点已带其它已确认事实而尚无 executionRoot，所有者再次打开该 locus
+- **THEN** 管理面继续提供确认执行根的入口，不因状态已是 confirmed 而移除该动作
 
 #### Scenario: 冷恢复或降权
 - **WHEN** 子会话恢复或空闲时被设置 read
 - **THEN** 核验实际策略后才继续派发，策略失败停止服务并诊断
+
+#### Scenario: 提权失败必须给出原因而非重试提示
+- **WHEN** 提权被拒绝
+- **THEN** 飞书控制面与管理面都返回/显示该确定性原因，不用「请稍后重试」掩盖它
+
 
 ### Requirement: 上下文按实际子会话绑定并允许按需问主会话
 
