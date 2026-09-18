@@ -85,6 +85,34 @@ describe('the three pet-locus-intent-triage tools are scoped to Pet executors', 
     expect(visible).not.toContain(PET_LOCUS_TRACK_TOOL)
   })
 
+  it('REGRESSION GUARD: both production composition paths in index.ts actually pass intentTriage — a unit test calling registerPetTools directly cannot catch this', async () => {
+    // This test exists because of a real defect found only at deployment:
+    // `tools.ts` correctly registered the three tools *when given*
+    // `intentTriage`, and every scope test above passes by supplying it by
+    // hand — but neither production call site in `index.ts` actually passed
+    // it, so the tools were never registered on the real Host at all.
+    //
+    // Both paths must pass it, for the same reason the collaboration surface
+    // is installed on both: a locus child composed by Pet's own executor
+    // setup and one adopted from DSH's native agent load must get the SAME
+    // surface, or a child can register a todo through one path and not the
+    // other.
+    const fs = await import('node:fs')
+    const source = fs.readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8')
+    // Slice from each call site to the start of the next one (or EOF) rather
+    // than trying to brace-match with a regex — the argument object spans
+    // nested closures, which no single regex reliably delimits.
+    const starts = [...source.matchAll(/registerPetTools\(/g)].map(m => m.index!)
+    expect(starts.length).toBeGreaterThanOrEqual(2)
+    for (const [i, start] of starts.entries()) {
+      const end = starts[i + 1] ?? source.length
+      expect(source.slice(start, end)).toContain('intentTriage')
+    }
+    // `pet_locus_track` additionally needs the current-Delivery proof seam,
+    // reusing the exact one `pet_locus_finish` uses.
+    expect(source).toContain('currentCapability: childSessionId => currentLocusCapability(childSessionId)')
+  })
+
   // ⚠️ KNOWN PRE-EXISTING ENVIRONMENT ISSUE, not a defect in this change's code:
   // `test/tool-scope.test.ts`'s own "is absent from an unrelated agent scope"
   // case (same assertion shape, for `pet_context`) already fails identically

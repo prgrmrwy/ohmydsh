@@ -7,6 +7,7 @@
  * is contained by the lifecycle machine and degrades Pet alone.
  */
 
+import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-host-webserver'
@@ -56,6 +57,7 @@ import {
   type CollaborationAssembly,
 } from './host/collaboration/assembly.js'
 import { InquiryLedgerStore } from './host/inquiry/ledger-store.js'
+import { SharedFactLedgerStore } from './host/ledger/store.js'
 import { InquiryOutboxStore } from './host/inquiry/outbox-store.js'
 import { summarizeInquiryReconciliation } from './host/inquiry/reconcile.js'
 import type { InquiryOriginProof } from './host/inquiry/ask.js'
@@ -384,6 +386,52 @@ async function initialize(
    * publish anything when that capability is absent.
    */
   const inquiryLedgerStore = new InquiryLedgerStore(domain as never)
+
+  /**
+   * Durable shared-fact ledger (`pet-locus-intent-triage`) over the same
+   * opened domain. Constructed unconditionally for the same reason as the
+   * inquiry ledger above: it proves the atomic-batch capability on every call
+   * and rejects without it, so construction itself commits nothing.
+   */
+  const sharedFactLedgerStore = new SharedFactLedgerStore(domain as never)
+
+  /**
+   * Caller-bound intent-triage capability set, shared by BOTH composition
+   * paths below (Pet's own executor setup and DSH's native agent load).
+   *
+   * Built once on purpose: a locus child that could register a todo through
+   * one path but not the other is exactly the split surface the scoped
+   * assembly pitfalls warn about, and it would be invisible to a unit test
+   * that calls `registerPetTools` directly.
+   *
+   * `inspect` is PROBED rather than injected — a Host without cold-read keeps
+   * every other tool working while the parent-lookup tool reports itself
+   * unavailable (spec: 缺少冷读能力时如实降级，不猜测、不降级为提问).
+   */
+  const intentTriageDeps = (() => {
+    const controller = ctx.get('sessionController') as
+      | { inspect?: (id: unknown, signal?: AbortSignal) => Promise<unknown> }
+      | undefined
+    const inspect = controller?.inspect
+    return {
+      // Returns EVERY durable generation for the child identity; rejecting
+      // ambiguity is the caller's job — exactly `resolveLedgerCaller`'s contract.
+      loci: { findByChildSessionId: (id: string) => locusRepository.findByChildSessionId(id) },
+      ledgerRead: { listForParent: (id: string) => sharedFactLedgerStore.listForParent(id) },
+      track: {
+        store: sharedFactLedgerStore,
+        now: () => Date.now(),
+        newItemId: () => `todo-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`,
+      },
+      ...(typeof inspect !== 'function' ? {} : {
+        parentLookup: {
+          // Keep the receiver: `inspect` is a service method that uses `this`.
+          inspect: async (sessionId: string) =>
+            await inspect.call(controller, sessionId) as { readonly events?: readonly unknown[] },
+        },
+      }),
+    }
+  })()
   // The result outbox is the other half of restart reconciliation: without it
   // the pass can classify inquiries but cannot see whether a result already
   // exists, so it would report a fault instead of reconciling on a guess.
@@ -830,6 +878,7 @@ async function initialize(
               () => registerPetTools(toolCtx, {
                 repository,
                 locusRepository: locusContextRepository,
+                intentTriage: intentTriageDeps,
               }),
               'dsh-pet: scoped caller-bound Agent tools',
             )
@@ -1013,6 +1062,21 @@ async function initialize(
             // wrapper must not capture the initial unavailable stub.
             finishCurrentDelivery: input => finishCurrentDelivery(input),
             waitCurrentDelivery: input => waitCurrentDelivery(input),
+          },
+          intentTriage: {
+            ...intentTriageDeps,
+            // `pet_locus_track` needs the same "there is exactly one current
+            // Delivery" proof `pet_locus_finish` uses — reusing this exact
+            // seam rather than a second, weaker resolver is what keeps a todo
+            // from ever being attributed to a Delivery that is not current.
+            currentCapability: childSessionId => currentLocusCapability(childSessionId),
+            authorizeCurrentDelivery: input => {
+              const proof = currentLocusCapability(input.childSessionId)
+              return locusContextRepository.authorizeCurrentDelivery?.({
+                ...input,
+                ...(proof === undefined ? {} : { proof }),
+              })
+            },
           },
         })
         // The circle surface rides the SAME synchronous boundary, so a locus
