@@ -11,7 +11,7 @@
 import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { TodoLedgerFold } from '../src/client/settings.js'
+import { LocusSurface } from '../src/client/settings.js'
 import { PET_CSS } from '../src/client/styles.js'
 import type { PetLocusManagementView } from '../src/wire.js'
 
@@ -21,11 +21,11 @@ const snapshot = {
     locusId: 'locus-1',
     generation: 1,
     endpoint: { chatId: 'oc_chat' },
-    main: { sessionId: 'main-1' },
+    main: { sessionId: 'main-1', availability: 'available' as const, title: '主会话' },
     child: { sessionId: 'child-1', availability: 'available' as const },
     workspace: { workspaceId: 'ws-1' },
     permission: { desired: 'read' as const, effective: 'read' as const },
-    state: { value: 'active' as const },
+    state: { state: 'active' as const, busy: false, createdAt: 1, updatedAt: 1 },
     source: 'auto' as const,
     isDefaultQa: false,
   }],
@@ -50,18 +50,33 @@ const groups = [{
   }],
 }]
 
+/**
+ * Renders the real `LocusSurface`, not a todo component in isolation: todos
+ * now live inside each parent session's block, so rendering them detached
+ * would no longer prove what the owner actually sees.
+ */
 function render(overrides: Record<string, unknown> = {}): string {
-  return renderToStaticMarkup(createElement(TodoLedgerFold, {
-    snapshot, disabled: false, initialGroups: groups, initialOpen: true, ...overrides,
+  return renderToStaticMarkup(createElement(LocusSurface, {
+    snapshot,
+    onAction: () => {},
+    runQuery: async () => undefined,
+    initialTodoGroups: groups,
+    initialTodosOpen: true,
+    ...overrides,
   } as never))
 }
 
 describe('todo panel renders a sound box model', () => {
   it('never reuses the two-column locus-row grid or the absolutely-positioned badge', () => {
+    // Scope to the todo article: the surrounding page legitimately renders
+    // `.dshpet-locus-row` for its own entry rows, so a whole-page assertion
+    // would be meaningless. What must never recur is a TODO built from them.
     const markup = render()
-    // The exact two classes that broke the first version.
-    expect(markup).not.toContain('dshpet-locus-row')
-    expect(markup).not.toContain('dshpet-badge')
+    const start = markup.indexOf('<article class="dshpet-todo"')
+    expect(start).toBeGreaterThan(-1)
+    const article = markup.slice(start, markup.indexOf('</article>', start))
+    expect(article).not.toContain('dshpet-locus-row')
+    expect(article).not.toContain('dshpet-badge')
   })
 
   it('renders each todo as a flat block owning its own class namespace', () => {
@@ -122,7 +137,7 @@ describe('todo panel renders a sound box model', () => {
 
   it('shows only terminal-safe output for a done todo — no actions offered', () => {
     const done = [{ ...groups[0]!, items: [{ ...groups[0]!.items[0]!, status: 'done' as const }] }]
-    const markup = render({ initialGroups: done })
+    const markup = render({ initialTodoGroups: done })
     expect(markup).toContain('data-status="done"')
     expect(markup).not.toContain('受理')
     expect(markup).not.toContain('放弃')
@@ -130,15 +145,21 @@ describe('todo panel renders a sound box model', () => {
 
   it('keeps the toggle label stable and moves the count beside it', () => {
     const markup = render()
-    // A button's accessible name must not change as data changes.
-    expect(markup).toMatch(/aria-expanded="true"[^>]*>待办</)
-    expect(markup).toContain('dshpet-todo-count')
+    // A button's accessible name must not change as data changes: the count
+    // rides in a sibling span, never in the label.
+    expect(markup).toContain('dshpet-work-todos-head')
+    expect(markup).toMatch(/<span>待办<\/span>/)
+    expect(markup).toContain('dshpet-work-todos-count')
+    expect(markup).toContain('1 条待处理')
   })
 
-  it('states an actionable empty message rather than a bare "none"', () => {
-    const markup = render({ initialGroups: [] })
-    expect(markup).toContain('还没有待办')
-    expect(markup).toContain('子会话遇到做不了的改动请求时会记在这里')
+  it('renders no todo block at all for a session with nothing filed', () => {
+    // Now that todos live inside a session block, an always-present empty
+    // shell would be noise on every healthy session. Absence is the empty
+    // state.
+    const markup = render({ initialTodoGroups: [] })
+    expect(markup).not.toContain('dshpet-work-todos')
+    expect(markup).not.toContain('dshpet-todo-summary')
   })
 })
 
@@ -154,7 +175,11 @@ describe('todo rows actually navigate, not merely describe', () => {
       ...groups[0]!,
       items: [{ ...groups[0]!.items[0]!, endpoint: { chatId: 'oc_chat', threadId: 'omt_x' } }],
     }]
-    const markup = render({ initialGroups: threaded })
+    const threadedSnapshot = {
+      ...snapshot,
+      loci: [{ ...snapshot.loci[0]!, endpoint: { chatId: 'oc_chat', threadId: 'omt_x' } }],
+    } as unknown as PetLocusManagementView
+    const markup = render({ initialTodoGroups: threaded, snapshot: threadedSnapshot })
     expect(markup).toContain('https://applink.feishu.cn/client/thread/open?threadId=omt_x')
     expect(markup).not.toContain('client/chat/open')
   })

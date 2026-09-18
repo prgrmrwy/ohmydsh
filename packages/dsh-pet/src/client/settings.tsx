@@ -88,6 +88,7 @@ import type {
   PetSkillSelection,
   PetTodoAction,
   PetTodoStatus,
+  PetTodoView,
   PetUnifiedLocusReadiness,
   PetWorkspaceChoice,
 } from '../wire.js'
@@ -1260,6 +1261,11 @@ function WorkSection(props: {
   readonly onToggleHistory: (key: string) => void
   readonly sharedEntryCount: (parentSessionId: string) => number
   readonly hasDefaultQa: boolean
+  /** Todos filed against this parent session; empty in the by-entry reading. */
+  readonly todos?: readonly PetTodoView[]
+  readonly todoBusyId?: string | undefined
+  readonly onTodoDispatch?: (itemId: string, action: PetTodoAction) => void
+  readonly initialTodosOpen?: boolean
 }): JSX.Element {
   const { work } = props
   const sessionId = work.parentSessionId
@@ -1328,8 +1334,32 @@ function WorkSection(props: {
         </p>
       )}
       <div className="dshpet-rail">{work.nodes.map(node => renderNode(node, false))}</div>
+      {/* Filed work closes the session block: the entries above are what this
+          session serves, and these are the requests it could not serve. */}
+      {props.todos === undefined || props.onTodoDispatch === undefined ? null : (
+        <WorkTodos
+          items={props.todos}
+          parentSessionId={sessionId}
+          // This session's own generations — the session jump resolves the
+          // CURRENT child through them, never a generation recorded on the
+          // todo itself (design D6: identity, not instance).
+          loci={work.families.map(family => familyHead(family)).filter(isPresent)}
+          busyId={props.todoBusyId}
+          disabled={props.busyKey !== undefined}
+          onDispatch={props.onTodoDispatch}
+          {...(props.initialTodosOpen === true ? { initialOpen: true } : {})}
+        />
+      )}
     </section>
   )
+}
+
+/** Stable empty reference so a session with no todos does not re-render. */
+const EMPTY_TODOS: readonly PetTodoView[] = Object.freeze([])
+
+/** Narrowing helper for `.filter()`, since TS does not infer it from a predicate. */
+function isPresent<T>(value: T | undefined): value is T {
+  return value !== undefined
 }
 
 /** The filter panel. Every group states the condition it is applying. */
@@ -1747,6 +1777,10 @@ export function LocusSurface(props: {
   readonly warning?: string
   readonly onAction: (key: string, operation: () => Promise<unknown>) => void
   readonly runQuery: (request: PetLocusDiscoveryRequest) => Promise<PetLocusDiscoveryView | undefined>
+  /** Test seam: pre-seeded ledger groups render without a Host round-trip. */
+  readonly initialTodoGroups?: readonly PetTodoLedgerGroup[]
+  /** Test seam: start each session's todo block expanded. */
+  readonly initialTodosOpen?: boolean
 }): JSX.Element {
   const [reading, setReading] = useState<LocusReading>('work')
   const [filter, setFilter] = useState<LocusFilter>(DEFAULT_LOCUS_FILTER)
@@ -1774,6 +1808,9 @@ export function LocusSurface(props: {
       document.removeEventListener('mousedown', onPointer)
     }
   }, [filterOpen])
+
+  // One ledger read for the whole panel, redistributed per parent session.
+  const todos = useTodoLedger(props.initialTodoGroups)
 
   const toggleOpen = useMemo(() => toggle(setOpenKeys), [toggle])
   const toggleHistory = useMemo(() => toggle(setHistoryKeys), [toggle])
@@ -1915,6 +1952,10 @@ export function LocusSurface(props: {
             onToggleHistory={toggleHistory}
             sharedEntryCount={sharedEntryCount}
             hasDefaultQa={defaultQaParents.has(work.parentSessionId)}
+            todos={todos.byParent.get(work.parentSessionId) ?? EMPTY_TODOS}
+            todoBusyId={todos.busyId}
+            onTodoDispatch={todos.dispatch}
+            {...(props.initialTodosOpen === true ? { initialTodosOpen: true } : {})}
           />
         ))
         : visible.entries.map(group => {
@@ -1962,7 +2003,12 @@ export function LocusSurface(props: {
         ? <DiscoveryFold codes={codes} disabled={props.busyKey !== undefined} run={props.runQuery} />
         : null}
 
-      <TodoLedgerFold snapshot={props.snapshot} disabled={props.busyKey !== undefined} />
+      {/* Todos are not a section of their own: each one belongs to a parent
+          session, which already has a block above. Only a ledger-wide read
+          failure surfaces here, because it belongs to no single session. */}
+      {todos.error === undefined ? null : (
+        <p className="dshpet-error">读取待办失败：{todos.error}</p>
+      )}
 
       {props.warning === undefined ? null : <p className="dshpet-callout" data-tone="warn">{props.warning}</p>}
       {props.error === undefined ? null : <p className="dshpet-error">{props.error}</p>}
@@ -1971,30 +2017,25 @@ export function LocusSurface(props: {
 }
 
 /**
- * Owner-facing todo list for the shared-fact ledger
- * (`pet-locus-intent-triage`).
+ * Shared-fact ledger todos, loaded once for the whole panel.
  *
- * Fetches on its own rather than riding the locus snapshot: a todo appears
- * when a child registers one, which is not a locus lifecycle event, so
- * folding it into that snapshot would either make the snapshot churn or make
- * the todos stale.
+ * Lives at panel level rather than inside each session block for two reasons:
+ * one request instead of one per session, and a single place that re-reads
+ * after a disposition so every block stays consistent.
  *
- * Every display decision comes from the pure model in `ledger-view.ts` —
- * this component only renders and dispatches, so grouping, labels, jump
- * targets and legal actions stay testable without a DOM.
+ * Fetches separately from the locus snapshot on purpose: a todo appears when a
+ * child registers one, which is not a locus lifecycle event, so folding it
+ * into that snapshot would either make the snapshot churn or make todos stale.
  */
-export function TodoLedgerFold(props: {
-  readonly snapshot: PetLocusManagementView
-  readonly disabled: boolean
-  /** Test seam: pre-seeded groups render without a Host round-trip. */
-  readonly initialGroups?: readonly PetTodoLedgerGroup[]
-  /** Test seam: start expanded so the list itself can be asserted. */
-  readonly initialOpen?: boolean
-}): JSX.Element {
-  const [groups, setGroups] = useState<readonly PetTodoLedgerGroup[] | undefined>(props.initialGroups)
+function useTodoLedger(seed?: readonly PetTodoLedgerGroup[]): {
+  readonly byParent: ReadonlyMap<string, readonly PetTodoView[]>
+  readonly error: string | undefined
+  readonly busyId: string | undefined
+  readonly dispatch: (itemId: string, action: PetTodoAction) => void
+} {
+  const [groups, setGroups] = useState<readonly PetTodoLedgerGroup[] | undefined>(seed)
   const [error, setError] = useState<string | undefined>(undefined)
   const [busyId, setBusyId] = useState<string | undefined>(undefined)
-  const [open, setOpen] = useState(props.initialOpen === true)
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -2002,166 +2043,172 @@ export function TodoLedgerFold(props: {
       setGroups(result.ledgers)
       setError(undefined)
     } catch (cause) {
-      setGroups(undefined)
       setError(cause instanceof Error ? cause.message : String(cause))
     }
   }, [])
 
   useEffect(() => {
-    if (!open) return
-    // Pre-seeded groups mean a caller already supplied the data (tests), so
-    // opening must not issue a Host round-trip that would overwrite it.
-    if (props.initialGroups !== undefined) return
+    // A seed means a caller already supplied the data (tests); fetching would
+    // overwrite it.
+    if (seed !== undefined) return
     void load()
-  }, [open, load, props.initialGroups])
+  }, [load, seed])
 
-  const dispatch = useCallback(async (itemId: string, action: PetTodoAction): Promise<void> => {
+  const dispatch = useCallback((itemId: string, action: PetTodoAction): void => {
     setBusyId(itemId)
-    try {
-      await petApi.locusTodoAction({ itemId, action })
-      // Re-read rather than patch locally: the Host owns transition legality,
-      // so a rejected action must not leave an optimistic status on screen
-      // (spec: Host 拒绝时状态不被乐观改写).
-      await load()
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      setBusyId(undefined)
-    }
+    void (async () => {
+      try {
+        await petApi.locusTodoAction({ itemId, action })
+        // Re-read rather than patch locally: the Host owns transition
+        // legality, so a rejected action must not leave an optimistic status
+        // on screen (spec: Host 拒绝时状态不被乐观改写).
+        await load()
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause))
+      } finally {
+        setBusyId(undefined)
+      }
+    })()
   }, [load])
 
-  const total = groups?.reduce((sum, group) => sum + group.items.length, 0) ?? 0
-  const openCount = groups?.reduce(
-    (sum, group) => sum + group.items.filter(item => item.status === 'open').length,
-    0,
-  ) ?? 0
+  const byParent = useMemo(() => {
+    const map = new Map<string, readonly PetTodoView[]>()
+    for (const group of groups ?? []) map.set(group.parentSessionId, group.items)
+    return map
+  }, [groups])
+
+  return { byParent, error, busyId, dispatch }
+}
+
+/**
+ * The todos filed against one parent session, rendered inside that session's
+ * own block.
+ *
+ * Collapsed by default and summarised in one line: a session that is working
+ * normally should read as one line of reassurance, not a wall of cards. The
+ * block disappears entirely when there is nothing filed — an always-present
+ * empty shell would be noise on every session that never had a todo.
+ */
+function WorkTodos(props: {
+  readonly items: readonly PetTodoView[]
+  readonly parentSessionId: string
+  readonly loci: readonly PetLocusView[]
+  readonly busyId: string | undefined
+  readonly disabled: boolean
+  readonly onDispatch: (itemId: string, action: PetTodoAction) => void
+  readonly initialOpen?: boolean
+}): JSX.Element | null {
+  const [open, setOpen] = useState(props.initialOpen === true)
+  if (props.items.length === 0) return null
+
+  const openCount = props.items.filter(item => item.status === 'open').length
+  const byLocus = groupTodosByLocus(props.items as readonly TodoSnapshotItem[])
 
   return (
-    <section className="dshpet-todo-fold">
-      <div className="dshpet-todo-head">
-        <button
-          type="button"
-          className="dshpet-jump"
-          aria-expanded={open}
-          onClick={() => setOpen(current => !current)}
-        >
-          待办
-        </button>
-        {/* The count sits beside the control rather than inside its label: a
-            button's name should stay stable, not change every time a child
-            files something. */}
-        {groups === undefined ? null : (
-          <span className="dshpet-todo-count">
-            {openCount === 0 ? `${String(total)} 条，都已处理` : `${String(openCount)} 条待处理 · 共 ${String(total)} 条`}
-          </span>
-        )}
-      </div>
+    <div className="dshpet-work-todos">
+      <button
+        type="button"
+        className="dshpet-work-todos-head"
+        aria-expanded={open}
+        onClick={() => setOpen(current => !current)}
+      >
+        <span className="dshpet-work-todos-mark" aria-hidden="true">▸</span>
+        <span>待办</span>
+        {/* The count carries the state; the label stays stable so the control
+            keeps one accessible name. */}
+        <span className="dshpet-work-todos-count" data-pending={openCount > 0 ? 'true' : undefined}>
+          {openCount > 0
+            ? `${String(openCount)} 条待处理`
+            : `${String(props.items.length)} 条，都已处理`}
+        </span>
+      </button>
       {!open ? null : (
-        <div className="dshpet-todo-list">
-          <p className="dshpet-item-hint">
-            子会话判定为「要求干活」但自身只读时，会把查清楚的结论登记成待办交给你。
-            处置只改这里的状态，不向飞书发送任何消息。
-          </p>
-          {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
-          {groups === undefined && error === undefined
-            ? <p className="dshpet-item-hint">正在读取待办…</p>
-            : null}
-          {groups !== undefined && total === 0
-            ? <p className="dshpet-item-hint">还没有待办。子会话遇到做不了的改动请求时会记在这里。</p>
-            : null}
-          {(groups ?? []).map(group => {
-            if (group.items.length === 0) return null
-            const byLocus = groupTodosByLocus(group.items as readonly TodoSnapshotItem[])
-            return (
-              <div key={group.parentSessionId} className="dshpet-todo-group">
-                {[...byLocus.entries()].flatMap(([locusId, items]) => {
-                  const locus = props.snapshot.loci.find(row => row.locusId === locusId)
-                  const session = resolveSessionJumpTarget(
-                    locus?.child.sessionId,
-                    locus?.child.availability,
-                  )
-                  return items.map(item => {
-                    const jump = resolveFeishuJumpTarget(item)
-                    const busy = props.disabled || busyId === item.itemId
-                    const actions = availableTodoActions(item.status)
-                    return (
-                      <article key={item.itemId} className="dshpet-todo" data-status={item.status}>
-                        <p className="dshpet-todo-summary">{item.summary}</p>
-                        <div className="dshpet-todo-meta">
-                          <span className="dshpet-status" data-tone={TODO_TONE[item.status]}>
-                            {todoStatusLabel(item.status)}
-                          </span>
-                          <span className="dshpet-todo-meta-sep">·</span>
-                          <time dateTime={new Date(item.createdAt).toISOString()}>
-                            {formatTodoTime(item.createdAt)}
-                          </time>
-                          <span className="dshpet-todo-meta-sep">·</span>
-                          <span className="dshpet-todo-who" title={item.requestedBy}>
-                            {item.requestedBy}
-                          </span>
-                        </div>
-                        {item.detail.trim() === '' ? null : (
-                          <details className="dshpet-todo-evidence">
-                            <summary>登记时查到的证据</summary>
-                            <div className="dshpet-todo-evidence-body">{item.detail}</div>
-                          </details>
-                        )}
-                        <div className="dshpet-todo-actions">
-                          <span className="dshpet-todo-routes">
-                            {/* Jump back to where the request came from. A
-                                thread todo opens its thread; a chat-level one
-                                opens the chat and says so, rather than
-                                fabricating a thread target it cannot prove. */}
-                            <Jump
-                              label={jump.kind === 'thread' ? '话题' : '群'}
-                              title={todoFeishuTitle(jump)}
-                              {...(todoFeishuLink(jump) === undefined
-                                ? { disabled: true }
-                                : { href: todoFeishuLink(jump)! })}
-                            />
-                            <Jump
-                              label="会话"
-                              title={session.kind === 'available'
-                                ? '打开登记这条待办的子会话'
-                                : session.reason}
-                              disabled={sessionOpener === undefined || session.kind !== 'available'}
-                              onClick={() => {
-                                if (session.kind !== 'available') return
-                                sessionOpener?.({
-                                  kind: 'subagent',
-                                  parentSessionId: group.parentSessionId,
-                                  childSessionId: session.sessionId,
-                                })
-                                closeSettings?.()
-                              }}
-                            />
-                          </span>
-                          {actions.map(action => (
-                            <button
-                              key={action}
-                              type="button"
-                              className="dshpet-jump"
-                              disabled={busy}
-                              data-disabled={busy ? 'true' : undefined}
-                              title={TODO_ACTION_HINTS[action]}
-                              onClick={() => { void dispatch(item.itemId, action) }}
-                            >
-                              {TODO_ACTION_LABELS[action]}
-                            </button>
-                          ))}
-                        </div>
-                      </article>
-                    )
-                  })
-                })}
-              </div>
+        <div className="dshpet-work-todos-body">
+          {[...byLocus.entries()].flatMap(([locusId, items]) => {
+            const locus = props.loci.find(row => row.locusId === locusId)
+            const session = resolveSessionJumpTarget(
+              locus?.child.sessionId,
+              locus?.child.availability,
             )
+            return items.map(item => {
+              const jump = resolveFeishuJumpTarget(item)
+              const busy = props.disabled || props.busyId === item.itemId
+              return (
+                <article key={item.itemId} className="dshpet-todo" data-status={item.status}>
+                  <p className="dshpet-todo-summary">{item.summary}</p>
+                  <div className="dshpet-todo-meta">
+                    <span className="dshpet-status" data-tone={TODO_TONE[item.status]}>
+                      {todoStatusLabel(item.status)}
+                    </span>
+                    <span className="dshpet-todo-meta-sep">·</span>
+                    <time dateTime={new Date(item.createdAt).toISOString()}>
+                      {formatTodoTime(item.createdAt)}
+                    </time>
+                    <span className="dshpet-todo-meta-sep">·</span>
+                    <span className="dshpet-todo-who" title={item.requestedBy}>
+                      {item.requestedBy}
+                    </span>
+                  </div>
+                  {item.detail.trim() === '' ? null : (
+                    <details className="dshpet-todo-evidence">
+                      <summary>登记时查到的证据</summary>
+                      <div className="dshpet-todo-evidence-body">{item.detail}</div>
+                    </details>
+                  )}
+                  <div className="dshpet-todo-actions">
+                    <span className="dshpet-todo-routes">
+                      {/* Jump back to where the request came from. A thread
+                          todo opens its thread; a chat-level one opens the
+                          chat and says so, rather than fabricating a thread
+                          target it cannot prove. */}
+                      <Jump
+                        label={jump.kind === 'thread' ? '话题' : '群'}
+                        title={todoFeishuTitle(jump)}
+                        {...(todoFeishuLink(jump) === undefined
+                          ? { disabled: true }
+                          : { href: todoFeishuLink(jump)! })}
+                      />
+                      <Jump
+                        label="会话"
+                        title={session.kind === 'available'
+                          ? '打开登记这条待办的子会话'
+                          : session.reason}
+                        disabled={sessionOpener === undefined || session.kind !== 'available'}
+                        onClick={() => {
+                          if (session.kind !== 'available') return
+                          sessionOpener?.({
+                            kind: 'subagent',
+                            parentSessionId: props.parentSessionId,
+                            childSessionId: session.sessionId,
+                          })
+                          closeSettings?.()
+                        }}
+                      />
+                    </span>
+                    {availableTodoActions(item.status).map(action => (
+                      <button
+                        key={action}
+                        type="button"
+                        className="dshpet-jump"
+                        disabled={busy}
+                        data-disabled={busy ? 'true' : undefined}
+                        title={TODO_ACTION_HINTS[action]}
+                        onClick={() => { props.onDispatch(item.itemId, action) }}
+                      >
+                        {TODO_ACTION_LABELS[action]}
+                      </button>
+                    ))}
+                  </div>
+                </article>
+              )
+            })
           })}
         </div>
       )}
-    </section>
+    </div>
   )
 }
+
 
 /**
  * Status tone, reusing the sheet's existing `.dshpet-status` tokens rather
