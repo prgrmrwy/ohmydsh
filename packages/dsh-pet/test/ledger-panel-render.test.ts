@@ -141,3 +141,50 @@ describe('todo panel renders a sound box model', () => {
     expect(markup).toContain('子会话遇到做不了的改动请求时会记在这里')
   })
 })
+
+describe('todo rows actually navigate, not merely describe', () => {
+  it('a chat-level todo links to the real chat applink format this panel already ships', () => {
+    const markup = render()
+    expect(markup).toContain('https://applink.feishu.cn/client/chat/open?openChatId=oc_chat')
+    expect(markup).toContain('target="_blank"')
+  })
+
+  it('a thread todo links to the thread applink instead of the chat', () => {
+    const threaded = [{
+      ...groups[0]!,
+      items: [{ ...groups[0]!.items[0]!, endpoint: { chatId: 'oc_chat', threadId: 'omt_x' } }],
+    }]
+    const markup = render({ initialGroups: threaded })
+    expect(markup).toContain('https://applink.feishu.cn/client/thread/open?threadId=omt_x')
+    expect(markup).not.toContain('client/chat/open')
+  })
+
+  it('never appends triggerMessageId to an applink — neither format accepts a message selector', () => {
+    const markup = render()
+    expect(markup).not.toContain('om_1')
+  })
+
+  it('offers a session jump whose label says what it opens', () => {
+    const markup = render()
+    expect(markup).toContain('>会话')
+    expect(markup).toContain('打开登记这条待办的子会话')
+  })
+
+  it('disables the session jump and states the reason when the child is archived', () => {
+    const archived = {
+      ...snapshot,
+      loci: [{ ...snapshot.loci[0]!, child: { sessionId: 'child-1', availability: 'archived' as const } }],
+    } as unknown as PetLocusManagementView
+    const markup = render({ snapshot: archived })
+    expect(markup).toContain('会话已归档')
+    // A disabled Jump renders as a button, never as a live anchor.
+    expect(markup).toMatch(/<button[^>]*disabled[^>]*>会话/)
+  })
+
+  it('every disposition button explains what it does and that nothing is sent to Feishu', () => {
+    const markup = render()
+    for (const hint of ['仍可稍后完成或放弃', '终态', '不发送任何飞书消息']) {
+      expect(markup).toContain(hint)
+    }
+  })
+})

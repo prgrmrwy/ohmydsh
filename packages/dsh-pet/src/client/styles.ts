@@ -1001,6 +1001,9 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
    text the way an 'auto' grid column did. */
 .dshpet-settings .dshpet-todo-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;
   margin-top:2px}
+/* Navigation sits left, disposition right: one group answers "where did this
+   come from", the other "what do I do with it". Separating them stops a
+   destructive verb from sitting flush against a harmless jump. */
 .dshpet-settings .dshpet-todo-actions .dshpet-todo-routes{margin-right:auto;
   display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}
 .dshpet-settings .dshpet-todo-route{font:var(--dsw-font-xs-13,400 12px/18px inherit);
