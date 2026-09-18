@@ -110,6 +110,21 @@ async function mountTab(initialTab: 'channel' | 'locus' = 'channel'): Promise<HT
   return host
 }
 
+/**
+ * Open every collapsed parent-session block.
+ *
+ * The locus list collapses each session by default, so entry-row controls are
+ * not in the DOM until the owner expands one. These cases are about what the
+ * controls DO once reached, so they take the same first step a person would
+ * rather than assuming the rows are already open.
+ */
+async function expandSessions(host: HTMLElement): Promise<void> {
+  const toggles = [...host.querySelectorAll('button.dshpet-work-expand')] as HTMLButtonElement[]
+  for (const toggle of toggles) {
+    await act(async () => { toggle.click() })
+  }
+}
+
 const LOCUS_VIEW = {
   locusId: 'locus-1',
   generation: 1,
@@ -189,6 +204,7 @@ describe('an archived session is refused before the click, not after', () => {
     // clicking. The retired legacy route projection stays absent from UI.
     stubLocus({ ...LOCUS_VIEW, main: { ...LOCUS_VIEW.main, availability: 'archived' as const } })
     const host = await mountTab('locus')
+    await expandSessions(host)
 
     // An archived parent is hidden by default. The list adds no second row for
     // that: the filter control states the condition, and its popover is where
@@ -236,6 +252,7 @@ describe('an archived session is refused before the click, not after', () => {
     setSettingsCloser(() => closed.push(1))
     stubLocus()
     const host = await mountTab('locus')
+    await expandSessions(host)
 
     await act(async () => {
       ;([...host.querySelectorAll('button')].find(
@@ -255,6 +272,7 @@ describe('the locus header reads title, condition, description, controls', () =>
   it('puts the filter on the title row and the counts under it', async () => {
     stubLocus()
     const host = await mountTab('locus')
+    await expandSessions(host)
 
     // The control that changes the reading belongs with the title; the counts
     // describe the snapshot, so they get their own line instead of competing
@@ -301,6 +319,7 @@ describe('the panel sends only fields its route accepts', () => {
       }),
     )
     const host = await mountTab('locus')
+    await expandSessions(host)
 
     await act(async () => {
       ;(host.querySelector('.dshpet-locus-more') as HTMLButtonElement | null)?.click()
@@ -362,6 +381,7 @@ describe('a stopped entry is hidden by default yet recoverable', () => {
       }),
     )
     const host = await mountTab('locus')
+    await expandSessions(host)
 
     expect(host.querySelector('.dshpet-locus-row')).toBeNull()
     // The filter button states the condition even while the popover is shut, so
@@ -385,6 +405,9 @@ describe('a stopped entry is hidden by default yet recoverable', () => {
     await act(async () => {
       bucket?.querySelector('input')?.click()
     })
+    // Widening the filter surfaces a session that was not in the list before,
+    // and it arrives collapsed like any other.
+    await expandSessions(host)
 
     expect(host.querySelector('.dshpet-locus-row')).not.toBeNull()
     const rebuild = [...host.querySelectorAll('button')].find(
@@ -429,6 +452,7 @@ describe('a locus child opens through its durable parent address', () => {
     setSettingsCloser(() => undefined)
     stubLocus()
     const host = await mountTab('locus')
+    await expandSessions(host)
 
     await act(async () => {
       ;([...host.querySelectorAll('button')].find(
@@ -454,6 +478,7 @@ describe('a locus child opens through its durable parent address', () => {
     setSettingsCloser(() => undefined)
     stubLocus({ ...LOCUS_VIEW, main: { ...LOCUS_VIEW.main, sessionId: '' } })
     const host = await mountTab('locus')
+    await expandSessions(host)
 
     await act(async () => {
       ;([...host.querySelectorAll('button')].find(

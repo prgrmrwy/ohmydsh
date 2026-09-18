@@ -936,6 +936,31 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
    an absolutely-positioned mascot count chip. Both mistakes shipped once; these
    rules exist so the todo surface owns its own box model.
    --------------------------------------------------------------------------- */
+/* Paging control, repeated above and below the list so a long page does not
+   force a scroll back up to change pages. */
+.dshpet-settings .dshpet-pager{display:flex;align-items:center;gap:10px;
+  padding:8px 0;flex-wrap:wrap}
+.dshpet-settings .dshpet-pager[data-position="top"]{
+  border-bottom:.5px solid var(--dsw-alias-border-l2,#0000001a)}
+.dshpet-settings .dshpet-pager[data-position="bottom"]{
+  border-top:.5px solid var(--dsw-alias-border-l2,#0000001a);margin-top:6px}
+.dshpet-settings .dshpet-pager-state{font:var(--dsw-font-xs-13,400 12px/18px inherit);
+  color:var(--dsw-alias-label-tertiary,#81858c)}
+
+/* Expand control for one session's entries. Quiet by default: the count is
+   the useful part, the caret only says it can open. */
+.dshpet-settings .dshpet-work-expand{display:inline-flex;align-items:center;gap:4px;
+  flex:none;border:0;background:0 0;padding:1px 2px;cursor:pointer;white-space:nowrap;
+  font:var(--dsw-font-xs-13,400 12px/18px inherit);
+  color:var(--dsw-alias-label-secondary,#61666b)}
+.dshpet-settings .dshpet-work-expand:hover{color:var(--dsw-alias-label-primary,#0f1115)}
+.dshpet-settings .dshpet-work-expand:focus-visible{border-radius:6px;
+  outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:2px}
+.dshpet-settings .dshpet-work-expand-mark{flex:none;font-size:10px;
+  color:var(--dsw-alias-label-tertiary,#81858c);transition:transform .16s ease}
+.dshpet-settings .dshpet-work-expand[aria-expanded="true"] .dshpet-work-expand-mark{
+  transform:rotate(90deg)}
+
 /* Filed work closes a session block: indented under the rail so it reads as
    part of that session, not as a sibling section competing with it. */
 .dshpet-settings .dshpet-work-todos{margin:2px 0 0 16px;display:flex;flex-direction:column;gap:6px}
