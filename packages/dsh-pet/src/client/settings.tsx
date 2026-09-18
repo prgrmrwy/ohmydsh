@@ -2108,13 +2108,33 @@ export function TodoLedgerFold(props: {
                         )}
                         <div className="dshpet-todo-actions">
                           <span className="dshpet-todo-routes">
-                            <span className="dshpet-todo-route" title={jump.kind === 'thread' ? undefined : jump.reason}>
-                              {jump.kind === 'thread' ? '来自话题' : jump.reason}
-                            </span>
-                            <span className="dshpet-todo-meta-sep">·</span>
-                            <span className="dshpet-todo-route" title={session.kind === 'available' ? undefined : session.reason}>
-                              {session.kind === 'available' ? '子会话在服务中' : session.reason}
-                            </span>
+                            {/* Jump back to where the request came from. A
+                                thread todo opens its thread; a chat-level one
+                                opens the chat and says so, rather than
+                                fabricating a thread target it cannot prove. */}
+                            <Jump
+                              label={jump.kind === 'thread' ? '话题' : '群'}
+                              title={todoFeishuTitle(jump)}
+                              {...(todoFeishuLink(jump) === undefined
+                                ? { disabled: true }
+                                : { href: todoFeishuLink(jump)! })}
+                            />
+                            <Jump
+                              label="会话"
+                              title={session.kind === 'available'
+                                ? '打开登记这条待办的子会话'
+                                : session.reason}
+                              disabled={sessionOpener === undefined || session.kind !== 'available'}
+                              onClick={() => {
+                                if (session.kind !== 'available') return
+                                sessionOpener?.({
+                                  kind: 'subagent',
+                                  parentSessionId: group.parentSessionId,
+                                  childSessionId: session.sessionId,
+                                })
+                                closeSettings?.()
+                              }}
+                            />
                           </span>
                           {actions.map(action => (
                             <button
@@ -2123,6 +2143,7 @@ export function TodoLedgerFold(props: {
                               className="dshpet-jump"
                               disabled={busy}
                               data-disabled={busy ? 'true' : undefined}
+                              title={TODO_ACTION_HINTS[action]}
                               onClick={() => { void dispatch(item.itemId, action) }}
                             >
                               {TODO_ACTION_LABELS[action]}
@@ -2159,6 +2180,46 @@ const TODO_ACTION_LABELS: Record<PetTodoAction, string> = {
   accept: '受理',
   done: '完成',
   drop: '放弃',
+}
+
+/**
+ * What each disposition actually does, stated in terms of the owner's own
+ * workflow rather than the state machine's vocabulary.
+ *
+ * All three only move this row's status — none of them sends anything to
+ * Feishu, and none of them makes the child do more work. `accept` is the one
+ * reversible step (it stays actionable); `done` and `drop` are terminal by
+ * design, because a settled todo that could re-open would make the list
+ * untrustworthy as a record of what is still owed.
+ */
+const TODO_ACTION_HINTS: Record<PetTodoAction, string> = {
+  accept: '标记为你已接手，仍可稍后完成或放弃；不发送任何飞书消息',
+  done: '标记为已处理完，此后不可再改（终态）；不发送任何飞书消息',
+  drop: '标记为不打算做，此后不可再改（终态）；不发送任何飞书消息',
+}
+
+/**
+ * The Feishu deep link for one todo, reusing the exact formats this panel
+ * already ships for locus rows (`chatAppLink` and the thread applink at
+ * `LocusFamilyRow`) — not a second, unverified URL shape.
+ *
+ * `triggerMessageId` is deliberately NOT appended: neither applink accepts a
+ * message selector, so adding one would be an invented parameter that
+ * silently opens the wrong thing. The message id stays a durable fact for
+ * correlation, not a link component.
+ */
+function todoFeishuLink(jump: ReturnType<typeof resolveFeishuJumpTarget>): string | undefined {
+  return jump.kind === 'thread'
+    ? `https://applink.feishu.cn/client/thread/open?threadId=${encodeURIComponent(jump.threadId)}`
+    : chatAppLink(jump.chatId)
+}
+
+/** Says where the jump lands, and when it cannot, why. */
+function todoFeishuTitle(jump: ReturnType<typeof resolveFeishuJumpTarget>): string {
+  if (todoFeishuLink(jump) === undefined) return '这条待办没有可用的飞书链接'
+  return jump.kind === 'thread'
+    ? '打开提出这条请求的话题'
+    : `打开提出这条请求的群（${jump.reason}）`
 }
 
 /**
