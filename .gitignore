@@ -21,6 +21,12 @@ openspec/changes/**/checking/screenshots/
 spike/
 
 # Architecture source + one theme-aware SVG are tracked; duplicate exports are not.
-archify-out/*.png
-archify-out/*.html
+# Everything else under archify-out/ is regenerable diagram output (per-diagram
+# source JSON, rendered HTML/PNG, visual-check reports) plus talk material that
+# belongs with its own change, so it stays out of version control. The two
+# tracked files are re-allowed explicitly below and are also enforced by
+# scripts/check-tracked-artifacts.mjs.
+archify-out/*
+!archify-out/ohmydsh-architecture.json
+!archify-out/ohmydsh-architecture.dual.svg
 worktree-session-architecture.html
