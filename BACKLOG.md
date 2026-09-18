@@ -170,6 +170,22 @@
   - 与「卡片浏览用 `memex serve`」的既有边界保持一致：页面不重复实现浏览能力，只提供入口。
 - **更新**: 2026-09-20 从 change `dsh-memex-settings-ui` 的 design Open Questions 转为条目（本期不做，等实际使用反馈）。
 
+### [B046] open-in-vscode 跨机器不可用：执行面在 host，需上游改为浏览器侧打开
+- **状态**: 想法
+- **优先级**: P2
+- **背景 / 动机**: 2026-09-15 实测：在 VM 上运行 DSH、经 dsh-cockpit iframe 从宿主机浏览器访问时，侧边栏 workspace more action 的「在 VSCode 中打开」点了不起作用。截图确认该入口**仍然渲染且可点**（此前怀疑它 inject 了 0.1.2 已移除的 `@deepseek-ai/dsh-client-runtime` 而静默失活，实测证伪——dsh.yaml:158 记录的「rc.6 走兼容适配器」确实在兜底）。失败原因与激活无关，是机制层面的。
+- **根因（读已安装 0.1.6 产物确认）**: 该插件的执行面在 **host**，而 host 跑在 VM 上。
+  - `~/.dsh/profiles/web/node_modules/dsh-open-in-vscode/lib/index.js` 中可见 `spawn` + `"code"`，host 侧 typert 服务 `openInVscode/open` 在用户点击时 spawn 本机编辑器 CLI；与 dsh.yaml:158 的审查记录一致。
+  - client 半区只负责渲染菜单行并调用 `openInVscode/open`，自身不产生任何 URI。
+  - 因此跨机器时实际发生的是「在 VM 上执行 `code <VM 路径>`」：VM 上没装 `code` 就静默失败，装了也只是在 VM 上开一个用户看不见的 GUI。**该设计的隐含前提是 host 与用户坐在同一台机器**，这个前提在 VM/远程场景下不成立。
+- **要点（提 PR 前必须想清的方向问题）**:
+  - **仅加配置项不成立**。给它加一个 remote authority 配置、让 host spawn `code --folder-uri vscode-remote://ssh-remote+<alias><path>` 仍然是**在 VM 上执行 code**，等于让 VM 去连它自己，没有意义。
+  - **对上游真正成立的修法是把执行面从 host 挪到 client**：由浏览器出 `vscode://file/<path>`（本机）或 `vscode://vscode-remote/ssh-remote+<alias><path>?windowId=_blank`（跨机器）深链，交系统 handler 处理——浏览器进程本来就在用户那台机器上。这是**架构改动而非加开关**，PR 需要与上游先对齐意图，不宜直接改完提。
+  - **不要把 dsh-cockpit 的特殊性带进上游 PR**。本仓的 cockpit 场景可以从父页面拿到 `sshAlias`（cockpit 的 `DeviceRecord.sshAlias`，其校验正则 `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$` 恰好排除 `@` 与 `:`，天然是干净的 SSH config alias），但上游插件不能假设用户装了 cockpit；对上游合理的是暴露一个静态 remote authority 配置 + 保持本机深链为默认。
+  - 若上游不接受架构改动，本仓的退路是 `patches/` 覆盖其 client 半区，或直接 `enabled: false`——但两者都在 PR 结论之后再定。
+- **与本仓 ws 入口的关系**: worktree-session 输入框分支名的打开走的是**浏览器深链**（`packages/worktree-session/src/client/controls.tsx:90` `openWorktreeInEditor`），机制上在跨机器下成立（URI 在宿主机浏览器触发），只是 `vscode://file/` 的本机语义需要换成 `vscode-remote` authority。**两个入口是不同机制、不同修法，不共用一套方案**；ws 入口优先落地，本条走上游 PR。
+- **更新**: 2026-09-15 实测确认入口可见但跨机器无效；根因定位到 host spawn；待提上游 PR 讨论执行面迁移。
+
 ### [B042] 父会话归档后，入口 @ 应有明确回执，而不是静默或静默复活
 - **状态**: 想法
 - **优先级**: P1
