@@ -55,8 +55,10 @@ flowchart LR
   文本和图片在绑定提交被接受前保持源草稿完整。
 - 输入区状态 UI 持续显示绑定任务分支、依赖模式(`lean`/`mutable`)与
   生命周期(`active`/`uncertain`/`cleaned`);分支名单行省略,hover 显示完整名。
-- 点击绑定分支名用本机编辑器打开绑定 worktree
-  (默认 `vscode://file/<path>` deep link,打开动作可配置);
+- 点击绑定分支名打开绑定 worktree:无适配器时默认使用本机
+  `vscode://file/<path>` deep link;Web client 提供运行时打开行为注册点,
+  部署侧适配器可替换该动作,缺失/卸载/抛错均回落默认实现。
+  Worktree Session 不命名、不 inject 任何具体适配器;
   cleaned 或未绑定的 Session 不提供打开动作,目标路径始终来自持久化绑定。
 
 ### 安全约束

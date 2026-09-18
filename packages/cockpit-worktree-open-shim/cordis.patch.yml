@@ -1,0 +1,5 @@
+# Deployment-specific browser adapter. Host entry is a no-op loader node;
+# the web half connects two optional same-page services without requiring either.
+- insert:
+    - id: cockpit-worktree-open-shim
+      name: dsh-cockpit-worktree-open-shim
