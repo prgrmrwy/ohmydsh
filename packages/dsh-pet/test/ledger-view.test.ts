@@ -129,3 +129,65 @@ describe('groupTodosByLocus', () => {
     expect(groupTodosByLocus([]).size).toBe(0)
   })
 })
+
+describe('owner-facing todo routes are actually wired (regression guards)', () => {
+  it('both routes are declared in LOCUS_ROUTES and registered exactly once in routes.ts', async () => {
+    // wire.ts states the invariant explicitly: "A declared route must be
+    // registered exactly once". A declared-but-unmounted route would 404 with
+    // no type error — exactly the class of defect that let the three
+    // intent-triage tools ship unregistered earlier in this change.
+    const fs = await import('node:fs')
+    const wire = fs.readFileSync(new URL('../src/wire.ts', import.meta.url), 'utf8')
+    const routes = fs.readFileSync(new URL('../src/host/routes.ts', import.meta.url), 'utf8')
+    for (const key of ['todos', 'todoAction']) {
+      expect(wire).toContain(`${key}: '/dsh-pet/api/locus-`)
+      const mounts = [...routes.matchAll(new RegExp(`petRoute\\(LOCUS_ROUTES\\.${key},`, 'g'))]
+      expect(mounts).toHaveLength(1)
+    }
+  })
+
+  it('the Host actually supplies todoLedger to createPetRoutes — a declared dep nobody passes is the same defect as an unmounted route', async () => {
+    const fs = await import('node:fs')
+    const index = fs.readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8')
+    const start = index.indexOf('createPetRoutes({')
+    expect(start).toBeGreaterThan(-1)
+    // Slice a generous window covering the whole argument object.
+    expect(index.slice(start, start + 6000)).toContain('todoLedger:')
+  })
+
+  it('both routes require owner proof, so a browser cannot list or dispose of todos without it', async () => {
+    const fs = await import('node:fs')
+    const routes = fs.readFileSync(new URL('../src/host/routes.ts', import.meta.url), 'utf8')
+    const todosStart = routes.indexOf('petRoute(LOCUS_ROUTES.todos,')
+    const actionStart = routes.indexOf('petRoute(LOCUS_ROUTES.todoAction,')
+    const statusStart = routes.indexOf('petRoute(ROUTES.status,')
+    expect(todosStart).toBeGreaterThan(-1)
+    expect(actionStart).toBeGreaterThan(todosStart)
+    expect(routes.slice(todosStart, actionStart)).toContain('requireLocusActor()')
+    expect(routes.slice(actionStart, statusStart)).toContain('requireLocusActor()')
+  })
+
+  it('an absent ledger fails closed with LOCUS_UNAVAILABLE rather than reporting an empty list', async () => {
+    const fs = await import('node:fs')
+    const routes = fs.readFileSync(new URL('../src/host/routes.ts', import.meta.url), 'utf8')
+    const todosStart = routes.indexOf('petRoute(LOCUS_ROUTES.todos,')
+    const statusStart = routes.indexOf('petRoute(ROUTES.status,')
+    const block = routes.slice(todosStart, statusStart)
+    // "no todos" and "this Host has no ledger" must stay distinguishable.
+    expect([...block.matchAll(/LOCUS_UNAVAILABLE/g)]).toHaveLength(2)
+  })
+
+  it('the settings panel renders the fold and dispatches through the pure model', async () => {
+    const fs = await import('node:fs')
+    const settings = fs.readFileSync(new URL('../src/client/settings.tsx', import.meta.url), 'utf8')
+    expect(settings).toContain('<TodoLedgerFold')
+    expect(settings).toContain('function TodoLedgerFold')
+    // Display decisions must come from ledger-view.ts, not be re-derived here.
+    for (const fn of ['groupTodosByLocus', 'todoStatusLabel', 'availableTodoActions', 'resolveFeishuJumpTarget', 'resolveSessionJumpTarget']) {
+      expect(settings).toContain(fn)
+    }
+    // Re-reads after a disposition instead of patching state optimistically.
+    expect(settings).toContain('await petApi.locusTodoAction(')
+    expect(settings).toContain('await load()')
+  })
+})

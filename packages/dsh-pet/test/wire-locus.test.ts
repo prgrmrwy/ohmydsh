@@ -30,6 +30,12 @@ describe('unified locus wire contract', () => {
       stop: '/dsh-pet/api/locus-stop',
       scope: '/dsh-pet/api/locus-scope',
       rebuild: '/dsh-pet/api/locus-rebuild',
+      // Added by `pet-locus-intent-triage`. This assertion's purpose is that
+      // existing routes keep their exact paths (no rename, no removal) — a
+      // genuinely ADDITIVE entry is the expected way for this object to grow,
+      // so the expectation is updated rather than the new routes hidden from it.
+      todos: '/dsh-pet/api/locus-todos',
+      todoAction: '/dsh-pet/api/locus-todo-action',
     })
     expect(LOCUS_VIEW_ROUTE).toBe(LOCUS_ROUTES.view)
     expect(LOCUS_DISCOVERY_ROUTE).toBe(LOCUS_ROUTES.discovery)

@@ -850,3 +850,32 @@
     (群或话题)一个会话」,spec 与占用判定需同步调整。
 - **更新**: 2026-09-07 由用户在 `pet-qa-bind-existing-group` 真机验收期间提出,
   明确本期不做,记录待后续立项。
+
+### [B043] Pet 悬浮球任务面板残留英文文案需汉化
+- **状态**: 未开始
+- **优先级**: P2
+- **背景 / 动机**: 所有者在 `pet-locus-intent-triage` 真机验收期间报「设置页待办列表空状态是英文」，
+  验收子会话查证后澄清：**设置页（settings.tsx）六个 tab 的空状态文案已全部是中文**，
+  真正残留英文的是点 Pet 悬浮球弹出的任务面板（`overlay.tsx` 的 `TaskPanel`），
+  这是 Pet 前端目前仅剩的英文文案片区。
+- **要点**:
+  - 空状态本体：`packages/dsh-pet/src/client/overlay.tsx:1100-1103`
+    ```tsx
+    {tab === 'current' ? 'No task for the current source yet.' : `No ${tab} tasks.`}
+    ```
+    **`No ${tab} tasks.` 是英文语法拼接**，会拼出 `No all tasks.` / `No archived tasks.`，
+    汉化时必须按 tab 分支给完整中文句子，不能只替换前缀；
+  - 同一 `TaskPanel`（`overlay.tsx:992` 起）连带残留：`:1067-1068` 标题与 aria-label `Pet tasks`、
+    `:1077/:1086/:1095` 三个 tab 按钮 `Current`/`All`/`Archived`、`:1128` `Independent task`、
+    `:1145` `source archived`、`:1177` `Retry`、`:1212` `Send`、
+    `:1204-1205` answer 区 aria-label 与 placeholder；
+  - **改动会挂测试**：`packages/dsh-pet/test/client.test.ts:822-823` 用字面量锁死了按钮文本
+    (`'>\n          Current\n        </button>'` 等)。该测试意图是「面板提供 当前/全部/已归档 三视图」
+    而非锁英文，按仓库惯例应同步更新断言，不是绕过；
+  - **必须重新构建**：部署副本在 `~/.dsh/profiles/web/node_modules/dsh-pet/lib/client.js`
+    （已确认其中仍含 `No task for the current source yet.`），仅改 `src/` 不影响当前 GUI；
+  - 建议文案：current `当前来源还没有任务。`、all `还没有任何任务。`、archived `没有已归档的任务。`；
+    tab `当前`/`全部`/`已归档`；标题 `Pet 任务`；`独立任务`；`来源已归档`；`重试`；`发送`；
+    placeholder `回复正在等待的问题…`。
+- **更新**: 2026-09-17 由 `pet-locus-intent-triage` 真机验收中的 locus 子会话查证发现并登记为待办
+  （台账 `ledger_item` 首条记录），所有者确认转入 BACKLOG 后续处理。

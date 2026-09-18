@@ -8,6 +8,8 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import type { TodoRecord } from './host/ledger/todo.js'
+import type { PetTodoView } from './wire.js'
 import type { Context } from '@deepseek-ai/cordis'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-host-webserver'
@@ -130,6 +132,29 @@ import {
 
 export const name = 'dsh-pet'
 
+/**
+ * Project one durable todo into its owner-facing wire shape.
+ *
+ * Flattens `evidence` into `summary`/`detail` because the panel renders them
+ * as two distinct fields, and passes `generation` through as an AUDIT fact
+ * only — no consumer may use it to address a locus (design D6: a todo
+ * references locus identity, never a locus instance).
+ */
+function projectTodoForOwner(record: TodoRecord): PetTodoView {
+  return {
+    itemId: record.itemId,
+    locusId: record.locusId,
+    generation: record.generation,
+    endpoint: record.endpoint,
+    triggerMessageId: record.triggerMessageId,
+    requestedBy: record.requestedBy,
+    summary: record.evidence.summary,
+    detail: record.evidence.detail,
+    status: record.status,
+    createdAt: record.createdAt,
+    statusChangedAt: record.statusChangedAt,
+  }
+}
 
 export const inject = [
   // `storage` is required in addition to `storageDomain`: the backend
@@ -2908,6 +2933,24 @@ async function initialize(
     // The identity is Host-derived; routes reject any actor a browser sends.
     locus: locusManagement,
     locusIdentity: () => ({ actorId: 'host:dsh-pet' }),
+    // Shared-fact ledger todo surface. Projects the durable record for the
+    // owner panel; `generation` rides along as an audit fact only — the
+    // panel's session jump resolves the CURRENT generation through the locus
+    // view, so a stale instance can never become a jump target (design D6).
+    todoLedger: {
+      list: parentSessionId => sharedFactLedgerStore
+        .listForParent(parentSessionId)
+        .map(projectTodoForOwner),
+      advance: async (itemId, action) => {
+        const to = action === 'accept' ? 'accepted' : action === 'done' ? 'done' : 'dropped'
+        return projectTodoForOwner(await sharedFactLedgerStore.advanceStatus(itemId, to, Date.now()))
+      },
+      // Derive owning main sessions from the locus records themselves rather
+      // than from ledger rows: a main session whose ledger exists but is
+      // currently empty must still appear, so the panel shows a real empty
+      // state instead of omitting the session entirely.
+      parents: () => [...new Set(locusRepository.listLoci().map(record => record.parentSessionId))],
+    },
     // One chain per current generation, assembled from durable records only.
     // Retired generations are omitted: the owner is diagnosing what an entry
     // does now, and listing superseded rows would obscure that.
