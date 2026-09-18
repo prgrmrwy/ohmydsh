@@ -54,8 +54,8 @@ Worktree Session 的分支名打开动作当前固定产出 `vscode://file/<绝�
 
 **外部依赖（dsh-cockpit，不由本 change 实施）**
 
-- 对侧 change `remote-editor-open-seam` 已完成规划（4/4 artifacts，`validate --strict` 通过），覆盖 bridge 与父页面全部改动。
-- **落地顺序**：cockpit 先行 → 本仓 shim 才有可读的能力。cockpit 侧完成后能力被 provide 但无消费方，无行为变化。
+- 对侧 change `remote-editor-open-seam` 已实现并提交（dsh-cockpit `f3594d9`）：父页面经既有 `bridge-config` 下发合法 `sshAlias`，bridge 0.4.0 provide 稳定服务 `cockpitBridge.editorOpen`；服务在原始用户手势中产出 URI，不新增反向动作消息。自动验证已全绿，尚待发布与跨仓真机验收。
+- **落地顺序**：bridge 0.4.0 发布 → 本仓更新精确 pin → shim 端到端生效。shim 在旧 bridge 下探测不到服务并安全无效。
 
 **风险与既有教训**
 
