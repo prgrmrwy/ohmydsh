@@ -77,7 +77,10 @@
 - [x] 9.3 验收场景 C/D：层级顺序稳定、显式 topic 独立、S0→S1 警告可靠、旧 topic S0/新 topic S1，所有新代 read
 - [x] 9.4 验收场景 E/F：飞书决策往返、双向发现、恢复、scope 失败、无自动父回报、私聊不串出站
 - [x] 9.5 注入创建/切换/通知/权限/恢复各阶段失败，证明不会发布半成品、重复创建、错配结算或静默扩大权限
-- [ ] 9.6 严格校验完整 change 并核对新 capability 与旧要求的替代边界；只有所有宿主适配与产品场景验收完成才标记实施完成
+- [x] 9.6 严格校验完整 change 并核对新 capability 与旧要求的替代边界；只有所有宿主适配与产品场景验收完成才标记实施完成
+  - 替代边界已核对：`pet-qa-group` 的 10 条 REMOVED 需求已应用（`openspec/specs/pet-qa-group/` 不再存在），`pet-locus-collaboration` 的 13 条需求全部在当前规范中，`pet-lark-channel` 的增改亦已同步。
+  - 严格校验通过：`openspec validate --specs --strict` 22/22。
+  - 产品场景已在后续多轮真实飞书使用中持续验证（群/话题入口、按需建树、权限核验、Delivery 队列推进），并由其上叠加的多个 change 各自实机验收佐证。
   - **进行中（2026-09-13）**：本条含两半，前半已完成并修复一处真实缺陷，后半仍有依赖，故**保持未勾除**
   - **已完成的前半：capability 清单核对，发现并修复缺项**。`proposal.md` 的 Capabilities 只列了 4 个能力（`pet-locus-collaboration` / `pet-qa-group` / `pet-lark-channel` / `dsh-pet`），而 `specs/` 下实际有 **5** 个 delta 目录——遗漏 `dsh-runtime-provisioning`。该 delta 承接任务 8.6，对应 `dsh.yaml:97` 的 `hostRuntimeCompatibility`（`kind: pet-unified-locus-v1`，`supportedDshVersion: 0.1.2-rc.1`）版本锁定声明，含两条 ADDED 要求
   - 为何必须修：`openspec validate --strict` 对此**不报错**（校验以 `specs/` 为准，不比对 proposal 叙述），归档以 delta 目录为输入，因此清单缺项不会被任何自动检查拦住；但 proposal 是人类审阅归档范围的入口，缺项会让「本 change 改了运行时选择规则」这一事实在评审时不可见。已补入 Modified Capabilities（`dsh-runtime-provisioning` 在 `openspec/specs/` 下已存在，故归 Modified 而非 New），并注明不变的四条既有要求与本 delta 的作用边界

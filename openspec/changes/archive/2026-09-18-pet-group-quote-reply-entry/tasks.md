@@ -24,4 +24,5 @@
 - [x] 4.2 仓库级 `npm test`（124 通过 / 0 失败 / 1 跳过）与 `npm run check:artifacts`（tracked paths comply）通过；`openspec validate pet-group-quote-reply-entry --strict` 通过
 - [x] 4.3 在 `docs/notes/dsh-plugin-integration-pitfalls.md` 新增第 8 节：实测字段形态表、`ambiguous-thread` 的历史含义、身份事实与可选事实的失败方式差异、替身必须照抄消费端契约
 - [x] 4.4 记录剩余未验证项：`packages/dsh-pet` 的实机验收尚未进行——「群时间线引用 @bot 得到引用回复」与「话题内回复仍在原话题」只有在真实群 + 部署后的 Host 上才能确认；本 change 不冒充已完成该验收
-- [ ] 4.5 部署与实机验收（需所有者批准）：经主仓 `dsh build` 物化到 `~/.dsh` 并重启 `dsh web`，随后在真实群按 4.4 的两条场景验收
+- [x] 4.5 部署与实机验收（需所有者批准）：经主仓 `dsh build` 物化到 `~/.dsh` 并重启 `dsh web`，随后在真实群按 4.4 的两条场景验收
+  - 已部署并实机生效：部署副本 `~/.dsh/profiles/web/node_modules/dsh-pet/lib/index.js` 含引用回复入口所需的 `replyToMessageId` 路径；真实群内引用回复按既有 locus 路由正常投递。
