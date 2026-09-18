@@ -515,7 +515,11 @@ describe('LocusChannelController live policy gate', () => {
     await expect(controller.handleAdmission(acceptedAdmission('message-root-drift'))).resolves.toEqual({
       kind: 'refused', reason: 'policy-drift',
     })
-    expect(persisted).toEqual([expect.stringContaining('不是完全访问')])
+    // The invariant under test — drift stops dispatch BEFORE any Delivery
+    // side effect — is unchanged. Only the recorded reason moved: the write
+    // master switch demotes this locus to read first, so the persisted
+    // diagnostic now names the switch instead of the mode mismatch.
+    expect(persisted).toEqual([expect.stringContaining('写档已全局停用')])
     expect(ledger.calls).toEqual([])
     expect(queued).not.toHaveBeenCalled()
     expect(marked).not.toHaveBeenCalled()

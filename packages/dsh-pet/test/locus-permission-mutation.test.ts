@@ -47,6 +47,10 @@ function harness(options: {
   })
   const resolve = vi.fn(() => ({ mode: effective, workspaceRoot: '/repo' }))
   const mutation = createLocusPermissionMutation({
+    // These cases verify the ADR-0005 write MECHANISM, which the global
+    // switch currently keeps off; the switch itself is covered in
+    // test/locus-policy-verification.test.ts.
+    writeEnabled: true,
     repository: {
       getLocus: id => repository.getLocus(id),
       getCurrentLocus: endpoint => repository.getCurrent(endpoint),
@@ -135,6 +139,10 @@ describe('locus permission mutation', () => {
       let effective = 'read-only'
       const apply = vi.fn((_session: { id: string }, mode: string) => { effective = mode })
       const mutation = createLocusPermissionMutation({
+    // These cases verify the ADR-0005 write MECHANISM, which the global
+    // switch currently keeps off; the switch itself is covered in
+    // test/locus-policy-verification.test.ts.
+    writeEnabled: true,
         repository: {
           getLocus: id => repository.getLocus(id),
           getCurrentLocus: endpoint => repository.getCurrent(endpoint),
@@ -168,6 +176,10 @@ describe('locus permission mutation', () => {
     let effective = 'read-only'
     const apply = vi.fn((_session: { id: string }, mode: string) => { effective = mode })
     const mutation = createLocusPermissionMutation({
+    // These cases verify the ADR-0005 write MECHANISM, which the global
+    // switch currently keeps off; the switch itself is covered in
+    // test/locus-policy-verification.test.ts.
+    writeEnabled: true,
       repository: {
         getLocus: id => repository.getLocus(id),
         getCurrentLocus: endpoint => repository.getCurrent(endpoint),
@@ -211,6 +223,10 @@ describe('locus permission mutation', () => {
       await applying
     })
     const mutation = createLocusPermissionMutation({
+    // These cases verify the ADR-0005 write MECHANISM, which the global
+    // switch currently keeps off; the switch itself is covered in
+    // test/locus-policy-verification.test.ts.
+    writeEnabled: true,
       repository,
       sessions: { resolve: () => ({ id: 'session-child' }) },
       policy: { apply, resolve: () => ({ mode: effective, workspaceRoot: '/repo' }) },
@@ -245,6 +261,10 @@ describe('locus permission mutation', () => {
     await repository.putLocus(activeRepository().getLocus('locus-current')!)
     let effective = 'read-only'
     const mutation = createLocusPermissionMutation({
+    // These cases verify the ADR-0005 write MECHANISM, which the global
+    // switch currently keeps off; the switch itself is covered in
+    // test/locus-policy-verification.test.ts.
+    writeEnabled: true,
       repository,
       sessions: { resolve: () => ({ id: 'session-child' }) },
       policy: {

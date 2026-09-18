@@ -324,7 +324,12 @@ describe('the panel sends only fields its route accepts', () => {
     await act(async () => {
       ;(host.querySelector('.dshpet-locus-more') as HTMLButtonElement | null)?.click()
     })
-    for (const label of ['可写', '确认执行根', '停止关联']) {
+    // `scope` is absent from this walk while the write master switch is off:
+    // the `可写` control is disabled by the switch, and `只读` is disabled
+    // because this fixture is ALREADY read — so neither scope button can post.
+    // Re-add '可写' here together with the switch; the payload-shape rule it
+    // covers has not changed, only the reachability of the control.
+    for (const label of ['确认执行根', '停止关联']) {
       const button = [...host.querySelectorAll('button')].find(
         item => item.textContent === label,
       ) as HTMLButtonElement | undefined
@@ -338,8 +343,12 @@ describe('the panel sends only fields its route accepts', () => {
       .map(body => JSON.parse(body) as Record<string, unknown>)
       .filter(body => typeof body['action'] === 'string' && body['action'] in LOCUS_ACTION_FIELDS)
     expect(actions.map(body => body['action']).sort()).toEqual(
-      ['confirm-anchor', 'scope', 'stop'],
+      ['confirm-anchor', 'stop'],
     )
+    // `scope`'s payload shape still matters even though no control can post
+    // it right now, so assert it statically rather than losing the rule.
+    expect(LOCUS_ACTION_FIELDS.scope).toContain('mode')
+    expect(LOCUS_ACTION_FIELDS.scope).toContain('locusId')
     for (const body of actions) {
       const action = body['action'] as string
       const allowed = LOCUS_ACTION_FIELDS[action as keyof typeof LOCUS_ACTION_FIELDS]
