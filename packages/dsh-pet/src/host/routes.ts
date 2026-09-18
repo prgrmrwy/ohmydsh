@@ -25,6 +25,7 @@ import {
   LocusManagementError,
   type LocusManagementPort,
 } from './locus/management.js'
+import { LOCUS_WRITE_ENABLED, LOCUS_WRITE_DISABLED_DIAGNOSTIC } from './locus/policy-verification.js'
 import { inspectBundle } from './skill-bundle.js'
 import { currentAllowlist } from './skill-provider.js'
 import { PET_ENV_PREFIX } from './shell-env.js'
@@ -479,6 +480,11 @@ function parseLocusAction(body: unknown, expectedAction?: PetLocusActionRequest[
     case 'scope': {
       const mode = requireString(record, 'mode')
       if (mode !== 'read' && mode !== 'write') throw new PetError('INVALID_REQUEST', 'mode must be read or write')
+      // Both the dedicated `scope` route and the generic `action` route parse
+      // here, so refusing at this single point covers the whole panel surface.
+      if (mode === 'write' && !LOCUS_WRITE_ENABLED) {
+        throw new PetError('INVALID_REQUEST', LOCUS_WRITE_DISABLED_DIAGNOSTIC)
+      }
       return { action, locusId: requireString(record, 'locusId').trim(), mode, ...fence }
     }
     case 'confirm-anchor': {

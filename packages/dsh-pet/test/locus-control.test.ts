@@ -267,9 +267,13 @@ describe('unified locus command dispatcher', () => {
       senderId: OWNER,
     })
 
-    expect(result).toMatchObject({ ok: false, reason: 'write-unsupported' })
-    expect(result.ok === false && result.text).toContain('缺少所有者已确认的 execution root')
-    expect(result.ok === false && result.text).toContain('Locus 管理')
+    // The write master switch now refuses at the door, BEFORE the anchor
+    // check this case was originally written against, so the real reason is
+    // the switch. The invariant under test is unchanged: state the actual
+    // cause, never a misleading retry hint.
+    expect(result).toMatchObject({ ok: false, reason: 'scope-write-disabled' })
+    expect(result.ok === false && result.text).toContain('写档已全局停用')
+    expect(result.ok === false && result.text).toContain('并发写')
     expect(result.ok === false && result.text).not.toContain('请稍后重试')
   })
 
@@ -283,7 +287,11 @@ describe('unified locus command dispatcher', () => {
         scope: { setCurrentMode: async () => { throw error } },
       })
       return dispatcher.dispatch({
-        command: { kind: 'scope', mode: 'write' },
+        // `read`, not `write`: this case is about ERROR-CODE MAPPING and
+        // secret-free receipts, not about the write grant. A write request is
+        // now refused at the door, which would short-circuit every branch
+        // below and silently stop testing what this case exists to test.
+        command: { kind: 'scope', mode: 'read' },
         endpoint: ENDPOINT,
         senderId: OWNER,
       })

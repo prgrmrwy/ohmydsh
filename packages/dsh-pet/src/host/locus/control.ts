@@ -22,6 +22,7 @@ import {
   type LocusEndpoint,
 } from './controller.js'
 import { LocusPermissionMutationError } from './permission-mutation.js'
+import { LOCUS_WRITE_ENABLED, LOCUS_WRITE_DISABLED_DIAGNOSTIC } from './policy-verification.js'
 
 export const MIN_LOCUS_BIND_PREFIX_LENGTH = 6
 export const LOCUS_BIND_UNRESOLVED_TEXT =
@@ -275,6 +276,13 @@ export function createLocusControlDispatcher(
             }
           }
           case 'scope': {
+            // Refuse a write request at the door rather than granting it and
+            // letting verification demote it afterwards: the owner asked for a
+            // capability this build does not hand out, and saying so here is
+            // the only answer that is not misleading.
+            if (command.mode === 'write' && !LOCUS_WRITE_ENABLED) {
+              return failure('scope-write-disabled', LOCUS_WRITE_DISABLED_DIAGNOSTIC)
+            }
             if (options.scope?.setCurrentMode === undefined) {
               return failure('scope-unavailable', '当前入口暂不支持权限变更。')
             }

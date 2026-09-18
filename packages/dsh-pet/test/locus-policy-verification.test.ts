@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { verifyLocusLivePolicy } from '../src/host/locus/policy-verification.js'
+import {
+  LOCUS_WRITE_DISABLED_DIAGNOSTIC,
+  LOCUS_WRITE_ENABLED,
+  verifyLocusLivePolicy,
+} from '../src/host/locus/policy-verification.js'
 
 const read = { desired: 'read' as const, effective: 'read' as const, verifiedAt: 1 }
 const write = { desired: 'write' as const, effective: 'write' as const, verifiedAt: 1, grantedBy: 'host:test' }
@@ -23,14 +27,14 @@ function confirmed(executionRoot: string) {
 
 describe('locus live sandbox policy verification', () => {
   it('requires exact durable mode for read', () => {
-    expect(verifyLocusLivePolicy({ permission: read }, { mode: 'read-only', workspaceRoot: '/repo' }))
+    expect(verifyLocusLivePolicy({ permission: read }, { mode: 'read-only', workspaceRoot: '/repo' }, true))
       .toEqual({ ok: true, effective: 'read' })
-    expect(verifyLocusLivePolicy({ permission: read }, { mode: 'workspace-write', workspaceRoot: '/repo' }))
+    expect(verifyLocusLivePolicy({ permission: read }, { mode: 'workspace-write', workspaceRoot: '/repo' }, true))
       .toMatchObject({ ok: false, reason: 'mode-mismatch' })
     // Full access is strictly wider than read, so it is a drift too.
-    expect(verifyLocusLivePolicy({ permission: read }, { mode: 'danger-full-access' }))
+    expect(verifyLocusLivePolicy({ permission: read }, { mode: 'danger-full-access' }, true))
       .toMatchObject({ ok: false, reason: 'mode-mismatch' })
-    expect(verifyLocusLivePolicy({ permission: read }, undefined))
+    expect(verifyLocusLivePolicy({ permission: read }, undefined, true))
       .toMatchObject({ ok: false, reason: 'policy-unavailable' })
   })
 
@@ -39,16 +43,16 @@ describe('locus live sandbox policy verification', () => {
     // child's cwd is fixed to its parent's cwd, so `workspace-write` — whose
     // boundary IS that cwd — can never cover the sibling worktrees the owner
     // actually works in.
-    expect(verifyLocusLivePolicy({ permission: write }, { mode: 'danger-full-access' }))
+    expect(verifyLocusLivePolicy({ permission: write }, { mode: 'danger-full-access' }, true))
       .toEqual({ ok: true, effective: 'write' })
   })
 
   it('never accepts a narrower live mode for write', () => {
     for (const mode of ['read-only', 'workspace-write']) {
-      expect(verifyLocusLivePolicy({ permission: write }, { mode, workspaceRoot: '/repo' }))
+      expect(verifyLocusLivePolicy({ permission: write }, { mode, workspaceRoot: '/repo' }, true))
         .toMatchObject({ ok: false, reason: 'mode-mismatch' })
     }
-    expect(verifyLocusLivePolicy({ permission: write }, undefined))
+    expect(verifyLocusLivePolicy({ permission: write }, undefined, true))
       .toMatchObject({ ok: false, reason: 'policy-unavailable' })
   })
 
@@ -67,6 +71,7 @@ describe('locus live sandbox policy verification', () => {
       expect(verifyLocusLivePolicy(
         { permission: write, ...(contextAnchor === undefined ? {} : { contextAnchor }) },
         { mode: 'danger-full-access', workspaceRoot: '/repo' },
+        true,
       )).toEqual({ ok: true, effective: 'write' })
     }
   })
@@ -74,9 +79,9 @@ describe('locus live sandbox policy verification', () => {
   it('reports drift without a workspace root, because full access has none', () => {
     // A deployment that reports no workspace root is not a write blocker any
     // more; only the mode decides.
-    expect(verifyLocusLivePolicy({ permission: write }, { mode: 'danger-full-access' }))
+    expect(verifyLocusLivePolicy({ permission: write }, { mode: 'danger-full-access' }, true))
       .toEqual({ ok: true, effective: 'write' })
-    expect(verifyLocusLivePolicy({ permission: write }, { mode: 'read-only' }))
+    expect(verifyLocusLivePolicy({ permission: write }, { mode: 'read-only' }, true))
       .toMatchObject({ ok: false, reason: 'mode-mismatch' })
   })
 
@@ -84,9 +89,62 @@ describe('locus live sandbox policy verification', () => {
     // Guards against reintroducing a directory boundary into the write
     // decision: a wide root with a narrow mode must still be refused, and a
     // full-access mode must be accepted regardless of the reported root.
-    expect(verifyLocusLivePolicy({ permission: write }, { mode: 'workspace-write', workspaceRoot: '/' }))
+    expect(verifyLocusLivePolicy({ permission: write }, { mode: 'workspace-write', workspaceRoot: '/' }, true))
       .toMatchObject({ ok: false, reason: 'mode-mismatch' })
-    expect(verifyLocusLivePolicy({ permission: write }, { mode: 'danger-full-access', workspaceRoot: '/' }))
+    expect(verifyLocusLivePolicy({ permission: write }, { mode: 'danger-full-access', workspaceRoot: '/' }, true))
+      .toEqual({ ok: true, effective: 'write' })
+  })
+})
+
+describe('the write master switch (LOCUS_WRITE_ENABLED)', () => {
+  const write = { desired: 'write' as const, effective: 'write' as const }
+  const read = { desired: 'read' as const, effective: 'read' as const }
+
+  it('ships OFF: concurrent writes have no agreed protocol yet', () => {
+    // If this ever reads `true` without a concurrency protocol landing first,
+    // that is the regression — several locus children share one checkout and
+    // `write` is full access (ADR-0005).
+    expect(LOCUS_WRITE_ENABLED).toBe(false)
+  })
+
+  it('demotes a stored write grant to read instead of reporting the stored intent', () => {
+    // The durable record still says `write` — the owner's intent is kept, not
+    // rewritten — but what is IN FORCE is read, and that is what callers get.
+    expect(verifyLocusLivePolicy({ permission: write }, { mode: 'read-only' }, false))
+      .toEqual({ ok: true, effective: 'read' })
+  })
+
+  it('keeps a demoted entry SERVING, not suspended', () => {
+    // A demoted locus must go on answering read-only work; failing it closed
+    // would take the entry offline for holding a grant it never chose to lose.
+    const result = verifyLocusLivePolicy({ permission: write }, { mode: 'read-only' }, false)
+    expect(result.ok).toBe(true)
+  })
+
+  it('names the real reason when the child still sits in full access', () => {
+    // Not a `mode-mismatch`: the switch is doing this, and a mismatch would
+    // read as a host fault the owner is supposed to fix.
+    expect(verifyLocusLivePolicy({ permission: write }, { mode: 'danger-full-access' }, false))
+      .toMatchObject({ ok: false, reason: 'write-disabled' })
+  })
+
+  it('explains itself in the diagnostic rather than just refusing', () => {
+    const result = verifyLocusLivePolicy({ permission: write }, { mode: 'danger-full-access' }, false)
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.diagnostic).toBe(LOCUS_WRITE_DISABLED_DIAGNOSTIC)
+    expect(result.diagnostic).toContain('并发写')
+  })
+
+  it('leaves read-only loci completely untouched', () => {
+    expect(verifyLocusLivePolicy({ permission: read }, { mode: 'read-only' }, false))
+      .toEqual({ ok: true, effective: 'read' })
+  })
+
+  it('restores the write path exactly when flipped back on', () => {
+    // Proves the mechanism is intact behind the switch: re-enabling is a
+    // one-line change, not a rewrite.
+    expect(verifyLocusLivePolicy({ permission: write }, { mode: 'danger-full-access' }, true))
       .toEqual({ ok: true, effective: 'write' })
   })
 })

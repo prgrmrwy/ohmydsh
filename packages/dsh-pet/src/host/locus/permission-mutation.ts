@@ -8,7 +8,7 @@
  */
 
 import type { LocusMutationFence, LocusPermissionMode, LocusRecord } from './aggregate.js'
-import { verifyLocusLivePolicy, type LocusLiveSandboxPolicy } from './policy-verification.js'
+import { LOCUS_WRITE_ENABLED, verifyLocusLivePolicy, type LocusLiveSandboxPolicy } from './policy-verification.js'
 
 /**
  * The two sandbox modes a locus may run under.
@@ -144,6 +144,8 @@ async function restorePolicy(
   const previous = locus.permission.effective
   try {
     await policy.apply(session, modeFor(previous))
+    // Rollback restores the PREVIOUS permission, so it verifies under the
+    // real switch: a rollback must never be the thing that hands write back.
     const restored = verifyLocusLivePolicy(locus, await policy.resolve(session))
     if (!restored.ok) throw new Error(`Host 回读未恢复：${restored.reason}`)
   } catch (rollbackError) {
@@ -172,8 +174,14 @@ export function createLocusPermissionMutation(options: {
   readonly sessions: LocusPermissionSessionPort
   readonly policy: LocusPermissionPolicyPort
   readonly now?: () => number
+  /**
+   * Whether write grants are honoured. Defaults to the module-level switch;
+   * injectable only so the write path keeps its own coverage while that
+   * switch is off (see `policy-verification.ts`).
+   */
+  readonly writeEnabled?: boolean
 }): LocusPermissionMutationPort {
-  const { repository, sessions, policy, now = Date.now } = options
+  const { repository, sessions, policy, now = Date.now, writeEnabled = LOCUS_WRITE_ENABLED } = options
   const chains = new Map<string, Promise<void>>()
 
   const serialize = async <T>(key: string, body: () => Promise<T>): Promise<T> => {
@@ -257,6 +265,7 @@ export function createLocusPermissionMutation(options: {
         verification = verifyLocusLivePolicy(
           { ...previous, permission: { ...previous.permission, desired: request.mode, effective: request.mode } },
           await policy.resolve(session),
+          writeEnabled,
         )
       } catch (error) {
         return restorePolicy(

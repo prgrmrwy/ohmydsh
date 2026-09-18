@@ -71,6 +71,10 @@ import {
   type WorkGroup,
 } from './locus-view.js'
 import { PET_EXECUTOR_PRESET, chatAppLink } from '../wire.js'
+import {
+  LOCUS_WRITE_ENABLED,
+  LOCUS_WRITE_DISABLED_DIAGNOSTIC,
+} from '../host/locus/policy-verification.js'
 import { WHEEL_CAPACITY } from './wheel.js'
 import type {
   PetEnvRecord,
@@ -967,9 +971,14 @@ export function LocusDetails(props: {
           <button
             type="button"
             aria-pressed={writable}
-            disabled={blocked || !canManageCurrent || writable}
-            title={'完全访问：该入口成员可在本机任意位置读写文件（不受目录范围限制）。'
-              + '宿主必须回读为完全访问才生效；核验失败会保持只读。'}
+            // Disabled by the write master switch, and the title says why: a
+            // control that still looks usable and then fails at the Host would
+            // read as a fault rather than a deliberate stance.
+            disabled={!LOCUS_WRITE_ENABLED || blocked || !canManageCurrent || writable}
+            title={LOCUS_WRITE_ENABLED
+              ? '完全访问：该入口成员可在本机任意位置读写文件（不受目录范围限制）。'
+                + '宿主必须回读为完全访问才生效；核验失败会保持只读。'
+              : LOCUS_WRITE_DISABLED_DIAGNOSTIC}
             onClick={run('scope-write', () => petApi.locusScope({ action: 'scope', mode: 'write', ...fence }))}
           >
             可写
