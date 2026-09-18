@@ -92,6 +92,15 @@ export const LOCUS_ROUTES = {
   // deliberately NOT declared here yet. A declared route must be registered
   // exactly once, and shared facts are now written by in-scope agents, so this
   // operator surface stays undeclared until it is actually mounted.
+  //
+  // The two routes below ARE mounted (`pet-locus-intent-triage`). The shared
+  // fact ledger's `todo` kind needs an owner-facing list and disposition
+  // surface: a todo the owner can neither see nor close would defeat the
+  // point of registering it instead of letting the request vanish.
+  /** Owner-facing todo list for one main session's shared-fact ledger. */
+  todos: '/dsh-pet/api/locus-todos',
+  /** Owner-only disposition of one todo: accept / done / drop. */
+  todoAction: '/dsh-pet/api/locus-todo-action',
 } as const
 
 /** Alias for callers that name the object after the management surface. */
@@ -373,6 +382,50 @@ export interface PetLocusManagementView {
   readonly discovery: PetLocusDiscoveryView
   /** Optional aggregate owner facts grouped by main session. */
   readonly owner?: PetLocusOwnerManagementView
+}
+
+// ---------------------------------------------------------------------------
+// Shared-fact ledger: owner-facing todo surface (`pet-locus-intent-triage`)
+// ---------------------------------------------------------------------------
+
+export type PetTodoStatus = 'open' | 'accepted' | 'done' | 'dropped'
+
+/** Owner-visible disposition actions, mirroring the pure model's legal transitions. */
+export type PetTodoAction = 'accept' | 'done' | 'drop'
+
+/**
+ * One todo as the owner-facing panel reads it.
+ *
+ * Carries the routing facts (`endpoint`, `triggerMessageId`) the panel needs
+ * to build a Feishu jump, and `locusId` for the session jump — but never the
+ * child session id directly: the panel resolves the CURRENT generation's
+ * child through the locus view, so a jump target is never a stale instance.
+ */
+export interface PetTodoView {
+  readonly itemId: string
+  readonly locusId: string
+  /** Generation at registration time. Audit fact only; never used to address. */
+  readonly generation: number
+  readonly endpoint: PetLocusEndpointView
+  readonly triggerMessageId: string
+  readonly requestedBy: string
+  readonly summary: string
+  readonly detail: string
+  readonly status: PetTodoStatus
+  readonly createdAt: number
+  readonly statusChangedAt: number
+}
+
+/** The complete owner-facing todo snapshot for one main session's ledger. */
+export interface PetTodoListView {
+  readonly parentSessionId: string
+  readonly items: readonly PetTodoView[]
+}
+
+/** Request body for the todo disposition route. */
+export interface PetTodoActionRequest {
+  readonly itemId: string
+  readonly action: PetTodoAction
 }
 
 /**

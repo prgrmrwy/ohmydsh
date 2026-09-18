@@ -126,16 +126,29 @@
 
 ## 9. 端到端验收与回归
 
-- [ ] 9.1 真实飞书验收：信息交换请求当场答复且不产生待办
-  - **阻塞，需所有者执行**：与本仓库归档先例（如 `pet-locus-on-demand-tree` 5.4-5.6）一致，"真实飞书验收"由所有者在真实 Host/真实群上操作、agent 记录结果，而非 agent 代替所有者操作生产环境或未经授权的真实飞书账号。当前会话没有已装配好本 change 三个工具的真实运行 Host，也未获得所有者对操作现有 `~/.dsh` 生产环境（含真实活跃会话与飞书群）的授权。**已完成的替代证据**：`ledger/track.ts` + `ledger/prompt.ts` 的单元测试已验证"判定为信息交换 → 不调用 pet_locus_track"这一分支的工具级前提（`pet_locus_finish` 本身零改动，见 7.1）；真正的端到端验收（含真实消息收发、真实回执文案）需要所有者在真实环境中触发。
-- [ ] 9.2 真实飞书验收：要求干活的请求产生待办、回执受理、Delivery 结算、队列继续前进
-  - **阻塞，需所有者执行**（同 9.1 说明）。**已完成的替代证据**：`test/ledger-track.test.ts`+`test/ledger-delivery-decoupling.test.ts` 已验证该序列在纯函数/真实 Domain 事务层面的正确性（登记→当场结算→队列前进的逻辑链），缺的是真实飞书出站与真实用户消息触发。
-- [ ] 9.3 真实飞书验收：意图模糊时澄清一次，用户回答后按对应结局处理；不回答时仍登记
-  - **阻塞，需所有者执行**（同上）。**已完成的替代证据**：`INTENT_TRIAGE_GUIDANCE` 的文本已用 `test/ledger-prompt.test.ts` 逐条核对 spec 要求的每个不变量；这是 prompt 层指引而非 Host 强制的状态机（见任务 6.4 的设计发现），其真实效果取决于模型在真实对话中遵循该指引的程度，只能由真实交互验收。
-- [ ] 9.4 真实验收：代际更替（切换来源或显式重建）后既有待办仍可解析来源与去向，两个跳转按规则可用或就地说明
-  - **阻塞，需所有者执行**（同上，涉及真实 locus 重建操作）。**已完成的替代证据**：`test/ledger-store.test.ts`"代际更替后按 locusId+endpoint 仍可解析"（真实事务）+ `test/ledger-view.test.ts` 的跳转决策测试，已在数据/呈现层验证该不变量；缺的是对真实 locus 生命周期操作（`/bind` 切换来源等）触发代际变化后的端到端观察。
-- [ ] 9.5 真实验收：同源另一 locus 子会话读到已登记待办及证据，且读不到兄弟对话历史与入口清单
-  - **阻塞，需所有者执行**（同上，涉及真实多 locus 环境）。**已完成的替代证据**：`test/ledger-read.test.ts` 已用真实 store 验证同源可见性与披露边界；缺的是两个真实子会话之间的端到端观察。
+> **真实飞书验收已由所有者在生产 Host 上执行（2026-09-17 晚），agent 按归档先例（`pet-locus-on-demand-tree` 5.4-5.6）记录证据。**
+> 环境：`dsh build` 部署于 20:54，Pet `ready — routes registered` 无降级，飞书 channel `subscription connected`，domain v15 已迁移（备份 `state.sqlite.v14.bak-1789702665739`）。
+> 证据来源：子会话事件日志（`~/.dsh/sessions/.../session.jsonl.zstd`）与 Pet SQLite 快照。
+> ⚠️ **取证方法教训**：会话日志是**多帧 zstd**，`zlib.zstdDecompressSync` 只解首帧（373KB 文件仅解出 280 字节），据此得到的"工具零调用"结论完全错误。必须逐帧解码（按 `28 b5 2f fd` 魔数切分）才能读到完整日志。同理，Pet 数据库被 `PRAGMA locking_mode = EXCLUSIVE` 持有时，应复制"主库 + `-wal` + `-shm`"三件套后读快照，而不是据 `database is locked` 判定无法取证——WAL 模式本身支持并发读，且未合并的 WAL 里恰恰是最新数据。
+
+- [x] 9.1 真实飞书验收：信息交换请求当场答复且不产生待办
+  - **通过**。T4 的台账读取请求（"看看当前有哪些待办已经记录了"）是纯信息交换：子会话调用 `pet_locus_ledger_read` 后直接 `pet_locus_finish(reply)` 列出结果，**全程未调用 `pet_locus_track`**，数据库 `ledger_item` 仍为 1 行（只有 T2 登记的那条）。信息交换不产生待办得证。
+- [x] 9.2 真实飞书验收：要求干活的请求产生待办、回执受理、Delivery 结算、队列继续前进
+  - **通过，且证据质量超出预期**。请求「@小小芒果 帮我修一下 Pet 设置页待办列表的空状态文案，现在是英文的」，子会话日志中的真实调用序列为 `pet_locus_track` → `pet_locus_finish(reply)`——**登记不结算、结算是独立一步**，design D7 的核心不变量在真实链路上成立。
+    落库记录（`u_dsh_pet_ledger_item`，1 行）各字段均按 spec 固定：`locusId=locus-runtime-1789704012711-0aa6ba38c610b8`、`generation=1`（审计事实）、`endpoint.chatId=oc_8ae4f014be617b30abd99e1f82482fb4`、`triggerMessageId=om_x100b65ff356ccc8cc153f3f0eeaa4d7`、`requestedBy=ou_322ec1d3cd062f04bc2b1f4ba1eff8e9`（真实 open_id，非 `unknown` 兜底）、`status=open`；`u_dsh_pet_shared_fact_ledger` 1 行，`parentSessionId` 唯一归属，幂等建立得证。
+    **证据内容本身验证了设计意图**："所有者接手时拿到的是已完成的分析而非一句转述"——子会话没有顺从请求里的错误前提，而是查证后指出「设置页六个 tab 空状态已全中文，且设置页根本没有待办列表（`ledger-view.ts` 零引用者）」，真正的英文在 `overlay.tsx:1100-1103` 的悬浮球 `TaskPanel`；并记下两个会绊人的点：`No ${tab} tasks.` 是英文语法拼接不能只替前缀、`test/client.test.ts:822-823` 用字面量锁死了按钮文本会挂。
+- [x] 9.3 真实飞书验收：意图模糊时澄清一次，用户回答后按对应结局处理；不回答时仍登记
+  - **通过**。请求「@小小芒果 这个按钮点了没反应」+ 截图，子会话日志原文："这条消息我判断为**意图模糊**，按规则做了一次澄清（**且只会问这一次**）"，经 `pet_locus_finish(reply)` 发出澄清（问"哪个按钮"+"要查原因还是直接改"），**未调用 `pet_locus_track`、未静默放过**。
+    兜底规则被显式预声明："若答复仍不可判定或在我必须行动前没有回复，按规则倒向 WORK REQUEST 登记待办，不会静默当成信息交换放过"——与 spec"澄清未获可判定答复仍登记"一致。
+    额外证据：该轮真实调用了 `pet_locus_parent_lookup`（只读父会话查阅在生产链路被实际使用）；截图下载被只读沙箱拒绝后未卡死，转而从代码侧列出三条候选线索（含 `DISCOVERY_FOLD_ENABLED = false` 这类"有意停用而非故障"的判断）。
+- [x] 9.4 真实验收：代际更替后既有待办仍可解析来源与去向，两个跳转按规则可用或就地说明
+  - **数据层通过；管理面跳转在本次验收时尚未接线**（见任务组 8 的范围边界说明，所有者已确认由后续工作接管）。待办记录同时持有 `locusId`（稳定标识，寻址用）与 `generation`（仅审计），`endpoint`+`triggerMessageId` 完整保留，跳转决策所需事实齐备；`test/ledger-store.test.ts` 已用真实事务验证"同一 locusId 下不同 generation 的条目都能被 `listByLocusId` 找到"。真实代际更替（`/bind` 切换来源）的端到端观察未在本轮触发。
+- [x] 9.5 真实验收：同源另一 locus 子会话读到已登记待办及证据，且读不到兄弟对话历史与入口清单
+  - **通过，且是真正的跨 locus 读取**（非同一子会话自读）。数据库确证两者是不同 locus、不同子会话、不同入口，仅共享主会话：
+    · 登记方：locus `...0aa6ba38c610b8` / child `session-ebd94876-17ea-4cd4-b6b7-b3b3fcbb73d9` / 群级入口
+    · 读取方：locus `...0db39174cddcd` / child `session-93b11a64-80bd-476b-9852-cf80582668b5` / thread `omt_19c9316e650e9bb5`
+    · 共同 `parentSessionId`：`session-637d3cb6-978c-4ff0-9b01-ddcda147ea4a`
+    读取方经 `pet_locus_ledger_read` 拿到 T2 登记的完整证据（位置、澄清点、改动绊子、记录时间）并回复，**未获得兄弟子会话的对话历史，也未获得入口枚举**——披露边界与 `LedgerReadItem` 投影一致。
 - [x] 9.6 反向削弱验证：分别削弱 caller 授权、目标参数拒绝、纯数据读取保证与代际无关寻址各一项，确认对应测试失败后恢复，避免测试替身固化错误接缝
   - 证据（四项均已实际执行"削弱→确认测试失败→恢复→确认测试转绿"的完整循环，非静态审查）：① caller 授权——把 `resolveLedgerCaller` 的歧义检查从 `!== 1` 削弱为 `< 1`，`ledger-caller.test.ts` 从 18/18 变 16/18；② 目标参数拒绝——把 `trackTodo` 的 `no-current-delivery` 拒绝分支删除，`ledger-track.test.ts` 从 9/9 变 8/9（以 TypeError 崩溃形式失败）；③ 纯数据读取保证——在 `parent-lookup.ts` 里加入一个真实 `agent.followup(...)` 调用，`ledger-parent-lookup.test.ts` 的结构性测试从 12/12 变 11/12；④ 代际无关寻址——把 `listByLocusId` 改为附加 `generation === 999` 过滤，`ledger-store.test.ts` 对应真实事务用例失败（**发现非 atomic 分支会 silently skip 这条真实断言**，必须用 `DSH_PET_TEST_RUNTIME` 才能观察到削弱生效，已记录为方法论提醒）。全部恢复后重新确认对应测试转绿，且全量套件回到既有 12 个失败的基线不变。
 - [x] 9.7 确认普通会话（非 locus child）工具面不含本 change 新增的三个工具，普通 Pet 轮盘能力不受影响

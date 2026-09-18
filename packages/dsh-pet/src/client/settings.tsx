@@ -28,7 +28,15 @@ import {
   type PetAccentId,
   type PetSizeId,
 } from './accent.js'
-import { petApi, type PetConfig } from './api.js'
+import { petApi, type PetConfig, type PetTodoLedgerGroup } from './api.js'
+import {
+  availableTodoActions,
+  groupTodosByLocus,
+  resolveFeishuJumpTarget,
+  resolveSessionJumpTarget,
+  todoStatusLabel,
+  type TodoSnapshotItem,
+} from './ledger-view.js'
 import {
   DEFAULT_LOCUS_FILTER,
   ENTRY_STATE_OPTIONS,
@@ -78,6 +86,7 @@ import type {
   PetLocusState,
   PetLocusView,
   PetSkillSelection,
+  PetTodoAction,
   PetUnifiedLocusReadiness,
   PetWorkspaceChoice,
 } from '../wire.js'
@@ -1952,9 +1961,155 @@ export function LocusSurface(props: {
         ? <DiscoveryFold codes={codes} disabled={props.busyKey !== undefined} run={props.runQuery} />
         : null}
 
+      <TodoLedgerFold snapshot={props.snapshot} disabled={props.busyKey !== undefined} />
+
       {props.warning === undefined ? null : <p className="dshpet-callout" data-tone="warn">{props.warning}</p>}
       {props.error === undefined ? null : <p className="dshpet-error">{props.error}</p>}
     </div>
+  )
+}
+
+/**
+ * Owner-facing todo list for the shared-fact ledger
+ * (`pet-locus-intent-triage`).
+ *
+ * Fetches on its own rather than riding the locus snapshot: a todo appears
+ * when a child registers one, which is not a locus lifecycle event, so
+ * folding it into that snapshot would either make the snapshot churn or make
+ * the todos stale.
+ *
+ * Every display decision comes from the pure model in `ledger-view.ts` —
+ * this component only renders and dispatches, so grouping, labels, jump
+ * targets and legal actions stay testable without a DOM.
+ */
+function TodoLedgerFold(props: {
+  readonly snapshot: PetLocusManagementView
+  readonly disabled: boolean
+}): JSX.Element {
+  const [groups, setGroups] = useState<readonly PetTodoLedgerGroup[] | undefined>(undefined)
+  const [error, setError] = useState<string | undefined>(undefined)
+  const [busyId, setBusyId] = useState<string | undefined>(undefined)
+  const [open, setOpen] = useState(false)
+
+  const load = useCallback(async (): Promise<void> => {
+    try {
+      const result = await petApi.locusTodos()
+      setGroups(result.ledgers)
+      setError(undefined)
+    } catch (cause) {
+      setGroups(undefined)
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    void load()
+  }, [open, load])
+
+  const dispatch = useCallback(async (itemId: string, action: PetTodoAction): Promise<void> => {
+    setBusyId(itemId)
+    try {
+      await petApi.locusTodoAction({ itemId, action })
+      // Re-read rather than patch locally: the Host owns transition legality,
+      // so a rejected action must not leave an optimistic status on screen
+      // (spec: Host 拒绝时状态不被乐观改写).
+      await load()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusyId(undefined)
+    }
+  }, [load])
+
+  const total = groups?.reduce((sum, group) => sum + group.items.length, 0) ?? 0
+  const openCount = groups?.reduce(
+    (sum, group) => sum + group.items.filter(item => item.status === 'open').length,
+    0,
+  ) ?? 0
+
+  return (
+    <section className="dshpet-locus-fold">
+      <button
+        type="button"
+        className="dshpet-jump"
+        aria-expanded={open}
+        onClick={() => setOpen(current => !current)}
+      >
+        待办{groups === undefined ? '' : `（${String(openCount)} 待处理 / 共 ${String(total)}）`}
+      </button>
+      {!open ? null : (
+        <div className="dshpet-locus-fold-body">
+          <p className="dshpet-item-hint">
+            子会话判定为「要求干活」但自身只读时，会把查清楚的结论登记成待办交给你。
+            这里的状态变化不会向飞书发送任何消息。
+          </p>
+          {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
+          {groups === undefined && error === undefined
+            ? <p className="dshpet-item-hint">正在读取待办…</p>
+            : null}
+          {groups !== undefined && total === 0
+            ? <p className="dshpet-item-hint">还没有登记任何待办。</p>
+            : null}
+          {(groups ?? []).map(group => {
+            if (group.items.length === 0) return null
+            const byLocus = groupTodosByLocus(group.items as readonly TodoSnapshotItem[])
+            return (
+              <div key={group.parentSessionId} className="dshpet-locus-fold-group">
+                {[...byLocus.entries()].map(([locusId, items]) => (
+                  <div key={locusId} className="dshpet-locus-fold-locus">
+                    {items.map(item => {
+                      const jump = resolveFeishuJumpTarget(item)
+                      const locus = props.snapshot.loci.find(row => row.locusId === locusId)
+                      const session = resolveSessionJumpTarget(
+                        locus?.child.sessionId,
+                        locus?.child.availability,
+                      )
+                      return (
+                        <article key={item.itemId} className="dshpet-locus-row">
+                          <header className="dshpet-locus-row-head">
+                            <span className="dshpet-badge">{todoStatusLabel(item.status)}</span>
+                            <span className="dshpet-locus-row-title">{item.summary}</span>
+                          </header>
+                          <p className="dshpet-item-hint">
+                            {new Date(item.createdAt).toLocaleString()} · 来自 {item.requestedBy}
+                          </p>
+                          {item.detail.trim() === '' ? null : (
+                            <details>
+                              <summary className="dshpet-item-hint">查看登记时的证据</summary>
+                              <pre className="dshpet-pre">{item.detail}</pre>
+                            </details>
+                          )}
+                          <div className="dshpet-locus-row-actions">
+                            <span className="dshpet-item-hint">
+                              {jump.kind === 'thread' ? '来源：话题' : `来源：${jump.reason}`}
+                            </span>
+                            <span className="dshpet-item-hint">
+                              {session.kind === 'available' ? '子会话可跳转' : session.reason}
+                            </span>
+                            {availableTodoActions(item.status).map(action => (
+                              <button
+                                key={action}
+                                type="button"
+                                className="dshpet-jump"
+                                disabled={props.disabled || busyId === item.itemId}
+                                onClick={() => { void dispatch(item.itemId, action) }}
+                              >
+                                {action === 'accept' ? '受理' : action === 'done' ? '完成' : '放弃'}
+                              </button>
+                            ))}
+                          </div>
+                        </article>
+                      )
+                    })}
+                  </div>
+                ))}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </section>
   )
 }
 

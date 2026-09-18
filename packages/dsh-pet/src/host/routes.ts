@@ -46,6 +46,8 @@ import {
   type PetLocusEndpointView,
   type PetLocusManagementView,
   type PetLocusView,
+  type PetTodoAction,
+  type PetTodoView,
 } from '../wire.js'
 
 /** Everything the routes read from the Host. */
@@ -97,6 +99,22 @@ export interface RouteDeps {
   readonly locusDiagnostics?: () => Promise<unknown> | unknown
   /** Host-authenticated operator identity; never read from request bodies. */
   readonly locusIdentity?: () => { readonly actorId?: string } | undefined
+  /**
+   * Shared-fact ledger todo surface (`pet-locus-intent-triage`).
+   *
+   * Optional in the same way `locus` is: a Host that composed no ledger keeps
+   * every other route working, and these two routes fail closed with
+   * `LOCUS_UNAVAILABLE` rather than returning an empty list — "no todos" and
+   * "this Host has no ledger" must stay different answers.
+   */
+  readonly todoLedger?: {
+    /** Every todo owned by one main session, already projected for the owner. */
+    list(parentSessionId: string): readonly PetTodoView[]
+    /** Owner-sourced disposition. Rejects illegal transitions and unknown ids. */
+    advance(itemId: string, action: PetTodoAction): Promise<PetTodoView>
+    /** Main sessions that currently own a ledger, so the panel groups without guessing. */
+    parents(): readonly string[]
+  }
   /**
    * Session ids DSH has archived.
    *
@@ -668,6 +686,51 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
       const handler = port.stop ?? port.action
       if (handler === undefined) return locusUnavailable()
       return invokeLocus('停止 locus', () => handler(request as never, { actorId: requireLocusActor() }))
+    }),
+
+    // `pet-locus-intent-triage` owner surface. Both routes require the same
+    // owner proof every other locus mutation does (`requireLocusActor`), so a
+    // todo can never be listed or disposed of by anything but a verified
+    // local owner — the caller-bound child tools have no path here at all.
+    petRoute(LOCUS_ROUTES.todos, async ({ body }) => {
+      const record = strictBody(body, ['parentSessionId'])
+      requireReady(lifecycle)
+      requireLocusActor()
+      const ledger = deps.todoLedger
+      if (ledger === undefined) {
+        throw new PetError('LOCUS_UNAVAILABLE', 'Shared-fact ledger is unavailable in this Host.')
+      }
+      const requested = record['parentSessionId']
+      if (requested !== undefined && typeof requested !== 'string') {
+        throw new PetError('INVALID_REQUEST', 'parentSessionId must be a string when provided.')
+      }
+      // Absent selector means "every ledger this Host owns": the owner panel
+      // groups by main session and must not have to discover parents itself.
+      const parents = typeof requested === 'string' && requested.trim() !== ''
+        ? [requested.trim()]
+        : ledger.parents()
+      return invokeLocus('读取待办', () => ({
+        ledgers: parents.map(parentSessionId => ({
+          parentSessionId,
+          items: ledger.list(parentSessionId),
+        })),
+      }))
+    }),
+    petRoute(LOCUS_ROUTES.todoAction, async ({ body }) => {
+      const record = strictBody(body, ['itemId', 'action'])
+      requireReady(lifecycle)
+      requireLocusActor()
+      const ledger = deps.todoLedger
+      if (ledger === undefined) {
+        throw new PetError('LOCUS_UNAVAILABLE', 'Shared-fact ledger is unavailable in this Host.')
+      }
+      const itemId = requireString(record, 'itemId').trim()
+      if (itemId === '') throw new PetError('INVALID_REQUEST', 'itemId must not be blank.')
+      const action = record['action']
+      if (action !== 'accept' && action !== 'done' && action !== 'drop') {
+        throw new PetError('INVALID_REQUEST', "action must be 'accept', 'done' or 'drop'.")
+      }
+      return invokeLocus('处置待办', () => ledger.advance(itemId, action))
     }),
 
     petRoute(ROUTES.status, async ({ body }) => {

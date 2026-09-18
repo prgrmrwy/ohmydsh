@@ -21,6 +21,8 @@ import {
   type PetLocusDiscoveryRequest,
   type PetLocusDiscoveryView,
   type PetLocusManagementView,
+  type PetTodoActionRequest,
+  type PetTodoView,
 } from '../wire.js'
 
 /** Uniform envelope returned by every Pet route. */
@@ -248,4 +250,26 @@ export const petApi = {
     call(LOCUS_ROUTES.action, input),
   locusRebuild: (input: Extract<PetLocusActionRequest, { action: 'rebuild' }>): Promise<PetLocusActionResult> =>
     call(LOCUS_ROUTES.rebuild, input),
+  /**
+   * Shared-fact ledger todos, grouped by owning main session.
+   *
+   * Omitting `parentSessionId` asks for every ledger this Host owns, which is
+   * what the panel wants: it groups by main session and must not have to
+   * discover the parents itself.
+   */
+  locusTodos: (parentSessionId?: string): Promise<PetTodoLedgerGroups> =>
+    call(LOCUS_ROUTES.todos, parentSessionId === undefined ? {} : { parentSessionId }),
+  locusTodoAction: (input: PetTodoActionRequest): Promise<PetTodoView> =>
+    call(LOCUS_ROUTES.todoAction, input),
+}
+
+/** One main session's ledger group, as returned by {@link petApi.locusTodos}. */
+export interface PetTodoLedgerGroup {
+  readonly parentSessionId: string
+  readonly items: readonly PetTodoView[]
+}
+
+/** Response shape of {@link petApi.locusTodos}. */
+export interface PetTodoLedgerGroups {
+  readonly ledgers: readonly PetTodoLedgerGroup[]
 }
