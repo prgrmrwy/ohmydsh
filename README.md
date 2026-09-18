@@ -58,10 +58,10 @@ tests/                    # sync 黑盒回归测试
 
 ## 架构图
 
-<img alt="ohmydsh 架构图:仓库真相源 → sync 物化 → ~/.dsh → DSH 运行时" src="archify-out/ohmydsh-architecture.dual.svg" width="100%">
+<img alt="ohmydsh 架构图:仓库真相源 → sync 物化 → ~/.dsh → DSH 运行时" src="docs/assets/ohmydsh-architecture.dual.svg" width="100%">
 
-> 展示资产为 `archify-out/ohmydsh-architecture.dual.svg`(单文件,自带明暗主题适配);
-> 可编辑图源为 `archify-out/ohmydsh-architecture.json`,架构变化时更新图源并重新导出该 SVG。
+> 展示资产为 `docs/assets/ohmydsh-architecture.dual.svg`(单文件,自带明暗主题适配);
+> 可编辑图源为 `docs/assets/ohmydsh-architecture.json`,架构变化时更新图源并重新导出该 SVG。
 
 ## 使用
 

@@ -109,9 +109,9 @@ tests/                    # black-box sync regression tests
 
 ## Architecture
 
-<img alt="ohmydsh architecture: repo source of truth → sync → ~/.dsh → DSH runtime" src="archify-out/ohmydsh-architecture.dual.svg" width="100%">
+<img alt="ohmydsh architecture: repo source of truth → sync → ~/.dsh → DSH runtime" src="docs/assets/ohmydsh-architecture.dual.svg" width="100%">
 
-The editable diagram source is `archify-out/ohmydsh-architecture.json`; update it and re-export the theme-adaptive SVG when the architecture changes.
+The editable diagram source is `docs/assets/ohmydsh-architecture.json`; update it and re-export the theme-adaptive SVG when the architecture changes.
 
 ## Security notes
 

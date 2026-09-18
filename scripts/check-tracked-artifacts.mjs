@@ -8,8 +8,8 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 export const REQUIRED_TRACKED_PATHS = [
   'package-lock.json',
-  'archify-out/ohmydsh-architecture.json',
-  'archify-out/ohmydsh-architecture.dual.svg',
+  'docs/assets/ohmydsh-architecture.json',
+  'docs/assets/ohmydsh-architecture.dual.svg',
 ]
 
 export function artifactPolicyViolations(files) {
@@ -19,7 +19,10 @@ export function artifactPolicyViolations(files) {
     if (/^packages\/[^/]+\/lib\//.test(file)) violations.push(`${file}: generated package lib must not be tracked`)
     if (/^packages\/[^/]+\/package-lock\.json$/.test(file)) violations.push(`${file}: nested package lock must not be tracked`)
     if (/^openspec\/changes\/.+\/checking\/(baselines|screenshots)\//.test(file)) violations.push(`${file}: raw acceptance evidence must not be tracked`)
-    if (/^archify-out\/.*\.(png|html)$/.test(file)) violations.push(`${file}: duplicate architecture export must not be tracked`)
+    // `archify-out/` is a LOCAL scratch directory for understanding the
+    // system; nothing in it is tracked. The two files the README shows moved
+    // to `docs/assets/`, where a documentation asset belongs.
+    if (/^archify-out\//.test(file)) violations.push(`${file}: archify output is local-only and must not be tracked`)
     if (file === 'worktree-session-architecture.html') violations.push(`${file}: generated architecture HTML must not be tracked`)
   }
   const set = new Set(files.map((file) => file.split(path.sep).join('/')))
