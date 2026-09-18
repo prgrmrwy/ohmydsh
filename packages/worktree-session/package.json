@@ -19,6 +19,10 @@
       "types": "./lib/host/maintenance.d.ts",
       "default": "./lib/host/maintenance.js"
     },
+    "./open-handler": {
+      "types": "./lib/open-handler.d.ts",
+      "default": "./lib/open-handler.js"
+    },
     "./cli": "./lib/cli.js",
     "./client": "./lib/client.js",
     "./package.json": "./package.json"

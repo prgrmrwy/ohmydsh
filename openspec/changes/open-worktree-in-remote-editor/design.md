@@ -84,11 +84,11 @@ dsh-cockpit-bridge ──provide──▶ shim ──register──▶ worktree-
 
 **理由**：origin 校验、capability 续签、失败重试这些易错逻辑应当只有一份实现。cockpit 侧 spec 已相应收紧为"设备页面与驾驶舱之间的一切通信必须经 bridge"。
 
-### D6：URI 在 cockpit 父页面产出
+### D6：URI 在 bridge 服务中、原始用户手势内产出
 
-**决定**：URI 拼装与路径校验都在 cockpit 父页面（详见对侧 change `remote-editor-open-seam` 的 D1/D4）。
+**决定**：cockpit 父页面仅经既有 `bridge-config` 握手下发合法 `sshAlias`；bridge 0.4.0 的稳定服务 `cockpitBridge.editorOpen` 在消费方点击调用的同一同步链路中校验路径、拼装 URI 并 `window.open`。
 
-**理由**：① 跨源 iframe 内 `window.open('vscode://...')` 被导航策略拦截；② alias 是 cockpit 侧事实，不必下发；③ 唯一能产出 URI 的一侧必须是把关的一侧。
+**理由**：现有 `vscode://file/` 已能从 iframe 拉起宿主机 VS Code，证明 iframe 的原始用户手势可启动外部协议，失败仅因路径被按本机语义解释。若改成 iframe `postMessage` 后由父页面异步 `window.open`，用户激活不会跨消息事件传播，反而可能被 popup blocker 拦截，同时无必要地新增第一条命令式反向通道。alias 仍只通过唯一 bridge 通信切面下发；其它插件只消费 bridge 的同页面 Cordis 服务。
 
 ## Risks / Trade-offs
 
