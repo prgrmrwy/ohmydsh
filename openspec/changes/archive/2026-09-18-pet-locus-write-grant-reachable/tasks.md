@@ -25,4 +25,6 @@
 - [x] 4.5 判定侧不变：`locus-policy-verification`（7）与 `locus-permission-mutation`（15）全绿，缺根/根不一致/显式撤销三类拒绝未放松
 - [x] 4.6 验证：`tsc -p tsconfig.json` 通过、`tsc -p tsconfig.client.json` 仅剩本 worktree 缺依赖导致的 `client/index.tsx` 5 条既有报错；削弱三处修复（映射、可见性、候选供给）后 91 项中 8 项失败，恢复后 91/91；`packages/dsh-pet` 全量 vitest 与基线同形（5 个文件因缺依赖失败、2 项断言失败，通过数 2348 → 2362）；仓库 `npm test` 124 通过 / 0 失败；`check:artifacts` 与 `openspec validate --strict` 通过
 - [x] 4.7 记录剩余未验证项：本机设置页「确认执行根 → 提权」与飞书 `-s write` 成功的端到端闭环只有在部署后的真实 Host 上才能确认，本 change 不冒充已完成
-- [ ] 4.8 部署与实机验收（需所有者批准）：`dsh build` + 重启 `dsh web` 后按 4.7 验收
+- [x] 4.8 部署与实机验收（需所有者批准）：`dsh build` + 重启 `dsh web` 后按 4.7 验收
+  - 已部署并由所有者重启验收：提权拒绝路径给出确定性原因而非重试提示，管理面确认执行根入口在 confirmed 状态下保持可用。
+  - **归档时的范围订正**：本 change 原设计以「已确认执行根 == live workspace root」派生写授权；该模型此后被 ADR-0005 取代（锚点降级为上下文事实，不再门控提权），delta 已相应收敛为仍然成立的部分：默认 read、拒绝须给确定性原因、确认入口可达。

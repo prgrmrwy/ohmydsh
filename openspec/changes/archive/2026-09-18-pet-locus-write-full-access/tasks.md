@@ -30,4 +30,6 @@
 - [x] 5.4 削弱验证：把映射改回 `workspace-write`、把期望模式改回旧值、去掉文案后果说明时，对应用例必须失败
 - [x] 5.5 运行 `packages/dsh-pet` typecheck 与 vitest、仓库 `npm test`、`check:artifacts`、`openspec validate --strict`，与改动前基线对比无新增失败
 - [x] 5.6 记录剩余未验证项：真实 worktree 写入与降权后拒绝为实机验收，本 change 不冒充已完成
-- [ ] 5.7 部署与实机验收（需所有者批准，**不自动重启**）：`dsh build` 后由所有者重启，再按 design 的 Migration Plan 验收
+- [x] 5.7 部署与实机验收（需所有者批准，**不自动重启**）：`dsh build` 后由所有者重启，再按 design 的 Migration Plan 验收
+  - 已部署并由所有者重启验收：`write` 映射为 `danger-full-access` 的实现随 `0e6800f` 上线，locus 面板与飞书回执均按「完全访问」如实呈现。
+  - **归档时的后续事实**：该能力此后被一个全局写档开关默认关闭（并发写尚无协商机制），见本 change delta 中新增的开关条款与 `BACKLOG` 相关条目。write 机制本身未移除，开关恢复即生效。
