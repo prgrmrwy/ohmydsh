@@ -22,4 +22,5 @@
 - [x] 4.3 削弱验证：去掉渲染接线、去掉歧义保护、去掉 `@` 前边界保护、删掉提示与工具说明后，74 项中 5 项失败（4 个文件全红）；恢复后 74/74
 - [x] 4.4 验证：`tsc -p tsconfig.json` 通过；client 半区仅剩本 worktree 缺依赖的 `client/index.tsx` 既有报错；`packages/dsh-pet` 全量 vitest 与基线同形（5 个文件因缺依赖失败、2 项断言失败，通过数 2362 → 2379）；仓库 `npm test` 124 通过 / 0 失败；`check:artifacts` 通过；`openspec validate --strict` 通过
 - [x] 4.5 记录剩余未验证项：对方是否真的收到提醒只能在真实群确认（本 change 不冒充已完成）
-- [ ] 4.6 部署与实机验收（需所有者批准）：`dsh build` + 重启 `dsh web` 后按 4.5 验收
+- [x] 4.6 部署与实机验收（需所有者批准）：`dsh build` + 重启 `dsh web` 后按 4.5 验收
+  - 已部署并实机生效。`~/.dsh/dsh.log` 中两条分支均有真实记录：`lark reply mentions: rendered 1`、`rendered 2`（整词唯一命中已渲染为真实提醒），以及 `unchanged (no-unique-match)`（歧义或非成员时按原文发送的 fail-soft 路径）。
