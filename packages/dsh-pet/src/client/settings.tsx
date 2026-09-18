@@ -87,6 +87,7 @@ import type {
   PetLocusView,
   PetSkillSelection,
   PetTodoAction,
+  PetTodoStatus,
   PetUnifiedLocusReadiness,
   PetWorkspaceChoice,
 } from '../wire.js'
@@ -1982,14 +1983,18 @@ export function LocusSurface(props: {
  * this component only renders and dispatches, so grouping, labels, jump
  * targets and legal actions stay testable without a DOM.
  */
-function TodoLedgerFold(props: {
+export function TodoLedgerFold(props: {
   readonly snapshot: PetLocusManagementView
   readonly disabled: boolean
+  /** Test seam: pre-seeded groups render without a Host round-trip. */
+  readonly initialGroups?: readonly PetTodoLedgerGroup[]
+  /** Test seam: start expanded so the list itself can be asserted. */
+  readonly initialOpen?: boolean
 }): JSX.Element {
-  const [groups, setGroups] = useState<readonly PetTodoLedgerGroup[] | undefined>(undefined)
+  const [groups, setGroups] = useState<readonly PetTodoLedgerGroup[] | undefined>(props.initialGroups)
   const [error, setError] = useState<string | undefined>(undefined)
   const [busyId, setBusyId] = useState<string | undefined>(undefined)
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(props.initialOpen === true)
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -2004,8 +2009,11 @@ function TodoLedgerFold(props: {
 
   useEffect(() => {
     if (!open) return
+    // Pre-seeded groups mean a caller already supplied the data (tests), so
+    // opening must not issue a Host round-trip that would overwrite it.
+    if (props.initialGroups !== undefined) return
     void load()
-  }, [open, load])
+  }, [open, load, props.initialGroups])
 
   const dispatch = useCallback(async (itemId: string, action: PetTodoAction): Promise<void> => {
     setBusyId(itemId)
@@ -2029,81 +2037,102 @@ function TodoLedgerFold(props: {
   ) ?? 0
 
   return (
-    <section className="dshpet-locus-fold">
-      <button
-        type="button"
-        className="dshpet-jump"
-        aria-expanded={open}
-        onClick={() => setOpen(current => !current)}
-      >
-        待办{groups === undefined ? '' : `（${String(openCount)} 待处理 / 共 ${String(total)}）`}
-      </button>
+    <section className="dshpet-todo-fold">
+      <div className="dshpet-todo-head">
+        <button
+          type="button"
+          className="dshpet-jump"
+          aria-expanded={open}
+          onClick={() => setOpen(current => !current)}
+        >
+          待办
+        </button>
+        {/* The count sits beside the control rather than inside its label: a
+            button's name should stay stable, not change every time a child
+            files something. */}
+        {groups === undefined ? null : (
+          <span className="dshpet-todo-count">
+            {openCount === 0 ? `${String(total)} 条，都已处理` : `${String(openCount)} 条待处理 · 共 ${String(total)} 条`}
+          </span>
+        )}
+      </div>
       {!open ? null : (
-        <div className="dshpet-locus-fold-body">
+        <div className="dshpet-todo-list">
           <p className="dshpet-item-hint">
             子会话判定为「要求干活」但自身只读时，会把查清楚的结论登记成待办交给你。
-            这里的状态变化不会向飞书发送任何消息。
+            处置只改这里的状态，不向飞书发送任何消息。
           </p>
           {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
           {groups === undefined && error === undefined
             ? <p className="dshpet-item-hint">正在读取待办…</p>
             : null}
           {groups !== undefined && total === 0
-            ? <p className="dshpet-item-hint">还没有登记任何待办。</p>
+            ? <p className="dshpet-item-hint">还没有待办。子会话遇到做不了的改动请求时会记在这里。</p>
             : null}
           {(groups ?? []).map(group => {
             if (group.items.length === 0) return null
             const byLocus = groupTodosByLocus(group.items as readonly TodoSnapshotItem[])
             return (
-              <div key={group.parentSessionId} className="dshpet-locus-fold-group">
-                {[...byLocus.entries()].map(([locusId, items]) => (
-                  <div key={locusId} className="dshpet-locus-fold-locus">
-                    {items.map(item => {
-                      const jump = resolveFeishuJumpTarget(item)
-                      const locus = props.snapshot.loci.find(row => row.locusId === locusId)
-                      const session = resolveSessionJumpTarget(
-                        locus?.child.sessionId,
-                        locus?.child.availability,
-                      )
-                      return (
-                        <article key={item.itemId} className="dshpet-locus-row">
-                          <header className="dshpet-locus-row-head">
-                            <span className="dshpet-badge">{todoStatusLabel(item.status)}</span>
-                            <span className="dshpet-locus-row-title">{item.summary}</span>
-                          </header>
-                          <p className="dshpet-item-hint">
-                            {new Date(item.createdAt).toLocaleString()} · 来自 {item.requestedBy}
-                          </p>
-                          {item.detail.trim() === '' ? null : (
-                            <details>
-                              <summary className="dshpet-item-hint">查看登记时的证据</summary>
-                              <pre className="dshpet-pre">{item.detail}</pre>
-                            </details>
-                          )}
-                          <div className="dshpet-locus-row-actions">
-                            <span className="dshpet-item-hint">
-                              {jump.kind === 'thread' ? '来源：话题' : `来源：${jump.reason}`}
+              <div key={group.parentSessionId} className="dshpet-todo-group">
+                {[...byLocus.entries()].flatMap(([locusId, items]) => {
+                  const locus = props.snapshot.loci.find(row => row.locusId === locusId)
+                  const session = resolveSessionJumpTarget(
+                    locus?.child.sessionId,
+                    locus?.child.availability,
+                  )
+                  return items.map(item => {
+                    const jump = resolveFeishuJumpTarget(item)
+                    const busy = props.disabled || busyId === item.itemId
+                    const actions = availableTodoActions(item.status)
+                    return (
+                      <article key={item.itemId} className="dshpet-todo" data-status={item.status}>
+                        <p className="dshpet-todo-summary">{item.summary}</p>
+                        <div className="dshpet-todo-meta">
+                          <span className="dshpet-status" data-tone={TODO_TONE[item.status]}>
+                            {todoStatusLabel(item.status)}
+                          </span>
+                          <span className="dshpet-todo-meta-sep">·</span>
+                          <time dateTime={new Date(item.createdAt).toISOString()}>
+                            {formatTodoTime(item.createdAt)}
+                          </time>
+                          <span className="dshpet-todo-meta-sep">·</span>
+                          <span className="dshpet-todo-who" title={item.requestedBy}>
+                            {item.requestedBy}
+                          </span>
+                        </div>
+                        {item.detail.trim() === '' ? null : (
+                          <details className="dshpet-todo-evidence">
+                            <summary>登记时查到的证据</summary>
+                            <div className="dshpet-todo-evidence-body">{item.detail}</div>
+                          </details>
+                        )}
+                        <div className="dshpet-todo-actions">
+                          <span className="dshpet-todo-routes">
+                            <span className="dshpet-todo-route" title={jump.kind === 'thread' ? undefined : jump.reason}>
+                              {jump.kind === 'thread' ? '来自话题' : jump.reason}
                             </span>
-                            <span className="dshpet-item-hint">
-                              {session.kind === 'available' ? '子会话可跳转' : session.reason}
+                            <span className="dshpet-todo-meta-sep">·</span>
+                            <span className="dshpet-todo-route" title={session.kind === 'available' ? undefined : session.reason}>
+                              {session.kind === 'available' ? '子会话在服务中' : session.reason}
                             </span>
-                            {availableTodoActions(item.status).map(action => (
-                              <button
-                                key={action}
-                                type="button"
-                                className="dshpet-jump"
-                                disabled={props.disabled || busyId === item.itemId}
-                                onClick={() => { void dispatch(item.itemId, action) }}
-                              >
-                                {action === 'accept' ? '受理' : action === 'done' ? '完成' : '放弃'}
-                              </button>
-                            ))}
-                          </div>
-                        </article>
-                      )
-                    })}
-                  </div>
-                ))}
+                          </span>
+                          {actions.map(action => (
+                            <button
+                              key={action}
+                              type="button"
+                              className="dshpet-jump"
+                              disabled={busy}
+                              data-disabled={busy ? 'true' : undefined}
+                              onClick={() => { void dispatch(item.itemId, action) }}
+                            >
+                              {TODO_ACTION_LABELS[action]}
+                            </button>
+                          ))}
+                        </div>
+                      </article>
+                    )
+                  })
+                })}
               </div>
             )
           })}
@@ -2111,6 +2140,43 @@ function TodoLedgerFold(props: {
       )}
     </section>
   )
+}
+
+/**
+ * Status tone, reusing the sheet's existing `.dshpet-status` tokens rather
+ * than inventing colours: `open` is the one that still wants attention,
+ * `accepted` is in hand, and both terminal states are neutral history.
+ */
+const TODO_TONE: Record<PetTodoStatus, string | undefined> = {
+  open: 'warn',
+  accepted: 'enabled',
+  done: undefined,
+  dropped: undefined,
+}
+
+/** An action keeps the same verb the button promised, per the writing rules. */
+const TODO_ACTION_LABELS: Record<PetTodoAction, string> = {
+  accept: '受理',
+  done: '完成',
+  drop: '放弃',
+}
+
+/**
+ * Registration time, trimmed to what the owner actually scans by.
+ *
+ * `toLocaleString()` prints a full date plus seconds, which is noise on a row
+ * whose job is "how long has this been waiting": today's items read as a clock
+ * time, older ones drop the seconds and keep the date.
+ */
+function formatTodoTime(at: number): string {
+  const when = new Date(at)
+  const now = new Date()
+  const sameDay = when.getFullYear() === now.getFullYear() &&
+    when.getMonth() === now.getMonth() &&
+    when.getDate() === now.getDate()
+  return sameDay
+    ? `今天 ${when.getHours()}:${String(when.getMinutes()).padStart(2, '0')}`
+    : `${when.getMonth() + 1}/${when.getDate()} ${when.getHours()}:${String(when.getMinutes()).padStart(2, '0')}`
 }
 
 /**

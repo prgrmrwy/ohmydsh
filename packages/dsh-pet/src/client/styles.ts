@@ -921,4 +921,89 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
   padding:10px 12px;border-radius:12px;
   border:.5px solid var(--dsw-alias-border-l4,#00000029);
   background:var(--dsw-specific-menu,#fff)}
+
+/* ---------------------------------------------------------------------------
+   Shared-fact ledger todos ('pet-locus-intent-triage').
+
+   The subject here is not "a list item" — it is a REQUEST THAT GOT STUCK: a
+   person asked for work in Feishu, the child could only read, so it filed the
+   analysis it did manage to produce and handed it back. What deserves the
+   page's weight is therefore the EVIDENCE, not the one-line summary.
+
+   Deliberately NOT reusing '.dshpet-locus-row': that class is a two-column
+   grid ('minmax(0,1fr) auto') built for a name/tail pair, and feeding it four
+   children silently folds them into two columns. Nor '.dshpet-badge', which is
+   an absolutely-positioned mascot count chip. Both mistakes shipped once; these
+   rules exist so the todo surface owns its own box model.
+   --------------------------------------------------------------------------- */
+.dshpet-settings .dshpet-todo-fold{display:flex;flex-direction:column;gap:10px;
+  padding:14px 0 0;border-top:.5px solid var(--dsw-alias-border-l2,#0000001a)}
+.dshpet-settings .dshpet-todo-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dshpet-settings .dshpet-todo-count{font:var(--dsw-font-xs-13,400 12px/18px inherit);
+  color:var(--dsw-alias-label-tertiary,#81858c)}
+.dshpet-settings .dshpet-todo-list{display:flex;flex-direction:column;gap:10px;margin:0;padding:0}
+/* One main session's ledger. Its own stack so the outer list's gap is not
+   doubled by a nested container sharing the same class. */
+.dshpet-settings .dshpet-todo-group{display:flex;flex-direction:column;gap:8px}
+
+/* One filed request. A flat block, not a card in a card: the fold already sits
+   inside a panel, and a second border would read as a nested surface. */
+.dshpet-settings .dshpet-todo{display:flex;flex-direction:column;gap:6px;
+  padding:11px 13px;border-radius:12px;
+  border:.5px solid var(--dsw-alias-border-l4,#00000029);
+  background:var(--dsw-specific-menu,#fff)}
+.dshpet-settings .dshpet-todo[data-status="done"],
+.dshpet-settings .dshpet-todo[data-status="dropped"]{
+  background:var(--dsw-alias-bg-module-platform,#0000000a);border-color:transparent}
+
+/* The summary leads and is allowed to wrap: it is the sentence the owner reads
+   to decide, so clipping it to one line would hide the decision. */
+.dshpet-settings .dshpet-todo-summary{font:500 13px/20px var(--dsw-font-family,inherit);
+  color:var(--dsw-alias-label-primary,#0f1115);margin:0;overflow-wrap:anywhere}
+.dshpet-settings .dshpet-todo[data-status="done"] .dshpet-todo-summary,
+.dshpet-settings .dshpet-todo[data-status="dropped"] .dshpet-todo-summary{
+  color:var(--dsw-alias-label-secondary,#61666b)}
+
+/* Provenance line: who asked, when, and where it came from. Tertiary weight —
+   it qualifies the summary, it is not competing with it. */
+.dshpet-settings .dshpet-todo-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+  font:var(--dsw-font-xs-13,400 12px/18px inherit);
+  color:var(--dsw-alias-label-tertiary,#81858c)}
+.dshpet-settings .dshpet-todo-meta-sep{opacity:.5}
+/* An open id is an opaque 40-char token: give it the utility face and let it
+   truncate rather than shoving the row to a second line. */
+.dshpet-settings .dshpet-todo-who{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:11px;max-width:16em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* THE SIGNATURE: evidence reads as an excerpt lifted out of the session, not as
+   a form field. Monospace, a rule down the left edge, quiet ground. This is the
+   one place the surface raises its voice, so everything around it stays flat. */
+.dshpet-settings .dshpet-todo-evidence{margin:2px 0 0}
+.dshpet-settings .dshpet-todo-evidence > summary{list-style:none;cursor:pointer;
+  display:inline-flex;align-items:center;gap:5px;
+  font:var(--dsw-font-xs-13,400 12px/18px inherit);
+  color:var(--dsw-alias-label-secondary,#61666b)}
+.dshpet-settings .dshpet-todo-evidence > summary::-webkit-details-marker{display:none}
+.dshpet-settings .dshpet-todo-evidence > summary::before{content:"▸";flex:none;font-size:10px;
+  color:var(--dsw-alias-label-tertiary,#81858c);transition:transform .16s ease}
+.dshpet-settings .dshpet-todo-evidence[open] > summary::before{transform:rotate(90deg)}
+.dshpet-settings .dshpet-todo-evidence > summary:hover{color:var(--dsw-alias-label-primary,#0f1115)}
+.dshpet-settings .dshpet-todo-evidence > summary:focus-visible{border-radius:6px;
+  outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:2px}
+.dshpet-settings .dshpet-todo-evidence-body{margin:7px 0 0;padding:0 0 0 11px;
+  border-left:2px solid var(--dsw-alias-border-l3,#0000001f);
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:11.5px;line-height:18px;color:var(--dsw-alias-label-secondary,#61666b);
+  white-space:pre-wrap;overflow-wrap:anywhere;
+  max-height:260px;overflow:auto}
+
+/* Actions sit on their own line, pushed right, so they never collide with the
+   text the way an 'auto' grid column did. */
+.dshpet-settings .dshpet-todo-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+  margin-top:2px}
+.dshpet-settings .dshpet-todo-actions .dshpet-todo-routes{margin-right:auto;
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}
+.dshpet-settings .dshpet-todo-route{font:var(--dsw-font-xs-13,400 12px/18px inherit);
+  color:var(--dsw-alias-label-tertiary,#81858c);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:20em}
 `
