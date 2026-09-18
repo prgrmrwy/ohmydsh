@@ -1266,8 +1266,14 @@ function WorkSection(props: {
   readonly todoBusyId?: string | undefined
   readonly onTodoDispatch?: (itemId: string, action: PetTodoAction) => void
   readonly initialTodosOpen?: boolean
+  /** Whether this session's entries are shown. Undefined keeps them always on
+   * (the by-entry reading, where the group IS the entry list). */
+  readonly expanded?: boolean
+  readonly onToggleExpanded?: () => void
 }): JSX.Element {
   const { work } = props
+  const collapsible = props.onToggleExpanded !== undefined
+  const showEntries = !collapsible || props.expanded === true
   const sessionId = work.parentSessionId
   const sessionCode = handleLabel('session', props.codes.session.get(sessionId) ?? '')
   const workspaceTitle = work.workspace?.title ?? work.workspace?.workspaceId ?? '未知工作区'
@@ -1322,6 +1328,20 @@ function WorkSection(props: {
         <span className="dshpet-work-tail">
           <HandleChip value={sessionId} code={sessionCode} />
           <span className="dshpet-meta">{sessionAvailabilityLabel(work.session?.availability)}</span>
+          {!collapsible ? null : (
+            <button
+              type="button"
+              className="dshpet-work-expand"
+              aria-expanded={showEntries}
+              // The count is what makes a collapsed row informative: it says
+              // how much is hidden without the owner having to open it.
+              title={showEntries ? '收起这个会话的入口' : '展开这个会话的入口'}
+              onClick={props.onToggleExpanded}
+            >
+              <span aria-hidden="true" className="dshpet-work-expand-mark">▸</span>
+              {work.families.length} 个入口
+            </button>
+          )}
         </span>
       </div>
       <div className="dshpet-work-sub">
@@ -1333,9 +1353,13 @@ function WorkSection(props: {
           默认 Q&amp;A 尚未创建 —— 请在目标会话里用 Pet 轮盘的「答疑群」创建；设置页只做展示与导航，不提供创建入口。
         </p>
       )}
-      <div className="dshpet-rail">{work.nodes.map(node => renderNode(node, false))}</div>
+      {!showEntries ? null : (
+        <div className="dshpet-rail">{work.nodes.map(node => renderNode(node, false))}</div>
+      )}
       {/* Filed work closes the session block: the entries above are what this
-          session serves, and these are the requests it could not serve. */}
+          session serves, and these are the requests it could not serve. Shown
+          even while the entries are collapsed — an outstanding request is the
+          reason to look at this session at all. */}
       {props.todos === undefined || props.onTodoDispatch === undefined ? null : (
         <WorkTodos
           items={props.todos}
@@ -1601,6 +1625,58 @@ function requireLocusSnapshot(value: unknown): PetLocusManagementView {
 const DISCOVERY_FOLD_ENABLED: boolean = false
 
 /**
+ * Parent sessions per page.
+ *
+ * Eight keeps a page roughly one screen tall when every session is collapsed,
+ * which is the state the list now opens in — enough to scan without paging,
+ * few enough that expanding two or three still fits.
+ */
+const WORKS_PER_PAGE = 8
+
+/**
+ * Page control, rendered both above and below the list.
+ *
+ * Renders nothing for a single page: a pager that can only say "1 / 1" is
+ * chrome that never helps.
+ */
+function LocusPager(props: {
+  readonly page: number
+  readonly pageCount: number
+  readonly total: number
+  readonly onGo: (page: number) => void
+  readonly position: 'top' | 'bottom'
+}): JSX.Element | null {
+  if (props.pageCount <= 1) return null
+  const first = props.page * WORKS_PER_PAGE + 1
+  const last = Math.min((props.page + 1) * WORKS_PER_PAGE, props.total)
+  return (
+    <nav className="dshpet-pager" data-position={props.position} aria-label="父会话分页">
+      <button
+        type="button"
+        className="dshpet-jump"
+        disabled={props.page === 0}
+        onClick={() => props.onGo(props.page - 1)}
+      >
+        上一页
+      </button>
+      {/* States the slice, not just the page number: "第 2 页" alone does not
+          tell the owner how much of the list they have seen. */}
+      <span className="dshpet-pager-state">
+        {first}–{last} / {props.total} 个父会话
+      </span>
+      <button
+        type="button"
+        className="dshpet-jump"
+        disabled={props.page >= props.pageCount - 1}
+        onClick={() => props.onGo(props.page + 1)}
+      >
+        下一页
+      </button>
+    </nav>
+  )
+}
+
+/**
  * The folded manual lookup.
  *
  * Kept because the Host contract it exercises — one explicit index selector,
@@ -1781,6 +1857,8 @@ export function LocusSurface(props: {
   readonly initialTodoGroups?: readonly PetTodoLedgerGroup[]
   /** Test seam: start each session's todo block expanded. */
   readonly initialTodosOpen?: boolean
+  /** Test seam: start every session's entries expanded. */
+  readonly initialWorksExpanded?: boolean
 }): JSX.Element {
   const [reading, setReading] = useState<LocusReading>('work')
   const [filter, setFilter] = useState<LocusFilter>(DEFAULT_LOCUS_FILTER)
@@ -1812,6 +1890,20 @@ export function LocusSurface(props: {
   // One ledger read for the whole panel, redistributed per parent session.
   const todos = useTodoLedger(props.initialTodoGroups)
 
+  // Parent sessions are the unit of navigation, so the page is paged by them
+  // rather than by entries: a session with twelve topics and one with a single
+  // chat must still count as one row each, or a page size would mean nothing.
+  const [page, setPage] = useState(0)
+  // Collapsed by default: a session's entries are detail, and showing every
+  // one of them for every session is what made this list unreadable.
+  const [expandedWorks, setExpandedWorks] = useState<readonly string[]>([])
+  const toggleWork = useCallback((parentSessionId: string) => {
+    setExpandedWorks(current => (current.includes(parentSessionId)
+      ? current.filter(id => id !== parentSessionId)
+      : [...current, parentSessionId]))
+  }, [])
+  const listTopRef = useRef<HTMLDivElement | null>(null)
+
   const toggleOpen = useMemo(() => toggle(setOpenKeys), [toggle])
   const toggleHistory = useMemo(() => toggle(setHistoryKeys), [toggle])
 
@@ -1827,6 +1919,26 @@ export function LocusSurface(props: {
     () => (filtered === undefined || codes === undefined ? undefined : applyQuery(filtered, codes, query)),
     [filtered, codes, query],
   )
+  const pageCount = Math.max(1, Math.ceil((visible?.works.length ?? 0) / WORKS_PER_PAGE))
+  // A filter or search that shrinks the list can strand the viewer on a page
+  // that no longer exists; clamping keeps the view on real content instead of
+  // rendering an empty page with no way back.
+  const safePage = Math.min(page, pageCount - 1)
+  useEffect(() => {
+    if (safePage !== page) setPage(safePage)
+  }, [safePage, page])
+  const pagedWorks = useMemo(
+    () => (visible?.works ?? []).slice(safePage * WORKS_PER_PAGE, (safePage + 1) * WORKS_PER_PAGE),
+    [visible, safePage],
+  )
+  const goToPage = useCallback((next: number) => {
+    setPage(next)
+    // Land at the top of the list, not wherever the previous page left the
+    // scroll: paging is a jump, and keeping the offset makes it read as if
+    // nothing happened.
+    listTopRef.current?.scrollIntoView({ block: 'start', behavior: 'auto' })
+  }, [])
+
   const counts = useMemo(
     () => (props.snapshot === undefined ? undefined : countLocusFilterOptions(props.snapshot)),
     [props.snapshot],
@@ -1937,8 +2049,22 @@ export function LocusSurface(props: {
         </div>
       </section>
 
+      {/* Scroll anchor for paging. Sits above the top pager so a page change
+          lands on the controls, not on the first row under them. */}
+      <div ref={listTopRef} aria-hidden="true" />
+
+      {reading === 'work' ? (
+        <LocusPager
+          page={safePage}
+          pageCount={pageCount}
+          total={visible.works.length}
+          onGo={goToPage}
+          position="top"
+        />
+      ) : null}
+
       {reading === 'work'
-        ? visible.works.map(work => (
+        ? pagedWorks.map(work => (
           <WorkSection
             key={work.parentSessionId}
             work={work}
@@ -1955,6 +2081,8 @@ export function LocusSurface(props: {
             todos={todos.byParent.get(work.parentSessionId) ?? EMPTY_TODOS}
             todoBusyId={todos.busyId}
             onTodoDispatch={todos.dispatch}
+            expanded={props.initialWorksExpanded === true || expandedWorks.includes(work.parentSessionId)}
+            onToggleExpanded={() => toggleWork(work.parentSessionId)}
             {...(props.initialTodosOpen === true ? { initialTodosOpen: true } : {})}
           />
         ))
@@ -1984,6 +2112,16 @@ export function LocusSurface(props: {
             />
           )
         })}
+
+      {reading === 'work' ? (
+        <LocusPager
+          page={safePage}
+          pageCount={pageCount}
+          total={visible.works.length}
+          onGo={goToPage}
+          position="bottom"
+        />
+      ) : null}
 
       {empty ? (
         <p className="dshpet-empty">

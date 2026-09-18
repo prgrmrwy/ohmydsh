@@ -21,6 +21,11 @@ function render(snapshot: PetLocusManagementView): string {
       snapshot,
       onAction: () => undefined,
       runQuery: async () => undefined,
+      // These cases assert how ENTRY ROWS render (nesting, naming, state
+      // wording); the list now collapses each session by default, so they
+      // expand it rather than re-testing the collapse behaviour, which
+      // `ledger-panel-render.test.ts` owns.
+      initialWorksExpanded: true,
     }),
   )
 }

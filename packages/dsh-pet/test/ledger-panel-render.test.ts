@@ -213,3 +213,74 @@ describe('todo rows actually navigate, not merely describe', () => {
     }
   })
 })
+
+describe('parent-session list is paged and collapsible', () => {
+  /** N sessions, each with one entry, so page math is by SESSION not entry. */
+  function manySessions(count: number): PetLocusManagementView {
+    return {
+      ...snapshot,
+      loci: Array.from({ length: count }, (_, i) => ({
+        ...snapshot.loci[0]!,
+        locusId: `locus-${i}`,
+        endpoint: { chatId: `oc_chat_${i}` },
+        main: { sessionId: `main-${i}`, availability: 'available' as const, title: `会话 ${i}` },
+        child: { sessionId: `child-${i}`, availability: 'available' as const },
+      })),
+    } as unknown as PetLocusManagementView
+  }
+
+  it('renders no pager when everything fits on one page', () => {
+    const markup = render({ snapshot: manySessions(3), initialTodoGroups: [] })
+    expect(markup).not.toContain('dshpet-pager')
+  })
+
+  it('renders a pager above AND below the list once it overflows', () => {
+    const markup = render({ snapshot: manySessions(20), initialTodoGroups: [] })
+    expect(markup).toContain('data-position="top"')
+    expect(markup).toContain('data-position="bottom"')
+  })
+
+  it('states the visible slice rather than only a page number', () => {
+    const markup = render({ snapshot: manySessions(20), initialTodoGroups: [] })
+    expect(markup).toContain('1–8 / 20 个父会话')
+  })
+
+  it('shows only one page of sessions at a time', () => {
+    const markup = render({ snapshot: manySessions(20), initialTodoGroups: [] })
+    // Count blocks rather than naming sessions: the list sorts by title, so
+    // which eight land on page one is the sort's business, not this test's.
+    const blocks = [...markup.matchAll(/class="dshpet-work"/g)]
+    expect(blocks).toHaveLength(8)
+  })
+
+  it('disables "上一页" on the first page', () => {
+    const markup = render({ snapshot: manySessions(20), initialTodoGroups: [] })
+    expect(markup).toMatch(/<button[^>]*disabled[^>]*>上一页/)
+  })
+
+  it('collapses each session by default and says how many entries are hidden', () => {
+    const markup = render({ snapshot: manySessions(3), initialTodoGroups: [] })
+    expect(markup).toContain('dshpet-work-expand')
+    expect(markup).toContain('1 个入口')
+    expect(markup).toContain('aria-expanded="false"')
+    // Entry rows stay out of the DOM until the session is expanded.
+    expect(markup).not.toContain('dshpet-rail')
+  })
+
+  it('renders entry rows once a session is expanded', () => {
+    const markup = render({
+      snapshot: manySessions(3), initialTodoGroups: [], initialWorksExpanded: true,
+    })
+    expect(markup).toContain('dshpet-rail')
+    expect(markup).toContain('dshpet-locus-row')
+  })
+
+  it('keeps a session\'s todos visible even while its entries are collapsed', () => {
+    // An outstanding request is the reason to look at a session at all, so it
+    // must not be hidden behind the same toggle as routine entry detail.
+    const markup = render()
+    expect(markup).not.toContain('dshpet-rail')
+    expect(markup).toContain('dshpet-work-todos')
+    expect(markup).toContain('dshpet-todo-summary')
+  })
+})
