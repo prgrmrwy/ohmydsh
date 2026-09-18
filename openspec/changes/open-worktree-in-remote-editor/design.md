@@ -1,117 +1,119 @@
 ## Context
 
-**当前状态**：`packages/worktree-session/src/client/controls.tsx:90` 的 `openWorktreeInEditor` 固定产出 `vscode://file/<path>` 并 `window.open`。唯一调用点是 `controls.tsx:169` 的 `openBranch`（分支名 span）。该函数是模块内私有，未导出给其它 package。
+**当前状态**：`packages/worktree-session/src/client/controls.tsx:90` 的 `openWorktreeInEditor` 固定产出 `vscode://file/<path>` 并 `window.open`。唯一调用点是 `controls.tsx:169` 的 `openBranch`（分支名 span）。
+
+`controls.tsx:19` 已有 `openWorktree?: (path: string) => void` prop —— 归档 change `2026-08-21-open-worktree-in-vscode` 为「后续支持其它编辑器」留下的口。但 `client/index.tsx:14-19` 的 slot 注册把 props 写死，**没有任何外部通路能设置它**。所以"支持注入"是真实的新增能力，不是现成的。
 
 **失败场景**：DSH 跑在 VM 上，用户经 dsh-cockpit iframe 从宿主机浏览器访问。深链由宿主机浏览器交给系统 handler，宿主机 VS Code 在本地文件系统查找 VM 路径，失败。
 
-**关键洞察**：深链**不需要跨机器传输**——触发它的浏览器进程本来就在宿主机上。缺的只是 authority 信息。VS Code 为此提供 `vscode://vscode-remote/<authority><path>`，其中 `ssh-remote+<alias>` 形态由 Remote-SSH 扩展解析（[CLI 文档](https://code.visualstudio.com/docs/configure/command-line)）。
+**关键洞察**：深链**不需要跨机器传输**——触发它的浏览器进程本来就在宿主机上。缺的只是 authority 信息。VS Code 为此提供 `vscode://vscode-remote/<authority><path>`。
 
 **已有材料**（读 `~/opensource/dsh-cockpit` 确认）：
 
-- `packages/shared/src/index.ts:18` `DeviceRecord.sshAlias?: string` —— 正是所需的 authority 材料。
-- `packages/cockpit-server/src/connectivity/ssh.ts:44` 的校验正则 `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$` **恰好排除 `@` 与 `:`**，保证存的是干净的 SSH config alias，拼进 `ssh-remote+<alias>` 零转义问题。
-- `packages/dsh-cockpit-bridge/src/client/index.ts:25` 起已有 `dsh-cockpit:bridge-config` postMessage 通道，`:64` 做双向 origin 严格校验，`:207` 已在反向 post `capability-expired`。**双向通道现成**。
+- `packages/shared/src/index.ts:18` `DeviceRecord.sshAlias?: string`。
+- `packages/cockpit-server/src/connectivity/ssh.ts:44` 校验正则 `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$` **恰好排除 `@` 与 `:`**，保证是干净的 SSH config alias。
+- `packages/dsh-cockpit-bridge/src/client/index.ts:25` 起已有 `dsh-cockpit:bridge-config` postMessage 通道，`:64` 双向 origin 校验，`:207` 已在反向 post。
 
-**约束**：
-
-- 本 change 的 `actionContext.allowedEditRoots` 仅含 ohmydsh。dsh-cockpit 是独立仓库。
-- 所有者确认：只经 cockpit iframe 访问 VM 上的 DSH，不直连。
-- 侧边栏 more action 入口（`dsh-open-in-vscode` 0.1.6）是 remote pin 的第三方包，执行面在 host，本次不碰（BACKLOG B043）。
+**核心约束（本轮设计的决定性输入）**：worktree-session 与 dsh-cockpit 必须**互不知晓**。两者是独立演进、独立安装、独立移除的插件；让任一方知道对方存在都是错误的耦合方向。
 
 ## Goals / Non-Goals
 
 **Goals:**
 
 - 经 cockpit 访问时，点击分支名能在宿主机 VS Code 中打开 VM 上的 worktree。
-- 本机直连场景行为**逐字节不变**。
+- **两端零互知**：worktree-session 不提 cockpit，cockpit 不提 worktree-session。
+- 耦合汇聚到单个可丢弃的 shim，移除即解耦。
+- 本机直连场景行为**逐字节不变**；未装 shim 的部署行为不变。
 - 全部失败路径安全降级，不伪造成功。
-- 不新增任何远端命令执行面。
 
 **Non-Goals:**
 
-- 修复侧边栏 more action 入口（机制不同，走上游 PR）。
-- 静态 `remoteAuthority` 配置兜底（所有者确认不需要，保留为扩展点）。
-- 支持 `tunnel+` / `dev-container+` 等其它 authority 形态（本次只做 `ssh-remote+`）。
-- 让 cockpit 代理任何远端操作。
+- 修复侧边栏 more action 入口（机制不同，走上游 PR，见 B043）。
+- 静态 `remoteAuthority` 配置兜底。
+- 让 shim 成为通用的插件间 RPC 层。
+- 支持 `tunnel+` / `dev-container+` 等其它 authority 形态。
 
 ## Decisions
 
-### D1：URI 在**父页面**产出，不在 iframe 内
+### D1：三段式而非直连
 
-**决定**：iframe 内的 DSH 页面把 `{path}` 经 postMessage 交给父页面，由父页面拼 URI 并 `window.open`。
+**决定**：
+
+```
+dsh-cockpit-bridge ──provide──▶ shim ──register──▶ worktree-session
+      (不知道 ws)                              (不知道 cockpit)
+```
+
+**理由**：直连方案（ws 直接 `ctx.get('cockpit.xxx')`）会把 cockpit 的服务名写进 ws 的源码，使 ws 永久携带对 cockpit 的知识。三段式让耦合只存在于 shim 一个 package，且该 package 可独立移除。
+
+**先例**：`packages/subscriptions-sandbox-shim` 是同构的"专用缓解/耦合 package"，其 README 明确记录了存在理由与移除路径。本 shim 沿用该惯例。
+
+**代价**：多一个 package 的 build/test/manifest 开销，以及多一跳间接。接受——换来的是两端各自的 spec 都能保持干净（ws 的 capability 完全不提 cockpit），这在规范层面比省一个 package 更有价值。
+
+### D2：ws 暴露注册点，而非读取约定名
+
+**决定**：worktree-session provide 一个自己命名的注册点，shim 作为注册方调用它。
 
 **理由**：
 
-1. **技术必需**：跨域 iframe 内 `window.open('vscode://...')` 会被浏览器导航策略拦截。
-2. **信任边界正确**：alias 是宿主机侧事实，URI 拼装与路径校验放在持有该事实的一侧，iframe 内不需要知道 alias。
-3. **最小信息暴露**：iframe 只需发路径，不需要接收 alias。
+1. **命名权归属正确**——扩展点是 ws 的地盘，契约由它定义，它不需要知道谁会来注册。
+2. **时序更宽松**——shim 晚于 ws 加载也能生效（后注册对后续动作生效）；反向方案要求 shim 必须先于首次点击完成 provide。
+3. **spec 更干净**——ws 的 capability 描述"我支持替换打开行为"，无需引入任何外部约定名。
 
-**备选**：把 alias 下发给 iframe、由 iframe 拼 URI 后 `window.open`。**否决**——被导航策略拦截，且让 alias 无必要地进入内嵌文档。
+**备选**：ws `ctx.get('<约定名>')` 探测，shim provide 该名。**否决**——约定名是"第三方约定"，写进 ws 的 spec 就等于引入了一个 ws 无法单独定义的概念；且有加载时序约束。
 
-### D2：能力经 cordis service 暴露，消费方用 `ctx.get()` 探测
+### D3：shim 必须最薄——只探测与转接
 
-**决定**：`dsh-cockpit-bridge` provide 一个服务；`worktree-session` 用 `ctx.get()` 探测。
+**决定**：shim 只做三件事：探测两端、转接路径、注册。不做校验、不拼 URI、不重试、不持状态。
 
-**理由**：这是 DSH 内同页面插件间通信的既有机制，不需要发明新东西。
+**理由**：shim 是耦合点，**耦合点承载的逻辑越多，解耦成本越高**。路径校验与 URI 拼装属于 cockpit 侧职责（它持有 alias、它是唯一能产出 URI 的一方，且其 spec 已要求父页面独立校验）；降级属于 ws 侧职责（它有默认实现）。shim 只负责"把 A 接到 B"。
 
-**硬约束**：**MUST NOT 写进 `inject`**。依据 `dsh.yaml` 记录的两次实际事故：
+这条写进 spec 而非仅 design，因为它约束的是**未来的改动**——防止 shim 逐渐长成一个业务层。
 
-- Pet 的 `shellEnv`：「写进 inject 会变必需依赖，Host 缺该服务时 Pet 永不加载」。
-- dsh-cockpit-bridge 0.2.1：inject 声明的 `dsh-client-runtime` 被上游移除后，插件在 0.1.2 运行体上「loader 解析不到依赖而**永不激活**（静默）」。
+### D4：跨插件服务读取必须用完整 dotted name
 
-失效模式是**静默不加载**而非报错，排查成本极高，因此这条写进了 spec 而不只是 design。
+**决定**：shim 读 cockpit 能力时必须 `ctx.get('a.b')`，禁止 `ctx.get('a').b`。
 
-**备选**：新建独立 package 提供该服务。**否决**——目前只有一个消费者（侧边栏入口机制不同、且改不了），属提前抽象。若将来出现第二个浏览器侧消费者再提升。
+**理由**：`packages/dsh-pet/src/client/index.tsx:171-195` 记录了实测事故——`ctx.get('remote')` 返回的是 cordis traceable proxy，其 `get` trap 会把任何注册为 `<service>.<name>` 的属性**重新路由回 context proxy**，而 context proxy 强制 `inject`。结果是抛 `cannot get property "remote.directoryPicker" without inject`，且以 uncaught promise rejection 逃逸出 click handler。
 
-### D3：复用既有 `bridge-config` 握手，不新建通道
+`ctx.get(name)` 是文档化的 inject-free 读取，正是可降级语义所需。
 
-**决定**：在现有 `dsh-cockpit:bridge-config` 消息里增带 `sshAlias` 字段；新增 `dsh-cockpit:open-in-editor` 作为反向消息。
+### D5：一切通信经 bridge，shim 不自建通道
 
-**理由**：该通道已有严格的双向 origin 校验（`client/index.ts:64`），且父页面已在能力续签路径上维护它。新建通道等于重复实现同一套校验，徒增攻击面。
+**决定**：shim MUST NOT 自行 `window.parent.postMessage`；跨文档通信一律经 dsh-cockpit-bridge。
 
-**兼容性**：`bridge-config` 增加可选字段对旧版 bridge 无影响（未知字段被忽略）；缺 `sshAlias` 时能力不声明可用，消费方按缺失降级。
+**理由**：origin 校验、capability 续签、失败重试这些易错逻辑应当只有一份实现。cockpit 侧 spec 已相应收紧为"设备页面与驾驶舱之间的一切通信必须经 bridge"。
 
-### D4：路径校验在父页面执行，双重把关
+### D6：URI 在 cockpit 父页面产出
 
-**决定**：父页面收到 `open-in-editor` 后校验：必须绝对路径、不含 `..`，校验失败拒绝且不产出 URI。
+**决定**：URI 拼装与路径校验都在 cockpit 父页面（详见对侧 change `remote-editor-open-seam` 的 D1/D4）。
 
-**理由**：父页面是唯一能产出 URI 的一侧，把关必须在这里。iframe 侧的校验（`controls.tsx:91` 已有的绝对路径检查）保留但不作为信任依据——**内嵌文档的输入一律视为不可信**。
-
-**为何不做更严的白名单**（如限定在某个根目录下）：worktree 路径由 DSH host 的绑定元数据决定，合法值域本身就是任意绝对路径；过严的白名单会误伤正常场景。当前校验的目标是阻止路径穿越与相对路径歧义，不是做授权。
-
-### D5：`windowId=_blank` 强制新窗口
-
-**决定**：URI 带 `?windowId=_blank`。
-
-**理由**：VS Code 1.67 起该参数强制在新窗口处理 URI。不带则可能复用当前窗口，把用户正在看的本地项目顶掉。
-
-### D6：只支持 `ssh-remote+`，不做 authority 形态抽象
-
-**决定**：本次只产出 `ssh-remote+<alias>`。
-
-**理由**：cockpit 的连接模型就是 SSH（`tunnel-manager.ts` 走 `-L` 端口转发），`DeviceRecord` 里也只有 `sshAlias`。为 `tunnel+` / `dev-container+` 做抽象没有对应的数据来源，属投机。
+**理由**：① 跨源 iframe 内 `window.open('vscode://...')` 被导航策略拦截；② alias 是 cockpit 侧事实，不必下发；③ 唯一能产出 URI 的一侧必须是把关的一侧。
 
 ## Risks / Trade-offs
 
-- **[目录 vs 文件歧义]** URI handler 无法 stat 远端路径，只能靠扩展名猜测。路径含点（如仓库名 `foo.bar`）可能被当成文件打开。CLI 有 `--folder-uri` 可强制，深链没有。→ **缓解**：接受该限制并在文档中注明；这是 VS Code 深链的固有行为（[WSL 文档记录了同样现象](https://code.visualstudio.com/docs/remote/wsl)），非本设计引入。
+- **[多一层间接的调试成本]** 故障可能出在三处任一。→ **缓解**：每一跳都有明确的降级语义与可观察的失败面；shim 最薄意味着它几乎不可能是故障源。
 
-- **[宿主机未装 Remote-SSH]** `vscode://vscode-remote/...` 会被 VS Code **静默丢弃**，无任何提示。→ **缓解**：spec 要求不伪造成功；文档中列为前置条件。无法在浏览器侧探测扩展是否安装，这是不可消除的边界。
+- **[shim 逐渐变厚]** 将来容易往 shim 里塞逻辑。→ **缓解**：D3 写进 spec（「不承载业务逻辑」带 scenario），新增逻辑必须过 spec。
 
-- **[首次连接需交互]** host key 确认、密钥密码会让 VS Code 停在连接中。→ **缓解**：属正常行为，文档说明；不视为失败。
+- **[ws 的注册点被滥用]** 注册点可能被用来做与"打开 worktree"无关的事。→ **缓解**：契约限定为「接收绝对路径、执行打开」，且 spec 明确注册方不得经该契约回传需 ws 解释的业务数据。
 
-- **[跨仓版本偏移]** bridge 与 cockpit 父页面必须同步升级，否则能力不可用。→ **缓解**：缺 `sshAlias` 即按能力缺失降级，偏移表现为"回落本机行为"而非报错；`dsh.yaml` 的 pin 需在 cockpit 发版后更新。
+- **[dotted name 读取事故]** 误写成 `ctx.get('a').b` 会静默失败（uncaught rejection）。→ **缓解**：D4 写进 spec 与实现注释，并在 shim 的测试中覆盖。
 
-- **[跨仓协调成本]** 本 change 只能改 ohmydsh，cockpit 侧需另开 change。→ **缓解**：本 spec 作为双方共同契约的真相源；tasks 中标注落地顺序（cockpit 先行，否则 ohmydsh 侧无法端到端验证）。
+- **[宿主机未装 Remote-SSH]** URI 被 VS Code **静默丢弃**，无提示。→ **缓解**：spec 要求不伪造成功；文档列为前置条件。浏览器侧无法探测扩展安装状态，这是不可消除的边界。
 
-- **[能力面扩大的滑坡]** 一旦 cockpit 能接收 iframe 的请求执行动作，后续容易被追加更多动作。→ **缓解**：spec 明确「只传输 alias 与路径」「不新增远端执行面」；URI 交给系统 handler 而非任何执行通道，SSH 用途保持仅端口转发。
+- **[目录 vs 文件歧义]** 路径含点（如仓库名 `foo.bar`）可能被当作文件打开。→ **缓解**：接受并在文档注明；这是 VS Code 深链的固有行为，非本设计引入。
+
+- **[跨仓版本偏移]** bridge 与 cockpit 父页面必须同步升级。→ **缓解**：能力缺失即降级，偏移表现为"回落本机行为"而非报错。
 
 ## Migration Plan
 
-1. **cockpit 先行**：父页面 + bridge 改动，发版 `dsh-cockpit-bridge`。此时 ohmydsh 侧未改，能力被 provide 但无人消费，**无行为变化**。
-2. **ohmydsh 跟进**：更新 `dsh.yaml` 的 bridge pin，改 `controls.tsx` 加探测，`dsh build`，重启 DSH web。
-3. **回滚**：任一侧回退即自动回落本机 `vscode://file/` 行为——降级路径是设计的一部分，回滚不需要额外动作。
+1. **cockpit 先行**：对侧 change `remote-editor-open-seam` 落地并发版 bridge。此时能力被 provide 但无消费方，**无行为变化**。
+2. **ws 扩展点**：本仓实现注册点。此时无注册方，行为不变。
+3. **shim 接入**：新增 shim package + manifest 条目，`dsh build`，重启 DSH web。端到端生效。
+4. **回滚**：三层任一回退即自动回落本机 `vscode://file/`。移除 shim 条目是成本最低的解耦动作，两端均无需改动。
 
 ## Open Questions
 
-- **服务名与消息 type 的最终命名**：需与 cockpit 仓的既有命名惯例对齐（现有前缀是 `dsh-cockpit:`）。实施时确定，不影响本设计成立。
-- **cockpit 侧 change 的粒度**：是并入现有 bridge 协议 change 还是独立开，由该仓决定。
+- shim 的 package id 与 ws 注册点的最终命名，实施时按仓内惯例确定。
+- cockpit 侧暴露的服务名由对侧 change 决定；shim 需在其确定后对齐（这正是 shim 存在的价值——对齐成本被限制在一个 package 内）。
