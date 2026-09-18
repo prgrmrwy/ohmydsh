@@ -879,3 +879,40 @@
     placeholder `回复正在等待的问题…`。
 - **更新**: 2026-09-17 由 `pet-locus-intent-triage` 真机验收中的 locus 子会话查证发现并登记为待办
   （台账 `ledger_item` 首条记录），所有者确认转入 BACKLOG 后续处理。
+
+### [B044] 常态说明混进故障通道：bot-added 诊断被渲染成像报错
+- **状态**: 未开始
+- **优先级**: P2
+- **背景 / 动机**: 所有者在 Pet 诊断页长期看到一条「Bot-added does not initialize a locus;
+  the first allowlist @ will.」，误以为有未完成的初始化。实际上这**不是故障**：
+  `src/index.ts:2786` 的注释写明拉 bot 入群本就不建 locus（入群零副作用），
+  整棵树由首条合格 @ 消息按需建立，且明确写着 "This is not a degraded state:
+  it is the only path"。功能完全正常，问题在表达层。
+- **要点**:
+  - 根因在 `src/host/channel/service.ts:252` 的 `??` 兜底链：
+    ```js
+    const diagnostic =
+      this.deps.locusDiagnostic ??        // 真故障
+      current.diagnostic ??               // 真故障
+      this.lifecycleSubscription?.current.diagnostic ??  // 真故障
+      this.lifecycleDiagnostic ??         // 真故障
+      durableLifecycle ??                 // 真故障(bot-added-unverified)
+      this.deps.botLifecycleDiagnostic    // ← 常态说明，不是故障
+    ```
+    前五项正常运行时均为 `undefined`，所以最后这条**永远兜底命中**，
+    表现为「始终存在的报错」；
+  - 前端 `src/client/settings.tsx:3777` 与 `:3833` 对该字段一视同仁地渲染成
+    `（{diagnostic}）` 紧贴连接状态徽标，视觉上属于状态的一部分；
+  - 三个因素叠加放大误导：**位置**（紧贴状态）、**语言**（周边文案全中文，
+    包括同一条链上的 `durableLifecycle`，唯独它是英文）、**语气**
+    (`does not initialize` 读作「没能初始化」而非「按设计不初始化」)；
+  - 两个修法方向：
+    - **A（倾向）**：给常态说明单独字段（如 `notice`），前端用中性样式渲染，
+      与故障通道彻底分离。需要改 `PetChannelView` wire 契约；
+    - **B（治标）**：只改措辞为中文并点明是常态，如「入群不建立关联；首次
+      allowlist @ 时按需建立（正常）」。一行改动，但仍混在故障通道里，
+      下次再看到还是会怀疑；
+  - 选 A 时注意：`unifiedLocusReadiness` 已经是独立字段并有自己的渲染
+    (`:3734`)，可作为「常态事实与故障分开表达」的既有先例参照。
+- **更新**: 2026-09-17 所有者在 `pet-locus-intent-triage` 收尾期间提出，
+  确认为表达层缺陷而非功能缺陷，本期不做，记录待后续立项。
