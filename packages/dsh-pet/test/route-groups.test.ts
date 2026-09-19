@@ -324,12 +324,12 @@ describe('the panel sends only fields its route accepts', () => {
     await act(async () => {
       ;(host.querySelector('.dshpet-locus-more') as HTMLButtonElement | null)?.click()
     })
-    // `scope` is absent from this walk while the write master switch is off:
-    // the `可写` control is disabled by the switch, and `只读` is disabled
-    // because this fixture is ALREADY read — so neither scope button can post.
-    // Re-add '可写' here together with the switch; the payload-shape rule it
-    // covers has not changed, only the reachability of the control.
-    for (const label of ['确认执行根', '停止关联']) {
+    // Only `stop` is reachable now. `scope`'s control is not rendered while the
+    // write master switch is off, and the execution-root confirm control was
+    // retired with its row. Re-add both labels here when those return; the
+    // payload-shape rules they cover have not changed, only reachability, so
+    // those two rules are asserted statically below rather than lost.
+    for (const label of ['停止关联']) {
       const button = [...host.querySelectorAll('button')].find(
         item => item.textContent === label,
       ) as HTMLButtonElement | undefined
@@ -342,13 +342,13 @@ describe('the panel sends only fields its route accepts', () => {
     const actions = bodies
       .map(body => JSON.parse(body) as Record<string, unknown>)
       .filter(body => typeof body['action'] === 'string' && body['action'] in LOCUS_ACTION_FIELDS)
-    expect(actions.map(body => body['action']).sort()).toEqual(
-      ['confirm-anchor', 'stop'],
-    )
-    // `scope`'s payload shape still matters even though no control can post
-    // it right now, so assert it statically rather than losing the rule.
+    expect(actions.map(body => body['action']).sort()).toEqual(['stop'])
+    // `scope` and `confirm-anchor` payload shapes still matter even though no
+    // control can post them right now, so assert them statically rather than
+    // losing the rules with the controls.
     expect(LOCUS_ACTION_FIELDS.scope).toContain('mode')
     expect(LOCUS_ACTION_FIELDS.scope).toContain('locusId')
+    expect(LOCUS_ACTION_FIELDS['confirm-anchor']).toContain('executionRoot')
     for (const body of actions) {
       const action = body['action'] as string
       const allowed = LOCUS_ACTION_FIELDS[action as keyof typeof LOCUS_ACTION_FIELDS]

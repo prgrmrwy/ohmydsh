@@ -548,7 +548,12 @@ describe('settings information architecture', () => {
     expect(settings).not.toContain('locusUnbind')
     expect(settings).not.toContain('locusArchive')
     expect(settings).toContain('locusScope')
-    expect(settings).toContain('locusConfirmAnchor')
+    // `locusConfirmAnchor` joins the absent list for the same reason
+    // `locusUnbind`/`locusArchive` are on it: the control is gone. The
+    // execution-root row and its confirm button were retired once ADR-0005
+    // demoted the anchor to a context fact and the write switch went off, so
+    // absence — not wording — is what this case asserts.
+    expect(settings).not.toContain('locusConfirmAnchor')
   })
 
   it('presents entries through the shared presentation model', async () => {

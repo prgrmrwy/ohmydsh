@@ -113,16 +113,22 @@ describe('the three pet-locus-intent-triage tools are scoped to Pet executors', 
     expect(source).toContain('currentCapability: childSessionId => currentLocusCapability(childSessionId)')
   })
 
-  // ⚠️ KNOWN PRE-EXISTING ENVIRONMENT ISSUE, not a defect in this change's code:
-  // `test/tool-scope.test.ts`'s own "is absent from an unrelated agent scope"
-  // case (same assertion shape, for `pet_context`) already fails identically
-  // on a clean HEAD with none of this change's edits applied — verified with
-  // `git stash` before writing this file. Both cases exercise the same real
-  // `dsh-scope`/`ToolRuntime` cross-scope isolation primitive, so this is the
-  // same environment-version drift, not a scoping defect this change introduced.
-  // Recorded here rather than silently dropped, per this repo's "surface a
+  // ⚠️ OPEN QUESTION, not a settled cause. This case still fails, but the
+  // explanation originally recorded here no longer holds: it was attributed to
+  // the `dsh-scope`/`ToolRuntime` drift that `test/tool-scope.test.ts` also hit,
+  // and after the environment was rebuilt that file's twin case now PASSES
+  // (6/6) while this one does not. An attempt to isolate the difference
+  // produced contradictory results — a strict mirror of the tool-scope setup
+  // reported the tools visible in the global layer, while the real
+  // tool-scope.test.ts reports an empty global layer for the same call — so
+  // neither account can be trusted yet.
+  //
+  // `it.fails` keeps the suite honest about the current behaviour, NOT about
+  // the behaviour being correct. Do not read this marker as evidence that
+  // cross-scope isolation is sound for these three tools; re-derive it before
+  // relying on that. Recorded rather than dropped, per this repo's "surface a
   // discrepancy, do not silently choose a side" convention.
-  it.fails('task 9.7: absent from an unrelated agent scope even when the Host has intentTriage-capable scopes elsewhere (blocked on the same pre-existing dsh-scope/ToolRuntime issue as test/tool-scope.test.ts)', async () => {
+  it.fails('task 9.7: absent from an unrelated agent scope even when the Host has intentTriage-capable scopes elsewhere (cause UNCONFIRMED — twin case in tool-scope.test.ts now passes)', async () => {
     harness = await openPetHarness()
     const ctx = await hostContext()
     const key = {} as never

@@ -1164,18 +1164,17 @@ async function initialize(
       // the tool filter restricts the inherited plane, so an own-plane
       // registration like the standard preset's `subagent` survives it.
       //
+      // Both services are declared injections, so Pet cannot load without them
+      // and the read cannot silently degrade to "no surface" for lack of one.
+      //
       // The scope key must be the live Agent. Reading the tools service without
       // it reports the inherited surface only, which would hide exactly the
       // registrations this check exists to find. `agents.get` is safe here
-      // because the runtime announces a child only after it is live.
+      // because the runtime announces a child only after it is registered.
       visibleTools: agent => {
-        const agents = ctx.get('agents') as { get?(id: never): unknown } | undefined
-        const tools = ctx.get('tools') as
-          | { schemas?(scope?: unknown): readonly { readonly name: string }[] }
-          | undefined
-        const live = agents?.get?.(agent.sessionId as never)
-        if (live === undefined || tools?.schemas === undefined) return undefined
-        return tools.schemas(live).map(schema => schema.name)
+        const live = ctx.agents.get(agent.sessionId as never)
+        if (live === undefined) return undefined
+        return ctx.tools.schemas(live).map(schema => schema.name)
       },
     },
     ...(() => {
