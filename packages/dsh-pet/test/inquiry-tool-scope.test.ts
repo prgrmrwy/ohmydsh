@@ -4,15 +4,22 @@
  * These prove the SHAPE a model sees: scoped registration, no recipient or
  * parent selector, and no way to name an audience, an origin or a delivery.
  */
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { createScope } from '@deepseek-ai/dsh-scope'
 import Tools from '@deepseek-ai/dsh-tools'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import {
   registerInquiryAskTool, registerInquiryAnswerTool,
   INQUIRY_ASK_TOOL, INQUIRY_ANSWER_TOOL,
 } from '../src/host/inquiry/tools.js'
+
+// Scope tags use a package-private Symbol, so mint from ToolRuntime's own
+// dependency root rather than the repository's second physical dsh-scope copy.
+const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/package.json'))
+const scopeEntry = requireFromTools.resolve('@deepseek-ai/dsh-scope')
+const { createScope } = await import(pathToFileURL(scopeEntry).href) as typeof import('@deepseek-ai/dsh-scope')
 
 const ports = {
   loci: {

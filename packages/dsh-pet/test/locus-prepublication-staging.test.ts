@@ -84,7 +84,7 @@ describe('locus child pre-publication staging', () => {
       },
       effectivePermission: 'read',
     })
-    expect(install).toHaveBeenCalledWith(agent)
+    expect(install).toHaveBeenCalledWith(agent, reservation.composition)
     expect(staging.inspect(reservation.childSessionId)?.state).toBe('claimed')
   })
 

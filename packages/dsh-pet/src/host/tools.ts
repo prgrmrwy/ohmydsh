@@ -40,7 +40,13 @@ import { lookupParentTranscript, type ParentLookupDeps } from './ledger/parent-l
 import { readSharedLedger, type LedgerReadDeps } from './ledger/ledger-read.js'
 import { trackTodo, type TrackDeps } from './ledger/track.js'
 import { INTENT_TRIAGE_GUIDANCE } from './ledger/prompt.js'
-import type { LocusContextRecord } from './locus/context-repository.js'
+import type {
+  LocusContextRecord,
+  LocusCurrentAuthorizationResult,
+} from './locus/context-repository.js'
+import type {
+  LocusCurrentCapabilityReason,
+} from './locus/turn-observer.js'
 
 
 
@@ -81,21 +87,24 @@ export interface PetLocusWaitResult {
   readonly capped: boolean
 }
 
+type LocusToolOperation = 'finish' | 'wait' | 'track'
+
+interface LocusToolCapability {
+  readonly deliveryId: string
+  readonly executionId: string
+  readonly turnId: string
+  readonly source: 'delivery' | 'agent-message'
+  readonly locusId?: string
+  readonly generation?: number
+}
+
 export interface PetLocusLifecycleDependencies {
   readonly locusRepository: NonNullable<PetContextDependencies['locusRepository']>
   readonly authorizeCurrentDelivery?: (
     input: {
       readonly childSessionId: string
-      readonly operation: 'finish' | 'wait'
-      readonly proof?: {
-        readonly deliveryId: string
-        readonly executionId: string
-        readonly turnId: string
-        readonly source: 'delivery' | 'agent-message'
-        readonly locusId: string
-        readonly generation: number
-        readonly childSessionId: string
-      }
+      readonly operation: LocusToolOperation
+      readonly proof?: LocusToolCapability
     },
   ) => import('./locus/context-repository.js').LocusContextRecord | undefined | Promise<import('./locus/context-repository.js').LocusContextRecord | undefined>
   readonly currentCapability?: (childSessionId: string) => {
@@ -106,6 +115,19 @@ export interface PetLocusLifecycleDependencies {
     readonly locusId?: string
     readonly generation?: number
   } | undefined
+  readonly inspectCurrentCapability?: (childSessionId: string) =>
+    | { readonly ok: true; readonly capability: LocusToolCapability }
+    | { readonly ok: false; readonly reason: LocusCurrentCapabilityReason }
+  readonly inspectCurrentDeliveryAuthorization?: (input: {
+    readonly childSessionId: string
+    readonly operation: LocusToolOperation
+    readonly proof?: LocusToolCapability
+  }) => LocusCurrentAuthorizationResult | Promise<LocusCurrentAuthorizationResult>
+  /** Stable low-cardinality security diagnostic; receives no endpoint or Delivery ids. */
+  readonly logAuthorizationRefusal?: (input: {
+    readonly operation: LocusToolOperation
+    readonly reason: LocusCurrentCapabilityReason
+  }) => void
   readonly finishCurrentDelivery?: (input: PetLocusFinishInput) => PetLocusFinishResult | Promise<PetLocusFinishResult>
   readonly waitCurrentDelivery?: (input: PetLocusWaitInput) => PetLocusWaitResult | Promise<PetLocusWaitResult>
 }
@@ -155,6 +177,81 @@ function requireKnownArguments(
 
 function hasOwnArgument(args: ToolArguments, name: string): boolean {
   return Object.prototype.hasOwnProperty.call(args, name)
+}
+
+interface CurrentAuthorizationDependencies {
+  readonly locusRepository?: PetLocusLifecycleDependencies['locusRepository']
+  readonly authorizeCurrentDelivery?: PetLocusLifecycleDependencies['authorizeCurrentDelivery']
+  readonly currentCapability?: PetLocusLifecycleDependencies['currentCapability']
+  readonly inspectCurrentCapability?: PetLocusLifecycleDependencies['inspectCurrentCapability']
+  readonly inspectCurrentDeliveryAuthorization?: PetLocusLifecycleDependencies['inspectCurrentDeliveryAuthorization']
+  readonly logAuthorizationRefusal?: PetLocusLifecycleDependencies['logAuthorizationRefusal']
+}
+
+const AUTHORIZATION_ERROR_MESSAGE = 'This operation is not authorized for the current request.'
+
+function rejectAuthorization(
+  deps: CurrentAuthorizationDependencies,
+  operation: LocusToolOperation,
+  reason: LocusCurrentCapabilityReason,
+): never {
+  deps.logAuthorizationRefusal?.({ operation, reason })
+  throw new PetError('INVALID_REQUEST', AUTHORIZATION_ERROR_MESSAGE, { reason })
+}
+
+/** Shared finish/wait/track authorization composition. */
+async function resolveAuthorizedCurrent(
+  deps: CurrentAuthorizationDependencies,
+  childSessionId: string,
+  operation: LocusToolOperation,
+): Promise<LocusContextRecord> {
+  const capabilityInspection = deps.inspectCurrentCapability?.(childSessionId)
+  const proof = capabilityInspection === undefined
+    ? deps.currentCapability?.(childSessionId)
+    : capabilityInspection.ok
+      ? capabilityInspection.capability
+      : rejectAuthorization(deps, operation, capabilityInspection.reason)
+  if (proof === undefined) rejectAuthorization(deps, operation, 'capability-unavailable')
+
+  const inspectAuthorization = deps.inspectCurrentDeliveryAuthorization
+  let authorized: LocusContextRecord | undefined
+  if (inspectAuthorization !== undefined) {
+    const result = await inspectAuthorization({ childSessionId, operation, proof })
+    if (!result.ok) rejectAuthorization(deps, operation, result.reason)
+    authorized = result.locus
+  } else if (deps.authorizeCurrentDelivery !== undefined) {
+    authorized = await deps.authorizeCurrentDelivery({ childSessionId, operation, proof })
+    if (authorized === undefined) rejectAuthorization(deps, operation, 'association-unproven')
+  } else if (deps.locusRepository?.inspectCurrentDeliveryAuthorization !== undefined) {
+    const result = await deps.locusRepository.inspectCurrentDeliveryAuthorization({ childSessionId, operation, proof })
+    if (!result.ok) rejectAuthorization(deps, operation, result.reason)
+    authorized = result.locus
+  } else {
+    const authorize = deps.locusRepository?.authorizeCurrentDelivery
+    if (authorize === undefined) rejectAuthorization(deps, operation, 'capability-unavailable')
+    authorized = await authorize({ childSessionId, operation, proof })
+    if (authorized === undefined) rejectAuthorization(deps, operation, 'association-unproven')
+  }
+
+  const delivery = authorized.currentDelivery
+  if (delivery === undefined) rejectAuthorization(deps, operation, 'no-current')
+  if (authorized.locus.generation !== proof.generation && proof.generation !== undefined) {
+    rejectAuthorization(deps, operation, 'generation-mismatch')
+  }
+  if (delivery.deliveryId !== proof.deliveryId || delivery.status !== 'current' ||
+      delivery.queueState !== undefined && delivery.queueState !== 'current') {
+    rejectAuthorization(deps, operation, 'stale-delivery')
+  }
+  if (authorized.legacy === true || authorized.source === 'legacy' ||
+      authorized.locus.state !== 'active' || authorized.child.sessionId !== childSessionId ||
+      authorized.locus.locusId.trim() === '' || !Number.isSafeInteger(authorized.locus.generation) ||
+      authorized.locus.generation < 1 ||
+      authorized.permission.effective !== 'read' && authorized.permission.effective !== 'write' ||
+      delivery.childSessionId !== childSessionId || delivery.locusId !== authorized.locus.locusId ||
+      delivery.generation !== authorized.locus.generation) {
+    rejectAuthorization(deps, operation, 'association-unproven')
+  }
+  return authorized
 }
 
 /**
@@ -208,15 +305,8 @@ export interface PetIntentTriageDependencies {
   /** Same authorization callback `pet_locus_finish`/`pet_locus_wait` use, reused for `pet_locus_track`'s stronger "current Delivery exists" proof. */
   readonly authorizeCurrentDelivery?: (input: {
     readonly childSessionId: string
-    readonly operation: 'finish' | 'wait'
-    readonly proof?: {
-      readonly deliveryId?: string
-      readonly executionId: string
-      readonly turnId: string
-      readonly source: 'delivery' | 'agent-message'
-      readonly locusId?: string
-      readonly generation?: number
-    }
+    readonly operation: LocusToolOperation
+    readonly proof?: LocusToolCapability
   }) => LocusContextRecord | undefined | Promise<LocusContextRecord | undefined>
   readonly currentCapability?: (childSessionId: string) => {
     readonly deliveryId: string
@@ -226,6 +316,19 @@ export interface PetIntentTriageDependencies {
     readonly locusId?: string
     readonly generation?: number
   } | undefined
+  readonly inspectCurrentCapability?: (childSessionId: string) =>
+    | { readonly ok: true; readonly capability: LocusToolCapability }
+    | { readonly ok: false; readonly reason: LocusCurrentCapabilityReason }
+  readonly inspectCurrentDeliveryAuthorization?: (input: {
+    readonly childSessionId: string
+    readonly operation: LocusToolOperation
+    readonly proof?: LocusToolCapability
+  }) => LocusCurrentAuthorizationResult | Promise<LocusCurrentAuthorizationResult>
+  /** Stable low-cardinality security diagnostic; receives no endpoint or Delivery ids. */
+  readonly logAuthorizationRefusal?: (input: {
+    readonly operation: LocusToolOperation
+    readonly reason: LocusCurrentCapabilityReason
+  }) => void
   readonly parentLookup?: ParentLookupDeps
   readonly ledgerRead?: LedgerReadDeps
   readonly track?: TrackDeps
@@ -272,38 +375,6 @@ export function registerPetTools(
 
   const lifecycle = deps.locusLifecycle
   if (lifecycle !== undefined) {
-    const resolveAuthorized = async (childSessionId: string, operation: 'finish' | 'wait') => {
-      const authorize = lifecycle.authorizeCurrentDelivery ?? lifecycle.locusRepository.authorizeCurrentDelivery
-      if (authorize === undefined) throw new PetError('INTERNAL', 'The Host has no caller/source authorization capability.')
-      const proof = lifecycle.currentCapability?.(childSessionId)
-      if (proof === undefined) throw new PetError('INVALID_REQUEST', 'This child has no current caller-authorized Feishu Delivery.')
-      const authorized = await authorize({ childSessionId, operation, proof })
-      if (authorized === undefined || authorized.locus.state !== 'active' || authorized.currentDelivery === undefined) {
-        throw new PetError('INVALID_REQUEST', 'This child has no current caller-authorized Feishu Delivery.')
-      }
-      const delivery = authorized.currentDelivery
-      // Keep the final boundary defensive even when a repository supplies its
-      // own authorizer: no stale generation, backlog row, or malformed caller
-      // projection may reach a lifecycle adapter.
-      if (
-        authorized.legacy === true ||
-        authorized.source === 'legacy' ||
-        authorized.child.sessionId !== childSessionId ||
-        authorized.locus.locusId.trim() === '' ||
-        !Number.isSafeInteger(authorized.locus.generation) ||
-        authorized.locus.generation < 1 ||
-        (authorized.permission.effective !== 'read' && authorized.permission.effective !== 'write') ||
-        delivery.childSessionId !== childSessionId ||
-        delivery.locusId !== authorized.locus.locusId ||
-        delivery.generation !== authorized.locus.generation ||
-        delivery.status !== 'current' ||
-        (delivery.queueState !== undefined && delivery.queueState !== 'current')
-      ) {
-        throw new PetError('INVALID_REQUEST', 'This Delivery is no longer current or caller-authorized.')
-      }
-      return authorized
-    }
-
     disposers.push(ctx.tools.register(defineTool({
       name: PET_LOCUS_FINISH_TOOL,
       description:
@@ -333,7 +404,7 @@ export function registerPetTools(
         if (outcome !== 'reply' && outcome !== 'no-reply') throw new PetError('INVALID_REQUEST', 'outcome must be reply or no-reply.')
         if (outcome === 'reply' && (!hasOwnArgument(input, 'text') || text === undefined || text.trim() === '' || hasOwnArgument(input, 'reason'))) throw new PetError('INVALID_REQUEST', 'reply requires non-empty text and no reason.')
         if (outcome === 'no-reply' && (hasOwnArgument(input, 'text') || !hasOwnArgument(input, 'reason') || reason === undefined || reason.trim() === '')) throw new PetError('INVALID_REQUEST', 'no-reply requires non-empty reason and no text.')
-        const locus = await resolveAuthorized(callerSessionId(exec as ExecutionLike), 'finish')
+        const locus = await resolveAuthorizedCurrent(lifecycle, callerSessionId(exec as ExecutionLike), 'finish')
         const delivery = locus.currentDelivery!
         if (lifecycle.finishCurrentDelivery === undefined) {
           // A direct Lark fallback would send without the durable finishing CAS,
@@ -360,7 +431,7 @@ export function registerPetTools(
         const waitMinutes = input.waitMinutes
         if (typeof waitMinutes !== 'number' || !Number.isSafeInteger(waitMinutes) || waitMinutes < 1 || waitMinutes > 1440) throw new PetError('INVALID_REQUEST', 'waitMinutes must be an integer from 1 through 1440.')
         if (hasOwnArgument(input, 'reason') && typeof input.reason !== 'string') throw new PetError('INVALID_REQUEST', 'reason must be a string when provided.')
-        const locus = await resolveAuthorized(callerSessionId(exec as ExecutionLike), 'wait')
+        const locus = await resolveAuthorizedCurrent(lifecycle, callerSessionId(exec as ExecutionLike), 'wait')
         if (lifecycle.waitCurrentDelivery === undefined) throw new PetError('INTERNAL', 'The Host has no durable Delivery wait lease.')
         const reason = typeof input.reason === 'string' ? input.reason : undefined
         return lifecycle.waitCurrentDelivery({ childSessionId: locus.currentDelivery!.childSessionId, locus, delivery: locus.currentDelivery!, waitMinutes, ...(reason === undefined ? {} : { reason }) })
@@ -467,16 +538,8 @@ export function registerPetTools(
           throw new PetError('INVALID_REQUEST', 'summary and detail must be strings.')
         }
         const sessionId = callerSessionId(exec as ExecutionLike)
-        if (intentTriage.authorizeCurrentDelivery === undefined || intentTriage.track === undefined) {
-          return { ok: false, reason: 'unavailable' }
-        }
-        const proof = intentTriage.currentCapability?.(sessionId)
-        const authorized = await intentTriage.authorizeCurrentDelivery({
-          childSessionId: sessionId,
-          operation: 'finish',
-          ...(proof === undefined ? {} : { proof }),
-        })
-        if (authorized === undefined) return { ok: false, reason: 'no-current-delivery' }
+        if (intentTriage.track === undefined) return { ok: false, reason: 'unavailable' }
+        const authorized = await resolveAuthorizedCurrent(intentTriage, sessionId, 'track')
         const result = await trackTodo(authorized, { summary: input.summary, detail: input.detail }, intentTriage.track)
         return result.ok ? { ok: true } : { ok: false, reason: result.reason }
       },

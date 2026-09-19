@@ -13,15 +13,22 @@
  * there is none.
  */
 
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { createScope } from '@deepseek-ai/dsh-scope'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import { PET_CONTEXT_TOOL } from '../src/host/context-tool.js'
 import { PET_LOCUS_FINISH_TOOL, PET_LOCUS_WAIT_TOOL, registerPetTools } from '../src/host/tools.js'
 import type { PetRepository } from '../src/host/repository.js'
 import { openPetHarness, type PetHarness } from './harness.js'
+
+// Scope tags use a package-private Symbol, so mint from ToolRuntime's own
+// dependency root rather than the repository's second physical dsh-scope copy.
+const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/package.json'))
+const scopeEntry = requireFromTools.resolve('@deepseek-ai/dsh-scope')
+const { createScope } = await import(pathToFileURL(scopeEntry).href) as typeof import('@deepseek-ai/dsh-scope')
 
 let harness: PetHarness | undefined
 

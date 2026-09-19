@@ -13,7 +13,8 @@
  * could undo that.
  */
 
-import type { LocusChildAdapter, LocusChildIdentity } from './child.js'
+import { LOCUS_SAFE_CHILD_COMPOSITION, type LocusChildComposition } from './aggregate.js'
+import type { LocusChildAdapter, LocusChildIdentity, LocusContentBlock } from './child.js'
 import type { LocusReplyTarget } from './context.js'
 
 /** The locus facts one delivery is served under. */
@@ -22,6 +23,7 @@ export interface LocusDeliveryTarget {
   readonly locusId?: string
   readonly parentSessionId: string
   readonly childSessionId: string
+  readonly childComposition?: LocusChildComposition
 }
 
 /** Result of queueing one delivery turn. */
@@ -61,7 +63,9 @@ export function createLocusChildDelivery(ports: LocusChildDeliveryPorts): {
     readonly child: LocusChildIdentity
     readonly deliveryId: string
     readonly executionId: string
-    readonly prompt: string
+    readonly content: readonly LocusContentBlock[]
+    /** Controller-owned exact-current proof checked at the final child queue seam. */
+    readonly fenceBeforeQueue?: () => boolean | PromiseLike<boolean>
     /** Immutable Host-resolved target carried only in the rendered prompt. */
     readonly replyTarget: LocusReplyTarget
     readonly signal: AbortSignal
@@ -87,6 +91,11 @@ export function createLocusChildDelivery(ports: LocusChildDeliveryPorts): {
 
   return {
     async ensureChild(locus, signal) {
+      // Refuse before adapter allocation, parent resolution, proof, or cold resume.
+      if (locus.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION) {
+        ports.log?.('safe-composition-unproven')
+        throw new Error('Locus child is unavailable (safe-composition-unproven)')
+      }
       const expected: LocusChildIdentity = {
         parentSessionId: locus.parentSessionId,
         childSessionId: locus.childSessionId,
@@ -130,9 +139,10 @@ export function createLocusChildDelivery(ports: LocusChildDeliveryPorts): {
         return { accepted: false, reason: 'child-not-adopted' }
       }
       const queued = await adapter.queuePrompt({
-        text: input.prompt,
+        content: input.content,
         identity: input.child,
         signal: input.signal,
+        ...(input.fenceBeforeQueue === undefined ? {} : { fenceBeforeQueue: input.fenceBeforeQueue }),
       })
       if (!queued.ok) {
         ports.log?.(queued.reason)

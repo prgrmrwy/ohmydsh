@@ -15,6 +15,7 @@ function record(overrides: Partial<LocusRecord> = {}): LocusRecord {
     endpoint: ENDPOINT,
     parentSessionId: 'main-1',
     childSessionId: 'child-1',
+    childComposition: 'safe-v1',
     workspaceId: 'ws-1',
     source: 'auto',
     state: 'active',
@@ -57,10 +58,20 @@ describe('durable locus resolution', () => {
       generation: 2,
       parentSessionId: 'main-1',
       childSessionId: 'child-1',
+      childComposition: 'safe-v1',
       workspaceId: 'ws-1',
       state: 'active',
       permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
     })
+  })
+
+  it('refuses a legacy active row without durable safe composition proof', () => {
+    const { port, diagnostics } = resolution({
+      current: record({ childComposition: undefined }),
+    })
+
+    expect(() => port.resolveCurrent(ENDPOINT)).toThrow(/safe-v1/)
+    expect(diagnostics).toEqual(['locus-unusable'])
   })
 
   it('reports an endpoint that never had a locus as absent, not refused', () => {
@@ -173,6 +184,7 @@ describe('establishing a locus for a new endpoint', () => {
       generation: 1,
       parentSessionId: 'main-new',
       childSessionId: 'child-new',
+      childComposition: 'safe-v1' as const,
       workspaceId: 'ws-new',
       state: 'active' as const,
     }
@@ -251,6 +263,7 @@ describe('establishing a locus for a new endpoint', () => {
       generation: 1,
       parentSessionId: 'main-new',
       childSessionId: 'child-new',
+      childComposition: 'safe-v1' as const,
       workspaceId: 'ws-new',
       state: 'active' as const,
     }

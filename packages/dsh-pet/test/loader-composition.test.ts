@@ -819,6 +819,9 @@ describe('a locus child is composed at the real creation boundary', () => {
    */
   async function hostWithLocusChild(options: { policy?: 'read-only' | 'workspace-write' | 'absent' } = {}) {
     const home = await mkdtemp(path.join(tmpdir(), 'pet-loader-'))
+    const projectRoot = await mkdtemp(path.join(tmpdir(), 'pet-project-'))
+    const { mkdir } = await import('node:fs/promises')
+    await mkdir(path.join(home, 'attachments'), { recursive: true })
     const routes: { path: string }[] = []
     const ctx = new Context()
     await ctx.plugin(Storage)
@@ -836,7 +839,7 @@ describe('a locus child is composed at the real creation boundary', () => {
       if (current !== undefined) return current
       const session = {
         id,
-        header: { cwd: '/repo' },
+        header: { cwd: projectRoot },
         snapshotEvents: () => [],
         seq: 0,
         append(type: string, data: { mode?: string }) {
@@ -863,6 +866,7 @@ describe('a locus child is composed at the real creation boundary', () => {
         // verifies against the locus grant.
         resolve: ({ session }: { session: { id: string } }) => ({
           mode: options.policy ?? modes.get(session.id),
+          workspaceRoot: projectRoot,
         }),
       })
     }
@@ -912,6 +916,7 @@ describe('a locus child is composed at the real creation boundary', () => {
       workspaceId: 'ws-live',
       source: 'auto',
       state: 'active',
+      childComposition: 'safe-v1',
       permission: { desired: permission, effective: permission, verifiedAt: 1 },
       busy: false,
       createdAt: 1,
@@ -925,11 +930,18 @@ describe('a locus child is composed at the real creation boundary', () => {
     const agentCtx = {
       get: (service: string) =>
         service === 'tools'
-          ? { register: (definition: { name?: string }) => { registered.push(definition.name ?? '?'); return () => {} } }
+          ? {
+              register: (definition: { name?: string }) => { registered.push(definition.name ?? '?'); return () => {} },
+              guard: () => () => {},
+            }
           : undefined,
       inject: (_services: string[], callback: (scoped: unknown) => void) => { callback(agentCtx) },
       effect: (fn: () => unknown) => { fn(); return () => {} },
-      tools: { register: (definition: { name?: string }) => { registered.push(definition.name ?? '?'); return () => {} } },
+      on: () => () => {},
+      tools: {
+        register: (definition: { name?: string }) => { registered.push(definition.name ?? '?'); return () => {} },
+        guard: () => () => {},
+      },
       skills: { registerProvider: () => () => {} },
     }
     ctx.emit('agent/created', { agent: { session: { id: sessionId }, ctx: agentCtx } })
@@ -1171,6 +1183,7 @@ describe('owner-facing locus management is served by the real routes', () => {
         createIdleContinuable: async () => ({ childId: 'child-live' }),
         supportsSettlementNotice: true,
         supportsIdleContinuableCreate: true,
+        supportsIndependentContinuableCreate: true,
         supportsLiveContinuableChildSession: true,
         listChildren: async (_parentSessionId: string) => {
           return [{
@@ -1364,7 +1377,7 @@ describe('owner-facing locus management is served by the real routes', () => {
     expect(refusedQa.ok).toBe(false)
   })
 
-  it('uses the exact continuation-owned child but rejects write without a confirmed root', async () => {
+  it('uses the exact continuation-owned child but rejects write while the global write gate is disabled', async () => {
     const host = await hostWithLoci({ scopeRuntime: true })
 
     const result = await callRoute(host.route(LOCUS_ROUTES.scope), {
@@ -1374,11 +1387,11 @@ describe('owner-facing locus management is served by the real routes', () => {
     })
 
     expect(result, JSON.stringify(result)).toMatchObject({ ok: false })
-    expect(result.error).toBe('WRITE_UNSUPPORTED')
-    // This locus has no context anchor at all, so intent was never expressed:
-    // live-root agreement alone can never authorize write.
-    expect(result.message).toContain('所有者已确认的 execution root')
-    expect(host.modes.get('child-live')).toBe('read-only')
+    expect(result.error).toBe('INVALID_REQUEST')
+    // The global write gate is the earlier authoritative refusal. It must not
+    // apply a wider live mode and only then fail on an unrelated anchor fact.
+    expect(result.message).toContain('写档已全局停用')
+    expect(host.modes.get('child-live')).toBeUndefined()
     expect(host.repository.getLocus('locus-live')?.permission).toMatchObject({
       desired: 'read', effective: 'read',
     })
@@ -1413,6 +1426,7 @@ describe('startup reconciliation runs against the real runtime', () => {
     // that the persisted child cannot take another turn.
     ctx.provide('subagents', {
       startContinuable: async () => ({ childId: 'child-live' }),
+      supportsIndependentContinuableCreate: true,
       listChildren: async () => [],
       [Symbol.for('dsh.subagent.queuePrompt')]: async () => 'message-1',
     })
@@ -1566,11 +1580,11 @@ describe('the unified Feishu channel stays gated on real capabilities', () => {
     await ctx.plugin(Storage)
     stubServices(ctx, routes)
     // A runtime exposing the child seams but NOT the ability to suppress a
-    // child's automatic parent report — the pinned runtime's actual state.
-    // `agents.resume` is present so the probe gets past parent resolution and
-    // the assertion below is about the settlement-notice gate specifically.
+    // child's automatic parent report. The independent marker is present so
+    // the assertion below reaches the settlement-notice gate specifically.
     ctx.provide('subagents', {
       startContinuable: async () => ({ childId: 'child-live' }),
+      supportsIndependentContinuableCreate: true,
       listChildren: async () => [],
       [Symbol.for('dsh.subagent.queuePrompt')]: async () => 'message-1',
     })

@@ -42,7 +42,7 @@ export interface LocusScopedSurfacePort {
    * Synchronous by contract: the runtime is mid-creation, so a rejected
    * promise would arrive after publication and could not veto it.
    */
-  install(agent: LocusCandidateAgent): void
+  install(agent: LocusCandidateAgent, composition: LocusChildComposition): void
 }
 
 /** Host file-policy operations for one child session. */
@@ -172,7 +172,7 @@ export function composeLocusChild(
     )
   }
   try {
-    surface.install(agent)
+    surface.install(agent, composition)
   } catch (error) {
     throw new LocusCompositionError(
       'surface-failed',

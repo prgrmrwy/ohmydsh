@@ -1,0 +1,9 @@
+# Fixed-source checkout, downloaded toolchain/cache, and generated binary.
+.upstream/
+.toolchains/
+.cache/
+artifact
+.artifact-builds/
+.artifact.staging-*
+.artifact.next-*
+.artifact.previous-*

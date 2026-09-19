@@ -282,15 +282,27 @@ const control = descriptor.snapshotSubagentDescriptor({
 if (control.version !== 4 || 'settlementNotice' in control || 'contextMode' in control || 'agentPreset' in control) {
   fail('built artifact changed the legacy descriptor shape; refusing to publish it')
 }
+const independentToolFilter = { allow: ['read', 'read_image', 'glob', 'grep', 'web_search'] }
 const independent = descriptor.snapshotSubagentDescriptor({
   mode: 'continuable', provider: 'spawn', label: 'independent-probe',
   agentProvider: 'deepseek', agentModel: 'chat', contextMode: 'independent-v1', agentPreset: 'default',
+  toolFilter: independentToolFilter,
 })
 if (
   independent.version !== 5
   || independent.contextMode !== 'independent-v1'
   || independent.agentPreset !== 'default'
+  || JSON.stringify(independent.toolFilter) !== JSON.stringify(independentToolFilter)
 ) {
-  fail('built artifact does not record the independent-v1 descriptor pair; refusing to publish it')
+  fail('built artifact does not record the independent-v1 durable tool filter; refusing to publish it')
+}
+const restoredIndependent = descriptor.foldSubagentDescriptor([{
+  type: 'subagent/descriptor', data: independent, seq: 0,
+}])
+if (
+  restoredIndependent?.contextMode !== 'independent-v1'
+  || JSON.stringify(restoredIndependent.toolFilter) !== JSON.stringify(independentToolFilter)
+) {
+  fail('built artifact does not cold-restore the independent-v1 durable tool filter; refusing to publish it')
 }
 console.log(`[compat/subagent] ready: ${manifest.name}@${manifest.version}`)

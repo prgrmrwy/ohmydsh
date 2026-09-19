@@ -19,7 +19,9 @@ import type {
   LocusWorkspaceFacts,
 } from './context.js'
 import type { DeliveryStatus } from './delivery.js'
+import type { DeliveryAddressingProjection } from './addressing.js'
 import type { LocusRecord } from './aggregate.js'
+import type { LocusCurrentCapabilityReason } from './turn-observer.js'
 
 /** Aggregate rows may carry a richer anchor once the durable schema is wired. */
 type LocusRecordWithContext = LocusRecord & {
@@ -52,6 +54,7 @@ export interface LocusCurrentDelivery {
   readonly senderOpenId?: string
   readonly senderName?: string
   readonly text?: string
+  readonly addressing?: DeliveryAddressingProjection
   /** Exact platform parent message, when the inbound message was a reply. */
   readonly replyToMessageId?: string
   readonly replyTarget?: LocusReplyTarget
@@ -84,6 +87,10 @@ export interface LocusContextRecord {
  * generations make identity ambiguous.  It must not collapse historical and
  * active rows before this caller-bound check runs.
  */
+export type LocusCurrentAuthorizationResult =
+  | { readonly ok: true; readonly locus: LocusContextRecord }
+  | { readonly ok: false; readonly reason: LocusCurrentCapabilityReason }
+
 export interface LocusContextRepository {
   findByChildSessionId(childSessionId: string): readonly LocusContextRecord[]
   /**
@@ -100,7 +107,7 @@ export interface LocusContextRepository {
    */
   authorizeCurrentDelivery?(input: {
     readonly childSessionId: string
-    readonly operation: 'finish' | 'wait'
+    readonly operation: 'finish' | 'wait' | 'track'
     readonly proof?: {
       readonly deliveryId?: string
       readonly executionId: string
@@ -110,6 +117,19 @@ export interface LocusContextRepository {
       readonly generation?: number
     }
   }): LocusContextRecord | undefined | Promise<LocusContextRecord | undefined>
+  /** Full repository-side authorization inspection; never guesses unavailable distinctions. */
+  inspectCurrentDeliveryAuthorization?(input: {
+    readonly childSessionId: string
+    readonly operation: 'finish' | 'wait' | 'track'
+    readonly proof?: {
+      readonly deliveryId?: string
+      readonly executionId: string
+      readonly turnId: string
+      readonly source: 'delivery' | 'agent-message'
+      readonly locusId?: string
+      readonly generation?: number
+    }
+  }): LocusCurrentAuthorizationResult | Promise<LocusCurrentAuthorizationResult>
 }
 
 /**
@@ -164,6 +184,45 @@ export function asLocusContextRepository(
       const record = repository.findByChildSession(childSessionId)
       return record === undefined ? [] : [record]
     })()
+  const inspectCurrentDeliveryAuthorization = (input: Parameters<NonNullable<LocusContextRepository['inspectCurrentDeliveryAuthorization']>>[0]): LocusCurrentAuthorizationResult => {
+    if (input.childSessionId.trim() === '') return { ok: false, reason: 'capability-unavailable' }
+    if (input.proof === undefined || input.proof.source !== 'delivery' && input.proof.source !== 'agent-message') {
+      return { ok: false, reason: 'association-unproven' }
+    }
+    const currentProof = currentTurnProof?.(input.childSessionId)
+    if (currentProof === undefined || currentProof.executionId !== input.proof.executionId || currentProof.turnId !== input.proof.turnId) {
+      return { ok: false, reason: 'association-unproven' }
+    }
+    const records = recordsForChild(input.childSessionId)
+    if (records.length === 0) return { ok: false, reason: 'association-unproven' }
+    if (records.length !== 1) return { ok: false, reason: 'association-unproven' }
+    const record = records[0]!
+    if (record.state !== 'active' || record.childSessionId !== input.childSessionId) {
+      return { ok: false, reason: 'association-unproven' }
+    }
+    const current = repository.findCurrentSerializedDelivery?.({
+      childSessionId: input.childSessionId,
+      locusId: record.id,
+      generation: record.generation,
+    })
+    if (current === undefined) return { ok: false, reason: 'no-current' }
+    if (current.status !== 'current' && current.status !== 'finishing' || current.queueState !== undefined && current.queueState !== 'current') {
+      return { ok: false, reason: 'stale-delivery' }
+    }
+    if (current.childSessionId !== input.childSessionId || current.locusId !== record.id) {
+      return { ok: false, reason: 'association-unproven' }
+    }
+    if (current.generation !== record.generation || input.proof.generation !== undefined && input.proof.generation !== current.generation) {
+      return { ok: false, reason: 'generation-mismatch' }
+    }
+    if (input.proof.locusId !== undefined && input.proof.locusId !== current.locusId) {
+      return { ok: false, reason: 'association-unproven' }
+    }
+    if (input.proof.deliveryId !== undefined && current.deliveryId !== input.proof.deliveryId) {
+      return { ok: false, reason: 'stale-delivery' }
+    }
+    return { ok: true, locus: { ...projectAggregateRecord(record, repository), currentDelivery: current } }
+  }
   return {
     findByChildSessionId(childSessionId) {
       return recordsForChild(childSessionId).map(record => projectAggregateRecord(
@@ -173,27 +232,10 @@ export function asLocusContextRepository(
       ))
     },
     authorizeCurrentDelivery(input) {
-      if (input.childSessionId.trim() === '') return undefined
-      if (input.proof === undefined || input.proof.source !== 'delivery' && input.proof.source !== 'agent-message') return undefined
-      const currentProof = currentTurnProof?.(input.childSessionId)
-      if (currentProof === undefined || currentProof.executionId !== input.proof.executionId || currentProof.turnId !== input.proof.turnId) return undefined
-      const records = recordsForChild(input.childSessionId)
-      if (records.length !== 1) return undefined
-      const record = records[0]
-      if (record === undefined || record.state !== 'active' || record.childSessionId !== input.childSessionId) return undefined
-      const current = repository.findCurrentSerializedDelivery?.({
-        childSessionId: input.childSessionId,
-        locusId: record.id,
-        generation: record.generation,
-      })
-      if (current === undefined || current.childSessionId !== input.childSessionId ||
-          current.locusId !== record.id || current.generation !== record.generation ||
-          (current.status !== 'current' && current.status !== 'finishing')) return undefined
-      if (input.proof.deliveryId !== undefined && current.deliveryId !== input.proof.deliveryId) return undefined
-       if (input.proof.locusId !== undefined && input.proof.locusId !== current.locusId) return undefined
-       if (input.proof.generation !== undefined && input.proof.generation !== current.generation) return undefined
-       return { ...projectAggregateRecord(record, repository), currentDelivery: current }
+      const inspected = inspectCurrentDeliveryAuthorization(input)
+      return inspected.ok ? inspected.locus : undefined
     },
+    inspectCurrentDeliveryAuthorization,
   }
 }
 

@@ -23,6 +23,13 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { LocusMediaPort } from './media.js'
+import {
+  historicalUnknownAddressing,
+  projectDeliveryAddressing,
+  type DeliveryAddressingProjection,
+} from '../locus/addressing.js'
 import {
   admitLocusEvent,
   type LocusAdmission,
@@ -40,6 +47,7 @@ import {
 export const MIN_BIND_PREFIX_LENGTH = 6
 import {
   normalizeLocusEndpoint,
+  type LocusChildComposition,
   type LocusContextAnchor,
   type LocusEndpoint,
   type LocusPermission,
@@ -92,6 +100,8 @@ export interface NormalizedLocusMessage {
   readonly senderOpenId: string
   readonly senderName?: string
   readonly text: string
+  /** Bounded addressing facts; absent only for legacy/pre-admitted callers. */
+  readonly addressing?: DeliveryAddressingProjection
   readonly replyTarget: LocusReplyTarget
   readonly replyToMessageId?: string
   readonly createdAt?: number
@@ -130,6 +140,8 @@ export interface ActiveLocus {
   readonly generation: number
   readonly parentSessionId: string
   readonly childSessionId: string
+  /** Missing on legacy callers; child delivery refuses it before adoption. */
+  readonly childComposition?: LocusChildComposition
   readonly workspaceId: string
   readonly state: 'active'
   /** Durable policy projection that every ordinary Delivery must re-verify. */
@@ -164,6 +176,24 @@ export interface LocusChildIdentity {
 }
 
 /** Port for resolving/resuming and queueing one locus child. */
+type ChildQueueResult =
+  | { readonly accepted: true; readonly executionId: string; readonly inboxMessageId: string }
+  | { readonly accepted: false; readonly reason: string }
+
+type CurrentDeliveryInput = {
+  readonly locus: ActiveLocus
+  readonly child: LocusChildIdentity
+  readonly record: DeliveryRecord
+  readonly message: NormalizedLocusMessage
+  readonly signal: AbortSignal
+}
+
+type PreparedCurrentContent = {
+  readonly typed: readonly ContentBlock[]
+  readonly textFallback: readonly ContentBlock[]
+  readonly hasImage: boolean
+}
+
 export interface LocusChildDeliveryPort {
   ensureChild(
     locus: ActiveLocus,
@@ -184,7 +214,9 @@ export interface LocusChildDeliveryPort {
     readonly deliveryId: string
     /** Controller-generated token, armed before the queue operation. */
     readonly executionId: string
-    readonly prompt: string
+    readonly content: readonly ContentBlock[]
+    /** Revalidate exact-current immediately at the child queue seam. */
+    readonly fenceBeforeQueue: () => Awaitable<boolean>
     readonly replyTarget: LocusReplyTarget
     readonly signal: AbortSignal
   }): Awaitable<
@@ -198,6 +230,8 @@ export type LocusDeliveryInput = DeliveryInput & {
   readonly senderOpenId: string
   readonly senderName?: string
   readonly text: string
+  /** Bounded addressing facts; absent only for legacy/pre-admitted callers. */
+  readonly addressing?: DeliveryAddressingProjection
   readonly replyTarget: LocusReplyTarget
   readonly replyToMessageId?: string
 }
@@ -341,6 +375,19 @@ export interface LocusControllerDeps {
   /** Required current/backlog dispatcher seam for serialized locus intake. */
   readonly deliveryDispatch: LocusDeliveryDispatchPort
   readonly child: LocusChildDeliveryPort
+  /** Optional Host-owned current-message image admission. */
+  readonly media?: LocusMediaPort
+  /**
+   * Async Host enrichment seam. Admission stays synchronous/pure; this lookup
+   * runs before durable acceptance and never classifies from flattened text.
+   */
+  readonly addressing?: {
+    listChatBots(chatId: string): Awaitable<
+      | readonly { readonly openId: string }[]
+      | { readonly kind: 'ok'; readonly bots: readonly { readonly openId: string }[] }
+      | { readonly kind: 'permission-denied' | 'error' }
+    >
+  }
   /**
    * Resolve the complete live sandbox policy for the exact Session handle.
    * Called only inside child.withChildSession, immediately before acceptance.
@@ -635,6 +682,7 @@ export function normalizeLocusEvent(input: LocusChannelEvent): NormalizedLocusEv
 function messageFromAdmission(
   event: NormalizedLocusEvent,
   decision: LocusAdmission,
+  selfOpenId?: string,
 ): NormalizedLocusMessage | undefined {
   const endpoint: LocusEndpoint = {
     chatId: decision.endpoint.chatId,
@@ -662,6 +710,13 @@ function messageFromAdmission(
     chatType: event.chatType,
     senderOpenId: decision.senderId,
     text: decision.text,
+    addressing: projectDeliveryAddressing({
+      mentions: event.mentions,
+      ...(selfOpenId === undefined ? {} : { selfOpenId }),
+      // Event arrays preserve occurrence order; membership enrichment happens
+      // asynchronously inside the controller before durable acceptance.
+      orderKnown: true,
+    }),
     replyTarget,
     ...(event.replyTo !== undefined ? { replyToMessageId: event.replyTo } : {}),
     ...(event.createdAt !== undefined ? { createdAt: event.createdAt } : {}),
@@ -694,7 +749,7 @@ export function admitNormalizedLocusEvent(
         }
     return { kind: 'rejected', reason: decision.reason, ...(endpoint !== undefined ? { endpoint } : {}) }
   }
-  const message = messageFromAdmission(event, decision)
+  const message = messageFromAdmission(event, decision, context.botOpenId)
   if (message === undefined) return { kind: 'rejected', reason: 'unsafe-reply-target' }
   if (decision.command !== undefined) {
     return { kind: 'control', message, command: decision.command, authorization: decision.authorization }
@@ -841,6 +896,7 @@ export class LocusChannelController {
         chatType: 'group',
         senderOpenId: claimed.senderOpenId ?? '',
         text: claimed.text ?? '',
+        addressing: claimed.addressing ?? projectDeliveryAddressing({ mentions: [], orderKnown: false }),
         replyTarget: { ...claimed.feedbackTarget },
         ...(claimed.replyToMessageId === undefined ? {} : { replyToMessageId: claimed.replyToMessageId }),
         ...(claimed.acceptedAt === undefined ? {} : { createdAt: claimed.acceptedAt }),
@@ -887,6 +943,7 @@ export class LocusChannelController {
           senderOpenId: claimed.senderOpenId,
           ...(claimed.senderName === undefined ? {} : { senderName: claimed.senderName }),
           text: claimed.text,
+          addressing: claimed.addressing ?? projectDeliveryAddressing({ mentions: [], orderKnown: false }),
           replyTarget: { ...claimed.feedbackTarget },
           ...(claimed.replyToMessageId === undefined ? {} : { replyToMessageId: claimed.replyToMessageId }),
           ...(claimed.acceptedAt === undefined ? {} : { createdAt: claimed.acceptedAt }),
@@ -923,6 +980,43 @@ export class LocusChannelController {
     return this.handleAdmission(admission)
   }
 
+  private async enrichAddressing(message: NormalizedLocusMessage): Promise<NormalizedLocusMessage> {
+    const original = message.addressing ?? historicalUnknownAddressing()
+    const normalized = message.addressing === undefined ? { ...message, addressing: original } : message
+    const port = this.deps.addressing
+    if (port === undefined || message.chatType !== 'group') return normalized
+    try {
+      const result = await port.listChatBots(message.endpoint.chatId)
+      let bots: readonly { readonly openId: string }[] | undefined
+      if (Array.isArray(result)) {
+        bots = result as readonly { readonly openId: string }[]
+      } else {
+        const structured = result as {
+          readonly kind: 'ok' | 'permission-denied' | 'error'
+          readonly bots?: readonly { readonly openId: string }[]
+        }
+        if (structured.kind === 'ok') bots = structured.bots
+      }
+      if (bots === undefined) return normalized
+      const self = original.occurrences.find(occurrence => occurrence.kind === 'self-bot')?.stableId
+      return {
+        ...message,
+        addressing: projectDeliveryAddressing({
+          mentions: original.occurrences.map(occurrence => ({
+            ...(occurrence.stableId === undefined ? {} : { id: occurrence.stableId }),
+            ...(occurrence.mentionKey === undefined ? {} : { key: occurrence.mentionKey }),
+            name: occurrence.displayName,
+          })),
+          ...(self === undefined ? {} : { selfOpenId: self }),
+          chatBots: bots,
+          orderKnown: original.orderKnown,
+        }),
+      }
+    } catch {
+      return normalized
+    }
+  }
+
   /** Consume a pre-admitted normalized result without re-running deduplication. */
   async handleAdmission(admission: NormalizedLocusAdmission): Promise<LocusControllerResult> {
     if (!this.available) return this.refuse('turn-correlation-unavailable')
@@ -940,7 +1034,7 @@ export class LocusChannelController {
       return this.dispatchControl(admission)
     }
 
-    const message = admission.message
+    const message = await this.enrichAddressing(admission.message)
     const endpoint = normalizeLocusEndpoint(message.endpoint).endpoint
     const signal = this.signal
     let locus = await this.resolveLocus(endpoint, message, admission.needsInitialization, signal)
@@ -993,6 +1087,7 @@ export class LocusChannelController {
       senderOpenId: message.senderOpenId,
       ...(message.senderName !== undefined ? { senderName: message.senderName } : {}),
       text: message.text,
+      ...(message.addressing === undefined ? {} : { addressing: message.addressing }),
       ...(message.replyTarget.rootMessageId !== undefined
         ? { rootMessageId: message.replyTarget.rootMessageId }
         : {}),
@@ -1128,14 +1223,21 @@ export class LocusChannelController {
       | { readonly accepted: true; readonly executionId: string; readonly inboxMessageId: string }
       | { readonly accepted: false; readonly reason: string }
     try {
-      queued = await this.deps.child.queueChild({
+      const content = await this.prepareCurrentContent({
         locus,
         child,
-        deliveryId: pending.deliveryId,
-        executionId,
-        prompt: this.deps.renderPrompt?.({ locus, message }) ?? message.text,
-        replyTarget: message.replyTarget,
+        record: accepted.record,
+        message,
         signal,
+      })
+      if (content === undefined) {
+        this.pending.delete(pending.deliveryId)
+        return this.dispatchUnknown(pending)
+      }
+      queued = await this.queuePreparedCurrent({
+        input: { locus, child, record: accepted.record, message, signal },
+        pending,
+        content,
       })
     } catch {
       this.pending.delete(pending.deliveryId)
@@ -1237,15 +1339,12 @@ export class LocusChannelController {
       | { readonly accepted: true; readonly executionId: string; readonly inboxMessageId: string }
       | { readonly accepted: false; readonly reason: string }
     try {
-      queued = await this.deps.child.queueChild({
-        locus: input.locus,
-        child: input.child,
-        deliveryId: pending.deliveryId,
-        executionId,
-        prompt: this.deps.renderPrompt?.({ locus: input.locus, message: input.message }) ?? input.message.text,
-        replyTarget: input.message.replyTarget,
-        signal: input.signal,
-      })
+      const content = await this.prepareCurrentContent(input)
+      if (content === undefined) {
+        this.pending.delete(pending.deliveryId)
+        return this.dispatchUnknown(pending)
+      }
+      queued = await this.queuePreparedCurrent({ input, pending, content })
     } catch {
       this.pending.delete(pending.deliveryId)
       return this.dispatchUnknown(pending)
@@ -1307,6 +1406,91 @@ export class LocusChannelController {
       locusId: bound.locusId,
       generation: bound.generation,
     }
+  }
+
+  /** Build one typed inbox message while repeatedly fencing the exact durable current. */
+  private async prepareCurrentContent(input: CurrentDeliveryInput): Promise<PreparedCurrentContent | undefined> {
+    const prompt = this.deps.renderPrompt?.({ locus: input.locus, message: input.message }) ?? input.message.text
+    const base: ContentBlock[] = [{ type: 'text', text: prompt }]
+    const isExactCurrent = () => this.isExactCurrent(input)
+    // Exact fence immediately before platform enumeration/download starts.
+    if (!await isExactCurrent()) return undefined
+    const media = this.deps.media
+    if (media === undefined || !media.available) {
+      // No selector or fallback is exposed. A Host without reliable media
+      // confinement remains text-only and says so deterministically.
+      const typed = [...base, { type: 'text' as const, text: '[当前 Host 的图片读取能力不可用。]' }]
+      return { typed, textFallback: typed, hasImage: false }
+    }
+    const admitted = await media.admitCurrentImage({
+      messageId: input.record.messageId,
+      signal: input.signal,
+      // Exact fence immediately before AttachmentStore.saveImage.
+      fenceBeforeSave: isExactCurrent,
+    })
+    // Exact fence immediately before typed ContentBlock[] enters the child inbox.
+    if (!await isExactCurrent()) return undefined
+    const typed = admitted.kind === 'unavailable'
+      ? [...base, ...admitted.content, { type: 'text' as const, text: '[当前消息图片未能安全读取。]' }]
+      : [...base, ...admitted.content]
+    const hasImage = typed.some(block => block.type === 'image')
+    return {
+      typed,
+      hasImage,
+      textFallback: hasImage
+        ? [...base, { type: 'text', text: '[当前模型无法查看图片；请仅依据以上文字回复，不要声称已看见或理解图片内容。]' }]
+        : typed,
+    }
+  }
+
+  private async isExactCurrent(input: CurrentDeliveryInput): Promise<boolean> {
+    if (input.signal.aborted || this.deps.deliveries.getById === undefined) return false
+    let current: DeliveryRecord | undefined
+    try { current = await this.deps.deliveries.getById(input.record.deliveryId) } catch { return false }
+    return current !== undefined
+      && current.deliveryId === input.record.deliveryId
+      && current.messageId === input.record.messageId
+      && current.status === 'current'
+      && current.queueState === 'current'
+      && exactCorrelation(current, {
+        endpoint: input.record.endpoint,
+        locusId: input.record.locusId,
+        generation: input.record.generation,
+        childSessionId: input.record.childSessionId,
+      })
+      && input.locus.generation === current.generation
+      && input.locus.childSessionId === input.child.childSessionId
+      && input.locus.parentSessionId === input.child.parentSessionId
+  }
+
+  /** Retry only a typed-image route refusal, once, against the same exact current. */
+  private async queuePreparedCurrent(input: {
+    readonly input: CurrentDeliveryInput
+    readonly pending: PendingTurn
+    readonly content: PreparedCurrentContent
+  }): Promise<ChildQueueResult> {
+    const queue = (content: readonly ContentBlock[]) => this.deps.child.queueChild({
+      locus: input.input.locus,
+      child: input.input.child,
+      deliveryId: input.pending.deliveryId,
+      executionId: input.pending.executionId,
+      content,
+      fenceBeforeQueue: () => this.isExactCurrent(input.input),
+      replyTarget: input.input.message.replyTarget,
+      signal: input.input.signal,
+    })
+    const typed = await queue(input.content.typed)
+    if (
+      typed.accepted === true ||
+      typed.reason !== 'image-route-unsupported' ||
+      !input.content.hasImage
+    ) return typed
+    // queueChild rejected before inbox acceptance. Revalidate after that await so
+    // A can never use its fallback to enter a newly promoted B. Media admission
+    // is deliberately not rerun: the fallback contains only the original prompt
+    // and an explicit statement that this route cannot see the image.
+    if (!await this.isExactCurrent(input.input)) return { accepted: false, reason: 'stale-delivery' }
+    return queue(input.content.textFallback)
   }
 
   private enqueueDispatchLane<T>(

@@ -23,7 +23,7 @@
  * race; they are not a substitute for a conditional repository commit.
  */
 
-import { endpointKeyOf } from './aggregate.js'
+import { endpointKeyOf, LOCUS_SAFE_CHILD_COMPOSITION, type LocusChildComposition } from './aggregate.js'
 
 /** A Feishu entry: a chat, optionally narrowed to one thread. */
 export interface LocusEndpoint {
@@ -53,6 +53,8 @@ export interface ProvisionedSession {
   readonly workspaceId?: string
   readonly parentSessionId?: string
   readonly title?: string
+  /** Host-attested safe composition for a newly created locus child. */
+  readonly childComposition?: LocusChildComposition
   /** Finish a pre-publication identity handoff after durable commit. */
   readonly commit?: () => Promise<void> | void
   /** Preferred cleanup hook for a failed provisioning transaction. */
@@ -104,6 +106,8 @@ export interface LocusRecord {
   readonly parentSessionId: string
   readonly parentSessionTitle?: string
   readonly childSessionId: string
+  /** Missing only on legacy rows, which resolution/startup keep unavailable. */
+  readonly childComposition?: LocusChildComposition
   /** Chat-level locus that structurally owns this topic, when applicable. */
   readonly parentLocusId?: string
   readonly source: LocusSource
@@ -440,6 +444,15 @@ function assertSessionShape(
       `${operation} 未能证明返回的 child 属于指定 parent，已拒绝发布。`,
     )
   }
+  if (
+    expectedParent !== undefined
+    && session.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION
+  ) {
+    throw new LocusControllerError(
+      'PROVISIONING_FAILED',
+      `${operation} 未能证明 safe-v1 child composition，已拒绝发布。`,
+    )
+  }
   if (expectedWorkspace !== undefined && session.workspaceId !== expectedWorkspace) {
     throw new LocusControllerError(
       'PROVISIONING_FAILED',
@@ -669,6 +682,7 @@ export class LocusController {
           parentSessionId: parent.id,
           ...(parent.title !== undefined ? { parentSessionTitle: parent.title } : {}),
           childSessionId: child.id,
+          childComposition: LOCUS_SAFE_CHILD_COMPOSITION,
           source: 'qa-created',
           state: 'active',
           permission: 'read',
@@ -833,6 +847,7 @@ export class LocusController {
             parentSessionId: parent.id,
             ...(parent.title === undefined ? {} : { parentSessionTitle: parent.title }),
             childSessionId: child.id,
+            childComposition: LOCUS_SAFE_CHILD_COMPOSITION,
             ...(parentLocusId === undefined ? {} : { parentLocusId }),
             source,
             state: 'active',
@@ -1014,6 +1029,7 @@ export class LocusController {
         parentSessionId: selected.id,
         ...(selected.title !== undefined ? { parentSessionTitle: selected.title } : {}),
         childSessionId: child.id,
+        childComposition: LOCUS_SAFE_CHILD_COMPOSITION,
         source: mainSource === 'auto' ? 'auto' : 'explicit',
         state: 'active',
         permission: 'read',
@@ -1081,6 +1097,7 @@ export class LocusController {
         parentSessionId: parent.id,
         ...(parent.title !== undefined ? { parentSessionTitle: parent.title } : {}),
         childSessionId: child.id,
+        childComposition: LOCUS_SAFE_CHILD_COMPOSITION,
         parentLocusId,
         source,
         state: 'active',
@@ -1177,6 +1194,7 @@ export class LocusController {
         parentSessionId: parent.id,
         ...(parent.title === undefined ? {} : { parentSessionTitle: parent.title }),
         childSessionId: child.id,
+        childComposition: LOCUS_SAFE_CHILD_COMPOSITION,
         ...(previousLocus.parentLocusId === undefined ? {} : { parentLocusId: previousLocus.parentLocusId }),
         source: 'explicit',
         state: 'active',
@@ -1329,6 +1347,7 @@ export class LocusController {
         parentSessionId: parent.id,
         ...(parent.title !== undefined ? { parentSessionTitle: parent.title } : {}),
         childSessionId: child.id,
+        childComposition: LOCUS_SAFE_CHILD_COMPOSITION,
         source: 'explicit',
         state: 'active',
         permission: 'read',

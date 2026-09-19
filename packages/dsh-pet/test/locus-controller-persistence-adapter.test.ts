@@ -24,6 +24,7 @@ function durableRecord(
     endpoint: { chatId: 'oc_project' },
     parentSessionId: 'session-main',
     childSessionId: 'session-child',
+    childComposition: 'safe-v1',
     workspaceId: 'workspace-main',
     source: 'auto',
     createdAt: 10,
@@ -42,6 +43,7 @@ function controllerRecord(
     workspaceId: 'workspace-main',
     parentSessionId: 'session-main',
     childSessionId: 'session-child-controller',
+    childComposition: 'safe-v1',
     source: 'auto',
     state: 'active',
     permission: 'read',
@@ -147,6 +149,7 @@ describe('controller to durable locus repository read adapter', () => {
       workspaceId: 'workspace-main',
       parentSessionId: 'session-main',
       childSessionId: 'session-child',
+      childComposition: 'safe-v1',
       source: 'auto',
       state: 'active',
       permission: 'read',
@@ -490,7 +493,7 @@ describe('controller to durable locus repository write boundary', () => {
         resolveSession: async id => sessions.get(id),
         createMainSession: async () => ({ id: 'unused', workspaceId: 'workspace-main' }),
         createChildSession: async ({ parentSessionId }) => ({
-          id: `session-child-${String(++sequence)}`, parentSessionId, workspaceId: 'workspace-main',
+          id: `session-child-${String(++sequence)}`, parentSessionId, workspaceId: 'workspace-main', childComposition: 'safe-v1' as const,
         }),
       },
       lark: { createGroup: async () => ({ chatId: 'oc_default_rebuild' }), sendControlMessage: async () => {} },
@@ -534,6 +537,7 @@ describe('controller to durable locus repository write boundary', () => {
           id: `session-child-${String(++sequence)}`,
           parentSessionId,
           workspaceId: 'workspace-main',
+          childComposition: 'safe-v1' as const,
         }),
       },
       id: () => `id-${String(++sequence)}`,
@@ -581,6 +585,7 @@ describe('controller to durable locus repository write boundary', () => {
           id: `session-child-${String(++sequence)}`,
           parentSessionId,
           workspaceId: sessions.get(parentSessionId)!.workspaceId,
+          childComposition: 'safe-v1' as const,
         }),
       },
       lark: {
@@ -858,6 +863,7 @@ describe('controller to durable locus repository write boundary', () => {
             workspaceId: parentSessionId === 'session-source-1'
               ? 'workspace-source'
               : 'workspace-main',
+            childComposition: 'safe-v1' as const,
           }
         },
       },

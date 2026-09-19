@@ -8,6 +8,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { join } from 'node:path'
 import type { TodoRecord } from './host/ledger/todo.js'
 import type { PetTodoView } from './wire.js'
 import type { Context } from '@deepseek-ai/cordis'
@@ -44,6 +45,8 @@ import { rebuildProjection } from './host/projection.js'
 import { PetRepository } from './host/repository.js'
 import { ChannelService } from './host/channel/service.js'
 import { createLarkCliClient, createLocusLarkPort } from './host/channel/lark.js'
+import { createLocusMediaPort, type LocusMediaPort } from './host/channel/media.js'
+import { resolvePetLarkCliCompat } from './host/channel/lark-cli-compat.js'
 import { createPetRoutes } from './host/routes.js'
 import { withBrowserAuth } from './host/http.js'
 import { createPetEnvContributor } from './host/shell-env.js'
@@ -116,6 +119,7 @@ import {
   type LocusCandidateAgent,
   type LocusCompositionPorts,
 } from './host/locus/composition.js'
+import { installLocusProjectReadGuard } from './host/locus/project-read-guard.js'
 import { currentAllowlist } from './host/skill-provider.js'
 import { petDomainSpec } from './host/spec.js'
 import {
@@ -335,17 +339,35 @@ async function initialize(
   // degradations (mention rendering, member reads) are greppable in dsh.log
   // instead of silent.
   const larkClient = createLarkCliClient(undefined, undefined, petLog)
+  // Media is available only through the exact pinned compat binary's bounded
+  // inherited-fd capability. Resolution never falls back to a PATH binary;
+  // absence therefore remains text-only with zero media side effects.
+  let locusMediaDownload: ReturnType<typeof resolvePetLarkCliCompat> | undefined
+  try {
+    locusMediaDownload = resolvePetLarkCliCompat()
+  } catch (error) {
+    petLog(`dsh-pet: bounded lark media downloader unavailable (${error instanceof Error ? error.message : String(error)})`)
+  }
+  const locusMedia: LocusMediaPort = createLocusMediaPort({
+    attachments: ctx.get('attachments') as never,
+    ...(locusMediaDownload === undefined ? {} : { download: locusMediaDownload }),
+  })
   let currentLocusTurnProof: (childSessionId: string) =>
     | { readonly executionId: string; readonly turnId: string }
     | undefined = () => undefined
-  let currentLocusCapability: (childSessionId: string) => {
+  type CurrentLocusCapabilityProjection = {
     readonly deliveryId: string
     readonly executionId: string
     readonly turnId: string
     readonly source: 'delivery' | 'agent-message'
     readonly locusId?: string
     readonly generation?: number
-  } | undefined = () => undefined
+  }
+  let currentLocusCapability: (childSessionId: string) => CurrentLocusCapabilityProjection | undefined = () => undefined
+  let inspectCurrentLocusCapability: (childSessionId: string) =>
+    | { readonly ok: true; readonly capability: CurrentLocusCapabilityProjection }
+    | { readonly ok: false; readonly reason: import('./host/locus/turn-observer.js').LocusCurrentCapabilityReason } =
+      () => ({ ok: false, reason: 'capability-unavailable' })
   const locusDispatchLanes = new Map<string, Promise<void>>()
   const locusDispatchKey = (correlation: DeliveryCorrelation): string => [
     correlation.locusId,
@@ -1060,14 +1082,35 @@ async function initialize(
     // The scoped surface is registered on the CHILD's own scope: resolving
     // `tools` from the Host scope would publish `pet_context` globally.
     surface: {
-      install: (agent) => {
-        const scope = agent.scope as unknown as {
-          get(service: string): { register(definition: unknown): unknown } | undefined
-        }
-        const tools = scope.get('tools')
+      install: (agent, composition) => {
+        const scope = agent.scope as unknown as Context
+        const tools = scope.get('tools') as { register(definition: unknown): unknown } | undefined
         if (tools === undefined) {
           throw new PetError('INTERNAL', 'Agent scope exposes no tools service')
         }
+        const childSession = ctx.sessions.get(agent.sessionId as never)
+        const parentSession = ctx.sessions.get(composition.parentSessionId as never)
+        const sandboxPolicy = ctx.get('sandboxPolicy') as
+          | { resolve?: (input: { session: unknown }) => { workspaceRoot?: string } | undefined }
+          | undefined
+        const childCwd = childSession?.header.cwd
+        const parentCwd = parentSession?.header.cwd
+        const workspaceRoot = childSession === undefined
+          ? undefined
+          : sandboxPolicy?.resolve?.({ session: childSession })?.workspaceRoot
+        if (
+          typeof childCwd !== 'string'
+          || typeof parentCwd !== 'string'
+          || typeof workspaceRoot !== 'string'
+        ) {
+          throw new PetError('INTERNAL', 'Exact child project-read roots are unavailable')
+        }
+        installLocusProjectReadGuard(scope, {
+          childCwd,
+          parentCwd,
+          workspaceRoot,
+          deniedRoots: [paths.dshHome, paths.stateRoot, join(paths.dshHome, 'attachments')],
+        })
         registerPetTools(agent.scope as never, {
           repository,
           locusRepository: locusContextRepository,
@@ -1075,13 +1118,12 @@ async function initialize(
             locusRepository: locusContextRepository,
             lark: larkClient,
             currentCapability: childSessionId => currentLocusCapability(childSessionId),
-            authorizeCurrentDelivery: input => {
-              const proof = currentLocusCapability(input.childSessionId)
-              return locusContextRepository.authorizeCurrentDelivery?.({
-                ...input,
-                ...(proof === undefined ? {} : { proof }),
-              })
-            },
+            inspectCurrentCapability: childSessionId => inspectCurrentLocusCapability(childSessionId),
+            inspectCurrentDeliveryAuthorization: input =>
+              locusContextRepository.inspectCurrentDeliveryAuthorization?.(input) ??
+              { ok: false as const, reason: 'capability-unavailable' as const },
+            logAuthorizationRefusal: ({ operation, reason }) =>
+              petLog(`dsh-pet locus authorization refused: ${operation}:${reason}`),
             // Delegate through mutable Host-owned closures. The scoped Agent
             // may be composed before the channel controller is published; the
             // wrapper must not capture the initial unavailable stub.
@@ -1095,13 +1137,12 @@ async function initialize(
             // seam rather than a second, weaker resolver is what keeps a todo
             // from ever being attributed to a Delivery that is not current.
             currentCapability: childSessionId => currentLocusCapability(childSessionId),
-            authorizeCurrentDelivery: input => {
-              const proof = currentLocusCapability(input.childSessionId)
-              return locusContextRepository.authorizeCurrentDelivery?.({
-                ...input,
-                ...(proof === undefined ? {} : { proof }),
-              })
-            },
+            inspectCurrentCapability: childSessionId => inspectCurrentLocusCapability(childSessionId),
+            inspectCurrentDeliveryAuthorization: input =>
+              locusContextRepository.inspectCurrentDeliveryAuthorization?.(input) ??
+              { ok: false as const, reason: 'capability-unavailable' as const },
+            logAuthorizationRefusal: ({ operation, reason }) =>
+              petLog(`dsh-pet locus authorization refused: ${operation}:${reason}`),
           },
         })
         // The circle surface rides the SAME synchronous boundary, so a locus
@@ -1595,6 +1636,7 @@ async function initialize(
   const idleChildProvisioning = locusChildProbe.available
     && locusChildProbe.ports.subagent.supportsSettlementNotice === true
     && locusChildProbe.ports.subagent.supportsIdleContinuableCreate === true
+    && locusChildProbe.ports.subagent.supportsIndependentContinuableCreate === true
     ? {
       create: async (input: {
         parentSessionId: string
@@ -1775,8 +1817,8 @@ async function initialize(
                 threadId: endpoint.threadId,
               })
             const record = ensured.locus
-            if (record.state !== 'active') {
-              throw new Error(`Provisioned locus is ${record.state}, not active`)
+            if (record.state !== 'active' || record.childComposition !== 'safe-v1') {
+              throw new Error(`Provisioned locus is not an active safe-v1 generation`)
             }
             return {
               id: record.locusId,
@@ -1784,6 +1826,7 @@ async function initialize(
               generation: record.generation,
               parentSessionId: record.parentSessionId,
               childSessionId: record.childSessionId,
+              childComposition: record.childComposition,
               workspaceId: record.workspaceId,
               state: 'active' as const,
               permission: {
@@ -1824,6 +1867,7 @@ async function initialize(
               id: locus.id,
               parentSessionId: locus.parentSessionId,
               childSessionId,
+              ...(locus.childComposition === undefined ? {} : { childComposition: locus.childComposition }),
             }, new AbortController().signal)
             if (
               adopted.parentSessionId !== identity.parentSessionId
@@ -2035,16 +2079,24 @@ async function initialize(
   })()
   if (locusTurnObserver !== undefined) {
     currentLocusTurnProof = childSessionId => locusTurnObserver.currentForChild?.(childSessionId)
+    const projectCapability = (capability: import('./host/locus/turn-observer.js').LocusCurrentCapability): CurrentLocusCapabilityProjection => ({
+      deliveryId: capability.deliveryId,
+      executionId: capability.executionId,
+      turnId: capability.turnId,
+      source: capability.source,
+      locusId: capability.correlation.locusId,
+      generation: capability.correlation.generation,
+    })
     currentLocusCapability = childSessionId => {
       const capability = locusTurnObserver.currentCapabilityForChild?.(childSessionId)
-      return capability === undefined ? undefined : {
-        deliveryId: capability.deliveryId,
-        executionId: capability.executionId,
-        turnId: capability.turnId,
-        source: capability.source,
-        locusId: capability.correlation.locusId,
-        generation: capability.correlation.generation,
-      }
+      return capability === undefined ? undefined : projectCapability(capability)
+    }
+    inspectCurrentLocusCapability = childSessionId => {
+      const inspection = locusTurnObserver.inspectCurrentCapabilityForChild?.(childSessionId)
+      if (inspection === undefined) return { ok: false, reason: 'capability-unavailable' }
+      return inspection.ok
+        ? { ok: true, capability: projectCapability(inspection.capability) }
+        : inspection
     }
   }
 
@@ -2288,6 +2340,7 @@ async function initialize(
             id: locus.id,
             parentSessionId: identity.parentSessionId,
             childSessionId: identity.childSessionId,
+            ...(locus.childComposition === undefined ? {} : { childComposition: locus.childComposition }),
           }, new AbortController().signal)
           if (
             adopted.parentSessionId !== identity.parentSessionId ||
@@ -2409,6 +2462,7 @@ async function initialize(
          scheduleCurrent: input => scheduleCurrentDelivery(input),
        },
       child: locusChildDelivery,
+      media: locusMedia,
       resolveLivePolicy: session => {
         const policy = ctx.get('sandboxPolicy') as
           | { resolve?: (input: { session: unknown }) => { mode?: string; workspaceRoot?: string } | undefined }
@@ -2433,6 +2487,9 @@ async function initialize(
             ...(current.revision === undefined ? {} : { expectedRevision: current.revision }),
           },
         )
+      },
+      addressing: {
+        listChatBots: chatId => larkClient.listChatBots(chatId),
       },
       receipts: (() => {
         const inProgressReactions = new Map<string, string>()
@@ -2493,6 +2550,7 @@ async function initialize(
             senderOpenId: message.senderOpenId,
             ...(message.senderName === undefined ? {} : { senderName: message.senderName }),
             text: message.text,
+            ...(message.addressing === undefined ? {} : { addressing: message.addressing }),
             ...(message.replyToMessageId === undefined
               ? {}
               : { replyToMessageId: message.replyToMessageId }),

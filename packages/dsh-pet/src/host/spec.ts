@@ -553,6 +553,8 @@ export const petLocusRecord = z.object({
   endpoint: petLocusEndpoint,
   parentSessionId: z.string().min(1),
   childSessionId: z.string().min(1).optional(),
+  /** Additive Host attestation; absent legacy rows parse but cannot serve. */
+  childComposition: z.literal('safe-v1').optional(),
   workspaceId: z.string().min(1),
   parentLocusId: z.string().min(1).optional(),
   source: z.enum(['auto', 'inherited', 'explicit', 'qa-created']),
@@ -611,6 +613,18 @@ export const petLocusDelivery = z.object({
   senderOpenId: z.string().min(1),
   senderName: z.string().optional(),
   text: z.string().min(1).optional(),
+  addressing: z.object({
+    status: z.enum(['known', 'unknown']),
+    occurrences: z.array(z.object({
+      kind: z.enum(['self-bot', 'other-bot', 'human', 'unknown']),
+      displayName: z.string().max(128),
+      stableId: z.string().min(1).max(256).optional(),
+      mentionKey: z.string().min(1).max(256).optional(),
+    })).max(32),
+    selfMentioned: z.boolean(),
+    otherBotCount: z.number().int().nonnegative().max(32),
+    orderKnown: z.boolean(),
+  }).optional(),
   replyTarget: petLocusEndpoint.extend({
     messageId: z.string().min(1),
     rootMessageId: z.string().min(1).optional(),

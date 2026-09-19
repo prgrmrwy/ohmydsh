@@ -290,8 +290,16 @@ function makeHarness(
     input: Parameters<LocusChildDeliveryPort['queueChild']>[0],
     observer: SynchronousTurnObserver,
   ) =>
-    | { readonly accepted: true; readonly executionId: string }
-    | Promise<{ readonly accepted: true; readonly executionId: string }>,
+    | Awaited<ReturnType<LocusChildDeliveryPort['queueChild']>>
+    | Promise<Awaited<ReturnType<LocusChildDeliveryPort['queueChild']>>>,
+  options: {
+    readonly media?: LocusControllerDeps['media']
+    readonly addressing?: LocusControllerDeps['addressing']
+    readonly beforeQueueFence?: (
+      input: Parameters<LocusChildDeliveryPort['queueChild']>[0],
+      attempt: number,
+    ) => void | Promise<void>
+  } = {},
 ): Harness {
   const observer = new SynchronousTurnObserver()
   const ledger = new MemoryDeliveryLedger()
@@ -305,8 +313,10 @@ function makeHarness(
       childSessionId: LOCUS.childSessionId,
     }),
     withChildSession: async input => ({ ok: true as const, value: await input.operation({ id: LOCUS.childSessionId }) }),
-    queueChild: input => {
+    queueChild: async input => {
       queueInputs.push(input)
+      await options.beforeQueueFence?.(input, queueInputs.length)
+      if (!await input.fenceBeforeQueue()) return { accepted: false, reason: 'child-proof-failed' }
       return queue(input, observer)
     },
   }
@@ -315,6 +325,8 @@ function makeHarness(
     child,
     resolveLivePolicy: () => ({ mode: 'read-only', workspaceRoot: '/repo' }),
     receipts: { markAccepted, markSettled },
+    ...(options.media === undefined ? {} : { media: options.media }),
+    ...(options.addressing === undefined ? {} : { addressing: options.addressing }),
     now: (() => {
       let value = 100
       return () => value++
@@ -333,6 +345,341 @@ function makeHarness(
 }
 
 describe('LocusChannelController queue/turn races', () => {
+  it('durably accepts multi-bot addressing before queueing without Host intent filtering', async () => {
+    const admission = acceptedAdmission('message-multi-bot')
+    if (admission.kind !== 'accepted') throw new Error('fixture must be accepted')
+    const withMentions: NormalizedLocusAdmission = {
+      ...admission,
+      message: {
+        ...admission.message,
+        addressing: {
+          status: 'unknown',
+          occurrences: [
+            { kind: 'self-bot', displayName: 'Pet', stableId: 'ou-self' },
+            { kind: 'unknown', displayName: 'Review Bot', stableId: 'ou-other' },
+          ],
+          selfMentioned: true,
+          otherBotCount: 0,
+          orderKnown: true,
+        },
+      },
+    }
+    const harness = makeHarness(
+      input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }),
+      { addressing: { listChatBots: async () => ({ kind: 'ok', bots: [{ openId: 'ou-self' }, { openId: 'ou-other' }] }) } },
+    )
+
+    const result = await harness.controller.handleAdmission(withMentions)
+    expect(result.kind).toBe('accepted')
+    expect(harness.ledger.state.byDeliveryId['delivery-1']?.addressing).toMatchObject({
+      status: 'known', selfMentioned: true, otherBotCount: 1,
+      occurrences: [{ kind: 'self-bot' }, { kind: 'other-bot' }],
+    })
+    expect(harness.queueInputs).toHaveLength(1)
+  })
+
+  it('keeps unknown kinds when async chat-bot enrichment fails but still durably queues', async () => {
+    const admission = acceptedAdmission('message-membership-failed')
+    if (admission.kind !== 'accepted') throw new Error('fixture must be accepted')
+    const withMentions: NormalizedLocusAdmission = {
+      ...admission,
+      message: {
+        ...admission.message,
+        addressing: {
+          status: 'unknown',
+          occurrences: [{ kind: 'unknown', displayName: 'Unproven', stableId: 'ou-unproven' }],
+          selfMentioned: false,
+          otherBotCount: 0,
+          orderKnown: true,
+        },
+      },
+    }
+    const harness = makeHarness(
+      input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }),
+      { addressing: { listChatBots: async () => ({ kind: 'error' }) } },
+    )
+
+    expect((await harness.controller.handleAdmission(withMentions)).kind).toBe('accepted')
+    expect(harness.ledger.state.byDeliveryId['delivery-1']?.addressing).toMatchObject({
+      status: 'unknown', occurrences: [{ kind: 'unknown', displayName: 'Unproven' }],
+    })
+    expect(harness.queueInputs).toHaveLength(1)
+  })
+
+  it('continues text Delivery when the production media gate is unavailable', async () => {
+    const admitCurrentImage = vi.fn(async () => ({ kind: 'ready' as const, content: [] }))
+    const harness = makeHarness(
+      input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }),
+      {
+        media: {
+          available: false,
+          diagnostic: 'cross-child-media-isolation-unavailable',
+          admitCurrentImage,
+        },
+      },
+    )
+
+    await expect(harness.controller.handleAdmission(acceptedAdmission())).resolves.toMatchObject({ kind: 'accepted' })
+    expect(admitCurrentImage).not.toHaveBeenCalled()
+    expect(harness.queueInputs).toHaveLength(1)
+    expect(harness.queueInputs[0]?.content).toEqual([
+      { type: 'text', text: 'inspect the race' },
+      { type: 'text', text: '[当前 Host 的图片读取能力不可用。]' },
+    ])
+    expect(harness.ledger.state.byDeliveryId['delivery-1']?.status).toBe('current')
+  })
+
+  it('retries one typed image refusal as text-only for the same exact current without rerunning media admission', async () => {
+    const admitCurrentImage = vi.fn(async () => ({
+      kind: 'ready' as const,
+      content: [
+        { type: 'text' as const, text: '[图片：screenshot.png]' },
+        {
+          type: 'image' as const,
+          attachment: {
+            attachmentId: 'attachment-text-fallback' as never,
+            mediaType: 'image/png' as const,
+            bytes: 8,
+            width: 1,
+            height: 1,
+          },
+        },
+      ],
+    }))
+    const harness = makeHarness(
+      input => input.content.some(block => block.type === 'image')
+        ? { accepted: false, reason: 'image-route-unsupported' }
+        : { accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` },
+      { media: { available: true, admitCurrentImage } },
+    )
+
+    await expect(harness.controller.handleAdmission(acceptedAdmission())).resolves.toMatchObject({ kind: 'accepted' })
+
+    expect(admitCurrentImage).toHaveBeenCalledOnce()
+    expect(harness.queueInputs).toHaveLength(2)
+    const [typed, fallback] = harness.queueInputs
+    expect(typed?.content.some(block => block.type === 'image')).toBe(true)
+    expect(fallback).toMatchObject({
+      deliveryId: typed?.deliveryId,
+      executionId: typed?.executionId,
+      child: typed?.child,
+      replyTarget: typed?.replyTarget,
+    })
+    expect(fallback?.content).toEqual([
+      { type: 'text', text: 'inspect the race' },
+      { type: 'text', text: '[当前模型无法查看图片；请仅依据以上文字回复，不要声称已看见或理解图片内容。]' },
+    ])
+    expect(harness.ledger.calls.filter(call => call === 'bindQueued')).toHaveLength(1)
+    expect(harness.ledger.state.byDeliveryId['delivery-1']?.status).toBe('current')
+  })
+
+  it('terminally fails the exact current only when its one text fallback also refuses', async () => {
+    const admitCurrentImage = vi.fn(async () => ({
+      kind: 'ready' as const,
+      content: [{
+        type: 'image' as const,
+        attachment: {
+          attachmentId: 'attachment-fallback-fails' as never,
+          mediaType: 'image/png' as const,
+          bytes: 8,
+          width: 1,
+          height: 1,
+        },
+      }],
+    }))
+    const harness = makeHarness(
+      input => input.content.some(block => block.type === 'image')
+        ? { accepted: false, reason: 'image-route-unsupported' }
+        : { accepted: false, reason: 'inbox-failed' },
+      { media: { available: true, admitCurrentImage } },
+    )
+
+    await expect(harness.controller.handleAdmission(acceptedAdmission())).resolves.toMatchObject({
+      kind: 'refused', reason: 'queue-failed',
+    })
+    expect(admitCurrentImage).toHaveBeenCalledOnce()
+    expect(harness.queueInputs).toHaveLength(2)
+    expect(harness.ledger.state.byDeliveryId['delivery-1']).toMatchObject({
+      status: 'failed', failureReason: 'inbox-failed',
+    })
+  })
+
+  it('does not retry any queue refusal other than image-route-unsupported', async () => {
+    const admitCurrentImage = vi.fn(async () => ({
+      kind: 'ready' as const,
+      content: [{
+        type: 'image' as const,
+        attachment: {
+          attachmentId: 'attachment-no-retry' as never,
+          mediaType: 'image/png' as const,
+          bytes: 8,
+          width: 1,
+          height: 1,
+        },
+      }],
+    }))
+    const harness = makeHarness(
+      () => ({ accepted: false, reason: 'inbox-failed' }),
+      { media: { available: true, admitCurrentImage } },
+    )
+
+    await expect(harness.controller.handleAdmission(acceptedAdmission())).resolves.toMatchObject({
+      kind: 'refused', reason: 'queue-failed',
+    })
+    expect(admitCurrentImage).toHaveBeenCalledOnce()
+    expect(harness.queueInputs).toHaveLength(1)
+    expect(harness.ledger.state.byDeliveryId['delivery-1']).toMatchObject({
+      status: 'failed', failureReason: 'inbox-failed',
+    })
+  })
+
+  it('does not let A text fallback enter B after current changes during typed refusal', async () => {
+    const admitCurrentImage = vi.fn(async () => ({
+      kind: 'ready' as const,
+      content: [{
+        type: 'image' as const,
+        attachment: {
+          attachmentId: 'attachment-old-a' as never,
+          mediaType: 'image/png' as const,
+          bytes: 8,
+          width: 1,
+          height: 1,
+        },
+      }],
+    }))
+    let harness!: Harness
+    harness = makeHarness(
+      input => {
+        const oldA = harness.ledger.state.byDeliveryId[input.deliveryId]!
+        const expiredA = Object.freeze({ ...oldA, status: 'expired' as const, queueState: undefined })
+        const acceptedB = acceptDelivery(harness.ledger.state, {
+          ...correlation(), messageId: 'message-b-fallback-race', acceptedAt: 200,
+          senderOpenId: 'ou-owner', text: 'message b',
+        })
+        const b = Object.freeze({ ...acceptedB.record, status: 'current' as const, queueState: 'current' as const })
+        harness.ledger.state = Object.freeze({
+          ...acceptedB.state,
+          byDeliveryId: Object.freeze({
+            ...acceptedB.state.byDeliveryId,
+            [expiredA.deliveryId]: expiredA,
+            [b.deliveryId]: b,
+          }),
+          byMessageId: Object.freeze({
+            ...acceptedB.state.byMessageId,
+            [expiredA.messageId]: expiredA,
+            [b.messageId]: b,
+          }),
+        })
+        return { accepted: false, reason: 'image-route-unsupported' }
+      },
+      { media: { available: true, admitCurrentImage } },
+    )
+
+    await expect(harness.controller.handleAdmission(acceptedAdmission())).resolves.toMatchObject({
+      kind: 'refused', reason: 'dispatch-state-unknown',
+    })
+    expect(admitCurrentImage).toHaveBeenCalledOnce()
+    expect(harness.queueInputs).toHaveLength(1)
+    expect(harness.queueInputs[0]?.deliveryId).toBe('delivery-1')
+    expect(harness.ledger.state.byDeliveryId['delivery-1']).toMatchObject({ status: 'expired' })
+    expect(harness.ledger.state.byMessageId['message-b-fallback-race']).toMatchObject({ status: 'current' })
+  })
+
+  it('revalidates at the fallback queue seam so A cannot enter B after the controller precheck', async () => {
+    const admitCurrentImage = vi.fn(async () => ({
+      kind: 'ready' as const,
+      content: [{
+        type: 'image' as const,
+        attachment: {
+          attachmentId: 'attachment-seam-race' as never,
+          mediaType: 'image/png' as const,
+          bytes: 8,
+          width: 1,
+          height: 1,
+        },
+      }],
+    }))
+    let harness!: Harness
+    harness = makeHarness(
+      input => input.content.some(block => block.type === 'image')
+        ? { accepted: false, reason: 'image-route-unsupported' }
+        : { accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` },
+      {
+        media: { available: true, admitCurrentImage },
+        beforeQueueFence: (_input, attempt) => {
+          if (attempt !== 2) return
+          const oldA = harness.ledger.state.byDeliveryId['delivery-1']!
+          const expiredA = Object.freeze({ ...oldA, status: 'expired' as const, queueState: undefined })
+          const acceptedB = acceptDelivery(harness.ledger.state, {
+            ...correlation(), messageId: 'message-b-at-fallback-seam', acceptedAt: 200,
+            senderOpenId: 'ou-owner', text: 'message b',
+          })
+          const b = Object.freeze({ ...acceptedB.record, status: 'current' as const, queueState: 'current' as const })
+          harness.ledger.state = Object.freeze({
+            ...acceptedB.state,
+            byDeliveryId: Object.freeze({
+              ...acceptedB.state.byDeliveryId,
+              [expiredA.deliveryId]: expiredA,
+              [b.deliveryId]: b,
+            }),
+            byMessageId: Object.freeze({
+              ...acceptedB.state.byMessageId,
+              [expiredA.messageId]: expiredA,
+              [b.messageId]: b,
+            }),
+          })
+        },
+      },
+    )
+
+    await expect(harness.controller.handleAdmission(acceptedAdmission())).resolves.toMatchObject({
+      kind: 'refused', reason: 'dispatch-state-unknown',
+    })
+    expect(admitCurrentImage).toHaveBeenCalledOnce()
+    expect(harness.queueInputs).toHaveLength(2)
+    expect(harness.queueInputs[1]?.content.some(block => block.type === 'image')).toBe(false)
+    expect(harness.ledger.state.byMessageId['message-b-at-fallback-seam']).toMatchObject({ status: 'current' })
+  })
+
+  it('drops downloaded image content when the exact Delivery stops being current before typed queueing', async () => {
+    let harness!: Harness
+    harness = makeHarness(
+      input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }),
+      {
+        media: {
+          available: true,
+          async admitCurrentImage() {
+            const current = harness.ledger.state.byDeliveryId['delivery-1']!
+            const expired = Object.freeze({ ...current, status: 'expired' as const })
+            harness.ledger.state = Object.freeze({
+              ...harness.ledger.state,
+              byDeliveryId: Object.freeze({ ...harness.ledger.state.byDeliveryId, [current.deliveryId]: expired }),
+              byMessageId: Object.freeze({ ...harness.ledger.state.byMessageId, [current.messageId]: expired }),
+            })
+            return {
+              kind: 'ready',
+              content: [{
+                type: 'image',
+                attachment: {
+                  attachmentId: 'attachment-race' as never,
+                  mediaType: 'image/png',
+                  bytes: 8,
+                  width: 1,
+                  height: 1,
+                },
+              }],
+            }
+          },
+        },
+      },
+    )
+
+    const result = await harness.controller.handleAdmission(acceptedAdmission())
+
+    expect(result).toMatchObject({ kind: 'refused' })
+    expect(harness.queueInputs).toEqual([])
+  })
+
   it.each(['started', 'completed', 'failed'] as const)(
     'buffers a synchronous %s observer event emitted before queue bind, which never settles the Delivery',
     async phase => {

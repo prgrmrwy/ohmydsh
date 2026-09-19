@@ -99,6 +99,40 @@ describe('unified locus delivery context', () => {
     expect(prompt).toContain('no-reply` 并提供非空原因')
   })
 
+  it('renders only the minimal addressing projection and hides Host stable ids', () => {
+    const prompt = renderLocusDeliveryPrompt(deliveryContext({
+      request: {
+        ...deliveryContext().request,
+        addressing: {
+          status: 'known',
+          occurrences: [
+            { kind: 'self-bot', displayName: 'Pet', stableId: 'ou_secret_self', mentionKey: '@_user_1' },
+            { kind: 'other-bot', displayName: 'Review Bot', stableId: 'ou_secret_other' },
+          ],
+          selfMentioned: true,
+          otherBotCount: 1,
+          orderKnown: true,
+        },
+      },
+    }))
+    expect(prompt).toContain('### Addressing (current delivery only)')
+    expect(prompt).toContain('1. self-bot「Pet」')
+    expect(prompt).toContain('2. other-bot「Review Bot」')
+    expect(prompt).toContain('self mentioned：true')
+    expect(prompt).toContain('other bot count：1')
+    expect(prompt).not.toContain('ou_secret_self')
+    expect(prompt).not.toContain('ou_secret_other')
+    expect(prompt).not.toContain('@_user_1')
+  })
+
+  it('renders historical deliveries as unknown/empty without guessing', () => {
+    const prompt = renderLocusDeliveryPrompt(deliveryContext())
+    expect(prompt).toContain('### Addressing (current delivery only)')
+    expect(prompt).toContain('status：unknown')
+    expect(prompt).toContain('occurrences：[]')
+    expect(prompt).toContain('self mentioned：unknown')
+  })
+
   it('keeps the exported short alias equivalent', () => {
     const context = deliveryContext()
     expect(renderLocusPrompt(context)).toBe(renderLocusDeliveryPrompt(context))
@@ -116,7 +150,29 @@ describe('unified locus delivery context', () => {
       expect(prompt).toContain('@对方显示名')
       expect(prompt).toContain('<at user_id="ou_…">')
       expect(prompt).toContain('渲染成真实提醒')
+      expect(prompt).toContain('pet_locus_finish')
+      expect(prompt).toContain('普通 assistant 文本')
+      expect(prompt).not.toContain('回复由你自己发出')
+      expect(prompt).not.toContain('lark-cli --profile')
     }
+  })
+
+  it('carries the four-way terminal intent contract in both delivery variants', () => {
+    const first = renderLocusDeliveryPrompt(deliveryContext())
+    const subsequent = renderLocusDeliveryPrompt(deliveryContext(), { position: 'subsequent' })
+
+    expect(first).toContain('INFORMATION EXCHANGE')
+    expect(first).toContain('REFERENCE-ONLY')
+    expect(first).toContain('`pet_locus_finish` with outcome `no-reply`')
+    expect(first).toContain('TERMINATES the current Delivery')
+    expect(first).toContain('a NEW Delivery in the normal FIFO queue')
+    expect(first).toContain('do not assume a timeout or scheduled model turn will occur')
+
+    expect(subsequent).toContain('info→finish(reply)')
+    expect(subsequent).toContain('reference-only→finish(no-reply) 静默结算')
+    expect(subsequent).toContain('ambiguous→finish(reply) 发一次澄清并终结本 Delivery')
+    expect(subsequent).toContain('后续回答是同一 child 的新 Delivery')
+    expect(subsequent).toContain('不得仅因同时 at 其它 bot 判为 reference-only')
   })
 
   it('does not flatten history or invent a parent summary', () => {
@@ -152,8 +208,8 @@ describe('unified locus delivery context', () => {
     expect(prompt).toContain('execution root：未确认')
     expect(prompt).toContain('constraints：未确认')
     expect(prompt).toContain('project resources：未确认')
-    expect(prompt).toContain('send_message')
-    expect(prompt).toContain('必须由所有者在管理面显式确认')
+    expect(prompt).toContain('请所有者在管理面显式确认')
+    expect(prompt).toContain('不得调用 shell、lark-cli、通用 HTTP、send_message 或子委派')
     expect(prompt).toContain('路径存在性与 sandbox 授权分离')
     expect(prompt).toContain('不自动运行 ws/sw')
     expect(prompt).not.toContain('/repo/.worktrees/project')

@@ -17,6 +17,8 @@
  * explicitly there.
  */
 
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+
 /** A live DSH Agent, intentionally opaque apart from its session identity. */
 export interface LocusLiveParent {
   readonly session: { readonly id: string }
@@ -32,11 +34,8 @@ export interface LocusParentPort {
   >
 }
 
-/** Text block shape accepted by the measured DSH child inbox seam. */
-export interface LocusTextBlock {
-  readonly type: 'text'
-  readonly text: string
-}
+/** Typed block vocabulary accepted unchanged by the measured DSH child inbox seam. */
+export type LocusContentBlock = ContentBlock
 
 /**
  * Whether the Host runtime delivers a child's automatic settlement account to
@@ -46,6 +45,24 @@ export interface LocusTextBlock {
  */
 export type LocusSettlementNotice = 'notify' | 'silent'
 
+/** Persisted global-tool restriction accepted by the reviewed Subagent runtime. */
+export interface LocusToolRestriction {
+  readonly allow?: readonly string[]
+  readonly deny?: readonly string[]
+}
+
+/**
+ * Complete inherited global-tool allowlist for a Locus child.
+ *
+ * The runtime validates every name against the mounted preset and applies the
+ * restriction after that preset is mounted. Unknown or missing names therefore
+ * abort child creation, while tools registered directly in the child scope stay
+ * visible and remain protected by their caller-bound implementations.
+ */
+export const LOCUS_SAFE_TOOL_FILTER: LocusToolRestriction = Object.freeze({
+  allow: Object.freeze(['read', 'read_image', 'glob', 'grep', 'web_search']),
+})
+
 /** The continuable-child creation operation. */
 export interface LocusSubagentPort {
   startContinuable(spec: {
@@ -53,7 +70,7 @@ export interface LocusSubagentPort {
     readonly label: string
     readonly childId?: string
     readonly request: {
-      readonly prompt: LocusTextBlock[]
+      readonly prompt: LocusContentBlock[]
       readonly parent: LocusLiveParent
     }
     /**
@@ -75,10 +92,16 @@ export interface LocusSubagentPort {
     readonly label: string
     readonly parent: LocusLiveParent
     readonly settlementNotice?: LocusSettlementNotice
+    /** Persist a fresh transcript and the creation-time preset for cold resume. */
+    readonly contextMode?: 'independent-v1'
+    /** Persist the inherited global-tool restriction for creation and cold resume. */
+    readonly toolFilter?: LocusToolRestriction
     readonly signal: AbortSignal
   }): Promise<{ readonly childId: string }>
   /** Literal proof that idle creation is implemented by this runtime. */
   readonly supportsIdleContinuableCreate?: boolean
+  /** Literal proof that independent-v1 and its persisted composition are implemented. */
+  readonly supportsIndependentContinuableCreate?: boolean
   /**
    * Run one operation against the exact continuation-owned child Session.
    * The runtime validates both exact live parent identity and durable child
@@ -121,7 +144,7 @@ export interface LocusInboxPort {
   queuePrompt(
     parent: LocusLiveParent,
     childId: string,
-    prompt: readonly LocusTextBlock[],
+    prompt: readonly LocusContentBlock[],
     source: LocusInboxSource,
     signal: AbortSignal,
   ): Promise<string>
@@ -215,6 +238,7 @@ export interface LocusHostContextLike {
 export type LocusChildProbeDiagnostic =
   | 'parent-service-unavailable'
   | 'subagent-service-unavailable'
+  | 'independent-continuable-create-unavailable'
   | 'inbox-unavailable'
   | 'settlement-events-unavailable'
 
@@ -244,6 +268,7 @@ export type LocusChildFailureReason =
   | 'child-create-failed'
   | 'settlement-notice-unsupported'
   | 'idle-child-create-unsupported'
+  | 'safe-composition-unsupported'
   /**
    * The default provider's independent-context capability could not be
    * proven on this runtime. Only reached when the caller omitted an explicit
@@ -257,6 +282,7 @@ export type LocusChildFailureReason =
   | 'child-identity-mismatch'
   | 'inbox-unavailable'
   | 'inbox-failed'
+  | 'image-route-unsupported'
   | 'inbox-message-id-invalid'
   | 'compensation-unavailable'
   | 'compensation-failed'
@@ -763,6 +789,9 @@ export class LocusChildAdapter {
         this.ports.subagent.supportsIdleContinuableCreate !== true
         || create === undefined
       ) return { ok: false, reason: 'idle-child-create-unsupported' }
+      if (this.ports.subagent.supportsIndependentContinuableCreate !== true) {
+        return { ok: false, reason: 'safe-composition-unsupported' }
+      }
       // Fail closed BEFORE creating anything: only the caller's own explicit
       // provider choice skips this — silently falling back to a provider
       // whose independence is unproven is the shape of the original failure.
@@ -780,6 +809,8 @@ export class LocusChildAdapter {
           label: input.label,
           parent: parentResult.parent,
           settlementNotice: 'silent',
+          contextMode: 'independent-v1',
+          toolFilter: LOCUS_SAFE_TOOL_FILTER,
           signal,
         })
       } catch {
@@ -957,18 +988,27 @@ export class LocusChildAdapter {
    * request from targeting a replacement child.
    */
   async queuePrompt(input: {
-    readonly text: string
+    readonly content?: readonly LocusContentBlock[]
+    /** Compatibility input for non-media callers; normalized once to typed content. */
+    readonly text?: string
     readonly identity?: LocusChildIdentity
+    /** Optional Host authorization fence evaluated inside the serialized queue mutation. */
+    readonly fenceBeforeQueue?: () => boolean | PromiseLike<boolean>
     readonly signal?: AbortSignal
   }): Promise<LocusChildQueueResult> {
-    if (!isIdentifier(input.text)) return { ok: false, reason: 'invalid-child-request' }
+    const content = input.content ?? (isIdentifier(input.text) ? [{ type: 'text', text: input.text }] : [])
+    if (content.length === 0) return { ok: false, reason: 'invalid-child-request' }
     const signal = input.signal ?? EMPTY_SIGNAL
     if (signal.aborted) return { ok: false, reason: 'aborted' }
-    return this.enqueueLifecycleMutation(() => this.queuePromptLocked(input, signal))
+    return this.enqueueLifecycleMutation(() => this.queuePromptLocked({ ...input, content }, signal))
   }
 
   private async queuePromptLocked(
-    input: { readonly text: string; readonly identity?: LocusChildIdentity },
+    input: {
+      readonly content: readonly LocusContentBlock[]
+      readonly identity?: LocusChildIdentity
+      readonly fenceBeforeQueue?: () => boolean | PromiseLike<boolean>
+    },
     signal: AbortSignal,
   ): Promise<LocusChildQueueResult> {
     if (this.disposed) return { ok: false, reason: 'adapter-disposed' }
@@ -999,6 +1039,11 @@ export class LocusChildAdapter {
       return { ok: false, reason: 'inbox-unavailable' }
     }
     if (signal.aborted) return { ok: false, reason: 'aborted' }
+    if (input.fenceBeforeQueue !== undefined) {
+      let authorized = false
+      try { authorized = await input.fenceBeforeQueue() } catch { authorized = false }
+      if (!authorized) return { ok: false, reason: 'child-proof-failed' }
+    }
 
     let messageId: string
     try {
@@ -1006,12 +1051,20 @@ export class LocusChildAdapter {
         inbox,
         parentResult.parent,
         active.childSessionId,
-        [{ type: 'text', text: input.text }],
+        [...input.content],
         { kind: 'user' },
         signal,
       )
-    } catch {
-      return { ok: false, reason: 'inbox-failed' }
+    } catch (error) {
+      const record = typeof error === 'object' && error !== null ? error as Record<string, unknown> : undefined
+      const code = record?.['code']
+      const message = error instanceof Error ? error.message : ''
+      return {
+        ok: false,
+        reason: code === 'MODEL_DOES_NOT_SUPPORT_IMAGES' || message.includes('MODEL_DOES_NOT_SUPPORT_IMAGES')
+          ? 'image-route-unsupported'
+          : 'inbox-failed',
+      }
     }
     // Queue acceptance is not reversible at this seam.  Still fence the
     // result so a turn completed after shutdown/cancellation cannot be reported
@@ -1283,7 +1336,7 @@ export function adaptLocusInboxPort(
     runtime: unknown,
     parent: LocusLiveParent,
     childId: string,
-    prompt: readonly LocusTextBlock[],
+    prompt: readonly LocusContentBlock[],
     source: LocusInboxSource,
     signal: AbortSignal,
   ) => Promise<string>,
@@ -1360,10 +1413,17 @@ export function probeLocusChildPorts(
     /** Literal markers published only by a runtime that owns the behavior. */
     supportsSettlementNotice?: unknown
     supportsIdleContinuableCreate?: unknown
+    supportsIndependentContinuableCreate?: unknown
     supportsLiveContinuableChildSession?: unknown
   }
   if (typeof subagentRecord.startContinuable !== 'function') {
     return { available: false, diagnostic: 'subagent-service-unavailable' }
+  }
+  // Locus creation always requests independent-v1 with a durable toolFilter.
+  // Older runtimes ignore unknown JavaScript fields, so the literal marker is
+  // required before any child/reconciliation capability is published.
+  if (subagentRecord.supportsIndependentContinuableCreate !== true) {
+    return { available: false, diagnostic: 'independent-continuable-create-unavailable' }
   }
   const inbox = adaptLocusInboxPort(subagentService)
   if (inbox === undefined) return { available: false, diagnostic: 'inbox-unavailable' }
@@ -1413,6 +1473,9 @@ export function probeLocusChildPorts(
       : {}),
     ...(subagentRecord.supportsIdleContinuableCreate === true
       ? { supportsIdleContinuableCreate: true }
+      : {}),
+    ...(subagentRecord.supportsIndependentContinuableCreate === true
+      ? { supportsIndependentContinuableCreate: true }
       : {}),
     ...(typeof subagentRecord.withLiveContinuableChildSession === 'function'
       ? {
