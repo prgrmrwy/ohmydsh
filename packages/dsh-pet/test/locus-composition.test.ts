@@ -1,12 +1,18 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  attestLocusComposition,
   composeLocusChild,
+  LOCUS_CALLER_BOUND_TOOLS,
+  LOCUS_SAFE_TOOL_NAMES,
   LocusCompositionError,
   type LocusChildComposition,
   type LocusCompositionPorts,
 } from '../src/host/locus/composition.js'
 
 const CHILD = 'child-1'
+
+/** The reviewed surface a composed child is expected to expose. */
+const SAFE_SURFACE: readonly string[] = [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_CALLER_BOUND_TOOLS]
 
 function composition(
   overrides: Partial<LocusChildComposition> = {},
@@ -31,7 +37,7 @@ function ports(
   const applied = new Map<string, 'read' | 'write'>()
   return {
     lookup: { find: vi.fn(() => composition()) },
-    surface: { install: vi.fn() },
+    surface: { install: vi.fn(), visibleTools: vi.fn(() => SAFE_SURFACE) },
     policy: {
       apply: vi.fn((sessionId: string, permission: 'read' | 'write') => {
         applied.set(sessionId, permission)
@@ -118,7 +124,7 @@ describe('unified locus child composition', () => {
   it('applies policy before installing the surface', () => {
     const order: string[] = []
     const deps = ports({
-      surface: { install: vi.fn(() => { order.push('surface') }) },
+      surface: { install: vi.fn(() => { order.push('surface') }), visibleTools: vi.fn(() => SAFE_SURFACE) },
       policy: {
         apply: vi.fn(() => { order.push('policy') }),
         resolve: vi.fn(() => 'read' as const),
@@ -201,3 +207,76 @@ describe('unified locus child composition', () => {
 function composeLocysChildSafely(deps: LocusCompositionPorts): void {
   composeLocusChild(agent(), deps)
 }
+
+describe('locus composition attestation', () => {
+  it('accepts exactly the reviewed surface', () => {
+    expect(attestLocusComposition(SAFE_SURFACE)).toEqual({ ok: true, leaks: [] })
+    // Order and repetition carry no meaning; only membership does.
+    expect(attestLocusComposition([...SAFE_SURFACE].reverse().concat('read')).ok).toBe(true)
+  })
+
+  it('names every tool the reviewed surface does not explain', () => {
+    expect(attestLocusComposition([...SAFE_SURFACE, 'subagent'])).toEqual({
+      ok: false,
+      reason: 'leaked',
+      leaks: ['subagent'],
+    })
+    expect(attestLocusComposition(['bash', 'subagent', 'bash'])).toEqual({
+      ok: false,
+      reason: 'leaked',
+      leaks: ['bash', 'subagent'],
+    })
+  })
+
+  it('refuses a surface it cannot read instead of treating silence as a pass', () => {
+    expect(attestLocusComposition(undefined)).toEqual({
+      ok: false,
+      reason: 'unreadable',
+      leaks: [],
+    })
+  })
+})
+
+describe('unified locus child publication', () => {
+  it('refuses to publish a child whose own plane escaped the safe filter', () => {
+    // The tool filter restricts the inherited plane only, so a per-agent
+    // registration like the standard preset's `subagent` survives it. The
+    // installed surface is a request; this read is the effect.
+    const deps = ports({ surface: { install: vi.fn(), visibleTools: vi.fn(() => [...SAFE_SURFACE, 'subagent']) } })
+
+    try {
+      composeLocusChild(agent(), deps)
+      expect.unreachable('a leaked tool surface must never be published')
+    } catch (error) {
+      expect((error as LocusCompositionError).reason).toBe('surface-not-attested')
+      expect((error as LocusCompositionError).message).toContain('subagent')
+    }
+  })
+
+  it('refuses to publish a child whose surface cannot be read', () => {
+    const deps = ports({ surface: { install: vi.fn() } })
+
+    try {
+      composeLocusChild(agent(), deps)
+      expect.unreachable('an unread surface must never be published')
+    } catch (error) {
+      expect((error as LocusCompositionError).reason).toBe('surface-not-attested')
+    }
+  })
+
+  it('refuses to publish when reading the surface throws', () => {
+    const deps = ports({
+      surface: {
+        install: vi.fn(),
+        visibleTools: vi.fn(() => { throw new Error('tools service gone') }),
+      },
+    })
+
+    try {
+      composeLocusChild(agent(), deps)
+      expect.unreachable('a failed read must never be published')
+    } catch (error) {
+      expect((error as LocusCompositionError).reason).toBe('surface-not-attested')
+    }
+  })
+})

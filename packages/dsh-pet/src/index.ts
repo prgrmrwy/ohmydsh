@@ -1159,6 +1159,24 @@ async function initialize(
         // behaves exactly as it did before this existed.
         collaborationSurface?.install(agent.scope)
       },
+      // `safe-v1` claims this child cannot reach an execution or delegation
+      // route, and only a read of what it can actually call supports that claim:
+      // the tool filter restricts the inherited plane, so an own-plane
+      // registration like the standard preset's `subagent` survives it.
+      //
+      // The scope key must be the live Agent. Reading the tools service without
+      // it reports the inherited surface only, which would hide exactly the
+      // registrations this check exists to find. `agents.get` is safe here
+      // because the runtime announces a child only after it is live.
+      visibleTools: agent => {
+        const agents = ctx.get('agents') as { get?(id: never): unknown } | undefined
+        const tools = ctx.get('tools') as
+          | { schemas?(scope?: unknown): readonly { readonly name: string }[] }
+          | undefined
+        const live = agents?.get?.(agent.sessionId as never)
+        if (live === undefined || tools?.schemas === undefined) return undefined
+        return tools.schemas(live).map(schema => schema.name)
+      },
     },
     ...(() => {
       const policy = ctx.get('sandboxPolicy') as

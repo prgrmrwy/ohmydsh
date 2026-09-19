@@ -18,6 +18,7 @@
  */
 
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { LOCUS_SAFE_TOOL_NAMES } from './composition.js'
 
 /** A live DSH Agent, intentionally opaque apart from its session identity. */
 export interface LocusLiveParent {
@@ -57,10 +58,11 @@ export interface LocusToolRestriction {
  * The runtime validates every name against the mounted preset and applies the
  * restriction after that preset is mounted. Unknown or missing names therefore
  * abort child creation, while tools registered directly in the child scope stay
- * visible and remain protected by their caller-bound implementations.
+ * visible — which is why the installed surface is attested separately
+ * ({@link attestLocusComposition}) rather than trusted from this filter.
  */
 export const LOCUS_SAFE_TOOL_FILTER: LocusToolRestriction = Object.freeze({
-  allow: Object.freeze(['read', 'read_image', 'glob', 'grep', 'web_search']),
+  allow: LOCUS_SAFE_TOOL_NAMES,
 })
 
 /** The continuable-child creation operation. */

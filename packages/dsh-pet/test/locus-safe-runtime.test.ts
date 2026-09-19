@@ -8,6 +8,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { LOCUS_SAFE_TOOL_FILTER } from '../src/host/locus/child.js'
+import { attestLocusComposition } from '../src/host/locus/composition.js'
 
 const forbidden = [
   'bash', 'pwsh', 'write', 'edit', 'skill', 'job_output', 'job_kill',
@@ -91,5 +92,68 @@ describe('Locus safe composition on the loaded ToolRuntime', () => {
     expect(effects).toBe(1)
 
     await scope.dispose()
+  })
+
+  it('cannot filter an own-plane registration, so publication must attest it', async () => {
+    // The rest of this file registers its forbidden tools on the GLOBAL layer,
+    // where the filter removes them. Production's real leak came from the other
+    // plane: the shipped standard preset registers its `subagent` row per agent,
+    // which lands in the child's OWN layer — and `view()` applies a scope's own
+    // registrations "outside the filter above", so no allow/deny can remove one.
+    // This test pins that platform limit so nobody reads the filter as
+    // sufficient, and ties it to the attestation that does catch the leak.
+    ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    let effects = 0
+    for (const name of allowed) ctx.tools.register(tool(name, () => { effects += 1 }))
+
+    const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/package.json'))
+    const scopeEntry = requireFromTools.resolve('@deepseek-ai/dsh-scope')
+    const { createScope } = await import(pathToFileURL(scopeEntry).href) as {
+      createScope(ctx: Context, key: Agent, options?: { parent?: Agent }): { ctx: Context; dispose(): Promise<void> }
+    }
+    const standingKey = { id: 'plane-standing' as SessionId } as Agent
+    const childKey = { id: 'plane-child' as SessionId } as Agent
+    let standing!: ReturnType<typeof createScope>
+    let child!: ReturnType<typeof createScope>
+    await ctx.plugin(Object.assign((inner: Context) => {
+      standing = createScope(inner, standingKey)
+      child = createScope(inner, childKey, { parent: standingKey })
+    }, { inject: ['tools', 'systemPrompt'] }))
+
+    // The preset's standing plane, where `subagent_fork` lives and is filtered.
+    standing.ctx.tools.register(tool('bash', () => { effects += 1 }))
+    standing.ctx.tools.register(tool('subagent_fork', () => { effects += 1 }))
+    // The child's own plane, where a per-agent registration lands.
+    child.ctx.tools.register(tool('subagent', () => { effects += 1 }))
+    child.ctx.tools.register(tool('pet_locus_finish', () => { effects += 1 }))
+    child.ctx.tools.restrict(LOCUS_SAFE_TOOL_FILTER)
+
+    const names = ctx.tools.schemas(childKey).map(schema => schema.name)
+    // Standing plane: removed exactly as the historical test asserts.
+    expect(names).not.toContain('bash')
+    expect(names).not.toContain('subagent_fork')
+    expect(names).toContain('pet_locus_finish')
+    // Own plane: still visible AND callable. A filter cannot change this.
+    expect(names).toContain('subagent')
+    expect((await ctx.tools.execute({
+      agent: childKey,
+      name: 'subagent',
+      callId: 'own-plane-subagent' as ToolCallId,
+      arguments: {},
+      signal: new AbortController().signal,
+    })).isError).toBe(false)
+    expect(effects).toBe(1)
+
+    // Which is why the safe composition is asserted, not assumed.
+    expect(attestLocusComposition(names)).toEqual({
+      ok: false,
+      reason: 'leaked',
+      leaks: ['subagent'],
+    })
+
+    await child.dispose()
+    await standing.dispose()
   })
 })
