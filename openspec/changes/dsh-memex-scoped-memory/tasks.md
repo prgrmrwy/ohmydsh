@@ -121,9 +121,10 @@
 - [x] 7.3 `docs/notes/`：MCP 子进程拿不到会话 cwd 故必须进程内注册；CLI 无结构化输出故需解析适配层与版本绑定；上游 push/pull 整库粒度故「库数 = 推送目标数」；DSH 有会话级生命周期事件（`agent/session-start` / `agent/turn-stopping`），不要重复「无可用钩子」的误判
 - [x] 7.4 `dsh.yaml` 新增一条 bundle 条目（含 enable 开关、来源、版本、审查记录）
 - [ ] 7.5 `dsh build` 物化到 `~/.dsh/profiles/web` 并重启
-  - 2026-09-19：`DSH_MEMEX_ENABLED=1` 物化成功且第二次 sync 报 `no changes`；随后以**同一 profile 的 3091 备用端口**启动完整组合成功（启动清单含 `dsh-memex`，HTTP 401，8 tools/6 skills 已由同版本 smoke 验证）
-  - 但 3080 的 `dsh restart` 调用被 harness 中断（返回 unknown），`dsh-startup.log` **没有**对应启动记录，全日志**无 memex 报错** → 失败点无法归因于本插件，更像「已停旧进程、未拉起新进程」的中断
-  - 结论：主实例通过前，restart 必须**完全脱离调用方进程**（如 `setsid`）或走 UI 的一键重启，避免调用被中断时留下空档
+  - 备用端口验收已完成（3080 全程未碰）：`DSH_MEMEX_ENABLED=1` 物化 → 3091 启动完整组合，启动清单含 `dsh-memex`、HTTP 401、运行日志 **0** 条 memex 报错 → 验收后立即用不带开关的 sync 恢复禁用并停掉 3091
+  - 同一主干产物用**真实 `~/.dsh/settings.yaml`** 跑端到端：真实 scope 表解析为 5 条、本仓路由到 `ohmydsh`/external/独立库、写入成功并给出 created+notice、检索命中、frontmatter 仅内核字段（title/created/source/modified）、正文含内部 scope 名时在外部目标被拒且未落盘、拒绝日志只含规则 id
+  - 该验收抓出一个真实可用性缺陷（已修）：`list()` 覆盖已解析条目导致内部 scope 丢失工作区路径证据，守门把**当前仓自己的库写入**也拒掉；现按本 change 的 guard spec 改为「规则缺输入 → 告警未生效、其余规则照常」，仅「发布方向未知 / 规则集加载失败」才拒绝
+  - 待办：主实例 3080 的实际启用仍未执行；重启必须脱离调用方进程（上次 `dsh restart` 调用被中断，`dsh-startup.log` 无对应记录且日志无 memex 报错，属中断而非插件故障）
 - [x] 7.6 在 settings 中写入初始 scope 表与绑定集合（待主实例启用时写入；已用临时 namespace + 实际 main/worktree remote 验证显式映射均收敛到 `ohmydsh`）
 - [ ] 7.7 按需配置各库同步（需要用户提供各 scope 的真实 remote；实现与验收均不创建 git 仓、不猜 remote，当前未配置即无同步）
 - [x] 7.8 在 `AGENTS.md` 补充写卡判据（写什么才算值得留档）——触发时机由生命周期事件承担
