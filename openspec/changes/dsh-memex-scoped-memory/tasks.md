@@ -26,14 +26,14 @@
   - 当前 0.1.2-rc.1 运行体没有完整 compact transaction 发布 `source: compact` 的可调用路径；仅以真实 Agent + 公共 `emitAgentEvent(... source: "compact")` 验证重注入与 wrote 状态保留。因此本项保留未完成，待真实 compaction 路径可用后验收
 - [x] 0.5 确认 memex 包内 `skills/` 目录的稳定路径（`customSkillDirs` 的取值依据）
 - [x] 0.6 枚举现有工作域并确定初始 scope 表：
-  - `code.byted.org:apaas/nexus.git` → `apaas-nexus`（`~/mydir/dev/` 下 9 个目录共享此 remote，按 remote 派生收敛为 **1 个库**）
-  - `code.byted.org:flow/flow-web-monorepo.git` → `flow-flow-web-monorepo`
+  - `~/mydir/dev/nexus` → scope `nexus`（库 `~/.dsh-memex/nexus`）。映射以**本地仓库路径**为准：scope 名取本地目录名，不再从 remote 路径推导
+  - `~/mydir/dev/flow-web-monorepo` → scope `flow-web-monorepo`（库 `~/.dsh-memex/flow-web-monorepo`）
   - `~/mydir/opensource/ohmydsh` → scope `ohmydsh`（库 `~/.dsh-memex/ohmydsh`）；`~/mydir/opensource/dsh-cockpit` → scope `dsh-cockpit`（库 `~/.dsh-memex/dsh-cockpit`）—— 开源仓各自成库，不并入 `personal`
   - `personal`（库 `~/.dsh-memex/personal`）→ 仅承载不属于任何具体项目的通用知识与无归属目录
   - 其余 `~/mydir/dev/*` 各自按 remote 派生
 - [x] 0.7 确认各 scope 的同步目标与**发布方向**：
   - **external**：`ohmydsh`、`dsh-cockpit` 等个人托管平台上的项目仓（各自独立库），以及承载通用知识的 `personal`（库 `~/.dsh-memex/personal`）；均推送个人托管私有仓
-  - **internal**：`apaas-nexus`、`flow-flow-web-monorepo` 及其余内网 remote 派生的 scope —— 推送公司内网仓
+  - **internal**：`nexus` → `git@code.byted.org:zhangyong.617/memex-nexus.git`；`flow-web-monorepo` → `git@code.byted.org:zhangyong.617/memex-flow-web-monorepo.git`；其余未指定者按 remote 派生，**默认仅本地、不建 git、不配远端**
   - 说明：本项曾在评审中被修正——早期规则是「`github.com` 一律归 `personal`」，现改为**开源仓各自按 remote 派生独立 scope 与库**（见 spec 的「scope 名按 remote 确定性派生」需求与 design D4 的推翻说明）；`personal` 只保留给通用知识与无归属情形
 - [x] 0.8 确定初始**绑定集合**：先不配置绑定，采用 spec 的退化行为（读 = 当前 scope；写 = 当前 scope + `personal`）。此时 `scope: "all"` 等价于「当前库 + personal」，跨团队仓读取默认关闭
 
@@ -126,7 +126,10 @@
   - 该验收抓出一个真实可用性缺陷（已修）：`list()` 覆盖已解析条目导致内部 scope 丢失工作区路径证据，守门把**当前仓自己的库写入**也拒掉；现按本 change 的 guard spec 改为「规则缺输入 → 告警未生效、其余规则照常」，仅「发布方向未知 / 规则集加载失败」才拒绝
   - 待办：主实例 3080 的实际启用仍未执行；重启必须脱离调用方进程（上次 `dsh restart` 调用被中断，`dsh-startup.log` 无对应记录且日志无 memex 报错，属中断而非插件故障）
 - [x] 7.6 在 settings 中写入初始 scope 表与绑定集合（待主实例启用时写入；已用临时 namespace + 实际 main/worktree remote 验证显式映射均收敛到 `ohmydsh`）
-- [ ] 7.7 按需配置各库同步（需要用户提供各 scope 的真实 remote；实现与验收均不创建 git 仓、不猜 remote，当前未配置即无同步）
+- [x] 7.7 按需配置各库同步（2026-09-19 实测完成）
+  - `personal` → `git@github.com:prgrmrwy/dsh-memex.git`：`memex sync push` 成功（commit `c3fd55f`）
+  - `nexus` / `flow-web-monorepo` → 各自内网仓：初次 push 因空库无提交而报「HEAD 没有匹配」，补 `--allow-empty` 初始提交后 push 成功
+  - 未配置远端的库确认无同步行为：`autoSync` 仅在库内存在 kernel 自己写的 `.sync.json` 时触发，未配置即不推送
 - [x] 7.8 在 `AGENTS.md` 补充写卡判据（写什么才算值得留档）——触发时机由生命周期事件承担
 - [x] 7.9 幂等校验：完整主 profile 暂不运行；隔离全 profile sync 被既有 `dsh-setting-restart` peer 安装失败阻断（非 dsh-memex）。最小真实 Cordis 组合 smoke 已通过 8 tools / 6 skills
 - [x] 7.10 升级内核版本时运行描述同步脚本并 review 差异；确认 `--check` 在描述一致时通过

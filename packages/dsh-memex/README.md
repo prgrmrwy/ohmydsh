@@ -20,15 +20,14 @@ No memex source, skill, or card format is modified. See `ATTRIBUTION.md`.
 
 ## Storage layout
 
-Libraries live under one namespace and never reference one another:
+Libraries live under one namespace and never reference one another. The scope map is
+local-path based — the local repository path decides the library, not the remote URL:
 
 ```text
 ~/.dsh-memex/
-  ohmydsh/
-  dsh-cockpit/
   personal/
-  apaas-nexus/
-  flow-flow-web-monorepo/
+  nexus/
+  flow-web-monorepo/
 ```
 
 Every child is a standard memex home (`cards/`, optional git repository and
