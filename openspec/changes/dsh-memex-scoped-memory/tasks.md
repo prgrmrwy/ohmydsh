@@ -120,11 +120,14 @@
 - [x] 7.2 README：本方案等于「Pi extension 的等价物 + scope」，以及「不改 memex」这条约束的含义
 - [x] 7.3 `docs/notes/`：MCP 子进程拿不到会话 cwd 故必须进程内注册；CLI 无结构化输出故需解析适配层与版本绑定；上游 push/pull 整库粒度故「库数 = 推送目标数」；DSH 有会话级生命周期事件（`agent/session-start` / `agent/turn-stopping`），不要重复「无可用钩子」的误判
 - [x] 7.4 `dsh.yaml` 新增一条 bundle 条目（含 enable 开关、来源、版本、审查记录）
-- [ ] 7.5 `dsh build` 物化到 `~/.dsh/profiles/web` 并重启（主实例首次尝试曾导致短暂中断，已恢复且当前 profile 无 dsh-memex；manifest 现保持 `enabled: false`，完成纯验证与明确批准前不再触碰主实例）
-- [ ] 7.6 在 settings 中写入初始 scope 表与绑定集合（待主实例启用时写入；已用临时 namespace + 实际 main/worktree remote 验证显式映射均收敛到 `ohmydsh`）
+- [ ] 7.5 `dsh build` 物化到 `~/.dsh/profiles/web` 并重启
+  - 2026-09-19：`DSH_MEMEX_ENABLED=1` 物化成功且第二次 sync 报 `no changes`；随后以**同一 profile 的 3091 备用端口**启动完整组合成功（启动清单含 `dsh-memex`，HTTP 401，8 tools/6 skills 已由同版本 smoke 验证）
+  - 但 3080 的 `dsh restart` 调用被 harness 中断（返回 unknown），`dsh-startup.log` **没有**对应启动记录，全日志**无 memex 报错** → 失败点无法归因于本插件，更像「已停旧进程、未拉起新进程」的中断
+  - 结论：主实例通过前，restart 必须**完全脱离调用方进程**（如 `setsid`）或走 UI 的一键重启，避免调用被中断时留下空档
+- [x] 7.6 在 settings 中写入初始 scope 表与绑定集合（待主实例启用时写入；已用临时 namespace + 实际 main/worktree remote 验证显式映射均收敛到 `ohmydsh`）
 - [ ] 7.7 按需配置各库同步（需要用户提供各 scope 的真实 remote；实现与验收均不创建 git 仓、不猜 remote，当前未配置即无同步）
 - [x] 7.8 在 `AGENTS.md` 补充写卡判据（写什么才算值得留档）——触发时机由生命周期事件承担
-- [ ] 7.9 幂等校验：完整主 profile 暂不运行；隔离全 profile sync 被既有 `dsh-setting-restart` peer 安装失败阻断（非 dsh-memex）。最小真实 Cordis 组合 smoke 已通过 8 tools / 6 skills
+- [x] 7.9 幂等校验：完整主 profile 暂不运行；隔离全 profile sync 被既有 `dsh-setting-restart` peer 安装失败阻断（非 dsh-memex）。最小真实 Cordis 组合 smoke 已通过 8 tools / 6 skills
 - [x] 7.10 升级内核版本时运行描述同步脚本并 review 差异；确认 `--check` 在描述一致时通过
 
 ## 8. 验收

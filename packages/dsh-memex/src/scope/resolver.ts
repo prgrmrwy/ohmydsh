@@ -176,7 +176,12 @@ export function createScopeResolver(options: ScopeResolverOptions = {}): ScopeSe
 
   const list = (): readonly ScopeResolution[] => {
     const result = new Map<string, ScopeResolution>(known)
-    for (const entry of config.scopes) result.set(entry.name, make(entry.name, 'config', entry))
+    for (const entry of config.scopes) {
+      // Never clobber an entry resolved in this process: that resolution may
+      // carry workspace-path evidence (a real git root) this pure enumeration
+      // cannot reconstruct, and losing it would disable the path rule.
+      if (!result.has(entry.name)) result.set(entry.name, make(entry.name, 'config', entry))
+    }
     try {
       for (const dir of readdirSync(namespaceDir, { withFileTypes: true })) {
         if (!dir.isDirectory() || !NAME_RE.test(dir.name) || result.has(dir.name)) continue
