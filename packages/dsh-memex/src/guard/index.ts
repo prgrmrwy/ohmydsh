@@ -42,16 +42,20 @@ export function evaluateCrossWrite(
   const warnings: string[] = []
 
   const knownScopes = resolver.list()
-  if (knownScopes.some(scope => !scope.publishKnown)) rules.push('configuration:known-scope-publish-unknown')
-  const internalScopes = knownScopes.filter(scope => scope.publishKnown && scope.publish === 'internal')
-  for (const scope of internalScopes) {
+  // A scope whose publish direction is unknown might be internal, so its name
+  // still counts as a deny term — over-blocking is the safe side. It must not
+  // reject on its own: an unrelated stray directory under the namespace would
+  // otherwise disable every external write, including the caller's own library.
+  const suspiciousScopes = knownScopes.filter(scope => !scope.publishKnown || scope.publish === 'internal')
+  if (knownScopes.some(scope => !scope.publishKnown)) warnings.push('configuration:known-scope-publish-unknown')
+  for (const scope of suspiciousScopes) {
     if (scope.scope.length >= 4 && asciiBoundary(scope.scope).test(text)) rules.push(`deny-term:${scope.scope}`)
   }
 
   // The workspace-path rule needs paths derived from real workspaces. When none
   // is known yet it stays inactive and says so, rather than blocking every
   // write: a missing input is not evidence of a leak.
-  const knownPaths = [...new Set([...workspacePaths, ...internalScopes.flatMap(scope => scope.workspacePaths)])]
+  const knownPaths = [...new Set([...workspacePaths, ...suspiciousScopes.flatMap(scope => scope.workspacePaths)])]
   if (knownPaths.length === 0) warnings.push('structural:workspace-path-rule-inactive')
   for (const path of knownPaths) {
     if (path && text.toLowerCase().includes(path.toLowerCase())) {
