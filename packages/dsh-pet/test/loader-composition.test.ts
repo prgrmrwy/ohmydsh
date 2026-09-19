@@ -23,6 +23,10 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { describe, expect, it, vi } from 'vitest'
 import * as petPlugin from '../src/index.js'
+import {
+  LOCUS_CALLER_BOUND_TOOLS,
+  LOCUS_SAFE_TOOL_NAMES,
+} from '../src/host/locus/composition.js'
 import { PET_DOMAIN_NAME } from '../src/host/spec.js'
 import { LOCUS_ROUTES, ROUTES } from '../src/wire.js'
 
@@ -42,6 +46,7 @@ function stubServices(
   overrides: {
     sessions?: unknown
     agents?: unknown
+    tools?: unknown
     sessionController?: unknown
     connection?: { requestRejection(req: unknown): 401 | 403 | undefined }
   } = {},
@@ -99,7 +104,7 @@ function stubServices(
         ? '研发主会话'
         : session?.id === 'child-live' ? '项目子会话' : undefined,
   })
-  ctx.provide('tools', { register: () => () => {} })
+  ctx.provide('tools', overrides.tools ?? { register: () => () => {} })
   ctx.provide('skills', { register: () => () => {} })
 }
 
@@ -858,6 +863,21 @@ describe('a locus child is composed at the real creation boundary', () => {
       sessions: {
         list: () => [],
         get: (id: string) => sessionOf(id),
+      },
+      // The Host exposes the live child (which IS the scope key) so the
+      // composition attestation can read what that child can actually call. A
+      // real Host reports the child's OWN view — exactly the surface the tool
+      // filter cannot constrain.
+      agents: {
+        create: async () => ({ session: { id: 'x' } }),
+        get: (id: string) => (id === 'child-live' ? { id } : undefined),
+        resume: async () => undefined,
+        list: () => [],
+      },
+      // A Host reports what that child can actually call, own plane included.
+      tools: {
+        register: () => () => {},
+        schemas: () => [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_CALLER_BOUND_TOOLS].map(name => ({ name })),
       },
     })
     if (options.policy !== 'absent') {

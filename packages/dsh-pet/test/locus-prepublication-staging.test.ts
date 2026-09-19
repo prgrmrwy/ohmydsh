@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   composeLocusChild,
+  LOCUS_CALLER_BOUND_TOOLS,
+  LOCUS_SAFE_TOOL_NAMES,
   type LocusChildComposition,
   type LocusCompositionLookup,
 } from '../src/host/locus/composition.js'
@@ -66,7 +68,7 @@ describe('locus child pre-publication staging', () => {
 
     const result = composeLocusChild(agent, {
       lookup,
-      surface: { install },
+      surface: { install, visibleTools: () => [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_CALLER_BOUND_TOOLS] },
       policy: {
         apply: (sessionId, permission) => { applied.set(sessionId, permission) },
         resolve: sessionId => applied.get(sessionId),

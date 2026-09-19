@@ -106,8 +106,28 @@ child 从 `composedPreset(parent.ctx)` 继承该组合，而 executor preset 的
 
 1. 修复只覆盖**新建** locus。修复前创建的 child 在其持久 descriptor 里带着 `agentPreset: standard`，
    冷恢复会沿用，因此仍保留 `subagent`（例如本轮验收群的 child）。需要重建该 locus 才能收敛。
-2. 没有实现「发布前组合证明」：若将来 executor preset 被改动，或出现其它 own 层泄漏路径，
-   除上述守卫测试外没有运行时闸门。
+2. ~~没有实现「发布前组合证明」~~ **已补（2026-09-19，见下节）**。
+
+### 发布前组合证明（2026-09-19）
+
+原来 `dsh-port.ts` 无条件返回 `childComposition: 'safe-v1'`——那是**断言一个常量**，不是证明。
+现改为在 agent 创建边界上读取真实工具面并据此发布或拒绝：
+
+- `LOCUS_SAFE_TOOL_NAMES`（5 个只读）与 `LOCUS_CALLER_BOUND_TOOLS`（11 个 `pet_*`）成为权威清单，
+  `LOCUS_SAFE_TOOL_FILTER` 由前者派生，避免两处各写一份。
+- `attestLocusComposition(visible)` 是纯函数：**不可读**与**读取抛错**都判失败，不把沉默当通过。
+- `LocusScopedSurfacePort.visibleTools` 是新端口；`composeLocusChild` 在 `surface.install()`
+  之后调用它，不通过就抛 `surface-not-attested`。因为落在 agent 创建边界上，**新建与冷恢复
+  走同一条路径**。
+- 生产读取用 `ctx.get('agents').get(childSessionId)` 取 live Agent 作 scope key——
+  **必须显式传 key**：实测不带 key 时 `schemas()` 只返回继承面，会恰好漏掉要抓的 own 层注册。
+
+本轮的 own 层限制也已被单测钉住：`locus-safe-runtime.test.ts` 按 standing/own 两级真实构造，
+断言 standing 层的 `bash`/`subagent_fork` 被滤除、而 own 层的 `subagent` **存活且可执行**，
+并断言证明把该 scope 判为 `leaked`。
+
+**待真机复验**：生产读取（`ctx.get('agents')` / `ctx.get('tools')`）是否确实可解析。若解析不到，
+证明确实会 fail closed 使 child 不发布——行为正确但影响面大，重启后需先确认这一条。
 
 ### 额外发现：出站 @ 退化成裸 open_id（2026-09-19，不属 A–G 判据）
 
