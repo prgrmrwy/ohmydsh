@@ -1599,6 +1599,13 @@ describe('startup reconciliation runs against the real runtime', () => {
       workspaceId: 'ws-1',
       source: 'auto',
       state: 'active',
+      // Required for this to test the rule it names. Reconciliation invalidates
+      // a generation that lacks this durable proof BEFORE consulting any probe
+      // (probing could resolve the child and inherit the parent preset), so a
+      // seed without it is invalidated whatever the runtime can answer — and
+      // the assertion below then depends on whether the fire-and-forget pass
+      // happened to finish inside the wait, which made this case flaky.
+      childComposition: 'safe-v1',
       permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
       busy: false,
       createdAt: 1,
