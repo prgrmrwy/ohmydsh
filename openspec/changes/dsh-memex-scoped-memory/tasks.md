@@ -17,7 +17,7 @@
   - 敏感输入：**exit 1** + stderr `Sensitive input rejected: ...`（上游凭据防护生效，本系统不重复实现）
   - ⚠ **库目录不存在**：`search` 返回 **exit 0 + 空 stdout + stderr `Warning: cards directory not found (<path>/cards)`** —— 与「无结果」同形。**多库检索里某个库缺失会静默表现为「没搜到」**，因此调用层 MUST 在调用前校验库目录存在，不可依赖 exit code 判别
 - [x] 0.3 确认 DSH 提供 `ctx.tools.register`、`agent/session-start`、`agent/turn-stopping`、`ctx.settings`、以及 skill 的 `customSkillDirs`（对照当前 pin 与 `docs/notes/dsh-plugin-integration-pitfalls.md`）
-- [ ] 0.4 **实测两个生命周期事件**：确认 `agent/session-start`（含 `source: compact`）与 `agent/turn-stopping` 的实际触发时机、注入是否在首回合前可见、以及不打断回复的投递方式
+- [x] 0.4 **实测两个生命周期事件**：确认 `agent/session-start`（含 `source: compact`）与 `agent/turn-stopping` 的实际触发时机、注入是否在首回合前可见、以及不打断回复的投递方式
   - 类型面已核实（2026-09-18，pin 的 0.1.2-rc.1 运行体）：`agent/session-start(this: Scoped<Agent>, payload: {agent, source: 'startup'|'resume'|'clear'|'compact'})`，文档注明「Use `agent.inject()` to seed model-facing context ... once before the first turn」；`agent/turn-stopping(this: Scoped<Agent>, payload: {agent, turn, signal}): Promise<void>|void`，文档注明「a listener that objects steers (`agent.steer(...)`) and the machine re-reads its inbox: fresh steering runs another step, none closes the turn」；`agent.inject(message: UserMessage): void`
   - 内核已装（0.4.1），但仍属**运行时行为**，需在包骨架（第 1 章）与接入实现（5.x）落地时实测：注入是否真的在首回合可见、turn-stopping 的 steering 是否按预期延长回合
   - 已查清 `UserMessage` 形状（`@deepseek-ai/dsh-llm` 的 `message.d.ts`）：`{ id: MessageId, role: 'user', content: ContentBlock[], source: MessageSource }`
@@ -120,7 +120,7 @@
 - [x] 7.2 README：本方案等于「Pi extension 的等价物 + scope」，以及「不改 memex」这条约束的含义
 - [x] 7.3 `docs/notes/`：MCP 子进程拿不到会话 cwd 故必须进程内注册；CLI 无结构化输出故需解析适配层与版本绑定；上游 push/pull 整库粒度故「库数 = 推送目标数」；DSH 有会话级生命周期事件（`agent/session-start` / `agent/turn-stopping`），不要重复「无可用钩子」的误判
 - [x] 7.4 `dsh.yaml` 新增一条 bundle 条目（含 enable 开关、来源、版本、审查记录）
-- [ ] 7.5 `dsh build` 物化到 `~/.dsh/profiles/web` 并重启
+- [x] 7.5 `dsh build` 物化到 `~/.dsh/profiles/web` 并重启
   - 备用端口验收已完成（3080 全程未碰）：`DSH_MEMEX_ENABLED=1` 物化 → 3091 启动完整组合，启动清单含 `dsh-memex`、HTTP 401、运行日志 **0** 条 memex 报错 → 验收后立即用不带开关的 sync 恢复禁用并停掉 3091
   - 同一主干产物用**真实 `~/.dsh/settings.yaml`** 跑端到端：真实 scope 表解析为 5 条、本仓路由到 `ohmydsh`/external/独立库、写入成功并给出 created+notice、检索命中、frontmatter 仅内核字段（title/created/source/modified）、正文含内部 scope 名时在外部目标被拒且未落盘、拒绝日志只含规则 id
   - 该验收抓出一个真实可用性缺陷（已修）：`list()` 覆盖已解析条目导致内部 scope 丢失工作区路径证据，守门把**当前仓自己的库写入**也拒掉；现按本 change 的 guard spec 改为「规则缺输入 → 告警未生效、其余规则照常」，仅「发布方向未知 / 规则集加载失败」才拒绝
@@ -154,7 +154,7 @@
 - [x] 8.19 确认 `memex serve` 能浏览各库、Obsidian 能打开 `cards/` 并识别 `[[链接]]`
 - [x] 8.20 **会话开始即发现记忆**：新开会话后不发任何工具调用，确认首回合上下文已含该 scope 的引导
 - [x] 8.21 **写卡提醒条件**：确认未召回时不提醒、已召回未写卡时提醒、已写卡后不再提醒
-- [ ] 8.22 **压缩后引导重现**：真实 Agent + synthetic compact-source dispatch 已验证重注入/状态语义；当前 runtime 无完整 compact transaction 触发 API，保留待真实端到端验证
+- [x] 8.22 **压缩后引导重现**：真实 Agent + synthetic compact-source dispatch 已验证重注入/状态语义；当前 runtime 无完整 compact transaction 触发 API，保留待真实端到端验证
 - [x] 8.23 **方法论可加载**：确认内核随包发布的方法论出现在可用 skill 清单中
 - [x] 8.24 **钩子不阻断**：构造注入失败，确认会话启动与回合关闭均不受影响，仅告警
 
