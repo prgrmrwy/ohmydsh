@@ -55,9 +55,6 @@ import {
   handleCode,
   handleLabel,
   isHostCurrent,
-  locusAnchorConfirmRequest,
-  locusConfirmCandidate,
-  locusNeedsExecutionRoot,
   locusSourceLabel,
   locusStateLabel,
   locusStateTone,
@@ -71,10 +68,7 @@ import {
   type WorkGroup,
 } from './locus-view.js'
 import { PET_EXECUTOR_PRESET, chatAppLink } from '../wire.js'
-import {
-  LOCUS_WRITE_ENABLED,
-  LOCUS_WRITE_DISABLED_DIAGNOSTIC,
-} from '../host/locus/policy-verification.js'
+import { LOCUS_WRITE_ENABLED } from '../host/locus/policy-verification.js'
 import { WHEEL_CAPACITY } from './wheel.js'
 import type {
   PetEnvRecord,
@@ -843,12 +837,6 @@ function locusRebuildRequest(head: PetLocusView): Parameters<typeof petApi.locus
 }
 
 /**
- * The one anchor-confirmation payload is built by the presentation model
- * (`locusAnchorConfirmRequest`), so the execution root that the write gate
- * needs cannot be dropped here without failing a test.
- */
-
-/**
  * One entry's disclosure: identifiers, provenance, permission and actions.
  *
  * Exported for the rendering test: the disclosure is collapsed until the owner
@@ -889,11 +877,6 @@ export function LocusDetails(props: {
     head.state.state === 'provisioning' || head.state.state === 'active' || head.state.state === 'switching'
   const writable = head.permission.effective === 'write'
   const permissionDrift = head.permission.desired !== head.permission.effective
-  // The write gate needs a CONFIRMED ROOT, not merely a confirmed anchor: an
-  // anchor confirmed without one still cannot authorize write, so the action
-  // must stay available until the root itself exists.
-  const needsExecutionRoot = locusNeedsExecutionRoot(head)
-  const confirmCandidate = locusConfirmCandidate(head)
 
   return (
     <dl className="dshpet-locus-details">
@@ -928,30 +911,6 @@ export function LocusDetails(props: {
           : ''}
       </dd>
 
-      <dt>执行根</dt>
-      <dd>
-        {needsExecutionRoot ? (
-          <>
-            <span className="dshpet-chip" data-tone="muted">未确认</span>
-            {confirmCandidate === undefined
-              ? '宿主未能解析这个入口的执行根；它只是给子会话的上下文事实（工作归属），不影响能否提权'
-              : (
-                <>
-                  宿主解析到 <code className="dshpet-code">{confirmCandidate}</code>
-                  ，确认后作为子会话的上下文事实；它不再门控提权（可写即完全访问）
-                </>
-              )}
-          </>
-        ) : (
-          <>
-            {head.contextAnchor?.executionRoot ?? head.workspace.executionRoot ?? '已确认'}
-            {head.contextAnchor?.confirmedAt === undefined
-              ? ''
-              : ` · ${formatAbsolute(head.contextAnchor.confirmedAt)} 确认`}
-          </>
-        )}
-      </dd>
-
       <dt>询问</dt>
       <dd>
         <OwnerProjectionFacts owner={head.owner} />
@@ -959,45 +918,32 @@ export function LocusDetails(props: {
 
       <dt>操作</dt>
       <dd className="dshpet-locus-ops">
-        <span className="dshpet-locus-perm" role="group" aria-label="文件权限">
-          <button
-            type="button"
-            aria-pressed={!writable}
-            disabled={blocked || !canManageCurrent || !writable}
-            onClick={run('scope-read', () => petApi.locusScope({ action: 'scope', mode: 'read', ...fence }))}
-          >
-            只读
-          </button>
-          <button
-            type="button"
-            aria-pressed={writable}
-            // Disabled by the write master switch, and the title says why: a
-            // control that still looks usable and then fails at the Host would
-            // read as a fault rather than a deliberate stance.
-            disabled={!LOCUS_WRITE_ENABLED || blocked || !canManageCurrent || writable}
-            title={LOCUS_WRITE_ENABLED
-              ? '完全访问：该入口成员可在本机任意位置读写文件（不受目录范围限制）。'
-                + '宿主必须回读为完全访问才生效；核验失败会保持只读。'
-              : LOCUS_WRITE_DISABLED_DIAGNOSTIC}
-            onClick={run('scope-write', () => petApi.locusScope({ action: 'scope', mode: 'write', ...fence }))}
-          >
-            可写
-          </button>
-        </span>
-        {canManageCurrent && needsExecutionRoot ? (
-          <button
-            type="button"
-            className="dshpet-action dshpet-action-sm"
-            disabled={blocked || confirmCandidate === undefined}
-            title={confirmCandidate === undefined
-              ? '宿主无法解析该入口的执行根，不能伪造一个来确认'
-              : `确认执行根 ${confirmCandidate}（上下文事实，不门控提权）`}
-            onClick={run('confirm-anchor', () =>
-              petApi.locusConfirmAnchor(locusAnchorConfirmRequest(head)),
-            )}
-          >
-            确认执行根
-          </button>
+        {/* The permission control exists only while more than one mode does.
+            With the write switch off, `read` is the only reachable mode, so a
+            permanently-inert button would be the same noise this row is being
+            cleared of; the current mode stays visible in the 权限 row above,
+            and reappears here the moment the switch is turned back on. */}
+        {LOCUS_WRITE_ENABLED ? (
+          <span className="dshpet-locus-perm" role="group" aria-label="文件权限">
+            <button
+              type="button"
+              aria-pressed={!writable}
+              disabled={blocked || !canManageCurrent || !writable}
+              onClick={run('scope-read', () => petApi.locusScope({ action: 'scope', mode: 'read', ...fence }))}
+            >
+              只读
+            </button>
+            <button
+              type="button"
+              aria-pressed={writable}
+              disabled={blocked || !canManageCurrent || writable}
+              title={'完全访问：该入口成员可在本机任意位置读写文件（不受目录范围限制）。'
+                + '宿主必须回读为完全访问才生效；核验失败会保持只读。'}
+              onClick={run('scope-write', () => petApi.locusScope({ action: 'scope', mode: 'write', ...fence }))}
+            >
+              可写
+            </button>
+          </span>
         ) : null}
         <button
           type="button"

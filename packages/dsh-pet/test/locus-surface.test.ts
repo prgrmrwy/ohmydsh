@@ -12,6 +12,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { LocusDetails, LocusSurface } from '../src/client/settings.js'
 import { collectHandleCodes, groupByWork } from '../src/client/locus-view.js'
+import { LOCUS_WRITE_ENABLED } from '../src/host/locus/policy-verification.js'
 import { locusFixture, snapshotOf, surfaceSnapshot } from './fixtures/locus-snapshot.js'
 import type { PetLocusManagementView } from '../src/wire.js'
 
@@ -187,7 +188,14 @@ describe('locus surface', () => {
   })
 })
 
-describe('locus execution-root confirmation', () => {
+describe('the execution-root surface is retired from the panel', () => {
+  // ADR-0005 demoted the anchor to a context fact that no longer gates
+  // escalation, and the write switch is off, so the row and the confirm
+  // control are gone. The RULES they enforced are not gone: they live in
+  // `locus-view.ts` and stay covered by `locus-view.test.ts`
+  // (`locusNeedsExecutionRoot`, `locusConfirmCandidate`,
+  // `locusAnchorConfirmRequest`), which is what makes restoring this surface a
+  // rendering change rather than a re-derivation.
   const ownerMarkup = (input: {
     readonly executionRoot?: string
     readonly anchor?: Parameters<typeof locusFixture>[0]['contextAnchor']
@@ -202,8 +210,6 @@ describe('locus execution-root confirmation', () => {
       ...(input.anchor === undefined ? {} : { contextAnchor: input.anchor }),
     })
     const snapshot = snapshotOf([locus], [locus.locusId])
-    // The permission controls live inside the collapsed 「更多」 disclosure, so
-    // render that block itself rather than an unopened row.
     return renderToStaticMarkup(
       createElement(LocusDetails, {
         family: groupByWork(snapshot)[0]!.families[0]!,
@@ -215,78 +221,36 @@ describe('locus execution-root confirmation', () => {
     )
   }
 
-  it('shows the Host-resolved root and offers to confirm it', () => {
+  it('renders neither the execution-root row nor a confirm control', () => {
     const markup = ownerMarkup({ executionRoot: '/Users/prgrmrwy/corp/nexus' })
-
-    expect(markup).toContain('确认执行根')
-    expect(markup).toContain('/Users/prgrmrwy/corp/nexus')
-    expect(markup).toContain('宿主解析到')
-  })
-
-  it('keeps the action when the anchor is confirmed but has no execution root', () => {
-    // The regression this change fixes: the button used to disappear on
-    // `status === 'confirmed'`, so the root it never sent could never be added.
-    const markup = ownerMarkup({
-      executionRoot: '/Users/prgrmrwy/corp/nexus',
-      anchor: { status: 'confirmed', projectResources: [], constraints: [] },
-    })
-
-    expect(markup).toContain('确认执行根')
-    expect(markup).toContain('/Users/prgrmrwy/corp/nexus')
-  })
-
-  it('drops the action once a root is confirmed', () => {
-    const markup = ownerMarkup({
-      executionRoot: '/Users/prgrmrwy/corp/nexus',
-      anchor: { status: 'confirmed', executionRoot: '/Users/prgrmrwy/corp/nexus' },
-    })
 
     expect(markup).not.toContain('确认执行根')
-    expect(markup).toContain('/Users/prgrmrwy/corp/nexus')
+    expect(markup).not.toContain('<dt>执行根</dt>')
   })
 
-  it('states that write means unbounded access shared by the entry', () => {
-    // The label is the only place the owner is told what the grant really is;
-    // hiding it behind a bare "可写" is the quiet widening this change removes.
-    const locus = locusFixture({
-      locusId: 'locus-runtime-full',
-      chatId: 'oc_full',
-      parentSessionId: 'session-parent',
-      childSessionId: 'session-child',
-      executionRoot: '/Users/prgrmrwy/corp/nexus',
-      permission: { desired: 'write', effective: 'write', verifiedAt: 1, grantedBy: 'ou-owner' },
-    })
-    const snapshot = snapshotOf([locus], [locus.locusId])
-    const markup = renderToStaticMarkup(
-      createElement(LocusDetails, {
-        family: groupByWork(snapshot)[0]!.families[0]!,
-        codes: collectHandleCodes(snapshot),
-        busy: false,
-        busyKey: undefined,
-        onAction: () => undefined,
-      }),
-    )
-
-    expect(markup).toContain('可写（完全访问）')
-    expect(markup).toContain('该入口成员共享整机写权限')
-    expect(markup).toContain('不再受目录范围限制')
-  })
-
-  it('presents the execution root as context, not as an escalation gate', () => {
+  it('removing that row leaves its neighbours intact', () => {
+    // A deletion that quietly takes the surrounding facts with it is the
+    // failure mode worth pinning: 权限 and 询问 sit either side of where the
+    // row used to be.
     const markup = ownerMarkup({ executionRoot: '/Users/prgrmrwy/corp/nexus' })
 
-    expect(markup).toContain('上下文事实')
-    expect(markup).toContain('不门控提权')
-    // The old wording told the owner escalation was blocked on this; it is not.
-    expect(markup).not.toContain('提权到可写需要先有可确认的执行根')
+    expect(markup).toContain('<dt>权限</dt>')
+    expect(markup).toContain('<dt>询问</dt>')
+    expect(markup).toContain('<dt>操作</dt>')
   })
 
-  it('says why nothing can be confirmed when the Host resolved no root', () => {
-    const markup = ownerMarkup({})
+  it('still shows the effective permission as a fact', () => {
+    // The control is gone; the current mode must remain visible, otherwise the
+    // owner has no way to read what this entry is actually serving as.
+    const markup = ownerMarkup({ executionRoot: '/Users/prgrmrwy/corp/nexus' })
 
-    expect(markup).toContain('宿主未能解析这个入口的执行根')
-    // The control is rendered but inert: no path is invented to confirm.
-    expect(markup).toContain('确认执行根')
-    expect(markup).toMatch(/<button[^>]*disabled[^>]*>确认执行根/)
+    expect(markup).toContain('只读')
+  })
+
+  it('offers no permission control while the write switch is off', () => {
+    const markup = ownerMarkup({ executionRoot: '/Users/prgrmrwy/corp/nexus' })
+
+    expect(LOCUS_WRITE_ENABLED).toBe(false)
+    expect(markup).not.toContain('dshpet-locus-perm')
   })
 })
