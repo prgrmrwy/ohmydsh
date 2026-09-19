@@ -79,6 +79,31 @@ describe('mention rendering', () => {
     expect(result.skipped).toBe('no-unique-match')
   })
 
+  it('renders a member open id the agent wrote instead of a display name', () => {
+    // The unified locus delivery prompt reports the sender as `ou_…`; an agent
+    // that addresses that literal string must still reach the person, not
+    // publish the identifier as plain text that notifies nobody.
+    const result = renderMentions('@ou_owner_0001 你好，我是小小芒果。', MEMBERS)
+
+    expect(result.text).toBe('<at user_id="ou_owner_0001">张勇</at> 你好，我是小小芒果。')
+    expect(result.rendered).toBe(1)
+  })
+
+  it('leaves an open id that is not a member of this chat as written', () => {
+    const result = renderMentions('@ou_stranger_99 你好', MEMBERS)
+
+    expect(result.text).toBe('@ou_stranger_99 你好')
+    expect(result.rendered).toBe(0)
+    expect(result.skipped).toBe('no-unique-match')
+  })
+
+  it('does not resolve an open id sitting inside a word', () => {
+    const result = renderMentions('发给 wang@ou_owner_0001 即可', MEMBERS)
+
+    expect(result.text).toBe('发给 wang@ou_owner_0001 即可')
+    expect(result.rendered).toBe(0)
+  })
+
   it('does not touch an email address or other in-word @', () => {
     const result = renderMentions('发给 wang@example.com 或者 foo@bar 都行', MEMBERS)
 

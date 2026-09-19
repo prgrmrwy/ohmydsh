@@ -265,9 +265,14 @@ describe('production LocusDshPort default Workspace resolution', () => {
 })
 
 describe('production LocusDshPort main creation', () => {
-  it('freezes the default preset, awaits mount, attaches, then renames', async () => {
+  it('composes Pet\'s own preset instead of the drifting Host default, awaits mount, attaches, then renames', async () => {
     const order: string[] = []
     const ws = workspace('ws-default', { order })
+    // A Host default that differs from Pet's own preset, and that hot-reloads
+    // mid-setup. Locus children compose themselves from whatever this creation
+    // mounts, so a drifting default would land in the child's composition — and
+    // `standard` registers its `subagent` row per agent, which no tool filter
+    // can remove. The fixed preset is what keeps that row on the standing layer.
     let preset = 'standard-v1'
     let releaseMount!: () => void
     const mountGate = new Promise<void>(resolve => {
@@ -321,15 +326,15 @@ describe('production LocusDshPort main creation', () => {
       chatId: 'oc_project',
     })
     await vi.waitFor(() => {
-      expect(order).toEqual(['create', 'mount-start:standard-v1'])
+      expect(order).toEqual(['create', 'mount-start:dsh-pet-executor'])
     })
     releaseMount()
     const created = await creation
 
     expect(order).toEqual([
       'create',
-      'mount-start:standard-v1',
-      'mount-end:standard-v1',
+      'mount-start:dsh-pet-executor',
+      'mount-end:dsh-pet-executor',
       'published',
       'attach',
       'rename',
@@ -339,7 +344,7 @@ describe('production LocusDshPort main creation', () => {
       sessionId: 'session-created-main',
       meta: {
         cwd: '/workspaces/ws-default',
-        agentPreset: 'standard-v1',
+        agentPreset: 'dsh-pet-executor',
       },
       agentOptions: { provider: 'deepseek', model: 'deepseek-chat' },
     }))

@@ -46,6 +46,7 @@ import {
 /** The minimum prefix accepted by the channel control surface. */
 export const MIN_BIND_PREFIX_LENGTH = 6
 import {
+  LOCUS_SAFE_CHILD_COMPOSITION,
   normalizeLocusEndpoint,
   type LocusChildComposition,
   type LocusContextAnchor,
@@ -387,6 +388,15 @@ export interface LocusControllerDeps {
       | { readonly kind: 'ok'; readonly bots: readonly { readonly openId: string }[] }
       | { readonly kind: 'permission-denied' | 'error' }
     >
+    /**
+     * Resolve one chat member's display name.
+     *
+     * The delivery prompt asks the agent to address people by display name, so a
+     * prompt reporting only an `ou_…` invites it to write that identifier —
+     * which renders as plain text and publishes the id. Optional: without it the
+     * prompt keeps the open id alone.
+     */
+    resolveMemberName?(chatId: string, openId: string): Awaitable<string | undefined>
   }
   /**
    * Resolve the complete live sandbox policy for the exact Session handle.
@@ -589,6 +599,14 @@ function normalizeActiveLocus(raw: unknown, expected: LocusEndpoint): ActiveLocu
   const contextAnchor = isRecord(raw.contextAnchor)
     ? raw.contextAnchor as unknown as NonNullable<LocusContextAnchor>
     : undefined
+  // Carry the durable safe-composition proof through this normalizer. Child
+  // delivery refuses any locus that does not present it, so dropping the field
+  // here (while the record has it) rejects every delivery with a generic
+  // `child-unavailable`. Only the proven value is copied: an unrecognized
+  // composition stays absent and the downstream guard keeps failing closed.
+  const childComposition = raw.childComposition === LOCUS_SAFE_CHILD_COMPOSITION
+    ? LOCUS_SAFE_CHILD_COMPOSITION
+    : undefined
   return {
     ...(id !== undefined ? { id } : {}),
     ...(locusId !== undefined ? { locusId } : {}),
@@ -599,6 +617,7 @@ function normalizeActiveLocus(raw: unknown, expected: LocusEndpoint): ActiveLocu
     workspaceId: raw.workspaceId.trim(),
     state: 'active',
     permission: permission as unknown as LocusPermission,
+    ...(childComposition === undefined ? {} : { childComposition }),
     ...(contextAnchor === undefined ? {} : { contextAnchor }),
   }
 }
@@ -981,12 +1000,13 @@ export class LocusChannelController {
   }
 
   private async enrichAddressing(message: NormalizedLocusMessage): Promise<NormalizedLocusMessage> {
-    const original = message.addressing ?? historicalUnknownAddressing()
-    const normalized = message.addressing === undefined ? { ...message, addressing: original } : message
+    const named = await this.withSenderName(message)
+    const original = named.addressing ?? historicalUnknownAddressing()
+    const normalized = named.addressing === undefined ? { ...named, addressing: original } : named
     const port = this.deps.addressing
-    if (port === undefined || message.chatType !== 'group') return normalized
+    if (port === undefined || named.chatType !== 'group') return normalized
     try {
-      const result = await port.listChatBots(message.endpoint.chatId)
+      const result = await port.listChatBots(named.endpoint.chatId)
       let bots: readonly { readonly openId: string }[] | undefined
       if (Array.isArray(result)) {
         bots = result as readonly { readonly openId: string }[]
@@ -1000,7 +1020,7 @@ export class LocusChannelController {
       if (bots === undefined) return normalized
       const self = original.occurrences.find(occurrence => occurrence.kind === 'self-bot')?.stableId
       return {
-        ...message,
+        ...named,
         addressing: projectDeliveryAddressing({
           mentions: original.occurrences.map(occurrence => ({
             ...(occurrence.stableId === undefined ? {} : { id: occurrence.stableId }),
@@ -1014,6 +1034,31 @@ export class LocusChannelController {
       }
     } catch {
       return normalized
+    }
+  }
+
+  /**
+   * Fill in the sender's display name when the record does not carry one.
+   *
+   * The delivery prompt reports the sender and tells the agent to address people
+   * by display name. Given only an `ou_…`, an agent writes that identifier: the
+   * platform renders it as plain text, so nobody is notified and the id is
+   * published in the chat. Fail-soft — an unresolvable name leaves the open id,
+   * which is the previous behaviour.
+   *
+   * @param message - Message about to be projected into a delivery.
+   * @returns the message, with `senderName` set when it could be resolved.
+   */
+  private async withSenderName(message: NormalizedLocusMessage): Promise<NormalizedLocusMessage> {
+    if (message.senderName !== undefined && message.senderName.trim() !== '') return message
+    const resolve = this.deps.addressing?.resolveMemberName
+    if (resolve === undefined || message.senderOpenId.trim() === '') return message
+    try {
+      const name = await resolve.call(this.deps.addressing, message.endpoint.chatId, message.senderOpenId)
+      if (name === undefined || name.trim() === '') return message
+      return { ...message, senderName: name.trim() }
+    } catch {
+      return message
     }
   }
 

@@ -418,6 +418,161 @@ effective/read，未扩大权限。」。子会话日志给出机制：
 
 ---
 
+## 11. 手写规范化会丢掉新闸门依赖的字段（类型允许，运行时必挂）
+
+### 现象
+
+真机验收时，在一个全新飞书群里首次 @ 机器人：locus **创建成功**（`source: auto`、
+`state: active`、`childComposition: "safe-v1"` 全部正确），但**投递被拒**，群里没有
+任何回复，Delivery 表 0 条记录。Host 日志只有两行，且没有任何原因：
+
+```
+[dsh-pet] dsh-pet locus channel: child-unavailable
+[dsh-pet] dsh-pet channel: inbound unroutable: child-unavailable
+```
+
+看起来像「冷启动竞态」或「子会话还没建好」，但父会话与子会话在磁盘上都存在，
+父会话甚至已跑完种子轮次，子会话日志也是完整的 `safe-v1` 组合（工具白名单只有
+`read/read_image/glob/grep/web_search`）。排查方向一开始完全是错的。
+
+### 根因（两层，都是「声明了但没接通」）
+
+1. **规范化函数逐字段重建对象，漏拷新闸门要求的那一个字段**：
+
+   ```ts
+   // child-delivery.ts —— 本次改动新增的闸门
+   if (locus.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION) {
+     ports.log?.('safe-composition-unproven')
+     throw new Error(`Locus child is unavailable (safe-composition-unproven)`)
+   }
+   ```
+
+   ```ts
+   // locus-controller.ts —— 同一个 commit，手写返回字面量
+   return {
+     ...(id !== undefined ? { id } : {}),
+     endpoint: locusEndpoint,
+     generation,
+     parentSessionId: raw.parentSessionId.trim(),
+     childSessionId: raw.childSessionId.trim(),
+     workspaceId: raw.workspaceId.trim(),
+     state: 'active',
+     permission: permission as unknown as LocusPermission,
+   }                                  // ← childComposition 从未被拷回
+   ```
+
+   该字段在类型上是**可选**的（`readonly childComposition?: LocusChildComposition`），
+   所以漏拷**编译通过、类型检查通过**。闸门检查它，规范化丢弃它，于是闸门**恒真**
+   ——任何 locus、任何群、任何投递都会失败，不是偶发也不是冷启动。
+
+   同仓库其它地方都忠实透传该字段（`resolution.ts`、`controller-persistence-adapter.ts`），
+   git 里也能看到闸门与规范化是在**同一个 commit** 里分别改的：加了判据，没加生产者。
+
+2. **诊断端口没接线，真实原因被静默丢弃**：
+
+   ```ts
+   // index.ts —— 生产接线
+   createLocusChildDelivery({
+     createAdapter: () => createLocusChildAdapter(locusChildProbe.ports),
+     // ← 没有传 log
+   })
+   ```
+
+   `child-delivery.ts` 在每个失败分支都调了 `ports.log?.(…)`，代码写得很规范；
+   但 `ports.log` 是 `undefined`，于是 `safe-composition-unproven` 被吞掉，只剩
+   控制器的 `catch { return this.refuse('child-unavailable') }`。仓库里同族端口
+   （reconcile / provisioning / resolve / turn / channel）**全都接了** `log`，
+   唯独 child delivery 漏接——是不一致，不是设计。
+
+### 为什么单测全绿
+
+两半各自被测过，但**从不在同一条路径上拼接**：
+
+| 测试 | 覆盖 | 漏洞 |
+| --- | --- | --- |
+| 频道控制器测试 | 全部 stub `deps.child` | 闸门根本不执行 |
+| child-delivery 测试 | 手写字面量 locus，**自带** `childComposition: 'safe-v1'` | 不经过规范化 |
+| locus 记录 fixture | 类型上该字段可选，fixture 直接不写 | 永不携带证明 |
+
+### 规则
+
+1. **给「可选字段」加闸门前，先找它的生产者**。判据要求的事实必须有可达的写入点；
+   类型可选意味着「缺失」是合法状态，编译器不会替你发现规范化把它丢了。在本例中
+   「缺失」恰好触发 fail-closed，于是表现为 100% 失败而不是偶发。
+2. **逐字段重建对象的规范化函数是危险区**。凡是下游要读的字段，都要么显式列出并配
+   测试，要么改成结构化拷贝。改动新增字段时，`grep` 该字段在全仓的引用，逐个确认
+   透传链完整——本例只需一条 `grep` 就能发现控制器从不引用它。
+3. **诊断要接到底**。声明了 `log`/`onError` 这类端口就要在生产接线里接上，否则等于
+   没有。判据：`grep` 该端口的可选调用点，确认每处调用都有非 `undefined` 的实现。
+4. **拒绝码不能只有兜底分类**。`catch { refuse('generic-code') }` 让每个失败长得一样；
+   要么在源头保留封闭的稳定子码（本例按 `admission-rejected:${reason}` 的既有先例），
+   要么让底层端口自己记日志。
+5. **回归测试必须跨层拼接**。只测单层会得到一个「两层都绿、合起来必挂」的系统。
+   有效形式：真实下层的端口 + 假适配器 + 由真实上层规范化流出的数据，断言端到端
+   被接受（本例：真实 `createLocusChildDelivery` + 假 adapter + 经
+   `normalizeActiveLocus` 的记录）。验证方式是**临时回退实现**，确认测试真的失败
+   ——本例回退后精确复现了线上症状（`refused` 而非 `accepted`）。
+
+---
+
+## 12. `toolFilter` 不覆盖 agent 自有 scope（白名单挡不住 own 层注册的工具）
+
+### 现象
+
+Pet 用 `LOCUS_SAFE_TOOL_FILTER` 把 Locus 子会话的继承工具限制为
+`['read','read_image','glob','grep','web_search']`，真机核对 child 工具面确实**没有**
+`bash`/`write`/`edit`/`run_code`/`send_message`/`workflow`/`ralph`——看起来白名单生效了。
+
+但 `subagent` **在列表里**。它派生出的孙代理工具面 **30 个**（含 `bash`），实测孙代理能用
+`bash` 跑通 `lark-cli --profile dsh-pet auth status --json`，返回 token `valid` 且 scope
+含 `im:message`。于是「群内业务正文只能经 `pet_locus_finish` 发出」这条唯一出口不变量，
+可被 child → subagent → 孙代理 bash → `lark-cli --as bot im +messages-send` 绕过，
+且不经 Delivery 账本、不留审计痕迹。
+
+### 根因（三层）
+
+1. **`toolFilter` 只约束继承面，own 层注册在过滤之外**：
+
+   ```ts
+   // packages/core/tools/src/index.ts
+   for (const [name, definition] of inherited) {
+     if (layers.every(layer => layer.admits(name))) visible.set(name, definition)
+   }
+   // The scope's own registrations last, shadowing an inherited name and
+   // outside the filter above.
+   if (own !== undefined) {
+     for (const [name, definition] of own.tools.entries()) visible.set(name, definition)
+   }
+   ```
+
+   所以 allow/deny 都动不了 own 层；把 `subagent` 写进 `deny` 也没用——它不在
+   `restrictableNames` 里，写入会直接抛错。
+
+2. **哪个工具落 own 层由注册方的 config 决定**：`@deepseek-ai/dsh-tool-subagent` 在
+   `config.modelSelectionSettings === true` 时按 agent 逐个 `inject` 后注册（own 层），
+   否则走普通安装（standing/祖先层，受 filter 约束）。标准 preset 的 `subagent` 行带
+   这个开关，同包的 `subagent_fork` 行没有——**这正是一份工具面里 `subagent_fork` 被挡住、
+   `subagent` 却漏进来的原因**。
+
+3. **后代不在同一链上**：子代理组合来自**委派请求**而非父 agent 的 restriction；子代经
+   `composeFrom` 绑到 preset 的 standing key，结构上不在父 child 的 own 层链上，所以
+   「把 toolFilter 传给后代」没有载体。
+
+### 规则
+
+1. **核对工具面要问「它注册在哪一层」**。名字不在列表里不足以证明被挡住；同包内两个同类
+   工具一个被挡一个漏，差别可能只是一个 config 开关。
+2. **给 child 选组合时不要继承 Host 默认或用户可改的 preset**。修复把 locus 主会话固定为
+   Pet 自有的 `dsh-pet-executor`（其委派行没有该开关），不再取 Host 默认；固定值本身也要
+   由测试钉住（断言该 preset 的委派行不得携带 `modelSelectionSettings`，并断言上游 standard
+   仍然携带，说明该固定值是 load-bearing）。
+3. **委派是一等逃逸面**。child 只要能派生后代，白名单就必须覆盖后代——而机制上做不到，
+   所以正确做法是让 child **根本拿不到委派工具**，不要靠 prompt 禁止（prompt 从不是边界）。
+4. **单测要把被禁工具注册在正确的层**。既有用例把 forbidden 工具全注册在 global 层，
+   于是永远抓不到 own 层豁免——那种绿色是假的。
+
+---
+
 ## `ctx.inject()` 的回调是异步的，不能紧跟同步断言
 
 ### 现象

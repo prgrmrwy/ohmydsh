@@ -1557,6 +1557,11 @@ async function initialize(
       // One adapter owns exactly one active child; use a factory so sibling
       // loci under the same main session do not contend for one singleton.
       createAdapter: () => createLocusChildAdapter(locusChildProbe.ports),
+      // Without this port every child-delivery refusal (safe-composition-unproven,
+      // child-not-found, parent-unavailable, ...) is discarded: the controller's
+      // catch collapses all of them into one `child-unavailable`, which is not
+      // actionable. The codes logged here are stable and carry no message body.
+      log: reason => petLog(`dsh-pet locus child: ${reason}`),
     })
     : undefined
   if (locusChildDelivery !== undefined) {
@@ -2490,6 +2495,10 @@ async function initialize(
       },
       addressing: {
         listChatBots: chatId => larkClient.listChatBots(chatId),
+        // Names the asker in the delivery prompt, so the agent addresses a
+        // display name instead of echoing the open id into the chat.
+        resolveMemberName: async (chatId, openId) =>
+          await larkClient.resolveMemberName?.(chatId, openId),
       },
       receipts: (() => {
         const inProgressReactions = new Map<string, string>()

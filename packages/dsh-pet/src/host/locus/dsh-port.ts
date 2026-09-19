@@ -33,6 +33,17 @@ import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { LOCUS_SAFE_CHILD_COMPOSITION } from './aggregate.js'
 import type { LocusDshPort, LocusParentSession, LocusWorkspace } from './controller.js'
 
+/**
+ * The preset every Pet-owned locus main session composes.
+ *
+ * Fixed on purpose. Locus children derive their composition from the main
+ * session's composed preset, so a Host- or user-chosen preset would drift
+ * straight into the child. Pet's executor preset is the only one whose
+ * delegation rows stay on the standing layer, where `LOCUS_SAFE_TOOL_FILTER`
+ * can actually remove them (see the creation comment in this file).
+ */
+export const LOCUS_MAIN_PRESET = 'dsh-pet-executor'
+
 /** Minimal cold-inspection result consumed by this adapter. */
 export interface LocusSessionInspection {
   readonly meta: {
@@ -303,10 +314,21 @@ export function createProductionLocusDshPort(
 
       // Freeze mutable defaults once so header, setup and runtime selection are
       // one creation decision even if settings hot-reload during setup.
-      const presetId = normalized(deps.agentPresets.defaultId)
-      if (presetId === undefined) {
+      //
+      // The preset is deliberately Pet's own, not the Host default. A locus
+      // child composes itself from `composedPreset(parent.ctx)`, so whatever is
+      // mounted here becomes the child's composition too. The Host default
+      // (`standard`) registers its delegation rows per agent
+      // (`modelSelectionSettings: true`), which lands `subagent` in the child's
+      // OWN scope — and `LOCUS_SAFE_TOOL_FILTER` only restricts the INHERITED
+      // surface, so no allow-list can remove it. The child could then delegate
+      // to a descendant that keeps the full tool set (bash, lark-cli), which
+      // breaks the single-egress invariant. Pet's executor preset keeps those
+      // rows on the standing layer, where the filter applies.
+      const presetId = LOCUS_MAIN_PRESET.trim()
+      if (presetId === '') {
         throw new LocusDshCapabilityUnavailableError(
-          'The Host has no default Agent preset for locus main creation',
+          'The Host has no Agent preset for locus main creation',
         )
       }
       const selection = { ...deps.agentDefaultModel.currentSelection() }
