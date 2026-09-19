@@ -126,8 +126,11 @@ child 从 `composedPreset(parent.ctx)` 继承该组合，而 executor preset 的
 断言 standing 层的 `bash`/`subagent_fork` 被滤除、而 own 层的 `subagent` **存活且可执行**，
 并断言证明把该 scope 判为 `leaked`。
 
-**待真机复验**：生产读取（`ctx.get('agents')` / `ctx.get('tools')`）是否确实可解析。若解析不到，
-证明确实会 fail closed 使 child 不发布——行为正确但影响面大，重启后需先确认这一条。
+**生产读取的可用性（已由构造保证，不需要真机才能确认）**：`agents` 与 `tools` 都在插件的
+`inject` 列表里，而 Cordis 的 `inject` 是加载前置条件——Pet 能加载就说明两个服务必定存在。
+因此 attestation 不会因为「服务缺失」而退化；接线也相应改成惯用的声明式访问
+（`ctx.agents.get(...)` / `ctx.tools.schemas(...)`，与既有生产代码一致），而不是给可选服务用的
+`ctx.get`。剩下的真机确认只有一条：重启后一次正常投递即可证明整条链（读取 → 证明 → 发布）成立。
 
 ### 额外发现：出站 @ 退化成裸 open_id（2026-09-19，不属 A–G 判据）
 
