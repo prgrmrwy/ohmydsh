@@ -58,6 +58,24 @@
 
 ## 真机验收结果（2026-09-19 重启后）
 
+### 附加验证：断联重连与重投去重（`pet-lark-channel` 规范，非本 change 判据）
+
+对本 change 之外的既有要求做了一次真机验证：
+
+- **断线自动重连 PASS**：对订阅 consumer（PID `60665`）发 `SIGTERM`（`lark-cli` 明确要求
+  `SIGTERM` 而非 `SIGKILL`，硬杀会泄漏服务端订阅），supervisor **5 秒内**拉起新 consumer
+  （`68190`）接管，计数器归零。
+- **重连后零重复处理 PASS**：该群 Delivery 数保持 2、无重复 `messageId`、群内 bot
+  回复仍为 2 条，未出现第二次回答。
+- **「重投被去重丢弃」本轮未被真机触发**：重连后平台未重投任何事件（新 consumer
+  `received: 0`），外部无法强制其重投。该分支目前只有单测覆盖——
+  `test/channel-event.test.ts:181` 断言重复消息 `{admit:false, reason:'duplicate'}`，
+  `test/channel-event.test.ts:187`／`test/channel-pipeline.test.ts:786`／
+  `test/locus-admission.test.ts:311` 断言早于启动水位 `{admit:false, reason:'before-watermark'}`。
+
+因此准确结论是「断线自动重连 + 重连后零重复处理」真机通过，而「重投去重」机制存在、
+有单测、但未被真机触发——不得表述为真机已验证。
+
 Host PID：`25993` → `2210`（修复后）。目标群 locus `state: active`、`childComposition: safe-v1`。
 
 | 用例 | 结果 | 关键证据 |
