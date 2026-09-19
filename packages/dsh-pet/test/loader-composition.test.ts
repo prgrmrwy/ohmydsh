@@ -990,6 +990,30 @@ describe('a locus child is composed at the real creation boundary', () => {
     expect(() => publish(ctx, 'child-live')).toThrow(/read/)
   })
 
+  it('logs why a composition was refused before the veto hides it', async () => {
+    // The veto travels out through agent creation and provisioning, which
+    // collapse every reason into one generic unroutable refusal. Without a line
+    // here an operator cannot tell a leaked tool from an unverified policy or an
+    // unreadable surface — the child just stops being published.
+    const { ctx } = await hostWithLocusChild({ policy: 'workspace-write' })
+    await seedLocus(ctx, 'read')
+    const logged: string[] = []
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logged.push(args.map(String).join(' '))
+    })
+    try {
+      expect(() => publish(ctx, 'child-live')).toThrow()
+    } finally {
+      spy.mockRestore()
+    }
+
+    expect(logged.some(line =>
+      line.includes('locus composition refused')
+      && line.includes('child-live')
+      && line.includes('read'),
+    )).toBe(true)
+  })
+
   it('vetoes publication when the Host exposes no policy seam at all', async () => {
     const { ctx } = await hostWithLocusChild({ policy: 'absent' })
     await seedLocus(ctx, 'read')

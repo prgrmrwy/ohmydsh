@@ -1234,8 +1234,23 @@ async function initialize(
         if (typeof sessionId === 'string' && agent?.ctx !== undefined) {
           const candidate: LocusCandidateAgent = { sessionId, scope: agent.ctx as never }
           // Rethrown deliberately: only a candidate that matched durable or
-          // staged locus identity may veto publication.
-          const result = composeLocusChild(candidate, locusCompositionPorts)
+          // staged locus identity may veto publication. Logged first because the
+          // veto travels out through agent creation and provisioning, which
+          // collapse it into one generic `locus-unavailable` refusal — without
+          // this line an operator cannot tell a leaked tool from an unverified
+          // policy or an unreadable surface, and the child simply stops being
+          // published.
+          let result: ReturnType<typeof composeLocusChild>
+          try {
+            result = composeLocusChild(candidate, locusCompositionPorts)
+          } catch (error) {
+            petLog(
+              `dsh-pet: locus composition refused ${sessionId} (${
+                error instanceof Error ? error.message : String(error)
+              })`,
+            )
+            throw error
+          }
           if (result.composed) {
             composedAgents.add(agent.ctx as object)
             contextToolAgents.add(agent.ctx as object)
