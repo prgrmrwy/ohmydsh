@@ -20,10 +20,10 @@ openspec/changes/**/checking/screenshots/
 # repository needs to carry.
 spike/
 
-# archify-out/ is a LOCAL scratch directory: diagrams rendered to understand
-# the system, regenerable from their own sources. Nothing in it is tracked.
-# A diagram the documentation actually shows belongs in docs/assets/ instead —
-# that is where the README's architecture SVG and its editable JSON source now
-# live. Enforced by scripts/check-tracked-artifacts.mjs.
+# Architecture render/scratch directories are regenerable local output. A
+# diagram documentation actually shows belongs in docs/assets/ with its source.
 archify-out/
+**/arch/*
+**/archify/*
+arch/*
 worktree-session-architecture.html

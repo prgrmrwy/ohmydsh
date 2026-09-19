@@ -760,7 +760,7 @@
   - 匹配度:三家均覆盖「/btw 不打断主会话」核心诉求;「只记录、不立即处理」的纯记忆形态(写 NOTES.md 待回顾)三家均未覆盖,如需可叠加;
   - 选型结论:语义最贴 = sidechain;顺带历史召回 = dsh-air;功能最全 = sidebar-qa(代价:better-sidebar 依赖链)。**终选 sidebar-qa**,已按 add-dsh-plugin 流程接入并确认 DSH 0.1.1-rc.2 兼容;
   - 落地形态:`better-sidebar` 0.15.2 + `dsh-sidebar-qa` 0.4.0(manifest 均已启用),划选任意文本 → 「提问」浮层 → 侧边栏内嵌问答(独立会话,可继续/归档),默认 compressed 上下文策略省 token;
-  - 未覆盖项(如需另立项):「只记录、不立即处理」的纯记忆形态(写 NOTES.md 待回顾)三家均未提供;侧问上下文看不到主会话**进行中**的 tool call / 流式输出(实现所限,完整性与省 token 不可兼得)。
+  - 未覆盖项(如需另立项):「只记录、不立即处理」的纯记忆形态三家均未提供；`dsh-memex-scoped-memory` 提供的是经过可复用写卡判据筛选的长期知识卡片，也不等于 `/btw` 的无处理暂存队列。若仍需要该语义，应另做 inbox/capture 层，而不是把临时消息污染进知识库。侧问上下文看不到主会话**进行中**的 tool call / 流式输出(实现所限,完整性与省 token 不可兼得)。
 - **更新**: 2026-08-14 新增;2026-08-24 完成两轮社区调研:首轮发现 dsh-sidechain,二轮确认同类共三家(sidechain / dsh-air / dsh-sidebar-qa)并拉齐对比,诉求核心普遍被覆盖,推进为讨论中,待选型试用;2026-08-24 试装 dsh-air 后弃用(=/btw fork 子会话全量继承父历史,每轮重复计费,主模型 codex 订阅无前缀缓存保障,侧问会话堆积),终选 sidebar-qa(better-sidebar 0.15.2 + dsh-sidebar-qa 0.4.0 已入 manifest 并合入 main,默认 compressed 策略省 token),待实测归档;2026-08-24 sidebar-qa 实现审查结论(源码核实):侧问发起零阻塞——create/fork 独立会话、prompt 走 queue,主对话进行中 inherit 自动降级 compressed(fork 需已完成 turn);host 仅对主会话只读 readSurface + 快速模型 160 token 摘要,不改主会话;侧问上下文只含已完成落盘内容,**看不到进行中 tool call/流式输出**(与 dsh-air 的 interrupted snapshot 携带在途状态相反,完整性/省 token 不可兼得);2026-08-24 日常使用确认 sidebar-qa 已满足诉求,归档为已完成。
 
 

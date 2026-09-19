@@ -1,0 +1,16 @@
+# dsh-memex bundle patch
+#
+# Mounts the plugin as a profile bundle row. The host half registers the memex
+# tool surface in-process (so each call sees the calling session's cwd) and adds
+# the scope dimension: it resolves the session to a knowledge domain and injects
+# that domain's MEMEX_HOME when spawning the memex CLI.
+#
+# No `inject` is declared on purpose: this plugin reads only core services
+# (`ctx.tools`) and contributes no client bundle. Declaring an optional service
+# here would turn it into a hard requirement and make the plugin never load when
+# that service is absent (see the dsh-pet entry in dsh.yaml for that failure mode).
+#
+# The ohmydsh manifest (source: local) appends `dsh-memex` to the bundle stack.
+- insert:
+    - id: dsh-memex
+      name: dsh-memex
