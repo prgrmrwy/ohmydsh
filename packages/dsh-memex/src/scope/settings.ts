@@ -11,6 +11,7 @@ export const MemexSettingsSchema = Schema.object({
   autoDerive: Schema.boolean().default(true),
   scopes: Schema.array(Schema.object({
     name: scopeName,
+    home: optionalString,
     pathPrefixes: stringList(),
     remotePatterns: stringList(),
     publish: Schema.union(['internal', 'external'] as const).default('external'),

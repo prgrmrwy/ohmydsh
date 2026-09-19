@@ -2,6 +2,8 @@ export type PublishDirection = 'internal' | 'external'
 
 export interface ScopeEntry {
   readonly name: string
+  /** Trusted user setting: absolute library path (defaults to the namespace). */
+  readonly home?: string
   readonly pathPrefixes?: readonly string[]
   readonly remotePatterns?: readonly string[]
   readonly publish?: PublishDirection
@@ -22,6 +24,7 @@ export interface ScopeConfig {
 export interface ScopeResolution {
   readonly scope: string
   readonly home: string
+  readonly homeSource: 'namespace' | 'configured'
   readonly publish: PublishDirection
   /** False only for a directory discovered without config/remote evidence. */
   readonly publishKnown: boolean

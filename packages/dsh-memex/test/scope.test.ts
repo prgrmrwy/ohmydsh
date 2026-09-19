@@ -45,6 +45,22 @@ describe('scope resolver', () => {
     expect(() => resolver.resolve('/b')).toThrow(/derive the same scope/)
   })
 
+  it('honours a configured library home inside its own repository', () => {
+    const homeDir = tempHome()
+    const repo = mkdtempSync(join(tmpdir(), 'dsh-memex-repo-'))
+    const resolver = createScopeResolver({
+      homeDir,
+      config: { scopes: [{ name: 'proj', pathPrefixes: [repo], publish: 'internal', home: join(repo, 'docs', 'memex') }] },
+      gitRemote: () => undefined,
+    })
+    const route = resolver.resolve(join(repo, 'src'))
+    expect(route.home).toBe(join(repo, 'docs', 'memex'))
+    expect(route.homeSource).toBe('configured')
+    expect(resolver.ensure(route)).toMatchObject({ created: true })
+    expect(existsSync(join(repo, 'docs', 'memex', 'cards'))).toBe(true)
+    expect(existsSync(join(homeDir, '.dsh-memex'))).toBe(false)
+  })
+
   it('uses the longest matching path rather than the entry with most prefixes', () => {
     const resolver = createScopeResolver({
       homeDir: tempHome(),
