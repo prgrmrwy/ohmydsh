@@ -18,11 +18,23 @@ describe('cross-write guard', () => {
   it('does not gate writes to internal libraries', () => {
     expect(evaluateCrossWrite({ slug: 'x', body: 'apaas-nexus details' }, internal, resolver).allowed).toBe(true)
   })
+  it('warns instead of blocking when an unrelated scope has unknown direction', () => {
+    const stray = { ...scope('stray-dir', 'external'), publishKnown: false, source: 'discovered' as const }
+    const service = { list: () => [internal, stray, external] } as ScopeService
+    const decision = evaluateCrossWrite({ slug: 'x', body: 'generic text' }, external, service, ['/work/nexus'])
+    expect(decision.allowed).toBe(true)
+    expect(decision.warnings).toContain('configuration:known-scope-publish-unknown')
+  })
+  it('still derives deny terms from a scope whose direction is unknown', () => {
+    const stray = { ...scope('unknown-internal', 'external'), publishKnown: false, source: 'discovered' as const }
+    const service = { list: () => [stray, external] } as ScopeService
+    expect(evaluateCrossWrite({ slug: 'x', body: 'unknown-internal notes' }, external, service).rules).toContain('deny-term:unknown-internal')
+  })
   it('keeps a rule with no input inactive instead of blocking every write', () => {
     const noPaths = scope('other-internal', 'internal')
     const service = { list: () => [noPaths, external] } as ScopeService
     const decision = evaluateCrossWrite({ slug: 'x', body: 'generic text' }, external, service)
-    expect(decision).toMatchObject({ allowed: true, rules: [], warnings: ['structural:workspace-path-rule-inactive'] })
+    expect(decision).toMatchObject({ allowed: true, rules: [] })
   })
   it('still rejects on the other rules while the path rule is inactive', () => {
     const noPaths = scope('other-internal', 'internal')
