@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type {
   BindingEntry,
   PublishDirection,
@@ -110,9 +110,11 @@ export function createScopeResolver(options: ScopeResolverOptions = {}): ScopeSe
     workspacePaths: readonly string[] = [],
     publishKnown = true,
   ): ScopeResolution => {
+    const configuredHome = entry?.home === undefined ? undefined : normalizePath(entry.home, homeDir)
     const result: ScopeResolution = {
       scope,
-      home: join(namespaceDir, scope),
+      home: configuredHome ?? join(namespaceDir, scope),
+      homeSource: configuredHome === undefined ? 'namespace' : 'configured',
       publish: publishFor(entry),
       publishKnown,
       source,
@@ -200,17 +202,19 @@ export function createScopeResolver(options: ScopeResolverOptions = {}): ScopeSe
   }
 
   const ensure = (scope: ScopeResolution): ScopeResolution => {
-    if (!NAME_RE.test(scope.scope) || scope.home !== join(namespaceDir, scope.scope)) throw new Error(`Invalid memex scope route: ${scope.scope}`)
-    if (!existsSync(namespaceDir)) mkdirSync(namespaceDir, { recursive: true })
-    assertSafeDirectory(namespaceDir, 'Memex namespace')
-    const realNamespace = realpathSync(namespaceDir)
-    assertContained(realNamespace, realNamespace)
-
-    const scopeHome = join(namespaceDir, scope.scope)
+    if (!NAME_RE.test(scope.scope)) throw new Error(`Invalid memex scope route: ${scope.scope}`)
+    if (!isAbsolute(scope.home)) throw new Error(`Memex library path must be absolute: ${scope.home}`)
+    if (scope.homeSource === 'namespace' && scope.home !== join(namespaceDir, scope.scope)) throw new Error(`Invalid namespace route for scope: ${scope.scope}`)
+    // A configured library may live inside its owning repository, so the
+    // namespace root is created lazily only when it is actually the parent.
+    const parent = dirname(scope.home)
+    if (!existsSync(parent)) mkdirSync(parent, { recursive: true })
+    if (!existsSync(namespaceDir) && scope.homeSource === 'namespace') mkdirSync(namespaceDir, { recursive: true })
+    const scopeHome = scope.home
     const existed = existsSync(join(scopeHome, 'cards'))
     if (!existsSync(scopeHome)) mkdirSync(scopeHome)
     assertSafeDirectory(scopeHome, 'Memex scope home')
-    assertContained(realNamespace, realpathSync(scopeHome))
+    if (scope.homeSource === 'namespace') assertContained(realpathSync(namespaceDir), realpathSync(scopeHome))
 
     const cards = join(scopeHome, 'cards')
     if (!existsSync(cards)) mkdirSync(cards)
