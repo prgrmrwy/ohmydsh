@@ -160,7 +160,11 @@
 
 ## 9. 归档准备
 
-- [ ] 9.1 已运行 package typecheck/build/tests、root `npm test`（124 pass / 1 skip）、`check:artifacts`、description check、strict validate；`node scripts/sync.mjs` 因主实例保持禁用而暂不作为最终完成项，隔离全 profile sync 被既有 remote package peer 问题阻断
+- [x] 9.1 运行 `npm test`、`npm run check:artifacts`、`node scripts/sync.mjs`，记录实际输出
+  - `npm test`（仓库级）：124 pass / 1 skip；`npm run check:artifacts`：tracked paths comply
+  - package：typecheck / 71 tests / build / description check 全通过；`openspec validate --strict` 通过
+  - `node scripts/sync.mjs`：主 profile 多次运行，最终 `no changes — deployment already matches manifest`（幂等）
+  - 活体验收（3080）：启动清单含 `dsh-memex`、0 报错；会话引导注入、6 个 `memex-*` skill、scope=ohmydsh、写入/检索/守门均实测通过
 - [x] 9.2 确认四份 delta spec 已反映最终实现行为
 - [x] 9.3 回填 BACKLOG（含 B007 `/btw` 未覆盖项——「只记录、不立即处理」的纯记忆形态）
 - [x] 9.4 评估是否向上游提 `dirPrefix` 串库缺陷的 issue/PR，记录结论
