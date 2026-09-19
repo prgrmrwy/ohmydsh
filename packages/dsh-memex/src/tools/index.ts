@@ -114,9 +114,14 @@ function logGuardReject(ctx: Context, scope: string, rules: readonly string[]): 
   ctx.logger('dsh-memex').warn('Cross-write rejected: scope=%s rules=%j', scope, rules)
 }
 
-function guardWrite(card: { slug: string; title?: string; body: string }, target: ScopeResolution, resolver: ScopeService) {
-  const workspacePaths = resolver.list().filter(scope => scope.publish === 'internal').flatMap(scope => scope.workspacePaths)
-  const decision = evaluateCrossWrite(card, target, resolver, workspacePaths)
+function guardWrite(
+  card: { slug: string; title?: string; body: string },
+  target: ScopeResolution,
+  resolver: ScopeService,
+  onInactiveRule?: (rule: string) => void,
+) {
+  const decision = evaluateCrossWrite(card, target, resolver)
+  for (const warning of decision.warnings) onInactiveRule?.(warning)
   return decision.allowed ? undefined : decision.rules
 }
 
@@ -191,7 +196,12 @@ async function writeCurrentAndAdditional(
   signal: AbortSignal | undefined,
   ctx: Context,
 ) {
-  const currentRules = guardWrite({ slug: args.slug, ...(args.title !== undefined ? { title: args.title } : {}), body: args.body }, current, resolver)
+  const inactiveRules: string[] = []
+  const noteInactive = (rule: string) => {
+    if (!inactiveRules.includes(rule)) inactiveRules.push(rule)
+    ctx.logger('dsh-memex').warn('Guard rule inactive: %s', rule)
+  }
+  const currentRules = guardWrite({ slug: args.slug, ...(args.title !== undefined ? { title: args.title } : {}), body: args.body }, current, resolver, noteInactive)
   if (currentRules) {
     logGuardReject(ctx, current.scope, currentRules)
     throw new Error(`Write rejected for scope ${current.scope}: ${currentRules.join(', ')}`)
@@ -217,7 +227,7 @@ async function writeCurrentAndAdditional(
       additional.push({ scope: name, written: false, error: 'unknown or invalid scope' })
       continue
     }
-    const rules = guardWrite({ slug: args.slug, ...(args.title !== undefined ? { title: args.title } : {}), body: args.body }, target, resolver)
+    const rules = guardWrite({ slug: args.slug, ...(args.title !== undefined ? { title: args.title } : {}), body: args.body }, target, resolver, noteInactive)
     if (rules) {
       logGuardReject(ctx, target.scope, rules)
       additional.push({ scope: target.scope, written: false, rules })
@@ -237,7 +247,7 @@ async function writeCurrentAndAdditional(
     const warning = [result.stderr.trim() ? 'memex emitted a write warning' : '', syncWarning].filter(Boolean).join('; ')
     additional.push({ scope: target.scope, written: true, ...(warning ? { warning } : {}) })
   }
-  return { primary, primaryWarnings, additional }
+  return { primary, primaryWarnings, additional, inactiveRules }
 }
 
 export function registerMemexTools(ctx: Context, resolver: ScopeService, options: MemexToolOptions = {}): () => void {
@@ -361,7 +371,7 @@ export function registerMemexTools(ctx: Context, resolver: ScopeService, options
       const content = enrichWriteContent(args.content, args.category)
       const result = await writeCurrentAndAdditional('write', { slug: args.slug, content, scope: args.scope, title: undefined, body: content }, current, resolver, runner, exec.signal, ctx)
       if (exec.agent !== undefined) options.onToolSuccess?.('write', exec.agent.session)
-      return { json: JSON.stringify({ ...(kernelVersionWarning ? { kernelVersionWarning } : {}), current: route(current), slug: args.slug, written: true, warning: [result.primary.stderr.trim() ? 'memex emitted a write warning' : '', ...result.primaryWarnings].filter(Boolean).join('; ') || undefined, additional: result.additional }, null, 2) }
+      return { json: JSON.stringify({ ...(kernelVersionWarning ? { kernelVersionWarning } : {}), current: route(current), slug: args.slug, written: true, warning: [result.primary.stderr.trim() ? 'memex emitted a write warning' : '', ...result.primaryWarnings].filter(Boolean).join('; ') || undefined, ...(result.inactiveRules.length > 0 ? { guardWarnings: result.inactiveRules } : {}), additional: result.additional }, null, 2) }
     },
   })))
 
@@ -384,7 +394,7 @@ export function registerMemexTools(ctx: Context, resolver: ScopeService, options
       const content = frontmatterForRetro(args)
       const result = await writeCurrentAndAdditional('retro', { slug: args.slug, title: args.title, body: args.body, content, scope: args.scope }, current, resolver, runner, exec.signal, ctx)
       if (exec.agent !== undefined) options.onToolSuccess?.('retro', exec.agent.session)
-      return { json: JSON.stringify({ ...(kernelVersionWarning ? { kernelVersionWarning } : {}), current: route(current), slug: args.slug, written: true, warning: [result.primary.stderr.trim() ? 'memex emitted a write warning' : '', ...result.primaryWarnings].filter(Boolean).join('; ') || undefined, additional: result.additional }, null, 2) }
+      return { json: JSON.stringify({ ...(kernelVersionWarning ? { kernelVersionWarning } : {}), current: route(current), slug: args.slug, written: true, warning: [result.primary.stderr.trim() ? 'memex emitted a write warning' : '', ...result.primaryWarnings].filter(Boolean).join('; ') || undefined, ...(result.inactiveRules.length > 0 ? { guardWarnings: result.inactiveRules } : {}), additional: result.additional }, null, 2) }
     },
   })))
 

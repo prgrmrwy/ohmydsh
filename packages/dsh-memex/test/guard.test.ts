@@ -13,15 +13,24 @@ const resolver = { list: () => [internal, external] } as ScopeService
 describe('cross-write guard', () => {
   it('rejects a target whose publication direction is unknown', () => {
     const unknown = { ...external, publishKnown: false, source: 'discovered' as const }
-    expect(evaluateCrossWrite({ slug: 'x', body: 'generic' }, unknown, resolver)).toEqual({ allowed: false, rules: ['configuration:publish-unknown'] })
+    expect(evaluateCrossWrite({ slug: 'x', body: 'generic' }, unknown, resolver)).toMatchObject({ allowed: false, rules: ['configuration:publish-unknown'] })
   })
   it('does not gate writes to internal libraries', () => {
     expect(evaluateCrossWrite({ slug: 'x', body: 'apaas-nexus details' }, internal, resolver).allowed).toBe(true)
   })
-  it('fails closed when any known internal scope lacks workspace evidence', () => {
-    const unknown = scope('other-internal', 'internal')
-    const service = { list: () => [unknown, external] } as ScopeService
-    expect(evaluateCrossWrite({ slug: 'x', body: 'generic text' }, external, service)).toMatchObject({ allowed: false, rules: ['structural:workspace-path-unknown'] })
+  it('keeps a rule with no input inactive instead of blocking every write', () => {
+    const noPaths = scope('other-internal', 'internal')
+    const service = { list: () => [noPaths, external] } as ScopeService
+    const decision = evaluateCrossWrite({ slug: 'x', body: 'generic text' }, external, service)
+    expect(decision).toMatchObject({ allowed: true, rules: [], warnings: ['structural:workspace-path-rule-inactive'] })
+  })
+  it('still rejects on the other rules while the path rule is inactive', () => {
+    const noPaths = scope('other-internal', 'internal')
+    const service = { list: () => [noPaths, external] } as ScopeService
+    const decision = evaluateCrossWrite({ slug: 'x', body: 'other-internal detail' }, external, service)
+    expect(decision.allowed).toBe(false)
+    expect(decision.rules).toContain('deny-term:other-internal')
+    expect(decision.warnings).toContain('structural:workspace-path-rule-inactive')
   })
   it('does not derive deny terms from external scope names', () => {
     expect(evaluateCrossWrite({ slug: 'x', body: 'ohmydsh personal' }, external, resolver).allowed).toBe(true)
