@@ -30,6 +30,7 @@ import type { AgentOptions, CreateAgentOptions } from '@deepseek-ai/dsh-agent'
 import { SessionId, type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { foldSessionTitle as foldDshSessionTitle } from '@deepseek-ai/dsh-session-title'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
+import { LOCUS_SAFE_CHILD_COMPOSITION } from './aggregate.js'
 import type { LocusDshPort, LocusParentSession, LocusWorkspace } from './controller.js'
 
 /** Minimal cold-inspection result consumed by this adapter. */
@@ -393,6 +394,7 @@ export function createProductionLocusDshPort(
       return {
         id: created.childSessionId,
         parentSessionId: input.parentSessionId,
+        childComposition: LOCUS_SAFE_CHILD_COMPOSITION,
         workspaceId: input.workspaceId,
         commit: created.commit,
         rollback: created.rollback,

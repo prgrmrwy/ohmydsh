@@ -1657,6 +1657,12 @@ export class LocusRepository {
         ...(input.senderOpenId !== undefined ? { senderOpenId: input.senderOpenId } : {}),
         ...(input.senderName !== undefined ? { senderName: input.senderName } : {}),
         ...(input.text !== undefined ? { text: input.text } : {}),
+        ...(input.addressing !== undefined ? {
+          addressing: Object.freeze({
+            ...input.addressing,
+            occurrences: Object.freeze(input.addressing.occurrences.map(occurrence => Object.freeze({ ...occurrence }))),
+          }),
+        } : {}),
         ...(input.replyTarget !== undefined ? { replyTarget: Object.freeze({ ...input.replyTarget }) } : {}),
         ...(input.replyToMessageId !== undefined ? { replyToMessageId: input.replyToMessageId } : {}),
         sequence,
@@ -3816,6 +3822,7 @@ function assertDeliveryRecord(record: DeliveryRecord): void {
     ...(record.senderOpenId !== undefined ? { senderOpenId: record.senderOpenId } : {}),
     ...(record.senderName !== undefined ? { senderName: record.senderName } : {}),
     ...(record.text !== undefined ? { text: record.text } : {}),
+    ...(record.addressing !== undefined ? { addressing: record.addressing } : {}),
     ...(record.replyTarget !== undefined ? { replyTarget: record.replyTarget } : {}),
     ...(record.rootMessageId !== undefined ? { rootMessageId: record.rootMessageId } : {}),
     ...(record.replyToMessageId !== undefined ? { replyToMessageId: record.replyToMessageId } : {}),

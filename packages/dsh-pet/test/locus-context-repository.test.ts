@@ -71,6 +71,43 @@ describe('caller-bound locus context repository', () => {
     })
   })
 
+  it('inspects durable mismatches without inventing observer-only reasons', async () => {
+    const proof = {
+      deliveryId: 'delivery-1', executionId: 'execution-1', turnId: 'session-child#3',
+      source: 'delivery' as const, locusId: 'locus-1', generation: 2,
+    }
+    const base = aggregate()
+    const current = {
+      deliveryId: 'delivery-1', messageId: 'om-1', endpoint: record.endpoint,
+      locusId: record.id, generation: record.generation, childSessionId: record.childSessionId,
+      status: 'current' as const, queueState: 'current' as const,
+    }
+    const repository = asLocusContextRepository({
+      ...base,
+      findCurrentSerializedDelivery: () => current,
+    }, () => ({ executionId: proof.executionId, turnId: proof.turnId }))
+
+    expect(repository.inspectCurrentDeliveryAuthorization?.({
+      childSessionId: record.childSessionId, operation: 'finish', proof,
+    })).toMatchObject({ ok: true, locus: { currentDelivery: current } })
+
+    const generationMismatch = asLocusContextRepository({
+      ...base,
+      findCurrentSerializedDelivery: () => ({ ...current, generation: 3 }),
+    }, () => ({ executionId: proof.executionId, turnId: proof.turnId }))
+    expect(generationMismatch.inspectCurrentDeliveryAuthorization?.({
+      childSessionId: record.childSessionId, operation: 'wait', proof,
+    })).toEqual({ ok: false, reason: 'generation-mismatch' })
+
+    const stale = asLocusContextRepository({
+      ...base,
+      findCurrentSerializedDelivery: () => ({ ...current, deliveryId: 'delivery-2' }),
+    }, () => ({ executionId: proof.executionId, turnId: proof.turnId }))
+    expect(stale.inspectCurrentDeliveryAuthorization?.({
+      childSessionId: record.childSessionId, operation: 'track', proof,
+    })).toEqual({ ok: false, reason: 'stale-delivery' })
+  })
+
   it('never exposes a prior reply target to a GUI or initialization turn', () => {
     const repository = asLocusContextRepository(aggregate(), () => undefined)
     expect(repository.findByChildSessionId('session-child')[0]).not.toHaveProperty('currentDelivery')

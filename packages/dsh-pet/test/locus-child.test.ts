@@ -4,6 +4,7 @@ import {
   createLocusChildAdapter,
   LOCUS_CHILD_PROVIDER,
   LOCUS_QUEUE_PROMPT_SYMBOL,
+  LOCUS_SAFE_TOOL_FILTER,
   probeLocusChildPorts,
   resolveLocusParent,
   type LocusChildIdentity,
@@ -40,6 +41,7 @@ function subagentPort(
   }),
   options: {
     readonly supportsSettlementNotice?: boolean
+    readonly supportsIndependentContinuableCreate?: boolean
     /**
      * Whether `getProvider(LOCUS_CHILD_PROVIDER)` proves independence, exactly
      * as the real `spawn` provider does (`inheritsParentContext: false`).
@@ -53,6 +55,7 @@ function subagentPort(
   return {
     startContinuable: vi.fn(start),
     supportsSettlementNotice: options.supportsSettlementNotice ?? true,
+    supportsIndependentContinuableCreate: options.supportsIndependentContinuableCreate ?? true,
     getProvider: vi.fn((name: string) =>
       proven && name === LOCUS_CHILD_PROVIDER ? { inheritsParentContext: false } : undefined),
   }
@@ -238,6 +241,75 @@ describe('generic locus child adapter', () => {
       })).resolves.toEqual({ ok: false, reason: 'independent-context-unproven' })
       expect(idleStart.createIdleContinuable).not.toHaveBeenCalled()
     }
+  })
+
+  it('refuses idle creation before side effects when the safe-composition seam is unproven', async () => {
+    const createIdleContinuable = vi.fn(async (spec: { childId: string }) => ({ childId: spec.childId }))
+    const start: LocusSubagentPort = {
+      ...subagentPort(undefined, { supportsIndependentContinuableCreate: false }),
+      createIdleContinuable,
+      supportsIdleContinuableCreate: true,
+    }
+    const adapter = createLocusChildAdapter({
+      parent: parentPort({ resident: parent() }),
+      subagent: start,
+      inbox: inboxPort(),
+    })
+
+    await expect(adapter.createIdleChild({
+      parentSessionId: PARENT_ID,
+      childId: CHILD_ID,
+      label: 'unsafe locus child',
+    })).resolves.toEqual({ ok: false, reason: 'safe-composition-unsupported' })
+    expect(createIdleContinuable).not.toHaveBeenCalled()
+  })
+
+  it('creates idle children with the exact durable independent safe composition', async () => {
+    const createIdleContinuable = vi.fn(async (spec: { childId: string }) => ({ childId: spec.childId }))
+    const start: LocusSubagentPort = {
+      ...subagentPort(),
+      createIdleContinuable,
+      supportsIdleContinuableCreate: true,
+    }
+    const adapter = createLocusChildAdapter({
+      parent: parentPort({ resident: parent() }),
+      subagent: start,
+      inbox: inboxPort(),
+    })
+
+    await expect(adapter.createIdleChild({
+      parentSessionId: PARENT_ID,
+      childId: CHILD_ID,
+      label: 'safe locus child',
+    })).resolves.toMatchObject({ ok: true, created: true })
+    expect(createIdleContinuable).toHaveBeenCalledWith({
+      childId: CHILD_ID,
+      provider: LOCUS_CHILD_PROVIDER,
+      label: 'safe locus child',
+      parent: parent(),
+      settlementNotice: 'silent',
+      contextMode: 'independent-v1',
+      toolFilter: LOCUS_SAFE_TOOL_FILTER,
+      signal: expect.any(AbortSignal),
+    })
+  })
+
+  it('safe composition is allow-based, excludes every process/delegation bypass, and keeps scoped Pet tools out of the filter', () => {
+    expect(LOCUS_SAFE_TOOL_FILTER).toEqual({
+      allow: ['read', 'read_image', 'glob', 'grep', 'web_search'],
+    })
+    for (const denied of [
+      'bash', 'pwsh', 'write', 'edit', 'skill', 'job_output', 'job_kill',
+      'create_goal', 'update_goal', 'exit_plan_mode', 'ask_user_question',
+      'todo_write', 'subagent', 'subagent_fork', 'send_message', 'list_agents',
+      'workflow', 'ralph', 'run_code', 'web_fetch',
+    ]) {
+      expect(LOCUS_SAFE_TOOL_FILTER.allow).not.toContain(denied)
+    }
+    // ToolRuntime restrictions filter inherited globals only. Pet's own tools
+    // register in the child scope after the filter and must not be named here.
+    expect(LOCUS_SAFE_TOOL_FILTER.allow).not.toContain('pet_locus_finish')
+    expect(LOCUS_SAFE_TOOL_FILTER.allow).not.toContain('pet_locus_wait')
   })
 
   it('never re-verifies independence for an explicitly named provider (D1: explicit choice stands)', async () => {
@@ -609,6 +681,33 @@ describe('generic locus child adapter', () => {
     expect(adapter.activeChild).toEqual({ parentSessionId: PARENT_ID, childSessionId: CHILD_ID })
   })
 
+  it('reports a fixed text-only route without claiming typed image delivery succeeded', async () => {
+    const error = Object.assign(new Error('MODEL_DOES_NOT_SUPPORT_IMAGES'), {
+      code: 'MODEL_DOES_NOT_SUPPORT_IMAGES',
+    })
+    const adapter = createLocusChildAdapter({
+      parent: parentPort({ resident: parent() }),
+      subagent: subagentPort(),
+      inbox: inboxPort(async () => { throw error }),
+    })
+    const created = await adapter.createChild({ parentSessionId: PARENT_ID, label: 'child', prompt: 'seed' })
+    if (!created.ok) throw new Error('expected child')
+
+    await expect(adapter.queuePrompt({
+      content: [{
+        type: 'image',
+        attachment: {
+          attachmentId: 'attachment-text-route' as never,
+          mediaType: 'image/png',
+          bytes: 8,
+          width: 1,
+          height: 1,
+        },
+      }],
+      identity: created.identity,
+    })).resolves.toEqual({ ok: false, reason: 'image-route-unsupported' })
+  })
+
   it('uses injected compensation and only clears identity after release succeeds', async () => {
     const release = vi.fn(async () => undefined)
     const adapter = createLocusChildAdapter({
@@ -800,12 +899,9 @@ describe('probed host child seams', () => {
     /** Literal capability marker from the runtime actually loaded. */
     readonly supportsSettlementNotice?: boolean
     readonly supportsIdleContinuableCreate?: boolean
+    readonly supportsIndependentContinuableCreate?: boolean
     readonly supportsLiveContinuableChildSession?: boolean
-    /**
-     * Whether `getProvider(LOCUS_CHILD_PROVIDER)` proves independence. Off by
-     * default like the other markers here, so a test asserting success must
-     * opt every required capability in explicitly.
-     */
+    /** Whether `getProvider(LOCUS_CHILD_PROVIDER)` proves provider independence. */
     readonly independentContextProven?: boolean
   } = {}) {
     const services: Record<string, unknown> = {
@@ -830,6 +926,9 @@ describe('probed host child seams', () => {
         ...(overrides.supportsIdleContinuableCreate === true
           ? { supportsIdleContinuableCreate: true }
           : {}),
+        ...(overrides.supportsIndependentContinuableCreate !== false
+          ? { supportsIndependentContinuableCreate: true }
+          : {}),
         ...(overrides.supportsLiveContinuableChildSession === true
           ? { supportsLiveContinuableChildSession: true }
           : {}),
@@ -841,6 +940,14 @@ describe('probed host child seams', () => {
     }
     return { get: (name: string) => services[name], on: () => () => {} }
   }
+
+  it('keeps the entire child seam unavailable without the independent-continuation marker', () => {
+    const probe = probeLocusChildPorts(hostCtx({ supportsIndependentContinuableCreate: false }))
+    expect(probe).toEqual({
+      available: false,
+      diagnostic: 'independent-continuable-create-unavailable',
+    })
+  })
 
   it('resumes the main session through the session controller, not a bare resume', async () => {
     const resolveAgent = vi.fn(() => ({ agent: parent() }))
@@ -910,7 +1017,11 @@ describe('probed host child seams', () => {
     // precedent above.
     const noMethod = probeLocusChildPorts({
       get: (name: string) => (name === 'subagents'
-        ? { startContinuable: async () => ({ childId: CHILD_ID }), [LOCUS_QUEUE_PROMPT_SYMBOL]: async () => 'm' }
+        ? {
+          startContinuable: async () => ({ childId: CHILD_ID }),
+          supportsIndependentContinuableCreate: true,
+          [LOCUS_QUEUE_PROMPT_SYMBOL]: async () => 'm',
+        }
         : name === 'agents' ? { get: () => undefined, resume: async () => undefined } : undefined),
       on: () => () => {},
     })

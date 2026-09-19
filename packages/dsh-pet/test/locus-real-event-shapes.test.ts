@@ -179,6 +179,13 @@ describe('admission and reply targets for the real observed shapes', () => {
       messageId: REAL_ID_SHAPES.nextMessageId,
     })
     expect(admission.message.replyToMessageId).toBe(REAL_ID_SHAPES.quotedMessageId)
+    expect(admission.message.addressing).toMatchObject({
+      status: 'unknown',
+      selfMentioned: true,
+      otherBotCount: 0,
+      orderKnown: true,
+      occurrences: [{ kind: 'self-bot' }],
+    })
   })
 
   it('keeps a topic reply on its topic entry and records the topic root', () => {

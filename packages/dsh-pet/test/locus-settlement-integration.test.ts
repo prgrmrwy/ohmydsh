@@ -39,6 +39,7 @@ async function durableLocus(harness: PetHarness): Promise<LocusRepository> {
     workspaceId: 'workspace-settle',
     source: 'auto',
     state: 'active',
+    childComposition: 'safe-v1',
     permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
     busy: false,
     createdAt: 1,
@@ -54,6 +55,7 @@ async function durableLocus(harness: PetHarness): Promise<LocusRepository> {
     parentLocusId: 'locus-settle-group',
     source: 'inherited',
     state: 'active',
+    childComposition: 'safe-v1',
     permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
     busy: false,
     createdAt: 2,
@@ -371,6 +373,51 @@ describe('durable Delivery lifecycle against its exact child turn', () => {
       expect(host.repository.findDeliveryByMessageId('om_b')?.turnId).toBe(`${CHILD}#2`)
       expect(host.repository.findDeliveryByMessageId('om_b')?.status).toBe('no-reply')
       expect(host.settledReactions.map(entry => entry.target.messageId)).toEqual(['om_a', 'om_b'])
+    } finally {
+      await host.close()
+    }
+  })
+
+  it('settles a reference-only Delivery with no reply body and advances the queue', async () => {
+    const host = await composeSettlementHost()
+    try {
+      await host.controller.handleAdmission(admission('om_reference') as never)
+      await host.controller.handleAdmission(admission('om_after_reference') as never)
+      expect(host.queued).toHaveLength(1)
+
+      host.claim({ childSessionId: CHILD, messageId: host.queued[0]!.messageId, turn: 1, sourceKind: 'user' })
+      await host.finish(CORRELATION, 'no-reply', { reason: 'reference-only: no action requested' })
+
+      expect(host.repository.findDeliveryByMessageId('om_reference')).toMatchObject({
+        status: 'no-reply',
+        finishOutcome: 'no-reply',
+        outboundResult: 'none',
+      })
+      await vi.waitFor(() => { expect(host.queued).toHaveLength(2) })
+      expect(host.repository.findDeliveryByMessageId('om_after_reference')?.status).toBe('current')
+    } finally {
+      await host.close()
+    }
+  })
+
+  it('treats an answer after a clarification as a new FIFO Delivery on the same child', async () => {
+    const host = await composeSettlementHost()
+    try {
+      await host.controller.handleAdmission(admission('om_ambiguous') as never)
+      host.claim({ childSessionId: CHILD, messageId: host.queued[0]!.messageId, turn: 1, sourceKind: 'user' })
+
+      // The clarification is an ordinary managed reply and therefore the
+      // terminal result of A, not an intermediate body outside the ledger.
+      await host.finish(CORRELATION, 'reply')
+      expect(host.repository.findDeliveryByMessageId('om_ambiguous')?.status).toBe('replied')
+
+      await host.controller.handleAdmission(admission('om_clarified_answer') as never)
+      const answer = host.repository.findDeliveryByMessageId('om_clarified_answer')
+      const clarification = host.repository.findDeliveryByMessageId('om_ambiguous')
+      expect(answer).toMatchObject({ childSessionId: CHILD, status: 'current' })
+      expect(answer?.deliveryId).not.toBe(clarification?.deliveryId)
+      expect(host.queued).toHaveLength(2)
+      expect(host.queued[1]?.messageId).not.toBe(host.queued[0]?.messageId)
     } finally {
       await host.close()
     }

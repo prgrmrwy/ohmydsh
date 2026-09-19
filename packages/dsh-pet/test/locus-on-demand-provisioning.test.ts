@@ -138,7 +138,12 @@ async function composeOnDemandHost(options: { readonly failFirstCreate?: boolean
         }
         const parent = sessions.get(parentSessionId)
         if (parent === undefined) throw new Error('missing parent fixture')
-        return { id: `session-child-${++sequence}`, parentSessionId, workspaceId: parent.workspaceId }
+        return {
+          id: `session-child-${++sequence}`,
+          parentSessionId,
+          workspaceId: parent.workspaceId,
+          childComposition: 'safe-v1' as const,
+        }
       },
     },
     // Only exercised by `replaceAutomaticGroupParentLocked`'s switch-warning
@@ -170,6 +175,7 @@ async function composeOnDemandHost(options: { readonly failFirstCreate?: boolean
             childSessionId: record.childSessionId,
             workspaceId: record.workspaceId,
             state: 'active' as const,
+            childComposition: 'safe-v1' as const,
             permission: { desired: record.permission, effective: record.permission, verifiedAt: Date.now() },
           }
         },
@@ -192,7 +198,7 @@ async function composeOnDemandHost(options: { readonly failFirstCreate?: boolean
       ensureChild: locus => ({ parentSessionId: locus.parentSessionId, childSessionId: locus.childSessionId }),
       withChildSession: async input => ({ ok: true as const, value: await input.operation({ id: input.identity.childSessionId }) }),
       queueChild: input => {
-        queued.push({ childSessionId: input.child.childSessionId, prompt: input.prompt })
+        queued.push({ childSessionId: input.child.childSessionId, prompt: input.content.filter(block => block.type === 'text').map(block => block.text).join('\n') })
         return { accepted: true as const, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }
       },
     },

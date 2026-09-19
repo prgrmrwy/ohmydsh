@@ -20,7 +20,13 @@
  * marker exists for.
  */
 
-import { LocusError, type LocusEndpoint, type LocusRecord } from './aggregate.js'
+import {
+  LOCUS_SAFE_CHILD_COMPOSITION,
+  LocusError,
+  type LocusChildComposition,
+  type LocusEndpoint,
+  type LocusRecord,
+} from './aggregate.js'
 import { classifyEndpointRetirement, type RetiredAssociationStore } from './retirement.js'
 
 /** A locus row the channel may serve, in the controller's vocabulary. */
@@ -30,6 +36,8 @@ export interface ResolvedActiveLocus {
   readonly generation: number
   readonly parentSessionId: string
   readonly childSessionId: string
+  /** Optional in the structural port; every returned/accepted active row is checked. */
+  readonly childComposition?: LocusChildComposition
   readonly workspaceId: string
   readonly state: 'active'
   readonly permission: LocusRecord['permission']
@@ -133,12 +141,19 @@ function toActive(record: LocusRecord): ResolvedActiveLocus {
       `Locus ${record.id} is ${record.state} and cannot serve a delivery.`,
     )
   }
+  if (record.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION) {
+    throw new LocusResolutionError(
+      'locus-unusable',
+      `Locus ${record.id} has no durable safe-v1 child composition proof and must be rebuilt.`,
+    )
+  }
   return {
     id: record.id,
     endpoint: { ...record.endpoint },
     generation: record.generation,
     parentSessionId: record.parentSessionId,
     childSessionId: record.childSessionId,
+    childComposition: record.childComposition,
     workspaceId: record.workspaceId,
     state: 'active',
     permission: record.permission,
@@ -236,6 +251,7 @@ export function createLocusResolution(ports: LocusResolutionPorts): {
       // non-active or childless locus would otherwise reach the delivery path.
       if (
         established.state !== 'active' ||
+        established.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION ||
         established.childSessionId.trim() === '' ||
         established.parentSessionId.trim() === '' ||
         established.id.trim() === ''

@@ -20,7 +20,7 @@
  *   separate, once-only decision made by the caller.
  */
 
-import type { LocusRecord } from './aggregate.js'
+import { LOCUS_SAFE_CHILD_COMPOSITION, type LocusRecord } from './aggregate.js'
 
 /** What the runtime could prove about one locus child. */
 export type ChildLiveness =
@@ -95,19 +95,33 @@ export async function reconcileLocusChildren(
   let usable = 0
 
   const candidates = loci.filter(record => record.state === 'active')
+  const safeCandidates: LocusRecord[] = []
+  for (const record of candidates) {
+    if (signal.aborted) break
+    if (record.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION) {
+      // This durable fact is checked before any runtime probe: probing may
+      // resolve/adopt/cold-resume the child and thereby inherit the parent preset.
+      const reason = '该代际缺少 safe-v1 child composition 证明，需要所有者重新建立。'
+      await ports.store.invalidate(record.id, reason, now())
+      invalidated.push({ locusId: record.id, reason })
+      ports.log?.('child-unusable')
+      continue
+    }
+    safeCandidates.push(record)
+  }
   if (ports.probe === undefined) {
-    // One missing seam must not invalidate every entry the user has.
-    if (candidates.length > 0) ports.log?.('probe-unavailable')
+    // A missing liveness seam proves nothing about otherwise safe-v1 rows.
+    if (safeCandidates.length > 0) ports.log?.('probe-unavailable')
     return {
-      checked: 0,
+      checked: invalidated.length,
       usable: 0,
-      invalidated: [],
-      unproven: candidates.map(record => record.id),
+      invalidated,
+      unproven: safeCandidates.map(record => record.id),
       busyCleared: [],
     }
   }
 
-  for (const record of candidates) {
+  for (const record of safeCandidates) {
     if (signal.aborted) break
     if (record.childSessionId === undefined) {
       // An active generation with no child cannot serve work at all.

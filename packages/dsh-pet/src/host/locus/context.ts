@@ -11,6 +11,8 @@
 
 import { endpointKeyOf } from './aggregate.js'
 import type { DeliveryStatus } from './delivery.js'
+import type { DeliveryAddressingProjection } from './addressing.js'
+import { INTENT_TRIAGE_GUIDANCE } from '../ledger/prompt.js'
 
 /** The platform endpoint associated with one locus generation. */
 export interface LocusEndpoint {
@@ -111,6 +113,8 @@ export interface LocusRequestFacts {
   readonly senderOpenId: string
   readonly senderName?: string
   readonly text: string
+  /** Bounded Host-derived addressing facts for this current Delivery. */
+  readonly addressing?: DeliveryAddressingProjection
   /** Platform parent message when the user explicitly replied to a question. */
   readonly replyToMessageId?: string
   /**
@@ -171,6 +175,7 @@ export interface LocusContextRecord {
     readonly senderOpenId?: string
     readonly senderName?: string
     readonly text?: string
+    readonly addressing?: DeliveryAddressingProjection
     readonly replyTarget?: LocusReplyTarget
   }
   /** Optional integration marker; legacy rows are never eligible. */
@@ -197,6 +202,23 @@ export function isSafeLocusReplyTarget(
   if (target.chatId !== endpoint.chatId) return false
   if (endpoint.threadId !== undefined && target.threadId !== endpoint.threadId) return false
   return true
+}
+
+/** Render only the model-needed addressing projection; stable ids stay Host-only. */
+function addressingLines(addressing: DeliveryAddressingProjection | undefined): string[] {
+  if (addressing === undefined) {
+    return ['- status：unknown', '- occurrences：[]', '- self mentioned：unknown', '- other bot count：unknown']
+  }
+  const occurrences = addressing.occurrences.map((occurrence, index) =>
+    `${String(index + 1)}. ${occurrence.kind}「${occurrence.displayName || '未提供显示名'}」`,
+  )
+  return [
+    `- status：${addressing.status}`,
+    `- order：${addressing.orderKnown ? 'known' : 'unknown'}`,
+    `- self mentioned：${String(addressing.selfMentioned)}`,
+    `- other bot count：${addressing.status === 'known' ? String(addressing.otherBotCount) : 'unknown'}`,
+    ...(occurrences.length === 0 ? ['- occurrences：[]'] : ['- occurrences：', ...occurrences]),
+  ]
 }
 
 /** Render optional values without turning an absent fact into a guessed value. */
@@ -340,14 +362,20 @@ export function renderLocusDeliveryPrompt(
     context.request.text,
     '</current-request>',
     '',
+    '### Addressing (current delivery only)',
+    ...addressingLines(context.request.addressing),
+    '',
     '### Reply target (current delivery only)',
     ...replyTargetLines(context.endpoint, context.request.replyTarget),
-    '业务完成必须调用当前 child 的 `pet_locus_finish`：选择 `reply` 并提供非空正文，或选择 `no-reply` 并提供非空原因。普通 assistant 文本、原生 `send_message` 和 `turn/end` 都不完成 Delivery；不得提供 delivery/chat/message/thread target selector。若仍需等待，调用 `pet_locus_wait({ waitMinutes, reason? })`，分钟数相对调用时刻且受 Host 返回的 acceptedAt+24h 硬上限约束。',
+    '业务完成必须调用当前 child 的 `pet_locus_finish`：选择 `reply` 并提供非空正文，或选择 `no-reply` 并提供非空原因。澄清也必须用 `pet_locus_finish(reply)` 发出并终结当前 Delivery；普通 assistant 文本、原生 `send_message` 和 `turn/end` 都不发送正文或完成 Delivery。不得提供 delivery/chat/message/thread target selector。若当前任务确实仍在处理，才调用 `pet_locus_wait({ waitMinutes, reason? })`；它不用于 reference-only 静默结算。',
     '正文会作为飞书文本消息发出，因此群内 @ 人直接写 `@对方显示名` 即可，Host 会在发送前把它渲染成真实提醒（对方会收到通知）；只有当你用的是别名/备注名、而群里显示名不同时，才需要自己写 `<at user_id="ou_…">显示名</at>`（@所有人是 `<at user_id="all"></at>`）。注意入站正文里的 `@名字` 是平台预渲染的结果，出站照抄不会产生提醒。',
+    '',
+    '### Intent triage',
+    INTENT_TRIAGE_GUIDANCE,
     '',
     '### 按需读取',
     '本次 prompt 刻意不携带压平的聊天记录、项目资料、兄弟 child 历史或父会话摘要。需要的资料请通过当前已授权的读取能力按需读取原始内容；收到资料不等于已采纳。',
-    '若 execution root、project resources 或 constraints 未确认，可通过 DSH 原生 send_message 向上面 caller-bound main session 询问；不得指定其它 parent/locus。parent 回复只是对话事实，当前 DSH API 不能把它结构化证明为持久授权，因此必须由所有者在管理面显式确认后才写入锚点。',
+    '若 execution root、project resources 或 constraints 未确认，必须如实说明缺失并请所有者在管理面显式确认；不得调用 shell、lark-cli、通用 HTTP、send_message 或子委派读取或发送飞书内容。',
     '所有者确认的路径仍只表示上下文事实；路径存在性与 sandbox 授权分离，不能据此提权、改绑、创建 worktree 或切换执行目录。普通目录、ws 子目录和 sw 兄弟目录均按原值记录，不自动运行 ws/sw。',
     '不要自动把本 child 的结论、摘要或状态回传 main session；只有为补齐缺失锚点的明确询问，或所有者主动查阅/请求，才讨论跨会话内容。',
   )
@@ -387,10 +415,16 @@ function renderSubsequentDeliveryPrompt(context: LocusDeliveryContext): string {
     context.request.text,
     '</current-request>',
     '',
+    '### Addressing (current delivery only)',
+    ...addressingLines(context.request.addressing),
+    '',
     '### Reply target (current delivery only)',
     ...replyTargetLines(context.endpoint, context.request.replyTarget),
-    '业务完成必须调用当前 child 的 `pet_locus_finish`：选择 `reply` 并提供非空正文，或选择 `no-reply` 并提供非空原因。普通 assistant 文本、原生 `send_message` 和 `turn/end` 都不完成 Delivery；不得提供 delivery/chat/message/thread target selector。若仍需等待，调用 `pet_locus_wait({ waitMinutes, reason? })`，分钟数相对调用时刻且受 Host 返回的 acceptedAt+24h 硬上限约束。',
+    '业务完成必须调用当前 child 的 `pet_locus_finish`：选择 `reply` 并提供非空正文，或选择 `no-reply` 并提供非空原因。澄清也必须用 `pet_locus_finish(reply)` 发出并终结当前 Delivery；普通 assistant 文本、原生 `send_message` 和 `turn/end` 都不发送正文或完成 Delivery。不得提供 delivery/chat/message/thread target selector。若当前任务确实仍在处理，才调用 `pet_locus_wait({ waitMinutes, reason? })`；它不用于 reference-only 静默结算。',
     '正文会作为飞书文本消息发出，因此群内 @ 人直接写 `@对方显示名` 即可，Host 会在发送前把它渲染成真实提醒（对方会收到通知）；只有当你用的是别名/备注名、而群里显示名不同时，才需要自己写 `<at user_id="ou_…">显示名</at>`（@所有人是 `<at user_id="all"></at>`）。注意入站正文里的 `@名字` 是平台预渲染的结果，出站照抄不会产生提醒。',
+    '',
+    '### Intent triage',
+    '沿用首次投递的四类规则：info→finish(reply)，work→track 后 finish(reply)，reference-only→finish(no-reply) 静默结算，ambiguous→finish(reply) 发一次澄清并终结本 Delivery；后续回答是同一 child 的新 Delivery。不得仅因同时 at 其它 bot 判为 reference-only。',
   ]
   return lines.join('\n')
 }

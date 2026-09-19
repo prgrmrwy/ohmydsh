@@ -155,6 +155,7 @@ function fakeHost(options: { defaultWorkspace?: string } = {}): FakeHost {
           id: `child-${++sequence}`,
           parentSessionId: input.parentSessionId,
           workspaceId: sessions.get(input.parentSessionId)?.workspaceId ?? 'ws-default',
+          childComposition: 'safe-v1' as const,
           commit: async () => {
             if (failChildCommit) throw new Error('child finalize failed')
           },
@@ -620,6 +621,24 @@ describe('explicit rebuild', () => {
     })
     expect(rebuilt.group).toMatchObject({ mainSessionId: 'source-1', workspaceId: 'ws-source' })
     expect(host.createdMains).toHaveLength(0)
+  })
+
+  it('publishes safe-v1 only after the child returns the Host attestation', async () => {
+    const host = fakeHost()
+    const controller = new LocusController(host.deps)
+
+    const created = await controller.ensureGroup({ chatId: 'oc-safe-marker' })
+    expect(created.locus.childComposition).toBe('safe-v1')
+
+    const unsafe = fakeHost()
+    unsafe.deps.dsh.createChildSession = async input => ({
+      id: 'child-unattested',
+      parentSessionId: input.parentSessionId,
+      workspaceId: input.workspaceId,
+    })
+    await expect(new LocusController(unsafe.deps).ensureGroup({ chatId: 'oc-unsafe-marker' }))
+      .rejects.toMatchObject({ code: 'PROVISIONING_FAILED' })
+    expect(unsafe.repository.loci.size).toBe(0)
   })
 
   it('refuses a legacy-marker rebuild when unified state already exists', async () => {

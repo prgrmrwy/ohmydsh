@@ -56,6 +56,12 @@ async function reopen(medium: MemoryMedium) {
 }
 
 describe('durable unified locus repository', () => {
+  it('keeps legacy rows readable while round-tripping the additive safe marker', async () => {
+    expect(petLocusRecord.safeParse({ ...record(), childComposition: undefined }).success).toBe(true)
+    expect(petLocusRecord.parse({ ...record(), childComposition: 'safe-v1' }).childComposition).toBe('safe-v1')
+    expect(petLocusRecord.safeParse({ ...record(), childComposition: 'unsafe-v0' }).success).toBe(false)
+  })
+
   it('round-trips an explicit context anchor and keeps it separate from permission', async () => {
     const medium = emptyMedium()
     const first = await openPetHarness(medium)
@@ -731,6 +737,16 @@ describe('durable unified locus repository', () => {
       messageId: 'message-reopen',
       deliveryId: 'delivery-reopen',
       senderOpenId: 'ou_reopen',
+      addressing: {
+        status: 'known',
+        occurrences: [
+          { kind: 'self-bot', displayName: 'Pet', stableId: 'ou_pet' },
+          { kind: 'other-bot', displayName: 'Review Bot', stableId: 'ou_review' },
+        ],
+        selfMentioned: true,
+        otherBotCount: 1,
+        orderKnown: true,
+      },
       acceptedAt: 2,
     })
     await first.close()
@@ -743,7 +759,16 @@ describe('durable unified locus repository', () => {
     expect(report.retainedDeliveries).toEqual([
       expect.objectContaining({ deliveryId: accepted.record.deliveryId, status: 'accepted' }),
     ])
-    expect(restarted.getDelivery(accepted.record.deliveryId)).toMatchObject({ status: 'accepted' })
+    expect(restarted.getDelivery(accepted.record.deliveryId)).toMatchObject({
+      status: 'accepted',
+      addressing: {
+        status: 'known', selfMentioned: true, otherBotCount: 1, orderKnown: true,
+        occurrences: [
+          { kind: 'self-bot', displayName: 'Pet', stableId: 'ou_pet' },
+          { kind: 'other-bot', displayName: 'Review Bot', stableId: 'ou_review' },
+        ],
+      },
+    })
     // Unqueued backlog admission is not a failed dispatch: the busy fence stays
     // set so the common dispatcher can still claim and deliver this row.
     expect(restarted.getLocus(locus.id)).toMatchObject({ busy: true })

@@ -1,12 +1,19 @@
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { createScope } from '@deepseek-ai/dsh-scope'
 import Tools from '@deepseek-ai/dsh-tools'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import {
   registerCollaborationContextTool, registerCollaborationContextUpdateTool, registerCollaboratorsTool,
   COLLABORATION_CONTEXT_TOOL, COLLABORATION_CONTEXT_UPDATE_TOOL, COLLABORATORS_TOOL,
 } from '../src/host/collaboration/tools.js'
+
+// Scope tags use a package-private Symbol, so mint from ToolRuntime's own
+// dependency root rather than the repository's second physical dsh-scope copy.
+const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/package.json'))
+const scopeEntry = requireFromTools.resolve('@deepseek-ai/dsh-scope')
+const { createScope } = await import(pathToFileURL(scopeEntry).href) as typeof import('@deepseek-ai/dsh-scope')
 
 it('public query registration is scoped and does not grant parent child-local tools', async () => {
   const ctx = new Context()

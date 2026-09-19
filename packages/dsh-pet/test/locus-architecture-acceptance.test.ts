@@ -57,7 +57,12 @@ async function controllerFixture() {
       createChildSession: async ({ parentSessionId }) => {
         const parent = sessions.get(parentSessionId)
         if (parent === undefined) throw new Error('missing parent fixture')
-        const child = { id: `session-child-${++sequence}`, parentSessionId, workspaceId: parent.workspaceId }
+        const child = {
+          id: `session-child-${++sequence}`,
+          parentSessionId,
+          workspaceId: parent.workspaceId,
+          childComposition: 'safe-v1' as const,
+        }
         children.push(child)
         return child
       },
@@ -138,7 +143,8 @@ describe('design architecture acceptance A-F focused gaps', () => {
       await durable.putLocus({
         id: 'locus-decision', generation: 1, endpoint: { chatId: 'oc-decision' },
         parentSessionId: 'session-main', childSessionId: 'session-child', workspaceId: 'workspace-main',
-        source: 'auto', state: 'active', permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
+        source: 'auto', state: 'active', childComposition: 'safe-v1',
+        permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
         busy: false, createdAt: 1, updatedAt: 1,
       })
       const queued: Array<{ childSessionId: string; prompt: string }> = []
@@ -164,7 +170,7 @@ describe('design architecture acceptance A-F focused gaps', () => {
           ensureChild: locus => ({ parentSessionId: locus.parentSessionId, childSessionId: locus.childSessionId }),
           withChildSession: async input => ({ ok: true as const, value: await input.operation({ id: 'session-child' }) }),
           queueChild: input => {
-            queued.push({ childSessionId: input.child.childSessionId, prompt: input.prompt })
+            queued.push({ childSessionId: input.child.childSessionId, prompt: input.content.filter(block => block.type === 'text').map(block => block.text).join('\n') })
             return {
               accepted: true as const,
               executionId: input.executionId,

@@ -31,6 +31,7 @@ function locus(id: string) {
     id: `locus-${id}`,
     parentSessionId: 'main-shared',
     childSessionId: `child-${id}`,
+    childComposition: 'safe-v1' as const,
   }
 }
 
@@ -45,16 +46,27 @@ describe('multi-locus child delivery', () => {
     const first = await port.ensureChild(locus('a'), signal)
     const second = await port.ensureChild(locus('b'), signal)
     await expect(port.queueChild({
-      locus: locus('a'), child: first, deliveryId: 'd-a', executionId: 'e-a', prompt: 'A', signal,
+      locus: locus('a'), child: first, deliveryId: 'd-a', executionId: 'e-a', content: [{ type: 'text', text: 'A' }], signal,
     })).resolves.toEqual({ accepted: true, executionId: 'e-a', inboxMessageId: 'message-1' })
     await port.queueChild({
-      locus: locus('b'), child: second, deliveryId: 'd-b', executionId: 'e-b', prompt: 'B', signal,
+      locus: locus('b'), child: second, deliveryId: 'd-b', executionId: 'e-b', content: [{ type: 'text', text: 'B' }], signal,
     })
 
     // The generic adapter intentionally owns one active child. A singleton
     // here made the second sibling fail with active-child-conflict.
     expect(created).toBe(2)
     expect(calls).toEqual(['adopt:1', 'adopt:2', 'queue:1', 'queue:2'])
+  })
+
+  it('refuses legacy rows before allocating an adapter or attempting adoption', async () => {
+    const createAdapter = vi.fn(() => adapter('unused', []) as never)
+    const port = createLocusChildDelivery({ createAdapter })
+
+    await expect(port.ensureChild({
+      ...locus('legacy'),
+      childComposition: undefined,
+    }, signal)).rejects.toThrow('safe-composition-unproven')
+    expect(createAdapter).not.toHaveBeenCalled()
   })
 
   it('reuses the same adapter for later turns of one child', async () => {
@@ -68,7 +80,7 @@ describe('multi-locus child delivery', () => {
     const first = await port.ensureChild(target, signal)
     await port.ensureChild(target, signal)
     await port.queueChild({
-      locus: target, child: first, deliveryId: 'd', executionId: 'e', prompt: 'hello', signal,
+      locus: target, child: first, deliveryId: 'd', executionId: 'e', content: [{ type: 'text', text: 'hello' }], signal,
     })
 
     expect(created).toBe(1)
@@ -96,7 +108,7 @@ describe('multi-locus child delivery', () => {
     await expect(port.queueChild({
       locus: locus('a'),
       child: { parentSessionId: 'main-shared', childSessionId: 'child-a' },
-      deliveryId: 'd', executionId: 'e', prompt: 'hello', signal,
+      deliveryId: 'd', executionId: 'e', content: [{ type: 'text', text: 'hello' }], signal,
     })).resolves.toEqual({ accepted: false, reason: 'child-not-adopted' })
     expect(calls).toEqual([])
   })

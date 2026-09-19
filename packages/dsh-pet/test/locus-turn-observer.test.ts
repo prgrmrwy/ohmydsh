@@ -7,6 +7,7 @@ import {
   type LocusTurnObserverDiagnostic,
   type LocusTurnObserverLimits,
 } from '../src/host/locus/turn-observer.js'
+import { LOCUS_FINISH_HISTORY } from './fixtures/locus-finish-history.js'
 
 const CHILD = 'child-1'
 
@@ -19,7 +20,7 @@ const correlation = {
 
 /** Wire the observer to controllable runtime subscriptions. */
 function harness(options: {
-  readonly deliveries?: Record<string, { deliveryId: string; executionId: string }>
+  readonly deliveries?: Record<string, { deliveryId: string; executionId: string; status?: 'current' | 'settled' }>
   readonly limits?: LocusTurnObserverLimits
 } = {}) {
   const claimListeners: ((claim: LocusInboxClaim) => void)[] = []
@@ -399,6 +400,130 @@ describe('per-turn Delivery correlation', () => {
     h.end({ childSessionId: CHILD, turn: 1, outcome: 'completed' })
 
     expect(seen).toEqual(['started'])
+  })
+})
+
+describe('current capability inspection', () => {
+  it('distinguishes no current, unbound claim, and proven mixed source while preserving compatibility', () => {
+    const deliveries: Record<string, { deliveryId: string; executionId: string }> = {}
+    const h = harness({ deliveries })
+    expect(h.observer.inspectCurrentCapabilityForChild?.(CHILD)).toEqual({ ok: false, reason: 'no-current' })
+
+    h.claim({ childSessionId: CHILD, messageId: 'raced', turn: 1, sourceKind: 'user' })
+    expect(h.observer.inspectCurrentCapabilityForChild?.(CHILD)).toEqual({ ok: false, reason: 'claim-unbound' })
+    expect(h.observer.currentCapabilityForChild?.(CHILD)).toBeUndefined()
+
+    deliveries.raced = { deliveryId: 'delivery-raced', executionId: 'execution-raced' }
+    h.available('raced')
+    expect(h.observer.inspectCurrentCapabilityForChild?.(CHILD)).toMatchObject({
+      ok: true,
+      capability: { deliveryId: 'delivery-raced', source: 'delivery' },
+    })
+    expect(h.observer.currentCapabilityForChild?.(CHILD)).toMatchObject({ deliveryId: 'delivery-raced' })
+
+    h.claim({ childSessionId: CHILD, messageId: 'second', turn: 2, sourceKind: 'user' })
+    expect(h.observer.inspectCurrentCapabilityForChild?.(CHILD)).toEqual({ ok: false, reason: 'mixed-source' })
+  })
+
+  it('reports stale terminal delivery and unproven restored association', () => {
+    const stale = harness({ deliveries: {
+      stale: { deliveryId: 'delivery-stale', executionId: 'execution-stale', status: 'settled' },
+    } })
+    stale.claim({ childSessionId: CHILD, messageId: 'stale', turn: 1, sourceKind: 'user' })
+    expect(stale.observer.inspectCurrentCapabilityForChild?.(CHILD)).toEqual({ ok: false, reason: 'stale-delivery' })
+
+    const restored = harness()
+    restored.observer.restoreCurrentCapability?.({
+      delivery: {
+        deliveryId: 'delivery-1', executionId: 'execution-1', turnId: `${CHILD}#4`,
+        correlation, status: 'current',
+      },
+    })
+    expect(restored.observer.inspectCurrentCapabilityForChild?.(CHILD)).toEqual({
+      ok: false, reason: 'association-unproven',
+    })
+  })
+
+  it('reports capability unavailable after disposal', () => {
+    const h = harness()
+    h.observer.dispose()
+    expect(h.observer.inspectCurrentCapabilityForChild?.(CHILD)).toEqual({
+      ok: false, reason: 'capability-unavailable',
+    })
+  })
+})
+
+describe('sanitized historical finish-refusal sequences', () => {
+  it('recovers claim-before-bind without granting durable-current-only authority', () => {
+    const fixture = LOCUS_FINISH_HISTORY.claimBeforeBind
+    const deliveries: Record<string, { deliveryId: string; executionId: string }> = {}
+    const h = harness({ deliveries })
+
+    h.claim({ childSessionId: fixture.childSessionId, messageId: fixture.messageId, turn: fixture.turn, sourceKind: 'user' })
+    expect(h.observer.inspectCurrentCapabilityForChild?.(CHILD)).toEqual({ ok: false, reason: 'claim-unbound' })
+    deliveries[fixture.messageId] = { deliveryId: fixture.deliveryId, executionId: fixture.executionId }
+    h.available(fixture.messageId)
+    expect(h.observer.inspectCurrentCapabilityForChild?.(CHILD)).toMatchObject({
+      ok: true,
+      capability: { deliveryId: fixture.deliveryId, executionId: fixture.executionId, source: 'delivery' },
+    })
+  })
+
+  it('continues only on a later agent-message after the original turn ends', () => {
+    const fixture = LOCUS_FINISH_HISTORY.continuation
+    const h = harness({ deliveries: {
+      [fixture.deliveryMessageId]: { deliveryId: fixture.deliveryId, executionId: fixture.executionId },
+    } })
+
+    h.claim({ childSessionId: CHILD, messageId: fixture.deliveryMessageId, turn: fixture.originalTurn, sourceKind: 'user' })
+    h.end({ childSessionId: CHILD, turn: fixture.originalTurn, outcome: 'completed' })
+    expect(h.observer.inspectCurrentCapabilityForChild?.(CHILD)).toEqual({ ok: false, reason: 'association-unproven' })
+
+    h.claim({ childSessionId: CHILD, messageId: fixture.agentMessageId, turn: fixture.continuationTurn, sourceKind: 'agent-message' })
+    expect(h.observer.inspectCurrentCapabilityForChild?.(CHILD)).toMatchObject({
+      ok: true,
+      capability: { deliveryId: fixture.deliveryId, turnId: `${CHILD}#${fixture.continuationTurn}`, source: 'agent-message' },
+    })
+  })
+
+  it('revokes active A before B promotion so a late A cannot consume B', () => {
+    const fixture = LOCUS_FINISH_HISTORY.promotion
+    const h = harness({ deliveries: {
+      [fixture.expiredMessageId]: { deliveryId: fixture.expiredDeliveryId, executionId: fixture.expiredExecutionId },
+      [fixture.promotedMessageId]: { deliveryId: fixture.promotedDeliveryId, executionId: fixture.promotedExecutionId },
+    } })
+
+    h.claim({ childSessionId: CHILD, messageId: fixture.expiredMessageId, turn: fixture.expiredTurn, sourceKind: 'user' })
+    h.observer.revokeCurrentCapability?.({ childSessionId: CHILD, deliveryId: fixture.expiredDeliveryId })
+    expect(h.observer.inspectCurrentCapabilityForChild?.(CHILD)).toEqual({ ok: false, reason: 'no-current' })
+
+    h.claim({ childSessionId: CHILD, messageId: fixture.promotedMessageId, turn: fixture.promotedTurn, sourceKind: 'user' })
+    expect(h.observer.inspectCurrentCapabilityForChild?.(CHILD)).toMatchObject({
+      ok: true,
+      capability: { deliveryId: fixture.promotedDeliveryId, executionId: fixture.promotedExecutionId },
+    })
+    // A duplicate/late runtime claim is ignored after revocation; B remains exact.
+    h.claim({ childSessionId: CHILD, messageId: fixture.expiredMessageId, turn: fixture.expiredTurn, sourceKind: 'user' })
+    expect(h.observer.currentCapabilityForChild?.(CHILD)).toMatchObject({ deliveryId: fixture.promotedDeliveryId })
+  })
+
+  it('restores association only after a later trusted agent-message claim', () => {
+    const fixture = LOCUS_FINISH_HISTORY.restore
+    const h = harness()
+    h.observer.restoreCurrentCapability?.({ delivery: {
+      deliveryId: fixture.deliveryId,
+      executionId: fixture.executionId,
+      turnId: `${CHILD}#${fixture.originalTurn}`,
+      correlation,
+      status: 'current',
+    } })
+    expect(h.observer.inspectCurrentCapabilityForChild?.(CHILD)).toEqual({ ok: false, reason: 'association-unproven' })
+    h.claim({ childSessionId: CHILD, messageId: fixture.agentMessageId, turn: fixture.continuationTurn, sourceKind: 'agent-message' })
+    expect(h.observer.currentCapabilityForChild?.(CHILD)).toMatchObject({
+      deliveryId: fixture.deliveryId,
+      executionId: fixture.executionId,
+      source: 'agent-message',
+    })
   })
 })
 

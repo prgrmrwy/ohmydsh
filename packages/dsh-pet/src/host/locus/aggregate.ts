@@ -19,6 +19,12 @@ export type LocusState =
 
 export type LocusPermissionMode = 'read' | 'write'
 
+/** Durable proof that this child was created with the reviewed safe composition. */
+export type LocusChildComposition = 'safe-v1'
+
+/** The only composition generation currently safe for adoption and dispatch. */
+export const LOCUS_SAFE_CHILD_COMPOSITION: LocusChildComposition = 'safe-v1'
+
 /** The normalized address of a Lark chat or a thread inside that chat. */
 export interface LocusEndpoint {
   readonly chatId: string
@@ -61,6 +67,8 @@ export interface LocusRecord {
   readonly endpoint: LocusEndpoint
   readonly parentSessionId: string
   readonly childSessionId?: string
+  /** Absent on legacy rows, which remain readable but are never serviceable. */
+  readonly childComposition?: LocusChildComposition
   readonly workspaceId: string
   /** Group locus that structurally owns a topic locus, when applicable. */
   readonly parentLocusId?: string
@@ -84,6 +92,7 @@ export interface NewLocusInput {
   readonly endpoint: LocusEndpoint
   readonly parentSessionId: string
   readonly childSessionId?: string
+  readonly childComposition?: LocusChildComposition
   readonly workspaceId: string
   readonly parentLocusId?: string
   readonly source: LocusSource
@@ -294,6 +303,12 @@ export function buildLocusRecord(input: NewLocusInput): LocusRecord {
   const state = input.state ?? 'active'
   assertState(state)
   if (input.childSessionId !== undefined) assertString(input.childSessionId, 'childSessionId')
+  if (
+    input.childComposition !== undefined
+    && input.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION
+  ) {
+    throw new LocusError('INVALID_LOCUS', `Unknown child composition '${String(input.childComposition)}'`)
+  }
   if (input.parentLocusId !== undefined) assertString(input.parentLocusId, 'parentLocusId')
   if (input.parentLocusId !== undefined && normalized.threadId === undefined) {
     throw new LocusError('INVALID_LOCUS', 'A parentLocusId is only valid for a topic locus')
@@ -375,6 +390,7 @@ export function buildLocusRecord(input: NewLocusInput): LocusRecord {
     endpoint: freezeEndpoint(normalized),
     parentSessionId: input.parentSessionId.trim(),
     ...(input.childSessionId !== undefined ? { childSessionId: input.childSessionId.trim() } : {}),
+    ...(input.childComposition !== undefined ? { childComposition: input.childComposition } : {}),
     workspaceId: input.workspaceId.trim(),
     ...(input.parentLocusId !== undefined ? { parentLocusId: input.parentLocusId.trim() } : {}),
     source: input.source,

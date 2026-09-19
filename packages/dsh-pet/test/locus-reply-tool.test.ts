@@ -6,6 +6,7 @@ import {
 } from '../src/host/locus/turn-observer.js'
 import {
   PET_LOCUS_FINISH_TOOL,
+  PET_LOCUS_TRACK_TOOL,
   PET_LOCUS_WAIT_TOOL,
   registerPetTools,
 } from '../src/host/tools.js'
@@ -42,6 +43,9 @@ function lifecycleTools(current = true, overrides: {
   readonly currentCapability?: (childSessionId: string) => unknown
   readonly finishCurrentDelivery?: (input: unknown) => unknown
   readonly waitCurrentDelivery?: (input: unknown) => unknown
+  readonly inspectCurrentCapability?: (childSessionId: string) => unknown
+  readonly inspectCurrentDeliveryAuthorization?: (input: unknown) => unknown
+  readonly logAuthorizationRefusal?: (input: unknown) => void
 } = {}) {
   const definitions: Array<{ name: string; parameters: unknown; execute(args: unknown, exec: unknown): Promise<unknown> }> = []
   const authorizeCurrentDelivery = overrides.authorizeCurrentDelivery ?? (() => current ? contextRecord(true) : undefined)
@@ -64,6 +68,9 @@ function lifecycleTools(current = true, overrides: {
       authorizeCurrentDelivery,
       lark: { reply: replyExact, replyExact },
       currentCapability,
+      ...(overrides.inspectCurrentCapability === undefined ? {} : { inspectCurrentCapability: overrides.inspectCurrentCapability as never }),
+      ...(overrides.inspectCurrentDeliveryAuthorization === undefined ? {} : { inspectCurrentDeliveryAuthorization: overrides.inspectCurrentDeliveryAuthorization as never }),
+      ...(overrides.logAuthorizationRefusal === undefined ? {} : { logAuthorizationRefusal: overrides.logAuthorizationRefusal }),
       ...(overrides.finishCurrentDelivery === undefined ? {} : { finishCurrentDelivery: overrides.finishCurrentDelivery }),
       ...(overrides.waitCurrentDelivery === undefined ? {} : { waitCurrentDelivery: overrides.waitCurrentDelivery }),
     },
@@ -172,6 +179,48 @@ describe('caller-bound Feishu lifecycle tools', () => {
     await expect(finish.execute({ outcome: 'reply', text: 'must not leak' }, childExec)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
     await expect(wait.execute({ waitMinutes: 10 }, childExec)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
     expect(replyExact).not.toHaveBeenCalled()
+  })
+
+  it.each(['finish', 'wait'] as const)('returns a stable non-leaking %s refusal and logs only its reason', async (operation) => {
+    const logAuthorizationRefusal = vi.fn()
+    const inspectCurrentCapability = vi.fn(() => ({ ok: false as const, reason: 'mixed-source' as const }))
+    const tools = lifecycleTools(true, { inspectCurrentCapability, logAuthorizationRefusal })
+    const call = operation === 'finish'
+      ? tools.finish.execute({ outcome: 'reply', text: 'secret body' }, childExec)
+      : tools.wait.execute({ waitMinutes: 5 }, childExec)
+    await expect(call).rejects.toMatchObject({
+      code: 'INVALID_REQUEST',
+      message: 'This operation is not authorized for the current request.',
+      fields: { reason: 'mixed-source' },
+    })
+    expect(logAuthorizationRefusal).toHaveBeenCalledWith({ operation, reason: 'mixed-source' })
+    expect(String(await call.catch(error => error.message))).not.toContain('delivery-1')
+  })
+
+  it('uses the same refusal resolver for track', async () => {
+    const definitions: Array<{ name: string; execute(args: unknown, exec: unknown): Promise<unknown> }> = []
+    const logAuthorizationRefusal = vi.fn()
+    registerPetTools({ tools: { register: (definition: never) => { definitions.push(definition); return () => {} } } } as never, {
+      repository: {} as never,
+      locusRepository: { findByChildSessionId: () => [] },
+      intentTriage: {
+        loci: { findByChildSessionId: () => [] },
+        inspectCurrentCapability: () => ({ ok: false, reason: 'generation-mismatch' }),
+        logAuthorizationRefusal,
+        track: {
+          store: { registerTodoItem: vi.fn() } as never,
+          now: () => 1,
+          newItemId: () => 'todo-1',
+        },
+      },
+    })
+    const track = definitions.find(item => item.name === PET_LOCUS_TRACK_TOOL)!
+    await expect(track.execute({ summary: 'work', detail: 'details' }, childExec)).rejects.toMatchObject({
+      code: 'INVALID_REQUEST',
+      message: 'This operation is not authorized for the current request.',
+      fields: { reason: 'generation-mismatch' },
+    })
+    expect(logAuthorizationRefusal).toHaveBeenCalledWith({ operation: 'track', reason: 'generation-mismatch' })
   })
 
   it('sends through the original Delivery after a parent agent-message reply', async () => {

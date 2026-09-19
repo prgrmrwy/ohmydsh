@@ -27,12 +27,12 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, mkdtemp } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { createScope } from '@deepseek-ai/dsh-scope'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import {
@@ -66,6 +66,12 @@ import { InquiryOutboxStore } from '../src/host/inquiry/outbox-store.js'
 import { PET_DOMAIN_NAME, petDomainSpec } from '../src/host/spec.js'
 import { openPetHarness, type PetHarness } from './harness.js'
 import * as petPlugin from '../src/index.js'
+
+// Scope tags use a package-private Symbol, so mint from ToolRuntime's own
+// dependency root rather than the repository's second physical dsh-scope copy.
+const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/package.json'))
+const scopeEntry = requireFromTools.resolve('@deepseek-ai/dsh-scope')
+const { createScope } = await import(pathToFileURL(scopeEntry).href) as typeof import('@deepseek-ai/dsh-scope')
 
 const MAIN = 'main-1'
 const CHILD_A = 'child-a'
@@ -141,6 +147,7 @@ function locus(
     workspaceId: 'workspace',
     source: 'explicit',
     state: 'active',
+    childComposition: 'safe-v1',
     ...overrides,
   })
 }
@@ -868,6 +875,8 @@ async function loadPetHost(seed: readonly LocusRecord[] = [], existingHome?: str
     },
   })
   ctx.provide('connection', { requestRejection: () => undefined })
+  const projectRoot = await mkdtemp(path.join(tmpdir(), 'pet-project-'))
+  await mkdir(path.join(home, 'attachments'), { recursive: true })
   ctx.provide('workspaceRegistry', {
     create: async (p: string) => ({ id: 'ws-pet', path: p, title: 'DSH Pet' }),
     list: () => [],
@@ -889,7 +898,7 @@ async function loadPetHost(seed: readonly LocusRecord[] = [], existingHome?: str
       live.has(id)
         ? {
           id,
-          header: {},
+          header: { cwd: projectRoot },
           snapshotEvents: () => [],
           seq: 0,
           append: (type: string, data: { mode?: string }) => {
@@ -905,7 +914,7 @@ async function loadPetHost(seed: readonly LocusRecord[] = [], existingHome?: str
     resolve: (input: { session?: { id?: string } }) => {
       const id = input?.session?.id
       const mode = id === undefined ? undefined : appliedModes.get(id)
-      return mode === undefined ? undefined : { mode }
+      return mode === undefined ? undefined : { mode, workspaceRoot: projectRoot }
     },
   })
   ctx.provide('sessionController', {

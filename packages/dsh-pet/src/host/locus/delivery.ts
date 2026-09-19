@@ -18,6 +18,8 @@
  * turns (such as initialization or a GUI turn) out of the feedback queue.
  */
 
+import type { DeliveryAddressingProjection } from './addressing.js'
+
 /** The endpoint a Delivery belongs to (a chat, optionally a thread). */
 export interface DeliveryEndpoint {
   readonly chatId: string
@@ -117,6 +119,8 @@ export interface DeliveryInput extends DeliveryCorrelation {
   readonly senderOpenId?: string
   readonly senderName?: string
   readonly text?: string
+  /** Additive bounded mention projection; absent on historical rows. */
+  readonly addressing?: DeliveryAddressingProjection
   readonly rootMessageId?: string
   readonly replyTarget?: DeliveryFeedbackTarget
   /** The platform parent reply id, retained separately from canonical root/thread. */
@@ -137,6 +141,8 @@ export interface DeliveryRecord extends DeliveryCorrelation {
   readonly senderOpenId?: string
   readonly senderName?: string
   readonly text?: string
+  /** Additive bounded mention projection; absent on historical rows. */
+  readonly addressing?: DeliveryAddressingProjection
   readonly replyTarget?: DeliveryFeedbackTarget
   /** The platform parent reply id, when present in the accepted event. */
   readonly replyToMessageId?: string
@@ -593,6 +599,7 @@ export function acceptDelivery(
     ...(input.senderOpenId !== undefined ? { senderOpenId: input.senderOpenId } : {}),
     ...(input.senderName !== undefined ? { senderName: input.senderName } : {}),
     ...(input.text !== undefined ? { text: input.text } : {}),
+    ...(input.addressing !== undefined ? { addressing: freezeAddressing(input.addressing) } : {}),
     ...(input.replyTarget !== undefined ? { replyTarget: Object.freeze({ ...input.replyTarget }) } : {}),
     ...(input.replyToMessageId !== undefined ? { replyToMessageId: input.replyToMessageId } : {}),
     sequence,
@@ -1056,6 +1063,14 @@ function freezeRecord(record: DeliveryRecord): DeliveryRecord {
     endpoint: cloneEndpoint(record.endpoint),
     feedbackTarget: Object.freeze({ ...record.feedbackTarget }),
     ...(record.replyTarget !== undefined ? { replyTarget: Object.freeze({ ...record.replyTarget }) } : {}),
+    ...(record.addressing !== undefined ? { addressing: freezeAddressing(record.addressing) } : {}),
+  })
+}
+
+function freezeAddressing(addressing: DeliveryAddressingProjection): DeliveryAddressingProjection {
+  return Object.freeze({
+    ...addressing,
+    occurrences: Object.freeze(addressing.occurrences.map(occurrence => Object.freeze({ ...occurrence }))),
   })
 }
 
@@ -1097,6 +1112,7 @@ function validateDeliveryInput(input: DeliveryInput): void {
     throw new TypeError('accepted Delivery cannot include execution or turn proof')
   }
   if (input.senderOpenId !== undefined) assertIdentifier(input.senderOpenId, 'senderOpenId')
+  if (input.addressing !== undefined) validateAddressing(input.addressing)
   if (input.rootMessageId !== undefined) assertIdentifier(input.rootMessageId, 'rootMessageId')
   if (input.replyToMessageId !== undefined) assertIdentifier(input.replyToMessageId, 'replyToMessageId')
   if (input.replyTarget !== undefined) {
@@ -1122,6 +1138,28 @@ function validateCorrelation(correlation: DeliveryCorrelation): void {
   assertIdentifier(correlation.childSessionId, 'childSessionId')
   if (!Number.isSafeInteger(correlation.generation) || correlation.generation < 1) {
     throw new TypeError('generation must be a positive safe integer')
+  }
+}
+
+function validateAddressing(addressing: DeliveryAddressingProjection): void {
+  if (addressing.status !== 'known' && addressing.status !== 'unknown') {
+    throw new TypeError('addressing.status is invalid')
+  }
+  if (!Array.isArray(addressing.occurrences) || addressing.occurrences.length > 32) {
+    throw new TypeError('addressing.occurrences exceeds its bound')
+  }
+  for (const occurrence of addressing.occurrences) {
+    if (!['self-bot', 'other-bot', 'human', 'unknown'].includes(occurrence.kind)) {
+      throw new TypeError('addressing occurrence kind is invalid')
+    }
+    if (typeof occurrence.displayName !== 'string' || occurrence.displayName.length > 128) {
+      throw new TypeError('addressing occurrence displayName is invalid')
+    }
+  }
+  if (typeof addressing.selfMentioned !== 'boolean' || typeof addressing.orderKnown !== 'boolean' ||
+      !Number.isSafeInteger(addressing.otherBotCount) || addressing.otherBotCount < 0 ||
+      addressing.otherBotCount > addressing.occurrences.length) {
+    throw new TypeError('addressing summary is invalid')
   }
 }
 

@@ -62,6 +62,21 @@ export interface LocusCurrentCapability {
   readonly source: LocusCurrentCapabilitySource
 }
 
+/** Stable, non-sensitive reasons why a caller capability is unavailable. */
+export type LocusCurrentCapabilityReason =
+  | 'no-current'
+  | 'claim-unbound'
+  | 'mixed-source'
+  | 'stale-delivery'
+  | 'generation-mismatch'
+  | 'association-unproven'
+  | 'capability-unavailable'
+
+/** Inspectable proof result; unlike the compatibility API it preserves refusal reason. */
+export type LocusCurrentCapabilityInspection =
+  | { readonly ok: true; readonly capability: LocusCurrentCapability }
+  | { readonly ok: false; readonly reason: LocusCurrentCapabilityReason }
+
 /** The durable Delivery facts a claimed inbox message resolves to. */
 export interface LocusClaimedDelivery {
   readonly deliveryId: string
@@ -204,6 +219,8 @@ export interface LocusTurnCorrelationObserver {
    * Arbitrary later turns never inherit the proof.
    */
   currentCapabilityForChild?(childSessionId: string): LocusCurrentCapability | undefined
+  /** Discriminated inspection underlying `currentCapabilityForChild`. */
+  inspectCurrentCapabilityForChild?(childSessionId: string): LocusCurrentCapabilityInspection
   /**
    * Wake exactly one durable inbox-message lookup after `bindQueued` commits.
    * This is the event-driven half of claim-before-persistence correlation: an
@@ -698,6 +715,70 @@ export function createLocusTurnObserver(
 
   const releaseTurnEnd = ports.onTurnEnd(handleTurnEnd)
 
+  const inspectCurrentCapabilityForChild = (childSessionId: string): LocusCurrentCapabilityInspection => {
+    if (disposed || !isNonEmpty(childSessionId)) return { ok: false, reason: 'capability-unavailable' }
+    const active = [...turns.values()].filter(observed =>
+      observed.childSessionId === childSessionId && observed.end === undefined,
+    )
+    if (active.length > 1) return { ok: false, reason: 'mixed-source' }
+    if (active.length === 1) {
+      const observed = active[0]!
+      if (observed.mixed || observed.saturated || observed.foreign.size > 0 || observed.deliveries.size > 1) {
+        return { ok: false, reason: 'mixed-source' }
+      }
+      if (observed.unresolved.size > 0) return { ok: false, reason: 'claim-unbound' }
+      if (observed.deliveries.size === 1) {
+        const claimed = observed.deliveries.values().next().value as PendingTurn | undefined
+        if (claimed === undefined) return { ok: false, reason: 'association-unproven' }
+        if (claimed.status !== undefined && !isPendingDeliveryStatus(claimed.status)) {
+          return { ok: false, reason: 'stale-delivery' }
+        }
+        return {
+          ok: true,
+          capability: {
+            deliveryId: claimed.deliveryId,
+            executionId: claimed.executionId,
+            turnId: claimed.turnId,
+            correlation: claimed.correlation,
+            source: 'delivery',
+          },
+        }
+      }
+    }
+
+    const currentKey = continuationByChild.get(childSessionId)
+    if (currentKey === undefined) {
+      return { ok: false, reason: active.length === 0 ? 'no-current' : 'association-unproven' }
+    }
+    const retainedCurrent = retained.get(currentKey)
+    if (retainedCurrent === undefined) return { ok: false, reason: 'association-unproven' }
+    if (retainedCurrent.delivery.status !== undefined && !isPendingDeliveryStatus(retainedCurrent.delivery.status)) {
+      return { ok: false, reason: 'stale-delivery' }
+    }
+    if (retainedCurrent.continuationTurnId === undefined) {
+      return { ok: false, reason: 'association-unproven' }
+    }
+    if (active.length !== 1) return { ok: false, reason: 'association-unproven' }
+    const continuation = active[0]!
+    if (continuation.turnId !== retainedCurrent.continuationTurnId) {
+      return { ok: false, reason: 'association-unproven' }
+    }
+    if (continuation.mixed || continuation.saturated || continuation.deliveries.size !== 0 ||
+        continuation.foreign.size !== 0) return { ok: false, reason: 'mixed-source' }
+    if (continuation.unresolved.size !== 0) return { ok: false, reason: 'claim-unbound' }
+    if (continuation.agentMessages.size === 0) return { ok: false, reason: 'association-unproven' }
+    return {
+      ok: true,
+      capability: {
+        deliveryId: retainedCurrent.delivery.deliveryId,
+        executionId: retainedCurrent.delivery.executionId,
+        turnId: retainedCurrent.continuationTurnId,
+        correlation: retainedCurrent.delivery.correlation,
+        source: 'agent-message',
+      },
+    }
+  }
+
   return {
     perTurnCorrelation: true,
     restoreCurrentCapability(input) {
@@ -712,54 +793,32 @@ export function createLocusTurnObserver(
       if (!Number.isSafeInteger(turn) || turn < 1) return
       retainRestoredCurrent({ ...delivery, turnId: delivery.turnId })
     },
+    inspectCurrentCapabilityForChild,
     currentCapabilityForChild(childSessionId) {
-      if (!isNonEmpty(childSessionId)) return undefined
-      const active = [...turns.values()].filter(observed =>
-        observed.childSessionId === childSessionId && observed.end === undefined,
-      )
-      if (active.length === 1) {
-        const observed = active[0]!
-        if (!observed.mixed && !observed.saturated && observed.deliveries.size === 1 &&
-            observed.unresolved.size === 0 && observed.foreign.size === 0) {
-          const claimed = observed.deliveries.values().next().value as PendingTurn | undefined
-          if (claimed !== undefined && (claimed.status === undefined || isPendingDeliveryStatus(claimed.status))) return {
-            deliveryId: claimed.deliveryId,
-            executionId: claimed.executionId,
-            turnId: claimed.turnId,
-            correlation: claimed.correlation,
-            source: 'delivery' as const,
-          }
-        }
-      }
-      const currentKey = continuationByChild.get(childSessionId)
-      if (currentKey === undefined) return undefined
-      const retainedCurrent = retained.get(currentKey)
-      if (retainedCurrent?.continuationTurnId === undefined ||
-          (retainedCurrent.delivery.status !== undefined && !isPendingDeliveryStatus(retainedCurrent.delivery.status))) return undefined
-      const activeForChild = [...turns.values()].filter(observed =>
-        observed.childSessionId === childSessionId && observed.end === undefined,
-      )
-      if (activeForChild.length !== 1) return undefined
-      const activeContinuation = activeForChild.filter(observed =>
-        observed.turnId === retainedCurrent.continuationTurnId,
-      )
-      if (activeContinuation.length !== 1) return undefined
-      const continuation = activeContinuation[0]!
-      if (continuation.mixed || continuation.saturated || continuation.deliveries.size !== 0 || continuation.unresolved.size !== 0 || continuation.foreign.size !== 0 || continuation.agentMessages.size === 0) return undefined
-      return {
-        deliveryId: retainedCurrent.delivery.deliveryId,
-        executionId: retainedCurrent.delivery.executionId,
-        turnId: retainedCurrent.continuationTurnId,
-        correlation: retainedCurrent.delivery.correlation,
-        source: 'agent-message' as const,
-      }
+      const inspection = inspectCurrentCapabilityForChild(childSessionId)
+      return inspection.ok ? inspection.capability : undefined
     },
     revokeCurrentCapability(input) {
+      if (!isNonEmpty(input?.childSessionId)) return
+      for (const [key, observed] of [...turns.entries()]) {
+        if (observed.childSessionId !== input.childSessionId) continue
+        const ownsDelivery = input.deliveryId === undefined ||
+          [...observed.deliveries.values()].some(delivery => delivery.deliveryId === input.deliveryId)
+        if (!ownsDelivery) continue
+        // Expiry/finish revokes the ACTIVE segment too, not just an ended
+        // retained lineage. Otherwise an expired A could remain the observer's
+        // current proof while the Host promotes B. Remember the turn key so a
+        // late duplicate claim from A cannot recreate authority.
+        clearTurn(key)
+        rememberEnded(key)
+      }
       const currentKey = continuationByChild.get(input.childSessionId)
-      if (currentKey === undefined) return
-      const retainedCurrent = retained.get(currentKey)
-      if (input.deliveryId !== undefined && retainedCurrent?.delivery.deliveryId !== input.deliveryId) return
-      clearRetained(input.childSessionId)
+      if (currentKey !== undefined) {
+        const retainedCurrent = retained.get(currentKey)
+        if (input.deliveryId === undefined || retainedCurrent?.delivery.deliveryId === input.deliveryId) {
+          clearRetained(input.childSessionId)
+        }
+      }
     },
     subscribe(listener) {
       listeners.add(listener)

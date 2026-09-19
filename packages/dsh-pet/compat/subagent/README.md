@@ -16,7 +16,15 @@
   `sendToParent`（child→parent），不改 `steer`（parent→child），避免把"回复我"
   注入到父对子的转向消息里；
 - Storage/Domain/SQLite/JSON 的原子 batch/transaction，其中 SQLite 可取得介质
-  独占所有权。
+  独占所有权；
+- Gate O1 使用 `independent-v1` + durable `toolFilter`：创建时从父 Agent 捕获已装配
+  preset 名称，但不继承父 transcript；tool filter 写入 child descriptor，并在首次创建和
+  冷恢复时都于已保存 preset 挂载后重装。Pet 只在 runtime instance 同时发布
+  `supportsIndependentContinuableCreate: true` 时使用该接缝，缺 marker、descriptor
+  损坏、preset 漂移或 restriction 的 unknown-name 校验失败都会使 Locus unavailable，
+  不回退到父 composition。ToolRuntime 的 allow/deny 名称必须是当前 preset 中真实的
+  global tool；未知名称会 loud fail，child scope 内注册的 caller-bound Pet tools 不受
+  inherited-global restriction 过滤。
 
 本目录保存固定 upstream tag、可审查 patch/hash 与可重建脚本。生成的
 `.upstream/`、`.storage-upstream/`、`storage-artifacts/`、`lib/`、`.launcher/`
@@ -83,3 +91,12 @@ mismatch、sync rollback 和停止启动；绝不会自动把旧 patch 套到未
 2. 否则针对新固定 tag 重新推导 patch、hash、能力验证与 compatibility kind/version。
 
 不要仅修改版本字符串让构建继续。
+
+## Gate O2：不阻塞无进程执行基线
+
+当前基线不保留 `bash`、`pwsh`、`run_code` 或其它任意进程/代码执行能力。只有另行
+实现并验证独立 UID/container、Lark 凭据隔离以及到 Lark API 的网络 egress policy，
+才可评估保留通用 shell；Host 的受管 `pet_locus_finish` broker 还必须在该隔离下继续
+可用。独立 HOME、PATH 隐藏、Skill 省略、prompt 提醒和 command 字符串过滤均不能
+替代这些隔离证明，也不得作为启用 shell 的理由。Gate O2 未实现不阻塞当前
+`independent-v1` + allow-based safe composition，但禁止把基线改回带通用进程执行。

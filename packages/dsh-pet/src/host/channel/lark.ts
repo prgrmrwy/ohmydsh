@@ -24,7 +24,7 @@ const run = promisify(execFile)
 export type LarkCliRunner = (
   binary: string,
   args: readonly string[],
-  options: { timeout: number; maxBuffer: number },
+  options: { timeout: number; maxBuffer: number; signal?: AbortSignal },
 ) => Promise<{ stdout: string; stderr?: string }>
 
 /** One historical message, reduced to what the prompt needs. */

@@ -97,6 +97,10 @@ customizations:
     hostRuntimeCompatibility:
       kind: pet-unified-locus-v1
       supportedDshVersion: 0.1.2-rc.1
+    buildInputs:
+      - packages/dsh-pet/compat/lark-cli/build.mjs
+      - packages/dsh-pet/compat/lark-cli/bounded-fd-download.patch
+      - packages/dsh-pet/compat/lark-cli/README.md
     compatDependencies:
       # 与根 launcher 使用同一固定 storage patch。profile 中显式加载的
       # SQLite backend 也必须支持 applyBatch，否则 Domain transaction 会

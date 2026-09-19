@@ -56,7 +56,7 @@ describe('unified locus child composition', () => {
     })
     // Registered against the child's OWN scope object: installing on the Host
     // scope would publish the surface globally instead of binding it here.
-    expect(deps.surface?.install).toHaveBeenCalledWith(candidate)
+    expect(deps.surface?.install).toHaveBeenCalledWith(candidate, composition())
     expect(deps.policy?.apply).toHaveBeenCalledWith(CHILD, 'read')
   })
 

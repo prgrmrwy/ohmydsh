@@ -13,6 +13,7 @@ function locus(overrides: Partial<LocusRecord> = {}): LocusRecord {
     endpoint: { chatId: 'oc-1' },
     parentSessionId: 'main-1',
     childSessionId: 'child-1',
+    childComposition: 'safe-v1',
     workspaceId: 'ws-1',
     source: 'auto',
     state: 'active',
@@ -55,6 +56,18 @@ describe('startup reconciliation', () => {
 
     expect(report).toMatchObject({ checked: 1, usable: 1, invalidated: [], unproven: [] })
     expect(h.invalidated).toEqual([])
+  })
+
+  it('invalidates legacy active rows before any child liveness probe', async () => {
+    const check = vi.fn(async () => ({ kind: 'usable' as const }))
+    const h = harness(() => ({ kind: 'usable' }))
+
+    const report = await reconcileLocusChildren([
+      locus({ childComposition: undefined }),
+    ], { ...h.ports, probe: { check } })
+
+    expect(report.invalidated[0]?.reason).toContain('safe-v1')
+    expect(check).not.toHaveBeenCalled()
   })
 
   it('marks a definitively gone child invalid instead of re-creating it', async () => {
