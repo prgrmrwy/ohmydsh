@@ -10,6 +10,7 @@ import {
   type NormalizedLocusAdmission,
 } from '../src/host/channel/locus-controller.js'
 import type { LocusControlCommand } from '../src/host/locus/admission.js'
+import { createLocusChildDelivery } from '../src/host/locus/child-delivery.js'
 import {
   acceptDelivery,
   bindQueued,
@@ -376,6 +377,44 @@ describe('LocusChannelController queue/turn races', () => {
       occurrences: [{ kind: 'self-bot' }, { kind: 'other-bot' }],
     })
     expect(harness.queueInputs).toHaveLength(1)
+  })
+
+  it('names the asker so the agent addresses a person instead of echoing the open id', async () => {
+    // The delivery prompt reports the sender and tells the agent to address
+    // people by display name. Handed only an `ou_…`, an agent writes that id,
+    // which the platform renders as plain text: nobody is notified and the
+    // identifier lands in the chat.
+    const harness = makeHarness(
+      input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }),
+      {
+        addressing: {
+          listChatBots: async () => ({ kind: 'ok', bots: [] }),
+          resolveMemberName: async (chatId, openId) =>
+            chatId === ENDPOINT.chatId && openId === 'ou-owner' ? '张勇' : undefined,
+        },
+      },
+    )
+
+    const result = await harness.controller.handleAdmission(acceptedAdmission('message-named'))
+
+    expect(result.kind).toBe('accepted')
+    expect(harness.ledger.state.byDeliveryId['delivery-1']?.senderName).toBe('张勇')
+  })
+
+  it('keeps the open id when the member name cannot be resolved', async () => {
+    const harness = makeHarness(
+      input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }),
+      {
+        addressing: {
+          listChatBots: async () => ({ kind: 'ok', bots: [] }),
+          resolveMemberName: async () => undefined,
+        },
+      },
+    )
+
+    expect((await harness.controller.handleAdmission(acceptedAdmission('message-unnamed'))).kind).toBe('accepted')
+    expect(harness.ledger.state.byDeliveryId['delivery-1']?.senderName).toBeUndefined()
+    expect(harness.ledger.state.byDeliveryId['delivery-1']?.senderOpenId).toBe('ou-owner')
   })
 
   it('keeps unknown kinds when async chat-bot enrichment fails but still durably queues', async () => {
@@ -1144,5 +1183,93 @@ describe('LocusChannelController dispatchNext / currentFinished / scheduleCurren
     harness.markSettled.mockClear()
     harness.controller.currentFinished({ deliveryId, correlation: correlation(), outcome: 'settled' })
     expect(harness.markSettled).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * The safe-composition proof has to survive the controller's own normalization.
+ *
+ * `normalizeActiveLocus` rebuilds the locus field by field before anything else
+ * sees it, and `createLocusChildDelivery.ensureChild` refuses any locus that does
+ * not present `childComposition: 'safe-v1'`. Every other fixture in this file
+ * stubs `deps.child`, and the child-delivery suite hand-writes its loci with the
+ * field already present — so the two halves never met and a normalizer that
+ * dropped the field rejected every live delivery as a bare `child-unavailable`.
+ * These tests drive the REAL child delivery port through a locus record shaped
+ * the way the repository/resolution port actually produces it.
+ */
+describe('LocusChannelController safe-composition proof', () => {
+  function deliveryHarness(record: ActiveLocus, diagnostics: string[]) {
+    const calls: string[] = []
+    const adoptChild = vi.fn(async (input: { parentSessionId: string; childSessionId: string }) => {
+      calls.push('adopt')
+      return {
+        ok: true as const,
+        adopted: true,
+        identity: {
+          parentSessionId: input.parentSessionId,
+          childSessionId: input.childSessionId,
+        },
+      }
+    })
+    const createAdapter = vi.fn(() => ({
+      activeChild: undefined,
+      createChild: vi.fn(),
+      adoptChild,
+      queuePrompt: vi.fn(async (input: { fenceBeforeQueue?: () => boolean | PromiseLike<boolean> }) => {
+        if (input.fenceBeforeQueue !== undefined && !await input.fenceBeforeQueue()) {
+          return { ok: false as const, reason: 'child-proof-failed' }
+        }
+        return { ok: true as const, messageId: 'inbox-proof' }
+      }),
+      withChildSession: vi.fn(async (input: { operation: (session: unknown) => unknown }) => ({
+        ok: true as const,
+        value: await input.operation({ id: LOCUS.childSessionId }),
+      })),
+      dispose: vi.fn(),
+    }))
+    const child = createLocusChildDelivery({
+      createAdapter: () => createAdapter() as never,
+      log: code => diagnostics.push(code),
+    })
+    const ledger = new MemoryDeliveryLedger()
+    const observer = new SynchronousTurnObserver()
+    const deps: LocusControllerDeps = {
+      ...baseDeps(ledger, observer),
+      locus: { resolveCurrent: () => record, ensureForDelivery: () => record },
+      child,
+      resolveLivePolicy: () => ({ mode: 'read-only', workspaceRoot: '/repo' }),
+      receipts: { markAccepted: vi.fn(), markSettled: vi.fn() },
+      log: code => diagnostics.push(code),
+    }
+    return { controller: new LocusChannelController(deps), calls, createAdapter, adoptChild, ledger, diagnostics }
+  }
+
+  it('carries the durable safe-v1 proof from the locus record into child adoption', async () => {
+    const diagnostics: string[] = []
+    const harness = deliveryHarness({ ...LOCUS, childComposition: 'safe-v1' }, diagnostics)
+
+    const result = await harness.controller.handleAdmission(acceptedAdmission('message-proof'))
+
+    expect(result.kind).toBe('accepted')
+    expect(harness.calls).toEqual(['adopt'])
+    expect(harness.adoptChild).toHaveBeenCalledWith(expect.objectContaining({
+      parentSessionId: LOCUS.parentSessionId,
+      childSessionId: LOCUS.childSessionId,
+    }))
+    expect(diagnostics).not.toContain('safe-composition-unproven')
+  })
+
+  it('still refuses a record without the proof before any adapter is allocated', async () => {
+    const diagnostics: string[] = []
+    const harness = deliveryHarness({ ...LOCUS }, diagnostics)
+
+    const result = await harness.controller.handleAdmission(acceptedAdmission('message-unproven'))
+
+    expect(result).toEqual({ kind: 'refused', reason: 'child-unavailable' })
+    expect(harness.createAdapter).not.toHaveBeenCalled()
+    // The refusal reason must be observable: wiring this port is what turns an
+    // undiagnosable `child-unavailable` into an actionable code.
+    expect(diagnostics).toContain('safe-composition-unproven')
   })
 })

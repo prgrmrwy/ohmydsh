@@ -14,10 +14,10 @@
 
 ## 3. Locus safe composition 与唯一出站
 
-- [x] 3.1 定义并持久安装 Locus safe composition：整体移除 `bash`、`pwsh`、run-code/任意进程执行以及 subagent/fork/workflow/Ralph/send-message 等委派旁路，保留受控只读工具和 child scope 自有的 caller-bound Pet tools。
-- [x] 3.2 把 safe composition 安装纳入 prepublication 原子边界与冷恢复核验；父/user preset 漂移、probe 缺失或安装结果不可证明时拒绝创建/恢复/派发，不静默继承父 preset。
+- [x] 3.1 定义并持久安装 Locus safe composition：整体移除 `bash`、`pwsh`、run-code/任意进程执行以及 subagent/fork/workflow/Ralph/send-message 等委派旁路，保留受控只读工具和 child scope 自有的 caller-bound Pet tools。（2026-09-19 真机验收先回退后修复：`subagent` 曾因 `modelSelectionSettings` 落进 child **自有 scope** 而绕过 toolFilter（own 层注册在 filter 之外，`core/tools/src/index.ts:1167-1174`），其派生后代更完全不受约束——实测孙代理可用 `bash` 执行 `lark-cli`，具备 `im:message` 出站能力。修复手段见 3.2；修复后新 locus 的 child 工具面为 16 个，`subagent`/`subagent_fork` 消失，5 个只读工具与 11 个 `pet_*` 全部保留，群内正常 replied。）
+- [ ] 3.2 把 safe composition 安装纳入 prepublication 原子边界与冷恢复核验；父/user preset 漂移、probe 缺失或安装结果不可证明时拒绝创建/恢复/派发，不静默继承父 preset。（2026-09-19 部分完成：漂移已消除——locus 主会话改为固定组合 `LOCUS_MAIN_PRESET = 'dsh-pet-executor'`，child 从 `composedPreset(parent.ctx)` 继承它，不再受 Host 默认或用户选择影响；并由 `test/loader-composition.test.ts` 的守卫用例钉住「executor preset 的委派行不得携带 `modelSelectionSettings`」（实测注入该开关即失败）。**仍未完成**：没有「发布前用真实 `tools.schemas(childScope)` 证明可见工具 ⊆ 白名单 ∪ caller-bound 工具」的运行时闸门；且修复前创建的 child 在 descriptor 里带着 `agentPreset: standard`，冷恢复仍保留 `subagent`，需重建该 locus 才能收敛。）
 - [x] 3.3 更新 child prompt，删除直接 `lark-cli` 读写与“回复由你自己发出”的指引，明确业务正文只由 `pet_locus_finish` 产生；确认 prompt 不是唯一防线。
-- [x] 3.4 添加真实负向隔离测试，尝试 `lark-cli`、绝对路径脚本、`msg.py`、Python/Node/curl、复制可执行文件及子委派均不能产生飞书消息；同时验证受管 finish 仍能发送并落账。
+- [ ] 3.4 添加真实负向隔离测试，尝试 `lark-cli`、绝对路径脚本、`msg.py`、Python/Node/curl、复制可执行文件及子委派均不能产生飞书消息；同时验证受管 finish 仍能发送并落账。（2026-09-19 部分完成：「子委派」一项已在真机复验——修复后新 locus 的 child 工具面无 `subagent`，且 `pet_locus_finish` 仍正常发送并落账；并新增 `test/loader-composition.test.ts` 的 preset 守卫用例。**仍未完成**：`test/locus-safe-runtime.test.ts` 仍把被禁工具注册在 global 层，抓不到 own 层豁免这一真实分层，需按生产分层（`createScope` 的 standing/own 两级）重写该用例。）
 - [x] 3.5 为 safe composition/runtime seam 添加启动 probe、明确运维诊断与 fail-closed tests；compat patch 回滚或版本不匹配时 Locus 必须 unavailable。
 
 ## 4. addressing 数据与 Delivery 兼容迁移

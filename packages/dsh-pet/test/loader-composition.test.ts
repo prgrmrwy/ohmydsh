@@ -1844,4 +1844,52 @@ describe('the Pet executor preset omits local-root Skill discovery', () => {
     // Skills that Pet DOES allow.
     expect(ids).toContain('tool-skill')
   })
+
+  it('registers its delegation rows outside the per-agent plane', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const nodePath = await import('node:path')
+    const read = (id: string): Promise<string> => readFile(
+      nodePath.resolve(process.cwd(), '..', '..', 'presets', id, 'agent.cordis.yml'),
+      'utf8',
+    )
+    /** The YAML block of one `- id:` row, whose config decides its plane. */
+    const row = (source: string, id: string): string => {
+      const start = source.indexOf(`- id: ${id}\n`)
+      expect(start, `preset row ${id} must exist`).toBeGreaterThanOrEqual(0)
+      const rest = source.slice(start + `- id: ${id}\n`.length)
+      const next = rest.search(/^\s*- id: /m)
+      return next === -1 ? rest : rest.slice(0, next)
+    }
+
+    // Locus children inherit their composition from the main session's mounted
+    // preset, and `LOCUS_MAIN_PRESET` pins that to this preset. A delegation row
+    // carrying `modelSelectionSettings` installs per agent, which puts the tool
+    // in the child's OWN scope — and `LOCUS_SAFE_TOOL_FILTER` only restricts the
+    // INHERITED surface, so the child would keep `subagent` and could delegate
+    // to a descendant that retains bash and lark-cli.
+    expect(row(await read('dsh-pet-executor'), 'tool-subagent'))
+      .not.toContain('modelSelectionSettings')
+    expect(row(await read('dsh-pet-executor'), 'tool-subagent-fork'))
+      .not.toContain('modelSelectionSettings')
+    // The shipped standard preset is the reason the pin exists; if upstream ever
+    // drops this, the fixed preset is no longer load-bearing.
+    const standard = await readFile(
+      nodePath.resolve(
+        process.cwd(),
+        'compat',
+        'subagent',
+        '.upstream',
+        'packages',
+        'preset',
+        'agent-presets',
+        'presets',
+        'standard',
+        'agent.cordis.yml',
+      ),
+      'utf8',
+    ).catch(() => undefined)
+    if (standard !== undefined) {
+      expect(row(standard, 'tool-subagent')).toContain('modelSelectionSettings: true')
+    }
+  })
 })

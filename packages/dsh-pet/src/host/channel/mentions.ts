@@ -16,6 +16,12 @@
  * is not a member, a `@` inside a word — is left exactly as written, because a
  * wrong mention notifies the wrong person, which is worse than no mention.
  *
+ * A member open id is also accepted, for the case where the agent was handed an
+ * `ou_…` and no display name (the unified locus delivery prompt reports the
+ * sender that way). Rendering it resolves the same person instead of publishing
+ * the identifier as plain text, which notifies nobody. An id that is not a
+ * member of this chat is still left as written.
+ *
  * @module
  */
 
@@ -44,6 +50,9 @@ const MAX_RENDERED = 10
 
 /** How many characters of context to look back/forward when matching a name. */
 const MAX_NAME_LENGTH = 64
+
+/** A raw member open id an agent copied instead of writing a display name. */
+const OPEN_ID_PATTERN = /^ou_[A-Za-z0-9_-]+/
 
 /**
  * Whether the character may sit directly before an `@` starting a reference.
@@ -92,6 +101,64 @@ function uniqueMembers(members: readonly MentionMember[]): Map<string, string> {
 }
 
 /**
+ * Build the open-id to display-name index.
+ *
+ * Open ids identify one member each, so there is no ambiguity to guard here; a
+ * member whose open id or name is unusable is simply absent.
+ */
+function membersByOpenId(members: readonly MentionMember[]): Map<string, string> {
+  const index = new Map<string, string>()
+  for (const member of members) {
+    const openId = typeof member?.openId === 'string' ? member.openId.trim() : ''
+    const name = typeof member?.name === 'string' ? member.name.trim() : ''
+    if (openId === '' || name === '' || name.includes('@') || name.includes('<')) continue
+    if (!index.has(openId)) index.set(openId, name)
+  }
+  return index
+}
+
+/** One resolved reference: the member it addresses and how much text it spans. */
+interface ResolvedReference {
+  readonly openId: string
+  readonly name: string
+  readonly length: number
+}
+
+/**
+ * Resolve the reference starting at one `@`.
+ *
+ * A display name is tried first, because that is what the delivery prompt asks
+ * the agent to write. A raw open id is the fallback for an agent that was handed
+ * an `ou_…` and no name; it resolves only when the id belongs to this chat.
+ *
+ * @param rest - Text after the `@`, bounded to the maximum name length.
+ * @param text - The whole reply body, for the reference-end check.
+ * @param at - Index of the `@` in `text`.
+ * @param names - Unique display names, longest first.
+ * @param byName - Display-name to open-id index.
+ * @param byOpenId - Open-id to display-name index.
+ * @returns the resolved reference, or undefined to keep the text as written.
+ */
+function resolveReference(
+  rest: string,
+  text: string,
+  at: number,
+  names: readonly string[],
+  byName: ReadonlyMap<string, string>,
+  byOpenId: ReadonlyMap<string, string>,
+): ResolvedReference | undefined {
+  const named = names.find(name => rest.startsWith(name) && isReferenceEnd(text, at + 1 + name.length))
+  if (named !== undefined) {
+    const openId = byName.get(named)
+    if (openId !== undefined) return { openId, name: named, length: named.length }
+  }
+  const raw = OPEN_ID_PATTERN.exec(rest)?.[0]
+  if (raw === undefined || !isReferenceEnd(text, at + 1 + raw.length)) return undefined
+  const name = byOpenId.get(raw)
+  return name === undefined ? undefined : { openId: raw, name, length: raw.length }
+}
+
+/**
  * Whether a text could contain a plain mention reference at all.
  *
  * Cheap pre-check so the caller does not read a chat's member list for the
@@ -124,7 +191,8 @@ export function renderMentions(
   }
 
   const index = uniqueMembers(members)
-  if (index.size === 0) return { text, rendered: 0, skipped: 'no-members' }
+  const byOpenId = membersByOpenId(members)
+  if (index.size === 0 && byOpenId.size === 0) return { text, rendered: 0, skipped: 'no-members' }
 
   // Longest name first: when one member's name is a prefix of another's, the
   // longer match is the one that was actually written.
@@ -145,15 +213,15 @@ export function renderMentions(
     }
     sawCandidate = true
     const rest = text.slice(at + 1, at + 1 + MAX_NAME_LENGTH)
-    const matched = names.find(name => rest.startsWith(name) && isReferenceEnd(text, at + 1 + name.length))
-    if (matched === undefined || rendered >= MAX_RENDERED) {
+    const resolved = resolveReference(rest, text, at, names, index, byOpenId)
+    if (resolved === undefined || rendered >= MAX_RENDERED) {
       output += text.slice(cursor, at + 1)
       cursor = at + 1
       continue
     }
     output += text.slice(cursor, at)
-    output += `<at user_id="${index.get(matched)!}">${matched}</at>`
-    cursor = at + 1 + matched.length
+    output += `<at user_id="${resolved.openId}">${resolved.name}</at>`
+    cursor = at + 1 + resolved.length
     rendered += 1
   }
 

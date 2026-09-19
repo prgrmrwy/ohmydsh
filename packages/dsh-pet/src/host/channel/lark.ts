@@ -152,6 +152,18 @@ export interface LarkClient {
    */
   listChatBots(chatId: string): Promise<LarkChatBotsResult | readonly LarkChatBot[]>
   /**
+   * Resolve one chat member's display name.
+   *
+   * Used to tell the delivery prompt who is asking. A prompt that reports only
+   * an `ou_…` invites the agent to address the person with that identifier,
+   * which renders as plain text and publishes the id. Optional so every
+   * existing fake keeps its behaviour.
+   * @param chatId - Chat the member belongs to.
+   * @param openId - Member open id (`ou_…`).
+   * @returns the display name, or undefined when it cannot be resolved.
+   */
+  resolveMemberName?(chatId: string, openId: string): Promise<string | undefined>
+  /**
    * Reply to a message as the bot.
    * @param messageId - Message being replied to.
    * @param text - Reply body.
@@ -791,6 +803,18 @@ export function createLarkCliClient(
         })
       }
       return { kind: 'ok', bots: parsed }
+    },
+    async resolveMemberName(chatId, openId) {
+      const wanted = openId.trim()
+      if (wanted === '') return undefined
+      try {
+        const members = await memberList(chatId)
+        return members?.find(member => member.openId === wanted)?.name
+      } catch {
+        // A name is presentation: an unresolvable one leaves the prompt with the
+        // open id alone, exactly as before this method existed.
+        return undefined
+      }
     },
 
     async reply(messageId, text) {
