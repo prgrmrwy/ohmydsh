@@ -54,6 +54,15 @@ customizations:
     enabled: true
     brief: Worktree Session 首发隔离(task branch/lean deps/独立 build home)
     note: '自研 Host+Web bundle；从 base 在首次普通发送时创建唯一 ws/* branch 与 .worktrees/* checkout，不切换主 checkout；npm lean/mutable、.env.local ignored-only 同步、隔离开发 DSH_HOME、安全 status/promote/clean；交互与 Git 探测概念参考 https://github.com/LaoYueHanNi/dsh-git-worktree (MIT，详见 packages/worktree-session/NOTICE)'
+  # 自研(local):按知识域物理隔离、可跨库检索的 memex 持久记忆层。
+  - id: dsh-memex
+    type: package
+    source: local
+    version: 0.1.0
+    enabled: false             # 纯验证阶段：loader smoke 与隔离验收通过前不得启用/部署主实例
+    enabledEnv: DSH_MEMEX_ENABLED  # 仅隔离验收时临时启用；主实例不设置该变量
+    brief: memex 持久记忆原生接入(scope 隔离/并发跨库检索/外部库守门)
+    note: 'change dsh-memex-scoped-memory；当前处于纯验证阶段(enabled=false)，禁止在 loader smoke 与隔离验收通过前重建/重启主实例；DSH 原生 Host bundle，结构等价于上游 Pi extension（工具注册 + 会话生命周期 + 方法论 skill），额外增加 scope 维度。每个 scope 是独立 MEMEX_HOME（统一位于 ~/.dsh-memex/<scope>）与独立 git remote；多库检索由本包并发 fan-out 后确定性归并；写入 publish=external 的库前 fail closed 守门。存储/卡片/Zettelkasten 方法论与 tool description 复用 @touchskyer/memex@0.4.1（MIT；工具描述由生成脚本按需同步，skills 直接引用，不修改上游源码/卡片格式）。运行依赖:memex CLI 在 PATH；全局安装需显式 --registry=https://registry.npmjs.org/，因用户 ~/.npmrc 的 bnpm 镜像目前仅同步到 0.4.0。'
   # 自研(local):B013 sidebar 会话行前动态 provider logo
   - id: sidebar-session-provider-icon
     type: package
