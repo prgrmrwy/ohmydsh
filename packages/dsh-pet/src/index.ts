@@ -1815,11 +1815,23 @@ async function initialize(
       : {
         provisioning: {
           ensureForDelivery: async ({ endpoint }) => {
+            // Name the new generation after its chat rather than its opaque id.
+            // These titles are what the owner reads in Locus management, where
+            // `Locus 主会话 · oc_…` says nothing about which group an entry
+            // belongs to. Fail-soft: an unresolvable name keeps the id.
+            let chatName: string | undefined
+            try {
+              chatName = await larkClient.chatName(endpoint.chatId)
+            } catch {
+              chatName = undefined
+            }
+            const named = chatName === undefined ? {} : { chatName }
             const ensured = endpoint.threadId === undefined
-              ? await locusProvisioningController.ensureGroup({ chatId: endpoint.chatId })
+              ? await locusProvisioningController.ensureGroup({ chatId: endpoint.chatId, ...named })
               : await locusProvisioningController.ensureTopic({
                 chatId: endpoint.chatId,
                 threadId: endpoint.threadId,
+                ...named,
               })
             const record = ensured.locus
             if (record.state !== 'active' || record.childComposition !== 'safe-v1') {
