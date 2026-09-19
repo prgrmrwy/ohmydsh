@@ -48,6 +48,6 @@
 
 - [x] 7.1 运行 package build/typecheck/test 与仓库 `npm test`、`npm run check:artifacts`；对任何失败给出归因，不跳过隔离和竞争用例。
 - [x] 7.2 运行 `node scripts/sync.mjs` 两次，确认 DSH pin/compat patch/preset 物化幂等且没有提交可重建产物。
-- [ ] 7.3 按 `docs/notes/pet-locus-delivery-safety-hardening-live-acceptance.md` 在真实测试群验证：合法 reply、reference-only 静默、ambiguous 澄清→新 Delivery、多人 backlog、GUI mixed 拒绝、图片查看和旁路负向尝试；只保存轻量去敏证据。（用户本轮选择暂不重启 Host、不向真实群发送验收消息。）
+- [ ] 7.3 按 `docs/notes/pet-locus-delivery-safety-hardening-live-acceptance.md` 在真实测试群验证：合法 reply、reference-only 静默、ambiguous 澄清→新 Delivery、多人 backlog、GUI mixed 拒绝、图片查看和旁路负向尝试；只保存轻量去敏证据。（2026-09-19 真机执行：A/B/C/D/F PASS；G 首轮 FAIL——`subagent` 经 own 层绕过 toolFilter、其孙代理可用 `bash` 执行 `lark-cli`——修复后新 locus 复验 PASS；**E 判据在本 DSH pin 不可达**：DSH GUI 对 `origin==='subagent'` 会话禁用一切 steer（直接 steer 与 queue-steer 双关），Pet 只经 `next-turn` 注入，唯一可用的 steer 通道携带 `agent-message` 且被 Pet 有意豁免，因此构造不出 mixed 轮。E 改按两层覆盖：真机负向项「GUI 输入不得进入 current Delivery 轮」（已实测两次：GUI 消息排 `next-turn`、current Delivery 零消费、由自己那轮正常结算）＋ `mixed-source` 由单测覆盖——`test/locus-turn-observer.test.ts:425` 断言混合轮能力查询返回该 reason，`test/locus-reply-tool.test.ts:186` 断言 `pet_locus_finish` 据此拒绝并记录。7.3 的关闭条件是 3.2/3.4 的剩余部分完成。）
 - [x] 7.4 若管理面新增 capability 诊断，在现有 `http://127.0.0.1:3080` 刷新验证；只在确认同 checkout 的 `pnpm run dev:web` watcher 运行时才承诺 HMR，不启动替代 server。（本 change 未新增管理面 UI，无需 GUI 验收。）
 - [x] 7.5 对照三个 delta spec 逐项验收并更新 current specs；将“首句一句话结论 + 仅必要上下文 + 详情按需展开”的合并项登记为后续工作，不在本 change 偷带实现。
