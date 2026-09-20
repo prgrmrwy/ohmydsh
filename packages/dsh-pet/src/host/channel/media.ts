@@ -1,7 +1,10 @@
 /** Host-owned, caller-bound Lark image admission for one durable Delivery. */
 
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { once } from 'node:events'
+import { mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type {
   AttachmentStore,
@@ -19,6 +22,17 @@ const MAX_METADATA_ITEMS = 8
 const MAX_METADATA_FIELD = 128
 const MAX_RECEIPT_BYTES = 64 * 1024
 const MAX_STDERR_BYTES = 4 * 1024
+/**
+ * How often the growing spool entry is measured.
+ *
+ * The official CLI has no byte ceiling of its own, so the bound is enforced
+ * here: an over-limit download is killed within one interval of crossing the
+ * limit. 50 ms on a local disk keeps the overshoot far below anything a
+ * deployment limit would care about, without inotify/fsevents portability.
+ */
+const SPOOL_POLL_MS = 50
+/** Random token length of one spool entry, in bytes (32 hex characters). */
+const SPOOL_TOKEN_BYTES = 16
 
 export interface LarkMessageResource {
   readonly kind: 'image' | 'file' | 'audio' | 'video' | 'media' | 'unknown'
@@ -47,11 +61,18 @@ export interface LocusMediaPort {
   }): Promise<LocusMediaAdmission>
 }
 
-/** Runtime-attested patched CLI capability. A mere executable path is insufficient. */
-export interface BoundedFdLarkDownloader {
+/**
+ * The pinned official CLI plus the one directory it may write into.
+ *
+ * A bare executable path is not enough: the version is the contract for
+ * `--output`'s allowed roots and denylist, and the spool is the only place a
+ * downloaded byte may exist on disk.
+ */
+export interface PinnedLarkDownloader {
   readonly binary: string
-  readonly supportsBoundedFdDownload: true
-  readonly upstreamVersion: '1.0.94'
+  readonly pinnedVersion: '1.0.94'
+  /** Pet-owned 0700 directory, already inside the locus child's denied roots. */
+  readonly spoolRoot: string
 }
 
 function recordOf(value: unknown): Record<string, unknown> | undefined {
@@ -131,12 +152,27 @@ function unsupportedContent(resources: readonly LarkMessageResource[]): ContentB
   return [{ type: 'text', text: `[当前消息还包含暂不支持的资源类型：${kinds || 'unknown'}；未下载、执行、解压、转码或 OCR。]` }]
 }
 
-function receiptSize(stdout: string): number | undefined {
+/** What the path-mode receipt must prove about the file Pet is about to read. */
+interface SpoolReceipt {
+  readonly savedName: string
+  /** Declared size; absent when the platform did not report a Content-Length. */
+  readonly sizeBytes?: number
+}
+
+function parseSpoolReceipt(stdout: string): SpoolReceipt | undefined {
   const envelope = recordOf(parseJsonSuffix(stdout))
   const receipt = envelope?.['ok'] === true ? recordOf(envelope['data']) : envelope
-  if (receipt?.['output_fd'] !== 3) return undefined
-  const value = receipt['size_bytes']
-  return Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : undefined
+  const savedPath = receipt?.['saved_path']
+  if (typeof savedPath !== 'string' || savedPath.trim() === '') return undefined
+  const savedName = savedPath.split(/[\\/]/).pop()
+  if (savedName === undefined || savedName === '') return undefined
+  const value = receipt?.['size_bytes']
+  return {
+    savedName,
+    // A negative size means "the platform did not say"; the file itself is
+    // then the only measurement, and Pet bounds it by its own limit.
+    ...(Number.isSafeInteger(value) && (value as number) >= 0 ? { sizeBytes: value as number } : {}),
+  }
 }
 
 function killProcessTree(child: ChildProcess): void {
@@ -147,29 +183,91 @@ function killProcessTree(child: ChildProcess): void {
   try { child.kill('SIGKILL') } catch { /* process may already have exited */ }
 }
 
-async function downloadOnInheritedFd(input: {
+/**
+ * Every entry inside one call's own directory.
+ *
+ * Each download gets a directory of its own rather than a filename inside a
+ * shared one: the CLI saves atomically (temp file plus rename) and cannot be
+ * relied on to name that temp file predictably, so "delete what this call
+ * created" is only provable if the call owns the whole directory.
+ */
+function spoolEntries(dir: string): string[] {
+  try {
+    return readdirSync(dir)
+  } catch {
+    return []
+  }
+}
+
+function largestSpoolEntry(dir: string): number {
+  let largest = 0
+  for (const name of spoolEntries(dir)) {
+    try {
+      largest = Math.max(largest, statSync(join(dir, name)).size)
+    } catch { /* renamed or removed mid-measurement */ }
+  }
+  return largest
+}
+
+function removeSpoolDir(dir: string): void {
+  try { rmSync(dir, { recursive: true, force: true }) } catch { /* startup sweep is the backstop */ }
+}
+
+/**
+ * Delete every leftover in the media spool.
+ *
+ * Called once at Pet startup: at that moment no download can be in flight, so
+ * anything in the directory is debris from a crash and must never be read as
+ * one.
+ * @param spoolRoot - Pet-owned spool directory.
+ * @returns how many entries were removed.
+ */
+export async function sweepMediaSpool(spoolRoot: string): Promise<number> {
+  let removed = 0
+  try {
+    for (const name of readdirSync(spoolRoot)) {
+      try {
+        rmSync(join(spoolRoot, name), { recursive: true, force: true })
+        removed += 1
+      } catch { /* leave it for the next startup */ }
+    }
+  } catch { /* a missing spool directory means there is nothing to sweep */ }
+  return removed
+}
+
+/**
+ * Download one resource with the official CLI into the guarded spool.
+ *
+ * The bytes land in a Pet-owned directory that the locus child's project-read
+ * guard already refuses, under a random name the CLI is told to honour. Because
+ * the official path mode has no byte ceiling, the caller's limit is enforced by
+ * measuring the growing entry and killing the whole process group on breach;
+ * nothing survives the call either way.
+ */
+async function downloadIntoSpool(input: {
   readonly binary: string
+  readonly spoolRoot: string
   readonly args: readonly string[]
   readonly maxBytes: number
   readonly timeoutMs: number
   readonly signal: AbortSignal
 }): Promise<Uint8Array> {
   if (input.signal.aborted) throw new Error('download-aborted')
-  const child = spawn(input.binary, [...input.args, '--output-fd', '3', '--max-bytes', String(input.maxBytes)], {
+  const token = randomBytes(SPOOL_TOKEN_BYTES).toString('hex')
+  const targetName = `${token}.bin`
+  const dir = join(input.spoolRoot, token)
+  const target = join(dir, targetName)
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  const child = spawn(input.binary, [...input.args, '--output', `./${targetName}`], {
+    cwd: dir,
     detached: process.platform !== 'win32',
-    stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe'],
   })
-  const output = child.stdio[3]
-  if (output === null || output === undefined) {
-    killProcessTree(child)
-    throw new Error('download-fd-unavailable')
-  }
 
-  const chunks: Buffer[] = []
-  let byteLength = 0
   let stdout = ''
   let stderrBytes = 0
   let failure: Error | undefined
+  let exited = false
   const fail = (error: Error): void => {
     if (failure !== undefined) return
     failure = error
@@ -179,20 +277,16 @@ async function downloadOnInheritedFd(input: {
   input.signal.addEventListener('abort', onAbort, { once: true })
   const timer = setTimeout(() => fail(new Error('download-timeout')), input.timeoutMs)
   timer.unref?.()
-
-  output.on('data', (chunk: Buffer | string) => {
-    const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
-    byteLength += data.byteLength
-    if (byteLength > input.maxBytes) {
+  const poll = setInterval(() => {
+    if (largestSpoolEntry(dir) > input.maxBytes) {
       fail(new Error('download-byte-limit-exceeded'))
-      return
     }
-    chunks.push(data)
-  })
+  }, SPOOL_POLL_MS)
+  poll.unref?.()
+
   child.stdout?.on('data', (chunk: Buffer | string) => {
     const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
-    const currentBytes = Buffer.byteLength(stdout)
-    if (data.byteLength > MAX_RECEIPT_BYTES - currentBytes) {
+    if (data.byteLength > MAX_RECEIPT_BYTES - Buffer.byteLength(stdout)) {
       fail(new Error('download-receipt-too-large'))
       return
     }
@@ -206,36 +300,58 @@ async function downloadOnInheritedFd(input: {
 
   try {
     const [code, signal] = await once(child, 'close') as [number | null, NodeJS.Signals | null]
+    exited = true
     if (failure !== undefined) throw failure
     if (code !== 0 || signal !== null) throw new Error('download-process-failed')
-    const declaredSize = receiptSize(stdout)
-    if (declaredSize === undefined || declaredSize !== byteLength) throw new Error('download-receipt-size-mismatch')
-    return new Uint8Array(Buffer.concat(chunks, byteLength))
+
+    const receipt = parseSpoolReceipt(stdout)
+    // The CLI must have written the name it was given: a different basename
+    // means it invented a path Pet did not choose, and nothing about that file
+    // is proven.
+    if (receipt === undefined || receipt.savedName !== targetName) {
+      throw new Error('download-receipt-name-mismatch')
+    }
+    let size: number
+    try {
+      size = statSync(target).size
+    } catch {
+      throw new Error('download-output-missing')
+    }
+    if (size > input.maxBytes) throw new Error('download-byte-limit-exceeded')
+    if (receipt.sizeBytes !== undefined && receipt.sizeBytes !== size) {
+      throw new Error('download-receipt-size-mismatch')
+    }
+    const data = readFileSync(target)
+    if (data.byteLength > input.maxBytes) throw new Error('download-byte-limit-exceeded')
+    if (data.byteLength !== size) throw new Error('download-output-changed')
+    return new Uint8Array(data)
   } finally {
     clearTimeout(timer)
+    clearInterval(poll)
     input.signal.removeEventListener('abort', onAbort)
-    output.destroy()
+    if (!exited) killProcessTree(child)
+    removeSpoolDir(dir)
   }
 }
 
-export const LOCUS_MEDIA_UNAVAILABLE_REASON = 'bounded-fd-media-download-unavailable'
+export const LOCUS_MEDIA_UNAVAILABLE_REASON = 'pinned-cli-media-download-unavailable'
 
 export interface CreateLocusMediaPortInput {
   readonly attachments?: AttachmentStore
-  /** Resolved only by the exact pinned-runtime compat capability probe. */
-  readonly download?: BoundedFdLarkDownloader
+  /** Resolved only by the pinned-official-CLI probe. */
+  readonly download?: PinnedLarkDownloader
   /** Ordinary runner remains sufficient for metadata-only mget. */
   readonly runner?: LarkCliRunner
   readonly timeoutMs?: number
 }
 
-/** Create the bounded no-path media port; absent compat capability performs no I/O. */
+/** Create the spooled media port; an unproven CLI performs no I/O at all. */
 export function createLocusMediaPort(input: CreateLocusMediaPortInput): LocusMediaPort {
   if (
     input.attachments === undefined
-    || input.download?.supportsBoundedFdDownload !== true
-    || input.download.upstreamVersion !== '1.0.94'
+    || input.download?.pinnedVersion !== '1.0.94'
     || input.download.binary.trim() === ''
+    || input.download.spoolRoot.trim() === ''
   ) {
     return {
       available: false,
@@ -261,6 +377,7 @@ export function createLocusMediaPort(input: CreateLocusMediaPortInput): LocusMed
   const runner = input.runner ?? run
   const timeoutMs = input.timeoutMs ?? CALL_TIMEOUT_MS
   const binary = input.download.binary
+  const spoolRoot = input.download.spoolRoot
 
   return {
     available: true,
@@ -290,8 +407,9 @@ export function createLocusMediaPort(input: CreateLocusMediaPortInput): LocusMed
           const remaining = limits.maxMessageImageBytes - totalBytes
           if (remaining < 1) throw new Error('message-images-too-large')
           const maxBytes = Math.min(limits.maxImageBytes, remaining)
-          const data = await downloadOnInheritedFd({
+          const data = await downloadIntoSpool({
             binary,
+            spoolRoot,
             args: petCliArgs([
               'im', '+messages-resources-download', '--as', 'bot',
               '--message-id', request.messageId,

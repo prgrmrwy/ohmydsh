@@ -15,6 +15,9 @@ describe('Pet runtime path resolution', () => {
       '/tmp/example-home/plugins/dsh-pet/workspace/.dsh/skills',
     )
     expect(paths.storeRoot).toBe('/tmp/example-home/plugins/dsh-pet/skills/store')
+    // The media spool must stay inside the state root: that is the tree the
+    // locus project-read guard refuses, so a child can never read Pet media.
+    expect(paths.mediaSpoolRoot).toBe('/tmp/example-home/plugins/dsh-pet/media-spool')
   })
 
   it('follows a $DSH_HOME override so state moves with the harness', () => {
@@ -40,7 +43,13 @@ describe('Pet runtime path resolution', () => {
     await ensurePetDirectories(paths)
     await ensurePetDirectories(paths)
 
-    for (const dir of [paths.stateRoot, paths.workspaceRoot, paths.projectionRoot, paths.storeRoot]) {
+    for (const dir of [
+      paths.stateRoot,
+      paths.workspaceRoot,
+      paths.projectionRoot,
+      paths.storeRoot,
+      paths.mediaSpoolRoot,
+    ]) {
       const info = await stat(dir)
       expect(info.isDirectory()).toBe(true)
       // Owner-only: no group or other bits on POSIX filesystems.

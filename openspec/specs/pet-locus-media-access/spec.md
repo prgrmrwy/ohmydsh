@@ -1,44 +1,48 @@
 ## Purpose
 
-定义 unified locus 如何通过 Pet 私有固定源码 `lark-cli` 的有界匿名 fd seam，读取当前 Delivery 所属消息图片并将其作为 DSH typed image content 交给长期 child，同时限制 safe child 的项目文件读取范围。
+定义 unified locus 如何通过 manifest 中精确 pin 的官方 `lark-cli` 在受守卫的私有 spool 目录内读取当前 Delivery 所属消息图片并将其作为 DSH typed image content 交给长期 child，同时限制 safe child 的项目文件读取范围。
 
 ## Requirements
 
 ### Requirement: 当前 Delivery 的图片由 Host caller-bound 取得
 
-系统 SHALL 通过 Pet 私有、固定源码构建且运行时证明 provenance 的 `lark-cli` bounded inherited-fd seam，为 read-only Locus 取得当前请求绑定消息中的图片。Host SHALL 从已接受 Delivery 的不可变触发 `messageId` 枚举资源，并只取得该消息内的图片；模型 MUST NOT 提供 chat、message、thread、file key、本地路径、URL 或其它目标 selector。
+系统 SHALL 通过 manifest 中精确 pin 的官方 `lark-cli`（由 Pet 私有解析，绝不回退 PATH）在受守卫的私有落盘目录内取得当前请求绑定消息中的图片。Host SHALL 从已接受 Delivery 的不可变触发 `messageId` 枚举资源，并只取得该消息内的图片；模型 MUST NOT 提供 chat、message、thread、file key、本地路径、URL 或其它目标 selector。
 
 资源枚举、下载与 attachment 提交 SHALL 绑定该 Delivery 的 active locus/generation/child；在保存与最终入队前 SHALL 重验它仍是同一 current Delivery。若 Delivery 已终结、晋升或代际改变，Host SHALL 丢弃未发布结果且 fail closed。
 
-#### Scenario: 私有 compat 能力已证明
-- **WHEN** 包内 binary 的版本、commit、patch、平台和 bounded-fd capability 均与 provenance 一致
-- **THEN** Host 使用 fd3 匿名 pipe 取得 current message 图片，绝不回退 PATH 中的全局 `lark-cli`
+#### Scenario: 官方 CLI 与私有落盘目录已证明
+- **WHEN** 官方 binary 可解析且版本与 manifest pin 一致，私有落盘目录存在、权限为 0700，且位于 Locus child 读取守卫拒绝的 root 内
+- **THEN** Host 以该目录为 spawn cwd 调用官方 CLI 取得 current message 图片，绝不回退 PATH 中的全局 `lark-cli`，且不向项目目录写入任何字节
 
-#### Scenario: compat 缺失或不匹配
-- **WHEN** 私有 binary 缺失、不可执行、平台不符或 provenance/capability 不匹配
+#### Scenario: CLI 或私有目录不可用
+- **WHEN** 官方 binary 缺失、不可执行或版本与 pin 不符，或私有落盘目录缺失、权限不符或不被 child 守卫覆盖
 - **THEN** media port 保持 unavailable，不枚举、不下载、不保存 attachment，文字 Delivery 继续
 
 #### Scenario: Delivery 结算后迟到下载
 - **WHEN** 图片下载已开始但 current 随后终结或被下一条 Delivery 替换，旧下载才完成
 - **THEN** Host 拒绝提交或投递结果，不把旧资源注入新 Delivery
 
-### Requirement: 媒体下载无具名路径且双层有界
+### Requirement: 媒体下载在私有目录内有界完成并在结算前删除
 
-私有 `lark-cli` 的 fd 模式 SHALL 仅在 POSIX 接受配对的 inherited `output-fd >= 3` 与正整数 `max-bytes`，并 MUST 与普通 `output` 路径互斥。已知 Content-Length 超限时 SHALL 在输出任何 bytes 前拒绝；未知长度 SHALL 最多向 fd 写入 `max-bytes + 1` 后拒绝。普通全局 CLI 与路径下载行为 MUST NOT 因此改变。
+Pet SHALL 使用一个位于 `DSH_HOME` 之下、权限 0700 的私有目录作为媒体下载的唯一落盘位置，并 SHALL 为每次调用在该目录下创建一个独占子目录，以该子目录作为 spawn cwd 调用官方 `lark-cli`，使相对 `--output` 落在 CLI 内置允许根之内。目标名 SHALL 不可预测，MUST NOT 复用固定名。整个私有根 SHALL 被 Locus child 的 project-read guard 显式拒绝。
 
-Pet SHALL 通过 Host-owned child process 的 fd3 pipe 接收 bytes，并以相同单图/消息剩余额做第二层累计。超限、Abort、timeout、进程错误或 receipt 大小不符 SHALL 关闭 pipe、终止完整进程组并丢弃 bytes。stdout SHALL 只承载小型 JSON receipt，图片 bytes MUST NOT 进入 stdout/stderr、项目目录、`/tmp` 或 Pet state。
+下载期间 Pet SHALL 以本次 Delivery 的单图与消息剩余额持续检查该子目录内最长条目的尺寸；超过上限时 SHALL 立即终止整个进程组。成功、非零退出、Abort、timeout 与进程错误一律 SHALL 在同一次调用内递归删除该子目录（含 CLI 可能以任意名字创建的原子写临时文件）；Pet 启动时 SHALL 清扫私有根下的全部残留。结算后 MUST NOT 在磁盘上留下任何下载产物。
 
-#### Scenario: 已知长度超限
-- **WHEN** 平台 Content-Length 大于 `max-bytes`
-- **THEN** 私有 CLI 非零退出且 fd 不输出资源 bytes，Host 不保存 attachment
+#### Scenario: 下载期超过字节上限
+- **WHEN** 目标文件在写入过程中超过本次 Delivery 允许的字节上限
+- **THEN** Pet 终止 downloader 及其后代、删除目标与临时文件，Host 不保存 attachment，并返回可判定原因
 
-#### Scenario: Host 第二层检测超限
-- **WHEN** fd3 实际输出超过 Host 传入的 byte 上限
-- **THEN** Host 立即关闭 pipe、终止进程组并丢弃全部已收 bytes
+#### Scenario: 取消、超时与进程失败
+- **WHEN** Delivery 被取消、下载超过 Host timeout 或 CLI 非零退出
+- **THEN** Pet 终止 downloader 及其后代并删除全部落盘字节，不留下文件、进程或可供其它 Agent 读取的路径
 
-#### Scenario: 取消和超时
-- **WHEN** Delivery 被取消或下载超过 Host timeout
-- **THEN** Host 终止 downloader 及其后代，不留下文件、进程或可供其它 Agent 读取的路径
+#### Scenario: 崩溃残留清扫
+- **WHEN** Pet 启动时私有目录内存在上一轮未删除的下载产物
+- **THEN** Pet 删除这些残留，且不把它们当作任何 Delivery 的输入
+
+#### Scenario: child 无法读取私有目录
+- **WHEN** safe child 以 `read`、`read_image`、`glob` 或 `grep` 访问 Pet 媒体私有目录内的文件
+- **THEN** project-read guard 在工具 body 之前拒绝，child 得不到任何媒体字节
 
 ### Requirement: 图片进入 DSH durable attachment 与 typed content
 

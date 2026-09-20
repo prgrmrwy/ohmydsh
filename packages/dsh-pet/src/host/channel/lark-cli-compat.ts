@@ -1,30 +1,34 @@
-import { createHash } from 'node:crypto'
-import { accessSync, lstatSync, readFileSync, realpathSync } from 'node:fs'
-import { constants } from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 
-export const PET_LARK_CLI_UPSTREAM_VERSION = '1.0.94' as const
-export const PET_LARK_CLI_UPSTREAM_COMMIT = 'f065bf5b645af381f9b7475ce721451e6ca36a23' as const
-export const PET_LARK_CLI_PATCH_SHA256 = '3c8b66745b20f44d2f88e86342df15294e13779eeb0d78ceddcb2511419aea7c' as const
+const run = promisify(execFile)
 
+/** The official lark-cli version whose `--output` contract Pet reviewed. */
+export const PET_LARK_CLI_PINNED_VERSION = '1.0.94' as const
+
+const VERSION_TIMEOUT_MS = 10_000
+const MAX_VERSION_CHARS = 64
+const VERSION_PATTERN = /\b(\d+\.\d+\.\d+)\b/
+
+/** The resolved official binary plus the only directory media may be written to. */
 export interface PetLarkCliCompat {
   readonly binary: string
-  readonly supportsBoundedFdDownload: true
-  readonly upstreamVersion: typeof PET_LARK_CLI_UPSTREAM_VERSION
+  readonly pinnedVersion: typeof PET_LARK_CLI_PINNED_VERSION
+  /** Pet-owned 0700 spool; the locus child's read guard refuses this tree. */
+  readonly spoolRoot: string
 }
 
-interface PetLarkCliProvenance {
-  readonly upstreamVersion: string
-  readonly upstreamCommit: string
-  readonly patchSha256: string
-  readonly platform: string
-  readonly arch: string
-  readonly supportsBoundedFdDownload: boolean
-  readonly binarySha256: string
+/** What the resolver needs to prove before media is allowed to touch disk. */
+export interface PetLarkCliCompatInput {
+  /** Pet's media spool directory, created by `ensurePetDirectories`. */
+  readonly spoolRoot: string
+  /** Binary to probe; defaults to the same `lark-cli` every other Pet call uses. */
+  readonly binary?: string
+  /** Version probe seam, for tests that must not spawn a real binary. */
+  readonly probe?: (binary: string) => Promise<string>
 }
 
-/** Stable fail-closed diagnostic for a missing or stale Pet-only lark-cli build. */
+/** Stable fail-closed diagnostic for an unproven lark-cli. */
 export class PetLarkCliCompatUnavailableError extends Error {
   readonly code = 'pet-lark-cli-compat-unavailable' as const
 
@@ -34,49 +38,51 @@ export class PetLarkCliCompatUnavailableError extends Error {
   }
 }
 
-function packageRoot(): string {
-  // Works from both src/host/channel during tests and lib/host/channel after tsc.
-  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
+function sanitize(text: string): string {
+  return text.replace(/[\r\n\0]/g, ' ').trim().slice(0, MAX_VERSION_CHARS)
+}
+
+async function probeVersion(binary: string): Promise<string> {
+  const result = await run(binary, ['--version'], { timeout: VERSION_TIMEOUT_MS, maxBuffer: 4096 })
+  return typeof result.stdout === 'string' ? result.stdout : String(result.stdout ?? '')
 }
 
 /**
- * Resolve the package-owned fixed-source lark-cli used only by Pet media.
- * Never consults PATH and never falls back to the user's global lark-cli.
+ * Resolve the official `lark-cli` Pet downloads media with.
+ *
+ * Two facts are required, and neither is inferred: the binary must run, and the
+ * version it reports must be the pinned one, because that version is the
+ * contract for `--output`'s allowed roots and denylist. Media stays unavailable
+ * otherwise — a version Pet has not reviewed must not decide where bytes land.
+ * @param input - Spool directory plus optional binary/probe overrides.
+ * @returns the resolved binary, pinned version and spool root.
+ * @throws PetLarkCliCompatUnavailableError when either fact cannot be proven.
  */
-export function resolvePetLarkCliCompat(rootOverride = packageRoot()): PetLarkCliCompat {
-  if (process.platform === 'win32') {
-    throw new PetLarkCliCompatUnavailableError('bounded inherited-fd download is unavailable on non-POSIX hosts')
+export async function resolvePetLarkCliCompat(input: PetLarkCliCompatInput): Promise<PetLarkCliCompat> {
+  if (input.spoolRoot.trim() === '') {
+    throw new PetLarkCliCompatUnavailableError('Pet media spool directory is not configured')
   }
-  const root = path.join(rootOverride, 'compat', 'lark-cli', 'artifact')
-  const binary = path.join(root, 'lark-cli')
-  const provenanceFile = path.join(root, 'provenance.json')
-  let provenance: PetLarkCliProvenance
+  const binary = (input.binary ?? 'lark-cli').trim()
+  if (binary === '') {
+    throw new PetLarkCliCompatUnavailableError('Pet media downloader has no lark-cli to resolve')
+  }
+  const probe = input.probe ?? probeVersion
+  let reported: string
   try {
-    provenance = JSON.parse(readFileSync(provenanceFile, 'utf8')) as PetLarkCliProvenance
-    const info = lstatSync(binary)
-    if (!info.isFile() || info.isSymbolicLink()) throw new Error('binary is not a regular owned file')
-    const canonicalRoot = realpathSync(root)
-    const canonicalBinary = realpathSync(binary)
-    if (path.dirname(canonicalBinary) !== canonicalRoot) throw new Error('binary resolves outside the artifact root')
-    accessSync(binary, constants.X_OK)
+    reported = await probe(binary)
   } catch (cause) {
-    throw new PetLarkCliCompatUnavailableError('Pet media lark-cli compatibility artifact is missing or not executable; rebuild dsh-pet', { cause })
+    throw new PetLarkCliCompatUnavailableError(`lark-cli ${binary} could not be probed`, { cause })
   }
-  if (
-    provenance.upstreamVersion !== PET_LARK_CLI_UPSTREAM_VERSION
-    || provenance.upstreamCommit !== PET_LARK_CLI_UPSTREAM_COMMIT
-    || provenance.patchSha256 !== PET_LARK_CLI_PATCH_SHA256
-    || provenance.platform !== process.platform
-    || provenance.arch !== process.arch
-    || provenance.supportsBoundedFdDownload !== true
-    || !/^[a-f0-9]{64}$/.test(provenance.binarySha256)
-    || provenance.binarySha256 !== createHash('sha256').update(readFileSync(binary)).digest('hex')
-  ) {
-    throw new PetLarkCliCompatUnavailableError('Pet media lark-cli compatibility artifact provenance or capability does not match this package')
+  const version = VERSION_PATTERN.exec(reported)?.[1]
+  if (version === undefined) {
+    throw new PetLarkCliCompatUnavailableError(
+      `lark-cli ${binary} reported no version (${sanitize(reported) || 'empty output'})`,
+    )
   }
-  return {
-    binary,
-    supportsBoundedFdDownload: true,
-    upstreamVersion: PET_LARK_CLI_UPSTREAM_VERSION,
+  if (version !== PET_LARK_CLI_PINNED_VERSION) {
+    throw new PetLarkCliCompatUnavailableError(
+      `lark-cli ${binary} is ${version}, but Pet media requires ${PET_LARK_CLI_PINNED_VERSION}`,
+    )
   }
+  return { binary, pinnedVersion: PET_LARK_CLI_PINNED_VERSION, spoolRoot: input.spoolRoot }
 }

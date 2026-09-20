@@ -1,12 +1,34 @@
 /** Caller-bound physical-path guard for the four Locus project-read tools. */
 
 import { realpathSync, statSync } from 'node:fs'
-import { isAbsolute, relative, resolve, sep } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ToolExecution } from '@deepseek-ai/dsh-tools'
 
 const PROJECT_READ_TOOLS = new Set(['read', 'read_image', 'glob', 'grep'])
 export const LOCUS_PROJECT_READ_DENIAL = 'locus-project-read-outside-confirmed-workspace'
+
+/** The Pet-owned roots that supply the guard's denylist. */
+export interface LocusDeniedRootInput {
+  /** Active DSH home; also the parent of the DSH attachment store. */
+  readonly dshHome: string
+  /** Pet's own state root, which contains the media spool. */
+  readonly stateRoot: string
+}
+
+/**
+ * The runtime roots a safe child must never read.
+ *
+ * Exported rather than inlined at the install site so the production denylist
+ * and the tests that pin it cannot drift: `mediaSpoolRoot` is a descendant of
+ * `stateRoot`, so covering these three roots is what makes the spool — the only
+ * place a media download may touch disk — unreadable to a child.
+ * @param paths - Resolved Pet runtime paths.
+ * @returns absolute denied roots, in stable order.
+ */
+export function locusDeniedRoots(paths: LocusDeniedRootInput): string[] {
+  return [paths.dshHome, paths.stateRoot, join(paths.dshHome, 'attachments')]
+}
 
 export interface LocusProjectReadGuardInput {
   /** Exact child Session cwd, read by the Host rather than supplied by the model. */

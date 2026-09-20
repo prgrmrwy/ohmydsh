@@ -45,7 +45,7 @@ import { rebuildProjection } from './host/projection.js'
 import { PetRepository } from './host/repository.js'
 import { ChannelService } from './host/channel/service.js'
 import { createLarkCliClient, createLocusLarkPort } from './host/channel/lark.js'
-import { createLocusMediaPort, type LocusMediaPort } from './host/channel/media.js'
+import { createLocusMediaPort, sweepMediaSpool, type LocusMediaPort } from './host/channel/media.js'
 import { resolvePetLarkCliCompat } from './host/channel/lark-cli-compat.js'
 import { createPetRoutes } from './host/routes.js'
 import { withBrowserAuth } from './host/http.js'
@@ -119,7 +119,7 @@ import {
   type LocusCandidateAgent,
   type LocusCompositionPorts,
 } from './host/locus/composition.js'
-import { installLocusProjectReadGuard } from './host/locus/project-read-guard.js'
+import { installLocusProjectReadGuard, locusDeniedRoots } from './host/locus/project-read-guard.js'
 import { currentAllowlist } from './host/skill-provider.js'
 import { petDomainSpec } from './host/spec.js'
 import {
@@ -339,14 +339,17 @@ async function initialize(
   // degradations (mention rendering, member reads) are greppable in dsh.log
   // instead of silent.
   const larkClient = createLarkCliClient(undefined, undefined, petLog)
-  // Media is available only through the exact pinned compat binary's bounded
-  // inherited-fd capability. Resolution never falls back to a PATH binary;
-  // absence therefore remains text-only with zero media side effects.
-  let locusMediaDownload: ReturnType<typeof resolvePetLarkCliCompat> | undefined
+  // Media is available only through the pinned official CLI writing into Pet's
+  // own spool. The spool is swept first: at this moment no download can be in
+  // flight, so anything left in it is debris from a crash and must never be
+  // read as one.
+  const swept = await sweepMediaSpool(paths.mediaSpoolRoot)
+  if (swept > 0) petLog(`dsh-pet: swept ${swept} leftover media spool entr${swept === 1 ? 'y' : 'ies'}`)
+  let locusMediaDownload: Awaited<ReturnType<typeof resolvePetLarkCliCompat>> | undefined
   try {
-    locusMediaDownload = resolvePetLarkCliCompat()
+    locusMediaDownload = await resolvePetLarkCliCompat({ spoolRoot: paths.mediaSpoolRoot })
   } catch (error) {
-    petLog(`dsh-pet: bounded lark media downloader unavailable (${error instanceof Error ? error.message : String(error)})`)
+    petLog(`dsh-pet: lark media downloader unavailable (${error instanceof Error ? error.message : String(error)})`)
   }
   const locusMedia: LocusMediaPort = createLocusMediaPort({
     attachments: ctx.get('attachments') as never,
@@ -1109,7 +1112,7 @@ async function initialize(
           childCwd,
           parentCwd,
           workspaceRoot,
-          deniedRoots: [paths.dshHome, paths.stateRoot, join(paths.dshHome, 'attachments')],
+          deniedRoots: locusDeniedRoots(paths),
         })
         registerPetTools(agent.scope as never, {
           repository,
