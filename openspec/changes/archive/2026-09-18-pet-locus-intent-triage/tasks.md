@@ -143,6 +143,7 @@
     额外证据：该轮真实调用了 `pet_locus_parent_lookup`（只读父会话查阅在生产链路被实际使用）；截图下载被只读沙箱拒绝后未卡死，转而从代码侧列出三条候选线索（含 `DISCOVERY_FOLD_ENABLED = false` 这类"有意停用而非故障"的判断）。
 - [x] 9.4 真实验收：代际更替后既有待办仍可解析来源与去向，两个跳转按规则可用或就地说明
   - **数据层通过；管理面跳转在本次验收时尚未接线**（见任务组 8 的范围边界说明，所有者已确认由后续工作接管）。待办记录同时持有 `locusId`（稳定标识，寻址用）与 `generation`（仅审计），`endpoint`+`triggerMessageId` 完整保留，跳转决策所需事实齐备；`test/ledger-store.test.ts` 已用真实事务验证"同一 locusId 下不同 generation 的条目都能被 `listByLocusId` 找到"。真实代际更替（`/bind` 切换来源）的端到端观察未在本轮触发。
+    **订正（2026-09-19）**：管理面跳转此后已在同一 change 内接线完成——新增 `LOCUS_ROUTES.todos` 与 `todoAction` 两条路由（复用既有 `petRoute` 的 loopback + same-origin 防护与 `requireLocusActor` 所有者证明，零新增安全模型）、`TodoLedgerFold` 面板，以及跳飞书（话题 / 群分支，话题身份不可证时退化为群并说明）与跳会话（按 `locusId` 解析**当前代**子会话，不沿用待办上记录的 generation）两个控件；`test/ledger-view.test.ts` 含 5 条接线守卫断言，`test/ledger-panel-render.test.ts` 含跳转与动作说明的渲染断言。真实代际更替的端到端观察仍**未触发**，上半句的判断仍然成立。
 - [x] 9.5 真实验收：同源另一 locus 子会话读到已登记待办及证据，且读不到兄弟对话历史与入口清单
   - **通过，且是真正的跨 locus 读取**（非同一子会话自读）。数据库确证两者是不同 locus、不同子会话、不同入口，仅共享主会话：
     · 登记方：locus `...0aa6ba38c610b8` / child `session-ebd94876-17ea-4cd4-b6b7-b3b3fcbb73d9` / 群级入口
@@ -153,3 +154,9 @@
   - 证据（四项均已实际执行"削弱→确认测试失败→恢复→确认测试转绿"的完整循环，非静态审查）：① caller 授权——把 `resolveLedgerCaller` 的歧义检查从 `!== 1` 削弱为 `< 1`，`ledger-caller.test.ts` 从 18/18 变 16/18；② 目标参数拒绝——把 `trackTodo` 的 `no-current-delivery` 拒绝分支删除，`ledger-track.test.ts` 从 9/9 变 8/9（以 TypeError 崩溃形式失败）；③ 纯数据读取保证——在 `parent-lookup.ts` 里加入一个真实 `agent.followup(...)` 调用，`ledger-parent-lookup.test.ts` 的结构性测试从 12/12 变 11/12；④ 代际无关寻址——把 `listByLocusId` 改为附加 `generation === 999` 过滤，`ledger-store.test.ts` 对应真实事务用例失败（**发现非 atomic 分支会 silently skip 这条真实断言**，必须用 `DSH_PET_TEST_RUNTIME` 才能观察到削弱生效，已记录为方法论提醒）。全部恢复后重新确认对应测试转绿，且全量套件回到既有 12 个失败的基线不变。
 - [x] 9.7 确认普通会话（非 locus child）工具面不含本 change 新增的三个工具，普通 Pet 轮盘能力不受影响
   - 证据：`test/ledger-tool-scope.test.ts`（3 用例，用真实 `@deepseek-ai/dsh-scope` + `ToolRuntime`，非 mock）。**实施中发现的两处真实自我回归，均已修复**：(a) 三个工具接入 `registerPetTools` 后触发 `test/executor-scope.test.ts` 的工具数量守卫断言（原硬编码期望 3，已更新为 6 并补充新工具名断言，理由：新增数量是本 change 的有意结果，不是需要绕过的约束）；(b) 全量套件因升级 `PET_DOMAIN_VERSION` 触发 `test/migrate-cli.test.ts` 10 个失败（见任务 7.5 的完整记录）。第三个用例（"absent from an unrelated agent scope"）标记为 `it.fails` 并注明原因：与 `test/tool-scope.test.ts` 同名断言在完全干净的 HEAD 上已用 `git stash` 验证过同样失败——同一个 `dsh-scope`/`ToolRuntime` 版本漂移的既有环境问题，不是本 change 的代码缺陷；如实记录而非静默删除或伪装通过。
+    **订正（2026-09-19）：上文对该用例失败的归因是错的。** 真因不在环境，而在测试文件自身：它直接写 `import { createScope } from '@deepseek-ai/dsh-scope'`，拿到的是仓库里**另一份物理副本**；而 scope tag 用的是 package-private Symbol，副本的 Symbol 不被 `ToolRuntime` 认可，于是 tag 读起来像不存在，`tools.register()` **静默退回全局层**——四个 Pet 工具因此出现在无关 scope 里。`test/tool-scope.test.ts` 早已用「从 ToolRuntime 自身的依赖根 mint」规避了这一点（其文件头注释写明了原因），本文件照抄它的 helper 时漏掉了那段。改成同样的解析方式后，该用例作为普通 `it` 通过，`it.fails` 与错误归因一并撤销。**结论：9.7 是真通过的——不存在工具面泄漏，`intentTriage` 也从来不是触发点。**
+
+## 归档后遗留（2026-09-19 记录）
+
+- **管理面处置动作未做真机验收**：受理 / 完成 / 放弃目前只有单元与渲染测试覆盖，端到端链路（点按钮 → `locus-todo-action` 路由 → `advanceStatus` → 落库 → 面板重新拉取）从未在真实环境点击过。归档时数据库里那条待办仍为 `status: open`，即该路径一次都未被真实触发。所有者将于后续补做。
+- 该缺口不影响本 change 已验收的部分：登记侧（飞书 → `pet_locus_track` → 落库）、读取侧（跨 locus 同源读取）与工具面隔离均已由真机日志、数据库记录或真实事务测试验证。
