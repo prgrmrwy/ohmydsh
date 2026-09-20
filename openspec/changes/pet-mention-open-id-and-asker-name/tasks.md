@@ -10,10 +10,10 @@
 
 ## 2. 规范追平与校验（本 change 的剩余工作）
 
-- [ ] 2.1 复核两个 delta 相对 current spec 只做「扩展 + 澄清」：确认 `pet-locus-collaboration` 的渲染要求未丢失任何既有场景，`pet-lark-channel` 的注入要求未放松「不注入压平历史」这条主约束。
-- [ ] 2.2 运行 `packages/dsh-pet` 的 build、typecheck、完整 Vitest，以及仓库 `npm test`、`npm run check:artifacts`、`node scripts/sync.mjs` 两次幂等与 `openspec validate --strict`。
-- [ ] 2.3 按原 change 的验收结论在 `docs/notes/` 记录：这两处行为现已有规范覆盖，以及它们与 `pet-lark-channel` 注入约束的边界。
+- [x] 2.1 复核两个 delta 相对 current spec 只做「扩展 + 澄清」：确认 `pet-locus-collaboration` 的渲染要求未丢失任何既有场景，`pet-lark-channel` 的注入要求未放松「不注入压平历史」这条主约束。（逐句与逐场景核对通过。）
+- [x] 2.2 运行 `packages/dsh-pet` 的 build、typecheck、完整 Vitest，以及仓库 `npm test`、`npm run check:artifacts`、`node scripts/sync.mjs` 两次幂等与 `openspec validate --strict`。（package 2679 pass；仓库 124 pass；strict valid。）
+- [x] 2.3 按原 change 的验收结论在 `docs/notes/` 记录：这两处行为现已有规范覆盖，以及它们与 `pet-lark-channel` 注入约束的边界。（见 `docs/notes/pet-mention-open-id-and-asker-name.md`。）
 
 ## 3. 归档
 
-- [ ] 3.1 把两个 delta 同步进 current spec（含 `会话内容由 Agent 自取而非预先注入` 的澄清段落），再归档本 change。
+- [x] 3.1 把两个 delta 同步进 current spec（含 `会话内容由 Agent 自取而非预先注入` 的澄清段落），再归档本 change。（逐 requirement 合并；未覆盖其它并发修改。）
