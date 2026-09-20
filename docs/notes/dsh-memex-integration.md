@@ -103,6 +103,32 @@ normalized), so one collision check covers them: two different sources — two
 remotes, two local paths, or one of each — that produce one name raise
 `Different sources derive the same scope …` instead of silently sharing a library.
 
+## Per-workspace memory off is enforced at the choke point
+
+The switch is `scopes[].memory: false` and it is deliberately enforced **once**,
+in `currentFor()` — the function every registered tool calls first:
+
+```ts
+const route = resolver.resolve(cwd)
+if (!route.memory) throw new Error('Memory is off for this workspace …')
+return resolver.ensure(route)
+```
+
+Three details matter and are easy to get wrong when editing this:
+
+- **The check must stay before `ensure()`.** In the other order, the first tool
+  call in a "memory-free" workspace creates the library directory before
+  refusing.
+- **It is the *session's route*, not the library.** Making a disabled library
+  globally unreachable looks tidier but breaks a real configuration: `personal`
+  is both the entry for `ohmydsh`/`dsh-cockpit` and every other workspace's
+  fallback write target, so disabling memory in `ohmydsh` would silently remove
+  the fallback write path everywhere.
+- **The lifecycle injection is a separate hook** (`agent/session-start`), so the
+  same flag has to be read there too; the write reminder is gated on the same
+  session state. Injecting the recall prompt while the tools refuse would be the
+  worst of both.
+
 ## Remote actions and the "never re-create" rule
 
 The settings page configures remotes only through the kernel CLI

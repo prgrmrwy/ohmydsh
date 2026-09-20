@@ -3,7 +3,7 @@ import { evaluateCrossWrite } from '../src/guard/index.js'
 import type { ScopeResolution, ScopeService } from '../src/scope/types.js'
 
 function scope(name: string, publish: 'internal' | 'external', workspacePaths: string[] = []): ScopeResolution {
-  return { scope: name, home: `/memex/${name}`, publish, publishKnown: true, source: 'config', created: false, workspacePaths }
+  return { scope: name, home: `/memex/${name}`, publish, publishKnown: true, memory: true, source: 'config', created: false, workspacePaths }
 }
 
 const internal = scope('apaas-nexus', 'internal', ['/work/nexus'])

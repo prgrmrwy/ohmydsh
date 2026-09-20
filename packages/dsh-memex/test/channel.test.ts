@@ -118,7 +118,7 @@ describe('memex settings channel', () => {
 
     const result = await h.stores()
     const nexus = result.stores.find(store => store.scope === 'nexus')!
-    expect(nexus).toMatchObject({ declared: true, primary: false, source: 'config', exists: true, cards: 3, homeSource: 'namespace', publish: 'internal' })
+    expect(nexus).toMatchObject({ declared: true, primary: false, source: 'config', exists: true, cards: 3, homeSource: 'namespace', publish: 'internal', memory: true })
     expect(nexus.sync).toMatchObject({ known: true, configured: true, remote: 'git@code.byted.org:apaas/memex-nexus.git', auto: true })
 
     const stray = result.stores.find(store => store.scope === 'stray')!
@@ -149,9 +149,9 @@ describe('memex settings channel', () => {
     // Configured `~/…` prefixes are compared against absolute registry paths, so
     // the browser is told which home to expand with.
     expect(result.homeDir).toBe('/home/u')
-    expect(result.items.map(item => [item.title, item.route?.scope])).toEqual([
-      ['nexus', 'nexus'],
-      ['learning', 'documents-learning'],
+    expect(result.items.map(item => [item.title, item.route?.scope, item.route?.memory])).toEqual([
+      ['nexus', 'nexus', true],
+      ['learning', 'documents-learning', true],
     ])
   })
 

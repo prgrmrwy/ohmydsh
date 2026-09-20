@@ -12,7 +12,7 @@ import type { BindingEntry, ScopeResolution, ScopeService } from '../src/scope/t
  * A route as the resolver would build it: the workspace's entries (this scope
  * alone here) and the reach they imply, so the tool layer reads one source.
  */
-function scope(name: string, binding?: BindingEntry): ScopeResolution {
+function scope(name: string, binding?: BindingEntry, memory = true): ScopeResolution {
   const read = binding === undefined
     ? [name]
     : [...new Set([name, ...binding.read, 'personal'])]
@@ -24,6 +24,7 @@ function scope(name: string, binding?: BindingEntry): ScopeResolution {
     home: `/memex/${name}`,
     publish: name === 'internal' || name === 'current' ? 'internal' : 'external',
     publishKnown: true,
+    memory,
     source: 'config',
     created: false,
     workspacePaths: name === 'internal' || name === 'current' ? [`/work/${name}`] : [],
@@ -158,6 +159,28 @@ describe('memex DSH tool registration', () => {
     const tools = capture(runner, { name: 'many', read: ['current', 'alpha', 'beta', 'blocked', 'personal'], write: ['current'] })
     await call(tools.get('memex_search')!, { query: 'x', scope: 'all', limit: 10 })
     expect(peak).toBe(4)
+  })
+
+  it('refuses every tool in a workspace whose memory is switched off', async () => {
+    // Full off, not just the injections: a workspace the user declared memory-free
+    // must not receive cards through a tool call either.
+    const off = { ...scope('current', undefined, false) }
+    const service: ScopeService = {
+      resolve: () => off,
+      list: () => [off],
+      resolveByName: () => off,
+      ensure: () => { throw new Error('ensure must not run for a disabled workspace') },
+      bindingFor: () => undefined,
+      accessFor: name => ({ current: name, read: [name], write: [name] }),
+    }
+    const runner: KernelRunner = vi.fn(async () => ok(''))
+    const tools = capture(runner, undefined, undefined, service)
+    for (const name of ['memex_search', 'memex_read', 'memex_write', 'memex_links', 'memex_archive', 'memex_organize']) {
+      await expect(call(tools.get(name)!, { slug: 'x', content: '---\ntitle: X\n---\nBody\n' }))
+        .rejects.toThrow(/Memory is off for this workspace/)
+    }
+    // Nothing reached the kernel, so no card was written anywhere.
+    expect(runner).not.toHaveBeenCalled()
   })
 
   it('reads a concrete readable scope and reports the route', async () => {

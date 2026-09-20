@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { MemexStoreView } from '../src/contract.js'
 import {
   addEntryToGroup,
+  setMemory,
   attachEntry,
   candidatesFor,
   claimersOf,
@@ -39,6 +40,7 @@ function store(overrides: Partial<MemexStoreView> & { scope: string }): MemexSto
     homeSource: 'namespace',
     publish: 'external',
     publishKnown: true,
+    memory: true,
     source: 'config',
     declared: true,
     exists: true,
@@ -237,7 +239,7 @@ describe('workspace-first view', () => {
       homeDir: home,
       items: [{ id: 'w1', title: 'learning', path: '/home/u/Documents/learning', route: {
         path: '/home/u/Documents/learning', scope: 'documents-learning', home: '/ns/documents-learning',
-        publish: 'external', publishKnown: true, source: 'local', exists: true, local: true,
+        publish: 'external', publishKnown: true, memory: true, source: 'local', exists: true, local: true,
       } }],
     })
     expect(views).toHaveLength(1)
@@ -280,7 +282,7 @@ describe('workspace-first view', () => {
       homeDir: home,
       items: [{ id: 'w1', title: 'learning', path: '/home/u/Documents/learning', route: {
         path: '/home/u/Documents/learning', scope: 'documents-learning', home: '/ns/documents-learning',
-        publish: 'external', publishKnown: true, source: 'local', exists: true, local: true,
+        publish: 'external', publishKnown: true, memory: true, source: 'local', exists: true, local: true,
       } }],
     })[0]!
     const staged = attachEntry(rows, view, { name: 'tools', discovered: false })
@@ -331,7 +333,7 @@ describe('workspace-first view', () => {
       homeDir: home,
       items: [{ id: 'w1', title: 'learning', path: '/home/u/Documents/learning', route: {
         path: '/home/u/Documents/learning', scope: 'documents-learning', home: '/ns/documents-learning',
-        publish: 'external', publishKnown: true, source: 'local', exists: true, local: true,
+        publish: 'external', publishKnown: true, memory: true, source: 'local', exists: true, local: true,
       } }],
     })[0]!
     expect(view.entries.map(entry => entry.kind)).toEqual(['assumed', 'fallback'])
@@ -343,6 +345,53 @@ describe('workspace-first view', () => {
     ])
     const on = toScopes(setFallback(off, view, true))
     expect(on[0]!.fallback).toBe(true)
+  })
+
+  it('switches memory off on the entry that carries the route', () => {
+    const rows: EditorRow[] = [
+      row({ key: 'a', name: 'nexus', paths: ['/home/u/work/nexus'], primary: true }),
+      row({ key: 'b', name: 'flow', paths: ['/home/u/work/nexus'] }),
+    ]
+    const view = workspaceViews(rows, ws('/home/u/work/nexus', 'nexus'))[0]!
+    expect(view.memory).toBe(true)
+    const off = setMemory(rows, view, false)
+    // The route carrier decides, exactly like the fallback switch.
+    expect(off.map(item => item.memory)).toEqual([false, undefined])
+    expect(toScopes(off)).toEqual([
+      { name: 'nexus', pathPrefixes: ['/home/u/work/nexus'], primary: true, memory: false },
+      { name: 'flow', pathPrefixes: ['/home/u/work/nexus'] },
+    ])
+    expect(workspaceViews(off, ws('/home/u/work/nexus', 'nexus'))[0]!.memory).toBe(false)
+    expect(toScopes(setMemory(off, view, true))[0]!.memory).toBe(true)
+  })
+
+  it('stages the derived primary when memory is switched off on an undeclared workspace', () => {
+    const rows: EditorRow[] = []
+    const view = workspaceViews(rows, {
+      known: true,
+      homeDir: home,
+      items: [{ id: 'w1', title: 'thing', path: '/home/u/work/thing', route: {
+        path: '/home/u/work/thing', scope: 'work-thing', home: '/ns/work-thing',
+        publish: 'external', publishKnown: true, memory: true, source: 'local', exists: true, local: true,
+      } }],
+    })[0]!
+    expect(view.memory).toBe(true)
+    expect(toScopes(setMemory(rows, view, false))).toEqual([
+      { name: 'work-thing', pathPrefixes: ['/home/u/work/thing'], primary: true, memory: false },
+    ])
+  })
+
+  it('writes both switches on a declared library that claims no path', () => {
+    // The block still shows the switches, so they must still write: there is no
+    // workspace to claim, and the block's own entry is the route carrier.
+    const rows: EditorRow[] = [row({ key: 'a', name: 'legacy', paths: [] })]
+    const view = workspaceViews(rows, undefined)[0]!
+    expect(view.entries.map(entry => [entry.kind, entry.name])).toEqual([
+      ['entry', 'legacy'],
+      ['fallback', 'personal'],
+    ])
+    expect(toScopes(setMemory(rows, view, false))[0]!.memory).toBe(false)
+    expect(toScopes(setFallback(rows, view, false))[0]!.fallback).toBe(false)
   })
 
   it('moves the primary inside one workspace only', () => {
@@ -396,7 +445,7 @@ describe('workspace-first view', () => {
       homeDir: home,
       items: [{ id: 'w1', title: 'learning', path: '/home/u/Documents/learning', route: {
         path: '/home/u/Documents/learning', scope: 'documents-learning', home: '/ns/documents-learning',
-        publish: 'external', publishKnown: true, source: 'local', exists: true, local: true,
+        publish: 'external', publishKnown: true, memory: true, source: 'local', exists: true, local: true,
       } }],
     })[0]! as WorkspaceView
     expect(view.assumed).toBeUndefined()

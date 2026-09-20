@@ -113,6 +113,28 @@ describe('scope resolver', () => {
     expect(resolver.resolve('/external/worktree')).toMatchObject({ scope: 'nexus', publish: 'internal', workspacePaths: ['/work/nexus'] })
   })
 
+  it('reports memory as on by default and off only when the entry says so', () => {
+    const resolver = createScopeResolver({
+      homeDir: tempHome(),
+      gitRemote: () => 'git@code.byted.org:apaas/nexus.git',
+      config: { scopes: [{ name: 'nexus', pathPrefixes: ['/work/nexus'], publish: 'internal' }] },
+    })
+    expect(resolver.resolve('/work/nexus/src').memory).toBe(true)
+    // An undeclared directory derives its own scope, which is on as well.
+    expect(resolver.resolve('/work/unowned').memory).toBe(true)
+
+    const off = createScopeResolver({
+      homeDir: tempHome(),
+      gitRemote: () => undefined,
+      config: { scopes: [{ name: 'work-thing', pathPrefixes: ['/work/thing'], memory: false }] },
+    })
+    const route = off.resolve('/work/thing/src')
+    expect(route).toMatchObject({ scope: 'work-thing', memory: false })
+    // Switching memory off is not a reachability change: the route still resolves
+    // and still carries its fallback grant.
+    expect(route.access.write).toEqual(['work-thing', 'personal'])
+  })
+
   // The fallback is a default grant in both directions: a new workspace has to be
   // usable without any configuration at all.
   it('grants the fallback library on an unconfigured scope', () => {

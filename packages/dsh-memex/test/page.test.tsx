@@ -81,6 +81,7 @@ interface Harness {
   /** Buttons by their aria-label, for the ones whose text is a glyph. */
   aria(label: string): HTMLButtonElement[]
   inputs(): HTMLInputElement[]
+  checkbox(label: string): HTMLInputElement
   inputByPlaceholder(placeholder: string): HTMLInputElement
   expand(index: number): Promise<void>
   choose(label: string): Promise<void>
@@ -147,6 +148,11 @@ async function render(
     aria: label => [...container.querySelectorAll('button')]
       .filter(candidate => candidate.getAttribute('aria-label') === label),
     inputs: () => [...container.querySelectorAll('input')],
+    checkbox: label => {
+      const found = [...container.querySelectorAll('input')].find(input => input.type === 'checkbox' && input.getAttribute('aria-label') === label)
+      if (found === undefined) throw new Error(`no checkbox labelled ${label} in: ${harness.text()}`)
+      return found
+    },
     inputByPlaceholder: placeholder => {
       const found = [...container.querySelectorAll('input')].find(candidate => candidate.placeholder === placeholder)
       if (found === undefined) throw new Error(`no input with placeholder ${placeholder} in: ${harness.text()}`)
@@ -486,7 +492,7 @@ describe('memory settings page', () => {
       workspaces: registry([{ title: 'learning', path: '/home/u/Documents/learning', route: routeOf('documents-learning', '/home/u/Documents/learning') }]),
       stores: [store({ scope: 'documents-learning', declared: false, source: 'local' })],
     })
-    const toggle = h.inputs().find(input => input.type === 'checkbox')!
+    const toggle = h.checkbox('fallbackLabel')
     expect(toggle.checked).toBe(true)
     await act(async () => { toggle.click() })
     expect(h.text()).toContain('stagedNotice')
@@ -494,6 +500,41 @@ describe('memory settings page', () => {
     expect(h.mutations).toEqual([[
       { op: 'set', path: ['scopes'], value: [
         { name: 'documents-learning', pathPrefixes: ['/home/u/Documents/learning'], primary: true, fallback: false },
+      ] },
+    ]])
+  })
+
+  it('switches memory off for one workspace, staging its derived primary', async () => {
+    const h = await render({ scopes: [] }, {
+      workspaces: registry([{ title: 'work-thing', path: '/home/u/work/thing', route: routeOf('work-thing', '/home/u/work/thing', { source: 'derived' }) }]),
+      stores: [store({ scope: 'work-thing', declared: false, source: 'derived' })],
+    })
+    const toggle = h.checkbox('memoryLabel')
+    expect(toggle.checked).toBe(true)
+    await act(async () => { toggle.click() })
+    expect(h.text()).toContain('stagedNotice')
+    await act(async () => { h.button('save').click() })
+    expect(h.mutations).toEqual([[
+      { op: 'set', path: ['scopes'], value: [
+        { name: 'work-thing', pathPrefixes: ['/home/u/work/thing'], primary: true, memory: false },
+      ] },
+    ]])
+  })
+
+  it('shows the off state and what it means, without hiding the configuration', async () => {
+    const h = await render({ scopes: [{ name: 'work-thing', pathPrefixes: ['/home/u/work/thing'], memory: false }] }, {
+      workspaces: registry([{ title: 'work-thing', path: '/home/u/work/thing' }]),
+      stores: [store({ scope: 'work-thing', memory: false })],
+    })
+    expect(h.checkbox('memoryLabel').checked).toBe(false)
+    expect(h.text()).toContain('memoryHint')
+    // Off is a runtime state, not a reason to hide the entry from the editor.
+    expect(h.container.querySelector('.dshmx-entry-line')?.textContent).toContain('work-thing')
+    await act(async () => { h.checkbox('memoryLabel').click() })
+    await act(async () => { h.button('save').click() })
+    expect(h.mutations).toEqual([[
+      { op: 'set', path: ['scopes'], value: [
+        { name: 'work-thing', pathPrefixes: ['/home/u/work/thing'], memory: true },
       ] },
     ]])
   })
@@ -506,7 +547,7 @@ describe('memory settings page', () => {
     // The fallback is an entry of the workspace, on by default, and its switch is
     // on the row rather than behind the disclosure: it is a state, not a detail.
     expect(h.text()).toContain('fallbackLabel')
-    const toggle = h.inputs().find(input => input.type === 'checkbox')!
+    const toggle = h.checkbox('fallbackLabel')
     expect(toggle.checked).toBe(true)
     await act(async () => { toggle.click() })
     await act(async () => { h.button('save').click() })

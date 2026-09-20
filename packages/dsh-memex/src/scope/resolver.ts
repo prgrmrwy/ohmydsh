@@ -215,6 +215,7 @@ export function createScopeResolver(options: ScopeResolverOptions = {}): ScopeSe
       workspacePaths: [...new Set([...(entry?.pathPrefixes ?? []), ...workspacePaths].map(path => normalizePath(path, homeDir)))],
       entries: resolvedEntries,
       access: accessOf(scope, resolvedEntries, fallbackOf(scope)),
+      memory: entry?.memory !== false,
     }
     known.set(scope, result)
     return result

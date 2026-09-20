@@ -7,6 +7,8 @@ interface SessionState {
   recalled: boolean
   wrote: boolean
   reminded: boolean
+  /** True once this session's workspace was found to have memory switched off. */
+  off: boolean
 }
 
 const RECALL_TEXT = [
@@ -40,7 +42,7 @@ export function registerMemexLifecycle(ctx: Context, scopes: ScopeService): Meme
   const state = (session: object): SessionState => {
     const found = states.get(session)
     if (found) return found
-    const created = { recalled: false, wrote: false, reminded: false }
+    const created = { recalled: false, wrote: false, reminded: false, off: false }
     states.set(session, created)
     return created
   }
@@ -48,12 +50,16 @@ export function registerMemexLifecycle(ctx: Context, scopes: ScopeService): Meme
   ctx.on('agent/session-start', ({ agent, source }) => {
     const sessionState = state(agent.session)
     if (source === 'compact') { sessionState.recalled = false; sessionState.reminded = false }
-    else { sessionState.recalled = false; sessionState.wrote = false; sessionState.reminded = false }
+    else { sessionState.recalled = false; sessionState.wrote = false; sessionState.reminded = false; sessionState.off = false }
 
     try {
       const cwd = agent.session.header.cwd
       if (!cwd) return
       const scope = scopes.resolve(cwd)
+      // Memory off is a workspace decision: injecting the recall prompt would
+      // invite calls the tools then refuse, so the session is left alone.
+      sessionState.off = !scope.memory
+      if (sessionState.off) return
       agent.inject(pluginMessage(`${RECALL_TEXT}\n\nCurrent memory scope: ${scope.scope}\nLibrary: ${scope.home}`, 'instructions'))
     } catch (error) {
       ctx.logger('dsh-memex').warn('Could not inject memex recall context: %s', error instanceof Error ? error.message : String(error))
@@ -62,7 +68,7 @@ export function registerMemexLifecycle(ctx: Context, scopes: ScopeService): Meme
 
   ctx.on('agent/turn-stopping', ({ agent }) => {
     const current = state(agent.session)
-    if (!current.recalled || current.wrote || current.reminded) return
+    if (current.off || !current.recalled || current.wrote || current.reminded) return
     current.reminded = true
     try {
       agent.inject(pluginMessage(RETRO_TEXT, 'notice', 'Memex write reminder'))
