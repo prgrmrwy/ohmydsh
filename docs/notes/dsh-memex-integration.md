@@ -129,6 +129,36 @@ Three details matter and are easy to get wrong when editing this:
   session state. Injecting the recall prompt while the tools refuse would be the
   worst of both.
 
+## A protected remote branch breaks the sync hook, not the write
+
+`memex sync push` runs `git -C <home> push origin HEAD` — the local branch name is
+whatever the remote's default branch is (`normalizeBranch()` aligns them at init),
+so with a protected `main` on code.byted.org the push is rejected:
+
+```
+remote: Application: You are not allow to operate the branch as it is protected.
+ ! [remote rejected] HEAD -> main (pre-receive hook declined)
+```
+
+Two things make this easy to misread while debugging:
+
+- **`git push --dry-run` succeeds.** A dry run only negotiates refs; the server's
+  pre-receive hook (which is what enforces protection) never runs. So "dry-run
+  says it would fast-forward" is not evidence that the push works.
+- **The card is not lost.** The kernel commits before pushing, so the local
+  library is ahead of the remote, `.sync.json`'s `lastSync` stays stale, and the
+  write hook fails on every subsequent write. Ours now says exactly that instead
+  of `exit 1`.
+
+`memex sync pull` is not affected in the same way (`fetch` works), so recall and
+local reads keep working; only the remote stays behind.
+
+Fixing it is a remote-policy decision, not a plugin one: unprotect the branch, or
+move the remote to a branch that is not protected **and** make it the repo's
+default branch (the kernel pushes to `HEAD` and pulls from `origin/HEAD`, so both
+must agree). Do not "fix" it by pointing an internal library at a public host —
+`publish: internal` libraries are exactly the ones the guard keeps off such hosts.
+
 ## Remote actions and the "never re-create" rule
 
 The settings page configures remotes only through the kernel CLI

@@ -11,6 +11,7 @@
 - 远端动作按状态分流：未配置 → `sync --init <url>`；已配置 → `sync` / `sync push|pull` / `sync on|off` / 更换远端（独立动作 + 确认）。**已配置的库从不重新初始化或重建**，系统自身不写库内 `.sync.json` / `.gitignore`。
 - **行为变化**：无仓库目录不再 fallback 到 `personal`。按本地路径末两段派生各自的库（`~/Documents/learning` → `documents-learning`），位于同一命名空间且**不配置远端同步**；`personal` 仍是可解析的普通 scope，但不再隐式承接任何目录。已声明路径的路由不变。
 - 新增两条**静态**完整性约束：同一库路径被两个 scope 共用、同一 remote 模式字面重复 → settings 校验拒绝并指明两方。remote 模式的**运行时重叠**（正则重叠无法在配置期判定）改为解析时报错，替换原先「按配置顺序第一个命中即生效」的静默行为。
+- **同步钩子的失败信息带原因**：写卡后的 `memex sync push`/`pull` 失败此前只报 `exit 1`，实测中一个远端分支保护导致 push 被拒，读者因此要自己进 git 排查。现在信息包含内核 stderr 的首段（折成一行、上限 400 字符），并区分两种后果：push 失败时说明「卡片已本地提交，只是没推上去」，附加库的 pull 失败时说明「写入被跳过」。
 - 所有内核调用注入 `LC_ALL=C` / `LANG=C`：内核 `--init` 靠英文错误串判定「remote 已存在」，本机 zh_CN locale 下会让已配置库重跑 `--init` 直接失败（实测 exit 1）。
 - 对应 openspec change `dsh-memex-settings-ui`；上一版见 change `dsh-memex-scoped-memory`（0.1.0）。
 
