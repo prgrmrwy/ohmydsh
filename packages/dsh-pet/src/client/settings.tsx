@@ -741,14 +741,19 @@ function ownerInquiryStatusLabel(status: string): string {
 /**
  * Owner facts, shown exactly as far as the Host proved them.
  *
- * A missing projection is stated as missing. Rendering an empty ledger as "no
- * inquiries" would invent a fact the Host never asserted.
+ * A projected owner whose inquiry ledger is absent is stated as absent.
+ * Rendering an empty ledger as "no inquiries" would invent a fact the Host
+ * never asserted. Whether anything was projected AT ALL is decided by the
+ * caller, which is why `owner` is required here.
  */
-function OwnerProjectionFacts(props: { readonly owner: PetLocusView['owner'] | undefined }): JSX.Element {
+function OwnerProjectionFacts(props: {
+  // Required, not optional: the caller renders this only when the Host
+  // actually projected owner facts, so a missing-projection branch here would
+  // be unreachable. "Is it projected at all" is the row's question, not this
+  // component's.
+  readonly owner: NonNullable<PetLocusView['owner']>
+}): JSX.Element {
   const owner = props.owner
-  if (owner === undefined) {
-    return <span className="dshpet-meta">Host 未提供 owner 投影与询问台账的真实快照，面板不伪造询问记录</span>
-  }
   const inquiry = owner.inquiry
   return (
     <span className="dshpet-owner-facts">
@@ -903,18 +908,32 @@ export function LocusDetails(props: {
         {permissionDrift
           ? ` · 期望${LOCUS_PERMISSION_LABELS[head.permission.desired]}，实际${LOCUS_PERMISSION_LABELS[head.permission.effective]}，未生效`
           : ''}
-        {head.permission.verifiedAt === undefined
-          ? ' · 未核验'
-          : ` · ${formatAbsolute(head.permission.verifiedAt)} 核验`}
+        {/* The verification timestamp is deliberately not shown. It is written
+            ONLY by an owner permission change, and with the write switch off
+            and the permission control retired there is no longer any path that
+            sets it — so the suffix read 「未核验」 on every entry. The date
+            branch would be worse than redundant: a locus whose write grant was
+            demoted still carries the timestamp from THAT grant, so showing it
+            beside 「只读」 would claim the current mode had been verified when a
+            different one was. */}
         {writable
           ? ' · 该入口成员共享整机写权限（含仓库之外的任何文件），不再受目录范围限制'
           : ''}
       </dd>
 
-      <dt>询问</dt>
-      <dd>
-        <OwnerProjectionFacts owner={head.owner} />
-      </dd>
+      {/* Only rendered when the Host actually projects owner facts. The
+          projection is an optional dependency that is not composed today, so
+          an unconditional row printed the same 「no data」 sentence on every
+          entry — an absence dressed up as content. It returns by itself the
+          moment the projection is wired. */}
+      {head.owner === undefined ? null : (
+        <>
+          <dt>询问</dt>
+          <dd>
+            <OwnerProjectionFacts owner={head.owner} />
+          </dd>
+        </>
+      )}
 
       <dt>操作</dt>
       <dd className="dshpet-locus-ops">

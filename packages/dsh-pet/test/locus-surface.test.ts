@@ -230,13 +230,35 @@ describe('the execution-root surface is retired from the panel', () => {
 
   it('removing that row leaves its neighbours intact', () => {
     // A deletion that quietly takes the surrounding facts with it is the
-    // failure mode worth pinning: 权限 and 询问 sit either side of where the
-    // row used to be.
+    // failure mode worth pinning: 权限 and 操作 sat either side of where the
+    // row used to be. 询问 is asserted separately — it is now conditional on
+    // the Host actually projecting owner facts.
     const markup = ownerMarkup({ executionRoot: '/Users/prgrmrwy/corp/nexus' })
 
+    expect(markup).toContain('<dt>来源</dt>')
     expect(markup).toContain('<dt>权限</dt>')
-    expect(markup).toContain('<dt>询问</dt>')
     expect(markup).toContain('<dt>操作</dt>')
+  })
+
+  it('shows the permission mode without a verification suffix', () => {
+    // `verifiedAt` is written ONLY by an owner permission change. With the
+    // write switch off and the permission control retired, nothing can set it,
+    // so the old 「· 未核验」 suffix was true on every single entry and
+    // distinguished nothing.
+    const markup = ownerMarkup({ executionRoot: '/Users/prgrmrwy/corp/nexus' })
+
+    expect(markup).toContain('<dt>权限</dt><dd>只读</dd>')
+    expect(markup).not.toContain('未核验')
+  })
+
+  it('omits the owner-facts row entirely when the Host projects nothing', () => {
+    // The projection is an optional dependency that is not composed today, so
+    // an unconditional row printed the same 「no data」 sentence everywhere —
+    // an absence dressed up as content.
+    const markup = ownerMarkup({ executionRoot: '/Users/prgrmrwy/corp/nexus' })
+
+    expect(markup).not.toContain('<dt>询问</dt>')
+    expect(markup).not.toContain('Host 未提供 owner 投影')
   })
 
   it('still shows the effective permission as a fact', () => {
