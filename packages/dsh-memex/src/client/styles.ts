@@ -82,6 +82,9 @@ export const MEMEX_CSS = `
 .dshmx-ws-title{font-size:17px;font-weight:600;letter-spacing:-.02em;color:var(--dshmx-ink)}
 .dshmx-ws-path{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dshmx-ink-3)}
 .dshmx-lib-head>.dshmx-count{margin-left:auto}
+/* The workspace-level switch sits at the end of the head, where it governs the
+   whole block rather than one row. */
+.dshmx-ws-memory{flex:none}
 .dshmx-count{flex:none;font-size:11px;color:var(--dshmx-ink-3);font-variant-numeric:tabular-nums}
 /* A field that shares a line with its own affordance must flex, not overflow:
    the base rule sizes fields to the full column. */

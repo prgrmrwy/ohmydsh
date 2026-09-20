@@ -20,6 +20,7 @@ export interface MemexScopeEntry {
   readonly remotePatterns?: readonly string[]
   readonly publish?: 'internal' | 'external'
   readonly fallback?: boolean
+  readonly memory?: boolean
 }
 
 /** The part of the settings section this page reads. */
@@ -51,6 +52,11 @@ export interface EditorRow {
    * carries the session's current scope. Undefined means the Host default (on).
    */
   readonly fallback?: boolean
+  /**
+   * Whether memory is on for this entry's workspaces. Only the primary entry of a
+   * workspace is read, for the same reason as the fallback. Undefined means on.
+   */
+  readonly memory?: boolean
   /** True when this row came from the saved configuration. */
   readonly saved: boolean
 }
@@ -88,6 +94,8 @@ export interface WorkspaceView {
   readonly entries: readonly WorkspaceEntryRow[]
   /** The library a session in this directory would use today, when nothing declares it. */
   readonly assumed?: { readonly scope: string; readonly home: string; readonly source: string }
+  /** False when memory is switched off for this workspace. */
+  readonly memory: boolean
   /** Declared entries that could still be attached to this workspace. */
   readonly candidates: readonly EntryCandidate[]
   /** The configuration group behind a block that has no workspace, for path editing. */
@@ -156,6 +164,7 @@ export function rowsFromSettings(settings: MemexSettingsShape | undefined): Edit
     ...(entry.primary === true ? { primary: true } : {}),
     ...(entry.publish !== undefined ? { publish: entry.publish } : {}),
     ...(entry.fallback !== undefined ? { fallback: entry.fallback } : {}),
+    ...(entry.memory !== undefined ? { memory: entry.memory } : {}),
     saved: true,
   }))
 }
@@ -197,6 +206,7 @@ export function toScopes(rows: readonly EditorRow[]): MemexScopeEntry[] {
       ...(row.primary === true ? { primary: true } : {}),
       ...(row.publish !== undefined ? { publish: row.publish } : {}),
       ...(row.fallback !== undefined ? { fallback: row.fallback } : {}),
+      ...(row.memory !== undefined ? { memory: row.memory } : {}),
     }
   })
 }
@@ -526,6 +536,7 @@ export function workspaceViews(
         fromRegistry: true,
         paths: [path],
         entries,
+        memory: primary === undefined ? item.route?.memory !== false : primary.memory !== false,
         ...(primary === undefined && item.route !== undefined
           ? { assumed: { scope: item.route.scope, home: item.route.home, source: item.route.source } }
           : {}),
@@ -550,6 +561,7 @@ export function workspaceViews(
       fromRegistry: false,
       paths: group.paths,
       entries,
+      memory: primary === undefined || primary.memory !== false,
       candidates: candidatesFor(rows, stores, group.rows),
       group,
     })
@@ -641,13 +653,39 @@ export function attachEntry(
   })
 }
 
+/**
+ * The entry that carries a block's route-level decisions.
+ *
+ * Normally the workspace's primary claimer. A block built from a declared library
+ * that claims no path at all has no workspace to claim — there the block's own
+ * entry is the route carrier, which is also why such a block shows the switches.
+ */
+function routeOwnerOf(rows: readonly EditorRow[], view: WorkspaceView): EditorRow | undefined {
+  const claimers = claimersOf(rows, view.path, '').filter(row => row.name.trim() !== '')
+  if (claimers.length > 0) return primaryOf(claimers)
+  return primaryOf(view.entries.filter(entry => entry.kind === 'entry' && entry.row !== undefined).map(entry => entry.row!))
+}
+
 /** Turn the workspace's fallback grant on or off, on the entry that carries it. */
 export function setFallback(rows: readonly EditorRow[], view: WorkspaceView, enabled: boolean): EditorRow[] {
   const base = stageAssumedPrimary(rows, view)
-  const claimers = claimersOf(base, view.path, '').filter(row => row.name.trim() !== '')
-  const owner = primaryOf(claimers)
+  const owner = routeOwnerOf(base, view)
   if (owner === undefined) return base
   return base.map(row => (row.key === owner.key ? { ...row, fallback: enabled } : row))
+}
+
+/**
+ * Switch memory on or off for one workspace.
+ *
+ * Written on the entry that carries the route, and staged as a declaration when
+ * the workspace had none — the same rule the fallback switch follows, for the
+ * same reason: a declaration for anything else would move the route.
+ */
+export function setMemory(rows: readonly EditorRow[], view: WorkspaceView, enabled: boolean): EditorRow[] {
+  const base = stageAssumedPrimary(rows, view)
+  const owner = routeOwnerOf(base, view)
+  if (owner === undefined) return base
+  return base.map(row => (row.key === owner.key ? { ...row, memory: enabled } : row))
 }
 
 /** Move the primary flag to another entry of the same workspace. */

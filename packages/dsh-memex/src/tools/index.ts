@@ -44,10 +44,21 @@ function outputSchema() {
   }
 }
 
+/**
+ * The session's route, refusing outright when memory is switched off there.
+ *
+ * Every tool goes through here, which is what makes "memory off in this
+ * workspace" a property of the workspace rather than of one tool. The check runs
+ * before `ensure`, so a disabled workspace cannot even materialize a library.
+ */
 function currentFor(exec: ToolExec, resolver: ScopeService): ScopeResolution {
   const cwd = exec.agent?.session.header.cwd
   if (cwd === undefined || cwd === '') throw new Error('memex tools require exec.agent.session.header.cwd to resolve the current scope')
-  return resolver.ensure(resolver.resolve(cwd))
+  const route = resolver.resolve(cwd)
+  if (!route.memory) {
+    throw new Error(`Memory is off for this workspace (scope ${route.scope}); turn it back on in Settings → 记忆 to use memex tools here`)
+  }
+  return resolver.ensure(route)
 }
 
 function route(scope: ScopeResolution): { scope: string; home: string; created: boolean; notice?: string } {

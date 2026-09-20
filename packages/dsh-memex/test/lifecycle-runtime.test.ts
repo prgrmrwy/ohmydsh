@@ -34,7 +34,8 @@ class ScriptedAdapter extends LlmAdapter {
 }
 
 function scopes(): ScopeService {
-  const route = { scope: 'repo', home: '/memex/repo', publish: 'internal' as const, publishKnown: true, source: 'derived' as const, created: false, workspacePaths: ['/repo'] }
+  const route = { scope: 'repo', home: '/memex/repo', publish: 'internal' as const, publishKnown: true,
+    memory: true, source: 'derived' as const, created: false, workspacePaths: ['/repo'] }
   return {
     resolve: () => route,
     list: () => [route],

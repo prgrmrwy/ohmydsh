@@ -20,6 +20,7 @@ export const MemexSettingsSchema = Schema.object({
     remotePatterns: stringList(),
     publish: Schema.union(['internal', 'external'] as const).default('external'),
     fallback: Schema.boolean(),
+    memory: Schema.boolean(),
   })).default([]),
   bindings: Schema.array(Schema.object({
     name: Schema.string().required(),

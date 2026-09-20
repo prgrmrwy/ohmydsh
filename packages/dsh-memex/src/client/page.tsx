@@ -42,6 +42,7 @@ import {
   removePathFromGroup,
   rowsFromSettings,
   setFallback,
+  setMemory,
   setPathInGroup,
   setPrimary,
   stageAssumedPrimary,
@@ -618,8 +619,20 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
                       </button>
                     </span>
                   )}
-                <span className="dshmx-count">{`${String(view.entries.length)} ${t('partEntry')}`}</span>
+                <span className="dshmx-count">{`${String(view.entries.length)} ${t('entryCount')}`}</span>
+                {/* Memory on/off belongs to the workspace, not to one entry: it is
+                    a property of the route a session here takes. */}
+                <label className="dshmx-toggle dshmx-ws-memory">
+                  <input
+                    type="checkbox"
+                    aria-label={t('memoryLabel')}
+                    checked={view.memory}
+                    onChange={event => apply(base => setMemory(base, view, event.target.checked), t('stagedNotice'))}
+                  />
+                  {`${t('memoryLabel')} ${view.memory ? t('on') : t('off')}`}
+                </label>
               </header>
+              {!view.memory && <p className="dshmx-note dshmx-prose">{t('memoryHint')}</p>}
 
               <div className="dshmx-entries">
                 {view.entries.map(entry => renderEntry(view, entry, many))}

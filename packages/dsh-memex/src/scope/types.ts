@@ -24,6 +24,15 @@ export interface ScopeEntry {
    * both directions — "not using an entry" means neither reading nor writing it.
    */
   readonly fallback?: boolean
+  /**
+   * Whether memory is on for the workspaces this entry routes.
+   *
+   * Absent means on. `false` makes the entry's workspaces memory-free: no recall
+   * injection, no write reminder, and every memex tool refuses there. It governs
+   * those sessions, not the library's reachability from other workspaces — a
+   * library that is also someone's fallback target stays writable by them.
+   */
+  readonly memory?: boolean
 }
 
 export interface BindingEntry {
@@ -63,6 +72,8 @@ export interface ScopeResolution {
   readonly entries: readonly string[]
   /** Reachable entries for a session whose current scope is this route. */
   readonly access: ScopeAccess
+  /** False when this workspace has memory switched off; see `ScopeEntry.memory`. */
+  readonly memory: boolean
   readonly created: boolean
   readonly workspacePaths: readonly string[]
 }

@@ -19,6 +19,10 @@ describe('memex settings validation', () => {
     ...valid,
     scopes: [...valid.scopes, { name: 'solo', fallback: false }],
   })).not.toThrow())
+  it('accepts a scope with memory switched off', () => expect(() => validateMemexSettings({
+    ...valid,
+    scopes: [...valid.scopes, { name: 'work-thing', memory: false }],
+  })).not.toThrow())
   it('allows an explicit personal entry to set its publication direction', () => expect(() => validateMemexSettings({ ...valid, scopes: [...valid.scopes, { name: 'personal', publish: 'external' }] })).not.toThrow())
   it('rejects duplicate scope names', () => expect(() => validateMemexSettings({ ...valid, scopes: [...valid.scopes, valid.scopes[0]!] })).toThrow(/duplicate scope/))
   it('rejects invalid remote regular expressions', () => expect(() => validateMemexSettings({ ...valid, scopes: [{ name: 'bad', remotePatterns: ['['] }] })).toThrow(/invalid remote pattern/))

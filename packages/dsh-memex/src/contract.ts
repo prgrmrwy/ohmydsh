@@ -58,6 +58,8 @@ export interface MemexStoreView {
   readonly declared: boolean
   /** True when the entry is marked as its workspaces' primary entry. */
   readonly primary: boolean
+  /** False when memory is switched off for this library's workspaces. */
+  readonly memory: boolean
   /** True when `cards/` exists — the library has been materialized. */
   readonly exists: boolean
   readonly cards?: number
@@ -129,6 +131,8 @@ export interface MemexResolveResult {
   readonly home: string
   readonly publish: 'internal' | 'external'
   readonly publishKnown: boolean
+  /** False when memory is switched off for the workspaces this directory routes. */
+  readonly memory: boolean
   readonly source: MemexRouteSource
   readonly exists: boolean
   /**

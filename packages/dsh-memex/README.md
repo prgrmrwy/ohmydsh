@@ -118,6 +118,15 @@ undeclared ones found under the namespace) or offers to create a new one, so a
 duplicate name is not reachable from the interface — one library is always one
 configuration entry, whatever number of workspaces claim it.
 
+Each workspace also carries a **memory switch**. Off means the workspace is
+memory-free: no recall prompt, no write reminder, and every memex tool refuses
+there — the refusal happens before the library is ever materialized. It is a
+property of that workspace's route, so a library that also serves as another
+workspace's fallback target stays writable by that other workspace. The switch is
+read at session start, so turning it back on needs no restart. (`dsh.yaml`'s
+`DSH_MEMEX_ENABLED` is the other extreme: it takes the whole plugin out at build
+time.)
+
 It also lists libraries that exist under the namespace but no entry declares
 (derived ones included) and can declare them, and offers a path probe that
 answers which library a directory resolves to **without creating anything**.

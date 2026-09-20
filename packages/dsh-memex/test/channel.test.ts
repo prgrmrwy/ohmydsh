@@ -118,7 +118,7 @@ describe('memex settings channel', () => {
 
     const result = await h.stores()
     const acme = result.stores.find(store => store.scope === 'acme')!
-    expect(acme).toMatchObject({ declared: true, primary: false, source: 'config', exists: true, cards: 3, homeSource: 'namespace', publish: 'internal' })
+    expect(acme).toMatchObject({ declared: true, primary: false, source: 'config', exists: true, cards: 3, homeSource: 'namespace', publish: 'internal', memory: true })
     expect(acme.sync).toMatchObject({ known: true, configured: true, remote: 'git@git.corp.example:team/memex-acme.git', auto: true })
 
     const stray = result.stores.find(store => store.scope === 'stray')!
@@ -149,9 +149,9 @@ describe('memex settings channel', () => {
     // Configured `~/…` prefixes are compared against absolute registry paths, so
     // the browser is told which home to expand with.
     expect(result.homeDir).toBe('/home/u')
-    expect(result.items.map(item => [item.title, item.route?.scope])).toEqual([
-      ['acme', 'acme'],
-      ['learning', 'documents-learning'],
+    expect(result.items.map(item => [item.title, item.route?.scope, item.route?.memory])).toEqual([
+      ['acme', 'acme', true],
+      ['learning', 'documents-learning', true],
     ])
   })
 

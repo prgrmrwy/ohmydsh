@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { registerMemexLifecycle } from '../src/lifecycle/index.js'
 
-function fixture() {
+function fixture(memory = true) {
   const listeners = new Map<string, (payload: any) => void>()
   const injected: any[] = []
   const session = { header: { cwd: '/work/repo' } }
@@ -11,7 +11,8 @@ function fixture() {
     logger: () => ({ warn: () => undefined }),
   }
   const scopes = {
-    resolve: () => ({ scope: 'repo', home: '/memex/repo', publish: 'internal', publishKnown: true, source: 'derived', created: false, workspacePaths: [] }),
+    resolve: () => ({ scope: 'repo', home: '/memex/repo', publish: 'internal', publishKnown: true,
+    memory, source: 'derived', created: false, workspacePaths: [] }),
   }
   return { listeners, injected, session, agent, ctx, scopes }
 }
@@ -40,6 +41,32 @@ describe('memex lifecycle', () => {
     expect(f.injected).toHaveLength(1)
     lifecycle.mark('retro', f.session)
     f.listeners.get('agent/turn-stopping')!({ agent: f.agent })
+    expect(f.injected).toHaveLength(1)
+  })
+
+  it('injects nothing at all when the workspace has memory switched off', () => {
+    const f = fixture(false)
+    const lifecycle = registerMemexLifecycle(f.ctx as never, f.scopes as never)
+    f.listeners.get('agent/session-start')!({ agent: f.agent, source: 'startup' })
+    // No recall prompt: inviting calls the tools would then refuse is worse than
+    // saying nothing.
+    expect(f.injected).toHaveLength(0)
+    // And no reminder either, even if something marked a recall before.
+    lifecycle.mark('recall', f.session)
+    f.listeners.get('agent/turn-stopping')!({ agent: f.agent })
+    expect(f.injected).toHaveLength(0)
+  })
+
+  it('resumes injecting when the switch is turned back on', () => {
+    // The switch is read per session start, so re-enabling takes effect on the
+    // next session without a restart.
+    const f = fixture(false)
+    registerMemexLifecycle(f.ctx as never, f.scopes as never)
+    f.listeners.get('agent/session-start')!({ agent: f.agent, source: 'startup' })
+    expect(f.injected).toHaveLength(0)
+    f.scopes.resolve = () => ({ scope: 'repo', home: '/memex/repo', publish: 'internal', publishKnown: true,
+      memory: true, source: 'derived', created: false, workspacePaths: [] })
+    f.listeners.get('agent/session-start')!({ agent: f.agent, source: 'startup' })
     expect(f.injected).toHaveLength(1)
   })
 

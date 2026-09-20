@@ -59,6 +59,9 @@ export type MemexKey =
   | 'stagedNotice'
   | 'noWorkspaceTitle'
   | 'degradedWorkspaces'
+  | 'memoryLabel'
+  | 'memoryHint'
+  | 'entryCount'
   | 'probeTitle'
   | 'probeHint'
   | 'probePlaceholder'
@@ -144,6 +147,9 @@ export const en: Record<MemexKey, string> = {
   actionDeclareEntry: 'Declare this entry',
   stagedNotice: 'To keep routing unchanged, the derived primary entry was added to the configuration as well',
   noWorkspaceTitle: 'Paths with no workspace',
+  memoryLabel: 'Memory',
+  memoryHint: 'Memory is off here: no recall prompt and no write reminder are injected, and memex tools refuse in this workspace. Other workspaces are unaffected.',
+  entryCount: 'entries',
   degradedWorkspaces: 'The host exposes no workspace registry: these blocks come from the configured paths instead.',
   probeTitle: 'Check a path',
   probeHint: 'See which library a directory resolves to. Nothing is created.',
@@ -231,6 +237,9 @@ export const zh: Record<MemexKey, string> = {
   actionDeclareEntry: '声明为配置条目',
   stagedNotice: '为保持路由不变，派生出的主入口也一并写进了配置',
   noWorkspaceTitle: '未对应工作区的路径',
+  memoryLabel: '记忆',
+  memoryHint: '这个工作区已关闭记忆：不注入召回提示与写卡提醒，memex 工具在这里会被拒绝。其他工作区不受影响。',
+  entryCount: '个入口',
   degradedWorkspaces: '宿主没有提供工作区注册表：以下块按配置里的路径列出。',
   probeTitle: '检查路径',
   probeHint: '查看某个目录会解析到哪个库。不会创建任何东西。',
