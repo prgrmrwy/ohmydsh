@@ -34,5 +34,5 @@
 
 - [x] 6.1 运行 `npm run build`、`npm run typecheck`、`npm test`（包内）与仓库 `npm test`，全部通过。
 - [x] 6.2 运行 `node scripts/sync.mjs` 两次，确认幂等且不产生可重建产物入库。
-- [ ] 6.3 真机验收：群内发图 → child 收到 typed image；结算后 spool 为空；child 尝试读取 spool 被拒；`lark-cli` 不可用时媒体降级为纯文本且 Delivery 继续。
+- [x] 6.3 真机验收：群内发图 → child 收到 typed image；结算后 spool 为空；child 尝试读取 spool 被拒；`lark-cli` 不可用时媒体降级为纯文本且 Delivery 继续。
 - [x] 6.4 `openspec validate pet-media-official-cli-download --strict` 通过，且冷构建不再 clone 上游或下载 Go 工具链（观测 `npm run build` 输出与磁盘目录）。

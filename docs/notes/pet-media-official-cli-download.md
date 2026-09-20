@@ -50,3 +50,14 @@ Locus child 的 project-read guard（`src/index.ts` 的 `deniedRoots` 指向 `ds
   这正是每次调用独占一个子目录、清理用递归删除而不是按名匹配的原因。
 - `--output` 若不带扩展名，CLI 会用 Content-Disposition/Content-Type 推断后缀并改名，因此
   Pet 传的名字固定带 `.bin`，并校验 receipt 的 `saved_path` basename 与自己给的名字一致。
+
+## 真机验收（2026-09-20，Host PID 94976 / 06:52 起）
+
+| 检查 | 结果 | 证据 |
+|---|---|---|
+| 重启后 spool 建立 | PASS | `~/.dsh/plugins/dsh-pet/media-spool` 存在，权限 `drwx------`（0700），无 `lark media downloader unavailable` 日志 ≈ 版本门在 1.0.94 上放行 |
+| 官方 CLI 接受本 seam 的 flag 形状 | PASS | 用真实历史图片跑与代码完全相同的命令（cwd=调用子目录、`--output ./<name>`）：退出码 0、`saved_path` basename 与传入名一致、`size_bytes` 326663 == 实际字节、magic 为 JPEG；未出现 unsafe output path |
+| 群内发图 → child 收到 typed image | PASS | delivery-43（07:02:16 接受 → 07:02:33 出站成功）；`~/.dsh/attachments` 07:02:19 新增 108,163 bytes 对象、07:02:24 生成 request-images 归一化；child 准确复述了图片内容（含引用块、正文与水印） |
+| 结算后 spool 为空 | PASS | 两次交付后 `media-spool` 均为空（目录 mtime 与交付时刻一致） |
+| child 读 spool 被拒 | PASS | delivery-44（07:19:44 结束）中 child 对同一目录执行列目录与 `read`，两次均返回 `locus-project-read-outside-confirmed-workspace` |
+| `lark-cli` 不可用 → 降级纯文本 | 仅单测 | `test/locus-media.test.ts` 覆盖 port 层（无 downloader / 空 spool / 非 pin 版本一律 unavailable 且零副作用）；`src/index.ts` 的 fail-soft catch 只有三行，未做 live（需改名 binary + 重启） |
