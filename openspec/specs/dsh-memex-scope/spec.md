@@ -40,6 +40,18 @@ MUST NOT 使用纯字符串前缀比较——否则前缀 `…/nexus` 会错误�
 目录，把一个知识域的记忆写进另一个。比较前 SHALL 展开 `~`、解析为绝对路径并去除尾部分隔符；
 「最长」SHALL 按路径段数比较。
 
+**同级可以有多个命中者。** 系统 SHALL 收集**路径段数最多的那一层里的全部**认领条目，
+而不是只取第一个：这些条目共同构成该工作区的关联入口集合（见「一个工作区可关联多个入口」）。
+命中者多于一个时，其中 SHALL 恰好有一个标为主入口；没有主入口或多于一个主入口时，
+系统 SHALL 报错并列出全部命中者，MUST NOT 静默采用其中一个——「按声明顺序取第一个」会把记忆
+静默写进另一个库。
+
+最后一步 fallback SHALL 定义为**本地路径派生**：cwd 不属于任何仓库（非 git 目录，或仓库没有
+`origin`）时，按本地路径派生出该目录专属的库，而不是并入任何共享库。该规则见下方同名要求。
+
+「外部 worktree 命中主仓」SHALL 只在**该仓库的 remote 已被某个 scope 以 remote 模式显式认领**
+时成立；未被认领的仓库按自动派生处理，因此其库与声明路径下的库是**两个不同的库**。
+
 #### Scenario: 路径匹配优先于自动派生
 - **WHEN** cwd 命中配置中显式声明的路径前缀
 - **THEN** 使用该条目的 scope 与库，自动派生不参与
@@ -49,8 +61,21 @@ MUST NOT 使用纯字符串前缀比较——否则前缀 `…/nexus` 会错误�
 - **THEN** 该会话 MUST NOT 命中 `nexus` 条目的路径前缀
 
 #### Scenario: 外部 worktree 经 remote 命中主仓
-- **WHEN** 会话运行在某仓库的外部 git worktree 内，其 cwd 不命中任何路径前缀
-- **THEN** 系统经 `git -C` 读取 origin 并命中主仓对应的 scope
+- **WHEN** 会话运行在某仓库的外部 git worktree 内，其 cwd 不命中任何路径前缀，
+  且该仓库的 remote 已被某个 scope 以 remote 模式认领
+- **THEN** 系统经 `git -C` 读取 origin 并命中该 scope 与其库
+
+#### Scenario: 未认领仓库的仓外副本不保证共库
+- **WHEN** 会话运行在某个仓库的仓外副本内，而该仓库的 remote 未被任何 scope 认领
+- **THEN** 系统按自动派生给出该仓库的派生库，MUST NOT 声称它与任何声明路径下的库是同一个
+
+#### Scenario: 同一工作区被多个入口声明
+- **WHEN** 两个 scope 声明了完全相同的路径前缀，其中恰好一个标为主入口，且会话 cwd 命中该前缀
+- **THEN** 当前 scope 为那个主入口，另一个进入该会话的关联入口集合
+
+#### Scenario: 同级多个命中却没有唯一主入口
+- **WHEN** 两个 scope 声明了完全相同的路径前缀，但都没有标为主入口（或都标了）
+- **THEN** 解析报错并列出两个 scope，MUST NOT 静默取声明顺序中的第一个
 
 ### Requirement: scope 名按 remote 确定性派生，不按目录名
 
@@ -62,8 +87,8 @@ MUST NOT 使用纯字符串前缀比较——否则前缀 `…/nexus` 会错误�
 开源项目同样拥有自己的知识域，把它们的知识混入通用库会重蹈「混库产生噪音」的问题。
 这类库的发布方向通常为外部（见 `dsh-memex-guard`）。
 
-`personal` SHALL 保留给**不属于任何具体项目**的通用知识（技能、语言陷阱、方法论），
-以及无 `origin` 的仓库、非 git 目录等无法确定归属的情形。
+`personal` SHALL 是一个**与其他 scope 地位相同的显式声明的库**，MUST NOT 再承担「无法确定归属」
+情形的兜底。它与其他 scope 一样只服务被显式声明的工作区。
 
 #### Scenario: 同一仓库的多个工作副本收敛到一个 scope
 - **WHEN** 多个目录共享同一个仓库 origin，且都不命中任何路径前缀
@@ -78,12 +103,16 @@ MUST NOT 使用纯字符串前缀比较——否则前缀 `…/nexus` 会错误�
 - **THEN** 该系统按该仓库的 remote 派生出**专属** scope 与独立库，不并入 `personal`
 
 #### Scenario: 无归属的通用知识留在 personal
-- **WHEN** cwd 不是 git 仓库，或仓库没有 `origin`
-- **THEN** scope 解析为 `personal`
+- **WHEN** 用户把某个不指向具体项目的工作区显式声明为 `personal` 条目
+- **THEN** 该工作区照常解析到 `personal` 与其库，通用知识留在该库
 
 #### Scenario: 非 git 目录落到 fallback
 - **WHEN** cwd 既不在任何已配置路径下，也不是 git 仓库
-- **THEN** scope 解析为 `personal`，且不按目录名建库
+- **THEN** 解析走 fallback 阶段，该阶段按本地路径派生出该目录专属的库，MUST NOT 并入 `personal`
+
+#### Scenario: 无归属的目录不再并入 personal
+- **WHEN** cwd 不是 git 仓库，或仓库没有 `origin`，且该目录不命中任何已配置路径前缀
+- **THEN** 系统按本地路径派生出该目录专属的库，MUST NOT 解析为 `personal`
 
 ### Requirement: 库位置映射固定，库位于工作区之外
 
@@ -154,14 +183,21 @@ scope 表与绑定集合 SHALL 注册为一个 DSH settings namespace，由该�
 
 ### Requirement: 绑定集合界定会话的读写可达范围
 
-系统 SHALL 由配置的**绑定集合**界定一次会话可读与可写的 scope 范围。绑定集合 SHALL 由
-配置显式声明，MUST NOT 由系统按目录邻近或命名相似自行推断。
+一次会话的**可达入口集合** SHALL 由三部分合成：**① 该工作区的主入口**（总是可读可写）；
+**② 该工作区的其他关联入口**（见「一个工作区可关联多个入口」）；**③ 兜底入口与当前 scope 所属
+绑定集合声明的 read / write**。
 
-当前 scope 不属于任何绑定时，可读范围 SHALL 退化为「当前 scope」，可写范围 SHALL 退化为
-「当前 scope + `personal`」——即与不引入绑定集合时完全一致的行为。
+绑定集合 SHALL 由配置显式声明，MUST NOT 由系统按目录邻近或命名相似自行推断；其意义是
+**限制而非授权**——它界定 agent 可以**额外**选到的范围上界。工作区自带的关联入口属于该工作区
+自身的声明，不受绑定集合限制；绑定集合限制的是除此之外还能选到哪些 scope。
 
-集合的意义是**限制而非授权**：它定义 agent 可以选择的范围上界。`personal` SHALL 在所有
-绑定集合的可读范围内可见；是否可写由各绑定显式声明。
+**兜底入口**（默认 `personal`）SHALL 是**默认授予**的可达范围：该工作区的主入口默认可读且可写
+`personal`，因此一个新工作区不需要任何配置即可使用。它 SHALL 可由主入口自己的声明关闭，关闭后
+`personal` 在该工作区**既不可读也不可写**。绑定集合 SHALL NOT 取消兜底（它只做加法）；反过来，
+绑定集合**显式**列出 `personal` 时可达性成立——显式声明覆盖默认值。
+
+**可达不等于默认动作**：默认读取与默认写入 SHALL 只作用于主入口（见 `dsh-memex-memory` 的跨库
+语义），附加入口只有被显式指名时才会被读或写。
 
 #### Scenario: 项目绑定三库
 - **WHEN** 配置声明某绑定含可读与可写 `[a, b, personal]`，且会话解析到 scope `a`
@@ -169,11 +205,28 @@ scope 表与绑定集合 SHALL 注册为一个 DSH settings namespace，由该�
 
 #### Scenario: 无绑定时行为退化
 - **WHEN** 配置未声明任何绑定集合
-- **THEN** 会话只可读当前 scope，且只可写当前 scope 与 `personal`
+- **THEN** 可达范围只由该工作区自己的入口与兜底入口合成：可读该工作区的全部入口与 `personal`，
+  可写主入口与 `personal`（不再有"读不到 `personal`"的情形，除非兜底被显式关闭）
+
+#### Scenario: 兜底入口默认开启
+- **WHEN** 某工作区未声明任何绑定、也未关闭兜底
+- **THEN** 该会话可读该工作区的全部入口与 `personal`，可写主入口与 `personal`
+
+#### Scenario: 关闭兜底后两个方向都不可达
+- **WHEN** 某工作区的主入口声明关闭兜底，且没有任何绑定列出 `personal`
+- **THEN** 该会话既不能读也不能写 `personal`，指名它会被拒绝并说明原因
 
 #### Scenario: 绑定外 scope 不可达
 - **WHEN** 会话绑定为某集合，模型在参数中指定一个不在该集合内的已知 scope
 - **THEN** 调用被拒绝并说明该 scope 不在当前绑定范围内
+
+#### Scenario: 工作区的关联入口无需绑定即可达
+- **WHEN** 某工作区由主入口 `a` 与附加入口 `b` 共同声明，且 `a` 不属于任何绑定
+- **THEN** 该会话可检索 `a` 与 `b`，并可将 `b` 作为写入目标
+
+#### Scenario: 附加入口不被默认读取或写入
+- **WHEN** 会话的主入口为 `a`、附加入口为 `b`，且调用未指名 `b`
+- **THEN** 读取与写入都只作用于 `a`，`b` 的库不产生新卡片
 
 ### Requirement: 解析结果如实呈现 scope 与库路径
 
@@ -206,3 +259,95 @@ scope 表与绑定集合 SHALL 注册为一个 DSH settings namespace，由该�
 #### Scenario: 不同会话解析出各自 scope
 - **WHEN** 同一 DSH 进程内，一个会话在业务仓、另一个在个人仓
 - **THEN** 两个会话分别解析出各自的 scope 与库路径
+
+### Requirement: 一个工作区可关联多个入口，其中恰好一个是主入口
+
+一个工作区（一个声明的路径前缀，或同一次 remote 命中的一组条目）SHALL 可以关联**多个**记忆入口，
+其中 SHALL **恰好有一个是主入口**：
+
+- **主入口**承载该工作区的**当前 scope**：召回（读该库的索引卡）、网络分析、归档与链接统计等
+  **图级操作**只作用于它；默认读取与默认写入也只作用于它。
+- **其他关联入口**是该工作区的附加入口：它们在可达范围内（可被检索、可被指名读取与写入），
+  但 MUST NOT 被默认读取或写入。
+
+该关系 SHALL 由配置显式声明（多个 scope 声明同一工作区，其中一个标为主入口），MUST NOT 由系统
+按目录邻近、命名相似或声明顺序推断。
+
+**唯一性按可判定性分级**：路径前缀与字面相同的 remote 模式在**配置期**可判定，校验 SHALL 拒绝
+「同级多个认领者却没有唯一主入口」；不同 remote 模式是否命中同一仓库在配置期不可判定，故在
+**解析时**判定并报错。
+
+同一路径前缀被多个 scope 声明时，除主入口唯一性之外 MUST NOT 再有其他隐含优先级——命名顺序、
+声明顺序、条目长度都不得成为判据。
+
+#### Scenario: 一个项目分内部与外部两个库
+- **WHEN** `proj-internal`（publish internal，主入口）与 `proj-public`（publish external）声明
+  同一个路径前缀
+- **THEN** 会话的当前 scope 为 `proj-internal`，`proj-public` 在可达范围内；写入 `proj-public`
+  需显式指名，并按该方法方向各自过守门
+
+#### Scenario: 缺主入口时拒绝而非猜测
+- **WHEN** 两个 scope 声明同一路径前缀且都没有标为主入口
+- **THEN** settings 校验拒绝该配置并指出冲突的两个 scope
+
+#### Scenario: 重复主入口时拒绝
+- **WHEN** 两个 scope 声明同一路径前缀且都标了主入口
+- **THEN** settings 校验拒绝该配置并指出两个 scope
+
+#### Scenario: 字面相同的 remote 模式同理
+- **WHEN** 两个 scope 声明完全相同的 remote 模式，且其中一个标为主入口
+- **THEN** 该配置合法；运行时命中该 remote 时以主入口为当前 scope
+
+#### Scenario: 运行时命中的多个 remote 模式缺唯一主入口
+- **WHEN** 某个仓库的 remote 同时匹配两个 scope 的 remote 模式，且两者都没有标为主入口
+- **THEN** 解析报错并指出两个 scope，MUST NOT 静默使用其中一个
+
+#### Scenario: 单条目声明无需标注
+- **WHEN** 某个路径前缀只被一个 scope 声明且未标主入口
+- **THEN** 该 scope 即该工作区的主入口，行为与显式标注等价
+
+### Requirement: 一个库目录只能被一个 scope 使用
+
+同一个库目录 MUST NOT 被两个 scope 共用：共享同一目录会让两个 scope 名指向同一份存储与同一个
+同步目标，产生无法解释的别名。违反时系统 SHALL 在 settings 校验阶段拒绝该配置并指明冲突的两方。
+
+库目录的比较 SHALL 使用展开 `~` 之后的绝对路径，并 SHALL 把「未配置时按命名空间派生的默认地址」
+一并纳入比较。
+
+#### Scenario: 共用同一库目录的配置被拒
+- **WHEN** 两个 scope 被配置为同一个库目录
+- **THEN** 该配置在校验阶段被拒绝，并指出冲突的两个 scope
+
+#### Scenario: 显式路径与另一个 scope 的默认地址相撞
+- **WHEN** 某个 scope 显式配置的库路径等于另一个 scope 未配置时的默认派生地址
+- **THEN** 该配置在校验阶段被拒绝，并指出冲突的两个 scope
+
+### Requirement: 无仓库目录按本地路径派生独立库，且不配置远端同步
+
+cwd 不属于任何仓库时，系统 SHALL 按**本地路径**派生出一个该目录专属的 scope 与库：
+
+- 名字 SHALL 与 remote 派生**同形**：取路径末两段、以 `-` 连接并归一化；MUST NOT 只取末段
+  ——`…/work/learning` 与 `…/Documents/learning` 只取末段会静默共用一个库。
+- 库位置 SHALL 位于统一命名空间 `~/.dsh-memex/<派生名>` 之下，MUST NOT 为本情形引入任何临时或
+  位置特殊的库。
+- 派生名归一化后不满足 scope 名规则时，系统 SHALL 使用一个固定的本地兜底库名，其行为与该规则下的
+  其他库一致。
+- 该库 SHALL NOT 被系统配置远端同步；在用户显式配置之前，它不产生任何推送或拉取。
+- 本地派生与 remote 派生 SHALL 共用同一套保护：同一 scope 名由**不同来源**（不同仓库、不同本地路径、
+  或两者混合）派生出来时，系统 SHALL 报错并指明需要显式映射，MUST NOT 让它们静默共用一个库。
+
+#### Scenario: 无仓库目录各自一个库
+- **WHEN** 会话在 `~/Documents/learning` 下启动，该目录不是 git 仓库
+- **THEN** 系统解析出该目录专属的库，位于命名空间之下，且与 `personal` 不是同一个库
+
+#### Scenario: 同名末段的不同目录不共库
+- **WHEN** 两个不是 git 仓库的目录分别为 `…/work/learning` 与 `…/Documents/learning`
+- **THEN** 二者派生出不同的 scope，MUST NOT 落到同一个库
+
+#### Scenario: 本地派生的库不产生远端同步
+- **WHEN** 在本地派生的库中写入一张卡片
+- **THEN** 系统不执行任何推送或拉取，该库的远端状态为未配置
+
+#### Scenario: 不同来源派生同名时显式报错
+- **WHEN** 某个仓库的 remote 与某个本地路径派生出同一个 scope 名
+- **THEN** 系统报错并指明需要显式映射，MUST NOT 让两者共用一个库

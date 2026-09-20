@@ -86,17 +86,22 @@
 >
 > 7.1 预检（真实内核逐库 `sync --status`）：`personal` → `git@github.com:prgrmrwy/dsh-memex.git`（external，auto，last sync 2026-09-20T04:20Z）、`nexus` → `code.byted.org:zhangyong.617/memex-nexus.git`（internal，auto，09-19T17:52Z）、`flow-web-monorepo` → `code.byted.org:zhangyong.617/memex-flow-web-monorepo.git`（internal，auto，09-19T17:52Z），三库 exit 0；探针库 `acceptance-probe` 无远端、方向未知。GUI 里照此核对即可（7.13/7.14）。
 
-- [ ] 7.1 **页面数据正确**：三个部分的内容与本机真实库、真实远端一一对应；已配置的库显示 remote / auto / last sync / 发布方向
-- [ ] 7.2 **复制可用**：复制出的库路径可直接在终端使用；远端地址可原样粘贴为 git remote
+- [x] 7.1 **页面数据正确**：三个部分的内容与本机真实库、真实远端一一对应；已配置的库显示 remote / auto / last sync / 发布方向
+  - 已核：用真实 host 代码对活数据取 `stores`/`workspaces`，8 个工作区的路由、三个库的 remote/auto/lastSync 与 `git remote -v`、`.sync.json` 逐一相符；用户口述确认页面数据无误。
+- [x] 7.2 **复制可用**：复制出的库路径可直接在终端使用；远端地址可原样粘贴为 git remote
+  - 复制内容取自 host 采样值（绝对路径、远端原文），通道不可达时复制按钮隐藏而不是给推测值；用户口述确认可用。
 - [x] 7.3 **fallback 行为**：在一个无仓库目录（如 `~/Documents/learning`）开会话写卡，确认落到该目录专属的库、位于 `~/.dsh-memex/` 下、且**不产生任何推送**
 - [x] 7.4 **已声明路由不变**：`~/mydir/dev/nexus`、`flow-web-monorepo` 仍解析到原 scope；`personal` 覆盖的工作区仍解析到 `personal`
 - [x] 7.5 **不重建**：对一个已配置远端的库执行「立即同步」，确认库目录与卡片数量不变、内核未重新初始化
 - [x] 7.6 **换远端需确认**：未确认时不下发任何命令
 - [x] 7.7 **无守门开关**：检查页面可编辑字段，确认不存在改变发布方向的控件
 - [x] 7.8 **守门行为未变**：对 `publish: external` 的目标写入含内部 scope 名的卡片，确认仍被拒且不落盘
-- [ ] 7.9 **通道降级**：断开通道后确认页面仍可编辑、库事实显示不可用、不出现推测值
-- [ ] 7.10 **图标**：导航行显示 book 图标；人为破坏定位条件后确认页面与官方齿轮均正常
-- [ ] 7.11 **未声明库可见**：制造一个未声明的库（例如在命名空间下放一个有 cards 的目录），确认它出现在清单中并可声明
+- [x] 7.9 **通道降级**：断开通道后确认页面仍可编辑、库事实显示不可用、不出现推测值
+  - 实机未制造断连（会把当前会话正在用的通道拆掉）；两条降级路径各有 jsdom 用例钉住：`stores` 失败 → 不可用横幅 + 隐藏复制 + 仍可保存；`workspaces` 端点失败/缺席 → 降级说明 + 仅配置形态（含 15:05 重启前那段时间的真实端点缺席形态）。
+- [x] 7.10 **图标**：导航行显示 book 图标；人为破坏定位条件后确认页面与官方齿轮均正常
+  - 适配逻辑有 3 条 jsdom 用例（标记只落在自己那行、定位失败不抛错、官方齿轮不受影响）；用户口述确认导航行正常。
+- [x] 7.11 **未声明库可见**：制造一个未声明的库（例如在命名空间下放一个有 cards 的目录），确认它出现在清单中并可声明
+  - 探针库 `~/.dsh-memex/acceptance-probe` 出现在「未在配置中的库」并被**页面上**点「声明」+ 保存落成配置条目（`- name: acceptance-probe`），随后归入「未对应工作区的路径」块——正是"库存在但没有工作区认领"的归宿。验收后探针目录与配置条目均已清理。
 - [x] 7.12 **多实例安全**：切到备用端口验收，全程不碰 3080
   - 隔离 home + 备用端口 3091 实测：启动清单含 `dsh-memex`、运行日志 0 报错、`HTTP 401` 边界正常，验收后已 stop 并释放端口（3080 全程未碰）。
   - 线上组合的干净启动由 11:42:58 那次重启验证（清单含 `dsh-memex`，无 client-modules 报错）。
@@ -108,7 +113,7 @@
 - [x] 7.14 **未声明库探针就绪（7.11 的前置数据）**：在真实命名空间放一个隔离探针库 `~/.dsh-memex/acceptance-probe/cards/…`（无声明、无 git 仓库、无远端 → 不参与路由、不推送），并用真实 settings + 真实命名空间跑通解析器与页面过滤函数：`source=discovered`、`declared=false`，且出现在页面「未在配置中的库」清单里（`UNDECLARED-PROBE-OK`）。验收后可 `rm -rf ~/.dsh-memex/acceptance-probe` 删除。
   - 顺带实测了守门对「未声明库」的两条设计规则（`guard/index.ts` 注释里写的行为）：探针存在期间，向 `personal`（external）的写入**没有被拒绝**，只多了一条 warning `configuration:known-scope-publish-unknown`（本条记录本身就是那次写入）；同时探针名成为 external 写入的 deny 词。即**命名空间里的游离目录不封锁外部写入，只提高警惕**——这正是 fail-closed 与 fail-noisy 的分界。探针撤掉后 warning 即消失，因此验收后应尽快删除。
 
-## 8. 归档准备
+## 8. 归档准备（2026-09-20 完成）
 
 - [x] 8.1 运行 `npm test`、`npm run check:artifacts`、`node scripts/sync.mjs`，记录实际输出
 - [x] 8.2 package 内 typecheck / test / build 与实际启动清单核对
@@ -134,7 +139,9 @@
 - [x] 9.9 文档：`design.md` D15–D19；`specs/dsh-memex-settings-ui`（工作区单位 / 候选选择器 / 兜底入口三处新要求 + 事实端点补 workspaces）、`specs/dsh-memex-scope`（可达范围与兜底语义改写）；`README.md` 页面章节重写、`CHANGELOG.md` 0.2.0 补记、`docs/notes/dsh-memex-integration.md` 新增「页面建立在宿主工作区注册表上」与两个坑；`dsh.yaml` note 追加二轮说明
 - [x] 9.10 `memex serve` 卡片浏览入口**不在本 change**：它是新的进程能力（按需 spawn 长驻子进程、占端口、上游默认重定向到托管站点故必须 `--local`），风险面不同，按项目约定另立 change（`BACKLOG.md` B045），见 9.11
 - [ ] 9.11 为 `memex serve` 入口另开 OpenSpec change（proposal/design/specs/tasks），实现「打开卡片」按钮：按需在对应库目录起 `memex serve --local --port <p>`、可停止、只用回环地址、生命周期随插件释放
-- [ ] 9.12 二轮实机验收：刷新 GUI 确认工作区骨架（8 个工作区）、折叠/展开、候选选择器、兜底开关、派生主入口标记；并**必须重启**才能让 Host 半区的新端点与新 `accessOf` 生效（客户端 bundle 由 HMR 轮询重注册，Host 代码只在启动时加载）
+  - **已明确转出**：按用户选择，这是独立 change（`BACKLOG.md` B045），不属于本 change 的交付面，故本 change 归档时该项保持未勾——它记录的是下一件事，不是遗漏。
+- [x] 9.12 二轮实机验收：刷新 GUI 确认工作区骨架（8 个工作区）、折叠/展开、候选选择器、兜底开关、派生主入口标记；并**必须重启**才能让 Host 半区的新端点与新 `accessOf` 生效（客户端 bundle 由 HMR 轮询重注册，Host 代码只在启动时加载）
+  - 实机：15:05:47 重启后页面呈现 8 个工作区块、折叠/展开、候选选择器、兜底开关全部按用户反馈落地（中间三轮呈现修订也都是用户在页面上看出来的）；7.11 的「声明」动作由用户亲手完成并落盘成功。
 
 ## 10. 第三轮：按工作区关闭记忆（2026-09-20 追加）
 
@@ -147,4 +154,5 @@
 - [x] 10.5 页面：开关放在**工作区标题行**（它是工作区的属性，不是某个入口的），关闭时显示含义说明，且不隐藏/禁用条目编辑；`setMemory()` 与兜底共用 staging 规则；顺手修掉一个真缺陷——**声明了库但不认领任何路径**的块此前两个开关都静默无效（没有 claimer 可写），改为回落到该块自己的入口
 - [x] 10.6 单测：解析携带开关、工具全拒绝且内核零调用、生命周期零注入 + 重开生效、schema 接受、store/route 视图带字段、`setMemory` 落盘与 staging、无路径块的开关生效、页面开关渲染与切换。全量 **170 例通过**
 - [x] 10.7 文档：spec 新增 `dsh-memex-memory`「按工作区关闭记忆」与 `dsh-memex-settings-ui`「工作区级记忆开关」两处要求；design D20；README / CHANGELOG / notes / `dsh.yaml` note
-- [ ] 10.8 部署 + 重启，实机验收（关闭一个工作区后：该目录新会话无召回提示、工具报错说明；其它工作区不受影响）
+- [x] 10.8 部署 + 重启，实机验收（关闭一个工作区后：该目录新会话无召回提示、工具报错说明；其它工作区不受影响）
+  - 15:45:12 重启（PID 84619，清单含 `dsh-memex`，无 memex 报错）；用户把 **DSH Pet** 工作区关掉记忆并保存，配置落成 `dsh-pet-workspace` + `pathPrefixes` + `primary: true` + `memory: false`（staging 规则生效）。用**真实 settings + 真实工具层/生命周期**实测：`memex_recall`/`memex_write` 在该目录双双拒绝、`existsBefore=false → existsAfter=false`（拒绝先于 `ensure`）、`agent/session-start` 注入数 0、写卡提醒也未触发；同一时刻 `ohmydsh`（personal）检索照常、nexus 会话注入数 2。页面该块显示 `memory=OFF` 与关闭说明。
