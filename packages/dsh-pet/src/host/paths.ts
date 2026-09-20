@@ -30,6 +30,14 @@ export interface PetPaths {
   readonly storeRoot: string
   /** `<stateRoot>/skills/staging` — scratch space for verified atomic installs. */
   readonly stagingRoot: string
+  /**
+   * `<stateRoot>/media-spool` — the only place a media download may touch disk.
+   *
+   * It lives inside the state root on purpose: the locus project-read guard
+   * already refuses that whole tree, so a child can never read a byte Pet is
+   * holding on its behalf.
+   */
+  readonly mediaSpoolRoot: string
 }
 
 /**
@@ -53,6 +61,7 @@ export function resolvePetPaths(
     projectionRoot: path.join(workspaceRoot, '.dsh', 'skills'),
     storeRoot: path.join(stateRoot, 'skills', 'store'),
     stagingRoot: path.join(stateRoot, 'skills', 'staging'),
+    mediaSpoolRoot: path.join(stateRoot, 'media-spool'),
   }
 }
 
@@ -71,6 +80,7 @@ export async function ensurePetDirectories(paths: PetPaths): Promise<void> {
     paths.projectionRoot,
     paths.storeRoot,
     paths.stagingRoot,
+    paths.mediaSpoolRoot,
   ]
   for (const dir of required) {
     const existing = await stat(dir).catch(() => undefined)

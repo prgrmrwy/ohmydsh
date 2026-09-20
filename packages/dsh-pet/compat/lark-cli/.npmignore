@@ -1,4 +1,0 @@
-# `package.json#files` selects only artifact/; explicitly unignore the generated
-# deployment payload even though the repository .gitignore excludes it.
-!artifact/
-!artifact/**
