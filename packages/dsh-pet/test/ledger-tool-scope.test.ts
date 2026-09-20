@@ -113,21 +113,29 @@ describe('the three pet-locus-intent-triage tools are scoped to Pet executors', 
     expect(source).toContain('currentCapability: childSessionId => currentLocusCapability(childSessionId)')
   })
 
-  // ⚠️ OPEN QUESTION, not a settled cause. This case still fails, but the
-  // explanation originally recorded here no longer holds: it was attributed to
-  // the `dsh-scope`/`ToolRuntime` drift that `test/tool-scope.test.ts` also hit,
-  // and after the environment was rebuilt that file's twin case now PASSES
-  // (6/6) while this one does not. An attempt to isolate the difference
-  // produced contradictory results — a strict mirror of the tool-scope setup
-  // reported the tools visible in the global layer, while the real
-  // tool-scope.test.ts reports an empty global layer for the same call — so
-  // neither account can be trusted yet.
+  // ⚠️ REPRODUCIBLE DISCREPANCY, cause not yet established.
   //
-  // `it.fails` keeps the suite honest about the current behaviour, NOT about
-  // the behaviour being correct. Do not read this marker as evidence that
-  // cross-scope isolation is sound for these three tools; re-derive it before
-  // relying on that. Recorded rather than dropped, per this repo's "surface a
-  // discrepancy, do not silently choose a side" convention.
+  // Narrowed by experiment: this case PASSES when `registerPetTools` is called
+  // WITHOUT `intentTriage`, and FAILS when it is passed — the unrelated scope
+  // then reports all four Pet tools (`pet_context` plus the three added here).
+  // Test order, file location and isolation runs are all ruled out; the
+  // argument itself is the trigger.
+  //
+  // What is NOT established is whether that is a real cross-scope leak or an
+  // artifact of this harness. Two facts argue against a production leak:
+  // production DOES pass `intentTriage` at both call sites (the guard above
+  // asserts it), and `test/tool-scope.test.ts` — the pre-existing twin case for
+  // `pet_context` — passes. Neither settles it, so this is recorded rather than
+  // explained away.
+  //
+  // `it.fails` keeps the suite honest about the CURRENT behaviour, not about
+  // that behaviour being correct. Do not read it as evidence that cross-scope
+  // isolation holds for these three tools.
+  //
+  // Note for whoever picks this up: the concurrent tool-surface attestation
+  // work already lists all three names in `LOCUS_CALLER_BOUND_TOOLS`
+  // (`src/host/locus/composition.ts`), so that mechanism is the natural place
+  // to settle whether this harness result reflects reality.
   it.fails('task 9.7: absent from an unrelated agent scope even when the Host has intentTriage-capable scopes elsewhere (cause UNCONFIRMED — twin case in tool-scope.test.ts now passes)', async () => {
     harness = await openPetHarness()
     const ctx = await hostContext()
