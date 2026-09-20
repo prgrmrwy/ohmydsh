@@ -111,6 +111,9 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
   const [probeResult, setProbeResult] = useState<MemexResolveResult | undefined>(undefined)
   const [probeError, setProbeError] = useState<string | undefined>(undefined)
   const [expanded, setExpanded] = useState<readonly string[]>([])
+  // View state only: memory-off workspaces are collapsed by default, and
+  // collapsing them never touches the configuration.
+  const [showHidden, setShowHidden] = useState(false)
   const [picker, setPicker] = useState<string | undefined>(undefined)
 
   useEffect(() => {
@@ -184,6 +187,10 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
     [views],
   )
   const undeclared = useMemo(() => undeclaredStores(stores?.stores, rows, accounted), [stores, rows, accounted])
+  // Memory off means the workspace has left daily view — it stays reachable,
+  // because the switch that turns it back on lives in its block.
+  const active = useMemo(() => views.filter(view => view.memory), [views])
+  const hidden = useMemo(() => views.filter(view => !view.memory), [views])
 
   const edit = useCallback((key: string, change: (row: EditorRow) => EditorRow) => {
     setDraft(current => (current ?? savedRows).map(row => (row.key === key ? change(row) : row)))
@@ -551,6 +558,85 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
     )
   }
 
+  /**
+   * One workspace block.
+   *
+   * The collapsed group of memory-off workspaces renders through this same path,
+   * so "can I switch it back on here" never depends on a second code path.
+   * @param view - the workspace to render.
+   * @returns the block.
+   */
+  const renderBlock = (view: WorkspaceView): JSX.Element => {
+    // Roles are drawn on every row as soon as there is more than one row to
+    // contrast. The fallback counts: a lone primary above an "additional"
+    // fallback is exactly the case where an unlabelled primary reads wrong.
+    const many = view.entries.length > 1
+    const group = view.group
+    return (
+      <section className="dshmx-lib" key={view.key}>
+        <header className="dshmx-lib-head">
+          {/* The eyebrow only appears where it distinguishes: a block that came
+              from configuration is not a workspace, and saying so is
+              information. Repeating "workspace" above every workspace was not —
+              the title already is one. */}
+          {!view.fromRegistry && <span className="dshmx-part-label">{t('noWorkspaceTitle')}</span>}
+          <span className="dshmx-ws-title">{view.title === '' ? t('entryNew') : view.title}</span>
+          {view.fromRegistry
+            ? <span className="dshmx-ident dshmx-ws-path">{view.path}</span>
+            : (
+              <span className="dshmx-ws">
+                {view.paths.map((path, index) => (
+                  <span className="dshmx-fieldrow" key={`${view.key}-${String(index)}`}>
+                    <input
+                      className="dshmx-field dshmx-ident"
+                      aria-label={t('workspaceHint')}
+                      value={path}
+                      placeholder={t('workspaceHint')}
+                      onChange={event => setDraft(current => (group === undefined ? current ?? savedRows : setPathInGroup(current ?? savedRows, group, index, event.target.value)))}
+                    />
+                    <button
+                      type="button"
+                      className="dshmx-act dshmx-act-inline"
+                      aria-label={`${t('removePath')}: ${path}`}
+                      onClick={() => setDraft(current => (group === undefined ? current ?? savedRows : removePathFromGroup(current ?? savedRows, group, index)))}
+                    >
+                      {t('removePath')}
+                    </button>
+                  </span>
+                ))}
+                <button
+                  type="button"
+                  className="dshmx-act dshmx-act-inline"
+                  onClick={() => setDraft(current => (group === undefined ? current ?? savedRows : addPathToGroup(current ?? savedRows, group)))}
+                >
+                  {t('addPath')}
+                </button>
+              </span>
+            )}
+          <span className="dshmx-count">{`${String(view.entries.length)} ${t('entryCount')}`}</span>
+          {/* Memory on/off belongs to the workspace, not to one entry: it is a
+              property of the route a session here takes. */}
+          <label className="dshmx-toggle dshmx-ws-memory">
+            <input
+              type="checkbox"
+              aria-label={t('memoryLabel')}
+              checked={view.memory}
+              onChange={event => apply(base => setMemory(base, view, event.target.checked), t('stagedNotice'))}
+            />
+            {`${t('memoryLabel')} ${view.memory ? t('on') : t('off')}`}
+          </label>
+        </header>
+        {!view.memory && <p className="dshmx-note dshmx-prose">{t('memoryHint')}</p>}
+
+        <div className="dshmx-entries">
+          {view.entries.map(entry => renderEntry(view, entry, many))}
+        </div>
+
+        <div className="dshmx-actions">{renderPicker(view)}</div>
+      </section>
+    )
+  }
+
   return (
     <div className="dshmx-root">
       <header className="dshmx-bar">
@@ -572,77 +658,29 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
       )}
 
       <div className="dshmx-shelf">
-        {views.map(view => {
-          // Roles are drawn on every row as soon as there is more than one row to
-          // contrast. The fallback counts: a lone primary above an "additional"
-          // fallback is exactly the case where an unlabelled primary reads wrong.
-          const many = view.entries.length > 1
-          const group = view.group
-          return (
-            <section className="dshmx-lib" key={view.key}>
-              <header className="dshmx-lib-head">
-                {/* The eyebrow only appears where it distinguishes: a block that
-                    came from configuration is not a workspace, and saying so is
-                    information. Repeating "workspace" above every workspace was
-                    not — the title already is one. */}
-                {!view.fromRegistry && <span className="dshmx-part-label">{t('noWorkspaceTitle')}</span>}
-                <span className="dshmx-ws-title">{view.title === '' ? t('entryNew') : view.title}</span>
-                {view.fromRegistry
-                  ? <span className="dshmx-ident dshmx-ws-path">{view.path}</span>
-                  : (
-                    <span className="dshmx-ws">
-                      {view.paths.map((path, index) => (
-                        <span className="dshmx-fieldrow" key={`${view.key}-${String(index)}`}>
-                          <input
-                            className="dshmx-field dshmx-ident"
-                            aria-label={t('workspaceHint')}
-                            value={path}
-                            placeholder={t('workspaceHint')}
-                            onChange={event => setDraft(current => (group === undefined ? current ?? savedRows : setPathInGroup(current ?? savedRows, group, index, event.target.value)))}
-                          />
-                          <button
-                            type="button"
-                            className="dshmx-act dshmx-act-inline"
-                            aria-label={`${t('removePath')}: ${path}`}
-                            onClick={() => setDraft(current => (group === undefined ? current ?? savedRows : removePathFromGroup(current ?? savedRows, group, index)))}
-                          >
-                            {t('removePath')}
-                          </button>
-                        </span>
-                      ))}
-                      <button
-                        type="button"
-                        className="dshmx-act dshmx-act-inline"
-                        onClick={() => setDraft(current => (group === undefined ? current ?? savedRows : addPathToGroup(current ?? savedRows, group)))}
-                      >
-                        {t('addPath')}
-                      </button>
-                    </span>
-                  )}
-                <span className="dshmx-count">{`${String(view.entries.length)} ${t('entryCount')}`}</span>
-                {/* Memory on/off belongs to the workspace, not to one entry: it is
-                    a property of the route a session here takes. */}
-                <label className="dshmx-toggle dshmx-ws-memory">
-                  <input
-                    type="checkbox"
-                    aria-label={t('memoryLabel')}
-                    checked={view.memory}
-                    onChange={event => apply(base => setMemory(base, view, event.target.checked), t('stagedNotice'))}
-                  />
-                  {`${t('memoryLabel')} ${view.memory ? t('on') : t('off')}`}
-                </label>
-              </header>
-              {!view.memory && <p className="dshmx-note dshmx-prose">{t('memoryHint')}</p>}
-
-              <div className="dshmx-entries">
-                {view.entries.map(entry => renderEntry(view, entry, many))}
-              </div>
-
-              <div className="dshmx-actions">{renderPicker(view)}</div>
-            </section>
-          )
-        })}
+        {active.map(view => renderBlock(view))}
       </div>
+
+      {hidden.length > 0 && (
+        <div className="dshmx-group">
+          {/* Collapsed by default: a workspace whose memory is off has left daily
+              view, but the switch that turns it back on lives in this block, so
+              the block stays one click away rather than filtered out. */}
+          <div className="dshmx-line">
+            <span className="dshmx-group-title">{`${t('hiddenGroup')} (${String(hidden.length)})`}</span>
+            <button
+              type="button"
+              className="dshmx-act dshmx-act-inline"
+              aria-expanded={showHidden}
+              aria-label={t('hiddenGroup')}
+              onClick={() => setShowHidden(current => !current)}
+            >
+              {showHidden ? t('actionHide') : t('actionShow')}
+            </button>
+          </div>
+          {showHidden && hidden.map(view => renderBlock(view))}
+        </div>
+      )}
 
       {undeclared.length > 0 && (
         <div className="dshmx-group">

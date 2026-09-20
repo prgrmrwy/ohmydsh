@@ -521,22 +521,57 @@ describe('memory settings page', () => {
     ]])
   })
 
-  it('shows the off state and what it means, without hiding the configuration', async () => {
+  it('folds memory-off workspaces into a collapsed group', async () => {
+    const h = await render({
+      scopes: [
+        { name: 'work-thing', pathPrefixes: ['/home/u/work/thing'], memory: false },
+        { name: 'nexus', pathPrefixes: ['/home/u/work/nexus'] },
+      ],
+    }, {
+      workspaces: registry([
+        { title: 'work-thing', path: '/home/u/work/thing' },
+        { title: 'nexus', path: '/home/u/work/nexus' },
+      ]),
+      stores: [store({ scope: 'work-thing', memory: false }), store({ scope: 'nexus' })],
+    })
+    const blocks = () => [...h.container.querySelectorAll('section.dshmx-lib')].map(node => node.querySelector('.dshmx-ws-title')?.textContent)
+    // Off by default: the block is not one of the main-list rows any more.
+    expect(blocks()).toEqual(['nexus'])
+    expect(h.text()).toContain('hiddenGroup (1)')
+    // Its state is still stated, and one click away.
+    expect(h.button('actionShow').getAttribute('aria-expanded')).toBe('false')
+    await act(async () => { h.button('actionShow').click() })
+    expect(blocks()).toEqual(['nexus', 'work-thing'])
+    expect(h.text()).toContain('memoryHint')
+    // Opening the group is a view state: nothing is written.
+    expect(h.mutations).toHaveLength(0)
+  })
+
+  it('can switch memory back on from inside the folded group', async () => {
     const h = await render({ scopes: [{ name: 'work-thing', pathPrefixes: ['/home/u/work/thing'], memory: false }] }, {
       workspaces: registry([{ title: 'work-thing', path: '/home/u/work/thing' }]),
       stores: [store({ scope: 'work-thing', memory: false })],
     })
-    expect(h.checkbox('memoryLabel').checked).toBe(false)
-    expect(h.text()).toContain('memoryHint')
-    // Off is a runtime state, not a reason to hide the entry from the editor.
-    expect(h.container.querySelector('.dshmx-entry-line')?.textContent).toContain('work-thing')
-    await act(async () => { h.checkbox('memoryLabel').click() })
+    await act(async () => { h.button('actionShow').click() })
+    const toggle = h.checkbox('memoryLabel')
+    expect(toggle.checked).toBe(false)
+    await act(async () => { toggle.click() })
     await act(async () => { h.button('save').click() })
     expect(h.mutations).toEqual([[
       { op: 'set', path: ['scopes'], value: [
         { name: 'work-thing', pathPrefixes: ['/home/u/work/thing'], memory: true },
       ] },
     ]])
+  })
+
+  it('shows no folded group when every workspace has memory on', async () => {
+    const h = await render({ scopes: [{ name: 'nexus', pathPrefixes: ['/home/u/work/nexus'] }] }, {
+      workspaces: registry([{ title: 'nexus', path: '/home/u/work/nexus' }]),
+      stores: [store({ scope: 'nexus' })],
+    })
+    // An empty "Memory off (0)" heading would be noise, so there is none.
+    expect(h.text()).not.toContain('hiddenGroup')
+    expect([...h.container.querySelectorAll('button')].map(b => b.textContent?.trim())).not.toContain('actionShow')
   })
 
   it('turns the fallback entry off in both directions, on the primary entry', async () => {
