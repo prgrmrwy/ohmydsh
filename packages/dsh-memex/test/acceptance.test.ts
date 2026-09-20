@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
@@ -10,7 +10,7 @@ function card(title: string, body: string): string {
   return `---\ntitle: ${title}\ncreated: 2026-09-18\nsource: acceptance\n---\n${body}\n`
 }
 
-function harness() {
+function harness(cwd = '/workspace/current') {
   const namespaceDir = mkdtempSync(join(tmpdir(), 'dsh-memex-acceptance-'))
   const resolver = createScopeResolver({
     namespaceDir,
@@ -25,6 +25,7 @@ function harness() {
       bindings: [{ name: 'bound', read: ['current', 'other', 'personal'], write: ['current', 'other', 'personal'] }],
     },
     gitRemote: () => undefined,
+    gitRoot: () => undefined,
   })
   const tools = new Map<string, ToolDefinition>()
   const logs: unknown[][] = []
@@ -33,7 +34,7 @@ function harness() {
     tools: { register(definition: ToolDefinition) { tools.set(definition.name, definition); return () => tools.delete(definition.name) } },
   }
   registerMemexTools(ctx as never, resolver)
-  const exec = { agent: { session: { header: { cwd: '/workspace/current' } } } }
+  const exec = { agent: { session: { header: { cwd } } } }
   const call = async (name: string, args: unknown) => {
     const result = await tools.get(name)!.execute(args, exec as never) as { json: string }
     return JSON.parse(result.json)
@@ -59,7 +60,7 @@ describe('dsh-memex real-kernel acceptance', () => {
     const other = await h.call('memex_read', { scope: 'other', slug: 'same' })
     expect(current.content).toContain('current-body')
     expect(other.content).toContain('other-body')
-    await expect(h.call('memex_read', { scope: 'outside', slug: 'same' })).rejects.toThrow(/outside the readable binding/)
+    await expect(h.call('memex_read', { scope: 'outside', slug: 'same' })).rejects.toThrow(/not reachable from current scope/)
   })
 
   it('writes current and internal targets, but rejects guarded and out-of-binding additions without rollback', async () => {
@@ -97,5 +98,65 @@ describe('dsh-memex real-kernel acceptance', () => {
     const result = await h.call('memex_search', { query: 'independent-key', scope: 'all' })
     expect(result.hits).toEqual([expect.objectContaining({ scope: 'current', slug: 'alive' })])
     expect(result.failures).toEqual(expect.arrayContaining([expect.objectContaining({ scope: 'other' })]))
+  })
+
+  it('keeps one workspace, two entries: default touches the primary only, an explicit scope writes the sibling', async () => {
+    const namespaceDir = mkdtempSync(join(tmpdir(), 'dsh-memex-multi-'))
+    const resolver = createScopeResolver({
+      namespaceDir,
+      config: {
+        autoDerive: false,
+        scopes: [
+          { name: 'proj-internal', primary: true, pathPrefixes: ['/workspace/proj'], publish: 'internal' },
+          { name: 'proj-public', pathPrefixes: ['/workspace/proj'], publish: 'internal' },
+          { name: 'personal', publish: 'external' },
+        ],
+        bindings: [],
+      },
+      gitRemote: () => undefined,
+      gitRoot: () => undefined,
+    })
+    const tools = new Map<string, ToolDefinition>()
+    const ctx = {
+      logger: () => ({ warn: () => undefined }),
+      tools: { register(definition: ToolDefinition) { tools.set(definition.name, definition); return () => tools.delete(definition.name) } },
+    }
+    registerMemexTools(ctx as never, resolver)
+    const exec = { agent: { session: { header: { cwd: '/workspace/proj/src' } } } }
+    const call = async (name: string, args: unknown): Promise<Record<string, any>> => {
+      const value = await tools.get(name)!.execute(args, exec as never) as { json: string }
+      return JSON.parse(value.json) as Record<string, any>
+    }
+
+    const route = resolver.resolve('/workspace/proj/src')
+    expect(route.scope).toBe('proj-internal')
+    expect(route.entries).toEqual(['proj-internal', 'proj-public'])
+
+    const plain = await call('memex_write', { slug: 'plain-note', content: card('Plain', 'a note that stays put') })
+    expect(plain.current.scope).toBe('proj-internal')
+    expect(plain.additional).toEqual([])
+    expect(existsSync(join(namespaceDir, 'proj-internal', 'cards', 'plain-note.md'))).toBe(true)
+    // The sibling is reachable, not written by default.
+    expect(existsSync(join(namespaceDir, 'proj-public', 'cards', 'plain-note.md'))).toBe(false)
+
+    const explicit = await call('memex_write', { slug: 'shared-note', content: card('Shared', 'written to both on purpose'), scope: 'proj-public' })
+    expect(explicit.additional).toEqual([expect.objectContaining({ scope: 'proj-public', written: true })])
+    expect(existsSync(join(namespaceDir, 'proj-public', 'cards', 'shared-note.md'))).toBe(true)
+
+    const searched = await call('memex_search', { query: 'note', scope: 'all' })
+    // Two cards in the primary, one in the sibling: both entries are searched.
+    expect([...new Set(searched.hits.map((hit: { scope: string }) => hit.scope))]).toEqual(['proj-internal', 'proj-public'])
+  })
+
+  it('gives a directory outside every repository its own library and no sync target', async () => {
+    const h = harness('/workspace/loose/notes')
+    const result = await h.call('memex_write', { slug: 'loose-note', content: card('Loose note', 'a note kept on this machine') })
+    expect(result.current).toMatchObject({ scope: 'loose-notes', home: join(h.namespaceDir, 'loose-notes') })
+    expect(result.current.notice).toMatch(/sync is not configured/)
+    expect(existsSync(join(h.namespaceDir, 'loose-notes', 'cards', 'loose-note.md'))).toBe(true)
+    // Nothing about this library talks to a remote until a human configures one.
+    for (const artifact of ['.git', '.sync.json', '.gitignore']) {
+      expect(existsSync(join(h.namespaceDir, 'loose-notes', artifact))).toBe(false)
+    }
   })
 })

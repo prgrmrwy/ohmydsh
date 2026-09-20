@@ -8,12 +8,32 @@ import { mapConcurrent, registerMemexTools } from '../src/tools/index.js'
 import { TOOL_DESCRIPTIONS } from '../src/tools/descriptions.generated.js'
 import type { BindingEntry, ScopeResolution, ScopeService } from '../src/scope/types.js'
 
-function scope(name: string): ScopeResolution {
-  return { scope: name, home: `/memex/${name}`, publish: name === 'internal' || name === 'current' ? 'internal' : 'external', publishKnown: true, source: 'config', created: false, workspacePaths: name === 'internal' || name === 'current' ? [`/work/${name}`] : [] }
+/**
+ * A route as the resolver would build it: the workspace's entries (this scope
+ * alone here) and the reach they imply, so the tool layer reads one source.
+ */
+function scope(name: string, binding?: BindingEntry): ScopeResolution {
+  const read = binding === undefined
+    ? [name]
+    : [...new Set([name, ...binding.read, 'personal'])]
+  const write = binding === undefined
+    ? (name === 'personal' ? [name] : [name, 'personal'])
+    : [...new Set([name, ...binding.write])]
+  return {
+    scope: name,
+    home: `/memex/${name}`,
+    publish: name === 'internal' || name === 'current' ? 'internal' : 'external',
+    publishKnown: true,
+    source: 'config',
+    created: false,
+    workspacePaths: name === 'internal' || name === 'current' ? [`/work/${name}`] : [],
+    entries: [name],
+    access: { current: name, read, write },
+  }
 }
 
 function resolver(binding?: BindingEntry): ScopeService {
-  const values = new Map(['current', 'alpha', 'beta', 'blocked', 'personal', 'internal'].map(name => [name, scope(name)]))
+  const values = new Map(['current', 'alpha', 'beta', 'blocked', 'personal', 'internal'].map(name => [name, scope(name, binding)]))
   return {
     resolve: cwd => {
       expect(cwd).toBe('/workspace/current')
@@ -109,7 +129,7 @@ describe('memex DSH tool registration', () => {
     const result = await call(tools.get('memex_search')!, { query: 'x', scope: ['beta', 'alpha'] })
     expect((result.hits as Array<{ scope: string }>).map(hit => hit.scope)).toEqual(['alpha'])
     expect(result.failures).toEqual([{ scope: 'beta', error: 'memex search failed in scope beta (exit 1)' }])
-    await expect(call(tools.get('memex_search')!, { query: 'x', scope: ['blocked'] })).rejects.toThrow(/outside the readable binding/)
+    await expect(call(tools.get('memex_search')!, { query: 'x', scope: ['blocked'] })).rejects.toThrow(/not reachable from current scope/)
     await expect(call(tools.get('memex_search')!, { query: 'x', scope: ['all'] })).rejects.toThrow(/use scope: "all" by itself/)
   })
 
@@ -166,7 +186,7 @@ describe('memex DSH tool registration', () => {
     const tools = capture(runner, { name: 'bound', read: ['current'], write: ['current'] })
     const result = await call(tools.get('memex_write')!, { slug: 'safe', content: 'safe body', scope: 'blocked' })
     expect(result.written).toBe(true)
-    expect(result.additional).toEqual([expect.objectContaining({ scope: 'blocked', written: false, error: expect.stringContaining('outside writable binding') })])
+    expect(result.additional).toEqual([expect.objectContaining({ scope: 'blocked', written: false, error: expect.stringContaining('not reachable from') })])
     expect(runner).toHaveBeenCalledTimes(1)
   })
 

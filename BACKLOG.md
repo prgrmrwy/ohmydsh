@@ -160,6 +160,16 @@
 
 ## 想法
 
+### [B045] 记忆设置页的便利动作（打开库目录、卡片明细）
+- **状态**: 想法
+- **优先级**: P2
+- **背景 / 动机**: change `dsh-memex-settings-ui` 落地的「记忆」页只做对应关系（工作区 / 库路径 / 远端）的展示与编辑，并已给出每库的卡片数与归档数。实际用起来后，可能想要更直接的便利动作：在文件管理器中打开某个库目录、查看卡片明细列表、或从页面直接跳到 `memex serve` 的对应库。
+- **要点**:
+  - 任何"打开目录/启动 serve"都属于**进程与外设**动作，必须新增 Host 端点（当前 `/dsh-memex` 只有取事实的端点 + 远端动作），需要先想清楚授权面：这些端点同样受 connection 层的回环 + 认证边界约束，但"打开 Finder"这类动作在远程 GUI（SSH 隧道访问）场景下是无意义的，需要按 `remote.$host` 决定是否显示。
+  - 卡片明细会引入分页/性能问题（当前只做有上界的递归计数），若要做应走内核 CLI 的 `search --list`，不要自建索引。
+  - 与「卡片浏览用 `memex serve`」的既有边界保持一致：页面不重复实现浏览能力，只提供入口。
+- **更新**: 2026-09-20 从 change `dsh-memex-settings-ui` 的 design Open Questions 转为条目（本期不做，等实际使用反馈）。
+
 ### [B042] 父会话归档后，入口 @ 应有明确回执，而不是静默或静默复活
 - **状态**: 想法
 - **优先级**: P1
@@ -585,6 +595,26 @@
 - **绕过(2026-08-28)**: 在 profile 目录手动 `rm -rf node_modules/dsh-worktree-session && pnpm add file:<路径>` 后内容正确;此后 sync 幂等(`no changes`)。
 - **待查方向**: `dsh plugin add` → profile 内 pnpm add 对 `file:` + lockfile `resolution: {type: directory}` 的目录依赖,在 node_modules 已存在同 spec 时是否跳过实际拷贝/链接;以及 sync 应在重装前先移除旧目录或对 `type: directory` 依赖强制刷新。影响面:任何 local package 的源码改动经 sync 部署都可能"假成功"。
 - **更新**: 2026-08-28 记录(worktree-session pnpm 支持实现部署时发现;当前部署已手动校正)。
+
+### [D004] sync 无法修复 compat `file:` 依赖指向已删除 checkout 的部署
+- **状态**: 待修复(本次由 change `dsh-memex-settings-ui` 的部署步骤暴露)
+- **现象**: 存在部署漂移需要 sync 修复时(`incomplete deployment dsh-memex: missing lib/client.js, reinstalling`),修复路径执行 `dsh plugin --profile web add ...`,pnpm 立刻失败:`ERR_PNPM_LINKED_PKG_DIR_NOT_FOUND`(`/Users/…/.worktrees/change-openspec-changes-dsh-memex-scoped-memory/packages/dsh-pet/compat/subagent/storage-artifacts/storage-domain` 不存在),报 `failed to repair incomplete deployment of dsh-memex`。
+- **根因**: profile `package.json` 中 4 个 `@deepseek-ai/dsh-storage*` 的 `file:` 依赖是**绝对路径**,取值 = 执行 sync 的 checkout 根 + `dsh.yaml` 中 dsh-pet 的 `compatDependencies.path`。上一次从 worktree `.worktrees/change-openspec-changes-dsh-memex-scoped-memory` 物化时把该 worktree 路径写进了 profile;worktree 随后被清理,而 sync 判定 `dsh-pet@0.1.0 up-to-date` 后不再重写这些路径 → profile 留下指向不存在目录的依赖,此后**任何** pnpm add/install 都失败,local package 的部署与修复一起被冻结(运行中的实例看起来正常,已加载模块不受影响)。
+- **影响面**: 任何「从 worktree 物化过、worktree 已被清理」的部署都会踩到。
+- **绕过(如需立刻恢复)**: 从主 checkout 重新执行一次 dsh-pet 的 add(即 sync 本来会跑的那条命令),把 4 个 `file:` 路径改写成当前 checkout 的绝对路径;或 `dsh reset` 后重跑 sync(更重)。
+- **修复方向**: sync 比较 local package 是否 up-to-date 时,应把 compatDependencies 解析出的**当前**绝对路径一并纳入比较(路径漂移即需重装,而不是 content hash 相同就跳过);或让 compat 依赖不绑定 checkout(相对 profile 的稳定形式)。
+- **更新**: 2026-09-20 记录(主 checkout 的 storage-artifacts 完好,仅 profile 记录陈旧)。
+
+### [D005] 硬链接部署让 manifest 改动对运行体立刻生效,声明与产物不同步即启动即崩
+- **状态**: 待评估(2026-09-20 change `dsh-memex-settings-ui` 实机踩到,已恢复)
+- **现象**: 在仓库里给已部署的 local package 的 `package.json` 加上 `dsh.client`,而对应的 `lib/client.js` 尚未部署(sync 被 D004 的 pnpm 失败挡住)时,下一次启动直接失败:`plugin tree failed to load … client bundles not found … package: dsh-memex, path: ~/.dsh/profiles/web/node_modules/dsh-memex/lib/client.js`。整个 profile 起不来(不是降级),需要用主干重新 build 才恢复。
+- **根因**: profile 以 pnpm `file:` 依赖安装 local package,**部署副本与仓库源是硬链接**(同一 inode,`stat -f %l` links≥3)→ 编辑仓库 `package.json` 等于直接改线上 manifest;而 loader 在启动期读 `dsh.client` 并要求入口文件存在。
+- **为什么 sync 的既有校验救不了**: `missingDeployedFiles()` 能检出"声明了却没有产物",但它在**下一次 sync** 才运行,而 manifest 的变化对运行体是**立刻**的 —— 顺序上无解。
+- **候选修复(待评估优先级)**:
+  1. **流程规则**(零成本,已写入 `docs/notes/dsh-plugin-integration-pitfalls.md`):新增启动期要求时,声明与满足它的文件必须在同一次 `dsh build` 里落地;sync 无法完成部署时先把声明撤回。
+  2. **部署解耦**: profile 改用 `package-import-method=copy`(或等价方式),让部署副本成为独立副本 —— 仓库编辑不再影响运行体,半截状态不可见。代价:磁盘与部署耗时上升,需复核 sync 的"部署副本一致性"校验是否仍成立。
+  3. **构建前置**: `dsh build` 在启动/重启前校验"每个声明了 `dsh.client` 的包,其入口产物已存在于部署副本",不满足则拒绝重启并提示(把崩溃提前成明确报错)。
+- **更新**: 2026-09-20 记录(恢复方式:主干 `dsh build` 补齐产物后重启)。
 
 ---
 

@@ -10,6 +10,7 @@ import { createMemexRuntime } from './plugin.js'
 import { registerMemexTools } from './tools/index.js'
 import { registerMemexLifecycle } from './lifecycle/index.js'
 import { registerMemexSkills } from './lifecycle/skills.js'
+import { registerMemexChannel } from './host/channel.js'
 
 export const name = 'dsh-memex'
 // Do not export a static `inject`: optional Host services belong in the dynamic
@@ -36,7 +37,25 @@ export function apply(ctx: Context): void {
       () => registerMemexTools(child, scopes, { onToolSuccess: lifecycle.mark }),
       'dsh-memex.tools.register()',
     )
+    // The settings page's read/write surface. It receives the same live proxy
+    // minus `ensure`, so no endpoint can create a library as a side effect of a
+    // page load.
+    registerMemexChannel(child, {
+      scopes: {
+        resolve: scopes.resolve,
+        list: scopes.list,
+        resolveByName: scopes.resolveByName,
+        bindingFor: scopes.bindingFor,
+        accessFor: scopes.accessFor,
+      },
+      config: runtime.config,
+      // The workspace registry is an optional peer: its absence is reported, not
+      // thrown, so the page degrades to the configuration-only shape.
+      onWarn: (message: string) => { child.logger('dsh-memex').warn(message) },
+    })
   })
 }
 
 export { registerMemexTools } from './tools/index.js'
+export { registerMemexChannel } from './host/channel.js'
+export { MEMEX_CHANNEL } from './contract.js'

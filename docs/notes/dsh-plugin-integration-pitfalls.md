@@ -622,6 +622,44 @@ inject(inject, callback) {
 
 ---
 
+## 声明 `dsh.client` 与部署 client bundle 必须在同一次 sync 里落地
+
+**症状**：改了 local package 的 `package.json` 加入 `dsh.client`（或任何会新增启动期要求的字段）后，
+下次启动整个 profile **起不来**：
+
+```
+Error: dsh: plugin tree failed to load: failed to apply loader entry modules (@deepseek-ai/dsh-client-modules):
+  client-modules: 1 client package failed to compose:
+  client bundles not found; run `pnpm run build` before launch:
+    - package: dsh-memex
+      path: ~/.dsh/profiles/web/node_modules/dsh-memex/lib/client.js
+```
+
+**机制**（2026-09-20 change `dsh-memex-settings-ui` 实机踩到）：profile 把 local package 装成 pnpm 的
+`file:` 依赖，**部署副本与仓库源是硬链接**（同一 inode，`stat -f %l` 显示 links≥3）。于是：
+
+1. 在仓库里编辑该包的 `package.json` → **部署副本的 manifest 立刻同步变化**（同一个 inode）；
+2. 运行体的 loader 在**启动时**读部署副本的 `dsh.client`，要求 `lib/<entry>` 存在；
+3. 而构建产物还没部署（`lib/client.js` 尚未生成或 sync 还没跑/失败）→ 启动期硬错误，
+   **不是降级**：整个 plugin tree 加载失败，实例起不来。
+
+**与"部署副本不一致"检查的关系**：sync 的 `missingDeployedFiles()` 确实能检出"声明了却没有产物"，
+但检出发生在**下一次 sync**，而 manifest 的变化对运行体是**立刻**生效的 —— 顺序上救不了。
+
+**规则**：
+
+1. **新增启动期要求（`dsh.client`、`exports` 新入口、新的 patch 行）时，必须让声明与满足它的文件在同一次
+   `dsh build` 里落地**；不要让"改 manifest"和"部署产物"跨两次 sync（中间任何一次重启都会崩）。
+2. 若 sync 因故无法完成部署（例如 pnpm 解析失败），**先把声明撤回去**让实例能启动，再排查部署，
+   而不是留着半截状态。
+3. 排查时先确认两件事：`stat -f %i` 看部署副本与源是否同一 inode（是否硬链接），
+   以及部署副本里那个被声明的入口文件是否真的存在（`ls ~/.dsh/profiles/<p>/node_modules/<pkg>/lib/`）。
+4. 手工编辑任何**已部署** local package 的 `package.json` 都等于直接改线上 manifest —— 没有"只改仓库"这回事。
+
+见 `BACKLOG.md` D005（用 `package-import-method=copy` 把部署副本与仓库解耦的候选修复）。
+
+---
+
 ## 排查这类问题的通用顺序
 
 1. **先证伪最省事的假设**：换个值、去掉这个字段——如果结果完全不变，

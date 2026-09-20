@@ -11,7 +11,7 @@ export function installedKernelVersion(): string | undefined {
 }
 
 export async function runKernel(args: readonly string[], options: KernelRunOptions): Promise<KernelResult> {
-  if (!existsSync(join(options.home, 'cards'))) {
+  if (options.requireCards !== false && !existsSync(join(options.home, 'cards'))) {
     throw new KernelError('missing', `Memex library is missing cards/: ${options.home}`)
   }
 
@@ -22,7 +22,13 @@ export async function runKernel(args: readonly string[], options: KernelRunOptio
 
   return await new Promise<KernelResult>((resolve, reject) => {
     const child = spawn(executable, [...args], {
-      env: { ...process.env, MEMEX_HOME: options.home },
+      // A stable C locale is part of the calling contract, not cosmetics: the
+      // kernel decides "remote already exists" by matching an English git error
+      // string, so `git remote add` failing in a localized message makes
+      // `sync --init` refuse to re-run on an already-configured library
+      // (observed with LANG=zh_CN.UTF-8). It also keeps the text we surface
+      // deterministic enough to assert on.
+      env: { ...process.env, MEMEX_HOME: options.home, LC_ALL: 'C', LANG: 'C' },
       stdio: ['pipe', 'pipe', 'pipe'],
       signal: options.signal,
     })
