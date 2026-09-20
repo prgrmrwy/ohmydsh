@@ -54,15 +54,15 @@ customizations:
     enabled: true
     brief: Worktree Session 首发隔离(task branch/lean deps/独立 build home)
     note: '自研 Host+Web bundle；从 base 在首次普通发送时创建唯一 ws/* branch 与 .worktrees/* checkout，不切换主 checkout；npm lean/mutable、.env.local ignored-only 同步、隔离开发 DSH_HOME、安全 status/promote/clean；交互与 Git 探测概念参考 https://github.com/LaoYueHanNi/dsh-git-worktree (MIT，详见 packages/worktree-session/NOTICE)'
-  # 自研(local):按知识域物理隔离、可跨库检索的 memex 持久记忆层。
+  # 自研(local):按知识域物理隔离、可跨库检索的 memex 持久记忆层 + 「记忆」设置页。
   - id: dsh-memex
     type: package
     source: local
-    version: 0.1.0
+    version: 0.2.0
     enabled: true              # 备用端口验收已通过(3091 完整组合启动/0 报错，禁用态验收已回滚)
     enabledEnv: DSH_MEMEX_ENABLED  # 紧急熔断：设 DSH_MEMEX_ENABLED=0 即可在下次 build 时移除
-    brief: memex 持久记忆原生接入(scope 隔离/并发跨库检索/外部库守门)
-    note: 'change dsh-memex-scoped-memory；2026-09-19 备用端口验收通过(真实 settings + 真实内核：scope 路由/写入/检索/守门/无私有 frontmatter)；回滚 = enabled: false + node scripts/sync.mjs；重启必须脱离调用方进程(setsid)，否则中断会留下停机空档；DSH 原生 Host bundle，结构等价于上游 Pi extension（工具注册 + 会话生命周期 + 方法论 skill），额外增加 scope 维度。每个 scope 是独立 MEMEX_HOME（统一位于 ~/.dsh-memex/<scope>）与独立 git remote；多库检索由本包并发 fan-out 后确定性归并；写入 publish=external 的库前 fail closed 守门。存储/卡片/Zettelkasten 方法论与 tool description 复用 @touchskyer/memex@0.4.1（MIT；工具描述由生成脚本按需同步，skills 直接引用，不修改上游源码/卡片格式）。运行依赖:memex CLI 在 PATH；全局安装需显式 --registry=https://registry.npmjs.org/，因用户 ~/.npmrc 的 bnpm 镜像目前仅同步到 0.4.0。'
+    brief: memex 持久记忆原生接入(scope 隔离/跨库检索/守门 + 「记忆」设置页)
+    note: 'change dsh-memex-scoped-memory(0.1.0 归档) + change dsh-memex-settings-ui(0.2.0)。回滚 = enabled: false + node scripts/sync.mjs；重启必须脱离调用方进程(setsid)，否则中断会留下停机空档。**0.2.0 新增 Web 半区**：注册 settings.section(id dsh-memex，文案「记忆」，order 25)，页面主语是「一组工作区」而非单个库：路径按「认领它的入口集合」分组，块内上半「关联仓库」、下半「记忆入口」(可多个，主入口在前并标注，整块左侧一条竖脊线贯穿；静默字段；事实按「标签—值」列出，含只读的发布方向)。**页面主语 = 宿主 workspace 注册表**(2026-09-20 二轮)：页面不再从配置的 pathPrefixes 反推工作区，而是读 `ctx.workspaceRegistry`(可选注入，`ctx.get` 读，缺席回答 known:false 降级为仅配置形态并明说)，因为配置路径只是真实工作区的副本——本机 8 个工作区里 4 个没有任何配置，按配置建的页面看不见它们、也无法给它们挂入口；每个工作区下列出入口：主入口默认取**该路径派生的库**(先远端后末两段，只作提议不写配置)，入口列表态只显示角色/名称/卡片数、展开才是路径与远端事实与动作，「+ 增加附加入口」从候选(已声明库 / 命名空间下未声明库 / 新建库)里选，**重名从构造上不可达**(一个库始终是一条配置条目，挂到第二个工作区是给它自己的条目加路径)；声明了路径但不属于任何工作区的条目单独可见可编辑；「关联仓库」措辞改为「工作区」。**兜底入口语义变更**：`personal` 由「无绑定时仅作写入目标」改为**默认授予**——默认可读可写(新工作区零配置可用)，由入口自己 `fallback: false` 关闭，关闭后**读写都不可达**；绑定只做加法(不取消兜底)，显式列出 personal 的绑定可覆盖关闭。**必须记住的坑**：给未声明工作区挂入口或关兜底时，必须同时把派生主入口落成声明——解析器一旦有任一声明命中该路径就不再走派生分支(`configuredPathMatch` 命中即返回)，只落附加入口会**静默抢走主入口**；页面已实现该 staging 并在保存前提示。**一个工作区可关联多个入口**(change 内追加的模型 B)：同一声明路径被多个 scope 认领时恰好一个必须标 `primary: true`(配置期校验；remote 模式重叠在解析期判定)，主入口承载当前 scope/召回/图级操作与默认读写，附加入口只在显式指名时可读可写(默认动作绝不碰它们)；同一库目录仍只能被一个 scope 使用。只用官方主题变量(border-l*/bg-layer-*/state-*-primary/button-primary-fill)，浅色与暗色均自适应；导航图标用有界 DOM 适配(匹配自己那行的可见文案 + 配对 CSS mask 自绘 16px 线性 book，跟随 currentColor)，适配失败静默降级为官方齿轮；配置编辑走官方 ctx.settingsScope(整份 scopes 作为一次带 revision 围栏的 mutate)，库事实走只读通道 /dsh-memex(stores/resolve/remote；回环与认证边界由 connection 层统一施加)。**行为变化(需知)**：无仓库目录不再 fallback 到 personal —— 按本地路径末两段派生各自的库(~/.dsh-memex/<name>)且不配远端同步；personal 仍是可解析的普通 scope(默认写入目标含它)但不再隐式承接任何目录；已声明路径(ohmydsh/dsh-cockpit→personal、nexus、flow-web-monorepo)路由不变。新增两条静态完整性约束(同一库路径被两个 scope 共用、同一 remote 模式字面重复 → settings 校验拒绝)；remote 模式运行时重叠改为报错而非静默取第一个。远端写入按状态分流：未配置→sync --init <url>；已配置→sync/push/pull/on|off/更换远端(独立动作+确认)，**从不重建或重新 init 已配置的库**，系统自身不写库内文件。⚠ 内核 --init 靠英文错误串判定「remote 已存在」，本机 zh_CN locale 下重跑 --init 会直接失败，故所有内核调用注入 LC_ALL=C/LANG=C(升级内核需复核)。运行依赖:memex CLI 在 PATH(@touchskyer/memex@0.4.1，MIT，不修改上游源码/卡片格式)；全局安装需显式 --registry=https://registry.npmjs.org/，因用户 ~/.npmrc 的 bnpm 镜像目前仅同步到 0.4.0。'
   # 自研(local):B013 sidebar 会话行前动态 provider logo
   - id: sidebar-session-provider-icon
     type: package
@@ -151,6 +151,12 @@ customizations:
   - id: dsh-sandbox-notes
     type: skill
     enabled: true
+  # 第三方 skill:前端视觉设计方法论(让 UI 不像模板产出的默认样子)
+  - id: frontend-design
+    type: skill
+    enabled: true
+    brief: 前端设计方法论(定调色/字体/布局/一条记忆点,避免“AI 默认脸”)
+    note: '上游 https://github.com/anthropics/skills 的 skills/frontend-design/SKILL.md,commit 41bbe19d1a1a7eaab5e7bb9050a417e5c6cffc8f(2026-09-03),Apache-2.0(许可全文随 skill 目录落在 ~/.dsh/skills/frontend-design/LICENSE.txt,出处见同目录 ATTRIBUTION.md)。逐字 vendor,未改写。用途仅为设计方法论:新建 UI 或重塑既有界面时给出定调流程(先出 token 方案 → 对照 brief 自查是否落进"通用默认" → 再写代码 → 克制与文案准则),不新增工具/代码/Hook/网络访问/依赖。本仓用法:改自研插件的 Web 半区(设置页等)时按需加载,与本仓"遵循官方 settings.section 槽、只用 --dsw-alias-* 主题变量"的既有约定叠加——主题由宿主决定,故该 skill 的"自选配色"在本仓落成"结构、排版与唯一记忆点自选"。升级需人工复核上游新 commit 后覆盖 SKILL.md 并更新 ATTRIBUTION.md 与本记录。'
   # 自研 skill:把 MR 的 CR 请求发到飞书群(lark-cli im +messages-send)
   # 与 ws 同等定位的普通 skill:普通会话可直接用;也可在 Pet 设置 → Skill 里导入
   # 本仓库的 skills/send-cr 成为 Pet 能力,两处行为一致、不含任何 Pet 专属声明。

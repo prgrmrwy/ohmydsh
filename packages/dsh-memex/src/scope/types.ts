@@ -2,11 +2,28 @@ export type PublishDirection = 'internal' | 'external'
 
 export interface ScopeEntry {
   readonly name: string
+  /**
+   * Marks this entry as its workspaces' primary entry.
+   *
+   * A workspace may be claimed by several entries — one library per publication
+   * direction, say — and exactly one of them is primary. The primary carries the
+   * session's current scope: recall, the graph-level operations, and default
+   * reads and writes. A lone claimer needs no flag.
+   */
+  readonly primary?: boolean
   /** Trusted user setting: absolute library path (defaults to the namespace). */
   readonly home?: string
   readonly pathPrefixes?: readonly string[]
   readonly remotePatterns?: readonly string[]
   readonly publish?: PublishDirection
+  /**
+   * Whether this entry's workspaces also reach the fallback library (`personal`).
+   *
+   * Absent means on: a new workspace is usable with no configuration at all. Only
+   * an explicit `false` turns it off, and turning it off removes `personal` from
+   * both directions — "not using an entry" means neither reading nor writing it.
+   */
+  readonly fallback?: boolean
 }
 
 export interface BindingEntry {
@@ -28,7 +45,24 @@ export interface ScopeResolution {
   readonly publish: PublishDirection
   /** False only for a directory discovered without config/remote evidence. */
   readonly publishKnown: boolean
-  readonly source: 'config' | 'derived' | 'fallback' | 'discovered'
+  /**
+   * How this route was produced: from configuration, from a repository's
+   * remote, from a local path that belongs to no repository, from a library
+   * found under the namespace, or as the implicit `personal` scope that stays
+   * resolvable even when it is not declared.
+   */
+  readonly source: 'config' | 'derived' | 'local' | 'discovered' | 'implicit'
+  /**
+   * Every entry of the workspace this route belongs to, primary first.
+   *
+   * Dynamic routes (from a session cwd) list all claimers of that workspace; an
+   * enumeration lists what can be known without a cwd, which is the entries
+   * sharing a declared path prefix with this one. Editing a workspace's paths is
+   * therefore visible here, while the routing decision still comes from a cwd.
+   */
+  readonly entries: readonly string[]
+  /** Reachable entries for a session whose current scope is this route. */
+  readonly access: ScopeAccess
   readonly created: boolean
   readonly workspacePaths: readonly string[]
 }

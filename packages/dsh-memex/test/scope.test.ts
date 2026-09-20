@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { createScopeResolver, deriveScopeFromRemote, hostOfRemote, pathSegmentMatches } from '../src/scope/resolver.js'
+import { createScopeResolver, deriveScopeFromLocalPath, deriveScopeFromRemote, hostOfRemote, pathSegmentMatches } from '../src/scope/resolver.js'
 
 function tempHome(): string {
   return mkdtempSync(join(tmpdir(), 'dsh-memex-scope-'))
@@ -24,12 +24,12 @@ describe('scope resolver', () => {
     expect(pathSegmentMatches('/work/nexus-ops', '/work/nexus')).toBe(false)
   })
 
-  it('falls back to personal for non-git directories', () => {
+  it('derives a local library for directories that belong to no repository', () => {
     const homeDir = tempHome()
-    const resolver = createScopeResolver({ homeDir, gitRemote: () => undefined })
+    const resolver = createScopeResolver({ homeDir, gitRemote: () => undefined, gitRoot: () => undefined })
     const route = resolver.resolve('/tmp/not-a-repo')
-    expect(route).toMatchObject({ scope: 'personal', source: 'fallback', home: join(homeDir, '.dsh-memex', 'personal'), created: false })
-    expect(resolver.ensure(route)).toMatchObject({ scope: 'personal', created: true })
+    expect(route).toMatchObject({ scope: 'tmp-not-a-repo', source: 'local', home: join(homeDir, '.dsh-memex', 'tmp-not-a-repo'), created: false })
+    expect(resolver.ensure(route)).toMatchObject({ scope: 'tmp-not-a-repo', created: true })
   })
 
   it('derives a dedicated scope for GitHub repositories', () => {
@@ -113,17 +113,165 @@ describe('scope resolver', () => {
     expect(resolver.resolve('/external/worktree')).toMatchObject({ scope: 'nexus', publish: 'internal', workspacePaths: ['/work/nexus'] })
   })
 
-  it('applies degraded access when no binding exists', () => {
+  // The fallback is a default grant in both directions: a new workspace has to be
+  // usable without any configuration at all.
+  it('grants the fallback library on an unconfigured scope', () => {
     const resolver = createScopeResolver({ homeDir: tempHome(), gitRemote: () => undefined })
-    expect(resolver.accessFor('apaas-nexus')).toEqual({ current: 'apaas-nexus', read: ['apaas-nexus'], write: ['apaas-nexus', 'personal'] })
+    expect(resolver.accessFor('apaas-nexus')).toEqual({ current: 'apaas-nexus', read: ['apaas-nexus', 'personal'], write: ['apaas-nexus', 'personal'] })
   })
 
-  it('adds personal to configured readable scopes', () => {
+  it('keeps the fallback when a binding exists, because bindings only add', () => {
     const resolver = createScopeResolver({
       homeDir: tempHome(),
       config: { bindings: [{ name: 'project', read: ['apaas-nexus'], write: ['apaas-nexus'] }] },
       gitRemote: () => undefined,
     })
+    expect(resolver.accessFor('apaas-nexus')).toEqual({ current: 'apaas-nexus', read: ['apaas-nexus', 'personal'], write: ['apaas-nexus', 'personal'] })
+  })
+
+  it('removes the fallback from both directions when the entry turns it off', () => {
+    const resolver = createScopeResolver({
+      homeDir: tempHome(),
+      gitRemote: () => undefined,
+      config: { scopes: [{ name: 'apaas-nexus', fallback: false }] },
+    })
+    expect(resolver.accessFor('apaas-nexus')).toEqual({ current: 'apaas-nexus', read: ['apaas-nexus'], write: ['apaas-nexus'] })
+  })
+
+  it('lets an explicit binding listing outrank a turned-off fallback', () => {
+    const resolver = createScopeResolver({
+      homeDir: tempHome(),
+      gitRemote: () => undefined,
+      config: {
+        scopes: [{ name: 'apaas-nexus', fallback: false }],
+        bindings: [{ name: 'project', read: ['apaas-nexus', 'personal'], write: ['apaas-nexus'] }],
+      },
+    })
     expect(resolver.accessFor('apaas-nexus')).toEqual({ current: 'apaas-nexus', read: ['apaas-nexus', 'personal'], write: ['apaas-nexus'] })
+  })
+})
+
+describe('local scope derivation', () => {
+  it('takes the last two path segments, like the remote rule', () => {
+    expect(deriveScopeFromLocalPath('/Users/me/Documents/learning')).toBe('documents-learning')
+    expect(deriveScopeFromLocalPath('/Users/me/work/learning')).toBe('work-learning')
+    expect(deriveScopeFromLocalPath('/Users/me/assistant')).toBe('me-assistant')
+  })
+
+  it('degrades to one fixed library name when the path yields no usable name', () => {
+    expect(deriveScopeFromLocalPath('/')).toBe('local')
+    expect(deriveScopeFromLocalPath('/tmp/中文目录')).toBe('local')
+  })
+
+  it('gives sibling-named directories different libraries', () => {
+    const resolver = createScopeResolver({ homeDir: tempHome(), gitRemote: () => undefined, gitRoot: () => undefined })
+    expect(resolver.resolve('/Users/me/work/learning').scope).toBe('work-learning')
+    expect(resolver.resolve('/Users/me/Documents/learning').scope).toBe('documents-learning')
+  })
+
+  it('rejects two local paths that normalize to one scope', () => {
+    const resolver = createScopeResolver({ homeDir: tempHome(), gitRemote: () => undefined, gitRoot: () => undefined })
+    resolver.resolve('/a/Documents/learning')
+    expect(() => resolver.resolve('/b/Documents/learning')).toThrow(/derive the same scope/)
+  })
+
+  it('rejects a remote and a local path that derive one scope', () => {
+    const remotes = new Map([['/repo', 'git@host:documents/learning.git']])
+    const resolver = createScopeResolver({ homeDir: tempHome(), gitRemote: cwd => remotes.get(cwd), gitRoot: () => undefined })
+    expect(resolver.resolve('/repo').scope).toBe('documents-learning')
+    expect(() => resolver.resolve('/x/Documents/learning')).toThrow(/derive the same scope/)
+  })
+
+  it('lets a declared scope govern a locally derived name', () => {
+    const homeDir = tempHome()
+    const resolver = createScopeResolver({
+      homeDir,
+      config: { scopes: [{ name: 'documents-learning', pathPrefixes: ['/elsewhere'], publish: 'internal', home: '/srv/lib' }] },
+      gitRemote: () => undefined,
+      gitRoot: () => undefined,
+    })
+    expect(resolver.resolve('/Users/me/Documents/learning')).toMatchObject({ scope: 'documents-learning', source: 'local', publish: 'internal', home: '/srv/lib' })
+  })
+
+  it('refuses a remote claimed by two scopes with no primary, instead of taking the first', () => {
+    const resolver = createScopeResolver({
+      homeDir: tempHome(),
+      config: { scopes: [
+        { name: 'first', remotePatterns: ['code\\.byted\\.org'] },
+        { name: 'second', remotePatterns: ['apaas/nexus'] },
+      ] },
+      gitRemote: () => 'git@code.byted.org:apaas/nexus.git',
+      gitRoot: () => '/work/nexus',
+    })
+    expect(() => resolver.resolve('/work/nexus')).toThrow(/is claimed by first, second but has 0 primary entries/)
+  })
+
+  it('routes a two-entry workspace to its primary and lists the other as reachable', () => {
+    const resolver = createScopeResolver({
+      homeDir: tempHome(),
+      config: { scopes: [
+        { name: 'proj-internal', primary: true, remotePatterns: ['apaas/nexus'], publish: 'internal' },
+        { name: 'proj-public', remotePatterns: ['apaas/nexus'], publish: 'external' },
+      ] },
+      gitRemote: () => 'git@code.byted.org:apaas/nexus.git',
+      gitRoot: () => '/work/nexus',
+    })
+    const route = resolver.resolve('/work/nexus')
+    expect(route).toMatchObject({ scope: 'proj-internal', publish: 'internal' })
+    expect(route.entries).toEqual(['proj-internal', 'proj-public'])
+    expect(route.access.write).toEqual(['proj-internal', 'proj-public', 'personal'])
+    // A path route carries the same relation.
+    const byPath = createScopeResolver({
+      homeDir: tempHome(),
+      config: { scopes: [
+        { name: 'proj-internal', primary: true, pathPrefixes: ['/work/proj'], publish: 'internal' },
+        { name: 'proj-public', pathPrefixes: ['/work/proj'], publish: 'external' },
+      ] },
+      gitRemote: () => undefined,
+      gitRoot: () => undefined,
+    })
+    const pathRoute = byPath.resolve('/work/proj/src')
+    expect(pathRoute.scope).toBe('proj-internal')
+    expect(pathRoute.entries).toEqual(['proj-internal', 'proj-public'])
+    expect(byPath.resolveByName('proj-public').entries).toEqual(['proj-public', 'proj-internal'])
+  })
+
+  it('refuses a path prefix shared by two scopes without a unique primary', () => {
+    const resolver = (extra: Record<string, boolean>) => createScopeResolver({
+      homeDir: tempHome(),
+      config: { scopes: [
+        { name: 'one', pathPrefixes: ['/work/proj'], ...extra },
+        { name: 'two', pathPrefixes: ['/work/proj'] },
+      ] },
+      gitRemote: () => undefined,
+      gitRoot: () => undefined,
+    })
+    expect(() => resolver({}).resolve('/work/proj')).toThrow(/is claimed by one, two but has 0 primary entries/)
+    expect(() => resolver({ primary: true }).resolve('/work/proj')).not.toThrow()
+    expect(resolver({ primary: true }).resolve('/work/proj').scope).toBe('one')
+  })
+
+  it('labels every route with how it was produced', () => {
+    const homeDir = tempHome()
+    const namespace = join(homeDir, '.dsh-memex')
+    mkdirSync(join(namespace, 'stray', 'cards'), { recursive: true })
+    const resolver = createScopeResolver({
+      homeDir,
+      config: { scopes: [{ name: 'nexus', pathPrefixes: ['/work/nexus'] }] },
+      gitRemote: cwd => (cwd === '/work/repo' ? 'git@github.com:org/repo.git' : undefined),
+      gitRoot: () => undefined,
+    })
+    expect(resolver.resolve('/work/nexus/src').source).toBe('config')
+    expect(resolver.resolve('/work/repo').source).toBe('derived')
+    expect(resolver.resolve('/tmp/loose').source).toBe('local')
+    expect(resolver.list().find(scope => scope.scope === 'stray')?.source).toBe('discovered')
+    expect(resolver.list().find(scope => scope.scope === 'personal')?.source).toBe('implicit')
+  })
+
+  it('keeps personal resolvable without making it the fallback', () => {
+    const homeDir = tempHome()
+    const resolver = createScopeResolver({ homeDir, gitRemote: () => undefined, gitRoot: () => undefined })
+    expect(resolver.resolveByName('personal')).toMatchObject({ home: join(homeDir, '.dsh-memex', 'personal') })
+    expect(resolver.resolve('/tmp/loose').scope).not.toBe('personal')
   })
 })

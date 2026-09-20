@@ -9,6 +9,7 @@ import { parseList, parseSearch } from '../run/parse.js'
 import type { ScopeResolution, ScopeService } from '../scope/types.js'
 import { KERNEL_VERSION, TOOL_DESCRIPTIONS } from './descriptions.generated.js'
 import { evaluateCrossWrite } from '../guard/index.js'
+import { mapConcurrent } from '../run/concurrency.js'
 
 const DEFAULT_FANOUT_CONCURRENCY = 4
 const MAX_SEARCH_RESULTS = 50
@@ -67,8 +68,16 @@ function requireSuccess(result: KernelResult, operation: string, scope: string):
   return result
 }
 
-function bindingReadScopes(current: ScopeResolution, resolver: ScopeService): readonly string[] {
-  return [...new Set(resolver.accessFor(current.scope).read)]
+/**
+ * Every entry a session may read from.
+ *
+ * The route's own reach: the current scope, the other entries of the same
+ * workspace, and whatever its binding declares. A name outside all three is
+ * unreachable — and being unreachable is not the same as being un-written: reads
+ * and writes only touch the current scope unless a target is named.
+ */
+function reachableReadScopes(current: ScopeResolution): readonly string[] {
+  return [...new Set(current.access.read)]
 }
 
 function selectedSearchScopes(
@@ -76,7 +85,7 @@ function selectedSearchScopes(
   current: ScopeResolution,
   resolver: ScopeService,
 ): ScopeResolution[] {
-  const readable = bindingReadScopes(current, resolver)
+  const readable = reachableReadScopes(current)
   if (requested === undefined || requested === 'current') return [current]
   const names = requested === 'all'
     ? [...new Set([current.scope, ...readable])]
@@ -89,7 +98,9 @@ function selectedSearchScopes(
   const unique = [...new Set(names.map(name => name === 'current' ? current.scope : name))]
   if (unique.length === 0) throw new Error('memex_search scope list must not be empty')
   for (const name of unique) {
-    if (name !== current.scope && !readable.includes(name)) throw new Error(`Scope ${name} is outside the readable binding for current scope ${current.scope}`)
+    if (name !== current.scope && !readable.includes(name)) {
+      throw new Error(`Scope ${name} is not reachable from current scope ${current.scope}: it is neither an entry of this workspace nor declared in its binding`)
+    }
   }
   return unique.map(name => name === current.scope ? current : resolver.resolveByName(name))
     .sort((a, b) => a.scope.localeCompare(b.scope))
@@ -97,8 +108,10 @@ function selectedSearchScopes(
 
 function selectedReadScope(requested: string | undefined, current: ScopeResolution, resolver: ScopeService): ScopeResolution {
   if (requested === undefined || requested === 'current' || requested === current.scope) return current
-  const readable = bindingReadScopes(current, resolver)
-  if (!readable.includes(requested)) throw new Error(`Scope ${requested} is outside the readable binding for current scope ${current.scope}`)
+  const readable = reachableReadScopes(current)
+  if (!readable.includes(requested)) {
+    throw new Error(`Scope ${requested} is not reachable from current scope ${current.scope}: it is neither an entry of this workspace nor declared in its binding`)
+  }
   return resolver.resolveByName(requested)
 }
 
@@ -123,22 +136,6 @@ function guardWrite(
   const decision = evaluateCrossWrite(card, target, resolver)
   for (const warning of decision.warnings) onInactiveRule?.(warning)
   return decision.allowed ? undefined : decision.rules
-}
-
-export async function mapConcurrent<T, R>(items: readonly T[], limit: number, worker: (item: T) => Promise<R>): Promise<R[]> {
-  if (!Number.isInteger(limit) || limit < 1) throw new Error('fanout concurrency must be a positive integer')
-  const results = new Array<R>(items.length)
-  let cursor = 0
-  const run = async (): Promise<void> => {
-    while (true) {
-      const index = cursor
-      cursor += 1
-      if (index >= items.length) return
-      results[index] = await worker(items[index]!)
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run))
-  return results
 }
 
 function searchArgs(args: { query?: string; limit?: number; list?: boolean; semantic?: boolean }): string[] {
@@ -215,11 +212,11 @@ async function writeCurrentAndAdditional(
   const primarySyncWarning = await syncHook(current.home, 'sync', runner, signal)
   if (primarySyncWarning) primaryWarnings.push(primarySyncWarning)
 
-  const writable = resolver.accessFor(current.scope).write
+  const writable = [...new Set(current.access.write)]
   const additional = [] as Array<{ scope: string; written: boolean; rules?: readonly string[]; error?: string; warning?: string }>
   for (const name of requestedWriteScopes(args.scope, current)) {
     if (!writable.includes(name)) {
-      additional.push({ scope: name, written: false, error: `outside writable binding for ${current.scope}` })
+      additional.push({ scope: name, written: false, error: `not reachable from ${current.scope}` })
       continue
     }
     let target: ScopeResolution
@@ -249,6 +246,8 @@ async function writeCurrentAndAdditional(
   }
   return { primary, primaryWarnings, additional, inactiveRules }
 }
+
+export { mapConcurrent } from '../run/concurrency.js'
 
 export function registerMemexTools(ctx: Context, resolver: ScopeService, options: MemexToolOptions = {}): () => void {
   const runner = options.runner ?? runKernel
