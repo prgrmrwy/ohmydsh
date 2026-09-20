@@ -159,6 +159,11 @@ default branch (the kernel pushes to `HEAD` and pulls from `origin/HEAD`, so bot
 must agree). Do not "fix" it by pointing an internal library at a public host —
 `publish: internal` libraries are exactly the ones the guard keeps off such hosts.
 
+**本机处置（2026-09-20）**：两个 code.byted.org 仓库取消 `main` 的分支保护后，一次
+`memex sync push` 就把积压推上去了（nexus `a872997→324df92`、flow-web `a15a053→4685b0b`，
+两边 `rev-list --left-right --count` 均为 `0  0`，`.sync.json` 的 `lastSync` 随之刷新）。
+没有改插件、没有改本地分支——保护是**远端**策略，`push origin HEAD` 本身没问题。
+
 ## Remote actions and the "never re-create" rule
 
 The settings page configures remotes only through the kernel CLI
