@@ -161,11 +161,32 @@ function syncConfig(home: string): { auto?: boolean; remote?: string } {
   try { return JSON.parse(readFileSync(join(home, '.sync.json'), 'utf8')) as { auto?: boolean; remote?: string } } catch { return {} }
 }
 
+/** Bound on the kernel text a hook failure may carry into a tool result. */
+const MAX_HOOK_DETAIL_CHARS = 400
+
+/**
+ * Why the sync hook failed, in the kernel's own words.
+ *
+ * Reporting only an exit code costs the reader a manual investigation — observed
+ * with a remote that rejects direct pushes to a protected branch, where "exit 1"
+ * said nothing while the kernel's stderr said exactly what happened. The text is
+ * collapsed and bounded: it is a git error, not a place for unbounded output.
+ */
+function hookDetail(result: KernelResult): string {
+  const text = (result.stderr.trim() || result.stdout.trim()).replace(/\s*\n\s*/g, ' ')
+  if (text === '') return `exit ${String(result.exitCode)}`
+  const clipped = text.length > MAX_HOOK_DETAIL_CHARS ? `${text.slice(0, MAX_HOOK_DETAIL_CHARS)}…` : text
+  return `exit ${String(result.exitCode)}: ${clipped}`
+}
+
 async function syncHook(home: string, phase: 'fetch' | 'sync', runner: KernelRunner, signal?: AbortSignal): Promise<string | undefined> {
   const config = syncConfig(home)
   if (!config.remote || (phase === 'sync' && !config.auto)) return undefined
   const result = await runner(['sync', phase === 'fetch' ? 'pull' : 'push'], { home, ...(signal ? { signal } : {}) })
-  return result.ok ? undefined : `memex ${phase} hook failed (exit ${result.exitCode})`
+  if (result.ok) return undefined
+  // Factual only: whether the write survived depends on the call site, and a
+  // message that guesses would be worse than one that does not say.
+  return `memex ${phase === 'fetch' ? 'pull' : 'push'} hook failed (${hookDetail(result)})`
 }
 
 function enrichWriteContent(content: string, category?: string): string {
@@ -221,7 +242,9 @@ async function writeCurrentAndAdditional(
   }
   const primary = requireSuccess(await runner(['write', '--', args.slug], { home: current.home, ...(signal !== undefined ? { signal } : {}), stdin: args.content }), operation, current.scope)
   const primarySyncWarning = await syncHook(current.home, 'sync', runner, signal)
-  if (primarySyncWarning) primaryWarnings.push(primarySyncWarning)
+  // The write already succeeded here, so the reader needs to know the card is not
+  // lost — a failing push is not a failing save.
+  if (primarySyncWarning) primaryWarnings.push(`${primarySyncWarning} — the card is committed locally; only the push failed`)
 
   const writable = [...new Set(current.access.write)]
   const additional = [] as Array<{ scope: string; written: boolean; rules?: readonly string[]; error?: string; warning?: string }>
@@ -243,8 +266,13 @@ async function writeCurrentAndAdditional(
     }
     if (operation === 'retro') {
       const warning = await syncHook(target.home, 'fetch', runner, signal)
-      if (warning) additional.push({ scope: target.scope, written: false, error: warning })
-      if (warning) continue
+      // Unlike the current library, an additional target is refused rather than
+      // written while its remote is unreachable: a stale remote must not be
+      // silently forked.
+      if (warning) {
+        additional.push({ scope: target.scope, written: false, error: `${warning} — the write was skipped` })
+        continue
+      }
     }
     const result = await runner(['write', '--', args.slug], { home: target.home, ...(signal !== undefined ? { signal } : {}), stdin: args.content })
     if (!result.ok) {

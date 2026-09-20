@@ -261,6 +261,89 @@ describe('memex DSH tool registration', () => {
     expect(runner).toHaveBeenNthCalledWith(5, ['sync', 'push'], expect.objectContaining({ home }))
   })
 
+  it('reports why a sync hook failed, and what survived it', async () => {
+    // Measured: a remote that rejects direct pushes to a protected branch cost a
+    // reader a manual git investigation, because the tool said only "exit 1"
+    // while the kernel's stderr said exactly what happened.
+    const home = mkdtempSync(join(tmpdir(), 'dsh-memex-hook-'))
+    mkdirSync(join(home, 'cards'))
+    writeFileSync(join(home, '.sync.json'), JSON.stringify({ auto: true, remote: 'git@example/repo.git' }))
+    const current = { ...scope('current'), home }
+    const service: ScopeService = {
+      resolve: () => current,
+      list: () => [current],
+      resolveByName: () => current,
+      ensure: value => value,
+      bindingFor: () => undefined,
+      accessFor: name => ({ current: name, read: [name], write: [name, 'personal'] }),
+    }
+    const runner: KernelRunner = vi.fn()
+      .mockResolvedValueOnce(ok())
+      .mockResolvedValueOnce(ok())
+      .mockResolvedValueOnce({
+        ok: false,
+        exitCode: 1,
+        stdout: '',
+        stderr: 'Push failed: remote: Application: You are not allow to operate the branch as it is protected.\n ! [remote rejected] HEAD -> main\n',
+      })
+    const tools = capture(runner, undefined, undefined, service)
+    const result = await call(tools.get('memex_retro')!, { slug: 'learned', title: 'Learned', body: 'Body' })
+    const warning = String(result.warning ?? '')
+    expect(warning).toContain('push hook failed')
+    expect(warning).toContain('protected')
+    expect(warning).toContain('committed locally')
+    // One line, and bounded: kernel output must not reshape the result.
+    expect(warning).not.toContain('\n')
+    expect(warning.length).toBeLessThan(600)
+  })
+
+  it('skips an additional target whose remote is unreachable, and says so', async () => {
+    // The current library writes regardless (a stale remote must not lose the
+    // card); an additional target is refused instead, so a stale remote is never
+    // silently forked.
+    const home = mkdtempSync(join(tmpdir(), 'dsh-memex-hook-primary-'))
+    const alphaHome = mkdtempSync(join(tmpdir(), 'dsh-memex-hook-alpha-'))
+    for (const dir of [home, alphaHome]) {
+      mkdirSync(join(dir, 'cards'))
+      writeFileSync(join(dir, '.sync.json'), JSON.stringify({ auto: true, remote: 'git@example/repo.git' }))
+    }
+    const current = {
+      ...scope('current'),
+      home,
+      entries: ['current', 'alpha'],
+      access: { current: 'current', read: ['current', 'alpha'], write: ['current', 'alpha', 'personal'] },
+    }
+    const alpha = { ...scope('alpha'), home: alphaHome, entries: ['current', 'alpha'] }
+    const service: ScopeService = {
+      resolve: () => current,
+      list: () => [current, alpha],
+      resolveByName: name => (name === 'alpha' ? alpha : current),
+      ensure: value => value,
+      bindingFor: () => undefined,
+      accessFor: name => current.access,
+    }
+    const runner: KernelRunner = vi.fn()
+      // current: pull fails, write and push succeed
+      .mockResolvedValueOnce({ ok: false, exitCode: 1, stdout: '', stderr: 'Fetch failed: could not read from remote' })
+      .mockResolvedValueOnce(ok())
+      .mockResolvedValueOnce(ok())
+      // alpha: pull fails, so its write is skipped
+      .mockResolvedValueOnce({ ok: false, exitCode: 1, stdout: '', stderr: 'Fetch failed: could not read from remote' })
+    const tools = capture(runner, undefined, undefined, service)
+    const result = await call(tools.get('memex_retro')!, { slug: 'learned', title: 'Learned', body: 'Body', scope: 'alpha' })
+
+    const warning = String(result.warning ?? '')
+    expect(warning).toContain('pull hook failed')
+    expect(warning).toContain('could not read from remote')
+    const additional = (result.additional as Array<{ scope: string; written: boolean; error?: string }>)[0]!
+    expect(additional).toMatchObject({ scope: 'alpha', written: false })
+    expect(additional.error).toContain('the write was skipped')
+    // Only the current library was written, on its own home.
+    const writes = runner.mock.calls.filter(call => (call[0] as readonly string[])[0] === 'write')
+    expect(writes).toHaveLength(1)
+    expect((writes[0]![1] as { home: string }).home).toBe(home)
+  })
+
   it('keeps graph-level tools on current scope', async () => {
     const runner: KernelRunner = vi.fn(async () => ok('done'))
     const tools = capture(runner)
