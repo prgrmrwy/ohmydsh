@@ -5,9 +5,10 @@
  * `pet_locus_wait` — not a hand-rolled double, so a wrong assumption about
  * `tools.register()`'s scope-tag contract cannot hide behind a mock.
  */
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { createScope } from '@deepseek-ai/dsh-scope'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import {
@@ -18,6 +19,18 @@ import {
 } from '../src/host/tools.js'
 import type { PetRepository } from '../src/host/repository.js'
 import { openPetHarness, type PetHarness } from './harness.js'
+
+// Scope tags use a package-private Symbol, so mint from ToolRuntime's OWN
+// dependency root rather than the repository's second physical `dsh-scope` copy.
+// Importing `createScope` from `@deepseek-ai/dsh-scope` directly yields a copy
+// whose Symbol the runtime does not recognise: the scope tag then reads as
+// absent and `tools.register()` SILENTLY falls back to the global layer. Making
+// that mistake here is what once made this file's isolation case look like a
+// product leak — every Pet tool appeared in an unrelated scope purely because
+// the harness had put them in the global one.
+const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/package.json'))
+const scopeEntry = requireFromTools.resolve('@deepseek-ai/dsh-scope')
+const { createScope } = await import(pathToFileURL(scopeEntry).href) as typeof import('@deepseek-ai/dsh-scope')
 
 let harness: PetHarness | undefined
 
@@ -113,30 +126,7 @@ describe('the three pet-locus-intent-triage tools are scoped to Pet executors', 
     expect(source).toContain('currentCapability: childSessionId => currentLocusCapability(childSessionId)')
   })
 
-  // ⚠️ REPRODUCIBLE DISCREPANCY, cause not yet established.
-  //
-  // Narrowed by experiment: this case PASSES when `registerPetTools` is called
-  // WITHOUT `intentTriage`, and FAILS when it is passed — the unrelated scope
-  // then reports all four Pet tools (`pet_context` plus the three added here).
-  // Test order, file location and isolation runs are all ruled out; the
-  // argument itself is the trigger.
-  //
-  // What is NOT established is whether that is a real cross-scope leak or an
-  // artifact of this harness. Two facts argue against a production leak:
-  // production DOES pass `intentTriage` at both call sites (the guard above
-  // asserts it), and `test/tool-scope.test.ts` — the pre-existing twin case for
-  // `pet_context` — passes. Neither settles it, so this is recorded rather than
-  // explained away.
-  //
-  // `it.fails` keeps the suite honest about the CURRENT behaviour, not about
-  // that behaviour being correct. Do not read it as evidence that cross-scope
-  // isolation holds for these three tools.
-  //
-  // Note for whoever picks this up: the concurrent tool-surface attestation
-  // work already lists all three names in `LOCUS_CALLER_BOUND_TOOLS`
-  // (`src/host/locus/composition.ts`), so that mechanism is the natural place
-  // to settle whether this harness result reflects reality.
-  it.fails('task 9.7: absent from an unrelated agent scope even when the Host has intentTriage-capable scopes elsewhere (cause UNCONFIRMED — twin case in tool-scope.test.ts now passes)', async () => {
+  it('task 9.7: absent from an unrelated agent scope even when the Host has intentTriage-capable scopes elsewhere', async () => {
     harness = await openPetHarness()
     const ctx = await hostContext()
     const key = {} as never
