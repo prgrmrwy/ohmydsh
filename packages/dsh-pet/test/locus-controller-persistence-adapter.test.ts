@@ -387,15 +387,19 @@ describe('startup compensation recovery', () => {
     })
     expect(failing.manualOperations.map(op => op.id)).toContain('provisioning-debt')
 
+    // A bounded number of fresh attempts, so a compensator fixed in a later
+    // build can still clear debt recorded by a broken one. It must not spin:
+    // once the budget is spent the operation stays manual debt for a human.
     let attempts = 0
-    const again = await durable.reconcileStartup({
-      now: 30,
-      compensators: {
-        mainSession: async () => { attempts += 1; throw new Error('detach refused: workspace still busy') },
-      },
-    })
-    expect(attempts).toBe(0)
-    expect(again.manualOperations.map(op => op.id)).toContain('provisioning-debt')
+    const throwing = {
+      mainSession: async () => { attempts += 1; throw new Error('detach refused: workspace still busy') },
+    }
+    for (let round = 0; round < 8; round += 1) {
+      await durable.reconcileStartup({ now: 40 + round, compensators: throwing })
+    }
+    expect(attempts).toBeGreaterThan(0)
+    expect(attempts).toBeLessThanOrEqual(5)
+    expect(durable.getOperation('provisioning-debt')).toMatchObject({ phase: 'needs-recovery' })
   })
 })
 
