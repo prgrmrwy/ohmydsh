@@ -2683,9 +2683,12 @@ export class LocusRepository {
         }
         if (operation.phase === 'needs-recovery' && operation.manualRecoveryReason !== undefined) {
           // A capability-shaped failure is retried once the Host gains it.
-          // Without this, the very first missing compensator pinned the
-          // endpoint forever and every later message was refused.
-          if (!this.isTransientCompensationFailure(operation.manualRecoveryReason)) {
+          const capabilityMissing = this.isTransientCompensationFailure(operation.manualRecoveryReason)
+          // Otherwise give the debt a bounded number of fresh chances, so a
+          // compensator fixed in a later build can still clear it.
+          const withinRetryBudget =
+            operation.attempts < LocusRepository.MANUAL_DEBT_RETRY_BUDGET
+          if (!capabilityMissing && !withinRetryBudget) {
             manualOperations.push(operation)
             continue
           }
@@ -3147,6 +3150,22 @@ export class LocusRepository {
   private isTransientCompensationFailure(reason: string): boolean {
     return /\bunavailable\b/.test(reason)
   }
+
+  /**
+   * Startup attempts allowed before a previously-manual debt is retried once
+   * more.
+   *
+   * Manual debt is normally final. But the debt may have been recorded by a
+   * Host whose own compensator was broken, and a later build can fix that —
+   * with no path back, the endpoint stays blocked forever and the fix is
+   * unreachable (observed live: a stale `needs-recovery` row survived the
+   * repair and kept refusing every message).
+   *
+   * A bounded re-attempt is safe because compensation is idempotent, and it
+   * cannot spin: `attempts` only grows, so the operation returns to manual
+   * debt after {@link MANUAL_DEBT_RETRY_BUDGET} failures.
+   */
+  private static readonly MANUAL_DEBT_RETRY_BUDGET = 5
 
   private findBlockingProvisioningOperation(
     endpointKey: string,
