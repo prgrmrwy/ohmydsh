@@ -136,7 +136,22 @@ if (validArtifactSet(artifacts, fingerprint)) {
   console.log('[compat/storage] up-to-date')
 } else {
 
-if (!existsSync(join(checkout, '.git'))) {
+// A cached checkout from an EARLIER reviewed commit cannot serve this build:
+// it was cloned shallow at the old tag, so the new commit is not fetchable and
+// `git checkout` fails with "reference is not a tree". That is exactly the
+// upgrade path (an existing deployment pulling a new DSH pin), so detect the
+// stale cache and re-clone instead of failing the whole `dsh build`.
+function checkoutHasReviewedCommit() {
+  if (!existsSync(join(checkout, '.git'))) return false
+  try {
+    runCompatCommand('git', ['cat-file', '-e', `${reviewedCommit}^{commit}`], checkout, { capture: true })
+    return true
+  } catch {
+    return false
+  }
+}
+const hasReviewedCommit = checkoutHasReviewedCommit()
+if (!hasReviewedCommit) {
   rmSync(checkout, { recursive: true, force: true })
   run('git', ['clone', '--depth', '1', '--branch', tag, 'https://github.com/deepseek-ai/deepseek-harness.git', checkout], here)
 }

@@ -70,7 +70,24 @@ if (actualPatchHash !== UPSTREAM.patchSha256) {
 }
 
 const checkout = process.env.DSH_COMPAT_SUBAGENT_CHECKOUT ?? join(here, '.upstream')
-if (!existsSync(join(checkout, '.git'))) {
+/**
+ * Whether the cached checkout actually contains the reviewed commit.
+ *
+ * A checkout left by an EARLIER reviewed commit was shallow-cloned at the old
+ * tag, so the new commit is absent and unfetchable: `git checkout` then fails
+ * with "reference is not a tree". That is precisely the upgrade path, so the
+ * stale cache must be detected and replaced rather than aborting `dsh build`.
+ */
+function checkoutHasReviewedCommit() {
+  if (!existsSync(join(checkout, '.git'))) return false
+  try {
+    capture('git', ['cat-file', '-e', `${UPSTREAM.commit}^{commit}`], checkout)
+    return true
+  } catch {
+    return false
+  }
+}
+if (!checkoutHasReviewedCommit()) {
   rmSync(checkout, { recursive: true, force: true })
   mkdirSync(dirname(checkout), { recursive: true })
   console.log(`[compat/subagent] cloning ${UPSTREAM.tag}`)
