@@ -235,6 +235,52 @@ Host/Origin fence。本 shim 不复制 RPC 协议与鉴权,也不改变非 Web s
 
 **仍应上报上游** —— 这是运行体缺陷,本仓库的 composition 覆盖只是绕开它。
 
+### 上游状态:已确认,且有确切版本分界
+
+Discussion #5926 的正文与 7 条回复已完整读到(`gh api graphql`)。要点:
+
+- **确切 breakchange**(讨论内表格,`dsh-client-connection` 顶层 `inject`):
+
+  | 版本 | 顶层 inject | `/api` 挂载 |
+  |---|---|---|
+  | 0.1.2-rc.1 | `["webServer", "credentials"]` | `ctx.effect(() => ctx.webServer.register(route))` |
+  | 0.1.5-rc.1 | `["credentials"]` | `ctx.inject(["webServer"], (webCtx) => …)` |
+  | 0.1.6-alpha.1 | `["credentials"]` | 同上 |
+
+  即 0.1.2 的 connection 自带 `webServer`,0.1.5 去掉它、只给自己的 `/api` 做局部注入 ——
+  这精确解释了"升级前正常"。`register()` 本身两版未变。
+- **命中面**:讨论内报告的第三方插件已有 5 个(`dsh-ssh`、`dsh-mnemon`、
+  `dsh-smooth-stream`、`dsh-auto-update`、`@eric.wen/dsh-sight`),另有同缺陷的
+  **#6105**(405 视角)。
+- **我方失败的尝试是已知死路**:回复里 PerryLink 实测"调用方的 inject 列表不是关键,
+  carrier 在 fiber 链上的位置才是";aldanux 也报告"包 `ctx.inject(['webServer'], …)`
+  能止血但通道仍不挂载"。
+- **本仓库采用的修法与他人的一致**:little3tar 给出同款行覆盖
+  (`- id: connection` / `inject: [webRuntime, webServer]`),在 0.1.5-rc.2 上实测 405→401。
+
+### 本仓库补充到上游的内容(已发布)
+
+**[discussioncomment-18542496](https://github.com/deepseek-ai/deepseek-harness/discussions/5926#discussioncomment-18542496)**
+(脱敏后发布;唯一被自检规则命中的词是 `DSH_HOME`,属 DSH 公开环境变量名)。三个增量点:
+
+1. **真实 web profile 端到端**确认(PerryLink 明确说过他只在包内测试、未跑完整 profile),
+   同一 profile 四个通道 405 → 行覆盖后全 200;
+2. **整行覆盖会静默丢掉 `config.trustedHosts`** —— 行覆盖是整行替换且 `config`
+   **不做深合并**,只写 `id` + `inject` 会让 Host/Origin fence 无声变弱,而探针
+   照样 405 → 200「看起来修好了」,该失效模式对 405/401 判别法不可见(此前无人提及);
+3. 用户可见症状清单(设置页显示 unavailable、诊断字段为空、某面板把"取不到"
+   显示成"没有"),便于他人按现象对号入座。
+
+### 本仓库适用边界(已写入 manifest note)
+
+- 本 fragment 让 **web carrier 成为 connection 行的硬依赖**,仅适用于 **web profile**。
+  本仓库 sync 为 `DSH_PROFILE ?? 'web'`,未引入无 web carrier 的 profile;
+  若将来引入,须按 profile 粒度拆分或移除本 fragment。
+- **不受影响的次要缺陷**:0.1.5 起 `rpc.handle` 第三参 `{authority}` 被静默丢弃
+  (讨论内多个插件中招,以为自己拿到了 loopback 限定)。本仓库四个包**只传两参** ——
+  0.1.2 迁移时已删去 `{authority:'loopback'}`、改由 connection 层对每个 channel
+  统一施加 fence;本次实测伪造 Host 仍 **403**,该 fence 正常。
+
 ## 影响评估(已按代码更正,不要夸大)
 
 ⚠ **本节前一版写错了,已作废。** 原文断言 `文档/资料` 面板"会把取不到数据渲染成
