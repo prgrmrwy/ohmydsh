@@ -456,6 +456,12 @@ export type LocusControllerDiagnostic =
   | `admission-rejected:${LocusAdmissionRefusal | 'unsafe-reply-target' | 'invalid-event'}`
   | 'control-command'
   | 'locus-unavailable'
+  // Distinguish WHY a locus could not be resolved. Without these, a reader
+  // failure and a refused bootstrap both surface as the single
+  // `locus-unavailable` code, which is undiagnosable from logs alone.
+  | 'locus-read-failed'
+  | 'locus-bootstrap-failed'
+  | 'locus-bootstrap-skipped'
   | 'child-unavailable'
   | 'child-identity-mismatch'
   | 'policy-drift'
@@ -1694,19 +1700,27 @@ export class LocusChannelController {
     let raw: unknown
     try {
       raw = await this.deps.locus.resolveCurrent(endpoint)
-    } catch {
+    } catch (error: unknown) {
+      this.logReason('locus-read-failed', error)
       return undefined
     }
     let locus = normalizeActiveLocus(raw, endpoint)
     if (locus !== undefined) return locus
-    if (!needsInitialization) return undefined
+    if (!needsInitialization) {
+      // Admitted, but this endpoint may not auto-bootstrap: only an
+      // `uninitialized` endpoint can. Naming it prevents a mis-set
+      // authorization state from looking like a broken runtime.
+      this.log('locus-bootstrap-skipped')
+      return undefined
+    }
     try {
       raw = await this.deps.locus.ensureForDelivery({
         endpoint,
         messageId: message.messageId,
         signal,
       })
-    } catch {
+    } catch (error: unknown) {
+      this.logReason('locus-bootstrap-failed', error)
       return undefined
     }
     locus = normalizeActiveLocus(raw, endpoint)
@@ -1893,6 +1907,18 @@ export class LocusChannelController {
   private refuse(reason: LocusControllerRefusal): LocusControllerResult {
     if (reason !== 'aborted' && reason !== 'admission-unavailable') this.log(reason as LocusControllerDiagnostic)
     return { kind: 'refused', reason }
+  }
+
+  /**
+   * Log a diagnostic together with the cause that produced it.
+   *
+   * The code stays a member of the stable union so existing consumers keep
+   * working; the cause is appended because a silent `catch` here previously
+   * made an operational failure indistinguishable from a design refusal.
+   */
+  private logReason(code: LocusControllerDiagnostic, error: unknown): void {
+    const cause = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+    this.log(`${code} (${cause})` as LocusControllerDiagnostic)
   }
 
   private log(code: LocusControllerDiagnostic): void {

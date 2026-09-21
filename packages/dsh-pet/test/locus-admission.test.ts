@@ -105,6 +105,16 @@ describe('durable production authorization resolver', () => {
       allowOpenIds: [],
     }))).toMatchObject({ admit: true, authorization: 'authorized', needsInitialization: true })
 
+    // Regression: a brand-new group resolves to the BARE STRING 'uninitialized'
+    // (no stored row). Reading only an object flag made needsInitialization
+    // false, so `resolveLocus` refused to bootstrap and the admitted @bot was
+    // dropped as `locus-unavailable` with no diagnostic — observed live on
+    // devbox. The state itself must carry the bootstrap intent.
+    expect(admitLocusEvent(
+      groupEvent({ sender_id: OWNER, content: '@Pet 你好' }),
+      context({ authorization: () => 'uninitialized' }),
+    )).toMatchObject({ admit: true, authorization: 'uninitialized', needsInitialization: true })
+
     expect(admitLocusEvent(groupEvent(), context({ authorization: unresolved }))).toMatchObject({
       admit: false,
       reason: 'authorization-unresolved',
