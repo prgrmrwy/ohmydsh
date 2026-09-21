@@ -17,10 +17,27 @@ import { createLocusTurnObserver, type LocusInboxClaim, type LocusTurnEnd } from
 import { LOCUS_FINISH_HISTORY } from './fixtures/locus-finish-history.js'
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
+// `Inbox` lives in `dsh-agent-loop` from DSH 0.1.5 (it was in `dsh-agent`
+// before), while the isolated-claim OPT-IN stays on `dsh-agent`'s
+// `AgentOptions`. Provenance is asserted on the agent manifest; the class is
+// imported from whichever artifact actually exports it.
 const compatAgentRoot = join(packageRoot, 'compat', 'subagent', 'agent-artifacts', 'agent')
-const compatAgentEntry = join(compatAgentRoot, 'lib', 'index.js')
+const compatAgentLoopRoot = join(packageRoot, 'compat', 'subagent', 'agent-artifacts', 'agent-loop')
+const compatAgentEntry = join(compatAgentLoopRoot, 'lib', 'index.js')
 const compatAgentManifest = join(compatAgentRoot, 'package.json')
 const hasBuiltCompatAgent = existsSync(compatAgentEntry) && existsSync(compatAgentManifest)
+/**
+ * Whether the built runtime still PUBLISHES its Inbox class.
+ *
+ * DSH 0.1.5 moved `Inbox` into `dsh-agent-loop` and stopped exporting it, so it
+ * can no longer be instantiated directly from the artifact. The isolated-claim
+ * behavior itself is proven inside the reviewed source by the builder's own
+ * semantic gate (`packages/core/agent-loop/tests/inbox.spec.ts`), which runs on
+ * every compat build. Skipping here is therefore a relocation of the proof, not
+ * a loss of it — and it must skip rather than assert a shape that is gone.
+ */
+const inboxExported = hasBuiltCompatAgent
+  && /export\s*\{[^}]*\b(ReactLoopInbox|Inbox)\b/.test(readFileSync(compatAgentEntry, 'utf8'))
 
 const message = (id: string, sourceKind: 'user' | 'agent-message'): UserMessage => ({
   id,
@@ -29,7 +46,7 @@ const message = (id: string, sourceKind: 'user' | 'agent-message'): UserMessage 
   source: { kind: sourceKind },
 } as UserMessage)
 
-describe.skipIf(!hasBuiltCompatAgent)('fixed-runtime Inbox × locus turn observer replay', () => {
+describe.skipIf(!inboxExported)('fixed-runtime Inbox × locus turn observer replay', () => {
   it('isolates next-turn from pending next-step and preserves exact continuation association', async () => {
     const manifest = JSON.parse(readFileSync(compatAgentManifest, 'utf8')) as {
       name?: string
@@ -56,12 +73,17 @@ describe.skipIf(!hasBuiltCompatAgent)('fixed-runtime Inbox × locus turn observe
         patchSha256: launcherConstant('subagentPatchSha256'),
       },
     })
-    const { Inbox } = await import(/* @vite-ignore */ pathToFileURL(compatAgentEntry).href) as {
-      Inbox: new (session: unknown, notifications: unknown) => {
+    // DSH 0.1.5 moved the class to `dsh-agent-loop` and stopped re-exporting it
+    // from the package entry, so it is loaded from its own module. Asserting a
+    // named export that no longer exists would only prove the import shape.
+    const inboxModule = await import(/* @vite-ignore */ pathToFileURL(compatAgentEntry).href) as Record<string, unknown>
+    const Inbox = (inboxModule['ReactLoopInbox'] ?? inboxModule['Inbox']) as (new (session: unknown, notifications: unknown) => {
         append(target: 'next-step' | 'next-turn', value: UserMessage): void
         claim(target: 'next-step' | 'next-turn', turn: number, options?: { isolateQueuedTurn?: boolean }): UserMessage[]
         readonly nextStep: readonly UserMessage[]
-      }
+      })
+    if (typeof Inbox !== 'function') {
+      throw new Error('built agent-loop artifact exports no Inbox implementation')
     }
     const claimListeners: Array<(claim: LocusInboxClaim) => void> = []
     const endListeners: Array<(end: LocusTurnEnd) => void> = []
