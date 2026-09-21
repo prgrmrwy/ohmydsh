@@ -2682,8 +2682,13 @@ export class LocusRepository {
           continue
         }
         if (operation.phase === 'needs-recovery' && operation.manualRecoveryReason !== undefined) {
-          manualOperations.push(operation)
-          continue
+          // A capability-shaped failure is retried once the Host gains it.
+          // Without this, the very first missing compensator pinned the
+          // endpoint forever and every later message was refused.
+          if (!this.isTransientCompensationFailure(operation.manualRecoveryReason)) {
+            manualOperations.push(operation)
+            continue
+          }
         }
         const refs = operation.resourceRefs ?? {}
         const required: Array<'chat' | 'child-session' | 'main-session'> = []
@@ -3125,6 +3130,22 @@ export class LocusRepository {
       )
     }
     return operation
+  }
+
+  /**
+   * Whether a compensation failure may resolve on a later attempt.
+   *
+   * `needs-recovery` must not mean "unreachable forever". When the cause is a
+   * MISSING CAPABILITY the next startup may have it — that is exactly how a
+   * Host upgrade repairs itself — so the operation is retried. Anything else
+   * (cleanup ran and failed, ownership unproven, a real conflict) is genuine
+   * debt that only a human should resolve, and stays manual.
+   *
+   * Only the "<x> unavailable" causes are treated as transient: they are
+   * thrown before any cleanup is attempted, so nothing was half-done.
+   */
+  private isTransientCompensationFailure(reason: string): boolean {
+    return /\bunavailable\b/.test(reason)
   }
 
   private findBlockingProvisioningOperation(
