@@ -904,6 +904,50 @@ describe('the measured symbol-keyed inbox adapter', () => {
 
 describe('probed host child seams', () => {
   /** A host exposing every seam the probe requires. */
+  /**
+   * Regression: the runtime's `createIdleContinuable` takes a NESTED
+   * `ContinuableStartSpec` (`request.parent`), while Pet's port is flat
+   * (`parent`). The probe bridged them by passing the flat object straight
+   * through, so the runtime died on `request.parent` and NO group child could
+   * ever be created — every first @ was refused as `locus-unavailable`.
+   *
+   * The pre-existing stub ignored the spec entirely, which is why this
+   * survived 2682 passing tests. This one asserts the wire shape the target
+   * actually reads.
+   */
+  it('translates the flat creation spec into the runtime nested request shape', async () => {
+    const seen: Record<string, unknown>[] = []
+    const probe = probeLocusChildPorts(hostCtx({
+      supportsSettlementNotice: true,
+      supportsIdleContinuableCreate: true,
+      independentContextProven: true,
+      captureIdleSpec: seen,
+    }))
+    expect(probe.available).toBe(true)
+    if (!probe.available) return
+    await probe.ports.subagent.createIdleContinuable!({
+      childId: CHILD_ID,
+      provider: LOCUS_CHILD_PROVIDER,
+      label: 'Locus 子会话',
+      parent: parent(),
+      settlementNotice: 'silent',
+      contextMode: 'independent-v1',
+      signal: AbortSignal.timeout(1000),
+    } as never)
+
+    const spec = seen[0]!
+    // The runtime reads `request.parent`; a flat `parent` made it throw
+    // "Cannot read properties of undefined (reading 'parent')".
+    expect(spec['request']).toBeDefined()
+    expect((spec['request'] as Record<string, unknown>)['parent']).toBeDefined()
+    // Nothing is submitted initially: an idle child's first Delivery is its
+    // first prompt, so the child transcript stays free of invented work.
+    expect((spec['request'] as Record<string, unknown>)['prompt']).toEqual([])
+    expect(spec['contextMode']).toBe('independent-v1')
+    expect(spec['settlementNotice']).toBe('silent')
+    expect(spec['provider']).toBe(LOCUS_CHILD_PROVIDER)
+  })
+
   function hostCtx(overrides: {
     readonly sessionController?: unknown
     readonly children?: readonly unknown[]
@@ -914,6 +958,8 @@ describe('probed host child seams', () => {
     readonly supportsLiveContinuableChildSession?: boolean
     /** Whether `getProvider(LOCUS_CHILD_PROVIDER)` proves provider independence. */
     readonly independentContextProven?: boolean
+    /** Records the exact spec the bridge hands the runtime, for wire-shape tests. */
+    readonly captureIdleSpec?: Record<string, unknown>[]
   } = {}) {
     const services: Record<string, unknown> = {
       // A resident parent, so a creation test exercises the capability gate
@@ -921,7 +967,10 @@ describe('probed host child seams', () => {
       agents: { get: (id: string) => (id === PARENT_ID ? parent() : undefined), resume: async () => undefined },
       subagents: {
         startContinuable: async () => ({ childId: SessionId(CHILD_ID), messageId: MessageId('message-1') }),
-        createIdleContinuable: async (spec: { childId: string }) => ({ childId: SessionId(spec.childId) }),
+        createIdleContinuable: async (spec: { childId: string }) => {
+          overrides.captureIdleSpec?.push(spec as unknown as Record<string, unknown>)
+          return { childId: SessionId(spec.childId) }
+        },
         withLiveContinuableChildSession: async (
           _spec: unknown,
           operation: (session: unknown) => unknown,
