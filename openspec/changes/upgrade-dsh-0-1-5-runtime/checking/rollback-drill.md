@@ -82,9 +82,39 @@ rm -rf packages/dsh-pet/compat/subagent/.upstream packages/dsh-pet/compat/subage
 **但回滚时跑的是旧代码,里面没有这个修复**,所以只能手工删缓存。
 (该探测在本次前滚中被实测验证:`.upstream` 被删后新构建器按探测重克隆并构建成功。)
 
-**诚实边界**:最终跑通的那次 `dsh build` 里,缓存已经在旧 commit 上(是前一次失败尝试
-重克隆留下的)。所以"干净缓存 + `npm ci`"的组合是**由两半各自的观测推出**的,
-没有在一次连续运行里合并验证过。按上面的处置做应当没问题,但严格说这一步仍属推断。
+### 干净缓存条件下的往返:已实测(补充验证)
+
+前一版这里留了一条"诚实边界":跑通那次缓存已在旧 commit 上,所以"干净缓存 + `npm ci`"
+只是由两半各自观测推出。**这条现已闭合** —— 补做了一次显式的干净缓存往返:
+
+```
+起点: repo 42658c3 / .upstream fb2c4b9 / deps 0.1.5-rc.2
+1. 备份当前 home(17410 项)
+2. dsh stop                        → 3080 进程 0
+3. 恢复升级前 home                 → dshVersion=0.1.2-rc.1, v3=0
+4. git checkout 986b9324
+5. npm ci                          → exit 0, dsh-session=0.1.2-rc.1
+6. rm -rf .upstream .storage-upstream   ← 显式的干净缓存条件(删后确认不存在)
+7. dsh build                       → exit 0, 142s, [sync] done — 3 changes
+8. dsh restart                     → exit 0, 180s → runtime=0.1.2-rc.1
+--- 前滚 ---
+9. npm ci                          → dsh-session=0.1.5-rc.2
+10. 恢复升级后 home + 清缓存
+11. dsh build                      → exit 0, 175s
+12. dsh restart                    → exit 0, 244s → runtime=0.1.5-rc.2
+```
+
+两个方向都在**缓存确实不存在**的条件下走通,所以"清缓存 + `npm ci`"是可用配方,
+不是推断。往返后 Pet 数据仍逐项未变(`loci=1 deliveries=1 tasks=2 invocations=1
+channel_config=1`),会话 40 + 11。
+
+### 一个会让人误判"回滚失败"的现象
+
+回滚后的旧运行体启动约 25 秒内,`/` 与各通道会返回 **403**;稍后重试才是
+**200**。本仓库三次演练都出现同一模式(0.1.5 侧则是 401,不带 token 时语义不同)。
+
+**运维含义**:回滚验证不能只看启动后第一次探测。若第一次是 403,等一会重试再判定;
+把它当成"回滚失败了"会导致不必要的二次操作。
 
 ### 附带:`dsh start` 不是合法动词
 
