@@ -48,9 +48,9 @@
 - [x] 6.3 针对目标 tag 重新推导并版本化 Storage/Domain/SQLite/JSON patches，更新 `replaces` provenance，验证 transaction 全有或全无、applyBatch、exclusive owner 与 JSON/SQLite 原子语义
 - [x] 6.4 更新 launcher/root template/build fingerprint/override，确保 `supportedDshVersion` 精确匹配、官方一次性 CLI 不加载 overlay、未知版本在副作用前拒绝
 - [x] 6.5 构建新 compatibility runtime，验证包名/版本/tag/commit/hash、`npm ls` 与 `require.resolve` 唯一实例、实际 runtime markers 和自包含原子发布
-- [ ] 6.6 执行 silent idle child、independent cold resume、saved preset/toolFilter、exact child Session、crash recovery、并发与双 writer；并覆盖首轮 Host 注入顺序、claim-before-bind 收敛、GUI/parent steer 污染 fail closed 和 agent own-layer subagent 逃逸负例
+- [x] 6.6 执行 silent idle child、independent cold resume、saved preset/toolFilter、exact child Session、crash recovery、并发与双 writer；并覆盖首轮 Host 注入顺序、claim-before-bind 收敛、GUI/parent steer 污染 fail closed 和 agent own-layer subagent 逃逸负例
 - [x] 6.7 明确 isolated queued-turn claim 当前未进入已装载 0.1.2 runtime：若本次选择启用则完成真实 marker/probe，否则保持 unavailable + marker 缺失 fail closed，不能误称为生产基线
-- [ ] 6.8 复跑 Pet 全量、固定 runtime probes 和现有 G1–G5 diagnostics；Pet 为生产切换硬 gate，silent/idle/independent cold resume+saved preset/exact Session/Storage 等当前可达能力任一退化即 NO-GO；仍不修改 inquiry 产品门槛或把未完成项标为通过
+- [x] 6.8 复跑 Pet 全量、固定 runtime probes 和现有 G1–G5 diagnostics；Pet 为生产切换硬 gate，silent/idle/independent cold resume+saved preset/exact Session/Storage 等当前可达能力任一退化即 NO-GO；仍不修改 inquiry 产品门槛或把未完成项标为通过
 
 ## 7. Remote 插件最小组合放行
 
@@ -69,7 +69,7 @@
 - [ ] 8.2 复跑根与 9 包自动化、真实旧 Session 迁移/重启、Worktree 文本/图片/文件首发、全部 local/remote 用户可见基线并与 0.1.2 记录逐项比对
 - [ ] 8.3 验证 RPC Host fence 与 Web 文件授权：非 trusted Host 拒绝；receipt 精确绑定 Session、cold/wrong Session、resource authorizing Session、跨 Session 复用拒绝；workspace-files read 按 composed fs policy 而非误设普适 workspace containment
 - [ ] 8.4 验证 0.1.5 outbound proxy：Geo/subscriptions/cost-meter/web_fetch/search/MCP/Pet-lark 各执行面，回环 RPC 直连、项目 `.env` 不注入、候选不读生产 `$DSH_HOME/.env`，child/workflow/code-runtime 继承差异有明确结果且报告不含代理凭据
-- [ ] 8.5 在新 compatibility runtime 上验证 Pet 普通轮盘、Locus 既有 fork/independent 基线、SQLite 单 writer、真实飞书入口与官方媒体下载；新 inquiry G1–G5 未通过时仍保持未发布
+- [x] 8.5 在新 compatibility runtime 上验证 Pet 普通轮盘、Locus 既有 fork/independent 基线、SQLite 单 writer、真实飞书入口与官方媒体下载；新 inquiry G1–G5 未通过时仍保持未发布
 - [ ] 8.6 验证失败回滚：插件组失败只撤该组，runtime 候选失败回到旧 manifest/runtime，数据已写新格式时先停 writer并恢复备份
 - [ ] 8.7 运行 `openspec validate upgrade-dsh-0-1-5-runtime --strict`、根全量测试、artifact check 与 `git diff --check`，记录最终候选证据
 
