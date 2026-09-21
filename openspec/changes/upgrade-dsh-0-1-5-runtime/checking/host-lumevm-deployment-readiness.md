@@ -36,6 +36,51 @@ Upstream dist-tags re-checked at write time: `latest`/`next` = `0.1.5-rc.2`,
    plus a `@byted` scope line. Do not let the build silently inherit a mirror
    that has not mirrored the new packages.
 
+5. **⚠ Reinstall the repo dependencies before building.** `ws-merge` merges into
+   the `main` *branch*, and the main checkout sits on `main` — so on a machine
+   where the checkout tracks `main`, **the source advances by itself while
+   `node_modules` does not**. Measured on `host`: `dsh.yaml` already said
+   `0.1.5-rc.2` while `node_modules/@deepseek-ai/dsh-session` was still
+   **`0.1.2-rc.1`** (untouched since 2026-09-20). Building with mismatched deps
+   fails the local packages (`tsc` exits 2 in `dsh-worktree-session`; `dsh-pet`'s
+   compat build dies on `@deepseek-ai/dsh-attachment` / `admitPromptContent`).
+   Run **`npm ci`** in the repo checkout, then confirm
+   `@deepseek-ai/dsh-session` reports `0.1.5-rc.2`.
+
+6. **⚠ Clear the stale compat cache.** `packages/dsh-pet/compat/subagent/.upstream`
+   (and `.storage-upstream`) are shallow clones pinned at whatever reviewed commit
+   last built. Measured on `host`: it still sat at `a66e470 release(dsh): 0.1.2-rc.1`.
+   The builder then does `git checkout --detach fb2c4b9e…` → **exit 128** (the commit
+   is not in the shallow clone) and the launcher **refuses the official-runtime
+   fallback**, so the build fails outright. The new `build.mjs` probes for this
+   (`git cat-file -e <sha>^{commit}` + re-clone), but deleting the caches is a safe
+   belt-and-braces step:
+
+   ```
+   rm -rf packages/dsh-pet/compat/subagent/.upstream packages/dsh-pet/compat/subagent/.storage-upstream
+   ```
+
+   On devbox this made the builder re-clone correctly at the pinned commit.
+
+### The exact apply sequence (host is a special case)
+
+On `host` the source is **already** at the target commit (the main checkout follows
+`main`), so `git pull` is a no-op there and the real work is steps 2–5:
+
+```
+1. dsh stop                          # stop writers
+2. back up $DSH_HOME                 # mandatory
+3. npm ci                            # ★ step 5 above
+4. rm -rf packages/dsh-pet/compat/subagent/.upstream \
+          packages/dsh-pet/compat/subagent/.storage-upstream   # ★ step 6 above
+5. dsh build
+6. dsh restart                       # launcher accepts only build/stop/restart
+```
+
+On `lumevm`, if its checkout is behind, add `git pull --ff-only origin main` before
+step 3. Verify with `git rev-parse HEAD` — the target is the commit recorded in
+"Exact identities" below.
+
 ## The one thing that changes the risk profile
 
 **Rolling back the runtime alone is NOT a rollback.** Session logs migrate
