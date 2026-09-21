@@ -123,27 +123,64 @@ POST /dsh-pet/api/status               -> 200   (Pet 自己注册的 HTTP 路由
 `ctx.inject(['connection'], …)` 回调就**一次都不会执行,且不报错**——
 这与"四个通道同时失效、日志无任何错误"的观测完全吻合。
 
-## 影响评估(不要夸大)
+## 影响评估(已按代码更正,不要夸大)
 
-- 受影响的是**浏览器侧**,已在 devbox 逐项点开确认(不是推测):
+⚠ **本节前一版写错了,已作废。** 原文断言 `文档/资料` 面板"会把取不到数据渲染成
+正常空态,真正有链接的会话会被误报成没有链接"。用户用 devbox 实机截图直接证伪:
+该面板**正常显示 16 条链接**。
 
-  | 界面 | 现象 | 证据 |
-  |---|---|---|
-  | `文档/资料` 面板(session-links,右侧栏) | 显示 **“当前会话暂无文档/资料 —— MR、部署、Meego、制品链接与本次产出的文件会在这里展示。”** | console `[dsh-session-links] baseline fetch failed: transport failure for /dsh-session-links/links: HTTP 405` |
-  | `系统时钟` 设置 section | 渲染“不可用”态,日期条显示 `- -- -` 而非主机时间 | 截图 |
-  | `出口守卫` 设置 section | 配置字段(`blockedISO alpha-2`、`Geo 端点`)为空 | 截图 |
-  | `记忆`(memex) | 同一条通道 `/dsh-memex/stores` = 405,同上机制(未逐项点开) | 通道探针 |
+### 为什么会错
 
-  **`文档/资料` 这一条最危险**:它把“取不到数据”渲染成**正常的空态文案**,
-  用户看到的是一句确定的“暂无”,而不是错误。真正有 MR/部署链接的会话会被
-  误报成“没有链接”。这正是本缺陷的典型形态——**静默退化,不报错**。
+`dsh-session-links` 是**双数据源**设计,我误读了主次。host 半区的模块注释写得很清楚:
 
-- **主机侧出口门禁不受影响**:它在 Host 内直接解析 Geo 并独立地对
-  `blocked`/`unknown` fail closed,不依赖这条 RPC。
-- Pet 与 worktree-session 注册的是**自有 HTTP 路由**(不是 Connection RPC),
-  实测正常;cost-meter / better-sidebar / skin-center / session-archive 也各走自己的面。
-- 远端 `subscriptions` 的 `/subscriptions-auth` 同样是 405,其设置页卡片结构
-  来自客户端常量而非 RPC —— 此前当作“subscriptions 正常”的证据属过度解读,已更正。
-- 因此:**应用整体“是通的”与本缺陷同时成立**。这是四处具体功能的静默退化,
-  不是数据安全、不是 Pet 可用性问题,但它是一处**真实回归**
-  (已用升级前基线证伪“本来就这样”),且在 devbox(目标运行环境)稳定复现。
+> whose single `links` endpoint reads a session's **complete** durable event log …
+> (the **"whole session" baseline the browser window cannot see**).
+> **The web half keeps its live snapshot for new-message increments.**
+
+即:
+
+- **浏览器半区(主源)**:从官方 runtime conversation snapshot 按消息 seq 水位
+  **增量采集**,**不依赖 RPC**,面板照常出数据;
+- **host 半区(`/dsh-session-links/links`,辅源)**:整份日志的**基线**,
+  用于补上**窗口截断与 compaction 丢掉的部分**
+  (客户端注释原文:"Whole-log baseline from the host (window-truncation and compaction …)")。
+
+而且客户端**本来就预期**这条 RPC 可能不可用 —— `Panel.tsx` 里有专门的告警分支:
+
+```js
+if (attempt === 0) console.warn('[dsh-session-links] baseline NOT fetched: connection RPC unavailable on tab context')
+… .catch(error => console.warn('[dsh-session-links] baseline fetch failed:', …))
+```
+
+### 更正后的影响表
+
+| 插件 | 有降级路径吗 | 真实影响 |
+|---|---|---|
+| `dsh-session-links` | **有,且是设计内的** | 面板正常;仅**长会话在窗口截断/compaction 之后,较早的链接可能缺**。不是"误报无链接" |
+| `dsh-system-clock` | 有(显示 unavailable,注释明说"never fabricate") | 设置 section 显示"不可用"而非主机时间 —— **视觉退化,无数据错误** |
+| `dsh-home-network-model-guard` | 有(客户端 `'unknown' while unavailable → fail open`) | 不阻塞任何模型;**设置页诊断字段为空**;模型选择告警不出现 |
+| `dsh-memex` | 未知 | `/dsh-memex/stores` = 405,同上机制,**未逐项点开验证** |
+
+**结论修正:四处全部是"优雅降级",没有一处给出错误结论。** 唯一的数据损失是
+session-links 的整份日志基线(窗口截断场景下的较早链接),唯一的视觉断点是
+系统时钟显示"不可用"和出口守卫设置页字段为空。
+
+因此严重度**低于**前一版措辞:它是"四个诊断/显示面失效",不是"数据正确性问题"。
+
+## 仍然成立的部分
+
+- Connection RPC 通道在 devbox 上确实**整体未注册**(四个自研通道 + 远端
+  `/subscriptions-auth` 全部 405,而升级前 devbox 与本机现在均为 200)。
+- 原因已定位到**插件批次**,不是运行体(三组对照见上)。
+- 这仍然是**真实回归**,只是**影响面小且各面都有降级**。
+
+### 我在本轮犯的同类错误(记录以免重复)
+
+两次都是**过度解读观测**:
+
+1. 把 subscriptions 设置页渲染完整当成"subscriptions 正常"—— 其实卡片来自客户端常量;
+2. 把新会话上"当前会话暂无文档/资料"当成 RPC 失效的证据 —— 那只是**空会话的正常空态**,
+   我因为同一时刻看到了 console 告警就把两者因果连起来。
+
+教训:**面板显示"空"不等于数据源坏了**;要判定失效,必须用能区分"空"与"取不到"的探针
+(本次的 HTTP 探针就是),而不是看 UI 文案。
