@@ -1,0 +1,32 @@
+# 修复 DSH 0.1.5-rc.2 的 Connection RPC channel 注册缺陷(纯 composition 覆盖,无代码)。
+#
+# 现象:所有注册 Connection RPC channel 的插件(本仓库 dsh-home-network-model-guard /
+# dsh-system-clock / dsh-session-links / dsh-memex,以及远端 dsh-plugin-subscriptions)
+# 的浏览器端调用全部失败,服务端返回与「路径不存在」无法区分的通用 **405**,且宿主
+# 日志**无任何错误**。
+#
+# 根因(devbox 实机诊断,2026-09-21):0.1.5 的 Web 组合里 Connection provider 行只声明
+# `webRuntime`;而 `HostConnectionService` 的 `rpc` / `fetch` accessor 会把调用 owner
+# 追踪回**这个 provider fiber**,`connection.rpc.handle()` 最终通过
+# `owner.webServer.register(route)` 挂载路由 —— cordis 因此抛
+# `cannot get property "webServer" without inject`,该 effect 抛错被吞,通道路由从未
+# 挂上。0.1.5 已按同样道理修好了自己的 `/api` 路由
+# (`ctx.inject(['webServer'], webCtx => …)`),但漏改了供所有插件使用的 `register()`。
+#
+# ⚠ 只在调用方(各插件的 child fiber)注入 webServer **不足以**覆盖 Cordis Service
+# shadow 语义 —— 本项目实测:四个包改成 `inject(['connection','webServer'])` 并真实
+# 部署后仍全 405。必须让 **Connection provider 自己**同时等待 webServer。
+#
+# ⚠ 这是**整行覆盖**:后应用的层按行 id 覆盖前者且 config 不做深合并,
+# 因此必须原样保留 `config.trustedHosts`,否则会丢掉 Host/Origin fence。
+# 本 shim 不改 connection 的 config/trustedHosts,不复制 RPC 协议与鉴权,
+# 也不改变非 Web surface。
+#
+# 退休条件:官方 connection 行的 `inject` 自己带上 `webServer` 时,本 fragment 必须删除。
+# 上游讨论:https://github.com/deepseek-ai/deepseek-harness/discussions/5926
+# 社区同款做法:https://github.com/ysr666/dsh-vision-router/pull/481
+- id: connection
+  name: '@deepseek-ai/dsh-client-connection'
+  inject: [webRuntime, webServer]
+  config:
+    trustedHosts: !!js ctx.webRuntime.trustedHosts
