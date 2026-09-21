@@ -752,10 +752,21 @@ const ARTIFACT_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '../compat/subagent/storage-artifacts',
 )
-const ATOMIC_VERSION = '0.1.2-rc.1-locus-atomic.1'
+// Derived from the builder, never pasted: hardcoded provenance silently rots
+// the moment the reviewed DSH pin moves, and then asserts the WRONG runtime.
+const STORAGE_BUILDER = readFileSync(
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../compat/subagent/build-storage.mjs'),
+  'utf8',
+)
+function builderConstant(name: string): string {
+  const found = new RegExp(`const ${name} = '([^']+)'`).exec(STORAGE_BUILDER)?.[1]
+  if (found === undefined) throw new Error(`build-storage.mjs no longer defines ${name}`)
+  return found
+}
+const ATOMIC_VERSION = `${builderConstant('targetVersion')}-${builderConstant('artifactVersionSuffix')}`
 const ATOMIC_PROVENANCE = {
-  upstreamBase: 'a66e4702047846cdaa10c66c9d3df3951f5ea70d',
-  patchSha256: '18ec93c5240612b513871d65db2d100ee6165ea1ba251dbf91e670963dd35bed',
+  upstreamBase: builderConstant('reviewedCommit'),
+  patchSha256: builderConstant('patchSha256'),
 }
 
 /** Whether the reviewed atomic storage artifacts are present to load. */
