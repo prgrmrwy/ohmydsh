@@ -74,8 +74,22 @@ On `host` the source is **already** at the target commit (the main checkout foll
 4. rm -rf packages/dsh-pet/compat/subagent/.upstream \
           packages/dsh-pet/compat/subagent/.storage-upstream   # ★ step 6 above
 5. dsh build
-6. dsh restart                       # launcher accepts only build/stop/restart
+6. dsh restart                       # ★ run WITHOUT the build proxy — see below
 ```
+
+**⚠ The build proxy must not reach the running Host.** `npm ci` and `dsh build` may need
+`http_proxy`/`https_proxy` to reach the registry, but if those variables are still exported
+when `dsh restart` runs, **the long-lived Host inherits them** and internal providers break.
+Measured on devbox: with the proxy inherited, every Trae call failed with
+`Trae request failed before receiving a response` / `TRANSPORT` (5/5 retries); after
+`unset http_proxy https_proxy no_proxy` and a restart, the same prompts succeeded normally
+(stream + a real tool call). Verified by counting the variables in the Host's own
+`/proc/<pid>/environ`: **2 with the leak, 0 after**.
+
+So either `unset http_proxy https_proxy no_proxy` before step 6, or scope the proxy to the
+build commands only (`http_proxy=… npm ci`, `http_proxy=… dsh build`). If the Host genuinely
+needs outbound proxying, configure it through DSH's own egress settings rather than the
+process environment.
 
 On `lumevm`, if its checkout is behind, add `git pull --ff-only origin main` before
 step 3. Verify with `git rev-parse HEAD` — the target is the commit recorded in
