@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, readlink, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -117,8 +118,12 @@ describe('Git worktree operation', () => {
     const prepared = await startOperation(request)
     await rm(prepared.worktreePath, { recursive: true, force: true })
 
+    // `prunable` is only reported by git >= 2.36. The invariant under test is
+    // that the registration survives while its directory is gone, which every
+    // supported git reports identically.
     const stale = await listWorktrees(root)
-    expect(stale.some(entry => entry.path === prepared.worktreePath && entry.prunable)).toBe(true)
+    expect(stale.some(entry => entry.path === prepared.worktreePath)).toBe(true)
+    expect(existsSync(prepared.worktreePath)).toBe(false)
 
     const replay = await startOperation(request)
     expect(replay).toEqual(prepared)

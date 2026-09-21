@@ -151,7 +151,13 @@ export async function createTaskWorktree(repoRoot: string, branch: string, path:
 export async function pruneInvalidRegistrations(repoRoot: string, git = createGitClient()): Promise<readonly string[]> {
   const paths: string[] = []
   for (const entry of await listWorktrees(repoRoot, git)) {
-    if (!entry.prunable || await isDirectory(entry.path)) continue
+    // `prunable` only exists from git 2.36; older git omits the field entirely.
+    // Trusting it alone makes this a silent no-op there, so a registration whose
+    // directory is gone could never be pruned and the worktree never recreated.
+    // A missing directory is the condition that actually matters, and it is
+    // observable on every supported git.
+    if (entry.bare) continue
+    if (await isDirectory(entry.path)) continue
     paths.push(entry.path)
   }
   if (paths.length > 0) await git.run(repoRoot, ['worktree', 'prune', '--expire', 'now'])
