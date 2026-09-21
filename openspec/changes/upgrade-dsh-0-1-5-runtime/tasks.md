@@ -24,7 +24,7 @@
 - [x] 3.3 在迁移后的同一 Session 中继续提交、停止并重启 Host，确认恢复写入和重启结果一致且原始生产源未被候选打开或改写
 - [ ] 3.4 注入损坏、不受支持格式、写所有权竞争与中断场景，确认候选 fail closed 且备份可恢复
 - [x] 3.5 记录生产迁移的 writer 停止顺序、Session/Pet 一致性备份、完整性检查与从新格式回滚到 `0.1.2-rc.1` 的演练结果
-- [ ] 3.6 让回滚路径真正可用(演练已证伪 naive 路径,证据见 checking/rollback-drill.md):①源码回退必须同时重装依赖,否则 dsh-worktree-session/dsh-pet/dsh-session-links 的 build 失败;②预置或加深 compat 缓存,使旧 compat commit 可取(当前 .upstream 为浅克隆只钉新 commit,旧 commit git checkout 退出 128,而启动器拒绝降级到官方运行体,Host 完全不启动);③定位旧树构建期 `@deepseek-ai/dsh-attachment` 不导出 `admitPromptContent`;④改用预置“可运行的旧运行体快照”(含仓库 node_modules、compat 缓存、按版本解析的官方 CLI),现有三件套备份不含后两类,恢复不出可运行旧运行体。**未完成前 host/lumevm 视为单向升级,备份只作数据保险**
+- [x] 3.6 让回滚路径真正可用 —— **已完成并实机验证**(checking/rollback-drill.md)。实测判定:回滚可行,不需预置“可运行旧运行体快照”;缺失的是**依赖也要一起退**:旧源码 + `npm ci` + `dsh build`(exit 0/143s/零失败)+ `dsh restart`(exit 0/77s)可完整退回 0.1.2-rc.1,Pet ready、GUI index 200、会话回到 plain 40/v3 0。原先记的三个阻塞中,①靠 `npm ci` 解决,③(admitPromptContent)证实是依赖不匹配的连带症状而非独立缺陷,②(compat 浅克隆拿不到旧 commit → 启动器拒绝降级 → Host 不启动)靠删除 `.upstream`/`.storage-upstream` 让其重新克隆解决。遗留(不阻塞回滚,故合并在本条):最终跑通那次缓存已在旧 commit 上,即“干净缓存 + npm ci”组合是由两半各自观测推出、未在同一次连续运行中合并验证。
 
 ## 4. Local runtime 声明与通用 API 迁移
 
