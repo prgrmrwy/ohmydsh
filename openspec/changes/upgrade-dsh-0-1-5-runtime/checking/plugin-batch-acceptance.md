@@ -93,21 +93,39 @@ loader 表与客户端模块图中**均不存在**(7.5)。
 `dsh-sidebar-session-provider-icon`、`dsh-home-network-model-guard`、
 `dsh-plugin-subscriptions`、`@byted/dsh-traex-bridge`。
 
-## 5. 浏览器级 GUI 验收
+## 5. 浏览器级 GUI 验收(devbox 实机)
 
-用缓存的 `chrome-headless-shell` 经 CDP 直连(零依赖,**没有**引入 playwright),
-加载真实 GUI 并读取页面状态:
+用零依赖的 CDP 客户端驱动浏览器(**没有**引入 playwright):
+本机侧用缓存的 `chrome-headless-shell` 149,devbox 侧用其缓存里的
+Chrome for Testing 148(`~/.cache/ms-playwright/chromium_headless_shell-1223`)。
+
+> ⚠ devbox 的 `/usr/bin/chromium` 是 **Chromium 90**,跑不动 0.1.5 的客户端
+> (`Promise.withResolvers is not a function`,渲染出 22 个节点的空白页)。
+> 用它得出的"无错误"是**无效结论**;必须用缓存里的现代 Chromium。
+
+在 devbox 上以 **真实 origin `http://127.0.0.1:3080`** 直连(不是经隧道)的结果:
 
 | 观测 | 结果 |
 |---|---|
-| 标题 | `DeepSeek Harness` |
-| 应用外壳渲染 | 是(输入框 / 模型选择器 `DeepSeek V4 Flash Vision Exp` / `⑀ main` / `☐ Worktree`) |
-| cost-meter 生效 | 是(顶栏 `5% 平价`) |
-| skin-center 生效 | 是(注入皮肤样式) |
-| Pet 生效 | 是(`🐾` 宿主挂在 `document.body`) |
-| width-tiers 接线 | 是(`--dsh-chat-content-width` 存在) |
-| **console error / warning** | **0** |
-| **未捕获页面异常** | **0** |
+| 标题 / DOM | `DeepSeek Harness`,658 节点,应用外壳完整渲染 |
+| 未捕获页面异常 | **0** |
+| 工作区与会话列表 | 正常;含已迁移会话 `Locus 主会话 · pet 命名…` |
+| **7.1 better-sidebar 0.19.1** | 原生 tab 全部注册:`新标签页 / 分栏 / 全屏 / 收起右侧边栏 / 文件 / 文件变动 / 任务管理 / 侧边对话(beta) / 终端 / 浏览器`;**本仓库 session-links 的 `文档/资料` tab 也在**;右侧栏宿主存在,无重复挂载 |
+| **7.1 width-tiers 1.0.5** | 档位控件存在:`对话区宽度档位:标准(748px),点击选择档位`;`--dsh-chat-content-width` 已接线 |
+| **7.2 cost-meter 1.7.30** | 侧栏面板:`余额 ¥291.71`、`Go 5h 7%`、`周 3% · 月 17%`、`重置 9/22/2026 2:25:29 AM`、`今日 ¥0.0451`、`平价 · 10小时40分后进入高峰`;设置页多周期 tab、三张汇总卡(`¥0.0451` / `¥77.098` / `¥77.5188`)、**逐会话表格含本仓库迁移后会话**(`¥0.0253` / `¥0.0198`)、余额块 `¥291.71` 且**无任何明文凭据回显** |
+| **7.3 subscriptions 0.9.2** | 设置页完整渲染 4 张 provider 卡:`Codex (ChatGPT)`、`Claude`、`Grok (X Premium)`、**`GitHub Copilot`**,各带状态点、登录按钮与模型/推理档下拉 |
+| **7.4 skin-center / session-archive 0.3.24** | 设置页出现 `皮肤` 与 `会话归档管理` 两个 section |
+| **7.5 已移除三件套** | DNS 层面确认缺席(`trioGone: true`,页面 HTML 不含三者) |
+| **7.7 Trae 0.1.15** | devbox 以启用态运行;Pet 配置实测默认 `providerId=traex` / `modelId=GPT-5.6-Sol[1m]` |
+| Pet | `🐾` 浮层宿主挂在 `document.body`;`ready` + 飞书 `subscription connected` |
+| 设置页导航全集 | `通用设置 / 模型 / 插件 / Agent 预设 / 记忆 / 费用 / 订阅 / 侧边卡片 / 皮肤 / 会话归档管理 / 出口守卫 / 系统时钟 / Pet` |
+
+**本节同时发现一处真实缺陷**:`出口守卫` 与 `系统时钟` 在 devbox 上拿不到
+Connection RPC 路由(HTTP 405),本机同样代码却正常。详见
+`connection-rpc-devbox.md`。
+
+仍未做:真实登录(需要凭据)、会话物理删除(破坏性)、主题实际切换(会改用户偏好)、
+cockpit-bridge `editorOpen` seam 的实际触发。
 
 ## 6. 未纳入本批 / 仍待办
 
