@@ -23,7 +23,7 @@ describe('probe: dispatching stuck state', () => {
     }
     const co = new PetCoordinator({
       repository: h.repository, capabilities: caps,
-      agents: { create: async (o: any) => ({ session: { id: o.sessionId } }), get: () => ({}) } as unknown as AgentRegistryLike,
+      agents: { create: async (o: any) => ({ agent: { id: o.sessionId }, dispose: async () => {} }), get: () => ({ id: 'probe' }) } as unknown as AgentRegistryLike,
       dispatcher, resolver, contextProviders: new SourceContextRegistry(),
       workspacePath: '/tmp/ws', selection: () => ({ providerId: 'p', modelId: 'm' }),
     })

@@ -1,5 +1,5 @@
 diff --git a/packages/storage/storage-domain/src/domain.ts b/packages/storage/storage-domain/src/domain.ts
-index c4087d6dd..eda9921bd 100644
+index c4087d6dd268fa2fe0de8ee69981ad7a9da2e435..eda9921bddddac27f1abe6891b064c1d2281abff 100644
 --- a/packages/storage/storage-domain/src/domain.ts
 +++ b/packages/storage/storage-domain/src/domain.ts
 @@ -12,9 +12,33 @@
@@ -184,7 +184,7 @@ index c4087d6dd..eda9921bd 100644
      this.host.emitChanged({
        domain: this.host.domainName,
 diff --git a/packages/storage/storage-domain/src/error.ts b/packages/storage/storage-domain/src/error.ts
-index b768c2af3..b729b7d84 100644
+index b768c2af35e0b7ae8b0ed72a38322e1e7bd1fea2..b729b7d8442192a54230d712ceb4b9844e204eae 100644
 --- a/packages/storage/storage-domain/src/error.ts
 +++ b/packages/storage/storage-domain/src/error.ts
 @@ -9,6 +9,7 @@ export type DomainErrorCode =
@@ -196,7 +196,7 @@ index b768c2af3..b729b7d84 100644
  
  /** Location of the record that failed schema validation at the durable boundary. */
 diff --git a/packages/storage/storage-domain/src/index.ts b/packages/storage/storage-domain/src/index.ts
-index 7e0be5e15..564ca5c79 100644
+index 7e0be5e151f3815d3b16bc8973623e32304d2c6e..564ca5c793118cd31383811b31cfd3ac39ba098c 100644
 --- a/packages/storage/storage-domain/src/index.ts
 +++ b/packages/storage/storage-domain/src/index.ts
 @@ -24,7 +24,9 @@ export type {
@@ -211,7 +211,7 @@ index 7e0be5e15..564ca5c79 100644
  declare module '@deepseek-ai/dsh-storage' {
    interface StorageForms {
 diff --git a/packages/storage/storage-domain/tests/domain.spec.ts b/packages/storage/storage-domain/tests/domain.spec.ts
-index b21ec0faf..49f339810 100644
+index b21ec0faf8bcfc1a09e04c80ac8ca788289e4070..49f3398107af86db2b910a8472d6657b5a61e635 100644
 --- a/packages/storage/storage-domain/tests/domain.spec.ts
 +++ b/packages/storage/storage-domain/tests/domain.spec.ts
 @@ -296,6 +296,150 @@ describe('KvTable writes', () => {
@@ -366,7 +366,7 @@ index b21ec0faf..49f339810 100644
    it('leaves memory untouched and emits nothing when the backend rejects a write', async () => {
      const pool = new MemoryMediaPool()
 diff --git a/packages/storage/storage-domain/tests/helpers/memory-backend.ts b/packages/storage/storage-domain/tests/helpers/memory-backend.ts
-index 3c8547d28..f6486ff49 100644
+index 3c8547d28072c0a92cb1a08a2494be9ab66d519b..f6486ff49e537618966c693282a4f91db2dd4095 100644
 --- a/packages/storage/storage-domain/tests/helpers/memory-backend.ts
 +++ b/packages/storage/storage-domain/tests/helpers/memory-backend.ts
 @@ -16,10 +16,11 @@
@@ -455,7 +455,7 @@ index 3c8547d28..f6486ff49 100644
      }
    }
 diff --git a/packages/storage/storage-json/src/per-record-unit.ts b/packages/storage/storage-json/src/per-record-unit.ts
-index 346c7a0d6..1d90063bd 100644
+index 3d064411ee6190e2a8445538cad5dd1f4be959a1..6dbe776675de5e7dc7fcb8170ad9e2526d5e0b51 100644
 --- a/packages/storage/storage-json/src/per-record-unit.ts
 +++ b/packages/storage/storage-json/src/per-record-unit.ts
 @@ -9,6 +9,12 @@
@@ -472,7 +472,7 @@ index 346c7a0d6..1d90063bd 100644
   * version outside the accepted set (the descriptor's current version plus
   * its `compatibleVersions`) reads as an absent record — one bad or stale
 diff --git a/packages/storage/storage-json/src/single-unit.ts b/packages/storage/storage-json/src/single-unit.ts
-index 085b37cfc..dbeb4e0b2 100644
+index 085b37cfc0673924a6218ae1e14a6bd794149855..dbeb4e0b26e3d80c1a7f1fd7a4d609c288b5d8d7 100644
 --- a/packages/storage/storage-json/src/single-unit.ts
 +++ b/packages/storage/storage-json/src/single-unit.ts
 @@ -12,7 +12,7 @@
@@ -528,7 +528,7 @@ index 085b37cfc..dbeb4e0b2 100644
    async close(): Promise<void> {
      if (this.closed) {
 diff --git a/packages/storage/storage-sqlite/src/index.ts b/packages/storage/storage-sqlite/src/index.ts
-index 5cd59cadc..cefb114b1 100644
+index 5cd59cadc24ff0817aa00920311d13cff17f6351..cefb114b16db31e1205569587617d001c27b9340 100644
 --- a/packages/storage/storage-sqlite/src/index.ts
 +++ b/packages/storage/storage-sqlite/src/index.ts
 @@ -39,12 +39,26 @@ export interface Config {
@@ -569,7 +569,7 @@ index 5cd59cadc..cefb114b1 100644
      // open failure still surfaces to each caller; this guard only prevents an
      // unhandled-rejection crash when the failure precedes the first use.
 diff --git a/packages/storage/storage-sqlite/src/schema.ts b/packages/storage/storage-sqlite/src/schema.ts
-index 65f9d289b..d5e671e63 100644
+index 65f9d289b601db97160059d219733ea5b358dfd7..d5e671e63ae3edeebdc0ec58b16544aaf97181e7 100644
 --- a/packages/storage/storage-sqlite/src/schema.ts
 +++ b/packages/storage/storage-sqlite/src/schema.ts
 @@ -57,7 +57,11 @@ async function createDatabaseFile(path: string): Promise<void> {
@@ -675,7 +675,7 @@ index 65f9d289b..d5e671e63 100644
   * Physical table name for one unit table. Both segments are validated against
   * `UNIT_NAME_RE` before reaching this, so the result is safe to interpolate
 diff --git a/packages/storage/storage-sqlite/src/unit.ts b/packages/storage/storage-sqlite/src/unit.ts
-index d8260b310..2b1e3e1ed 100644
+index d8260b310896b3d6baf74b7e2de6904a81cdd53f..2b1e3e1ed48777ce2a6735791f5a793ac5c8bd06 100644
 --- a/packages/storage/storage-sqlite/src/unit.ts
 +++ b/packages/storage/storage-sqlite/src/unit.ts
 @@ -2,14 +2,15 @@
@@ -751,7 +751,7 @@ index d8260b310..2b1e3e1ed 100644
      if (!this.closed) {
        this.closed = true
 diff --git a/packages/storage/storage-sqlite/tests/sqlite-backend.spec.ts b/packages/storage/storage-sqlite/tests/sqlite-backend.spec.ts
-index f2fd65ee4..8ed12214f 100644
+index c5f5dd4ee32d7880663f26a8b758db25284e2268..39b13aeaeb332cf1b9d1004c0a0d362f9b98226e 100644
 --- a/packages/storage/storage-sqlite/tests/sqlite-backend.spec.ts
 +++ b/packages/storage/storage-sqlite/tests/sqlite-backend.spec.ts
 @@ -4,6 +4,7 @@ import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -762,7 +762,7 @@ index f2fd65ee4..8ed12214f 100644
  import Storage, { storageBackendServiceKey } from '@deepseek-ai/dsh-storage'
  import type { KvUnitDescriptor } from '@deepseek-ai/dsh-storage'
  import { runKvBackendContract } from '../../storage/tests/contract.ts'
-@@ -41,6 +42,108 @@ const DESCRIPTOR: KvUnitDescriptor = {
+@@ -41,6 +42,150 @@ const DESCRIPTOR: KvUnitDescriptor = {
    hasGlobal: true,
  }
  
@@ -866,13 +866,55 @@ index f2fd65ee4..8ed12214f 100644
 +    expect((await unit2.loadAll()).tables['records']).toEqual({ k: { n: 2 } })
 +    await second.close()
 +  })
++
++  it('recovers an interrupted SQLite transaction without publishing its prefix', async () => {
++    const path = await freshDbPath()
++    // Materialize the reviewed schema before the crash process opens it.
++    const setup = new SqliteStorageBackend(new Config({ path, exclusive: true }))
++    await setup.kv.open(DESCRIPTOR)
++    await setup.close()
++
++    // Kill a real process after one statement but before COMMIT. SQLite's
++    // rollback journal must discard that prefix on the next open.
++    const crashed = spawn(process.execPath, ['--input-type=module', '-e', `
++      const { DatabaseSync } = await import('node:sqlite')
++      const db = new DatabaseSync(${JSON.stringify(path)})
++      db.exec('PRAGMA journal_mode = DELETE')
++      db.exec('BEGIN IMMEDIATE')
++      db.prepare('INSERT INTO u_specimen_records (key, value) VALUES (?, ?)').run('crash-prefix', '{"ok":true}')
++      process.stdout.write('written')
++      setTimeout(() => process.kill(process.pid, 'SIGKILL'), 20)
++      setInterval(() => {}, 1000)
++    `], { stdio: ['ignore', 'pipe', 'inherit'] })
++    try {
++      await new Promise<void>((resolve, reject) => {
++        crashed.stdout.on('data', (chunk: Buffer) => {
++          if (chunk.toString().includes('written')) resolve()
++        })
++        crashed.once('error', reject)
++        crashed.once('exit', (code, signal) => {
++          if (code !== null || signal !== 'SIGKILL') {
++            reject(new Error(`crash process exited early: code=${String(code)} signal=${String(signal)}`))
++          }
++        })
++      })
++      await new Promise<void>((resolve) => { crashed.once('exit', () => resolve()) })
++    } finally {
++      crashed.kill('SIGKILL')
++    }
++
++    const recovered = new SqliteStorageBackend(new Config({ path, exclusive: true }))
++    const recoveredUnit = await recovered.kv.open(DESCRIPTOR)
++    expect((await recoveredUnit.loadAll()).tables['records']).toEqual({})
++    await recovered.close()
++  })
 +})
 +
  describe('sqlite backend specifics', () => {
    it('opens an in-memory database', async () => {
      const backend = backendAt(':memory:')
 diff --git a/packages/storage/storage/src/backend.ts b/packages/storage/storage/src/backend.ts
-index 4a8e0ac2d..cd7feb0a2 100644
+index 9c92a42b04a2a304d9fc5e535f42967662e8838b..ef704dbc07e03f981bd17d33c89d612dd3b30b6d 100644
 --- a/packages/storage/storage/src/backend.ts
 +++ b/packages/storage/storage/src/backend.ts
 @@ -42,6 +42,15 @@ export interface KvFacet {
@@ -918,7 +960,7 @@ index 4a8e0ac2d..cd7feb0a2 100644
     * Drain this unit's in-flight writes and release it. Idempotent.
     * @returns resolution after the unit is released.
 diff --git a/packages/storage/storage/src/error.ts b/packages/storage/storage/src/error.ts
-index 9e3424db5..7db11afb6 100644
+index 9e3424db552fc8cb1a485fb76c41f0f12fb6f5dd..7db11afb6ee94acad37ae5b91b80b8b9e9441f55 100644
 --- a/packages/storage/storage/src/error.ts
 +++ b/packages/storage/storage/src/error.ts
 @@ -11,6 +11,8 @@ export type StorageErrorCode =
@@ -931,7 +973,7 @@ index 9e3424db5..7db11afb6 100644
  
  /**
 diff --git a/packages/storage/storage/src/index.ts b/packages/storage/storage/src/index.ts
-index 9344558e0..6a006b480 100644
+index 9344558e098227ec6301a7ffdcf27b8a5590ca5e..6a006b480209fbd6460cc68e70e4d59dd951df86 100644
 --- a/packages/storage/storage/src/index.ts
 +++ b/packages/storage/storage/src/index.ts
 @@ -13,7 +13,7 @@ export { BackendRegistry } from './registry.ts'
@@ -944,7 +986,7 @@ index 9344558e0..6a006b480 100644
  /**
   * Derive the Cordis lifecycle service that one named backend plugin provides.
 diff --git a/packages/storage/storage/tests/contract.ts b/packages/storage/storage/tests/contract.ts
-index d173918dc..fde7729ad 100644
+index d173918dcee2d2063fdd6a3af19b4b89e2eb118a..fde7729adaf5d1cf5f53a18724c2ab1de328d6e8 100644
 --- a/packages/storage/storage/tests/contract.ts
 +++ b/packages/storage/storage/tests/contract.ts
 @@ -88,6 +88,67 @@ export function runKvBackendContract(label: string, create: () => Promise<KvBack

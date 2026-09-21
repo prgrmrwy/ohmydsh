@@ -98,7 +98,7 @@ function fixture(rows: LocusRecord[] = [locus('a', 'child-a'), locus('b', 'child
 }
 
 const answer = (id: unknown, args: unknown, f: ReturnType<typeof fixture>) =>
-  submitInquiryAnswerFromCaller({ agent: { session: { id } } }, args, f.deps)
+  submitInquiryAnswerFromCaller({ agent: { id } }, args, f.deps)
 
 const body = (over: Record<string, unknown> = {}) => ({
   inquiryId: 'inquiry-1',
@@ -267,7 +267,7 @@ describe('caller-bound inquiry answer', () => {
         return Reflect.get(target, key) as unknown
       },
     })
-    const result = await submitInquiryAnswerFromCaller({ agent: { session: { id: 'child-b' } } }, body(), guarded)
+    const result = await submitInquiryAnswerFromCaller({ agent: { id: 'child-b' } }, body(), guarded)
     // Recording an answer is not delivering it; delivery is a separate, deferred step.
     expect(result.delivered).toBe(false)
     expect(JSON.stringify(result)).not.toMatch(/chatId|deliveryId|messageId/)

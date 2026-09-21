@@ -108,7 +108,6 @@ async function readJsonOrText(path: string): Promise<string> {
 
 async function performStart(request: StartOperationRequest, deps: OperationDeps): Promise<PreparedOperationResult> {
   validateOperationId(request.operationId)
-  if (request.taskText.trim() === '') throw new WsError('INVALID_REQUEST', 'taskText must be non-empty')
   if (request.dependencyMode !== 'lean') throw new WsError('INVALID_REQUEST', 'Only lean dependency mode is supported at start')
   const runner = deps.runner ?? runProcess
   const git = deps.git ?? createGitClient(runner)
@@ -339,38 +338,7 @@ export async function bindSource(request: { operationId: string; repoPath: strin
     }
     const updated = await saveOperation(ensureFreshSourceBinding(operation, request.sourceSessionId))
     const binding = bindingOf(updated)
-    return { sourceSessionId: request.sourceSessionId, state: binding?.mode === 'source-session' ? publicBindingLifecycle(binding) : 'bound', submitAllowed: false }
-  })
-}
-
-export async function updateSourceBinding(request: { operationId: string; repoPath: string; sourceSessionId: string; action: 'bind-source' | 'claim-submit' | 'admitted' | 'uncertain' | 'cleaned' }): Promise<BindSourceResult> {
-  validateOperationId(request.operationId)
-  const repo = await discoverRepo(request.repoPath)
-  const lock = join(repo.gitCommonDir, 'ws', 'locks', 'repo.lock')
-  return withMkdirLock(lock, async () => {
-    const operation = await loadOperation(repo.gitCommonDir, request.operationId)
-    if (operation === undefined || operation.phase !== 'prepared') throw new WsError('OPERATION_NOT_FOUND', 'Prepared operation not found')
-    const current = bindingOf(operation)
-    if (current?.mode === 'source-session' && (current.state === 'cleaned-archived' || current.state === 'released')) {
-      throw new WsError('OPERATION_CONFLICT', `Binding lifecycle ${current.state} is terminal and cannot regress`)
-    }
-    if (current?.mode === 'source-session' && current.sourceSessionId !== request.sourceSessionId) {
-      throw new WsError('OPERATION_CONFLICT', `Operation is already bound to source Session ${current.sourceSessionId}`)
-    }
-    let next = ensureFreshSourceBinding(operation, request.sourceSessionId)
-    const binding = bindingOf(next)
-    if (binding === undefined || binding.mode !== 'source-session') throw new WsError('OPERATION_INVALID', 'Binding was not established')
-    let state = binding.state
-    let submitAllowed = false
-    if (request.action === 'claim-submit') {
-      if (binding.state === 'bound') { state = 'submit-claimed'; submitAllowed = true }
-      else state = binding.state
-    } else if (request.action !== 'bind-source') {
-      state = request.action
-    }
-    next = { ...next, binding: { ...binding, state, updatedAt: new Date().toISOString() } }
-    await saveOperation(next)
-    return { sourceSessionId: request.sourceSessionId, state: publicBindingLifecycle({ ...binding, state }), submitAllowed }
+    return { sourceSessionId: request.sourceSessionId, state: binding?.mode === 'source-session' ? publicBindingLifecycle(binding) : 'bound' }
   })
 }
 

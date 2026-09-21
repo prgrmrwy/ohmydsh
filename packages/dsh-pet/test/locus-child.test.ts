@@ -1,9 +1,11 @@
+import { SessionId } from '@deepseek-ai/dsh-session'
+import { MessageId } from '@deepseek-ai/dsh-llm'
 import { describe, expect, it, vi } from 'vitest'
 import {
   adaptLocusInboxPort,
   createLocusChildAdapter,
   LOCUS_CHILD_PROVIDER,
-  LOCUS_QUEUE_PROMPT_SYMBOL,
+  LOCUS_DELIVER_PROMPT_SYMBOL,
   LOCUS_SAFE_TOOL_FILTER,
   probeLocusChildPorts,
   resolveLocusParent,
@@ -14,11 +16,12 @@ import {
   type LocusSubagentPort,
 } from '../src/host/locus/child.js'
 
+
 const PARENT_ID = 'session-parent'
 const CHILD_ID = 'session-child'
 
 function parent(id = PARENT_ID): LocusLiveParent {
-  return { session: { id } }
+  return { id }
 }
 
 function parentPort(options: {
@@ -37,7 +40,8 @@ function parentPort(options: {
 
 function subagentPort(
   start: LocusSubagentPort['startContinuable'] = async spec => ({
-    childId: spec.childId ?? CHILD_ID,
+    childId: spec.childId ?? SessionId(CHILD_ID),
+    messageId: MessageId('message-1'),
   }),
   options: {
     readonly supportsSettlementNotice?: boolean
@@ -68,7 +72,7 @@ function inboxPort(
     prompt: { type: 'text'; text: string }[],
     source: { kind: 'user' },
     signal: AbortSignal,
-  ) => Promise<string> = async () => 'message-1',
+  ) => Promise<ReturnType<typeof MessageId>> = async () => MessageId('message-1'),
 ) {
   return { queuePrompt: vi.fn(queue) }
 }
@@ -176,7 +180,10 @@ describe('generic locus child adapter', () => {
   it('refuses to create a child on a runtime that cannot suppress the parent account', async () => {
     for (const supportsSettlementNotice of [false, undefined]) {
       const start: LocusSubagentPort = {
-        startContinuable: vi.fn(async spec => ({ childId: spec.childId ?? CHILD_ID })),
+        startContinuable: vi.fn(async spec => ({
+          childId: spec.childId ?? SessionId(CHILD_ID),
+          messageId: MessageId('message-1'),
+        })),
         // `undefined` is the unknown case: an old runtime exposes no such flag.
         ...(supportsSettlementNotice === undefined ? {} : { supportsSettlementNotice }),
       }
@@ -223,7 +230,10 @@ describe('generic locus child adapter', () => {
       expect(startSpy).not.toHaveBeenCalled()
       expect(adapter.activeChild).toBeUndefined()
 
-      const idleStart = { ...subagentPort(), createIdleContinuable: vi.fn(async (spec: { childId: string }) => ({ childId: spec.childId })) }
+      const idleStart = {
+        ...subagentPort(),
+        createIdleContinuable: vi.fn(async (spec: { childId: string }) => ({ childId: SessionId(spec.childId) })),
+      }
       const idleVariant: LocusSubagentPort = {
         ...idleStart,
         supportsIdleContinuableCreate: true,
@@ -244,7 +254,7 @@ describe('generic locus child adapter', () => {
   })
 
   it('refuses idle creation before side effects when the safe-composition seam is unproven', async () => {
-    const createIdleContinuable = vi.fn(async (spec: { childId: string }) => ({ childId: spec.childId }))
+    const createIdleContinuable = vi.fn(async (spec: { childId: string }) => ({ childId: SessionId(spec.childId) }))
     const start: LocusSubagentPort = {
       ...subagentPort(undefined, { supportsIndependentContinuableCreate: false }),
       createIdleContinuable,
@@ -265,7 +275,7 @@ describe('generic locus child adapter', () => {
   })
 
   it('creates idle children with the exact durable independent safe composition', async () => {
-    const createIdleContinuable = vi.fn(async (spec: { childId: string }) => ({ childId: spec.childId }))
+    const createIdleContinuable = vi.fn(async (spec: { childId: string }) => ({ childId: SessionId(spec.childId) }))
     const start: LocusSubagentPort = {
       ...subagentPort(),
       createIdleContinuable,
@@ -352,7 +362,7 @@ describe('generic locus child adapter', () => {
   })
 
   it('shares one in-flight create and fences adopt until create publishes', async () => {
-    const gate = deferred<{ childId: string }>()
+    const gate = deferred<{ childId: ReturnType<typeof SessionId>; messageId: ReturnType<typeof MessageId> }>()
     const start = subagentPort(async () => gate.promise)
     const proof = { findChild: vi.fn(async () => ({ parentSessionId: PARENT_ID, childSessionId: 'persisted-child' })) }
     const adapter = createLocusChildAdapter({
@@ -367,7 +377,7 @@ describe('generic locus child adapter', () => {
     const adoption = adapter.adoptChild({ parentSessionId: PARENT_ID, childSessionId: 'persisted-child' })
     await flushLifecycle()
     expect(start.startContinuable).toHaveBeenCalledTimes(1)
-    gate.resolve({ childId: CHILD_ID })
+    gate.resolve({ childId: SessionId(CHILD_ID), messageId: MessageId('message-1') })
     await expect(first).resolves.toEqual({
       ok: true,
       created: true,
@@ -385,7 +395,7 @@ describe('generic locus child adapter', () => {
   })
 
   it('does not publish a child when disposed while creation is in flight', async () => {
-    const gate = deferred<{ childId: string }>()
+    const gate = deferred<{ childId: ReturnType<typeof SessionId>; messageId: ReturnType<typeof MessageId> }>()
     const release = vi.fn(async () => undefined)
     const adapter = createLocusChildAdapter({
       parent: parentPort({ resident: parent() }),
@@ -397,7 +407,7 @@ describe('generic locus child adapter', () => {
     const pending = adapter.createChild({ parentSessionId: PARENT_ID, label: 'child', prompt: 'seed' })
     await flushLifecycle()
     adapter.dispose()
-    gate.resolve({ childId: CHILD_ID })
+    gate.resolve({ childId: SessionId(CHILD_ID), messageId: MessageId('message-1') })
 
     await expect(pending).resolves.toEqual({ ok: false, reason: 'adapter-disposed' })
     expect(adapter.activeChild).toBeUndefined()
@@ -583,7 +593,7 @@ describe('generic locus child adapter', () => {
     const start = subagentPort(async () => {
       attempts += 1
       if (attempts === 1) throw new Error('transient host failure')
-      return { childId: CHILD_ID }
+      return { childId: SessionId(CHILD_ID), messageId: MessageId('message-1') }
     })
     const adapter = createLocusChildAdapter({
       parent: parentPort({ resident: parent() }),
@@ -843,7 +853,7 @@ describe('the measured symbol-keyed inbox adapter', () => {
   it('prefers the runtime package helper over the symbol lookup', async () => {
     const calls: unknown[] = []
     const service = {
-      [LOCUS_QUEUE_PROMPT_SYMBOL]: async () => 'from-symbol',
+      [LOCUS_DELIVER_PROMPT_SYMBOL]: async () => 'from-symbol',
     }
     // The runtime's own package owns the argument contract, so when the exact
     // helper is supplied it must be used instead of the loose symbol call.
@@ -866,7 +876,7 @@ describe('the measured symbol-keyed inbox adapter', () => {
   it('binds the process-stable queue symbol without importing DSH internals', async () => {
     const calls: unknown[] = []
     const service = {
-      [LOCUS_QUEUE_PROMPT_SYMBOL]: async (...args: unknown[]) => {
+      [LOCUS_DELIVER_PROMPT_SYMBOL]: async (...args: unknown[]) => {
         calls.push(args)
         return 'message-symbol'
       },
@@ -887,6 +897,7 @@ describe('the measured symbol-keyed inbox adapter', () => {
       [{ type: 'text', text: 'hello' }],
       { kind: 'user' },
       expect.any(AbortSignal),
+       'queue',
     ])
   })
 })
@@ -909,8 +920,8 @@ describe('probed host child seams', () => {
       // rather than stopping at parent resolution.
       agents: { get: (id: string) => (id === PARENT_ID ? parent() : undefined), resume: async () => undefined },
       subagents: {
-        startContinuable: async () => ({ childId: CHILD_ID }),
-        createIdleContinuable: async (spec: { childId: string }) => ({ childId: spec.childId }),
+        startContinuable: async () => ({ childId: SessionId(CHILD_ID), messageId: MessageId('message-1') }),
+        createIdleContinuable: async (spec: { childId: string }) => ({ childId: SessionId(spec.childId) }),
         withLiveContinuableChildSession: async (
           _spec: unknown,
           operation: (session: unknown) => unknown,
@@ -932,7 +943,7 @@ describe('probed host child seams', () => {
         ...(overrides.supportsLiveContinuableChildSession === true
           ? { supportsLiveContinuableChildSession: true }
           : {}),
-        [LOCUS_QUEUE_PROMPT_SYMBOL]: async () => 'message-1',
+        [LOCUS_DELIVER_PROMPT_SYMBOL]: async () => 'message-1',
       },
       ...(overrides.sessionController === undefined
         ? {}
@@ -1018,9 +1029,9 @@ describe('probed host child seams', () => {
     const noMethod = probeLocusChildPorts({
       get: (name: string) => (name === 'subagents'
         ? {
-          startContinuable: async () => ({ childId: CHILD_ID }),
+          startContinuable: async () => ({ childId: SessionId(CHILD_ID), messageId: MessageId('message-1') }),
           supportsIndependentContinuableCreate: true,
-          [LOCUS_QUEUE_PROMPT_SYMBOL]: async () => 'm',
+          [LOCUS_DELIVER_PROMPT_SYMBOL]: async () => 'm',
         }
         : name === 'agents' ? { get: () => undefined, resume: async () => undefined } : undefined),
       on: () => () => {},
@@ -1103,7 +1114,7 @@ describe('probed host child seams', () => {
       { row: { id: CHILD_ID, kind: 'child', mode: 'one-shot' }, adopted: false },
       // A runtime that reports neither field is accepted on id alone, which
       // is all the evidence it offers.
-      { row: { id: CHILD_ID }, adopted: true },
+      { row: { id: CHILD_ID, kind: 'child', mode: 'continuable' }, adopted: true },
     ] as const
 
     for (const { row, adopted } of cases) {

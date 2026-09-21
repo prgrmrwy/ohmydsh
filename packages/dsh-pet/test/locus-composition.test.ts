@@ -27,8 +27,8 @@ function composition(
   }
 }
 
-function agent(sessionId = CHILD) {
-  return { sessionId, scope: { get: vi.fn(() => ({})) } }
+function agent(id = CHILD) {
+  return { id, scope: { get: vi.fn(() => ({})) } }
 }
 
 function ports(

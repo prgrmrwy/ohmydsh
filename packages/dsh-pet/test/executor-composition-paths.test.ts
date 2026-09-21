@@ -143,35 +143,35 @@ async function composeHost(): Promise<ComposedHost> {
   /** A handle shaped like the real one, recording dispatched follow-ups. */
   const makeHandle = (sessionId: string, agentCtx: FakeAgentContext): unknown => {
     const agent = {
+      id: sessionId,
       ctx: agentCtx,
-      session: { id: sessionId },
       followup: (message: unknown) => {
         followups.push(message)
       },
       whenIdle: async () => {},
     }
-    return { agent, session: { id: sessionId } }
+    return { agent, dispose: async () => {} }
   }
 
   ctx.provide('agents', {
     create: async (options: {
       sessionId: string
-      setup?: (agentCtx: unknown) => void | Promise<void>
+      setup?: (agentCtx: unknown, agent: unknown) => void | Promise<void>
     }) => {
       created.push(options)
       const agentCtx = makeAgentContext()
       // The real factory awaits setup before publishing the Agent.
-      await options.setup?.(agentCtx)
+      await options.setup?.(agentCtx, { id: options.sessionId })
       liveAgent = makeHandle(options.sessionId, agentCtx)
       return liveAgent
     },
     resume: async (options: {
       resumeSessionId: string
-      setup?: (agentCtx: unknown) => void | Promise<void>
+      setup?: (agentCtx: unknown, agent: unknown) => void | Promise<void>
     }) => {
       resumed.push(options)
       const agentCtx = makeAgentContext()
-      await options.setup?.(agentCtx)
+      await options.setup?.(agentCtx, { id: options.resumeSessionId })
       liveAgent = makeHandle(options.resumeSessionId, agentCtx)
       return liveAgent
     },
@@ -458,8 +458,9 @@ describe('path 3: DSH itself loaded the executor', () => {
     // observer must recognize the Pet executor session and scope it, so the
     // user opening the Task natively does not break later Invocations.
     const foreign = {
+      id: executorOf(first),
       ctx: makeAgentContext(),
-      session: { id: executorOf(first) },
+
       followup: (message: unknown) => {
         host.followups.push(message)
       },
@@ -496,8 +497,9 @@ describe('path 3: DSH itself loaded the executor', () => {
     await settleTurn(host, executorOf(first))
 
     const foreign = {
+      id: executorOf(first),
       ctx: makeAgentContext(),
-      session: { id: executorOf(first) },
+
       followup: () => {},
       whenIdle: async () => {},
     }
@@ -524,8 +526,9 @@ describe('path 3: DSH itself loaded the executor', () => {
     expect((await invoke(host, 'inv-1')).ok).toBe(true)
 
     const ordinary = {
+      id: 'some-unrelated-session',
       ctx: makeAgentContext(),
-      session: { id: 'some-unrelated-session' },
+
     }
     host.ctx.emit('agent/created' as never, { agent: ordinary } as never)
 

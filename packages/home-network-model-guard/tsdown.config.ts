@@ -5,7 +5,6 @@ import { defineConfig } from 'tsdown'
 // src) is bundled into the single plugin client file.
 const external = [
   '@deepseek-ai/cordis',
-  '@deepseek-ai/dsh-client-runtime',
   '@deepseek-ai/dsh-client-locale',
   '@deepseek-ai/dsh-client-connection',
   '@deepseek-ai/dsh-client-ui-settings',

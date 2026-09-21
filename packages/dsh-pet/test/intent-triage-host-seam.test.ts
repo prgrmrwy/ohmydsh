@@ -19,8 +19,8 @@ describe('intent-triage host seam: sessionController.inspect shape (task 1.1)', 
       with: { type: 'json' },
     }) as unknown as { default: { name: string; version: string } }
     expect(pkg.default.name).toBe('@deepseek-ai/dsh-api-session-controller')
-    // Pin check: fail loudly if the reviewed dependency drifts without review.
-    expect(pkg.default.version).toBe('0.1.2-rc.1')
+    // Target pin check: fail loudly if the reviewed dependency drifts without review.
+    expect(pkg.default.version).toBe('0.1.5-rc.2')
   })
 
   it('GAP: dsh-session-persistence resolves at runtime (transitively) but is not a declared dsh-pet dependency', async () => {
@@ -96,7 +96,7 @@ describe('intent-triage host seam: sessionController.inspect shape (task 1.1)', 
     // `management.ts`/`index.ts`, the implementer sees the full real shape
     // here instead of re-deriving it from the compiled runtime again.
     for (const field of [
-      'readonly version: number;',
+      'readonly version: typeof SESSION_FORMAT_VERSION;',
       'readonly id: SessionId;',
       'readonly createdAt: number;',
       'readonly cwd?: string;',

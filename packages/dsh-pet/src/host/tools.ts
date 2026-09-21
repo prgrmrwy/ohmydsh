@@ -143,7 +143,7 @@ export interface PetLocusFinishDependencies extends PetLocusLifecycleDependencie
 
 /** Minimal execution view Pet reads; the agent loop sets `agent`. */
 interface ExecutionLike {
-  readonly agent?: { readonly session: { readonly id: unknown } }
+  readonly agent?: { readonly id: unknown }
 }
 
 type ToolArguments = Record<string, unknown>
@@ -267,7 +267,7 @@ async function resolveAuthorizedCurrent(
  * @throws PetError when the call has no owning agent.
  */
 function callerSessionId(exec: ExecutionLike): string {
-  const sessionId = exec.agent?.session.id
+  const sessionId = exec.agent?.id
   if (sessionId === undefined || sessionId === null) {
     throw new PetError(
       'NOT_A_PET_SESSION',
@@ -364,7 +364,7 @@ export function registerPetTools(
         async execute(_args, exec) {
           const context = executePetContext(
             deps.repository,
-            { agent: { session: { id: callerSessionId(exec as ExecutionLike) } } },
+            { agent: { id: callerSessionId(exec as ExecutionLike) } },
             deps,
           )
           return { json: JSON.stringify(context, null, 2) }

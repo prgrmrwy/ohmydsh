@@ -118,7 +118,7 @@ async function agentScope(
   const loopCtx = await new Promise<Context>(resolve => {
     ctx.inject(['tools'], injected => resolve(injected as Context))
   })
-  const key = { session: { id: sessionId } }
+  const key = { id: sessionId }
   const scope = createScope(loopCtx, key as never)
   return {
     key,
@@ -862,7 +862,7 @@ async function loadPetHost(seed: readonly LocusRecord[] = [], existingHome?: str
   ])
   const home = existingHome ?? await mkdtemp(path.join(tmpdir(), 'pet-assembly-'))
   const routes: { path: string }[] = []
-  const live = new Map<string, { ctx: Context; session: { id: string } }>()
+  const live = new Map<string, { ctx: Context; id: string }>()
 
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
@@ -927,7 +927,7 @@ async function loadPetHost(seed: readonly LocusRecord[] = [], existingHome?: str
     resolveAgent: async () => undefined,
   })
   ctx.provide('agents', {
-    create: async () => ({ session: { id: 'x' } }),
+    create: async () => ({ agent: { id: 'x' }, dispose: async () => {} }),
     get: (id: string) => live.get(id),
     resume: async () => undefined,
     list: () => [],
@@ -990,7 +990,7 @@ async function loadPetHost(seed: readonly LocusRecord[] = [], existingHome?: str
     ctx,
     routes,
     publish(sessionId, scope) {
-      ctx.emit('agent/created' as never, { agent: { session: { id: sessionId }, ctx: scope } } as never)
+      ctx.emit('agent/created' as never, { agent: { id: sessionId, ctx: scope } } as never)
     },
     toolNames: scope =>
       (ctx.tools as unknown as { schemas(s?: unknown): { name: string }[] })
@@ -998,7 +998,7 @@ async function loadPetHost(seed: readonly LocusRecord[] = [], existingHome?: str
         .map(schema => schema.name),
     agentScope: async sessionId => {
       const built = await agentScope(ctx, sessionId)
-      live.set(sessionId, { ctx: built.scope, session: { id: sessionId } })
+      live.set(sessionId, { ctx: built.scope, id: sessionId })
       return built
     },
     close: async () => {

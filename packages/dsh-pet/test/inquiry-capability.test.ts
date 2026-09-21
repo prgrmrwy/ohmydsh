@@ -4,19 +4,13 @@
  * Two layers on purpose:
  *  1. Pure injected-seam cases, which pin the discriminated result and prove the
  *     detector fails closed on absent / unknown / throwing seams.
- *  2. One case driven by the ACTUALLY INSTALLED `@deepseek-ai/dsh-agent` Inbox.
- *     The seam exists only in the tracked compat patch and has NOT been built,
- *     so the installed runtime still sweeps pending `next-step` input. That is
- *     the path that must work today, so it is exercised against the real class
- *     rather than a hand-written lookalike.
- *
- * If a rebuilt runtime ever ships the seam, the real-Inbox case below MUST fail.
- * That failure is the signal to re-verify the capability deliberately, not a
- * reason to loosen the detector.
+ *  2. The installed 0.1.5 runtime deliberately has no public `Inbox` constructor
+ *     export; concrete inbox ownership moved into AgentLoop. The capability is
+ *     therefore unavailable until the target-compatible overlay publishes an
+ *     explicit marker and a real AgentLoop-backed probe. This test keeps the
+ *     negative verdict without inventing a private constructor seam.
  */
 import { describe, expect, it } from 'vitest'
-import { Inbox } from '@deepseek-ai/dsh-agent'
-import type { UserMessage } from '@deepseek-ai/dsh-session'
 import {
   ISOLATED_QUEUED_TURN_CLAIM_NOT_PROBED,
   detectIsolatedQueuedTurnClaim,
@@ -193,51 +187,16 @@ describe('ISOLATED_QUEUED_TURN_CLAIM_NOT_PROBED', () => {
   })
 })
 
-describe('detectIsolatedQueuedTurnClaim against the installed runtime Inbox', () => {
-  const message = (id: string): UserMessage => ({
-    id, role: 'user', content: [{ type: 'text', text: id }], source: { kind: 'user' },
-  } as UserMessage)
-
-  /** In-memory append sink; NOT a Session, no persistence, no agent, no model. */
-  function realInboxProbe(fixture: IsolatedClaimProbeFixture): IsolatedClaimProbeObservation {
-    const events: { type: string; data: unknown; seq: number }[] = []
-    const sink = {
-      ownEvents: () => events,
-      append(type: string, data: unknown) {
-        const event = { type, data, seq: events.length }
-        events.push(event)
-        return event
-      },
-    }
-    const inbox = new Inbox(sink as never, { inserted() {}, discarded() {}, claimed() {} })
-    inbox.append('next-step', message(fixture.nextStepId))
-    inbox.append('next-turn', message(fixture.nextTurnId))
-    // The opt-in option is passed exactly as the patched seam defines it. An
-    // unpatched build accepts the extra argument silently and ignores it.
-    const claimed = (inbox.claim as (
-      target: 'next-turn', turn: number, options?: { isolateQueuedTurn?: boolean },
-    ) => UserMessage[])('next-turn', 1, { isolateQueuedTurn: true })
-    return {
-      claimedMessageIds: claimed.map(value => String(value.id)),
-      pendingNextStepIds: inbox.nextStep.map(value => String(value.id)),
-    }
-  }
-
-  it('is unavailable today: the installed build has no marker at all', () => {
-    // No AgentLoop marker is supplied because the installed loop does not declare
-    // one. This is the verdict the Host actually gets right now.
+describe('detectIsolatedQueuedTurnClaim against the installed runtime', () => {
+  it('is unavailable today because the target AgentLoop exposes no marker or probe seam', () => {
     expect(detectIsolatedQueuedTurnClaim({
       agentLoop: {},
-      probeIsolatedClaim: realInboxProbe,
     })).toEqual({ available: false, reason: 'marker-absent' })
   })
 
-  it('stays unavailable even if a marker were present, because the real claim still sweeps GUI input', () => {
-    // This is the delivery gap recorded in the capability audit: a patched loop
-    // paired with an unpatched dsh-agent. A marker alone is NOT the capability.
+  it('does not accept a marker without an explicit behavioral probe', () => {
     expect(detectIsolatedQueuedTurnClaim({
       agentLoop: capableLoop,
-      probeIsolatedClaim: realInboxProbe,
-    })).toEqual({ available: false, reason: 'probe-swept-foreign-input' })
+    })).toEqual({ available: false, reason: 'probe-missing' })
   })
 })

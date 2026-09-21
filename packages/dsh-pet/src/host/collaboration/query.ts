@@ -9,7 +9,7 @@ export interface CollaborationQueryDependencies {
 /** Tool execution identity only; never accept a model-supplied parent selector. */
 export async function queryCollaborationContext(execution: unknown, deps: CollaborationQueryDependencies): Promise<CollaborationContextRecord> {
   try {
-    const sessionId = (execution as { agent?: { session?: { id?: unknown } } } | undefined)?.agent?.session?.id
+    const sessionId = (execution as { agent?: { id?: unknown } } | undefined)?.agent?.id
     if (typeof sessionId !== 'string') throw new CollaborationUnavailableError()
     return await readForCollaborationCaller(sessionId, deps.ports, caller => {
       // Read at the resolver's final fence: awaiting a separate resolve() then

@@ -33,7 +33,7 @@ function fixture(rows: LocusRecord[] = [locus('a', 'child-a'), locus('b', 'child
 
 const denied = { code: 'COLLABORATION_UNAVAILABLE' }
 const call = (id: unknown, f: ReturnType<typeof fixture>) =>
-  listCollaborators({ agent: { session: { id } } }, f.deps)
+  listCollaborators({ agent: { id } }, f.deps)
 
 describe('caller-bound collaborator roster', () => {
   it('lists a main session own current children with relationship and reachability', async () => {

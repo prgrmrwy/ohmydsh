@@ -12,6 +12,8 @@
 
 import { randomUUID } from 'node:crypto'
 import type { CapabilityRegistry } from './capabilities.js'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Context } from '@deepseek-ai/cordis'
 import {
   validateCapture,
   type SourceContextRegistry,
@@ -76,7 +78,8 @@ export interface CoordinatorDeps {
    * the isolation boundary would exist only on paper.
    */
   readonly executorSetup?: (
-    agentCtx: unknown,
+    agentCtx: Context,
+    agent: Agent,
     presetId: string | undefined,
     includeAllowlist: boolean,
   ) => void | Promise<void>

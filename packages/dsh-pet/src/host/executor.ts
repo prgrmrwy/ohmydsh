@@ -8,6 +8,16 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import type {
+  Agent,
+  AgentHandle,
+  AgentSetup,
+  AgentSetupCommit,
+  CreateAgentOptions,
+  ResumeAgentOptions,
+} from '@deepseek-ai/dsh-agent'
+import { SessionId, type SessionId as BrandedSessionId } from '@deepseek-ai/dsh-session'
+import type { Context } from '@deepseek-ai/cordis'
 import { PetError } from './errors.js'
 import type { PetRepository } from './repository.js'
 import { executorTitle, shortIdOf } from './workspace.js'
@@ -22,15 +32,16 @@ export interface PetModelSelection {
 
 /** The subset of the DSH agent registry Pet uses. */
 export interface AgentRegistryLike {
-  create(options: {
-    sessionId: string
-    meta?: { cwd?: string; agentPreset?: string }
-    /** Mirrors DSH's flat `AgentOptions`; a nested shape silently drops both. */
-    agentOptions?: { provider?: string; model?: string }
-    setup?: (agentCtx: unknown) => void | Promise<void>
-  }): Promise<{ session: { id: string } }>
-  get(sessionId: string): unknown
+  create(options: CreateAgentOptions): Promise<AgentHandle>
+  get(sessionId: BrandedSessionId): Agent | undefined
+  resume(options: ResumeAgentOptions): Promise<AgentHandle>
 }
+
+/** The setup callback shape accepted by DSH's unpublished-agent factory. */
+export type PetAgentSetup = AgentSetup
+
+/** The optional publication-boundary commit returned by a setup callback. */
+export type PetAgentSetupCommit = AgentSetupCommit
 
 /**
  * The subset of the DSH LLM registry Pet uses to validate routing.
@@ -160,10 +171,11 @@ export interface CreateExecutorOptions {
    * identity so a user-selected Pet preset is not mistaken for resident mode.
    */
   readonly setup?: (
-    agentCtx: unknown,
+    agentCtx: Context,
+    agent: Agent,
     presetId: string | undefined,
     includeAllowlist: boolean,
-  ) => void | Promise<void>
+  ) => AgentSetupCommit | void | Promise<AgentSetupCommit | void>
 }
 
 /**
@@ -228,8 +240,9 @@ export async function createTaskWithExecutor(
     options.residentWorkspaceId !== undefined ? STANDARD_PRESET : options.selection.agentPreset
 
   try {
+    const sessionId = SessionId(identity.executorSessionId)
     await agents.create({
-      sessionId: identity.executorSessionId,
+      sessionId,
       meta: {
         // Ordinarily the Pet Workspace, never the source repository: one Task
         // may outlive or move across source snapshots, and source access is
@@ -259,9 +272,10 @@ export async function createTaskWithExecutor(
       },
       ...(options.setup !== undefined
         ? {
-            setup: (agentCtx: unknown) =>
+            setup: async (agentCtx: Context, agent: Agent) =>
               options.setup?.(
                 agentCtx,
+                agent,
                 effectivePreset,
                 options.residentWorkspaceId === undefined,
               ),
@@ -272,7 +286,7 @@ export async function createTaskWithExecutor(
     // to the Task — the executor works, it is only mis-filed in the sidebar —
     // so it must not roll back a usable session.
     await options
-      .attachToWorkspace?.(identity.executorSessionId, options.residentWorkspaceId)
+      .attachToWorkspace?.(String(sessionId), options.residentWorkspaceId)
       .catch(() => undefined)
   } catch (error) {
     await repository.setTaskStatus(

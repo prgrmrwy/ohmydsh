@@ -112,10 +112,10 @@ async function build(
   const seam: SubagentSeam = {
     agents: {
       get: (id: string) =>
-        options.resident === false ? undefined : ({ session: { id } } as LiveAgentLike),
+        options.resident === false ? undefined : ({ id } as LiveAgentLike),
       resume: vi.fn(async ({ resumeSessionId }: { resumeSessionId: string }) => {
         if (options.resumeFails === true) throw new Error('cannot resume')
-        return { agent: { session: { id: resumeSessionId } } as LiveAgentLike }
+        return { agent: { id: resumeSessionId } as LiveAgentLike, dispose: async () => {} }
       }),
     },
     subagents: {
@@ -125,7 +125,7 @@ async function build(
     },
     queuePrompt: vi.fn(async (parent: LiveAgentLike, childId: string, text: string) => {
       if (options.queueFails !== undefined) throw options.queueFails
-      queued.push({ childId, text, parentId: parent.session.id })
+      queued.push({ childId, text, parentId: parent.id })
       return 'message-1'
     }),
     onChildSettled: fn => {

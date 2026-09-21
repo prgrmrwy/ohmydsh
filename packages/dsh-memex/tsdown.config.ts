@@ -4,7 +4,6 @@ import { defineConfig } from 'tsdown'
 // browser bundle externalizes them all and inlines only this package's src.
 const external = [
   '@deepseek-ai/cordis',
-  '@deepseek-ai/dsh-client-runtime',
   '@deepseek-ai/dsh-client-connection',
   '@deepseek-ai/dsh-client-locale',
   '@deepseek-ai/dsh-client-ui-settings',

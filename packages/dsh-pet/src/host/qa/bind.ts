@@ -16,6 +16,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import { PetError } from '../errors.js'
 import { forkQaChild, qaGroupName, type QaActionDeps, type QaSource } from './action.js'
 import { archiveStale, chatOccupancy, qaScopeKeyOf, sessionOccupancy } from './occupancy.js'
@@ -139,12 +140,13 @@ export async function bindExistingGroup(
   await archiveStale(repository, byChat)
   await archiveStale(repository, bySession)
 
-  const parent = deps.seam.agents.get(target.id)
+  const targetSessionId = SessionId(target.id)
+  const parent = deps.seam.agents.get(targetSessionId)
   const liveParent =
     parent ??
     (await deps.seam.agents
-      .resume({ resumeSessionId: target.id })
-      .then(handle => handle?.agent ?? deps.seam.agents.get(target.id))
+      .resume({ resumeSessionId: targetSessionId })
+      .then(handle => handle?.agent ?? deps.seam.agents.get(targetSessionId))
       .catch(() => undefined))
   if (liveParent === undefined) {
     return {
@@ -230,7 +232,7 @@ export async function bindExistingGroup(
     // Unlike the create path there is no group to strand here — nothing was
     // created in Lark — so rollback is just releasing the child.
     try {
-      await deps.seam.subagents.drainContinuableChildren(liveParent, [childId])
+      await deps.seam.subagents.drainContinuableChildren(liveParent, [SessionId(childId)])
     } catch (releaseError) {
       deps.log?.(
         `bind rollback could not release child ${childId}: ${

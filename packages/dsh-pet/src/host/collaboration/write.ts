@@ -39,7 +39,7 @@ export async function updateCollaborationContextForCaller(
 ): Promise<AuthoredCollaborationContext> {
   let commit: (() => Promise<AuthoredCollaborationContext>) | undefined
   try {
-    const sessionId = (execution as { agent?: { session?: { id?: unknown } } } | undefined)?.agent?.session?.id
+    const sessionId = (execution as { agent?: { id?: unknown } } | undefined)?.agent?.id
     if (typeof sessionId !== 'string') throw new CollaborationUnavailableError()
     // Derive provenance inside the resolver's final fence, then commit outside
     // it: the store performs its own atomic recheck, and holding the fence

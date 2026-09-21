@@ -26,7 +26,7 @@ const CREATED_CHAT = 'oc_created000000000000000000000000'
 
 /** A live parent Agent as the seam hands it around. */
 function liveAgent(id = SOURCE_SESSION): LiveAgentLike {
-  return { session: { id } }
+  return { id }
 }
 
 interface SeamStub {
@@ -54,7 +54,7 @@ function seamStub(
         get: (id: string) => (options.resident === false ? undefined : liveAgent(id)),
         resume: vi.fn(async ({ resumeSessionId }: { resumeSessionId: string }) => {
           if (options.resumeFails === true) throw new Error('cannot resume')
-          return { agent: liveAgent(resumeSessionId) }
+          return { agent: liveAgent(resumeSessionId), dispose: async () => {} }
         }),
       },
       subagents: {

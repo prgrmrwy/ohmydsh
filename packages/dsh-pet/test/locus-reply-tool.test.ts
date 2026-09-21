@@ -83,7 +83,7 @@ function lifecycleTools(current = true, overrides: {
 }
 
 const childExec = {
-  agent: { session: { id: 'child-1' } },
+  agent: { id: 'child-1' },
   signal: new AbortController().signal,
 }
 
@@ -276,7 +276,7 @@ describe('caller-bound Feishu lifecycle tools', () => {
     })
     const tool = definitions.find(item => item.name === PET_LOCUS_FINISH_TOOL)!
     const exec = {
-      agent: { session: { id: 'child-1' } },
+      agent: { id: 'child-1' },
       signal: new AbortController().signal,
     }
     const claim = (value: LocusInboxClaim) => claimListeners.forEach(listener => listener(value))
@@ -349,7 +349,7 @@ describe('caller-bound Feishu lifecycle tools', () => {
       })
       const tool = definitions.find(item => item.name === PET_LOCUS_FINISH_TOOL)!
       const exec = {
-        agent: { session: { id: 'child-1' } },
+        agent: { id: 'child-1' },
         signal: new AbortController().signal,
       }
       const claim = (value: LocusInboxClaim) => claimListeners.forEach(listener => listener({ sourceKind: 'user', ...value }))

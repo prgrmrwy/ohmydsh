@@ -99,9 +99,9 @@ async function boot(home?: string): Promise<Deployment> {
   const agents: AgentRegistryLike = {
     create: vi.fn(async (options: { sessionId: string }) => {
       createdSessions.add(options.sessionId)
-      return { session: { id: options.sessionId } }
+      return { agent: { id: options.sessionId }, dispose: async () => {} }
     }),
-    get: (id: string) => (createdSessions.has(id) ? {} : undefined),
+    get: (id: string) => (createdSessions.has(id) ? { id } : undefined),
   } as AgentRegistryLike
 
   const dispatched: { session: string; text: string }[] = []
@@ -347,14 +347,14 @@ describe('Task, executor and Invocation flow', () => {
     })
 
     const context = executePetContext(deployment.repository, {
-      agent: { session: { id: accepted.task.executorSessionId } },
+      agent: { id: accepted.task.executorSessionId },
     })
 
     expect(context.source.sessionId).toBe('src-1')
     expect(context.invocationId).toBe('inv-a')
     // An ordinary session gets nothing.
     expect(() =>
-      executePetContext(deployment.repository, { agent: { session: { id: 'ordinary' } } }),
+      executePetContext(deployment.repository, { agent: { id: 'ordinary' } }),
     ).toThrow(/not bound to a Pet Task/)
   })
 

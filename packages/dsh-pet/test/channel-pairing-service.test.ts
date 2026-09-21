@@ -70,7 +70,7 @@ async function fixture() {
   const coordinator = new PetCoordinator({
     repository: created.repository,
     capabilities: new CapabilityRegistry(),
-    agents: { create: async () => ({}), get: () => ({}) } as never,
+    agents: { create: async (options: { sessionId: string }) => ({ agent: { id: options.sessionId }, dispose: async () => {} }), get: () => ({ id: 'pairing-test' }) } as never,
     dispatcher: { dispatch: async () => {} },
     resolver: { getSession: () => undefined, getWorkspace: () => undefined },
     contextProviders: new SourceContextRegistry(),

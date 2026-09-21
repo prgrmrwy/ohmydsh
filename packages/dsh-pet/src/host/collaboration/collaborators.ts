@@ -90,7 +90,7 @@ export async function listCollaborators(
   deps: CollaboratorRosterDependencies,
 ): Promise<CollaboratorRoster> {
   try {
-    const sessionId = (execution as { agent?: { session?: { id?: unknown } } } | undefined)?.agent?.session?.id
+    const sessionId = (execution as { agent?: { id?: unknown } } | undefined)?.agent?.id
     if (typeof sessionId !== 'string') throw new CollaborationUnavailableError()
     return await readForCollaborationCaller(sessionId, deps.ports, caller => {
       const members: CollaboratorMember[] = []

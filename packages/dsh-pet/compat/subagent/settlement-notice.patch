@@ -1,8 +1,8 @@
 diff --git a/packages/core/agent-loop/src/agent.ts b/packages/core/agent-loop/src/agent.ts
-index 1b8448e..f9f08bc 100644
+index 06e1f51..9cac919 100644
 --- a/packages/core/agent-loop/src/agent.ts
 +++ b/packages/core/agent-loop/src/agent.ts
-@@ -235,7 +235,10 @@ export class ReactLoopAgent implements Agent {
+@@ -241,7 +241,10 @@ export class ReactLoopAgent implements Agent {
      /* v8 ignore next -- private callers establish the running phase before proposing a step */
      if (this.phase.kind !== 'running') throw new Error(`agent "${this.id}": pre-step outside running phase`)
      const signal = this.phase.abort.signal
@@ -14,27 +14,27 @@ index 1b8448e..f9f08bc 100644
      const assembly = await this.loopCtx.systemPrompt.assemble(assembleContextFor(this, signal))
      signal.throwIfAborted()
      const sections = renderContextSections(assembly)
-@@ -268,6 +271,11 @@ export class ReactLoopAgent implements Agent {
+@@ -282,6 +285,11 @@ export class ReactLoopAgent implements Agent {
      phase.turn = turn
      let turnEnds: TurnEndReason | null = null
      let target: InboxTarget = 'next-turn'
 +    // An isolated turn ends at its own completion instead of extending itself
 +    // with input it deliberately left pending. That input is not lost: the
 +    // driver reopens a turn for it, where an empty `next-turn` makes the claim
-+    // fall back to the default batch and gives it its own single-origin turn.
++    // fall back to the default batch.
 +    const isolatingQueuedTurn = this.options.isolateQueuedTurnClaim === true
      try {
        while (true) {
          signal.throwIfAborted()
-@@ -301,11 +309,15 @@ export class ReactLoopAgent implements Agent {
+@@ -312,11 +320,15 @@ export class ReactLoopAgent implements Agent {
            this.session.append('step/end', { turn, step })
          }
          signal.throwIfAborted()
 -        if (turnEnds && this.inbox.nextStep.length === 0) {
 +        // Both `nextStep` reads stay live: an `agent/turn-stopping` listener may
-+        // append steering that only the second one can observe. Isolation
-+        // short-circuits ahead of them, so an isolated turn never extends itself
-+        // with input it deliberately left pending.
++        // append steering only the second one can observe. Isolation
++        // short-circuits ahead of them, so an isolated turn never extends
++        // itself with input it deliberately left pending.
 +        if (turnEnds && (isolatingQueuedTurn || this.inbox.nextStep.length === 0)) {
            await this.dispatch.serial('agent/turn-stopping', { turn, signal })
            signal.throwIfAborted()
@@ -44,94 +44,128 @@ index 1b8448e..f9f08bc 100644
          target = 'next-step'
        }
      } catch (error: unknown) {
-diff --git a/packages/core/agent-loop/src/index.ts b/packages/core/agent-loop/src/index.ts
-index 572f2bc..39724f7 100644
---- a/packages/core/agent-loop/src/index.ts
-+++ b/packages/core/agent-loop/src/index.ts
-@@ -352,6 +352,14 @@ function validateConfiguredAgents(agents: Config['agents']): void {
- export class AgentLoop extends Service implements AgentFactory {
-   static inject = ['agents', 'sessions', 'llm', 'tools', 'systemPrompt', 'sessionProjections']
- 
-+  /**
-+   * Literal marker for `AgentOptions.isolateQueuedTurnClaim`. An older loop
-+   * silently ignores the unknown option and claims the combined batch, so a
-+   * Host that needs one provable origin per turn must prove this driver owns
-+   * the behavior before creating such an agent.
-+   */
-+  readonly supportsIsolatedQueuedTurnClaim: true = true
-+
-   /** Runtime schema for declarative agents. */
-   static Config = z.object({
-     maxParallelToolCalls: z.number().step(1).min(1).default(DEFAULT_MAX_PARALLEL_TOOL_CALLS),
-diff --git a/packages/core/agent/src/inbox.ts b/packages/core/agent/src/inbox.ts
-index c5d50b2..576a80b 100644
---- a/packages/core/agent/src/inbox.ts
-+++ b/packages/core/agent/src/inbox.ts
-@@ -11,6 +11,27 @@ import type { InboxTarget } from './types.ts'
- /** Mutable state privately owned by an {@link Inbox}. */
- type InboxState = Record<InboxTarget, UserMessage[]>
+diff --git a/packages/core/agent-loop/src/inbox.ts b/packages/core/agent-loop/src/inbox.ts
+index db89cd3..98e1921 100644
+--- a/packages/core/agent-loop/src/inbox.ts
++++ b/packages/core/agent-loop/src/inbox.ts
+@@ -17,6 +17,21 @@ import type {
+ } from '@deepseek-ai/dsh-agent'
+ import { z } from 'zod'
  
 +/**
 + * Caller-selected scope of one {@link Inbox.claim} at a `next-turn` boundary.
 + *
-+ * `Inbox.claim` is a pure deletion: it publishes the claimed batch and keeps no
-+ * undo path, so a caller that needs one provable origin per turn cannot inspect
-+ * a mixed batch and put the foreign part back. This option lets such a caller
-+ * decide the scope BEFORE the deletion instead.
++ * `claim` is a pure deletion with no undo path, so a caller that needs one
++ * provable origin per turn decides the scope BEFORE the deletion happens.
 + */
 +export interface ClaimOptions {
 +  /**
-+   * Claim only the head `next-turn` message and leave every pending
-+   * `next-step` message pending.
-+   *
-+   * Ignored at a `next-step` boundary, which owns no queued turn, and ignored
-+   * when no queued turn exists: isolating an empty `next-turn` would return an
-+   * empty batch and end the turn, stranding pending `next-step` input with no
-+   * later boundary to claim it. Omitted or `false` keeps the combined batch.
++   * Claim only the head `next-turn` message and leave pending `next-step`
++   * input pending. Ignored at a `next-step` boundary and when no queued turn
++   * exists, so parked input is never stranded.
 +   */
 +  isolateQueuedTurn?: boolean
 +}
 +
- /** Live notifications committed by inbox mutations. */
- export interface InboxNotifications {
-   /** Publish one inserted message. */
-@@ -61,15 +82,26 @@ export class Inbox {
+ /** Wire validation for pending agent input reconstructed from durable inbox splices. */
+ export const inboxProjectionSchema = z.object({
+   'next-turn': z.array(z.custom<UserMessage>()).readonly(),
+@@ -103,13 +118,23 @@ export class ReactLoopInbox implements InboxContract {
    }
  
    /**
--   * Remove and return the complete batch proposed for one step, publishing
--   * each claimed message. The durable splices are pure deletions.
+-   * Remove and return the complete batch proposed for one step.
 +   * Remove and return the batch proposed for one step, publishing exactly the
-+   * messages this call claimed. The durable splices are pure deletions, so the
-+   * claimed batch cannot be returned to the pending lists afterwards.
++   * messages this call claimed. The durable splices are pure deletions, so a
++   * claimed batch cannot be put back afterwards.
     * @param target - whether this boundary also consumes one queued turn.
     * @param turn - turn that will own the claimed batch.
 -   * @returns next-step input followed by the queued turn, when requested.
-+   * @param options - opt-in narrowing of the claim scope; omitted keeps the
-+   *   default combined batch.
++   * @param options - opt-in narrowing; omitted keeps the combined batch.
 +   * @returns next-step input followed by the queued turn, when requested; only
 +   *   the head queued turn under {@link ClaimOptions.isolateQueuedTurn}.
-    * @internal - The agent loop's step-boundary operation, not a plugin extension point.
     */
 -  claim(target: InboxTarget, turn: number): UserMessage[] {
 -    const claimed = this.mutate('next-step', 0, this.nextStep.length, [], false)
 +  claim(target: InboxTarget, turn: number, options?: ClaimOptions): UserMessage[] {
 +    // An isolated claim must not touch `next-step` at all: leaving those
-+    // messages pending is the whole point. Isolation needs a queued turn to
-+    // claim, otherwise the batch would be empty and the parked `next-step`
-+    // input would never reach a later boundary.
++    // messages pending is the whole point. Isolation needs a queued turn,
++    // otherwise the batch would be empty and parked input would be stranded.
 +    const isolated = target === 'next-turn'
 +      && options?.isolateQueuedTurn === true
 +      && this.nextTurn.length > 0
 +    const claimed = isolated ? [] : this.mutate('next-step', 0, this.nextStep.length, [], false)
-     if (target === 'next-turn') {
-       claimed.push(...this.mutate('next-turn', 0, 1, [], false))
-     }
+     if (target === 'next-turn') claimed.push(...this.mutate('next-turn', 0, 1, [], false))
+     for (const message of claimed) this.dispatch.emit('agent/inbox/claimed', { message, turn })
+     return claimed
+diff --git a/packages/core/agent-loop/src/index.ts b/packages/core/agent-loop/src/index.ts
+index aa967f8..81d2217 100644
+--- a/packages/core/agent-loop/src/index.ts
++++ b/packages/core/agent-loop/src/index.ts
+@@ -357,6 +357,14 @@ function validateConfiguredAgents(agents: Config['agents']): void {
+ 
+ /** Concrete agent factory and driver service. */
+ export class AgentLoop extends Service implements AgentFactory {
++  /**
++   * Literal marker for `AgentOptions.isolateQueuedTurnClaim`. An older loop
++   * silently ignores the unknown option and claims the combined batch, so a
++   * Host needing one provable origin per turn proves this driver owns the
++   * behavior before creating such an agent.
++   */
++  readonly supportsIsolatedQueuedTurnClaim: true = true
++
+   static inject = ['agents', 'sessions', 'llm', 'tools', 'systemPrompt', 'sessionProjections']
+ 
+   /** Runtime schema for declarative agents. */
+diff --git a/packages/core/agent-loop/tests/inbox.spec.ts b/packages/core/agent-loop/tests/inbox.spec.ts
+index 028c42c..a75dccd 100644
+--- a/packages/core/agent-loop/tests/inbox.spec.ts
++++ b/packages/core/agent-loop/tests/inbox.spec.ts
+@@ -264,3 +264,39 @@ describe('ReactLoopInbox', () => {
+     expect(session.snapshotEvents()).toHaveLength(beforeClear + 2)
+   })
+ })
++
++describe('isolated queued-turn claim', () => {
++  it('claims only the head queued turn and leaves next-step pending', async () => {
++    const { inbox } = await inboxAgent('isolate-claim')
++    inbox.append('next-step', freezeMessage(createUserMessage({ content: [{ type: 'text', text: 'parked' }], source: { kind: 'user' } })))
++    inbox.append('next-turn', freezeMessage(createUserMessage({ content: [{ type: 'text', text: 'queued' }], source: { kind: 'user' } })))
++
++    const claimed = inbox.claim('next-turn', 1, { isolateQueuedTurn: true })
++
++    expect(claimed).toHaveLength(1)
++    expect(claimed[0]!.content).toEqual([{ type: 'text', text: 'queued' }])
++    // The whole point: parked input survives for a later boundary.
++    expect(inbox.nextStep).toHaveLength(1)
++  })
++
++  it('keeps the combined batch by default', async () => {
++    const { inbox } = await inboxAgent('default-claim')
++    inbox.append('next-step', freezeMessage(createUserMessage({ content: [{ type: 'text', text: 'parked' }], source: { kind: 'user' } })))
++    inbox.append('next-turn', freezeMessage(createUserMessage({ content: [{ type: 'text', text: 'queued' }], source: { kind: 'user' } })))
++
++    expect(inbox.claim('next-turn', 1)).toHaveLength(2)
++    expect(inbox.nextStep).toHaveLength(0)
++  })
++
++  it('falls back to the combined batch when no queued turn exists', async () => {
++    const { inbox } = await inboxAgent('empty-queued-turn')
++    inbox.append('next-step', freezeMessage(createUserMessage({ content: [{ type: 'text', text: 'parked' }], source: { kind: 'user' } })))
++
++    // Isolating an empty next-turn would strand parked input with no later
++    // boundary to claim it, so isolation must not apply here.
++    const claimed = inbox.claim('next-turn', 1, { isolateQueuedTurn: true })
++
++    expect(claimed).toHaveLength(1)
++    expect(inbox.nextStep).toHaveLength(0)
++  })
++})
 diff --git a/packages/core/agent/src/runtime-types.ts b/packages/core/agent/src/runtime-types.ts
-index c8bc08e..85f847c 100644
+index 31338e8..1f90ba2 100644
 --- a/packages/core/agent/src/runtime-types.ts
 +++ b/packages/core/agent/src/runtime-types.ts
-@@ -31,6 +31,17 @@ export interface AgentOptions {
+@@ -32,6 +32,15 @@ export interface AgentOptions {
    reasoningEffort?: ReasoningEffortId
    /** Maximum output tokens for each conversation-model request. */
    maxTokens?: number
@@ -141,19 +175,17 @@ index c8bc08e..85f847c 100644
 +   *
 +   * Opt-in and off by default: the default loop claims one combined batch, and
 +   * `Inbox.claim` cannot undo a claim, so an agent whose turns must have one
-+   * provable origin selects the narrower scope before the claim happens. Step
-+   * boundaries inside a turn are unaffected — they own no queued turn and still
-+   * drain `next-step` normally.
++   * provable origin selects the narrower scope before the claim happens.
 +   */
 +  isolateQueuedTurnClaim?: boolean
  }
  
  /** Options for {@link Agent.cancel}. */
 diff --git a/packages/subagent/subagent/src/child-agent.ts b/packages/subagent/subagent/src/child-agent.ts
-index 228b9de..e384855 100644
+index c00aa21..02dfd22 100644
 --- a/packages/subagent/subagent/src/child-agent.ts
 +++ b/packages/subagent/subagent/src/child-agent.ts
-@@ -139,9 +139,13 @@ export function childSessionMeta(
+@@ -139,9 +139,15 @@ export function childSessionMeta(
    parent: Agent,
    childDepth: number,
    isSeeded: boolean,
@@ -161,56 +193,53 @@ index 228b9de..e384855 100644
  ): NonNullable<CreateAgentOptions['meta']> {
    const parentHeader = parent.session.header
 -  const agentPreset = parent.ctx.get('agentPresets')?.composedPreset(parent.ctx)
-+  const agentPreset = capturedAgentPreset ?? parent.ctx.get('agentPresets')?.composedPreset(parent.ctx)
 +  if (capturedAgentPreset !== undefined && capturedAgentPreset.trim() === '') {
 +    throw new Error('independent subagent child requires a nonblank agent preset')
 +  }
++  // An independent child persists the preset it was created under, so a cold
++  // resume restores that exact selection instead of the parent's later one.
++  const agentPreset = capturedAgentPreset ?? parent.ctx.get('agentPresets')?.composedPreset(parent.ctx)
    return {
      ...parentHeader.cwd !== undefined ? { cwd: parentHeader.cwd } : {},
      ...agentPreset === undefined ? {} : { agentPreset },
-@@ -196,12 +200,7 @@ export const SUBAGENT_DELEGATION_CONTEXT
-  * @param parent - the delegating parent whose composition the child joins.
-  * @param composition - the per-child persona and tool filter to install.
-  */
--export function applyChildComposition(
--  childCtx: Context,
--  parent: Agent,
--  composition: ChildComposition,
--): void {
--  childCtx.get('agentPresets')?.composeFrom(childCtx, parent.ctx)
+@@ -202,6 +208,11 @@ export function applyChildComposition(
+   composition: ChildComposition,
+ ): void {
+   childCtx.get('agentPresets')?.composeFrom(childCtx, parent.ctx)
++  applyLocalChildComposition(childCtx, composition)
++}
++
++/** Apply only the child's own overlays, with no parent-derived composition. */
 +function applyLocalChildComposition(childCtx: Context, composition: ChildComposition): void {
    childCtx.systemPrompt.context({
      name: 'subagent:delegation',
      order: childCtx.systemPrompt.getContextOrder('SUBAGENT_DELEGATION'),
-@@ -217,6 +216,39 @@ export function applyChildComposition(
+@@ -217,6 +228,36 @@ export function applyChildComposition(
    if (composition.toolFilter !== undefined) childCtx.tools.restrict(composition.toolFilter)
  }
  
-+/** Compose a legacy child by joining its parent's live standing preset. */
-+export function applyChildComposition(
-+  childCtx: Context,
-+  parent: Agent,
-+  composition: ChildComposition,
-+): void {
-+  childCtx.get('agentPresets')?.composeFrom(childCtx, parent.ctx)
-+  applyLocalChildComposition(childCtx, composition)
-+}
-+
 +/**
-+ * Compose an independent child from its saved preset, then apply local overlays.
-+ * The header is checked after mounting to ensure the mounted preset is exactly
-+ * the durable child selection; no parent composition fallback is allowed.
++ * Compose an independent child from its OWN durable saved preset instead of
++ * the parent's live standing composition, then apply local overlays.
++ *
++ * The mounted preset is checked against the child's durable header, so a
++ * silent fallback to the parent's composition cannot masquerade as an
++ * independent child.
++ * @param childCtx - the child's creation-window context.
++ * @param child - the unpublished child Agent being composed.
++ * @param composition - per-child persona and tool filter.
++ * @param agentPreset - the durable preset this child must run under.
 + */
 +export async function applyIndependentChildComposition(
 +  childCtx: Context,
++  child: Agent,
 +  composition: ChildComposition,
 +  agentPreset: string,
 +): Promise<void> {
 +  if (agentPreset.trim() === '') throw new Error('independent subagent child requires a nonblank agent preset')
 +  const presets = childCtx.get('agentPresets')
-+  const child = childCtx.agent as Agent | undefined
-+  if (presets === undefined || child === undefined) {
-+    throw new Error('independent subagent child requires agent-presets and agent services')
++  if (presets === undefined) {
++    throw new Error('independent subagent child requires the agent-presets service')
 +  }
 +  const mounted = await presets.mount(childCtx, agentPreset)
 +  if (mounted.id !== agentPreset || child.session.header.agentPreset !== agentPreset) {
@@ -222,746 +251,406 @@ index 228b9de..e384855 100644
  /** Policy seeded onto a child session's log at the delegation boundary. */
  export interface DelegatedPolicyOverrides {
    /** The parent session's explicit sandbox-mode override, or `undefined` without one. */
-diff --git a/packages/subagent/subagent/src/continuation.ts b/packages/subagent/subagent/src/continuation.ts
-index 2103ce2..42bed2c 100644
---- a/packages/subagent/subagent/src/continuation.ts
-+++ b/packages/subagent/subagent/src/continuation.ts
-@@ -38,10 +38,16 @@ import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
- import type { SessionObservation, SessionQueryEngine } from '@deepseek-ai/dsh-session-query'
- import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
- import { foldSubagentDescriptor, snapshotSubagentDescriptor } from './descriptor.ts'
--import type { SubagentDescriptorData } from './descriptor.ts'
-+import type {
-+  SubagentContextMode,
-+  ContinuableSubagentDescriptorInput,
-+  SubagentDescriptorData,
-+  SubagentSettlementNotice,
-+} from './descriptor.ts'
+diff --git a/packages/subagent/subagent/src/continuation-activation.ts b/packages/subagent/subagent/src/continuation-activation.ts
+index df2b6da..d950fde 100644
+--- a/packages/subagent/subagent/src/continuation-activation.ts
++++ b/packages/subagent/subagent/src/continuation-activation.ts
+@@ -28,10 +28,12 @@ import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
  import {
    appendDelegatedPolicyOverrides,
    applyChildComposition,
 +  applyIndependentChildComposition,
-   captureDelegatedPolicyOverrides,
-   childSessionMeta,
-   resolveChildAgentOptions,
-@@ -50,7 +56,13 @@ import {
+ } from './child-agent.ts'
  import type { DelegatedPolicyOverrides } from './child-agent.ts'
- import { assertSubagentMaxDepth } from './depth.ts'
- import { seedDescriptorTurn } from './descriptor-seed.ts'
--import type { ContinuableCreateRequest, ContinuableCreateSpec, SubagentResult, SubagentStartRequest } from './types.ts'
-+import type {
-+  ContinuableCreateRequest,
-+  ContinuableCreateSpec,
-+  SubagentProvider,
-+  SubagentResult,
-+  SubagentStartRequest,
-+} from './types.ts'
- import type { ActivationObserver, ActivationTerminal } from './lifecycle.ts'
+ import { createSettlementMessage } from './continuation-messages.ts'
+ import type { SubagentDescriptorData } from './descriptor.ts'
++import type { SubagentSettlementNotice } from './types.ts'
  import { SubagentError } from './error.ts'
- import { isAdjacentAgentSendMessageTool } from './internal.ts'
-@@ -105,6 +117,19 @@ export interface ContinuableStartSpec {
-    * the durable descriptor, and composes the child itself.
-    */
-   readonly request: Omit<SubagentStartRequest, 'label' | 'signal' | 'outputSchema'>
-+  /**
-+   * Whether the runtime's automatic settlement account reaches the durable
-+   * direct parent. Omission means {@link SubagentSettlementNotice} `notify`,
-+   * the behavior every ordinary delegation relies on.
-+   *
-+   * A host that owns the child's own reporting channel — and must keep that
-+   * child's conclusions out of the parent conversation — passes `silent`. The
-+   * value is recorded in the durable descriptor, so a cold-resumed activation
-+   * makes the same choice instead of reverting to `notify`. It suppresses only
-+   * this automatic account: model-authored messages between the two agents,
-+   * lifecycle edges, and ownership release are unaffected.
-+   */
-+  readonly settlementNotice?: SubagentSettlementNotice
-   /** Caller cancellation, owning the operation only until inbox acceptance. */
-   readonly signal: AbortSignal
- }
-@@ -117,6 +142,61 @@ export interface ContinuableStart {
-   readonly messageId: MessageId
- }
- 
-+/** What a host asks for when provisioning a continuable child before its first message. */
-+export interface IdleContinuableCreateSpec {
-+  /** Caller-reserved durable child session id. */
-+  readonly childId: SessionId
-+  /** The `ctx.subagents` provider whose preparation establishes the child. */
-+  readonly provider: string
-+  /** Short display label persisted in the child's descriptor. */
-+  readonly label: string
-+  /** Exact live parent that authorizes and owns the child. */
-+  readonly parent: Agent
-+  /** Durable child Agent provider, model, and reasoning-effort overrides. */
-+  readonly agentOptions?: Pick<AgentOptions, 'provider' | 'model' | 'reasoningEffort'>
-+  /** Optional per-child persona. */
-+  readonly persona?: string
-+  /** Optional child tool restriction. */
-+  readonly toolFilter?: ToolRestriction
-+  /** Whether later settled epochs automatically notify the direct parent. */
-+  readonly settlementNotice?: SubagentSettlementNotice
-+  /** Host-only opt-in for a fresh independent transcript and saved preset. */
-+  readonly contextMode?: SubagentContextMode
-+  /** Caller cancellation, owning creation until the resumable child is durable. */
-+  readonly signal: AbortSignal
-+}
-+
-+/** Identity returned once an idle continuable child is durable and resumable. */
-+export interface IdleContinuableCreateResult {
-+  /** The caller-reserved durable child session id. */
-+  readonly childId: SessionId
-+}
-+
-+/** Exact identity used by a Host while operating on a continuable child's live Session. */
-+export interface ContinuableChildSessionSpec {
-+  /** Exact live direct parent that authorizes child access. */
-+  readonly parent: Agent
-+  /** Durable direct-child session id. */
-+  readonly childId: SessionId
-+  /** Caller cancellation bounding cold resume and the Host operation. */
-+  readonly signal: AbortSignal
-+}
-+
-+/** Normalized inputs shared by prompted and idle fresh-child creation. */
-+interface FreshContinuableSpec {
-+  readonly childId?: SessionId | undefined
-+  readonly provider: string
-+  readonly label: string
-+  readonly parent: Agent
-+  readonly agentOptions?: AgentOptions | undefined
-+  readonly maxDepth?: number | undefined
-+  readonly persona?: string | undefined
-+  readonly toolFilter?: ToolRestriction | undefined
-+  readonly settlementNotice?: SubagentSettlementNotice | undefined
-+  readonly contextMode?: SubagentContextMode | undefined
-+  readonly signal: AbortSignal
-+}
-+
- /**
-  * Authority under which one interrupt request is admitted. `user` carries the
-  * durable direct-parent address a human client presented; `ancestor` carries
-@@ -162,6 +242,8 @@ interface ContinuationHost {
-    * @returns the provider's detached creation spec.
-    */
-   prepareContinuable(name: string, request: ContinuableCreateRequest): Promise<ContinuableCreateSpec>
-+  /** Resolve one provider object for independent-child validation. */
-+  getProvider(name: string): SubagentProvider | undefined
-   /**
-    * Build the lifecycle observer for one Activation's residency epoch.
-    * @param provider - the provider name recorded in the durable descriptor.
-@@ -224,6 +306,12 @@ interface Activation {
+ import { SubagentInbox } from './inbox.ts'
+ import type { SubagentDelivery } from './inbox.ts'
+@@ -78,6 +80,12 @@ export interface Activation {
     * not exist, so its teardown owes the parent no settlement account.
     */
    announced: boolean
 +  /**
-+   * Whether this epoch delivers the runtime's automatic settlement account to
-+   * the durable direct parent. Taken from the durable descriptor, so a cold
-+   * resume keeps the establishing host's choice.
++   * Whether this Activation's automatic settlement account reaches the durable
++   * direct parent. `silent` suppresses only that injected notice; lifecycle
++   * edges, ownership release, and terminal failures are unchanged.
 +   */
 +  readonly settlementNotice: SubagentSettlementNotice
-   /** Renewed whenever a settlement watcher must re-observe quiescence. */
+   /** Renewed whenever a settlement watcher must re-check residency state. */
    poke: PromiseWithResolvers<void>
  }
-@@ -248,6 +336,12 @@ interface MaterializeInputs {
+@@ -104,6 +112,13 @@ export interface MaterializeInputs {
    }
    agentOptions: AgentOptions
    composition: { persona?: string | undefined; toolFilter?: ToolRestriction | undefined }
-+  /** Durable settlement-notice choice; absent means `notify`. */
-+  settlementNotice?: SubagentSettlementNotice | undefined
-+  /** Independent context mode, when opted in. */
-+  contextMode?: SubagentContextMode | undefined
-+  /** Independent child preset captured at creation. */
-+  agentPreset?: string | undefined
++  /** Settlement-account reach for this epoch; omission means `notify`. */
++  settlementNotice?: SubagentSettlementNotice
++  /**
++   * Durable preset this child composes from independently. Absent keeps the
++   * ordinary parent-derived composition.
++   */
++  independentAgentPreset?: string
    signal: AbortSignal
  }
  
-@@ -292,6 +386,35 @@ function agentMessage(sender: Agent, content: ContentBlock[]) {
-   })
- }
- 
-+/**
-+ * Build a child-to-parent message that states how the parent can answer.
-+ *
-+ * `continuableInitialPrompt` tells a child its parent's id and that reaching
-+ * the parent requires `send_message`. The reverse direction carried no such
-+ * statement: a parent saw only `Agent <id> sent a message:` and had no recorded
-+ * way to learn that ordinary assistant text never reaches the sender and that
-+ * answering requires `send_message` with this exact id. A parent that answered
-+ * in plain text therefore failed silently — it considered the question
-+ * answered while the child kept waiting for a reply that was never delivered.
-+ */
-+function parentFacingAgentMessage(sender: Agent, content: ContentBlock[]) {
-+  const encodedSenderId = JSON.stringify(sender.id)
-+  return createUserMessage({
-+    content: [
-+      { type: 'text' as const, text: `Agent ${sender.id} sent a message:` },
-+      ...content,
-+      {
-+        type: 'text' as const,
-+        text: `Reply to this agent with send_message({ agent_id: ${encodedSenderId}, `
-+          + 'message: "<self-contained answer>" }). Assistant text in your own turn does not '
-+          + 'reach it: that agent only observes messages delivered through send_message, and it '
-+          + 'may be blocked waiting for this answer. Sending a message does not end your turn.',
-+      },
-+    ],
-+    source: agentMessageSource(sender),
-+  })
-+}
-+
- /** Append adjacent-Agent return guidance to a continuable child's initial task. */
- function continuableInitialPrompt(parentId: SessionId, prompt: ContentBlock[]): ContentBlock[] {
-   const encodedParentId = JSON.stringify(parentId)
-@@ -428,32 +551,198 @@ export class SubagentContinuationManager {
-    */
-   async startContinuable(spec: ContinuableStartSpec): Promise<ContinuableStart> {
-     const request = spec.request
--    const parent = request.parent
-+    const established = await this.establishFresh<MessageId>({
-+      ...spec,
-+      parent: request.parent,
-+      agentOptions: request.agentOptions,
-+      maxDepth: request.maxDepth,
-+      persona: request.persona,
-+      toolFilter: request.toolFilter,
-+    }, activation => this.admitMaterialized(
-+      activation,
-+      isAdjacentAgentSendMessageTool(this.ctx.get('tools')?.get('send_message', activation.handle.agent))
-+        ? continuableInitialPrompt(request.parent.id, request.prompt)
-+        : request.prompt,
-+      { source: { kind: 'user' }, signal: spec.signal, delivery: 'queue' },
-+      request.parent,
-+    ))
-+    return { childId: established.childId, messageId: established.value }
-+  }
-+
-+  /**
-+   * Create and durably checkpoint one continuable child without submitting an
-+   * inbox message or opening a turn. The ordinary setup, publication, lifecycle,
-+   * ownership, and rollback path is unchanged; after return the existing Host
-+   * Queue adapter may submit the real first message.
-+   * @param spec - caller-reserved identity, provider, composition, and cancellation.
-+   * @returns the durable child identity, with no message identity.
-+   */
-+  async createIdleContinuable(spec: IdleContinuableCreateSpec): Promise<IdleContinuableCreateResult> {
-+    const established = await this.establishFresh(spec, async (activation) => {
-+      const child = activation.handle.agent
-+      spec.signal.throwIfAborted()
-+      this.assertAdmitting(spec.parent)
-+      this.authorizeLineage(spec.parent, spec.childId, child.session.header.parentSession)
-+      // This is the idle creation commit point. A successful flush wins over a
-+      // later caller abort, exactly as inbox acceptance does for ordinary start.
-+      await child.ctx.sessions.flush(child.session)
-+    })
-+    return { childId: established.childId }
-+  }
-+
-+  /**
-+   * Run one Host operation against the exact Session of a continuable direct
-+   * child. This is intentionally owned by the continuation manager: generic
-+   * Session routing rejects subagent-owned identities, while this manager can
-+   * authorize the exact live parent and retained or cold-resumed child handle.
-+   * The per-child lock prevents settlement disposal from racing the operation;
-+   * the Session is flushed before the capability returns.
-+   * @param spec - exact live parent, durable child id, and caller cancellation.
-+   * @param operation - Host operation against the authorized child Session.
-+   * @returns the operation's exact awaited return value.
-+   */
-+  withLiveChildSession<T>(
-+    spec: ContinuableChildSessionSpec,
-+    operation: (session: Agent['session']) => T | Promise<T>,
-+  ): Promise<T> {
-+    this.assertAdmitting(spec.parent)
-+    return this.locks.run(spec.childId, async () => {
-+      spec.signal.throwIfAborted()
-+      const activation = await this.resolveChildForHostOperation(spec)
-+      spec.signal.throwIfAborted()
-+      const child = activation.handle.agent
-+      this.authorizeLineage(spec.parent, spec.childId, child.session.header.parentSession)
-+      if (activation.parentSession !== spec.parent.id
-+        || this.ctx.agents.get(child.id) !== child
-+        || child.id !== spec.childId) {
-+        throw new SubagentError(`subagent "${spec.childId}" has no exact live agent`, 'UNAUTHORIZED')
-+      }
-+      const result = await operation(child.session)
-+      spec.signal.throwIfAborted()
-+      await child.ctx.sessions.flush(child.session)
-+      return result
-+    })
-+  }
-+
-+  /** Resolve the retained child Activation or cold-resume it without opening a turn. */
-+  private async resolveChildForHostOperation(spec: ContinuableChildSessionSpec): Promise<Activation> {
-+    const resident = this.activations.get(spec.childId)
-+    if (resident !== undefined) {
-+      if (resident.disposal !== undefined) await resident.disposal.catch(() => undefined)
-+      else return resident
-+    }
-+    const query = this.requireSessionQuery()
-+    let observation: SessionObservation
-+    try {
-+      observation = await query.observeSession(spec.childId, { signal: spec.signal })
-+    } catch (error: unknown) {
-+      spec.signal.throwIfAborted()
-+      throw new SubagentError(`subagent "${spec.childId}" is unavailable`, 'NOT_RESUMABLE', { cause: error })
-+    }
-+    using source = observation
-+    this.assertAdmitting(spec.parent)
-+    this.authorizeLineage(spec.parent, spec.childId, source.header.parentSession)
-+    const descriptor = foldSubagentDescriptor(source.events.slice(source.inheritedEventCount))
-+    if (descriptor === undefined || descriptor.mode !== 'continuable') {
-+      throw new SubagentError(
-+        `subagent "${spec.childId}" has no supported continuation state and cannot be resumed`,
-+        'NOT_RESUMABLE',
-+      )
-+    }
-+    try {
-+      return await this.materialize({
-+        childId: spec.childId,
-+        provider: descriptor.provider,
-+        parent: spec.parent,
-+        agentOptions: {
-+          ...descriptor.agentProvider !== undefined ? { provider: descriptor.agentProvider } : {},
-+          ...descriptor.agentModel !== undefined ? { model: descriptor.agentModel } : {},
-+          ...descriptor.agentReasoningEffort !== undefined
-+            ? { reasoningEffort: ReasoningEffortId(descriptor.agentReasoningEffort) }
-+            : {},
-+        },
-+        composition: { persona: descriptor.persona, toolFilter: descriptor.toolFilter },
-+        settlementNotice: descriptor.settlementNotice,
-+        contextMode: descriptor.contextMode,
-+        agentPreset: descriptor.agentPreset,
-+        signal: spec.signal,
-+      })
-+    } catch (error: unknown) {
-+      spec.signal.throwIfAborted()
-+      if (error instanceof SubagentError) throw error
-+      throw new SubagentError(`subagent "${spec.childId}" is unavailable`, 'NOT_RESUMABLE', { cause: error })
-+    }
-+  }
-+
-+  /**
-+   * Prepare and materialize one fresh continuable child under its per-id lock,
-+   * then run the caller's publication action before releasing that lock.
-+   * Synchronous descriptor and delegated-policy capture remains before the first
-+   * provider await for both prompted and idle creation.
-+   */
-+  private async establishFresh<T>(
-+    spec: FreshContinuableSpec,
-+    establish: (activation: Activation) => Promise<T> | T,
-+  ): Promise<{ childId: SessionId; value: T }> {
-+    const parent = spec.parent
-     this.assertAdmitting(parent)
-     const persistence = this.requirePersistence()
--    assertSubagentMaxDepth(request.maxDepth)
-+    assertSubagentMaxDepth(spec.maxDepth)
-     const childId = spec.childId ?? brandString<SessionId>(randomUUID())
-     this.assertChildIdAvailable(childId)
--    const childDepth = resolveChildDepth(parent, request.maxDepth)
-+    const childDepth = resolveChildDepth(parent, spec.maxDepth)
-+    const independent = spec.contextMode !== undefined
-+    const agentPreset = independent
-+      ? parent.ctx.get('agentPresets')?.composedPreset(parent.ctx)
-+      : undefined
-+    const provider = independent ? this.host.getProvider(spec.provider) : undefined
-+    if (independent) {
-+      if (spec.contextMode !== 'independent-v1') {
-+        throw new SubagentError(`unsupported independent context mode "${String(spec.contextMode)}"`, 'UNSUPPORTED_CAPABILITY')
-+      }
-+      if (parent.ctx.get('agentPresets') === undefined || agentPreset === undefined || agentPreset.trim() === '') {
-+        throw new SubagentError('independent continuable children require a composed agent preset', 'UNSUPPORTED_CAPABILITY')
-+      }
-+      if (
-+        provider === undefined
-+        || provider.inheritsParentContext !== false
-+        || typeof provider.prepareContinuable !== 'function'
-+      ) {
-+        throw new SubagentError(
-+          `subagent provider "${spec.provider}" cannot establish an independent continuable child`,
-+          'UNSUPPORTED_CAPABILITY',
-+        )
-+      }
-+    }
-     // Snapshot before any await: invalid descriptor JSON rejects the call
-     // before a child exists, and the detached value is what reaches the log.
--    const agentOptions = resolveChildAgentOptions(parent, request.agentOptions, childDepth)
-+    const agentOptions = resolveChildAgentOptions(parent, spec.agentOptions, childDepth)
-     const agentProvider = agentOptions.provider
-     const agentModel = agentOptions.model
-     const agentReasoningEffort = agentOptions.reasoningEffort
--    const descriptor = snapshotSubagentDescriptor({
-+    if (independent && (agentProvider === undefined || agentProvider.trim() === ''
-+      || agentModel === undefined || agentModel.trim() === '')) {
-+      throw new SubagentError('independent continuable children require a provider and model route', 'UNSUPPORTED_CAPABILITY')
-+    }
-+    const descriptorInput: ContinuableSubagentDescriptorInput = {
-       mode: 'continuable',
-       provider: spec.provider,
-       label: spec.label,
-       ...agentProvider !== undefined ? { agentProvider } : {},
-       ...agentModel !== undefined ? { agentModel } : {},
-       ...agentReasoningEffort !== undefined ? { agentReasoningEffort } : {},
--      ...request.persona !== undefined ? { persona: request.persona } : {},
--      ...request.toolFilter !== undefined ? { toolFilter: request.toolFilter } : {},
--    })
-+      ...spec.persona !== undefined ? { persona: spec.persona } : {},
-+      ...spec.toolFilter !== undefined ? { toolFilter: spec.toolFilter } : {},
-+      ...spec.settlementNotice !== undefined ? { settlementNotice: spec.settlementNotice } : {},
-+      ...(independent && agentPreset !== undefined
-+        ? { contextMode: spec.contextMode, agentPreset }
-+        : {}),
-+    }
-+    const descriptor = snapshotSubagentDescriptor(descriptorInput)
-     // Capture before the first await: a later parent switch belongs to the
-     // parent's future, not to this child.
-     const delegatedPolicies = captureDelegatedPolicyOverrides(parent)
-+    const capturedMeta = childSessionMeta(parent, childDepth, false, independent ? agentPreset : undefined)
- 
-     const prepared = await this.host.prepareContinuable(spec.provider, {
-       sessionId: childId,
-@@ -462,10 +751,13 @@ export class SubagentContinuationManager {
-     })
-     spec.signal.throwIfAborted()
-     this.assertAdmitting(parent)
-+    if (independent && Object.hasOwn(prepared, 'seed')) {
-+      throw new SubagentError('independent continuable provider returned a seed', 'UNSUPPORTED_CAPABILITY')
-+    }
- 
--    const inheritedEventCount = SessionLogOffset(prepared.seed?.length ?? 0)
--    const seed = seedDescriptorTurn(childId, prepared.seed, descriptor)
--    const messageId = await this.locks.run(childId, async () => {
-+    const inheritedEventCount = SessionLogOffset(independent ? 0 : prepared.seed?.length ?? 0)
-+    const seed = seedDescriptorTurn(childId, independent ? undefined : prepared.seed, descriptor)
-+    const value = await this.locks.run(childId, async () => {
-       spec.signal.throwIfAborted()
-       this.assertAdmitting(parent)
-       this.assertChildIdAvailable(childId)
-@@ -484,24 +776,29 @@ export class SubagentContinuationManager {
-         parent,
-         create: {
-           seed,
--          meta: childSessionMeta(parent, childDepth, prepared.seed !== undefined),
-+          meta: { ...capturedMeta, isSeeded: independent ? false : prepared.seed !== undefined },
-           inheritedEventCount,
-           delegatedPolicies,
-         },
-         agentOptions,
--        composition: { persona: request.persona, toolFilter: request.toolFilter },
-+        composition: { persona: spec.persona, toolFilter: spec.toolFilter },
-+        // Read from the snapshot rather than the spec: the descriptor is what a
-+        // later cold resume sees, so both paths agree by construction.
-+        settlementNotice: descriptor.settlementNotice,
-+        contextMode: descriptor.contextMode,
-+        agentPreset: descriptor.agentPreset,
-         signal: spec.signal,
-       })
--      return this.submitMaterialized(
--        activation,
--        isAdjacentAgentSendMessageTool(this.ctx.get('tools')?.get('send_message', activation.handle.agent))
--          ? continuableInitialPrompt(parent.id, request.prompt)
--          : request.prompt,
--        { source: { kind: 'user' }, signal: spec.signal, delivery: 'queue' },
--        parent,
--      )
-+      try {
-+        return await establish(activation)
-+      } catch (error: unknown) {
-+        /* v8 ignore next -- rollback disposal failures must not mask the
-+         * creation, cancellation, or durability failure. */
-+        await this.dispose(activation).catch(() => undefined)
-+        throw error
-+      }
-     })
--    return { childId, messageId }
-+    return { childId, value }
-   }
- 
-   /** Reject one child identity already owned by a live Agent or Session. */
-@@ -704,7 +1001,7 @@ export class SubagentContinuationManager {
-         'PARENT_UNAVAILABLE',
-       )
-     }
--    const message = agentMessage(sender, content)
-+    const message = parentFacingAgentMessage(sender, content)
-     this.sendWaking(parent, message, () => { this.sendAgentMessage(parent, message) })
-     return message.id
-   }
-@@ -1016,6 +1313,9 @@ export class SubagentContinuationManager {
-             : {},
-         },
-         composition: { persona: descriptor.persona, toolFilter: descriptor.toolFilter },
-+        settlementNotice: descriptor.settlementNotice,
-+        contextMode: descriptor.contextMode,
-+        agentPreset: descriptor.agentPreset,
-         signal: options.signal,
-       })
-     } catch (error: unknown) {
-@@ -1029,7 +1329,7 @@ export class SubagentContinuationManager {
-   /**
-    * Submit to a freshly materialized Activation or roll it back completely.
-    * @param activation - the just-published Activation to admit or release.
--   * @param content - the initial or resumed message content.
-+   * @param content - the resumed message content.
-    * @param options - durable source, scheduling, and pre-acceptance cancellation.
-    * @param parent - the live direct parent authorizing admission.
-    * @returns the accepted inbox message id.
-@@ -1041,16 +1341,7 @@ export class SubagentContinuationManager {
-     parent: Agent,
-   ): Promise<MessageId> {
-     try {
--      if (contentHasImage(content)) {
--        // The capability read awaits with the activation already published, so
--        // the disposal cutoff is re-checked before the submit; a drain that
--        // began during the read turns into a clean closing rejection.
--        await this.assertImageCapable(activation.handle.agent, options.signal)
--        if (activation.disposal !== undefined) {
--          throw new SubagentError(`subagent "${activation.childId}" is closing`, 'ACTIVATION_CLOSING')
--        }
--      }
--      return this.submitAdmitted(activation, content, options, parent)
-+      return await this.admitMaterialized(activation, content, options, parent)
-     } catch (error: unknown) {
-       /* v8 ignore next -- rollback disposal failures must not mask the
-        * pre-acceptance signal, drain, or lifecycle failure. */
-@@ -1059,6 +1350,25 @@ export class SubagentContinuationManager {
-     }
-   }
- 
-+  /** Submit to a materialized Activation while its owning transaction handles rollback. */
-+  private async admitMaterialized(
-+    activation: Activation,
-+    content: ContentBlock[],
-+    options: ChildDeliveryOptions,
-+    parent: Agent,
-+  ): Promise<MessageId> {
-+    if (contentHasImage(content)) {
-+      // The capability read awaits with the activation already published, so
-+      // the disposal cutoff is re-checked before the submit; a drain that
-+      // began during the read turns into a clean closing rejection.
-+      await this.assertImageCapable(activation.handle.agent, options.signal)
-+      if (activation.disposal !== undefined) {
-+        throw new SubagentError(`subagent "${activation.childId}" is closing`, 'ACTIVATION_CLOSING')
-+      }
-+    }
-+    return this.submitAdmitted(activation, content, options, parent)
-+  }
-+
-   /**
-    * Refuse image content addressed to a child whose model accepts text only.
-    * Callers guard with `contentHasImage`, so text-only delivery never awaits.
-@@ -1126,15 +1436,26 @@ export class SubagentContinuationManager {
-     // `AgentRegistry.enter()` is the authoritative collision boundary for an id
-     // some other owner holds — a duplicate would reject there with rollback.
+@@ -576,13 +591,18 @@ export class ContinuableActivationRegistry {
+   ): Promise<Activation> {
+     const { childId, provider, parent, create } = inputs
      inputs.signal.throwIfAborted()
--    const setup = (childCtx: Context): void => {
--      // Only fresh creation seeds the delegation policy onto the child's own
--      // log (after any fork seed, so fresh policy wins stale seed state); a
--      // cold resume replays those persisted events instead.
--      if (create !== undefined) {
--        appendDelegatedPolicyOverrides((childCtx.agent as Agent).session, create.delegatedPolicies)
-+    const setup = inputs.contextMode === 'independent-v1'
-+      ? async (childCtx: Context): Promise<void> => {
-+        // Only fresh creation seeds the delegation policy onto the child's own
-+        // log (after any fork seed, so fresh policy wins stale seed state); a
-+        // cold resume replays those persisted events instead.
-+        if (create !== undefined) {
-+          appendDelegatedPolicyOverrides((childCtx.agent as Agent).session, create.delegatedPolicies)
-+        }
-+        if (inputs.agentPreset === undefined) {
-+          throw new SubagentError('independent continuable child has no saved preset', 'NOT_RESUMABLE')
-+        }
-+        await applyIndependentChildComposition(childCtx, inputs.composition, inputs.agentPreset)
-+      }
-+      : (childCtx: Context): void => {
-+        // Legacy creation keeps its synchronous composition contract.
-+        if (create !== undefined) {
-+          appendDelegatedPolicyOverrides((childCtx.agent as Agent).session, create.delegatedPolicies)
-+        }
-+        applyChildComposition(childCtx, parent, inputs.composition)
+-    const setup = (childCtx: Context, child: Agent): void => {
++    const independentPreset = inputs.independentAgentPreset
++    const setup = async (childCtx: Context, child: Agent): Promise<void> => {
+       // Only fresh creation appends the descriptor and delegated policy after
+       // the inherited marker; a cold resume replays those persisted events.
+       if (create !== undefined) {
+         child.session.append('subagent/descriptor', create.descriptor)
+         appendDelegatedPolicyOverrides(child.session, create.delegatedPolicies)
        }
--      applyChildComposition(childCtx, parent, inputs.composition)
--    }
-     const observer = this.host.observeActivation(provider, childId, parent)
-     // Agent creation owns rollback before handle transfer. A rejection leaves
-     // no resident Activation and therefore publishes no lifecycle edge.
-@@ -1169,6 +1490,7 @@ export class SubagentContinuationManager {
-       disposal: undefined,
-       accepted: new Set(),
++      if (independentPreset !== undefined) {
++        await applyIndependentChildComposition(childCtx, child, inputs.composition, independentPreset)
++        return
++      }
+       applyChildComposition(childCtx, parent, inputs.composition)
+     }
+     const observer = this.observeActivation(provider, childId, parent)
+@@ -615,6 +635,7 @@ export class ContinuableActivationRegistry {
+       ownedChildren: new Set(),
+       observer,
        announced: false,
 +      settlementNotice: inputs.settlementNotice ?? 'notify',
        poke: Promise.withResolvers<void>(),
      }
-     // After transfer, any failure must dispose the created handle, remove the
-@@ -1516,10 +1838,11 @@ export class SubagentContinuationManager {
+     this.resident.set(childId, activation)
+@@ -648,6 +669,17 @@ export class ContinuableActivationRegistry {
+     })
+   }
  
-   /**
-    * Tell the durable direct parent that this child produced everything it is
--   * going to. Unconditional for every child the caller received an id for: it
--   * does not consider whether the child reported, because the cases that most
--   * need it — a token ceiling, a model failure, cancellation, teardown — are
--   * exactly the ones where the child never got to choose. A materialization
-+   * going to. Unconditional for every child the caller received an id for,
-+   * except one whose durable descriptor recorded `settlementNotice: 'silent'`:
-+   * it does not consider whether the child reported, because the cases that
-+   * most need it — a token ceiling, a model failure, cancellation, teardown —
-+   * are exactly the ones where the child never got to choose. A materialization
-    * rolled back before its first acceptance stays silent, since the caller was
-    * told that child was not established. A parent that is no longer live is not
-    * an error; the child's own Session remains the durable record either way.
-@@ -1534,6 +1857,13 @@ export class SubagentContinuationManager {
-    */
++  /**
++   * Register the child in a continuation-managed parent's owned set without a
++   * delivery. Idle creation establishes a real, announced child, so it must
++   * take exactly the same ownership a delivered child takes.
++   * @param parent - exact live direct parent.
++   * @param childId - durable child to own.
++   */
++  claimOwnership(parent: Agent, childId: SessionId): void {
++    this.acquireOwnership(parent, childId)
++  }
++
+   /** Register the child in a continuation-managed parent's owned set. */
+   private acquireOwnership(parent: Agent, childId: SessionId): void {
+     const parentActivation = this.resident.get(parent.id)
+@@ -822,6 +854,10 @@ export class ContinuableActivationRegistry {
+   /** Tell the durable direct parent how this Activation ended. */
    private notifySettlement(activation: Activation, terminal: ActivationTerminal): void {
      if (!activation.announced) return
-+    // A silent child's host owns its reporting channel and requires this
-+    // automatic account to stay out of the parent conversation. Returning here
-+    // — before the message exists — is what makes that true: nothing is
-+    // appended to the parent's log, so no later removal or filter is needed,
-+    // and no notice can wake a quiescent parent. The lifecycle edge below,
-+    // ownership release, and the child's own Session are untouched.
++    // A host owning the child's own reporting channel asked the runtime not to
++    // also inject an unsolicited account into the parent conversation. Every
++    // other settlement effect already ran before this point.
 +    if (activation.settlementNotice === 'silent') return
      try {
        const parent = this.ctx.agents.get(activation.parentSession)
        if (parent === undefined) return
+diff --git a/packages/subagent/subagent/src/continuation.ts b/packages/subagent/subagent/src/continuation.ts
+index b86d5cd..34c1b45 100644
+--- a/packages/subagent/subagent/src/continuation.ts
++++ b/packages/subagent/subagent/src/continuation.ts
+@@ -20,7 +20,7 @@ import { brandString } from '@deepseek-ai/dsh-brand'
+ import { ReasoningEffortId, contentHasImage, createUserMessage } from '@deepseek-ai/dsh-llm'
+ import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm'
+ import { SessionLogOffset } from '@deepseek-ai/dsh-session'
+-import type { SessionId } from '@deepseek-ai/dsh-session'
++import type { Session, SessionId } from '@deepseek-ai/dsh-session'
+ import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
+ import type { SessionObservation, SessionQueryEngine } from '@deepseek-ai/dsh-session-query'
+ import {
+@@ -114,6 +114,17 @@ export class SubagentContinuationManager {
+     const agentProvider = agentOptions.provider
+     const agentModel = agentOptions.model
+     const agentReasoningEffort = agentOptions.reasoningEffort
++    // Captured BEFORE any await: an independent child must persist the preset
++    // in effect at creation, not one the parent switches to later.
++    const capturedPreset = spec.contextMode === 'independent-v1'
++      ? parent.ctx.get('agentPresets')?.composedPreset(parent.ctx)
++      : undefined
++    if (spec.contextMode === 'independent-v1' && (capturedPreset ?? '').trim() === '') {
++      throw new SubagentError(
++        'independent continuable child requires a resolvable parent agent preset',
++        'INVALID_REQUEST',
++      )
++    }
+     const descriptor = snapshotSubagentDescriptor({
+       mode: 'continuable',
+       provider: spec.provider,
+@@ -123,6 +134,11 @@ export class SubagentContinuationManager {
+       ...agentReasoningEffort !== undefined ? { agentReasoningEffort } : {},
+       ...request.persona !== undefined ? { persona: request.persona } : {},
+       ...request.toolFilter !== undefined ? { toolFilter: request.toolFilter } : {},
++      // Durable, so a cold resume keeps the creator's choices instead of
++      // reverting to an unsolicited notice or the parent's later composition.
++      ...spec.settlementNotice !== undefined ? { settlementNotice: spec.settlementNotice } : {},
++      ...spec.contextMode !== undefined ? { contextMode: spec.contextMode } : {},
++      ...capturedPreset !== undefined ? { agentPreset: capturedPreset } : {},
+     })
+     // Capture before the first await: a later parent switch belongs to the
+     // parent's future, not to this child.
+@@ -162,13 +178,15 @@ export class SubagentContinuationManager {
+           parent,
+           create: {
+             seed,
+-            meta: childSessionMeta(parent, childDepth, prepared.seed !== undefined),
++            meta: childSessionMeta(parent, childDepth, prepared.seed !== undefined, capturedPreset),
+             inheritedEventCount,
+             delegatedPolicies,
+             descriptor,
+           },
+           agentOptions,
+           composition: { persona: request.persona, toolFilter: request.toolFilter },
++          ...spec.settlementNotice !== undefined ? { settlementNotice: spec.settlementNotice } : {},
++          ...capturedPreset !== undefined ? { independentAgentPreset: capturedPreset } : {},
+           signal: spec.signal,
+         })
+         const childHeader = activation.handle.agent.session.header
+@@ -189,6 +207,160 @@ export class SubagentContinuationManager {
+     }
+   }
+ 
++  /**
++   * Establish one durable continuable child WITHOUT delivering a first prompt.
++   *
++   * Two-phase provisioning needs the child to exist and be owned before the
++   * host commits its own durable index, so the first real delivery is the
++   * first prompt the child ever sees. An artificial initialization prompt
++   * would be indistinguishable from real work in the child's own transcript.
++   *
++   * The child is announced at creation because it is a child the caller was
++   * told exists; its Activation therefore owes the normal settlement account
++   * unless the caller selected `silent`.
++   * @param spec - provider, delegation request, and caller cancellation.
++   * @returns the durable child id.
++   */
++  async createIdleContinuable(spec: ContinuableStartSpec): Promise<{ readonly childId: SessionId }> {
++    const request = spec.request
++    const parent = request.parent
++    this.activations.assertAdmitting(parent)
++    const persistence = this.requirePersistence()
++    assertSubagentMaxDepth(request.maxDepth)
++    const childId = spec.childId ?? brandString<SessionId>(randomUUID())
++    this.activations.assertChildIdAvailable(childId)
++    const childDepth = resolveChildDepth(parent, request.maxDepth)
++    const agentOptions = resolveChildAgentOptions(parent, request.agentOptions, childDepth)
++    const agentProvider = agentOptions.provider
++    const agentModel = agentOptions.model
++    const agentReasoningEffort = agentOptions.reasoningEffort
++    // Captured BEFORE any await: an independent child must persist the preset
++    // in effect at creation, not one the parent switches to later.
++    const capturedPreset = spec.contextMode === 'independent-v1'
++      ? parent.ctx.get('agentPresets')?.composedPreset(parent.ctx)
++      : undefined
++    if (spec.contextMode === 'independent-v1' && (capturedPreset ?? '').trim() === '') {
++      throw new SubagentError(
++        'independent continuable child requires a resolvable parent agent preset',
++        'INVALID_REQUEST',
++      )
++    }
++    const descriptor = snapshotSubagentDescriptor({
++      mode: 'continuable',
++      provider: spec.provider,
++      label: spec.label,
++      ...agentProvider !== undefined ? { agentProvider } : {},
++      ...agentModel !== undefined ? { agentModel } : {},
++      ...agentReasoningEffort !== undefined ? { agentReasoningEffort } : {},
++      ...request.persona !== undefined ? { persona: request.persona } : {},
++      ...request.toolFilter !== undefined ? { toolFilter: request.toolFilter } : {},
++      // Durable, so a cold resume keeps the creator's choices instead of
++      // reverting to an unsolicited notice or the parent's later composition.
++      ...spec.settlementNotice !== undefined ? { settlementNotice: spec.settlementNotice } : {},
++      ...spec.contextMode !== undefined ? { contextMode: spec.contextMode } : {},
++      ...capturedPreset !== undefined ? { agentPreset: capturedPreset } : {},
++    })
++    const delegatedPolicies = captureDelegatedPolicyOverrides(parent)
++    const releaseHold = this.activations.holdOwnership(parent, childId)
++    try {
++      const prepared = await this.host.prepareContinuable(spec.provider, {
++        sessionId: childId,
++        parent,
++        signal: spec.signal,
++      })
++      spec.signal.throwIfAborted()
++      this.activations.assertAdmitting(parent)
++
++      const inheritedEventCount = SessionLogOffset(prepared.seed?.length ?? 0)
++      const seed = prepared.seed
++      await this.activations.locks.run(childId, async () => {
++        spec.signal.throwIfAborted()
++        this.activations.assertAdmitting(parent)
++        this.activations.assertChildIdAvailable(childId)
++        if (spec.childId !== undefined) {
++          const persisted = await persistence.stat(childId, { signal: spec.signal })
++          spec.signal.throwIfAborted()
++          this.activations.assertAdmitting(parent)
++          this.activations.assertChildIdAvailable(childId)
++          if (persisted !== undefined) {
++            throw new SubagentError(`subagent "${childId}" already exists`, 'DUPLICATE_CHILD')
++          }
++        }
++        const activation = await this.activations.materialize({
++          childId,
++          provider: spec.provider,
++          parent,
++          create: {
++            seed,
++            meta: childSessionMeta(parent, childDepth, prepared.seed !== undefined, capturedPreset),
++            inheritedEventCount,
++            delegatedPolicies,
++            descriptor,
++          },
++          agentOptions,
++          composition: { persona: request.persona, toolFilter: request.toolFilter },
++          ...spec.settlementNotice !== undefined ? { settlementNotice: spec.settlementNotice } : {},
++          ...capturedPreset !== undefined ? { independentAgentPreset: capturedPreset } : {},
++          signal: spec.signal,
++        })
++        try {
++          const childHeader = activation.handle.agent.session.header
++          // Ownership must hold without a delivery: the child exists and the
++          // caller was told so, therefore it is announced and owned exactly as
++          // a delivered child is.
++          this.activations.claimOwnership(parent, childId)
++          establishCatalogChild(parent.session, childHeader, descriptor)
++          activation.announced = true
++        } catch (error: unknown) {
++          try {
++            await this.activations.dispose(activation)
++          } catch (cleanupError: unknown) {
++            this.ctx.logger.warn(
++              `subagent continuation: idle-create rollback also failed: ${String(cleanupError)}`,
++            )
++          }
++          throw error
++        }
++      })
++      return { childId }
++    } catch (error: unknown) {
++      releaseHold()
++      throw error
++    }
++  }
++
++  /**
++   * Run one operation against the exact live Session of a direct continuable
++   * child, proving both the exact live parent and the durable child lineage.
++   *
++   * Generic Session routing intentionally cannot resolve a continuation-owned
++   * child, so a host that must read that child's own transcript would
++   * otherwise have no authorized path to it.
++   * @param spec - exact live parent, durable child id, and cancellation.
++   * @param operation - receives the live child Session.
++   * @returns the operation's result.
++   */
++  async withLiveContinuableChildSession<T>(
++    spec: { readonly parent: Agent; readonly childId: SessionId; readonly signal: AbortSignal },
++    operation: (session: Session) => T | Promise<T>,
++  ): Promise<T> {
++    spec.signal.throwIfAborted()
++    const activation = this.activations.get(spec.childId)
++    if (activation === undefined) {
++      throw new SubagentError(`subagent "${spec.childId}" is not resident`, 'NOT_FOUND')
++    }
++    if (this.ctx.agents.get(spec.parent.id) !== spec.parent) {
++      throw new SubagentError(
++        `subagent "${spec.childId}" access requires the exact live parent agent`,
++        'UNAUTHORIZED',
++      )
++    }
++    if (activation.parentSession !== spec.parent.id) {
++      throw new SubagentError(`subagent "${spec.childId}" belongs to another parent session`, 'UNAUTHORIZED')
++    }
++    return await operation(activation.handle.agent.session)
++  }
++
+   /**
+    * Deliver one model-authored message to a direct continuable child or to the
+    * sender's direct parent. A missing direct child cold-resumes through the
 diff --git a/packages/subagent/subagent/src/descriptor.ts b/packages/subagent/subagent/src/descriptor.ts
-index de9191c..c0aceae 100644
+index de9191c..2ab6030 100644
 --- a/packages/subagent/subagent/src/descriptor.ts
 +++ b/packages/subagent/subagent/src/descriptor.ts
-@@ -40,12 +40,49 @@ declare module '@deepseek-ai/dsh-session/types' {
- }
- 
- /**
-- * The current descriptor format version, stamped into every appended
-- * `subagent/descriptor` event and required verbatim by {@link foldSubagentDescriptor}.
-+ * The newest descriptor format this runtime can read and write for independent
-+ * continuable children. Legacy creation deliberately continues to write v4.
+@@ -45,7 +45,21 @@ declare module '@deepseek-ai/dsh-session/types' {
   * Supporting another composition input is a deliberate version change, never
   * an implicit extra field.
   */
 -export const SUBAGENT_DESCRIPTOR_VERSION = 3
-+export const SUBAGENT_DESCRIPTOR_VERSION = 5
-+const LEGACY_DESCRIPTOR_VERSION = 4
-+
-+/** A host-only continuable-child context mode with an independent transcript. */
-+export type SubagentContextMode = 'independent-v1'
++export const SUBAGENT_DESCRIPTOR_VERSION = 4
 +
 +/**
-+ * Descriptor versions this runtime can still classify, newest first.
-+ *
-+ * A version bump changes what is WRITTEN, not what can be read: a child
-+ * established by an earlier runtime must stay resumable, so its payload is
-+ * accepted under the schema that version declared. Version 3 predates
-+ * {@link SubagentSettlementNotice}; v4 predates independent composition.
++ * Version stamped when a descriptor carries independent composition.
++ * A reader that does not understand independence must not silently treat such
++ * a child as an ordinary one, so the version itself gates it.
 + */
-+const SUPPORTED_DESCRIPTOR_VERSIONS = new Set([
-+  SUBAGENT_DESCRIPTOR_VERSION,
-+  LEGACY_DESCRIPTOR_VERSION,
++export const SUBAGENT_INDEPENDENT_DESCRIPTOR_VERSION = 5
++
++/** Descriptor versions this runtime can fold. */
++export const SUPPORTED_DESCRIPTOR_VERSIONS: readonly number[] = [
 +  3,
-+])
-+
-+/**
-+ * Whether the runtime delivers this child's automatic settlement account to
-+ * its durable direct parent.
-+ *
-+ * `notify` is the default and the only value an ordinary delegation records:
-+ * the parent that started background work is told how it ended even when the
-+ * child never got to report. `silent` belongs to a host that owns the child's
-+ * own reporting channel and requires that automatic account NOT to enter the
-+ * parent conversation — the settlement notice is then never constructed, so
-+ * nothing reaches the parent log and no notice can wake it.
-+ *
-+ * It is deliberately narrow. It suppresses only the runtime's own settlement
-+ * account: a model-authored `send_message` between the two agents, the
-+ * lifecycle edges, ownership release, and the child's durable Session remain
-+ * exactly as they are. Because it is recorded in the descriptor, a cold resume
-+ * restores the same choice instead of silently reverting to `notify`.
-+ */
-+export type SubagentSettlementNotice = 'notify' | 'silent'
++  SUBAGENT_DESCRIPTOR_VERSION,
++  SUBAGENT_INDEPENDENT_DESCRIPTOR_VERSION,
++]
  
  /** Fields shared by every supported `subagent/descriptor` payload. */
  interface SubagentDescriptorBase {
-@@ -83,6 +120,16 @@ export interface ContinuableSubagentDescriptorData extends SubagentDescriptorBas
+@@ -83,6 +97,16 @@ export interface ContinuableSubagentDescriptorData extends SubagentDescriptorBas
    readonly persona?: string
    /** Child tool scoping reapplied on resume. */
    readonly toolFilter?: ToolRestriction
 +  /**
-+   * Whether the runtime's automatic settlement account reaches this child's
-+   * durable direct parent. Absent means {@link SubagentSettlementNotice}
-+   * `notify`, so an existing descriptor keeps the original behavior.
++   * Whether this child's settlement reaches its durable parent. Persisted so a
++   * cold resume keeps the silence the creator chose instead of reverting to an
++   * unsolicited notice.
 +   */
-+  readonly settlementNotice?: SubagentSettlementNotice
-+  /** Opted-in independent transcript composition mode. */
-+  readonly contextMode?: SubagentContextMode
-+  /** Preset id captured at independent child creation. */
++  readonly settlementNotice?: 'notify' | 'silent'
++  /** Composition source; `independent-v1` resumes from {@link agentPreset}. */
++  readonly contextMode?: 'independent-v1'
++  /** Durable preset an independent child composes from on every resume. */
 +  readonly agentPreset?: string
  }
  
  /** The supported durable subagent identity and optional continuation composition. */
-@@ -120,6 +167,12 @@ export interface ContinuableSubagentDescriptorInput extends SubagentDescriptorIn
+@@ -120,6 +144,12 @@ export interface ContinuableSubagentDescriptorInput extends SubagentDescriptorIn
    readonly persona?: string
    /** Requested child tool scoping. */
    readonly toolFilter?: ToolRestriction
-+  /** Requested automatic settlement-notice behavior; omission means `notify`. */
-+  readonly settlementNotice?: SubagentSettlementNotice
-+  /** Host-only independent transcript opt-in. */
-+  readonly contextMode?: SubagentContextMode
-+  /** Host-captured preset id for independent composition. */
++  /** Requested settlement reach; omitted means `notify`. */
++  readonly settlementNotice?: 'notify' | 'silent'
++  /** Requested composition source. */
++  readonly contextMode?: 'independent-v1'
++  /** Durable preset for an independent child. */
 +  readonly agentPreset?: string
  }
  
  /** Inputs {@link snapshotSubagentDescriptor} validates and detaches. */
-@@ -134,14 +187,18 @@ const DESCRIPTOR_BASE_KEYS = [
-   'label',
- ] as const
- const ONE_SHOT_DESCRIPTOR_KEYS = new Set(DESCRIPTOR_BASE_KEYS)
--const CONTINUABLE_DESCRIPTOR_KEYS = new Set([
-+/** Continuable fields every supported descriptor version declares. */
-+const CONTINUABLE_DESCRIPTOR_BASE_KEYS = [
-   ...DESCRIPTOR_BASE_KEYS,
-   'agentProvider',
-   'agentModel',
+@@ -141,6 +171,9 @@ const CONTINUABLE_DESCRIPTOR_KEYS = new Set([
    'agentReasoningEffort',
    'persona',
    'toolFilter',
--])
-+] as const
-+const LEGACY_V3_DESCRIPTOR_KEYS = new Set(CONTINUABLE_DESCRIPTOR_BASE_KEYS)
-+const LEGACY_V4_DESCRIPTOR_KEYS = new Set([...CONTINUABLE_DESCRIPTOR_BASE_KEYS, 'settlementNotice'])
-+const INDEPENDENT_DESCRIPTOR_KEYS = new Set([...LEGACY_V4_DESCRIPTOR_KEYS, 'contextMode', 'agentPreset'])
++  'settlementNotice',
++  'contextMode',
++  'agentPreset',
+ ])
  const TOOL_FILTER_KEYS = new Set(['allow', 'deny'])
  
- /** Whether a persisted JSON value is an object record. */
-@@ -207,15 +264,21 @@ function parseSubagentDescriptor(value: unknown): SubagentDescriptorData | undef
+@@ -207,7 +240,7 @@ function parseSubagentDescriptor(value: unknown): SubagentDescriptorData | undef
    if (typeof version !== 'number') {
      throw new Error('persisted subagent descriptor version must be a number')
    }
 -  if (version !== SUBAGENT_DESCRIPTOR_VERSION) return undefined
--
-+  if (!SUPPORTED_DESCRIPTOR_VERSIONS.has(version)) return undefined
-+  // Fields introduced after a payload's own version are not part of the schema
-+  // it was written against, so they are rejected as unknown rather than
-+  // silently honored on a record that could not have declared them.
++  if (!SUPPORTED_DESCRIPTOR_VERSIONS.includes(version)) return undefined
+ 
    const mode = value['mode']
    if (mode !== 'one-shot' && mode !== 'continuable') {
-     throw new Error('persisted subagent descriptor mode must be "one-shot" or "continuable"')
-   }
-   assertKnownKeys(
-     value,
--    mode === 'one-shot' ? ONE_SHOT_DESCRIPTOR_KEYS : CONTINUABLE_DESCRIPTOR_KEYS,
-+    mode === 'one-shot'
-+      ? ONE_SHOT_DESCRIPTOR_KEYS
-+      : version >= SUBAGENT_DESCRIPTOR_VERSION
-+        ? INDEPENDENT_DESCRIPTOR_KEYS
-+        : version >= LEGACY_DESCRIPTOR_VERSION ? LEGACY_V4_DESCRIPTOR_KEYS : LEGACY_V3_DESCRIPTOR_KEYS,
-     'payload',
-   )
-   const provider = value['provider']
-@@ -223,9 +286,12 @@ function parseSubagentDescriptor(value: unknown): SubagentDescriptorData | undef
-     throw new Error('persisted subagent descriptor provider must be a string')
-   }
+@@ -225,7 +258,7 @@ function parseSubagentDescriptor(value: unknown): SubagentDescriptorData | undef
    if (mode === 'one-shot') {
-+    if (version >= SUBAGENT_DESCRIPTOR_VERSION) {
-+      throw new Error('v5 subagent descriptors must be continuable independent children')
-+    }
      const label = optionalString(value, 'label')
      return {
 -      version: SUBAGENT_DESCRIPTOR_VERSION,
@@ -969,278 +658,346 @@ index de9191c..c0aceae 100644
        mode,
        provider,
        ...label !== undefined ? { label } : {},
-@@ -242,8 +308,28 @@ function parseSubagentDescriptor(value: unknown): SubagentDescriptorData | undef
+@@ -242,8 +275,17 @@ function parseSubagentDescriptor(value: unknown): SubagentDescriptorData | undef
    const toolFilter = Object.hasOwn(value, 'toolFilter')
      ? parseToolFilter(value['toolFilter'])
      : undefined
-+  const settlementNotice = parseSettlementNotice(value)
-+  const contextMode = Object.hasOwn(value, 'contextMode')
-+    ? parseContextMode(value)
-+    : undefined
++  const settlementNotice = optionalString(value, 'settlementNotice')
++  if (settlementNotice !== undefined && settlementNotice !== 'notify' && settlementNotice !== 'silent') {
++    throw new Error('persisted subagent descriptor settlementNotice must be "notify" or "silent"')
++  }
++  const contextMode = optionalString(value, 'contextMode')
++  if (contextMode !== undefined && contextMode !== 'independent-v1') {
++    throw new Error('persisted subagent descriptor contextMode must be "independent-v1"')
++  }
 +  const agentPreset = optionalString(value, 'agentPreset')
-+  if ((contextMode === undefined) !== (agentPreset === undefined)) {
-+    throw new Error('independent subagent descriptor contextMode and agentPreset must be provided together')
-+  }
-+  if (version >= SUBAGENT_DESCRIPTOR_VERSION && (contextMode === undefined || agentPreset === undefined)) {
-+    throw new Error('v5 subagent descriptors must declare independent context')
-+  }
-+  if (contextMode !== undefined && agentPreset!.trim() === '') {
-+    throw new Error('independent subagent descriptor agentPreset must be nonblank')
-+  }
-+  if (contextMode !== undefined && (
-+    agentProvider === undefined || agentProvider.trim() === ''
-+    || agentModel === undefined || agentModel.trim() === ''
-+  )) {
-+    throw new Error('independent subagent descriptors require a provider and model route')
-+  }
    return {
 -    version: SUBAGENT_DESCRIPTOR_VERSION,
 +    version,
      mode,
      provider,
      label,
-@@ -252,7 +338,37 @@ function parseSubagentDescriptor(value: unknown): SubagentDescriptorData | undef
+@@ -252,6 +294,9 @@ function parseSubagentDescriptor(value: unknown): SubagentDescriptorData | undef
      ...agentReasoningEffort !== undefined ? { agentReasoningEffort } : {},
      ...persona !== undefined ? { persona } : {},
      ...toolFilter !== undefined ? { toolFilter } : {},
 +    ...settlementNotice !== undefined ? { settlementNotice } : {},
 +    ...contextMode !== undefined ? { contextMode } : {},
 +    ...agentPreset !== undefined ? { agentPreset } : {},
-+  }
-+}
-+
-+/** Validate one persisted independent context mode. */
-+function parseContextMode(value: Record<string, unknown>): SubagentContextMode {
-+  const field = value['contextMode']
-+  if (field !== 'independent-v1') {
-+    throw new Error('persisted subagent descriptor contextMode must be "independent-v1"')
    }
-+  return field
-+}
-+
-+/**
-+ * Validate one persisted settlement-notice choice.
-+ *
-+ * An unreadable value is a hard error rather than a silent fallback: guessing
-+ * `notify` would leak an account the host suppressed on purpose, and guessing
-+ * `silent` would hide one a parent is entitled to.
-+ */
-+function parseSettlementNotice(
-+  value: Record<string, unknown>,
-+): SubagentSettlementNotice | undefined {
-+  if (!Object.hasOwn(value, 'settlementNotice')) return undefined
-+  const field = value['settlementNotice']
-+  if (field !== 'notify' && field !== 'silent') {
-+    throw new Error('persisted subagent descriptor settlementNotice must be "notify" or "silent"')
-+  }
-+  return field
  }
  
- /**
-@@ -277,24 +393,49 @@ export function snapshotSubagentDescriptor(
-   input: ContinuableSubagentDescriptorInput,
- ): ContinuableSubagentDescriptorData
- export function snapshotSubagentDescriptor(input: SubagentDescriptorInput): SubagentDescriptorData {
--  const candidate: SubagentDescriptorData = input.mode === 'one-shot'
--    ? {
--      version: SUBAGENT_DESCRIPTOR_VERSION,
-+  if (input.mode === 'one-shot') {
-+    const candidate: OneShotSubagentDescriptorData = {
-+      version: LEGACY_DESCRIPTOR_VERSION,
-       mode: input.mode,
-       provider: input.provider,
+@@ -285,7 +330,9 @@ export function snapshotSubagentDescriptor(input: SubagentDescriptorInput): Suba
        ...input.label !== undefined ? { label: input.label } : {},
      }
--    : {
+     : {
 -      version: SUBAGENT_DESCRIPTOR_VERSION,
--      mode: input.mode,
--      provider: input.provider,
--      label: input.label,
--      ...input.agentProvider !== undefined ? { agentProvider: input.agentProvider } : {},
--      ...input.agentModel !== undefined ? { agentModel: input.agentModel } : {},
--      ...input.agentReasoningEffort !== undefined ? { agentReasoningEffort: input.agentReasoningEffort } : {},
--      ...input.persona !== undefined ? { persona: input.persona } : {},
--      ...input.toolFilter !== undefined ? { toolFilter: input.toolFilter } : {},
--    }
-+    const snapshot = snapshotJsonValue(candidate)
-+    if (snapshot === undefined) throw new Error('subagent descriptor is not losslessly JSON-serializable')
-+    return snapshot
-+  }
-+  if ((input.contextMode === undefined) !== (input.agentPreset === undefined)) {
-+    throw new Error('independent subagent descriptor contextMode and agentPreset must be provided together')
-+  }
-+  if (input.contextMode !== undefined && input.contextMode !== 'independent-v1') {
-+    throw new Error('independent subagent descriptor contextMode must be "independent-v1"')
-+  }
-+  if (input.contextMode !== undefined && input.agentPreset!.trim() === '') {
-+    throw new Error('independent subagent descriptor agentPreset must be nonblank')
-+  }
-+  if (input.contextMode !== undefined && (
-+    input.agentProvider === undefined || input.agentProvider.trim() === ''
-+    || input.agentModel === undefined || input.agentModel.trim() === ''
-+  )) {
-+    throw new Error('independent subagent descriptors require a provider and model route')
-+  }
-+  const independent = input.contextMode !== undefined
-+  const candidate: ContinuableSubagentDescriptorData = {
-+    version: independent ? SUBAGENT_DESCRIPTOR_VERSION : LEGACY_DESCRIPTOR_VERSION,
-+    mode: input.mode,
-+    provider: input.provider,
-+    label: input.label,
-+    ...input.agentProvider !== undefined ? { agentProvider: input.agentProvider } : {},
-+    ...input.agentModel !== undefined ? { agentModel: input.agentModel } : {},
-+    ...input.agentReasoningEffort !== undefined ? { agentReasoningEffort: input.agentReasoningEffort } : {},
-+    ...input.persona !== undefined ? { persona: input.persona } : {},
-+    ...input.toolFilter !== undefined ? { toolFilter: input.toolFilter } : {},
-+    // Omitted when `notify`, so an ordinary delegation keeps producing the
-+    // exact payload it produced before this field existed.
-+    ...input.settlementNotice === 'silent' ? { settlementNotice: input.settlementNotice } : {},
-+    ...input.contextMode !== undefined ? { contextMode: input.contextMode } : {},
-+    ...input.agentPreset !== undefined ? { agentPreset: input.agentPreset } : {},
-+  }
++      version: input.contextMode === 'independent-v1'
++        ? SUBAGENT_INDEPENDENT_DESCRIPTOR_VERSION
++        : SUBAGENT_DESCRIPTOR_VERSION,
+       mode: input.mode,
+       provider: input.provider,
+       label: input.label,
+@@ -294,6 +341,9 @@ export function snapshotSubagentDescriptor(input: SubagentDescriptorInput): Suba
+       ...input.agentReasoningEffort !== undefined ? { agentReasoningEffort: input.agentReasoningEffort } : {},
+       ...input.persona !== undefined ? { persona: input.persona } : {},
+       ...input.toolFilter !== undefined ? { toolFilter: input.toolFilter } : {},
++      ...input.settlementNotice === 'silent' ? { settlementNotice: input.settlementNotice } : {},
++      ...input.contextMode !== undefined ? { contextMode: input.contextMode } : {},
++      ...input.agentPreset !== undefined ? { agentPreset: input.agentPreset } : {},
+     }
    const snapshot = snapshotJsonValue(candidate)
    if (snapshot === undefined) {
-     throw new Error('subagent descriptor is not losslessly JSON-serializable')
-@@ -308,9 +449,10 @@ export function snapshotSubagentDescriptor(input: SubagentDescriptorInput): Suba
-  * appends exactly one, so a later same-type event cannot rewrite the declared
-  * composition.
-  * @param events - the loaded child session events.
-- * @returns the descriptor, or `undefined` when the log has none or its
-- *   version is not {@link SUBAGENT_DESCRIPTOR_VERSION} (the child cannot be
-- *   classified by this runtime).
-+ * @returns the descriptor, or `undefined` when the log has none or its version
-+ *   is not one this runtime still classifies. The recovered `version` is the
-+ *   payload's own, so a child written by an earlier runtime stays resumable
-+ *   under the schema it declared.
-  * @throws when a current-version persisted payload does not match its complete
-  *   declared schema.
-  */
 diff --git a/packages/subagent/subagent/src/index.ts b/packages/subagent/subagent/src/index.ts
-index 28e5093..17d3fef 100644
+index 8a91e06..cd0de66 100644
 --- a/packages/subagent/subagent/src/index.ts
 +++ b/packages/subagent/subagent/src/index.ts
-@@ -66,8 +66,11 @@ import { createActivationObserver, createLifecycleEmitter, observeRun } from './
- import type { ActivationObserver, LifecycleEmitter } from './lifecycle.ts'
- import SubagentContinuationManager from './continuation.ts'
- import type {
-+  ContinuableChildSessionSpec,
-   ContinuableStart,
-   ContinuableStartSpec,
-+  IdleContinuableCreateResult,
-+  IdleContinuableCreateSpec,
-   SubagentInterruptAuthority,
-   SubagentSendMessageOptions,
- } from './continuation.ts'
-@@ -102,8 +105,10 @@ export type {
-   ContinuableSubagentDescriptorInput,
-   OneShotSubagentDescriptorData,
-   OneShotSubagentDescriptorInput,
+@@ -36,7 +36,7 @@ import type { Scoped } from '@deepseek-ai/dsh-scope'
+ import { assertObjectJsonSchema } from '@deepseek-ai/dsh-tools'
+ import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm'
+ import type { Agent } from '@deepseek-ai/dsh-agent'
+-import type { SessionId } from '@deepseek-ai/dsh-session'
++import type { Session, SessionId } from '@deepseek-ai/dsh-session'
+ import { canonicalClientTimeZone } from '@deepseek-ai/dsh-util-time'
+ import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+ import {
+@@ -92,7 +92,9 @@ export type {
+   SubagentProvider,
+   SubagentResult,
+   SubagentRun,
 +  SubagentContextMode,
-   SubagentDescriptorData,
-   SubagentDescriptorInput,
-+  SubagentSettlementNotice,
- } from './descriptor.ts'
- export { seedDescriptorTurn } from './descriptor-seed.ts'
- export { SubagentError } from './error.ts'
-@@ -112,6 +117,7 @@ export { assertSubagentMaxDepth, delegationDepthOf } from './depth.ts'
- export {
-   appendDelegatedPolicyOverrides,
-   applyChildComposition,
-+  applyIndependentChildComposition,
-   captureDelegatedPolicyOverrides,
-   childSessionMeta,
-   parentAgentOptionsForDelegation,
-@@ -122,8 +128,11 @@ export {
- export type { ChildComposition, DelegatedPolicyOverrides } from './child-agent.ts'
- export type {
-   AgentMessageSource,
-+  ContinuableChildSessionSpec,
-   ContinuableStart,
-   ContinuableStartSpec,
-+  IdleContinuableCreateResult,
-+  IdleContinuableCreateSpec,
-   SubagentInterruptAuthority,
    SubagentSendMessageOptions,
-   SubagentSettledMessageSource,
-@@ -189,6 +198,22 @@ interface BrowserPromptSource {
- 
- /** Named provider registry with one-shot runs, durable discovery, and continuable-child operations. */
- export class SubagentRuntime extends TypertRemoteService {
-+  /**
-+   * Structural capability marker for Host adapters.
-+   * An older runtime silently ignores an unknown field, so a caller
-+   * must prove the loaded runtime owns the behavior before relying on it.
-+   */
-+  readonly supportsSettlementNotice: true = true
-+
-+  /** Literal marker for hosts that depend on two-phase continuable provisioning. */
-+  readonly supportsIdleContinuableCreate: true = true
-+
-+  /** Literal marker for exact parent-authorized live child Session access. */
-+  readonly supportsLiveContinuableChildSession: true = true
-+
-+  /** Literal marker for Host-only independent continuable creation. */
-+  readonly supportsIndependentContinuableCreate: true = true
-+
-   private providers = new Map<string, SubagentProvider>()
-   private continuations: SubagentContinuationManager | undefined
-   /**
-@@ -204,6 +229,7 @@ export class SubagentRuntime extends TypertRemoteService {
-     ctx.inject(['agents'], (childCtx: Context) => {
-       const manager = new SubagentContinuationManager(childCtx, {
-         prepareContinuable: (name, request) => this.prepareContinuable(name, request),
-+        getProvider: name => this.getProvider(name),
-         observeActivation: (provider, childId, parent) => this.observeActivation(provider, childId, parent),
-       })
-       this.continuations = manager
-@@ -231,6 +257,38 @@ export class SubagentRuntime extends TypertRemoteService {
++  SubagentSettlementNotice,
+   SubagentStartRequest,
+   SubagentStopReason,
+   SubagentStopReasonMap,
+@@ -229,6 +231,49 @@ export class SubagentRuntime extends TypertRemoteService {
      return this.requireContinuations().startContinuable(spec)
    }
  
 +  /**
-+   * Create and durably publish one idle continuable child without submitting a
-+   * prompt or opening a turn. The caller supplies the stable identity, commits
-+   * its own provisioning state, then may use the existing Host Queue adapter to
-+   * deliver the real first message. Creation runs the same provider preparation,
-+   * child setup, lifecycle publication, ownership, and rollback as
-+   * {@link startContinuable}.
-+   * @param spec - reserved identity, provider, child composition, and cancellation.
-+   * @returns the durable child identity; no message identity exists yet.
-+   * @throws when continuation services are unavailable, preparation fails, or
-+   *   the child cannot be durably published.
++   * Literal proof that this runtime honors `ContinuableStartSpec.settlementNotice`.
++   * An older runtime silently ignores the unknown option and still injects the
++   * settlement account, so a host that must own the child's reporting channel
++   * proves the behavior before creating such a child.
 +   */
-+  async createIdleContinuable(spec: IdleContinuableCreateSpec): Promise<IdleContinuableCreateResult> {
++  readonly supportsSettlementNotice: true = true
++
++  /** Literal proof that {@link createIdleContinuable} is implemented here. */
++  readonly supportsIdleContinuableCreate: true = true
++
++  /**
++   * Literal proof that `ContinuableStartSpec.contextMode: 'independent-v1'`
++   * composes the child from its own durable saved preset.
++   */
++  readonly supportsIndependentContinuableCreate: true = true
++
++  /** Literal proof that {@link withLiveContinuableChildSession} is implemented here. */
++  readonly supportsLiveContinuableChildSession: true = true
++
++  /**
++   * Establish one durable continuable child with no initial prompt.
++   * @param spec - provider, delegation request, and caller cancellation.
++   * @returns the durable child id.
++   */
++  async createIdleContinuable(spec: ContinuableStartSpec): Promise<{ readonly childId: SessionId }> {
 +    return this.requireContinuations().createIdleContinuable(spec)
 +  }
 +
 +  /**
-+   * Run one synchronous Host operation against the exact live Session of a
-+   * continuable direct child. Generic Session routing intentionally refuses
-+   * these identities; the continuation owner alone can validate the retained
-+   * Activation handle and exact live parent.
-+   * @param spec - exact parent/child identity and cancellation.
-+   * @param operation - operation receiving only the child Session.
-+   * @returns the operation's exact awaited return value after Session flush.
++   * Run one operation against the exact live Session of a direct continuable
++   * child, proving exact live parent identity and durable child lineage.
++   * @param spec - exact live parent, durable child id, and cancellation.
++   * @param operation - receives the live child Session.
++   * @returns the operation's result.
 +   */
-+  withLiveContinuableChildSession<T>(
-+    spec: ContinuableChildSessionSpec,
-+    operation: (session: Agent['session']) => T | Promise<T>,
++  async withLiveContinuableChildSession<T>(
++    spec: { readonly parent: Agent; readonly childId: SessionId; readonly signal: AbortSignal },
++    operation: (session: Session) => T | Promise<T>,
 +  ): Promise<T> {
-+    return this.requireContinuations().withLiveChildSession(spec, operation)
++    return this.requireContinuations().withLiveContinuableChildSession(spec, operation)
 +  }
 +
    /**
     * Steer one model-authored message to the sender's direct parent or direct
     * continuable child. A running target admits it at the nearest step boundary;
-diff --git a/packages/subagent/subagent/src/projection.ts b/packages/subagent/subagent/src/projection.ts
-index 6a7367d..da92ac4 100644
---- a/packages/subagent/subagent/src/projection.ts
-+++ b/packages/subagent/subagent/src/projection.ts
-@@ -178,5 +178,6 @@ export const subagentIdentityProjectionDefinition = {
-   wire: { viewSchema: identitySchema, view: state => state.identity ?? null },
-   // Bumped when the identity gained its `seq` field: an older checkpoint row
-   // would replay into a value the schema rejects, so it must refold instead.
--  stateVersion: 2,
-+  // Bumped for v5 context/preset identity descriptors: old checkpoints must refold.
-+  stateVersion: 3,
- } satisfies ProjectionDefinition<'subagent', IdentityState>
+diff --git a/packages/subagent/subagent/src/types.ts b/packages/subagent/subagent/src/types.ts
+index 1b9ce56..5885b22 100644
+--- a/packages/subagent/subagent/src/types.ts
++++ b/packages/subagent/subagent/src/types.ts
+@@ -45,10 +45,37 @@ export interface ContinuableStartSpec {
+    * the durable descriptor, and composes the child itself.
+    */
+   readonly request: Omit<SubagentStartRequest, 'label' | 'signal' | 'outputSchema'>
++  /**
++   * Whether this Activation's automatic settlement account reaches the durable
++   * direct parent. Omission means `notify`, the behavior every ordinary
++   * delegation relies on.
++   *
++   * A host that owns the child's own reporting channel selects `silent` so the
++   * runtime does not also inject an unsolicited settlement message into a
++   * parent conversation the host is presenting itself. Silence applies only to
++   * that automatic notice: lifecycle edges, ownership release, and terminal
++   * failures are unchanged.
++   */
++  readonly settlementNotice?: SubagentSettlementNotice
++  /**
++   * Composition source for this child. Omission keeps the ordinary behavior,
++   * where the child joins its parent's live standing composition.
++   *
++   * `independent-v1` composes the child from its OWN durable saved preset, so
++   * a cold resume restores the selection the child was created under rather
++   * than whatever the parent happens to be running later.
++   */
++  readonly contextMode?: SubagentContextMode
+   /** Caller cancellation, owning the operation only until inbox acceptance. */
+   readonly signal: AbortSignal
+ }
+ 
++/** How a continuable child's composition is sourced. */
++export type SubagentContextMode = 'independent-v1'
++
++/** Whether a continuable Activation's settlement reaches its durable parent. */
++export type SubagentSettlementNotice = 'notify' | 'silent'
++
+ /** Identities returned once a continuable child accepted its initial prompt. */
+ export interface ContinuableStart {
+   /** The durable child session id, stable across activations. */
+diff --git a/packages/subagent/subagent/tests/continuation.spec.ts b/packages/subagent/subagent/tests/continuation.spec.ts
+index f2bbd16..536bf1b 100644
+--- a/packages/subagent/subagent/tests/continuation.spec.ts
++++ b/packages/subagent/subagent/tests/continuation.spec.ts
+@@ -2475,6 +2475,136 @@ describe('continuable adjacent-Agent delivery', () => {
+   })
+ })
+ 
++describe('Pet compatibility seams', () => {
++  it('suppresses only the automatic settlement notice under silent', async () => {
++    const { ctx, parent } = await setup([textResponse('the answer'), textResponse('parent ack')])
++    const started = await ctx.subagents.startContinuable({
++      ...startSpec(parent),
++      settlementNotice: 'silent' as const,
++    })
++    await waitNoActivation(ctx, started.childId)
++
++    // The child really ran and really settled; only the unsolicited account
++    // into the parent conversation is withheld.
++    const loaded = await loadStoredSession(ctx.sessionPersistence, started.childId)
++    expect(hasAssistantText(loaded.events, 'the answer')).toBe(true)
++    expect(settlementNotices(parent)).toHaveLength(0)
++  })
++
++  it('still notifies by default, so silence is never the accidental behavior', async () => {
++    const { ctx, parent } = await setup([textResponse('the answer'), textResponse('parent ack')])
++    const started = await ctx.subagents.startContinuable(startSpec(parent))
++    await waitNoActivation(ctx, started.childId)
++
++    await vi.waitFor(() => { expect(settlementNotices(parent)).toHaveLength(1) })
++  })
++
++  it('creates an idle child that exists and is owned but has run no turn', async () => {
++    const { ctx, parent, adapter } = await setup([textResponse('never used')])
++    const created = await ctx.subagents.createIdleContinuable({
++      ...startSpec(parent),
++      childId: SessionId('idle-child'),
++    })
++
++    expect(created.childId).toBe(SessionId('idle-child'))
++    // The decisive property: no artificial initialization prompt was invented,
++    // so the child's transcript is still empty of model work.
++    expect(adapter.requests.filter(request => request.sessionId === created.childId)).toHaveLength(0)
++    expect(ctx.agents.get(created.childId)).toBeDefined()
++  })
++
++  it('delivers a first real prompt into a previously idle child', async () => {
++    const { ctx, parent, adapter } = await setup([textResponse('first real answer'), textResponse('parent ack')])
++    const created = await ctx.subagents.createIdleContinuable({
++      ...startSpec(parent),
++      childId: SessionId('idle-then-used'),
++    })
++    const child = ctx.agents.get(created.childId)!
++
++    await ctx.subagents.sendMessage(parent, created.childId, message('first real work'), {
++      signal: testSignal,
++    })
++    await vi.waitFor(() => {
++      expect(adapter.requests.filter(request => request.sessionId === created.childId).length)
++        .toBeGreaterThan(0)
++    })
++    expect(child.id).toBe(created.childId)
++  })
++
++  it('opens the exact live child Session for its exact live parent', async () => {
++    const { ctx, parent } = await setup([textResponse('child text'), textResponse('parent ack')])
++    const created = await ctx.subagents.createIdleContinuable({
++      ...startSpec(parent),
++      childId: SessionId('session-access-child'),
++    })
++
++    const observedId = await ctx.subagents.withLiveContinuableChildSession(
++      { parent, childId: created.childId, signal: testSignal },
++      session => session.id,
++    )
++    expect(observedId).toBe(created.childId)
++  })
++
++  it('refuses child Session access to anything but the exact live parent', async () => {
++    const { ctx, parent } = await setup([textResponse('child text'), textResponse('parent ack')])
++    const created = await ctx.subagents.createIdleContinuable({
++      ...startSpec(parent),
++      childId: SessionId('guarded-child'),
++    })
++    const impostor = { ...parent, id: parent.id } as unknown as Agent
++
++    await expect(ctx.subagents.withLiveContinuableChildSession(
++      { parent: impostor, childId: created.childId, signal: testSignal },
++      session => session.id,
++    )).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
++  })
++
++  it('persists the creation-time preset for an independent child', async () => {
++    const { ctx, parent } = await setup([textResponse('child text'), textResponse('parent ack')])
++    // A minimal presets service: the point is that the child's DURABLE header
++    // records the preset resolved at creation.
++    ctx.provide('agentPresets', {
++      composedPreset: () => 'pet-executor',
++      composeFrom: () => {},
++      mount: async (_childCtx: unknown, id?: string) => ({ id: id ?? 'pet-executor' }),
++    } as never)
++
++    const created = await ctx.subagents.createIdleContinuable({
++      ...startSpec(parent),
++      childId: SessionId('independent-child'),
++      contextMode: 'independent-v1' as const,
++    })
++    const child = ctx.agents.get(created.childId)!
++    expect(child.session.header.agentPreset).toBe('pet-executor')
++  })
++
++  it('refuses an independent child when no preset can be resolved', async () => {
++    const { ctx, parent } = await setup([textResponse('unused')])
++    ctx.provide('agentPresets', {
++      composedPreset: () => undefined,
++      composeFrom: () => {},
++      mount: async (_childCtx: unknown, id?: string) => ({ id: id ?? '' }),
++    } as never)
++
++    // Falling back to the parent's composition would produce a child that only
++    // LOOKS independent, so creation must refuse instead.
++    await expect(ctx.subagents.createIdleContinuable({
++      ...startSpec(parent),
++      childId: SessionId('no-preset-child'),
++      contextMode: 'independent-v1' as const,
++    })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
++  })
++
++  it('publishes every literal capability marker a host proves before relying on them', async () => {
++    const { ctx } = await setup([textResponse('unused')])
++    const runtime = ctx.subagents as unknown as Record<string, unknown>
++    expect(runtime.supportsSettlementNotice).toBe(true)
++    expect(runtime.supportsIdleContinuableCreate).toBe(true)
++    expect(runtime.supportsLiveContinuableChildSession).toBe(true)
++    expect(runtime.supportsIndependentContinuableCreate).toBe(true)
++  })
++})
++
+ describe('continuable settlement delivery', () => {
+   it('tells the parent what the child finished with, without being asked', async () => {
+     const { ctx, parent } = await setup([textResponse('the answer'), textResponse('parent ack')])
+diff --git a/packages/subagent/subagent/tests/list-children.spec.ts b/packages/subagent/subagent/tests/list-children.spec.ts
+index 6d83648..7a69dfb 100644
+--- a/packages/subagent/subagent/tests/list-children.spec.ts
++++ b/packages/subagent/subagent/tests/list-children.spec.ts
+@@ -689,12 +689,16 @@ describe('SubagentRuntime.listChildren', () => {
+     expect(entries).toEqual([{ kind: 'diagnostic', id: malformed, reason: 'corrupt' }])
+   })
+ 
++  // Beyond every version this runtime supports, including the compatibility
++  // line's continuable (4) and independent (5) descriptors.
++  const UNKNOWN_DESCRIPTOR_VERSION = 99
++
+   it('diagnoses an unknown descriptor version as corrupt', async () => {
+     const { ctx, parent } = await setup([])
+     const future = await authorChild(ctx, '00000000-0000-4000-8000-0000000000aa', {
+       parentSession: parent.id,
+       origin: 'subagent',
+-    }, childEvents(descriptorPayload('from the future', SUBAGENT_DESCRIPTOR_VERSION + 1)))
++    }, childEvents(descriptorPayload('from the future', UNKNOWN_DESCRIPTOR_VERSION)))
+     // The projection fold does not distinguish an unrecognized version from
+     // other invalid descriptors: both serve no identity, and a settled
+     // no-value candidate is corrupt.
+diff --git a/packages/subagent/subagent/tests/service.spec.ts b/packages/subagent/subagent/tests/service.spec.ts
+index f40fc11..fdfbb9e 100644
+--- a/packages/subagent/subagent/tests/service.spec.ts
++++ b/packages/subagent/subagent/tests/service.spec.ts
+@@ -444,7 +444,9 @@ describe('subagent descriptors', () => {
+       }),
+     ])).toMatchObject({ toolFilter: { deny: ['bash'] } })
+     expect(foldSubagentDescriptor([
+-      event({ version: SUBAGENT_DESCRIPTOR_VERSION + 1, provider: 'spawn' }),
++      // 99 is beyond every supported version, including the compatibility
++      // line's independent descriptor (5).
++      event({ version: 99, provider: 'spawn' }),
+     ])).toBeUndefined()
+     expect(() => snapshotSubagentDescriptor({
+       mode: 'continuable',

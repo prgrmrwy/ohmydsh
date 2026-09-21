@@ -76,9 +76,10 @@ function installInheritanceForAgent(child: Agent): () => void {
  * Compose the parent Worktree binding into a child during its unpublished
  * creation window (`agents.create`/`resume` `setup` callback form).
  */
-export function installSubagentInheritance(childCtx: Context): () => void {
-  const child = childCtx.agent
-  if (child === undefined) throw new Error('Worktree Session cannot install delegated policy without an unpublished child Agent')
+export function installSubagentInheritance(childCtx: Context, child: Agent): () => void {
+  // DSH 0.1.5 passes the unpublished Agent separately from its scoped Context;
+  // the child is not present in ctx.agents until setup has committed.
+  void childCtx
   return installInheritanceForAgent(child)
 }
 

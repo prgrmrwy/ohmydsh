@@ -15,7 +15,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-client-connection'
-import type {} from '@deepseek-ai/dsh-session'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-presets'
 import type {} from '@deepseek-ai/dsh-llm'
@@ -969,13 +969,13 @@ async function initialize(
    * scoped providers are registered (see the integration pitfalls note).
    */
   const executorSetup = async (
-    agentCtx: unknown,
+    agentCtx: Context,
+    _agent: import('@deepseek-ai/dsh-agent').Agent,
     presetId: string | undefined,
     includeAllowlist: boolean,
   ): Promise<void> => {
-    const scoped = agentCtx as Context
-    await ctx.agentPresets.mount(scoped as never, presetId as never)
-    await installPetScope(scoped, includeAllowlist)
+    await ctx.agentPresets.mount(agentCtx as never, presetId as never)
+    await installPetScope(agentCtx, includeAllowlist)
   }
 
   // This is intentionally a separate Host owner proof from locusIdentity
@@ -998,9 +998,9 @@ async function initialize(
    * synchronous throw from `agent/created` would veto publication.
    */
   const composeForeignExecutor = async (agent: unknown): Promise<void> => {
-    const view = agent as { session?: { id?: unknown }; ctx?: unknown } | undefined
-    const sessionId = view?.session?.id
-    if (sessionId === undefined || view?.ctx === undefined) return
+    const view = agent as { id?: unknown; ctx?: unknown } | undefined
+    const sessionId = view?.id
+    if (typeof sessionId !== 'string' || view?.ctx === undefined) return
     const task = repository.findTaskByExecutor(String(sessionId))
     if (task === undefined || composedAgents.has(view.ctx as object)) return
     // A `qa-chat` Task's "executor" is a fork CHILD of a user session, not a
@@ -1091,7 +1091,7 @@ async function initialize(
         if (tools === undefined) {
           throw new PetError('INTERNAL', 'Agent scope exposes no tools service')
         }
-        const childSession = ctx.sessions.get(agent.sessionId as never)
+        const childSession = ctx.sessions.get(agent.id as never)
         const parentSession = ctx.sessions.get(composition.parentSessionId as never)
         const sandboxPolicy = ctx.get('sandboxPolicy') as
           | { resolve?: (input: { session: unknown }) => { workspaceRoot?: string } | undefined }
@@ -1175,7 +1175,7 @@ async function initialize(
       // registrations this check exists to find. `agents.get` is safe here
       // because the runtime announces a child only after it is registered.
       visibleTools: agent => {
-        const live = ctx.agents.get(agent.sessionId as never)
+        const live = ctx.agents.get(agent.id as never)
         if (live === undefined) return undefined
         return ctx.tools.schemas(live).map(schema => schema.name)
       },
@@ -1225,16 +1225,16 @@ async function initialize(
     () =>
       ctx.on('agent/created', (payload: { agent?: unknown }) => {
         const agent = payload?.agent as
-          | { session?: { id?: unknown }; ctx?: unknown }
+          | { id?: unknown; ctx?: unknown }
           | undefined
-        const sessionId = agent?.session?.id
+        const sessionId = agent?.id
         // Call the locus composer exactly ONCE. A durable lookup is reusable,
         // but the fresh-child staging fallback is a one-shot claim; a
         // preliminary "is locus?" probe would consume it and make the real
         // composition fail as a duplicate publication. `composed:false` is
         // the ordinary-session answer and falls through unchanged.
         if (typeof sessionId === 'string' && agent?.ctx !== undefined) {
-          const candidate: LocusCandidateAgent = { sessionId, scope: agent.ctx as never }
+          const candidate: LocusCandidateAgent = { id: sessionId, scope: agent.ctx as never }
           // Rethrown deliberately: only a candidate that matched durable or
           // staged locus identity may veto publication. Logged first because the
           // veto travels out through agent creation and provisioning, which
@@ -1459,7 +1459,7 @@ async function initialize(
             )
           }
           handle = await ctx.agents.resume({
-            resumeSessionId: executorSessionId as never,
+            resumeSessionId: SessionId(executorSessionId),
             // Same flat model shape as creation. The preset name is persisted
             // for display, but setup still needs the resolved id because
             // `agentPresets.mount` is what actually composes its tools.
@@ -1470,9 +1470,9 @@ async function initialize(
             // Resume mints a BRAND NEW agent scope. Mount the Task form's
             // preset, then restore `pet_context`; only dedicated Pet executors
             // regain the allowlist provider.
-            setup: (agentCtx: unknown) =>
-              executorSetup(agentCtx, presetId, task.residentWorkspaceId === undefined),
-          } as never)
+            setup: async (agentCtx, agent) =>
+              executorSetup(agentCtx, agent, presetId, task.residentWorkspaceId === undefined),
+          })
         } catch (error) {
           throw new PetError(
             'INTERNAL',
@@ -1796,8 +1796,11 @@ async function initialize(
           // Delegate explicitly rather than spreading or inheriting from the
           // service: `ctx.agents` is a Cordis service whose `create` relies on
           // its own receiver, so it must keep being called on itself.
-          create: (options: unknown) =>
-            (ctx.agents as { create(input: unknown): unknown }).create(options),
+          create: async (options: import('@deepseek-ai/dsh-agent').CreateAgentOptions) =>
+            (ctx.agents as {
+               create(input: import('@deepseek-ai/dsh-agent').CreateAgentOptions):
+                 Promise<import('@deepseek-ai/dsh-agent').AgentHandle>
+             }).create(options),
           // Same seam the Pet executor uses: a real UserMessage through
           // `followup`, never a raw string, so the briefing rides the path a
           // native client uses. Not awaited — see the port's `brief` doc.
@@ -2054,11 +2057,11 @@ async function initialize(
       return createLocusTurnObserver({
         onClaimed: listener =>
           ctx.on(claimEvent as never, ((payload: {
-            agent?: { session?: { id?: unknown } }
+            agent?: { id?: unknown }
             message?: { id?: unknown; source?: { kind?: unknown } }
             turn?: unknown
           }) => {
-            const childSessionId = payload?.agent?.session?.id
+            const childSessionId = payload?.agent?.id
             const messageId = payload?.message?.id
             if (typeof childSessionId !== 'string' || typeof messageId !== 'string') return
             if (typeof payload.turn !== 'number') return

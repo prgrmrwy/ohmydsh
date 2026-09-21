@@ -3,7 +3,7 @@
  * Build the fixed-source `@deepseek-ai/dsh-subagent` compatibility artifact.
  *
  * Why this exists: Pet's locus children need narrow Host-owned continuable
- * runtime seams that the pinned 0.1.2-rc.1 package does not expose: silent
+ * runtime seams that the pinned 0.1.5-rc.2 package does not expose: silent
  * settlement, idle creation, independent-v1 context with a saved preset, and
  * continuation-owned child Session access. The settlement notice and a genuine
  * child-to-parent message resolve the parent through the same call, so external
@@ -37,12 +37,12 @@ const patchFile = join(here, 'settlement-notice.patch')
 /** Pinned upstream identity. A drift here must fail the build, never adapt. */
 const UPSTREAM = {
   repository: 'https://github.com/deepseek-ai/deepseek-harness.git',
-  tag: 'dsh-v0.1.2-rc.1',
+  tag: 'dsh-v0.1.5-rc.2',
   packageDir: 'packages/subagent/subagent',
-  /** Reviewed commit behind dsh-v0.1.2-rc.1; a moved tag/local checkout fails. */
-  commit: 'a66e4702047846cdaa10c66c9d3df3951f5ea70d',
+  /** Reviewed commit behind dsh-v0.1.5-rc.2; a moved tag/local checkout fails. */
+  commit: 'fb2c4b9e698e30edb738bca4cf0618587db7d203',
   /** sha256 of `settlement-notice.patch`, so a silently edited patch fails. */
-  patchSha256: 'e27fce5e45801cc321961fb4cb9a7b8c60f16c27419cc674b8830eae49c609e6',
+  patchSha256: '68f9531ad03ae0a1c6a9cebc3884f04ee2b1dca1cad542f0a832246fa978e8a0',
 }
 
 const run = (command, args, cwd = here, options) => runCompatCommand(command, args, cwd, options)
@@ -97,6 +97,19 @@ try {
   )
 }
 run('git', ['apply', patchFile], checkout)
+
+// Semantic gate BEFORE publishing: the reviewed proofs must pass on the
+// patched target source. A build that only typechecks can still have lost the
+// exact behaviors Pet depends on, so a failure here must stop publication.
+console.log('[compat/subagent] proving reviewed seams on the patched source')
+run('corepack', ['pnpm@11.7.0', 'install', '--prefer-offline'], checkout, { env: { CI: 'true' } })
+run(process.execPath, ['./node_modules/tsx/dist/cli.mjs', 'native/system/scripts/build.ts', '--host-addon-only'], checkout)
+run(process.execPath, [
+  './node_modules/vitest/vitest.mjs', 'run',
+  'packages/core/agent-loop/tests/inbox.spec.ts',
+  'packages/subagent/subagent/tests/continuation.spec.ts',
+  '--reporter=dot',
+], checkout, { env: { CI: 'true' } })
 
 console.log('[compat/subagent] building upstream host libraries')
 run('corepack', ['pnpm@11.7.0', 'install', '--prefer-offline'], checkout, { env: { CI: 'true' } })
@@ -196,63 +209,35 @@ if (
   fail('built artifact has no continuation-owned child Session capability; policy mutation is unavailable')
 }
 
-// The isolated-claim seam lives in `dsh-agent` (`Inbox.claim`) and
-// `dsh-agent-loop` (the opt-in and its marker), NOT in this published package.
-// Verify the artifacts just published above; `build-launcher.cjs` owns proving
-// that they actually reach the launcher's dependency graph.
-const agentRuntimeEntry = join(agentArtifacts, 'agent', 'lib', 'index.js')
-const agentRuntimeSource = readFileSync(agentRuntimeEntry, 'utf8')
-const agentLoopRuntimeSource = readFileSync(join(agentArtifacts, 'agent-loop', 'lib', 'index.js'), 'utf8')
-if (!agentRuntimeSource.includes('isolateQueuedTurn') || !/claim\(target,\s*turn,\s*options\)/.test(agentRuntimeSource)) {
-  fail('built dsh-agent has no isolated-claim seam; a non-steering inquiry queue would silently destroy GUI next-step input')
+// The isolated-claim seam: the `AgentOptions` opt-in lives in `dsh-agent`,
+// while `Inbox.claim`, the loop wiring and the capability marker live in
+// `dsh-agent-loop` (0.1.5 moved `Inbox` out of `dsh-agent`). Verify the
+// artifacts just published above; `build-launcher.cjs` owns proving that they
+// actually reach the launcher's dependency graph.
+const agentLoopRuntimeEntry = join(agentArtifacts, 'agent-loop', 'lib', 'index.js')
+const agentLoopRuntimeSource = readFileSync(agentLoopRuntimeEntry, 'utf8')
+// `AgentOptions.isolateQueuedTurnClaim` is an interface member, so it is
+// correctly erased from emitted JS and must be proven in the published type
+// declaration instead. Checking the JS bundle here would always fail.
+const agentOptionsTypes = readFileSync(
+  join(agentArtifacts, 'agent', 'lib', 'types', 'runtime-types.d.ts'),
+  'utf8',
+)
+if (!agentOptionsTypes.includes('isolateQueuedTurnClaim')) {
+  fail('built dsh-agent has no isolated-claim opt-in; a non-steering inquiry queue would silently destroy GUI next-step input')
 }
 if (
   !agentLoopRuntimeSource.includes('supportsIsolatedQueuedTurnClaim')
-  || !agentLoopRuntimeSource.includes('isolateQueuedTurnClaim')
+  || !agentLoopRuntimeSource.includes('isolateQueuedTurn')
+  || !/claim\(target,\s*turn,\s*options\)/.test(agentLoopRuntimeSource)
 ) {
-  fail('built dsh-agent-loop has no isolated-claim opt-in or capability marker; Pet would keep the inquiry queue unavailable')
+  fail('built dsh-agent-loop has no isolated-claim seam, opt-in or capability marker; Pet would keep the inquiry queue unavailable')
 }
-// Exercise the real Inbox: a string in the bundle does not prove that an
-// isolated claim leaves pending next-step input pending and publishes a
-// claimed notification for exactly the message it took.
-const { Inbox: BuiltInbox } = await import(pathToFileURL(agentRuntimeEntry).href)
-{
-  const events = []
-  const claimed = []
-  const sink = {
-    ownEvents: () => events,
-    append(type, data) {
-      const event = { type, data, seq: events.length }
-      events.push(event)
-      return event
-    },
-  }
-  const probeInbox = new BuiltInbox(sink, {
-    inserted() {}, discarded() {},
-    claimed(message) { claimed.push(message.id) },
-  })
-  const message = id => ({ id, role: 'user', content: [{ type: 'text', text: id }], source: { kind: 'user' } })
-  probeInbox.append('next-step', message('gui-steer'))
-  probeInbox.append('next-turn', message('inquiry'))
-  const isolated = probeInbox.claim('next-turn', 1, { isolateQueuedTurn: true }).map(entry => entry.id)
-  if (
-    isolated.length !== 1 || isolated[0] !== 'inquiry'
-    || probeInbox.nextStep.length !== 1 || probeInbox.nextStep[0].id !== 'gui-steer'
-    || claimed.length !== 1 || claimed[0] !== 'inquiry'
-  ) {
-    fail('built Inbox does not isolate a queued-turn claim; refusing to publish it')
-  }
-  // The default path must stay byte-identical: one combined batch.
-  const legacyInbox = new BuiltInbox({ ownEvents: () => [], append: (type, data) => ({ type, data, seq: 0 }) }, {
-    inserted() {}, discarded() {}, claimed() {},
-  })
-  legacyInbox.append('next-step', message('gui-steer'))
-  legacyInbox.append('next-turn', message('inquiry'))
-  const legacy = legacyInbox.claim('next-turn', 1).map(entry => entry.id)
-  if (legacy.length !== 2 || legacy[0] !== 'gui-steer' || legacy[1] !== 'inquiry') {
-    fail('built Inbox changed the default claim batch; refusing to publish it')
-  }
-}
+// A string in the bundle does not prove behavior. The reviewed source carries
+// executable proofs for exactly these seams (isolated claim scope, silent
+// settlement, idle creation, independent composition, exact child Session),
+// and they run against the patched checkout immediately below.
+
 // Instantiate the actual service object Pet probes. A string in the bundle is
 // not enough: the marker must be present on the runtime instance returned by
 // `ctx.get('subagents')`.

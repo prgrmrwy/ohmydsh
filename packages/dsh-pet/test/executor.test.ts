@@ -39,9 +39,9 @@ function fakeAgents(overrides: Partial<AgentRegistryLike> = {}): AgentRegistryLi
   return {
     create: vi.fn(async (options: { sessionId: string }) => {
       sessions.add(options.sessionId)
-      return { session: { id: options.sessionId } }
+      return { agent: { id: options.sessionId }, dispose: async () => {} }
     }),
-    get: (sessionId: string) => (sessions.has(sessionId) ? {} : undefined),
+    get: (sessionId: string) => (sessions.has(sessionId) ? { id: sessionId } : undefined),
     ...overrides,
   } as AgentRegistryLike
 }
@@ -226,7 +226,7 @@ describe('recoverable executor creation', () => {
       create: vi.fn(async (options: { sessionId: string }) => {
         // Inside the DSH call: Pet's durable record must already exist.
         observed = repo.findTaskByExecutor(options.sessionId)?.status
-        return { session: { id: options.sessionId } }
+        return { agent: { id: options.sessionId }, dispose: async () => {} }
       }),
     } as Partial<AgentRegistryLike>)
 
@@ -282,8 +282,8 @@ describe('recoverable executor creation', () => {
     // Invoked, not identical: the callback is wrapped so it also receives the
     // preset id it must MOUNT — naming a preset in `meta` composes nothing.
     const call = (agents.create as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
-    await call.setup({})
-    expect(setup).toHaveBeenCalledWith({}, 'pet', true)
+    await call.setup({}, { id: 'executor-test' })
+    expect(setup).toHaveBeenCalledWith({}, { id: 'executor-test' }, 'pet', true)
     expect(call.meta.agentPreset).toBe('pet')
   })
 
@@ -309,9 +309,9 @@ describe('recoverable executor creation', () => {
 
     // What the session claims and what it actually composes must not drift.
     const call = (agents.create as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
-    await call.setup({})
+    await call.setup({}, { id: 'executor-test' })
     expect(call.meta.agentPreset).toBe('standard')
-    expect(setup).toHaveBeenCalledWith({}, 'standard', false)
+    expect(setup).toHaveBeenCalledWith({}, { id: 'executor-test' }, 'standard', false)
   })
 })
 
@@ -357,7 +357,7 @@ describe('agent options match the flat DSH contract', () => {
     const agents = {
       create: async (options: { agentOptions?: { provider?: string; model?: string } }) => {
         captured = options.agentOptions
-        return { session: { id: 'exec-1' } }
+        return { agent: { id: 'exec-1' }, dispose: async () => {} }
       },
       get: () => undefined,
     }
@@ -382,7 +382,7 @@ describe('the executor is accounted to the Pet Workspace', () => {
     harness = await openPetHarness()
     const attached: string[] = []
     const agents = {
-      create: async (options: { sessionId: string }) => ({ session: { id: options.sessionId } }),
+      create: async (options: { sessionId: string }) => ({ agent: { id: options.sessionId }, dispose: async () => {} }),
       get: () => undefined,
     }
 
@@ -406,7 +406,7 @@ describe('the executor is accounted to the Pet Workspace', () => {
   it('keeps a usable executor when accounting fails', async () => {
     harness = await openPetHarness()
     const agents = {
-      create: async (options: { sessionId: string }) => ({ session: { id: options.sessionId } }),
+      create: async (options: { sessionId: string }) => ({ agent: { id: options.sessionId }, dispose: async () => {} }),
       get: () => undefined,
     }
 
@@ -433,7 +433,7 @@ describe('the executor composes without local-root Skill discovery', () => {
     const agents = {
       create: async (options: { meta?: { agentPreset?: string } }) => {
         captured = options.meta?.agentPreset
-        return { session: { id: 'exec-1' } }
+        return { agent: { id: 'exec-1' }, dispose: async () => {} }
       },
       get: () => undefined,
     }

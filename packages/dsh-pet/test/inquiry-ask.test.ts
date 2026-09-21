@@ -88,7 +88,7 @@ function fixture(rows: LocusRecord[] = [locus('a', 'child-a'), locus('b', 'child
 }
 
 const ask = (id: unknown, args: unknown, f: ReturnType<typeof fixture>) =>
-  acceptInquiryFromCaller({ agent: { session: { id } } }, args, f.deps)
+  acceptInquiryFromCaller({ agent: { id } }, args, f.deps)
 
 const request = (target: string, over: Record<string, unknown> = {}) => ({
   target,
@@ -297,7 +297,7 @@ describe('caller-bound inquiry accept', () => {
       },
     })
     await expect(acceptInquiryFromCaller(
-      { agent: { session: { id: 'child-a' } } },
+      { agent: { id: 'child-a' } },
       request(childKey('b', 1, 'child-b')),
       guarded,
     )).resolves.toMatchObject({ status: 'accepted' })

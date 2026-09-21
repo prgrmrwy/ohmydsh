@@ -66,7 +66,7 @@ export interface LocusWorkspaceEntity {
 
 /** Exact creation capability retained for rollback. */
 export interface LocusAgentHandle {
-  readonly agent: { readonly session: Session }
+  readonly agent: { readonly id: SessionId }
   dispose(): Promise<void>
 }
 
@@ -103,6 +103,7 @@ export interface ProductionLocusDshPortDeps {
     currentSelection(): AgentOptions
   }
   readonly sessions: {
+    get?(sessionId: SessionId): Session | undefined
     flush(session: Session): Promise<boolean>
   }
   readonly sessionTitle: {
@@ -342,7 +343,7 @@ export function createProductionLocusDshPort(
         sessionId,
         meta: { cwd: workspace.path, agentPreset: presetId },
         agentOptions: selection,
-        setup: async agentContext => {
+        setup: async (agentContext, _agent) => {
           await deps.agentPresets.mount(agentContext, presetId)
         },
       })
@@ -352,7 +353,13 @@ export function createProductionLocusDshPort(
         // Accounting is part of the identity proof, not a cosmetic best-effort
         // attach. Rename only after that proof is durable.
         await workspace.attachSession(sessionId)
-        title = (await deps.sessionTitle.rename(handle.agent.session, input.label)).title
+        const session = deps.sessions.get?.(handle.agent.id)
+        if (session === undefined) {
+          throw new LocusDshCapabilityUnavailableError(
+            `Session ${sessionId} is not resolvable after Agent creation`,
+          )
+        }
+        title = (await deps.sessionTitle.rename(session, input.label)).title
 
         // Brief the main through the ORDINARY lifecycle: an identified user
         // message through `followup`, exactly as a native client sends one.
@@ -373,7 +380,7 @@ export function createProductionLocusDshPort(
           label: input.label,
         }))
 
-        if (!(await deps.sessions.flush(handle.agent.session))) {
+        if (!(await deps.sessions.flush(session))) {
           throw new LocusDshCapabilityUnavailableError(
             `Session ${sessionId} has no durability listener, so it cannot be published as a locus main`,
           )

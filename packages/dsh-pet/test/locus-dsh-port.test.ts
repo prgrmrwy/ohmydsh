@@ -63,9 +63,10 @@ function harness(
     },
     agents: {
       create: vi.fn(async options => {
-        await options.setup?.({ scope: 'agent' } as unknown as Context)
+        const agent = { id: options.sessionId }
+        await options.setup?.({ scope: 'agent' } as unknown as Context, agent)
         return {
-          agent: { session: fakeSession(String(options.sessionId)) },
+          agent,
           dispose: vi.fn(async () => undefined),
         }
       }),
@@ -78,6 +79,7 @@ function harness(
       currentSelection: () => ({ provider: 'deepseek', model: 'deepseek-chat' }),
     },
     sessions: {
+      get: id => fakeSession(String(id)),
       flush: vi.fn(async () => true),
     },
     sessionTitle: {
@@ -289,9 +291,10 @@ describe('production LocusDshPort main creation', () => {
     })
     const create = vi.fn(async options => {
       order.push('create')
-      await options.setup?.({ scope: 'main' } as unknown as Context)
+      const agent = { id: options.sessionId }
+      await options.setup?.({ scope: 'main' } as unknown as Context, agent)
       order.push('published')
-      return { agent: { session: fakeSession(String(options.sessionId)) }, dispose }
+      return { agent, dispose }
     })
     const rename = vi.fn((_session: Session, title: string) => {
       order.push('rename')
@@ -316,7 +319,7 @@ describe('production LocusDshPort main creation', () => {
         mount,
       },
       sessionTitle: { rename },
-      sessions: { flush },
+      sessions: { get: id => fakeSession(String(id)), flush },
       agentDefaultModel: base.agentDefaultModel,
     })
 
@@ -377,8 +380,9 @@ describe('production LocusDshPort main creation', () => {
       },
       agents: {
         create: vi.fn(async options => {
-          await options.setup?.({} as Context)
-          return { agent: { session: fakeSession(String(options.sessionId)) }, dispose }
+          const agent = { id: SessionId(String(options.sessionId)) }
+          await options.setup?.({} as Context, agent)
+          return { agent, dispose }
         }),
       },
     })
@@ -411,8 +415,9 @@ describe('production LocusDshPort main creation', () => {
       },
       agents: {
         create: vi.fn(async options => {
-          await options.setup?.({} as Context)
-          return { agent: { session: fakeSession(String(options.sessionId)) }, dispose }
+          const agent = { id: SessionId(String(options.sessionId)) }
+          await options.setup?.({} as Context, agent)
+          return { agent, dispose }
         }),
       },
       sessionTitle: {
@@ -474,10 +479,11 @@ describe('locus main opening briefing', () => {
         archivedSessionIds: [],
       },
       agents: {
-        create: vi.fn(async options => ({
-          agent: { session: fakeSession(String(options.sessionId)) },
-          dispose: vi.fn(async () => undefined),
-        })),
+        create: vi.fn(async options => {
+          const agent = { id: SessionId(String(options.sessionId)) }
+          await options.setup?.({} as Context, agent)
+          return { agent, dispose: vi.fn(async () => undefined) }
+        }),
         brief,
       } as unknown as ProductionLocusDshPortDeps['agents'],
       sessionTitle: {
@@ -487,6 +493,7 @@ describe('locus main opening briefing', () => {
         }),
       },
       sessions: {
+        get: id => fakeSession(String(id)),
         flush: vi.fn(async () => {
           order.push('flush')
           return true
@@ -502,7 +509,7 @@ describe('locus main opening briefing', () => {
 
     expect(order).toEqual(['attach', 'rename', 'brief', 'flush'])
     expect(brief).toHaveBeenCalledWith(
-      expect.objectContaining({ session: expect.anything() }),
+      expect.objectContaining({ id: SessionId('session-created-main') }),
       composeLocusMainBriefing(facts),
     )
   })
@@ -510,10 +517,11 @@ describe('locus main opening briefing', () => {
   it('still provisions a main when the Host exposes no briefing seam', async () => {
     const deps = harness({
       agents: {
-        create: vi.fn(async options => ({
-          agent: { session: fakeSession(String(options.sessionId)) },
-          dispose: vi.fn(async () => undefined),
-        })),
+        create: vi.fn(async options => {
+          const agent = { id: SessionId(String(options.sessionId)) }
+          await options.setup?.({} as Context, agent)
+          return { agent, dispose: vi.fn(async () => undefined) }
+        }),
       } as unknown as ProductionLocusDshPortDeps['agents'],
     })
 

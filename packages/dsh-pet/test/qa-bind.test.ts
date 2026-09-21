@@ -42,10 +42,10 @@ function seamStub(options: { resumeFails?: boolean } = {}) {
   const drained: string[] = []
   const seam: SubagentSeam = {
     agents: {
-      get: (id: string) => ({ session: { id } }) as LiveAgentLike,
+      get: (id: string) => ({ id }) as LiveAgentLike,
       resume: vi.fn(async ({ resumeSessionId }: { resumeSessionId: string }) => {
         if (options.resumeFails === true) throw new Error('cannot resume')
-        return { agent: { session: { id: resumeSessionId } } as LiveAgentLike }
+        return { agent: { id: resumeSessionId } as LiveAgentLike, dispose: async () => {} }
       }),
     },
     subagents: {
