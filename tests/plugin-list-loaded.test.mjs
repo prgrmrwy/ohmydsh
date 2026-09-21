@@ -18,6 +18,12 @@ import { collectLoadedPlugins } from '../scripts/plugin-list.mjs'
  * an explicit patch `insert` row — `dsh-width-tiers` via
  * `patches/width-tiers-wiring.yml` is exactly that shape. Reading only the
  * bundles array silently omitted it from the startup message for its whole life.
+ *
+ * The patch layer has a second shape that matters just as much: a top-level
+ * `{id, name}` row with no `insert`, which re-wires the row carrying that id
+ * instead of adding a new one. `patches/connection-webserver.yml` is that shape
+ * under 0.1.5. The same "acted but invisible" defect applies, so both shapes are
+ * asserted below.
  */
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -133,6 +139,55 @@ test('a missing profile degrades to an empty list instead of throwing', async (t
   const home = await mkdtemp(path.join(tmpdir(), 'ohmydsh-plugin-list-empty-'))
   t.after(() => rm(home, { recursive: true, force: true }))
   assert.deepEqual(collectLoadedPlugins({ dshHome: home, profile: 'web' }), [])
+})
+
+test('an override row that re-wires an existing loader row is reported too', async (t) => {
+  // The second wiring shape: a top-level `{id, name}` row with no `insert`.
+  // It adds no loader row — it re-wires the row carrying that id. 0.1.5's
+  // `patches/connection-webserver.yml` is exactly this, and it is load-bearing:
+  // it is what gives the official `connection` row its `webServer` inject.
+  // Reading only `insert` rows would hide it completely, which is the same
+  // "patch layer acted, startup list shows nothing" defect this file guards.
+  const home = await makeHome(
+    bundlesPkg(['@deepseek-ai/dsh-base']),
+    [
+      '- id: connection',
+      "  name: '@deepseek-ai/dsh-client-connection'",
+      '  inject: [webRuntime, webServer]',
+      '',
+    ].join('\n'),
+  )
+  t.after(() => rm(home, { recursive: true, force: true }))
+
+  const rows = collectLoadedPlugins({ dshHome: home, profile: 'web' })
+  assert.deepEqual(rows, [
+    { name: '@deepseek-ai/dsh-base', source: 'bundle' },
+    { name: '@deepseek-ai/dsh-client-connection', source: 'patch' },
+  ])
+})
+
+test('an override row marked disabled is not reported as loaded', async (t) => {
+  // `disabled: true` on a top-level row means "drop the row carrying this id".
+  // It contributes nothing, so it must not inflate the startup list.
+  const home = await makeHome(
+    bundlesPkg(['@deepseek-ai/dsh-base']),
+    ['- id: connection', "  name: '@deepseek-ai/dsh-client-connection'", '  disabled: true', ''].join('\n'),
+  )
+  t.after(() => rm(home, { recursive: true, force: true }))
+
+  const rows = collectLoadedPlugins({ dshHome: home, profile: 'web' })
+  assert.deepEqual(rows, [{ name: '@deepseek-ai/dsh-base', source: 'bundle' }])
+})
+
+test('an override row naming an already-loaded bundle package does not duplicate it', async (t) => {
+  const home = await makeHome(
+    bundlesPkg(['@deepseek-ai/dsh-base']),
+    ['- id: base-row', "  name: '@deepseek-ai/dsh-base'", '  config: {}', ''].join('\n'),
+  )
+  t.after(() => rm(home, { recursive: true, force: true }))
+
+  const rows = collectLoadedPlugins({ dshHome: home, profile: 'web' })
+  assert.deepEqual(rows, [{ name: '@deepseek-ai/dsh-base', source: 'bundle' }])
 })
 
 test('every manifest patch fragment this repo ships stays parseable', async (t) => {

@@ -71,7 +71,7 @@
 - [ ] 8.3 验证 RPC Host fence 与 Web 文件授权：非 trusted Host 拒绝；receipt 精确绑定 Session、cold/wrong Session、resource authorizing Session、跨 Session 复用拒绝；workspace-files read 按 composed fs policy 而非误设普适 workspace containment
 - [ ] 8.4 验证 0.1.5 outbound proxy：Geo/subscriptions/cost-meter/web_fetch/search/MCP/Pet-lark 各执行面，回环 RPC 直连、项目 `.env` 不注入、候选不读生产 `$DSH_HOME/.env`，child/workflow/code-runtime 继承差异有明确结果且报告不含代理凭据
 - [x] 8.5 在新 compatibility runtime 上验证 Pet 普通轮盘、Locus 既有 fork/independent 基线、SQLite 单 writer、真实飞书入口与官方媒体下载；新 inquiry G1–G5 未通过时仍保持未发布
-- [ ] 8.6 验证失败回滚：插件组失败只撤该组，runtime 候选失败回到旧 manifest/runtime，数据已写新格式时先停 writer并恢复备份
+- [x] 8.6 验证失败回滚：插件组失败只撤该组，runtime 候选失败回到旧 manifest/runtime，数据已写新格式时先停 writer并恢复备份（见 `checking/plugin-group-failure-rollback.md`。插件组失败为本次新增实测：坏 pin 下 `dsh build` `exit=1` + `ERR_PNPM_NO_MATCHING_VERSION` + `finished with 1 failure(s)`，失败组的依赖表 / `node_modules` / bundle 组合三层均停在原值，撤销后一次 build 即 `no changes` 收敛；附带发现 sync 的漂移判定读 `version:` 而非 `spec:` 字面量，只改 `spec` 是静默 no-op）
 - [x] 8.7 运行 `openspec validate upgrade-dsh-0-1-5-runtime --strict`、根全量测试、artifact check 与 `git diff --check`，记录最终候选证据
 
 ## 9. devbox 主干清洁构建与场景验收

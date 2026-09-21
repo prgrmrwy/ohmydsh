@@ -11,7 +11,15 @@
 // 只读 bundles 会漏掉「没有 dsh.bundle、靠 patch insert 行接线」的插件:
 // dsh-width-tiers 就是这种——它只声明 dsh.client,`dsh plugin add` 把它装成
 // 普通依赖,由 patches/width-tiers-wiring.yml 插入 loader 行才被真正加载,
-// 于是启动 msg 里长期看不到它。这里补齐 2/3 两层的 insert 行。
+// 于是启动 msg 里长期看不到它。这里补齐 2/3 两层接线的行。
+//
+// patch 层有**两种**接线形态,两种都要报,否则同样会「做了事却看不见」:
+//
+//   - `insert` 行 —— 往 loader 表里新增行(上面的 width-tiers);
+//   - 覆盖式行 —— 顶层 `{id, name}`,按 id 重新接线一个已存在的行。
+//     DSH 0.1.5 的 `patches/connection-webserver.yml` 就是这种:它把官方
+//     connection 行的 `inject` 补上 `webServer`,从而修好所有 Connection RPC
+//     channel 的注册;但按 id 覆盖不产生新行,只看 insert 会让它完全隐身。
 //
 // desc 来源:ohmydsh manifest 的 brief/note(按 npm 名匹配)> 已安装包
 // package.json 的 description。
@@ -119,16 +127,32 @@ export function collectLoadedPlugins({ dshHome, profile }) {
   const rows = bundles.map((name) => ({ name, source: "bundle" }))
   const seen = new Set(bundles)
 
-  const inserted = []
-  for (const file of [path.join(profileDir, "cordis.patch.yml"), path.join(dshHome, "cordis.patch.yml")]) {
+  const patchFiles = [path.join(profileDir, "cordis.patch.yml"), path.join(dshHome, "cordis.patch.yml")]
+
+  // patch 层接线的包,按遇到顺序。两种形态都算(见文件头注释):`insert` 行新增
+  // loader 行;覆盖式行(顶层 `{id, name}`,无 `insert`)按 id 重新接线一个已存在
+  // 的行——它不新增行,但同样证明 patch 层参与了这个包的加载/接线。
+  const wired = []
+  for (const file of patchFiles) {
     for (const patch of readPatchList(file)) {
       if (patch === null || typeof patch !== "object") continue
-      if (patch.insert !== undefined) collectInserted(patch.insert, inserted)
+      if (patch.insert !== undefined) {
+        collectInserted(patch.insert, wired)
+        continue
+      }
+      if (
+        patch.disabled !== true &&
+        typeof patch.id === "string" &&
+        typeof patch.name === "string" &&
+        patch.name !== ""
+      ) {
+        wired.push({ name: patch.name, id: patch.id })
+      }
     }
   }
-  // 后续 patch 行可以按 id 停用先前插入的行;停用者不算「已加载」。
+  // 后续 patch 行可以按 id 停用先前接线的行;停用者不算「已加载」。
   const disabledIds = new Set()
-  for (const file of [path.join(profileDir, "cordis.patch.yml"), path.join(dshHome, "cordis.patch.yml")]) {
+  for (const file of patchFiles) {
     for (const patch of readPatchList(file)) {
       if (patch === null || typeof patch !== "object") continue
       if (patch.insert === undefined && typeof patch.id === "string" && patch.disabled === true) {
@@ -137,7 +161,7 @@ export function collectLoadedPlugins({ dshHome, profile }) {
     }
   }
 
-  for (const entry of inserted) {
+  for (const entry of wired) {
     if (entry.id !== undefined && disabledIds.has(entry.id)) continue
     if (seen.has(entry.name)) continue // bundle 层已经加载过同一个包
     seen.add(entry.name)
