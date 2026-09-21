@@ -27,10 +27,19 @@
  * (handlers never throw). The `llm/stream` gate registers on the root context
  * and therefore also guards headless compositions.
  *
+ * ⚠ **0.1.5 起必须同时注入 `webServer`。** `connection.rpc.handle()` 内部是
+ * `owner.effect(() => owner.webServer.register(route))` —— 路由挂到**调用方
+ * 上下文**的 web server 上。只注入 `connection` 时 `owner.webServer` 为
+ * undefined,该 effect 抛错被吞,通道**静默不注册**,客户端拿到的是通用
+ * `405`(与"路径不存在"无法区分)。0.1.2 及以前不注入也能工作,故这是运行体
+ * 侧的破坏性变更,不注入就退化。仓库内正常工作的 `dsh-pet` /
+ * `dsh-worktree-session` 的 inject 列表都含 `webServer`,可作范式。
+ *
  * @module dsh-home-network-model-guard
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-connection'
+import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-llm'
 import os from 'node:os'
 import path from 'node:path'
@@ -117,7 +126,9 @@ export function apply(ctx: Context): void {
     },
   ))
 
-  ctx.inject(['connection'], (child) => {
+  // `webServer` 与 `connection` 必须一起注入:channel 路由挂在调用方上下文的
+  // web server 上(见文件头说明)。两者皆缺时回调不执行 —— 这正是无头组合想要的行为。
+  ctx.inject(['connection', 'webServer'], (child) => {
     const connection = child.get('connection')
     if (connection === undefined) return
     // 诊断信号:verdict 每次变化只记一行,从不含 IP/原文错误文本。
