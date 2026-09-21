@@ -1591,7 +1591,10 @@ async function initialize(
     ? createLocusChildDelivery({
       // One adapter owns exactly one active child; use a factory so sibling
       // loci under the same main session do not contend for one singleton.
-      createAdapter: () => createLocusChildAdapter(locusChildProbe.ports),
+      createAdapter: () => createLocusChildAdapter({
+        ...locusChildProbe.ports,
+        log: message => petLog(`dsh-pet locus child: ${message}`),
+      }),
       // Without this port every child-delivery refusal (safe-composition-unproven,
       // child-not-found, parent-unavailable, ...) is discarded: the controller's
       // catch collapses all of them into one `child-unavailable`, which is not
@@ -1692,7 +1695,13 @@ async function initialize(
           generation: input.generation,
           permission: input.permission,
         })
-        const adapter = createLocusChildAdapter(locusChildProbe.ports)
+        const adapter = createLocusChildAdapter({
+          ...locusChildProbe.ports,
+          // The provisioning path builds its own adapter; without this sink a
+          // child-creation failure here is the fourth silent swallow on the
+          // way from a Feishu message to a published locus.
+          log: message => petLog(`dsh-pet locus child: ${message}`),
+        })
         try {
           const created = await adapter.createIdleChild({
             parentSessionId: input.parentSessionId,
