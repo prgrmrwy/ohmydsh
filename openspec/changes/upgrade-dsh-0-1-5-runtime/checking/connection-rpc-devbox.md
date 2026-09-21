@@ -36,20 +36,33 @@ POST /dsh-home-network-model-guard/check -> 405
 POST /dsh-pet/api/status               -> 200   (Pet 自己注册的 HTTP 路由,正常)
 ```
 
-## 关键对照:本机正常,devbox 不正常
+## 关键对照:三组配置,同一个探针
 
-| | 本机 | devbox |
-|---|---|---|
-| 运行体 | 0.1.5-rc.2 | 0.1.5-rc.2 |
-| `guard/lib/client.js` sha256 | `59c688b1adc1ea1f…` | `59c688b1adc1ea1f…`(**逐字节相同**) |
-| `guard/lib/index.js` sha256 | `137084fe79c19998…` | `137084fe79c19998…`(**逐字节相同**) |
-| `guard/lib/client.js` | 同上 | 同上 |
-| `POST /dsh-home-network-model-guard/check` | **成功**(唯一非 2xx 是无关的 codex 404) | **405 ×5** |
-| console 警告 | 无 | 有 |
+被质疑"升级前没问题、升级后也没有对应 breakchange,凭什么算问题"之后,
+用**同一个探针**(POST + `content-type: application/json` + 同一信封体)
+在三组配置上各跑一遍,而不是靠推理:
 
-`dsh-system-clock` 两个半区的 sha256 同样逐字节相同。
+| 配置 | `guard` `/check` | `clock` `/now` | `session-links` `/links` | `memex` `/stores` | 不存在的路径 |
+|---|---|---|---|---|---|
+| **0.1.2-rc.1 + 升级前 home**(devbox 备份 + npx 装回的旧运行体) | **200** | **200** | **200** | 405 | 405 |
+| **0.1.5-rc.2 + 旧插件集**(本机现在) | **200** | **200** | **200** | **200** | 405 |
+| **0.1.5-rc.2 + 新插件集**(devbox 现在) | **405** | **405** | **405** | **405** | 405 |
 
-**所以不是插件代码差异,也不是运行体版本差异**,而是组合/环境差异。
+200 的响应体是合法的 RPC 信封:`{"type":"server-response","rpcId":"probe","result":{"ok":false,…}}`。
+
+由此得到两条硬结论:
+
+1. **运行体升级本身不是原因。** 第 2 行证明 0.1.5-rc.2 配旧插件集时四个通道全部正常。
+   这也解释了为什么"升级后看不到对应 breakchange"——**运行体侧确实没有这个 breakchange**。
+2. **原因在插件批次里。** 第 2 行与第 3 行运行体同版本、插件构建 sha256 也相同,
+   唯一差别是插件集合;集合一换,四个通道同时失效。
+
+补充:`memex` 在 0.1.2-rc.1 上本来就是 405(旧运行体下未注册),升到 0.1.5 旧插件集
+后才变 200 —— 属于另一个独立的既存现象,不要和本缺陷混为一谈。
+
+另附硬件事实:`guard`/`clock` 两个半区的构建在本机与 devbox **逐字节相同**
+(`client.js` sha256 `59c688b1adc1ea1f…`、`index.js` `137084fe79c19998…`),
+所以也不是插件代码差异。
 
 ## 已排除的原因(每条都实测过,不要重复假设)
 
@@ -92,23 +105,35 @@ POST /dsh-pet/api/status               -> 200   (Pet 自己注册的 HTTP 路由
 
 ## 未定根因与后续方向
 
-根因**尚未确定**,不做推测性结论。已知的差异面只有组合:
+原因已**定位到插件批次**,但批次内的具体元凶**尚未确定**,不做推测性结论。
 
-- devbox 启用了 `@byted/dsh-traex-bridge@0.1.15`(本机未启用);
-- devbox 是新的插件批次,本机仍是旧批次(且仍带着已移除的三件套);
-- 其余官方 `connection` 相关条目两边相同。
+下一步按组合二分:在 devbox 上逐个禁用本批次新升级/新启用的插件,每禁一个就用
+同一个探针打一次 `POST /dsh-home-network-model-guard/check`,直到恢复 200。
+优先顺序(按“最可能影响 Host 路由/服务装配”排):
 
-下一步建议按组合二分:从 devbox 当前组合里逐个禁用 devbox 独有/新升级的插件
-(优先 `dsh-cockpit-bridge@0.4.0`、`dsh-opencode-session-header`、
-`@byted/dsh-traex-bridge`),复现一次 `POST /dsh-home-network-model-guard/check`
-是否恢复 2xx。
+1. `dsh-opencode-session-header`(在 Host 进程全局 patch `fetch`)
+2. `@byted/dsh-traex-bridge@0.1.15`(devbox 独有启用,且带 bundle patch:
+   插入 `llm-traex-bridge`、覆盖 `agent-default-model`、新增 `web.searchProvider`)
+3. `dsh-cockpit-bridge@0.4.0`(新升级,自带上报路由)
+4. `dsh-better-sidebar@0.19.1`
+
+一个需要重点验证的假说:`connection` 服务的 loader 条目注入 `webRuntime`
+且 channel 是**惰性注册**的,因此只要批次里有一个条目在装配阶段影响了
+`connection`/`webRuntime` 的激活顺序或失败传播,后面所有插件的
+`ctx.inject(['connection'], …)` 回调就**一次都不会执行,且不报错**——
+这与"四个通道同时失效、日志无任何错误"的观测完全吻合。
 
 ## 影响评估(不要夸大)
 
-- 受影响的是**浏览器侧**:出口守卫的设置页配置显示与模型选择告警、系统时钟显示。
+- 受影响的是**浏览器侧**:出口守卫的设置页配置显示与模型选择告警、系统时钟显示;
+  `dsh-memex` 与 `dsh-session-links` 用的是同一条通道,大概率同样拿到不到数据
+  (未逐项点开验证,不在此断言)。
 - **host 侧的出口门禁不受影响** —— 它在 Host 内直接解析 Geo 并独立地对
   `blocked`/`unknown` fail closed,不依赖这条 RPC。
-- Pet、worktree-session、subscriptions 各自注册 HTTP 路由,均正常(见
-  `plugin-batch-acceptance.md`)。
-- 因此这是**功能退化**,不是数据安全或 Pet 可用性问题;但它是一处**真实缺陷**,
-  且在 devbox(即目标运行环境)上稳定复现。
+- Pet 与 worktree-session 注册的是**自有 HTTP 路由**(不是 Connection RPC),
+  实测正常。
+- 远端 `subscriptions` 的 `/subscriptions-auth` 同样是 405,所以它的设置页里
+  **卡片结构来自客户端常量而非 RPC**;此前把它当作"subscriptions 正常"的证据
+  属过度解读,已更正。
+- 因此这是**功能退化**,不是数据安全或 Pet 可用性问题;但它是一处**真实回归**
+  (已用升级前基线证伪"本来就这样"),且在 devbox(目标运行环境)上稳定复现。
