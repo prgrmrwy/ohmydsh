@@ -368,6 +368,14 @@ describe('production LocusDshPort main creation', () => {
     await createProductionLocusDshPort(listedDeps).releaseSession('session-created-main')
     // Detach is the ONLY effect: session history is deliberately retained.
     expect(listed.detachSession).toHaveBeenCalledWith('session-created-main')
+
+    // Idempotent, and a session no workspace claims is ALREADY released. The
+    // session log outlives the attachment, so treating a readable log as
+    // "still attached" rejected the very state this method produces and left
+    // the operation permanently in needs-recovery.
+    const releasedDeps = { ...deps, workspaceRegistry: { ...deps.workspaceRegistry, list: () => [] } }
+    await expect(createProductionLocusDshPort(releasedDeps).releaseSession('session-created-main'))
+      .resolves.toBeUndefined()
   })
 
   it('returns an ownership-bound rollback that attempts detach and handle disposal', async () => {
