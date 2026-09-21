@@ -5,7 +5,7 @@
 - [x] 1.3 在当前 `0.1.2-rc.1` 上执行并记录根 `npm test`、`npm run check:artifacts`、9 包 build/typecheck/test 及已知跳过/环境差异
 - [x] 1.4 在隔离旧版 `DSH_HOME` 连续执行 sync/build 两次，记录第二次无变化、dump-config、启动清单及每个已启用插件恰好一次
 - [x] 1.5 固定旧版人工/黑盒基线：Worktree 首发、Session 冷恢复、Memex、guard、clock、session-links/title/provider icon、Cockpit、remote Web 插件与 Pet/飞书链，并列出无自动化覆盖项
-- [ ] 1.6 选择经脱敏的真实旧 Session v0/v1/v2 样本与 Pet 数据副本，记录身份、标题、workspace/cwd、lineage、provider、assistant/tool 内容等迁移 oracle，不提交原始 session/history evidence
+- [x] 1.6 选择经脱敏的真实旧 Session v0/v1/v2 样本与 Pet 数据副本，记录身份、标题、workspace/cwd、lineage、provider、assistant/tool 内容等迁移 oracle，不提交原始 session/history evidence
 
 ## 2. 第三方插件前置审查与分组决策
 
@@ -20,7 +20,7 @@
 ## 3. 裸 DSH 0.1.5 与数据迁移演练
 
 - [ ] 3.1 创建独立 `DSH_HOME` 和非生产端口，只部署官方 `0.1.5-rc.2` profile；验证 CLI/dump-config/Web，并覆盖 `--from-default-profile` 的 launcher 路由、fresh/existing custom profile、shipped profile 名、desktop 拒绝及 plugin add/remove/why
-- [ ] 3.2 在真实旧 Session 备份副本上触发官方 v0→v1→v2→v3 migrators，逐项比对内容并证明旧 generation 保留、新 generation 原子发布、lease 排他与中断后 generation 选择
+- [x] 3.2 在真实旧 Session 备份副本上触发官方 v0→v1→v2→v3 migrators，逐项比对内容并证明旧 generation 保留、新 generation 原子发布、lease 排他与中断后 generation 选择
 - [ ] 3.3 在迁移后的同一 Session 中继续提交、停止并重启 Host，确认恢复写入和重启结果一致且原始生产源未被候选打开或改写
 - [ ] 3.4 注入损坏、不受支持格式、写所有权竞争与中断场景，确认候选 fail closed 且备份可恢复
 - [ ] 3.5 记录生产迁移的 writer 停止顺序、Session/Pet 一致性备份、完整性检查与从新格式回滚到 `0.1.2-rc.1` 的演练结果
@@ -71,7 +71,7 @@
 - [ ] 8.4 验证 0.1.5 outbound proxy：Geo/subscriptions/cost-meter/web_fetch/search/MCP/Pet-lark 各执行面，回环 RPC 直连、项目 `.env` 不注入、候选不读生产 `$DSH_HOME/.env`，child/workflow/code-runtime 继承差异有明确结果且报告不含代理凭据
 - [x] 8.5 在新 compatibility runtime 上验证 Pet 普通轮盘、Locus 既有 fork/independent 基线、SQLite 单 writer、真实飞书入口与官方媒体下载；新 inquiry G1–G5 未通过时仍保持未发布
 - [ ] 8.6 验证失败回滚：插件组失败只撤该组，runtime 候选失败回到旧 manifest/runtime，数据已写新格式时先停 writer并恢复备份
-- [ ] 8.7 运行 `openspec validate upgrade-dsh-0-1-5-runtime --strict`、根全量测试、artifact check 与 `git diff --check`，记录最终候选证据
+- [x] 8.7 运行 `openspec validate upgrade-dsh-0-1-5-runtime --strict`、根全量测试、artifact check 与 `git diff --check`，记录最终候选证据
 
 ## 9. devbox 主干清洁构建与场景验收
 
@@ -89,6 +89,6 @@
 
 - [ ] 10.1 重新同步 `origin/main` 与上游 dist-tags，处理并行 Pet inquiry 变更漂移；最终候选 SHA 变化默认重跑完整 devbox gate，只有纯文档 diff 且有明确证明时才可豁免
 - [ ] 10.2 在用户明确批准后按 Worktree Session 受控流程合入任务分支，不裸跑 merge 或强删 worktree
-- [ ] 10.3 输出 host/lumevm 手动部署清单：精确 commit/pins、profile-scoped registries、机器私有 env gate、停止 writer、Session/Pet/manifest/profile 备份、build/sync×2、重启、现有 GUI 验收及按数据写入状态回滚
-- [ ] 10.4 明确本 change 不远程操作 host/lumevm，也不把它们的部署状态写成已验收；用户手动完成后可另行补充机器级证据
+- [x] 10.3 输出 host/lumevm 手动部署清单：精确 commit/pins、profile-scoped registries、机器私有 env gate、停止 writer、Session/Pet/manifest/profile 备份、build/sync×2、重启、现有 GUI 验收及按数据写入状态回滚
+- [x] 10.4 明确本 change 不远程操作 host/lumevm，也不把它们的部署状态写成已验收；用户手动完成后可另行补充机器级证据
 - [ ] 10.5 更新 devbox 最终证据、current specs 与任务状态，另行请求归档 change
