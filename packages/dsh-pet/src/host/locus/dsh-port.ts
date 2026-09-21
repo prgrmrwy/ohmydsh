@@ -429,5 +429,43 @@ export function createProductionLocusDshPort(
         rollback: created.rollback,
       }
     },
+
+    /**
+     * Detach a session left behind by an operation that died mid-provision.
+     *
+     * The creator-held rollback closure cannot survive a process restart, so
+     * startup reconciliation needs this narrower, restart-safe equivalent. It
+     * unlists the session from whichever workspace still claims it and nothing
+     * else: history is retained, and an unknown/absent session is reported as
+     * a failure so the operation keeps its recovery debt instead of being
+     * silently marked clean.
+     */
+    async releaseSession(sessionId: string): Promise<void> {
+      const requested = normalized(sessionId)
+      if (requested === undefined) {
+        throw new Error('releaseSession requires a non-empty session id')
+      }
+      const branded = SessionId(requested)
+      let detached = false
+      for (const workspace of deps.workspaceRegistry.list()) {
+        if (!workspace.sessionIds.includes(branded)) continue
+        await workspace.detachSession(branded)
+        detached = true
+      }
+      if (!detached) {
+        // Not an error when the session never reached a workspace: creation
+        // can fail before the attach. An archived id is likewise already gone.
+        const archived = deps.workspaceRegistry.archivedSessionIds.includes(branded)
+        if (!archived) {
+          const known = await deps.sessionController
+            .inspect(branded)
+            .then(() => true)
+            .catch(() => false)
+          if (known) {
+            throw new Error(`session ${requested} is still attached but no workspace lists it`)
+          }
+        }
+      }
+    },
   }
 }

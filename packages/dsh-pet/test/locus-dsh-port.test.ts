@@ -356,7 +356,18 @@ describe('production LocusDshPort main creation', () => {
       workspaceId: 'ws-default',
       title: 'Locus 主会话 · Project',
     })
-    expect('releaseSession' in createProductionLocusDshPort(deps)).toBe(false)
+    // `releaseSession` is the RESTART-SAFE compensation path, deliberately
+    // narrower than the creator-held rollback closure: it only unlists the
+    // session from the workspace that still claims it, so startup
+    // reconciliation can repair an operation whose creator died. Its absence
+    // previously made such an operation permanently unrecoverable.
+    const port = createProductionLocusDshPort(deps)
+    expect(typeof port.releaseSession).toBe('function')
+    const listed = workspace('ws-default', { sessions: ['session-created-main'] })
+    const listedDeps = { ...deps, workspaceRegistry: { ...deps.workspaceRegistry, list: () => [listed] } }
+    await createProductionLocusDshPort(listedDeps).releaseSession('session-created-main')
+    // Detach is the ONLY effect: session history is deliberately retained.
+    expect(listed.detachSession).toHaveBeenCalledWith('session-created-main')
   })
 
   it('returns an ownership-bound rollback that attempts detach and handle disposal', async () => {

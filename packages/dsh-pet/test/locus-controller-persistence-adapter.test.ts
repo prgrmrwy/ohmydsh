@@ -321,6 +321,84 @@ describe('controller to durable locus repository read adapter', () => {
   })
 })
 
+describe('startup compensation recovery', () => {
+  /**
+   * An operation that dies after creating its main session must be repairable
+   * on a LATER startup. Before this, a missing compensator recorded
+   * `manualRecoveryReason`, which permanently pinned the operation and its
+   * endpoint: every later message was refused as `locus-unavailable` with no
+   * way to recover. Observed live on devbox.
+   */
+  it('retries a capability-shaped compensation failure and then completes', async () => {
+    const harness = await openPetHarness()
+    enableAtomicTransactions(harness)
+    const durable = new DurableLocusRepository(harness.domain)
+
+    // First startup: the Host has no main-session compensator at all.
+    await durable.beginProvisioning({
+      provisioningId: 'provisioning-orphan',
+      kind: 'group',
+      endpoint: { chatId: 'oc_orphan' },
+      startedAt: 10,
+    })
+    await durable.recordProvisioningResource('provisioning-orphan', {
+      mainSessionId: 'session-orphan',
+    })
+
+    const first = await durable.reconcileStartup({ now: 20 })
+    expect(first.manualOperations.map(op => op.id)).toContain('provisioning-orphan')
+
+    // Second startup, now WITH the compensator a Host upgrade supplied.
+    const compensated: string[] = []
+    const second = await durable.reconcileStartup({
+      now: 30,
+      compensators: {
+        mainSession: async ({ mainSessionId }) => { compensated.push(mainSessionId) },
+      },
+    })
+
+    expect(compensated).toEqual(['session-orphan'])
+    expect(second.compensatedOperations.map(op => op.id)).toContain('provisioning-orphan')
+    expect(second.manualOperations.map(op => op.id)).not.toContain('provisioning-orphan')
+  })
+
+  it('keeps a real cleanup failure as manual debt instead of retrying it blindly', async () => {
+    const harness = await openPetHarness()
+    enableAtomicTransactions(harness)
+    const durable = new DurableLocusRepository(harness.domain)
+
+    await durable.beginProvisioning({
+      provisioningId: 'provisioning-debt',
+      kind: 'group',
+      endpoint: { chatId: 'oc_debt' },
+      startedAt: 10,
+    })
+    await durable.recordProvisioningResource('provisioning-debt', {
+      mainSessionId: 'session-debt',
+    })
+
+    // The compensator EXISTS but fails: cleanup ran and did not succeed, so
+    // this is genuine debt and must not be silently retried away.
+    const failing = await durable.reconcileStartup({
+      now: 20,
+      compensators: {
+        mainSession: async () => { throw new Error('detach refused: workspace still busy') },
+      },
+    })
+    expect(failing.manualOperations.map(op => op.id)).toContain('provisioning-debt')
+
+    let attempts = 0
+    const again = await durable.reconcileStartup({
+      now: 30,
+      compensators: {
+        mainSession: async () => { attempts += 1; throw new Error('detach refused: workspace still busy') },
+      },
+    })
+    expect(attempts).toBe(0)
+    expect(again.manualOperations.map(op => op.id)).toContain('provisioning-debt')
+  })
+})
+
 describe('controller to durable locus repository write boundary', () => {
   it('fails before external creation when the Domain has no transaction', async () => {
     const harness = await openPetHarness()

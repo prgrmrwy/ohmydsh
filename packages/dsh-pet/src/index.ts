@@ -2377,6 +2377,20 @@ async function initialize(
       : {
         chat: ({ chatId }) => locusLarkPort.deleteGroup!(chatId),
       }),
+    // The main-session compensator was previously absent, so an operation that
+    // died after creating its main session could never be compensated: startup
+    // had no hook, the operation stayed `needs-recovery`, and its endpoint was
+    // blocked by PROVISIONING_CONFLICT forever. Every later message was then
+    // refused as `locus-unavailable`. Without this entry that state is
+    // unreachable-forever rather than fail-closed, which is a different thing.
+    ...(typeof locusDshPort?.releaseSession !== 'function'
+      ? {}
+      : {
+        mainSession: async ({ mainSessionId, operationId }) => {
+          console.log(`[dsh-pet] locus startup: compensating orphaned main ${mainSessionId} (${operationId})`)
+          await locusDshPort.releaseSession!(mainSessionId)
+        },
+      }),
   }
   const locusStartup = await lifecycle.contain('Locus startup reconciliation', () =>
     locusRepository.reconcileStartup({
