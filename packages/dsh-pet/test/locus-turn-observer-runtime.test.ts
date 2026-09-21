@@ -36,12 +36,24 @@ describe.skipIf(!hasBuiltCompatAgent)('fixed-runtime Inbox × locus turn observe
       version?: string
       dsh_compat?: { upstreamBase?: string; patchSha256?: string }
     }
+    // Provenance is DERIVED from the launcher builder, never pasted: a literal
+    // here silently asserts the previous DSH pin after an upgrade, which is
+    // exactly how this test started failing against a correct runtime.
+    const launcherSource = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '..', 'compat', 'subagent', 'build-launcher.cjs'),
+      'utf8',
+    )
+    const launcherConstant = (name: string): string => {
+      const found = new RegExp(`const ${name} = '([^']+)'`).exec(launcherSource)?.[1]
+      if (found === undefined) throw new Error(`build-launcher.cjs no longer defines ${name}`)
+      return found
+    }
     expect(manifest).toMatchObject({
       name: '@deepseek-ai/dsh-agent',
-      version: '0.1.2-rc.1-locus-isolated-claim.1',
+      version: `${launcherConstant('version')}-locus-isolated-claim.1`,
       dsh_compat: {
-        upstreamBase: 'a66e4702047846cdaa10c66c9d3df3951f5ea70d',
-        patchSha256: 'e27fce5e45801cc321961fb4cb9a7b8c60f16c27419cc674b8830eae49c609e6',
+        upstreamBase: launcherConstant('reviewedCommit'),
+        patchSha256: launcherConstant('subagentPatchSha256'),
       },
     })
     const { Inbox } = await import(/* @vite-ignore */ pathToFileURL(compatAgentEntry).href) as {
