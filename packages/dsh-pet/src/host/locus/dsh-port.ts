@@ -452,20 +452,12 @@ export function createProductionLocusDshPort(
         await workspace.detachSession(branded)
         detached = true
       }
-      if (!detached) {
-        // Not an error when the session never reached a workspace: creation
-        // can fail before the attach. An archived id is likewise already gone.
-        const archived = deps.workspaceRegistry.archivedSessionIds.includes(branded)
-        if (!archived) {
-          const known = await deps.sessionController
-            .inspect(branded)
-            .then(() => true)
-            .catch(() => false)
-          if (known) {
-            throw new Error(`session ${requested} is still attached but no workspace lists it`)
-          }
-        }
-      }
+      // No workspace claiming it IS the released state, not a failure. An
+      // earlier version treated it as "still attached" whenever the session
+      // log was readable — but the log outlives the attachment by design, so
+      // that check rejected the very state this method exists to produce and
+      // left the operation permanently in needs-recovery.
+      void detached
     },
   }
 }
