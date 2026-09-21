@@ -32,10 +32,12 @@ customizations:
   - id: cost-meter
     type: package
     source: remote
-    spec: dsh-cost-meter@1.7.10
-    version: 1.7.10
+    spec: dsh-cost-meter@1.7.30
+    version: 1.7.30
       # [2026-09-04] staged-dsh-and-plugin-upgrade 阶段一:cost-meter 1.5.42 -> 1.7.10
-      # [upgrade-dsh-0-1-5-runtime] 1.7.30 candidate audited in checking/cost-meter-1.7.30.md; keep 1.7.10 rollback until old/target loader and credential/network gates pass
+      # [2026-09-21] upgrade-dsh-0-1-5-runtime 任务 2.1/7.2:1.7.10 -> 1.7.30。
+      #   审查记录 checking/cost-meter-1.7.30.md;peer 已含 ^0.1.5-0(对 0.1.5-rc.2 满足)。
+      #   回滚:改回 dsh-cost-meter@1.7.10 + version 1.7.10 → dsh build → 重启。
     enabled: true
     brief: 会话费用统计
     note: '会话费用统计(web client 插件);仓库 https://github.com/Han-1413141/dsh-cost-meter;1.7.10(2026-09-04 审查,npm 1.7.10 发布物核对):① 密钥治理变更——所有密钥(OpenCode Go Key、各 Coding Plan Key、火山 AK/SK、自定义余额 {{VAR}} 占位符)不再明文落盘,一律迁入 DSH 凭据库(新增运行时依赖 @deepseek-ai/dsh-credentials 0.1.0-rc.8,与 dsh-home-paths 同为精确锁版),设置页输入框改 write-only(保存后不可回显),账本 ledger.json 与下发浏览器的配置永不含明文;旧版写在请求头里的明文密钥在启动时自动导入凭据库并替换为 {{CUSTOM_BALANCE_KEY_…}} 占位符;携带凭据出站另受 customBalance.allowedHosts 白名单约束(未配置时放行并告警一次,不 fail closed)。② 网络声明面扩大——host 侧出现的域名由 1.5.42 的 18 个增至 19 个(净增 cli-chat-proxy.grok.com、chatgpt.com、cloudcode-pa.googleapis.com 及其 daily/sandbox 变体,来自新增的 CLIProxyAPI 网关额度适配器与 xAI/Codex 额度查询;另有 open.volcengineapi.com 为火山方舟 AK/SK 管控面 HMAC 签名端点);其中一部分仅为文档/价目表链接常量(api-docs.deepseek.com、opencode.ai/docs、ax.ac.sugon.com 等)而非请求目标。**隐私边界:余额/额度类端点仅在用户显式启用对应 Provider 时才出站,未启用不产生任何网络流量**;API Key 只发往各自官方域名(baseURL 指向非官方域名时余额查询直接拒绝,模型请求不受影响)。③ 版本选择——1.7.0/1.7.8/1.7.9 曾致宿主启动即崩,故直接取该功能线首个稳定版 1.7.10;升级后必须先做宿主冒烟(排查 plugin tree failed to load / Cannot access / strict codec)再推进后续阶段。仍为纯 web client 插件(dsh.client.platform=web + 自带 cordis.patch.yml),不导入 cordis/dsh 的 Service/Context 运行时类,故不受阶段四运行体迁移直接影响;engines.node >=20。历史记录:1.5.35(2026-08-21 审查):v1.5.34 为 dsh 0.1.1-rc.x 适配(修复 rc.2 下费用展示丢失),v1.5.32 内置 DeepSeek-V4-Flash-Vision-Exp 计价,v1.5.35 修正未命中模型列表口径;升级后需重启验证加载与展示'
@@ -194,8 +196,8 @@ customizations:
   - id: width-tiers
     type: package
     source: remote
-    spec: dsh-width-tiers@1.0.4
-    version: 1.0.4
+    spec: dsh-width-tiers@1.0.5
+    version: 1.0.5
       # [2026-09-04] staged-dsh-and-plugin-upgrade 阶段二:width-tiers 1.0.3 -> 1.0.4,
       #   并同批删除手写 patch 条目 width-tiers-wiring(接线改由包自带 bundle patch 承载)。
     enabled: true
@@ -213,8 +215,8 @@ customizations:
   - id: better-sidebar
     type: package
     source: remote
-    spec: dsh-better-sidebar@0.18.0
-    version: 0.18.0
+    spec: dsh-better-sidebar@0.19.1
+    version: 0.19.1
       # [2026-09-05] dsh-0-1-2-host-api-migration:0.17.1 -> 0.18.0(准入条件
       #   「运行体升到 0.1.2 线」已满足;且 0.17.1 在 0.1.2-rc.1 上启动即崩——
       #   import 了 dsh-settings 已移除的 settingsNamespace,故必须同批放行)
@@ -225,9 +227,9 @@ customizations:
   - id: dsh-cockpit-bridge
     type: package
     source: remote
-    spec: 'https://github.com/prgrmrwy/dsh-cockpit/releases/download/dsh-cockpit-bridge-v0.3.0/dsh-cockpit-bridge-0.3.0.tgz'
+    spec: 'https://github.com/prgrmrwy/dsh-cockpit/releases/download/dsh-cockpit-bridge-v0.4.0/dsh-cockpit-bridge-0.4.0.tgz'
     name: dsh-cockpit-bridge
-    version: 0.3.0
+    version: 0.4.0
     enabled: true
     brief: 驾驶舱桥接(会话点击上报 + 0.1.2 待审批/提问观测,顶栏完成提醒自动清除)
     note: 'B015;repo https://github.com/prgrmrwy/dsh-cockpit(MIT,自研);web client cordis bundle。**0.3.0(2026-09-05 升级,change dsh-0-1-2-host-api-migration 收尾 / cockpit 仓库 change adapt-dsh-012-typert-gateway 产物;发布物核对:version 0.3.0、inject 已换为 dsh-api-session-controller + dsh-client-ui-session、peer 仅 cordis ^4.0.1、lib/client.js 含 pendingInteractions 订阅)**:① 适配 DSH 0.1.2 —— 旧 inject 声明的 dsh-client-runtime 在 0.1.2 线被上游移除,0.2.1 在新运行体上 loader 解析不到依赖而**永不激活**(静默),0.3.0 改声明实际承接包;② 新增职责 —— 订阅官方 uiSession.pendingInteractions,把当前完整 {sessionId,kind,key} 快照经既有 capability 通道上报驾驶舱(typert 设备的顶栏待审批/提问计数**唯一来源**,cockpit 侧 evidence 已实测 requested→计数升、resolved→归零、无 bridge 时显示「不可观测」而非 0);只传最小标识,不读交互内容,不注册决策监听,host 半区仍为 no-op。历史:0.2.1(2026-09-04 审查,逐字节 diff 0.2.0→0.2.1 的 lib/client.js):① capability 失效自愈——capability 是 TTL 60s 的短期凭据,新增 readErrorCode 解析驳回响应体的结构化 code,把 401 与「400 + bridge-capability-invalid」统一判为 capability 失效(isCapabilityFailure),此时重置 helloReady 并向父页面 postMessage {type:"dsh-cockpit:capability-expired"} 主动请求换发,换发前 outbox 条目保留不丢;② 纯续签不再重申 current——0.2.0 收到同源 bridge-config 时无条件 helloReady=false,使驾驶舱每次续发配置都触发重新 hello 并重报当前会话(可能误清刚 re-arm 的绿点),0.2.1 删除该行,仅在真正的设备重新激活路径上重置;peer 仍为 @deepseek-ai/dsh-client-runtime ^0.1.1-rc.2(对运行体 0.1.1-rc.2 满足;该包在 0.1.2 线被上游移除,故本条目也是阶段四的回归对象);发布物含 lib/index.js(host no-op 入口)与 lib/client.js,main 指向存在的文件。0.2.0 协议 v2 重构:选择时立即捕获 ID 入有界去重 outbox(不再等 250ms debounce 定时器触发才重读 current,快速连续切换/打开后立即归档不再丢确认);outbox 项只在驾驶舱明确 2xx 后移除,网络异常/401/其它非 2xx 均保留并按有上限指数退避重试,由新选择/设备重新激活/成功 hello 触发;实际 Cockpit origin 与短期认证 capability 由父页面 postMessage 握手动态提供(不再固定 127.0.0.1:3090),适配任意 COCKPIT_PORT;驾驶舱按请求 Origin 匹配设备,按 sessionId 精确清除完成绿点且保留 re-arm(官方 select 语义的驾驶舱侧观察);驾驶舱同步升级后仍兼容旧协议(无 capability header)请求走既有 cookie 认证;只传 sessionId 与协议元数据,不碰内容/settings/凭据/provider token;驾驶舱不可达静默降级并重试,不影响原生 DSH 工作台;每台接驾驶舱的机器都装,需搭配驾驶舱同步升级到对应版本才能拿到可靠协议,否则仍按旧协议尽力而为工作(顶栏链条图标只表示插件装没装,不表示协议版本或连接新鲜度)。⚠ 必须 ≥0.1.1:v0.1.0 发布物缺 lib/index.js 而 package.json main 指向它、cordis.patch.yml 又把它插进 bundle 栈,导致装了该插件的设备 DSH 启动即崩(plugin tree failed to load / ERR_MODULE_NOT_FOUND),不是功能降级而是完全无法启动;0.1.1 补了 no-op host 入口(纯浏览器插件同样需要 loader entry 才能被 client-modules scanner 服务浏览器包)并让 tsdown 同时构建 host/client 两个半区'
@@ -239,9 +241,12 @@ customizations:
   - id: dsh-traex-bridge
     type: package
     source: remote
-    spec: '@byted/dsh-traex-bridge@0.1.12'
-    version: 0.1.12
+    spec: '@byted/dsh-traex-bridge@0.1.15'
+    version: 0.1.15
       # [2026-09-10] dsh-traex-bridge 0.1.8 -> 0.1.12(0.1.2-rc.1 适配 + 原生 web_search 后端 + 排队计时)
+      # [2026-09-21] upgrade-dsh-0-1-5-runtime 任务 2.7/7.7:0.1.12 -> 0.1.15(registry latest)。
+      #   仓库默认 enabled:false + enabledEnv:DSH_TRAEX_BRIDGE 保持不变;仅在 devbox 验证启用态能力。
+      #   回滚:改回 @byted/dsh-traex-bridge@0.1.12 + version 0.1.12 → dsh build → 重启。
     enabled: false
     enabledEnv: DSH_TRAEX_BRIDGE
     brief: TraeX 官方 bridge provider(设置→模型→TraeX Bridge;默认关闭,见 enabledEnv)
@@ -250,8 +255,8 @@ customizations:
   - id: skin-center
     type: package
     source: remote
-    spec: '@linxin666/dsh-client-ui-skin-center@0.3.16'
-    version: 0.3.16
+    spec: '@linxin666/dsh-client-ui-skin-center@0.3.24'
+    version: 0.3.24
     enabled: true
     brief: 设置→皮肤中心(主题试穿/自定义主题/壁纸;默认 blue-fantasy)
     note: 'repo https://github.com/zhu1090093659/dsh-web(Apache-2.0,活跃);2026-09-06 审查 npm 0.3.16 发布物与 README:兼容 DSH >=0.1.2-rc.1;Host+Web bundle,内置 blue-fantasy,支持原子试穿/应用、自定义明暗主题、$DSH_HOME/skins 用户皮肤及可选 Wallpaper Engine 本机媒体桥。安全面:同源 Host 路由、皮肤目录 containment、CSS 强制 scope 且拒绝 @import/远程 URL/越界路径;但用户皮肤 patches.css 具整页样式能力,hooks.mjs 属受信代码逃生口(仅内置或 provenance/字节身份核验通过的官方市场内容执行);会读取本机 Wallpaper Engine/Steam 库并提供同源媒体流。隐私:浏览器每日向 dsh-market.com 发送一次匿名安装心跳(随机 localStorage id + 包名;上游声明服务端仅存 salted hash、不存 IP);新装默认激活 blue-fantasy。未搭配 @linxin666/dsh-i18n:该包只增加俄语,与皮肤功能无关。'
@@ -259,8 +264,8 @@ customizations:
   - id: session-archive
     type: package
     source: remote
-    spec: '@linxin666/dsh-session-archive@0.3.16'
-    version: 0.3.16
+    spec: '@linxin666/dsh-session-archive@0.3.24'
+    version: 0.3.24
     enabled: true
     brief: 会话归档管理(批量归档/恢复/预览/物理删除;自动维护默认关闭)
   # 第三方(remote):OpenCode Go 400 MissingSessionID 补丁(社区插件,非官方;官方适配发布后评估移除)
