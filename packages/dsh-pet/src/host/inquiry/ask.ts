@@ -246,7 +246,7 @@ export async function acceptInquiryFromCaller(
     const target = bounded(asked.target, INQUIRY_LIMITS.identifierLength * 4)
     const question = bounded(asked.question, INQUIRY_LIMITS.questionLength)
     const purpose = bounded(asked.purpose, INQUIRY_LIMITS.purposeLength)
-    const sessionId = (execution as { agent?: { session?: { id?: unknown } } } | undefined)?.agent?.session?.id
+    const sessionId = (execution as { agent?: { id?: unknown } } | undefined)?.agent?.id
     if (typeof sessionId !== 'string') refuse()
 
     commit = await readForCollaborationCaller(sessionId, deps.ports, caller => {

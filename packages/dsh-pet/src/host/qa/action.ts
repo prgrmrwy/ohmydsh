@@ -19,6 +19,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import { PetError } from '../errors.js'
 import { renderQaSeedPrompt } from './prompt.js'
 import { FORK_PROVIDER, type LiveAgentLike, type SubagentSeam } from './subagents.js'
@@ -126,7 +127,7 @@ export async function forkQaChild(
   await deps.seam.subagents.startContinuable({
     provider: FORK_PROVIDER,
     label: options.label,
-    childId: options.childId,
+    childId: SessionId(options.childId),
     request: {
       // The seed states the execution root as well: the owner can talk to the
       // child directly in the GUI, and that path carries no trigger prompt to
@@ -217,12 +218,13 @@ export async function createQaGroup(
   // An exact live parent is required by the seam, and a source session that
   // is not resident can be resumed — but a session that cannot be made live
   // cannot be forked either, and saying so here is clearer than a seam error.
-  const parent = deps.seam.agents.get(source.sessionId)
+  const sourceSessionId = SessionId(source.sessionId)
+  const parent = deps.seam.agents.get(sourceSessionId)
   const liveParent: LiveAgentLike | undefined =
     parent ??
     (await deps.seam.agents
-      .resume({ resumeSessionId: source.sessionId })
-      .then(handle => handle?.agent ?? deps.seam.agents.get(source.sessionId))
+      .resume({ resumeSessionId: sourceSessionId })
+      .then(handle => handle?.agent ?? deps.seam.agents.get(sourceSessionId))
       .catch(() => undefined))
   if (liveParent === undefined) {
     throw new PetError('SOURCE_NOT_FOUND', `来源会话 ${source.sessionId} 当前不可用，无法创建答疑群。`)
@@ -342,7 +344,7 @@ async function releaseChild(
   childId: string,
 ): Promise<void> {
   try {
-    await deps.seam.subagents.drainContinuableChildren(parent, [childId])
+    await deps.seam.subagents.drainContinuableChildren(parent, [SessionId(childId)])
   } catch (error) {
     // Reported, not rethrown: the caller is already failing, and the original
     // reason is more useful than a cleanup error stacked on top.

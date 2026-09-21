@@ -73,8 +73,8 @@ async function fixture(
     }),
   }
   const agents: AgentRegistryLike = {
-    create: vi.fn(async (opts: { sessionId: string }) => ({ session: { id: opts.sessionId } })),
-    get: () => ({}),
+    create: vi.fn(async (opts: { sessionId: string }) => ({ agent: { id: opts.sessionId }, dispose: async () => {} })),
+    get: () => ({ id: 'pipeline-test' }),
   } as AgentRegistryLike
   const resolver: SourceResolver = {
     getSession: () => undefined,

@@ -101,7 +101,8 @@ describe('executor Agents receive the Pet scope', () => {
     await installTestSkill(harness!, 'demo', { context: 'session-required' })
 
     const create = vi.fn(async (options: { sessionId: string }) => ({
-      session: { id: options.sessionId },
+      agent: { id: options.sessionId },
+      dispose: async () => {},
     }))
     const executorSetup = vi.fn()
     const dispatcher: PromptDispatcher = { dispatch: async () => {} }
@@ -109,7 +110,7 @@ describe('executor Agents receive the Pet scope', () => {
     const coordinator = new PetCoordinator({
       repository: harness.repository,
       capabilities,
-      agents: { create, get: () => ({}) } as unknown as AgentRegistryLike,
+      agents: { create, get: () => ({ id: 'executor-test' }) } as unknown as AgentRegistryLike,
       dispatcher,
       resolver,
       contextProviders: new SourceContextRegistry(),
@@ -120,12 +121,12 @@ describe('executor Agents receive the Pet scope', () => {
 
     await coordinator.accept(capture())
 
-    const call = create.mock.calls[0]?.[0] as { setup?: unknown; meta?: { cwd?: string } }
+    const call = create.mock.calls[0]?.[0] as { setup?: (agentCtx: unknown, agent: unknown) => unknown; meta?: { cwd?: string } }
     // The scope must be handed to the factory, which awaits it BEFORE the
     // session and agent are published.
     // Invoked rather than compared: the callback is wrapped so it also
     // receives the preset id to mount.
-    await call.setup({})
+    await call.setup?.({}, { id: 'executor-test' })
     expect(executorSetup).toHaveBeenCalled()
     expect(call.meta?.cwd).toBe(paths.workspaceRoot)
   })
@@ -194,13 +195,14 @@ describe('executor Agents receive the Pet scope', () => {
     const capabilities = new CapabilityRegistry()
     await installTestSkill(harness!, 'demo', { context: 'session-required' })
     const create = vi.fn(async (options: { sessionId: string }) => ({
-      session: { id: options.sessionId },
+      agent: { id: options.sessionId },
+      dispose: async () => {},
     }))
     const executorSetup = vi.fn()
     const coordinator = new PetCoordinator({
       repository: harness.repository,
       capabilities,
-      agents: { create, get: () => ({}) } as unknown as AgentRegistryLike,
+      agents: { create, get: () => ({ id: 'executor-test' }) } as unknown as AgentRegistryLike,
       dispatcher: { dispatch: async () => {} },
       resolver,
       contextProviders: new SourceContextRegistry(),
@@ -333,8 +335,8 @@ describe('executor sessions receive their relationship title', () => {
       repository: harness.repository,
       capabilities,
       agents: {
-        create: async (options: { sessionId: string }) => ({ session: { id: options.sessionId } }),
-        get: () => ({}),
+        create: async (options: { sessionId: string }) => ({ agent: { id: options.sessionId }, dispose: async () => {} }),
+        get: () => ({ id: 'executor-test' }),
       } as unknown as AgentRegistryLike,
       dispatcher: { dispatch: async () => {} },
       resolver,
@@ -368,8 +370,8 @@ describe('executor sessions receive their relationship title', () => {
       repository: harness.repository,
       capabilities,
       agents: {
-        create: async (options: { sessionId: string }) => ({ session: { id: options.sessionId } }),
-        get: () => ({}),
+        create: async (options: { sessionId: string }) => ({ agent: { id: options.sessionId }, dispose: async () => {} }),
+        get: () => ({ id: 'executor-test' }),
       } as unknown as AgentRegistryLike,
       dispatcher: { dispatch: async () => {} },
       resolver,
@@ -400,8 +402,8 @@ describe('executor sessions receive their relationship title', () => {
       repository: harness.repository,
       capabilities,
       agents: {
-        create: async (options: { sessionId: string }) => ({ session: { id: options.sessionId } }),
-        get: () => ({}),
+        create: async (options: { sessionId: string }) => ({ agent: { id: options.sessionId }, dispose: async () => {} }),
+        get: () => ({ id: 'executor-test' }),
       } as unknown as AgentRegistryLike,
       dispatcher: { dispatch: async () => {} },
       resolver,

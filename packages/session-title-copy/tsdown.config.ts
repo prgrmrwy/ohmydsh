@@ -2,7 +2,6 @@ import { defineConfig } from 'tsdown'
 
 const external = [
   '@deepseek-ai/cordis',
-  '@deepseek-ai/dsh-client-runtime',
 ]
 
 export default defineConfig({

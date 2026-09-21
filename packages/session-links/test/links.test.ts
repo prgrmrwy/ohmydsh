@@ -11,7 +11,7 @@ import {
   stripUrlTail,
   type LinkEntry,
 } from '../src/shared/links.js'
-import type { AssistantBlock, ContentBlock, ConversationNode } from '@deepseek-ai/dsh-client-runtime/client'
+import type { AssistantBlock, ContentBlock, ConversationNode } from '@deepseek-ai/dsh-client-ui-conversation/client'
 
 describe('extractUrls', () => {
   it('picks bare URLs out of prose', () => {

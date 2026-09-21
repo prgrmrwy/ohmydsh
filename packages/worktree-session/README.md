@@ -15,10 +15,11 @@ repository root. WS separately treats `<repo>/.worktrees/<task>` as the logical
 Agent execution. The main checkout is never switched, reset, or used as the
 managed task root.
 
-Preparation and admission are recoverable and fail closed. If preparation or
-binding fails, the source draft and images remain intact and are not submitted
-from the repository checkout. A claimed but unconfirmed admission becomes
-`uncertain` and is not automatically submitted again.
+Preparation and handoff are recoverable and fail closed. If preparation or
+binding fails, the source draft and all official generic attachments remain
+intact and are not submitted from the repository checkout. After preparation
+and binding, WS invokes the official SessionInput submit exactly once; DSH owns
+attempts, uploads, receipts, retries, echo retirement, and draft restoration.
 
 Project type is resolved from the repository-root lockfile before any branch,
 worktree, operation file, or binding is created. A single `package-lock.json`
@@ -49,7 +50,7 @@ metadata and UI status, but does not change the stable model runtime context.
 ## Status and maintenance
 
 The input-area status UI persistently shows the bound task branch, dependency
-mode (`lean` or `mutable`), and lifecycle (`active`, `uncertain`, or `cleaned`).
+mode (`lean` or `mutable`), and lifecycle (`active` or `cleaned`).
 Dynamic status is not repeatedly injected into conversation context.
 
 Clicking the bound task branch asks the local editor to open that Session's
@@ -95,7 +96,7 @@ mid-Session Worktree control; Worktree startup remains blank-Session-only.
 
 Operation records live at `<git-common-dir>/ws/operations/<operationId>.json`.
 They persist the source Session binding, canonical repository, managed worktree,
-task branch, admission state, and dependency metadata. Host restart or Session
+task branch, and dependency metadata. Host restart or Session
 resume revalidates the same binding before local execution continues. Repeated
 first-submit retries reuse the operation id and prepared resources.
 

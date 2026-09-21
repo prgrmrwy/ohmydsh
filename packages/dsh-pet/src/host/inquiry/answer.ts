@@ -205,7 +205,7 @@ export async function submitInquiryAnswerFromCaller(
     const confidence = choice(sent.confidence, INQUIRY_ANSWER_CONFIDENCE)
     const recency = choice(sent.recency, INQUIRY_ANSWER_RECENCY)
     const sources = sourceList(sent.sources)
-    const sessionId = (execution as { agent?: { session?: { id?: unknown } } } | undefined)?.agent?.session?.id
+    const sessionId = (execution as { agent?: { id?: unknown } } | undefined)?.agent?.id
     if (typeof sessionId !== 'string') refuse()
 
     plan = await readForCollaborationCaller(sessionId, deps.ports, caller => {

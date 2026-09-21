@@ -58,8 +58,8 @@ async function fixture(): Promise<Fixture> {
     }),
   }
   const agents: AgentRegistryLike = {
-    create: vi.fn(async (opts: { sessionId: string }) => ({ session: { id: opts.sessionId } })),
-    get: () => ({}),
+    create: vi.fn(async (opts: { sessionId: string }) => ({ agent: { id: opts.sessionId }, dispose: async () => {} })),
+    get: () => ({ id: 'conversation-test' }),
   } as AgentRegistryLike
 
   const coordinator = new PetCoordinator({

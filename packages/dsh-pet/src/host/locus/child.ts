@@ -17,20 +17,20 @@
  * explicitly there.
  */
 
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { SessionId, type SessionId as BrandedSessionId } from '@deepseek-ai/dsh-session'
 import { LOCUS_SAFE_TOOL_NAMES } from './composition.js'
 
 /** A live DSH Agent, intentionally opaque apart from its session identity. */
-export interface LocusLiveParent {
-  readonly session: { readonly id: string }
-}
+export type LocusLiveParent = Agent
 
 /** The parent registry/resume operations required by the adapter. */
 export interface LocusParentPort {
   /** Return the resident Agent for an exact session id, if one is live. */
-  get(sessionId: string): LocusLiveParent | undefined
+  get(sessionId: BrandedSessionId): LocusLiveParent | undefined
   /** Resume persisted state and return its live Agent when possible. */
-  resume(options: { readonly resumeSessionId: string; readonly signal?: AbortSignal }): Promise<
+  resume(options: { readonly resumeSessionId: BrandedSessionId; readonly signal?: AbortSignal }): Promise<
     { readonly agent?: LocusLiveParent } | undefined
   >
 }
@@ -70,7 +70,7 @@ export interface LocusSubagentPort {
   startContinuable(spec: {
     readonly provider: string
     readonly label: string
-    readonly childId?: string
+    readonly childId?: SessionId
     readonly request: {
       readonly prompt: LocusContentBlock[]
       readonly parent: LocusLiveParent
@@ -82,7 +82,7 @@ export interface LocusSubagentPort {
      */
     readonly settlementNotice?: LocusSettlementNotice
     readonly signal: AbortSignal
-  }): Promise<{ readonly childId: string; readonly messageId?: string }>
+  }): Promise<{ readonly childId: BrandedSessionId; readonly messageId: import('@deepseek-ai/dsh-llm').MessageId }>
   /**
    * Create a durable continuable child without submitting an initial prompt.
    * The controller can therefore publish the active locus first, then queue
@@ -149,7 +149,7 @@ export interface LocusInboxPort {
     prompt: readonly LocusContentBlock[],
     source: LocusInboxSource,
     signal: AbortSignal,
-  ): Promise<string>
+  ): Promise<import('@deepseek-ai/dsh-llm').MessageId>
 }
 
 /** Context passed to a compensation operation. */
@@ -317,7 +317,7 @@ export type LocusChildCreateResult =
 
 /** Result of accepting one host-authored prompt into an active child inbox. */
 export type LocusChildQueueResult =
-  | { readonly ok: true; readonly messageId: string; readonly identity: LocusChildIdentity }
+  | { readonly ok: true; readonly messageId: import('@deepseek-ai/dsh-llm').MessageId; readonly identity: LocusChildIdentity }
   | LocusChildFailure
 
 /** Result of one operation on an exact continuation-owned child Session. */
@@ -416,9 +416,7 @@ function childRequestFingerprint(input: {
 /** Return whether a value can be used as a live Agent. */
 function isLiveParent(value: unknown): value is LocusLiveParent {
   if (value === null || typeof value !== 'object') return false
-  const session = (value as { session?: unknown }).session
-  if (session === null || typeof session !== 'object') return false
-  return isIdentifier((session as { id?: unknown }).id)
+  return isIdentifier((value as { id?: unknown }).id)
 }
 
 /** Compare identities exactly; no prefix matching is safe at this seam. */
@@ -448,25 +446,26 @@ export async function resolveLocusParent(
   if (!isIdentifier(parentSessionId)) return { ok: false, reason: 'invalid-parent-id' }
   if (isAborted(signal)) return { ok: false, reason: 'aborted' }
 
+  const brandedParentId = SessionId(parentSessionId)
   let resident: LocusLiveParent | undefined
   try {
-    resident = port.get(parentSessionId)
+    resident = port.get(brandedParentId)
   } catch {
     return { ok: false, reason: 'parent-operation-failed' }
   }
-  if (isLiveParent(resident) && resident.session.id === parentSessionId) {
+  if (isLiveParent(resident) && resident.id === parentSessionId) {
     return { ok: true, parent: resident }
   }
 
   let resumed: { readonly agent?: LocusLiveParent } | undefined
   try {
-    resumed = await port.resume({ resumeSessionId: parentSessionId, ...(signal !== undefined ? { signal } : {}) })
+    resumed = await port.resume({ resumeSessionId: brandedParentId, ...(signal !== undefined ? { signal } : {}) })
   } catch {
     return { ok: false, reason: 'parent-unavailable' }
   }
 
   if (isAborted(signal)) return { ok: false, reason: 'aborted' }
-  if (isLiveParent(resumed?.agent) && resumed.agent.session.id === parentSessionId) {
+  if (isLiveParent(resumed?.agent) && resumed.agent.id === parentSessionId) {
     return { ok: true, parent: resumed.agent }
   }
 
@@ -474,8 +473,8 @@ export async function resolveLocusParent(
   // second exact lookup is safe; a different session id is not accepted.
   try {
     if (isAborted(signal)) return { ok: false, reason: 'aborted' }
-    const afterResume = port.get(parentSessionId)
-    if (isLiveParent(afterResume) && afterResume.session.id === parentSessionId) {
+    const afterResume = port.get(brandedParentId)
+    if (isLiveParent(afterResume) && afterResume.id === parentSessionId) {
       return { ok: true, parent: afterResume }
     }
   } catch {
@@ -666,7 +665,7 @@ export class LocusChildAdapter {
     readonly label: string
     readonly prompt: string
     readonly provider?: string
-    readonly childId?: string
+    readonly childId?: SessionId
     readonly signal?: AbortSignal
   }): Promise<LocusChildCreateResult> {
     if (!isIdentifier(input.parentSessionId) || !isIdentifier(input.label) || !isIdentifier(input.prompt)) {
@@ -702,7 +701,13 @@ export class LocusChildAdapter {
     ) return { ok: false, reason: 'invalid-child-request' }
     const signal = input.signal ?? EMPTY_SIGNAL
     if (signal.aborted) return { ok: false, reason: 'aborted' }
-    const reservedInput = { ...input, prompt: '<idle-continuable>' }
+    const reservedInput = {
+      parentSessionId: input.parentSessionId,
+      label: input.label,
+      childId: SessionId(input.childId),
+      ...(input.provider !== undefined ? { provider: input.provider } : {}),
+      prompt: '<idle-continuable>',
+    }
     const reservation = this.reserveCreate(
       reservedInput,
       childRequestFingerprint(reservedInput),
@@ -725,7 +730,7 @@ export class LocusChildAdapter {
       readonly label: string
       readonly prompt: string
       readonly provider?: string
-      readonly childId?: string
+      readonly childId?: SessionId
     },
     fingerprint: string,
     signal: AbortSignal,
@@ -825,7 +830,7 @@ export class LocusChildAdapter {
       }
       const identity = {
         parentSessionId: input.parentSessionId,
-        childSessionId: input.childId,
+        childSessionId: String(input.childId),
       }
       this.active = Object.freeze({ ...identity, parent: parentResult.parent })
       return { ok: true, created: true, identity }
@@ -849,7 +854,7 @@ export class LocusChildAdapter {
       readonly label: string
       readonly prompt: string
       readonly provider?: string
-      readonly childId?: string
+      readonly childId?: SessionId
     },
     signal: AbortSignal,
     pending: PendingLocusCreate,
@@ -884,7 +889,7 @@ export class LocusChildAdapter {
       readonly label: string
       readonly prompt: string
       readonly provider?: string
-      readonly childId?: string
+      readonly childId?: SessionId
     },
     signal: AbortSignal,
   ): Promise<LocusChildCreateResult> {
@@ -939,7 +944,7 @@ export class LocusChildAdapter {
 
     const identity: LocusChildIdentity = {
       parentSessionId: input.parentSessionId,
-      childSessionId: result.childId,
+      childSessionId: String(result.childId),
     }
 
     // Never publish an activation after cancellation or disposal.  If the
@@ -1047,7 +1052,7 @@ export class LocusChildAdapter {
       if (!authorized) return { ok: false, reason: 'child-proof-failed' }
     }
 
-    let messageId: string
+    let messageId: import('@deepseek-ai/dsh-llm').MessageId
     try {
       messageId = await queue.call(
         inbox,
@@ -1315,16 +1320,15 @@ export function createLocusChildAdapter(ports: LocusChildPorts): LocusChildAdapt
  * present, so a plugin can remain loaded while the locus capability is
  * unavailable.
  */
-export const LOCUS_QUEUE_PROMPT_SYMBOL = Symbol.for('dsh.subagent.queuePrompt')
+export const LOCUS_DELIVER_PROMPT_SYMBOL = Symbol.for('dsh.subagent.deliverPrompt')
 
 /**
  * Adapt the Host child inbox.
  *
- * The runtime publishes this operation under a well-known symbol on its
- * subagent service, and its own package exposes the same entry as a named
- * helper. Reading the symbol keeps this module free of a hard dependency on
- * that package while still using the runtime's real seam rather than a
- * reimplementation; an absent symbol is an unavailable inbox.
+ * The runtime publishes this operation under the target internal delivery
+ * symbol on its subagent service. Reading the symbol keeps this module free of
+ * a hard dependency on that package while still using the runtime's real seam
+ * rather than a reimplementation; an absent symbol is unavailable.
  */
 export function adaptLocusInboxPort(
   subagents: unknown,
@@ -1341,7 +1345,7 @@ export function adaptLocusInboxPort(
     prompt: readonly LocusContentBlock[],
     source: LocusInboxSource,
     signal: AbortSignal,
-  ) => Promise<string>,
+  ) => Promise<import('@deepseek-ai/dsh-llm').MessageId>,
 ): LocusInboxPort | undefined {
   if (subagents === null || typeof subagents !== 'object') return undefined
   if (queueHostPrompt !== undefined) {
@@ -1353,20 +1357,21 @@ export function adaptLocusInboxPort(
     }
   }
   const service = subagents as Record<symbol, unknown>
-  const queue = service[LOCUS_QUEUE_PROMPT_SYMBOL]
-  if (typeof queue !== 'function') return undefined
+  const deliver = service[LOCUS_DELIVER_PROMPT_SYMBOL]
+  if (typeof deliver !== 'function') return undefined
 
   return {
     queuePrompt: async (parent, childId, prompt, source, signal) => {
       if (source.kind !== 'user') throw new Error('unsupported inbox source')
-      return (await (queue as (...args: unknown[]) => Promise<unknown>).call(
+      return (await (deliver as (...args: unknown[]) => Promise<unknown>).call(
         subagents,
         parent,
         childId,
         prompt,
         source,
         signal,
-      )) as string
+        'queue',
+      )) as import('@deepseek-ai/dsh-llm').MessageId
     },
   }
 }
@@ -1464,7 +1469,7 @@ export function probeLocusChildPorts(
     startContinuable: spec =>
       Promise.resolve(
         (subagentRecord.startContinuable as (input: unknown) => unknown).call(subagentService, spec),
-      ) as Promise<{ readonly childId: string; readonly messageId?: string }>,
+      ) as Promise<{ readonly childId: BrandedSessionId; readonly messageId: import('@deepseek-ai/dsh-llm').MessageId }>,
     ...(typeof subagentRecord.createIdleContinuable === 'function'
       ? {
         createIdleContinuable: (spec: unknown) => Promise.resolve(
@@ -1549,8 +1554,7 @@ export function probeLocusChildPorts(
               // adopting one of those would bind a locus to a child that can
               // never take another turn. When the runtime reports the kind and
               // mode, both must say this is a continuable child.
-              if (row.kind !== undefined && row.kind !== 'child') return false
-              if (row.mode !== undefined && row.mode !== 'continuable') return false
+              if (row.kind !== 'child' || row.mode !== 'continuable') return false
               return true
             }) as { id?: unknown } | undefined
             return match !== undefined && typeof match.id === 'string'

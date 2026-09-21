@@ -83,8 +83,8 @@ beforeEach(async () => {
     repository: harness.repository,
     capabilities,
     agents: {
-      create: async (options: { sessionId: string }) => ({ session: { id: options.sessionId } }),
-      get: () => ({}),
+      create: async (options: { sessionId: string }) => ({ agent: { id: options.sessionId }, dispose: async () => {} }),
+      get: () => ({ id: 'route-validation-test' }),
     } as never,
     dispatcher: { dispatch: async () => {} },
     resolver: { getSession: () => undefined, getWorkspace: () => undefined },

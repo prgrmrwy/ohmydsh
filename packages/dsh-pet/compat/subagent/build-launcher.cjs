@@ -22,11 +22,11 @@ const here = __dirname
 const launcher = join(here, '.launcher')
 const builds = join(here, '.launcher-builds')
 const root = resolve(here, '../../../..')
-const version = '0.1.2-rc.1'
+const version = '0.1.5-rc.2'
 const npmVersion = '11.19.0'
-const reviewedCommit = 'a66e4702047846cdaa10c66c9d3df3951f5ea70d'
-const subagentPatchSha256 = 'e27fce5e45801cc321961fb4cb9a7b8c60f16c27419cc674b8830eae49c609e6'
-const storagePatchSha256 = '18ec93c5240612b513871d65db2d100ee6165ea1ba251dbf91e670963dd35bed'
+const reviewedCommit = 'fb2c4b9e698e30edb738bca4cf0618587db7d203'
+const subagentPatchSha256 = '68f9531ad03ae0a1c6a9cebc3884f04ee2b1dca1cad542f0a832246fa978e8a0'
+const storagePatchSha256 = '188e5aac118b5835f0ff0b7b9a4c1794c92e64f340602e39f59eba09375c4b7e'
 const expectedRuntimeStorage = [
   '@deepseek-ai/dsh-storage',
   '@deepseek-ai/dsh-storage-domain',
@@ -56,6 +56,16 @@ const overrideRuntimeAgent = false
 const expectedRuntimeAgent = overrideRuntimeAgent
   ? ['@deepseek-ai/dsh-agent', '@deepseek-ai/dsh-agent-loop']
   : []
+/**
+ * Published Subagent artifact version. `build.mjs` derives it from the tracked
+ * skeleton as `skeleton + 1`, so this must follow the same rule instead of
+ * hardcoding a suffix that silently drifts when the skeleton is bumped.
+ */
+const expectedSubagentVersion = (() => {
+  const skeleton = readJson(join(here, 'package.template.json'))
+  const build = Number(String(skeleton.version).split('.').pop() ?? 0) + 1
+  return `${version}-locus-settlement-notice.${build}`
+})()
 const agentPatchVersion = `${version}-locus-isolated-claim.1`
 
 function run(command, args, cwd, capture = false) {
@@ -119,7 +129,7 @@ function verifyLauncher(directory, fingerprint) {
     const subagentPath = requireFromLauncher.resolve('@deepseek-ai/dsh-subagent/package.json')
     const subagent = readJson(subagentPath)
     if (
-      subagent.version !== `${version}-locus-settlement-notice.1`
+      subagent.version !== expectedSubagentVersion
       || subagent.dsh_compat?.patchSha256 !== subagentPatchSha256
       || subagent.dsh_compat?.upstreamBase !== reviewedCommit
     ) return undefined

@@ -18,11 +18,15 @@ test('the runtime patch is pinned to the manifest DSH version', async () => {
   const builder = await text('build.mjs')
 
   // A DSH version bump must force a deliberate re-audit instead of carrying a
-  // source patch across an unknown upstream implementation.
-  assert.equal(manifest.dshVersion, '0.1.2-rc.1')
-  assert.match(launcher, /const version = '0\.1\.2-rc\.1'/)
-  assert.match(builder, /tag: 'dsh-v0\.1\.2-rc\.1'/)
-  assert.match(builder, /commit: 'a66e4702047846cdaa10c66c9d3df3951f5ea70d'/)
+  // source patch across an unknown upstream implementation. The patch was
+  // re-derived against the target tag, so every provenance value must name
+  // that exact target rather than the superseded 0.1.2 line.
+  assert.equal(manifest.dshVersion, '0.1.5-rc.2')
+  assert.match(launcher, /const version = '0\.1\.5-rc\.2'/)
+  assert.match(builder, /tag: 'dsh-v0\.1\.5-rc\.2'/)
+  assert.match(builder, /commit: 'fb2c4b9e698e30edb738bca4cf0618587db7d203'/)
+  assert.doesNotMatch(launcher, /0\.1\.2-rc\.1/)
+  assert.doesNotMatch(builder, /a66e4702047846cdaa10c66c9d3df3951f5ea70d/)
   assert.match(builder, /const run = \(command, args, cwd = here, options\)/)
   assert.match(builder, /pnpm@11\.7\.0', 'install', '--prefer-offline'\], checkout, \{ env: \{ CI: 'true' \} \}/)
   assert.match(builder, /reviewed DSH source requires Node \^22\.19\.0 or >=24\.0\.0/)

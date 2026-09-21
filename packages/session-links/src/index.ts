@@ -24,7 +24,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-connection'
 // Type-only: brings the host Context.sessionPersistence merge.
 import type {} from '@deepseek-ai/dsh-session-persistence'
-import { SessionLogOffset } from '@deepseek-ai/dsh-session'
+import { SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import { SESSION_LINKS_CHANNEL, SESSION_LINKS_ENTRIES_ENDPOINT, type SessionLinksRequest } from './contract.js'
 import { extractSession } from './host/extract.js'
 
@@ -87,18 +87,25 @@ export function apply(ctx: Context): void {
               },
             }
           }
-          const { events } = await persistence.readFrom(sessionId as never, SessionLogOffset(0))
-          const tools = child.get('tools')
-          const { entries, produced, maxSeq } = extractSession(events, (name, rawArgs) => {
-            // Same render-intent seam as api-proxy; a missing tool or a parse
-            // throw soft-falls to no view (the client's generic-card default).
-            const args = rawArgs === '' ? {} : JSON.parse(rawArgs)
-            const view = tools?.get(name)?.presentCall?.(args)
-            return view as ReturnType<import('./shared/produced.js').PresentCall>
-          })
-          const value = { entries, produced, maxSeq, complete: true as const }
-          cache.set(sessionId, { value, at: Date.now() })
-          return { ok: true as const, value }
+          const handle = await persistence.open(SessionId(sessionId), 'read')
+          try {
+            // Start at the beginning: the baseline must preserve the complete
+            // event log, including events before the live browser snapshot.
+            const { events } = await handle.read(SessionLogOffset(0))
+            const tools = child.get('tools')
+            const { entries, produced, maxSeq } = extractSession(events, (name, rawArgs) => {
+              // Same render-intent seam as api-proxy; a missing tool or a parse
+              // throw soft-falls to no view (the client's generic-card default).
+              const args = rawArgs === '' ? {} : JSON.parse(rawArgs)
+              const view = tools?.get(name)?.presentCall?.(args)
+              return view as ReturnType<import('./shared/produced.js').PresentCall>
+            })
+            const value = { entries, produced, maxSeq, complete: true as const }
+            cache.set(sessionId, { value, at: Date.now() })
+            return { ok: true as const, value }
+          } finally {
+            await handle.close()
+          }
         } catch (error) {
           return {
             ok: false as const,

@@ -13,41 +13,31 @@
  * spike (`spike/qa-subagent/FINDINGS.md`), not as guessed from names:
  *
  * - `startContinuable` needs an exact live parent `Agent` object, not an id.
- * - the host queue entry point is symbol-keyed (`dsh.subagent.queuePrompt`)
- *   and reached through the package's `internal` subpath.
+ * - the host delivery entry point is symbol-keyed by the target's internal
+ *   `deliverSubagentPrompt` symbol and reached through the package's `internal` subpath.
  * - resolving either only means the child's inbox ACCEPTED the message; it
  *   says nothing about the turn running, finishing, or reaching persistence.
  */
 
-/** A live Agent as Pet passes it around: opaque except for its session id. */
-export interface LiveAgentLike {
-  readonly session: { readonly id: string }
-}
+import type { Agent, AgentHandle, ResumeAgentOptions } from '@deepseek-ai/dsh-agent'
+import type { MessageId } from '@deepseek-ai/dsh-llm'
+import { SessionId, type SessionId as BrandedSessionId } from '@deepseek-ai/dsh-session'
+import type { SubagentListEntry, ContinuableStart, ContinuableStartSpec } from '@deepseek-ai/dsh-subagent'
+
+/** Public target Agent identity; the Session is intentionally not assumed. */
+export type LiveAgentLike = Agent
 
 /** The `ctx.agents` operations the QA path needs. */
 export interface AgentsPortLike {
-  /**
-   * @param sessionId - Durable session id.
-   * @returns the live Agent, or `undefined` when it is not resident.
-   */
-  get(sessionId: string): LiveAgentLike | undefined
-  /**
-   * Load a persisted session and resume an Agent on it.
-   *
-   * Requires session persistence in the host composition; the spike observed
-   * `cannot resume: session persistence is not configured` without it.
-   * @param options - The session to resume.
-   * @returns a handle whose `agent` is the live Agent.
-   */
-  resume(options: { resumeSessionId: string }): Promise<{ agent?: LiveAgentLike } | undefined>
+  /** Return the live Agent for an exact durable identity. */
+  get(sessionId: BrandedSessionId): LiveAgentLike | undefined
+  /** Resume persisted state and return the owned live Agent handle. */
+  resume(options: ResumeAgentOptions): Promise<AgentHandle>
 }
 
 /** One entry of the child listing, as the seam projects it. */
-export interface SubagentChildEntry {
-  readonly id: string
-  readonly label?: string
-  readonly activity?: string
-}
+export type SubagentChildEntry = Extract<SubagentListEntry, { readonly kind: 'child' }>
+
 
 /** The `ctx.subagents` operations the QA path needs. */
 export interface SubagentsPortLike {
@@ -56,13 +46,7 @@ export interface SubagentsPortLike {
    * @param spec - Provider, label, optional reserved child id, and request.
    * @returns the durable child id.
    */
-  startContinuable(spec: {
-    provider: string
-    label: string
-    childId?: string
-    request: { prompt: { type: 'text'; text: string }[]; parent: LiveAgentLike }
-    signal: AbortSignal
-  }): Promise<{ childId: string }>
+  startContinuable(spec: ContinuableStartSpec): Promise<ContinuableStart>
   /**
    * Release selected resident children of one exact live parent.
    *
@@ -71,13 +55,13 @@ export interface SubagentsPortLike {
    * @param parent - Exact live parent.
    * @param childIds - Children to release.
    */
-  drainContinuableChildren(parent: LiveAgentLike, childIds: readonly string[]): Promise<void>
+  drainContinuableChildren(parent: LiveAgentLike, childIds: readonly BrandedSessionId[]): Promise<void>
   /**
    * Enumerate a parent's direct children.
    * @param parentSessionId - Parent session.
    * @param signal - Cancellation.
    */
-  listChildren(parentSessionId: string, signal?: AbortSignal): Promise<SubagentChildEntry[]>
+  listChildren(parentSessionId: BrandedSessionId, signal?: AbortSignal): Promise<SubagentChildEntry[]>
 }
 
 /**
@@ -90,10 +74,10 @@ export interface SubagentsPortLike {
  */
 export type QueueHostPrompt = (
   parent: LiveAgentLike,
-  childId: string,
+  childId: BrandedSessionId,
   text: string,
   signal: AbortSignal,
-) => Promise<string>
+) => Promise<MessageId>
 
 /** Everything the QA path needs from the host, once proven present. */
 export interface SubagentSeam {
@@ -118,7 +102,7 @@ export type SeamProbe =
 export const FORK_PROVIDER = 'fork'
 
 /** Process-stable symbol the host queue entry point is keyed by. */
-const QUEUE_PROMPT_SYMBOL = Symbol.for('dsh.subagent.queuePrompt')
+const DELIVER_PROMPT_SYMBOL = Symbol.for('dsh.subagent.deliverPrompt')
 
 /** The DSH context surface this module probes, all of it optional. */
 export interface HostContextLike {
@@ -148,11 +132,11 @@ export function probeSubagentSeam(ctx: HostContextLike): SeamProbe {
   if (subagents === undefined || typeof subagents.startContinuable !== 'function') {
     return { available: false, diagnostic: '此 DSH Host 未装配 subagents 服务' }
   }
-  const queue = subagents[QUEUE_PROMPT_SYMBOL]
-  if (typeof queue !== 'function') {
+  const deliver = subagents[DELIVER_PROMPT_SYMBOL]
+  if (typeof deliver !== 'function') {
     return {
       available: false,
-      diagnostic: '此 DSH Host 的 subagents 服务不支持宿主消息投递（缺 queuePrompt）',
+      diagnostic: '此 DSH Host 的 subagents 服务不支持宿主消息投递（缺 deliverPrompt）',
     }
   }
   if (typeof ctx.on !== 'function') {
@@ -161,14 +145,15 @@ export function probeSubagentSeam(ctx: HostContextLike): SeamProbe {
   const on = ctx.on.bind(ctx)
 
   const queuePrompt: QueueHostPrompt = async (parent, childId, text, signal) =>
-    (await (queue as (...args: unknown[]) => Promise<string>).call(
+    (await (deliver as (...args: unknown[]) => Promise<MessageId>).call(
       subagents,
       parent,
       childId,
       [{ type: 'text', text }],
       { kind: 'user' },
       signal,
-    )) as string
+      'queue',
+    )) as MessageId
 
   return {
     available: true,
@@ -204,11 +189,12 @@ export async function resolveLiveParent(
   seam: SubagentSeam,
   parentSessionId: string,
 ): Promise<LiveAgentLike | undefined> {
-  const resident = seam.agents.get(parentSessionId)
+  const brandedParentId = SessionId(parentSessionId)
+  const resident = seam.agents.get(brandedParentId)
   if (resident !== undefined) return resident
   try {
-    const handle = await seam.agents.resume({ resumeSessionId: parentSessionId })
-    const resumed = handle?.agent ?? seam.agents.get(parentSessionId)
+    const handle = await seam.agents.resume({ resumeSessionId: brandedParentId })
+    const resumed = handle?.agent ?? seam.agents.get(brandedParentId)
     return resumed
   } catch {
     // Archived, deleted, or persistence-less: all indistinguishable here and

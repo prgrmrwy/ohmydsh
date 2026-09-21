@@ -2,7 +2,7 @@
  * The `pet_context` tool: a zero-argument, executor-bound trusted context read.
  *
  * The schema accepts NO arguments by design. Resolution starts from the real
- * `exec.agent.session.id` set by the agent loop, so the model cannot name a
+ * `exec.agent.id` set by the agent loop, so the model cannot name a
  * different Task, session or workspace. Prompt text is never an authorization
  * boundary; this tool is.
  */
@@ -76,7 +76,7 @@ export interface PetContextDependencies {
 
 /** Minimal execution view Pet reads; mirrors `ToolExecution`. */
 export interface ToolExecutionLike {
-  readonly agent?: { readonly session: { readonly id: string } }
+  readonly agent?: { readonly id: string }
 }
 
 /**
@@ -105,7 +105,7 @@ export function executePetContext(
   exec: ToolExecutionLike,
   deps: PetContextDependencies = {},
 ): PetContextResult {
-  const sessionId = exec.agent?.session.id
+  const sessionId = exec.agent?.id
   if (sessionId === undefined) {
     throw new PetError(
       'NOT_A_PET_SESSION',

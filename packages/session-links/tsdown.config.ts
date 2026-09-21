@@ -4,7 +4,6 @@ const external = [
   'react',
   'react/jsx-runtime',
   '@deepseek-ai/cordis',
-  '@deepseek-ai/dsh-client-runtime',
   '@deepseek-ai/dsh-llm',
   'dsh-better-sidebar',
 ]

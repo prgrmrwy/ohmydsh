@@ -23,6 +23,7 @@
  *    silence would just look broken.
  */
 
+import { SessionId } from '@deepseek-ai/dsh-session'
 import { markInProgress, settleFeedback } from '../channel/feedback.js'
 import type { LarkClient } from '../channel/lark.js'
 import type { LarkInboundEvent } from '../channel/event.js'
@@ -175,7 +176,7 @@ export class QaDelivery {
     })
 
     try {
-      await this.deps.seam.queuePrompt(parent, childId, prompt, AbortSignal.timeout(30_000))
+      await this.deps.seam.queuePrompt(parent, SessionId(childId), prompt, AbortSignal.timeout(30_000))
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
       // A refused queue is not necessarily fatal to the binding (a transient

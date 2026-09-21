@@ -78,7 +78,7 @@ describe('caller-bound unified locus pet_context', () => {
 
     const result = executePetContext(
       harness.repository,
-      { agent: { session: { id: 'child-1' } } },
+      { agent: { id: 'child-1' } },
       { locusRepository },
     )
 
@@ -109,7 +109,7 @@ describe('caller-bound unified locus pet_context', () => {
     ]) {
       const result = executePetContext(
         harness!.repository,
-        { agent: { session: { id: 'child-1' } } },
+        { agent: { id: 'child-1' } },
         { locusRepository: repository([locusRecord({ contextAnchor })]) },
       ) as PetLocusContextResult
       expect(result.scope).toBe('locus')
@@ -123,7 +123,7 @@ describe('caller-bound unified locus pet_context', () => {
     harness = await openPetHarness()
     expect(() => executePetContext(
       harness!.repository,
-      { agent: { session: { id: 'child-1' } } },
+      { agent: { id: 'child-1' } },
       { locusRepository: repository([locusRecord({
         contextAnchor: { status: 'trusted-by-model' } as never,
       })]) },
@@ -134,7 +134,7 @@ describe('caller-bound unified locus pet_context', () => {
     harness = await openPetHarness()
     const result = executePetContext(
       harness.repository,
-      { agent: { session: { id: 'child-1' } } },
+      { agent: { id: 'child-1' } },
       { locusRepository: repository([locusRecord()]) },
     )
 
@@ -163,7 +163,7 @@ describe('caller-bound unified locus pet_context', () => {
       try {
         executePetContext(
           harness!.repository,
-          { agent: { session: { id: 'child-1' } } },
+          { agent: { id: 'child-1' } },
           { locusRepository: repository([record]) },
         )
         throw new Error('expected context lookup to fail')
@@ -184,7 +184,7 @@ describe('caller-bound unified locus pet_context', () => {
     expect(() =>
       executePetContext(
         harness!.repository,
-        { agent: { session: { id: 'child-1' } } },
+        { agent: { id: 'child-1' } },
         { locusRepository: repository([first, second]) },
       ),
     ).toThrow(/ambiguous locus association/)
@@ -205,7 +205,7 @@ describe('caller-bound unified locus pet_context', () => {
 
     const result = executePetContext(
       harness.repository,
-      { agent: { session: { id: 'exec-1' } } },
+      { agent: { id: 'exec-1' } },
       { locusRepository: repository([]) },
     )
 
@@ -220,7 +220,7 @@ describe('caller-bound unified locus pet_context', () => {
     const result = executePetContext(
       harness.repository,
       {
-        agent: { session: { id: 'child-1' } },
+        agent: { id: 'child-1' },
         // Deliberately ignored extra fields model code cannot use to redirect lookup.
         target: 'child-other',
         locusId: 'locus-other',

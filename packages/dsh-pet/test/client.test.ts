@@ -1502,7 +1502,7 @@ describe('Host directory APIs are read from the right connection face', () => {
 
   it('matches the face the installed client library actually exposes', async () => {
     const { readFile } = await import('node:fs/promises')
-    const declared = await readFile(
+    const candidates = [
       path.resolve(
         __dirname,
         '..',
@@ -1512,8 +1512,28 @@ describe('Host directory APIs are read from the right connection face', () => {
         'lib',
         'typert.remote-client.d.ts',
       ),
-      'utf8',
-    )
+      path.resolve(
+        __dirname,
+        '..',
+        '..',
+        '..',
+        'node_modules',
+        '@deepseek-ai',
+        'dsh-api-workspace-controller',
+        'lib',
+        'typert.remote-client.d.ts',
+      ),
+    ]
+    let declared: string | undefined
+    for (const candidate of candidates) {
+      try {
+        declared = await readFile(candidate, 'utf8')
+        break
+      } catch {
+        // npm may hoist or nest peer-conflict copies; try the other location.
+      }
+    }
+    expect(declared).toBeDefined()
 
     // Pin the assumption to the real contract rather than to memory.
     expect(declared).toContain("'directoryPicker/pick'")

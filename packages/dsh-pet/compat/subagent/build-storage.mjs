@@ -29,9 +29,11 @@ const checkout = join(here, '.storage-upstream')
 const artifacts = join(here, 'storage-artifacts')
 const artifactBuilds = join(here, '.storage-artifact-builds')
 const patchFile = join(here, 'storage-atomic.patch')
-const tag = 'dsh-v0.1.2-rc.1'
-const reviewedCommit = 'a66e4702047846cdaa10c66c9d3df3951f5ea70d'
-const patchSha256 = '18ec93c5240612b513871d65db2d100ee6165ea1ba251dbf91e670963dd35bed'
+const targetVersion = '0.1.5-rc.2'
+const artifactVersionSuffix = 'locus-atomic.2'
+const tag = 'dsh-v0.1.5-rc.2'
+const reviewedCommit = 'fb2c4b9e698e30edb738bca4cf0618587db7d203'
+const patchSha256 = '188e5aac118b5835f0ff0b7b9a4c1794c92e64f340602e39f59eba09375c4b7e'
 const packages = [
   ['storage/storage', 'storage'],
   ['storage/storage-domain', 'storage-domain'],
@@ -85,9 +87,12 @@ function publish(targetRoot, sourceRel, targetName, versions, head) {
   }
   delete pkg.devDependencies
   delete pkg.publishConfig
-  pkg.version = `${pkg.version}-locus-atomic.1`
+  if (pkg.version !== targetVersion) {
+    fail(`reviewed ${pkg.name} package is ${pkg.version}, expected ${targetVersion}`)
+  }
+  pkg.version = `${pkg.version}-${artifactVersionSuffix}`
   pkg.dsh_compat = {
-    replaces: `${pkg.name}@0.1.2-rc.1`,
+    replaces: `${pkg.name}@${targetVersion}`,
     upstreamTag: tag,
     upstreamBase: head,
     patchSha256,
@@ -102,7 +107,7 @@ function validArtifactSet(root, fingerprint) {
       if (!existsSync(join(root, name, 'lib', 'index.js'))) return false
       if (pkg.dsh_compat?.patchSha256 !== patchSha256) return false
       if (pkg.dsh_compat?.upstreamBase !== reviewedCommit) return false
-      if (pkg.dsh_compat?.replaces !== `${pkg.name}@0.1.2-rc.1`) return false
+      if (pkg.dsh_compat?.replaces !== `${pkg.name}@${targetVersion}`) return false
     }
     const domain = readFileSync(join(root, 'storage-domain', 'lib', 'index.js'), 'utf8')
     const json = readFileSync(join(root, 'storage-json', 'lib', 'index.js'), 'utf8')
@@ -110,7 +115,8 @@ function validArtifactSet(root, fingerprint) {
     const storageTypes = readFileSync(join(root, 'storage', 'lib', 'types', 'backend.d.ts'), 'utf8')
     return domain.includes('transaction-unsupported') && domain.includes('applyBatch')
       && json.includes('applyBatch') && sqlite.includes('applyBatch')
-      && sqlite.includes('exclusive write lock') && storageTypes.includes('applyBatch?')
+      && sqlite.includes('exclusive write lock') && sqlite.includes('medium-locked')
+      && storageTypes.includes('applyBatch?')
   } catch {
     return false
   }

@@ -22,9 +22,9 @@ afterEach(async () => {
 
 /** An execution as the agent loop presents it. */
 function execution(sessionId: string | undefined): {
-  agent?: { session: { header: { id: string } } }
+  agent?: { id: string }
 } {
-  return sessionId === undefined ? {} : { agent: { session: { header: { id: sessionId } } } }
+  return sessionId === undefined ? {} : { agent: { id: sessionId } }
 }
 
 /**

@@ -24,7 +24,7 @@ function operation(overrides: Partial<OperationRecord> = {}): OperationRecord {
 
 describe('Worktree Session stable runtime context', () => {
   it('is byte-identical across repeated renders for the same active binding', () => {
-    const record = operation({ binding: { mode: 'source-session', sourceSessionId: 'session-a', state: 'admitted', updatedAt: '2026-01-01T00:00:00.000Z' } })
+    const record = operation({ binding: { mode: 'source-session', sourceSessionId: 'session-a', state: 'bound', updatedAt: '2026-01-01T00:00:00.000Z' } })
     const binding = bindingOf(record)
     const first = activeBindingContext(record)
     expect(boundContextText(record, binding)).toBe(first)
@@ -42,10 +42,10 @@ describe('Worktree Session stable runtime context', () => {
   })
 
   it('stays byte-identical across a lean -> mutable transition', () => {
-    const record = operation({ dependencyMode: 'lean', binding: { mode: 'source-session', sourceSessionId: 'session-a', state: 'admitted', updatedAt: '2026-01-01T00:00:00.000Z' } })
+    const record = operation({ dependencyMode: 'lean', binding: { mode: 'source-session', sourceSessionId: 'session-a', state: 'bound', updatedAt: '2026-01-01T00:00:00.000Z' } })
     const binding = bindingOf(record)
     const before = activeBindingContext(record)
-    const mutable = operation({ dependencyMode: 'mutable', binding: { mode: 'source-session', sourceSessionId: 'session-a', state: 'admitted', updatedAt: '2026-01-02T00:00:00.000Z' } })
+    const mutable = operation({ dependencyMode: 'mutable', binding: { mode: 'source-session', sourceSessionId: 'session-a', state: 'bound', updatedAt: '2026-01-02T00:00:00.000Z' } })
     expect(activeBindingContext(mutable)).toBe(before)
     // boundContextText is also stable across the transient mode change.
     expect(boundContextText(mutable, bindingOf(mutable))).toBe(before)
@@ -77,7 +77,7 @@ describe('Worktree Session stable runtime context', () => {
   })
 
   it('reprojects the same active text after a hypothetical compaction without duplication', () => {
-    const record = operation({ binding: { mode: 'source-session', sourceSessionId: 'session-a', state: 'admitted', updatedAt: '2026-01-01T00:00:00.000Z' } })
+    const record = operation({ binding: { mode: 'source-session', sourceSessionId: 'session-a', state: 'bound', updatedAt: '2026-01-01T00:00:00.000Z' } })
     const text = boundContextText(record, bindingOf(record))
     // Recomputing for the same operation yields the identical string, so the
     // runtime-context projection will not emit a new snapshot.

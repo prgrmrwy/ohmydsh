@@ -19,8 +19,8 @@ describe('probe: admission map eviction', () => {
     const co = new PetCoordinator({
       repository: h.repository, capabilities: caps,
       agents: {
-        create: async (o: any) => { created++; await new Promise(r => setTimeout(r, 5)); return { session: { id: o.sessionId } } },
-        get: () => ({}),
+        create: async (o: any) => { created++; await new Promise(r => setTimeout(r, 5)); return { agent: { id: o.sessionId }, dispose: async () => {} } },
+        get: () => ({ id: 'probe2' }),
       } as unknown as AgentRegistryLike,
       dispatcher: { dispatch: async () => {} } as PromptDispatcher,
       resolver, contextProviders: new SourceContextRegistry(),

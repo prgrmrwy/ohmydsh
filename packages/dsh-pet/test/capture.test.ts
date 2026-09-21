@@ -272,7 +272,7 @@ describe('pet_context fails closed', () => {
     harness = await seedRunning()
 
     const result = executePetContext(harness.repository, {
-      agent: { session: { id: 'exec-1' } },
+      agent: { id: 'exec-1' },
     })
 
     expect(result.taskId).toBe('task-1')
@@ -285,7 +285,7 @@ describe('pet_context fails closed', () => {
     harness = await seedRunning()
 
     expect(() =>
-      executePetContext(harness!.repository, { agent: { session: { id: 'ordinary' } } }),
+      executePetContext(harness!.repository, { agent: { id: 'ordinary' } }),
     ).toThrow(/not bound to a Pet Task/)
   })
 
@@ -301,7 +301,7 @@ describe('pet_context fails closed', () => {
     await harness.repository.archiveTask('task-1')
 
     expect(() =>
-      executePetContext(harness!.repository, { agent: { session: { id: 'exec-1' } } }),
+      executePetContext(harness!.repository, { agent: { id: 'exec-1' } }),
     ).toThrow(/is archived/)
   })
 
@@ -310,7 +310,7 @@ describe('pet_context fails closed', () => {
     await harness.repository.createTask(testTask())
 
     expect(() =>
-      executePetContext(harness!.repository, { agent: { session: { id: 'exec-1' } } }),
+      executePetContext(harness!.repository, { agent: { id: 'exec-1' } }),
     ).toThrow(/no running or waiting Invocation/)
   })
 
@@ -324,7 +324,7 @@ describe('pet_context fails closed', () => {
     await repo.setInvocationStatus('inv-2', 'running')
 
     expect(() =>
-      executePetContext(repo, { agent: { session: { id: 'exec-1' } } }),
+      executePetContext(repo, { agent: { id: 'exec-1' } }),
     ).toThrow(/concurrent Invocations/)
   })
 
@@ -335,7 +335,7 @@ describe('pet_context fails closed', () => {
     executePetContext(harness.repository, {
       // A hostile model may only influence its own session identity, which the
       // agent loop sets — there is no argument surface at all.
-      agent: { session: { id: 'exec-1' } },
+      agent: { id: 'exec-1' },
     })
 
     expect(spy).toHaveBeenCalledWith('exec-1')

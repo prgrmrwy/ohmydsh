@@ -52,29 +52,29 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-llm": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-locale": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-connection": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-ui-settings": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-ui-model-selection": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-api-session-controller": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.2-rc.1"
+    "@deepseek-ai/dsh-llm": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-locale": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-connection": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-settings": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-model-selection": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-api-session-controller": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.5-rc.2"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-llm": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-locale": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-connection": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-ui-settings": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-ui-model-selection": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-ui-slots": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-llm": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-locale": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-connection": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-settings": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-model-selection": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.5-rc.2",
     "@types/node": "^24.0.0",
     "tsdown": "^0.14.2",
     "typescript": "^5.9.3",
     "vitest": "^3.2.7",
-    "@deepseek-ai/dsh-api-session-controller": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.2-rc.1"
+    "@deepseek-ai/dsh-api-session-controller": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.5-rc.2"
   }
 }

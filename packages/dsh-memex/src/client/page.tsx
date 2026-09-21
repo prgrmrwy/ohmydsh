@@ -252,7 +252,20 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
       return
     }
     try {
-      await scope.mutate([{ op: 'set', path: ['scopes'], value: toScopes(rows) }])
+      await scope.mutate([{
+        op: 'set',
+        path: ['scopes'],
+        value: toScopes(rows).map(scope => ({
+          name: scope.name,
+          ...(scope.pathPrefixes === undefined ? {} : { pathPrefixes: [...scope.pathPrefixes] }),
+          ...(scope.remotePatterns === undefined ? {} : { remotePatterns: [...scope.remotePatterns] }),
+          ...(scope.home === undefined ? {} : { home: scope.home }),
+          ...(scope.primary === undefined ? {} : { primary: scope.primary }),
+          ...(scope.publish === undefined ? {} : { publish: scope.publish }),
+          ...(scope.fallback === undefined ? {} : { fallback: scope.fallback }),
+          ...(scope.memory === undefined ? {} : { memory: scope.memory }),
+        })),
+      }])
       setDraft(undefined)
       setNotice({ kind: 'ok', text: t('saved') })
       await loadStores()

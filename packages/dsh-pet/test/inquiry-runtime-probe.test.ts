@@ -15,6 +15,7 @@ import { pathToFileURL } from 'node:url'
 import { beforeAll, describe, expect, it } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
 import type { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { ToolExecutionInput } from '@deepseek-ai/dsh-tools'
@@ -150,7 +151,7 @@ describe.skipIf(runtimePath === undefined)('opt-in fixed-runtime inquiry seam ob
     await ctx.plugin(runtime.prompt.default)
     await ctx.plugin(runtime.tools.default)
     // Only scope identity is required by ToolRuntime; no Agent is registered.
-    const agent = {} as Agent
+    const agent = { id: SessionId('runtime-probe-agent') } as Agent
     const scope = runtime.scope.createScope(ctx, agent)
     const input = (name: string, callId = name): ToolExecutionInput => ({
       agent, name, callId: callId as ToolCallId, arguments: {}, signal: new AbortController().signal,

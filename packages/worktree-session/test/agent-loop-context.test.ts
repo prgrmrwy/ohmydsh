@@ -11,7 +11,7 @@ import LlmRuntime, {
   type StreamChunk,
 } from '@deepseek-ai/dsh-llm'
 import SessionProjection from '@deepseek-ai/dsh-session-projection'
-import SessionStore, { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionId, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
 import { activeBindingContext, cleanedBindingContext, installContext } from '../src/host/context.js'
@@ -49,7 +49,7 @@ class ScriptedAdapter extends LlmAdapter {
   }
 }
 
-function operation(state: 'admitted' | 'cleaned' | 'released' = 'admitted'): OperationRecord {
+function operation(state: 'bound' | 'cleaned' | 'released' = 'bound'): OperationRecord {
   return {
     schemaVersion: 2,
     operationId: 'operation-12345678',
@@ -101,8 +101,8 @@ async function createBoundAgent(
     meta: { cwd: record.repoRoot },
     ...(seed === undefined ? {} : { seed }),
     agentOptions: { provider: 'scripted', model: 'scripted' },
-    setup(agentCtx) {
-      installContext(agentCtx.agent, record)
+    setup(_agentCtx, agent) {
+      installContext(agent, record)
     },
   })
 }
@@ -168,7 +168,7 @@ describe('Worktree Session AgentLoop runtime-context projection', () => {
       content: [{ type: 'text', text: 'compacted summary' }],
       source: { kind: 'plugin', plugin: 'test-compaction' },
     }), {
-      surfaceOp: { op: 'replace', start: first.seq, end: first.seq },
+      surfaceOp: { op: 'replace', startSeq: SessionSeq(first.seq), endSeq: SessionSeq(first.seq) },
       sourceEventSeqs: [first.seq],
     })
 
@@ -189,7 +189,7 @@ describe('Worktree Session AgentLoop runtime-context projection', () => {
       sessionId: SessionId('session-child'),
       meta: { cwd: record.repoRoot, parentSession: parent.agent.id, origin: 'subagent', delegationDepth: 1 },
       agentOptions: { provider: 'scripted', model: 'scripted' },
-      setup(childCtx) { installSubagentInheritance(childCtx) },
+      setup(childCtx, childAgent) { installSubagentInheritance(childCtx, childAgent) },
     })
     await step(child.agent, 'child first step')
     expect(runtimeContextEvents(child.agent)).toHaveLength(1)

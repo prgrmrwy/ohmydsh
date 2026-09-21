@@ -18,7 +18,7 @@ async function fixture(): Promise<{ root: string; worktree: string; record: Oper
     baseRef: 'main', baseCommit: 'abc', taskBranch: 'ws/task', worktreePath: worktree, taskHash: 'h',
     dependencyMode: 'lean', dshHome: join(root, '.git', 'ws', 'home'), phase: 'prepared',
     createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-    binding: { mode: 'source-session', sourceSessionId: 'session-a', state: 'admitted', updatedAt: '2026-01-01T00:00:00.000Z' },
+    binding: { mode: 'source-session', sourceSessionId: 'session-a', state: 'bound', updatedAt: '2026-01-01T00:00:00.000Z' },
   }
   return { root, worktree, record }
 }

@@ -30,7 +30,7 @@ export const PET_ENV_CONTRIBUTOR = 'dsh-pet-workspace-env'
 
 /** The execution view this contributor reads; mirrors `ToolExecution`. */
 export interface ShellEnvExecutionLike {
-  readonly agent?: { readonly session: { readonly header: { readonly id: string } } }
+  readonly agent?: { readonly id: string }
 }
 
 /** One declared variable, as `ctx.shellEnv` expects it. */
@@ -67,7 +67,7 @@ export function createPetEnvContributor(repository: PetRepository): PetEnvContri
     name: PET_ENV_CONTRIBUTOR,
     variables,
     resolve(execution: ShellEnvExecutionLike): Readonly<Record<string, string>> {
-      const sessionId = execution.agent?.session.header.id
+      const sessionId = execution.agent?.id
       // A non-Pet session contributes nothing. Returning empty rather than
       // throwing matters: this runs for EVERY shell call in the Host,
       // including ordinary sessions that have nothing to do with Pet.

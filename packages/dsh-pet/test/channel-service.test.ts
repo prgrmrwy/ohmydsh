@@ -102,8 +102,8 @@ async function fixture(
     repository: created.repository,
     capabilities: new CapabilityRegistry(),
     agents: {
-      create: async (opts: { sessionId: string }) => ({ session: { id: opts.sessionId } }),
-      get: () => ({}),
+      create: async (opts: { sessionId: string }) => ({ agent: { id: opts.sessionId }, dispose: async () => {} }),
+      get: () => ({ id: 'service-test' }),
     } as never,
     dispatcher: { dispatch: async () => {} },
     resolver: { getSession: () => undefined, getWorkspace: () => undefined },

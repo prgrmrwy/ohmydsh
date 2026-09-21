@@ -43,8 +43,9 @@ export interface WorktreeEntry {
   prunable: boolean
 }
 
-export type PublicBindingLifecycle = 'bound' | 'submit-claimed' | 'admitted' | 'uncertain' | 'cleaned'
-export type SourceBindingState = PublicBindingLifecycle | 'cleaned-archived' | 'released'
+/** Durable source binding lifecycle. Submission admission is owned by DSH. */
+export type PublicBindingLifecycle = 'bound' | 'cleaned' | 'released'
+export type SourceBindingState = PublicBindingLifecycle | 'cleaned-archived'
 
 /**
  * Marks tombstones written by the archive-aware schema-v2 implementation.
@@ -72,7 +73,7 @@ export function isCurrentBinding(binding: SessionBinding | undefined): binding i
 
 /** Map internal archive states onto the stable public lifecycle vocabulary. */
 export function publicBindingLifecycle(binding: SourceSessionBinding): PublicBindingLifecycle {
-  return binding.state === 'cleaned-archived' || binding.state === 'released' ? 'cleaned' : binding.state
+  return binding.state === 'cleaned-archived' ? 'cleaned' : binding.state
 }
 
 export interface OperationRecord {
@@ -153,13 +154,12 @@ export interface BindSourceRequest {
 }
 
 export interface SourceBindingRequest extends BindSourceRequest {
-  action: 'bind-source' | 'claim-submit' | 'admitted' | 'uncertain' | 'cleaned'
+  action: 'bind-source'
 }
 
 export interface BindSourceResult {
   sourceSessionId: string
-  state: 'bound' | 'submit-claimed' | 'admitted' | 'uncertain' | 'cleaned'
-  submitAllowed: boolean
+  state: 'bound' | 'cleaned' | 'released'
 }
 
 export interface SessionStatusRequest {

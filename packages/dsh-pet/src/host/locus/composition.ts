@@ -96,7 +96,8 @@ export function attestLocusComposition(
 
 /** One agent the runtime is about to publish. */
 export interface LocusCandidateAgent {
-  readonly sessionId: string
+  /** Target Agent exposes its durable identity as `id`, not `sessionId`. */
+  readonly id: string
   /**
    * The agent's own scope. Services must be resolved from THIS object: a
    * registration made against the Host scope publishes globally instead of
@@ -226,28 +227,28 @@ export function composeLocusChild(
   agent: LocusCandidateAgent,
   ports: LocusCompositionPorts,
 ): LocusCompositionResult {
-  if (typeof agent.sessionId !== 'string' || agent.sessionId.trim() === '') {
+  if (typeof agent.id !== 'string' || agent.id.trim() === '') {
     return { composed: false }
   }
 
   let composition: LocusChildComposition | undefined
   try {
-    composition = ports.lookup.find(agent.sessionId)
+    composition = ports.lookup.find(agent.id)
   } catch (error) {
     // An unusable lookup cannot prove this is an ordinary session, and
     // publishing a locus child without its surface is the failure this
     // boundary exists to prevent.
     throw new LocusCompositionError(
       'lookup-failed',
-      `Unable to resolve locus composition for ${agent.sessionId}`,
+      `Unable to resolve locus composition for ${agent.id}`,
       { cause: error },
     )
   }
   if (composition === undefined) return { composed: false }
-  if (composition.childSessionId !== agent.sessionId) {
+  if (composition.childSessionId !== agent.id) {
     throw new LocusCompositionError(
       'lookup-failed',
-      `Locus lookup for ${agent.sessionId} returned a different child identity`,
+      `Locus lookup for ${agent.id} returned a different child identity`,
     )
   }
 
@@ -259,7 +260,7 @@ export function composeLocusChild(
   if (surface === undefined) {
     throw new LocusCompositionError(
       'surface-unavailable',
-      `Host exposes no scoped surface for locus child ${agent.sessionId}`,
+      `Host exposes no scoped surface for locus child ${agent.id}`,
     )
   }
   try {
@@ -267,7 +268,7 @@ export function composeLocusChild(
   } catch (error) {
     throw new LocusCompositionError(
       'surface-failed',
-      `Could not install the caller-bound surface for locus child ${agent.sessionId}`,
+      `Could not install the caller-bound surface for locus child ${agent.id}`,
       { cause: error },
     )
   }
@@ -283,7 +284,7 @@ export function composeLocusChild(
   } catch (error) {
     throw new LocusCompositionError(
       'surface-not-attested',
-      `Could not read the tool surface of locus child ${agent.sessionId}`,
+      `Could not read the tool surface of locus child ${agent.id}`,
       { cause: error },
     )
   }
@@ -292,8 +293,8 @@ export function composeLocusChild(
     throw new LocusCompositionError(
       'surface-not-attested',
       attestation.reason === 'unreadable'
-        ? `Locus child ${agent.sessionId} exposes no readable tool surface`
-        : `Locus child ${agent.sessionId} exposes tools outside its safe composition: `
+        ? `Locus child ${agent.id} exposes no readable tool surface`
+        : `Locus child ${agent.id} exposes tools outside its safe composition: `
           + attestation.leaks.join(', '),
     )
   }
@@ -317,33 +318,33 @@ function applyPolicy(
   if (policy === undefined) {
     throw new LocusCompositionError(
       'policy-unavailable',
-      `Host exposes no file policy seam for locus child ${agent.sessionId}`,
+      `Host exposes no file policy seam for locus child ${agent.id}`,
     )
   }
   try {
-    policy.apply(agent.sessionId, composition.permission)
+    policy.apply(agent.id, composition.permission)
   } catch (error) {
     throw new LocusCompositionError(
       'policy-failed',
-      `Could not apply ${composition.permission} policy to locus child ${agent.sessionId}`,
+      `Could not apply ${composition.permission} policy to locus child ${agent.id}`,
       { cause: error },
     )
   }
 
   let resolved: LocusChildPermission | undefined
   try {
-    resolved = policy.resolve(agent.sessionId)
+    resolved = policy.resolve(agent.id)
   } catch (error) {
     throw new LocusCompositionError(
       'policy-failed',
-      `Could not read back the resolved policy for locus child ${agent.sessionId}`,
+      `Could not read back the resolved policy for locus child ${agent.id}`,
       { cause: error },
     )
   }
   if (resolved !== composition.permission) {
     throw new LocusCompositionError(
       'policy-not-verified',
-      `Locus child ${agent.sessionId} requires ${composition.permission} but the Host resolved `
+      `Locus child ${agent.id} requires ${composition.permission} but the Host resolved `
       + `${resolved ?? 'no policy'}`,
     )
   }

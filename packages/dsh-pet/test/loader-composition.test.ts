@@ -19,6 +19,8 @@ import { Context } from '@deepseek-ai/cordis'
 import Storage, { storageBackendServiceKey } from '@deepseek-ai/dsh-storage'
 import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
 import * as StorageSqlite from '@deepseek-ai/dsh-storage-sqlite'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import { MessageId } from '@deepseek-ai/dsh-llm'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { describe, expect, it, vi } from 'vitest'
@@ -84,7 +86,7 @@ function stubServices(
   // `resume` mirrors the real registry. Omitting it made the locus child
   // probe stop at parent resolution, masking every later capability gate.
   ctx.provide('agents', overrides.agents ?? {
-    create: async () => ({ session: { id: 'x' } }),
+    create: async () => ({ agent: { id: 'x' }, dispose: async () => {} }),
     get: () => undefined,
     resume: async () => undefined,
     list: () => [],
@@ -353,9 +355,9 @@ describe('a real Invocation scopes its executor Agent', () => {
     ctx.provide('agents', {
       create: async (options: { sessionId: string }) => {
         createdAgents.push(options)
-        return { session: { id: options.sessionId } }
+        return { agent: { id: options.sessionId }, dispose: async () => {} }
       },
-      get: () => ({}),
+      get: () => ({ id: 'loader-test' }),
       list: () => [],
     })
     ctx.provide('agentDefaultModel', {
@@ -469,6 +471,7 @@ describe('dispatch uses the ordinary Agent lifecycle', () => {
     }
     const agentHandle = {
       agent: {
+        id: 'exec-test',
         ctx: agentCtx,
         followup: (message: unknown) => {
           followups.push(message)
@@ -480,12 +483,12 @@ describe('dispatch uses the ordinary Agent lifecycle', () => {
     }
     ctx.provide('sessionController', { inspect: async () => ({ session: undefined }), resolveAgent: async () => undefined })
     ctx.provide('agents', {
-      create: async (options: { sessionId: string; setup?: (c: unknown) => void | Promise<void> }) => {
+      create: async (options: { sessionId: string; setup?: (c: unknown, a: unknown) => void | Promise<void> }) => {
         // The real factory awaits `setup` before publishing the agent.
-        await options.setup?.(agentCtx)
-        return { session: { id: options.sessionId } }
+        await options.setup?.(agentCtx, { ...agentHandle.agent, id: options.sessionId })
+        return { ...agentHandle, agent: { ...agentHandle.agent, id: options.sessionId } }
       },
-      get: () => agentHandle,
+      get: () => agentHandle.agent,
       list: () => [],
     })
     ctx.provide('agentDefaultModel', {
@@ -587,9 +590,9 @@ describe('archiving from the Pet route syncs the executor session', () => {
     })
     ctx.provide('sessionController', { inspect: async () => ({ session: undefined }), resolveAgent: async () => undefined })
     ctx.provide('agents', {
-      create: async (options: { sessionId: string }) => ({ session: { id: options.sessionId } }),
+      create: async (options: { sessionId: string }) => ({ agent: { id: options.sessionId }, dispose: async () => {} }),
       get: () => ({
-        agent: { followup: () => {}, whenIdle: async () => {} },
+        agent: { id: 'exec-test', followup: () => {}, whenIdle: async () => {} },
       }),
       list: () => [],
     })
@@ -705,9 +708,9 @@ describe('provider routability is proven before an executor is created', () => {
     ctx.provide('agents', {
       create: async (options: { sessionId: string }) => {
         createdAgents.push(options)
-        return { session: { id: options.sessionId } }
+        return { agent: { id: options.sessionId }, dispose: async () => {} }
       },
-      get: () => ({ agent: { followup: () => {}, whenIdle: async () => {} } }),
+      get: () => ({ agent: { id: 'exec-test', followup: () => {}, whenIdle: async () => {} }, dispose: async () => {} }),
       list: () => [],
     })
 
@@ -869,7 +872,7 @@ describe('a locus child is composed at the real creation boundary', () => {
       // real Host reports the child's OWN view — exactly the surface the tool
       // filter cannot constrain.
       agents: {
-        create: async () => ({ session: { id: 'x' } }),
+        create: async () => ({ agent: { id: 'x' }, dispose: async () => {} }),
         get: (id: string) => (id === 'child-live' ? { id } : undefined),
         resume: async () => undefined,
         list: () => [],
@@ -964,7 +967,7 @@ describe('a locus child is composed at the real creation boundary', () => {
       },
       skills: { registerProvider: () => () => {} },
     }
-    ctx.emit('agent/created', { agent: { session: { id: sessionId }, ctx: agentCtx } })
+    ctx.emit('agent/created', { agent: { id: sessionId, ctx: agentCtx } })
     return { registered }
   }
 
@@ -1121,7 +1124,7 @@ describe('the per-turn correlation observer is wired to real runtime events', ()
 
     // Exactly the two events DSH emits, with their real payload shapes.
     host.ctx.emit('agent/inbox/claimed' as never, {
-      agent: { session: { id: 'child-live' } },
+      agent: { id: 'child-live' },
       message: { id: 'inbox-execution-live' },
       turn: 1,
     } as never)
@@ -1198,7 +1201,7 @@ describe('owner-facing locus management is served by the real routes', () => {
       ...(options.scopeRuntime === true
         ? {
           agents: {
-            create: async () => ({ session: { id: 'x' } }),
+            create: async () => ({ agent: { id: 'x' }, dispose: async () => {} }),
             get: (id: string) => id === 'main-live' ? main : undefined,
             resume: async () => undefined,
             list: () => [main],
@@ -1223,7 +1226,7 @@ describe('owner-facing locus management is served by the real routes', () => {
         resolve: ({ session }: { session: { id: string } }) => ({ mode: modes.get(session.id) }),
       })
       ctx.provide('subagents', {
-        startContinuable: async () => ({ childId: 'child-live' }),
+        startContinuable: async () => ({ childId: SessionId('child-live'), messageId: MessageId('message-1') }),
         createIdleContinuable: async () => ({ childId: 'child-live' }),
         supportsSettlementNotice: true,
         supportsIdleContinuableCreate: true,
@@ -1242,7 +1245,7 @@ describe('owner-facing locus management is served by the real routes', () => {
           expect(spec.childId).toBe('child-live')
           return operation(sessionOf('child-live'))
         },
-        [Symbol.for('dsh.subagent.queuePrompt')]: async () => 'message-1',
+        [Symbol.for('dsh.subagent.deliverPrompt')]: async () => 'message-1',
       })
     }
 
@@ -1469,10 +1472,10 @@ describe('startup reconciliation runs against the real runtime', () => {
     // A runtime that can enumerate children and reports none: real evidence
     // that the persisted child cannot take another turn.
     ctx.provide('subagents', {
-      startContinuable: async () => ({ childId: 'child-live' }),
+      startContinuable: async () => ({ childId: SessionId('child-live'), messageId: MessageId('message-1') }),
       supportsIndependentContinuableCreate: true,
       listChildren: async () => [],
-      [Symbol.for('dsh.subagent.queuePrompt')]: async () => 'message-1',
+      [Symbol.for('dsh.subagent.deliverPrompt')]: async () => 'message-1',
     })
 
     await ctx.plugin({
@@ -1634,10 +1637,10 @@ describe('the unified Feishu channel stays gated on real capabilities', () => {
     // child's automatic parent report. The independent marker is present so
     // the assertion below reaches the settlement-notice gate specifically.
     ctx.provide('subagents', {
-      startContinuable: async () => ({ childId: 'child-live' }),
+      startContinuable: async () => ({ childId: SessionId('child-live'), messageId: MessageId('message-1') }),
       supportsIndependentContinuableCreate: true,
       listChildren: async () => [],
-      [Symbol.for('dsh.subagent.queuePrompt')]: async () => 'message-1',
+      [Symbol.for('dsh.subagent.deliverPrompt')]: async () => 'message-1',
     })
     // Capture the sink Pet actually writes to. Pet reports through `console`
     // rather than `ctx.logger`, because the Host logger's output never reaches
@@ -1679,7 +1682,7 @@ describe('the unified Feishu channel stays gated on real capabilities', () => {
       // "not wired yet" from "wired and broken".
       const gate = logs.find(line => line.includes('unified Feishu channel stays unavailable'))
       expect(gate).toBeDefined()
-      expect(gate).toContain('suppress')
+      expect(gate).toContain('child')
     } finally {
       // Restore unconditionally: a patched `console.log` leaking out of this
       // case would silently swallow output from every later test.

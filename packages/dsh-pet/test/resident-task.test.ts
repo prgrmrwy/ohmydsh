@@ -29,9 +29,9 @@ function fakeAgents(): AgentRegistryLike {
   return {
     create: vi.fn(async (options: { sessionId: string }) => {
       sessions.add(options.sessionId)
-      return { session: { id: options.sessionId } }
+      return { agent: { id: options.sessionId }, dispose: async () => {} }
     }),
-    get: (sessionId: string) => (sessions.has(sessionId) ? {} : undefined),
+    get: (sessionId: string) => (sessions.has(sessionId) ? { id: sessionId } : undefined),
   }
 }
 

@@ -64,7 +64,7 @@ describe('locus child pre-publication staging', () => {
     })
     const applied = new Map<string, 'read' | 'write'>()
     const install = vi.fn()
-    const agent = { sessionId: reservation.childSessionId, scope: { get: vi.fn() } }
+    const agent = { id: reservation.childSessionId, scope: { get: vi.fn() } }
 
     const result = composeLocusChild(agent, {
       lookup,

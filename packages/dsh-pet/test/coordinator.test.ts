@@ -70,8 +70,8 @@ async function fixture(options: { dispatchFails?: boolean } = {}): Promise<Fixtu
     }),
   }
   const agents: AgentRegistryLike = {
-    create: vi.fn(async (opts: { sessionId: string }) => ({ session: { id: opts.sessionId } })),
-    get: () => ({}),
+    create: vi.fn(async (opts: { sessionId: string }) => ({ agent: { id: opts.sessionId }, dispose: async () => {} })),
+    get: () => ({ id: 'coordinator-test' }),
   } as AgentRegistryLike
 
   const coordinator = new PetCoordinator({
@@ -505,8 +505,8 @@ describe('explicit injection boundary at dispatch', () => {
       repository: f.harness.repository,
       capabilities: f.capabilities,
       agents: {
-        create: vi.fn(async (o: { sessionId: string }) => ({ session: { id: o.sessionId } })),
-        get: () => ({}),
+        create: vi.fn(async (o: { sessionId: string }) => ({ agent: { id: o.sessionId }, dispose: async () => {} })),
+        get: () => ({ id: 'coordinator-test' }),
       } as never,
       dispatcher: { dispatch: vi.fn(async () => {}) },
       resolver,
@@ -537,8 +537,8 @@ describe('explicit injection boundary at dispatch', () => {
       repository: f.harness.repository,
       capabilities: f.capabilities,
       agents: {
-        create: vi.fn(async (o: { sessionId: string }) => ({ session: { id: o.sessionId } })),
-        get: () => ({}),
+        create: vi.fn(async (o: { sessionId: string }) => ({ agent: { id: o.sessionId }, dispose: async () => {} })),
+        get: () => ({ id: 'coordinator-test' }),
       } as never,
       dispatcher: { dispatch: vi.fn(async () => {}) },
       resolver,
@@ -568,8 +568,8 @@ describe('explicit injection boundary at dispatch', () => {
       repository: f.harness.repository,
       capabilities: f.capabilities,
       agents: {
-        create: vi.fn(async (o: { sessionId: string }) => ({ session: { id: o.sessionId } })),
-        get: () => ({}),
+        create: vi.fn(async (o: { sessionId: string }) => ({ agent: { id: o.sessionId }, dispose: async () => {} })),
+        get: () => ({ id: 'coordinator-test' }),
       } as never,
       dispatcher: { dispatch: vi.fn(async () => {}) },
       resolver,

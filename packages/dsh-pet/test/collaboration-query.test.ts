@@ -26,8 +26,8 @@ function fixture() {
 describe('caller-bound current public query', () => {
   it('returns the same current revision for root and child, without local fallback or audit', async () => {
     const f = fixture()
-    const main = await queryCollaborationContext({ agent: { session: { id: 'main' } } }, f)
-    const child = await queryCollaborationContext({ agent: { session: { id: 'child' } } }, f)
+    const main = await queryCollaborationContext({ agent: { id: 'main' } }, f)
+    const child = await queryCollaborationContext({ agent: { id: 'child' } }, f)
     expect(child).toEqual(main)
     expect(main).toMatchObject({ parentSessionId: 'main', revision: 0, status: 'unknown' })
     expect(main).not.toHaveProperty('history')
@@ -40,29 +40,29 @@ describe('caller-bound current public query', () => {
       if (!updated) { f.update(); updated = true }
       return { id, ...(id === 'child' ? { parentSessionId: 'main' } : {}) }
     })
-    expect(await queryCollaborationContext({ agent: { session: { id: 'child' } } }, f)).toMatchObject({ revision: 1, workDescription: 'latest' })
+    expect(await queryCollaborationContext({ agent: { id: 'child' } }, f)).toMatchObject({ revision: 1, workDescription: 'latest' })
   })
 
   it('retired child cannot read retained record; root continues with no children', async () => {
     const f = fixture()
     f.retire()
-    await expect(queryCollaborationContext({ agent: { session: { id: 'child' } } }, f)).rejects.toMatchObject({ code: 'COLLABORATION_UNAVAILABLE' })
-    expect(await queryCollaborationContext({ agent: { session: { id: 'main' } } }, f)).toMatchObject({ revision: 0 })
+    await expect(queryCollaborationContext({ agent: { id: 'child' } }, f)).rejects.toMatchObject({ code: 'COLLABORATION_UNAVAILABLE' })
+    expect(await queryCollaborationContext({ agent: { id: 'main' } }, f)).toMatchObject({ revision: 0 })
   })
 
-  it.each([undefined, {}, { agent: { session: { id: 123 } } }, { agent: { session: { id: 'foreign' } } }])('rejects unproven execution %j', async execution => {
+  it.each([undefined, {}, { agent: { id: 123 } }, { agent: { id: 'foreign' } }])('rejects unproven execution %j', async execution => {
     await expect(queryCollaborationContext(execution, fixture())).rejects.toMatchObject({ code: 'COLLABORATION_UNAVAILABLE' })
   })
 
   it('does not synthesize or initialize a missing shared record', async () => {
     const f = fixture()
     f.clear()
-    await expect(queryCollaborationContext({ agent: { session: { id: 'child' } } }, f)).rejects.toMatchObject({ code: 'COLLABORATION_UNAVAILABLE' })
+    await expect(queryCollaborationContext({ agent: { id: 'child' } }, f)).rejects.toMatchObject({ code: 'COLLABORATION_UNAVAILABLE' })
   })
 
   it('refuses corrupt wrong-parent record rather than exposing it', async () => {
     const f = fixture()
     f.store.get.mockImplementation(() => createEmptyCollaborationContext({ parentSessionId: 'foreign' }))
-    await expect(queryCollaborationContext({ agent: { session: { id: 'child' } } }, f)).rejects.toMatchObject({ code: 'COLLABORATION_UNAVAILABLE' })
+    await expect(queryCollaborationContext({ agent: { id: 'child' } }, f)).rejects.toMatchObject({ code: 'COLLABORATION_UNAVAILABLE' })
   })
 })

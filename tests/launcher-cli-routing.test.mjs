@@ -68,7 +68,10 @@ async function withStubBin(sb) {
 }
 
 async function installOfficialCacheStub(sb) {
-  const spec = '@deepseek-ai/dsh@0.1.2-rc.1'
+  const manifestSource = await readFile(path.join(ROOT, 'dsh.yaml'), 'utf8')
+  const version = manifestSource.match(/^dshVersion:\s*([^\s#]+)/m)?.[1]
+  assert.ok(version, 'manifest dshVersion is required for the cache fixture')
+  const spec = `@deepseek-ai/dsh@${version}`
   const cacheRoot = path.join(sb.dir, 'npm-cache')
   const bin = path.join(cacheRoot, '_npx', computeNpxCacheKey([spec]), 'node_modules/@deepseek-ai/dsh/lib/bin.js')
   await mkdir(path.dirname(bin), { recursive: true })

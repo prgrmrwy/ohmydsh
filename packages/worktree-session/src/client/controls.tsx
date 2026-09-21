@@ -131,7 +131,7 @@ export function WorktreeControls({ pluginContext: ctx, sessionId, useSession, op
           ...(status.dependencyMode === undefined ? {} : { dependencyMode: status.dependencyMode }),
           ...(status.packageManager === undefined ? {} : { packageManager: status.packageManager }),
           ...(status.lifecycle === undefined ? {} : { lifecycle: status.lifecycle }),
-          phase: status.lifecycle === 'uncertain' ? 'uncertain' : status.lifecycle === 'cleaned' ? 'cleaned' : 'done',
+          phase: status.lifecycle === 'cleaned' ? 'cleaned' : status.lifecycle === 'released' ? 'idle' : 'done',
         })
         restoreSubmit(sessionId as string)
         return
@@ -163,7 +163,7 @@ export function WorktreeControls({ pluginContext: ctx, sessionId, useSession, op
   const filtered = useMemo(() => (stage?.refs ?? []).filter(ref => ref.name.toLowerCase().includes(query.toLowerCase())), [query, revision, stage?.refs])
   if (cwd === undefined || stage === undefined) return null
   if (stage.lifecycle !== undefined) {
-    const lifecycle = stage.lifecycle === 'admitted' || stage.lifecycle === 'bound' || stage.lifecycle === 'submit-claimed' ? 'active' : stage.lifecycle
+    const lifecycle = stage.lifecycle === 'bound' ? 'active' : stage.lifecycle
     const canOpen = lifecycle !== 'cleaned' && stage.worktreePath !== undefined
     const branchStyle: React.CSSProperties = { ...controlStyle, ...ellipsisStyle, lineHeight: '24px', padding: '0 8px', ...(canOpen ? { cursor: 'pointer', borderColor: 'var(--dsw-alias-line-border-strong, #a0a0a0)' } : {}) }
     const openBranch = (): void => { if (canOpen) openWorktree(stage.worktreePath as string) }
@@ -177,7 +177,7 @@ export function WorktreeControls({ pluginContext: ctx, sessionId, useSession, op
         {...(canOpen ? { role: 'button', tabIndex: 0, onClick: openBranch, onKeyDown: onBranchKeyDown, 'aria-label': `Open worktree in editor: ${stage.taskBranch ?? 'worktree'}` } : {})}
       >⑂ {stage.taskBranch ?? 'worktree'}</span>
       <span style={{ opacity: .8 }}>{stage.dependencyMode ?? 'lean'} · {stage.packageManager ?? 'npm'}</span>
-      <span style={{ color: lifecycle === 'uncertain' ? '#d9822b' : lifecycle === 'cleaned' ? '#888' : '#2b8a3e' }}>{lifecycle}</span>
+      <span style={{ color: lifecycle === 'cleaned' || lifecycle === 'released' ? '#888' : '#2b8a3e' }}>{lifecycle}</span>
     </span>
   }
   if (!session.blank || stage.refs.length === 0) return null
@@ -220,7 +220,7 @@ export function WorktreeControls({ pluginContext: ctx, sessionId, useSession, op
     </span>
     <button type="button" aria-pressed={stage.enabled} style={{ ...controlStyle, padding: '0 8px', background: stage.enabled ? '#3370ff22' : 'transparent' }} onClick={() => {
       const enabled = !stage.enabled
-      setStage(sessionId as string, cwd, { enabled, phase: 'idle', error: undefined, ...(enabled ? {} : { submitted: false }) })
+      setStage(sessionId as string, cwd, { enabled, phase: 'idle', error: undefined })
       if (!enabled) restoreSubmit(sessionId as string)
     }}>{stage.enabled ? '☑' : '☐'} Worktree</button>
     {stage.phase !== 'idle' && stage.phase !== 'done' && <span title={stage.error ?? stage.phase} style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: stage.error ? '#d44' : 'inherit', opacity: .8 }}>{stage.error ?? stage.phase}</span>}

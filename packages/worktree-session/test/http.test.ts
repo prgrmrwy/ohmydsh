@@ -78,6 +78,12 @@ describe('Host routes', () => {
     expect(oversizedResponse.status).toBe(413)
   })
 
+  it('rejects retired second-protocol binding actions', async () => {
+    const response = await call(ROUTES.bindSource, { operationId: 'operation-12345678', repoPath: '/tmp', sourceSessionId: 'session', action: 'claim-submit' })
+    expect(response.status).toBe(400)
+    expect(JSON.parse(response.body).error.code).toBe('INVALID_REQUEST')
+  })
+
   it('maps an unsupported project to 400 with the explicit diagnostic', async () => {
     const root = await mkdtemp(join(tmpdir(), 'ws-http-'))
     const exec = promisify(execFile)

@@ -11,9 +11,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import { probeSubagentSeam, resolveLiveParent } from '../src/host/qa/subagents.js'
 import type { HostContextLike, LiveAgentLike, SubagentSeam } from '../src/host/qa/subagents.js'
+import { SessionId } from '@deepseek-ai/dsh-session'
 
 /** The symbol the host keys its queue entry point by. */
-const QUEUE = Symbol.for('dsh.subagent.queuePrompt')
+const QUEUE = Symbol.for('dsh.subagent.deliverPrompt')
 
 /** A context whose services each test can remove. */
 function hostContext(
@@ -24,7 +25,7 @@ function hostContext(
   } = {},
 ): HostContextLike {
   const services: Record<string, unknown> = {
-    agents: 'agents' in options ? options.agents : { get: () => undefined, resume: async () => ({}) },
+    agents: 'agents' in options ? options.agents : { get: () => undefined, resume: async () => ({ agent: { id: SessionId('qa-seam-resume') }, dispose: async () => {} }) },
     subagents:
       'subagents' in options
         ? options.subagents
@@ -80,7 +81,7 @@ describe('probing the subagent seam', () => {
     )
 
     expect(probe.available).toBe(false)
-    if (!probe.available) expect(probe.diagnostic).toContain('queuePrompt')
+    if (!probe.available) expect(probe.diagnostic).toContain('deliverPrompt')
   })
 
   it('reports a host with no event subscription', () => {
@@ -109,7 +110,7 @@ describe('probing the subagent seam', () => {
     expect(probe.available).toBe(true)
     if (!probe.available) return
 
-    const parent = { session: { id: 'p' } }
+    const parent = { id: 'p' }
     const id = await probe.seam.queuePrompt(parent, 'child', '问题', AbortSignal.timeout(1000))
 
     expect(id).toBe('message-7')
@@ -162,13 +163,13 @@ describe('resolving a live parent', () => {
   it('uses the resident agent without resuming', async () => {
     const resume = vi.fn()
     const seam = seamWith({
-      get: (id: string) => ({ session: { id } }) as LiveAgentLike,
+      get: (id: string) => ({ id }) as LiveAgentLike,
       resume: resume as never,
     })
 
     const parent = await resolveLiveParent(seam, 'session-source')
 
-    expect(parent?.session.id).toBe('session-source')
+    expect(parent?.id).toBe('session-source')
     expect(resume).not.toHaveBeenCalled()
   })
 
@@ -176,13 +177,14 @@ describe('resolving a live parent', () => {
     const seam = seamWith({
       get: () => undefined,
       resume: async ({ resumeSessionId }) => ({
-        agent: { session: { id: resumeSessionId } } as LiveAgentLike,
+        agent: { id: resumeSessionId } as LiveAgentLike,
+        dispose: async () => {},
       }),
     })
 
     const parent = await resolveLiveParent(seam, 'session-source')
 
-    expect(parent?.session.id).toBe('session-source')
+    expect(parent?.id).toBe('session-source')
   })
 
   it('reports an unresumable session as absent rather than throwing', async () => {
