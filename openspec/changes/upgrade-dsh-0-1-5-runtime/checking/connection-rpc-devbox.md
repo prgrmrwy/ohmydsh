@@ -161,8 +161,15 @@ ctx.inject(['webServer'], (webCtx) => {
 但 `register()`(供所有插件使用的 channel 注册入口)被漏掉了。
 cordis 版本两版相同(4.0.1/4.0.2),所以不是 cordis 侧变化 —— 是 DSH 自己的适配不完整。
 
-**因此这不是本仓库的缺陷,而是影响所有插件作者的运行体缺陷**:
-远端 `dsh-plugin-subscriptions@0.9.2`(专为 0.1.5 构建)的 `/subscriptions-auth` 同样 405。
+**因此这不是本仓库的缺陷,而是影响所有使用 `connection.rpc.handle()` 注册 channel 的插件的运行体缺陷。**
+
+⚠ **更正(勿再误传)**:早前这里写过"远端 `dsh-plugin-subscriptions` 的
+`/subscriptions-auth` 同样 405,可证影响面是全体" —— **这是错的**。
+subscriptions 用的是**另一套机制**:`CHANNEL = '/api'` + `registerInterceptor()`
+(走 `/api` 共享 fetch handler),而 `registerInterceptor` **不碰 `owner.webServer`**,
+所以它从未受本缺陷影响。当时看到的 405 只是我把路径探错了(真实路径是以**点号**分隔的
+`/api/subscriptions-auth.status`,实测 **200**)。受影响的精确范围是
+**调用 `connection.rpc.handle()` 的插件**,本仓库四个包全部命中。
 
 ### 已实测证伪的中间假设(不要重复)
 
@@ -175,21 +182,58 @@ cordis 版本两版相同(4.0.1/4.0.2),所以不是 cordis 侧变化 —— 是 
 | host 半区加载抛错 | 否 —— 当前 boot 段无 loader 错误 |
 | 插件需注入 `webServer` | **否** —— 四个包改成 `inject(['connection','webServer'])` 并真实部署后**仍全 405**;因为出错的是**服务自己的**上下文,调用方注入无法影响 |
 
-### 修复方案(二选一,尚未实施)
+### 修复:已实施并验证(纯 composition 覆盖)
 
-1. **打运行体补丁(推荐)。** 本仓库已有成熟机制:Pet compat 层对 DSH 源码打补丁
-   (`.upstream/packages/client/connection/src/rpc-host.ts`),已有
-   `dsh-agent` / `dsh-agent-loop` 按路径覆盖的先例,补丁带 sha256 闸门。
-   改动就是把 `register()` 的注册也包进 `ctx.inject(['webServer'], …)`,
-   与 DSH 自己 `/api` 的写法一致。
-   代价:补丁进入"升级必须重新推导"的维护面;上游修复后即可删除。
-2. **各包自行实现 channel 注册(绕过)。** 用实测可用的
-   `child.webServer.register({kind:'prefix', path: channel, handler})` 自己挂路由,
-   配合 `connection.requestRejection(req)` 施加同一套 fence,自行实现
-   `{type:'client-request'|'server-response', rpcId}` 信封。
-   代价:在 4 个包(或一个共享包)里分叉一份线上协议,长期偏离官方 API。
+社区先例:上游已有**逐字对应**的讨论
+[Discussion #5926](https://github.com/deepseek-ai/deepseek-harness/discussions/5926)
+("[Bug] connection fails to start when a third-party plugin registers an HTTP channel:
+cannot get property 'webServer' without inject"),社区同款做法见
+[ysr666/dsh-vision-router#481](https://github.com/ysr666/dsh-vision-router/pull/481)
+("fix(compat): retain webServer in connection provider")。
 
-无论选哪个,**都应同时上报上游** —— 该缺陷影响所有注册 Connection RPC channel 的插件。
+该 PR 的注释把机制说得与本仓库诊断完全一致:
+
+> Connection provider row 只声明 `webRuntime`,但 `HostConnectionService.rpc/fetch` 的
+> accessor 会把调用 owner **追踪回这个 provider fiber**;`rpc.handle()` 最终又通过
+> `owner.webServer.register()` 挂载路由。**因此仅在调用 child fiber 注入 webServer
+> 仍不足以覆盖 Cordis Service shadow 语义。**
+
+**结论修法:只覆盖 loader 行**(不改源码、不复制协议)——
+`patches/connection-webserver.yml`,在 `dsh.yaml` 登记为 `type: patch` 条目:
+
+```yaml
+- id: connection
+  name: '@deepseek-ai/dsh-client-connection'
+  inject: [webRuntime, webServer]
+  config:
+    trustedHosts: !!js ctx.webRuntime.trustedHosts   # 整行覆盖,必须原样保留
+```
+
+⚠ 整行覆盖时 `config` **不做深合并**,故必须原样保留 `trustedHosts`,否则会丢掉
+Host/Origin fence。本 shim 不复制 RPC 协议与鉴权,也不改变非 Web surface。
+
+**退休条件**:官方 `connection` 行的 `inject` 自己带上 `webServer` 时,
+删除该 fragment 与 `patches/connection-webserver.yml`。
+
+#### 验证结果(devbox,`dsh build` + `dsh restart` 后)
+
+| 探针 | 修复前 | 修复后 |
+|---|---|---|
+| `/dsh-home-network-model-guard/check` | 405 | **200**(合法 RPC 信封) |
+| `/dsh-home-network-model-guard/status` | 405 | **200** |
+| `/dsh-system-clock/now` | 405 | **200** |
+| `/dsh-session-links/links` | 405 | **200** |
+| `/dsh-memex/stores` | 405 | **200** |
+| `/api`(共享 handler) | 404 not found | 404 not found(未受影响) |
+| 不存在的路径(对照) | 405 | 405(语义未变) |
+| `Host: evil.example.com` + 有效会话 | 401 | **403** → fence 仍在且现在能真正判定 |
+| console `verdict RPC failed` 告警 | 每次加载都有 | **(none)** |
+| `系统时钟` 界面 | 日期条 `- -- -` + 不可用告警 | **`00:12:21` / `2026-09-22` / `Asia/Shanghai (UTC+08:00)` / `DSH 主机: n37-044-026`** |
+| Pet(`/dsh-pet/api/status`) | 正常 | 正常(未受影响) |
+
+四个自研通道全部恢复,且时钟界面从"不可用"变回**实时主机时间 + 时区 + 主机名**。
+
+**仍应上报上游** —— 这是运行体缺陷,本仓库的 composition 覆盖只是绕开它。
 
 ## 影响评估(已按代码更正,不要夸大)
 
@@ -237,18 +281,31 @@ session-links 的整份日志基线(窗口截断场景下的较早链接),唯一
 
 ## 仍然成立的部分
 
-- Connection RPC 通道在 devbox 上确实**整体未注册**(四个自研通道 + 远端
-  `/subscriptions-auth` 全部 405,而升级前 devbox 与本机现在均为 200)。
-- 原因已定位到**插件批次**,不是运行体(三组对照见上)。
-- 这仍然是**真实回归**,只是**影响面小且各面都有降级**。
+- 调用 `connection.rpc.handle()` 的通道在 devbox 上确实**整体未注册**
+  (四个自研通道全 405,升级前的 devbox 与本机均为 200)。
+  ⚠ 早期此处还列了"远端 `/subscriptions-auth`",**该说法已作废**:
+  subscriptions 走 `/api` + interceptor,不受影响(真实路径
+  `/api/subscriptions-auth.status` 实测 200)。
+- 原因已定位到**运行体**(0.1.5 的 `register()` 缺陷),**不是插件批次**。
+- 这是**真实回归**,且已修复并在 devbox 验证(四个通道 200 + 时钟恢复实时主机时间)。
 
-### 我在本轮犯的同类错误(记录以免重复)
+### 我在本轮犯的错误(记录以免重复)
 
-两次都是**过度解读观测**:
+**三次错误结论,两次是过度解读观测,一次是变量没核实:**
 
-1. 把 subscriptions 设置页渲染完整当成"subscriptions 正常"—— 其实卡片来自客户端常量;
+1. 把 subscriptions 设置页渲染完整当成"subscriptions 正常"的证据 —— 结论**碰巧对**
+   (它确实正常),但依据是错的(卡片结构来自客户端常量,不是 RPC 数据);
 2. 把新会话上"当前会话暂无文档/资料"当成 RPC 失效的证据 —— 那只是**空会话的正常空态**,
-   我因为同一时刻看到了 console 告警就把两者因果连起来。
+   我因为同一时刻看到了 console 告警就把两者因果连起来;
+3. **最严重的一次:没核实变量就下结论。** 我把本机 Host 当成"0.1.5-rc.2 + 旧插件集",
+   据此宣布"运行体不是原因、原因在插件批次"。实际本机 `dsh-startup.log` 与运行体
+   `package.json` 都写着 **0.1.2-rc.1**(`dsh.yaml` 是 0.1.5-rc.2 但本机一直没重建)——
+   于是那个"中间行"根本不存在,真相反转。**用户凭直觉质疑"升级前没问题、
+   也没有对应 breakchange",是对的。**
 
-教训:**面板显示"空"不等于数据源坏了**;要判定失效,必须用能区分"空"与"取不到"的探针
-(本次的 HTTP 探针就是),而不是看 UI 文案。
+教训:
+
+- **面板显示"空"不等于数据源坏了**;判定失效必须用能区分"空"与"取不到"的探针
+  (本次的 HTTP 探针就是),而不是看 UI 文案;
+- **"某处显示正常/异常"永远不能替代"某个具体探针返回什么"**;
+- **下结论前先核实对照组本身的版本/身份**,而不是假定它是什么。
