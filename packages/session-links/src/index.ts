@@ -22,8 +22,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 // Type-only: brings the host Context.connection merge (HostConnectionHandle).
 import type {} from '@deepseek-ai/dsh-client-connection'
-// Type-only: brings the host Context.webServer merge (channel routes mount there).
-import type {} from '@deepseek-ai/dsh-host-webserver'
 // Type-only: brings the host Context.sessionPersistence merge.
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import { SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
@@ -44,12 +42,7 @@ type BaselineCacheEntry = { value: unknown; at: number }
 export function apply(ctx: Context): void {
   const cache = new Map<string, BaselineCacheEntry>()
 
-  // ⚠ 0.1.5 起必须同时注入 `webServer`:channel 路由挂在**调用方上下文**的 web
-  // server 上(`connection.rpc.handle` 内部为
-  // `owner.effect(() => owner.webServer.register(route))`)。只注入 `connection`
-  // 时 `owner.webServer` 为 undefined,effect 抛错被吞,通道静默不注册,
-  // 客户端只看到与"路径不存在"无法区分的通用 405。
-  ctx.inject(['connection', 'webServer'], (child) => {
+  ctx.inject(['connection'], (child) => {
     const connection = child.get('connection')
     if (connection === undefined) return
 

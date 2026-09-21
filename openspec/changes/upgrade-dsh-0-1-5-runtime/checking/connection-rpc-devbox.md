@@ -36,31 +36,43 @@ POST /dsh-home-network-model-guard/check -> 405
 POST /dsh-pet/api/status               -> 200   (Pet 自己注册的 HTTP 路由,正常)
 ```
 
-## 关键对照:三组配置,同一个探针
+## 关键对照:四组配置,同一个探针
 
 被质疑"升级前没问题、升级后也没有对应 breakchange,凭什么算问题"之后,
 用**同一个探针**(POST + `content-type: application/json` + 同一信封体)
-在三组配置上各跑一遍,而不是靠推理:
+逐组实测,而不是靠推理:
 
 | 配置 | `guard` `/check` | `clock` `/now` | `session-links` `/links` | `memex` `/stores` | 不存在的路径 |
 |---|---|---|---|---|---|
-| **0.1.2-rc.1 + 升级前 home**(devbox 备份 + npx 装回的旧运行体) | **200** | **200** | **200** | 405 | 405 |
-| **0.1.5-rc.2 + 旧插件集**(本机现在) | **200** | **200** | **200** | **200** | 405 |
-| **0.1.5-rc.2 + 新插件集**(devbox 现在) | **405** | **405** | **405** | **405** | 405 |
+| 0.1.2-rc.1 + 升级前 home(devbox 备份 + npx 装回的旧运行体) | **200** | **200** | **200** | 405 | 405 |
+| 0.1.2-rc.1 + 旧插件集(**本机**当前进程,pid 84619) | **200** | **200** | **200** | **200** | 405 |
+| **0.1.5-rc.2 + 同一个升级前 home**(实验 A) | **405** | **405** | **405** | **405** | 405 |
+| 0.1.5-rc.2 + 新插件集(devbox 现在) | **405** | **405** | **405** | **405** | 405 |
 
 200 的响应体是合法的 RPC 信封:`{"type":"server-response","rpcId":"probe","result":{"ok":false,…}}`。
 
-由此得到两条硬结论:
+⚠ **先更正一处早前的错误结论。** 我曾把第 2 行写成"0.1.5-rc.2 + 旧插件集",据此得出
+"运行体升级不是原因、原因在插件批次"。**那是错的**:本机那个 Host 是 2026-09-20
+15:45 启动的,运行体实际是 **0.1.2-rc.1**:
 
-1. **运行体升级本身不是原因。** 第 2 行证明 0.1.5-rc.2 配旧插件集时四个通道全部正常。
-   这也解释了为什么"升级后看不到对应 breakchange"——**运行体侧确实没有这个 breakchange**。
-2. **原因在插件批次里。** 第 2 行与第 3 行运行体同版本、插件构建 sha256 也相同,
-   唯一差别是插件集合;集合一换,四个通道同时失效。
+```
+$ ps -o command= -p 84619 → …/.launcher/node_modules/@deepseek-ai/dsh/lib/bin.js
+  runtime version: 0.1.2-rc.1
+$ tail -1 ~/.dsh/dsh-startup.log → dshVersion=0.1.2-rc.1
+```
 
-补充:`memex` 在 0.1.2-rc.1 上本来就是 405(旧运行体下未注册),升到 0.1.5 旧插件集
-后才变 200 —— 属于另一个独立的既存现象,不要和本缺陷混为一谈。
+本机 `dsh.yaml` 虽写 `0.1.5-rc.2`,但本机一直没重建。所以第 1、2 行本质是同一组配置。
 
-另附硬件事实:`guard`/`clock` 两个半区的构建在本机与 devbox **逐字节相同**
+由此得到的硬结论(与早前相反):
+
+1. **运行体升级就是原因。** 第 3 行用**同一个升级前 home**、只把运行体从 0.1.2-rc.1
+   换成 0.1.5-rc.2,四个通道就从 200 变成 405 —— 唯一的变量是运行体。
+2. **与插件批次无关。** 第 1/3 行插件完全一致,结论照样翻转。
+
+补充:`memex` 在 0.1.2-rc.1 的升级前 home 上本来就是 405(该 home 尚未注册),
+在本机那份 home 上是 200 —— 属另一独立现象,不与本缺陷混谈。
+
+另附:`guard`/`clock` 两个半区的构建在本机与 devbox **逐字节相同**
 (`client.js` sha256 `59c688b1adc1ea1f…`、`index.js` `137084fe79c19998…`),
 所以也不是插件代码差异。
 
@@ -103,25 +115,81 @@ POST /dsh-pet/api/status               -> 200   (Pet 自己注册的 HTTP 路由
 `dsh-home-network-model-guard` 与 `dsh-system-clock` 的 loader 条目都是无
 `inject`、无 `config` 的裸条目。两边 loader 总数 20/21 的差别只来自 Trae。
 
-## 未定根因与后续方向
+## 根因已确定:这是 DSH 0.1.5 自身的缺陷
 
-原因已**定位到插件批次**,但批次内的具体元凶**尚未确定**,不做推测性结论。
+`connection.rpc.handle()` 在本仓库四个包上**直接抛错**。devbox 实机诊断输出:
 
-下一步按组合二分:在 devbox 上逐个禁用本批次新升级/新启用的插件,每禁一个就用
-同一个探针打一次 `POST /dsh-home-network-model-guard/check`,直到恢复 200。
-优先顺序(按“最可能影响 Host 路由/服务装配”排):
+```
+[guard-diag] inject fired connection=true webServer=true                       ← 注入没问题
+[guard-diag] manual webServer.register returned function                       ← 我们自己注册路由没问题
+[guard-diag] rpc.handle probe THREW: cannot get property "webServer" without inject   ← 元凶
+```
 
-1. `dsh-opencode-session-header`(在 Host 进程全局 patch `fetch`)
-2. `@byted/dsh-traex-bridge@0.1.15`(devbox 独有启用,且带 bundle patch:
-   插入 `llm-traex-bridge`、覆盖 `agent-default-model`、新增 `web.searchProvider`)
-3. `dsh-cockpit-bridge@0.4.0`(新升级,自带上报路由)
-4. `dsh-better-sidebar@0.19.1`
+`rpc-host.ts` 里 `register()` 的实现(0.1.2 与 0.1.5 **逐字节相同**):
 
-一个需要重点验证的假说:`connection` 服务的 loader 条目注入 `webRuntime`
-且 channel 是**惰性注册**的,因此只要批次里有一个条目在装配阶段影响了
-`connection`/`webRuntime` 的激活顺序或失败传播,后面所有插件的
-`ctx.inject(['connection'], …)` 回调就**一次都不会执行,且不报错**——
-这与"四个通道同时失效、日志无任何错误"的观测完全吻合。
+```js
+register(owner, channel, handler) {
+  assertChannel(channel)
+  const fetchHandler = rpcFetchHandler(channel, handler)
+  const route = { kind: 'prefix', path: channel, handler: async (req, res) => { … } }
+  return owner.effect(() => owner.webServer.register(route), `client-connection: ${channel} rpc channel`)
+}
+```
+
+而 `get rpc() { const owner = this.ctx; … }` —— **`owner` 是 connection 服务自己的上下文**
+(`new HostConnectionService(ctx, …)` 里那个 ctx),**不是调用方**。该上下文从未注入
+`webServer`,cordis 因此在 effect 回调里抛
+`cannot get property "webServer" without inject`;错误被吞,路由从未挂上,
+客户端拿到与"路径不存在"无法区分的通用 **405**。
+
+### 为什么 0.1.5 才坏:DSH 修了自己的路由,漏了这一条
+
+同一个包里,`/api` 路由的注册方式在两版之间**变了**:
+
+```js
+// 0.1.2 —— 直接在插件上下文注册
+ctx.effect(() => ctx.webServer.register(route), …)
+
+// 0.1.5 —— 先注入 webServer,再在其子上下文注册
+ctx.inject(['webServer'], (webCtx) => {
+  …
+  webCtx.effect(() => webCtx.webServer.register(route), 'client-connection: /api route')
+})
+```
+
+即 0.1.5 已经发现"访问 `ctx.webServer` 必须先注入",并**按此修好了自己的 `/api` 路由**,
+但 `register()`(供所有插件使用的 channel 注册入口)被漏掉了。
+cordis 版本两版相同(4.0.1/4.0.2),所以不是 cordis 侧变化 —— 是 DSH 自己的适配不完整。
+
+**因此这不是本仓库的缺陷,而是影响所有插件作者的运行体缺陷**:
+远端 `dsh-plugin-subscriptions@0.9.2`(专为 0.1.5 构建)的 `/subscriptions-auth` 同样 405。
+
+### 已实测证伪的中间假设(不要重复)
+
+| 假设 | 结论 |
+|---|---|
+| 隧道 / Origin 伪造导致 | 否 —— devbox 本机原生直连(现代 Chromium,真实 origin)同样复现 |
+| Host fence 拒绝 | 否 —— fence 放行 loopback,且拒绝应为 403 |
+| 插件构建过期 | 否 —— 与本机 sha256 逐字节相同 |
+| 插件批次引入 | 否 —— 0.1.5 + **升级前旧插件 home** 同样全 405(实验 A) |
+| host 半区加载抛错 | 否 —— 当前 boot 段无 loader 错误 |
+| 插件需注入 `webServer` | **否** —— 四个包改成 `inject(['connection','webServer'])` 并真实部署后**仍全 405**;因为出错的是**服务自己的**上下文,调用方注入无法影响 |
+
+### 修复方案(二选一,尚未实施)
+
+1. **打运行体补丁(推荐)。** 本仓库已有成熟机制:Pet compat 层对 DSH 源码打补丁
+   (`.upstream/packages/client/connection/src/rpc-host.ts`),已有
+   `dsh-agent` / `dsh-agent-loop` 按路径覆盖的先例,补丁带 sha256 闸门。
+   改动就是把 `register()` 的注册也包进 `ctx.inject(['webServer'], …)`,
+   与 DSH 自己 `/api` 的写法一致。
+   代价:补丁进入"升级必须重新推导"的维护面;上游修复后即可删除。
+2. **各包自行实现 channel 注册(绕过)。** 用实测可用的
+   `child.webServer.register({kind:'prefix', path: channel, handler})` 自己挂路由,
+   配合 `connection.requestRejection(req)` 施加同一套 fence,自行实现
+   `{type:'client-request'|'server-response', rpcId}` 信封。
+   代价:在 4 个包(或一个共享包)里分叉一份线上协议,长期偏离官方 API。
+
+无论选哪个,**都应同时上报上游** —— 该缺陷影响所有注册 Connection RPC channel 的插件。
 
 ## 影响评估(已按代码更正,不要夸大)
 

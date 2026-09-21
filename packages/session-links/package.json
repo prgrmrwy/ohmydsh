@@ -52,7 +52,6 @@
     "dsh-better-sidebar": ">=0.16.0",
     "react": "^18.2.0",
     "@deepseek-ai/dsh-client-connection": "^0.1.5-rc.2",
-    "@deepseek-ai/dsh-host-webserver": "^0.1.5-rc.2",
     "@deepseek-ai/dsh-api-session-controller": "^0.1.5-rc.2"
   },
   "peerDependenciesMeta": {
@@ -72,7 +71,6 @@
     "typescript": "^5.9.3",
     "vitest": "^3.2.4",
     "@deepseek-ai/dsh-client-connection": "^0.1.5-rc.2",
-    "@deepseek-ai/dsh-host-webserver": "^0.1.5-rc.2",
     "@deepseek-ai/dsh-api-session-controller": "^0.1.5-rc.2",
     "@deepseek-ai/dsh-client-ui-chat": "^0.1.5-rc.2",
     "@deepseek-ai/dsh-client-ui-conversation": "^0.1.5-rc.2"

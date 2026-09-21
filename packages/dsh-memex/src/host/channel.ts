@@ -15,7 +15,6 @@ import { existsSync, readdirSync, type Dirent } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-host-webserver'
 import {
   MEMEX_CHANNEL,
   MEMEX_REMOTE_ENDPOINT,
@@ -275,7 +274,7 @@ export function registerMemexChannel(ctx: Context, options: MemexChannelOptions)
     }
   }
 
-  ctx.inject(['connection', 'webServer'], child => {
+  ctx.inject(['connection'], child => {
     const connection = child.get('connection')
     if (connection === undefined) return
     child.effect(() => connection.rpc.handle(
