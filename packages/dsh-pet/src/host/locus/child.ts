@@ -1497,10 +1497,44 @@ export function probeLocusChildPorts(
       ) as Promise<{ readonly childId: BrandedSessionId; readonly messageId: import('@deepseek-ai/dsh-llm').MessageId }>,
     ...(typeof subagentRecord.createIdleContinuable === 'function'
       ? {
-        createIdleContinuable: (spec: unknown) => Promise.resolve(
-          (subagentRecord.createIdleContinuable as (input: unknown) => unknown)
-            .call(subagentService, spec),
-        ) as Promise<{ readonly childId: string }>,
+        createIdleContinuable: (flat: unknown) => {
+          // Pet's port is FLAT (`parent`, `toolFilter`); the runtime's
+          // `ContinuableStartSpec` nests the delegation request. Passing the
+          // flat object straight through left `request` undefined, so the
+          // runtime died reading `request.parent` — the child was never
+          // created and the group's first @ was refused as
+          // `locus-unavailable`. Translate here, at the one boundary that
+          // knows both shapes.
+          const spec = flat as {
+            readonly childId: string
+            readonly provider: string
+            readonly label: string
+            readonly parent: unknown
+            readonly settlementNotice?: unknown
+            readonly contextMode?: unknown
+            readonly toolFilter?: unknown
+            readonly signal: AbortSignal
+          }
+          const request: Record<string, unknown> = { parent: spec.parent }
+          if (spec.toolFilter !== undefined) request['toolFilter'] = spec.toolFilter
+          // An idle child submits NO initial prompt — its first real Delivery
+          // is its first prompt. The runtime materializes the child without
+          // ever reading `request.prompt`, so empty content is correct and
+          // leaves the child's transcript genuinely empty of model work.
+          request['prompt'] = []
+          return Promise.resolve(
+            (subagentRecord.createIdleContinuable as (input: unknown) => unknown)
+              .call(subagentService, {
+              childId: spec.childId,
+              provider: spec.provider,
+              label: spec.label,
+              request,
+              ...(spec.settlementNotice === undefined ? {} : { settlementNotice: spec.settlementNotice }),
+              ...(spec.contextMode === undefined ? {} : { contextMode: spec.contextMode }),
+              signal: spec.signal,
+            }),
+          ) as Promise<{ readonly childId: string }>
+        },
       }
       : {}),
     ...(subagentRecord.supportsIdleContinuableCreate === true
