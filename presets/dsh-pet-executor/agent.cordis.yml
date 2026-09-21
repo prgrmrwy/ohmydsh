@@ -23,9 +23,16 @@
 # `{{model}}` and `{{cwd}}` resolve from the agent's own route and workspace.
 - id: persona
   name: '@deepseek-ai/dsh-persona'
+  # DSH 0.1.5 replaced the single `text` field with `prefix`/`suffix`;
+  # `prefix` is required, and a preset still supplying `text` fails to mount
+  # with `$.prefix missing required value`. That surfaced only at Pet locus
+  # creation (the first @ in a group), not at startup, so it stayed invisible
+  # until a real Feishu message exercised the mount.
   config:
-    text: >-
-      You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.
+    prefix: >-
+      You are a coding agent powered by the {{model}} model.
+    suffix: >-
+      Your working directory is {{cwd}}.
 
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
