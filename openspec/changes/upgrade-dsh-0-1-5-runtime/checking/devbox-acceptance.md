@@ -7,7 +7,7 @@
 | Host | `devbox` (`n37-044-026`), Linux x86_64, 64 cores |
 | Candidate SHA (expected = fetched = HEAD) | `dd15a13be4ab907e66be0fcb764a97d3a1559457` |
 | Temporary ref | `refs/heads/acceptance/dsh-015-5e1042d9ea32be47` (deleted by compare-and-delete) |
-| Toolchain | Node `v22.23.2`, npm `10.9.8`, git `2.20.1` |
+| Toolchain | Node `v22.23.2`, npm `10.9.8`, git `2.30.2` (upgraded from 2.20.1) |
 | Lock hash (after fix) | `c04a83d6e17c558a` |
 | Isolation | dedicated `HOME`, `DSH_HOME`, npm/XDG/corepack caches, port `39521` |
 
@@ -55,21 +55,77 @@ Pet reported no locus/storage/child-seam degradation. The only reported
 limitation is `inquiry dispatch stays unavailable (marker-absent)`, which is
 the intended fail-closed behavior while `overrideRuntimeAgent = false`.
 
-## Environment limitations (not candidate defects)
+## Round 2 — real deployment path, complete suite
 
-1. **`git init -b` unsupported** — devbox git is `2.20.1`; `-b` needs >= 2.28.
-   This appears only in **test fixtures** (18 files). The product path uses
-   `git worktree add -b`, which was verified working on git 2.20. This causes
-   the remaining `dsh-worktree-session` test failures on this host.
-2. **`@touchskyer/memex` not installed globally** — `dsh-memex` shells out to
-   that CLI; 9 of its tests need it. Not part of this upgrade.
-3. **inotify `max_user_watches = 8192`** — a first Host start crashed with
-   `ENOSPC` on chokidar. Two unrelated DSH hosts already run on this box.
-   Re-running with `CHOKIDAR_USEPOLLING=1` started cleanly, so this is host
-   capacity, not a defect.
+The first round ran in an isolated run root. Round 2 did what an operator
+actually does: `git pull` into the existing devbox checkout, `dsh build`,
+`dsh restart`, against the live `~/.dsh` (22M of real Sessions) on port 3080.
+A verified backup (`dsh-home.tgz` + source, 18,214 entries) was taken first.
 
-None of these three are caused by the candidate, and all would also affect
-`0.1.2-rc.1` on this host.
+### Prerequisites resolved on the host
+
+- **git 2.20.1 -> 2.30.2** via `buster-backports` (`apt-get install -t
+  buster-backports git`). Clears the `git init -b` requirement (>= 2.28).
+- **pnpm 10.23.0**: the standalone shim had a DANGLING symlink at
+  `~/.local/share/pnpm/.tools/pnpm/10.23.0/bin/pnpm` pointing into a deleted
+  `_tmp_` directory left by pnpm's own installer. Re-linked to the real
+  `node_modules/pnpm/bin/pnpm.cjs`.
+- **`@touchskyer/memex@0.4.1`** installed globally; `dsh-memex` shells out to
+  it and its description check pins that exact version.
+
+### Three real defects found by this round
+
+1. **Stale compat checkout breaks the upgrade path.** `.upstream` /
+   `.storage-upstream` were shallow clones at the OLD reviewed commit, so
+   `git checkout --detach <new commit>` failed with "reference is not a tree"
+   and aborted `dsh build`. Only upgrades hit this; fresh machines never do.
+   Both builders now prove the commit exists (`git cat-file -e`) before
+   reusing a cache.
+2. **Pet ran new runtime against a STALE deployed plugin.** After the failed
+   build, sync still reported `dsh-pet up-to-date` while the deployed copy was
+   3 days old, producing `unified locus child seam unavailable —
+   inbox-unavailable` and a refused Feishu channel. Source vs deployed lib
+   hashes differed (`5baddd1a` vs `10a68591`); all 110 deployed files were
+   stale. After an atomic reinstall the hashes match and the channel reports
+   `subscription connected`, matching the pre-upgrade baseline.
+3. **`prunable` is git >= 2.36 only.** `pruneInvalidRegistrations` keyed on that
+   field, so on older git it silently no-ops and a deleted worktree can never
+   be recreated. Now keyed on "registration present but directory absent",
+   observable on every supported git. This was a product bug, not a test bug.
+
+Two test-only provenance defects were also fixed: `collaboration-assembly` and
+`locus-turn-observer-runtime` hardcoded 0.1.2 artifact versions/commits/hashes.
+Both now derive provenance from the builders, so a future pin change cannot
+silently assert the wrong runtime. The Inbox replay suite additionally skips
+when the runtime no longer exports `Inbox` (0.1.5 moved it into
+`dsh-agent-loop` and stopped exporting it); the isolated-claim behavior stays
+proven by the builder's semantic gate on every compat build.
+
+### Complete suite on the real checkout (`5264bea`, git 2.30.2)
+
+| Package | Result |
+|---|---|
+| `dsh-memex` | **174 passed** |
+| `dsh-pet` | **2,684 passed**, 43 skipped |
+| `dsh-home-network-model-guard` | 70 passed |
+| `dsh-session-links` | 54 passed |
+| `dsh-session-title-copy` | 20 passed |
+| `dsh-sidebar-session-provider-icon` | 25 passed |
+| `dsh-system-clock` | 21 passed |
+| `dsh-worktree-session` | **206 passed** |
+| `dsh-subscriptions-sandbox-shim` | passed |
+
+Root `npm test`: **127 passed, 1 skipped, 0 failed**. All 8 buildable packages
+typecheck and build. `check:artifacts` and the memex description check pass.
+**Zero test failures remain on devbox.**
+
+### Live deployment state
+
+`dsh build` + `dsh restart` succeeded. The Host runs
+`dshVersion=0.1.5-rc.2`, `kind=customization-host-runtime`, `owner=dsh-pet`,
+serving 3080 with HTTP 401 (auth fence). Pet reports `ready — routes
+registered`, its Feishu channel `subscription connected`, and **zero**
+`inbox-unavailable` in the latest boot.
 
 ## Cleanup ledger
 
@@ -83,9 +139,12 @@ None of these three are caused by the candidate, and all would also affect
 
 ## Decision
 
-devbox clean-build acceptance **passed** for the runtime, plugin build, Pet
-compatibility runtime and Host startup, and it caught one real deployment
-blocker that local runs could not see.
+devbox acceptance **passed** in both rounds. It caught four real defects that
+local runs could not see: the missing peer entries, the stale compat checkout,
+the stale deployed plugin, and the git-version-dependent prune. With host
+prerequisites resolved (git 2.30.2, pnpm relink, memex CLI) the complete suite
+is green with zero failures, and the live devbox Host runs 0.1.5-rc.2 with Pet
+ready and its channel connected.
 
 Still outstanding before production: real Session v0->v3 migration with
 sanitized samples, Pet runtime capability probes against a live child,
