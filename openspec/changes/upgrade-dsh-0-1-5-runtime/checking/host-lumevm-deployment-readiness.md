@@ -50,11 +50,30 @@ So after any session has been opened post-upgrade:
 
 This is why the backup in pre-flight is mandatory rather than nice-to-have.
 
-Evidence that this path is safe (devbox, real data): 7 migrated sessions with
-both generations present, zero content loss, all `tool/call` and `tool/result`
-preserved 1:1, header fields equal. Upstream suites for generation atomicity,
-lease exclusivity, migration refusal and multi-edge publication pass
+The **data** half of this path is proven (devbox, real data): 7 migrated sessions
+with both generations present, zero content loss, all `tool/call` and
+`tool/result` preserved 1:1, header fields equal. Upstream suites for generation
+atomicity, lease exclusivity, migration refusal and multi-edge publication pass
 (468 tests + 2 e2e). See `session-migration-acceptance.md`.
+
+⚠ **The RUNTIME half is NOT proven — the rehearsal failed.** Step 3 below
+("restore the old runtime") does not work as written on a real machine. Full
+detail and the three concrete blockers are in `rollback-drill.md`. Summary:
+
+| step | outcome |
+|---|---|
+| stop writers (`dsh stop`) | ✅ works; port released, no stray processes |
+| restore the pre-upgrade `$DSH_HOME` | ✅ works; old profile, 40 plain logs, **0 v3** |
+| put the old runtime back (`git checkout <old>` + `dsh build`) | ❌ **fails** |
+| minimal path (restore data + old manifest + `dsh restart`, no build) | ❌ **Host does not start at all** |
+
+So on `host`/`lumevm` today: **the data is recoverable, the old runtime is not.**
+Treat the upgrade as forward-only until the blockers are cleared, and size the
+backup as data-loss insurance rather than as a working rollback.
+
+Also note `dsh start` is **not** a valid verb — the launcher accepts only
+`build` / `stop` / `restart` (plain `dsh` starts). A procedure that says
+`dsh build && dsh start` fails at the second command.
 
 ## Verification after restart
 
@@ -86,7 +105,11 @@ to run, but they are why the change should not yet be archived:
   export) is unverified.
 - **Worktree isolated Web acceptance** (text/image/file first submission).
 - **Proxy surface** for 0.1.5 outbound paths.
-- **Explicit rollback rehearsal** on a real machine.
+- ~~Explicit rollback rehearsal on a real machine.~~ **Attempted — and it FAILED at
+  the runtime step.** See the risk profile section above and `rollback-drill.md`.
+  The data half passes; putting the old runtime back does not. Clearing this (or
+  pre-staging a runnable old-runtime snapshot) is now the main gate before touching
+  `host`/`lumevm`.
 
 ## Recommended sequencing
 

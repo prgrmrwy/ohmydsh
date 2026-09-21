@@ -24,6 +24,7 @@
 - [x] 3.3 在迁移后的同一 Session 中继续提交、停止并重启 Host，确认恢复写入和重启结果一致且原始生产源未被候选打开或改写
 - [ ] 3.4 注入损坏、不受支持格式、写所有权竞争与中断场景，确认候选 fail closed 且备份可恢复
 - [x] 3.5 记录生产迁移的 writer 停止顺序、Session/Pet 一致性备份、完整性检查与从新格式回滚到 `0.1.2-rc.1` 的演练结果
+- [ ] 3.6 让回滚路径真正可用(演练已证伪 naive 路径,证据见 checking/rollback-drill.md):①源码回退必须同时重装依赖,否则 dsh-worktree-session/dsh-pet/dsh-session-links 的 build 失败;②预置或加深 compat 缓存,使旧 compat commit 可取(当前 .upstream 为浅克隆只钉新 commit,旧 commit git checkout 退出 128,而启动器拒绝降级到官方运行体,Host 完全不启动);③定位旧树构建期 `@deepseek-ai/dsh-attachment` 不导出 `admitPromptContent`;④改用预置“可运行的旧运行体快照”(含仓库 node_modules、compat 缓存、按版本解析的官方 CLI),现有三件套备份不含后两类,恢复不出可运行旧运行体。**未完成前 host/lumevm 视为单向升级,备份只作数据保险**
 
 ## 4. Local runtime 声明与通用 API 迁移
 
