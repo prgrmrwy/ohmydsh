@@ -1,7 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -188,6 +189,34 @@ test('an override row naming an already-loaded bundle package does not duplicate
 
   const rows = collectLoadedPlugins({ dshHome: home, profile: 'web' })
   assert.deepEqual(rows, [{ name: '@deepseek-ai/dsh-base', source: 'bundle' }])
+})
+
+test('the CLI entry point still runs when the checkout is reached through a symlink', async (t) => {
+  // The entry guard used to compare `import.meta.url` against a hand-built
+  // `file://${process.argv[1]}`. Node resolves the main module's symlinks while
+  // argv[1] keeps the caller's path, so on any checkout reached through a
+  // symlink the comparison failed and `main()` never ran — exit 0, no output, no
+  // error. `bin/dsh` consumes this script for both the startup message and the
+  // startup-log plugin list, so the whole feature died silently there (44/44
+  // devbox startup records read `plugins=[]`).
+  //
+  // Every other test here *imports* the module, which is exactly why none of
+  // them noticed. This one runs it as a subprocess through a symlink.
+  const home = await makeHome(bundlesPkg(['@deepseek-ai/dsh-base']))
+  const linkRoot = await mkdtemp(path.join(tmpdir(), 'ohmydsh-plugin-list-symlink-'))
+  t.after(() => rm(linkRoot, { recursive: true, force: true }))
+  t.after(() => rm(home, { recursive: true, force: true }))
+
+  const linkedRepo = path.join(linkRoot, 'repo')
+  await symlink(REPO, linkedRepo, 'dir')
+
+  const out = execFileSync(
+    process.execPath,
+    [path.join(linkedRepo, 'scripts', 'plugin-list.mjs'), '--names'],
+    { env: { ...process.env, DSH_HOME: home, DSH_PROFILE: 'web' }, encoding: 'utf8' },
+  )
+
+  assert.match(out, /@deepseek-ai\/dsh-base/, 'the entry point must run through a symlinked path')
 })
 
 test('every manifest patch fragment this repo ships stays parseable', async (t) => {

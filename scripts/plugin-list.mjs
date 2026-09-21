@@ -23,10 +23,10 @@
 //
 // desc 来源:ohmydsh manifest 的 brief/note(按 npm 名匹配)> 已安装包
 // package.json 的 description。
-import { readFileSync, existsSync } from "node:fs"
+import { readFileSync, existsSync, realpathSync } from "node:fs"
 import path from "node:path"
 import os from "node:os"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import yaml from "js-yaml"
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
@@ -205,4 +205,26 @@ function main(argv) {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main(process.argv.slice(2))
+// 入口守卫必须比较 **realpath**,不能拼 `file://${process.argv[1]}`。
+//
+// Node 解析主模块时会解开符号链接,而 `process.argv[1]` 保留**调用时**的路径。
+// 只要 checkout 是通过符号链接访问的,两者就不相等 → `main()` 根本不执行 →
+// **退出码 0、零输出、零报错**。devbox 上 `/home/<user>` 就是
+// `/data00/home/<user>` 的符号链接,于是 `bin/dsh` 的插件清单两条消费路径
+// (`print_plugins` 的启动 msg 与 `record_startup` 的启动日志)**全部静默失效**:
+// 44/44 条启动记录写成 `plugins=[]`,看起来像"这个 profile 一个插件都没加载"。
+//
+// 这正是本模块存在的理由所要防的那类静默漏报,而且它发生在**本模块自己身上**。
+// 写法与 `packages/worktree-session/src/cli.ts` 的既有入口守卫保持一致。
+function isEntryPoint() {
+  const argv1 = process.argv[1]
+  if (typeof argv1 !== "string" || argv1 === "") return false
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(argv1)).href
+  } catch {
+    // argv1 不存在时 realpathSync 抛错;这不是入口调用,静默跳过即可。
+    return false
+  }
+}
+
+if (isEntryPoint()) main(process.argv.slice(2))

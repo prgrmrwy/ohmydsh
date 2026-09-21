@@ -27,6 +27,22 @@ Upstream dist-tags re-checked at write time: `latest`/`next` = `0.1.5-rc.2`,
 2. **Back up `$DSH_HOME` while stopped**, and verify the archive. On devbox the
    equivalent step produced `dsh-home.tgz` (~115 MB, 18,214 entries). Keep the
    old `dsh.yaml` and the resolved old runtime alongside it.
+
+   **⚠ Tighten the backup's permissions in the same step.** `$DSH_HOME` is `700`
+   but `tar` output inherits the umask, so on devbox the pre-upgrade backup came
+   out **world-readable** — directory `755`, both tarballs and `src-head.txt`
+   `644` — on a machine shared with another user:
+
+   ```
+   tar czf "$B/dsh-home.tgz" -C "$DSH_HOME" .   # 644 under umask 022
+   chmod 700 "$B"; chmod 600 "$B"/*             # ← do this, or use umask 077
+   stat -c '%a %n' "$B" "$B"/*                  # 700 / 600 expected
+   ```
+
+   Backing up a `700` tree into a `755` directory silently widens the session and
+   credential surface to every local user. Verify the archive still lists its
+   entries after the `chmod` (devbox: 18,214 for `dsh-home.tgz`).
+   See `gate-hygiene-9-6-9-7.md`.
 3. **Confirm the local plugin environment.** `.env.local` is machine-private
    and gitignored; the launcher sources it. In particular `DSH_TRAEX_BRIDGE`
    gates the Trae bridge (`enabledEnv`, default off) and `DSH_MEMEX_ENABLED`
@@ -69,7 +85,7 @@ On `host` the source is **already** at the target commit (the main checkout foll
 
 ```
 1. dsh stop                          # stop writers
-2. back up $DSH_HOME                 # mandatory
+2. back up $DSH_HOME && chmod 700 <backup-dir> && chmod 600 <backup-dir>/*   # mandatory, see step 2
 3. npm ci                            # ★ step 5 above
 4. rm -rf packages/dsh-pet/compat/subagent/.upstream \
           packages/dsh-pet/compat/subagent/.storage-upstream   # ★ step 6 above
@@ -175,25 +191,43 @@ Also note `dsh start` is **not** a valid verb — the launcher accepts only
 These are pending tasks in the change; none of them are required for the runtime
 to run, but they are why the change should not yet be archived:
 
-- **Approved plugin upgrades are not pinned yet.** `cost-meter` 1.7.30,
-  `better-sidebar` 0.19.1, `width-tiers` 1.0.5, `skin-center`/`session-archive`
-  0.3.24, `cockpit-bridge` 0.4.0, Trae 0.1.15. The manifest still carries the
-  rollback pins. `better-sidebar@0.18.0` is running on 0.1.5 today and only
-  imports stable externals (`react`, `dsh-client-ui-primitives`), so this is a
-  known-benign declaration lag rather than a load failure — but it is unverified
-  by the change's own gate.
-- **Trae 0.1.15** must be validated only where it is actually enabled; do not
-  ship an unverified pin.
+- ~~**Approved plugin upgrades are not pinned yet.**~~ **Done.** The manifest now
+  carries every approved target pin, and devbox accepted the batch on the new
+  runtime (`plugin-batch-acceptance.md`): `dsh-cost-meter@1.7.30`,
+  `dsh-width-tiers@1.0.5`, `dsh-better-sidebar@0.19.1`,
+  `@linxin666/dsh-client-ui-skin-center@0.3.24`,
+  `@linxin666/dsh-session-archive@0.3.24`, `dsh-cockpit-bridge@0.4.0` (GitHub
+  release tarball), `dsh-opencode-session-header@0.1.0`,
+  `@tt-a1i/archify-dsh@0.1.0`, and the `llm-subscriptions` 0.9.2 peer-only
+  compatibility fork (pinned release tarball). `@byted/dsh-traex-bridge@0.1.15`
+  stays `enabled: false` behind `enabledEnv: DSH_TRAEX_BRIDGE` — that is the repo
+  default, not a pending decision.
+- **Trae 0.1.15** is validated only where it is actually enabled. It passes
+  end-to-end on devbox (stream + a real `bash` tool call), and the repo default
+  keeps it off for machines that have not opted in — do not ship an unverified
+  pin to a machine that turns it on without repeating that check.
 - **Archify** user-visible behavior (single provider, generate/validate/deliver/
-  export) is unverified.
-- **Worktree isolated Web acceptance** (text/image/file first submission).
-- **Proxy surface** for 0.1.5 outbound paths.
+  export) — see `gui-residual-0-1-5.md`.
+- **Worktree isolated Web acceptance.** Text first-send has passed end-to-end
+  (`worktree-first-submission.md`); image / plain-file / mixed payload and the
+  resource-address binding cases are recorded in `worktree-attachment-paths.md`.
+- ~~**Proxy surface** for 0.1.5 outbound paths.~~ **Done** — `outbound-proxy-surfaces.md`.
+  The Host currently carries **zero** proxy variables, loopback RPC is verified
+  direct, and the child/workflow/code-runtime inheritance difference is now
+  pinned down (three different answers, by seam).
+- **Session-log truncation is silently accepted.** Injecting a 41 % tail
+  truncation produced `exit 0`, an empty stderr, a 409-event read (baseline 654)
+  and a **silently published new generation**. Every other corruption/format case
+  fails closed. This is official-runtime behavior, not something this change
+  introduced, but it is a real durability gap: **do not rely on the runtime to
+  detect a truncated session log** — see `migration-adversarial-injection.md`.
 - ~~Explicit rollback rehearsal on a real machine.~~ **Done — the round trip
   passed on devbox** (`rollback-drill.md`): restore data → `git checkout <old>` →
   **`npm ci`** → `dsh build` → `dsh restart` returns to `0.1.2-rc.1` with Pet ready
   and the GUI serving. No runnable-snapshot staging needed; just remember the two
   traps (deps must be rolled back too; clear the compat caches so the old commit
-  can be cloned).
+  can be cloned). Plugin-group failure isolation is separately measured in
+  `plugin-group-failure-rollback.md`.
 
 ## Recommended sequencing
 
