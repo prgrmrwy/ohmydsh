@@ -75,15 +75,15 @@
 
 ## 9. devbox 主干清洁构建与场景验收
 
-- [ ] 9.1 将候选提交为 clean Git commit；以高熵 run id 推送唯一验收 ref 到 expected SHA，devbox 仅 fetch 该 ref 并记录 expected/fetched/HEAD 三个 SHA，全部相等且 checkout clean 才继续
-- [ ] 9.2 以公钥免密、`BatchMode=yes` 和已确认 host key 连接 devbox；在单个 `set -euo pipefail`、`umask 077` login shell 中先 `type set_sh_devbox_proxy`、再调用并检查 rc；函数缺失、失败或 shell 结束即 fail closed且不输出代理值
-- [ ] 9.3 在同一 shell/子进程内完成 git/npm/pnpm/corepack 网络操作；建立环境 allowlist，拒绝直接 source checkout `.env.local`，unset `DSH_BIN/DSH_OPEN_APP/DSH_UPDATE_CHANNEL`，设置 `DSH_SKIP_UPDATE=1` 并把 HOME/DSH_HOME/npm/XDG/Corepack/pnpm store 全部指向 run root；Trae 按该 devbox 已证明的本地启用意图显式设为 1 或 0，不复制秘密值
-- [ ] 9.4 detached checkout 精确 SHA，断言无 node_modules、packages/*/lib 等 ignored 产物；禁止共享/symlink依赖，记录 Node/npm、lock hash并执行 fresh `npm ci`
+- [x] 9.1 将候选提交为 clean Git commit；以高熵 run id 推送唯一验收 ref 到 expected SHA，devbox 仅 fetch 该 ref 并记录 expected/fetched/HEAD 三个 SHA，全部相等且 checkout clean 才继续
+- [x] 9.2 以公钥免密、`BatchMode=yes` 和已确认 host key 连接 devbox；在单个 `set -euo pipefail`、`umask 077` login shell 中先 `type set_sh_devbox_proxy`、再调用并检查 rc；函数缺失、失败或 shell 结束即 fail closed且不输出代理值
+- [x] 9.3 在同一 shell/子进程内完成 git/npm/pnpm/corepack 网络操作；建立环境 allowlist，拒绝直接 source checkout `.env.local`，unset `DSH_BIN/DSH_OPEN_APP/DSH_UPDATE_CHANNEL`，设置 `DSH_SKIP_UPDATE=1` 并把 HOME/DSH_HOME/npm/XDG/Corepack/pnpm store 全部指向 run root；Trae 按该 devbox 已证明的本地启用意图显式设为 1 或 0，不复制秘密值
+- [x] 9.4 detached checkout 精确 SHA，断言无 node_modules、packages/*/lib 等 ignored 产物；禁止共享/symlink依赖，记录 Node/npm、lock hash并执行 fresh `npm ci`
 - [ ] 9.5 在独立 profile 写最小 `.npmrc`（公开 npmjs，内部 scope 默认关闭）；用独立端口、PID/PGID/start token/cwd/home/SHA fingerprint 写 ownership ledger，再执行根测试、9 包构建、artifact、sync/build×2、CLI/Host/loader/RPC/HTTP
 - [ ] 9.6 数据迁移使用 owner-only 的脱敏真实副本或结构等价 fixture并记录差异/hash/oracle；Worktree 使用 `$RUN_ROOT/fixtures/repo` disposable Git 仓库，不得拿候选 checkout 当被测仓库
 - [ ] 9.7 GUI 需要时才以严格 OpenSSH 参数建立 loopback tunnel，本地端口不得 3080；HTTP/DSH probe 才算 ready，浏览器使用临时独立 profile；前后记录本地 3080 Host PID/start/健康不变
 - [ ] 9.8 生成轻量报告，记录工具链、lock hash、三个 SHA、脱敏命令/cwd/exit/duration、runtime fingerprint、端口、场景判据和环境差异，不提交 raw 数据、密钥、环境 dump 或批量截图
-- [ ] 9.9 按浏览器→tunnel→远端 Host/子进程→Worktree fixture→checkout/home/cache→创建侧 compare-and-delete ref 清理；逐项记录 done/not-owned/preserved，身份或 ref 漂移则保留报告，任一清理失败不得完成本 gate
+- [x] 9.9 按浏览器→tunnel→远端 Host/子进程→Worktree fixture→checkout/home/cache→创建侧 compare-and-delete ref 清理；逐项记录 done/not-owned/preserved，身份或 ref 漂移则保留报告，任一清理失败不得完成本 gate
 
 ## 10. 收尾与用户手动部署交接
 
