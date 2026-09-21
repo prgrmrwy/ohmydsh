@@ -228,6 +228,14 @@ export interface LocusChildPorts {
   /** Required for safe adoption; create/queue may still operate without it. */
   readonly proof?: LocusChildProofPort
   readonly settlement?: LocusChildSettlementPort
+  /**
+   * Operator-facing diagnostic sink.
+   *
+   * Optional so a Host without one still works. Without it a child-creation
+   * failure collapses into the single `child-create-failed` code with the
+   * underlying exception discarded, which is not diagnosable from logs.
+   */
+  readonly log?: (message: string) => void
 }
 
 /** Optional host context shape used by {@link probeLocusChildPorts}. */
@@ -518,6 +526,21 @@ export class LocusChildAdapter {
 
   constructor(private readonly ports: LocusChildPorts) {
     this.unsubscribeSettlement = this.bindSettlementPort(ports.settlement)
+  }
+
+  /**
+   * Emit one child-failure diagnostic with its cause.
+   *
+   * The cause is appended rather than replacing the stable reason code so a
+   * reader still has a machine key to match on.
+   */
+  private reportFailure(operation: string, error: unknown): void {
+    const cause = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+    try {
+      this.ports.log?.(`${operation} failed (${cause})`)
+    } catch {
+      // A diagnostic sink must never change the outcome of the operation.
+    }
   }
 
   /** The currently published child identity, or undefined before/after activation. */
@@ -820,9 +843,10 @@ export class LocusChildAdapter {
           toolFilter: LOCUS_SAFE_TOOL_FILTER,
           signal,
         })
-      } catch {
+      } catch (error: unknown) {
         if (this.disposed) return { ok: false, reason: 'adapter-disposed' }
         if (signal.aborted) return { ok: false, reason: 'aborted' }
+        this.reportFailure('independent child creation', error)
         return { ok: false, reason: 'child-create-failed' }
       }
       if (result.childId !== input.childId) {
@@ -930,9 +954,10 @@ export class LocusChildAdapter {
         settlementNotice: 'silent',
         signal,
       })
-    } catch {
+    } catch (error: unknown) {
       if (this.disposed) return { ok: false, reason: 'adapter-disposed' }
       if (signal.aborted) return { ok: false, reason: 'aborted' }
+      this.reportFailure('idle child creation', error)
       return { ok: false, reason: 'child-create-failed' }
     }
 
