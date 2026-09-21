@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change default-cache-only-dsh-runtime. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: 已缓存的精确 pin 必须直接执行
 
 启动器必须(SHALL)按 `dsh.yaml` 的精确 `dshVersion` 解析 DSH CLI。若显式 `DSH_BIN`、该精确 spec 的 npx 缓存入口或仓库管理的固定缓存入口已经存在，所有 start、build 与官方 CLI 转交必须直接执行该入口，不得再次调用 npx/npm 计算依赖。
@@ -59,3 +61,36 @@ TBD - created by archiving change default-cache-only-dsh-runtime. Update Purpose
 - **WHEN** 标准通道已通过约定回归矩阵并决定移除 rc.2 临时绕过
 - **THEN** 删除集中策略项即可恢复通用解析流程，既有 `DSH_BIN`、npx 缓存和固定缓存继续有效
 
+### Requirement: Host compatibility runtime 跨版本族升级必须重新证明
+当启用的 customization 请求长期 Host compatibility runtime 且 `dshVersion` 跨版本族变化时，该 compatibility runtime MUST 针对目标精确版本重新审查并生成可复核的来源证明、补丁身份、依赖替换身份与运行时能力证明。旧版本的 tag、commit、patch hash、构建产物、能力 marker 或“文本仍可应用”的结果 MUST NOT 被视为目标版本兼容证据。
+
+目标版本缺少 customization 所要求的任一 Host 能力时，系统 SHALL 保留或重新推导最窄 compatibility seam；无法保持原有能力与安全语义时 SHALL 阻止目标 Host 启动，不得回退到官方 runtime、旧 compatibility runtime 或能力残缺的运行体。
+
+#### Scenario: 旧补丁无法应用到目标版本
+- **WHEN** compatibility patch 在目标精确 DSH tag 上无法通过可应用性检查
+- **THEN** 系统 SHALL 要求重新推导补丁和能力验证，MUST NOT 只更新版本字符串、commit 或 hash 后继续构建
+
+#### Scenario: 旧补丁文本仍可应用
+- **WHEN** 旧 compatibility patch 在目标 tag 上仍能文本应用
+- **THEN** 系统 SHALL 仍重新固定目标版本 provenance 并复跑语义、原子性和并发能力验证，MUST NOT 把文本可应用等同于兼容
+
+#### Scenario: 目标运行体缺少必需能力
+- **WHEN** 官方目标运行体缺少 customization 已声明并依赖的任一能力，且重新推导的 compatibility runtime 未能证明该能力
+- **THEN** 长期 Host 启动 SHALL fail closed，不得静默降级或套用旧运行体
+
+### Requirement: compatibility runtime 只替换长期 Host 且保持单一依赖身份
+Customization 请求的 compatibility runtime SHALL 只作用于长期 `dsh web` Host；build、plugin、dump-config 及其它官方一次性 CLI SHALL 继续使用 manifest 的官方精确 `dshVersion`，除非人类显式提供全局逃生路径。
+
+Compatibility runtime 发布前 MUST 证明被替换的运行体包在 Host 依赖树中各自只有一个有效实例，实际解析路径、包名、版本、目标 tag/commit、patch 身份和能力 marker 全部匹配已审查声明。任何双实例、来源不明或 marker 缺失 MUST 阻止发布。
+
+#### Scenario: 官方一次性 CLI 执行
+- **WHEN** 用户在启用 Host compatibility 的 manifest 上执行 build、plugin 或 dump-config
+- **THEN** 系统 SHALL 使用官方精确 `dshVersion`，不得构建或加载 Host compatibility overlay
+
+#### Scenario: 长期 Host 解析 compatibility runtime
+- **WHEN** `dsh web` 为目标版本准备并选择 compatibility runtime
+- **THEN** 系统 SHALL 验证唯一依赖树、实际解析来源和全部能力 marker 后才允许启动
+
+#### Scenario: manifest 与 compatibility 支持版本不一致
+- **WHEN** `supportedDshVersion` 不精确等于 `dshVersion`
+- **THEN** sync 与长期 Host 启动 SHALL 在产生部署副作用或启动服务前拒绝，自动升级链 SHALL 按既有规则回滚 manifest
