@@ -27,3 +27,6 @@ archify-out/
 **/archify/*
 arch/*
 worktree-session-architecture.html
+
+# 0.1.2 基线黑盒遗留的运行期状态,不应进版本控制
+.tmp-old-blackbox/

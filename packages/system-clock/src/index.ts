@@ -26,6 +26,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 // Type-only: brings the host Context.connection merge (HostConnectionHandle).
 import type {} from '@deepseek-ai/dsh-client-connection'
+import type {} from '@deepseek-ai/dsh-host-webserver'
 import { SYSTEM_CLOCK_CHANNEL, SYSTEM_CLOCK_NOW_ENDPOINT } from './contract.js'
 import { buildSystemClockSample, resolveHostIanaZone } from './host-time.js'
 import { hostname as osHostname } from 'node:os'
@@ -42,7 +43,12 @@ export const inject: string[] = []
 
 /** Mount the `/dsh-system-clock` RPC channel when a host connection exists. */
 export function apply(ctx: Context): void {
-  ctx.inject(['connection'], (child) => {
+  // ⚠ 0.1.5 起必须同时注入 `webServer`:channel 路由是挂到**调用方上下文**的
+  // web server 上的(`connection.rpc.handle` 内部为
+  // `owner.effect(() => owner.webServer.register(route))`)。只注入 `connection`
+  // 时 `owner.webServer` 为 undefined,effect 抛错被吞,通道静默不注册,
+  // 客户端只看到与"路径不存在"无法区分的通用 405。
+  ctx.inject(['connection', 'webServer'], (child) => {
     const connection = child.get('connection')
     if (connection === undefined) return
     child.effect(() => connection.rpc.handle(
