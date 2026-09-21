@@ -9,7 +9,7 @@
 
 ## 2. 第三方插件前置审查与分组决策
 
-- [ ] 2.1 审查 `dsh-cost-meter@1.7.30` 发布物、网络/凭据/依赖变化与 `^0.1.5-0` peers；若可在旧版独立升级则单独改 pin、物化和验收，否则记录进入运行体批次的理由
+- [x] 2.1 审查 `dsh-cost-meter@1.7.30` 发布物、网络/凭据/依赖变化与 `^0.1.5-0` peers；若可在旧版独立升级则单独改 pin、物化和验收，否则记录进入运行体批次的理由
 - [x] 2.2 审查 `skin-center`/`session-archive@0.3.24` 发布物与 engines/Session 行为，分别决定前置升级或运行体同批，并记录回滚 pin
 - [x] 2.3 审查 `dsh-better-sidebar@0.19.1` 对官方 sidebar-right 的接线、peer、工具/网络面及与 local session-links 的组合边界，确认作为运行体同批候选；sidebar-qa 不再进入组合
 - [x] 2.4 为 subscriptions `0.9.2` 制作可复现最小 compatibility fork：仅给 attachment/home-paths/llm/tools 四个 production peer 追加 `|| ^0.1.5-rc.2`；runtime 源码/client inject/cordis patch 不改，dev/CI 另更新 0.1.5 dev deps、dsh-agent augmentation 和测试依赖；固定 tag/tgz/hash/patch provenance
@@ -21,9 +21,9 @@
 
 - [ ] 3.1 创建独立 `DSH_HOME` 和非生产端口，只部署官方 `0.1.5-rc.2` profile；验证 CLI/dump-config/Web，并覆盖 `--from-default-profile` 的 launcher 路由、fresh/existing custom profile、shipped profile 名、desktop 拒绝及 plugin add/remove/why
 - [x] 3.2 在真实旧 Session 备份副本上触发官方 v0→v1→v2→v3 migrators，逐项比对内容并证明旧 generation 保留、新 generation 原子发布、lease 排他与中断后 generation 选择
-- [ ] 3.3 在迁移后的同一 Session 中继续提交、停止并重启 Host，确认恢复写入和重启结果一致且原始生产源未被候选打开或改写
+- [x] 3.3 在迁移后的同一 Session 中继续提交、停止并重启 Host，确认恢复写入和重启结果一致且原始生产源未被候选打开或改写
 - [ ] 3.4 注入损坏、不受支持格式、写所有权竞争与中断场景，确认候选 fail closed 且备份可恢复
-- [ ] 3.5 记录生产迁移的 writer 停止顺序、Session/Pet 一致性备份、完整性检查与从新格式回滚到 `0.1.2-rc.1` 的演练结果
+- [x] 3.5 记录生产迁移的 writer 停止顺序、Session/Pet 一致性备份、完整性检查与从新格式回滚到 `0.1.2-rc.1` 的演练结果
 
 ## 4. Local runtime 声明与通用 API 迁移
 
@@ -61,11 +61,11 @@
 - [ ] 7.5 验证 open-in-vscode/sidebar-qa/setting-restart 已从组合中彻底移除，better-sidebar/session-links 不受 sidebar-qa 移除影响；archify-dsh 保持唯一 Skill provider 且功能可用
 - [ ] 7.6 评估 cockpit-bridge `0.4.0`，验证 selection/pending snapshot 与 editorOpen seam；保持 opencode-header 当前版并复验 OpenCode 请求头和非目标域负例
 - [ ] 7.7 将 Trae 升级候选 `0.1.15` 加入启用环境的隔离组合，验证设置登录、模型目录、stream/图片、队列计时、web_search、默认模型覆盖与 0.1.5 proxy；未启用环境仍不得安装内部包
-- [ ] 7.8 把每组最终 pin/启用状态、安全审查与回滚说明写回 `dsh.yaml` note，remote/fork 条目保持精确、可复现身份
+- [x] 7.8 把每组最终 pin/启用状态、安全审查与回滚说明写回 `dsh.yaml` note，remote/fork 条目保持精确、可复现身份
 
 ## 8. 最终隔离组合与安全验收
 
-- [ ] 8.1 在完整隔离组合执行 sync/build 连续两次，确认第二次无变化、dump-config 可用、启动清单每项恰好一次且 loader 全部可执行
+- [x] 8.1 在完整隔离组合执行 sync/build 连续两次，确认第二次无变化、dump-config 可用、启动清单每项恰好一次且 loader 全部可执行
 - [ ] 8.2 复跑根与 9 包自动化、真实旧 Session 迁移/重启、Worktree 文本/图片/文件首发、全部 local/remote 用户可见基线并与 0.1.2 记录逐项比对
 - [ ] 8.3 验证 RPC Host fence 与 Web 文件授权：非 trusted Host 拒绝；receipt 精确绑定 Session、cold/wrong Session、resource authorizing Session、跨 Session 复用拒绝；workspace-files read 按 composed fs policy 而非误设普适 workspace containment
 - [ ] 8.4 验证 0.1.5 outbound proxy：Geo/subscriptions/cost-meter/web_fetch/search/MCP/Pet-lark 各执行面，回环 RPC 直连、项目 `.env` 不注入、候选不读生产 `$DSH_HOME/.env`，child/workflow/code-runtime 继承差异有明确结果且报告不含代理凭据

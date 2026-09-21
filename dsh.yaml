@@ -200,6 +200,8 @@ customizations:
     version: 1.0.5
       # [2026-09-04] staged-dsh-and-plugin-upgrade 阶段二:width-tiers 1.0.3 -> 1.0.4,
       #   并同批删除手写 patch 条目 width-tiers-wiring(接线改由包自带 bundle patch 承载)。
+      # [2026-09-21] upgrade-dsh-0-1-5-runtime 任务 7.1:1.0.4 -> 1.0.5(无 peer,engines.node >=18)。
+      #   回滚:改回 dsh-width-tiers@1.0.4 + version 1.0.4 → dsh build → 重启。
     enabled: true
     brief: 对话区宽度五档切换(748px 至全宽)
     note: 'repo https://github.com/aaronlei/dsh-width-tiers(MIT);用途:Web 对话区标准/中等/宽/超宽/全宽五档切换并以 localStorage 记忆;1.0.4(2026-09-04 审查,npm 1.0.4 发布物核对):**该版本新增了自带的 cordis.patch.yml,并在 package.json 补上 dsh.bundle.patch** —— 此前本包只声明 dsh.client,`dsh plugin add` 把它装成普通依赖、不进 dsh.profile.bundles,浏览器半区要靠本仓库手写的 patches/width-tiers-wiring.yml 插一行 loader 才被发现;1.0.4 起该接线由包自身承载,故本次升级**与删除 width-tiers-wiring patch 条目在同一批次完成**。两份 patch 语义等价(均为无 id 的 insert,插入同一条 {id: dsh-width-tiers, name: dsh-width-tiers};已用 js-yaml 解析比对,结构逐字段相同),而 DSH 的 applyEntryPatches 对无 id 的 insert 一律 push 且不去重——两者并存会产生**两条同 id 的 loader 行**,因此绝不可只升 pin 而保留手写 patch。验收口径:启动清单中 dsh-width-tiers 恰好出现一次,且 [patch] 标注消失(改由 bundle 承载)。历史审查(2026-08-20 npm 1.0.2 精确包):host 入口为空操作,client 仅注入 layout/locale,通过 --dsh-chat-content-width 行内覆盖调整宽度,不依赖构建哈希类名;无网络请求、Host 文件/命令/模型能力,生命周期 disposer 会清理 DOM、监听器、定时器与样式;注意非标准档会主动关闭详情面板,全宽档会经官方 layout 服务收起侧边栏;依赖 DSH Web rc.x 客户端布局与 locale 服务,升级后需回归验证'
@@ -217,6 +219,9 @@ customizations:
     source: remote
     spec: dsh-better-sidebar@0.19.1
     version: 0.19.1
+      # [2026-09-21] upgrade-dsh-0-1-5-runtime 任务 7.1:0.18.0 -> 0.19.1(peer 由
+      #   ^0.1.2-rc.1 升到 ^0.1.5-rc.1,与运行体 0.1.5-rc.2 对齐)。
+      #   回滚:改回 dsh-better-sidebar@0.18.0 + version 0.18.0 → dsh build → 重启。
       # [2026-09-05] dsh-0-1-2-host-api-migration:0.17.1 -> 0.18.0(准入条件
       #   「运行体升到 0.1.2 线」已满足;且 0.17.1 在 0.1.2-rc.1 上启动即崩——
       #   import 了 dsh-settings 已移除的 settingsNamespace,故必须同批放行)
@@ -230,6 +235,9 @@ customizations:
     spec: 'https://github.com/prgrmrwy/dsh-cockpit/releases/download/dsh-cockpit-bridge-v0.4.0/dsh-cockpit-bridge-0.4.0.tgz'
     name: dsh-cockpit-bridge
     version: 0.4.0
+      # [2026-09-21] upgrade-dsh-0-1-5-runtime 任务 7.6:0.3.0 -> 0.4.0
+      #   (exact GitHub release dsh-cockpit-bridge-v0.4.0,HTTP 200 / 16368 B)。
+      #   回滚:spec/version 改回 .../dsh-cockpit-bridge-v0.3.0/dsh-cockpit-bridge-0.3.0.tgz + 0.3.0 → dsh build → 重启。
     enabled: true
     brief: 驾驶舱桥接(会话点击上报 + 0.1.2 待审批/提问观测,顶栏完成提醒自动清除)
     note: 'B015;repo https://github.com/prgrmrwy/dsh-cockpit(MIT,自研);web client cordis bundle。**0.3.0(2026-09-05 升级,change dsh-0-1-2-host-api-migration 收尾 / cockpit 仓库 change adapt-dsh-012-typert-gateway 产物;发布物核对:version 0.3.0、inject 已换为 dsh-api-session-controller + dsh-client-ui-session、peer 仅 cordis ^4.0.1、lib/client.js 含 pendingInteractions 订阅)**:① 适配 DSH 0.1.2 —— 旧 inject 声明的 dsh-client-runtime 在 0.1.2 线被上游移除,0.2.1 在新运行体上 loader 解析不到依赖而**永不激活**(静默),0.3.0 改声明实际承接包;② 新增职责 —— 订阅官方 uiSession.pendingInteractions,把当前完整 {sessionId,kind,key} 快照经既有 capability 通道上报驾驶舱(typert 设备的顶栏待审批/提问计数**唯一来源**,cockpit 侧 evidence 已实测 requested→计数升、resolved→归零、无 bridge 时显示「不可观测」而非 0);只传最小标识,不读交互内容,不注册决策监听,host 半区仍为 no-op。历史:0.2.1(2026-09-04 审查,逐字节 diff 0.2.0→0.2.1 的 lib/client.js):① capability 失效自愈——capability 是 TTL 60s 的短期凭据,新增 readErrorCode 解析驳回响应体的结构化 code,把 401 与「400 + bridge-capability-invalid」统一判为 capability 失效(isCapabilityFailure),此时重置 helloReady 并向父页面 postMessage {type:"dsh-cockpit:capability-expired"} 主动请求换发,换发前 outbox 条目保留不丢;② 纯续签不再重申 current——0.2.0 收到同源 bridge-config 时无条件 helloReady=false,使驾驶舱每次续发配置都触发重新 hello 并重报当前会话(可能误清刚 re-arm 的绿点),0.2.1 删除该行,仅在真正的设备重新激活路径上重置;peer 仍为 @deepseek-ai/dsh-client-runtime ^0.1.1-rc.2(对运行体 0.1.1-rc.2 满足;该包在 0.1.2 线被上游移除,故本条目也是阶段四的回归对象);发布物含 lib/index.js(host no-op 入口)与 lib/client.js,main 指向存在的文件。0.2.0 协议 v2 重构:选择时立即捕获 ID 入有界去重 outbox(不再等 250ms debounce 定时器触发才重读 current,快速连续切换/打开后立即归档不再丢确认);outbox 项只在驾驶舱明确 2xx 后移除,网络异常/401/其它非 2xx 均保留并按有上限指数退避重试,由新选择/设备重新激活/成功 hello 触发;实际 Cockpit origin 与短期认证 capability 由父页面 postMessage 握手动态提供(不再固定 127.0.0.1:3090),适配任意 COCKPIT_PORT;驾驶舱按请求 Origin 匹配设备,按 sessionId 精确清除完成绿点且保留 re-arm(官方 select 语义的驾驶舱侧观察);驾驶舱同步升级后仍兼容旧协议(无 capability header)请求走既有 cookie 认证;只传 sessionId 与协议元数据,不碰内容/settings/凭据/provider token;驾驶舱不可达静默降级并重试,不影响原生 DSH 工作台;每台接驾驶舱的机器都装,需搭配驾驶舱同步升级到对应版本才能拿到可靠协议,否则仍按旧协议尽力而为工作(顶栏链条图标只表示插件装没装,不表示协议版本或连接新鲜度)。⚠ 必须 ≥0.1.1:v0.1.0 发布物缺 lib/index.js 而 package.json main 指向它、cordis.patch.yml 又把它插进 bundle 栈,导致装了该插件的设备 DSH 启动即崩(plugin tree failed to load / ERR_MODULE_NOT_FOUND),不是功能降级而是完全无法启动;0.1.1 补了 no-op host 入口(纯浏览器插件同样需要 loader entry 才能被 client-modules scanner 服务浏览器包)并让 tsdown 同时构建 host/client 两个半区'
@@ -257,6 +265,8 @@ customizations:
     source: remote
     spec: '@linxin666/dsh-client-ui-skin-center@0.3.24'
     version: 0.3.24
+      # [2026-09-21] upgrade-dsh-0-1-5-runtime 任务 7.4:0.3.16 -> 0.3.24(peer react ^18.2.0)。
+      #   回滚:改回 @linxin666/dsh-client-ui-skin-center@0.3.16 + version 0.3.16 → dsh build → 重启。
     enabled: true
     brief: 设置→皮肤中心(主题试穿/自定义主题/壁纸;默认 blue-fantasy)
     note: 'repo https://github.com/zhu1090093659/dsh-web(Apache-2.0,活跃);2026-09-06 审查 npm 0.3.16 发布物与 README:兼容 DSH >=0.1.2-rc.1;Host+Web bundle,内置 blue-fantasy,支持原子试穿/应用、自定义明暗主题、$DSH_HOME/skins 用户皮肤及可选 Wallpaper Engine 本机媒体桥。安全面:同源 Host 路由、皮肤目录 containment、CSS 强制 scope 且拒绝 @import/远程 URL/越界路径;但用户皮肤 patches.css 具整页样式能力,hooks.mjs 属受信代码逃生口(仅内置或 provenance/字节身份核验通过的官方市场内容执行);会读取本机 Wallpaper Engine/Steam 库并提供同源媒体流。隐私:浏览器每日向 dsh-market.com 发送一次匿名安装心跳(随机 localStorage id + 包名;上游声明服务端仅存 salted hash、不存 IP);新装默认激活 blue-fantasy。未搭配 @linxin666/dsh-i18n:该包只增加俄语,与皮肤功能无关。'
@@ -266,6 +276,8 @@ customizations:
     source: remote
     spec: '@linxin666/dsh-session-archive@0.3.24'
     version: 0.3.24
+      # [2026-09-21] upgrade-dsh-0-1-5-runtime 任务 7.4:0.3.16 -> 0.3.24(peer react ^18.2.0)。
+      #   回滚:改回 @linxin666/dsh-session-archive@0.3.16 + version 0.3.16 → dsh build → 重启。
     enabled: true
     brief: 会话归档管理(批量归档/恢复/预览/物理删除;自动维护默认关闭)
   # 第三方(remote):OpenCode Go 400 MissingSessionID 补丁(社区插件,非官方;官方适配发布后评估移除)
