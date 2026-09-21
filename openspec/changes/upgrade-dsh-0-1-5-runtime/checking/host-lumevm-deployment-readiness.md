@@ -56,20 +56,44 @@ with both generations present, zero content loss, all `tool/call` and
 atomicity, lease exclusivity, migration refusal and multi-edge publication pass
 (468 tests + 2 e2e). See `session-migration-acceptance.md`.
 
-⚠ **The RUNTIME half is NOT proven — the rehearsal failed.** Step 3 below
-("restore the old runtime") does not work as written on a real machine. Full
-detail and the three concrete blockers are in `rollback-drill.md`. Summary:
+**The RUNTIME half is proven too** — the round-trip drill passed on devbox
+(`rollback-drill.md`). The recoverable procedure is:
 
-| step | outcome |
-|---|---|
-| stop writers (`dsh stop`) | ✅ works; port released, no stray processes |
-| restore the pre-upgrade `$DSH_HOME` | ✅ works; old profile, 40 plain logs, **0 v3** |
-| put the old runtime back (`git checkout <old>` + `dsh build`) | ❌ **fails** |
-| minimal path (restore data + old manifest + `dsh restart`, no build) | ❌ **Host does not start at all** |
+```
+1. dsh stop                                   # stop writers
+2. restore the pre-upgrade $DSH_HOME backup   # data first
+3. git checkout <pre-upgrade commit>          # source
+4. npm ci                                     # ★ dependencies too — mandatory
+5. dsh build                                  # old runtime + old plugin set
+6. dsh restart                                # launcher accepts only build/stop/restart
+```
 
-So on `host`/`lumevm` today: **the data is recoverable, the old runtime is not.**
-Treat the upgrade as forward-only until the blockers are cleared, and size the
-backup as data-loss insurance rather than as a working rollback.
+Verified numbers: `npm ci` → `@deepseek-ai/dsh-session` back to `0.1.2-rc.1`;
+`dsh build` exit 0 (143 s, zero failures); `dsh restart` exit 0 (77 s) →
+`dshVersion=0.1.2-rc.1`, Pet `ready` + channel connected, GUI `index=200`,
+sessions back to `plain 40 / v3 0`, zero errors in the boot segment. The forward
+trip (also with `npm ci`) passed twice.
+
+Two traps:
+
+- **Skipping `npm ci` breaks the build.** The three local packages fail
+  (`tsc` exit 2 in `dsh-worktree-session`; the `@deepseek-ai/dsh-attachment` /
+  `admitPromptContent` error is a *symptom* of mismatched deps, not its own bug —
+  it disappears once deps are rolled back).
+- **The compat cache is a shallow clone pinned at the current reviewed commit**, so
+  the launcher's `git checkout --detach <old commit>` exits 128 and, because it
+  **refuses the official-runtime fallback**, the Host does not start at all. Fix:
+  `rm -rf packages/dsh-pet/compat/subagent/.upstream packages/dsh-pet/compat/subagent/.storage-upstream`
+  and let the builder re-clone. The new `build.mjs` already probes for this, but a
+  rollback runs the *old* code, which does not.
+
+So no "runnable old-runtime snapshot" is needed — the pre-upgrade source plus
+`npm ci` rebuilds it. Pre-flight requirements are therefore just:
+
+1. a `$DSH_HOME` backup (**mandatory** — lazy v3 migration makes the old runtime
+   unable to read migrated sessions);
+2. the pre-upgrade commit SHA (`src-head.txt` already records it);
+3. network access for `npm ci` on whatever machine performs a rollback.
 
 Also note `dsh start` is **not** a valid verb — the launcher accepts only
 `build` / `stop` / `restart` (plain `dsh` starts). A procedure that says
@@ -105,11 +129,12 @@ to run, but they are why the change should not yet be archived:
   export) is unverified.
 - **Worktree isolated Web acceptance** (text/image/file first submission).
 - **Proxy surface** for 0.1.5 outbound paths.
-- ~~Explicit rollback rehearsal on a real machine.~~ **Attempted — and it FAILED at
-  the runtime step.** See the risk profile section above and `rollback-drill.md`.
-  The data half passes; putting the old runtime back does not. Clearing this (or
-  pre-staging a runnable old-runtime snapshot) is now the main gate before touching
-  `host`/`lumevm`.
+- ~~Explicit rollback rehearsal on a real machine.~~ **Done — the round trip
+  passed on devbox** (`rollback-drill.md`): restore data → `git checkout <old>` →
+  **`npm ci`** → `dsh build` → `dsh restart` returns to `0.1.2-rc.1` with Pet ready
+  and the GUI serving. No runnable-snapshot staging needed; just remember the two
+  traps (deps must be rolled back too; clear the compat caches so the old commit
+  can be cloned).
 
 ## Recommended sequencing
 
