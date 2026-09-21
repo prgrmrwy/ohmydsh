@@ -125,15 +125,25 @@ POST /dsh-pet/api/status               -> 200   (Pet 自己注册的 HTTP 路由
 
 ## 影响评估(不要夸大)
 
-- 受影响的是**浏览器侧**:出口守卫的设置页配置显示与模型选择告警、系统时钟显示;
-  `dsh-memex` 与 `dsh-session-links` 用的是同一条通道,大概率同样拿到不到数据
-  (未逐项点开验证,不在此断言)。
-- **host 侧的出口门禁不受影响** —— 它在 Host 内直接解析 Geo 并独立地对
+- 受影响的是**浏览器侧**,已在 devbox 逐项点开确认(不是推测):
+
+  | 界面 | 现象 | 证据 |
+  |---|---|---|
+  | `文档/资料` 面板(session-links,右侧栏) | 显示 **“当前会话暂无文档/资料 —— MR、部署、Meego、制品链接与本次产出的文件会在这里展示。”** | console `[dsh-session-links] baseline fetch failed: transport failure for /dsh-session-links/links: HTTP 405` |
+  | `系统时钟` 设置 section | 渲染“不可用”态,日期条显示 `- -- -` 而非主机时间 | 截图 |
+  | `出口守卫` 设置 section | 配置字段(`blockedISO alpha-2`、`Geo 端点`)为空 | 截图 |
+  | `记忆`(memex) | 同一条通道 `/dsh-memex/stores` = 405,同上机制(未逐项点开) | 通道探针 |
+
+  **`文档/资料` 这一条最危险**:它把“取不到数据”渲染成**正常的空态文案**,
+  用户看到的是一句确定的“暂无”,而不是错误。真正有 MR/部署链接的会话会被
+  误报成“没有链接”。这正是本缺陷的典型形态——**静默退化,不报错**。
+
+- **主机侧出口门禁不受影响**:它在 Host 内直接解析 Geo 并独立地对
   `blocked`/`unknown` fail closed,不依赖这条 RPC。
 - Pet 与 worktree-session 注册的是**自有 HTTP 路由**(不是 Connection RPC),
-  实测正常。
-- 远端 `subscriptions` 的 `/subscriptions-auth` 同样是 405,所以它的设置页里
-  **卡片结构来自客户端常量而非 RPC**;此前把它当作"subscriptions 正常"的证据
-  属过度解读,已更正。
-- 因此这是**功能退化**,不是数据安全或 Pet 可用性问题;但它是一处**真实回归**
-  (已用升级前基线证伪"本来就这样"),且在 devbox(目标运行环境)上稳定复现。
+  实测正常;cost-meter / better-sidebar / skin-center / session-archive 也各走自己的面。
+- 远端 `subscriptions` 的 `/subscriptions-auth` 同样是 405,其设置页卡片结构
+  来自客户端常量而非 RPC —— 此前当作“subscriptions 正常”的证据属过度解读,已更正。
+- 因此:**应用整体“是通的”与本缺陷同时成立**。这是四处具体功能的静默退化,
+  不是数据安全、不是 Pet 可用性问题,但它是一处**真实回归**
+  (已用升级前基线证伪“本来就这样”),且在 devbox(目标运行环境)稳定复现。
