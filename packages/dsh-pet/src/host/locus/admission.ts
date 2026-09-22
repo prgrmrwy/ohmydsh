@@ -104,7 +104,12 @@ export type LocusAuthorizationResolver = (
 /** Narrow durable view needed by production admission. */
 export interface LocusAuthorizationStore {
   getLatestLocusByEndpoint(endpoint: { readonly chatId: string; readonly threadId?: string }):
-    | { readonly id?: string; readonly state: 'provisioning' | 'active' | 'switching' | 'invalid' | 'retired' | 'stopped' }
+    | {
+        readonly id?: string
+        readonly state: 'provisioning' | 'active' | 'switching' | 'invalid' | 'retired' | 'stopped'
+        /** The main session this generation serves; archived state is read from it. */
+        readonly parentSessionId: string
+      }
     | undefined
 }
 
@@ -123,6 +128,16 @@ export interface LegacyRetirementProbe {
 export function createDurableLocusAuthorizationResolver(
   store: LocusAuthorizationStore,
   legacy: LegacyRetirementProbe,
+  /**
+   * Whether the generation's main session is archived by its owner.
+   *
+   * Archiving the main session is an OWNER action, and nothing in the runtime
+   * enforces it: `dsh-agent` and the session controller both resume an archived
+   * session without complaint, so an endpoint whose parent was archived kept
+   * answering and the archival had no effect at all. Absent means "cannot know",
+   * which keeps the previous behaviour rather than inventing a refusal.
+   */
+  isParentArchived?: (parentSessionId: string) => boolean,
 ): LocusAuthorizationResolver {
   /**
    * Classify a non-`active` generation by WHO put it in that state.
@@ -142,12 +157,38 @@ export function createDurableLocusAuthorizationResolver(
     state: 'provisioning' | 'active' | 'switching' | 'invalid' | 'retired' | 'stopped',
   ): LocusAuthorizationState => (isOwnerExit(state) ? 'retired' : 'unusable')
 
+  /**
+   * An archived main session records an OWNER action, so it must classify as
+   * `retired` — the state that produces "this entry needs an explicit rebuild"
+   * — and never as `unusable`, which would let an ordinary mention establish a
+   * new generation on a main session the owner never chose.
+   *
+   * Applies to `active` (it would otherwise serve) and to `invalid` (it would
+   * otherwise be auto-replaced). Transient states are left alone: provisioning
+   * already in flight is not a decision to reverse here.
+   */
+  const archivedParentOutranks = (
+    state: 'provisioning' | 'active' | 'switching' | 'invalid' | 'retired' | 'stopped',
+    parentSessionId: string,
+  ): boolean => {
+    if (state !== 'active' && state !== 'invalid') return false
+    if (isParentArchived === undefined) return false
+    try {
+      return isParentArchived(parentSessionId) === true
+    } catch {
+      // A probe that cannot answer must not become a refusal: the delivery
+      // path has its own, narrower gate for this fact.
+      return false
+    }
+  }
+
   return endpoint => {
     const exact = endpoint.threadId === undefined
       ? { chatId: endpoint.chatId }
       : { chatId: endpoint.chatId, threadId: endpoint.threadId }
     const current = store.getLatestLocusByEndpoint(exact)
     if (current !== undefined) {
+      if (archivedParentOutranks(current.state, current.parentSessionId)) return 'retired'
       if (current.state === 'active') {
         return { state: 'authorized', ...(current.id === undefined ? {} : { locusId: current.id }) }
       }
@@ -165,6 +206,7 @@ export function createDurableLocusAuthorizationResolver(
     if (parent === undefined) {
       return legacy.find({ chatId: endpoint.chatId }) === undefined ? 'uninitialized' : 'legacy'
     }
+    if (archivedParentOutranks(parent.state, parent.parentSessionId)) return 'retired'
     if (parent.state === 'active') {
       return { state: 'authorized', ...(parent.id === undefined ? {} : { locusId: parent.id }), needsInitialization: true }
     }

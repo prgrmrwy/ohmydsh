@@ -84,7 +84,7 @@ import {
   type DeliveryRecord,
 } from './host/locus/delivery.js'
 import { createExpiryScheduler } from './host/locus/expiry-scheduler.js'
-import { proveLiveStartupDelivery } from './host/locus/startup-recovery.js'
+import { proveLiveStartupDelivery, proveUnconsumedStartupDelivery } from './host/locus/startup-recovery.js'
 import {
   createLocusChildAdapter,
   probeLocusChildPorts,
@@ -1868,13 +1868,26 @@ async function initialize(
   // Legacy rows participate only as a terminal retirement marker. They never
   // supply routing, session identity, workspace or permission to the new path.
   const retiredAssociations = asRetiredAssociationStore(repository)
+  /**
+   * One reader for the owner's archive set, shared by every layer that must
+   * agree on it: admission (does this endpoint still answer at all?) and
+   * resolution (may this generation serve or be replaced?). Reading it in two
+   * places with two implementations is how "archived" would end up meaning two
+   * different things depending on which gate asked first.
+   */
+  const isSessionArchived = (sessionId: string): boolean =>
+    ((ctx.workspaceRegistry.archivedSessionIds ?? []) as readonly unknown[])
+      .some(id => String(id) === sessionId)
+
   const locusAuthorization = createDurableLocusAuthorizationResolver(
     locusRepository,
     retiredAssociations,
+    isSessionArchived,
   )
   const locusResolution = createLocusResolution({
     store: locusRepository,
     retired: retiredAssociations,
+    isSessionArchived,
     ...(locusProvisioningController === undefined
       ? {}
       : {
@@ -2492,7 +2505,13 @@ async function initialize(
           ) return undefined
           const result = await locusChildDelivery.withChildSession({
             identity,
-            operation: session => proveLiveStartupDelivery(delivery, session),
+            operation: session =>
+              proveLiveStartupDelivery(delivery, session)
+              // Only consulted when the open-turn proof declined: a `current`
+              // row can also be one whose dispatch died before hand-off, and
+              // the child's own inbox log is the only thing that distinguishes
+              // "the child took it" from "nobody ever did".
+              ?? proveUnconsumedStartupDelivery(delivery, session),
           })
           return result.ok ? result.value : undefined
         } catch {
@@ -2749,6 +2768,20 @@ async function initialize(
           })
         }
       }
+      // A `current` row the child's log proved it never took is backlog, not an
+      // in-flight execution: retaining it only armed a deadline that would
+      // expire a message the child never saw. Re-dispatch it through the same
+      // claim fence normal finish/expiry uses. The lease is armed first so a
+      // dispatch that cannot claim still cannot leave the row unguarded.
+      for (const delivery of locusStartup.replayableDeliveries) {
+        scheduleCurrentDelivery(delivery)
+        await locusChannelController?.dispatchNext?.({
+          endpoint: { ...delivery.endpoint },
+          locusId: delivery.locusId,
+          generation: delivery.generation,
+          childSessionId: delivery.childSessionId,
+        })
+      }
       for (const delivery of locusRepository.listDeliveries()) {
         if (delivery.status !== 'accepted' && delivery.status !== 'queued') continue
         if (blockedLoci.has(delivery.locusId)) continue
@@ -2832,6 +2865,10 @@ async function initialize(
   let locusManagement!: ReturnType<typeof createLocusManagementPort>
   locusManagement = createLocusManagementPort({
     repository: locusRepository as never,
+    // The same live reader admission and resolution already share: the panel
+    // must agree with the channel about whether this entry can still serve,
+    // otherwise one of them offers a repair while the other refuses it.
+    isSessionArchived,
     resolvers: {
       main: describeSession,
       child: describeSession,
@@ -2935,6 +2972,27 @@ async function initialize(
               previousLocus,
               created: true,
               reused: false,
+            }
+          },
+          replaceParent: async (request) => {
+            // Session-level repair for an archived main session: the
+            // controller creates ONE replacement session and moves each
+            // requested entry onto it, re-proving the archived parent and the
+            // exact generation per entry.
+            const result = await locusProvisioningController.replaceArchivedParent({
+              parentSessionId: request.parentSessionId,
+              entries: request.entries.map(entry => ({
+                endpoint: entry.endpoint.threadId === undefined
+                  ? { chatId: entry.endpoint.chatId }
+                  : { chatId: entry.endpoint.chatId, threadId: entry.endpoint.threadId },
+                locusId: entry.locusId,
+              })),
+            })
+            return {
+              action: 'replace-parent' as const,
+              parentSessionId: result.parentSessionId,
+              replaced: result.replaced,
+              skipped: result.skipped,
             }
           },
         },

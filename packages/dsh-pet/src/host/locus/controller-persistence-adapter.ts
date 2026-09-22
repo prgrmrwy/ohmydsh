@@ -244,7 +244,20 @@ export function projectProvisioningCommit(
         }
       : {}),
     ...(input.rebuild !== undefined
-      ? { rebuild: { oldLocusId: input.rebuild.oldLocusId } }
+      ? {
+          rebuild: {
+            oldLocusId: input.rebuild.oldLocusId,
+            // Carried, not dropped. This projection is the ONLY path from a
+            // controller commit to the durable guard, so a field it forgets is
+            // a field the guard can never see — which is how the session-level
+            // replacement reached production, created its new main session, and
+            // was then refused by the very rule this disposition exists to
+            // satisfy.
+            ...(input.rebuild.predecessorDisposition === undefined
+              ? {}
+              : { predecessorDisposition: input.rebuild.predecessorDisposition }),
+          },
+        }
       : {}),
   }
 }

@@ -217,22 +217,50 @@ export interface DurableProvisioningCommit {
   /** Owner-authorized rebuild over an unavailable latest marker. */
   readonly rebuild?: {
     readonly oldLocusId: string
+    /**
+     * Why a predecessor that is NOT a tombstone may still be replaced.
+     *
+     * Absent keeps the ordinary rule — only `stopped`/`invalid`/`retired` may be
+     * replaced — which is what stops a healthy serving generation from being
+     * swapped out by mistake.
+     *
+     * `archived-parent` is set by exactly one producer: the session-level
+     * replacement, AFTER it re-proved that this predecessor's recorded main
+     * session is archived by its owner. That is the one case where the endpoint
+     * is genuinely out of service without the owner having exited it, and the
+     * owner has explicitly asked to move it to a different session. It travels
+     * as a named disposition, not as a boolean bypass, so the guard below still
+     * reads as one rule and the authorization is visible in the operation.
+     */
+    readonly predecessorDisposition?: 'archived-parent'
   }
 }
 
 /**
- * Proof supplied by the live Host for one interrupted `queued`/`running`
- * Delivery. A durably serialized `current` row does not need this proof to be
- * retained: it is retained by exact locus/generation/child/endpoint identity
- * alone, because `current` is already the physical-dispatch fence.
+ * Proof supplied by the live Host for one interrupted Delivery.
+ *
+ * `running` covers a `queued`/`running` row whose exact child turn is still
+ * open. `unconsumed` covers a `current` row whose message never entered a turn
+ * and is no longer queued in the child, so it is backlog rather than an
+ * in-flight execution. A durably serialized `current` row needs neither proof
+ * to be RETAINED — it is retained by exact locus/generation/child/endpoint
+ * identity alone, because `current` is already the physical-dispatch fence —
+ * but only `unconsumed` makes it safe to dispatch again.
  */
-export interface LocusStartupDeliveryProof {
-  readonly deliveryId: string
-  readonly executionId: string
-  readonly turnId: string
-  /** Only a still-live turn may remain pending across startup. */
-  readonly state: 'running'
-}
+export type LocusStartupDeliveryProof =
+  | {
+      readonly deliveryId: string
+      readonly executionId: string
+      readonly turnId: string
+      /** Only a still-live turn may remain pending across startup. */
+      readonly state: 'running'
+    }
+  | {
+      readonly deliveryId: string
+      readonly executionId: string
+      /** No turn ever entered the message and the child no longer queues it. */
+      readonly state: 'unconsumed'
+    }
 
 /** External resource compensators used only for durable provisioning refs. */
 export interface LocusStartupCompensators {
@@ -273,6 +301,15 @@ export interface LocusStartupRecoveryReport {
   readonly recoverableOperations: readonly LocusOperation[]
   readonly failedDeliveries: readonly DeliveryRecord[]
   readonly retainedDeliveries: readonly DeliveryRecord[]
+  /**
+   * A `current` row proven to have never reached the child's work queue.
+   *
+   * Retaining it was not enough: a `current` row only gets a deadline, so a
+   * dispatch that died before hand-off became an unanswered message that
+   * expired an hour later and was never replayed. These rows are backlog and
+   * must be dispatched again through the ordinary claim fence.
+   */
+  readonly replayableDeliveries: readonly DeliveryRecord[]
   /** Still pending/busy because exact termination could not be proven. */
   readonly manualDeliveries: readonly DeliveryRecord[]
   readonly compensatedOperations: readonly LocusOperation[]
@@ -510,7 +547,9 @@ export class LocusRepository {
             `Rebuild predecessor ${input.rebuild.oldLocusId} is not the latest endpoint generation`,
           )
         }
-        if (previous.state !== 'stopped' && previous.state !== 'invalid' && previous.state !== 'retired') {
+        const predecessorUnavailable =
+          previous.state === 'stopped' || previous.state === 'invalid' || previous.state === 'retired'
+        if (!predecessorUnavailable && input.rebuild.predecessorDisposition !== 'archived-parent') {
           throw new LocusProvisioningError(
             'PROVISIONING_CONFLICT',
             `Rebuild predecessor ${previous.id} is not unavailable`,
@@ -518,6 +557,21 @@ export class LocusRepository {
         }
         if (previous.busy || this.hasPendingDelivery(previous.id, previous.generation)) {
           throw new LocusProvisioningError('PROVISIONING_CONFLICT', `Rebuild predecessor ${previous.id} is busy`)
+        }
+        if (!predecessorUnavailable) {
+          // Replacing a generation that is STILL current needs one more thing
+          // than a rebuild of a tombstone: the set allows at most one current
+          // generation per endpoint, so the predecessor has to leave that set in
+          // the same transaction (the replacement path does exactly this).
+          //
+          // Marked `invalid`, never `retired`: the owner archived the main
+          // session, they never exited this endpoint, and `retired` records an
+          // owner decision they did not make — the same distinction the whole
+          // serviceability policy is built on.
+          after.set(previous.id, transitionLocus(previous, 'invalid', normalized.createdAt, {
+            busy: false,
+            invalidReason: '已被新的主会话接替（原主会话由所有者归档）',
+          }))
         }
         if (normalized.generation !== previous.generation + 1 || normalized.replacesLocusId !== previous.id) {
           throw new LocusProvisioningError(
@@ -2431,6 +2485,7 @@ export class LocusRepository {
       const now = options.now ?? Date.now()
       const failedDeliveries: DeliveryRecord[] = []
       const retainedDeliveries: DeliveryRecord[] = []
+      const replayableDeliveries: DeliveryRecord[] = []
       const manualDeliveries: DeliveryRecord[] = []
       const compensatedOperations: LocusOperation[] = []
       const manualOperations: LocusOperation[] = []
@@ -2583,6 +2638,29 @@ export class LocusRepository {
         // not need an open turn proof to survive restart; the Host will rebuild
         // its deadline timer and the observer/runtime may prove the next turn.
         if (current.status === 'current') {
+          // ...unless the child's own log proves that fence was never crossed.
+          // A dispatch that died before hand-off leaves a `current` row that no
+          // turn will ever claim, so arming its deadline only schedules an
+          // unanswered message for expiry. Such a row is backlog and must be
+          // dispatched again; `unconsumed` is the proof that re-sending cannot
+          // duplicate work the child already took.
+          if (current.turnId === undefined && current.executionId !== undefined) {
+            let replayProof: LocusStartupDeliveryProof | undefined
+            try {
+              replayProof = await options.deliveryProof?.(current)
+            } catch {
+              replayProof = undefined
+            }
+            if (
+              replayProof !== undefined &&
+              replayProof.state === 'unconsumed' &&
+              replayProof.deliveryId === current.deliveryId &&
+              replayProof.executionId === current.executionId
+            ) {
+              replayableDeliveries.push(current)
+              continue
+            }
+          }
           const retained = Object.freeze({
             ...current,
             queueState: 'current' as const,
@@ -2794,6 +2872,7 @@ export class LocusRepository {
         recoverableOperations,
         failedDeliveries,
         retainedDeliveries,
+        replayableDeliveries,
         manualDeliveries,
         compensatedOperations,
         manualOperations,
