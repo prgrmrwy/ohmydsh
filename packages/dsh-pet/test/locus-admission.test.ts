@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { LarkInboundEvent } from '../src/host/channel/event.js'
+import { admitNormalizedLocusEvent } from '../src/host/channel/locus-controller.js'
 import {
   admitLocusEvent,
   createDurableLocusAuthorizationResolver,
@@ -152,6 +153,55 @@ describe('durable production authorization resolver', () => {
       admit: false,
       reason: 'authorization-unresolved',
     })
+  })
+})
+
+/**
+ * The channel controller re-gates what admission already decided, so a state
+ * that admission admits can still be dropped one layer later.
+ *
+ * That is exactly what happened when `unusable` was introduced: the tests above
+ * passed (admission admitted it), but the controller still carried a local
+ * `'authorized' | 'uninitialized'` allowlist and rejected the message as
+ * `authorization-unresolved`. The deadlock the new state existed to remove
+ * survived, wearing a different reason code, and both machines' bots went
+ * silent. These cases pin the END-TO-END outcome, not just admission's.
+ */
+describe('normalized channel admission outcome', () => {
+  const outcome = (authorization: () => unknown) => admitNormalizedLocusEvent(
+    groupEvent({ sender_id: OWNER, content: '@Pet 你好' }),
+    context({ authorization: authorization as never }),
+  )
+
+  it('accepts an existing locus', () => {
+    expect(outcome(() => 'authorized')).toMatchObject({
+      kind: 'accepted',
+      authorization: 'authorized',
+    })
+  })
+
+  it('accepts a never-seen endpoint for bootstrap', () => {
+    expect(outcome(() => 'uninitialized')).toMatchObject({
+      kind: 'accepted',
+      authorization: 'uninitialized',
+      needsInitialization: true,
+    })
+  })
+
+  // The regression: a generation the Host invalidated carries no owner
+  // decision, so it must bootstrap exactly like a never-seen endpoint. It was
+  // admitted by `admitLocusEvent` and then rejected right here.
+  it('accepts a Host-invalidated generation for bootstrap', () => {
+    expect(outcome(() => 'unusable')).toMatchObject({
+      kind: 'accepted',
+      authorization: 'unusable',
+      needsInitialization: true,
+    })
+  })
+
+  it('still refuses an owner-exited endpoint and a legacy association', () => {
+    expect(outcome(() => 'retired')).toMatchObject({ kind: 'rejected', reason: 'retired-endpoint' })
+    expect(outcome(() => 'legacy')).toMatchObject({ kind: 'rejected', reason: 'legacy-endpoint' })
   })
 })
 

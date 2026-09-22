@@ -33,7 +33,9 @@ import {
 import {
   admitLocusEvent,
   type LocusAdmission,
+  isAdmittableAuthorization,
   locusEndpointKey,
+  type AdmittableLocusAuthorization,
   type LocusAdmissionContext,
   type LocusAdmissionDecision,
   type LocusAdmissionRefusal,
@@ -114,7 +116,9 @@ export type NormalizedLocusAdmission =
   | {
       readonly kind: 'accepted'
       readonly message: NormalizedLocusMessage
-      readonly authorization: 'authorized' | 'uninitialized'
+      // Reference the single source rather than restating the union: a local
+      // copy here is what let `unusable` be admitted and then rejected.
+      readonly authorization: AdmittableLocusAuthorization
       readonly needsInitialization: boolean
     }
   | {
@@ -788,7 +792,7 @@ export function admitNormalizedLocusEvent(
   if (decision.command !== undefined) {
     return { kind: 'control', message, command: decision.command, authorization: decision.authorization }
   }
-  if (decision.authorization !== 'authorized' && decision.authorization !== 'uninitialized') {
+  if (!isAdmittableAuthorization(decision.authorization)) {
     return { kind: 'rejected', reason: 'authorization-unresolved' }
   }
   return {
