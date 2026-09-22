@@ -59,7 +59,7 @@ function context(overrides: Partial<LocusAdmissionContext> = {}): LocusAdmission
 }
 
 describe('durable production authorization resolver', () => {
-  it('maps only an active current generation to authorized', () => {
+  it('maps only an active current generation to authorized, and separates owner exits from Host judgements', () => {
     const byState = (state: 'active' | 'switching' | 'invalid' | 'retired' | 'stopped') =>
       createDurableLocusAuthorizationResolver(
         { getLatestLocusByEndpoint: () => ({ state }) },
@@ -67,10 +67,19 @@ describe('durable production authorization resolver', () => {
       )({ chatId: GROUP, key: GROUP })
 
     expect(byState('active')).toMatchObject({ state: 'authorized' })
-    expect(byState('switching')).toBe('retired')
-    expect(byState('invalid')).toBe('retired')
-    expect(byState('retired')).toBe('retired')
+
+    // Owner decisions. The spec's "明确退出的入口 … 普通 at MUST NOT 自动复活"
+    // applies to exactly these two, so they stay terminal for ordinary work.
     expect(byState('stopped')).toBe('retired')
+    expect(byState('retired')).toBe('retired')
+
+    // Host judgements, not owner decisions: an invalidated generation (failed
+    // child re-attach, missing composition proof) and a transient in-flight
+    // state. Collapsing these into `retired` forced an explicit rebuild that
+    // could itself be impossible — the recorded parent may have been archived
+    // — which left the endpoint permanently unreachable.
+    expect(byState('invalid')).toBe('unusable')
+    expect(byState('switching')).toBe('unusable')
   })
 
   it('distinguishes never-created from legacy and propagates lookup failures', () => {
@@ -114,6 +123,30 @@ describe('durable production authorization resolver', () => {
       groupEvent({ sender_id: OWNER, content: '@Pet 你好' }),
       context({ authorization: () => 'uninitialized' }),
     )).toMatchObject({ admit: true, authorization: 'uninitialized', needsInitialization: true })
+
+    // A Host-invalidated generation bootstraps exactly like a never-seen
+    // endpoint. Observed on devbox: the only locus went `invalid` after a
+    // restart (`child-session-access-failed`), was then reported as `retired`,
+    // and every @bot was refused with "rebuild it" — while the rebuild itself
+    // could not run, because the parent that generation recorded had been
+    // archived. The owner never exited anything, so there is no exit to honour.
+    expect(admitLocusEvent(
+      groupEvent({ sender_id: OWNER, content: '@Pet 你好' }),
+      context({ authorization: () => 'unusable' }),
+    )).toMatchObject({ admit: true, authorization: 'unusable', needsInitialization: true })
+
+    // The allowlist gate is unchanged: an ordinary member still cannot
+    // bootstrap a replacement for an invalidated endpoint.
+    expect(admitLocusEvent(
+      groupEvent({ content: '@Pet 你好' }),
+      context({ authorization: () => 'unusable', allowOpenIds: [] }),
+    )).toMatchObject({ admit: false, reason: 'not-allowed-sender' })
+
+    // An owner-exited endpoint is still terminal for ordinary work.
+    expect(admitLocusEvent(
+      groupEvent({ sender_id: OWNER, content: '@Pet 你好' }),
+      context({ authorization: () => 'retired' }),
+    )).toMatchObject({ admit: false, reason: 'retired-endpoint' })
 
     expect(admitLocusEvent(groupEvent(), context({ authorization: unresolved }))).toMatchObject({
       admit: false,

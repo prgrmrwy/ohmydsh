@@ -37,6 +37,7 @@ import {
   type LocusAdmissionContext,
   type LocusAdmissionDecision,
   type LocusAdmissionRefusal,
+  type LocusAuthorizationState,
   type LocusControlDispatchPort,
   type LocusControlDispatchResult,
   type LocusControlCommand,
@@ -120,7 +121,9 @@ export type NormalizedLocusAdmission =
       readonly kind: 'control'
       readonly message: NormalizedLocusMessage
       readonly command: LocusControlCommand
-      readonly authorization: 'authorized' | 'uninitialized' | 'retired' | 'legacy'
+      // Reference the single source rather than restating the union: this
+      // copy silently went stale when `unusable` was added.
+      readonly authorization: LocusAuthorizationState
     }
   | {
       readonly kind: 'rejected'
@@ -208,7 +211,13 @@ export interface LocusChildDeliveryPort {
     readonly identity: LocusChildIdentity
     readonly operation: (session: unknown) => T | Promise<T>
     readonly signal?: AbortSignal
-  }): Awaitable<{ readonly ok: true; readonly value: T } | { readonly ok: false; readonly reason: string }>
+  }): Awaitable<
+    | { readonly ok: true; readonly value: T }
+    // `detail` carries the adapter's underlying message when it caught a host
+    // exception; optional so an adapter that has no extra text still satisfies
+    // this port. Diagnostics only — never branched on.
+    | { readonly ok: false; readonly reason: string; readonly detail?: string }
+  >
   queueChild(input: {
     readonly locus: ActiveLocus
     readonly child: LocusChildIdentity
@@ -1581,7 +1590,13 @@ export class LocusChannelController {
         operation: async session => await this.deps.resolveLivePolicy!(session),
       })
       if (!result.ok) {
-        return { ok: false, diagnostic: `continuation owner rejected live policy read (${result.reason})` }
+        // Carry the adapter's underlying message when it has one: this
+        // diagnostic becomes the locus `invalidReason`, and a bare reason code
+        // leaves an operator with no way to tell why a child became
+        // unreachable — the failure that put devbox's only locus into
+        // `invalid` recorded nothing but `child-session-access-failed`.
+        const detail = result.detail === undefined ? '' : `: ${result.detail}`
+        return { ok: false, diagnostic: `continuation owner rejected live policy read (${result.reason}${detail})` }
       }
       const livePolicy = result.value as { readonly mode?: string; readonly workspaceRoot?: string } | undefined
       const verified = verifyLocusLivePolicy({
