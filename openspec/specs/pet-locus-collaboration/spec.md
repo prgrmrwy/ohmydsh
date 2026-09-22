@@ -182,6 +182,8 @@ GUI Q&A SHALL 仅接受未归档主会话，验证 bot、所有者及宿主能�
 
 子会话需要决策时 SHALL 直接向当前飞书入口发问，后续 at 回答 SHALL 在同一子会话继续。歧义回答 SHALL 澄清，不自动解释为授权。模型 turn 结束 MUST NOT 被显示为整个项目完成，也 MUST NOT 单独完成 current Delivery。Host 超时推进 SHALL 继续复用同一个 child session及其历史，MUST NOT 自动重建 session 或增加 locus generation。
 
+子会话的运行体驻留 SHALL NOT 被当作代际可用性的一部分。运行体 MAY 在子会话空闲且 inbox 为空时释放它（这是常态而非故障），因此宿主 MUST 以「按需冷恢复该 durable child」的方式取得其 live session 与策略，MUST NOT 因「当前不在内存中」判定该 child 不可用、作废代际或另建 child。宿主提供的「读取 exact child session」能力 SHALL 自身完成驻留解析，MUST NOT 要求调用方先证明它已驻留——否则每条消息都会在第二次投递时失败，并表现为一代只服务一条消息。
+
 #### Scenario: 普通资料发布
 - **WHEN** 成员发送 PRD、Figma、会议资料但未 at bot
 - **THEN** 不执行工作；将来被 at 时可按权限按需读取，不宣称已吸收资料
@@ -372,6 +374,8 @@ caller-bound `pet_context` SHALL 提供当前 locus、局部项目入口、已�
 
 Host SHALL 维护进行中/完成/失败等控制反馈；反馈失败不阻断工作，也不得冒充业务正文。启动恢复 SHALL 在开放 intake 前过期超时项、把遗留 `finishing` 收敛为 `unknown-terminal`、恢复未过期 current 的 deadline 调度，或在无 current 时幂等投递最早未过期 backlog。无法证明 current、child 或 generation 一致时 SHALL 暂停对应 locus 并诊断，不猜目标、不重放发送、不新建替代身份。
 
+`current` 是物理投递栅栏，仅凭身份即可跨重启保留——但它同时覆盖「已在 child 手中」与「投递尚未交接就随进程终止」两种情形。因此启动恢复 SHALL 额外区分这两者：当且仅当子会话自身日志能证明该 Delivery 的 `inboxMessageId` 从未进入任何 turn、且已不在该子会话的待运行队列中时，该行 SHALL 经正常 claim 栅栏重新投递，MUST NOT 仅挂 deadline 等其过期而静默丢失。证明不成立（仍排队、已被 turn 领取、turn 未闭合、日志为空或无法精确折叠）时 MUST NOT 重放，按既有规则保留或记为人工债。
+
 #### Scenario: 群级引用触发消息
 - **WHEN** 群 locus 的 current Delivery 由消息 `om_A` 触发且 child 以 `reply` 完成
 - **THEN** Host 使用 bot 身份按消息回复 `om_A`，不得只按 `chatId` 发送普通群消息，也不得引用 backlog 中其它消息
@@ -435,6 +439,8 @@ Host SHALL 维护进行中/完成/失败等控制反馈；反馈失败不阻断�
 「建立新代际」SHALL 严格限于发布一个**新创建**的代际：失效代际的子会话 MUST NOT 被 adopt、冷恢复或复用（其缺少 safe-v1 composition 证明，恢复即继承父 preset），失效行 SHALL 作为历史保留并退出路由。原主会话不可用（归档或缺失）时，恢复 SHALL 按首次建立的方式新建主会话，MUST NOT 因此拒绝服务。管理面的所有者显式重建 MAY 保持不自动新建主会话（以便就地说明需恢复哪个会话），但自动恢复路径 MUST 具备该回退，否则该入口在两条路径下都不可达。话题入口的群级父代际同样失效时，恢复 SHALL 先恢复群级再恢复话题，MUST NOT 因群级问题拒绝话题。
 
 失效诊断 SHALL 保留宿主原始错误信息，MUST NOT 仅以稳定原因码记录——原因码无法区分瞬时重附着竞争与真正不可用的子会话，使失效无法被事后定位。
+
+读不到 live policy（读取失败或读到空值）MUST NOT 被记为 drift：它不构成「存储的授权已不再描述该 child」的证据。但它确实意味着该代际此刻无法服务，因此宿主 SHALL 退休该代际并经建立路径重建一次，用新代际继续服务这条消息，MUST NOT 让入口停在 `active` 却对之后每条消息永久拒答——那等于一个读不到的子会话永久静音整个入口。重建后仍读不到时 SHALL 失败关闭并保留诊断。能力整体缺失（如组合中不存在策略解析能力）属于组合事实而非该 child 的事实，重建无法修复，MUST NOT 因此触发重建。
 
 #### Scenario: 退出单个 locus
 - **WHEN** 所有者在空闲 locus 解绑或归档

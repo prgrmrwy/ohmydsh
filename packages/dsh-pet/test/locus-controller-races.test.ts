@@ -870,20 +870,29 @@ describe('LocusChannelController live policy gate', () => {
     expect(marked).not.toHaveBeenCalled()
   })
 
-  // The message is still refused (serving work against a policy nobody could
-  // confirm would be fail-open), but the GENERATION is kept. Retiring it here
-  // was the bug: not being able to read a policy says nothing about whether the
-  // stored grant still matches, and treating it as drift made a transient
-  // condition permanent — every Host restart plus every other message lost its
-  // reply, while the recovery added another child session for the same group.
-  it('refuses without retiring the generation when the policy cannot be read', async () => {
+  // A read that produced nothing comparable is NOT drift, so the recorded
+  // reason must never say `policy-drift`. It IS a fact about how this child was
+  // materialized, so the generation is retired and rebuilt once; keeping it
+  // `active` while refusing every delivery is what muted a group forever.
+  it('retires an unreadable generation once, then refuses when the rebuild is unreadable too', async () => {
     const observer = new SynchronousTurnObserver()
     const ledger = new MemoryDeliveryLedger()
     const queued = vi.fn()
     const marked = vi.fn()
-    const invalidate = vi.fn()
+    let invalid = false
+    const invalidate = vi.fn(() => { invalid = true })
+    const ensureForDelivery = vi.fn(() => LOCUS)
     const controller = new LocusChannelController({
       ...baseDeps(ledger, observer),
+      // Mirror the repository: retiring the generation makes the READ path
+      // refuse it, which is what routes the repair through `ensureForDelivery`.
+      locus: {
+        resolveCurrent: () => {
+          if (invalid) throw new Error('This locus is invalid and must be rebuilt.')
+          return LOCUS
+        },
+        ensureForDelivery,
+      },
       child: {
         ensureChild: () => ({ parentSessionId: LOCUS.parentSessionId, childSessionId: LOCUS.childSessionId }),
         withChildSession: async input => ({ ok: true as const, value: await input.operation({ id: LOCUS.childSessionId }) }),
@@ -897,20 +906,38 @@ describe('LocusChannelController live policy gate', () => {
     await expect(controller.handleAdmission(acceptedAdmission('message-unreadable'))).resolves.toEqual({
       kind: 'refused', reason: 'policy-unreadable',
     })
-    expect(invalidate).not.toHaveBeenCalled()
+    // Exactly one repair attempt, and it never claims drift.
+    expect(invalidate).toHaveBeenCalledOnce()
+    expect(invalidate.mock.calls[0]?.[0]).toMatchObject({
+      reason: expect.stringContaining('live policy unreadable; rebuilding this generation'),
+    })
+    expect(ensureForDelivery).toHaveBeenCalledOnce()
+    // The invariant is unchanged: nothing is served under a policy nobody could
+    // confirm, so there is still no Delivery, queue or receipt side effect.
     expect(ledger.calls).toEqual([])
     expect(queued).not.toHaveBeenCalled()
     expect(marked).not.toHaveBeenCalled()
   })
 
-  // Same for a child the Host cannot reach right now: report it as
-  // unreadable, never as drift.
-  it('refuses without retiring the generation when the child cannot be reached', async () => {
+  // The same for a child the Host cannot reach: the exact child could not be
+  // brought up, which a fresh generation genuinely can fix, so the generation is
+  // retired rather than left `active` and permanently unservable.
+  it('retires a generation whose child cannot be reached, then refuses if the rebuild fails too', async () => {
     const observer = new SynchronousTurnObserver()
     const ledger = new MemoryDeliveryLedger()
     const invalidate = vi.fn()
+    let invalid = false
+    invalidate.mockImplementation(() => { invalid = true })
+    const ensureForDelivery = vi.fn(() => LOCUS)
     const controller = new LocusChannelController({
       ...baseDeps(ledger, observer),
+      locus: {
+        resolveCurrent: () => {
+          if (invalid) throw new Error('This locus is invalid and must be rebuilt.')
+          return LOCUS
+        },
+        ensureForDelivery,
+      },
       child: {
         ensureChild: () => ({ parentSessionId: LOCUS.parentSessionId, childSessionId: LOCUS.childSessionId }),
         withChildSession: async () => ({ ok: false as const, reason: 'child-session-access-failed' }),
@@ -924,7 +951,66 @@ describe('LocusChannelController live policy gate', () => {
     await expect(controller.handleAdmission(acceptedAdmission('message-unreachable'))).resolves.toEqual({
       kind: 'refused', reason: 'policy-unreadable',
     })
-    expect(invalidate).not.toHaveBeenCalled()
+    expect(invalidate).toHaveBeenCalledOnce()
+    expect(ensureForDelivery).toHaveBeenCalledOnce()
+  })
+
+  // The repair must actually serve the message, not merely tidy the state: the
+  // whole point of replacing "refuse and stay active" is that the message the
+  // unreadable generation could not serve is answered by the next generation.
+  it('serves the delivery on the rebuilt generation after the old child was unreachable', async () => {
+    const observer = new SynchronousTurnObserver()
+    const ledger = new MemoryDeliveryLedger()
+    const rebound: ActiveLocus = {
+      ...LOCUS,
+      id: 'locus-rebuilt',
+      generation: 4,
+      childSessionId: 'session-child-rebuilt',
+      workspaceId: 'workspace-rebuilt',
+    }
+    const invalidate = vi.fn()
+    const queueInputs: { childSessionId: string }[] = []
+    let current: ActiveLocus = LOCUS
+    let invalid = false
+    invalidate.mockImplementation(() => { invalid = true })
+    const controller = new LocusChannelController({
+      ...baseDeps(ledger, observer),
+      locus: {
+        resolveCurrent: () => {
+          if (invalid) throw new Error('This locus is invalid and must be rebuilt.')
+          return current
+        },
+        ensureForDelivery: () => {
+          current = rebound
+          invalid = false
+          return rebound
+        },
+      },
+      child: {
+        ensureChild: locus => ({
+          parentSessionId: locus.parentSessionId,
+          childSessionId: locus.childSessionId,
+        }),
+        // The stale child cannot be read; the rebuilt one can.
+        withChildSession: async input => input.identity.childSessionId === LOCUS.childSessionId
+          ? { ok: false as const, reason: 'child-session-access-failed' }
+          : { ok: true as const, value: await input.operation({ id: input.identity.childSessionId }) },
+        queueChild: async input => {
+          queueInputs.push({ childSessionId: input.child.childSessionId })
+          return { accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }
+        },
+      },
+      resolveLivePolicy: () => ({ mode: 'read-only', workspaceRoot: '/repo' }),
+      invalidatePolicyDrift: invalidate,
+      receipts: { markAccepted: vi.fn(), markSettled: vi.fn() },
+    })
+
+    await expect(controller.handleAdmission(acceptedAdmission('message-repaired'))).resolves.toMatchObject({
+      kind: 'accepted',
+    })
+    expect(invalidate).toHaveBeenCalledOnce()
+    // The reply work went to the REBUILT child, never back to the unreadable one.
+    expect(queueInputs).toEqual([{ childSessionId: 'session-child-rebuilt' }])
   })
 
   it('rejects a write root mismatch before accept and persists the pause diagnostic', async () => {

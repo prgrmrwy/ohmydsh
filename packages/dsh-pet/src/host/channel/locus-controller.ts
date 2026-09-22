@@ -478,8 +478,14 @@ export type LocusControllerDiagnostic =
   | 'child-unavailable'
   | 'child-identity-mismatch'
   | 'policy-drift'
-  /** Live policy could not be READ (not a mismatch); the message is refused but the generation is kept. */
+  /**
+   * Live policy could not be READ (not a mismatch). The generation is retired
+   * and rebuilt once so the delivery is still served; this code is logged only
+   * when that repair also failed and the message was refused.
+   */
   | 'policy-unreadable'
+  /** The unreadable generation was retired and a fresh one served this delivery. */
+  | 'policy-generation-rebuilt'
   | 'delivery-persistence-failed'
   | 'delivery-conflict'
   | 'duplicate-delivery'
@@ -520,7 +526,11 @@ export type LocusControllerRefusal =
   | 'child-unavailable'
   | 'child-identity-mismatch'
   | 'policy-drift'
-  /** Live policy could not be READ (not a mismatch); the message is refused but the generation is kept. */
+  /**
+   * Live policy could not be READ (not a mismatch). The generation is retired
+   * and rebuilt once so the delivery is still served; this refusal is reported
+   * only when that repair also failed.
+   */
   | 'policy-unreadable'
   | 'delivery-persistence-failed'
   | 'delivery-conflict'
@@ -1108,49 +1118,77 @@ export class LocusChannelController {
     let locus = await this.resolveLocus(endpoint, message, admission.needsInitialization, signal)
     if (locus === undefined) return this.refuse('locus-unavailable')
 
-    let child: LocusChildIdentity
-    try {
-      child = await this.deps.child.ensureChild(locus, signal)
-    } catch {
-      return this.refuse('child-unavailable')
-    }
-    if (
-      !nonEmpty(child.parentSessionId) ||
-      !nonEmpty(child.childSessionId) ||
-      child.parentSessionId.trim() !== locus.parentSessionId ||
-      child.childSessionId.trim() !== locus.childSessionId
-    ) {
-      return this.refuse('child-identity-mismatch')
-    }
-    child = {
-      parentSessionId: child.parentSessionId.trim(),
-      childSessionId: child.childSessionId.trim(),
-    }
-
     // Adoption proves the exact durable child, but not that its current policy
     // still matches the database. Resolve through the continuation owner at
     // this operation boundary, before creating ANY Delivery/reaction/queue.
-    const policyVerification = await this.verifyLivePolicy(locus, child, signal)
-    if (!policyVerification.ok) {
-      // Retire the generation ONLY when the live policy was actually read and
-      // disagrees with the durable grant. A failure to READ it — the child is
-      // not resident after a restart, the capability is absent — is transient
-      // and says nothing about the grant; invalidating on it turned a
-      // recoverable condition into a permanent one, so every restart and every
-      // other message lost its reply while the recovery created yet another
-      // child for the same group.
-      //
-      // The message is still refused either way: serving work against a policy
-      // nobody could confirm would be fail-open.
+    //
+    // A generation whose live policy cannot be READ is repaired here rather
+    // than merely refused. Refusing alone left the locus `active` with no
+    // self-healing exit: every later delivery failed the same way forever, so
+    // one unreadable child silently muted the group until an operator
+    // intervened. Retiring the generation and letting the establishing path
+    // build a fresh one serves THIS message instead of starving it. Bounded to
+    // one rebuild per delivery so a persistently unverifiable composition
+    // cannot churn generations inside a single request.
+    let child: LocusChildIdentity | undefined
+    let policyVerification: Awaited<ReturnType<LocusChannelController['verifyLivePolicy']>> | undefined
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      let adopted: LocusChildIdentity
+      try {
+        adopted = await this.deps.child.ensureChild(locus, signal)
+      } catch {
+        return this.refuse('child-unavailable')
+      }
+      if (
+        !nonEmpty(adopted.parentSessionId) ||
+        !nonEmpty(adopted.childSessionId) ||
+        adopted.parentSessionId.trim() !== locus.parentSessionId ||
+        adopted.childSessionId.trim() !== locus.childSessionId
+      ) {
+        return this.refuse('child-identity-mismatch')
+      }
+      const identity: LocusChildIdentity = {
+        parentSessionId: adopted.parentSessionId.trim(),
+        childSessionId: adopted.childSessionId.trim(),
+      }
+      policyVerification = await this.verifyLivePolicy(locus, identity, signal)
+      if (policyVerification.ok) {
+        child = identity
+        break
+      }
+      // A durable disagreement is real drift: retire it and refuse, before any
+      // Delivery side effect (ADR-0005). A generation-scoped read failure is
+      // repairable, so rebuild it once and serve on the fresh generation. An
+      // absent capability belongs to the composition, not to this child, so
+      // rebuilding cannot help it.
       if (policyVerification.fatal) {
         try {
           await this.deps.invalidatePolicyDrift?.({ locus, reason: policyVerification.diagnostic })
         } catch {
           // Failure to persist the pause is still fail closed for this request.
         }
-        return this.refuse('policy-drift')
+        break
       }
-      return this.refuse('policy-unreadable')
+      if (!policyVerification.repairable || attempt > 0) break
+      try {
+        await this.deps.invalidatePolicyDrift?.({
+          locus,
+          reason: `live policy unreadable; rebuilding this generation (${policyVerification.diagnostic})`,
+        })
+      } catch {
+        // Failure to persist the retirement is still fail closed for this
+        // request, so do not fall through to the rebuild.
+        break
+      }
+      const rebuilt = await this.resolveLocus(endpoint, message, true, signal)
+      if (rebuilt === undefined) break
+      this.log('policy-generation-rebuilt')
+      locus = rebuilt
+    }
+    if (child === undefined || policyVerification === undefined || !policyVerification.ok) {
+      const failed = policyVerification !== undefined && !policyVerification.ok ? policyVerification : undefined
+      this.logReason('policy-unreadable', failed?.diagnostic ?? 'no verification result')
+      return this.refuse(failed?.fatal === true ? 'policy-drift' : 'policy-unreadable')
     }
 
     const locusId = locusIdOf(locus)
@@ -1177,8 +1215,11 @@ export class LocusChannelController {
     }
 
     // Serialize the durable acceptance and any physical dispatch per exact lane.
-    // Resolution/adoption/policy checks above are read-only; the acceptance and
-    // queue side effect below must not overlap for one locus in this Host.
+    // The acceptance and queue side effect below must not overlap for one locus
+    // in this Host. The checks above are read-only EXCEPT for the one repair
+    // that retires an unreadable generation; that retirement is guarded by the
+    // stored locus's own state, so a concurrent delivery can at worst observe
+    // the already-rebuilt generation instead of building a second one.
     return this.enqueueDispatchLane(correlation, async () => {
       // Probe the durable message index before resolving/queueing a duplicate.
       // The atomic accept below remains authoritative for concurrent deliveries;
@@ -1599,18 +1640,25 @@ export class LocusChannelController {
   ): Promise<
     | { readonly ok: true }
     /**
-     * `fatal` distinguishes a DURABLE disagreement from a failure to READ.
+     * `fatal` distinguishes a DURABLE disagreement from a failure to READ, and
+     * `repairable` distinguishes a failure that belongs to THIS child from one
+     * that belongs to the composition.
      *
      * Only a real disagreement means the stored grant no longer describes the
-     * child, and only that justifies retiring the generation. Not being able
-     * to read the policy — the child is not resident, the capability is absent
-     * — says nothing about the grant, and treating it as drift made a
-     * TRANSIENT access failure permanently invalidate the locus: observed as
-     * every Host restart plus every other message losing its reply, with the
-     * recovery creating a fresh child each time until three of them piled up
-     * for one group.
+     * child, and only that justifies refusing the work outright (ADR-0005).
+     * Not being able to read the policy says nothing about the grant, so it must
+     * not be reported as drift — but it does mean this generation cannot serve,
+     * and leaving it `active` while refusing every delivery gave the locus no
+     * self-healing exit at all: one unreadable child muted its group forever.
+     * A capability that is absent for every child cannot be repaired by
+     * building another one, so only `repairable` failures trigger a rebuild.
      */
-    | { readonly ok: false; readonly diagnostic: string; readonly fatal: boolean }
+    | {
+        readonly ok: false
+        readonly diagnostic: string
+        readonly fatal: boolean
+        readonly repairable: boolean
+      }
   > {
     if (
       locus.permission === undefined ||
@@ -1621,6 +1669,9 @@ export class LocusChannelController {
         ok: false,
         diagnostic: 'live sandbox policy verification capability is unavailable',
         fatal: false,
+        // The capability is missing for the whole composition: a fresh child
+        // inherits the same gap, so rebuilding would only churn generations.
+        repairable: false,
       }
     }
     try {
@@ -1640,8 +1691,11 @@ export class LocusChannelController {
           ok: false,
           diagnostic: `continuation owner rejected live policy read (${result.reason}${detail})`,
           // Could not READ the child's policy. Says nothing about whether the
-          // stored grant still matches, so it must not retire the generation.
+          // stored grant still matches, so it is not drift.
           fatal: false,
+          // ...but this exact child could not be brought up, which a fresh
+          // generation can genuinely fix.
+          repairable: true,
         }
       }
       const livePolicy = result.value as { readonly mode?: string; readonly workspaceRoot?: string } | undefined
@@ -1658,9 +1712,21 @@ export class LocusChannelController {
             // durable grant is drift. `policy-unavailable` means the read
             // produced nothing to compare.
             fatal: verified.reason === 'mode-mismatch' || verified.reason === 'write-disabled',
+            // `policy-unavailable` stays repairable on purpose. The read
+            // reached the live Session and the sandbox service had no policy
+            // for it, which is a fact about how THIS child was materialized —
+            // the one thing a fresh generation can change. Refusing without
+            // rebuilding would leave the locus `active` and unservable, which
+            // is the permanent-muteness defect this repair exists to remove.
+            repairable: true,
           }
-    } catch {
-      return { ok: false, diagnostic: 'live sandbox policy read failed', fatal: false }
+    } catch (error: unknown) {
+      return {
+        ok: false,
+        diagnostic: `live sandbox policy read failed (${error instanceof Error ? error.message : String(error)})`,
+        fatal: false,
+        repairable: true,
+      }
     }
   }
 

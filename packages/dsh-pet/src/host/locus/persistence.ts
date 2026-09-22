@@ -221,18 +221,30 @@ export interface DurableProvisioningCommit {
 }
 
 /**
- * Proof supplied by the live Host for one interrupted `queued`/`running`
- * Delivery. A durably serialized `current` row does not need this proof to be
- * retained: it is retained by exact locus/generation/child/endpoint identity
- * alone, because `current` is already the physical-dispatch fence.
+ * Proof supplied by the live Host for one interrupted Delivery.
+ *
+ * `running` covers a `queued`/`running` row whose exact child turn is still
+ * open. `unconsumed` covers a `current` row whose message never entered a turn
+ * and is no longer queued in the child, so it is backlog rather than an
+ * in-flight execution. A durably serialized `current` row needs neither proof
+ * to be RETAINED — it is retained by exact locus/generation/child/endpoint
+ * identity alone, because `current` is already the physical-dispatch fence —
+ * but only `unconsumed` makes it safe to dispatch again.
  */
-export interface LocusStartupDeliveryProof {
-  readonly deliveryId: string
-  readonly executionId: string
-  readonly turnId: string
-  /** Only a still-live turn may remain pending across startup. */
-  readonly state: 'running'
-}
+export type LocusStartupDeliveryProof =
+  | {
+      readonly deliveryId: string
+      readonly executionId: string
+      readonly turnId: string
+      /** Only a still-live turn may remain pending across startup. */
+      readonly state: 'running'
+    }
+  | {
+      readonly deliveryId: string
+      readonly executionId: string
+      /** No turn ever entered the message and the child no longer queues it. */
+      readonly state: 'unconsumed'
+    }
 
 /** External resource compensators used only for durable provisioning refs. */
 export interface LocusStartupCompensators {
@@ -273,6 +285,15 @@ export interface LocusStartupRecoveryReport {
   readonly recoverableOperations: readonly LocusOperation[]
   readonly failedDeliveries: readonly DeliveryRecord[]
   readonly retainedDeliveries: readonly DeliveryRecord[]
+  /**
+   * A `current` row proven to have never reached the child's work queue.
+   *
+   * Retaining it was not enough: a `current` row only gets a deadline, so a
+   * dispatch that died before hand-off became an unanswered message that
+   * expired an hour later and was never replayed. These rows are backlog and
+   * must be dispatched again through the ordinary claim fence.
+   */
+  readonly replayableDeliveries: readonly DeliveryRecord[]
   /** Still pending/busy because exact termination could not be proven. */
   readonly manualDeliveries: readonly DeliveryRecord[]
   readonly compensatedOperations: readonly LocusOperation[]
@@ -2431,6 +2452,7 @@ export class LocusRepository {
       const now = options.now ?? Date.now()
       const failedDeliveries: DeliveryRecord[] = []
       const retainedDeliveries: DeliveryRecord[] = []
+      const replayableDeliveries: DeliveryRecord[] = []
       const manualDeliveries: DeliveryRecord[] = []
       const compensatedOperations: LocusOperation[] = []
       const manualOperations: LocusOperation[] = []
@@ -2583,6 +2605,29 @@ export class LocusRepository {
         // not need an open turn proof to survive restart; the Host will rebuild
         // its deadline timer and the observer/runtime may prove the next turn.
         if (current.status === 'current') {
+          // ...unless the child's own log proves that fence was never crossed.
+          // A dispatch that died before hand-off leaves a `current` row that no
+          // turn will ever claim, so arming its deadline only schedules an
+          // unanswered message for expiry. Such a row is backlog and must be
+          // dispatched again; `unconsumed` is the proof that re-sending cannot
+          // duplicate work the child already took.
+          if (current.turnId === undefined && current.executionId !== undefined) {
+            let replayProof: LocusStartupDeliveryProof | undefined
+            try {
+              replayProof = await options.deliveryProof?.(current)
+            } catch {
+              replayProof = undefined
+            }
+            if (
+              replayProof !== undefined &&
+              replayProof.state === 'unconsumed' &&
+              replayProof.deliveryId === current.deliveryId &&
+              replayProof.executionId === current.executionId
+            ) {
+              replayableDeliveries.push(current)
+              continue
+            }
+          }
           const retained = Object.freeze({
             ...current,
             queueState: 'current' as const,
@@ -2794,6 +2839,7 @@ export class LocusRepository {
         recoverableOperations,
         failedDeliveries,
         retainedDeliveries,
+        replayableDeliveries,
         manualDeliveries,
         compensatedOperations,
         manualOperations,

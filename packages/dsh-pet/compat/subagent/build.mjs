@@ -42,7 +42,7 @@ const UPSTREAM = {
   /** Reviewed commit behind dsh-v0.1.5-rc.2; a moved tag/local checkout fails. */
   commit: 'fb2c4b9e698e30edb738bca4cf0618587db7d203',
   /** sha256 of `settlement-notice.patch`, so a silently edited patch fails. */
-  patchSha256: '68f9531ad03ae0a1c6a9cebc3884f04ee2b1dca1cad542f0a832246fa978e8a0',
+  patchSha256: 'c1b63fd420bb60ea3b22da0844318c722f2b0e9f7042e69501d14690802a5da6',
 }
 
 const run = (command, args, cwd = here, options) => runCompatCommand(command, args, cwd, options)
@@ -224,6 +224,22 @@ if (
   || !runtimeSource.includes('withLiveContinuableChildSession')
 ) {
   fail('built artifact has no continuation-owned child Session capability; policy mutation is unavailable')
+}
+// The access seam must resolve residency itself. The registry settles and
+// disposes an idle child with an empty inbox, so a child is normally NOT
+// resident when the next delivery arrives; an accessor that refused on that
+// state made every post-idle read fail, which the host could only report (and
+// only "recover" from) by retiring a healthy generation and building yet
+// another child for the same group.
+//
+// The refusal is matched as the THROWN template literal, not as prose: the
+// upstream source documents `undefined`-when-not-resident in its own comments,
+// so a bare phrase match fails on a correct artifact.
+if (
+  /is not resident\x60/.test(runtimeSource)
+  || !runtimeSource.includes('materializeForAccess')
+) {
+  fail('built artifact still requires prior residency for continuation-owned child Session access')
 }
 // Unlike the capabilities above, host-authored delivery is published as a
 // SYMBOL-keyed method with no `supports*` companion flag, so the four marker
