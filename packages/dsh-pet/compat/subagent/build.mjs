@@ -161,7 +161,13 @@ const manifest = {
     upstreamTag: UPSTREAM.tag,
     upstreamBase: head,
     patchSha256: UPSTREAM.patchSha256,
-    removeWhen: 'upstream publishes settlementNotice and independent-v1; then delete compat/subagent and use the official package',
+    // Verifiable condition, not a promise with no due date: each seam names
+    // what upstream would have to publish. Reported upstream so far:
+    // settlementNotice only (discussions #7508). The other three have NOT been
+    // reported, so nothing upstream is tracking them — do not read this field
+    // as "expiring soon". Upstream accepts no external PRs; Discussions is the
+    // only channel.
+    removeWhen: 'upstream publishes all four: settlement suppression, idle continuable creation, independent (self-mounted) child composition, and continuation-owned child Session access; then delete compat/subagent and use the official package',
   },
 }
 // `sync.mjs` installs this directory by path and checks that its manifest

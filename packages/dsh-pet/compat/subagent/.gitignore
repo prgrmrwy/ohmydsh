@@ -9,10 +9,11 @@ package.json
 .launcher.next-*
 .launcher.restore-*
 .launcher.previous-*
+# No longer produced: storage is served by Pet's own registered backend
+# (src/host/storage/), and the isolated-claim seam was removed. Kept so a
+# directory left over from an earlier build can never be committed by accident.
 .storage-upstream/
 storage-artifacts
-# No longer produced (the isolated-claim seam was removed). Kept so a directory
-# left over from an earlier build can never be committed by accident.
 agent-artifacts/
 .storage-artifact-builds/
 .storage-artifacts.staging-*
