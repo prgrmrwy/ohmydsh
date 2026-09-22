@@ -827,21 +827,7 @@ function locusFence(head: PetLocusView): {
  * excess-check spread properties — and the Host's `strictBody` answered
  * `Unknown request field 'locusId'` the moment an owner clicked 重建.
  */
-function locusRebuildRequest(
-  head: PetLocusView,
-  options: {
-    /**
-     * Ask for a NEWLY created main session instead of the recorded one.
-     *
-     * The recorded parent is the only session this endpoint ever served, so
-     * when the owner archived it a rebuild had no possible parent at all —
-     * their only way back was to unarchive a session they may have retired on
-     * purpose. This is the explicit alternative, and it stays explicit: an
-     * ordinary mention must never pick a new main session on their behalf.
-     */
-    readonly freshParent?: boolean
-  } = {},
-): Parameters<typeof petApi.locusRebuild>[0] {
+function locusRebuildRequest(head: PetLocusView): Parameters<typeof petApi.locusRebuild>[0] {
   return {
     action: 'rebuild',
     endpoint: locusEndpointInput(head.endpoint),
@@ -849,7 +835,6 @@ function locusRebuildRequest(
     ...(head.workspace.workspaceId === '' ? {} : { workspaceId: head.workspace.workspaceId }),
     ...(head.parentLocusId === undefined ? {} : { parentLocusId: head.parentLocusId }),
     ...(head.isDefaultQa ? { asDefaultQa: true } : {}),
-    ...(options.freshParent === true ? { freshParent: true } : {}),
     expectedGeneration: head.generation,
     expectedLocusId: head.locusId,
     expectedUpdatedAt: head.state.updatedAt,
@@ -1125,6 +1110,14 @@ function LocusRow(props: {
           {props.reading === 'work' ? (
             <div className="dshpet-locus-row-line">
               <span className="dshpet-meta">{stateLine}</span>
+              {/* The repair for this state is on the session block, so the row
+                  states why it is down and where to act — otherwise hiding the
+                  rebuild button would read as "nothing can be done". */}
+              {head.main.availability === 'archived' ? (
+                <span className="dshpet-meta" data-tone="paused">
+                  主会话已归档 · 恢复该主会话后本入口即恢复服务，或在上面把它迁到新主会话
+                </span>
+              ) : null}
               <span className="dshpet-meta dshpet-locus-session-title" title={head.child.title ?? undefined}>
                 会话 {childSessionId === undefined ? '—' : head.child.title ?? '未命名'}
               </span>
@@ -1198,13 +1191,14 @@ function LocusRow(props: {
             entries, and burying their one way back two disclosures deep would
             make the default a dead end.
 
-            An ARCHIVED main session earns the same placement without being a
-            tombstone. The entry still reads `active`, but the channel refuses
-            to serve it and answers mentions with "this needs a rebuild", so a
-            row that offered no action would be telling the owner to do
-            something the panel does not let them do.
+            An ARCHIVED main session is deliberately NOT rebuilt from here. The
+            rebuild reuses the recorded main session — exactly the session that
+            cannot serve — so this button could never succeed, and pointing the
+            entry at a DIFFERENT session is a decision about the session, not
+            about this row. That repair lives on the session block above; all
+            this row owes the owner is the reason, which the row already states.
           */}
-          {isTerminalLocusState(head.state.state) || head.main.availability === 'archived' ? (
+          {isTerminalLocusState(head.state.state) && head.main.availability !== 'archived' ? (
             <button
               type="button"
               className="dshpet-action dshpet-action-sm"
@@ -1213,24 +1207,6 @@ function LocusRow(props: {
               onClick={() => props.onAction(`${head.locusId}:rebuild`, () => petApi.locusRebuild(locusRebuildRequest(head)))}
             >
               重建
-            </button>
-          ) : null}
-          {head.main.availability === 'archived' ? (
-            // The second repair, and it stays a deliberate choice: the ordinary
-            // 重建 above reuses the recorded main session (which the owner is
-            // expected to restore first), while this one creates a new main
-            // session and moves the entry onto it.
-            <button
-              type="button"
-              className="dshpet-action dshpet-action-sm"
-              disabled={props.busyKey !== undefined || head.state.busy}
-              title="新建一个主会话并把本入口改挂到它上面；原主会话保持归档不动"
-              onClick={() => props.onAction(
-                `${head.locusId}:rebuild-fresh-parent`,
-                () => petApi.locusRebuild(locusRebuildRequest(head, { freshParent: true })),
-              )}
-            >
-              用新的主会话重建
             </button>
           ) : null}
           <button
@@ -1286,6 +1262,17 @@ function WorkSection(props: {
   readonly onToggleExpanded?: () => void
 }): JSX.Element {
   const { work } = props
+  // Entries this session-level repair may move: their own generations, and
+  // never one the owner explicitly stopped/retired — moving it would revive an
+  // exit the owner made on purpose. The Host re-proves both facts per entry.
+  const movableEntries = work.families.flatMap(family => {
+    const head = familyHead(family)
+    if (head === undefined || isTerminalLocusState(head.state.state)) return []
+    return [{
+      endpoint: { chatId: family.endpoint.chatId, ...(family.endpoint.threadId === undefined ? {} : { threadId: family.endpoint.threadId }) },
+      locusId: head.locusId,
+    }]
+  })
   const collapsible = props.onToggleExpanded !== undefined
   const showEntries = !collapsible || props.expanded === true
   const sessionId = work.parentSessionId
@@ -1342,6 +1329,34 @@ function WorkSection(props: {
         <span className="dshpet-work-tail">
           <HandleChip value={sessionId} code={sessionCode} />
           <span className="dshpet-meta">{sessionAvailabilityLabel(work.session?.availability)}</span>
+          {/*
+            The session-level repair, and the ONLY place the owner may decide to
+            abandon an archived main session.
+
+            It is not a per-entry action because it is not a per-entry decision:
+            every entry under this session went down for the same reason, and
+            they must all land on ONE replacement session — the per-entry
+            rebuild creates a main session per call, which would split what used
+            to be one shared session into as many sessions as there are entries.
+          */}
+          {work.availability !== 'archived' || movableEntries.length === 0 ? null : (
+            <button
+              type="button"
+              className="dshpet-action dshpet-action-sm"
+              disabled={props.busyKey !== undefined}
+              title="新建一个主会话，把本会话名下的入口一起迁移过去；原主会话保持归档不动"
+              onClick={() => props.onAction(
+                `session:${sessionId}:replace-parent`,
+                () => petApi.locusReplaceParent({
+                  action: 'replace-parent',
+                  parentSessionId: sessionId,
+                  entries: movableEntries,
+                }),
+              )}
+            >
+              用新的主会话接替
+            </button>
+          )}
           {!collapsible ? null : (
             <button
               type="button"

@@ -15,6 +15,7 @@ import {
   type PetLifecycleState,
   type PetWorkspaceChoice,
   type PetLocusActionRequest,
+  type PetLocusReplaceParentResult,
   type PetLocusActionResult,
   type PetLocusDefaultQaRequest,
   type PetLocusDefaultQaResult,
@@ -250,6 +251,16 @@ export const petApi = {
     call(LOCUS_ROUTES.action, input),
   locusRebuild: (input: Extract<PetLocusActionRequest, { action: 'rebuild' }>): Promise<PetLocusActionResult> =>
     call(LOCUS_ROUTES.rebuild, input),
+  /**
+   * Move an archived main session's entries onto one newly created session.
+   *
+   * Answers with its own result shape: a session-level operation has no single
+   * `locus`, and several entries may be refused individually.
+   */
+  locusReplaceParent: (
+    input: Extract<PetLocusActionRequest, { action: 'replace-parent' }>,
+  ): Promise<PetLocusReplaceParentResult> =>
+    call(LOCUS_ROUTES.action, input),
   /**
    * Shared-fact ledger todos, grouped by owning main session.
    *

@@ -15,6 +15,7 @@ import {
   type LocusPermissionMode,
   type LocusRecord,
 } from './aggregate.js'
+import { isOwnerExit } from './serviceability.js'
 import type { LocusPermissionMutationPort } from './permission-mutation.js'
 import type {
   PetLocusActionRequest,
@@ -26,6 +27,7 @@ import type {
   PetLocusEndpointView,
   PetLocusManagementView,
   PetLocusOwnerProjection,
+  PetLocusReplaceParentResult,
   PetLocusView,
 } from '../../wire.js'
 
@@ -257,6 +259,16 @@ export interface LocusManagementActions {
     request: Extract<PetLocusActionRequest, { action: 'stop' }>,
     context: LocusManagementActionContext,
   ) => Promise<PetLocusActionResult> | PetLocusActionResult
+  /**
+   * Session-level repair for an archived main session.
+   *
+   * Separate from `rebuild` because it acts on a SESSION, not on one entry,
+   * and it must create exactly one replacement session for all of them.
+   */
+  readonly replaceParent?: (
+    request: Extract<PetLocusActionRequest, { action: 'replace-parent' }>,
+    context: LocusManagementActionContext,
+  ) => Promise<PetLocusReplaceParentResult> | PetLocusReplaceParentResult
 }
 
 /** Optional Host seam for the owner-facing unified locus management routes. */
@@ -272,11 +284,18 @@ export interface LocusManagementPort {
     request: PetLocusDefaultQaHostRequest,
     context: LocusManagementActionContext,
   ) => Promise<PetLocusDefaultQaResult> | PetLocusDefaultQaResult
-  /** Optional generic transactional action dispatcher. */
+  /**
+   * Optional generic transactional action dispatcher.
+   *
+   * The session-level `replace-parent` answers with its own result shape, so
+   * the union is explicit here rather than forced into `PetLocusActionResult`
+   * (which would demand a single `locus` that a session-level operation has no
+   * honest value for).
+   */
   readonly action?: (
     request: PetLocusActionRequest,
     context: LocusManagementActionContext,
-  ) => Promise<PetLocusActionResult> | PetLocusActionResult
+  ) => Promise<PetLocusActionResult | PetLocusReplaceParentResult> | PetLocusActionResult | PetLocusReplaceParentResult
   readonly bind?: (
     request: Extract<PetLocusActionRequest, { action: 'bind' }>,
     context: LocusManagementActionContext,
@@ -303,6 +322,16 @@ export interface LocusManagementPort {
     request: Extract<PetLocusActionRequest, { action: 'stop' }>,
     context: LocusManagementActionContext,
   ) => Promise<PetLocusActionResult> | PetLocusActionResult
+  /**
+   * Session-level repair for an archived main session.
+   *
+   * Separate from `rebuild` because it acts on a SESSION, not on one entry,
+   * and it must create exactly one replacement session for all of them.
+   */
+  readonly replaceParent?: (
+    request: Extract<PetLocusActionRequest, { action: 'replace-parent' }>,
+    context: LocusManagementActionContext,
+  ) => Promise<PetLocusReplaceParentResult> | PetLocusReplaceParentResult
 }
 
 /** Host-authoritative owner identity and lifecycle diagnostics. */
@@ -998,7 +1027,41 @@ export function createLocusManagementPort(
     : async (request: PetLocusDefaultQaHostRequest, context: LocusManagementActionContext) =>
         actions.defaultQa!(request, assertActionContext(context))
 
+  /**
+   * Move an archived session's entries onto one new main session.
+   *
+   * Validates only what this layer owns: the requested parent must be an
+   * archived main session the view already reports as such, and every entry
+   * must be a current generation under it. The controller re-proves both per
+   * entry, so a stale panel cannot move an entry that recovered meanwhile.
+   */
+  const replaceParent = async (
+    request: Extract<PetLocusActionRequest, { action: 'replace-parent' }>,
+    context: LocusManagementActionContext,
+  ): Promise<PetLocusReplaceParentResult> => {
+    const byId = new Map(records().map(record => [record.id, record]))
+    if (![...byId.values()].some(record => record.parentSessionId === request.parentSessionId)) {
+      throw new LocusManagementError('LOCUS_INVALID', '指定的主会话名下没有本机的入口。')
+    }
+    for (const entry of request.entries) {
+      const record = byId.get(entry.locusId)
+      if (record === undefined) {
+        throw new LocusManagementError('LOCUS_INVALID', `入口 ${entry.locusId} 不存在。`)
+      }
+      if (record.parentSessionId !== request.parentSessionId) {
+        throw new LocusManagementError('LOCUS_INVALID', `入口 ${entry.locusId} 不属于该主会话。`)
+      }
+      if (isOwnerExit(record.state)) {
+        throw new LocusManagementError('LOCUS_INVALID', `入口 ${entry.locusId} 由所有者退出，不能迁移。`)
+      }
+    }
+    assertActionContext(context)
+    if (actions?.replaceParent === undefined) throw unavailable('replace-parent')
+    return actions.replaceParent(request, context)
+  }
+
   const adapter: LocusManagementPort = {
+    ...(actions?.replaceParent === undefined ? {} : { replaceParent }),
     view,
     discovery,
     ...(defaultQa === undefined ? {} : { defaultQa }),
@@ -1024,6 +1087,8 @@ export function createLocusManagementPort(
           return archive(request, context)
         case 'stop':
           return stop(request, context)
+        case 'replace-parent':
+          return replaceParent(request, context)
         default: {
           const exhaustive: never = request
           throw new LocusManagementError('INVALID_REQUEST', `未知 locus action：${String(exhaustive)}`)

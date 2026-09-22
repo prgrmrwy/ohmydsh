@@ -571,16 +571,28 @@ export interface PetLocusRebuildAction extends PetLocusMutationFence {
   readonly parentLocusId?: string
   /** Rebuilt endpoint may claim the parent's default-Q&A slot only explicitly. */
   readonly asDefaultQa?: boolean
-  /**
-   * Rebuild against a NEWLY created main session instead of the recorded one.
-   *
-   * The recorded parent is the only session this endpoint ever served, so when
-   * the owner archived it a rebuild had no possible parent and always failed —
-   * the owner's only way back was to unarchive a session they may have retired
-   * on purpose. This is the explicit alternative, and it stays explicit: an
-   * ordinary mention must never pick a new main session on the owner's behalf.
-   */
-  readonly freshParent?: boolean
+}
+
+/**
+ * Move every entry of one archived main session onto ONE newly created one.
+ *
+ * A session-level action, not a per-entry one: the entries under an archived
+ * session all went out of service for the same reason, and the repair is one
+ * decision, so it must produce one replacement session. (The per-entry rebuild
+ * creates a main session per call, which would split a shared session into as
+ * many sessions as there are entries.)
+ *
+ * The client sends the entries it is rendering; the Host re-proves each one
+ * against its own rows, so a stale list moves nothing it should not.
+ */
+export interface PetLocusReplaceParentAction {
+  readonly action: 'replace-parent'
+  /** The archived main session whose entries are being moved. */
+  readonly parentSessionId: string
+  readonly entries: readonly {
+    readonly endpoint: PetLocusEndpointInput
+    readonly locusId: string
+  }[]
 }
 
 /** Discriminated mutation request accepted by the staged locus action route. */
@@ -592,6 +604,7 @@ export type PetLocusActionRequest =
   | PetLocusScopeAction
   | PetLocusConfirmAnchorAction
   | PetLocusRebuildAction
+  | PetLocusReplaceParentAction
 
 /** Result shared by all explicit locus actions. */
 export interface PetLocusActionResult {
@@ -623,6 +636,23 @@ export interface PetLocusRebuildResult extends PetLocusActionResult {
   readonly action: 'rebuild'
 }
 
+/**
+ * Result of moving an archived session's entries onto a new main session.
+ *
+ * Deliberately NOT a {@link PetLocusActionResult}: there is no single `locus`
+ * for a session-level operation, and pretending otherwise would make the
+ * client read one entry's outcome as the whole operation's.
+ */
+export interface PetLocusReplaceParentResult {
+  readonly action: 'replace-parent'
+  /** The newly created main session the entries were moved onto. */
+  readonly parentSessionId: string
+  /** Generations that were replaced, in request order. */
+  readonly replaced: readonly string[]
+  /** Entries the Host refused to move, with the reason it refused. */
+  readonly skipped: readonly { readonly locusId: string; readonly reason: string }[]
+}
+
 /** Dedicated route response for archive/retire. */
 export interface PetLocusArchiveResult extends PetLocusActionResult {
   readonly action: 'archive'
@@ -638,6 +668,7 @@ export type PetLocusBindRequest = PetLocusBindAction
 export type PetLocusUnbindRequest = PetLocusUnbindAction
 export type PetLocusScopeRequest = PetLocusScopeAction
 export type PetLocusRebuildRequest = PetLocusRebuildAction
+export type PetLocusReplaceParentRequest = PetLocusReplaceParentAction
 export type PetLocusArchiveRequest = PetLocusArchiveAction
 export type PetLocusStopRequest = PetLocusStopAction
 export type LocusEndpointView = PetLocusEndpointView
