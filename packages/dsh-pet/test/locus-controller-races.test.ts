@@ -838,8 +838,9 @@ describe('LocusChannelController queue/turn races', () => {
 })
 
 describe('LocusChannelController live policy gate', () => {
+  // A live policy that was READ and disagrees with the durable grant is real
+  // drift, and retiring the generation is the correct fail-closed answer.
   it.each([
-    { name: 'unknown policy', live: undefined },
     { name: 'mode drift to workspace-write', live: { mode: 'workspace-write', workspaceRoot: '/repo' } },
     { name: 'mode drift to danger-full-access', live: { mode: 'danger-full-access', workspaceRoot: '/repo' } },
   ])('invalidates before accept for $name with zero queue or reaction', async ({ live }) => {
@@ -867,6 +868,63 @@ describe('LocusChannelController live policy gate', () => {
     expect(ledger.calls).toEqual([])
     expect(queued).not.toHaveBeenCalled()
     expect(marked).not.toHaveBeenCalled()
+  })
+
+  // The message is still refused (serving work against a policy nobody could
+  // confirm would be fail-open), but the GENERATION is kept. Retiring it here
+  // was the bug: not being able to read a policy says nothing about whether the
+  // stored grant still matches, and treating it as drift made a transient
+  // condition permanent — every Host restart plus every other message lost its
+  // reply, while the recovery added another child session for the same group.
+  it('refuses without retiring the generation when the policy cannot be read', async () => {
+    const observer = new SynchronousTurnObserver()
+    const ledger = new MemoryDeliveryLedger()
+    const queued = vi.fn()
+    const marked = vi.fn()
+    const invalidate = vi.fn()
+    const controller = new LocusChannelController({
+      ...baseDeps(ledger, observer),
+      child: {
+        ensureChild: () => ({ parentSessionId: LOCUS.parentSessionId, childSessionId: LOCUS.childSessionId }),
+        withChildSession: async input => ({ ok: true as const, value: await input.operation({ id: LOCUS.childSessionId }) }),
+        queueChild: queued,
+      },
+      resolveLivePolicy: () => undefined,
+      invalidatePolicyDrift: invalidate,
+      receipts: { markAccepted: marked, markSettled: vi.fn() },
+    })
+
+    await expect(controller.handleAdmission(acceptedAdmission('message-unreadable'))).resolves.toEqual({
+      kind: 'refused', reason: 'policy-unreadable',
+    })
+    expect(invalidate).not.toHaveBeenCalled()
+    expect(ledger.calls).toEqual([])
+    expect(queued).not.toHaveBeenCalled()
+    expect(marked).not.toHaveBeenCalled()
+  })
+
+  // Same for a child the Host cannot reach right now: report it as
+  // unreadable, never as drift.
+  it('refuses without retiring the generation when the child cannot be reached', async () => {
+    const observer = new SynchronousTurnObserver()
+    const ledger = new MemoryDeliveryLedger()
+    const invalidate = vi.fn()
+    const controller = new LocusChannelController({
+      ...baseDeps(ledger, observer),
+      child: {
+        ensureChild: () => ({ parentSessionId: LOCUS.parentSessionId, childSessionId: LOCUS.childSessionId }),
+        withChildSession: async () => ({ ok: false as const, reason: 'child-session-access-failed' }),
+        queueChild: vi.fn(),
+      },
+      resolveLivePolicy: () => ({ mode: 'read-only', workspaceRoot: '/repo' }),
+      invalidatePolicyDrift: invalidate,
+      receipts: { markAccepted: vi.fn(), markSettled: vi.fn() },
+    })
+
+    await expect(controller.handleAdmission(acceptedAdmission('message-unreachable'))).resolves.toEqual({
+      kind: 'refused', reason: 'policy-unreadable',
+    })
+    expect(invalidate).not.toHaveBeenCalled()
   })
 
   it('rejects a write root mismatch before accept and persists the pause diagnostic', async () => {

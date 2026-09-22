@@ -478,6 +478,8 @@ export type LocusControllerDiagnostic =
   | 'child-unavailable'
   | 'child-identity-mismatch'
   | 'policy-drift'
+  /** Live policy could not be READ (not a mismatch); the message is refused but the generation is kept. */
+  | 'policy-unreadable'
   | 'delivery-persistence-failed'
   | 'delivery-conflict'
   | 'duplicate-delivery'
@@ -518,6 +520,8 @@ export type LocusControllerRefusal =
   | 'child-unavailable'
   | 'child-identity-mismatch'
   | 'policy-drift'
+  /** Live policy could not be READ (not a mismatch); the message is refused but the generation is kept. */
+  | 'policy-unreadable'
   | 'delivery-persistence-failed'
   | 'delivery-conflict'
   | 'queue-failed'
@@ -1128,12 +1132,25 @@ export class LocusChannelController {
     // this operation boundary, before creating ANY Delivery/reaction/queue.
     const policyVerification = await this.verifyLivePolicy(locus, child, signal)
     if (!policyVerification.ok) {
-      try {
-        await this.deps.invalidatePolicyDrift?.({ locus, reason: policyVerification.diagnostic })
-      } catch {
-        // Failure to persist the pause is still fail closed for this request.
+      // Retire the generation ONLY when the live policy was actually read and
+      // disagrees with the durable grant. A failure to READ it — the child is
+      // not resident after a restart, the capability is absent — is transient
+      // and says nothing about the grant; invalidating on it turned a
+      // recoverable condition into a permanent one, so every restart and every
+      // other message lost its reply while the recovery created yet another
+      // child for the same group.
+      //
+      // The message is still refused either way: serving work against a policy
+      // nobody could confirm would be fail-open.
+      if (policyVerification.fatal) {
+        try {
+          await this.deps.invalidatePolicyDrift?.({ locus, reason: policyVerification.diagnostic })
+        } catch {
+          // Failure to persist the pause is still fail closed for this request.
+        }
+        return this.refuse('policy-drift')
       }
-      return this.refuse('policy-drift')
+      return this.refuse('policy-unreadable')
     }
 
     const locusId = locusIdOf(locus)
@@ -1579,13 +1596,32 @@ export class LocusChannelController {
     locus: ActiveLocus,
     child: LocusChildIdentity,
     signal: AbortSignal,
-  ): Promise<{ readonly ok: true } | { readonly ok: false; readonly diagnostic: string }> {
+  ): Promise<
+    | { readonly ok: true }
+    /**
+     * `fatal` distinguishes a DURABLE disagreement from a failure to READ.
+     *
+     * Only a real disagreement means the stored grant no longer describes the
+     * child, and only that justifies retiring the generation. Not being able
+     * to read the policy — the child is not resident, the capability is absent
+     * — says nothing about the grant, and treating it as drift made a
+     * TRANSIENT access failure permanently invalidate the locus: observed as
+     * every Host restart plus every other message losing its reply, with the
+     * recovery creating a fresh child each time until three of them piled up
+     * for one group.
+     */
+    | { readonly ok: false; readonly diagnostic: string; readonly fatal: boolean }
+  > {
     if (
       locus.permission === undefined ||
       this.deps.child.withChildSession === undefined ||
       this.deps.resolveLivePolicy === undefined
     ) {
-      return { ok: false, diagnostic: 'live sandbox policy verification capability is unavailable' }
+      return {
+        ok: false,
+        diagnostic: 'live sandbox policy verification capability is unavailable',
+        fatal: false,
+      }
     }
     try {
       const result = await this.deps.child.withChildSession({
@@ -1600,7 +1636,13 @@ export class LocusChannelController {
         // unreachable — the failure that put devbox's only locus into
         // `invalid` recorded nothing but `child-session-access-failed`.
         const detail = result.detail === undefined ? '' : `: ${result.detail}`
-        return { ok: false, diagnostic: `continuation owner rejected live policy read (${result.reason}${detail})` }
+        return {
+          ok: false,
+          diagnostic: `continuation owner rejected live policy read (${result.reason}${detail})`,
+          // Could not READ the child's policy. Says nothing about whether the
+          // stored grant still matches, so it must not retire the generation.
+          fatal: false,
+        }
       }
       const livePolicy = result.value as { readonly mode?: string; readonly workspaceRoot?: string } | undefined
       const verified = verifyLocusLivePolicy({
@@ -1609,9 +1651,16 @@ export class LocusChannelController {
       }, livePolicy)
       return verified.ok
         ? { ok: true }
-        : { ok: false, diagnostic: verified.diagnostic }
+        : {
+            ok: false,
+            diagnostic: verified.diagnostic,
+            // Only a live policy that was actually READ and disagrees with the
+            // durable grant is drift. `policy-unavailable` means the read
+            // produced nothing to compare.
+            fatal: verified.reason === 'mode-mismatch' || verified.reason === 'write-disabled',
+          }
     } catch {
-      return { ok: false, diagnostic: 'live sandbox policy read failed' }
+      return { ok: false, diagnostic: 'live sandbox policy read failed', fatal: false }
     }
   }
 

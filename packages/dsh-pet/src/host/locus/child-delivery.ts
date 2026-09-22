@@ -74,7 +74,17 @@ export function createLocusChildDelivery(ports: LocusChildDeliveryPorts): {
     readonly identity: LocusChildIdentity
     readonly operation: (session: unknown) => T | Promise<T>
     readonly signal?: AbortSignal
-  }): Promise<{ readonly ok: true; readonly value: T } | { readonly ok: false; readonly reason: string }>
+  }): Promise<
+    | { readonly ok: true; readonly value: T }
+    // `detail` MUST survive this seam: it carries the adapter's underlying host
+    // message, and this forwarder IS the production path (`index.ts` wires the
+    // controller's `child` port to this factory, not to `LocusChildAdapter`
+    // directly). Rebuilding the failure as `{ ok: false, reason }` dropped it,
+    // which is why a locus invalidated by a failed live-policy read recorded
+    // only `child-session-access-failed` and left no way to distinguish a lost
+    // child residency from a genuine authorization failure.
+    | { readonly ok: false; readonly reason: string; readonly detail?: string }
+  >
   dispose(): void
 } {
   if ((ports.adapter === undefined) === (ports.createAdapter === undefined)) {
@@ -163,7 +173,13 @@ export function createLocusChildDelivery(ports: LocusChildDeliveryPorts): {
       const result = await adapter.withChildSession(input)
       return result.ok
         ? { ok: true, value: result.value }
-        : { ok: false, reason: result.reason }
+        : {
+            ok: false,
+            reason: result.reason,
+            // Forwarded verbatim: the diagnostic is the whole point of having
+            // it, and dropping it here is what made the failure opaque.
+            ...(result.detail === undefined ? {} : { detail: result.detail }),
+          }
     },
 
     dispose() {
