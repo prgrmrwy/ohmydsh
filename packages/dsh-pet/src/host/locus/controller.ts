@@ -317,6 +317,22 @@ export interface RebuildLocusRequest {
    * session the same way first-time provisioning does.
    */
   readonly allowFreshParent?: boolean
+  /**
+   * Rebuild a generation that is NOT terminal, because its recorded main
+   * session is archived.
+   *
+   * The generic rebuild refuses anything but a tombstone, and that guard is
+   * what keeps a healthy generation from being replaced by mistake. An
+   * archived main session is the exception the owner asked for: the endpoint
+   * genuinely cannot serve (the archive fact outranks `active`), yet its row
+   * is not a tombstone, so without this the session-level "use a new main
+   * session" action would have no way to move its entries.
+   *
+   * Only the owner-facing session-level action sets this, and this method
+   * re-proves the archived fact for THIS generation before accepting it — the
+   * flag alone authorizes nothing.
+   */
+  readonly replaceArchivedParent?: boolean
 }
 
 export interface RebuildLocusResult {
@@ -329,6 +345,7 @@ export interface RebuildLocusResult {
 
 export type LocusControllerErrorCode =
   | 'INVALID_ENDPOINT'
+  | 'INVALID_REQUEST'
   | 'INVALID_PARENT'
   | 'PARENT_NOT_FOUND'
   | 'PARENT_NOT_ALLOWED'
@@ -814,7 +831,14 @@ export class LocusController {
           throw new LocusControllerError('REPOSITORY_INCONSISTENT', '入口当前代际已变化，请刷新后重试。')
         }
         if (previous.state !== 'stopped' && previous.state !== 'invalid' && previous.state !== 'retired') {
-          throw new LocusControllerError('GROUP_UNAVAILABLE', '只有停止、失效或退役入口可以显式重建。')
+          // A non-terminal generation may be replaced ONLY when this exact
+          // generation's recorded main session is archived, re-proved here
+          // rather than trusted from the caller's flag.
+          const archivedParent = request.replaceArchivedParent === true &&
+            await this.isArchivedSession(previous.parentSessionId)
+          if (!archivedParent) {
+            throw new LocusControllerError('GROUP_UNAVAILABLE', '只有停止、失效或退役入口可以显式重建。')
+          }
         }
         if (!(await this.deps.repository.isLocusIdle(previous.locusId))) {
           throw new LocusControllerError('BUSY', '入口仍有执行中或排队消息，请空闲后再重建。')
@@ -1472,6 +1496,121 @@ export class LocusController {
         state: 'active',
       }
     }
+  }
+
+  /** Whether the exact recorded session is archived, proved from the Host. */
+  private async isArchivedSession(sessionId: string): Promise<boolean> {
+    if (sessionId.trim() === '') return false
+    try {
+      const session = await this.deps.dsh.resolveSession(sessionId)
+      return session !== undefined && session.id === sessionId && session.state === 'archived'
+    } catch {
+      // Cannot prove it is archived, and treating "unknown" as archived would
+      // let an unreadable registry replace a generation that is serving fine.
+      return false
+    }
+  }
+
+  /**
+   * Move every entry of one archived main session onto ONE newly created main.
+   *
+   * This is a SESSION-level operation on purpose. The entries listed under an
+   * archived session all went out of service for the same reason, and the
+   * repair is a single decision — "stop using that session" — so it must
+   * produce a single replacement session. Rebuilding each entry through the
+   * per-entry path would create one new main session per entry, silently
+   * splitting what used to be one shared session into as many as there are
+   * groups.
+   *
+   * Entries are re-proved one by one: each must still be the current
+   * generation of its endpoint and must still record the archived session as
+   * its parent. A stale panel list therefore moves nothing it should not.
+   * @param request - the archived session plus the entries the owner selected.
+   * @returns the replacement session and one outcome per requested entry.
+   */
+  async replaceArchivedParent(request: {
+    readonly parentSessionId: string
+    readonly entries: readonly {
+      readonly endpoint: LocusEndpoint
+      readonly locusId: string
+    }[]
+  }): Promise<{
+    readonly parentSessionId: string
+    readonly replaced: readonly string[]
+    readonly skipped: readonly { readonly locusId: string; readonly reason: string }[]
+  }> {
+    const recorded = requireNonEmpty(request.parentSessionId, 'parentSessionId')
+    if (request.entries.length === 0) {
+      throw new LocusControllerError('INVALID_REQUEST', '没有指定要迁移的入口。')
+    }
+    if (!(await this.isArchivedSession(recorded))) {
+      // Refuse rather than no-op: the owner asked for a repair that only an
+      // archived session needs, so a non-archived one means a stale panel —
+      // and moving entries off a serving session would be destructive.
+      throw new LocusControllerError(
+        'PARENT_NOT_ALLOWED',
+        '该主会话当前未被归档，无需接替；如要更换主会话请在单个入口上重建。',
+      )
+    }
+    const session = await this.deps.dsh.resolveSession(recorded)
+    const workspaceId = session?.workspaceId?.trim() ?? ''
+    if (workspaceId === '') {
+      throw new LocusControllerError('PARENT_NOT_FOUND', '原主会话的工作区无法确认，已停止操作。')
+    }
+
+    // One replacement for the whole session, created in the ARCHIVED
+    // session's own workspace: relocating the owner's entries into the
+    // configured default workspace would move their work somewhere they never
+    // put it.
+    const anchor = request.entries[0]!
+    const created = await this.deps.dsh.createMainSession({
+      workspaceId,
+      label: this.mainLabel(endpointOf(
+        anchor.endpoint.threadId === undefined
+          ? { chatId: anchor.endpoint.chatId }
+          : { chatId: anchor.endpoint.chatId, threadId: anchor.endpoint.threadId },
+      ), session?.title),
+      chatId: anchor.endpoint.chatId,
+    })
+    assertSessionShape(created, undefined, workspaceId, '接替用主会话')
+
+    const replaced: string[] = []
+    const skipped: { readonly locusId: string; readonly reason: string }[] = []
+    for (const entry of request.entries) {
+      try {
+        await this.rebuildExplicit({
+          endpoint: entry.endpoint,
+          previousLocusId: entry.locusId,
+          parentSessionId: created.id,
+          // Re-proves the archived parent for THIS generation inside the
+          // rebuild, which is what authorizes replacing a non-terminal row.
+          replaceArchivedParent: true,
+        })
+        replaced.push(entry.locusId)
+      } catch (error: unknown) {
+        skipped.push({
+          locusId: entry.locusId,
+          reason: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
+    if (replaced.length === 0) {
+      // Nothing moved, so the freshly created session has no owner. Releasing
+      // it keeps the failed attempt from leaving an orphan main session that
+      // looks like the owner's work.
+      try {
+        await this.deps.dsh.releaseSession?.(created.id)
+      } catch {
+        // A failed cleanup is reported by the caller's empty `replaced` list.
+      }
+      throw new LocusControllerError(
+        'GROUP_UNAVAILABLE',
+        skipped[0] === undefined
+          ? '没有任何入口被迁移。'
+          : `没有任何入口被迁移：${skipped[0].reason}`,
+      )
+    }
+    return { parentSessionId: created.id, replaced, skipped }
   }
 
   private async resolveMainParent(

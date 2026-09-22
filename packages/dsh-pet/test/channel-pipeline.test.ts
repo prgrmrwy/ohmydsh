@@ -277,8 +277,8 @@ describe('unified locus precedence', () => {
     // `retired-endpoint` means a unified generation exists but is not active, so
     // the entry already has a row in the owner surface. The notice must name
     // BOTH repairs, because one of the ways an endpoint lands here is an
-    // archived main session, where "just rebuild" would silently move the entry
-    // onto a new main session the owner never chose.
+    // archived main session — restoring that session is one answer, abandoning
+    // it is the other, and the second is a decision about the SESSION.
     const handle = vi.fn(async () => ({ kind: 'ignored' as const, reason: 'retired-endpoint' }))
     const pipeline = new InboundPipeline({
       repository: f.harness.repository,
@@ -294,10 +294,12 @@ describe('unified locus precedence', () => {
       kind: 'ignored', reason: 'retired-endpoint',
     })
     expect(f.client.reply).toHaveBeenCalledWith('om_1', expect.stringContaining('Pet 设置页'))
-    expect(f.client.reply).toHaveBeenCalledWith('om_1', expect.stringContaining('用新的主会话重建'))
+    expect(f.client.reply).toHaveBeenCalledWith('om_1', expect.stringContaining('用新的主会话接替'))
     // Restoring the archived session has to be offered too: an owner who still
-    // wants that session must not be pushed into creating another one.
+    // wants that session must not be pushed into creating another one. It is
+    // also the only repair that needs no rebuild at all.
     expect(f.client.reply).toHaveBeenCalledWith('om_1', expect.stringContaining('会话归档管理'))
+    expect(f.client.reply).toHaveBeenCalledWith('om_1', expect.stringContaining('自动恢复服务'))
     expect(f.dispatched).toEqual([])
   })
 

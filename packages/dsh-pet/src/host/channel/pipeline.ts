@@ -162,14 +162,15 @@ export function renderLocusUnavailableReply(reason: 'legacy-endpoint' | 'retired
       + '请在本入口 @ 机器人并发送 /bind 加目标会话 id 前缀（至少 6 位）重新建立关联；新入口从只读（read）权限开始。'
   }
   // Two repairs reach this one sentence now, and naming only one of them makes
-  // the other invisible to the person reading it: an endpoint also lands here
-  // when its main session was ARCHIVED, where "just rebuild it" would silently
-  // move the entry onto a brand-new main session — a switch the owner is
-  // entitled to make deliberately, not by following a one-line instruction.
+  // the other invisible to the person reading it. An endpoint also lands here
+  // when its main session was ARCHIVED: restoring that session brings the entry
+  // back by itself, while abandoning it is a decision about the SESSION, taken
+  // once for every entry under it — so the text sends the owner to the session,
+  // not to a per-entry button that could never succeed.
   return '这个入口已停止服务，需要重建后才会继续应答。'
-    + '如果它的主会话已被归档，可以先在「会话归档管理」里恢复该主会话；'
-    + '不想再用那个主会话时，在 Pet 设置页「Locus 管理」里选「用新的主会话重建」即可换一个。'
-    + '新入口从只读（read）权限开始。'
+    + '如果它的主会话已被归档：在「会话归档管理」里恢复该主会话，本入口会自动恢复服务；'
+    + '不想再用那个主会话时，在 Pet 设置页「Locus 管理」里找到该主会话，点「用新的主会话接替」，'
+    + '它名下的入口会一起迁到新建的主会话上。新入口从只读（read）权限开始。'
 }
 
 /**

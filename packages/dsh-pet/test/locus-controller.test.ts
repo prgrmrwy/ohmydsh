@@ -118,7 +118,18 @@ interface FakeHost {
   failNotification?: boolean
 }
 
-function fakeHost(options: { defaultWorkspace?: string } = {}): FakeHost {
+function fakeHost(options: {
+  defaultWorkspace?: string
+  /**
+   * Session ids the Host reports as archived.
+   *
+   * Modelled on the harness rather than on a mutable probe so a test states the
+   * archive fact once and every reader — the parent resolver, the rebuild gate,
+   * the session-level replacement — sees the same answer, which is the whole
+   * point of the gate.
+   */
+  readonly archived?: readonly string[]
+} = {}): FakeHost {
   const repository = new MemoryLocusRepository()
   const createdMains: { workspaceId: string; chatId: string }[] = []
   const createdChildren: { parentSessionId: string; endpoint: { chatId: string; threadId?: string } }[] = []
@@ -136,7 +147,13 @@ function fakeHost(options: { defaultWorkspace?: string } = {}): FakeHost {
   const deps: LocusControllerDeps = {
     repository,
     dsh: {
-      resolveSession: async id => sessions.get(id),
+      resolveSession: async id => {
+        const session = sessions.get(id)
+        if (session === undefined) return undefined
+        return options.archived?.includes(id) === true
+          ? { ...session, state: 'archived' as const }
+          : session
+      },
       resolveDefaultWorkspace: async () =>
         options.defaultWorkspace === undefined
           ? { id: 'ws-default', title: '默认工作区' }
@@ -676,6 +693,135 @@ describe('explicit rebuild', () => {
     })
     expect(host.repository.loci.get(first.locus.locusId)?.state).toBe('stopped')
     expect(host.repository.groups.get('oc-rebuild')).toMatchObject({ state: 'active', mainSessionId: 'source-1' })
+  })
+
+  /**
+   * The session-level repair. It exists because the per-entry rebuild reuses
+   * the recorded main session — exactly the session that cannot serve — so an
+   * archived session left every entry under it with no working repair, and the
+   * per-entry path cannot replace the session for all of them at once.
+   */
+  describe('session-level replacement of an archived main session', () => {
+    /**
+     * The real sequence, which matters: entries are created on a LIVE session
+     * and the owner archives it afterwards. Creating one directly on an
+     * archived session is refused by design, so a fixture that started
+     * archived could not exist.
+     */
+    const archivedHost = async (chatIds: readonly string[]) => {
+      const archived: string[] = []
+      const host = fakeHost({ archived })
+      const controller = new LocusController(host.deps)
+      const created: { endpoint: { chatId: string }; locusId: string }[] = []
+      for (const chatId of chatIds) {
+        const group = await controller.ensureGroup({ chatId, parentSessionId: 'source-1' })
+        created.push({ endpoint: { chatId }, locusId: group.locus.locusId })
+      }
+      archived.push('source-1')
+      return { host, controller, created }
+    }
+
+    it('moves every entry onto ONE newly created session', async () => {
+      const { host, controller, created } = await archivedHost(['oc-a', 'oc-b'])
+      const before = host.createdMains.length
+
+      const result = await controller.replaceArchivedParent({
+        parentSessionId: 'source-1',
+        entries: created,
+      })
+
+      // ONE replacement for the whole session: the entries shared a session
+      // before, and they must still share one after.
+      expect(host.createdMains).toHaveLength(before + 1)
+      expect(host.createdMains.at(-1)).toEqual({ workspaceId: 'ws-source', chatId: 'oc-a' })
+      expect(result.parentSessionId).not.toBe('source-1')
+      expect(result.skipped).toEqual([])
+      expect(result.replaced).toEqual(created.map(entry => entry.locusId))
+
+      const rebuilt = [...host.repository.loci.values()]
+        .filter(record => record.parentSessionId === result.parentSessionId)
+      expect(rebuilt).toHaveLength(2)
+      // Each entry's NEWEST generation is the one on the replacement session;
+      // the old rows stay as durable history and are never resumed.
+      for (const entry of created) {
+        const newest = [...host.repository.loci.values()]
+          .filter(record => record.endpoint.chatId === entry.endpoint.chatId)
+          .sort((left, right) => left.generation - right.generation)
+          .at(-1)
+        expect(newest).toMatchObject({
+          parentSessionId: result.parentSessionId,
+          replacesLocusId: entry.locusId,
+        })
+      }
+    })
+
+    it('refuses a session that is not archived instead of moving anything', async () => {
+      const host = fakeHost()
+      const controller = new LocusController(host.deps)
+      const group = await controller.ensureGroup({ chatId: 'oc-not-archived', parentSessionId: 'source-1' })
+      const before = host.createdMains.length
+
+      await expect(controller.replaceArchivedParent({
+        parentSessionId: 'source-1',
+        entries: [{ endpoint: { chatId: 'oc-not-archived' }, locusId: group.locus.locusId }],
+      })).rejects.toMatchObject({ code: 'PARENT_NOT_ALLOWED' })
+      expect(host.createdMains).toHaveLength(before)
+    })
+
+    it('releases the replacement session when no entry could be moved', async () => {
+      const { host, controller } = await archivedHost(['oc-c'])
+      const before = host.createdMains.length
+
+      await expect(controller.replaceArchivedParent({
+        parentSessionId: 'source-1',
+        entries: [{ endpoint: { chatId: 'oc-c' }, locusId: 'stale-locus-id' }],
+      })).rejects.toMatchObject({ code: 'GROUP_UNAVAILABLE' })
+      // The failed attempt must not leave an orphan main session behind: it
+      // would look like the owner's work and pollute every session surface.
+      expect(host.createdMains).toHaveLength(before + 1)
+      const orphan = host.released.at(-1)
+      expect(orphan).toMatch(/^main-/)
+      expect([...host.repository.loci.values()].some(record => record.parentSessionId === orphan)).toBe(false)
+    })
+
+    it('replaces a non-terminal generation ONLY when its parent is archived', async () => {
+      const { host, controller, created } = await archivedHost(['oc-d'])
+      const entry = created[0]!
+      const record = host.repository.loci.get(entry.locusId)!
+      expect(record.state).toBe('active')
+
+      // Without the owner-facing flag the generic rebuild still refuses an
+      // active generation — the guard that keeps a healthy row from being
+      // replaced by mistake is unchanged.
+      await expect(controller.rebuildExplicit({
+        endpoint: entry.endpoint,
+        previousLocusId: entry.locusId,
+        parentSessionId: 'source-1',
+      })).rejects.toMatchObject({ code: 'GROUP_UNAVAILABLE' })
+
+      // With it, and with the archived fact re-proved by the controller.
+      const rebuilt = await controller.rebuildExplicit({
+        endpoint: entry.endpoint,
+        previousLocusId: entry.locusId,
+        parentSessionId: 'source-2',
+        replaceArchivedParent: true,
+      })
+      expect(rebuilt.locus).toMatchObject({ parentSessionId: 'source-2', generation: record.generation + 1 })
+    })
+
+    it('refuses the flag when the recorded parent is NOT archived', async () => {
+      const host = fakeHost()
+      const controller = new LocusController(host.deps)
+      const group = await controller.ensureGroup({ chatId: 'oc-flag', parentSessionId: 'source-1' })
+
+      // The flag alone authorizes nothing: the archived fact is re-proved here.
+      await expect(controller.rebuildExplicit({
+        endpoint: { chatId: 'oc-flag' },
+        previousLocusId: group.locus.locusId,
+        parentSessionId: 'source-2',
+        replaceArchivedParent: true,
+      })).rejects.toMatchObject({ code: 'GROUP_UNAVAILABLE' })
+    })
   })
 
   it('refuses stale or busy explicit rebuild without creating another child', async () => {

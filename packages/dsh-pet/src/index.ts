@@ -2941,11 +2941,6 @@ async function initialize(
               previousLocusId: request.expectedLocusId!,
               parentSessionId: request.parentSessionId,
               ...(request.asDefaultQa === undefined ? {} : { asDefaultQa: request.asDefaultQa }),
-              // The owner explicitly asked for a different main session. Only
-              // this flag may replace the recorded parent on an owner-driven
-              // rebuild; without it the panel keeps explaining which session to
-              // restore.
-              ...(request.freshParent === true ? { allowFreshParent: true } : {}),
             })
             const view = await locusManagement.view()
             const locus = view.loci.find(item => item.locusId === rebuilt.locus.locusId)
@@ -2959,6 +2954,27 @@ async function initialize(
               previousLocus,
               created: true,
               reused: false,
+            }
+          },
+          replaceParent: async (request) => {
+            // Session-level repair for an archived main session: the
+            // controller creates ONE replacement session and moves each
+            // requested entry onto it, re-proving the archived parent and the
+            // exact generation per entry.
+            const result = await locusProvisioningController.replaceArchivedParent({
+              parentSessionId: request.parentSessionId,
+              entries: request.entries.map(entry => ({
+                endpoint: entry.endpoint.threadId === undefined
+                  ? { chatId: entry.endpoint.chatId }
+                  : { chatId: entry.endpoint.chatId, threadId: entry.endpoint.threadId },
+                locusId: entry.locusId,
+              })),
+            })
+            return {
+              action: 'replace-parent' as const,
+              parentSessionId: result.parentSessionId,
+              replaced: result.replaced,
+              skipped: result.skipped,
             }
           },
         },
