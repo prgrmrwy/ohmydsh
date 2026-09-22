@@ -1850,13 +1850,26 @@ async function initialize(
   // Legacy rows participate only as a terminal retirement marker. They never
   // supply routing, session identity, workspace or permission to the new path.
   const retiredAssociations = asRetiredAssociationStore(repository)
+  /**
+   * One reader for the owner's archive set, shared by every layer that must
+   * agree on it: admission (does this endpoint still answer at all?) and
+   * resolution (may this generation serve or be replaced?). Reading it in two
+   * places with two implementations is how "archived" would end up meaning two
+   * different things depending on which gate asked first.
+   */
+  const isSessionArchived = (sessionId: string): boolean =>
+    ((ctx.workspaceRegistry.archivedSessionIds ?? []) as readonly unknown[])
+      .some(id => String(id) === sessionId)
+
   const locusAuthorization = createDurableLocusAuthorizationResolver(
     locusRepository,
     retiredAssociations,
+    isSessionArchived,
   )
   const locusResolution = createLocusResolution({
     store: locusRepository,
     retired: retiredAssociations,
+    isSessionArchived,
     ...(locusProvisioningController === undefined
       ? {}
       : {
@@ -2834,6 +2847,10 @@ async function initialize(
   let locusManagement!: ReturnType<typeof createLocusManagementPort>
   locusManagement = createLocusManagementPort({
     repository: locusRepository as never,
+    // The same live reader admission and resolution already share: the panel
+    // must agree with the channel about whether this entry can still serve,
+    // otherwise one of them offers a repair while the other refuses it.
+    isSessionArchived,
     resolvers: {
       main: describeSession,
       child: describeSession,
@@ -2924,6 +2941,11 @@ async function initialize(
               previousLocusId: request.expectedLocusId!,
               parentSessionId: request.parentSessionId,
               ...(request.asDefaultQa === undefined ? {} : { asDefaultQa: request.asDefaultQa }),
+              // The owner explicitly asked for a different main session. Only
+              // this flag may replace the recorded parent on an owner-driven
+              // rebuild; without it the panel keeps explaining which session to
+              // restore.
+              ...(request.freshParent === true ? { allowFreshParent: true } : {}),
             })
             const view = await locusManagement.view()
             const locus = view.loci.find(item => item.locusId === rebuilt.locus.locusId)

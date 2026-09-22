@@ -377,7 +377,7 @@ export const LOCUS_ACTION_FIELDS: Readonly<Record<PetLocusActionRequest['action'
     'action', 'endpoint', 'locusId', 'executionRoot', 'projectResources', 'constraints', 'existence',
     ...LOCUS_FENCE_FIELDS,
   ],
-  rebuild: ['action', 'endpoint', 'parentSessionId', 'workspaceId', 'parentLocusId', 'asDefaultQa', ...LOCUS_FENCE_FIELDS],
+  rebuild: ['action', 'endpoint', 'parentSessionId', 'workspaceId', 'parentLocusId', 'asDefaultQa', 'freshParent', ...LOCUS_FENCE_FIELDS],
   archive: ['action', 'endpoint', 'locusId', ...LOCUS_FENCE_FIELDS],
   stop: ['action', 'endpoint', 'locusId', ...LOCUS_FENCE_FIELDS],
 }
@@ -461,6 +461,7 @@ function parseLocusAction(body: unknown, expectedAction?: PetLocusActionRequest[
       }
     case 'rebuild': {
       const asDefaultQa = optionalBoolean(record, 'asDefaultQa')
+      const freshParent = optionalBoolean(record, 'freshParent')
       return {
         action,
         endpoint: locusEndpointInput(record['endpoint']),
@@ -468,6 +469,7 @@ function parseLocusAction(body: unknown, expectedAction?: PetLocusActionRequest[
         ...(optionalString(record, 'workspaceId') === undefined ? {} : { workspaceId: optionalString(record, 'workspaceId')!.trim() }),
         ...(optionalString(record, 'parentLocusId') === undefined ? {} : { parentLocusId: optionalString(record, 'parentLocusId')!.trim() }),
         ...(asDefaultQa === undefined ? {} : { asDefaultQa }),
+        ...(freshParent === undefined ? {} : { freshParent }),
         ...fence,
       }
     }

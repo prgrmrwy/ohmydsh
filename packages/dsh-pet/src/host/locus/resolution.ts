@@ -113,6 +113,16 @@ export interface LocusResolutionPorts {
   readonly retired?: RetiredAssociationStore
   /** Stable diagnostics; never a message body or platform identifier. */
   readonly log?: (reason: LocusResolutionRefusal) => void
+  /**
+   * Whether one exact Session is archived by its owner.
+   *
+   * Required for the delivery gate to mean anything: nothing in the runtime
+   * refuses to resume an archived Session, so without this fact an endpoint
+   * whose main session the owner archived would keep serving and the archival
+   * would silently have no effect. Absent reads as "not archived", so a
+   * composition without the fact behaves exactly as it did before.
+   */
+  readonly isSessionArchived?: (sessionId: string) => boolean
 }
 
 /**
@@ -123,14 +133,25 @@ export interface LocusResolutionPorts {
  * partially served: the controller would otherwise queue work against an
  * identity nobody can execute.
  */
-function toActive(record: LocusRecord): ResolvedActiveLocus {
+function toActive(record: LocusRecord, parentArchived: boolean): ResolvedActiveLocus {
   // Classify via the ONE policy module rather than restating the rules here.
   // Serving stays strict for every non-serve disposition — including
   // `replace`, whose whole point is that the CURRENT generation is never
   // resumed (its child may lack the safe-v1 proof, and adopting it would
   // inherit the parent preset).
-  const disposition = dispositionOf(record)
+  const disposition = dispositionOf({ ...record, parentArchived })
   if (disposition.kind === 'terminal') {
+    // An archived main session is an OWNER action, so it reports the same
+    // repair an explicit stop does — "rebuild it from the panel" — rather than
+    // the generic unusable text. Anything else would send the owner looking
+    // for a Host fault that does not exist.
+    if (parentArchived) {
+      throw new LocusResolutionError(
+        'retired-endpoint',
+        '这个入口的主会话已被归档，普通 @ 不会自动恢复它。'
+          + '请在「会话归档管理」里恢复该主会话，或在 Pet 设置页「Locus 管理」里显式重建到一个新的主会话。',
+      )
+    }
     throw new LocusResolutionError(
       record.state === 'stopped' ? 'endpoint-stopped' : 'locus-unusable',
       record.state === 'stopped'
@@ -196,6 +217,23 @@ export function createLocusResolution(ports: LocusResolutionPorts): {
     }
   }
 
+  /**
+   * Read the archived fact without letting a broken probe become a refusal.
+   *
+   * A probe that throws cannot prove the session is archived, and turning
+   * "cannot tell" into "stopped" would take a working endpoint out of service
+   * on a diagnostic failure. The delivery also has the child/policy gates
+   * behind this one, so fail-open here is not fail-open overall.
+   */
+  const isArchived = (parentSessionId: string): boolean => {
+    if (ports.isSessionArchived === undefined) return false
+    try {
+      return ports.isSessionArchived(parentSessionId) === true
+    } catch {
+      return false
+    }
+  }
+
   return {
     resolveCurrent(endpoint) {
       let record: LocusRecord | undefined
@@ -209,7 +247,7 @@ export function createLocusResolution(ports: LocusResolutionPorts): {
       // the latter would let the caller establish a replacement and thereby
       // bypass the owner's explicit stop.
       try {
-        return toActive(record)
+        return toActive(record, isArchived(record.parentSessionId))
       } catch (error) {
         return refuse(error)
       }
@@ -224,7 +262,7 @@ export function createLocusResolution(ports: LocusResolutionPorts): {
       }
       if (record !== undefined) {
         try {
-          return toActive(record)
+          return toActive(record, isArchived(record.parentSessionId))
         } catch (error) {
           // Ask the ONE policy module whether this generation may be replaced
           // without the owner. `stopped`/`retired` record an owner decision
@@ -235,7 +273,9 @@ export function createLocusResolution(ports: LocusResolutionPorts): {
           // generation's child is never adopted or cold-resumed (it may lack
           // the safe-v1 proof). Only the REPLACEMENT is automatic; the old row
           // stays untouched as durable history.
-          if (dispositionOf(record).kind !== 'replace') return refuse(error)
+          if (dispositionOf({ ...record, parentArchived: isArchived(record.parentSessionId) }).kind !== 'replace') {
+            return refuse(error)
+          }
         }
       }
       // Before establishing anything, prove this endpoint is not a retired

@@ -571,6 +571,16 @@ export interface PetLocusRebuildAction extends PetLocusMutationFence {
   readonly parentLocusId?: string
   /** Rebuilt endpoint may claim the parent's default-Q&A slot only explicitly. */
   readonly asDefaultQa?: boolean
+  /**
+   * Rebuild against a NEWLY created main session instead of the recorded one.
+   *
+   * The recorded parent is the only session this endpoint ever served, so when
+   * the owner archived it a rebuild had no possible parent and always failed —
+   * the owner's only way back was to unarchive a session they may have retired
+   * on purpose. This is the explicit alternative, and it stays explicit: an
+   * ordinary mention must never pick a new main session on the owner's behalf.
+   */
+  readonly freshParent?: boolean
 }
 
 /** Discriminated mutation request accepted by the staged locus action route. */

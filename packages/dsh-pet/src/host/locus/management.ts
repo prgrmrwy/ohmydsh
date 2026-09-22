@@ -332,6 +332,14 @@ export interface CreateLocusManagementPortOptions {
     readonly parentSessionId: string
   }) => Promise<PetLocusOwnerProjection | undefined> | PetLocusOwnerProjection | undefined
   readonly actions?: LocusManagementActions
+  /**
+   * Whether one exact session is archived by its owner.
+   *
+   * Read live, never persisted onto the record, so restoring the session
+   * restores service without a rebuild in between. Absent reads as "nothing is
+   * archived", which keeps every caller that does not supply it unchanged.
+   */
+  readonly isSessionArchived?: (sessionId: string) => boolean
   /** Host change generation, when one exists; otherwise the adapter revision is used. */
   readonly generation?: () => number
   /** Current time for safe transition records and deterministic tests. */
@@ -912,7 +920,17 @@ export function createLocusManagementPort(
     assertExpected(target, request.expectedGeneration, request.expectedLocusId, request.expectedUpdatedAt)
     requireLatestEndpointMarker(repository, target, request.endpoint)
     if (target.state !== 'stopped' && target.state !== 'invalid' && target.state !== 'retired') {
-      throw new LocusManagementError('LOCUS_INVALID', '只有停止、失效或退役入口可以显式重建。')
+      // An ACTIVE generation whose main session the owner archived is the one
+      // further case where a rebuild is the owner's intended repair rather than
+      // a mistake. The runtime refuses to serve such an entry (the archive fact
+      // outranks `active`), so without this the panel would show a served entry
+      // with no way to act on the notice the chat just sent. Every other active
+      // generation stays protected from an explicit rebuild.
+      const archivedParent = target.state === 'active' &&
+        options.isSessionArchived?.(target.parentSessionId) === true
+      if (!archivedParent) {
+        throw new LocusManagementError('LOCUS_INVALID', '只有停止、失效或退役入口可以显式重建。')
+      }
     }
     requireIdle(repository, target)
     const trusted = assertActionContext(context, target)

@@ -83,6 +83,48 @@ describe('durable production authorization resolver', () => {
     expect(byState('switching')).toBe('unusable')
   })
 
+  // Archiving the main session is an OWNER action that is NOT an owner exit:
+  // the owner decided about the SESSION, never about this endpoint. Nothing in
+  // the runtime enforces it — both `dsh-agent` and the session controller
+  // resume an archived session without complaint — so without this fact the
+  // entry kept answering and the archival had no effect at all.
+  it('treats an archived main session as needing an explicit rebuild, never as Host-replaceable', () => {
+    const byState = (state: 'active' | 'invalid', parentArchived: boolean) =>
+      createDurableLocusAuthorizationResolver(
+        { getLatestLocusByEndpoint: () => ({ state, parentSessionId: 'session-parent' }) },
+        { find: () => undefined },
+        id => parentArchived && id === 'session-parent',
+      )({ chatId: GROUP, key: GROUP })
+
+    // `retired` is what produces the "needs an explicit rebuild" notice and
+    // suppresses auto-provisioning. `unusable` would let an ordinary mention
+    // establish a generation on a main session the owner never chose.
+    expect(byState('active', true)).toBe('retired')
+    expect(byState('invalid', true)).toBe('retired')
+
+    // Unarchived behaviour, including the Host-judged replacement, is untouched.
+    expect(byState('active', false)).toMatchObject({ state: 'authorized' })
+    expect(byState('invalid', false)).toBe('unusable')
+
+    // The fact is about THIS generation's recorded parent, not about the endpoint.
+    expect(
+      createDurableLocusAuthorizationResolver(
+        { getLatestLocusByEndpoint: () => ({ state: 'active', parentSessionId: 'session-other' }) },
+        { find: () => undefined },
+        id => id === 'session-parent',
+      )({ chatId: GROUP, key: GROUP }),
+    ).toMatchObject({ state: 'authorized' })
+
+    // A probe that cannot answer must never take a working endpoint down.
+    expect(
+      createDurableLocusAuthorizationResolver(
+        { getLatestLocusByEndpoint: () => ({ state: 'active', parentSessionId: 'session-parent' }) },
+        { find: () => undefined },
+        () => { throw new Error('registry unavailable') },
+      )({ chatId: GROUP, key: GROUP }),
+    ).toMatchObject({ state: 'authorized' })
+  })
+
   it('distinguishes never-created from legacy and propagates lookup failures', () => {
     const fresh = createDurableLocusAuthorizationResolver(
       { getLatestLocusByEndpoint: () => undefined },
