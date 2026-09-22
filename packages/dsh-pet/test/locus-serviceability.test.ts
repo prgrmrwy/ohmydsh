@@ -95,9 +95,27 @@ describe('locus serviceability policy', () => {
     for (const state of ALL_STATES) {
       // The two predicates partition the unavailable states; neither may
       // silently grow to cover the other's territory.
-      expect(isOwnerExit(state) && mayReplaceWithoutOwner(state)).toBe(false)
+      expect(isOwnerExit(state) && mayReplaceWithoutOwner({ state })).toBe(false)
     }
     expect(ALL_STATES.filter(isOwnerExit)).toEqual(['retired', 'stopped'])
-    expect(ALL_STATES.filter(mayReplaceWithoutOwner)).toEqual(['invalid'])
+    expect(ALL_STATES.filter(state => mayReplaceWithoutOwner({ state }))).toEqual(['invalid'])
+  })
+
+  /**
+   * An archived main session is the third case: an OWNER action that is not an
+   * owner exit. Treating it as Host-judged would let an ordinary mention pick a
+   * brand-new main session; treating it as an exit would fabricate a decision
+   * the owner never made about this endpoint.
+   */
+  it('never serves or replaces a generation whose main session is archived', () => {
+    expect(dispositionOf({ ...serve, parentArchived: true })).toMatchObject({ kind: 'terminal' })
+    // Not even a generation the Host would otherwise be free to replace.
+    expect(dispositionOf({ ...serve, state: 'invalid', parentArchived: true })).toMatchObject({
+      kind: 'terminal',
+    })
+    expect(mayReplaceWithoutOwner({ state: 'invalid', parentArchived: true })).toBe(false)
+    // ...and the fact is what decides, not the state: unarchived is unchanged.
+    expect(dispositionOf({ ...serve, parentArchived: false }).kind).toBe('serve')
+    expect(mayReplaceWithoutOwner({ state: 'invalid', parentArchived: false })).toBe(true)
   })
 })

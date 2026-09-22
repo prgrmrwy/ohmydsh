@@ -73,6 +73,22 @@ export interface ServiceabilitySubject {
   readonly childSessionId?: string
   readonly childComposition?: string
   readonly invalidReason?: string
+  /**
+   * Whether this endpoint's recorded main session is archived.
+   *
+   * Archiving the main session is an OWNER action, and it must not be
+   * silently undone: nothing in the runtime refuses to RESUME an archived
+   * session, so a delivery that only asked "can I reach the parent?" would
+   * revive it and keep serving — the owner's archival would have no effect at
+   * all. It is also not a HOST judgement, so it is not replaceable without the
+   * owner either: an ordinary mention must not quietly re-point the endpoint
+   * at a brand-new main session, which is exactly the "自动换来源" the spec
+   * forbids.
+   *
+   * Read from the live archive set rather than persisted onto the record, so
+   * restoring the session restores service with no rebuild in between.
+   */
+  readonly parentArchived?: boolean
 }
 
 /**
@@ -90,9 +106,15 @@ export function isOwnerExit(state: LocusState): boolean {
  * unavailable states: `invalid` is the only one that is a Host judgement
  * rather than an owner decision. Transient states (`provisioning`,
  * `switching`) are not "unavailable" and are excluded by the caller.
+ *
+ * An archived main session is the one case that is unavailable WITHOUT being a
+ * Host judgement: the owner acted, just not on this locus. Building a
+ * replacement would need a different main session, and choosing one on the
+ * owner's behalf is the switch the spec reserves for them.
  */
-export function mayReplaceWithoutOwner(state: LocusState): boolean {
-  return state === 'invalid'
+export function mayReplaceWithoutOwner(subject: Pick<ServiceabilitySubject, 'state' | 'parentArchived'>): boolean {
+  if (subject.parentArchived === true) return false
+  return subject.state === 'invalid'
 }
 
 /**
@@ -105,6 +127,17 @@ export function mayReplaceWithoutOwner(state: LocusState): boolean {
  * @returns the disposition every delivery-path layer must agree on.
  */
 export function dispositionOf(subject: ServiceabilitySubject): LocusDisposition {
+  // An archived main session outranks every other classification, including
+  // `active`: the child is intact and reachable, so nothing downstream would
+  // notice on its own that the session this endpoint belongs to was retired
+  // from the owner's view.
+  if (subject.parentArchived === true) {
+    return {
+      kind: 'terminal',
+      reason: 'the main session of this endpoint is archived by its owner; '
+        + 'restore that session, or rebuild the endpoint against a new one',
+    }
+  }
   if (subject.state === 'active') {
     const childSessionId = subject.childSessionId?.trim() ?? ''
     if (childSessionId === '') {
@@ -121,7 +154,7 @@ export function dispositionOf(subject: ServiceabilitySubject): LocusDisposition 
   if (isOwnerExit(subject.state)) {
     return { kind: 'terminal', reason: `endpoint was explicitly ${subject.state} by its owner` }
   }
-  if (mayReplaceWithoutOwner(subject.state)) {
+  if (mayReplaceWithoutOwner(subject)) {
     return {
       kind: 'replace',
       reason: subject.invalidReason === undefined

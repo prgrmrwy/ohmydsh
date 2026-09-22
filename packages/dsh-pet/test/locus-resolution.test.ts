@@ -31,6 +31,8 @@ function resolution(options: {
   readonly current?: LocusRecord | undefined
   readonly throws?: unknown
   readonly provisioning?: Parameters<typeof createLocusResolution>[0]['provisioning']
+  readonly archived?: readonly string[]
+  readonly archivedThrows?: boolean
 } = {}) {
   const diagnostics: LocusResolutionRefusal[] = []
   const port = createLocusResolution({
@@ -41,6 +43,10 @@ function resolution(options: {
       },
     },
     ...(options.provisioning === undefined ? {} : { provisioning: options.provisioning }),
+    isSessionArchived: id => {
+      if (options.archivedThrows === true) throw new Error('registry unavailable')
+      return (options.archived ?? []).includes(id)
+    },
     log: reason => { diagnostics.push(reason) },
   })
   return { port, diagnostics }
@@ -329,5 +335,77 @@ describe('establishing a locus for a new endpoint', () => {
 
     await expect(port.ensureForDelivery({ endpoint: ENDPOINT, messageId: 'om-1', signal }))
       .rejects.toThrow(failure)
+  })
+})
+
+/**
+ * An archived main session is an OWNER action that no layer of the runtime
+ * enforces: `dsh-agent` and the session controller both resume an archived
+ * session, so a delivery that only asked "can I reach the parent?" would revive
+ * it and keep serving. These hold the two halves that matter — the entry stops,
+ * and it does not quietly come back on a main session the owner never chose.
+ */
+describe('an archived main session stops the endpoint', () => {
+  it('refuses the current generation with the rebuild reason, not a Host fault', () => {
+    const { port, diagnostics } = resolution({
+      current: record({ state: 'active' }),
+      archived: ['main-1'],
+    })
+
+    // `retired-endpoint` is what the channel renders as "this entry needs an
+    // explicit rebuild". Reporting a generic unusable reason would send the
+    // owner looking for a Host fault that does not exist.
+    expect(() => port.resolveCurrent(ENDPOINT)).toThrowError(
+      expect.objectContaining({ reason: 'retired-endpoint' }),
+    )
+    expect(diagnostics).toContain('retired-endpoint')
+  })
+
+  it('does not auto-replace it, even though `invalid` alone would be replaceable', async () => {
+    const ensureForDelivery = vi.fn(async () => { throw new Error('must not provision') })
+    const { port } = resolution({
+      current: record({ state: 'invalid', invalidReason: 'child re-attach failed' }),
+      archived: ['main-1'],
+      provisioning: { ensureForDelivery },
+    })
+
+    await expect(port.ensureForDelivery({
+      endpoint: ENDPOINT, messageId: 'om-1', signal,
+    })).rejects.toThrowError()
+    // The whole point: an ordinary mention must NOT establish a generation on a
+    // main session the owner never chose. That switch belongs to the owner.
+    expect(ensureForDelivery).not.toHaveBeenCalled()
+  })
+
+  it('still replaces a Host-judged generation whose parent is NOT archived', async () => {
+    const ensureForDelivery = vi.fn(async () => ({
+      id: 'locus-2', generation: 3, endpoint: ENDPOINT, parentSessionId: 'main-1',
+      childSessionId: 'child-2', childComposition: 'safe-v1', workspaceId: 'ws-1',
+      source: 'auto', state: 'active',
+      permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
+      busy: false, createdAt: 2, updatedAt: 2,
+    } as LocusRecord))
+    const { port } = resolution({
+      current: record({ state: 'invalid', invalidReason: 'child re-attach failed' }),
+      archived: [],
+      provisioning: { ensureForDelivery },
+    })
+
+    await expect(port.ensureForDelivery({
+      endpoint: ENDPOINT, messageId: 'om-1', signal,
+    })).resolves.toMatchObject({ id: 'locus-2', state: 'active' })
+    expect(ensureForDelivery).toHaveBeenCalledOnce()
+  })
+
+  it('serves normally once the session is restored', () => {
+    // Read from the live archive set, never persisted onto the record, so
+    // restoring the session restores service with no rebuild in between.
+    const { port } = resolution({ current: record({ state: 'active' }), archived: [] })
+    expect(port.resolveCurrent(ENDPOINT)).toMatchObject({ id: 'locus-1', state: 'active' })
+  })
+
+  it('never turns an unreadable archive probe into a refusal', () => {
+    const { port } = resolution({ current: record({ state: 'active' }), archivedThrows: true })
+    expect(port.resolveCurrent(ENDPOINT)).toMatchObject({ id: 'locus-1', state: 'active' })
   })
 })

@@ -827,7 +827,21 @@ function locusFence(head: PetLocusView): {
  * excess-check spread properties — and the Host's `strictBody` answered
  * `Unknown request field 'locusId'` the moment an owner clicked 重建.
  */
-function locusRebuildRequest(head: PetLocusView): Parameters<typeof petApi.locusRebuild>[0] {
+function locusRebuildRequest(
+  head: PetLocusView,
+  options: {
+    /**
+     * Ask for a NEWLY created main session instead of the recorded one.
+     *
+     * The recorded parent is the only session this endpoint ever served, so
+     * when the owner archived it a rebuild had no possible parent at all —
+     * their only way back was to unarchive a session they may have retired on
+     * purpose. This is the explicit alternative, and it stays explicit: an
+     * ordinary mention must never pick a new main session on their behalf.
+     */
+    readonly freshParent?: boolean
+  } = {},
+): Parameters<typeof petApi.locusRebuild>[0] {
   return {
     action: 'rebuild',
     endpoint: locusEndpointInput(head.endpoint),
@@ -835,6 +849,7 @@ function locusRebuildRequest(head: PetLocusView): Parameters<typeof petApi.locus
     ...(head.workspace.workspaceId === '' ? {} : { workspaceId: head.workspace.workspaceId }),
     ...(head.parentLocusId === undefined ? {} : { parentLocusId: head.parentLocusId }),
     ...(head.isDefaultQa ? { asDefaultQa: true } : {}),
+    ...(options.freshParent === true ? { freshParent: true } : {}),
     expectedGeneration: head.generation,
     expectedLocusId: head.locusId,
     expectedUpdatedAt: head.state.updatedAt,
@@ -1177,12 +1192,19 @@ function LocusRow(props: {
             disabled={feishuLink === undefined}
             {...(feishuLink === undefined ? {} : { href: feishuLink })}
           />
-          {isTerminalLocusState(head.state.state) ? (
-            // Rebuild is the only action left on a tombstone, and it is legal
-            // ONLY on a tombstone, so it lives on the row rather than inside
-            // 更多: the default filter hides terminal entries, and burying
-            // their one way back two disclosures deep would make the default a
-            // dead end. Every other state would render it permanently disabled.
+          {/*
+            Rebuild is the only action left on a tombstone, so it lives on the
+            row rather than inside 更多: the default filter hides terminal
+            entries, and burying their one way back two disclosures deep would
+            make the default a dead end.
+
+            An ARCHIVED main session earns the same placement without being a
+            tombstone. The entry still reads `active`, but the channel refuses
+            to serve it and answers mentions with "this needs a rebuild", so a
+            row that offered no action would be telling the owner to do
+            something the panel does not let them do.
+          */}
+          {isTerminalLocusState(head.state.state) || head.main.availability === 'archived' ? (
             <button
               type="button"
               className="dshpet-action dshpet-action-sm"
@@ -1191,6 +1213,24 @@ function LocusRow(props: {
               onClick={() => props.onAction(`${head.locusId}:rebuild`, () => petApi.locusRebuild(locusRebuildRequest(head)))}
             >
               重建
+            </button>
+          ) : null}
+          {head.main.availability === 'archived' ? (
+            // The second repair, and it stays a deliberate choice: the ordinary
+            // 重建 above reuses the recorded main session (which the owner is
+            // expected to restore first), while this one creates a new main
+            // session and moves the entry onto it.
+            <button
+              type="button"
+              className="dshpet-action dshpet-action-sm"
+              disabled={props.busyKey !== undefined || head.state.busy}
+              title="新建一个主会话并把本入口改挂到它上面；原主会话保持归档不动"
+              onClick={() => props.onAction(
+                `${head.locusId}:rebuild-fresh-parent`,
+                () => petApi.locusRebuild(locusRebuildRequest(head, { freshParent: true })),
+              )}
+            >
+              用新的主会话重建
             </button>
           ) : null}
           <button

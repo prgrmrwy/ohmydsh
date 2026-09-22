@@ -28,12 +28,18 @@ function parentPort(options: {
   resident?: LocusLiveParent
   resumed?: LocusLiveParent
   resumeThrows?: boolean
+  archived?: readonly string[]
+  archivedThrows?: boolean
 } = {}): LocusParentPort {
   return {
     get: vi.fn(() => options.resident),
     resume: vi.fn(async () => {
       if (options.resumeThrows === true) throw new Error('not resumable')
       return options.resumed === undefined ? undefined : { agent: options.resumed }
+    }),
+    isArchived: vi.fn((id: string) => {
+      if (options.archivedThrows === true) throw new Error('registry unavailable')
+      return (options.archived ?? []).includes(id)
     }),
   }
 }
@@ -110,6 +116,39 @@ describe('generic locus child adapter', () => {
 
     const wrong = await resolveLocusParent(parentPort({ resumed: parent('session-other') }), PARENT_ID)
     expect(wrong).toEqual({ ok: false, reason: 'parent-unavailable' })
+  })
+
+  /**
+   * Archiving is an owner action and the runtime does not enforce it: `get`
+   * hands back a still-resident agent, and `resume` happily resurrects one that
+   * is not resident. Resolving an archived parent would therefore silently undo
+   * the owner's decision and keep the endpoint serving.
+   */
+  it('refuses an archived parent without touching the live registry', async () => {
+    const live = parent()
+    // Resident AND resumable: the only reason to refuse is the archive fact.
+    const port = parentPort({ resident: live, resumed: live, archived: [PARENT_ID] })
+
+    await expect(resolveLocusParent(port, PARENT_ID)).resolves.toEqual({
+      ok: false,
+      reason: 'parent-archived',
+    })
+    expect(port.get).not.toHaveBeenCalled()
+    expect(port.resume).not.toHaveBeenCalled()
+  })
+
+  it('resolves the same parent once it is no longer archived', async () => {
+    const live = parent()
+    await expect(resolveLocusParent(parentPort({ resident: live, archived: [] }), PARENT_ID))
+      .resolves.toEqual({ ok: true, parent: live })
+  })
+
+  it('treats an unreadable archive probe as "not archived" rather than a refusal', async () => {
+    const live = parent()
+    await expect(resolveLocusParent(
+      parentPort({ resident: live, archivedThrows: true }),
+      PARENT_ID,
+    )).resolves.toEqual({ ok: true, parent: live })
   })
 
   it('fails closed when parent resume throws or returns no agent', async () => {

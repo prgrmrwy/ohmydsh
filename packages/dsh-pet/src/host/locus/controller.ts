@@ -1504,7 +1504,8 @@ export class LocusController {
       throw new LocusControllerError(
         'PARENT_NOT_FOUND',
         `${operation} ${shortLocusSessionLabel(normalized, session.title)} 已被归档，已停止操作。` +
-        '请先在「会话归档管理」中恢复该会话，再重试。',
+        '两个可用的修法：在「会话归档管理」中恢复该会话后重试；' +
+        '或改用「用新的主会话重建」，让本入口改挂到一个新建的主会话上。',
       )
     }
     if (session === undefined || session.state === 'missing') {

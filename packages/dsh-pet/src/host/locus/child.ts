@@ -33,6 +33,16 @@ export interface LocusParentPort {
   resume(options: { readonly resumeSessionId: BrandedSessionId; readonly signal?: AbortSignal }): Promise<
     { readonly agent?: LocusLiveParent } | undefined
   >
+  /**
+   * Whether this exact session is archived by its owner.
+   *
+   * Checked BEFORE `get`/`resume` on purpose. Archiving is an owner action and
+   * the runtime does not enforce it at all — both `dsh-agent` and the session
+   * controller resume an archived session without complaint — so resolving one
+   * here would silently undo the owner's decision and keep the endpoint
+   * serving. Absent means "cannot know" and preserves the previous behaviour.
+   */
+  isArchived?(sessionId: BrandedSessionId): boolean
 }
 
 /** Typed block vocabulary accepted unchanged by the measured DSH child inbox seam. */
@@ -242,6 +252,14 @@ export interface LocusChildPorts {
 export interface LocusHostContextLike {
   get?(name: string): unknown
   on?(event: string, listener: (...args: unknown[]) => void): () => void
+  /**
+   * The workspace registry, read for exactly one fact: which sessions the
+   * owner archived. Optional because a Host without it can only be treated as
+   * "nothing is archived", which is the behaviour every earlier version had.
+   */
+  readonly workspaceRegistry?: {
+    readonly archivedSessionIds?: readonly unknown[]
+  }
 }
 
 /** Why a host child seam could not be acquired. */
@@ -271,6 +289,14 @@ export interface LocusActiveChild extends LocusChildIdentity {
 
 export type LocusChildFailureReason =
   | 'invalid-parent-id'
+  /**
+   * The recorded main session is archived by its owner.
+   *
+   * Distinct from `parent-unavailable`: the session is intact and resumable,
+   * and resuming it is exactly what must NOT happen. It is also distinct from
+   * a Host judgement, so callers must not treat it as replaceable.
+   */
+  | 'parent-archived'
   | 'parent-unavailable'
   | 'parent-operation-failed'
   | 'invalid-child-request'
@@ -466,6 +492,14 @@ export async function resolveLocusParent(
   if (isAborted(signal)) return { ok: false, reason: 'aborted' }
 
   const brandedParentId = SessionId(parentSessionId)
+  // Refuse an archived parent before touching the live registry: `get` would
+  // hand back a still-resident agent for a session the owner archived, and
+  // `resume` would otherwise resurrect one that is not.
+  try {
+    if (port.isArchived?.(brandedParentId) === true) return { ok: false, reason: 'parent-archived' }
+  } catch {
+    // Cannot tell is not proof: fall through to the ordinary resolution.
+  }
   let resident: LocusLiveParent | undefined
   try {
     resident = port.get(brandedParentId)
@@ -1494,9 +1528,15 @@ export function probeLocusChildPorts(
     ? controller.resolveAgent.bind(controller)
     : undefined
 
+  const archivedSessionIds = (): readonly string[] => {
+    const ids = ctx.workspaceRegistry?.archivedSessionIds
+    return Array.isArray(ids) ? ids.map(id => String(id)) : []
+  }
+
   const parent: LocusParentPort = {
     get: sessionId =>
       (parentRecord.get as (id: string) => LocusLiveParent | undefined).call(parentService, sessionId),
+    isArchived: sessionId => archivedSessionIds().some(id => id === sessionId),
     resume: async (resumeOptions) => {
       if (resolveAgent === undefined) return undefined
       const resolved = await Promise.resolve(resolveAgent(resumeOptions.resumeSessionId)) as
