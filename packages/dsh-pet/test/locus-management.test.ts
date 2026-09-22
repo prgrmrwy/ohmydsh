@@ -381,6 +381,44 @@ describe('locus management projection adapter', () => {
       expectedLocusId: stopped.id, expectedGeneration: stopped.generation, expectedUpdatedAt: stopped.updatedAt,
     }, { actorId: 'owner' })).resolves.toMatchObject({ action: 'rebuild' })
   })
+
+  /**
+   * An archived main session is the one case where an ACTIVE entry may be
+   * rebuilt. The channel refuses to serve such an entry and answers mentions
+   * with "this needs a rebuild", so a panel that offered no rebuild would be
+   * telling the owner to do something it does not let them do.
+   */
+  it('allows rebuilding an active entry whose main session is archived, and nothing else active', async () => {
+    const active = record({ state: 'active' })
+    const rebuild = vi.fn(async () => ({ action: 'rebuild', locus: {} } as never))
+    const request = {
+      action: 'rebuild' as const,
+      endpoint: active.endpoint,
+      parentSessionId: active.parentSessionId,
+      expectedLocusId: active.id,
+      expectedGeneration: active.generation,
+      expectedUpdatedAt: active.updatedAt,
+    }
+    const archivedPort = createLocusManagementPort({
+      repository: memory([active]),
+      identity: () => ({ actorId: 'owner' }),
+      actions: { rebuild },
+      isSessionArchived: id => id === active.parentSessionId,
+    })
+    await expect(archivedPort.rebuild!(request, { actorId: 'owner' }))
+      .resolves.toMatchObject({ action: 'rebuild' })
+    expect(rebuild).toHaveBeenCalledOnce()
+
+    // Same record, no archive: an active generation stays protected.
+    const plainPort = createLocusManagementPort({
+      repository: memory([active]),
+      identity: () => ({ actorId: 'owner' }),
+      actions: { rebuild },
+      isSessionArchived: () => false,
+    })
+    await expect(plainPort.rebuild!(request, { actorId: 'owner' }))
+      .rejects.toMatchObject({ code: 'LOCUS_INVALID' })
+  })
 })
 
 describe('locus session describer', () => {

@@ -359,6 +359,12 @@ function requireReady(lifecycle: PetLifecycleMachine): void {
 }
 
 const LOCUS_FENCE_FIELDS = ['expectedGeneration', 'expectedLocusId', 'expectedUpdatedAt'] as const
+/**
+ * Upper bound on one session-level replacement, mirroring the page size the
+ * owner surface renders. A body this large is not a realistic click, and
+ * bounding it keeps one request from doing unbounded provisioning work.
+ */
+const MAX_REPLACE_PARENT_ENTRIES = 64
 
 /**
  * The exact request fields each locus action accepts.
@@ -380,6 +386,9 @@ export const LOCUS_ACTION_FIELDS: Readonly<Record<PetLocusActionRequest['action'
   rebuild: ['action', 'endpoint', 'parentSessionId', 'workspaceId', 'parentLocusId', 'asDefaultQa', ...LOCUS_FENCE_FIELDS],
   archive: ['action', 'endpoint', 'locusId', ...LOCUS_FENCE_FIELDS],
   stop: ['action', 'endpoint', 'locusId', ...LOCUS_FENCE_FIELDS],
+  // Session-level, so it carries no per-locus fence: the Host re-proves each
+  // entry against its own rows and skips anything that moved on.
+  'replace-parent': ['action', 'parentSessionId', 'entries'],
 }
 
 function optionalFiniteInteger(record: Record<string, unknown>, key: string): number | undefined {
@@ -434,7 +443,7 @@ function parseLocusAction(body: unknown, expectedAction?: PetLocusActionRequest[
     throw new PetError('INVALID_REQUEST', 'Request body must be a JSON object')
   }
   const action = requireString(body as Record<string, unknown>, 'action')
-  if (action !== 'bind' && action !== 'unbind' && action !== 'scope' && action !== 'confirm-anchor' && action !== 'rebuild' && action !== 'archive' && action !== 'stop') {
+  if (action !== 'bind' && action !== 'unbind' && action !== 'scope' && action !== 'confirm-anchor' && action !== 'rebuild' && action !== 'archive' && action !== 'stop' && action !== 'replace-parent') {
     throw new PetError('INVALID_REQUEST', `Unknown locus action '${action}'`)
   }
   if (expectedAction !== undefined && action !== expectedAction) {
@@ -469,6 +478,34 @@ function parseLocusAction(body: unknown, expectedAction?: PetLocusActionRequest[
         ...(optionalString(record, 'parentLocusId') === undefined ? {} : { parentLocusId: optionalString(record, 'parentLocusId')!.trim() }),
         ...(asDefaultQa === undefined ? {} : { asDefaultQa }),
         ...fence,
+      }
+    }
+    case 'replace-parent': {
+      const raw = record['entries']
+      if (!Array.isArray(raw) || raw.length === 0) {
+        throw new PetError('INVALID_REQUEST', 'entries must be a non-empty array')
+      }
+      if (raw.length > MAX_REPLACE_PARENT_ENTRIES) {
+        throw new PetError('INVALID_REQUEST', `entries exceeds ${String(MAX_REPLACE_PARENT_ENTRIES)}`)
+      }
+      return {
+        action,
+        parentSessionId: requireString(record, 'parentSessionId').trim(),
+        entries: raw.map((item) => {
+          if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+            throw new PetError('INVALID_REQUEST', 'each entry must be an object')
+          }
+          const entry = item as Record<string, unknown>
+          for (const key of Object.keys(entry)) {
+            if (key !== 'endpoint' && key !== 'locusId') {
+              throw new PetError('INVALID_REQUEST', `Unknown entry field '${key}'`)
+            }
+          }
+          return {
+            endpoint: locusEndpointInput(entry['endpoint']),
+            locusId: requireString(entry, 'locusId').trim(),
+          }
+        }),
       }
     }
     case 'unbind':

@@ -1031,4 +1031,99 @@ describe('controller to durable locus repository write boundary', () => {
       operation: 'commitProvisioning',
     })
   })
+
+  /**
+   * The durable guard for a rebuild, and the ONE authorization that may relax
+   * it.
+   *
+   * Production caught what the controller's in-memory fixture could not: the
+   * controller allowed replacing an active generation whose main session was
+   * archived, while this layer still demanded a tombstone and failed the whole
+   * operation AFTER the replacement session had already been created. Both
+   * layers have to agree, so both are pinned here.
+   */
+  it('replaces an active predecessor only under the archived-parent disposition', async () => {
+    const harness = await openPetHarness()
+    enableAtomicTransactions(harness)
+    const durable = new DurableLocusRepository(harness.domain)
+    const adapter = new ControllerLocusRepositoryAdapter(durable)
+
+    // Two independent predecessors: the refused attempt leaves a `failed`
+    // operation that keeps blocking its own endpoint, which is correct
+    // behaviour and not what this test is about.
+    const refused = await durable.putLocus(durableRecord({
+      id: 'locus-rebuild-refused-previous',
+      endpoint: { chatId: 'oc_rebuild_refused' },
+      childSessionId: 'session-child-refused',
+      state: 'active',
+    }))
+    const allowed = await durable.putLocus(durableRecord({
+      id: 'locus-rebuild-allowed-previous',
+      endpoint: { chatId: 'oc_rebuild_allowed' },
+      childSessionId: 'session-child-allowed',
+      state: 'active',
+    }))
+    const rebuildCommit = (
+      suffix: string,
+      previous: LocusRecord,
+      disposition?: 'archived-parent',
+    ): LocusProvisioningCommit => ({
+      provisioningId: `provisioning-rebuild-${suffix}`,
+      locus: controllerRecord({
+        locusId: `locus-rebuild-${suffix}`,
+        endpoint: { ...previous.endpoint },
+        parentSessionId: previous.parentSessionId,
+        childSessionId: `child-rebuild-${suffix}`,
+        workspaceId: previous.workspaceId,
+        generation: previous.generation + 1,
+        replacesLocusId: previous.id,
+        // A rebuild republishes the group projection alongside the generation.
+        source: 'explicit',
+        createdAt: 40,
+      }),
+      group: {
+        chatId: previous.endpoint.chatId,
+        workspaceId: previous.workspaceId,
+        mainSessionId: previous.parentSessionId,
+        mainSource: 'explicit',
+        state: 'active',
+        createdAt: 40,
+        updatedAt: 40,
+      },
+      rebuild: {
+        oldLocusId: previous.id,
+        ...(disposition === undefined ? {} : { predecessorDisposition: disposition }),
+      },
+    })
+
+    // Without the disposition an active predecessor is still protected.
+    await adapter.beginProvisioning({
+      provisioningId: 'provisioning-rebuild-refused',
+      kind: 'rebuild',
+      endpoint: refused.endpoint,
+      parentSessionId: refused.parentSessionId,
+      startedAt: 40,
+    })
+    await adapter.recordProvisioningResource('provisioning-rebuild-refused', { childSessionId: 'child-rebuild-refused' })
+    await expect(adapter.commitProvisioning(rebuildCommit('refused', refused))).rejects.toMatchObject({
+      code: 'PROVISIONING_CONFLICT',
+    })
+
+    // With it — set only by the session-level replacement, after IT re-proved
+    // the archived parent — the replacement publishes.
+    await adapter.beginProvisioning({
+      provisioningId: 'provisioning-rebuild-allowed',
+      kind: 'rebuild',
+      endpoint: allowed.endpoint,
+      parentSessionId: allowed.parentSessionId,
+      startedAt: 41,
+    })
+    await adapter.recordProvisioningResource('provisioning-rebuild-allowed', { childSessionId: 'child-rebuild-allowed' })
+    await adapter.commitProvisioning(rebuildCommit('allowed', allowed, 'archived-parent'))
+    expect(durable.getLatestLocusByEndpoint(allowed.endpoint)).toMatchObject({
+      id: 'locus-rebuild-allowed',
+      replacesLocusId: allowed.id,
+    })
+  })
+
 })

@@ -229,7 +229,7 @@ index b86d5cd..34c1b45 100644
            signal: spec.signal,
          })
          const childHeader = activation.handle.agent.session.header
-@@ -189,6 +207,160 @@ export class SubagentContinuationManager {
+@@ -189,6 +207,231 @@ export class SubagentContinuationManager {
      }
    }
  
@@ -359,6 +359,14 @@ index b86d5cd..34c1b45 100644
 +   * Run one operation against the exact live Session of a direct continuable
 +   * child, proving both the exact live parent and the durable child lineage.
 +   *
++   * Residency is deliberately NOT a precondition. The registry releases an
++   * Activation as soon as the child is idle with an empty inbox, so "not
++   * resident" is the ORDINARY state between turns, and every delivery already
++   * resolves it by cold-resuming. An accessor that threw instead failed on
++   * exactly the post-idle access it exists to serve, and it reported that
++   * lifecycle fact as a policy/lineage fault: the host saw an unreachable
++   * child, retired a healthy generation, and rebuilt one child per message.
++   *
 +   * Generic Session routing intentionally cannot resolve a continuation-owned
 +   * child, so a host that must read that child's own transcript would
 +   * otherwise have no authorized path to it.
@@ -371,20 +379,83 @@ index b86d5cd..34c1b45 100644
 +    operation: (session: Session) => T | Promise<T>,
 +  ): Promise<T> {
 +    spec.signal.throwIfAborted()
-+    const activation = this.activations.get(spec.childId)
-+    if (activation === undefined) {
-+      throw new SubagentError(`subagent "${spec.childId}" is not resident`, 'NOT_FOUND')
-+    }
 +    if (this.ctx.agents.get(spec.parent.id) !== spec.parent) {
 +      throw new SubagentError(
 +        `subagent "${spec.childId}" access requires the exact live parent agent`,
 +        'UNAUTHORIZED',
 +      )
 +    }
-+    if (activation.parentSession !== spec.parent.id) {
-+      throw new SubagentError(`subagent "${spec.childId}" belongs to another parent session`, 'UNAUTHORIZED')
++    // Resolve AND use under the child lock: a concurrent delivery may be
++    // materializing or disposing the same child, and the operation must observe
++    // one exact Activation rather than racing its teardown.
++    return await this.activations.locks.run(spec.childId, async () => {
++      spec.signal.throwIfAborted()
++      const activation = await this.materializeForAccess(spec.parent, spec.childId, spec.signal)
++      spec.signal.throwIfAborted()
++      if (activation.parentSession !== spec.parent.id) {
++        throw new SubagentError(`subagent "${spec.childId}" belongs to another parent session`, 'UNAUTHORIZED')
++      }
++      return await operation(activation.handle.agent.session)
++    })
++  }
++
++  /**
++   * Return the resident Activation of one durable direct continuable child,
++   * cold-resuming it when the registry no longer holds it.
++   *
++   * This is the materialization half of {@link coldResume} without its prompt
++   * submission: an accessor must observe the same live Session a delivery
++   * would, but must never inject a message of its own to get there.
++   * @param parent - exact live direct parent authorizing the access.
++   * @param childId - durable direct-child session id.
++   * @param signal - caller cancellation.
++   * @returns the resident Activation for that exact child.
++   */
++  private async materializeForAccess(
++    parent: Agent,
++    childId: SessionId,
++    signal: AbortSignal,
++  ): Promise<Activation> {
++    const resident = this.activations.get(childId)
++    if (resident !== undefined) return resident
++    const query = this.requireSessionQuery()
++    let observation: SessionObservation
++    try {
++      observation = await query.observeSession(childId, { signal })
++    } catch (error: unknown) {
++      signal.throwIfAborted()
++      throw new SubagentError(`subagent "${childId}" is unavailable`, 'NOT_RESUMABLE', { cause: error })
 +    }
-+    return await operation(activation.handle.agent.session)
++    using source = observation
++    this.activations.assertAdmitting(parent)
++    this.activations.authorizeLineage(parent, childId, source.header.parentSession)
++    const descriptor = foldSubagentDescriptor(source.events.slice(source.inheritedEventCount))
++    if (descriptor === undefined || descriptor.mode !== 'continuable') {
++      throw new SubagentError(
++        `subagent "${childId}" has no supported continuation state and cannot be resumed; choose a different target`,
++        'NOT_RESUMABLE',
++      )
++    }
++    try {
++      return await this.activations.materialize({
++        childId,
++        provider: descriptor.provider,
++        parent,
++        agentOptions: {
++          ...descriptor.agentProvider !== undefined ? { provider: descriptor.agentProvider } : {},
++          ...descriptor.agentModel !== undefined ? { model: descriptor.agentModel } : {},
++          ...descriptor.agentReasoningEffort !== undefined
++            ? { reasoningEffort: ReasoningEffortId(descriptor.agentReasoningEffort) }
++            : {},
++        },
++        composition: { persona: descriptor.persona, toolFilter: descriptor.toolFilter },
++        signal,
++      })
++    } catch (error: unknown) {
++      signal.throwIfAborted()
++      if (error instanceof SubagentError) throw error
++      throw new SubagentError(`subagent "${childId}" is unavailable`, 'NOT_RESUMABLE', { cause: error })
++    }
 +  }
 +
    /**

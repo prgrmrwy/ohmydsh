@@ -1110,6 +1110,14 @@ function LocusRow(props: {
           {props.reading === 'work' ? (
             <div className="dshpet-locus-row-line">
               <span className="dshpet-meta">{stateLine}</span>
+              {/* The repair for this state is on the session block, so the row
+                  states why it is down and where to act — otherwise hiding the
+                  rebuild button would read as "nothing can be done". */}
+              {head.main.availability === 'archived' ? (
+                <span className="dshpet-meta" data-tone="paused">
+                  主会话已归档 · 恢复该主会话后本入口即恢复服务，或在上面把它迁到新主会话
+                </span>
+              ) : null}
               <span className="dshpet-meta dshpet-locus-session-title" title={head.child.title ?? undefined}>
                 会话 {childSessionId === undefined ? '—' : head.child.title ?? '未命名'}
               </span>
@@ -1177,12 +1185,20 @@ function LocusRow(props: {
             disabled={feishuLink === undefined}
             {...(feishuLink === undefined ? {} : { href: feishuLink })}
           />
-          {isTerminalLocusState(head.state.state) ? (
-            // Rebuild is the only action left on a tombstone, and it is legal
-            // ONLY on a tombstone, so it lives on the row rather than inside
-            // 更多: the default filter hides terminal entries, and burying
-            // their one way back two disclosures deep would make the default a
-            // dead end. Every other state would render it permanently disabled.
+          {/*
+            Rebuild is the only action left on a tombstone, so it lives on the
+            row rather than inside 更多: the default filter hides terminal
+            entries, and burying their one way back two disclosures deep would
+            make the default a dead end.
+
+            An ARCHIVED main session is deliberately NOT rebuilt from here. The
+            rebuild reuses the recorded main session — exactly the session that
+            cannot serve — so this button could never succeed, and pointing the
+            entry at a DIFFERENT session is a decision about the session, not
+            about this row. That repair lives on the session block above; all
+            this row owes the owner is the reason, which the row already states.
+          */}
+          {isTerminalLocusState(head.state.state) && head.main.availability !== 'archived' ? (
             <button
               type="button"
               className="dshpet-action dshpet-action-sm"
@@ -1246,6 +1262,17 @@ function WorkSection(props: {
   readonly onToggleExpanded?: () => void
 }): JSX.Element {
   const { work } = props
+  // Entries this session-level repair may move: their own generations, and
+  // never one the owner explicitly stopped/retired — moving it would revive an
+  // exit the owner made on purpose. The Host re-proves both facts per entry.
+  const movableEntries = work.families.flatMap(family => {
+    const head = familyHead(family)
+    if (head === undefined || isTerminalLocusState(head.state.state)) return []
+    return [{
+      endpoint: { chatId: family.endpoint.chatId, ...(family.endpoint.threadId === undefined ? {} : { threadId: family.endpoint.threadId }) },
+      locusId: head.locusId,
+    }]
+  })
   const collapsible = props.onToggleExpanded !== undefined
   const showEntries = !collapsible || props.expanded === true
   const sessionId = work.parentSessionId
@@ -1302,6 +1329,34 @@ function WorkSection(props: {
         <span className="dshpet-work-tail">
           <HandleChip value={sessionId} code={sessionCode} />
           <span className="dshpet-meta">{sessionAvailabilityLabel(work.session?.availability)}</span>
+          {/*
+            The session-level repair, and the ONLY place the owner may decide to
+            abandon an archived main session.
+
+            It is not a per-entry action because it is not a per-entry decision:
+            every entry under this session went down for the same reason, and
+            they must all land on ONE replacement session — the per-entry
+            rebuild creates a main session per call, which would split what used
+            to be one shared session into as many sessions as there are entries.
+          */}
+          {work.availability !== 'archived' || movableEntries.length === 0 ? null : (
+            <button
+              type="button"
+              className="dshpet-action dshpet-action-sm"
+              disabled={props.busyKey !== undefined}
+              title="新建一个主会话，把本会话名下的入口一起迁移过去；原主会话保持归档不动"
+              onClick={() => props.onAction(
+                `session:${sessionId}:replace-parent`,
+                () => petApi.locusReplaceParent({
+                  action: 'replace-parent',
+                  parentSessionId: sessionId,
+                  entries: movableEntries,
+                }),
+              )}
+            >
+              用新的主会话接替
+            </button>
+          )}
           {!collapsible ? null : (
             <button
               type="button"
