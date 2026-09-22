@@ -53,10 +53,14 @@ The input-area status UI persistently shows the bound task branch, dependency
 mode (`lean` or `mutable`), and lifecycle (`active` or `cleaned`).
 Dynamic status is not repeatedly injected into conversation context.
 
-Clicking the bound task branch asks the local editor to open that Session's
-managed worktree directory, via a `vscode://file/<path>` deep link by default
-the open action is configurable). Cleaned or unbound sessions do not offer the
-open action, and the target path always comes from the persistent binding.
+Clicking the bound task branch asks an editor to open that Session's managed
+worktree directory. With no adapter registered, the default remains the local
+`vscode://file/<path>` deep link. The client exposes a runtime registration
+point for deployment-specific replacements; a missing, unloaded, or throwing
+adapter safely falls back to the local default. The Worktree Session package
+names no adapter and declares none in `inject`. Cleaned or unbound sessions do
+not offer the open action, and the target path always comes from the persistent
+binding.
 
 The model-visible `ws` tool resolves schema-v2 maintenance from the exact
 calling `ToolExecution.agent.session`; Agent calls cannot supply a path or
