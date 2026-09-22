@@ -24,6 +24,7 @@
  */
 
 import { endpointKeyOf, LOCUS_SAFE_CHILD_COMPOSITION, type LocusChildComposition } from './aggregate.js'
+import { dispositionOf } from './serviceability.js'
 
 /** A Feishu entry: a chat, optionally narrowed to one thread. */
 export interface LocusEndpoint {
@@ -1546,10 +1547,20 @@ export class LocusController {
         `${label} ${endpointLabel(endpoint)} 缺少 active locus，已停止操作。`,
       )
     }
-    if (locus.state !== 'active') {
+    // Classified by the shared policy, not by a local reading of `state`:
+    // every layer that decides "may this proceed / may this be replaced" must
+    // agree, and hand-written copies are what let three rounds of fixes each
+    // move the refusal one layer deeper instead of removing it.
+    const disposition = dispositionOf(locus)
+    if (disposition.kind !== 'serve') {
       throw new LocusControllerError(
         label === '群级' ? 'GROUP_UNAVAILABLE' : 'TOPIC_UNAVAILABLE',
-        `${label} ${endpointLabel(endpoint)} 处于 ${locus.state}，不会静默重建。`,
+        disposition.kind === 'replace'
+          // Reachable only when the provisioning seam did not take the
+          // replacement path — a wiring gap worth naming precisely, because
+          // the policy says this generation IS replaceable.
+          ? `${label} ${endpointLabel(endpoint)} 需要被替换（${disposition.reason}），但本次调用未走替换路径。`
+          : `${label} ${endpointLabel(endpoint)} ${disposition.reason}，不会静默重建。`,
       )
     }
     return locus
