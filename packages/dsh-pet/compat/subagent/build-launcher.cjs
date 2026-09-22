@@ -139,6 +139,16 @@ function verifyLauncher(directory, fingerprint) {
       'supportsIdleContinuableCreate',
       'supportsLiveContinuableChildSession',
       'supportsIndependentContinuableCreate',
+      // Host-authored delivery has no `supports*` companion flag — it is
+      // published only as a symbol-keyed method — so the four markers above
+      // all pass without it. Pet looks the symbol up by exact string and
+      // reports `inbox-unavailable` when absent, which then cascades through
+      // `idleChildProvisioning` → `locusProvisioning` →
+      // `locusProvisioningController` → `locusControlDispatch` and takes the
+      // entire unified Feishu channel down. Verify both the method name and
+      // the exact symbol string a consumer resolves.
+      'deliverSubagentPrompt',
+      'dsh.subagent.deliverPrompt',
     ]) {
       if (!runtimeSource.includes(marker)) return undefined
     }

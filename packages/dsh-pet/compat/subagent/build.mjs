@@ -225,6 +225,22 @@ if (
 ) {
   fail('built artifact has no continuation-owned child Session capability; policy mutation is unavailable')
 }
+// Unlike the capabilities above, host-authored delivery is published as a
+// SYMBOL-keyed method with no `supports*` companion flag, so the four marker
+// checks above all pass without it. `adaptLocusInboxPort` looks up exactly
+// `Symbol.for('dsh.subagent.deliverPrompt')` and returns undefined when it is
+// missing, which Pet reports as `inbox-unavailable` — and that single gap
+// cascades: `locusChildProbe.available` gates `idleChildProvisioning`, which
+// gates `locusProvisioning`, `locusProvisioningController` and
+// `locusControlDispatch`, so the whole unified Feishu channel goes
+// unavailable. A patch hunk that stops applying cleanly here is therefore both
+// high-impact and, without this check, invisible to the build.
+if (
+  !runtimeSource.includes('deliverSubagentPrompt')
+  || !runtimeSource.includes('dsh.subagent.deliverPrompt')
+) {
+  fail('built artifact has no host-authored delivery seam; unified locus intake would be unavailable')
+}
 
 // The isolated-claim seam: the `AgentOptions` opt-in lives in `dsh-agent`,
 // while `Inbox.claim`, the loop wiring and the capability marker live in
