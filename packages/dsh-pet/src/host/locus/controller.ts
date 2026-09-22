@@ -24,7 +24,7 @@
  */
 
 import { endpointKeyOf, LOCUS_SAFE_CHILD_COMPOSITION, type LocusChildComposition } from './aggregate.js'
-import { dispositionOf } from './serviceability.js'
+import { dispositionOf, isOwnerExit } from './serviceability.js'
 
 /** A Feishu entry: a chat, optionally narrowed to one thread. */
 export interface LocusEndpoint {
@@ -144,6 +144,16 @@ export interface LocusProvisioningCommit {
   /** Publish over an unavailable latest marker without silently reviving it. */
   readonly rebuild?: {
     readonly oldLocusId: string
+    /**
+     * Why a predecessor that is still CURRENT may be replaced.
+     *
+     * Absent keeps the ordinary rule: only a generation already out of service
+     * may be published over. `archived-parent` is set by the session-level
+     * replacement after IT re-proved that this predecessor's main session is
+     * archived, and it also retires the predecessor — the set allows only one
+     * current generation per endpoint.
+     */
+    readonly predecessorDisposition?: 'archived-parent'
   }
 }
 
@@ -830,15 +840,18 @@ export class LocusController {
         if (previous === undefined || previous.locusId !== request.previousLocusId) {
           throw new LocusControllerError('REPOSITORY_INCONSISTENT', '入口当前代际已变化，请刷新后重试。')
         }
-        if (previous.state !== 'stopped' && previous.state !== 'invalid' && previous.state !== 'retired') {
-          // A non-terminal generation may be replaced ONLY when this exact
-          // generation's recorded main session is archived, re-proved here
-          // rather than trusted from the caller's flag.
-          const archivedParent = request.replaceArchivedParent === true &&
-            await this.isArchivedSession(previous.parentSessionId)
-          if (!archivedParent) {
-            throw new LocusControllerError('GROUP_UNAVAILABLE', '只有停止、失效或退役入口可以显式重建。')
-          }
+        // A non-terminal generation may be replaced ONLY when this exact
+        // generation's recorded main session is archived, re-proved here rather
+        // than trusted from the caller's flag. Proved once, before the commit,
+        // and carried into it so the persistence guard agrees with this gate
+        // instead of re-deriving a rule it cannot check.
+        const predecessorUnavailable =
+          previous.state === 'stopped' || previous.state === 'invalid' || previous.state === 'retired'
+        const archivedParent = !predecessorUnavailable &&
+          request.replaceArchivedParent === true &&
+          await this.isArchivedSession(previous.parentSessionId)
+        if (!predecessorUnavailable && !archivedParent) {
+          throw new LocusControllerError('GROUP_UNAVAILABLE', '只有停止、失效或退役入口可以显式重建。')
         }
         if (!(await this.deps.repository.isLocusIdle(previous.locusId))) {
           throw new LocusControllerError('BUSY', '入口仍有执行中或排队消息，请空闲后再重建。')
@@ -914,7 +927,13 @@ export class LocusController {
             ...(nextGroup === undefined ? {} : { group: nextGroup }),
             locus,
             ...(request.asDefaultQa === true ? { defaultQaForParentSessionId: parent.id } : {}),
-            rebuild: { oldLocusId: previous.locusId },
+            rebuild: {
+              oldLocusId: previous.locusId,
+              // Stated, not assumed: reaching this commit means the archived
+              // fact above was already re-proved for THIS predecessor, and the
+              // persistence guard is the last place that has to agree.
+              ...(archivedParent ? { predecessorDisposition: 'archived-parent' as const } : {}),
+            },
           })
           published = true
           await child.commit?.()
@@ -1558,25 +1577,68 @@ export class LocusController {
       throw new LocusControllerError('PARENT_NOT_FOUND', '原主会话的工作区无法确认，已停止操作。')
     }
 
+    // Prove every entry is movable BEFORE creating the replacement session.
+    // Discovering it afterwards is what left a freshly created main session
+    // with nothing on it — a session the owner never asked for, which then has
+    // to be cleaned up (and a cleanup that only detaches reappears in their
+    // ungrouped bucket). Refusing here has no side effect at all.
+    const refusals: { readonly locusId: string; readonly reason: string }[] = []
+    for (const entry of request.entries) {
+      const current = await this.deps.repository.findActive(entry.endpoint)
+      if (current === undefined || current.locusId !== entry.locusId) {
+        refusals.push({ locusId: entry.locusId, reason: '入口当前代际已变化，请刷新后重试。' })
+        continue
+      }
+      if (current.parentSessionId !== recorded) {
+        refusals.push({ locusId: entry.locusId, reason: '入口已不属于该主会话，请刷新后重试。' })
+        continue
+      }
+      if (isOwnerExit(current.state)) {
+        refusals.push({ locusId: entry.locusId, reason: '入口由所有者停止/退役，不迁移。' })
+        continue
+      }
+      if (!(await this.deps.repository.isLocusIdle(current.locusId))) {
+        refusals.push({ locusId: entry.locusId, reason: '入口仍有在途工作，请空闲后再迁移。' })
+      }
+    }
+    if (refusals.length === request.entries.length) {
+      throw new LocusControllerError(
+        'GROUP_UNAVAILABLE',
+        `没有任何入口可以迁移：${refusals[0]!.reason}`,
+      )
+    }
+
     // One replacement for the whole session, created in the ARCHIVED
     // session's own workspace: relocating the owner's entries into the
     // configured default workspace would move their work somewhere they never
     // put it.
     const anchor = request.entries[0]!
+    // The replacement CONTINUES the archived session's job, so it inherits that
+    // session's own title. Passing the old title in as a chat NAME stacked
+    // another 「Locus 主会话 ·」 prefix onto it and produced
+    // 「Locus 主会话 · Locus 主会话 · oc_…」, which reads as a stray session
+    // rather than as the successor of the one the owner just retired.
+    const inherited = session?.title?.trim() ?? ''
     const created = await this.deps.dsh.createMainSession({
       workspaceId,
-      label: this.mainLabel(endpointOf(
-        anchor.endpoint.threadId === undefined
-          ? { chatId: anchor.endpoint.chatId }
-          : { chatId: anchor.endpoint.chatId, threadId: anchor.endpoint.threadId },
-      ), session?.title),
+      label: inherited !== ''
+        ? inherited
+        : this.mainLabel(endpointOf(
+          anchor.endpoint.threadId === undefined
+            ? { chatId: anchor.endpoint.chatId }
+            : { chatId: anchor.endpoint.chatId, threadId: anchor.endpoint.threadId },
+        ), undefined),
       chatId: anchor.endpoint.chatId,
     })
     assertSessionShape(created, undefined, workspaceId, '接替用主会话')
 
     const replaced: string[] = []
-    const skipped: { readonly locusId: string; readonly reason: string }[] = []
+    const skipped: { readonly locusId: string; readonly reason: string }[] = [...refusals]
+    const refused = new Set(refusals.map(item => item.locusId))
     for (const entry of request.entries) {
+      // Already refused above, with the reason the owner needs; retrying it
+      // would only produce a second, less specific entry for the same id.
+      if (refused.has(entry.locusId)) continue
       try {
         await this.rebuildExplicit({
           endpoint: entry.endpoint,
@@ -1595,14 +1657,16 @@ export class LocusController {
       }
     }
     if (replaced.length === 0) {
-      // Nothing moved, so the freshly created session has no owner. Releasing
-      // it keeps the failed attempt from leaving an orphan main session that
-      // looks like the owner's work.
-      try {
-        await this.deps.dsh.releaseSession?.(created.id)
-      } catch {
-        // A failed cleanup is reported by the caller's empty `replaced` list.
-      }
+      // Nothing moved, so the freshly created session has no owner. It MUST be
+      // rolled back: an orphan main session looks like the owner's work, shows
+      // up in their session list, and nothing will ever use it.
+      //
+      // Via the creator's own `rollback` hook, not `releaseSession`: the
+      // production adapter deliberately does NOT publish a generic session
+      // release ("only a creator-held rollback closure may tear down a session
+      // created by this adapter"), so the generic call is a silent no-op and
+      // the orphan survives exactly the failure it was meant to clean up.
+      await this.rollbackSession(created)
       throw new LocusControllerError(
         'GROUP_UNAVAILABLE',
         skipped[0] === undefined

@@ -217,6 +217,22 @@ export interface DurableProvisioningCommit {
   /** Owner-authorized rebuild over an unavailable latest marker. */
   readonly rebuild?: {
     readonly oldLocusId: string
+    /**
+     * Why a predecessor that is NOT a tombstone may still be replaced.
+     *
+     * Absent keeps the ordinary rule — only `stopped`/`invalid`/`retired` may be
+     * replaced — which is what stops a healthy serving generation from being
+     * swapped out by mistake.
+     *
+     * `archived-parent` is set by exactly one producer: the session-level
+     * replacement, AFTER it re-proved that this predecessor's recorded main
+     * session is archived by its owner. That is the one case where the endpoint
+     * is genuinely out of service without the owner having exited it, and the
+     * owner has explicitly asked to move it to a different session. It travels
+     * as a named disposition, not as a boolean bypass, so the guard below still
+     * reads as one rule and the authorization is visible in the operation.
+     */
+    readonly predecessorDisposition?: 'archived-parent'
   }
 }
 
@@ -531,7 +547,9 @@ export class LocusRepository {
             `Rebuild predecessor ${input.rebuild.oldLocusId} is not the latest endpoint generation`,
           )
         }
-        if (previous.state !== 'stopped' && previous.state !== 'invalid' && previous.state !== 'retired') {
+        const predecessorUnavailable =
+          previous.state === 'stopped' || previous.state === 'invalid' || previous.state === 'retired'
+        if (!predecessorUnavailable && input.rebuild.predecessorDisposition !== 'archived-parent') {
           throw new LocusProvisioningError(
             'PROVISIONING_CONFLICT',
             `Rebuild predecessor ${previous.id} is not unavailable`,
@@ -539,6 +557,21 @@ export class LocusRepository {
         }
         if (previous.busy || this.hasPendingDelivery(previous.id, previous.generation)) {
           throw new LocusProvisioningError('PROVISIONING_CONFLICT', `Rebuild predecessor ${previous.id} is busy`)
+        }
+        if (!predecessorUnavailable) {
+          // Replacing a generation that is STILL current needs one more thing
+          // than a rebuild of a tombstone: the set allows at most one current
+          // generation per endpoint, so the predecessor has to leave that set in
+          // the same transaction (the replacement path does exactly this).
+          //
+          // Marked `invalid`, never `retired`: the owner archived the main
+          // session, they never exited this endpoint, and `retired` records an
+          // owner decision they did not make — the same distinction the whole
+          // serviceability policy is built on.
+          after.set(previous.id, transitionLocus(previous, 'invalid', normalized.createdAt, {
+            busy: false,
+            invalidReason: '已被新的主会话接替（原主会话由所有者归档）',
+          }))
         }
         if (normalized.generation !== previous.generation + 1 || normalized.replacesLocusId !== previous.id) {
           throw new LocusProvisioningError(

@@ -82,9 +82,22 @@ class MemoryLocusRepository implements LocusRepository {
     locus: LocusRecord
     defaultQaForParentSessionId?: string
     replace?: { oldLocusId: string; noticeText: string }
-    rebuild?: { oldLocusId: string }
+    rebuild?: { oldLocusId: string; predecessorDisposition?: 'archived-parent' }
   }): Promise<void> {
     this.committed.push(input.provisioningId)
+    if (input.rebuild !== undefined) {
+      // Mirrors the durable guard, because a fixture that does not enforce it
+      // cannot catch a controller that stops proving what the guard requires:
+      // every controller test passed while the real rebuild failed on exactly
+      // this rule ("predecessor … is not unavailable"), and only production
+      // showed it.
+      const predecessor = this.loci.get(input.rebuild.oldLocusId)
+      const unavailable = predecessor !== undefined &&
+        (predecessor.state === 'stopped' || predecessor.state === 'invalid' || predecessor.state === 'retired')
+      if (!unavailable && input.rebuild.predecessorDisposition !== 'archived-parent') {
+        throw new Error(`Rebuild predecessor ${String(input.rebuild.oldLocusId)} is not unavailable`)
+      }
+    }
     if (input.replace !== undefined) {
       const old = this.loci.get(input.replace.oldLocusId)
       if (old !== undefined) this.loci.set(old.locusId, { ...old, state: 'retired', retiredAt: 99 })
@@ -108,7 +121,7 @@ class MemoryLocusRepository implements LocusRepository {
 interface FakeHost {
   readonly deps: LocusControllerDeps
   readonly repository: MemoryLocusRepository
-  readonly createdMains: { workspaceId: string; chatId: string }[]
+  readonly createdMains: { workspaceId: string; chatId: string; label: string }[]
   readonly createdChildren: { parentSessionId: string; endpoint: { chatId: string; threadId?: string } }[]
   readonly released: string[]
   readonly sentWarnings: string[]
@@ -164,8 +177,14 @@ function fakeHost(options: {
         if (options.defaultWorkspace === 'fail-main') throw new Error('main failed')
         const session = parent(`main-${++sequence}`, input.workspaceId, `群主会话 ${input.chatId}`)
         sessions.set(session.id, session)
-        createdMains.push({ workspaceId: input.workspaceId, chatId: input.chatId })
-        return session
+        createdMains.push({ workspaceId: input.workspaceId, chatId: input.chatId, label: input.label })
+        return {
+          ...session,
+          rollback: async () => {
+            released.push(session.id)
+            sessions.delete(session.id)
+          },
+        }
       },
       createChildSession: async input => {
         const session = {
@@ -180,6 +199,11 @@ function fakeHost(options: {
         createdChildren.push({ parentSessionId: input.parentSessionId, endpoint: input.endpoint })
         return session
       },
+      // Production provides this, and it only DETACHES: the session leaves its
+      // workspace and reappears in the ungrouped bucket, which is exactly the
+      // stray the owner saw after a failed replacement. `rollback` (below) is
+      // the creator-held hook that also disposes the agent, so a caller must
+      // prefer it.
       releaseSession: async id => {
         released.push(id)
       },
@@ -246,7 +270,7 @@ describe('unified locus hierarchy', () => {
     const first = await controller(host).ensureGroup({ chatId: 'oc-project', chatName: 'Project' })
     const second = await controller(host).ensureGroup({ chatId: 'oc-other', chatName: 'Other' })
 
-    expect(host.createdMains).toEqual([
+    expect(host.createdMains.map(entry => ({ workspaceId: entry.workspaceId, chatId: entry.chatId }))).toEqual([
       { workspaceId: 'ws-default', chatId: 'oc-project' },
       { workspaceId: 'ws-default', chatId: 'oc-other' },
     ])
@@ -733,7 +757,11 @@ describe('explicit rebuild', () => {
       // ONE replacement for the whole session: the entries shared a session
       // before, and they must still share one after.
       expect(host.createdMains).toHaveLength(before + 1)
-      expect(host.createdMains.at(-1)).toEqual({ workspaceId: 'ws-source', chatId: 'oc-a' })
+      expect(host.createdMains.at(-1)).toMatchObject({ workspaceId: 'ws-source', chatId: 'oc-a' })
+      // The replacement CONTINUES the archived session's job, so it inherits
+      // that session's title rather than stacking another 「Locus 主会话 ·」
+      // prefix onto it — the doubled label read as a stray session.
+      expect(host.createdMains.at(-1)?.label).not.toContain('Locus 主会话 · Locus 主会话')
       expect(result.parentSessionId).not.toBe('source-1')
       expect(result.skipped).toEqual([])
       expect(result.replaced).toEqual(created.map(entry => entry.locusId))
@@ -768,20 +796,37 @@ describe('explicit rebuild', () => {
       expect(host.createdMains).toHaveLength(before)
     })
 
-    it('releases the replacement session when no entry could be moved', async () => {
+    it('creates NOTHING when no entry could be moved', async () => {
       const { host, controller } = await archivedHost(['oc-c'])
       const before = host.createdMains.length
 
+      // Every entry is proved movable BEFORE the replacement session exists.
+      // Finding out afterwards is what left a freshly created, unused main
+      // session behind — and cleaning that up only detaches it, which puts the
+      // stray in the owner's ungrouped bucket.
       await expect(controller.replaceArchivedParent({
         parentSessionId: 'source-1',
         entries: [{ endpoint: { chatId: 'oc-c' }, locusId: 'stale-locus-id' }],
       })).rejects.toMatchObject({ code: 'GROUP_UNAVAILABLE' })
-      // The failed attempt must not leave an orphan main session behind: it
-      // would look like the owner's work and pollute every session surface.
-      expect(host.createdMains).toHaveLength(before + 1)
-      const orphan = host.released.at(-1)
-      expect(orphan).toMatch(/^main-/)
-      expect([...host.repository.loci.values()].some(record => record.parentSessionId === orphan)).toBe(false)
+      expect(host.createdMains).toHaveLength(before)
+      expect(host.released).toEqual([])
+    })
+
+    it('moves the entries it can and reports the ones it cannot', async () => {
+      const { host, controller, created } = await archivedHost(['oc-e'])
+      const stale = { endpoint: { chatId: 'oc-e' }, locusId: 'stale-locus-id' }
+
+      const result = await controller.replaceArchivedParent({
+        parentSessionId: 'source-1',
+        entries: [...created, stale],
+      })
+
+      expect(result.replaced).toEqual([created[0]!.locusId])
+      expect(result.skipped).toEqual([
+        { locusId: 'stale-locus-id', reason: expect.stringContaining('代际已变化') },
+      ])
+      // The replacement survived because something moved onto it.
+      expect(host.released).toEqual([])
     })
 
     it('replaces a non-terminal generation ONLY when its parent is archived', async () => {
