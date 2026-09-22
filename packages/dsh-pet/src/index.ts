@@ -84,7 +84,7 @@ import {
   type DeliveryRecord,
 } from './host/locus/delivery.js'
 import { createExpiryScheduler } from './host/locus/expiry-scheduler.js'
-import { proveLiveStartupDelivery } from './host/locus/startup-recovery.js'
+import { proveLiveStartupDelivery, proveUnconsumedStartupDelivery } from './host/locus/startup-recovery.js'
 import {
   createLocusChildAdapter,
   probeLocusChildPorts,
@@ -2474,7 +2474,13 @@ async function initialize(
           ) return undefined
           const result = await locusChildDelivery.withChildSession({
             identity,
-            operation: session => proveLiveStartupDelivery(delivery, session),
+            operation: session =>
+              proveLiveStartupDelivery(delivery, session)
+              // Only consulted when the open-turn proof declined: a `current`
+              // row can also be one whose dispatch died before hand-off, and
+              // the child's own inbox log is the only thing that distinguishes
+              // "the child took it" from "nobody ever did".
+              ?? proveUnconsumedStartupDelivery(delivery, session),
           })
           return result.ok ? result.value : undefined
         } catch {
@@ -2730,6 +2736,20 @@ async function initialize(
             },
           })
         }
+      }
+      // A `current` row the child's log proved it never took is backlog, not an
+      // in-flight execution: retaining it only armed a deadline that would
+      // expire a message the child never saw. Re-dispatch it through the same
+      // claim fence normal finish/expiry uses. The lease is armed first so a
+      // dispatch that cannot claim still cannot leave the row unguarded.
+      for (const delivery of locusStartup.replayableDeliveries) {
+        scheduleCurrentDelivery(delivery)
+        await locusChannelController?.dispatchNext?.({
+          endpoint: { ...delivery.endpoint },
+          locusId: delivery.locusId,
+          generation: delivery.generation,
+          childSessionId: delivery.childSessionId,
+        })
       }
       for (const delivery of locusRepository.listDeliveries()) {
         if (delivery.status !== 'accepted' && delivery.status !== 'queued') continue
