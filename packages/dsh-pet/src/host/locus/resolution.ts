@@ -27,6 +27,7 @@ import {
   type LocusEndpoint,
   type LocusRecord,
 } from './aggregate.js'
+import { dispositionOf } from './serviceability.js'
 import { classifyEndpointRetirement, type RetiredAssociationStore } from './retirement.js'
 
 /** A locus row the channel may serve, in the controller's vocabulary. */
@@ -123,28 +124,27 @@ export interface LocusResolutionPorts {
  * identity nobody can execute.
  */
 function toActive(record: LocusRecord): ResolvedActiveLocus {
-  if (record.state === 'stopped') {
+  // Classify via the ONE policy module rather than restating the rules here.
+  // Serving stays strict for every non-serve disposition — including
+  // `replace`, whose whole point is that the CURRENT generation is never
+  // resumed (its child may lack the safe-v1 proof, and adopting it would
+  // inherit the parent preset).
+  const disposition = dispositionOf(record)
+  if (disposition.kind === 'terminal') {
     throw new LocusResolutionError(
-      'endpoint-stopped',
-      'This endpoint was explicitly stopped and must be rebuilt by its owner.',
+      record.state === 'stopped' ? 'endpoint-stopped' : 'locus-unusable',
+      record.state === 'stopped'
+        ? 'This endpoint was explicitly stopped and must be rebuilt by its owner.'
+        : `Locus ${record.id} cannot serve a delivery: ${disposition.reason}.`,
     )
   }
-  if (record.state === 'invalid') {
+  if (disposition.kind === 'replace') {
     throw new LocusResolutionError(
-      'endpoint-invalid',
-      `This locus is invalid${record.invalidReason === undefined ? '' : ` (${record.invalidReason})`} and must be rebuilt.`,
-    )
-  }
-  if (record.state !== 'active' || record.childSessionId === undefined) {
-    throw new LocusResolutionError(
-      'locus-unusable',
-      `Locus ${record.id} is ${record.state} and cannot serve a delivery.`,
-    )
-  }
-  if (record.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION) {
-    throw new LocusResolutionError(
-      'locus-unusable',
-      `Locus ${record.id} has no durable safe-v1 child composition proof and must be rebuilt.`,
+      // `endpoint-invalid` stays the code for a Host-invalidated generation so
+      // existing diagnostics keep their meaning; the read path refusing it is
+      // the contract `ensureForDelivery` relies on.
+      record.state === 'invalid' ? 'endpoint-invalid' : 'locus-unusable',
+      `Locus ${record.id} cannot serve a delivery: ${disposition.reason}.`,
     )
   }
   return {
@@ -152,8 +152,9 @@ function toActive(record: LocusRecord): ResolvedActiveLocus {
     endpoint: { ...record.endpoint },
     generation: record.generation,
     parentSessionId: record.parentSessionId,
-    childSessionId: record.childSessionId,
-    childComposition: record.childComposition,
+    // Proven by `dispositionOf`; not re-derived here on purpose.
+    childSessionId: disposition.childSessionId,
+    childComposition: disposition.childComposition,
     workspaceId: record.workspaceId,
     state: 'active',
     permission: record.permission,
@@ -225,16 +226,16 @@ export function createLocusResolution(ports: LocusResolutionPorts): {
         try {
           return toActive(record)
         } catch (error) {
-          // A generation the HOST invalidated is not an owner decision, so the
-          // "an explicit exit must not be silently replaced" rule does not
-          // apply to it. Fall through to provisioning, which replaces it with
-          // a freshly created generation.
+          // Ask the ONE policy module whether this generation may be replaced
+          // without the owner. `stopped`/`retired` record an owner decision
+          // and stay terminal; anything it classifies as replaceable falls
+          // through to provisioning.
           //
-          // `toActive` still refuses it, and that refusal is the point: the
-          // invalid row's child must never be adopted or cold-resumed (it
-          // lacks the safe-v1 composition proof). Only the REPLACEMENT is
-          // automatic; the old child stays untouched as durable history.
-          if (record.state !== 'invalid') return refuse(error)
+          // `toActive` refusing it remains the point: the unavailable
+          // generation's child is never adopted or cold-resumed (it may lack
+          // the safe-v1 proof). Only the REPLACEMENT is automatic; the old row
+          // stays untouched as durable history.
+          if (dispositionOf(record).kind !== 'replace') return refuse(error)
         }
       }
       // Before establishing anything, prove this endpoint is not a retired

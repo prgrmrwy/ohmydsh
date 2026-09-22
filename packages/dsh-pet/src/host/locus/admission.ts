@@ -9,6 +9,7 @@
  */
 
 import type { LarkInboundEvent } from '../channel/event.js'
+import { isOwnerExit } from './serviceability.js'
 import { STORAGE_KEY_SEPARATOR, containsStorageKeySeparator } from './storage-key.js'
 
 /** The two possible parts of a Locus address. */
@@ -133,9 +134,13 @@ export function createDurableLocusAuthorizationResolver(
    * rebuild — a rebuild that could itself be impossible when the recorded
    * parent was archived, leaving the endpoint permanently unreachable.
    */
+  // Derive from the ONE policy module instead of restating the split here:
+  // every layer that decides "may this proceed / may this be replaced" must
+  // agree, and hand-written copies are what let three rounds of fixes each
+  // move the refusal one layer deeper rather than removing it.
   const unserviceableAuthorization = (
     state: 'provisioning' | 'active' | 'switching' | 'invalid' | 'retired' | 'stopped',
-  ): LocusAuthorizationState => (state === 'stopped' || state === 'retired' ? 'retired' : 'unusable')
+  ): LocusAuthorizationState => (isOwnerExit(state) ? 'retired' : 'unusable')
 
   return endpoint => {
     const exact = endpoint.threadId === undefined
