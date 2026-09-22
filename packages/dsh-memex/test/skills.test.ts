@@ -18,4 +18,5 @@ describe('memex skill filesystem integration', () => {
   it('resolves the installed package and verifies its pinned version', () => {
     expect(resolveMemexInstallation()).toMatchObject({ version: '0.4.1' })
   })
+
 })
