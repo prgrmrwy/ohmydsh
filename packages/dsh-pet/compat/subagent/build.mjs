@@ -42,7 +42,7 @@ const UPSTREAM = {
   /** Reviewed commit behind dsh-v0.1.5-rc.2; a moved tag/local checkout fails. */
   commit: 'fb2c4b9e698e30edb738bca4cf0618587db7d203',
   /** sha256 of `settlement-notice.patch`, so a silently edited patch fails. */
-  patchSha256: '68f9531ad03ae0a1c6a9cebc3884f04ee2b1dca1cad542f0a832246fa978e8a0',
+  patchSha256: '8bcf808cb49c825703d9a12b90d289da7e21a12e244adfd5a189eebaeab023ed',
 }
 
 const run = (command, args, cwd = here, options) => runCompatCommand(command, args, cwd, options)
@@ -123,7 +123,6 @@ run('corepack', ['pnpm@11.7.0', 'install', '--prefer-offline'], checkout, { env:
 run(process.execPath, ['./node_modules/tsx/dist/cli.mjs', 'native/system/scripts/build.ts', '--host-addon-only'], checkout)
 run(process.execPath, [
   './node_modules/vitest/vitest.mjs', 'run',
-  'packages/core/agent-loop/tests/inbox.spec.ts',
   'packages/subagent/subagent/tests/continuation.spec.ts',
   '--reporter=dot',
 ], checkout, { env: { CI: 'true' } })
@@ -144,36 +143,6 @@ rmSync(join(target, 'lib'), { recursive: true, force: true })
 cpSync(libSource, join(target, 'lib'), { recursive: true })
 for (const stale of ['lib/tsconfig.tsbuildinfo', 'lib/types/tsconfig.tsbuildinfo']) {
   rmSync(join(target, stale), { force: true })
-}
-
-// The isolated-claim seam is patched into `dsh-agent` and `dsh-agent-loop`, so
-// those built packages must be published beside the subagent artifact: the
-// launcher overrides them by path, and a launcher resolving the unpatched
-// registry build would leave Pet's inquiry queue unavailable.
-const agentArtifacts = join(here, 'agent-artifacts')
-rmSync(agentArtifacts, { recursive: true, force: true })
-for (const [sourceDir, artifactName] of [['packages/core/agent', 'agent'], ['packages/core/agent-loop', 'agent-loop']]) {
-  const sourcePackage = join(checkout, sourceDir)
-  const artifact = join(agentArtifacts, artifactName)
-  mkdirSync(artifact, { recursive: true })
-  cpSync(join(sourcePackage, 'lib'), join(artifact, 'lib'), { recursive: true })
-  for (const stale of ['lib/tsconfig.tsbuildinfo', 'lib/types/tsconfig.tsbuildinfo']) {
-    rmSync(join(artifact, stale), { force: true })
-  }
-  const pkg = JSON.parse(readFileSync(join(sourcePackage, 'package.json'), 'utf8'))
-  delete pkg.devDependencies
-  delete pkg.publishConfig
-  const baseVersion = pkg.version
-  pkg.version = `${baseVersion}-locus-isolated-claim.1`
-  pkg.dsh_compat = {
-    replaces: `${pkg.name}@${baseVersion}`,
-    reason: 'adds the opt-in isolated queued-turn claim so an inquiry turn has one provable origin without discarding pending next-step input',
-    upstreamTag: UPSTREAM.tag,
-    upstreamBase: head,
-    patchSha256: UPSTREAM.patchSha256,
-    removeWhen: 'upstream publishes the isolated queued-turn claim; then delete compat/subagent and use the official packages',
-  }
-  writeFileSync(join(artifact, 'package.json'), `${JSON.stringify(pkg, null, 2)}\n`)
 }
 
 const upstreamPkg = JSON.parse(readFileSync(join(built, 'package.json'), 'utf8'))
@@ -242,30 +211,6 @@ if (
   fail('built artifact has no host-authored delivery seam; unified locus intake would be unavailable')
 }
 
-// The isolated-claim seam: the `AgentOptions` opt-in lives in `dsh-agent`,
-// while `Inbox.claim`, the loop wiring and the capability marker live in
-// `dsh-agent-loop` (0.1.5 moved `Inbox` out of `dsh-agent`). Verify the
-// artifacts just published above; `build-launcher.cjs` owns proving that they
-// actually reach the launcher's dependency graph.
-const agentLoopRuntimeEntry = join(agentArtifacts, 'agent-loop', 'lib', 'index.js')
-const agentLoopRuntimeSource = readFileSync(agentLoopRuntimeEntry, 'utf8')
-// `AgentOptions.isolateQueuedTurnClaim` is an interface member, so it is
-// correctly erased from emitted JS and must be proven in the published type
-// declaration instead. Checking the JS bundle here would always fail.
-const agentOptionsTypes = readFileSync(
-  join(agentArtifacts, 'agent', 'lib', 'types', 'runtime-types.d.ts'),
-  'utf8',
-)
-if (!agentOptionsTypes.includes('isolateQueuedTurnClaim')) {
-  fail('built dsh-agent has no isolated-claim opt-in; a non-steering inquiry queue would silently destroy GUI next-step input')
-}
-if (
-  !agentLoopRuntimeSource.includes('supportsIsolatedQueuedTurnClaim')
-  || !agentLoopRuntimeSource.includes('isolateQueuedTurn')
-  || !/claim\(target,\s*turn,\s*options\)/.test(agentLoopRuntimeSource)
-) {
-  fail('built dsh-agent-loop has no isolated-claim seam, opt-in or capability marker; Pet would keep the inquiry queue unavailable')
-}
 // A string in the bundle does not prove behavior. The reviewed source carries
 // executable proofs for exactly these seams (isolated claim scope, silent
 // settlement, idle creation, independent composition, exact child Session),

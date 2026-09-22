@@ -18,7 +18,8 @@ import { fileURLToPath } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import Storage, { storageBackendServiceKey } from '@deepseek-ai/dsh-storage'
 import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
-import * as StorageSqlite from '@deepseek-ai/dsh-storage-sqlite'
+import * as PetStorage from '../src/host/storage/plugin.js'
+import { PET_BACKEND_NAME } from '../src/host/storage/backend.js'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { MessageId } from '@deepseek-ai/dsh-llm'
 import { mkdtemp } from 'node:fs/promises'
@@ -135,12 +136,13 @@ async function composeHost(options: {
         {
           name: 'default-backend-inner',
           inject: ['storage'],
-          apply(inner: Context, config: StorageSqlite.Config) {
-            const backend = new StorageSqlite.SqliteStorageBackend(config)
-            inner.effect(() => inner.storage.backend.register('json', backend))
-            inner.provide(storageBackendServiceKey('json'), backend)
+          apply(inner: Context) {
+            // Non-Pet domains only; this suite opens none, so the unit
+            // factory never runs.
+            const backend = { kv: { open: () => Promise.reject(new Error('no default unit in this suite')) }, close: () => Promise.resolve() }
+            inner.effect(() => inner.storage.backend.register('json', backend as never))
+            inner.provide(storageBackendServiceKey('json'), backend as never)
           },
-          Config: StorageSqlite.Config,
         },
         { path: ':memory:' },
       )
@@ -148,13 +150,11 @@ async function composeHost(options: {
   })
 
   if (options.withSqlite !== false) {
-    await ctx.plugin(StorageSqlite, {
-      path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite'),
-    })
+    await ctx.plugin(PetStorage as never, { path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite') })
   }
   await ctx.plugin(StorageDomain, {
     backend: 'json',
-    routes: { [PET_DOMAIN_NAME]: 'sqlite' },
+    routes: { [PET_DOMAIN_NAME]: PET_BACKEND_NAME },
   })
 
   await ctx.plugin(petPlugin, { home, version: '0.1.0' })
@@ -188,10 +188,10 @@ describe('plugin entry shape', () => {
   it('routes the bundle patch to the exact domain name the spec declares', async () => {
     const patch = await readFile(path.join(packageRoot, 'cordis.patch.yml'), 'utf8')
 
-    expect(patch).toContain(`${PET_DOMAIN_NAME}: sqlite`)
+    expect(patch).toContain(`${PET_DOMAIN_NAME}: ${PET_BACKEND_NAME}`)
     // Guards the hyphen/underscore trap: DSH's UNIT_NAME_RE forbids hyphens.
     expect(PET_DOMAIN_NAME).toMatch(/^[a-z][a-z0-9_]*$/)
-    expect(patch).not.toMatch(/^\s+dsh-pet: sqlite$/m)
+    expect(patch).not.toMatch(/^\s+dsh-pet: /m)
   })
 })
 
@@ -377,21 +377,20 @@ describe('a real Invocation scopes its executor Agent', () => {
           {
             name: 'default-backend-inner',
             inject: ['storage'],
-            apply(inner: Context, config: StorageSqlite.Config) {
-              const backend = new StorageSqlite.SqliteStorageBackend(config)
-              inner.effect(() => inner.storage.backend.register('json', backend))
-              inner.provide(storageBackendServiceKey('json'), backend)
+            apply(inner: Context) {
+              // Non-Pet domains only; this suite opens none, so the unit
+              // factory never runs.
+              const backend = { kv: { open: () => Promise.reject(new Error('no default unit in this suite')) }, close: () => Promise.resolve() }
+              inner.effect(() => inner.storage.backend.register('json', backend as never))
+              inner.provide(storageBackendServiceKey('json'), backend as never)
             },
-            Config: StorageSqlite.Config,
           },
           { path: ':memory:' },
         )
       },
     })
-    await ctx.plugin(StorageSqlite, {
-      path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite'),
-    })
-    await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: 'sqlite' } })
+    await ctx.plugin(PetStorage as never, { path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite') })
+    await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: PET_BACKEND_NAME } })
     await ctx.plugin(petPlugin, { home, version: '0.1.0' })
 
     const deadline = Date.now() + 15_000
@@ -508,21 +507,20 @@ describe('dispatch uses the ordinary Agent lifecycle', () => {
           {
             name: 'default-backend-inner',
             inject: ['storage'],
-            apply(inner: Context, config: StorageSqlite.Config) {
-              const backend = new StorageSqlite.SqliteStorageBackend(config)
-              inner.effect(() => inner.storage.backend.register('json', backend))
-              inner.provide(storageBackendServiceKey('json'), backend)
+            apply(inner: Context) {
+              // Non-Pet domains only; this suite opens none, so the unit
+              // factory never runs.
+              const backend = { kv: { open: () => Promise.reject(new Error('no default unit in this suite')) }, close: () => Promise.resolve() }
+              inner.effect(() => inner.storage.backend.register('json', backend as never))
+              inner.provide(storageBackendServiceKey('json'), backend as never)
             },
-            Config: StorageSqlite.Config,
           },
           { path: ':memory:' },
         )
       },
     })
-    await ctx.plugin(StorageSqlite, {
-      path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite'),
-    })
-    await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: 'sqlite' } })
+    await ctx.plugin(PetStorage as never, { path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite') })
+    await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: PET_BACKEND_NAME } })
     await ctx.plugin(petPlugin, { home, version: '0.1.0' })
 
     const deadline = Date.now() + 15_000
@@ -613,21 +611,20 @@ describe('archiving from the Pet route syncs the executor session', () => {
           {
             name: 'default-backend-inner',
             inject: ['storage'],
-            apply(inner: Context, config: StorageSqlite.Config) {
-              const backend = new StorageSqlite.SqliteStorageBackend(config)
-              inner.effect(() => inner.storage.backend.register('json', backend))
-              inner.provide(storageBackendServiceKey('json'), backend)
+            apply(inner: Context) {
+              // Non-Pet domains only; this suite opens none, so the unit
+              // factory never runs.
+              const backend = { kv: { open: () => Promise.reject(new Error('no default unit in this suite')) }, close: () => Promise.resolve() }
+              inner.effect(() => inner.storage.backend.register('json', backend as never))
+              inner.provide(storageBackendServiceKey('json'), backend as never)
             },
-            Config: StorageSqlite.Config,
           },
           { path: ':memory:' },
         )
       },
     })
-    await ctx.plugin(StorageSqlite, {
-      path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite'),
-    })
-    await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: 'sqlite' } })
+    await ctx.plugin(PetStorage as never, { path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite') })
+    await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: PET_BACKEND_NAME } })
     await ctx.plugin(petPlugin, { home, version: '0.1.0' })
 
     const deadline = Date.now() + 15_000
@@ -722,21 +719,20 @@ describe('provider routability is proven before an executor is created', () => {
           {
             name: 'default-backend-inner',
             inject: ['storage'],
-            apply(inner: Context, config: StorageSqlite.Config) {
-              const backend = new StorageSqlite.SqliteStorageBackend(config)
-              inner.effect(() => inner.storage.backend.register('json', backend))
-              inner.provide(storageBackendServiceKey('json'), backend)
+            apply(inner: Context) {
+              // Non-Pet domains only; this suite opens none, so the unit
+              // factory never runs.
+              const backend = { kv: { open: () => Promise.reject(new Error('no default unit in this suite')) }, close: () => Promise.resolve() }
+              inner.effect(() => inner.storage.backend.register('json', backend as never))
+              inner.provide(storageBackendServiceKey('json'), backend as never)
             },
-            Config: StorageSqlite.Config,
           },
           { path: ':memory:' },
         )
       },
     })
-    await ctx.plugin(StorageSqlite, {
-      path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite'),
-    })
-    await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: 'sqlite' } })
+    await ctx.plugin(PetStorage as never, { path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite') })
+    await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: PET_BACKEND_NAME } })
     await ctx.plugin(petPlugin, { home, version: '0.1.0' })
 
     const deadline = Date.now() + 15_000
@@ -784,7 +780,7 @@ describe('the bundle patch composes into a real DSH profile', () => {
     // `backend` would drop the profile default and leave every other DSH
     // domain unrouted.
     expect(block).toMatch(/backend: json/)
-    expect(block).toMatch(/dsh_pet: sqlite/)
+    expect(block).toContain(`dsh_pet: ${PET_BACKEND_NAME}`)
   })
 
   it('declares every inject the Host entry requires', async () => {
@@ -902,19 +898,20 @@ describe('a locus child is composed at the real creation boundary', () => {
           {
             name: 'default-backend-inner',
             inject: ['storage'],
-            apply(inner: Context, config: StorageSqlite.Config) {
-              const backend = new StorageSqlite.SqliteStorageBackend(config)
-              inner.effect(() => inner.storage.backend.register('json', backend))
-              inner.provide(storageBackendServiceKey('json'), backend)
+            apply(inner: Context) {
+              // Non-Pet domains only; this suite opens none, so the unit
+              // factory never runs.
+              const backend = { kv: { open: () => Promise.reject(new Error('no default unit in this suite')) }, close: () => Promise.resolve() }
+              inner.effect(() => inner.storage.backend.register('json', backend as never))
+              inner.provide(storageBackendServiceKey('json'), backend as never)
             },
-            Config: StorageSqlite.Config,
           },
           { path: ':memory:' },
         )
       },
     })
-    await ctx.plugin(StorageSqlite, { path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite') })
-    await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: 'sqlite' } })
+    await ctx.plugin(PetStorage as never, { path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite') })
+    await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: PET_BACKEND_NAME } })
     await ctx.plugin(petPlugin, { home, version: '0.1.0' })
 
     const deadline = Date.now() + 15_000
@@ -1064,19 +1061,20 @@ describe('the per-turn correlation observer is wired to real runtime events', ()
           {
             name: 'default-backend-inner',
             inject: ['storage'],
-            apply(inner: Context, config: StorageSqlite.Config) {
-              const backend = new StorageSqlite.SqliteStorageBackend(config)
-              inner.effect(() => inner.storage.backend.register('json', backend))
-              inner.provide(storageBackendServiceKey('json'), backend)
+            apply(inner: Context) {
+              // Non-Pet domains only; this suite opens none, so the unit
+              // factory never runs.
+              const backend = { kv: { open: () => Promise.reject(new Error('no default unit in this suite')) }, close: () => Promise.resolve() }
+              inner.effect(() => inner.storage.backend.register('json', backend as never))
+              inner.provide(storageBackendServiceKey('json'), backend as never)
             },
-            Config: StorageSqlite.Config,
           },
           { path: ':memory:' },
         )
       },
     })
-    await ctx.plugin(StorageSqlite, { path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite') })
-    await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: 'sqlite' } })
+    await ctx.plugin(PetStorage as never, { path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite') })
+    await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: PET_BACKEND_NAME } })
     await ctx.plugin(petPlugin, { home, version: '0.1.0' })
 
     const deadline = Date.now() + 15_000
@@ -1257,19 +1255,20 @@ describe('owner-facing locus management is served by the real routes', () => {
           {
             name: 'default-backend-inner',
             inject: ['storage'],
-            apply(inner: Context, config: StorageSqlite.Config) {
-              const backend = new StorageSqlite.SqliteStorageBackend(config)
-              inner.effect(() => inner.storage.backend.register('json', backend))
-              inner.provide(storageBackendServiceKey('json'), backend)
+            apply(inner: Context) {
+              // Non-Pet domains only; this suite opens none, so the unit
+              // factory never runs.
+              const backend = { kv: { open: () => Promise.reject(new Error('no default unit in this suite')) }, close: () => Promise.resolve() }
+              inner.effect(() => inner.storage.backend.register('json', backend as never))
+              inner.provide(storageBackendServiceKey('json'), backend as never)
             },
-            Config: StorageSqlite.Config,
           },
           { path: ':memory:' },
         )
       },
     })
-    await ctx.plugin(StorageSqlite, { path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite') })
-    await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: 'sqlite' } })
+    await ctx.plugin(PetStorage as never, { path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite') })
+    await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: PET_BACKEND_NAME } })
     await ctx.plugin(petPlugin, { home, version: '0.1.0' })
 
     const deadline = Date.now() + 15_000
@@ -1486,19 +1485,20 @@ describe('startup reconciliation runs against the real runtime', () => {
           {
             name: 'default-backend-inner',
             inject: ['storage'],
-            apply(inner: Context, config: StorageSqlite.Config) {
-              const backend = new StorageSqlite.SqliteStorageBackend(config)
-              inner.effect(() => inner.storage.backend.register('json', backend))
-              inner.provide(storageBackendServiceKey('json'), backend)
+            apply(inner: Context) {
+              // Non-Pet domains only; this suite opens none, so the unit
+              // factory never runs.
+              const backend = { kv: { open: () => Promise.reject(new Error('no default unit in this suite')) }, close: () => Promise.resolve() }
+              inner.effect(() => inner.storage.backend.register('json', backend as never))
+              inner.provide(storageBackendServiceKey('json'), backend as never)
             },
-            Config: StorageSqlite.Config,
           },
           { path: ':memory:' },
         )
       },
     })
-    await ctx.plugin(StorageSqlite, { path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite') })
-    await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: 'sqlite' } })
+    await ctx.plugin(PetStorage as never, { path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite') })
+    await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: PET_BACKEND_NAME } })
 
     await ctx.plugin(petPlugin, { home, version: '0.1.0' })
     // Pet registers the domain during its async setup, so wait for it the
@@ -1570,19 +1570,20 @@ describe('startup reconciliation runs against the real runtime', () => {
           {
             name: 'default-backend-inner',
             inject: ['storage'],
-            apply(inner: Context, config: StorageSqlite.Config) {
-              const backend = new StorageSqlite.SqliteStorageBackend(config)
-              inner.effect(() => inner.storage.backend.register('json', backend))
-              inner.provide(storageBackendServiceKey('json'), backend)
+            apply(inner: Context) {
+              // Non-Pet domains only; this suite opens none, so the unit
+              // factory never runs.
+              const backend = { kv: { open: () => Promise.reject(new Error('no default unit in this suite')) }, close: () => Promise.resolve() }
+              inner.effect(() => inner.storage.backend.register('json', backend as never))
+              inner.provide(storageBackendServiceKey('json'), backend as never)
             },
-            Config: StorageSqlite.Config,
           },
           { path: ':memory:' },
         )
       },
     })
-    await ctx.plugin(StorageSqlite, { path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite') })
-    await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: 'sqlite' } })
+    await ctx.plugin(PetStorage as never, { path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite') })
+    await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: PET_BACKEND_NAME } })
 
     await ctx.plugin(petPlugin, { home, version: '0.1.0' })
     // Pet registers the domain during its async setup, so wait for it the
@@ -1657,19 +1658,20 @@ describe('the unified Feishu channel stays gated on real capabilities', () => {
           {
             name: 'default-backend-inner',
             inject: ['storage'],
-            apply(inner: Context, config: StorageSqlite.Config) {
-              const backend = new StorageSqlite.SqliteStorageBackend(config)
-              inner.effect(() => inner.storage.backend.register('json', backend))
-              inner.provide(storageBackendServiceKey('json'), backend)
+            apply(inner: Context) {
+              // Non-Pet domains only; this suite opens none, so the unit
+              // factory never runs.
+              const backend = { kv: { open: () => Promise.reject(new Error('no default unit in this suite')) }, close: () => Promise.resolve() }
+              inner.effect(() => inner.storage.backend.register('json', backend as never))
+              inner.provide(storageBackendServiceKey('json'), backend as never)
             },
-            Config: StorageSqlite.Config,
           },
           { path: ':memory:' },
         )
       },
     })
-    await ctx.plugin(StorageSqlite, { path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite') })
-    await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: 'sqlite' } })
+    await ctx.plugin(PetStorage as never, { path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite') })
+    await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: PET_BACKEND_NAME } })
     await ctx.plugin(petPlugin, { home, version: '0.1.0' })
 
     try {

@@ -1,13 +1,34 @@
 # DSH Pet Host entry. The package also declares a Web client bundle.
 #
-# Pet composes the standard SQLite backend and routes ONLY its own `dsh-pet`
+# Pet registers its OWN storage backend and routes ONLY its own `dsh-pet`
 # domain to it. Every other DSH domain keeps the profile's default backend:
-# `storage-domain.routes` is an override map, not a replacement. The Host
-# fails Pet into `degraded` when the `sqlite` backend name is already owned by
-# an incompatible composition rather than replacing that backend.
+# `storage-domain.routes` is an override map, not a replacement.
+#
+# Why a Pet-owned backend rather than the official `storage-sqlite`:
+# Pet needs atomic multi-table commits (a locus publication, an inquiry ledger
+# row and an outbox row must land together) and single-writer ownership of the
+# medium. Neither is in the official backend, and both used to be added by
+# patching four upstream packages — which kept `storage`, `storage-domain`,
+# `storage-json` and `storage-sqlite` permanently inside Pet's compatibility
+# overlay and forced 32 hunks to be re-derived on every DSH version bump.
+#
+# `@deepseek-ai/dsh-storage` exports the backend contract and its registry
+# precisely so a consumer can do this, and documents routing as the consumer's
+# own configuration. So Pet implements `StorageBackend` itself and upstream
+# stays untouched. Everything above the backend — schema validation, domain
+# versioning and migration, the in-memory view, `domain/changed` — remains the
+# official `storage-domain` layer's job.
+#
+# This row must load BEFORE `storage-domain`: the domain layer injects
+# `storageBackendServiceKey('pet-sqlite')` and cannot resolve the route until
+# this row provides it. It is a separate row from `dsh-pet` for the same
+# reason — the Pet row injects `storageDomain`, so providing the backend from
+# there would make the dependency graph circular and neither would ever load.
 - insert:
-    - id: dsh-pet-storage-sqlite
-      name: '@deepseek-ai/dsh-storage-sqlite'
+    - id: dsh-pet-storage
+      name: dsh-pet/storage
+      inject:
+        - storage
       config:
         # Pet state lives under the ACTIVE DSH home, never in the package
         # checkout or the generated profile, so plugin upgrades and profile
@@ -15,9 +36,6 @@
         # loader helper the base Web profile uses for `storage-json`, so a
         # `$DSH_HOME` override moves Pet state with the rest of the harness.
         path: !!js dshHomePath('plugins', 'dsh-pet', 'state.sqlite')
-        # Transactions prevent partial locus publication; exclusive ownership
-        # separately prevents two Host processes from processing the same work.
-        exclusive: true
 # A patch row is a top-level entry naming the row it overrides by `id`; a
 # `patch:` wrapper is not a thing and fails composition with
 # "id is required for non-insert patches".
@@ -32,7 +50,12 @@
       # MUST equal PET_DOMAIN_NAME in src/host/spec.ts. DSH's UNIT_NAME_RE
       # forbids hyphens, so the domain (and this route key) is `dsh_pet`;
       # a mismatch would silently leave Pet on the profile's JSON backend.
-      dsh_pet: sqlite
+      #
+      # The value MUST equal PET_BACKEND_NAME in src/host/storage/backend.ts.
+      # Routing is by name, so a typo here does not fail loudly — it silently
+      # sends Pet's records to the profile's default JSON backend, which has
+      # neither atomic batches nor single-writer ownership.
+      dsh_pet: pet-sqlite
 - insert:
     - id: dsh-pet
       name: dsh-pet
