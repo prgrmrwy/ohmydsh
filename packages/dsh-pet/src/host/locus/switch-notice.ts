@@ -23,6 +23,7 @@
  */
 
 import type { LocusEndpoint } from './aggregate.js'
+import { STORAGE_KEY_SEPARATOR } from './storage-key.js'
 
 /** One notice owed to an endpoint after its source changed. */
 export interface SwitchNotice {
@@ -72,7 +73,7 @@ export function createDurableSwitchNoticeStore(domain: {
   }
 }): SwitchNoticeStore {
   const rowKey = (locusId: string, generation: number): string =>
-    `${locusId}\u0000${String(generation)}`
+    `${locusId}${STORAGE_KEY_SEPARATOR}${String(generation)}`
   const table = () => domain.table('locus_switch_notices')
 
   return {

@@ -14,6 +14,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { removeLegacyState } from '../src/host/migrate.js'
 import { PET_DOMAIN_VERSION } from '../src/host/spec.js'
+import { STORAGE_KEY_SEPARATOR } from '../src/host/locus/storage-key.js'
 
 /** Build a database stamped as the previous domain version. */
 async function legacyDatabase(): Promise<string> {
@@ -214,7 +215,7 @@ describe('a healthy older medium upgrades additively without losing anything', (
       JSON.stringify({ id: 'task-1', status: 'idle', sourceKind: 'session' }),
     )
     db.prepare('INSERT INTO u_dsh_pet_workspace_env VALUES (?, ?)').run(
-      'global\u0000CR_GROUP',
+      `global${STORAGE_KEY_SEPARATOR}CR_GROUP`,
       JSON.stringify({ scope: 'global', key: 'CR_GROUP', value: 'oc_x', updatedAt: 1 }),
     )
     db.close()

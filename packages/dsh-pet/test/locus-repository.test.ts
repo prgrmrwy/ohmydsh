@@ -7,6 +7,7 @@ import {
   type LocusEndpoint,
 } from '../src/host/locus/aggregate.js'
 import { LocusRepository } from '../src/host/locus/repository.js'
+import { STORAGE_KEY_SEPARATOR } from '../src/host/locus/storage-key.js'
 
 const CHAT = ' oc_project '
 const THREAD_A = ' topic-a '
@@ -37,15 +38,15 @@ describe('unified locus endpoint normalization', () => {
     expect(chat.endpoint).toEqual({ chatId: 'oc_chat' })
     expect(topic.endpoint).toEqual({ chatId: 'oc_chat', threadId: 'omt_thread' })
     expect(chat.key).toBe('oc_chat')
-    expect(topic.key).toBe(`oc_chat\u0000omt_thread`)
+    expect(topic.key).toBe(`oc_chat${STORAGE_KEY_SEPARATOR}omt_thread`)
     expect(endpointFromKey(topic.key)).toEqual(topic.endpoint)
     expect(endpointKeyOf(chat.endpoint)).not.toBe(endpointKeyOf(topic.endpoint))
   })
 
   it('rejects missing ids and delimiter injection', () => {
     expect(() => normalizeLocusEndpoint({ chatId: ' ' })).toThrow(LocusError)
-    expect(() => normalizeLocusEndpoint({ chatId: 'oc_chat\u0000other' })).toThrow(
-      /may not contain NUL/,
+    expect(() => normalizeLocusEndpoint({ chatId: `oc_chat${STORAGE_KEY_SEPARATOR}other` })).toThrow(
+      /may not contain the storage key separator/,
     )
     expect(() => endpointFromKey('')).toThrow(LocusError)
   })

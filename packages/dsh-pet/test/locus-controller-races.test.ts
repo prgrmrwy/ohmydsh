@@ -23,6 +23,7 @@ import {
   type DeliveryRecord,
 } from '../src/host/locus/delivery.js'
 import type { LocusReplyTarget } from '../src/host/locus/context.js'
+import { STORAGE_KEY_SEPARATOR } from '../src/host/locus/storage-key.js'
 
 const ENDPOINT = { chatId: 'oc_race', threadId: 'omt_race' } as const
 const LOCUS: ActiveLocus = {
@@ -938,7 +939,7 @@ describe('LocusChannelController control commands', () => {
     })
     expect(dispatch).toHaveBeenCalledWith({
       command: { kind: 'scope', mode: 'write' },
-      endpoint: { chatId: ENDPOINT.chatId, threadId: ENDPOINT.threadId, key: `${ENDPOINT.chatId}\u0000${ENDPOINT.threadId}` },
+      endpoint: { chatId: ENDPOINT.chatId, threadId: ENDPOINT.threadId, key: `${ENDPOINT.chatId}${STORAGE_KEY_SEPARATOR}${ENDPOINT.threadId}` },
       senderId: 'ou-owner',
       authorization: 'authorized',
     })

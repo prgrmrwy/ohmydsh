@@ -4,8 +4,11 @@
  * A locus is one generation of the association between a Lark endpoint and a
  * DSH parent/child session pair.  The repository owns indexes and persistence;
  * this module deliberately has no dependency on the retired chat_bindings or
- * QA task model.
+ * QA task model — the one import below is a leaf constant, not a sibling
+ * domain module, so it does not compromise that boundary.
  */
+
+import { STORAGE_KEY_SEPARATOR, containsStorageKeySeparator } from './storage-key.js'
 
 export type LocusSource = 'auto' | 'inherited' | 'explicit' | 'qa-created'
 
@@ -196,8 +199,8 @@ export function normalizeLocusEndpoint(endpoint: LocusEndpoint): NormalizedEndpo
   if (chatId.length === 0) {
     throw new LocusError('INVALID_ENDPOINT', 'A locus endpoint requires a non-empty chatId')
   }
-  if (chatId.includes('\u0000') || (threadId !== undefined && threadId.includes('\u0000'))) {
-    throw new LocusError('INVALID_ENDPOINT', 'Locus endpoint identifiers may not contain NUL')
+  if (containsStorageKeySeparator(chatId) || (threadId !== undefined && containsStorageKeySeparator(threadId))) {
+    throw new LocusError('INVALID_ENDPOINT', 'Locus endpoint identifiers may not contain the storage key separator')
   }
 
   const endpointValue: LocusEndpoint =
@@ -210,8 +213,14 @@ export function normalizeLocusEndpoint(endpoint: LocusEndpoint): NormalizedEndpo
 
 /**
  * Stable endpoint key.  Chat-only endpoints use the chat id itself; a topic
- * appends a NUL separator.  Lark IDs do not contain NUL, so this is reversible
- * and keeps the familiar `chat\u0000thread` form used by the channel seam.
+ * appends {@link STORAGE_KEY_SEPARATOR}.  Lark IDs do not contain it, so this
+ * is reversible and keeps the familiar `chat<sep>thread` form used by the
+ * channel seam.
+ *
+ * The separator MUST NOT be NUL: every row this key becomes a SQLite TEXT
+ * PRIMARY KEY for goes through `node:sqlite`, which binds strings as C
+ * strings and truncates at the first NUL byte — every topic-scoped endpoint
+ * under the same chat would collide onto that chat's own row.
  */
 export function endpointKeyOf(endpoint: LocusEndpoint): string {
   const normalized = endpoint === undefined ? undefined : normalizeWithoutKey(endpoint)
@@ -220,7 +229,7 @@ export function endpointKeyOf(endpoint: LocusEndpoint): string {
   }
   return normalized.threadId === undefined
     ? normalized.chatId
-    : `${normalized.chatId}\u0000${normalized.threadId}`
+    : `${normalized.chatId}${STORAGE_KEY_SEPARATOR}${normalized.threadId}`
 }
 
 /** Alias used by channel code and tests that call this a locus key. */
@@ -231,7 +240,7 @@ export function endpointFromKey(key: string): LocusEndpoint {
   if (typeof key !== 'string' || key.length === 0) {
     throw new LocusError('INVALID_ENDPOINT', 'An endpoint key must be non-empty')
   }
-  const separator = key.indexOf('\u0000')
+  const separator = key.indexOf(STORAGE_KEY_SEPARATOR)
   if (separator < 0) return normalizeLocusEndpoint({ chatId: key }).endpoint
   const chatId = key.slice(0, separator)
   const threadId = key.slice(separator + 1)
@@ -254,8 +263,8 @@ function normalizeWithoutKey(endpoint: LocusEndpoint): LocusEndpoint {
   if (chatId.length === 0) {
     throw new LocusError('INVALID_ENDPOINT', 'A locus endpoint requires a non-empty chatId')
   }
-  if (chatId.includes('\u0000') || (threadId !== undefined && threadId.includes('\u0000'))) {
-    throw new LocusError('INVALID_ENDPOINT', 'Locus endpoint identifiers may not contain NUL')
+  if (containsStorageKeySeparator(chatId) || (threadId !== undefined && containsStorageKeySeparator(threadId))) {
+    throw new LocusError('INVALID_ENDPOINT', 'Locus endpoint identifiers may not contain the storage key separator')
   }
   return threadId === undefined || threadId.length === 0 ? { chatId } : { chatId, threadId }
 }

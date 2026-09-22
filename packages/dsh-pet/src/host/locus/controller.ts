@@ -1420,7 +1420,25 @@ export class LocusController {
         error,
       )
     }
-    if (session === undefined || session.state === 'missing' || session.state === 'archived') {
+    if (session?.state === 'archived') {
+      // Archived is reversible, unlike missing — the session's bytes and
+      // history are still on disk, only its workspace-registry membership is
+      // hidden. Saying only "unavailable, stopped" here used to strand an
+      // owner: rebuild's parentSessionId comes from the STOPPED locus record
+      // (the only session that was ever this endpoint's main session), so
+      // there was no path back into this method with a different id, and
+      // ordinary `@bot` refuses a stopped/invalid endpoint with "rebuild it"
+      // — a rebuild whose only possible parent is the one this branch always
+      // refused. Naming the reversible cause tells the owner the one action
+      // that actually unblocks it, instead of a dead end wearing the same
+      // wording as a truly gone session.
+      throw new LocusControllerError(
+        'PARENT_NOT_FOUND',
+        `${operation} ${shortLocusSessionLabel(normalized, session.title)} 已被归档，已停止操作。` +
+        '请先在「会话归档管理」中恢复该会话，再重试。',
+      )
+    }
+    if (session === undefined || session.state === 'missing') {
       throw new LocusControllerError(
         'PARENT_NOT_FOUND',
         `${operation} ${shortLocusSessionLabel(normalized)} 当前不可用，已停止操作。`,

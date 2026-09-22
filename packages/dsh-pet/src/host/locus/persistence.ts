@@ -59,6 +59,7 @@ import {
   type DeliveryWaitInput,
 } from './delivery.js'
 import { LocusError } from './aggregate.js'
+import { STORAGE_KEY_SEPARATOR } from './storage-key.js'
 import type { LocusContextAnchorFacts } from './context.js'
 import type { LocusCurrentDelivery } from './context-repository.js'
 import { extractResourceRefs, operationKindOf } from './persistence-helper.js'
@@ -1202,7 +1203,7 @@ export class LocusRepository {
         replacesLocusId: previous.id,
       }, notice === undefined ? [] : [{
         table: 'locus_switch_notices',
-        key: `${current.id}\u0000${String(current.generation)}`,
+        key: switchNoticeKey(current.id, current.generation),
         value: {
           locusId: current.id,
           generation: current.generation,
@@ -1353,7 +1354,7 @@ export class LocusRepository {
     // Without a Host-derived operator there is nothing auditable to record;
     // the permission change itself has already been fenced by its caller.
     if (grantedBy === undefined || grantedBy.trim() === '') return []
-    const prefix = `${record.id}\u0000${String(record.generation)}\u0000`
+    const prefix = `${record.id}${STORAGE_KEY_SEPARATOR}${String(record.generation)}${STORAGE_KEY_SEPARATOR}`
     let sequence = 1
     for (const [key] of this.domain.table('locus_permission_audit').entries()) {
       if (!key.startsWith(prefix)) continue
@@ -1382,7 +1383,7 @@ export class LocusRepository {
 
   /** Read the append-only permission history of one locus generation. */
   listPermissionAudit(locusId: string, generation: number): readonly PetLocusPermissionAudit[] {
-    const prefix = `${locusId}\u0000${String(generation)}\u0000`
+    const prefix = `${locusId}${STORAGE_KEY_SEPARATOR}${String(generation)}${STORAGE_KEY_SEPARATOR}`
     return [...this.domain.table('locus_permission_audit').entries()]
       .filter(([key]) => key.startsWith(prefix))
       .map(([, value]) => value)
@@ -2838,7 +2839,28 @@ export class LocusRepository {
     const indexes = new Map<string, PetLocusIndex>()
     for (const [key, value] of this.indexes().entries()) {
       if (key !== value.key) {
-        throw new LocusError('INVALID_LOCUS', `Locus index table key ${key} does not match ${value.key}`)
+        // Every `\u0000`-joined row key written before `storage-key.ts`
+        // introduced `\x1f` was truncated by `node:sqlite`'s C-string binding
+        // at the first NUL byte, so the recorded key is always a strict
+        // prefix of `value.key` (which is bound as its own parameter and was
+        // never truncated). That is a provable, one-directional corruption
+        // signature — not an arbitrary mismatch a bug elsewhere could also
+        // produce — so it is safe to serve from `value.key` in memory rather
+        // than refusing every Locus route the moment one historical row hits
+        // this shape. The on-disk row key is repaired out-of-band by
+        // `scripts/repair-truncated-keys.mjs`, run once while DSH is stopped;
+        // this in-memory substitution is what keeps a Host that has not run
+        // it yet serving the endpoint correctly on this and every future
+        // boot until it does.
+        //
+        // A mismatch that is NOT a prefix relationship is a different bug —
+        // one this recovery cannot explain and must not paper over — so it
+        // stays a hard failure.
+        if (!value.key.startsWith(key)) {
+          throw new LocusError('INVALID_LOCUS', `Locus index table key ${key} does not match ${value.key}`)
+        }
+        indexes.set(value.key, value)
+        continue
       }
       indexes.set(key, value)
     }
@@ -3493,7 +3515,7 @@ function latestLocusForEndpoint(
 }
 
 function switchNoticeKey(locusId: string, generation: number): string {
-  return `${locusId}\u0000${String(generation)}`
+  return `${locusId}${STORAGE_KEY_SEPARATOR}${String(generation)}`
 }
 
 function provisioningBeginHash(input: DurableProvisioningBegin): string {
