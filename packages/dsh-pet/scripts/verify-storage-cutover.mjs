@@ -54,10 +54,21 @@ console.log('Pet storage cutover — 重启后验证\n')
 
 // 1. The medium must be held exclusively: that is the single-writer guarantee.
 //    A readable database means the Host did NOT take it, which is a failure.
+//
+//    `new DatabaseSync()` is LAZY — it does not touch the file until the first
+//    statement runs, so opening and closing always "succeeds" even against a
+//    database another process holds exclusively. The probe therefore has to
+//    READ something. (Measured: open+close succeeds while the very next
+//    `PRAGMA journal_mode` on the same handle is refused with
+//    `database is locked`.)
 let held = false
 try {
   const probe = new DatabaseSync(database, { readOnly: true })
-  probe.close()
+  try {
+    probe.prepare('PRAGMA journal_mode').get()
+  } finally {
+    probe.close()
+  }
 } catch (error) {
   const message = String(error?.message ?? '').toLowerCase()
   held = message.includes('locked') || message === 'not an error'

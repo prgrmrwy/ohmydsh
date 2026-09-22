@@ -60,6 +60,21 @@ function isLocked(error) {
   return message.includes('locked') || message === 'not an error'
 }
 
+/**
+ * Remove a SQLite file together with its sidecars.
+ *
+ * A failed `backup()` can leave `-wal` and `-shm` beside the partial file.
+ * Deleting only the main path leaves those behind, where they later look like
+ * stray backups to anything scanning the directory. (Observed live: a
+ * `.partial-<pid>-wal` was reported as "the newest backup".)
+ */
+async function removeDatabase(file) {
+  await Promise.all(
+    [file, `${file}-wal`, `${file}-shm`, `${file}-journal`]
+      .map(candidate => rm(candidate, { force: true }).catch(() => undefined)),
+  )
+}
+
 function human(bytes) {
   const units = ['B', 'KB', 'MB', 'GB']
   let value = bytes
@@ -77,6 +92,11 @@ try {
   let live
   try {
     live = new DatabaseSync(source, { readOnly: true })
+    // `new DatabaseSync()` is LAZY: it does not touch the file until the first
+    // statement, so opening alone "succeeds" even against a database another
+    // process holds exclusively. Read something so contention surfaces HERE,
+    // with a diagnosis, instead of further down inside `backup()`.
+    live.prepare('PRAGMA journal_mode').get()
   } catch (error) {
     if (isLocked(error)) {
       fail(
@@ -92,7 +112,7 @@ try {
   console.log(`备份至: ${destination}\n`)
 
   await mkdir(path.dirname(destination), { recursive: true })
-  await rm(temporary, { force: true })
+  await removeDatabase(temporary)
   try {
     await backup(live, temporary)
   } catch (error) {
@@ -100,7 +120,7 @@ try {
     // exclusive lock, so this path needs the same diagnosis as the open above.
     if (isLocked(error)) {
       live.close()
-      await rm(temporary, { force: true }).catch(() => undefined)
+      await removeDatabase(temporary)
       fail(
         'Pet 数据库正被占用,无法生成快照。',
         '说明 DSH Host 仍在运行。请先停止 Host(`dsh stop`),确认进程已退出后重试。',
@@ -158,7 +178,7 @@ try {
     }
   } finally {
     check.close()
-    await rm(probe, { force: true })
+    await removeDatabase(probe)
   }
   if (after !== rows) throw new Error(`切换演练后记录数变化: ${rows} → ${after}`)
 
@@ -168,8 +188,8 @@ try {
   console.log('可以重启 Host。若需回滚:')
   console.log(`  cp "${destination}" "${source}"`)
 } catch (error) {
-  await rm(temporary, { force: true }).catch(() => undefined)
-  await rm(probe, { force: true }).catch(() => undefined)
+  await removeDatabase(temporary)
+  await removeDatabase(probe)
   fail(`预检失败: ${error instanceof Error ? error.message : String(error)}`, '未做任何改动,可安全重试。')
   process.exit(1)
 }
