@@ -177,6 +177,49 @@ describe('establishing a locus for a new endpoint', () => {
     expect(ensure).not.toHaveBeenCalled()
   })
 
+  // A generation the HOST invalidated carries no owner decision, so the
+  // "never silently replace an explicit exit" rule does not apply to it.
+  // Refusing here is what left both machines' bots silent: admission admitted
+  // the mention, the channel controller accepted it, and THIS layer answered
+  // "must be rebuilt" — an instruction no ordinary member can act on, and one
+  // the panel can only attempt against the same recorded parent, which may
+  // itself be archived.
+  it('replaces a Host-invalidated generation instead of reporting it unrebuildable', async () => {
+    const established = {
+      id: 'locus-recovered',
+      endpoint: ENDPOINT,
+      generation: 3,
+      parentSessionId: 'main-1',
+      childSessionId: 'child-recovered',
+      childComposition: 'safe-v1' as const,
+      workspaceId: 'ws-1',
+      state: 'active' as const,
+    }
+    const ensure = vi.fn(async () => established)
+    const { port } = resolution({
+      current: record({ state: 'invalid', invalidReason: '子会话在运行时中已不存在' }),
+      provisioning: { ensureForDelivery: ensure },
+    })
+
+    await expect(port.ensureForDelivery({ endpoint: ENDPOINT, messageId: 'om-1', signal }))
+      .resolves.toEqual(established)
+    expect(ensure).toHaveBeenCalledOnce()
+  })
+
+  // Replacing it must never mean serving it: the invalid row's child lacks the
+  // safe-v1 composition proof, so adopting or cold-resuming it would inherit
+  // the parent preset. Only a freshly created generation is ever published,
+  // and the read path keeps refusing the old one.
+  it('never serves the invalid generation itself, only its replacement', async () => {
+    const { port } = resolution({
+      current: record({ state: 'invalid', invalidReason: '缺少 safe-v1 证明' }),
+      provisioning: { ensureForDelivery: async () => { throw new Error('unused') } },
+    })
+
+    expect(() => port.resolveCurrent(ENDPOINT)).toThrow(LocusResolutionError)
+    expect(() => port.resolveCurrent(ENDPOINT)).toThrow(/invalid/)
+  })
+
   it('delegates establishment and accepts a complete active locus', async () => {
     const established = {
       id: 'locus-new',

@@ -225,7 +225,16 @@ export function createLocusResolution(ports: LocusResolutionPorts): {
         try {
           return toActive(record)
         } catch (error) {
-          return refuse(error)
+          // A generation the HOST invalidated is not an owner decision, so the
+          // "an explicit exit must not be silently replaced" rule does not
+          // apply to it. Fall through to provisioning, which replaces it with
+          // a freshly created generation.
+          //
+          // `toActive` still refuses it, and that refusal is the point: the
+          // invalid row's child must never be adopted or cold-resumed (it
+          // lacks the safe-v1 composition proof). Only the REPLACEMENT is
+          // automatic; the old child stays untouched as durable history.
+          if (record.state !== 'invalid') return refuse(error)
         }
       }
       // Before establishing anything, prove this endpoint is not a retired
