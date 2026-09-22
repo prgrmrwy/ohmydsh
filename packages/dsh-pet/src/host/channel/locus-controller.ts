@@ -1720,8 +1720,20 @@ export class LocusChannelController {
     try {
       raw = await this.deps.locus.resolveCurrent(endpoint)
     } catch (error: unknown) {
-      this.logReason('locus-read-failed', error)
-      return undefined
+      // The READ path refuses every unavailable generation on purpose — an
+      // owner exit must not be resurrected, and a generation without the
+      // safe-v1 proof must never be served. That refusal is only fatal when
+      // this endpoint may not bootstrap at all; otherwise fall through so
+      // `ensureForDelivery` can apply the replacement policy it owns.
+      //
+      // Returning here instead is what kept a Host-invalidated endpoint
+      // unreachable even after every other layer allowed recovery: the read
+      // refused first, so the establishing path was never consulted.
+      if (!needsInitialization) {
+        this.logReason('locus-read-failed', error)
+        return undefined
+      }
+      raw = undefined
     }
     let locus = normalizeActiveLocus(raw, endpoint)
     if (locus !== undefined) return locus

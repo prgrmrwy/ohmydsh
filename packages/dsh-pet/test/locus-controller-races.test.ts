@@ -1274,3 +1274,72 @@ describe('LocusChannelController safe-composition proof', () => {
     expect(diagnostics).toContain('safe-composition-unproven')
   })
 })
+
+/**
+ * Which refusals from the READ path may be bypassed by establishing a
+ * replacement.
+ *
+ * `resolveCurrent` refuses every unavailable generation on purpose — an owner
+ * exit must not be resurrected, and a generation without the safe-v1 proof must
+ * never be served. The channel used to treat any such refusal as fatal, which
+ * made the read path the LAST gate: every other layer had been taught to allow
+ * recovery, and the mention still died here with `locus-read-failed` before
+ * `ensureForDelivery` — the one port that owns the replacement policy — was
+ * ever consulted.
+ */
+describe('unavailable current generation vs bootstrap', () => {
+  const invalid = () => { throw new Error('This locus is invalid and must be rebuilt.') }
+
+  it('consults the establishing port when the endpoint may bootstrap', async () => {
+    const harness = makeHarness(
+      input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }),
+    )
+    const ensureForDelivery = vi.fn(() => LOCUS)
+    const controller = new LocusChannelController({
+      ...baseDeps(harness.ledger, harness.observer),
+      locus: { resolveCurrent: invalid, ensureForDelivery },
+      child: {
+        ensureChild: () => ({ parentSessionId: LOCUS.parentSessionId, childSessionId: LOCUS.childSessionId }),
+        queueChild: input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }),
+      },
+    })
+
+    const result = await controller.handleAdmission({
+      ...acceptedAdmission('message-recover'),
+      authorization: 'unusable',
+      needsInitialization: true,
+    })
+
+    // The assertion that matters: the establishing port owns the replacement
+    // policy and was actually consulted. Whether THIS synthetic locus then
+    // clears the later delivery gates (this harness refuses it as
+    // `policy-drift`) is a different concern.
+    expect(ensureForDelivery).toHaveBeenCalledOnce()
+    expect(result).not.toMatchObject({ reason: 'locus-read-failed' })
+
+    controller.dispose()
+  })
+
+  it('keeps the read refusal fatal when the endpoint may not bootstrap', async () => {
+    const harness = makeHarness(
+      input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }),
+    )
+    const ensureForDelivery = vi.fn(() => LOCUS)
+    const controller = new LocusChannelController({
+      ...baseDeps(harness.ledger, harness.observer),
+      locus: { resolveCurrent: invalid, ensureForDelivery },
+      child: {
+        ensureChild: () => ({ parentSessionId: LOCUS.parentSessionId, childSessionId: LOCUS.childSessionId }),
+        queueChild: input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }),
+      },
+    })
+
+    await expect(controller.handleAdmission({
+      ...acceptedAdmission('message-no-bootstrap'),
+      authorization: 'authorized',
+      needsInitialization: false,
+    })).resolves.toMatchObject({ kind: 'refused' })
+    expect(ensureForDelivery).not.toHaveBeenCalled()
+    controller.dispose()
+  })
+})
