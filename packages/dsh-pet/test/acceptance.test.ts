@@ -15,7 +15,8 @@ import path from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import Storage, { storageBackendServiceKey } from '@deepseek-ai/dsh-storage'
 import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
-import * as StorageSqlite from '@deepseek-ai/dsh-storage-sqlite'
+import * as PetStorage from '../src/host/storage/plugin.js'
+import { PET_BACKEND_NAME } from '../src/host/storage/backend.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { archiveTaskFromPet, reconcileArchives } from '../src/host/archive.js'
 import { CapabilityRegistry } from '../src/host/capabilities.js'
@@ -65,19 +66,21 @@ async function boot(home?: string): Promise<Deployment> {
         {
           name: 'default-json-inner',
           inject: ['storage'],
-          apply(inner: Context, config: StorageSqlite.Config) {
-            const backend = new StorageSqlite.SqliteStorageBackend(config)
-            inner.effect(() => inner.storage.backend.register('json', backend))
-            inner.provide(storageBackendServiceKey('json'), backend)
+          apply(inner: Context) {
+            // Non-Pet domains only: this suite opens none, so the unit
+            // factory never runs. Keeping it a stub avoids pulling the
+            // official sqlite backend in just to satisfy a route default.
+            const backend = { kv: { open: () => Promise.reject(new Error('no default unit in this suite')) }, close: () => Promise.resolve() }
+            inner.effect(() => inner.storage.backend.register('json', backend as never))
+            inner.provide(storageBackendServiceKey('json'), backend as never)
           },
-          Config: StorageSqlite.Config,
         },
         { path: ':memory:' },
       )
     },
   })
-  await ctx.plugin(StorageSqlite, { path: paths.databaseFile })
-  await ctx.plugin(StorageDomain, { backend: 'json', routes: { dsh_pet: 'sqlite' } })
+  await ctx.plugin(PetStorage as never, { path: paths.databaseFile })
+  await ctx.plugin(StorageDomain, { backend: 'json', routes: { dsh_pet: PET_BACKEND_NAME } })
 
   const domain = await ctx.storage.domain.open(petDomainSpec)
   openDomains.push(() => domain.close())
@@ -137,7 +140,14 @@ async function boot(home?: string): Promise<Deployment> {
     dispatched,
     createdSessions,
     workspaceCreates,
-    close: () => domain.close(),
+    // Close the domain AND dispose the context: Pet's backend owns the SQLite
+    // connection, and it is released by its plugin's disposer. Closing only
+    // the domain would leave the medium exclusively held, so the reboot below
+    // would be refused — correctly, but for a reason the test does not mean.
+    close: async () => {
+      await domain.close()
+      await ctx.fiber.dispose()
+    },
   }
 }
 

@@ -1,7 +1,11 @@
 /**
- * Proves the Pet domain works against the REAL `@deepseek-ai/dsh-storage-sqlite`
- * backend at the exact path the bundle patch configures, and that only the
- * `dsh_pet` domain is routed away from the profile's default backend.
+ * Proves the Pet domain works against Pet's OWN storage backend at the exact
+ * path the bundle patch configures, and that only the `dsh_pet` domain is
+ * routed away from the profile's default backend.
+ *
+ * The default backend here is the official `storage-sqlite`, standing in for
+ * whatever the profile composes: the point of these tests is that Pet's route
+ * is an override, so an unrelated domain must keep landing on the default.
  */
 
 import { mkdtemp, stat } from 'node:fs/promises'
@@ -11,6 +15,8 @@ import { Context } from '@deepseek-ai/cordis'
 import Storage, { storageBackendServiceKey } from '@deepseek-ai/dsh-storage'
 import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
 import * as StorageSqlite from '@deepseek-ai/dsh-storage-sqlite'
+import * as PetStorage from '../src/host/storage/plugin.js'
+import { PET_BACKEND_NAME } from '../src/host/storage/backend.js'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import { afterEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
@@ -30,7 +36,10 @@ const otherDomainSpec = defineDomain({
 const contexts: Context[] = []
 
 afterEach(async () => {
-  contexts.length = 0
+  // Dispose, don't just forget: Pet's backend owns its SQLite connection
+  // exclusively and releases it through its plugin disposer. Dropping the
+  // reference alone leaves the medium locked for the rest of the file.
+  for (const ctx of contexts.splice(0)) await ctx.fiber.dispose()
 })
 
 async function composeProfile(paths: PetPaths): Promise<Context> {
@@ -61,13 +70,13 @@ async function composeProfile(paths: PetPaths): Promise<Context> {
     },
   })
 
-  // Pet's own composed backend, at the exact configured path.
-  await ctx.plugin(StorageSqlite, { path: paths.databaseFile })
+  // Pet's own registered backend, at the exact configured path.
+  await ctx.plugin(PetStorage as never, { path: paths.databaseFile })
 
   // Pet's patch: an override map, not a replacement.
   await ctx.plugin(StorageDomain, {
     backend: 'json',
-    routes: { dsh_pet: 'sqlite' },
+    routes: { dsh_pet: PET_BACKEND_NAME },
   })
   return ctx
 }
@@ -100,7 +109,11 @@ describe('Pet SQLite composition', () => {
     const first = await composeProfile(paths)
     const firstDomain = await first.storage.domain.open(petDomainSpec)
     await new PetRepository(firstDomain).createTask(testTask())
+    // A restart releases the medium: closing only the domain would leave the
+    // connection open and the second boot would be refused — correctly, but
+    // that is medium ownership, not the recovery this test is about.
     await firstDomain.close()
+    await first.fiber.dispose()
 
     const second = await composeProfile(paths)
     const secondDomain = await second.storage.domain.open(petDomainSpec)

@@ -20,12 +20,16 @@ export interface BackendOwnership {
   readonly diagnostic?: string
 }
 
-/** Backend name Pet's domain route targets. */
-export const PET_BACKEND_NAME = 'sqlite'
+// Single definition, re-exported: the route key in `cordis.patch.yml`, the
+// registration in `storage/plugin.ts` and this ownership proof must all name
+// the same backend, and routing by name fails SILENTLY when they drift — the
+// domain quietly lands on the profile's default JSON backend instead.
+export { PET_BACKEND_NAME } from './storage/backend.js'
+import { PET_BACKEND_NAME } from './storage/backend.js'
 
 /**
- * Prove the routed `sqlite` backend is the Pet-owned one before trusting it
- * with Pet records.
+ * Prove the routed backend is the Pet-owned one before trusting it with Pet
+ * records.
  *
  * The check is deliberately conservative: an absent backend, an absent
  * database file after open, or a database path that is not a regular file all

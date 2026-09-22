@@ -26,7 +26,8 @@ import { tmpdir } from 'node:os'
 import { Context } from '@deepseek-ai/cordis'
 import Storage, { storageBackendServiceKey } from '@deepseek-ai/dsh-storage'
 import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
-import * as StorageSqlite from '@deepseek-ai/dsh-storage-sqlite'
+import * as PetStorage from '../src/host/storage/plugin.js'
+import { PET_BACKEND_NAME } from '../src/host/storage/backend.js'
 import { describe, expect, it, vi } from 'vitest'
 import * as petPlugin from '../src/index.js'
 import { PET_DOMAIN_NAME } from '../src/host/spec.js'
@@ -200,21 +201,21 @@ async function composeHost(): Promise<ComposedHost> {
         {
           name: 'default-backend-inner',
           inject: ['storage'],
-          apply(inner: Context, config: StorageSqlite.Config) {
-            const backend = new StorageSqlite.SqliteStorageBackend(config)
-            inner.effect(() => inner.storage.backend.register('json', backend))
-            inner.provide(storageBackendServiceKey('json'), backend)
+          apply(inner: Context) {
+            // Non-Pet domains only: this suite opens none, so the unit
+            // factory never runs. Keeping it a stub avoids pulling the
+            // official sqlite backend in just to satisfy a route default.
+            const backend = { kv: { open: () => Promise.reject(new Error('no default unit in this suite')) }, close: () => Promise.resolve() }
+            inner.effect(() => inner.storage.backend.register('json', backend as never))
+            inner.provide(storageBackendServiceKey('json'), backend as never)
           },
-          Config: StorageSqlite.Config,
         },
         { path: ':memory:' },
       )
     },
   })
-  await ctx.plugin(StorageSqlite, {
-    path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite'),
-  })
-  await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: 'sqlite' } })
+  await ctx.plugin(PetStorage as never, { path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite') })
+  await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: PET_BACKEND_NAME } })
   await ctx.plugin(petPlugin, { home, version: '0.1.0' })
 
   const deadline = Date.now() + 15_000

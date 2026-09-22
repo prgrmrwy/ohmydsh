@@ -121,7 +121,9 @@ import {
 } from './host/locus/composition.js'
 import { installLocusProjectReadGuard, locusDeniedRoots } from './host/locus/project-read-guard.js'
 import { currentAllowlist } from './host/skill-provider.js'
-import { petDomainSpec } from './host/spec.js'
+import { PET_DOMAIN_NAME, petDomainSpec } from './host/spec.js'
+import { withAtomicWrites } from './host/storage/atomic-domain.js'
+import { PET_BACKEND_NAME } from './host/storage/backend.js'
 import {
   isForkChildTaskForm,
   PET_EXECUTOR_PRESET,
@@ -305,6 +307,21 @@ async function initialize(
   )
   if (domain === undefined) return
 
+  // Atomic writes commit through the very unit the domain layer just opened,
+  // so the transaction runs on the connection that already holds the exclusive
+  // lock — the `dsh-pet-storage` row owns that backend instance and this reads
+  // it back from the hub rather than constructing a second one.
+  //
+  // A backend that is not Pet's own (or a unit that is not open) leaves
+  // `supportsTransaction` false, and every store then refuses its writes.
+  // That is the correct fail-closed outcome: the ownership proof above already
+  // established this is Pet's backend, so reaching here without a unit means
+  // something is wrong enough that silently degrading to per-record writes
+  // would be worse than refusing.
+  const petBackend = ctx.storage.backend.get(PET_BACKEND_NAME) as unknown as {
+    unitFor?: (name: string) => Promise<{ applyBatch(writes: readonly never[]): Promise<void> } | undefined>
+  }
+  withAtomicWrites(domain as never, await petBackend.unitFor?.(PET_DOMAIN_NAME) as never)
 
   // Force one durable write so the lazily materialized SQLite file exists,
   // then prove it landed at Pet's configured path rather than a foreign one.
@@ -316,6 +333,7 @@ async function initialize(
     lifecycle.markDegraded(location.diagnostic ?? 'Pet database location unproven')
     return
   }
+
   ctx.effect(() => () => {
     void domain.close()
   }, 'dsh-pet: close durable domain')

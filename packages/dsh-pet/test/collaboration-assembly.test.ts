@@ -63,6 +63,9 @@ import {
 import { createInquiry, type InquiryRecord } from '../src/host/inquiry/ledger.js'
 import { InquiryLedgerStore } from '../src/host/inquiry/ledger-store.js'
 import { InquiryOutboxStore } from '../src/host/inquiry/outbox-store.js'
+import * as petStoragePlugin from '../src/host/storage/plugin.js'
+import { PET_BACKEND_NAME } from '../src/host/storage/backend.js'
+import { withAtomicWrites } from '../src/host/storage/atomic-domain.js'
 import { PET_DOMAIN_NAME, petDomainSpec } from '../src/host/spec.js'
 import { openPetHarness, type PetHarness } from './harness.js'
 import * as petPlugin from '../src/index.js'
@@ -740,137 +743,70 @@ describe('every call re-authorizes, whatever the scope still shows', () => {
  * nothing, because the code that would have composed it was never invoked.
  *
  * The composition needs a Domain with ATOMIC BATCHES, because the assembly
- * refuses to publish without one. The ordinary devDependency storage stack has
- * none; the reviewed compatibility artifacts under `compat/subagent/` do, and
- * they are the ones the launcher actually ships. Their identity and provenance
- * are verified before use, exactly as `vitest.collaboration-runtime.config.ts`
- * does, so this can never silently run against an unreviewed build — and it
- * skips rather than weakening the check when the artifacts are absent.
- */
-
-const ARTIFACT_ROOT = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../compat/subagent/storage-artifacts',
-)
-// Derived from the builder, never pasted: hardcoded provenance silently rots
-// the moment the reviewed DSH pin moves, and then asserts the WRONG runtime.
-const STORAGE_BUILDER = readFileSync(
-  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../compat/subagent/build-storage.mjs'),
-  'utf8',
-)
-function builderConstant(name: string): string {
-  const found = new RegExp(`const ${name} = '([^']+)'`).exec(STORAGE_BUILDER)?.[1]
-  if (found === undefined) throw new Error(`build-storage.mjs no longer defines ${name}`)
-  return found
-}
-const ATOMIC_VERSION = `${builderConstant('targetVersion')}-${builderConstant('artifactVersionSuffix')}`
-const ATOMIC_PROVENANCE = {
-  upstreamBase: builderConstant('reviewedCommit'),
-  patchSha256: builderConstant('patchSha256'),
-}
-
-/** Whether the reviewed atomic storage artifacts are present to load. */
-function atomicArtifactsPresent(): boolean {
-  return ['storage', 'storage-domain', 'storage-sqlite'].every(name =>
-    existsSync(path.join(ARTIFACT_ROOT, name, 'lib', 'index.js')),
-  )
-}
-
-/**
- * Load one reviewed artifact, proving its identity and patch provenance first.
- * @param directory - artifact directory under `storage-artifacts`; the package
- *   name it must declare is `@deepseek-ai/dsh-<directory>`, read from the real
- *   manifest rather than assumed from the path.
- */
-async function loadAtomicArtifact(directory: string): Promise<Record<string, unknown>> {
-  const root = path.join(ARTIFACT_ROOT, directory)
-  const manifest = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as {
-    name?: string
-    version?: string
-    dsh_compat?: { upstreamBase?: string; patchSha256?: string }
-  }
-  // Never load an artifact whose identity, version or patch provenance differs
-  // from the reviewed one: a test that silently accepts a different build is
-  // exactly how an unreviewed seam becomes "already tested".
-  expect(manifest.name).toBe(`@deepseek-ai/dsh-${directory}`)
-  expect(manifest.version).toBe(ATOMIC_VERSION)
-  expect(manifest.dsh_compat).toMatchObject(ATOMIC_PROVENANCE)
-  return (await import(
-    /* @vite-ignore */ pathToFileURL(path.join(root, 'lib', 'index.js')).href
-  )) as Record<string, unknown>
-}
-
-/** Stand-ins for the DSH services Pet injects, plus the recorders under test. */
-interface LoadedHost {
-  ctx: Context
-  routes: { path: string }[]
-  /** Emit `agent/created` exactly as the runtime's registry announce does. */
-  publish(sessionId: string, scope: Context): void
-  toolNames(scope?: unknown): string[]
-  agentScope(sessionId: string): Promise<{ key: object; scope: Context }>
-  close(): Promise<void>
-}
-
-/**
- * Compose the real Pet plugin over the reviewed atomic storage stack and a REAL
- * tool runtime, so `tools.register()` resolves real scope layers.
+ * refuses to publish without one. That capability now comes from Pet's OWN
+ * registered storage backend (`src/host/storage/`) rather than from patched
+ * upstream artifacts, so this suite composes the same backend the Host does —
+ * the official `storage` hub and `storage-domain` layer from devDependencies,
+ * with `dsh_pet` routed to `pet-sqlite`.
  *
- * Locus rows are seeded BEFORE Pet applies, because Pet opens the Pet Domain
- * exclusively for the process; a second `open` is refused by the real storage
- * layer. Seeding first is also the honest shape: a cold restore finds durable
- * rows that already existed, it does not create them.
- * @param seed - locus rows to make durable before Pet initializes.
+ * That also removes the old skip condition: there is no build step to wait
+ * for, so these tests always run instead of silently disappearing when the
+ * compatibility artifacts happen to be absent.
  */
+
 /**
- * Open ONLY the reviewed atomic storage stack against an existing medium.
+ * Compose the official storage stack with Pet's own backend.
  *
- * Used to seed durable rows before the Host starts and to re-read them after it
- * stopped, so an assertion reflects what actually landed on disk rather than
- * in-process state the Host still holds.
+ * `storage-domain` injects `storageBackendServiceKey(name)` for every routed
+ * backend, so Pet's backend row must load BEFORE it — the same ordering
+ * `cordis.patch.yml` encodes for the real Host.
+ * @param ctx - context to compose into.
  * @param statePath - the Pet state medium to attach to.
- * @returns a context owning that storage stack; dispose it when done.
  */
-async function openDomainOnly(statePath: string): Promise<Context> {
-  const [Storage, Sqlite, Domain] = await Promise.all([
-    loadAtomicArtifact('storage'),
-    loadAtomicArtifact('storage-sqlite'),
-    loadAtomicArtifact('storage-domain'),
+async function composePetStorage(ctx: Context, statePath: string): Promise<void> {
+  const [Storage, Domain] = await Promise.all([
+    import('@deepseek-ai/dsh-storage'),
+    import('@deepseek-ai/dsh-storage-domain'),
   ])
-  const ctx = new Context()
   await ctx.plugin(Storage.default as never)
+  // A default backend for every domain that is NOT Pet's: the route table is
+  // an override map, so `backend: 'json'` still has to resolve to something.
   await ctx.plugin({
-    name: 'seed-backend',
+    name: 'default-backend',
     inject: ['storage'],
-    async apply(outer: Context) {
-      await outer.plugin(
-        {
-          name: 'seed-backend-inner',
-          inject: ['storage'],
-          apply(inner: Context, config: unknown) {
-            const backend = new (Sqlite.SqliteStorageBackend as new (c: unknown) => unknown)(config)
-            inner.effect(() => inner.storage.backend.register('json', backend as never))
-            inner.provide(
-              (Storage.storageBackendServiceKey as (n: string) => string)('json'),
-              backend,
-            )
-          },
-          Config: Sqlite.Config,
-        } as never,
-        { path: ':memory:' },
-      )
+    apply(inner: Context) {
+      const backend = { kv: { open: () => Promise.reject(new Error('no default unit in this suite')) }, close: () => Promise.resolve() }
+      inner.effect(() => inner.storage.backend.register('json', backend as never))
+      inner.provide(Storage.storageBackendServiceKey('json'), backend as never)
     },
-  })
-  await ctx.plugin(Sqlite as never, { path: statePath })
-  await ctx.plugin(Domain as never, { backend: 'json', routes: { [PET_DOMAIN_NAME]: 'sqlite' } })
+  } as never)
+  await ctx.plugin(petStoragePlugin as never, { path: statePath })
+  await ctx.plugin(Domain as never, { backend: 'json', routes: { [PET_DOMAIN_NAME]: PET_BACKEND_NAME } })
+}
+
+async function openDomainOnly(statePath: string): Promise<Context> {
+  const ctx = new Context()
+  await composePetStorage(ctx, statePath)
   return ctx
 }
 
+/**
+ * Open Pet's domain with atomic writes attached, exactly as `src/index.ts`
+ * does. A domain opened without this advertises no transaction support, and
+ * every store refuses its writes — correct fail-closed behavior, but not what
+ * a test seeding real records wants.
+ * @param ctx - a context already carrying Pet's storage stack.
+ * @returns the domain, ready for the stores.
+ */
+async function openPetDomain(ctx: Context): Promise<never> {
+  const domain = await ctx.storageDomain.open(petDomainSpec)
+  const backend = ctx.storage.backend.get(PET_BACKEND_NAME) as unknown as {
+    unitFor(name: string): Promise<{ applyBatch(writes: readonly never[]): Promise<void> } | undefined>
+  }
+  return withAtomicWrites(domain as never, await backend.unitFor(PET_DOMAIN_NAME) as never) as never
+}
+
 async function loadPetHost(seed: readonly LocusRecord[] = [], existingHome?: string): Promise<LoadedHost> {
-  const [Storage, Sqlite, Domain] = await Promise.all([
-    loadAtomicArtifact('storage'),
-    loadAtomicArtifact('storage-sqlite'),
-    loadAtomicArtifact('storage-domain'),
-  ])
   const home = existingHome ?? await mkdtemp(path.join(tmpdir(), 'pet-assembly-'))
   const routes: { path: string }[] = []
   const live = new Map<string, { ctx: Context; id: string }>()
@@ -878,7 +814,8 @@ async function loadPetHost(seed: readonly LocusRecord[] = [], existingHome?: str
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
-  await ctx.plugin(Storage.default as never)
+  // The storage hub is composed by `composePetStorage` below, together with
+  // Pet's backend and the domain layer, in the order the real Host uses.
   ctx.provide('webServer', {
     register: (route: { path: string }) => {
       routes.push(route)
@@ -955,33 +892,10 @@ async function loadPetHost(seed: readonly LocusRecord[] = [], existingHome?: str
   })
   ctx.provide('skills', { register: () => () => {}, registerProvider: () => () => {} })
 
-  await ctx.plugin({
-    name: 'default-backend',
-    inject: ['storage'],
-    async apply(outer: Context) {
-      await outer.plugin(
-        {
-          name: 'default-backend-inner',
-          inject: ['storage'],
-          apply(inner: Context, config: unknown) {
-            const backend = new (Sqlite.SqliteStorageBackend as new (c: unknown) => unknown)(config)
-            inner.effect(() => inner.storage.backend.register('json', backend as never))
-            inner.provide(
-              (Storage.storageBackendServiceKey as (n: string) => string)('json'),
-              backend,
-            )
-          },
-          Config: Sqlite.Config,
-        } as never,
-        { path: ':memory:' },
-      )
-    },
-  })
-  await ctx.plugin(Sqlite as never, { path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite') })
-  await ctx.plugin(Domain as never, { backend: 'json', routes: { [PET_DOMAIN_NAME]: 'sqlite' } })
+  await composePetStorage(ctx, path.join(home, 'plugins', 'dsh-pet', 'state.sqlite'))
 
   if (seed.length > 0) {
-    const seeded = await ctx.storageDomain.open(petDomainSpec)
+    const seeded = await openPetDomain(ctx)
     const repository = new LocusRepository(seeded)
     for (const row of seed) await repository.putLocus(row)
     await seeded.close()
@@ -1018,7 +932,7 @@ async function loadPetHost(seed: readonly LocusRecord[] = [], existingHome?: str
   }
 }
 
-describe.skipIf(!atomicArtifactsPresent())('the real plugin entry installs the surface', () => {
+describe('the real plugin entry installs the surface', () => {
   it('scopes a main session and its locus child on agent/created, and nobody else', async () => {
     const host = await loadPetHost([locus('a', CHILD_A)])
     try {
@@ -1100,7 +1014,7 @@ describe.skipIf(!atomicArtifactsPresent())('the real plugin entry installs the s
     // left it. Age is diagnostic only and must not auto-expire it.
     const seedCtx = await openDomainOnly(statePath)
     try {
-      const store = new InquiryLedgerStore(await seedCtx.storageDomain.open(petDomainSpec) as never)
+      const store = new InquiryLedgerStore(await openPetDomain(seedCtx))
       await store.accept(
         { target: { kind: 'child', sessionId: CHILD_A, locusId: 'a', generation: 1 }, question: 'q', purpose: 'p', declaredOrigin: null },
         {
@@ -1114,22 +1028,26 @@ describe.skipIf(!atomicArtifactsPresent())('the real plugin entry installs the s
     }
 
     const host = await loadPetHost([locus('a', CHILD_A)], home)
+    // Close the Host BEFORE reading the medium back. Pet's backend owns the
+    // database exclusively while it runs, so a second opener is refused by
+    // design — the same guarantee that stops two Hosts from processing one
+    // piece of durable work. Reading after shutdown is also the stronger
+    // assertion: it proves what actually landed on disk, not what the Host
+    // still holds in memory.
+    await host.close()
+
+    const reopened = await openDomainOnly(statePath)
     try {
-      const reopened = await openDomainOnly(statePath)
-      try {
-        const domain = await reopened.storageDomain.open(petDomainSpec)
-        const settled = new InquiryLedgerStore(domain as never).get('inq-stale')
-        // Startup reconciliation preserves queued work regardless of age.
-        expect(settled?.status).toBe('queued')
-        expect(settled).not.toHaveProperty('deadlineAt')
-        // No synthetic failure result is manufactured; normal dispatch remains
-        // responsible for the queued inquiry once the target is runnable.
-        expect(new InquiryOutboxStore(domain as never).findByInquiry('inq-stale')).toBeUndefined()
-      } finally {
-        await reopened.fiber.dispose()
-      }
+      const domain = await openPetDomain(reopened)
+      const settled = new InquiryLedgerStore(domain as never).get('inq-stale')
+      // Startup reconciliation preserves queued work regardless of age.
+      expect(settled?.status).toBe('queued')
+      expect(settled).not.toHaveProperty('deadlineAt')
+      // No synthetic failure result is manufactured; normal dispatch remains
+      // responsible for the queued inquiry once the target is runnable.
+      expect(new InquiryOutboxStore(domain as never).findByInquiry('inq-stale')).toBeUndefined()
     } finally {
-      await host.close()
+      await reopened.fiber.dispose()
     }
   })
 })

@@ -538,6 +538,36 @@ function declaredRuntimeFiles(pkg) {
  * `./package.json` is skipped: the manifest was just parsed to get here.
  * @returns {string[]} missing package-relative paths; empty means healthy.
  */
+/**
+ * Path to one deployed package's manifest inside the profile.
+ * @param {string} name npm package name, scope included.
+ * @returns {string} absolute path to its deployed `package.json`.
+ */
+function deployedPackageJsonPath(name) {
+  return path.join(PROFILE_DIR, 'node_modules', ...name.split('/'), 'package.json')
+}
+
+/**
+ * The reviewed identity a compatibility artifact was produced from.
+ *
+ * Only the fields that pin WHAT WAS PATCHED AND FROM WHERE take part: the
+ * upstream base commit and the patch hash. Version is deliberately excluded —
+ * it is a label the build assigns, so two artifacts can share a version while
+ * being derived from different upstream trees, which is the drift this exists
+ * to catch. Returns undefined when the artifact declares no provenance, so an
+ * unannotated package is reported as unknown rather than silently equal.
+ * @param {object|undefined} pkg a parsed package manifest.
+ * @returns {string|undefined} a comparable identity, or undefined when absent.
+ */
+function compatProvenanceOf(pkg) {
+  const compat = pkg?.dsh_compat
+  if (compat === null || typeof compat !== 'object') return undefined
+  const base = typeof compat.upstreamBase === 'string' ? compat.upstreamBase : ''
+  const patch = typeof compat.patchSha256 === 'string' ? compat.patchSha256 : ''
+  if (base === '' && patch === '') return undefined
+  return `${base}/${patch}`
+}
+
 function missingDeployedFiles(name) {
   const dir = path.join(PROFILE_DIR, 'node_modules', ...name.split('/'))
   const pkg = readJson(path.join(dir, 'package.json'))
@@ -850,8 +880,26 @@ async function syncPackages(manifest, items) {
     const removedCompatNames = (previousCompatByOwner[name] ?? [])
       .filter(packageName => !currentCompatNames.includes(packageName))
     if (removedCompatNames.length > 0) {
-      fail(`local package ${name}: refusing to remove or rename active compatibility overrides (${removedCompatNames.join(', ')}); disable the owner and sync first`)
-      continue
+      // Dropping SOME overrides while keeping others is the dangerous shape
+      // this guard exists for: the owner still runs against a partially
+      // replaced dependency tree, and which half it gets is install order.
+      //
+      // Retiring the LAST one is different in kind. The owner has stopped
+      // requesting overrides at all, so restoring the official packages is the
+      // whole point rather than an accident, and there is no mixed tree to land
+      // in. Reinstalling the owner in the same pnpm transaction is what makes
+      // it a real retirement instead of leaving the replaced copies deployed.
+      if (currentCompatNames.length > 0) {
+        fail(`local package ${name}: refusing to remove or rename active compatibility overrides (${removedCompatNames.join(', ')}); disable the owner and sync first`)
+        continue
+      }
+      change(`local package ${name} retired its compatibility overrides (${removedCompatNames.join(', ')}); restoring official packages`)
+      if (!dshCli(['plugin', '--profile', PROFILE, 'remove', ...removedCompatNames], { version: manifest.dshVersion })) {
+        fail(`failed to retire compatibility overrides for ${name}`)
+        continue
+      }
+      delete previousCompatByOwner[name]
+      for (const packageName of removedCompatNames) delete nextCompatHashes[packageName]
     }
     const spec = localDir === undefined ? item.spec : `file:${localDir}`
     let localHash
@@ -901,6 +949,12 @@ async function syncPackages(manifest, items) {
     const compatEntries = localDir === undefined ? [] : (compatByOwner.get(name) ?? [])
     const compatSpecs = []
     const compatHashes = {}
+    // Source-side provenance per compatibility artifact, compared below against
+    // what is actually deployed. A content hash cannot stand in for this: the
+    // hash only answers "did the source bytes change since the last sync we
+    // recorded", and a ledger entry that survives while the deployed copy came
+    // from an older upstream base makes the two agree on a lie.
+    const compatProvenance = {}
     let compatInvalid = false
     for (const entry of compatEntries) {
       const compatDir = path.join(localDir, entry.path)
@@ -912,6 +966,7 @@ async function syncPackages(manifest, items) {
       }
       compatSpecs.push(`file:${compatDir}`)
       compatHashes[entry.name] = await dirHash(compatDir)
+      compatProvenance[entry.name] = compatProvenanceOf(compatPkg)
     }
     if (compatInvalid) continue
 
@@ -932,7 +987,20 @@ async function syncPackages(manifest, items) {
       && pinSpec
       && currentlyInstalledFrom !== undefined
       && currentlyInstalledFrom !== item.spec
-    const compatChanged = compatEntries.some(entry =>
+    // Provenance drift is deployment-side truth, read from the installed copy
+    // rather than from the ledger. The ledger only remembers what sync last
+    // wrote; it cannot see a deployed artifact that was built from a different
+    // upstream base — which is exactly how the profile's storage overlays sat a
+    // whole version family behind the launcher's while every name, path and
+    // recorded hash still matched (see `checking/baseline-compat-identity.md`).
+    const compatDrifted = compatEntries.filter(entry => {
+      if (installedVersion(entry.name) === undefined) return false
+      const expected = compatProvenance[entry.name]
+      if (expected === undefined) return false
+      const deployed = compatProvenanceOf(readJson(deployedPackageJsonPath(entry.name)))
+      return deployed !== undefined && deployed !== expected
+    })
+    const compatChanged = compatDrifted.length > 0 || compatEntries.some(entry =>
       installedVersion(entry.name) === undefined || previousCompatHashes[entry.name] !== compatHashes[entry.name])
     // Deployment-side integrity. Every other trigger here compares metadata
     // (version / source hash / recorded spec) and so cannot see a package that
@@ -1025,14 +1093,42 @@ async function syncPackages(manifest, items) {
       } else {
         // Version pin drift or a compatibility artifact change: same install
         // mechanics as before (the atomic refresh path above owns content).
-        const reason = current !== item.version ? `${current} -> ${item.version}` : 'compatibility artifact changed'
+        // Name provenance drift explicitly. It is the one trigger here whose
+        // cause is invisible in the manifest and the ledger alike, so reporting
+        // it as a generic "artifact changed" would hide exactly the condition
+        // that made the drift survivable in the first place.
+        const reason = current !== item.version
+          ? `${current} -> ${item.version}`
+          : compatDrifted.length > 0
+            ? `deployed compatibility overrides were built from a different upstream base (${compatDrifted.map(e => e.name).join(', ')})`
+            : 'compatibility artifact changed'
         const action = `local package ${name} ${reason}, reinstalling atomically`
         change(`${action}${compatEntries.length > 0 ? ' with compatibility overrides' : ''}`)
+        // Provenance drift is the one trigger here that a plain `add` cannot
+        // repair. The `file:` spec string is unchanged by definition — the
+        // artifact was rebuilt in place — so pnpm resolves the dependency as
+        // already satisfied and leaves the stale deployed tree (hard-linked
+        // from an earlier generation) untouched. Evict exactly the drifted
+        // overlays first so the add has to materialize them again.
+        for (const entry of compatDrifted) {
+          const staleDir = path.join(PROFILE_DIR, 'node_modules', ...entry.name.split('/'))
+          await rm(staleDir, { recursive: true, force: true })
+        }
         // pnpm stages and commits all local specs as one operation. Do not remove
         // the last-known-good owner first: a failed build or add must leave the
         // previous federation + Connection pair intact.
         installed = dshCli(['plugin', '--profile', PROFILE, 'add', ...compatSpecs, spec], { version: manifest.dshVersion })
         if (!installed) fail(`failed to deploy ${name}${compatEntries.length > 0 ? ' and compatibility overrides' : ''}`)
+        // Verify the eviction actually took: an add that "succeeds" while the
+        // overlay is still stale must not be reported as a repair.
+        if (installed && compatDrifted.length > 0) {
+          const unresolved = compatDrifted.filter(entry =>
+            compatProvenanceOf(readJson(deployedPackageJsonPath(entry.name))) !== compatProvenance[entry.name])
+          if (unresolved.length > 0) {
+            installed = false
+            fail(`compatibility overrides still report a different upstream base after reinstall (${unresolved.map(e => e.name).join(', ')})`)
+          }
+        }
       }
     } else if (current === undefined) {
       change(`install ${item.source} package ${name} (${spec})`)

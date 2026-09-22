@@ -11,6 +11,8 @@ package.json
 .launcher.previous-*
 .storage-upstream/
 storage-artifacts
+# No longer produced (the isolated-claim seam was removed). Kept so a directory
+# left over from an earlier build can never be committed by accident.
 agent-artifacts/
 .storage-artifact-builds/
 .storage-artifacts.staging-*
