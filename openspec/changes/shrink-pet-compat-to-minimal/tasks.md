@@ -58,36 +58,46 @@
 - [x] 7.4 证明移除 `independent-v1` 后 `attestLocusComposition` 仍能拦截 own 层注册的越界工具（针对历史 `subagent` 穿透事故构造用例）
 - [x] 7.5 将 7.1–7.4 结果写入 `checking/batch-c-official-subagent-api.md`；任一项失败则该项保留 patch 并记录失败证据，其余项仍可推进
 
-## 8. 批 C 实施：child 创建路径改用官方 API
+## 8. 批 C 实施：已核验不成立，不执行
 
-- [ ] 8.1 将 locus child 创建从 `createIdleContinuable` 改为官方 `startContinuable` 并传入预留 `childId`；保留"身份不符即拒绝"的既有校验
-- [ ] 8.2 改用官方 `toolFilter` 与 descriptor 持久化，移除自建持久化路径
-- [ ] 8.3 移除 `contextMode: 'independent-v1'` 及其能力 marker 门禁，改为依赖官方 `composeFrom` bind 语义
-- [ ] 8.4 **不改动** `attestLocusComposition` 与 `dsh-pet-executor` preset；提交前 diff 复核确认这两处零改动
-- [ ] 8.5 从 `settlement-notice.patch` 移除 7.1–7.3 对应的 hunks，仅保留 settlement 相关改动
-- [ ] 8.6 验证创建、冷恢复、父 preset 切换隔离、工具面核验四条路径与 1.2 基线一致
+> **实施期复核推翻了 §7 的静态结论**（证据见 `checking/batch-c-official-subagent-api.md`
+> 的「实施期复核」节）：
+> - `createIdleContinuable` 不可退 —— 官方 `SubagentStartRequest.prompt` 必填，而
+>   Pet 的 locus 创建是两阶段的（建 child → 建群 → 提交 locus → 才投递首条内容），
+>   中间那段 child 必须存在但不能开始工作；
+> - `contextMode:'independent-v1'` 不可退 —— `composeFrom` 绑定的是**父的** mount
+>   实例，而 independent 是 child **自己 mount 一份并核验 header**，冷恢复需要后者；
+> - durable `toolFilter` 官方确有，但与 `independent-v1` 共用 descriptor v5，
+>   保留后者即无法单独摘除。
+>
+> 原 §7 核验的缺陷是**只验证了官方 API 的一部分语义**就判定等价。该教训已固化为
+> `pet-compat-minimization` 的新 Requirement「判定 seam 可移除必须覆盖其全部语义」。
+
+- [x] 8.1 复核 §7 结论并记录证伪证据；更正 `checking/batch-c-official-subagent-api.md` 的作废结论
+- [x] 8.2 将方法论教训写入 `pet-compat-minimization` spec（移除判定与新增判定适用同一举证标准）
+- [x] 8.3 **不改动** `attestLocusComposition` 与 `dsh-pet-executor` preset（批 C 不执行，护栏自然保持零改动）
 
 ## 9. 收敛 compat 并更新治理记录
 
-- [ ] 9.1 将 `settlement-notice.patch` 收敛为单一改动（`notifySettlement` 早返回，即 silent 形态；`inject` 方案已在 design Open Questions 中排除），仅作用 `@deepseek-ai/dsh-subagent`
-- [ ] 9.2 重新固定 patch SHA、upstream base、launcher fingerprint 与能力 marker（缩至 1 项），更新 `compat/subagent/README.md`
-- [ ] 9.3 将 `dsh.yaml` 的 `removeWhen` 改为可验证措辞，显式记录"该需求尚未向上游报告；上游不接受外部 PR，唯一通道是 Discussions"
-- [ ] 9.4 确认 `hostRuntimeCompatibility` 的 fail-closed、版本精确相等、唯一依赖实例校验全部保留且仍生效
-- [ ] 9.5 验证官方一次性 CLI（build / plugin / dump-config）仍使用官方精确 `dshVersion`，不构建 overlay
+- [x] 9.1 确认 `settlement-notice.patch` 仅作用 `@deepseek-ai/dsh-subagent` 一个上游包（批 C 不执行，故保留 settlement + idle + independent 三项 seam，32 hunks）
+- [x] 9.2 重新固定 patch SHA、upstream base、launcher fingerprint 与能力 marker（批 A 后缩至 4 项），更新 `compat/subagent/README.md` 使其与实际 seam 集合一致
+- [x] 9.3 将 `dsh.yaml` 的 `removeWhen` 改为可验证措辞，显式记录"该需求尚未向上游报告；上游不接受外部 PR，唯一通道是 Discussions"
+- [x] 9.4 确认 `hostRuntimeCompatibility` 的 fail-closed、版本精确相等、唯一依赖实例校验全部保留且仍生效
+- [x] 9.5 验证官方一次性 CLI（build / plugin / dump-config）仍使用官方精确 `dshVersion`，不构建 overlay
 
 ## 10. 全量回归与验收
 
-- [ ] 10.1 跑 `npm test`、`npm run check:artifacts`、Pet 包 build / typecheck / test 与 collaboration-runtime 套件
-- [ ] 10.2 `node scripts/sync.mjs` 连续两次，确认幂等
+- [x] 10.1 跑 `npm test`、`npm run check:artifacts`、Pet 包 build / typecheck / test 与 collaboration-runtime 套件
+- [x] 10.2 `node scripts/sync.mjs` 连续两次，确认幂等
 - [ ] 10.3 启动清单核对：加载行数、无重复 id、compat runtime 身份与 8.2 记录一致
 - [ ] 10.4 真实 locus 端到端：飞书入站 → child 创建 → 工作 → 结算，确认父会话进行中轮次未被打断
 - [ ] 10.5 多 locus 场景：同一主会话关联多个 locus 先后结算，确认打断次数为零
 - [ ] 10.6 回滚演练：验证任一批次可独立回滚，storage 批次先停 writer 再恢复数据备份
-- [ ] 10.7 将最终 compat 规模（包数 / patch 数 / hunks / 磁盘）与基线对比写入 `checking/final-compat-footprint.md`
+- [x] 10.7 将最终 compat 规模（包数 / patch 数 / hunks / 磁盘）与基线对比写入 `checking/final-compat-footprint.md`
 
 ## 11. 上游报告与收尾
 
-- [ ] 11.1 按 `upstream-discussion-draft.md` 复核引用对 `dsh-v0.1.5-rc.2` 仍成立，确认 #5360 当前状态，完成脱敏检查
-- [ ] 11.2 经用户确认后发布到上游 Discussions，记录编号与链接
-- [ ] 11.3 将 discussion 编号回填到 `proposal.md` Impact 段与 `dsh.yaml` 的 `removeWhen`
+- [x] 11.1 按 `upstream-discussion-draft.md` 复核引用对 `dsh-v0.1.5-rc.2` 仍成立，确认 #5360 当前状态，完成脱敏检查
+- [x] 11.2 经用户确认后发布到上游 Discussions，记录编号与链接
+- [x] 11.3 将 discussion 编号回填到 `proposal.md` Impact 段与 `dsh.yaml` 的 `removeWhen`
 - [ ] 11.4 确认 current specs 已反映最终行为后归档本 change
