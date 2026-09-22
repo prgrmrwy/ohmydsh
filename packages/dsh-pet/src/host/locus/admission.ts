@@ -43,7 +43,20 @@ export type EndpointExtraction =
 export type LocusAuthorizationState =
   | 'authorized'
   | 'uninitialized'
+  /**
+   * The owner deliberately took this endpoint out of service (`stopped` /
+   * `retired`). Spec: "明确退出的入口 SHALL 保留停止标记，普通 at MUST NOT
+   * 自动复活" — an ordinary mention must not resurrect it.
+   */
   | 'retired'
+  /**
+   * The Host itself judged the generation unusable (`invalid`) — a failed
+   * child re-attach after a restart, a lost composition proof. The owner
+   * never asked for this, so the "do not auto-resurrect an explicit exit"
+   * rule does not apply: treating it like a deliberate exit stranded the
+   * endpoint behind a rebuild that could itself fail, with no way out.
+   */
+  | 'unusable'
   | 'legacy'
 
 /** Optional metadata a controller may attach to an authorization result. */
@@ -83,30 +96,47 @@ export function createDurableLocusAuthorizationResolver(
   store: LocusAuthorizationStore,
   legacy: LegacyRetirementProbe,
 ): LocusAuthorizationResolver {
+  /**
+   * Classify a non-`active` generation by WHO put it in that state.
+   *
+   * `stopped`/`retired` are owner decisions; `invalid` is the Host's own
+   * judgement (failed child re-attach, missing composition proof) and
+   * `provisioning`/`switching` are transient. Collapsing all of them into
+   * `retired` is what made a Host-invalidated endpoint demand an explicit
+   * rebuild — a rebuild that could itself be impossible when the recorded
+   * parent was archived, leaving the endpoint permanently unreachable.
+   */
+  const unserviceableAuthorization = (
+    state: 'provisioning' | 'active' | 'switching' | 'invalid' | 'retired' | 'stopped',
+  ): LocusAuthorizationState => (state === 'stopped' || state === 'retired' ? 'retired' : 'unusable')
+
   return endpoint => {
     const exact = endpoint.threadId === undefined
       ? { chatId: endpoint.chatId }
       : { chatId: endpoint.chatId, threadId: endpoint.threadId }
     const current = store.getLatestLocusByEndpoint(exact)
     if (current !== undefined) {
-      return current.state === 'active'
-        ? { state: 'authorized', ...(current.id === undefined ? {} : { locusId: current.id }) }
-        : 'retired'
+      if (current.state === 'active') {
+        return { state: 'authorized', ...(current.id === undefined ? {} : { locusId: current.id }) }
+      }
+      return unserviceableAuthorization(current.state)
     }
     if (legacy.find(exact) !== undefined) return 'legacy'
     if (endpoint.threadId === undefined) return 'uninitialized'
 
-    // A new topic is authorized by the durable chat-level locus. A retired,
-    // stopped or invalid parent is terminal and must not be bypassed by topic
-    // auto-provisioning; a missing parent remains uninitialized for an
-    // allowlisted first mention only.
+    // A new topic is authorized by the durable chat-level locus. A parent the
+    // owner deliberately exited is terminal and must not be bypassed by topic
+    // auto-provisioning; a parent the Host merely judged unusable is not an
+    // owner decision and keeps that distinction. A missing parent remains
+    // uninitialized for an allowlisted first mention only.
     const parent = store.getLatestLocusByEndpoint({ chatId: endpoint.chatId })
     if (parent === undefined) {
       return legacy.find({ chatId: endpoint.chatId }) === undefined ? 'uninitialized' : 'legacy'
     }
-    return parent.state === 'active'
-      ? { state: 'authorized', ...(parent.id === undefined ? {} : { locusId: parent.id }), needsInitialization: true }
-      : 'retired'
+    if (parent.state === 'active') {
+      return { state: 'authorized', ...(parent.id === undefined ? {} : { locusId: parent.id }), needsInitialization: true }
+    }
+    return unserviceableAuthorization(parent.state)
   }
 }
 
@@ -356,6 +386,7 @@ function stateOf(value: LocusAuthorizationState | LocusAuthorization): LocusAuth
   if (state === 'authorized') return state
   if (state === 'uninitialized') return state
   if (state === 'retired') return state
+  if (state === 'unusable') return state
   if (state === 'legacy') return state
   return 'uninitialized'
 }
@@ -514,7 +545,14 @@ export function admitLocusEvent(
     text,
     senderId,
     authorization,
-    needsInitialization: authorization === 'uninitialized' || authorizationLookup.needsInitialization,
+    // `unusable` initializes exactly like a never-seen endpoint: the previous
+    // generation was invalidated by the Host, not exited by the owner, so
+    // there is no owner decision to preserve and nothing to "rebuild" from —
+    // its recorded parent may itself be gone. The allowlist gate above still
+    // applies, so an ordinary member cannot bootstrap one.
+    needsInitialization: authorization === 'uninitialized'
+      || authorization === 'unusable'
+      || authorizationLookup.needsInitialization,
     ...(isControl ? { command: parsed } : {}),
   }
   return admission

@@ -307,6 +307,17 @@ export type LocusChildFailureReason =
 export interface LocusChildFailure {
   readonly ok: false
   readonly reason: LocusChildFailureReason
+  /**
+   * The underlying failure text, when the adapter caught a host exception.
+   *
+   * The stable `reason` is what callers branch on; this is what an operator
+   * needs to act. Without it a bare `catch` turned every distinct host
+   * failure into the same opaque `child-session-access-failed`, which is how
+   * a locus reached `invalid` on devbox with no recorded cause — the only
+   * way to learn why was to add logging and wait for it to happen again.
+   * Never parsed or matched on; diagnostics only.
+   */
+  readonly detail?: string
 }
 
 /** Result of resolving a parent without exposing host exceptions. */
@@ -1166,9 +1177,16 @@ export class LocusChildAdapter {
       ) as T
       if (signal.aborted) return { ok: false, reason: 'aborted' }
       return { ok: true, value, identity }
-    } catch {
+    } catch (error) {
       if (signal.aborted) return { ok: false, reason: 'aborted' }
-      return { ok: false, reason: 'child-session-access-failed' }
+      // Keep the host's own message: this failure is what invalidates a locus,
+      // and a bare `catch` left no way to tell a transient re-attach race from
+      // a genuinely unusable child.
+      return {
+        ok: false,
+        reason: 'child-session-access-failed',
+        detail: error instanceof Error ? error.message : String(error),
+      }
     }
   }
 
