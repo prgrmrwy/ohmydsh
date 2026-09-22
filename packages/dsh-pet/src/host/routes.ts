@@ -26,6 +26,7 @@ import {
   type LocusManagementPort,
 } from './locus/management.js'
 import { LOCUS_WRITE_ENABLED, LOCUS_WRITE_DISABLED_DIAGNOSTIC } from './locus/policy-verification.js'
+import { containsStorageKeySeparator } from './locus/storage-key.js'
 import { inspectBundle } from './skill-bundle.js'
 import { currentAllowlist } from './skill-provider.js'
 import { PET_ENV_PREFIX } from './shell-env.js'
@@ -419,8 +420,8 @@ function locusEndpointInput(value: unknown): PetLocusEndpointInput {
   const threadId = optionalString(record, 'threadId')
   const chatId = requireString(record, 'chatId').trim()
   const normalizedThreadId = threadId?.trim()
-  if (chatId.includes('\u0000') || normalizedThreadId?.includes('\u0000') === true) {
-    throw new PetError('INVALID_REQUEST', 'endpoint identifiers may not contain NUL')
+  if (containsStorageKeySeparator(chatId) || (normalizedThreadId !== undefined && containsStorageKeySeparator(normalizedThreadId))) {
+    throw new PetError('INVALID_REQUEST', 'endpoint identifiers may not contain the storage key separator')
   }
   return {
     chatId,
@@ -600,8 +601,8 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
         }
         const threadId = optionalString(candidate, 'threadId')
         const chatId = requireString(candidate, 'chatId')
-        if (chatId.includes('\u0000') || threadId?.includes('\u0000') === true) {
-          throw new PetError('INVALID_REQUEST', 'endpoint identifiers may not contain NUL')
+        if (containsStorageKeySeparator(chatId) || (threadId !== undefined && containsStorageKeySeparator(threadId))) {
+          throw new PetError('INVALID_REQUEST', 'endpoint identifiers may not contain the storage key separator')
         }
         return invokeLocus('查询 locus endpoint', () => requireLocus().discovery({ endpoint: {
           chatId,

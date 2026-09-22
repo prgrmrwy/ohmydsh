@@ -13,6 +13,7 @@ import { parseCollaborationContext } from './collaboration/context.js'
 import { parseInquiry } from './inquiry/ledger.js'
 import { parseInquiryOutboxRecord } from './inquiry/outbox.js'
 import { parseTodoRecord } from './ledger/todo.js'
+import { STORAGE_KEY_SEPARATOR, containsStorageKeySeparator } from './locus/storage-key.js'
 
 /**
  * Domain name; also the backend unit name and the storage-domain route key.
@@ -522,11 +523,14 @@ const petInvocationChannel = z.object({
  * locus model is a new durable surface and does not reinterpret old bindings.
  */
 export const petLocusEndpoint = z.object({
-  chatId: z.string().min(1).refine(value => !value.includes('\u0000'), 'chatId may not contain NUL'),
+  chatId: z
+    .string()
+    .min(1)
+    .refine(value => !containsStorageKeySeparator(value), 'chatId may not contain the storage key separator'),
   threadId: z
     .string()
     .min(1)
-    .refine(value => !value.includes('\u0000'), 'threadId may not contain NUL')
+    .refine(value => !containsStorageKeySeparator(value), 'threadId may not contain the storage key separator')
     .optional(),
 })
 
@@ -870,7 +874,7 @@ export const petLocusSwitchNotice = z.object({
  * rebuilt/replaced generation gets its own rows rather than inheriting any.
  */
 export const petLocusPermissionAudit = z.object({
-  /** `<locusId>\u0000<generation>\u0000<sequence>`; stable and sortable. */
+  /** `<locusId><sep><generation><sep><sequence>`; stable and sortable. */
   id: z.string().min(1),
   locusId: z.string().min(1),
   generation: z.number().int().positive(),
@@ -1197,12 +1201,13 @@ export function revisionKey(skillName: string): string {
  * Composite key for one environment entry.
  *
  * Scope first so a scope's entries sort together. A workspace id never equals
- * {@link PET_ENV_GLOBAL_SCOPE}, and a validated key contains no `\u0000`, so
- * this separator cannot produce a collision between two distinct pairs.
+ * {@link PET_ENV_GLOBAL_SCOPE}, and a validated key contains no
+ * {@link STORAGE_KEY_SEPARATOR}, so this separator cannot produce a collision
+ * between two distinct pairs.
  * @param scope - `global` or a workspace id.
  * @param key - Validated upper-snake-case variable name.
  * @returns the stable table key.
  */
 export function envKey(scope: string, key: string): string {
-  return `${scope}\u0000${key}`
+  return `${scope}${STORAGE_KEY_SEPARATOR}${key}`
 }

@@ -699,6 +699,54 @@ describe('explicit rebuild', () => {
     })).rejects.toMatchObject({ code: 'REPOSITORY_INCONSISTENT' })
     expect(host.createdChildren).toHaveLength(count)
   })
+
+  // Regression for the dead end an owner used to hit: `rebuild`'s
+  // parentSessionId always comes from the stopped/invalid locus record (the
+  // only session that was ever this endpoint's main session — see
+  // `locusRebuildRequest` in `client/settings.tsx`), so there was no way to
+  // retry with a different id. Archiving that session is reversible — the
+  // bytes and workspace-registry membership are just hidden — unlike a
+  // genuinely missing one, so the error must say so and name the one action
+  // that actually unblocks it, instead of reading identically to "gone".
+  it('names the archived parent and points at recovery when rebuild targets it', async () => {
+    const host = fakeHost()
+    const controller = new LocusController(host.deps)
+    const first = await controller.ensureGroup({ chatId: 'oc-rebuild-archived' })
+    host.repository.loci.set(first.locus.locusId, { ...first.locus, state: 'stopped' })
+    host.repository.groups.set('oc-rebuild-archived', { ...first.group, state: 'stopped' })
+
+    const resolveSession = host.deps.dsh.resolveSession
+    host.deps.dsh.resolveSession = async id =>
+      id === 'source-archived'
+        ? { id: 'source-archived', workspaceId: 'ws-source', title: '已归档的研发主会话', state: 'archived' }
+        : resolveSession(id)
+
+    await expect(controller.rebuildExplicit({
+      endpoint: { chatId: 'oc-rebuild-archived' },
+      previousLocusId: first.locus.locusId,
+      parentSessionId: 'source-archived',
+    })).rejects.toMatchObject({
+      code: 'PARENT_NOT_FOUND',
+      message: expect.stringMatching(/已归档的研发主会话.*已被归档.*会话归档管理.*恢复/u),
+    })
+  })
+
+  it('keeps the plain "unavailable" wording for a parent that is missing outright, not archived', async () => {
+    const host = fakeHost()
+    const controller = new LocusController(host.deps)
+    const first = await controller.ensureGroup({ chatId: 'oc-rebuild-missing' })
+    host.repository.loci.set(first.locus.locusId, { ...first.locus, state: 'stopped' })
+    host.repository.groups.set('oc-rebuild-missing', { ...first.group, state: 'stopped' })
+
+    await expect(controller.rebuildExplicit({
+      endpoint: { chatId: 'oc-rebuild-missing' },
+      previousLocusId: first.locus.locusId,
+      parentSessionId: 'session-truly-gone',
+    })).rejects.toMatchObject({
+      code: 'PARENT_NOT_FOUND',
+      message: expect.not.stringContaining('归档'),
+    })
+  })
 })
 
 describe('warning text', () => {

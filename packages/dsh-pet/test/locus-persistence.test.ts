@@ -9,6 +9,7 @@ import {
   parentIndexKey,
 } from '../src/host/locus/persistence.js'
 import { emptyMedium, openPetHarness, type MemoryMedium } from './harness.js'
+import { STORAGE_KEY_SEPARATOR } from '../src/host/locus/storage-key.js'
 
 function enableAtomicTransactions(harness: Awaited<ReturnType<typeof openPetHarness>>): void {
   const domain = harness.domain as unknown as {
@@ -1262,5 +1263,172 @@ describe('durable unified locus repository', () => {
     expect(second.domain.table('chat_bindings').get('oc_legacy')).toEqual({ ...legacyChat, qaOrigin: 'created' })
     expect(second.domain.table('invocation_channel').get('legacy-invocation')).toEqual(legacyInvocation)
     await second.close()
+  })
+
+  // Real-world reproduction of the pre-STORAGE_KEY_SEPARATOR corruption: a row
+  // written before it existed had its SQL primary key truncated at the first
+  // NUL byte by `node:sqlite`'s C-string binding, while the JSON *value* —
+  // bound as its own, separately-truncated parameter — kept the full,
+  // never-truncated key. This block manufactures exactly that on-disk shape
+  // directly in the medium (not through `putLocus`, which now always writes
+  // the correct key) and proves both the startup-blocking failure this used
+  // to cause and the self-heal that replaces it.
+  describe('recovery from a pre-existing truncated index row key', () => {
+    function truncatedIndexRow(fullKey: string): { truncatedKey: string; value: unknown } {
+      const truncatedKey = fullKey.slice(0, fullKey.indexOf(STORAGE_KEY_SEPARATOR))
+      return {
+        truncatedKey,
+        value: {
+          kind: 'endpoint-current',
+          // The value's own `key` field was bound as an independent SQL
+          // parameter and was therefore never truncated — this is the
+          // surviving copy the self-heal reads back.
+          key: fullKey,
+          locusIds: ['locus-topic'],
+          updatedAt: 1,
+        },
+      }
+    }
+
+    it('reconcileStartup no longer aborts Pet initialization on a truncated row', async () => {
+      const medium = emptyMedium()
+      const first = await openPetHarness(medium)
+      const firstRepository = new DurableLocusRepository(first.domain)
+      const group = await firstRepository.putLocus(
+        record({ id: 'locus-group-truncated', endpoint: { chatId: 'oc_truncated' }, childSessionId: 'child-group-truncated', source: 'qa-created' }),
+      )
+      const topic = { chatId: 'oc_truncated', threadId: 'omt_truncated' }
+      await firstRepository.putLocus(
+        record({ id: 'locus-topic', endpoint: topic, parentLocusId: group.id, childSessionId: 'child-topic-truncated', source: 'inherited' }),
+      )
+      await first.close()
+
+      const fullKey = endpointIndexKey(topic)
+      expect(fullKey.includes(STORAGE_KEY_SEPARATOR)).toBe(true)
+      const { truncatedKey, value } = truncatedIndexRow(fullKey)
+      // A topic's truncated key IS its parent chat's key — truncation always
+      // drops the separator and everything after it. Overwriting the
+      // correctly-written topic row with the pre-fix on-disk shape therefore
+      // does not just corrupt the topic's own row: it CLOBBERS the group's
+      // legitimate index row too (`INSERT ... ON CONFLICT DO UPDATE` kept only
+      // the last writer). This is the real, observed production shape: five
+      // topic-scoped rows under one chat all collided onto that chat's own
+      // row, and whichever write landed last is what survived.
+      expect(truncatedKey).toBe(endpointIndexKey(group.endpoint))
+      delete medium.tables['locus_indexes']?.[fullKey]
+      medium.tables['locus_indexes'] ??= {}
+      medium.tables['locus_indexes'][truncatedKey] = JSON.stringify(value)
+
+      const second = await reopen(medium)
+      enableAtomicTransactions(second)
+      const restarted = new DurableLocusRepository(second.domain)
+      // This is the exact call `index.ts` makes at startup; before the fix it
+      // threw `INVALID_LOCUS: Locus index table key ... does not match ...`
+      // and the caller's `if (locusStartup === undefined) return` aborted
+      // Pet's `apply()` before any route registered.
+      await expect(restarted.reconcileStartup({ now: 2 })).resolves.toBeDefined()
+      // reconcileStartup does not merely tolerate the corrupted row: it
+      // rebuilds the ENTIRE index table from the authoritative `loci` table
+      // (`deriveIndexes(collectLoci(), ...)`) and diffs/persists the result.
+      // The group row the collision clobbered on disk is therefore also
+      // recovered, correctly, as a side effect of startup — not left as an
+      // "UNRECOVERABLE" case the way a row whose OWN locus record was gone
+      // would be. `scripts/repair-truncated-keys.mjs` reports a collision as
+      // unrecoverable only when the medium is inspected directly, offline,
+      // without this full-table rebuild — Pet itself never leaves this state.
+      expect(restarted.getCurrentLocus(group.endpoint)).toMatchObject({ id: group.id })
+      expect(restarted.getCurrentLocus(topic)).toMatchObject({ id: 'locus-topic' })
+      await second.close()
+    })
+
+    it('serves the corrupted endpoint correctly once a write path re-derives its index', async () => {
+      const medium = emptyMedium()
+      const first = await openPetHarness(medium)
+      const firstRepository = new DurableLocusRepository(first.domain)
+      const group = await firstRepository.putLocus(
+        record({ id: 'locus-group-serve', endpoint: { chatId: 'oc_truncated_serve' }, childSessionId: 'child-group-serve', source: 'qa-created' }),
+      )
+      const topic = { chatId: 'oc_truncated_serve', threadId: 'omt_truncated_serve' }
+      const locus = await firstRepository.putLocus(
+        record({ id: 'locus-topic-serve', endpoint: topic, parentLocusId: group.id, childSessionId: 'child-topic-serve', source: 'inherited' }),
+      )
+      await first.close()
+
+      const fullKey = endpointIndexKey(topic)
+      const { truncatedKey, value } = truncatedIndexRow(fullKey)
+      delete medium.tables['locus_indexes']?.[fullKey]
+      medium.tables['locus_indexes'] ??= {}
+      medium.tables['locus_indexes'][truncatedKey] = JSON.stringify(value)
+
+      const second = await reopen(medium)
+      enableAtomicTransactions(second)
+      const restarted = new DurableLocusRepository(second.domain)
+
+      // A point lookup by the CURRENT (correct) key does not see the
+      // truncated row at all — it queries the exact key, not a scan — so the
+      // corrupted endpoint looks like it never had a Locus. This is the
+      // "silently invisible" half of the bug, distinct from the "startup
+      // aborts" half `collectIndexes` used to cause.
+      expect(restarted.getCurrentLocus(topic)).toBeUndefined()
+
+      // Any write path that scans the index table (`collectIndexes`) DOES see
+      // it, self-heals it into the returned Map under the correct key, and —
+      // because that Map feeds the next diff/persist — the corrected key is
+      // what actually lands back on disk. `setLocusPermission` on the SAME
+      // locus is exactly such a path (it is what `reconcileStartup`'s
+      // retained-work replay and ordinary bind/rebuild flows both go
+      // through): it re-derives the actual index table via `persistLocusSet`
+      // -> `collectIndexes()`.
+      await restarted.setLocusPermission(locus.id, {
+        desired: 'read',
+        effective: 'read',
+        verifiedAt: 3,
+        grantedBy: 'owner',
+      }, 3, {
+        expectedGeneration: locus.generation,
+        expectedUpdatedAt: locus.updatedAt,
+        expectedRevision: locus.revision,
+      })
+
+      expect(restarted.getCurrentLocus(topic)).toMatchObject({ id: 'locus-topic-serve' })
+      const indexTable = second.domain.table('locus_indexes')
+      expect(indexTable.get(fullKey)).toMatchObject({ key: fullKey, locusIds: ['locus-topic-serve'] })
+      // `truncatedKey` here happens to equal the CHAT-only endpoint key (the
+      // group's own legitimate row) — truncation always drops the separator
+      // and everything after it, so a topic's truncated key IS its parent
+      // chat's key. The assertion that matters is therefore on the group row,
+      // not on the truncated key's absence: it must still point only at the
+      // group, never having been overwritten or merged with the topic's data.
+      expect(indexTable.get(truncatedKey)).toMatchObject({ locusIds: [group.id] })
+      await second.close()
+    })
+
+    it('still fails closed on a genuinely unrelated key/value mismatch', async () => {
+      const medium = emptyMedium()
+      const first = await openPetHarness(medium)
+      const firstRepository = new DurableLocusRepository(first.domain)
+      const group = await firstRepository.putLocus(
+        record({ id: 'locus-group-mismatch', endpoint: { chatId: 'oc_mismatch' }, childSessionId: 'child-group-mismatch', source: 'qa-created' }),
+      )
+      const topic = { chatId: 'oc_mismatch', threadId: 'omt_mismatch' }
+      await firstRepository.putLocus(
+        record({ id: 'locus-mismatch', endpoint: topic, parentLocusId: group.id, childSessionId: 'child-topic-mismatch', source: 'inherited' }),
+      )
+      await first.close()
+
+      // A mismatch that is NOT a prefix relationship — e.g. a foreign key
+      // entirely, not a truncation artifact of THIS row's own key — must stay
+      // a hard failure. Self-healing this would paper over a different class
+      // of bug the truncation-repair reasoning does not apply to.
+      const fullKey = endpointIndexKey(topic)
+      medium.tables['locus_indexes'] ??= {}
+      medium.tables['locus_indexes']['totally-unrelated-key'] = medium.tables['locus_indexes']?.[fullKey]
+      delete medium.tables['locus_indexes']?.[fullKey]
+
+      const second = await reopen(medium)
+      const restarted = new DurableLocusRepository(second.domain)
+      await expect(restarted.reconcileStartup({ now: 2 })).rejects.toThrow(/does not match/)
+      await second.close()
+    })
   })
 })

@@ -98,7 +98,7 @@ describe('durable production authorization resolver', () => {
       },
       { find: () => undefined },
     )
-    expect(topicFromActiveGroup({ chatId: GROUP, threadId: THREAD, key: `${GROUP}\u0000${THREAD}` }))
+    expect(topicFromActiveGroup({ chatId: GROUP, threadId: THREAD, key: locusEndpointKey(GROUP, THREAD) }))
       .toEqual({ state: 'authorized', locusId: 'locus-group', needsInitialization: true })
     expect(admitLocusEvent(groupEvent({ thread_id: THREAD }), context({
       authorization: topicFromActiveGroup,

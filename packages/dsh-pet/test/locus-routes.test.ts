@@ -13,6 +13,7 @@ import {
   type LocusManagementPort,
 } from '../src/host/locus/management.js'
 import { createPetRoutes } from '../src/host/routes.js'
+import { STORAGE_KEY_SEPARATOR } from '../src/host/locus/storage-key.js'
 import { LOCUS_ROUTES } from '../src/wire.js'
 import { openPetHarness, type PetHarness } from './harness.js'
 
@@ -165,7 +166,7 @@ describe('unified locus route parsing', () => {
     expect(stop).not.toHaveBeenCalled()
   })
 
-  it('rejects NUL endpoint identifiers before invoking a management action', async () => {
+  it('rejects storage-key-separator endpoint identifiers before invoking a management action', async () => {
     const bind = vi.fn(async () => ({ action: 'bind', locus: {} } as never))
     const routes = await makeRoutes({
       view: vi.fn(() => ({ generation: 1, loci: [], defaultQa: [], discovery: { byEndpoint: [], byParent: [], byChild: [] } })),
@@ -173,7 +174,7 @@ describe('unified locus route parsing', () => {
       bind,
     })
     const reply = await call(routes, LOCUS_ROUTES.bind, {
-      action: 'bind', endpoint: { chatId: 'oc-project\u0000evil' }, parentSessionId: 'main-1',
+      action: 'bind', endpoint: { chatId: `oc-project${STORAGE_KEY_SEPARATOR}evil` }, parentSessionId: 'main-1',
     })
     expect(reply.status).toBe(400)
     expect(reply.body.error).toBe('INVALID_REQUEST')

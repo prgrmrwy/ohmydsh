@@ -9,6 +9,7 @@
  */
 
 import type { LarkInboundEvent } from '../channel/event.js'
+import { STORAGE_KEY_SEPARATOR, containsStorageKeySeparator } from './storage-key.js'
 
 /** The two possible parts of a Locus address. */
 export interface LocusEndpoint {
@@ -227,13 +228,13 @@ export type LocusAdmissionDecision = LocusAdmission | LocusAdmissionRejection
 
 /** Serialize a Locus endpoint without putting parent/session ids in its key. */
 export function locusEndpointKey(chatId: string, threadId?: string): string {
-  return threadId === undefined ? chatId : `${chatId}\u0000${threadId}`
+  return threadId === undefined ? chatId : `${chatId}${STORAGE_KEY_SEPARATOR}${threadId}`
 }
 
 /** Normalize an id while rejecting whitespace/control-character ambiguity. */
 function normalizeId(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
-  if (value === '' || value.trim() !== value || value.includes('\u0000') || /\s/.test(value)) {
+  if (value === '' || value.trim() !== value || containsStorageKeySeparator(value) || /\s/.test(value)) {
     return undefined
   }
   return value

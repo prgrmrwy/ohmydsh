@@ -14,6 +14,7 @@ import type {
 } from '../src/host/locus/controller.js'
 import { LocusRepository as DurableLocusRepository } from '../src/host/locus/persistence.js'
 import { createLocusResolution } from '../src/host/locus/resolution.js'
+import { STORAGE_KEY_SEPARATOR } from '../src/host/locus/storage-key.js'
 import { openPetHarness } from './harness.js'
 
 function durableRecord(
@@ -902,7 +903,7 @@ describe('controller to durable locus repository write boundary', () => {
       parentLocusId: original.id,
     })
     expect(durable.getLatestLocusByEndpoint(original.endpoint)?.id).toBe('locus-next')
-    expect(harness.domain.table('locus_switch_notices').get('locus-next\u00002')).toMatchObject({
+    expect(harness.domain.table('locus_switch_notices').get(`locus-next${STORAGE_KEY_SEPARATOR}2`)).toMatchObject({
       text: 'S0 → S1；旧历史未合并。', attempts: 0,
     })
     await adapter.acknowledgeSwitchNotice('locus-next', 2)
