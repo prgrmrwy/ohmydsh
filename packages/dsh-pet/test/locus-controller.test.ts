@@ -747,6 +747,69 @@ describe('explicit rebuild', () => {
       message: expect.not.stringContaining('归档'),
     })
   })
+
+  // Automatic recovery of a generation the HOST invalidated. The recorded
+  // parent is the only session a rebuild is ever offered, so when it is
+  // unusable the endpoint had no reachable repair at all — the deadlock the
+  // owner hit on devbox. `allowFreshParent` lets recovery establish a new main
+  // session the same way first-time provisioning does.
+  it('establishes a fresh main session when recovery is allowed and the recorded parent is archived', async () => {
+    const host = fakeHost()
+    const controller = new LocusController(host.deps)
+    const first = await controller.ensureGroup({ chatId: 'oc-recover-archived' })
+    host.repository.loci.set(first.locus.locusId, { ...first.locus, state: 'invalid' })
+    host.repository.groups.set('oc-recover-archived', { ...first.group, state: 'invalid' })
+
+    const resolveSession = host.deps.dsh.resolveSession
+    host.deps.dsh.resolveSession = async id =>
+      id === 'source-archived'
+        ? { id: 'source-archived', workspaceId: 'ws-source', title: '已归档主会话', state: 'archived' }
+        : resolveSession(id)
+
+    // `ensureGroup` above already created the group's own main session, so
+    // compare against that baseline rather than an absolute zero.
+    const mainsBefore = host.createdMains.length
+    const rebuilt = await controller.rebuildExplicit({
+      endpoint: { chatId: 'oc-recover-archived' },
+      previousLocusId: first.locus.locusId,
+      parentSessionId: 'source-archived',
+      allowFreshParent: true,
+    })
+
+    // A genuinely new main session, not a revived reference to the archived one.
+    expect(rebuilt.locus).toMatchObject({ generation: 2, state: 'active', permission: 'read' })
+    expect(rebuilt.locus.parentSessionId).not.toBe('source-archived')
+    expect(host.createdMains).toHaveLength(mainsBefore + 1)
+    // The replacement is published as its own generation; the invalid row is
+    // left in place as durable history rather than being revived or erased.
+    expect(host.repository.loci.get(rebuilt.locus.locusId)?.state).toBe('active')
+    expect(host.repository.loci.get(first.locus.locusId)).toBeDefined()
+  })
+
+  // The owner-driven path is unchanged: the panel must still be able to say
+  // which session to restore rather than silently fabricating a new one.
+  it('keeps refusing an archived parent when recovery is not allowed', async () => {
+    const host = fakeHost()
+    const controller = new LocusController(host.deps)
+    const first = await controller.ensureGroup({ chatId: 'oc-recover-refused' })
+    host.repository.loci.set(first.locus.locusId, { ...first.locus, state: 'invalid' })
+    host.repository.groups.set('oc-recover-refused', { ...first.group, state: 'invalid' })
+
+    const resolveSession = host.deps.dsh.resolveSession
+    host.deps.dsh.resolveSession = async id =>
+      id === 'source-archived'
+        ? { id: 'source-archived', workspaceId: 'ws-source', title: '已归档主会话', state: 'archived' }
+        : resolveSession(id)
+
+    const mainsBefore = host.createdMains.length
+    await expect(controller.rebuildExplicit({
+      endpoint: { chatId: 'oc-recover-refused' },
+      previousLocusId: first.locus.locusId,
+      parentSessionId: 'source-archived',
+    })).rejects.toMatchObject({ code: 'PARENT_NOT_FOUND' })
+    // Refusing must not have fabricated a replacement session.
+    expect(host.createdMains).toHaveLength(mainsBefore)
+  })
 })
 
 describe('warning text', () => {

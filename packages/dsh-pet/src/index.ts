@@ -1873,13 +1873,61 @@ async function initialize(
               chatName = undefined
             }
             const named = chatName === undefined ? {} : { chatName }
-            const ensured = endpoint.threadId === undefined
-              ? await locusProvisioningController.ensureGroup({ chatId: endpoint.chatId, ...named })
-              : await locusProvisioningController.ensureTopic({
-                chatId: endpoint.chatId,
-                threadId: endpoint.threadId,
-                ...named,
+            // A generation the Host itself invalidated (failed child re-attach
+            // after a restart, lost composition proof) is replaced rather than
+            // reported as "must be rebuilt": the owner never exited anything,
+            // so there is no exit to honour, and the management surface offers
+            // that rebuild only against the same recorded parent — which may
+            // itself be archived, making it impossible. Creating a fresh
+            // generation is safe precisely because the invalid child is NOT
+            // adopted or resumed; `resolution.toActive` still refuses it, and
+            // `rebuildExplicit` retires it as durable history.
+            const invalidCurrent = (() => {
+              try {
+                const current = locusRepository.getLatestLocusByEndpoint(endpoint)
+                return current?.state === 'invalid' ? current : undefined
+              } catch {
+                // A read failure here is not a reason to skip normal ensure:
+                // let the standard path surface its own diagnostic.
+                return undefined
+              }
+            })()
+            const recover = async (target: typeof invalidCurrent & object) =>
+              await locusProvisioningController.rebuildExplicit({
+                endpoint: target.endpoint,
+                previousLocusId: target.id,
+                parentSessionId: target.parentSessionId,
+                allowFreshParent: true,
               })
+            if (invalidCurrent !== undefined) {
+              // A topic cannot be rebuilt while the chat-level generation it
+              // nests under is itself invalid: the rebuild path needs an active
+              // parent locus (`requireActiveLocus`). Recover the group first so
+              // a topic mention is not stuck behind a group problem the member
+              // never caused and cannot see.
+              if (endpoint.threadId !== undefined) {
+                const groupCurrent = (() => {
+                  try {
+                    const group = locusRepository.getLatestLocusByEndpoint({ chatId: endpoint.chatId })
+                    return group?.state === 'invalid' ? group : undefined
+                  } catch {
+                    return undefined
+                  }
+                })()
+                if (groupCurrent !== undefined) {
+                  await recover({ ...groupCurrent, endpoint: { chatId: endpoint.chatId } })
+                }
+              }
+            }
+            const ensured = invalidCurrent === undefined
+              ? (endpoint.threadId === undefined
+                ? await locusProvisioningController.ensureGroup({ chatId: endpoint.chatId, ...named })
+                : await locusProvisioningController.ensureTopic({
+                  chatId: endpoint.chatId,
+                  threadId: endpoint.threadId,
+                  ...named,
+                }))
+              : await recover({ ...invalidCurrent, endpoint })
             const record = ensured.locus
             if (record.state !== 'active' || record.childComposition !== 'safe-v1') {
               throw new Error(`Provisioned locus is not an active safe-v1 generation`)

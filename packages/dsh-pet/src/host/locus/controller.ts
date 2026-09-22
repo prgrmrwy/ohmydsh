@@ -299,6 +299,23 @@ export interface RebuildLocusRequest {
   readonly previousLocusId: string
   readonly parentSessionId: string
   readonly asDefaultQa?: boolean
+  /**
+   * Replace an unusable recorded parent with a freshly created main session.
+   *
+   * The recorded parent is the only session that was ever this endpoint's main
+   * session, and the management surface offers no way to pass a different one
+   * (by design — see the "no bare-identifier binding" requirement). So when
+   * that session is archived or missing, an explicit rebuild had no possible
+   * parent and always failed, and an endpoint whose generation the Host itself
+   * invalidated became permanently unreachable — the owner never exited
+   * anything, yet the only way out was a rebuild that could never run.
+   *
+   * Recovery is opt-in per call: an owner-driven rebuild keeps refusing so the
+   * management surface can explain which session to restore, while automatic
+   * recovery of a Host-invalidated generation may establish a fresh main
+   * session the same way first-time provisioning does.
+   */
+  readonly allowFreshParent?: boolean
 }
 
 export interface RebuildLocusResult {
@@ -804,7 +821,7 @@ export class LocusController {
         if (request.asDefaultQa === true && endpoint.threadId !== undefined) {
           throw new LocusControllerError('INVALID_ENDPOINT', '默认 Q&A 只能重建群级入口。')
         }
-        const parent = await this.resolveMainParent(request.parentSessionId, '显式重建 parent')
+        const parent = await this.resolveRebuildParent(request)
         const group = endpoint.threadId === undefined
           ? undefined
           : await this.requireGroup(endpoint.chatId)
@@ -1402,6 +1419,57 @@ export class LocusController {
         `群 ${endpoint.chatId} 的显式主会话切换失败，旧关联保持不变。`,
         error,
       )
+    }
+  }
+
+  /**
+   * Resolve the parent for a rebuild, optionally falling back to a fresh one.
+   *
+   * With `allowFreshParent` unset this is exactly {@link resolveMainParent}:
+   * an owner-driven rebuild still surfaces "the recorded session is archived /
+   * gone", which is the actionable answer for someone looking at the panel.
+   *
+   * With it set — automatic recovery of a generation the HOST invalidated —
+   * an unusable recorded parent is replaced by a newly created main session in
+   * the default workspace, the same way first-time provisioning establishes
+   * one. Refusing instead would strand the endpoint: the recorded parent is
+   * the only one a rebuild is ever offered, so there is no second attempt to
+   * make. This never revives or re-parents the invalid generation itself; that
+   * child is left untouched as durable history and a brand-new one is created.
+   * @param request - the rebuild request.
+   * @returns the parent to build the replacement generation on.
+   */
+  private async resolveRebuildParent(request: RebuildLocusRequest): Promise<LocusParentSession> {
+    try {
+      return await this.resolveMainParent(request.parentSessionId, '显式重建 parent')
+    } catch (error) {
+      if (request.allowFreshParent !== true) throw error
+      const workspace = await this.deps.dsh.resolveDefaultWorkspace()
+      if (workspace === undefined || workspace.id.trim() === '') {
+        throw new LocusControllerError(
+          'DEFAULT_WORKSPACE_UNAVAILABLE',
+          '原主会话不可用，且未配置 default workspace，无法自动建立新主会话。',
+        )
+      }
+      const created = await this.deps.dsh.createMainSession({
+        workspaceId: workspace.id,
+        label: this.mainLabel(
+          endpointOf(
+            request.endpoint.threadId === undefined
+              ? { chatId: request.endpoint.chatId }
+              : { chatId: request.endpoint.chatId, threadId: request.endpoint.threadId },
+          ),
+          undefined,
+        ),
+        chatId: request.endpoint.chatId,
+      })
+      assertSessionShape(created, undefined, workspace.id, '恢复用主会话')
+      return {
+        id: created.id,
+        workspaceId: workspace.id,
+        ...(created.title === undefined ? {} : { title: created.title }),
+        state: 'active',
+      }
     }
   }
 
