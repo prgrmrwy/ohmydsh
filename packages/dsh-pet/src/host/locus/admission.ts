@@ -59,6 +59,33 @@ export type LocusAuthorizationState =
   | 'unusable'
   | 'legacy'
 
+/**
+ * The subset of {@link LocusAuthorizationState} that ordinary work may proceed
+ * under: an existing serviceable locus (`authorized`), or an endpoint the
+ * channel is allowed to bootstrap itself — `uninitialized` for one it has
+ * never seen, `unusable` for a generation the Host invalidated without any
+ * owner decision.
+ *
+ * Every consumer that gates ordinary work MUST use
+ * {@link isAdmittableAuthorization} instead of restating the union. The
+ * channel controller restated `'authorized' | 'uninitialized'` in two places,
+ * so adding `unusable` above admitted the message through admission and then
+ * silently rejected it one layer later as `authorization-unresolved` — the
+ * very deadlock the new state existed to remove, wearing a different reason
+ * code and with no compile error to catch it.
+ */
+export type AdmittableLocusAuthorization = Extract<
+  LocusAuthorizationState,
+  'authorized' | 'uninitialized' | 'unusable'
+>
+
+/** Whether ordinary (non-control) work may proceed under this state. */
+export function isAdmittableAuthorization(
+  state: LocusAuthorizationState,
+): state is AdmittableLocusAuthorization {
+  return state === 'authorized' || state === 'uninitialized' || state === 'unusable'
+}
+
 /** Optional metadata a controller may attach to an authorization result. */
 export interface LocusAuthorization {
   readonly state: LocusAuthorizationState
