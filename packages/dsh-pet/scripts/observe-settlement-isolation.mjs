@@ -178,6 +178,7 @@ if (takeSnapshot) {
   await writeFile(snapshotFile, `${JSON.stringify(report, null, 2)}\n`)
   console.log(`已记录基线 → ${snapshotFile}\n`)
   for (const [childId, row] of Object.entries(report)) {
+    if (childId.startsWith('__')) continue
     console.log(`locus  chat=${row.chatId}`)
     console.log(`  父 ${row.parentId}`)
     console.log(`    事件数 ${row.parent?.events ?? '?'}  结算通知 ${row.parent?.settlementNotices ?? '?'}`)
@@ -193,6 +194,7 @@ let failures = 0
 let worked = false
 
 for (const [childId, row] of Object.entries(report)) {
+  if (childId.startsWith('__')) continue
   const before = baseline[childId]
   if (before === undefined) {
     console.log(`· 新 locus ${childId.slice(0, 20)}… 不在基线中，跳过`)
