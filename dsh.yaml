@@ -243,6 +243,14 @@ customizations:
     enabled: true
     brief: 驾驶舱远程编辑器能力接入 Worktree Session(可移除 shim)
     note: 'openspec change open-worktree-in-remote-editor;纯 Web client shim,无 Host 能力/网络通道/业务状态。唯一职责:运行时探测完整 dotted 服务名 cockpitBridge.editorOpen 与 worktreeSession.openHandler,两端齐备时把前者原样注册给后者;两端无任何直接依赖或互相命名。无顶层 inject(任一端缺失时整体静默无效,ws 回落 vscode://file 默认行为);监听 Cordis internal/service 支持任意加载/卸载顺序;禁止 ctx.get("cockpitBridge").editorOpen(会被 traceable proxy 重新路由并强制 inject),只用 ctx.get("cockpitBridge.editorOpen");不校验/改写路径,不持状态/重试/认证。前置:dsh-cockpit-bridge >=0.4.0 + 宿主机 VS Code Remote-SSH;当前 bridge pin 仍为 0.3.0,故发布升级前 shim 安全无效。移除:删除本条 → dsh build → 重启,两端均无需迁移。'
+  # 自研(local):仅承载 cockpit bridge → dsh-memex 卡片浏览地址的部署侧耦合
+  - id: cockpit-memex-browse-shim
+    type: package
+    source: local
+    version: 0.1.0
+    enabled: false             # 待 dsh-cockpit-bridge 发布 cockpitBridge.portForward 后改 true
+    brief: 驾驶舱端口发布能力接入 dsh-memex 卡片浏览(可移除 shim)
+    note: 'openspec change dsh-memex-card-browser;纯 Web client shim,无 Host 能力/网络通道/业务状态。唯一职责:运行时探测完整 dotted 服务名 cockpitBridge.portForward 与 dshMemex.browseAddress,两端齐备时把前者注册给后者,使 DSH 跑在 VM/devbox 时卡片浏览可从宿主机浏览器访问;两端无任何直接依赖或互相命名(一个约定服务名同样属于提供方,故连字符串也不放进 dsh-memex)。每库一个 channel(memex-browse-<库名>)——内核一进程一库,共用 channel 会发布错库;先 register(channelId,port) 声明可发布再 publish(channelId) 取地址,失败原样上抛由 dsh-memex 呈现。无顶层 inject(任一端缺失时整体静默无效,dsh-memex 回落 localhost:<port>,本机直连场景不受影响);监听 Cordis internal/service 支持任意加载/卸载顺序;禁止 ctx.get("cockpitBridge").portForward(会被 traceable proxy 重新路由并强制 inject),只用 ctx.get("cockpitBridge.portForward");不校验/改写地址,不持状态/重试/缓存。⚠ 前置:dsh-cockpit-bridge 需提供 portForward(cockpit 仓 change device-port-forward-seam,已实现未发布);当前 bridge pin 为 0.4.0 尚无该能力,故本条目 enabled:false——提前启用不会出错但纯属空载。移除:删除本条 → dsh build → 重启,两端均无需迁移。'
   # 第三方(remote):本机 TraeX 官方 bridge — 模型选择器选 TraeX Bridge / traex
   # 2026-08-28 决策:官方 bridge 替代社区 ACP 方案(不 spawn traecli;traex-acp-provider 已移除)
   # 2026-08-31 决策:内部包(bnpm/内网鉴权),开源/无 ByteDance 内网环境默认禁用;
