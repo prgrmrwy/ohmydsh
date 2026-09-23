@@ -30,17 +30,30 @@ export interface LauncherViewOptions {
  */
 export function mountLauncher(options: LauncherViewOptions): () => void {
   let host: HTMLElement | undefined
+  /** Library the mounted view belongs to; `undefined` when nothing is mounted. */
+  let mountedScope: string | undefined
+  /** Incremented per render so a superseded resolution cannot paint. */
+  let generation = 0
 
   const render = (): void => {
     const scope = launcherScope(window.location.hash)
     if (scope === undefined) {
       host?.remove()
       host = undefined
+      mountedScope = undefined
       return
     }
-    if (host !== undefined) return
+    // Re-render whenever the TARGET changes, not merely when nothing is
+    // mounted. Guarding on "a host exists" alone made a second library open
+    // inside the first one's view: the hash had changed but the page kept
+    // showing — and kept resolving — the library it was first mounted for.
+    if (host !== undefined && mountedScope === scope) return
+
+    host?.remove()
+    const current = ++generation
 
     host = document.createElement('div')
+    mountedScope = scope
     host.setAttribute('data-dsh-memex-launcher', scope)
     host.style.cssText = [
       'position:fixed', 'inset:0', 'z-index:2147483000',
@@ -62,6 +75,12 @@ export function mountLauncher(options: LauncherViewOptions): () => void {
     document.body.appendChild(host)
 
     void runLauncher(scope, options.deps).then(outcome => {
+      // Starting a service takes a moment, so the user can retarget this tab
+      // before the answer lands. A superseded resolution must not paint over
+      // the newer view — and must never navigate, which would send the tab to
+      // the library the user just moved away from.
+      if (current !== generation) return
+
       if (outcome.status === 'ready' && outcome.address !== undefined) {
         title.textContent = options.t('browseRedirecting', { scope })
         const navigate = options.navigate ?? ((address: string) => { window.location.replace(address) })
@@ -79,7 +98,11 @@ export function mountLauncher(options: LauncherViewOptions): () => void {
   window.addEventListener('hashchange', render)
   return () => {
     window.removeEventListener('hashchange', render)
+    // Bump the generation so an in-flight resolution cannot navigate a tab
+    // whose launcher has already been disposed.
+    generation += 1
     host?.remove()
     host = undefined
+    mountedScope = undefined
   }
 }
