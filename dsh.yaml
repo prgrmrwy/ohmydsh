@@ -144,6 +144,12 @@ customizations:
     enabled: true
     brief: 前端设计方法论(定调色/字体/布局/一条记忆点,避免“AI 默认脸”)
     note: '上游 https://github.com/anthropics/skills 的 skills/frontend-design/SKILL.md,commit 41bbe19d1a1a7eaab5e7bb9050a417e5c6cffc8f(2026-09-03),Apache-2.0(许可全文随 skill 目录落在 ~/.dsh/skills/frontend-design/LICENSE.txt,出处见同目录 ATTRIBUTION.md)。逐字 vendor,未改写。用途仅为设计方法论:新建 UI 或重塑既有界面时给出定调流程(先出 token 方案 → 对照 brief 自查是否落进"通用默认" → 再写代码 → 克制与文案准则),不新增工具/代码/Hook/网络访问/依赖。本仓用法:改自研插件的 Web 半区(设置页等)时按需加载,与本仓"遵循官方 settings.section 槽、只用 --dsw-alias-* 主题变量"的既有约定叠加——主题由宿主决定,故该 skill 的"自选配色"在本仓落成"结构、排版与唯一记忆点自选"。升级需人工复核上游新 commit 后覆盖 SKILL.md 并更新 ATTRIBUTION.md 与本记录。'
+  # 第三方 skill:按受众校准的解释模式(ELI5 / 讲给经理 / 讲给我妈)
+  - id: eli5
+    type: skill
+    enabled: true
+    brief: 按受众校准解释(年龄/学段/职位/亲属关系,默认 Age 5)
+    note: '上游 https://github.com/DreambigOu/ELI5,commit a766623b062331fdde53467001379b4ddf3acc2f(2026-03-17),MIT(全文随目录落在 ~/.dsh/skills/eli5/LICENSE.txt,本仓公开故再分发须随附)。纯文本 skill,不新增工具/代码/Hook/网络访问/依赖。正文逐字未改,仅追加 whenToUse 收紧触发(上游 description 会被"讲给我妈听"这类日常说法自动命中);出处与本地改动见同目录 ATTRIBUTION.md。'
   # 自研 skill:把 MR 的 CR 请求发到飞书群(lark-cli im +messages-send)
   # 与 ws 同等定位的普通 skill:普通会话可直接用;也可在 Pet 设置 → Skill 里导入
   # 本仓库的 skills/send-cr 成为 Pet 能力,两处行为一致、不含任何 Pet 专属声明。
