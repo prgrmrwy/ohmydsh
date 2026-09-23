@@ -71,3 +71,8 @@ Pet 拥有自有汇报通道的 locus child 结算时，系统 SHALL 确保该�
 #### Scenario: 多个 locus 同时结算
 - **WHEN** 同一父会话关联的多个 locus child 先后结算
 - **THEN** 父会话受到的打断次数 SHALL 为零，不随 locus 数量增长
+
+#### Scenario: Host 重启后子代冷恢复再结算
+- **WHEN** 一个已配置非打断式结算的 locus child 经 Host 重启被重新物化，随后完成工作并结算
+- **THEN** 其结算策略 SHALL 与创建时一致，父会话受到的打断次数仍为零
+- **AND** 该策略 MUST 从子代自身的持久化记录还原，MUST NOT 依赖进程内存中的创建期状态
