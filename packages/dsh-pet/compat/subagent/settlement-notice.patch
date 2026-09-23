@@ -170,7 +170,7 @@ index df2b6da..d950fde 100644
        const parent = this.ctx.agents.get(activation.parentSession)
        if (parent === undefined) return
 diff --git a/packages/subagent/subagent/src/continuation.ts b/packages/subagent/subagent/src/continuation.ts
-index b86d5cd..34c1b45 100644
+index b86d5cd..10fcd7f 100644
 --- a/packages/subagent/subagent/src/continuation.ts
 +++ b/packages/subagent/subagent/src/continuation.ts
 @@ -20,7 +20,7 @@ import { brandString } from '@deepseek-ai/dsh-brand'
@@ -229,7 +229,7 @@ index b86d5cd..34c1b45 100644
            signal: spec.signal,
          })
          const childHeader = activation.handle.agent.session.header
-@@ -189,6 +207,231 @@ export class SubagentContinuationManager {
+@@ -189,6 +207,240 @@ export class SubagentContinuationManager {
      }
    }
  
@@ -449,6 +449,15 @@ index b86d5cd..34c1b45 100644
 +            : {},
 +        },
 +        composition: { persona: descriptor.persona, toolFilter: descriptor.toolFilter },
++        // Restored from the descriptor, exactly like the composition above: a
++        // resumed child must keep the settlement policy it was created under.
++        // Without this the activation falls back to 'notify', so every Host
++        // restart turns a silent child loud again — and a restart is routine.
++        // Measured: two settlements after one restart injected four events
++        // into the parent session a human was using.
++        ...descriptor.settlementNotice !== undefined
++          ? { settlementNotice: descriptor.settlementNotice }
++          : {},
 +        signal,
 +      })
 +    } catch (error: unknown) {
@@ -461,6 +470,22 @@ index b86d5cd..34c1b45 100644
    /**
     * Deliver one model-authored message to a direct continuable child or to the
     * sender's direct parent. A missing direct child cold-resumes through the
+@@ -443,6 +695,15 @@ export class SubagentContinuationManager {
+             : {},
+         },
+         composition: { persona: descriptor.persona, toolFilter: descriptor.toolFilter },
++        // Restored from the descriptor, exactly like the composition above: a
++        // resumed child must keep the settlement policy it was created under.
++        // Without this the activation falls back to 'notify', so every Host
++        // restart turns a silent child loud again — and a restart is routine.
++        // Measured: two settlements after one restart injected four events
++        // into the parent session a human was using.
++        ...descriptor.settlementNotice !== undefined
++          ? { settlementNotice: descriptor.settlementNotice }
++          : {},
+         signal: options.signal,
+       })
+     } catch (error: unknown) {
 diff --git a/packages/subagent/subagent/src/descriptor.ts b/packages/subagent/subagent/src/descriptor.ts
 index de9191c..2ab6030 100644
 --- a/packages/subagent/subagent/src/descriptor.ts
