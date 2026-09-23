@@ -57,6 +57,32 @@ describe('parseReadyPort', () => {
     expect(parseReadyPort('memex is running at http://127.0.0.1:51000')).toBe(51000)
   })
 
+  it('takes the LAST readiness line, because the kernel lies about earlier ports', () => {
+    // Captured verbatim from @touchskyer/memex 0.4.1 with 3939 and 3940 already
+    // taken. The kernel adds a listen callback per retry to the SAME server and
+    // never removes the old ones, so a successful bind fires every accumulated
+    // callback and prints one "running at" line per port it ever tried. Only
+    // the last names the port actually listening; taking the first hands out a
+    // port owned by another library's service.
+    const real = [
+      'Port 3939 in use, trying 3940...',
+      'Port 3940 in use, trying 3941...',
+      'memex is running at http://localhost:3939',
+      "\u{1F4A1} Tip: Run 'memex sync --init' to sync and access your cards online",
+      'memex is running at http://localhost:3940',
+      "\u{1F4A1} Tip: Run 'memex sync --init' to sync and access your cards online",
+      'memex is running at http://localhost:3941',
+      '',
+    ].join('\n')
+    expect(parseReadyPort(real)).toBe(3941)
+  })
+
+  it('is not stateful across calls despite the global regex', () => {
+    const one = 'memex is running at http://localhost:3939\n'
+    expect(parseReadyPort(one)).toBe(3939)
+    expect(parseReadyPort(one)).toBe(3939)
+  })
+
   it('returns undefined for output that does not state an address', () => {
     expect(parseReadyPort('')).toBeUndefined()
     expect(parseReadyPort('Cards synced to git@example.com:me/cards.git\nOpening https://example.invalid...')).toBeUndefined()
@@ -110,6 +136,23 @@ describe('startBrowseService', () => {
       spawnProcess: (() => child) as never,
     })
     child.say('Port 3939 in use, trying 3940...\nmemex is running at http://localhost:3940\n')
+    const service = await pending
+    expect(service.port).toBe(3940)
+    await service.stop()
+  })
+
+  it('waits out the bogus readiness lines when they stream in separately', async () => {
+    // The lies and the truth need not share a chunk: settling on the first
+    // chunk that contains any "running at" would return another library's port.
+    const child = new FakeChild()
+    const pending = startBrowseService({
+      home: libraryHome(),
+      executable: '/fake/memex',
+      spawnProcess: (() => child) as never,
+    })
+    child.say('Port 3939 in use, trying 3940...\nmemex is running at http://localhost:3939\n')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    child.say('memex is running at http://localhost:3940\n')
     const service = await pending
     expect(service.port).toBe(3940)
     await service.stop()
