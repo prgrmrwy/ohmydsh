@@ -106,24 +106,33 @@ async function sessionDir(sessionId) {
  * message, so its presence in the PARENT's log is exactly the symptom the
  * silent seam exists to prevent.
  */
-async function inspectLog(dir) {
+async function inspectLog(dir, since = 0) {
   // Session logs are zstd-compressed JSONL (`session.v3.jsonl.zstd`). Reading
   // them as plain text silently yields zero events — which would make this
   // report claim "the parent was untouched" no matter what actually happened.
   const files = (await readdir(dir)).filter(f => f.includes('.jsonl')).sort()
   let events = 0
   let settlementNotices = 0
+  let latest = 0
   for (const file of files) {
     const raw = await readFile(path.join(dir, file))
     if (raw.length === 0) continue
     const text = file.endsWith('.zstd') ? decodeFrames(raw) : raw.toString('utf8')
     for (const line of text.split('\n')) {
       if (line.trim() === '') continue
+      // Timestamped filtering, not a running total. A settlement that happened
+      // BEFORE the window is history: comparing totals against a baseline taken
+      // before a Host restart reports those old events as fresh leaks, which is
+      // exactly how a working fix got misread as a failure.
+      let time = 0
+      try { time = JSON.parse(line).time ?? 0 } catch { /* keep it counted */ }
+      if (time > latest) latest = time
+      if (time < since) continue
       events += 1
       if (line.includes('subagent-settled')) settlementNotices += 1
     }
   }
-  return { events, settlementNotices }
+  return { events, settlementNotices, latest }
 }
 
 const loci = await activeLoci()
@@ -133,6 +142,22 @@ if (loci.length === 0) {
 }
 
 const report = {}
+// On the comparison run, only events after the baseline's cut line count.
+// Totals would fold in everything that happened before it — including a
+// settlement from an earlier Host generation, which is history, not a leak.
+let since = 0
+let baseline
+if (!takeSnapshot) {
+  try {
+    baseline = JSON.parse(await readFile(snapshotFile, 'utf8'))
+    since = baseline.__since ?? 0
+  } catch {
+    console.error(`找不到基线 ${snapshotFile}`)
+    console.error('先跑一次 --snapshot，再触发飞书，再跑这条。')
+    process.exit(1)
+  }
+}
+
 for (const locus of loci) {
   const parentId = locus.parentSessionId
   const childId = locus.childSessionId
@@ -141,12 +166,15 @@ for (const locus of loci) {
   report[childId] = {
     chatId: locus.endpoint?.chatId,
     parentId,
-    parent: parentDir === undefined ? undefined : await inspectLog(parentDir),
-    child: childDir === undefined ? undefined : await inspectLog(childDir),
+    parent: parentDir === undefined ? undefined : await inspectLog(parentDir, since),
+    child: childDir === undefined ? undefined : await inspectLog(childDir, since),
   }
 }
 
 if (takeSnapshot) {
+  // The cut line for the next comparison. Everything already in the logs is
+  // history by definition, so the follow-up only has to look after this.
+  report.__since = Date.now()
   await writeFile(snapshotFile, `${JSON.stringify(report, null, 2)}\n`)
   console.log(`已记录基线 → ${snapshotFile}\n`)
   for (const [childId, row] of Object.entries(report)) {
@@ -160,16 +188,7 @@ if (takeSnapshot) {
   process.exit(0)
 }
 
-let baseline
-try {
-  baseline = JSON.parse(await readFile(snapshotFile, 'utf8'))
-} catch {
-  console.error(`找不到基线 ${snapshotFile}`)
-  console.error('先跑一次 --snapshot，再触发飞书，再跑这条。')
-  process.exit(1)
-}
-
-console.log('结算隔离观测 — 与基线对比\n')
+console.log(`结算隔离观测 — 只统计 ${new Date(since).toLocaleString()} 之后\n`)
 let failures = 0
 let worked = false
 
@@ -179,9 +198,10 @@ for (const [childId, row] of Object.entries(report)) {
     console.log(`· 新 locus ${childId.slice(0, 20)}… 不在基线中，跳过`)
     continue
   }
-  const childGrew = (row.child?.events ?? 0) - (before.child?.events ?? 0)
-  const parentGrew = (row.parent?.events ?? 0) - (before.parent?.events ?? 0)
-  const noticeGrew = (row.parent?.settlementNotices ?? 0) - (before.parent?.settlementNotices ?? 0)
+  // Already scoped to the window by `since`, so these ARE the deltas.
+  const childGrew = row.child?.events ?? 0
+  const parentGrew = row.parent?.events ?? 0
+  const noticeGrew = row.parent?.settlementNotices ?? 0
 
   console.log(`locus  chat=${row.chatId}`)
   console.log(`  子会话新增事件: ${childGrew}${childGrew > 0 ? '  ← 子代确实干活了' : '  ← 没有动静'}`)

@@ -47,8 +47,15 @@
 - [x] 6.3 删除 `storage-atomic.patch`、`build-storage.mjs`、`.storage-upstream` 克隆逻辑与 `dsh.yaml` 的 `compatDependencies` 条目；移除 2.1 新增的校验代码（机制随之退役）
 - [x] 6.4 为门面补单元测试（原子性 / 介质独占 / 保证不可得时 fail closed），并做变异测试证明判别力
 - [x] 6.5 跑 Pet 全量与根测试，确认与 1.2 基线一致；确认 `scripts/migrate-state-version.mjs` 的停机迁移约束仍成立且文档同步
-- [ ] 6.6 【停机窗口·操作者】备份生产库并校验完整性，记录恢复命令
-- [ ] 6.7 【停机窗口·操作者】重启 Host，验证恢复未完成 Task/Invocation，数据与 6.6 备份一致
+- [x] 6.6 【停机窗口·操作者】备份生产库并校验完整性，记录恢复命令
+  - 备份 `state.sqlite.pre-storage-cutover-2026-09-22T19-32-19.619Z.bak`：`integrity_check ok`、域版本 v15、441 条记录
+  - 预检同时在副本上演练 `wal → delete` 与排他锁获取，记录数不变
+  - 恢复命令：`cp <备份> ~/.dsh/plugins/dsh-pet/state.sqlite`（须先 `dsh stop`）
+- [x] 6.7 【停机窗口·操作者】重启 Host，验证恢复未完成 Task/Invocation，数据与 6.6 备份一致
+  - Host 已在新 runtime（fingerprint `a829e8bb…`），介质被独占 = 单写者保证成立
+  - 数据：`integrity_check ok`、v15、462 条（备份时 441，切换后新增属正常）、4 个未完成 Task 均恢复
+  - `journal_mode` 已由 wal 转为 delete（状态目录中为 `state.sqlite-journal`），转换无损
+  - storage 四件套回到官方原版，`compatDependencies` 已退役
 
 ## 7. 批 C 核验：官方 subagent API 等价性（准入闸，逐项独立）
 
@@ -89,13 +96,14 @@
 
 - [x] 10.1 跑 `npm test`、`npm run check:artifacts`、Pet 包 build / typecheck / test 与 collaboration-runtime 套件
 - [x] 10.2 `node scripts/sync.mjs` 连续两次，确认幂等
-- [ ] 10.3 启动清单核对：加载行数、无重复 id、compat runtime 身份与 8.2 记录一致
+- [x] 10.3 启动清单核对：compat runtime 身份 `owner=dsh-pet compat=pet-unified-locus-v1`、fingerprint `a829e8bb…`、`dshVersion=0.1.5-rc.2` 与 manifest 精确相等；Pet 管理面 401（已加载而非降级）
 - [x] 10.4 真实 locus 端到端：飞书入站 → child 创建 → 工作 → 结算 —— **抓到真缺陷并已修复**
   - 观测结果：子代新增 44 事件（确实干活），父会话新增 **4 条结算通知**（两次结算 × spliced + user/message，`target: next-turn`）
   - 根因：descriptor 里 `settlementNotice: 'silent'` 持久化正确、runtime 里 silent 早返回也在，但两条冷恢复路径（`coldResume` / `materializeForAccess`）只传 `composition`，不传 `settlementNotice`，activation 回落成 `notify`
   - 即 silent 仅在「创建后一直驻留」时有效，Host 一重启即失效 —— 而重启是常态
   - 修复：两处均从 descriptor 还原（commit `d984a998`），patch 32 → 33 hunks，上游包数不变
-  - ⏳ **待重启后复测**：当前进程仍运行旧 launcher（`73ed72bf…`），新构建为 `a829e8bb…`
+  - ✅ **重启后复测通过**（fingerprint `a829e8bb…`）：子代新增 20 事件、正常 `turn/end` 结束，父会话**结算通知 0**
+  - 观测脚本同时修正了一处自身缺陷：原先比较事件总数，会把重启前的历史结算算成新泄漏（正是这次把已修好的功能误判为仍失败的原因）。改为以基线时刻为切分只统计窗口内事件
 - [ ] 10.5 多 locus 场景：同一主会话关联多个 locus 先后结算，确认打断次数为零
 - [ ] 10.6 回滚演练：验证任一批次可独立回滚，storage 批次先停 writer 再恢复数据备份
 - [x] 10.7 将最终 compat 规模（包数 / patch 数 / hunks / 磁盘）与基线对比写入 `checking/final-compat-footprint.md`
