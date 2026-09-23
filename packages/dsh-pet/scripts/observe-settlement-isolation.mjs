@@ -18,6 +18,25 @@ import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { zstdDecompressSync } from 'node:zlib'
 
+/**
+ * Whether one session event IS a settlement notice injected by the runtime.
+ *
+ * Structural, not a substring scan: the literal `subagent-settled` also appears
+ * inside ordinary assistant text and tool arguments whenever someone discusses
+ * or greps for it — including this very script's own diagnostics. A substring
+ * match therefore reports phantom leaks in any session where the topic came up,
+ * which is precisely the session an operator runs this from.
+ *
+ * The runtime stamps `source.kind` on the message it delivers, and on each
+ * entry it splices into the inbox; both shapes are checked.
+ */
+function isSettlementNotice(event) {
+  if (event?.data?.source?.kind === 'subagent-settled') return true
+  const inserted = event?.data?.inserted
+  return Array.isArray(inserted)
+    && inserted.some(entry => entry?.source?.kind === 'subagent-settled')
+}
+
 /** zstd frame magic — `28 B5 2F FD`. */
 const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
 
@@ -124,12 +143,13 @@ async function inspectLog(dir, since = 0) {
       // BEFORE the window is history: comparing totals against a baseline taken
       // before a Host restart reports those old events as fresh leaks, which is
       // exactly how a working fix got misread as a failure.
-      let time = 0
-      try { time = JSON.parse(line).time ?? 0 } catch { /* keep it counted */ }
+      let event
+      try { event = JSON.parse(line) } catch { event = undefined }
+      const time = event?.time ?? 0
       if (time > latest) latest = time
       if (time < since) continue
       events += 1
-      if (line.includes('subagent-settled')) settlementNotices += 1
+      if (isSettlementNotice(event)) settlementNotices += 1
     }
   }
   return { events, settlementNotices, latest }

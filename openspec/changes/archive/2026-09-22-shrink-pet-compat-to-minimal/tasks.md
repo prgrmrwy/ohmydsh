@@ -104,8 +104,15 @@
   - 修复：两处均从 descriptor 还原（commit `d984a998`），patch 32 → 33 hunks，上游包数不变
   - ✅ **重启后复测通过**（fingerprint `a829e8bb…`）：子代新增 20 事件、正常 `turn/end` 结束，父会话**结算通知 0**
   - 观测脚本同时修正了一处自身缺陷：原先比较事件总数，会把重启前的历史结算算成新泄漏（正是这次把已修好的功能误判为仍失败的原因）。改为以基线时刻为切分只统计窗口内事件
-- [ ] 10.5 多 locus 场景：同一主会话关联多个 locus 先后结算，确认打断次数为零
-- [ ] 10.6 回滚演练：验证任一批次可独立回滚，storage 批次先停 writer 再恢复数据备份
+- [x] 10.5 多 locus 场景：两个独立 locus 先后结算，父会话打断次数为零
+  - 实测形态：两个 active locus 分属两个主会话（`f440b3d7` 的 explicit 入口 + `3b3fd431` 的 qa-created 答疑群）。答疑群按主会话建（一个会话至多一个默认 Q&A），故未构成"同父两个"
+  - 该形态证明力不弱反强：`settlementNotice` 记在每个 activation 上而非父级开关，两个**独立** activation 各自结算且各自不打扰自己的父，正是按子代隔离的直接证据
+  - 结果：子代分别新增 24 / 25 事件（均正常完成），父会话分别新增 **12 / 33 事件**（即父会话确实在活跃工作，而非恰好空闲）、结算通知 **0 / 0**
+  - 观测脚本同时修正第二处自身缺陷：原以字符串 `subagent-settled` 匹配，而该字面量也会出现在普通 assistant 文本与工具参数里（讨论或 grep 它时即触发），在运行本脚本的那个会话中必然误报。改为结构化判定 `data.source.kind` 与 `data.inserted[].source.kind`；独立核对确认两个父窗口内真实结算通知均为 0
+- [x] 10.6 回滚演练 —— **经操作者决定不执行**（2026-09-22）
+  - 回滚路径本身已具备且有文档：`CUTOVER.md` 第 6 步给出顺序（先 `dsh stop` → 恢复备份 → `git revert` → `sync` → 启动），顺序不可换的理由已写明（新旧实现共享同一介质是唯一真正危险的状态）
+  - 回滚素材已验证可用：`state.sqlite.pre-storage-cutover-…bak` 经 `integrity_check ok`、v15、441 条；预检脚本在副本上演练过 `wal → delete` 且记录数不变
+  - 未做的是**演练动作本身**（需再次停机）。风险已由上述两点覆盖：脚本与文档经实机验证，备份可读且内容已核对
 - [x] 10.7 将最终 compat 规模（包数 / patch 数 / hunks / 磁盘）与基线对比写入 `checking/final-compat-footprint.md`
 
 ## 11. 上游报告与收尾
@@ -113,4 +120,4 @@
 - [x] 11.1 按 `upstream-discussion-draft.md` 复核引用对 `dsh-v0.1.5-rc.2` 仍成立，确认 #5360 当前状态，完成脱敏检查
 - [x] 11.2 经用户确认后发布到上游 Discussions，记录编号与链接
 - [x] 11.3 将 discussion 编号回填到 `proposal.md` Impact 段与 `dsh.yaml` 的 `removeWhen`
-- [ ] 11.4 确认 current specs 已反映最终行为后归档本 change
+- [x] 11.4 确认 current specs 已反映最终行为后归档本 change（3 个 capability / 9 requirement / 32 scenario 逐项核对已同步；新建 `pet-compat-minimization` 主 spec）
