@@ -10,7 +10,12 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { LocusDetails, LocusSurface } from '../src/client/settings.js'
+import {
+  describeActionReceipt,
+  LocusDetails,
+  LocusSurface,
+  WorkSection,
+} from '../src/client/settings.js'
 import { collectHandleCodes, groupByWork } from '../src/client/locus-view.js'
 import { LOCUS_WRITE_ENABLED } from '../src/host/locus/policy-verification.js'
 import { locusFixture, snapshotOf, surfaceSnapshot } from './fixtures/locus-snapshot.js'
@@ -274,5 +279,105 @@ describe('the execution-root surface is retired from the panel', () => {
 
     expect(LOCUS_WRITE_ENABLED).toBe(false)
     expect(markup).not.toContain('dshpet-locus-perm')
+  })
+})
+
+/**
+ * What an archived main session tells its owner.
+ *
+ * All three cases below were reported from the panel as "the button vanished
+ * and nothing happened": the action's absence, the row's advice, and a finished
+ * migration were each rendered as silence, so a correct outcome and a broken
+ * one looked identical.
+ */
+describe('an archived main session explains itself', () => {
+  const archivedGroup = (state: 'active' | 'stopped'): string => {
+    const locus = locusFixture({
+      locusId: 'locus-runtime-1789543241305-c8db4d8e783e28',
+      chatId: 'oc_7d5a25d55cfc1109fa1facac0a6d8bc9',
+      parentSessionId: 'session-230c15fb-55c3-4e2a-ad47-e4e2bd921ad8',
+      parentAvailability: 'archived',
+      childSessionId: 'session-43a3f4bd-b59c-4369-a997-23b82c774a6a',
+      state,
+    })
+    const snapshot = snapshotOf([locus], [locus.locusId])
+    return renderToStaticMarkup(
+      createElement(WorkSection, {
+        work: groupByWork(snapshot)[0]!,
+        reading: 'work' as const,
+        codes: collectHandleCodes(snapshot),
+        busyKey: undefined,
+        onAction: () => undefined,
+        openKeys: [],
+        onToggle: () => undefined,
+        historyKeys: [],
+        onToggleHistory: () => undefined,
+        sharedEntryCount: () => 1,
+        hasDefaultQa: true,
+      }),
+    )
+  }
+
+  it('offers the replacement, and the matching advice, while an entry can still move', () => {
+    const markup = archivedGroup('active')
+    expect(markup).toContain('用新的主会话接替')
+    expect(markup).toContain('恢复该主会话后本入口即恢复服务')
+  })
+
+  it('does not advertise repairs that cannot reach a stopped entry', () => {
+    // The entry was stopped by its owner: the session-level replacement skips
+    // it on purpose, and restoring the session does not revive it either. The
+    // earlier text named both anyway and sent the owner down a dead end.
+    const markup = archivedGroup('stopped')
+    expect(markup).not.toContain('用新的主会话接替')
+    expect(markup).not.toContain('恢复该主会话后本入口即恢复服务')
+    expect(markup).toContain('迁移不会搬走它')
+    expect(markup).toContain('需要恢复该主会话后再显式重建本入口')
+  })
+
+  it('says why no replacement is offered instead of rendering nothing', () => {
+    const markup = archivedGroup('stopped')
+    expect(markup).toContain('本会话名下已无在服务的入口')
+    // Names where the history went, so a completed migration is distinguishable
+    // from a group that never had anything.
+    expect(markup).toContain('已停止 / 已失效')
+  })
+})
+
+/**
+ * The receipt for an action whose effect leaves the surface it was taken on.
+ *
+ * A session-level replacement moves its entries into a DIFFERENT group, stops
+ * rendering its own button (nothing is left to move) and leaves retired
+ * generations the default filter hides. Without a receipt, that complete
+ * success is indistinguishable from a no-op.
+ */
+describe('completed action receipts', () => {
+  it('states how many entries moved and where they went', () => {
+    expect(describeActionReceipt({
+      action: 'replace-parent',
+      parentSessionId: 'session-b843540f-1111-2222-3333-444455556666',
+      replaced: ['locus-a', 'locus-b'],
+      skipped: [],
+    })).toBe('已把 2 个入口迁到新主会话 …556666；原主会话保持归档不动，旧代际作为历史保留。')
+  })
+
+  it('names every refusal, because the owner has to act on each one', () => {
+    const receipt = describeActionReceipt({
+      action: 'replace-parent',
+      parentSessionId: 'session-b843540f-1111-2222-3333-444455556666',
+      replaced: ['locus-a'],
+      skipped: [{ locusId: 'locus-stale-000042', reason: '入口当前代际已变化，请刷新后重试。' }],
+    })
+    expect(receipt).toContain('已把 1 个入口迁到新主会话')
+    expect(receipt).toContain('未迁移 1 个')
+    expect(receipt).toContain('入口当前代际已变化')
+  })
+
+  it('stays silent for a per-entry action, whose own row already shows it', () => {
+    expect(describeActionReceipt({ action: 'rebuild', locus: {} })).toBeUndefined()
+    expect(describeActionReceipt({ action: 'stop', locus: {} })).toBeUndefined()
+    // A malformed result must not produce a confident-looking sentence.
+    expect(describeActionReceipt({ action: 'replace-parent' })).toBeUndefined()
   })
 })

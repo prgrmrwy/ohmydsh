@@ -386,6 +386,11 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
   border-left-color:var(--dsw-alias-state-warn-label,#f59e0b)}
 .dshpet-settings .dshpet-callout[data-tone="danger"]{
   border-left-color:var(--dsw-alias-state-error-primary,#ec1313)}
+/* A completed action needs its own tone: reporting "moved 2 entries" in the
+   warning colour reads as "something went wrong", which is how a successful
+   session replacement looked indistinguishable from a refused one. */
+.dshpet-settings .dshpet-callout[data-tone="ok"]{
+  border-left-color:var(--dsw-alias-state-success-primary,#34a853)}
 
 /* Stack each label above its control: side-by-side labels made the inputs
    crowd their own text and left the column ragged. */

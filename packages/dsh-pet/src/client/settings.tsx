@@ -799,6 +799,100 @@ function OwnerProjectionFacts(props: {
  * this surface hides by default — so the row shortcut below is what keeps a
  * hidden entry from becoming an unreachable one.
  */
+/**
+ * Describe what a completed action actually did, when its own row cannot.
+ *
+ * Only the session-level replacement needs this today, and it needs it badly:
+ * the entries it moves leave this session's group, the action's own button
+ * stops rendering (there is nothing left to move), and the default filter hides
+ * the retired generations it left behind. All three are correct, and together
+ * they make a SUCCESSFUL replacement look like one that silently did nothing.
+ *
+ * Returns undefined for every ordinary per-entry action, whose result is
+ * already visible as the row it rewrote.
+ * Exported for its own test: this is the only place a session-level outcome is
+ * ever stated, so a silent regression here is invisible in the markup.
+ * @param result - the Host's action result.
+ * @returns a short receipt, or undefined when the surface speaks for itself.
+ */
+export function describeActionReceipt(result: object): string | undefined {
+  const action = (result as { action?: unknown }).action
+  if (action !== 'replace-parent') return undefined
+  const replaced = (result as { replaced?: unknown }).replaced
+  const skipped = (result as { skipped?: unknown }).skipped
+  const parentSessionId = (result as { parentSessionId?: unknown }).parentSessionId
+  if (!Array.isArray(replaced) || typeof parentSessionId !== 'string') return undefined
+  const target = shortHandle(parentSessionId)
+  const moved = `已把 ${String(replaced.length)} 个入口迁到新主会话${target === undefined ? '' : ` ${target}`}`
+  if (!Array.isArray(skipped) || skipped.length === 0) {
+    return `${moved}；原主会话保持归档不动，旧代际作为历史保留。`
+  }
+  // Naming each refusal matters more than the count: the owner has to decide
+  // what to do about them, and "N 个被跳过" is not something anyone can act on.
+  const reasons = skipped
+    .map(item => {
+      const entry = item as { locusId?: unknown; reason?: unknown }
+      const id = typeof entry.locusId === 'string' ? shortHandle(entry.locusId) ?? entry.locusId : '未知入口'
+      return `${id}：${typeof entry.reason === 'string' ? entry.reason : '未说明原因'}`
+    })
+    .join('；')
+  return `${moved}。未迁移 ${String(skipped.length)} 个 —— ${reasons}`
+}
+
+/** Last six characters of an identifier, matching the panel's handle chips. */
+function shortHandle(value: string): string | undefined {
+  const trimmed = value.trim()
+  return trimmed.length < 6 ? undefined : `…${trimmed.slice(-6)}`
+}
+
+/**
+ * Why this entry is out of service, and the repair that actually applies to it.
+ *
+ * Two independent facts meet here, and only their COMBINATION picks a repair:
+ *
+ * - the main session is archived — an owner action on the SESSION, repaired at
+ *   the session level (restore it, or let a new session take over);
+ * - the entry itself was stopped/retired — an owner action on THIS ENTRY, which
+ *   the session-level replacement deliberately never moves.
+ *
+ * When both hold, neither session-level repair reaches this row: restoring the
+ * session does not revive a stopped entry, and the replacement skips it. Saying
+ * so is the whole point — the earlier text named both repairs unconditionally
+ * and pointed the owner at a dead end.
+ * @param head - the entry's current generation.
+ * @returns the note to render, or undefined when the entry is unaffected.
+ */
+function archivedParentNote(head: PetLocusView): string | undefined {
+  if (head.main.availability !== 'archived') return undefined
+  if (!isTerminalLocusState(head.state.state)) {
+    return '主会话已归档 · 恢复该主会话后本入口即恢复服务，或在上面把它迁到新主会话'
+  }
+  return '主会话已归档，且本入口已由你停止 —— 迁移不会搬走它（那等于复活一次主动退出），'
+    + '恢复主会话也不会自动复活它；需要恢复该主会话后再显式重建本入口'
+}
+
+/**
+ * Why an archived session offers no replacement action right now.
+ *
+ * Distinguishes the two ways `movableEntries` can be empty, because they need
+ * opposite things from the owner: entries that were deliberately stopped need
+ * an explicit per-entry rebuild, while a group whose entries already left needs
+ * nothing at all — it is finished work, not a pending problem.
+ * @param work - the session group being rendered.
+ * @returns the note explaining the absent action.
+ */
+function replacementUnavailableNote(work: WorkGroup): string {
+  const hasHistory = work.families.some(family => familyHead(family) !== undefined)
+  if (!hasHistory) return '本会话名下没有入口'
+  const allTerminal = work.families.every(family => {
+    const head = familyHead(family)
+    return head === undefined || isTerminalLocusState(head.state.state)
+  })
+  if (!allTerminal) return '本会话名下暂无可迁移的入口'
+  return '本会话名下已无在服务的入口 —— 已停止/已失效的入口不会被迁走，'
+    + '它们作为历史保留（在上方筛选里勾选「已停止 / 已失效」可见）'
+}
+
 function isTerminalLocusState(state: PetLocusState): boolean {
   return state === 'invalid' || state === 'stopped' || state === 'retired'
 }
@@ -1112,12 +1206,17 @@ function LocusRow(props: {
               <span className="dshpet-meta">{stateLine}</span>
               {/* The repair for this state is on the session block, so the row
                   states why it is down and where to act — otherwise hiding the
-                  rebuild button would read as "nothing can be done". */}
-              {head.main.availability === 'archived' ? (
-                <span className="dshpet-meta" data-tone="paused">
-                  主会话已归档 · 恢复该主会话后本入口即恢复服务，或在上面把它迁到新主会话
-                </span>
-              ) : null}
+                  rebuild button would read as "nothing can be done".
+
+                  Which repair depends on the ENTRY's own state, not only on the
+                  archived session: an entry the owner stopped is not moved by
+                  the session-level replacement (that would revive an exit they
+                  made on purpose) and is not revived by restoring the session
+                  either. Naming the general two repairs there sent the owner
+                  down a path that could not work for this row. */}
+              {archivedParentNote(head) === undefined ? null : (
+                <span className="dshpet-meta" data-tone="paused">{archivedParentNote(head)}</span>
+              )}
               <span className="dshpet-meta dshpet-locus-session-title" title={head.child.title ?? undefined}>
                 会话 {childSessionId === undefined ? '—' : head.child.title ?? '未命名'}
               </span>
@@ -1238,8 +1337,14 @@ function LocusRow(props: {
   )
 }
 
-/** One parent session and the entries that belong to it. */
-function WorkSection(props: {
+/**
+ * One parent session and the entries that belong to it.
+ *
+ * Exported for the rendering tests: the surface's default filter hides an
+ * archived parent entirely, so the notes this block owes an owner about an
+ * archived session can only be asserted by rendering the block itself.
+ */
+export function WorkSection(props: {
   readonly work: WorkGroup
   readonly reading: LocusReading
   readonly codes: HandleCodes
@@ -1339,7 +1444,7 @@ function WorkSection(props: {
             rebuild creates a main session per call, which would split what used
             to be one shared session into as many sessions as there are entries.
           */}
-          {work.availability !== 'archived' || movableEntries.length === 0 ? null : (
+          {work.availability !== 'archived' ? null : movableEntries.length > 0 ? (
             <button
               type="button"
               className="dshpet-action dshpet-action-sm"
@@ -1356,6 +1461,14 @@ function WorkSection(props: {
             >
               用新的主会话接替
             </button>
+          ) : (
+            // An archived session with nothing to move must SAY so. Rendering
+            // nothing is ambiguous in both directions: before a replacement it
+            // hides that stopped entries are deliberately not moved, and after
+            // one it makes a completed migration look like it never ran (the
+            // entries left this group, and the default filter hides the retired
+            // generations they left behind).
+            <span className="dshpet-meta" data-tone="paused">{replacementUnavailableNote(work)}</span>
           )}
           {!collapsible ? null : (
             <button
@@ -1880,6 +1993,8 @@ export function LocusSurface(props: {
   readonly busyKey?: string
   readonly error?: string
   readonly warning?: string
+  /** What a completed action did, when the surface itself cannot show it. */
+  readonly notice?: string
   readonly onAction: (key: string, operation: () => Promise<unknown>) => void
   readonly runQuery: (request: PetLocusDiscoveryRequest) => Promise<PetLocusDiscoveryView | undefined>
   /** Test seam: pre-seeded ledger groups render without a Host round-trip. */
@@ -2177,6 +2292,7 @@ export function LocusSurface(props: {
         <p className="dshpet-error">读取待办失败：{todos.error}</p>
       )}
 
+      {props.notice === undefined ? null : <p className="dshpet-callout" data-tone="ok">{props.notice}</p>}
       {props.warning === undefined ? null : <p className="dshpet-callout" data-tone="warn">{props.warning}</p>}
       {props.error === undefined ? null : <p className="dshpet-error">{props.error}</p>}
     </div>
@@ -2466,6 +2582,7 @@ function LocusTab(): JSX.Element {
   const [snapshot, setSnapshot] = useState<PetLocusManagementView | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
   const [warning, setWarning] = useState<string | undefined>(undefined)
+  const [notice, setNotice] = useState<string | undefined>(undefined)
   const [busyKey, setBusyKey] = useState<string | undefined>(undefined)
   const actionInFlight = useRef(false)
   const load = useCallback(async (): Promise<PetLocusManagementView> => {
@@ -2492,11 +2609,18 @@ function LocusTab(): JSX.Element {
       setBusyKey(key)
       setError(undefined)
       setWarning(undefined)
+      setNotice(undefined)
       try {
         const result = await operation()
         if (typeof result === 'object' && result !== null) {
           const warningText = (result as { warningText?: unknown }).warningText
           if (typeof warningText === 'string' && warningText.trim() !== '') setWarning(warningText)
+          // A session-level action has no row to speak for it: the entries it
+          // moved leave this session's group entirely, so without a receipt a
+          // completed replacement looks exactly like one that did nothing —
+          // the button disappears, the group empties, and nothing says why.
+          const receipt = describeActionReceipt(result)
+          if (receipt !== undefined) setNotice(receipt)
         }
         setSnapshot(await load())
       } catch (cause) {
@@ -2553,6 +2677,7 @@ function LocusTab(): JSX.Element {
       {...(busyKey === undefined ? {} : { busyKey })}
       {...(error === undefined ? {} : { error })}
       {...(warning === undefined ? {} : { warning })}
+      {...(notice === undefined ? {} : { notice })}
     />
   )
 }
