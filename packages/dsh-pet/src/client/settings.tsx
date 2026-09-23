@@ -1215,7 +1215,9 @@ function LocusRow(props: {
                   either. Naming the general two repairs there sent the owner
                   down a path that could not work for this row. */}
               {archivedParentNote(head) === undefined ? null : (
-                <span className="dshpet-meta" data-tone="paused">{archivedParentNote(head)}</span>
+                // No `data-tone`: the stylesheet has no variant for one, so it
+                // only looked meaningful in the markup while rendering nothing.
+                <span className="dshpet-meta">{archivedParentNote(head)}</span>
               )}
               <span className="dshpet-meta dshpet-locus-session-title" title={head.child.title ?? undefined}>
                 会话 {childSessionId === undefined ? '—' : head.child.title ?? '未命名'}
@@ -1444,7 +1446,7 @@ export function WorkSection(props: {
             rebuild creates a main session per call, which would split what used
             to be one shared session into as many sessions as there are entries.
           */}
-          {work.availability !== 'archived' ? null : movableEntries.length > 0 ? (
+          {work.availability !== 'archived' || movableEntries.length === 0 ? null : (
             <button
               type="button"
               className="dshpet-action dshpet-action-sm"
@@ -1461,14 +1463,6 @@ export function WorkSection(props: {
             >
               用新的主会话接替
             </button>
-          ) : (
-            // An archived session with nothing to move must SAY so. Rendering
-            // nothing is ambiguous in both directions: before a replacement it
-            // hides that stopped entries are deliberately not moved, and after
-            // one it makes a completed migration look like it never ran (the
-            // entries left this group, and the default filter hides the retired
-            // generations they left behind).
-            <span className="dshpet-meta" data-tone="paused">{replacementUnavailableNote(work)}</span>
           )}
           {!collapsible ? null : (
             <button
@@ -1490,6 +1484,22 @@ export function WorkSection(props: {
         <span>父会话 · 工作区 {workspaceTitle}</span>
         {path === undefined ? null : <code className="dshpet-code">{path}</code>}
       </div>
+      {/*
+        An archived session with nothing to move must SAY so. Rendering nothing
+        is ambiguous in both directions: before a replacement it hides that
+        stopped entries are deliberately not moved, and after one it makes a
+        completed migration look like it never ran (the entries left this group,
+        and the default filter hides the retired generations they left behind).
+
+        It belongs HERE rather than in the header row: `dshpet-work-tail` is a
+        `flex:none` single-line strip sized for chips and one button, so a
+        sentence placed there stretched the title line and was clipped at the
+        panel's edge. `dshpet-work-note` is the block the session already uses
+        for exactly this kind of prose.
+      */}
+      {work.availability !== 'archived' || movableEntries.length > 0 ? null : (
+        <p className="dshpet-work-note">{replacementUnavailableNote(work)}</p>
+      )}
       {props.hasDefaultQa ? null : (
         <p className="dshpet-work-note">
           默认 Q&amp;A 尚未创建 —— 请在目标会话里用 Pet 轮盘的「答疑群」创建；设置页只做展示与导航，不提供创建入口。
