@@ -11,6 +11,7 @@
  * not a second, earlier step.
  */
 
+import { LOCUS_MAIN_PRESET } from '../src/host/locus/aggregate.js'
 import { describe, expect, it } from 'vitest'
 import { LocusChannelController } from '../src/host/channel/locus-controller.js'
 import { LocusController } from '../src/host/locus/controller.js'
@@ -116,7 +117,9 @@ async function composeOnDemandHost(options: { readonly failFirstCreate?: boolean
   const durable = new DurableLocusRepository(harness.domain)
 
   const sessions = new Map([
-    [PARENT_SESSION, { id: PARENT_SESSION, workspaceId: 'workspace-owner', title: 'Owner main' }],
+    // agentPreset mirrors the real Host: an explicitly named main must run
+    // LOCUS_MAIN_PRESET, because the locus child inherits its composition.
+    [PARENT_SESSION, { id: PARENT_SESSION, workspaceId: 'workspace-owner', title: 'Owner main', agentPreset: LOCUS_MAIN_PRESET }],
   ])
   let sequence = 0
   let createChildCalls = 0

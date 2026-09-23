@@ -1,3 +1,4 @@
+import { LOCUS_MAIN_PRESET } from '../src/host/locus/aggregate.js'
 import { describe, expect, it } from 'vitest'
 import { LocusChannelController } from '../src/host/channel/locus-controller.js'
 import { ControllerLocusRepositoryAdapter } from '../src/host/locus/controller-persistence-adapter.js'
@@ -39,8 +40,10 @@ async function controllerFixture() {
   enableAtomicTransactions(harness)
   const durable = new DurableLocusRepository(harness.domain)
   const sessions = new Map([
-    ['session-s1', { id: 'session-s1', workspaceId: 'workspace-s1', title: 'S1' }],
-    ['session-s2', { id: 'session-s2', workspaceId: 'workspace-s2', title: 'S2' }],
+    // agentPreset mirrors the real Host: an explicitly named main must run
+    // LOCUS_MAIN_PRESET, because the locus child inherits its composition.
+    ['session-s1', { id: 'session-s1', workspaceId: 'workspace-s1', title: 'S1', agentPreset: LOCUS_MAIN_PRESET }],
+    ['session-s2', { id: 'session-s2', workspaceId: 'workspace-s2', title: 'S2', agentPreset: LOCUS_MAIN_PRESET }],
   ])
   const children: Array<{ id: string; parentSessionId: string }> = []
   let sequence = 0
