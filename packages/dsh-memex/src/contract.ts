@@ -28,6 +28,15 @@ export const MEMEX_RESOLVE_ENDPOINT = 'resolve'
 export const MEMEX_WORKSPACES_ENDPOINT = 'workspaces'
 /** Human-initiated remote action, delegated to the kernel CLI. */
 export const MEMEX_REMOTE_ENDPOINT = 'remote'
+/**
+ * Start (or reuse) one library's browse service and report the port it bound.
+ *
+ * Deliberately answers with a PORT, never a URL. Whether that port needs to be
+ * translated for a browser running on a different machine is a fact only the
+ * browser side holds; the Host would have to guess, and a guessed address
+ * resolves against whatever happens to listen on the user's own machine.
+ */
+export const MEMEX_BROWSE_ENDPOINT = 'browse'
 
 /** How a route was produced; mirrors the resolver's own vocabulary. */
 export type MemexRouteSource = 'config' | 'derived' | 'local' | 'discovered' | 'implicit'
@@ -141,6 +150,32 @@ export interface MemexResolveResult {
    */
   readonly local: boolean
 }
+
+/** Request body of the `browse` endpoint. */
+export interface MemexBrowseRequest {
+  readonly scope: string
+}
+
+/**
+ * Why a library cannot be browsed. Stable codes so the page can explain the
+ * cause instead of showing a raw kernel string.
+ */
+export type MemexBrowseRefusal = 'memory-off' | 'not-materialized' | 'kernel-unavailable' | 'start-failed'
+
+/** Outcome of a `browse` request; transport succeeded whenever this is returned. */
+export type MemexBrowseResult =
+  | {
+    readonly status: 'ok'
+    /** Port the kernel actually bound — the browser assembles the address. */
+    readonly port: number
+    readonly scope: string
+  }
+  | {
+    readonly status: 'refused'
+    readonly reason: MemexBrowseRefusal
+    /** Human-readable explanation, already scoped to this library. */
+    readonly message: string
+  }
 
 /** Every remote action the page may request; each maps to one kernel invocation. */
 export type MemexRemoteAction = 'init' | 'sync' | 'push' | 'pull' | 'auto-on' | 'auto-off'

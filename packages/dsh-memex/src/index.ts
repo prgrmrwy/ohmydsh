@@ -11,6 +11,7 @@ import { registerMemexTools } from './tools/index.js'
 import { registerMemexLifecycle } from './lifecycle/index.js'
 import { registerMemexSkills } from './lifecycle/skills.js'
 import { registerMemexChannel } from './host/channel.js'
+import { createBrowseRegistry } from './run/browse-registry.js'
 
 export const name = 'dsh-memex'
 // Do not export a static `inject`: optional Host services belong in the dynamic
@@ -40,6 +41,10 @@ export function apply(ctx: Context): void {
     // The settings page's read/write surface. It receives the same live proxy
     // minus `ensure`, so no endpoint can create a library as a side effect of a
     // page load.
+    // Browse services start on demand and are all stopped with this fiber, so
+    // no kernel process can outlive the plugin that spawned it.
+    const browse = createBrowseRegistry()
+    child.effect(() => () => { void browse.stopAll() }, 'dsh-memex: stop browse services')
     registerMemexChannel(child, {
       scopes: {
         resolve: scopes.resolve,
@@ -48,6 +53,7 @@ export function apply(ctx: Context): void {
         bindingFor: scopes.bindingFor,
         accessFor: scopes.accessFor,
       },
+      browse,
       config: runtime.config,
       // The workspace registry is an optional peer: its absence is reported, not
       // thrown, so the page degrades to the configuration-only shape.

@@ -16,11 +16,14 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import {
+  MEMEX_BROWSE_ENDPOINT,
   MEMEX_CHANNEL,
   MEMEX_REMOTE_ENDPOINT,
   MEMEX_RESOLVE_ENDPOINT,
   MEMEX_STORES_ENDPOINT,
   MEMEX_WORKSPACES_ENDPOINT,
+  type MemexBrowseRequest,
+  type MemexBrowseResult,
   type MemexKernelView,
   type MemexRemoteAction,
   type MemexRemoteRequest,
@@ -32,6 +35,7 @@ import {
   type MemexWorkspaceView,
   type MemexWorkspacesResult,
 } from '../contract.js'
+import type { BrowseRegistry } from '../run/browse-registry.js'
 import { mapConcurrent } from '../run/concurrency.js'
 import { installedKernelVersion, runKernel } from '../run/kernel.js'
 import { parseSyncStatus } from '../run/sync-status.js'
@@ -69,6 +73,11 @@ export interface MemexChannelOptions {
   readonly homeDir?: string
   /** Degradation reporter; the workspace registry is an optional peer. */
   readonly onWarn?: (message: string) => void
+  /**
+   * Browse-service registry. Absent means card browsing is not composed, and
+   * the endpoint refuses rather than pretending a service could start.
+   */
+  readonly browse?: BrowseRegistry
 }
 
 /** The slice of a host workspace this channel reads. */
@@ -257,6 +266,55 @@ export function registerMemexChannel(ctx: Context, options: MemexChannelOptions)
     }
   }
 
+  /**
+   * Ensure one library's browse service and report its bound port.
+   *
+   * Refusals are ordered so that nothing is started for a library that is not
+   * allowed to be browsed: the memory-off check runs BEFORE any spawn, mirroring
+   * the tool path's "reject before ensure" rule — otherwise a workspace that
+   * deliberately has no memory would get a live server on first click.
+   */
+  const runBrowse = async (params: unknown): Promise<MemexBrowseResult> => {
+    const request = params as MemexBrowseRequest | undefined
+    if (request === undefined || typeof request.scope !== 'string' || request.scope === '') {
+      throw new Error('browse requires a scope')
+    }
+    // resolveByName is pure: an unknown scope is answered, not materialized.
+    const target = options.scopes.resolveByName(request.scope)
+    if (!target.memory) {
+      return {
+        status: 'refused',
+        reason: 'memory-off',
+        message: `Memory is off for the workspaces routed to ${request.scope}; turn it back on in Settings → 记忆 to browse its cards.`,
+      }
+    }
+    if (!existsSync(join(target.home, 'cards'))) {
+      return {
+        status: 'refused',
+        reason: 'not-materialized',
+        message: `Library ${request.scope} has no cards directory yet, so there is nothing to browse.`,
+      }
+    }
+    if (options.browse === undefined) {
+      return {
+        status: 'refused',
+        reason: 'kernel-unavailable',
+        message: 'Card browsing is not available in this deployment.',
+      }
+    }
+    try {
+      const service = await options.browse.ensure(target.home)
+      return { status: 'ok', port: service.port, scope: request.scope }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      return {
+        status: 'refused',
+        reason: /not found|Expected @touchskyer|does not declare/i.test(detail) ? 'kernel-unavailable' : 'start-failed',
+        message: summarize(detail) ?? 'Could not start the card browser for this library.',
+      }
+    }
+  }
+
   const runRemote = async (params: unknown): Promise<MemexRemoteResult> => {
     const request = params as MemexRemoteRequest | undefined
     if (request === undefined || typeof request.scope !== 'string') throw new Error('remote requires a scope')
@@ -285,6 +343,7 @@ export function registerMemexChannel(ctx: Context, options: MemexChannelOptions)
           if (endpoint === MEMEX_RESOLVE_ENDPOINT) return { ok: true, value: resolvePath(params) }
           if (endpoint === MEMEX_WORKSPACES_ENDPOINT) return { ok: true, value: listWorkspaces() }
           if (endpoint === MEMEX_REMOTE_ENDPOINT) return { ok: true, value: await runRemote(params) }
+          if (endpoint === MEMEX_BROWSE_ENDPOINT) return { ok: true, value: await runBrowse(params) }
           return fail(`unknown endpoint "${endpoint}"`)
         } catch (error) {
           return fail(`${endpoint} failed: ${error instanceof Error ? error.message : String(error)}`)

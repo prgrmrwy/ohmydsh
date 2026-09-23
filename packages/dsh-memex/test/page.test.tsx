@@ -206,6 +206,39 @@ afterEach(async () => {
 })
 
 describe('memory settings page', () => {
+  /**
+   * Card browsing must only be offered where it can actually work. Each case
+   * below is a state in which clicking would be guaranteed to fail, so the
+   * button's absence IS the behaviour under test.
+   */
+  it('offers card browsing for a materialized, memory-on library once expanded', async () => {
+    const h = await render({ scopes: [{ name: 'nexus', pathPrefixes: ['/work/nexus'] }] }, {
+      stores: [store({ scope: 'nexus', exists: true })],
+    })
+    // List state shows role, name and counts only — actions belong to the
+    // expanded view, so the browse action must not appear before opening.
+    expect(h.text()).not.toContain('actionBrowse')
+    await h.expand(0)
+    expect(h.text()).toContain('actionBrowse')
+  })
+
+  it('does not offer browsing for a library with no cards directory', async () => {
+    const h = await render({ scopes: [{ name: 'nexus', pathPrefixes: ['/work/nexus'] }] }, {
+      stores: [store({ scope: 'nexus', exists: false })],
+    })
+    await h.expand(0)
+    expect(h.text()).not.toContain('actionBrowse')
+  })
+
+  it('does not offer browsing for a memory-off workspace', async () => {
+    const h = await render({ scopes: [{ name: 'nexus', pathPrefixes: ['/work/nexus'], memory: false }] }, {
+      stores: [store({ scope: 'nexus', exists: true, memory: false })],
+    })
+    // Memory-off workspaces live in the collapsed group; expanding it must not
+    // reveal a browse action either.
+    expect(h.text()).not.toContain('actionBrowse')
+  })
+
   it('shows the default library path as a placeholder, never as a configured value', async () => {
     const h = await render({ scopes: [{ name: 'nexus', pathPrefixes: ['/work/nexus'] }] })
     await h.expand(0)

@@ -36,6 +36,10 @@ export type MemexKey =
   | 'actionConfirmChange'
   | 'actionCancel'
   | 'actionSync'
+  | 'actionBrowse'
+  | 'browseOpening'
+  | 'browseRedirecting'
+  | 'browseUnavailable'
   | 'actionPull'
   | 'actionAutoOn'
   | 'actionAutoOff'
@@ -128,6 +132,10 @@ export const en: Record<MemexKey, string> = {
   actionConfirmChange: 'Change it',
   actionCancel: 'Cancel',
   actionSync: 'Sync now',
+  actionBrowse: 'Open cards',
+  browseOpening: 'Starting the card browser for {scope}…',
+  browseRedirecting: 'Opening {scope}…',
+  browseUnavailable: 'Cannot open {scope}',
   actionPull: 'Pull changes',
   actionAutoOn: 'Turn auto on',
   actionAutoOff: 'Turn auto off',
@@ -221,6 +229,10 @@ export const zh: Record<MemexKey, string> = {
   actionConfirmChange: '确认更换',
   actionCancel: '取消',
   actionSync: '立即同步',
+  actionBrowse: '打开卡片',
+  browseOpening: '正在启动 {scope} 的卡片浏览…',
+  browseRedirecting: '正在打开 {scope}…',
+  browseUnavailable: '无法打开 {scope}',
   actionPull: '拉取改动',
   actionAutoOn: '开启自动同步',
   actionAutoOff: '关闭自动同步',

@@ -31,6 +31,7 @@ import {
   type MemexStoreView,
   type MemexWorkspacesResult,
 } from '../contract.js'
+import { launcherUrl } from './launcher.js'
 import type { MemexKey } from './locales.js'
 import {
   addPathToGroup,
@@ -501,6 +502,27 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
             {entry.kind === 'fallback' && <p className="dshmx-note dshmx-prose">{t('fallbackHint')}</p>}
             {renderRemote(store)}
             <div className="dshmx-actions">
+              {/*
+                Card browsing. Rendered only when it can actually work: a
+                memory-off workspace has no browsing at all, an unmaterialized
+                library has no cards to show, and without a resolvable kernel
+                nothing can be started. A button that always fails is worse
+                than no button.
+
+                The click stays synchronous on purpose — starting the service
+                and resolving an address are both async, and awaiting either
+                here would drop the user activation and get the new tab
+                blocked. The launcher page owns that work and explains failure.
+              */}
+              {view.memory && store?.exists === true && stores?.kernel.version !== undefined && (
+                <button
+                  type="button"
+                  className="dshmx-act dshmx-act-inline"
+                  onClick={() => { window.open(launcherUrl(entry.name), '_blank', 'noopener') }}
+                >
+                  {t('actionBrowse')}
+                </button>
+              )}
               {entry.kind === 'assumed' && (
                 <button
                   type="button"
