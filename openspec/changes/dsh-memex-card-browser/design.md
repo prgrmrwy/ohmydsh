@@ -63,18 +63,26 @@
 
 **为什么不把三态判断放按钮上**：按钮没有地方好好显示"为什么不能用"，而 launcher 页有整页空间；且三态会随时间变化（服务可能刚崩），按钮渲染时的判断到点击时可能已过期。
 
-### D4. 以中立能力名消费端口发布，不引用 cockpit/bridge
+### D4. 三段式：dsh-memex 暴露注册点，专用 shim 接上 cockpit 能力
 
-依赖方向必须指向**抽象**而非厂商。dsh-memex 侧的形状：
+**本决定在 2026-09-23 修订**。初稿写的是「dsh-memex 直接 `ctx.get('<中立能力名>')` 消费端口发布」。该形态与本仓**既定范式不一致**，已改为三段式：
 
 ```
-能力存在 → 用它交付的地址
-能力缺席 → 回落 `localhost:<实际端口>`（Host 与浏览器同机，本就正确）
+dsh-cockpit-bridge ──provide──▶  shim  ──register──▶  dsh-memex
+     (不知道 memex)                                  (不知道 cockpit)
 ```
 
-跨仓落地沿用本仓已有的**可选 peer** 模式：`src/host/channel.ts:224` 用 `ctx.get('workspaceRegistry')` 消费可选注册表，注释明确"an unavailable peer is a normal state, not a wiring error"。同样地：不共享任何包，只对服务名与结构达成一致。
+**为什么直连不够**：初稿的理由是"依赖方向指向抽象而非厂商"。但一个约定的服务名**本身就是提供方的**——把它写进 dsh-memex 的源码与 spec，就等于让 dsh-memex 永久携带一个它无法单独定义的概念。判据是**消费方是否通用**：dsh-memex 是通用的记忆插件，它不该认识任何提供方，哪怕只认一个字符串。
 
-**代价**：字符串契约没有编译期保护。pitfalls 第 7 条（`tokenStatus` 猜成 `ready` 实际是 `valid`，替身照着错的写、测试长期全绿但真机必挂）就是这类契约的翻车样本。因此：契约写进两个仓的 spec，测试替身照抄真实实现，且**能力形状不匹配时按"缺席"处理**（显式降级），不尝试猜测。
+**本仓先例**（已落地，非提议）：change `open-worktree-in-remote-editor` 对完全同构的问题给出同一答案——`worktree-session` 暴露 `worktreeSession.openHandler` 注册点，`packages/cockpit-worktree-open-shim` 读 `cockpitBridge.editorOpen` 并注册进去，两端互不知晓。更早的 `packages/subscriptions-sandbox-shim` 是同一惯例。本 change 沿用，不发明第二种。
+
+**dsh-memex 侧**：提供一个自己命名的注册点（命名权归 dsh-memex），用于替换「取得卡片浏览地址」的实现。未注册时使用默认实现 `localhost:<实际端口>`——Host 与浏览器同机时这本就正确。注册点 MUST NOT 出现在 `inject` 中（loader 对不可解析依赖是**静默不加载**，把可选协作方写进 inject 会让功能无声消失）。
+
+**shim 侧**：只探测两端、转接、注册，不做校验、不拼地址、不持状态、不重试。耦合点承载的逻辑越多解耦成本越高；这条写进 spec 而非仅 design，约束的是未来改动。
+
+**必须遵守的实测教训**（`cockpit-worktree-open-shim/src/client/index.ts` 的注释记录）：读跨插件服务必须用**完整 dotted name 的单次 `ctx.get('a.b')`**，禁止 `ctx.get('a').b`——Cordis 会把点属性重新路由回 context proxy 并强制 inject，使这个本应可降级的接缝抛出 uncaught rejection。
+
+**代价**：多一个 package 与多一跳间接。接受——换来 dsh-memex 的 capability 完全不提 cockpit，规范层面的干净比省一个 package 更有价值。
 
 ### D5. 服务按库隔离，生命周期绑插件
 
@@ -95,12 +103,12 @@
 - **[上游 CDN 外链]** → `serve-ui.html` 从公网 CDN 加载 `marked`。跑在**独立 origin** 上时它无法触及 DSH 的已认证 API（这正是 D1 相对子路径挂载的一个额外安全收益），但离线/内网环境下 Markdown 渲染会降级。记录为已知限制，不因此改写上游资源。
 - **[stdout 解析随版本失效]** → 内核升级后监听行格式若变，表现为"启动失败"而非错误地址（fail closed）。在 `dsh.yaml` note 中登记复核点。
 - **[进程泄漏]** → 插件异常退出时可能遗留子进程。回收用 SIGTERM 且注册在插件 dispose 上；不按端口/命令行相似性猜测归属去杀进程（与 cockpit 同一保守原则）。
-- **[跨仓契约漂移]** → 见 D4 的缓解。
+- **[跨仓契约漂移]** → 服务名与结构是字符串契约，无编译期保护（pitfalls 第 7 条是同类翻车样本：`tokenStatus` 猜成 `ready` 实际是 `valid`，替身照抄错误假设导致测试长期全绿而真机必挂）。缓解：契约写进两端 spec、测试替身照抄真实实现、**形状不匹配按"缺席"处理**（显式降级而非猜测）；且漂移只影响 shim 一个 package，两端各自仍可用。
 
 ## Migration Plan
 
-1. 先落本机直连路径（D1/D2/D3/D5/D6），此时跨机器场景呈现为「不可用 + 原因」。这一步**独立可用且可验收**，不依赖 dsh-cockpit。
-2. dsh-cockpit 的 `device-port-forward-seam` 落地并发布后，接入 D4 的中立能力消费，跨机器路径自然变活。
+1. 先落本机直连路径（D1/D2/D3/D5/D6），此时跨机器场景呈现为「不可用 + 原因」。这一步**独立可用且可验收**，不依赖 dsh-cockpit，也不需要 shim。
+2. dsh-cockpit 的 `device-port-forward-seam` 落地并发布后，新增 shim package 把两端接起来（D4），跨机器路径自然变活。shim 可独立移除，移除即解耦。
 3. 回滚：`dsh.yaml` 中 dsh-memex 的 `enabled: false` + `node scripts/sync.mjs`；或仅移除设置页动作与相关路由，库与卡片不受影响（本 change 不写库内文件）。
 
 ## Open Questions
