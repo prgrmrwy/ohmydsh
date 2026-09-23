@@ -28,6 +28,7 @@ import path from "node:path"
 import os from "node:os"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import yaml from "js-yaml"
+import { loadOverlayCustomizations } from "./lib/manifest-overlay.mjs"
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
@@ -75,6 +76,19 @@ export function manifestNotes(manifestPath = path.join(REPO, "dsh.yaml"), repo =
     doc = yaml.load(readFileSync(manifestPath, "utf8"))
   } catch {
     return notes // manifest 不可读 → 只用包自身 description
+  }
+  // Merge the local overlay so locally-installed (non-publishable) customizations
+  // appear in the startup list instead of being installed but invisible.
+  // Non-strict on purpose: this is a display surface, so a broken overlay degrades
+  // to "no brief" the same way an unreadable manifest already does, while sync's
+  // deployment surface fails closed on the identical input.
+  try {
+    const overlay = loadOverlayCustomizations({ repo, strict: false })
+    if (overlay.customizations.length > 0 && doc && typeof doc === "object") {
+      doc.customizations = [...(doc.customizations ?? []), ...overlay.customizations]
+    }
+  } catch {
+    // Never let the overlay break the listing.
   }
   for (const [name, brief] of Object.entries(doc?.bundlesBrief ?? {})) {
     if (brief) notes.set(name, brief)
