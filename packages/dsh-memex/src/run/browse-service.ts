@@ -33,6 +33,15 @@ import { resolveMemexInstallation } from './installation.js'
 const READY_TIMEOUT_MS = 20_000
 /** Grace period between SIGTERM and giving up on a service process. */
 const STOP_GRACE_MS = 2_000
+/**
+ * How long stdout must stay quiet before its last readiness line is trusted.
+ *
+ * The kernel emits one bogus "running at" line per attempted port before the
+ * real one (see {@link parseReadyPort}); they are written back-to-back, so a
+ * short settle window is enough to see the whole burst without adding
+ * meaningful startup latency.
+ */
+const QUIET_MS = 120
 
 /**
  * The kernel's readiness line, e.g. `memex is running at http://localhost:3939`.
@@ -42,8 +51,10 @@ const STOP_GRACE_MS = 2_000
  * must be re-checked on upgrade; a parse miss is treated as a startup failure
  * rather than a guess, so the failure is loud instead of pointing a browser at
  * an unrelated service.
+ *
+ * Global on purpose — see {@link parseReadyPort}.
  */
-const READY_LINE = /running at https?:\/\/[^\s:]+:(\d{1,5})/i
+const READY_LINE = /running at https?:\/\/[^\s:]+:(\d{1,5})/gi
 
 export interface BrowseService {
   /** Absolute library directory this service serves (one library per process). */
@@ -65,12 +76,34 @@ export interface StartBrowseServiceOptions {
   readonly readyTimeoutMs?: number
 }
 
-/** Extract the bound port from an accumulated stdout buffer. */
+/**
+ * Extract the bound port from an accumulated stdout buffer.
+ *
+ * Takes the LAST readiness line, not the first. The kernel attaches a fresh
+ * `listen` callback per retry to the SAME server object without removing the
+ * previous ones, so when a bind finally succeeds every accumulated callback
+ * fires and it prints one "running at" line per port it ever tried:
+ *
+ *     Port 3939 in use, trying 3940...
+ *     Port 3940 in use, trying 3941...
+ *     memex is running at http://localhost:3939   <- never bound
+ *     memex is running at http://localhost:3940   <- never bound
+ *     memex is running at http://localhost:3941   <- the real one
+ *
+ * Only the last line names the port actually listening. Reading the first one
+ * hands out a port owned by ANOTHER library's service — which looks like
+ * success and silently shows the wrong library's cards.
+ */
 export function parseReadyPort(output: string): number | undefined {
-  const match = READY_LINE.exec(output)
-  if (match === undefined || match === null) return undefined
-  const port = Number(match[1])
-  return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : undefined
+  let port: number | undefined
+  // Fresh lastIndex per call: the regex is global and module-scoped, so
+  // reusing it statefully across calls would skip matches.
+  READY_LINE.lastIndex = 0
+  for (const match of output.matchAll(READY_LINE)) {
+    const candidate = Number(match[1])
+    if (Number.isInteger(candidate) && candidate >= 1 && candidate <= 65535) port = candidate
+  }
+  return port
 }
 
 /**
@@ -120,10 +153,13 @@ export async function startBrowseService(options: StartBrowseServiceOptions): Pr
     let settled = false
     let stdout = ''
     let stderr = ''
+    /** Debounce handle for "stdout has gone quiet"; see the data handler. */
+    let quiet: ReturnType<typeof setTimeout> | undefined
 
     const timer = setTimeout(() => {
       if (settled) return
       settled = true
+      if (quiet !== undefined) clearTimeout(quiet)
       child.kill('SIGTERM')
       reject(new KernelError('timeout', `memex serve did not report a listening address within ${options.readyTimeoutMs ?? READY_TIMEOUT_MS}ms`))
     }, options.readyTimeoutMs ?? READY_TIMEOUT_MS)
@@ -131,6 +167,7 @@ export async function startBrowseService(options: StartBrowseServiceOptions): Pr
     const finishOk = (port: number): void => {
       settled = true
       clearTimeout(timer)
+      if (quiet !== undefined) clearTimeout(quiet)
       resolve({
         home: options.home,
         port,
@@ -144,7 +181,17 @@ export async function startBrowseService(options: StartBrowseServiceOptions): Pr
       if (settled) return
       stdout += chunk
       const port = parseReadyPort(stdout)
-      if (port !== undefined) finishOk(port)
+      if (port === undefined) return
+      // Those bogus readiness lines (see parseReadyPort) can arrive in the
+      // same chunk or in separate ones, so the first line seen is not
+      // necessarily the last line coming. Settle only once stdout has gone
+      // quiet briefly, and re-read the whole buffer at that point.
+      clearTimeout(quiet)
+      quiet = setTimeout(() => {
+        if (settled) return
+        const settledPort = parseReadyPort(stdout)
+        if (settledPort !== undefined) finishOk(settledPort)
+      }, QUIET_MS)
     })
     child.stderr?.on('data', (chunk: string) => { stderr += chunk })
 
@@ -152,6 +199,7 @@ export async function startBrowseService(options: StartBrowseServiceOptions): Pr
       if (settled) return
       settled = true
       clearTimeout(timer)
+      if (quiet !== undefined) clearTimeout(quiet)
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         reject(new KernelError('missing', 'memex CLI not found in PATH. Install @touchskyer/memex.'))
       } else reject(error)
@@ -161,6 +209,7 @@ export async function startBrowseService(options: StartBrowseServiceOptions): Pr
       if (settled) return
       settled = true
       clearTimeout(timer)
+      if (quiet !== undefined) clearTimeout(quiet)
       // Reached whenever the kernel decided not to serve locally at all — the
       // hosted-site redirect path exits cleanly, so a zero code is still a
       // failure for our purposes.
