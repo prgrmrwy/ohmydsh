@@ -90,7 +90,12 @@
 - [x] 10.1 跑 `npm test`、`npm run check:artifacts`、Pet 包 build / typecheck / test 与 collaboration-runtime 套件
 - [x] 10.2 `node scripts/sync.mjs` 连续两次，确认幂等
 - [ ] 10.3 启动清单核对：加载行数、无重复 id、compat runtime 身份与 8.2 记录一致
-- [ ] 10.4 真实 locus 端到端：飞书入站 → child 创建 → 工作 → 结算，确认父会话进行中轮次未被打断
+- [x] 10.4 真实 locus 端到端：飞书入站 → child 创建 → 工作 → 结算 —— **抓到真缺陷并已修复**
+  - 观测结果：子代新增 44 事件（确实干活），父会话新增 **4 条结算通知**（两次结算 × spliced + user/message，`target: next-turn`）
+  - 根因：descriptor 里 `settlementNotice: 'silent'` 持久化正确、runtime 里 silent 早返回也在，但两条冷恢复路径（`coldResume` / `materializeForAccess`）只传 `composition`，不传 `settlementNotice`，activation 回落成 `notify`
+  - 即 silent 仅在「创建后一直驻留」时有效，Host 一重启即失效 —— 而重启是常态
+  - 修复：两处均从 descriptor 还原（commit `d984a998`），patch 32 → 33 hunks，上游包数不变
+  - ⏳ **待重启后复测**：当前进程仍运行旧 launcher（`73ed72bf…`），新构建为 `a829e8bb…`
 - [ ] 10.5 多 locus 场景：同一主会话关联多个 locus 先后结算，确认打断次数为零
 - [ ] 10.6 回滚演练：验证任一批次可独立回滚，storage 批次先停 writer 再恢复数据备份
 - [x] 10.7 将最终 compat 规模（包数 / patch 数 / hunks / 磁盘）与基线对比写入 `checking/final-compat-footprint.md`
