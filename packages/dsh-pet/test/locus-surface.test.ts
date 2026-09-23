@@ -342,6 +342,20 @@ describe('an archived main session explains itself', () => {
     // from a group that never had anything.
     expect(markup).toContain('已停止 / 已失效')
   })
+
+  it('keeps that sentence out of the single-line header', () => {
+    // `dshpet-work-tail` is a `flex:none` strip sized for chips and one button.
+    // A sentence placed there stretched the title line and was clipped at the
+    // panel edge; `dshpet-work-note` is the block this session already uses for
+    // prose, so the note must render there instead.
+    const markup = archivedGroup('stopped')
+    const header = markup.slice(
+      markup.indexOf('dshpet-work-tail'),
+      markup.indexOf('dshpet-work-sub'),
+    )
+    expect(header).not.toContain('本会话名下已无在服务的入口')
+    expect(markup).toMatch(/dshpet-work-note[^>]*>本会话名下已无在服务的入口/)
+  })
 })
 
 /**
