@@ -1,4 +1,4 @@
-> **顺序依赖**：dsh-cockpit 自动实现已提交为 `f3594d9`，bridge 版本已升到 0.4.0 但尚未发布。本仓 ws 扩展点与 shim 可先完成；发布后更新精确 pin 才能端到端生效。
+> **顺序依赖**：dsh-cockpit 实现已发布为 `dsh-cockpit-bridge@0.4.0`（`ecfeb46`）；其后 cockpit 仓 change `device-port-forward-seam` 又发布 0.5.0/0.5.1，本仓当前 pin 为 0.5.1，`editorOpen` 契约保持不变。
 >
 > **架构不变式**：worktree-session 与 dsh-cockpit 互不知晓。耦合只存在于 `cockpit-worktree-open-shim`；架构测试持续断言 ws 源码/依赖不含 cockpit 名字。
 
@@ -8,8 +8,8 @@
 - [x] 1.2 bridge 0.4.0 provide 稳定、消费方无关的 `cockpitBridge.editorOpen`；`inject` 保持 `['sessions', 'uiSession']`
 - [x] 1.3 bridge 服务在原始用户点击链路中校验路径并直接产出 `vscode-remote` URI；无新增 iframe→父页面动作消息
 - [x] 1.4 对侧 build/typecheck/lint 与全仓自动测试通过（root 8、shared 1、web 63、bridge 19、server 141）
-- [ ] 1.5 对侧真机验收与 current spec 归档
-- [ ] 1.6 发布 `dsh-cockpit-bridge@0.4.0`
+- [x] 1.5 对侧真机验收（2026-09-24，与本仓 6.4 同一次）；对侧 change 归档在该仓单独进行
+- [x] 1.6 发布 `dsh-cockpit-bridge@0.4.0`（tag `dsh-cockpit-bridge-v0.4.0`，sha256 `165d25bd…8bcc`）
 
 ## 2. worktree-session 扩展点
 
@@ -28,7 +28,7 @@
 - [x] 3.4 无顶层 inject；监听 Cordis `internal/service`，支持两端任意加载/卸载顺序，缺任一端安全无效
 - [x] 3.5 README 记录职责、前置条件、已知边界与移除路径
 - [x] 3.6 `dsh.yaml` 新增 local shim 条目；当前明确记录 bridge 0.3.0 下安全无效
-- [ ] 3.7 bridge 0.4.0 发布后，把 `dsh.yaml` 的 remote spec/version 精确 pin 更新到 0.4.0 并补审查记录
+- [x] 3.7 bridge 0.4.0 发布后，把 `dsh.yaml` 的 remote spec/version 精确 pin 更新到 0.4.0 并补审查记录（已随后续 change 升到 0.5.1；两条 shim note 同步改为已生效）
 
 ## 4. 测试
 
@@ -52,6 +52,6 @@
 - [x] 6.1 worktree-session（207 tests）与 shim（4 tests）各自 typecheck/build/test 通过
 - [x] 6.2 `node scripts/sync.mjs` 幂等：首次物化 shim，第二次明确 `no changes — deployment already matches manifest`
 - [x] 6.3 根 `npm test`（126 pass / 1 skip）与 `npm run check:artifacts` 通过
-- [ ] 6.4 bridge 0.4.0 发布并更新 pin 后，真机从 cockpit 访问 VM：点击分支名，宿主机 VS Code 新窗口打开 VM worktree
+- [x] 6.4 bridge 0.4.0 发布并更新 pin 后，真机从 cockpit 访问 VM：点击分支名，宿主机 VS Code 新窗口打开 VM worktree（2026-09-24 所有者验收通过，bridge 0.5.1）
 - [ ] 6.5 真机降级：禁用 shim 后 ws 回落 `vscode://file/`，cockpit 既有功能正常
 - [ ] 6.6 两仓 current specs 均同步最终行为后归档各自 change
