@@ -14,7 +14,7 @@
 - **按需拉起内核浏览服务**：Host 侧按需启动 `memex serve`，**以库为单位**（一个库一个进程一个端口，这正是内核 `MEMEX_HOME` 的粒度），并管理其生命周期。
 - **必须处理的四条内核约束**（均已实测，见 design）：配置了远端的库不传 `--local` 会**重定向到托管站点且本地服务根本不启动**；默认会在 **Host 那台机器**弹浏览器，必须抑制；实际端口会因占用而漂移，只能从 stdout 解析；长驻子进程的 stdin 不能用 `ignore`。
 - **跨机器访问走三段式，不直连**：dsh-memex 暴露一个**自己命名**的注册点，用于替换「取得卡片浏览地址」的实现；一个**专用 shim package** 读取驾驶舱侧 bridge 的端口发布能力（见 dsh-cockpit 的 `device-port-forward-seam`）并注册进去。dsh-memex MUST NOT 引用 cockpit / bridge 的 package 名、服务名或产品名——连约定服务名也不行，那个名字本身就属于提供方。未注册时回落为本机地址，本机直连场景零影响、也不需要 shim。沿用本仓既有范式（`cockpit-worktree-open-shim`、`subscriptions-sandbox-shim`），不发明第二种。
-- **同源 launcher 承担就绪与失败呈现**：「打开」按钮同步打开一个 DSH 同源路径（避免异步等待导致的弹窗拦截），由该页面完成「确保服务与转发就绪」并跳转，失败时就地说明原因，MUST NOT 给出一个会指向宿主机其它服务的地址。
+- **设置页上下文解析地址，空白新标签页承担呈现**：「打开」按钮同步打开空白标签页（保留用户手势，避免异步等待导致弹窗拦截），同时在仍位于 cockpit iframe 的设置页上下文中完成「确保服务与转发就绪」；成功后令已打开的标签页跳转，失败时在该标签页就地说明原因，MUST NOT 给出一个会指向宿主机其它服务的地址。
 - **关闭记忆的工作区不可浏览**：`memory: false` 的入口不提供「打开」，且直接请求其浏览地址也被拒绝。
 - **不做**：不自研卡片浏览 UI、不改写上游 HTML、不实现上游 API 的等价物、不改卡片格式、不改多库检索与守门语义。
 
@@ -29,7 +29,7 @@
 
 ## Impact
 
-- `packages/dsh-memex/src/host/`：新增浏览服务的进程管理与 launcher 路由；现有 `/dsh-memex` 通道新增相关端点。
+- `packages/dsh-memex/src/host/`：新增浏览服务的进程管理；现有 `/dsh-memex` 通道新增相关端点。
 - `packages/dsh-memex/src/run/kernel.ts`：现有 runner 是「跑完即死 + 有界 timeout + 到点 SIGTERM」，长驻服务需要另一条路径，不复用它。
 - `packages/dsh-memex/src/client/page.tsx`、`locales.ts`：入口展开态的「打开」动作与降级文案。
 - `dsh.yaml`：dsh-memex 的 note 需记录新增的运行依赖（按需拉起内核 serve）与内核版本复核点。
