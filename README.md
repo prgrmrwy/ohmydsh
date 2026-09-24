@@ -20,7 +20,7 @@ Worktree Session 是通用插件，不应知道 dsh-cockpit；dsh-cockpit-bridge
 
 ## 前置条件与已知边界
 
-- 需要 `dsh-cockpit-bridge >= 0.4.0`；旧版 bridge 不提供该服务，shim 会静默不生效。
+- 需要 `dsh-cockpit-bridge >= 0.4.0`（本仓当前 pin 0.5.1）；旧版 bridge 不提供该服务，shim 会静默不生效。
 - 宿主机需要安装 VS Code Remote-SSH，并能用 Cockpit 设备登记的 SSH config alias 连接目标设备。
 - 未安装 Remote-SSH 时 URI 可能被静默丢弃；包含点号的目录名可能被 VS Code URI handler 判断为文件。
 
