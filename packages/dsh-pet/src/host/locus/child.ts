@@ -1,0 +1,1711 @@
+/**
+ * Generic DSH continuable-child adapter for unified locus execution.
+ *
+ * This module is deliberately storage- and product-model neutral.  It keeps
+ * the small, measured seam used by the old QA path (resolve an exact live
+ * parent, start a continuable child, and put a host-authored prompt into the
+ * child's inbox) without importing QA, Task, Invocation, repository, or Lark
+ * concerns.
+ *
+ * The DSH operations are ports.  A host composition may adapt its concrete
+ * `ctx.agents`, `ctx.subagents`, symbol-keyed inbox, and lifecycle event to
+ * these ports; a missing or throwing port is an unavailable operation, never a
+ * reason for this adapter to guess, create a replacement identity, or notify a
+ * parent.  In particular, a settlement event is an **activation lifecycle**
+ * event for the child.  It is not a per-delivery completion signal.  Delivery
+ * correlation belongs to the controller/channel layer and must be supplied
+ * explicitly there.
+ */
+
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { SessionId, type SessionId as BrandedSessionId } from '@deepseek-ai/dsh-session'
+import { LOCUS_SAFE_TOOL_NAMES } from './composition.js'
+
+/** A live DSH Agent, intentionally opaque apart from its session identity. */
+export type LocusLiveParent = Agent
+
+/** The parent registry/resume operations required by the adapter. */
+export interface LocusParentPort {
+  /** Return the resident Agent for an exact session id, if one is live. */
+  get(sessionId: BrandedSessionId): LocusLiveParent | undefined
+  /** Resume persisted state and return its live Agent when possible. */
+  resume(options: { readonly resumeSessionId: BrandedSessionId; readonly signal?: AbortSignal }): Promise<
+    { readonly agent?: LocusLiveParent } | undefined
+  >
+  /**
+   * Whether this exact session is archived by its owner.
+   *
+   * Checked BEFORE `get`/`resume` on purpose. Archiving is an owner action and
+   * the runtime does not enforce it at all — both `dsh-agent` and the session
+   * controller resume an archived session without complaint — so resolving one
+   * here would silently undo the owner's decision and keep the endpoint
+   * serving. Absent means "cannot know" and preserves the previous behaviour.
+   */
+  isArchived?(sessionId: BrandedSessionId): boolean
+}
+
+/** Typed block vocabulary accepted unchanged by the measured DSH child inbox seam. */
+export type LocusContentBlock = ContentBlock
+
+/**
+ * Whether the Host runtime delivers a child's automatic settlement account to
+ * its parent session. A locus child answers in its own Feishu entry, so the
+ * runtime's account must not enter the main session's conversation; the owner
+ * reads a locus child deliberately instead.
+ */
+export type LocusSettlementNotice = 'notify' | 'silent'
+
+/** Persisted global-tool restriction accepted by the reviewed Subagent runtime. */
+export interface LocusToolRestriction {
+  readonly allow?: readonly string[]
+  readonly deny?: readonly string[]
+}
+
+/**
+ * Complete inherited global-tool allowlist for a Locus child.
+ *
+ * The runtime validates every name against the mounted preset and applies the
+ * restriction after that preset is mounted. Unknown or missing names therefore
+ * abort child creation, while tools registered directly in the child scope stay
+ * visible — which is why the installed surface is attested separately
+ * ({@link attestLocusComposition}) rather than trusted from this filter.
+ */
+export const LOCUS_SAFE_TOOL_FILTER: LocusToolRestriction = Object.freeze({
+  allow: LOCUS_SAFE_TOOL_NAMES,
+})
+
+/** The continuable-child creation operation. */
+export interface LocusSubagentPort {
+  startContinuable(spec: {
+    readonly provider: string
+    readonly label: string
+    readonly childId?: SessionId
+    readonly request: {
+      readonly prompt: LocusContentBlock[]
+      readonly parent: LocusLiveParent
+    }
+    /**
+     * Requested automatic-settlement behavior. A Host runtime that does not
+     * support it ignores the field, which is exactly why creation verifies the
+     * capability separately rather than assuming suppression took effect.
+     */
+    readonly settlementNotice?: LocusSettlementNotice
+    readonly signal: AbortSignal
+  }): Promise<{ readonly childId: BrandedSessionId; readonly messageId: import('@deepseek-ai/dsh-llm').MessageId }>
+  /**
+   * Create a durable continuable child without submitting an initial prompt.
+   * The controller can therefore publish the active locus first, then queue
+   * the first real Delivery through the ordinary inbox path.
+   */
+  createIdleContinuable?(spec: {
+    readonly childId: string
+    readonly provider: string
+    readonly label: string
+    readonly parent: LocusLiveParent
+    readonly settlementNotice?: LocusSettlementNotice
+    /** Persist a fresh transcript and the creation-time preset for cold resume. */
+    readonly contextMode?: 'independent-v1'
+    /** Persist the inherited global-tool restriction for creation and cold resume. */
+    readonly toolFilter?: LocusToolRestriction
+    readonly signal: AbortSignal
+  }): Promise<{ readonly childId: string }>
+  /** Literal proof that idle creation is implemented by this runtime. */
+  readonly supportsIdleContinuableCreate?: boolean
+  /** Literal proof that independent-v1 and its persisted composition are implemented. */
+  readonly supportsIndependentContinuableCreate?: boolean
+  /**
+   * Run one operation against the exact continuation-owned child Session.
+   * The runtime validates both exact live parent identity and durable child
+   * lineage; generic Session routing intentionally cannot resolve this child.
+   */
+  withLiveContinuableChildSession?<T>(
+    spec: {
+      readonly parent: LocusLiveParent
+      readonly childId: string
+      readonly signal: AbortSignal
+    },
+    operation: (session: unknown) => T | Promise<T>,
+  ): Promise<T>
+  /** Literal proof that exact child Session access is implemented. */
+  readonly supportsLiveContinuableChildSession?: boolean
+  /**
+   * Whether this Host runtime honors `settlementNotice`. Absent means unknown,
+   * and an unknown capability is treated as unsupported: a locus child must
+   * not be established when its conclusions would be pushed into the main
+   * session automatically.
+   */
+  readonly supportsSettlementNotice?: boolean
+  /**
+   * Look up one registered provider by name, when the runtime exposes its
+   * provider registry synchronously. Used only to prove
+   * `inheritsParentContext` before creating with the DEFAULT provider; an
+   * absent method or an unproven provider keeps creation unavailable rather
+   * than assuming independence.
+   */
+  getProvider?(name: string): { readonly inheritsParentContext?: boolean } | undefined
+}
+
+/** Source metadata for a host-authored inbox message. */
+export interface LocusInboxSource {
+  readonly kind: 'user'
+}
+
+/** The child inbox operation, already adapted away from symbol-keyed DSH APIs. */
+export interface LocusInboxPort {
+  queuePrompt(
+    parent: LocusLiveParent,
+    childId: string,
+    prompt: readonly LocusContentBlock[],
+    source: LocusInboxSource,
+    signal: AbortSignal,
+  ): Promise<import('@deepseek-ai/dsh-llm').MessageId>
+}
+
+/** Context passed to a compensation operation. */
+export interface LocusChildCompensationRequest {
+  readonly parent: LocusLiveParent
+  readonly childId: string
+  readonly signal: AbortSignal
+  /** Optional controller diagnostic; never interpreted as a routing value. */
+  readonly reason?: string
+}
+
+/** Release an unpublished or otherwise abandoned child activation. */
+export interface LocusChildCompensationPort {
+  release(request: LocusChildCompensationRequest): Promise<void>
+}
+
+/**
+ * Compatibility shape for a host adapter that exposes the measured DSH name.
+ * It is accepted by {@link createLocusChildAdapter} but not required of
+ * controller/channel callers.
+ */
+export interface LocusChildDrainPort {
+  drainContinuableChildren(
+    parent: LocusLiveParent,
+    childIds: readonly string[],
+  ): Promise<void>
+}
+
+/**
+ * Proof port used when restoring a persisted child identity.
+ *
+ * A durable id alone is not enough: adoption must prove that the child still
+ * exists and is a direct child of the exact parent.  Implementations should
+ * return the host's observed identity, not merely echo the request.
+ */
+export interface LocusChildProofPort {
+  findChild(
+    parentSessionId: string,
+    childSessionId: string,
+    signal?: AbortSignal,
+  ): Promise<LocusChildIdentity | undefined>
+}
+
+/** Raw activation-level child settlement emitted by an injected host port. */
+export type LocusChildSettlementEvent =
+  | { readonly childSessionId: string; readonly stopReason?: string }
+  | { readonly id: string; readonly stopReason?: string }
+
+/** Canonical activation-level settlement observed by adapter consumers. */
+export interface LocusChildActivationSettlement {
+  readonly identity: LocusChildIdentity
+  readonly stopReason?: string
+}
+
+/**
+ * Lifecycle subscription port.  The event names a child activation, not a
+ * queued delivery.  A host may use either `onChildSettled` (the measured DSH
+ * seam) or `subscribe` when adapting its event bus.
+ */
+export interface LocusChildSettlementPort {
+  readonly onChildSettled?: (
+    listener: (event: LocusChildSettlementEvent) => void,
+  ) => () => void
+  readonly subscribe?: (
+    listener: (event: LocusChildSettlementEvent) => void,
+  ) => () => void
+}
+
+/** All external operations used by one adapter instance. */
+export interface LocusChildPorts {
+  readonly parent: LocusParentPort
+  readonly subagent: LocusSubagentPort
+  /** Omit when this Host does not expose a child inbox; queue then fails closed. */
+  readonly inbox?: LocusInboxPort
+  readonly compensation?: LocusChildCompensationPort | LocusChildDrainPort
+  /** Required for safe adoption; create/queue may still operate without it. */
+  readonly proof?: LocusChildProofPort
+  readonly settlement?: LocusChildSettlementPort
+  /**
+   * Operator-facing diagnostic sink.
+   *
+   * Optional so a Host without one still works. Without it a child-creation
+   * failure collapses into the single `child-create-failed` code with the
+   * underlying exception discarded, which is not diagnosable from logs.
+   */
+  readonly log?: (message: string) => void
+}
+
+/** Optional host context shape used by {@link probeLocusChildPorts}. */
+export interface LocusHostContextLike {
+  get?(name: string): unknown
+  on?(event: string, listener: (...args: unknown[]) => void): () => void
+  /**
+   * The workspace registry, read for exactly one fact: which sessions the
+   * owner archived. Optional because a Host without it can only be treated as
+   * "nothing is archived", which is the behaviour every earlier version had.
+   */
+  readonly workspaceRegistry?: {
+    readonly archivedSessionIds?: readonly unknown[]
+  }
+}
+
+/** Why a host child seam could not be acquired. */
+export type LocusChildProbeDiagnostic =
+  | 'parent-service-unavailable'
+  | 'subagent-service-unavailable'
+  | 'independent-continuable-create-unavailable'
+  | 'inbox-unavailable'
+  | 'settlement-events-unavailable'
+
+/** Result of probing an optional host for the generic locus child seam. */
+export type LocusChildPortsProbe =
+  | { readonly available: true; readonly ports: LocusChildPorts }
+  | { readonly available: false; readonly diagnostic: LocusChildProbeDiagnostic }
+
+/** Stable child identity used to fence queue and compensation operations. */
+export interface LocusChildIdentity {
+  readonly parentSessionId: string
+  readonly childSessionId: string
+}
+
+/** Active identity plus the exact live parent object required by DSH. */
+export interface LocusActiveChild extends LocusChildIdentity {
+  /** The latest exact live parent used for a DSH operation. */
+  readonly parent: LocusLiveParent
+}
+
+export type LocusChildFailureReason =
+  | 'invalid-parent-id'
+  /**
+   * The recorded main session is archived by its owner.
+   *
+   * Distinct from `parent-unavailable`: the session is intact and resumable,
+   * and resuming it is exactly what must NOT happen. It is also distinct from
+   * a Host judgement, so callers must not treat it as replaceable.
+   */
+  | 'parent-archived'
+  | 'parent-unavailable'
+  | 'parent-operation-failed'
+  | 'invalid-child-request'
+  | 'active-child-conflict'
+  | 'child-create-failed'
+  | 'settlement-notice-unsupported'
+  | 'idle-child-create-unsupported'
+  | 'safe-composition-unsupported'
+  /**
+   * The default provider's independent-context capability could not be
+   * proven on this runtime. Only reached when the caller omitted an explicit
+   * `provider`; an explicit choice is never second-guessed here.
+   */
+  | 'independent-context-unproven'
+  | 'child-identity-invalid'
+  | 'adapter-disposed'
+  | 'aborted'
+  | 'no-active-child'
+  | 'child-identity-mismatch'
+  | 'inbox-unavailable'
+  | 'inbox-failed'
+  | 'image-route-unsupported'
+  | 'inbox-message-id-invalid'
+  | 'compensation-unavailable'
+  | 'compensation-failed'
+  | 'child-not-found'
+  | 'child-parent-mismatch'
+  | 'child-proof-unavailable'
+  | 'child-proof-failed'
+  | 'child-session-access-unsupported'
+  | 'child-session-access-failed'
+
+/** A fail-closed diagnostic returned by an adapter operation. */
+export interface LocusChildFailure {
+  readonly ok: false
+  readonly reason: LocusChildFailureReason
+  /**
+   * The underlying failure text, when the adapter caught a host exception.
+   *
+   * The stable `reason` is what callers branch on; this is what an operator
+   * needs to act. Without it a bare `catch` turned every distinct host
+   * failure into the same opaque `child-session-access-failed`, which is how
+   * a locus reached `invalid` on devbox with no recorded cause — the only
+   * way to learn why was to add logging and wait for it to happen again.
+   * Never parsed or matched on; diagnostics only.
+   */
+  readonly detail?: string
+}
+
+/** Result of resolving a parent without exposing host exceptions. */
+export type LocusParentResolution =
+  | { readonly ok: true; readonly parent: LocusLiveParent }
+  | LocusChildFailure
+
+/** Result of creating or reusing one child activation. */
+export type LocusChildCreateResult =
+  | {
+      readonly ok: true
+      readonly created: boolean
+      readonly identity: LocusChildIdentity
+    }
+  | LocusChildFailure
+
+/** Result of accepting one host-authored prompt into an active child inbox. */
+export type LocusChildQueueResult =
+  | { readonly ok: true; readonly messageId: import('@deepseek-ai/dsh-llm').MessageId; readonly identity: LocusChildIdentity }
+  | LocusChildFailure
+
+/** Result of one operation on an exact continuation-owned child Session. */
+export type LocusChildSessionResult<T> =
+  | { readonly ok: true; readonly value: T; readonly identity: LocusChildIdentity }
+  | LocusChildFailure
+
+/** Result of compensating one active child. */
+export type LocusChildCompensationResult =
+  | { readonly ok: true; readonly identity: LocusChildIdentity }
+  | LocusChildFailure
+
+/** Input used when adopting a durable child after a process/Agent restart. */
+export interface LocusChildAdoptionInput {
+  readonly parentSessionId: string
+  readonly childSessionId: string
+  readonly signal?: AbortSignal
+}
+
+/** Result of adopting a persisted child without creating a new child. */
+export type LocusChildAdoptionResult =
+  | { readonly ok: true; readonly adopted: boolean; readonly identity: LocusChildIdentity }
+  | LocusChildFailure
+
+/**
+ * Default provider for new and explicitly rebuilt locus children.
+ *
+ * `spawn` (not `fork`) is the independent-context default: the host's
+ * `dsh-subagent-spawn-in-process` provider declares `inheritsParentContext
+ * === false` and its `prepareContinuable()` returns no seed, so a child
+ * created here starts with no copy of the parent's transcript. This is the
+ * B035 fix — a child created under the previous `fork` default inherited the
+ * parent's full history and answered as if it were the parent, including
+ * skipping `pet_locus_reply`. Existing fork children are unaffected: this
+ * only changes the value new/explicit-rebuild callers get when they omit an
+ * explicit `provider`, never their own recorded identity or history. Callers
+ * needing the old behavior may still pass `provider: 'fork'` explicitly.
+ */
+const DEFAULT_CHILD_PROVIDER = 'spawn'
+const EMPTY_SIGNAL = new AbortController().signal
+
+function isAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted ?? false
+}
+
+/** Default provider used for the in-process continuable child backend. */
+export const LOCUS_CHILD_PROVIDER = DEFAULT_CHILD_PROVIDER
+
+/**
+ * Whether the DEFAULT provider's independent-context capability is proven,
+ * fail closed.
+ *
+ * Only called when the caller omitted an explicit `provider` — an explicit
+ * choice (including the legacy `'fork'`) is never re-verified here, since a
+ * caller naming a provider by hand has already made that decision. This is
+ * the D2 guard: a silent fallback to a history-inheriting provider is exactly
+ * the shape of the original B035 failure, so an unprovable capability must
+ * refuse creation rather than produce a child that only looks independent.
+ *
+ * Requires an ACTUAL function at `getProvider` and an ACTUAL provider object
+ * with `inheritsParentContext === false`; a missing port, a missing lookup
+ * result, or any other value is unproven.
+ */
+function defaultProviderProvenIndependent(subagent: LocusSubagentPort): boolean {
+  if (typeof subagent.getProvider !== 'function') return false
+  let provider: { readonly inheritsParentContext?: boolean } | undefined
+  try {
+    provider = subagent.getProvider(DEFAULT_CHILD_PROVIDER)
+  } catch {
+    return false
+  }
+  return provider !== undefined && provider !== null && provider.inheritsParentContext === false
+}
+
+/** Return whether an object has a usable non-empty identifier. */
+function isIdentifier(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
+function childRequestFingerprint(input: {
+  readonly parentSessionId: string
+  readonly label: string
+  readonly prompt: string
+  readonly provider?: string
+  readonly childId?: string
+}): string {
+  return JSON.stringify([
+    input.parentSessionId,
+    input.label,
+    input.prompt,
+    input.provider ?? DEFAULT_CHILD_PROVIDER,
+    input.childId ?? null,
+  ])
+}
+
+/** Return whether a value can be used as a live Agent. */
+function isLiveParent(value: unknown): value is LocusLiveParent {
+  if (value === null || typeof value !== 'object') return false
+  return isIdentifier((value as { id?: unknown }).id)
+}
+
+/** Compare identities exactly; no prefix matching is safe at this seam. */
+export function sameLocusChildIdentity(
+  left: LocusChildIdentity,
+  right: LocusChildIdentity,
+): boolean {
+  return (
+    left.parentSessionId === right.parentSessionId &&
+    left.childSessionId === right.childSessionId
+  )
+}
+
+/**
+ * Resolve an exact live parent, resuming it only when it is not resident.
+ *
+ * The returned object is the exact object passed to `startContinuable` and
+ * `queuePrompt`; an id alone is not a substitute because DSH checks lineage
+ * against the live Agent object.  Host failures are intentionally collapsed to
+ * a diagnostic result so callers can stop publishing a locus.
+ */
+export async function resolveLocusParent(
+  port: LocusParentPort,
+  parentSessionId: string,
+  signal?: AbortSignal,
+): Promise<LocusParentResolution> {
+  if (!isIdentifier(parentSessionId)) return { ok: false, reason: 'invalid-parent-id' }
+  if (isAborted(signal)) return { ok: false, reason: 'aborted' }
+
+  const brandedParentId = SessionId(parentSessionId)
+  // Refuse an archived parent before touching the live registry: `get` would
+  // hand back a still-resident agent for a session the owner archived, and
+  // `resume` would otherwise resurrect one that is not.
+  try {
+    if (port.isArchived?.(brandedParentId) === true) return { ok: false, reason: 'parent-archived' }
+  } catch {
+    // Cannot tell is not proof: fall through to the ordinary resolution.
+  }
+  let resident: LocusLiveParent | undefined
+  try {
+    resident = port.get(brandedParentId)
+  } catch {
+    return { ok: false, reason: 'parent-operation-failed' }
+  }
+  if (isLiveParent(resident) && resident.id === parentSessionId) {
+    return { ok: true, parent: resident }
+  }
+
+  let resumed: { readonly agent?: LocusLiveParent } | undefined
+  try {
+    resumed = await port.resume({ resumeSessionId: brandedParentId, ...(signal !== undefined ? { signal } : {}) })
+  } catch {
+    return { ok: false, reason: 'parent-unavailable' }
+  }
+
+  if (isAborted(signal)) return { ok: false, reason: 'aborted' }
+  if (isLiveParent(resumed?.agent) && resumed.agent.id === parentSessionId) {
+    return { ok: true, parent: resumed.agent }
+  }
+
+  // Some host versions report resume success without returning the Agent.  A
+  // second exact lookup is safe; a different session id is not accepted.
+  try {
+    if (isAborted(signal)) return { ok: false, reason: 'aborted' }
+    const afterResume = port.get(brandedParentId)
+    if (isLiveParent(afterResume) && afterResume.id === parentSessionId) {
+      return { ok: true, parent: afterResume }
+    }
+  } catch {
+    return { ok: false, reason: 'parent-operation-failed' }
+  }
+
+  return { ok: false, reason: 'parent-unavailable' }
+}
+
+/**
+ * Generic continuable-child adapter.
+ *
+ * One instance represents one controller-owned active child at a time.  It
+ * never creates a Task/Invocation, never sends a message to the parent, and
+ * never infers delivery settlement from a child lifecycle event.
+ */
+type PendingLocusCreate = {
+  readonly fingerprint: string
+  readonly promise: Promise<LocusChildCreateResult>
+  readonly resolve: (result: LocusChildCreateResult) => void
+  readonly reject: (reason?: unknown) => void
+}
+
+type LocusCreateReservation =
+  | { readonly kind: 'active'; readonly result: LocusChildCreateResult }
+  | { readonly kind: 'pending'; readonly promise: Promise<LocusChildCreateResult> }
+  | { readonly kind: 'start'; readonly pending: PendingLocusCreate }
+
+export class LocusChildAdapter {
+  private active: LocusActiveChild | undefined
+  private createInFlight: PendingLocusCreate | undefined
+  /** Active-changing operations reserve this fence before entering the queue. */
+  private activeTransitionInFlight = 0
+  /** Undefined means no lifecycle mutation is currently queued. */
+  private lifecycleChain: Promise<void> | undefined
+  private disposed = false
+  private readonly settlementListeners = new Set<
+    (event: LocusChildActivationSettlement) => void
+  >()
+  private readonly unsubscribeSettlement: (() => void) | undefined
+
+  constructor(private readonly ports: LocusChildPorts) {
+    this.unsubscribeSettlement = this.bindSettlementPort(ports.settlement)
+  }
+
+  /**
+   * Emit one child-failure diagnostic with its cause.
+   *
+   * The cause is appended rather than replacing the stable reason code so a
+   * reader still has a machine key to match on.
+   */
+  private reportFailure(operation: string, error: unknown): void {
+    const cause = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+    try {
+      this.ports.log?.(`${operation} failed (${cause})`)
+    } catch {
+      // A diagnostic sink must never change the outcome of the operation.
+    }
+  }
+
+  /** The currently published child identity, or undefined before/after activation. */
+  get activeChild(): LocusChildIdentity | undefined {
+    if (this.active === undefined) return undefined
+    return Object.freeze({
+      parentSessionId: this.active.parentSessionId,
+      childSessionId: this.active.childSessionId,
+    })
+  }
+
+  /** Read the current active identity without exposing the live Agent object. */
+  getActiveChild(): LocusChildIdentity | undefined {
+    return this.activeChild
+  }
+
+  private enqueueLifecycleMutation<T>(operation: () => Promise<T>): Promise<T> {
+    // Start the operation in the same turn as the caller.  Besides reducing
+    // queue latency, this preserves the adapter contract that a create request
+    // has synchronously reserved its in-flight identity before another request
+    // or disposal can race it.  The continuation itself remains serialized by
+    // lifecycleChain.
+    let resolveNext!: (value: T | PromiseLike<T>) => void
+    let rejectNext!: (reason?: unknown) => void
+    const result = new Promise<T>((resolve, reject) => {
+      resolveNext = resolve
+      rejectNext = reject
+    })
+    const run = async (): Promise<void> => {
+      try {
+        resolveNext(await operation())
+      } catch (error) {
+        rejectNext(error)
+      }
+    }
+    const prior = this.lifecycleChain
+    if (prior === undefined) {
+      this.lifecycleChain = result.then(() => undefined, () => undefined)
+      void run()
+    } else {
+      const scheduled = prior.then(run, run)
+      this.lifecycleChain = scheduled.then(() => undefined, () => undefined)
+    }
+    return result
+  }
+
+  /**
+   * Reserve an operation that may publish or clear `active` before queueing it.
+   *
+   * The reservation is synchronous: a later create request must not observe the
+   * old active child while compensation/adoption is already waiting in the
+   * lifecycle queue.  The returned promise owns the release so callers only
+   * observe completion after the fence has been removed.
+   */
+  private enqueueActiveTransition<T>(operation: () => Promise<T>): Promise<T> {
+    this.activeTransitionInFlight += 1
+    const result = this.enqueueLifecycleMutation(operation)
+    return result.finally(() => {
+      this.activeTransitionInFlight -= 1
+    })
+  }
+
+  /** Resolve a parent through the injected parent port. */
+  resolveParent(parentSessionId: string, signal?: AbortSignal): Promise<LocusParentResolution> {
+    if (this.disposed) return Promise.resolve({ ok: false, reason: 'adapter-disposed' })
+    return resolveLocusParent(this.ports.parent, parentSessionId, signal)
+  }
+
+  /**
+   * Adopt an already-created durable child after a Host restart or Agent
+   * unload.  Adoption validates/resumes the exact parent but never calls
+   * `startContinuable`; passing a persisted child id to that creation API would
+   * risk duplicate-child rejection or an accidental replacement identity.
+   */
+  async adoptChild(input: LocusChildAdoptionInput): Promise<LocusChildAdoptionResult> {
+    if (!isIdentifier(input.parentSessionId) || !isIdentifier(input.childSessionId)) {
+      return { ok: false, reason: 'invalid-child-request' }
+    }
+    if (isAborted(input.signal)) return { ok: false, reason: 'aborted' }
+    return this.enqueueActiveTransition(() => this.adoptChildLocked(input))
+  }
+
+  private async adoptChildLocked(input: LocusChildAdoptionInput): Promise<LocusChildAdoptionResult> {
+    if (this.disposed) return { ok: false, reason: 'adapter-disposed' }
+    if (isAborted(input.signal)) return { ok: false, reason: 'aborted' }
+    if (this.createInFlight !== undefined) return { ok: false, reason: 'active-child-conflict' }
+    const current = this.active
+    if (current !== undefined) {
+      const identity = {
+        parentSessionId: current.parentSessionId,
+        childSessionId: current.childSessionId,
+      }
+      return sameLocusChildIdentity(identity, input)
+        ? { ok: true, adopted: false, identity }
+        : { ok: false, reason: 'active-child-conflict' }
+    }
+
+    const parentResult = await this.resolveParent(input.parentSessionId, input.signal)
+    if (!parentResult.ok) return parentResult
+    if (this.disposed) return { ok: false, reason: 'adapter-disposed' }
+    if (isAborted(input.signal)) return { ok: false, reason: 'aborted' }
+
+    const proof = this.ports.proof
+    if (proof === undefined || typeof proof.findChild !== 'function') {
+      return { ok: false, reason: 'child-proof-unavailable' }
+    }
+    let observed: LocusChildIdentity | undefined
+    try {
+      observed = await proof.findChild(input.parentSessionId, input.childSessionId, input.signal)
+    } catch {
+      return { ok: false, reason: 'child-proof-failed' }
+    }
+    if (this.disposed) return { ok: false, reason: 'adapter-disposed' }
+    if (isAborted(input.signal)) return { ok: false, reason: 'aborted' }
+    if (observed === undefined) return { ok: false, reason: 'child-not-found' }
+    if (!isIdentifier(observed.parentSessionId) || !isIdentifier(observed.childSessionId)) {
+      return { ok: false, reason: 'child-proof-failed' }
+    }
+    if (observed.parentSessionId !== input.parentSessionId) {
+      return { ok: false, reason: 'child-parent-mismatch' }
+    }
+    if (observed.childSessionId !== input.childSessionId) {
+      return { ok: false, reason: 'child-not-found' }
+    }
+    const identity: LocusChildIdentity = {
+      parentSessionId: observed.parentSessionId,
+      childSessionId: observed.childSessionId,
+    }
+    this.active = Object.freeze({ ...identity, parent: parentResult.parent })
+    return { ok: true, adopted: true, identity }
+  }
+
+  /** Alias for integrations that name durable-child restoration explicitly. */
+  resumeChild = this.adoptChild.bind(this)
+
+  /**
+   * Create or idempotently reuse a child activation.
+   *
+   * A second request for the same parent returns the current identity without
+   * starting another child.  A request for another parent is refused until the
+   * controller explicitly compensates/retires the current activation.
+   */
+  async createChild(input: {
+    readonly parentSessionId: string
+    readonly label: string
+    readonly prompt: string
+    readonly provider?: string
+    readonly childId?: SessionId
+    readonly signal?: AbortSignal
+  }): Promise<LocusChildCreateResult> {
+    if (!isIdentifier(input.parentSessionId) || !isIdentifier(input.label) || !isIdentifier(input.prompt)) {
+      return { ok: false, reason: 'invalid-child-request' }
+    }
+
+    const signal = input.signal ?? EMPTY_SIGNAL
+    if (signal.aborted) return { ok: false, reason: 'aborted' }
+    const fingerprint = childRequestFingerprint(input)
+    const reservation = this.reserveCreate(input, fingerprint, signal)
+    return reservation.kind === 'active' ? reservation.result : reservation.kind === 'pending'
+      ? reservation.promise
+      : this.runReservedCreate(input, signal, reservation.pending)
+  }
+
+  /**
+   * Create a durable, idle child for two-phase locus provisioning.
+   *
+   * No artificial initialization prompt is allowed: the first prompt will be
+   * the first real Delivery, after the active locus and its indexes commit.
+   */
+  async createIdleChild(input: {
+    readonly parentSessionId: string
+    readonly label: string
+    readonly childId: string
+    readonly provider?: string
+    readonly signal?: AbortSignal
+  }): Promise<LocusChildCreateResult> {
+    if (
+      !isIdentifier(input.parentSessionId)
+      || !isIdentifier(input.label)
+      || !isIdentifier(input.childId)
+    ) return { ok: false, reason: 'invalid-child-request' }
+    const signal = input.signal ?? EMPTY_SIGNAL
+    if (signal.aborted) return { ok: false, reason: 'aborted' }
+    const reservedInput = {
+      parentSessionId: input.parentSessionId,
+      label: input.label,
+      childId: SessionId(input.childId),
+      ...(input.provider !== undefined ? { provider: input.provider } : {}),
+      prompt: '<idle-continuable>',
+    }
+    const reservation = this.reserveCreate(
+      reservedInput,
+      childRequestFingerprint(reservedInput),
+      signal,
+    )
+    return reservation.kind === 'active' ? reservation.result : reservation.kind === 'pending'
+      ? reservation.promise
+      : this.runReservedIdleCreate(input, signal, reservation.pending)
+  }
+
+  /**
+   * Reserve create synchronously before entering the async lifecycle queue.
+   * The checks are still performed by the queue operation for queued callers;
+   * this reservation closes the gap in which a second create/adopt/dispose can
+   * run before the first async callback reaches its first statement.
+   */
+  private reserveCreate(
+    input: {
+      readonly parentSessionId: string
+      readonly label: string
+      readonly prompt: string
+      readonly provider?: string
+      readonly childId?: SessionId
+    },
+    fingerprint: string,
+    signal: AbortSignal,
+  ): LocusCreateReservation {
+    if (this.disposed) return { kind: 'active', result: { ok: false, reason: 'adapter-disposed' } }
+    if (signal.aborted) return { kind: 'active', result: { ok: false, reason: 'aborted' } }
+    if (this.activeTransitionInFlight > 0) {
+      return { kind: 'active', result: { ok: false, reason: 'active-child-conflict' } }
+    }
+    const current = this.active
+    if (current !== undefined) {
+      if (current.parentSessionId !== input.parentSessionId) {
+        return { kind: 'active', result: { ok: false, reason: 'active-child-conflict' } }
+      }
+      if (input.childId !== undefined && input.childId !== current.childSessionId) {
+        return { kind: 'active', result: { ok: false, reason: 'active-child-conflict' } }
+      }
+      return {
+        kind: 'active',
+        result: {
+          ok: true,
+          created: false,
+          identity: { parentSessionId: current.parentSessionId, childSessionId: current.childSessionId },
+        },
+      }
+    }
+    const pending = this.createInFlight
+    if (pending !== undefined) {
+      return pending.fingerprint === fingerprint
+        ? { kind: 'pending', promise: pending.promise }
+        : { kind: 'active', result: { ok: false, reason: 'active-child-conflict' } }
+    }
+    let resolve!: (result: LocusChildCreateResult) => void
+    let reject!: (reason?: unknown) => void
+    const promise = new Promise<LocusChildCreateResult>((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise
+      reject = rejectPromise
+    })
+    const next = { fingerprint, promise, resolve, reject }
+    this.createInFlight = next
+    return { kind: 'start', pending: next }
+  }
+
+  private runReservedIdleCreate(
+    input: {
+      readonly parentSessionId: string
+      readonly label: string
+      readonly childId: string
+      readonly provider?: string
+    },
+    signal: AbortSignal,
+    pending: PendingLocusCreate,
+  ): Promise<LocusChildCreateResult> {
+    const operation: Promise<LocusChildCreateResult> = this.enqueueLifecycleMutation(async () => {
+      if (this.disposed) return { ok: false, reason: 'adapter-disposed' }
+      if (signal.aborted) return { ok: false, reason: 'aborted' }
+      if (this.active !== undefined) return { ok: false, reason: 'active-child-conflict' }
+      const create = this.ports.subagent.createIdleContinuable
+      if (this.ports.subagent.supportsSettlementNotice !== true) {
+        return { ok: false, reason: 'settlement-notice-unsupported' }
+      }
+      if (
+        this.ports.subagent.supportsIdleContinuableCreate !== true
+        || create === undefined
+      ) return { ok: false, reason: 'idle-child-create-unsupported' }
+      if (this.ports.subagent.supportsIndependentContinuableCreate !== true) {
+        return { ok: false, reason: 'safe-composition-unsupported' }
+      }
+      // Fail closed BEFORE creating anything: only the caller's own explicit
+      // provider choice skips this — silently falling back to a provider
+      // whose independence is unproven is the shape of the original failure.
+      if (
+        input.provider === undefined
+        && !defaultProviderProvenIndependent(this.ports.subagent)
+      ) return { ok: false, reason: 'independent-context-unproven' }
+      const parentResult = await this.resolveParent(input.parentSessionId, signal)
+      if (!parentResult.ok) return parentResult
+      let result: { readonly childId: string }
+      try {
+        result = await create.call(this.ports.subagent, {
+          childId: input.childId,
+          provider: input.provider ?? DEFAULT_CHILD_PROVIDER,
+          label: input.label,
+          parent: parentResult.parent,
+          settlementNotice: 'silent',
+          contextMode: 'independent-v1',
+          toolFilter: LOCUS_SAFE_TOOL_FILTER,
+          signal,
+        })
+      } catch (error: unknown) {
+        if (this.disposed) return { ok: false, reason: 'adapter-disposed' }
+        if (signal.aborted) return { ok: false, reason: 'aborted' }
+        this.reportFailure('independent child creation', error)
+        return { ok: false, reason: 'child-create-failed' }
+      }
+      if (result.childId !== input.childId) {
+        return { ok: false, reason: 'child-identity-invalid' }
+      }
+      const identity = {
+        parentSessionId: input.parentSessionId,
+        childSessionId: String(input.childId),
+      }
+      this.active = Object.freeze({ ...identity, parent: parentResult.parent })
+      return { ok: true, created: true, identity }
+    })
+    void operation.then(
+      result => {
+        if (this.createInFlight === pending) this.createInFlight = undefined
+        pending.resolve(result)
+      },
+      error => {
+        if (this.createInFlight === pending) this.createInFlight = undefined
+        pending.reject(error)
+      },
+    )
+    return pending.promise
+  }
+
+  private runReservedCreate(
+    input: {
+      readonly parentSessionId: string
+      readonly label: string
+      readonly prompt: string
+      readonly provider?: string
+      readonly childId?: SessionId
+    },
+    signal: AbortSignal,
+    pending: PendingLocusCreate,
+  ): Promise<LocusChildCreateResult> {
+    const operation: Promise<LocusChildCreateResult> = this.enqueueLifecycleMutation(async () => {
+      if (this.disposed) return { ok: false, reason: 'adapter-disposed' }
+      if (signal.aborted) return { ok: false, reason: 'aborted' }
+      if (this.active !== undefined) return { ok: false, reason: 'active-child-conflict' }
+      return this.startChild(input, signal)
+    })
+    void operation.then(
+      result => {
+        if (this.createInFlight === pending) this.createInFlight = undefined
+        pending.resolve(result)
+      },
+      error => {
+        if (this.createInFlight === pending) this.createInFlight = undefined
+        pending.reject(error)
+      },
+    )
+    return pending.promise
+  }
+
+  /**
+   * Restore a persisted child only after the host has proven direct lineage.
+   * This is intentionally separate from createChild so a stored id can never
+   * be passed to startContinuable as a duplicate-creation hint.
+   */
+  private async startChild(
+    input: {
+      readonly parentSessionId: string
+      readonly label: string
+      readonly prompt: string
+      readonly provider?: string
+      readonly childId?: SessionId
+    },
+    signal: AbortSignal,
+  ): Promise<LocusChildCreateResult> {
+    if (this.disposed) return { ok: false, reason: 'adapter-disposed' }
+    if (signal.aborted) return { ok: false, reason: 'aborted' }
+
+    const parentResult = await this.resolveParent(input.parentSessionId, signal)
+    if (!parentResult.ok) return parentResult
+    if (this.disposed) return { ok: false, reason: 'adapter-disposed' }
+    if (signal.aborted) return { ok: false, reason: 'aborted' }
+
+    // Fail closed before creating anything: a child established on a runtime
+    // that pushes its settlement account into the main session would violate
+    // the "no automatic report to the parent" boundary, and no later cleanup
+    // can retract conclusions already written to the parent's log.
+    if (this.ports.subagent.supportsSettlementNotice !== true) {
+      return { ok: false, reason: 'settlement-notice-unsupported' }
+    }
+    // Same fail-closed discipline for the DEFAULT provider's independence: a
+    // caller that named a provider explicitly has already decided, but a
+    // caller relying on the default must not silently get a history-inheriting
+    // child when that capability cannot be proven on this runtime.
+    if (
+      input.provider === undefined
+      && !defaultProviderProvenIndependent(this.ports.subagent)
+    ) return { ok: false, reason: 'independent-context-unproven' }
+
+    let result: { readonly childId: string }
+    try {
+      result = await this.ports.subagent.startContinuable({
+        provider: input.provider ?? DEFAULT_CHILD_PROVIDER,
+        label: input.label,
+        ...(input.childId !== undefined ? { childId: input.childId } : {}),
+        request: {
+          prompt: [{ type: 'text', text: input.prompt }],
+          parent: parentResult.parent,
+        },
+        settlementNotice: 'silent',
+        signal,
+      })
+    } catch (error: unknown) {
+      if (this.disposed) return { ok: false, reason: 'adapter-disposed' }
+      if (signal.aborted) return { ok: false, reason: 'aborted' }
+      this.reportFailure('idle child creation', error)
+      return { ok: false, reason: 'child-create-failed' }
+    }
+
+    if (!isIdentifier(result?.childId)) {
+      // Do not call compensation for an unknown child identity.  Releasing a
+      // guessed id could destroy an unrelated child; fail closed instead.
+      return { ok: false, reason: 'child-identity-invalid' }
+    }
+
+    const identity: LocusChildIdentity = {
+      parentSessionId: input.parentSessionId,
+      childSessionId: String(result.childId),
+    }
+
+    // Never publish an activation after cancellation or disposal.  If the
+    // host completed creation before either fence was observed, release the
+    // now-known child best-effort instead of exposing a stale active identity.
+    if (this.disposed || signal.aborted) {
+      await this.releaseUnpublishedChild(parentResult.parent, identity.childSessionId)
+      return { ok: false, reason: this.disposed ? 'adapter-disposed' : 'aborted' }
+    }
+
+    this.active = Object.freeze({ ...identity, parent: parentResult.parent })
+    return { ok: true, created: true, identity }
+  }
+
+  /** Release a child that was created but failed the publication fence. */
+  private async releaseUnpublishedChild(
+    parent: LocusLiveParent,
+    childSessionId: string,
+  ): Promise<void> {
+    const compensation = this.ports.compensation
+    if (compensation === undefined) return
+    try {
+      if ('release' in compensation && typeof compensation.release === 'function') {
+        await compensation.release({
+          parent,
+          childId: childSessionId,
+          signal: EMPTY_SIGNAL,
+          reason: 'child activation publication fenced',
+        })
+      } else if (
+        'drainContinuableChildren' in compensation &&
+        typeof compensation.drainContinuableChildren === 'function'
+      ) {
+        await compensation.drainContinuableChildren(parent, [childSessionId])
+      }
+    } catch {
+      // The activation was never published.  There is no safe active identity
+      // to expose or guess; a durable provisioning reconciler can diagnose any
+      // cleanup failure from the host's own resource records.
+    }
+  }
+
+  /**
+   * Queue one host-authored turn for the exact active child.
+   *
+   * `identity` is optional for convenience when a controller already serializes
+   * one adapter instance; when supplied it is checked exactly to prevent a late
+   * request from targeting a replacement child.
+   */
+  async queuePrompt(input: {
+    readonly content?: readonly LocusContentBlock[]
+    /** Compatibility input for non-media callers; normalized once to typed content. */
+    readonly text?: string
+    readonly identity?: LocusChildIdentity
+    /** Optional Host authorization fence evaluated inside the serialized queue mutation. */
+    readonly fenceBeforeQueue?: () => boolean | PromiseLike<boolean>
+    readonly signal?: AbortSignal
+  }): Promise<LocusChildQueueResult> {
+    const content = input.content ?? (isIdentifier(input.text) ? [{ type: 'text', text: input.text }] : [])
+    if (content.length === 0) return { ok: false, reason: 'invalid-child-request' }
+    const signal = input.signal ?? EMPTY_SIGNAL
+    if (signal.aborted) return { ok: false, reason: 'aborted' }
+    return this.enqueueLifecycleMutation(() => this.queuePromptLocked({ ...input, content }, signal))
+  }
+
+  private async queuePromptLocked(
+    input: {
+      readonly content: readonly LocusContentBlock[]
+      readonly identity?: LocusChildIdentity
+      readonly fenceBeforeQueue?: () => boolean | PromiseLike<boolean>
+    },
+    signal: AbortSignal,
+  ): Promise<LocusChildQueueResult> {
+    if (this.disposed) return { ok: false, reason: 'adapter-disposed' }
+    const active = this.active
+    if (active === undefined) return { ok: false, reason: 'no-active-child' }
+    const identity = { parentSessionId: active.parentSessionId, childSessionId: active.childSessionId }
+    if (input.identity !== undefined && !sameLocusChildIdentity(input.identity, identity)) {
+      return { ok: false, reason: 'child-identity-mismatch' }
+    }
+
+    // A continuable child can be unloaded after an activation-level end event.
+    // Resolve the parent for every inbox operation so DSH receives the current
+    // exact live Agent object and can cold-resume it when needed.
+    const parentResult = await this.resolveParent(active.parentSessionId, signal)
+    if (!parentResult.ok) return parentResult
+    if (
+      this.disposed ||
+      this.active === undefined ||
+      !sameLocusChildIdentity(this.active, active)
+    ) {
+      return { ok: false, reason: this.disposed ? 'adapter-disposed' : 'child-identity-mismatch' }
+    }
+    this.active = Object.freeze({ ...active, parent: parentResult.parent })
+
+    const inbox = this.ports.inbox
+    const queue = inbox?.queuePrompt
+    if (typeof queue !== 'function' || inbox === undefined) {
+      return { ok: false, reason: 'inbox-unavailable' }
+    }
+    if (signal.aborted) return { ok: false, reason: 'aborted' }
+    if (input.fenceBeforeQueue !== undefined) {
+      let authorized = false
+      try { authorized = await input.fenceBeforeQueue() } catch { authorized = false }
+      if (!authorized) return { ok: false, reason: 'child-proof-failed' }
+    }
+
+    let messageId: import('@deepseek-ai/dsh-llm').MessageId
+    try {
+      messageId = await queue.call(
+        inbox,
+        parentResult.parent,
+        active.childSessionId,
+        [...input.content],
+        { kind: 'user' },
+        signal,
+      )
+    } catch (error) {
+      const record = typeof error === 'object' && error !== null ? error as Record<string, unknown> : undefined
+      const code = record?.['code']
+      const message = error instanceof Error ? error.message : ''
+      return {
+        ok: false,
+        reason: code === 'MODEL_DOES_NOT_SUPPORT_IMAGES' || message.includes('MODEL_DOES_NOT_SUPPORT_IMAGES')
+          ? 'image-route-unsupported'
+          : 'inbox-failed',
+      }
+    }
+    // Queue acceptance is not reversible at this seam.  Still fence the
+    // result so a turn completed after shutdown/cancellation cannot be reported
+    // as an active delivery to a caller that is no longer allowed to publish.
+    if (this.disposed) return { ok: false, reason: 'adapter-disposed' }
+    if (signal.aborted) return { ok: false, reason: 'aborted' }
+    if (!isIdentifier(messageId)) return { ok: false, reason: 'inbox-message-id-invalid' }
+    return { ok: true, messageId, identity }
+  }
+
+  /** Alias used by channel adapters that call the operation a delivery. */
+  queueChildPrompt = this.queuePrompt.bind(this)
+
+  /**
+   * Run one Host operation against this adapter's exact continuation-owned
+   * child Session. Parent resolution supplies the current exact live parent;
+   * the runtime owner then validates direct lineage and the retained child
+   * Agent identity before exposing the Session to the callback.
+   */
+  async withChildSession<T>(input: {
+    readonly identity: LocusChildIdentity
+    readonly operation: (session: unknown) => T | Promise<T>
+    readonly signal?: AbortSignal
+  }): Promise<LocusChildSessionResult<T>> {
+    const signal = input.signal ?? EMPTY_SIGNAL
+    if (signal.aborted) return { ok: false, reason: 'aborted' }
+    return this.enqueueLifecycleMutation(() => this.withChildSessionLocked(input, signal))
+  }
+
+  private async withChildSessionLocked<T>(
+    input: {
+      readonly identity: LocusChildIdentity
+      readonly operation: (session: unknown) => T | Promise<T>
+    },
+    signal: AbortSignal,
+  ): Promise<LocusChildSessionResult<T>> {
+    if (this.disposed) return { ok: false, reason: 'adapter-disposed' }
+    const active = this.active
+    if (active === undefined) return { ok: false, reason: 'no-active-child' }
+    const identity = { parentSessionId: active.parentSessionId, childSessionId: active.childSessionId }
+    if (!sameLocusChildIdentity(input.identity, identity)) {
+      return { ok: false, reason: 'child-identity-mismatch' }
+    }
+    const access = this.ports.subagent.withLiveContinuableChildSession as
+      | (<R>(
+          spec: { parent: LocusLiveParent; childId: string; signal: AbortSignal },
+          operation: (session: unknown) => R | Promise<R>,
+        ) => Promise<R>)
+      | undefined
+    if (
+      this.ports.subagent.supportsLiveContinuableChildSession !== true
+      || typeof access !== 'function'
+    ) return { ok: false, reason: 'child-session-access-unsupported' }
+
+    const parentResult = await this.resolveParent(active.parentSessionId, signal)
+    if (!parentResult.ok) return parentResult
+    if (
+      this.disposed
+      || this.active === undefined
+      || !sameLocusChildIdentity(this.active, active)
+    ) return { ok: false, reason: this.disposed ? 'adapter-disposed' : 'child-identity-mismatch' }
+    try {
+      const value = await access.call(
+        this.ports.subagent,
+        { parent: parentResult.parent, childId: active.childSessionId, signal },
+        input.operation,
+      ) as T
+      if (signal.aborted) return { ok: false, reason: 'aborted' }
+      return { ok: true, value, identity }
+    } catch (error) {
+      if (signal.aborted) return { ok: false, reason: 'aborted' }
+      // Keep the host's own message: this failure is what invalidates a locus,
+      // and a bare `catch` left no way to tell a transient re-attach race from
+      // a genuinely unusable child.
+      return {
+        ok: false,
+        reason: 'child-session-access-failed',
+        detail: error instanceof Error ? error.message : String(error),
+      }
+    }
+  }
+
+  /**
+   * Compensate the currently active child, if its identity still matches.
+   *
+   * Compensation is explicit because a queue refusal is not proof that a child
+   * should be destroyed.  The operation is fail-soft but not fail-open: a
+   * failed or missing compensation port leaves `activeChild` intact so the
+   * controller cannot publish a false rollback result.
+   */
+  async compensateChild(options: {
+    readonly identity?: LocusChildIdentity
+    readonly reason?: string
+    readonly signal?: AbortSignal
+  } = {}): Promise<LocusChildCompensationResult> {
+    const signal = options.signal ?? EMPTY_SIGNAL
+    if (signal.aborted) return { ok: false, reason: 'aborted' }
+    return this.enqueueActiveTransition(() => this.compensateChildLocked(options, signal))
+  }
+
+  private async compensateChildLocked(
+    options: { readonly identity?: LocusChildIdentity; readonly reason?: string },
+    signal: AbortSignal,
+  ): Promise<LocusChildCompensationResult> {
+    if (this.disposed) return { ok: false, reason: 'adapter-disposed' }
+    const active = this.active
+    if (active === undefined) return { ok: false, reason: 'no-active-child' }
+    const identity = { parentSessionId: active.parentSessionId, childSessionId: active.childSessionId }
+    if (options.identity !== undefined && !sameLocusChildIdentity(options.identity, identity)) {
+      return { ok: false, reason: 'child-identity-mismatch' }
+    }
+
+    const compensation = this.ports.compensation
+    if (compensation === undefined) return { ok: false, reason: 'compensation-unavailable' }
+    const parentResult = await this.resolveParent(active.parentSessionId, signal)
+    if (!parentResult.ok) return parentResult
+    if (
+      this.disposed ||
+      this.active === undefined ||
+      !sameLocusChildIdentity(this.active, active)
+    ) {
+      return { ok: false, reason: this.disposed ? 'adapter-disposed' : 'child-identity-mismatch' }
+    }
+    this.active = Object.freeze({ ...active, parent: parentResult.parent })
+    try {
+      if ('release' in compensation && typeof compensation.release === 'function') {
+        await compensation.release({
+          parent: parentResult.parent,
+          childId: active.childSessionId,
+          signal,
+          ...(options.reason !== undefined ? { reason: options.reason } : {}),
+        })
+      } else if (
+        'drainContinuableChildren' in compensation &&
+        typeof compensation.drainContinuableChildren === 'function'
+      ) {
+        await compensation.drainContinuableChildren(parentResult.parent, [active.childSessionId])
+      } else {
+        return { ok: false, reason: 'compensation-unavailable' }
+      }
+    } catch {
+      return { ok: false, reason: 'compensation-failed' }
+    }
+
+    // The child is released regardless of whether the caller's fence closed
+    // while the external operation was in flight.  Clear the local identity
+    // first; retaining it after a successful release would permit a later
+    // queue to target a child that no longer exists.
+    if (this.active === undefined || !sameLocusChildIdentity(this.active, active)) {
+      return { ok: false, reason: 'child-identity-mismatch' }
+    }
+    this.active = undefined
+    if (this.disposed) return { ok: false, reason: 'adapter-disposed' }
+    if (signal.aborted) return { ok: false, reason: 'aborted' }
+    return { ok: true, identity }
+  }
+
+  /** Short alias for controllers that call compensation a release. */
+  releaseActiveChild = this.compensateChild.bind(this)
+
+  /** Subscribe to activation-level settlement observations from this adapter. */
+  onActivationSettled(
+    listener: (event: LocusChildActivationSettlement) => void,
+  ): () => void {
+    this.settlementListeners.add(listener)
+    return () => this.settlementListeners.delete(listener)
+  }
+
+  /** Explicitly named alias that avoids implying per-delivery settlement. */
+  onChildActivationSettled = this.onActivationSettled.bind(this)
+
+  /** Dispose only the lifecycle subscription; it never sends a parent message. */
+  dispose(): void {
+    if (this.disposed) return
+    this.disposed = true
+    try {
+      this.unsubscribeSettlement?.()
+    } catch {
+      // A broken event disposer cannot be allowed to turn plugin shutdown into
+      // a host failure.  No child is implicitly released here.
+    }
+    this.settlementListeners.clear()
+  }
+
+  private bindSettlementPort(
+    port: LocusChildSettlementPort | undefined,
+  ): (() => void) | undefined {
+    if (port === undefined) return undefined
+    const subscribe =
+      typeof port.onChildSettled === 'function'
+        ? port.onChildSettled
+        : typeof port.subscribe === 'function'
+          ? port.subscribe
+          : undefined
+    if (subscribe === undefined) return undefined
+
+    try {
+      const unsubscribe = subscribe.call(port, event => this.handleSettlement(event))
+      return typeof unsubscribe === 'function' ? unsubscribe : undefined
+    } catch {
+      // The adapter remains usable for create/queue, but no activation
+      // settlement is considered observed.  It therefore never clears an
+      // active identity on an unproven event source.
+      return undefined
+    }
+  }
+
+  private handleSettlement(event: LocusChildSettlementEvent): void {
+    const active = this.active
+    if (active === undefined || event === undefined || event === null) return
+    const raw = event as { childSessionId?: unknown; id?: unknown; stopReason?: unknown }
+    const childSessionId =
+      typeof raw.childSessionId === 'string'
+        ? raw.childSessionId
+        : typeof raw.id === 'string'
+          ? raw.id
+          : undefined
+    if (childSessionId !== active.childSessionId) return
+
+    const identity: LocusChildIdentity = {
+      parentSessionId: active.parentSessionId,
+      childSessionId: active.childSessionId,
+    }
+    const settled: LocusChildActivationSettlement = {
+      identity,
+      ...(typeof raw.stopReason === 'string' ? { stopReason: raw.stopReason } : {}),
+    }
+    // Keep the durable continuable-child identity.  This event closes one
+    // activation epoch only; a later queue operation resolves/resumes the same
+    // parent and asks DSH to cold-resume the same child session.  Clearing it
+    // here would force an unsafe replacement child and lose locus history.
+    for (const listener of [...this.settlementListeners]) {
+      try {
+        listener(settled)
+      } catch {
+        // Observer failures belong to the controller and must not corrupt the
+        // adapter's lifecycle fence or bubble into DSH's event emitter.
+      }
+    }
+  }
+}
+
+/** Factory form for controller/channel dependency injection. */
+export function createLocusChildAdapter(ports: LocusChildPorts): LocusChildAdapter {
+  return new LocusChildAdapter(ports)
+}
+
+/**
+ * Extract the measured symbol-keyed DSH queue into the generic inbox port.
+ *
+ * This helper is optional: callers may inject their own queue operation.  It
+ * accepts an unknown host service and returns `undefined` when the seam is not
+ * present, so a plugin can remain loaded while the locus capability is
+ * unavailable.
+ */
+export const LOCUS_DELIVER_PROMPT_SYMBOL = Symbol.for('dsh.subagent.deliverPrompt')
+
+/**
+ * Adapt the Host child inbox.
+ *
+ * The runtime publishes this operation under the target internal delivery
+ * symbol on its subagent service. Reading the symbol keeps this module free of
+ * a hard dependency on that package while still using the runtime's real seam
+ * rather than a reimplementation; an absent symbol is unavailable.
+ */
+export function adaptLocusInboxPort(
+  subagents: unknown,
+  /**
+   * Optional exact helper from the runtime's own package. When supplied it is
+   * preferred over the symbol lookup, because the package owns the argument
+   * contract and a version change surfaces as a type error rather than as a
+   * silently mismatched call.
+   */
+  queueHostPrompt?: (
+    runtime: unknown,
+    parent: LocusLiveParent,
+    childId: string,
+    prompt: readonly LocusContentBlock[],
+    source: LocusInboxSource,
+    signal: AbortSignal,
+  ) => Promise<import('@deepseek-ai/dsh-llm').MessageId>,
+): LocusInboxPort | undefined {
+  if (subagents === null || typeof subagents !== 'object') return undefined
+  if (queueHostPrompt !== undefined) {
+    return {
+      queuePrompt: async (parent, childId, prompt, source, signal) => {
+        if (source.kind !== 'user') throw new Error('unsupported inbox source')
+        return queueHostPrompt(subagents, parent, childId, prompt, source, signal)
+      },
+    }
+  }
+  const service = subagents as Record<symbol, unknown>
+  const deliver = service[LOCUS_DELIVER_PROMPT_SYMBOL]
+  if (typeof deliver !== 'function') return undefined
+
+  return {
+    queuePrompt: async (parent, childId, prompt, source, signal) => {
+      if (source.kind !== 'user') throw new Error('unsupported inbox source')
+      return (await (deliver as (...args: unknown[]) => Promise<unknown>).call(
+        subagents,
+        parent,
+        childId,
+        prompt,
+        source,
+        signal,
+        'queue',
+      )) as import('@deepseek-ai/dsh-llm').MessageId
+    },
+  }
+}
+
+/**
+ * Probe the optional DSH child seams without making them hard dependencies of
+ * Pet.  The probe only publishes a capability when parent resolution,
+ * continuable creation, and the symbol-keyed inbox are all present.  A proof
+ * port is exposed when the host can enumerate direct children; otherwise
+ * adoption remains deliberately unavailable rather than trusting a durable id.
+ */
+export function probeLocusChildPorts(
+  ctx: LocusHostContextLike,
+  options: {
+    /**
+     * Whether the composed Host runtime honors a silent settlement notice.
+     * The caller proves this from the runtime it actually loaded; this module
+     * never infers it, and an unproven capability keeps creation unavailable.
+     */
+    readonly settlementNoticeSupported?: boolean
+  } = {},
+): LocusChildPortsProbe {
+  const parentService = ctx.get?.('agents')
+  if (parentService === null || typeof parentService !== 'object') {
+    return { available: false, diagnostic: 'parent-service-unavailable' }
+  }
+  const parentRecord = parentService as {
+    get?: unknown
+    resume?: unknown
+  }
+  if (typeof parentRecord.get !== 'function' || typeof parentRecord.resume !== 'function') {
+    return { available: false, diagnostic: 'parent-service-unavailable' }
+  }
+
+  const subagentService = ctx.get?.('subagents')
+  if (subagentService === null || typeof subagentService !== 'object') {
+    return { available: false, diagnostic: 'subagent-service-unavailable' }
+  }
+  const subagentRecord = subagentService as {
+    startContinuable?: unknown
+    createIdleContinuable?: unknown
+    withLiveContinuableChildSession?: unknown
+    drainContinuableChildren?: unknown
+    listChildren?: unknown
+    getProvider?: unknown
+    /** Literal markers published only by a runtime that owns the behavior. */
+    supportsSettlementNotice?: unknown
+    supportsIdleContinuableCreate?: unknown
+    supportsIndependentContinuableCreate?: unknown
+    supportsLiveContinuableChildSession?: unknown
+  }
+  if (typeof subagentRecord.startContinuable !== 'function') {
+    return { available: false, diagnostic: 'subagent-service-unavailable' }
+  }
+  // Locus creation always requests independent-v1 with a durable toolFilter.
+  // Older runtimes ignore unknown JavaScript fields, so the literal marker is
+  // required before any child/reconciliation capability is published.
+  if (subagentRecord.supportsIndependentContinuableCreate !== true) {
+    return { available: false, diagnostic: 'independent-continuable-create-unavailable' }
+  }
+  const inbox = adaptLocusInboxPort(subagentService)
+  if (inbox === undefined) return { available: false, diagnostic: 'inbox-unavailable' }
+  if (typeof ctx.on !== 'function') {
+    return { available: false, diagnostic: 'settlement-events-unavailable' }
+  }
+
+  // Resume the main session through the Host's session controller when it is
+  // composed. That path reconstructs the session's persisted preset before
+  // publishing it; a bare `agents.resume()` does not, and would hand back a
+  // parent whose tool composition is empty — the same "looks resumed, is not
+  // composed" failure recorded in the integration-pitfalls note. Without the
+  // controller, parent resume stays unavailable rather than silently degraded.
+  const controller = ctx.get?.('sessionController') as
+    | { resolveAgent?: (sessionId: string) => unknown }
+    | undefined
+  const resolveAgent = typeof controller?.resolveAgent === 'function'
+    ? controller.resolveAgent.bind(controller)
+    : undefined
+
+  const archivedSessionIds = (): readonly string[] => {
+    const ids = ctx.workspaceRegistry?.archivedSessionIds
+    return Array.isArray(ids) ? ids.map(id => String(id)) : []
+  }
+
+  const parent: LocusParentPort = {
+    get: sessionId =>
+      (parentRecord.get as (id: string) => LocusLiveParent | undefined).call(parentService, sessionId),
+    isArchived: sessionId => archivedSessionIds().some(id => id === sessionId),
+    resume: async (resumeOptions) => {
+      if (resolveAgent === undefined) return undefined
+      const resolved = await Promise.resolve(resolveAgent(resumeOptions.resumeSessionId)) as
+        | { readonly agent?: LocusLiveParent; readonly error?: unknown }
+        | undefined
+      // The controller reports a refusal as data. Returning no agent keeps the
+      // adapter's fail-closed path instead of surfacing a partial parent.
+      if (resolved?.error !== undefined) return undefined
+      return resolved?.agent === undefined ? undefined : { agent: resolved.agent }
+    },
+  }
+  const subagent: LocusSubagentPort = {
+    startContinuable: spec =>
+      Promise.resolve(
+        (subagentRecord.startContinuable as (input: unknown) => unknown).call(subagentService, spec),
+      ) as Promise<{ readonly childId: BrandedSessionId; readonly messageId: import('@deepseek-ai/dsh-llm').MessageId }>,
+    ...(typeof subagentRecord.createIdleContinuable === 'function'
+      ? {
+        createIdleContinuable: (flat: unknown) => {
+          // Pet's port is FLAT (`parent`, `toolFilter`); the runtime's
+          // `ContinuableStartSpec` nests the delegation request. Passing the
+          // flat object straight through left `request` undefined, so the
+          // runtime died reading `request.parent` — the child was never
+          // created and the group's first @ was refused as
+          // `locus-unavailable`. Translate here, at the one boundary that
+          // knows both shapes.
+          const spec = flat as {
+            readonly childId: string
+            readonly provider: string
+            readonly label: string
+            readonly parent: unknown
+            readonly settlementNotice?: unknown
+            readonly contextMode?: unknown
+            readonly toolFilter?: unknown
+            readonly signal: AbortSignal
+          }
+          const request: Record<string, unknown> = { parent: spec.parent }
+          if (spec.toolFilter !== undefined) request['toolFilter'] = spec.toolFilter
+          // An idle child submits NO initial prompt — its first real Delivery
+          // is its first prompt. The runtime materializes the child without
+          // ever reading `request.prompt`, so empty content is correct and
+          // leaves the child's transcript genuinely empty of model work.
+          request['prompt'] = []
+          return Promise.resolve(
+            (subagentRecord.createIdleContinuable as (input: unknown) => unknown)
+              .call(subagentService, {
+              childId: spec.childId,
+              provider: spec.provider,
+              label: spec.label,
+              request,
+              ...(spec.settlementNotice === undefined ? {} : { settlementNotice: spec.settlementNotice }),
+              ...(spec.contextMode === undefined ? {} : { contextMode: spec.contextMode }),
+              signal: spec.signal,
+            }),
+          ) as Promise<{ readonly childId: string }>
+        },
+      }
+      : {}),
+    ...(subagentRecord.supportsIdleContinuableCreate === true
+      ? { supportsIdleContinuableCreate: true }
+      : {}),
+    ...(subagentRecord.supportsIndependentContinuableCreate === true
+      ? { supportsIndependentContinuableCreate: true }
+      : {}),
+    ...(typeof subagentRecord.withLiveContinuableChildSession === 'function'
+      ? {
+        withLiveContinuableChildSession: <T>(
+          spec: unknown,
+          operation: (session: unknown) => T | Promise<T>,
+        ) => Promise.resolve(
+          (subagentRecord.withLiveContinuableChildSession as (
+            spec: unknown,
+            operation: (session: unknown) => T | Promise<T>,
+          ) => T | Promise<T>).call(subagentService, spec, operation),
+        ),
+      }
+      : {}),
+    ...(subagentRecord.supportsLiveContinuableChildSession === true
+      ? { supportsLiveContinuableChildSession: true }
+      : {}),
+    // Accept either an explicit composition proof (tests/older adapters) or
+    // the literal marker on the runtime actually loaded by the Host. Never
+    // infer from accepting an unknown field: older JS silently ignores it.
+    ...(options.settlementNoticeSupported === true || subagentRecord.supportsSettlementNotice === true
+      ? { supportsSettlementNotice: true }
+      : {}),
+    // Bound to the exact loaded service, so `defaultProviderProvenIndependent`
+    // reads this runtime's own provider registry rather than a copy.
+    ...(typeof subagentRecord.getProvider === 'function'
+      ? {
+        getProvider: (name: string) => (subagentRecord.getProvider as (
+          name: string,
+        ) => { readonly inheritsParentContext?: boolean } | undefined).call(subagentService, name),
+      }
+      : {}),
+  }
+  const compensation: LocusChildDrainPort | undefined =
+    typeof subagentRecord.drainContinuableChildren === 'function'
+      ? {
+          drainContinuableChildren: (liveParent, childIds) =>
+            Promise.resolve(
+              (subagentRecord.drainContinuableChildren as (parent: LocusLiveParent, ids: readonly string[]) => unknown).call(
+                subagentService,
+                liveParent,
+                childIds,
+              ),
+            ).then(() => undefined),
+        }
+      : undefined
+  const proof: LocusChildProofPort | undefined =
+    typeof subagentRecord.listChildren === 'function'
+      ? {
+          findChild: async (parentSessionId, childSessionId, signal) => {
+            const result = await (subagentRecord.listChildren as (id: string, signal?: AbortSignal) => Promise<unknown>).call(
+              subagentService,
+              parentSessionId,
+              signal,
+            )
+            if (!Array.isArray(result)) return undefined
+            const match = result.find(item => {
+              if (item === null || typeof item !== 'object') return false
+              const row = item as {
+                id?: unknown
+                parentSessionId?: unknown
+                kind?: unknown
+                mode?: unknown
+              }
+              if (row.id !== childSessionId) return false
+              if (row.parentSessionId !== undefined && row.parentSessionId !== parentSessionId) return false
+              // A matching id alone is not proof of a resumable child: the same
+              // listing also carries diagnostics and one-shot runs, and
+              // adopting one of those would bind a locus to a child that can
+              // never take another turn. When the runtime reports the kind and
+              // mode, both must say this is a continuable child.
+              if (row.kind !== 'child' || row.mode !== 'continuable') return false
+              return true
+            }) as { id?: unknown } | undefined
+            return match !== undefined && typeof match.id === 'string'
+              ? { parentSessionId, childSessionId: match.id }
+              : undefined
+          },
+        }
+      : undefined
+
+  const on = ctx.on.bind(ctx)
+  const settlement: LocusChildSettlementPort = {
+    onChildSettled: listener =>
+      on('subagent/end', (...args: unknown[]) => {
+        const value = args[0]
+        if (value === null || typeof value !== 'object') return
+        const raw = value as { id?: unknown; childSessionId?: unknown; stopReason?: unknown }
+        const id = typeof raw.childSessionId === 'string' ? raw.childSessionId : raw.id
+        if (typeof id !== 'string') return
+        listener({
+          id,
+          ...(typeof raw.stopReason === 'string' ? { stopReason: raw.stopReason } : {}),
+        })
+      }),
+  }
+
+  return {
+    available: true,
+    ports: {
+      parent,
+      subagent,
+      inbox,
+      ...(compensation !== undefined ? { compensation } : {}),
+      ...(proof !== undefined ? { proof } : {}),
+      settlement,
+    },
+  }
+}

@@ -23,6 +23,7 @@
 // 标记提取,才不会把安装输出当成路径的一部分。
 import { existsSync } from 'node:fs'
 import { resolveCliBin, serverBinFrom } from './lib/dsh-cli.mjs'
+import { prepareDeclaredHostRuntime } from './lib/dsh-host-runtime.mjs'
 
 const version = process.env.DSH_CLI_VERSION ?? ''
 if (version === '') {
@@ -30,13 +31,37 @@ if (version === '') {
   process.exit(1)
 }
 
-// 复用既有解析顺序(DSH_BIN → npx 缓存 → pnpm 直装 → 通道 A/B 安装),
-// 不新写解析逻辑,冷启动的就绪保证与 runDshCli 一致。
-const resolved = resolveCliBin({
-  spec: `@deepseek-ai/dsh@${version}`,
-  version,
-  dshBinEnv: process.env.DSH_BIN,
-})
+// Human-supplied DSH_BIN remains the explicit, process-wide escape hatch. In
+// ordinary operation only the long-lived Host consults a customization-owned
+// compatibility declaration; build/plugin/dump-config keep using the exact
+// official CLI through scripts/dsh-cli.mjs and sync.mjs.
+let resolved
+if (process.env.DSH_BIN) {
+  resolved = resolveCliBin({
+    spec: `@deepseek-ai/dsh@${version}`,
+    version,
+    dshBinEnv: process.env.DSH_BIN,
+  })
+} else {
+  try {
+    resolved = prepareDeclaredHostRuntime({ repo: process.env.DSH_REPO_ROOT ?? process.cwd() })
+  } catch (error) {
+    console.error(`error: 无法准备 customization Host runtime:${String(error?.message ?? error)}`)
+    process.exit(1)
+  }
+  if (resolved !== null) {
+    if (resolved.version !== version) {
+      console.error(`error: Host runtime manifest version ${resolved.version} does not match requested DSH_CLI_VERSION ${version}`)
+      process.exit(1)
+    }
+    console.error(`info: Host runtime compatibility owner=${resolved.ownerId}, dshVersion=${version}`)
+  } else {
+    resolved = resolveCliBin({
+      spec: `@deepseek-ai/dsh@${version}`,
+      version,
+    })
+  }
+}
 
 if (resolved === null) {
   console.error(`error: 无法解析官方 DSH CLI(@deepseek-ai/dsh@${version});请检查网络或 npm registry`)
@@ -53,3 +78,7 @@ if (resolved.kind !== 'env' && !existsSync(serverBin)) {
 }
 
 process.stdout.write(`DSH_SERVER_BIN=${serverBin}\n`)
+process.stdout.write(`DSH_RUNTIME_KIND=${resolved.kind}\n`)
+process.stdout.write(`DSH_RUNTIME_OWNER=${resolved.ownerId ?? ''}\n`)
+process.stdout.write(`DSH_RUNTIME_COMPAT=${resolved.compatibilityKind ?? ''}\n`)
+process.stdout.write(`DSH_RUNTIME_FINGERPRINT=${resolved.fingerprint ?? ''}\n`)

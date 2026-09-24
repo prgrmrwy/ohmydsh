@@ -2,20 +2,13 @@
 # 修改后运行 `dsh build`(或 `node scripts/sync.mjs`)物化到 ~/.dsh。
 # 约定:禁用(enabled: false)≠删除;手改一律回写本仓库。
 
-dshVersion: 0.1.1-rc.2     # 启动脚本 bin/dsh 运行时读取,单一版本来源
+dshVersion: 0.1.5-rc.2     # 启动脚本 bin/dsh 运行时读取,单一版本来源
 
 autoUpdate:                # 启动/构建前自动检测并升级 DSH 版本(channel = registry dist-tag)
-  enabled: true            # 逃生门:false 或 env DSH_SKIP_UPDATE=1 完全跳过检测(可钉在旧版)
+  enabled: false           # 关闭:完全跳过检测,钉在 dshVersion(需手动升级时改回 true;env DSH_SKIP_UPDATE=1 等效)
   channel: latest          # 追踪频道:latest / next;env DSH_UPDATE_CHANNEL 可临时覆盖(优先级最高)
 
 web:                       # Web 启动形态(非 customization;sync 直接渲染进 profile patch)
-  lan: false               # 保持关闭。跨机器访问统一走 SSH 隧道,不做明文局域网直连。
-                           # ⚠ 开启会绑 0.0.0.0,把完整 agent 能力(bash/文件读写)暴露到局域网,
-                           #   且 DSH 无 TLS——明文传输可被同网嗅探。2026-08-24 决策:不使用该形态。
-                           # 远端访问方式:另一台机器 `ssh -N -L 3080:127.0.0.1:3080 user@<本机IP>`,
-                           #   浏览器开 http://127.0.0.1:3080(公钥免登 + SSH 加密 + 回环即 secure context)。
-                           #   用法见 docs/notes/lan-access-ssh-tunnel.md
-                           # ⚠ DSH_LAN=1 环境变量优先级高于本开关,同样不要设置。
   open: false              # 启动/检测时不自动打开浏览器或 PWA(2026-08-28 本机偏好)。
                            # 需要时显式 `dsh --open` 强制打开;`dsh --no-open` 仍可临时关闭。
                            # 缺省(字段不存在)视为 true = 保持旧行为。
@@ -34,17 +27,20 @@ customizations:
   #          enabledEnv = 可选,声明后同名 DSH_ 环境变量(真值 1/true/yes/on、
   #            假值 0/false/no/off)覆盖本条目有效启用状态,未设置/无法识别时
   #            回退到 enabled;用于默认关闭、仅在有权限的机器上用 env 打开的
-  #            定制(如内部专属包),与顶层 web.lan / DSH_LAN 同一套语义
+  #            定制(如内部专属包),与顶层 web / DSH_ 环境变量同一套真值/假值语义
   # 第三方(remote):只存 pin + 覆盖 + 记录,不 vendor 源码
   - id: cost-meter
     type: package
     source: remote
-    spec: dsh-cost-meter@1.5.42
-    version: 1.5.42
-      # [2026-08-24] plugin-update: cost-meter 1.5.35 -> 1.5.42(release notes 见 registry;审查记录请补进 note)
+    spec: dsh-cost-meter@1.7.30
+    version: 1.7.30
+      # [2026-09-04] staged-dsh-and-plugin-upgrade 阶段一:cost-meter 1.5.42 -> 1.7.10
+      # [2026-09-21] upgrade-dsh-0-1-5-runtime 任务 2.1/7.2:1.7.10 -> 1.7.30。
+      #   审查记录 checking/cost-meter-1.7.30.md;peer 已含 ^0.1.5-0(对 0.1.5-rc.2 满足)。
+      #   回滚:改回 dsh-cost-meter@1.7.10 + version 1.7.10 → dsh build → 重启。
     enabled: true
     brief: 会话费用统计
-    note: '会话费用统计(web client 插件);仓库 https://github.com/Han-1413141/dsh-cost-meter;1.5.35(2026-08-21 审查):v1.5.34 为 dsh 0.1.1-rc.x 适配(修复 rc.2 下费用展示丢失),v1.5.32 内置 DeepSeek-V4-Flash-Vision-Exp 计价,v1.5.35 修正未命中模型列表口径;升级后需重启验证加载与展示'
+    note: '会话费用统计(web client 插件);仓库 https://github.com/Han-1413141/dsh-cost-meter;1.7.10(2026-09-04 审查,npm 1.7.10 发布物核对):① 密钥治理变更——所有密钥(OpenCode Go Key、各 Coding Plan Key、火山 AK/SK、自定义余额 {{VAR}} 占位符)不再明文落盘,一律迁入 DSH 凭据库(新增运行时依赖 @deepseek-ai/dsh-credentials 0.1.0-rc.8,与 dsh-home-paths 同为精确锁版),设置页输入框改 write-only(保存后不可回显),账本 ledger.json 与下发浏览器的配置永不含明文;旧版写在请求头里的明文密钥在启动时自动导入凭据库并替换为 {{CUSTOM_BALANCE_KEY_…}} 占位符;携带凭据出站另受 customBalance.allowedHosts 白名单约束(未配置时放行并告警一次,不 fail closed)。② 网络声明面扩大——host 侧出现的域名由 1.5.42 的 18 个增至 19 个(净增 cli-chat-proxy.grok.com、chatgpt.com、cloudcode-pa.googleapis.com 及其 daily/sandbox 变体,来自新增的 CLIProxyAPI 网关额度适配器与 xAI/Codex 额度查询;另有 open.volcengineapi.com 为火山方舟 AK/SK 管控面 HMAC 签名端点);其中一部分仅为文档/价目表链接常量(api-docs.deepseek.com、opencode.ai/docs、ax.ac.sugon.com 等)而非请求目标。**隐私边界:余额/额度类端点仅在用户显式启用对应 Provider 时才出站,未启用不产生任何网络流量**;API Key 只发往各自官方域名(baseURL 指向非官方域名时余额查询直接拒绝,模型请求不受影响)。③ 版本选择——1.7.0/1.7.8/1.7.9 曾致宿主启动即崩,故直接取该功能线首个稳定版 1.7.10;升级后必须先做宿主冒烟(排查 plugin tree failed to load / Cannot access / strict codec)再推进后续阶段。仍为纯 web client 插件(dsh.client.platform=web + 自带 cordis.patch.yml),不导入 cordis/dsh 的 Service/Context 运行时类,故不受阶段四运行体迁移直接影响;engines.node >=20。历史记录:1.5.35(2026-08-21 审查):v1.5.34 为 dsh 0.1.1-rc.x 适配(修复 rc.2 下费用展示丢失),v1.5.32 内置 DeepSeek-V4-Flash-Vision-Exp 计价,v1.5.35 修正未命中模型列表口径;升级后需重启验证加载与展示'
   - id: archify-dsh
     type: package
     source: remote
@@ -61,6 +57,15 @@ customizations:
     enabled: true
     brief: Worktree Session 首发隔离(task branch/lean deps/独立 build home)
     note: '自研 Host+Web bundle；从 base 在首次普通发送时创建唯一 ws/* branch 与 .worktrees/* checkout，不切换主 checkout；npm lean/mutable、.env.local ignored-only 同步、隔离开发 DSH_HOME、安全 status/promote/clean；交互与 Git 探测概念参考 https://github.com/LaoYueHanNi/dsh-git-worktree (MIT，详见 packages/worktree-session/NOTICE)'
+  # 自研(local):按知识域物理隔离、可跨库检索的 memex 持久记忆层 + 「记忆」设置页。
+  - id: dsh-memex
+    type: package
+    source: local
+    version: 0.2.0
+    enabled: true              # 备用端口验收已通过(3091 完整组合启动/0 报错，禁用态验收已回滚)
+    enabledEnv: DSH_MEMEX_ENABLED  # 紧急熔断：设 DSH_MEMEX_ENABLED=0 即可在下次 build 时移除
+    brief: memex 持久记忆原生接入(scope 隔离/跨库检索/守门 + 「记忆」设置页)
+    note: 'change dsh-memex-scoped-memory(0.1.0 归档) + change dsh-memex-settings-ui(0.2.0)。回滚 = enabled: false + node scripts/sync.mjs；重启必须脱离调用方进程(setsid)，否则中断会留下停机空档。**0.2.0 新增 Web 半区**：注册 settings.section(id dsh-memex，文案「记忆」，order 25)，页面主语是「一组工作区」而非单个库：路径按「认领它的入口集合」分组，块内上半「关联仓库」、下半「记忆入口」(可多个，主入口在前并标注，整块左侧一条竖脊线贯穿；静默字段；事实按「标签—值」列出，含只读的发布方向)。**页面主语 = 宿主 workspace 注册表**(2026-09-20 二轮)：页面不再从配置的 pathPrefixes 反推工作区，而是读 `ctx.workspaceRegistry`(可选注入，`ctx.get` 读，缺席回答 known:false 降级为仅配置形态并明说)，因为配置路径只是真实工作区的副本——本机 8 个工作区里 4 个没有任何配置，按配置建的页面看不见它们、也无法给它们挂入口；每个工作区下列出入口：主入口默认取**该路径派生的库**(先远端后末两段，只作提议不写配置)，入口列表态只显示角色/名称/卡片数、展开才是路径与远端事实与动作，「+ 增加附加入口」从候选(已声明库 / 命名空间下未声明库 / 新建库)里选，**重名从构造上不可达**(一个库始终是一条配置条目，挂到第二个工作区是给它自己的条目加路径)；声明了路径但不属于任何工作区的条目单独可见可编辑；「关联仓库」措辞改为「工作区」。**按工作区关闭记忆**(2026-09-20 三轮)：入口级 `memory: false`(缺省开启) = **完全关闭**——该工作区会话不注入召回指令、不注入写卡提醒、8 个工具全部拒绝(说明去 Settings→记忆 打开)；判定在 `currentFor()` 里、且在 `ensure()` **之前**(否则关闭的工作区第一次调用会把库目录建出来)。粒度是**该工作区的路由**而非库全局可达性：personal 既是 ohmydsh/dsh-cockpit 的入口又是所有工作区的兜底写入目标，做成全局会连带掐掉其它工作区的兜底路径，故 spec 明确「关的是这个工作区，不是这个库」。开关按会话启动读取，重开无需重启；页面开关在工作区标题行，未声明工作区同样先落声明(含 primary)。与 `enabledEnv: DSH_MEMEX_ENABLED`(整插件下线、构建期)不重叠。**兜底入口语义变更**：`personal` 由「无绑定时仅作写入目标」改为**默认授予**——默认可读可写(新工作区零配置可用)，由入口自己 `fallback: false` 关闭，关闭后**读写都不可达**；绑定只做加法(不取消兜底)，显式列出 personal 的绑定可覆盖关闭。**必须记住的坑**：给未声明工作区挂入口或关兜底时，必须同时把派生主入口落成声明——解析器一旦有任一声明命中该路径就不再走派生分支(`configuredPathMatch` 命中即返回)，只落附加入口会**静默抢走主入口**；页面已实现该 staging 并在保存前提示。**一个工作区可关联多个入口**(change 内追加的模型 B)：同一声明路径被多个 scope 认领时恰好一个必须标 `primary: true`(配置期校验；remote 模式重叠在解析期判定)，主入口承载当前 scope/召回/图级操作与默认读写，附加入口只在显式指名时可读可写(默认动作绝不碰它们)；同一库目录仍只能被一个 scope 使用。只用官方主题变量(border-l*/bg-layer-*/state-*-primary/button-primary-fill)，浅色与暗色均自适应；导航图标用有界 DOM 适配(匹配自己那行的可见文案 + 配对 CSS mask 自绘 16px 线性 book，跟随 currentColor)，适配失败静默降级为官方齿轮；配置编辑走官方 ctx.settingsScope(整份 scopes 作为一次带 revision 围栏的 mutate)，库事实走只读通道 /dsh-memex(stores/resolve/remote；回环与认证边界由 connection 层统一施加)。**行为变化(需知)**：无仓库目录不再 fallback 到 personal —— 按本地路径末两段派生各自的库(~/.dsh-memex/<name>)且不配远端同步；personal 仍是可解析的普通 scope(默认写入目标含它)但不再隐式承接任何目录；已声明路径(ohmydsh/dsh-cockpit→personal、nexus、flow-web-monorepo)路由不变。新增两条静态完整性约束(同一库路径被两个 scope 共用、同一 remote 模式字面重复 → settings 校验拒绝)；remote 模式运行时重叠改为报错而非静默取第一个。远端写入按状态分流：未配置→sync --init <url>；已配置→sync/push/pull/on|off/更换远端(独立动作+确认)，**从不重建或重新 init 已配置的库**，系统自身不写库内文件。⚠ 内核 --init 靠英文错误串判定「remote 已存在」，本机 zh_CN locale 下重跑 --init 会直接失败，故所有内核调用注入 LC_ALL=C/LANG=C(升级内核需复核)。**卡片浏览(change dsh-memex-card-browser，2026-09-24)**：设置页入口展开态新增「打开卡片」，按需拉起内核自带 `memex serve` 并在新标签页呈现——不自研浏览 UI、不改写上游资源，上游跑在**自己 origin 的根路径**上，这是「上游升级零跟随」唯一成立的形态(挂子路径会因绝对路径断裂而必须重写上游 HTML)。⚠ 四条内核约束见 docs/notes/dsh-plugin-integration-pitfalls.md 第 11 节：①配了远端不传 `--local` 会重定向托管站且**本地服务根本不创建**；②内核默认在 **Host 那台机器**开浏览器，须注入 MEMEX_NO_OPEN；③端口被占用时内核为**每个试过的端口**各打印一行 running at，**只有最后一行是真的**，故解析 stdout 必须取最后一个匹配(取第一个会交出另一个库的端口，页面正常打开但内容属于别的库)——**此为随内核版本复核的文本解析**；④长驻进程 stdin 不能用 ignore，且 `runKernel()` 的跑完即死结构不可复用。服务按库隔离(一进程一库，内核 MEMEX_HOME 粒度)、按需启动、随插件停止回收；`memory:false` 的库在 **spawn 之前**拒绝。跨机器：dsh-memex 只暴露自有注册点 `dshMemex.browseAddress`(client 半区，不进 inject)，由 `cockpit-memex-browse-shim` 接上驾驶舱 `cockpitBridge.portForward`；**注册方失败时绝不回落本机地址**(跨机器下 localhost 会解析到用户自己的机器)。地址解析必须发生在 **cockpit iframe 内**(bridge 只认 window.parent 握手)，故按钮同步开空白标签页→在设置页解析→再令其跳转，不能用 launcher 页自行解析。已知限制：上游 serve-ui.html 从公网 CDN 取 marked，离线/内网下 Markdown 渲染降级(不因此改写上游资源)。运行依赖:memex CLI 在 PATH(@touchskyer/memex@0.4.1，MIT，不修改上游源码/卡片格式)；全局安装需显式 --registry=https://registry.npmjs.org/，因用户 ~/.npmrc 的 bnpm 镜像目前仅同步到 0.4.0。'
   # 自研(local):B013 sidebar 会话行前动态 provider logo
   - id: sidebar-session-provider-icon
     type: package
@@ -69,7 +74,56 @@ customizations:
     enabled: true
     brief: 侧边栏会话行当前选中模型品牌 logo(选择器即时切换)
     note: 'B013 落地;openspec change sidebar-session-provider-icon;Web client 订阅官方 modelDirectories per-session store,输入框模型切换成功即更新 logo;host provider projection 仅作未打开历史会话 fallback;品牌 SVG 下载落盘(DeepSeek/OpenAI/OpenCode/Anthropic/Grok/Kimi/GLM/MiniMax/Pi/OpenClaw/Hermes),不手绘;轻量 DOM 注入 + row-locator 单模块,不触碰官方 StateDot/时间/菜单/拖拽;未知选择首字母 fallback'
+  # 自研(local):B018 会话标题旁 session id 短标识徽标(点击复制完整 id)
+  - id: session-title-copy
+    type: package
+    source: local
+    version: 0.1.2
+    enabled: true
+    brief: 标题右侧 6 位 session id 徽标(点击复制完整 id + toast;标题恢复官方)
+    note: 'B018 落地 + 实机修订;openspec change session-title-id-badge;Web client 订阅官方 sessions list(current 为 id 真相源,cockpit-bridge 同 seam);标题旁插入自建徽标(去 session- 前缀取前 6 位,如 9af69b),hover tooltip 完整 id,点击复制完整 id + 瞬态提示;0.1.0 的标题点击复制已移除——标题恢复官方 disabled 原样;MutationObserver + sessions 订阅 rAF 防抖幂等 reconcile;DOM 结构知识单文件 title-locator;祖先面包屑打开行为不变;无 host 能力/无网络请求;定位失败/剪贴板拒绝安全降级'
+  # 自研(local):B019 设置面板底部 DSH 主机系统时钟(24 小时制 + 时区)
+  - id: system-clock
+    type: package
+    source: local
+    version: 0.1.0
+    enabled: true
+    brief: 设置面板底部 DSH 主机系统时钟(24h + 时区 + hostname)
+    note: 'B019 落地;openspec change settings-system-clock + dsh-0-1-2-host-api-migration;Host+Web bundle:host 经通用 connection RPC 通道 /dsh-system-clock 暴露只读 now 采样(主机 epoch / IANA 时区 / UTC 偏移 / hostname);web 注册官方 settings.section(id system-clock,order 300→设置导航最底部),一次采样 + skew 引擎本地每秒 tick,Intl timeZone + hour12:false 渲染,DST 正确;60s 周期 + visibilitychange 重同步;采样不可达显式降级,不静默回退浏览器时间;只读、零配置、无外部网络外呼。⚠ 回环边界的表达方式随运行体变更(2026-09-05,change dsh-0-1-2-host-api-migration):`0.1.1-rc.2` 由注册时显式传入 `{authority:''loopback''}` 逐 channel 限定;`0.1.2` 线删除了该注册参数,改由 connection 层对**每个** channel 统一施加 Host fence(Host 非 loopback 且不在 `trustedHosts` 内即 403)加浏览器会话认证(未认证 401)。本部署未配置 `trustedHosts`,故边界与旧版等价且更严(两道)。**已实测**:LAN IP / 伪造域名 Host 一律 403,携带有效 cookie 也仍 403(fence 先于认证);回环+已认证才返回采样。⚠ 若将来给 profile 配置 `trustedHosts`,本 channel 会随之放宽——那是一次显式安全决策,不得顺手添加'
+  # 自研(local):受限地区 × Claude 发送拦截(Web blocks + Host 出口国家码判定,双备份 Geo,未知 fail-closed)
+  - id: home-network-model-guard
+    type: package
+    source: local
+    version: 0.1.0
+    enabled: true
+    brief: 出口位于受限地区时禁用 Claude 系列模型发送(输入框禁用 + 原因文案)
+    note: 'openspec change block-claude-on-home-network 归档后更新为 trusted-egress-claude-guard,运行体迁移见 dsh-0-1-2-host-api-migration;openspec change fix-geo-timeout-budget-starvation 修复主备共享超时预算导致的假 unknown(实机 2026-09-04 误杀 84min/351 步 turn,出口实为 US、两端点均 200):timeoutMs 语义由整次判定预算改为**单端点**预算(默认 5s,最坏整体约 2×),每端点经 AbortSignal.any 组合调用方信号独享预算,慢主端点不再剥夺备端点尝试机会;单端点预算内对瞬时失败(transport/非 2xx)至多重试 1 次(150ms 退避),端点自身超时与确定性坏响应(非 JSON/无 country)不重试;失败归因由 geo 层上行(timeout/invalid-response/fetch-failed),network 层不再靠错误文本正则猜测;llm/stream gate 拒绝时在**根上下文**输出去重诊断日志(仅分类+降级原因,与 RPC 路径 logTransition 独立计数)——此前拒绝完全静默,故障只能靠解压 session 日志反推;fail-closed 语义未放宽,双端点均失败仍判 unknown;Host+Web bundle:host 经 connection RPC /dsh-home-network-model-guard(仅回环可达,表达方式见 system-clock 条目)提供出口判定(两个互为备份的 HTTPS Geo 服务读国家码:主失败切备,双失败 unknown 且指数退避持续重试 2s→60s;blockedCountries 默认 CN,本地配置 $DSH_HOME/plugins/dsh-home-network-model-guard/config.json 可改,不进仓库;TTL 5min + 本机 IPv4 指纹 + 配置代际失效,single-flight,响应只含分类/新鲜度不泄漏 IP);web 订阅官方 modelDirectories per-session store + conversation.blocks,Claude 家族识别 provider+model 双字段(claude/anthropic 路由 + claude-* 模型名),routable=false 让位官方,只清自己写入的 block,槽位自检防官方竞态;⚠ 信任面:仅访问两个声明过的 IP 归属服务,不主动探测 Anthropic/Cloudflare,不回传本地信息,不落盘 IP;blocked/unknown 对 Claude fail-closed(CLI/subagent 等 Host 流由 llm/stream 门禁兜底,实现中),非 Claude 不受影响;仅客户端 affordance 定位已升级为 Host 强制;DSH 升级需回归 blocks 共存语义(design Decisions 4)。[2026-09-05 运行体 0.1.2-rc.1 迁移]host 半区删除 `{authority:''loopback''}` 注册参数(该参数在 0.1.2 已不存在),回环边界改由 connection 层统一施加并**实测确认**(LAN Host 403);client 半区 inject 由 dsh-client-runtime 改为 dsh-api-session-controller + dsh-client-ui-renderer;56 例测试全过。[openspec change restore-blocked-composer-height]⚠ 临时补偿:0.1.2-rc.1 把 composer 从原生 textarea 迁到 Lexical contenteditable 时删除了撑高的隐藏 mirror(其内容为 draft+换行符,空草稿也占一行),高度改由 Lexical 产出的 p 元素承担,而仅存的 min-height 规则只作用于 hero 态——于是 block 生效且**草稿为空**时无 p 元素,内容区高度归零,绝对定位的原因文案被 scroll 容器 overflow 裁掉(实机 height 3.99858px,盒模型 956x0 + padding 4);草稿非空时有 p 元素不塌、内容照常保留,该路径本就正常。本包注入 COMPOSER_FALLBACK_CSS `[data-input-scroll] > div{min-height:24px}`:只锚定稳定 data-* 属性不用构建期哈希类名(每次重新构建都会变),补在内容区父级而非编辑器本身以免与官方 .hero .input{min-height:52px} 争夺同一元素同一属性,且为下界非覆写(24px=一行 line-height,已有高度的状态不受影响)。⚠ 运行体重新为非 hero 态 composer 内容区提供最小高度(或恢复等价 mirror)后**应删除该规则**;验证方式:移除后确认「block 生效+空草稿」仍能显示原因文案。该回归非本包特有——官方 ui-model-selection 在 routable=false 时走同一 blocked 分支同样会塌,本兜底无条件生效顺带覆盖'
+  # 自研(local):DSH Pet 常驻桌宠 Agent 入口(Host+Web 双半区)
+  - id: dsh-pet
+    type: package
+    source: local
+    version: 0.1.0
+    enabled: true
+    # 仅长期 dsh web Host 使用的 Pet Locus 兼容运行时；build/plugin 等官方
+    # CLI 仍按 dshVersion 走官方精确版本。版本变化必须重新审查，不自动套补丁。
+    hostRuntimeCompatibility:
+      kind: pet-unified-locus-v1
+      supportedDshVersion: 0.1.5-rc.2
+    brief: 常驻桌宠 Agent 入口(Pet Task/Invocation/可信来源快照/受管 Skill store)
+    note: 'openspec change add-dsh-pet;Host+Web bundle。Host 随 dsh web 同进程启动,自有受控生命周期(starting/ready/degraded/stopping)——Pet 初始化失败只降级自身,不阻止其余 DSH 服务加载。持久化:组合官方 @deepseek-ai/dsh-storage-sqlite 并仅把 dsh_pet 域路由到该 backend(storage-domain.routes 为覆盖式,profile 其余域保持默认 json);运行时状态一律位于 $DSH_HOME/plugins/dsh-pet/(state.sqlite / workspace / skills/store),与包安装目录和生成 profile 分离,插件升级或 profile 重建不覆盖任务数据。模型:每来源 scope 至多一个未归档 Pet Task,固定复用位于专用 DSH Pet Workspace 的一个普通 root executor session;每次调用创建新 Invocation 并固定当时 source 快照,页面切换不改写已创建 Invocation。Skill 隔离:Pet 不自带任何 Skill,也不提供让 Skill 为 Pet 适配的机制(petLabel/petIcon/petContext 解析已移除)——能力一律来自用户从 Host 绝对路径显式导入的普通 DSH Skill,登记为指向用户自有目录的 local-link 并软链投影到 workspace/.dsh/skills;授权边界是 Pet allowlist provider 而非投影,投影损坏/越界 fail-closed 并需显式重建。Pet 不按能力施加上下文门禁,来源是否够用由 Skill 自行校验。可信上下文:零参数 pet_context 工具按实际调用 executor session 反查当前 Invocation,模型无法传标识改绑目标。⚠ 该工具必须注册在 **executor 的 scoped agent 上下文**:官方 tools.register() 按调用上下文的 scope tag 决定层级,**无 scope 即静默落 global 层**——注册在 Host 上下文会让普通会话看到 pet_context 并误调用得到 NOT_A_PET_SESSION(openspec change scope-pet-context-tool-to-executor,2026-09-07 实机复现)。同一 change 覆盖 executor 加载的三条路径:Pet create、Pet resume(新 scope 必须重装 preset 与 scoped surface)及 DSH 自身从原生列表加载(agent/created 仅补 scoped surface,不重复 mount 已挂载 preset);所有 Pet Task executor 获得 pet_context,仅专用 Pet executor 获得 allowlist provider,workspace-resident executor 保留 standard preset 与 workspace Skills;WeakSet 幂等闸防重复注册,dispatch 前缺 scope 则 fail closed。[2026-09-10 真机修复]Cordis `ctx.inject()` 回调异步执行,不得注册后同步检查 WeakSet；create/resume setup 现显式等待 skills/tools 两个回调真实完成,外部加载 executor 复用同一 in-flight Promise,5s 未就绪 fail-closed；空且 failed 的 executor 创建壳会自动归档并新建 epoch,已有 Invocation 的失败历史不动。管理面为 loopback + same-origin 精确路由,严格字段校验、响应脱敏,不暴露任意 DSH RPC/prompt/文件路径(仅专用导入操作)。不读取或保存 provider 凭据。飞书入站(openspec change fix-pet-lark-onboarding):绑定使用新版 lark-cli `config init --name dsh-pet` 建专属 profile,Host-owned 订阅/身份/成员/历史/表情/回复均显式 `--profile dsh-pet --as bot`;绑定后以 `auth status --json --verify` 顶层结果核验 App ID 并原子持久化 bot open_id/name,旧 App-ID profile 不自动 rename/切换而在设置页要求显式重连。Channel onboarding 按 Bot→身份→allowlist→默认 workspace→启用/连接展示稳定步骤与 blocker;openspec change pair-pet-allowlist-member 增加允许成员单聊配对:Host 内存生成 40-bit `/pair xxxx-xxxx` bearer code(5min、单次、重启/取消/替换即失效),与正式 Channel 复用唯一受监督 consumer 且仅在 ready 后显示命令;严格限制 user+p2p+text+合法 open_id+配对水位+精确命令,首个认领者经串行配置写原子加入 allowlist,姓名仅作展示缓存;错误码/群聊/旧码静默,配对不创建 Task/Invocation/chat binding/表情,提交后才由 Host 固定回执;Settings 提供倒计时/复制/取消/重生/终态并保留手填 open_id 兜底。启用前 Host 重验全部前置;starting/reconnecting 页面做可取消有界刷新,避免错过 ready edge 后永久显示启动中。仅支持能由 `auth status --json --verify` 直接证明 bot open_id 的 lark-cli(最低已验证 1.0.93),旧版/未知版本提示升级且不启动 consumer;目标群缺 scope 仅持久化 code/scopes/官方 open.feishu.cn URL,ignored 仅节流记录低基数分类,不含正文/chat/message/sender/token。一期不含飞书入站 transport、跨设备 Pet Hub,也不改 dsh-cockpit 与 dsh-cockpit-bridge。隔离 DSH home 验收通过后启用(2026-09-01)。环境变量(openspec change pet-send-cr-and-workspace-env,2026-09-03):按 global 与来源 workspace 两个作用域配置键值,workspace 覆盖同名 global,两者皆无则变量不存在、由 Skill 停下询问;经官方 ctx.shellEnv 以 DSH_PET_<KEY> 注入 executor 每次 shell 调用,值不进 prompt/envelope,走 ShellExecRequest.dshEnv 通道;设置页第四页签「环境变量」含全局/工作区/生效结果三区,值默认打码、标示覆盖关系。⚠ shellEnv 为可选依赖:经 ctx.get 读取(写进 inject 会变必需依赖,Host 缺该服务时 Pet 永不加载),且 register 必须直接调用——包在 ctx.effect 里会因 effect 重跑重复注册抛错,中断 Pet 初始化并导致 executor 丢失 bash/fs 等官方工具(2026-09-03 实测复现并修复)。浮层:Pet 挂在 document.body 下自有宿主 + 独立 React root(非 portal,portal 会脱离事件委托容器使交互静默失效),position:fixed 按视口定位,不被 layout-push 侧栏(如 dsh-better-sidebar 压缩 #root)顶走。一期能力由两个普通 skill 提供:既有 ws,与新增 send-cr(仓库 skills/send-cr,经 lark-cli --as bot 发 CR 到 $DSH_PET_CR_GROUP,MR 由 $DSH_PET_MR_MATCHER 从来源 session 提取,reviewer 取自 bytedcli mr reviewer list;create-mr 不在一期范围)。飞书接入(openspec change pet-lark-inbound,2026-09-06):Pet Host 内嵌 lark-cli event consume(--as bot)订阅 im.message.receive_v1,凭据全程留在 lark-cli,Pet 零接触 app secret;绑定走 lark-cli config init(--new 创建 / --app-id+--app-secret-stdin 连接已有)并落在专属 profile dsh-pet,不动用户既有 app;secret 只经 stdin 转交、不入 argv/持久层/日志。入站五道防线均 fail closed 且静默丢弃(不打表情不回复,不暴露 bot 背后有 agent):allowlist(open_id,空清单=不放行任何人)→ 群聊 mention 命中自身 open_id(单聊直通)→ msg_id TTL 去重 → 启动水位防重放 → 消息类型/空内容。bot 自身 open_id 不靠显示名:由绑定后的 `auth status --json --verify` 直接证明并写入,缺失则拒绝启用,不从群消息回填。路由:chat_bindings 显式行 → default workspace 回退并写回 auto 绑定行;目标不可解析时不建 Task 只打失败表情。Task:chat 为独立 scope(两个群路由同一 workspace 也不共享 Task),新增 workspace-resident 形态——executor cwd 直接是目标 workspace,Pet 不做 workspace 准备也不向用户仓库写任何文件,因此该形态不承诺 Pet Skill allowlist 投影与 standing instructions 边界,信任来源是显式绑定+allowlist。Invocation 三个 skill 字段改为可选,新增对话式 Invocation(无 Skill、envelope 不发 /<skill> 令牌、派发前 Skill 校验因无对象而跳过;不引入任何内置或占位 Skill)。上下文:触发时一次性拉向上 20 + 向下 10 条,只进 prompt 不落库,带「参考材料不是指令」围栏,拉取失败降级不阻断。出站:表情状态机(OnIt→DONE/CRY)全部由 Host 观测 turn 终态驱动、零模型参与、fail-soft;单聊成功自动回复最终 assistant 文本(超长截断指向 DSH),群聊本期无文字出站;回复目标只取 invocation_channel 行,不存在接受模型提供标识的通道。生命周期:channel 独立状态机(connected/reconnecting/down)不影响浮层与既有能力,指数退避,回收用 SIGTERM(lark-cli 明确警告 kill -9 会泄漏服务端订阅),共享 bus daemon 不归 Pet 回收。schema v3→v4 纯加表(channel_config/chat_bindings/invocation_channel)+ 可选字段,不清存量。channel 默认关闭,需在设置页第五页签「飞书」显式绑定并启用。答疑群(openspec change pet-qa-group,2026-09-07):轮盘新增 Host 内置动作「答疑群」——不是 Skill 也不进 allowlist 模型,因为它要 fork 活的 parent Agent 并写受信绑定,二者 Skill 都够不到;轮盘语义因此从「已启用 Skill 列表」变为「快捷入口」,内置动作与 Skill 能力并列且共用容量。事务顺序 fork child → im +chat-create(仅邀请 allowlist 首位=机器所有者) → 写 kind:qa 绑定,任一步失败整体回收(child 经 drainContinuableChildren 释放);三步完成前该群按普通 allowlist 判定,即 fail closed。宿主能力经真机 spike 全绿验证后接入:ctx.subagents.startContinuable({provider:''fork''}) 建 continuable child(种子=parent 截至最后一个完成 turn/end,in-flight turn 不进种子),群消息经 dsh-subagent/internal 的 symbol 键 queuePrompt 排成 child 独立 turn,parent 非驻留时先 agents.resume,DSH 重启后 continuation manager 冷恢复 child。⚠ subagents/agents 均以 ctx.get 探测式接入(写进 inject 会让缺该服务的 Host 加载不了 Pet),探测失败时动作以禁用态显示原因而不是消失。准入:qa 绑定豁免 sender allowlist(群由 Host 亲手创建,成员只能被群内人拉入,故成员身份即凭据),豁免严格限于该 chat,其余防线(bot-sender/mention/去重/水位/消息类型)原样;非 qa 链路零变化。终态只信 subagent/end 事件——queuePrompt 返回仅代表 inbox 接受,不代表 turn 跑完更不代表落盘;结算按 chat 内最早未 settled 行匹配(child inbox 为 FIFO)。child 继承源会话组合与工具面,Pet 不装 preset 也不装 allowlist provider,不承诺任何 Skill 边界——信任来源是「本人建群+本人拉人」,prompt 要求改动前先确认(防呆不防坏)。源会话归档或无法 resume 时绑定失效:群内明示一次后静默(qa 群里 bot 已公开发言,静默只会显得坏了),child 会话与历史保留可查。schema v4→v5 纯加字段(chat_bindings.kind 缺省 workspace + qaChild/qaParent/qaInvalidated,tasks 新增 qa-chat sourceKind),不清存量。[openspec change pet-media-official-cli-download]媒体下载不再依赖私有 lark-cli fork:删除 packages/dsh-pet/compat/lark-cli(patch + 固定 Go 工具链 + artifact,冷构建省约 1.7 GB)与本条目的 buildInputs 三条登记,`build:runtime-compat` 只剩 storage 段;改为以 $DSH_HOME/plugins/dsh-pet/media-spool(0700,已在 locus child project-read guard 的 deniedRoots 覆盖之内)为 spawn cwd,用本机 pin 的官方 lark-cli 路径模式下载,官方 binary 必须能解析且 `--version` 等于 1.0.94,否则 media port 保持 unavailable(文字 Delivery 继续);写入期每 50ms 量目标与原子写临时条目,超限即终止整个进程组,成功/失败/取消/超时一律删除本次随机前缀条目,启动清扫全部残留;隔离依据由「字节无具名路径」改为「路径位于 child 被拒 root 内」,已知退化=失去官方 CLI 的已知长度读前拒绝[2026-09-22 真机修复]升级到 0.1.5-rc.2 后 lumevm 上 Pet 启动即整体不可用:`node:sqlite` 绑定字符串参数在首个 NUL 字节处截断(C 字符串语义),而三张 Locus 表(locus_indexes/locus_switch_notices/locus_permission_audit)此前用 `\u0000` 作复合行键分隔符——话题级 endpoint、switch notice、permission audit 序号过 1 的行,主键实际全部塌缩到分隔符之前的前缀,`INSERT ... ON CONFLICT DO UPDATE` 静默保留最后写入者,索引表出现真实数据丢失;启动对账发现行键与 value.key 不一致时抛错,而调用方 `if (locusStartup === undefined) return` 让整个 Pet apply()提前退出,路由未注册、飞书通道不启动。改分隔符为 `\x1f`(`host/locus/storage-key.ts`);对账发现的是「行键为 value.key 截断前缀」这一可证明的损坏特征时改为自愈(用 value.key 计入内存索引,不再中止启动;真正无关的不一致仍 fail closed);新增离线修复脚本 `scripts/repair-truncated-keys.mjs`(比照既有 `migrate-state-version.mjs` 范式:停 Host、备份、`--dry-run`/`--yes`)重写历史损坏行键,对索引表的碰撞该脚本会标记 UNRECOVERABLE 而非猜测——但 locus_indexes 的碰撞在下次 Host 启动时通常已被 `reconcileStartup` 的全量 loci→index 重建自愈,switch_notices/permission_audit 无此重建、碰撞是真实永久丢失。顺带修了另一处独立死锁:显式重建入口若原 parent 已归档,`resolveMainParent` 与真正缺失用同一句「已停止操作」,而重建请求的 parentSessionId 固定取自被重建 locus 记录本身(GUI 无法换绑),于是唯一出口必然失败;现在归档态给出「已被归档,请先恢复」的专门措辞,恢复归档后同一重建请求即可成功。同步补 `openspec/specs/pet-locus-collaboration/spec.md` 『来源失效』一节缺失的『原 parent 已归档』场景。[openspec change shrink-pet-compat-to-minimal,2026-09-22]compat overlay 从 **7 个上游包 / 72 hunks 收敛到 1 个包 / 32 hunks**,现在只替换 `@deepseek-ai/dsh-subagent`。① 移除 `isolateQueuedTurnClaim`(8 hunks,`core/agent` + `core/agent-loop` 回到官方原版):该 seam 只服务 B035 的推送式 inquiry 派发,而该路径已被拉取式上下文工具(`pet_locus_parent_lookup` 等,读已持久化 transcript、不唤醒对方、不占 run slot)取代;实测 override 从未启用(npm arborist 崩溃)、台账 0 行。② storage 改为**注册 Pet 自有 backend**(删 `storage-atomic.patch` 32 hunks,`storage`/`storage-domain`/`storage-json`/`storage-sqlite` 四包回到官方原版,`compatDependencies` 随之退役):`@deepseek-ai/dsh-storage` 公开导出 `StorageBackend`/`KvFacet`/`KvUnit` 与 `BackendRegistry` 且明述路由归消费者,故 Pet 实现自己的 backend(`src/host/storage/`),schema 校验、域版本迁移、`domain/changed` 仍由官方 storage-domain 承担。⚠ backend 必须是**独立 Cordis 行**(`dsh-pet-storage`):storage-domain 注入 `storageBackendServiceKey(name)` 而 Pet 行注入 `storageDomain`,自 provide 会成环。⚠ SQLite 排他锁**按连接**持有:初版保留官方 backend、另开连接持锁,真机死锁;事务与锁必须是写记录的同一句柄。⚠ `locking_mode = EXCLUSIVE` 是**惰性**的,新建库时 schema 写入恰好顺带取锁掩盖了缺陷,对已存在的库则一无所写、第二个 Host 会长驱直入,故 open 时必须强制 `BEGIN IMMEDIATE`/`COMMIT`。③ 保留的 4 个 seam 及其 marker:`settlementNotice:''silent''`、`createIdleContinuable`、`contextMode:''independent-v1''`(含 durable `toolFilter`)、`withLiveContinuableChildSession`。**曾计划一并退掉前三项,实施期复核证伪**:官方 `SubagentStartRequest.prompt` 必填,而 locus 创建是两阶段的(建 child → 建群 → 提交 locus 行 → 才投递首条内容),中间那段 child 必须存在但不能开工;`composeFrom` 绑定的是**父的** standing mount 实例(保证「已存活子代不被父的后续变更污染」),而冷恢复需要的是「子代能独立于父重建自己的组合」,后者只有 `independent-v1` 提供;`toolFilter` 官方确有但与 `independent-v1` 共用 descriptor v5,拆不干净。教训已固化为 `pet-compat-minimization` 的 Requirement「判定 seam 可移除必须覆盖其全部语义」——**移除判定与新增判定适用同一举证标准**。**退役条件(诚实措辞)**:上游需同时发布这四项能力才能删除本 overlay;目前**只有 settlementNotice 报告过上游**(discussions #7508,交叉引用 #5360),其余三项上游并不知情,故本字段不应被读作「即将到期」;上游不接受外部 PR,唯一通道是 Discussions。'
+  - id: dsh-pet-executor
+    type: preset
+    version: 0.1.0
+    enabled: true
+    brief: Pet 执行会话专用 preset(不加载 skill-filesystem)
+    note: '与官方 standard 的唯一差别是移除 skill-filesystem。Pet 规范要求只有其允许清单中显式启用的 Skill 才可对执行会话发布/加载/注入,而 dsh-skill 的 collectFresh 始终把 global 层并入合并结果——scoped 注册是加法,provider 无法减去 preset 带进来的另一个 provider,因此排除它的唯一办法是不在 preset 中加载。保留 tool-skill:执行会话仍需目录与加载器,只是目录完全来自 Pet 允许清单。理由见 packages/dsh-pet/docs/adr/0001-executor-preset.md'
   - id: ws
+    type: skill
+    enabled: true
+  # 自研 skill:「统计一下召回」→ 跑 dsh-memex-recall-report 并按口径解读
+  # 命令本身随 dsh-memex 包的 bin 分发(openspec 2026-09-24-memex-recall-report-cli);
+  # 这里只提供触发词、定位命令的包装脚本与解读纪律。只读,不改卡片。
+  - id: memex-recall-report
     type: skill
     enabled: true
   # 自研 skill:添加远端插件的标准流程
@@ -80,39 +134,57 @@ customizations:
   - id: remove-dsh-plugin
     type: skill
     enabled: true
+  # 第三方 Skill 的 DSH 按需适配:只有用户显式调用时才启用该会话的 ADHD 友好输出模式
+  - id: i-have-adhd
+    type: skill
+    enabled: true
+    brief: ADHD 友好按需输出模式(答案优先/短步骤/显式进度/少跑题)
+    note: '上游 https://github.com/ayghri/i-have-adhd (MIT,约 43.9k stars,活跃);依据 commit 6f1f982d0a47c65899af3c5a7450b7098bc65325 的 skills/i-have-adhd/SKILL.md 做 DSH 原生中文适配。用途仅为改变模型回答结构,不新增工具、模型、Host/Web 代码、Hook、网络访问、文件权限或依赖。上游未发布 npm 包(package.json private:true),npm i-have-adhd 查询为 404,且 INSTALL.md 尚无 DSH 专项说明;本仓库按既有 type:skill 通道由 sync 复制到 ~/.dsh/skills/i-have-adhd。默认按需:whenToUse 要求用户显式调用 i-have-adhd / ADHD mode,普通“简洁一点”不触发;启用后在当前会话持续,用户说 stop adhd mode / normal mode 时退出。更新需人工复核上游新 commit 后同步适配内容与本记录。'
   # 自研 skill:沙箱/权限升级避坑(sandbox_permissions 正确用法 + core 缺陷绕过)
   - id: dsh-sandbox-notes
     type: skill
     enabled: true
-  # 自研 skill:B015 跨机器访问 — 客户端 SSH 隧道(公钥免登 + 端口占用自动退避 + 附脚本)
-  - id: dsh-tunnel
+  # 第三方 skill:前端视觉设计方法论(让 UI 不像模板产出的默认样子)
+  - id: frontend-design
     type: skill
     enabled: true
-  # 第三方(remote):B003 IDE 集成 — workspace 菜单一键在 VSCode 打开
-  - id: open-in-vscode
-    type: package
-    source: remote
-    spec: 'https://github.com/omdsh-dev/dsh-open-in-vscode/archive/refs/tags/v0.1.6.tar.gz'
-    name: dsh-open-in-vscode
-    version: 0.1.6
+    brief: 前端设计方法论(定调色/字体/布局/一条记忆点,避免“AI 默认脸”)
+    note: '上游 https://github.com/anthropics/skills 的 skills/frontend-design/SKILL.md,commit 41bbe19d1a1a7eaab5e7bb9050a417e5c6cffc8f(2026-09-03),Apache-2.0(许可全文随 skill 目录落在 ~/.dsh/skills/frontend-design/LICENSE.txt,出处见同目录 ATTRIBUTION.md)。逐字 vendor,未改写。用途仅为设计方法论:新建 UI 或重塑既有界面时给出定调流程(先出 token 方案 → 对照 brief 自查是否落进"通用默认" → 再写代码 → 克制与文案准则),不新增工具/代码/Hook/网络访问/依赖。本仓用法:改自研插件的 Web 半区(设置页等)时按需加载,与本仓"遵循官方 settings.section 槽、只用 --dsw-alias-* 主题变量"的既有约定叠加——主题由宿主决定,故该 skill 的"自选配色"在本仓落成"结构、排版与唯一记忆点自选"。升级需人工复核上游新 commit 后覆盖 SKILL.md 并更新 ATTRIBUTION.md 与本记录。'
+  # 第三方 skill:按受众校准的解释模式(ELI5 / 讲给经理 / 讲给我妈)
+  - id: eli5
+    type: skill
     enabled: true
-    brief: 工作区菜单「在 VSCode 中打开」
-    note: B003 落地;npm 0.2.0 已 unpublished,按官方 README 建议用 tag v0.1.6 的 tarball 直装(不跑 git prepare);MIT,50 stars,2026-08-16 活跃;host 行 dsh-open-in-vscode(typert 服务 openInVscode/open,用户点击时 spawn 编辑器 CLI)+ web client(workspace 行菜单,rc.6 走兼容适配器),无工具/无模型可见面;前置:本机装了 VS Code CLI(code),详见 https://github.com/omdsh-dev/dsh-open-in-vscode
+    brief: 按受众校准解释(年龄/学段/职位/亲属关系,默认 Age 5)
+    note: '上游 https://github.com/DreambigOu/ELI5,commit a766623b062331fdde53467001379b4ddf3acc2f(2026-03-17),MIT(全文随目录落在 ~/.dsh/skills/eli5/LICENSE.txt,本仓公开故再分发须随附)。纯文本 skill,不新增工具/代码/Hook/网络访问/依赖。正文逐字未改,仅追加 whenToUse 收紧触发(上游 description 会被"讲给我妈听"这类日常说法自动命中);出处与本地改动见同目录 ATTRIBUTION.md。'
+  # 自研 skill:把 MR 的 CR 请求发到飞书群(lark-cli im +messages-send)
+  # 与 ws 同等定位的普通 skill:普通会话可直接用;也可在 Pet 设置 → Skill 里导入
+  # 本仓库的 skills/send-cr 成为 Pet 能力,两处行为一致、不含任何 Pet 专属声明。
+  # 目标群来自 $DSH_PET_CR_GROUP(Pet 设置 → 环境变量,工作区覆盖全局);未配置则
+  # 停下来询问,不猜群。发送前必须用户确认。前置:本机装了 lark-cli。
+  - id: send-cr
+    type: skill
+    enabled: true
   # B004 扩展:订阅制主对话 provider — codex / claude / grok OAuth 登录后出现在输入框模型选择器(免 api-key)
-  # ⚠ 临时(2026-08-25):上游 PR #40 的 fork 分支 pinned tarball(含内置 lib,b5b1897),本地先用「按模型默认推理档」;
-  #   上游合并发版后删除本临时条目,spec/version 切回 npm 新版本。
   - id: llm-subscriptions
     type: package
     source: remote
-    spec: 'https://github.com/prgrmrwy/dsh-plugin-subscriptions/archive/d927e3aa7f6580193b503aba0db2da4de1eec895.tar.gz'
     name: dsh-plugin-subscriptions
-    # 必须与 pinned tarball 内 package.json 的真实版本一致：sync 以严格字符串
-    # 比对做漂移检测，写成 0.5.2+pr40.d927e3a 会让每次 sync 都判定漂移并重新 add，
-    # 破坏幂等。fork/patch 身份由上面的 spec commit hash 与下面的 note 承载。
-    version: 0.5.2
+    spec: https://github.com/prgrmrwy/dsh-plugin-subscriptions/releases/download/v0.9.2-dsh-0.1.5-rc.2-peer.1/dsh-plugin-subscriptions-0.9.2.tgz
+    version: 0.9.2
+    integrity: sha512-0ezy0cd5gmxSTwvw+tnC3yBuak6BtU8M6zm8bv8FgI4Dr/RA0/RvigK5Txm69awBJeGHYb2mmQc9tluqAaLn+Q==
+    # compatibility provenance: upstream v0.9.2 commit 963e7bc9a92ca98853270a7c9c9be6442ec60a48;
+    # target branch commit c24abd94bf7d83d27602c91fa0d07292ccb5e46c, tag v0.9.2-dsh-0.1.5-rc.2-peer.1;
+    # tarball SHA-256 885b0a5d7b7333e48a32e5ab81361fe653815c196fd42f1ff2f66738baa30fbf.
+      # [2026-09-07] codex 模型目录停在 GPT-5.6 线、看不到 GPT-6-Astra:
+      #   0.6.0 硬编码上报 client_version=0.147.0,而 chatgpt.com 的
+      #   /backend-api/codex/models 按客户端版本分流目录。同一账号实测
+      #   0.147.0–0.152.0 均无 gpt-6-astra,0.153.4 起返回 visibility=list,
+      #   故根因是 pin 过旧而非账号权限。上游 0.6.2 已把该常量提到 0.153.4。
+      # [upgrade-dsh-0-1-5-runtime] 0.9.2 target peer-only fork is pinned to the exact release above;
+      # full target Host/Web auth, media, proxy, and sandbox-shim smoke remains a devbox gate.
     enabled: true
-    brief: codex/claude/grok 订阅制 provider(Claude 复用本机登录态,输入框可切换)
-    note: '【2026-08-25 临时 fork patch,08-26 跟进 head】上游 PR #40「按模型默认推理档」(https://github.com/V1ki/dsh-plugin-subscriptions/pull/40)的 fork 分支 pinned tarball(prgrmrwy/dsh-plugin-subscriptions @ d927e3aa7f6580193b503aba0db2da4de1eec895,归档含 built lib;08-26 新提交 d927e3aa「feat(settings): collapse the per-model default-effort list」= 设置页每 provider 默认推理档列表默认收起为可展开区,头部计数(总数/已覆盖),>8 模型出名称过滤,带纯函数 deriveModelDefaultsView 单测);功能:设置→订阅每模型「默认推理档」下拉(枚举跟随 live 目录,Claude 不再只能 Default),选择器切换模型即预选,存 ~/.dsh/plugins/subscriptions/model-defaults.json(0600);验证:隔离 DSH_HOME 端到端(下拉→保存→/model 预选 High→真实 Claude 请求 22.1K in/4 out)+ tsc/build/单测 208 用例 0 失败;⚠ 上游合并发版后删除本临时条目并把 spec/version 切回 npm。原记录:B004 扩展(订阅制主对话,非委派);每次升级先读 change openspec/changes/2026-08-20-llm-subscriptions-upgrade(含 ADR-0001 选型);repo https://github.com/V1ki/dsh-plugin-subscriptions(MIT,158 stars,活跃,每日提交);功能:设置页 Subscriptions 页登录 ChatGPT(Codex)/ Claude / Grok(X Premium),登录后出现在会话模型选择器(/model 分组),live 模型目录(codex 走 chatgpt.com/backend-api/codex/models、claude 走 api.anthropic.com/v1/models 带 thinking/effort),附用量卡片 / Effort 选择器 / Speed 选择器 / image_generate / x_search;0.4.2 关键变化(2026-08-20 diff 0.3.1→0.4.2 源码核对):① claude 登录默认「导入本机 Claude Code 凭据」— macOS keychain(服务名 "Claude Code-credentials")→ 失败回退 ~/.claude/.credentials.json(尊重 CLAUDE_CONFIG_DIR),命中即秒登录不弹浏览器,无凭据时报"Run claude first";刷新后写回 CLI 凭据库(stale-blob 乐观并发校验,与 claude CLI 共享同账号不打架)② OAuth 底层改用 claude.com/cai/oauth/authorize + 固定回调 platform.claude.com/oauth/code/callback(旧 claude.ai/oauth/authorize 已废弃 → 修复 0.3.1 authorization failed)③ 新增 providerRetryPolicy(1s→60s 指数退避)与 execFileSync 探测 claude --version(⚠ 信任面变化:0.3.1 的"无 child_process"对 0.4.2 不成立,本条目由 2026-08-20 审查确认);路由 id(codex/claude/grok)未变 → subscriptions-sandbox-shim 与既有 codex 会话(auth.json)兼容;peer 仍 ^0.1.0-rc.5(兼容 rc.7 解析);风险:订阅自动化 ToS/封号(与网页版同级),config.providers 可只留 codex/claude;grok 不登录即不出现。0.5.0(2026-08-22 diff 0.4.2→0.5.0 升级):路由 id 未变、登录/凭据面未变;新增 Speed 档位(speed/setSpeed RPC,standard/fast)与 web-app rc.8 vendor 图库(ImageGallery);claude User-Agent 改惰性计算(行为不变)。0.5.2(2026-08-24 diff 0.5.0→0.5.2:commits 0f9c3307→958a236f→08b9b7cc 核对):**① claude prompt caching 完整落地(PR #25,closed #24;0.5.0 的 claude 路由从不发 cache_control → 每轮全价重放 tools/system/全部历史,订阅 5h 窗口烧速远高于 CLI——本机 8/20-8/24 实测 32.1M/日全价 input、cost-meter cacheRead=0,升级后应见 cacheRead>0)**:translate/anthropic.ts 新增 markMessageCache(前缀断点 + 会话尾部 ephemeral 断点),配套 fix(claude) 按名排序 tools 保证缓存前缀稳定、保留中段 system 消息;② Claude OAuth fallback(本机无 CLI 凭据时走交互登录,PR #10);③ 新增 GitHub Copilot provider(设备码登录,PR #13/#26,默认未登录不出现);④ HTTP(S) proxy 支持(PR #33);⑤ peer 依赖 bump 至 0.1.1-rc.2(对运行体 0.1.1-rc.2 满足);路由 id(codex/claude/grok)未变 → shim 兼容;风险与 0.5.0 同(ToS/封号),config.providers 建议只留 codex/claude'
+    brief: codex/claude/grok/copilot 订阅制 provider(Claude 复用本机登录态,输入框可切换)
+    note: '0.9.2-dsh-0.1.5-rc.2-peer.1(compatibility fork, exact GitHub release; production patch only appends ^0.1.5-rc.2 to dsh-attachment/home-paths/llm/tools peers; runtime source, dsh.client.inject and cordis.patch unchanged; 453 tests passed, 7 skipped):升级动机 = **恢复 codex 模型目录的完整性**。0.6.0 把 Codex 目录请求的 `client_version` 硬编码为 `0.147.0`,而 ChatGPT 后端按该参数分流可见模型:同一已登录账号实测 `0.147.0`/`0.148.0`/…/`0.152.0` 一律不返回 `gpt-6-astra`,`0.153.4` 起返回且 `visibility=list`,即 GPT-6-Astra 缺失是**部署侧 pin 过旧**,与订阅权限、OAuth 凭据、DSH 选择器过滤均无关(插件仅丢弃 `visibility` 为 `hide`/`none` 的条目,Astra 不在其中)。① Codex 客户端版本改为**动态解析**——`lib/providers/codex-client-version.js` 读取公开 npm 元数据 `registry.npmjs.org/@openai%2fcodex/latest` 取稳定版号,**新增一个出站域名 registry.npmjs.org**;该请求只带 `accept: application/json`、`redirect: error`,**不携带任何订阅凭据**,1.5s 超时、成功缓存 6h、失败 5min 后重试并保留上次成功值,首次失败回退内置常量 `0.153.4`,且忽略 prerelease 与"倒退"版本号;不想出网可在插件配置显式写 `codexClientVersion: ''0.153.4''` 固定并关闭自动查询(改后需重启)。② 新增 **GitHub Copilot** provider(`PROVIDER_IDS` 由 3 个变为 4 个:codex/claude/grok/copilot,走 GitHub OAuth device flow,目录来自 `api.githubcopilot.com/models`)——**未登录即不出现在选择器**,不登录不产生该 provider 的任何流量;随之新增声明面域名 `api.github.com`/`api.githubcopilot.com`/`github.com`。③ 其余新增能力:模型池(priority / quota_aware 故障转移)、`video_generate`(grok)、设置页可视模型/工具编辑器;工具受 per-session 开关约束(`image_generate` 在两个 provider 均禁用时消失,`x_search`/`video_generate` 跟随 grok 开关),会话策略在创建时固化。⚠ 信任面延续:仍 `execFileSync` 调 `/usr/bin/security`(macOS keychain 读写 Claude Code 凭据)与 `claude --version` 探测,与 0.4.2 起的记录一致,非本次新增。peer 仍为双运行体区间(`dsh-llm`/`-tools`/`-attachment`/`-home-paths` 均 `^0.1.1-rc.2 || ^0.1.2-alpha.1`,cordis `^4.0.1`),对现役 0.1.2-rc.1 满足;路由 id(`codex`/`claude`/`grok`)未变,故 `subscriptions-sandbox-shim`(按 codex/grok 匹配)无需改动;凭据仍在 `$DSH_HOME/plugins/subscriptions/auth.json`(0600),升级不改写,**无需重新登录**。回滚:`spec`/`version` 改回 `dsh-plugin-subscriptions@0.6.0` → `dsh build` → 重启(代价是 Astra 重新消失)。历史记录:0.6.0(2026-09-04 升级,发布物核对):临时 fork 条目已回收为常规 npm pin——上游 PR #40「按模型默认推理档」(https://github.com/V1ki/dsh-plugin-subscriptions/pull/40)已于 2026-08-29 合并并随 0.6.0 发布,本仓库 2026-08-25 起为携带该补丁而临时指向的 fork commit tarball(prgrmrwy/dsh-plugin-subscriptions @ d927e3aa)因此撤销,name 字段随 npm spec 一并省略;0.6.0 发布物已核对含该功能:lib/model-defaults.js(设置→订阅每模型「默认推理档」,枚举跟随 live 目录,Claude 不再只能 Default,选择器切换模型即预选;存 ~/.dsh/plugins/subscriptions/model-defaults.json,写入 mode 0o600 + chmod 0600)与设置页收起视图的纯函数 deriveModelDefaultsView;peer 为双运行体区间(@deepseek-ai/dsh-llm/-tools/-attachment/-home-paths 均 ^0.1.1-rc.2 || ^0.1.2-alpha.1,cordis ^4.0.1)——对现役 0.1.1-rc.2 满足,且同一份构建同时兼容 0.1.2-alpha 线,故本条目在阶段四运行体迁移时无需再动。原记录:B004 扩展(订阅制主对话,非委派);每次升级先读 change openspec/changes/2026-08-20-llm-subscriptions-upgrade(含 ADR-0001 选型);repo https://github.com/V1ki/dsh-plugin-subscriptions(MIT,158 stars,活跃,每日提交);功能:设置页 Subscriptions 页登录 ChatGPT(Codex)/ Claude / Grok(X Premium),登录后出现在会话模型选择器(/model 分组),live 模型目录(codex 走 chatgpt.com/backend-api/codex/models、claude 走 api.anthropic.com/v1/models 带 thinking/effort),附用量卡片 / Effort 选择器 / Speed 选择器 / image_generate / x_search;0.4.2 关键变化(2026-08-20 diff 0.3.1→0.4.2 源码核对):① claude 登录默认「导入本机 Claude Code 凭据」— macOS keychain(服务名 "Claude Code-credentials")→ 失败回退 ~/.claude/.credentials.json(尊重 CLAUDE_CONFIG_DIR),命中即秒登录不弹浏览器,无凭据时报"Run claude first";刷新后写回 CLI 凭据库(stale-blob 乐观并发校验,与 claude CLI 共享同账号不打架)② OAuth 底层改用 claude.com/cai/oauth/authorize + 固定回调 platform.claude.com/oauth/code/callback(旧 claude.ai/oauth/authorize 已废弃 → 修复 0.3.1 authorization failed)③ 新增 providerRetryPolicy(1s→60s 指数退避)与 execFileSync 探测 claude --version(⚠ 信任面变化:0.3.1 的"无 child_process"对 0.4.2 不成立,本条目由 2026-08-20 审查确认);路由 id(codex/claude/grok)未变 → subscriptions-sandbox-shim 与既有 codex 会话(auth.json)兼容;peer 仍 ^0.1.0-rc.5(兼容 rc.7 解析);风险:订阅自动化 ToS/封号(与网页版同级),config.providers 可只留 codex/claude;grok 不登录即不出现。0.5.0(2026-08-22 diff 0.4.2→0.5.0 升级):路由 id 未变、登录/凭据面未变;新增 Speed 档位(speed/setSpeed RPC,standard/fast)与 web-app rc.8 vendor 图库(ImageGallery);claude User-Agent 改惰性计算(行为不变)。0.5.2(2026-08-24 diff 0.5.0→0.5.2:commits 0f9c3307→958a236f→08b9b7cc 核对):**① claude prompt caching 完整落地(PR #25,closed #24;0.5.0 的 claude 路由从不发 cache_control → 每轮全价重放 tools/system/全部历史,订阅 5h 窗口烧速远高于 CLI——本机 8/20-8/24 实测 32.1M/日全价 input、cost-meter cacheRead=0,升级后应见 cacheRead>0)**:translate/anthropic.ts 新增 markMessageCache(前缀断点 + 会话尾部 ephemeral 断点),配套 fix(claude) 按名排序 tools 保证缓存前缀稳定、保留中段 system 消息;② Claude OAuth fallback(本机无 CLI 凭据时走交互登录,PR #10);③ 新增 GitHub Copilot provider(设备码登录,PR #13/#26,默认未登录不出现);④ HTTP(S) proxy 支持(PR #33);⑤ peer 依赖 bump 至 0.1.1-rc.2(对运行体 0.1.1-rc.2 满足);路由 id(codex/claude/grok)未变 → shim 兼容;风险与 0.5.0 同(ToS/封号),config.providers 建议只留 codex/claude'
   # 自研(local):D001/issue #7 + Codex Responses 孤立 function_call 部署侧缓解
   - id: subscriptions-sandbox-shim
     type: package
@@ -121,68 +193,108 @@ customizations:
     enabled: true
     brief: 订阅 provider 工具面 sandbox 字段与 Responses 历史配对清洗(shim)
     note: 'D001/upstream https://github.com/V1ki/dsh-plugin-subscriptions/issues/7 部署侧缓解;适配器边界两层剥离(schema 出站 + arguments 入站),并清理中断 subagent settlement notice 注入父会话的孤立 tool-call(避免 Codex No tool output found HTTP 400);默认只作用 codex/grok,配置见 packages/subscriptions-sandbox-shim/README.md;⚠ sandbox 字段剥离仅限 danger-full-access + approval: never 部署,受限部署(read-only/workspace-write + ask)必须 enabled: false(合法升级通道会被误剥);上游修复后按 manifest 删除移除'
-  # 第三方(remote):归档会话查看/恢复 — 官方只有 archiveSession 无 unarchive(上游 Discussion #2613 已知缺口)
-  - id: ui-archive-manager
-    type: package
-    source: remote
-    spec: '@tangzai/dsh-ui-archive-manager@0.1.1'
-    version: 0.1.1
-    enabled: true
-    brief: 归档会话查看与恢复(设置页「归档管理」)
-    note: 'repo https://github.com/Neumannzc/dsh-archive-manager(MIT);用途:设置 → 归档管理,按工作区列出已归档会话,一键取消归档回侧边栏继续原会话;审查(2026-08-19):host 端幂等补丁 WorkspaceRegistry.unarchiveSession(官方未来提供则让位),unarchive 走 registry 自身 enqueueOperation/requireState/setState 状态路径,经官方 archived-sessions-changed 帧广播;webServer 路由带信任防护(Host fence 防 DNS rebinding + Origin 校验 + 8KiB body cap);无删除/破坏性功能;仅 react peer;本地 clone 验证 typecheck + 17 单测 + build 全过(CI 红叉仅为 pnpm 忽略 esbuild 构建脚本的环境问题);⚠ TRUSTED_HOSTS 默认空 → 仅限 loopback(127.0.0.1/localhost),开启 web.lan 需源码加 trustedHosts;DSH 升级后需回归验证'
   - id: width-tiers
     type: package
     source: remote
-    spec: dsh-width-tiers@1.0.3
-    version: 1.0.3
-      # [2026-08-24] plugin-update: width-tiers 1.0.2 -> 1.0.3(release notes 见 registry;审查记录请补进 note)
+    spec: dsh-width-tiers@1.0.5
+    version: 1.0.5
+      # [2026-09-04] staged-dsh-and-plugin-upgrade 阶段二:width-tiers 1.0.3 -> 1.0.4,
+      #   并同批删除手写 patch 条目 width-tiers-wiring(接线改由包自带 bundle patch 承载)。
+      # [2026-09-21] upgrade-dsh-0-1-5-runtime 任务 7.1:1.0.4 -> 1.0.5(无 peer,engines.node >=18)。
+      #   回滚:改回 dsh-width-tiers@1.0.4 + version 1.0.4 → dsh build → 重启。
     enabled: true
     brief: 对话区宽度五档切换(748px 至全宽)
-    note: 'repo https://github.com/aaronlei/dsh-width-tiers(MIT);用途:Web 对话区标准/中等/宽/超宽/全宽五档切换并以 localStorage 记忆;审查(2026-08-20 npm 1.0.2 精确包):host 入口为空操作,client 仅注入 layout/locale,通过 --dsh-chat-content-width 行内覆盖调整宽度,不依赖构建哈希类名;无网络请求、Host 文件/命令/模型能力,生命周期 disposer 会清理 DOM、监听器、定时器与样式;注意非标准档会主动关闭详情面板,全宽档会经官方 layout 服务收起侧边栏;依赖 DSH Web rc.x 客户端布局与 locale 服务,升级后需回归验证'
-  # dsh-width-tiers 没有 dsh.bundle,需显式 loader 行让 client scanner 发现浏览器半区。
-  - id: width-tiers-wiring
-    type: patch
+    note: 'repo https://github.com/aaronlei/dsh-width-tiers(MIT);用途:Web 对话区标准/中等/宽/超宽/全宽五档切换并以 localStorage 记忆;1.0.4(2026-09-04 审查,npm 1.0.4 发布物核对):**该版本新增了自带的 cordis.patch.yml,并在 package.json 补上 dsh.bundle.patch** —— 此前本包只声明 dsh.client,`dsh plugin add` 把它装成普通依赖、不进 dsh.profile.bundles,浏览器半区要靠本仓库手写的 patches/width-tiers-wiring.yml 插一行 loader 才被发现;1.0.4 起该接线由包自身承载,故本次升级**与删除 width-tiers-wiring patch 条目在同一批次完成**。两份 patch 语义等价(均为无 id 的 insert,插入同一条 {id: dsh-width-tiers, name: dsh-width-tiers};已用 js-yaml 解析比对,结构逐字段相同),而 DSH 的 applyEntryPatches 对无 id 的 insert 一律 push 且不去重——两者并存会产生**两条同 id 的 loader 行**,因此绝不可只升 pin 而保留手写 patch。验收口径:启动清单中 dsh-width-tiers 恰好出现一次,且 [patch] 标注消失(改由 bundle 承载)。历史审查(2026-08-20 npm 1.0.2 精确包):host 入口为空操作,client 仅注入 layout/locale,通过 --dsh-chat-content-width 行内覆盖调整宽度,不依赖构建哈希类名;无网络请求、Host 文件/命令/模型能力,生命周期 disposer 会清理 DOM、监听器、定时器与样式;注意非标准档会主动关闭详情面板,全宽档会经官方 layout 服务收起侧边栏;依赖 DSH Web rc.x 客户端布局与 locale 服务,升级后需回归验证'
+  # 自研(local):B020 会话链接面板 — better-sidebar 右侧工作台 tab(当前会话链接分类)
+  - id: session-links
+    type: package
+    source: local
+    version: 0.1.0
     enabled: true
-    brief: 对话宽度插件 Web 加载接线
-  # 第三方(remote):B007 侧问答 — better-sidebar 侧边栏框架 + sidebar-qa 划选追问(压缩策略省 token)
+    brief: 文档/资料面板(当前会话 MR/部署/meego/制品链接分类 + 本次产出文件)
+    note: 'B020 落地;openspec change session-links-panel;面板名「文档/资料」(2026-09-03 起,覆盖链接+产物文件;内部 id 仍为 session-links);纯浏览器插件(host 入口为 no-op loader 节点):经 ctx.betterSidebar.registerTab 注册 id session-links 工作台 tab(单实例,badge=当前会话链接计数);数据面=官方 runtime conversation snapshot(ctx.sessions.binding(id).session),按消息 seq 水位增量采集,仅收 user/assistant(仅正文 text,排除 reasoning/tool-call)/steering/context 的 text 块;分类规则表集中(src/client/links.ts CATEGORY_RULES,域名+路径特征,mr/deploy/meego/artifact/other 兜底不丢链接);去重保留最近一次并计数,组内时间倒序且同时间 assistant 优先;点击新标签打开不注入脚本;每个会话至多一次全量扫描,渲染防抖,不持久化(刷新重建),不出网、无 host 能力;宿主依赖 dsh-better-sidebar(peer ^0.16.0,client inject=betterSidebar 门禁,宿主缺失整体不激活;npm strict-peer 下 devDeps 不装 better-sidebar,类型面为本地镜像 src/client/better-sidebar.d.ts,升级宿主需回归该面);[2026-09-05 运行体 0.1.2-rc.1 迁移]host 半区:删除 `{authority:''loopback''}`(边界改由 connection 层统一施加,已实测 LAN Host 403),`persistence.readFrom` 的 offset 改用 branded `SessionLogOffset(0)`;client 半区:官方把节点装配从 `sessions.binding().session` 快照移到 `uiConversation.binding(id).target(''chat'')` 的 `legacy.nodes`,面板据此改接(折叠与水位语义不变),产出文件判定因 `ToolResultNode.callView` 被移除而改按调用头 + 官方 deliverables 同款词汇表(write/edit/str_replace_editor);peer `dsh-better-sidebar` 由 `^0.16.0` 放宽为 `>=0.16.0`(与 sidebar-qa@0.5.0 同风格;宿主已升 0.18.0,pnpm why 实测仍只有唯一一份实例);54 例测试全过。历史:⚠ 宿主曾于 2026-09-04 升到 0.17.1,**超出当时声明的 ^0.16.0 与 sidebar-qa@0.4.0 的 ^0.14.0**——两者均为声明滞后而非运行时断裂:profile 未开 strict-peer 且 autoInstallPeers=false,pnpm 实际只解析出**唯一一份** dsh-better-sidebar@0.17.1(pnpm why 确认无第二实例,即无双实例风险),且本包唯一使用的 API ctx.betterSidebar.registerTab 在 0.17.1 中仍存在;0.17.1 另自带 loader 自去重守卫(同 name 不同 id 的已启用条目存在时自禁用),可挡住双挂载。阶段四放行 0.18.0 时应一并复核这两处 peer 声明是否需要跟进;DSH 升级需回归 conversation 节点结构与 tab API'
+  # 第三方(remote):B007 better-sidebar 侧边栏工作台
   - id: better-sidebar
     type: package
     source: remote
-    spec: dsh-better-sidebar@0.16.0
-    version: 0.16.0
-      # [2026-08-24] plugin-update: better-sidebar 0.15.2 -> 0.16.0(release notes 见 registry;审查记录请补进 note)
+    spec: dsh-better-sidebar@0.19.1
+    version: 0.19.1
+      # [2026-09-21] upgrade-dsh-0-1-5-runtime 任务 7.1:0.18.0 -> 0.19.1(peer 由
+      #   ^0.1.2-rc.1 升到 ^0.1.5-rc.1,与运行体 0.1.5-rc.2 对齐)。
+      #   回滚:改回 dsh-better-sidebar@0.18.0 + version 0.18.0 → dsh build → 重启。
+      # [2026-09-05] dsh-0-1-2-host-api-migration:0.17.1 -> 0.18.0(准入条件
+      #   「运行体升到 0.1.2 线」已满足;且 0.17.1 在 0.1.2-rc.1 上启动即崩——
+      #   import 了 dsh-settings 已移除的 settingsNamespace,故必须同批放行)
     enabled: true
-    brief: 服务化侧边栏工作台框架(sidebar-qa 的前置依赖)
-    note: 'B007/sidebar-qa 前置;repo https://github.com/omdsh-dev/DSH-better-sidebar(MIT,2026-08-24 摘要审查);重型框架:右侧栏+底部面板双工作台(ctx.betterSidebar.registerTab 开放给生态,28+ 插件),内置文件管理/内嵌浏览器/真实终端(node-pty)/Git 面板/后台任务/侧边对话(beta,完整上下文继承=费 token 形态,可设置关闭);README 官宣支持 DSH 0.1.0-rc.8 / 0.1.1-rc.1 / 0.1.1-rc.2,peer ^0.1.0-rc.8 对运行体 0.1.1-rc.2 满足;信任面:终端/浏览器/可选工具注入(terminal_* / sidebar_open,默认关闭),比轻量插件重得多;仅为 sidebar-qa 引入,接入后只开所需 tab;部署侧信任决定(2026-08-24):profile pnpm `allowBuilds.node-pty: true` 已批准其原生构建脚本,否则安装被 ERR_PNPM_IGNORED_BUILDS 挡下'
-  - id: sidebar-qa
-    type: package
-    source: remote
-    spec: dsh-sidebar-qa@0.4.0
-    version: 0.4.0
-    enabled: true
-    brief: 划选即问侧边栏问答(压缩上下文,省 token)
-    note: 'B007 终选(替代 dsh-air:fork 全量继承费 token,codex 订阅无缓存保障);repo https://github.com/ChenRuoT/dsh-sidebar-qa(MIT,2026-08-24 README+发布物审查);划选文本→「提问」→侧边栏内嵌问答,独立会话(❓<主题>)不中断主对话;三种上下文策略=全量继承(fork+前缀缓存)/压缩(快速模型压旧历史+近期原文,默认)/机械裁切(定长窗口),默认 compressed 解决侧问费 token 痛点;嵌套追问+追问记录树(归档/删除置灰);依赖 dsh-better-sidebar ^0.14.0(同批入 manifest);peer rc.8 系对运行体 0.1.1-rc.2 满足'
+    brief: 服务化侧边栏工作台
+    note: 'B007;repo https://github.com/omdsh-dev/DSH-better-sidebar(MIT);**0.18.0(2026-09-05 升级,change dsh-0-1-2-host-api-migration)**:peer 为 cordis ^4.0.2 + dsh-* ^0.1.2-rc.1,对运行体 0.1.2-rc.1 满足。⚠ 该升级不是可选收益而是**运行体升级的必要条件**——0.17.1 在 0.1.2-rc.1 上 `import { settingsNamespace } from ''@deepseek-ai/dsh-settings''`,而该导出在 0.1.2 已移除,loader 抛 SyntaxError 使整个 profile **启动即崩**(不是降级),故与 dshVersion 同批放行。0.18.0 新增 peer `@huanlin/dsh-plugin-better-locale ^0.1.0`(registry 有 0.1.0/0.3.0/0.3.1)。隔离实例实测:20 项启动清单全部加载、无 duplicate prefix route、pnpm why 只有唯一一份实例、registerTab API 仍在。历史(0.17.1,2026-09-04 逐版本 npm view 核对 peer):**取 0.17.1 而非最新的 0.18.0,因为它是最后一个 peer 仍接受现役运行体的版本**——0.16.1 与 0.17.1 的 peer 均为 cordis ^4.0.1 + dsh-* ^0.1.0-rc.8(对运行体 0.1.1-rc.2 满足,已用 semver.satisfies 实算确认);0.18.0-alpha.0 起 dsh-* 跳到 ^0.1.2-alpha.2、0.18.0 正式版为 cordis ^4.0.2 + dsh-* ^0.1.2-rc.1,**均不被 0.1.1-rc.2 满足**,故 0.18.0 的准入条件是 change staged-dsh-and-plugin-upgrade 阶段四(运行体升到 0.1.2 线)完成。取 0.17.1 而非停在 0.16.0:该版本包含对 0.1.2 线的双向兼容层,是通往阶段四的过渡砖。附注:本机 cordis 实测已解析为 4.0.2(dsh 0.1.1-rc.2 依赖 ^4.0.1,范围自然上浮),故 0.18.0 两项阻塞中 cordis 一项其实已满足,真正的阻塞只剩 dsh-* 版本族。历史审查(2026-08-24 摘要审查,0.16.0):重型框架:右侧栏+底部面板双工作台(ctx.betterSidebar.registerTab 开放给生态,28+ 插件),内置文件管理/内嵌浏览器/真实终端(node-pty)/Git 面板/后台任务/侧边对话(beta,完整上下文继承=费 token 形态,可设置关闭);README 官宣支持 DSH 0.1.0-rc.8 / 0.1.1-rc.1 / 0.1.1-rc.2,peer ^0.1.0-rc.8 对运行体 0.1.1-rc.2 满足;信任面:终端/浏览器/可选工具注入(terminal_* / sidebar_open,默认关闭),比轻量插件重得多;仅为 sidebar-qa 引入,接入后只开所需 tab;部署侧信任决定(2026-08-24):profile pnpm `allowBuilds.node-pty: true` 已批准其原生构建脚本,否则安装被 ERR_PNPM_IGNORED_BUILDS 挡下'
   # 自研(remote):B015 驾驶舱桥接 — DSH web 客户端上报会话点击给本机 dsh-cockpit
   - id: dsh-cockpit-bridge
     type: package
     source: remote
-    spec: 'https://github.com/prgrmrwy/dsh-cockpit/releases/download/dsh-cockpit-bridge-v0.1.2/dsh-cockpit-bridge-0.1.2.tgz'
+    spec: 'https://github.com/prgrmrwy/dsh-cockpit/releases/download/dsh-cockpit-bridge-v0.5.1/dsh-cockpit-bridge-0.5.1.tgz'
     name: dsh-cockpit-bridge
-    version: 0.1.2
+    version: 0.5.1
+      # [2026-09-24] change dsh-memex-card-browser / cockpit device-port-forward-seam:0.4.0 -> 0.5.0
+      #   (exact GitHub release dsh-cockpit-bridge-v0.5.1;0.5.0 首发 portForward,0.5.1 修 capability 过期直接 401)。
+      #   新增 cockpitBridge.portForward(设备回环端口发布),cockpit 服务端需 >= 2aaa473(device-port-forward-seam 已含真机修复)。
+      #   回滚:spec/version 改回 .../dsh-cockpit-bridge-v0.4.0/dsh-cockpit-bridge-0.4.0.tgz + 0.4.0 → dsh build → 重启;
+      #   回滚后 cockpit-memex-browse-shim 自动空载(读不到 portForward),dsh-memex 回落本机地址。
+      # [2026-09-21] upgrade-dsh-0-1-5-runtime 任务 7.6:0.3.0 -> 0.4.0
+      #   (exact GitHub release dsh-cockpit-bridge-v0.4.0,HTTP 200 / 16368 B)。
     enabled: true
-    brief: 驾驶舱桥接(web 客户端上报会话点击,顶栏完成提醒自动清除)
-    note: 'B015;repo https://github.com/prgrmrwy/dsh-cockpit(MIT,自研);web client cordis bundle,订阅官方 ctx.sessions.list.current(= 用户点击会话),防抖上报 POST /api/bridge/session-opened 给本机驾驶舱(127.0.0.1:3090,401 先 bootstrap);驾驶舱按请求 Origin 匹配设备,按 sessionId 精确清除完成绿点且保留 re-arm(官方 select 语义的驾驶舱侧观察);启动 hello 让顶栏显示桥接连接态;0.1.2 增加 cockpit 切回已加载设备 iframe 时重新上报当前 session，清除当前 active 已完成会话绿点;只传 sessionId,不碰内容/settings/凭据;驾驶舱不可达静默降级;每台接驾驶舱的机器都装。⚠ 必须 ≥0.1.1:v0.1.0 发布物缺 lib/index.js 而 package.json main 指向它、cordis.patch.yml 又把它插进 bundle 栈,导致装了该插件的设备 DSH 启动即崩(plugin tree failed to load / ERR_MODULE_NOT_FOUND),不是功能降级而是完全无法启动;0.1.1 补了 no-op host 入口(纯浏览器插件同样需要 loader entry 才能被 client-modules scanner 服务浏览器包)并让 tsdown 同时构建 host/client 两个半区'
-  # 第三方(remote):本机 TraeX 官方 bridge — 模型选择器选 TraeX Bridge / traex
-  # 2026-08-28 决策:官方 bridge 替代社区 ACP 方案(不 spawn traecli;traex-acp-provider 已移除)
-  # 2026-08-31 决策:内部包(bnpm/内网鉴权),开源/无 ByteDance 内网环境默认禁用;
-  #   本机(有 bnpm/内网权限)需要时在 .env.local(不进 git)设 DSH_TRAEX_BRIDGE=1
-  #   即可打开,不改这份文件;设为 0 或不设则禁用,`dsh build` 后立即生效
-  - id: dsh-traex-bridge
+    brief: 驾驶舱桥接(会话点击上报 + 0.1.2 待审批/提问观测,顶栏完成提醒自动清除)
+    note: 'B015;repo https://github.com/prgrmrwy/dsh-cockpit(MIT,自研);web client cordis bundle。**0.3.0(2026-09-05 升级,change dsh-0-1-2-host-api-migration 收尾 / cockpit 仓库 change adapt-dsh-012-typert-gateway 产物;发布物核对:version 0.3.0、inject 已换为 dsh-api-session-controller + dsh-client-ui-session、peer 仅 cordis ^4.0.1、lib/client.js 含 pendingInteractions 订阅)**:① 适配 DSH 0.1.2 —— 旧 inject 声明的 dsh-client-runtime 在 0.1.2 线被上游移除,0.2.1 在新运行体上 loader 解析不到依赖而**永不激活**(静默),0.3.0 改声明实际承接包;② 新增职责 —— 订阅官方 uiSession.pendingInteractions,把当前完整 {sessionId,kind,key} 快照经既有 capability 通道上报驾驶舱(typert 设备的顶栏待审批/提问计数**唯一来源**,cockpit 侧 evidence 已实测 requested→计数升、resolved→归零、无 bridge 时显示「不可观测」而非 0);只传最小标识,不读交互内容,不注册决策监听,host 半区仍为 no-op。历史:0.2.1(2026-09-04 审查,逐字节 diff 0.2.0→0.2.1 的 lib/client.js):① capability 失效自愈——capability 是 TTL 60s 的短期凭据,新增 readErrorCode 解析驳回响应体的结构化 code,把 401 与「400 + bridge-capability-invalid」统一判为 capability 失效(isCapabilityFailure),此时重置 helloReady 并向父页面 postMessage {type:"dsh-cockpit:capability-expired"} 主动请求换发,换发前 outbox 条目保留不丢;② 纯续签不再重申 current——0.2.0 收到同源 bridge-config 时无条件 helloReady=false,使驾驶舱每次续发配置都触发重新 hello 并重报当前会话(可能误清刚 re-arm 的绿点),0.2.1 删除该行,仅在真正的设备重新激活路径上重置;peer 仍为 @deepseek-ai/dsh-client-runtime ^0.1.1-rc.2(对运行体 0.1.1-rc.2 满足;该包在 0.1.2 线被上游移除,故本条目也是阶段四的回归对象);发布物含 lib/index.js(host no-op 入口)与 lib/client.js,main 指向存在的文件。0.2.0 协议 v2 重构:选择时立即捕获 ID 入有界去重 outbox(不再等 250ms debounce 定时器触发才重读 current,快速连续切换/打开后立即归档不再丢确认);outbox 项只在驾驶舱明确 2xx 后移除,网络异常/401/其它非 2xx 均保留并按有上限指数退避重试,由新选择/设备重新激活/成功 hello 触发;实际 Cockpit origin 与短期认证 capability 由父页面 postMessage 握手动态提供(不再固定 127.0.0.1:3090),适配任意 COCKPIT_PORT;驾驶舱按请求 Origin 匹配设备,按 sessionId 精确清除完成绿点且保留 re-arm(官方 select 语义的驾驶舱侧观察);驾驶舱同步升级后仍兼容旧协议(无 capability header)请求走既有 cookie 认证;只传 sessionId 与协议元数据,不碰内容/settings/凭据/provider token;驾驶舱不可达静默降级并重试,不影响原生 DSH 工作台;每台接驾驶舱的机器都装,需搭配驾驶舱同步升级到对应版本才能拿到可靠协议,否则仍按旧协议尽力而为工作(顶栏链条图标只表示插件装没装,不表示协议版本或连接新鲜度)。⚠ 必须 ≥0.1.1:v0.1.0 发布物缺 lib/index.js 而 package.json main 指向它、cordis.patch.yml 又把它插进 bundle 栈,导致装了该插件的设备 DSH 启动即崩(plugin tree failed to load / ERR_MODULE_NOT_FOUND),不是功能降级而是完全无法启动;0.1.1 补了 no-op host 入口(纯浏览器插件同样需要 loader entry 才能被 client-modules scanner 服务浏览器包)并让 tsdown 同时构建 host/client 两个半区'
+  # 自研(local):仅承载 cockpit bridge → Worktree Session 打开行为的部署侧耦合
+  - id: cockpit-worktree-open-shim
+    type: package
+    source: local
+    version: 0.1.0
+    enabled: true
+    brief: 驾驶舱远程编辑器能力接入 Worktree Session(可移除 shim)
+    note: 'openspec change open-worktree-in-remote-editor;纯 Web client shim,无 Host 能力/网络通道/业务状态。唯一职责:运行时探测完整 dotted 服务名 cockpitBridge.editorOpen 与 worktreeSession.openHandler,两端齐备时把前者原样注册给后者;两端无任何直接依赖或互相命名。无顶层 inject(任一端缺失时整体静默无效,ws 回落 vscode://file 默认行为);监听 Cordis internal/service 支持任意加载/卸载顺序;禁止 ctx.get("cockpitBridge").editorOpen(会被 traceable proxy 重新路由并强制 inject),只用 ctx.get("cockpitBridge.editorOpen");不校验/改写路径,不持状态/重试/认证。前置:dsh-cockpit-bridge >=0.4.0 + 宿主机 VS Code Remote-SSH;当前 bridge pin 仍为 0.3.0,故发布升级前 shim 安全无效。移除:删除本条 → dsh build → 重启,两端均无需迁移。'
+  # 自研(local):仅承载 cockpit bridge → dsh-memex 卡片浏览地址的部署侧耦合
+  - id: cockpit-memex-browse-shim
+    type: package
+    source: local
+    version: 0.1.0
+    enabled: true              # bridge 0.5.0 已发布 cockpitBridge.portForward(2026-09-24)
+    brief: 驾驶舱端口发布能力接入 dsh-memex 卡片浏览(可移除 shim)
+    note: 'openspec change dsh-memex-card-browser;纯 Web client shim,无 Host 能力/网络通道/业务状态。唯一职责:运行时探测完整 dotted 服务名 cockpitBridge.portForward 与 dshMemex.browseAddress,两端齐备时把前者注册给后者,使 DSH 跑在 VM/devbox 时卡片浏览可从宿主机浏览器访问;两端无任何直接依赖或互相命名(一个约定服务名同样属于提供方,故连字符串也不放进 dsh-memex)。每库一个 channel(memex-browse-<库名>)——内核一进程一库,共用 channel 会发布错库;先 register(channelId,port) 声明可发布再 publish(channelId) 取地址,失败原样上抛由 dsh-memex 呈现。无顶层 inject(任一端缺失时整体静默无效,dsh-memex 回落 localhost:<port>,本机直连场景不受影响);监听 Cordis internal/service 支持任意加载/卸载顺序;禁止 ctx.get("cockpitBridge").portForward(会被 traceable proxy 重新路由并强制 inject),只用 ctx.get("cockpitBridge.portForward");不校验/改写地址,不持状态/重试/缓存。⚠ 前置:dsh-cockpit-bridge 需提供 portForward(cockpit 仓 change device-port-forward-seam,已实现未发布);当前 bridge pin 为 0.4.0 尚无该能力,故本条目 enabled:false——提前启用不会出错但纯属空载。移除:删除本条 → dsh build → 重启,两端均无需迁移。'
+  # 第三方(remote):dsh-web 系皮肤/主题中心(按需子插件,不安装聚合全家桶)
+  - id: skin-center
     type: package
     source: remote
-    spec: '@byted/dsh-traex-bridge@0.1.1'
-    version: 0.1.1
-    enabled: false
-    enabledEnv: DSH_TRAEX_BRIDGE
-    brief: TraeX 官方 bridge provider(设置→模型→TraeX Bridge;默认关闭,见 enabledEnv)
-    note: '内部官方包(bnpm @byted/dsh-traex-bridge,maintainer chenxinhao.046@bytedance.com,仓库 https://code.byted.org/data/dsh-traex-bridge,0.1.0/0.1.1 皆 2026-08-28 发布,0.1.1 新增 Web 设置页登录卡片+设备登录/SSO,9/9 测试通过);直接实现 Trae 登录/模型目录/TraeChat 协议,运行时不依赖 traecli 与 ACP;bundle patch 插入 llm-traex-bridge 并把 agent-default-model 覆盖为 traex/DeepSeek-V4-Flash(仅新会话生效,2026-08-28 用户已确认接受);登录:设置→模型→TraeX Bridge 或 CLI dsh-traex-bridge login device/sso;凭据 ~/.dsh/traex-bridge/auth.json(0600),兼容读取 ~/.trae/cli/auth.json 等本机既有 Trae 登录态;能力:文本/reasoning/工具/token usage/排队,暂不支持图片(UNSUPPORTED_CONTENT);默认 Trae API https://copilot-cn.bytedance.net、ByteCloud 登录 https://cloud.bytedance.net;无 install/postinstall 脚本;peer 依赖 rc.2 区间对运行体 0.1.1-rc.2 满足;Node >=20(本机 22.16.0);安装通道 bnpm(用户级 ~/.npmrc registry=http://bnpm.byted.org;agent 环境注入的 NPM_CONFIG_REGISTRY 会覆盖,安装时需显式指定);⚠ 鉴权与推理流量走 ByteDance 内部服务,凭据仅在 DSH Host 本机保存;⚠ 2026-08-31 起本仓库默认 enabled:false + enabledEnv:DSH_TRAEX_BRIDGE(内部专属,公开仓库默认关闭),本机通过 .env.local 的 DSH_TRAEX_BRIDGE=1 打开,不改本条目 enabled'
+    spec: '@linxin666/dsh-client-ui-skin-center@0.3.24'
+    version: 0.3.24
+      # [2026-09-21] upgrade-dsh-0-1-5-runtime 任务 7.4:0.3.16 -> 0.3.24(peer react ^18.2.0)。
+      #   回滚:改回 @linxin666/dsh-client-ui-skin-center@0.3.16 + version 0.3.16 → dsh build → 重启。
+    enabled: true
+    brief: 设置→皮肤中心(主题试穿/自定义主题/壁纸;默认 blue-fantasy)
+    note: 'repo https://github.com/zhu1090093659/dsh-web(Apache-2.0,活跃);2026-09-06 审查 npm 0.3.16 发布物与 README:兼容 DSH >=0.1.2-rc.1;Host+Web bundle,内置 blue-fantasy,支持原子试穿/应用、自定义明暗主题、$DSH_HOME/skins 用户皮肤及可选 Wallpaper Engine 本机媒体桥。安全面:同源 Host 路由、皮肤目录 containment、CSS 强制 scope 且拒绝 @import/远程 URL/越界路径;但用户皮肤 patches.css 具整页样式能力,hooks.mjs 属受信代码逃生口(仅内置或 provenance/字节身份核验通过的官方市场内容执行);会读取本机 Wallpaper Engine/Steam 库并提供同源媒体流。隐私:浏览器每日向 dsh-market.com 发送一次匿名安装心跳(随机 localStorage id + 包名;上游声明服务端仅存 salted hash、不存 IP);新装默认激活 blue-fantasy。未搭配 @linxin666/dsh-i18n:该包只增加俄语,与皮肤功能无关。'
+  # 第三方(remote):dsh-web 系会话归档管理(按需子插件,不安装聚合全家桶)
+  - id: session-archive
+    type: package
+    source: remote
+    spec: '@linxin666/dsh-session-archive@0.3.24'
+    version: 0.3.24
+      # [2026-09-21] upgrade-dsh-0-1-5-runtime 任务 7.4:0.3.16 -> 0.3.24(peer react ^18.2.0)。
+      #   回滚:改回 @linxin666/dsh-session-archive@0.3.16 + version 0.3.16 → dsh build → 重启。
+    enabled: true
+    brief: 会话归档管理(批量归档/恢复/预览/物理删除;自动维护默认关闭)
+  # 第三方(remote):OpenCode Go 400 MissingSessionID 补丁(社区插件,非官方;官方适配发布后评估移除)
+  - id: dsh-opencode-session-header
+    type: package
+    source: remote
+    spec: dsh-opencode-session-header@0.1.0
+    version: 0.1.0
+    enabled: true
+    brief: OpenCode Go 注入 x-opencode-session(修复 400 MissingSessionID;仅作用于 opencode.ai)
+    note: 'repo https://github.com/beihzb/dsh-opencode-session-header(MIT;0.1.0 发布于 2026-09-07,目前唯一版本,新仓单提交);背景:OpenCode Go 网关自 2026-09-05 起强制 x-opencode-session 头(路由/提示词缓存),DSH 0.1.2-rc.1 各适配器路径均不发该头,上游适配讨论 https://github.com/deepseek-ai/deepseek-harness/discussions/5495 尚未发布。审查(2026-09-09,npm 0.1.0 发布物 lib/index.js 逐行通读,262 行,零运行时依赖):Host 面 cordis 插件——llm/stream waterfall 观察者以 AsyncLocalStorage 携带 GenerateOptions.sessionId(每会话稳定,新会话/fork/子代理各自全新);fetch 管线机制取自 @aizigao/pi-fetch-pipeline v1.0.1(MIT,经 dsh-custom-header),以独立 Symbol.for key 隔离,不与其他插件互相覆盖;仅当请求 host 命中白名单(默认 opencode.ai 及子域)时注入 x-opencode-session,其余请求一个字节不改;值默认取当前会话 id(无上下文时 dsh-default)。运行时开关 $DSH_HOME/plugins/dsh-opencode-session-header.json(文件缺失=开;{"enabled":false}=关),每次请求实时重读,免重启。信任面:无网络外发/子进程/文件写入/凭据读取,唯一 fs 只读该开关 JSON,无 install/postinstall 脚本,Node >=20。☝ 注意:插件在 DSH Host 进程全局 patch fetch,仅匹配主机加头;第三方非官方,后续官方适配合入后可移除。'
+
+  # 组合补丁(非包):修复 DSH 0.1.5 的 Connection RPC channel 注册缺陷
+  - id: connection-webserver
+    type: patch
+    enabled: true
+    brief: 让 connection provider 自身等待 webServer,恢复全部 Connection RPC 通道注册
+    note: '修复 openspec change upgrade-dsh-0-1-5-runtime 中发现的运行体缺陷(证据见 checking/connection-rpc-devbox.md)。**现象**:所有注册 Connection RPC channel 的插件——本仓库 dsh-home-network-model-guard(出口守卫)/ dsh-system-clock(系统时钟)/ dsh-session-links(文档/资料面板的整份日志基线)/ dsh-memex,以及远端 dsh-plugin-subscriptions 的 /subscriptions-auth——浏览器端调用全部失败,服务端返回与「路径不存在」无法区分的通用 **405**,宿主日志**无任何错误**,属静默退化。**根因**(devbox 实机诊断):0.1.5 的 Web 组合里 connection 行只声明 webRuntime,而 HostConnectionService 的 rpc/fetch accessor 会把调用 owner 追踪回**这个 provider fiber**,connection.rpc.handle() 最终通过 owner.webServer.register(route) 挂载路由,cordis 因此抛 cannot get property "webServer" without inject,effect 抛错被吞、通道路由从未挂上;0.1.5 已按同一道理修好自己的 /api 路由(ctx.inject(["webServer"], …))却漏改了供所有插件使用的 register(),故属运行体缺陷而非本仓库缺陷,影响所有插件作者。**为何不能只改调用方**:实测四个包改成 inject(["connection","webServer"]) 并真实部署后仍全 405——必须在 **provider 自身**的 fiber 上注入才覆盖 Cordis Service shadow 语义。**变更面**:仅覆盖 connection 一行的 inject 为 [webRuntime, webServer];整行覆盖必须原样保留 config.trustedHosts,否则会丢掉 Host/Origin fence。不复制 RPC 协议与鉴权,不改非 Web surface。**退休条件**:官方 connection 行 inject 自带 webServer 时删除本 fragment 与 patches/connection-webserver.yml。 **上游已确认并记录版本分界**(讨论 #5926):0.1.2-rc.1 的 connection 顶层 inject 为 [webServer, credentials],0.1.5 起改为 [credentials] 并把 /api 改为局部注入 —— 这就是本缺陷的确切 breakchange;讨论内另有 5 个第三方插件同命中。**适用边界**:本 fragment 让 web carrier 成为 connection 行的**硬依赖**,仅适用于 web profile(本仓库 sync 为 DSH_PROFILE ?? web,未引入无 web carrier 的 profile);若将来引入此类 profile,须按 profile 粒度拆分或移除本 fragment。**不受影响的次要缺陷**:0.1.5 起 connection.rpc.handle 的第三参 {authority} 被静默丢弃(有插件因此以为自己拿到了 loopback 限定);本仓库四个包均只传两参——0.1.2 迁移时已删去 {authority:loopback},边界改由 connection 层对每个 channel 统一施加,本次实测伪造 Host 仍 403,该 fence 正常。**上游回复**:https://github.com/deepseek-ai/deepseek-harness/discussions/5926#discussioncomment-18542496 上游讨论 https://github.com/deepseek-ai/deepseek-harness/discussions/5926;社区同款 https://github.com/ysr666/dsh-vision-router/pull/481'

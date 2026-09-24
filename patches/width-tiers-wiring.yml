@@ -1,7 +1,0 @@
-# dsh-width-tiers only declares dsh.client (no dsh.bundle), so dsh plugin add
-# installs it as a plain dependency. This explicit loader row mounts its no-op
-# Host entry, allowing the Web client scanner to discover and serve ./client.
-# Paired manifest package: dsh-width-tiers@1.0.2.
-- insert:
-    - id: dsh-width-tiers
-      name: dsh-width-tiers

@@ -10,6 +10,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, readFile, writeFile, rm, chmod, cp } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
+import { computeNpxCacheKey } from '../scripts/lib/dsh-cli.mjs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -65,6 +66,73 @@ async function withStubBin(sb) {
   await chmod(wrapper, 0o755)
   return { ...sb, stub: wrapper }
 }
+
+async function installOfficialCacheStub(sb) {
+  const manifestSource = await readFile(path.join(ROOT, 'dsh.yaml'), 'utf8')
+  const version = manifestSource.match(/^dshVersion:\s*([^\s#]+)/m)?.[1]
+  assert.ok(version, 'manifest dshVersion is required for the cache fixture')
+  const spec = `@deepseek-ai/dsh@${version}`
+  const cacheRoot = path.join(sb.dir, 'npm-cache')
+  const bin = path.join(cacheRoot, '_npx', computeNpxCacheKey([spec]), 'node_modules/@deepseek-ai/dsh/lib/bin.js')
+  await mkdir(path.dirname(bin), { recursive: true })
+  await writeFile(bin, `for (const a of process.argv.slice(2)) console.log('OFFICIAL_ARG:' + a)\n`)
+  return cacheRoot
+}
+
+test('旧 Pet DSH_BIN 若由 .env.local 注入则忽略，plugin 仍走官方精确 cache', async t => {
+  const sb = await sandbox()
+  t.after(() => rm(sb.dir, { recursive: true, force: true }))
+  const legacy = path.join(sb.dir, 'packages/dsh-pet/compat/subagent/.launcher/node_modules/.bin/dsh')
+  await mkdir(path.dirname(legacy), { recursive: true })
+  await writeFile(legacy, '#!/usr/bin/env bash\necho LEGACY_SHOULD_NOT_RUN\n')
+  await chmod(legacy, 0o755)
+  await writeFile(path.join(sb.dir, '.env.local'), `DSH_BIN="$REPO/packages/dsh-pet/compat/subagent/.launcher/node_modules/.bin/dsh"\n`)
+  const npmCache = await installOfficialCacheStub(sb)
+  const r = spawnSync('bash', [sb.bin, 'plugin', '--profile', 'web', 'list'], {
+    encoding: 'utf8',
+    env: { ...process.env, DSH_BIN: undefined, npm_config_cache: npmCache, XDG_CACHE_HOME: path.join(sb.dir, 'xdg'), DSH_SKIP_UPDATE: '1', DSH_HOME: path.join(sb.dir, 'h'), HOME: sb.dir },
+  })
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stderr, /忽略 \.env\.local 中旧 dsh-pet DSH_BIN/)
+  assert.match(r.stdout, /OFFICIAL_ARG:plugin/)
+  assert.doesNotMatch(r.stdout, /LEGACY_SHOULD_NOT_RUN/)
+})
+
+test('调用方显式同一历史 Pet 路径时仍保留最高优先级', async t => {
+  const sb = await sandbox()
+  t.after(() => rm(sb.dir, { recursive: true, force: true }))
+  const legacy = path.join(sb.dir, 'packages/dsh-pet/compat/subagent/.launcher/node_modules/.bin/dsh')
+  await mkdir(path.dirname(legacy), { recursive: true })
+  await writeFile(legacy, '#!/usr/bin/env bash\necho EXPLICIT_LEGACY "$@"\n')
+  await chmod(legacy, 0o755)
+  await writeFile(path.join(sb.dir, '.env.local'), `DSH_BIN="$REPO/packages/dsh-pet/compat/subagent/.launcher/node_modules/.bin/dsh"\n`)
+  const r = spawnSync('bash', [sb.bin, '--dump-config'], {
+    encoding: 'utf8',
+    env: { ...process.env, DSH_BIN: legacy, DSH_SKIP_UPDATE: '1', DSH_HOME: path.join(sb.dir, 'h'), HOME: sb.dir },
+  })
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /EXPLICIT_LEGACY --dump-config/)
+  assert.doesNotMatch(r.stderr, /忽略 \.env\.local/)
+})
+
+test('.env.local 不得覆盖调用方显式的其它 DSH_BIN', async t => {
+  const sb = await sandbox()
+  t.after(() => rm(sb.dir, { recursive: true, force: true }))
+  const localValue = path.join(sb.dir, 'local-dsh')
+  const callerValue = path.join(sb.dir, 'caller-dsh')
+  await writeFile(localValue, '#!/usr/bin/env bash\necho LOCAL_SHOULD_NOT_RUN\n')
+  await chmod(localValue, 0o755)
+  await writeFile(callerValue, '#!/usr/bin/env bash\necho CALLER_OVERRIDE "$@"\n')
+  await chmod(callerValue, 0o755)
+  await writeFile(path.join(sb.dir, '.env.local'), `DSH_BIN=${JSON.stringify(localValue)}\n`)
+  const r = spawnSync('bash', [sb.bin, '--dump-config'], {
+    encoding: 'utf8',
+    env: { ...process.env, DSH_BIN: callerValue, DSH_SKIP_UPDATE: '1', DSH_HOME: path.join(sb.dir, 'h'), HOME: sb.dir },
+  })
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /CALLER_OVERRIDE --dump-config/)
+  assert.doesNotMatch(r.stdout, /LOCAL_SHOULD_NOT_RUN/)
+})
 
 test('官方 plugin 子命令被原样转交给 CLI,不再污染 web argv', async (t) => {
   const sb = await withStubBin(await sandbox())
@@ -157,4 +225,46 @@ test('前台与后台官方启动路径都强制 --no-open,保证只有启动器
 test('server 不再经 npx 拉起:npx 会把 npm_config_* 烘焙给长期进程', async () => {
   const src = await readFile(path.join(ROOT, 'bin/dsh'), 'utf8')
   assert.doesNotMatch(src, /npx -y "@deepseek-ai\/dsh@\$VER" web/, 'server 启动必须走 node 直连,否则 npm 环境会泄漏给 agent')
+})
+
+test('stop 在 autoUpdate 与运行体解析之前短路，restart 只进入一次 start_server', async () => {
+  const src = await readFile(path.join(ROOT, 'bin/dsh'), 'utf8')
+  const stopBranch = src.indexOf('if [[ $STOP -eq 1 ]]')
+  const autoupdateBlock = src.indexOf('# ---------- autoUpdate:')
+  assert.ok(stopBranch > 0 && stopBranch < autoupdateBlock, 'stop 必须在版本检测/运行体解析前退出')
+  const restartBody = src.match(/do_restart\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.doesNotMatch(restartBody, /resolveCliBin|dsh-server-bin|start_server/, 'restart stop 阶段不得解析/启动运行体')
+  assert.equal((src.match(/^start_server$/gm) ?? []).length, 1, 'launcher 最终只能进入一次 start_server')
+})
+
+test('macOS UI AppleScript 清理有界，不得让 stop/restart 永久等待 Chrome', async () => {
+  const src = await readFile(path.join(ROOT, 'bin/dsh'), 'utf8')
+  assert.match(src, /run_osascript_bounded\(\)/)
+  assert.match(src, /run_osascript_bounded 3 -e "tell application/)
+  assert.match(src, /run_osascript_bounded 3 - "\$PORT"/)
+  assert.doesNotMatch(src, /^\s+osascript - "\$PORT"/m)
+})
+
+test('stop 在无 server 时不调用 npm/npx/pnpm provision', async t => {
+  const sb = await sandbox()
+  t.after(() => rm(sb.dir, { recursive: true, force: true }))
+  const toolDir = path.join(sb.dir, 'tools')
+  const calls = path.join(sb.dir, 'package-manager-calls')
+  await mkdir(toolDir)
+  for (const name of ['npm', 'npx', 'pnpm']) {
+    const tool = path.join(toolDir, name)
+    await writeFile(tool, `#!/usr/bin/env bash\necho ${name} >> "${calls}"\nexit 97\n`)
+    await chmod(tool, 0o755)
+  }
+  const r = spawnSync('bash', [sb.bin, 'stop', '--port', '39989'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${toolDir}:${process.env.PATH}`,
+      DSH_HOME: path.join(sb.dir, 'dsh-home'),
+      HOME: sb.dir,
+    },
+  })
+  assert.equal(r.status, 0, r.stderr)
+  await assert.rejects(readFile(calls), { code: 'ENOENT' })
 })

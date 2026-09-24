@@ -1,0 +1,658 @@
+/**
+ * Pure admission decisions for the unified Locus collaboration channel.
+ *
+ * This module deliberately has no repository, Lark client, or DSH runtime
+ * dependency.  The channel adapter supplies an already parsed event and the
+ * caller supplies the current authorization/replay facts.  That keeps the
+ * trust boundary deterministic and lets the controller decide what to do with
+ * an admitted request without making this module know how a locus is stored.
+ */
+
+import type { LarkInboundEvent } from '../channel/event.js'
+import { isOwnerExit } from './serviceability.js'
+import { STORAGE_KEY_SEPARATOR, containsStorageKeySeparator } from './storage-key.js'
+
+/** The two possible parts of a Locus address. */
+export interface LocusEndpoint {
+  /** Lark chat id (group or p2p). */
+  readonly chatId: string
+  /** Stable thread id, when this event is addressed to a thread. */
+  readonly threadId?: string
+  /** Stable serialized key used by indexes. */
+  readonly key: string
+}
+
+/** Why endpoint extraction stopped without choosing an address. */
+export type EndpointRefusal =
+  | 'invalid-chat'
+  | 'invalid-thread'
+
+/** Result of extracting a Locus address from one inbound event. */
+export type EndpointExtraction =
+  | { readonly ok: true; readonly endpoint: LocusEndpoint }
+  | { readonly ok: false; readonly reason: EndpointRefusal }
+
+/**
+ * Lifecycle/authorization state known for an endpoint.
+ *
+ * `authorized` is the only state that gives a group the member-at exemption.
+ * `uninitialized` is intentionally separate from a missing record: an
+ * allowlisted sender may use its first mention to create the new structure.
+ * `retired` and `legacy` are terminal protection states and never fall through
+ * to a default identity.
+ */
+export type LocusAuthorizationState =
+  | 'authorized'
+  | 'uninitialized'
+  /**
+   * The owner deliberately took this endpoint out of service (`stopped` /
+   * `retired`). Spec: "明确退出的入口 SHALL 保留停止标记，普通 at MUST NOT
+   * 自动复活" — an ordinary mention must not resurrect it.
+   */
+  | 'retired'
+  /**
+   * The Host itself judged the generation unusable (`invalid`) — a failed
+   * child re-attach after a restart, a lost composition proof. The owner
+   * never asked for this, so the "do not auto-resurrect an explicit exit"
+   * rule does not apply: treating it like a deliberate exit stranded the
+   * endpoint behind a rebuild that could itself fail, with no way out.
+   */
+  | 'unusable'
+  | 'legacy'
+
+/**
+ * The subset of {@link LocusAuthorizationState} that ordinary work may proceed
+ * under: an existing serviceable locus (`authorized`), or an endpoint the
+ * channel is allowed to bootstrap itself — `uninitialized` for one it has
+ * never seen, `unusable` for a generation the Host invalidated without any
+ * owner decision.
+ *
+ * Every consumer that gates ordinary work MUST use
+ * {@link isAdmittableAuthorization} instead of restating the union. The
+ * channel controller restated `'authorized' | 'uninitialized'` in two places,
+ * so adding `unusable` above admitted the message through admission and then
+ * silently rejected it one layer later as `authorization-unresolved` — the
+ * very deadlock the new state existed to remove, wearing a different reason
+ * code and with no compile error to catch it.
+ */
+export type AdmittableLocusAuthorization = Extract<
+  LocusAuthorizationState,
+  'authorized' | 'uninitialized' | 'unusable'
+>
+
+/** Whether ordinary (non-control) work may proceed under this state. */
+export function isAdmittableAuthorization(
+  state: LocusAuthorizationState,
+): state is AdmittableLocusAuthorization {
+  return state === 'authorized' || state === 'uninitialized' || state === 'unusable'
+}
+
+/** Optional metadata a controller may attach to an authorization result. */
+export interface LocusAuthorization {
+  readonly state: LocusAuthorizationState
+  readonly locusId?: string
+  readonly reason?: string
+  /** Endpoint itself is absent but an authorized parent group may initialize it. */
+  readonly needsInitialization?: boolean
+}
+
+/** A resolver supplied by the locus controller/repository. */
+export type LocusAuthorizationResolver = (
+  endpoint: LocusEndpoint,
+) => LocusAuthorizationState | LocusAuthorization
+
+/** Narrow durable view needed by production admission. */
+export interface LocusAuthorizationStore {
+  getLatestLocusByEndpoint(endpoint: { readonly chatId: string; readonly threadId?: string }):
+    | {
+        readonly id?: string
+        readonly state: 'provisioning' | 'active' | 'switching' | 'invalid' | 'retired' | 'stopped'
+        /** The main session this generation serves; archived state is read from it. */
+        readonly parentSessionId: string
+      }
+    | undefined
+}
+
+/** Read-only legacy-retirement probe; it never supplies an execution identity. */
+export interface LegacyRetirementProbe {
+  find(endpoint: { readonly chatId: string; readonly threadId?: string }): unknown
+}
+
+/**
+ * Build production authorization from the durable unified generation and the
+ * read-only legacy retirement marker. A missing unified row is bootstrap-able
+ * only when the legacy probe also proves the endpoint was never associated.
+ * Lookup failures throw so admission returns `authorization-unresolved` rather
+ * than silently creating a default identity.
+ */
+export function createDurableLocusAuthorizationResolver(
+  store: LocusAuthorizationStore,
+  legacy: LegacyRetirementProbe,
+  /**
+   * Whether the generation's main session is archived by its owner.
+   *
+   * Archiving the main session is an OWNER action, and nothing in the runtime
+   * enforces it: `dsh-agent` and the session controller both resume an archived
+   * session without complaint, so an endpoint whose parent was archived kept
+   * answering and the archival had no effect at all. Absent means "cannot know",
+   * which keeps the previous behaviour rather than inventing a refusal.
+   */
+  isParentArchived?: (parentSessionId: string) => boolean,
+): LocusAuthorizationResolver {
+  /**
+   * Classify a non-`active` generation by WHO put it in that state.
+   *
+   * `stopped`/`retired` are owner decisions; `invalid` is the Host's own
+   * judgement (failed child re-attach, missing composition proof) and
+   * `provisioning`/`switching` are transient. Collapsing all of them into
+   * `retired` is what made a Host-invalidated endpoint demand an explicit
+   * rebuild — a rebuild that could itself be impossible when the recorded
+   * parent was archived, leaving the endpoint permanently unreachable.
+   */
+  // Derive from the ONE policy module instead of restating the split here:
+  // every layer that decides "may this proceed / may this be replaced" must
+  // agree, and hand-written copies are what let three rounds of fixes each
+  // move the refusal one layer deeper rather than removing it.
+  const unserviceableAuthorization = (
+    state: 'provisioning' | 'active' | 'switching' | 'invalid' | 'retired' | 'stopped',
+  ): LocusAuthorizationState => (isOwnerExit(state) ? 'retired' : 'unusable')
+
+  /**
+   * An archived main session records an OWNER action, so it must classify as
+   * `retired` — the state that produces "this entry needs an explicit rebuild"
+   * — and never as `unusable`, which would let an ordinary mention establish a
+   * new generation on a main session the owner never chose.
+   *
+   * Applies to `active` (it would otherwise serve) and to `invalid` (it would
+   * otherwise be auto-replaced). Transient states are left alone: provisioning
+   * already in flight is not a decision to reverse here.
+   */
+  const archivedParentOutranks = (
+    state: 'provisioning' | 'active' | 'switching' | 'invalid' | 'retired' | 'stopped',
+    parentSessionId: string,
+  ): boolean => {
+    if (state !== 'active' && state !== 'invalid') return false
+    if (isParentArchived === undefined) return false
+    try {
+      return isParentArchived(parentSessionId) === true
+    } catch {
+      // A probe that cannot answer must not become a refusal: the delivery
+      // path has its own, narrower gate for this fact.
+      return false
+    }
+  }
+
+  return endpoint => {
+    const exact = endpoint.threadId === undefined
+      ? { chatId: endpoint.chatId }
+      : { chatId: endpoint.chatId, threadId: endpoint.threadId }
+    const current = store.getLatestLocusByEndpoint(exact)
+    if (current !== undefined) {
+      if (archivedParentOutranks(current.state, current.parentSessionId)) return 'retired'
+      if (current.state === 'active') {
+        return { state: 'authorized', ...(current.id === undefined ? {} : { locusId: current.id }) }
+      }
+      return unserviceableAuthorization(current.state)
+    }
+    if (legacy.find(exact) !== undefined) return 'legacy'
+    if (endpoint.threadId === undefined) return 'uninitialized'
+
+    // A new topic is authorized by the durable chat-level locus. A parent the
+    // owner deliberately exited is terminal and must not be bypassed by topic
+    // auto-provisioning; a parent the Host merely judged unusable is not an
+    // owner decision and keeps that distinction. A missing parent remains
+    // uninitialized for an allowlisted first mention only.
+    const parent = store.getLatestLocusByEndpoint({ chatId: endpoint.chatId })
+    if (parent === undefined) {
+      return legacy.find({ chatId: endpoint.chatId }) === undefined ? 'uninitialized' : 'legacy'
+    }
+    if (archivedParentOutranks(parent.state, parent.parentSessionId)) return 'retired'
+    if (parent.state === 'active') {
+      return { state: 'authorized', ...(parent.id === undefined ? {} : { locusId: parent.id }), needsInitialization: true }
+    }
+    return unserviceableAuthorization(parent.state)
+  }
+}
+
+/** Control operations understood by the unified locus channel. */
+export type LocusControlCommand =
+  | { readonly kind: 'bind'; readonly prefix: string }
+  | { readonly kind: 'bind-missing-prefix' }
+  | { readonly kind: 'bind-invalid' }
+  | { readonly kind: 'scope'; readonly mode: 'read' | 'write' }
+  | { readonly kind: 'scope-missing-mode' }
+  | { readonly kind: 'scope-invalid'; readonly value: string }
+  | { readonly kind: 'unbind' }
+  | { readonly kind: 'unbind-invalid' }
+
+/** Input passed to an already-authorized control dispatcher. */
+export interface LocusControlDispatchRequest {
+  readonly command: LocusControlCommand
+  readonly endpoint: LocusEndpoint
+  readonly senderId: string
+  /** Protected endpoints may enter only the explicit bind/rebuild control path. */
+  readonly authorization?: LocusAuthorizationState
+}
+
+/** Result of a control-plane operation; it never creates a Delivery. */
+export type LocusControlDispatchResult =
+  | { readonly ok: true; readonly text: string }
+  | { readonly ok: false; readonly reason: string; readonly text: string }
+  | { readonly ok: false; readonly reason: string; readonly silent: true; readonly text?: never }
+
+/** Host-provided control surface for the unified channel. */
+export interface LocusControlDispatchPort {
+  dispatch(
+    request: LocusControlDispatchRequest,
+  ): LocusControlDispatchResult | PromiseLike<LocusControlDispatchResult>
+}
+
+/** Ordinary content, rather than a recognized control command. */
+export type NoLocusControlCommand = { readonly kind: 'none' }
+
+/** Result of parsing a command after leading bot mentions are removed. */
+export type LocusCommandParse = LocusControlCommand | NoLocusControlCommand
+
+/** Refusals emitted by {@link admitLocusEvent}. */
+export type LocusAdmissionRefusal =
+  | 'not-a-message'
+  | 'missing-message-id'
+  | 'invalid-endpoint'
+  | 'bot-sender'
+  | 'not-allowed-sender'
+  | 'no-mention'
+  | 'duplicate'
+  | 'before-watermark'
+  | 'unsupported-message-type'
+  | 'empty-content'
+  | 'uninitialized-endpoint'
+  | 'retired-endpoint'
+  | 'legacy-endpoint'
+  | 'authorization-unresolved'
+  | 'control-not-allowed'
+  | 'dedup-unavailable'
+
+/**
+ * Facts needed for one admission decision.
+ *
+ * `authorization` is preferred.  The additional static forms are deliberately
+ * supported so a small controller can pass a snapshot without manufacturing a
+ * callback; all forms use the same endpoint key and fail closed when absent.
+ * There is no `isQaChat` escape hatch: group authorization is represented by
+ * the explicit `authorized` Locus state only.
+ */
+export interface LocusAdmissionContext {
+  /** Verified open_id of this bot. Required for both group and p2p mentions. */
+  readonly botOpenId?: string
+  /** Global allowlist. It gates every control command. */
+  readonly allowOpenIds: readonly string[]
+  /** Messages created before this millisecond watermark are replays. */
+  readonly watermark: number
+  /** Return true when the message id was already accepted in the dedup window. */
+  readonly isDuplicate: (messageId: string) => boolean
+  /** Resolve authorization for the exact endpoint. */
+  readonly authorization?: LocusAuthorizationResolver
+  /** Alias accepted by integrations that call this operation a lookup. */
+  readonly resolveAuthorization?: LocusAuthorizationResolver
+  /** One snapshot state for all endpoints (normally `uninitialized`). */
+  readonly authorizationState?: LocusAuthorizationState | LocusAuthorization
+  /** Endpoint-keyed snapshot states. */
+  readonly authorizationByEndpoint?: Readonly<Record<string, LocusAuthorizationState | LocusAuthorization>>
+  /** Explicitly authorized endpoint keys. */
+  readonly authorizedEndpoints?: ReadonlySet<string> | readonly string[]
+  /** Explicitly authorized chat ids; useful for group-level member-at policy. */
+  readonly authorizedChats?: ReadonlySet<string> | readonly string[]
+}
+
+/** A successful admission, including the exact endpoint the controller must use. */
+export interface LocusAdmission {
+  readonly admit: true
+  readonly endpoint: LocusEndpoint
+  readonly text: string
+  readonly senderId: string
+  readonly authorization: LocusAuthorizationState
+  /** True when the controller must perform first-time locus initialization. */
+  readonly needsInitialization: boolean
+  /** Present only for a recognized, allowlist-authorized control command. */
+  readonly command?: LocusControlCommand
+}
+
+/** A refused admission. Refusals carry no reply/action payload. */
+export interface LocusAdmissionRejection {
+  readonly admit: false
+  readonly reason: LocusAdmissionRefusal
+  /** Present when the event had an unambiguous endpoint. */
+  readonly endpoint?: LocusEndpoint
+  /** Present when authorization was resolved before refusal. */
+  readonly authorization?: LocusAuthorizationState
+}
+
+/** Complete outcome of the pure admission function. */
+export type LocusAdmissionDecision = LocusAdmission | LocusAdmissionRejection
+
+/** Serialize a Locus endpoint without putting parent/session ids in its key. */
+export function locusEndpointKey(chatId: string, threadId?: string): string {
+  return threadId === undefined ? chatId : `${chatId}${STORAGE_KEY_SEPARATOR}${threadId}`
+}
+
+/** Normalize an id while rejecting whitespace/control-character ambiguity. */
+function normalizeId(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  if (value === '' || value.trim() !== value || containsStorageKeySeparator(value) || /\s/.test(value)) {
+    return undefined
+  }
+  return value
+}
+
+/**
+ * Extract the exact Locus endpoint represented by an event.
+ *
+ * The platform's `thread_id` is the ONLY proof of thread membership, and it is
+ * therefore the only fact that may put an event on a topic endpoint.  `root_id`
+ * and `reply_to` are MESSAGE-level reply/quote facts: in a regular group a
+ * quote carries both (equal to the quoted message id) while `thread_id` is
+ * absent, and a reply inside a topic carries `thread_id` as well.  Reading them
+ * as thread evidence used to refuse every quoted group message as
+ * `ambiguous-thread`, which silently dropped the most common way a person asks
+ * the bot something.  They must not derive, change, or veto an endpoint.
+ *
+ * Unusable values are handled by kind rather than by convenience: a corrupted
+ * `thread_id` is a corrupted IDENTITY fact, so the event fails closed; a
+ * corrupted `root_id`/`reply_to` is a missing optional CONTEXT fact, so only
+ * that fact is dropped and the message is still addressed normally.
+ */
+export function extractLocusEndpoint(event: LarkInboundEvent): EndpointExtraction {
+  const chatId = normalizeId(event.chat_id)
+  if (chatId === undefined) return { ok: false, reason: 'invalid-chat' }
+
+  const threadId = event.thread_id === undefined ? undefined : normalizeId(event.thread_id)
+  if (event.thread_id !== undefined && event.thread_id !== '' && threadId === undefined) {
+    return { ok: false, reason: 'invalid-thread' }
+  }
+
+  if (threadId !== undefined) {
+    return {
+      ok: true,
+      endpoint: {
+        chatId,
+        threadId,
+        key: locusEndpointKey(chatId, threadId),
+      },
+    }
+  }
+
+  return { ok: true, endpoint: { chatId, key: locusEndpointKey(chatId) } }
+}
+
+/** Alias with the shorter name used by some controller integrations. */
+export const resolveLocusEndpoint = extractLocusEndpoint
+/** Alias matching the design document's resolver terminology. */
+export const resolveEndpoint = extractLocusEndpoint
+/** Alias for callers that use the noun-first form. */
+export const endpointOf = extractLocusEndpoint
+
+/** Strip one or more leading @mention tokens from message text. */
+function withoutLeadingMentions(text: string): string {
+  return text.replace(/^(?:\s*@\S+)+/, '').replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * Parse the control surface.  Recognition is intentionally narrow and only
+ * considers a command at the beginning after leading mentions.  A malformed
+ * recognized verb remains a control command so an unallowlisted sender cannot
+ * smuggle it into the normal work path.
+ */
+export function parseLocusControlCommand(text: string): LocusCommandParse {
+  const cleaned = withoutLeadingMentions(text)
+  if (cleaned === '') return { kind: 'none' }
+
+  const [verb = '', ...args] = cleaned.split(/\s+/)
+  const lower = verb.toLowerCase()
+
+  if (lower === '/unbind' || lower === '-u' || lower === '--unbind') {
+    return args.length === 0 ? { kind: 'unbind' } : { kind: 'unbind-invalid' }
+  }
+
+  if (lower === '/bind' || lower === '-b' || lower === '--bind') {
+    const prefix = args[0] ?? ''
+    if (prefix === '') return { kind: 'bind-missing-prefix' }
+    return args.length === 1 ? { kind: 'bind', prefix } : { kind: 'bind-invalid' }
+  }
+
+  if (lower === '/scope' || lower === '-s' || lower === '--scope') {
+    const value = args[0]?.toLowerCase()
+    if (value === undefined) return { kind: 'scope-missing-mode' }
+    if (args.length === 1 && (value === 'read' || value === 'write')) return { kind: 'scope', mode: value }
+    return { kind: 'scope-invalid', value: args.join(' ') }
+  }
+
+  if (lower.startsWith('--scope=')) {
+    const value = lower.slice('--scope='.length)
+    if (args.length === 0 && (value === 'read' || value === 'write')) return { kind: 'scope', mode: value }
+    return { kind: 'scope-invalid', value: [value, ...args].join(' ') }
+  }
+
+  if (lower.startsWith('--bind=')) {
+    const prefix = cleaned.slice(verb.indexOf('=') + 1)
+    if (prefix === '') return { kind: 'bind-missing-prefix' }
+    return args.length === 0 ? { kind: 'bind', prefix } : { kind: 'bind-invalid' }
+  }
+
+  return { kind: 'none' }
+}
+
+/** Short alias for command parsing. */
+export const parseLocusCommand = parseLocusControlCommand
+/** Compatibility alias for parent integration. */
+export const parseControlCommand = parseLocusControlCommand
+
+/** Whether a collection contains one exact string. */
+function includesValue(values: ReadonlySet<string> | readonly string[] | undefined, value: string): boolean {
+  if (values === undefined) return false
+  return values instanceof Set ? values.has(value) : (values as readonly string[]).includes(value)
+}
+
+/** Normalize a resolver's object/string form to one stable state. */
+function stateOf(value: LocusAuthorizationState | LocusAuthorization): LocusAuthorizationState {
+  const state = typeof value === 'string' ? value : value.state
+  // Keep integrations that used an explicit group/locus wording source
+  // compatible while exposing one canonical state to callers.
+  if (state === 'authorized') return state
+  if (state === 'uninitialized') return state
+  if (state === 'retired') return state
+  if (state === 'unusable') return state
+  if (state === 'legacy') return state
+  return 'uninitialized'
+}
+
+/** Internal lookup result, retaining resolver failure for fail-closed admission. */
+type AuthorizationLookup =
+  | { readonly resolved: true; readonly state: LocusAuthorizationState; readonly needsInitialization: boolean }
+  | { readonly resolved: false }
+
+/** Resolve authorization from the supported callback/snapshot forms. */
+function lookupLocusAuthorization(
+  endpoint: LocusEndpoint,
+  context: LocusAdmissionContext,
+): AuthorizationLookup {
+  try {
+    const resolved = (value: LocusAuthorizationState | LocusAuthorization): AuthorizationLookup => ({
+      resolved: true,
+      state: stateOf(value),
+      needsInitialization: typeof value === 'object' && value.needsInitialization === true,
+    })
+    const resolver = context.authorization ?? context.resolveAuthorization
+    if (resolver !== undefined) return resolved(resolver(endpoint))
+
+    const snapshot = context.authorizationByEndpoint?.[endpoint.key]
+    if (snapshot !== undefined) return resolved(snapshot)
+
+    if (includesValue(context.authorizedEndpoints, endpoint.key)) {
+      return { resolved: true, state: 'authorized', needsInitialization: false }
+    }
+    if (includesValue(context.authorizedChats, endpoint.chatId)) {
+      return { resolved: true, state: 'authorized', needsInitialization: false }
+    }
+
+    if (context.authorizationState !== undefined) return resolved(context.authorizationState)
+  } catch {
+    // The caller cannot safely tell whether a failing lookup was authorized.
+    return { resolved: false }
+  }
+  // No stored row is the explicit uninitialized state. It is not an error:
+  // an allowlisted first @bot may bootstrap it.
+  return { resolved: true, state: 'uninitialized', needsInitialization: true }
+}
+
+/**
+ * Resolve an endpoint's authorization state without performing admission.
+ * Resolver failures are represented as `uninitialized` for this value-only
+ * helper; {@link admitLocusEvent} retains the failure and refuses the event.
+ */
+export function resolveLocusAuthorization(
+  endpoint: LocusEndpoint,
+  context: LocusAdmissionContext,
+): LocusAuthorizationState {
+  const lookup = lookupLocusAuthorization(endpoint, context)
+  return lookup.resolved ? lookup.state : 'uninitialized'
+}
+
+/** Check the same verified bot mention rule for group and p2p events. */
+export function mentionsLocusBot(event: LarkInboundEvent, botOpenId: string | undefined): boolean {
+  if (botOpenId === undefined || botOpenId === '') return false
+  return (event.mentions ?? []).some(mention => mention.id === botOpenId)
+}
+
+/**
+ * Decide whether an inbound event may reach the unified locus controller.
+ *
+ * All messages, including p2p messages and control commands, must mention the
+ * verified bot.  A group in `authorized` state grants ordinary @bot questions
+ * to its members; it never grants control authority.  An uninitialized endpoint
+ * can be bootstrapped only by a global allowlist sender.  Retired and legacy
+ * endpoints never fall through to a new/default locus.
+ */
+export function admitLocusEvent(
+  event: LarkInboundEvent,
+  context: LocusAdmissionContext,
+): LocusAdmissionDecision {
+  if (event.type !== 'im.message.receive_v1') return { admit: false, reason: 'not-a-message' }
+  if (typeof event.message_id !== 'string' || event.message_id === '') {
+    return { admit: false, reason: 'missing-message-id' }
+  }
+
+  const extracted = extractLocusEndpoint(event)
+  if (!extracted.ok) {
+    return { admit: false, reason: 'invalid-endpoint' }
+  }
+  const endpoint = extracted.endpoint
+
+  if (event.sender_type !== undefined && event.sender_type !== 'user') {
+    return { admit: false, reason: 'bot-sender', endpoint }
+  }
+
+  const senderId = event.sender_id ?? ''
+  const allowlisted = senderId !== '' && context.allowOpenIds.includes(senderId)
+  if (senderId === '') return { admit: false, reason: 'not-allowed-sender', endpoint }
+
+  // The mention check applies equally to p2p and group events.  A p2p event
+  // with no mention array is not proof that this bot was addressed.
+  if (!mentionsLocusBot(event, context.botOpenId)) {
+    return { admit: false, reason: 'no-mention', endpoint }
+  }
+
+  let duplicate: boolean
+  try {
+    duplicate = context.isDuplicate(event.message_id)
+  } catch {
+    return { admit: false, reason: 'dedup-unavailable', endpoint }
+  }
+  if (duplicate) return { admit: false, reason: 'duplicate', endpoint }
+
+  const createdAt = Number(event.create_time ?? '0')
+  if (Number.isFinite(createdAt) && createdAt > 0 && createdAt < context.watermark) {
+    return { admit: false, reason: 'before-watermark', endpoint }
+  }
+
+  if (event.message_type !== 'text' && event.message_type !== 'post') {
+    return { admit: false, reason: 'unsupported-message-type', endpoint }
+  }
+  const text = (event.content ?? '').trim()
+  if (text === '') return { admit: false, reason: 'empty-content', endpoint }
+
+  // Resolve after the transport/event gates.  A failing resolver is never a
+  // reason to expose a default identity or bootstrap a new locus.
+  const authorizationLookup = lookupLocusAuthorization(endpoint, context)
+  if (!authorizationLookup.resolved) {
+    return { admit: false, reason: 'authorization-unresolved', endpoint }
+  }
+  const authorization = authorizationLookup.state
+  const parsed = parseLocusControlCommand(text)
+  const isControl = parsed.kind !== 'none'
+  if (isControl && !allowlisted) {
+    return { admit: false, reason: 'control-not-allowed', endpoint, authorization }
+  }
+
+  // A protected endpoint remains unavailable for ordinary work. The sole
+  // exception is an allowlisted, well-formed explicit bind: it enters the
+  // control plane so a dedicated rebuild adapter can create a fresh read locus
+  // without consuming any legacy parent/workspace/permission identity.
+  const explicitRebuild = allowlisted && parsed.kind === 'bind'
+  if (authorization === 'retired' && !explicitRebuild) {
+    return { admit: false, reason: 'retired-endpoint', endpoint, authorization }
+  }
+  if (authorization === 'legacy' && !explicitRebuild) {
+    return { admit: false, reason: 'legacy-endpoint', endpoint, authorization }
+  }
+
+  // Only a group with an explicitly authorized locus can grant ordinary
+  // non-allowlisted member questions.  P2P conversations remain allowlist
+  // scoped because there is no group membership authorization to inherit.
+  const canAskAsGroupMember = event.chat_type === 'group' && authorization === 'authorized'
+  if (!allowlisted && !canAskAsGroupMember) {
+    return { admit: false, reason: 'not-allowed-sender', endpoint, authorization }
+  }
+
+  const admission: LocusAdmission = {
+    admit: true,
+    endpoint,
+    text,
+    senderId,
+    authorization,
+    // `unusable` initializes exactly like a never-seen endpoint: the previous
+    // generation was invalidated by the Host, not exited by the owner, so
+    // there is no owner decision to preserve and nothing to "rebuild" from —
+    // its recorded parent may itself be gone. The allowlist gate above still
+    // applies, so an ordinary member cannot bootstrap one.
+    needsInitialization: authorization === 'uninitialized'
+      || authorization === 'unusable'
+      || authorizationLookup.needsInitialization,
+    ...(isControl ? { command: parsed } : {}),
+  }
+  return admission
+}
+
+/** Alias used by channel adapters that call the operation "inbound". */
+export const admitLocusInboundEvent = admitLocusEvent
+/** Alias used by integrations that call an event a message. */
+export const admitLocusMessage = admitLocusEvent
+
+/** Bounded message-id dedup helper for controllers without a repository. */
+export class LocusMessageDedup {
+  private readonly seen = new Map<string, number>()
+
+  constructor(private readonly windowMs = 60_000) {}
+
+  /** Record an id and report whether it was already seen in the window. */
+  check(messageId: string, now = Date.now()): boolean {
+    for (const [id, at] of this.seen) {
+      if (now - at > this.windowMs) this.seen.delete(id)
+    }
+    if (this.seen.has(messageId)) return true
+    this.seen.set(messageId, now)
+    return false
+  }
+}
+
+/** Familiar short name for callers that use the existing channel helper. */
+export { LocusMessageDedup as MessageDedup }

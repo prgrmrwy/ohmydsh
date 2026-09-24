@@ -5,7 +5,7 @@ import {
   titleNodeOf,
 } from '../src/client/row-locator.js'
 import { providerBySession, providerTitleIndex } from '../src/client/provider-map.js'
-import type { SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
 
 /** Minimal structural fake of a session row node (role + class + one title child). */
 function rowNode(classes: string[], titleText?: string): {

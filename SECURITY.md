@@ -44,11 +44,11 @@ ohmydsh 是持续演进的个人定制仓,**只维护 `main` 分支的最新状�
 
 若你发现某个已 pin 的第三方插件版本存在漏洞,这属于有效报告 —— 即使漏洞在上游。
 
-### 2. 局域网绑定默认关闭
+### 2. 回环绑定(无局域网形态)
 
-`web.lan` 默认为 `false`,且**刻意保持关闭**。开启会把 webserver 绑到 `0.0.0.0`,将完整 agent 能力(bash 执行、文件读写)暴露给同网段任意设备,且 DSH 无 TLS(明文可嗅探)。
+webserver **只绑定回环地址**(`127.0.0.1`)。本仓库已**移除** `web.lan` / `DSH_LAN` 局域网绑定开关与 SSH 隧道配套(2026-09-03 决策:不再提供跨机器访问形态)。
 
-跨机器访问的既定方案是 **SSH 隧道**(见 `docs/notes/lan-access-ssh-tunnel.md`)。"开启 `web.lan` 后不安全"是**已知且已文档化的行为**,不构成新漏洞;但绕过该开关、或在其关闭时仍产生非回环监听的路径,属于有效报告。
+任何路径能让 webserver 在未显式传入 `--host` 时产生**非回环监听**(绕过上面的移除,或让其重新出现),属于有效报告——那会把完整 agent 能力(bash 执行、文件读写)暴露给同网段任意设备,且 DSH 无 TLS(明文可嗅探)。
 
 ### 3. 部署面 fail-closed 约定
 
@@ -72,7 +72,6 @@ sync 对 `$DSH_HOME/AGENTS.md` 等托管文件有 ownership/hash 漂移防护:�
 
 - 只在你信任的机器上运行;
 - 安装任何第三方插件前先审查源码;
-- 不要在不可信网络中开启 `web.lan`;
 - `$DSH_HOME/AGENTS.md` 中的模型指令**不是权限授予,也不是强制安全边界** —— 实际能力始终由 runtime context 与工具执行策略决定。
 
 ---
@@ -85,6 +84,6 @@ Use [GitHub Private Vulnerability Reporting](https://github.com/prgrmrwy/ohmydsh
 
 Only the latest `main` is supported. Best-effort response: acknowledgement within 7 days, assessment within 30 days.
 
-Note these intentional, documented design tradeoffs before reporting: remote plugins are third-party code pinned by exact version; `web.lan` is deliberately disabled by default (SSH tunneling is the supported remote-access path); sync is fail-closed on managed-file drift; and `autoUpdate` performs blocking self-upgrades scoped to `@deepseek-ai/dsh-*` pins. Bypasses of any of these guarantees are valid reports.
+Note these intentional, documented design tradeoffs before reporting: remote plugins are third-party code pinned by exact version; the webserver binds loopback only (`web.lan` / LAN serving was removed 2026-09-03); sync is fail-closed on managed-file drift; and `autoUpdate` performs blocking self-upgrades scoped to `@deepseek-ai/dsh-*` pins. Bypasses of any of these guarantees are valid reports.
 
 This repository drives an AI agent runtime with full local machine capabilities. Run it only on machines you trust, and review third-party plugin source before installing.

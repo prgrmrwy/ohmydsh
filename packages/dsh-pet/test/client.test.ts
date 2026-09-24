@@ -1,0 +1,2091 @@
+/**
+ * Client-side tests: position persistence, static markup accessibility and
+ * the fixed settings information architecture.
+ *
+ * Rendering uses `renderToStaticMarkup` (the established pattern in this
+ * repository) so the component contract is asserted without a full DOM.
+ */
+
+import path from 'node:path'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  PET_SIZE,
+  clampPosition,
+  defaultPosition,
+  readPosition,
+  writePosition,
+  POSITION_KEY,
+} from '../src/client/position.js'
+import { PET_CSS } from '../src/client/styles.js'
+import {
+  PET_SETTINGS_TABS,
+  PetSettingsSection,
+  shouldRefreshChannel,
+  shouldRefreshPairing,
+  unifiedLocusReadiness,
+  watchChannelTransition,
+} from '../src/client/settings.js'
+import type { PetChannelView, PetChannelPhase } from '../src/wire.js'
+import { ordinaryPetTasks, PetOverlay } from '../src/client/overlay.js'
+
+// Pet never polls on render; fetch is stubbed so effects cannot escape.
+vi.stubGlobal('fetch', vi.fn(async () => ({ json: async () => ({ ok: true, data: {} }) })))
+
+const viewport = { width: 1280, height: 800 }
+
+function memoryStorage(): Pick<Storage, 'getItem' | 'setItem'> & { map: Map<string, string> } {
+  const map = new Map<string, string>()
+  return {
+    map,
+    getItem: (key: string) => map.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      map.set(key, value)
+    },
+  }
+}
+
+describe('channel connection convergence', () => {
+  const view = (phase: PetChannelPhase): PetChannelView => ({
+    enabled: true,
+    allowOpenIds: [],
+    knownNames: {},
+    routes: [],
+    unifiedLocus: {
+      childSession: 'verified',
+      defaultPermission: 'read',
+      readVerification: 'verified',
+    },
+    onboarding: { ready: true, steps: [], blockers: [] },
+    connection: { phase, queueDepth: 0 },
+  })
+
+  it('recognises only transitional states', () => {
+    expect(shouldRefreshChannel('starting')).toBe(true)
+    expect(shouldRefreshChannel('reconnecting')).toBe(true)
+    expect(shouldRefreshChannel('connected')).toBe(false)
+    expect(shouldRefreshChannel('down')).toBe(false)
+    expect(shouldRefreshChannel('stopped')).toBe(false)
+  })
+
+  it('keeps refreshing for every nonterminal pairing phase', () => {
+    expect(shouldRefreshPairing({ ...view('stopped'), pairing: { phase: 'starting' } })).toBe(true)
+    expect(shouldRefreshPairing({
+      ...view('stopped'),
+      pairing: { phase: 'waiting', command: '/pair 2345-6789', expiresAt: Date.now() + 1 },
+    })).toBe(true)
+    expect(shouldRefreshPairing({
+      ...view('stopped'),
+      pairing: { phase: 'claiming', expiresAt: Date.now() + 1 },
+    })).toBe(true)
+    expect(shouldRefreshPairing({ ...view('stopped'), pairing: { phase: 'expired' } })).toBe(false)
+    expect(shouldRefreshPairing({
+      ...view('stopped'),
+      pairing: { phase: 'succeeded', openId: 'ou_member' },
+    })).toBe(false)
+  })
+
+  it('refreshes a missed ready edge and stops at connected', async () => {
+    const scheduled: (() => void)[] = []
+    const applied: PetChannelPhase[] = []
+    const stop = watchChannelTransition(
+      vi.fn(async () => view('connected')),
+      next => applied.push(next.connection.phase),
+      1,
+      callback => {
+        scheduled.push(callback)
+        return 1 as unknown as ReturnType<typeof setTimeout>
+      },
+      vi.fn(),
+    )
+
+    scheduled.shift()?.()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(applied).toEqual(['connected'])
+    expect(scheduled).toHaveLength(0)
+    stop()
+  })
+
+  it('stops after a bounded number of unsuccessful refreshes', async () => {
+    const scheduled: (() => void)[] = []
+    watchChannelTransition(
+      vi.fn(async () => Promise.reject(new Error('offline'))),
+      vi.fn(),
+      1,
+      callback => {
+        scheduled.push(callback)
+        return scheduled.length as unknown as ReturnType<typeof setTimeout>
+      },
+      vi.fn(),
+      2,
+    )
+
+    scheduled.shift()?.()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(scheduled).toHaveLength(1)
+    scheduled.shift()?.()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    // The second failed load consumes the final permitted attempt.
+    expect(scheduled).toHaveLength(0)
+  })
+
+  it('continues through reconnecting and cancellation stops future polls', async () => {
+    const scheduled: (() => void)[] = []
+    const phases: PetChannelPhase[] = ['reconnecting', 'down']
+    const applied: PetChannelPhase[] = []
+    const cancelled: unknown[] = []
+    const stop = watchChannelTransition(
+      vi.fn(async () => view(phases.shift() ?? 'down')),
+      next => applied.push(next.connection.phase),
+      1,
+      callback => {
+        scheduled.push(callback)
+        return scheduled.length as unknown as ReturnType<typeof setTimeout>
+      },
+      timer => cancelled.push(timer),
+    )
+
+    scheduled.shift()?.()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(applied).toEqual(['reconnecting'])
+    stop()
+    scheduled.shift()?.()
+    await Promise.resolve()
+    expect(applied).toEqual(['reconnecting'])
+    expect(cancelled).toHaveLength(1)
+  })
+})
+
+describe('overlay position persistence', () => {
+  let storage: ReturnType<typeof memoryStorage>
+
+  beforeEach(() => {
+    storage = memoryStorage()
+  })
+
+  it('defaults to a visible bottom-right position', () => {
+    const position = defaultPosition(viewport)
+
+    expect(position.x).toBeLessThanOrEqual(viewport.width - PET_SIZE)
+    expect(position.y).toBeLessThanOrEqual(viewport.height - PET_SIZE)
+    expect(position.x).toBeGreaterThanOrEqual(0)
+  })
+
+  it('round-trips a dragged position across a reload', () => {
+    writePosition({ x: 120, y: 240 }, viewport, storage)
+
+    expect(readPosition(viewport, storage)).toEqual({ x: 120, y: 240 })
+    expect(storage.map.has(POSITION_KEY)).toBe(true)
+  })
+
+  it('clamps a stored position into a smaller viewport', () => {
+    writePosition({ x: 1200, y: 700 }, viewport, storage)
+
+    // The window shrank; Pet must not be stranded off-screen.
+    const restored = readPosition({ width: 400, height: 300 }, storage)
+
+    expect(restored.x).toBeLessThanOrEqual(400 - PET_SIZE)
+    expect(restored.y).toBeLessThanOrEqual(300 - PET_SIZE)
+  })
+
+  it('never allows a negative position', () => {
+    expect(clampPosition({ x: -500, y: -500 }, viewport)).toEqual({ x: 0, y: 0 })
+  })
+
+  it('falls back to the default for corrupt storage', () => {
+    storage.map.set(POSITION_KEY, 'not json')
+    expect(readPosition(viewport, storage)).toEqual(defaultPosition(viewport))
+
+    storage.map.set(POSITION_KEY, JSON.stringify({ x: 'left', y: null }))
+    expect(readPosition(viewport, storage)).toEqual(defaultPosition(viewport))
+
+    storage.map.set(POSITION_KEY, JSON.stringify({ x: Infinity, y: 0 }))
+    expect(readPosition(viewport, storage)).toEqual(defaultPosition(viewport))
+  })
+
+  it('survives storage that refuses writes', () => {
+    const hostile = {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error('quota exceeded')
+      },
+    }
+
+    // Dragging must keep working even when persistence fails.
+    expect(() => writePosition({ x: 10, y: 10 }, viewport, hostile)).not.toThrow()
+  })
+
+  it('tolerates a missing storage implementation', () => {
+    expect(readPosition(viewport, undefined)).toEqual(defaultPosition(viewport))
+  })
+})
+
+describe('overlay markup and accessibility', () => {
+  it('renders an accessible, labelled mascot control', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetOverlay, { currentSource: undefined }),
+    )
+
+    expect(markup).toContain('aria-label="DSH Pet"')
+    expect(markup).toContain('type="button"')
+    // A real button is keyboard focusable and activatable by default.
+    expect(markup).toContain('class="dshpet-mascot"')
+  })
+
+  it('positions itself as a fixed overlay surface', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetOverlay, { currentSource: undefined }),
+    )
+
+    expect(markup).toContain('dshpet-root')
+    // Offset rides `transform`, not `left`/`top`: those two invalidate Pet's
+    // geometry on every write, so dragging paid a layout and a paint per
+    // pointer event. The CSS rule pins them to 0 (asserted separately), which
+    // is what makes these translate arguments viewport coordinates.
+    expect(markup).toMatch(/transform:translate3d\(\d+px, ?\d+px, ?0\)/)
+    // The old form must not creep back in alongside the new one: a stray
+    // `left`/`top` would re-introduce the layout cost while the transform
+    // made everything still LOOK correct.
+    expect(markup).not.toMatch(/style="[^"]*left:\d+px/)
+    expect(markup).not.toMatch(/style="[^"]*top:\d+px/)
+  })
+
+  it('publishes the resizable mascot size to the wheel-note anchor rules', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetOverlay, { currentSource: undefined }),
+    )
+
+    // The wheel notes are anchored to the mascot's edge through
+    // `--dshpet-mascot-size`; without it the rule falls back to 72px and the
+    // note is only correct at the default size.
+    expect(markup).toContain('--dshpet-mascot-size:72px')
+  })
+})
+
+describe('overlay styles', () => {
+  it('only defines Pet-owned class names', () => {
+    // Strip comments first: prose mentioning `document.body` or `index.tsx`
+    // otherwise looks like a `.body` / `.tsx` selector and fails a rule about
+    // actual styling.
+    const declarations = PET_CSS.replace(/\/\*[\s\S]*?\*\//g, '')
+    const selectors = declarations.match(/\.[a-zA-Z][\w-]*/g) ?? []
+
+    expect(selectors.length).toBeGreaterThan(0)
+    for (const selector of selectors) {
+      expect(selector.startsWith('.dshpet-')).toBe(true)
+    }
+  })
+
+  it('opts into pointer events only on the Pet surface', () => {
+    // The shell.overlay layer is click-through; Pet re-enables events for
+    // itself alone so it never blocks the app underneath.
+    expect(PET_CSS).toContain('pointer-events:auto')
+    expect(PET_CSS).toContain('.dshpet-badge{')
+  })
+
+  it('uses DSH theme tokens with literal fallbacks for dark and light', () => {
+    // Use names present in the installed DSH vocabulary. `bg-layer-1` was
+    // never defined here and only appeared to work because every declaration
+    // carried a literal fallback.
+    expect(PET_CSS).toContain('var(--dsw-specific-menu,')
+    expect(PET_CSS).toContain('var(--dsw-alias-label-primary,')
+  })
+
+  it('references only DSW tokens the installed DSH actually defines', async () => {
+    const { readFile, readdir } = await import('node:fs/promises')
+    // npm may hoist client packages to the workspace root or nest them under
+    // this package (peer-conflict isolation); the vocabulary is their union.
+    const roots = [
+      path.resolve(__dirname, '..', 'node_modules', '@deepseek-ai'),
+      path.resolve(__dirname, '..', '..', '..', 'node_modules', '@deepseek-ai'),
+    ]
+
+    // Build the real vocabulary from the shipped client bundles. The previous
+    // assertion only echoed the names Pet itself used, so four invented tokens
+    // (`bg-float`, `primary`, `danger`, `line-divider`) passed for weeks while
+    // silently falling back to hard-coded colors and ignoring the theme.
+    const defined = new Set<string>()
+    for (const root of roots) {
+      const entries = await readdir(root).catch(() => [] as string[])
+      for (const entry of entries) {
+        const bundle = path.join(root, entry, 'lib', 'client.js')
+        const source = await readFile(bundle, 'utf8').catch(() => undefined)
+        if (source === undefined) continue
+        for (const match of source.matchAll(/--dsw-[a-z0-9-]+/g)) defined.add(match[0])
+      }
+    }
+    expect(defined.size).toBeGreaterThan(20)
+
+    const used = new Set([...PET_CSS.matchAll(/--dsw-[a-z0-9-]+/g)].map(m => m[0]))
+    expect([...used].filter(token => !defined.has(token))).toEqual([])
+  })
+
+  it('provides a visible keyboard focus indicator', () => {
+    expect(PET_CSS).toContain('.dshpet-mascot:focus-visible')
+    expect(PET_CSS).toContain('.dshpet-wheel-item:focus-visible')
+  })
+
+  it('clears the drawn rings instead of covering them', () => {
+    // Two wrong anchors preceded this. `top:100%` used the wheel BOX, sized
+    // for the widest ring it could ever draw (356px), parking the note far
+    // below a wheel that usually draws fewer. Anchoring to the mascot's edge
+    // overcorrected: the mascot is only the innermost 72px of a disc reaching
+    // 170px, so the note landed ON the rings (measured in Chrome: 37–113px of
+    // overlap depending on ring count).
+    const noteRule = PET_CSS.match(/\.dshpet-wheel \.dshpet-wheel-note\{[^}]*\}/)?.[0] ?? ''
+    // The clearance must follow the rings ACTUALLY drawn, which only the
+    // overlay knows; it publishes the radius it already computes for its own
+    // hover test.
+    expect(noteRule).toContain('--dshpet-wheel-radius')
+    expect(noteRule).toContain('top:calc(50%')
+    expect(noteRule).not.toContain('top:100%')
+    // A `p` carries a UA margin that would silently add itself to the gap.
+    expect(noteRule).toContain('margin:0')
+  })
+
+  it('publishes the drawn ring radius the note anchors to', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // The CSS cannot compute this: the radius depends on how many rings the
+    // capability list produced.
+    expect(overlay).toContain("'--dshpet-wheel-radius'")
+    // Published from `noteClearance`, NOT `wheelRadius`. The latter is a
+    // hit-testing radius held at one ring's width even when the wheel is
+    // empty, so that an empty wheel cannot collapse onto the mascot and snap
+    // shut on first hover. Nothing is painted out there, so anchoring the
+    // note to it left the "Pet 未就绪" message floating in blank space.
+    expect(overlay).toContain('${noteClearance}px')
+    expect(overlay).not.toContain('${wheelRadius}px')
+  })
+
+  it('measures note clearance from the rings drawn, not the hover disc', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // The two radii must stay separate. Collapsing them reintroduces one of
+    // two bugs: reuse `wheelRadius` and the note floats away from a ringless
+    // wheel; make `wheelRadius` follow the rings and an empty wheel snaps
+    // shut the moment the pointer leaves the mascot's face.
+    const clearance = /const noteClearance =[^\n]*\n?[^\n]*/.exec(overlay)?.[0] ?? ''
+    expect(clearance).toContain('rings.length === 0')
+    // Falls back to the mascot's own edge when nothing is drawn.
+    expect(clearance).toContain('size / 2')
+  })
+
+  it('falls back to the mascot edge, not a ring, when the variable is missing', () => {
+    // A note is only pushed out to a ring when the overlay says one was
+    // drawn, so the safe default is the tighter radius. The old 94px fallback
+    // was one ring's width and would strand the note if the variable ever
+    // failed to reach the CSS.
+    const noteRule = PET_CSS.match(/\.dshpet-wheel \.dshpet-wheel-note\{[^}]*\}/)?.[0] ?? ''
+    expect(noteRule).toContain('var(--dshpet-wheel-radius,36px)')
+  })
+
+  it('scopes the note rule above the shared empty/error paddings', () => {
+    // The note element carries BOTH dshpet-wheel-note and dshpet-empty (or
+    // dshpet-error). Those modifiers set padding:6px 0 and, because they are
+    // later in source order at the same single-class specificity, they
+    // silently overrode the card's padding:10px — the hint text touched the
+    // card edges ("still no margin" bug). Two-class scope wins the cascade.
+    expect(PET_CSS).toContain('.dshpet-wheel .dshpet-wheel-note{pointer-events:auto;position:absolute')
+  })
+
+  it('adapts to narrow viewports', () => {
+    expect(PET_CSS).toContain('@media (max-width:520px)')
+  })
+
+  it('disables touch scrolling interference while dragging', () => {
+    expect(PET_CSS).toContain('touch-action:none')
+  })
+})
+
+describe('settings information architecture', () => {
+  it('exposes exactly the six stable tabs', () => {
+    // Locus is a stable management surface, not a conditional replacement for
+    // ordinary settings or the legacy channel tab.
+    expect(PET_SETTINGS_TABS).toEqual([
+      'general',
+      'skills',
+      'locus',
+      'env',
+      'channel',
+      'diagnostics',
+    ])
+  })
+
+  it('renders an accessible tablist', () => {
+    const markup = renderToStaticMarkup(createElement(PetSettingsSection, {}))
+
+    expect(markup).toContain('role="tablist"')
+    expect(markup).toContain('role="tab"')
+    expect(markup).toContain('role="tabpanel"')
+    // Each tab is wired to its panel for screen readers.
+    expect(markup).toContain('aria-controls="dshpet-panel-general"')
+    expect(markup).toContain('aria-labelledby="dshpet-tab-general"')
+  })
+
+  it('defaults to General and supports deep-linking a tab', () => {
+    const general = renderToStaticMarkup(createElement(PetSettingsSection, {}))
+    expect(general).toContain('id="dshpet-panel-general"')
+
+    const skills = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'skills' as const }),
+    )
+    expect(skills).toContain('id="dshpet-panel-skills"')
+
+    const locus = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'locus' as const }),
+    )
+    expect(locus).toContain('id="dshpet-panel-locus"')
+    expect(locus).toContain('Locus 管理')
+  })
+
+  it('states that Skill import paths are Host paths, not browser paths', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'skills' as const }),
+    )
+
+    expect(markup).toContain('dsh web')
+    expect(markup).toContain('不是你当前浏览器所在的机器')
+  })
+
+  it('states that Pet follows the DSH default model instead of its own', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'general' as const }),
+    )
+
+    // Pet executors are ordinary Agents, so the model is the Host's default.
+    // There is no Pet-owned copy for the user to set or keep in sync.
+    expect(markup).toContain('跟随 DSH')
+    expect(markup).not.toMatch(/type="password"/)
+    expect(markup.toLowerCase()).not.toContain('api key')
+  })
+
+  it('offers no editable provider or model control', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'general' as const }),
+    )
+
+    // A writable field here would reintroduce the divergence this removed:
+    // a Pet-private selection silently disagreeing with the Host default.
+    expect(markup).not.toContain('name="providerId"')
+    expect(markup).not.toMatch(/<input[^>]*value="[^"]*"[^>]*\/>[\s\S]{0,40}Model/)
+  })
+
+  it('never renders an input that could hold an app secret in cleartext', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'channel' as const }),
+    )
+
+    // The secret field exists, but only as a password input: it is handed
+    // straight to lark-cli and never stored, so it must not be readable on
+    // screen either.
+    expect(markup).not.toContain('type="text" placeholder="App Secret')
+  })
+
+  it('keeps locus owner identity fail-closed and exposes management concepts', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // Static markup intentionally stops at a Host snapshot loading state; the
+    // controls below are rendered only after the typed Host route succeeds.
+    // Assert the source contract so this test does not pretend useEffect ran on
+    // the server or expose ownerId as a browser capability.
+    expect(settings).toContain('统一 locus 接口不可用时不会回退')
+    // The reverse-lookup fold is disabled by owner decision, not deleted: the
+    // component and the Host route it calls stay compiled behind one switch, so
+    // re-enabling it is a one-line change instead of a rewrite.
+    expect(settings).toContain('DISCOVERY_FOLD_ENABLED: boolean = false')
+    expect(settings).toContain('反查关联')
+    expect(settings).toContain('petApi.locusDiscovery')
+    // Our word for an entry is 入口; "endpoint" is bookkeeping, so it must not
+    // appear as a label anywhere the owner reads.
+    expect(settings).not.toContain("'Endpoint'")
+    expect(settings).toContain('locusStop')
+    expect(settings).toContain('warningText')
+    expect(settings).toContain('默认 Q&A 新群的所有者来自 dsh-pet profile 实时核验的当前飞书用户')
+    expect(settings).toContain('列表顺序和浏览器输入都不能声明“本人”')
+    expect(settings).not.toContain('ownerId:')
+  })
+
+  it('creates no external resource from the locus tab', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // Binding an endpoint by hand and creating a Q&A group are both removed:
+    // the second is an irreversible external side effect (a real group, with a
+    // real owner), and it used to be rendered as parallel buttons that differed
+    // only by a bare session id. The regression this guards is the control
+    // coming BACK, so absence is what gets asserted — not wording.
+    expect(settings).not.toContain('locusDefaultQa')
+    expect(settings).not.toContain('locusBind')
+    expect(settings).not.toContain('绑定新的 endpoint')
+    expect(settings).not.toContain('创建/打开默认 Q&A')
+    // The read-only replacement still tells the owner where creation lives.
+    expect(settings).toContain('请在目标会话里用 Pet 轮盘的「答疑群」创建')
+    // Lifecycle actions stay reachable, and the single exit replaces the three
+    // names that used to land in the same state.
+    expect(settings).toContain('locusRebuild')
+    expect(settings).toContain('locusStop')
+    expect(settings).not.toContain('locusUnbind')
+    expect(settings).not.toContain('locusArchive')
+    expect(settings).toContain('locusScope')
+    // `locusConfirmAnchor` joins the absent list for the same reason
+    // `locusUnbind`/`locusArchive` are on it: the control is gone. The
+    // execution-root row and its confirm button were retired once ADR-0005
+    // demoted the anchor to a context fact and the write switch went off, so
+    // absence — not wording — is what this case asserts.
+    expect(settings).not.toContain('locusConfirmAnchor')
+  })
+
+  it('presents entries through the shared presentation model', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // A rebuilt entry used to be a full card per RECORD, so one entry could
+    // appear several times. Aggregation and naming now live in locus-view.ts
+    // (where they are tested against real snapshots); this asserts the surface
+    // actually goes through it rather than re-implementing a per-record card.
+    expect(settings).not.toContain('function LocusCard')
+    expect(settings).toContain('applyLocusFilter')
+    expect(settings).toContain('collectHandleCodes')
+    expect(settings).toContain('entryDisplayName(endpoint, endpointCode)')
+    expect(settings).toContain('familyHead')
+  })
+
+})
+
+describe('client program is actually typechecked', () => {
+  it('compiles every client source file, not just wire.ts', async () => {
+    const { execFileSync } = await import('node:child_process')
+    const output = execFileSync(
+      'npx',
+      ['tsc', '-p', 'tsconfig.client.json', '--showConfig'],
+      { cwd: path.resolve(__dirname, '..'), encoding: 'utf8' },
+    )
+    const config = JSON.parse(output) as { files?: string[] }
+    const files = config.files ?? []
+
+    // Regression guard: the parent tsconfig excludes `src/client`, and that
+    // exclude is INHERITED and beats this config's `include`. When that
+    // happened the client program compiled only `wire.ts`, so `ctx` was `any`
+    // and a wrong slot-registration API shipped without a type error.
+    for (const name of ['index.tsx', 'overlay.tsx', 'settings.tsx', 'api.ts', 'position.ts']) {
+      expect(files.some(file => file.endsWith(`/client/${name}`))).toBe(true)
+    }
+  }, 60_000)
+
+  it('declares the slot-contract packages it imports types from', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const pkg = JSON.parse(
+      await readFile(path.resolve(__dirname, '..', 'package.json'), 'utf8'),
+    ) as Record<string, Record<string, string> | undefined>
+    const declared = { ...pkg['peerDependencies'], ...pkg['devDependencies'] }
+
+    // Without these, the `SlotMap` augmentations for `shell.overlay` and
+    // `settings.section` never load and every slot key goes unchecked.
+    expect(declared['@deepseek-ai/dsh-client-ui-layout']).toBeDefined()
+    expect(declared['@deepseek-ai/dsh-client-ui-settings']).toBeDefined()
+    expect(declared['@deepseek-ai/dsh-client-ui-slots']).toBeDefined()
+  })
+})
+
+describe('client reads DSH contracts, not invented shapes', () => {
+  it('resolves the current source through getSnapshot and byId', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const source = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'index.tsx'),
+      'utf8',
+    )
+
+    // `sessions.list` is an ObservableSnapshot: reading `.current` off the
+    // feed object yields undefined, which made Pet believe there was never an
+    // active session.
+    expect(source).toContain('ctx.sessions.list.getSnapshot()')
+    expect(source).toContain('ctx.workspaces.list.getSnapshot()')
+    // The list is keyed by id, not an `items` array of sessions.
+    expect(source).toContain('sessionState.byId[currentId]')
+    // WorkspaceView identifies itself with `workspaceId`.
+    expect(source).toContain('workspace.workspaceId')
+    // Untyped service lookups defeat the compiler; the typed faces are used.
+    expect(source).not.toContain("ctx.get('sessions')")
+    expect(source).not.toContain("ctx.get('workspaces')")
+  })
+
+  it('ships no control for a settings API DSH does not expose', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const clientDir = path.resolve(__dirname, '..', 'src', 'client')
+    const entry = await readFile(path.join(clientDir, 'index.tsx'), 'utf8')
+    const overlay = await readFile(path.join(clientDir, 'overlay.tsx'), 'utf8')
+
+    // `openSection` belongs to the settings ONBOARDING slot; a plugin cannot
+    // call it. A "Settings" button wired to an invented API would silently do
+    // nothing — so Pet ships no such control, and no longer carries a hint
+    // that just restated where the panel lives.
+    expect(entry).not.toContain('openSettings')
+    expect(overlay).not.toContain('openSettings')
+    expect(overlay).not.toContain('Manage in Settings')
+  })
+
+  it('registers its settings slot through inject with the two-argument form', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const source = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'index.tsx'),
+      'utf8',
+    )
+
+    // Settings still goes through the slot: it is a page section the shell
+    // owns and lays out. Only the floating surface left, because only it needs
+    // to escape the frame's containing block.
+    expect(source).toContain("ctx.slots.inject('settings.section'")
+    expect(source).toContain("name: 'settings.section' as const")
+    // The old three-argument form throws at load.
+    expect(source).not.toMatch(/register\(\s*'settings\.section'/)
+  })
+})
+
+describe('task panel follows the change feed instead of polling data routes', () => {
+  it('reloads only when the Host reports a newer generation', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // The cheap status route carries the generation; the expensive task list
+    // is refetched only when that generation moves. Fetching tasks on a timer
+    // would be the polling the contract forbids.
+    expect(overlay).toContain('petApi.status(seen)')
+    expect(overlay).toContain('status.stale')
+    expect(overlay).toContain('seen = status.generation')
+    expect(overlay).not.toMatch(/setInterval\([^)]*petApi\.tasks/)
+  })
+
+  it('sends the seen generation so the Host can answer staleness', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const api = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'api.ts'),
+      'utf8',
+    )
+
+    expect(api).toContain('seenGeneration')
+    expect(api).toContain('readonly generation: number')
+    expect(api).toContain('readonly stale: boolean')
+  })
+})
+
+
+describe('radial menu honors shortcut visibility', () => {
+  it('renders only capabilities marked as shortcuts', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // Without this filter the Settings toggle silently does nothing.
+    expect(overlay).toContain('capability.showAsShortcut')
+    expect(overlay).toContain('capability.showAsShortcut')
+    expect(overlay).not.toContain('capabilities.map(')
+  })
+})
+
+
+describe('configured behavior is applied, not just displayed', () => {
+  it('starts a new Task unattached when the policy is none', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // The policy was persisted and shown but never applied, so choosing
+    // `none` had no effect on how a Task actually started.
+    expect(overlay).toContain("config.defaultContextPolicy === 'none'")
+    expect(overlay).toContain('setSourceRemoved(true)')
+  })
+
+  it('lets the user change the policy rather than only reading it', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    expect(settings).toContain('defaultContextPolicy: next')
+    expect(settings).toContain("value: 'none'")
+  })
+
+})
+
+describe('task panel can answer a waiting Invocation', () => {
+  it('offers an answer input only while a Task waits for the user', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // The Host route existed and the spec requires the affordance, but the
+    // panel previously had only cancel/retry/archive — a waiting Invocation
+    // was unanswerable from Pet.
+    expect(overlay).toContain("task.status === 'waiting-user' ? (")
+    expect(overlay).toContain('.answer(task.id, text)')
+    expect(overlay).toContain('dshpet-answer')
+    // Labelled for assistive technology.
+    expect(overlay).toContain('aria-label={`Answer the question waiting in')
+  })
+})
+
+describe('the Task panel retires only legacy Feishu Invocation rows', () => {
+  it('keeps ordinary wheel Tasks and filters chat/qa-chat projections', () => {
+    const task = (sourceKind: string, id: string) => ({
+      id,
+      scopeKey: `${sourceKind}:${id}`,
+      sourceKind,
+      status: 'succeeded',
+      executorSessionId: `session-${id}`,
+      revision: 1,
+      invocations: [{ id: `inv-${id}`, capabilityId: 'ws', status: 'succeeded' }],
+    })
+
+    expect(
+      ordinaryPetTasks([
+        task('session', 'session'),
+        task('workspace', 'workspace'),
+        task('none', 'none'),
+        task('chat', 'legacy-chat'),
+        task('qa-chat', 'legacy-qa'),
+      ]).map(item => item.id),
+    ).toEqual(['session', 'workspace', 'none'])
+  })
+})
+
+describe('the Task row is the only navigation control', () => {
+  it('opens the executor session and offers nothing destructive', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // The whole row navigates. Archiving belongs in the session, where
+    // `reconcileArchives` already observes it; a destructive control in a
+    // hover panel only invites misclicks.
+    expect(overlay).toContain("props.openSession?.(task.executorSessionId)")
+    expect(overlay).not.toContain('petApi.archive(')
+    expect(overlay).not.toContain('petApi.cancel(')
+    expect(overlay).not.toContain('Open source')
+  })
+
+  it('reaches the row from the keyboard', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // A clickable div is invisible to keyboard users without this.
+    expect(overlay).toContain('role="button"')
+    expect(overlay).toContain('tabIndex={0}')
+  })
+})
+
+describe('task panel groups by source with a current-source view', () => {
+  it('offers Current, All and Archived views', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // The spec requires the current source's Task first, with a switch to
+    // other sources and archived Tasks; the panel previously had only
+    // active/archived and no notion of "current".
+    expect(overlay).toContain("useState<'current' | 'all' | 'archived'>('current')")
+    expect(overlay).toContain('>\n          Current\n        </button>')
+    expect(overlay).toContain('>\n          All\n        </button>')
+  })
+
+  it('scopes the current view by the same scope key the Host routes on', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    expect(overlay).toContain('`session:${props.currentSource.sessionId}`')
+    expect(overlay).toContain('`workspace:${props.currentSource.workspaceId}`')
+    expect(overlay).toContain("'independent:web:default'")
+    expect(overlay).toContain('task.scopeKey === currentScopeKey')
+    // The executor session must never be treated as a source.
+    expect(overlay).not.toContain('scopeKey === task.executorSessionId')
+  })
+
+  it('labels each Task by its source kind when listing all sources', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+    expect(overlay).toContain('${task.sourceKind}: ${task.sourceTitle')
+  })
+})
+
+describe('capability menu is reachable and legible without a pointer', () => {
+  it('opens on focus, the keyboard equivalent of hover', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // Previously the menu opened only on mouseEnter, so a keyboard user could
+    // never reach the capabilities.
+    expect(overlay).toContain('onFocus={() => {')
+    expect(overlay).toContain('onBlur={event => {')
+    // Moving focus between the mascot and a menu item must not collapse it.
+    expect(overlay).toContain('event.currentTarget.contains(event.relatedTarget)')
+  })
+
+  it('binds each disabled reason as an accessible description', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // `title` alone is not reliably announced by assistive technology.
+    expect(overlay).toContain('aria-describedby={reason !== undefined')
+    expect(overlay).toContain('id={`${capability.id}-reason`}')
+  })
+
+  it('announces a degraded Host instead of hiding it in a tooltip', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    expect(overlay).toContain('role="status"')
+    expect(overlay).toContain('Pet 未就绪：')
+    expect(overlay).toContain('aria-hidden="true"')
+  })
+
+  it('closes the menu with Escape from anywhere on the surface', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+    expect(overlay).toContain("if (event.key === 'Escape') setMode('closed')")
+  })
+
+  it('provides a visually hidden utility class for announced-only text', async () => {
+    const { PET_CSS } = await import('../src/client/styles.js')
+    expect(PET_CSS).toContain('.dshpet-visually-hidden')
+    // Must stay in the accessibility tree, so `display:none` is wrong here.
+    expect(PET_CSS).not.toMatch(/\.dshpet-visually-hidden\{[^}]*display:none/)
+  })
+})
+
+describe('Pet is a top layer that yields to no layout', () => {
+  it('never re-parents an already-mounted node out of its root', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // React delegates events at the mount container, so MOVING a mounted node
+    // to `document.body` silently stops every synthetic handler while the
+    // element still renders. Pet escapes the frame by owning a separate root
+    // (see index.tsx), never by re-parenting the surface from here.
+    expect(overlay).not.toContain('document.body.appendChild')
+    expect(overlay).not.toContain('createPortal')
+  })
+
+  it('mounts on its own React root under document.body', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const entry = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'index.tsx'),
+      'utf8',
+    )
+
+    // A dedicated root establishes its own delegation container, which is why
+    // interaction survives here where a portal out of the host root would not.
+    expect(entry).toContain('createRoot')
+    expect(entry).toContain('document.body.appendChild')
+    // The surface must NOT also be registered into the frame's overlay slot,
+    // or two Pets would render.
+    expect(entry).not.toContain("ctx.slots.inject('shell.overlay'")
+  })
+
+  it('reuses an existing host instead of stacking a second Pet', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const entry = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'index.tsx'),
+      'utf8',
+    )
+
+    // A client bundle can be applied again by HMR or a plugin reload.
+    expect(entry).toContain('PET_HOST_ATTRIBUTE')
+    expect(entry).toContain('root.unmount()')
+  })
+
+  it('positions against the viewport, not the app frame', () => {
+    // `dsh-better-sidebar` squeezes `#root` itself (margin-right +
+    // width:calc), so every containing block inside it narrows when the panel
+    // opens. Absolute positioning inherits that and Pet gets pushed aside;
+    // fixed positioning does not. This is a containing-block fix — z-index
+    // cannot substitute for it.
+    expect(PET_CSS).toContain('.dshpet-root{position:fixed')
+    expect(PET_CSS).not.toContain('.dshpet-root{position:absolute')
+  })
+
+  it('keeps its own host from swallowing page clicks', () => {
+    // The host spans nothing visually but still sits over the page.
+    expect(PET_CSS).toContain('[data-dsh-pet-host]{pointer-events:none}')
+    expect(PET_CSS).toMatch(/\.dshpet-root\{[^}]*pointer-events:auto/)
+  })
+
+  it('clamps against the window rather than the squeezed frame', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // Measuring `[data-shell-overlay]` was right while Pet lived inside it,
+    // but that layer shrinks with the sidebar — clamping to it would drag Pet
+    // left as the panel opens, which is the exact behaviour being removed.
+    // Asserted on the QUERY, so prose may still explain the old approach.
+    expect(overlay).not.toMatch(/querySelector\([^)]*data-shell-overlay/)
+    expect(overlay).toContain('globalThis.innerWidth')
+  })
+
+  it('keeps the mascot and the clamp size in agreement', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const position = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'position.ts'),
+      'utf8',
+    )
+    const declared = /PET_SIZE = (\d+)/.exec(position)?.[1]
+
+    expect(declared).toBeDefined()
+    // Matched within the rule rather than immediately after `z-index`, since
+    // the offset pinning (`left:0;top:0`) now sits between them. The
+    // invariant being guarded is that the CSS box and `PET_SIZE` agree — the
+    // clamp would otherwise let a larger Pet be dragged partly off-screen.
+    expect(PET_CSS).toMatch(
+      new RegExp(`\\.dshpet-root\\{position:fixed;z-index:\\d+;[^}]*width:${declared}px`),
+    )
+    expect(PET_CSS).toContain(`width:${declared}px;height:${declared}px`)
+  })
+
+  it('pins the offset origin so a translate lands in viewport coordinates', () => {
+    // `left:0;top:0` is load-bearing, not tidiness. A `position:fixed` element
+    // with both at `auto` resolves from its STATIC position, which for this
+    // node depends on the flow of `document.body` under Pet's host wrapper —
+    // not a dependable (0,0). Without the pinning, `translate3d(x, y, 0)`
+    // would be an offset from an arbitrary origin, so the stored `{x, y}`
+    // (unchanged, hence no migration) would no longer mean viewport pixels
+    // and Pet would restore to the wrong spot.
+    const rule = PET_CSS.match(/\.dshpet-root\{[^}]*\}/)?.[0] ?? ''
+    expect(rule).toContain('left:0')
+    expect(rule).toContain('top:0')
+  })
+
+  it('sits at the exact z-index chosen to stay below the Settings overlay', () => {
+    // Locked to the precise value, not a `\d+` placeholder: the whole point
+    // of fix-pet-below-settings-layer is a SPECIFIC number (one below the
+    // shipped Settings panel's known 1000), so a regex that matches any
+    // digit sequence would silently accept a regression back toward
+    // 2147483000 (see the deleted-then-reintroduced-by-accident case this
+    // guards against).
+    expect(PET_CSS).toContain('.dshpet-root{position:fixed;z-index:999;')
+  })
+
+  it('stays strictly between ordinary content and the known Settings overlay tier', () => {
+    // Encodes the actual invariant from design.md rather than one fixed
+    // number, so it keeps failing usefully if the constant above is ever
+    // "fixed" back up in isolation: lower bound 100 is the highest value
+    // observed across every deployed DSH/plugin bundle for ordinary
+    // (non-modal) content; upper bound 1000 is the shipped Settings panel's
+    // own z-index (@deepseek-ai/dsh-client-ui-settings-general's
+    // SettingsRoot.module.css .VOzbGW_overlay). Pet must clear the first
+    // floor and stay under the second ceiling — equal to 1000 is NOT
+    // acceptable, since Pet and Settings share the same root stacking
+    // context and a tie would resolve by DOM insertion order instead of a
+    // deliberate rule.
+    const declared = /\.dshpet-root\{position:fixed;z-index:(\d+);/.exec(PET_CSS)?.[1]
+    expect(declared).toBeDefined()
+    const value = Number(declared)
+    expect(value).toBeGreaterThan(100)
+    expect(value).toBeLessThan(1000)
+  })
+})
+
+describe('settings nav glyph stays scoped to Pet\'s own row', () => {
+  it('paints the mascot emoji and hides the fallback gear', async () => {
+    const { PET_SETTINGS_NAV_CSS, PET_SETTINGS_NAV_MARKER } = await import(
+      '../src/client/settings-nav-icon.js'
+    )
+
+    // DSH 0.1.x has no icon field on `settings.section`, so a third-party row
+    // renders the shell's fallback gear until it marks itself.
+    expect(PET_SETTINGS_NAV_CSS).toContain(`[${PET_SETTINGS_NAV_MARKER}]`)
+    expect(PET_SETTINGS_NAV_CSS).toContain("content:'🐾'")
+    expect(PET_SETTINGS_NAV_CSS).toContain('svg:first-child{display:none}')
+  })
+
+  it('selects nothing beyond its own marker attribute', async () => {
+    const { PET_SETTINGS_NAV_CSS, PET_SETTINGS_NAV_MARKER } = await import(
+      '../src/client/settings-nav-icon.js'
+    )
+
+    // Every selector must be anchored on the owned marker; a bare `nav button`
+    // rule would restyle every other plugin's row too.
+    const selectors = PET_SETTINGS_NAV_CSS.split('}')
+      .map(block => block.split('{')[0]?.trim() ?? '')
+      .filter(selector => selector.length > 0)
+    expect(selectors.length).toBeGreaterThan(0)
+    for (const selector of selectors) {
+      expect(selector.startsWith(`[${PET_SETTINGS_NAV_MARKER}]`)).toBe(true)
+    }
+  })
+
+  it('marks only the button whose text matches the label, and cleans up', async () => {
+    const { registerPetSettingsNavIcon, PET_SETTINGS_NAV_MARKER } = await import(
+      '../src/client/settings-nav-icon.js'
+    )
+    const { JSDOM } = await import('jsdom').catch(() => ({ JSDOM: undefined }) as never)
+    if (JSDOM === undefined) return
+
+    const dom = new JSDOM(
+      '<body><div role="dialog"><nav>' +
+        '<button>General</button><button>Pet</button><button>Plugins</button>' +
+        '</nav></div></body>',
+    )
+    const priorDocument = globalThis.document
+    const priorObserver = globalThis.MutationObserver
+    Object.defineProperty(globalThis, 'document', {
+      value: dom.window.document,
+      configurable: true,
+    })
+    globalThis.MutationObserver = dom.window.MutationObserver
+
+    try {
+      const dispose = registerPetSettingsNavIcon(() => 'Pet')
+      const marked = [...dom.window.document.querySelectorAll(`[${PET_SETTINGS_NAV_MARKER}]`)]
+      expect(marked.map(node => node.textContent)).toEqual(['Pet'])
+
+      dispose()
+      expect(dom.window.document.querySelectorAll(`[${PET_SETTINGS_NAV_MARKER}]`)).toHaveLength(0)
+    } finally {
+      Object.defineProperty(globalThis, 'document', {
+        value: priorDocument,
+        configurable: true,
+      })
+      globalThis.MutationObserver = priorObserver
+    }
+  })
+})
+
+describe('hover, drag and dismissal behave independently', () => {
+  it('closes the hover menu on leave but not the clicked panel', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // Hover owns the MENU only. The panel is opened deliberately, so a
+    // pointer drifting away must not evaporate it — and collapsing it here is
+    // why Pet appeared to stay open forever after a capability run.
+    // Hover owns the wheel only; the panel is click-opened and must not
+    // evaporate when the pointer drifts. Closing is now distance-based, so
+    // assert the rule rather than a `mouseleave` handler.
+    expect(overlay).toContain("> wheelRadius) setMode('closed')")
+    expect(overlay).not.toContain("if (mode !== 'closed') setMode('closed')")
+  })
+
+  it('dismisses the panel on an outside pointer press', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // Since hover no longer closes the panel, it needs a click-driven exit.
+    expect(overlay).toContain("document.addEventListener('pointerdown'")
+    expect(overlay).toContain('node.contains(event.target as Node)')
+  })
+
+})
+
+describe('settings surface follows the DSH type scale', () => {
+  it('uses the official font tokens instead of ad-hoc sizes', () => {
+    // Each font declaration pins its own line-height; a bare font-size left
+    // the vertical rhythm to the browser default, which is the main reason
+    // the panel read as cramped and inconsistent. Body text states 14px/22px
+    // over the live family token, while compact labels use the shipped 13px
+    // shorthand rather than the removed `--dsw-font-xxs-12` token.
+    expect(PET_CSS).toContain('14px/22px var(--dsw-font-family')
+    expect(PET_CSS).toContain('var(--dsw-font-xs-13')
+  })
+
+  it('uses the business accent for focus rings, not the neutral brand token', () => {
+    // `--dsw-alias-brand-primary` resolves to #0f1115 (near-black), so using
+    // it as a focus ring with a blue fallback meant the ring changed colour
+    // depending on whether the token resolved.
+    expect(PET_CSS).toContain('var(--dsw-alias-state-business-primary')
+    expect(PET_CSS).not.toContain('var(--dsw-alias-brand-primary,#3370ff)')
+  })
+
+  it('gives every settings tab the same group rhythm', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+    const titles = [...settings.matchAll(/className="dshpet-group-title"/g)].length
+    const groups = [...settings.matchAll(/className="dshpet-group"/g)].length
+
+    // Previously only General wrapped its sections, so the other three tabs
+    // had no padding, gap or divider at all.
+    expect(groups).toBe(titles)
+  })
+
+  it('styles every settings input rather than leaving a bare control', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+    const inputs = [...settings.matchAll(/<input\b/g)].length
+    // Allow additional owned modifiers alongside the base class.
+    const styled = [...settings.matchAll(/<input\s+className="dshpet-input[^"]*"/g)].length
+    expect(styled).toBe(inputs)
+  })
+})
+
+describe('settings expose the configuration they claim to', () => {
+  it('offers the optional Pet agent preset', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // Tasks 4.3 and 10.2 both require it; the Host accepted `agentPreset` all
+    // along but no control ever let a user set it.
+    expect(settings).toContain('Agent 预设')
+    expect(settings).toContain('agentPreset: next')
+  })
+
+  it('applies the accent through a broadcast, not just storage', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const [accent, overlay] = await Promise.all([
+      readFile(path.resolve(__dirname, '..', 'src', 'client', 'accent.ts'), 'utf8'),
+      readFile(path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'), 'utf8'),
+    ])
+
+    // The overlay reads the accent once into React state, so writing storage
+    // alone would appear to do nothing until the page was reloaded.
+    expect(accent).toContain('PET_ACCENT_EVENT')
+    expect(overlay).toContain('PET_ACCENT_EVENT')
+  })
+
+  it('offers a Host directory picker for Skill import', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // The path is a HOST path, so a browser file input would be wrong — it
+    // yields the user's own machine. A deployment without the native
+    // capability simply gets no picker and keeps typing.
+    expect(settings).toContain('directoryPicker')
+    expect(settings).toContain('浏览')
+    expect(settings).not.toContain('type="file"')
+  })
+
+  it('shows bindings read-only until the user chooses to edit', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    expect(settings).toContain('setEditing(true)')
+    expect(settings).toContain('dshpet-readonly')
+    // A rejected save keeps the form open with the input preserved.
+    expect(settings).toContain('setEditing(false)')
+  })
+
+  it('renders diagnostics as labelled facts instead of a JSON dump', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    expect(settings).toContain('<Fact label="生命周期"')
+    expect(settings).not.toContain("JSON.stringify(data?.['lifecycle']")
+  })
+})
+
+describe('stored settings share one read-only-until-edit pattern', () => {
+  it('routes every persisted value through the shared field', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // Agent preset and default context policy are the stored values that
+    // remain, so each shows its current setting until the user opts into
+    // editing.
+    const fields = [...settings.matchAll(/<StoredField/g)].length
+    expect(fields).toBeGreaterThanOrEqual(2)
+  })
+
+  it('renders the panel in Chinese', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'general' as const }),
+    )
+
+    expect(markup).toContain('模型')
+    expect(markup).toContain('Agent 预设')
+    expect(markup).toContain('桌宠配色')
+    // The tab strip is Chinese too.
+    expect(markup).toContain('通用')
+  })
+})
+
+
+
+describe('Skill file health is explained without internal jargon', () => {
+  it('names the control by what it does, not by its implementation', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'skills' as const }),
+    )
+
+    // "Rebuild projection" describes Pet's internals. A user only needs to
+    // know these are the Skill links the executor reads.
+    expect(markup).toContain('重新生成 Skill 链接')
+    expect(markup).not.toContain('Rebuild projection')
+    expect(markup).toContain('Skill 文件状态')
+  })
+
+  it('says these links are self-maintained so the button is rarely needed', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'skills' as const }),
+    )
+
+    expect(markup).toContain('你不需要管它')
+    expect(markup).toContain('当前一切正常')
+  })
+
+  it('states the limit: repair fixes links, not tampered content', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'skills' as const }),
+    )
+
+    // Rebuild deliberately refuses to republish a revision whose digest no
+    // longer matches, so the panel must not imply it fixes everything.
+    expect(markup).toContain('只修复链接本身')
+    expect(markup).toContain('重新加入')
+  })
+})
+
+describe('Skill install and upgrade semantics are stated', () => {
+
+
+  it('says import does not auto-enable', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'skills' as const }),
+    )
+    expect(markup).toContain('不会自动启用')
+  })
+})
+
+describe('Skills are linked, not copied', () => {
+  it('states that a registered Skill stays live', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'skills' as const }),
+    )
+
+    // Linking is the whole model: editing the source takes effect at once,
+    // and removing a Skill must not touch the user's own directory.
+    expect(markup).toContain('直接链接到你给的目录')
+    expect(markup).toContain('立即生效')
+    expect(markup).toContain('不会删除你的目录')
+  })
+
+  it('warns that the Skill breaks if its directory disappears', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'skills' as const }),
+    )
+    expect(markup).toContain('目录被删除或移走')
+  })
+})
+
+describe('directory selection degrades to the in-app browser', () => {
+  it('falls through when the OS picker is unavailable', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // `host.pickDirectory` needs the `native` capability; a deployment that
+    // only serves `browse` rejects it. Treating that rejection as an error
+    // left the Browse button apparently dead.
+    expect(settings).toContain('directoryLister')
+    expect(settings).toContain('setBrowsing')
+    expect(settings).toContain('此部署不支持目录选择')
+  })
+
+  it('swallows the native rejection instead of surfacing it', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const entry = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'index.tsx'),
+      'utf8',
+    )
+    expect(entry).toContain('pick().catch(() => undefined)')
+    expect(entry).toContain('setDirectoryLister')
+  })
+})
+
+describe('channel settings mutation payloads', () => {
+  it('fails closed when the Host omits the unified-locus proof', () => {
+    expect(unifiedLocusReadiness(undefined)).toEqual({
+      childSession: 'unavailable',
+      defaultPermission: 'read',
+      readVerification: 'unavailable',
+      diagnostic: 'Host 未返回完整的统一子会话与默认只读核验证明。',
+    })
+  })
+
+  it('omits the workspace id when clearing the default', async () => {
+    const { defaultWorkspaceMutation } = await import('../src/client/settings.js')
+
+    expect(defaultWorkspaceMutation('')).toEqual({ action: 'set-default-workspace' })
+    expect(defaultWorkspaceMutation('  ')).toEqual({ action: 'set-default-workspace' })
+    expect(defaultWorkspaceMutation(' ws-nexus ')).toEqual({
+      action: 'set-default-workspace',
+      defaultWorkspaceId: 'ws-nexus',
+    })
+  })
+})
+
+describe('the Agent preset is chosen, not typed', () => {
+  it('offers the presets this Host actually provides', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // A typed name could refer to a composition that does not exist.
+    expect(settings).toContain('presetOptions')
+    // Unset means Pet's own executor preset, not the Host default.
+    expect(settings).toContain('config?.agentPreset ?? PET_EXECUTOR_PRESET')
+  })
+})
+
+describe('bindings are gone, not hidden', () => {
+  it('drops the tab and its routes entirely', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const [settings, wire, api] = await Promise.all([
+      readFile(path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'), 'utf8'),
+      readFile(path.resolve(__dirname, '..', 'src', 'wire.ts'), 'utf8'),
+      readFile(path.resolve(__dirname, '..', 'src', 'client', 'api.ts'), 'utf8'),
+    ])
+
+    // Nothing read the bindings, so the page configured values that could
+    // never take effect. A dead setting is worse than an absent one.
+    expect(settings).not.toContain('BindingsTab')
+    expect(wire).not.toContain('bindingsUpdate')
+    expect(api).not.toContain('updateBinding')
+  })
+})
+
+describe('preset terminology cannot be confused with Pet context', () => {
+  it('says the default preset restricts Skill visibility', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'general' as const }),
+    )
+
+    // Pet now ships its own executor preset: `standard` would load
+    // `skill-filesystem` and expose every globally installed Skill.
+    expect(markup).toContain('Pet 执行会话')
+    expect(markup).toContain('不加载本地 Skill 发现')
+    // Switching away widens authorization, so the panel must say so.
+    expect(markup).toContain('放宽授权范围')
+  })
+
+  it('says Pet context applies regardless of the chosen preset', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'general' as const }),
+    )
+
+    // Standing instructions plus the per-Invocation envelope are what
+    // establish Pet's context — never the preset.
+    expect(markup).toContain('常驻指令')
+    expect(markup).toContain('与这里选什么预设无关')
+  })
+})
+
+describe('Host directory APIs are read from the right connection face', () => {
+  // 0.1.2 removed the dsh-host-apiproxy `connection.api.host.*` proxy face;
+  // the Host directory verbs now live on the typed Remote namespace
+  // `directoryPicker`. The invariant these tests pin is unchanged: the client
+  // must read the face the installed library actually exposes, or both the
+  // picker and the browser silently degrade to "unsupported".
+  //
+  // Behaviour lives in `directory-picker-face.test.ts`, which composes real
+  // cordis. These remain source-level guards against the removed face
+  // reappearing.
+  it('does not read the removed connection.api.host face', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const entry = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'index.tsx'),
+      'utf8',
+    )
+
+    expect(entry).toContain('directoryPicker')
+    expect(entry).not.toContain('connection?.api?.host')
+    expect(entry).not.toContain('connection?.rpc?.host')
+  })
+
+  it('names the dotted namespace service rather than a property of `remote`', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const entry = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'index.tsx'),
+      'utf8',
+    )
+
+    // A Remote namespace is its own service keyed `remote.<namespace>`.
+    // Reaching it as a property of the `remote` service throws
+    // `cannot get property "remote.directoryPicker" without inject`, because
+    // the traceable proxy re-routes the dotted name through the context proxy.
+    expect(entry).toContain("get(\n      'remote.directoryPicker',\n    )")
+    // The broken form, ignoring the comment block that explains it.
+    const code = entry.replace(/^\s*\/\/.*$/gm, '')
+    expect(code).not.toContain("ctx.get('remote')")
+  })
+
+  it('matches the face the installed client library actually exposes', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const candidates = [
+      path.resolve(
+        __dirname,
+        '..',
+        'node_modules',
+        '@deepseek-ai',
+        'dsh-api-workspace-controller',
+        'lib',
+        'typert.remote-client.d.ts',
+      ),
+      path.resolve(
+        __dirname,
+        '..',
+        '..',
+        '..',
+        'node_modules',
+        '@deepseek-ai',
+        'dsh-api-workspace-controller',
+        'lib',
+        'typert.remote-client.d.ts',
+      ),
+    ]
+    let declared: string | undefined
+    for (const candidate of candidates) {
+      try {
+        declared = await readFile(candidate, 'utf8')
+        break
+      } catch {
+        // npm may hoist or nest peer-conflict copies; try the other location.
+      }
+    }
+    expect(declared).toBeDefined()
+
+    // Pin the assumption to the real contract rather than to memory.
+    expect(declared).toContain("'directoryPicker/pick'")
+    expect(declared).toContain("'directoryPicker/list'")
+  })
+})
+
+describe('the directory browser reads as a left-aligned list', () => {
+  it('beats the centering settings-action rule on specificity', () => {
+    // `.dshpet-settings .dshpet-action` centers its label with two levels of
+    // specificity, so a single-class override loses and the folder names
+    // render centered.
+    expect(PET_CSS).toContain('.dshpet-settings .dshpet-browser-entry{justify-content:flex-start')
+    expect(PET_CSS).toContain('.dshpet-settings .dshpet-crumbs{justify-content:flex-start}')
+  })
+
+  it('lays a folder row out as icon, name, chevron', () => {
+    expect(PET_CSS).toContain('.dshpet-browser-name{flex:1')
+    // A long name must truncate rather than push the chevron out of view.
+    expect(PET_CSS).toContain('text-overflow:ellipsis')
+  })
+})
+
+describe('the glyph follows the same stored-setting pattern', () => {
+  it('is read-only until edited, and offers a reset', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // Every persisted value in this panel behaves the same way; a bare always
+    // editable input was the odd one out.
+    expect(settings).toContain('label="图标"')
+    expect(settings).toContain('onReset')
+    expect(settings).not.toContain('dshpet-glyph-input')
+  })
+
+  it('renders a reset control inside the shared field', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+    const field = settings.slice(settings.indexOf('function StoredField'))
+
+    expect(field).toContain('恢复默认')
+    // Shown only while editing, next to save and cancel.
+    expect(field.indexOf('恢复默认')).toBeGreaterThan(field.indexOf('取消'))
+  })
+})
+
+describe('the directory browser starts from the typed path', () => {
+  it('opens at the field value instead of always the Host home', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // Calling the lister with no argument always lists the Host home, so a
+    // path already in the field was ignored and the user had to navigate back
+    // to it by hand.
+    expect(settings).toContain('await directoryLister?.(typed)')
+  })
+
+  it('falls back to the default listing when the typed path is unreadable', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // A half-typed or deleted path must not prevent browsing entirely.
+    expect(settings).toContain('(await directoryLister?.())')
+  })
+
+  it('keeps the field in step with the browsed directory', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // Otherwise the field and the listing disagree, and Inspect would read a
+    // different directory than the one on screen.
+    expect([...settings.matchAll(/setPath\(next\.path\)/g)]).toHaveLength(2)
+  })
+})
+
+describe('the import preview reflects the link model', () => {
+  it('shows the directory it will link, not a removed digest', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // Digests went away with the copy-based model, so the preview rendered a
+    // literal "Digest: undefined".
+    expect(settings).not.toContain("preview['digest']")
+    expect(settings).toContain("preview['canonicalSourcePath']")
+  })
+
+  it('warns that a linked Skill stays live', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // The trust warning must reflect linking: later edits to that directory
+    // take effect without any further confirmation.
+    expect(settings).toContain('只加入你信任的目录')
+    expect(settings).toContain('立即生效')
+  })
+})
+
+describe('Settings caps enabled Skills at the wheel capacity', () => {
+  it('blocks enabling past the cap and explains why', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // Enabling past the cap would leave a Skill enabled but invisible, which
+    // reads as a bug rather than a limit.
+    expect(settings).toContain('disabled={!enabled && atCapacity}')
+    expect(settings).toContain('已达轮盘容量上限')
+  })
+
+  it('never blocks disabling', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // `!enabled &&` matters: at capacity the user must still be able to turn
+    // one off, or the state would be unrecoverable.
+    expect(settings).not.toContain('disabled={atCapacity}')
+  })
+})
+
+describe('the wheel container does not swallow pointer events', () => {
+  it('makes only the slices and mascot interactive', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const styles = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'styles.ts'),
+      'utf8',
+    )
+
+    // The wheel's box is far larger than the mascot. Without this it would
+    // cover the page underneath even while collapsed.
+    expect(styles).toContain('.dshpet-wheel{')
+    const wheel = styles.slice(styles.indexOf('.dshpet-wheel{'))
+    expect(wheel.slice(0, 200)).toContain('pointer-events:none')
+    expect(styles).toContain('.dshpet-slot{pointer-events:auto')
+  })
+})
+
+describe('the Task row reads as clickable', () => {
+  it('shows a pointer cursor and a hover state', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const styles = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'styles.ts'),
+      'utf8',
+    )
+    const rule = styles.slice(styles.indexOf('.dshpet-task{'))
+
+    // The whole row navigates; the default arrow makes it look inert.
+    expect(rule.slice(0, 200)).toContain('cursor:pointer')
+    expect(styles).toContain('.dshpet-task:hover')
+  })
+
+  it('does not navigate when an inner control is used', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // The row hosts the answer field: navigating on every click inside it
+    // would steal focus mid-typing.
+    expect(overlay).toContain("closest('input, button, textarea')")
+    expect(overlay).toContain('if (event.target !== event.currentTarget) return')
+  })
+})
+
+describe('the executor preset falls back on a blank value', () => {
+  it('treats an empty stored preset as unset', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const entry = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
+
+    // `??` only catches `undefined`. An empty string reached DSH verbatim and
+    // broke session resume with `preset "" not found`.
+    expect(entry).toContain("repository.global.agentPreset.trim() === ''")
+    expect(entry).toContain('PET_EXECUTOR_PRESET')
+  })
+
+  it('heals a stored blank preset at startup', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const entry = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
+
+    // The value is invisible in the panel, so a user cannot clear it; without
+    // this, every existing Task stays unusable.
+    expect(entry).toContain("repository.global.agentPreset?.trim() === ''")
+    expect(entry).toContain('const { agentPreset: _blank, ...rest } = current')
+  })
+})
+
+describe('the wheel is reachable above the mascot box', () => {
+  it('drops the rectangular menu hover bridge', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const styles = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'styles.ts'),
+      'utf8',
+    )
+
+    // That bridge was a 268px strip anchored to the root. With the wheel it
+    // lies ON TOP of the slices and swallows their clicks — which is why a
+    // capability sometimes ran and sometimes just closed the wheel.
+    expect(styles).not.toContain('left:-260px')
+    expect(styles).not.toContain('[data-open="true"]::before')
+  })
+
+  it('stacks the wheel above the root and the mascot above the wheel', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const styles = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'styles.ts'),
+      'utf8',
+    )
+    const layer = (selector: string): number => {
+      const rule = styles.slice(styles.indexOf(selector))
+      return Number(/z-index:(\d+)/.exec(rule.slice(0, 220))?.[1] ?? '0')
+    }
+
+    // The mascot must stay clickable; the slices must not sit under it.
+    expect(layer('.dshpet-wheel{')).toBeGreaterThan(0)
+    expect(layer('.dshpet-mascot{')).toBeGreaterThan(layer('.dshpet-wheel{'))
+  })
+
+  it('measures the hover disc from the mascot, not the fixed root box', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // The root is a fixed 72px, so at 56 or 88 its centre is 8px off.
+    expect(overlay).toContain("querySelector('.dshpet-mascot')")
+  })
+})
+
+describe('dispatch resumes an unloaded executor', () => {
+  it('does not treat an evicted agent as a missing session', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const entry = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
+    const from = entry.indexOf('const dispatcher: PromptDispatcher')
+    const block = entry.slice(from, entry.indexOf('\n  }\n', from))
+
+    // `agents.get` only finds a LOADED agent. DSH unloads idle ones, so a Pet
+    // Task that sat unused had its executor evicted and every later dispatch
+    // failed with "is not live" — while the session was perfectly intact.
+    expect(block).toContain('ctx.agents.resume(')
+    expect(block).toContain('resumeSessionId')
+  })
+
+  it('still fails when the session itself is gone', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const entry = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
+    const from = entry.indexOf('const dispatcher: PromptDispatcher')
+    const block = entry.slice(from, entry.indexOf('\n  }\n', from))
+
+    // `sessions.get` also means LOADED, so gating on it re-created the very
+    // bug being fixed. Resume itself reads persisted state, so its failure —
+    // and only its failure — distinguishes evicted from deleted.
+    expect(block).not.toContain('ctx.sessions.get(executorSessionId')
+    expect(block).toContain('could not be resumed')
+  })
+})
+
+describe('liveness checks never stand in for existence', () => {
+  it('does not gate restart reconciliation on a loaded session', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const entry = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
+    const from = entry.indexOf('reconcileCreatingExecutors(')
+    const block = entry.slice(from, from + 700)
+
+    // Nothing is loaded at startup, so `agents.get`/`sessions.get` report
+    // every session as gone and condemn healthy Tasks. The workspace's
+    // session account is the durable record.
+    expect(block).not.toContain('ctx.agents.get(')
+    expect(block).not.toContain('ctx.sessions.get(')
+    expect(block).toContain('sessionIds')
+  })
+})
+
+describe('the hover disc survives the capability fetch', () => {
+  it('holds one ring of radius while the list is empty', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // An empty list collapses the disc to the mascot, so the first hover
+    // after a restart — capabilities still loading — closed the wheel the
+    // moment the pointer left the mascot's face, and the click was lost.
+    expect(overlay).toContain('shortcuts.length === 0')
+    expect(overlay).toContain('size / 2 + RING_GAP + RING_WIDTH')
+  })
+})
+
+describe('resume carries the model route', () => {
+  it('passes the flat provider/model pair, matching creation', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const entry = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
+    const from = entry.indexOf('ctx.agents.resume(')
+    const end = entry.indexOf('} as never)', from)
+    const block = entry.slice(from, end)
+
+    // Without a model route the persona template's {{model}} has no value and
+    // assembly fails before the agent ever runs.
+    expect(block).toContain('provider: current.providerId')
+    expect(block).toContain('model: current.modelId')
+    // The preset is resolved from the session's persisted projection and
+    // mounted through setup, never repeated as a current-setting option.
+    expect(block).not.toContain('agentPreset: current.agentPreset')
+  })
+})
+
+describe('a seam click cannot blur the wheel shut', () => {
+  it('backs the slices with a pointer-opaque disc', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+    const styles = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'styles.ts'),
+      'utf8',
+    )
+
+    // A click landing in a seam fell through the pointer-transparent SVG to
+    // the page, focused it, and blur closed the wheel before the click could
+    // fire — the first click after a restart was reliably lost this way.
+    expect(overlay).toContain('dshpet-wheel-catch')
+    expect(styles).toContain('.dshpet-wheel-catch{fill:transparent;pointer-events:auto}')
+  })
+
+  it('lets blur close only when the pointer really left the disc', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+    const from = overlay.indexOf('onBlur={event => {')
+    const block = overlay.slice(from, from + 1400)
+
+    // Focus loss with the pointer still on the disc is a fall-through, not a
+    // departure; keyboard blur carries no pointer position and still closes.
+    expect(block).toContain('pointerRef.current')
+    expect(block).toContain('<= wheelRadius) return')
+  })
+})
+
+
+describe('the built-in Q&A action is wired end to end', () => {
+  it('routes a builtin capability away from the Invocation path', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // A built-in pins no Skill, so dispatching it as an Invocation would send
+    // a capability id the Host cannot resolve to anything.
+    expect(overlay).toContain("capability.kind === 'builtin'")
+    expect(overlay).toContain('petApi.locusDefaultQa')
+    expect(overlay).not.toContain('petApi.createQaGroup')
+  })
+
+  it('requires a session source before the group can be created', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // Checked in BOTH places: `blocked` disables the sector, and `run`
+    // re-checks because the source can change between render and click.
+    expect(overlay).toContain('需要当前会话作为来源')
+    expect(overlay).toContain('答疑群需要一个当前会话作为来源')
+  })
+
+  it('keeps the ordinary wheel action while removing legacy Channel routes', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const [settings, overlay] = await Promise.all([
+      readFile(path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'), 'utf8'),
+      readFile(path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'), 'utf8'),
+    ])
+
+    // The ordinary Pet wheel is not the retired Feishu Invocation UI: Q&A
+    // remains a wheel action while Channel no longer exposes chat→workspace.
+    expect(overlay).toContain("capability.kind === 'builtin'")
+    expect(settings).not.toContain("action: 'rebind-chat'")
+    expect(settings).not.toContain("action: 'remove-chat'")
+    expect(settings).not.toContain('会话路由')
+  })
+})
+
+
+describe('a success receipt does not become furniture', () => {
+  it('auto-dismisses instead of waiting for the next click', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // Clearing it only on the next action left it on screen indefinitely,
+    // covering whatever sat below the wheel.
+    expect(overlay).toContain('NOTICE_DISMISS_MS')
+    expect(overlay).toContain('setNotice(undefined)')
+  })
+
+  it('does not intercept pointer events while visible', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const styles = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'styles.ts'),
+      'utf8',
+    )
+
+    // The note is absolutely positioned; a receipt that also swallowed clicks
+    // would block the controls underneath it.
+    expect(styles).toContain('dshpet-wheel-receipt')
+    expect(styles).toContain('pointer-events:none')
+  })
+})
+
+
+describe('Channel onboarding describes the unified execution model', () => {
+  it('presents the default workspace only as automatic main-session placement', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    expect(settings).toContain('自动主会话默认工作区')
+    expect(settings).toContain('每个群独立复用自己的主会话')
+    expect(settings).toContain('不是群级执行路由')
+    expect(settings).toContain('不会改写任何已有 locus')
+  })
+
+  it('shows unified child and effective read checks without Invocation wording', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    expect(settings).toContain('统一子会话能力')
+    expect(settings).toContain("locusReadiness.childSession === 'verified'")
+    expect(settings).toContain("locusReadiness.readVerification === 'verified'")
+    expect(settings).toContain('新关联默认权限')
+    expect(settings).toContain('只读（read）')
+    expect(settings).toContain('不会创建飞书 root executor')
+    expect(settings).not.toContain('排队中的调用')
+  })
+})
+
+
+describe('session titles come from the title service, not the header', () => {
+  it('does not read a title off the session header', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const index = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
+
+    // `header.title` does not exist: the title is maintained by the
+    // session-title service in the log. Reading the header silently yields
+    // `undefined` for EVERY session, which surfaced as every bound group
+    // being named "答疑 · DSH" and every receipt naming a raw id — a failure
+    // that looks like "bind picked the wrong session".
+    expect(index).not.toContain('header?.title')
+
+    // The title must still come from the LOG. Two log-backed readers are
+    // legitimate: the live title service, and folding `session/title` events
+    // out of a cold inspection (which is what lets an unloaded locus main keep
+    // its name). Requiring the live service specifically would have forced the
+    // management view back onto the live registry.
+    expect(
+      index.includes('ctx.sessionTitle.get(session)')
+        || index.includes('foldTitle: latestSessionTitle'),
+    ).toBe(true)
+  })
+})
+
+describe('the stylesheet stays a valid template literal', () => {
+  it('contains no backtick inside PET_CSS', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const source = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'styles.ts'),
+      'utf8',
+    )
+
+    // `PET_CSS` is a template literal, so a backtick anywhere inside it —
+    // including in a prose comment quoting a class or token name — terminates
+    // the string early. The failure mode is nasty: `tsdown` parses it as
+    // broken TypeScript AFTER `npm run clean` has already deleted `lib/`, so
+    // the package is left with NO build output and the deployed bundle
+    // silently keeps whatever it had. This has happened four times; quote
+    // with double quotes in these comments instead.
+    const body = source.slice(source.indexOf('export const PET_CSS = `') + 24, -2)
+
+    expect(body).not.toContain('`')
+  })
+})
+
+describe('a locus child gets its own durable title', () => {
+  it('renames the child instead of leaving it to the fallback generator', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const index = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
+
+    // Without an explicit rename, DSH derives a title from the first user
+    // message — which for a locus child is the long caller-bound delivery
+    // header. Every child then displayed as "## 当前 unified locus 投递（caller-"
+    // and was indistinguishable in the sidebar and the management view, even
+    // though the subagent descriptor already carried the right label.
+    const provisioning = index.slice(index.indexOf('const idleChildProvisioning'))
+    const scope = provisioning.slice(0, provisioning.indexOf('const locusLarkPort'))
+    expect(scope).toContain('ctx.sessionTitle.rename')
+    expect(scope).toContain('input.label')
+    // Naming must not undo a child that is already durably created.
+    expect(scope).toContain('could not be titled')
+  })
+})
+
+describe('the delivery preamble position comes from durable history', () => {
+  it('derives position from persisted Deliveries, not a runtime counter', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const index = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
+
+    const render = index.slice(index.indexOf('renderPrompt: ({ locus, message })'))
+    const scope = render.slice(0, render.indexOf('turns: locusTurnObserver'))
+
+    // A runtime counter would reset on Host restart and re-send the preamble
+    // mid-conversation; durable Delivery history survives restarts.
+    expect(scope).toContain('listDeliveries')
+    expect(scope).toContain('childSessionId === record.childSessionId')
+    expect(scope).toContain("'subsequent'")
+    expect(scope).toContain("'first'")
+  })
+})

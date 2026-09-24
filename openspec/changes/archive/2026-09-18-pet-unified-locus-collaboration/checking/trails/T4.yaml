@@ -1,0 +1,107 @@
+id: T4
+name: 默认 Q&A 与双向发现
+description: 从主会话创建或打开本人群主的默认 Q&A，并核验 endpoint、parent、child 三种方向的同源发现。
+device: pc
+parallel_group: G4
+conflicts_with: [T1, T2, T3, T5, T6, T7, T8]
+precondition: dsh-pet 固定 profile 的 user identity 已 verified 且等于 allowlist 所有者；浏览器当前主会话可作为 Q&A parent。
+ask_user_if_blocked: true
+status: passed
+blocked_reason: null
+mock_setup:
+  required: false
+  status: not_needed
+  scenario_id: null
+  surface: pet-locus-management
+  data_source: Pet locus management API and real Feishu group
+  evidence: []
+  enable:
+    command: null
+    env: null
+    notes: 使用真实 user identity 与真实 Q&A 群，不启用 mock。
+  user_decision: null
+steps:
+  - seq: 1
+    description: 在 Locus 管理中对当前主会话执行创建或打开默认 Q&A
+    action: click
+    target: "button:has-text('创建或打开默认 Q&A')"
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: T4-C1
+        description: 操作完成后默认 Q&A 回显 active Locus、本人群主的群入口、独立 child 与有效 read 权限
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: qa-default-first-use
+        surface: pet-locus-management
+        data_source: Pet default-Q&A index and Feishu group
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 必须核对固定 dsh-pet user owner，而不是浏览器 cookie holder 或 Bot owner；创建失败不得发布半成品。
+        selector: .dshpet-settings
+        expected_text: "默认 Q&A；活跃；群主为当前 dsh-pet 用户；实际 只读；子会话"
+        expected_attrs: null
+        expected_visible: true
+        result: pass
+        result_detail: "经 Pet 轮盘内置能力「答疑群」（qa-group）创建，parent 取当前会话 session-19340b29，不需从裸 id 列表挑选。结果：新建飞书群「答疑 · DSH」（chat oc_cadf40a0...），**群主为本人 ou_322ec1d3...，不是 bot**——这正是统一 Locus 相对旧模型收紧之处（旧模型遗留的三个「答疑 · pet 二期2」群主均为 bot）；群成员恰为「张勇 + 小小芒果」，只邀请所有者。持久层新增 1 条 locus：source=qa-created、state=active、generation=1、permission effective/desired 均为 read，child session-f85dfb55 为全新独立子会话（origin=subagent，parent 为该主会话）。child 标题为「答疑 · DSH」且 source=user，证明 B032 的显式 rename 在本路径同样生效。前置缺陷已先行修复：defaultQaOwner 原要求 tokenStatus==='ready' 而 lark-cli 实际返回 'valid'，导致 Q&A 在任何情况下都建不出来（详见 10.14 与 pitfalls 第 7 节）。"
+  - seq: 2
+    description: 再次对同一主会话执行创建或打开默认 Q&A
+    action: click
+    target: "button:has-text('创建或打开默认 Q&A')"
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: T4-C2
+        description: 重复操作回读同一默认 Q&A chat、Locus、generation 与 child，数量没有增加
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: qa-default-idempotent
+        surface: pet-locus-management
+        data_source: Pet default-Q&A index
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 第一次操作后记录四个标识及 Locus 总数，第二次精确比较。
+        selector: .dshpet-settings
+        expected_text: "默认入口仍为同一 Locus；代际与子会话未变化；locus 数量未增加"
+        expected_attrs: null
+        expected_visible: true
+        result: pass
+        result_detail: "同一会话再次点击「答疑群」，回执为「已打开」而非「已创建」。幂等在两个层面同时成立——持久层：locus 总数保持 7、Q&A locus 保持 1、locusId/chatId/child/generation/permission 全部未变；飞书侧：名为「答疑 · DSH」的群仍只有 1 个，bot 所在群总数保持 33 未增加。后者比计数更关键：若幂等失败，每次点击都会真实创建一个孤儿飞书群。"
+  - seq: 3
+    description: 分别按 Q&A endpoint、parent session 和 child session 执行发现查询
+    action: fill
+    target: "input[placeholder*='Chat ID'], input[placeholder*='主会话'], input[placeholder*='子会话']"
+    value: "使用刚创建的精确 endpoint、parent 与 child 标识逐项查询"
+    url_needs_input: false
+    checkpoints:
+      - id: T4-C3
+        description: endpoint 查询命中当前代，parent 查询包含默认 Q&A 与全部关联 Locus，child 查询只反查唯一所属 Locus
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: bidirectional-discovery
+        surface: pet-locus-management
+        data_source: Pet locus discovery indexes
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 每次填入后必须点击查询并回读结果；查询本身不得授予其它入口权限或枚举到无关 parent。
+        selector: .dshpet-settings
+        expected_text: "当前 locus；默认 Q&A；所属 locus；查询结果相互一致"
+        expected_attrs: null
+        expected_visible: true
+        result: pass
+        result_detail: "三个方向同源一致，且子会话反查未越界。① endpoint 查 oc_cadf40a0... → 命中当前代 gen1 active 的 Q&A locus；② parent 查 session-19340b29 → 返回其名下全部 locus（此主会话当前仅此一条）；③ child 查 session-f85dfb55 → 恰好 1 条，与前两者指向同一 locus。为验证「不因共享 parent 枚举兄弟」这一约束，额外用话题 A 的 child session-155a7796 反查：其 parent 为 S0，而 S0 名下有 4 条 locus，查询仍**只返回 1 条**（locus-runtime-1789156302898-bb141271361378，即话题 A 自身），符合「子会话反查只返回自己的 locus，不因共享 parent 获得兄弟入口的公开枚举」。附带发现：发现结果卡片仅展示子会话 ID 与所属 locus 两行机器标识，未展示 endpoint，所有者无法据此判断命中的是群级还是某个话题——已补入 B026。"

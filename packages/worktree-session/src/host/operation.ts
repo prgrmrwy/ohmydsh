@@ -108,7 +108,6 @@ async function readJsonOrText(path: string): Promise<string> {
 
 async function performStart(request: StartOperationRequest, deps: OperationDeps): Promise<PreparedOperationResult> {
   validateOperationId(request.operationId)
-  if (request.taskText.trim() === '') throw new WsError('INVALID_REQUEST', 'taskText must be non-empty')
   if (request.dependencyMode !== 'lean') throw new WsError('INVALID_REQUEST', 'Only lean dependency mode is supported at start')
   const runner = deps.runner ?? runProcess
   const git = deps.git ?? createGitClient(runner)
@@ -123,9 +122,10 @@ async function performStart(request: StartOperationRequest, deps: OperationDeps)
     if (operation !== undefined) validateReplay(operation, request, repo.repoRoot)
     // Resolve the dependency project type before creating ANY Git resource or
     // operation file (fail-closed for unsupported/mixed lockfiles).
-    const packageManager = operation === undefined
-      ? await detectPackageManager(request.repoPath)
-      : operation.packageManager ?? 'npm'
+    const resolution = operation === undefined
+      ? await detectPackageManager(repo.repoRoot, git)
+      : { packageManager: operation.packageManager ?? 'npm' }
+    const packageManager = resolution.packageManager
     if (operation === undefined) {
       const baseCommit = await resolveCommit(repo.repoRoot, request.baseRef, git)
       const allocation = await allocateTask(repo.repoRoot, request.taskText, git)
@@ -142,6 +142,11 @@ async function performStart(request: StartOperationRequest, deps: OperationDeps)
         taskHash: hashTask(request.taskText),
         dependencyMode: 'lean',
         packageManager,
+        ...(resolution.adoption === undefined ? {} : {
+          diagnostics: [
+            `混合 lockfile 裁决：采信 ${resolution.adoption.packageManager}（依据 ${resolution.adoption.signal === 'packageManager-field' ? 'package.json 的 packageManager 声明' : 'Git 跟踪状态'}），忽略 ${resolution.adoption.ignoredLockfile}`,
+          ],
+        }),
         dshHome: join(repo.gitCommonDir, 'ws', 'dsh-home', request.operationId),
         phase: 'allocated',
         createdAt: timestamp,
@@ -235,6 +240,42 @@ export async function findBySourceSession(gitCommonDir: string, sourceSessionId:
 export type ArchiveReconcileMode = 'archive-observed' | 'unarchive-observed' | 'current-snapshot'
 
 /**
+ * Release a cleaned binding whose managed worktree no longer exists, so the
+ * Session resumes as an ordinary one. The caller supplies the proof (the full
+ * managed-worktree identity check); this helper only persists the transition
+ * under the repository lock.
+ *
+ * Ownership follows one fact — is the execution directory still there — and
+ * never the archive history, which has no bearing on it. Monotonicity is kept:
+ * an already-released record is returned untouched, and a live (non-cleaned)
+ * binding is never released through this path, because for those the same
+ * failure means "cannot trust the directory I execute in" and must stay
+ * fail-closed rather than be granted ordinary-Session freedom.
+ *
+ * Creates, modifies and deletes nothing else: no branch, worktree, Workspace,
+ * Session, operation file removal, or tombstone deletion.
+ */
+export async function releaseMissingWorktreeBinding(options: {
+  gitCommonDir: string
+  sourceSessionId: string
+  now?: () => Date
+}): Promise<OperationRecord | undefined> {
+  const lock = join(options.gitCommonDir, 'ws', 'locks', 'repo.lock')
+  return withMkdirLock(lock, async () => {
+    const operation = await findHistoryBySourceSession(options.gitCommonDir, options.sourceSessionId)
+    if (operation === undefined) return undefined
+    const binding = bindingOf(operation)
+    if (binding?.mode !== 'source-session') return operation
+    if (binding.state !== 'cleaned' && binding.state !== 'cleaned-archived') return operation
+    const now = options.now?.() ?? new Date()
+    return saveOperation({
+      ...operation,
+      binding: { ...binding, state: 'released', archiveLifecycle: { version: 1 }, updatedAt: now.toISOString() },
+    }, now)
+  })
+}
+
+/**
  * Move a cleaned source binding monotonically through its archive lifecycle.
  * The caller supplies the current archive membership and holds no lock; this
  * helper takes the repository lock so event/status/recovery callers share one
@@ -297,38 +338,7 @@ export async function bindSource(request: { operationId: string; repoPath: strin
     }
     const updated = await saveOperation(ensureFreshSourceBinding(operation, request.sourceSessionId))
     const binding = bindingOf(updated)
-    return { sourceSessionId: request.sourceSessionId, state: binding?.mode === 'source-session' ? publicBindingLifecycle(binding) : 'bound', submitAllowed: false }
-  })
-}
-
-export async function updateSourceBinding(request: { operationId: string; repoPath: string; sourceSessionId: string; action: 'bind-source' | 'claim-submit' | 'admitted' | 'uncertain' | 'cleaned' }): Promise<BindSourceResult> {
-  validateOperationId(request.operationId)
-  const repo = await discoverRepo(request.repoPath)
-  const lock = join(repo.gitCommonDir, 'ws', 'locks', 'repo.lock')
-  return withMkdirLock(lock, async () => {
-    const operation = await loadOperation(repo.gitCommonDir, request.operationId)
-    if (operation === undefined || operation.phase !== 'prepared') throw new WsError('OPERATION_NOT_FOUND', 'Prepared operation not found')
-    const current = bindingOf(operation)
-    if (current?.mode === 'source-session' && (current.state === 'cleaned-archived' || current.state === 'released')) {
-      throw new WsError('OPERATION_CONFLICT', `Binding lifecycle ${current.state} is terminal and cannot regress`)
-    }
-    if (current?.mode === 'source-session' && current.sourceSessionId !== request.sourceSessionId) {
-      throw new WsError('OPERATION_CONFLICT', `Operation is already bound to source Session ${current.sourceSessionId}`)
-    }
-    let next = ensureFreshSourceBinding(operation, request.sourceSessionId)
-    const binding = bindingOf(next)
-    if (binding === undefined || binding.mode !== 'source-session') throw new WsError('OPERATION_INVALID', 'Binding was not established')
-    let state = binding.state
-    let submitAllowed = false
-    if (request.action === 'claim-submit') {
-      if (binding.state === 'bound') { state = 'submit-claimed'; submitAllowed = true }
-      else state = binding.state
-    } else if (request.action !== 'bind-source') {
-      state = request.action
-    }
-    next = { ...next, binding: { ...binding, state, updatedAt: new Date().toISOString() } }
-    await saveOperation(next)
-    return { sourceSessionId: request.sourceSessionId, state: publicBindingLifecycle({ ...binding, state }), submitAllowed }
+    return { sourceSessionId: request.sourceSessionId, state: binding?.mode === 'source-session' ? publicBindingLifecycle(binding) : 'bound' }
   })
 }
 

@@ -43,8 +43,9 @@ export interface WorktreeEntry {
   prunable: boolean
 }
 
-export type PublicBindingLifecycle = 'bound' | 'submit-claimed' | 'admitted' | 'uncertain' | 'cleaned'
-export type SourceBindingState = PublicBindingLifecycle | 'cleaned-archived' | 'released'
+/** Durable source binding lifecycle. Submission admission is owned by DSH. */
+export type PublicBindingLifecycle = 'bound' | 'cleaned' | 'released'
+export type SourceBindingState = PublicBindingLifecycle | 'cleaned-archived'
 
 /**
  * Marks tombstones written by the archive-aware schema-v2 implementation.
@@ -72,7 +73,7 @@ export function isCurrentBinding(binding: SessionBinding | undefined): binding i
 
 /** Map internal archive states onto the stable public lifecycle vocabulary. */
 export function publicBindingLifecycle(binding: SourceSessionBinding): PublicBindingLifecycle {
-  return binding.state === 'cleaned-archived' || binding.state === 'released' ? 'cleaned' : binding.state
+  return binding.state === 'cleaned-archived' ? 'cleaned' : binding.state
 }
 
 export interface OperationRecord {
@@ -153,13 +154,12 @@ export interface BindSourceRequest {
 }
 
 export interface SourceBindingRequest extends BindSourceRequest {
-  action: 'bind-source' | 'claim-submit' | 'admitted' | 'uncertain' | 'cleaned'
+  action: 'bind-source'
 }
 
 export interface BindSourceResult {
   sourceSessionId: string
-  state: 'bound' | 'submit-claimed' | 'admitted' | 'uncertain' | 'cleaned'
-  submitAllowed: boolean
+  state: 'bound' | 'cleaned' | 'released'
 }
 
 export interface SessionStatusRequest {
@@ -202,6 +202,18 @@ export interface PromoteResult extends StatusResult {
   dependencyMode: 'mutable'
 }
 
+/**
+ * How the task branch was proven to be merged.
+ *
+ * `ancestor` is ordinary Git ancestry — the strongest proof, and the only one
+ * a plain merge workflow ever needs. `patch-equivalent` means ancestry did NOT
+ * hold, yet every commit on the branch already exists upstream under a
+ * different hash (`git cherry` patch-id equality), which is exactly what a
+ * rebase produces. The weaker proof is reported rather than hidden: a clean is
+ * irreversible, so the basis for "already merged" must stay reviewable.
+ */
+export type MergeProof = 'ancestor' | 'patch-equivalent'
+
 export interface CleanResult {
   dryRun: boolean
   operationId: string
@@ -209,15 +221,45 @@ export interface CleanResult {
   taskBranch: string
   actions: readonly string[]
   cleaned: boolean
+  /** Which proof established that the task branch is merged. */
+  mergeProof: MergeProof
+  /**
+   * Present only when this candidate's source Session was archived as part of
+   * THIS call, after the user confirmed finishing it. Absent for an
+   * already-archived candidate, keeping the two paths distinguishable.
+   */
+  archivedBeforeClean?: true
+}
+
+/**
+ * The decidable facts a user needs to judge one archive-then-clean offer. The
+ * candidate is identified exactly (never summarized), and `merged`/`clean`
+ * report the gates already proven at offer time — the clean itself re-verifies
+ * them under the repository lock.
+ */
+export interface RepoCleanArchiveOffer {
+  operationId: string
+  sourceSessionId: string
+  taskBranch: string
+  worktreePath: string
+  /** The task branch is provably merged into its base ref. */
+  merged: boolean
+  /** The worktree has no uncommitted changes. */
+  clean: boolean
 }
 
 /**
  * Why one repository-clean candidate was not cleaned. `not-archived` is this
- * flow's own precondition; `refused` carries an existing single-operation
- * safety-gate rejection; `unreadable` marks metadata that could not be parsed
- * (including retired schema versions), which is reported and never mutated.
+ * flow's own precondition (the user was asked and declined);
+ * `confirmation-unavailable` marks a candidate that passed every safety gate
+ * but whose question could not reach a human at all, which is a different fact
+ * from a refusal and must not be reported as one; `archive-failed` marks a
+ * confirmed offer whose archive call failed, leaving every resource intact;
+ * `refused` carries an existing single-operation safety-gate rejection;
+ * `unreadable` marks metadata that could not be parsed (including retired
+ * schema versions), which is reported and never mutated.
  */
-export type RepoCleanRefusalKind = 'not-archived' | 'refused' | 'unreadable'
+export type RepoCleanRefusalKind = 'not-archived' | 'confirmation-unavailable' | 'archive-failed' | 'refused' | 'unreadable'
 
 /** A candidate this run deliberately left untouched, with a stable reason. */
 export interface RepoCleanRefusal {
@@ -250,6 +292,16 @@ export interface RepoCleanResult {
   cleaned: readonly CleanResult[]
   refused: readonly RepoCleanRefusal[]
   ignored: readonly RepoCleanIgnored[]
+  /**
+   * How many candidates a real run would offer to archive-and-finish. Present
+   * only on a preview that could make such an offer, and only when non-zero.
+   *
+   * A preview reports those candidates as refusals, so `cleaned: []` reads as
+   * "nothing to do here" even when a real run would put a real decision to the
+   * user. This states the actionable outcome outright instead of leaving it to
+   * be inferred from refusal prose.
+   */
+  wouldOfferToFinish?: number
 }
 
 export type WsErrorCode =

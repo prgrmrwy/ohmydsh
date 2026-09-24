@@ -87,6 +87,27 @@ export async function worktreeStatus(path: string, git = createGitClient()): Pro
   return git.run(path, ['status', '--porcelain=v1', '--untracked-files=all'])
 }
 
+/**
+ * Resolve whether a repository-relative path is tracked by Git.
+ *
+ * This intentionally does not use GitClient.maybe(): ls-files exits with 1
+ * for an untracked path, while another non-zero exit code means that the
+ * tracking state could not be queried. The distinction is needed by the
+ * mixed-lockfile fail-closed resolution.
+ */
+export async function isTracked(repoRoot: string, relativePath: string, git = createGitClient()): Promise<boolean | undefined> {
+  try {
+    const result = await git.runner('git', ['ls-files', '--error-unmatch', '--', relativePath], { cwd: repoRoot })
+    if (result.timedOut) return undefined
+    if (result.code === 0) return true
+    if (result.code === 1) return false
+    return undefined
+  } catch {
+    // A runner failure means that tracking state cannot be proved.
+    return undefined
+  }
+}
+
 export function taskSlug(taskText: string): string {
   const tokens = taskText.toLowerCase().match(/[a-z0-9]+/g) ?? []
   const joined = tokens.join('-').slice(0, 48).replace(/-+$/g, '')
@@ -130,7 +151,13 @@ export async function createTaskWorktree(repoRoot: string, branch: string, path:
 export async function pruneInvalidRegistrations(repoRoot: string, git = createGitClient()): Promise<readonly string[]> {
   const paths: string[] = []
   for (const entry of await listWorktrees(repoRoot, git)) {
-    if (!entry.prunable || await isDirectory(entry.path)) continue
+    // `prunable` only exists from git 2.36; older git omits the field entirely.
+    // Trusting it alone makes this a silent no-op there, so a registration whose
+    // directory is gone could never be pruned and the worktree never recreated.
+    // A missing directory is the condition that actually matters, and it is
+    // observable on every supported git.
+    if (entry.bare) continue
+    if (await isDirectory(entry.path)) continue
     paths.push(entry.path)
   }
   if (paths.length > 0) await git.run(repoRoot, ['worktree', 'prune', '--expire', 'now'])

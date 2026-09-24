@@ -1,0 +1,549 @@
+import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { resetFailureLatch, telemetryFile } from '../src/telemetry/sink.js'
+import type { KernelRunner } from '../src/tools/index.js'
+import { mapConcurrent, registerMemexTools } from '../src/tools/index.js'
+import { TOOL_DESCRIPTIONS } from '../src/tools/descriptions.generated.js'
+import type { BindingEntry, ScopeResolution, ScopeService } from '../src/scope/types.js'
+
+/**
+ * Every search writes a telemetry record. Without an isolated DSH home the
+ * suite appends to the developer's real recall log — observed polluting it with
+ * 45 fixture rows, which then showed up as bogus statistics in the report.
+ * Redirect unconditionally; individual tests override with their own home.
+ */
+beforeEach(() => {
+  vi.stubEnv('DSH_HOME', mkdtempSync(join(tmpdir(), 'dsh-memex-suite-home-')))
+})
+
+afterEach(() => {
+  vi.unstubAllEnvs()
+  resetFailureLatch()
+})
+
+/**
+ * A route as the resolver would build it: the workspace's entries (this scope
+ * alone here) and the reach they imply, so the tool layer reads one source.
+ */
+function scope(name: string, binding?: BindingEntry, memory = true): ScopeResolution {
+  const read = binding === undefined
+    ? [name]
+    : [...new Set([name, ...binding.read, 'personal'])]
+  const write = binding === undefined
+    ? (name === 'personal' ? [name] : [name, 'personal'])
+    : [...new Set([name, ...binding.write])]
+  return {
+    scope: name,
+    home: `/memex/${name}`,
+    publish: name === 'internal' || name === 'current' ? 'internal' : 'external',
+    publishKnown: true,
+    memory,
+    source: 'config',
+    created: false,
+    workspacePaths: name === 'internal' || name === 'current' ? [`/work/${name}`] : [],
+    entries: [name],
+    access: { current: name, read, write },
+  }
+}
+
+function resolver(binding?: BindingEntry): ScopeService {
+  const values = new Map(['current', 'alpha', 'beta', 'blocked', 'personal', 'internal'].map(name => [name, scope(name, binding)]))
+  return {
+    resolve: cwd => {
+      expect(cwd).toBe('/workspace/current')
+      return values.get('current')!
+    },
+    list: () => [...values.values()],
+    resolveByName: name => {
+      const found = values.get(name)
+      if (found === undefined) throw new Error(`Unknown scope: ${name}`)
+      return found
+    },
+    ensure: value => value,
+    bindingFor: () => binding,
+    accessFor: current => binding === undefined
+      ? { current, read: [current], write: current === 'personal' ? [current] : [current, 'personal'] }
+      : { current, read: binding.read.includes('personal') ? binding.read : [...binding.read, 'personal'], write: binding.write },
+  }
+}
+
+function capture(runner: KernelRunner, binding?: BindingEntry, concurrency?: number, service: ScopeService = resolver(binding)): Map<string, ToolDefinition> {
+  const tools = new Map<string, ToolDefinition>()
+  const ctx = {
+    logger: () => ({ warn: vi.fn() }),
+    tools: {
+      register(definition: ToolDefinition) {
+        tools.set(definition.name, definition)
+        return () => tools.delete(definition.name)
+      },
+    },
+  }
+  registerMemexTools(ctx as never, service, { runner, ...(concurrency === undefined ? {} : { fanoutConcurrency: concurrency }) })
+  return tools
+}
+
+const exec = { agent: { session: { header: { cwd: '/workspace/current' } } } }
+
+async function call(tool: ToolDefinition, args: unknown): Promise<Record<string, unknown>> {
+  const value = await tool.execute(args, exec as never) as { json: string }
+  return JSON.parse(value.json) as Record<string, unknown>
+}
+
+function ok(stdout = '', stderr = '') {
+  return { ok: true, exitCode: 0, stdout, stderr }
+}
+
+describe('memex DSH tool registration', () => {
+  it('registers the eight Pi-aligned tools with generated descriptions', () => {
+    const tools = capture(async () => ok())
+    expect([...tools.keys()]).toEqual(['memex_search', 'memex_read', 'memex_recall', 'memex_write', 'memex_retro', 'memex_links', 'memex_archive', 'memex_organize'])
+    for (const [name, description] of Object.entries(TOOL_DESCRIPTIONS)) {
+      if (tools.has(name)) expect(tools.get(name)!.description.startsWith(description)).toBe(true)
+    }
+    expect(tools.get('memex_search')!.parameters).toHaveProperty('properties.semantic')
+    expect(tools.get('memex_recall')!.description).toContain('semantic=true')
+  })
+
+  it('rejects calls without the calling session cwd', async () => {
+    const tools = capture(async () => ok())
+    await expect(tools.get('memex_read')!.execute({ slug: 'x' }, {} as never)).rejects.toThrow(/session\.header\.cwd/)
+  })
+
+  it('searches binding scopes concurrently with a bound and deterministic merge', async () => {
+    let active = 0
+    let peak = 0
+    const completed: string[] = []
+    const runner: KernelRunner = vi.fn(async (_args, options) => {
+      active += 1
+      peak = Math.max(peak, active)
+      const name = options.home.split('/').at(-1)!
+      await new Promise(resolve => setTimeout(resolve, name === 'alpha' ? 25 : name === 'beta' ? 5 : 15))
+      completed.push(name)
+      active -= 1
+      return ok(`## same\n${name} title\n${name} body\n`)
+    })
+    const tools = capture(runner, { name: 'bound', read: ['beta', 'current', 'alpha'], write: ['current'] }, 2)
+    const result = await call(tools.get('memex_search')!, { query: 'term', scope: 'all', limit: 20 })
+    expect(peak).toBe(2)
+    expect(completed).not.toEqual(['alpha', 'beta', 'current'])
+    expect((result.hits as Array<{ scope: string }>).map(hit => hit.scope)).toEqual(['alpha', 'beta', 'current', 'personal'])
+    expect(result.targets).toEqual([
+      expect.objectContaining({ scope: 'alpha', home: '/memex/alpha' }),
+      expect.objectContaining({ scope: 'beta', home: '/memex/beta' }),
+      expect.objectContaining({ scope: 'current', home: '/memex/current' }),
+      expect.objectContaining({ scope: 'personal', home: '/memex/personal' }),
+    ])
+  })
+
+  it('supports an explicit scope list, rejects out-of-binding scopes, and preserves partial results', async () => {
+    const runner: KernelRunner = vi.fn(async (_args, options) => options.home.endsWith('/beta')
+      ? { ok: false, exitCode: 1, stdout: '', stderr: 'broken' }
+      : ok('## alpha-card\nAlpha\nBody\n'))
+    const tools = capture(runner, { name: 'bound', read: ['alpha', 'beta'], write: ['current'] })
+    const result = await call(tools.get('memex_search')!, { query: 'x', scope: ['beta', 'alpha'] })
+    expect((result.hits as Array<{ scope: string }>).map(hit => hit.scope)).toEqual(['alpha'])
+    expect(result.failures).toEqual([{ scope: 'beta', error: 'memex search failed in scope beta (exit 1)' }])
+    await expect(call(tools.get('memex_search')!, { query: 'x', scope: ['blocked'] })).rejects.toThrow(/not reachable from current scope/)
+    await expect(call(tools.get('memex_search')!, { query: 'x', scope: ['all'] })).rejects.toThrow(/use scope: "all" by itself/)
+  })
+
+  it('keeps current intrinsically readable even when a binding only lists it as writable', async () => {
+    const runner: KernelRunner = vi.fn(async () => ok('## current-card\nCurrent\nBody\n'))
+    const tools = capture(runner, { name: 'write-only-current', read: ['alpha'], write: ['current'] })
+    const searched = await call(tools.get('memex_search')!, { query: 'x' })
+    expect((searched.hits as Array<{ scope: string }>).map(hit => hit.scope)).toEqual(['current'])
+    await expect(call(tools.get('memex_read')!, { slug: 'x', scope: 'current' })).resolves.toMatchObject({ target: { scope: 'current' } })
+  })
+
+  it('uses four workers by default', async () => {
+    let active = 0
+    let peak = 0
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const runner: KernelRunner = vi.fn(async (_args, options) => {
+      active += 1
+      peak = Math.max(peak, active)
+      if (peak === 4) release()
+      await gate
+      active -= 1
+      const name = options.home.split('/').at(-1)!
+      return ok(`## ${name}\n${name}\nBody\n`)
+    })
+    const tools = capture(runner, { name: 'many', read: ['current', 'alpha', 'beta', 'blocked', 'personal'], write: ['current'] })
+    await call(tools.get('memex_search')!, { query: 'x', scope: 'all', limit: 10 })
+    expect(peak).toBe(4)
+  })
+
+  it('refuses every tool in a workspace whose memory is switched off', async () => {
+    // Full off, not just the injections: a workspace the user declared memory-free
+    // must not receive cards through a tool call either.
+    const off = { ...scope('current', undefined, false) }
+    const service: ScopeService = {
+      resolve: () => off,
+      list: () => [off],
+      resolveByName: () => off,
+      ensure: () => { throw new Error('ensure must not run for a disabled workspace') },
+      bindingFor: () => undefined,
+      accessFor: name => ({ current: name, read: [name], write: [name] }),
+    }
+    const runner: KernelRunner = vi.fn(async () => ok(''))
+    const tools = capture(runner, undefined, undefined, service)
+    for (const name of ['memex_search', 'memex_read', 'memex_write', 'memex_links', 'memex_archive', 'memex_organize']) {
+      await expect(call(tools.get(name)!, { slug: 'x', content: '---\ntitle: X\n---\nBody\n' }))
+        .rejects.toThrow(/Memory is off for this workspace/)
+    }
+    // Nothing reached the kernel, so no card was written anywhere.
+    expect(runner).not.toHaveBeenCalled()
+  })
+
+  it('reads a concrete readable scope and reports the route', async () => {
+    const runner: KernelRunner = vi.fn(async () => ok('---\ntitle: Alpha\n---\nBody\n'))
+    const tools = capture(runner, { name: 'bound', read: ['current', 'alpha'], write: ['current'] })
+    const result = await call(tools.get('memex_read')!, { slug: 'same', scope: 'alpha' })
+    expect(result.target).toEqual(expect.objectContaining({ scope: 'alpha', home: '/memex/alpha' }))
+    expect(result.content).toContain('title: Alpha')
+    expect(runner).toHaveBeenCalledWith(['read', '--', 'same'], expect.objectContaining({ home: '/memex/alpha' }))
+  })
+
+  it('writes current first and then an allowed additional scope', async () => {
+    const runner: KernelRunner = vi.fn(async () => ok())
+    const tools = capture(runner, { name: 'bound', read: ['current'], write: ['current', 'alpha'] })
+    await call(tools.get('memex_write')!, { slug: 'raw', content: '---\ntitle: Raw\ncreated: 2026-01-01\nsource: test\n---\nBody' })
+    await call(tools.get('memex_retro')!, { slug: 'learned', title: 'Learned', body: 'A [[lesson]].', category: 'architecture' })
+    expect(runner).toHaveBeenNthCalledWith(1, ['write', '--', 'raw'], expect.objectContaining({ home: '/memex/current', stdin: expect.stringContaining('title: Raw') }))
+    expect(runner).toHaveBeenNthCalledWith(2, ['write', '--', 'learned'], expect.objectContaining({ home: '/memex/current', stdin: expect.stringContaining('source: dsh') }))
+    const additional = await call(tools.get('memex_write')!, { slug: 'nope', content: 'x', scope: 'alpha' })
+    expect(additional.additional).toEqual([expect.objectContaining({ scope: 'alpha', written: true })])
+    expect(runner).toHaveBeenCalledTimes(4)
+  })
+
+  it('keeps the current write when an additional scope is outside the binding', async () => {
+    const runner: KernelRunner = vi.fn(async () => ok())
+    const tools = capture(runner, { name: 'bound', read: ['current'], write: ['current'] })
+    const result = await call(tools.get('memex_write')!, { slug: 'safe', content: 'safe body', scope: 'blocked' })
+    expect(result.written).toBe(true)
+    expect(result.additional).toEqual([expect.objectContaining({ scope: 'blocked', written: false, error: expect.stringContaining('not reachable from') })])
+    expect(runner).toHaveBeenCalledTimes(1)
+  })
+
+  it('processes multiple additional targets independently', async () => {
+    const runner: KernelRunner = vi.fn(async () => ok())
+    const tools = capture(runner, { name: 'bound', read: ['current'], write: ['current', 'alpha', 'beta'] })
+    const result = await call(tools.get('memex_write')!, { slug: 'safe', content: 'safe body', scope: ['alpha', 'beta', 'blocked'] })
+    expect(result.additional).toEqual([
+      expect.objectContaining({ scope: 'alpha', written: true }),
+      expect.objectContaining({ scope: 'beta', written: true }),
+      expect.objectContaining({ scope: 'blocked', written: false }),
+    ])
+    expect(runner).toHaveBeenCalledTimes(3)
+  })
+
+  it('keeps the current write when an external additional scope is guarded', async () => {
+    const runner: KernelRunner = vi.fn(async () => ok())
+    const bound = { name: 'bound', read: ['current', 'alpha'], write: ['current', 'alpha'] }
+    const tools = capture(runner, bound)
+    // The resolver fixture exposes an internal scope named "internal"; that term
+    // is denied when writing to an external target such as alpha.
+    const result = await call(tools.get('memex_write')!, { slug: 'raw', content: 'mentions internal details', scope: 'alpha' })
+    expect(result.additional).toEqual([expect.objectContaining({ scope: 'alpha', written: false })])
+    expect(runner).toHaveBeenCalledTimes(1)
+  })
+
+  it('matches upstream retro hooks and write enrichment when auto-sync is enabled', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-memex-retro-'))
+    mkdirSync(join(home, 'cards'))
+    writeFileSync(join(home, '.sync.json'), JSON.stringify({ auto: true, remote: 'git@example/repo.git' }))
+    const current = { ...scope('current'), home }
+    const service: ScopeService = {
+      resolve: () => current,
+      list: () => [current],
+      resolveByName: () => current,
+      ensure: value => value,
+      bindingFor: () => undefined,
+      accessFor: name => ({ current: name, read: [name], write: [name, 'personal'] }),
+    }
+    const runner: KernelRunner = vi.fn(async () => ok())
+    const tools = capture(runner, undefined, undefined, service)
+    await call(tools.get('memex_retro')!, { slug: 'learned', title: 'Learned', body: 'Body', category: 'architecture' })
+    expect(runner).toHaveBeenNthCalledWith(1, ['sync', 'pull'], expect.objectContaining({ home }))
+    expect(runner).toHaveBeenNthCalledWith(2, ['write', '--', 'learned'], expect.objectContaining({ home, stdin: expect.stringContaining('category: "architecture"') }))
+    expect(runner).toHaveBeenNthCalledWith(3, ['sync', 'push'], expect.objectContaining({ home }))
+
+    await call(tools.get('memex_write')!, { slug: 'raw', content: '---\ntitle: Raw\ncreated: 2026-01-01\n---\nBody', category: 'devops' })
+    expect(runner).toHaveBeenNthCalledWith(4, ['write', '--', 'raw'], expect.objectContaining({ stdin: expect.stringContaining('source: dsh') }))
+    expect(runner).toHaveBeenNthCalledWith(5, ['sync', 'push'], expect.objectContaining({ home }))
+  })
+
+  it('reports why a sync hook failed, and what survived it', async () => {
+    // Measured: a remote that rejects direct pushes to a protected branch cost a
+    // reader a manual git investigation, because the tool said only "exit 1"
+    // while the kernel's stderr said exactly what happened.
+    const home = mkdtempSync(join(tmpdir(), 'dsh-memex-hook-'))
+    mkdirSync(join(home, 'cards'))
+    writeFileSync(join(home, '.sync.json'), JSON.stringify({ auto: true, remote: 'git@example/repo.git' }))
+    const current = { ...scope('current'), home }
+    const service: ScopeService = {
+      resolve: () => current,
+      list: () => [current],
+      resolveByName: () => current,
+      ensure: value => value,
+      bindingFor: () => undefined,
+      accessFor: name => ({ current: name, read: [name], write: [name, 'personal'] }),
+    }
+    const runner: KernelRunner = vi.fn()
+      .mockResolvedValueOnce(ok())
+      .mockResolvedValueOnce(ok())
+      .mockResolvedValueOnce({
+        ok: false,
+        exitCode: 1,
+        stdout: '',
+        stderr: 'Push failed: remote: Application: You are not allow to operate the branch as it is protected.\n ! [remote rejected] HEAD -> main\n',
+      })
+    const tools = capture(runner, undefined, undefined, service)
+    const result = await call(tools.get('memex_retro')!, { slug: 'learned', title: 'Learned', body: 'Body' })
+    const warning = String(result.warning ?? '')
+    expect(warning).toContain('push hook failed')
+    expect(warning).toContain('protected')
+    expect(warning).toContain('committed locally')
+    // One line, and bounded: kernel output must not reshape the result.
+    expect(warning).not.toContain('\n')
+    expect(warning.length).toBeLessThan(600)
+  })
+
+  it('skips an additional target whose remote is unreachable, and says so', async () => {
+    // The current library writes regardless (a stale remote must not lose the
+    // card); an additional target is refused instead, so a stale remote is never
+    // silently forked.
+    const home = mkdtempSync(join(tmpdir(), 'dsh-memex-hook-primary-'))
+    const alphaHome = mkdtempSync(join(tmpdir(), 'dsh-memex-hook-alpha-'))
+    for (const dir of [home, alphaHome]) {
+      mkdirSync(join(dir, 'cards'))
+      writeFileSync(join(dir, '.sync.json'), JSON.stringify({ auto: true, remote: 'git@example/repo.git' }))
+    }
+    const current = {
+      ...scope('current'),
+      home,
+      entries: ['current', 'alpha'],
+      access: { current: 'current', read: ['current', 'alpha'], write: ['current', 'alpha', 'personal'] },
+    }
+    const alpha = { ...scope('alpha'), home: alphaHome, entries: ['current', 'alpha'] }
+    const service: ScopeService = {
+      resolve: () => current,
+      list: () => [current, alpha],
+      resolveByName: name => (name === 'alpha' ? alpha : current),
+      ensure: value => value,
+      bindingFor: () => undefined,
+      accessFor: name => current.access,
+    }
+    const runner: KernelRunner = vi.fn()
+      // current: pull fails, write and push succeed
+      .mockResolvedValueOnce({ ok: false, exitCode: 1, stdout: '', stderr: 'Fetch failed: could not read from remote' })
+      .mockResolvedValueOnce(ok())
+      .mockResolvedValueOnce(ok())
+      // alpha: pull fails, so its write is skipped
+      .mockResolvedValueOnce({ ok: false, exitCode: 1, stdout: '', stderr: 'Fetch failed: could not read from remote' })
+    const tools = capture(runner, undefined, undefined, service)
+    const result = await call(tools.get('memex_retro')!, { slug: 'learned', title: 'Learned', body: 'Body', scope: 'alpha' })
+
+    const warning = String(result.warning ?? '')
+    expect(warning).toContain('pull hook failed')
+    expect(warning).toContain('could not read from remote')
+    const additional = (result.additional as Array<{ scope: string; written: boolean; error?: string }>)[0]!
+    expect(additional).toMatchObject({ scope: 'alpha', written: false })
+    expect(additional.error).toContain('the write was skipped')
+    // Only the current library was written, on its own home.
+    const writes = runner.mock.calls.filter(call => (call[0] as readonly string[])[0] === 'write')
+    expect(writes).toHaveLength(1)
+    expect((writes[0]![1] as { home: string }).home).toBe(home)
+  })
+
+  it('keeps graph-level tools on current scope', async () => {
+    const runner: KernelRunner = vi.fn(async () => ok('done'))
+    const tools = capture(runner)
+    await call(tools.get('memex_links')!, {})
+    await call(tools.get('memex_archive')!, { slug: 'old-card' })
+    await call(tools.get('memex_organize')!, {})
+    expect(runner).toHaveBeenNthCalledWith(1, ['links'], expect.objectContaining({ home: '/memex/current' }))
+    expect(runner).toHaveBeenNthCalledWith(2, ['archive', '--', 'old-card'], expect.objectContaining({ home: '/memex/current' }))
+    expect(runner).toHaveBeenNthCalledWith(3, ['organize'], expect.objectContaining({ home: '/memex/current' }))
+  })
+
+  it('recall uses only current scope and falls back from a missing index to list', async () => {
+    const runner: KernelRunner = vi.fn()
+      .mockResolvedValueOnce({ ok: false, exitCode: 1, stdout: '', stderr: 'Card not found: index' })
+      .mockResolvedValueOnce(ok('one  One title\n'))
+    const tools = capture(runner)
+    const result = await call(tools.get('memex_recall')!, {})
+    expect(result.mode).toBe('list')
+    expect(runner).toHaveBeenNthCalledWith(1, ['read', '--', 'index'], expect.objectContaining({ home: '/memex/current' }))
+    expect(runner).toHaveBeenNthCalledWith(2, ['search', '--limit', '10', '--list'], expect.objectContaining({ home: '/memex/current' }))
+  })
+})
+
+describe('keyword queries reach the kernel segmented', () => {
+  /** The exact query string handed to the kernel: the argument after `--`. */
+  function sentQuery(runner: ReturnType<typeof vi.fn>, callIndex = 0): string {
+    const args = runner.mock.calls[callIndex]![0] as string[]
+    return args[args.indexOf('--') + 1]!
+  }
+
+  it('segments Han runs for memex_search', async () => {
+    const runner = vi.fn(async () => ok())
+    const tools = capture(runner as never)
+    await call(tools.get('memex_search')!, { query: '子进程能不能用上代理' })
+    expect(sentQuery(runner)).toBe('子进 进程 程能 能不 不能 能用 用上 上代 代理')
+  })
+
+  it('segments Han runs for memex_recall', async () => {
+    const runner = vi.fn(async () => ok())
+    const tools = capture(runner as never)
+    await call(tools.get('memex_recall')!, { query: '子进程能不能用上代理' })
+    expect(sentQuery(runner)).toBe('子进 进程 程能 能不 不能 能用 用上 上代 代理')
+  })
+
+  it('sends both entry points the same query for the same question', async () => {
+    // A divergence here is invisible at runtime: the model cannot tell "not in
+    // the library" from "asked through the other tool".
+    const searchRunner = vi.fn(async () => ok())
+    const recallRunner = vi.fn(async () => ok())
+    await call(capture(searchRunner as never).get('memex_search')!, { query: '会话删不掉 提示被占用' })
+    await call(capture(recallRunner as never).get('memex_recall')!, { query: '会话删不掉 提示被占用' })
+    expect(sentQuery(searchRunner)).toBe(sentQuery(recallRunner))
+  })
+
+  it('leaves ASCII queries byte-identical', async () => {
+    const runner = vi.fn(async () => ok())
+    const tools = capture(runner as never)
+    await call(tools.get('memex_search')!, { query: 'connection.rpc.handle 405' })
+    expect(sentQuery(runner)).toBe('connection.rpc.handle 405')
+  })
+
+  it('passes the query through unchanged for semantic search', async () => {
+    // Segmentation would shred the text the embedding is computed from.
+    const runner = vi.fn(async () => ok())
+    const tools = capture(runner as never)
+    await call(tools.get('memex_search')!, { query: '子进程能不能用上代理', semantic: true })
+    expect(sentQuery(runner)).toBe('子进程能不能用上代理')
+  })
+})
+
+describe('recall telemetry', () => {
+  function useHome(): NodeJS.ProcessEnv {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-memex-tools-telemetry-'))
+    vi.stubEnv('DSH_HOME', dir)
+    return { DSH_HOME: dir }
+  }
+
+  function records(env: NodeJS.ProcessEnv): Record<string, unknown>[] {
+    const file = telemetryFile(new Date(), env)
+    if (!existsSync(file)) return []
+    return readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>)
+  }
+
+
+  it('records a keyword search without keeping the query text', async () => {
+    const env = useHome()
+    const marker = 'UNIQUEQUERYMARKER'
+    const tools = capture(async () => ok('## card-one\nCard one title\nbody\n'))
+    await call(tools.get('memex_search')!, { query: `${marker} proxy` })
+    const written = records(env)
+    expect(written).toHaveLength(1)
+    expect(JSON.stringify(written)).not.toContain(marker)
+    expect(written[0]!.hitCount).toBe(1)
+  })
+
+  it('records an empty recall as hitCount 0, the observable false-negative signal', async () => {
+    const env = useHome()
+    const tools = capture(async () => ok(''))
+    await call(tools.get('memex_search')!, { query: '会话删不掉' })
+    expect(records(env)[0]).toMatchObject({
+      hitCount: 0,
+      query: expect.objectContaining({ han: true, segmented: true }),
+    })
+  })
+
+  it('records recall through the second entry point too', async () => {
+    const env = useHome()
+    const tools = capture(async () => ok('## card-one\nCard one title\nbody\n'))
+    await call(tools.get('memex_recall')!, { query: 'proxy' })
+    expect(records(env)).toHaveLength(1)
+  })
+
+  it('does not record list or index reads, which carry no query', async () => {
+    const env = useHome()
+    const tools = capture(async () => ok('one  One title\n'))
+    await call(tools.get('memex_recall')!, {})
+    expect(records(env)).toHaveLength(0)
+  })
+
+  it('marks whether a hit was anchored in slug or title', async () => {
+    const env = useHome()
+    const tools = capture(async () => ok('## dsh-proxy-model\nProxy model\nbody\n\n## unrelated-card\nSomething else\nbody\n'))
+    await call(tools.get('memex_search')!, { query: 'proxy' })
+    expect((records(env)[0] as { hits: { slug: string; anchored: boolean }[] }).hits).toEqual([
+      { slug: 'dsh-proxy-model', scope: 'current', anchored: true },
+      { slug: 'unrelated-card', scope: 'current', anchored: false },
+    ])
+  })
+
+  it('attributes each hit to the library it came from, not to the caller', async () => {
+    // Fan-out means a recall issued from one workspace routinely returns cards
+    // owned by another. Keying "never recalled" on the caller would blame the
+    // wrong library and report live cards as dead weight.
+    const env = useHome()
+    const runner: KernelRunner = async (_args, options) => {
+      const name = options.home.split('/').at(-1)!
+      return ok(`## ${name}-card\n${name} title\nbody\n`)
+    }
+    const tools = capture(runner, { name: 'bound', read: ['current', 'personal'], write: ['current'] })
+    await call(tools.get('memex_search')!, { query: 'proxy', scope: 'all' })
+    const record = records(env)[0] as { scope: string; hits: { slug: string; scope: string }[] }
+    expect(record.scope).toBe('current')
+    expect([...new Set(record.hits.map(hit => hit.scope))].sort()).toEqual(['current', 'personal'])
+  })
+
+  it('writes nothing for a workspace that turned memory off', async () => {
+    // Closing memory closes it completely: leaving a record would log that
+    // workspace's activity on a boundary the user explicitly shut.
+    const env = useHome()
+    const off = scope('current', undefined, false)
+    const service: ScopeService = {
+      resolve: () => off,
+      list: () => [off],
+      resolveByName: () => off,
+      ensure: value => value,
+      bindingFor: () => undefined,
+      accessFor: current => ({ current, read: [current], write: [current] }),
+    }
+    const tools = capture(async () => ok('## card\nTitle\nbody\n'), undefined, undefined, service)
+    await expect(call(tools.get('memex_search')!, { query: 'proxy' })).rejects.toThrow(/Memory is off/)
+    expect(records(env)).toHaveLength(0)
+  })
+
+  it('returns identical results whether or not telemetry can be written', async () => {
+    // The spec requires results to be byte-identical: a sink failure must never
+    // be observable through the tool.
+    const stdout = '## card-one\nCard one title\nbody\n'
+    useHome()
+    const working = await call(capture(async () => ok(stdout)).get('memex_search')!, { query: 'proxy' })
+    const broken = mkdtempSync(join(tmpdir(), 'dsh-memex-ro-'))
+    chmodSync(broken, 0o500)
+    vi.stubEnv('DSH_HOME', broken)
+    const failing = await call(capture(async () => ok(stdout)).get('memex_search')!, { query: 'proxy' })
+    chmodSync(broken, 0o700)
+    expect(failing).toEqual(working)
+  })
+})
+
+describe('bounded mapper', () => {
+  it('keeps result order even when workers complete out of order', async () => {
+    const result = await mapConcurrent([30, 5, 15], 2, async value => {
+      await new Promise(resolve => setTimeout(resolve, value))
+      return value
+    })
+    expect(result).toEqual([30, 5, 15])
+  })
+})

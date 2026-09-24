@@ -1,0 +1,135 @@
+id: T6
+name: Read Write 与 Caller-bound Context
+description: 在真实 nexus 仓库的日常 README 防腐任务中验证默认 read、授权 write、降权后的真实文件效果，并核验 pet_context 只绑定实际 child。验收融入真实开发流程，不另造 canary 靶子目录。
+device: pc
+parallel_group: G6
+conflicts_with: [T1, T2, T3, T4, T5, T7, T8]
+precondition: 当前群级 Locus 空闲且 context anchor 已 confirmed（write 授权要求 anchor.status=confirmed 且 provenance 以 host: 开头）；nexus 工作树位于一次性验收分支 pet-locus-acceptance、基线 973e272dfe、README.md 未改动；只改动 README.md 中可判定的过时描述，变更可随时 git checkout 还原。
+ask_user_if_blocked: true
+status: passed
+blocked_reason: null
+mock_setup:
+  required: false
+  status: not_needed
+  scenario_id: null
+  surface: pet-locus-management
+  data_source: Pet sandbox policy, context and real workspace filesystem
+  evidence: []
+  enable:
+    command: null
+    env: null
+    notes: 使用正式 workspace 与真实受 git 跟踪的仓库文件，不启用 mock，不新建靶子目录。
+  user_decision: null
+steps:
+  - seq: 1
+    description: 在默认 read 状态让群级 child 读取真实 README 并核对仓库事实，尝试直接修正已确认的过时描述
+    action: wait_for
+    target: "user-action:read-state-readme-probe"
+    value: "@Bot README.md 第 185 行说 rushx-config.json 要放在 config/ 下，请核对仓库实际情况；如果确实不符，直接改正这一处。"
+    url_needs_input: false
+    checkpoints:
+      - id: T6-C1
+        description: read 状态可读取真实仓库文件并据实指出过时描述，但写入明确失败且 README 回读逐字未变，Locus 有效权限仍为 read
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: permission-read
+        surface: pet-locus-management
+        data_source: Pet sandbox policy and workspace filesystem
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 必须以 README 内容摘要与 git status 回读证明未被修改，不只依赖模型口头说明；同时确认它读到的是真实文件内容（能指出仓库根存在 rushx-config.json 而 config/ 下没有），而非编造。
+        selector: .dshpet-settings
+        expected_text: "期望 只读 · 实际 只读；读取成功；README 未变更；写入被拒绝"
+        expected_attrs: null
+        expected_visible: true
+        result: pass
+        result_detail: "read 态下 child 读取真实仓库并据实报告，写入被 sandbox 拒绝。工具序列 bash → grep → read → bash → edit ✗ → pet_locus_reply，edit 返回「[sandbox: file access denied under read-only mode]」——是 sandbox 层真实拒绝，不是模型自我克制。文件系统零变化：git status 为空、README.md md5 与基线 8a1c8df6a21abf0bae901af7ece19757 一致、无新增文件。确实读到了真实文件而非编造：它声明改动应插在「Please see `rush test --help`...」之后、「## Detect Incremental Coverage」之前，核对 README 实际为 L134 与 L136，精确吻合。locus 有效权限仍为 read。它如实报告「当前会话是 read-only 沙箱，且审批提示被禁用，我无法自行提权」。"
+  - seq: 2
+    description: 由 allowlist 用户发送 scope write，随后让 child 真正提交该处 README 防腐修改
+    action: wait_for
+    target: "user-action:scope-write-and-apply-readme-fix"
+    value: "@Bot -s write；随后 @Bot 现在请把刚才确认的那处改正写入 README.md"
+    url_needs_input: false
+    checkpoints:
+      - id: T6-C2
+        description: Host 核验 canonical root 与 workspace-write 后回显实际 write，且 README.md 在精确工作根内被真实修改，git diff 可见且改动正确、范围最小
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: permission-write
+        surface: pet-locus-management
+        data_source: Pet permission mutation and workspace filesystem
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: desired/write 与 effective/write 必须同时出现；若 Host 不支持必须明确拒绝，不能只改持久字段。以 git diff 核对：仅 README.md 被改、仅该处过时描述被修正、无越权改动其它文件。
+        selector: .dshpet-settings
+        expected_text: "期望 可写 · 实际 可写；锚点已确认；README.md 已修改并回读"
+        expected_attrs: null
+        expected_visible: true
+        result: pass
+        result_detail: "`-s write` 授权成功并真实写入。权限持久为 desired=write / effective=write / verifiedAt=1789279765392 / grantedBy=ou_322e...（操作者 openId），权限审计表新增一条（generation 3、sequence 1）。effective=write 不是直接写库：permission-mutation 先 policy.apply 应用到 live sandbox、再 policy.resolve 回读、经 verifyLocusLivePolicy 核验通过后才持久化，因此该值证明 live sandbox 确已进入 workspace-write 且 workspace root 与已确认锚点精确一致。文件结果：git diff 显示 README.md 仅 2 行新增（1 file changed, 2 insertions(+)），插入位置正是 L134/L136 之间——与 read 态下的声明一字不差；内容遵守「只指路、不复制数字」约束（diff 中无 90%/80% 等数值），链接锚点 docs/patterns/testing.md#覆盖率要求 真实存在（该文件 L100）。范围最小：未新增文件、未改动其它文件、未越权修改其它行。"
+  - seq: 3
+    description: 由 allowlist 用户切回 scope read，再让 child 尝试做第二处 README 改动
+    action: wait_for
+    target: "user-action:scope-read-and-second-edit-probe"
+    value: "@Bot -s read；随后 @Bot 请再修改 README.md 顶部的一行措辞"
+    url_needs_input: false
+    checkpoints:
+      - id: T6-C3
+        description: 降权后实际权限回到 read，上一步已写入的改动仍可读，但新的写入被拒绝且 README 不再发生变化
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: permission-downgrade
+        surface: pet-locus-management
+        data_source: Pet permission mutation and workspace filesystem
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 验证实际 sandbox 效果与持久状态一致；不得把旧 write 沿用到降权后的轮次。以 git diff 核对降权后 README 与上一步结束时逐字一致。
+        selector: .dshpet-settings
+        expected_text: "期望 只读 · 实际 只读；已写入改动可读；新的写入被拒绝"
+        expected_attrs: null
+        expected_visible: true
+        result: pass
+        result_detail: "`-s read` 降权立即生效。权限回到 desired=read / effective=read 且 verifiedAt 更新为 1789280912617。child 随后确实尝试了写入——turn 5 工具序列 read → bash ×3 → edit ✗，edit 再次被 sandbox 以 read-only 拒绝，因此验证的是真实拒绝而非跳过。已写入的改动仍可读（该轮 read 成功）。README 与 C2 结束时逐字一致，仍为 1 file changed, 2 insertions(+)，上一轮的 write 未沿用到降权后的轮次。"
+  - seq: 4
+    description: 在当前飞书 child 调用零参数 pet_context 并核对返回事实
+    action: wait_for
+    target: "user-action:invoke-pet-context-from-locus-child"
+    value: "@Bot 调用 pet_context，仅报告当前入口、workspace、权限和确认锚点"
+    url_needs_input: false
+    checkpoints:
+      - id: T6-C4
+        description: pet_context 按实际 child 返回唯一当前 Locus、正确 workspace、effective read 与确认锚点，且不包含 taskId/invocationId 或其它入口
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: true
+        data_scenario: caller-bound-context
+        surface: feishu-child-interaction
+        data_source: scoped pet_context and locus repository
+        mock_scenario_id: null
+        expected_source: openspec
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        reviewer_notes: 模型不提供任何 chat/thread/session/path 参数；联合 Locus 管理回读验证返回值属于实际 caller child。
+        selector: .dshpet-settings
+        expected_text: "当前 locus 与 child 匹配；workspace 正确；实际 只读；锚点 confirmed；不包含 taskId；不包含 invocationId"
+        expected_attrs: null
+        expected_visible: true
+        result: pass
+        result_detail: "零参 pet_context 只绑定实际 caller child。返回的 locus/generation/main/child/workspace/permission/contextAnchor 与 Host 持久层逐项一致：locus-runtime-1789234959933-4ad5a0fff614b8、generation 3、main session-85620d77、child session-41bfec40（即实际 caller）、workspace e81b1ec0、effective read、锚点 confirmed 且执行根 /Users/prgrmrwy/corp/nexus。作用域正确：持久层此时有 4 条活跃 locus（群级 1 + 话题 3），返回中只有自己这一条，未枚举兄弟入口，三个话题的 threadId 均未出现。旧模型字段全部不存在：taskId、invocationId、invocation、chatBinding、executorSessionId 均未出现。currentDelivery 为本轮 Delivery 且 status=running，reply target 为 Host 绑定。"

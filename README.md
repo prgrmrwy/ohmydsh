@@ -47,7 +47,6 @@ openspec/                 # spec-driven 变更流程
 scripts/bootstrap.sh       # clone 后初始化:检查 Node 环境 + 安装依赖(幂等)
 scripts/install.sh         # 一键安装:bin/dsh → ~/.local/bin(幂等,可卸载)
 scripts/sync.mjs          # manifest → ~/.dsh 物化
-skills/dsh-tunnel/           # skill:SSH 隧道访问远端 DSH(含脚本,端口占用自动退避)
 instructions/dsh-home.md  # 工作环境级模型指令源文件
 packages/<name>/          # 自研 bundle 插件(见 packages/README.md)
 presets/<id>/             # agent preset(见 presets/README.md)
@@ -59,10 +58,10 @@ tests/                    # sync 黑盒回归测试
 
 ## 架构图
 
-<img alt="ohmydsh 架构图:仓库真相源 → sync 物化 → ~/.dsh → DSH 运行时" src="archify-out/ohmydsh-architecture.dual.svg" width="100%">
+<img alt="ohmydsh 架构图:仓库真相源 → sync 物化 → ~/.dsh → DSH 运行时" src="docs/assets/ohmydsh-architecture.dual.svg" width="100%">
 
-> 展示资产为 `archify-out/ohmydsh-architecture.dual.svg`(单文件,自带明暗主题适配);
-> 可编辑图源为 `archify-out/ohmydsh-architecture.json`,架构变化时更新图源并重新导出该 SVG。
+> 展示资产为 `docs/assets/ohmydsh-architecture.dual.svg`(单文件,自带明暗主题适配);
+> 可编辑图源为 `docs/assets/ohmydsh-architecture.json`,架构变化时更新图源并重新导出该 SVG。
 
 ## 使用
 
@@ -95,7 +94,7 @@ dsh stop    # 3. 停止服务
 ```
 
 - 想一步到位?"构建 + 启动"用 `dsh -b`;
-- 启动后 UI 在 **http://127.0.0.1:3080**(换端口:`dsh -p 8080`);`web.lan` 开启时(默认关),启动输出会**同时打印局域网地址**,同网络设备可直接打开;
+- 启动后 UI 在 **http://127.0.0.1:3080**(换端口:`dsh -p 8080`);
 - 每次启动/停止,终端都会打印**当前加载的插件清单**,一眼看清生效了哪些定制;
 - 重复执行 `dsh` 不会起第二个实例:已在运行就只是帮你把 UI 打开。
 
@@ -125,13 +124,12 @@ dsh stop    # 3. 停止服务
 - **逃生门 & 频道**:想钉在旧版,`dsh.yaml` 置 `autoUpdate.enabled: false` 或临时 `DSH_SKIP_UPDATE=1 dsh`;追 `next`(前夜版)用 `DSH_UPDATE_CHANNEL=next dsh`(或改 `autoUpdate.channel`);
 - 升级/跳过/离线事件记录在 `~/.dsh/dsh-startup.log`,`dsh history` 可见。
 
-**局域网访问**(`dsh.yaml` 的 `web.lan`,**默认关闭**):
+**临时 rc.2 运行体防卡死策略**（默认启用）：
 
-- 需要时把 `web.lan` 改为 `true` 后 `dsh build`;sync 会把 webserver 绑到 `0.0.0.0`,启动时除 `http://127.0.0.1:<端口>` 外同时打印局域网地址 `http://<本机IP>:<端口>`,同一局域网的其他设备(手机/平板等)可直接打开;
-- ⚠️ 安全提示:绑定局域网意味着同网段任意设备都能访问并驱动完整 agent 能力(bash、文件读写等),这是官方 CLI 出于安全故意禁用的;请只在可信网络、需要时临时开启,用完改回 `false` 后 `dsh build`;
-- 不想改配置文件?`.env.local`(gitignored)或行内传 `DSH_LAN=1` / `DSH_LAN=0` 即可覆盖开关(优先级高于 `dsh.yaml`,如 `DSH_LAN=1 dsh` 临时开启),同样需要 `dsh build` 让绑定生效;
-- 临时单次仅本机:`dsh --host 127.0.0.1`;
-- macOS 首次开放端口可能弹防火墙询问,选择允许 node 接受传入连接。
+- `@deepseek-ai/dsh@0.1.1-rc.2` 已有精确版本的 npx 或 ohmydsh pnpm 缓存时，启动、build 和官方 CLI 都直接执行缓存入口，不重复运行 npx 计算预发布 peer 依赖；
+- 两级缓存都缺失时，rc.2 默认跳过已观察到可能长期卡死的 npm/libnpmexec 通道，改用有超时、临时 staging 和完整性校验的 pnpm 固定缓存；失败不会换用其他 DSH 版本，也不会覆盖已有可用缓存；
+- 仅用于隔离诊断或验证上游修复时，可单次运行 `DSH_ALLOW_NPX_PROVISION=1 dsh ...` 恢复 npx-first，但仍受超时保护；它与只控制版本检测的 `DSH_SKIP_UPDATE=1` 含义不同；
+- `dsh stop` 始终只做本地进程/UI 清理，不触发 npm/npx/pnpm。临时策略的删除 gate：隔离冷 npx install、连续 build、重复 restart 均能在超时内稳定通过后，删除 `scripts/lib/dsh-cli.mjs` 中唯一的 rc.2 策略项及对应测试。
 
 **UI 打开方式**(`web.open` 开关 + `DSH_OPEN_APP` 选目标,不用改 shell 配置):
 
@@ -153,9 +151,7 @@ sync 行为按定制类型:
 
 顶层 `dependencies:` = 无 bundle 的支撑包(如 remote 定制缺失的 peer),精确版本 pin 装为 plain dependency、**不进 bundle 层**;定制条目用 `deps:` 引用其包名声明归属(安装仍以顶层列表为唯一入口,sync 校验引用,悬空引用报错)。
 
-顶层 `web.lan`(布尔)不是 customization:开启时 sync 额外生成一条 webserver 绑 `0.0.0.0` 的 patch fragment(见「局域网访问」);`DSH_LAN` 环境变量可覆盖(见 `.env.local.example`)。
-
-**定制项按需开关**(`enabledEnv`,可选字段,任意 `customizations` 条目都能声明):跟 `web.lan`/`DSH_LAN` 同一套语义,但作用范围是单条定制而不是整个 profile。用于"仓库里默认关闭,但在有权限/有需要的机器上用环境变量按需打开"的场景——例如内部专属包:公开分享这份仓库时它不该默认安装,但在有权限的机器上不想手改 `dsh.yaml`。写法:
+**定制项按需开关**(`enabledEnv`,可选字段,任意 `customizations` 条目都能声明):声明后同名 `DSH_` 环境变量覆盖该条目的 `enabled`,作用范围是单条定制而不是整个 profile——用于"仓库里默认关闭,但在有权限/有需要的机器上用环境变量按需打开"的场景,例如内部专属包:公开分享这份仓库时它不该默认安装,但在有权限的机器上不想手改 `dsh.yaml`。写法:
 
 ```yaml
 - id: some-internal-plugin
@@ -179,7 +175,7 @@ DSH 官方 `standard` preset 会自动加载,无需复制出 `ohmydsh` preset。
 - 升级 = 改 pin 重跑 sync(默认由 `autoUpdate` 自动完成,见上方「自动升级」;`DSH_SKIP_UPDATE=1` 恢复纯手工改 pin 模式)。
 - **安全提醒**:插件即第三方代码(社区列表明示警告),安装前先看源码,`note` 记录来源与审查结论。
 - **`dsh-traex-bridge`(内部专属包)**:来自 bnpm/内网(`code.byted.org`),鉴权与推理流量走 ByteDance 内网服务,仓库默认 `enabled: false` + `enabledEnv: DSH_TRAEX_BRIDGE`(见上方「定制项按需开关」)。克隆本仓库的机器默认不装它;有内网权限时,本机 `.env.local`(gitignored)加一行 `DSH_TRAEX_BRIDGE=1` 后 `dsh build` 即可启用,详见 `dsh.yaml` 条目 `note`。
-- **`llm-subscriptions` 订阅 provider 插件**(`dsh-plugin-subscriptions`,当前 pin `0.5.2+pr40.d927e3a` = 上游 PR #40「按模型默认推理档」临时 fork tarball,设置页每模型默认档列表收起,详见 `dsh.yaml` 条目 note;上游合并发版后切回 npm):Claude 登录 = 导入本机 Claude Code 凭据(秒登录,不弹 OAuth),升级与选型细见 change `openspec/changes/2026-08-20-llm-subscriptions-upgrade`(含 ADR-0001)。**回滚**:`dsh.yaml` 该条目 `spec`/`version` 改回 `dsh-plugin-subscriptions@0.5.2` / `0.5.2`(或删除临时条目) → `dsh build` → 重启;codex 会话不受影响,可无损回滚。
+- **`llm-subscriptions` 订阅 provider 插件**(`dsh-plugin-subscriptions`,当前 pin `0.8.0`,详见 `dsh.yaml` 条目 note):Claude 登录 = 导入本机 Claude Code 凭据(秒登录,不弹 OAuth),选型细见 change `openspec/changes/2026-08-20-llm-subscriptions-upgrade`(含 ADR-0001)。**codex 模型目录与 pin 强耦合**:ChatGPT 后端按请求里的 `client_version` 分流可见模型,旧 pin 会静默少几个新模型(如 `0.147.0` 看不到 GPT-6-Astra);`0.8.0` 起该版本号改为从公开 npm 元数据动态解析(不带凭据、失败回退内置 `0.153.4`),也可用插件配置 `codexClientVersion` 固定。**回滚**:该条目 `spec`/`version` 改回 `dsh-plugin-subscriptions@0.6.0` / `0.6.0` → `dsh build` → 重启;`auth.json` 不被升级改写,登录态与既有会话无损。
 
 ## 开发流
 

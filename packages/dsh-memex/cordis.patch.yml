@@ -1,0 +1,22 @@
+# dsh-memex bundle patch
+#
+# Mounts the plugin as a profile bundle row. The host half registers the memex
+# tool surface in-process (so each call sees the calling session's cwd) and adds
+# the scope dimension: it resolves the session to a knowledge domain and injects
+# that domain's MEMEX_HOME when spawning the memex CLI. It also owns the
+# `/dsh-memex` channel (read-only library facts plus the remote actions a human
+# requests in the settings page), mounted only when a host connection exists.
+#
+# The web client half (`dsh.client` below) contributes the "记忆 / Memory"
+# settings section; each DSH web client loads `./client` for it.
+#
+# No static `inject` is declared on purpose: this plugin's optional services
+# (`settings`, `tools`, `skills`, `connection`) are resolved through dynamic
+# ctx.inject() fibers. Declaring one statically would turn it into a hard
+# requirement and make the plugin never load when that service is absent (see
+# the dsh-pet entry in dsh.yaml for that failure mode).
+#
+# The ohmydsh manifest (source: local) appends `dsh-memex` to the bundle stack.
+- insert:
+    - id: dsh-memex
+      name: dsh-memex

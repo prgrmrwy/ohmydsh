@@ -5,7 +5,7 @@
  *
  * @module dsh-sidebar-session-provider-icon/client/provider-map
  */
-import type { SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { ProviderProjection } from '../types.ts'
 
 /** Live `sessionId → provider` map used by the sidebar renderer. */

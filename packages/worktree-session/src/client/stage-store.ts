@@ -12,9 +12,18 @@ export interface ClientStage {
   dependencyMode?: DependencyMode
   packageManager?: PackageManager
   lifecycle?: SessionStatusResult['lifecycle']
-  phase: 'idle' | 'validating' | 'host' | 'binding' | 'claim' | 'submit' | OperationPhase | 'error' | 'uncertain' | 'done'
-  error?: string
-  submitted: boolean
+  /** Local handoff lifecycle; official admission/receipt state is not persisted here. */
+  phase: 'idle' | 'validating' | 'host' | 'binding' | 'handoff-issued' | OperationPhase | 'error' | 'done'
+  /**
+   * Last failure text, or `undefined` once cleared.
+   *
+   * Explicitly `| undefined` rather than optional-only: `setStage` merges by
+   * spread, so callers clear a stale failure by passing `error: undefined` —
+   * omitting the key would keep the previous value. Under
+   * `exactOptionalPropertyTypes` that assignment is only legal when the type
+   * admits `undefined`.
+   */
+  error?: string | undefined
 }
 
 const stages = new Map<string, ClientStage>()
@@ -36,22 +45,21 @@ function restore(sessionId: string, cwd: string): Partial<ClientStage> {
       ...(typeof value.worktreePath === 'string' ? { worktreePath: value.worktreePath } : {}),
       ...(value.dependencyMode === 'lean' || value.dependencyMode === 'mutable' ? { dependencyMode: value.dependencyMode } : {}),
       ...(value.packageManager === 'npm' || value.packageManager === 'pnpm' ? { packageManager: value.packageManager } : {}),
-      ...(value.lifecycle === 'bound' || value.lifecycle === 'submit-claimed' || value.lifecycle === 'admitted' || value.lifecycle === 'uncertain' || value.lifecycle === 'cleaned' ? { lifecycle: value.lifecycle } : {}),
-      submitted: value.submitted === true,
+      ...(value.lifecycle === 'bound' || value.lifecycle === 'cleaned' || value.lifecycle === 'released' ? { lifecycle: value.lifecycle } : {}),
     }
   } catch { return {} }
 }
 
 function persist(stage: ClientStage): void {
   try {
-    localStorage.setItem(persistenceKey(stage.sessionId), JSON.stringify({ cwd: stage.cwd, enabled: stage.enabled, baseRef: stage.baseRef, operationId: stage.operationId, taskBranch: stage.taskBranch, worktreePath: stage.worktreePath, dependencyMode: stage.dependencyMode, packageManager: stage.packageManager, lifecycle: stage.lifecycle, submitted: stage.submitted }))
+    localStorage.setItem(persistenceKey(stage.sessionId), JSON.stringify({ cwd: stage.cwd, enabled: stage.enabled, baseRef: stage.baseRef, operationId: stage.operationId, taskBranch: stage.taskBranch, worktreePath: stage.worktreePath, dependencyMode: stage.dependencyMode, packageManager: stage.packageManager, lifecycle: stage.lifecycle }))
   } catch { /* browser storage may be disabled */ }
 }
 
 export function getStage(sessionId: string, cwd: string): ClientStage {
   const existing = stages.get(sessionId)
   if (existing !== undefined && existing.cwd === cwd) return existing
-  const stage: ClientStage = { sessionId, cwd, enabled: false, refs: [], phase: 'idle', submitted: false, ...restore(sessionId, cwd) }
+  const stage: ClientStage = { sessionId, cwd, enabled: false, refs: [], phase: 'idle', ...restore(sessionId, cwd) }
   stages.set(sessionId, stage)
   return stage
 }

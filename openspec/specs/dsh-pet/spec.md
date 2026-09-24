@@ -1,0 +1,719 @@
+# dsh-pet Specification
+
+## Purpose
+TBD - created by archiving change add-dsh-pet. Update Purpose after archive.
+## Requirements
+### Requirement: Pet 作为可独立安装的 DSH 伴生插件运行
+
+系统 SHALL 以 DSH Host 与 Web Client 双半区插件提供 Pet。Host 半区 SHALL 随 `dsh web` 进程启动并拥有任务持久化、Agent 执行和后续后台 channel 的生命周期；Web 半区 SHALL 随对应 DSH 页面加载并提供交互界面。Pet MUST NOT 要求独立 daemon、Pi、ACP、cc-connect 或 ohmydsh 才能运行，但目标 DSH profile MUST 已安装该插件。
+
+Pet Host 初始化或可选依赖失败时 SHALL 进入可诊断的 degraded 状态，而 MUST NOT 阻止 DSH 其余功能启动和使用。关闭浏览器不得停止已启动的 Pet Host 或正在执行的 Pet Task；停止 `dsh web` 时 Pet Host SHALL 终止并在下次启动恢复持久状态。
+
+#### Scenario: 安装插件后启动 DSH Web
+- **WHEN** 用户在任意标准 DSH Web profile 安装 Pet 插件并启动 `dsh web`
+- **THEN** DSH Loader 在同一 Host 进程加载 Pet Host，浏览器加载 Pet Web，且不要求安装或运行 ohmydsh 与独立 Pet daemon
+
+#### Scenario: Pet 可选能力初始化失败
+- **WHEN** Pet 状态存储、Pet Workspace 或其它可选能力初始化失败
+- **THEN** Pet 显示可诊断的 degraded 状态，DSH 的普通会话和工作台仍可使用
+
+#### Scenario: 浏览器关闭但 DSH Host 继续运行
+- **WHEN** 用户关闭 DSH 页面而一个 Pet Invocation 正在执行
+- **THEN** Pet Host 继续管理该 Invocation，重新打开页面后从持久状态恢复其最新状态
+
+### Requirement: Web 中提供常驻、可拖动且可访问的 Pet 入口
+
+系统 SHALL 在 DSH 页面提供不替换原生工作台的**视口级**浮动 Pet。Pet SHALL 在普通会话、无会话 Hero 和 Settings 等页面状态间保持可用，允许用户拖动位置，并在页面重载后恢复已保存的位置。Pet 的位置 SHALL 以视口为坐标系，MUST NOT 因应用外壳的布局变化（侧栏、工作台、详情列的展开收起或调宽）而被移动或裁剪。Pet MUST NOT 默认遮挡底层页面交互；其可交互表面 SHALL 明确接管指针和键盘操作，而未绘制区域 MUST NOT 拦截指针事件。
+
+快捷能力 SHALL 呈现为以 Pet 本体为圆心的同心圆环轮盘。轮盘 SHALL 由内向外填充，每圈填满后才启用下一圈，最多三圈，容量依次为 6、8、10，合计上限 24 个能力；超出上限的能力 MUST NOT 渲染，且 MUST NOT 因此报错或阻断其余能力。
+
+轮盘条目 SHALL 支持两类来源：用户导入并启用的 Pet Skill（既有），以及 Host 内置
+动作（如 Q&A）。内置动作 MUST NOT 进入 Skill 安装/启用清单模型，MUST NOT 产生
+`/<skill-name>` envelope，其可用性由 Host 按各自依赖探测计算；不可用时 SHALL
+以禁用态呈现并展示原因。内置动作与 Skill 能力共同计入轮盘容量。
+
+hover Pet 本体或等价键盘操作 SHALL 展开轮盘；指向 Pet 本体之外的区域 MUST NOT 唤起轮盘。展开后，从圆心到最外侧已渲染圆环之间的整个圆盘 SHALL 视为轮盘的可保持区域，其中包含圆环之间的间隙与扇区接缝；指针离开该区域 SHALL 立即收起轮盘。可保持区域的半径 SHALL 按实际渲染的圈数计算，MUST NOT 按最大圈数计算。
+
+轮盘 SHALL 逐圈渐入：第一圈在展开时立即可见，其后每圈依次延迟出现，使层次可被感知而不显著推迟可操作时间。
+
+扇区标签 SHALL 沿弧线切向排布并随扇区角度旋转；当该角度会使文字上下颠倒时，系统 SHALL 将其翻转 180°，使任意位置的标签均保持可正向阅读。标签超出扇区弧长可容纳的宽度时 SHALL 截断并以省略号标示。
+
+点击 Pet 本体 SHALL 打开 Task 面板或提供等价入口。所有能力、任务状态和上下文选择 MUST 可通过键盘操作，且深色与浅色主题下均保持可辨认。
+
+#### Scenario: 在会话之间切换
+- **WHEN** 用户从一个 DSH session 切换到另一个 session
+- **THEN** Pet 保持挂载且位置不变，后续操作使用新的当前页面上下文而不是先前页面上下文
+
+#### Scenario: 拖动并重载页面
+- **WHEN** 用户拖动 Pet 到新的可见位置后重载 DSH 页面
+- **THEN** Pet 在视口边界内恢复到已保存位置
+
+#### Scenario: 应用侧栏展开
+- **WHEN** 任一侧栏或工作台展开并压缩应用外壳的可用宽度
+- **THEN** Pet 的屏幕位置保持不变，不被推移也不被裁剪
+
+#### Scenario: 指针掠过 Pet 周围空白
+- **WHEN** 指针经过 Pet 本体之外、轮盘尚未展开的区域
+- **THEN** 轮盘保持收起，且该区域不拦截底层页面的指针操作
+
+#### Scenario: 从 Pet 本体移向外圈能力
+- **WHEN** 用户 hover Pet 展开轮盘后，将指针移向某个外圈扇区
+- **THEN** 轮盘在移动全程保持展开，经过圆环间隙与扇区接缝时不收起
+
+#### Scenario: 能力不足以填满三圈
+- **WHEN** 已启用能力只够渲染一圈，用户将指针移到第二圈本应所在的空白位置
+- **THEN** 轮盘收起，因为该位置不属于已渲染的圆盘
+
+#### Scenario: 能力数量超过轮盘上限
+- **WHEN** 已启用能力多于 24 个
+- **THEN** 轮盘渲染前 24 个能力，其余不渲染，且轮盘与其余功能均可正常使用
+
+#### Scenario: 标签位于轮盘下方
+- **WHEN** 某个能力的扇区位于轮盘正下方
+- **THEN** 该扇区标签正向朝上显示，不出现上下颠倒
+
+#### Scenario: 键盘使用能力轮盘
+- **WHEN** 键盘用户聚焦 Pet 并打开快捷能力
+- **THEN** 用户可以遍历、选择或关闭能力轮盘，焦点状态和能力禁用原因均可感知
+
+#### Scenario: 内置动作与 Skill 能力并列呈现
+- **WHEN** 用户在会话来源下展开轮盘，且 Q&A 动作依赖探测通过
+- **THEN** Q&A 与已启用 Skill 能力并列出现在轮盘上，点击后执行 Host 内置流程而非派发 Skill
+
+#### Scenario: 内置动作依赖不可用
+- **WHEN** 宿主缺少 Q&A 动作所需依赖（如 fork provider 或 channel 未绑定）
+- **THEN** 该动作以禁用态呈现并可感知原因，其余轮盘条目不受影响
+
+### Requirement: Pet 使用自有持久化任务模型
+
+系统 SHALL 将 Pet Task、Pet Invocation、source snapshot、执行尝试、executor session 关联和归档状态持久化在 Pet 自有状态目录中。Pet Task ID SHALL 是关联关系的主身份；DSH session 标题、启动消息和其它可见文案仅作为投影，系统 MUST NOT 通过解析这些文案恢复或授权关联。
+
+系统 SHALL 原子持久化状态，并在 Host 重启后恢复未完成任务、Invocation 队列和关联。状态目录 MUST 与插件安装目录分离，插件升级或 profile 重建不得覆盖 Pet 任务数据。归档 MUST NOT 删除 Pet 记录或 DSH session log。
+
+原子性 SHALL 由 Pet 在自有介质上保证，不依赖对宿主持久化实现的修改。跨表跨行的多项写入 MUST 全有或全无地提交；同一介质 MUST 在任一时刻只有一个 Host 进程可写。所需保证无法取得时，写入路径 SHALL fail closed 并给出可诊断错误，MUST NOT 降级为逐项写入或静默丢弃。
+
+#### Scenario: Host 重启后恢复进行中任务
+- **WHEN** DSH Host 在 Pet Task 已创建且 Invocation 未完成时重启
+- **THEN** Pet 从持久化关联恢复 Task、Invocation、snapshot 和 executor session，并将无法证明仍在执行的状态标记为可诊断待恢复状态而不是伪报成功
+
+#### Scenario: 用户改名 executor session
+- **WHEN** 用户修改 Pet executor DSH session 的标题
+- **THEN** Pet Task 与 source 的关联保持不变，任务聚合和可信工具解析继续使用持久化 ID 关系
+
+#### Scenario: 插件升级
+- **WHEN** Pet 插件包或 DSH profile 被重新构建
+- **THEN** Pet 的任务、快照和配置仍保存在独立状态目录中且可恢复
+
+#### Scenario: 多项写入中途失败
+- **WHEN** 一次跨表写入在部分记录已暂存后失败
+- **THEN** 该次写入的全部改动 SHALL 不可见，介质 SHALL 保持写入前的一致状态
+
+#### Scenario: 第二个 Host 进程尝试写入同一介质
+- **WHEN** 另一个 Host 进程尝试取得同一 Pet 状态介质的写入权
+- **THEN** 该进程 SHALL 明确失败并可诊断，MUST NOT 与既有持有者并发写入
+
+#### Scenario: 原子写入保证不可得
+- **WHEN** 运行环境无法提供所需的原子提交或介质独占保证
+- **THEN** 相关写入路径 SHALL 拒绝执行并给出可诊断错误，MUST NOT 以非原子方式继续
+
+### Requirement: 每个来源 scope 至多有一个活跃 Pet Task
+
+系统 SHALL 将 Pet Task 建模为一个长期工作线程。对相同来源 scope，系统 SHALL 复用唯一未归档 Pet Task 及其固定 executor DSH session，并把多次能力调用追加为不同 Pet Invocations；系统 MUST NOT 因每次调用 Skill 而创建新的 Task 或 executor session。
+
+Pet Task 归档后 MUST NOT 再接收新 Invocation。用户在同一来源 scope 再次使用 Pet 时，系统 SHALL 创建新的 Task epoch 和新的 executor session，并保留旧 Task 的历史。
+
+来源 scope SHALL 至少支持：指定 DSH session、指定 DSH workspace、无关联的独立 scope、外部 channel 会话（如飞书 chat），以及 qa 答疑群会话。不同 scope 的 Task MUST NOT 被错误复用；两个不同 channel 会话即使路由到同一 workspace 也属于不同 scope。每个 qa 答疑群 SHALL 对应至多一个活跃 Task，其固定"executor"即该群绑定的 fork child 会话；qa Task 归档 SHALL 使对应 qa 绑定失效，MUST NOT 销毁 child 会话历史。
+
+#### Scenario: 在同一 source session 多次调用能力
+- **WHEN** 用户在同一 DSH source session 依次调用 Create MR、Send CR 和 Clean Worktree，且其 Pet Task 未归档
+- **THEN** 系统创建一个 Pet Task 和一个 executor DSH session，并在其中按顺序追加三个独立 Invocation
+
+#### Scenario: 归档后再次调用
+- **WHEN** 用户归档某 source session 的活跃 Pet Task 后再次从该 source session 调用能力
+- **THEN** 系统创建新的 Task epoch 和 executor session，旧 Task 保持只读历史且不被复活
+
+#### Scenario: 不同来源分别调用 Pet
+- **WHEN** 两个不同 DSH sessions 各自调用 Pet
+- **THEN** 系统为两个 source scope 分别维护活跃 Pet Task，不共享 executor session 或当前 Invocation
+
+#### Scenario: channel 会话构成独立 scope
+- **WHEN** 一个飞书群与一个本机浮层 workspace 来源分别触发同一 workspace 上的工作
+- **THEN** 两者各自维护独立的活跃 Pet Task，互不复用 executor session
+
+#### Scenario: qa 群与源会话的浮层 Task 相互独立
+- **WHEN** 用户在源会话上既有浮层触发的活跃 Task，又通过 Q&A 建立了答疑群
+- **THEN** 浮层 Task 与 qa Task 各自独立存在，qa 群消息只进入 child，不影响浮层 Task 的 executor
+
+#### Scenario: 归档 qa Task
+- **WHEN** 用户在面板归档一个 qa Task
+- **THEN** 对应 qa 绑定失效、群消息不再触发工作，child 会话及其历史保留可查
+
+### Requirement: 每次主动调用在发起位置捕获独立快照
+
+系统 SHALL 在用户主动调用能力或提交新 Pet 请求时创建 Pet Invocation，并在接受操作的同一逻辑时刻固定 source identity、可用的 session event 位置、session metadata、workspace metadata、worktree binding 和 SCM metadata。后续页面切换、source session 继续运行或元数据变化 MUST NOT 改写该 Invocation 已绑定的 snapshot。
+
+系统 MAY 按引用和结构化摘要组合保存快照，但 SHALL 保存足以解释 Invocation 发起位置和目标的不可变信息。Agent 内部重试 SHALL 继续使用同一 Invocation snapshot；用户再次主动执行 SHALL 创建新的 Invocation 和新 snapshot。
+
+#### Scenario: 调用后立即切换页面
+- **WHEN** 用户在 Session A 发起 Create MR 后立即切换到 Session B
+- **THEN** 已创建 Invocation 仍绑定 Session A 在点击时的 snapshot，执行期间不得重新读取浏览器当前 Session B 作为目标
+
+#### Scenario: 同一 Task 的后续能力看到更新现场
+- **WHEN** Create MR 完成后 source session 状态继续演进，用户随后调用 Send CR
+- **THEN** Send CR 获得新的 Invocation snapshot，并可观察调用时已经存在的 MR 信息，而不复用 Create MR 的首次快照
+
+#### Scenario: Agent 自动重试
+- **WHEN** 一个 Invocation 因瞬态网络失败执行内部重试
+- **THEN** 重试继续使用原 Invocation 和 snapshot，不因重试时 source 已变化而切换目标
+
+### Requirement: 来源上下文是显式且可移除的一等输入
+
+系统 SHALL 支持 `session`、`workspace` 和 `none` 三类 Pet Task 来源。用户在执行前
+SHALL 能看见有效来源，并 SHALL 能移除或改选该来源。
+
+系统 MUST NOT 按能力施加上下文门禁：Pet 不声明也不存储任何"此能力需要
+session/workspace"的要求，任何能力在任何来源下都 SHALL 可被发起。没有 active DSH
+session 时，系统 MUST NOT 隐式绑定最近使用的 session，而 SHALL 以 `none` 来源创建
+或复用独立 Pet Task，并在启动消息中明确标注没有 source DSH session。
+
+对来源的实质要求由 Skill 自身在执行时校验并向用户说明。
+
+#### Scenario: 从无会话页面发起任务
+- **WHEN** 用户在没有 active session 的页面调用一个能力
+- **THEN** 系统以 `none` 来源创建或复用独立 Pet Task，启动消息明确显示没有
+      source DSH session，能力正常派发
+
+#### Scenario: 移除可选当前会话
+- **WHEN** 一个能力默认显示当前 session，用户在执行前移除该关联
+- **THEN** Invocation 使用 `none` 来源，且不得向 Agent 暴露刚被移除的 session 上下文
+
+#### Scenario: 来源不满足由 Skill 报告
+- **WHEN** 用户以 `none` 来源发起一个实际需要 session 的 Skill
+- **THEN** Invocation 正常创建并派发，Skill 经 `pet_context` 发现来源不足后停止并
+      说明需要从一个会话发起
+
+### Requirement: Pet Task 使用专用 Workspace 中的普通 DSH executor session
+
+系统 SHALL 确保存在一个标题可识别的 `DSH Pet` Workspace，其路径位于 Pet 持久状态目录而非插件安装目录。浮层触发的 Pet Task SHALL 固定关联该 Workspace 下的一个普通 DSH root session，并复用同一 DSH Host 已装配的 Agent Loop、Skills、Tools、交互能力和 LLM provider；executor session SHALL 在原生 DSH 列表中可见并可打开。
+
+系统 SHALL 另支持 workspace-resident Task 形态：executor session 是路由目标 workspace 下的普通 DSH root session，其工作目录即该 workspace，且 SHALL 被登记到该目标 workspace（而非 Pet Workspace），使其在原生会话列表中归属于对应项目而不是显示为未分类。此形态 SHALL 仅由用户显式建立或显式可改的 channel 路由触发，信任来源是该显式路由加发送者 allowlist。
+
+此形态下 Pet MUST NOT 承诺 Pet Skill allowlist 投影与 standing instructions 边界——目标 workspace 自身的 Skill 目录与 Agent 指令生效。为与该承诺一致，系统 MUST NOT 为此形态施加 Pet 专用 executor preset，也 MUST NOT 安装 Pet 的 allowlist Skill provider：两者的作用都是把 Skill 面收窄为 Pet 的清单，与「使用目标 workspace 自身能力」直接矛盾。此形态 SHALL 显式使用 DSH 的 `standard` preset——而非省略 preset：未指定的 preset 不会记录在会话头上，会使该会话在原生界面中显示不出任何模式。Pet MUST NOT 向目标 workspace 仓库写入任何投影、指令或状态文件。
+
+系统 SHALL 再支持 qa-child Task 形态：其"executor"是源会话的 fork continuable
+子代理会话，由 DSH 子代理机制组合与驱动。此形态下 Pet MUST NOT 自建 root
+session、MUST NOT 施加任何 preset、MUST NOT 安装 Pet allowlist Skill provider
+——child 的组合与工具面继承自源会话。信任来源是「本人显式创建答疑群 + 本人亲手
+拉人入群」；Pet MUST NOT 承诺任何 Pet Skill 边界对 child 生效。child SHALL 收纳
+在源会话名下的原生子代理列表中，MUST NOT 作为独立 root session 出现在会话列表。
+
+创建 executor session 后，系统 SHALL 按 Pet 配置选择 Pet Agent composition 与模型。当前 Web profile 已注册的 subscription provider SHALL 可被 Pet executor session 正常选择，Pet MUST NOT 读取、复制或另行保存 provider token。模型或 Pet composition 不可用时 SHALL 让 Task 进入可诊断失败/等待配置状态，不得创建伪成功结果。qa-child 形态的模型选择 SHALL 继承自源会话（fork 快照），不适用 Pet 配置的模型选择。
+
+#### Scenario: 首次为 source scope 启动 Task
+- **WHEN** 用户首次从某 source scope 调用 Pet 能力
+- **THEN** 系统在 `DSH Pet` Workspace 创建一个普通 executor session、保存双向关联并将 Invocation 投递给该 session
+
+#### Scenario: 打开完整执行过程
+- **WHEN** 用户从 Pet Task 面板点击"打开完整过程"
+- **THEN** DSH 打开该 Task 固定关联的原生 executor session，用户可查看历史、回答问题、取消或继续会话
+
+#### Scenario: 使用订阅 provider
+- **WHEN** Pet 配置选择了当前 DSH Web Host 中已登录并可路由的 Claude 或 Codex subscription provider
+- **THEN** executor session 使用该 provider 执行，不要求 Pet 复制凭据或再次登录
+
+#### Scenario: Pet Workspace 尚不存在
+- **WHEN** 第一次创建 Pet Task 且 `DSH Pet` Workspace 尚未注册
+- **THEN** 系统在 Pet 状态目录准备稳定 workspace 路径并幂等注册后再创建 executor session
+
+#### Scenario: channel 触发创建 workspace-resident executor
+- **WHEN** 飞书触发经路由命中 nexus workspace 且该 chat 无活跃 Task
+- **THEN** 系统在 nexus workspace 创建普通 executor session，该 session 使用 nexus 自身的 Skill 与 Agent 指令，Pet 不向 nexus 仓库写入任何文件
+
+#### Scenario: workspace-resident 不伪造投影边界
+- **WHEN** 用户在 Diagnostics 查看一个 workspace-resident Task
+- **THEN** 系统如实展示其形态与信任来源（显式路由 + allowlist），不显示 Pet Skill 投影对其生效
+
+#### Scenario: resident session 归属目标项目
+- **WHEN** 飞书触发在 nexus workspace 创建 executor session
+- **THEN** 该 session 在原生会话列表中归属 nexus，而非归属 Pet Workspace 或显示为未分类
+
+#### Scenario: resident 形态使用 workspace 自身能力
+- **WHEN** 系统为 resident Task 创建 executor
+- **THEN** 使用 `standard` preset、不安装 Pet allowlist Skill provider，
+      executor 可用的 Skill 由其所在 workspace 决定，且该会话在原生界面显示为标准模式
+
+#### Scenario: qa-child 形态继承源会话组合
+- **WHEN** Q&A 动作对源会话 fork 出 child 并有群成员触发工作
+- **THEN** child 以源会话的组合与工具面执行，Pet 不为其装配 preset 或 allowlist provider
+
+#### Scenario: qa-child 不出现在 root 会话列表
+- **WHEN** 用户查看源会话所在 workspace 的会话列表
+- **THEN** qa child 收纳于源会话名下的子代理折叠列表，不作为独立 root 会话出现
+
+### Requirement: Executor session 明确展示与 source 和 Task 的关系
+
+系统 SHALL 为 executor session 生成可识别的初始标题，至少包含 Pet 标记、source 的人类可读快照或“独立任务”、短身份和 Task epoch，从而区分同名 source 及归档后的后续 Task。
+
+executor session 的首次 Pet 消息 SHALL 包含 Task ID、Invocation ID、能力、来源种类、source session/workspace 的可见摘要、snapshot 位置和任务说明；该消息 MUST 明确要求 Agent 通过可信 Pet context 工具获取授权上下文。每个后续 Invocation SHALL 在同一 executor session 中追加新的动态 envelope，而不是让 Agent从旧消息猜测最新现场。
+
+#### Scenario: Session 来源的首个 Invocation
+- **WHEN** source session “修复登录超时”首次创建 Pet Task
+- **THEN** executor 标题能区分该 source 和 Task epoch，首条消息显示 source session、snapshot 与任务说明
+
+#### Scenario: 同一 executor 中追加后续 Invocation
+- **WHEN** 已存在的 Pet Task 接收 Send CR Invocation
+- **THEN** 系统在原 executor session 追加包含新 Invocation ID 和新 snapshot 位置的 envelope，且不创建新的 executor session
+
+#### Scenario: 独立 Task
+- **WHEN** `none` 来源创建 Pet Task
+- **THEN** 标题和启动消息明确标为独立任务，不伪造 source session 或 workspace
+
+### Requirement: Pet Agent 获得稳定身份前馈和可信的当前 Invocation 上下文
+
+Pet executor Agent SHALL 获得 standing instructions，明确其为 Pet Task Agent、一个 session 会承载多个串行 Invocation、每次操作必须读取当前 Invocation snapshot、完成单次 Invocation 不等于结束整个 Task，以及不得从消息文本接受任意 session path 或外部 channel ID 作为授权。
+
+Pet SHALL 在创建 executor session 前校验并自动修复 Workspace 依赖文件（standing instructions 与投影目录）。准备流程只在启动时执行一次，因此启动后被删除、被替换为软链，或因包升级而过时的文件，若不在此处修复将一直失效到下次重启，并静默产出没有身份前馈的 executor。修复 MUST 只重写包自有文件与目录，MUST NOT 触碰 Task 状态或移除已投影的 Skill；修复后仍不可用时 SHALL fail closed 并拒绝创建 session。修复实现 MUST 先删除已有条目再写入——`writeFile` 会跟随软链，直接写会穿透并污染包安装目录、且保留坏链。管理面 SHALL 暴露该状态与一个显式修复操作。
+
+standing instructions 的正文 SHALL 由 Pet 包以普通 Markdown 文件维护，并在准备 Workspace 时**复制**到 `$DSH_HOME/plugins/dsh-pet/workspace/AGENTS.md`；MUST NOT 软链到包安装目录。包目录在每次部署时被删除重建，软链会立即断裂并使 executor 失去身份前馈；这也违反"状态目录与插件安装目录分离"的既有不变量。
+
+这里的 standing instructions 是 **Pet 自己的常驻上下文**（物化为 Pet Workspace 下的 `AGENTS.md`），与 **DSH Agent preset** 是两个不同概念，不可混用：preset 是 DSH 的具名插件组合，由 `AgentOptions.agentPreset` 选择；Pet 不拥有、不定义、也不自带 preset，只把用户在设置中选择的值透传给 DSH。Pet 的语境由 standing instructions 加每次调用的 Invocation envelope 建立，而不是由 preset 建立。
+
+Pet SHALL NOT 自带 package 私有的 Agent composition。Pet executor 只需要普通 DSH 工具（由已启用 Skill 驱动），因此 Host 默认组合即为正确选择；引入 Pet 专有组合会让 Pet 重新成为特权容器。仅当出现明确需求（例如刻意收窄 executor 的工具面）时才重新评估。
+
+系统 SHALL 提供无目标参数的可信上下文能力。调用时 Host MUST 从实际调用 executor session 反查 Pet Task、当前 Invocation 和 snapshot，并返回绑定的 source/context；模型 MUST NOT 能通过传入任意 task/session/workspace 标识改绑目标。不存在唯一当前 Invocation、Task 已归档或调用 session 未绑定 Pet Task 时，能力 SHALL fail closed 并返回可诊断错误。
+
+该可信上下文能力 SHALL 只对 Pet executor Agent 发布：其注册 MUST 位于 Pet executor 自身的 Agent 作用域，MUST NOT 位于 Host 全局工具面。非 Pet 会话的 model-facing 工具清单 MUST NOT 包含该能力。fail-closed 的目标解析已保证不泄漏其它 Task 上下文，但把能力发布到全局工具面会让每个普通会话都看到并尝试调用一个对其永远不可用的工具，产生噪声与误导；能力的**可见性**必须与其**授权边界**一致。
+
+#### Scenario: Agent 获取当前快照
+- **WHEN** Pet executor Agent 在 Invocation 执行开始时调用 Pet context 能力
+- **THEN** Host 根据调用 executor session 返回当前 Invocation 的可信 source snapshot，而不要求或接受模型提供 source ID
+
+#### Scenario: 非 Pet session 调用上下文能力
+- **WHEN** 普通 DSH session 调用 Pet context 能力
+- **THEN** 系统拒绝请求并说明该 session 未绑定 Pet Task，不暴露其它 Task 上下文
+
+#### Scenario: 归档 Task 的 executor 再次调用
+- **WHEN** 已归档 Task 的 executor Agent 尝试获取活动 Invocation 上下文
+- **THEN** 系统 fail closed，不将旧 snapshot 当成新的可执行授权
+
+#### Scenario: 普通会话的工具面不含 Pet 可信上下文能力
+- **WHEN** Pet 已加载，用户在一个未绑定 Pet Task 的普通 DSH 会话中开始一个 turn
+- **THEN** 该会话的 model-facing 工具清单不含 Pet 可信上下文能力，模型没有可调用入口，也不会产生"未绑定 Pet Task"的调用错误
+
+### Requirement: Pet executor 的作用域组合在每次加载时存在
+
+Pet 创建和管理的 root executor SHALL 在**每一次** Agent 进入活跃状态时获得与其 Task 形态一致的 scoped surface：所有这类 executor 都获得可信上下文能力；专用 Pet Workspace 中的 executor 还获得 Pet allowlist Skill provider；workspace-resident executor 则按前述边界保留 `standard` preset 与目标 workspace 自身的 Skill，不安装 Pet allowlist。qa-child 由 DSH 子代理机制组合，不属于此处的 Pet root executor。
+
+该 scoped surface 无论 Agent 由 Pet 首次创建、由 Pet 从持久化 session 恢复，**还是由 Pet 之外的 DSH 自身加载**（例如用户从原生会话列表直接打开该 executor session）都必须存在。DSH 会卸载空闲 Agent，恢复时铸造**全新的** Agent 作用域，原作用域的注册随旧 Agent 一并销毁。因此恢复路径 MUST 先实际 mount 与 Task 形态一致的 preset，再安装相同 scoped surface；只在创建时安装会让闲置后恢复的 Pet Task 丢失工具或隔离边界，而 Task 与 session 本身仍看似完好。
+
+由于 root executor session 按既有要求在原生 DSH 列表中可见并可打开，Pet MUST NOT 假定自己是 executor Agent 的唯一加载者：由 DSH 自身加载时，原生 session controller 已按持久化 metadata mount preset，Pet 的加载观察者 SHALL 只补 scoped surface，MUST NOT 重复 mount preset。系统 SHALL 根据 Task 记录判断是否安装 allowlist；重复安装 scoped surface SHALL 幂等，同一 Agent 被多次触发安装 MUST NOT 因重复注册而失败或中断加载。
+
+该加载观察者对 Host 发布的**每一个** Agent 触发，并以 executor session id 反查 Task；而 qa-child 形态恰好把 child 会话 id 记在同一个 `executorSessionId` 字段上。因此"能按 executor session id 查到 Task"**不足以**证明该 Agent 可由 Pet 组合：观察者 SHALL 在安装任何 scoped surface **之前**先按 Task 的 source kind 排除 fork-child 形态，命中 qa-child 时 MUST NOT 安装可信上下文能力，也 MUST NOT 安装 Pet allowlist Skill provider。
+
+若恢复路径无法完成该 Task 形态要求的 preset 或 scoped surface，系统 SHALL fail closed：拒绝在组合不完整的 executor 上派发 Invocation，并给出可诊断说明；MUST NOT 退化为缺少可信上下文能力的 executor，专用 Pet executor 也 MUST NOT 退化为 Host 全局 Skill 发现结果。
+
+#### Scenario: 闲置后被恢复的 executor 仍具备可信上下文能力
+- **WHEN** 某 Pet Task 的 executor 因长时间空闲被 DSH 卸载，随后用户发起新的 Invocation 触发恢复
+- **THEN** 恢复后的 executor 仍可调用 Pet 可信上下文能力并取得当前 Invocation 快照
+
+#### Scenario: 闲置后被恢复的专用 Pet executor 仍受 Skill 允许清单约束
+- **WHEN** 上述被恢复的是专用 Pet Workspace executor，且 Host 全局安装了未被 Pet 启用的 Skill
+- **THEN** 该 executor 的 Skill catalog 仍只含 Pet 允许清单中已启用的 Skill，全局 Skill 不因恢复而变得可见
+
+#### Scenario: 闲置后被恢复的 workspace-resident executor 保留自身能力
+- **WHEN** 被恢复的是 workspace-resident executor
+- **THEN** 系统实际 mount `standard` preset、恢复可信上下文能力，但不安装 Pet allowlist provider，其 Skill 继续由目标 workspace 决定
+
+#### Scenario: 用户从原生列表打开 executor 后再触发 Invocation
+- **WHEN** 用户从 DSH 原生会话列表直接打开某 Pet Task 的 root executor session（由 DSH 自身完成加载），随后从 Pet 发起新的 Invocation
+- **THEN** 该 Invocation 仍在具备该 Task 形态所需 scoped surface 的 executor 上执行：可信上下文能力可用；若为专用 Pet executor，Skill catalog 仍只含 Pet 允许清单中已启用的 Skill；若为 workspace-resident executor，则继续使用目标 workspace 的 Skill
+
+#### Scenario: 同一 executor 被重复触发组合安装
+- **WHEN** 同一 executor Agent 在其生命周期内被多次触发作用域组合安装
+- **THEN** 安装幂等，不因重复注册同名能力而报错或中断该 Agent 的加载
+
+#### Scenario: 加载观察者遇到 qa-child 不施加 Pet 组合
+- **WHEN** Host 发布某答疑群绑定的 fork child Agent，Pet 的加载观察者按其 session id 查到对应的 qa-child Task
+- **THEN** 系统跳过该 Agent，不安装可信上下文能力、也不安装 Pet allowlist provider；该 child 的工具面与 Skill 目录仍完全继承自源会话
+
+#### Scenario: qa-child 不被诱导调用可信上下文能力
+- **WHEN** 群成员向答疑群提问，该问题作为一轮消息进入 child
+- **THEN** child 的工具清单中不含 Pet 可信上下文能力，模型没有可调用入口，不会因该形态天然没有 Invocation 记录而收到"没有正在运行或等待的 Invocation"这类错误
+
+#### Scenario: 作用域组合缺失或安装失败
+- **WHEN** 系统无法确认某 executor 已具备 Pet 作用域组合，或安装过程失败
+- **THEN** 系统不在该 executor 上派发 Invocation，并给出可诊断说明，不退化为无隔离边界的执行
+
+### Requirement: 同一 Pet Task 的 Invocations 严格串行
+
+系统 SHALL 保证每个 Pet Task 同时至多有一个 running 或 waiting-user Invocation。用户在当前 Invocation 未终结时发起的新能力 SHALL 进入该 Task 的持久队列，不得与当前 Invocation 并发使用同一个 executor session。当前 Invocation 完成、失败或取消后，系统 SHALL 按接受顺序启动下一项；waiting-user 状态不得被后续 Invocation 隐式抢占。
+
+#### Scenario: 连续点击两个能力
+- **WHEN** 用户在 Create MR 尚未完成时点击 Send CR
+- **THEN** Send CR Invocation 被持久排队，Create MR 仍是 Pet context 工具解析的唯一当前 Invocation
+
+#### Scenario: 当前 Invocation 等待用户
+- **WHEN** Create MR 正在等待用户选择 target branch 且队列中已有 Send CR
+- **THEN** Send CR 保持排队，用户回答继续发送给同一 Create MR Invocation
+
+#### Scenario: 当前 Invocation 完成
+- **WHEN** 当前 Invocation 进入终态且队列非空
+- **THEN** 系统按序启动下一 Invocation，并使可信上下文能力原子切换到其 snapshot
+
+### Requirement: Pet 面板按来源聚合并管理 Task 和 Invocation
+
+Pet 面板 SHALL 显示当前来源 scope 的活跃 Pet Task、其 executor session 状态和按时间排列的 Invocations，并允许切换查看其它来源和已归档 Task。每个 Invocation SHALL 显示能力、运行/排队/等待/结果/失败状态及必要结果链接；复杂执行过程 SHALL 通过打开原生 executor session 查看，Pet 面板不要求复制完整 DSH transcript。
+
+面板中每个 Task SHALL 呈现为单一可点击条目，点击 SHALL 打开该 Task 的 executor session。面板 MUST NOT 提供归档 Task 的入口；归档 SHALL 在 executor session 自身完成，Pet SHALL 观察归档变化并同步——终态 Task 自动归档，非终态 Task 保持活跃并给出可诊断说明，MUST NOT 把外部归档当作工作已被取消的证据。
+
+用户 SHALL 能从面板回答当前等待问题。重试瞬态执行尝试不得创建新 snapshot；用户主动重新执行能力 SHALL 创建新 Invocation 和新 snapshot。
+
+#### Scenario: 当前 session 有多次 Pet 调用
+- **WHEN** 当前 source session 的 Pet Task 已执行 Create MR 并正在执行 Send CR
+- **THEN** 面板在一个 Task 下显示两条 Invocation、各自状态和同一个 executor session 跳转入口
+
+#### Scenario: 查看其它来源任务
+- **WHEN** 用户从当前来源切换到“全部任务”
+- **THEN** 面板可按 source session/workspace/独立来源聚合展示活跃和已归档 Task，且不会把 executor session 当作 source
+
+#### Scenario: 从面板进入执行会话
+- **WHEN** 用户点击面板中的某个 Task 条目
+- **THEN** 系统打开该 Task 的 executor session，且该条目不提供归档或取消操作
+
+#### Scenario: 在会话中归档终态 Task
+- **WHEN** 用户在某个终态 Pet Task 的 executor session 中归档该会话
+- **THEN** Pet 同步将该 Task 标记为已归档，无需用户在 Pet 面板中另行操作
+
+#### Scenario: 在会话中归档仍在进行的 Task
+- **WHEN** 用户归档了一个仍处于非终态的 Pet Task 的 executor session
+- **THEN** 该 Task 保持活跃并显示可诊断说明，Pet 不将其视为已取消
+
+### Requirement: Pet Skill 通过显式安装和启用清单管理
+
+Pet SHALL 将“已安装”“已启用”“显示为快捷能力”建模为显式 Pet 配置，而 MUST NOT 把 DSH 全局 Skill 发现结果自动加入 Pet。Pet Agent 的 model-facing catalog、`skill` loader 和用户显式 `/<skill-name>` 注入 SHALL 只允许当前配置代际中已启用且由当前 Invocation 固定版本的 Pet Skill；未启用、仅全局可见、已卸载或名称碰撞的 Skill SHALL fail-closed。
+
+设置界面 SHALL 在已启用 Skill 达到轮盘容量上限（24 个）时阻止继续启用，并说明原因。该上限属于呈现约束，MUST NOT 影响授权边界：超出上限不改变任何 Skill 的启用状态或可执行性，只影响其是否出现在轮盘上。
+
+安装来源 SHALL 只有一种：用户从运行当前 `dsh web` 的 Host 机器绝对路径显式导入的单层 Skill bundle。Pet MUST NOT 自带、声明或自动安装任何 Skill——不存在"内置 Skill"这一类别，因此也不存在内置与外部之分。Web UI SHALL 先提交该路径执行只读检查并展示名称、摘要、文件范围、来源和风险预览，只有用户再次确认后才注册安装；它 MUST NOT 把路径解释为浏览器客户端路径。
+
+注册 SHALL 记录用户自有目录的链接而非内容副本，因此对该目录的修改立即生效、无需重新导入；目录被删除或移走时该 Skill SHALL 失效并拒绝执行，而不是运行过期副本。
+
+#### Scenario: 启用数量达到上限
+- **WHEN** 用户已启用 24 个 Skill，并尝试启用第 25 个
+- **THEN** 系统拒绝该次启用并说明已达轮盘容量上限，已启用的 Skill 不受影响
+
+#### Scenario: 存量启用数超过上限
+- **WHEN** 由于历史数据，已启用 Skill 数量超过 24 个
+- **THEN** 轮盘只渲染前 24 个，其余 Skill 仍可被调用与管理，系统不报错
+
+#### Scenario: Pet 不提供任何内置 Skill
+- **WHEN** 用户首次安装 Pet 并打开 Skills 页
+- **THEN** 列表为空，且不存在可供"启用内置 Skill"的入口
+
+#### Scenario: 修改已注册目录立即生效
+- **WHEN** 用户编辑某个已注册 Skill 的源目录内容
+- **THEN** 下一次调用即读到新内容，无需重新导入
+
+### Requirement: Pet 能力以 Agent Skill 驱动并以有界工具完成副作用
+
+Pet 能力 SHALL 全部由**普通 DSH Skill** 提供：Skill 在仓库 `skills/` 下维护、随
+sync 部署到 `~/.dsh/skills/`，可在任意普通 DSH 会话中独立使用，并由用户在 Pet
+Settings 中显式导入、启用后成为 Pet 能力。Pet MUST NOT 自动 seed 或隐式启用任何
+Skill。
+
+系统 MUST NOT 提供任何让 Skill 为 Pet 适配的机制。Skill 的 `SKILL.md` MUST NOT 被
+读取任何 Pet 专属字段，Pet MUST NOT 定义、解析或消费此类声明——不存在"为 Pet 优化
+过的 Skill"与"普通 Skill"之分，因此也不存在两等 Skill。Pet 呈现一项能力时 SHALL
+只使用普通 Skill 已有的信息（名称与 description）。
+
+一期 SHALL 以两项能力验证该形态：`ws`（既有，Worktree Session 维护）与 `send-cr`
+（新增）。Create MR 不属于一期范围。
+
+系统 SHALL 另支持**对话式 Invocation**：由入站 channel 消息发起、不绑定任何 Skill
+的调用。此类 Invocation MUST NOT 固定 skill 名称、来源路径或 skill-set 代际，其
+envelope MUST NOT 发出 `/<skill-name>` 前导令牌，派发前的 Skill 校验 SHALL 因无可
+校验对象而跳过。这 MUST NOT 被解读为放宽 Skill 边界：对话式 Invocation 不引用任何
+Skill，因此不存在被绕过的授权检查；executor 可用的 Skill 面仍由其所在 workspace
+决定（workspace-resident 形态下即该 workspace 自身的 Skill）。
+
+Pet MUST NOT 为对话式 Invocation 自带、声明或隐式创建"内置 Skill"或伪能力来充当
+占位；无 Skill 就是无 Skill。
+
+Pet SHALL 允许 Agent 参与现场检查、信息补全、结果生成和用户澄清，但清理 worktree、
+发送外部消息等副作用 SHALL 通过确定性、有界且可审计的工具或现有安全门禁执行。
+
+Pet MUST NOT 代替 Skill 判断其执行前提。需要特定来源、配置或外部依赖的 Skill
+SHALL 自行在执行开始时校验（在 Pet 中运行时经 `pet_context` 获取可信快照），并在
+不满足时停止并说明缺失项。Pet MUST NOT 让模型通过自由文本自行替换 source 路径、
+清理目标、飞书群或 reviewer 绑定。
+
+#### Scenario: 任何普通 Skill 都能被同等消费
+- **WHEN** 用户导入任意一个普通 DSH Skill（例如既有的 `ws`）
+- **THEN** 它正常成为 Pet 能力，标签为 Skill 名、描述取自其 description，且无需
+      为此修改该 Skill 的任何内容
+
+#### Scenario: Clean Worktree 遇到不安全状态
+- **WHEN** source worktree 尚有未提交修改或无法证明满足清理门禁
+- **THEN** Skill 与确定性工具停止清理并返回可操作说明，不绕过既有安全检查
+
+#### Scenario: Skill 自行发现来源不满足
+- **WHEN** 用户从没有 source session 的页面调用一个需要 session 的 Skill
+- **THEN** Pet 正常创建 Invocation 并派发，Skill 经 `pet_context` 发现来源不满足后
+      停止并说明原因，而不是由 Pet 提前拦截
+
+#### Scenario: Send CR 缺少可信群配置
+- **WHEN** source workspace 没有配置可用的 CR 目标群且用户未明确给出
+- **THEN** Skill 不向任意群发送消息，停止并说明缺失项与配置位置
+
+#### Scenario: 能力不被自动启用
+- **WHEN** Pet 首次启动且用户尚未导入任何 Skill
+- **THEN** 能力列表为空，用户需显式导入并启用后能力才出现
+
+#### Scenario: 飞书消息发起对话式 Invocation
+- **WHEN** allowlist 用户在已绑定的会话中触发一次分析请求
+- **THEN** Pet 创建不绑定 Skill 的 Invocation，其 envelope 不含 `/<skill-name>`
+      令牌，派发不因缺少 Skill 而失败
+
+#### Scenario: 对话式 Invocation 不产生占位能力
+- **WHEN** 用户在 Pet 设置的 Skills 页查看能力列表，且已发生过 channel 触发
+- **THEN** 列表中不出现任何 Pet 自带的对话或占位能力条目
+
+### Requirement: Task 与 DSH session 归档语义保持一致且不误删历史
+
+归档 source session SHALL 只更新 Pet 中的来源可用状态，不得自动归档其 Pet Task。归档已进入终态的 executor session SHALL 自动归档对应 Pet Task；从 Pet 面板归档终态 Task SHALL 同步归档其 executor session。running 或 waiting-user Task MUST NOT 因 executor session 被归档而从活跃列表消失或被隐式取消。
+
+系统 MUST 将 Task 执行状态与归档状态分开保存。对非终态 Task 发起归档时 SHALL 要求用户先取消或明确执行取消后归档，且归档操作不得删除 Task、Invocation、snapshot 或 DSH log。
+
+#### Scenario: Source session 被归档
+- **WHEN** 用户归档仍有关联 Pet Task 的 source DSH session
+- **THEN** Pet Task 保持活跃或保持原终态，面板标记来源已归档并继续保留 executor session 与历史
+
+#### Scenario: 归档已完成 executor session
+- **WHEN** 用户从原生 DSH UI 归档一个已完成 Pet executor session
+- **THEN** 对应 Pet Task 自动记录归档时间且不再接受新的 Invocation
+
+#### Scenario: 从 Pet 归档已完成 Task
+- **WHEN** 用户在 Pet 面板归档一个 succeeded、failed 或 cancelled Task
+- **THEN** 系统同步归档其 executor session并保留全部持久历史
+
+#### Scenario: 尝试归档等待用户的 Task
+- **WHEN** 用户对 waiting-user Task 发起归档但未确认取消
+- **THEN** 系统不归档 Task、不取消 Invocation，并提示需要先处理或取消当前工作
+
+### Requirement: Pet 设置采用固定的页签信息架构且不接触 provider 凭据
+
+系统 SHALL 在 DSH Settings 注册独立 Pet section，并固定包含以下六个页签：
+
+- **General**：Pet 外观/位置重置、默认 Agent composition、provider/model、新 Task 使用的默认上下文策略；
+- **Skills**：Skill 列表、本地目录导入、已安装版本、启用/禁用、快捷能力可见性、升级/卸载和 Workspace 投影同步状态；
+- **Locus**：飞书入口与 DSH 会话关联的**只读展示、导航与生命周期动作**——按入口（群/话题）聚合当前代并折叠历史代际、展示来源与默认 Q&A、权限、工作根与状态，并提供跳转到对应飞书入口与主/子会话的入口，以及解绑/归档/停止/重建/权限确认等动作。该页签 MUST NOT 提供任何**新建外部资源**的入口（绑定新入口、创建答疑群），关联 SHALL 由飞书消息建立、答疑群 SHALL 由 Pet 轮盘建立；
+- **环境变量**：按全局与来源 workspace 两个作用域配置的键值，经官方 `ctx.shellEnv` 以 `DSH_PET_*` 注入 Pet executor 的每次 shell 调用；
+- **Channel**：bot 绑定入口（创建新 Bot / 连接已有 Bot）与已绑定身份摘要、channel 启用开关、发送者 allowlist、default workspace、chat 到 workspace 的绑定列表（含自动写回的绑定行）与改绑/删除操作；
+- **Diagnostics**：Host 生命周期、状态/Workspace/Skill store 与投影路径、版本摘要、同步漂移、依赖可用性、channel 连接状态与队列深度，以及显式修复/重建投影/重连操作。
+
+环境变量页签 SHALL 提供全局与 workspace 两个作用域的编辑入口：全局配置对所有 Pet
+Task 生效，workspace 配置只对该来源生效并**覆盖**同名的全局配置；两者都没有时该
+变量不存在，由 Skill 自行发现并停止。workspace 作用域允许从 Host 已知 workspace
+选择，也允许手工输入尚未列出的 workspace id。页面 SHALL 显示每个 key 实际注入的
+变量名，使用户知道在 Skill 中如何引用。系统 MUST NOT 为此引入自定义模板语法：
+Skill 侧就是普通的 `$DSH_PET_<KEY>` 环境变量引用。
+
+Pet 浮层与 Task 面板 SHALL 只提供快捷能力执行、调用前来源确认以及 Task/Invocation 的日常操作；它们 MUST NOT 承担 Skill 安装、版本管理、环境变量编辑、channel 配置或完整诊断配置。浮层 SHALL 提供进入相应 Settings 页签的明确入口。
+
+channel 尚未绑定 bot 时，浮层的提示区 SHALL 显示一条通向 Channel 页签的引导，且该
+引导 SHALL 可被用户永久关闭——channel 是可选增强，不使用它的用户 MUST NOT 被长期
+提示。关闭该引导 MUST NOT 影响 Channel 页签本身的可用性：绑定入口 SHALL 始终可从
+Settings 到达。提示区同时具备多条引导资格时 SHALL 只显示一条，且 Skill 引导优先于
+channel 引导——没有任何能力的 Pet 首先需要的是 Skill。
+
+#### Scenario: 已配置 Skill 但未绑定 Bot
+- **WHEN** 用户已启用至少一个 Skill 且尚未绑定飞书 bot，展开轮盘
+- **THEN** 提示区显示通向 Channel 页签的绑定引导
+
+#### Scenario: 既无 Skill 也未绑定 Bot
+- **WHEN** 全新安装的 Pet 展开轮盘
+- **THEN** 提示区只显示添加 Skill 的引导，不同时显示 channel 引导
+
+#### Scenario: 关闭 channel 引导后仍可绑定
+- **WHEN** 用户关闭浮层的 channel 引导，随后改变主意想绑定 bot
+- **THEN** 浮层不再显示该引导，Settings 的 Channel 页签仍提供完整绑定入口
+
+#### Scenario: 绑定完成后引导消失
+- **WHEN** 用户完成 bot 绑定
+- **THEN** 浮层不再显示 channel 引导，无需用户手动关闭
+
+Pet SHALL 显示 provider/model 可用性，但 MUST NOT 读取、回传或保存 subscription token 和其它 provider credentials。环境变量页保存的值 MUST NOT 被当作凭据保管机制，页面 SHALL 提示其会进入子进程环境。Channel 页 MUST NOT 展示或保存任何飞书凭据。配置写入失败 SHALL 保留用户输入并显示错误；需要重启才生效的配置 SHALL 明确提示。敏感 channel 字段在未来加入时 SHALL 以 secret reference 或等价受保护机制保存，管理读取不得回显明文。
+
+#### Scenario: 打开 Pet 设置
+- **WHEN** 用户从 Pet 浮层或 DSH Settings 打开 Pet 配置
+- **THEN** 用户看到 General、Skills、Locus、环境变量、Channel、Diagnostics 六个稳定页签，并能在 Skills 页完成安装、启用和投影诊断而无需进入 Task 执行面板
+
+#### Scenario: Locus 页签不提供新建外部资源的入口
+- **WHEN** 用户打开 Locus 页签
+- **THEN** 页面只提供既有入口的展示、导航与生命周期动作，不出现绑定新入口或创建答疑群的控件；两者分别由飞书消息与 Pet 轮盘建立
+
+#### Scenario: Skill 投影发生漂移
+- **WHEN** Diagnostics 检测到已启用 allowlist 与 Workspace `.dsh/skills` 投影摘要不一致
+- **THEN** Pet 显示具体漂移项且停止把不一致 Skill 用于新 Invocation，用户可执行显式重建投影
+
+#### Scenario: 选择已注册模型
+- **WHEN** 用户在 Pet 设置中选择当前 DSH Host 可路由的 provider/model
+- **THEN** 后续新 Pet executor session 使用该选择，Pet 配置中不出现 provider token
+
+#### Scenario: 选择不可用模型
+- **WHEN** 已配置 provider/model 在当前 Host 不可路由
+- **THEN** Pet 在启动 Invocation 前显示可诊断配置错误，不静默回退到另一个可能产生不同副作用的模型
+
+#### Scenario: 配置 CR 目标群
+- **WHEN** 用户在环境变量页为某 workspace 保存 `CR_GROUP`
+- **THEN** 页面显示其引用形式 `$DSH_PET_CR_GROUP`，该 workspace 来源的后续 shell 调用可读到该值
+
+#### Scenario: 全局配置对所有 Task 生效
+- **WHEN** 用户在环境变量页的全局作用域保存 `CR_GROUP`，且某来源 workspace 未配置该 key
+- **THEN** 该来源的 shell 调用读到全局值；若该 workspace 另配了同名 key，则读到 workspace 值
+
+#### Scenario: 保存无效配置
+- **WHEN** 用户提交不合法的 key 或空 value
+- **THEN** 系统拒绝写入、保留表单输入并指出无效字段
+
+#### Scenario: 在 Channel 页改绑一个群
+- **WHEN** 用户把一个此前自动绑定到 default workspace 的群改绑到另一个已注册 workspace
+- **THEN** 后续该群的触发路由到新 workspace，改绑行标记为用户显式绑定
+
+### Requirement: 由 ohmydsh 管理部署且保持 Cockpit 与跨设备边界
+
+本仓 SHALL 在 `packages/dsh-pet/` 保存插件源码，并以 `dsh.yaml` 中一个可逆的 local package customization 作为本机 profile 安装、启用和禁用的唯一真相源。sync/build SHALL 幂等物化该插件且不得把 Pet runtime database、Skill store、Workspace、生成 profile 或 package `lib/` 当作应提交源码。插件包本身 SHALL 保持可独立安装，运行时 MUST NOT 依赖 ohmydsh 脚本。
+
+Pet SHALL 仅在其所在 DSH 设备内创建 Task 和 executor session，不修改 dsh-cockpit 仓，不新增 Cockpit 对 DSH 的写代理，不修改 `dsh-cockpit-bridge` 只上报 active session ID 的契约，也不实现同 bot 多设备竞争或 Cockpit Pet Hub。飞书入站 transport SHALL 按 `pet-lark-channel` 规范经本机 lark-cli 提供，MUST NOT 引入 lark-agent-bridge 或其它外部 bridge 运行时依赖。跨设备 Pet 聚合、设备路由、共享 Bot 或 Pet Hub SHALL 在需求出现时由 dsh-cockpit 的独立 change 负责。
+
+系统的持久模型 SHALL 为 channel 触发的 Invocation 保存可信 Channel Binding（chat、触发消息、发送者、表情标识）。外部回复能力 MUST 根据调用 executor session 和当前 Invocation 解析绑定目标，MUST NOT 接受模型生成的任意 chat/thread/user ID；本 change 内唯一的外部文字出站是 Host 侧单聊自动回复，模型主动回复工具由后续 change 承接。
+
+#### Scenario: ohmydsh 重复物化 Pet customization
+- **WHEN** 用户在相同 manifest 和源码下连续运行两次 sync/build
+- **THEN** 第二次运行不产生配置或安装漂移，Pet runtime 状态保持在 `$DSH_HOME/plugins/dsh-pet/` 且不回写仓库
+
+#### Scenario: Cockpit 承载安装 Pet 的设备
+- **WHEN** 用户通过 Cockpit iframe 使用已安装 Pet 的设备
+- **THEN** Pet 在该设备原生 DSH 页面内运行，Cockpit 仍不代理 Pet executor RPC、settings 或 provider credentials
+
+#### Scenario: 模型请求任意外部回复目标
+- **WHEN** Agent 在 executor session 中试图以自由文本指定一个 chat/thread/user ID 要求回复
+- **THEN** 系统不存在接受该标识的通道，任何出站回复目标只能来自当前 Invocation 持久化的 Channel Binding
+
+### Requirement: 拖动 Pet SHALL 保持流畅，不做与位置无关的重绘
+
+拖动 Pet 本体时，系统 SHALL 通过合成器友好的位移通道更新其屏幕位置，
+MUST NOT 在拖动过程中反复触发整页布局（layout）重算。
+
+拖动进行中，系统 MUST NOT 重新渲染与 Pet 位置无关的界面部分——尤其是已展开
+的能力轮盘及其扇区。轮盘常在拖动开始前就已展开（hover Pet 本体即展开），
+它的内容只取决于能力清单与 hover 状态，不取决于 Pet 的坐标。
+
+指针事件的到达频率可高于屏幕刷新率。系统 SHALL 将同一帧内的多次位置更新合并
+为至多一次视觉更新，MUST NOT 为每个指针事件各做一次独立的 DOM 写入。
+
+拖动结束时（正常释放或指针取消），系统 SHALL 提交最终位置并按既有规则持久化。
+拖动过程中的中间位置 MUST NOT 被持久化。
+
+本要求只约束位移的实现通道与重绘范围，MUST NOT 改变任何既有的可观察定位行为：
+视口坐标系、视口内钳制、页面重载后恢复已保存位置、以及 Pet 不为应用外壳布局
+变化让位，全部保持不变。持久化的位置格式保持兼容，存量已保存位置 SHALL 继续
+可用，MUST NOT 需要迁移或被重置。
+
+#### Scenario: 轮盘展开时拖动 Pet
+- **WHEN** 用户 hover Pet 展开轮盘后按住 Pet 本体连续拖动
+- **THEN** Pet 跟随指针平滑移动，拖动全程不重新渲染轮盘扇区
+
+#### Scenario: 指针事件快于刷新率
+- **WHEN** 一帧内到达多个指针移动事件
+- **THEN** 该帧只产生一次位置更新，而不是每个事件一次
+
+#### Scenario: 拖动后重载页面
+- **WHEN** 用户把 Pet 拖到新的可见位置，释放指针，然后重载 DSH 页面
+- **THEN** Pet 在视口边界内恢复到释放时的位置
+
+#### Scenario: 拖动被取消
+- **WHEN** 拖动过程中指针被系统取消（pointercancel）
+- **THEN** Pet 停留在取消时所在的已钳制位置，且该位置被持久化，不回弹到拖动起点
+
+#### Scenario: 升级后沿用已保存位置
+- **WHEN** 用户在本次改动前已保存过 Pet 位置，随后加载新版本
+- **THEN** Pet 出现在原先保存的位置，无需重新拖动
+
+### Requirement: 轮盘 hover 高亮 MUST NOT 残留
+
+轮盘扇区的 hover 高亮 SHALL 表示"指针此刻正指向该能力"。因此高亮 SHALL 只在
+轮盘处于展开状态、且该扇区仍被渲染时存在。
+
+轮盘收起时，系统 SHALL 清除 hover 高亮，无论收起由何种原因触发——指针离开可
+保持区域、Escape、焦点离开、开始拖动 Pet，或能力清单刷新使该扇区不再渲染。
+再次展开轮盘时 MUST NOT 有任何扇区带着上一次的高亮出现。
+
+开始拖动 Pet SHALL 清除 hover 高亮：拖动期间指针表示的是"搬动 Pet"，而不是
+"悬停某个能力"。
+
+高亮 SHALL 绑定到仍然存在的能力。当能力清单刷新后某个此前被高亮的能力不再
+出现在轮盘上时，系统 MUST NOT 把该高亮转移到占据同一位置的其他能力。
+
+本要求针对的错误状态是：轮盘因指针仍停在某扇区上时被收起，该扇区的
+`mouseleave` 因此永不到达，高亮便留存至下一次展开——使一个用户并未悬停的
+能力看起来处于选中态。由于轮盘上的能力点击即执行，这一错误可见状态会诱发误点。
+
+#### Scenario: 指针停在扇区上时轮盘收起
+- **WHEN** 指针停在某扇区上，轮盘因该扇区之外的原因收起（Escape、焦点离开或开始拖动）
+- **THEN** 高亮被清除；再次展开轮盘时没有扇区处于高亮态
+
+#### Scenario: 拖动开始时清除高亮
+- **WHEN** 用户在指针位于某扇区上方时按住 Pet 本体开始拖动
+- **THEN** 该扇区的高亮立即清除
+
+#### Scenario: 被高亮的能力不再渲染
+- **WHEN** 某扇区处于高亮态，随后能力清单刷新使该能力不再出现在轮盘上
+- **THEN** 轮盘上没有任何扇区处于高亮态，且该高亮不转移到占据同一位置的其他能力
+
+#### Scenario: 正常悬停仍然高亮
+- **WHEN** 轮盘展开，用户把指针移到某个扇区上
+- **THEN** 该扇区高亮；指针移到相邻扇区时高亮随之转移，只有当前指向的扇区高亮
+
+### Requirement: Locus child 创建使用官方 subagent 契约表达其不变量
+
+Pet 创建 locus child 时 SHALL 使用宿主官方已发布的 subagent 创建契约表达以下不变量：调用方预留的 child 身份、child 工具面限制及其跨冷恢复的持久化、以及 child 组合与父后续变更的隔离。
+
+上述不变量 MUST NOT 通过修改宿主源码实现，除非已按 `pet-compat-minimization` 的正面证据标准证明官方契约无法表达。
+
+child 实际暴露的工具面 SHALL 在发布前被读取并核验；核验不通过时 SHALL 拒绝发布该 child。该核验 MUST 独立于任何工具过滤声明而存在，因为在 child 自身作用域注册的工具不受继承面过滤约束。
+
+#### Scenario: 预留身份后创建 child
+- **WHEN** Pet 在创建 child 前已持久登记其身份
+- **THEN** 创建 SHALL 使用该预留身份，MUST NOT 产生第二次身份握手或接受与预留值不同的身份
+
+#### Scenario: 冷恢复后工具面限制仍然有效
+- **WHEN** Host 重启后恢复一个已存在的 locus child
+- **THEN** 该 child 的工具面限制 SHALL 与创建时一致
+
+#### Scenario: 父在 child 存活期间更改组合
+- **WHEN** 父会话在 locus child 存活期间切换其 preset 或组合
+- **THEN** 该 child SHALL 继续运行在其创建时的组合上，不受该变更影响
+
+#### Scenario: child 实际工具面超出允许范围
+- **WHEN** 发布前核验发现 child 暴露了允许清单与 Pet 自有注册均无法解释的工具
+- **THEN** 系统 SHALL 拒绝发布该 child，MUST NOT 依赖工具过滤声明推定其安全
+
+### Requirement: 子代结算 MUST NOT 打断父会话的进行中工作
+
+Pet 拥有自有汇报通道的 locus child 结算时，系统 SHALL 确保该结算不会打断父会话正在进行的工作。父会话是用户实际使用的主会话，且一个主会话可关联多个 locus。
+
+当宿主官方契约无法表达非打断式结算投递时，系统 SHALL 保留满足 `pet-compat-minimization` 举证标准的最窄 compatibility seam，并记录其退役条件与上游报告状态。
+
+#### Scenario: 父会话工作期间子代结算
+- **WHEN** 某个 locus child 在父会话正在执行一个轮次时结算
+- **THEN** 父会话当前轮次 SHALL 不被该结算打断
+
+#### Scenario: 多个 locus 同时结算
+- **WHEN** 同一父会话关联的多个 locus child 先后结算
+- **THEN** 父会话受到的打断次数 SHALL 为零，不随 locus 数量增长
+
+#### Scenario: Host 重启后子代冷恢复再结算
+- **WHEN** 一个已配置非打断式结算的 locus child 经 Host 重启被重新物化，随后完成工作并结算
+- **THEN** 其结算策略 SHALL 与创建时一致，父会话受到的打断次数仍为零
+- **AND** 该策略 MUST 从子代自身的持久化记录还原，MUST NOT 依赖进程内存中的创建期状态

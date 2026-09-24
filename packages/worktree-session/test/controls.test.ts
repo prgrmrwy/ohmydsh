@@ -17,17 +17,33 @@ import { BaseRefHoverLabel, BaseRefOption, baseRefChooserTitle, openWorktreeInEd
 const BASE_REF_HINT = 'Choose the base ref; selection has no Git side effects'
 const LONG_REF = 'feat/per-model-default-reasoning-effort'
 
-function sessionLike() { return { blank: false } }
-function useSessionsLike(selector: (state: { byId: Record<string, { cwd: string }> }) => { cwd: string } | undefined) {
-  return selector({ byId: { 'session-a': { cwd: '/repo' } } })
+// DSH 0.1.2 slot contract for a `scope: 'session'` seat: the component gets
+// `useSession` / `sessionId` / `useProjection`, and reads `cwd` (a list-row
+// fact) from the injected `sessions` service. The fixture mirrors that exact
+// shape — the previous fixture supplied the removed 0.1.1 `session` value and
+// `useSessions` feed, so it kept passing while the real seat threw.
+function useSessionLike(selector: (snapshot: { blank: boolean }) => unknown) {
+  return selector({ blank: false })
+}
+function pluginContextLike(cwd: string | undefined = '/repo') {
+  return {
+    sessions: {
+      list: {
+        subscribe: () => () => {},
+        getSnapshot: () => ({ byId: cwd === undefined ? {} : { 'session-a': { cwd } } }),
+      },
+    },
+  }
 }
 function renderControls(overrides: Record<string, unknown> = {}) {
+  const { session, ...rest } = overrides as { session?: { blank: boolean } }
   return renderToStaticMarkup(createElement(WorktreeControls, {
-    pluginContext: {},
-    session: sessionLike(),
+    pluginContext: pluginContextLike(),
     sessionId: 'session-a',
-    useSessions: useSessionsLike,
-    ...overrides,
+    useSession: session === undefined
+      ? useSessionLike
+      : (selector: (snapshot: { blank: boolean }) => unknown) => selector(session),
+    ...rest,
   } as never))
 }
 

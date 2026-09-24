@@ -10,9 +10,15 @@ describe('Session-oriented ws tool target', () => {
     })).toEqual({ sessionId: 'session-source', repoPath: '/repo' })
   })
 
-  it('retains host/CLI operator recovery paths but rejects Agent cross-binding paths', () => {
+  it('retains host/CLI operator recovery paths but rejects unauthorized Agent paths', () => {
     expect(targetFor({ path: '/repo/.worktrees/operator-recovery' }, {})).toBe('/repo/.worktrees/operator-recovery')
-    expect(() => targetFor({ path: '/repo/.worktrees/other' }, { agent: { session: { id: 'session-source', header: { cwd: '/repo' } } } })).toThrow(/Agent-bound call/)
+    // Without proof of user authorization for this exact path, an Agent-bound
+    // explicit path stays refused.
+    expect(() => targetFor({ path: '/repo/.worktrees/other' }, { agent: { session: { id: 'session-source', header: { cwd: '/repo' } } } })).toThrow(/one-shot user authorization/)
+    // A grant for a DIFFERENT path must not launder this one.
+    expect(() => targetFor({ path: '/repo/.worktrees/other' }, { agent: { session: { id: 'session-source', header: { cwd: '/repo' } } } }, '/repo/.worktrees/authorized')).toThrow(/one-shot user authorization/)
+    // The exact authorized path resolves as an operator-equivalent target.
+    expect(targetFor({ path: '/repo/.worktrees/other' }, { agent: { session: { id: 'session-source', header: { cwd: '/repo' } } } }, '/repo/.worktrees/other')).toBe('/repo/.worktrees/other')
     expect(() => targetFor({}, {})).toThrow(/calling Session binding/)
   })
 
@@ -25,10 +31,16 @@ describe('Session-oriented ws tool target', () => {
     expect(() => targetFor({ path: '' }, {})).toThrow(/calling Session binding/)
   })
 
-  it('does not advertise the operator-only path on the model-visible tool', () => {
+  // `path` is declared so the authorization channel is discoverable from the
+  // schema rather than reachable only by guessing an undocumented argument
+  // (the parameter root is open). Declaring it grants no authority: an
+  // Agent-supplied path is refused unless the user authorizes that exact call.
+  it('advertises the authorization-gated path on the model-visible tool', () => {
     expect(WS_TOOL_PARAMETERS).toHaveProperty('action')
     expect(WS_TOOL_PARAMETERS).toHaveProperty('dry_run')
-    expect(WS_TOOL_PARAMETERS).not.toHaveProperty('path')
+    expect(WS_TOOL_PARAMETERS).toHaveProperty('path')
+    expect(WS_TOOL_PARAMETERS.path.description).toMatch(/authoriz/i)
+    expect(WS_TOOL_PARAMETERS.path).not.toHaveProperty('required')
   })
 })
 

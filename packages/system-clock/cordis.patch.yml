@@ -1,0 +1,13 @@
+# dsh-system-clock bundle patch
+#
+# Mounts the plugin (host entry + declared web client bundle) as a profile
+# bundle row: each DSH web client then loads `./client` (via the package's
+# `dsh.client` declaration) and registers the "System Clock" settings section.
+# The host half exposes the `/dsh-system-clock` Connection RPC channel.
+#
+# This is the `dsh.bundle.patch` layer declared in package.json; the ohmydsh
+# manifest (source: local) appends `dsh-system-clock` to the bundle stack
+# automatically.
+- insert:
+    - id: dsh-system-clock
+      name: dsh-system-clock

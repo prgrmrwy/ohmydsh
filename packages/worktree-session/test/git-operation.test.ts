@@ -1,10 +1,11 @@
 import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, readlink, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
-import { allocateTask, createGitClient, createTaskWorktree, discoverRepo, listRefs, listWorktrees, resolveCommit, taskSlug } from '../src/host/git.js'
+import { allocateTask, createGitClient, createTaskWorktree, discoverRepo, isTracked, listRefs, listWorktrees, resolveCommit, taskSlug } from '../src/host/git.js'
 import { loadOperation, startOperation } from '../src/host/operation.js'
 
 const exec = promisify(execFile)
@@ -32,6 +33,19 @@ async function fixture(): Promise<string> {
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 
 describe('Git worktree operation', () => {
+  it('distinguishes tracked, untracked, and unqueryable paths', async () => {
+    const root = await fixture()
+    expect(await isTracked(root, 'package.json')).toBe(true)
+    expect(await isTracked(root, 'pnpm-lock.yaml')).toBe(false)
+
+    const nonGit = await mkdtemp(join(tmpdir(), 'ws-non-git-'))
+    roots.push(nonGit)
+    expect(await isTracked(nonGit, 'package.json')).toBeUndefined()
+
+    const unqueryable = createGitClient(async () => ({ code: 128, stdout: '', stderr: 'not a git repository', timedOut: false }))
+    expect(await isTracked(root, 'package.json', unqueryable)).toBeUndefined()
+  })
+
   it('discovers refs and creates two unique worktrees without moving main', async () => {
     const root = await fixture()
     const client = createGitClient()
@@ -104,8 +118,12 @@ describe('Git worktree operation', () => {
     const prepared = await startOperation(request)
     await rm(prepared.worktreePath, { recursive: true, force: true })
 
+    // `prunable` is only reported by git >= 2.36. The invariant under test is
+    // that the registration survives while its directory is gone, which every
+    // supported git reports identically.
     const stale = await listWorktrees(root)
-    expect(stale.some(entry => entry.path === prepared.worktreePath && entry.prunable)).toBe(true)
+    expect(stale.some(entry => entry.path === prepared.worktreePath)).toBe(true)
+    expect(existsSync(prepared.worktreePath)).toBe(false)
 
     const replay = await startOperation(request)
     expect(replay).toEqual(prepared)
