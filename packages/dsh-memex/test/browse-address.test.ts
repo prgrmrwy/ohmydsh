@@ -1,5 +1,5 @@
 /**
- * The browse-address extension point and the launcher that drives it.
+ * The browse-address extension point and the open flow that drives it.
  *
  * The rule worth guarding: a registrant's failure MUST NOT fall back to the
  * local address. That fallback looks harmless but is the exact bug the
@@ -13,19 +13,35 @@ import {
   localBrowseAddress,
   type MemexBrowseAddressRegistry,
 } from '../src/client/browse-address.js'
-import { launcherScope, runLauncher, type LauncherDeps } from '../src/client/launcher.js'
+import { openBrowseTab, type BrowseOpenDeps, type OpenedTab } from '../src/client/browse-open.js'
+
+/** A stand-in for the blank tab opened inside the click. */
+function fakeTab(): OpenedTab & { navigated: string[]; painted: string[]; closedFlag: boolean } {
+  const tab = {
+    navigated: [] as string[],
+    painted: [] as string[],
+    closedFlag: false,
+    location: { replace(url: string) { tab.navigated.push(url) } },
+    get closed() { return tab.closedFlag },
+    document: { body: { style: { cssText: '' }, set textContent(v: string) { tab.painted.push(v) }, get textContent() { return '' } } } as unknown as Document,
+  }
+  return tab
+}
 
 function depsWith(options: {
   browse?: unknown
   browseError?: Error
   addresses?: MemexBrowseAddressRegistry
-}): LauncherDeps {
+  tab?: OpenedTab | null
+}): BrowseOpenDeps {
   return {
     request: async () => {
       if (options.browseError !== undefined) throw options.browseError
       return options.browse
     },
     addresses: options.addresses ?? createBrowseAddressRegistry(),
+    openTab: () => (options.tab === undefined ? fakeTab() : options.tab),
+    t: (key, params) => `${key}:${params?.scope ?? ''}`,
   }
 }
 
@@ -71,89 +87,89 @@ describe('browse address registry', () => {
   })
 })
 
-describe('launcher route', () => {
-  it('recognizes only its own hash route', () => {
-    expect(launcherScope('#/dsh-memex/browse/personal')).toBe('personal')
-    expect(launcherScope('#/dsh-memex/browse/with%20space')).toBe('with space')
-    expect(launcherScope('#/dsh-memex/browse/')).toBeUndefined()
-    expect(launcherScope('#/settings')).toBeUndefined()
-    expect(launcherScope('')).toBeUndefined()
-  })
-})
 
-describe('launcher run', () => {
-  it('resolves an address once the host reports a port', async () => {
-    const outcome = await runLauncher('personal', depsWith({ browse: { status: 'ok', port: 3939, scope: 'personal' } }))
-    expect(outcome).toEqual({ status: 'ready', address: 'http://localhost:3939' })
+describe('open browse tab', () => {
+  it('opens the tab before any await, so the popup is not blocked', async () => {
+    // The tab must be requested synchronously inside the click; if it were
+    // opened after resolving, the browser would have dropped the activation.
+    const order: string[] = []
+    const tab = fakeTab()
+    await openBrowseTab('personal', {
+      request: async () => { order.push('host'); return { status: 'ok', port: 3939, scope: 'personal' } },
+      addresses: createBrowseAddressRegistry(),
+      openTab: () => { order.push('open'); return tab },
+      t: key => key,
+    })
+    expect(order).toEqual(['open', 'host'])
+    expect(tab.navigated).toEqual(['http://localhost:3939'])
   })
 
-  it('passes the registrant address through', async () => {
+  it('navigates the tab to a registrant-provided address', async () => {
     const addresses = createBrowseAddressRegistry()
-    addresses.register(async ({ scope, port }) => `http://127.0.0.1:54321/?from=${scope}&p=${port}`)
-    const outcome = await runLauncher('personal', depsWith({
+    addresses.register(async ({ scope, port }) => `http://127.0.0.1:54321/?s=${scope}&p=${port}`)
+    const tab = fakeTab()
+    const outcome = await openBrowseTab('personal', depsWith({
       browse: { status: 'ok', port: 3939, scope: 'personal' },
       addresses,
+      tab,
     }))
-    expect(outcome.status).toBe('ready')
-    expect(outcome.address).toBe('http://127.0.0.1:54321/?from=personal&p=3939')
+    expect(outcome.status).toBe('opened')
+    expect(tab.navigated).toEqual(['http://127.0.0.1:54321/?s=personal&p=3939'])
   })
 
-  it('surfaces a host refusal verbatim and navigates nowhere', async () => {
-    const outcome = await runLauncher('personal', depsWith({
-      browse: { status: 'refused', reason: 'memory-off', message: 'Memory is off for this workspace; turn it back on in Settings → 记忆.' },
+  it('reports a host refusal into the tab and navigates nowhere', async () => {
+    const tab = fakeTab()
+    const outcome = await openBrowseTab('personal', depsWith({
+      browse: { status: 'refused', reason: 'memory-off', message: 'Memory is off for this workspace.' },
+      tab,
     }))
     expect(outcome.status).toBe('failed')
-    expect(outcome.address).toBeUndefined()
-    expect(outcome.message).toMatch(/Memory is off/)
+    expect(tab.navigated).toEqual([])
+    expect(tab.painted.join('\n')).toMatch(/Memory is off/)
   })
 
-  it('never yields the local address when the registrant fails', async () => {
+  it('never navigates to the local address when the registrant fails', async () => {
+    // The whole reason the registrant exists: on another machine the local
+    // address resolves against the USER's machine.
     const addresses = createBrowseAddressRegistry()
-    addresses.register(async () => { throw new Error('the forward could not be established') })
-    const outcome = await runLauncher('personal', depsWith({
+    addresses.register(async () => { throw new Error('cockpit port forward is unavailable') })
+    const tab = fakeTab()
+    const outcome = await openBrowseTab('personal', depsWith({
       browse: { status: 'ok', port: 3939, scope: 'personal' },
       addresses,
+      tab,
     }))
     expect(outcome.status).toBe('failed')
-    expect(outcome.address).toBeUndefined()
-    // The whole point: no localhost address leaks out on this path.
-    expect(JSON.stringify(outcome)).not.toContain('localhost')
-    expect(outcome.message).toMatch(/forward could not be established/)
+    expect(tab.navigated).toEqual([])
+    expect(JSON.stringify(tab.painted)).not.toContain('localhost')
+    expect(tab.painted.join('\n')).toMatch(/unavailable/)
   })
 
-  it('reports an unreachable host as a failure, not a refusal', async () => {
-    const outcome = await runLauncher('personal', depsWith({ browseError: new Error('channel unavailable') }))
-    expect(outcome).toMatchObject({ status: 'failed' })
-    expect(outcome.message).toMatch(/channel unavailable/)
+  it('reports a blocked popup instead of failing silently', async () => {
+    const outcome = await openBrowseTab('personal', depsWith({
+      browse: { status: 'ok', port: 3939, scope: 'personal' },
+      tab: null,
+    }))
+    expect(outcome).toMatchObject({ status: 'blocked' })
+  })
+
+  it('does not navigate a tab the user already closed', async () => {
+    const tab = fakeTab()
+    tab.closedFlag = true
+    const outcome = await openBrowseTab('personal', depsWith({
+      browse: { status: 'ok', port: 3939, scope: 'personal' },
+      tab,
+    }))
+    expect(outcome.status).toBe('failed')
+    expect(tab.navigated).toEqual([])
   })
 
   it('does not trust a malformed answer', async () => {
     for (const browse of [undefined, null, 'nope', {}]) {
-      const outcome = await runLauncher('personal', depsWith({ browse }))
+      const tab = fakeTab()
+      const outcome = await openBrowseTab('personal', depsWith({ browse, tab }))
       expect(outcome.status).toBe('failed')
-      expect(outcome.address).toBeUndefined()
+      expect(tab.navigated).toEqual([])
     }
-  })
-
-  it('asks the host before resolving an address', async () => {
-    const order: string[] = []
-    const addresses = createBrowseAddressRegistry()
-    addresses.register(async () => { order.push('resolve'); return 'http://host:1' })
-    await runLauncher('personal', {
-      request: async () => { order.push('host'); return { status: 'ok', port: 1, scope: 'personal' } },
-      addresses,
-    })
-    expect(order).toEqual(['host', 'resolve'])
-  })
-})
-
-describe('launcher deps', () => {
-  it('unwraps the channel envelope and turns a rejection into an error', async () => {
-    const { createLauncherDeps } = await import('../src/client/launcher.js')
-    const ok = createLauncherDeps({ call: vi.fn(async () => ({ ok: true, value: { status: 'ok', port: 7 } })) }, createBrowseAddressRegistry())
-    await expect(ok.request('browse', {})).resolves.toEqual({ status: 'ok', port: 7 })
-
-    const bad = createLauncherDeps({ call: vi.fn(async () => ({ ok: false, error: { message: 'boom' } })) }, createBrowseAddressRegistry())
-    await expect(bad.request('browse', {})).rejects.toThrow('boom')
   })
 })
