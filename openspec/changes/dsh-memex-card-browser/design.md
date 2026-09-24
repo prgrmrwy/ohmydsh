@@ -51,19 +51,18 @@
 
 **就绪判定靠解析 stdout 的监听行**，而不是"spawn 成功即就绪"：端口会漂移，且 `return null` 那条重定向分支下进程会直接结束。解析失败 SHALL 视为启动失败。这是又一处随内核版本复核的文本解析，与既有 `sync --status` 解析同性质，在 `dsh.yaml` 的 note 中一并记录。
 
-### D3. 「打开」按钮同步开同源 launcher，不等待就绪
+### D3. 「打开」按钮同步开空白标签页，在设置页上下文内完成解析
 
-弹窗拦截约束：异步 await 之后再 `window.open` 会脱离原始用户手势链而被拦。cockpit 的 `editorOpen` 因此必须在点击链路中同步产出 URI。
+弹窗拦截约束：异步 await 之后再 `window.open` 会脱离原始用户手势链而被拦。因此按钮在点击链路中先同步 `window.open('', '_blank')`，取得一个空白标签页句柄；随后才异步启动服务、解析地址，并令该句柄跳转。失败信息也写入这张已经打开的标签页。
 
-所以按钮只做一件事：同步 `window.open('<DSH 同源 launcher 路径>', '_blank')`。launcher 页面（DSH 侧路由，属于我们自己的资源，**不违反 D1 的零改写**——上游 HTML 仍在自己端口的根上原样跑）负责：
+最初方案曾让一个 DSH 同源 launcher 页面承担解析。真机跨机器验收证明这条路必然失败：`cockpitBridge` 只在 cockpit iframe 内通过 `window.parent` 的握手取得 `cockpitOrigin` 与 capability；独立新标签页中 `window.parent === window`，注册方不存在，必然报告 `cockpit port forward is unavailable`。因此**解析必须留在仍处于 cockpit iframe 内的设置页上下文**，新标签页只负责占住用户手势并最终呈现结果。
 
-1. 确保该库的浏览服务已就绪（按需启动）
-2. 取得可访问地址（D4）
-3. 跳转；失败则就地说明原因
+流程为：
 
-**为什么不把三态判断放按钮上**：按钮没有地方好好显示"为什么不能用"，而 launcher 页有整页空间；且三态会随时间变化（服务可能刚崩），按钮渲染时的判断到点击时可能已过期。
-
-**launcher 必须是客户端页面，不能是 Host 的 302**（2026-09-23 定案，原 Open Question 就此关闭）。理由是硬约束而非偏好：取地址这一步要调用驻留在**浏览器**里的注册方（见 D4），Host 无法代劳。因此 launcher 是一个 DSH 同源的客户端路由，它自己完成"问注册点要地址 → 跳转"。
+1. 点击时同步打开空白标签页，避免弹窗拦截；
+2. 设置页上下文确保该库浏览服务已就绪（按需启动）；
+3. 设置页上下文调用注册点取得可访问地址（D4）；
+4. 成功则令已打开标签页跳转，失败则在该标签页就地说明原因。
 
 这同时决定了 **Host 与 Client 的职责切分**：
 
@@ -71,10 +70,14 @@
 Host 侧   按需 spawn memex serve，解析 stdout 得到【实际端口 P】
             │  经既有 /dsh-memex RPC 通道返回 P（新增端点，无需新机制）
             ▼
-Client 侧 launcher 页拿到 P → 问注册点要地址 → 跳转
+Client 侧 设置页(仍在 cockpit iframe)拿到 P → 问注册点要地址
             ├ 有注册方（装了 shim）→ 宿主机可访问 URL
             └ 无注册方            → http://localhost:P
+            │
+            └→ 令点击时同步打开的空白标签页跳转；失败则就地呈现
 ```
+
+不能使用 `noopener` 打开该空白页，因为那会切断后续跳转所需的句柄。此处新标签页初始为空白、只由系统写入提示并导航，不向它暴露 DSH 页面对象。
 
 Host 只交付**事实**（端口），不交付**地址**——地址是否需要翻译取决于浏览器在哪台机器上，而这件事只有浏览器侧知道。
 
@@ -93,9 +96,9 @@ dsh-cockpit-bridge ──provide──▶  shim  ──register──▶  dsh-me
 
 **dsh-memex 侧**：提供一个自己命名的注册点（命名权归 dsh-memex），用于替换「取得卡片浏览地址」的实现。未注册时使用默认实现 `localhost:<实际端口>`——Host 与浏览器同机时这本就正确。注册点 MUST NOT 出现在 `inject` 中（loader 对不可解析依赖是**静默不加载**，把可选协作方写进 inject 会让功能无声消失）。
 
-**注册点在 client 半区**（与 D3 的 launcher 同侧）。这不是风格选择：提供方能力（bridge）只存在于浏览器，先例 shim 的 host 半区是 inert 的，因此注册点必须在浏览器侧才可能被接上。
+**注册点在 client 半区**（与 D3 的设置页同侧）。这不是风格选择：提供方能力（bridge）只存在于浏览器中的 cockpit iframe，先例 shim 的 host 半区是 inert 的，因此注册点必须在该浏览器上下文才可能被接上。
 
-**注册契约是异步的**，与先例不同且必须如此：已实现的提供方能力是 `register(channelId, devicePort): Promise` + `publish(channelId): Promise<{url}>`（两次跨源 `fetch`），而 `cockpitBridge.editorOpen` 是同步的（只拼 URI）。所以本注册点的契约形如「给定库标识与实际端口，异步解析出可访问地址」。**异步正是 D3 的 launcher 成为必需而非优化的原因**——按钮不可能在点击链路里 await 它。
+**注册契约是异步的**，与先例不同且必须如此：已实现的提供方能力是 `register(channelId, devicePort): Promise` + `publish(channelId): Promise<{url}>`（两次跨源 `fetch`），而 `cockpitBridge.editorOpen` 是同步的（只拼 URI）。所以本注册点的契约形如「给定库标识与实际端口，异步解析出可访问地址」。**异步决定了 D3 必须先同步打开空白标签页，再在 iframe 内 await 解析**——按钮不能等解析结束后才调用 `window.open`。
 
 **shim 侧**：只探测两端、转接、注册，不做校验、不拼地址、不持状态、不重试。耦合点承载的逻辑越多解耦成本越高；这条写进 spec 而非仅 design，约束的是未来改动。
 
@@ -113,7 +116,7 @@ dsh-cockpit-bridge ──provide──▶  shim  ──register──▶  dsh-me
 
 与既有工具的处理对齐（归档 design D20：拒绝发生在 `ensure()` 之前，否则关闭的工作区第一次调用就把库目录建出来）。这里同理：若先启动服务再判定，一个关闭了记忆的库会因为一次浏览请求而被拉起进程。
 
-按钮不呈现是第一道，launcher 拒绝是第二道——**两道都要有**，因为按钮可见性是渲染时快照，而地址可被直接访问。
+按钮不呈现是第一道，Host 浏览端点拒绝是第二道——**两道都要有**，因为按钮可见性是渲染时快照，而 RPC 端点仍可被直接请求。
 
 ## Risks / Trade-offs
 
@@ -136,4 +139,4 @@ dsh-cockpit-bridge ──provide──▶  shim  ──register──▶  dsh-me
 
 已关闭的问题：
 
-- ~~launcher 是 302 还是前端跳转~~ → **只能前端跳转**（D3）。取地址要调用浏览器侧的注册方，Host 无法代劳，因此不存在 302 方案。
+- ~~launcher 是 302 还是前端跳转~~ → **两者都不成立，最终采用设置页解析 + 空白标签页句柄**（D3）。取地址要调用只在 cockpit iframe 内存在的浏览器侧注册方，Host 不能代劳，独立 launcher 标签页也拿不到该注册方。
