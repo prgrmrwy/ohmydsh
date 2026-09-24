@@ -226,11 +226,11 @@ customizations:
   - id: dsh-cockpit-bridge
     type: package
     source: remote
-    spec: 'https://github.com/prgrmrwy/dsh-cockpit/releases/download/dsh-cockpit-bridge-v0.5.0/dsh-cockpit-bridge-0.5.0.tgz'
+    spec: 'https://github.com/prgrmrwy/dsh-cockpit/releases/download/dsh-cockpit-bridge-v0.5.1/dsh-cockpit-bridge-0.5.1.tgz'
     name: dsh-cockpit-bridge
-    version: 0.5.0
+    version: 0.5.1
       # [2026-09-24] change dsh-memex-card-browser / cockpit device-port-forward-seam:0.4.0 -> 0.5.0
-      #   (exact GitHub release dsh-cockpit-bridge-v0.5.0,HTTP 200 / 18912 B,包内 version 0.5.0 且 lib/client.js 含 portForward)。
+      #   (exact GitHub release dsh-cockpit-bridge-v0.5.1;0.5.0 首发 portForward,0.5.1 修 capability 过期直接 401)。
       #   新增 cockpitBridge.portForward(设备回环端口发布),cockpit 服务端需 >= 2aaa473(device-port-forward-seam 已含真机修复)。
       #   回滚:spec/version 改回 .../dsh-cockpit-bridge-v0.4.0/dsh-cockpit-bridge-0.4.0.tgz + 0.4.0 → dsh build → 重启;
       #   回滚后 cockpit-memex-browse-shim 自动空载(读不到 portForward),dsh-memex 回落本机地址。
