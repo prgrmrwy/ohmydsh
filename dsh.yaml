@@ -255,24 +255,6 @@ customizations:
     enabled: true              # bridge 0.5.0 已发布 cockpitBridge.portForward(2026-09-24)
     brief: 驾驶舱端口发布能力接入 dsh-memex 卡片浏览(可移除 shim)
     note: 'openspec change dsh-memex-card-browser;纯 Web client shim,无 Host 能力/网络通道/业务状态。唯一职责:运行时探测完整 dotted 服务名 cockpitBridge.portForward 与 dshMemex.browseAddress,两端齐备时把前者注册给后者,使 DSH 跑在 VM/devbox 时卡片浏览可从宿主机浏览器访问;两端无任何直接依赖或互相命名(一个约定服务名同样属于提供方,故连字符串也不放进 dsh-memex)。每库一个 channel(memex-browse-<库名>)——内核一进程一库,共用 channel 会发布错库;先 register(channelId,port) 声明可发布再 publish(channelId) 取地址,失败原样上抛由 dsh-memex 呈现。无顶层 inject(任一端缺失时整体静默无效,dsh-memex 回落 localhost:<port>,本机直连场景不受影响);监听 Cordis internal/service 支持任意加载/卸载顺序;禁止 ctx.get("cockpitBridge").portForward(会被 traceable proxy 重新路由并强制 inject),只用 ctx.get("cockpitBridge.portForward");不校验/改写地址,不持状态/重试/缓存。⚠ 前置:dsh-cockpit-bridge 需提供 portForward(cockpit 仓 change device-port-forward-seam,已实现未发布);当前 bridge pin 为 0.4.0 尚无该能力,故本条目 enabled:false——提前启用不会出错但纯属空载。移除:删除本条 → dsh build → 重启,两端均无需迁移。'
-  # 第三方(remote):本机 TraeX 官方 bridge — 模型选择器选 TraeX Bridge / traex
-  # 2026-08-28 决策:官方 bridge 替代社区 ACP 方案(不 spawn traecli;traex-acp-provider 已移除)
-  # 2026-08-31 决策:内部包(bnpm/内网鉴权),开源/无 ByteDance 内网环境默认禁用;
-  #   本机(有 bnpm/内网权限)需要时在 .env.local(不进 git)设 DSH_TRAEX_BRIDGE=1
-  #   即可打开,不改这份文件;设为 0 或不设则禁用,`dsh build` 后立即生效
-  - id: dsh-traex-bridge
-    type: package
-    source: remote
-    spec: '@byted/dsh-traex-bridge@0.1.15'
-    version: 0.1.15
-      # [2026-09-10] dsh-traex-bridge 0.1.8 -> 0.1.12(0.1.2-rc.1 适配 + 原生 web_search 后端 + 排队计时)
-      # [2026-09-21] upgrade-dsh-0-1-5-runtime 任务 2.7/7.7:0.1.12 -> 0.1.15(registry latest)。
-      #   仓库默认 enabled:false + enabledEnv:DSH_TRAEX_BRIDGE 保持不变;仅在 devbox 验证启用态能力。
-      #   回滚:改回 @byted/dsh-traex-bridge@0.1.12 + version 0.1.12 → dsh build → 重启。
-    enabled: false
-    enabledEnv: DSH_TRAEX_BRIDGE
-    brief: TraeX 官方 bridge provider(设置→模型→TraeX Bridge;默认关闭,见 enabledEnv)
-    note: '内部官方包(@byted/dsh-traex-bridge,maintainer chenxinhao.046,内部 registry 与内部代码托管;公开文档不记录内网地址),0.1.0–0.1.12 于 2026-08-28 至 2026-09-06 发布,0.1.12 为 registry latest。**0.1.12(2026-09-10 升级,逐文件核对 0.1.8→0.1.12 发布物)**:① peer 新增 @deepseek-ai/dsh-web(>=0.1.1-rc.2 <0.1.2 || >=0.1.2-alpha.1 <0.2.0)且 cordis 放宽到 ^4.0.0,对现役运行体 0.1.2-rc.1 / cordis 4.0.2 满足;0.1.10 显式适配 0.1.2-rc.1 并修复旧版保存配置时的 mutate is not a function。② **bundle patch 语义扩大**——除既有 llm-traex-bridge 插入与 agent-default-model→traex/DeepSeek-V4-Flash 覆盖外,新增 web.searchProvider: traex,即 DSH 原生 web_search 工具的**搜索后端整体切到 Trae**(0.1.11 能力,复用登录态,不需要 DeepSeek API Key,不改网页抓取后端;host 侧 ctx.inject([web]) 注册,无 web 服务的 headless 组合不受影响);无登录时明确报 WEB_PROVIDER_CREDENTIAL_MISSING 而非静默回退,15s 超时上限。③ 新增 queue.js(排队计时移交 Host 持有,修复切页重新计时)与 tui/* 命令集;0.1.9 修复流式增量被 trim 导致空格/换行丢失。④ 图片输入自 0.1.8 起即支持(images.js 字节未变,按模型能力放行,不支持的模型报 UNSUPPORTED_CONTENT),旧 note 的「暂不支持图片」为过期描述,本次订正。发布物无 dependencies、无 install/postinstall 脚本;出站端点与 0.1.8 一致(Trae API / ByteCloud 登录 / SSO 控制台,均为内部服务,不在此记录具体地址)。直接实现 Trae 登录/模型目录/TraeChat 协议,运行时不依赖 traecli 与 ACP;登录:设置→模型→TraeX Bridge 或 CLI dsh-traex-bridge login device/sso;凭据 ~/.dsh/traex-bridge/auth.json(0600),兼容读取 ~/.trae/cli/auth.json 等本机既有 Trae 登录态;Node >=20(本机 22.16.0);安装通道为内部 registry(本机用户级 ~/.npmrc 指向该源,profile 侧另有 @byted scope 级覆盖;agent 环境注入的 NPM_CONFIG_REGISTRY 会覆盖,安装时需显式指定)。⚠ 鉴权与推理流量走 ByteDance 内部服务,凭据仅在 DSH Host 本机保存;⚠ 升级后需重新验证:Web 设置页登录卡片/设备登录/SSO、模型目录、Markdown 流式渲染、排队计时,以及**原生 web_search 是否确实经 Trae 返回来源**;⚠ 2026-08-31 起本仓库默认 enabled:false + enabledEnv:DSH_TRAEX_BRIDGE(内部专属,公开仓库默认关闭),本机通过 .env.local 的 DSH_TRAEX_BRIDGE=1 打开,不改本条目 enabled'
   # 第三方(remote):dsh-web 系皮肤/主题中心(按需子插件,不安装聚合全家桶)
   - id: skin-center
     type: package
