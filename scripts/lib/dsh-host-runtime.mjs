@@ -5,8 +5,8 @@
 // reviewed transitive-dependency overlay.
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import path from 'node:path'
-import yaml from 'js-yaml'
 import { runBoundedProvision } from './dsh-cli.mjs'
+import { loadManifestWithOverlay } from './manifest-overlay.mjs'
 
 const PET_LOCUS_KIND = 'pet-unified-locus-v1'
 const ALLOWED_KEYS = new Set(['kind', 'supportedDshVersion'])
@@ -85,7 +85,16 @@ export function declaredHostRuntimeFromManifest(doc, { repo, env = process.env }
 }
 
 export function loadDeclaredHostRuntime({ repo, env = process.env } = {}) {
-  const doc = yaml.load(readFileSync(path.join(repo, 'dsh.yaml'), 'utf8'))
+  // Read through the overlay-merged view, not the public manifest alone: this is
+  // the Host runtime version fence, so an overlay entry owning
+  // hostRuntimeCompatibility must be fenced here too, and the "at most one
+  // owner" assertion must count public + overlay together.
+  const { doc } = loadManifestWithOverlay({
+    manifestPath: path.join(repo, 'dsh.yaml'),
+    repo,
+    env,
+    strict: true,
+  })
   return declaredHostRuntimeFromManifest(doc, { repo, env })
 }
 
