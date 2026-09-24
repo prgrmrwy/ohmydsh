@@ -120,6 +120,12 @@ customizations:
   - id: ws
     type: skill
     enabled: true
+  # 自研 skill:「统计一下召回」→ 跑 dsh-memex-recall-report 并按口径解读
+  # 命令本身随 dsh-memex 包的 bin 分发(openspec 2026-09-24-memex-recall-report-cli);
+  # 这里只提供触发词、定位命令的包装脚本与解读纪律。只读,不改卡片。
+  - id: memex-recall-report
+    type: skill
+    enabled: true
   # 自研 skill:添加远端插件的标准流程
   - id: add-dsh-plugin
     type: skill
