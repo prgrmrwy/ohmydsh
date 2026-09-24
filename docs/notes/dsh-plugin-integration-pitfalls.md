@@ -670,3 +670,56 @@ Error: dsh: plugin tree failed to load: failed to apply loader entry modules (@d
    本文两个主要条目的答案都直接写在依赖包的注释里。
 4. **不要相信"看起来对"的字段名**：`agentPreset`、`stdio`、`data` 都很像
    那个意思，但语义与预期不同。
+
+---
+
+## 11. 把上游 CLI 的长驻服务接进插件：四条只能实测得到的约束
+
+`dsh-memex` 的卡片浏览按需拉起 `memex serve`（`@touchskyer/memex` 0.4.1）。
+下面四条都**看不出来**——`--help` 不说、类型签名没有、调用也不报错，
+但每一条都能让功能在真机上静默失效。
+
+1. **`--local` 不是修饰，是存亡开关**。配了远端的库若不传它，内核打开托管站点
+   并 `return null`，**本地服务根本不创建**。缺了它既拿不到服务，内部库的卡片
+   还会被指向第三方。
+2. **内核会自己开浏览器**，且是在**运行 Host 的那台机器**上。用户浏览器在别处时
+   这是纯粹的错误外部效果，必须注入 `MEMEX_NO_OPEN`。
+3. **就绪行会谎报**。端口被占用时内核对**每一个试过的端口**各打印一行
+   `memex is running at ...`，只有最后一行是真的：
+
+   ```
+   Port 3939 in use, trying 3940...
+   memex is running at http://localhost:3939   <- 从未绑上
+   memex is running at http://localhost:3941   <- 真的
+   ```
+
+   根因是它每次重试都往同一个 `server` 再挂一个 listen 回调且从不移除。
+   因此解析 stdout **必须取最后一个匹配**；取第一个会交出**另一个实例**正在
+   监听的端口——页面正常打开、内容却属于别的库。这类"看起来成功"的错误答案
+   比报错难查得多。
+4. **长驻子进程的 stdin 不能用 `'ignore'`**（同第 2 节）。另外
+   `runKernel()` 那条路径是"跑完即死 + 有界 timeout + 到点 SIGTERM"，
+   结构上跑不了长驻服务，必须另起一条。
+
+**版本复核点**：第 3 条依赖对内核 stdout 的文本解析，与既有 `sync --status`
+解析同性质，升级内核时必须重测。
+
+## 12. 跨源调用方没有 cookie：认证豁免名单必须与路由同步
+
+`dsh-cockpit-bridge` 运行在**设备自己的 DSH 页面**里，向驾驶舱发的是**跨源**
+请求，按构造不可能携带驾驶舱的同源 cookie——短 TTL 的 capability 头就是它的
+全部凭据。驾驶舱的 `TokenMiddleware` 为此开了豁免，但豁免名单是**硬编码的
+路径列表**。
+
+新增一条 bridge 路由却忘了加进该名单时，请求在**到达 controller 之前**就被
+401，capability 再有效也没用；而 controller 侧的单测全绿，因为它们根本没经过
+那道门。
+
+两条通用教训：
+
+1. **凡是消费方够得到的新路由，都要问一句"它会经过哪些前置门"**，而不只是
+   "controller 逻辑对不对"。
+2. **验证必须复刻真实调用方的形态**。本例中 `curl` 带 cookie 得 201、不带得
+   401——真实 bridge 属于后者。这与第 7 节同源：替身与真实系统形态不一致时，
+   测试会长期全绿而真机必挂。相关判据见记忆卡
+   `verify-with-the-real-callers-shape`。

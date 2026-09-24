@@ -25,13 +25,13 @@
 
 ## 3b. 专用 shim package（跨机器路径；依赖 dsh-cockpit 侧能力先落地）
 
-- [ ] 3b.1 新建 `packages/cockpit-memex-browse-shim/`，形态与依赖声明对齐既有 `packages/cockpit-worktree-open-shim/`（host 半区惰性，集成在 client 半区）
-- [ ] 3b.2 探测两端并接线：读驾驶舱端口发布能力 + 注册进 dsh-memex 的注册点；任一端缺席则不产生效果且不抛未捕获错误
-- [ ] 3b.3 服务读取一律用**完整 dotted name 的单次 `ctx.get('a.b')`**，禁止 `ctx.get('a').b`（Cordis 重路由点属性并强制 inject，会变成未捕获拒绝）
-- [ ] 3b.4 顶层 `inject` 必须为空数组；监听服务变更以支持任意加载顺序，并在任一端消失时解除接线
-- [ ] 3b.5 保持最薄：不校验、不拼装地址、不重试、不持状态、不缓存；失败原样上抛由 dsh-memex 呈现
-- [ ] 3b.6 在 `dsh.yaml` 登记该 package，并写 README 说明存在理由与移除路径（对齐 `subscriptions-sandbox-shim` 惯例）
-- [ ] 3b.7 单测：仅装一端时无效果且两端正常；两端就绪后接线；晚加载可接线；一端卸载后解除接线
+- [x] 3b.1 新建 `packages/cockpit-memex-browse-shim/`，形态与依赖声明对齐既有 `packages/cockpit-worktree-open-shim/`（host 半区惰性，集成在 client 半区）
+- [x] 3b.2 探测两端并接线：读驾驶舱端口发布能力 + 注册进 dsh-memex 的注册点；任一端缺席则不产生效果且不抛未捕获错误
+- [x] 3b.3 服务读取一律用**完整 dotted name 的单次 `ctx.get('a.b')`**，禁止 `ctx.get('a').b`（Cordis 重路由点属性并强制 inject，会变成未捕获拒绝）
+- [x] 3b.4 顶层 `inject` 必须为空数组；监听服务变更以支持任意加载顺序，并在任一端消失时解除接线
+- [x] 3b.5 保持最薄：不校验、不拼装地址、不重试、不持状态、不缓存；失败原样上抛由 dsh-memex 呈现
+- [x] 3b.6 在 `dsh.yaml` 登记该 package，并写 README 说明存在理由与移除路径（对齐 `subscriptions-sandbox-shim` 惯例）
+- [x] 3b.7 单测：仅装一端时无效果且两端正常；两端就绪后接线；晚加载可接线；一端卸载后解除接线
 
 ## 4. Host 端点与同源 launcher 页面
 
@@ -52,10 +52,10 @@
 
 ## 6. 契约、文档与验收
 
-- [ ] 6.1 更新 `dsh.yaml` 中 dsh-memex 的 note：新增运行依赖（按需拉起内核 serve）、stdout 解析的版本复核点、CDN 外链的已知限制
-- [ ] 6.2 在 `docs/notes/` 记录内核 serve 的四条行为约束与本方案的应对（或在既有 pitfalls 文档中追加一节）
-- [ ] 6.3 运行仓库检查：`npm test`、`npm run check:artifacts`、`node scripts/sync.mjs`（含幂等验证：连续第二次运行无变化），以及 package 内的 build/typecheck/test
+- [x] 6.1 更新 `dsh.yaml` 中 dsh-memex 的 note：新增运行依赖（按需拉起内核 serve）、stdout 解析的版本复核点、CDN 外链的已知限制
+- [x] 6.2 在 `docs/notes/` 记录内核 serve 的四条行为约束与本方案的应对（或在既有 pitfalls 文档中追加一节）
+- [x] 6.3 运行仓库检查：`npm test`、`npm run check:artifacts`、`node scripts/sync.mjs`（含幂等验证：连续第二次运行无变化），以及 package 内的 build/typecheck/test
 - [x] 6.4 真机验收（本机直连）：对一个已物化且开启记忆的库点击「打开」，新标签页呈现内核界面并可浏览卡片
 - [x] 6.5 真机验收（降级）：关闭记忆的入口无动作且直接请求被拒；未物化的库无动作；内核不可用时不误导
-- [ ] 6.6 真机验收（跨机器）：待 dsh-cockpit `device-port-forward-seam` 落地并装上 shim 后，验证经注册方取得的地址可从宿主机浏览器访问；未装 shim 时验证呈现为「不可用 + 原因」，且移除 shim 后两端各自仍正常
+- [x] 6.6 真机验收（跨机器）：待 dsh-cockpit `device-port-forward-seam` 落地并装上 shim 后，验证经注册方取得的地址可从宿主机浏览器访问；未装 shim 时验证呈现为「不可用 + 原因」，且移除 shim 后两端各自仍正常
 - [ ] 6.7 确认 current specs 已同步最终行为后归档 change
