@@ -15,21 +15,34 @@ repository root. WS separately treats `<repo>/.worktrees/<task>` as the logical
 Agent execution. The main checkout is never switched, reset, or used as the
 managed task root.
 
-Preparation and admission are recoverable and fail closed. If preparation or
-binding fails, the source draft and images remain intact and are not submitted
-from the repository checkout. A claimed but unconfirmed admission becomes
-`uncertain` and is not automatically submitted again.
+Preparation and handoff are recoverable and fail closed. If preparation or
+binding fails, the source draft and all official generic attachments remain
+intact and are not submitted from the repository checkout. After preparation
+and binding, WS invokes the official SessionInput submit exactly once; DSH owns
+attempts, uploads, receipts, retries, echo retirement, and draft restoration.
+
+Project type is resolved from the repository-root lockfile before any branch,
+worktree, operation file, or binding is created. A single `package-lock.json`
+or `pnpm-lock.yaml` selects npm or pnpm respectively. If both lockfiles are
+present, WS first honors a supported `packageManager` declaration in
+`package.json`, then adopts the lockfile that is tracked by Git when exactly
+one is tracked; the selected manager and ignored lockfile are recorded in
+operation diagnostics. If no unique signal proves the repository intent, WS
+refuses the request rather than guessing a default manager.
 
 ## Dependency modes and promote
 
 New Worktree Sessions are **lean by default**:
 
-- `lean`: `node_modules` is a verified link to a cache addressed by
-  `package-lock.json`, Node major, and npm major. Before any install, removal,
-  update, or other dependency mutation, the Agent must run `ws promote` for the
-  current bound Session.
-- `mutable`: worktree-local `npm ci` has succeeded and operation metadata has
-  been updated. Only then may the Agent perform dependency mutations.
+- `lean` for npm: `node_modules` is a verified link to a cache addressed by
+  `package-lock.json`, Node major, and npm major. `lean` for pnpm installs from
+  `pnpm-lock.yaml` inside the bound worktree and reuses pnpm's global store;
+  workspace-internal links therefore continue to point at that worktree's own
+  sources. Before any install, removal, update, or other dependency mutation,
+  the Agent must run `ws promote` for the current bound Session.
+- `mutable`: the package-manager-specific full install has succeeded (`npm ci`
+  for npm, or `pnpm install --frozen-lockfile` for pnpm) and operation metadata
+  has been updated. Only then may the Agent perform dependency mutations.
 
 Promotion is Agent-driven and preserves the Session binding. It updates
 metadata and UI status, but does not change the stable model runtime context.
@@ -37,13 +50,17 @@ metadata and UI status, but does not change the stable model runtime context.
 ## Status and maintenance
 
 The input-area status UI persistently shows the bound task branch, dependency
-mode (`lean` or `mutable`), and lifecycle (`active`, `uncertain`, or `cleaned`).
+mode (`lean` or `mutable`), and lifecycle (`active` or `cleaned`).
 Dynamic status is not repeatedly injected into conversation context.
 
-Clicking the bound task branch asks the local editor to open that Session's
-managed worktree directory, via a `vscode://file/<path>` deep link by default
-the open action is configurable). Cleaned or unbound sessions do not offer the
-open action, and the target path always comes from the persistent binding.
+Clicking the bound task branch asks an editor to open that Session's managed
+worktree directory. With no adapter registered, the default remains the local
+`vscode://file/<path>` deep link. The client exposes a runtime registration
+point for deployment-specific replacements; a missing, unloaded, or throwing
+adapter safely falls back to the local default. The Worktree Session package
+names no adapter and declares none in `inject`. Cleaned or unbound sessions do
+not offer the open action, and the target path always comes from the persistent
+binding.
 
 The model-visible `ws` tool resolves schema-v2 maintenance from the exact
 calling `ToolExecution.agent.session`; Agent calls cannot supply a path or
@@ -83,7 +100,7 @@ mid-Session Worktree control; Worktree startup remains blank-Session-only.
 
 Operation records live at `<git-common-dir>/ws/operations/<operationId>.json`.
 They persist the source Session binding, canonical repository, managed worktree,
-task branch, admission state, and dependency metadata. Host restart or Session
+task branch, and dependency metadata. Host restart or Session
 resume revalidates the same binding before local execution continues. Repeated
 first-submit retries reuse the operation id and prepared resources.
 

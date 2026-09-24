@@ -1,0 +1,2 @@
+name: DSH Pet 执行会话
+description: Pet 任务执行会话专用。与 standard 的唯一差别是不加载 skill-filesystem，因此只有 Pet 允许清单里显式启用的 Skill 对执行会话可见。

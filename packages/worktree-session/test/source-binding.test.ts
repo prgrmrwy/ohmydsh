@@ -6,7 +6,7 @@ import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import { discoverRepo } from '../src/host/git.js'
 import { atomicJson, readJson } from '../src/host/fs.js'
-import { bindSource, findBySourceSession, findHistoryBySourceSession, loadOperation, operationFile, reconcileSourceArchiveLifecycle, sessionStatus, startOperation, updateSourceBinding } from '../src/host/operation.js'
+import { bindSource, findBySourceSession, findHistoryBySourceSession, loadOperation, operationFile, reconcileSourceArchiveLifecycle, sessionStatus, startOperation } from '../src/host/operation.js'
 import { wsClean } from '../src/host/maintenance.js'
 import { bindingOf, type OperationRecord } from '../src/wire.js'
 
@@ -46,7 +46,6 @@ describe('source-session binding (schema-v2)', () => {
     const operationId = await prepared(root)
     const bound = await bindSource({ operationId, repoPath: root, sourceSessionId: 'session-main-1' })
     expect(bound.state).toBe('bound')
-    expect(bound.submitAllowed).toBe(false)
     const repo = await discoverRepo(root)
     const record = await loadOperation(repo.gitCommonDir, operationId)
     expect(record?.schemaVersion).toBe(2)
@@ -61,30 +60,26 @@ describe('source-session binding (schema-v2)', () => {
     expect(status.dependencyMode).toBe('lean')
   }, 120_000)
 
-  it('persists exactly-once submit claim and refuses automatic resubmission', async () => {
+  it('is idempotent and never persists a submission protocol', async () => {
     const root = await fixture()
     const operationId = await prepared(root)
-    await bindSource({ operationId, repoPath: root, sourceSessionId: 'session-main-2' })
-    const first = await updateSourceBinding({ operationId, repoPath: root, sourceSessionId: 'session-main-2', action: 'claim-submit' })
-    expect(first.state).toBe('submit-claimed')
-    expect(first.submitAllowed).toBe(true)
-    const second = await updateSourceBinding({ operationId, repoPath: root, sourceSessionId: 'session-main-2', action: 'claim-submit' })
-    expect(second.state).toBe('submit-claimed')
-    expect(second.submitAllowed).toBe(false)
+    const first = await bindSource({ operationId, repoPath: root, sourceSessionId: 'session-main-2' })
+    const second = await bindSource({ operationId, repoPath: root, sourceSessionId: 'session-main-2' })
+    expect(first).toEqual(second)
+    expect(first.state).toBe('bound')
     const repo = await discoverRepo(root)
-    expect((await readJson<OperationRecord>(operationFile(repo.gitCommonDir, operationId)))?.binding).toMatchObject({ mode: 'source-session', state: 'submit-claimed', sourceSessionId: 'session-main-2' })
+    expect((await readJson<OperationRecord>(operationFile(repo.gitCommonDir, operationId)))?.binding).toMatchObject({ mode: 'source-session', state: 'bound', sourceSessionId: 'session-main-2' })
   }, 120_000)
 
-  it('moves to admitted and then cleaned without changing the source Session relation', async () => {
+  it('keeps the source relation through cleanup', async () => {
     const root = await fixture()
     const operationId = await prepared(root)
     await bindSource({ operationId, repoPath: root, sourceSessionId: 'session-main-3' })
-    const admitted = await updateSourceBinding({ operationId, repoPath: root, sourceSessionId: 'session-main-3', action: 'admitted' })
-    expect(admitted.state).toBe('admitted')
     const status = await sessionStatus(root, 'session-main-3')
-    expect(status.lifecycle).toBe('admitted')
+    expect(status.lifecycle).toBe('bound')
     const repo = await discoverRepo(root)
-    await updateSourceBinding({ operationId, repoPath: root, sourceSessionId: 'session-main-3', action: 'cleaned' })
+    const operation = await loadOperation(repo.gitCommonDir, operationId) as OperationRecord
+    await atomicJson(operationFile(repo.gitCommonDir, operationId), { ...operation, phase: 'cleaned', binding: { ...bindingOf(operation)!, state: 'cleaned' as const } })
     const afterClean = await readJson<OperationRecord>(operationFile(repo.gitCommonDir, operationId))
     expect(bindingOf(afterClean!)?.mode).toBe('source-session')
     expect(bindingOf(afterClean!)?.state).toBe('cleaned')

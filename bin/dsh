@@ -15,7 +15,6 @@
 #   dsh plugin-update 统一升级远端插件(检测 → 确认 → 改 dsh.yaml → sync → 自动提交;
 #                   --dry-run 只预览;--yes 跳过逐条确认)
 #   dsh -p 8080    指定端口(默认 3080)
-#   (web.lan / DSH_LAN 开启时,启动输出同时打印本机与局域网地址;临时仅本机:--host 127.0.0.1)
 #   官方 CLI 命令自动转交,直接用即可:dsh plugin --profile web add <pkg>、
 #                   dsh --profile <name>、dsh --dump-config(插件安装仍建议走 dsh.yaml + dsh build)
 #
@@ -40,12 +39,33 @@ REPO="$(cd "$(dirname "$SOURCE")/.." && pwd)"
 # shellcheck disable=SC1091
 source "$REPO/scripts/lib/dsh-runtime.sh"
 
-# Local overrides (gitignored; optional)
+# Local overrides (gitignored; optional). Snapshot DSH_BIN first so migration
+# of the old Pet-only .env.local value never swallows an identical value that
+# the caller deliberately exported for this invocation.
+CALLER_DSH_BIN_SET=0
+CALLER_DSH_BIN=""
+if [[ -n "${DSH_BIN+x}" ]]; then
+  CALLER_DSH_BIN_SET=1
+  CALLER_DSH_BIN="$DSH_BIN"
+fi
 if [[ -f "$REPO/.env.local" ]]; then
   set -a
   # shellcheck disable=SC1091
   source "$REPO/.env.local"
   set +a
+fi
+
+# The first Pet Locus deployment selected its generated Host runtime through the
+# process-wide DSH_BIN escape hatch. That also retargeted build/plugin commands
+# and could pin a stale official version forever. Migrate only the exact value
+# newly sourced from this checkout's .env.local; every caller-supplied DSH_BIN
+# keeps its original highest-priority meaning.
+LEGACY_PET_DSH_BIN="$REPO/packages/dsh-pet/compat/subagent/.launcher/node_modules/.bin/dsh"
+if [[ $CALLER_DSH_BIN_SET -eq 1 ]]; then
+  DSH_BIN="$CALLER_DSH_BIN"
+elif [[ "${DSH_BIN:-}" == "$LEGACY_PET_DSH_BIN" ]]; then
+  echo "info: 忽略 .env.local 中旧 dsh-pet DSH_BIN；Host runtime 现由 dsh.yaml 声明管理" >&2
+  unset DSH_BIN
 fi
 
 # Snapshot the user's explicit registry override before this launcher runs any
@@ -99,26 +119,6 @@ with_repo_registry() {
   fi
 }
 
-# LAN serving switch: DSH_LAN env (inline or .env.local) beats dsh.yaml web.lan.
-# When on, sync renders a 0.0.0.0 webserver bind and the launcher prints the LAN URL.
-LAN_ENABLED=0
-lan_enabled() {
-  local v="${DSH_LAN:-}"
-  if [[ -n "$v" ]]; then
-    case "$v" in
-      1|true|TRUE|True|yes|YES|Yes|on|ON|On) return 0 ;;
-      0|false|FALSE|False|no|NO|No|off|OFF|Off) return 1 ;;
-    esac
-  fi
-  [[ "$(node -e '
-    const path = require("node:path")
-    const fs = require("node:fs")
-    const yaml = require(path.join(process.argv[1], "node_modules", "js-yaml"))
-    const doc = yaml.load(fs.readFileSync(path.join(process.argv[1], "dsh.yaml"), "utf8"))
-    console.log(doc && doc.web && doc.web.lan ? "1" : "")
-  ' "$REPO" 2>/dev/null)" == "1" ]]
-}
-if lan_enabled; then LAN_ENABLED=1; fi
 PORT=3080
 BUILD=0
 BUILD_ONLY=0
@@ -238,6 +238,27 @@ ui_pid() {
 
 is_ui_open() { [[ -n "$(ui_pid)" ]]; }
 
+# macOS Apple Events can wait forever when Chrome has a wedged window/process.
+# Keep UI cleanup best-effort and bounded so stop/restart can always reach the
+# server lifecycle. Kill only the osascript child we spawned, never Chrome.
+run_osascript_bounded() {
+  local timeout_s="${1:-3}" pid status=0
+  shift
+  osascript "$@" &
+  pid=$!
+  (
+    sleep "$timeout_s"
+    kill -TERM "$pid" 2>/dev/null || true
+    sleep 0.2
+    kill -KILL "$pid" 2>/dev/null || true
+  ) &
+  local watchdog=$!
+  wait "$pid" || status=$?
+  kill -TERM "$watchdog" 2>/dev/null || true
+  wait "$watchdog" 2>/dev/null || true
+  return "$status"
+}
+
 # 优雅退出 PWA;Chrome app-mode 进程的 argv 不含应用名,ui_pid 通过
 # lsappinfo 定位。AppleScript 失败或超时才按已验证的 pid 发 TERM。
 close_ui() {
@@ -245,7 +266,7 @@ close_ui() {
   pid="$(ui_pid)" || return 0
   name="$(ui_app_name 2>/dev/null)" || true
   if [[ -n "$name" ]] && command -v osascript >/dev/null 2>&1; then
-    osascript -e "tell application \"$name\" to quit" >/dev/null 2>&1 && {
+    run_osascript_bounded 3 -e "tell application \"$name\" to quit" >/dev/null 2>&1 && {
       for _ in $(seq 1 20); do [[ -z "$(ui_pid)" ]] && return 0; sleep 0.1; done
     }
   fi
@@ -256,7 +277,7 @@ close_ui() {
 # windows 也包含 PWA app-mode 窗口,所以必须在 close_ui 之后调用。
 close_browser_ui_tabs() {
   command -v osascript >/dev/null 2>&1 || return 0
-  osascript - "$PORT" >/dev/null 2>&1 <<'APPLESCRIPT' || true
+  run_osascript_bounded 3 - "$PORT" >/dev/null 2>&1 <<'APPLESCRIPT' || true
 on run argv
   set targetPrefix to "http://127.0.0.1:" & (item 1 of argv) & "/"
   tell application "Google Chrome"
@@ -332,12 +353,14 @@ print_plugins() {
 }
 
 # Append one startup record: timestamp, dsh version, port, loaded plugins
+# 插件清单走 plugin-list.mjs --names(与启动 msg 同一真相源:bundle 层 +
+# patch 层)。早先这里只读 dsh.profile.bundles,靠 patch insert 行接线的插件
+# (如 dsh-width-tiers)既不出现在启动 msg 里,也不出现在历史记录里。
 record_startup() {
-  local VER="$1" bundles=""
-  if [[ -f "$PROFILE_PKG" ]]; then
-    bundles="$(node -e 'const p=require(process.argv[1]);console.log((p.dsh&&p.dsh.profile&&p.dsh.profile.bundles||[]).join(", "))' "$PROFILE_PKG" 2>/dev/null || true)"
-  fi
-  printf '[%s] dshVersion=%s port=%s plugins=[%s]\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$VER" "$PORT" "$bundles" >>"$STARTUP_LOG"
+  local VER="$1" runtime_kind="$2" runtime_owner="$3" runtime_compat="$4" runtime_fingerprint="$5" plugins=""
+  plugins="$(node "$REPO/scripts/plugin-list.mjs" --names 2>/dev/null || true)"
+  printf '[%s] dshVersion=%s runtime=%s owner=%s compat=%s fingerprint=%s port=%s plugins=[%s]\n' \
+    "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$VER" "$runtime_kind" "$runtime_owner" "$runtime_compat" "$runtime_fingerprint" "$PORT" "$plugins" >>"$STARTUP_LOG"
 }
 
 is_server_up() {
@@ -360,51 +383,6 @@ wait_for_port() {
     sleep 0.5
   done
   return 1
-}
-
-# CGNAT (100.64.0.0/10,如 Tailscale) 与 link-local (169.254/16) 不算局域网地址
-is_lan_ip() {
-  local o1 o2
-  o1="${1%%.*}"
-  o2="${1#*.}"; o2="${o2%%.*}"
-  [[ "$o1" == "169" && "$o2" == "254" ]] && return 1
-  [[ "$o1" == "100" && "$o2" -ge 64 && "$o2" -le 127 ]] && return 1
-  return 0
-}
-
-# First non-loopback IPv4 address, default-route interface preferred; falls back
-# to scanning for a private-range address (skips CGNAT/link-local), then to
-# hostname -I. Best effort: empty when none can be determined.
-lan_ip() {
-  local ip="" iface cand
-  if command -v route >/dev/null 2>&1 && command -v ifconfig >/dev/null 2>&1; then
-    iface="$(route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}')"
-    if [[ -n "$iface" ]]; then
-      ip="$(ifconfig "$iface" 2>/dev/null | awk '/inet / && $2 !~ /^127\./{print $2; exit}')"
-    fi
-  fi
-  if [[ -z "$ip" ]] || ! is_lan_ip "$ip"; then
-    cand="$(ifconfig 2>/dev/null | awk '
-      /inet / && $2 !~ /^127\./ {
-        split($2, o, ".")
-        if (o[1] == 169 && o[2] == 254) next
-        if (o[1] == 100 && o[2] >= 64 && o[2] <= 127) next
-        print $2; exit
-      }')"
-    [[ -n "$cand" ]] && ip="$cand"
-  fi
-  if [[ -z "$ip" ]] && command -v hostname >/dev/null 2>&1; then
-    ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-  fi
-  [[ -n "$ip" ]] && echo "$ip"
-}
-
-# One LAN access line after the loopback URL line, when LAN serving is enabled.
-print_lan() {
-  [[ $LAN_ENABLED -eq 1 ]] || return 0
-  local ip
-  ip="$(lan_ip)"
-  [[ -n "$ip" ]] && echo "局域网: http://$ip:$PORT (同网络设备可访问;临时仅本机:dsh --host 127.0.0.1)"
 }
 
 # 探测已安装的 DeepSeek Harness PWA(Chrome Apps 目录)。未显式配置
@@ -516,41 +494,56 @@ server_env_strip_args() {
   done < <(compgen -e | grep -E '^npm_(config_|lifecycle_|package_)|^npm_(command|execpath|node_execpath)$' || true)
 }
 
+PREPARED_DSH_VERSION=""
+PREPARED_SERVER_BIN=""
+PREPARED_RUNTIME_KIND=""
+PREPARED_RUNTIME_OWNER=""
+PREPARED_RUNTIME_COMPAT=""
+PREPARED_RUNTIME_FINGERPRINT=""
+
+prepare_server_runtime() {
+  local resolve_out
+  PREPARED_DSH_VERSION="$(dsh_version)"
+  if [[ -z "$PREPARED_DSH_VERSION" ]]; then
+    echo "error: dshVersion missing in $REPO/dsh.yaml" >&2
+    return 1
+  fi
+  mkdir -p "$DSH_HOME"
+  if ! resolve_out="$(DSH_CLI_VERSION="$PREPARED_DSH_VERSION" DSH_REPO_ROOT="$REPO" with_repo_registry node "$REPO/scripts/dsh-server-bin.mjs")"; then
+    echo "error: 无法解析 DSH Host runtime(@deepseek-ai/dsh@$PREPARED_DSH_VERSION)" >&2
+    return 1
+  fi
+  PREPARED_SERVER_BIN="$(printf '%s\n' "$resolve_out" | sed -n 's/^DSH_SERVER_BIN=//p' | tail -1)"
+  PREPARED_RUNTIME_KIND="$(printf '%s\n' "$resolve_out" | sed -n 's/^DSH_RUNTIME_KIND=//p' | tail -1)"
+  PREPARED_RUNTIME_OWNER="$(printf '%s\n' "$resolve_out" | sed -n 's/^DSH_RUNTIME_OWNER=//p' | tail -1)"
+  PREPARED_RUNTIME_COMPAT="$(printf '%s\n' "$resolve_out" | sed -n 's/^DSH_RUNTIME_COMPAT=//p' | tail -1)"
+  PREPARED_RUNTIME_FINGERPRINT="$(printf '%s\n' "$resolve_out" | sed -n 's/^DSH_RUNTIME_FINGERPRINT=//p' | tail -1)"
+  if [[ -z "$PREPARED_SERVER_BIN" ]]; then
+    echo "error: Host runtime 解析未返回 bin 路径(@deepseek-ai/dsh@$PREPARED_DSH_VERSION)" >&2
+    return 1
+  fi
+}
+
 start_server() {
-  local VER pid server_bin resolve_out
+  local VER pid server_bin runtime_kind runtime_owner runtime_compat runtime_fingerprint
   local -a env_args=() strip=()
   # 官方 dsh-web-app 默认也会打开浏览器。始终给官方 CLI 传 --no-open，
   # 确保本启动器的 open_ui 是唯一 UI opener（否则一次 dsh 会打开两个 tab）。
-  VER="$(dsh_version)"
-  if [[ -z "$VER" ]]; then
-    echo "error: dshVersion missing in $REPO/dsh.yaml" >&2
-    exit 1
-  fi
-  mkdir -p "$DSH_HOME"
-
-  # Resolve the CLI entry (DSH_BIN → npx cache → pnpm dir → install channels).
-  # Resolution may install, so it runs with the repo registry applied; the
-  # server itself is then launched with a clean environment.
-  #
-  # A cold start installs the CLI first, and those installers stream progress
-  # onto this same stdout, so read the DSH_SERVER_BIN= marker line instead of
-  # treating the whole capture as a path.
-  if ! resolve_out="$(DSH_CLI_VERSION="$VER" with_repo_registry node "$REPO/scripts/dsh-server-bin.mjs")"; then
-    echo "error: 无法解析 DSH CLI(@deepseek-ai/dsh@$VER)" >&2
-    exit 1
-  fi
-  server_bin="$(printf '%s\n' "$resolve_out" | sed -n 's/^DSH_SERVER_BIN=//p' | tail -1)"
-  if [[ -z "$server_bin" ]]; then
-    echo "error: DSH CLI 解析未返回 bin 路径(@deepseek-ai/dsh@$VER)" >&2
-    exit 1
-  fi
+  if [[ -z "$PREPARED_SERVER_BIN" ]]; then prepare_server_runtime || exit 1; fi
+  VER="$PREPARED_DSH_VERSION"
+  server_bin="$PREPARED_SERVER_BIN"
+  runtime_kind="$PREPARED_RUNTIME_KIND"
+  runtime_owner="$PREPARED_RUNTIME_OWNER"
+  runtime_compat="$PREPARED_RUNTIME_COMPAT"
+  runtime_fingerprint="$PREPARED_RUNTIME_FINGERPRINT"
 
   while IFS= read -r -d '' arg; do strip+=("$arg"); done < <(server_env_strip_args)
   env_args=(env "${strip[@]+"${strip[@]}"}")
   # Re-apply the user's own override on top of the cleaned environment.
   [[ -n "$DSH_USER_REGISTRY" ]] && env_args+=("npm_config_registry=$DSH_USER_REGISTRY")
 
-  record_startup "$VER"
+  echo "Host runtime: kind=${runtime_kind:-unknown} owner=${runtime_owner:-none} compat=${runtime_compat:-none} fingerprint=${runtime_fingerprint:-none} dshVersion=$VER"
+  record_startup "$VER" "${runtime_kind:-unknown}" "${runtime_owner:-none}" "${runtime_compat:-none}" "${runtime_fingerprint:-none}"
   if [[ $FOREGROUND -eq 1 ]]; then
     "${env_args[@]}" node "$server_bin" web --port "$PORT" --no-open ${PASSTHRU[@]+"${PASSTHRU[@]}"} &
     pid=$!
@@ -561,7 +554,6 @@ start_server() {
       else
         echo "dsh 已启动: http://127.0.0.1:$PORT (dshVersion=$VER;未自动打开 UI,可 dsh --open)"
       fi
-      print_lan
       print_plugins
     elif kill -0 "$pid" 2>/dev/null; then
       echo "warn: server did not answer on port $PORT within 30s" >&2
@@ -579,7 +571,6 @@ start_server() {
       else
         echo "dsh 已启动: http://127.0.0.1:$PORT (dshVersion=$VER;未自动打开 UI,可 dsh --open)"
       fi
-      print_lan
       print_plugins
     elif kill -0 "$pid" 2>/dev/null; then
       echo "warn: server did not answer on port $PORT — see $DSH_HOME/dsh.log" >&2
@@ -711,6 +702,8 @@ if [[ $BUILD -eq 1 ]]; then
 fi
 
 if [[ $RESTART -eq 1 ]]; then
+  # Validate/build the replacement runtime before stopping a healthy Host.
+  prepare_server_runtime || exit 1
   do_restart
 fi
 
@@ -718,13 +711,11 @@ fi
 if is_server_up; then
   if [[ $NO_OPEN -eq 1 ]]; then
     echo "dsh 已在运行: http://127.0.0.1:$PORT"
-    print_lan
     print_plugins
     exit 0
   fi
   if is_ui_open; then
     echo "dsh 已在运行(UI 已打开): http://127.0.0.1:$PORT"
-    print_lan
     print_plugins
     exit 0
   fi
@@ -733,7 +724,6 @@ if is_server_up; then
   else
     echo "dsh 已在运行: http://127.0.0.1:$PORT (未自动打开 UI,可 dsh --open)"
   fi
-  print_lan
   print_plugins
   exit 0
 fi

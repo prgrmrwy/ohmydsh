@@ -1,0 +1,609 @@
+import type { Context } from '@deepseek-ai/cordis'
+import { SessionId, type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
+import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  composeLocusMainBriefing,
+  createProductionLocusDshPort,
+  LocusDshCapabilityUnavailableError,
+  type LocusWorkspaceEntity,
+  type ProductionLocusDshPortDeps,
+} from '../src/host/locus/dsh-port.js'
+
+function fakeSession(id: string): Session {
+  return { id: SessionId(id) } as unknown as Session
+}
+
+function fakeEvents(events: readonly unknown[]): readonly SessionEvent[] {
+  return events as readonly SessionEvent[]
+}
+
+function workspace(
+  id: string,
+  options: {
+    readonly sessions?: readonly string[]
+    readonly status?: 'ok' | 'missing-dir'
+    readonly order?: string[]
+  } = {},
+): LocusWorkspaceEntity {
+  const order = options.order
+  return {
+    id: WorkspaceId(id),
+    path: `/workspaces/${id}`,
+    title: `Workspace ${id}`,
+    sessionIds: (options.sessions ?? []).map(SessionId),
+    status: vi.fn(async () => options.status ?? 'ok'),
+    attachSession: vi.fn(async () => {
+      order?.push('attach')
+    }),
+    detachSession: vi.fn(async () => {
+      order?.push('detach')
+    }),
+  }
+}
+
+function harness(
+  overrides: Partial<ProductionLocusDshPortDeps> = {},
+): ProductionLocusDshPortDeps {
+  const defaultWorkspace = workspace('ws-default')
+  return {
+    repository: {
+      getChannelConfig: () => ({ defaultWorkspaceId: 'ws-default' }),
+    },
+    sessionController: {
+      inspect: vi.fn(async sessionId => ({
+        meta: { id: sessionId },
+        events: [],
+      })),
+    },
+    workspaceRegistry: {
+      get: id => (id === defaultWorkspace.id ? defaultWorkspace : undefined),
+      list: () => [defaultWorkspace],
+      archivedSessionIds: [],
+    },
+    agents: {
+      create: vi.fn(async options => {
+        const agent = { id: options.sessionId }
+        await options.setup?.({ scope: 'agent' } as unknown as Context, agent)
+        return {
+          agent,
+          dispose: vi.fn(async () => undefined),
+        }
+      }),
+    },
+    agentPresets: {
+      defaultId: 'standard',
+      mount: vi.fn(async () => undefined),
+    },
+    agentDefaultModel: {
+      currentSelection: () => ({ provider: 'deepseek', model: 'deepseek-chat' }),
+    },
+    sessions: {
+      get: id => fakeSession(String(id)),
+      flush: vi.fn(async () => true),
+    },
+    sessionTitle: {
+      rename: vi.fn((_session, title) => ({ title })),
+    },
+    foldSessionTitle: vi.fn(() => undefined),
+    createSessionId: () => 'session-created-main',
+    ...overrides,
+  }
+}
+
+describe('production LocusDshPort session resolution', () => {
+  it('cold-inspects a session, requires Workspace membership and folds its durable title', async () => {
+    const events = fakeEvents([{ type: 'session/title', data: { title: 'Cold title' } }])
+    const ws = workspace('ws-project', { sessions: ['session-cold'] })
+    const inspect = vi.fn(async () => ({
+      meta: { id: SessionId('session-cold') },
+      events,
+    }))
+    const foldSessionTitle = vi.fn(() => ({ title: 'Cold title' }))
+    const deps = harness({
+      sessionController: { inspect },
+      workspaceRegistry: {
+        get: id => (id === ws.id ? ws : undefined),
+        list: () => [ws],
+        archivedSessionIds: [],
+      },
+      foldSessionTitle,
+    })
+
+    await expect(createProductionLocusDshPort(deps).resolveSession('session-cold')).resolves.toEqual({
+      id: 'session-cold',
+      workspaceId: 'ws-project',
+      title: 'Cold title',
+      state: 'active',
+    })
+    expect(inspect).toHaveBeenCalledWith('session-cold')
+    expect(foldSessionTitle).toHaveBeenCalledWith(events)
+  })
+
+  it('preserves archived state instead of treating history as active', async () => {
+    const ws = workspace('ws-project', { sessions: ['session-archived'] })
+    const deps = harness({
+      sessionController: {
+        inspect: vi.fn(async () => ({
+          meta: { id: SessionId('session-archived') },
+          events: [],
+        })),
+      },
+      workspaceRegistry: {
+        get: id => (id === ws.id ? ws : undefined),
+        list: () => [ws],
+        archivedSessionIds: [SessionId('session-archived')],
+      },
+    })
+
+    await expect(createProductionLocusDshPort(deps).resolveSession('session-archived')).resolves.toEqual({
+      id: 'session-archived',
+      workspaceId: 'ws-project',
+      state: 'archived',
+    })
+  })
+
+  it('returns unavailable for a missing persisted session', async () => {
+    const deps = harness({
+      sessionController: {
+        inspect: vi.fn(async () => {
+          throw new Error('session not found')
+        }),
+      },
+    })
+
+    await expect(createProductionLocusDshPort(deps).resolveSession('session-missing')).resolves.toBeUndefined()
+  })
+
+  it('fails closed when no Workspace owns the session', async () => {
+    const deps = harness({
+      workspaceRegistry: {
+        get: () => undefined,
+        list: () => [],
+        archivedSessionIds: [],
+      },
+    })
+
+    await expect(createProductionLocusDshPort(deps).resolveSession('session-unfiled')).resolves.toBeUndefined()
+  })
+
+  it('fails closed when several Workspaces claim the same session', async () => {
+    const first = workspace('ws-one', { sessions: ['session-conflict'] })
+    const second = workspace('ws-two', { sessions: ['session-conflict'] })
+    const deps = harness({
+      workspaceRegistry: {
+        get: () => undefined,
+        list: () => [first, second],
+        archivedSessionIds: [],
+      },
+    })
+
+    await expect(createProductionLocusDshPort(deps).resolveSession('session-conflict')).resolves.toBeUndefined()
+  })
+
+  it('fails closed when the owning Workspace directory is missing', async () => {
+    const ws = workspace('ws-project', {
+      sessions: ['session-dead-workspace'],
+      status: 'missing-dir',
+    })
+    const deps = harness({
+      workspaceRegistry: {
+        get: id => (id === ws.id ? ws : undefined),
+        list: () => [ws],
+        archivedSessionIds: [],
+      },
+    })
+
+    await expect(
+      createProductionLocusDshPort(deps).resolveSession('session-dead-workspace'),
+    ).resolves.toBeUndefined()
+    expect(ws.status).toHaveBeenCalledOnce()
+  })
+
+  it('projects child lineage so the controller can reject it as a main', async () => {
+    const ws = workspace('ws-project', { sessions: ['session-child'] })
+    const deps = harness({
+      sessionController: {
+        inspect: vi.fn(async () => ({
+          meta: {
+            id: SessionId('session-child'),
+            parentSession: SessionId('session-parent'),
+          },
+          events: [],
+        })),
+      },
+      workspaceRegistry: {
+        get: id => (id === ws.id ? ws : undefined),
+        list: () => [ws],
+        archivedSessionIds: [],
+      },
+    })
+
+    await expect(createProductionLocusDshPort(deps).resolveSession('session-child')).resolves.toMatchObject({
+      parentSessionId: 'session-parent',
+    })
+  })
+})
+
+describe('production LocusDshPort default Workspace resolution', () => {
+  it.each([
+    ['not configured', undefined, undefined, 'ok'],
+    ['unknown', 'ws-missing', undefined, 'ok'],
+    ['missing directory', 'ws-default', 'present', 'missing-dir'],
+  ] as const)('rejects an invalid default Workspace: %s', async (_label, configured, present, status) => {
+    const ws = workspace('ws-default', { status })
+    const deps = harness({
+      repository: {
+        getChannelConfig: () => (
+          configured === undefined ? {} : { defaultWorkspaceId: configured }
+        ),
+      },
+      workspaceRegistry: {
+        get: id => (present === 'present' && id === ws.id ? ws : undefined),
+        list: () => present === 'present' ? [ws] : [],
+        archivedSessionIds: [],
+      },
+    })
+
+    await expect(createProductionLocusDshPort(deps).resolveDefaultWorkspace()).resolves.toBeUndefined()
+  })
+
+  it('returns the configured Workspace only after its live status succeeds', async () => {
+    const ws = workspace('ws-default')
+    const deps = harness({
+      workspaceRegistry: {
+        get: id => (id === ws.id ? ws : undefined),
+        list: () => [ws],
+        archivedSessionIds: [],
+      },
+    })
+
+    await expect(createProductionLocusDshPort(deps).resolveDefaultWorkspace()).resolves.toEqual({
+      id: 'ws-default',
+      title: 'Workspace ws-default',
+    })
+    expect(ws.status).toHaveBeenCalledOnce()
+  })
+})
+
+describe('production LocusDshPort main creation', () => {
+  it('composes Pet\'s own preset instead of the drifting Host default, awaits mount, attaches, then renames', async () => {
+    const order: string[] = []
+    const ws = workspace('ws-default', { order })
+    // A Host default that differs from Pet's own preset, and that hot-reloads
+    // mid-setup. Locus children compose themselves from whatever this creation
+    // mounts, so a drifting default would land in the child's composition — and
+    // `standard` registers its `subagent` row per agent, which no tool filter
+    // can remove. The fixed preset is what keeps that row on the standing layer.
+    let preset = 'standard-v1'
+    let releaseMount!: () => void
+    const mountGate = new Promise<void>(resolve => {
+      releaseMount = resolve
+    })
+    const mount = vi.fn(async (_scope: Context, id: string) => {
+      order.push(`mount-start:${id}`)
+      await mountGate
+      order.push(`mount-end:${id}`)
+      preset = 'standard-v2'
+    })
+    const dispose = vi.fn(async () => {
+      order.push('dispose')
+    })
+    const create = vi.fn(async options => {
+      order.push('create')
+      const agent = { id: options.sessionId }
+      await options.setup?.({ scope: 'main' } as unknown as Context, agent)
+      order.push('published')
+      return { agent, dispose }
+    })
+    const rename = vi.fn((_session: Session, title: string) => {
+      order.push('rename')
+      return { title }
+    })
+    const flush = vi.fn(async () => {
+      order.push('flush')
+      return true
+    })
+    const base = harness()
+    const deps = harness({
+      workspaceRegistry: {
+        get: id => (id === ws.id ? ws : undefined),
+        list: () => [ws],
+        archivedSessionIds: [],
+      },
+      agents: { create },
+      agentPresets: {
+        get defaultId() {
+          return preset
+        },
+        mount,
+      },
+      sessionTitle: { rename },
+      sessions: { get: id => fakeSession(String(id)), flush },
+      agentDefaultModel: base.agentDefaultModel,
+    })
+
+    const creation = createProductionLocusDshPort(deps).createMainSession({
+      workspaceId: 'ws-default',
+      label: 'Locus 主会话 · Project',
+      chatId: 'oc_project',
+    })
+    await vi.waitFor(() => {
+      expect(order).toEqual(['create', 'mount-start:dsh-pet-executor'])
+    })
+    releaseMount()
+    const created = await creation
+
+    expect(order).toEqual([
+      'create',
+      'mount-start:dsh-pet-executor',
+      'mount-end:dsh-pet-executor',
+      'published',
+      'attach',
+      'rename',
+      'flush',
+    ])
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-created-main',
+      meta: {
+        cwd: '/workspaces/ws-default',
+        agentPreset: 'dsh-pet-executor',
+      },
+      agentOptions: { provider: 'deepseek', model: 'deepseek-chat' },
+    }))
+    expect(created).toMatchObject({
+      id: 'session-created-main',
+      workspaceId: 'ws-default',
+      title: 'Locus 主会话 · Project',
+    })
+    // `releaseSession` is the RESTART-SAFE compensation path, deliberately
+    // narrower than the creator-held rollback closure: it only unlists the
+    // session from the workspace that still claims it, so startup
+    // reconciliation can repair an operation whose creator died. Its absence
+    // previously made such an operation permanently unrecoverable.
+    const port = createProductionLocusDshPort(deps)
+    expect(typeof port.releaseSession).toBe('function')
+    const listed = workspace('ws-default', { sessions: ['session-created-main'] })
+    const listedDeps = { ...deps, workspaceRegistry: { ...deps.workspaceRegistry, list: () => [listed] } }
+    await createProductionLocusDshPort(listedDeps).releaseSession('session-created-main')
+    // Detach is the ONLY effect: session history is deliberately retained.
+    expect(listed.detachSession).toHaveBeenCalledWith('session-created-main')
+
+    // Idempotent, and a session no workspace claims is ALREADY released. The
+    // session log outlives the attachment, so treating a readable log as
+    // "still attached" rejected the very state this method produces and left
+    // the operation permanently in needs-recovery.
+    const releasedDeps = { ...deps, workspaceRegistry: { ...deps.workspaceRegistry, list: () => [] } }
+    await expect(createProductionLocusDshPort(releasedDeps).releaseSession('session-created-main'))
+      .resolves.toBeUndefined()
+  })
+
+  it('returns an ownership-bound rollback that attempts detach and handle disposal', async () => {
+    const order: string[] = []
+    const detachFailure = new Error('detach failed')
+    const disposeFailure = new Error('dispose failed')
+    const ws = workspace('ws-default', { order })
+    ws.detachSession = vi.fn(async () => {
+      order.push('detach')
+      throw detachFailure
+    })
+    const dispose = vi.fn(async () => {
+      order.push('dispose')
+      throw disposeFailure
+    })
+    const deps = harness({
+      workspaceRegistry: {
+        get: id => (id === ws.id ? ws : undefined),
+        list: () => [ws],
+        archivedSessionIds: [],
+      },
+      agents: {
+        create: vi.fn(async options => {
+          const agent = { id: SessionId(String(options.sessionId)) }
+          await options.setup?.({} as Context, agent)
+          return { agent, dispose }
+        }),
+      },
+    })
+
+    const created = await createProductionLocusDshPort(deps).createMainSession({
+      workspaceId: 'ws-default',
+      label: 'Main',
+      chatId: 'oc_project',
+    })
+
+    await expect(created.rollback?.()).rejects.toSatisfy((error: unknown) => {
+      return error instanceof AggregateError &&
+        error.errors.includes(detachFailure) &&
+        error.errors.includes(disposeFailure)
+    })
+    expect(order.slice(-2)).toEqual(['detach', 'dispose'])
+  })
+
+  it('rolls back the owned Agent when post-create rename fails', async () => {
+    const order: string[] = []
+    const ws = workspace('ws-default', { order })
+    const dispose = vi.fn(async () => {
+      order.push('dispose')
+    })
+    const deps = harness({
+      workspaceRegistry: {
+        get: id => (id === ws.id ? ws : undefined),
+        list: () => [ws],
+        archivedSessionIds: [],
+      },
+      agents: {
+        create: vi.fn(async options => {
+          const agent = { id: SessionId(String(options.sessionId)) }
+          await options.setup?.({} as Context, agent)
+          return { agent, dispose }
+        }),
+      },
+      sessionTitle: {
+        rename: vi.fn(() => {
+          order.push('rename')
+          throw new Error('rename failed')
+        }),
+      },
+    })
+
+    await expect(createProductionLocusDshPort(deps).createMainSession({
+      workspaceId: 'ws-default',
+      label: 'Main',
+      chatId: 'oc_project',
+    })).rejects.toThrow('rename failed')
+    expect(order).toEqual(['attach', 'rename', 'detach', 'dispose'])
+  })
+})
+
+describe('locus main opening briefing', () => {
+  const facts = {
+    chatId: 'oc_project',
+    workspaceId: 'ws-default',
+    workspacePath: '/workspaces/ws-default',
+    label: 'Locus 主会话 · Project',
+  }
+
+  it('states the identity facts an owner needs to tell this session apart', () => {
+    const text = composeLocusMainBriefing(facts)
+
+    expect(text).toContain(facts.label)
+    expect(text).toContain(facts.chatId)
+    expect(text).toContain(facts.workspaceId)
+    expect(text).toContain(facts.workspacePath)
+  })
+
+  it('frames itself as context and asks the main to acknowledge and stand by', () => {
+    const text = composeLocusMainBriefing(facts)
+
+    // A capable model handed a project path would otherwise start working.
+    expect(text).toContain('只是陈述上下文')
+    expect(text).toContain('不是任务')
+    expect(text).toMatch(/了解|知道了/)
+    expect(text).toContain('待命')
+    // The main must not believe it will be fed the Feishu traffic.
+    expect(text).toContain('不会自动回传')
+  })
+
+  it('briefs through the ordinary follow-up turn, after the durable rename', async () => {
+    const order: string[] = []
+    const ws = workspace('ws-default', { order })
+    const brief = vi.fn(() => {
+      order.push('brief')
+    })
+    const deps = harness({
+      workspaceRegistry: {
+        get: id => (id === ws.id ? ws : undefined),
+        list: () => [ws],
+        archivedSessionIds: [],
+      },
+      agents: {
+        create: vi.fn(async options => {
+          const agent = { id: SessionId(String(options.sessionId)) }
+          await options.setup?.({} as Context, agent)
+          return { agent, dispose: vi.fn(async () => undefined) }
+        }),
+        brief,
+      } as unknown as ProductionLocusDshPortDeps['agents'],
+      sessionTitle: {
+        rename: vi.fn((_session, title) => {
+          order.push('rename')
+          return { title }
+        }),
+      },
+      sessions: {
+        get: id => fakeSession(String(id)),
+        flush: vi.fn(async () => {
+          order.push('flush')
+          return true
+        }),
+      },
+    })
+
+    await createProductionLocusDshPort(deps).createMainSession({
+      workspaceId: 'ws-default',
+      label: facts.label,
+      chatId: facts.chatId,
+    })
+
+    expect(order).toEqual(['attach', 'rename', 'brief', 'flush'])
+    expect(brief).toHaveBeenCalledWith(
+      expect.objectContaining({ id: SessionId('session-created-main') }),
+      composeLocusMainBriefing(facts),
+    )
+  })
+
+  it('still provisions a main when the Host exposes no briefing seam', async () => {
+    const deps = harness({
+      agents: {
+        create: vi.fn(async options => {
+          const agent = { id: SessionId(String(options.sessionId)) }
+          await options.setup?.({} as Context, agent)
+          return { agent, dispose: vi.fn(async () => undefined) }
+        }),
+      } as unknown as ProductionLocusDshPortDeps['agents'],
+    })
+
+    await expect(createProductionLocusDshPort(deps).createMainSession({
+      workspaceId: 'ws-default',
+      label: facts.label,
+      chatId: facts.chatId,
+    })).resolves.toMatchObject({ id: 'session-created-main' })
+  })
+})
+
+describe('production LocusDshPort child capability gate', () => {
+  it('delegates to the reviewed idle child provisioner when composed', async () => {
+    const commit = vi.fn()
+    const rollback = vi.fn(async () => undefined)
+    const create = vi.fn(async () => ({
+      childSessionId: 'child-reserved',
+      commit,
+      rollback,
+    }))
+    const port = createProductionLocusDshPort(harness({ idleChildren: { create } }))
+
+    const child = await port.createChildSession({
+      parentSessionId: 'main-1',
+      workspaceId: 'ws-default',
+      locusId: 'locus-1',
+      generation: 1,
+      label: '项目子会话',
+      endpoint: { chatId: 'oc-project' },
+      permission: 'read',
+    })
+
+    expect(create).toHaveBeenCalledWith({
+      parentSessionId: 'main-1',
+      workspaceId: 'ws-default',
+      locusId: 'locus-1',
+      generation: 1,
+      label: '项目子会话',
+      permission: 'read',
+    })
+    expect(child).toMatchObject({
+      id: 'child-reserved',
+      parentSessionId: 'main-1',
+      workspaceId: 'ws-default',
+      commit,
+      rollback,
+    })
+  })
+
+  it('is explicitly unavailable until the idle-runtime patch is connected', async () => {
+    const port = createProductionLocusDshPort(harness())
+
+    await expect(port.createChildSession({
+      parentSessionId: 'session-parent',
+      workspaceId: 'ws-default',
+      locusId: 'locus-1',
+      generation: 1,
+      label: 'Locus child',
+      endpoint: { chatId: 'oc_project' },
+      permission: 'read',
+    })).rejects.toMatchObject({
+      name: 'LocusDshCapabilityUnavailableError',
+      code: 'CAPABILITY_UNAVAILABLE',
+    } satisfies Partial<LocusDshCapabilityUnavailableError>)
+  })
+})

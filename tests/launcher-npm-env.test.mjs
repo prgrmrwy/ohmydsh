@@ -55,7 +55,7 @@ async function sandbox() {
   // 安装器(stdio:'inherit')与结果共用 stdout 的真实形态。
   const before = patched
   patched = patched.replace(
-    /if ! resolve_out="\$\(DSH_CLI_VERSION="\$VER" with_repo_registry node "\$REPO\/scripts\/dsh-server-bin\.mjs"\)"; then/,
+    /if ! resolve_out="\$\(DSH_CLI_VERSION="\$PREPARED_DSH_VERSION" DSH_REPO_ROOT="\$REPO" with_repo_registry node "\$REPO\/scripts\/dsh-server-bin\.mjs"\)"; then/,
     'if ! resolve_out="$(printf \'0.0.0-installer-noise\\nDSH_SERVER_BIN=%s\\n\' "$REPO/node_modules/@deepseek-ai/dsh/lib/bin.js")"; then',
   )
   assert.notEqual(patched, before, 'CLI 解析调用未被替换,测试桩与实现已漂移')

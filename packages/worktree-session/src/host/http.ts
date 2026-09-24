@@ -4,7 +4,7 @@ import type { OperationRecord, SourceBindingRequest, StartOperationRequest, Wire
 import { ROUTES } from '../wire.js'
 import { wireError, WsError } from './errors.js'
 import { createGitClient, discoverRepo, listRefs, listWorktrees } from './git.js'
-import { bindSource, findBySourceSession, loadOperation, sessionStatus, startOperation, updateSourceBinding } from './operation.js'
+import { bindSource, findBySourceSession, loadOperation, sessionStatus, startOperation } from './operation.js'
 import { wsClean, wsPromote, wsStatus } from './maintenance.js'
 
 const BODY_LIMIT = 64 * 1024
@@ -64,6 +64,12 @@ function strictObject(body: unknown, keys: readonly string[]): Record<string, un
 
 function stringField(record: Record<string, unknown>, key: string): string {
   if (typeof record[key] !== 'string' || record[key].trim() === '') throw new WsError('INVALID_REQUEST', `${key} must be a non-empty string`)
+  return record[key]
+}
+
+/** Text may be empty for an attachment-only official SessionInput draft. */
+function textField(record: Record<string, unknown>, key: string): string {
+  if (typeof record[key] !== 'string') throw new WsError('INVALID_REQUEST', `${key} must be a string`)
   return record[key]
 }
 
@@ -133,7 +139,7 @@ export function createRoutes(deps: HostRouteDeps = {}): readonly RouteRegistrati
         operationId: stringField(parsed, 'operationId'),
         repoPath: absolutePath(parsed, 'repoPath'),
         baseRef: stringField(parsed, 'baseRef'),
-        taskText: stringField(parsed, 'taskText'),
+        taskText: textField(parsed, 'taskText'),
         dependencyMode: parsed.dependencyMode === 'lean' ? 'lean' : (() => { throw new WsError('INVALID_REQUEST', 'dependencyMode must be lean') })(),
       }
       return startOperation(request)
@@ -147,27 +153,18 @@ export function createRoutes(deps: HostRouteDeps = {}): readonly RouteRegistrati
     }),
     route(ROUTES.bindSource, async body => {
       const parsed = strictObject(body, ['operationId', 'repoPath', 'sourceSessionId', 'action'])
-      if (parsed.action !== 'bind-source' && parsed.action !== 'claim-submit' && parsed.action !== 'admitted' && parsed.action !== 'uncertain' && parsed.action !== 'cleaned') throw new WsError('INVALID_REQUEST', 'Invalid source binding action')
+      if (parsed.action !== 'bind-source') throw new WsError('INVALID_REQUEST', 'Invalid source binding action')
       const request: SourceBindingRequest = {
         operationId: stringField(parsed, 'operationId'),
         repoPath: absolutePath(parsed, 'repoPath'),
         sourceSessionId: stringField(parsed, 'sourceSessionId'),
         action: parsed.action,
       }
-      if (request.action === 'bind-source') {
-        const repo = await discoverRepo(request.repoPath)
-        const operation = await loadOperation(repo.gitCommonDir, request.operationId)
-        if (operation === undefined) throw new WsError('OPERATION_NOT_FOUND', 'Prepared operation not found')
-        deps.bindLiveSource?.(request.sourceSessionId, operation, { requireBlank: true })
-        const result = await bindSource(request)
-        recordBind(request.sourceSessionId, await loadBySession(request.repoPath, request.sourceSessionId))
-        return result
-      }
-      const current = await loadBySession(request.repoPath, request.sourceSessionId)
-      if (current === undefined) throw new WsError('OPERATION_NOT_FOUND', 'Source Session binding not found')
-      // Claim is admitted only after the exact live Agent policy has been reinstalled.
-      if (request.action === 'claim-submit') deps.bindLiveSource?.(request.sourceSessionId, current, { requireBlank: true })
-      const result = await updateSourceBinding(request)
+      const repo = await discoverRepo(request.repoPath)
+      const operation = await loadOperation(repo.gitCommonDir, request.operationId)
+      if (operation === undefined) throw new WsError('OPERATION_NOT_FOUND', 'Prepared operation not found')
+      deps.bindLiveSource?.(request.sourceSessionId, operation, { requireBlank: true })
+      const result = await bindSource(request)
       recordBind(request.sourceSessionId, await loadBySession(request.repoPath, request.sourceSessionId))
       return result
     }),

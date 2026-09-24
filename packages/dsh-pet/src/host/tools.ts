@@ -1,0 +1,552 @@
+/**
+ * Pet Host tools registered on the executor Agent's scoped composition.
+ *
+ * There is exactly ONE, and that is the design: Pet is a runtime, not a
+ * catalog of per-capability adapters. A capability is an installed Skill that
+ * drives ordinary DSH tools and owns its own bounded behavior, so adding one
+ * is an install rather than a code change.
+ *
+ * `pet_context` is CALLER-BOUND: it resolves the Invocation from the real
+ * executing session id the agent loop sets on the execution, never from an
+ * argument, and declares no parameters at all — so a model cannot substitute
+ * a different Task or session.
+ *
+ * SCOPE IS PART OF THE CONTRACT. `ctx.tools.register()` resolves its target
+ * layer from the CALLING context's scope tag and falls back to the GLOBAL
+ * layer when there is none — silently, with no error. Registering from the
+ * Host plugin context therefore published `pet_context` to every ordinary DSH
+ * session, whose model was offered a tool that can only ever answer
+ * `NOT_A_PET_SESSION`. Always register through a Pet executor's scoped agent
+ * context (`executorSetup` in `src/index.ts`), never the Host context.
+ *
+ * Registration goes through `defineTool` so the parameter and output schemas
+ * are checked at compile time. `parameters` is a FLAT property map (an
+ * implicit open object root with per-property `required: true`), not a raw
+ * JSON Schema object.
+ */
+
+import type { Context } from '@deepseek-ai/cordis'
+import { defineTool } from '@deepseek-ai/dsh-tools'
+import {
+  executePetContext,
+  PET_CONTEXT_TOOL,
+  type PetContextDependencies,
+} from './context-tool.js'
+import { PetError } from './errors.js'
+import type { PetRepository } from './repository.js'
+import type { LarkClient } from './channel/lark.js'
+import { resolveLedgerCaller, LedgerCallerUnavailableError, type LedgerCallerLocusLookup } from './ledger/caller.js'
+import { lookupParentTranscript, type ParentLookupDeps } from './ledger/parent-lookup.js'
+import { readSharedLedger, type LedgerReadDeps } from './ledger/ledger-read.js'
+import { trackTodo, type TrackDeps } from './ledger/track.js'
+import { INTENT_TRIAGE_GUIDANCE } from './ledger/prompt.js'
+import type {
+  LocusContextRecord,
+  LocusCurrentAuthorizationResult,
+} from './locus/context-repository.js'
+import type {
+  LocusCurrentCapabilityReason,
+} from './locus/turn-observer.js'
+
+
+
+/**
+ * Zero-argument by contract: there is no selector for a model to substitute.
+ */
+export const PET_CONTEXT_PARAMETERS = {} as const
+export const PET_LOCUS_FINISH_TOOL = 'pet_locus_finish'
+export const PET_LOCUS_WAIT_TOOL = 'pet_locus_wait'
+/** `pet-locus-intent-triage`: caller-bound, zero-argument, read-only. */
+export const PET_LOCUS_PARENT_LOOKUP_TOOL = 'pet_locus_parent_lookup'
+export const PET_LOCUS_LEDGER_READ_TOOL = 'pet_locus_ledger_read'
+export const PET_LOCUS_TRACK_TOOL = 'pet_locus_track'
+
+export type PetLocusFinishOutcome = 'reply' | 'no-reply'
+
+export interface PetLocusFinishInput {
+  readonly childSessionId: string
+  readonly locus: import('./locus/context-repository.js').LocusContextRecord
+  readonly delivery: import('./locus/context-repository.js').LocusCurrentDelivery
+  readonly outcome: PetLocusFinishOutcome
+  readonly text?: string
+  readonly reason?: string
+}
+
+export interface PetLocusFinishResult { readonly sent: boolean; readonly outcome: PetLocusFinishOutcome }
+export interface PetLocusWaitInput {
+  readonly childSessionId: string
+  readonly locus: import('./locus/context-repository.js').LocusContextRecord
+  readonly delivery: import('./locus/context-repository.js').LocusCurrentDelivery
+  readonly waitMinutes: number
+  readonly reason?: string
+}
+export interface PetLocusWaitResult {
+  readonly accepted: boolean
+  readonly deadline: number
+  readonly remainingMinutes: number
+  readonly capped: boolean
+}
+
+type LocusToolOperation = 'finish' | 'wait' | 'track'
+
+interface LocusToolCapability {
+  readonly deliveryId: string
+  readonly executionId: string
+  readonly turnId: string
+  readonly source: 'delivery' | 'agent-message'
+  readonly locusId?: string
+  readonly generation?: number
+}
+
+export interface PetLocusLifecycleDependencies {
+  readonly locusRepository: NonNullable<PetContextDependencies['locusRepository']>
+  readonly authorizeCurrentDelivery?: (
+    input: {
+      readonly childSessionId: string
+      readonly operation: LocusToolOperation
+      readonly proof?: LocusToolCapability
+    },
+  ) => import('./locus/context-repository.js').LocusContextRecord | undefined | Promise<import('./locus/context-repository.js').LocusContextRecord | undefined>
+  readonly currentCapability?: (childSessionId: string) => {
+    readonly deliveryId: string
+    readonly executionId: string
+    readonly turnId: string
+    readonly source: 'delivery' | 'agent-message'
+    readonly locusId?: string
+    readonly generation?: number
+  } | undefined
+  readonly inspectCurrentCapability?: (childSessionId: string) =>
+    | { readonly ok: true; readonly capability: LocusToolCapability }
+    | { readonly ok: false; readonly reason: LocusCurrentCapabilityReason }
+  readonly inspectCurrentDeliveryAuthorization?: (input: {
+    readonly childSessionId: string
+    readonly operation: LocusToolOperation
+    readonly proof?: LocusToolCapability
+  }) => LocusCurrentAuthorizationResult | Promise<LocusCurrentAuthorizationResult>
+  /** Stable low-cardinality security diagnostic; receives no endpoint or Delivery ids. */
+  readonly logAuthorizationRefusal?: (input: {
+    readonly operation: LocusToolOperation
+    readonly reason: LocusCurrentCapabilityReason
+  }) => void
+  readonly finishCurrentDelivery?: (input: PetLocusFinishInput) => PetLocusFinishResult | Promise<PetLocusFinishResult>
+  readonly waitCurrentDelivery?: (input: PetLocusWaitInput) => PetLocusWaitResult | Promise<PetLocusWaitResult>
+}
+
+export interface PetLocusFinishDependencies extends PetLocusLifecycleDependencies {
+  /**
+   * Retained only as a composition-time capability description. The tool never
+   * calls this adapter directly: finish must go through the durable lifecycle
+   * callback so the Host can perform its finishing CAS and queue advancement.
+   */
+  readonly lark?: Pick<LarkClient, 'replyToTarget'>
+}
+
+/** Minimal execution view Pet reads; the agent loop sets `agent`. */
+interface ExecutionLike {
+  readonly agent?: { readonly id: unknown }
+}
+
+type ToolArguments = Record<string, unknown>
+
+/**
+ * Validate the raw argument boundary even when a definition is invoked
+ * directly by a test or an embedded caller instead of through ToolRuntime.
+ * ToolRuntime also validates the schema, but this explicit check prevents a
+ * selector or routing field from ever reaching a lifecycle callback when a
+ * caller bypasses that pipeline.
+ */
+function requireKnownArguments(
+  args: unknown,
+  allowed: readonly string[],
+  toolName: string,
+): ToolArguments {
+  if (args === null || typeof args !== 'object' || Array.isArray(args)) {
+    throw new PetError('INVALID_REQUEST', `${toolName} arguments must be an object.`)
+  }
+  const prototype = Object.getPrototypeOf(args)
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new PetError('INVALID_REQUEST', `${toolName} arguments must be a plain object.`)
+  }
+  for (const key of Reflect.ownKeys(args)) {
+    if (typeof key !== 'string' || !allowed.includes(key)) {
+      throw new PetError('INVALID_REQUEST', `${toolName} does not accept argument '${String(key)}'.`)
+    }
+  }
+  return args as ToolArguments
+}
+
+function hasOwnArgument(args: ToolArguments, name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(args, name)
+}
+
+interface CurrentAuthorizationDependencies {
+  readonly locusRepository?: PetLocusLifecycleDependencies['locusRepository']
+  readonly authorizeCurrentDelivery?: PetLocusLifecycleDependencies['authorizeCurrentDelivery']
+  readonly currentCapability?: PetLocusLifecycleDependencies['currentCapability']
+  readonly inspectCurrentCapability?: PetLocusLifecycleDependencies['inspectCurrentCapability']
+  readonly inspectCurrentDeliveryAuthorization?: PetLocusLifecycleDependencies['inspectCurrentDeliveryAuthorization']
+  readonly logAuthorizationRefusal?: PetLocusLifecycleDependencies['logAuthorizationRefusal']
+}
+
+const AUTHORIZATION_ERROR_MESSAGE = 'This operation is not authorized for the current request.'
+
+function rejectAuthorization(
+  deps: CurrentAuthorizationDependencies,
+  operation: LocusToolOperation,
+  reason: LocusCurrentCapabilityReason,
+): never {
+  deps.logAuthorizationRefusal?.({ operation, reason })
+  throw new PetError('INVALID_REQUEST', AUTHORIZATION_ERROR_MESSAGE, { reason })
+}
+
+/** Shared finish/wait/track authorization composition. */
+async function resolveAuthorizedCurrent(
+  deps: CurrentAuthorizationDependencies,
+  childSessionId: string,
+  operation: LocusToolOperation,
+): Promise<LocusContextRecord> {
+  const capabilityInspection = deps.inspectCurrentCapability?.(childSessionId)
+  const proof = capabilityInspection === undefined
+    ? deps.currentCapability?.(childSessionId)
+    : capabilityInspection.ok
+      ? capabilityInspection.capability
+      : rejectAuthorization(deps, operation, capabilityInspection.reason)
+  if (proof === undefined) rejectAuthorization(deps, operation, 'capability-unavailable')
+
+  const inspectAuthorization = deps.inspectCurrentDeliveryAuthorization
+  let authorized: LocusContextRecord | undefined
+  if (inspectAuthorization !== undefined) {
+    const result = await inspectAuthorization({ childSessionId, operation, proof })
+    if (!result.ok) rejectAuthorization(deps, operation, result.reason)
+    authorized = result.locus
+  } else if (deps.authorizeCurrentDelivery !== undefined) {
+    authorized = await deps.authorizeCurrentDelivery({ childSessionId, operation, proof })
+    if (authorized === undefined) rejectAuthorization(deps, operation, 'association-unproven')
+  } else if (deps.locusRepository?.inspectCurrentDeliveryAuthorization !== undefined) {
+    const result = await deps.locusRepository.inspectCurrentDeliveryAuthorization({ childSessionId, operation, proof })
+    if (!result.ok) rejectAuthorization(deps, operation, result.reason)
+    authorized = result.locus
+  } else {
+    const authorize = deps.locusRepository?.authorizeCurrentDelivery
+    if (authorize === undefined) rejectAuthorization(deps, operation, 'capability-unavailable')
+    authorized = await authorize({ childSessionId, operation, proof })
+    if (authorized === undefined) rejectAuthorization(deps, operation, 'association-unproven')
+  }
+
+  const delivery = authorized.currentDelivery
+  if (delivery === undefined) rejectAuthorization(deps, operation, 'no-current')
+  if (authorized.locus.generation !== proof.generation && proof.generation !== undefined) {
+    rejectAuthorization(deps, operation, 'generation-mismatch')
+  }
+  if (delivery.deliveryId !== proof.deliveryId || delivery.status !== 'current' ||
+      delivery.queueState !== undefined && delivery.queueState !== 'current') {
+    rejectAuthorization(deps, operation, 'stale-delivery')
+  }
+  if (authorized.legacy === true || authorized.source === 'legacy' ||
+      authorized.locus.state !== 'active' || authorized.child.sessionId !== childSessionId ||
+      authorized.locus.locusId.trim() === '' || !Number.isSafeInteger(authorized.locus.generation) ||
+      authorized.locus.generation < 1 ||
+      authorized.permission.effective !== 'read' && authorized.permission.effective !== 'write' ||
+      delivery.childSessionId !== childSessionId || delivery.locusId !== authorized.locus.locusId ||
+      delivery.generation !== authorized.locus.generation) {
+    rejectAuthorization(deps, operation, 'association-unproven')
+  }
+  return authorized
+}
+
+/**
+ * Resolve the executing session id, failing closed when absent.
+ *
+ * Scoping the registration means a non-Pet session no longer even sees this
+ * tool, so this guard is no longer the primary defense. It is kept because it
+ * covers a DIFFERENT invariant: an execution that reaches the body with no
+ * owning agent has no caller identity to resolve, and inventing one would be
+ * the only way to answer. That must fail, whatever the tool's visibility.
+ * @param exec - The tool execution.
+ * @returns the executing session id.
+ * @throws PetError when the call has no owning agent.
+ */
+function callerSessionId(exec: ExecutionLike): string {
+  const sessionId = exec.agent?.id
+  if (sessionId === undefined || sessionId === null) {
+    throw new PetError(
+      'NOT_A_PET_SESSION',
+      'This tool must be called from a Pet executor Agent session.',
+    )
+  }
+  return String(sessionId)
+}
+
+/**
+ * Register Pet's Agent-facing tools.
+ *
+ * The stable surface is `pet_context` plus the caller-bound
+ * `pet_locus_finish` and `pet_locus_wait` tools. Pet is not a catalog of per-capability adapters — an
+ * installed Skill drives ordinary DSH tools and
+ * owns its own bounded behavior, so adding a capability never adds a tool.
+ * @param ctx - A Pet executor's SCOPED agent context. Passing an unscoped
+ * context (such as the Host plugin context) does not fail — it publishes the
+ * tool to the global layer, where every ordinary session sees it.
+ * @param deps - Repository supplying the caller's authorized Invocation and,
+ *   when integrated, an optional reverse locus lookup.
+ * @returns a disposer removing the registration.
+ */
+/**
+ * Optional `pet-locus-intent-triage` capability set. Absent entirely on a
+ * Host that has not composed the shared-fact ledger — the three tools then
+ * simply do not register, matching how `locusLifecycle` already governs
+ * `pet_locus_finish`/`pet_locus_wait`'s presence. No tool half-registers: it
+ * is either fully wired (caller resolution + its one durable capability) or
+ * absent.
+ */
+export interface PetIntentTriageDependencies {
+  /** Caller-bound locus lookup, shared by all three tools' identity resolution. */
+  readonly loci: LedgerCallerLocusLookup
+  /** Same authorization callback `pet_locus_finish`/`pet_locus_wait` use, reused for `pet_locus_track`'s stronger "current Delivery exists" proof. */
+  readonly authorizeCurrentDelivery?: (input: {
+    readonly childSessionId: string
+    readonly operation: LocusToolOperation
+    readonly proof?: LocusToolCapability
+  }) => LocusContextRecord | undefined | Promise<LocusContextRecord | undefined>
+  readonly currentCapability?: (childSessionId: string) => {
+    readonly deliveryId: string
+    readonly executionId: string
+    readonly turnId: string
+    readonly source: 'delivery' | 'agent-message'
+    readonly locusId?: string
+    readonly generation?: number
+  } | undefined
+  readonly inspectCurrentCapability?: (childSessionId: string) =>
+    | { readonly ok: true; readonly capability: LocusToolCapability }
+    | { readonly ok: false; readonly reason: LocusCurrentCapabilityReason }
+  readonly inspectCurrentDeliveryAuthorization?: (input: {
+    readonly childSessionId: string
+    readonly operation: LocusToolOperation
+    readonly proof?: LocusToolCapability
+  }) => LocusCurrentAuthorizationResult | Promise<LocusCurrentAuthorizationResult>
+  /** Stable low-cardinality security diagnostic; receives no endpoint or Delivery ids. */
+  readonly logAuthorizationRefusal?: (input: {
+    readonly operation: LocusToolOperation
+    readonly reason: LocusCurrentCapabilityReason
+  }) => void
+  readonly parentLookup?: ParentLookupDeps
+  readonly ledgerRead?: LedgerReadDeps
+  readonly track?: TrackDeps
+}
+
+export function registerPetTools(
+  ctx: Context,
+  deps: { readonly repository: PetRepository } & PetContextDependencies & {
+    readonly locusLifecycle?: PetLocusFinishDependencies
+    readonly intentTriage?: PetIntentTriageDependencies
+  },
+): () => void {
+  const disposers: (() => void)[] = []
+
+  disposers.push(
+    ctx.tools.register(
+      defineTool({
+        name: PET_CONTEXT_TOOL,
+        description:
+          'Return trusted caller-bound Pet context for this session. For an ordinary Pet ' +
+          'executor this is the current Invocation snapshot; for a unified locus child it is ' +
+          'the active locus, permission, anchor, and current Delivery when present. Takes no ' +
+          'arguments: the target is resolved from the calling session and cannot be redirected.',
+        parameters: PET_CONTEXT_PARAMETERS,
+        output: {
+          schema: {
+            type: 'object',
+            additionalProperties: false,
+            properties: { json: { type: 'string', required: true } },
+          },
+          render: (_args, value) => [{ type: 'text', text: value.json }],
+        },
+        async execute(_args, exec) {
+          const context = executePetContext(
+            deps.repository,
+            { agent: { id: callerSessionId(exec as ExecutionLike) } },
+            deps,
+          )
+          return { json: JSON.stringify(context, null, 2) }
+        },
+      }),
+    ),
+  )
+
+  const lifecycle = deps.locusLifecycle
+  if (lifecycle !== undefined) {
+    disposers.push(ctx.tools.register(defineTool({
+      name: PET_LOCUS_FINISH_TOOL,
+      description:
+        'Finish the exact current Feishu Delivery with reply text or a no-reply reason. ' +
+        'The Host derives all routing targets; do not provide ids. ' +
+        'The text is sent as a Feishu text message: write `@Display Name` to mention a chat ' +
+        'member and the Host renders it into a real mention before sending, so the person is ' +
+        'notified. Only when the name you use differs from the group display name, write ' +
+        '`<at user_id="ou_…">Name</at>` yourself (`<at user_id="all"></at>` mentions everyone). ' +
+        'Copying the `@Name` form seen in inbound text produces plain text with no notification.',
+      parameters: {
+        outcome: { type: 'string', enum: ['reply', 'no-reply'], required: true },
+        text: { type: 'string' },
+        reason: { type: 'string' },
+      },
+      output: {
+        schema: { type: 'object', additionalProperties: false, properties: {
+          sent: { type: 'boolean', required: true }, outcome: { type: 'string', required: true },
+        } },
+        render: (_args, value) => [{ type: 'text', text: value.sent ? '已提交当前飞书请求。' : '当前请求未发送正文。' }],
+      },
+      async execute(args, exec) {
+        const input = requireKnownArguments(args, ['outcome', 'text', 'reason'], PET_LOCUS_FINISH_TOOL)
+        const outcome = input.outcome
+        const text = typeof input.text === 'string' ? input.text : undefined
+        const reason = typeof input.reason === 'string' ? input.reason : undefined
+        if (outcome !== 'reply' && outcome !== 'no-reply') throw new PetError('INVALID_REQUEST', 'outcome must be reply or no-reply.')
+        if (outcome === 'reply' && (!hasOwnArgument(input, 'text') || text === undefined || text.trim() === '' || hasOwnArgument(input, 'reason'))) throw new PetError('INVALID_REQUEST', 'reply requires non-empty text and no reason.')
+        if (outcome === 'no-reply' && (hasOwnArgument(input, 'text') || !hasOwnArgument(input, 'reason') || reason === undefined || reason.trim() === '')) throw new PetError('INVALID_REQUEST', 'no-reply requires non-empty reason and no text.')
+        const locus = await resolveAuthorizedCurrent(lifecycle, callerSessionId(exec as ExecutionLike), 'finish')
+        const delivery = locus.currentDelivery!
+        if (lifecycle.finishCurrentDelivery === undefined) {
+          // A direct Lark fallback would send without the durable finishing CAS,
+          // result ledger, or queue advancement. Refuse instead of weakening
+          // at-most-once semantics during partial composition.
+          throw new PetError('INTERNAL', 'The Host has no durable Delivery finish capability.')
+        }
+        return lifecycle.finishCurrentDelivery({ childSessionId: delivery.childSessionId, locus, delivery, outcome, ...(text === undefined ? {} : { text }), ...(reason === undefined ? {} : { reason }) })
+      },
+    })))
+
+    disposers.push(ctx.tools.register(defineTool({
+      name: PET_LOCUS_WAIT_TOOL,
+      description: 'Extend the current Delivery lease by positive minutes from now, bounded by the acceptedAt plus 24 hour hard cap.',
+      parameters: { waitMinutes: { type: 'number', required: true }, reason: { type: 'string' } },
+      output: {
+        schema: { type: 'object', additionalProperties: false, properties: {
+          accepted: { type: 'boolean', required: true }, deadline: { type: 'number', required: true }, remainingMinutes: { type: 'number', required: true }, capped: { type: 'boolean', required: true },
+        } },
+        render: (_args, value) => [{ type: 'text', text: `等待期限：${String(value.deadline)}` }],
+      },
+      async execute(args, exec) {
+        const input = requireKnownArguments(args, ['waitMinutes', 'reason'], PET_LOCUS_WAIT_TOOL)
+        const waitMinutes = input.waitMinutes
+        if (typeof waitMinutes !== 'number' || !Number.isSafeInteger(waitMinutes) || waitMinutes < 1 || waitMinutes > 1440) throw new PetError('INVALID_REQUEST', 'waitMinutes must be an integer from 1 through 1440.')
+        if (hasOwnArgument(input, 'reason') && typeof input.reason !== 'string') throw new PetError('INVALID_REQUEST', 'reason must be a string when provided.')
+        const locus = await resolveAuthorizedCurrent(lifecycle, callerSessionId(exec as ExecutionLike), 'wait')
+        if (lifecycle.waitCurrentDelivery === undefined) throw new PetError('INTERNAL', 'The Host has no durable Delivery wait lease.')
+        const reason = typeof input.reason === 'string' ? input.reason : undefined
+        return lifecycle.waitCurrentDelivery({ childSessionId: locus.currentDelivery!.childSessionId, locus, delivery: locus.currentDelivery!, waitMinutes, ...(reason === undefined ? {} : { reason }) })
+      },
+    })))
+  }
+
+  const intentTriage = deps.intentTriage
+  if (intentTriage !== undefined) {
+    disposers.push(ctx.tools.register(defineTool({
+      name: PET_LOCUS_PARENT_LOOKUP_TOOL,
+      description:
+        INTENT_TRIAGE_GUIDANCE +
+        '\n\nThis tool performs the read-only lookup: it returns your caller-bound main ' +
+        'session\'s already-persisted transcript. It takes no arguments — the target is resolved ' +
+        'from the calling session and cannot be redirected. It is a pure data read: it never wakes ' +
+        'the main session, never occupies its run slot, and multiple children may call it ' +
+        'concurrently. The result is a conversational fact, not a persisted authorization — a write ' +
+        'grant still requires the owner\'s explicit confirmation through the management panel.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', required: true },
+            reason: { type: 'string' },
+            transcript: { type: 'string' },
+          },
+        },
+        render: (_args, value) => [{ type: 'text', text: value.ok ? String(value.transcript) : `未获取到内容：${String(value.reason)}` }],
+      },
+      async execute(_args, exec) {
+        const sessionId = callerSessionId(exec as ExecutionLike)
+        let caller
+        try {
+          caller = resolveLedgerCaller(sessionId, intentTriage.loci)
+        } catch (error) {
+          if (error instanceof LedgerCallerUnavailableError) return { ok: false, reason: 'unavailable' }
+          throw error
+        }
+        if (intentTriage.parentLookup === undefined) return { ok: false, reason: 'unavailable' }
+        const result = await lookupParentTranscript(caller, intentTriage.parentLookup)
+        if (!result.ok) return { ok: false, reason: result.reason }
+        return { ok: true, transcript: JSON.stringify(result.transcript) }
+      },
+    })))
+
+    disposers.push(ctx.tools.register(defineTool({
+      name: PET_LOCUS_LEDGER_READ_TOOL,
+      description:
+        'Read every todo item already registered in your same-source shared-fact ledger — the ' +
+        'set of work requests siblings serving the same main session have recorded, so you can ' +
+        'avoid re-investigating something already found. Takes no arguments. Returns only ' +
+        'structured todo content: summary, detail, status, requester and creation time — never a ' +
+        'sibling\'s conversation history or a list of other endpoints.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: { items: { type: 'string', required: true } },
+        },
+        render: (_args, value) => [{ type: 'text', text: value.items }],
+      },
+      async execute(_args, exec) {
+        const sessionId = callerSessionId(exec as ExecutionLike)
+        let caller
+        try {
+          caller = resolveLedgerCaller(sessionId, intentTriage.loci)
+        } catch (error) {
+          if (error instanceof LedgerCallerUnavailableError) return { items: '[]' }
+          throw error
+        }
+        if (intentTriage.ledgerRead === undefined) return { items: '[]' }
+        return { items: JSON.stringify(readSharedLedger(caller, intentTriage.ledgerRead)) }
+      },
+    })))
+
+    disposers.push(ctx.tools.register(defineTool({
+      name: PET_LOCUS_TRACK_TOOL,
+      description:
+        'Register the current Feishu request as a durable todo for the owner to pick up, when it ' +
+        'is a WORK REQUEST you cannot act on under this locus\'s read-only policy. Provide `summary` ' +
+        '(one sentence) and `detail` (location, cause, suggested fix). The Host derives who asked, ' +
+        'which locus, and which message to reply to from the current authorized Delivery — there is ' +
+        'no target/chat/locus/message argument. Registering a todo does NOT finish the Delivery: ' +
+        'you must still call `pet_locus_finish` afterward to acknowledge receipt.',
+      parameters: {
+        summary: { type: 'string', required: true },
+        detail: { type: 'string', required: true },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: { ok: { type: 'boolean', required: true }, reason: { type: 'string' } },
+        },
+        render: (_args, value) => [{ type: 'text', text: value.ok ? '已登记待办。' : `登记失败：${String(value.reason)}` }],
+      },
+      async execute(args, exec) {
+        const input = requireKnownArguments(args, ['summary', 'detail'], PET_LOCUS_TRACK_TOOL)
+        if (typeof input.summary !== 'string' || typeof input.detail !== 'string') {
+          throw new PetError('INVALID_REQUEST', 'summary and detail must be strings.')
+        }
+        const sessionId = callerSessionId(exec as ExecutionLike)
+        if (intentTriage.track === undefined) return { ok: false, reason: 'unavailable' }
+        const authorized = await resolveAuthorizedCurrent(intentTriage, sessionId, 'track')
+        const result = await trackTodo(authorized, { summary: input.summary, detail: input.detail }, intentTriage.track)
+        return result.ok ? { ok: true } : { ok: false, reason: result.reason }
+      },
+    })))
+  }
+
+  return () => {
+    for (const dispose of disposers.splice(0)) dispose()
+  }
+}

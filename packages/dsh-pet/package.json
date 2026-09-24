@@ -1,0 +1,136 @@
+{
+  "name": "dsh-pet",
+  "version": "0.1.0",
+  "description": "DSH Pet: a resident desktop-companion Agent entry that runs management Skills against a trusted, immutable snapshot of the current DSH session, workspace, or an independent scope",
+  "license": "MIT",
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./wire": {
+      "types": "./lib/wire.d.ts",
+      "default": "./lib/wire.js"
+    },
+    "./storage": {
+      "types": "./lib/host/storage/plugin.d.ts",
+      "default": "./lib/host/storage/plugin.js"
+    },
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "LICENSE",
+    "README.md",
+    "cordis.patch.yml",
+    "executor-instructions.md",
+    "scripts/migrate-state-version.mjs",
+    "scripts/repair-truncated-keys.mjs",
+    "lib"
+  ],
+  "bin": {
+    "dsh-pet-migrate-state": "./scripts/migrate-state-version.mjs",
+    "dsh-pet-repair-truncated-keys": "./scripts/repair-truncated-keys.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-api-workspace-controller",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  },
+  "scripts": {
+    "clean": "rm -rf lib",
+    "build:host": "tsc -p tsconfig.json",
+    "build:client": "tsdown",
+    "build": "npm run clean && npm run build:host && npm run build:client",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "cutover:backup": "node scripts/cutover-backup.mjs",
+    "migrate:state": "node scripts/migrate-state-version.mjs",
+    "migrate:state:check": "node scripts/migrate-state-version.mjs --dry-run",
+    "repair:truncated-keys": "node scripts/repair-truncated-keys.mjs",
+    "repair:truncated-keys:check": "node scripts/repair-truncated-keys.mjs --dry-run",
+    "prepack": "npm run build"
+  },
+  "engines": {
+    "node": ">=22.19"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-agent": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-agent-default-model": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-agent-presets": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-attachment": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-layout": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-settings": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-connection": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-home-paths": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-llm": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-session": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-session-title": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-sandbox-policy": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-skill": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-storage-domain": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tools": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-workspace": "^0.1.5-rc.2",
+    "react": "^18.2.0",
+    "@deepseek-ai/dsh-api-session-controller": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-api-workspace-controller": "^0.1.5-rc.2"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-storage-sqlite": "^0.1.5-rc.2"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-agent": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-agent-default-model": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-agent-loop": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-agent-presets": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-attachment": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-layout": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-settings": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-connection": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-home-paths": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-llm": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-session": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-session-title": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-sandbox-policy": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-shell-env": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-skill": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-storage": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-storage-domain": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tools": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-workspace": "^0.1.5-rc.2",
+    "@deepseek-ai/schemastery": "^3.15.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "~18.3.1",
+    "@types/react-dom": "^18.3.7",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "tsdown": "^0.14.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4",
+    "zod": "^4.4.3",
+    "@deepseek-ai/dsh-api-session-controller": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-api-workspace-controller": "^0.1.5-rc.2"
+  }
+}

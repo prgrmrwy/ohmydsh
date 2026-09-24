@@ -3,14 +3,15 @@ import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { type Agent, type AgentHandle } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import LlmRuntime, {
-  CallId,
+  ToolCallId,
   createUserMessage,
   LlmAdapter,
   type GenerateOptions,
   type LlmResolvedModelInfo,
   type StreamChunk,
 } from '@deepseek-ai/dsh-llm'
-import SessionStore, { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import SessionProjection from '@deepseek-ai/dsh-session-projection'
+import SessionStore, { SessionId, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
 import { activeBindingContext, cleanedBindingContext, installContext } from '../src/host/context.js'
@@ -48,7 +49,7 @@ class ScriptedAdapter extends LlmAdapter {
   }
 }
 
-function operation(state: 'admitted' | 'cleaned' | 'released' = 'admitted'): OperationRecord {
+function operation(state: 'bound' | 'cleaned' | 'released' = 'bound'): OperationRecord {
   return {
     schemaVersion: 2,
     operationId: 'operation-12345678',
@@ -81,6 +82,9 @@ async function harness(responses: number): Promise<{ ctx: Context; adapter: Scri
   await ctx.plugin(SystemPrompt, { persona: '' })
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(AgentRegistry)
+  // 0.1.2: AgentLoop injects `sessionProjections`; without this plugin the
+  // loop never loads and `agents.create` throws "no agent factory registered".
+  await ctx.plugin(SessionProjection)
   await ctx.plugin(AgentLoop, { agents: [] })
   const adapter = new ScriptedAdapter(Array.from({ length: responses }, (_, index) => textResponse(`reply-${index + 1}`)))
   ctx.llm.registerAdapter(['scripted'], adapter)
@@ -97,8 +101,8 @@ async function createBoundAgent(
     meta: { cwd: record.repoRoot },
     ...(seed === undefined ? {} : { seed }),
     agentOptions: { provider: 'scripted', model: 'scripted' },
-    setup(agentCtx) {
-      installContext(agentCtx.agent, record)
+    setup(_agentCtx, agent) {
+      installContext(agent, record)
     },
   })
 }
@@ -112,7 +116,7 @@ async function step(agent: Agent, text: string): Promise<void> {
 }
 
 function runtimeContextEvents(agent: Agent): SessionEvent<'user/message'>[] {
-  return agent.session.events.flatMap(event =>
+  return agent.session.snapshotEvents().flatMap(event =>
     event.type === 'user/message'
       && event.data.source.kind === 'plugin'
       && event.data.source.plugin === '@deepseek-ai/dsh-system-prompt'
@@ -142,7 +146,7 @@ describe('Worktree Session AgentLoop runtime-context projection', () => {
     await step(handle.agent, 'same context, later turn')
     expect(runtimeContextEvents(handle.agent)).toHaveLength(1)
 
-    const seed = [...handle.agent.session.events]
+    const seed = [...handle.agent.session.snapshotEvents()]
     await handle.dispose()
     handle = await createBoundAgent(ctx, record, seed)
     await step(handle.agent, 'cold replay')
@@ -164,7 +168,7 @@ describe('Worktree Session AgentLoop runtime-context projection', () => {
       content: [{ type: 'text', text: 'compacted summary' }],
       source: { kind: 'plugin', plugin: 'test-compaction' },
     }), {
-      surfaceOp: { op: 'replace', start: first.seq, end: first.seq },
+      surfaceOp: { op: 'replace', startSeq: SessionSeq(first.seq), endSeq: SessionSeq(first.seq) },
       sourceEventSeqs: [first.seq],
     })
 
@@ -185,7 +189,7 @@ describe('Worktree Session AgentLoop runtime-context projection', () => {
       sessionId: SessionId('session-child'),
       meta: { cwd: record.repoRoot, parentSession: parent.agent.id, origin: 'subagent', delegationDepth: 1 },
       agentOptions: { provider: 'scripted', model: 'scripted' },
-      setup(childCtx) { installSubagentInheritance(childCtx) },
+      setup(childCtx, childAgent) { installSubagentInheritance(childCtx, childAgent) },
     })
     await step(child.agent, 'child first step')
     expect(runtimeContextEvents(child.agent)).toHaveLength(1)
@@ -207,7 +211,7 @@ describe('Worktree Session AgentLoop runtime-context projection', () => {
     const { agent } = await createBoundAgent(ctx, cleaned)
     rememberBind(ctx, agent.session.id as string, cleaned)
     const result = await ctx.tools.execute({
-      callId: CallId('cleaned-read'),
+      callId: ToolCallId('cleaned-read'),
       name: 'read',
       arguments: { file_path: cleaned.worktreePath + '/file.txt' },
       agent,
@@ -233,7 +237,7 @@ describe('Worktree Session AgentLoop runtime-context projection', () => {
     rememberBind(ctx, agent.session.id as string, cleaned)
     await step(agent, 'cleaned')
     rememberBind(ctx, agent.session.id as string, released)
-    const result = await ctx.tools.execute({ callId: CallId('released-read'), name: 'read', arguments: { file_path: '/repo/file.txt' }, agent, signal: new AbortController().signal })
+    const result = await ctx.tools.execute({ callId: ToolCallId('released-read'), name: 'read', arguments: { file_path: '/repo/file.txt' }, agent, signal: new AbortController().signal })
     expect(result.isError).toBe(false)
     expect(bodyCalls).toBe(1)
     await step(agent, 'released')
@@ -243,7 +247,7 @@ describe('Worktree Session AgentLoop runtime-context projection', () => {
     expect(eventText(projections[1]!)).toContain('Current runtime context')
     expect(eventText(projections[1]!)).not.toContain('Worktree Session（已清理）')
     rememberBind(ctx, agent.session.id as string, released)
-    expect(await ctx.tools.execute({ callId: CallId('released-read-again'), name: 'read', arguments: { file_path: '/repo/again.txt' }, agent, signal: new AbortController().signal })).toMatchObject({ isError: false })
+    expect(await ctx.tools.execute({ callId: ToolCallId('released-read-again'), name: 'read', arguments: { file_path: '/repo/again.txt' }, agent, signal: new AbortController().signal })).toMatchObject({ isError: false })
   })
 
   it('adds one terminal snapshot for active to cleaned and does not repeat it', async () => {

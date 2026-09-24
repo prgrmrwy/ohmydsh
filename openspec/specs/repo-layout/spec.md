@@ -209,6 +209,64 @@ manifest 中每项定制可(MAY)声明可选字符串字段 `enabledEnv`,取值�
 - **WHEN** 某定制未声明 `enabledEnv`
 - **THEN** 其有效启用状态完全由 manifest 的 `enabled` 字段决定,sync 不读取任何环境变量参与该定制的启用判定
 
+### Requirement: 本地 manifest overlay 追加不可公开定制
+
+仓库可(MAY)存在一个**本地 manifest overlay**:默认路径为仓库根 `dsh.yaml.local`,或由环境变量 `DSH_LOCAL_MANIFEST` 指定的绝对路径(该变量非空白时**取代**默认路径,而非叠加)。该文件必须(SHALL)被版本控制忽略,用于承载不可公开的定制(内网包、内网采集器、含本机绝对路径的片段)。
+
+overlay 的内容结构必须(SHALL)与 `dsh.yaml` 的 `customizations` **同构**:顶层为映射,其 `customizations` 为定制条目列表,每个条目的字段语义、校验规则与公开 manifest 完全一致(含 `note`、`brief`、`enabledEnv`、`hostRuntimeCompatibility` 等)。overlay 条目的审查记录随条目留在该文件内,公开 manifest 不得(SHALL NOT)为其保留任何占位、计数或存在性声明。
+
+overlay 的权限边界必须(SHALL)是**只追加定制条目**:
+
+- overlay 不得(SHALL NOT)声明 `dshVersion`、`autoUpdate`、`web`、`agentInstructions`、`dependencies` 或除 `customizations` 之外的任何顶层字段;出现此类字段时 sync 必须(SHALL)在加载阶段报错并以非零退出码结束,不产生任何物化动作。
+- overlay 条目的 `id` 与公开 manifest 中任一条目的 `id` 相同时,sync 必须(SHALL)报错并以非零退出码结束;overlay 不得(SHALL NOT)覆盖、改写或禁用公开 manifest 中的条目。
+- overlay 条目之间的 `id` 重复同样必须(SHALL)报错。
+
+overlay 条目必须(SHALL)走与公开条目**完全相同**的校验与安全路径,不得(SHALL NOT)因来源是本地文件而放宽:逐字段类型与命名校验、`source: remote` 的精确版本 pin 要求、`deps` 引用完整性,以及 `hostRuntimeCompatibility` 的运行体版本围栏。该围栏必须(SHALL)在任何 profile 或部署面操作之前完成校验。
+
+合并结果必须(SHALL)是所有消费方的唯一事实来源:物化(sync)、启动清单、插件升级检查与运行体版本围栏必须(SHALL)看到同一份合并后的定制列表,不得(SHALL)出现「已物化但清单不可见」或「已物化但升级检查不覆盖」的分裂状态。
+
+overlay 缺失是**常态而非错误**:文件不存在时 sync 必须(SHALL)静默按公开 manifest 运行,行为与未引入本能力时完全一致。文件存在但无法读取或解析时,必须(SHALL)报错并以非零退出码结束,不得静默跳过。
+
+#### Scenario: overlay 缺失时行为不变
+- **WHEN** 仓库不存在 `dsh.yaml.local` 且未设置 `DSH_LOCAL_MANIFEST`
+- **THEN** sync 仅按 `dsh.yaml` 物化,不报错、不产生额外输出,结果与未引入 overlay 能力时一致
+
+#### Scenario: overlay 条目被追加物化
+- **WHEN** overlay 声明一条启用的定制,其 id 不与公开 manifest 冲突
+- **THEN** 该定制按其类型被物化(package 安装 / patch 行合并 / preset·skill 复制),与写在公开 manifest 中的同一条目物化结果不可区分
+
+#### Scenario: overlay 条目出现在启动清单与升级检查
+- **WHEN** overlay 声明了一条启用的 remote package 定制
+- **THEN** 启动清单列出该定制,且插件升级检查覆盖该定制的版本 pin
+
+#### Scenario: id 与公开 manifest 冲突时拒绝运行
+- **WHEN** overlay 条目的 `id` 与 `dsh.yaml` 中某条目的 `id` 相同
+- **THEN** sync 在加载阶段报错并以非零退出码结束,指明冲突的 id,不物化任何变更
+
+#### Scenario: overlay 声明顶层字段时拒绝运行
+- **WHEN** overlay 声明了 `dshVersion`、`autoUpdate`、`web`、`agentInstructions`、`dependencies` 或其他非 `customizations` 的顶层字段
+- **THEN** sync 在加载阶段报错并以非零退出码结束,指明越权字段,不物化任何变更
+
+#### Scenario: overlay 条目不因来源而放宽校验
+- **WHEN** overlay 条目缺少必填字段、`source: remote` 缺少精确版本 pin,或其 `hostRuntimeCompatibility` 与当前 `dshVersion` 不符
+- **THEN** sync 以与公开 manifest 中同类错误相同的方式报错并以非零退出码结束,且在任何 profile 操作之前发生
+
+#### Scenario: overlay 存在但不可解析时拒绝运行
+- **WHEN** overlay 文件存在但无法读取,或不是合法 YAML 映射
+- **THEN** sync 报错并以非零退出码结束,不静默跳过该层
+
+#### Scenario: 环境变量指定 overlay 路径
+- **WHEN** 设置 `DSH_LOCAL_MANIFEST` 为一个存在的 overlay 绝对路径
+- **THEN** sync 读取该路径作为 overlay,且不再读取仓库根的 `dsh.yaml.local`
+
+#### Scenario: 公开 manifest 不承载不可公开定制的痕迹
+- **WHEN** 某定制因不可公开而由 overlay 承载
+- **THEN** 公开 `dsh.yaml` 中不存在该定制的条目、包名、内部地址或存在性声明
+
+#### Scenario: 含 overlay 时 sync 仍幂等
+- **WHEN** 存在 overlay 且仓库与 overlay 均无变更,连续运行 sync 两次
+- **THEN** 第二次运行报告无任何变化
+
 ### Requirement: 生成文件带标记且按序合并
 sync 生成的文件(含 profile patch 层)必须(SHALL)带有生成标记头,声明仓库为真相源;多个启用定制贡献的 patch 行必须按 manifest 顺序合并。
 
@@ -252,6 +310,10 @@ sync 生成的文件(含 profile patch 层)必须(SHALL)带有生成标记头,�
 ### Requirement: 自研 package 的运行体 peer 声明跟随 manifest 版本族
 仓库内 local package 对运行体包(`@deepseek-ai/dsh-*`)的 `peerDependencies` 声明必须(SHALL)与 `dsh.yaml` 所 pin 的 `dshVersion` 属于同一版本族,并采用与上游自身一致的范围写法。此类 peer 不得(SHALL NOT)使用精确版本 pin:精确 pin 在运行体升级后可能解析出第二份同名包,造成同一模块的双实例。仓库必须(SHALL)提供一项自动检查,在任一 local package 的运行体 peer 声明偏离当前 `dshVersion` 版本族时失败,并指出具体的 package、依赖名与实际声明。非运行体依赖(如 `react`、`@deepseek-ai/cordis`、`@deepseek-ai/schemastery`)不受本要求约束。
 
+`dshVersion` 与各 local package 的运行体 peer 声明必须(SHALL)作为**同一批次**变更:二者构成一个必须一致的整体,因此运行体升级不得(SHALL NOT)在未同步更新 peer 声明的情况下被视为完成。该检查在版本族迁移期间失败是**预期的前置门槛**,而非缺陷——它标示本批次尚未完成,不得(SHALL NOT)通过放宽检查、豁免个别 package 或临时跳过来"修复"。
+
+当上游在新版本族中**移除或拆分**了某个运行体包时,对该包的 peer 声明不得(SHALL NOT)被机械改写为新版本族的同名声明。此种情形必须(SHALL)被识别为接口面迁移:该 peer 必须(SHALL)改为声明其在新版本族中的实际承接包,或在该 local package 不再依赖该接口面时移除。
+
 #### Scenario: 运行体升级后声明未跟进
 - **WHEN** `dshVersion` 升级到新版本族,而某 local package 的 `@deepseek-ai/dsh-*` peer 仍声明旧版本族
 - **THEN** 仓库检查失败,并指出该 package、依赖名与实际声明
@@ -263,6 +325,14 @@ sync 生成的文件(含 profile patch 层)必须(SHALL)带有生成标记头,�
 #### Scenario: 声明已对齐
 - **WHEN** 全部 local package 的运行体 peer 均处于当前 `dshVersion` 版本族且均为范围写法
 - **THEN** 仓库检查通过,且不对非运行体依赖提出要求
+
+#### Scenario: 版本族迁移期间的失败不得被绕过
+- **WHEN** `dshVersion` 已升级到新版本族,而部分 local package 的 peer 声明尚未同步,检查因此失败
+- **THEN** 该失败 SHALL 被视为本批次未完成的前置门槛,MUST NOT 通过放宽检查、豁免个别 package 或跳过该检查来消除
+
+#### Scenario: 上游移除的运行体包不得被机械改写
+- **WHEN** 某运行体包在新版本族中已被移除或拆分,而某 local package 仍对其声明 peer
+- **THEN** 该声明 SHALL 改为其在新版本族中的实际承接包,或在不再依赖该接口面时移除,MUST NOT 被改写为该包在新版本族下的同名声明
 
 ### Requirement: 仓库初始化按最低版本准则校验 Node/npm 工具链
 仓库初始化脚本必须(SHALL)按**最低版本准则**校验 Node 与 npm:仅当实际版本低于声明的最低版本时拒绝初始化并给出升级指引;不低于最低版本时必须放行,不得因版本与推荐值不同而失败。最低版本必须(SHALL)在根 `package.json` 的 `engines` 中以范围形式声明,并与初始化脚本内的阈值保持一致。`.nvmrc` 必须(SHALL)作为**推荐版本**的单一来源被初始化脚本读取;实际版本与推荐值不同时,脚本必须仅提示并继续执行。版本比较必须(SHALL)在 bash 内自包含实现,不得依赖 `sort -V`、semver 或其他非 POSIX 通用工具,以保持 macOS / Linux / WSL / Git Bash 通用。仓库不得(SHALL NOT)通过 `packageManager` 等字段在 `engines` 之外再声明一个精确的包管理器版本。依赖的可复现性由根 `package-lock.json` 保证,不由工具链版本相等保证。

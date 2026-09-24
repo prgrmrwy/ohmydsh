@@ -1,0 +1,422 @@
+import { describe, expect, it, vi } from 'vitest'
+import {
+  createLarkCliClient,
+  parseBotIdentity,
+  parseUserIdentity,
+  permissionDiagnostic,
+  type LarkCliRunner,
+} from '../src/host/channel/lark.js'
+
+const APP = 'cli_aa14740a43f81cd4'
+const BOT = 'ou_58c5c01075637418a8b934e58e5e1400'
+const USER = 'ou_currenthuman'
+
+const READY = {
+  appId: APP,
+  verified: true,
+  identities: {
+    bot: {
+      status: 'ready',
+      available: true,
+      verified: true,
+      openId: BOT,
+      appName: 'Pet Bot',
+    },
+    user: {
+      status: 'ready',
+      available: true,
+      verified: true,
+      openId: USER,
+      userName: 'Current Human',
+      // The real lark-cli reports `valid` here, not `ready`. The fixture used
+      // to say `ready`, which made this suite agree with a wrong implementation
+      // and hid the fact that Q&A creation could never succeed on a real host.
+      tokenStatus: 'valid',
+      scope: 'im:chat',
+      expiresAt: '2026-09-13T01:51:51-07:00',
+    },
+  },
+}
+
+describe('supported CLI version', () => {
+  it('accepts the installed identity-contract version and rejects older builds', async () => {
+    const supported = createLarkCliClient(
+      'lark-cli',
+      vi.fn(async () => ({ stdout: 'lark-cli version 1.0.93\n' })) as unknown as LarkCliRunner,
+    )
+    const outdated = createLarkCliClient(
+      'lark-cli',
+      vi.fn(async () => ({ stdout: 'lark-cli version 1.0.92\n' })) as unknown as LarkCliRunner,
+    )
+
+    await expect(supported.cliVersion?.()).resolves.toEqual({ supported: true, version: '1.0.93' })
+    await expect(outdated.cliVersion?.()).resolves.toEqual({ supported: false, version: '1.0.92' })
+  })
+})
+
+describe('verified bot identity parsing', () => {
+  it('reads the real top-level auth status shape', () => {
+    expect(parseBotIdentity(READY, APP)).toEqual({
+      kind: 'ready',
+      identity: { appId: APP, openId: BOT, name: 'Pet Bot' },
+    })
+  })
+
+  it.each([
+    ['another app', { ...READY, appId: 'cli_other' }],
+    ['not ready', { ...READY, identities: { bot: { ...READY.identities.bot, status: 'missing' } } }],
+    ['not verified', { ...READY, verified: false }],
+    ['no open id', { ...READY, identities: { bot: { ...READY.identities.bot, openId: undefined } } }],
+    ['non-json shape', 'not-json'],
+  ])('fails closed for %s', (_label, value) => {
+    expect(parseBotIdentity(value, APP).kind).toBe('unavailable')
+  })
+})
+
+describe('verified current-user identity parsing', () => {
+  it('reads the real top-level auth status shape', () => {
+    expect(parseUserIdentity(READY, APP)).toEqual({
+      kind: 'ready',
+      identity: { appId: APP, openId: USER, name: 'Current Human' },
+    })
+  })
+
+  it.each([
+    ['another app', { ...READY, appId: 'cli_other' }],
+    ['missing login', { ...READY, identities: { ...READY.identities, user: { status: 'missing', available: false } } }],
+    ['stale login', { ...READY, identities: { ...READY.identities, user: { ...READY.identities.user, status: 'needs_refresh' } } }],
+    ['unavailable identity', { ...READY, identities: { ...READY.identities, user: { ...READY.identities.user, available: false } } }],
+    ['unverified response', { ...READY, verified: false }],
+    ['no open id', { ...READY, identities: { ...READY.identities, user: { ...READY.identities.user, openId: undefined } } }],
+    ['malformed open id', { ...READY, identities: { ...READY.identities, user: { ...READY.identities.user, openId: 'not-open-id' } } }],
+  ])('fails closed for %s', (_label, value) => {
+    expect(parseUserIdentity(value, APP).kind).toBe('unavailable')
+  })
+})
+
+describe('token vocabulary is measured, not inferred', () => {
+  // Regression: the gate required `tokenStatus === 'ready'`, but lark-cli
+  // reports `valid` for a usable token. Every real Q&A creation therefore
+  // failed with "The Pet user identity is not ready or verified" even though
+  // the profile was freshly logged in and allowlisted. Freshness is carried by
+  // `status` (`needs_refresh` when stale), so the gate must not pin an
+  // undocumented `tokenStatus` literal.
+  it.each(['valid', 'ready', 'active', undefined])(
+    'accepts a verified, ready identity whatever tokenStatus reads (%s)',
+    (tokenStatus) => {
+      const value = {
+        ...READY,
+        identities: {
+          ...READY.identities,
+          user: { ...READY.identities.user, tokenStatus },
+        },
+      }
+      expect(parseUserIdentity(value, APP).kind).toBe('ready')
+    },
+  )
+
+  it('still fails closed when the profile itself is stale or unverified', () => {
+    const stale = {
+      ...READY,
+      identities: {
+        ...READY.identities,
+        user: { ...READY.identities.user, status: 'needs_refresh' },
+      },
+    }
+    expect(parseUserIdentity(stale, APP).kind).toBe('unavailable')
+    expect(parseUserIdentity({ ...READY, verified: false }, APP).kind).toBe('unavailable')
+  })
+})
+
+describe('default Q&A owner proof', () => {
+  it('returns only the verified current user when that exact open_id is allowlisted', async () => {
+    const runner = vi.fn(async () => ({ stdout: JSON.stringify(READY) })) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner)
+
+    await expect(client.defaultQaOwner?.(APP, [BOT, USER])).resolves.toEqual({
+      kind: 'ready', ownerId: USER,
+    })
+  })
+
+  it('fails closed when user auth is missing or the verified user is not allowlisted', async () => {
+    const missingUser = {
+      ...READY,
+      identities: { ...READY.identities, user: { status: 'missing', available: false } },
+    }
+    const missingClient = createLarkCliClient(
+      'lark-cli',
+      vi.fn(async () => ({ stdout: JSON.stringify(missingUser) })) as unknown as LarkCliRunner,
+    )
+    const notAllowedClient = createLarkCliClient(
+      'lark-cli',
+      vi.fn(async () => ({ stdout: JSON.stringify(READY) })) as unknown as LarkCliRunner,
+    )
+
+    await expect(missingClient.defaultQaOwner?.(APP, [USER])).resolves.toMatchObject({ kind: 'unavailable' })
+    await expect(notAllowedClient.defaultQaOwner?.(APP, [BOT])).resolves.toMatchObject({ kind: 'unavailable' })
+  })
+})
+
+describe('safe permission diagnostics', () => {
+  it('keeps scopes and the official console link', () => {
+    expect(
+      permissionDiagnostic({
+        error: {
+          subtype: 'app_scope_not_applied',
+          code: 99991672,
+          missing_scopes: ['im:chat.members:read'],
+          console_url: `https://open.feishu.cn/page/scope-apply?clientID=${APP}`,
+          message: 'raw detail that must not be retained',
+        },
+      }),
+    ).toEqual({
+      code: 99991672,
+      missingScopes: ['im:chat.members:read'],
+      consoleUrl: `https://open.feishu.cn/page/scope-apply?clientID=${APP}`,
+    })
+  })
+
+  it('drops a non-official URL', () => {
+    expect(
+      permissionDiagnostic({
+        error: {
+          subtype: 'app_scope_not_applied',
+          missing_scopes: ['im:chat.members:read'],
+          console_url: 'https://evil.example/steal',
+        },
+      }),
+    ).toEqual({ missingScopes: ['im:chat.members:read'] })
+  })
+})
+
+describe('real shortcut error output', () => {
+  it('extracts permission diagnostics after stderr progress lines', async () => {
+    const failure = Object.assign(new Error('command failed'), {
+      stdout: '',
+      stderr: `[page 1] fetching...\n${JSON.stringify({
+        ok: false,
+        identity: 'bot',
+        error: {
+          type: 'authorization',
+          subtype: 'app_scope_not_applied',
+          code: 99991672,
+          missing_scopes: ['im:chat.members:read'],
+          console_url: `https://open.feishu.cn/page/scope-apply?clientID=${APP}`,
+          message: 'raw server detail',
+        },
+      }, null, 2)}\n`,
+    })
+    const runner = vi.fn(async () => Promise.reject(failure)) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner)
+
+    await expect(client.listChatBots('oc_group')).resolves.toEqual({
+      kind: 'permission-denied',
+      diagnostic: {
+        code: 99991672,
+        missingScopes: ['im:chat.members:read'],
+        consoleUrl: `https://open.feishu.cn/page/scope-apply?clientID=${APP}`,
+      },
+    })
+  })
+})
+
+describe('strict Delivery-target reply', () => {
+  it('replies to a group Delivery message and validates the returned message id', async () => {
+    const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
+      expect(args).toEqual([
+        '--profile', 'dsh-pet', 'im', '+messages-reply', '--as', 'bot',
+        '--message-id', 'om_current', '--text', 'done', '--json',
+      ])
+      return { stdout: JSON.stringify({ ok: true, data: { message_id: 'om_reply', chat_id: 'oc_group' } }) }
+    }) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner)
+
+    await expect(client.replyToTarget?.({ chatId: 'oc_group', messageId: 'om_current' }, 'done'))
+      .resolves.toEqual({ messageId: 'om_reply' })
+  })
+
+  it('uses explicit thread reply semantics for a topic Delivery', async () => {
+    const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
+      expect(args).toEqual([
+        '--profile', 'dsh-pet', 'im', '+messages-reply', '--as', 'bot',
+        '--message-id', 'om_topic', '--text', 'threaded', '--reply-in-thread', '--json',
+      ])
+      return { stdout: JSON.stringify({ ok: true, data: { message_id: 'om_threadreply', chat_id: 'oc_group' } }) }
+    }) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner)
+
+    await expect(client.replyToTarget?.({ chatId: 'oc_group', threadId: 'omt_topic', messageId: 'om_topic' }, 'threaded'))
+      .resolves.toEqual({ messageId: 'om_threadreply' })
+  })
+
+  it('rejects an invalid target chat before sending', async () => {
+    const runner = vi.fn(async () => ({ stdout: JSON.stringify({ ok: true, data: { message_id: 'om_reply' } }) })) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner)
+
+    await expect(client.replyToTarget?.({ chatId: 'not-a-chat', messageId: 'om_current' }, 'done'))
+      .rejects.toThrow('reply target: lark-cli returned no valid chat id')
+    expect(runner).not.toHaveBeenCalled()
+  })
+
+  it('rejects a successful-looking response without a valid returned message id', async () => {
+    const client = createLarkCliClient(
+      'lark-cli',
+      vi.fn(async () => ({ stdout: JSON.stringify({ ok: true, data: { chat_id: 'oc_group' } }) })) as unknown as LarkCliRunner,
+    )
+
+    await expect(client.replyToTarget?.({ chatId: 'oc_group', messageId: 'om_current' }, 'done'))
+      .rejects.toThrow('reply to target: lark-cli returned no valid message id')
+  })
+
+  it('rejects a response for a different chat', async () => {
+    const client = createLarkCliClient(
+      'lark-cli',
+      vi.fn(async () => ({ stdout: JSON.stringify({ ok: true, data: { message_id: 'om_reply', chat_id: 'oc_other' } }) })) as unknown as LarkCliRunner,
+    )
+
+    await expect(client.replyToTarget?.({ chatId: 'oc_group', messageId: 'om_current' }, 'done'))
+      .rejects.toThrow('reply to target: lark-cli returned a different chat id')
+  })
+
+  it('renders a plain @display-name into a real mention before sending', async () => {
+    const calls: string[][] = []
+    const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
+      calls.push([...args])
+      if (args.includes('+chat-members-list')) {
+        return {
+          stdout: JSON.stringify({
+            ok: true,
+            data: { users: [{ member_id: 'ou_reviewer_02', name: '赵鸿珂' }] },
+          }),
+        }
+      }
+      return { stdout: JSON.stringify({ ok: true, data: { message_id: 'om_reply', chat_id: 'oc_group' } }) }
+    }) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner)
+
+    await expect(
+      client.replyToTarget?.({ chatId: 'oc_group', messageId: 'om_current' }, '@赵鸿珂 看完了'),
+    ).resolves.toEqual({ messageId: 'om_reply' })
+
+    expect(calls[0]).toEqual([
+      '--profile', 'dsh-pet', 'im', '+chat-members-list', '--as', 'bot',
+      '--chat-id', 'oc_group', '--member-types', 'user', '--page-all',
+    ])
+    expect(calls[1]).toEqual([
+      '--profile', 'dsh-pet', 'im', '+messages-reply', '--as', 'bot',
+      '--message-id', 'om_current',
+      '--text', '<at user_id="ou_reviewer_02">赵鸿珂</at> 看完了', '--json',
+    ])
+  })
+
+  it('sends the original text when the member list cannot be read', async () => {
+    const calls: string[][] = []
+    const logs: string[] = []
+    const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
+      calls.push([...args])
+      if (args.includes('+chat-members-list')) throw new Error('lark-cli exploded')
+      return { stdout: JSON.stringify({ ok: true, data: { message_id: 'om_reply', chat_id: 'oc_group' } }) }
+    }) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner, message => logs.push(message))
+
+    await expect(
+      client.replyToTarget?.({ chatId: 'oc_group', messageId: 'om_current' }, '@赵鸿珂 看完了'),
+    ).resolves.toEqual({ messageId: 'om_reply' })
+
+    expect(calls[1]).toContain('@赵鸿珂 看完了')
+    // Diagnostics stay low-cardinality: no name, id or body.
+    expect(logs.join('\n')).not.toContain('赵鸿珂')
+    expect(logs.join('\n')).not.toContain('ou_')
+  })
+
+  it('reads no member list at all when the reply addresses nobody', async () => {
+    const calls: string[][] = []
+    const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
+      calls.push([...args])
+      return { stdout: JSON.stringify({ ok: true, data: { message_id: 'om_reply', chat_id: 'oc_group' } }) }
+    }) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner)
+
+    await expect(client.replyToTarget?.({ chatId: 'oc_group', messageId: 'om_current' }, '看完了'))
+      .resolves.toEqual({ messageId: 'om_reply' })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).not.toContain('+chat-members-list')
+  })
+})
+
+describe('strict control-plane receipt', () => {
+  it('rejects a zero-exit ok:false pairing acknowledgement', async () => {
+    const client = createLarkCliClient(
+      'lark-cli',
+      vi.fn(async () => ({
+        stdout: JSON.stringify({ ok: false, error: { type: 'business', message: 'refused' } }),
+      })) as unknown as LarkCliRunner,
+    )
+
+    await expect(client.replyStrict?.('om_pair', 'paired')).rejects.toThrow(
+      'could not send the pairing receipt',
+    )
+  })
+
+  it('rejects when lark-cli refuses the pairing acknowledgement', async () => {
+    const failure = Object.assign(new Error('command failed'), {
+      stdout: '',
+      stderr: JSON.stringify({ ok: false, error: { type: 'network', message: 'offline' } }),
+    })
+    const client = createLarkCliClient(
+      'lark-cli',
+      vi.fn(async () => Promise.reject(failure)) as unknown as LarkCliRunner,
+    )
+
+    await expect(client.replyStrict?.('om_pair', 'paired')).rejects.toThrow(
+      'could not send the pairing receipt',
+    )
+  })
+})
+
+describe('Pet profile isolation', () => {
+  it('prefixes every Host-owned operation with the named profile', async () => {
+    const calls: readonly string[][] = []
+    const mutableCalls = calls as string[][]
+    const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
+      mutableCalls.push([...args])
+      if (args.includes('status')) return { stdout: JSON.stringify(READY) }
+      if (args.includes('+chat-create')) {
+        return { stdout: JSON.stringify({ ok: true, data: { chat_id: 'oc_created' } }) }
+      }
+      if (args.includes('+chat-members-list')) {
+        return { stdout: JSON.stringify({ ok: true, data: { bots: [], users: [] } }) }
+      }
+      if (args.includes('+messages-reply') && args.includes('--json')) {
+        return { stdout: JSON.stringify({ ok: true, data: { message_id: 'om_reply' } }) }
+      }
+      if (args.includes('create') && args.includes('reactions')) {
+        return { stdout: JSON.stringify({ ok: true, data: { reaction_id: 'r1' } }) }
+      }
+      return { stdout: JSON.stringify({ ok: true, data: {} }) }
+    }) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner)
+
+    await client.addReaction('om_1', 'OnIt')
+    await client.removeReaction('om_1', 'r1')
+    await client.listMessages('oc_1', 5)
+    await client.botReady()
+    await client.botIdentity?.(APP)
+    await client.userIdentity?.(APP)
+    await client.defaultQaOwner?.(APP, [USER])
+    await client.chatName('oc_1')
+    await client.listChatBots('oc_1')
+    await client.reply('om_1', 'hi')
+    await client.replyExact?.('om_1', 'verified hi')
+    await client.replyStrict?.('om_1', 'paired')
+    await client.createChat?.('qa', [BOT], BOT)
+    await client.memberCount?.('oc_1')
+    await client.sendToChat?.('oc_1', 'notice')
+
+    expect(mutableCalls).toHaveLength(15)
+    for (const args of mutableCalls) {
+      expect(args.slice(0, 2)).toEqual(['--profile', 'dsh-pet'])
+    }
+  })
+})

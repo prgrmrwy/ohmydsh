@@ -1,0 +1,13 @@
+# dsh-session-title-copy bundle patch
+#
+# Mounts the Web client plugin as a profile bundle row: each DSH web client
+# then loads `./client` (via the package's `dsh.client` declaration), locates
+# the current session title in the official conversation header and copies
+# the current session id on click (hover shows a pointer cursor).
+#
+# This is the `dsh.bundle.patch` layer declared in package.json; the ohmydsh
+# manifest (source: local) appends `dsh-session-title-copy` to the bundle
+# stack automatically.
+- insert:
+    - id: dsh-session-title-copy
+      name: dsh-session-title-copy

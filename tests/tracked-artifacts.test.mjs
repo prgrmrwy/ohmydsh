@@ -26,16 +26,21 @@ test('rejects generated package output and nested locks', () => {
   assert.match(violations[1], /nested package lock/)
 })
 
-test('rejects raw checking evidence and duplicate architecture exports', () => {
+test('rejects raw checking evidence and any tracked archify output', () => {
+  // `archify-out/` is local-only now: every path under it is a violation,
+  // not just the duplicate exports it used to single out. The README's
+  // architecture asset lives in `docs/assets/` instead.
   const violations = artifactPolicyViolations([
     ...allowed,
     'openspec/changes/example/checking/baselines/history.json',
     'openspec/changes/example/checking/screenshots/gui.png',
     'archify-out/ohmydsh-architecture.light.png',
     'archify-out/ohmydsh-architecture.html',
+    'archify-out/ohmydsh-architecture.dual.svg',
+    'archify-out/talk-script.md',
     'worktree-session-architecture.html',
   ])
-  assert.equal(violations.length, 5)
+  assert.equal(violations.length, 7)
 })
 
 test('requires the root lock and architecture source/display allowlist', () => {

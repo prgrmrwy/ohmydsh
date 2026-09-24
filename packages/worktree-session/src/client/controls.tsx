@@ -1,10 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+// Type-only: merges the 0.1.2 session-scoped slot props (useSession /
+// sessionId / useProjection) into PropsRuntime. Without this import the
+// merged interface stays EMPTY and destructuring a non-existent prop
+// typechecks fine — which is exactly how the useSessions regression shipped.
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
+// Type-only: brings ctx.sessions (list store) onto the client Context.
+import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type { RepoStatusResult, SessionStatusResult } from '../wire.ts'
 import { post, ROUTES } from './api.ts'
 import { decorateSubmit, restoreSubmit } from './handoff.ts'
 import { getStage, resetStage, resetStageForCwd, setStage, subscribeStage, type ClientStage } from './stage-store.ts'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 
 export type WorktreeControlsProps = PropsRuntime<'conversation.input.left'> & {
   pluginContext: ClientContext
@@ -86,9 +93,23 @@ export function openWorktreeInEditor(path: string): void {
   window.open(uri, '_blank')
 }
 
-export function WorktreeControls({ pluginContext: ctx, session, sessionId, useSessions, openWorktree = openWorktreeInEditor }: WorktreeControlsProps) {
-  const summary = useSessions(state => state.byId[sessionId])
-  const cwd = summary?.cwd
+export function WorktreeControls({ pluginContext: ctx, sessionId, useSession, openWorktree = openWorktreeInEditor }: WorktreeControlsProps) {
+  // DSH 0.1.2 slot contract: a `scope: 'session'` seat receives
+  // `useSession` / `sessionId` / `useProjection`. The 0.1.1-rc.2 props this
+  // component used — the `session` value and the `useSessions` list feed —
+  // no longer exist. Lifecycle state now comes from `useSession`, and `cwd`
+  // (a list-row fact, absent from SessionSnapshot) is read from the injected
+  // `sessions` service's list store.
+  const session = useSession(snapshot => snapshot)
+  const readCwd = (): string | undefined => ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd
+  // The third argument (server snapshot) is required by React whenever the
+  // tree may be rendered to static markup — this package's own tests do
+  // exactly that. The store is plain in-memory state, so the same read serves.
+  const cwd = useSyncExternalStore(
+    (onChange: () => void) => ctx.sessions.list.subscribe(onChange),
+    readCwd,
+    readCwd,
+  )
   const [revision, setRevision] = useState(0)
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
@@ -110,7 +131,7 @@ export function WorktreeControls({ pluginContext: ctx, session, sessionId, useSe
           ...(status.dependencyMode === undefined ? {} : { dependencyMode: status.dependencyMode }),
           ...(status.packageManager === undefined ? {} : { packageManager: status.packageManager }),
           ...(status.lifecycle === undefined ? {} : { lifecycle: status.lifecycle }),
-          phase: status.lifecycle === 'uncertain' ? 'uncertain' : status.lifecycle === 'cleaned' ? 'cleaned' : 'done',
+          phase: status.lifecycle === 'cleaned' ? 'cleaned' : status.lifecycle === 'released' ? 'idle' : 'done',
         })
         restoreSubmit(sessionId as string)
         return
@@ -142,7 +163,7 @@ export function WorktreeControls({ pluginContext: ctx, session, sessionId, useSe
   const filtered = useMemo(() => (stage?.refs ?? []).filter(ref => ref.name.toLowerCase().includes(query.toLowerCase())), [query, revision, stage?.refs])
   if (cwd === undefined || stage === undefined) return null
   if (stage.lifecycle !== undefined) {
-    const lifecycle = stage.lifecycle === 'admitted' || stage.lifecycle === 'bound' || stage.lifecycle === 'submit-claimed' ? 'active' : stage.lifecycle
+    const lifecycle = stage.lifecycle === 'bound' ? 'active' : stage.lifecycle
     const canOpen = lifecycle !== 'cleaned' && stage.worktreePath !== undefined
     const branchStyle: React.CSSProperties = { ...controlStyle, ...ellipsisStyle, lineHeight: '24px', padding: '0 8px', ...(canOpen ? { cursor: 'pointer', borderColor: 'var(--dsw-alias-line-border-strong, #a0a0a0)' } : {}) }
     const openBranch = (): void => { if (canOpen) openWorktree(stage.worktreePath as string) }
@@ -156,7 +177,7 @@ export function WorktreeControls({ pluginContext: ctx, session, sessionId, useSe
         {...(canOpen ? { role: 'button', tabIndex: 0, onClick: openBranch, onKeyDown: onBranchKeyDown, 'aria-label': `Open worktree in editor: ${stage.taskBranch ?? 'worktree'}` } : {})}
       >⑂ {stage.taskBranch ?? 'worktree'}</span>
       <span style={{ opacity: .8 }}>{stage.dependencyMode ?? 'lean'} · {stage.packageManager ?? 'npm'}</span>
-      <span style={{ color: lifecycle === 'uncertain' ? '#d9822b' : lifecycle === 'cleaned' ? '#888' : '#2b8a3e' }}>{lifecycle}</span>
+      <span style={{ color: lifecycle === 'cleaned' || lifecycle === 'released' ? '#888' : '#2b8a3e' }}>{lifecycle}</span>
     </span>
   }
   if (!session.blank || stage.refs.length === 0) return null
@@ -199,7 +220,7 @@ export function WorktreeControls({ pluginContext: ctx, session, sessionId, useSe
     </span>
     <button type="button" aria-pressed={stage.enabled} style={{ ...controlStyle, padding: '0 8px', background: stage.enabled ? '#3370ff22' : 'transparent' }} onClick={() => {
       const enabled = !stage.enabled
-      setStage(sessionId as string, cwd, { enabled, phase: 'idle', error: undefined, ...(enabled ? {} : { submitted: false }) })
+      setStage(sessionId as string, cwd, { enabled, phase: 'idle', error: undefined })
       if (!enabled) restoreSubmit(sessionId as string)
     }}>{stage.enabled ? '☑' : '☐'} Worktree</button>
     {stage.phase !== 'idle' && stage.phase !== 'done' && <span title={stage.error ?? stage.phase} style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: stage.error ? '#d44' : 'inherit', opacity: .8 }}>{stage.error ?? stage.phase}</span>}

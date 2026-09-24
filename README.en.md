@@ -109,15 +109,15 @@ tests/                    # black-box sync regression tests
 
 ## Architecture
 
-<img alt="ohmydsh architecture: repo source of truth → sync → ~/.dsh → DSH runtime" src="archify-out/ohmydsh-architecture.dual.svg" width="100%">
+<img alt="ohmydsh architecture: repo source of truth → sync → ~/.dsh → DSH runtime" src="docs/assets/ohmydsh-architecture.dual.svg" width="100%">
 
-The editable diagram source is `archify-out/ohmydsh-architecture.json`; update it and re-export the theme-adaptive SVG when the architecture changes.
+The editable diagram source is `docs/assets/ohmydsh-architecture.json`; update it and re-export the theme-adaptive SVG when the architecture changes.
 
 ## Security notes
 
 ⚠️ This repository drives an **AI agent runtime with full local machine capabilities** (shell execution, file read/write). Run it only on machines you trust, and review third-party plugin source before installing.
 
-LAN binding (`web.lan`) is **deliberately disabled by default**: enabling it binds to `0.0.0.0` and exposes full agent capability to every device on the network without TLS. The supported remote-access path is an SSH tunnel — see `docs/notes/lan-access-ssh-tunnel.md`.
+The webserver binds to loopback only; LAN binding (`web.lan` / `DSH_LAN`) has been **removed** from this repo. Enabling it exposes full agent capability to every device on the network without TLS.
 
 Report vulnerabilities privately per [SECURITY.md](SECURITY.md).
 
