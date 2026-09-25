@@ -151,6 +151,8 @@ sync 行为按定制类型:
 
 顶层 `dependencies:` = 无 bundle 的支撑包(如 remote 定制缺失的 peer),精确版本 pin 装为 plain dependency、**不进 bundle 层**;定制条目用 `deps:` 引用其包名声明归属(安装仍以顶层列表为唯一入口,sync 校验引用,悬空引用报错)。
 
+`thirdPartyResources:` 用于精确 pin 的外部 MCP、独立 workflow 与 OpenSpec schema。Jev 只在 DSH Host 启动环境存在 `TYPESAFE_API_KEY` 时装配；key 应只写入本机 gitignored `.env.local`（模板见 `.env.local.example`），然后由用户执行 `dsh restart`。不要把 key 写进 manifest、命令参数、日志或聊天。`node scripts/jev-readiness.mjs` 只检查变量存在性、精确 package/insert row 与当前 request-header/skill-catalog 名称，不读取或打印 key 值。
+
 **定制项按需开关**(`enabledEnv`,可选字段,任意 `customizations` 条目都能声明):声明后同名 `DSH_` 环境变量覆盖该条目的 `enabled`,作用范围是单条定制而不是整个 profile——用于"仓库里默认关闭,但在有权限/有需要的机器上用环境变量按需打开"的场景,例如内部专属包:公开分享这份仓库时它不该默认安装,但在有权限的机器上不想手改 `dsh.yaml`。写法:
 
 ```yaml

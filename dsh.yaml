@@ -17,6 +17,49 @@ agentInstructions:          # DSH 原生工作环境级指令,单例物化为 $D
   enabled: true
   source: instructions/dsh-home.md
 
+# 精确 pin 的外部决策/工作流资源。sync 先验证来源身份，再物化；禁用只撤销受管产物。
+thirdPartyResources:
+  - id: spec-superflow
+    type: npm-workflow
+    enabled: true
+    spec: spec-superflow@2.0.1
+    version: 2.0.1
+    integrity: sha512-G5P8ossz5R7lDuUWAO1v5aVG93qVjk3D85+tF2gkPGVhnVgdfEZ+pqllsAo+IEMsKa7/KE52ohbAhb9m+r0XtQ==
+    provider:
+      spec: '@deepseek-ai/dsh-skill-filesystem@0.1.5-rc.2'
+      version: 0.1.5-rc.2
+      integrity: sha512-lEZ9KojaIc24vKCa5mp8LBHUDoXpNRSR/vlMsWONc9Tc1wwfn9kEotIjj0HD4PjIRcnc+Lma1nk4G/oNED8A9Q==
+    providerName: spec-superflow-upstream
+    skills: [bug-investigator, build-executor, code-reviewer, contract-builder, need-explorer, release-archivist, spec-merger, spec-writer, workflow-start]
+  - id: jev
+    type: npm-mcp-server
+    enabled: true
+    spec: '@jkudish/jev-mcp@0.6.0'
+    version: 0.6.0
+    integrity: sha512-AAQeZESEMatz5m5X/bojvcL3bpwTPxebFOXBSj66KKNOKznumhne2VsLQ9btxPWBS8obhbVvCInwooy7Phudtw==
+    bridge:
+      spec: '@deepseek-ai/dsh-mcp-client@0.1.5-rc.2'
+      version: 0.1.5-rc.2
+      integrity: sha512-L1uhXptzs63bne3fpe8By30xUu2KzC9bbo8t1RdasnRNxhevNJA/5/Z9ZenuMRh26XZh9THF+DVuudEH8PFIsQ==
+    serverName: jev
+    credentialEnv: TYPESAFE_API_KEY
+    toolCallTimeoutMs: 30000
+    reconnect:
+      enabled: true
+      initialDelayMs: 500
+      maxDelayMs: 10000
+      maxAttempts: 5
+  - id: anvil
+    type: openspec-schema
+    enabled: true
+    archiveUrl: https://codeload.github.com/jikkujoyce/openspec-schemas/tar.gz/73eea60c622712a5d952ec1aec62da4e349f8c33
+    commit: 73eea60c622712a5d952ec1aec62da4e349f8c33
+    archiveSha256: 62a94ccad4000982c8de93f5596ee0e778ef58a41797994568e546021eacd9d5
+    treeSha256: 61250a6741799df17fe74c41ed23a95e2910ea3190fff2f6c0e8f66004a63767
+    sourcePath: schemas/anvil
+    target: anvil
+    scope: user
+
 bundlesBrief:              # 出厂 bundle 的短备注(非 manifest 管理的包)
   "@deepseek-ai/dsh-base": 核心 bundle(agent / 会话 / 工具骨架)
   "@deepseek-ai/dsh-web-app": web 壳(浏览器 UI)
@@ -120,6 +163,12 @@ customizations:
   - id: ws
     type: skill
     enabled: true
+  # Phase 1 Jev 流程路由:只做 shadow observation,不创建 change/切 schema/调用 ssf。
+  - id: jev-workflow-router
+    type: skill
+    enabled: true
+    brief: Jev 流程分流 shadow 评估(无自动副作用)
+    note: '仅在 Agent 已独立到达流程选择点后调用 pinned Jev MCP；候选闭集为 direct / 标准 OpenSpec / 原样 Anvil / 原样 spec-superflow。用户显式选择、existing change、安全门禁与 Worktree Session 始终优先；低置信度/失败均 needs-review，记录仅含本地有界特征。'
   # 自研 skill:添加远端插件的标准流程
   - id: add-dsh-plugin
     type: skill
