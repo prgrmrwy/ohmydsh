@@ -188,6 +188,12 @@ async function render(
       rpc={rpc as never}
       t={((key: string) => key) as never}
       scope={scope as never}
+      browseOpen={{
+        request: async () => ({ status: 'ok', port: 3939, scope: 'x' }),
+        addresses: { register: () => () => undefined, resolve: async ({ port }) => `http://localhost:${port}` },
+        openTab: () => null,
+        t: key => key,
+      } as never}
     />
   )
 

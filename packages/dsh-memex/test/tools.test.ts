@@ -1,12 +1,28 @@
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { resetFailureLatch, telemetryFile } from '../src/telemetry/sink.js'
 import type { KernelRunner } from '../src/tools/index.js'
 import { mapConcurrent, registerMemexTools } from '../src/tools/index.js'
 import { TOOL_DESCRIPTIONS } from '../src/tools/descriptions.generated.js'
 import type { BindingEntry, ScopeResolution, ScopeService } from '../src/scope/types.js'
+
+/**
+ * Every search writes a telemetry record. Without an isolated DSH home the
+ * suite appends to the developer's real recall log — observed polluting it with
+ * 45 fixture rows, which then showed up as bogus statistics in the report.
+ * Redirect unconditionally; individual tests override with their own home.
+ */
+beforeEach(() => {
+  vi.stubEnv('DSH_HOME', mkdtempSync(join(tmpdir(), 'dsh-memex-suite-home-')))
+})
+
+afterEach(() => {
+  vi.unstubAllEnvs()
+  resetFailureLatch()
+})
 
 /**
  * A route as the resolver would build it: the workspace's entries (this scope
@@ -364,6 +380,161 @@ describe('memex DSH tool registration', () => {
     expect(result.mode).toBe('list')
     expect(runner).toHaveBeenNthCalledWith(1, ['read', '--', 'index'], expect.objectContaining({ home: '/memex/current' }))
     expect(runner).toHaveBeenNthCalledWith(2, ['search', '--limit', '10', '--list'], expect.objectContaining({ home: '/memex/current' }))
+  })
+})
+
+describe('keyword queries reach the kernel segmented', () => {
+  /** The exact query string handed to the kernel: the argument after `--`. */
+  function sentQuery(runner: ReturnType<typeof vi.fn>, callIndex = 0): string {
+    const args = runner.mock.calls[callIndex]![0] as string[]
+    return args[args.indexOf('--') + 1]!
+  }
+
+  it('segments Han runs for memex_search', async () => {
+    const runner = vi.fn(async () => ok())
+    const tools = capture(runner as never)
+    await call(tools.get('memex_search')!, { query: '子进程能不能用上代理' })
+    expect(sentQuery(runner)).toBe('子进 进程 程能 能不 不能 能用 用上 上代 代理')
+  })
+
+  it('segments Han runs for memex_recall', async () => {
+    const runner = vi.fn(async () => ok())
+    const tools = capture(runner as never)
+    await call(tools.get('memex_recall')!, { query: '子进程能不能用上代理' })
+    expect(sentQuery(runner)).toBe('子进 进程 程能 能不 不能 能用 用上 上代 代理')
+  })
+
+  it('sends both entry points the same query for the same question', async () => {
+    // A divergence here is invisible at runtime: the model cannot tell "not in
+    // the library" from "asked through the other tool".
+    const searchRunner = vi.fn(async () => ok())
+    const recallRunner = vi.fn(async () => ok())
+    await call(capture(searchRunner as never).get('memex_search')!, { query: '会话删不掉 提示被占用' })
+    await call(capture(recallRunner as never).get('memex_recall')!, { query: '会话删不掉 提示被占用' })
+    expect(sentQuery(searchRunner)).toBe(sentQuery(recallRunner))
+  })
+
+  it('leaves ASCII queries byte-identical', async () => {
+    const runner = vi.fn(async () => ok())
+    const tools = capture(runner as never)
+    await call(tools.get('memex_search')!, { query: 'connection.rpc.handle 405' })
+    expect(sentQuery(runner)).toBe('connection.rpc.handle 405')
+  })
+
+  it('passes the query through unchanged for semantic search', async () => {
+    // Segmentation would shred the text the embedding is computed from.
+    const runner = vi.fn(async () => ok())
+    const tools = capture(runner as never)
+    await call(tools.get('memex_search')!, { query: '子进程能不能用上代理', semantic: true })
+    expect(sentQuery(runner)).toBe('子进程能不能用上代理')
+  })
+})
+
+describe('recall telemetry', () => {
+  function useHome(): NodeJS.ProcessEnv {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-memex-tools-telemetry-'))
+    vi.stubEnv('DSH_HOME', dir)
+    return { DSH_HOME: dir }
+  }
+
+  function records(env: NodeJS.ProcessEnv): Record<string, unknown>[] {
+    const file = telemetryFile(new Date(), env)
+    if (!existsSync(file)) return []
+    return readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>)
+  }
+
+
+  it('records a keyword search without keeping the query text', async () => {
+    const env = useHome()
+    const marker = 'UNIQUEQUERYMARKER'
+    const tools = capture(async () => ok('## card-one\nCard one title\nbody\n'))
+    await call(tools.get('memex_search')!, { query: `${marker} proxy` })
+    const written = records(env)
+    expect(written).toHaveLength(1)
+    expect(JSON.stringify(written)).not.toContain(marker)
+    expect(written[0]!.hitCount).toBe(1)
+  })
+
+  it('records an empty recall as hitCount 0, the observable false-negative signal', async () => {
+    const env = useHome()
+    const tools = capture(async () => ok(''))
+    await call(tools.get('memex_search')!, { query: '会话删不掉' })
+    expect(records(env)[0]).toMatchObject({
+      hitCount: 0,
+      query: expect.objectContaining({ han: true, segmented: true }),
+    })
+  })
+
+  it('records recall through the second entry point too', async () => {
+    const env = useHome()
+    const tools = capture(async () => ok('## card-one\nCard one title\nbody\n'))
+    await call(tools.get('memex_recall')!, { query: 'proxy' })
+    expect(records(env)).toHaveLength(1)
+  })
+
+  it('does not record list or index reads, which carry no query', async () => {
+    const env = useHome()
+    const tools = capture(async () => ok('one  One title\n'))
+    await call(tools.get('memex_recall')!, {})
+    expect(records(env)).toHaveLength(0)
+  })
+
+  it('marks whether a hit was anchored in slug or title', async () => {
+    const env = useHome()
+    const tools = capture(async () => ok('## dsh-proxy-model\nProxy model\nbody\n\n## unrelated-card\nSomething else\nbody\n'))
+    await call(tools.get('memex_search')!, { query: 'proxy' })
+    expect((records(env)[0] as { hits: { slug: string; anchored: boolean }[] }).hits).toEqual([
+      { slug: 'dsh-proxy-model', scope: 'current', anchored: true },
+      { slug: 'unrelated-card', scope: 'current', anchored: false },
+    ])
+  })
+
+  it('attributes each hit to the library it came from, not to the caller', async () => {
+    // Fan-out means a recall issued from one workspace routinely returns cards
+    // owned by another. Keying "never recalled" on the caller would blame the
+    // wrong library and report live cards as dead weight.
+    const env = useHome()
+    const runner: KernelRunner = async (_args, options) => {
+      const name = options.home.split('/').at(-1)!
+      return ok(`## ${name}-card\n${name} title\nbody\n`)
+    }
+    const tools = capture(runner, { name: 'bound', read: ['current', 'personal'], write: ['current'] })
+    await call(tools.get('memex_search')!, { query: 'proxy', scope: 'all' })
+    const record = records(env)[0] as { scope: string; hits: { slug: string; scope: string }[] }
+    expect(record.scope).toBe('current')
+    expect([...new Set(record.hits.map(hit => hit.scope))].sort()).toEqual(['current', 'personal'])
+  })
+
+  it('writes nothing for a workspace that turned memory off', async () => {
+    // Closing memory closes it completely: leaving a record would log that
+    // workspace's activity on a boundary the user explicitly shut.
+    const env = useHome()
+    const off = scope('current', undefined, false)
+    const service: ScopeService = {
+      resolve: () => off,
+      list: () => [off],
+      resolveByName: () => off,
+      ensure: value => value,
+      bindingFor: () => undefined,
+      accessFor: current => ({ current, read: [current], write: [current] }),
+    }
+    const tools = capture(async () => ok('## card\nTitle\nbody\n'), undefined, undefined, service)
+    await expect(call(tools.get('memex_search')!, { query: 'proxy' })).rejects.toThrow(/Memory is off/)
+    expect(records(env)).toHaveLength(0)
+  })
+
+  it('returns identical results whether or not telemetry can be written', async () => {
+    // The spec requires results to be byte-identical: a sink failure must never
+    // be observable through the tool.
+    const stdout = '## card-one\nCard one title\nbody\n'
+    useHome()
+    const working = await call(capture(async () => ok(stdout)).get('memex_search')!, { query: 'proxy' })
+    const broken = mkdtempSync(join(tmpdir(), 'dsh-memex-ro-'))
+    chmodSync(broken, 0o500)
+    vi.stubEnv('DSH_HOME', broken)
+    const failing = await call(capture(async () => ok(stdout)).get('memex_search')!, { query: 'proxy' })
+    chmodSync(broken, 0o700)
+    expect(failing).toEqual(working)
   })
 })
 

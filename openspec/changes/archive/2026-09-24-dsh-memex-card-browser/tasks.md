@@ -25,37 +25,37 @@
 
 ## 3b. 专用 shim package（跨机器路径；依赖 dsh-cockpit 侧能力先落地）
 
-- [ ] 3b.1 新建 `packages/cockpit-memex-browse-shim/`，形态与依赖声明对齐既有 `packages/cockpit-worktree-open-shim/`（host 半区惰性，集成在 client 半区）
-- [ ] 3b.2 探测两端并接线：读驾驶舱端口发布能力 + 注册进 dsh-memex 的注册点；任一端缺席则不产生效果且不抛未捕获错误
-- [ ] 3b.3 服务读取一律用**完整 dotted name 的单次 `ctx.get('a.b')`**，禁止 `ctx.get('a').b`（Cordis 重路由点属性并强制 inject，会变成未捕获拒绝）
-- [ ] 3b.4 顶层 `inject` 必须为空数组；监听服务变更以支持任意加载顺序，并在任一端消失时解除接线
-- [ ] 3b.5 保持最薄：不校验、不拼装地址、不重试、不持状态、不缓存；失败原样上抛由 dsh-memex 呈现
-- [ ] 3b.6 在 `dsh.yaml` 登记该 package，并写 README 说明存在理由与移除路径（对齐 `subscriptions-sandbox-shim` 惯例）
-- [ ] 3b.7 单测：仅装一端时无效果且两端正常；两端就绪后接线；晚加载可接线；一端卸载后解除接线
+- [x] 3b.1 新建 `packages/cockpit-memex-browse-shim/`，形态与依赖声明对齐既有 `packages/cockpit-worktree-open-shim/`（host 半区惰性，集成在 client 半区）
+- [x] 3b.2 探测两端并接线：读驾驶舱端口发布能力 + 注册进 dsh-memex 的注册点；任一端缺席则不产生效果且不抛未捕获错误
+- [x] 3b.3 服务读取一律用**完整 dotted name 的单次 `ctx.get('a.b')`**，禁止 `ctx.get('a').b`（Cordis 重路由点属性并强制 inject，会变成未捕获拒绝）
+- [x] 3b.4 顶层 `inject` 必须为空数组；监听服务变更以支持任意加载顺序，并在任一端消失时解除接线
+- [x] 3b.5 保持最薄：不校验、不拼装地址、不重试、不持状态、不缓存；失败原样上抛由 dsh-memex 呈现
+- [x] 3b.6 在 `dsh.yaml` 登记该 package，并写 README 说明存在理由与移除路径（对齐 `subscriptions-sandbox-shim` 惯例）
+- [x] 3b.7 单测：仅装一端时无效果且两端正常；两端就绪后接线；晚加载可接线；一端卸载后解除接线
 
-## 4. Host 端点与同源 launcher 页面
+## 4. Host 端点与 Client 打开流程
 
 - [x] 4.1 Host：在既有 `/dsh-memex` 通道新增「确保某库浏览服务就绪」端点，返回**实际监听端口**（交付事实，不交付地址）
 - [x] 4.2 Host：`memory: false` 在**启动任何进程之前**拒绝，并说明重新开启的位置（对齐归档 design D20 的「拒绝先于 ensure」）
-- [x] 4.3 Client：注册 DSH 同源的 launcher 路由/视图（我们自己的资源；上游 HTML 仍在其自身端口根路径原样运行）
-- [x] 4.4 Client：launcher 流程 —— 取端口 → 问注册点要地址 → 跳转；**在浏览器内完成，不用服务端 302**
-- [x] 4.5 Client：失败呈现 —— 服务启动失败、关闭记忆被拒、注册方失败三类各自就地说明原因；注册方失败时 MUST NOT 回落本机地址
-- [x] 4.6 单测：关闭记忆的库被拒且未 spawn；启动失败不跳转；注册方失败时不返回本机地址
+- [x] 4.3 Client：点击时同步打开空白标签页，保留句柄；地址解析继续在发起点击的设置页上下文内完成（跨机器时该上下文仍位于 cockpit iframe）
+- [x] 4.4 Client：设置页流程 —— 取端口 → 问注册点要地址 → 令已打开标签页跳转；**不用服务端 302，也不把解析移交给独立标签页**
+- [x] 4.5 Client：失败呈现 —— 服务启动失败、关闭记忆被拒、注册方失败三类均在已打开标签页就地说明原因；注册方失败时 MUST NOT 回落本机地址
+- [x] 4.6 单测：关闭记忆的库被拒且未 spawn；打开标签页发生在首个 await 之前；启动失败不跳转；注册方失败时不返回本机地址
 
 ## 5. 设置页「打开」动作
 
 - [x] 5.1 在入口**展开态**增加「打开」动作，与既有路径/远端动作并列；列表态保持不变
 - [x] 5.2 可见性规则：关闭记忆、内核不可用、库未物化三种情形不呈现（或禁用并说明），不呈现点击必然失败的按钮
-- [x] 5.3 点击行为：同步 `window.open` 到 launcher 路径，页面不进入等待态（避免弹窗拦截）
+- [x] 5.3 点击行为：同步 `window.open('', '_blank')`，在设置页上下文异步解析后导航该标签页；设置页不进入等待态（避免弹窗拦截且保留 iframe 内 bridge）
 - [x] 5.4 新增文案进 `locales.ts`，覆盖动作名与各降级说明
 - [x] 5.5 单测/组件测：三种不可用情形的渲染；点击不阻塞页面
 
 ## 6. 契约、文档与验收
 
-- [ ] 6.1 更新 `dsh.yaml` 中 dsh-memex 的 note：新增运行依赖（按需拉起内核 serve）、stdout 解析的版本复核点、CDN 外链的已知限制
-- [ ] 6.2 在 `docs/notes/` 记录内核 serve 的四条行为约束与本方案的应对（或在既有 pitfalls 文档中追加一节）
-- [ ] 6.3 运行仓库检查：`npm test`、`npm run check:artifacts`、`node scripts/sync.mjs`（含幂等验证：连续第二次运行无变化），以及 package 内的 build/typecheck/test
+- [x] 6.1 更新 `dsh.yaml` 中 dsh-memex 的 note：新增运行依赖（按需拉起内核 serve）、stdout 解析的版本复核点、CDN 外链的已知限制
+- [x] 6.2 在 `docs/notes/` 记录内核 serve 的四条行为约束与本方案的应对（或在既有 pitfalls 文档中追加一节）
+- [x] 6.3 运行仓库检查：`npm test`、`npm run check:artifacts`、`node scripts/sync.mjs`（含幂等验证：连续第二次运行无变化），以及 package 内的 build/typecheck/test
 - [x] 6.4 真机验收（本机直连）：对一个已物化且开启记忆的库点击「打开」，新标签页呈现内核界面并可浏览卡片
 - [x] 6.5 真机验收（降级）：关闭记忆的入口无动作且直接请求被拒；未物化的库无动作；内核不可用时不误导
-- [ ] 6.6 真机验收（跨机器）：待 dsh-cockpit `device-port-forward-seam` 落地并装上 shim 后，验证经注册方取得的地址可从宿主机浏览器访问；未装 shim 时验证呈现为「不可用 + 原因」，且移除 shim 后两端各自仍正常
-- [ ] 6.7 确认 current specs 已同步最终行为后归档 change
+- [x] 6.6 真机验收（跨机器）：待 dsh-cockpit `device-port-forward-seam` 落地并装上 shim 后，验证经注册方取得的地址可从宿主机浏览器访问；未装 shim 时验证呈现为「不可用 + 原因」，且移除 shim 后两端各自仍正常
+- [x] 6.7 确认 current specs 已同步最终行为后归档 change

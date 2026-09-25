@@ -108,11 +108,46 @@ mismatch、sync rollback 和停止启动；绝不会自动把旧 patch 套到未
   表达不了；
 - 判定某个 seam **可以移除**：证据必须覆盖它承担的**每一项**语义，不是其中一项。
 
+**举证必须用 `git grep <字符串> HEAD`，不要读 `.upstream/` 工作区，也不要按行号区间取。**
+`build.mjs` 在该目录上 `git apply` 本补丁；构建现在会在退出时还原（含失败路径），但
+构建进行中、或还原失败时，工作区里的 patch 内容与上游代码**外观完全一致**。
+2026-09-23 的评审中，三位独立读者据此把 `settlementNotice` 与
+`withLiveContinuableChildSession` 判成官方能力——两者在干净 HEAD 中均为 **0 命中**。
+最具迷惑性的是补丁自己的 marker 注释（"Literal proof that this runtime honors …"）：
+它读起来像上游承诺，实际只是让 Pet 自检补丁是否生效。
+
+行号同样不可信：`notifySettlement` 在干净 HEAD 是 `:823`，打补丁后偏移到 `:855`，
+且偏移量随 hunk 变化。**`git show HEAD:<file> | sed -n '行号区间'` 取到的是别的内容**；
+验证某段代码是否存在于上游，只能按字符串搜。
+
+先跑 `git -C .upstream status --short`：输出为空才说明工作区可信；非空时，清单内文件
+一律按上述方式读，清单外目录（`core/`、`api/`、`workspace/`、`session/`、`preset/`）
+可直接读。
+
 第二条是 2026-09 实测的教训。当时据「官方 `startContinuable` 接受 `spec.childId`」
 判定 `createIdleContinuable` 可退，却漏了它同时承担的「不提交初始内容」——而官方
 `prompt` 必填；又据 `composeFrom` 的 "bind, not a mount" 判定 `independent-v1`
 可退，但那句话保证的是「已存活子代不被父的后续变更污染」，不是「能独立于父重建
 组合」。**形近 API 常常解决的是相邻问题。**
+
+### 退役还取决于 Pet 自己的架构前提（2026-09-23 补）
+
+上面两条只检查**上游能不能表达**。但一个 seam 的必要性同时由 **Pet 这一侧的结构
+前提**决定，而后者可能先于上游改变。当前四个 seam 的实际阻塞项：
+
+| seam | 阻塞 | 说明 |
+|---|---|---|
+| `settlementNotice: 'silent'` | **需要旁路 locus 主会话** | 其论证前提是「父 = 用户正在使用的主会话」，故 `notifySettlement` 走 `parent.steer()` 会插进用户的轮次。上游实际代码是 `parent.status === 'idle' ? 'queue' : 'steer'`——父若是 Pet 自有的 standby 主会话（几乎恒为 idle），走 `queue`，在它自己的会话里开一轮，不打断任何人。**前提由架构消除，不必等上游发布。** |
+| `contextMode: 'independent-v1'` | 依赖 locus 主 preset 不可变 | 它解决「父后来换了 preset，冷恢复重建不出原组合」。Pet 自有 main 的 preset 固定为 `dsh-pet-executor`；但若该会话在侧边栏可见、用户可进去切换 preset/模型，该条件即失效。 |
+| `createIdleContinuable` | 失败补偿需重新设计 | 官方 `startContinuable({ childId })` 可接受预留 id，改为「先留 id → 先提交 locus 行 → 首条真实 Delivery 作为创建 prompt」即可绕开 `prompt` 必填。但当前顺序是「child 先存在才提交行」，反转后行可能指向不存在的 child。与 BACKLOG B036 是同一条。 |
+| `withLiveContinuableChildSession` | **只要子会话仍是 subagent child 就不能退** | 泛化 Session 路由**有意**拒绝 continuation-owned child（判据即 `origin === 'subagent'`）。生产消费面 3 处：sandbox policy 的 apply/resolve、启动恢复的 delivery 证明——均需读写子会话自身的 Session 对象，无替代路径。 |
+
+**因此这些 seam 都不能独立退役**：它们各自的退役入口是 Pet 的结构改造，而不是
+一次 patch 清理。判定可退时，除了引用上游 API，还必须指出**是哪次架构变更消除了
+该 seam 的前提，以及该变更是否已经落地**。
+
+同一纪律的反向用法：若某次架构改造声称「顺带让某 patch 可以退役」，必须在改造
+**落地并验收之后**才移除 patch，不得在同一批改动里既建立新前提又依赖它。
 
 ## Gate O2：不阻塞无进程执行基线
 

@@ -30,25 +30,30 @@ import type { AgentOptions, CreateAgentOptions } from '@deepseek-ai/dsh-agent'
 import { SessionId, type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { foldSessionTitle as foldDshSessionTitle } from '@deepseek-ai/dsh-session-title'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { LOCUS_SAFE_CHILD_COMPOSITION } from './aggregate.js'
+import { LOCUS_MAIN_PRESET, LOCUS_SAFE_CHILD_COMPOSITION } from './aggregate.js'
 import type { LocusDshPort, LocusParentSession, LocusWorkspace } from './controller.js'
 
 /**
- * The preset every Pet-owned locus main session composes.
- *
- * Fixed on purpose. Locus children derive their composition from the main
- * session's composed preset, so a Host- or user-chosen preset would drift
- * straight into the child. Pet's executor preset is the only one whose
- * delegation rows stay on the standing layer, where `LOCUS_SAFE_TOOL_FILTER`
- * can actually remove them (see the creation comment in this file).
+ * Re-exported for existing importers; the constant now lives in `aggregate.ts`
+ * so the explicit-bind gate in `controller.ts` can read the same value without
+ * importing this module (which already depends on `controller.ts`).
  */
-export const LOCUS_MAIN_PRESET = 'dsh-pet-executor'
+export { LOCUS_MAIN_PRESET }
 
 /** Minimal cold-inspection result consumed by this adapter. */
 export interface LocusSessionInspection {
   readonly meta: {
     readonly id: SessionId
     readonly parentSession?: SessionId
+    /**
+     * The preset recorded on this session's durable header.
+     *
+     * Read for binding safety, not for display: a locus child composes itself
+     * from its parent's composed preset, so an explicitly bound main decides
+     * the child's tool surface. Absent means the header states no preset,
+     * which is NOT the same as a known-safe one.
+     */
+    readonly agentPreset?: string
   }
   readonly events: readonly SessionEvent[]
 }
@@ -276,6 +281,12 @@ export function createProductionLocusDshPort(
         ...(inspection.meta.parentSession === undefined
           ? {}
           : { parentSessionId: String(inspection.meta.parentSession) }),
+        // Carried so an explicit bind can verify what the child would inherit.
+        // Deliberately NOT defaulted: "absent" and "some safe value" must stay
+        // distinguishable at the gate that reads it.
+        ...(inspection.meta.agentPreset === undefined
+          ? {}
+          : { agentPreset: inspection.meta.agentPreset }),
         state: archived ? 'archived' : 'active',
       }
     },

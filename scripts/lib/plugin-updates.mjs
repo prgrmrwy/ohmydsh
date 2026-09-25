@@ -9,7 +9,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import yaml from 'js-yaml'
+import { loadManifestWithOverlay } from './manifest-overlay.mjs'
 
 export const STALE_DAYS = 60
 export const DSH_PEER_PREFIX = '@deepseek-ai/dsh-'
@@ -116,8 +116,10 @@ export function npmSpecOf(item) {
  * 检测 manifest 中所有 remote package 条目的更新状态。
  * @returns {Promise<Array<object>>} rows(见 check-plugin-updates 输出结构)。
  */
-export async function detectRemotePluginUpdates({ manifestPath, registry = 'https://registry.npmjs.org', dshVersion, cordisVersion }) {
-  const manifest = yaml.load(readFileSync(manifestPath, 'utf8'))
+export async function detectRemotePluginUpdates({ manifestPath, registry = 'https://registry.npmjs.org', dshVersion, cordisVersion, repo = path.dirname(manifestPath), env = process.env }) {
+  // Include the local overlay: its remote entries carry version pins too, and an
+  // overlay-only package that is never update-checked would silently rot.
+  const { doc: manifest } = loadManifestWithOverlay({ manifestPath, repo, env, strict: true })
   const current = dshVersion ?? String(manifest.dshVersion)
   const rows = []
   for (const item of manifest.customizations ?? []) {

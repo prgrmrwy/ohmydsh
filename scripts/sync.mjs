@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url'
 import yaml from 'js-yaml'
 import { runDshCli } from './lib/dsh-cli.mjs'
 import { declaredHostRuntimeFromManifest } from './lib/dsh-host-runtime.mjs'
+import { loadOverlayCustomizations, mergeOverlayCustomizations } from './lib/manifest-overlay.mjs'
 
 // Some repository tests intentionally copy sync.mjs with only its historical
 // core helpers. Keep that no-resource fixture viable while requiring the helper
@@ -81,6 +82,17 @@ function loadManifest() {
   if (typeof doc !== 'object' || doc === null) throw new Error(`manifest ${file} is empty or not a YAML mapping`)
   if (typeof doc.dshVersion !== 'string' || doc.dshVersion === '') throw new Error('manifest: dshVersion is required')
   if (!Array.isArray(doc.customizations)) throw new Error('manifest: customizations must be a list')
+  // Append the local overlay's customizations *before* the Host runtime fence
+  // and before per-entry normalization. Both are load-bearing:
+  //   - declaredHostRuntimeFromManifest() receives the whole doc and asserts
+  //     "at most one owner of hostRuntimeCompatibility". Merging after it would
+  //     let an overlay entry bypass the version fence outright and would break
+  //     that invariant silently (one public + one overlay = two real owners).
+  //   - Merging into `doc` rather than into the normalized `items` means overlay
+  //     entries traverse the exact same validation chain below, so no consumer
+  //     needs a per-source branch and no check can be accidentally skipped.
+  const overlay = loadOverlayCustomizations({ repo: REPO, env: process.env, strict: true })
+  mergeOverlayCustomizations(doc, overlay.customizations, overlay.file)
   // Version-fence the reviewed Host overlay before even normalizing the rest of
   // the manifest. loadManifest itself is side-effect free, and main performs no
   // profile/state operation until this entire validation returns.
@@ -97,7 +109,12 @@ function loadManifest() {
   const depNames = new Set(deps.map((d) => d.name))
 
   const items = doc.customizations.map((item, index) => {
-    const label = `customizations[${index}]`
+    // Overlay entries are appended, so their merged index is meaningless to a
+    // reader: "customizations[30]" would send them hunting for a 30th entry the
+    // public manifest does not have. Name the overlay instead.
+    const label = item?.overlaySource === undefined
+      ? `customizations[${index}]`
+      : `local manifest overlay ${item.overlaySource} entry`
     if (typeof item.id !== 'string' || !/^[a-z0-9][a-z0-9._-]*$/i.test(item.id)) throw new Error(`${label}: valid string id required`)
     if (!['package', 'preset', 'patch', 'skill'].includes(item.type)) throw new Error(`${label} (${item.id}): type must be package|preset|patch|skill`)
     const source = item.source ?? 'local'

@@ -12,12 +12,28 @@ import {
   type LocusRepository,
   type ProvisionedSession,
 } from '../src/host/locus/controller.js'
+import { LOCUS_MAIN_PRESET } from '../src/host/locus/aggregate.js'
 
-function parent(id: string, workspaceId = 'ws-default', title = id): ProvisionedSession & {
+/**
+ * A main session as the real Host reports it.
+ *
+ * `agentPreset` is part of that shape, not decoration: `resolveMainParent`
+ * refuses to let an owner NAME a main that is not running
+ * `LOCUS_MAIN_PRESET`, because the locus child inherits its composition from
+ * the main's preset. A double omitting it describes a session the real Host
+ * never returns for a Pet-created main, and would make every explicit-bind
+ * test assert against an unreachable state.
+ */
+function parent(
+  id: string,
+  workspaceId = 'ws-default',
+  title = id,
+  agentPreset: string | undefined = LOCUS_MAIN_PRESET,
+): ProvisionedSession & {
   readonly workspaceId: string
   readonly title: string
 } {
-  return { id, workspaceId, title }
+  return { id, workspaceId, title, ...(agentPreset === undefined ? {} : { agentPreset }) }
 }
 
 class MemoryLocusRepository implements LocusRepository {
@@ -324,6 +340,53 @@ describe('unified locus hierarchy', () => {
     await expect(
       controller(host).ensureGroup({ chatId: 'oc-project', parentSessionId: 'child-only' }),
     ).rejects.toMatchObject({ code: 'PARENT_NOT_ALLOWED' })
+  })
+
+  it('refuses to bind a main running another preset, naming the preset in the reason', async () => {
+    const host = fakeHost()
+    // A user's own work session: real, resolvable, not a child, workspace fine
+    // — and running the shipped `standard` preset. Binding it would hand the
+    // locus child a composition whose delegation rows sit in the child's OWN
+    // scope, where the inherited-plane tool filter cannot remove them.
+    host.deps.dsh.resolveSession = async () =>
+      ({ id: 'user-work', workspaceId: 'ws-source', title: '用户工作会话', agentPreset: 'standard' })
+
+    await expect(
+      controller(host).ensureGroup({ chatId: 'oc-project', parentSessionId: 'user-work' }),
+    ).rejects.toMatchObject({
+      code: 'PARENT_NOT_ALLOWED',
+      // The owner must be told WHICH preset is wrong and what to do instead;
+      // a generic refusal is what previously surfaced as `locus-unavailable`.
+      message: expect.stringContaining('standard'),
+    })
+  })
+
+  it('refuses a main whose header records no preset at all', async () => {
+    const host = fakeHost()
+    // Absent is not "probably fine": the header proves nothing about what the
+    // child would inherit, so it fails exactly as firmly as a mismatch.
+    host.deps.dsh.resolveSession = async () =>
+      ({ id: 'legacy-main', workspaceId: 'ws-source', title: '旧主会话' })
+
+    await expect(
+      controller(host).ensureGroup({ chatId: 'oc-project', parentSessionId: 'legacy-main' }),
+    ).rejects.toMatchObject({ code: 'PARENT_NOT_ALLOWED', message: expect.stringContaining('未记录') })
+  })
+
+  it('still resolves an ALREADY-established main that lacks the preset', async () => {
+    // The gate guards naming a main, not serving one. A generation accepted
+    // under the previous rule must keep working: refusing here would take a
+    // live endpoint offline over a binding decision made long ago, and those
+    // rows are already handled by the composition attestation.
+    const host = fakeHost()
+    const locus = controller(host)
+    const established = await locus.ensureGroup({ chatId: 'oc-project' })
+
+    host.deps.dsh.resolveSession = async id =>
+      ({ id, workspaceId: 'ws-default', title: '既有主会话' })
+
+    const topic = await locus.ensureTopic({ chatId: 'oc-project', threadId: 'omt-after' })
+    expect(topic.locus.parentSessionId).toBe(established.group.mainSessionId)
   })
 
   it('does not cascade a stopped group to an existing topic and blocks new topics', async () => {
