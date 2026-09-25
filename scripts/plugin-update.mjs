@@ -25,14 +25,20 @@ const { rows } = await detectRemotePluginUpdates({
   manifestPath: MANIFEST,
   cordisVersion: deployedCordisVersion(),
 })
-const ready = rows.filter((r) => r.status === 'upgrade-ready')
+// Overlay entries live in the private overlay file, not in dsh.yaml: rewriting
+// and committing them here would target the wrong file and the wrong repo.
+const overlayReady = rows.filter((r) => r.status === 'upgrade-ready' && r.fromOverlay)
+const ready = rows.filter((r) => r.status === 'upgrade-ready' && !r.fromOverlay)
 
 console.log(`plugin-update: 检测完成(upgrade-ready ${ready.length} / needs-review ${rows.filter((r) => r.status === 'needs-review').length})`)
 for (const r of rows.filter((x) => x.status === 'needs-review')) {
   console.log(`  ⚠ [needs-review] ${r.id}: ${r.issues.join('; ')} — 需人工复核,本次跳过`)
 }
+for (const r of overlayReady) {
+  console.log(`  ↪ [overlay] ${r.id}: ${r.current} → ${r.latest} — 来自本地 overlay,需在 overlay 中手动升级,本次跳过`)
+}
 if (ready.length === 0) {
-  console.log('全部插件已是最新,无需升级。')
+  console.log(overlayReady.length > 0 ? '公开 dsh.yaml 中无待升级插件。' : '全部插件已是最新,无需升级。')
   process.exit(0)
 }
 for (const r of ready) console.log(`  • ${r.id}: ${r.current} → ${r.latest}`)

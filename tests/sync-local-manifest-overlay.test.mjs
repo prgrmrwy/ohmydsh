@@ -4,18 +4,14 @@
 // `fragment: <id>` marker in the generated cordis.patch.yml.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, readFile, symlink, writeFile, rm } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
-import { spawnSync } from 'node:child_process'
+import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const COPIED_LIBS = ['dsh-cli.mjs', 'dsh-host-runtime.mjs', 'manifest-overlay.mjs']
+import { overlayFixture } from './helpers/overlay-fixture.mjs'
 
 /**
- * Build a throwaway repo + DSH home.
+ * Build a throwaway repo + DSH home on the shared overlay fixture, with the
+ * overlay at the repo root (the historical default location).
  *
  * @param options
  * @param options.publicItems - ids materialized through the public manifest.
@@ -23,49 +19,22 @@ const COPIED_LIBS = ['dsh-cli.mjs', 'dsh-host-runtime.mjs', 'manifest-overlay.mj
  * @param options.overlayPatchIds - patch fragments to create for overlay entries.
  */
 async function fixture({ publicItems = [], overlay, overlayPatchIds = [] } = {}) {
-  // Deliberately avoids the word "overlay": one assertion checks that a missing
-  // overlay produces no mention of it, and sync echoes absolute paths.
-  const root = await mkdtemp(path.join(os.tmpdir(), 'ohmydsh-localman-'))
-  const repo = path.join(root, 'repo')
-  const dshHome = path.join(root, 'dsh-home')
-  await mkdir(path.join(repo, 'scripts', 'lib'), { recursive: true })
-  await mkdir(path.join(repo, 'patches'), { recursive: true })
-  await mkdir(path.join(dshHome, 'profiles', 'web'), { recursive: true })
-  await writeFile(path.join(repo, 'scripts', 'sync.mjs'), await readFile(path.join(REPO, 'scripts', 'sync.mjs')))
-  for (const lib of COPIED_LIBS) {
-    await writeFile(path.join(repo, 'scripts', 'lib', lib), await readFile(path.join(REPO, 'scripts', 'lib', lib)))
-  }
-  await symlink(path.join(REPO, 'node_modules'), path.join(repo, 'node_modules'), 'dir')
-  await writeFile(
-    path.join(dshHome, 'profiles', 'web', 'package.json'),
-    JSON.stringify({ dependencies: {}, dsh: { profile: { bundles: [] } } }, null, 2) + '\n',
-  )
-
   // `customizations:` with no entries parses as null, which sync rejects before
   // it ever reaches the overlay — use an explicit empty flow list instead.
   const publicBlock = publicItems.length === 0
     ? 'customizations: []\n'
     : `customizations:\n${publicItems.map((id) => `  - id: ${id}\n    type: patch\n    enabled: true`).join('\n')}\n`
-  await writeFile(
-    path.join(repo, 'dsh.yaml'),
-    `dshVersion: 0.1.0-rc.7\ndependencies: []\n${publicBlock}`,
-  )
-  for (const id of [...publicItems, ...overlayPatchIds]) {
-    await writeFile(path.join(repo, 'patches', `${id}.yml`), '- insert: []\n')
+  // Deliberately avoids the word "overlay" in paths: one assertion checks that a
+  // missing overlay produces no mention of it, and sync echoes absolute paths.
+  const fx = await overlayFixture({ externalRoot: false, manifest: `dshVersion: 0.1.0-rc.7\ndependencies: []\n${publicBlock}` })
+  for (const id of [...publicItems, ...overlayPatchIds]) await fx.putPublic(`patches/${id}.yml`, '- insert: []\n')
+  if (overlay !== undefined) await fx.writeOverlay(overlay)
+  const patchPath = path.join(fx.profile, 'cordis.patch.yml')
+  return {
+    root: fx.root, repo: fx.repo, dshHome: fx.dshHome, overlayPath: fx.overlayFile, patchPath,
+    run: (extraEnv = {}) => fx.sync([], extraEnv),
+    readPatch: fx.readPatch,
   }
-
-  const overlayPath = path.join(repo, 'dsh.yaml.local')
-  if (overlay !== undefined) await writeFile(overlayPath, overlay)
-
-  const run = (extraEnv = {}) => spawnSync(process.execPath, [path.join(repo, 'scripts', 'sync.mjs')], {
-    cwd: repo,
-    encoding: 'utf8',
-    env: { ...process.env, DSH_BIN: '/usr/bin/true', DSH_HOME: dshHome, DSH_LOCAL_MANIFEST: '', ...extraEnv },
-  })
-
-  const patchPath = path.join(dshHome, 'profiles', 'web', 'cordis.patch.yml')
-  const readPatch = async () => (existsSync(patchPath) ? readFile(patchPath, 'utf8') : undefined)
-  return { root, repo, dshHome, overlayPath, patchPath, run, readPatch }
 }
 
 test('no overlay: sync behaves exactly as before', async () => {
@@ -148,9 +117,13 @@ test('overlay whose root is not a mapping fails closed', async () => {
 test('DSH_LOCAL_MANIFEST replaces the default overlay path', async () => {
   const fx = await fixture({
     overlay: 'customizations:\n  - id: from-default\n    type: patch\n    enabled: true\n',
-    overlayPatchIds: ['from-default', 'from-env'],
+    overlayPatchIds: ['from-default'],
   })
-  const external = path.join(fx.root, 'external.yaml')
+  // The overlay root is the directory the overlay file lives in, so the
+  // env-selected overlay brings its own patches/ (design D1).
+  const external = path.join(fx.root, 'external', 'external.yaml')
+  await mkdir(path.join(fx.root, 'external', 'patches'), { recursive: true })
+  await writeFile(path.join(fx.root, 'external', 'patches', 'from-env.yml'), '- insert: []\n')
   await writeFile(external, 'customizations:\n  - id: from-env\n    type: patch\n    enabled: true\n')
 
   const result = fx.run({ DSH_LOCAL_MANIFEST: external })
@@ -207,7 +180,9 @@ test('startup listing includes overlay entries', async () => {
     "    spec: '@scope/local-pkg@1.0.0'\n    version: 1.0.0\n    enabled: true\n" +
     '    brief: OVERLAY_BRIEF\n',
   )
-  const notes = manifestNotes(manifestPath, root)
+  // Explicit overlay path: `npm test` masks the runner's own overlay, so a test
+  // that needs one names it (spec: 仓库测试与本机 overlay 隔离).
+  const notes = manifestNotes(manifestPath, root, { DSH_LOCAL_MANIFEST: path.join(root, 'dsh.yaml.local') })
   assert.equal(notes.get('@scope/local-pkg'), 'OVERLAY_BRIEF')
   await rm(root, { recursive: true, force: true })
 })
@@ -220,7 +195,7 @@ test('startup listing degrades instead of failing on a broken overlay', async ()
   const manifestPath = path.join(root, 'dsh.yaml')
   await writeFile(manifestPath, 'dshVersion: 0.1.0-rc.7\nbundlesBrief:\n  keep-me: STILL_HERE\ncustomizations: []\n')
   await writeFile(path.join(root, 'dsh.yaml.local'), 'customizations:\n  - [unclosed\n')
-  const notes = manifestNotes(manifestPath, root)
+  const notes = manifestNotes(manifestPath, root, { DSH_LOCAL_MANIFEST: path.join(root, 'dsh.yaml.local') })
   assert.equal(notes.get('keep-me'), 'STILL_HERE')
   await rm(root, { recursive: true, force: true })
 })
@@ -235,7 +210,7 @@ test('update check covers overlay remote entries', async () => {
     'customizations:\n  - id: overlay-remote\n    type: package\n    source: remote\n' +
     '    spec: definitely-not-a-real-package-xyz\n    version: 1.0.0\n    enabled: true\n',
   )
-  const { rows } = await detectRemotePluginUpdates({ manifestPath, repo: root, dshVersion: '0.1.0-rc.7' })
+  const { rows } = await detectRemotePluginUpdates({ manifestPath, repo: root, dshVersion: '0.1.0-rc.7', env: { DSH_LOCAL_MANIFEST: path.join(root, 'dsh.yaml.local') } })
   // Presence is the assertion: a non-npm spec is reported as skipped rather than
   // omitted, which still proves the entry entered the check at all.
   assert.ok(rows.some((row) => row.id === 'overlay-remote'), 'overlay entry must reach the update check')

@@ -14,7 +14,7 @@
 // disable a reviewed customization, or move the pinned runtime — and would
 // break the property that reading the public manifest tells you what the
 // deployment is allowed to contain.
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import path from 'node:path'
 import yaml from 'js-yaml'
 
@@ -35,6 +35,29 @@ export const OVERLAY_PATH_ENV = 'DSH_LOCAL_MANIFEST'
 const ALLOWED_TOP_LEVEL_KEYS = new Set(['customizations'])
 
 /**
+ * Entry fields sync derives itself and attaches to merged entries: which file an
+ * entry came from, and which root its local sources resolve against. An entry
+ * declaring either could point its own source resolution somewhere else, so both
+ * manifests reject them at load time (spec: 条目自行声明所属根时拒绝运行).
+ */
+export const RESERVED_ENTRY_KEYS = Object.freeze(['overlaySource', 'sourceRoot'])
+
+/**
+ * Throw if a raw manifest entry declares a reserved field.
+ *
+ * @param {object} item - raw entry as parsed from YAML.
+ * @param {string} label - diagnostic prefix naming the entry.
+ */
+export function assertNoReservedEntryKeys(item, label) {
+  if (typeof item !== 'object' || item === null) return
+  for (const key of RESERVED_ENTRY_KEYS) {
+    if (Object.hasOwn(item, key)) {
+      throw new Error(`${label}: "${key}" is a reserved field derived by sync and may not be declared`)
+    }
+  }
+}
+
+/**
  * Resolve which overlay path is in effect.
  *
  * `DSH_LOCAL_MANIFEST` *replaces* the repository-root default rather than
@@ -50,7 +73,14 @@ const ALLOWED_TOP_LEVEL_KEYS = new Set(['customizations'])
 export function resolveOverlayPath(repo, env = process.env) {
   const override = env[OVERLAY_PATH_ENV]
   if (typeof override === 'string' && override.trim() !== '') {
-    return { file: path.resolve(override.trim()), source: 'env' }
+    const value = override.trim()
+    // Never resolve against the caller's cwd: the overlay root decides where
+    // private sources are read from, so a cwd-dependent path would silently
+    // point sync, the listing and the update check at different files.
+    if (!path.isAbsolute(value)) {
+      throw new Error(`${OVERLAY_PATH_ENV} must be an absolute path (必须是绝对路径), got "${value}"`)
+    }
+    return { file: path.resolve(value), source: 'env' }
   }
   return { file: path.join(repo, OVERLAY_FILENAME), source: 'default' }
 }
@@ -71,7 +101,13 @@ export function resolveOverlayPath(repo, env = process.env) {
  * @returns {{ file: string, present: boolean, customizations: object[], error?: Error }}
  */
 export function loadOverlayCustomizations({ repo, env = process.env, strict = true } = {}) {
-  const { file } = resolveOverlayPath(repo, env)
+  let file
+  try {
+    ({ file } = resolveOverlayPath(repo, env))
+  } catch (error) {
+    if (strict) throw error
+    return { file: undefined, present: false, customizations: [], error: /** @type {Error} */ (error) }
+  }
   const empty = { file, present: false, customizations: [] }
   if (!existsSync(file)) return empty
 
@@ -85,7 +121,12 @@ export function loadOverlayCustomizations({ repo, env = process.env, strict = tr
   }
 
   try {
-    return { file, present: true, customizations: parseOverlay(raw, file) }
+    // The overlay root is the directory the overlay file really lives in, so a
+    // repo-root `dsh.yaml.local` symlinked into a private repository resolves
+    // that repository's sources (spec: overlay 经符号链接置于仓库根).
+    const sourceRoot = path.dirname(realpathSync(file))
+    const customizations = parseOverlay(raw, file).map((item) => ({ ...item, sourceRoot }))
+    return { file, present: true, customizations }
   } catch (error) {
     if (strict) throw error
     return { ...empty, present: true, error: /** @type {Error} */ (error) }
@@ -140,6 +181,7 @@ export function parseOverlay(content, file) {
     if (typeof item.id !== 'string' || item.id === '') throw new Error(`${at}: valid string id required`)
     if (seen.has(item.id)) throw new Error(`${at}: duplicate id "${item.id}" within the overlay`)
     seen.add(item.id)
+    assertNoReservedEntryKeys(item, `${at} (${item.id})`)
     // Source tag travels with the entry so downstream diagnostics can say which
     // file an entry came from without re-reading either manifest.
     return { ...item, overlaySource: file }
