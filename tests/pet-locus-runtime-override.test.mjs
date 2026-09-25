@@ -105,6 +105,15 @@ test('the launcher installs reviewed overrides and atomically publishes a self-c
   assert.match(launcher, /const frameworkPins = Object\.fromEntries\(/)
   assert.match(launcher, /'@deepseek-ai\/cordis', '@deepseek-ai\/cordis-plugin-include'/)
   assert.doesNotMatch(launcher, /const frameworkPins[^]*?'4\.0\.\d'/)
+  // The process-wide proxy dispatcher is built from this launcher's own undici
+  // dependency and installed with `setGlobalDispatcher`, i.e. it becomes the
+  // dispatcher the runtime's BUILT-IN fetch routes through. undici 8 is
+  // unreadable there: every response arrives with zero headers and a still
+  // compressed body, so each `response.json()` fails while SSE keeps working.
+  // The tree is therefore pinned below the declared `^8.10.0`, and that pin is
+  // a named, reviewed fact rather than a pasted literal in the overrides.
+  assert.match(launcher, /const UNDICI_COMPAT_PIN = '\d+\.\d+\.\d+'/)
+  assert.match(launcher, /undici: UNDICI_COMPAT_PIN/)
   // The dependency proof must cover EVERY overridden package. An override that
   // is staged but never proven present would leave Pet believing a seam exists
   // while running the unpatched registry build.
