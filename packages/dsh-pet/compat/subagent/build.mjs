@@ -115,6 +115,37 @@ try {
 }
 run('git', ['apply', patchFile], checkout)
 
+// The checkout is now PATCHED, and it stays patched for the whole build below
+// (install, native build, tests, tsc, tsdown all read the patched source).
+//
+// It must not stay patched AFTERWARDS. This directory is also the only place a
+// maintainer reads upstream when deciding whether a seam can be retired, and
+// `README.md` requires citing upstream source as positive evidence for that
+// decision. A checkout left dirty makes the patch read as upstream's own API:
+// during the 2026-09-23 review three independent readers concluded that
+// `settlementNotice` and `withLiveContinuableChildSession` were official
+// capabilities, because the working tree says so while `git show HEAD:` does
+// not. The most misleading artifact was the patch's own marker comment
+// ("Literal proof that this runtime honors ...") — it reads like an upstream
+// guarantee but exists only to let Pet self-check the patch.
+//
+// Registered as an exit hook rather than a trailing statement so that `fail()`
+// and every thrown error restore it too; a build that dies midway is exactly
+// when the tree would otherwise be left dirty.
+process.on('exit', () => {
+  try {
+    run('git', ['checkout', '--', '.'], checkout)
+  } catch {
+    // Restoration is hygiene, not correctness: the artifact is already
+    // published (or already failed). Report it without changing the exit code.
+    console.warn(
+      '[compat/subagent] WARNING: could not restore the upstream checkout.\n'
+      + `  Run: git -C ${checkout} checkout -- .\n`
+      + '  Until then, read upstream with `git grep <string> HEAD`, not the working tree.',
+    )
+  }
+})
+
 // Semantic gate BEFORE publishing: the reviewed proofs must pass on the
 // patched target source. A build that only typechecks can still have lost the
 // exact behaviors Pet depends on, so a failure here must stop publication.

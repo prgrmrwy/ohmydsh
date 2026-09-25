@@ -31,7 +31,7 @@ import {
   type MemexStoreView,
   type MemexWorkspacesResult,
 } from '../contract.js'
-import { launcherUrl } from './launcher.js'
+import { openBrowseTab, type BrowseOpenDeps } from './browse-open.js'
 import type { MemexKey } from './locales.js'
 import {
   addPathToGroup,
@@ -66,6 +66,14 @@ export interface MemexSectionInjected {
   t: (key: MemexKey) => string
   /** The `dsh-memex` settings namespace, bound on the client. */
   scope: SettingsScope<MemexSettingsShape>
+  /**
+   * Opens a library's card browser.
+   *
+   * Injected rather than built here because resolving the address may need a
+   * registrant that only exists inside the cockpit iframe — this page is in
+   * that iframe, a new tab is not, so the work must stay on this side.
+   */
+  browseOpen: BrowseOpenDeps
 }
 
 /** Props delivered to the section component (the inject face, flat). */
@@ -89,14 +97,14 @@ function messageOf(error: unknown): string {
  * @returns the page, or null while the face is absent.
  */
 export function MemexSettingsSection(props: MemexSectionProps): JSX.Element | null {
-  const { rpc, t, scope } = props
-  if (rpc === undefined || t === undefined || scope === undefined) return null
-  return <MemexSettingsPage rpc={rpc} t={t} scope={scope} />
+  const { rpc, t, scope, browseOpen } = props
+  if (rpc === undefined || t === undefined || scope === undefined || browseOpen === undefined) return null
+  return <MemexSettingsPage rpc={rpc} t={t} scope={scope} browseOpen={browseOpen} />
 }
 
 /** The page body, with every injected part guaranteed present. */
 function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
-  const { rpc, t, scope } = props
+  const { rpc, t, scope, browseOpen } = props
   const [snapshot, setSnapshot] = useState(() => scope.getSnapshot())
   const [draft, setDraft] = useState<EditorRow[] | undefined>(undefined)
   const [stores, setStores] = useState<MemexStoresResult | undefined>(undefined)
@@ -518,7 +526,7 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
                 <button
                   type="button"
                   className="dshmx-act dshmx-act-inline"
-                  onClick={() => { window.open(launcherUrl(entry.name), '_blank', 'noopener') }}
+                  onClick={() => { void openBrowseTab(entry.name, browseOpen) }}
                 >
                   {t('actionBrowse')}
                 </button>

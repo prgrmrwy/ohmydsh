@@ -10,6 +10,9 @@ import type { ScopeResolution, ScopeService } from '../scope/types.js'
 import { KERNEL_VERSION, TOOL_DESCRIPTIONS } from './descriptions.generated.js'
 import { evaluateCrossWrite } from '../guard/index.js'
 import { mapConcurrent } from '../run/concurrency.js'
+import { segmentQuery } from './query-segment.js'
+import { anchored, buildRecord, queryShape } from '../telemetry/record.js'
+import { appendRecord } from '../telemetry/sink.js'
 
 const DEFAULT_FANOUT_CONCURRENCY = 4
 const MAX_SEARCH_RESULTS = 50
@@ -149,11 +152,72 @@ function guardWrite(
   return decision.allowed ? undefined : decision.rules
 }
 
+/**
+ * The query text to hand the kernel, given the search mode.
+ *
+ * Keyword search gets Han runs segmented — the kernel treats a run as one
+ * literal token, so an unsegmented Chinese question matches nothing. Semantic
+ * search gets the query verbatim, because segmentation would shred the input
+ * the embedding is computed from.
+ *
+ * Every keyword search MUST route through here. Two entry points (`memex_search`
+ * and `memex_recall`) issue kernel searches independently; if only one segments,
+ * the same question yields different results depending on which tool asked, and
+ * nothing in the tool output or logs reveals why.
+ */
+function kernelQuery(query: string, semantic: boolean | undefined): string {
+  return semantic === true ? query : segmentQuery(query)
+}
+
+/**
+ * Record one keyword recall, best effort.
+ *
+ * Every caller reaches this *after* the memory-disabled rejection in
+ * `currentFor()`, so a workspace that turned memory off leaves no trace — a
+ * record there would log that workspace's activity on a boundary the user
+ * explicitly closed.
+ *
+ * Failures are swallowed inside the sink: telemetry must never be able to fail
+ * a search.
+ */
+function recordRecall(
+  ctx: Context,
+  scope: string,
+  query: string,
+  semantic: boolean | undefined,
+  hits: readonly { slug: string; title: string; scope?: string }[],
+): void {
+  const sent = kernelQuery(query, semantic)
+  const tokens = sent.split(/\s+/).filter(Boolean)
+  appendRecord(
+    buildRecord({
+      at: new Date(),
+      scope,
+      query: queryShape(tokens, {
+        han: HAN_QUERY_RE.test(query),
+        segmented: sent !== query,
+        semantic: semantic === true,
+      }),
+      // A hit carries its own owning library: fan-out means the caller's scope
+      // is routinely not the library the card came from.
+      hits: hits.map(hit => ({
+        slug: hit.slug,
+        scope: hit.scope ?? scope,
+        anchored: anchored(tokens, hit.slug, hit.title),
+      })),
+    }),
+    { onFirstFailure: message => { ctx.logger('dsh-memex').warn(message) } },
+  )
+}
+
+/** Whether the raw query carried Han characters, for the shape record only. */
+const HAN_QUERY_RE = /\p{Unified_Ideograph}/u
+
 function searchArgs(args: { query?: string; limit?: number; list?: boolean; semantic?: boolean }): string[] {
   const result = ['search', '--limit', String(Math.min(Math.max(Math.trunc(args.limit ?? 10), 1), MAX_SEARCH_RESULTS))]
   if (args.list === true) result.push('--list')
   if (args.semantic === true) result.push('--semantic')
-  if (args.query !== undefined && args.query !== '') result.push('--', args.query)
+  if (args.query !== undefined && args.query !== '') result.push('--', kernelQuery(args.query, args.semantic))
   return result
 }
 
@@ -330,6 +394,8 @@ export function registerMemexTools(ctx: Context, resolver: ScopeService, options
       const hits = outcomes.flatMap(item => item.hits).slice(0, limit)
       const failures = outcomes.flatMap(item => item.error === undefined ? [] : [{ scope: item.target.scope, error: item.error }])
       if (failures.length === targets.length) throw new Error(`memex search failed in every target scope: ${failures.map(item => `${item.scope}: ${item.error}`).join('; ')}`)
+      // Only a real query is worth recording: --list and index reads carry none.
+      if (args.query !== undefined && args.query !== '') recordRecall(ctx, current.scope, args.query, args.semantic, hits)
       return { json: JSON.stringify({ ...(kernelVersionWarning ? { kernelVersionWarning } : {}), current: route(current), targets: targets.map(route), hits, failures }, null, 2) }
     },
   })))
@@ -373,7 +439,9 @@ export function registerMemexTools(ctx: Context, resolver: ScopeService, options
       let mode: 'search' | 'index' | 'list'
       if (args.query !== undefined && args.query !== '') {
         mode = 'search'
-        result = await runner(['search', '--limit', '10', ...filters, '--', args.query], { home: current.home, signal: exec.signal })
+        // Recall has no semantic mode, so this is always the keyword path.
+        const query = kernelQuery(args.query, undefined)
+        result = await runner(['search', '--limit', '10', ...filters, '--', query], { home: current.home, signal: exec.signal })
       } else if (filters.length > 0) {
         mode = 'list'
         result = await runner(['search', '--limit', '10', '--list', ...filters], { home: current.home, signal: exec.signal })
@@ -386,6 +454,13 @@ export function registerMemexTools(ctx: Context, resolver: ScopeService, options
         }
       }
       requireSuccess(result, 'recall', current.scope)
+      if (mode === 'search' && args.query !== undefined && args.query !== '') {
+        // Parsed for telemetry only; the returned content stays the kernel's
+        // own stdout, so recording cannot alter what the caller receives.
+        let parsed: SearchHit[] = []
+        try { parsed = parseSearch(result.stdout) } catch { parsed = [] }
+        recordRecall(ctx, current.scope, args.query, undefined, parsed)
+      }
       if (exec.agent !== undefined) options.onToolSuccess?.('recall', exec.agent.session)
       return { json: JSON.stringify({ ...(kernelVersionWarning ? { kernelVersionWarning } : {}), current: route(current), mode, content: result.stdout || (mode === 'list' ? 'No cards yet.' : 'No cards found.') }, null, 2) }
     },

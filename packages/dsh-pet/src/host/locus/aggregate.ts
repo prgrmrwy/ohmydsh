@@ -28,6 +28,23 @@ export type LocusChildComposition = 'safe-v1'
 /** The only composition generation currently safe for adoption and dispatch. */
 export const LOCUS_SAFE_CHILD_COMPOSITION: LocusChildComposition = 'safe-v1'
 
+/**
+ * The preset every locus main session must be composed from.
+ *
+ * Load-bearing for the CHILD's safety, not the main's: a locus child derives
+ * its composition from `composedPreset(parent.ctx)`, so the main's preset
+ * decides what the child can call. The shipped `standard` preset registers its
+ * delegation rows per agent, which lands `subagent` in the child's OWN scope
+ * where `LOCUS_SAFE_TOOL_FILTER` — an INHERITED-plane filter — cannot remove
+ * it. Production met exactly that: a child delegated to a descendant that kept
+ * `bash` and `lark-cli`, breaking the single-egress invariant.
+ *
+ * Lives here rather than in `dsh-port.ts` because both the creation path and
+ * the explicit-bind gate must read one value, and `dsh-port` already imports
+ * `controller`, so the constant cannot travel the other way.
+ */
+export const LOCUS_MAIN_PRESET = 'dsh-pet-executor'
+
 /** The normalized address of a Lark chat or a thread inside that chat. */
 export interface LocusEndpoint {
   readonly chatId: string

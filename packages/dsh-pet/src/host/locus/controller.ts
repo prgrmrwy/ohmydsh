@@ -23,7 +23,12 @@
  * race; they are not a substitute for a conditional repository commit.
  */
 
-import { endpointKeyOf, LOCUS_SAFE_CHILD_COMPOSITION, type LocusChildComposition } from './aggregate.js'
+import {
+  endpointKeyOf,
+  LOCUS_MAIN_PRESET,
+  LOCUS_SAFE_CHILD_COMPOSITION,
+  type LocusChildComposition,
+} from './aggregate.js'
 import { dispositionOf, isOwnerExit } from './serviceability.js'
 
 /** A Feishu entry: a chat, optionally narrowed to one thread. */
@@ -40,6 +45,14 @@ export interface LocusParentSession {
   /** Present for a child session; child sessions are never valid parents. */
   readonly parentSessionId?: string
   readonly state?: 'active' | 'archived' | 'missing'
+  /**
+   * The preset on this session's durable header, when the Host reported one.
+   *
+   * A locus child composes itself from its parent's composed preset, so an
+   * explicitly bound main decides what the child can call. Absent means the
+   * Host stated nothing — never assume it is safe.
+   */
+  readonly agentPreset?: string
 }
 
 /** A workspace returned by the host's current default-workspace resolver. */
@@ -627,7 +640,7 @@ export class LocusController {
         const explicit =
           explicitParent === undefined
             ? undefined
-            : await this.resolveMainParent(explicitParent, '显式话题 parent')
+            : await this.resolveMainParent(explicitParent, '显式话题 parent', true)
 
         const groupResult = await this.ensureGroupLocked(
           { chatId: endpoint.chatId, ...(request.chatName !== undefined ? { chatName: request.chatName } : {}) },
@@ -662,7 +675,7 @@ export class LocusController {
     const parentSessionId = requireNonEmpty(request.parentSessionId, 'parentSessionId')
     const ownerId = requireNonEmpty(request.ownerId, 'ownerId')
     return this.withLock(`qa:${parentSessionId}`, async () => {
-      const parent = await this.resolveMainParent(parentSessionId, 'Q&A parent')
+      const parent = await this.resolveMainParent(parentSessionId, 'Q&A parent', true)
       const existing = await this.deps.repository.findDefaultQa(parentSessionId)
       if (existing !== undefined) {
         if (existing.state !== 'active') {
@@ -809,7 +822,7 @@ export class LocusController {
           throw new LocusControllerError('GROUP_UNAVAILABLE', '话题所属群级结构不可用，不能重建旧入口。')
         }
         const parentGroupLocus = await this.requireActiveLocus({ chatId: endpoint.chatId }, '话题父级')
-        const parent = await this.resolveMainParent(parentSessionId, 'legacy 入口显式重建 parent')
+        const parent = await this.resolveMainParent(parentSessionId, 'legacy 入口显式重建 parent', true)
         const locus = await this.provisionChildLocus(
           'topic',
           endpoint,
@@ -1014,7 +1027,7 @@ export class LocusController {
     const parent =
       explicitParent === undefined
         ? undefined
-        : await this.resolveMainParent(explicitParent, '显式群级 parent')
+        : await this.resolveMainParent(explicitParent, '显式群级 parent', true)
     const provisioningId = generatedId('provisioning', this.id)
     await this.beginProvisioning({
       provisioningId,
@@ -1210,7 +1223,7 @@ export class LocusController {
         `话题 ${endpointLabel(endpoint)} 当前有执行中或排队消息，请空闲后再切换主会话。`,
       )
     }
-    const parent = await this.resolveMainParent(input.parentSessionId, '显式话题 parent')
+    const parent = await this.resolveMainParent(input.parentSessionId, '显式话题 parent', true)
     if (parent.id === previousLocus.parentSessionId) {
       await this.flushPendingSwitchNotice(previousLocus)
       return { group, locus: previousLocus, created: false, reused: true, groupCreated: false }
@@ -1339,7 +1352,7 @@ export class LocusController {
         `群 ${endpoint.chatId} 当前有执行中或排队消息，请空闲后再切换主会话。`,
       )
     }
-    const parent = await this.resolveMainParent(request.parentSessionId, '显式替换 parent')
+    const parent = await this.resolveMainParent(request.parentSessionId, '显式替换 parent', true)
     if (parent.id === group.mainSessionId) {
       const warningText = await this.flushPendingSwitchNotice(previousLocus)
       return {
@@ -1485,7 +1498,7 @@ export class LocusController {
    */
   private async resolveRebuildParent(request: RebuildLocusRequest): Promise<LocusParentSession> {
     try {
-      return await this.resolveMainParent(request.parentSessionId, '显式重建 parent')
+      return await this.resolveMainParent(request.parentSessionId, '显式重建 parent', true)
     } catch (error) {
       if (request.allowFreshParent !== true) throw error
       const workspace = await this.deps.dsh.resolveDefaultWorkspace()
@@ -1680,6 +1693,12 @@ export class LocusController {
   private async resolveMainParent(
     sessionId: string,
     operation: string,
+    /**
+     * Whether this call is the owner NAMING a main, rather than resolving one
+     * already recorded. Only a naming operation may refuse on the preset; see
+     * the gate at the end of this method.
+     */
+    requirePreset = false,
   ): Promise<LocusParentSession> {
     const normalized = requireNonEmpty(sessionId, 'parentSessionId')
     let session: LocusParentSession | undefined
@@ -1727,6 +1746,36 @@ export class LocusController {
       throw new LocusControllerError(
         'PARENT_NOT_FOUND',
         `${operation} 的 workspace 无法确认，已停止操作。`,
+      )
+    }
+    // The child's tool surface is decided by the MAIN's preset: a locus child
+    // composes itself from `composedPreset(parent.ctx)`. A session running any
+    // other preset makes `safe-v1` unprovable, and the only thing that would
+    // catch it is `attestLocusComposition` refusing to publish the child —
+    // after the operation was accepted, reported as a generic
+    // `locus-unavailable`, with no actionable cause for the owner.
+    //
+    // Measured on production data (2026-09-23): 7 of 16 locus rows are
+    // `invalid` for want of a `safe-v1` proof, and all 7 hang off two
+    // conscripted user work sessions.
+    //
+    // Checked ONLY where the caller is naming a new main (`requirePreset`).
+    // Resolving an already-established main — the `inherited` path every topic
+    // delivery takes — must not fail on it: that main was accepted under the
+    // previous rule, and refusing here would take a working endpoint offline
+    // over a binding decision made long ago. Those rows are already handled as
+    // `invalid` by the composition attestation, which is where a pre-existing
+    // generation belongs.
+    //
+    // Absent is refused as firmly as a mismatch: a header stating no preset
+    // proves nothing about what the child would inherit.
+    if (requirePreset && session.agentPreset !== LOCUS_MAIN_PRESET) {
+      throw new LocusControllerError(
+        'PARENT_NOT_ALLOWED',
+        `${operation} 的主会话未运行 ${LOCUS_MAIN_PRESET} preset（当前：${
+          session.agentPreset ?? '未记录'
+        }），无法保证子会话的安全工具面，已停止操作。` +
+        '请改用「用新的主会话重建」，由 Pet 新建一个使用该 preset 的主会话。',
       )
     }
     return session

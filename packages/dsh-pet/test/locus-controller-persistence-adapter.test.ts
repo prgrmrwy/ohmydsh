@@ -1,3 +1,4 @@
+import { LOCUS_MAIN_PRESET } from '../src/host/locus/aggregate.js'
 import { describe, expect, it, vi } from 'vitest'
 import { buildLocusRecord, type LocusRecord as DurableLocusRecord } from '../src/host/locus/aggregate.js'
 import {
@@ -566,7 +567,8 @@ describe('controller to durable locus repository write boundary', () => {
     const durable = new DurableLocusRepository(harness.domain)
     const adapter = new ControllerLocusRepositoryAdapter(durable)
     const sessions = new Map([
-      ['session-main', { id: 'session-main', workspaceId: 'workspace-main' }],
+      // agentPreset mirrors the real Host: naming a main requires it.
+      ['session-main', { id: 'session-main', workspaceId: 'workspace-main', agentPreset: LOCUS_MAIN_PRESET }],
     ])
     let sequence = 0
     const locus = new LocusController({
@@ -649,7 +651,8 @@ describe('controller to durable locus repository write boundary', () => {
     const durable = new DurableLocusRepository(harness.domain)
     const adapter = new ControllerLocusRepositoryAdapter(durable)
     const sessions = new Map([
-      ['session-source-1', { id: 'session-source-1', workspaceId: 'workspace-source' }],
+      // agentPreset mirrors the real Host: naming a main requires it.
+      ['session-source-1', { id: 'session-source-1', workspaceId: 'workspace-source', agentPreset: LOCUS_MAIN_PRESET }],
     ])
     let sequence = 0
     let failNotice = true
@@ -921,7 +924,8 @@ describe('controller to durable locus repository write boundary', () => {
     const durable = new DurableLocusRepository(harness.domain)
     const adapter = new ControllerLocusRepositoryAdapter(durable)
     const sessions = new Map([
-      ['session-source-1', { id: 'session-source-1', workspaceId: 'workspace-source' }],
+      // agentPreset mirrors the real Host: naming a main requires it.
+      ['session-source-1', { id: 'session-source-1', workspaceId: 'workspace-source', agentPreset: LOCUS_MAIN_PRESET }],
     ])
     const children: string[] = []
     const sent: string[] = []

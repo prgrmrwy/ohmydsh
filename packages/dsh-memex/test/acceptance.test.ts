@@ -2,9 +2,20 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFile
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createScopeResolver } from '../src/scope/resolver.js'
 import { registerMemexTools } from '../src/tools/index.js'
+
+/**
+ * Searches emit telemetry, which defaults to the real `$DSH_HOME`. Without an
+ * isolated home this suite appends fixture rows to the developer's own recall
+ * log and corrupts the very statistics that log exists to support.
+ */
+beforeEach(() => {
+  vi.stubEnv('DSH_HOME', mkdtempSync(join(tmpdir(), 'dsh-memex-acceptance-home-')))
+})
+
+afterEach(() => { vi.unstubAllEnvs() })
 
 function card(title: string, body: string): string {
   return `---\ntitle: ${title}\ncreated: 2026-09-18\nsource: acceptance\n---\n${body}\n`
@@ -146,6 +157,26 @@ describe('dsh-memex real-kernel acceptance', () => {
     const searched = await call('memex_search', { query: 'note', scope: 'all' })
     // Two cards in the primary, one in the sibling: both entries are searched.
     expect([...new Set(searched.hits.map((hit: { scope: string }) => hit.scope))]).toEqual(['proj-internal', 'proj-public'])
+  })
+
+  it('recalls a Chinese question through the real kernel and ranks the true hit above bigram noise', async () => {
+    // End-to-end guard for query segmentation. The kernel treats a run of Han
+    // characters as one literal token, so the unsegmented question matches
+    // nothing at all; segmentation is what makes this recall possible.
+    const h = harness()
+    h.resolver.ensure(h.resolver.resolveByName('current'))
+    const cards = join(h.namespaceDir, 'current', 'cards')
+    writeFileSync(join(cards, 'proxy-seam.md'), card('子进程代理继承按 seam 分三种', '回环永远直连'))
+    // Decoy carrying the cross-word-boundary bigrams 能不 / 不能 in its body
+    // only — exactly the noise segmentation is known to introduce.
+    writeFileSync(join(cards, 'decoy.md'), card('Unrelated note', '这里讨论的是能不能开工的问题，与代理无关'))
+
+    const result = await h.call('memex_search', { query: '子进程能不能用上代理' })
+    const slugs = result.hits.map((hit: { slug: string }) => hit.slug)
+    expect(slugs).toContain('proxy-seam')
+    // The real hit matches in the title (weight 5), the decoy only in the body
+    // (weight 1): ranking — not filtering — is what keeps noise out of the way.
+    expect(slugs[0]).toBe('proxy-seam')
   })
 
   it('gives a directory outside every repository its own library and no sync target', async () => {

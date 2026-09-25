@@ -19,8 +19,7 @@ import type {} from '@deepseek-ai/dsh-client-connection/client'
 // Type-only: the `settings.section` slot declaration and ctx.settingsScope.
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { createBrowseAddressRegistry, MEMEX_BROWSE_ADDRESS_SERVICE } from './browse-address.js'
-import { createLauncherDeps } from './launcher.js'
-import { mountLauncher } from './launcher-view.js'
+import { createBrowseOpenDeps } from './browse-open.js'
 import { NS, en, zh } from './locales.js'
 import { registerMemexSettingsNavIcon } from './nav-icon.js'
 import { MemexSettingsSection, type MemexSectionInjected, type MemexSectionProps } from './page.js'
@@ -57,6 +56,16 @@ export function apply(ctx: ClientContext): void {
   // browser shell the same key holds the full client ConnectionHandle.
   const connection = ctx.get('connection')
 
+  // Card browsing, client half.
+  //
+  // The registry is dsh-memex's own extension point: with no registrant it
+  // yields this machine's address, which is right whenever the Host and the
+  // browser are the same machine. It is provided unconditionally and is NOT in
+  // `inject`, because a registrant is optional and an unresolved inject makes a
+  // client plugin silently not load.
+  const addresses = createBrowseAddressRegistry()
+  ctx.effect(() => ctx.provide(MEMEX_BROWSE_ADDRESS_SERVICE, addresses), 'dsh-memex: browse address registry')
+
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section' as const,
     id: MEMEX_NAMESPACE,
@@ -67,6 +76,7 @@ export function apply(ctx: ClientContext): void {
       rpc: connection.rpc,
       t,
       scope: settingsScope,
+      browseOpen: createBrowseOpenDeps(connection.rpc, addresses, t),
     }),
   }, MemexSettingsSection as (props: MemexSectionProps) => JSX.Element | null))
 
@@ -74,17 +84,4 @@ export function apply(ctx: ClientContext): void {
   // stays and the page is unaffected.
   ctx.effect(() => registerMemexSettingsNavIcon(() => t('nav')), 'dsh-memex: settings nav glyph')
 
-  // Card browsing, client half.
-  //
-  // The registry is dsh-memex's own extension point: with no registrant it
-  // yields this machine's address, which is right whenever the Host and the
-  // browser are the same machine. It is provided unconditionally and is NOT in
-  // `inject`, because a registrant is optional and an unresolved inject makes a
-  // client plugin silently not load.
-  const addresses = createBrowseAddressRegistry()
-  ctx.effect(() => ctx.provide(MEMEX_BROWSE_ADDRESS_SERVICE, addresses), 'dsh-memex: browse address registry')
-  ctx.effect(
-    () => mountLauncher({ deps: createLauncherDeps(connection.rpc, addresses), t }),
-    'dsh-memex: card browser launcher',
-  )
 }
