@@ -53,5 +53,5 @@
 - [x] 6.2 `node scripts/sync.mjs` 幂等：首次物化 shim，第二次明确 `no changes — deployment already matches manifest`
 - [x] 6.3 根 `npm test`（126 pass / 1 skip）与 `npm run check:artifacts` 通过
 - [x] 6.4 bridge 0.4.0 发布并更新 pin 后，真机从 cockpit 访问 VM：点击分支名，宿主机 VS Code 新窗口打开 VM worktree（2026-09-24 所有者验收通过，bridge 0.5.1）
-- [ ] 6.5 真机降级：禁用 shim 后 ws 回落 `vscode://file/`，cockpit 既有功能正常
-- [ ] 6.6 两仓 current specs 均同步最终行为后归档各自 change
+- [x] 6.5 真机降级：禁用 shim 后 ws 回落 `vscode://file/`，cockpit 既有功能正常（2026-09-25 所有者决定以单测为证据，不做禁用 shim 的实机重启：shim 无顶层 inject，禁用即 handler 从未注册；worktree-session `open-handler.test.ts` 的“无替换时用本地回落”“替换抛错时同步回落”、`controls.test.ts` 的 `vscode://file/` URI 以及 shim 4 个装卸测试全部通过。cockpit 侧的“本机设备回落本地编辑器、工作台其它功能正常”由所有者实机验收通过，见 cockpit remote-editor-open-seam 6.4）
+- [x] 6.6 两仓 current specs 均同步最终行为后归档各自 change（ohmydsh：source-workspace-worktree-session MODIFIED，新增 cockpit-worktree-open-shim、worktree-open-handler-registry）
