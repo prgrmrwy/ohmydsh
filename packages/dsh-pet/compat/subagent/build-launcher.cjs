@@ -200,6 +200,36 @@ try {
           return [pkg, pinned]
         }),
       )
+      // Reviewed deviation from `@deepseek-ai/dsh-http-proxy`'s declared
+      // `undici: ^8.10.0` (and `dsh-web-fetch-http`'s identical range).
+      //
+      // That package builds the process-wide dispatcher out of ITS OWN undici
+      // dependency and installs it with `setGlobalDispatcher`, which is the
+      // dispatcher Node's built-in `fetch` then routes through. Its declared
+      // range resolves to undici 8.x, whose dispatcher this runtime's built-in
+      // fetch cannot consume: undici 6.28.0 on Node 22.23 and 7.8.0 on Node
+      // 24.1 both come back with ZERO response headers and a body still
+      // compressed, so every `response.json()` on a proxied response fails
+      // (subscriptions usage and model catalogs, cost-meter price refresh, geo
+      // guard). SSE streaming is never compressed, which is why chat keeps
+      // working while every JSON reading call fails — the failure looks like a
+      // network error and is not.
+      //
+      // Measured 2026-09-25 against the same relay, one endpoint:
+      // built-in fetch + undici 6.28.1 dispatcher → 19 headers, valid JSON;
+      // built-in fetch + undici 7.30.0 dispatcher → 19 headers, valid JSON;
+      // built-in fetch + undici 8.11.0 dispatcher → 0 headers, raw brotli.
+      // Raising Node does not help (Node 24 + undici 8 fails identically), and
+      // letting Node's `NODE_USE_ENV_PROXY` take over instead BREAKS the two
+      // packages that fetch through the npm undici 8 they declare.
+      //
+      // 7.30.0 is therefore the smallest deviation from ^8.10.0 that works on
+      // both Node 22 and Node 24. Only these two official packages declare
+      // `undici`, and both use only `Agent` / `Pool` / `ProxyAgent` / `fetch`.
+      // npm still reports the tree valid (`npm ls --all` → no `problems`).
+      // Retire this pin once DSH ships a dispatcher built from the runtime's own
+      // undici generation, or drops the install for Node's native env proxy.
+      const UNDICI_COMPAT_PIN = '7.30.0'
       writeFileSync(join(staging, 'package.json'), `${JSON.stringify({
         name: 'dsh-pet-locus-launcher',
         private: true,
@@ -213,6 +243,7 @@ try {
         overrides: {
           '@deepseek-ai/dsh-subagent': `file:${join(compatPackages, 'subagent')}`,
           ...frameworkPins,
+          undici: UNDICI_COMPAT_PIN,
         },
       }, null, 2)}\n`)
 
