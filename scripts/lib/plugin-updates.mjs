@@ -7,6 +7,7 @@
 //   稳定性 - 非 pre-release、未被 deprecated、最新版发布 ≤ STALE_DAYS。
 //   状态   - up-to-date / upgrade-ready / needs-review / skipped。
 import { readFileSync, existsSync } from 'node:fs'
+import { execFile } from 'node:child_process'
 import path from 'node:path'
 import os from 'node:os'
 import { loadManifestWithOverlay } from './manifest-overlay.mjs'
@@ -105,6 +106,48 @@ async function registryPackage(name, registry) {
   return { latest, deprecated: latestEntry?.deprecated, peers: latestEntry?.peerDependencies ?? {}, publishedAt: doc.time?.[latest] }
 }
 
+/**
+ * Scoped metadata through the npm client, run from the profile dir: npm then
+ * applies the same registry and auth (`//host/:_authToken`, env interpolation,
+ * layered .npmrc) as the install itself would. Reimplementing that resolution
+ * here is exactly what would drift from install behaviour (design D8).
+ */
+// Async on purpose: a synchronous spawn would block the caller's event loop for
+// the whole registry round-trip.
+function npmSpawn(args, { cwd, env }) {
+  return new Promise((resolve) => {
+    execFile('npm', args, { cwd, encoding: 'utf8', env: { ...process.env, ...env }, maxBuffer: 64 * 1024 * 1024 }, (error, stdout, stderr) => {
+      resolve({ status: error ? (typeof error.code === 'number' ? error.code : 1) : 0, stdout, stderr: stderr || (error && !stderr ? String(error.message) : '') })
+    })
+  })
+}
+
+async function scopeRegistryConfigured(scope, ctx) {
+  if (!ctx.scopeCache.has(scope)) {
+    const result = await npmSpawn(['config', 'get', `${scope}:registry`], ctx)
+    const value = String(result.stdout ?? '').trim()
+    ctx.scopeCache.set(scope, result.status === 0 && value !== '' && value !== 'undefined')
+  }
+  return ctx.scopeCache.get(scope)
+}
+
+async function npmViewPackage(name, ctx) {
+  const result = await npmSpawn(['view', name, 'dist-tags', 'versions', 'time', 'peerDependencies', 'deprecated', '--json'], ctx)
+  if (result.status !== 0) {
+    const line = String(result.stderr ?? '').split('\n').find((l) => l.trim() !== '') ?? `exit ${result.status}`
+    throw new Error(`npm view: ${line.trim()}`)
+  }
+  const doc = JSON.parse(result.stdout)
+  const latest = doc['dist-tags']?.latest
+  return { latest, deprecated: doc.deprecated, peers: doc.peerDependencies ?? {}, publishedAt: doc.time?.[latest] }
+}
+
+async function packageInfo(name, registry, ctx) {
+  const scope = name.startsWith('@') ? name.split('/')[0] : undefined
+  if (scope !== undefined && existsSync(ctx.cwd) && await scopeRegistryConfigured(scope, ctx)) return npmViewPackage(name, ctx)
+  return registryPackage(name, registry)
+}
+
 /** npm spec 解析:'@scope/name@1.2.3' → { name } 非 npm spec → null。 */
 export function npmSpecOf(item) {
   const spec = String(item.spec ?? '')
@@ -116,19 +159,24 @@ export function npmSpecOf(item) {
  * 检测 manifest 中所有 remote package 条目的更新状态。
  * @returns {Promise<Array<object>>} rows(见 check-plugin-updates 输出结构)。
  */
-export async function detectRemotePluginUpdates({ manifestPath, registry = 'https://registry.npmjs.org', dshVersion, cordisVersion, repo = path.dirname(manifestPath), env = process.env }) {
+export async function detectRemotePluginUpdates({ manifestPath, registry = 'https://registry.npmjs.org', dshVersion, cordisVersion, repo = path.dirname(manifestPath), env = process.env, profileDir }) {
   // Include the local overlay: its remote entries carry version pins too, and an
   // overlay-only package that is never update-checked would silently rot.
   const { doc: manifest } = loadManifestWithOverlay({ manifestPath, repo, env, strict: true })
   const current = dshVersion ?? String(manifest.dshVersion)
+  const home = env.DSH_HOME || path.join(os.homedir(), '.dsh')
+  const ctx = { cwd: profileDir ?? path.join(home, 'profiles', env.DSH_PROFILE || 'web'), env, scopeCache: new Map() }
   const rows = []
   for (const item of manifest.customizations ?? []) {
     if (item.source !== 'remote' || item.type !== 'package') continue
+    // Every row says where it came from, so auto-update can leave overlay
+    // entries alone: it only ever rewrites the public dsh.yaml.
+    const fromOverlay = item.overlaySource !== undefined
     const parsed = npmSpecOf(item)
-    if (!parsed) { rows.push({ id: item.id, status: 'skipped', current: undefined, latest: undefined, issues: [], reason: `非 npm registry spec(${item.spec}),跳过自动检测`, peers: {} }); continue }
+    if (!parsed) { rows.push({ id: item.id, fromOverlay, status: 'skipped', current: undefined, latest: undefined, issues: [], reason: `非 npm registry spec(${item.spec}),跳过自动检测`, peers: {} }); continue }
     let info
-    try { info = await registryPackage(parsed.name, registry) } catch (e) {
-      rows.push({ id: item.id, status: 'skipped', current: item.version, latest: undefined, issues: [], reason: `registry 查询失败: ${e.message}`, peers: {} }); continue
+    try { info = await packageInfo(parsed.name, registry, ctx) } catch (e) {
+      rows.push({ id: item.id, fromOverlay, status: 'skipped', current: item.version, latest: undefined, issues: [], reason: `registry 查询失败: ${e.message}`, peers: {} }); continue
     }
     const issues = []
     if (info.latest !== item.version) {
@@ -140,7 +188,7 @@ export async function detectRemotePluginUpdates({ manifestPath, registry = 'http
     }
     const unknownPeers = Object.keys(info.peers ?? {}).filter((p) => !p.startsWith(DSH_PEER_PREFIX) && p !== CORDIS)
     rows.push({
-      id: item.id, current: item.version, latest: info.latest,
+      id: item.id, fromOverlay, current: item.version, latest: info.latest,
       name: parsed.name,
       status: info.latest === item.version ? 'up-to-date' : issues.length ? 'needs-review' : 'upgrade-ready',
       issues, peers: info.peers ?? {},
