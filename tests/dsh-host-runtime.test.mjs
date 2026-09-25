@@ -5,7 +5,9 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import {
+  assertHostRuntimeSources,
   declaredHostRuntimeFromManifest,
+  loadDeclaredHostRuntime,
   prepareDeclaredHostRuntime,
 } from '../scripts/lib/dsh-host-runtime.mjs'
 
@@ -77,6 +79,23 @@ test('启用 Pet 时版本 mismatch fail closed；effective disabled 时不阻�
   assert.equal(declaredHostRuntimeFromManifest(manifest({
     dshVersion: '0.1.2', enabledEnv: 'DSH_PET_ENABLED',
   }), { repo, env: { DSH_PET_ENABLED: 'false' } }), null)
+})
+
+test('builder 缺失：声明解析不读源码，Host 启动与源码检查仍 fail closed', async t => {
+  const { repo, compat } = await fixture(t)
+  await rm(path.join(compat, 'build-launcher.cjs'))
+  // Declaration parsing is a load-stage check and must not read sources, so
+  // `sync --reset` can undo deployment while the builder is gone.
+  const parsed = declaredHostRuntimeFromManifest(manifest(), { repo, env: {} })
+  assert.match(parsed.builder, /build-launcher\.cjs$/)
+  // The source check itself still refuses, and Host startup still runs it.
+  assert.throws(() => assertHostRuntimeSources(parsed), /builder is missing from dsh-pet/)
+  assert.throws(() => loadDeclaredHostRuntime({ repo, env: { DSH_LOCAL_MANIFEST: path.join(repo, 'none.yaml') } }), /builder is missing from dsh-pet/)
+  assert.throws(() => prepareDeclaredHostRuntime({
+    repo,
+    env: { DSH_LOCAL_MANIFEST: path.join(repo, 'none.yaml') },
+    runner: () => { throw new Error('builder must not run when it is missing') },
+  }), /builder is missing from dsh-pet/)
 })
 
 test('builder 失败时 Host fail closed，不回退官方 runtime', async t => {
