@@ -12,6 +12,23 @@ import yaml from 'js-yaml'
 import { runDshCli } from './lib/dsh-cli.mjs'
 import { declaredHostRuntimeFromManifest } from './lib/dsh-host-runtime.mjs'
 
+// Some repository tests intentionally copy sync.mjs with only its historical
+// core helpers. Keep that no-resource fixture viable while requiring the helper
+// whenever the manifest actually declares thirdPartyResources.
+const THIRD_PARTY = await import('./lib/third-party-resources.mjs').catch((error) => {
+  if (error?.code === 'ERR_MODULE_NOT_FOUND' && String(error?.message).includes('third-party-resources.mjs')) return undefined
+  throw error
+})
+const validateThirdPartyResources = (value) => {
+  if (THIRD_PARTY === undefined) {
+    if (value !== undefined) throw new Error('manifest: thirdPartyResources support module is missing')
+    return []
+  }
+  return THIRD_PARTY.validateThirdPartyResources(value)
+}
+const resourcePackageItems = (resources) => THIRD_PARTY?.resourcePackageItems(resources) ?? []
+const preflightResourceIntegrities = (resources) => THIRD_PARTY?.preflightResourceIntegrities(resources) ?? Promise.resolve()
+
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DSH_HOME = resolveDshHome(process.env.DSH_HOME)
 const PROFILE = process.env.DSH_PROFILE ?? 'web'
@@ -148,8 +165,25 @@ function loadManifest() {
   if (web.open !== undefined && typeof web.open !== 'boolean') {
     throw new Error('manifest: web.open must be a boolean')
   }
+  // Validate the complete third-party resource surface while loadManifest is
+  // still side-effect free. Package translation happens only after every row,
+  // pin, hash and target has been accepted.
+  const thirdPartyResources = validateThirdPartyResources(doc.thirdPartyResources)
+  const syntheticItems = resourcePackageItems(thirdPartyResources)
+  const claimedIds = new Set(items.map((item) => item.id))
+  for (const item of syntheticItems) {
+    if (claimedIds.has(item.id)) throw new Error(`manifest: generated third-party package id conflicts with customization ${item.id}`)
+    claimedIds.add(item.id)
+  }
   const agentInstructions = validateAgentInstructions(doc.agentInstructions)
-  return { dshVersion: doc.dshVersion, items, deps, agentInstructions, web: { open: web.open !== false } }
+  return {
+    dshVersion: doc.dshVersion,
+    items: [...items, ...syntheticItems],
+    deps,
+    thirdPartyResources,
+    agentInstructions,
+    web: { open: web.open !== false },
+  }
 }
 
 function validateAgentInstructions(value) {
@@ -1305,7 +1339,7 @@ async function syncDirs(manifest, items, type, srcDir, dstRoot, requiredFile, la
   await saveState(state)
 }
 
-async function syncPatches(items, manifest) {
+async function syncPatches(items, manifest, generatedParts = []) {
   const fragments = items.filter((i) => i.type === 'patch' && i.enabled)
   const target = path.join(PROFILE_DIR, 'cordis.patch.yml')
   const parts = []
@@ -1317,6 +1351,7 @@ async function syncPatches(items, manifest) {
     }
     parts.push(`# --- fragment: ${item.id} ---\n` + readFileSync(file, 'utf8').trimEnd() + '\n')
   }
+  for (const generated of generatedParts) parts.push(`${generated.trimEnd()}\n`)
   const body = parts.length === 0 ? '[]\n' : parts.join('\n')
   const content = GENERATED_HEADER + '\n' + body
   const existing = existsSync(target) ? readFileSync(target, 'utf8') : ''
@@ -1330,6 +1365,26 @@ async function syncPatches(items, manifest) {
   await writeFile(target, content)
 }
 
+async function syncThirdPartyAssets(resources, { reset = false } = {}) {
+  if (THIRD_PARTY === undefined) return
+  const state = await loadState()
+  const effective = reset ? resources.map((resource) => ({ ...resource, enabled: false })) : resources
+  await THIRD_PARTY.syncSchemaResources(effective, {
+    repo: REPO,
+    state,
+    onChange: change,
+    onLog: log,
+  })
+  await THIRD_PARTY.syncManagedLaunchers(effective, {
+    profileDir: PROFILE_DIR,
+    managedAssetsDir: path.join(DSH_HOME, 'managed-assets'),
+    state,
+    onChange: change,
+    onLog: log,
+  })
+  await saveState(state)
+}
+
 function logVersion(manifest) {
   log(`dshVersion: ${manifest.dshVersion} (launcher bin/dsh reads dsh.yaml as the single source)`)
 }
@@ -1337,20 +1392,36 @@ function logVersion(manifest) {
 // ---------- main ----------
 async function main() {
   const manifest = loadManifest()
+  // Registry identity is a precondition, not an install-time best effort. Keep
+  // this before profile creation, state migration, or any other side effect.
+  // Reset only removes managed state and must remain available offline.
+  const reset = process.argv.includes('--reset')
+  if (!reset) await preflightResourceIntegrities(manifest.thirdPartyResources)
   await mkdir(PROFILE_DIR, { recursive: true })
   await migrateLegacyState()
   // 全新机器上 profile 骨架尚不存在;package 物化与 reset 都以它为前置。
   await ensureProfileScaffold(manifest)
-  if (process.argv.includes('--reset')) {
+  if (reset) {
     await doReset(manifest)
+    await syncThirdPartyAssets(manifest.thirdPartyResources, { reset: true })
     await syncAgentInstructions(manifest.agentInstructions, { reset: true })
   } else {
     await syncAgentInstructions(manifest.agentInstructions)
     await syncDependencies(manifest)
     await syncPackages(manifest, manifest.items)
+    await syncThirdPartyAssets(manifest.thirdPartyResources)
     await syncDirs(manifest, manifest.items, 'preset', 'presets', path.join(DSH_HOME, '.agent-presets'), 'agent.cordis.yml', 'preset')
     await syncDirs(manifest, manifest.items, 'skill', 'skills', path.join(DSH_HOME, 'skills'), 'SKILL.md', 'skill')
-    await syncPatches(manifest.items, manifest)
+    const health = THIRD_PARTY === undefined ? {} : await THIRD_PARTY.resourceHealth(manifest.thirdPartyResources, {
+      profileDir: PROFILE_DIR,
+      managedAssetsDir: path.join(DSH_HOME, 'managed-assets'),
+    })
+    const generatedParts = THIRD_PARTY?.renderResourcePatch(manifest.thirdPartyResources, {
+      profileDir: PROFILE_DIR,
+      managedAssetsDir: path.join(DSH_HOME, 'managed-assets'),
+      health,
+    }) ?? []
+    await syncPatches(manifest.items, manifest, generatedParts)
   }
   logVersion(manifest)
   console.log('')
