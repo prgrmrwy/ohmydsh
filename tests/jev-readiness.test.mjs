@@ -17,6 +17,8 @@ test('readiness probe only retains request-header tool names and skill-presence 
   assert.match(source, /event\.data\?\.source\?\.kind === 'skill-catalog'/)
   assert.match(source, /jevTools:/)
   assert.match(source, /specSuperflowSkills:/)
+  assert.match(source, /liveProbeReady: session\.jevTools\?\.includes\('mcp__jev__jev_classify'\)/)
+  assert.doesNotMatch(source, /liveProbeReady: Boolean\(process\.env\.TYPESAFE_API_KEY\)/)
   assert.doesNotMatch(source, /user\/message'[\s\S]*console\.log/)
   assert.doesNotMatch(source, /assistant\/message/)
 })

@@ -92,8 +92,7 @@ const report = {
     },
   },
   currentSession: session,
-  liveProbeReady: Boolean(process.env.TYPESAFE_API_KEY)
-    && session.jevTools?.includes('mcp__jev__jev_classify')
+  liveProbeReady: session.jevTools?.includes('mcp__jev__jev_classify')
     && session.jevTools?.includes('mcp__jev__jev_decide'),
 }
 
