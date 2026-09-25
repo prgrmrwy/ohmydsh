@@ -19,7 +19,7 @@ If spec-superflow is ineligible inside managed Worktree Sessions, those records 
 
 ## Quality gate
 
-The report must publish the complete confusion matrix and these pre-registered costs:
+The report must publish the complete confusion matrix and these pre-registered costs. Overlap uses deterministic specificity: existing-change and explicit-route authority conflicts first, then Anvil high-risk misses, then the route-specific `standard-openspec`/`spec-superflow` rows; the general formal→direct row is a fallback so no specific row is unreachable:
 
 | Actual → recommended | Cost |
 |---|---:|

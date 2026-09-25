@@ -56,7 +56,7 @@ test('report emits aggregate confusion, cost, reliability, latency and coverage 
   assert.equal(report.recommendations.confusionMatrix.counts.direct['standard-openspec'], 1)
   assert.equal(report.recommendations.confusionMatrix.counts['standard-openspec'].direct, 1)
   assert.equal(report.recommendations.confusionMatrix.counts.anvil['spec-superflow'], 1)
-  assert.equal(report.cost.weightedTotal, 32); assert.equal(report.cost.weightedPerLabelled, 6.4); assert.equal(report.cost.highCostMisses, 3)
+  assert.equal(report.cost.weightedTotal, 28); assert.equal(report.cost.weightedPerLabelled, 5.6); assert.equal(report.cost.highCostMisses, 2)
   assert.equal(report.cost.needsReviewCost, 0); assert.equal(report.quality.needsReviewRate, 1 / 6); assert.equal(report.quality.providerFailureRate, 1 / 6)
   assert.deepEqual(report.quality.latencyMs, { method: 'nearest-rank', p50: 30, p95: 60 })
   assert.deepEqual(report.quality.usage.totals, { input: 42, output: 48, total: 90 })
@@ -64,8 +64,52 @@ test('report emits aggregate confusion, cost, reliability, latency and coverage 
   assert.equal(report.dataset.languageProxy.availability, 'unavailable')
   assert.equal(report.coverage.phase2Admission, 'not-established')
   assert.ok(report.coverage.warnings.some(w => w.code === 'language-coverage-unavailable'))
+  assert.ok(report.coverage.warnings.some(w => w.code === 'weighted-cost-above-threshold'))
+  assert.ok(!report.coverage.warnings.some(w => w.code === 'needs-review-rate-above-threshold'))
+  assert.ok(report.coverage.warnings.some(w => w.code === 'provider-failure-rate-above-threshold'))
+  assert.ok(report.coverage.warnings.some(w => w.code === 'high-cost-misses-present'))
   const text = JSON.stringify(report)
   assert.doesNotMatch(text, /SECRET|private\.example|user@example|private\/path|observationId|recordedAt/)
+})
+
+test('quality warnings include needs-review threshold breaches', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'jev-report-review-rate-')); t.after(() => rm(home, { recursive: true, force: true }))
+  await add(home, { actual: 'standard-openspec', recommended: 'standard-openspec', status: 'needs-review', latencyMs: 1, usage: {} })
+  const report = run(home, ['report'])
+  assert.equal(report.quality.needsReviewRate, 1)
+  assert.ok(report.coverage.warnings.some(w => w.code === 'needs-review-rate-above-threshold'))
+})
+
+test('every pre-registered misroute cost row is reachable with deterministic precedence', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'jev-report-costs-')); t.after(() => rm(home, { recursive: true, force: true }))
+  await add(home, { actual: 'standard-openspec', recommended: 'direct', latencyMs: 1, usage: {} })
+  await add(home, { actual: 'spec-superflow', recommended: 'direct', latencyMs: 1, usage: {} })
+  await add(home, { actual: 'anvil', recommended: 'direct', latencyMs: 1, usage: {} })
+  await add(home, { actual: 'direct', recommended: 'anvil', latencyMs: 1, usage: {} })
+  await add(home, { actual: 'standard-openspec', recommended: 'anvil', latencyMs: 1, usage: {} })
+  await add(home, { actual: 'standard-openspec', recommended: 'direct', latencyMs: 1, usage: {}, feature: { existingChange: true } })
+  await add(home, { actual: 'spec-superflow', recommended: 'direct', latencyMs: 1, usage: {}, feature: { explicitRoute: 'spec-superflow' } })
+  const report = run(home, ['report'])
+  assert.equal(report.cost.weightedTotal, 46) // 6 + 5 + 10 + 2 + 3 + 10 + 10
+  assert.equal(report.cost.highCostMisses, 3)
+  assert.deepEqual(report.cost.precedence.slice(2), [
+    'existing-change-different-10',
+    'explicit-route-different-10',
+    'anvil-to-direct-or-spec-superflow-10',
+    'standard-openspec-to-direct-6',
+    'spec-superflow-to-direct-5',
+    'formal-to-direct-fallback-10',
+    'direct-to-formal-2',
+    'other-formal-mismatch-3',
+  ])
+})
+
+test('zero placeholder latency remains unavailable rather than claiming 0ms', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'jev-report-no-latency-')); t.after(() => rm(home, { recursive: true, force: true }))
+  await add(home, { actual: 'standard-openspec', recommended: 'standard-openspec', latencyMs: 0, usage: {} })
+  const report = run(home, ['report'])
+  assert.deepEqual(report.quality.latencyMs, { method: 'nearest-rank', p50: null, p95: null })
+  assert.ok(report.coverage.warnings.some(w => w.code === 'latency-coverage-unavailable'))
 })
 
 test('empty and corrupt record sets produce a valid conservative report', async t => {

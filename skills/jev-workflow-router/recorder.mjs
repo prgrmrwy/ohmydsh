@@ -494,9 +494,9 @@ function isAutoCandidate(record) {
 }
 
 // Cost rules use deterministic first-match precedence. Authority conflicts and
-// high-risk misses are evaluated before general route mismatch rules. Because
-// every formal->direct miss is cost 10, the gate's later standard->direct (6)
-// and spec-superflow->direct (5) entries are intentionally superseded.
+// Anvil high-risk misses stay cost 10. The accepted table's route-specific
+// standard->direct (6) and spec-superflow->direct (5) rows override its general
+// formal->direct fallback so every pre-registered row remains reachable.
 function recommendationCost(record) {
   if (!isAutoCandidate(record)) return 0
   const actual = record.actualRoute
@@ -509,6 +509,8 @@ function recommendationCost(record) {
   if (actual === 'anvil' && (recommended === 'direct' || recommended === 'spec-superflow')) {
     return 10
   }
+  if (actual === 'standard-openspec' && recommended === 'direct') return 6
+  if (actual === 'spec-superflow' && recommended === 'direct') return 5
   if (FORMAL_ROUTES.includes(actual) && recommended === 'direct') return 10
   if (actual === 'direct' && FORMAL_ROUTES.includes(recommended)) return 2
   if (FORMAL_ROUTES.includes(actual) && FORMAL_ROUTES.includes(recommended)) return 3
@@ -582,7 +584,18 @@ function labelledHighCostCategories(records) {
   return counts
 }
 
-function coverageWarnings({ labelled, distinctWorkingDays, routeLabels, highCostCategories }) {
+function coverageWarnings({
+  labelled,
+  distinctWorkingDays,
+  routeLabels,
+  highCostCategories,
+  weightedPerLabelled,
+  highCostMisses,
+  needsReviewRate,
+  providerFailureRate,
+  latencyP50,
+  latencyP95,
+}) {
   const warnings = [
     {
       code: 'language-coverage-unavailable',
@@ -625,6 +638,25 @@ function coverageWarnings({ labelled, distinctWorkingDays, routeLabels, highCost
       required: PHASE_2_THRESHOLDS.highCostCategoryLabels,
     })
   }
+  if (highCostMisses > 0) warnings.push({ code: 'high-cost-misses-present', metric: 'highCostMisses', actual: highCostMisses, required: 0 })
+  if (weightedPerLabelled !== null && weightedPerLabelled > PHASE_2_THRESHOLDS.weightedCostPerLabelled) warnings.push({
+    code: 'weighted-cost-above-threshold', metric: 'weightedCostPerLabelled', actual: weightedPerLabelled, required: PHASE_2_THRESHOLDS.weightedCostPerLabelled,
+  })
+  if (needsReviewRate > PHASE_2_THRESHOLDS.needsReviewRate) warnings.push({
+    code: 'needs-review-rate-above-threshold', metric: 'needsReviewRate', actual: needsReviewRate, required: PHASE_2_THRESHOLDS.needsReviewRate,
+  })
+  if (providerFailureRate > PHASE_2_THRESHOLDS.providerFailureRate) warnings.push({
+    code: 'provider-failure-rate-above-threshold', metric: 'providerFailureRate', actual: providerFailureRate, required: PHASE_2_THRESHOLDS.providerFailureRate,
+  })
+  if (latencyP50 === null || latencyP95 === null) warnings.push({
+    code: 'latency-coverage-unavailable', metric: 'latencyMs', actual: null, required: { p50: PHASE_2_THRESHOLDS.p50LatencyMs, p95: PHASE_2_THRESHOLDS.p95LatencyMs },
+  })
+  if (latencyP50 !== null && latencyP50 > PHASE_2_THRESHOLDS.p50LatencyMs) warnings.push({
+    code: 'p50-latency-above-threshold', metric: 'p50LatencyMs', actual: latencyP50, required: PHASE_2_THRESHOLDS.p50LatencyMs,
+  })
+  if (latencyP95 !== null && latencyP95 > PHASE_2_THRESHOLDS.p95LatencyMs) warnings.push({
+    code: 'p95-latency-above-threshold', metric: 'p95LatencyMs', actual: latencyP95, required: PHASE_2_THRESHOLDS.p95LatencyMs,
+  })
   return warnings
 }
 
@@ -650,7 +682,7 @@ async function reportCommand() {
     increment(versions.routerVersion, String(record.routerVersion))
     increment(versions.candidateCatalogVersion, String(record.candidateCatalogVersion))
     increment(eligibleCandidateSets, candidateSetKey(record))
-    latencies.push(record.metrics.latencyMs)
+    if (record.metrics.latencyMs > 0) latencies.push(record.metrics.latencyMs)
     for (const key of Object.keys(usageTotals)) usageTotals[key] += record.metrics.usage[key]
 
     if (record.actualRoute !== 'unknown') {
@@ -662,11 +694,22 @@ async function reportCommand() {
   }
 
   const highCostCategories = labelledHighCostCategories(records)
+  const weightedPerLabelled = overall.labelled === 0 ? null : overall.weightedCost / overall.labelled
+  const needsReviewRate = records.length === 0 ? 0 : overall.needsReview / records.length
+  const providerFailureRate = records.length === 0 ? 0 : overall.providerFailures / records.length
+  const latencyP50 = nearestRank(latencies, 0.5)
+  const latencyP95 = nearestRank(latencies, 0.95)
   const warnings = coverageWarnings({
     labelled: overall.labelled,
     distinctWorkingDays: workingDays.size,
     routeLabels,
     highCostCategories,
+    weightedPerLabelled,
+    highCostMisses: overall.highCostMisses,
+    needsReviewRate,
+    providerFailureRate,
+    latencyP50,
+    latencyP95,
   })
   const meanUsage = Object.fromEntries(Object.entries(usageTotals).map(([key, value]) => [
     key,
@@ -707,23 +750,25 @@ async function reportCommand() {
         'existing-change-different-10',
         'explicit-route-different-10',
         'anvil-to-direct-or-spec-superflow-10',
-        'formal-to-direct-10',
+        'standard-openspec-to-direct-6',
+        'spec-superflow-to-direct-5',
+        'formal-to-direct-fallback-10',
         'direct-to-formal-2',
         'other-formal-mismatch-3',
       ],
       weightedTotal: overall.weightedCost,
-      weightedPerLabelled: overall.labelled === 0 ? null : overall.weightedCost / overall.labelled,
+      weightedPerLabelled,
       highCostMisses: overall.highCostMisses,
       needsReviewCost: 0,
     },
     quality: {
-      needsReviewRate: records.length === 0 ? 0 : overall.needsReview / records.length,
-      providerFailureRate: records.length === 0 ? 0 : overall.providerFailures / records.length,
+      needsReviewRate,
+      providerFailureRate,
       providerFailures: overall.providerFailures,
       latencyMs: {
         method: 'nearest-rank',
-        p50: nearestRank(latencies, 0.5),
-        p95: nearestRank(latencies, 0.95),
+        p50: latencyP50,
+        p95: latencyP95,
       },
       usage: {
         totals: usageTotals,
