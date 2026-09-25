@@ -77,11 +77,24 @@ export function declaredHostRuntimeFromManifest(doc, { repo, env = process.env }
       `but dshVersion is ${String(doc.dshVersion)}; re-audit or remove the compatibility layer before upgrading`,
     )
   }
-  const runtime = fixedPetLocusRuntime(repo, declaration.supportedDshVersion)
+  // Declaration only: no source read here. Checking the builder at load time
+  // would make `sync --reset` depend on sources being present, and reset must
+  // be able to undo deployment regardless (design D5). Callers that are about
+  // to use the runtime call assertHostRuntimeSources().
+  return fixedPetLocusRuntime(repo, declaration.supportedDshVersion)
+}
+
+/**
+ * Source check for a declared Host runtime: the builder must exist as a file.
+ * Called by sync's source preflight and on every Host startup path.
+ *
+ * @param {ReturnType<typeof fixedPetLocusRuntime> | null} runtime
+ */
+export function assertHostRuntimeSources(runtime) {
+  if (runtime === null) return
   if (!existsSync(runtime.builder) || !statSync(runtime.builder).isFile()) {
-    throw new Error(`manifest: ${label} builder is missing from dsh-pet`)
+    throw new Error(`manifest: customization ${runtime.ownerId} hostRuntimeCompatibility builder is missing from dsh-pet: ${runtime.builder}`)
   }
-  return runtime
 }
 
 export function loadDeclaredHostRuntime({ repo, env = process.env } = {}) {
@@ -95,7 +108,10 @@ export function loadDeclaredHostRuntime({ repo, env = process.env } = {}) {
     env,
     strict: true,
   })
-  return declaredHostRuntimeFromManifest(doc, { repo, env })
+  const runtime = declaredHostRuntimeFromManifest(doc, { repo, env })
+  // Host startup behaviour is unchanged by the declaration/source split.
+  assertHostRuntimeSources(runtime)
+  return runtime
 }
 
 function verifiedServerBin(declared) {
