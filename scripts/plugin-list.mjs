@@ -69,7 +69,7 @@ function readPatchList(file) {
  * manifest 的 brief/note,按 npm 包名索引(外加出厂 bundle 的显式短备注)。
  * @returns {Map<string, string>}
  */
-export function manifestNotes(manifestPath = path.join(REPO, "dsh.yaml"), repo = REPO) {
+export function manifestNotes(manifestPath = path.join(REPO, "dsh.yaml"), repo = REPO, env = process.env) {
   const notes = new Map()
   let doc
   try {
@@ -83,7 +83,10 @@ export function manifestNotes(manifestPath = path.join(REPO, "dsh.yaml"), repo =
   // to "no brief" the same way an unreadable manifest already does, while sync's
   // deployment surface fails closed on the identical input.
   try {
-    const overlay = loadOverlayCustomizations({ repo, strict: false })
+    const overlay = loadOverlayCustomizations({ repo, env, strict: false })
+    // Degrade, but say so: a silently ignored overlay looks exactly like
+    // "the private plugins were never installed".
+    if (overlay.error) console.error(`[plugin-list] ${overlay.error.message}`)
     if (overlay.customizations.length > 0 && doc && typeof doc === "object") {
       doc.customizations = [...(doc.customizations ?? []), ...overlay.customizations]
     }
@@ -97,7 +100,9 @@ export function manifestNotes(manifestPath = path.join(REPO, "dsh.yaml"), repo =
     if (item?.type !== "package") continue
     let name
     if (item.source === "local") {
-      name = readJson(path.join(repo, "packages", item.id, "package.json"))?.name
+      // Overlay entries carry their owning root (set by the overlay loader);
+      // public entries live in this repo.
+      name = readJson(path.join(item.sourceRoot ?? repo, "packages", item.id, "package.json"))?.name
     } else if (item.spec) {
       // explicit `name` (required for non-npm specs like github/tarball) wins;
       // otherwise derive it from an npm `name@version` spec
