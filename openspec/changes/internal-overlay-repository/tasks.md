@@ -73,4 +73,4 @@
 
 - [x] 12.1 Update `docs/notes/local-manifest-overlay.md`: private isomorphic repo layout, the trust model (D0), multi-machine steps (clone, `npm ci` in the private repo, `.env.local` line, profile `.npmrc` scope), `npmScopes`, preflight, and rollback. Use generic `@example` names only. Grep the whole diff for internal names and registries and confirm there are none.
 - [x] 12.2 Run `npm test`, `npm run check:artifacts`, and `openspec validate internal-overlay-repository --strict`. Flip every test-plan row to 🟢.
-- [ ] 12.3 Run `node scripts/sync.mjs` twice against the real profile with no overlay. The second run reports no changes.
+- [x] 12.3 Run `node scripts/sync.mjs` twice against the real profile with no overlay. The second run reports no changes.

@@ -4,20 +4,19 @@
 
 All tasks 0.1–12.2 are `- [x]`.
 
-Still open:
+**12.3** was run after the merge, from the main checkout at `014609f8`, against the real profile with the machine's repo-root overlay in place. It was run there rather than in the worktree for two reasons:
+- a worktree run would not see the overlay, so it would uninstall the overlay's package;
+- it would re-point local `file:` specs at the worktree.
 
-- **12.3** Run `node scripts/sync.mjs` twice against the real profile with no overlay.
-  **Not run, on purpose.** On this machine, "no overlay" is not a neutral state:
-  - The main checkout has a `dsh.yaml.local`, and the live profile has one overlay-owned remote package installed; it is present both in profile `package.json` and in the ledger.
-  - A run from this worktree would treat the overlay as absent, so it would uninstall that package.
-  - The same run would also repair every local package's `file:` spec to point at this worktree.
-  - The data volume had 344 MiB free when checked.
+Profile `package.json`, `cordis.patch.yml`, and the ledger were backed up first.
 
-  This step changes the live deployment, so it waits for the user's go-ahead. Two ways to run it:
-  - from the main checkout, after merge, with its overlay, or
-  - against a scratch `DSH_HOME`.
+- **Run 1:** exit 0, `done — 3 change(s) applied`. The three changes:
+  - rebuild of the local package `dsh-cockpit-worktree-open-shim`;
+  - reinstall of that package, whose content changed through commits merged into main alongside this change;
+  - regeneration of `cordis.patch.yml`, whose only diff is the new D10 header.
 
-  The idempotence property itself is covered hermetically by `external overlay root sync is idempotent`. That test asserts "no changes" plus a byte-identical `$DSH_HOME` on the second run.
+  Profile `dependencies` are identical to the backup, so the overlay's package stayed installed.
+- **Run 2:** exit 0, `no changes — deployment already matches manifest`.
 
 ### 2. TDD integrity
 
@@ -45,7 +44,7 @@ Still open:
 
 ### 4. Delivery status
 
-Nothing is committed; the work is uncommitted in branch `ws/docs-notes-ai-code-report-dsh-integration-resear`. The user commits after review, and merges through `scripts/ws-merge.mjs`.
+Committed as `2d690dd0` and merged into `main` as `014609f8` via `scripts/ws-merge.mjs`, with user approval. This ledger update (12.3) is a follow-up commit on the same branch.
 
 **Changed files:**
 
@@ -76,7 +75,6 @@ Nothing is committed; the work is uncommitted in branch `ws/docs-notes-ai-code-r
 
 - **W1.** `design.md` was modified after the review verdict (see §3).
 - **W2.** When a local package's build fails, the pre-existing "local package path repair" in `syncPackages` may already have written the package's `file:` spec into profile `package.json` before the build. No install or remove runs, and nothing lands in `node_modules`. This matches the spec: it requires no install or removal of `q`, not an unchanged `package.json`. The behavior predates this change and applies to public local packages too.
-- **W3.** Task 12.3 has not been run (see §1).
 
 ### Evidence
 
@@ -86,8 +84,10 @@ All commands were run from the worktree root on 2026-09-25:
 |-|-|
 | `npm test` | `tests 197 / pass 197 / fail 0`, exit 0 (baseline before this change: 157) |
 | `npm run check:artifacts` | `[artifacts] tracked paths comply with repository policy`, exit 0 |
+| `npm test` on merged `014609f8` | `tests 197 / pass 197 / fail 0` |
+| `node scripts/sync.mjs` ×2 on main (real profile) | run 1: 3 changes, exit 0; run 2: `no changes`, exit 0 |
 | `npx openspec validate internal-overlay-repository --strict` | `Change 'internal-overlay-repository' is valid`, exit 0 |
 
 ### Overall Decision
 
-⚠️ PASS WITH WARNINGS. W1 and W3 need a human decision before archive.
+⚠️ PASS WITH WARNINGS. W1 needs a human decision before archive.
