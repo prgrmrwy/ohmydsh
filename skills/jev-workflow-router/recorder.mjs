@@ -14,7 +14,8 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import process from 'node:process'
 
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
+const LEGACY_SCHEMA_VERSION = 1
 const ROUTER_VERSION = 1
 const CANDIDATE_CATALOG_VERSION = 1
 const DEFAULT_MAX_COUNT = 1_000
@@ -24,7 +25,7 @@ const MAX_MAX_BYTES = 16_777_216
 const MAX_INPUT_BYTES = 65_536
 const LOCK_WAIT_MS = 2_000
 const LOCK_STALE_MS = 30_000
-const REPORT_VERSION = 1
+const REPORT_VERSION = 2
 const PHASE_2_THRESHOLDS = {
   labelled: 100,
   distinctWorkingDays: 10,
@@ -42,6 +43,8 @@ const FORMAL_ROUTES = ROUTES.filter(route => route !== 'direct')
 const ACTUAL_ROUTES = [...ROUTES, 'unknown']
 const LABEL_SOURCES = ['user-explicit', 'agent', 'existing-change']
 const OVERRIDE_SOURCES = [...LABEL_SOURCES, 'unknown']
+const SAMPLE_PROVENANCE = ['real-vibe', 'synthetic-fixture', 'unknown']
+const LATENCY_AVAILABILITY = ['measured', 'unavailable']
 const INTENTS = [
   'explanation',
   'research',
@@ -192,6 +195,18 @@ function normalizeRequirementChecks(input) {
   return Object.fromEntries(REQUIREMENT_KEYS.map(key => [key, bool(source[key])]))
 }
 
+function normalizeLatency(input) {
+  const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {}
+  const availability = enumValue(source.availability, LATENCY_AVAILABILITY, 'unavailable')
+  if (
+    availability !== 'measured'
+    || typeof source.milliseconds !== 'number'
+    || !Number.isFinite(source.milliseconds)
+    || source.milliseconds < 0
+  ) return { availability: 'unavailable', milliseconds: null }
+  return { availability: 'measured', milliseconds: finiteInteger(source.milliseconds, 0, 0, 60_000) }
+}
+
 function normalizeRecord(input) {
   const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {}
   const recommendation = source.recommendation && typeof source.recommendation === 'object'
@@ -263,6 +278,7 @@ function normalizeRecord(input) {
     candidateCatalogVersion: CANDIDATE_CATALOG_VERSION,
     observationId: newObservationId(),
     recordedAt: new Date().toISOString(),
+    sampleProvenance: enumValue(source.sampleProvenance, SAMPLE_PROVENANCE),
     features: normalizeFeatures(source.features),
     eligibleCandidates,
     recommendation: {
@@ -277,7 +293,7 @@ function normalizeRecord(input) {
       status,
     },
     metrics: {
-      latencyMs: finiteInteger(metrics.latencyMs, 0, 0, 60_000),
+      latency: normalizeLatency(metrics.latency),
       usage: {
         input: finiteInteger(usage.input, 0, 0, 10_000_000),
         output: finiteInteger(usage.output, 0, 0, 10_000_000),
@@ -295,7 +311,7 @@ function normalizeStoredRecord(value) {
     !value
     || typeof value !== 'object'
     || Array.isArray(value)
-    || value.schemaVersion !== SCHEMA_VERSION
+    || ![LEGACY_SCHEMA_VERSION, SCHEMA_VERSION].includes(value.schemaVersion)
     || typeof value.observationId !== 'string'
     || !/^[a-f0-9-]{8,64}$/u.test(value.observationId)
     || !ACTUAL_ROUTES.includes(value.actualRoute)
@@ -303,6 +319,15 @@ function normalizeStoredRecord(value) {
   ) return null
 
   const normalized = normalizeRecord(value)
+  normalized.schemaVersion = value.schemaVersion
+  if (value.schemaVersion === LEGACY_SCHEMA_VERSION) {
+    normalized.sampleProvenance = 'unknown'
+    normalized.metrics.latency = typeof value.metrics?.latencyMs === 'number'
+      && Number.isFinite(value.metrics.latencyMs)
+      && value.metrics.latencyMs > 0
+      ? { availability: 'measured', milliseconds: finiteInteger(value.metrics.latencyMs, 0, 0, 60_000) }
+      : { availability: 'unavailable', milliseconds: null }
+  }
   normalized.observationId = value.observationId
   const recordedAt = new Date(value.recordedAt)
   normalized.recordedAt = Number.isFinite(recordedAt.getTime())
@@ -336,7 +361,10 @@ async function readRecords(recordsFile) {
 }
 
 function encodeRecords(records) {
-  return records.length === 0 ? '' : `${records.map(record => JSON.stringify(record)).join('\n')}\n`
+  return records.length === 0 ? '' : `${records.map(record => JSON.stringify({
+    ...record,
+    schemaVersion: SCHEMA_VERSION,
+  })).join('\n')}\n`
 }
 
 function trimRecords(records, { maxCount, maxBytes }) {
@@ -458,6 +486,7 @@ async function summaryCommand() {
     actualRoutes: {},
     overrideSources: {},
     errors: {},
+    provenance: {},
     labelled: 0,
   }
   for (const record of records) {
@@ -466,6 +495,7 @@ async function summaryCommand() {
     increment(summary.actualRoutes, enumValue(record.actualRoute, ACTUAL_ROUTES))
     increment(summary.overrideSources, enumValue(record.overrideSource, OVERRIDE_SOURCES))
     increment(summary.errors, enumValue(record.errorCategory, ERROR_CATEGORIES, 'unknown'))
+    increment(summary.provenance, enumValue(record.sampleProvenance, SAMPLE_PROVENANCE))
     if (record.actualRoute !== 'unknown') summary.labelled += 1
   }
   return summary
@@ -584,7 +614,17 @@ function labelledHighCostCategories(records) {
   return counts
 }
 
+function gate(status, actual, required) {
+  return { status, actual, required }
+}
+
+function thresholdGate(actual, required, predicate) {
+  if (actual === null || actual === undefined) return gate('unavailable', actual ?? null, required)
+  return gate(predicate(actual, required) ? 'pass' : 'fail', actual, required)
+}
+
 function coverageWarnings({
+  realVibeRecords,
   labelled,
   distinctWorkingDays,
   routeLabels,
@@ -596,20 +636,13 @@ function coverageWarnings({
   latencyP50,
   latencyP95,
 }) {
-  const warnings = [
-    {
-      code: 'language-coverage-unavailable',
-      metric: 'language',
-      actual: null,
-      required: { chinese: 30, english: 20 },
-    },
-    {
-      code: 'sample-provenance-unavailable',
-      metric: 'sample-provenance',
-      actual: null,
-      required: 'synthetic-and-real-vibe-identifiable',
-    },
-  ]
+  const warnings = []
+  if (realVibeRecords === 0) warnings.push({
+    code: 'real-vibe-coverage-unavailable',
+    metric: 'sampleProvenance',
+    actual: 0,
+    required: 'reliably-labelled-real-vibe-records',
+  })
   if (labelled < PHASE_2_THRESHOLDS.labelled) warnings.push({
     code: 'labelled-observations-below-threshold',
     metric: 'labelled',
@@ -642,10 +675,10 @@ function coverageWarnings({
   if (weightedPerLabelled !== null && weightedPerLabelled > PHASE_2_THRESHOLDS.weightedCostPerLabelled) warnings.push({
     code: 'weighted-cost-above-threshold', metric: 'weightedCostPerLabelled', actual: weightedPerLabelled, required: PHASE_2_THRESHOLDS.weightedCostPerLabelled,
   })
-  if (needsReviewRate > PHASE_2_THRESHOLDS.needsReviewRate) warnings.push({
+  if (needsReviewRate !== null && needsReviewRate > PHASE_2_THRESHOLDS.needsReviewRate) warnings.push({
     code: 'needs-review-rate-above-threshold', metric: 'needsReviewRate', actual: needsReviewRate, required: PHASE_2_THRESHOLDS.needsReviewRate,
   })
-  if (providerFailureRate > PHASE_2_THRESHOLDS.providerFailureRate) warnings.push({
+  if (providerFailureRate !== null && providerFailureRate > PHASE_2_THRESHOLDS.providerFailureRate) warnings.push({
     code: 'provider-failure-rate-above-threshold', metric: 'providerFailureRate', actual: providerFailureRate, required: PHASE_2_THRESHOLDS.providerFailureRate,
   })
   if (latencyP50 === null || latencyP95 === null) warnings.push({
@@ -663,6 +696,7 @@ function coverageWarnings({
 async function reportCommand() {
   const records = await readRecords(paths().recordsFile)
   const overall = newAggregate()
+  const realVibe = newAggregate()
   const confusionMatrix = emptyConfusionMatrix()
   const workingDays = new Set()
   const versions = {
@@ -671,21 +705,31 @@ async function reportCommand() {
     candidateCatalogVersion: {},
   }
   const eligibleCandidateSets = {}
+  const provenance = Object.fromEntries(SAMPLE_PROVENANCE.map(value => [value, 0]))
   const routeLabels = Object.fromEntries(ROUTES.map(route => [route, 0]))
   const usageTotals = { input: 0, output: 0, total: 0 }
   const latencies = []
+  const realVibeRecords = []
 
   for (const record of records) {
     addToAggregate(overall, record)
-    workingDays.add(record.recordedAt.slice(0, 10))
+    if (record.sampleProvenance === 'real-vibe') {
+      addToAggregate(realVibe, record)
+      workingDays.add(record.recordedAt.slice(0, 10))
+    }
     increment(versions.schemaVersion, String(record.schemaVersion))
     increment(versions.routerVersion, String(record.routerVersion))
     increment(versions.candidateCatalogVersion, String(record.candidateCatalogVersion))
     increment(eligibleCandidateSets, candidateSetKey(record))
-    if (record.metrics.latencyMs > 0) latencies.push(record.metrics.latencyMs)
+    increment(provenance, record.sampleProvenance)
+    if (record.sampleProvenance === 'real-vibe') realVibeRecords.push(record)
+    if (
+      record.sampleProvenance === 'real-vibe'
+      && record.metrics.latency.availability === 'measured'
+    ) latencies.push(record.metrics.latency.milliseconds)
     for (const key of Object.keys(usageTotals)) usageTotals[key] += record.metrics.usage[key]
 
-    if (record.actualRoute !== 'unknown') {
+    if (record.sampleProvenance === 'real-vibe' && record.actualRoute !== 'unknown') {
       routeLabels[record.actualRoute] += 1
       if (isAutoCandidate(record)) {
         confusionMatrix[record.actualRoute][record.recommendation.workflow] += 1
@@ -693,19 +737,20 @@ async function reportCommand() {
     }
   }
 
-  const highCostCategories = labelledHighCostCategories(records)
-  const weightedPerLabelled = overall.labelled === 0 ? null : overall.weightedCost / overall.labelled
-  const needsReviewRate = records.length === 0 ? 0 : overall.needsReview / records.length
-  const providerFailureRate = records.length === 0 ? 0 : overall.providerFailures / records.length
+  const highCostCategories = labelledHighCostCategories(realVibeRecords)
+  const weightedPerLabelled = realVibe.labelled === 0 ? null : realVibe.weightedCost / realVibe.labelled
+  const needsReviewRate = realVibeRecords.length === 0 ? null : realVibe.needsReview / realVibeRecords.length
+  const providerFailureRate = realVibeRecords.length === 0 ? null : realVibe.providerFailures / realVibeRecords.length
   const latencyP50 = nearestRank(latencies, 0.5)
   const latencyP95 = nearestRank(latencies, 0.95)
   const warnings = coverageWarnings({
-    labelled: overall.labelled,
+    realVibeRecords: realVibeRecords.length,
+    labelled: realVibe.labelled,
     distinctWorkingDays: workingDays.size,
     routeLabels,
     highCostCategories,
     weightedPerLabelled,
-    highCostMisses: overall.highCostMisses,
+    highCostMisses: realVibe.highCostMisses,
     needsReviewRate,
     providerFailureRate,
     latencyP50,
@@ -715,6 +760,21 @@ async function reportCommand() {
     key,
     records.length === 0 ? null : value / records.length,
   ]))
+  const gateStatuses = {
+    labelledObservations: thresholdGate(realVibe.labelled, PHASE_2_THRESHOLDS.labelled, (a, r) => a >= r),
+    distinctWorkingDays: thresholdGate(workingDays.size, PHASE_2_THRESHOLDS.distinctWorkingDays, (a, r) => a >= r),
+    actualRouteCoverage: Object.fromEntries(ROUTES.map(route => [route, thresholdGate(routeLabels[route], PHASE_2_THRESHOLDS.routeLabels, (a, r) => a >= r)])),
+    highCostCategoryCoverage: Object.fromEntries(Object.entries(highCostCategories).map(([category, count]) => [category, thresholdGate(count, PHASE_2_THRESHOLDS.highCostCategoryLabels, (a, r) => a >= r)])),
+    highCostMisses: thresholdGate(realVibe.highCostMisses, 0, a => a === 0),
+    weightedCostPerLabelled: thresholdGate(weightedPerLabelled, PHASE_2_THRESHOLDS.weightedCostPerLabelled, (a, r) => a <= r),
+    needsReviewRate: thresholdGate(needsReviewRate, PHASE_2_THRESHOLDS.needsReviewRate, (a, r) => a <= r),
+    providerFailureRate: thresholdGate(providerFailureRate, PHASE_2_THRESHOLDS.providerFailureRate, (a, r) => a <= r),
+    p50LatencyMs: thresholdGate(latencyP50, PHASE_2_THRESHOLDS.p50LatencyMs, (a, r) => a <= r),
+    p95LatencyMs: thresholdGate(latencyP95, PHASE_2_THRESHOLDS.p95LatencyMs, (a, r) => a <= r),
+    externalCostAccepted: gate('unavailable', null, 'user-accepted-estimated-mean-external-cost'),
+    privacyAndIntegrationEvidence: gate('unavailable', null, 'separate-acceptance-evidence'),
+    explicitUserApproval: gate('unavailable', null, 'separate-phase-2-change-approval'),
+  }
 
   return {
     reportVersion: REPORT_VERSION,
@@ -722,11 +782,13 @@ async function reportCommand() {
       total: overall.total,
       labelled: overall.labelled,
       unknownLabels: overall.unknownLabels,
-      distinctWorkingDays: workingDays.size,
-      languageProxy: {
-        availability: 'unavailable',
-        reason: 'language-not-recorded-and-must-not-be-inferred',
+      realVibe: {
+        total: realVibe.total,
+        labelled: realVibe.labelled,
+        unknownLabels: realVibe.unknownLabels,
       },
+      provenance,
+      distinctWorkingDays: workingDays.size,
       versions,
       eligibleCandidateSets,
       actualRouteLabels: routeLabels,
@@ -756,17 +818,19 @@ async function reportCommand() {
         'direct-to-formal-2',
         'other-formal-mismatch-3',
       ],
-      weightedTotal: overall.weightedCost,
+      weightedTotal: realVibe.weightedCost,
       weightedPerLabelled,
-      highCostMisses: overall.highCostMisses,
+      highCostMisses: realVibe.highCostMisses,
       needsReviewCost: 0,
     },
     quality: {
       needsReviewRate,
       providerFailureRate,
-      providerFailures: overall.providerFailures,
+      providerFailures: realVibe.providerFailures,
       latencyMs: {
-        method: 'nearest-rank',
+        method: 'complete-shadow-sequence-monotonic-nearest-rank',
+        measuredCount: latencies.length,
+        unavailableCount: realVibeRecords.length - latencies.length,
         p50: latencyP50,
         p95: latencyP95,
       },
@@ -778,14 +842,16 @@ async function reportCommand() {
       estimatedExternalCostReason: 'pricing-model-unavailable',
     },
     breakdowns: {
-      intentCategory: groupedAggregates(records, record => record.features.intent, INTENTS),
-      actualRoute: groupedAggregates(records, record => record.actualRoute, ACTUAL_ROUTES),
-      routerVersion: groupedAggregates(records, record => record.routerVersion),
-      candidateSet: groupedAggregates(records, candidateSetKey),
+      provenance: groupedAggregates(records, record => record.sampleProvenance, SAMPLE_PROVENANCE),
+      intentCategory: groupedAggregates(realVibeRecords, record => record.features.intent, INTENTS),
+      actualRoute: groupedAggregates(realVibeRecords, record => record.actualRoute, ACTUAL_ROUTES),
+      routerVersion: groupedAggregates(realVibeRecords, record => record.routerVersion),
+      candidateSet: groupedAggregates(realVibeRecords, candidateSetKey),
     },
     coverage: {
       phase2Admission: 'not-established',
       thresholds: PHASE_2_THRESHOLDS,
+      gates: gateStatuses,
       warnings,
     },
   }

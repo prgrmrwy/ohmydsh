@@ -63,6 +63,8 @@ function sample(index = 0) {
     url: 'https://example.invalid/private?q=secret',
     token: 'token-like-value-should-not-persist',
     providerError: { message: 'raw provider error echoed private request' },
+    language: 'zh-private-prompt-derived-value',
+    sampleProvenance: 'synthetic-fixture',
     arbitrary: { deeply: ['nested', 'unknown', 'data'] },
     features: {
       intent: 'feature',
@@ -112,7 +114,7 @@ function sample(index = 0) {
       raw: 'unbounded model output',
     },
     metrics: {
-      latencyMs: 17,
+      latency: { availability: 'measured', milliseconds: 17, raw: 'do not persist latency' },
       usage: { input: 3, output: 2, total: 5, rawCost: '$secret' },
       unknown: 'do not persist',
     },
@@ -127,6 +129,12 @@ test('skill is an observation-only closed two-step shadow router', async () => {
   assert.match(source, /mcp__jev__jev_decide/u)
   assert.match(source, /observation-only/iu)
   assert.match(source, /never show a recommendation as a question or a user-visible interruption/iu)
+  assert.match(source, /Do not collect, infer, persist, report, or gate on request language/iu)
+  assert.match(source, /local monotonic start time/iu)
+  assert.match(source, /"sampleProvenance":"real-vibe"/u)
+  assert.match(source, /"availability":"measured","milliseconds":N/u)
+  assert.match(source, /Never reuse the legacy `latencyMs` field/iu)
+  assert.match(source, /`real-vibe`[\s\S]*`synthetic-fixture`[\s\S]*`unknown`/iu)
   assert.match(source, /active managed Worktree Session[\s\S]*remove `spec-superflow`[\s\S]*`ssf isolate`[\s\S]*`ssf finish`/iu)
   assert.match(source, /instructions or warnings alone do not qualify/iu)
   for (const route of ['direct', 'standard-openspec', 'anvil', 'spec-superflow']) {
@@ -149,7 +157,7 @@ test('record persists only normalized bounded fields and never attacker observat
   for (const secret of [
     'PRIVATE full prompt', 'privateSource', 'secret line', 'payroll-secret.pdf', '/private/',
     'private-person@', 'example.invalid', 'token-like', 'raw provider error', 'attacker-controlled',
-    'unbounded model output', 'do not persist', '$secret', '../evil',
+    'unbounded model output', 'do not persist', '$secret', '../evil', 'zh-private-prompt-derived-value',
   ]) {
     assert.equal(text.includes(secret), false, secret)
   }
@@ -158,7 +166,7 @@ test('record persists only normalized bounded fields and never attacker observat
   assert.deepEqual(Object.keys(record).sort(), [
     'actualRoute', 'candidateCatalogVersion', 'eligibleCandidates', 'errorCategory', 'features',
     'metrics', 'observationId', 'overrideSource', 'recommendation', 'recordedAt', 'routerVersion',
-    'schemaVersion',
+    'sampleProvenance', 'schemaVersion',
   ].sort())
   assert.deepEqual(record.eligibleCandidates, ['direct', 'standard-openspec', 'anvil'])
   assert.deepEqual(Object.keys(record.recommendation.classificationProbabilities), [
@@ -167,6 +175,9 @@ test('record persists only normalized bounded fields and never attacker observat
   assert.deepEqual(Object.keys(record.recommendation.workflowProbabilities), [
     'standard-openspec', 'anvil', 'spec-superflow', 'ask_user', 'investigate', 'none',
   ])
+  assert.equal(record.schemaVersion, 2)
+  assert.equal(record.sampleProvenance, 'synthetic-fixture')
+  assert.deepEqual(record.metrics.latency, { availability: 'measured', milliseconds: 17 })
   assert.equal(record.actualRoute, 'unknown')
   assert.equal(record.overrideSource, 'unknown')
 })
@@ -180,7 +191,8 @@ test('record normalizes invalid enums and non-finite or out-of-range numbers', a
   input.recommendation.classificationProbabilities.direct = Number.NaN
   input.recommendation.confidence = null
   input.recommendation.margin = 99
-  input.metrics.latencyMs = -5
+  input.sampleProvenance = 'real prompt text should not persist'
+  input.metrics.latency = { availability: 'measured', milliseconds: -5 }
   input.metrics.usage.total = Number.POSITIVE_INFINITY
   input.errorCategory = 'raw: secret endpoint failed'
 
@@ -192,9 +204,44 @@ test('record normalizes invalid enums and non-finite or out-of-range numbers', a
   assert.equal(record.recommendation.workflow, 'unknown')
   assert.equal(record.recommendation.confidence, 0)
   assert.equal(record.recommendation.margin, 1)
-  assert.equal(record.metrics.latencyMs, 0)
+  assert.equal(record.sampleProvenance, 'unknown')
+  assert.deepEqual(record.metrics.latency, { availability: 'unavailable', milliseconds: null })
   assert.equal(record.metrics.usage.total, 0)
   assert.equal(record.errorCategory, 'unknown')
+})
+
+test('legacy v1 records remain readable without invented provenance or latency', async t => {
+  const home = await temporaryHome(t)
+  const stateDir = join(home, 'state', 'jev-workflow-router')
+  await mkdir(stateDir, { recursive: true })
+  const legacyInput = sample()
+  const created = await run(home, ['record'], legacyInput)
+  assert.equal(created.code, 0, created.stderr)
+  const [current] = await storedRecords(home)
+  const legacy = {
+    ...current,
+    schemaVersion: 1,
+    metrics: { latencyMs: 0, usage: current.metrics.usage },
+  }
+  delete legacy.sampleProvenance
+  await writeFile(recordsPath(home), `${JSON.stringify(legacy)}\n`, 'utf8')
+
+  const summary = await run(home, ['summary'])
+  assert.equal(summary.code, 0, summary.stderr)
+  assert.equal(JSON.parse(summary.stdout).records, 1)
+  const report = await run(home, ['report'])
+  assert.equal(report.code, 0, report.stderr)
+  const parsed = JSON.parse(report.stdout)
+  assert.equal(parsed.dataset.provenance.unknown, 1)
+  assert.equal(parsed.quality.latencyMs.measuredCount, 0)
+
+  const id = legacy.observationId
+  const labelled = await run(home, ['label', id, 'direct', 'agent'])
+  assert.equal(labelled.code, 0, labelled.stderr)
+  const [rewritten] = await storedRecords(home)
+  assert.equal(rewritten.schemaVersion, 2)
+  assert.equal(rewritten.sampleProvenance, 'unknown')
+  assert.deepEqual(rewritten.metrics.latency, { availability: 'unavailable', milliseconds: null })
 })
 
 test('record enforces workflow consistency and conservative status', async t => {
