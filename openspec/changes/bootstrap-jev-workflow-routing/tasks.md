@@ -18,7 +18,7 @@
 - [x] 3.1 为 Jev 子进程建立单变量 `TYPESAFE_API_KEY` 凭据注入路径：生成配置只动态读取本机进程环境，最窄 launcher 给实际 Jev 子进程仅传 `TYPESAFE_API_KEY` 与固定 `JEV_PROVIDER=typesafe`；值不进入仓库、命令参数或部署账本
 - [x] 3.2 bridge 配置有界 tool-call timeout/reconnect，真实 MCP seam 已验证 AbortSignal 与 dispose 生命周期；shadow policy 对歧义失败不重试并将缺 key、401/403、429、5xx、网络、超时、取消、malformed response 规范化为有限枚举，任何错误都强制 `needs-review`，原始错误不进入记录
 - [x] 3.3 单测验证 launcher 不展开完整父环境或项目 `.env`、只传 key 与固定 provider；bridge 在缺凭据时动态 disabled，启动错误 fail open，shadow recorder 仅接受有限错误枚举且不持久化 provider 原始错误
-- [ ] 3.4 用户在本机安全配置已有 TypeSafe key 后执行一次 live Jev typed-decision probe，记录版本、候选、结构校验、延迟、usage 与脱敏结果；不把 key 或请求全文写进证据
+- [x] 3.4 用户在本机安全配置 replacement TypeSafe key 并重启后完成 live typed-decision：`jev_classify` 的完整闭合分布为 formal-workflow 0.68 / direct 0.28 / manual-review 0.04，confidence 0.52、margin 0.40 正确落 review；随后 `jev_decide` 在 eligible standard/anvil 闭集中选择 standard-openspec 0.93、confidence 0.91，standard 的 3 项 requirements 均 supported，合计 usage input 2189 / output 363；没有保存 key、请求/响应正文或 raw error
 
 ## 4. Shadow workflow router
 
@@ -37,7 +37,7 @@
 
 ## 6. 真实集成验收与分期门槛
 
-- [ ] 6.1 已用当前普通 Agent 的真实 v3 request context 验证：缺 key 时 16 个 request header 均无 Jev tools 且原 40-tool surface 不变；修复生成 row 必须使用 `insert` 后，真实 skill-catalog 出现 router 与全部 9 个 spec-superflow skills；当前 existing change + prepared Worktree Session 全程未重路由/建第二 worktree/合入/归档。仍需安全配置 replacement key 并重启后验证 Jev tool 可见且 live typed 调用成功
+- [x] 6.1 已用普通 Agent 的真实 v3 request context 验证：缺 key 时 16 个 request header 均无 Jev tools 且原 40-tool surface 不变；修复生成 row 必须使用 `insert` 后，真实 skill-catalog 出现 router 与全部 9 个 spec-superflow skills；配置 replacement key 并重启后当前 request header 为 50 tools，含全部 10 个 `mcp__jev__jev_*`，且 classify/decide live typed 调用成功。existing change 始终保持 `spec-driven`，未重路由/建第二 worktree/触发归档或清理
 - [x] 6.2 验证三条候选入口：临时 standard change 为 `spec-driven` 且项目默认不变；临时 Anvil change 显式解析为 pinned project schema；spec-superflow 精确包的 CLI 入口与九个原始 skill 均可发现/加载，但在当前 Worktree Session 中按确定性安全规则不执行 `isolate/finish`
 - [ ] 6.3 已完成 16-case 人工标注中英文 synthetic fixture，并实现/验证只输出 aggregate 的版本化 report（完整混淆矩阵、加权成本、needs-review/失败率、p50/p95、usage、覆盖告警；无定价时成本明确 unavailable）；当前真实 prospective router records 为 0，禁止读取历史 prompt 回填，仍需在 live Jev 接通后积累若干真实 vibe shadow 样本
 - [x] 6.4 在文档中固定 Phase 2 准入：样本量与关键类别覆盖达标、无高代价漏判、服务失败不影响对话、隐私审计通过且用户显式批准；本 change 不实现 advisory UI 或自动选路
