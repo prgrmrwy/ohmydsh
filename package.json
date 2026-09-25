@@ -30,9 +30,9 @@
   ],
   "scripts": {
     "sync": "node scripts/sync.mjs",
-    "test": "node --test tests/*.test.mjs",
+    "test": "DSH_LOCAL_MANIFEST=/nonexistent/ohmydsh-test-isolation/dsh.yaml.local node --test tests/*.test.mjs",
     "check:artifacts": "node scripts/check-tracked-artifacts.mjs",
-    "test:tap": "node --test --test-reporter=tap tests/*.test.mjs"
+    "test:tap": "DSH_LOCAL_MANIFEST=/nonexistent/ohmydsh-test-isolation/dsh.yaml.local node --test --test-reporter=tap tests/*.test.mjs"
   },
   "devDependencies": {
     "js-yaml": "^4.1.0",
