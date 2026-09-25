@@ -16,6 +16,7 @@ This skill observes a decision that the agent already had to make. It never make
 - Never use this skill before independently reaching the workflow decision point. It is not an intent detector and must not turn explanation, research, or casual conversation into a formal workflow.
 - The closed candidate set is exactly `direct`, `standard-openspec`, `anvil`, and `spec-superflow`. Do not invent, fork, combine, rename, or silently modify candidates.
 - Phase 1 is observation-only regardless of confidence. Promotion requires a separate change and explicit user approval.
+- Do not collect, infer, persist, report, or gate on request language. There are no Chinese/English quotas.
 
 ## Versioned candidate catalog
 
@@ -60,6 +61,8 @@ Use `unknown`/conservative values when evidence is absent. Never include or deri
 
 ## Two bounded shadow calls
 
+Before the first call, capture a local monotonic start time. After classify plus the conditional decide has settled (success, error, timeout, or cancellation), compute the complete shadow-sequence duration. Record it as `{ "availability": "measured", "milliseconds": N }`; only use `{ "availability": "unavailable", "milliseconds": null }` when a monotonic local measurement genuinely cannot be obtained. Timing and provenance are local recorder metadata and MUST NOT be sent to Jev.
+
 If `DSH_JEV_WORKFLOW_ROUTER_DISABLED` is `1`, `true`, `yes`, or `on` (case-insensitive), make no Jev calls and write no records.
 
 Otherwise, after deterministic rules are known, make these observation-only calls with only the bounded feature projection:
@@ -77,7 +80,7 @@ A result may be labelled `auto-candidate` only for offline evaluation when all c
 
 ## Local recorder
 
-Use the zero-dependency Node >=22 recorder next to this file. Pass JSON only on stdin; never put observations in command arguments.
+Use the zero-dependency Node >=22 recorder next to this file. Pass JSON only on stdin; never put observations in command arguments. The bounded record object must contain `"sampleProvenance":"real-vibe"` for an ordinary Agent call and `"metrics":{"latency":{"availability":"measured","milliseconds":N},"usage":{...}}` when the local monotonic measurement succeeded. Never reuse the legacy `latencyMs` field.
 
 ```sh
 printf '%s' "$BOUNDED_JSON" | node recorder.mjs record
@@ -87,6 +90,8 @@ node recorder.mjs report
 node recorder.mjs clear
 ```
 
+Every record must include one bounded local provenance value: `real-vibe` for an ordinary Agent decision point, `synthetic-fixture` for an explicit test/offline fixture, or `unknown` when neither is provable. Provenance is not a Jev feature. Synthetic and unknown records may validate implementation but never contribute to real-vibe Phase 2 admission metrics.
+
 `label` is retrospective only. Allowed sources are `user-explicit`, `agent`, and `existing-change`. Label only when the actual route is known from one of those sources. Otherwise leave it `unknown`; never infer or guess it from the recommendation.
 
-Records default to `$DSH_HOME/state/jev-workflow-router/records.v1.jsonl` (falling back to `~/.dsh` only when `DSH_HOME` is unset), remain bounded and local, and are not conversation context. `summary` emits aggregate counts only. `report` emits only a versioned aggregate confusion/cost/coverage/latency/usage report; language and external cost remain explicitly unavailable rather than being inferred. `clear` explicitly removes recorded samples.
+Records default to `$DSH_HOME/state/jev-workflow-router/records.v1.jsonl` (falling back to `~/.dsh` only when `DSH_HOME` is unset), remain bounded and local, and are not conversation context. New writes use schema v2; legacy schema-v1 records remain readable with unknown provenance and measured latency only when their old positive latency value proves it. Reading never backfills historical facts; a later label/retention write serializes the conservative projection as v2. `summary` emits aggregate counts only. `report` emits only a versioned aggregate confusion/cost/provenance/coverage/latency/usage report and contains no language field or quota. External cost remains explicitly unavailable until separately accepted. `clear` explicitly removes recorded samples.

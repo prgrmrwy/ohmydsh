@@ -347,12 +347,13 @@ test('table-driven English and Chinese fixtures preserve actual route and conser
         // actual route is associated only afterward from authoritative facts.
         actualRoute: fixture.recommendation,
         overrideSource: 'recommendation',
+        sampleProvenance: 'synthetic-fixture',
         features: fixture.features,
         eligibleCandidates: eligible,
         recommendation: recommendation(fixture.recommendation, eligible, {
           safetyCompatible: fixture.safetyCompatible,
         }),
-        metrics: { latencyMs: 5, usage: { input: 1, output: 1, total: 2 } },
+        metrics: { latency: { availability: 'measured', milliseconds: 5 }, usage: { input: 1, output: 1, total: 2 } },
         errorCategory: 'none',
       }
       const recorded = await runRecorder(home, ['record'], primaryInput)
@@ -362,6 +363,7 @@ test('table-driven English and Chinese fixtures preserve actual route and conser
 
       assert.ok(record)
       assert.deepEqual(record.eligibleCandidates, eligible)
+      assert.equal(record.sampleProvenance, 'synthetic-fixture')
       assert.equal(record.actualRoute, 'unknown')
       assert.equal(record.overrideSource, 'unknown')
       assert.equal(record.recommendation.status, fixture.expectedStatus)
@@ -384,10 +386,11 @@ test('table-driven English and Chinese fixtures preserve actual route and conser
         candidate !== authority.route && candidate !== fixture.recommendation
       )) ?? (authority.route === 'direct' ? 'standard-openspec' : 'direct')
       const counterfactual = await runRecorder(home, ['record'], {
+        sampleProvenance: 'synthetic-fixture',
         features: fixture.features,
         eligibleCandidates: eligible,
         recommendation: recommendation(counterfactualChoice, eligible),
-        metrics: { latencyMs: 5, usage: { input: 1, output: 1, total: 2 } },
+        metrics: { latency: { availability: 'measured', milliseconds: 5 }, usage: { input: 1, output: 1, total: 2 } },
         errorCategory: 'none',
       })
       assert.equal(counterfactual.code, 0, counterfactual.stderr)

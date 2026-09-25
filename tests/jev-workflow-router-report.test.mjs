@@ -33,11 +33,12 @@ function features(extra = {}) {
   return { intent: 'feature', scope: 'single-module', behaviorChange: true, persistence: false, concurrency: false, existingChange: false, safetyGateConflict: false, externalSystems: 0, safetyRisk: 'low', migrationRisk: 'none', explicitRoute: 'unknown', ...extra }
 }
 
-async function add(home, { actual, recommended, status, errorCategory = 'none', latencyMs, usage, feature = {} }) {
+async function add(home, { actual, recommended, status, errorCategory = 'none', latencyMs, usage, feature = {}, sampleProvenance = 'real-vibe' }) {
   const output = run(home, ['record'], {
+    sampleProvenance,
     features: features(feature), eligibleCandidates: ROUTES,
     recommendation: recommendation(recommended, status),
-    metrics: { latencyMs, usage }, errorCategory,
+    metrics: { latency: latencyMs === undefined ? undefined : { availability: latencyMs === null ? 'unavailable' : 'measured', milliseconds: latencyMs }, usage }, errorCategory,
     rawProviderError: 'SECRET https://private.example user@example.com /private/path',
   })
   if (actual) run(home, ['label', output.observationId, actual, feature.existingChange ? 'existing-change' : feature.explicitRoute && feature.explicitRoute !== 'unknown' ? 'user-explicit' : 'agent'])
@@ -58,18 +59,35 @@ test('report emits aggregate confusion, cost, reliability, latency and coverage 
   assert.equal(report.recommendations.confusionMatrix.counts.anvil['spec-superflow'], 1)
   assert.equal(report.cost.weightedTotal, 28); assert.equal(report.cost.weightedPerLabelled, 5.6); assert.equal(report.cost.highCostMisses, 2)
   assert.equal(report.cost.needsReviewCost, 0); assert.equal(report.quality.needsReviewRate, 1 / 6); assert.equal(report.quality.providerFailureRate, 1 / 6)
-  assert.deepEqual(report.quality.latencyMs, { method: 'nearest-rank', p50: 30, p95: 60 })
+  assert.deepEqual(report.quality.latencyMs, { method: 'complete-shadow-sequence-monotonic-nearest-rank', measuredCount: 6, unavailableCount: 0, p50: 30, p95: 60 })
   assert.deepEqual(report.quality.usage.totals, { input: 42, output: 48, total: 90 })
   assert.equal(report.quality.estimatedExternalCost, null)
-  assert.equal(report.dataset.languageProxy.availability, 'unavailable')
+  assert.equal('languageProxy' in report.dataset, false)
+  assert.equal(JSON.stringify(report).includes('language'), false)
+  assert.deepEqual(report.dataset.provenance, { 'real-vibe': 6, 'synthetic-fixture': 0, unknown: 0 })
   assert.equal(report.coverage.phase2Admission, 'not-established')
-  assert.ok(report.coverage.warnings.some(w => w.code === 'language-coverage-unavailable'))
+  assert.equal(report.coverage.gates.explicitUserApproval.status, 'unavailable')
+  assert.notEqual(report.coverage.gates.labelledObservations.status, 'unavailable')
   assert.ok(report.coverage.warnings.some(w => w.code === 'weighted-cost-above-threshold'))
   assert.ok(!report.coverage.warnings.some(w => w.code === 'needs-review-rate-above-threshold'))
   assert.ok(report.coverage.warnings.some(w => w.code === 'provider-failure-rate-above-threshold'))
   assert.ok(report.coverage.warnings.some(w => w.code === 'high-cost-misses-present'))
   const text = JSON.stringify(report)
   assert.doesNotMatch(text, /SECRET|private\.example|user@example|private\/path|observationId|recordedAt/)
+})
+
+test('synthetic fixtures never contribute to real-vibe admission metrics', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'jev-report-provenance-')); t.after(() => rm(home, { recursive: true, force: true }))
+  await add(home, { actual: 'anvil', recommended: 'direct', latencyMs: 1, usage: {}, sampleProvenance: 'synthetic-fixture', feature: { intent: 'security', safetyRisk: 'high' } })
+  const report = run(home, ['report'])
+  assert.deepEqual(report.dataset.provenance, { 'real-vibe': 0, 'synthetic-fixture': 1, unknown: 0 })
+  assert.deepEqual(report.dataset.realVibe, { total: 0, labelled: 0, unknownLabels: 0 })
+  assert.equal(report.cost.weightedTotal, 0)
+  assert.equal(report.cost.highCostMisses, 0)
+  assert.equal(report.quality.needsReviewRate, null)
+  assert.equal(report.coverage.gates.labelledObservations.status, 'fail')
+  assert.equal(report.coverage.gates.needsReviewRate.status, 'unavailable')
+  assert.ok(report.coverage.warnings.some(w => w.code === 'real-vibe-coverage-unavailable'))
 })
 
 test('quality warnings include needs-review threshold breaches', async t => {
@@ -104,11 +122,11 @@ test('every pre-registered misroute cost row is reachable with deterministic pre
   ])
 })
 
-test('zero placeholder latency remains unavailable rather than claiming 0ms', async t => {
+test('explicit unavailable latency remains unavailable rather than claiming 0ms', async t => {
   const home = await mkdtemp(join(tmpdir(), 'jev-report-no-latency-')); t.after(() => rm(home, { recursive: true, force: true }))
-  await add(home, { actual: 'standard-openspec', recommended: 'standard-openspec', latencyMs: 0, usage: {} })
+  await add(home, { actual: 'standard-openspec', recommended: 'standard-openspec', latencyMs: null, usage: {} })
   const report = run(home, ['report'])
-  assert.deepEqual(report.quality.latencyMs, { method: 'nearest-rank', p50: null, p95: null })
+  assert.deepEqual(report.quality.latencyMs, { method: 'complete-shadow-sequence-monotonic-nearest-rank', measuredCount: 0, unavailableCount: 1, p50: null, p95: null })
   assert.ok(report.coverage.warnings.some(w => w.code === 'latency-coverage-unavailable'))
 })
 
@@ -116,6 +134,9 @@ test('empty and corrupt record sets produce a valid conservative report', async 
   const home = await mkdtemp(join(tmpdir(), 'jev-report-empty-')); t.after(() => rm(home, { recursive: true, force: true }))
   let report = run(home, ['report'])
   assert.equal(report.dataset.total, 0); assert.equal(report.cost.weightedPerLabelled, null); assert.equal(report.quality.latencyMs.p50, null)
+  assert.equal(report.coverage.gates.externalCostAccepted.status, 'unavailable')
+  assert.equal(report.coverage.gates.privacyAndIntegrationEvidence.status, 'unavailable')
+  assert.equal(report.coverage.gates.explicitUserApproval.status, 'unavailable')
   const file = join(home, 'state', 'jev-workflow-router', 'records.v1.jsonl')
   await mkdir(join(home, 'state', 'jev-workflow-router'), { recursive: true })
   await writeFile(file, '{bad json}\n')
