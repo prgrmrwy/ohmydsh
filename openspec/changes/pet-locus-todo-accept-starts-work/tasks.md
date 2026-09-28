@@ -48,7 +48,7 @@
 ## 7. 路由与投递回执（D9）
 
 - [ ] 7.1 写失败测试 `todoAction accept returns a dispatch outcome`、`done and drop return no dispatch field`、`reread todo carries no dispatch outcome`（test-plan 第 16–18 行）
-- [ ] 7.2 扩展 `routes.ts:112` 的 `todoLedger` 依赖面与 `LOCUS_ROUTES.todoAction`（`routes.ts:763`），返回 `PetTodoView` + 独立的 `dispatch` 回执；保持 `todoLedger` 整体可选（缺失时 `LOCUS_UNAVAILABLE` 行为不变）
+- [ ] 7.2 扩展 `routes.ts:112` 的 `todoLedger` 依赖面与 `LOCUS_ROUTES.todoAction`（`routes.ts:763`），返回 `PetTodoView` + 独立的 `dispatch` 回执（含已投递时的 `executionTarget`，供 D11 导航直接取用）；保持 `todoLedger` 整体可选（缺失时 `LOCUS_UNAVAILABLE` 行为不变）
 - [ ] 7.3 重构；确认回执不被持久化到待办行
 
 ## 8. 子会话请求执行工具（D10）
@@ -66,11 +66,16 @@
 
 ## 9. 管理面（Web）
 
-- [ ] 9.1 写失败测试 `accept hint states it dispatches to the main session`（test-plan 第 32 行）
-- [ ] 9.2 更新 `settings.tsx:2536` 的 `TODO_ACTION_HINTS.accept`：同时说明会向主会话投递跟进任务（新）与不发送任何飞书消息（旧，仍成立）
-- [ ] 9.3 写失败测试 `queued outcome renders as queued not completed`（test-plan 第 21 行）
+- [ ] 9.1 写失败测试 `accept hint states dispatch and navigation`
+- [ ] 9.2 更新 `settings.tsx:2536` 的 `TODO_ACTION_HINTS.accept`：说明会投递跟进任务、开始处理并转到执行目标会话，同时保留"不发送任何飞书消息"（旧，仍成立）
+- [ ] 9.3 写失败测试 `queued outcome renders as queued not completed`
 - [ ] 9.4 `useTodoLedger.dispatch`（`settings.tsx:2351`）承接投递回执并作为一次性 notice 呈现；失败时就地显示原因并保持该行待处理
-- [ ] 9.5 重构；确认不从行状态反推是否已投递
+- [ ] 9.5 写失败测试 `successful accept opens the resolved execution target` 与 `failed accept stays put and shows the reason`；断言 `sessionOpener` 被以**回执里的 `executionTarget.sessionId`** 调用，不可断言"等于 parentSessionId"（那会把 D3 消除的硬编码写回测试）
+- [ ] 9.6 实现受理成功后的导航（D11）：用 `sessionOpener` 的 `kind: 'session'` 形态打开回执给出的执行目标并 `closeSettings`。**不可复用 `:2470-2477` 那段** —— 它开的是 `kind: 'subagent'`（登记待办的子会话），与投递目标不是同一个会话
+- [ ] 9.7 写失败测试 `queued outcome survives the navigation`；实现使结局回执以不随面板关闭而消失的形式呈现（D11 解 M1：导航不得吞掉 `dispatched`/`queued` 的区分）
+- [ ] 9.8 写失败测试 `accept succeeds without a session opener`；实现接缝缺失时正常完成受理、不导航、就地保留回执（`sessionOpener`/`closeSettings` 均为可选注入，见 `:2764-2790`）
+- [ ] 9.9 写失败测试 `request-execution returns no navigation instruction`（Host 侧断言，非组件交互）；确认工具路径返回值不含导航指令且不触达 GUI 接缝
+- [ ] 9.10 重构；确认不从行状态反推是否已投递
 
 ## 10. 既有不变量回归
 
@@ -81,12 +86,13 @@
 
 ## 11. 验证与物化
 
-- [ ] 11.1 确认 test-plan.md 全部 36 行已由 🔴 翻为 🟢
+- [ ] 11.1 确认 test-plan.md 全部 41 行已由 🔴 翻为 🟢
 - [ ] 11.2 在 `packages/dsh-pet/` 内运行独立 build、typecheck 与 test
 - [ ] 11.3 运行仓库级 `npm test`
 - [ ] 11.4 运行 `npm run check:artifacts`
 - [ ] 11.5 运行 `node scripts/sync.mjs`，确认连续第二次运行不产生变化（幂等）
 - [ ] 11.6 确认 `~/.dsh/profiles/web/node_modules/dsh-pet/lib/client.js` 已含新文案（仅改 `src/` 不影响当前 GUI，B043 记录过同一陷阱）
-- [ ] 11.7 真机验收：对一条真实待办点击受理，确认主会话收到带上下文的跟进任务、在途工作未被打断、回执与实际结果一致
-- [ ] 11.8 真机验收：子会话经新工具请求执行，确认与按钮路径产生同构正文与同样结局
-- [ ] 11.9 把 1.1 的核验结论回写 design.md，并就剩余 Open Question（受理后是否自动打开目标会话）向所有者确认后定稿
+- [ ] 11.7 真机验收：对一条真实待办点击受理，确认主会话收到带上下文的跟进任务、界面转到该会话、在途工作未被打断
+- [ ] 11.8 真机验收：子会话经新工具请求执行，确认与按钮路径产生同构正文与同样结局，且不发生界面导航
+- [ ] 11.9 真机验收失败路径：构造一个不可达目标，确认受理失败、状态仍为待处理、界面留在原地并显示原因
+- [ ] 11.10 把 1.1 的核验结论回写 design.md（design 的 Open Questions 已清空，无待确认项）
