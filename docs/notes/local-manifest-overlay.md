@@ -58,7 +58,7 @@ overlay 文件所在目录就是它的**所属根**（`dirname(realpath(overlay 
 的源码一律从所属根取，布局与公开仓库同构：
 
 ```text
-<R>/                      # 私有仓库根，例如 ~/.dsh-local
+<R>/                      # 私有仓库根，例如与公开仓库并列的 ~/opensource/<private-repo>
 ├── dsh.yaml              # overlay 本体（私有根里不必叫 .local；DSH_LOCAL_MANIFEST 指向它）
 ├── package.json          # workspaces: ["packages/*"]，有自己的 lockfile
 ├── package-lock.json
@@ -84,14 +84,19 @@ overlay 文件所在目录就是它的**所属根**（`dirname(realpath(overlay 
 相对路径会被拒绝（sync 报错，启动清单降级并在 stderr 提示）。每台机器：
 
 ```bash
-git clone <private-repo-url> ~/.dsh-local
-(cd ~/.dsh-local && npm ci)                 # 私有 package 的构建依赖
+git clone <private-repo-url> ~/opensource/<private-repo>
+(cd ~/opensource/<private-repo> && npm ci) # 私有 package 的构建依赖
 # 公开仓库根 .env.local（gitignored，bin/dsh 会 source 它）加一行：
-echo "export DSH_LOCAL_MANIFEST=$HOME/.dsh-local/dsh.yaml" >> .env.local
+echo "export DSH_LOCAL_MANIFEST=$HOME/opensource/<private-repo>/dsh.yaml" >> .env.local
 # 若 overlay 条目声明了 npmScopes，给 profile 配好 scope registry（sync 不会替你写）：
 echo "@example:registry=https://registry.example.com/" >> ~/.dsh/profiles/web/.npmrc
 dsh build
 ```
+
+**挪动私有仓库位置。** 改 `.env.local` 的 `DSH_LOCAL_MANIFEST` 后，sync 会把 profile
+`package.json` 里的 `file:` 路径改成新位置，但 profile 的 `pnpm-lock.yaml` 仍记着旧路径，刷新
+时 pnpm 按旧路径 scandir 报 `ENOENT`，sync 回滚并失败。处理：临时建旧路径 → 新路径的符号链接，
+跑一次 `dsh build` 让 pnpm 改写 lockfile，再删掉链接并连跑两次确认幂等。
 
 `git pull` 私有仓库后重新 `dsh build` 即可在各机器保持一致。**不要**指望
 cockpit/联邦分发 overlay——联邦控制面明确声明「不同步文件」，且其设计前提是远端保持
