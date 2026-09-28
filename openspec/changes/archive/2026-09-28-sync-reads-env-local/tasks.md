@@ -23,5 +23,5 @@
 ## 4. 文档与收尾
 
 - [x] 4.1 更新 `docs/notes/local-manifest-overlay.md` 与 `.env.local.example` 注释。
-- [ ] 4.2 在主 checkout 裸跑 `node scripts/sync.mjs` 两次（不 source），确认 overlay 包保留、第二次无变化。
+- [x] 4.2 在主 checkout 裸跑 `node scripts/sync.mjs` 两次（不 source），确认 overlay 包保留、第二次无变化。
 - [x] 4.3 运行 `openspec validate sync-reads-env-local --strict`。
