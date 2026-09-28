@@ -1,57 +1,92 @@
-## 1. 前置核验（写代码前必须完成）
+## 1. 前置核验（写码前完成，结论回写 design）
 
-- [ ] 1.1 核验 `qa-created` 来源的 main 是否也带 standby 开场简报：读 `host/locus/controller.ts:730,909` 的 QA 建群路径，确认其 main 是新建还是复用、是否调用 `composeLocusMainBriefing`；结论写回 design.md 的 Open Question 3，不从 `auto` 分支推断（design D4 第 6 条依赖该事实）
-- [ ] 1.2 核验 Host 侧能从待办拿到其 locus 的 `mainSource`：确认 `locusRepository` 有按 `parentSessionId` 或 `locusId` 反查 `mainSource` 的既有读法，若无则确定最小新增读取面，不新增持久字段（design D7）
-- [ ] 1.3 核验 `ctx.agents.get(sessionId)` 返回的 handle 上 `status` 与 `followup` 的实际可达路径（参考 `index.ts:672` 的 `liveAgentScope` 与 `:1535` 的 executor 投递），确认判忙与投递可在同一处完成
-- [ ] 1.4 核验 `ctx.agents.resume` 在 Pet Host 内的既有调用形态（`index.ts:1479`）所需的最小参数，确认冷恢复一个**非 Pet 自建**的主会话不需要 Pet 专属 setup；若需要，记录约束并据此收敛 D5 的"目标可达"判据
+- [ ] 1.1 核验 Host 能否判定"某主会话是否被 brief 过 standby"：若无直接记录，确认 `mainSource === 'auto'` 是当前唯一等价判据，并在实现注释中写明它是代理指标（design D4）
+- [ ] 1.2 核验 `ctx.agents.get(sessionId)` 返回句柄上 `status` 与 `followup` 的实际可达路径（参考 `index.ts:672` 的 `liveAgentScope`、`:1535` 的 executor 投递），确认判忙与投递可在同一处完成
+- [ ] 1.3 核验 `ctx.agents.resume` 冷恢复一个**非 Pet 自建**主会话所需的最小参数（参考 `index.ts:1479`），确认不需要 Pet 专属 setup；若需要，据此收敛 D9 的 `unreachable` 判据
+- [ ] 1.4 核验新工具在 `composition.ts` 白名单与 `attestLocusComposition` 下的注册方式，确认与 `pet_locus_track`（`composition.ts:54`）同层
 
-## 2. Host：跟进正文组装（纯函数，先于副作用）
+## 2. 共享测试脚手架（先于一切实现）
 
-- [ ] 2.1 在 `src/host/ledger/` 下新增跟进正文组装纯函数（与 `host/locus/dsh-port.ts:176` 的 `composeLocusMainBriefing` 独立，不复用其文案，理由见 design D4）
-- [ ] 2.2 正文包含 design D4 列举的 1–5 项：待办标识、请求人、登记时间、来源入口、证据摘要（明确标注为登记时刻快照）、先读上下文再推进的行动指引、可用查证路径
-- [ ] 2.3 正文按 `mainSource` 分支追加 D4 第 6 条：auto（及 1.1 核验为同类的来源）时声明这是所有者发起的真实任务、待命状态到此结束；按 D4 措辞纪律，写成"待命状态结束"而非"解除约束"或"忽略之前的指令"
-- [ ] 2.4 为该纯函数写单测：覆盖 auto 分支含待命结束声明、explicit 分支不含、证据被标注为登记时快照、正文不含任何 selector 或飞书出站意味的措辞
+- [ ] 2.1 在 `packages/dsh-pet/test/todo-dispatch.test.ts` 建立假 `TodoDispatchPort`，记录 `resolve`/`resume`/`followup` 的**调用序列**（不只是结果）——"投递前被拒"类断言依赖"端口从未被调用"，只看返回值无法区分拒绝时机
+- [ ] 2.2 建立待办 fixture 工厂，可构造 `open`/`accepted`/`done`/`dropped` 四种状态及含恶意证据的变体
 
-## 3. Host：受理即投递
+## 3. 执行目标解析（D3）
 
-- [ ] 3.1 在 `index.ts:3204` 的 `todoLedger.advance` 处，把 `accept` 分支与 `done`/`drop` 分支分离：后两者维持现有纯状态推进，不触碰投递
-- [ ] 3.2 实现 `accept` 的执行次序（design D5）：解析 `parentSessionId` → 判目标可达（未加载则 `resume`）→ `followup` 投递 → 再调 `advanceStatus` 置 `accepted`
-- [ ] 3.3 目标不可达（归档/无法恢复/归属不可证明）时拒绝受理，抛出可被路由层映射为就地说明的错误，状态保持 `open`，MUST NOT 猜测替代目标
-- [ ] 3.4 投递成功但 `advanceStatus` 失败的残留窗口记结构化日志（design D5 残留窗口），不做自动补偿
-- [ ] 3.5 用 `followup` 而非 `steer`/`inject`（design D2）；目标 `running` 时不做任何额外等待或打断，直接依赖 `followup` 的队列语义
-- [ ] 3.6 扩展 `host/routes.ts:112` 的 `todoLedger` 依赖面与 `LOCUS_ROUTES.todoAction`（`routes.ts:763`）的返回值，使其携带投递结果事实（已投递 / 已排队 / 不可达），保持 `todoLedger` 整体仍为可选（缺失时 `LOCUS_UNAVAILABLE` 行为不变）
+- [ ] 3.1 写失败测试 `dispatch never targets the child nor mutates permission`（test-plan 第 10 行），断言解析结果为主会话且无任何权限档位写入；确认因解析函数不存在而失败
+- [ ] 3.2 实现执行目标解析纯函数：输入待办已固定的归属事实，输出执行目标；本期唯一规则为"登记方无执行能力 → 转交主会话"，零 selector，不可证明时 fail closed
+- [ ] 3.3 重构：确认解析不被任何调用方旁路，全量套件保持绿
 
-## 4. Host：状态机与不变量
+## 4. 跟进正文组装（D4 + D8）
 
-- [ ] 4.1 更新 `host/ledger/todo.ts` 中 `accepted` 的语义注释与 `TODO_STATUS_TRANSITIONS` 附近的文档（状态机转换表本身不变，`accepted: ['done','dropped']` 保持）
-- [ ] 4.2 更新 `host/ledger/store.ts:184-190` `advanceStatus` 的文档：说明它仍是纯状态推进，投递由调用方在其之前完成，两者不在同一事务（design D5）
-- [ ] 4.3 确认并用测试固定：受理路径不产生任何飞书出站正文、表情或 Delivery（`pet-locus-intent-triage` spec.md:141 的不变量）
-- [ ] 4.4 确认并用测试固定：模型仍不能经任何工具改写待办状态（D8 授权分界不变）
-- [ ] 4.5 确认并用测试固定：受理路径不改变任何 locus 的生效权限档位，也不向子会话投递——跟进只落在主会话（`pet-locus-collaboration` spec.md:221-231 的默认 read 与全局写档开关不被绕过）
+- [ ] 4.1 写失败测试：`body states itemId requester time endpoint and evidence`、`body marks evidence as registration-time snapshot`（test-plan 第 2–3 行）
+- [ ] 4.2 实现正文组装纯函数（独立于 `composeLocusMainBriefing`，不复用其文案——两者意图相反）
+- [ ] 4.3 写失败测试：`evidence is final section with no trailing host text`、`evidence section has start marker and no end marker`、`body declares evidence as third-party input`（test-plan 第 4、5、7 行）
+- [ ] 4.4 实现指令段/证据段结构：证据为正文最后一段、其后无任何 Host 文本、只有起始标记无结束标记、全文至多一个证据段
+- [ ] 4.5 写失败测试 `forged delimiter stays inside the evidence section`（test-plan 第 6 行），用例覆盖伪造起始标记、Markdown 代码围栏、形似段落结束的文本；**断言对象是"文本仍位于末段内且指令段字节不变"，不是"模型没有照做"**（D8 三层定位）
+- [ ] 4.6 实现使上述用例通过；`requestedBy` 来自 `senderOpenId`（`track.ts:71`）为平台事实，留在指令段
+- [ ] 4.7 写失败测试 `briefed main is told standby has ended` 与 `never-briefed main omits the standby-ended sentence`（test-plan 第 8–9 行）
+- [ ] 4.8 实现待命结束声明的条件分支，判据用 1.1 的结论；措辞写"待命状态到此结束"，不写"解除约束"或"忽略之前的指令"（D4 措辞纪律）
+- [ ] 4.9 重构正文组装；全量套件保持绿
 
-## 5. Web：管理面
+## 5. 投递端口与结局映射（D9）
 
-- [ ] 5.1 更新 `client/settings.tsx:2536` 的 `TODO_ACTION_HINTS.accept`：同时说明会向主会话投递跟进任务并开始处理（新）与不发送任何飞书消息（旧，仍成立）
-- [ ] 5.2 复核 `TODO_ACTION_LABELS.accept` 的「受理」字面是否仍与新语义相符；若改则同步 `client/ledger-view.ts:113` 的状态标签一致性
-- [ ] 5.3 `useTodoLedger.dispatch`（`settings.tsx:2351`）承接 3.6 的投递结果，作为一次性 notice 呈现（design D6：不做成从行状态反推的持久标签）
-- [ ] 5.4 受理失败时就地显示原因并保持该行仍为待处理，沿用既有"Host 拒绝时状态不被乐观改写"的重读策略
-- [ ] 5.5 存量 `accepted` 行：就地说明其无法经受理触发投递（Migration Plan 第 2 点），不让所有者反复点一个必然失败的按钮
+- [ ] 5.1 写失败测试 `unloaded target resumes before dispatch`、`running target yields queued via followup not steer`（test-plan 第 19–20 行）
+- [ ] 5.2 实现窄 `TodoDispatchPort { resolve, resume, followup }`，映射到 `agents.get`/`status`、`agents.resume`、`AgentHandle.followup`；**用 `followup` 而非 `steer`/`inject`**（D2）
+- [ ] 5.3 实现 D9 的五条结局映射；`dispatched` 与 `queued` 的区分取自投递**前**读到的 `status`，不取自投递返回值
+- [ ] 5.4 重构；确认五条路径均可经假端口离线构造
 
-## 6. 测试
+## 6. 受理动作：状态闸门与投递次序（D5）
 
-- [ ] 6.1 扩展 `test/ledger-todo.test.ts`：`accepted` 语义相关的状态机断言与新注释一致
-- [ ] 6.2 扩展 `test/ledger-store.test.ts`：`advanceStatus` 仍为纯状态推进，不因本 change 获得副作用
-- [ ] 6.3 新增受理投递测试：覆盖 delta spec 的全部 scenario——置状态并投递、正文携带上下文、证据标注为快照、auto 主会话待命状态结束、跟进不投给只读子会话也不提权、目标不可达不置已受理、受理不外发飞书、目标忙碌排队不打断、目标未加载先恢复、已排队不等于已处理、不经受理直接了结不投递
-- [ ] 6.4 扩展 `test/locus-routes.test.ts` 或 `test/routes.test.ts`：`todoAction` 路由返回投递结果事实，且 `todoLedger` 缺失时仍 `LOCUS_UNAVAILABLE`
-- [ ] 6.5 扩展 `test/ledger-panel-render.test.ts` / `test/client.test.ts`：受理动作 hint 自述会开工；存量 `accepted` 不被呈现为已投递
-- [ ] 6.6 确认 `test/ledger-delivery-decoupling.test.ts` 的既有断言未被本 change 破坏（登记与 Delivery 结算解耦仍成立）
+- [ ] 6.1 写失败测试 `terminal todo rejects accept before the dispatch port is called` 与 `accepted todo rejects a second accept without dispatching`（test-plan 第 13–14 行），断言假端口零调用
+- [ ] 6.2 实现**第 0 步前置状态闸门**：投递前读取待办，非 `open` 一律拒绝（design D5 的 blocking 修复，不可省）
+- [ ] 6.3 写失败测试 `accept dispatches then advances to accepted`、`unreachable target leaves the todo open`、`accept retry succeeds after a dispatch failure`（test-plan 第 1、11、12 行）
+- [ ] 6.4 在 `index.ts:3204` 的 `todoLedger.advance` 中分离 `accept` 分支：闸门 → 解析 → 投递 → **成功后**才 `advanceStatus`；失败不写任何状态，不引入 `accepted → open` 边
+- [ ] 6.5 保持 `done`/`drop` 分支为纯状态推进；写失败测试 `done and drop from open never dispatch`（test-plan 第 31 行）
+- [ ] 6.6 投递成功但 `advanceStatus` 失败的分支记结构化日志，不自动重投（D5 残留窗口）
+- [ ] 6.7 重构；全量套件保持绿
 
-## 7. 验证与物化
+## 7. 路由与投递回执（D9）
 
-- [ ] 7.1 运行 `npm test`（仓库级）
-- [ ] 7.2 在 `packages/dsh-pet/` 内运行其独立的 build、typecheck 与 test
-- [ ] 7.3 运行 `npm run check:artifacts`
-- [ ] 7.4 运行 `node scripts/sync.mjs`，并确认连续第二次运行不产生变化（幂等）
-- [ ] 7.5 确认 `~/.dsh/profiles/web/node_modules/dsh-pet/lib/client.js` 已包含新文案（仅改 `src/` 不影响当前 GUI，见 B043 记录的同一陷阱）
-- [ ] 7.6 真机验收：对一条真实待办点击受理，确认主会话收到带上下文的跟进任务、在途工作未被打断、管理面回执与实际结果一致
-- [ ] 7.7 把 1.1 的核验结论与 6.3 的实测结果回写 design.md 的 Open Questions，并就 Open Question 1（存量 accepted 补投递）与 2（受理后是否自动打开目标会话）向所有者确认后定稿
+- [ ] 7.1 写失败测试 `todoAction accept returns a dispatch outcome`、`done and drop return no dispatch field`、`reread todo carries no dispatch outcome`（test-plan 第 16–18 行）
+- [ ] 7.2 扩展 `routes.ts:112` 的 `todoLedger` 依赖面与 `LOCUS_ROUTES.todoAction`（`routes.ts:763`），返回 `PetTodoView` + 独立的 `dispatch` 回执；保持 `todoLedger` 整体可选（缺失时 `LOCUS_UNAVAILABLE` 行为不变）
+- [ ] 7.3 重构；确认回执不被持久化到待办行
+
+## 8. 子会话请求执行工具（D10）
+
+- [ ] 8.1 写失败测试 `child request-execution dispatches and marks accepted`（test-plan 第 22 行）
+- [ ] 8.2 实现 caller-bound 工具，沿用 `track.ts:48-83` 的授权形状：零 selector，Host 从 caller 与唯一 current Delivery 解析全部事实，不可证明即拒绝
+- [ ] 8.3 写失败测试 `request-execution rejects any target selector argument`、`foreign todo request-execution is refused`、`request-execution cannot mark done or dropped`（test-plan 第 24–26 行）
+- [ ] 8.4 实现三条拒绝路径；工具**只能**使自己登记的待办进入 `accepted`，且必须伴随一次真实投递
+- [ ] 8.5 写失败测试 `both entry points share resolution body and outcomes`（test-plan 第 23 行），断言两个入口经同一解析、产生同构正文、使用同一组结局
+- [ ] 8.6 确认共用下游链路，不复制任何一段
+- [ ] 8.7 **注册在 executor 的 scoped agent 上下文**并加入 `composition.ts` 白名单；无 scope 会静默落 global 层使普通会话看到该工具（本仓库已实机复现过的陷阱）
+- [ ] 8.8 扩展 `ledger-tool-scope.test.ts`：固定普通会话工具面不变，且 `no model-facing tool can reach done or dropped`（test-plan 第 30 行）
+- [ ] 8.9 更新 `host/ledger/prompt.ts` 的 WORK REQUEST 分支，告知子会话登记后可请求执行；同步 `intentTriageGuidanceCoversRequiredPoints` 的必备短语清单
+- [ ] 8.10 重构；全量套件保持绿
+
+## 9. 管理面（Web）
+
+- [ ] 9.1 写失败测试 `accept hint states it dispatches to the main session`（test-plan 第 32 行）
+- [ ] 9.2 更新 `settings.tsx:2536` 的 `TODO_ACTION_HINTS.accept`：同时说明会向主会话投递跟进任务（新）与不发送任何飞书消息（旧，仍成立）
+- [ ] 9.3 写失败测试 `queued outcome renders as queued not completed`（test-plan 第 21 行）
+- [ ] 9.4 `useTodoLedger.dispatch`（`settings.tsx:2351`）承接投递回执并作为一次性 notice 呈现；失败时就地显示原因并保持该行待处理
+- [ ] 9.5 重构；确认不从行状态反推是否已投递
+
+## 10. 既有不变量回归
+
+- [ ] 10.1 重跑 `ledger-delivery-decoupling.test.ts`：`backlog advances after registration`、`settled delivery leaves the todo open`、`status change emits nothing to Feishu`（test-plan 第 27–29 行）翻绿
+- [ ] 10.2 重跑 `ledger-view.test.ts` 四条跳转场景（test-plan 第 33–36 行）翻绿
+- [ ] 10.3 写失败测试 `accept emits no Feishu body reaction or Delivery`（test-plan 第 15 行）并实现/确认
+- [ ] 10.4 更新 `host/ledger/todo.ts` 与 `store.ts:184-190` 的语义注释：状态机转换表不变，说明投递发生在 `advanceStatus` 之前且两者不在同一事务
+
+## 11. 验证与物化
+
+- [ ] 11.1 确认 test-plan.md 全部 36 行已由 🔴 翻为 🟢
+- [ ] 11.2 在 `packages/dsh-pet/` 内运行独立 build、typecheck 与 test
+- [ ] 11.3 运行仓库级 `npm test`
+- [ ] 11.4 运行 `npm run check:artifacts`
+- [ ] 11.5 运行 `node scripts/sync.mjs`，确认连续第二次运行不产生变化（幂等）
+- [ ] 11.6 确认 `~/.dsh/profiles/web/node_modules/dsh-pet/lib/client.js` 已含新文案（仅改 `src/` 不影响当前 GUI，B043 记录过同一陷阱）
+- [ ] 11.7 真机验收：对一条真实待办点击受理，确认主会话收到带上下文的跟进任务、在途工作未被打断、回执与实际结果一致
+- [ ] 11.8 真机验收：子会话经新工具请求执行，确认与按钮路径产生同构正文与同样结局
+- [ ] 11.9 把 1.1 的核验结论回写 design.md，并就剩余 Open Question（受理后是否自动打开目标会话）向所有者确认后定稿
