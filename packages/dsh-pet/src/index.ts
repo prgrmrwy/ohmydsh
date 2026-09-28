@@ -1698,6 +1698,7 @@ async function initialize(
     && locusChildProbe.ports.subagent.supportsSettlementNotice === true
     && locusChildProbe.ports.subagent.supportsIdleContinuableCreate === true
     && locusChildProbe.ports.subagent.supportsIndependentContinuableCreate === true
+    && locusChildProbe.ports.subagent.supportsIndependentChildAgentPreset === true
     ? {
       create: async (input: {
         parentSessionId: string

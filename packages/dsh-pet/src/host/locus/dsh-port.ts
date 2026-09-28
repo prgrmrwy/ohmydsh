@@ -327,16 +327,10 @@ export function createProductionLocusDshPort(
       // Freeze mutable defaults once so header, setup and runtime selection are
       // one creation decision even if settings hot-reload during setup.
       //
-      // The preset is deliberately Pet's own, not the Host default. A locus
-      // child composes itself from `composedPreset(parent.ctx)`, so whatever is
-      // mounted here becomes the child's composition too. The Host default
-      // (`standard`) registers its delegation rows per agent
-      // (`modelSelectionSettings: true`), which lands `subagent` in the child's
-      // OWN scope — and `LOCUS_SAFE_TOOL_FILTER` only restricts the INHERITED
-      // surface, so no allow-list can remove it. The child could then delegate
-      // to a descendant that keeps the full tool set (bash, lark-cli), which
-      // breaks the single-egress invariant. Pet's executor preset keeps those
-      // rows on the standing layer, where the filter applies.
+      // Pet's own preset, not the Host default, for the main Pet itself
+      // creates. This is not the child's safety pin: the locus child composes
+      // from LOCUS_CHILD_PRESET whatever preset its main runs, which is why an
+      // owner may `/bind` an ordinary `standard` session.
       const presetId = LOCUS_MAIN_PRESET.trim()
       if (presetId === '') {
         throw new LocusDshCapabilityUnavailableError(

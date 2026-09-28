@@ -25,7 +25,7 @@ const root = resolve(here, '../../../..')
 const version = '0.1.5-rc.2'
 const npmVersion = '11.19.0'
 const reviewedCommit = 'fb2c4b9e698e30edb738bca4cf0618587db7d203'
-const subagentPatchSha256 = '41434d244cd509ec82e3a17655e79182e311e2c4ff1e36139eeb8fc98ca376d8'
+const subagentPatchSha256 = '0929b10b6d173257829e6c76f6f6815689a9f98c0c63d15e315a8c2765ed2280'
 /**
  * Published Subagent artifact version. `build.mjs` derives it from the tracked
  * skeleton as `skeleton + 1`, so this must follow the same rule instead of
@@ -108,8 +108,9 @@ function verifyLauncher(directory, fingerprint) {
       'supportsIdleContinuableCreate',
       'supportsLiveContinuableChildSession',
       'supportsIndependentContinuableCreate',
+      'supportsIndependentChildAgentPreset',
       // Host-authored delivery has no `supports*` companion flag — it is
-      // published only as a symbol-keyed method — so the four markers above
+      // published only as a symbol-keyed method — so the five markers above
       // all pass without it. Pet looks the symbol up by exact string and
       // reports `inbox-unavailable` when absent, which then cascades through
       // `idleChildProvisioning` → `locusProvisioning` →

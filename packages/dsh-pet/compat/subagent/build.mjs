@@ -42,7 +42,7 @@ const UPSTREAM = {
   /** Reviewed commit behind dsh-v0.1.5-rc.2; a moved tag/local checkout fails. */
   commit: 'fb2c4b9e698e30edb738bca4cf0618587db7d203',
   /** sha256 of `settlement-notice.patch`, so a silently edited patch fails. */
-  patchSha256: '41434d244cd509ec82e3a17655e79182e311e2c4ff1e36139eeb8fc98ca376d8',
+  patchSha256: '0929b10b6d173257829e6c76f6f6815689a9f98c0c63d15e315a8c2765ed2280',
 }
 
 const run = (command, args, cwd = here, options) => runCompatCommand(command, args, cwd, options)
@@ -188,7 +188,7 @@ const manifest = {
   }`,
   dsh_compat: {
     replaces: `@deepseek-ai/dsh-subagent@${upstreamPkg.version}`,
-    reason: 'adds silent settlement, idle creation, independent-v1 continuable children, and exact continuation-owned child Session access for unified locus',
+    reason: 'adds silent settlement, idle creation, independent-v1 continuable children with a caller-named preset, and exact continuation-owned child Session access for unified locus',
     upstreamTag: UPSTREAM.tag,
     upstreamBase: head,
     patchSha256: UPSTREAM.patchSha256,
@@ -216,6 +216,7 @@ if (!/settlementNotice\s*===\s*["']silent["']/.test(runtimeSource)) {
 if (
   !runtimeSource.includes('supportsSettlementNotice')
   || !runtimeSource.includes('supportsIndependentContinuableCreate')
+  || !runtimeSource.includes('supportsIndependentChildAgentPreset')
 ) {
   fail('built artifact has no structural settlement/independent capability marker; Pet would keep it unavailable')
 }
@@ -248,7 +249,7 @@ if (
   fail('built artifact still requires prior residency for continuation-owned child Session access')
 }
 // Unlike the capabilities above, host-authored delivery is published as a
-// SYMBOL-keyed method with no `supports*` companion flag, so the four marker
+// SYMBOL-keyed method with no `supports*` companion flag, so the five marker
 // checks above all pass without it. `adaptLocusInboxPort` looks up exactly
 // `Symbol.for('dsh.subagent.deliverPrompt')` and returns undefined when it is
 // missing, which Pet reports as `inbox-unavailable` — and that single gap
@@ -281,6 +282,7 @@ if (
   || runtime.supportsIdleContinuableCreate !== true
   || runtime.supportsLiveContinuableChildSession !== true
   || runtime.supportsIndependentContinuableCreate !== true
+  || runtime.supportsIndependentChildAgentPreset !== true
   || typeof runtime.createIdleContinuable !== 'function'
   || typeof runtime.withLiveContinuableChildSession !== 'function'
 ) {

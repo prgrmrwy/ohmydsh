@@ -29,19 +29,30 @@ export type LocusChildComposition = 'safe-v1'
 export const LOCUS_SAFE_CHILD_COMPOSITION: LocusChildComposition = 'safe-v1'
 
 /**
- * The preset every locus main session must be composed from.
+ * The preset every locus CHILD composes from, on creation and on every cold
+ * resume, regardless of the preset its main session runs.
  *
- * Load-bearing for the CHILD's safety, not the main's: a locus child derives
- * its composition from `composedPreset(parent.ctx)`, so the main's preset
- * decides what the child can call. The shipped `standard` preset registers its
- * delegation rows per agent, which lands `subagent` in the child's OWN scope
- * where `LOCUS_SAFE_TOOL_FILTER` — an INHERITED-plane filter — cannot remove
- * it. Production met exactly that: a child delegated to a descendant that kept
- * `bash` and `lark-cli`, breaking the single-egress invariant.
+ * Load-bearing for the single-egress invariant. `LOCUS_SAFE_TOOL_FILTER` only
+ * restricts the INHERITED tool plane; a preset that registers a row per agent
+ * (the shipped `standard` preset does so for `subagent`, via
+ * `modelSelectionSettings: true`) lands that tool in the child's OWN scope,
+ * where no allow-list reaches it. Production met exactly that: a child
+ * delegated to a descendant that kept `bash` and `lark-cli`.
  *
- * Lives here rather than in `dsh-port.ts` because both the creation path and
- * the explicit-bind gate must read one value, and `dsh-port` already imports
- * `controller`, so the constant cannot travel the other way.
+ * Deriving the child's preset from the main tied the child's safety to a value
+ * the owner chooses for their own work, so an explicit `/bind` to an ordinary
+ * `standard` session had to be refused. Naming the child's preset here removes
+ * that coupling: any unarchived main session is bindable, and
+ * `attestLocusComposition` still vetoes publication if the installed surface
+ * ever exceeds the reviewed set.
+ */
+export const LOCUS_CHILD_PRESET = 'dsh-pet-executor'
+
+/**
+ * The preset Pet mounts on a main session IT creates (the auto path).
+ *
+ * Not a safety pin: the child composes from {@link LOCUS_CHILD_PRESET}, and an
+ * owner-bound main may run any preset.
  */
 export const LOCUS_MAIN_PRESET = 'dsh-pet-executor'
 

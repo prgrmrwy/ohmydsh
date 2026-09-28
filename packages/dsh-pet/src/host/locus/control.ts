@@ -159,6 +159,10 @@ function safeControlError(error: unknown): LocusControlDispatchResult {
   if (code === 'LOCUS_STOPPED' || code === 'GROUP_UNAVAILABLE') {
     return failure('stopped', '当前入口已停止，需要所有者显式重建后才能继续。')
   }
+  // The only PARENT_NOT_ALLOWED a control command can reach is "the prefix
+  // resolved to a child session", which the spec requires to read exactly like
+  // no match. Any new refusal under this code needs its own honest receipt —
+  // a preset gate once hid here and made a valid `/bind` look like a typo.
   if (error instanceof LocusControllerError && error.code === 'PARENT_NOT_ALLOWED') {
     return failure('prefix-unresolved', LOCUS_BIND_UNRESOLVED_TEXT)
   }

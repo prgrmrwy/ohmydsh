@@ -562,10 +562,19 @@ Pet 用 `LOCUS_SAFE_TOOL_FILTER` 把 Locus 子会话的继承工具限制为
 
 1. **核对工具面要问「它注册在哪一层」**。名字不在列表里不足以证明被挡住；同包内两个同类
    工具一个被挡一个漏，差别可能只是一个 config 开关。
-2. **给 child 选组合时不要继承 Host 默认或用户可改的 preset**。修复把 locus 主会话固定为
-   Pet 自有的 `dsh-pet-executor`（其委派行没有该开关），不再取 Host 默认；固定值本身也要
-   由测试钉住（断言该 preset 的委派行不得携带 `modelSelectionSettings`，并断言上游 standard
-   仍然携带，说明该固定值是 load-bearing）。
+2. **给 child 选组合时不要继承 Host 默认或用户可改的 preset——包括父会话的 preset**。
+   locus child 的 preset 由 Pet 直接指定（`LOCUS_CHILD_PRESET = dsh-pet-executor`，经
+   compat `ContinuableStartSpec.agentPreset` 传入，冷恢复从 descriptor 读回），不从主会话
+   派生。固定值本身由测试钉住（断言该 preset 的委派行不得携带 `modelSelectionSettings`，并
+   断言上游 standard 仍然携带，说明该固定值是 load-bearing）。
+
+   **反例（2026-09-23 → 修正）**：第一版修复把 locus **主会话**固定为 `dsh-pet-executor`，
+   让 child 通过 `composedPreset(parent.ctx)` 间接拿到它，再在 `/bind` 加「主会话必须跑
+   该 preset」的门。结果用户 `/bind` 自己的 `standard` 会话被拒，而 control 层把这个拒绝
+   映射成「没有匹配到唯一的会话」——一条合法绑定看起来像是前缀打错了。把安全前提挂在
+   用户可选的值上，只能靠拒绝用户来维持；应该把前提挪到 Pet 自己能决定的位置。同一轮还
+   发现两条冷恢复路径根本没把 descriptor 里的 preset 传给 `materialize`，独立子代重启后
+   实际走的是 `composeFrom(parent)`——「持久化了」不等于「恢复时用了」。
 3. **委派是一等逃逸面**。child 只要能派生后代，白名单就必须覆盖后代——而机制上做不到，
    所以正确做法是让 child **根本拿不到委派工具**，不要靠 prompt 禁止（prompt 从不是边界）。
 4. **单测要把被禁工具注册在正确的层**。既有用例把 forbidden 工具全注册在 global 层，

@@ -15,6 +15,7 @@ import {
   type LocusParentPort,
   type LocusSubagentPort,
 } from '../src/host/locus/child.js'
+import { LOCUS_CHILD_PRESET } from '../src/host/locus/aggregate.js'
 
 
 const PARENT_ID = 'session-parent'
@@ -52,6 +53,7 @@ function subagentPort(
   options: {
     readonly supportsSettlementNotice?: boolean
     readonly supportsIndependentContinuableCreate?: boolean
+    readonly supportsIndependentChildAgentPreset?: boolean
     /**
      * Whether `getProvider(LOCUS_CHILD_PROVIDER)` proves independence, exactly
      * as the real `spawn` provider does (`inheritsParentContext: false`).
@@ -66,6 +68,7 @@ function subagentPort(
     startContinuable: vi.fn(start),
     supportsSettlementNotice: options.supportsSettlementNotice ?? true,
     supportsIndependentContinuableCreate: options.supportsIndependentContinuableCreate ?? true,
+    supportsIndependentChildAgentPreset: options.supportsIndependentChildAgentPreset ?? true,
     getProvider: vi.fn((name: string) =>
       proven && name === LOCUS_CHILD_PROVIDER ? { inheritsParentContext: false } : undefined),
   }
@@ -338,9 +341,34 @@ describe('generic locus child adapter', () => {
       parent: parent(),
       settlementNotice: 'silent',
       contextMode: 'independent-v1',
+      // Pet names the child's preset; the main's own preset never reaches it.
+      agentPreset: LOCUS_CHILD_PRESET,
       toolFilter: LOCUS_SAFE_TOOL_FILTER,
       signal: expect.any(AbortSignal),
     })
+  })
+
+  it('refuses idle creation when the runtime cannot honor an explicit child preset', async () => {
+    // Without the marker the runtime would ignore `agentPreset` and compose
+    // the child from whatever preset the main runs — a `standard` main would
+    // then hand the child an own-scope `subagent` no filter can remove.
+    const createIdleContinuable = vi.fn(async (spec: { childId: string }) => ({ childId: SessionId(spec.childId) }))
+    const adapter = createLocusChildAdapter({
+      parent: parentPort({ resident: parent() }),
+      subagent: {
+        ...subagentPort(undefined, { supportsIndependentChildAgentPreset: false }),
+        createIdleContinuable,
+        supportsIdleContinuableCreate: true,
+      },
+      inbox: inboxPort(),
+    })
+
+    await expect(adapter.createIdleChild({
+      parentSessionId: PARENT_ID,
+      childId: CHILD_ID,
+      label: 'unsafe locus child',
+    })).resolves.toEqual({ ok: false, reason: 'safe-composition-unsupported' })
+    expect(createIdleContinuable).not.toHaveBeenCalled()
   })
 
   it('safe composition is allow-based, excludes every process/delegation bypass, and keeps scoped Pet tools out of the filter', () => {
@@ -971,6 +999,7 @@ describe('probed host child seams', () => {
       parent: parent(),
       settlementNotice: 'silent',
       contextMode: 'independent-v1',
+      agentPreset: LOCUS_CHILD_PRESET,
       signal: AbortSignal.timeout(1000),
     } as never)
 
@@ -983,6 +1012,7 @@ describe('probed host child seams', () => {
     // first prompt, so the child transcript stays free of invented work.
     expect((spec['request'] as Record<string, unknown>)['prompt']).toEqual([])
     expect(spec['contextMode']).toBe('independent-v1')
+    expect(spec['agentPreset']).toBe(LOCUS_CHILD_PRESET)
     expect(spec['settlementNotice']).toBe('silent')
     expect(spec['provider']).toBe(LOCUS_CHILD_PROVIDER)
   })
@@ -994,6 +1024,7 @@ describe('probed host child seams', () => {
     readonly supportsSettlementNotice?: boolean
     readonly supportsIdleContinuableCreate?: boolean
     readonly supportsIndependentContinuableCreate?: boolean
+    readonly supportsIndependentChildAgentPreset?: boolean
     readonly supportsLiveContinuableChildSession?: boolean
     /** Whether `getProvider(LOCUS_CHILD_PROVIDER)` proves provider independence. */
     readonly independentContextProven?: boolean
@@ -1028,6 +1059,9 @@ describe('probed host child seams', () => {
         ...(overrides.supportsIndependentContinuableCreate !== false
           ? { supportsIndependentContinuableCreate: true }
           : {}),
+        ...(overrides.supportsIndependentChildAgentPreset !== false
+          ? { supportsIndependentChildAgentPreset: true }
+          : {}),
         ...(overrides.supportsLiveContinuableChildSession === true
           ? { supportsLiveContinuableChildSession: true }
           : {}),
@@ -1045,6 +1079,14 @@ describe('probed host child seams', () => {
     expect(probe).toEqual({
       available: false,
       diagnostic: 'independent-continuable-create-unavailable',
+    })
+  })
+
+  it('keeps the entire child seam unavailable without the explicit child-preset marker', () => {
+    const probe = probeLocusChildPorts(hostCtx({ supportsIndependentChildAgentPreset: false }))
+    expect(probe).toEqual({
+      available: false,
+      diagnostic: 'independent-child-preset-unavailable',
     })
   })
 
@@ -1119,6 +1161,7 @@ describe('probed host child seams', () => {
         ? {
           startContinuable: async () => ({ childId: SessionId(CHILD_ID), messageId: MessageId('message-1') }),
           supportsIndependentContinuableCreate: true,
+          supportsIndependentChildAgentPreset: true,
           [LOCUS_DELIVER_PROMPT_SYMBOL]: async () => 'm',
         }
         : name === 'agents' ? { get: () => undefined, resume: async () => undefined } : undefined),
