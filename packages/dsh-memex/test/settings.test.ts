@@ -1,7 +1,7 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { validateMemexSettings } from '../src/scope/settings.js'
+import { MemexSettingsSchema, validateMemexSettings } from '../src/scope/settings.js'
 
 const valid = {
   autoDerive: true,
@@ -76,6 +76,60 @@ describe('memex settings validation', () => {
     bindings: [],
     scopes: [{ name: 'solo', pathPrefixes: ['~/work/solo'] }],
   })).not.toThrow())
+
+  describe('workspace declarations', () => {
+    const claimed = (extra: object) => ({ autoDerive: true, bindings: [], scopes: [
+      { name: 'one', pathPrefixes: ['~/work/proj'] },
+      { name: 'two', pathPrefixes: ['~/work/proj'] },
+      { name: 'other', pathPrefixes: ['~/work/elsewhere'] },
+    ], ...extra })
+
+    it('rejects memory: true or fallback: true in a workspace declaration', () => {
+      const parse = (entry: object) => () => MemexSettingsSchema({ workspaces: [{ path: '~/w', ...entry }] })
+      expect(parse({ memory: true })).toThrow(/expected false/)
+      expect(parse({ fallback: true })).toThrow(/expected false/)
+      expect(parse({ memory: false, fallback: false })).not.toThrow()
+      // A config that bypassed the schema is still refused by validation.
+      expect(() => validateMemexSettings({ ...valid, workspaces: [{ path: '~/w', memory: true as unknown as false }] }))
+        .toThrow(/workspaces\[0\] \(~\/w\).*memory.*only be false/)
+    })
+
+    it('rejects a declared primary that does not claim that exact path', () => {
+      expect(() => validateMemexSettings(claimed({ workspaces: [{ path: '~/work/proj', primary: 'other' }] })))
+        .toThrow(/workspaces\[0\] \(~\/work\/proj\).*primary other does not claim this exact path/)
+      expect(() => validateMemexSettings(claimed({ workspaces: [{ path: '~/work/proj', primary: 'missing' }] })))
+        .toThrow(/primary missing is not a declared scope/)
+      // A claim on an ancestor is not an exact claim.
+      expect(() => validateMemexSettings(claimed({ workspaces: [{ path: '~/work/proj/sub', primary: 'one' }] })))
+        .toThrow(/does not claim this exact path/)
+    })
+
+    it('rejects duplicate or missing workspace declaration paths', () => {
+      expect(() => validateMemexSettings({ ...valid, workspaces: [{ path: '~/w/p', memory: false }, { path: join(homedir(), 'w', 'p/'), fallback: false }] }))
+        .toThrow(/workspaces\[1\] .* duplicates workspaces\[0\]/)
+      expect(() => validateMemexSettings({ ...valid, workspaces: [{ path: '  ', memory: false }] }))
+        .toThrow(/workspaces\[0\] has no path/)
+      expect(() => MemexSettingsSchema({ workspaces: [{ memory: false }] })).toThrow()
+    })
+
+    it('rejects two scopes claiming one workspace with neither a declaration nor a mark', () => {
+      expect(() => validateMemexSettings(claimed({ workspaces: [{ path: '~/work/proj', memory: false }] })))
+        .toThrow(/path prefix .*proj is claimed by one, two but has 0 primary entries.*or declare its primary under workspaces/)
+    })
+
+    it('rejects two scopes claiming one workspace with two marks and no declaration', () => {
+      const marked = claimed({})
+      marked.scopes = marked.scopes.map(entry => entry.name === 'other' ? entry : { ...entry, primary: true })
+      expect(() => validateMemexSettings(marked)).toThrow(/has 2 primary entries/)
+    })
+
+    it('accepts a workspace declaration that picks one primary among conflicting marks', () => {
+      const marked = claimed({ workspaces: [{ path: '~/work/proj', primary: 'two' }] })
+      marked.scopes = marked.scopes.map(entry => entry.name === 'other' ? entry : { ...entry, primary: true })
+      expect(() => validateMemexSettings(marked)).not.toThrow()
+      expect(() => validateMemexSettings(claimed({ workspaces: [{ path: '~/work/proj', primary: 'one' }] }))).not.toThrow()
+    })
+  })
 
   it('accepts distinct homes and a pattern repeated inside one scope', () => expect(() => validateMemexSettings({
     autoDerive: true,

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { registerMemexLifecycle } from '../src/lifecycle/index.js'
+import { createScopeResolver } from '../src/scope/resolver.js'
 
 function fixture(memory = true) {
   const listeners = new Map<string, (payload: any) => void>()
@@ -79,5 +83,22 @@ describe('memex lifecycle', () => {
     expect(f.injected).toHaveLength(1)
     f.listeners.get('agent/turn-stopping')!({ agent: f.agent })
     expect(f.injected).toHaveLength(1)
+  })
+
+  it('injects nothing when a path declaration closes memory for the directory or its children', () => {
+    const resolver = createScopeResolver({
+      homeDir: mkdtempSync(join(tmpdir(), 'dsh-memex-lifecycle-')), gitRemote: () => undefined, gitRoot: () => undefined,
+      config: { scopes: [{ name: 'proj', pathPrefixes: ['/w/proj'] }], workspaces: [{ path: '/w/proj', memory: false }] },
+    })
+    for (const cwd of ['/w/proj', '/w/proj/deep/child', '/w/other']) {
+      const f = fixture()
+      f.session.header.cwd = cwd
+      const lifecycle = registerMemexLifecycle(f.ctx as never, resolver)
+      f.listeners.get('agent/session-start')!({ agent: f.agent, source: 'startup' })
+      lifecycle.mark('recall', f.session)
+      f.listeners.get('agent/turn-stopping')!({ agent: f.agent })
+      // Neither the recall instructions nor the write reminder, except outside the declaration.
+      expect(f.injected).toHaveLength(cwd === '/w/other' ? 2 : 0)
+    }
   })
 })

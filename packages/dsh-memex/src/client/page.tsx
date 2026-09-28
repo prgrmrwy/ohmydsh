@@ -11,7 +11,12 @@
  * Two rules shape the row rendering. An entry in a list shows only what makes
  * entries comparable — role, name, card count — and expands into its facts on
  * demand; and nothing that changes routing is written without saying so, which
- * is why declaring the derived primary is reported in the notice line.
+ * is why every note an edit produces is listed before saving.
+ *
+ * Workspace-level edits (switches, attach, detach, switch primary) run through
+ * `workspace-actions` / `workspace-edits`, which end in the universal guard: no
+ * page action can silently open a closed workspace. Save runs the guard once
+ * more, so an entry edit made by typing is held to the same rule.
  *
  * @module dsh-memex/client/page
  */
@@ -33,17 +38,15 @@ import {
 } from '../contract.js'
 import { openBrowseTab, type BrowseOpenDeps } from './browse-open.js'
 import type { MemexKey } from './locales.js'
+import { expandPath } from './paths.js'
 import {
   addPathToGroup,
   attachEntry,
-  candidatesFor,
   conflicts,
   defaultHome,
   detachEntry,
   removePathFromGroup,
   rowsFromSettings,
-  setFallback,
-  setMemory,
   setPathInGroup,
   setPrimary,
   stageAssumedPrimary,
@@ -51,12 +54,15 @@ import {
   toScopes,
   undeclaredStores,
   workspaceViews,
+  type Draft,
   type EditorRow,
   type EntryCandidate,
   type MemexSettingsShape,
   type WorkspaceEntryRow,
   type WorkspaceView,
 } from './settings-model.js'
+import { closeSwitch, guard, openSwitch, type Env, type Note, type Outcome, type Refusal, type Session, type SwitchKey } from './workspace-actions.js'
+import { attachTo, detachFrom, switchPrimary } from './workspace-edits.js'
 
 /** The injected service face for the section slot (spread flat by the renderer). */
 export interface MemexSectionInjected {
@@ -84,6 +90,28 @@ interface Notice {
   readonly text: string
 }
 
+/** The open picker: attaching an entry, or replacing the primary. */
+interface Picker {
+  readonly key: string
+  readonly mode: 'attach' | 'replace'
+}
+
+/**
+ * Rename a library in the draft, and every declared primary naming it.
+ *
+ * A declared primary is a name: renaming the library without it would leave a
+ * declaration naming something that no longer claims the path.
+ */
+function renamed(draft: Draft, key: string, name: string): Draft {
+  const before = draft.rows.find(row => row.key === key)?.name.trim()
+  return {
+    rows: draft.rows.map(row => (row.key === key ? { ...row, name } : row)),
+    workspaces: before === undefined ? draft.workspaces : draft.workspaces.map(declaration => (declaration.primary === before && before !== name.trim()
+      ? { ...declaration, primary: name.trim() }
+      : declaration)),
+  }
+}
+
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -106,7 +134,10 @@ export function MemexSettingsSection(props: MemexSectionProps): JSX.Element | nu
 function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
   const { rpc, t, scope, browseOpen } = props
   const [snapshot, setSnapshot] = useState(() => scope.getSnapshot())
-  const [draft, setDraft] = useState<EditorRow[] | undefined>(undefined)
+  // The draft and the decisions the user made while editing it; undefined is
+  // "nothing edited". Notes are what the edits so far must say before saving.
+  const [session, setSession] = useState<Session | undefined>(undefined)
+  const [notes, setNotes] = useState<readonly Note[]>([])
   const [stores, setStores] = useState<MemexStoresResult | undefined>(undefined)
   const [storesError, setStoresError] = useState<string | undefined>(undefined)
   const [workspaces, setWorkspaces] = useState<MemexWorkspacesResult | undefined>(undefined)
@@ -123,7 +154,7 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
   // View state only: memory-off workspaces are collapsed by default, and
   // collapsing them never touches the configuration.
   const [showHidden, setShowHidden] = useState(false)
-  const [picker, setPicker] = useState<string | undefined>(undefined)
+  const [picker, setPicker] = useState<Picker | undefined>(undefined)
 
   useEffect(() => {
     setSnapshot(scope.getSnapshot())
@@ -169,7 +200,23 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
   useEffect(() => { void loadStores(); void loadWorkspaces() }, [loadStores, loadWorkspaces])
 
   const savedRows = useMemo(() => rowsFromSettings(snapshot?.value), [snapshot])
-  const rows = draft ?? savedRows
+  const savedDraft = useMemo<Draft>(() => ({ rows: savedRows, workspaces: [...(snapshot?.value?.workspaces ?? [])] }), [savedRows, snapshot])
+  const bindings = useMemo(() => snapshot?.value?.bindings ?? [], [snapshot])
+  const current: Session = session ?? { draft: savedDraft, intents: [] }
+  const draft = current.draft
+  const rows = draft.rows
+  const homeDir = workspaces?.homeDir ?? ''
+  // The facts every workspace action is checked against: the Host's current
+  // answer for each registered workspace, and the configuration as saved.
+  const env = useMemo<Env>(() => ({
+    known: workspaces?.known === true,
+    registry: workspaces?.known === true
+      ? workspaces.items.map(item => ({ path: expandPath(item.path, workspaces.homeDir), ...(item.route === undefined ? {} : { route: item.route }) }))
+      : [],
+    bindings,
+    homeDir: workspaces?.homeDir ?? '',
+    saved: savedDraft,
+  }), [workspaces, bindings, savedDraft])
   const byName = useMemo(() => storesByName(stores?.stores), [stores])
   // Absolute only when the host answered: a guessed "~/.dsh-memex/<name>" is a
   // placeholder, never something offered as the library path.
@@ -180,14 +227,15 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
       home: t('conflictHome'),
       pattern: t('conflictPattern'),
       primary: t('conflictPrimary'),
-    }),
-    [rows, namespaceDir, t],
+      declared: t('conflictDeclared'),
+    }, draft.workspaces, homeDir),
+    [rows, draft.workspaces, homeDir, namespaceDir, t],
   )
   // Workspaces are the page's subject; the host registry is the skeleton and the
   // configured paths fill in whatever it does not cover.
   const views = useMemo(
-    () => workspaceViews(rows, workspaces, stores?.stores),
-    [rows, workspaces, stores],
+    () => workspaceViews(rows, workspaces, stores?.stores, { workspaces: draft.workspaces, bindings }),
+    [rows, draft.workspaces, bindings, workspaces, stores],
   )
   // Libraries a workspace already presents are declared from that block, which
   // also records the workspace; only the unaccounted for stay in their own list.
@@ -197,23 +245,85 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
   )
   const undeclared = useMemo(() => undeclaredStores(stores?.stores, rows, accounted), [stores, rows, accounted])
   // Memory off means the workspace has left daily view — it stays reachable,
-  // because the switch that turns it back on lives in its block.
-  const active = useMemo(() => views.filter(view => view.memory), [views])
-  const hidden = useMemo(() => views.filter(view => !view.memory), [views])
+  // because the switch that turns it back on lives in its block. Only registered
+  // workspaces fold: a configuration block has no switch to reopen it with.
+  const active = useMemo(() => views.filter(view => view.memory || !view.fromRegistry), [views])
+  const hidden = useMemo(() => views.filter(view => !view.memory && view.fromRegistry), [views])
+
+  /** Fill a copy string's `{name}` placeholders. */
+  const fill = useCallback((key: MemexKey, values: Record<string, string>): string =>
+    t(key).replace(/\{(\w+)\}/g, (_, name: string) => values[name] ?? ''), [t])
+  const itemOf = useCallback((item: SwitchKey): string => t(item === 'memory' ? 'itemMemory' : 'itemFallback'), [t])
+
+  const noteText = useCallback((note: Note): string => {
+    switch (note.kind) {
+      case 'preserved': return fill('notePreserved', { path: note.path, item: itemOf(note.item) })
+      case 'alsoCloses': return fill('noteAlsoCloses', { path: note.path, item: itemOf(note.item) })
+      case 'removedEntryField': return fill('noteRemovedEntryField', { scope: note.scope, item: itemOf(note.item) })
+      case 'unregisteredReopen': return fill('noteUnregisteredReopen', { scope: note.scope, item: itemOf(note.item) })
+      case 'stagedPrimary': return fill('noteStagedPrimary', { scope: note.scope })
+      case 'declaredPrimary': return fill('noteDeclaredPrimary', { path: note.path, scope: note.scope })
+      case 'inheritedAttach': return fill('noteInheritedAttach', { path: note.path, scope: note.scope, list: note.inherited.join(', ') })
+      case 'replaced': return note.splitFrom === undefined
+        ? fill('noteReplaced', { path: note.path, scope: note.scope, replaced: note.replaced })
+        : fill('noteReplacedSplit', { path: note.path, scope: note.scope, replaced: note.replaced, split: note.splitFrom })
+      case 'personalDespiteDeclaration': return fill('notePersonalDespiteDeclaration', { path: note.path })
+    }
+  }, [fill, itemOf])
+
+  const refusalText = useCallback((refusal: Refusal): string => {
+    switch (refusal.kind) {
+      case 'ancestor': return fill(refusal.registered ? 'refuseAncestor' : 'refuseAncestorConfig', { path: refusal.path, ancestor: refusal.ancestor, item: itemOf(refusal.item) })
+      case 'remoteEntry': return fill('refuseRemoteEntry', { path: refusal.path, scope: refusal.scope, item: itemOf(refusal.item) })
+      case 'binding': return fill('refuseBinding', { path: refusal.path, binding: refusal.binding })
+      case 'personalEntry': return fill('refusePersonalEntry', { path: refusal.path })
+      case 'wouldClose': return fill('refuseWouldClose', { path: refusal.path, victim: refusal.victim, item: itemOf(refusal.item) })
+      case 'stillClosed': return fill('refuseStillClosed', { path: refusal.path, ancestor: refusal.by, item: itemOf(refusal.item) })
+      case 'unregistered': return fill('refuseUnregistered', { path: refusal.path })
+      case 'degraded': return t('refuseDegraded')
+      case 'remoteClaimed': return fill('refuseRemoteClaimed', { path: refusal.path })
+      case 'undecided': return fill('refuseUndecided', { path: refusal.path })
+      case 'becomesPrimary': return `${fill('attachBecomesPrimary', { path: refusal.path, scope: refusal.scope })} ${refusalText(refusal.cause)}`
+    }
+  }, [fill, itemOf, t])
+
+  /** Run one workspace action: apply it with its notes, or say why not. */
+  const run = useCallback((action: (base: Session, facts: Env) => Outcome): void => {
+    const outcome = action(current, env)
+    if (!outcome.ok) {
+      setNotice({ kind: 'error', text: refusalText(outcome.refusal) })
+      return
+    }
+    setSession(outcome.session)
+    setNotes(existing => [...existing, ...outcome.notes])
+    setNotice(undefined)
+  }, [current, env, refusalText])
+
+  /**
+   * An entry edit that is not a workspace action (typing a name or a path, a
+   * configuration block's own actions): applied as typed, guarded at save.
+   */
+  const editRows = useCallback((change: (base: readonly EditorRow[]) => readonly EditorRow[]): void => {
+    setSession(existing => {
+      const base = existing ?? { draft: savedDraft, intents: [] }
+      return { ...base, draft: { ...base.draft, rows: [...change(base.draft.rows)] } }
+    })
+  }, [savedDraft])
 
   const edit = useCallback((key: string, change: (row: EditorRow) => EditorRow) => {
-    setDraft(current => (current ?? savedRows).map(row => (row.key === key ? change(row) : row)))
-  }, [savedRows])
+    editRows(base => base.map(row => (row.key === key ? change(row) : row)))
+  }, [editRows])
 
-  const apply = useCallback((change: (base: readonly EditorRow[]) => readonly EditorRow[], staged: string) => {
-    setDraft(current => {
-      const base = current ?? savedRows
-      const next = [...change(base)]
-      if (next.length !== base.length) setNotice({ kind: 'ok', text: staged })
-      else setNotice(undefined)
-      return next
+  const rename = useCallback((key: string, name: string) => {
+    setSession(existing => {
+      const base = existing ?? { draft: savedDraft, intents: [] }
+      return { ...base, draft: renamed(base.draft, key, name) }
     })
-  }, [savedRows])
+  }, [savedDraft])
+
+  const toggle = useCallback((view: WorkspaceView, key: SwitchKey, on: boolean): void => {
+    run((base, facts) => (on ? openSwitch : closeSwitch)(base, facts, view.path, key))
+  }, [run])
 
   const copy = useCallback(async (value: string, token: string): Promise<void> => {
     try {
@@ -260,29 +370,47 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
       setNotice({ kind: 'error', text: problems.join(' · ') })
       return
     }
+    // The same guard once more: an entry edit made by typing is held to it too.
+    const guarded = guard(current, env)
+    if (!guarded.ok) {
+      setNotice({ kind: 'error', text: refusalText(guarded.refusal) })
+      return
+    }
+    if (JSON.stringify(guarded.session.draft.workspaces) !== JSON.stringify(current.draft.workspaces)) {
+      // It added declarations: say so first, and save on the next click.
+      setSession(guarded.session)
+      setNotes(existing => [...existing, ...guarded.notes])
+      return
+    }
     try {
-      await scope.mutate([{
-        op: 'set',
-        path: ['scopes'],
-        value: toScopes(rows).map(scope => ({
-          name: scope.name,
-          ...(scope.pathPrefixes === undefined ? {} : { pathPrefixes: [...scope.pathPrefixes] }),
-          ...(scope.remotePatterns === undefined ? {} : { remotePatterns: [...scope.remotePatterns] }),
-          ...(scope.home === undefined ? {} : { home: scope.home }),
-          ...(scope.primary === undefined ? {} : { primary: scope.primary }),
-          ...(scope.publish === undefined ? {} : { publish: scope.publish }),
-          ...(scope.fallback === undefined ? {} : { fallback: scope.fallback }),
-          ...(scope.memory === undefined ? {} : { memory: scope.memory }),
-        })),
-      }])
-      setDraft(undefined)
+      // Two sets rather than the namespace root: an older page bundle that sets
+      // only `scopes` leaves the path declarations alone.
+      await scope.mutate([
+        {
+          op: 'set',
+          path: ['scopes'],
+          value: toScopes(rows).map(entry => ({
+            name: entry.name,
+            ...(entry.pathPrefixes === undefined ? {} : { pathPrefixes: [...entry.pathPrefixes] }),
+            ...(entry.remotePatterns === undefined ? {} : { remotePatterns: [...entry.remotePatterns] }),
+            ...(entry.home === undefined ? {} : { home: entry.home }),
+            ...(entry.primary === undefined ? {} : { primary: entry.primary }),
+            ...(entry.publish === undefined ? {} : { publish: entry.publish }),
+            ...(entry.fallback === undefined ? {} : { fallback: entry.fallback }),
+            ...(entry.memory === undefined ? {} : { memory: entry.memory }),
+          })),
+        },
+        { op: 'set', path: ['workspaces'], value: current.draft.workspaces.map(declaration => ({ ...declaration })) },
+      ])
+      setSession(undefined)
+      setNotes([])
       setNotice({ kind: 'ok', text: t('saved') })
       await loadStores()
       await loadWorkspaces()
     } catch (error) {
       setNotice({ kind: 'error', text: `${t('saveFailed')}: ${messageOf(error)}` })
     }
-  }, [scope, problems, rows, t, loadStores, loadWorkspaces])
+  }, [scope, problems, current, env, rows, refusalText, t, loadStores, loadWorkspaces])
 
   const runProbe = useCallback(async (): Promise<void> => {
     setProbeResult(undefined)
@@ -296,7 +424,7 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
     }
   }, [rpc, probePath, t])
 
-  const dirty = draft !== undefined
+  const dirty = session !== undefined
   const writable = snapshot?.writable === true && snapshot.status === 'ready'
 
   const toggleExpanded = useCallback((key: string) => {
@@ -453,8 +581,9 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
    * between entries ("which library, how much in it"), while the path, remote
    * state and actions belong to one entry's own story.
    */
-  const renderEntry = (view: WorkspaceView, entry: WorkspaceEntryRow, many: boolean): JSX.Element => {
-    const key = entry.kind === 'entry' && entry.row !== undefined ? entry.row.key : `${view.key}:${entry.kind}`
+  const renderEntry = (view: WorkspaceView, entry: WorkspaceEntryRow): JSX.Element => {
+    // Per block: one library shared by two workspaces is two separate rows here.
+    const key = entry.kind === 'entry' && entry.row !== undefined ? `${view.key}:${entry.row.key}` : `${view.key}:${entry.kind}`
     const store = byName.get(entry.name)
     const unnamed = entry.kind === 'entry' && entry.name.trim() === ''
     const open = unnamed || expanded.includes(key)
@@ -462,9 +591,8 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
     return (
       <div className={`dshmx-entry${open ? ' dshmx-entry-open' : ''}${entry.primary ? '' : ' dshmx-entry-additional'}`} key={key}>
         <div className="dshmx-entry-line">
-          {many && (
-            <span className={`dshmx-role${entry.primary ? ' dshmx-role-primary' : ''}`}>{role}</span>
-          )}
+          {/* Every row, a lone one included: an unlabelled row reads as neither. */}
+          <span className={`dshmx-role${entry.primary ? ' dshmx-role-primary' : ''}`}>{role}</span>
           {entry.kind === 'entry'
             ? (open
               ? (
@@ -473,7 +601,7 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
                   aria-label={t('columnLibrary')}
                   value={entry.row?.name ?? ''}
                   placeholder="scope-name"
-                  onChange={event => { if (entry.row !== undefined) edit(entry.row.key, current => ({ ...current, name: event.target.value })) }}
+                  onChange={event => { if (entry.row !== undefined) rename(entry.row.key, event.target.value) }}
                 />
               )
               : <span className="dshmx-name-text">{entry.name}</span>)
@@ -487,11 +615,13 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
                 type="checkbox"
                 aria-label={t('fallbackLabel')}
                 checked={entry.enabled === true}
-                onChange={event => apply(base => setFallback(base, view, event.target.checked), t('stagedNotice'))}
+                disabled={!view.switches.editable}
+                onChange={event => toggle(view, 'fallback', event.target.checked)}
               />
               {entry.enabled === true ? t('on') : t('off')}
             </label>
           )}
+          {entry.kind === 'fallback' && entry.enabled !== true && renderReach(view)}
           <button
             type="button"
             className="dshmx-act dshmx-act-inline dshmx-disclose"
@@ -531,34 +661,7 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
                   {t('actionBrowse')}
                 </button>
               )}
-              {entry.kind === 'assumed' && (
-                <button
-                  type="button"
-                  className="dshmx-act dshmx-act-inline"
-                  onClick={() => apply(base => stageAssumedPrimary(base, view), t('stagedNotice'))}
-                >
-                  {t('actionDeclareEntry')}
-                </button>
-              )}
-              {entry.kind === 'entry' && many && !entry.primary && (
-                <button
-                  type="button"
-                  className="dshmx-act dshmx-act-inline"
-                  onClick={() => apply(base => setPrimary(base, view, entry.row?.key ?? ''), '')}
-                >
-                  {t('actionSetPrimary')}
-                </button>
-              )}
-              {entry.kind === 'entry' && entry.row !== undefined && (
-                <button
-                  type="button"
-                  className="dshmx-act dshmx-act-inline"
-                  title={t('removeStoreHint')}
-                  onClick={() => apply(base => (view.path === '' ? base.filter(row => row.key !== entry.row?.key) : detachEntry(base, view, entry.row?.key ?? '')), '')}
-                >
-                  {t('removeStore')}
-                </button>
-              )}
+              {renderEntryActions(view, entry)}
             </div>
           </div>
         )}
@@ -566,37 +669,104 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
     )
   }
 
+  /**
+   * The fallback decision is off, but a binding still reaches `personal`: the
+   * switch shows the decision, this says what a session here can actually do.
+   */
+  const renderReach = (view: WorkspaceView): JSX.Element | null => {
+    const reach = view.reach
+    if (reach === undefined || reach.entry || (!reach.read && !reach.write)) return null
+    const key: MemexKey = reach.read && reach.write ? 'fallbackViaBindingBoth' : reach.read ? 'fallbackViaBindingRead' : 'fallbackViaBindingWrite'
+    return <span className="dshmx-note">{fill(key, { path: view.path, binding: reach.binding ?? '' })}</span>
+  }
+
+  /**
+   * An entry's claim actions.
+   *
+   * On a registered workspace they are workspace actions, guarded; a
+   * remote-claimed one has none, because its claims live in a repository field.
+   * A configuration block edits its entries directly.
+   */
+  const renderEntryActions = (view: WorkspaceView, entry: WorkspaceEntryRow): JSX.Element | null => {
+    const button = (label: MemexKey, onClick: () => void, title?: string): JSX.Element => (
+      <button type="button" className="dshmx-act dshmx-act-inline" title={title} onClick={onClick}>{t(label)}</button>
+    )
+    if (view.fromRegistry) {
+      const claim = view.claim?.kind
+      if (claim === 'remote') return null
+      return (
+        <>
+          {entry.kind === 'assumed' && button('actionDeclareEntry', () => run((base, facts) =>
+            guard({ ...base, draft: { ...base.draft, rows: stageAssumedPrimary(base.draft.rows, view) } }, facts)))}
+          {entry.primary && claim !== 'unknown' && button('actionReplacePrimary', () => setPicker({ key: view.key, mode: 'replace' }))}
+          {!entry.primary && entry.kind !== 'assumed' && button('actionSetPrimary', () => run((base, facts) =>
+            switchPrimary(base, facts, view.path, { name: entry.name, discovered: false })))}
+          {/* Only an exact claim can be removed here; an inherited one belongs to its ancestor. */}
+          {entry.kind === 'entry' && entry.row !== undefined && claim === 'exact' && button('removeStore', () => {
+            const key = entry.row?.key ?? ''
+            run((base, facts) => detachFrom(base, facts, view.path, key))
+          }, t('removeStoreHint'))}
+        </>
+      )
+    }
+    const many = view.entries.filter(item => item.kind === 'entry').length > 1
+    return (
+      <>
+        {entry.kind === 'entry' && many && !entry.primary && button('actionSetPrimary', () => editRows(base => setPrimary(base, view, entry.row?.key ?? '')))}
+        {entry.kind === 'entry' && entry.row !== undefined && button('removeStore', () => editRows(base => (view.path === ''
+          ? base.filter(row => row.key !== entry.row?.key)
+          : detachEntry(base, view, entry.row?.key ?? ''))), t('removeStoreHint'))}
+      </>
+    )
+  }
+
   /** The "add an entry" picker: choosing is how duplicates are made impossible. */
   const renderPicker = (view: WorkspaceView): JSX.Element => {
     const candidates: readonly EntryCandidate[] = view.candidates
-    if (picker !== view.key) {
+    const claim = view.claim
+    // An inherited workspace's first own entry becomes its primary: say so on
+    // the picker, before anything is chosen.
+    const inherited = claim?.kind === 'inherited'
+      ? <span className="dshmx-note">{fill('attachBecomesHint', { path: view.path, split: claim.prefix, list: claim.scopes.join(', ') })}</span>
+      : null
+    const open = picker?.key === view.key ? picker : undefined
+    if (open === undefined) {
       return (
-        <button type="button" className="dshmx-act dshmx-act-inline" onClick={() => setPicker(view.key)}>{t('actionAttach')}</button>
+        <>
+          <button type="button" className="dshmx-act dshmx-act-inline" onClick={() => setPicker({ key: view.key, mode: 'attach' })}>{t('actionAttach')}</button>
+          {inherited}
+        </>
       )
+    }
+    const label = open.mode === 'replace' ? t('actionReplacePrimary') : t('actionAttach')
+    const choose = (candidate: EntryCandidate): void => {
+      setPicker(undefined)
+      if (open.mode === 'replace') run((base, facts) => switchPrimary(base, facts, view.path, candidate))
+      else if (view.fromRegistry) run((base, facts) => attachTo(base, facts, view.path, candidate))
+      else editRows(base => attachEntry(base, view, candidate))
     }
     return (
       <span className="dshmx-attach">
         <select
           className="dshmx-field"
-          aria-label={t('actionAttach')}
+          aria-label={label}
           value=""
           onChange={event => {
             const chosen = event.target.value
             if (chosen === '') return
-            const candidate = chosen === '\u0000new'
+            choose(chosen === '\u0000new'
               ? { name: '', discovered: true }
-              : candidates.find(item => item.name === chosen) ?? { name: chosen, discovered: false }
-            setPicker(undefined)
-            apply(base => attachEntry(base, view, candidate), t('stagedNotice'))
+              : candidates.find(item => item.name === chosen) ?? { name: chosen, discovered: false })
           }}
         >
-          <option value="">{candidates.length === 0 ? t('attachEmpty') : t('actionAttach')}</option>
+          <option value="">{candidates.length === 0 ? t('attachEmpty') : label}</option>
           {candidates.map(candidate => (
             <option key={candidate.name} value={candidate.name}>{`${candidate.name}${candidate.discovered ? ` · ${t('assumedLabel')}` : ''}`}</option>
           ))}
           <option value={'\u0000new'}>{t('attachNew')}</option>
         </select>
         <button type="button" className="dshmx-act dshmx-act-inline" onClick={() => setPicker(undefined)}>{t('actionCancel')}</button>
+        {open.mode === 'attach' && inherited}
       </span>
     )
   }
@@ -610,11 +780,9 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
    * @returns the block.
    */
   const renderBlock = (view: WorkspaceView): JSX.Element => {
-    // Roles are drawn on every row as soon as there is more than one row to
-    // contrast. The fallback counts: a lone primary above an "additional"
-    // fallback is exactly the case where an unlabelled primary reads wrong.
-    const many = view.entries.length > 1
     const group = view.group
+    const switches = view.switches
+    const remote = view.claim?.kind === 'remote'
     return (
       <section className="dshmx-lib" key={view.key}>
         <header className="dshmx-lib-head">
@@ -635,13 +803,13 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
                       aria-label={t('workspaceHint')}
                       value={path}
                       placeholder={t('workspaceHint')}
-                      onChange={event => setDraft(current => (group === undefined ? current ?? savedRows : setPathInGroup(current ?? savedRows, group, index, event.target.value)))}
+                      onChange={event => editRows(base => (group === undefined ? base : setPathInGroup(base, group, index, event.target.value)))}
                     />
                     <button
                       type="button"
                       className="dshmx-act dshmx-act-inline"
                       aria-label={`${t('removePath')}: ${path}`}
-                      onClick={() => setDraft(current => (group === undefined ? current ?? savedRows : removePathFromGroup(current ?? savedRows, group, index)))}
+                      onClick={() => editRows(base => (group === undefined ? base : removePathFromGroup(base, group, index)))}
                     >
                       {t('removePath')}
                     </button>
@@ -650,7 +818,7 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
                 <button
                   type="button"
                   className="dshmx-act dshmx-act-inline"
-                  onClick={() => setDraft(current => (group === undefined ? current ?? savedRows : addPathToGroup(current ?? savedRows, group)))}
+                  onClick={() => editRows(base => (group === undefined ? base : addPathToGroup(base, group)))}
                 >
                   {t('addPath')}
                 </button>
@@ -664,18 +832,25 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
               type="checkbox"
               aria-label={t('memoryLabel')}
               checked={view.memory}
-              onChange={event => apply(base => setMemory(base, view, event.target.checked), t('stagedNotice'))}
+              disabled={!switches.editable}
+              onChange={event => toggle(view, 'memory', event.target.checked)}
             />
             {`${t('memoryLabel')} ${view.memory ? t('on') : t('off')}`}
           </label>
         </header>
         {!view.memory && <p className="dshmx-note dshmx-prose">{t('memoryHint')}</p>}
+        {!switches.editable && (
+          <p className="dshmx-note dshmx-prose">{t(switches.reason === 'degraded'
+            ? 'switchesReadonlyDegraded'
+            : switches.reason === 'pathless' ? 'switchesReadonlyPathless' : 'switchesReadonlyUnregistered')}</p>
+        )}
+        {remote && <p className="dshmx-note dshmx-prose">{t('remoteClaimedHint')}</p>}
 
         <div className="dshmx-entries">
-          {view.entries.map(entry => renderEntry(view, entry, many))}
+          {view.entries.map(entry => renderEntry(view, entry))}
         </div>
 
-        <div className="dshmx-actions">{renderPicker(view)}</div>
+        {!remote && <div className="dshmx-actions">{renderPicker(view)}</div>}
       </section>
     )
   }
@@ -735,14 +910,14 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
               <button
                 type="button"
                 className="dshmx-act dshmx-act-inline"
-                onClick={() => apply(base => (base.some(row => row.name === store.scope) ? base : [...base, {
+                onClick={() => editRows(base => (base.some(row => row.name === store.scope) ? base : [...base, {
                   key: `declare-${store.scope}`,
                   name: store.scope,
                   paths: [],
                   repos: [],
                   home: store.homeSource === 'configured' ? store.home : '',
                   saved: false,
-                }]), '')}
+                }]))}
               >
                 {t('actionDeclare')}
               </button>
@@ -774,13 +949,19 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
         </div>
       )}
 
+      {notes.length > 0 && (
+        <div className="dshmx-banner dshmx-banner-ok" role="status">
+          {[...new Set(notes.map(noteText))].map(text => <div key={text}>{text}</div>)}
+        </div>
+      )}
+
       {notice !== undefined && (
         <div className={`dshmx-banner ${notice.kind === 'ok' ? 'dshmx-banner-ok' : 'dshmx-banner-error'}`} role="status">{notice.text}</div>
       )}
 
       <div className="dshmx-footer">
         <button type="button" className="dshmx-primary" disabled={!writable || problems.length > 0} onClick={() => void save()}>{t('save')}</button>
-        <button type="button" className="dshmx-act dshmx-act-inline" disabled={!dirty} onClick={() => { setDraft(undefined); setNotice(undefined) }}>{t('discard')}</button>
+        <button type="button" className="dshmx-act dshmx-act-inline" disabled={!dirty} onClick={() => { setSession(undefined); setNotes([]); setNotice(undefined) }}>{t('discard')}</button>
         <span className="dshmx-note">{dirty ? t('unsaved') : t('saved')}</span>
       </div>
     </div>

@@ -113,6 +113,18 @@ describe('browse endpoint', () => {
     expect(h.started).toEqual([])
   })
 
+  it('ignores a workspace field in the request and still refuses an entry-level memory-off library', async () => {
+    // A self-reported workspace proves nothing about where the request came
+    // from, so it can neither open nor close anything.
+    const off = harness({ memory: false })
+    const refused = (await off.call({ scope: 'lib', workspace: '/some/memory-on/dir' })).value as MemexBrowseResult
+    expect(refused).toMatchObject({ status: 'refused', reason: 'memory-off' })
+    expect(off.started).toEqual([])
+    const on = harness()
+    const served = (await on.call({ scope: 'lib', workspace: '/some/memory-off/dir' })).value as MemexBrowseResult
+    expect(served).toEqual({ status: 'ok', port: 51234, scope: 'lib' })
+  })
+
   it('refuses a library that has not been materialized, without starting anything', async () => {
     const h = harness({ materialized: false })
     const result = await h.browse()

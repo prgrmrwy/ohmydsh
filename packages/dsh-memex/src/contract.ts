@@ -133,6 +133,16 @@ export interface MemexWorkspacesResult {
   readonly items: readonly MemexWorkspaceView[]
 }
 
+export type MemexClaim =
+  | { readonly kind: 'path'; readonly prefix: string }
+  | { readonly kind: 'remote' }
+  | { readonly kind: 'none' }
+
+/** One source that closed a switch: a path declaration, or an entry's own field. */
+export type MemexOffSource =
+  | { readonly kind: 'workspace'; readonly path: string }
+  | { readonly kind: 'entry'; readonly scope: string }
+
 /** Answer to the `resolve` endpoint. */
 export interface MemexResolveResult {
   readonly path: string
@@ -140,8 +150,30 @@ export interface MemexResolveResult {
   readonly home: string
   readonly publish: 'internal' | 'external'
   readonly publishKnown: boolean
-  /** False when memory is switched off for the workspaces this directory routes. */
+  /**
+   * False when memory is off for this directory: a covering workspace
+   * declaration or the primary entry closed it (see {@link offBy}).
+   */
   readonly memory: boolean
+  /**
+   * The fallback decision — whether `personal` is granted by default. Not
+   * reachability; a binding may still list it (see {@link personal}).
+   */
+  readonly fallback: boolean
+  /**
+   * Whether `personal` is actually reachable from this directory, per
+   * direction, bindings included. Both are true when the current scope is
+   * `personal` itself.
+   */
+  readonly personal: { readonly read: boolean; readonly write: boolean }
+  /**
+   * How the directory was claimed: the deepest declared path prefix, a remote
+   * pattern, or nothing. Configuration facts only — never the raw remote URL,
+   * which may carry credentials.
+   */
+  readonly claim: MemexClaim
+  /** The sources that closed `memory` / `fallback`, outermost declaration first. */
+  readonly offBy: { readonly memory: readonly MemexOffSource[]; readonly fallback: readonly MemexOffSource[] }
   readonly source: MemexRouteSource
   readonly exists: boolean
   /**
