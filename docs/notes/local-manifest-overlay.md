@@ -59,7 +59,7 @@ overlay 文件所在目录就是它的**所属根**（`dirname(realpath(overlay 
 
 ```text
 <R>/                      # 私有仓库根，例如 ~/.dsh-local
-├── dsh.yaml.local        # overlay 本体
+├── dsh.yaml              # overlay 本体（私有根里不必叫 .local；DSH_LOCAL_MANIFEST 指向它）
 ├── package.json          # workspaces: ["packages/*"]，有自己的 lockfile
 ├── package-lock.json
 ├── packages/<id>/        # overlay 的 local package
@@ -72,7 +72,7 @@ overlay 文件所在目录就是它的**所属根**（`dirname(realpath(overlay 
   `npm run build --workspace <name>`，构建依赖装在 `<R>` 自己的 `node_modules`，公开
   仓库的 `package.json` / lockfile 不受影响——**每个根一个 lockfile**。
 - `buildInputs`、`compatDependencies` 的路径都相对所属根，且 realpath 不得越出所属根。
-- 公开仓库根的 `dsh.yaml.local` 若是指向 `<R>/dsh.yaml.local` 的符号链接，所属根是
+- 公开仓库根的 `dsh.yaml.local` 若是指向 `<R>/dsh.yaml` 的符号链接，所属根是
   链接**目标**所在目录 `<R>`，不是公开仓库根。
 
 **信任模型。** overlay 根与公开仓库同等可信：它能声明 local package，而 local package
@@ -87,7 +87,7 @@ overlay 文件所在目录就是它的**所属根**（`dirname(realpath(overlay 
 git clone <private-repo-url> ~/.dsh-local
 (cd ~/.dsh-local && npm ci)                 # 私有 package 的构建依赖
 # 公开仓库根 .env.local（gitignored，bin/dsh 会 source 它）加一行：
-echo "export DSH_LOCAL_MANIFEST=$HOME/.dsh-local/dsh.yaml.local" >> .env.local
+echo "export DSH_LOCAL_MANIFEST=$HOME/.dsh-local/dsh.yaml" >> .env.local
 # 若 overlay 条目声明了 npmScopes，给 profile 配好 scope registry（sync 不会替你写）：
 echo "@example:registry=https://registry.example.com/" >> ~/.dsh/profiles/web/.npmrc
 dsh build
