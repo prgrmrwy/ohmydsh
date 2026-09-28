@@ -20,6 +20,7 @@
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionId as BrandedSessionId } from '@deepseek-ai/dsh-session'
+import { LOCUS_CHILD_PRESET } from './aggregate.js'
 import { LOCUS_SAFE_TOOL_NAMES } from './composition.js'
 
 /** A live DSH Agent, intentionally opaque apart from its session identity. */
@@ -106,6 +107,12 @@ export interface LocusSubagentPort {
     readonly settlementNotice?: LocusSettlementNotice
     /** Persist a fresh transcript and the creation-time preset for cold resume. */
     readonly contextMode?: 'independent-v1'
+    /**
+     * Preset the independent child composes from on creation AND every cold
+     * resume. Named by Pet so the child's tool surface never depends on which
+     * preset the owner's main session runs.
+     */
+    readonly agentPreset?: string
     /** Persist the inherited global-tool restriction for creation and cold resume. */
     readonly toolFilter?: LocusToolRestriction
     readonly signal: AbortSignal
@@ -114,6 +121,8 @@ export interface LocusSubagentPort {
   readonly supportsIdleContinuableCreate?: boolean
   /** Literal proof that independent-v1 and its persisted composition are implemented. */
   readonly supportsIndependentContinuableCreate?: boolean
+  /** Literal proof that an explicit independent-child preset is honored on create and resume. */
+  readonly supportsIndependentChildAgentPreset?: boolean
   /**
    * Run one operation against the exact continuation-owned child Session.
    * The runtime validates both exact live parent identity and durable child
@@ -267,6 +276,7 @@ export type LocusChildProbeDiagnostic =
   | 'parent-service-unavailable'
   | 'subagent-service-unavailable'
   | 'independent-continuable-create-unavailable'
+  | 'independent-child-preset-unavailable'
   | 'inbox-unavailable'
   | 'settlement-events-unavailable'
 
@@ -864,7 +874,10 @@ export class LocusChildAdapter {
         this.ports.subagent.supportsIdleContinuableCreate !== true
         || create === undefined
       ) return { ok: false, reason: 'idle-child-create-unsupported' }
-      if (this.ports.subagent.supportsIndependentContinuableCreate !== true) {
+      if (
+        this.ports.subagent.supportsIndependentContinuableCreate !== true
+        || this.ports.subagent.supportsIndependentChildAgentPreset !== true
+      ) {
         return { ok: false, reason: 'safe-composition-unsupported' }
       }
       // Fail closed BEFORE creating anything: only the caller's own explicit
@@ -885,6 +898,8 @@ export class LocusChildAdapter {
           parent: parentResult.parent,
           settlementNotice: 'silent',
           contextMode: 'independent-v1',
+          // Pet's own preset, never the main's: see LOCUS_CHILD_PRESET.
+          agentPreset: LOCUS_CHILD_PRESET,
           toolFilter: LOCUS_SAFE_TOOL_FILTER,
           signal,
         })
@@ -1498,6 +1513,7 @@ export function probeLocusChildPorts(
     supportsSettlementNotice?: unknown
     supportsIdleContinuableCreate?: unknown
     supportsIndependentContinuableCreate?: unknown
+    supportsIndependentChildAgentPreset?: unknown
     supportsLiveContinuableChildSession?: unknown
   }
   if (typeof subagentRecord.startContinuable !== 'function') {
@@ -1508,6 +1524,12 @@ export function probeLocusChildPorts(
   // required before any child/reconciliation capability is published.
   if (subagentRecord.supportsIndependentContinuableCreate !== true) {
     return { available: false, diagnostic: 'independent-continuable-create-unavailable' }
+  }
+  // The child's safety rests on composing from Pet's own preset rather than
+  // the main's. A runtime that would silently ignore `agentPreset` hands the
+  // child the owner's preset instead, so the marker is required up front.
+  if (subagentRecord.supportsIndependentChildAgentPreset !== true) {
+    return { available: false, diagnostic: 'independent-child-preset-unavailable' }
   }
   const inbox = adaptLocusInboxPort(subagentService)
   if (inbox === undefined) return { available: false, diagnostic: 'inbox-unavailable' }
@@ -1570,6 +1592,7 @@ export function probeLocusChildPorts(
             readonly parent: unknown
             readonly settlementNotice?: unknown
             readonly contextMode?: unknown
+            readonly agentPreset?: unknown
             readonly toolFilter?: unknown
             readonly signal: AbortSignal
           }
@@ -1589,6 +1612,7 @@ export function probeLocusChildPorts(
               request,
               ...(spec.settlementNotice === undefined ? {} : { settlementNotice: spec.settlementNotice }),
               ...(spec.contextMode === undefined ? {} : { contextMode: spec.contextMode }),
+              ...(spec.agentPreset === undefined ? {} : { agentPreset: spec.agentPreset }),
               signal: spec.signal,
             }),
           ) as Promise<{ readonly childId: string }>
@@ -1600,6 +1624,9 @@ export function probeLocusChildPorts(
       : {}),
     ...(subagentRecord.supportsIndependentContinuableCreate === true
       ? { supportsIndependentContinuableCreate: true }
+      : {}),
+    ...(subagentRecord.supportsIndependentChildAgentPreset === true
+      ? { supportsIndependentChildAgentPreset: true }
       : {}),
     ...(typeof subagentRecord.withLiveContinuableChildSession === 'function'
       ? {

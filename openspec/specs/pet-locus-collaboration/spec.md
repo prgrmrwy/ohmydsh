@@ -1,9 +1,7 @@
 ## Purpose
 
 统一描述研发工作上下文与飞书协作现场的关联：所有入口先取得主会话，再由专属子会话持续服务。覆盖研发先行、project 群先行、群与话题的层级补齐、双向发现、权限及上下文切换，不以旧 QA 或 workspace executor 的实现分类组织产品。
-
 ## Requirements
-
 ### Requirement: Locus 统一关联主会话子会话与飞书入口
 
 系统 SHALL 以 locus 表达一段持续协作关联，包含飞书入口、workspace 归属、主会话、专属子会话、权限和生命周期。入口 SHALL 以 chat 标识与可选 thread 标识寻址；普通消息标识 MUST NOT 作为长期入口身份。workspace SHALL 与主会话归属一致。一个入口 SHALL 至多有一个活跃 locus，一个活跃 locus SHALL 恰好拥有一个专属子会话；一个主会话 SHALL 可关联多个 locus。系统 MUST NOT 以子会话作为绑定源产生孙辈。
@@ -142,7 +140,7 @@ GUI Q&A SHALL 仅接受未归档主会话，验证 bot、所有者及宿主能�
 
 ### Requirement: 显式绑定可替换自动关联并警告上下文改变
 
-`-b/--bind <prefix>` 及 `/bind <prefix>` SHALL 只由 allowlist 触发。前缀 SHALL 至少六位，唯一匹配未归档主会话；无匹配/多匹配 SHALL 同一句回执，不暴露其它会话。群名 SHALL 取平台事实，未知留空，不承诺管理不属于自己的群。
+`-b/--bind <prefix>` 及 `/bind <prefix>` SHALL 只由 allowlist 触发。前缀 SHALL 至少六位，唯一匹配未归档主会话；无匹配/多匹配 SHALL 同一句回执，不暴露其它会话。主会话运行的 Agent preset MUST NOT 成为绑定条件：locus 子会话的组合与主会话 preset 无关（见「Locus 业务出站只能经受管 finish」），因此用户自己的 `standard` 等会话与 Pet 自建主会话同样可绑定。拒绝绑定 SHALL 给出真实原因；只有「前缀命中子会话」按无匹配同一句回执。群名 SHALL 取平台事实，未知留空，不承诺管理不属于自己的群。
 
 尚未建立 locus 的入口收到 `/bind` 时 SHALL 直接以指定主会话建立该入口的 locus，MUST NOT 先建立自动来源再改绑：入群不预建关联，因而不存在需要被替换的自动归属。此时 MUST NOT 发出上下文变更警告——没有发生来源变化。
 
@@ -153,6 +151,10 @@ GUI Q&A SHALL 仅接受未归档主会话，验证 bot、所有者及宿主能�
 #### Scenario: 首次绑定一次建对
 - **WHEN** bot 已在群内但该入口尚无 locus，allowlist 发送 `/bind S1`
 - **THEN** 直接建立以 S1 为主会话的 locus，`mainSource` 记为显式来源，不产生自动 main、不执行改绑、不发送上下文变更警告
+
+#### Scenario: 绑定用户自己的 standard 会话
+- **WHEN** allowlist 发送 `/bind S1`，S1 是运行 `standard` preset 的未归档用户主会话
+- **THEN** 建立以 S1 为主会话的 locus；子会话仍以 Pet 指定的 safe preset 组合，不获得 `subagent` 等委派工具
 
 #### Scenario: 自动来源显式切换
 - **WHEN** 空闲自动 locus S0 收到 allowlist `/bind S1`
@@ -290,7 +292,6 @@ GUI Q&A SHALL 仅接受未归档主会话，验证 bot、所有者及宿主能�
 #### Scenario: 提权失败必须给出原因而非重试提示
 - **WHEN** 提权被拒绝
 - **THEN** 飞书控制面与管理面都返回/显示该确定性原因，不用「请稍后重试」掩盖它
-
 
 ### Requirement: 上下文按实际子会话绑定并允许按需问主会话
 
@@ -672,7 +673,7 @@ Locus child 的飞书业务正文与撤回动作 SHALL 只能由 caller-bound `p
 
 该边界 SHALL 由工具/执行 authority 隔离强制执行，MUST NOT 仅依赖 prompt、Skill 省略、命令字符串黑名单、PATH/HOME 隐藏或 read-only 文件沙箱。若当前 pinned runtime 无法证明在保留通用进程执行时隔离飞书凭据与 Lark 网络出口，发布的 Locus safe composition SHALL 移除 `bash`、`pwsh`、任意代码执行和可代为执行的子委派能力，只保留受控只读工具与 caller-bound Pet 工具。
 
-Locus child 创建和冷恢复 SHALL 使用同一份持久、不可由 parent/user preset 漂移的 safe composition。每个成功完成 independent marker 与精确 durable toolFilter 装配的新建/重建 child，SHALL 在对应 Locus 行发布 Host 证明的 `safe-v1` composition marker；该 marker 只能在 child 创建成功返回后、active locus 发布时写入。缺少 marker 的旧行仍 SHALL 可被 schema/persistence 读取，但 startup reconciliation SHALL 将其置为 invalid，resolution、adoption 与 dispatch SHALL 在任何 parent/child cold resume 之前拒绝；非 `safe-v1` 值亦同。Host 无法证明该 composition 已安装时 SHALL 拒绝创建、恢复或派发；MUST NOT 静默回退到继承父 preset 的 child。任何为满足本条所需的 DSH compatibility seam SHALL 针对 manifest 中的精确 pin 做运行时探针并 fail closed。
+Locus child 创建和冷恢复 SHALL 使用同一份持久、不可由 parent/user preset 漂移的 safe composition。该 composition 的 preset SHALL 由 Pet 在创建时显式指定并持久化，MUST NOT 从主会话当前或创建时的 preset 派生；冷恢复 SHALL mount 持久化的该 preset，MUST NOT 经父组合（`composeFrom`）重建；持久记录缺失该 preset 时 SHALL 拒绝恢复。每个成功完成 independent marker 与精确 durable toolFilter 装配的新建/重建 child，SHALL 在对应 Locus 行发布 Host 证明的 `safe-v1` composition marker；该 marker 只能在 child 创建成功返回后、active locus 发布时写入。缺少 marker 的旧行仍 SHALL 可被 schema/persistence 读取，但 startup reconciliation SHALL 将其置为 invalid，resolution、adoption 与 dispatch SHALL 在任何 parent/child cold resume 之前拒绝；非 `safe-v1` 值亦同。Host 无法证明该 composition 已安装时 SHALL 拒绝创建、恢复或派发；MUST NOT 静默回退到继承父 preset 的 child。任何为满足本条所需的 DSH compatibility seam SHALL 针对 manifest 中的精确 pin 做运行时探针并 fail closed。
 
 #### Scenario: 受管 finish 正常发送
 - **WHEN** safe child 对其已证明的 current Delivery 调用 `pet_locus_finish(reply)`
@@ -689,6 +690,14 @@ Locus child 创建和冷恢复 SHALL 使用同一份持久、不可由 parent/us
 #### Scenario: 隔离能力无法证明时不发布
 - **WHEN** runtime 既不能持久固定无进程执行的 safe composition，也不能提供隔离凭据与 Lark egress 的独立 execution world
 - **THEN** Locus intake/child 能力保持 unavailable 并给出确定性诊断，MUST NOT 以字符串过滤或 prompt 警告宣称安全
+
+#### Scenario: 主会话 preset 不影响子会话工具面
+- **WHEN** 主会话运行一个把委派工具注册进 agent 自有层的 preset（如 `standard`）
+- **THEN** 该主会话下的 locus child 仍以 Pet 指定的 preset 创建，其已发布工具面与 Pet 自建主会话下的 child 相同
+
+#### Scenario: 冷恢复不回落到父组合
+- **WHEN** Host 重启后首次向一个 independent locus child 投递
+- **THEN** runtime mount 其持久化的 preset 恢复组合，不调用父会话的组合继承；运行时不支持显式 child preset 时 locus child 能力保持 unavailable
 
 #### Scenario: 升级前的 legacy child 不可恢复服务
 - **WHEN** 一个历史 active locus 的 durable child 没有 Host attested safe-composition marker
@@ -713,3 +722,4 @@ Locus child 创建和冷恢复 SHALL 使用同一份持久、不可由 parent/us
 #### Scenario: 旧 Delivery 兼容读取
 - **WHEN** Host 恢复一个没有 addressing projection 的历史 Delivery
 - **THEN** 将 addressing 视为 unknown 并继续既有安全恢复，不伪造 mention 结构
+

@@ -170,7 +170,7 @@ index df2b6da..d950fde 100644
        const parent = this.ctx.agents.get(activation.parentSession)
        if (parent === undefined) return
 diff --git a/packages/subagent/subagent/src/continuation.ts b/packages/subagent/subagent/src/continuation.ts
-index b86d5cd..10fcd7f 100644
+index b86d5cd..4c90526 100644
 --- a/packages/subagent/subagent/src/continuation.ts
 +++ b/packages/subagent/subagent/src/continuation.ts
 @@ -20,7 +20,7 @@ import { brandString } from '@deepseek-ai/dsh-brand'
@@ -182,25 +182,17 @@ index b86d5cd..10fcd7f 100644
  import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
  import type { SessionObservation, SessionQueryEngine } from '@deepseek-ai/dsh-session-query'
  import {
-@@ -114,6 +114,17 @@ export class SubagentContinuationManager {
+@@ -114,6 +114,9 @@ export class SubagentContinuationManager {
      const agentProvider = agentOptions.provider
      const agentModel = agentOptions.model
      const agentReasoningEffort = agentOptions.reasoningEffort
 +    // Captured BEFORE any await: an independent child must persist the preset
 +    // in effect at creation, not one the parent switches to later.
-+    const capturedPreset = spec.contextMode === 'independent-v1'
-+      ? parent.ctx.get('agentPresets')?.composedPreset(parent.ctx)
-+      : undefined
-+    if (spec.contextMode === 'independent-v1' && (capturedPreset ?? '').trim() === '') {
-+      throw new SubagentError(
-+        'independent continuable child requires a resolvable parent agent preset',
-+        'INVALID_REQUEST',
-+      )
-+    }
++    const capturedPreset = resolveIndependentPreset(spec, parent)
      const descriptor = snapshotSubagentDescriptor({
        mode: 'continuable',
        provider: spec.provider,
-@@ -123,6 +134,11 @@ export class SubagentContinuationManager {
+@@ -123,6 +126,11 @@ export class SubagentContinuationManager {
        ...agentReasoningEffort !== undefined ? { agentReasoningEffort } : {},
        ...request.persona !== undefined ? { persona: request.persona } : {},
        ...request.toolFilter !== undefined ? { toolFilter: request.toolFilter } : {},
@@ -212,7 +204,7 @@ index b86d5cd..10fcd7f 100644
      })
      // Capture before the first await: a later parent switch belongs to the
      // parent's future, not to this child.
-@@ -162,13 +178,15 @@ export class SubagentContinuationManager {
+@@ -162,13 +170,15 @@ export class SubagentContinuationManager {
            parent,
            create: {
              seed,
@@ -229,7 +221,7 @@ index b86d5cd..10fcd7f 100644
            signal: spec.signal,
          })
          const childHeader = activation.handle.agent.session.header
-@@ -189,6 +207,240 @@ export class SubagentContinuationManager {
+@@ -189,6 +199,235 @@ export class SubagentContinuationManager {
      }
    }
  
@@ -262,15 +254,7 @@ index b86d5cd..10fcd7f 100644
 +    const agentReasoningEffort = agentOptions.reasoningEffort
 +    // Captured BEFORE any await: an independent child must persist the preset
 +    // in effect at creation, not one the parent switches to later.
-+    const capturedPreset = spec.contextMode === 'independent-v1'
-+      ? parent.ctx.get('agentPresets')?.composedPreset(parent.ctx)
-+      : undefined
-+    if (spec.contextMode === 'independent-v1' && (capturedPreset ?? '').trim() === '') {
-+      throw new SubagentError(
-+        'independent continuable child requires a resolvable parent agent preset',
-+        'INVALID_REQUEST',
-+      )
-+    }
++    const capturedPreset = resolveIndependentPreset(spec, parent)
 +    const descriptor = snapshotSubagentDescriptor({
 +      mode: 'continuable',
 +      provider: spec.provider,
@@ -458,6 +442,9 @@ index b86d5cd..10fcd7f 100644
 +        ...descriptor.settlementNotice !== undefined
 +          ? { settlementNotice: descriptor.settlementNotice }
 +          : {},
++        // An independent child resumes from the preset it was created under,
++        // never from whatever composition the parent runs now.
++        ...independentResumePreset(descriptor),
 +        signal,
 +      })
 +    } catch (error: unknown) {
@@ -470,7 +457,7 @@ index b86d5cd..10fcd7f 100644
    /**
     * Deliver one model-authored message to a direct continuable child or to the
     * sender's direct parent. A missing direct child cold-resumes through the
-@@ -443,6 +695,15 @@ export class SubagentContinuationManager {
+@@ -443,6 +682,18 @@ export class SubagentContinuationManager {
              : {},
          },
          composition: { persona: descriptor.persona, toolFilter: descriptor.toolFilter },
@@ -483,9 +470,66 @@ index b86d5cd..10fcd7f 100644
 +        ...descriptor.settlementNotice !== undefined
 +          ? { settlementNotice: descriptor.settlementNotice }
 +          : {},
++        // An independent child resumes from the preset it was created under,
++        // never from whatever composition the parent runs now.
++        ...independentResumePreset(descriptor),
          signal: options.signal,
        })
      } catch (error: unknown) {
+@@ -548,3 +799,53 @@ export class SubagentContinuationManager {
+ }
+ 
+ export default SubagentContinuationManager
++
++/**
++ * Resolve the preset an `independent-v1` child is created under.
++ *
++ * An explicit `spec.agentPreset` wins over the parent's live preset, so a host
++ * whose child composition must not follow the parent's user-selected preset
++ * names it directly. Must run before the first await.
++ * @param spec - the creation request.
++ * @param parent - the delegating parent.
++ * @returns the preset to persist and mount, or undefined for an ordinary child.
++ * @throws SubagentError `INVALID_REQUEST` when an explicit preset accompanies a non-independent child, or no nonblank preset resolves for an independent one.
++ */
++function resolveIndependentPreset(spec: ContinuableStartSpec, parent: Agent): string | undefined {
++  if (spec.contextMode !== 'independent-v1') {
++    if (spec.agentPreset !== undefined) {
++      throw new SubagentError(
++        'an explicit child agent preset requires contextMode "independent-v1"',
++        'INVALID_REQUEST',
++      )
++    }
++    return undefined
++  }
++  const preset = spec.agentPreset ?? parent.ctx.get('agentPresets')?.composedPreset(parent.ctx)
++  if ((preset ?? '').trim() === '') {
++    throw new SubagentError(
++      'independent continuable child requires a resolvable agent preset',
++      'INVALID_REQUEST',
++    )
++  }
++  return preset
++}
++
++/**
++ * The durable preset a cold resume must mount for an independent child.
++ * @param descriptor - the child's folded continuable descriptor.
++ * @returns the materialize input naming that preset, or nothing for an ordinary child.
++ * @throws SubagentError `NOT_RESUMABLE` when an independent descriptor records no preset.
++ */
++function independentResumePreset(
++  descriptor: { readonly contextMode?: 'independent-v1'; readonly agentPreset?: string },
++): { readonly independentAgentPreset?: string } {
++  if (descriptor.contextMode !== 'independent-v1') return {}
++  if (descriptor.agentPreset === undefined || descriptor.agentPreset.trim() === '') {
++    throw new SubagentError(
++      'independent subagent child records no agent preset and cannot be resumed',
++      'NOT_RESUMABLE',
++    )
++  }
++  return { independentAgentPreset: descriptor.agentPreset }
++}
 diff --git a/packages/subagent/subagent/src/descriptor.ts b/packages/subagent/subagent/src/descriptor.ts
 index de9191c..2ab6030 100644
 --- a/packages/subagent/subagent/src/descriptor.ts
@@ -622,7 +666,7 @@ index de9191c..2ab6030 100644
    const snapshot = snapshotJsonValue(candidate)
    if (snapshot === undefined) {
 diff --git a/packages/subagent/subagent/src/index.ts b/packages/subagent/subagent/src/index.ts
-index 8a91e06..cd0de66 100644
+index 8a91e06..b01a63f 100644
 --- a/packages/subagent/subagent/src/index.ts
 +++ b/packages/subagent/subagent/src/index.ts
 @@ -36,7 +36,7 @@ import type { Scoped } from '@deepseek-ai/dsh-scope'
@@ -644,7 +688,7 @@ index 8a91e06..cd0de66 100644
    SubagentStartRequest,
    SubagentStopReason,
    SubagentStopReasonMap,
-@@ -229,6 +231,49 @@ export class SubagentRuntime extends TypertRemoteService {
+@@ -229,6 +231,55 @@ export class SubagentRuntime extends TypertRemoteService {
      return this.requireContinuations().startContinuable(spec)
    }
  
@@ -664,6 +708,12 @@ index 8a91e06..cd0de66 100644
 +   * composes the child from its own durable saved preset.
 +   */
 +  readonly supportsIndependentContinuableCreate: true = true
++
++  /**
++   * Literal proof that `ContinuableStartSpec.agentPreset` names an
++   * independent child's preset, and that cold resume mounts the durable one.
++   */
++  readonly supportsIndependentChildAgentPreset: true = true
 +
 +  /** Literal proof that {@link withLiveContinuableChildSession} is implemented here. */
 +  readonly supportsLiveContinuableChildSession: true = true
@@ -695,10 +745,10 @@ index 8a91e06..cd0de66 100644
     * Steer one model-authored message to the sender's direct parent or direct
     * continuable child. A running target admits it at the nearest step boundary;
 diff --git a/packages/subagent/subagent/src/types.ts b/packages/subagent/subagent/src/types.ts
-index 1b9ce56..5885b22 100644
+index 1b9ce56..784d4b9 100644
 --- a/packages/subagent/subagent/src/types.ts
 +++ b/packages/subagent/subagent/src/types.ts
-@@ -45,10 +45,37 @@ export interface ContinuableStartSpec {
+@@ -45,10 +45,43 @@ export interface ContinuableStartSpec {
     * the durable descriptor, and composes the child itself.
     */
    readonly request: Omit<SubagentStartRequest, 'label' | 'signal' | 'outputSchema'>
@@ -723,6 +773,12 @@ index 1b9ce56..5885b22 100644
 +   * than whatever the parent happens to be running later.
 +   */
 +  readonly contextMode?: SubagentContextMode
++  /**
++   * Preset an `independent-v1` child composes from, named by the caller.
++   * Omission captures the parent's live preset at creation. Rejected without
++   * `independent-v1`, because an ordinary child joins the parent's composition.
++   */
++  readonly agentPreset?: string
    /** Caller cancellation, owning the operation only until inbox acceptance. */
    readonly signal: AbortSignal
  }
@@ -737,10 +793,10 @@ index 1b9ce56..5885b22 100644
  export interface ContinuableStart {
    /** The durable child session id, stable across activations. */
 diff --git a/packages/subagent/subagent/tests/continuation.spec.ts b/packages/subagent/subagent/tests/continuation.spec.ts
-index f2bbd16..536bf1b 100644
+index f2bbd16..ca4a407 100644
 --- a/packages/subagent/subagent/tests/continuation.spec.ts
 +++ b/packages/subagent/subagent/tests/continuation.spec.ts
-@@ -2475,6 +2475,136 @@ describe('continuable adjacent-Agent delivery', () => {
+@@ -2475,6 +2475,181 @@ describe('continuable adjacent-Agent delivery', () => {
    })
  })
  
@@ -847,6 +903,50 @@ index f2bbd16..536bf1b 100644
 +    expect(child.session.header.agentPreset).toBe('pet-executor')
 +  })
 +
++  it('composes an independent child from an explicit preset instead of the parent preset', async () => {
++    const { ctx, parent } = await setup([textResponse('first'), textResponse('second')])
++    const mounted: Array<string | undefined> = []
++    let joinedParent = 0
++    ctx.provide('agentPresets', {
++      composedPreset: () => 'standard',
++      composeFrom: () => { joinedParent += 1 },
++      mount: async (_childCtx: unknown, id?: string) => {
++        mounted.push(id)
++        return { id: id ?? 'standard' }
++      },
++    } as never)
++
++    const created = await ctx.subagents.createIdleContinuable({
++      ...startSpec(parent),
++      childId: SessionId('explicit-preset-child'),
++      contextMode: 'independent-v1' as const,
++      agentPreset: 'pet-executor',
++      settlementNotice: 'silent' as const,
++    })
++    expect(ctx.agents.get(created.childId)!.session.header.agentPreset).toBe('pet-executor')
++
++    // Each delivery settles to no Activation, so the second one cold-resumes;
++    // the resume must mount the durable preset, never join the parent.
++    await queuePrompt(ctx, parent, created.childId, message('first'))
++    await waitNoActivation(ctx, created.childId)
++    await queuePrompt(ctx, parent, created.childId, message('second'))
++    await waitNoActivation(ctx, created.childId)
++
++    expect(mounted.length).toBeGreaterThanOrEqual(2)
++    expect(mounted.every(id => id === 'pet-executor')).toBe(true)
++    expect(joinedParent).toBe(0)
++  })
++
++  it('refuses an explicit child preset without independent-v1', async () => {
++    const { ctx, parent } = await setup([textResponse('unused')])
++    await expect(ctx.subagents.createIdleContinuable({
++      ...startSpec(parent),
++      childId: SessionId('preset-without-independence'),
++      agentPreset: 'pet-executor',
++    })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
++    expect(ctx.agents.get(SessionId('preset-without-independence'))).toBeUndefined()
++  })
++
 +  it('refuses an independent child when no preset can be resolved', async () => {
 +    const { ctx, parent } = await setup([textResponse('unused')])
 +    ctx.provide('agentPresets', {
@@ -871,6 +971,7 @@ index f2bbd16..536bf1b 100644
 +    expect(runtime.supportsIdleContinuableCreate).toBe(true)
 +    expect(runtime.supportsLiveContinuableChildSession).toBe(true)
 +    expect(runtime.supportsIndependentContinuableCreate).toBe(true)
++    expect(runtime.supportsIndependentChildAgentPreset).toBe(true)
 +  })
 +})
 +
