@@ -14,9 +14,21 @@ import readline from 'node:readline'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { detectRemotePluginUpdates, deployedCordisVersion } from './lib/plugin-updates.mjs'
+import { applyEnvLocal, enabledEnvNames } from './lib/env-local.mjs'
+import { loadManifestWithOverlay, OVERLAY_PATH_ENV } from './lib/manifest-overlay.mjs'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const MANIFEST = path.join(REPO, 'dsh.yaml')
+
+// Same view of the overlay as `dsh build` even when run bare (spec: manifest
+// 消费脚本自行读取 .env.local 中决定部署内容的变量). Strict: this path rewrites
+// dsh.yaml and runs sync, so an unresolvable value must stop it.
+applyEnvLocal({ repo: REPO, names: [OVERLAY_PATH_ENV], strict: true })
+applyEnvLocal({
+  repo: REPO,
+  names: enabledEnvNames(loadManifestWithOverlay({ manifestPath: MANIFEST, repo: REPO, strict: true }).doc),
+  strict: true,
+})
 const args = new Set(process.argv.slice(2))
 const DRY_RUN = args.has('--dry-run')
 const YES = args.has('--yes')

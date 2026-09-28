@@ -25,6 +25,7 @@ import {
   type MemexBrowseRequest,
   type MemexBrowseResult,
   type MemexKernelView,
+  type MemexOffSource,
   type MemexRemoteAction,
   type MemexRemoteRequest,
   type MemexRemoteResult,
@@ -40,7 +41,7 @@ import { mapConcurrent } from '../run/concurrency.js'
 import { installedKernelVersion, runKernel } from '../run/kernel.js'
 import { parseSyncStatus } from '../run/sync-status.js'
 import { KERNEL_VERSION } from '../tools/descriptions.generated.js'
-import type { ScopeConfig, ScopeResolution, ScopeService } from '../scope/types.js'
+import type { OffSource, ScopeConfig, ScopeResolution, ScopeService } from '../scope/types.js'
 
 /** Sampling concurrency: the page opens rarely, but never stampede the kernel. */
 const SAMPLE_CONCURRENCY = 4
@@ -185,6 +186,10 @@ export function registerMemexChannel(ctx: Context, options: MemexChannelOptions)
     return { kernel: kernelView(probeVersion()), namespaceDir, stores }
   }
 
+  /** Field-by-field copy, so nothing beyond the contract reaches the browser. */
+  const copyOffSource = (source: OffSource): MemexOffSource =>
+    source.kind === 'workspace' ? { kind: 'workspace', path: source.path } : { kind: 'entry', scope: source.scope }
+
   /** Pure: answers for directories that do not exist, and creates nothing. */
   const resolvePath = (params: unknown): MemexResolveResult => {
     const path = (params as { path?: unknown } | undefined)?.path
@@ -197,6 +202,13 @@ export function registerMemexChannel(ctx: Context, options: MemexChannelOptions)
       publish: resolution.publish,
       publishKnown: resolution.publishKnown,
       memory: resolution.memory,
+      fallback: resolution.fallback,
+      personal: { read: resolution.personal.read, write: resolution.personal.write },
+      claim: resolution.claim.kind === 'path' ? { kind: 'path', prefix: resolution.claim.prefix } : { kind: resolution.claim.kind },
+      offBy: {
+        memory: resolution.offBy.memory.map(copyOffSource),
+        fallback: resolution.offBy.fallback.map(copyOffSource),
+      },
       source: resolution.source,
       exists: existsSync(join(resolution.home, 'cards')),
       local: resolution.source === 'local',

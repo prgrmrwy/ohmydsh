@@ -173,6 +173,52 @@ describe('memex settings channel', () => {
     expect(existsSync(target)).toBe(false)
   })
 
+  it('resolve reports fallback false with personal reachable through a binding', async () => {
+    const resolver = createScopeResolver({
+      namespaceDir: mkdtempSync(join(tmpdir(), 'dsh-memex-channel-')),
+      config: {
+        scopes: [{ name: 'kept', pathPrefixes: ['/work/kept'], fallback: false }, { name: 'shut', pathPrefixes: ['/work/shut'] }],
+        bindings: [{ name: 'kept-binding', read: ['kept', 'personal'], write: ['kept'] }],
+        workspaces: [{ path: '/work/shut', fallback: false }],
+      },
+      gitRemote: () => undefined,
+      gitRoot: () => undefined,
+    })
+    const h = harness({ scopes: resolver })
+    const kept = (await h.call(MEMEX_RESOLVE_ENDPOINT, { path: '/work/kept/src' })).value as MemexResolveResult
+    // The decision is off, yet the binding keeps personal readable (not writable).
+    expect(kept).toMatchObject({ fallback: false, personal: { read: true, write: false }, offBy: { fallback: [{ kind: 'entry', scope: 'kept' }] } })
+    const shut = (await h.call(MEMEX_RESOLVE_ENDPOINT, { path: '/work/shut' })).value as MemexResolveResult
+    expect(shut).toMatchObject({ fallback: false, personal: { read: false, write: false }, offBy: { fallback: [{ kind: 'workspace', path: '/work/shut' }] } })
+  })
+
+  it('resolve reports claim and offBy without any raw remote URL', async () => {
+    const secret = 'https://user:token-123@git.example.com/org/repo.git'
+    const resolver = createScopeResolver({
+      namespaceDir: mkdtempSync(join(tmpdir(), 'dsh-memex-channel-')),
+      config: {
+        scopes: [{ name: 'remote-lib', remotePatterns: ['org/repo'], memory: false }, { name: 'acme', pathPrefixes: ['/work/acme'] }],
+        workspaces: [{ path: '/work', memory: false }],
+      },
+      gitRemote: cwd => (cwd.startsWith('/clone') ? secret : undefined),
+      gitRoot: () => undefined,
+    })
+    const h = harness({
+      scopes: resolver,
+      workspaces: [{ id: 'w1', title: 'clone', path: '/clone' }, { id: 'w2', title: 'acme', path: '/work/acme' }],
+    })
+    const remote = (await h.call(MEMEX_RESOLVE_ENDPOINT, { path: '/clone' })).value as MemexResolveResult
+    expect(remote).toMatchObject({ claim: { kind: 'remote' }, memory: false, offBy: { memory: [{ kind: 'entry', scope: 'remote-lib' }] } })
+    const path = (await h.call(MEMEX_RESOLVE_ENDPOINT, { path: '/work/acme/src' })).value as MemexResolveResult
+    expect(path).toMatchObject({ claim: { kind: 'path', prefix: '/work/acme' }, memory: false, offBy: { memory: [{ kind: 'workspace', path: '/work' }] } })
+    const listed = await h.workspaces()
+    expect(listed.items.map(item => item.route?.claim)).toEqual([{ kind: 'remote' }, { kind: 'path', prefix: '/work/acme' }])
+    for (const payload of [remote, path, listed]) {
+      expect(JSON.stringify(payload)).not.toContain('token-123')
+      expect(JSON.stringify(payload)).not.toContain('git.example.com')
+    }
+  })
+
   it('reports ambiguous configuration instead of guessing a scope', async () => {
     const namespaceDir = mkdtempSync(join(tmpdir(), 'dsh-memex-channel-'))
     const resolver = createScopeResolver({

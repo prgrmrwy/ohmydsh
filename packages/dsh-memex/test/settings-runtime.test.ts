@@ -24,6 +24,6 @@ describe('memex settings with the real provider', () => {
     const dir = mkdtempSync(join(tmpdir(), 'dsh-memex-settings-'))
     const ctx = new Context(); contexts.push(ctx)
     await ctx.plugin(FileSettingsProvider, { path: join(dir, 'settings.yaml'), watch: false })
-    expect(registerMemexSettings(ctx).get()).toEqual({ autoDerive: true, scopes: [], bindings: [] })
+    expect(registerMemexSettings(ctx).get()).toEqual({ autoDerive: true, scopes: [], bindings: [], workspaces: [] })
   })
 })

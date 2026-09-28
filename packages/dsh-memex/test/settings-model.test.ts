@@ -2,14 +2,12 @@ import { describe, expect, it } from 'vitest'
 import type { MemexStoreView } from '../src/contract.js'
 import {
   addEntryToGroup,
-  setMemory,
   attachEntry,
   candidatesFor,
   claimersOf,
   detachEntry,
   expandPath,
   primaryOf,
-  setFallback,
   setPrimary,
   stageAssumedPrimary,
   underPath,
@@ -31,6 +29,15 @@ import {
   type EditorRow,
   type WorkspaceView,
 } from '../src/client/settings-model.js'
+import type { MemexWorkspacesResult } from '../src/contract.js'
+import { closeSwitch, type Env } from '../src/client/workspace-actions.js'
+import { recompute } from '../src/client/workspace-draft.js'
+import { attachTo, switchPrimary } from '../src/client/workspace-edits.js'
+import { scenario } from './support/workspace-env.js'
+
+function registryOf(env: Env): MemexWorkspacesResult {
+  return { known: true, homeDir: env.homeDir, items: env.registry.map((item, index) => ({ id: `w${String(index)}`, title: item.path, path: item.path, ...(item.route === undefined ? {} : { route: item.route }) })) }
+}
 
 const messages = { name: 'name', home: 'home', pattern: 'pattern', primary: 'primary' }
 
@@ -174,6 +181,13 @@ describe('workspace grouping', () => {
     expect(groups).toHaveLength(1)
     expect(groups[0]!.rows.map(item => item.name)).toEqual(['proj-internal', 'proj-public'])
     expect(groups[0]!.paths).toEqual(['/w/proj'])
+
+    // On a registered workspace a path declaration picks the primary, over the mark.
+    const declared = workspaceViews(rows, { known: true, homeDir: '/home/u', items: [{ id: 'w', title: 'proj', path: '/w/proj' }] }, [],
+      { workspaces: [{ path: '/w/proj', primary: 'proj-public' }] })[0]!
+    expect(declared.entries.map(entry => [entry.name, entry.primary])).toEqual([
+      ['proj-public', true], ['proj-internal', false], ['personal', false],
+    ])
   })
 
   it('gives a pathless entry its own block', () => {
@@ -193,6 +207,20 @@ describe('workspace grouping', () => {
   })
 
   it('keeps exactly one primary when a workspace gains a second entry', () => {
+    // A registered workspace: the existing exact claimer becomes the declared primary,
+    // and the new entry's own mark (it is primary elsewhere) is left alone.
+    const { session, env } = scenario({ scopes: [{ name: 'one', pathPrefixes: ['/w/proj'] }, { name: 'two', pathPrefixes: ['/w/two'], primary: true }] }, ['/w/proj'])
+    const done = attachTo(session, env, '/w/proj', { name: 'two', discovered: false })
+    if (!done.ok) throw new Error('refused')
+    expect(done.session.draft.workspaces).toEqual([{ path: '/w/proj', primary: 'one' }])
+    expect(toScopes(done.session.draft.rows)).toEqual([
+      { name: 'one', pathPrefixes: ['/w/proj'] },
+      { name: 'two', pathPrefixes: ['/w/two', '/w/proj'], primary: true },
+    ])
+    expect(done.notes).toContainEqual({ kind: 'declaredPrimary', path: '/w/proj', scope: 'one' })
+    expect(conflicts(done.session.draft.rows, '/ns', messages, done.session.draft.workspaces, '/home/u')).toEqual([])
+
+    // A configuration block has no registered path to declare: it keeps the entry mark.
     const rows: EditorRow[] = [row({ key: 'a', name: 'one', paths: ['/w/proj'] })]
     const added = addEntryToGroup(rows, groupsOf(rows)[0]!)
     expect(added).toHaveLength(2)
@@ -239,7 +267,8 @@ describe('workspace-first view', () => {
       homeDir: home,
       items: [{ id: 'w1', title: 'learning', path: '/home/u/Documents/learning', route: {
         path: '/home/u/Documents/learning', scope: 'documents-learning', home: '/ns/documents-learning',
-        publish: 'external', publishKnown: true, memory: true, source: 'local', exists: true, local: true,
+        publish: 'external', publishKnown: true, memory: true, fallback: true, personal: { read: true, write: true },
+        claim: { kind: 'none' }, offBy: { memory: [], fallback: [] }, source: 'local', exists: true, local: true,
       } }],
     })
     expect(views).toHaveLength(1)
@@ -276,20 +305,18 @@ describe('workspace-first view', () => {
   })
 
   it('stages the derived primary before a second claimer can steal the route', () => {
-    const rows: EditorRow[] = []
-    const view = workspaceViews(rows, {
-      known: true,
-      homeDir: home,
-      items: [{ id: 'w1', title: 'learning', path: '/home/u/Documents/learning', route: {
-        path: '/home/u/Documents/learning', scope: 'documents-learning', home: '/ns/documents-learning',
-        publish: 'external', publishKnown: true, memory: true, source: 'local', exists: true, local: true,
-      } }],
-    })[0]!
-    const staged = attachEntry(rows, view, { name: 'tools', discovered: false })
-    expect(staged.map(item => [item.name, item.primary === true])).toEqual([
-      ['documents-learning', true],
-      ['tools', false],
+    const { session, env } = scenario({ scopes: [{ name: 'tools', pathPrefixes: ['/work/tools'] }] }, ['/home/u/Documents/learning'])
+    const done = attachTo(session, env, '/home/u/Documents/learning', { name: 'tools', discovered: false })
+    if (!done.ok) throw new Error('refused')
+    expect(toScopes(done.session.draft.rows)).toEqual([
+      { name: 'tools', pathPrefixes: ['/work/tools', '/home/u/Documents/learning'] },
+      { name: 'documents-learning', pathPrefixes: ['/home/u/Documents/learning'] },
     ])
+    // The primary is decided by the workspace's declaration, not an entry mark.
+    expect(done.session.draft.workspaces).toEqual([{ path: '/home/u/Documents/learning', primary: 'documents-learning' }])
+    expect(done.notes).toContainEqual({ kind: 'stagedPrimary', scope: 'documents-learning' })
+    expect(recompute(done.session.draft, { bindings: [], homeDir: env.homeDir }, '/home/u/Documents/learning', env.registry[0]!.route).scope)
+      .toBe('documents-learning')
   })
 
   it('attaches an existing library by adding the path to its own entry', () => {
@@ -306,92 +333,152 @@ describe('workspace-first view', () => {
     expect(conflicts(next, '/ns', messages)).toEqual([])
   })
 
+  it('model path comparisons use the Host homeDir, not an empty string', () => {
+    // The live configuration writes `~/…`; an empty homeDir expands that to `/…`
+    // and every comparison against the absolute registry path silently misses.
+    const rows: EditorRow[] = [
+      row({ key: 'p', name: 'personal', paths: ['~/work/acme', '~/work/cockpit'] }),
+      row({ key: 'f', name: 'flow', paths: ['~/work/acme/'] }),
+    ]
+    const registry = { known: true as const, homeDir: home, items: [{ id: 'w1', title: 'acme', path: '/home/u/work/acme', route: {
+      path: '/home/u/work/acme', scope: 'documents-acme', home: '/ns/documents-acme', publish: 'external' as const, publishKnown: true,
+      memory: true, fallback: true, personal: { read: true, write: true }, claim: { kind: 'none' as const }, offBy: { memory: [], fallback: [] },
+      source: 'local' as const, exists: true, local: true,
+    } }] }
+    const view = workspaceViews(rows, registry)[0]!
+    // Removal drops the `~/` spelling of this workspace, and only it.
+    expect(detachEntry(rows, view, 'p')[0]!.paths).toEqual(['~/work/cockpit'])
+    expect(detachEntry(rows, view, 'f')[1]!.paths).toEqual([])
+    // Attaching a library that already claims the workspace through `~/` adds no second spelling.
+    expect(attachEntry(rows, view, { name: 'personal', discovered: false })[0]!.paths).toEqual(['~/work/acme', '~/work/cockpit'])
+    // A derived primary already declared through `~/` is not staged again.
+    const derived: EditorRow[] = [row({ key: 'd', name: 'documents-acme', paths: ['~/work/acme'] })]
+    expect(stageAssumedPrimary(derived, workspaceViews([], registry)[0]!)).toHaveLength(1)
+  })
+
   it('detaches a library from one workspace by dropping that path only', () => {
     const rows: EditorRow[] = [row({ key: 'a', name: 'personal', paths: ['/home/u/work/acme', '/home/u/work/cockpit'] })]
     const view = workspaceViews(rows, ws('/home/u/work/acme', 'acme'))[0]!
     expect(detachEntry(rows, view, 'a')[0]!.paths).toEqual(['/home/u/work/cockpit'])
   })
 
-  it('writes the fallback decision on the entry that carries the route', () => {
+  it("a fallback close writes only this workspace's declaration and leaves shared-library workspaces untouched", () => {
+    const { session, env } = scenario({
+      scopes: [{ name: 'acme', pathPrefixes: ['/home/u/work/acme', '/home/u/work/cockpit'], primary: true }, { name: 'flow', pathPrefixes: ['/home/u/work/acme'] }],
+    }, ['/home/u/work/acme', '/home/u/work/cockpit'])
+    const done = closeSwitch(session, env, '/home/u/work/acme', 'fallback')
+    if (!done.ok) throw new Error('refused')
+    expect(toScopes(done.session.draft.rows)).toEqual(toScopes(session.draft.rows))
+    expect(done.session.draft.workspaces).toEqual([{ path: '/home/u/work/acme', fallback: false }])
+    const views = workspaceViews(done.session.draft.rows, registryOf(env), [], done.session.draft)
+    const fallbackOf = (view: WorkspaceView) => view.entries.find(entry => entry.kind === 'fallback')?.enabled
+    expect(views.map(view => [view.path, fallbackOf(view)])).toEqual([['/home/u/work/acme', false], ['/home/u/work/cockpit', true]])
+  })
+
+  it('closing the fallback of an undeclared workspace adds a declaration and no scopes entry', () => {
+    const { session, env } = scenario({ scopes: [] }, ['/home/u/Documents/learning'])
+    expect(workspaceViews([], registryOf(env))[0]!.entries.map(entry => entry.kind)).toEqual(['assumed', 'fallback'])
+    const done = closeSwitch(session, env, '/home/u/Documents/learning', 'fallback')
+    if (!done.ok) throw new Error('refused')
+    expect(done.session.draft.rows).toEqual([])
+    expect(done.session.draft.workspaces).toEqual([{ path: '/home/u/Documents/learning', fallback: false }])
+    const view = workspaceViews(done.session.draft.rows, registryOf(env), [], done.session.draft)[0]!
+    expect(view.entries.find(entry => entry.kind === 'fallback')?.enabled).toBe(false)
+  })
+
+  it('closing memory in one workspace leaves another workspace on the same primary on', () => {
+    const { session, env } = scenario({ scopes: [{ name: 'personal', pathPrefixes: ['/home/u/work/acme', '/home/u/work/cockpit'] }] },
+      ['/home/u/work/acme', '/home/u/work/cockpit'])
+    const done = closeSwitch(session, env, '/home/u/work/acme', 'memory')
+    if (!done.ok) throw new Error('refused')
+    expect(toScopes(done.session.draft.rows)).toEqual([{ name: 'personal', pathPrefixes: ['/home/u/work/acme', '/home/u/work/cockpit'] }])
+    expect(done.session.draft.workspaces).toEqual([{ path: '/home/u/work/acme', memory: false }])
+    const views = workspaceViews(done.session.draft.rows, registryOf(env), [], done.session.draft)
+    expect(views.map(view => [view.path, view.memory])).toEqual([['/home/u/work/acme', false], ['/home/u/work/cockpit', true]])
+    expect(done.notes.filter(note => note.kind === 'alsoCloses')).toEqual([])
+  })
+
+  it('configuration blocks of every kind carry no switch and say why', () => {
     const rows: EditorRow[] = [
-      row({ key: 'a', name: 'acme', paths: ['/home/u/work/acme'], primary: true }),
-      row({ key: 'b', name: 'flow', paths: ['/home/u/work/acme'] }),
+      row({ key: 'a', name: 'legacy', paths: ['/srv/legacy'], memory: false }),
+      row({ key: 'b', name: 'loose', paths: [] }),
     ]
-    const view = workspaceViews(rows, ws('/home/u/work/acme', 'acme'))[0]!
-    const off = setFallback(rows, view, false)
-    expect(off.map(item => item.fallback)).toEqual([false, undefined])
-    expect(toScopes(off)).toEqual([
-      { name: 'acme', pathPrefixes: ['/home/u/work/acme'], primary: true, fallback: false },
-      { name: 'flow', pathPrefixes: ['/home/u/work/acme'] },
+    const views = workspaceViews(rows, ws('/home/u/work/acme', 'acme'))
+    expect(views.map(view => [view.title, view.switches])).toEqual([
+      ['acme', { editable: true }],
+      ['/srv/legacy', { editable: false, reason: 'unregistered' }],
+      ['loose', { editable: false, reason: 'pathless' }],
+    ])
+    // The state is still shown: legacy's entry closes memory.
+    expect(views[1]!.memory).toBe(false)
+    const degraded = workspaceViews(rows, undefined)
+    expect(degraded.map(view => view.switches)).toEqual([
+      { editable: false, reason: 'degraded' },
+      { editable: false, reason: 'degraded' },
     ])
   })
 
-  it('turns the fallback off on an undeclared workspace, staging its derived primary', () => {
-    const rows: EditorRow[] = []
-    const view = workspaceViews(rows, {
-      known: true,
-      homeDir: home,
-      items: [{ id: 'w1', title: 'learning', path: '/home/u/Documents/learning', route: {
-        path: '/home/u/Documents/learning', scope: 'documents-learning', home: '/ns/documents-learning',
-        publish: 'external', publishKnown: true, memory: true, source: 'local', exists: true, local: true,
-      } }],
-    })[0]!
-    expect(view.entries.map(entry => entry.kind)).toEqual(['assumed', 'fallback'])
-    const off = setFallback(rows, view, false)
-    // Turning the default off is a decision, so it has to be written down — and
-    // with it the primary, or the declaration itself would move the route.
-    expect(toScopes(off)).toEqual([
-      { name: 'documents-learning', pathPrefixes: ['/home/u/Documents/learning'], primary: true, fallback: false },
-    ])
-    const on = toScopes(setFallback(off, view, true))
-    expect(on[0]!.fallback).toBe(true)
+  it('setting the fallback personal row as primary replaces the old primary on that workspace', () => {
+    const { session, env } = scenario({ scopes: [] }, ['/home/u/docs/learning'])
+    const done = switchPrimary(session, env, '/home/u/docs/learning', { name: 'personal', discovered: false })
+    if (!done.ok) throw new Error('refused')
+    expect(toScopes(done.session.draft.rows)).toEqual([{ name: 'personal', pathPrefixes: ['/home/u/docs/learning'] }])
+    expect(done.notes).toContainEqual({ kind: 'replaced', path: '/home/u/docs/learning', scope: 'personal', replaced: 'docs-learning' })
+    const view = workspaceViews(done.session.draft.rows, registryOf(env), [], done.session.draft)[0]!
+    expect(view.entries.map(entry => [entry.kind, entry.name, entry.primary])).toEqual([['entry', 'personal', true]])
   })
 
-  it('switches memory off on the entry that carries the route', () => {
+  it('switching under an inherited ancestor prefix splits the workspace out and leaves siblings routed', () => {
+    const { session, env } = scenario({
+      scopes: [{ name: 'a', pathPrefixes: ['/w'], primary: true }, { name: 'b', pathPrefixes: ['/w'] }, { name: 'c', pathPrefixes: ['/o'] }],
+    }, ['/w/p', '/w/q'])
+    const done = switchPrimary(session, env, '/w/p', { name: 'c', discovered: false })
+    if (!done.ok) throw new Error('refused')
+    expect(toScopes(done.session.draft.rows)).toEqual([
+      { name: 'a', pathPrefixes: ['/w'], primary: true },
+      { name: 'b', pathPrefixes: ['/w', '/w/p'] },
+      { name: 'c', pathPrefixes: ['/o', '/w/p'] },
+    ])
+    expect(done.session.draft.workspaces).toEqual([{ path: '/w/p', primary: 'c' }])
+    const context = { bindings: [], homeDir: env.homeDir }
+    expect(recompute(done.session.draft, context, '/w/q', env.registry[1]!.route).scope).toBe('a')
+    expect(recompute(done.session.draft, context, '/w/p', env.registry[0]!.route).scope).toBe('c')
+    expect(done.notes).toContainEqual({ kind: 'replaced', path: '/w/p', scope: 'c', replaced: 'a', splitFrom: '/w' })
+  })
+
+  it("switching primary in one workspace leaves the shared library's other workspaces unchanged", () => {
+    const { session, env } = scenario({
+      scopes: [{ name: 'personal', pathPrefixes: ['/home/u/work/acme', '/home/u/work/cockpit'] }, { name: 'x', pathPrefixes: ['/o'] }],
+    }, ['/home/u/work/acme', '/home/u/work/cockpit'])
+    const done = switchPrimary(session, env, '/home/u/work/acme', { name: 'x', discovered: false })
+    if (!done.ok) throw new Error('refused')
+    expect(toScopes(done.session.draft.rows)).toEqual([
+      { name: 'personal', pathPrefixes: ['/home/u/work/cockpit'] },
+      { name: 'x', pathPrefixes: ['/o', '/home/u/work/acme'] },
+    ])
+    const views = workspaceViews(done.session.draft.rows, registryOf(env), [], done.session.draft)
+    expect(views[1]!.entries.map(entry => [entry.name, entry.primary])).toEqual([['personal', true]])
+    expect(views[1]!.memory).toBe(true)
+    expect(done.session.draft.workspaces).toEqual([])
+  })
+
+  it('blocks a workspace with no declaration and no unique mark', () => {
+    const rows: EditorRow[] = [row({ key: 'a', name: 'one', paths: ['/w/p'] }), row({ key: 'b', name: 'two', paths: ['/w/p'] })]
+    expect(conflicts(rows, '/ns', messages, [], '/home/u')).toEqual(['primary: /w/p ← one, two'])
+    expect(conflicts(rows, '/ns', messages, [{ path: '/w/p', primary: 'two' }], '/home/u')).toEqual([])
+  })
+
+  it('blocks a workspace with several marks and no declaration, and a non-exact declared primary', () => {
     const rows: EditorRow[] = [
-      row({ key: 'a', name: 'acme', paths: ['/home/u/work/acme'], primary: true }),
-      row({ key: 'b', name: 'flow', paths: ['/home/u/work/acme'] }),
+      row({ key: 'a', name: 'one', paths: ['/w/p'], primary: true }),
+      row({ key: 'b', name: 'two', paths: ['/w/p'], primary: true }),
+      row({ key: 'c', name: 'up', paths: ['/w'] }),
     ]
-    const view = workspaceViews(rows, ws('/home/u/work/acme', 'acme'))[0]!
-    expect(view.memory).toBe(true)
-    const off = setMemory(rows, view, false)
-    // The route carrier decides, exactly like the fallback switch.
-    expect(off.map(item => item.memory)).toEqual([false, undefined])
-    expect(toScopes(off)).toEqual([
-      { name: 'acme', pathPrefixes: ['/home/u/work/acme'], primary: true, memory: false },
-      { name: 'flow', pathPrefixes: ['/home/u/work/acme'] },
-    ])
-    expect(workspaceViews(off, ws('/home/u/work/acme', 'acme'))[0]!.memory).toBe(false)
-    expect(toScopes(setMemory(off, view, true))[0]!.memory).toBe(true)
-  })
-
-  it('stages the derived primary when memory is switched off on an undeclared workspace', () => {
-    const rows: EditorRow[] = []
-    const view = workspaceViews(rows, {
-      known: true,
-      homeDir: home,
-      items: [{ id: 'w1', title: 'thing', path: '/home/u/work/thing', route: {
-        path: '/home/u/work/thing', scope: 'work-thing', home: '/ns/work-thing',
-        publish: 'external', publishKnown: true, memory: true, source: 'local', exists: true, local: true,
-      } }],
-    })[0]!
-    expect(view.memory).toBe(true)
-    expect(toScopes(setMemory(rows, view, false))).toEqual([
-      { name: 'work-thing', pathPrefixes: ['/home/u/work/thing'], primary: true, memory: false },
-    ])
-  })
-
-  it('writes both switches on a declared library that claims no path', () => {
-    // The block still shows the switches, so they must still write: there is no
-    // workspace to claim, and the block's own entry is the route carrier.
-    const rows: EditorRow[] = [row({ key: 'a', name: 'legacy', paths: [] })]
-    const view = workspaceViews(rows, undefined)[0]!
-    expect(view.entries.map(entry => [entry.kind, entry.name])).toEqual([
-      ['entry', 'legacy'],
-      ['fallback', 'personal'],
-    ])
-    expect(toScopes(setMemory(rows, view, false))[0]!.memory).toBe(false)
-    expect(toScopes(setFallback(rows, view, false))[0]!.fallback).toBe(false)
+    expect(conflicts(rows, '/ns', messages, [], '/home/u')).toEqual(['primary: /w/p ← one, two'])
+    expect(conflicts(rows, '/ns', messages, [{ path: '/w/p', primary: 'one' }], '/home/u')).toEqual([])
+    // Declared on a path its primary only inherits: stale, and the Host would refuse it.
+    expect(conflicts(rows, '/ns', { ...messages, declared: 'declared' }, [{ path: '/w/p', primary: 'up' }], '/home/u'))
+      .toEqual(['primary: /w/p ← one, two', 'declared: /w/p → up'])
   })
 
   it('moves the primary inside one workspace only', () => {
@@ -445,7 +532,8 @@ describe('workspace-first view', () => {
       homeDir: home,
       items: [{ id: 'w1', title: 'learning', path: '/home/u/Documents/learning', route: {
         path: '/home/u/Documents/learning', scope: 'documents-learning', home: '/ns/documents-learning',
-        publish: 'external', publishKnown: true, memory: true, source: 'local', exists: true, local: true,
+        publish: 'external', publishKnown: true, memory: true, fallback: true, personal: { read: true, write: true },
+        claim: { kind: 'none' }, offBy: { memory: [], fallback: [] }, source: 'local', exists: true, local: true,
       } }],
     })[0]! as WorkspaceView
     expect(view.assumed).toBeUndefined()

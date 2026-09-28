@@ -11,7 +11,8 @@ import { fileURLToPath } from 'node:url'
 import yaml from 'js-yaml'
 import { runDshCli } from './lib/dsh-cli.mjs'
 import { assertHostRuntimeSources, declaredHostRuntimeFromManifest } from './lib/dsh-host-runtime.mjs'
-import { assertNoReservedEntryKeys, loadOverlayCustomizations, mergeOverlayCustomizations } from './lib/manifest-overlay.mjs'
+import { assertNoReservedEntryKeys, loadOverlayCustomizations, mergeOverlayCustomizations, OVERLAY_PATH_ENV } from './lib/manifest-overlay.mjs'
+import { applyEnvLocal, enabledEnvNames } from './lib/env-local.mjs'
 
 // Some repository tests intentionally copy sync.mjs with only its historical
 // core helpers. Keep that no-resource fixture viable while requiring the helper
@@ -72,6 +73,9 @@ const log = (msg) => console.log(`[sync] ${msg}`)
 const change = (msg) => { changes.push(msg); log(msg) }
 const fail = (msg) => { failures.push(msg); console.error(`[sync] ERROR ${msg}`) }
 
+// Name the variable and its origin, never the value (it may be a private path).
+const logEnvLocal = ({ applied }) => { for (const name of applied) log(`${name} from .env.local`) }
+
 // ---------- manifest ----------
 function loadManifest() {
   const file = path.join(REPO, 'dsh.yaml')
@@ -96,8 +100,15 @@ function loadManifest() {
   doc.customizations.forEach((item, index) => assertNoReservedEntryKeys(item, `customizations[${index}] (${item?.id})`))
   doc.customizations = doc.customizations.map((item) =>
     item !== null && typeof item === 'object' && !Array.isArray(item) ? { ...item, sourceRoot: REPO } : item)
+  // `.env.local` is only sourced by bin/dsh; a bare `node scripts/sync.mjs`
+  // must still see the same overlay and enabledEnv switches, or it silently
+  // uninstalls overlay packages (spec: manifest 消费脚本自行读取 .env.local).
+  // Two phases: the overlay path decides which entries (and thus which
+  // enabledEnv names) exist at all.
+  logEnvLocal(applyEnvLocal({ repo: REPO, names: [OVERLAY_PATH_ENV], env: process.env, strict: true }))
   const overlay = loadOverlayCustomizations({ repo: REPO, env: process.env, strict: true })
   mergeOverlayCustomizations(doc, overlay.customizations, overlay.file)
+  logEnvLocal(applyEnvLocal({ repo: REPO, names: enabledEnvNames(doc), env: process.env, strict: true }))
   // Version-fence the reviewed Host overlay before even normalizing the rest of
   // the manifest. loadManifest itself is side-effect free, and main performs no
   // profile/state operation until this entire validation returns.

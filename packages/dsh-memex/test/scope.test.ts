@@ -151,13 +151,21 @@ describe('scope resolver', () => {
     expect(resolver.accessFor('team-acme')).toEqual({ current: 'team-acme', read: ['team-acme', 'personal'], write: ['team-acme', 'personal'] })
   })
 
-  it('removes the fallback from both directions when the entry turns it off', () => {
+  it('removes the fallback from both directions when a declaration or the entry turns it off', () => {
     const resolver = createScopeResolver({
       homeDir: tempHome(),
       gitRemote: () => undefined,
       config: { scopes: [{ name: 'team-acme', fallback: false }] },
     })
     expect(resolver.accessFor('team-acme')).toEqual({ current: 'team-acme', read: ['team-acme'], write: ['team-acme'] })
+    const declared = createScopeResolver({
+      homeDir: tempHome(),
+      gitRemote: () => undefined,
+      gitRoot: () => undefined,
+      config: { scopes: [{ name: 'team-acme', pathPrefixes: ['/work/acme'] }], workspaces: [{ path: '/work/acme', fallback: false }] },
+    }).resolve('/work/acme/src')
+    expect(declared.access).toEqual({ current: 'team-acme', read: ['team-acme'], write: ['team-acme'] })
+    expect(declared.personal).toEqual({ read: false, write: false })
   })
 
   it('lets an explicit binding listing outrank a turned-off fallback', () => {
@@ -256,6 +264,21 @@ describe('local scope derivation', () => {
     expect(pathRoute.scope).toBe('proj-internal')
     expect(pathRoute.entries).toEqual(['proj-internal', 'proj-public'])
     expect(byPath.resolveByName('proj-public').entries).toEqual(['proj-public', 'proj-internal'])
+
+    // A declaration picks the primary of a path group without any entry mark.
+    const declared = createScopeResolver({
+      homeDir: tempHome(),
+      config: {
+        scopes: [
+          { name: 'proj-internal', pathPrefixes: ['/work/proj'], publish: 'internal' },
+          { name: 'proj-public', pathPrefixes: ['/work/proj'], publish: 'external' },
+        ],
+        workspaces: [{ path: '/work/proj', primary: 'proj-public' }],
+      },
+      gitRemote: () => undefined,
+      gitRoot: () => undefined,
+    }).resolve('/work/proj/src')
+    expect(declared).toMatchObject({ scope: 'proj-public', entries: ['proj-public', 'proj-internal'] })
   })
 
   it('refuses a path prefix shared by two scopes without a unique primary', () => {
@@ -271,6 +294,18 @@ describe('local scope derivation', () => {
     expect(() => resolver({}).resolve('/work/proj')).toThrow(/is claimed by one, two but has 0 primary entries/)
     expect(() => resolver({ primary: true }).resolve('/work/proj')).not.toThrow()
     expect(resolver({ primary: true }).resolve('/work/proj').scope).toBe('one')
+
+    // A declaration that closes switches but names no primary settles nothing.
+    const closedOnly = createScopeResolver({
+      homeDir: tempHome(),
+      config: {
+        scopes: [{ name: 'one', pathPrefixes: ['/work/proj'] }, { name: 'two', pathPrefixes: ['/work/proj'] }],
+        workspaces: [{ path: '/work/proj', memory: false }],
+      },
+      gitRemote: () => undefined,
+      gitRoot: () => undefined,
+    })
+    expect(() => closedOnly.resolve('/work/proj')).toThrow(/is claimed by one, two but has 0 primary entries/)
   })
 
   it('labels every route with how it was produced', () => {
@@ -288,6 +323,18 @@ describe('local scope derivation', () => {
     expect(resolver.resolve('/tmp/loose').source).toBe('local')
     expect(resolver.list().find(scope => scope.scope === 'stray')?.source).toBe('discovered')
     expect(resolver.list().find(scope => scope.scope === 'personal')?.source).toBe('implicit')
+  })
+
+  it('derives a separate library for an unclaimed repository copy outside the checkout', () => {
+    const resolver = createScopeResolver({
+      homeDir: tempHome(),
+      config: { scopes: [{ name: 'claimed', pathPrefixes: ['/work/checkout'] }] },
+      gitRemote: () => 'git@github.com:org/unclaimed.git',
+      gitRoot: cwd => cwd,
+    })
+    expect(resolver.resolve('/work/checkout')).toMatchObject({ scope: 'claimed', source: 'config' })
+    const copy = resolver.resolve('/elsewhere/copy')
+    expect(copy).toMatchObject({ scope: 'org-unclaimed', source: 'derived', entries: ['org-unclaimed'], workspacePaths: ['/elsewhere/copy'] })
   })
 
   it('keeps personal resolvable without making it the fallback', () => {

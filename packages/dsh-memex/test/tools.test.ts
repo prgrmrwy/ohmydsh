@@ -7,7 +7,8 @@ import { resetFailureLatch, telemetryFile } from '../src/telemetry/sink.js'
 import type { KernelRunner } from '../src/tools/index.js'
 import { mapConcurrent, registerMemexTools } from '../src/tools/index.js'
 import { TOOL_DESCRIPTIONS } from '../src/tools/descriptions.generated.js'
-import type { BindingEntry, ScopeResolution, ScopeService } from '../src/scope/types.js'
+import type { BindingEntry, ScopeConfig, ScopeResolution, ScopeService } from '../src/scope/types.js'
+import { createScopeResolver } from '../src/scope/resolver.js'
 
 /**
  * Every search writes a telemetry record. Without an isolated DSH home the
@@ -41,6 +42,10 @@ function scope(name: string, binding?: BindingEntry, memory = true): ScopeResolu
     publish: name === 'internal' || name === 'current' ? 'internal' : 'external',
     publishKnown: true,
     memory,
+    fallback: true,
+    personal: { read: read.includes('personal'), write: write.includes('personal') },
+    claim: { kind: 'none' },
+    offBy: { memory: memory ? [] : [{ kind: 'entry', scope: name }], fallback: [] },
     source: 'config',
     created: false,
     workspacePaths: name === 'internal' || name === 'current' ? [`/work/${name}`] : [],
@@ -86,6 +91,23 @@ function capture(runner: KernelRunner, binding?: BindingEntry, concurrency?: num
 }
 
 const exec = { agent: { session: { header: { cwd: '/workspace/current' } } } }
+const execAt = (cwd: string) => ({ agent: { session: { header: { cwd } } } })
+
+/** Tools over a real resolver, so a declaration is judged the way the Host judges it. */
+function captureReal(runner: KernelRunner, config: Partial<ScopeConfig>): Map<string, ToolDefinition> {
+  const real = createScopeResolver({
+    homeDir: mkdtempSync(join(tmpdir(), 'dsh-memex-tools-real-')),
+    gitRemote: () => undefined,
+    gitRoot: () => undefined,
+    config,
+  })
+  return capture(runner, undefined, undefined, real)
+}
+
+async function callAt(tool: ToolDefinition, args: unknown, cwd: string): Promise<Record<string, unknown>> {
+  const value = await tool.execute(args, execAt(cwd) as never) as { json: string }
+  return JSON.parse(value.json) as Record<string, unknown>
+}
 
 async function call(tool: ToolDefinition, args: unknown): Promise<Record<string, unknown>> {
   const value = await tool.execute(args, exec as never) as { json: string }
@@ -197,6 +219,47 @@ describe('memex DSH tool registration', () => {
     }
     // Nothing reached the kernel, so no card was written anywhere.
     expect(runner).not.toHaveBeenCalled()
+
+    // The same refusal holds when a path declaration, not the entry, closed it —
+    // including a child directory — and no library directory is created.
+    const declared: KernelRunner = vi.fn(async () => ok(''))
+    const home = mkdtempSync(join(tmpdir(), 'dsh-memex-tools-off-'))
+    const real = createScopeResolver({
+      homeDir: home, gitRemote: () => undefined, gitRoot: () => undefined,
+      config: { scopes: [{ name: 'proj', pathPrefixes: ['/w/proj'] }], workspaces: [{ path: '/w/proj', memory: false }] },
+    })
+    const declaredTools = capture(declared, undefined, undefined, real)
+    for (const cwd of ['/w/proj', '/w/proj/sub']) {
+      await expect(callAt(declaredTools.get('memex_write')!, { slug: 'x', content: '---\ntitle: X\n---\nBody\n' }, cwd))
+        .rejects.toThrow(/Memory is off for this workspace \(scope proj\)/)
+    }
+    expect(declared).not.toHaveBeenCalled()
+    expect(existsSync(join(home, '.dsh-memex'))).toBe(false)
+  })
+
+  it('a memory-off workspace\'s primary stays writable as another workspace\'s fallback target', async () => {
+    // `/w/off` is served by personal and has memory off; `/w/on` falls back to personal.
+    const runner: KernelRunner = vi.fn(async () => ok())
+    const tools = captureReal(runner, {
+      scopes: [{ name: 'personal', pathPrefixes: ['/w/off'] }, { name: 'on', pathPrefixes: ['/w/on'] }],
+      workspaces: [{ path: '/w/off', memory: false }],
+    })
+    const result = await callAt(tools.get('memex_write')!, { slug: 'shared', content: 'body', scope: 'personal' }, '/w/on')
+    expect(result.additional).toEqual([expect.objectContaining({ scope: 'personal', written: true })])
+    expect(runner).toHaveBeenLastCalledWith(['write', '--', 'shared'], expect.objectContaining({ home: expect.stringMatching(/personal$/) }))
+  })
+
+  it('closing memory in one workspace leaves a workspace sharing its primary fully working', async () => {
+    const runner: KernelRunner = vi.fn(async () => ok('## card\nCard\nBody\n'))
+    const tools = captureReal(runner, {
+      scopes: [{ name: 'personal', pathPrefixes: ['/w/a', '/w/b'] }],
+      workspaces: [{ path: '/w/a', memory: false }],
+    })
+    await expect(callAt(tools.get('memex_search')!, { query: 'card' }, '/w/a')).rejects.toThrow(/Memory is off/)
+    expect(runner).not.toHaveBeenCalled()
+    const found = await callAt(tools.get('memex_search')!, { query: 'card' }, '/w/b')
+    expect(found).toBeDefined()
+    expect(runner).toHaveBeenCalled()
   })
 
   it('reads a concrete readable scope and reports the route', async () => {

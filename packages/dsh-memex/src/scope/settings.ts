@@ -27,6 +27,14 @@ export const MemexSettingsSchema = Schema.object({
     read: stringList(),
     write: stringList(),
   })).default([]),
+  // Declarations only close: `true` is not a value, so "open" means deleting the
+  // closure rather than overriding one set elsewhere.
+  workspaces: Schema.array(Schema.object({
+    path: Schema.string().required(),
+    primary: Schema.string(),
+    memory: Schema.const(false),
+    fallback: Schema.const(false),
+  })).default([]),
 })
 
 export type MemexSettings = ScopeConfig
@@ -74,17 +82,63 @@ function validateExclusiveClaims(value: ScopeConfig): void {
     for (const pattern of entry.remotePatterns ?? []) claim(patterns, pattern, entry.name)
   }
 
+  const declared = validateWorkspaceDeclarations(value, paths)
+
   const primaries = new Set(entries.filter(entry => entry.primary === true).map(entry => entry.name))
   for (const [kind, claims] of [['path prefix', paths], ['remote pattern', patterns]] as const) {
     for (const [key, names] of claims) {
       const unique = [...new Set(names)]
       if (unique.length < 2) continue
+      // A declaration already proved to name an exact claimer settles the group.
+      if (kind === 'path prefix' && declared.has(key)) continue
       const marked = unique.filter(name => primaries.has(name))
       if (marked.length !== 1) {
-        throw new Error(`${kind} ${key} is claimed by ${unique.join(', ')} but has ${marked.length} primary entries; mark exactly one with primary: true`)
+        const remedy = kind === 'path prefix'
+          ? 'mark exactly one with primary: true, or declare its primary under workspaces'
+          : 'mark exactly one with primary: true'
+        throw new Error(`${kind} ${key} is claimed by ${unique.join(', ')} but has ${marked.length} primary entries; ${remedy}`)
       }
     }
   }
+}
+
+/**
+ * Judge the path-keyed workspace declarations.
+ *
+ * Paths are normalized like path prefixes and must be unique, the switches may
+ * only close, and a declared primary must claim exactly that path — a claim on
+ * an ancestor is inherited routing, not membership of this group.
+ * @param value - the candidate settings section.
+ * @param paths - normalized path prefix → the scope names claiming it.
+ * @returns the normalized paths whose declaration names a primary.
+ */
+function validateWorkspaceDeclarations(value: ScopeConfig, paths: ReadonlyMap<string, readonly string[]>): Set<string> {
+  const scopeNames = new Set(['personal', ...value.scopes.map(entry => entry.name)])
+  const seen = new Map<string, number>()
+  const declared = new Set<string>()
+  for (const [index, declaration] of (value.workspaces ?? []).entries()) {
+    const raw = typeof declaration.path === 'string' ? declaration.path : ''
+    if (raw.trim() === '') throw new Error(`workspaces[${index}] has no path`)
+    const label = `workspaces[${index}] (${raw})`
+    for (const key of ['memory', 'fallback'] as const) {
+      if (declaration[key] !== undefined && declaration[key] !== false) {
+        throw new Error(`${label}: ${key} may only be false; open a workspace by removing the declaration`)
+      }
+    }
+    const path = normalizePath(raw)
+    const prior = seen.get(path)
+    if (prior !== undefined) throw new Error(`${label} duplicates workspaces[${prior}]: both declare ${path}`)
+    seen.set(path, index)
+    if (declaration.primary === undefined) continue
+    if (!scopeNames.has(declaration.primary)) {
+      throw new Error(`${label}: primary ${declaration.primary} is not a declared scope`)
+    }
+    if (!(paths.get(path) ?? []).includes(declaration.primary)) {
+      throw new Error(`${label}: primary ${declaration.primary} does not claim this exact path`)
+    }
+    declared.add(path)
+  }
+  return declared
 }
 
 export function validateMemexSettings(value: ScopeConfig): void {

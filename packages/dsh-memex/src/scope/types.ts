@@ -41,10 +41,34 @@ export interface BindingEntry {
   readonly write: readonly string[]
 }
 
+/**
+ * A decision about a directory, independent of which library serves it.
+ *
+ * A library can serve several workspaces, so a decision written on its entry
+ * (`ScopeEntry.memory`, `.fallback`, `.primary`) moves with it into every one of
+ * them. A declaration is keyed by path instead and only ever closes: `memory`
+ * and `fallback` accept nothing but `false`, and a closure covers every session
+ * cwd at or under `path` however that session is routed — path claim, remote
+ * claim, derivation or local derivation. A directory closed this way can only
+ * be reopened by deleting the declaration.
+ *
+ * `primary` is the one exception: it belongs to the group of entries that claim
+ * exactly `path`, and it takes part only when a session is routed by path and
+ * the deepest matching prefix is `path` itself.
+ */
+export interface WorkspaceDeclaration {
+  readonly path: string
+  readonly primary?: string
+  readonly memory?: false
+  readonly fallback?: false
+}
+
 export interface ScopeConfig {
   readonly autoDerive: boolean
   readonly scopes: readonly ScopeEntry[]
   readonly bindings: readonly BindingEntry[]
+  /** Absent is the same as empty: a section written before declarations existed. */
+  readonly workspaces?: readonly WorkspaceDeclaration[]
 }
 
 export interface ScopeResolution {
@@ -72,11 +96,43 @@ export interface ScopeResolution {
   readonly entries: readonly string[]
   /** Reachable entries for a session whose current scope is this route. */
   readonly access: ScopeAccess
-  /** False when this workspace has memory switched off; see `ScopeEntry.memory`. */
+  /**
+   * False when memory is off for this route: a workspace declaration covering
+   * the session cwd closed it, or the primary entry did (`ScopeEntry.memory`).
+   */
   readonly memory: boolean
+  /**
+   * The fallback *decision* (the default grant of `personal`), decided like
+   * `memory`. Not reachability: a binding may still list `personal` — see
+   * {@link ScopeResolution.personal}.
+   */
+  readonly fallback: boolean
+  /**
+   * Whether `personal` is actually reachable from this route, per direction,
+   * after bindings: what a session here can really read and write.
+   */
+  readonly personal: { readonly read: boolean; readonly write: boolean }
+  /**
+   * How the session cwd was claimed: by a declared path prefix (the deepest
+   * one), by a remote pattern, or by nothing (derived, local, or a name-only
+   * lookup that has no cwd).
+   */
+  readonly claim: ScopeClaim
+  /** Every source that closed `memory` / `fallback`, outermost declaration first. */
+  readonly offBy: { readonly memory: readonly OffSource[]; readonly fallback: readonly OffSource[] }
   readonly created: boolean
   readonly workspacePaths: readonly string[]
 }
+
+export type ScopeClaim =
+  | { readonly kind: 'path'; readonly prefix: string }
+  | { readonly kind: 'remote' }
+  | { readonly kind: 'none' }
+
+/** A closure source: a path declaration, or the primary entry's own field. */
+export type OffSource =
+  | { readonly kind: 'workspace'; readonly path: string }
+  | { readonly kind: 'entry'; readonly scope: string }
 
 export interface ScopeAccess {
   readonly current: string
@@ -110,4 +166,5 @@ export const DEFAULT_SCOPE_CONFIG: ScopeConfig = {
   autoDerive: true,
   scopes: [],
   bindings: [],
+  workspaces: [],
 }

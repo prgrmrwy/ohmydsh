@@ -10,6 +10,8 @@
  * @module dsh-memex/client/settings-model
  */
 import type { MemexStoreView, MemexWorkspacesResult } from '../contract.js'
+import { expandPath, segmentCount, underPath } from './paths.js'
+import { claimPrimary, coveringDeclarations, pathClaimOf, recompute } from './workspace-draft.js'
 
 /** One scope entry as stored in the settings section. */
 export interface MemexScopeEntry {
@@ -23,9 +25,42 @@ export interface MemexScopeEntry {
   readonly memory?: boolean
 }
 
+/**
+ * One path-keyed workspace declaration, as stored.
+ *
+ * Mirrors the Host's `WorkspaceDeclaration`: the switches only ever close, and a
+ * closure covers every directory at or under `path` however it is routed.
+ */
+export interface MemexWorkspaceDeclaration {
+  readonly path: string
+  readonly primary?: string
+  readonly memory?: false
+  readonly fallback?: false
+}
+
+/** One binding, read-only on this page: it only adds reachability. */
+export interface MemexBinding {
+  readonly name: string
+  readonly read: readonly string[]
+  readonly write: readonly string[]
+}
+
 /** The part of the settings section this page reads. */
 export interface MemexSettingsShape {
   readonly scopes?: readonly MemexScopeEntry[]
+  readonly workspaces?: readonly MemexWorkspaceDeclaration[]
+  readonly bindings?: readonly MemexBinding[]
+}
+
+/**
+ * What the page edits: the entries and the path declarations.
+ *
+ * Bindings are not part of it — the page reads them from the same snapshot to
+ * compute reachability and never writes them.
+ */
+export interface Draft {
+  readonly rows: readonly EditorRow[]
+  readonly workspaces: readonly MemexWorkspaceDeclaration[]
 }
 
 /** One editable row: a memory library and the workspaces claimed for it. */
@@ -87,6 +122,8 @@ export interface WorkspaceView {
   readonly title: string
   /** Absolute workspace directory; empty for a block built only from config paths. */
   readonly path: string
+  /** The Host's home directory, for expanding configured `~/…` prefixes; empty when unknown. */
+  readonly homeDir: string
   /** False when this block came from configuration because no workspace registry existed. */
   readonly fromRegistry: boolean
   /** The editable paths this block's entries claim. */
@@ -96,10 +133,48 @@ export interface WorkspaceView {
   readonly assumed?: { readonly scope: string; readonly home: string; readonly source: string }
   /** False when memory is switched off for this workspace. */
   readonly memory: boolean
+  /**
+   * Whether the page may write this block's memory and fallback switches.
+   *
+   * Only a registered workspace can: a switch writes a path declaration, and the
+   * guard that keeps closed workspaces closed compares registered workspaces
+   * only. Every other block shows the state and says why it cannot change it.
+   */
+  readonly switches: BlockSwitches
+  /**
+   * How a registered workspace is claimed on the draft, which decides the claim
+   * actions it offers: none on a remote-claimed one, and an attach on an
+   * inherited one makes the new entry its primary. Absent on configuration blocks.
+   */
+  readonly claim?: BlockClaim
+  /**
+   * The fallback decision against `personal`'s actual reach on the draft, for
+   * the "still reachable through a binding" annotation. Registered blocks only.
+   */
+  readonly reach?: { readonly read: boolean; readonly write: boolean; readonly entry: boolean; readonly binding?: string }
   /** Declared entries that could still be attached to this workspace. */
   readonly candidates: readonly EntryCandidate[]
   /** The configuration group behind a block that has no workspace, for path editing. */
   readonly group?: WorkspaceGroup
+}
+
+/** How a registered workspace is routed: see {@link WorkspaceView.claim}. */
+export type BlockClaim =
+  | { readonly kind: 'exact' }
+  | { readonly kind: 'inherited'; readonly prefix: string; readonly scopes: readonly string[] }
+  | { readonly kind: 'remote' }
+  | { readonly kind: 'derived' }
+  | { readonly kind: 'unknown' }
+
+/** Why a block's switches are read-only. */
+export type BlockSwitches =
+  | { readonly editable: true }
+  | { readonly editable: false; readonly reason: 'unregistered' | 'pathless' | 'degraded' }
+
+/** The workspace-level parts of a draft the views read besides its rows. */
+export interface ViewDecisions {
+  readonly workspaces?: readonly MemexWorkspaceDeclaration[]
+  readonly bindings?: readonly MemexBinding[]
 }
 
 /** One option in the "add an entry" picker. */
@@ -250,7 +325,9 @@ export function undeclaredStores(
 export function conflicts(
   rows: readonly EditorRow[],
   namespaceDir: string,
-  messages: { name: string; home: string; pattern: string; primary: string },
+  messages: { name: string; home: string; pattern: string; primary: string; declared?: string },
+  workspaces: readonly MemexWorkspaceDeclaration[] = [],
+  homeDir = '',
 ): string[] {
   const problems: string[] = []
   const named = new Set<string>()
@@ -270,22 +347,47 @@ export function conflicts(
     homes.set(home, name === '' ? `#${String(index + 1)}` : name)
   })
 
+  // A path declaration settles its group only when it names an exact claimer;
+  // otherwise the Host refuses it, so the page does too.
+  const exact = new Map<string, Set<string>>()
+  for (const row of rows) {
+    for (const path of row.paths) {
+      if (path.trim() === '') continue
+      const key = expandPath(path.trim(), homeDir)
+      exact.set(key, new Set([...(exact.get(key) ?? []), row.name.trim()]))
+    }
+  }
+  const settled = new Set<string>()
+  const stale: string[] = []
+  for (const declaration of workspaces) {
+    if (declaration.primary === undefined) continue
+    const key = expandPath(declaration.path, homeDir)
+    if (exact.get(key)?.has(declaration.primary) === true) settled.add(key)
+    else stale.push(`${messages.declared ?? messages.primary}: ${declaration.path} → ${declaration.primary}`)
+  }
+
   // One workspace, several entries: exactly one of them must be the primary.
-  const claims = (pairs: Array<[string, EditorRow]>): void => {
-    const byWorkspace = new Map<string, EditorRow[]>()
-    for (const [key, row] of pairs) byWorkspace.set(key, [...(byWorkspace.get(key) ?? []), row])
-    for (const [key, claimers] of byWorkspace) {
-      const unique = [...new Map(claimers.map(row => [row.name.trim(), row])).values()]
-      if (unique.length < 2) continue
+  const claims = (pairs: Array<[string, string, EditorRow]>, declarable: boolean): void => {
+    const byWorkspace = new Map<string, { label: string; rows: EditorRow[] }>()
+    for (const [key, label, row] of pairs) {
+      const group = byWorkspace.get(key) ?? { label, rows: [] }
+      group.rows.push(row)
+      byWorkspace.set(key, group)
+    }
+    for (const [key, group] of byWorkspace) {
+      const unique = [...new Map(group.rows.map(row => [row.name.trim(), row])).values()]
+      if (unique.length < 2 || (declarable && settled.has(key))) continue
       const primaries = unique.filter(row => row.primary === true)
       if (primaries.length !== 1) {
-        problems.push(`${messages.primary}: ${key} ← ${unique.map(row => row.name.trim()).join(', ')}`)
+        problems.push(`${messages.primary}: ${group.label} ← ${unique.map(row => row.name.trim()).join(', ')}`)
       }
     }
   }
-  claims(rows.flatMap(row => row.paths.map(path => path.trim()).filter(path => path !== '').map(path => [path, row] as [string, EditorRow])))
-  claims(rows.flatMap(row => row.repos.map(pattern => pattern.trim()).filter(pattern => pattern !== '').map(pattern => [pattern, row] as [string, EditorRow])))
-  return problems
+  claims(rows.flatMap(row => row.paths.map(path => path.trim()).filter(path => path !== '')
+    .map(path => [expandPath(path, homeDir), path, row] as [string, string, EditorRow])), true)
+  claims(rows.flatMap(row => row.repos.map(pattern => pattern.trim()).filter(pattern => pattern !== '')
+    .map(pattern => [pattern, pattern, row] as [string, string, EditorRow])), false)
+  return [...problems, ...stale]
 }
 
 /** One workspace group: the paths it covers and the entries that claim them. */
@@ -417,34 +519,7 @@ export function setPrimaryInGroup(rows: readonly EditorRow[], group: WorkspaceGr
  * Workspace-first view (the page's skeleton)
  * ------------------------------------------------------------------ */
 
-/** Expand a leading `~` using the Host's home directory and drop trailing slashes. */
-export function expandPath(path: string, homeDir: string): string {
-  const trimmed = path.trim()
-  const expanded = trimmed === '~'
-    ? homeDir
-    : trimmed.startsWith('~/')
-      ? `${homeDir.replace(/\/+$/, '')}/${trimmed.slice(2)}`
-      : trimmed
-  return expanded.length > 1 ? expanded.replace(/\/+$/, '') : expanded
-}
-
-function segmentCount(path: string): number {
-  return path.split('/').filter(Boolean).length
-}
-
-/**
- * Whether `path` is `prefix` or lives under it — the Host's own rule.
- *
- * Compared segment-wise, so `/a/bc` is not under `/a/b`. Both sides are expanded
- * first: configured prefixes are usually written `~/…` while a workspace path is
- * always absolute, and comparing the two raw strings would match nothing.
- */
-export function underPath(path: string, prefix: string, homeDir: string): boolean {
-  const a = expandPath(path, homeDir)
-  const b = expandPath(prefix, homeDir)
-  if (b === '') return false
-  return a === b || a.startsWith(`${b}/`)
-}
+export { expandPath, segmentCount, underPath }
 
 /**
  * The entries claiming one workspace directory.
@@ -472,8 +547,8 @@ export function primaryOf(claimers: readonly EditorRow[]): EditorRow | undefined
   return undefined
 }
 
-function entryRows(claimers: readonly EditorRow[]): WorkspaceEntryRow[] {
-  const primary = primaryOf(claimers)
+function entryRows(claimers: readonly EditorRow[], chosen: EditorRow | undefined = primaryOf(claimers)): WorkspaceEntryRow[] {
+  const primary = chosen
   return claimers
     .map((row): WorkspaceEntryRow => ({
       kind: 'entry',
@@ -502,8 +577,12 @@ export function workspaceViews(
   rows: readonly EditorRow[],
   workspaces: MemexWorkspacesResult | undefined,
   stores: readonly MemexStoreView[] | undefined = [],
+  decisions: ViewDecisions = {},
 ): WorkspaceView[] {
   const homeDir = workspaces?.homeDir ?? ''
+  const declarations = decisions.workspaces ?? []
+  const draft: Draft = { rows, workspaces: declarations }
+  const context = { bindings: decisions.bindings ?? [], homeDir }
   const views: WorkspaceView[] = []
   const covered = new Set<string>()
 
@@ -517,30 +596,46 @@ export function workspaceViews(
         }
       }
       covered.add(path)
-      const primary = primaryOf(claimers)
-      const entries = entryRows(claimers)
+      // The draft recomputation applies the declared primary, then the mark.
+      const claim = pathClaimOf(rows, path, homeDir)
+      const decided = recompute(draft, context, path, item.route)
+      const remote = claim === undefined && item.route?.claim?.kind === 'remote'
+      // A remote-claimed workspace's primary is a declared library, not a derived
+      // proposal: shown as that entry, with nothing staged for it.
+      const remoteRow = remote ? rows.find(row => row.name.trim() === item.route?.scope) : undefined
+      const primary = claim !== undefined ? claimPrimary(claim, declarations, homeDir) : remoteRow
+      const entries = entryRows(remoteRow === undefined ? claimers : [remoteRow], primary)
       if (primary === undefined && item.route !== undefined) {
         entries.unshift({ kind: 'assumed', name: item.route.scope, primary: true })
       }
       // The fallback is a property of the workspace's route, so an undeclared
-      // workspace has one too — turning it off is what stages a declaration.
-      if (primary !== undefined && primary.name.trim() !== 'personal') {
-        entries.push({ kind: 'fallback', name: 'personal', primary: false, enabled: primary.fallback !== false })
-      } else if (primary === undefined && item.route !== undefined && item.route.scope !== 'personal') {
-        entries.push({ kind: 'fallback', name: 'personal', primary: false, enabled: true })
+      // workspace has one too. It is not shown once `personal` is an entry here:
+      // explicitly attached, a default grant of it means nothing.
+      const current = primary?.name.trim() ?? item.route?.scope
+      const personalHere = current === 'personal' || entries.some(entry => entry.kind === 'entry' && entry.name === 'personal')
+      if (current !== undefined && !personalHere) {
+        entries.push({ kind: 'fallback', name: 'personal', primary: false, enabled: decided.fallback })
       }
+      const blockClaim: BlockClaim = claim !== undefined
+        ? (claim.prefix === path ? { kind: 'exact' } : { kind: 'inherited', prefix: claim.prefix, scopes: claim.claimers.map(row => row.name.trim()) })
+        : remote ? { kind: 'remote' }
+          : item.route?.claim?.kind === 'none' ? { kind: 'derived' } : { kind: 'unknown' }
       views.push({
         key: `ws:${item.id}`,
         title: item.title.trim() === '' ? path : item.title,
         path,
+        homeDir,
         fromRegistry: true,
         paths: [path],
         entries,
-        memory: primary === undefined ? item.route?.memory !== false : primary.memory !== false,
+        memory: decided.memory,
+        switches: { editable: true },
+        claim: blockClaim,
+        reach: { ...decided.personal, entry: decided.personalEntry, ...(decided.binding === undefined ? {} : { binding: decided.binding }) },
         ...(primary === undefined && item.route !== undefined
           ? { assumed: { scope: item.route.scope, home: item.route.home, source: item.route.source } }
           : {}),
-        candidates: candidatesFor(rows, stores, claimers),
+        candidates: remote ? [] : candidatesFor(rows, stores, claim?.prefix === path ? claimers : []),
       })
     }
   }
@@ -551,17 +646,24 @@ export function workspaceViews(
   for (const group of groupsOf(leftovers)) {
     const primary = primaryOf(group.rows)
     const entries = entryRows(group.rows.filter(row => row.name.trim() !== ''))
-    if (primary !== undefined && primary.name.trim() !== 'personal') {
-      entries.push({ kind: 'fallback', name: 'personal', primary: false, enabled: primary.fallback !== false })
+    const covering = group.paths.length === 0 ? [] : coveringDeclarations(declarations, expandPath(group.paths[0]!, homeDir), homeDir)
+    const fallbackOn = primary?.fallback !== false && !covering.some(declaration => declaration.fallback === false)
+    if (primary !== undefined && !group.rows.some(row => row.name.trim() === 'personal')) {
+      entries.push({ kind: 'fallback', name: 'personal', primary: false, enabled: fallbackOn })
     }
     views.push({
       key: `cfg:${group.key}`,
       title: group.paths[0] ?? group.rows[0]?.name.trim() ?? '',
       path: group.paths[0] ?? '',
+      homeDir,
       fromRegistry: false,
       paths: group.paths,
       entries,
-      memory: primary === undefined || primary.memory !== false,
+      memory: primary?.memory !== false && !covering.some(declaration => declaration.memory === false),
+      switches: {
+        editable: false,
+        reason: workspaces?.known !== true ? 'degraded' : group.paths.length === 0 ? 'pathless' : 'unregistered',
+      },
       candidates: candidatesFor(rows, stores, group.rows),
       group,
     })
@@ -600,7 +702,7 @@ export function candidatesFor(
 export function stageAssumedPrimary(rows: readonly EditorRow[], view: WorkspaceView): EditorRow[] {
   const assumed = view.assumed
   if (assumed === undefined || view.path === '') return [...rows]
-  const already = claimersOf(rows, view.path, '').some(row => row.name.trim() === assumed.scope)
+  const already = claimersOf(rows, view.path, view.homeDir).some(row => row.name.trim() === assumed.scope)
   if (already) return [...rows]
   addedCounter += 1
   return [...rows, {
@@ -609,7 +711,6 @@ export function stageAssumedPrimary(rows: readonly EditorRow[], view: WorkspaceV
     paths: [view.path],
     repos: [],
     home: '',
-    primary: true,
     saved: false,
   }]
 }
@@ -648,49 +749,19 @@ export function attachEntry(
   }
   return base.map(row => {
     if (row.name.trim() !== candidate.name || path === '') return row
-    if (row.paths.some(own => underPath(path, own, ''))) return { ...row, primary: false }
+    if (row.paths.some(own => underPath(path, own, view.homeDir))) return { ...row, primary: false }
     return { ...row, paths: [...row.paths, path], primary: false }
   })
 }
 
 /**
- * The entry that carries a block's route-level decisions.
+ * Move the primary mark to another entry of a configuration block.
  *
- * Normally the workspace's primary claimer. A block built from a declared library
- * that claims no path at all has no workspace to claim — there the block's own
- * entry is the route carrier, which is also why such a block shows the switches.
+ * Registered workspaces switch through `switchPrimary` instead, which writes the
+ * workspace's declaration: a mark decides every path its library claims.
  */
-function routeOwnerOf(rows: readonly EditorRow[], view: WorkspaceView): EditorRow | undefined {
-  const claimers = claimersOf(rows, view.path, '').filter(row => row.name.trim() !== '')
-  if (claimers.length > 0) return primaryOf(claimers)
-  return primaryOf(view.entries.filter(entry => entry.kind === 'entry' && entry.row !== undefined).map(entry => entry.row!))
-}
-
-/** Turn the workspace's fallback grant on or off, on the entry that carries it. */
-export function setFallback(rows: readonly EditorRow[], view: WorkspaceView, enabled: boolean): EditorRow[] {
-  const base = stageAssumedPrimary(rows, view)
-  const owner = routeOwnerOf(base, view)
-  if (owner === undefined) return base
-  return base.map(row => (row.key === owner.key ? { ...row, fallback: enabled } : row))
-}
-
-/**
- * Switch memory on or off for one workspace.
- *
- * Written on the entry that carries the route, and staged as a declaration when
- * the workspace had none — the same rule the fallback switch follows, for the
- * same reason: a declaration for anything else would move the route.
- */
-export function setMemory(rows: readonly EditorRow[], view: WorkspaceView, enabled: boolean): EditorRow[] {
-  const base = stageAssumedPrimary(rows, view)
-  const owner = routeOwnerOf(base, view)
-  if (owner === undefined) return base
-  return base.map(row => (row.key === owner.key ? { ...row, memory: enabled } : row))
-}
-
-/** Move the primary flag to another entry of the same workspace. */
 export function setPrimary(rows: readonly EditorRow[], view: WorkspaceView, key: string): EditorRow[] {
-  const members = new Set(claimersOf(rows, view.path, '').map(row => row.key))
+  const members = new Set(claimersOf(rows, view.path, view.homeDir).map(row => row.key))
   return rows.map(row => {
     if (row.key === key) return { ...row, primary: true }
     if (members.has(row.key)) return { ...row, primary: false }
@@ -701,6 +772,6 @@ export function setPrimary(rows: readonly EditorRow[], view: WorkspaceView, key:
 /** Drop a library from a workspace by removing that workspace path from its entry. */
 export function detachEntry(rows: readonly EditorRow[], view: WorkspaceView, key: string): EditorRow[] {
   return rows.map(row => (row.key === key && view.path !== ''
-    ? { ...row, paths: row.paths.filter(path => expandPath(path, '') !== view.path) }
+    ? { ...row, paths: row.paths.filter(path => expandPath(path, view.homeDir) !== view.path) }
     : row))
 }

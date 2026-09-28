@@ -4,7 +4,9 @@ import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type {
   BindingEntry,
+  OffSource,
   ScopeAccess,
+  ScopeClaim,
   PublishDirection,
   ScopeConfig,
   ScopeEntry,
@@ -22,14 +24,14 @@ function normalizePath(path: string, home = homedir()): string {
   return absolute.length > 1 ? absolute.replace(/[\\/]$/, '') : absolute
 }
 
-function pathSegmentMatches(cwd: string, prefix: string): boolean {
-  const a = normalizePath(cwd)
-  const b = normalizePath(prefix)
+function pathSegmentMatches(cwd: string, prefix: string, home = homedir()): boolean {
+  const a = normalizePath(cwd, home)
+  const b = normalizePath(prefix, home)
   return a === b || a.startsWith(`${b}${sep}`)
 }
 
-function segmentCount(path: string): number {
-  return normalizePath(path).split(/[\\/]+/).filter(Boolean).length
+function segmentCount(path: string, home = homedir()): number {
+  return normalizePath(path, home).split(/[\\/]+/).filter(Boolean).length
 }
 
 function remotePath(remote: string): string | undefined {
@@ -120,8 +122,13 @@ function normalizedRemote(remote: string): string {
 }
 
 function publishFor(entry: ScopeEntry | undefined): PublishDirection { return entry?.publish ?? 'external' }
-function mergeConfig(config?: Partial<ScopeConfig>): ScopeConfig {
-  return { autoDerive: config?.autoDerive ?? true, scopes: config?.scopes ?? [], bindings: config?.bindings ?? [] }
+function mergeConfig(config?: Partial<ScopeConfig>): ScopeConfig & { readonly workspaces: NonNullable<ScopeConfig['workspaces']> } {
+  return {
+    autoDerive: config?.autoDerive ?? true,
+    scopes: config?.scopes ?? [],
+    bindings: config?.bindings ?? [],
+    workspaces: config?.workspaces ?? [],
+  }
 }
 
 function assertSafeDirectory(path: string, label: string): void {
@@ -193,6 +200,22 @@ export function createScopeResolver(options: ScopeResolverOptions = {}): ScopeSe
   const fallbackOf = (scope: string): boolean =>
     config.scopes.find(entry => entry.name === scope)?.fallback !== false
 
+  const declarations = config.workspaces.map(declaration => ({ ...declaration, path: normalizePath(declaration.path, homeDir) }))
+
+  /** Declarations covering `cwd` by path segments, outermost first. */
+  const coveringDeclarations = (cwd: string) => {
+    const key = normalizePath(cwd, homeDir)
+    return declarations
+      .filter(declaration => key === declaration.path || key.startsWith(`${declaration.path}${sep}`))
+      .sort((a, b) => segmentCount(a.path) - segmentCount(b.path))
+  }
+
+  /**
+   * Where a route is being resolved from. A name-only lookup has none, and then
+   * only the entry-level fields decide — no workspace, no declaration.
+   */
+  interface RouteContext { readonly cwd: string; readonly claim: ScopeClaim }
+
   const make = (
     scope: string,
     source: ScopeResolution['source'],
@@ -200,11 +223,22 @@ export function createScopeResolver(options: ScopeResolverOptions = {}): ScopeSe
     workspacePaths: readonly string[] = [],
     publishKnown = true,
     workspaceEntries?: readonly string[],
+    context?: RouteContext,
   ): ScopeResolution => {
     const configuredHome = entry?.home === undefined ? undefined : normalizePath(entry.home, homeDir)
     const entries = [...new Set(workspaceEntries ?? [scope])]
     const resolvedEntries = entries.includes(scope) ? entries : [scope, ...entries]
-    const result: ScopeResolution = {
+    // Off wins: every covering declaration and the primary entry's own field are
+    // sources, and any one of them closes the switch.
+    const covering = context === undefined ? [] : coveringDeclarations(context.cwd)
+    const offBy = (key: 'memory' | 'fallback', entryOff: boolean): OffSource[] => [
+      ...covering.filter(declaration => declaration[key] === false).map(declaration => ({ kind: 'workspace' as const, path: declaration.path })),
+      ...(entryOff ? [{ kind: 'entry' as const, scope }] : []),
+    ]
+    const memoryOff = offBy('memory', entry?.memory === false)
+    const fallbackOff = offBy('fallback', !fallbackOf(scope))
+    const access = accessOf(scope, resolvedEntries, fallbackOff.length === 0)
+    const base = {
       scope,
       home: configuredHome ?? join(namespaceDir, scope),
       homeSource: configuredHome === undefined ? 'namespace' : 'configured',
@@ -214,10 +248,20 @@ export function createScopeResolver(options: ScopeResolverOptions = {}): ScopeSe
       created: false,
       workspacePaths: [...new Set([...(entry?.pathPrefixes ?? []), ...workspacePaths].map(path => normalizePath(path, homeDir)))],
       entries: resolvedEntries,
-      access: accessOf(scope, resolvedEntries, fallbackOf(scope)),
-      memory: entry?.memory !== false,
+    } as const
+    const result: ScopeResolution = {
+      ...base,
+      access,
+      memory: memoryOff.length === 0,
+      fallback: fallbackOff.length === 0,
+      personal: { read: access.read.includes('personal'), write: access.write.includes('personal') },
+      claim: context?.claim ?? { kind: 'none' },
+      offBy: { memory: memoryOff, fallback: fallbackOff },
     }
-    known.set(scope, result)
+    // Enumerations and name-only lookups reuse what a cwd resolution learned
+    // (its git root), but never its workspace decisions: those belong to that
+    // cwd, and a name carries no workspace.
+    known.set(scope, context === undefined ? result : make(scope, source, entry, workspacePaths, publishKnown, workspaceEntries))
     return result
   }
 
@@ -228,8 +272,19 @@ export function createScopeResolver(options: ScopeResolverOptions = {}): ScopeSe
    * silent first-match rule is exactly how a knowledge domain's memory ends up in
    * another library without anyone noticing.
    */
-  const primaryOf = (claimers: readonly ScopeEntry[], workspace: string): ScopeEntry => {
+  const primaryOf = (claimers: readonly ScopeEntry[], workspace: string, declared?: { path: string; primary: string }): ScopeEntry => {
     const unique = [...new Map(claimers.map(entry => [entry.name, entry])).values()]
+    if (declared !== undefined) {
+      // A stale declaration is refused, never skipped: skipping it would send
+      // this workspace's writes into whichever library the fallback rule picks.
+      const chosen = unique.find(entry => entry.name === declared.primary)
+      if (chosen === undefined) {
+        throw new Error(
+          `Workspace declaration ${declared.path} names primary ${declared.primary}, which does not claim it (claimers: ${unique.map(entry => entry.name).join(', ')})`,
+        )
+      }
+      return chosen
+    }
     if (unique.length === 1) return unique[0]!
     const primaries = unique.filter(entry => entry.primary === true)
     if (primaries.length !== 1) {
@@ -262,16 +317,20 @@ export function createScopeResolver(options: ScopeResolverOptions = {}): ScopeSe
    */
   const configuredPathMatch = (cwd: string): ScopeResolution | undefined => {
     const matches = config.scopes.flatMap(entry => (entry.pathPrefixes ?? [])
-      .filter(prefix => pathSegmentMatches(cwd, prefix))
+      .filter(prefix => pathSegmentMatches(cwd, prefix, homeDir))
       .map(prefix => ({ entry, prefix })))
     if (matches.length === 0) return undefined
-    const deepest = Math.max(...matches.map(match => segmentCount(match.prefix)))
-    const claimers = matches.filter(match => segmentCount(match.prefix) === deepest).map(match => match.entry)
-    const primary = primaryOf(claimers, cwd)
+    const deepest = Math.max(...matches.map(match => segmentCount(match.prefix, homeDir)))
+    const group = matches.filter(match => segmentCount(match.prefix, homeDir) === deepest)
+    const claimers = group.map(match => match.entry)
+    // Every prefix in the group matches cwd at the same depth, so they are one path.
+    const prefix = normalizePath(group[0]!.prefix, homeDir)
+    const declaration = declarations.find(item => item.path === prefix && item.primary !== undefined)
+    const primary = primaryOf(claimers, cwd, declaration === undefined ? undefined : { path: declaration.path, primary: declaration.primary! })
     const entries = [...new Map(claimers.map(entry => [entry.name, entry])).values()]
       .map(entry => entry.name)
       .filter(name => name !== primary.name)
-    return make(primary.name, 'config', primary, [], true, [primary.name, ...entries])
+    return make(primary.name, 'config', primary, [], true, [primary.name, ...entries], { cwd, claim: { kind: 'path', prefix } })
   }
 
   /**
@@ -303,7 +362,7 @@ export function createScopeResolver(options: ScopeResolverOptions = {}): ScopeSe
     const primary = primaryOf(matches, remote)
     const entries = matches.map(entry => entry.name).filter(name => name !== primary.name)
     const root = gitRoot(cwd)
-    return make(primary.name, 'config', primary, root ? [root] : [cwd], true, [primary.name, ...entries])
+    return make(primary.name, 'config', primary, root ? [root] : [cwd], true, [primary.name, ...entries], { cwd, claim: { kind: 'remote' } })
   }
 
   /**
@@ -335,7 +394,7 @@ export function createScopeResolver(options: ScopeResolverOptions = {}): ScopeSe
         const root = gitRoot(cwd)
         const host = hostOfRemote(remote)
         const publish: PublishDirection = host !== undefined && INTERNAL_HOSTS.has(host) ? 'internal' : 'external'
-        const result = make(scope, 'derived', { name: scope, publish }, root ? [root] : [cwd])
+        const result = make(scope, 'derived', { name: scope, publish }, root ? [root] : [cwd], true, undefined, { cwd, claim: { kind: 'none' } })
         cache.set(key, result)
         return result
       }
@@ -348,7 +407,7 @@ export function createScopeResolver(options: ScopeResolverOptions = {}): ScopeSe
     const declared = config.scopes.find(entry => entry.name === scope)
     const root = gitRoot(cwd)
     if (declared === undefined) claimDerived(scope, normalizedLocalOrigin(cwd, homeDir))
-    const result = make(scope, 'local', declared, root ? [root] : [cwd])
+    const result = make(scope, 'local', declared, root ? [root] : [cwd], true, undefined, { cwd, claim: { kind: 'none' } })
     cache.set(key, result)
     return result
   }

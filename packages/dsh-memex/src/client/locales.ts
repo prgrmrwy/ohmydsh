@@ -60,7 +60,6 @@ export type MemexKey =
   | 'assumedLabel'
   | 'assumedHint'
   | 'actionDeclareEntry'
-  | 'stagedNotice'
   | 'noWorkspaceTitle'
   | 'degradedWorkspaces'
   | 'memoryLabel'
@@ -101,6 +100,40 @@ export type MemexKey =
   | 'actionSetPrimary'
   | 'actionAddEntry'
   | 'conflictPrimary'
+  | 'conflictDeclared'
+  | 'itemMemory'
+  | 'itemFallback'
+  | 'notePreserved'
+  | 'noteAlsoCloses'
+  | 'noteRemovedEntryField'
+  | 'noteUnregisteredReopen'
+  | 'noteStagedPrimary'
+  | 'noteDeclaredPrimary'
+  | 'noteInheritedAttach'
+  | 'noteReplaced'
+  | 'noteReplacedSplit'
+  | 'notePersonalDespiteDeclaration'
+  | 'refuseAncestor'
+  | 'refuseAncestorConfig'
+  | 'refuseRemoteEntry'
+  | 'refuseBinding'
+  | 'refusePersonalEntry'
+  | 'refuseWouldClose'
+  | 'refuseStillClosed'
+  | 'refuseUnregistered'
+  | 'refuseDegraded'
+  | 'refuseRemoteClaimed'
+  | 'refuseUndecided'
+  | 'attachBecomesPrimary'
+  | 'attachBecomesHint'
+  | 'fallbackViaBindingRead'
+  | 'fallbackViaBindingWrite'
+  | 'fallbackViaBindingBoth'
+  | 'actionReplacePrimary'
+  | 'remoteClaimedHint'
+  | 'switchesReadonlyUnregistered'
+  | 'switchesReadonlyPathless'
+  | 'switchesReadonlyDegraded'
   | 'publishExternal'
   | 'publishInternal'
   | 'publishUnknown'
@@ -156,7 +189,6 @@ export const en: Record<MemexKey, string> = {
   assumedLabel: 'derived, not declared',
   assumedHint: 'Nothing declares this workspace, so a session here uses the library derived from its path. It is written to the configuration only when you declare it or attach another entry.',
   actionDeclareEntry: 'Declare this entry',
-  stagedNotice: 'To keep routing unchanged, the derived primary entry was added to the configuration as well',
   noWorkspaceTitle: 'Paths with no workspace',
   memoryLabel: 'Memory',
   memoryHint: 'Memory is off here: no recall prompt and no write reminder are injected, and memex tools refuse in this workspace. Other workspaces are unaffected.',
@@ -197,6 +229,40 @@ export const en: Record<MemexKey, string> = {
   actionSetPrimary: 'Make primary',
   actionAddEntry: '+ entry',
   conflictPrimary: 'One workspace needs exactly one primary entry',
+  conflictDeclared: 'A workspace\'s declared primary does not claim it',
+  itemMemory: 'memory',
+  itemFallback: 'fallback entry',
+  notePreserved: '{path} keeps its {item} closed: a path declaration was added for it',
+  noteAlsoCloses: 'This also turns {item} off for {path}',
+  noteRemovedEntryField: 'The {item} setting on entry {scope} was removed: it closed every path the library claims',
+  noteUnregisteredReopen: 'Paths of {scope} that are not registered workspaces open their {item} again',
+  noteStagedPrimary: 'The derived library {scope} was declared as well, so it stays the primary',
+  noteDeclaredPrimary: '{scope} stays the primary of {path}: the path declaration records it',
+  noteInheritedAttach: '{scope} becomes the primary of {path}; it no longer inherits {list}',
+  noteReplaced: 'Primary of {path}: {replaced} → {scope}',
+  noteReplacedSplit: 'Primary of {path}: {replaced} → {scope}. {path} now claims its own entries instead of inheriting from {split}',
+  notePersonalDespiteDeclaration: 'personal is an entry of {path}, so it stays reachable even with the fallback off',
+  refuseAncestor: '{item} is closed for {path} by the declaration on {ancestor}; open it there',
+  refuseAncestorConfig: '{item} is closed for {path} by the declaration on {ancestor}, which is not a registered workspace; edit settings to change it',
+  refuseRemoteEntry: '{item} is closed by entry {scope}, which also claims by repository; edit settings to change it',
+  refuseBinding: 'The binding {binding} keeps personal reachable from {path}; remove the binding to close it',
+  refusePersonalEntry: 'personal is an entry of {path}; detach it to close the fallback',
+  refuseWouldClose: 'This would turn {item} off for {victim}',
+  refuseStillClosed: '{item} stays closed for {path} because of the declaration on {ancestor}',
+  refuseUnregistered: '{path} is not a registered workspace',
+  refuseDegraded: 'The host did not report its workspaces, so routing changes cannot be checked; edit settings directly',
+  refuseRemoteClaimed: '{path} is claimed by a repository pattern; edit settings to change its entries',
+  refuseUndecided: 'The routing of {path} is not known here',
+  attachBecomesPrimary: '{scope} would become the primary of {path}, but:',
+  attachBecomesHint: '{path} inherits {list} from {split}; the first entry added here becomes its primary',
+  fallbackViaBindingRead: 'The fallback is off, but the binding {binding} still lets {path} read personal',
+  fallbackViaBindingWrite: 'The fallback is off, but the binding {binding} still lets {path} write personal',
+  fallbackViaBindingBoth: 'The fallback is off, but the binding {binding} still lets {path} read and write personal',
+  actionReplacePrimary: 'Replace primary',
+  remoteClaimedHint: 'A repository pattern claims this workspace. Its entries are edited in settings, not here.',
+  switchesReadonlyUnregistered: 'Not a registered workspace: the switches show the configured state and are changed in settings.',
+  switchesReadonlyPathless: 'This entry claims no path: the switches show the configured state and are changed in settings.',
+  switchesReadonlyDegraded: 'The host did not report its workspaces: the switches show the configured state and are changed in settings.',
   publishExternal: 'external — cards may leave this machine',
   publishInternal: 'internal — cards stay inside',
   publishUnknown: 'unknown — no declaration and no remote evidence; writes are refused',
@@ -253,7 +319,6 @@ export const zh: Record<MemexKey, string> = {
   assumedLabel: '派生，未声明',
   assumedHint: '没有任何条目声明这个工作区，会话在这里用的是从路径派生出来的库。只有当你声明它、或者给它挂别的入口时，才会写进配置。',
   actionDeclareEntry: '声明为配置条目',
-  stagedNotice: '为保持路由不变，派生出的主入口也一并写进了配置',
   noWorkspaceTitle: '未对应工作区的路径',
   memoryLabel: '记忆',
   memoryHint: '这个工作区已关闭记忆：不注入召回提示与写卡提醒，memex 工具在这里会被拒绝。其他工作区不受影响。',
@@ -294,6 +359,40 @@ export const zh: Record<MemexKey, string> = {
   actionSetPrimary: '设为主入口',
   actionAddEntry: '+ 入口',
   conflictPrimary: '同一组工作区必须恰好有一个主入口',
+  conflictDeclared: '工作区声明的主入口并未认领该工作区',
+  itemMemory: '记忆',
+  itemFallback: '兜底入口',
+  notePreserved: '{path} 的{item}保持关闭：为它补了一条路径声明',
+  noteAlsoCloses: '这也会关闭 {path} 的{item}',
+  noteRemovedEntryField: '已移除入口 {scope} 上的{item}设置：它会关闭该库认领的所有路径',
+  noteUnregisteredReopen: '{scope} 认领的非注册工作区路径会重新打开{item}',
+  noteStagedPrimary: '派生出的库 {scope} 也一并声明，以保持它是主入口',
+  noteDeclaredPrimary: '{scope} 仍是 {path} 的主入口：由路径声明记录',
+  noteInheritedAttach: '{scope} 成为 {path} 的主入口；不再继承 {list}',
+  noteReplaced: '{path} 的主入口：{replaced} → {scope}',
+  noteReplacedSplit: '{path} 的主入口：{replaced} → {scope}。{path} 改为自己认领入口，不再继承 {split}',
+  notePersonalDespiteDeclaration: 'personal 是 {path} 的入口，关闭兜底后仍可访问',
+  refuseAncestor: '{path} 的{item}被 {ancestor} 上的声明关闭；请在那里打开',
+  refuseAncestorConfig: '{path} 的{item}被 {ancestor} 上的声明关闭，它不是注册工作区；请在设置中修改',
+  refuseRemoteEntry: '{item}由入口 {scope} 关闭，它还按仓库认领；请在设置中修改',
+  refuseBinding: '绑定 {binding} 让 {path} 仍能访问 personal；移除该绑定才能关闭',
+  refusePersonalEntry: 'personal 是 {path} 的入口；先移除它才能关闭兜底',
+  refuseWouldClose: '这会关闭 {victim} 的{item}',
+  refuseStillClosed: '由于 {ancestor} 上的声明，{path} 的{item}仍然关闭',
+  refuseUnregistered: '{path} 不是注册工作区',
+  refuseDegraded: '宿主没有报告工作区，无法校验路由变化；请直接修改设置',
+  refuseRemoteClaimed: '{path} 由仓库规则认领；请在设置中修改它的入口',
+  refuseUndecided: '此处无法得知 {path} 的路由',
+  attachBecomesPrimary: '{scope} 会成为 {path} 的主入口，但：',
+  attachBecomesHint: '{path} 从 {split} 继承 {list}；在这里添加的第一个入口会成为它的主入口',
+  fallbackViaBindingRead: '兜底已关闭，但绑定 {binding} 仍让 {path} 可读 personal',
+  fallbackViaBindingWrite: '兜底已关闭，但绑定 {binding} 仍让 {path} 可写 personal',
+  fallbackViaBindingBoth: '兜底已关闭，但绑定 {binding} 仍让 {path} 可读写 personal',
+  actionReplacePrimary: '替换主入口',
+  remoteClaimedHint: '该工作区由仓库规则认领，它的入口需在设置中修改。',
+  switchesReadonlyUnregistered: '不是注册工作区：开关显示配置中的状态，需在设置中修改。',
+  switchesReadonlyPathless: '该入口不认领路径：开关显示配置中的状态，需在设置中修改。',
+  switchesReadonlyDegraded: '宿主没有报告工作区：开关显示配置中的状态，需在设置中修改。',
   publishExternal: '外部（卡片会离开这台机器）',
   publishInternal: '内部（卡片不出网）',
   publishUnknown: '未知（既没有声明也没有远端证据，写入会被拒绝）',
