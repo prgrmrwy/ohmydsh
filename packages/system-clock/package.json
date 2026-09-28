@@ -65,7 +65,7 @@
     "react": "^18.2.0",
     "tsdown": "^0.23.0",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4",
+    "vitest": "^5.0.1",
     "@deepseek-ai/dsh-client-ui-renderer": "^0.1.5-rc.2"
   }
 }
