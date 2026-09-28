@@ -1229,6 +1229,7 @@ describe('owner-facing locus management is served by the real routes', () => {
         supportsSettlementNotice: true,
         supportsIdleContinuableCreate: true,
         supportsIndependentContinuableCreate: true,
+        supportsIndependentChildAgentPreset: true,
         supportsLiveContinuableChildSession: true,
         listChildren: async (_parentSessionId: string) => {
           return [{
@@ -1473,6 +1474,7 @@ describe('startup reconciliation runs against the real runtime', () => {
     ctx.provide('subagents', {
       startContinuable: async () => ({ childId: SessionId('child-live'), messageId: MessageId('message-1') }),
       supportsIndependentContinuableCreate: true,
+      supportsIndependentChildAgentPreset: true,
       listChildren: async () => [],
       [Symbol.for('dsh.subagent.deliverPrompt')]: async () => 'message-1',
     })
@@ -1640,6 +1642,7 @@ describe('the unified Feishu channel stays gated on real capabilities', () => {
     ctx.provide('subagents', {
       startContinuable: async () => ({ childId: SessionId('child-live'), messageId: MessageId('message-1') }),
       supportsIndependentContinuableCreate: true,
+      supportsIndependentChildAgentPreset: true,
       listChildren: async () => [],
       [Symbol.for('dsh.subagent.deliverPrompt')]: async () => 'message-1',
     })
@@ -1917,8 +1920,8 @@ describe('the Pet executor preset omits local-root Skill discovery', () => {
       return next === -1 ? rest : rest.slice(0, next)
     }
 
-    // Locus children inherit their composition from the main session's mounted
-    // preset, and `LOCUS_MAIN_PRESET` pins that to this preset. A delegation row
+    // Every locus child composes from this preset (`LOCUS_CHILD_PRESET`),
+    // whatever preset its main session runs. A delegation row
     // carrying `modelSelectionSettings` installs per agent, which puts the tool
     // in the child's OWN scope — and `LOCUS_SAFE_TOOL_FILTER` only restricts the
     // INHERITED surface, so the child would keep `subagent` and could delegate

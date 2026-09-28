@@ -7,7 +7,7 @@
 
 **当前 overlay 只替换一个上游包：`@deepseek-ai/dsh-subagent`。**
 
-承载的 seam（对应 4 个能力 marker）：
+承载的 seam（对应 5 个能力 marker）：
 
 - `settlementNotice: 'silent'` —— 抑制子代结算向父会话的自动投递。父非 idle 时
   官方走 `steer`，会在最近一个 step 边界插入父正在进行的轮次；而 locus child 的
@@ -20,6 +20,13 @@
   preset** 独立 mount 一份组合，并核验挂到的就是 header 记录的那个，挂错即 throw。
   官方 `composeFrom` 绑定的是**父的** standing mount 实例，保证的是「已存活子代不被
   父的后续变更污染」，而冷恢复需要的是「能独立于父重建自己的组合」。
+  调用方可用 `agentPreset` 显式指定该 preset（marker
+  `supportsIndependentChildAgentPreset`）；两条冷恢复路径都从 descriptor 读回它并
+  mount，缺失即 `NOT_RESUMABLE`。Pet 固定传 `dsh-pet-executor`，使 locus 子代的工具面
+  不取决于主会话跑的是哪个 preset——`standard` 的 `tool-subagent` 带
+  `modelSelectionSettings: true`，按 agent 注册进子代自有层，`toolFilter` 只过滤继承层，
+  删不掉它。没有这一项，要么拒绝 `/bind` 到用户的普通会话，要么产出能委派出
+  `bash`/`lark-cli` 的子代。
 - `withLiveContinuableChildSession` —— 在 continuation owner 内访问准确的 child
   Session。官方泛化 Session 路由**有意**不解析 continuation-owned child。
 
@@ -138,7 +145,7 @@ mismatch、sync rollback 和停止启动；绝不会自动把旧 patch 套到未
 | seam | 阻塞 | 说明 |
 |---|---|---|
 | `settlementNotice: 'silent'` | **需要旁路 locus 主会话** | 其论证前提是「父 = 用户正在使用的主会话」，故 `notifySettlement` 走 `parent.steer()` 会插进用户的轮次。上游实际代码是 `parent.status === 'idle' ? 'queue' : 'steer'`——父若是 Pet 自有的 standby 主会话（几乎恒为 idle），走 `queue`，在它自己的会话里开一轮，不打断任何人。**前提由架构消除，不必等上游发布。** |
-| `contextMode: 'independent-v1'` | 依赖 locus 主 preset 不可变 | 它解决「父后来换了 preset，冷恢复重建不出原组合」。Pet 自有 main 的 preset 固定为 `dsh-pet-executor`；但若该会话在侧边栏可见、用户可进去切换 preset/模型，该条件即失效。 |
+| `contextMode: 'independent-v1'` + `agentPreset` | **只要 locus 能绑定用户自己的会话就不能退** | 子代的组合必须由 Pet 指定、且冷恢复不随父漂移。`/bind` 可指向运行 `standard` 的用户会话，官方 `composeFrom` 只能继承父的组合，无法表达「子代用另一个 preset」。 |
 | `createIdleContinuable` | 失败补偿需重新设计 | 官方 `startContinuable({ childId })` 可接受预留 id，改为「先留 id → 先提交 locus 行 → 首条真实 Delivery 作为创建 prompt」即可绕开 `prompt` 必填。但当前顺序是「child 先存在才提交行」，反转后行可能指向不存在的 child。与 BACKLOG B036 是同一条。 |
 | `withLiveContinuableChildSession` | **只要子会话仍是 subagent child 就不能退** | 泛化 Session 路由**有意**拒绝 continuation-owned child（判据即 `origin === 'subagent'`）。生产消费面 3 处：sandbox policy 的 apply/resolve、启动恢复的 delivery 证明——均需读写子会话自身的 Session 对象，无替代路径。 |
 
