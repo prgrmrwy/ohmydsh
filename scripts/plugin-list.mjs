@@ -28,7 +28,8 @@ import path from "node:path"
 import os from "node:os"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import yaml from "js-yaml"
-import { loadOverlayCustomizations } from "./lib/manifest-overlay.mjs"
+import { loadOverlayCustomizations, OVERLAY_PATH_ENV } from "./lib/manifest-overlay.mjs"
+import { applyEnvLocal } from "./lib/env-local.mjs"
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
@@ -193,6 +194,15 @@ const cut = (s, n = 60) => (s.length > n ? s.slice(0, n) + "…" : s)
 
 function main(argv) {
   const namesOnly = argv.includes("--names")
+  // Bare runs must list the same overlay entries as `bin/dsh` does. Display
+  // surface: degrade on an unresolvable value, never block startup. The listing
+  // has no enabled/disabled distinction, so enabledEnv names are irrelevant here.
+  try {
+    const { errors } = applyEnvLocal({ repo: REPO, names: [OVERLAY_PATH_ENV], strict: false })
+    for (const message of errors) console.error(`[plugin-list] ${message}`)
+  } catch (error) {
+    console.error(`[plugin-list] ${String(error?.message ?? error)}`)
+  }
   const dshHome = process.env.DSH_HOME ?? path.join(os.homedir(), ".dsh")
   const profile = process.env.DSH_PROFILE ?? "web"
 

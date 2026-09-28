@@ -93,6 +93,17 @@ echo "@example:registry=https://registry.example.com/" >> ~/.dsh/profiles/web/.n
 dsh build
 ```
 
+**不经 `bin/dsh` 也生效。** 直接跑 `node scripts/sync.mjs`、`scripts/plugin-list.mjs` 或 `scripts/plugin-update.mjs` 时，脚本会自己读取仓库根 `.env.local`，但只读两类变量：`DSH_LOCAL_MANIFEST`，以及 manifest 中各 `enabledEnv` 声明的变量。其它变量（如 `DSH_HOME`）仍只由 `bin/dsh` 负责。
+
+读取时有两条规则：
+
+- 调用方环境已设置的值优先，空字符串也算已设置。
+- 值按字面解析，不执行 shell：
+  - 上面的 `echo "…$HOME…"` 在写入文件时就已展开成绝对路径，所以可以用；
+  - 如果文件里留着 `$HOME`、`~` 或反引号，sync 会报出行号并拒绝运行，不会猜测。
+
+此前只有 `bin/dsh` 读取 `.env.local`。裸跑 sync 看不到 overlay，会把 overlay 包当作已删除而静默卸载，退出码仍为 0。
+
 **挪动私有仓库位置。** 改 `.env.local` 的 `DSH_LOCAL_MANIFEST` 后，sync 会把 profile
 `package.json` 里的 `file:` 路径改成新位置，但 profile 的 `pnpm-lock.yaml` 仍记着旧路径，刷新
 时 pnpm 按旧路径 scandir 报 `ENOENT`，sync 回滚并失败。处理：临时建旧路径 → 新路径的符号链接，
