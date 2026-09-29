@@ -230,11 +230,16 @@ export function packagePins(resources, { enabledOnly = true } = {}) {
   return [...byName.values()]
 }
 
-export function resolveNpmIntegrity(pin) {
-  const result = spawnSync('npm', ['view', pin.spec, 'dist.integrity', '--json'], { encoding: 'utf8' })
+export function resolveNpmIntegrity(pin, { spawn = spawnSync } = {}) {
+  const result = spawn('npm', ['view', pin.spec, 'dist.integrity', '--json'], { encoding: 'utf8' })
   if (result.status !== 0) throw new Error(`cannot resolve npm integrity for ${pin.spec}`)
   let value
   try { value = JSON.parse(result.stdout) } catch { throw new Error(`invalid npm integrity response for ${pin.spec}`) }
+  // npm 12 wraps an exact-version field projection in a one-element array,
+  // while npm 10/11 return the projected string directly. Accept only those
+  // two unambiguous shapes so missing or conflicting registry metadata still
+  // fails closed before anything is materialized.
+  if (Array.isArray(value) && value.length === 1) value = value[0]
   if (typeof value !== 'string') throw new Error(`npm registry returned no integrity for ${pin.spec}`)
   return value
 }
