@@ -49,6 +49,7 @@ import {
   type PetLocusManagementView,
   type PetLocusView,
   type PetTodoAction,
+  type PetTodoDispatchReceipt,
   type PetTodoView,
 } from '../wire.js'
 
@@ -112,8 +113,20 @@ export interface RouteDeps {
   readonly todoLedger?: {
     /** Every todo owned by one main session, already projected for the owner. */
     list(parentSessionId: string): readonly PetTodoView[]
-    /** Owner-sourced disposition. Rejects illegal transitions and unknown ids. */
-    advance(itemId: string, action: PetTodoAction): Promise<PetTodoView>
+    /**
+     * Owner-sourced disposition. Rejects illegal transitions and unknown ids.
+     *
+     * `accept` additionally dispatches a follow-up task and reports the result
+     * as a ONE-SHOT receipt alongside the row. The receipt is deliberately not
+     * part of `PetTodoView`: it describes this operation, not the todo, and
+     * folding it into the row projection would invite the panel to infer
+     * "was it dispatched?" from durable state — which is exactly what design
+     * D6/D7 decline to persist. `done` / `drop` dispatch nothing and omit it.
+     */
+    advance(itemId: string, action: PetTodoAction): Promise<{
+      readonly todo: PetTodoView
+      readonly dispatch?: PetTodoDispatchReceipt
+    }>
     /** Main sessions that currently own a ledger, so the panel groups without guessing. */
     parents(): readonly string[]
   }

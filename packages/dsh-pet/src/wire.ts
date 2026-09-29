@@ -429,6 +429,33 @@ export interface PetTodoActionRequest {
 }
 
 /**
+ * One-shot result of an accept's follow-up dispatch.
+ *
+ * `dispatched` and `queued` differ only by the target's status read BEFORE
+ * dispatch — the follow-up call is synchronous and void, so it never reports
+ * when the target actually starts. `queued` is a success, not a failure.
+ *
+ * `executionTarget` is present only when a dispatch happened, and exists so the
+ * panel can navigate without re-deriving the target: which session runs a
+ * follow-up is a Host resolution decision, and a front end that guessed it
+ * would reintroduce the hardcoded "always the main session" assumption.
+ *
+ * Deliberately NOT persisted to the todo: this describes one operation, not the
+ * record, so it must never be inferred from a later re-read.
+ */
+export interface PetTodoDispatchReceipt {
+  readonly outcome: 'dispatched' | 'queued' | 'unreachable'
+  readonly reason?: string
+  readonly executionTarget?: { readonly kind: 'session'; readonly sessionId: string }
+}
+
+/** Response of the todo disposition route: the row, plus an accept's receipt. */
+export interface PetTodoActionResult {
+  readonly todo: PetTodoView
+  readonly dispatch?: PetTodoDispatchReceipt
+}
+
+/**
  * Storage-aligned locus projection for Host adapters and persistence tooling.
  *
  * Unlike `PetLocusView`, this shape keeps the aggregate's stable field names

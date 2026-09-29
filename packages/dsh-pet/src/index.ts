@@ -63,6 +63,7 @@ import {
 } from './host/collaboration/assembly.js'
 import { InquiryLedgerStore } from './host/inquiry/ledger-store.js'
 import { SharedFactLedgerStore } from './host/ledger/store.js'
+import { acceptTodo, type TodoDispatchPort } from './host/ledger/dispatch.js'
 import { InquiryOutboxStore } from './host/inquiry/outbox-store.js'
 import { summarizeInquiryReconciliation } from './host/inquiry/reconcile.js'
 import type { InquiryOriginProof } from './host/inquiry/ask.js'
@@ -2863,6 +2864,52 @@ async function initialize(
     foldTitle: latestSessionTitle,
   })
 
+  /**
+   * The narrow DSH capability todo follow-up dispatch needs (design D9).
+   *
+   * `agents.get` means LOADED, not "exists": DSH unloads idle agents, so an
+   * undefined handle must lead to `resume`, never straight to unreachable
+   * (the same trap `dispatcher` documents at the Pet executor path).
+   *
+   * Resume mounts the session's OWN persisted preset, not Pet's executor
+   * setup: an execution target may be a `/bind`-bound `standard` session, and
+   * the point is to bring it back exactly as it was — neither widened nor
+   * narrowed (design D8's consequence ceiling, task 1.3).
+   */
+  const todoDispatchPort: TodoDispatchPort = {
+    resolve: sessionId => {
+      try {
+        const handle = ctx.agents.get(sessionId as never) as
+          | { agent?: { status?: unknown } }
+          | undefined
+        const status = handle?.agent?.status
+        return status === 'idle' || status === 'running' ? { status } : undefined
+      } catch {
+        return undefined
+      }
+    },
+    resume: async sessionId => {
+      const current = selection()
+      const presetId = await persistedPresetFor(sessionId)
+      await ctx.agents.resume({
+        resumeSessionId: SessionId(sessionId),
+        agentOptions: { provider: current.providerId, model: current.modelId },
+        setup: async agentCtx => { await ctx.agentPresets.mount(agentCtx, presetId) },
+      })
+    },
+    followup: (sessionId, text) => {
+      const handle = ctx.agents.get(sessionId as never) as { agent?: unknown } | undefined
+      const agent = handle?.agent
+      if (agent === undefined) throw new Error(`session ${sessionId} is not loaded`)
+      // A real UserMessage through `followup`, exactly as a native client
+      // sends one: it queues its own ordinary turn and wakes the driver,
+      // without preempting whatever step is running (design D2).
+      ;(agent as { followup(input: unknown): void }).followup(
+        createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }),
+      )
+    },
+  }
+
   let locusManagement!: ReturnType<typeof createLocusManagementPort>
   locusManagement = createLocusManagementPort({
     repository: locusRepository as never,
@@ -3206,9 +3253,39 @@ async function initialize(
       list: parentSessionId => sharedFactLedgerStore
         .listForParent(parentSessionId)
         .map(projectTodoForOwner),
+      // `done` / `drop` stay pure status advances — they settle a record and
+      // dispatch nothing. `accept` means "start working on it", so it runs the
+      // gate → dispatch → advance orchestration instead (design D5).
       advance: async (itemId, action) => {
-        const to = action === 'accept' ? 'accepted' : action === 'done' ? 'done' : 'dropped'
-        return projectTodoForOwner(await sharedFactLedgerStore.advanceStatus(itemId, to, Date.now()))
+        if (action !== 'accept') {
+          const to = action === 'done' ? 'done' : 'dropped'
+          return {
+            todo: projectTodoForOwner(
+              await sharedFactLedgerStore.advanceStatus(itemId, to, Date.now()),
+            ),
+          }
+        }
+        const result = await acceptTodo(itemId, {
+          readTodo: id => sharedFactLedgerStore.getTodoItem(id),
+          // No locus child can execute today, so every accept resolves to the
+          // handoff branch. Passing it as a FACT rather than hardcoding the
+          // main session keeps the future branch a caller decision (D3).
+          registrarFor: todo => ({
+            childCanExecute: false,
+            childSessionId: locusRepository.getLocus(todo.locusId)?.childSessionId ?? '',
+          }),
+          // Proxy indicator: Host keeps no "was briefed" flag, and
+          // `createMainSession` — the only caller of the standby briefing —
+          // runs only on the `auto` branch (design D4, verified in task 1.1).
+          contextFor: todo => ({
+            mainWasBriefedStandby: locusRepository.getLocus(todo.locusId)?.source === 'auto',
+          }),
+          port: todoDispatchPort,
+          advanceStatus: async (id, to) => sharedFactLedgerStore.advanceStatus(id, to, Date.now()),
+          log: reason => petWarn(`dsh-pet ledger: ${reason}`),
+        })
+        if (!result.ok) throw new PetError('INVALID_REQUEST', result.reason)
+        return { todo: projectTodoForOwner(result.record), dispatch: result.dispatch }
       },
       // Derive owning main sessions from the locus records themselves rather
       // than from ledger rows: a main session whose ledger exists but is
