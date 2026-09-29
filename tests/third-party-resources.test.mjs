@@ -11,6 +11,7 @@ import {
   SPEC_SUPERFLOW_SKILLS,
   packagePins,
   preflightResourceIntegrities,
+  resolveNpmIntegrity,
   renderMcpLauncher,
   renderResourcePatch,
   resourceHealth,
@@ -116,6 +117,19 @@ test('preflights enabled exact npm integrities once and rejects mismatch before 
     /integrity mismatch/,
   )
   assert.equal(packagePins(validated({ ...workflow, enabled: false })).length, 0)
+})
+
+test('accepts npm 10/11 string and npm 12 singleton-array integrity responses', () => {
+  const pin = { spec: workflow.spec }
+  const response = (value) => () => ({ status: 0, stdout: JSON.stringify(value) })
+  assert.equal(resolveNpmIntegrity(pin, { spawn: response(I) }), I)
+  assert.equal(resolveNpmIntegrity(pin, { spawn: response([I]) }), I)
+  for (const value of [[], [I, I], [null], null, { integrity: I }]) {
+    assert.throws(
+      () => resolveNpmIntegrity(pin, { spawn: response(value) }),
+      /registry returned no integrity/,
+    )
+  }
 })
 
 test('renders generated rows only for healthy installed identities and exact upstream skill/runtime files', async () => {
