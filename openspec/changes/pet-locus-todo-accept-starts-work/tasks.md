@@ -47,22 +47,22 @@
 
 ## 7. 路由与投递回执（D9）
 
-- [ ] 7.1 写失败测试 `todoAction accept returns a dispatch outcome`、`done and drop return no dispatch field`、`reread todo carries no dispatch outcome`（test-plan 第 16–18 行）
-- [ ] 7.2 扩展 `routes.ts:112` 的 `todoLedger` 依赖面与 `LOCUS_ROUTES.todoAction`（`routes.ts:763`），返回 `PetTodoView` + 独立的 `dispatch` 回执（含已投递时的 `executionTarget`，供 D11 导航直接取用）；保持 `todoLedger` 整体可选（缺失时 `LOCUS_UNAVAILABLE` 行为不变）
-- [ ] 7.3 重构；确认回执不被持久化到待办行
+- [x] 7.1 写失败测试 `todoAction accept returns a dispatch outcome`、`done and drop return no dispatch field`、`reread todo carries no dispatch outcome`（test-plan 第 16–18 行）
+- [x] 7.2 扩展 `routes.ts:112` 的 `todoLedger` 依赖面与 `LOCUS_ROUTES.todoAction`（`routes.ts:763`），返回 `PetTodoView` + 独立的 `dispatch` 回执（含已投递时的 `executionTarget`，供 D11 导航直接取用）；保持 `todoLedger` 整体可选（缺失时 `LOCUS_UNAVAILABLE` 行为不变）
+- [x] 7.3 重构；确认回执不被持久化到待办行
 
 ## 8. 子会话请求执行工具（D10）
 
-- [ ] 8.1 写失败测试 `child request-execution dispatches and marks accepted`（test-plan 第 22 行）
-- [ ] 8.2 实现 caller-bound 工具，沿用 `track.ts:48-83` 的授权形状：零 selector，Host 从 caller 与唯一 current Delivery 解析全部事实，不可证明即拒绝
-- [ ] 8.3 写失败测试 `request-execution rejects any target selector argument`、`foreign todo request-execution is refused`、`request-execution cannot mark done or dropped`（test-plan 第 24–26 行）
-- [ ] 8.4 实现三条拒绝路径；工具**只能**使自己登记的待办进入 `accepted`，且必须伴随一次真实投递
-- [ ] 8.5 写失败测试 `both entry points share resolution body and outcomes`（test-plan 第 23 行），断言两个入口经同一解析、产生同构正文、使用同一组结局
-- [ ] 8.6 确认共用下游链路，不复制任何一段
-- [ ] 8.7 **注册在 executor 的 scoped agent 上下文**并加入 `composition.ts` 白名单；无 scope 会静默落 global 层使普通会话看到该工具（本仓库已实机复现过的陷阱）
-- [ ] 8.8 扩展 `ledger-tool-scope.test.ts`：固定普通会话工具面不变，且 `no model-facing tool can reach done or dropped`（test-plan 第 30 行）
-- [ ] 8.9 更新 `host/ledger/prompt.ts` 的 WORK REQUEST 分支，告知子会话登记后可请求执行；同步 `intentTriageGuidanceCoversRequiredPoints` 的必备短语清单
-- [ ] 8.10 重构；全量套件保持绿
+- [x] 8.1 写失败测试 `child request-execution dispatches and marks accepted`（test-plan 第 22 行）
+- [x] 8.2 实现 caller-bound 工具，沿用 `track.ts:48-83` 的授权形状：零 selector，Host 从 caller 与唯一 current Delivery 解析全部事实，不可证明即拒绝
+- [x] 8.3 写失败测试 `request-execution rejects any target selector argument`、`foreign todo request-execution is refused`、`request-execution cannot mark done or dropped`（test-plan 第 24–26 行）
+- [x] 8.4 实现三条拒绝路径；工具**只能**使自己登记的待办进入 `accepted`，且必须伴随一次真实投递
+- [x] 8.5 写失败测试 `both entry points share resolution body and outcomes`（test-plan 第 23 行），断言两个入口经同一解析、产生同构正文、使用同一组结局
+- [x] 8.6 确认共用下游链路，不复制任何一段
+- [x] 8.7 **注册在 executor 的 scoped agent 上下文**并加入 `composition.ts` 白名单；无 scope 会静默落 global 层使普通会话看到该工具（本仓库已实机复现过的陷阱）
+- [x] 8.8 扩展 `ledger-tool-scope.test.ts`：固定普通会话工具面不变，且 `no model-facing tool can reach done or dropped`（test-plan 第 30 行）
+- [x] 8.9 更新 `host/ledger/prompt.ts` 的 WORK REQUEST 分支，告知子会话登记后可请求执行；同步 `intentTriageGuidanceCoversRequiredPoints` 的必备短语清单
+- [x] 8.10 重构；全量套件保持绿
 
 ## 9. 管理面（Web）
 

@@ -63,7 +63,12 @@ import {
 } from './host/collaboration/assembly.js'
 import { InquiryLedgerStore } from './host/inquiry/ledger-store.js'
 import { SharedFactLedgerStore } from './host/ledger/store.js'
-import { acceptTodo, type TodoDispatchPort } from './host/ledger/dispatch.js'
+import {
+  acceptTodo,
+  requestTodoExecution,
+  type AcceptTodoDeps,
+  type TodoDispatchPort,
+} from './host/ledger/dispatch.js'
 import { InquiryOutboxStore } from './host/inquiry/outbox-store.js'
 import { summarizeInquiryReconciliation } from './host/inquiry/reconcile.js'
 import type { InquiryOriginProof } from './host/inquiry/ask.js'
@@ -1165,6 +1170,11 @@ async function initialize(
               { ok: false as const, reason: 'capability-unavailable' as const },
             logAuthorizationRefusal: ({ operation, reason }) =>
               petLog(`dsh-pet locus authorization refused: ${operation}:${reason}`),
+            // Deferred on purpose: the dispatch chain is composed far below
+            // this registration, and routing through the same late binding is
+            // what keeps the child tool and the owner button on ONE chain
+            // instead of two copies that can drift (design D10).
+            requestExecution: input => runTodoExecutionRequest(input),
           },
         })
         // The circle surface rides the SAME synchronous boundary, so a locus
@@ -2910,6 +2920,49 @@ async function initialize(
     },
   }
 
+  /**
+   * The collaborators owner accept and child request-execution BOTH use.
+   *
+   * Built once so the two entry points cannot drift: same execution-target
+   * resolution, same body, same dispatch port, same outcome vocabulary — the
+   * spec requires them to share one chain (design D10).
+   */
+  const todoAcceptDeps = (): AcceptTodoDeps => ({
+    readTodo: id => sharedFactLedgerStore.getTodoItem(id),
+    // No locus child can execute today, so every request resolves to the
+    // handoff branch. Passing it as a FACT rather than hardcoding the main
+    // session keeps the future branch a caller decision (design D3).
+    registrarFor: todo => ({
+      childCanExecute: false,
+      childSessionId: locusRepository.getLocus(todo.locusId)?.childSessionId ?? '',
+    }),
+    // Proxy indicator: Host keeps no "was briefed" flag, and
+    // `createMainSession` — the only caller of the standby briefing — runs
+    // only on the `auto` branch (design D4, verified in task 1.1).
+    contextFor: todo => ({
+      mainWasBriefedStandby: locusRepository.getLocus(todo.locusId)?.source === 'auto',
+    }),
+    port: todoDispatchPort,
+    advanceStatus: async (id, to) => sharedFactLedgerStore.advanceStatus(id, to, Date.now()),
+    log: reason => petWarn(`dsh-pet ledger: ${reason}`),
+  })
+
+  /** Child-side entry point; the owner-side one lives on `todoLedger.advance`. */
+  const runTodoExecutionRequest = async (input: {
+    readonly itemId: string
+    readonly callerChildSessionId: string
+  }): Promise<
+    | { readonly ok: true; readonly outcome: 'dispatched' | 'queued' | 'unreachable' }
+    | { readonly ok: false; readonly reason: string }
+  > => {
+    const result = await requestTodoExecution(input, {
+      ...todoAcceptDeps(),
+      // Ownership is proven from the todo's own locus, never from an argument.
+      lookupRegistrarChild: todo => locusRepository.getLocus(todo.locusId)?.childSessionId ?? '',
+    })
+    return result.ok ? { ok: true, outcome: result.outcome } : { ok: false, reason: result.reason }
+  }
+
   let locusManagement!: ReturnType<typeof createLocusManagementPort>
   locusManagement = createLocusManagementPort({
     repository: locusRepository as never,
@@ -3265,25 +3318,8 @@ async function initialize(
             ),
           }
         }
-        const result = await acceptTodo(itemId, {
-          readTodo: id => sharedFactLedgerStore.getTodoItem(id),
-          // No locus child can execute today, so every accept resolves to the
-          // handoff branch. Passing it as a FACT rather than hardcoding the
-          // main session keeps the future branch a caller decision (D3).
-          registrarFor: todo => ({
-            childCanExecute: false,
-            childSessionId: locusRepository.getLocus(todo.locusId)?.childSessionId ?? '',
-          }),
-          // Proxy indicator: Host keeps no "was briefed" flag, and
-          // `createMainSession` — the only caller of the standby briefing —
-          // runs only on the `auto` branch (design D4, verified in task 1.1).
-          contextFor: todo => ({
-            mainWasBriefedStandby: locusRepository.getLocus(todo.locusId)?.source === 'auto',
-          }),
-          port: todoDispatchPort,
-          advanceStatus: async (id, to) => sharedFactLedgerStore.advanceStatus(id, to, Date.now()),
-          log: reason => petWarn(`dsh-pet ledger: ${reason}`),
-        })
+        // Same collaborators the child tool uses — one chain, two entries.
+        const result = await acceptTodo(itemId, todoAcceptDeps())
         if (!result.ok) throw new PetError('INVALID_REQUEST', result.reason)
         return { todo: projectTodoForOwner(result.record), dispatch: result.dispatch }
       },

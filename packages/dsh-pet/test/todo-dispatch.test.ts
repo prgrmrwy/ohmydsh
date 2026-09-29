@@ -12,6 +12,7 @@ import type { TodoRecord, TodoStatus } from '../src/host/ledger/todo.js'
 import {
   acceptTodo,
   dispatchFollowUp,
+  requestTodoExecution,
   composeFollowUpBody,
   EVIDENCE_SECTION_MARKER,
   resolveExecutionTarget,
@@ -371,5 +372,91 @@ describe('non-accept dispositions never dispatch (D1)', () => {
       expect(result.ok).toBe(false)
     }
     expect(port.calls).toHaveLength(0)
+  })
+})
+
+describe('child request-execution (D10)', () => {
+  function requestDeps(overrides: Record<string, unknown> = {}) {
+    const port = fakeDispatchPort({ status: 'idle' })
+    const advanceStatus = vi.fn(async (id: string) => todoFixture({ itemId: id, status: 'accepted' }))
+    return {
+      port,
+      advanceStatus,
+      deps: {
+        readTodo: (id: string) => todoFixture({ itemId: id }),
+        registrarFor: () => ({ childCanExecute: false, childSessionId: 'child-1' }),
+        contextFor: () => ({ mainWasBriefedStandby: false }),
+        port,
+        advanceStatus,
+        log: vi.fn(),
+        ...overrides,
+      },
+    }
+  }
+
+  it('child request-execution dispatches and marks accepted', async () => {
+    const { port, advanceStatus, deps } = requestDeps()
+    const result = await requestTodoExecution(
+      { itemId: 'todo-1', callerChildSessionId: 'child-1' },
+      deps,
+    )
+    expect(result.ok).toBe(true)
+    expect(port.calls.some(call => call.kind === 'followup')).toBe(true)
+    expect(advanceStatus).toHaveBeenCalledWith('todo-1', 'accepted')
+  })
+
+  it('foreign todo request-execution is refused', async () => {
+    const { port, advanceStatus, deps } = requestDeps({
+      // The todo belongs to a DIFFERENT locus child than the caller.
+      readTodo: () => todoFixture({ locusId: 'locus-other' }),
+      lookupRegistrarChild: () => 'child-other',
+    })
+    const result = await requestTodoExecution(
+      { itemId: 'todo-1', callerChildSessionId: 'child-1' },
+      deps,
+    )
+    expect(result.ok).toBe(false)
+    expect(port.calls).toHaveLength(0)
+    expect(advanceStatus).not.toHaveBeenCalled()
+  })
+
+  it('request-execution cannot mark done or dropped', async () => {
+    // The entry point exposes no status argument at all: the only reachable
+    // status it can produce is `accepted`, and only via a real dispatch.
+    const source = await import('node:fs/promises').then(fs =>
+      fs.readFile(new URL('../src/host/ledger/dispatch.ts', import.meta.url), 'utf8'),
+    )
+    const fn = source.slice(source.indexOf('export async function requestTodoExecution'))
+    expect(fn).not.toContain("'done'")
+    expect(fn).not.toContain("'dropped'")
+  })
+
+  it('request-execution returns no navigation instruction', async () => {
+    const { deps } = requestDeps()
+    const result = await requestTodoExecution(
+      { itemId: 'todo-1', callerChildSessionId: 'child-1' },
+      deps,
+    )
+    // The tool path has no GUI context by design; assert it carries nothing a
+    // client could interpret as "navigate" (review round 6 S2).
+    expect(JSON.stringify(result)).not.toContain('executionTarget')
+    expect(JSON.stringify(result)).not.toContain('navigate')
+  })
+
+  it('both entry points share resolution body and outcomes', async () => {
+    const viaOwner = requestDeps()
+    const owner = await acceptTodo('todo-1', viaOwner.deps)
+    const viaChild = requestDeps()
+    const child = await requestTodoExecution(
+      { itemId: 'todo-1', callerChildSessionId: 'child-1' },
+      viaChild.deps,
+    )
+    expect(owner.ok).toBe(true)
+    expect(child.ok).toBe(true)
+    // Same target, same body bytes, same outcome vocabulary.
+    const ownerBody = viaOwner.port.calls.find(c => c.kind === 'followup')
+    const childBody = viaChild.port.calls.find(c => c.kind === 'followup')
+    expect(childBody?.sessionId).toBe(ownerBody?.sessionId)
+    expect(childBody?.text).toBe(ownerBody?.text)
   })
 })

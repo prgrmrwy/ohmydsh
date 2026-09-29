@@ -302,3 +302,65 @@ export async function acceptTodo(itemId: string, deps: AcceptTodoDeps): Promise<
     return { ok: false, reason: '跟进任务已投递，但状态写入失败；该待办仍显示为待处理。', dispatch: receipt }
   }
 }
+
+/** Caller-bound request-execution input. Host-derived; no model-supplied target. */
+export interface RequestTodoExecutionInput {
+  readonly itemId: string
+  /** The child session actually executing the tool call, proven by the Host. */
+  readonly callerChildSessionId: string
+}
+
+export interface RequestTodoExecutionDeps extends AcceptTodoDeps {
+  /**
+   * The child session that registered a todo, derived from its `locusId`.
+   *
+   * Defaults to the registrar the capability lookup already reports, which is
+   * correct for the single-locus case; a Host with several children under one
+   * parent supplies a real lookup so "not my todo" stays provable.
+   */
+  lookupRegistrarChild?(todo: TodoRecord): string
+}
+
+export type RequestTodoExecutionResult =
+  | { readonly ok: true; readonly record: TodoRecord; readonly outcome: DispatchReceipt['outcome'] }
+  | { readonly ok: false; readonly reason: string }
+
+/**
+ * A locus child asks for the todo it registered to be executed (design D10).
+ *
+ * The semantics are "request execution", NOT "hand off to the main session":
+ * where it runs is {@link resolveExecutionTarget}'s answer, so when a child
+ * eventually can execute its own work, this tool's contract does not change.
+ *
+ * Shares the entire downstream chain with owner accept — same resolution, same
+ * body, same outcomes — so the two entry points cannot drift.
+ *
+ * This does NOT give a model general status-writing power: it reaches only
+ * `accepted`, only for a todo this same child registered, and only when a
+ * dispatch actually succeeded. Terminal states stay owner-only.
+ *
+ * The result deliberately omits the execution target: the tool path has no GUI
+ * context, so it must carry nothing a client could read as "navigate".
+ *
+ * @param input - the caller-bound request.
+ * @param deps - the same collaborators owner accept uses.
+ * @returns the advanced record and outcome, or a refusal.
+ */
+export async function requestTodoExecution(
+  input: RequestTodoExecutionInput,
+  deps: RequestTodoExecutionDeps,
+): Promise<RequestTodoExecutionResult> {
+  const todo = deps.readTodo(input.itemId)
+  if (todo === undefined) return { ok: false, reason: '待办不存在。' }
+
+  // Ownership: a child may only ask for work it registered itself.
+  const registrarChild = deps.lookupRegistrarChild?.(todo)
+    ?? deps.registrarFor(todo).childSessionId
+  if (registrarChild.trim() === '' || registrarChild !== input.callerChildSessionId) {
+    return { ok: false, reason: '这条待办不是由当前子会话登记的。' }
+  }
+
+  const accepted = await acceptTodo(input.itemId, deps)
+  if (!accepted.ok) return { ok: false, reason: accepted.reason }
+  return { ok: true, record: accepted.record, outcome: accepted.dispatch.outcome }
+}

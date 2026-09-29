@@ -19,22 +19,22 @@
 | specs/pet-locus-intent-triage/spec.md → 受理即开工并向主会话投递带上下文的跟进任务 | 已受理的待办不能再次受理 | packages/dsh-pet/test/todo-dispatch.test.ts | accepted todo rejects a second accept without dispatching | 🟢 green |
 | specs/pet-locus-intent-triage/spec.md → 受理即开工并向主会话投递带上下文的跟进任务 | 终态待办的受理请求在投递前被拒 | packages/dsh-pet/test/todo-dispatch.test.ts | terminal todo rejects accept before the dispatch port is called | 🟢 green |
 | specs/pet-locus-intent-triage/spec.md → 受理即开工并向主会话投递带上下文的跟进任务 | 受理不外发飞书 | packages/dsh-pet/test/todo-dispatch.test.ts | accept emits no Feishu body reaction or Delivery | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 受理投递按队列语义接入主会话且不打断在途工作 | 受理返回投递结果事实 | packages/dsh-pet/test/locus-routes.test.ts | todoAction accept returns a dispatch outcome | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 受理投递按队列语义接入主会话且不打断在途工作 | 不投递的动作不返回投递结果 | packages/dsh-pet/test/locus-routes.test.ts | done and drop return no dispatch field | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 受理投递按队列语义接入主会话且不打断在途工作 | 投递结果不写入待办 | packages/dsh-pet/test/locus-routes.test.ts | reread todo carries no dispatch outcome | 🔴 red |
+| specs/pet-locus-intent-triage/spec.md → 受理投递按队列语义接入主会话且不打断在途工作 | 受理返回投递结果事实 | packages/dsh-pet/test/locus-routes.test.ts | todoAction accept returns a dispatch outcome | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 受理投递按队列语义接入主会话且不打断在途工作 | 不投递的动作不返回投递结果 | packages/dsh-pet/test/locus-routes.test.ts | done and drop return no dispatch field | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 受理投递按队列语义接入主会话且不打断在途工作 | 投递结果不写入待办 | packages/dsh-pet/test/locus-routes.test.ts | reread todo carries no dispatch outcome | 🟢 green |
 | specs/pet-locus-intent-triage/spec.md → 受理投递按队列语义接入主会话且不打断在途工作 | 目标忙碌时排队不打断 | packages/dsh-pet/test/todo-dispatch.test.ts | running target yields queued via followup not steer | 🟢 green |
 | specs/pet-locus-intent-triage/spec.md → 受理投递按队列语义接入主会话且不打断在途工作 | 目标未加载时先恢复 | packages/dsh-pet/test/todo-dispatch.test.ts | unloaded target resumes before dispatch | 🟢 green |
 | specs/pet-locus-intent-triage/spec.md → 受理投递按队列语义接入主会话且不打断在途工作 | 已排队不等于已处理 | packages/dsh-pet/test/ledger-panel-render.test.ts | queued outcome renders as queued not completed | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 子会话可在登记后请求执行且与所有者受理共用同一链路 | 子会话登记后请求执行 | packages/dsh-pet/test/ledger-track.test.ts | child request-execution dispatches and marks accepted | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 子会话可在登记后请求执行且与所有者受理共用同一链路 | 请求执行与受理走同一链路 | packages/dsh-pet/test/todo-dispatch.test.ts | both entry points share resolution body and outcomes | 🔴 red |
+| specs/pet-locus-intent-triage/spec.md → 子会话可在登记后请求执行且与所有者受理共用同一链路 | 子会话登记后请求执行 | packages/dsh-pet/test/ledger-track.test.ts | child request-execution dispatches and marks accepted | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 子会话可在登记后请求执行且与所有者受理共用同一链路 | 请求执行与受理走同一链路 | packages/dsh-pet/test/todo-dispatch.test.ts | both entry points share resolution body and outcomes | 🟢 green |
 | specs/pet-locus-intent-triage/spec.md → 子会话可在登记后请求执行且与所有者受理共用同一链路 | 工具不接受目标选择 | packages/dsh-pet/test/ledger-track.test.ts | request-execution rejects any target selector argument | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 子会话可在登记后请求执行且与所有者受理共用同一链路 | 不能就他人登记的待办请求执行 | packages/dsh-pet/test/ledger-track.test.ts | foreign todo request-execution is refused | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 子会话可在登记后请求执行且与所有者受理共用同一链路 | 请求执行不赋予改写状态的一般能力 | packages/dsh-pet/test/ledger-track.test.ts | request-execution cannot mark done or dropped | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 子会话可在登记后请求执行且与所有者受理共用同一链路 | 请求执行不触发界面导航 | packages/dsh-pet/test/ledger-track.test.ts | request-execution returns no navigation instruction | 🔴 red |
+| specs/pet-locus-intent-triage/spec.md → 子会话可在登记后请求执行且与所有者受理共用同一链路 | 不能就他人登记的待办请求执行 | packages/dsh-pet/test/ledger-track.test.ts | foreign todo request-execution is refused | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 子会话可在登记后请求执行且与所有者受理共用同一链路 | 请求执行不赋予改写状态的一般能力 | packages/dsh-pet/test/ledger-track.test.ts | request-execution cannot mark done or dropped | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 子会话可在登记后请求执行且与所有者受理共用同一链路 | 请求执行不触发界面导航 | packages/dsh-pet/test/ledger-track.test.ts | request-execution returns no navigation instruction | 🟢 green |
 | specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 登记后队列继续前进 | packages/dsh-pet/test/ledger-delivery-decoupling.test.ts | backlog advances after registration (existing, re-asserted) | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 回复完成不等于事情做完 | packages/dsh-pet/test/ledger-delivery-decoupling.test.ts | settled delivery leaves the todo open | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 待办状态变化不外发 | packages/dsh-pet/test/ledger-delivery-decoupling.test.ts | status change emits nothing to Feishu | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 模型不能把待办推进到终态 | packages/dsh-pet/test/ledger-tool-scope.test.ts | no model-facing tool can reach done or dropped | 🔴 red |
+| specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 模型不能把待办推进到终态 | packages/dsh-pet/test/ledger-tool-scope.test.ts | no model-facing tool can reach done or dropped | 🟢 green |
 | specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 不经受理直接了结 | packages/dsh-pet/test/todo-dispatch.test.ts | done and drop from open never dispatch | 🟢 green |
 | specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 受理动作自述会开工 | packages/dsh-pet/test/ledger-panel-render.test.ts | accept hint states dispatch and navigation | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 受理成功后转到执行目标会话 | packages/dsh-pet/test/ledger-panel-render.test.ts | successful accept opens the resolved execution target | 🔴 red |

@@ -142,3 +142,32 @@ describe('the three pet-locus-intent-triage tools are scoped to Pet executors', 
     expect(otherScopeVisible).not.toContain(PET_LOCUS_TRACK_TOOL)
   })
 })
+
+describe('model-facing tools cannot settle a todo (design D10)', () => {
+  it('no model-facing tool can reach done or dropped', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const nodePath = await import('node:path')
+    const tools = await readFile(
+      nodePath.resolve(__dirname, '..', 'src', 'host', 'tools.ts'),
+      'utf8',
+    )
+    // The narrowed invariant: a model may hand work off (reach `accepted`
+    // through a real dispatch), but may never declare work finished.
+    //
+    // Assert on CODE, not prose: the tool description legitimately says it
+    // cannot mark a todo done or dropped, so a bare substring check would
+    // fail on its own documentation. What must not exist is a terminal
+    // status VALUE flowing through any registered tool.
+    const code = tools.replace(/'(?:[^'\\]|\\.)*'/g, match =>
+      match.includes(' ') ? "''" : match)
+    expect(code).not.toContain("'done'")
+    expect(code).not.toContain("'dropped'")
+    // And the one tool that does move status exposes no status argument.
+    // Slice from the REGISTRATION, not the constant declaration near the top.
+    const block = tools.slice(tools.indexOf('name: PET_LOCUS_REQUEST_EXECUTION_TOOL'))
+    const params = block.slice(block.indexOf('parameters: {'), block.indexOf('output: {'))
+    expect(params).toContain('itemId')
+    expect(params).not.toContain('status')
+    expect(params).not.toContain('action')
+  })
+})
