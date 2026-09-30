@@ -122,3 +122,24 @@ describe('trackTodo', () => {
     expect(Object.keys(input).sort()).toEqual(['detail', 'summary'])
   })
 })
+
+describe('pet_locus_request_execution takes no target selector (design D10)', () => {
+  it('request-execution rejects any target selector argument', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const nodePath = await import('node:path')
+    const tools = await readFile(
+      nodePath.resolve(__dirname, '..', 'src', 'host', 'tools.ts'),
+      'utf8',
+    )
+    const block = tools.slice(tools.indexOf('name: PET_LOCUS_REQUEST_EXECUTION_TOOL'))
+    const params = block.slice(block.indexOf('parameters: {'), block.indexOf('output: {'))
+    // `itemId` is the ONLY accepted argument; anything resembling a target
+    // would let a model choose where work runs, which the Host must decide.
+    expect(params).toContain('itemId')
+    for (const selector of ['locusId', 'chatId', 'threadId', 'sessionId', 'target', 'messageId']) {
+      expect(params).not.toContain(selector)
+    }
+    // Unknown arguments are refused by the shared wrapper, not silently kept.
+    expect(block.slice(0, block.indexOf('output: {') + 4000)).toContain('requireKnownArguments')
+  })
+})

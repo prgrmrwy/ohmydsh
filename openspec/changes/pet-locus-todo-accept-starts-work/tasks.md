@@ -66,23 +66,23 @@
 
 ## 9. 管理面（Web）
 
-- [ ] 9.1 写失败测试 `accept hint states dispatch and navigation`
-- [ ] 9.2 更新 `settings.tsx:2536` 的 `TODO_ACTION_HINTS.accept`：说明会投递跟进任务、开始处理并转到执行目标会话，同时保留"不发送任何飞书消息"（旧，仍成立）
-- [ ] 9.3 写失败测试 `queued outcome renders as queued not completed`
-- [ ] 9.4 `useTodoLedger.dispatch`（`settings.tsx:2351`）承接投递回执并作为一次性 notice 呈现；失败时就地显示原因并保持该行待处理
-- [ ] 9.5 写失败测试 `successful accept opens the resolved execution target` 与 `failed accept stays put and shows the reason`；断言 `sessionOpener` 被以**回执里的 `executionTarget.sessionId`** 调用，不可断言"等于 parentSessionId"（那会把 D3 消除的硬编码写回测试）
-- [ ] 9.6 实现受理成功后的导航（D11）：用 `sessionOpener` 的 `kind: 'session'` 形态打开回执给出的执行目标并 `closeSettings`。**不可复用 `:2470-2477` 那段** —— 它开的是 `kind: 'subagent'`（登记待办的子会话），与投递目标不是同一个会话
-- [ ] 9.7 写失败测试 `queued outcome survives the navigation`；实现使结局回执以不随面板关闭而消失的形式呈现（D11 解 M1：导航不得吞掉 `dispatched`/`queued` 的区分）
-- [ ] 9.8 写失败测试 `accept succeeds without a session opener`；实现接缝缺失时正常完成受理、不导航、就地保留回执（`sessionOpener`/`closeSettings` 均为可选注入，见 `:2764-2790`）
-- [ ] 9.9 写失败测试 `request-execution returns no navigation instruction`（Host 侧断言，非组件交互）；确认工具路径返回值不含导航指令且不触达 GUI 接缝
-- [ ] 9.10 重构；确认不从行状态反推是否已投递
+- [x] 9.1 写失败测试 `accept hint states dispatch and navigation`
+- [x] 9.2 更新 `settings.tsx:2536` 的 `TODO_ACTION_HINTS.accept`：说明会投递跟进任务、开始处理并转到执行目标会话，同时保留"不发送任何飞书消息"（旧，仍成立）
+- [x] 9.3 写失败测试 `queued outcome renders as queued not completed`
+- [x] 9.4 `useTodoLedger.dispatch`（`settings.tsx:2351`）承接投递回执并作为一次性 notice 呈现；失败时就地显示原因并保持该行待处理
+- [x] 9.5 写失败测试 `successful accept opens the resolved execution target` 与 `failed accept stays put and shows the reason`；断言 `sessionOpener` 被以**回执里的 `executionTarget.sessionId`** 调用，不可断言"等于 parentSessionId"（那会把 D3 消除的硬编码写回测试）
+- [x] 9.6 实现受理成功后的导航（D11）：用 `sessionOpener` 的 `kind: 'session'` 形态打开回执给出的执行目标并 `closeSettings`。**不可复用 `:2470-2477` 那段** —— 它开的是 `kind: 'subagent'`（登记待办的子会话），与投递目标不是同一个会话
+- [x] 9.7 写失败测试 `queued outcome survives the navigation`；实现使结局回执以不随面板关闭而消失的形式呈现（D11 解 M1：导航不得吞掉 `dispatched`/`queued` 的区分）
+- [x] 9.8 写失败测试 `accept succeeds without a session opener`；实现接缝缺失时正常完成受理、不导航、就地保留回执（`sessionOpener`/`closeSettings` 均为可选注入，见 `:2764-2790`）
+- [x] 9.9 写失败测试 `request-execution returns no navigation instruction`（Host 侧断言，非组件交互）；确认工具路径返回值不含导航指令且不触达 GUI 接缝
+- [x] 9.10 重构；确认不从行状态反推是否已投递
 
 ## 10. 既有不变量回归
 
-- [ ] 10.1 重跑 `ledger-delivery-decoupling.test.ts`：`backlog advances after registration`、`settled delivery leaves the todo open`、`status change emits nothing to Feishu`（test-plan 第 27–29 行）翻绿
-- [ ] 10.2 重跑 `ledger-view.test.ts` 四条跳转场景（test-plan 第 33–36 行）翻绿
-- [ ] 10.3 写失败测试 `accept emits no Feishu body reaction or Delivery`（test-plan 第 15 行）并实现/确认
-- [ ] 10.4 更新 `host/ledger/todo.ts` 与 `store.ts:184-190` 的语义注释：状态机转换表不变，说明投递发生在 `advanceStatus` 之前且两者不在同一事务
+- [x] 10.1 重跑 `ledger-delivery-decoupling.test.ts`：`backlog advances after registration`、`settled delivery leaves the todo open`、`status change emits nothing to Feishu`（test-plan 第 27–29 行）翻绿
+- [x] 10.2 重跑 `ledger-view.test.ts` 四条跳转场景（test-plan 第 33–36 行）翻绿
+- [x] 10.3 写失败测试 `accept emits no Feishu body reaction or Delivery`（test-plan 第 15 行）并实现/确认
+- [x] 10.4 更新 `host/ledger/todo.ts` 与 `store.ts:184-190` 的语义注释：状态机转换表不变，说明投递发生在 `advanceStatus` 之前且两者不在同一事务
 
 ## 11. 验证与物化
 

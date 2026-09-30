@@ -23,6 +23,7 @@ import {
   type PetLocusDiscoveryView,
   type PetLocusManagementView,
   type PetTodoActionRequest,
+  type PetTodoActionResult,
   type PetTodoView,
 } from '../wire.js'
 
@@ -270,7 +271,7 @@ export const petApi = {
    */
   locusTodos: (parentSessionId?: string): Promise<PetTodoLedgerGroups> =>
     call(LOCUS_ROUTES.todos, parentSessionId === undefined ? {} : { parentSessionId }),
-  locusTodoAction: (input: PetTodoActionRequest): Promise<PetTodoView> =>
+  locusTodoAction: (input: PetTodoActionRequest): Promise<PetTodoActionResult> =>
     call(LOCUS_ROUTES.todoAction, input),
 }
 

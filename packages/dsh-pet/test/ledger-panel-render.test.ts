@@ -11,7 +11,7 @@
 import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { LocusSurface } from '../src/client/settings.js'
+import { LocusSurface, planAcceptFollowThrough } from '../src/client/settings.js'
 import { PET_CSS } from '../src/client/styles.js'
 import type { PetLocusManagementView } from '../src/wire.js'
 
@@ -208,9 +208,14 @@ describe('todo rows actually navigate, not merely describe', () => {
 
   it('every disposition button explains what it does and that nothing is sent to Feishu', () => {
     const markup = render()
-    for (const hint of ['仍可稍后完成或放弃', '终态', '不发送任何飞书消息']) {
+    // `accept` no longer promises a reversible middle state: it dispatches a
+    // follow-up and navigates, so its hint must say THAT. The old wording
+    // ("仍可稍后完成或放弃") described the marker-only semantics this change
+    // deliberately removed — spec Scenario 受理动作自述会开工.
+    for (const hint of ['投递跟进任务', '转到执行目标会话', '终态', '不发送任何飞书消息']) {
       expect(markup).toContain(hint)
     }
+    expect(markup).not.toContain('仍可稍后完成或放弃')
   })
 })
 
@@ -282,5 +287,68 @@ describe('parent-session list is paged and collapsible', () => {
     expect(markup).not.toContain('dshpet-rail')
     expect(markup).toContain('dshpet-work-todos')
     expect(markup).toContain('dshpet-todo-summary')
+  })
+})
+
+describe('accept receipt and navigation (D9 + D11)', () => {
+  it('successful accept opens the resolved execution target', () => {
+    const plan = planAcceptFollowThrough({
+      dispatch: {
+        outcome: 'dispatched',
+        executionTarget: { kind: 'session', sessionId: 'main-77' },
+      },
+      hasSessionOpener: true,
+    })
+    expect(plan.navigate).toEqual({ kind: 'session', sessionId: 'main-77' })
+    // Target comes from the receipt, never re-derived: asserting a literal
+    // parentSessionId here would write back the hardcoding D3 removed.
+    expect(plan.closeSettings).toBe(true)
+  })
+
+  it('queued outcome survives the navigation', () => {
+    const plan = planAcceptFollowThrough({
+      dispatch: {
+        outcome: 'queued',
+        executionTarget: { kind: 'session', sessionId: 'main-77' },
+      },
+      hasSessionOpener: true,
+    })
+    // Navigating closes the panel, so the outcome must be announced in a form
+    // that outlives it — otherwise dispatched/queued becomes indistinguishable.
+    expect(plan.persistentNotice).toBeTruthy()
+    expect(plan.persistentNotice).toContain('排队')
+    expect(plan.inPanelNotice).toBeUndefined()
+  })
+
+  it('failed accept stays put and shows the reason', () => {
+    const plan = planAcceptFollowThrough({
+      dispatch: { outcome: 'unreachable', reason: '目标会话已归档' },
+      hasSessionOpener: true,
+    })
+    expect(plan.navigate).toBeUndefined()
+    expect(plan.closeSettings).toBe(false)
+    expect(plan.inPanelNotice).toContain('目标会话已归档')
+  })
+
+  it('accept succeeds without a session opener', () => {
+    const plan = planAcceptFollowThrough({
+      dispatch: {
+        outcome: 'dispatched',
+        executionTarget: { kind: 'session', sessionId: 'main-77' },
+      },
+      hasSessionOpener: false,
+    })
+    // A missing GUI seam must not turn a delivered follow-up into a failure.
+    expect(plan.navigate).toBeUndefined()
+    expect(plan.closeSettings).toBe(false)
+    expect(plan.inPanelNotice).toBeTruthy()
+    expect(plan.treatAsFailure).toBe(false)
+  })
+
+  it('settle actions produce no receipt and no navigation', () => {
+    const plan = planAcceptFollowThrough({ hasSessionOpener: true })
+    expect(plan.navigate).toBeUndefined()
+    expect(plan.persistentNotice).toBeUndefined()
+    expect(plan.inPanelNotice).toBeUndefined()
   })
 })

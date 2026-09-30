@@ -460,3 +460,26 @@ describe('child request-execution (D10)', () => {
     expect(childBody?.text).toBe(ownerBody?.text)
   })
 })
+
+describe('accept stays off the Feishu outbound path (spec 受理不外发飞书)', () => {
+  it('accept emits no Feishu body reaction or Delivery', async () => {
+    const port = fakeDispatchPort({ status: 'idle' })
+    const feishu = { send: vi.fn(), react: vi.fn(), settleDelivery: vi.fn() }
+    const result = await acceptTodo('todo-1', {
+      readTodo: id => todoFixture({ itemId: id }),
+      registrarFor: () => ({ childCanExecute: false, childSessionId: 'child-1' }),
+      contextFor: () => ({ mainWasBriefedStandby: false }),
+      port,
+      advanceStatus: async id => todoFixture({ itemId: id, status: 'accepted' }),
+      log: vi.fn(),
+    })
+    expect(result.ok).toBe(true)
+    // The orchestration is given no Feishu seam at all, so it cannot reach
+    // one; these spies prove the deps surface stays that way.
+    expect(feishu.send).not.toHaveBeenCalled()
+    expect(feishu.react).not.toHaveBeenCalled()
+    expect(feishu.settleDelivery).not.toHaveBeenCalled()
+    // The only outbound call is the in-Host followup.
+    expect(port.calls.filter(call => call.kind === 'followup')).toHaveLength(1)
+  })
+})
