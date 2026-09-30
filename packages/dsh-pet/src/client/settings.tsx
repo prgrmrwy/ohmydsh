@@ -85,6 +85,7 @@ import type {
   PetLocusView,
   PetSkillSelection,
   PetTodoAction,
+  PetTodoDispatchReceipt,
   PetTodoStatus,
   PetTodoView,
   PetUnifiedLocusReadiness,
@@ -1992,6 +1993,76 @@ function DiscoveryFold(props: {
   )
 }
 
+/** What the panel should do after one disposition call returns (design D11). */
+export interface AcceptFollowThrough {
+  /** Where to navigate, taken from the receipt — never re-derived here. */
+  readonly navigate?: { readonly kind: 'session'; readonly sessionId: string }
+  readonly closeSettings: boolean
+  /** Outcome announcement that outlives the panel closing. */
+  readonly persistentNotice?: string
+  /** Shown in place when the panel stays open. */
+  readonly inPanelNotice?: string
+  /** False whenever a follow-up was really delivered, whatever the GUI could do. */
+  readonly treatAsFailure: boolean
+}
+
+/**
+ * Decide the panel's follow-through for one disposition result.
+ *
+ * Pure so every branch is assertable without a DOM or a Host: the interesting
+ * cases are exactly the ones that are awkward to reach through a component
+ * (absent opener, queued-then-navigate, unreachable).
+ *
+ * Three rules this encodes, each from a review finding:
+ *
+ * - The navigation target comes from `dispatch.executionTarget`. The panel
+ *   must not recompute it — which session runs a follow-up is a Host
+ *   resolution decision, and guessing would reinstate the "always the main
+ *   session" hardcoding design D3 removed.
+ * - A success announcement must SURVIVE the panel closing, or navigating
+ *   would swallow the `dispatched` vs `queued` distinction the spec requires
+ *   the owner to see.
+ * - A missing `sessionOpener` is not a failure. The follow-up was delivered;
+ *   only the convenience of being taken there is unavailable.
+ *
+ * @param input - the receipt (absent for settle actions) and GUI capability.
+ * @returns the follow-through plan.
+ */
+export function planAcceptFollowThrough(input: {
+  readonly dispatch?: PetTodoDispatchReceipt
+  readonly hasSessionOpener: boolean
+}): AcceptFollowThrough {
+  const receipt = input.dispatch
+  // `done` / `drop` dispatch nothing, so there is nothing to announce.
+  if (receipt === undefined) return { closeSettings: false, treatAsFailure: false }
+
+  if (receipt.outcome === 'unreachable') {
+    return {
+      closeSettings: false,
+      inPanelNotice: `受理失败：${receipt.reason ?? '目标不可达。'}`,
+      treatAsFailure: true,
+    }
+  }
+
+  const announcement = receipt.outcome === 'queued'
+    ? '跟进任务已投递，目标会话正忙，已排队等待。'
+    : '跟进任务已投递，目标会话已开始处理。'
+
+  const target = receipt.executionTarget
+  if (!input.hasSessionOpener || target === undefined) {
+    // Delivered, but this shell cannot navigate. Say so in place; do not
+    // report a delivered follow-up as a failed accept.
+    return { closeSettings: false, inPanelNotice: announcement, treatAsFailure: false }
+  }
+
+  return {
+    navigate: target,
+    closeSettings: true,
+    persistentNotice: announcement,
+    treatAsFailure: false,
+  }
+}
+
 /**
  * The locus surface: everything it shows, given a snapshot.
  *
@@ -2301,6 +2372,13 @@ export function LocusSurface(props: {
       {todos.error === undefined ? null : (
         <p className="dshpet-error">读取待办失败：{todos.error}</p>
       )}
+      {/* The disposition outcome, shown here whenever the panel stays open:
+          a failed accept, or a shell that cannot navigate. The navigating
+          case announces through the shell instead, so the dispatched/queued
+          distinction survives this panel closing (design D11). */}
+      {todos.notice === undefined ? null : (
+        <p className="dshpet-callout" data-tone="ok">{todos.notice}</p>
+      )}
 
       {props.notice === undefined ? null : <p className="dshpet-callout" data-tone="ok">{props.notice}</p>}
       {props.warning === undefined ? null : <p className="dshpet-callout" data-tone="warn">{props.warning}</p>}
@@ -2323,12 +2401,17 @@ export function LocusSurface(props: {
 function useTodoLedger(seed?: readonly PetTodoLedgerGroup[]): {
   readonly byParent: ReadonlyMap<string, readonly PetTodoView[]>
   readonly error: string | undefined
+  /** Disposition outcome shown in place when the panel stays open (D11). */
+  readonly notice: string | undefined
   readonly busyId: string | undefined
   readonly dispatch: (itemId: string, action: PetTodoAction) => void
 } {
   const [groups, setGroups] = useState<readonly PetTodoLedgerGroup[] | undefined>(seed)
   const [error, setError] = useState<string | undefined>(undefined)
   const [busyId, setBusyId] = useState<string | undefined>(undefined)
+  // In-place outcome text, used when the panel STAYS open (failure, or a
+  // shell with no navigation seam). The navigating case announces instead.
+  const [notice, setNotice] = useState<string | undefined>(undefined)
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -2349,13 +2432,29 @@ function useTodoLedger(seed?: readonly PetTodoLedgerGroup[]): {
 
   const dispatch = useCallback((itemId: string, action: PetTodoAction): void => {
     setBusyId(itemId)
+    setNotice(undefined)
     void (async () => {
       try {
-        await petApi.locusTodoAction({ itemId, action })
+        const result = await petApi.locusTodoAction({ itemId, action })
         // Re-read rather than patch locally: the Host owns transition
         // legality, so a rejected action must not leave an optimistic status
         // on screen (spec: Host 拒绝时状态不被乐观改写).
         await load()
+        // The receipt is one-shot: it describes THIS call, so it is consumed
+        // here and never read back off the reloaded row (design D6/D7/D9).
+        const opener = sessionOpener
+        const plan = planAcceptFollowThrough({
+          ...(result.dispatch === undefined ? {} : { dispatch: result.dispatch }),
+          hasSessionOpener: opener !== undefined,
+        })
+        if (plan.inPanelNotice !== undefined) setNotice(plan.inPanelNotice)
+        if (plan.navigate !== undefined && opener !== undefined) {
+          // Announce BEFORE closing: the panel is about to disappear, and the
+          // dispatched/queued distinction must not disappear with it.
+          if (plan.persistentNotice !== undefined) outcomeAnnouncer?.(plan.persistentNotice)
+          opener({ kind: 'session', sessionId: plan.navigate.sessionId })
+          if (plan.closeSettings) closeSettings?.()
+        }
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause))
       } finally {
@@ -2370,7 +2469,7 @@ function useTodoLedger(seed?: readonly PetTodoLedgerGroup[]): {
     return map
   }, [groups])
 
-  return { byParent, error, busyId, dispatch }
+  return { byParent, error, notice, busyId, dispatch }
 }
 
 /**
@@ -2526,14 +2625,15 @@ const TODO_ACTION_LABELS: Record<PetTodoAction, string> = {
  * What each disposition actually does, stated in terms of the owner's own
  * workflow rather than the state machine's vocabulary.
  *
- * All three only move this row's status — none of them sends anything to
- * Feishu, and none of them makes the child do more work. `accept` is the one
- * reversible step (it stays actionable); `done` and `drop` are terminal by
+ * None of them sends anything to Feishu. `accept` is no longer a bare marker:
+ * it dispatches a follow-up task to the resolved execution target and only
+ * then records `accepted`, so a failed dispatch leaves the row untouched
+ * (design D5). `done` and `drop` remain pure records and are terminal by
  * design, because a settled todo that could re-open would make the list
  * untrustworthy as a record of what is still owed.
  */
 const TODO_ACTION_HINTS: Record<PetTodoAction, string> = {
-  accept: '标记为你已接手，仍可稍后完成或放弃；不发送任何飞书消息',
+  accept: '投递跟进任务并开始处理，随后转到执行目标会话；不发送任何飞书消息',
   done: '标记为已处理完，此后不可再改（终态）；不发送任何飞书消息',
   drop: '标记为不打算做，此后不可再改（终态）；不发送任何飞书消息',
 }
@@ -2771,6 +2871,27 @@ export function setSessionOpener(
   opener: ((target: PetSessionTarget) => void) | undefined,
 ): void {
   sessionOpener = opener
+}
+
+/**
+ * Announce a short outcome that must outlive this panel.
+ *
+ * Exists because accepting a todo both navigates away and has an outcome the
+ * owner still needs: `dispatched` versus `queued` is the difference between
+ * "it started" and "it is behind other work", and an in-panel notice dies the
+ * moment navigation closes the panel (design D11).
+ *
+ * Optional like every other shell seam here: a shell that publishes none
+ * still gets a correct accept, it just reports the outcome in place instead.
+ */
+let outcomeAnnouncer: ((text: string) => void) | undefined
+
+/**
+ * Publish the outcome announcer.
+ * @param announcer - Shows a shell-level notice, or `undefined` where unsupported.
+ */
+export function setOutcomeAnnouncer(announcer: ((text: string) => void) | undefined): void {
+  outcomeAnnouncer = announcer
 }
 
 /**

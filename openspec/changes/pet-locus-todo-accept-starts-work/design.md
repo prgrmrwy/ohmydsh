@@ -165,6 +165,8 @@ Pet 内已有两处同路径先例，实现应沿用而非另造：`index.ts:183
 
 之所以把判据写成"是否被 brief 过"而不是"`mainSource === 'auto'`"：前者陈述的是第 6 条真正依赖的事实，将来若新增第四种来源、或 `auto` 改为不再 brief，规则不需要重写。实现时若 Host 没有直接记录"是否 brief 过"，`mainSource === 'auto'` 是当前唯一等价的判据，但注释须写明它是代理指标。
 
+**实施期核验（tasks 1.1）结论**：Host 确实没有"是否 brief 过"的直接记录，故采用代理指标。取数路径比规划时预估的更短——**不必绕 group 行**：`LocusRecord` 自带 `source`（`aggregate.ts:106`），待办持有 `locusId`，经 `locusRepository.getLocus(locusId)`（`repository.ts:99`）即可取得。`source` 为 `'auto'` 时加第 6 条，其余不加。group 行上那份 `mainSource`（`persistence.ts:206`）是同源投影，本路径不需要它。
+
 措辞纪律：第 6 条应写成"**待命状态结束**"而非"**解除约束**"或"**忽略之前的指令**"。后两种写法暗示两条指令在打架，会诱使模型去推理该听谁；前者陈述的是事实——开场简报描述的初始状态已经过去了。这与所有者对该简报的定性一致（见 Context）。
 
 ### D5. 投递成功之后才置 `accepted`，不做乐观更新
@@ -362,6 +364,13 @@ interface TodoDispatchPort {
 `dispatched` 与 `queued` 的差别只来自**投递前**读到的 `status`，不来自投递结果——`followup` 是同步 void（D2 核验），它不报告目标何时真正开始执行。这个界定让两个结局都能用假端口确定性断言，也避免把 `queued` 误说成一种失败。
 
 做成独立端口而非直接调 `ctx.agents`，是为了让上述五条路径都能在单测里构造，不依赖真实 DSH 时序（review round 2 建议 2 的做法）。
+
+**实施期核验（tasks 1.2–1.4）结论**：
+
+- `ctx.agents.get(id)` 返回 `AgentHandle { agent, dispose }`（`dsh-agent/lib/types/index.d.ts:144`），忙闲取自 `handle.agent.status`（`runtime-types.d.ts:147`）。注意其语义是 **LOADED 而非 exists**——DSH 会卸载闲置 agent（`index.ts:1450-1458` 的注释记录过这个坑：Task 闲置后 executor 被逐出，后续投递全失败而会话其实完好）。因此 `resolve` 返回 undefined **不等于**会话不存在，必须先 `resume` 再判定 `unreachable`。
+- `ctx.agents.resume({ resumeSessionId, agentOptions, setup })`（`index.ts:1479`）。**`setup` 中挂载的 preset 决定 resume 出来的 agent 有什么工具**，而 resume 会新建 agent scope，所以这一项不能省略。
+- **冷恢复挂会话自己持久化的 preset**（所有者确认）：用既有的 `persistedPresetFor`（`index.ts:1412`）从会话 header 读取，不套用 Pet 的 `executorSetup`——后者是 executor 专用，而执行目标可能是所有者 `/bind` 的 `standard` 会话。这与 D8 "后果上限由主会话自身权限决定"一致：恢复出的会话与它原本一样，不扩大也不缩小能力面。读不到持久 preset 时按 `unreachable` 处理，不猜测默认值。
+- 新工具加入 `LOCUS_CALLER_BOUND_TOOLS`（`composition.ts:44-56`）即可，该清单是显式白名单，漏加会使发布被拒而非静默放宽——正是 D10 所依赖的失败方向。
 
 ### D10. 子会话可在登记后请求执行，本期唯一结果是转交
 

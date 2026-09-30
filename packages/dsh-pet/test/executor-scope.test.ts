@@ -273,21 +273,30 @@ describe('Pet tool schemas match the real defineTool contract', () => {
       'utf8',
     )
 
-    // Pet still does not ship one tool per arbitrary capability. Six is the
+    // Pet still does not ship one tool per arbitrary capability. Seven is the
     // full set today: `pet_context`; the security-critical Delivery lifecycle
     // pair (finish/wait), both resolved from the caller/turn proof and
-    // deliberately accepting no target selector; and the three
+    // deliberately accepting no target selector; and the four
     // `pet-locus-intent-triage` tools (read-only parent lookup, ledger read,
-    // `pet_locus_track`), each equally caller-bound with no target selector.
+    // `pet_locus_track`, and `pet_locus_request_execution`), each equally
+    // caller-bound with no target selector.
+    //
+    // The count is the point: this asserts nobody adds a registration without
+    // amending this list, so a new entry must be justified here in the same
+    // change. `pet_locus_request_execution` was added by
+    // `pet-locus-todo-accept-starts-work` (design D10) — it takes only an
+    // `itemId`, resolves where work runs Host-side, and can reach `accepted`
+    // only through a real dispatch, never `done`/`dropped`.
     // Comments are stripped so prose mentioning registration is not counted.
     const code = tools.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-    expect([...code.matchAll(/ctx\.tools\.register\(/g)]).toHaveLength(6)
+    expect([...code.matchAll(/ctx\.tools\.register\(/g)]).toHaveLength(7)
     expect(tools).toContain('PET_CONTEXT_TOOL')
     expect(tools).toContain('PET_LOCUS_FINISH_TOOL')
     expect(tools).toContain('PET_LOCUS_WAIT_TOOL')
     expect(tools).toContain('PET_LOCUS_PARENT_LOOKUP_TOOL')
     expect(tools).toContain('PET_LOCUS_LEDGER_READ_TOOL')
     expect(tools).toContain('PET_LOCUS_TRACK_TOOL')
+    expect(tools).toContain('PET_LOCUS_REQUEST_EXECUTION_TOOL')
     expect(tools).not.toContain('pet_create_mr')
     expect(tools).not.toContain('pet_send_cr')
     expect(tools).not.toContain('pet_clean_worktree')

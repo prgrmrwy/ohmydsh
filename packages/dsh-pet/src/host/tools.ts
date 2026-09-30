@@ -60,6 +60,8 @@ export const PET_LOCUS_WAIT_TOOL = 'pet_locus_wait'
 export const PET_LOCUS_PARENT_LOOKUP_TOOL = 'pet_locus_parent_lookup'
 export const PET_LOCUS_LEDGER_READ_TOOL = 'pet_locus_ledger_read'
 export const PET_LOCUS_TRACK_TOOL = 'pet_locus_track'
+/** Caller-bound request-execution tool: asks for a registered todo to be executed (design D10). */
+export const PET_LOCUS_REQUEST_EXECUTION_TOOL = 'pet_locus_request_execution'
 
 export type PetLocusFinishOutcome = 'reply' | 'no-reply'
 
@@ -332,6 +334,21 @@ export interface PetIntentTriageDependencies {
   readonly parentLookup?: ParentLookupDeps
   readonly ledgerRead?: LedgerReadDeps
   readonly track?: TrackDeps
+  /**
+   * Executes a child's request to run a todo it registered (design D10).
+   *
+   * Shaped as a single callback rather than the orchestration's own deps so
+   * this module stays free of the dispatch chain: the Host composes owner
+   * accept and child request-execution from the SAME collaborators, and this
+   * seam only carries the caller-bound request across.
+   */
+  readonly requestExecution?: (input: {
+    readonly itemId: string
+    readonly callerChildSessionId: string
+  }) => Promise<
+    | { readonly ok: true; readonly outcome: 'dispatched' | 'queued' | 'unreachable' }
+    | { readonly ok: false; readonly reason: string }
+  >
 }
 
 export function registerPetTools(
@@ -542,6 +559,56 @@ export function registerPetTools(
         const authorized = await resolveAuthorizedCurrent(intentTriage, sessionId, 'track')
         const result = await trackTodo(authorized, { summary: input.summary, detail: input.detail }, intentTriage.track)
         return result.ok ? { ok: true } : { ok: false, reason: result.reason }
+      },
+    })))
+
+    disposers.push(ctx.tools.register(defineTool({
+      name: PET_LOCUS_REQUEST_EXECUTION_TOOL,
+      description:
+        'Ask for a todo YOU registered to be executed. Provide only `itemId` — the Host resolves ' +
+        'where the work runs from the todo\'s own attribution, so there is no target/session/chat ' +
+        'argument and you cannot choose a destination. Today a locus child cannot make file ' +
+        'changes itself, so this hands the work to the session that can; that is a consequence of ' +
+        'the current permission model, not part of this tool\'s meaning. It marks the todo accepted ' +
+        'ONLY when a follow-up task was really delivered. It cannot mark a todo done or dropped — ' +
+        'settling a todo stays the owner\'s decision.',
+      parameters: {
+        itemId: { type: 'string', required: true },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', required: true },
+            outcome: { type: 'string' },
+            reason: { type: 'string' },
+          },
+        },
+        render: (_args, value) => [{
+          type: 'text',
+          text: value.ok
+            ? `已请求执行（${value.outcome === 'queued' ? '目标忙碌，已排队' : '已开始'}）。`
+            : `请求执行失败：${String(value.reason)}`,
+        }],
+      },
+      async execute(args, exec) {
+        const input = requireKnownArguments(args, ['itemId'], PET_LOCUS_REQUEST_EXECUTION_TOOL)
+        if (typeof input.itemId !== 'string' || input.itemId.trim() === '') {
+          throw new PetError('INVALID_REQUEST', 'itemId must be a non-empty string.')
+        }
+        const sessionId = callerSessionId(exec as ExecutionLike)
+        if (intentTriage.requestExecution === undefined) return { ok: false, reason: 'unavailable' }
+        // Same authorization proof `pet_locus_track` uses: a caller without a
+        // unique current Delivery cannot prove which locus it speaks for.
+        await resolveAuthorizedCurrent(intentTriage, sessionId, 'track')
+        const result = await intentTriage.requestExecution({
+          itemId: input.itemId.trim(),
+          callerChildSessionId: sessionId,
+        })
+        return result.ok
+          ? { ok: true, outcome: result.outcome }
+          : { ok: false, reason: result.reason }
       },
     })))
   }

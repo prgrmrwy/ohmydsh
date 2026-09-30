@@ -19,7 +19,11 @@ export const INTENT_TRIAGE_GUIDANCE =
   '2. WORK REQUEST: a request to change code, fix a bug, or otherwise act. Under a read-only locus, ' +
   'do not attempt the write. Investigate enough to record a useful handoff, call `pet_locus_track`, ' +
   'then finish that Delivery by calling `pet_locus_finish` with outcome `reply`. Registering a todo ' +
-  'never itself finishes a Delivery.\n' +
+  'never itself finishes a Delivery. If the work should start now rather than wait for the owner to ' +
+  'pick it up, you may additionally call `pet_locus_request_execution` with the `itemId` you just ' +
+  'registered: it asks for that todo to be executed and the Host decides where the work runs. It ' +
+  'marks the todo accepted only when a follow-up task was really delivered, and it can never mark a ' +
+  'todo done or dropped — settling a todo stays the owner\'s decision.\n' +
   '3. REFERENCE-ONLY: this bot is merely copied, cited, introduced as a contact, or mentioned as an ' +
   'associated party, with no request for this bot to answer or act. For example: a message tells ' +
   'another participant “if you have questions, contact this bot” while also mentioning this bot. ' +
@@ -56,6 +60,8 @@ export function intentTriageGuidanceCoversRequiredPoints(guidance: string): bool
     'SAME persistent child',
     'do not create a todo',
     'do not retain a current Delivery',
+    '`pet_locus_request_execution`',
+    'can never mark a todo done or dropped',
     'do not classify a message as reference-only merely because it also mentions another bot',
   ]
   return requiredPhrases.every(phrase => guidance.includes(phrase))
