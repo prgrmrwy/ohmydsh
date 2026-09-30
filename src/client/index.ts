@@ -13,6 +13,30 @@ interface CockpitPortForwardService {
   publish(channelId: string): Promise<PortForwardHandle>
 }
 
+/**
+ * The bridge's "no forward to have" failure (dsh-cockpit-bridge >= 0.5.2).
+ *
+ * Thrown when the page is not inside a cockpit, or when this device IS the
+ * cockpit host: the browser and the device port are then on the same machine,
+ * so the device's own loopback address is exactly right. Detected by `name`,
+ * never by class identity — the bridge lives in another bundle. Every other
+ * failure (a cockpit that answered and refused, a network error, an older
+ * bridge's generic Error) keeps propagating: a loopback address would resolve
+ * on the user's machine, not on the device.
+ */
+export const PORT_FORWARD_UNAVAILABLE_ERROR = 'PortForwardUnavailableError'
+
+export function isPortForwardUnavailable(error: unknown): boolean {
+  return typeof error === 'object' && error !== null
+    && (error as { name?: unknown }).name === PORT_FORWARD_UNAVAILABLE_ERROR
+    && typeof (error as { reason?: unknown }).reason === 'string'
+}
+
+/** Same address dsh-memex hands out when no resolver is registered at all. */
+export function localBrowseAddress(port: number): string {
+  return `http://localhost:${port}`
+}
+
 interface BrowseTarget {
   readonly scope: string
   readonly port: number
@@ -86,12 +110,20 @@ export function apply(ctx: ServiceContext): void {
       const current = readForward()
       if (current === undefined) throw new Error('cockpit port-forward service unavailable')
       const channelId = browseChannelId(scope)
-      // Declaring the port is what makes it publishable; the cockpit refuses
-      // anything not registered, and registering the same channel again simply
-      // reuses the existing forward.
-      await current.register(channelId, port)
-      const handle = await current.publish(channelId)
-      return handle.url
+      try {
+        // Declaring the port is what makes it publishable; the cockpit refuses
+        // anything not registered, and registering the same channel again
+        // simply reuses the existing forward.
+        await current.register(channelId, port)
+        const handle = await current.publish(channelId)
+        return handle.url
+      } catch (error) {
+        // "No forward to have" is the one case where falling back is right:
+        // it is what dsh-memex does on its own when this shim is not installed,
+        // and what the host device needs, since it never leaves the machine.
+        if (isPortForwardUnavailable(error)) return localBrowseAddress(port)
+        throw error
+      }
     })
   }
 
