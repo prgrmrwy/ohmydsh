@@ -1,7 +1,7 @@
 {
   "name": "dsh-session-links",
   "version": "0.1.0",
-  "description": "Session links panel: collect and categorize MR / deploy / tracker / artifact URLs from the current conversation into a dsh-better-sidebar tab",
+  "description": "Session links panel: collect and categorize MR / deploy / work-item / artifact URLs from the current conversation into a dsh-better-sidebar tab",
   "license": "MIT",
   "type": "module",
   "main": "./lib/index.js",

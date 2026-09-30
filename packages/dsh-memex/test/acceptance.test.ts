@@ -93,7 +93,8 @@ describe('dsh-memex real-kernel acceptance', () => {
     const guarded = await h.call('memex_write', { slug: 'guarded', content: card('Guarded', 'mentions current internals'), scope: 'personal' })
     expect(guarded.additional).toEqual([expect.objectContaining({ scope: 'personal', written: false, rules: expect.any(Array) })])
     expect(readFileSync(join(h.namespaceDir, 'current', 'cards', 'guarded.md'), 'utf8')).toContain('mentions current')
-    expect(h.logs).toHaveLength(1)
+    // One reject record; rule-inactive notices are separate diagnostics.
+    expect(h.logs.filter(entry => String(entry[0]).startsWith('Cross-write rejected'))).toHaveLength(1)
     expect(JSON.stringify(h.logs)).not.toContain('mentions current')
     const written = readFileSync(join(h.namespaceDir, 'current', 'cards', 'guarded.md'), 'utf8')
     expect(written).not.toMatch(/^origin:/m)

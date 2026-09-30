@@ -1,6 +1,6 @@
 # dsh-session-links · 文档/资料面板
 
-better-sidebar 右侧工作台「文档/资料」tab:自动收集**当前会话**消息中的 URL 与产出的文件,按 **MR / 部署 / Tracker / 产物制品 / 其他** 分类展示,随会话切换联动,tab 徽标显示链接计数。
+better-sidebar 右侧工作台「文档/资料」tab:自动收集**当前会话**消息中的 URL 与产出的文件,按 **MR / 部署 / 工作项 / 产物制品 / 其他** 分类展示,随会话切换联动,tab 徽标显示链接计数。
 
 纯浏览器插件:无 host 能力、无网络外呼、不读写凭据、不持久化(刷新后对当前会话重建一次采集)。
 
@@ -13,7 +13,18 @@ better-sidebar 右侧工作台「文档/资料」tab:自动收集**当前会话*
 ## 行为
 
 - **采集范围**:user / assistant / steering / context 消息;assistant 仅正文 text 块(reasoning 与 tool-call 载荷不采集);tool-result、compaction 等节点跳过。
-- **分类规则**:集中维护于 `src/client/links.ts` 的 `CATEGORY_RULES`(域名 + 路径/查询特征);未知 URL 进「其他」,绝不丢弃。
+- **分类规则**:集中维护于 `src/shared/links.ts` 的 `CATEGORY_RULES`(域名 + 路径/查询特征);未知 URL 进「其他」,绝不丢弃。
+- **组织专属域名走配置**:公开源码只认公开平台(GitHub/GitLab/Bitbucket/Gitee 等)。组织自己的代码评审域名与工作项域名写在插件行的 `config` 里,由私有 overlay 的 patch 覆盖本插件行:
+
+  ```yaml
+  - id: session-links
+    name: dsh-session-links
+    config:
+      reviewHosts: [git.corp.example]      # 额外的 MR/PR 域名(含子域名)
+      trackerHosts: [tracker.corp.example] # 归入「工作项」的域名(含子域名)
+  ```
+
+  host 在全量基线里把这份规则一并下发给浏览器端,两边分类一致。未配置时「工作项」分组为空。
 - **增量**:每会话至多一次全量扫描,之后按消息 `seq` 水位只处理新消息;`loadOlder` 追加的旧消息不重复采集。
 - **去重与排序**:同 URL 去重保留最近一次出现并计数;组内按最近出现时间倒序,同时间 assistant 优先。
 - **展示**:分类分组 + 标题(host + 路径摘要)+ 相对时间 + 重复次数;点击在新标签页打开,不注入脚本。

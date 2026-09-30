@@ -16,7 +16,6 @@ import type {
 } from './types.js'
 
 const NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
-const INTERNAL_HOSTS = new Set(['git.corp.example'])
 
 function normalizePath(path: string, home = homedir()): string {
   const expanded = path === '~' ? home : path.startsWith('~/') ? join(home, path.slice(2)) : path
@@ -146,6 +145,7 @@ export function createScopeResolver(options: ScopeResolverOptions = {}): ScopeSe
   const homeDir = options.homeDir ?? homedir()
   const namespaceDir = normalizePath(options.namespaceDir ?? defaultNamespaceDir(homeDir), homeDir)
   const config = mergeConfig(options.config)
+  const internalHosts = new Set(options.org?.internalHosts ?? [])
   const directoryExists = options.directoryExists ?? existsSync
   const gitRemote = options.gitRemote ?? ((cwd: string) => {
     try {
@@ -393,7 +393,7 @@ export function createScopeResolver(options: ScopeResolverOptions = {}): ScopeSe
         claimDerived(scope, normalizedRemote(remote))
         const root = gitRoot(cwd)
         const host = hostOfRemote(remote)
-        const publish: PublishDirection = host !== undefined && INTERNAL_HOSTS.has(host) ? 'internal' : 'external'
+        const publish: PublishDirection = host !== undefined && internalHosts.has(host) ? 'internal' : 'external'
         const result = make(scope, 'derived', { name: scope, publish }, root ? [root] : [cwd], true, undefined, { cwd, claim: { kind: 'none' } })
         cache.set(key, result)
         return result

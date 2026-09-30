@@ -155,6 +155,8 @@ export interface ScopeService {
 
 export interface ScopeResolverOptions {
   readonly homeDir?: string
+  /** Organization profile; its `internalHosts` mark derived libraries internal. */
+  readonly org?: import('../org.js').OrgProfile
   readonly namespaceDir?: string
   readonly config?: Partial<ScopeConfig>
   readonly gitRemote?: (cwd: string) => string | undefined

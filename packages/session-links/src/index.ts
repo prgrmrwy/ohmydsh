@@ -27,6 +27,7 @@ import type {} from '@deepseek-ai/dsh-session-persistence'
 import { SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import { SESSION_LINKS_CHANNEL, SESSION_LINKS_ENTRIES_ENDPOINT, type SessionLinksRequest } from './contract.js'
 import { extractSession } from './host/extract.js'
+import { parseLinkRules } from './shared/links.js'
 
 export const name = 'session-links'
 
@@ -39,7 +40,10 @@ const BASELINE_CACHE_TTL_MS = 30_000
 type BaselineCacheEntry = { value: unknown; at: number }
 
 /** Mount the `/dsh-session-links` RPC channel when a host connection exists. */
-export function apply(ctx: Context): void {
+export function apply(ctx: Context, config?: unknown): void {
+  // Organization hosts come from the row config (a private overlay patch), so
+  // the public source never names them.
+  const rules = parseLinkRules(config)
   const cache = new Map<string, BaselineCacheEntry>()
 
   ctx.inject(['connection'], (child) => {
@@ -99,8 +103,8 @@ export function apply(ctx: Context): void {
               const args = rawArgs === '' ? {} : JSON.parse(rawArgs)
               const view = tools?.get(name)?.presentCall?.(args)
               return view as ReturnType<import('./shared/produced.js').PresentCall>
-            })
-            const value = { entries, produced, maxSeq, complete: true as const }
+            }, rules)
+            const value = { entries, produced, maxSeq, complete: true as const, rules }
             cache.set(sessionId, { value, at: Date.now() })
             return { ok: true as const, value }
           } finally {

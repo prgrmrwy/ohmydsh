@@ -36,7 +36,7 @@ export interface LinkEntry {
 export const CATEGORY_LABELS: Readonly<Record<LinkCategory, string>> = {
   mr: 'MR',
   deploy: '部署',
-  tracker: 'Tracker',
+  tracker: '工作项',
   artifact: '产物制品',
   other: '其他',
 }
@@ -131,25 +131,63 @@ export function extractUrls(text: string): string[] {
 /* Classification                                                      */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Deployment-specific hosts. The public package knows only public platforms;
+ * an organization's review and work-item hosts arrive through the plugin row
+ * config (a private overlay patch overrides the row), so the public source
+ * never names them.
+ */
+export interface LinkRules {
+  /** Hosts (and their subdomains) whose links are work items. */
+  readonly trackerHosts: readonly string[]
+  /** Code-review hosts (and subdomains) in addition to the public platforms. */
+  readonly reviewHosts: readonly string[]
+}
+
+export const DEFAULT_LINK_RULES: LinkRules = { trackerHosts: [], reviewHosts: [] }
+
+const HOSTNAME_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
+
+function hostList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const out: string[] = []
+  for (const raw of value) {
+    const host = typeof raw === 'string' ? raw.trim().toLowerCase().replace(/^\.+|\.+$/g, '') : ''
+    if (HOSTNAME_RE.test(host) && !out.includes(host)) out.push(host)
+  }
+  return out
+}
+
+/** Normalize untrusted row config; unusable entries are dropped. */
+export function parseLinkRules(config: unknown): LinkRules {
+  if (config === null || typeof config !== 'object') return DEFAULT_LINK_RULES
+  const record = config as Record<string, unknown>
+  return { trackerHosts: hostList(record.trackerHosts), reviewHosts: hostList(record.reviewHosts) }
+}
+
+function underAny(host: string, hosts: readonly string[]): boolean {
+  return hosts.some((entry) => host === entry || host.endsWith(`.${entry}`))
+}
+
 /** One rule: category + a predicate over the parsed URL parts. */
 interface CategoryRule {
   category: LinkCategory
-  match(host: string, path: string, query: string): boolean
+  match(host: string, path: string, query: string, rules: LinkRules): boolean
 }
 
-/** Git code-review / MR hosts (host segment match). */
-const REVIEW_HOST_RE = /(^|\.)(gitlab|github|bitbucket|gitee|git\.corp|code\.corp|source\.byte|git\.code)\./
+/** Public git code-review / MR platforms (host segment match). */
+const REVIEW_HOST_RE = /(^|\.)(gitlab|github|bitbucket|gitee)\./
 
 /** Central, ordered rule table: first match wins; `other` is the fallback. */
 const CATEGORY_RULES: readonly CategoryRule[] = [
   {
     category: 'tracker',
-    match: (host) => host === 'tracker.corp.example' || host.endsWith('.tracker.corp.example'),
+    match: (host, _path, _query, rules) => underAny(host, rules.trackerHosts),
   },
   {
     category: 'mr',
-    match: (host, path, query) => {
-      if (!REVIEW_HOST_RE.test(host)) return false
+    match: (host, path, query, rules) => {
+      if (!REVIEW_HOST_RE.test(host) && !underAny(host, rules.reviewHosts)) return false
       return (
         /(\/(merge_request|pull|pullrequest|pr|mr)\b|\/(merge_requests|pulls)\/)/.test(path) ||
         /(merge_request_iid|pull_request|review)=/.test(query)
@@ -176,7 +214,7 @@ const CATEGORY_RULES: readonly CategoryRule[] = [
  * wins. URLs that match nothing are classified `other` and are never
  * dropped by callers.
  */
-export function classifyUrl(rawUrl: string): LinkCategory {
+export function classifyUrl(rawUrl: string, rules: LinkRules = DEFAULT_LINK_RULES): LinkCategory {
   let u: URL
   try {
     u = new URL(rawUrl)
@@ -187,7 +225,7 @@ export function classifyUrl(rawUrl: string): LinkCategory {
   const path = u.pathname.toLowerCase()
   const query = u.search.toLowerCase()
   for (const rule of CATEGORY_RULES) {
-    if (rule.match(host, path, query)) return rule.category
+    if (rule.match(host, path, query, rules)) return rule.category
   }
   return 'other'
 }
@@ -235,7 +273,7 @@ function assistantTextBlocks(blocks: readonly AssistantBlock[]): string[] {
  * links come from its visible text blocks only — reasoning and tool-call
  * payloads are never collected. Unknown node kinds are skipped safely.
  */
-export function collectLinksFromNode(node: ConversationNode): LinkEntry[] {
+export function collectLinksFromNode(node: ConversationNode, rules: LinkRules = DEFAULT_LINK_RULES): LinkEntry[] {
   let role: LinkRole
   let texts: string[]
   switch (node.kind) {
@@ -263,7 +301,7 @@ export function collectLinksFromNode(node: ConversationNode): LinkEntry[] {
     for (const url of extractUrls(text)) {
       entries.push({
         url,
-        category: classifyUrl(url),
+        category: classifyUrl(url, rules),
         time: node.time,
         seq: node.seq,
         role,
@@ -276,9 +314,9 @@ export function collectLinksFromNode(node: ConversationNode): LinkEntry[] {
 }
 
 /** Collect entries from every node of a conversation snapshot. */
-export function collectLinksFromNodes(nodes: readonly ConversationNode[]): LinkEntry[] {
+export function collectLinksFromNodes(nodes: readonly ConversationNode[], rules: LinkRules = DEFAULT_LINK_RULES): LinkEntry[] {
   const out: LinkEntry[] = []
-  for (const node of nodes) out.push(...collectLinksFromNode(node))
+  for (const node of nodes) out.push(...collectLinksFromNode(node, rules))
   return out
 }
 
