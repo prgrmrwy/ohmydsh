@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { registerMemexSettings } from './scope/settings.js'
 import { ScopeRuntime } from './scope/runtime.js'
 import type { ScopeConfig } from './scope/types.js'
+import { EMPTY_ORG_PROFILE, type OrgProfile } from './org.js'
 
 export interface MemexRuntime {
   readonly scopes: ScopeRuntime
@@ -21,10 +22,10 @@ export interface MemexRuntime {
  * deliberately performed by the caller inside the same injected fiber so that
  * all contributions unwind together when the settings service reloads.
  */
-export function createMemexRuntime(ctx: Context): MemexRuntime {
+export function createMemexRuntime(ctx: Context, org: OrgProfile = EMPTY_ORG_PROFILE): MemexRuntime {
   const settings = registerMemexSettings(ctx)
   let current = settings.get()
-  const scopes = new ScopeRuntime(current)
+  const scopes = new ScopeRuntime(current, { org })
   const dispose = settings.watch(next => {
     current = next
     scopes.replace(next)

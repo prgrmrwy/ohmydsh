@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { evaluateCrossWrite } from '../src/guard/index.js'
 import type { ScopeResolution, ScopeService } from '../src/scope/types.js'
+import { parseOrgProfile } from '../src/org.js'
 
 function scope(name: string, publish: 'internal' | 'external', workspacePaths: string[] = []): ScopeResolution {
   return { scope: name, home: `/memex/${name}`, publish, publishKnown: true, memory: true, source: 'config', created: false, workspacePaths }
@@ -58,8 +59,23 @@ describe('cross-write guard', () => {
   it('uses boundaries rather than matching scope substrings', () => {
     expect(evaluateCrossWrite({ slug: 'x', body: 'prefixteam-acmesuffix' }, external, resolver).allowed).toBe(true)
   })
+  const org = parseOrgProfile({ internalHosts: ['git.corp.example'], internalDomains: ['corp.example', 'intra.example'] })
   it('rejects private IPs, internal remotes and workspace paths', () => {
-    const decision = evaluateCrossWrite({ slug: 'x', body: '127.0.0.1 fc00::1 ssh://git@git.corp.example/team/acme.git corp.example /work/acme/src' }, external, resolver, ['/work/acme'])
+    const decision = evaluateCrossWrite({ slug: 'x', body: '127.0.0.1 fc00::1 ssh://git@git.corp.example/team/acme.git /work/acme/src' }, external, resolver, ['/work/acme'], org)
     expect(decision.rules).toEqual(expect.arrayContaining(['structural:private-ip', 'structural:internal-remote', 'structural:workspace-path']))
+  })
+  it('rejects hosts under a configured internal domain, by label boundary', () => {
+    expect(evaluateCrossWrite({ slug: 'x', body: 'see wiki.intra.example/page' }, external, resolver, [], org).rules).toContain('structural:internal-domain')
+    expect(evaluateCrossWrite({ slug: 'x', body: 'see notintra.example/page' }, external, resolver, [], org).rules).not.toContain('structural:internal-domain')
+  })
+  it('matches scp, ssh and https remote forms on a configured host', () => {
+    for (const remote of ['git@git.corp.example:team/acme.git', 'ssh://me@git.corp.example/team/acme.git', 'https://git.corp.example/team/acme']) {
+      expect(evaluateCrossWrite({ slug: 'x', body: remote }, external, resolver, [], org).rules).toContain('structural:internal-remote')
+    }
+  })
+  it('keeps the internal-host rules inactive and reported when no organization is configured', () => {
+    const decision = evaluateCrossWrite({ slug: 'x', body: 'git@git.corp.example:team/acme.git' }, external, resolver)
+    expect(decision.rules).not.toContain('structural:internal-remote')
+    expect(decision.warnings).toContain('structural:internal-host-rule-inactive')
   })
 })

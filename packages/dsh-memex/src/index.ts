@@ -12,6 +12,7 @@ import { registerMemexLifecycle } from './lifecycle/index.js'
 import { registerMemexSkills } from './lifecycle/skills.js'
 import { registerMemexChannel } from './host/channel.js'
 import { createBrowseRegistry } from './run/browse-registry.js'
+import { parseOrgProfile, type OrgProfileInput } from './org.js'
 
 export const name = 'dsh-memex'
 // Do not export a static `inject`: optional Host services belong in the dynamic
@@ -19,9 +20,13 @@ export const name = 'dsh-memex'
 // hard dependencies and can make this plugin silently never activate.
 
 /** Mount all settings-dependent contributions in one injected fiber. */
-export function apply(ctx: Context): void {
+export function apply(ctx: Context, config?: OrgProfileInput): void {
+  // Row config (profile patch), not live settings: which hosts are internal is
+  // a deployment fact supplied by a private overlay, never by the public repo.
+  const org = parseOrgProfile(config)
+  for (const problem of org.problems) ctx.logger('dsh-memex').warn('Ignored organization config: %s', problem)
   ctx.inject(['settings', 'tools', 'skills'], child => {
-    const runtime = createMemexRuntime(child)
+    const runtime = createMemexRuntime(child, org)
     // Tools keep this stable proxy while valid live settings atomically replace
     // the underlying resolver (and discard its cwd cache).
     const scopes = {
@@ -35,7 +40,7 @@ export function apply(ctx: Context): void {
     const lifecycle = registerMemexLifecycle(child, scopes)
     registerMemexSkills(child)
     child.effect(
-      () => registerMemexTools(child, scopes, { onToolSuccess: lifecycle.mark }),
+      () => registerMemexTools(child, scopes, { onToolSuccess: lifecycle.mark, org }),
       'dsh-memex.tools.register()',
     )
     // The settings page's read/write surface. It receives the same live proxy

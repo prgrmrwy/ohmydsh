@@ -9,6 +9,7 @@ import { parseList, parseSearch } from '../run/parse.js'
 import type { ScopeResolution, ScopeService } from '../scope/types.js'
 import { KERNEL_VERSION, TOOL_DESCRIPTIONS } from './descriptions.generated.js'
 import { evaluateCrossWrite } from '../guard/index.js'
+import type { OrgProfile } from '../org.js'
 import { mapConcurrent } from '../run/concurrency.js'
 import { segmentQuery } from './query-segment.js'
 import { anchored, buildRecord, queryShape } from '../telemetry/record.js'
@@ -25,6 +26,8 @@ export interface MemexToolOptions {
   readonly runner?: KernelRunner
   readonly fanoutConcurrency?: number
   readonly onToolSuccess?: (tool: 'recall' | 'retro' | 'write', session: object) => void
+  /** Organization profile for the guard's internal-host rules (see ../org.ts). */
+  readonly org?: OrgProfile
 }
 
 interface ToolExec {
@@ -146,8 +149,9 @@ function guardWrite(
   target: ScopeResolution,
   resolver: ScopeService,
   onInactiveRule?: (rule: string) => void,
+  org?: OrgProfile,
 ) {
-  const decision = evaluateCrossWrite(card, target, resolver)
+  const decision = evaluateCrossWrite(card, target, resolver, [], org)
   for (const warning of decision.warnings) onInactiveRule?.(warning)
   return decision.allowed ? undefined : decision.rules
 }
@@ -288,13 +292,14 @@ async function writeCurrentAndAdditional(
   runner: KernelRunner,
   signal: AbortSignal | undefined,
   ctx: Context,
+  org?: OrgProfile,
 ) {
   const inactiveRules: string[] = []
   const noteInactive = (rule: string) => {
     if (!inactiveRules.includes(rule)) inactiveRules.push(rule)
     ctx.logger('dsh-memex').warn('Guard rule inactive: %s', rule)
   }
-  const currentRules = guardWrite({ slug: args.slug, ...(args.title !== undefined ? { title: args.title } : {}), body: args.body }, current, resolver, noteInactive)
+  const currentRules = guardWrite({ slug: args.slug, ...(args.title !== undefined ? { title: args.title } : {}), body: args.body }, current, resolver, noteInactive, org)
   if (currentRules) {
     logGuardReject(ctx, current.scope, currentRules)
     throw new Error(`Write rejected for scope ${current.scope}: ${currentRules.join(', ')}`)
@@ -322,7 +327,7 @@ async function writeCurrentAndAdditional(
       additional.push({ scope: name, written: false, error: 'unknown or invalid scope' })
       continue
     }
-    const rules = guardWrite({ slug: args.slug, ...(args.title !== undefined ? { title: args.title } : {}), body: args.body }, target, resolver, noteInactive)
+    const rules = guardWrite({ slug: args.slug, ...(args.title !== undefined ? { title: args.title } : {}), body: args.body }, target, resolver, noteInactive, org)
     if (rules) {
       logGuardReject(ctx, target.scope, rules)
       additional.push({ scope: target.scope, written: false, rules })
@@ -482,7 +487,7 @@ export function registerMemexTools(ctx: Context, resolver: ScopeService, options
     async execute(args, exec) {
       const current = currentFor(exec, resolver)
       const content = enrichWriteContent(args.content, args.category)
-      const result = await writeCurrentAndAdditional('write', { slug: args.slug, content, scope: args.scope, title: undefined, body: content }, current, resolver, runner, exec.signal, ctx)
+      const result = await writeCurrentAndAdditional('write', { slug: args.slug, content, scope: args.scope, title: undefined, body: content }, current, resolver, runner, exec.signal, ctx, options.org)
       if (exec.agent !== undefined) options.onToolSuccess?.('write', exec.agent.session)
       return { json: JSON.stringify({ ...(kernelVersionWarning ? { kernelVersionWarning } : {}), current: route(current), slug: args.slug, written: true, warning: [result.primary.stderr.trim() ? 'memex emitted a write warning' : '', ...result.primaryWarnings].filter(Boolean).join('; ') || undefined, ...(result.inactiveRules.length > 0 ? { guardWarnings: result.inactiveRules } : {}), additional: result.additional }, null, 2) }
     },
@@ -505,7 +510,7 @@ export function registerMemexTools(ctx: Context, resolver: ScopeService, options
     async execute(args, exec) {
       const current = currentFor(exec, resolver)
       const content = frontmatterForRetro(args)
-      const result = await writeCurrentAndAdditional('retro', { slug: args.slug, title: args.title, body: args.body, content, scope: args.scope }, current, resolver, runner, exec.signal, ctx)
+      const result = await writeCurrentAndAdditional('retro', { slug: args.slug, title: args.title, body: args.body, content, scope: args.scope }, current, resolver, runner, exec.signal, ctx, options.org)
       if (exec.agent !== undefined) options.onToolSuccess?.('retro', exec.agent.session)
       return { json: JSON.stringify({ ...(kernelVersionWarning ? { kernelVersionWarning } : {}), current: route(current), slug: args.slug, written: true, warning: [result.primary.stderr.trim() ? 'memex emitted a write warning' : '', ...result.primaryWarnings].filter(Boolean).join('; ') || undefined, ...(result.inactiveRules.length > 0 ? { guardWarnings: result.inactiveRules } : {}), additional: result.additional }, null, 2) }
     },

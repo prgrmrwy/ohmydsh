@@ -72,6 +72,11 @@ describe('extractSession (links)', () => {
     expect(byUrl.get('https://deploy.example.com/app/1')).toMatchObject({ category: 'deploy', role: 'assistant', seq: 2 })
   })
 
+  it('classifies with the deployment rules it is given', () => {
+    const { entries } = extractSession([assistantMessage(1, 'https://tracker.corp.example/story/9')], noView, { trackerHosts: ['tracker.corp.example'], reviewHosts: [] })
+    expect(entries[0]).toMatchObject({ category: 'tracker' })
+  })
+
   it('excludes reasoning and tool-call payloads', () => {
     const { entries } = extractSession([assistantMessage(1, '正常文本 https://good.example.com')], noView)
     expect(entries.map((e) => e.url)).toEqual(['https://good.example.com'])

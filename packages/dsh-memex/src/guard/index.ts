@@ -1,4 +1,5 @@
 import type { ScopeResolution, ScopeService } from '../scope/types.js'
+import { EMPTY_ORG_PROFILE, internalDomainPattern, internalRemotePattern, type OrgProfile } from '../org.js'
 
 export interface GuardCard {
   readonly slug: string
@@ -18,8 +19,6 @@ export interface GuardDecision {
 
 const PRIVATE_IPV4 = /\b(?:10(?:\.\d{1,3}){3}|127(?:\.\d{1,3}){3}|169\.254(?:\.\d{1,3}){2}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])(?:\.\d{1,3}){2})\b/
 const PRIVATE_IPV6 = /(?:^|[\s[(])(?:::1|f[cd][0-9a-f]{0,2}:|fe[89ab][0-9a-f]?:)[0-9a-f:]*(?=$|[\s\])},])/i
-const INTERNAL_REMOTE = /(?:ssh:\/\/(?:[^@\s/]+@)?|git@)?git\.corp\.example(?::|\/)[^\s]+/i
-const INTERNAL_DOMAIN = /\b(?:[a-z0-9-]+\.)*(?:corp\.org|corp\.net)\b/i
 
 function asciiBoundary(term: string): RegExp {
   const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -31,6 +30,7 @@ export function evaluateCrossWrite(
   target: ScopeResolution,
   resolver: ScopeService,
   workspacePaths: readonly string[] = [],
+  org: OrgProfile = EMPTY_ORG_PROFILE,
 ): GuardDecision {
   // An undetermined publish direction is the only state that cannot be judged
   // at all, so it is the one that fails closed.
@@ -65,7 +65,13 @@ export function evaluateCrossWrite(
   }
 
   if (PRIVATE_IPV4.test(text) || PRIVATE_IPV6.test(text)) rules.push('structural:private-ip')
-  if (INTERNAL_REMOTE.test(text)) rules.push('structural:internal-remote')
-  if (INTERNAL_DOMAIN.test(text)) rules.push('structural:internal-domain')
+  // Which hosts are internal is deployment configuration (see ../org.ts). With
+  // none configured the rule has no input: inactive and reported, like the
+  // workspace-path rule, rather than silently passing or blocking everything.
+  const internalRemote = internalRemotePattern(org)
+  const internalDomain = internalDomainPattern(org)
+  if (internalRemote === undefined && internalDomain === undefined) warnings.push('structural:internal-host-rule-inactive')
+  if (internalRemote?.test(text)) rules.push('structural:internal-remote')
+  if (internalDomain?.test(text)) rules.push('structural:internal-domain')
   return { allowed: rules.length === 0, rules, warnings }
 }

@@ -100,7 +100,7 @@ test('blank or unrecognized enabledEnv value falls back to the manifest enabled 
 })
 
 test('invalid enabledEnv name fails sync at manifest load, before any materialization', async () => {
-  const fx = await fixture([{ id: 'demo-f', enabled: true, enabledEnv: 'private_bridge' }])
+  const fx = await fixture([{ id: 'demo-f', enabled: true, enabledEnv: 'some_plugin' }])
   assert.equal(existsSync(fx.patchPath), false)
   const result = fx.run()
   assert.notEqual(result.status, 0)

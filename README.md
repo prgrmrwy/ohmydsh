@@ -161,7 +161,7 @@ sync 行为按定制类型:
   enabledEnv: DSH_SOME_PLUGIN  # 同名 env 覆盖上面的 enabled;必须是大写 DSH_ 前缀
 ```
 
-`DSH_SOME_PLUGIN=1`(或 `true`/`yes`/`on`)在该机器上启用,`=0`(或 `false`/`no`/`off`)禁用;不设置或取值无法识别时回退到 `enabled` 字段。`enabledEnv` 名字不合法(不是大写 `DSH_` 前缀)时 sync 直接报错并中止,避免拼错后"开关看起来没生效"却毫无提示。改动后同样需要 `dsh build` 才生效。仓库内 `private-model-bridge`(内部包)就是这个模式的实例,见下方「第三方定制」。
+`DSH_SOME_PLUGIN=1`(或 `true`/`yes`/`on`)在该机器上启用,`=0`(或 `false`/`no`/`off`)禁用;不设置或取值无法识别时回退到 `enabled` 字段。`enabledEnv` 名字不合法(不是大写 `DSH_` 前缀)时 sync 直接报错并中止,避免拼错后"开关看起来没生效"却毫无提示。改动后同样需要 `dsh build` 才生效。
 
 ## 环境级 instructions
 
@@ -176,7 +176,7 @@ DSH 官方 `standard` preset 会自动加载,无需复制出 `ohmydsh` preset。
 - 只存三样:**精确版本 pin**、**个人覆盖片段**(`patches/<id>.yml`)、**条目说明**(`note`/审查记录);**不 vendor 源码**。
 - 升级 = 改 pin 重跑 sync(默认由 `autoUpdate` 自动完成,见上方「自动升级」;`DSH_SKIP_UPDATE=1` 恢复纯手工改 pin 模式)。
 - **安全提醒**:插件即第三方代码(社区列表明示警告),安装前先看源码,`note` 记录来源与审查结论。
-- **`private-model-bridge`(内部专属包)**:来自 private-npm/内网(`git.corp.example`),鉴权与推理流量走 Corp 内网服务,仓库默认 `enabled: false` + `enabledEnv: DSH_PRIVATE_BRIDGE`(见上方「定制项按需开关」)。克隆本仓库的机器默认不装它;有内网权限时,本机 `.env.local`(gitignored)加一行 `DSH_PRIVATE_BRIDGE=1` 后 `dsh build` 即可启用,详见 `dsh.yaml` 条目 `note`。
+- **不可公开的定制**(组织内部包、只对某组织有意义的 skill、组织专属域名等)不进本仓库,由本机私有 overlay 承载,见 [`docs/notes/local-manifest-overlay.md`](docs/notes/local-manifest-overlay.md)。自研插件需要组织专属值时,公开源码只读插件行 `config`,真值由 overlay 的 patch 按行 id 注入。
 - **`llm-subscriptions` 订阅 provider 插件**(`dsh-plugin-subscriptions`,当前 pin `0.8.0`,详见 `dsh.yaml` 条目 note):Claude 登录 = 导入本机 Claude Code 凭据(秒登录,不弹 OAuth),选型细见 change `openspec/changes/2026-08-20-llm-subscriptions-upgrade`(含 ADR-0001)。**codex 模型目录与 pin 强耦合**:ChatGPT 后端按请求里的 `client_version` 分流可见模型,旧 pin 会静默少几个新模型(如 `0.147.0` 看不到 GPT-6-Astra);`0.8.0` 起该版本号改为从公开 npm 元数据动态解析(不带凭据、失败回退内置 `0.153.4`),也可用插件配置 `codexClientVersion` 固定。**回滚**:该条目 `spec`/`version` 改回 `dsh-plugin-subscriptions@0.6.0` / `0.6.0` → `dsh build` → 重启;`auth.json` 不被升级改写,登录态与既有会话无损。
 
 ## 开发流

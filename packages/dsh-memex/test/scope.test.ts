@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { parseOrgProfile } from '../src/org.js'
 import { createScopeResolver, deriveScopeFromLocalPath, deriveScopeFromRemote, hostOfRemote, pathSegmentMatches } from '../src/scope/resolver.js'
 
 function tempHome(): string {
@@ -30,6 +31,16 @@ describe('scope resolver', () => {
     const route = resolver.resolve('/tmp/not-a-repo')
     expect(route).toMatchObject({ scope: 'tmp-not-a-repo', source: 'local', home: join(homeDir, '.dsh-memex', 'tmp-not-a-repo'), created: false })
     expect(resolver.ensure(route)).toMatchObject({ scope: 'tmp-not-a-repo', created: true })
+  })
+
+  it('derives an internal library only for a configured internal host', () => {
+    const org = parseOrgProfile({ internalHosts: ['git.corp.example'] })
+    const internal = createScopeResolver({ homeDir: tempHome(), org, gitRemote: () => 'git@git.corp.example:team/acme.git' })
+    expect(internal.resolve('/work/acme')).toMatchObject({ scope: 'team-acme', source: 'derived', publish: 'internal' })
+    const unconfigured = createScopeResolver({ homeDir: tempHome(), gitRemote: () => 'git@git.corp.example:team/acme.git' })
+    expect(unconfigured.resolve('/work/acme')).toMatchObject({ scope: 'team-acme', publish: 'external' })
+    const other = createScopeResolver({ homeDir: tempHome(), org, gitRemote: () => 'git@github.com:team/acme.git' })
+    expect(other.resolve('/work/acme')).toMatchObject({ publish: 'external' })
   })
 
   it('derives a dedicated scope for GitHub repositories', () => {

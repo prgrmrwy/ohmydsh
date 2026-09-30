@@ -179,6 +179,7 @@ export function Panel({ ctx, store, sessionId, onOpenFile }: PanelProps) {
       fetchSessionLinks(rpc, sessionId, controller.signal)
         .then((baseline) => {
           console.info(`[dsh-session-links] baseline applied: ${baseline.entries.length} entries, maxSeq ${baseline.maxSeq}, complete ${baseline.complete}`)
+          store.setRules(baseline.rules)
           store.applyBaseline(sessionId, baseline.entries, baseline.produced, baseline.maxSeq)
         })
         .catch((error) => {
@@ -202,7 +203,7 @@ export function Panel({ ctx, store, sessionId, onOpenFile }: PanelProps) {
   if (!sessionId || (entries.length === 0 && produced.length === 0)) {
     return (
       <div style={{ ...ROOT_STYLE, padding: '16px 12px', fontSize: 13, color: 'var(--dsw-alias-label-tertiary)' }}>
-        当前会话暂无文档/资料 —— MR、部署、Tracker、制品链接与本次产出的文件会在这里展示。
+        当前会话暂无文档/资料 —— MR、部署、工作项、制品链接与本次产出的文件会在这里展示。
       </div>
     )
   }

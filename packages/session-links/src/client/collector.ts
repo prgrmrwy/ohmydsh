@@ -9,7 +9,7 @@
  */
 import type { ConversationNode } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import { collectLinksFromNode, compareEntries, type LinkEntry } from '../shared/links.js'
+import { classifyUrl, collectLinksFromNode, compareEntries, DEFAULT_LINK_RULES, parseLinkRules, type LinkEntry, type LinkRules } from '../shared/links.js'
 import type { ProducedFile } from '../shared/produced.js'
 import { compareProduced, producedFromNode } from './produces.js'
 
@@ -51,7 +51,11 @@ class SessionLinksState {
   private producedSorted: readonly ProducedFile[] = EMPTY_PRODUCED
   private producedDirty = false
 
-  constructor(source: SnapshotSource | undefined, private readonly changed: () => void) {
+  constructor(
+    source: SnapshotSource | undefined,
+    private readonly changed: () => void,
+    private readonly rules: () => LinkRules,
+  ) {
     this.upgradeSource(source)
   }
 
@@ -97,7 +101,7 @@ class SessionLinksState {
     for (const node of snap.nodes) {
       if (node.seq <= this.maxSeen) continue
       if (node.seq > max) max = node.seq
-      for (const entry of collectLinksFromNode(node)) this.upsert(entry)
+      for (const entry of collectLinksFromNode(node, this.rules())) this.upsert(entry)
       if (node.kind === 'tool-result') {
         for (const produced of producedFromNode(node)) {
           const prev = this.producedByPath.get(produced.path)
@@ -143,6 +147,18 @@ class SessionLinksState {
     return this.byUrl.size
   }
 
+  /** Re-derive every entry's category after the deployment rules changed. */
+  reclassify(): void {
+    const rules = this.rules()
+    for (const [url, entry] of this.byUrl) {
+      const category = classifyUrl(url, rules)
+      if (category !== entry.category) {
+        this.byUrl.set(url, { ...entry, category })
+        this.sortedDirty = true
+      }
+    }
+  }
+
   dispose(): void {
     this.unsubscribe?.()
   }
@@ -160,12 +176,14 @@ export class SessionLinksStore {
   private readonly states = new Map<SessionId, SessionLinksState>()
   private readonly listeners = new Set<() => void>()
   private notifyTimer: ReturnType<typeof setTimeout> | null = null
+  /** Deployment classification rules; public defaults until a host baseline supplies them. */
+  private rules: LinkRules = DEFAULT_LINK_RULES
 
   /** (Re)attach a session to its snapshot source; a previous state for the same id is torn down first. */
   observe(sessionId: SessionId, source: SnapshotSource | undefined): void {
     const existing = this.states.get(sessionId)
     if (!existing) {
-      this.states.set(sessionId, new SessionLinksState(source, () => this.scheduleNotify()))
+      this.states.set(sessionId, new SessionLinksState(source, () => this.scheduleNotify(), () => this.rules))
       this.scheduleNotify()
       return
     }
@@ -199,6 +217,20 @@ export class SessionLinksStore {
   /** Current-session link count (the tab badge value). */
   countOf(sessionId: SessionId): number {
     return this.states.get(sessionId)?.size ?? 0
+  }
+
+  /**
+   * Adopt the deployment's classification rules (sent with the host baseline).
+   * Entries already collected under the previous rules are reclassified, so a
+   * link seen before the baseline arrived does not stay in the wrong group.
+   */
+  setRules(rules: unknown): void {
+    // Wire data: normalize again rather than trusting the host payload shape.
+    const next = parseLinkRules(rules)
+    if (JSON.stringify(next) === JSON.stringify(this.rules)) return
+    this.rules = next
+    for (const state of this.states.values()) state.reclassify()
+    this.scheduleNotify()
   }
 
   /** Apply the host whole-log baseline for one session (no-op when no state or already applied). */

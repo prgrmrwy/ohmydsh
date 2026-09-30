@@ -158,6 +158,22 @@ describe('SessionLinksStore', () => {
     store.dispose()
   })
 
+  it('reclassifies collected links when the host baseline brings deployment rules', () => {
+    const source = new FakeSource([userNode(1, 'https://tracker.corp.example/story/1')])
+    const store = new SessionLinksStore()
+    store.observe('s1', source)
+    expect(store.entriesOf('s1').map((e) => e.category)).toEqual(['other'])
+    store.setRules({ trackerHosts: ['tracker.corp.example'], reviewHosts: [] })
+    expect(store.entriesOf('s1').map((e) => e.category)).toEqual(['tracker'])
+    // Later increments use the adopted rules too.
+    source.push([userNode(1, 'https://tracker.corp.example/story/1'), userNode(2, 'https://tracker.corp.example/story/2')])
+    expect(store.entriesOf('s1').every((e) => e.category === 'tracker')).toBe(true)
+    // A malformed payload falls back to the public defaults.
+    store.setRules('not rules')
+    expect(store.entriesOf('s1').every((e) => e.category === 'other')).toBe(true)
+    store.dispose()
+  })
+
   it('applies the host baseline (watermark jump, dedupe merge, idempotent)', () => {
     const source = new FakeSource([userNode(30, 'https://example.com/new-after-baseline')])
     const store = new SessionLinksStore()

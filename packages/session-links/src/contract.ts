@@ -9,7 +9,7 @@
  *
  * @module dsh-session-links/contract
  */
-import type { LinkEntry } from './shared/links.js'
+import type { LinkEntry, LinkRules } from './shared/links.js'
 import type { ProducedFile } from './shared/produced.js'
 
 /** The Connection RPC channel this package registers on the host. */
@@ -33,4 +33,10 @@ export interface SessionLinksBaseline {
   maxSeq: number
   /** Always true: the host reads the whole durable log, not a window. */
   complete: true
+  /**
+   * The deployment's classification rules (host row config). The client
+   * classifies its live increments with them so both halves agree; absent
+   * from older hosts, which means the public defaults.
+   */
+  rules?: LinkRules
 }

@@ -7,9 +7,11 @@
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import {
   classifyUrl,
+  DEFAULT_LINK_RULES,
   extractUrls,
   linkTitle,
   type LinkEntry,
+  type LinkRules,
   type LinkRole,
 } from '../shared/links.js'
 import type { PresentCall, ProducedFile, SessionExtraction } from '../shared/produced.js'
@@ -37,7 +39,7 @@ function mutationPaths(view: NonNullable<ReturnType<PresentCall>>): string[] {
  * a file written then edited later stays one entry (first-seen kept).
  * Presenter throws soft-fall to no view (the generic-card default).
  */
-export function extractSession(events: readonly SessionEvent[], presentCall: PresentCall): SessionExtraction {
+export function extractSession(events: readonly SessionEvent[], presentCall: PresentCall, rules: LinkRules = DEFAULT_LINK_RULES): SessionExtraction {
   // Pass 1: which calls failed (so their provisional mutations are withdrawn).
   const failedCalls = new Set<string>()
   for (const event of events) {
@@ -55,7 +57,7 @@ export function extractSession(events: readonly SessionEvent[], presentCall: Pre
       const prev = byUrl.get(url)
       byUrl.set(url, prev
         ? { ...prev, time, seq, role, count: prev.count + 1 }
-        : { url, category: classifyUrl(url), time, seq, role, title: linkTitle(url), count: 1 })
+        : { url, category: classifyUrl(url, rules), time, seq, role, title: linkTitle(url), count: 1 })
     }
   }
 

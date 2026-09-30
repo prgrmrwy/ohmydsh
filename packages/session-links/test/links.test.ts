@@ -8,6 +8,7 @@ import {
   compareEntries,
   extractUrls,
   linkTitle,
+  parseLinkRules,
   stripUrlTail,
   type LinkEntry,
 } from '../src/shared/links.js'
@@ -59,16 +60,28 @@ describe('stripUrlTail', () => {
 })
 
 describe('classifyUrl', () => {
-  it('classifies tracker hosts', () => {
-    expect(classifyUrl('https://tracker.corp.example/space/1/story/123')).toBe('tracker')
-    expect(classifyUrl('https://x.tracker.corp.example/y')).toBe('tracker')
+  const rules = parseLinkRules({ trackerHosts: ['tracker.corp.example'], reviewHosts: ['git.corp.example'] })
+
+  it('classifies configured work-item hosts and their subdomains', () => {
+    expect(classifyUrl('https://tracker.corp.example/space/1/story/123', rules)).toBe('tracker')
+    expect(classifyUrl('https://x.tracker.corp.example/y', rules)).toBe('tracker')
+    expect(classifyUrl('https://nottracker.corp.example/y', rules)).toBe('other')
   })
 
-  it('classifies MR links on review hosts', () => {
-    expect(classifyUrl('https://git.corp.example/x/y/-/merge_requests/99')).toBe('mr')
+  it('knows no organization hosts by default', () => {
+    expect(classifyUrl('https://tracker.corp.example/space/1/story/123')).toBe('other')
+    expect(classifyUrl('https://git.corp.example/x/y/-/merge_requests/99')).toBe('other')
+  })
+
+  it('classifies MR links on public and configured review hosts', () => {
+    expect(classifyUrl('https://git.corp.example/x/y/-/merge_requests/99', rules)).toBe('mr')
     expect(classifyUrl('https://github.com/foo/bar/pull/12')).toBe('mr')
     expect(classifyUrl('https://gitlab.com/foo/bar/merge_requests/3')).toBe('mr')
-    expect(classifyUrl('https://git.corp.example/data/dsh/-/merge_requests/42')).toBe('mr')
+  })
+
+  it('drops unusable rule entries instead of guessing', () => {
+    expect(parseLinkRules({ trackerHosts: ['ok.example', 'bad host', 3], reviewHosts: 'git.example' })).toEqual({ trackerHosts: ['ok.example'], reviewHosts: [] })
+    expect(parseLinkRules(undefined)).toEqual({ trackerHosts: [], reviewHosts: [] })
   })
 
   it('does not classify plain repo pages on review hosts as MR', () => {
@@ -101,8 +114,8 @@ describe('classifyUrl', () => {
 
 describe('linkTitle', () => {
   it('uses host plus truncated path', () => {
-    expect(linkTitle('https://tracker.corp.example/space/1/story/123')).toBe(
-      'tracker.corp.example/space/1/story/123',
+    expect(linkTitle('https://tracker.example.com/space/1/story/123')).toBe(
+      'tracker.example.com/space/1/story/123',
     )
     expect(linkTitle('https://www.example.com')).toBe('example.com')
   })

@@ -71,6 +71,23 @@ Writes to libraries whose `publish` direction is `external` are scanned for:
 - internal domains/remotes/private IPs,
 - known internal workspace paths.
 
+Which hosts count as internal is **deployment configuration**, not source. The
+package ships with none; a private overlay supplies them by overriding this
+plugin's row in the profile patch:
+
+```yaml
+- id: dsh-memex
+  name: dsh-memex
+  config:
+    internalHosts: [git.corp.example]   # remotes on these hosts derive internal libraries
+    internalDomains: [corp.example]     # these domains and their subdomains are denied in external writes
+```
+
+`internalHosts` also marks remote-derived libraries on those hosts as internal.
+With nothing configured, the host/domain rules have no input: they stay
+inactive and each write reports `structural:internal-host-rule-inactive`
+instead of silently passing. Invalid entries are dropped and logged.
+
 Unknown publication direction is treated as external (fail closed). The guard
 reduces accidental writes; it **cannot guarantee that semantic business
 information is absent**. Cross-library content must still be rewritten in a
@@ -162,5 +179,5 @@ npm install -g @touchskyer/memex@0.4.1 --registry=https://registry.npmjs.org/
 ```
 
 Global npm installs may ignore the repository `.npmrc` and fall back to a user
-mirror. This repository's user-level private-npm mirror currently lags npmjs, so the
+mirror. A user-level private mirror may lag npmjs, so the
 explicit registry argument matters for the pinned release.
