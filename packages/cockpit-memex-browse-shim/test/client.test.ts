@@ -167,6 +167,63 @@ describe('cockpit memex browse shim', () => {
     f.cleanup()
   })
 
+  it('falls back to the device loopback address when the bridge says there is no forward to have', async () => {
+    // dsh-cockpit-bridge >= 0.5.2 throws this shape on the cockpit host itself
+    // (no ssh alias in the handshake) and before any handshake. Both mean the
+    // browser and the device port share a machine — the exact address dsh-memex
+    // would use if this shim were not installed. Real-device regression: the
+    // host's "打开卡片" showed "cockpit port forward rejected (400)".
+    const f = fixture()
+    const registry = registryFixture()
+    const unavailable = (reason: string) => Object.assign(new Error(`cockpit port forward is unavailable: ${reason}`), {
+      name: 'PortForwardUnavailableError',
+      reason,
+    })
+    const local = {
+      register: vi.fn(async () => { throw unavailable('local-device') }),
+      publish: vi.fn(),
+    }
+    apply(f.ctx as never)
+    f.provide(MEMEX_BROWSE_ADDRESS_SERVICE, registry.registry)
+    f.provide(COCKPIT_PORT_FORWARD_SERVICE, local)
+    await expect(registry.resolve('personal', 3940)).resolves.toBe('http://localhost:3940')
+
+    // Also when it surfaces at publish time rather than register time.
+    f.provide(COCKPIT_PORT_FORWARD_SERVICE, {
+      register: vi.fn(async () => undefined),
+      publish: vi.fn(async () => { throw unavailable('no-cockpit') }),
+    })
+    await expect(registry.resolve('personal', 3940)).resolves.toBe('http://localhost:3940')
+    f.cleanup()
+  })
+
+  it('does not fall back on a cockpit refusal, even one whose message mentions the local device', async () => {
+    // A cockpit that answered and refused means the browser is (usually) on
+    // another machine; only the structural unavailable shape may fall back.
+    const f = fixture()
+    const registry = registryFixture()
+    const refused = Object.assign(new Error('cockpit port forward rejected (409): local device needs no port forward'), {
+      name: 'PortForwardRejectedError',
+      status: 409,
+      code: 'local-device',
+    })
+    apply(f.ctx as never)
+    f.provide(MEMEX_BROWSE_ADDRESS_SERVICE, registry.registry)
+    f.provide(COCKPIT_PORT_FORWARD_SERVICE, {
+      register: vi.fn(async () => undefined),
+      publish: vi.fn(async () => { throw refused }),
+    })
+    await expect(registry.resolve('personal', 3940)).rejects.toBe(refused)
+
+    // An older bridge's plain Error is not the unavailable shape either.
+    f.provide(COCKPIT_PORT_FORWARD_SERVICE, {
+      register: vi.fn(async () => { throw new Error('cockpit port forward is unavailable') }),
+      publish: vi.fn(),
+    })
+    await expect(registry.resolve('personal', 3940)).rejects.toThrow(/unavailable/)
+    f.cleanup()
+  })
+
   it('unregisters on dispose', () => {
     const f = fixture()
     const registry = registryFixture()
