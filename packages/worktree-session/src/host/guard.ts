@@ -7,7 +7,7 @@ import { confinePath, firstPathOf } from './containment.js'
 
 /** Exact audited argument contracts for the pinned DSH tool surface. */
 export interface ToolContract {
-  kind: 'bash' | 'paths' | 'search' | 'delegation' | 'maintenance' | 'non-local'
+  kind: 'bash' | 'paths' | 'search' | 'delegation' | 'maintenance' | 'non-local' | 'inquiry'
   pathFields: readonly string[]
   requiredAbsolute: boolean
 }
@@ -27,6 +27,10 @@ export const TOOL_CONTRACTS: Readonly<Record<string, ToolContract>> = Object.fre
   subagent: { kind: 'delegation', pathFields: [], requiredAbsolute: false },
   send_message: { kind: 'delegation', pathFields: [], requiredAbsolute: false },
   ws: { kind: 'maintenance', pathFields: ['path'], requiredAbsolute: true },
+  // Pet inquiry/tools.ts: target is a caller-bound collaborator reference, not
+  // a filesystem path. Pet still owns membership, generation and effect checks.
+  // Unlike non-local tools, this may queue work and needs a valid live binding.
+  pet_inquire: { kind: 'inquiry', pathFields: [], requiredAbsolute: false },
 })
 
 function lexicalWithin(root: string, candidate: string): boolean {
@@ -58,6 +62,18 @@ export function checkTool({ name, args }: { name: string; args: unknown }, opera
     const object = firstPathObject(args)
     const suspicious = ['path', 'file_path', 'filePath', 'cwd', 'workdir', 'command', 'root', 'directory', 'target'].some(key => key in object)
     return suspicious ? `Worktree Session 不支持未经审计的本地能力工具 contract：${name}` : undefined
+  }
+  if (contract.kind === 'inquiry') {
+    // Fail closed on schema drift; do not turn a named-tool exception into a
+    // path/command escape. Content and target authorization remain Pet's job.
+    if (args === null || typeof args !== 'object' || Array.isArray(args)) return `Worktree Session 工具 contract 不匹配：${name}`
+    const keys = Reflect.ownKeys(args)
+    const fields = ['target', 'question', 'purpose']
+    const valid = keys.length === fields.length && fields.every(key => {
+      const property = Object.getOwnPropertyDescriptor(args, key)
+      return property !== undefined && 'value' in property && typeof property.value === 'string'
+    })
+    return valid ? undefined : `Worktree Session 工具 contract 不匹配：${name}`
   }
   if (contract.kind === 'delegation') {
     if (name === 'send_message') return undefined

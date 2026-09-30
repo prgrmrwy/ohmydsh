@@ -107,6 +107,30 @@ describe('fail-closed managed-root tool policy', () => {
     expect(checkTool({ name: 'bash', args: {} }, bare)).toBeUndefined()
   })
 
+  it('passes the exact Pet inquiry contract without interpreting its target as a path', async () => {
+    const { record } = await fixture()
+    const args = { target: 'child:locus-a:1:session-child', question: 'Which tools are available?', purpose: 'Diagnose this child' }
+    expect(TOOL_CONTRACTS.pet_inquire).toMatchObject({ kind: 'inquiry', pathFields: [] })
+    expect(checkTool({ name: 'pet_inquire', args }, record)).toBeUndefined()
+    expect(await physicalDecision({ name: 'pet_inquire', arguments: args }, record)).toEqual({ kind: 'allow' })
+    // Passing Worktree is NOT target authorization: Pet must resolve the reference.
+    expect(checkTool({ name: 'pet_inquire', args: { ...args, target: '/outside/not-a-member' } }, record)).toBeUndefined()
+  })
+
+  it('rejects inquiry contract drift without broadly exempting target or pet tools', async () => {
+    const { record } = await fixture()
+    const args = { target: 'child:locus-a:1:session-child', question: 'q', purpose: 'p' }
+    for (const invalid of [null, [], {}, { ...args, workdir: '/tmp' }, { ...args, command: 'ls' }, { ...args, recipient: 'other' }, { ...args, target: 7 }, { ...args, purpose: undefined }]) {
+      expect(checkTool({ name: 'pet_inquire', args: invalid }, record)).toMatch(/contract/)
+    }
+    for (const name of ['future_local_tool', 'pet_future_tool', 'pet_inquire_v2']) {
+      expect(checkTool({ name, args }, record)).toMatch(/未经审计/)
+    }
+    expect(checkTool({ name: 'pet_inquire', args }, record, 'identity mismatch')).toMatch(/绑定校验失败/)
+    const cleaned = { ...record, binding: { ...record.binding!, state: 'cleaned' as const } }
+    expect(checkTool({ name: 'pet_inquire', args }, cleaned)).toMatch(/已清理/)
+  })
+
   it('confinement resolves symlink ancestors that escape the managed root', async () => {
     const { root, worktree, record } = await fixture()
     const outside = join(root, 'outside')
