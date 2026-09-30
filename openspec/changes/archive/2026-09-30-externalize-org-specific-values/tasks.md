@@ -8,7 +8,7 @@
 
 ## 2. dsh-session-links
 
-- [x] 2.1 分类 `tracker` 改为 `tracker`（「工作项」）；评审/工作项域名改为 `reviewHosts` / `trackerHosts` 行配置
+- [x] 2.1 以产品名命名的分类改为 `tracker`（「工作项」）；评审/工作项域名改为 `reviewHosts` / `trackerHosts` 行配置
 - [x] 2.2 host 基线附带 `rules`；浏览器端校验后采用并重分类
 - [x] 2.3 测试：配置命中、默认不识别、非法条目、基线重分类、host 提取使用规则
 - [x] 2.4 README 记录配置方式
@@ -17,10 +17,10 @@
 
 - [x] 3.1 send-cr skill、manifest 条目、规范迁入私有仓库
 - [x] 3.2 私有仓库新增 `patches/org-hosts.yml` 与对应 manifest 条目
-- [ ] 3.3 私有仓库提交并推送
+- [x] 3.3 私有仓库提交并推送
 
 ## 4. 验证
 
-- [ ] 4.1 两个包 typecheck + vitest；仓库 `npm test`、`npm run check:artifacts`
-- [ ] 4.2 合入后在主 checkout 跑 sync 两次，确认 profile patch 含 overlay 覆盖行、第二次无变化
-- [ ] 4.3 `openspec validate externalize-org-specific-values --strict`
+- [x] 4.1 两个包 typecheck + vitest；仓库 `npm test`、`npm run check:artifacts`
+- [x] 4.2 合入后在主 checkout 跑 sync 两次，确认 profile patch 含 overlay 覆盖行、第二次无变化
+- [x] 4.3 `openspec validate externalize-org-specific-values --strict`
