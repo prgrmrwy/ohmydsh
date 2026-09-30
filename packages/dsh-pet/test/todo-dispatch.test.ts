@@ -483,3 +483,20 @@ describe('accept stays off the Feishu outbound path (spec 受理不外发飞书)
     expect(port.calls.filter(call => call.kind === 'followup')).toHaveLength(1)
   })
 })
+
+describe('todoDispatchPort reads the bare Agent that agents.get returns', () => {
+  it('treats a loaded bare Agent as loaded, not as needing resume', async () => {
+    // Regression for real-device acceptance: `ctx.agents.get` returns a BARE
+    // Agent (dsh-agent index.d.ts:139,341). The port once read `.agent` off
+    // it, so every loaded main looked unloaded, went to `resume`, and failed
+    // with "already owned by an active write handle". The fake port could
+    // never surface this — it returned `{ status }` directly — so pin the
+    // wiring against the real return shape at the source level.
+    const { readFile } = await import('node:fs/promises')
+    const nodePath = await import('node:path')
+    const index = await readFile(nodePath.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
+    const port = index.slice(index.indexOf('const liveTodoAgent'), index.indexOf('let locusManagement!'))
+    expect(port).toContain('found.agent ?? found')
+    expect(port).not.toMatch(/handle\?\.agent\?\.status/)
+  })
+})

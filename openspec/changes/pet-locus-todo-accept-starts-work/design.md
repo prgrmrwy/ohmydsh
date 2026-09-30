@@ -367,7 +367,7 @@ interface TodoDispatchPort {
 
 **实施期核验（tasks 1.2–1.4）结论**：
 
-- `ctx.agents.get(id)` 返回 `AgentHandle { agent, dispose }`（`dsh-agent/lib/types/index.d.ts:144`），忙闲取自 `handle.agent.status`（`runtime-types.d.ts:147`）。注意其语义是 **LOADED 而非 exists**——DSH 会卸载闲置 agent（`index.ts:1450-1458` 的注释记录过这个坑：Task 闲置后 executor 被逐出，后续投递全失败而会话其实完好）。因此 `resolve` 返回 undefined **不等于**会话不存在，必须先 `resume` 再判定 `unreachable`。
+- `ctx.agents.get(id)` 返回**裸 `Agent`**（`dsh-agent/lib/types/index.d.ts:139,341`："still returns a bare Agent — the handle is exposed only to the consumer owner that created it"），忙闲直接取 `agent.status`（`runtime-types.d.ts:147`）。`AgentHandle { agent, dispose }` 只是 `create`/`resume` 交给创建者的形状。**此条原先写成"返回 AgentHandle、取 `handle.agent.status`"，是错的**：核验时读了 `AgentHandle` 的声明（`:144`），没读 `get` 本身的签名（`:341`）。真机验收暴露了后果——已加载的主会话被判为未加载，转去 `resume`，撞上自身的活跃写句柄（`session ... is already owned by an active write handle`）。假端口测试无法发现此类错误，因为它直接返回 `{ status }`，从不经过真实返回形状。注意其语义是 **LOADED 而非 exists**——DSH 会卸载闲置 agent（`index.ts:1450-1458` 的注释记录过这个坑：Task 闲置后 executor 被逐出，后续投递全失败而会话其实完好）。因此 `resolve` 返回 undefined **不等于**会话不存在，必须先 `resume` 再判定 `unreachable`。
 - `ctx.agents.resume({ resumeSessionId, agentOptions, setup })`（`index.ts:1479`）。**`setup` 中挂载的 preset 决定 resume 出来的 agent 有什么工具**，而 resume 会新建 agent scope，所以这一项不能省略。
 - **冷恢复挂会话自己持久化的 preset**（所有者确认）：用既有的 `persistedPresetFor`（`index.ts:1412`）从会话 header 读取，不套用 Pet 的 `executorSetup`——后者是 executor 专用，而执行目标可能是所有者 `/bind` 的 `standard` 会话。这与 D8 "后果上限由主会话自身权限决定"一致：恢复出的会话与它原本一样，不扩大也不缩小能力面。读不到持久 preset 时按 `unreachable` 处理，不猜测默认值。
 - 新工具加入 `LOCUS_CALLER_BOUND_TOOLS`（`composition.ts:44-56`）即可，该清单是显式白名单，漏加会使发布被拒而非静默放宽——正是 D10 所依赖的失败方向。
