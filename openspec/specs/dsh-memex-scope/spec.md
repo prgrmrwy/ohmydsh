@@ -6,9 +6,7 @@
 
 本能力是「跨库」这一维的全部——它存在的唯一原因是上游 memex 的设计前提是单库，它没有、
 也不需要有 scope 概念。除此之外的一切（卡片格式、写法、链接、索引）都不属于本能力。
-
 ## Requirements
-
 ### Requirement: scope 由会话 cwd 解析得出，调用方无法指定
 
 系统 SHALL 在每次调用时以**当前会话的 cwd**（`agent.session.header.cwd`）为唯一输入解析
@@ -351,3 +349,21 @@ cwd 不属于任何仓库时，系统 SHALL 按**本地路径**派生出一个�
 #### Scenario: 不同来源派生同名时显式报错
 - **WHEN** 某个仓库的 remote 与某个本地路径派生出同一个 scope 名
 - **THEN** 系统报错并指明需要显式映射，MUST NOT 让两者共用一个库
+
+### Requirement: remote 派生库的发布方向由配置的内部 host 决定
+
+按 remote 自动派生的库 SHALL 在且仅在其 `origin` 的 host 属于部署配置的内部 host（插件行 `config.internalHosts`）时，
+取发布方向为内部；否则 SHALL 为外部。源码 MUST NOT 内置任何组织的 host。
+
+#### Scenario: 配置的内部 host 派生内部库
+- **WHEN** 部署配置内部 host `git.corp.example`，cwd 所在仓库的 origin 为 `git@git.corp.example:team/acme.git`
+- **THEN** 派生出 scope `team-acme`，发布方向为内部
+
+#### Scenario: 未配置时同一仓库派生外部库
+- **WHEN** 部署未配置内部 host，cwd 所在仓库的 origin 同上
+- **THEN** 派生出同名 scope，发布方向为外部（因此写入受守门）
+
+#### Scenario: 公开平台仓库始终外部
+- **WHEN** 部署配置了内部 host，cwd 所在仓库的 origin 位于 `github.com`
+- **THEN** 派生库的发布方向为外部
+
