@@ -308,6 +308,10 @@ export interface LocusManagementPort {
     request: Extract<PetLocusActionRequest, { action: 'scope' }>,
     context: LocusManagementActionContext,
   ) => Promise<PetLocusActionResult> | PetLocusActionResult
+  readonly tools?: (
+    request: Extract<PetLocusActionRequest, { action: 'tools' }>,
+    context: LocusManagementActionContext,
+  ) => Promise<PetLocusActionResult> | PetLocusActionResult
   readonly rebuild?: (
     request: Extract<PetLocusActionRequest, { action: 'rebuild' }>,
     context: LocusManagementActionContext,
@@ -382,6 +386,9 @@ export interface CreateLocusManagementPortOptions {
    * exact child sandbox before persisting permission/audit state.
    */
   readonly permissionMutation?: LocusPermissionMutationPort
+  readonly toolTierMutation?: {
+    set(input: { readonly locusId: string; readonly endpoint: LocusEndpoint; readonly tier: 'safe' | 'shell'; readonly actor: string; readonly fence: LocusMutationFence }): Promise<{ readonly ok: true; readonly locus: LocusRecord } | { readonly ok: false; readonly reason: string }>
+  }
   /** @deprecated Compatibility-only test seam; production must use permissionMutation. */
   readonly verifyWrite?: (input: {
     readonly locus: LocusRecord
@@ -512,6 +519,8 @@ async function projectRecord(
       ...(record.permission.verifiedAt === undefined ? {} : { verifiedAt: record.permission.verifiedAt }),
       ...(record.permission.grantedBy === undefined ? {} : { grantedBy: record.permission.grantedBy }),
     },
+    toolTier: record.toolTier ?? { desired: 'safe', effective: 'safe' },
+    ...(record.childComposition === undefined ? {} : { childComposition: record.childComposition }),
     state: stateView(record),
     source: record.source,
     ...(owner === undefined ? {} : { owner }),
@@ -822,6 +831,37 @@ export function createLocusManagementPort(
     }
   }
 
+  const tools = async (
+    request: Extract<PetLocusActionRequest, { action: 'tools' }>,
+    context: LocusManagementActionContext,
+  ): Promise<PetLocusActionResult> => {
+    if (options.toolTierMutation === undefined) throw unavailable('tools')
+    const previous = requireRecord(repository, request.locusId)
+    assertExpected(previous, request.expectedGeneration, request.expectedLocusId, request.expectedUpdatedAt)
+    const trusted = assertActionContext(context, previous)
+    const fence: LocusMutationFence = {
+      expectedLocusId: previous.id,
+      expectedGeneration: request.expectedGeneration ?? previous.generation,
+      expectedUpdatedAt: request.expectedUpdatedAt ?? previous.updatedAt,
+      ...(previous.revision === undefined ? {} : { expectedRevision: previous.revision }),
+    }
+    const result = await options.toolTierMutation.set({
+      locusId: previous.id,
+      endpoint: previous.endpoint,
+      tier: request.tier,
+      actor: trusted.actorId,
+      fence,
+    })
+    if (!result.ok) {
+      if (result.reason === 'busy') throw new LocusManagementError('LOCUS_BUSY', 'locus 仍有已接受或运行中的 Delivery，请等待入口空闲。')
+      if (result.reason === 'not-found') throw new LocusManagementError('LOCUS_NOT_FOUND', '当前 locus 不存在、已替换或已不是入口当前代际。')
+      if (result.reason === 'legacy-v1-shell') throw new LocusManagementError('INVALID_REQUEST', '该入口是 safe-v1；请显式重建一次后再授予 shell。入口保持 safe 且继续服务。')
+      throw new LocusManagementError('INTEGRATION_FAILED', `工具档位变更未核验生效：${result.reason}`)
+    }
+    revision += 1
+    return actionResult('tools', result.locus, previous, { created: false })
+  }
+
   const scope = async (
     request: Extract<PetLocusActionRequest, { action: 'scope' }>,
     context: LocusManagementActionContext,
@@ -1071,6 +1111,7 @@ export function createLocusManagementPort(
     ...(stop === undefined ? {} : { stop }),
     unbind,
     scope,
+    ...(options.toolTierMutation === undefined ? {} : { tools }),
     action: async (request, context) => {
       switch (request.action) {
         case 'bind':
@@ -1081,6 +1122,8 @@ export function createLocusManagementPort(
           return unbind(request, context)
         case 'scope':
           return scope(request, context)
+        case 'tools':
+          return tools(request, context)
         case 'confirm-anchor':
           return confirmAnchor(request, context)
         case 'archive':

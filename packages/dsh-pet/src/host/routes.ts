@@ -392,6 +392,7 @@ export const LOCUS_ACTION_FIELDS: Readonly<Record<PetLocusActionRequest['action'
   bind: ['action', 'endpoint', 'parentSessionId', 'workspaceId', 'parentLocusId', ...LOCUS_FENCE_FIELDS],
   unbind: ['action', 'endpoint', 'locusId', ...LOCUS_FENCE_FIELDS],
   scope: ['action', 'locusId', 'mode', ...LOCUS_FENCE_FIELDS],
+  tools: ['action', 'locusId', 'tier', ...LOCUS_FENCE_FIELDS],
   'confirm-anchor': [
     'action', 'endpoint', 'locusId', 'executionRoot', 'projectResources', 'constraints', 'existence',
     ...LOCUS_FENCE_FIELDS,
@@ -456,7 +457,7 @@ function parseLocusAction(body: unknown, expectedAction?: PetLocusActionRequest[
     throw new PetError('INVALID_REQUEST', 'Request body must be a JSON object')
   }
   const action = requireString(body as Record<string, unknown>, 'action')
-  if (action !== 'bind' && action !== 'unbind' && action !== 'scope' && action !== 'confirm-anchor' && action !== 'rebuild' && action !== 'archive' && action !== 'stop' && action !== 'replace-parent') {
+  if (action !== 'bind' && action !== 'unbind' && action !== 'scope' && action !== 'tools' && action !== 'confirm-anchor' && action !== 'rebuild' && action !== 'archive' && action !== 'stop' && action !== 'replace-parent') {
     throw new PetError('INVALID_REQUEST', `Unknown locus action '${action}'`)
   }
   if (expectedAction !== undefined && action !== expectedAction) {
@@ -537,6 +538,11 @@ function parseLocusAction(body: unknown, expectedAction?: PetLocusActionRequest[
         throw new PetError('INVALID_REQUEST', LOCUS_WRITE_DISABLED_DIAGNOSTIC)
       }
       return { action, locusId: requireString(record, 'locusId').trim(), mode, ...fence }
+    }
+    case 'tools': {
+      const tier = requireString(record, 'tier')
+      if (tier !== 'safe' && tier !== 'shell') throw new PetError('INVALID_REQUEST', 'tier must be safe or shell')
+      return { action, locusId: requireString(record, 'locusId').trim(), tier, ...fence }
     }
     case 'confirm-anchor': {
       const existence = optionalString(record, 'existence')
@@ -715,6 +721,16 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
       if (handler === undefined) return locusUnavailable()
       return invokeLocus('修改 locus 权限', () => handler(
         request as Extract<PetLocusActionRequest, { action: 'scope' }>,
+        { actorId: requireLocusActor() },
+      ))
+    }),
+    petRoute(LOCUS_ROUTES.tools, async ({ body }) => {
+      const request = parseLocusAction(body, 'tools')
+      requireReady(lifecycle)
+      const handler = requireLocus().tools
+      if (handler === undefined) return locusUnavailable()
+      return invokeLocus('修改 locus 工具档位', () => handler(
+        request as Extract<PetLocusActionRequest, { action: 'tools' }>,
         { actorId: requireLocusActor() },
       ))
     }),

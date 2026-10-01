@@ -21,7 +21,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionId as BrandedSessionId } from '@deepseek-ai/dsh-session'
 import { LOCUS_CHILD_PRESET } from './aggregate.js'
-import { LOCUS_SAFE_TOOL_NAMES } from './composition.js'
+import { LOCUS_SAFE_TOOL_NAMES, LOCUS_SHELL_TIER_TOOL_NAMES } from './composition.js'
 
 /** A live DSH Agent, intentionally opaque apart from its session identity. */
 export type LocusLiveParent = Agent
@@ -72,6 +72,11 @@ export interface LocusToolRestriction {
  * visible — which is why the installed surface is attested separately
  * ({@link attestLocusComposition}) rather than trusted from this filter.
  */
+export const LOCUS_BASE_TOOL_FILTER: LocusToolRestriction = Object.freeze({
+  allow: Object.freeze([...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_SHELL_TIER_TOOL_NAMES]),
+})
+
+/** Compatibility alias retained for call sites/tests that assert the old safe list. */
 export const LOCUS_SAFE_TOOL_FILTER: LocusToolRestriction = Object.freeze({
   allow: LOCUS_SAFE_TOOL_NAMES,
 })
@@ -900,7 +905,7 @@ export class LocusChildAdapter {
           contextMode: 'independent-v1',
           // Pet's own preset, never the main's: see LOCUS_CHILD_PRESET.
           agentPreset: LOCUS_CHILD_PRESET,
-          toolFilter: LOCUS_SAFE_TOOL_FILTER,
+          toolFilter: LOCUS_BASE_TOOL_FILTER,
           signal,
         })
       } catch (error: unknown) {

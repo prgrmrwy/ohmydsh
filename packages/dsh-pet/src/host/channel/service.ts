@@ -54,6 +54,7 @@ export interface ChannelServiceDeps {
   readonly locusController?: LocusChannelControllerPort
   /** Durable unified/legacy-retirement authorization for exact endpoints. */
   readonly locusAuthorization?: LocusAuthorizationResolver
+  readonly locusToolTier?: (endpoint: import('../locus/admission.js').LocusEndpoint) => 'safe' | 'shell' | undefined
   /**
    * Optional diagnostic for a Host that knows unified locus was requested but
    * could not compose its durable/observer/child capability. It is surfaced
@@ -178,6 +179,7 @@ export class ChannelService implements ChannelControl {
       // root/Invocation/QA branches below the pipeline boundary.
       requireLocus: true,
       ...(deps.locusAuthorization !== undefined ? { locusAuthorization: deps.locusAuthorization } : {}),
+      ...(deps.locusToolTier !== undefined ? { locusToolTier: deps.locusToolTier } : {}),
       watermark: () => this.subscription.watermark,
       onOutcome: outcome => this.onOutcome(outcome),
     })

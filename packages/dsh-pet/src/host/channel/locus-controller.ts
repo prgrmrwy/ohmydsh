@@ -154,6 +154,7 @@ export interface ActiveLocus {
   readonly state: 'active'
   /** Durable policy projection that every ordinary Delivery must re-verify. */
   readonly permission?: LocusPermission
+  readonly toolTier?: { readonly desired: 'safe' | 'shell'; readonly effective: 'safe' | 'shell' }
   /** Separately Host-authorized root required by effective write. */
   readonly contextAnchor?: NonNullable<LocusContextAnchor>
 }
@@ -278,6 +279,8 @@ export interface LocusDeliveryDispatchPort {
     readonly deliveryId?: string
     readonly now: number
   }): Awaitable<DeliveryRecord | undefined>
+  /** Read-only, exact-correlation backlog snapshot used to recheck shell-tier allowlisting before claim. */
+  pendingForLocus?(correlation: DeliveryCorrelation): Awaitable<readonly DeliveryRecord[]>
   /** Read-only occupancy probe for isolated test adapters; never a claim. */
   hasCurrent?(correlation: DeliveryCorrelation): Awaitable<boolean>
   /** Optional notification after a Delivery reaches a business terminal state. */
@@ -330,6 +333,8 @@ export interface LocusDeliveryLedgerPort {
     readonly settledAt: number
     readonly failureReason?: string
   }): Awaitable<{ readonly changed: boolean; readonly record: DeliveryRecord | undefined; readonly reason?: string }>
+  /** Host-side terminal disposition for a backlog/current item never injected into a child. */
+  failBeforeDispatch(input: { readonly deliveryId: string; readonly correlation: DeliveryCorrelation; readonly reason: string; readonly executionId?: string; readonly failedAt?: number }): Awaitable<boolean>
   /** Atomically promote one accepted/backlog Delivery to current. */
   claimCurrent?(input: {
     readonly correlation: DeliveryCorrelation
@@ -446,6 +451,11 @@ export interface LocusControllerDeps {
    */
   readonly controlDispatch?: LocusControlDispatchPort
   readonly admissionContext?: LocusAdmissionContext | (() => LocusAdmissionContext)
+  /** Authoritative allowlist snapshot used again at the durable claim boundary. */
+  readonly allowOpenIds?: () => readonly string[]
+  readonly currentToolTier?: (endpoint: LocusEndpoint) => 'safe' | 'shell' | undefined
+  /** Receives the same admission allowlist snapshot used for owner-only checks. */
+  readonly readAllowOpenIds?: () => readonly string[]
   readonly now?: () => number
   readonly signal?: AbortSignal
   readonly log?: (code: LocusControllerDiagnostic) => void
@@ -582,6 +592,10 @@ function controlValidationText(command: LocusControlCommand): string {
       return '请指定共享权限：read 或 write。'
     case 'scope-invalid':
       return '共享权限只能是 read 或 write。'
+    case 'tools-missing-tier':
+      return '请指定工具档位：safe 或 shell。'
+    case 'tools-invalid':
+      return '工具档位只能是 safe 或 shell。'
     case 'unbind-invalid':
       return '解绑命令不接受参数。'
     default:
@@ -637,8 +651,14 @@ function normalizeActiveLocus(raw: unknown, expected: LocusEndpoint): ActiveLocu
   // here (while the record has it) rejects every delivery with a generic
   // `child-unavailable`. Only the proven value is copied: an unrecognized
   // composition stays absent and the downstream guard keeps failing closed.
-  const childComposition = raw.childComposition === LOCUS_SAFE_CHILD_COMPOSITION
-    ? LOCUS_SAFE_CHILD_COMPOSITION
+  const childComposition = raw.childComposition === 'safe-v1'
+    || raw.childComposition === LOCUS_SAFE_CHILD_COMPOSITION
+    ? raw.childComposition as 'safe-v1' | 'safe-v2'
+    : undefined
+  const toolTier = isRecord(raw.toolTier)
+    && (raw.toolTier.effective === 'safe' || raw.toolTier.effective === 'shell')
+    && (raw.toolTier.desired === 'safe' || raw.toolTier.desired === 'shell')
+    ? raw.toolTier as unknown as { readonly desired: 'safe' | 'shell'; readonly effective: 'safe' | 'shell' }
     : undefined
   return {
     ...(id !== undefined ? { id } : {}),
@@ -651,6 +671,7 @@ function normalizeActiveLocus(raw: unknown, expected: LocusEndpoint): ActiveLocu
     state: 'active',
     permission: permission as unknown as LocusPermission,
     ...(childComposition === undefined ? {} : { childComposition }),
+    ...(toolTier === undefined ? {} : { toolTier }),
     ...(contextAnchor === undefined ? {} : { contextAnchor }),
   }
 }
@@ -919,10 +940,74 @@ export class LocusChannelController {
     await this.enqueueDispatchLane(correlation, async () => {
       let claimed: DeliveryRecord | undefined
       try {
-        claimed = await this.deps.deliveryDispatch.claimCurrent?.({
-          correlation,
-          now: this.now(),
-        })
+        let refreshedLocus: unknown
+        try {
+          refreshedLocus = await this.deps.locus.resolveCurrent(correlation.endpoint)
+        } catch {
+          this.log('dispatch-state-unknown')
+          return
+        }
+        const currentLocus = normalizeActiveLocus(refreshedLocus, correlation.endpoint)
+        if (currentLocus === undefined || locusIdOf(currentLocus) !== correlation.locusId
+          || currentLocus.generation !== correlation.generation || currentLocus.childSessionId !== correlation.childSessionId) {
+          this.log('dispatch-state-unknown')
+          return
+        }
+        const shellTier = currentLocus.toolTier?.effective === 'shell'
+        let allowOpenIds: readonly string[] | undefined
+        try {
+          allowOpenIds = this.deps.readAllowOpenIds?.() ?? this.deps.allowOpenIds?.()
+        } catch {
+          allowOpenIds = undefined
+        }
+        if (shellTier && allowOpenIds === undefined) {
+          this.log('dispatch-state-unknown')
+          return
+        }
+        const backlog = await this.deps.deliveryDispatch.pendingForLocus?.(correlation)
+        if (shellTier && backlog === undefined) {
+          this.log('dispatch-state-unknown')
+          return
+        }
+        let dispatchDeliveryId: string | undefined
+        if (shellTier) {
+          for (const delivery of backlog ?? []) {
+            if (delivery.status !== 'accepted' && delivery.status !== 'queued') continue
+            if (delivery.senderOpenId !== undefined && allowOpenIds!.includes(delivery.senderOpenId)) {
+              dispatchDeliveryId = delivery.deliveryId
+              break
+            }
+            let settled = false
+            try {
+              settled = await this.deps.deliveries.failBeforeDispatch({
+                deliveryId: delivery.deliveryId,
+                correlation,
+                reason: 'owner-only-tier',
+                ...(delivery.executionId === undefined ? {} : { executionId: delivery.executionId }),
+                failedAt: this.now(),
+              })
+            } catch {
+              this.log('delivery-persistence-failed')
+              return
+            }
+            if (settled) {
+              await this.receiptSettled(delivery.feedbackTarget, 'failed')
+              await this.sendControlReceipt(delivery.feedbackTarget, '当前入口为所有者专用，该排队请求未投递；所有者可将工具档位切回 safe。')
+            } else {
+              // The row moved after our snapshot (for example, a durable lease
+              // transition). Do not guess at its new sender/status; another
+              // dispatcher pass will reread the lane.
+              return
+            }
+          }
+        }
+        if (!shellTier || dispatchDeliveryId !== undefined) {
+          claimed = await this.deps.deliveryDispatch.claimCurrent?.({
+            correlation,
+            ...(dispatchDeliveryId === undefined ? {} : { deliveryId: dispatchDeliveryId }),
+            now: this.now(),
+          })
+        }
       } catch {
         this.log('delivery-persistence-failed')
         return
@@ -1029,7 +1114,7 @@ export class LocusChannelController {
     const context = suppliedContext ?? this.readAdmissionContext()
     if (context === undefined) return this.refuse('admission-unavailable')
     const admission = admitNormalizedLocusEvent(input, context)
-    return this.handleAdmission(admission)
+    return this.handleAdmission(admission, context, input)
   }
 
   private async enrichAddressing(message: NormalizedLocusMessage): Promise<NormalizedLocusMessage> {
@@ -1096,10 +1181,19 @@ export class LocusChannelController {
   }
 
   /** Consume a pre-admitted normalized result without re-running deduplication. */
-  async handleAdmission(admission: NormalizedLocusAdmission): Promise<LocusControllerResult> {
+  async handleAdmission(
+    admission: NormalizedLocusAdmission,
+    suppliedContext?: LocusAdmissionContext,
+    originalEvent?: LocusChannelEvent,
+  ): Promise<LocusControllerResult> {
     if (!this.available) return this.refuse('turn-correlation-unavailable')
     if (this.signal.aborted) return this.refuse('aborted')
     if (admission.kind === 'rejected') {
+      if (admission.reason === 'owner-only-tier' && admission.endpoint !== undefined) {
+        if (originalEvent !== undefined) {
+          await this.refuseOwnerOnlyAdmission(admission.endpoint, originalEvent, suppliedContext)
+        }
+      }
       // Report the exact reason: a bare `admission-rejected` makes a genuine
       // non-mention indistinguishable from a watermark, dedup or authorization
       // problem, which is precisely the ambiguity that made a live refusal
@@ -1275,6 +1369,48 @@ export class LocusChannelController {
     if (dispatch.claimCurrent !== undefined) {
       let claimed: DeliveryRecord | undefined
       try {
+        if (locus.toolTier?.effective === 'shell') {
+          const allowOpenIds = this.readAdmissionContext()?.allowOpenIds ?? this.deps.readAllowOpenIds?.() ?? this.deps.allowOpenIds?.()
+          if (allowOpenIds === undefined) return this.refuse('admission-unavailable')
+          if (!allowOpenIds.includes(message.senderOpenId)) {
+            const failed = await this.deps.deliveries.failBeforeDispatch({
+              deliveryId: accepted.record.deliveryId,
+              correlation,
+              reason: 'owner-only-tier',
+              failedAt: this.now(),
+            })
+            if (failed) {
+              await this.receiptSettled(accepted.record.feedbackTarget, 'failed')
+              await this.sendControlReceipt(message.replyTarget, '当前入口为所有者专用，只有 allowlist 成员可以驱动。')
+            }
+            return { kind: 'ignored', reason: 'owner-only-tier' }
+          }
+        }
+        const refreshedRaw = await this.deps.locus.resolveCurrent(endpoint)
+        const refreshed = normalizeActiveLocus(refreshedRaw, endpoint)
+        if (refreshed === undefined || locusIdOf(refreshed) !== correlation.locusId
+          || refreshed.generation !== correlation.generation || refreshed.childSessionId !== correlation.childSessionId) {
+          return this.refuse('dispatch-state-unknown')
+        }
+        if (refreshed.toolTier?.effective === 'shell') {
+          const currentAllowOpenIds = this.readAdmissionContext()?.allowOpenIds
+            ?? this.deps.readAllowOpenIds?.()
+            ?? this.deps.allowOpenIds?.()
+          if (currentAllowOpenIds === undefined) return this.refuse('admission-unavailable')
+          if (!currentAllowOpenIds.includes(message.senderOpenId)) {
+            const failed = await this.deps.deliveries.failBeforeDispatch({
+              deliveryId: accepted.record.deliveryId,
+              correlation,
+              reason: 'owner-only-tier',
+              failedAt: this.now(),
+            })
+            if (failed) {
+              await this.receiptSettled(accepted.record.feedbackTarget, 'failed')
+              await this.sendControlReceipt(message.replyTarget, '当前入口为所有者专用，只有 allowlist 成员可以驱动。工具档位可由所有者切回 safe。')
+            }
+            return { kind: 'ignored', reason: 'owner-only-tier' }
+          }
+        }
         claimed = await dispatch.claimCurrent({
           correlation,
           deliveryId: accepted.record.deliveryId,
@@ -1744,6 +1880,8 @@ export class LocusChannelController {
       (command.kind === 'bind' && command.prefix.trim().length < MIN_BIND_PREFIX_LENGTH) ||
       command.kind === 'scope-missing-mode' ||
       command.kind === 'scope-invalid' ||
+      command.kind === 'tools-missing-tier' ||
+      command.kind === 'tools-invalid' ||
       command.kind === 'unbind-invalid'
     ) {
       const text = controlValidationText(command)
@@ -1802,6 +1940,26 @@ export class LocusChannelController {
       ...('reason' in result && result.reason !== undefined ? { reason: result.reason } : {}),
       ...('text' in result && result.text !== undefined ? { text: result.text } : {}),
     }
+  }
+
+  private async refuseOwnerOnlyAdmission(
+    endpoint: LocusEndpoint,
+    event: LocusChannelEvent,
+    suppliedContext?: LocusAdmissionContext,
+  ): Promise<void> {
+    const normalized = normalizeLocusEvent(event)
+    const message = messageFromAdmission(normalized, {
+      admit: true,
+      endpoint: { chatId: endpoint.chatId, ...(endpoint.threadId === undefined ? {} : { threadId: endpoint.threadId }), key: locusEndpointKey(endpoint.chatId, endpoint.threadId) },
+      text: normalized.text,
+      senderId: normalized.senderOpenId,
+      authorization: 'authorized',
+      needsInitialization: false,
+    }, suppliedContext?.botOpenId ?? this.readAdmissionContext()?.botOpenId)
+    if (message === undefined) return
+    const allow = suppliedContext?.allowOpenIds ?? this.readAdmissionContext()?.allowOpenIds ?? this.deps.allowOpenIds?.() ?? []
+    if (allow.includes(message.senderOpenId)) return
+    await this.sendControlReceipt(message.replyTarget, '当前入口为所有者专用，只有 allowlist 成员可以驱动。工具档位可由所有者切回 safe。')
   }
 
   private async sendControlReceipt(target: LocusReplyTarget, text: string): Promise<void> {

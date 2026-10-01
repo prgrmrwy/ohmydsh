@@ -32,6 +32,29 @@ export const LOCUS_SAFE_TOOL_NAMES: readonly string[] = Object.freeze([
   'web_search',
 ])
 
+/** Tools added by the explicitly owner-granted shell tier. */
+export const LOCUS_SHELL_TIER_TOOL_NAMES: readonly string[] = Object.freeze([
+  'bash',
+  'skill',
+])
+
+/** Delegation/agent-control routes forbidden in every Locus tool tier. */
+export const LOCUS_DELEGATION_DENYLIST: readonly string[] = Object.freeze([
+  'subagent',
+  'subagent_fork',
+  'subagent_codex',
+  'subagent_claude_code',
+  'workflow',
+  'ralph',
+  'send_message',
+  'list_agents',
+  'job_output',
+  'job_list',
+  'job_kill',
+])
+
+export type LocusToolTier = 'safe' | 'shell'
+
 /**
  * Tools Pet registers into a Locus child's OWN scope.
  *
@@ -88,10 +111,21 @@ export interface LocusCompositionAttestation {
  */
 export function attestLocusComposition(
   visible: readonly string[] | undefined,
+  tier: LocusToolTier = 'safe',
 ): LocusCompositionAttestation {
   if (visible === undefined) return { ok: false, reason: 'unreadable', leaks: [] }
-  const allowed = new Set<string>([...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_CALLER_BOUND_TOOLS])
-  const leaks = [...new Set(visible)].filter(name => !allowed.has(name)).sort()
+  const tierTools = tier === 'shell' ? LOCUS_SHELL_TIER_TOOL_NAMES : []
+  const allowed = new Set<string>([
+    ...LOCUS_SAFE_TOOL_NAMES,
+    ...tierTools,
+    ...LOCUS_CALLER_BOUND_TOOLS,
+  ])
+  const leaks = [...new Set([...visible].filter(name => !allowed.has(name)))].sort()
+  if (tier === 'shell' && !visible.includes('bash')) leaks.push('bash (required for shell tier)')
+  for (const name of LOCUS_DELEGATION_DENYLIST) {
+    if (visible.includes(name) && !leaks.includes(name)) leaks.push(name)
+  }
+  leaks.sort()
   return leaks.length === 0 ? { ok: true, leaks: [] } : { ok: false, reason: 'leaked', leaks }
 }
 
@@ -122,6 +156,10 @@ export interface LocusScopedSurfacePort {
    * promise would arrive after publication and could not veto it.
    */
   install(agent: LocusCandidateAgent, composition: LocusChildComposition): void
+  /** Apply or remove the per-agent shell-tier restriction layer on a live child. */
+  setToolTier?(agent: LocusCandidateAgent, tier: LocusToolTier): void
+  /** Install the per-agent Lark CLI write mistake-prevention guard. */
+  installOutboundGuard?(agent: LocusCandidateAgent): void
   /**
    * Read the tool names this exact child can actually see and call.
    *
@@ -157,6 +195,10 @@ export interface LocusChildComposition {
   readonly generation: number
   /** Host-verified permission of the locus generation. */
   readonly permission: LocusChildPermission
+  /** Missing means a legacy safe-v1 child. */
+  readonly childComposition?: 'safe-v1' | 'safe-v2'
+  /** Missing on legacy rows means safe. */
+  readonly toolTier?: { readonly desired: LocusToolTier; readonly effective: LocusToolTier }
 }
 
 /** Reverse lookup from a candidate session to its durable locus. */
@@ -273,6 +315,39 @@ export function composeLocusChild(
       { cause: error },
     )
   }
+  if (composition.childComposition === 'safe-v2') {
+    const tier = composition.toolTier?.effective ?? 'safe'
+    if (surface.setToolTier === undefined) {
+      throw new LocusCompositionError(
+        'surface-not-attested',
+        `Host cannot apply the ${tier} tool tier to safe-v2 locus child ${agent.id}`,
+      )
+    }
+    try {
+      surface.setToolTier(agent, tier)
+    } catch (error) {
+      throw new LocusCompositionError(
+        'surface-not-attested',
+        `Host could not attest the ${tier} tool tier for locus child ${agent.id}`,
+        { cause: error },
+      )
+    }
+    if (surface.installOutboundGuard === undefined) {
+      throw new LocusCompositionError(
+        'surface-not-attested',
+        `Host cannot install the Lark CLI mistake-prevention guard for safe-v2 child ${agent.id}`,
+      )
+    }
+    try {
+      surface.installOutboundGuard(agent)
+    } catch (error) {
+      throw new LocusCompositionError(
+        'surface-not-attested',
+        `Host cannot install the Lark CLI mistake-prevention guard for safe-v2 child ${agent.id}`,
+        { cause: error },
+      )
+    }
+  }
 
   // The installed surface is a request; what the child can actually call is the
   // effect. `safe-v1` claims the child cannot reach an execution or delegation
@@ -289,7 +364,10 @@ export function composeLocusChild(
       { cause: error },
     )
   }
-  const attestation = attestLocusComposition(visible)
+  const compositionTier: LocusToolTier = composition.childComposition === 'safe-v2'
+    ? composition.toolTier?.effective ?? 'safe'
+    : 'safe'
+  const attestation = attestLocusComposition(visible, compositionTier)
   if (!attestation.ok) {
     throw new LocusCompositionError(
       'surface-not-attested',

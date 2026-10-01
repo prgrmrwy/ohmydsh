@@ -278,7 +278,8 @@ describe('the execution-root surface is retired from the panel', () => {
     const markup = ownerMarkup({ executionRoot: '/Users/prgrmrwy/corp/acme' })
 
     expect(LOCUS_WRITE_ENABLED).toBe(false)
-    expect(markup).not.toContain('dshpet-locus-perm')
+    expect(markup).not.toContain('aria-label="文件权限"')
+    expect(markup).toContain('aria-label="工具档位"')
   })
 })
 

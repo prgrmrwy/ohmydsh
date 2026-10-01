@@ -66,7 +66,7 @@ describe('startup reconciliation', () => {
       locus({ childComposition: undefined }),
     ], { ...h.ports, probe: { check } })
 
-    expect(report.invalidated[0]?.reason).toContain('safe-v1')
+    expect(report.invalidated[0]?.reason).toContain('缺少 safe child composition 证明')
     expect(check).not.toHaveBeenCalled()
   })
 

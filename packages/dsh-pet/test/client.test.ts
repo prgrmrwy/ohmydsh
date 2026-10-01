@@ -7,6 +7,9 @@
  */
 
 import path from 'node:path'
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -303,6 +306,9 @@ describe('overlay styles', () => {
     const roots = [
       path.resolve(__dirname, '..', 'node_modules', '@deepseek-ai'),
       path.resolve(__dirname, '..', '..', '..', 'node_modules', '@deepseek-ai'),
+      // Lean Worktree Sessions may resolve a shared cache/ancestor install.
+      ...((require.resolve.paths('@deepseek-ai/dsh-api-session-controller') ?? [])
+        .map(root => path.join(root, '@deepseek-ai'))),
     ]
 
     // Build the real vocabulary from the shipped client bundles. The previous
@@ -1524,6 +1530,11 @@ describe('Host directory APIs are read from the right connection face', () => {
         'typert.remote-client.d.ts',
       ),
     ]
+    candidates.push(path.join(
+      path.dirname(require.resolve('@deepseek-ai/dsh-api-workspace-controller/package.json')),
+      'lib',
+      'typert.remote-client.d.ts',
+    ))
     let declared: string | undefined
     for (const candidate of candidates) {
       try {

@@ -97,6 +97,8 @@ function locus(input: LocusInput): PetLocusView {
       ...(input.workspaceTitle === undefined ? {} : { title: input.workspaceTitle }),
     },
     permission: { desired: 'read', effective: 'read' },
+    toolTier: { desired: 'safe', effective: 'safe' },
+    childComposition: 'safe-v2',
     state: {
       state: input.state ?? 'active',
       busy: false,

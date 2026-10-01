@@ -102,7 +102,7 @@ export function createLocusChildDelivery(ports: LocusChildDeliveryPorts): {
   return {
     async ensureChild(locus, signal) {
       // Refuse before adapter allocation, parent resolution, proof, or cold resume.
-      if (locus.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION) {
+      if (locus.childComposition !== 'safe-v1' && locus.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION) {
         ports.log?.('safe-composition-unproven')
         throw new Error('Locus child is unavailable (safe-composition-unproven)')
       }

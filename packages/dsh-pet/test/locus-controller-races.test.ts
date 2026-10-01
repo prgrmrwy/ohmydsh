@@ -3,6 +3,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   LocusChannelController,
+  admitNormalizedLocusEvent,
   type ActiveLocus,
   type LocusChildDeliveryPort,
   type LocusControllerDeps,
@@ -81,6 +82,51 @@ class MemoryDeliveryLedger {
 
   getById(deliveryId: string): DeliveryRecord | undefined {
     return this.state.byDeliveryId[deliveryId]
+  }
+
+  listDeliveries(): readonly DeliveryRecord[] {
+    return Object.values(this.state.byDeliveryId).sort((left, right) => left.sequence - right.sequence)
+  }
+
+  pendingForLocus(correlation: DeliveryCorrelation): readonly DeliveryRecord[] {
+    return this.listDeliveries().filter(record =>
+      record.locusId === correlation.locusId && record.generation === correlation.generation
+      && record.childSessionId === correlation.childSessionId,
+    )
+  }
+
+  hasCurrent(correlation: DeliveryCorrelation): boolean {
+    return Object.values(this.state.byDeliveryId).some(record =>
+      record.locusId === correlation.locusId && record.generation === correlation.generation
+      && record.childSessionId === correlation.childSessionId
+      && (record.status === 'current' || record.status === 'finishing')
+    )
+  }
+
+  failBeforeDispatch(input: { deliveryId: string; correlation: DeliveryCorrelation; reason: string; executionId?: string; failedAt?: number }): boolean {
+    this.calls.push('failBeforeDispatch')
+    const current = this.state.byDeliveryId[input.deliveryId]
+    if (current === undefined || current.status === 'failed' || current.status === 'replied' || current.status === 'no-reply') return false
+    if (current.locusId !== input.correlation.locusId || current.generation !== input.correlation.generation
+      || current.childSessionId !== input.correlation.childSessionId
+      || current.endpoint.chatId !== input.correlation.endpoint.chatId
+      || current.endpoint.threadId !== input.correlation.endpoint.threadId) return false
+    if (current.status === 'queued' && current.executionId !== input.executionId) return false
+    const { queueState: _queueState, ...withoutQueueState } = current
+    const failed = Object.freeze({
+      ...withoutQueueState,
+      status: 'failed' as const,
+      dispatchFailure: current.status === 'queued' ? 'queued-not-started' as const : 'not-queued' as const,
+      failureReason: input.reason,
+      failedAt: input.failedAt ?? 100,
+    })
+    this.state = {
+      ...this.state,
+      byDeliveryId: Object.freeze({ ...this.state.byDeliveryId, [failed.deliveryId]: failed }),
+      byMessageId: Object.freeze({ ...this.state.byMessageId, [failed.messageId]: failed }),
+    }
+    this.history.push(failed)
+    return true
   }
 
   accept(input: Parameters<typeof acceptDelivery>[1]): DeliveryAcceptance {
@@ -189,10 +235,6 @@ class MemoryDeliveryLedger {
     return mutation.changed && mutation.record?.status === 'current' ? mutation.record : undefined
   }
 
-  currentFinished(): void {
-    this.calls.push('currentFinished')
-  }
-
   async dispatchNext(): Promise<void> {
     this.calls.push('dispatchNext')
   }
@@ -282,7 +324,14 @@ function baseDeps(ledger: MemoryDeliveryLedger, observer: SynchronousTurnObserve
       ensureForDelivery: () => LOCUS,
     },
     deliveries: ledger,
-    deliveryDispatch: ledger,
+    deliveryDispatch: {
+      claimCurrent: input => ledger.claimCurrent(input),
+      hasCurrent: correlation => ledger.hasCurrent(correlation),
+      pendingForLocus: correlation => ledger.pendingForLocus(correlation),
+      currentFinished: () => {},
+      dispatchNext: () => {},
+      scheduleCurrent: record => ledger.scheduleCurrent(record),
+    },
     turns: observer,
   }
 }
@@ -1185,7 +1234,7 @@ describe('LocusChannelController control commands', () => {
     // `fail` must durably fail it FROM `current` (matching production
     // `failBeforeDispatch`), then advance the locus so a later backlog row is
     // not permanently stranded behind this refusal.
-    expect(harness.ledger.calls).toEqual(['accept', 'claimCurrent', 'fail', 'currentFinished', 'dispatchNext'])
+    expect(harness.ledger.calls).toEqual(['accept', 'claimCurrent', 'fail'])
     expect(harness.ledger.state.byMessageId['message-race']).toMatchObject({
       status: 'failed', dispatchFailure: 'not-queued', failureReason: 'queue-refused',
     })
@@ -1269,6 +1318,121 @@ describe('LocusChannelController control commands', () => {
 })
 
 describe('LocusChannelController dispatchNext / currentFinished / scheduleCurrent', () => {
+  it('owner-only refusal emits deterministic receipt without accepting a Delivery', async () => {
+    const harness = makeHarness(input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }))
+    const sent = vi.fn()
+    const controller = new LocusChannelController({
+      ...baseDeps(harness.ledger, harness.observer),
+      locus: {
+        resolveCurrent: () => ({ ...LOCUS, toolTier: { desired: 'shell', effective: 'shell' } }),
+        ensureForDelivery: () => ({ ...LOCUS, toolTier: { desired: 'shell', effective: 'shell' } }),
+      },
+      receipts: { markAccepted: harness.markAccepted, markSettled: harness.markSettled, sendControl: sent },
+      log: code => harness.diagnostics.push(code),
+    })
+    const event = {
+      type: 'im.message.receive_v1' as const,
+      message_id: 'message-stranger', chat_id: ENDPOINT.chatId, thread_id: ENDPOINT.threadId,
+      chat_type: 'group', message_type: 'text', content: '@Pet inspect this',
+      sender_id: 'ou-stranger', mentions: [{ id: 'ou-pet', name: 'Pet' }],
+    }
+    const context = {
+      botOpenId: 'ou-pet', messageId: 'message-stranger', text: '@Pet inspect this', senderId: 'ou-stranger',
+      allowOpenIds: ['ou-owner'], watermark: 0, isDuplicate: () => false,
+      authorization: () => 'authorized' as const,
+      toolTier: () => 'shell' as const,
+    }
+    await controller.handle(event, context)
+    expect(sent).toHaveBeenCalledWith(expect.objectContaining({ messageId: 'message-stranger' }), expect.stringContaining('所有者专用'))
+    expect(harness.diagnostics).toContain('admission-rejected:owner-only-tier')
+    expect(harness.ledger.listDeliveries()).toHaveLength(0)
+    expect(harness.queueInputs).toHaveLength(0)
+    controller.dispose()
+  })
+
+  it('fails a non-allowlisted shell-tier backlog row before current claim or child queueing', async () => {
+    const harness = makeHarness(input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }))
+    const sent = vi.fn()
+    const shellLocus = { ...LOCUS, toolTier: { desired: 'shell' as const, effective: 'shell' as const } }
+    const controller = new LocusChannelController({
+      ...baseDeps(harness.ledger, harness.observer),
+      locus: { resolveCurrent: () => shellLocus, ensureForDelivery: () => shellLocus },
+      currentToolTier: () => 'shell',
+      readAllowOpenIds: () => ['ou-owner'],
+      deliveryDispatch: {
+        claimCurrent: input => harness.ledger.claimCurrent(input),
+        pendingForLocus: correlation => harness.ledger.pendingForLocus(correlation),
+        currentFinished: () => {},
+        dispatchNext: () => {},
+        scheduleCurrent: record => harness.ledger.scheduleCurrent(record),
+      },
+      receipts: { markAccepted: harness.markAccepted, markSettled: harness.markSettled, sendControl: sent },
+    })
+    const accepted = acceptDelivery(harness.ledger.state, {
+      ...correlation(), messageId: 'message-backlog-stranger', acceptedAt: 5,
+      senderOpenId: 'ou-stranger', text: 'queued before shell tier',
+    })
+    harness.ledger.state = accepted.state
+
+    await controller.dispatchNext(correlation())
+
+    expect(harness.ledger.state.byDeliveryId[accepted.record.deliveryId]).toMatchObject({
+      status: 'failed', dispatchFailure: 'not-queued', failureReason: 'owner-only-tier',
+    })
+    expect(harness.queueInputs).toHaveLength(0)
+    expect(harness.ledger.calls).not.toContain('claimCurrent')
+    expect(sent).toHaveBeenCalledWith(expect.objectContaining({ messageId: 'message-backlog-stranger' }), expect.stringContaining('所有者专用'))
+    controller.dispose()
+  })
+
+  it('keeps dispatching after refusing a non-allowlisted head row so later owner backlog progresses', async () => {
+    const harness = makeHarness(input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }))
+    const sent = vi.fn()
+    const shellLocus = { ...LOCUS, toolTier: { desired: 'shell' as const, effective: 'shell' as const } }
+    const controller = new LocusChannelController({
+      ...baseDeps(harness.ledger, harness.observer),
+      locus: { resolveCurrent: () => shellLocus, ensureForDelivery: () => shellLocus },
+      currentToolTier: () => 'shell',
+      readAllowOpenIds: () => ['ou-owner'],
+      deliveryDispatch: {
+        claimCurrent: input => harness.ledger.claimCurrent(input),
+        pendingForLocus: correlation => harness.ledger.pendingForLocus(correlation),
+        currentFinished: () => {},
+        dispatchNext: () => {},
+        scheduleCurrent: record => harness.ledger.scheduleCurrent(record),
+      },
+      child: {
+        ensureChild: () => ({ parentSessionId: LOCUS.parentSessionId, childSessionId: LOCUS.childSessionId }),
+        withChildSession: async input => ({ ok: true as const, value: await input.operation({ id: LOCUS.childSessionId }) }),
+        queueChild: async input => {
+          harness.queueInputs.push(input)
+          return { accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }
+        },
+      },
+      resolveLivePolicy: () => ({ mode: 'read-only', workspaceRoot: '/repo' }),
+      receipts: { markAccepted: harness.markAccepted, markSettled: harness.markSettled, sendControl: sent },
+    })
+    const acceptedAt = Date.now() - 1000
+    const stranger = acceptDelivery(harness.ledger.state, {
+      ...correlation(), messageId: 'message-backlog-stranger-first', acceptedAt,
+      senderOpenId: 'ou-stranger', text: 'earlier non-owner request',
+    })
+    const owner = acceptDelivery(stranger.state, {
+      ...correlation(), messageId: 'message-backlog-owner-second', acceptedAt: acceptedAt + 1,
+      senderOpenId: 'ou-owner', text: 'later owner request',
+    })
+    harness.ledger.state = owner.state
+
+    await controller.dispatchNext(correlation())
+
+    expect(harness.ledger.state.byDeliveryId[stranger.record.deliveryId]).toMatchObject({
+      status: 'failed', failureReason: 'owner-only-tier',
+    })
+    expect(harness.ledger.state.byDeliveryId[owner.record.deliveryId]).toMatchObject({ status: 'current' })
+    expect(harness.queueInputs).toHaveLength(1)
+    controller.dispose()
+  })
+
   it('claims and queues the oldest backlog Delivery after a terminal transition, exactly once', async () => {
     const harness = makeHarness(input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }))
     // Seed A as current and B as backlog directly on the durable ledger, the
@@ -1381,6 +1545,8 @@ describe('LocusChannelController safe-composition proof', () => {
     const observer = new SynchronousTurnObserver()
     const deps: LocusControllerDeps = {
       ...baseDeps(ledger, observer),
+      readAllowOpenIds: () => ['ou-owner'],
+      currentToolTier: () => 'safe',
       locus: { resolveCurrent: () => record, ensureForDelivery: () => record },
       child,
       resolveLivePolicy: () => ({ mode: 'read-only', workspaceRoot: '/repo' }),

@@ -227,6 +227,63 @@ describe('unified locus command dispatcher', () => {
     expect(unbindCurrent).toHaveBeenCalledWith({ endpoint: { chatId: ENDPOINT.chatId }, actorId: OWNER })
   })
 
+  it('dispatches tool-tier changes through the owner mutation seam with truthful receipts', async () => {
+    const setCurrentTier = vi.fn(async ({ tier }: { tier: 'safe' | 'shell' }) => ({
+      tier,
+      childComposition: 'safe-v2' as const,
+    }))
+    const dispatcher = createLocusControlDispatcher({
+      allowOpenIds: () => [OWNER],
+      listSessions: () => [],
+      bind: { bind: vi.fn() },
+      exit: { unbindCurrent: vi.fn() },
+      toolTierMutation: { setCurrentTier },
+    })
+    const result = await dispatcher.dispatch({
+      command: { kind: 'tools', tier: 'shell' },
+      endpoint: ENDPOINT,
+      senderId: OWNER,
+    })
+    expect(setCurrentTier).toHaveBeenCalledWith({ endpoint: { chatId: ENDPOINT.chatId }, actorId: OWNER, tier: 'shell' })
+    expect(result).toMatchObject({ ok: true, text: expect.stringContaining('当前入口转为所有者专用') })
+    expect(result.ok === true && result.text).toContain('不是安全边界')
+
+    setCurrentTier.mockResolvedValueOnce({ tier: 'safe', childComposition: 'safe-v1' })
+    await expect(dispatcher.dispatch({
+      command: { kind: 'tools', tier: 'safe' }, endpoint: ENDPOINT, senderId: OWNER,
+    })).resolves.toMatchObject({ ok: true, text: expect.stringContaining('bash 与 Skill 已收紧') })
+  })
+
+  it('rejects a busy tool-tier change with a deterministic wait receipt', async () => {
+    const dispatcher = createLocusControlDispatcher({
+      allowOpenIds: () => [OWNER],
+      listSessions: () => [],
+      bind: { bind: vi.fn() },
+      exit: { unbindCurrent: vi.fn() },
+      toolTierMutation: {
+        setCurrentTier: async () => { throw Object.assign(new Error('busy'), { code: 'LOCUS_BUSY' }) },
+      },
+    })
+    await expect(dispatcher.dispatch({
+      command: { kind: 'tools', tier: 'shell' }, endpoint: ENDPOINT, senderId: OWNER,
+    })).resolves.toEqual({
+      ok: false, reason: 'busy', text: '当前入口仍有执行中或排队消息，请稍后重试。',
+    })
+  })
+
+  it('requires an explicit rebuild before shell can be granted to safe-v1', async () => {
+    const dispatcher = createLocusControlDispatcher({
+      allowOpenIds: () => [OWNER],
+      listSessions: () => [],
+      bind: { bind: vi.fn() },
+      exit: { unbindCurrent: vi.fn() },
+      toolTierMutation: { setCurrentTier: async () => { throw Object.assign(new Error('safe-v1'), { code: 'LOCUS_LEGACY_V1_SHELL' }) } },
+    })
+    await expect(dispatcher.dispatch({
+      command: { kind: 'tools', tier: 'shell' }, endpoint: ENDPOINT, senderId: OWNER,
+    })).resolves.toMatchObject({ ok: false, reason: 'tools-legacy-v1', text: expect.stringContaining('入口保持 safe 且继续服务') })
+  })
+
   it('maps busy control mutations to a deterministic retry receipt', async () => {
     const dispatcher = createLocusControlDispatcher({
       allowOpenIds: () => [OWNER],

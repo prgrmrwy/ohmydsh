@@ -579,6 +579,11 @@ Pet 用 `LOCUS_SAFE_TOOL_FILTER` 把 Locus 子会话的继承工具限制为
    所以正确做法是让 child **根本拿不到委派工具**，不要靠 prompt 禁止（prompt 从不是边界）。
 4. **单测要把被禁工具注册在正确的层**。既有用例把 forbidden 工具全注册在 global 层，
    于是永远抓不到 own 层豁免——那种绿色是假的。
+5. **shell-tier 的可撤销层只负责收紧，不得携带委派 denylist**。`restrict()` 对继承层按交集生效，
+   own-layer 工具仍可绕过；因此 Pet 的 `safe-v2` 宽底座必须结构性不含委派（含
+   `subagent`、`subagent_fork`、`workflow`、`ralph`、`send_message` 和 agent 控制工具），
+   可撤层只暂时隐藏 `bash`/`skill`。移除这一层最多改变 safe/shell 两档，不能恢复孙代理逃逸面。
+   这是 [[ADR-0008-locus-shell-tier]] 所接受 shell 风险中仍保留的结构性不变量。
 
 ---
 
