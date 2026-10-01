@@ -20,7 +20,7 @@ extracted at *sync* time by a maintainer, never read at runtime.
 ## Concept reference
 
 The session-lifecycle design (tool registration in-process, recall injection at
-session start, a write reminder at turn close, and resetting recall state after
+session start, a write reminder scheduled at turn close and delivered with the next turn, and resetting recall state after
 compaction) follows the integration shipped as memex's Pi extension:
 
 - `pi-extension/index.ts` in the memex package

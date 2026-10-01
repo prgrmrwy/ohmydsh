@@ -9,6 +9,12 @@ interface SessionState {
   reminded: boolean
   /** True once this session's workspace was found to have memory switched off. */
   off: boolean
+  /**
+   * The turn that closed while a write reminder was owed, or undefined when none
+   * is scheduled. The reminder is delivered with a LATER turn's first step, never
+   * in this one, so it cannot add a model step to the turn it was scheduled in.
+   */
+  pendingSince: number | undefined
 }
 
 const RECALL_TEXT = [
@@ -23,6 +29,11 @@ const RECALL_TEXT = [
 ].join('\n')
 
 const RETRO_TEXT = '**Memex reminder:** If this task produced a non-obvious reusable learning, call memex_retro before finishing.'
+
+/** A write reminder is owed: memory is on, something was recalled, nothing was written, none delivered yet. */
+function reminderOwed(state: SessionState): boolean {
+  return !state.off && state.recalled && !state.wrote && !state.reminded
+}
 
 function pluginMessage(text: string, form: 'instructions' | 'notice', summary?: string) {
   return createUserMessage({
@@ -42,13 +53,16 @@ export function registerMemexLifecycle(ctx: Context, scopes: ScopeService): Meme
   const state = (session: object): SessionState => {
     const found = states.get(session)
     if (found) return found
-    const created = { recalled: false, wrote: false, reminded: false, off: false }
+    const created: SessionState = { recalled: false, wrote: false, reminded: false, off: false, pendingSince: undefined }
     states.set(session, created)
     return created
   }
 
   ctx.on('agent/session-start', ({ agent, source }) => {
     const sessionState = state(agent.session)
+    // A scheduled reminder belongs to the recall it followed; every reset below
+    // ends that recall, so the reminder goes with it.
+    sessionState.pendingSince = undefined
     if (source === 'compact') { sessionState.recalled = false; sessionState.reminded = false }
     else { sessionState.recalled = false; sessionState.wrote = false; sessionState.reminded = false; sessionState.off = false }
 
@@ -66,16 +80,46 @@ export function registerMemexLifecycle(ctx: Context, scopes: ScopeService): Meme
     }
   })
 
-  ctx.on('agent/turn-stopping', ({ agent }) => {
+  // Closing a turn only SCHEDULES the reminder. Injecting here would make the
+  // host run one more step inside the closing turn, so the model would answer,
+  // then be pulled back to write a card, and the turn's last message (the only
+  // one the web UI shows in full) would be the card report instead of the answer.
+  ctx.on('agent/turn-stopping', ({ agent, turn }) => {
     const current = state(agent.session)
-    if (current.off || !current.recalled || current.wrote || current.reminded) return
-    current.reminded = true
+    if (!reminderOwed(current) || current.pendingSince !== undefined) return
+    current.pendingSince = turn
+  })
+
+  // The scheduled reminder rides along with the first later step that already
+  // carries input, appended after everything the rest of the chain admitted.
+  // Runs on every step of every agent, so it stays O(1) and allocates nothing
+  // while no reminder is scheduled.
+  ctx.on('agent/pre-step', async ({ agent, turn, signal }, next) => {
+    const decision = await next()
+    const current = states.get(agent.session)
+    const since = current?.pendingSince
+    if (current === undefined || since === undefined) return decision
+    // What earned the reminder may be gone by now (a card was written meanwhile).
+    if (!reminderOwed(current)) { current.pendingSince = undefined; return decision }
+    if (decision.kind !== 'enter' || signal.aborted) return decision
+    // Never the turn that scheduled it, and never a step with nothing else in
+    // it: a message added there would itself make the host open a model request.
+    if (turn <= since || decision.messages.length === 0) return decision
+    current.pendingSince = undefined
+    // This runs on every step of every agent, so a nudge that cannot be built
+    // must cost only the nudge: log it and let the step go ahead untouched, as
+    // the turn-close injection this replaces did. State changes only after the
+    // message exists, so a failure leaves the reminder owed and it is scheduled
+    // again at the next turn close (one warning per turn at most).
+    let reminder: ReturnType<typeof pluginMessage>
     try {
-      agent.inject(pluginMessage(RETRO_TEXT, 'notice', 'Memex write reminder'))
+      reminder = pluginMessage(RETRO_TEXT, 'notice', 'Memex write reminder')
     } catch (error) {
-      current.reminded = false
-      ctx.logger('dsh-memex').warn('Could not inject memex write reminder: %s', error instanceof Error ? error.message : String(error))
+      ctx.logger('dsh-memex').warn('Could not build memex write reminder: %s', error instanceof Error ? error.message : String(error))
+      return decision
     }
+    current.reminded = true
+    return { ...decision, messages: [...decision.messages, reminder] }
   })
 
   return {
