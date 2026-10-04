@@ -41,10 +41,10 @@
 
 ## 4. W4 memex（隔离候选，约 2–3h）
 
-- [ ] 4.1 声明 dsh-memex 自有的 MessageSource kind，替换 `kind:'plugin'`；测试证明含该消息的会话可经 0.2.0 持久化路径写入后重新加载
-- [ ] 4.2 Host 侧配置从 `ctx.settings.register`/`SettingsScope` 迁到 loader 行 config（schemastery + last-good 语义）；移除 `dsh-settings-file` 依赖，改写相关测试
-- [ ] 4.3 设置页从 `settingsScope.bind` 迁到 `configForms`：保存仍以 Host 回读为准，保留工作区声明、主入口和开关的守门逻辑
-- [ ] 4.4 配置迁移：`settings.yaml` 导入的 `dsh-memex.scopes` 与 org-hosts 的键合并后生效；迁移失败时 fail closed，不发布工具
+- [x] 4.1 声明 dsh-memex 自有的 MessageSource kind，替换 `kind:'plugin'`；测试证明含该消息的会话可经 0.2.0 持久化路径写入后重新加载
+- [x] 4.2 Host 侧配置从 `ctx.settings.register`/`SettingsScope` 迁到 loader 行 config（schemastery + last-good 语义）；移除 `dsh-settings-file` 依赖，改写相关测试
+- [x] 4.3 设置页从 `settingsScope.bind` 迁到 `configForms`：保存仍以 Host 回读为准，保留工作区声明、主入口和开关的守门逻辑
+- [x] 4.4 配置迁移：`settings.yaml` 导入的 `dsh-memex.scopes` 与 org-hosts 的键合并后生效；迁移失败时 fail closed，不发布工具
 - [ ] 4.5 候选上启用 memex：逐工作区比对路由、主入口和开关结果与 0.3 快照一致；人工验收记忆设置页、卡片浏览、召回注入和写卡提醒
 
 ## 5. W5 Pet（隔离候选，约 4–5h）

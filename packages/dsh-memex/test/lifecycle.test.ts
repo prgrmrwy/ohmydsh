@@ -28,7 +28,7 @@ describe('memex lifecycle', () => {
     f.listeners.get('agent/created')!({ agent: f.agent, source: 'startup' })
     expect(f.injected).toHaveLength(1)
     expect(f.injected[0].content[0].text).toContain('Current memory scope: repo')
-    expect(f.injected[0].source).toMatchObject({ kind: 'plugin', plugin: 'dsh-memex', form: 'instructions' })
+    expect(f.injected[0].source).toEqual({ kind: 'plugin:dsh-memex', form: 'instructions' })
   })
 
   it('treats a sourceless agent/created (DSH 0.1.5) as a fresh start', () => {

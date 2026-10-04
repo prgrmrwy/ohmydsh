@@ -35,6 +35,7 @@ async function fixture({ preInitialized = false } = {}) {
   await writeFile(path.join(repo, 'scripts', 'lib', 'manifest-overlay.mjs'), await readFile(path.join(REPO, 'scripts', 'lib', 'manifest-overlay.mjs')))
   await writeFile(path.join(repo, 'scripts', 'lib', 'env-local.mjs'), await readFile(path.join(REPO, 'scripts', 'lib', 'env-local.mjs')))
   await writeFile(path.join(repo, 'scripts', 'lib', 'profile-lock.mjs'), await readFile(path.join(REPO, 'scripts', 'lib', 'profile-lock.mjs')))
+  await writeFile(path.join(repo, 'scripts', 'lib', 'legacy-settings.mjs'), await readFile(path.join(REPO, 'scripts', 'lib', 'legacy-settings.mjs')))
   await mkdir(path.join(repo, 'node_modules'), { recursive: true })
   await writeFile(path.join(repo, 'package.json'), JSON.stringify({ name: 'fixture-root', private: true, type: 'module' }))
   await writeFile(path.join(repo, 'dsh.yaml'), `dshVersion: 0.1.0-rc.7

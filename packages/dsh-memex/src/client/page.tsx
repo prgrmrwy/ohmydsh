@@ -22,7 +22,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection/client'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import {
   MEMEX_CHANNEL,
   MEMEX_REMOTE_ENDPOINT,
@@ -70,8 +70,8 @@ export interface MemexSectionInjected {
   rpc: ClientConnectionRpc
   /** Section copy under the plugin's locale namespace. */
   t: (key: MemexKey) => string
-  /** The `dsh-memex` settings namespace, bound on the client. */
-  scope: SettingsScope<MemexSettingsShape>
+  /** The `dsh-memex` entry's live Config form (DSH 0.2.0 `configForms`). */
+  scope: ConfigForm<MemexSettingsShape>
   /**
    * Opens a library's card browser.
    *
@@ -385,7 +385,10 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
     try {
       // Two sets rather than the namespace root: an older page bundle that sets
       // only `scopes` leaves the path declarations alone.
-      await scope.mutate([
+      // DSH 0.2.0 ConfigForm.mutate resolves false when the Host refuses the
+      // write (validation, stale revision, or a higher layer shadowing the row)
+      // and has already reloaded Host state; only a transport failure throws.
+      const accepted = await scope.mutate([
         {
           op: 'set',
           path: ['scopes'],
@@ -402,6 +405,12 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
         },
         { op: 'set', path: ['workspaces'], value: current.draft.workspaces.map(declaration => ({ ...declaration })) },
       ])
+      if (!accepted) {
+        // Keep the draft: the page still shows the Host's last accepted value
+        // beside the user's unsaved edits, never an intermediate state.
+        setNotice({ kind: 'error', text: t('saveFailed') })
+        return
+      }
       setSession(undefined)
       setNotes([])
       setNotice({ kind: 'ok', text: t('saved') })

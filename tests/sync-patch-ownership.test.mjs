@@ -225,3 +225,122 @@ test('the profile lock serializes writers and is taken over only from an exited 
   assert.ok(order.join(',') === 'a:in,a:out,b:in,b:out' || order.join(',') === 'b:in,b:out,a:in,a:out', order.join(','))
   t.diagnostic(order.join(','))
 })
+
+// ---- interaction with the DSH 0.2.0 config editor (design D3, task 3.8) ----
+
+import { configEditorWrite } from './helpers/config-editor-write.mjs'
+
+test('a settings-form save of a row sync generates lands inside the region and the next sync reverts it', async () => {
+  const fx = await fixture({ 'org-hosts': ORG }, { merge: ['org-hosts'] })
+  assert.equal(fx.run().status, 0)
+  const saved = configEditorWrite(await fx.readText(), { id: 'dsh-memex', name: 'dsh-memex' }, { internalHosts: ['code.example'], scopes: [{ name: 'work' }] })
+  // The config editor edits the last same-id row in place — which is the sync-owned row.
+  const end = saved.search(END)
+  assert.ok(saved.indexOf('name: work') > 0 && saved.indexOf('name: work') < end, 'the form wrote into the generated region')
+  await writeFile(fx.patchPath, saved)
+  assert.equal(fx.run().status, 0)
+  // Documented boundary: region content is sync-owned, so the form edit is lost.
+  assert.doesNotMatch(await fx.readText(), /name: work/)
+})
+
+test('a settings-form save of a row sync does not generate is appended below the region and survives', async () => {
+  const fx = await fixture({ frag: '- insert: []\n' })
+  assert.equal(fx.run().status, 0)
+  const saved = configEditorWrite(await fx.readText(), { id: 'agent-default-model', name: '@deepseek-ai/dsh-agent-default-model' }, { model: 'm' })
+  assert.ok(saved.indexOf('agent-default-model') > saved.search(END), 'a new row is appended after the region')
+  await writeFile(fx.patchPath, saved)
+  assert.equal(fx.run().status, 0)
+  assert.match(fx.run().stdout, /patches up-to-date/)
+  assert.deepEqual(effectiveConfig(await fx.readText(), 'agent-default-model'), { model: 'm' })
+})
+
+test('an empty region is still a valid entry list that composes nothing', async () => {
+  const fx = await overlayFixture({ externalRoot: false, manifest: 'dshVersion: 0.1.0-rc.7\ndependencies: []\ncustomizations: []\n' })
+  assert.equal(fx.sync([]).status, 0)
+  const rows = yaml.load(await fx.readPatch())
+  assert.deepEqual(rows, [{ insert: [] }])
+})
+
+// ---- DSH 0.2+: runtime-owned rows for live config (design D3, tasks 2.3/4.4) ----
+
+async function fixture020(patches, { merge = [], settings } = {}) {
+  const ids = Object.keys(patches)
+  const items = ids.map((id) => `  - id: ${id}\n    type: patch\n    enabled: true${merge.includes(id) ? '\n    mergeConfig: true' : ''}`)
+  const body = items.length === 0 ? 'customizations: []\n' : `customizations:\n${items.join('\n')}\n`
+  const fx = await overlayFixture({ externalRoot: false, manifest: `dshVersion: 0.2.0-rc.2\ndependencies: []\n${body}` })
+  for (const [id, text] of Object.entries(patches)) await fx.putPublic(`patches/${id}.yml`, text)
+  if (settings !== undefined) await writeFile(path.join(fx.dshHome, 'settings.yaml'), settings)
+  const patchPath = path.join(fx.profile, 'cordis.patch.yml')
+  return { ...fx, patchPath, run: () => fx.sync([]), readText: () => readFile(patchPath, 'utf8') }
+}
+
+function regionOf(text) { return text.slice(0, text.search(END)) }
+
+test('0.2+: a mergeConfig row is seeded below the region and a form save edits that row, not the region', async () => {
+  const fx = await fixture020({ 'org-hosts': ORG }, { merge: ['org-hosts'] })
+  assert.equal(fx.run().status, 0, 'first run')
+  const first = await fx.readText()
+  assert.doesNotMatch(regionOf(first), /- id: dsh-memex/, 'no copy of the row inside the region')
+  assert.deepEqual(effectiveConfig(first, 'dsh-memex'), { internalHosts: ['code.example'] })
+
+  // The settings form saves scopes: it rewrites the LAST dsh-memex row — the runtime-owned one.
+  const saved = configEditorWrite(first, { id: 'dsh-memex', name: 'dsh-memex' }, { internalHosts: ['code.example'], scopes: [{ name: 'work' }] })
+  await writeFile(fx.patchPath, saved)
+  const again = fx.run()
+  assert.equal(again.status, 0, again.stderr)
+  assert.match(again.stdout, /patches up-to-date/)
+  assert.deepEqual(effectiveConfig(await fx.readText(), 'dsh-memex'), { internalHosts: ['code.example'], scopes: [{ name: 'work' }] })
+})
+
+test('0.2+: an org-hosts change updates only its keys in the runtime-owned row', async () => {
+  const fx = await fixture020({ 'org-hosts': ORG }, { merge: ['org-hosts'] })
+  assert.equal(fx.run().status, 0)
+  await writeFile(fx.patchPath, configEditorWrite(await fx.readText(), { id: 'dsh-memex', name: 'dsh-memex' }, { internalHosts: ['code.example'], scopes: [{ name: 'work' }] }))
+  await fx.putPublic('patches/org-hosts.yml', ORG.replace('code.example', 'git.example'))
+  const result = fx.run()
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /profile runtime row: dsh-memex\.internalHosts/)
+  assert.deepEqual(effectiveConfig(await fx.readText(), 'dsh-memex'), { internalHosts: ['git.example'], scopes: [{ name: 'work' }] })
+})
+
+test('0.2+: the legacy settings.yaml memex section is carried into the seeded row together with org keys', async () => {
+  const settings = 'dsh-memex:\n  scopes:\n    - name: work\n      pathPrefixes: [~/work]\n  bindings: []\nui-settings:\n  theme: dark\n'
+  const fx = await fixture020({ 'org-hosts': ORG }, { merge: ['org-hosts'], settings })
+  assert.equal(fx.run().status, 0)
+  assert.deepEqual(effectiveConfig(await fx.readText(), 'dsh-memex'), {
+    internalHosts: ['code.example'], scopes: [{ name: 'work', pathPrefixes: ['~/work'] }], bindings: [],
+  })
+  // Seeded once: a second run does not seed again or rewrite.
+  assert.match(fx.run().stdout, /patches up-to-date/)
+  // settings.yaml is left for upstream's own import, which merges identical values.
+  assert.equal(await readFile(path.join(fx.dshHome, 'settings.yaml'), 'utf8'), settings)
+})
+
+test('0.2+: the legacy memex section is carried even without an org-hosts fragment', async () => {
+  const fx = await fixture020({}, { settings: 'dsh-memex:\n  autoDerive: false\n' })
+  assert.equal(fx.run().status, 0)
+  assert.deepEqual(effectiveConfig(await fx.readText(), 'dsh-memex'), { autoDerive: false })
+})
+
+test('0.2+: an existing runtime row is never reseeded from settings.yaml', async () => {
+  const fx = await fixture020({}, { settings: 'dsh-memex:\n  autoDerive: false\n' })
+  await writeFile(fx.patchPath, '- id: dsh-memex\n  name: dsh-memex\n  config:\n    autoDerive: true\n')
+  assert.equal(fx.run().status, 0)
+  assert.deepEqual(effectiveConfig(await fx.readText(), 'dsh-memex'), { autoDerive: true })
+})
+
+test('0.2+: an unreadable or unexpected legacy memex section fails the run without touching the patch', async () => {
+  for (const settings of ['dsh-memex: [unclosed\n', 'dsh-memex: [1, 2]\n', 'dsh-memex:\n  scopez: []\n']) {
+    const fx = await fixture020({ 'org-hosts': ORG }, { merge: ['org-hosts'], settings })
+    const result = fx.run()
+    assert.notEqual(result.status, 0, settings)
+    assert.match(result.stderr, /settings\.yaml/)
+    assert.equal(existsSync(fx.patchPath), false, 'nothing is written on failure')
+  }
+})
+
+test('0.1.x keeps rendering mergeConfig rows inside the region', async () => {
+  const fx = await fixture({ 'org-hosts': ORG }, { merge: ['org-hosts'] })
+  assert.equal(fx.run().status, 0)
+  assert.match(regionOf(await fx.readText()), /- id: dsh-memex/)
+})

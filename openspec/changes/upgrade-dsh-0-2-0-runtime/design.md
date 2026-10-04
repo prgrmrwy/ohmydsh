@@ -72,7 +72,16 @@ W2 在 0.1.5 上先落地**方案 B 的区段化**，并把覆盖片段改为**�
 - sync 能把运行时**已经写入**的同行 config 键并入区段（W2 已实现，带 `mergeConfig: true` 的片段才这样做）；
 - 但运行时**之后**再保存同一行时，它会在区段下方写出一份不含 org 键的完整 config，这一行排在后面、组合时生效，org 键随之失效，直到下一次 sync。
 
-所以方案 B 能保证「不丢运行时写入」，保证不了「运行时写入不覆盖 sync 的键」。后者只有方案 A（生成层位于 profile 之上的 home 层）能做到，代价是 config-editor 会以 `overridden by a home patch` 拒绝编辑被 home 层覆盖的行。3.8 实测时必须同时验证两件事：被 org-hosts 覆盖的 `dsh-memex`/`session-links` 行在设置页是否还能编辑；如果不能，org 键要换一个不和运行时抢同一行的承载方式（例如由插件读取独立配置源）。
+所以方案 B 能保证「不丢运行时写入」，保证不了「运行时写入不覆盖 sync 的键」。
+
+**W4 定案（2026-10-04，本地实现，待候选实测）**：在 0.2+ 上，带 `mergeConfig: true` 的片段**不再渲染进生成区段**，改为维护区段下方的一条**运行时所有行**（id 相同）：
+- 没有该行时 sync 种一条：config = 片段声明的键（org hosts）叠上 `settings.yaml` 中对应旧分节（dsh-memex 的 scopes/bindings/workspaces/autoDerive）；
+- 已有该行时 sync 只把片段声明的键保持为最新值（`yaml` Document API，保留注释、顺序与 `!!js`），其余键属于运行时；
+- 设置页保存改写的正是这条「最后一条同 id 行」，于是表单写入与 org 键在同一行内共存，sync 再跑是空操作；
+- 区段末尾固定一条空 insert 锚行，保证 config-editor 追加的新行落在区段之外（`yaml` 会把尾注释挂到最后一个节点上，没有锚行时新行会被追加进区段、下次 sync 被删）；
+- `settings.yaml` 读不了或分节形状不认识时整次 sync 失败、不写 patch（fail closed）；`settings.yaml` 原样保留，交给上游首启导入，它对同一行合并的是相同的值。
+
+这样 A 不再必要；3.8 仍需在候选上实测「设置页编辑 → build×2 → 值仍在且 org 键仍生效」。后者只有方案 A（生成层位于 profile 之上的 home 层）能做到，代价是 config-editor 会以 `overridden by a home patch` 拒绝编辑被 home 层覆盖的行。3.8 实测时必须同时验证两件事：被 org-hosts 覆盖的 `dsh-memex`/`session-links` 行在设置页是否还能编辑；如果不能，org 键要换一个不和运行时抢同一行的承载方式（例如由插件读取独立配置源）。
 
 ### D4. 运行体依赖波次在单一候选 `DSH_HOME` 上累积
 
