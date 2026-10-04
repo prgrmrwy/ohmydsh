@@ -16,11 +16,11 @@
 
 ## 2. W2 配置所有权（0.1.5 上线，约 2–3h）
 
-- [ ] 2.1 写失败测试：设置页写入 profile patch 后连续 sync 两次，写入的内容仍在；覆盖片段与下层 config 键共存
-- [ ] 2.2 sync 的 patch 写入改为只替换生成标记区段，区段外内容逐字节保留；首次迁移时把旧的整文件生成物识别为区段
-- [ ] 2.3 覆盖类片段（如 org-hosts 的 `dsh-memex`、`session-links`）改为按键合并 config，替代整行替换；`patches/connection-webserver.yml` 保持原有整行语义并加测试锁定
-- [ ] 2.4 sync 区分出厂 bundle、manifest 定制和运行时安装的插件：漂移只报告、不纳入 `shippedBundles`、不删除；写 profile `package.json` 时与运行体的文件锁协调
-- [ ] 2.5 在 0.1.5 上实测：生成 patch 的生效配置与改造前逐项一致（dump-config 比对），连跑两次 sync 幂等
+- [x] 2.1 写失败测试：设置页写入 profile patch 后连续 sync 两次，写入的内容仍在；覆盖片段与下层 config 键共存
+- [x] 2.2 sync 的 patch 写入改为只替换生成标记区段，区段外内容逐字节保留；首次迁移时把旧的整文件生成物识别为区段
+- [x] 2.3 覆盖类片段（如 org-hosts 的 `dsh-memex`、`session-links`）改为按键合并 config，替代整行替换（实现为 manifest 显式 `mergeConfig: true`，只允许纯覆盖行；运行时**之后**的保存仍会覆盖同一行，见 design D3「W2 实施发现」，由 3.8 定案）；`patches/connection-webserver.yml` 保持原有整行语义并加测试锁定
+- [x] 2.4 sync 区分出厂 bundle、manifest 定制和运行时安装的插件：漂移只报告、不纳入 `shippedBundles`、不删除；写 profile `package.json` 时与运行体的文件锁协调
+- [x] 2.5 在 0.1.5 上实测：生成 patch 的生效配置与改造前逐项一致（dump-config 比对），连跑两次 sync 幂等
 - [ ] 2.6 用户重启验收后提交；更新 `repo-layout` 实现说明
 
 ## 3. W3 运行体与易改项（隔离候选，约 3–4h）

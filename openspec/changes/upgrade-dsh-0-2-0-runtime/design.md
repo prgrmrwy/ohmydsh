@@ -67,6 +67,13 @@ W2 在 0.1.5 上先落地**方案 B 的区段化**，并把覆盖片段改为**�
 
 `settings.yaml` 导入：在 W3 候选中实测导入结果。导入的段落与 sync 合并后的 config 必须同时生效，这一点由 spec 场景「覆盖片段只合并自身声明的键」覆盖。
 
+**W2 实施发现（2026-10-04，源码核实）**：0.2.0 的 config-editor 保存时只改**最后一条**同 id 覆盖行（`findLastIndex`），并整份替换该行的 `config`。loader 的覆盖语义也是按键整替换（`cordis-plugin-include` `applyEntryPatches`：`target[key] = value`）。因此，只要生成区段与运行时写入的行同在 profile patch 里：
+
+- sync 能把运行时**已经写入**的同行 config 键并入区段（W2 已实现，带 `mergeConfig: true` 的片段才这样做）；
+- 但运行时**之后**再保存同一行时，它会在区段下方写出一份不含 org 键的完整 config，这一行排在后面、组合时生效，org 键随之失效，直到下一次 sync。
+
+所以方案 B 能保证「不丢运行时写入」，保证不了「运行时写入不覆盖 sync 的键」。后者只有方案 A（生成层位于 profile 之上的 home 层）能做到，代价是 config-editor 会以 `overridden by a home patch` 拒绝编辑被 home 层覆盖的行。3.8 实测时必须同时验证两件事：被 org-hosts 覆盖的 `dsh-memex`/`session-links` 行在设置页是否还能编辑；如果不能，org 键要换一个不和运行时抢同一行的承载方式（例如由插件读取独立配置源）。
+
 ### D4. 运行体依赖波次在单一候选 `DSH_HOME` 上累积
 
 W3 建立隔离候选：独立 `DSH_HOME`、非 3080 端口，使用真实数据的脱敏副本。W4、W5 在同一候选上叠加，每波结束时记录启动清单、loader 结果与功能证据。后一波失败时只回退本波改动，不重建前面的波次。最终 devbox 用精确 commit 做一次清洁构建，作为切换 gate。

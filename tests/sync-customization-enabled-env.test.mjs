@@ -28,6 +28,7 @@ async function fixture(items) {
   await writeFile(path.join(repo, 'scripts', 'lib', 'dsh-host-runtime.mjs'), await readFile(path.join(REPO, 'scripts', 'lib', 'dsh-host-runtime.mjs')))
   await writeFile(path.join(repo, 'scripts', 'lib', 'manifest-overlay.mjs'), await readFile(path.join(REPO, 'scripts', 'lib', 'manifest-overlay.mjs')))
   await writeFile(path.join(repo, 'scripts', 'lib', 'env-local.mjs'), await readFile(path.join(REPO, 'scripts', 'lib', 'env-local.mjs')))
+  await writeFile(path.join(repo, 'scripts', 'lib', 'profile-lock.mjs'), await readFile(path.join(REPO, 'scripts', 'lib', 'profile-lock.mjs')))
   await symlink(path.join(REPO, 'node_modules'), path.join(repo, 'node_modules'), 'dir')
   await writeFile(
     path.join(dshHome, 'profiles', 'web', 'package.json'),
