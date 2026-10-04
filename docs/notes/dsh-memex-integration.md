@@ -20,8 +20,12 @@ The first design draft incorrectly concluded that DSH lacked SessionStart/Stop
 hooks. The equivalent surface lives in `@deepseek-ai/dsh-agent`, not only in the
 hook-protocol package:
 
-- `agent/session-start` + `agent.inject()` — seed recall guidance before the
-  first turn; `source: "compact"` resets recall state after compaction.
+- `agent/created` + `agent.inject()` — seed recall guidance before the first
+  turn. This was `agent/session-start` until change `upgrade-dsh-0-2-0-runtime`:
+  DSH 0.2.0 removed that event, and `agent/created` fires at the same publication
+  boundary (fresh creation and cold resume) on both 0.1.5 and 0.2.0. 0.1.5 sends
+  no `source`; a `compact` source resets only recall state, but neither runtime
+  currently re-announces an Agent after compaction.
 - `agent/turn-stopping` + `agent.inject()` — queue a non-interrupting write
   reminder for the next step/turn when recall occurred but no write did.
 
@@ -124,7 +128,7 @@ Three details matter and are easy to get wrong when editing this:
   is both the entry for `ohmydsh`/`dsh-cockpit` and every other workspace's
   fallback write target, so disabling memory in `ohmydsh` would silently remove
   the fallback write path everywhere.
-- **The lifecycle injection is a separate hook** (`agent/session-start`), so the
+- **The lifecycle injection is a separate hook** (`agent/created`), so the
   same flag has to be read there too; the write reminder is gated on the same
   session state. Injecting the recall prompt while the tools refuse would be the
   worst of both.

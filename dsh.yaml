@@ -75,12 +75,21 @@ customizations:
   - id: cost-meter
     type: package
     source: remote
-    spec: dsh-cost-meter@1.7.30
-    version: 1.7.30
+    spec: dsh-cost-meter@1.8.11
+    version: 1.8.11
       # [2026-09-04] staged-dsh-and-plugin-upgrade 阶段一:cost-meter 1.5.42 -> 1.7.10
       # [2026-09-21] upgrade-dsh-0-1-5-runtime 任务 2.1/7.2:1.7.10 -> 1.7.30。
       #   审查记录 checking/cost-meter-1.7.30.md;peer 已含 ^0.1.5-0(对 0.1.5-rc.2 满足)。
       #   回滚:改回 dsh-cost-meter@1.7.10 + version 1.7.10 → dsh build → 重启。
+      # [2026-10-04] upgrade-dsh-0-2-0-runtime W1(任务 1.2):1.7.30 -> 1.8.11(npm latest,
+      #   integrity sha512-3G1PgC+razTH4xWq0cn2/Kh1czGhjSfjDFauEGxy66RzeXCb5upq+mo4kXle4Kfd4DAsSGzQUVgsbG/IJOMilA==)。
+      #   peer(dsh-credentials/dsh-home-paths)= 旧范围 || >=0.2.0-rc.1 <0.3.0-0,0.1.5-rc.3 与 0.2.0-rc.2 双侧满足,
+      #   故作为前置波次在 0.1.5 上独立上线。发布物核对:运行依赖仍只有 zod(4.5.1→4.6.5),无 install 脚本;
+      #   新增 lib/cli-bridge.js 以 execFile(shell:false、固定参数、15s 超时、错误不带输出)只读调用用户自装的
+      #   qwen-cli / bailian-cli 查百炼额度,仅在用户启用对应 Provider 且本机 PATH 有该 CLI 时才执行;
+      #   新出现的 5 个域名(mimo.mi.com 等)均为价目表 sourceUrl / 文档链接常量,不是请求目标;
+      #   ledger 仍为 version 1(同一 store 格式,回滚到 1.7.30 可直接读)。新增跨进程 ledger 锁。
+      #   回滚:改回 dsh-cost-meter@1.7.30 + version 1.7.30 → dsh build → 重启。
     enabled: true
     brief: 会话费用统计
     note: '会话费用统计(web client 插件);仓库 https://github.com/Han-1413141/dsh-cost-meter;1.7.10(2026-09-04 审查,npm 1.7.10 发布物核对):① 密钥治理变更——所有密钥(OpenCode Go Key、各 Coding Plan Key、火山 AK/SK、自定义余额 {{VAR}} 占位符)不再明文落盘,一律迁入 DSH 凭据库(新增运行时依赖 @deepseek-ai/dsh-credentials 0.1.0-rc.8,与 dsh-home-paths 同为精确锁版),设置页输入框改 write-only(保存后不可回显),账本 ledger.json 与下发浏览器的配置永不含明文;旧版写在请求头里的明文密钥在启动时自动导入凭据库并替换为 {{CUSTOM_BALANCE_KEY_…}} 占位符;携带凭据出站另受 customBalance.allowedHosts 白名单约束(未配置时放行并告警一次,不 fail closed)。② 网络声明面扩大——host 侧出现的域名由 1.5.42 的 18 个增至 19 个(净增 cli-chat-proxy.grok.com、chatgpt.com、cloudcode-pa.googleapis.com 及其 daily/sandbox 变体,来自新增的 CLIProxyAPI 网关额度适配器与 xAI/Codex 额度查询;另有 open.volcengineapi.com 为火山方舟 AK/SK 管控面 HMAC 签名端点);其中一部分仅为文档/价目表链接常量(api-docs.deepseek.com、opencode.ai/docs、ax.ac.sugon.com 等)而非请求目标。**隐私边界:余额/额度类端点仅在用户显式启用对应 Provider 时才出站,未启用不产生任何网络流量**;API Key 只发往各自官方域名(baseURL 指向非官方域名时余额查询直接拒绝,模型请求不受影响)。③ 版本选择——1.7.0/1.7.8/1.7.9 曾致宿主启动即崩,故直接取该功能线首个稳定版 1.7.10;升级后必须先做宿主冒烟(排查 plugin tree failed to load / Cannot access / strict codec)再推进后续阶段。仍为纯 web client 插件(dsh.client.platform=web + 自带 cordis.patch.yml),不导入 cordis/dsh 的 Service/Context 运行时类,故不受阶段四运行体迁移直接影响;engines.node >=20。历史记录:1.5.35(2026-08-21 审查):v1.5.34 为 dsh 0.1.1-rc.x 适配(修复 rc.2 下费用展示丢失),v1.5.32 内置 DeepSeek-V4-Flash-Vision-Exp 计价,v1.5.35 修正未命中模型列表口径;升级后需重启验证加载与展示'
@@ -209,12 +218,18 @@ customizations:
   - id: llm-subscriptions
     type: package
     source: remote
-    spec: dsh-plugin-subscriptions@0.9.6
-    version: 0.9.6
-    integrity: sha512-wxTjDtaB5dwxqTZLy2tkT/ccvefj3qFKc9il4UMPnKa2XOVgyCoYYBk9/UnI5F5nMnXJgF/OZDGx8tZ1in7eiA==
-    # provenance: upstream npm release, gitHead d8ab13e91fd6747e419a1f5e965bce42bdfc3ad8;
-    # integrity identical on registry.npmjs.org and the private-npm mirror; tarball SHA-256
-    # 9379f9765b5d9b2151502c1088740fafb5e8c3e6952d694e0f5756bedd7589ba.
+    spec: dsh-plugin-subscriptions@0.9.7
+    version: 0.9.7
+    integrity: sha512-p+rOInD3AWu6vMYIDiUnUWdU8y17NCC/NaV1JckamMc0kwwMh4wVQwZ2ycMdcWaEfbS2xsW+WwD+Dqv3NAdRSA==
+    # provenance: upstream npm release, gitHead c5cc37fe7ac431dd3dad0821857573b5ac1e7d5b.
+    # [2026-10-04] upgrade-dsh-0-2-0-runtime W1(任务 1.2):0.9.6 -> 0.9.7。peer 在既有 0.1.x 范围后
+    #   追加精确 `0.2.0-rc.2`,0.1.5-rc.3 与 0.2.0-rc.2 双侧满足,作为前置波次在 0.1.5 上独立上线。
+    #   上游 release notes:适配 0.2.0 的 request-only message / 一等 tool result / 图片 offload 占位,
+    #   同时保留旧历史翻译;账号与池成员在能力准备到派发间保持一致;provider replay 按具体账号+模型隔离;
+    #   空终止错误触发故障转移、保留 tool error 标志、提前关闭未读 SSE。发布物核对:出站域名集合与
+    #   0.9.6 完全一致(无新增/删除),child_process 使用文件数不变(3)。
+    #   回滚:spec/version/integrity 改回 0.9.6(gitHead d8ab13e9,
+    #   sha512-wxTjDtaB5dwxqTZLy2tkT/ccvefj3qFKc9il4UMPnKa2XOVgyCoYYBk9/UnI5F5nMnXJgF/OZDGx8tZ1in7eiA==)→ dsh build → 重启。
       # [2026-09-29] 0.9.2 fork → 上游 0.9.6:本机 codex 目录缺 gpt-6-sol / gpt-6-luna。
       #   同账号实测 client_version=0.153.4 只返回 gpt-6-astra,0.155.1/0.159.0 才返回
       #   sol/luna;0.9.2 从 npm 查 @openai/codex 最新版的超时只有 1.5s,而本机经 Clash
@@ -244,12 +259,16 @@ customizations:
   - id: width-tiers
     type: package
     source: remote
-    spec: dsh-width-tiers@1.0.5
-    version: 1.0.5
+    spec: dsh-width-tiers@1.0.6
+    version: 1.0.6
       # [2026-09-04] staged-dsh-and-plugin-upgrade 阶段二:width-tiers 1.0.3 -> 1.0.4,
       #   并同批删除手写 patch 条目 width-tiers-wiring(接线改由包自带 bundle patch 承载)。
       # [2026-09-21] upgrade-dsh-0-1-5-runtime 任务 7.1:1.0.4 -> 1.0.5(无 peer,engines.node >=18)。
       #   回滚:改回 dsh-width-tiers@1.0.4 + version 1.0.4 → dsh build → 重启。
+      # [2026-10-04] upgrade-dsh-0-2-0-runtime W1(任务 1.2):1.0.5 -> 1.0.6(仍无 dsh peer;
+      #   gitHead 3679abd3,integrity sha512-O9/ZyA1V+xwl/tGrxK9JgaNN97QR1484qqo3kPuwq9Ywnvnk7gBopB3yMWLQozP+79iE+0t1oMzZL2MZAjMQVg==)。
+      #   发布物只改 lib/client.js 与 README,无 fetch、无 child_process、无新增域名。
+      #   回滚:改回 dsh-width-tiers@1.0.5 + version 1.0.5 → dsh build → 重启。
     enabled: true
     brief: 对话区宽度五档切换(748px 至全宽)
     note: 'repo https://github.com/aaronlei/dsh-width-tiers(MIT);用途:Web 对话区标准/中等/宽/超宽/全宽五档切换并以 localStorage 记忆;1.0.4(2026-09-04 审查,npm 1.0.4 发布物核对):**该版本新增了自带的 cordis.patch.yml,并在 package.json 补上 dsh.bundle.patch** —— 此前本包只声明 dsh.client,`dsh plugin add` 把它装成普通依赖、不进 dsh.profile.bundles,浏览器半区要靠本仓库手写的 patches/width-tiers-wiring.yml 插一行 loader 才被发现;1.0.4 起该接线由包自身承载,故本次升级**与删除 width-tiers-wiring patch 条目在同一批次完成**。两份 patch 语义等价(均为无 id 的 insert,插入同一条 {id: dsh-width-tiers, name: dsh-width-tiers};已用 js-yaml 解析比对,结构逐字段相同),而 DSH 的 applyEntryPatches 对无 id 的 insert 一律 push 且不去重——两者并存会产生**两条同 id 的 loader 行**,因此绝不可只升 pin 而保留手写 patch。验收口径:启动清单中 dsh-width-tiers 恰好出现一次,且 [patch] 标注消失(改由 bundle 承载)。历史审查(2026-08-20 npm 1.0.2 精确包):host 入口为空操作,client 仅注入 layout/locale,通过 --dsh-chat-content-width 行内覆盖调整宽度,不依赖构建哈希类名;无网络请求、Host 文件/命令/模型能力,生命周期 disposer 会清理 DOM、监听器、定时器与样式;注意非标准档会主动关闭详情面板,全宽档会经官方 layout 服务收起侧边栏;依赖 DSH Web rc.x 客户端布局与 locale 服务,升级后需回归验证'

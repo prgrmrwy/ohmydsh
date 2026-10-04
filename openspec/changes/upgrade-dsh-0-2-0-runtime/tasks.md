@@ -1,16 +1,16 @@
 ## 0. 冻结目标与基线
 
 - [ ] 0.1 查询 `@deepseek-ai/dsh` dist-tags，确认目标仍为 `0.2.0-rc.2`，记录 tag commit；出现更新的 rc 时停下，回到 proposal 重新冻结目标
-- [ ] 0.2 在当前 0.1.5 上执行并记录 `npm test`、`npm run check:artifacts`、11 个 local package 的 build/typecheck/test 结果（含已知跳过项），作为后续每波的比对基线
+- [x] 0.2 在当前 0.1.5 上执行并记录 `npm test`、`npm run check:artifacts`、11 个 local package 的 build/typecheck/test 结果（含已知跳过项），作为后续每波的比对基线
 - [ ] 0.3 记录生产启动清单、loader 行数，以及 memex 各工作区的路由、主入口和开关结果（逐工作区快照），供 W4 迁移比对
 
 ## 1. W1 前置清理（0.1.5 上线，约 1h）
 
-- [ ] 1.1 在私有 overlay `dsh.yaml` 中把 traex-bridge 设为 `enabled: false`，note 写明「用户不再使用，0.2.0 无兼容版」
-- [ ] 1.2 审查 cost-meter 1.8.6、subscriptions 0.9.7、width-tiers 1.0.6 的发布物差异（网络、凭据、依赖），更新精确 pin 与 note，并写明回滚 pin
-- [ ] 1.3 worktree-session：`agent/session-start` 改为 `agent/created`；补测试证明注入、绑定仍在首个回合之前完成
-- [ ] 1.4 dsh-memex：`agent/session-start` 改为 `agent/created`；补测试证明召回引导仍在首个回合之前注入
-- [ ] 1.5 ai-code-report-bridge：`tool/code-dispatch`→`tool/ptc-dispatch`、`header.model`→`header.config.model`、`message.model`→`source.model`；用 vendor 生成物做差分测试，并在 note 中写明上报内容的变化
+- [x] 1.1 在私有 overlay `dsh.yaml` 中把 traex-bridge 设为 `enabled: false`，note 写明「用户不再使用，0.2.0 无兼容版」
+- [x] 1.2 审查 cost-meter 1.8.6（实施时 latest 已到 1.8.11，改 pin 1.8.11，双侧 peer 同样满足）、subscriptions 0.9.7、width-tiers 1.0.6 的发布物差异（网络、凭据、依赖），更新精确 pin 与 note，并写明回滚 pin
+- [x] 1.3 worktree-session：`agent/session-start` 改为 `agent/created`；补测试证明注入、绑定仍在首个回合之前完成
+- [x] 1.4 dsh-memex：`agent/session-start` 改为 `agent/created`；补测试证明召回引导仍在首个回合之前注入
+- [x] 1.5 ai-code-report-bridge：`tool/code-dispatch`→`tool/ptc-dispatch`、`header.model`→`header.config.model`、`message.model`→`source.model`；用 vendor 生成物做差分测试，并在 note 中写明上报内容的变化
 - [ ] 1.6 运行 W1 涉及包的测试与根 `npm test`，`dsh build` 连跑两次（第二次无变化），确认启动清单不再含 traex 且其余条目各出现一次
 - [ ] 1.7 请用户执行 `dsh restart`；验收费用面板、订阅登录与 codex 目录、宽度档位、Worktree 首发、memex 召回注入，然后提交
 

@@ -1,6 +1,9 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { createUserMessage } from '@deepseek-ai/dsh-llm/message'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+
+/** `SessionStartSource` as declared by dsh-agent in 0.1.5 and 0.2.0. */
+type SessionStartSource = 'startup' | 'resume' | 'clear' | 'compact'
 import type { ScopeService } from '../scope/types.js'
 
 interface SessionState {
@@ -47,7 +50,13 @@ export function registerMemexLifecycle(ctx: Context, scopes: ScopeService): Meme
     return created
   }
 
-  ctx.on('agent/session-start', ({ agent, source }) => {
+  // Inject at the Agent publication boundary. `agent/created` fires once per
+  // fresh creation or cold resume, after setup and before the first driver step,
+  // in both DSH 0.1.5 (emit) and 0.2.0 (serial, awaited before queued input);
+  // 0.2.0 removed `agent/session-start`. 0.1.5 carries no `source` here, so an
+  // absent source is a (re)start. Neither runtime currently emits `compact` or
+  // `clear` through this lifecycle; the compact branch is kept for when it does.
+  ctx.on('agent/created', ({ agent, source }: { agent: Agent; source?: SessionStartSource }) => {
     const sessionState = state(agent.session)
     if (source === 'compact') { sessionState.recalled = false; sessionState.reminded = false }
     else { sessionState.recalled = false; sessionState.wrote = false; sessionState.reminded = false; sessionState.off = false }
