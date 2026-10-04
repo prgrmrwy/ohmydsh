@@ -1,6 +1,6 @@
 ## 0. 冻结目标与基线
 
-- [ ] 0.1 查询 `@deepseek-ai/dsh` dist-tags，确认目标仍为 `0.2.0-rc.2`，记录 tag commit；出现更新的 rc 时停下，回到 proposal 重新冻结目标
+- [x] 0.1 查询 `@deepseek-ai/dsh` dist-tags，确认目标仍为 `0.2.0-rc.2`，记录 tag commit；出现更新的 rc 时停下，回到 proposal 重新冻结目标
 - [x] 0.2 在当前 0.1.5 上执行并记录 `npm test`、`npm run check:artifacts`、11 个 local package 的 build/typecheck/test 结果（含已知跳过项），作为后续每波的比对基线
 - [ ] 0.3 记录生产启动清单、loader 行数，以及 memex 各工作区的路由、主入口和开关结果（逐工作区快照），供 W4 迁移比对
 
