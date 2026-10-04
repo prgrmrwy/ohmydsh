@@ -1246,6 +1246,13 @@ describe('probed host child seams', () => {
       // A runtime that reports neither field is accepted on id alone, which
       // is all the evidence it offers.
       { row: { id: CHILD_ID, kind: 'child', mode: 'continuable' }, adopted: true },
+      // DSH 0.2.0 `listChildren` returns the parent CATALOG
+      // (`SubagentCatalogEntry`: id, createdAt, mode, label) with no `kind`;
+      // diagnostics are no longer mixed into this listing. The continuable
+      // mode is the proof there.
+      { row: { id: CHILD_ID, createdAt: 1, mode: 'continuable', label: 'locus' }, adopted: true },
+      { row: { id: CHILD_ID, createdAt: 1, mode: 'one-shot' }, adopted: false },
+      { row: { id: CHILD_ID, createdAt: 1, mode: 'unknown' }, adopted: false },
     ] as const
 
     for (const { row, adopted } of cases) {

@@ -1693,12 +1693,18 @@ export function probeLocusChildPorts(
               }
               if (row.id !== childSessionId) return false
               if (row.parentSessionId !== undefined && row.parentSessionId !== parentSessionId) return false
-              // A matching id alone is not proof of a resumable child: the same
-              // listing also carries diagnostics and one-shot runs, and
-              // adopting one of those would bind a locus to a child that can
-              // never take another turn. When the runtime reports the kind and
-              // mode, both must say this is a continuable child.
-              if (row.kind !== 'child' || row.mode !== 'continuable') return false
+              // A matching id alone is not proof of a resumable child: one-shot
+              // runs carry an id too, and adopting one would bind a locus to a
+              // child that can never take another turn.
+              //
+              // DSH 0.1.5 returned `SubagentListEntry` (kind 'child' |
+              // 'diagnostic', mixed in one listing). DSH 0.2.0 returns the
+              // parent's durable catalog, `SubagentCatalogEntry` (id, createdAt,
+              // mode, label) with no `kind` and no diagnostics. Either way the
+              // continuable mode is required; a `kind` other than 'child', when
+              // reported, still disqualifies the row.
+              if (row.mode !== 'continuable') return false
+              if (row.kind !== undefined && row.kind !== 'child') return false
               return true
             }) as { id?: unknown } | undefined
             return match !== undefined && typeof match.id === 'string'

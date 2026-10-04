@@ -115,6 +115,46 @@ function overrideConfigOf(rows, id) {
   return config
 }
 
+/**
+ * Render enabled `type: preset` customizations as DSH 0.2 declaration rows.
+ *
+ * Each becomes one `@deepseek-ai/dsh-agent-preset` row (`id: preset-<id>`,
+ * `config.id: <id>`), the same shape the shipped bundles use for `standard`.
+ * `agent.cordis.yml` supplies `plugins`; the optional `preset.yml` supplies
+ * the display `name`/`description`. Rows keep their `!!js` expressions, which
+ * the preset plugin preserves until its child plugins load.
+ *
+ * @param {object[]} items - manifest items.
+ * @returns {string[]} patch parts; failures are reported through `fail`.
+ */
+function presetDeclarationParts(items) {
+  const parts = []
+  for (const item of items.filter((entry) => entry.type === 'preset' && entry.enabled)) {
+    const dir = sourceDirOf(item, 'presets')
+    let plugins
+    let meta = {}
+    try {
+      plugins = yaml.load(readFileSync(path.join(dir, 'agent.cordis.yml'), 'utf8'), { schema: ENTRY_LIST_SCHEMA })
+      if (!Array.isArray(plugins) || plugins.length === 0 || plugins.some((row) => row === null || typeof row !== 'object' || Array.isArray(row))) {
+        throw new Error('agent.cordis.yml must be a non-empty list of plugin entries')
+      }
+      const metaFile = path.join(dir, 'preset.yml')
+      if (existsSync(metaFile)) {
+        const parsed = yaml.load(readFileSync(metaFile, 'utf8')) ?? {}
+        if (typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('preset.yml must be a mapping')
+        meta = Object.fromEntries(['name', 'description'].filter((key) => typeof parsed[key] === 'string').map((key) => [key, parsed[key]]))
+      }
+    } catch (error) {
+      fail(`preset ${item.id}: ${String(error.message).split('\n')[0]}`)
+      continue
+    }
+    const row = { id: `preset-${item.id}`, name: '@deepseek-ai/dsh-agent-preset', config: { id: item.id, ...meta, plugins } }
+    parts.push(`# --- preset: ${item.id} (declared; DSH 0.2 loads no .agent-presets directory) ---\n`
+      + yaml.dump([{ insert: [row] }], { schema: ENTRY_LIST_SCHEMA, lineWidth: -1, noRefs: true }))
+  }
+  return parts
+}
+
 /** Parse and validate a mergeConfig fragment's override rows (id/name/object config only). */
 function mergeRowsOf(item, text) {
   let rows
@@ -1868,7 +1908,15 @@ async function main() {
     await syncDependencies(manifest)
     await syncPackages(manifest, manifest.items, packageNames)
     await syncThirdPartyAssets(manifest.thirdPartyResources)
-    await syncDirs(manifest, manifest.items, 'preset', 'presets', path.join(DSH_HOME, '.agent-presets'), 'agent.cordis.yml', 'preset')
+    // DSH 0.2+ no longer loads directory presets from `$DSH_HOME/.agent-presets`;
+    // a preset is a `@deepseek-ai/dsh-agent-preset` declaration row rendered into
+    // the profile patch (presetDeclarationParts). Running the directory sync with
+    // every preset disabled removes, through the ledger, the copies an earlier
+    // 0.1.x sync made, and never removes anything it did not create.
+    const presetItems = settingsLiveInProfile(manifest.dshVersion)
+      ? manifest.items.map((item) => (item.type === 'preset' ? { ...item, enabled: false } : item))
+      : manifest.items
+    await syncDirs(manifest, presetItems, 'preset', 'presets', path.join(DSH_HOME, '.agent-presets'), 'agent.cordis.yml', 'preset')
     await syncDirs(manifest, manifest.items, 'skill', 'skills', path.join(DSH_HOME, 'skills'), 'SKILL.md', 'skill')
     const health = THIRD_PARTY === undefined ? {} : await THIRD_PARTY.resourceHealth(manifest.thirdPartyResources, {
       profileDir: PROFILE_DIR,
@@ -1879,7 +1927,8 @@ async function main() {
       managedAssetsDir: path.join(DSH_HOME, 'managed-assets'),
       health,
     }) ?? []
-    await syncPatches(manifest.items, manifest, generatedParts)
+    const presetParts = settingsLiveInProfile(manifest.dshVersion) ? presetDeclarationParts(manifest.items) : []
+    await syncPatches(manifest.items, manifest, [...presetParts, ...generatedParts])
   }
   logVersion(manifest)
   console.log('')

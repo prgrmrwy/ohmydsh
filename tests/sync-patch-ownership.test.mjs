@@ -344,3 +344,74 @@ test('0.1.x keeps rendering mergeConfig rows inside the region', async () => {
   assert.equal(fx.run().status, 0)
   assert.match(regionOf(await fx.readText()), /- id: dsh-memex/)
 })
+
+// ---- DSH 0.2+: presets are declared rows, not `.agent-presets` copies (task 5.4) ----
+
+const PRESET_AGENT = [
+  '- id: persona',
+  "  name: '@deepseek-ai/dsh-persona'",
+  '  config:',
+  '    prefix: You are {{model}}.',
+  '- id: tool-bash',
+  "  name: '@deepseek-ai/dsh-tool-bash'",
+  '  disabled: !!js process.platform === \'win32\'',
+  '',
+].join('\n')
+
+async function presetFixture(dshVersion) {
+  const manifest = `dshVersion: ${dshVersion}\ndependencies: []\ncustomizations:\n  - id: pet-exec\n    type: preset\n    version: 0.1.0\n    enabled: true\n`
+  const fx = await overlayFixture({ externalRoot: false, manifest })
+  await fx.putPublic('presets/pet-exec/agent.cordis.yml', PRESET_AGENT)
+  await fx.putPublic('presets/pet-exec/preset.yml', 'name: Pet 执行会话\ndescription: no skill-filesystem\n')
+  const patchPath = path.join(fx.profile, 'cordis.patch.yml')
+  return { ...fx, patchPath, run: () => fx.sync([]), readText: () => readFile(patchPath, 'utf8') }
+}
+
+function presetRow(text, id) {
+  const rows = yaml.load(text, { schema: yaml.DEFAULT_SCHEMA.extend([new yaml.Type('tag:yaml.org,2002:js', { kind: 'scalar', resolve: () => true, construct: (d) => ({ __jsExpr: d }) })]) }) ?? []
+  return rows.flatMap((row) => row?.insert ?? []).find((entry) => entry?.name === '@deepseek-ai/dsh-agent-preset' && entry?.config?.id === id)
+}
+
+test('0.2+: an enabled preset is declared in the generated region with its plugins and metadata', async () => {
+  const fx = await presetFixture('0.2.0-rc.2')
+  const result = fx.run()
+  assert.equal(result.status, 0, result.stderr)
+  const text = await fx.readText()
+  const row = presetRow(text.slice(0, text.search(END)), 'pet-exec')
+  assert.ok(row, 'declaration row present inside the region')
+  assert.equal(row.id, 'preset-pet-exec')
+  assert.equal(row.config.name, 'Pet 执行会话')
+  assert.equal(row.config.description, 'no skill-filesystem')
+  assert.deepEqual(row.config.plugins.map((p) => p.id), ['persona', 'tool-bash'])
+  // `!!js` survives as an expression for the loader to evaluate, verbatim.
+  assert.match(text, /disabled: !!js process\.platform === 'win32'/)
+  // Nothing is copied into the retired directory layout.
+  assert.equal(existsSync(path.join(fx.dshHome, '.agent-presets', 'pet-exec')), false)
+  assert.match(fx.run().stdout, /patches up-to-date/)
+})
+
+test('0.2+: a copy sync made under 0.1.x is removed and the preset is declared instead', async () => {
+  const fx = await presetFixture('0.1.0-rc.7')
+  assert.equal(fx.run().status, 0)
+  assert.ok(existsSync(path.join(fx.dshHome, '.agent-presets', 'pet-exec', 'agent.cordis.yml')), '0.1.x copies the directory')
+  await writeFile(path.join(fx.repo, 'dsh.yaml'), (await readFile(path.join(fx.repo, 'dsh.yaml'), 'utf8')).replace('0.1.0-rc.7', '0.2.0-rc.2'))
+  const result = fx.run()
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(existsSync(path.join(fx.dshHome, '.agent-presets', 'pet-exec')), false)
+  assert.ok(presetRow(await fx.readText(), 'pet-exec'))
+})
+
+test('0.2+: a disabled preset is not declared', async () => {
+  const fx = await presetFixture('0.2.0-rc.2')
+  await writeFile(path.join(fx.repo, 'dsh.yaml'), (await readFile(path.join(fx.repo, 'dsh.yaml'), 'utf8')).replace('enabled: true', 'enabled: false'))
+  assert.equal(fx.run().status, 0)
+  assert.equal(presetRow(await fx.readText(), 'pet-exec'), undefined)
+})
+
+test('0.2+: a preset whose agent.cordis.yml is not an entry list fails the run', async () => {
+  const fx = await presetFixture('0.2.0-rc.2')
+  await fx.putPublic('presets/pet-exec/agent.cordis.yml', 'persona: oops\n')
+  const result = fx.run()
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /pet-exec/)
+})

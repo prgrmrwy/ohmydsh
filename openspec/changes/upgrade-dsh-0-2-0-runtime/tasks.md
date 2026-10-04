@@ -50,12 +50,14 @@
 ## 5. W5 Pet（隔离候选，约 4–5h）
 
 - [ ] 5.1 先实测子代激活名额池：确认 locus 创建、只读访问、冷恢复各自怎样占用和释放名额，据此确定 5.5 的改动面
-- [ ] 5.2 `compat/subagent` 改为以 `dsh-v0.2.0-rc.2` 为基线：重写失败的 `child-agent.ts` hunk 和测试 hunk；4 个 seam 逐项重新举证并记录被排除的官方替代路径；更新 tag、commit、patch hash、能力 marker 和 README
+- [x] 5.2 `compat/subagent` 改为以 `dsh-v0.2.0-rc.2` 为基线：重写失败的 `child-agent.ts` hunk 和测试 hunk；4 个 seam 逐项重新举证并记录被排除的官方替代路径；更新 tag、commit、patch hash、能力 marker 和 README
 - [ ] 5.3 launcher 的依赖范围改写（`~`/`*`→`^`）后，证明 cordis 等运行体包在依赖树中只有一个实例；`supportedDshVersion` 与 `dshVersion` 精确一致
-- [ ] 5.4 `dsh-pet-executor` 改为由 sync 渲染成 `dsh-agent-preset` 声明行；清理 sync 账本中记录的 `.agent-presets` 产物；Pet 依赖从 `dsh-agent-presets` 迁到 `dsh-agent-preset-registry`
-- [ ] 5.5 child 存在证明改为依赖 catalog 现存字段（`child.ts:1701`、`qa/subagents.ts`）；名额不足时进入可重试状态，不丢投递
+- [x] 5.4 `dsh-pet-executor` 改为由 sync 渲染成 `dsh-agent-preset` 声明行；清理 sync 账本中记录的 `.agent-presets` 产物；Pet 依赖从 `dsh-agent-presets` 迁到 `dsh-agent-preset-registry`
+- [x] 5.5 child 存在证明改为依赖 catalog 现存字段（`child.ts:1701`、`qa/subagents.ts`）；名额不足时进入可重试状态，不丢投递
 - [ ] 5.6 Pet 全量测试与运行时探针：silent 结算、idle child、independent 冷恢复 + 已保存 preset、精确 child Session、Storage 原子性，任一项退化即判定 NO-GO
 - [ ] 5.7 候选上启用 Pet：轮盘、Locus fork/independent 基线、SQLite 单 writer、真实飞书入口与媒体下载
+
+- [ ] 5.8 （本地实施中发现）Pet 客户端：`SessionListState.current` 删除、`sessions.open/openSubagent` 迁到 `uiWorkspace.openSession`；executor preset 的 `dsh-workflow-worker-thread` 在 0.2.0 已更名 `dsh-workflow-ptc`；候选上实测「打开会话 / 打开 locus 子代」与 executor preset 挂载
 
 ## 6. 原子切换 gate
 

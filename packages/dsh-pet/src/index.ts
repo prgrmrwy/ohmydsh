@@ -1252,7 +1252,7 @@ async function initialize(
 
   ctx.effect(
     () =>
-      ctx.on('agent/created', (payload: { agent?: unknown }) => {
+      ctx.on('agent/created', (payload: { agent?: unknown }): undefined => {
         const agent = payload?.agent as
           | { id?: unknown; ctx?: unknown }
           | undefined
@@ -1290,7 +1290,7 @@ async function initialize(
             // it from outside would record a surface that may never have been
             // installed at all — for example when no assembly composed — and
             // then permanently suppress the repair paths that would fix it.
-            return
+            return undefined
           }
           // This is the COLD RESTORE and NATIVE GUI LOAD entry point for a main
           // session, and for a locus child whose durable row was already active
@@ -1308,7 +1308,11 @@ async function initialize(
         // Cordis event listeners are observe-only here. Await the scoped
         // installation without allowing an async rejection to escape into the
         // event dispatcher; dispatch itself performs a late fail-closed check.
+        // DSH 0.2.0 awaits `agent/created` listeners serially and a rejection
+        // fails creation; returning undefined (not the promise) keeps the
+        // 0.1.5 contract that a foreign executor's composition never vetoes it.
         void composeForeignExecutor(payload?.agent)
+        return undefined
       }),
     'dsh-pet: scope externally loaded executors',
   )

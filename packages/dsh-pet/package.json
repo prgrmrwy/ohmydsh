@@ -46,7 +46,8 @@
         "@deepseek-ai/dsh-client-ui-renderer",
         "@deepseek-ai/dsh-api-workspace-controller",
         "@deepseek-ai/dsh-client-ui-layout",
-        "@deepseek-ai/dsh-client-ui-settings"
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-workspace"
       ]
     }
   },
@@ -81,6 +82,7 @@
     "@deepseek-ai/dsh-client-ui-renderer": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-client-ui-settings": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-client-ui-slots": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-workspace": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-home-paths": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-host-webserver": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-llm": "^0.2.0-rc.2",
@@ -110,6 +112,8 @@
     "@deepseek-ai/dsh-client-ui-renderer": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-client-ui-settings": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-client-ui-slots": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-theme": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-workspace": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-home-paths": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-host-webserver": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-llm": "^0.2.0-rc.2",
