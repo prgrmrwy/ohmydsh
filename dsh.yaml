@@ -2,7 +2,8 @@
 # 修改后运行 `dsh build`(或 `node scripts/sync.mjs`)物化到 ~/.dsh。
 # 约定:禁用(enabled: false)≠删除;手改一律回写本仓库。
 
-dshVersion: 0.1.5-rc.2     # 启动脚本 bin/dsh 运行时读取,单一版本来源
+dshVersion: 0.2.0-rc.2     # 启动脚本 bin/dsh 运行时读取,单一版本来源
+                           # [2026-10-04] upgrade-dsh-0-2-0-runtime W3:0.1.5-rc.2 -> 0.2.0-rc.2(隔离候选,未部署)
 
 autoUpdate:                # 启动/构建前自动检测并升级 DSH 版本(channel = registry dist-tag)
   enabled: false           # 关闭:完全跳过检测,钉在 dshVersion(需手动升级时改回 true;env DSH_SKIP_UPDATE=1 等效)
@@ -26,9 +27,9 @@ thirdPartyResources:
     version: 2.0.1
     integrity: sha512-G5P8ossz5R7lDuUWAO1v5aVG93qVjk3D85+tF2gkPGVhnVgdfEZ+pqllsAo+IEMsKa7/KE52ohbAhb9m+r0XtQ==
     provider:
-      spec: '@deepseek-ai/dsh-skill-filesystem@0.1.5-rc.2'
-      version: 0.1.5-rc.2
-      integrity: sha512-lEZ9KojaIc24vKCa5mp8LBHUDoXpNRSR/vlMsWONc9Tc1wwfn9kEotIjj0HD4PjIRcnc+Lma1nk4G/oNED8A9Q==
+      spec: '@deepseek-ai/dsh-skill-filesystem@0.2.0-rc.2'
+      version: 0.2.0-rc.2
+      integrity: sha512-V/88b4uEFwhCAewQhI/VE7/IvgBkDQb//3/zQjK7xieZ+D9wVpOc5AY8GCcQThZu5aGBnI1gX5ITHPlUHjKUtQ==
     providerName: spec-superflow-upstream
     skills: [bug-investigator, build-executor, code-reviewer, contract-builder, need-explorer, release-archivist, spec-merger, spec-writer, workflow-start]
   - id: jev
@@ -38,9 +39,9 @@ thirdPartyResources:
     version: 0.6.0
     integrity: sha512-AAQeZESEMatz5m5X/bojvcL3bpwTPxebFOXBSj66KKNOKznumhne2VsLQ9btxPWBS8obhbVvCInwooy7Phudtw==
     bridge:
-      spec: '@deepseek-ai/dsh-mcp-client@0.1.5-rc.2'
-      version: 0.1.5-rc.2
-      integrity: sha512-L1uhXptzs63bne3fpe8By30xUu2KzC9bbo8t1RdasnRNxhevNJA/5/Z9ZenuMRh26XZh9THF+DVuudEH8PFIsQ==
+      spec: '@deepseek-ai/dsh-mcp-client@0.2.0-rc.2'
+      version: 0.2.0-rc.2
+      integrity: sha512-UqP2sY1r6qAhBPFeuclqrXiMBBxPaCNrXlXRqKxAON7uI1wmZZ0B3/1GmBviQ3/WjjTQlOOkj0su2v4e5DMkug==
     serverName: jev
     credentialEnv: TYPESAFE_API_KEY
     toolCallTimeoutMs: 30000
@@ -155,7 +156,10 @@ customizations:
     type: package
     source: local
     version: 0.1.0
-    enabled: true
+    # [2026-10-04] upgrade-dsh-0-2-0-runtime W3–W4 **候选态**:compat 运行时仍绑定 0.1.5-rc.2,
+    #   重新推导在 W5(任务 5.2–5.6)。候选内暂时禁用以便 W3/W4 在 0.2.0 上推进(design D4)。
+    #   ⚠ 生产切换前 MUST 恢复 enabled: true 且 supportedDshVersion 等于 dshVersion(任务 6.1 gate)。
+    enabled: false
     # 仅长期 dsh web Host 使用的 Pet Locus 兼容运行时；build/plugin 等官方
     # CLI 仍按 dshVersion 走官方精确版本。版本变化必须重新审查，不自动套补丁。
     hostRuntimeCompatibility:
@@ -166,7 +170,9 @@ customizations:
   - id: dsh-pet-executor
     type: preset
     version: 0.1.0
-    enabled: true
+    # [2026-10-04] upgrade-dsh-0-2-0-runtime W3–W4 候选态:随 dsh-pet 暂时禁用。0.2.0 不再从
+    #   $DSH_HOME/.agent-presets 加载目录式 preset,W5(任务 5.4)改为 profile 声明后再启用。
+    enabled: false
     brief: Pet 执行会话专用 preset(不加载 skill-filesystem)
     note: '与官方 standard 的唯一差别是移除 skill-filesystem。Pet 规范要求只有其允许清单中显式启用的 Skill 才可对执行会话发布/加载/注入,而 dsh-skill 的 collectFresh 始终把 global 层并入合并结果——scoped 注册是加法,provider 无法减去 preset 带进来的另一个 provider,因此排除它的唯一办法是不在 preset 中加载。保留 tool-skill:执行会话仍需目录与加载器,只是目录完全来自 Pet 允许清单。理由见 packages/dsh-pet/docs/adr/0001-executor-preset.md'
   - id: ws
@@ -284,10 +290,15 @@ customizations:
   - id: better-sidebar
     type: package
     source: remote
-    spec: dsh-better-sidebar@0.19.1
-    version: 0.19.1
+    spec: dsh-better-sidebar@0.24.1
+    version: 0.24.1
       # [2026-09-21] upgrade-dsh-0-1-5-runtime 任务 7.1:0.18.0 -> 0.19.1(peer 由
       #   ^0.1.2-rc.1 升到 ^0.1.5-rc.1,与运行体 0.1.5-rc.2 对齐)。
+      # [2026-10-04] upgrade-dsh-0-2-0-runtime W3(任务 3.7):0.19.1 -> 0.24.1(peer 只满足 0.2.0,
+      #   故随运行体同批;integrity sha512-X5tdu07Ub0isxruG559o46891F7MjxM+CzR6QoGpHZtN5J8gz6FA8Dq632lLI77c4IjL2GP+N6PuWaDnoKPuPQ==)。
+      #   发布物核对:出站域名集合不变;依赖删除 node-pty 与 schemastery、新增 @deepseek-ai/schemastery 与 yaml
+      #   (终端改走 0.2.0 官方 terminal 能力,不再自带原生 pty,也就不再需要为它放行原生构建)。
+      #   回滚:随运行体一起回到 0.19.1(0.19.1 的 peer 只满足 0.1.5)。
       #   回滚:改回 dsh-better-sidebar@0.18.0 + version 0.18.0 → dsh build → 重启。
       # [2026-09-05] dsh-0-1-2-host-api-migration:0.17.1 -> 0.18.0(准入条件
       #   「运行体升到 0.1.2 线」已满足;且 0.17.1 在 0.1.2-rc.1 上启动即崩——
@@ -332,10 +343,14 @@ customizations:
   - id: skin-center
     type: package
     source: remote
-    spec: '@linxin666/dsh-client-ui-skin-center@0.3.24'
-    version: 0.3.24
+    spec: '@linxin666/dsh-client-ui-skin-center@0.4.4'
+    version: 0.4.4
       # [2026-09-21] upgrade-dsh-0-1-5-runtime 任务 7.4:0.3.16 -> 0.3.24(peer react ^18.2.0)。
       #   回滚:改回 @linxin666/dsh-client-ui-skin-center@0.3.16 + version 0.3.16 → dsh build → 重启。
+      # [2026-10-04] upgrade-dsh-0-2-0-runtime W3(任务 3.7):0.3.24 -> 0.4.4(peer 只满足 0.2.0,随运行体同批;
+      #   gitHead 540acca5,integrity sha512-5X6SHGV4bWncapW8+9jIM5F+4rQR+YZ2EMyuwnkfvw5rB1OW3eAKI9HpTsE4nEORZW9r6jxwT5FkMVr6+OB2vQ==)。
+      #   出站域名不变;schemastery 改为 @deepseek-ai/schemastery;新增 prepare 脚本只在 git/目录安装时运行,
+      #   registry tarball 安装不执行。回滚:随运行体一起回到 0.3.24。
     enabled: true
     brief: 设置→皮肤中心(主题试穿/自定义主题/壁纸;默认 blue-fantasy)
     note: 'repo https://github.com/zhu1090093659/dsh-web(Apache-2.0,活跃);2026-09-06 审查 npm 0.3.16 发布物与 README:兼容 DSH >=0.1.2-rc.1;Host+Web bundle,内置 blue-fantasy,支持原子试穿/应用、自定义明暗主题、$DSH_HOME/skins 用户皮肤及可选 Wallpaper Engine 本机媒体桥。安全面:同源 Host 路由、皮肤目录 containment、CSS 强制 scope 且拒绝 @import/远程 URL/越界路径;但用户皮肤 patches.css 具整页样式能力,hooks.mjs 属受信代码逃生口(仅内置或 provenance/字节身份核验通过的官方市场内容执行);会读取本机 Wallpaper Engine/Steam 库并提供同源媒体流。隐私:浏览器每日向 dsh-market.com 发送一次匿名安装心跳(随机 localStorage id + 包名;上游声明服务端仅存 salted hash、不存 IP);新装默认激活 blue-fantasy。未搭配 @linxin666/dsh-i18n:该包只增加俄语,与皮肤功能无关。'
@@ -343,10 +358,14 @@ customizations:
   - id: session-archive
     type: package
     source: remote
-    spec: '@linxin666/dsh-session-archive@0.3.24'
-    version: 0.3.24
+    spec: '@linxin666/dsh-session-archive@0.4.4'
+    version: 0.4.4
       # [2026-09-21] upgrade-dsh-0-1-5-runtime 任务 7.4:0.3.16 -> 0.3.24(peer react ^18.2.0)。
       #   回滚:改回 @linxin666/dsh-session-archive@0.3.16 + version 0.3.16 → dsh build → 重启。
+      # [2026-10-04] upgrade-dsh-0-2-0-runtime W3(任务 3.7):0.3.24 -> 0.4.4(peer 只满足 0.2.0,随运行体同批;
+      #   integrity sha512-uIUWe6BXwvEhHmHlL9FBMrQ4c0BminPPyRbFwskXxNCHA1ehzySX8ppVYryMpb1X2u2py+JM57Xgj/E+PzQbSw==)。
+      #   发布物依赖与出站域名不变、无 child_process。⚠ 0.2.0 的 archiveSession 对活跃会话会拒绝,
+      #   物理删除/归档行为须在候选上实测。回滚:随运行体一起回到 0.3.24。
     enabled: true
     brief: 会话归档管理(批量归档/恢复/预览/物理删除;自动维护默认关闭)
   # 第三方(remote):OpenCode Go 400 MissingSessionID 补丁(社区插件,非官方;官方适配发布后评估移除)

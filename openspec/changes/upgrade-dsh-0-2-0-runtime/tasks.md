@@ -27,15 +27,17 @@
 
 - [ ] 3.1 创建隔离候选：独立 `DSH_HOME`、非 3080 端口；放入 `~/.dsh/sessions`、Pet SQLite、profile 与 `settings.yaml` 的 owner-only 脱敏副本，并做完整性校验
 - [ ] 3.2 在候选中部署裸 `0.2.0-rc.2` 官方 profile，验证 CLI、dump-config、Web 认证链和 `settings.yaml` 导入；记录被导入的段落与未被接收的段落
-- [ ] 3.3 `dshVersion`→`0.2.0-rc.2`，同批完成：skill-filesystem、mcp-client provider 的 pin 与 integrity；`scripts/jev-readiness.mjs` 和 tests 中写死的 0.1.5；11 个 local package 的 peer 改到 0.2.0 版本族；`dsh-settings-file` 等已删除包按接口迁移处理，不改成同名新版
-- [ ] 3.4 subscriptions-sandbox-shim：先写 `role:'tool'` 工具结果的失败测试，再让配对识别同时支持两种表示
-- [ ] 3.5 session-links：`content[0]?.isError` 改为 `message.isError`，补测试
-- [ ] 3.6 worktree-session：适配运行中归档抛 `WorkspaceActiveSessionError` 的清理路径；handoff 对 `input.submit` 透传新增的 `source` 参数；测试覆盖 Enter 与点击两种提交方式
-- [ ] 3.7 第三方插件：better-sidebar 0.24.1、skin-center/session-archive 0.4.4 审查后改 pin；在候选上核对 cockpit-bridge 0.5.1 与 0.6.0，选定版本
+- [x] 3.3 `dshVersion`→`0.2.0-rc.2`，同批完成：skill-filesystem、mcp-client provider 的 pin 与 integrity；`scripts/jev-readiness.mjs` 和 tests 中写死的 0.1.5；11 个 local package 的 peer 改到 0.2.0 版本族；`dsh-settings-file` 等已删除包按接口迁移处理，不改成同名新版
+- [x] 3.4 subscriptions-sandbox-shim：先写 `role:'tool'` 工具结果的失败测试，再让配对识别同时支持两种表示
+- [x] 3.5 session-links：`content[0]?.isError` 改为 `message.isError`，补测试
+- [x] 3.6 worktree-session：适配运行中归档抛 `WorkspaceActiveSessionError` 的清理路径；handoff 对 `input.submit` 透传新增的 `source` 参数；测试覆盖 Enter 与点击两种提交方式
+- [x] 3.7 第三方插件：better-sidebar 0.24.1、skin-center/session-archive 0.4.4 审查后改 pin；在候选上核对 cockpit-bridge 0.5.1 与 0.6.0，选定版本（本地：两版 peer 都只要求 cordis ^4.0.1，暂保留 0.5.1；候选实测后定，见 3.11）
 - [ ] 3.8 候选上实测 D3：若生成内容迁到 home 层，config-editor 是否会被 `overridden by a home patch` 拒绝；据此定案方案 A 或方案 B 并回填 design
 - [ ] 3.9 候选上验证 connection 405 修复片段仍然需要且有效：去掉它时插件 RPC 返回 405，加上后返回 200
 - [ ] 3.10 Session v4 演练：脱敏副本上首次写入发布 v4；重启后状态一致；损坏与截断样本按预期处理；回滚到 0.1.5 并恢复备份后可读
 - [ ] 3.11 候选中禁用 memex 与 Pet，组合其余全部定制；记录启动清单（每项各出现一次）、loader 结果和各插件功能证据，与 0.2 基线比对
+
+- [ ] 3.12 （本地实施中发现）三个包读的 `SessionListState.current` 在 0.2.0 被删（upstream 6830e1460d），改为 `retainedBy.mainView` 双版本读取；候选上实测标题徽标、provider 图标、guard 预热跟随会话切换
 
 ## 4. W4 memex（隔离候选，约 2–3h）
 

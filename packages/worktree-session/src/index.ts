@@ -74,6 +74,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     try { recoverAgent(agent) } catch (error) {
       ctx.logger.warn(`worktree-session recovery at agent/created failed: ${error instanceof Error ? error.message : String(error)}`)
     }
+    return undefined
   })
   registerSubagentInheritance(ctx)
   ctx.effect(() => registerArchiveLifecycle(ctx, { recordBind }), 'worktree-session: observe durable archive lifecycle')
