@@ -22,8 +22,13 @@ hook-protocol package:
 
 - `agent/session-start` + `agent.inject()` — seed recall guidance before the
   first turn; `source: "compact"` resets recall state after compaction.
-- `agent/turn-stopping` + `agent.inject()` — queue a non-interrupting write
-  reminder for the next step/turn when recall occurred but no write did.
+- `agent/turn-stopping` (schedule) + `agent/pre-step` (deliver) — the write
+  reminder is only *scheduled* when a turn closes, and rides along with the first
+  step of a **later** turn that already carries input. It is never `inject`ed at
+  turn close: the host answers a late `inject`/`steer` by running one more step in
+  the closing turn, which puts the card report after the real answer (see
+  `dsh-plugin-integration-pitfalls.md`). Nothing is delivered if no further turn
+  starts, which is the accepted trade-off.
 
 Injected messages use `{kind:"plugin", plugin:"dsh-memex"}` provenance so
 transcript consumers do not mistake them for user messages.

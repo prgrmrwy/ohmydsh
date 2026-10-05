@@ -63,6 +63,15 @@ Names and descriptions come verbatim from the pinned memex release. Scope is
 implicit (`current`) unless the operation accepts an optional `scope`. Multi-
 library search fans out concurrently, one normal memex CLI call per library.
 
+
+## Write reminder
+
+After a session has recalled something and not yet written a card, the plugin
+nudges the model to save what it learned. The nudge is delivered with the
+**next** turn, never inside the one that just finished, so a turn always ends
+on the answer to the request it was asked for. If the conversation stops after
+that turn, no reminder is delivered and no card is written on its own.
+
 ## Guard boundary
 
 Writes to libraries whose `publish` direction is `external` are scanned for:
