@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { emitAgentEvent, type Agent, type AgentHandle } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
@@ -7,7 +7,7 @@ import SessionProjection from '@deepseek-ai/dsh-session-projection'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
@@ -105,6 +105,22 @@ function requestText(request: GenerateOptions): string {
 
 afterEach(async () => { await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose())) })
 
+/**
+ * The real memex tools append recall telemetry under `$DSH_HOME`, which defaults
+ * to the developer's own recall log. Without an isolated home every run of the
+ * end-to-end tests below would add fixture rows to it and skew the very
+ * statistics that log exists to support (same reason as acceptance.test.ts).
+ */
+let dshHome: string
+beforeEach(() => {
+  dshHome = mkdtempSync(join(tmpdir(), 'dsh-memex-runtime-home-'))
+  vi.stubEnv('DSH_HOME', dshHome)
+})
+afterEach(() => {
+  vi.unstubAllEnvs()
+  rmSync(dshHome, { recursive: true, force: true })
+})
+
 describe('memex lifecycle with the real AgentLoop', () => {
   it('publishes startup guidance before the first model request', async () => {
     const { adapter, handle } = await harness(1)
@@ -166,6 +182,15 @@ describe('memex lifecycle with the real AgentLoop', () => {
       lifecycle.mark('retro', handle.agent.session)
       await step(handle.agent, 'second')
       expect(reminderCount(adapter.requests[1]!)).toBe(0)
+    })
+
+    it('keeps the recall telemetry its real tool call produces inside the isolated home', async () => {
+      const script = [toolCallResponse('c1', 'memex_recall', { query: 'topic' }), textResponse('ok')]
+      const { handle } = await harness(script, scopes(), 'memex-telemetry-sandbox', { realTools: true })
+      await step(handle.agent, 'look it up')
+      // Present here means it was not written to the developer's own $DSH_HOME.
+      const written = readdirSync(join(dshHome, 'plugins', 'dsh-memex')).filter(name => name.startsWith('recall-'))
+      expect(written).toHaveLength(1)
     })
 
     it('leaves the answer as the last message of the turn even when the model then writes a card', async () => {
