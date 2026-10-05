@@ -632,6 +632,21 @@
   3. **构建前置**: `dsh build` 在启动/重启前校验"每个声明了 `dsh.client` 的包,其入口产物已存在于部署副本",不满足则拒绝重启并提示(把崩溃提前成明确报错)。
 - **更新**: 2026-09-20 记录(恢复方式:主干 `dsh build` 补齐产物后重启)。
 
+
+### [D006] 宿主层 Skill provider 会进入每个 scope(含 Pet executor / Locus child),Pet 的 Skill 隔离只覆盖 preset 层
+- **状态**: 待评估(2026-10-01 在 change `add-dsh-openspec-adapter` 的 Anvil 审查中发现并复现;该 change 决定与同类插件一致、如实声明、不在其内修复)
+- **现象**: 任何以宿主层(未带 scope)注册的 Skill provider——`archify`(bundle 的 `cordis.patch.yml` 插入官方 `dsh-skill-filesystem`)、`spec-superflow`(manifest `thirdPartyResources` 生成的 `third-party-spec-superflow-skills` 行)、以及将来的 `dsh-openspec`——都会出现在 Pet executor 与 Locus child 的 Skill 目录里并可被加载。这与 `dsh-pet` spec 的要求相冲:「仅全局可见的 Skill SHALL fail-closed」(`openspec/specs/dsh-pet/spec.md` 约 L393)、专用 Pet executor「MUST NOT 退化为 Host 全局 Skill 发现结果」(约 L313)。
+- **根因**: DSH 的 `SkillRegistry.collectFresh` 把每个调用方的视图建为 `[global 层, ...scope 链]` 再合并;registry 没有 restrict/过滤 API,scope 层**只能追加、不能删减**。Pet 现有隔离靠 `presets/dsh-pet-executor/agent.cordis.yml` 里「preset 不加载 `skill-filesystem`」(该文件注释已写明 scoped 注册是加法),只对 **preset 层** provider 有效,管不到宿主层。
+- **实证(2026-10-01)**: 用真实 `@deepseek-ai/dsh-skill` 的 `SkillRegistry` + `@deepseek-ai/dsh-scope` 的 `createScope` 在内存里复现:宿主层 provider 注册一个 `openspec-propose`,另在 Pet 风格 scope 内追加一个 provider;对该 scope `list` 同时返回两者,`get('openspec-propose')` 成功返回正文。**未**用真实 Pet executor 会话验证(本机没有可用的专用 Pet executor / Locus child 样本)。
+- **为什么至今没被发现**: `packages/dsh-pet/test/skill-allowlist.test.ts` 只测 Pet 自己的 provider(「只提供已启用的 Skill」「拒绝已禁用的」),**没有任何一条把宿主层 provider 当对照放进同一 scope 去断言它不可见**,所以这条隔离从未被测试覆盖,而不是被某次改动破坏。另:本机早先拿「Pet 会话目录 9 个 vs 普通会话 29 个」当隔离证据是错的——两组会话相隔近一个月,差异来自 memex/Jev/spec-superflow 后装,与隔离无关。
+- **影响面**: 对 OpenSpec/archify 这类**只读提示词** Skill,无直接安全后果;但它们会占用 Pet 的 Skill 预算,并让 Pet 的「目录 = 允许清单」声明不成立。若将来有带副作用的宿主层 Skill,则是真实越界。
+- **候选修复方向(待评估)**:
+  1. **Pet 侧统一过滤**(倾向):为 Pet executor / Locus child 的 scope 提供统一的拦截点,避免每个插件各做一遍。需先确认 DSH 是否允许在 `list`/`get` 路径上按 scope 过滤(目前 registry 无此 API,可能需要上游改动)。
+  2. **provider 各自 fail-closed**:每个宿主层 provider 读 `options.scope`,用 `agentPresets.composedPreset(scope.ctx)` 判定,不在白名单 preset 里就返回空。代价:要改 archify(第三方)与 spec-superflow(生成行)的接入方式,且 `scope` 不在 provider 合同声明的 lookup 选项里,属未声明依赖。
+  3. **补测试先行**:无论选哪条,先加一条「宿主层 provider 作为对照放进 Pet 风格 scope,断言**当前**可见」的特征化测试(`add-dsh-openspec-adapter` 的 `host_level_provider_is_visible_in_pet_style_scope_and_gap_is_documented` 即此类),让缺口有可检出的基线,将来修复时翻转断言。
+- **相关**: `openspec/changes/add-dsh-openspec-adapter/`(design D1「宿主层 provider 与 Pet 的关系」、session spec 的 Pet 暴露缺口场景);`docs/notes/dsh-plugin-integration-pitfalls.md` §12(`toolFilter` 不覆盖 own scope,同类的「过滤只管继承层」问题)。
+- **更新**: 2026-10-01 记录(change `add-dsh-openspec-adapter` 要求登记;用户决定先声明、先用着试试,不在该 change 内修)。
+
 ---
 
 ## 待立项
