@@ -40,6 +40,6 @@
 ## 7. 验证与收尾
 
 - [x] 7.1 `packages/dsh-pet` typecheck 与测试；仓库 `npm test`、`npm run check:artifacts`、`openspec validate pet-locus-shell-tier --strict`（当前工作树重新运行；Pet 2859 passed / 43 skipped，仓库 253 passed / 2 skipped，typecheck/build/strict/diff 检查通过；证据见 `port-verification.md`）
-- [ ] 7.2 `node scripts/sync.mjs` 两次，第二次无变化（需单独批准部署；本次只移植，不触碰现有 DSH home）
-- [ ] 7.3 实机：重建一个测试群 locus（得到 `safe-v2`）→ `-t shell` → 让子会话读取当前群历史成功；尝试 lark-cli 发送被 guard 拒绝并走 finish；普通成员 at 收到所有者专用回执；`-t safe` 后 bash 不可见；重启 DSH 后档位与工具面保持
+- [x] 7.2 `node scripts/sync.mjs` 两次，第二次无变化（经所有者批准部署并重启 Host：第一次 32 changes，第二次 `no changes — deployment already matches manifest`；产物含新代码已核验。清理 worktree 前须先在 main checkout 再跑一次 sync，见 `port-verification.md`）
+- [x] 7.3 实机：新建入口群即得 `safe-v2`（无需重建）→ `-t shell` 成功且回执如实声明"guard 不是安全边界" → bash 执行 `echo shell-ok` 退出码 0 → `lark-cli im +messages-send` 执行前被 guard 拒绝并原文返回 `pet_locus_finish` 指引、正文改经 finish 送达 → `-t safe` 回退且 bash/Skill 收紧。四条均有回执，见 `port-verification.md` 的 Live acceptance 表。**未复测**：授予后的重启/冷恢复持久性
 - [ ] 7.4 将 delta 合入 `openspec/specs/pet-locus-collaboration/spec.md` 后归档（需用户确认）

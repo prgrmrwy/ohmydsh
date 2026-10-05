@@ -44,9 +44,50 @@ Reviewed the complete current worktree delta against the target base, including 
 
 Disposition: **pass for source port and local verification**, after correcting the live-child idle omission. This is not permission to merge/deploy and not proof of live Lark behavior.
 
+## Live acceptance (real Lark entrance group)
+
+Run against a **freshly created** entrance group, so the locus was created by the new code rather than carried over:
+
+| Step | Receipt | Verdict |
+| --- | --- | --- |
+| `-t shell` | "工具档位已核验为 shell。当前入口转为所有者专用：仅 allowlist 成员可驱动；子会话可在本机执行命令并使用本机飞书凭据（读取与网络不受文件权限约束）。lark-cli 出站 guard 仅防误操作，不是安全边界；业务回复请用 pet_locus_finish。" | **pass** |
+| bash availability | "已用 bash 执行 'echo shell-ok'，退出码 0，输出为：shell-ok" | **pass** |
+| guard vs `lark-cli im +messages-send` | The command was refused before execution and returned the guard text verbatim: 「业务回复只能经 pet_locus_finish；若 finish 被拒，请在回复中说明拒绝原因，不要绕行发送。」The requested `test` body then went out through the supported finish path. | **pass** |
+| `-t safe` rollback | "工具档位已核验恢复为 safe；bash 与 Skill 已收紧，入口恢复既有群成员提问规则。" | **pass** |
+
+What this establishes and what it does not:
+
+- A fresh locus therefore publishes `safe-v2`: a `safe-v1` entry would have been refused deterministically with `tools-legacy-v1` ("该入口仍是 safe-v1 组合…"). No explicit rebuild was needed.
+- The guard text returned by the live child is **byte-identical** to `LOCUS_LARK_CLI_OUTBOUND_DENIAL`, so the server-side guard really is what refused the call.
+- The disclosure is not overstated: the grant receipt states that the guard is mistake prevention and **not** a security boundary, and the child's own claim that it "did not work around it" is a self-report, not proof of impossibility — consistent with the spec, which scopes the guard to common `lark-cli` write spellings and explicitly excludes deliberate bypass.
+- Not re-tested after the tier changes: restart/cold-recovery persistence of the granted tier. The earlier restart only proved the plugin loads.
+
 ## Explicit remaining gates
 
-- Task 1.2: bot history-read proof inside a real read-tier child-equivalent sandbox remains unverified. The reference recorded Lark 230027; no fresh external API probe or user-credential substitution was made here.
-- Task 7.2: deployment/sync twice and idempotence remain unchecked on this target. Previous source-worktree sync evidence does not certify this port.
-- Task 7.3: real safe-v2 rebuild, owner-only request behavior, guard/finish flow, safe rollback and restart/cold-recovery acceptance require separately authorized deployment and a test entry.
-- Task 7.4: published-spec merge and archive remain unchecked. No branch merge, commit, push, Worktree cleanup, Host restart or live DSH Home deployment occurred.
+- Task 1.2: **owner-confirmed, not receipt-backed.** No separate history-read receipt was captured; the child reported `lark-cli` itself usable (v1.0.94) during the guard step and the owner reports the read path working. This is weaker evidence than the four receipt-backed steps above and should not be cited as equivalent.
+- Task 7.2: satisfied on this target — see "Closure actions" above for the two sync runs and the idempotence result.
+- Task 7.3: satisfied on this target by the table above, except the restart/cold-recovery persistence sub-item noted there.
+- Task 7.4: the merge is done; published-spec merge and archive remain unchecked, and no push occurred.
+
+## Closure actions after the port review
+
+With explicit owner approval the reviewed port was committed, merged, and materialized:
+
+- Commit `c907ede` on `ws/session-c6978c4f-980b-4c2a-a807-ff1ede1c9d9c` (60 files, all under `packages/dsh-pet/`, `openspec/`, `docs/`).
+- Controlled merge via `scripts/ws-merge.mjs`: every gate passed, **fast-forward**, `main` == task branch == `c907ede`. No merge commit, no conflict, older Worktree Sessions retained.
+- `node scripts/sync.mjs` run twice from this Worktree Session. Run 1 applied 32 changes (first materialization: built local packages, installed pinned deps, removed a deleted package). Run 2 reported `no changes — deployment already matches manifest`, so idempotence holds.
+- Deployed artifact verified: `~/.dsh/profiles/web/node_modules/dsh-pet` is a real directory (copied, not symlinked) and contains the new code — `safe-v2`, the Lark CLI guard, and `toolTier` all present.
+- The running Host still had the previous code in memory, so a Host restart was required before any runtime acceptance. It was performed and the new Host loads Pet normally (`ready — routes registered`, subscription connected).
+
+### Host restart findings
+
+The restart used a detached supervisor (`nohup bash host-restart.sh &`) meant to stop the old Host, wait for the port to free, and relaunch it. Outcome: **the supervisor completed the stop but never reached the relaunch**, and the replacement Host had to be started manually from a shell. The supervisor had already been reparented to PPID 1 before the stop, yet its log ends at `stopping old host 70969` and the process is gone. `nohup` alone is therefore not sufficient — it only ignores SIGHUP, and the process was still torn down during the old Host's shutdown. A scripted Host restart must fully detach from the old Host's process group (for example `setsid` or `launchd`), not merely use `nohup`.
+
+Two further observations:
+
+- The old Host **survived SIGTERM** as a leftover: it released port 3080 and held no `state.sqlite`, but stayed alive holding only `dsh.log` descriptors and required an explicit `SIGKILL`.
+- `sqlite3 -readonly` on `state.sqlite` returns `database is locked` while the Host runs. That is the live Host's normal write lock, not a fault; locus rows cannot be read from outside the Host while it runs, so runtime verification must come from `dsh.log` or the management surface.
+
+### Deployment path caveat — handle before Worktree cleanup
+
+Running `sync.mjs` **from a Worktree Session** writes that worktree's absolute paths into the live profile: after this sync, all 11 local packages in `~/.dsh/profiles/web/package.json` `dependencies` pointed at `<worktree>/packages/*` (only the `devDependencies` entry for `dsh-worktree-session` pointed at main). Package *content* is copied, so the running Host is unaffected and the deployed code keeps working, but those recorded `file:` specs break the next `pnpm install` / `dsh plugin` once the worktree is deleted. Run `sync.mjs` once from the main checkout before removing this Worktree Session.
