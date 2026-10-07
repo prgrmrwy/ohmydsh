@@ -107,6 +107,24 @@ describe('immutable generations', () => {
     await expect(materializeGeneration({ home, id: 'gen-other', sourceRoot: source, version: '1.13.2', skills: [], invocation: foreign })).rejects.toThrow('invocation-path-mismatch')
     expect((await loadGeneration(home)).id).toBe('gen-run')
   })
+  it('existing_generation_with_a_different_recorded_invocation_is_an_identity_collision_not_silently_reused', async () => {
+    const { materializeGeneration } = await import('../src/generation-materializer.js')
+    const home = await root(); const source = await root(); const fs = await import('node:fs/promises')
+    await fs.mkdir(join(source, 'bin'), { recursive: true })
+    await writeFile(join(source, 'bin/openspec.js'), "console.log('1.13.2')\n")
+    await writeFile(join(source, 'package.json'), JSON.stringify({ name: '@fission-ai/openspec', version: '1.13.2', type: 'module', bin: { openspec: './bin/openspec.js' } }))
+    const good = await invocationFor(home, 'gen-same')
+    const skills = [{ name: 's', body: 'b' }]
+    await materializeGeneration({ home, id: 'gen-same', sourceRoot: source, version: '1.13.2', skills, invocation: good })
+    // Same identity and skills, same invocation: idempotent reuse stays allowed.
+    expect((await materializeGeneration({ home, id: 'gen-same', sourceRoot: source, version: '1.13.2', skills, invocation: good })).id).toBe('gen-same')
+    // A previously materialized generation that recorded a broken path must be reported, never served as-is.
+    const manifestPath = join(home, 'plugins/dsh-openspec/generations/gen-same/generation.json')
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+    manifest.invocation = good.replace('/bin/openspec.js', '/bin/bin/openspec.js')
+    await writeFile(manifestPath, JSON.stringify(manifest))
+    await expect(materializeGeneration({ home, id: 'gen-same', sourceRoot: source, version: '1.13.2', skills, invocation: good })).rejects.toThrow('generation-identity-collision')
+  })
   it('materialized_cli_dependency_closure_is_executable_without_profile_node_modules', async () => {
     const { materializeGeneration } = await import('../src/generation-materializer.js')
     const { spawnSync } = await import('node:child_process')

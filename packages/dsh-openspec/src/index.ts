@@ -93,7 +93,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     const entries = await getOfficialCatalog({ workflowIds: selected.workflows, delivery: selected.delivery })
     const chosen = entries
     const generationSkillsData = [...chosen.map(entry => ({ name: entry.skillName, description: `Official OpenSpec ${entry.workflowId} workflow`, body: entry.body })), manageSkill]
-    const generationId = config.generationId ?? createHash('sha256').update(`${version}:${selected.fingerprint}:${chosen.map(entry => entry.workflowId).join(',')}:manage-v1`).digest('hex').slice(0, 24)
+    const generationId = config.generationId ?? createHash('sha256').update(`${version}:${selected.fingerprint}:${chosen.map(entry => entry.workflowId).join(',')}:manage-v2`).digest('hex').slice(0, 24)
     const invocation = managedInvocation({ node: process.execPath, cli: join(dshHome, 'plugins', 'dsh-openspec', 'generations', generationId, 'bin', 'openspec.js'), telemetry: settings.telemetry })
     if (config.initialDeployment !== false) {
       await materializeGeneration({
@@ -122,7 +122,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       const nextSelection = await resolveEffectiveSelection({ configPath: config.officialConfigPath, workflows: config.selectedWorkflows })
       if (nextSelection.fingerprint === selected.fingerprint) return
       const nextEntries = await getOfficialCatalog({ workflowIds: nextSelection.workflows, delivery: nextSelection.delivery })
-      const nextId = createHash('sha256').update(`${version}:${nextSelection.fingerprint}:${nextEntries.map(entry => entry.workflowId).join(',')}:manage-v1`).digest('hex').slice(0, 24)
+      const nextId = createHash('sha256').update(`${version}:${nextSelection.fingerprint}:${nextEntries.map(entry => entry.workflowId).join(',')}:manage-v2`).digest('hex').slice(0, 24)
       const nextInvocation = managedInvocation({ node: process.execPath, cli: join(dshHome, 'plugins', 'dsh-openspec', 'generations', nextId, 'bin', 'openspec.js'), telemetry: settings.telemetry })
       await materializeGeneration({ home: dshHome, id: nextId, sourceRoot: openspecRoot, version, skills: [...nextEntries.map(entry => ({ name: entry.skillName, description: `Official OpenSpec ${entry.workflowId} workflow`, body: entry.body })), manageSkill], invocation: nextInvocation, selectionFingerprint: nextSelection.fingerprint, delivery: nextSelection.delivery })
       activeSurface = { entries: nextEntries, generation: nextId, invocation: nextInvocation }

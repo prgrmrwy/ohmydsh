@@ -68,7 +68,7 @@ export async function materializeGeneration(input: { home: string; id: string; s
     try {
       const existing = await readFile(join(destination, 'generation.json'), 'utf8')
       const manifest = JSON.parse(existing)
-      if (manifest.id === input.id && manifest.version === input.version && manifest.sourceHashes && JSON.stringify(manifest.skills) === JSON.stringify(input.skills) && (!input.selectionFingerprint || manifest.selectionFingerprint === input.selectionFingerprint)) {
+      if (manifest.id === input.id && manifest.version === input.version && manifest.sourceHashes && JSON.stringify(manifest.skills) === JSON.stringify(input.skills) && manifest.invocation === input.invocation && (!input.selectionFingerprint || manifest.selectionFingerprint === input.selectionFingerprint)) {
         const prior = await loadGeneration(input.home, input.id)
         if ((await readFile(join(root, 'active.json'), 'utf8')).includes(input.id)) return { ...prior, files: [binRelative, 'dist', 'schemas', 'node_modules', 'package.json'], hashes: manifest.sourceHashes }
         return await selectGeneration(input.home, input.id)
