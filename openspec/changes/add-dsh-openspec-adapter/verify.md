@@ -4,7 +4,19 @@ DECISION: FAIL
 
 Interim implementation report, not final acceptance. The public naming amendment is complete locally; the overall change remains incomplete. Do not merge, archive, or treat artifact approval as authorization for Host-side mutations.
 
-## Latest bounded work: authorized WIP VM deployment attempt (goal round 9)
+## Latest bounded work: actual official Skill caller contract (goal round 10)
+
+Completed tasks5.28–5.30; progress **180/194**,14remaining. Test-plan scope-option scenario now green with actual caller evidence, not synthetic provider-only calls.
+
+New opt-in `tests/openspec-skill-caller.smoke.mjs` imports the existing official runtime via explicit `DSH_SKILL_RUNTIME_ANCHOR`, real Cordis SkillRegistry/createScope and current adapter compiled provider. It executes official tool.execute and both registered pre-step listeners with fixture agents/messages. Assertions prove exact model/gesture scope identity, respective caller cwd and AbortSignal, identical complete tool/gesture frames, independent agent notice reservation and undefined-agent zero checks/notices. Both missing-model-scope and missing-gesture-scope negative controls fail at their intended scope assertions before GREEN. Initial missing fixture dependency and nonexistent Context.dispose failures were harness errors, NOT counted as behavioral RED; fixed existing-dependency lookup and registration-owned cleanup.
+
+Pinned official caller0.1.5-rc.2 from VM's existing official CLI cache passes. Diagnostic against the actual Pet launcher graph unexpectedly found caller **0.1.5-rc.3** despite declared Host0.1.5-rc.2; strict default version assertion correctly failed. The caller JS files are byte-identical; a separate explicitly expected rc.3 diagnostic passes all behavioral assertions. Do NOT silently treat this drift as approved-pin acceptance; dependency graph must be inspected before next live deployment. No dependency install or mutation/weakening of production scope gates.
+
+Probe commands require existing anchor+current lib, default expected caller0.1.5-rc.2; optional DSH_SKILL_CALLER_EXPECTED_VERSION exists only to explicitly label diagnostic identity. VM probe used /tmp compiled adapter fixture symlinked to existing repository dependencies, never rebuilt live source or touched ~/.dsh. Zero real sessions/model requests. Existing main Host remained HTTP401-reachable, no restart/sync this round. These are real caller-module/registry integration proofs, NOT real session headers/cross-workspace GUI acceptance.
+
+Fresh validations: package **32files/115tests pass**, pretest/build/typecheck; repo **263total/261pass/0fail/2existing skips**, collected bash-40; artifact/strict/diff checks pass. Previous VM network/deployment failure and other real-runtime rows remain outstanding. No main merge/archive/cleanup. Goal stays active and final acceptance remains FAIL.
+
+## Earlier bounded work: authorized WIP VM deployment attempt (goal round 9)
 
 - Committed/pushed only the authorized task branch: repair commit `fc3b7abd706457a393cfd1985ea589810ee15508`, macOS fixture portability commit `9db970d301e601a243aac006f09ecdccbe5f8e09`. Approved proposal/design/delta hashes remain unchanged from artifact review round3. Local snapshot clean before this evidence update.
 - VM GitHub DNS/SSH fetch failed before any stop/sync. Incremental Git bundles carried the exact pushed commits over existing SSH; ordinary VM checkout fast-forwarded, no main branch merge or credentials workaround.
