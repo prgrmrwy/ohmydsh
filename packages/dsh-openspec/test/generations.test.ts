@@ -60,6 +60,29 @@ describe('immutable generations', () => {
     expect(await readFile(join(home, 'plugins/dsh-openspec/generations/gen-cli/bin/openspec.js'), 'utf8')).toContain('openspec 1.13.2')
     expect(await readFile(join(home, 'plugins/dsh-openspec/generations/gen-cli/package.json'), 'utf8')).toContain('1.13.2')
   })
+  it('materialization_accepts_real_shaped_cli_whose_entry_file_does_not_embed_the_version', async () => {
+    const { materializeGeneration } = await import('../src/generation-materializer.js')
+    const home = await root(); const source = await root(); const fs = await import('node:fs/promises')
+    await fs.mkdir(join(source, 'bin'), { recursive: true }); await fs.mkdir(join(source, 'dist/cli'), { recursive: true })
+    // Real official layout: a 4-line bin entry; the version lives in package.json and is read by dist/cli/index.js.
+    await writeFile(join(source, 'bin/openspec.js'), "#!/usr/bin/env node\nimport { runCli } from '../dist/cli/index.js';\nrunCli();\n")
+    await writeFile(join(source, 'dist/cli/index.js'), "import { createRequire } from 'node:module'\nconst require = createRequire(import.meta.url)\nexport function runCli() { console.log(require('../../package.json').version) }\n")
+    await writeFile(join(source, 'package.json'), JSON.stringify({ name: '@fission-ai/openspec', version: '1.13.2', type: 'module', bin: { openspec: './bin/openspec.js' } }))
+    const invocation = "env OPENSPEC_NO_UPDATE_CHECK=1 OPENSPEC_TELEMETRY=0 '/usr/bin/node' '/managed/bin/openspec.js'"
+    const generation = await materializeGeneration({ home, id: 'gen-real', sourceRoot: source, version: '1.13.2', skills: [{ name: 's', body: 'b' }], invocation })
+    expect(generation.id).toBe('gen-real')
+    expect((await loadGeneration(home)).id).toBe('gen-real')
+  })
+  it('materialization_rejects_a_cli_that_reports_a_different_version_and_exposes_no_generation', async () => {
+    const { materializeGeneration } = await import('../src/generation-materializer.js')
+    const home = await root(); const source = await root(); const fs = await import('node:fs/promises')
+    await fs.mkdir(join(source, 'bin'), { recursive: true })
+    await writeFile(join(source, 'bin/openspec.js'), "console.log('9.9.9')\n")
+    await writeFile(join(source, 'package.json'), JSON.stringify({ name: '@fission-ai/openspec', version: '1.13.2', type: 'module', bin: { openspec: './bin/openspec.js' } }))
+    const invocation = "env OPENSPEC_NO_UPDATE_CHECK=1 OPENSPEC_TELEMETRY=0 '/usr/bin/node' '/managed/bin/openspec.js'"
+    await expect(materializeGeneration({ home, id: 'gen-bad', sourceRoot: source, version: '1.13.2', skills: [], invocation })).rejects.toThrow(/^cli-smoke-failed$/)
+    await expect(loadGeneration(home)).rejects.toMatchObject({ code: 'generation-invalid' })
+  })
   it('materialized_cli_dependency_closure_is_executable_without_profile_node_modules', async () => {
     const { materializeGeneration } = await import('../src/generation-materializer.js')
     const { spawnSync } = await import('node:child_process')

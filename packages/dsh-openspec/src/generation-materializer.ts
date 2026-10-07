@@ -52,8 +52,9 @@ export async function materializeGeneration(input: { home: string; id: string; s
     }
     const binRelative = packageJson.bin?.openspec
     if (typeof binRelative !== 'string' || isAbsolute(binRelative) || binRelative.split(/[\\/]/).includes('..')) throw new Error('upstream-identity-mismatch')
-    const cli = await readFile(join(staged, binRelative), 'utf8')
-    if (!cli.includes(input.version)) throw new Error('cli-version-smoke-failed')
+    // The entry file need not embed the version (the official bin only imports dist/cli); the authoritative
+    // check is executing the materialized CLI with --version after activation-independent staging below.
+    await readFile(join(staged, binRelative), 'utf8')
     await copyDependencyClosure(source, join(staged, 'node_modules'))
     await writeFile(join(staged, 'package.json'), JSON.stringify({ name: '@fission-ai/openspec', version: input.version, type: 'module', bin: { openspec: binRelative }, dependencies: packageJson.dependencies }, null, 2) + '\n')
     await writeFile(join(staged, 'generation.json'), JSON.stringify({ id: input.id, version: input.version, skills: input.skills, invocation: input.invocation, sourceHashes: hashes, selectionFingerprint: input.selectionFingerprint, delivery: input.delivery }, null, 2) + '\n')
@@ -68,17 +69,13 @@ export async function materializeGeneration(input: { home: string; id: string; s
       }
       throw new Error('generation-identity-collision')
     } catch (error: any) { if (error?.code !== 'ENOENT') throw error }
+    // Smoke the staged CLI before it is renamed into place or activated, so a CLI that cannot run or reports a
+    // different version never becomes visible (a failure removes the staging directory in the outer catch).
+    const smoke = await import('node:child_process').then(({ spawnSync }) => spawnSync(process.execPath, [join(staged, binRelative), '--version'], { encoding: 'utf8', timeout: 10_000, env: { PATH: process.env.PATH, HOME: input.home, OPENSPEC_NO_UPDATE_CHECK: '1', OPENSPEC_TELEMETRY: '0' } }))
+    if (smoke.status !== 0 || !`${smoke.stdout}${smoke.stderr}`.includes(input.version)) throw new Error('cli-smoke-failed')
     await rename(staged, destination)
     const invocation = input.invocation.endsWith(`/bin/${binRelative.split('/').at(-1)}`) ? input.invocation : input.invocation.replaceAll('/openspec.js', `/bin/${binRelative.split('/').at(-1)}`)
     const generation = await activateGeneration(input.home, input.id, { version: input.version, skills: input.skills, invocation, cli: join(destination, binRelative), sourceHashes: hashes })
-    try {
-      const result = await import('node:child_process').then(({ spawnSync }) => spawnSync(process.execPath, [join(destination, binRelative), '--version'], { encoding: 'utf8', timeout: 10_000, env: { PATH: process.env.PATH, HOME: input.home, OPENSPEC_NO_UPDATE_CHECK: '1', OPENSPEC_TELEMETRY: '0' } }))
-      if (result.status !== 0 || !`${result.stdout}${result.stderr}`.includes(input.version)) throw new Error('cli-smoke-failed')
-    } catch (error) {
-      const prior = await loadGeneration(input.home).catch(() => undefined)
-      if (prior?.id === input.id) throw new Error('cli-smoke-failed-generation-exposed')
-      throw error
-    }
     return { ...generation, files: [binRelative, 'dist', 'schemas', 'node_modules', 'package.json'], hashes }
   } catch (error) {
     await rm(staged, { recursive: true, force: true })
