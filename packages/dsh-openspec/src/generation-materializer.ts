@@ -29,6 +29,12 @@ async function copyDependencyClosure(packageRoot: string, destinationModules: st
   }
 }
 
+/** True only when the invocation's final shell argument is exactly the generation's CLI path (POSIX single-quoted). */
+function invocationNamesCli(invocation: string, cliPath: string): boolean {
+  const quoted = `'${cliPath.replaceAll("'", "'\\''")}'`
+  return invocation.endsWith(` ${quoted}`)
+}
+
 export async function materializeGeneration(input: { home: string; id: string; sourceRoot: string; version: string; skills: unknown[]; invocation: string; selectionFingerprint?: string; delivery?: string }) {
   const source = resolve(input.sourceRoot)
   const root = join(input.home, 'plugins', 'dsh-openspec')
@@ -69,12 +75,15 @@ export async function materializeGeneration(input: { home: string; id: string; s
       }
       throw new Error('generation-identity-collision')
     } catch (error: any) { if (error?.code !== 'ENOENT') throw error }
+    // The recorded invocation must name exactly the CLI this generation will serve; checked before anything is exposed.
+    if (!invocationNamesCli(input.invocation, join(destination, binRelative))) throw new Error('invocation-path-mismatch')
     // Smoke the staged CLI before it is renamed into place or activated, so a CLI that cannot run or reports a
     // different version never becomes visible (a failure removes the staging directory in the outer catch).
     const smoke = await import('node:child_process').then(({ spawnSync }) => spawnSync(process.execPath, [join(staged, binRelative), '--version'], { encoding: 'utf8', timeout: 10_000, env: { PATH: process.env.PATH, HOME: input.home, OPENSPEC_NO_UPDATE_CHECK: '1', OPENSPEC_TELEMETRY: '0' } }))
     if (smoke.status !== 0 || !`${smoke.stdout}${smoke.stderr}`.includes(input.version)) throw new Error('cli-smoke-failed')
     await rename(staged, destination)
-    const invocation = input.invocation.endsWith(`/bin/${binRelative.split('/').at(-1)}`) ? input.invocation : input.invocation.replaceAll('/openspec.js', `/bin/${binRelative.split('/').at(-1)}`)
+    // The recorded invocation is never rewritten: the block must name exactly the CLI that was smoked here.
+    const invocation = input.invocation
     const generation = await activateGeneration(input.home, input.id, { version: input.version, skills: input.skills, invocation, cli: join(destination, binRelative), sourceHashes: hashes })
     return { ...generation, files: [binRelative, 'dist', 'schemas', 'node_modules', 'package.json'], hashes }
   } catch (error) {
