@@ -2377,7 +2377,12 @@ export function LocusSurface(props: {
           case announces through the shell instead, so the dispatched/queued
           distinction survives this panel closing (design D11). */}
       {todos.notice === undefined ? null : (
-        <p className="dshpet-callout" data-tone="ok">{todos.notice}</p>
+        <p
+          className="dshpet-callout"
+          data-tone={todos.notice.startsWith('受理失败') || todos.notice.startsWith('处置失败') ? 'warn' : 'ok'}
+        >
+          {todos.notice}
+        </p>
       )}
 
       {props.notice === undefined ? null : <p className="dshpet-callout" data-tone="ok">{props.notice}</p>}
@@ -2456,7 +2461,9 @@ function useTodoLedger(seed?: readonly PetTodoLedgerGroup[]): {
           if (plan.closeSettings) closeSettings?.()
         }
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : String(cause))
+        // A rejected disposition is not a failure to READ the ledger: keep it
+        // off the "读取待办失败" line, which describes the list fetch.
+        setNotice(`处置失败：${cause instanceof Error ? cause.message : String(cause)}`)
       } finally {
         setBusyId(undefined)
       }
