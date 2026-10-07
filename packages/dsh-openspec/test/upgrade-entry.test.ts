@@ -112,6 +112,25 @@ describe('openspec-upgrade public entry', () => {
     expect(mutation).not.toHaveBeenCalled()
   })
 
+  it('changed_adapter_authored_guidance_gets_a_new_generation_identity_instead_of_an_identity_collision', async () => {
+    // Reproduces the real deployment failure. The previous release stored its guidance under the identity that
+    // an identity-blind derivation would also compute for the new release; the materializer refuses that reuse.
+    // We rebuild that state: take today's generation, and give it the OLD guidance under the SAME identity
+    // the previous derivation (no guidance in the hash) assigns.
+    const home = await mkdtemp(join(tmpdir(), 'dsh-openspec-guidance-')); homes.push(home)
+    const selected = await resolveEffectiveSelection({ configPath: join(home, 'absent-official-config.json') })
+    const entries = await getOfficialCatalog({ workflowIds: selected.workflows, delivery: selected.delivery })
+    const legacyId = createHash('sha256').update(`1.13.2:${selected.fingerprint}:${entries.map(entry => entry.workflowId).join(',')}:openspec-upgrade-v5`).digest('hex').slice(0, 24)
+    await activateGeneration(home, legacyId, { version: '1.13.2', skills: [{ name: 'openspec-upgrade', body: 'older guidance' }], invocation, selectionFingerprint: selected.fingerprint, delivery: selected.delivery })
+    const manifestPath = join(home, 'plugins/dsh-openspec/generations', legacyId, 'generation.json')
+    const before = await readFile(manifestPath, 'utf8')
+    await startAdapter(home)   // identity-blind derivation would throw generation-identity-collision here
+    const current = await loadGeneration(home)
+    expect(current.id).not.toBe(legacyId)
+    expect((current.skills as any[]).find(skill => skill.name === 'openspec-upgrade').body).toBe(createManagementGuidance())
+    // The older generation is retained byte-for-byte, never rewritten.
+    expect(await readFile(manifestPath, 'utf8')).toBe(before)
+  })
   it('restart_materializes_a_new_identity_without_overwriting_the_old_named_generation', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-openspec-rename-')); homes.push(home)
     const selected = await resolveEffectiveSelection({ configPath: join(home, 'absent-official-config.json') })

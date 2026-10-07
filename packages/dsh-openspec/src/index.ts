@@ -18,6 +18,16 @@ import { managedInvocation } from './managed-invocation.js'
 import { createManagementGuidance } from './manage-flow.js'
 const manageSkill = { name: 'openspec-upgrade', description: 'Upgrade the managed official OpenSpec stack (adapter-defined)', body: createManagementGuidance() }
 const approvedRoutingProviders: string[] = []
+
+/**
+ * Immutable generation identity. Besides the pinned release, selection and workflow ids it covers the
+ * adapter-authored Skill body: that text is stored inside the generation, and the materializer refuses to
+ * reuse an identity whose stored content differs. Hashing it here makes any wording change a new generation
+ * (old ones are retained untouched) instead of an `generation-identity-collision` that stops the Host.
+ */
+function generationIdentity(version: string, fingerprint: string, workflowIds: string[]): string {
+  return createHash('sha256').update(`${version}:${fingerprint}:${workflowIds.join(',')}:openspec-upgrade-v5:${createHash('sha256').update(manageSkill.body).digest('hex')}`).digest('hex').slice(0, 24)
+}
 import { createRegistryProvider } from './registry-provider.js'
 import { prepareSessionManagement } from './session-management.js'
 import { recoverGeneration } from './generations.js'
@@ -54,7 +64,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     const entries = await getOfficialCatalog({ workflowIds: selected.workflows, delivery: selected.delivery })
     const chosen = entries
     const generationSkillsData = [...chosen.map(entry => ({ name: entry.skillName, description: `Official OpenSpec ${entry.workflowId} workflow`, body: entry.body })), manageSkill]
-    const generationId = config.generationId ?? createHash('sha256').update(`${version}:${selected.fingerprint}:${chosen.map(entry => entry.workflowId).join(',')}:openspec-upgrade-v5`).digest('hex').slice(0, 24)
+    const generationId = config.generationId ?? generationIdentity(version, selected.fingerprint, chosen.map(entry => entry.workflowId))
     const invocation = managedInvocation({ node: process.execPath, cli: join(dshHome, 'plugins', 'dsh-openspec', 'generations', generationId, 'bin', 'openspec.js'), telemetry: settings.telemetry })
     const recoveryPending = async () => (await recoverGeneration(dshHome).catch(() => ({ state: 'recovery-required' as const }))).state === 'recovery-required'
     if (config.initialDeployment !== false && !await recoveryPending()) {
@@ -96,7 +106,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         const nextSelection = await resolveEffectiveSelection({ configPath: config.officialConfigPath, workflows: config.selectedWorkflows })
         if (disposed || nextSelection.fingerprint === fingerprint) return
         const nextEntries = await getOfficialCatalog({ workflowIds: nextSelection.workflows, delivery: nextSelection.delivery })
-        const nextId = createHash('sha256').update(`${version}:${nextSelection.fingerprint}:${nextEntries.map(entry => entry.workflowId).join(',')}:openspec-upgrade-v5`).digest('hex').slice(0, 24)
+        const nextId = generationIdentity(version, nextSelection.fingerprint, nextEntries.map(entry => entry.workflowId))
         const nextInvocation = managedInvocation({ node: process.execPath, cli: join(dshHome, 'plugins', 'dsh-openspec', 'generations', nextId, 'bin', 'openspec.js'), telemetry: settings.telemetry })
         if (disposed) return
         await materializeGeneration({ home: dshHome, id: nextId, sourceRoot: openspecRoot, version, skills: [...nextEntries.map(entry => ({ name: entry.skillName, description: `Official OpenSpec ${entry.workflowId} workflow`, body: entry.body })), manageSkill], invocation: nextInvocation, selectionFingerprint: nextSelection.fingerprint, delivery: nextSelection.delivery, canActivate: () => !disposed })
