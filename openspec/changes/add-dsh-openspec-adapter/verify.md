@@ -4,7 +4,15 @@ DECISION: FAIL
 
 Interim implementation report, not final acceptance. The public naming amendment is complete locally; the overall change remains incomplete. Do not merge, archive, or treat artifact approval as authorization for Host-side mutations.
 
-## Latest bounded work: expired update-lock ownership (goal round 15)
+## Latest bounded work: genuine fixture transaction process death (goal round 16)
+
+Added process-crash.test.ts, actual Node child executing current built createUpgradeTransaction in temporary checkout/home. It reaches runSync after both source CAS writes then is SIGKILLed (test child ONLY, no DSH process). Actual source/profile locks and prepared journal survive; source1.13.3 but healthy active1.13.2 reference remains byte-identical. New transaction blocks ordinary upgrade before stage; recovery remains blocked by retained lock. After verifying exact dead child pid+recorded fixture checkout/stateDir, test explicitly removes only its abandoned locks, then authorized recoverRollback executes in another fresh process. It safely restores1.13.2, or preserves user's post-crash edit + journal with source-edited-after-cas. Both cases remain active-byte-identical.
+
+The tests were GREEN immediately against current implementation; no RED or production repair claimed. README clarifies operator order (retain journal/source, prove owner dead and coordinate, remove exact abandoned locks, authorized rollback; never discard journal). This closes a Linux real process-death/operator-sequence evidence gap, NOT power-loss/fsync durability, partial-rename genuine death, cross-platform or VM Host main acceptance. No automatic stale source-lock deletion added.
+
+Fresh full package **33files/128tests pass**, pretest/build/typecheck/artifact/strict/diff checks pass; repo **263total/261pass/0fail/2existing skips**, collected bash-51. No VM/network/model/install operations. Progress180/194 unchanged; genuine runtime rows require restored DNS and explicit real-session/disable method. Goal active, final FAIL.
+
+## Earlier bounded work: expired update-lock ownership (goal round 15)
 
 The old stale-lock test exercised only future cache, not a lock. New aged-crashed-holder fixture reproduces RED: successor enters fetch after deleting expired update.lock without exclusive reacquisition. GREEN uses a reclamation claim keyed to observed device/inode/mtime, rechecks that exact identity, then reacquires wx lock before fetch. Held-owner/second-checker test proves contender issues zero requests. Separate replacement-inode fixture asserts finishing prior holder cannot unlink replacement lock; cleanup checks owned identity.
 

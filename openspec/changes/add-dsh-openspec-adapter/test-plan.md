@@ -117,6 +117,10 @@ Actual apply with historical active1.13.1 then official1.13.2 materialization ex
 
 `update-check.test.ts` now actually creates/ages a crashed-holder lock. RED successor fetch entered without any update.lock; GREEN exact observed inode reclamation claim, recheck, unlink then exclusive reacquisition before fetch. Contender does not fetch while owner held. Replacement-lock fixture confirms finishing prior holder does not unlink a different inode. This closes the old test's misleading stale-lock title (previously only future cache tested). Full package32files/126tests pass; fixtures, not multi-process adversarial scheduling or real killed-holder acceptance.
 
+## Genuine fixture process death (goal round 16)
+
+New `P/process-crash.test.ts` spawns actual built transaction in temporary checkout/home, pauses at runSync after both source atomic renames, then SIGKILLs only that test child. Journal/source/pid-bearing source lock/profile lock actually survive; old active bytes remain. Fresh transaction refuses ordinary upgrade and locked recovery. Test proves child pid gone and matching checkout/stateDir, explicitly removes only fixture abandoned locks, then runs authorized recoverRollback in a separate process. Safe case restores old pin; user-edited case retains exact source/journal and reports drift. This test was immediately green, so it is additional acceptance-strength evidence, not fabricated RED/new-production implementation. Full33files/128tests; actual Linux death but no power-loss/fsync/partial-rename death/VM main proof. README operator sequencing clarified.
+
 ## Coverage Notes
 
 - All 59 rows are executable; none is `N/A — non-executable`. Count check: 26 session + 19 updates + 14 routing scenarios = 59.
