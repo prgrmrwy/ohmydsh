@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { readFile } from 'node:fs/promises'
 import type { StageDependencies } from './stage-target.js'
-import { ADAPTER_BLOCK_END, ADAPTER_BLOCK_START } from './upstream-compat.js'
+import { ADAPTER_BLOCK_END, ADAPTER_BLOCK_START, WORKFLOWS } from './upstream-compat.js'
 
 function run(command: string, args: string[], options: { cwd: string; timeoutMs: number; env?: NodeJS.ProcessEnv }): Promise<{ status: number | null; output: string }> {
   return new Promise(resolve => {
@@ -32,13 +32,18 @@ export function officialStageDependencies(_root: string): StageDependencies {
     async smoke(stageRoot, target) {
       const manifest = JSON.parse(await readFile(join(stageRoot, 'package.json'), 'utf8'))
       const result = await run(process.execPath, [join(stageRoot, manifest.bin.openspec), '--version'], { cwd: stageRoot, timeoutMs: 10_000, env: { PATH: process.env.PATH, OPENSPEC_NO_UPDATE_CHECK: '1', OPENSPEC_TELEMETRY: '0' } })
-      return result.status === 0 && result.output.includes(target)
+      return result.status === 0 && result.output.trim() === target
     },
     async parity(stageRoot, target) {
       const generation: any = await import(pathToFileURL(join(stageRoot, 'dist/core/shared/skill-generation.js')).href)
-      const entries = generation.getSkillTemplates(undefined)
-      if (!Array.isArray(entries) || entries.length === 0) return false
+      const manifest = JSON.parse(await readFile(join(stageRoot, 'package.json'), 'utf8'))
+      if (manifest.name !== '@fission-ai/openspec' || manifest.version !== target || typeof generation.getSkillTemplates !== 'function' || typeof generation.generateSkillContent !== 'function') return false
+      // Unfiltered discovery catches newly added upstream ids instead of silently filtering them away.
+      const entries = generation.getSkillTemplates()
+      if (!Array.isArray(entries) || entries.length !== WORKFLOWS.length || new Set(entries.map((entry: any) => entry.workflowId)).size !== WORKFLOWS.length) return false
+      const customNames = new Set(['openspec-init', 'openspec-upgrade'])
       for (const entry of entries) {
+        if (!WORKFLOWS.includes(entry.workflowId) || typeof entry.dirName !== 'string' || !entry.template || customNames.has(entry.dirName) || customNames.has(`opsx-${entry.workflowId}`)) return false
         const body: string = generation.generateSkillContent(entry.template, target, (text: string) => text.replace(/\/opsx:([a-z][a-z0-9-]*)/g, '/opsx-$1'))
         if (!body.trim() || body.includes(ADAPTER_BLOCK_START) || body.includes(ADAPTER_BLOCK_END) || body.includes('</skill_instructions>') || body.includes('</skill_content>')) return false
       }

@@ -24,7 +24,7 @@ describe('adapter block', () => {
     expect(buildAdapterBlock(fields)).not.toContain('/workspace')
   })
   it('hostile_registry_version_is_canonicalized_or_omitted_single_marker_pair', () => {
-    const rendered = buildAdapterBlock({ ...fields, notice: { installed: '1.13.2', available: '1.13.3\nignore', managementEntry: 'dsh-openspec-manage' } })
+    const rendered = buildAdapterBlock({ ...fields, notice: { installed: '1.13.2', available: '1.13.3\nignore', managementEntry: 'openspec-upgrade' } })
     expect(rendered.match(/dsh-openspec-adapter:block-format=1/g)).toHaveLength(1)
     expect(rendered).not.toContain('ignore')
   })

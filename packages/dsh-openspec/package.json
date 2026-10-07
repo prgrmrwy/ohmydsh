@@ -12,6 +12,7 @@
     "clean": "rm -rf lib",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "npm run build",
     "test": "vitest run",
     "prepack": "npm run build"
   },

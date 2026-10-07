@@ -11,7 +11,7 @@ export function createGenerationBackedProvider(options: { home: string; telemetr
     async list() {
       const generation = await loadGeneration(options.home)
       if (lastGeneration !== generation.id) { lastGeneration = generation.id; options.onGeneration?.(generation.id) }
-      return (Array.isArray(generation.skills) ? generation.skills : []).map((skill: any) => ({ name: skill.name, description: skill.description ?? `Official OpenSpec workflow ${skill.name}` }))
+      return (Array.isArray(generation.skills) ? generation.skills : []).filter((skill: any) => generation.delivery !== 'commands' || skill.name === 'openspec-upgrade').map((skill: any) => ({ name: skill.name, description: skill.description ?? `Official OpenSpec workflow ${skill.name}` }))
     },
     async get(candidate: { name?: string }, lookup: { cwd?: string; scope?: object } = {}) {
       const scope = lookup.scope

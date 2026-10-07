@@ -29,7 +29,7 @@
 - 静态 vendor 12 篇 Markdown：会陈旧。
 - 把所有 CLI native tools 暴露到会话：违背范围。
 - 直接从六个模板文件加载：不足以覆盖官方表面和 optional workflow 条件。
-- **sync 时用官方 renderer 渲染进 user-dsh / filesystem-provider 目录（最便宜的方案）**：它能解决跨 workspace 发现与版本一致，因此初版应尽量复用官方 `dsh-skill-filesystem` provider 读取受管 generation 目录，而不是自写 provider。但它单独无法满足以下已确认需求，因此仍需一个薄 Host 层：① “消费时检查更新”必须知道真实的 get/load 或 slash 调用，静态目录没有这个事件；② 受管调用串需要随所选 generation 交付；Skill 加载只返回 `content`，所以只能作为正文之后的分隔块追加，正文本身保持官方一致（块的规范格式见 D2）；③ `/openspec-init`、`/dsh-openspec-manage` 与官方 workflow slash 需要命令注册；④ routing 注册表与 dispatcher 需要一个进程内服务（本 change 不发布任何会话工具）。Host 层职责仅限这四项。探测 0.3 已证明官方 filesystem provider 没有加载钩子，故需自写薄 provider（目录发现复用其导出类）。
+- **sync 时用官方 renderer 渲染进 user-dsh / filesystem-provider 目录（最便宜的方案）**：它能解决跨 workspace 发现与版本一致，因此初版应尽量复用官方 `dsh-skill-filesystem` provider 读取受管 generation 目录，而不是自写 provider。但它单独无法满足以下已确认需求，因此仍需一个薄 Host 层：① “消费时检查更新”必须知道真实的 get/load 或 slash 调用，静态目录没有这个事件；② 受管调用串需要随所选 generation 交付；Skill 加载只返回 `content`，所以只能作为正文之后的分隔块追加，正文本身保持官方一致（块的规范格式见 D2）；③ `/openspec-init`、`/openspec-upgrade` 与官方 workflow slash 需要命令注册；④ routing 注册表与 dispatcher 需要一个进程内服务（本 change 不发布任何会话工具）。Host 层职责仅限这四项。探测 0.3 已证明官方 filesystem provider 没有加载钩子，故需自写薄 provider（目录发现复用其导出类）。
 - **fork 社区 0.1.0 源码**：会与 `repo-layout`“第三方不 vendor、local 表示自研”冲突；其 slash 注册与消息构造在新设计中几乎全部被替换，保留价值低。决定：NOTICE 中致谢 prior art（包名、版本、gitHead、MIT），不复制源码。
 
 ### D2. 独立不可变 generation，通过普通 Bash 使用 CLI
@@ -46,7 +46,7 @@
 
 **正文的唯一判据（审查 M3）**：`renderOfficialBody(selection)` = 官方 renderer 输出的 `instructions`，外加**唯一一个**文档化的 DSH 转换：官方 `/opsx:<name>` 引用改写为同一 workflow 的 DSH 合法名（DSH 命令名须匹配 `^[a-z][a-z0-9_-]*$`，`:` 不可表示；官方 renderer 的 `transformInstructions` 钩子即为此留）。加载器会去掉 frontmatter 并 trim，所以加载结果永远不等于 `generateSkillContent` 的完整输出，可比对的是 instructions 部分。Skill 与 command 共用该函数。
 
-**命令载体（审查 M8）**：为每个有效官方 workflow 注册 `opsx-<workflow>`（`<workflow>` 为官方 workflow 名），另有 `openspec-init`、`dsh-openspec-manage`。DSH 对已注册命令只运行 handler，**不会**把参数原文发给模型，所以官方 workflow 命令的 handler 提交**两条**消息：① 一条来源标记为本适配器的消息，文本 = `renderOfficialBody` + 适配器块，**不含原始参数字符串**；② 一条用户来源的消息，内容恰为原始参数字符串，使用户自己的请求原样到达模型，且绝不进入适配器来源的消息（trust 边界：适配器消息只含适配器自己构造的文本）。`openspec-init` 与 `dsh-openspec-manage` 没有官方正文，其适配器消息文本是适配器自写的固定指令 + 适配器块，只带已校验的值。`recordInput` 对官方 workflow 命令实际上不起隔离作用（参数会作为用户消息持久化），仅对不需要审计参数的自定义命令设为 `false`。手势 `/<skill-name>` 若命中 Skill 则走 Skill 路径，块字节一致。
+**命令载体（审查 M8）**：为每个有效官方 workflow 注册 `opsx-<workflow>`（`<workflow>` 为官方 workflow 名），另有 `openspec-init`、`openspec-upgrade`。DSH 对已注册命令只运行 handler，**不会**把参数原文发给模型，所以官方 workflow 命令的 handler 提交**两条**消息：① 一条来源标记为本适配器的消息，文本 = `renderOfficialBody` + 适配器块，**不含原始参数字符串**；② 一条用户来源的消息，内容恰为原始参数字符串，使用户自己的请求原样到达模型，且绝不进入适配器来源的消息（trust 边界：适配器消息只含适配器自己构造的文本）。`openspec-init` 与 `openspec-upgrade` 没有官方正文，其适配器消息文本是适配器自写的固定指令 + 适配器块，只带已校验的值。`recordInput` 对官方 workflow 命令实际上不起隔离作用（参数会作为用户消息持久化），仅对不需要审计参数的自定义命令设为 `false`。手势 `/<skill-name>` 若命中 Skill 则走 Skill 路径，块字节一致。
 
 **受管调用的边界与诊断**：它仍走普通 Bash 文件/权限通道，不新增通用 CLI 工具，不改 Host/global PATH，也不承诺裸 `openspec` 被重定向。版本一致只对该受管调用串成立；Agent 若运行裸 `openspec`，执行的是 PATH 上的版本，管理检查报告 `path-version`/`managed-version`/`mismatch`。项目覆盖 Skill 不注入为官方 bundled consumer；诊断如实报告胜出的 `source` 与 `provider`（registry 的 `SkillSummary` 没有版本字段，故不报版本）。有效 profile/delivery 在每次 get/load 时重新读取官方全局配置。
 
@@ -58,9 +58,9 @@
 
 `/openspec-init` 将固定、明确标识的指引和校验后参数交给当前 Agent，经 session Bash 执行 managed CLI。缺省 `--tools none --no-copilot-cloud --no-animation`；只在 caller cwd 初始化，不猜测其它路径/store，不静默使用 force。tools/profile 只接受所 pin 版本官方取值；`--language` 在官方是自由文本，adapter 以 `^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$` 校验。**adapter 代码生成完整 shell-quoted 命令串**，模型只运行它，不拼接原始 slash 参数；含 shell 元字符或未知值时返回类型化校验错误且不提供命令。已有项目按官方 init 的保守语义；force 和 cloud 选项需单独明确确认。探测 0.7 已确认：`--profile` 本身只读，但 extend 模式的 `migrateIfNeeded` 在“全局配置无 `profile` 字段且项目已有官方 workflow 产物”时会写全局配置；因此工作区已含 `openspec` 目录时，`/openspec-init` 的结果文本必须警告该可能（已写入 session spec 要求与场景）。
 
-自定义入口名：`/openspec-init`（按用户要求保留该名；官方 1.13.2 无同名 workflow）与 `dsh-openspec-manage`（Skill 与 `/dsh-openspec-manage`，用 `dsh-` 前缀避开官方 `openspec-*` 命名空间）。准备阶段若官方产出的 Skill/command 名与任一自定义名冲突则 fail closed。
+自定义入口名：`/openspec-init`（按用户要求保留该名；官方 1.13.2 无同名 workflow）与 `openspec-upgrade`（Skill 与 `/openspec-upgrade`）。用户在实施期选择用 `openspec-upgrade` 替换原管理入口名，以直观表达“升级适配器受管的官方 OpenSpec 栈”；描述和帮助须明确这是适配器自定义入口，不是官方工作流。本次只改公开名称，不新增权限：保留只读检查、精确版本升级/回滚及单独授权的项目刷新，项目刷新不是软件升级的副作用。不注册旧名别名；旧 generation 保守保留，新的命名使用新的 generation identity，不能覆盖旧正文。官方 1.13.2 无同名 Skill/command；未来准备阶段若官方产出的 Skill/command 名与任一自定义名冲突则 fail closed。D3 的 session Bash 执行边界不因改名而改变。
 
-`dsh-openspec-manage` Skill 与 `/dsh-openspec-manage` 提供 check/upgrade/rollback/project-refresh 的独立指引。source mutation仍由 session受控 Bash运行受管 updater，不在 Host命令handler里直接执行npm或写源码。调用或加载帮助不等于升级批准。调用的session政策不能写source时返回 blocked，不能改用部署目录凑成功。
+`openspec-upgrade` Skill 与 `/openspec-upgrade` 提供 check/upgrade/rollback/project-refresh 的独立指引。source mutation仍由 session受控 Bash运行受管 updater，不在 Host命令handler里直接执行npm或写源码。调用或加载帮助不等于升级批准。调用的session政策不能写source时返回 blocked，不能改用部署目录凑成功。
 
 ### D4. 消费检查与提示是有界只读附加行为
 

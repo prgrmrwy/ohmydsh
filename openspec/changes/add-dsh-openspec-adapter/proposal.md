@@ -6,7 +6,7 @@
 
 - 新写本地 `packages/dsh-openspec` bundle；`@codigoconelmer/dsh-openspec@0.1.0` 仅作为 NOTICE 中致谢的 prior art，不复制其源码（它只有六条 slash 且无 Skill provider，保留价值低，且避免与仓库“第三方不 vendor”原则冲突）。不在本 change 创建远端 fork 或发布 npm。
 - 从独立受管、精确 pin 的官方 OpenSpec 版本生成 Skills 与 slash commands，覆盖官方支持的完整会话工作流集合并遵循其 profile/delivery 配置；CLI-only 功能保持官方 Bash/终端用法。
-- 增加明确标记为自定义的 `/openspec-init` 与 `dsh-openspec-manage`（Skill + slash）。每次消费在未改动的官方正文之后追加一个格式受规范约束的适配器块，其中的受管 CLI 调用串使模板与该调用同版本；不修改系统全局 CLI，也不宣称重定向裸 `openspec` 命令，版本不一致由管理检查报告。
+- 增加明确标记为自定义的 `/openspec-init` 与 `openspec-upgrade`（Skill + slash）。每次消费在未改动的官方正文之后追加一个格式受规范约束的适配器块，其中的受管 CLI 调用串使模板与该调用同版本；不修改系统全局 CLI，也不宣称重定向裸 `openspec` 命令，版本不一致由管理检查报告。
 - 使用 Skill 或 slash 时按需检查官方稳定更新（插件选项 `updateCheck` 读 DSH settings 服务命名空间 `dsh-openspec`，默认开启）；成功结果共享缓存 24h，失败退避 15min，只作为下一次消费结果里的附加提示、不安装、不开新轮次。显式升级/回滚是同一种 source-owned 事务：写回包 pin 与根 lockfile、验证后激活，带中断恢复 journal；区分软件升级、项目 `openspec update`、`opsx-update` change 修订。
 - 暴露实验性 routing-provider **契约**（contract-only：无生产调用方，不向任何会话发布 `openspec_route` 或指导），支持 `change-necessity`、`workflow-selection` 两阶段，经唯一的进程内入口调用；无 provider 时维持官方行为。会话工具发布推迟到拿到真实 Pet executor/Locus child 样本之后的单独 change。
 - 用本地测试 router 验证接线。现有 Jev MCP、shadow Skill、recorder、Anvil/schema 与 spec-superflow 保持不变；真实 Jev adapter 在后续 change 实现。

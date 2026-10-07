@@ -1,6 +1,6 @@
 ## Test Plan
 
-Precheck: `review.md` carries the round-2 verdict `APPROVE_WITH_CHANGES` with `CHANGES_APPLIED: yes`, set only after three reviewer re-checks accepted all 16 Required Changes (round 1 is void: the reviewed artifacts changed afterwards). Any later edit to proposal, design or specs beyond applying listed Required Changes voids this verdict and requires a new round.
+Precheck: fresh-context round-3 `review.md` carries `VERDICT: APPROVE`, `CHANGES_APPLIED: n/a` for the user-authorized `openspec-upgrade` naming amendment. Round 2 was approved with all Required Changes accepted, but is superseded. Artifact approval is not implementation acceptance: review I1 identifies Host-side management mutations as a blocker. Any later proposal/design/spec edit voids the verdict and requires a new round.
 
 Paths: `P = packages/dsh-openspec/test` (vitest, package-local, same convention as `packages/dsh-memex`); `R = tests` (repo `node --test`, same convention as existing `sync-*.test.mjs`); `L = packages/dsh-openspec/test/live` (target-runtime smoke against an isolated `DSH_HOME` profile on DSH 0.1.5-rc.2, asserting real `request/header` tools and session logs — never the running production GUI).
 
@@ -65,6 +65,37 @@ Paths: `P = packages/dsh-openspec/test` (vitest, package-local, same convention 
 | specs/dsh-openspec-routing-extension/spec.md → The dispatcher is reachable through one in-process entry and is not published to sessions in this change | No provider adds no conversation machinery | L/routing-invocation.smoke.mjs | no_provider_header_equals_baseline_exactly | 🔴 red |
 | specs/dsh-openspec-routing-extension/spec.md → Routing failures cancellation and stale results are contained | Bounded uncertain response is preserved | P/routing-failure.test.ts | needs_review_passes_through_without_substitution | 🟢 green |
 | specs/dsh-openspec-routing-extension/spec.md → Routing failures cancellation and stale results are contained | Late failing or cancelled provider cannot mutate the route | P/routing-failure.test.ts | timeout_cancel_throw_unload_normalize_and_persist_no_text | 🟢 green |
+
+## Naming amendment regression (round 3)
+
+The 59 scenario rows above retain their prior state; those green flags do not certify the Host mutation boundary (review I1). Additional `P/upgrade-entry.test.ts` regressions were run RED before source edits and GREEN afterward:
+
+- `publishes_only_the_custom_upgrade_name_as_skill_and_command`: new Skill/slash, adapter-defined description/help, no old alias.
+- `notices_point_only_to_the_new_entry_and_reject_arbitrary_destinations`: canonical notice destination and rejection of legacy/arbitrary/injection-shaped destinations.
+- `renamed_help_is_read_only_and_invalid_usage_names_the_new_entry`: empty help and invalid input invoke no mutation callbacks.
+- `restart_materializes_a_new_identity_without_overwriting_the_old_named_generation`: real official CLI materialization at a temporary home; new identity, prior manifest byte-identical. This drives the adapter startup callback with stubbed Host services, not the VM GUI.
+
+## D3 session execution repair (goal round 4)
+
+`P/session-management.test.ts`: approved slash emits only a session Bash plan (zero Host mutation callbacks), empty/unapproved/missing-cwd requests offer no action, existing Worktree Session Bash guard rejects authoritative-root execution. `P/session-updater.test.ts`: read-only quoted plan, approval/realpath/worktree gates before staging or writes, caller-cwd active-generation project refresh, telemetry-mode pass-through, real shell child fixture isolated to one workspace, real transaction with injected staging/sync and unchanged active id until reload. Raw failure string leakage regression was RED then normalized at the updater output boundary. These are local regressions, not real sandbox or VM acceptance.
+
+The prior `manage-command.test.ts` Host-controller assertions contradicted existing design D3; replaced them with no-Host-execution/prepared-Bash assertions, retaining independent transaction/controller tests. No requirement was removed or authorization widened. Built helper tests require current lib, so package `pretest` runs build.
+
+## Catalog and generation lifecycle repair (goal round 5)
+
+Added `P/catalog-lifecycle.test.ts` with actual adapter startup + official CLI, both registration-control cache simulation and real SkillRegistry; RED no invalidate/wrong delivery → GREEN catalog refresh, command replacement, cached candidate get refresh, return-to-original selection, failed refresh preservation/retry, single-flight and disposal. Dropped workflow's old command handle regression exposed unsafe body fallback and now returns error with no send. `P/generations.test.ts` RED metadata lost → GREEN exact selection/delivery reuse with unchanged bytes and no staging leak; RED cancellation ignored → GREEN no activation and own staging removed. `P/upstream-compat.test.ts` RED delivery omitted verify/onboard → GREEN all 12 shared workflows retained with surface-level delivery filtering. Monitor pending-stat/dispose and failed-refresh retry tested. Package 30 files/96 tests pass. These are stronger local proofs of earlier checked rows, not real VM acceptance.
+
+## Closure, staging and unload integrity (goal round 6)
+
+`P/generation-closure.test.ts` RED flattening EEXIST/accepted tampering/shared staging → GREEN internal dependency graph (nested versions, cycles, absent optional), CLI executes after source deletion, recursive runtime hashes, changed source/tampering refused without manifest overwrite, concurrent identical publication no staging leaks. Substring-version smoke RED `1.13.20` accepted → GREEN rejected. `P/stage-official.test.ts` RED noncore custom-name collision/package identity accepted → GREEN unfiltered 12-workflow catalog contract validation, real installed official 1.13.2 passes. `P/routing-failure.test.ts` RED whole-registry dispose missing → GREEN cancels in-flight requests and refuses later registration, hooked to adapter cleanup. Package 32 files/104 tests, repo 261 pass/0 fail/2 existing skips; build/typecheck/artifacts/strict checks pass. No real target registry install or VM acceptance implied.
+
+## Selected official body and recovery boundary repair (goal round 7)
+
+Independent pinned official renderer test exposed selected-body/all-catalog mismatch, now exact workflowIds propagate to renderer. Transaction tests RED lock ownership removed by contender / malformed journal reported absent / recovery worktree bypass and staging-time user edit overwritten / source-pin mismatch staged → GREEN owner-only cleanup, malformed journal refusal, serialized guarded recovery with post-await source+journal recheck, pin preflight and startup metadata preservation. Actual apply recovery test RED overwrote active.json → GREEN prior immutable Skill body with recovery field and unchanged active reference. Package 32 files/110 tests; repo 261 pass/0 fail/2 existing skips; build/typecheck/artifacts/strict pass. Does not prove real killed-process/VM or full lock closure recovery.
+
+## Source-wide exclusion and session recovery (goal round 8)
+
+Transaction RED cross-profile stage/commit allowed, chmod readonly file replaced → GREEN source-realpath temp lock plus profile lock, writable file/parent preflight before staging/journal. Session updater RED selected/source mismatch unnoticed and guarded recovery unreachable → GREEN mismatch preflight/pending-reload second-upgrade refusal and existing explicitly approved rollback of pending journal previousVersion routes to recoverRollback. Recovery closure RED retained new-only entry → GREEN journal entry identity/hash-based deletion preserving unrelated entries. Package 32 files/115 tests; repository 261 pass/0 fail/2 existing skips at earlier batch snapshot. Real process death/abandoned lock operator path and partial CAS windows remain unproven; no sandbox or VM acceptance claimed.
 
 ## Coverage Notes
 

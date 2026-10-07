@@ -7,7 +7,7 @@ import { createOpenSpecSkillProvider } from '../src/provider.js'
 
 const invocation = "env OPENSPEC_NO_UPDATE_CHECK=1 OPENSPEC_TELEMETRY=0 '/usr/bin/node' '/cli'"
 
-async function harness(check = async () => ({ installed: '1.13.2', available: '1.13.3', managementEntry: 'dsh-openspec-manage' })) {
+async function harness(check = async () => ({ installed: '1.13.2', available: '1.13.3', managementEntry: 'openspec-upgrade' })) {
   const ctx = new Context()
   await ctx.plugin(SkillRegistry)
   const adapter = createOpenSpecSkillProvider({ skills: [{ name: 'opsx-test', body: 'official body' }], generationId: 'g1', invocation, telemetry: 'adapter-off', updateCheck: 'enabled', check })
@@ -28,7 +28,7 @@ describe('real SkillRegistry integration', () => {
   })
   it('tool_gesture_and_command_consumers_each_spend_notice_and_listing_never_does', async () => {
     let checks = 0
-    const { ctx } = await harness(async () => { checks++; return { installed: '1.13.2', available: '1.13.3', managementEntry: 'dsh-openspec-manage' } })
+    const { ctx } = await harness(async () => { checks++; return { installed: '1.13.2', available: '1.13.3', managementEntry: 'openspec-upgrade' } })
     const scope = {}
     createScope(ctx, scope)
     await ctx.skills.list({ scope })

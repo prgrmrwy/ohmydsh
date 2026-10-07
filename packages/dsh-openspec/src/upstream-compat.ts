@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 
-export type OfficialSelection = { workflowId: string; all?: boolean; profile?: 'core' | 'custom' | string; delivery?: string }
+export type OfficialSelection = { workflowId: string; all?: boolean; workflowIds?: string[]; profile?: 'core' | 'custom' | string; delivery?: string }
 export type OfficialEntry = { workflowId: string; skillName: string; commandName: string; body: string }
 export const ADAPTER_BLOCK_START = '<!-- dsh-openspec-adapter:block-format=1 -->'
 export const ADAPTER_BLOCK_END = '<!-- /dsh-openspec-adapter -->'
@@ -16,7 +16,7 @@ export class UpstreamIncompatibleError extends Error {
   constructor(message: string) { super(message); this.name = 'UpstreamIncompatibleError' }
 }
 
-const WORKFLOWS = ['propose', 'explore', 'new', 'continue', 'apply', 'update', 'ff', 'sync', 'archive', 'bulk-archive', 'verify', 'onboard'] as const
+export const WORKFLOWS = ['propose', 'explore', 'new', 'continue', 'apply', 'update', 'ff', 'sync', 'archive', 'bulk-archive', 'verify', 'onboard'] as const
 const require = createRequire(import.meta.url)
 const packageEntryPath = require.resolve('@fission-ai/openspec')
 const packageRoot = dirname(dirname(packageEntryPath))
@@ -41,7 +41,7 @@ function transformDshReferences(body: string): string {
 export async function renderOfficialBody(selection: OfficialSelection): Promise<string> {
   if (!WORKFLOWS.includes(selection.workflowId as (typeof WORKFLOWS)[number])) throw new UpstreamIncompatibleError(`unmapped workflow ${selection.workflowId}`)
   const upstream = await api()
-  const entries = upstream.getSkillTemplates(selection.all ? [...WORKFLOWS] : undefined)
+  const entries = upstream.getSkillTemplates(selection.workflowIds ?? (selection.all ? [...WORKFLOWS] : undefined))
   const entry = entries.find((candidate: any) => candidate.workflowId === selection.workflowId)
   if (!entry) throw new UpstreamIncompatibleError(`workflow is not selected: ${selection.workflowId}`)
   const generated = upstream.generateSkillContent(entry.template, upstream.version, transformDshReferences)
@@ -69,7 +69,7 @@ export async function prepareCatalog(selection: { all?: boolean; activeGeneratio
   const requested = selection.workflowIds ?? (selection.all ? [...WORKFLOWS] : undefined)
   const entries = upstream.getSkillTemplates(requested)
   const delivery = selection.delivery ?? 'both'
-  const customNames = new Set(selection.customNames ?? ['openspec-init', 'dsh-openspec-manage'])
+  const customNames = new Set(selection.customNames ?? ['openspec-init', 'openspec-upgrade'])
   const result: OfficialEntry[] = []
   for (const entry of entries) {
     const workflowId = entry.workflowId
@@ -77,9 +77,7 @@ export async function prepareCatalog(selection: { all?: boolean; activeGeneratio
     const skillName = entry.dirName
     const commandName = `opsx-${workflowId}`
     if (customNames.has(skillName) || customNames.has(commandName)) throw new UpstreamIncompatibleError(`upstream surface collides with custom name ${skillName}/${commandName}`)
-    if (delivery === 'skills' && ['onboard', 'verify'].includes(workflowId)) continue
-    if (delivery === 'commands' && ['onboard', 'verify'].includes(workflowId)) continue
-    const body = await renderOfficialBody({ workflowId, all: selection.all, delivery })
+    const body = await renderOfficialBody({ workflowId, all: selection.all, workflowIds: requested, delivery })
     if (body.split(/\\r?\\n/).some((line) => line === ADAPTER_BLOCK_START || line === ADAPTER_BLOCK_END) || body.includes('</skill_instructions>') || body.includes('</skill_content>')) {
       throw new UpstreamIncompatibleError(`unsafe marker or loader frame in ${workflowId}`)
     }

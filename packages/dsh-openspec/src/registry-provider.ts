@@ -6,7 +6,7 @@ type GenerationProvider = {
 const POLICY = { modelInvocable: true, userInvocable: true } as const
 
 /** Adapts the generation-backed provider to the real SkillRegistry provider contract (full SkillDefinition results). */
-export function createRegistryProvider(generations: GenerationProvider, hooks: { beforeList?: () => Promise<void> } = {}) {
+export function createRegistryProvider(generations: GenerationProvider, hooks: { beforeList?: () => Promise<void>; beforeGet?: () => Promise<void> } = {}) {
   return {
     name: 'dsh-openspec',
     list: async (_options: unknown) => {
@@ -17,6 +17,8 @@ export function createRegistryProvider(generations: GenerationProvider, hooks: {
       }))
     },
     get: async (candidate: { name: string; description: string }, options: { cwd?: string; scope?: object }) => {
+      await hooks.beforeGet?.()
+      if (!(await generations.list()).some(skill => skill.name === candidate.name)) return undefined
       const loaded = await generations.get({ name: candidate.name }, options)
       if (!loaded) return undefined
       return { name: candidate.name, description: candidate.description, invocation: POLICY, source: 'bundled', provider: 'dsh-openspec', content: loaded.content }

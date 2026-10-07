@@ -3,7 +3,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { CommandDefinition } from '@deepseek-ai/dsh-commands'
 import { buildInitCommand } from './init-command.js'
 import { checkManagedCli } from './manage-check.js'
-import { parseManageInput } from './manage-input.js'
+import { parseManageInput, type ManageIntent } from './manage-input.js'
+import type { SessionManagementPlan } from './session-management.js'
+import { isAbsolute } from 'node:path'
 import type { OfficialEntry } from './upstream-compat.js'
 import { access } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -45,7 +47,7 @@ export function registerWorkflowCommands(ctx: Context, input: {
   checkCommand?: () => Promise<string>
   skillDiagnostics?: () => Promise<Array<{ name: string; source: string; provider: string }>>
   hasOpenSpecDir?: (cwd: string) => Promise<boolean>
-  management?: { upgrade(target: string, consent: { approved: boolean }): Promise<any>; rollback(target: string, consent: { approved: boolean }): Promise<any>; refreshProject(consent: { approved: boolean }): Promise<any> }
+  prepareManagement?: (intent: ManageIntent, cwd: string) => Promise<SessionManagementPlan>
   onGeneration?: () => Promise<void>
   generationState?: () => Promise<{ id: string; invocation: string }>
   checkManagedVersion?: () => Promise<string | undefined>
@@ -68,6 +70,7 @@ export function registerWorkflowCommands(ctx: Context, input: {
       try {
         await input.onGeneration?.()
         const consumed = await input.consumeWorkflow?.(entry.skillName, invocation.agent)
+        if (input.consumeWorkflow && !consumed) return { kind: 'error', text: 'OpenSpec workflow is no longer selected.' }
         const generation = await input.generationState?.()
         const body = consumed ?? renderConsumedContent(entry.body, { generation: generation?.id ?? input.generation, invocation: generation?.invocation ?? input.invocation, telemetry: input.telemetry, updateCheck: input.updateCheck })
         await send(invocation.agent, body)
@@ -89,16 +92,18 @@ export function registerWorkflowCommands(ctx: Context, input: {
     },
   })
   register({
-    name: 'dsh-openspec-manage', description: 'Manage the DSH OpenSpec adapter', recordInput: false,
+    name: 'openspec-upgrade', description: 'Upgrade the managed official OpenSpec stack (adapter-defined)', recordInput: false,
     handler: async (invocation: any) => {
       try {
         const intent = parseManageInput(typeof invocation.rawInput === 'string' ? invocation.rawInput : '')
-        let outcome: unknown
-        if (intent.kind === 'invalid') return { kind: 'error', text: 'Usage: /dsh-openspec-manage [upgrade|rollback <X.Y.Z> | refresh-project] [--approve]' }
+        let outcome: SessionManagementPlan | undefined
+        if (intent.kind === 'invalid') return { kind: 'error', text: 'Usage: /openspec-upgrade [upgrade|rollback <X.Y.Z> | refresh-project] [--approve]' }
         if (intent.kind !== 'help') {
-          if (!input.management) outcome = { status: 'blocked', reason: 'transaction-support-unavailable' }
-          else if (intent.kind === 'refresh-project') outcome = await input.management.refreshProject({ approved: intent.approved })
-          else outcome = await input.management[intent.kind](intent.target, { approved: intent.approved })
+          const cwd = invocation.agent?.cwd
+          if (!intent.approved) outcome = { status: 'blocked', reason: intent.kind === 'refresh-project' ? 'explicit-project-refresh-approval-required' : 'explicit-approval-required' }
+          else if (typeof cwd !== 'string' || !isAbsolute(cwd)) outcome = { status: 'blocked', reason: 'caller-cwd-unavailable' }
+          else if (!input.prepareManagement) outcome = { status: 'blocked', reason: 'transaction-support-unavailable' }
+          else outcome = await input.prepareManagement(intent, cwd)
         }
         await input.onGeneration?.()
         const generation = await input.generationState?.()
@@ -109,7 +114,9 @@ export function registerWorkflowCommands(ctx: Context, input: {
         const winners = input.skillDiagnostics ? await input.skillDiagnostics() : []
         const update = input.checkCommand ? await input.checkCommand() : 'update check is available on explicit request'
         const manageSkill = `${input.manageInstruction}\n\nAdapter check: ${JSON.stringify({ ...diag, skillWinners: winners, update, ...(outcome === undefined ? {} : { outcome: summarizeOutcome(outcome) }) })}\n\nUpgrade or rollback uses an exact stable version and requires explicit approval. Project refresh requires separate explicit approval. The helper operations are available only in a profile with recorded authoritative-source transaction support.`
-        const manageContent = renderConsumedContent(manageSkill, { generation: generation?.id ?? input.generation, invocation: generation?.invocation ?? input.invocation, telemetry: input.telemetry, updateCheck: input.updateCheck })
+        const execution = outcome?.status === 'ready' && outcome.command && outcome.workdir
+          ? `\n\nRun this adapter-built command only through this session's Bash tool, with workdir=${JSON.stringify(outcome.workdir)}. Do not switch cwd, elevate policy, or retry a denied operation outside this session. Report the helper result; this handler has not executed it.\n${outcome.command}` : ''
+        const manageContent = renderConsumedContent(manageSkill + execution, { generation: generation?.id ?? input.generation, invocation: generation?.invocation ?? input.invocation, telemetry: input.telemetry, updateCheck: input.updateCheck })
         await send(invocation.agent, manageContent)
         return { kind: 'success', text: 'OpenSpec management guidance submitted.' }
       }

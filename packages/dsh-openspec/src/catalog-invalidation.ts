@@ -1,6 +1,6 @@
 import { stat as fsStat } from 'node:fs/promises'
 
-export function watchCatalogInvalidation(input: { configPath: string; invalidate: () => void; stat?: (path: string) => Promise<{ mtimeMs: number; size: number }>; intervalMs?: number }) {
+export function watchCatalogInvalidation(input: { configPath: string; invalidate: () => void | Promise<void>; stat?: (path: string) => Promise<{ mtimeMs: number; size: number }>; intervalMs?: number }) {
   const readStat = input.stat ?? (async path => fsStat(path))
   let prior: string | undefined
   let disposed = false
@@ -12,12 +12,14 @@ export function watchCatalogInvalidation(input: { configPath: string; invalidate
       let signature: string
       try { const result = await readStat(input.configPath); signature = `${result.mtimeMs}:${result.size}` }
       catch { signature = 'missing' }
-      if (prior !== undefined && signature !== prior) input.invalidate()
+      if (!disposed && prior !== undefined && signature !== prior) await input.invalidate()
       prior = signature
     })()
     try { await running } finally { running = undefined }
   }
-  const timer = setInterval(() => { void check() }, input.intervalMs ?? 30_000)
+  const timer = setInterval(() => { void check().catch(() => {}) }, input.intervalMs ?? 30_000)
   timer.unref?.()
+  // Establish the initial signature now, not on the first timer tick after a possible edit.
+  void check().catch(() => {})
   return { check, dispose() { disposed = true; clearInterval(timer) } }
 }

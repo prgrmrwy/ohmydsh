@@ -1,6 +1,6 @@
 ## 0. Gate and target-runtime probes
 
-Round history: round 1 is VOID (artifacts changed after it). Round 2 verdict is `APPROVE_WITH_CHANGES` with 3 Critical and 14 Moderate findings; all 16 Required Changes were applied and accepted over three narrow reviewer re-checks, and `review.md` shows `CHANGES_APPLIED: yes` for the current content. Any further edit to proposal, design or specs voids it and needs a new review round.
+Round history: round 1 is VOID. Round 2 was `APPROVE_WITH_CHANGES` with all 16 Required Changes accepted over three narrow re-checks. The user-authorized `openspec-upgrade` naming amendment supersedes that review; fresh-context round 3 is `VERDICT: APPROVE`, `CHANGES_APPLIED: n/a`. This approves artifacts only: review I1 records Host-side management mutation as an implementation acceptance blocker, not a new authorization. Any further edit to proposal, design or specs voids the verdict and needs a new review round.
 
 - [x] 0.1 Confirm the round-2 review exists and read its Required Changes (done; round-1 gate no longer applies)
 - [x] 0.2 Probe Skill get/load seam. **Result**: `dsh-tool-skill` calls `ctx.skills.get(name,{cwd,signal,scope})`; provider `get(candidate,options)` is the real load event; `list` is catalog-driven. The loader returns only `content`. Two carriers reach the model: the `skill` tool result and the user `/name` gesture injection. **Decision (user)**: append one delimited adapter block after the unmodified body.
@@ -35,10 +35,10 @@ Round history: round 1 is VOID (artifacts changed after it). Round 2 verdict is 
 - [x] 2.5 Implement: typed `upstream-incompatible` preparation failure for custom-name collisions and marker/loader-closer scan; preparation is side-effect free
 - [x] 2.6 Refactor; package tests (3) and typecheck pass
 - [x] 2.7 Write failing test: P/catalog-invalidation.test.ts `profile_edit_invalidates_provider_and_next_listing_reflects_it` (red: missing catalog invalidation module)
-- [x] 2.8 Implement: global-config stat monitor with at-most-30s interval and `invalidate()` callback
-- [x] 2.9 Refactor; package test and typecheck pass
+- [x] 2.8 Implement: global-config stat monitor with at-most-30s interval and `invalidate()` callback. Round-5 audit/repair: monitor now awaits async refresh; actual registration control.invalidate is called after single-flight materialization, both Skill and command surfaces follow current selection/delivery, get and slash consumption refresh before delivery, returning to prior profile works. Timer is disposed; failed refresh preserves prior surface and can retry.
+- [x] 2.9 Refactor; package test and typecheck pass. Round-5 evidence adds actual apply with official CLI and real SkillRegistry cached-list regression, dropped command handler denial, failed-refresh/single-flight/disposal tests; earlier callback-only test did not prove runtime wiring.
 - [x] 2.10 Write failing test: P/generations.test.ts `loaded_generation_stays_executable_after_new_selection` (red: missing generations module)
-- [x] 2.11 Implement: immutable generation materialization under `$DSH_HOME/plugins/dsh-openspec/generations/<identity>/`, atomic active reference, no deletion of non-staging generations
+- [x] 2.11 Implement: immutable generation materialization under `$DSH_HOME/plugins/dsh-openspec/generations/<identity>/`, atomic active reference, no deletion of non-staging generations. Round-5 repair retains selection/delivery metadata rather than rewriting manifest at activation; reuse validates exact metadata and removes staging, prior manifest bytes unchanged, cancelled refresh refuses activation. Round-6 RED 3 closure tests → GREEN nested-version/cycle/internal-edge resolution and missing optional handling, recursive runtime hashes with tamper/source drift refusal, unique staging and concurrent same-id convergence; source removed then CLI still executes.
 - [x] 2.12 Refactor; package test/typecheck pass
 - [x] 2.13 Write failing test: P/generations.test.ts `activation_racing_a_load_never_mixes_body_and_block_generations` (captured generation remains stable across activation)
 - [x] 2.14 Implement: each load resolves active generation once and returns an immutable snapshot
@@ -137,11 +137,17 @@ Round history: round 1 is VOID (artifacts changed after it). Round 2 verdict is 
 ## 6. Management flow
 
 - [x] 6.1 Write failing test: P/manage-flow.test.ts `loading_manage_help_mutates_nothing` (assert it fails for the right reason)
-- [x] 6.2 Implement: `dsh-openspec-manage` Skill and `/dsh-openspec-manage` guidance separating upgrade, `openspec update` and change revision; no mutation on load
+- [x] 6.2 Implement: `openspec-upgrade` Skill and `/openspec-upgrade` guidance separating upgrade, `openspec update` and change revision; no mutation on load
 - [x] 6.3 Refactor; full suite stays green
 - [x] 6.4 Write failing test: P/manage-flow.test.ts `upgrade_changes_only_runtime_selection` (assert it fails for the right reason)
-- [x] 6.5 Implement: upgrade path wired to the transaction helper only; project refresh requires separate approval
-- [x] 6.6 Refactor; full suite stays green
+- [x] 6.5 Implement: upgrade path wired to the transaction helper only; project refresh requires separate approval. Round-3 I1 local repair: Host controller/service removed; handler prepares only a quoted command for calling-session Bash, updater rechecks approval, recorded realpath cwd and .git worktree status before staging; project refresh uses the active managed CLI with caller cwd and telemetry policy. `session-management.test.ts` RED 2 Host mutation assertions → GREEN; `session-updater.test.ts` RED 4 stub behavior assertions → GREEN. Existing Worktree Bash guard denial and built helper shell/cwd isolation verified. Real session sandbox/VM upgrade evidence remains outside this local completion.
+- [x] 6.6 Refactor; full suite stays green: package build/typecheck and 29 files/88 tests pass; repository 263 total/261 pass/0 fail/2 existing skips; artifact/strict/diff checks pass. Old Host-dispatch tests corrected to the unchanged D3 requirement, transaction tests retained. No acceptance or deployment claimed.
+
+### User-authorized naming amendment (round 3)
+
+- [x] 6.7 Write failing regression: `P/upgrade-entry.test.ts` asserts new Skill/slash discovery with no old alias, canonical notice destination, read-only help/new usage text, and new generation identity retaining old bytes. RED: all four failed against `de0b93d` source (old registration, omitted notice, missing new handler, identity collision).
+- [x] 6.8 Implement: rename to `openspec-upgrade`, describe the adapter-defined managed official OpenSpec stack, update reserved-name/notice wiring and both generation identity derivations; GREEN: all four naming regressions pass. No Host mutation authorization or boundary repair is claimed.
+- [x] 6.9 Refactor and run package build/typecheck/tests, repository tests/artifact checks, strict validation; evidence: 27 files/80 package tests pass, repo 263 total/261 pass/0 fail/2 pre-existing skips, build/typecheck/artifact/strict/diff checks pass. Recorded in verify.md; I1/live-evidence gaps remain open. No sync/deployment or final change acceptance claimed.
 
 ## 7. Source-owned upgrade/rollback transaction and recovery
 
@@ -164,7 +170,7 @@ Round history: round 1 is VOID (artifacts changed after it). Round 2 verdict is 
 ## 8. Routing registry and dispatcher (contract-only)
 
 - [x] 8.1 Write failing test: P/routing-registry.test.ts `selected_provider_invoked_once_then_unavailable_after_dispose` (assert it fails for the right reason)
-- [x] 8.2 Implement: experimental v1 registration service, explicit `activeProviderId`, disposer, cancellation on dispose
+- [x] 8.2 Implement: experimental v1 registration service, explicit `activeProviderId`, disposer, cancellation on dispose. Round-6 whole-registry teardown RED missing dispose → GREEN cancels pending requests, denies later registration and adapter cleanup invokes it.
 - [x] 8.3 Refactor; full suite stays green
 - [x] 8.4 Write failing test: P/routing-registry.test.ts `invalid_or_missing_provider_never_falls_back` (assert it fails for the right reason)
 - [x] 8.5 Implement: duplicate/unsupported/absent handling without order-based fallback

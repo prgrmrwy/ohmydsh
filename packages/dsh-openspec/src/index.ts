@@ -16,19 +16,14 @@ import { createGenerationBackedProvider } from './generation-provider.js'
 import { materializeGeneration } from './generation-materializer.js'
 import { managedInvocation } from './managed-invocation.js'
 import { createManagementGuidance } from './manage-flow.js'
-const manageSkill = { name: 'dsh-openspec-manage', description: 'Manage the pinned DSH OpenSpec adapter runtime', body: createManagementGuidance() }
+const manageSkill = { name: 'openspec-upgrade', description: 'Upgrade the managed official OpenSpec stack (adapter-defined)', body: createManagementGuidance() }
 const approvedRoutingProviders: string[] = []
 import { createRegistryProvider } from './registry-provider.js'
-import { createManagementController } from './manage-controller.js'
+import { prepareSessionManagement } from './session-management.js'
+import { recoverGeneration } from './generations.js'
+import { fileURLToPath } from 'node:url'
 import { watchCatalogInvalidation } from './catalog-invalidation.js'
-import { createUpgradeTransaction } from './upgrade-transaction.js'
-import { readSourceCheckout, isWorktreeCheckout } from './source-record.js'
-import { stageTarget } from './stage-target.js'
-import { officialStageDependencies } from './stage-official.js'
-import { selectGeneration, loadGeneration } from './generations.js'
-import { resolve as resolvePath } from 'node:path'
-import { realpath } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { loadGeneration } from './generations.js'
 
 export const name = 'dsh-openspec'
 export const RoutingRegistryServiceName = 'openspec.routing'
@@ -46,44 +41,11 @@ export function apply(ctx: Context, config: Config = {}): void {
     const version = openspecPackage.version as string
     const dshHome = process.env.DSH_HOME ?? join(homedir(), '.dsh')
     const stateDir = config.stateDir ?? join(dshHome, 'plugins', 'dsh-openspec')
-      const activeGeneration = await loadGeneration(dshHome).catch(() => undefined)
+    const activeGeneration = await loadGeneration(dshHome).catch(() => undefined)
     const installedVersion = typeof activeGeneration?.version === 'string' ? activeGeneration.version : version
     const updateChecker = createUpdateChecker({ stateDir, installed: installedVersion, enabled: settings.updateCheck === 'enabled' })
-    const recordedCheckout = await readSourceCheckout(stateDir)
-    const sourceRoot = recordedCheckout
-    const transaction = sourceRoot ? createUpgradeTransaction({
-      checkout: sourceRoot, recordedCheckout: sourceRoot, stateDir,
-      isWorktreeBound: Boolean(process.env.DSH_WORKTREE_SESSION) || await isWorktreeCheckout(sourceRoot),
-      stage: target => stageTarget(sourceRoot, target, officialStageDependencies(sourceRoot)),
-      verify: async staged => {
-        const entry = staged.lockfile.packages?.['node_modules/@fission-ai/openspec']
-        return staged.integrity.startsWith('sha512-') && entry?.integrity === staged.integrity && entry?.version === staged.target
-      },
-      activate: async target => {
-        // A target other than the running package cannot be rendered by this process's official renderer:
-        // the previously active generation keeps serving and the next Host start materializes the target.
-        if (target !== version) return { activation: 'pending-reload' as const }
-        await materializeGeneration({
-          home: dshHome, id: generationId, sourceRoot: openspecRoot, version,
-          skills: generationSkillsData, invocation, selectionFingerprint: selected.fingerprint, delivery: selected.delivery,
-        })
-        return { activation: 'live' as const }
-      },
-      runSync: async () => {
-        const { spawnSync } = await import('node:child_process')
-        const run = spawnSync(process.execPath, [join(sourceRoot!, 'scripts/sync.mjs')], { cwd: sourceRoot!, encoding: 'utf8', timeout: 120_000, env: { ...process.env, DSH_HOME: dshHome } })
-        return run.status === 0
-      },
-    }) : undefined
-    const management = transaction ? createManagementController({
-      transact: async (target, approval) => transaction.upgrade(target, { approved: approval.approved }) as any,
-      refreshProject: async () => {
-        const { spawnSync } = await import('node:child_process')
-        const run = spawnSync(process.execPath, [join(openspecRoot, 'bin/openspec.js'), 'update'], { cwd: process.cwd(), encoding: 'utf8', timeout: 120_000, env: { ...process.env, OPENSPEC_NO_UPDATE_CHECK: '1', OPENSPEC_TELEMETRY: settings.telemetry === 'adapter-off' ? '0' : '1' } })
-        if (run.status !== 0) throw new Error('project-refresh-failed')
-      },
-    }) : undefined
-    child.provide('openspec.management', management)
+    // Host registers read-only guidance only. Source/npm/project mutations live exclusively in the session Bash updater.
+    const updater = fileURLToPath(new URL('./session-updater.js', import.meta.url))
     const routingRegistry = createRoutingRegistry(activeRoutingProviderId)
     const routingDispatcher = createRoutingDispatcher()
     child.provide(RoutingRegistryServiceName, routingRegistry)
@@ -93,9 +55,10 @@ export function apply(ctx: Context, config: Config = {}): void {
     const entries = await getOfficialCatalog({ workflowIds: selected.workflows, delivery: selected.delivery })
     const chosen = entries
     const generationSkillsData = [...chosen.map(entry => ({ name: entry.skillName, description: `Official OpenSpec ${entry.workflowId} workflow`, body: entry.body })), manageSkill]
-    const generationId = config.generationId ?? createHash('sha256').update(`${version}:${selected.fingerprint}:${chosen.map(entry => entry.workflowId).join(',')}:manage-v2`).digest('hex').slice(0, 24)
+    const generationId = config.generationId ?? createHash('sha256').update(`${version}:${selected.fingerprint}:${chosen.map(entry => entry.workflowId).join(',')}:openspec-upgrade-v5`).digest('hex').slice(0, 24)
     const invocation = managedInvocation({ node: process.execPath, cli: join(dshHome, 'plugins', 'dsh-openspec', 'generations', generationId, 'bin', 'openspec.js'), telemetry: settings.telemetry })
-    if (config.initialDeployment !== false) {
+    const recoveryPending = async () => (await recoverGeneration(dshHome).catch(() => ({ state: 'recovery-required' as const }))).state === 'recovery-required'
+    if (config.initialDeployment !== false && !await recoveryPending()) {
       await materializeGeneration({
         home: dshHome, id: generationId, sourceRoot: openspecRoot, version,
         skills: generationSkillsData,
@@ -112,41 +75,59 @@ export function apply(ctx: Context, config: Config = {}): void {
       onGeneration: id => { void scopeRoot?.set('dsh-openspec:generation', id) },
       check: async () => {
         const result = await updateChecker.check()
-        return result.state === 'newer' && result.available ? { installed: result.installed, available: result.available, managementEntry: 'dsh-openspec-manage' } : undefined
+        return result.state === 'newer' && result.available ? { installed: result.installed, available: result.available, managementEntry: 'openspec-upgrade' } : undefined
       },
     })
-    const generationSkills = await generationsProvider.list()
-    const effectiveEntries = chosen.filter(entry => generationSkills.some(skill => skill.name === entry.skillName))
-    let activeSurface = { entries: effectiveEntries, generation: generationId, invocation }
-    const refreshSurface = async () => {
-      const nextSelection = await resolveEffectiveSelection({ configPath: config.officialConfigPath, workflows: config.selectedWorkflows })
-      if (nextSelection.fingerprint === selected.fingerprint) return
-      const nextEntries = await getOfficialCatalog({ workflowIds: nextSelection.workflows, delivery: nextSelection.delivery })
-      const nextId = createHash('sha256').update(`${version}:${nextSelection.fingerprint}:${nextEntries.map(entry => entry.workflowId).join(',')}:manage-v2`).digest('hex').slice(0, 24)
-      const nextInvocation = managedInvocation({ node: process.execPath, cli: join(dshHome, 'plugins', 'dsh-openspec', 'generations', nextId, 'bin', 'openspec.js'), telemetry: settings.telemetry })
-      await materializeGeneration({ home: dshHome, id: nextId, sourceRoot: openspecRoot, version, skills: [...nextEntries.map(entry => ({ name: entry.skillName, description: `Official OpenSpec ${entry.workflowId} workflow`, body: entry.body })), manageSkill], invocation: nextInvocation, selectionFingerprint: nextSelection.fingerprint, delivery: nextSelection.delivery })
-      activeSurface = { entries: nextEntries, generation: nextId, invocation: nextInvocation }
+    const initialState = await loadGeneration(dshHome)
+    let activeSurface = { entries: chosen.filter(entry => (initialState.skills as any[]).some(skill => skill.name === entry.skillName)),  generation: initialState.id, invocation: String(initialState.invocation), delivery: String(initialState.delivery ?? selected.delivery) }
+    let fingerprint = selected.fingerprint
+    let disposed = false
+    let refreshFlight: Promise<void> | undefined
+    let invalidate = () => {}
+    let commands = () => {}
+    const refreshSurface = async (): Promise<void> => {
+      if (disposed) return
+      if (refreshFlight) return refreshFlight
+      refreshFlight = (async () => {
+        if (await recoveryPending()) return
+        const nextSelection = await resolveEffectiveSelection({ configPath: config.officialConfigPath, workflows: config.selectedWorkflows })
+        if (disposed || nextSelection.fingerprint === fingerprint) return
+        const nextEntries = await getOfficialCatalog({ workflowIds: nextSelection.workflows, delivery: nextSelection.delivery })
+        const nextId = createHash('sha256').update(`${version}:${nextSelection.fingerprint}:${nextEntries.map(entry => entry.workflowId).join(',')}:openspec-upgrade-v5`).digest('hex').slice(0, 24)
+        const nextInvocation = managedInvocation({ node: process.execPath, cli: join(dshHome, 'plugins', 'dsh-openspec', 'generations', nextId, 'bin', 'openspec.js'), telemetry: settings.telemetry })
+        if (disposed) return
+        await materializeGeneration({ home: dshHome, id: nextId, sourceRoot: openspecRoot, version, skills: [...nextEntries.map(entry => ({ name: entry.skillName, description: `Official OpenSpec ${entry.workflowId} workflow`, body: entry.body })), manageSkill], invocation: nextInvocation, selectionFingerprint: nextSelection.fingerprint, delivery: nextSelection.delivery, canActivate: () => !disposed })
+        if (disposed) return
+        activeSurface = { entries: nextEntries, generation: nextId, invocation: nextInvocation, delivery: nextSelection.delivery }
+        fingerprint = nextSelection.fingerprint
+        commands()
+        commands = registerCommands()
+        invalidate()
+      })()
+      try { await refreshFlight } finally { refreshFlight = undefined }
     }
     const catalogMonitor = watchCatalogInvalidation({
       configPath: config.officialConfigPath ?? join(process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config'), 'openspec/config.json'),
-      invalidate: () => { void refreshSurface() },
+      invalidate: refreshSurface,
       intervalMs: 30_000,
     })
     scopeRoot = child
-    const registration = child.skills.registerProvider(() => createRegistryProvider(generationsProvider as any, {
-      beforeList: async () => { await catalogMonitor.check(); await refreshSurface() },
-    }) as any)
-    const commands = registerWorkflowCommands(child, {
-      entries: effectiveEntries, generation: generationId, invocation,
+    const registration = child.skills.registerProvider(control => {
+      invalidate = control.invalidate
+      return createRegistryProvider(generationsProvider as any, { beforeList: refreshSurface, beforeGet: refreshSurface }) as any
+    })
+    const registerCommands = () => registerWorkflowCommands(child, {
+      entries: activeSurface.delivery === 'skills' ? [] : activeSurface.entries, generation: activeSurface.generation, invocation: activeSurface.invocation,
       telemetry: settings.telemetry, updateCheck: settings.updateCheck,
-      consumeWorkflow: async (skillName, scope) => (await generationsProvider.get({ name: skillName }, { scope }))?.content,
+      consumeWorkflow: async (skillName, scope) => {
+        await refreshSurface()
+        if (disposed || activeSurface.delivery === 'skills' || !activeSurface.entries.some(entry => entry.skillName === skillName)) return undefined
+        return (await generationsProvider.get({ name: skillName }, { scope }))?.content
+      },
       initInstruction: 'Initialize OpenSpec using the official CLI in this workspace.',
       hasOpenSpecDir: async cwd => await import('node:fs/promises').then(fs => fs.stat(join(cwd, 'openspec')).then(info => info.isDirectory()).catch(() => false)),
       manageInstruction: createManagementGuidance(),
-      onGeneration: async () => {
-        const state = await loadGeneration(dshHome)
-        activeSurface = { entries: chosen.filter(entry => (state.skills as any[]).some(skill => skill.name === entry.skillName)), generation: state.id, invocation: String(state.invocation) }
-      },
+      onGeneration: refreshSurface,
       generationState: async () => {
         const state = await loadGeneration(dshHome)
         return { id: state.id, invocation: String(state.invocation) }
@@ -161,14 +142,15 @@ export function apply(ctx: Context, config: Config = {}): void {
         if (result.status !== 0) return null
         return `${result.stdout}${result.stderr}`.match(/\b\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\b/)?.[0] ?? null
       },
-      recoveryState: async () => transaction ? await transaction.inspectRecovery() : 'none',
+      recoveryState: async () => (await recoverGeneration(dshHome)).state === 'recovery-required' ? 'recovery-required' : 'none',
       managedVersion: version,
       checkCommand: async () => JSON.stringify(await updateChecker.check({ explicit: true })),
-      management,
-      skillDiagnostics: async () => diagnoseSkillWinners(child.skills, effectiveEntries.map(entry => entry.skillName)),
+      prepareManagement: (intent, cwd) => prepareSessionManagement({ home: dshHome, cwd, node: process.execPath, updater, intent, telemetry: settings.telemetry }),
+      skillDiagnostics: async () => diagnoseSkillWinners(child.skills, activeSurface.entries.map(entry => entry.skillName)),
     })
+    commands = registerCommands()
     child.on('agent/created', ({ agent }: any) => liveScopes.add(agent))
     child.on('agent/disposed', ({ agent }: any) => liveScopes.delete(agent))
-    child.effect(() => () => { commands(); registration() }, 'dsh-openspec: contributions')
+    child.effect(() => () => { disposed = true; routingRegistry.dispose(); catalogMonitor.dispose(); commands(); registration() },  'dsh-openspec: contributions')
   })
 }

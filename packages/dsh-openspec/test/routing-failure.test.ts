@@ -2,6 +2,15 @@ import { describe, expect, it, vi } from 'vitest'
 import { createRoutingRegistry } from '../src/routing.js'
 
 describe('routing failures', () => {
+  it('registry_unload_cancels_all_inflight_requests_and_refuses_future_registration', async () => {
+    const registry = createRoutingRegistry('fixture')
+    registry.register({ id: 'fixture', contractVersion: 1, stages: ['change-necessity'], decide: () => new Promise(() => {}), testOnly: true })
+    const pending = registry.dispatch({ stage: 'change-necessity', sessionId: 's', features: {} })
+    registry.dispose()
+    expect(await pending).toMatchObject({ status: 'unavailable', reason: 'provider-disposed', authority: 'none' })
+    expect(await registry.dispatch({ stage: 'change-necessity', sessionId: 's', features: {} })).toMatchObject({ status: 'unavailable' })
+    expect(() => registry.register({ id: 'later', contractVersion: 1, stages: [], decide: () => ({ status: 'unavailable', authority: 'none' }) })).toThrow('routing-registration-invalid')
+  })
   it('needs_review_passes_through_without_substitution', async () => {
     const registry = createRoutingRegistry('fixture')
     registry.register({ id: 'fixture', contractVersion: 1, stages: ['change-necessity'], decide: () => ({ status: 'needs-review', reason: 'uncertain', authority: 'none' as const }), testOnly: true })

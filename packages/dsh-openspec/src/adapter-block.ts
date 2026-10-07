@@ -59,8 +59,8 @@ export function buildAdapterBlock(input: AdapterBlockFields): string {
   if (input.notice) {
     const installed = canonicalVersion(input.notice.installed)
     const available = canonicalVersion(input.notice.available)
-    if (installed && available && input.notice.managementEntry === 'dsh-openspec-manage') {
-      lines.push(`notice.installed=${installed}`, `notice.available=${available}`, 'notice.managementEntry=dsh-openspec-manage')
+    if (installed && available && input.notice.managementEntry === 'openspec-upgrade') {
+      lines.push(`notice.installed=${installed}`, `notice.available=${available}`, 'notice.managementEntry=openspec-upgrade')
     }
   }
   if (input.recovery) lines.push(`recovery=${input.recovery}`)

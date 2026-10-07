@@ -10,7 +10,7 @@ async function home() { const h = await mkdtemp(join(tmpdir(), 'dsh-openspec-sco
 
 describe('update notices', () => {
   it('newer_release_notice_once_in_one_result_without_turn_or_install', async () => {
-    const check = vi.fn(async () => ({ installed: '1.13.2', available: '1.13.3', managementEntry: 'dsh-openspec-manage' }))
+    const check = vi.fn(async () => ({ installed: '1.13.2', available: '1.13.3', managementEntry: 'openspec-upgrade' }))
     const scope = {}
     const h = await home()
     await activateGeneration(h, 'g1', { skills: [{ name: 'openspec-apply-change', body: 'official' }], invocation: "env OPENSPEC_NO_UPDATE_CHECK=1 OPENSPEC_TELEMETRY=0 '/usr/bin/node' '/cli'" })
@@ -20,7 +20,7 @@ describe('update notices', () => {
     expect(result?.content).not.toContain('Agent.inject')
   })
   it('racing_model_and_gesture_consumers_spend_notice_once', async () => {
-    const check = vi.fn(async () => ({ installed: '1.13.2', available: '1.13.3', managementEntry: 'dsh-openspec-manage' }))
+    const check = vi.fn(async () => ({ installed: '1.13.2', available: '1.13.3', managementEntry: 'openspec-upgrade' }))
     const scope = {}; const h = await home()
     await activateGeneration(h, 'g1', { skills: [{ name: 's', body: 'b' }], invocation: "env OPENSPEC_NO_UPDATE_CHECK=1 OPENSPEC_TELEMETRY=0 '/usr/bin/node' '/cli'" })
     const provider = createGenerationBackedProvider({ home: h, telemetry: 'adapter-off', updateCheck: 'enabled', check })
@@ -29,7 +29,7 @@ describe('update notices', () => {
     expect([a?.content,b?.content].filter(x=>x?.includes('notice.available=1.13.3'))).toHaveLength(1)
   })
   it('newer_pair_renotifies_and_scope_less_lookup_gets_none', async () => {
-    let available='1.13.3'; const check=vi.fn(async()=>({installed:'1.13.2',available,managementEntry:'dsh-openspec-manage'})); const h=await home(); const scope={}
+    let available='1.13.3'; const check=vi.fn(async()=>({installed:'1.13.2',available,managementEntry:'openspec-upgrade'})); const h=await home(); const scope={}
     await activateGeneration(h,'g1',{skills:[{name:'s',body:'b'}],invocation:"env OPENSPEC_NO_UPDATE_CHECK=1 OPENSPEC_TELEMETRY=0 '/usr/bin/node' '/cli'"})
     const p=createGenerationBackedProvider({home:h,telemetry:'adapter-off',updateCheck:'enabled',check})
     const a=await p.get({name:'s'},{scope}); available='1.13.4'; const b=await p.get({name:'s'},{scope}); const c=await p.get({name:'s'})
@@ -41,7 +41,7 @@ describe('update notices', () => {
     const p=createGenerationBackedProvider({home:h,telemetry:'adapter-off',updateCheck:'enabled',isScopeLive:()=>live,check: async s=>{ return check() }})
     const pending=p.get({name:'s'},{scope});
     while (!resolveCheck) await new Promise(resolve => setTimeout(resolve, 1))
-    live=false; resolveCheck({installed:'1.13.2',available:'1.13.3',managementEntry:'dsh-openspec-manage'})
+    live=false; resolveCheck({installed:'1.13.2',available:'1.13.3',managementEntry:'openspec-upgrade'})
     expect((await pending)?.content).not.toContain('notice.available')
   })
 })

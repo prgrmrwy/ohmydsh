@@ -5,7 +5,7 @@ export type ManageIntent =
   | { kind: 'invalid' }
 
 /**
- * Parses the user-typed argument of `/dsh-openspec-manage`.
+ * Parses the user-typed argument of `/openspec-upgrade`.
  * Only the exact literal `--approve` flag counts as approval; the model never supplies this text,
  * because the argument arrives from the user's own gesture. Anything unrecognized is `invalid`, never a mutation.
  */

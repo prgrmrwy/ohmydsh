@@ -13,9 +13,17 @@ export function createRoutingRegistry(activeProviderId: string) {
   const providers = new Map<string, RoutingProvider>()
   const controllers = new Map<string, Set<AbortController>>()
   const disabled = new Set<string>()
+  let disposed = false
   return {
+    dispose() {
+      disposed = true
+      for (const id of providers.keys()) disabled.add(id)
+      providers.clear()
+      for (const set of controllers.values()) for (const controller of set) controller.abort()
+      controllers.clear()
+    },
     register(provider: RoutingProvider) {
-      if (providers.has(provider.id) || provider.contractVersion !== 1 || !provider.id || typeof provider.decide !== 'function') throw new RoutingRegistrationError()
+      if (disposed || providers.has(provider.id) || provider.contractVersion !== 1 || !provider.id || typeof provider.decide !== 'function') throw new RoutingRegistrationError()
       providers.set(provider.id, provider)
       disabled.delete(provider.id)
       return () => {

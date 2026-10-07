@@ -7,11 +7,11 @@ describe('management flow', () => {
   it('loading_manage_help_mutates_nothing', async () => {
     const mutate = vi.fn()
     const guidance = createManagementGuidance()
-    const provider = createOpenSpecSkillProvider({ skills: [{ name: 'dsh-openspec-manage', body: guidance }], generationId: 'g1', invocation: "env OPENSPEC_NO_UPDATE_CHECK=1 OPENSPEC_TELEMETRY=0 '/usr/bin/node' '/cli'", telemetry: 'adapter-off', updateCheck: 'disabled', check: async () => { mutate() } })
-    const loaded = await provider.get({ name: 'dsh-openspec-manage' })
+    const provider = createOpenSpecSkillProvider({ skills: [{ name: 'openspec-upgrade', body: guidance }], generationId: 'g1', invocation: "env OPENSPEC_NO_UPDATE_CHECK=1 OPENSPEC_TELEMETRY=0 '/usr/bin/node' '/cli'", telemetry: 'adapter-off', updateCheck: 'disabled', check: async () => { mutate() } })
+    const loaded = await provider.get({ name: 'openspec-upgrade' })
     expect(loaded?.content).toContain('openspec update')
     expect(loaded?.content).toContain('opsx-update')
-    expect(loaded?.content).toContain('dsh-openspec-manage')
+    expect(loaded?.content).toContain('openspec-upgrade')
     expect(mutate).not.toHaveBeenCalled()
   })
   it('upgrade_changes_only_runtime_selection', async () => {

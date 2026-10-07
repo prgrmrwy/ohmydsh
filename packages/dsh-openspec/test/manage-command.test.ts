@@ -3,13 +3,13 @@ import { parseManageInput } from '../src/manage-input.js'
 import { registerWorkflowCommands } from '../src/commands.js'
 
 const invocation = "env OPENSPEC_NO_UPDATE_CHECK=1 OPENSPEC_TELEMETRY=0 '/usr/bin/node' '/cli'"
-function harness(management: any) {
+function harness(prepareManagement: any) {
   const handlers = new Map<string, (invocation: any) => Promise<any>>()
   const ctx = { commands: { register: (definition: any) => { handlers.set(definition.name, definition.handler); return () => {} } } }
-  registerWorkflowCommands(ctx as any, { entries: [], generation: 'g1', invocation, telemetry: 'adapter-off', updateCheck: 'disabled', initInstruction: 'i', manageInstruction: 'guide', management } as any)
+  registerWorkflowCommands(ctx as any, { entries: [], generation: 'g1', invocation, telemetry: 'adapter-off', updateCheck: 'disabled', initInstruction: 'i', manageInstruction: 'guide', prepareManagement } as any)
   const sent: string[] = []
-  const agent = { send: async (message: any) => { sent.push(message.content[0].text) } }
-  return { run: (rawInput: string) => handlers.get('dsh-openspec-manage')!({ agent, rawInput }), sent }
+  const agent = { cwd: '/caller', send: async (message: any) => { sent.push(message.content[0].text) } }
+  return { run: (rawInput: string) => handlers.get('openspec-upgrade')!({ agent, rawInput }), sent }
 }
 
 describe('management command', () => {
@@ -20,25 +20,23 @@ describe('management command', () => {
     expect(parseManageInput('refresh-project --approve')).toEqual({ kind: 'refresh-project', approved: true })
     for (const bad of ['upgrade latest', 'upgrade 1.13.3-beta.1 --approve', 'upgrade 1.13.3 extra', 'rm -rf', 'upgrade']) expect(parseManageInput(bad)).toEqual({ kind: 'invalid' })
   })
-  it('help_and_unapproved_requests_never_reach_the_transaction_with_consent', async () => {
-    const management = { upgrade: vi.fn(async (_t: string, consent: any) => ({ status: consent.approved ? 'ok' : 'blocked', reason: 'explicit-approval-required' })), rollback: vi.fn(), refreshProject: vi.fn() }
-    const h = harness(management)
-    await h.run('')
-    expect(management.upgrade).not.toHaveBeenCalled()
-    await h.run('upgrade 1.13.3')
-    expect(management.upgrade).toHaveBeenCalledWith('1.13.3', { approved: false })
+  it('help_and_unapproved_requests_never_prepare_a_mutation_command', async () => {
+    const prepare = vi.fn()
+    const h = harness(prepare)
+    await h.run(''); await h.run('upgrade 1.13.3')
+    expect(prepare).not.toHaveBeenCalled()
     expect(h.sent.at(-1)).toContain('explicit-approval-required')
-    expect(management.refreshProject).not.toHaveBeenCalled()
   })
-  it('approved_upgrade_runs_only_the_transaction_and_project_refresh_stays_separate', async () => {
-    const management = { upgrade: vi.fn(async (target: string) => ({ status: 'ok', target, activation: 'pending-reload' })), rollback: vi.fn(), refreshProject: vi.fn(async () => ({ status: 'ok' })) }
-    const h = harness(management)
+  // Previous assertions required Host controller execution; D3 forbids that path. Real helper transaction assertions remain in session-updater/upgrade-transaction suites.
+  it('approved_upgrade_and_project_refresh_only_prepare_separate_session_commands', async () => {
+    const prepare = vi.fn(async () => ({ status: 'ready', command: "'/usr/bin/node' '/updater'", workdir: '/caller' }))
+    const h = harness(prepare)
     await h.run('upgrade 1.13.3 --approve')
-    expect(management.upgrade).toHaveBeenCalledWith('1.13.3', { approved: true })
-    expect(management.refreshProject).not.toHaveBeenCalled()
-    expect(h.sent.at(-1)).toContain('pending-reload')
+    expect(prepare).toHaveBeenCalledWith({ kind: 'upgrade', target: '1.13.3', approved: true }, '/caller')
+    expect(h.sent.at(-1)).toContain('Bash')
+    expect(h.sent.at(-1)).toContain('has not executed it')
     await h.run('refresh-project --approve')
-    expect(management.refreshProject).toHaveBeenCalledWith({ approved: true })
+    expect(prepare).toHaveBeenLastCalledWith({ kind: 'refresh-project', approved: true }, '/caller')
   })
   it('invalid_input_and_absent_transaction_support_never_mutate', async () => {
     const h = harness(undefined)
