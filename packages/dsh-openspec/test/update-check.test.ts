@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile, mkdir, utimes, rename } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -54,6 +54,39 @@ describe('stable update check', () => {
     try {
       expect((await createUpdateChecker({ stateDir: await stateDir(), installed: '1.13.2', fetch: fetcher }).check()).state).toBe('timeout')
     } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) }
+  })
+  it('expired_lock_replacement_acquires_ownership_before_fetch_and_contender_never_fetches', async () => {
+    const dir = await stateDir(), lockPath = join(dir, 'update.lock')
+    await writeFile(lockPath, 'crashed-holder')
+    const old = new Date(Date.now() - 60_000); await utimes(lockPath, old, old)
+    let resume!: () => void, entered!: () => void
+    const enteredPromise = new Promise<void>(resolve => { entered = resolve })
+    const wait = new Promise<void>(resolve => { resume = resolve })
+    const ownerFetch = vi.fn(async () => { entered(); await wait; return latest() })
+    const pending = createUpdateChecker({ stateDir: dir, installed: '1.13.2', fetch: ownerFetch }).check()
+    await enteredPromise
+    const contenderFetch = vi.fn(async () => latest())
+    try {
+      expect(await readFile(lockPath, 'utf8')).not.toBe('crashed-holder')
+      expect((await createUpdateChecker({ stateDir: dir, installed: '1.13.2', fetch: contenderFetch }).check()).state).toBe('state-unwritable')
+      expect(contenderFetch).not.toHaveBeenCalled()
+      expect(await readFile(lockPath)).toBeDefined()
+    } finally { resume(); await pending }
+    await expect(readFile(lockPath)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+  it('finishing_old_holder_does_not_unlink_a_replacement_lock', async () => {
+    const dir = await stateDir(), lockPath = join(dir, 'update.lock')
+    let resume!: () => void, entered!: () => void
+    const started = new Promise<void>(resolve => { entered = resolve })
+    const wait = new Promise<void>(resolve => { resume = resolve })
+    const pending = createUpdateChecker({ stateDir: dir, installed: '1.13.2', fetch: async () => { entered(); await wait; return latest() } }).check()
+    await started
+    try {
+      // Keep the old inode alive; do not depend on filesystem inode recycling.
+      await rename(lockPath, join(dir, 'old-holder.lock'))
+      await writeFile(lockPath, 'replacement-holder')
+    } finally { resume(); await pending }
+    expect(await readFile(lockPath, 'utf8')).toBe('replacement-holder')
   })
   it('concurrent_consumers_share_one_request_across_restart', async () => {
     const dir = await stateDir(); const fetch = vi.fn(async () => latest())

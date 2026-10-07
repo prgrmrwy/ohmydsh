@@ -113,6 +113,10 @@ Actual apply with historical active1.13.1 then official1.13.2 materialization ex
 
 `update-check.test.ts` RED stalled body after successful headers never timed out (2.5s sentinel), and oversized no-content-length stream consumed4chunks instead of1. GREEN shared document reader keeps2s automatic/10s explicit timer through body reads, races reader with abort, buffers at most64KiB and cancels on overflow/error; unwritable-state fallback uses same bounded reader. Real loopback HTTP server flushes successful headers then hangs body; real global fetch correctly returns timeout. Package32files/124tests/build/typecheck/artifact/strict/diff pass; no real registry/VM/model calls. This strengthens checked bounded-check rows, not live acceptance.
 
+## Expired update-lock ownership (goal round 15)
+
+`update-check.test.ts` now actually creates/ages a crashed-holder lock. RED successor fetch entered without any update.lock; GREEN exact observed inode reclamation claim, recheck, unlink then exclusive reacquisition before fetch. Contender does not fetch while owner held. Replacement-lock fixture confirms finishing prior holder does not unlink a different inode. This closes the old test's misleading stale-lock title (previously only future cache tested). Full package32files/126tests pass; fixtures, not multi-process adversarial scheduling or real killed-holder acceptance.
+
 ## Coverage Notes
 
 - All 59 rows are executable; none is `N/A — non-executable`. Count check: 26 session + 19 updates + 14 routing scenarios = 59.

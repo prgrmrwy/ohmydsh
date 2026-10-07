@@ -98,7 +98,19 @@ export function createUpdateChecker(options: {
       } catch (lockError) {
         try {
           const lockPath = join(options.stateDir, 'update.lock')
-          if (now() - (await stat(lockPath)).mtimeMs > 30_000) await rm(lockPath, { force: true })
+          const observed = await stat(lockPath)
+          if (now() - observed.mtimeMs > 30_000) {
+            // Serialise reclamation of this exact observed inode. A delayed contender
+            // must not delete the fresh replacement another process acquired.
+            const claimPath = `${lockPath}.reclaim-${observed.dev}-${observed.ino}-${observed.mtimeMs}`
+            const claim = await open(claimPath, 'wx')
+            try {
+              const current = await stat(lockPath)
+              if (current.dev !== observed.dev || current.ino !== observed.ino || current.mtimeMs !== observed.mtimeMs) return { state: 'state-unwritable', installed: options.installed }
+              await rm(lockPath)
+              lock = await open(lockPath, 'wx')
+            } finally { await claim.close(); await rm(claimPath, { force: true }).catch(() => {}) }
+          }
           else if (!explicit && cache && valid(cache.version)) return result(cache.version)
           else return { state: 'state-unwritable', installed: options.installed }
         } catch {
@@ -110,6 +122,7 @@ export function createUpdateChecker(options: {
           return { state: 'state-unwritable', installed: options.installed }
         }
       }
+      const ownedIdentity = await lock!.stat()
       try {
         const doc = await requestDocument(explicit)
         if (!valid(doc.version)) { await writeCache({ checkedAt: now(), version: options.installed, failureUntil: now() + BACKOFF }); return { state: 'invalid-metadata', installed: options.installed } }
@@ -122,7 +135,9 @@ export function createUpdateChecker(options: {
         return { state, installed: options.installed }
       } finally {
         await lock?.close().catch(() => {})
-        await rm(join(options.stateDir, 'update.lock'), { force: true }).catch(() => {})
+        const lockPath = join(options.stateDir, 'update.lock')
+        const current = await stat(lockPath).catch(() => undefined)
+        if (current?.dev === ownedIdentity.dev && current.ino === ownedIdentity.ino) await rm(lockPath, { force: true }).catch(() => {})
       }
     })()
     try { return await flight } finally { flight = undefined }

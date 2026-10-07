@@ -4,7 +4,15 @@ DECISION: FAIL
 
 Interim implementation report, not final acceptance. The public naming amendment is complete locally; the overall change remains incomplete. Do not merge, archive, or treat artifact approval as authorization for Host-side mutations.
 
-## Latest bounded work: streamed metadata budgets (goal round 14)
+## Latest bounded work: expired update-lock ownership (goal round 15)
+
+The old stale-lock test exercised only future cache, not a lock. New aged-crashed-holder fixture reproduces RED: successor enters fetch after deleting expired update.lock without exclusive reacquisition. GREEN uses a reclamation claim keyed to observed device/inode/mtime, rechecks that exact identity, then reacquires wx lock before fetch. Held-owner/second-checker test proves contender issues zero requests. Separate replacement-inode fixture asserts finishing prior holder cannot unlink replacement lock; cleanup checks owned identity.
+
+Fresh full package **32files/126tests pass**, pretest/build/typecheck/artifact/strict/diff checks pass. Repository **263total/261pass/0fail/2existing skips**, collected bash-49. These in-process filesystem/race fixtures are NOT real killed-process or exhaustive multi-process scheduling proof; abandoned reclaim claim can conservatively block until operator handles it. No source transaction lock semantics changed, no VM operations/network/model calls/install.
+
+Progress180/194 unchanged. Main-runtime deployment/model-header/disable/repeated-sync rows remain pending DNS repair and explicit authorization. Overall FAIL; goal active.
+
+## Earlier bounded work: streamed metadata budgets (goal round 14)
 
 Approved updates2s/64KiB constraints were not enforced during body reading: timer cleared after fetch returned headers; response.text allocated whole body before size check. Two RED regressions demonstrate body-hung after2.5s and4chunks consumed despite first chunk>64KiB. GREEN shared requestDocument keeps timer through headers+body, races reads with abort, rejects overflow before buffering, cancels body without awaiting an unresponsive cancel hook. Both normal and state-unwritable paths use it. Additional real loopback HTTP server flushes successful headers and hangs body; actual global fetch normalizes timeout and closes via fixture cleanup. Fixed URL/GET/redirect:error assertions remain.
 
