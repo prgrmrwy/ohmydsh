@@ -4,7 +4,13 @@ DECISION: FAIL
 
 Interim implementation report, not final acceptance. The public naming amendment is complete locally; the overall change remains incomplete. Do not merge, archive, or treat artifact approval as authorization for Host-side mutations.
 
-## Latest bounded work: partial-CAS recovery and newline marker guard (goal round 11)
+## Latest bounded work: real-acceptance prerequisites and DNS diagnosis (goal round 12)
+
+Read-only VM checks: clean detached de0b93d checkout, existing real Host HTTP401 reachable. Registry HTTPS still fails DNS resolution after user reported likely recovery. scutil reports resolver114.114.114.114; bounded dig against it times out, while a diagnostic query to1.1.1.1 returns in53ms (198.18.0.4, network's synthetic answer). No proxy environment variables present by boolean-only check. No DNS/system/proxy/credential changes, fetch/sync/stop/model session or disable performed. User chose to repair DNS themselves, then have agent verify; do not keep retrying deployment or change DNS autonomously while awaiting that repair.
+
+Real acceptance authorization remains unsettled: user did not choose API-created test sessions versus manual GUI tests. User asked why disable was needed; explained the existing reversibility/preservation scenario, not a network fix or ordinary requirement, and did not execute it without authorization. Task counts180/194 and overall FAIL unchanged. Next deployment requires successful VM network verification; remaining model-header/disable tests additionally require the user's explicit method/permission choice. This is a concrete pending prerequisite, not evidence of implementation completion or authority to narrow approved scenarios.
+
+## Earlier bounded work: partial-CAS recovery and newline marker guard (goal round 11)
 
 - Actual catalog preparation accepted an upstream body with the reserved start marker on its own newline: escaped regex split matched literal backslashes instead of line breaks. New mocked-official-renderer behavioral test failed with catalog published, then passes after the one-line real CRLF/LF split repair. Official stage parity already uses includes and was not affected. Existing collision test alone did not prove marker rejection.
 - Guarded recovery required BOTH source files at after hashes, mislabeling prepared-but-no-CAS and package-only CAS windows as user edits. Two new tests failed then pass with per-file admission of exact before OR after hashes. Recovery rewrites only files proven changed; untouched source bytes retained. Added lock-only fixture covers a partial rollback window. Genuine drift still fails closed and existing staging-time edit tests remain green.
