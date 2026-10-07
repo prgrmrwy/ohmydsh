@@ -4,6 +4,18 @@ DECISION: FAIL
 
 Interim implementation report, not final acceptance. The public naming amendment is complete locally; the overall change remains incomplete. Do not merge, archive, or treat artifact approval as authorization for Host-side mutations.
 
+## First real GUI evidence on the VM main process (goal round 19)
+
+The user ran the commands in the real Web GUI of corp-mac-vm's main DSH process (task branch deployed, supported `dsh stop` / `dsh --no-open` restart, sync run twice with the second reporting no changes). This is the first live evidence for the adapter and it exposed three defects that 150+ passing tests had not:
+
+1. **Input hint missing (fixed `272f4ec`).** Picking `openspec-init` / `openspec-upgrade` from the `/` menu left the composer empty: neither command declared `input`, so the client treated it as argument-less. Now both advertise the grammar their parsers accept. User confirmed the composer fills.
+2. **Messages never reached the model (fixed `a79c442`).** Executing the command returned `command/done kind=error` ("management guidance unavailable") and the GUI showed nothing. Root cause: the handler delivered through an invented shape (`agent.send` with no message id, `source.kind: 'adapter'`, an object target, no wakeup) instead of the real contract (`createUserMessage` id, source `plugin`, `followup()` which wakes the driver). Every command test used a fake Agent that recorded any shape, so all passed. A shared strict Agent double (`support-agent.ts`) now enforces id, known source kind, real inbox target and waking delivery, and every command test uses it.
+3. **Model invented a command (fixed in this round).** After the fix the command succeeded: the session log shows `command/done kind=success`, a `plugin`-sourced user message of 2455 chars containing the adapter block and the `Adapter check` JSON, then a model turn. The model's reply was correct about the facts (managed 1.13.2, latest 1.14.1, PATH CLI 1.4.1, Node supported, no recovery, 7 skills from `dsh-openspec`) and kept all mutation behind explicit consent, **but it suggested `/openspec-upgrade 1.14.1`, which the parser rejects** (a verb is required). The guidance never stated the grammar. It now lists the four exact forms, says the verb is required and that only the user types `--approve`; a test requires every command shown in the guidance to parse to a real intent.
+
+What this evidence does support: the real command plane executes both custom commands, the adapter message is delivered and wakes the model, the block and check JSON reach the model, no mutation occurred without `--approve`. What it does not: the init flow, cross-workspace discovery (9.1-9.3), request-header baselines (9.7-9.12), disable (9.13-9.15) and an approved upgrade through Bash are still unproven live.
+
+Also recorded: to deploy, the VM resolver `114.114.114.114` was unreachable; Ethernet DNS was changed to `223.5.5.5 8.8.8.8` (rollback: `networksetup -setdnsservers Ethernet 114.114.114.114`).
+
 ## Latest bounded work: caller-scoped diagnostics (goal round 19)
 
 IR18-DIAG repaired with `diagnostics-scope.test.ts` (3 RED, then green).
