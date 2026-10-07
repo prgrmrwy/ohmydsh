@@ -39,6 +39,42 @@ export function createUpdateChecker(options: {
     await writeFile(temp, JSON.stringify(cache))
     await rename(temp, join(options.stateDir, 'update-cache.json'))
   }
+  async function requestDocument(explicit: boolean): Promise<{ version?: unknown }> {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), explicit ? 10_000 : 2_000)
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+    let abortListener: (() => void) | undefined
+    try {
+      const response = await fetcher(URL, { method: 'GET', redirect: 'error', signal: controller.signal })
+      if (!response.ok || Number(response.headers.get('content-length') ?? 0) > 65_536) {
+        void response.body?.cancel().catch(() => {})
+        throw new Error(response.ok ? 'invalid-metadata' : 'network-error')
+      }
+      if (!response.body) throw new Error('invalid-metadata')
+      reader = response.body.getReader()
+      const aborted = new Promise<never>((_resolve, reject) => {
+        abortListener = () => reject(new DOMException('aborted', 'AbortError'))
+        controller.signal.addEventListener('abort', abortListener, { once: true })
+        if (controller.signal.aborted) abortListener()
+      })
+      const chunks: Uint8Array[] = []
+      let bytes = 0
+      for (;;) {
+        const { done, value } = await Promise.race([reader.read(), aborted])
+        if (done) break
+        bytes += value.byteLength
+        if (bytes > 65_536) throw new Error('invalid-metadata')
+        chunks.push(value)
+      }
+      try { return JSON.parse(Buffer.concat(chunks, bytes).toString('utf8')) }
+      catch { throw new Error('invalid-metadata') }
+    } finally {
+      clearTimeout(timer)
+      if (abortListener) controller.signal.removeEventListener('abort', abortListener)
+      // Cancellation must not wait for an unresponsive remote source's cancel hook.
+      if (reader) void reader.cancel().catch(() => {})
+    }
+  }
   async function check({ explicit = false }: { explicit?: boolean } = {}): Promise<UpdateResult> {
     if (options.enabled === false) return { state: 'check-disabled', installed: options.installed }
     if (flight) return flight
@@ -52,16 +88,8 @@ export function createUpdateChecker(options: {
       try { await ensureDirectory(options.stateDir, { recursive: true }) }
       catch {
         unwritableUntil = now() + BACKOFF
-        const controller = new AbortController()
-        const timer = setTimeout(() => controller.abort(), explicit ? 10_000 : 2_000)
-        try {
-          const response = await fetcher(URL, { method: 'GET', redirect: 'error', signal: controller.signal })
-          if (response.ok) {
-            const text = await response.text()
-            if (Buffer.byteLength(text) <= 65_536) JSON.parse(text)
-          }
-        } catch { /* state cannot be persisted; expose only normalized state */ }
-        finally { clearTimeout(timer) }
+        try { await requestDocument(explicit) }
+        catch { /* state cannot be persisted; expose only normalized state */ }
         return { state: 'state-unwritable', installed: options.installed }
       }
       let lock
@@ -83,17 +111,7 @@ export function createUpdateChecker(options: {
         }
       }
       try {
-        const controller = new AbortController()
-        const timer = setTimeout(() => controller.abort(), explicit ? 10_000 : 2_000)
-        let response: Response
-        try { response = await fetcher(URL, { method: 'GET', redirect: 'error', signal: controller.signal }) }
-        finally { clearTimeout(timer) }
-        if (!response.ok) throw new Error('network-error')
-        const declaredLength = Number(response.headers.get('content-length') ?? 0)
-        if (declaredLength > 65_536) throw new Error('invalid-metadata')
-        const text = await response.text()
-        if (Buffer.byteLength(text) > 65_536) throw new Error('invalid-metadata')
-        const doc = JSON.parse(text)
+        const doc = await requestDocument(explicit)
         if (!valid(doc.version)) { await writeCache({ checkedAt: now(), version: options.installed, failureUntil: now() + BACKOFF }); return { state: 'invalid-metadata', installed: options.installed } }
         await writeCache({ checkedAt: now(), version: doc.version })
         return result(doc.version)

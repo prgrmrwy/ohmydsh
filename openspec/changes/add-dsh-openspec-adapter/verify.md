@@ -4,7 +4,15 @@ DECISION: FAIL
 
 Interim implementation report, not final acceptance. The public naming amendment is complete locally; the overall change remains incomplete. Do not merge, archive, or treat artifact approval as authorization for Host-side mutations.
 
-## Latest bounded work: startup selected-version diagnostics (goal round 13)
+## Latest bounded work: streamed metadata budgets (goal round 14)
+
+Approved updates2s/64KiB constraints were not enforced during body reading: timer cleared after fetch returned headers; response.text allocated whole body before size check. Two RED regressions demonstrate body-hung after2.5s and4chunks consumed despite first chunk>64KiB. GREEN shared requestDocument keeps timer through headers+body, races reads with abort, rejects overflow before buffering, cancels body without awaiting an unresponsive cancel hook. Both normal and state-unwritable paths use it. Additional real loopback HTTP server flushes successful headers and hangs body; actual global fetch normalizes timeout and closes via fixture cleanup. Fixed URL/GET/redirect:error assertions remain.
+
+Fresh package **32files/124tests pass**; pretest/build/typecheck/artifact/strict/diff checks pass. Repo **263total/261pass/0fail/2existing skips**, collected bash-46. Focused secondary Jev summary review returned escalate (safe0.38/blast confidence0.31), not approval; local source inspection plus real HTTP/stream tests support the bounded implementation repair only. Final whole-change review remains outstanding.
+
+No VM operations/registry requests/model sessions/install. Progress180/194 unchanged; awaiting user's DNS repair and unresolved real-session/disable permission. Explicit10s branch uses shared reader but no fresh elapsed10s test is claimed. No final acceptance; goal active.
+
+## Earlier bounded work: startup selected-version diagnostics (goal round 13)
 
 Actual startup with previous active1.13.1 and installed official1.13.2 reproduced management diagnostic managedVersion1.13.2 but update.installed1.13.1. The checker captured active before materialization. New behavioral RED asserts exact update JSON version; GREEN constructs the checker only after startup selected generation is loaded. Prepared-journal fixture additionally proves update diagnostics keep1.13.1 when recovery correctly retains historical active. Initial missing skills.list fixture method was a harness error, not behavioral RED.
 

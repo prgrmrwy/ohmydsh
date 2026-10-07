@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createServer } from 'node:http'
 import { createUpdateChecker } from '../src/update-check.js'
 
 const roots: string[] = []
@@ -10,6 +11,50 @@ async function stateDir() { const root = await mkdtemp(join(tmpdir(), 'dsh-opens
 const latest = (version = '1.13.3') => new Response(JSON.stringify({ version }), { status: 200 })
 
 describe('stable update check', () => {
+  it('budget_covers_stalled_body_after_headers_and_releases_lock', async () => {
+    const dir = await stateDir()
+    let signal!: AbortSignal
+    const fetch = vi.fn(async (_url: any, options: any) => {
+      signal = options.signal
+      return new Response(new ReadableStream({ start(controller) {
+        signal.addEventListener('abort', () => controller.error(new DOMException('aborted', 'AbortError')), { once: true })
+      } }))
+    })
+    const pending = createUpdateChecker({ stateDir: dir, installed: '1.13.2', fetch }).check()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      const observed = await Promise.race([pending, new Promise(resolve => { timer = setTimeout(() => resolve('body-hung'), 2_500) })])
+      expect(observed).toMatchObject({ state: 'timeout' })
+      await expect(readFile(join(dir, 'update.lock'))).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally { if (timer) clearTimeout(timer); /* Abort only for the broken-implementation cleanup. */ (signal as any)?.dispatchEvent(new Event('abort')); await pending }
+  })
+  it('oversized_chunked_body_is_cancelled_before_next_read_and_unwritable_path_is_bounded_too', async () => {
+    for (const unwritable of [false, true]) {
+      let reads = 0, cancelled = false
+      const fetch = vi.fn(async () => new Response(new ReadableStream({ pull(controller) {
+        reads++
+        controller.enqueue(new Uint8Array(65_537))
+        if (reads === 4) controller.close()
+      }, cancel() { cancelled = true } }, { highWaterMark: 0 })))
+      const checker = createUpdateChecker({ stateDir: await stateDir(), installed: '1.13.2', fetch,
+        ...(unwritable ? { mkdir: async () => { throw new Error('readonly') } } : {}) })
+      expect((await checker.check()).state).toBe(unwritable ? 'state-unwritable' : 'invalid-metadata')
+      expect(reads).toBe(1); expect(cancelled).toBe(true)
+    }
+  })
+  it('real_fetch_stalled_http_body_times_out_and_preserves_fixed_request_contract', async () => {
+    const server = createServer((_req, response) => { response.writeHead(200, { 'Content-Type': 'application/json' }); response.flushHeaders(); response.write('{"version":') })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as any).port
+    const fetcher = vi.fn((url: any, options: any) => {
+      expect(url).toBe('https://registry.npmjs.org/@fission-ai%2Fopenspec/latest')
+      expect(options.method).toBe('GET'); expect(options.redirect).toBe('error')
+      return globalThis.fetch(`http://127.0.0.1:${port}`, options)
+    })
+    try {
+      expect((await createUpdateChecker({ stateDir: await stateDir(), installed: '1.13.2', fetch: fetcher }).check()).state).toBe('timeout')
+    } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) }
+  })
   it('concurrent_consumers_share_one_request_across_restart', async () => {
     const dir = await stateDir(); const fetch = vi.fn(async () => latest())
     const checker = createUpdateChecker({ stateDir: dir, installed: '1.13.2', fetch })

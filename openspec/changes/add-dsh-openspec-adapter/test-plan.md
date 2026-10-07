@@ -109,6 +109,10 @@ Transaction RED cross-profile stage/commit allowed, chmod readonly file replaced
 
 Actual apply with historical active1.13.1 then official1.13.2 materialization exposed management update diagnostic installed1.13.1 while managedVersion1.13.2. RED observed stale version; GREEN initializes checker only after selecting current generation. Recovery fixture additionally asserts check-disabled result still reports historical1.13.1 when pending journal intentionally preserves old active. Initial missing Skill list fixture method was harness setup error, not behavioral RED. Full package32files/121tests pass; no live deployment/model calls/network checks.
 
+## Metadata body budgets and streaming cap (goal round 14)
+
+`update-check.test.ts` RED stalled body after successful headers never timed out (2.5s sentinel), and oversized no-content-length stream consumed4chunks instead of1. GREEN shared document reader keeps2s automatic/10s explicit timer through body reads, races reader with abort, buffers at most64KiB and cancels on overflow/error; unwritable-state fallback uses same bounded reader. Real loopback HTTP server flushes successful headers then hangs body; real global fetch correctly returns timeout. Package32files/124tests/build/typecheck/artifact/strict/diff pass; no real registry/VM/model calls. This strengthens checked bounded-check rows, not live acceptance.
+
 ## Coverage Notes
 
 - All 59 rows are executable; none is `N/A — non-executable`. Count check: 26 session + 19 updates + 14 routing scenarios = 59.
