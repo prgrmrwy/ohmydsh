@@ -4,7 +4,18 @@ DECISION: FAIL
 
 Interim implementation report, not final acceptance. The public naming amendment is complete locally; the overall change remains incomplete. Do not merge, archive, or treat artifact approval as authorization for Host-side mutations.
 
-## Latest bounded work: source-wide exclusion and recovery reachability (goal round 8)
+## Latest bounded work: authorized WIP VM deployment attempt (goal round 9)
+
+- Committed/pushed only the authorized task branch: repair commit `fc3b7abd706457a393cfd1985ea589810ee15508`, macOS fixture portability commit `9db970d301e601a243aac006f09ecdccbe5f8e09`. Approved proposal/design/delta hashes remain unchanged from artifact review round3. Local snapshot clean before this evidence update.
+- VM GitHub DNS/SSH fetch failed before any stop/sync. Incremental Git bundles carried the exact pushed commits over existing SSH; ordinary VM checkout fast-forwarded, no main branch merge or credentials workaround.
+- VM build/typecheck passed. Package full run initially exposed 3 `/var`→`/private/var` realpath expectation failures in session-updater fixtures. Canonicalize fixture root at creation, retain security realpath checks and exact assertions. Fresh VM full package **32 files/115 tests pass** at 9db970d.
+- Authorized `dsh stop` succeeded. Online sync stalled on registry integrity preflight; VM DNS timeout independently reproduced for registry.npmjs.org/github.com. Cancelled only the stalled sync/installer subprocesses, no manual DSH PID killing.
+- npm official offline cache preserved integrity preflight, but official plugin/pnpm reinstall still issued HEAD for the existing cockpit GitHub tarball despite environment offline config. Two stalled installer attempts were cancelled; sync reported failure and restored quarantined prior dsh-openspec deployment. No second no-op sync obtained; task10.2 stays unchecked.
+- Plain launcher briefly printed started but actual HTTP verification failed; Host log identified missing new generation-closure.js. Existing compiled files are hardlinked to source and pretest/build changed them, while newly added files require complete sync. This real partial-build window means source build alone is not a safe deployment and old source rollback is needed while offline. Recovery procedure switches VM detached to known healthy de0b93d, rebuilds old source, then uses only `dsh stop`/`dsh --no-open`; latest task branch remains intact/pushed. Recovery completed: VM clean detached HEAD de0b93d, actual steady listener PID41466 on localhost3080, HTTP401 from authentication middleware (no credentials read), prior active d9734b69dff2e2f9b6b50a9b retained, managed CLI under minimal PATH exits0 with exact1.13.2. This proves service/CLI restored, not authenticated GUI surface acceptance. Latest task branch is NOT deployed.
+
+No model sessions, live-source updater actions, disable, replacement server or final acceptance performed. Local implementation-review.md is explicitly a bounded WIP review, not final whole-range pass. The network condition does not justify bypassing integrity checks or treating deployment as complete. Overall remains FAIL, task totals177/194 and goal active; further work can continue locally while VM network is repaired.
+
+## Earlier bounded work: source-wide exclusion and recovery reachability (goal round 8)
 
 Five additional RED → GREEN regressions:
 
