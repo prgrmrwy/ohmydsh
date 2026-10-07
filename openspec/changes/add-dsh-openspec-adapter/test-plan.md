@@ -105,6 +105,10 @@ Transaction RED cross-profile stage/commit allowed, chmod readonly file replaced
 
 `upstream-incompat.test.ts` now actually supplies reserved multiline marker through mocked upstream renderer; RED published hostile catalog → GREEN real CRLF/LF split rejects. `upgrade-transaction.test.ts` RED prepared/no-CAS and package-only rejected as user edits → GREEN accepts each file at exact before/after hash, reconstructs only changed files; lock-only covers partial rollback, unchanged bytes preserved. RED post-CAS sync failure generic failed → GREEN recovery-required with old active and pending journal, authorized recovery. Package32files/120tests and repo261pass/0fail/2existing skips. Fixtures, not actual process-death/durable-write/live-runtime acceptance.
 
+## Startup selected-version diagnostics (goal round 13)
+
+Actual apply with historical active1.13.1 then official1.13.2 materialization exposed management update diagnostic installed1.13.1 while managedVersion1.13.2. RED observed stale version; GREEN initializes checker only after selecting current generation. Recovery fixture additionally asserts check-disabled result still reports historical1.13.1 when pending journal intentionally preserves old active. Initial missing Skill list fixture method was harness setup error, not behavioral RED. Full package32files/121tests pass; no live deployment/model calls/network checks.
+
 ## Coverage Notes
 
 - All 59 rows are executable; none is `N/A — non-executable`. Count check: 26 session + 19 updates + 14 routing scenarios = 59.

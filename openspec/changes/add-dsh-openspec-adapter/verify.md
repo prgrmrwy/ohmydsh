@@ -4,7 +4,13 @@ DECISION: FAIL
 
 Interim implementation report, not final acceptance. The public naming amendment is complete locally; the overall change remains incomplete. Do not merge, archive, or treat artifact approval as authorization for Host-side mutations.
 
-## Latest bounded work: real-acceptance prerequisites and DNS diagnosis (goal round 12)
+## Latest bounded work: startup selected-version diagnostics (goal round 13)
+
+Actual startup with previous active1.13.1 and installed official1.13.2 reproduced management diagnostic managedVersion1.13.2 but update.installed1.13.1. The checker captured active before materialization. New behavioral RED asserts exact update JSON version; GREEN constructs the checker only after startup selected generation is loaded. Prepared-journal fixture additionally proves update diagnostics keep1.13.1 when recovery correctly retains historical active. Initial missing skills.list fixture method was a harness error, not behavioral RED.
+
+Fresh package **32files/121tests pass**, pretest/build/typecheck/artifacts/strict/diff checks pass; repo **263total/261pass/0fail/2existing skips**, collected bash-43. No VM network retries/deployment/model calls, respecting user's choice to repair DNS themselves. Progress180/194 unchanged; stronger implementation evidence does not close real-session/disable/repeated-sync acceptance. Final FAIL, goal active.
+
+## Earlier bounded work: real-acceptance prerequisites and DNS diagnosis (goal round 12)
 
 Read-only VM checks: clean detached de0b93d checkout, existing real Host HTTP401 reachable. Registry HTTPS still fails DNS resolution after user reported likely recovery. scutil reports resolver114.114.114.114; bounded dig against it times out, while a diagnostic query to1.1.1.1 returns in53ms (198.18.0.4, network's synthetic answer). No proxy environment variables present by boolean-only check. No DNS/system/proxy/credential changes, fetch/sync/stop/model session or disable performed. User chose to repair DNS themselves, then have agent verify; do not keep retrying deployment or change DNS autonomously while awaiting that repair.
 

@@ -28,7 +28,7 @@ async function startAdapter(home: string) {
   let startup!: Promise<unknown>
   const child = {
     settings: { register: () => ({ get: () => ({ updateCheck: 'disabled', telemetry: 'adapter-off' }) }) },
-    skills: { registerProvider: (factory: any) => { provider = factory({ invalidate() {}, signal: new AbortController().signal }); return () => {} } },
+    skills: { list: async () => provider.list(), registerProvider: (factory: any) => { provider = factory({ invalidate() {}, signal: new AbortController().signal }); return () => {} } },
     commands: { register: (definition: any) => { definitions.set(definition.name, definition); return () => {} } },
     provide() {}, on() {}, set() {}, effect() {},
   }
@@ -39,14 +39,29 @@ async function startAdapter(home: string) {
 }
 
 describe('openspec-upgrade public entry', () => {
+  it('startup_update_diagnostic_uses_selected_generation_not_pre_materialization_version', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-openspec-version-')); homes.push(home)
+    await activateGeneration(home, 'historical', { version: '1.13.1', skills: [{ name: 'openspec-upgrade', body: 'old help' }], invocation })
+    const { definitions } = await startAdapter(home)
+    const state = await loadGeneration(home)
+    expect(state.version).toBe('1.13.2')
+    const send = vi.fn()
+    await definitions.get('openspec-upgrade').handler({ agent: { cwd: home, send }, rawInput: '' })
+    const content = send.mock.calls[0]![0].content[0].text
+    expect(content).toContain('\\"installed\\":\\"1.13.2\\"')
+    expect(content).not.toContain('\\"installed\\":\\"1.13.1\\"')
+  })
   it('restart_with_interrupted_transaction_serves_previous_generation_without_materializing_current_pin', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-openspec-recovery-')); homes.push(home)
     const invocation = "env OPENSPEC_NO_UPDATE_CHECK=1 OPENSPEC_TELEMETRY=0 '/usr/bin/node' '/historical-cli'"
     await activateGeneration(home, 'historical', { version: '1.13.1', skills: [{ name: 'historical-workflow', body: 'old immutable instructions' }, { name: 'openspec-upgrade', body: 'old help' }], invocation })
     const activePath = join(home, 'plugins/dsh-openspec/active.json'); const before = await readFile(activePath)
     await writeFile(join(home, 'plugins/dsh-openspec/upgrade-journal.json'), JSON.stringify({ phase: 'prepared', target: '1.13.2' }))
-    const { provider } = await startAdapter(home)
+    const { provider, definitions } = await startAdapter(home)
     expect(await readFile(activePath)).toEqual(before)
+    const send = vi.fn()
+    await definitions.get('openspec-upgrade').handler({ agent: { cwd: home, send }, rawInput: '' })
+    expect(send.mock.calls[0]![0].content[0].text).toContain('\\"installed\\":\\"1.13.1\\"')
     const candidate = (await provider.list()).find((skill: any) => skill.name === 'historical-workflow')
     expect(candidate).toBeDefined()
     const loaded = await provider.get(candidate, {})

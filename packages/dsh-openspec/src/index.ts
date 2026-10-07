@@ -41,9 +41,6 @@ export function apply(ctx: Context, config: Config = {}): void {
     const version = openspecPackage.version as string
     const dshHome = process.env.DSH_HOME ?? join(homedir(), '.dsh')
     const stateDir = config.stateDir ?? join(dshHome, 'plugins', 'dsh-openspec')
-    const activeGeneration = await loadGeneration(dshHome).catch(() => undefined)
-    const installedVersion = typeof activeGeneration?.version === 'string' ? activeGeneration.version : version
-    const updateChecker = createUpdateChecker({ stateDir, installed: installedVersion, enabled: settings.updateCheck === 'enabled' })
     // Host registers read-only guidance only. Source/npm/project mutations live exclusively in the session Bash updater.
     const updater = fileURLToPath(new URL('./session-updater.js', import.meta.url))
     const routingRegistry = createRoutingRegistry(activeRoutingProviderId)
@@ -67,6 +64,11 @@ export function apply(ctx: Context, config: Config = {}): void {
         delivery: selected.delivery,
       })
     }
+    // Materialization may have selected a newer pin; during recovery the previous
+    // immutable active generation is intentionally retained. Report that actual selection.
+    const initialState = await loadGeneration(dshHome)
+    const installedVersion = typeof initialState.version === 'string' ? initialState.version : version
+    const updateChecker = createUpdateChecker({ stateDir, installed: installedVersion, enabled: settings.updateCheck === 'enabled' })
     const liveScopes = new WeakSet<object>()
     let scopeRoot: any
     const generationsProvider = createGenerationBackedProvider({
@@ -78,7 +80,6 @@ export function apply(ctx: Context, config: Config = {}): void {
         return result.state === 'newer' && result.available ? { installed: result.installed, available: result.available, managementEntry: 'openspec-upgrade' } : undefined
       },
     })
-    const initialState = await loadGeneration(dshHome)
     let activeSurface = { entries: chosen.filter(entry => (initialState.skills as any[]).some(skill => skill.name === entry.skillName)),  generation: initialState.id, invocation: String(initialState.invocation), delivery: String(initialState.delivery ?? selected.delivery) }
     let fingerprint = selected.fingerprint
     let disposed = false
