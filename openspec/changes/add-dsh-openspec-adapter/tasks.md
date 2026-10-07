@@ -86,7 +86,7 @@ Round history: round 1 is VOID. Round 2 was `APPROVE_WITH_CHANGES` with all 16 R
 - [x] 4.5 Implement: `/openspec-init` command builder with no-tools/no-cloud/no-animation defaults
 - [x] 4.6 Refactor; focused tests pass
 - [x] 4.7 Write failing test: P/init-command.test.ts `rejects_metacharacters_unknown_tools_and_bad_language` (covered by input validation tests)
-- [ ] 4.8 Implement: tool/profile enum checks, language regex and typed invalid-options error
+- [x] 4.8 Implement: tool/profile enum checks, language regex and typed invalid-options error
 - [x] 4.9 Refactor; package tests/typecheck pass
 - [x] 4.10 Write test: P/init-command.test.ts `never_offers_force_and_never_spawns_from_host`
 - [x] 4.11 Implement: builder omits force; Host handler returns a command rather than spawning it

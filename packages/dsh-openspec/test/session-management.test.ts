@@ -17,6 +17,23 @@ function harness(cwd: string | undefined) {
 }
 
 describe('management session execution boundary', () => {
+  it('actual_init_slash_validates_raw_options_before_any_send_and_uses_current_managed_invocation', async () => {
+    const definitions = new Map<string, any>(), hasOpenSpecDir = vi.fn(async () => false), send = vi.fn()
+    const current = "env OPENSPEC_NO_UPDATE_CHECK=1 OPENSPEC_TELEMETRY=0 '/current/node' '/current/cli'"
+    registerWorkflowCommands({ commands: { register: (d: any) => { definitions.set(d.name, d); return () => {} } } } as any,
+      { entries: [], generation: 'g1', invocation, telemetry: 'adapter-off', updateCheck: 'disabled', initInstruction: 'init', manageInstruction: 'guide', hasOpenSpecDir,
+        initToolIds: async () => (await import('../src/upstream-compat.js')).getOfficialInitToolIds(),
+        generationState: async () => ({ id: 'g2', invocation: current }) })
+    const handler = definitions.get('openspec-init').handler, agent = { session: { header: { cwd: '/caller/project-b' } }, send }
+    for (const [rawInput, argument] of [['--tools evil;touch', 'tools'], ['--language en;rm', 'language'], ['--profile unknown', 'profile'], ['--force', 'option'], ['--tools claude --tools codex', 'tools']] as const) {
+      expect(await handler({ agent, rawInput })).toMatchObject({ kind: 'error', text: expect.stringContaining(argument) })
+      expect(send).not.toHaveBeenCalled(); expect(hasOpenSpecDir).not.toHaveBeenCalled()
+    }
+    expect(await handler({ agent, rawInput: '--tools amazon-q --profile custom --language zh-CN' })).toMatchObject({ kind: 'success' })
+    const text = send.mock.calls[0]![0].content[0].text
+    expect(text).toContain(`${current} init '/caller/project-b' --tools amazon-q --profile custom --no-copilot-cloud --no-animation --language zh-CN`)
+    expect(text).toContain('generation=g2'); expect(text).not.toContain('$DSH_OPENSPEC_CLI')
+  })
   it('real_command_service_preserves_session_header_cwd_and_does_not_record_approval_arguments', async () => {
     const ctx = new Context(); await ctx.plugin(Commands)
     const prepare = vi.fn(async (_intent: unknown, cwd: string) => ({ status: 'ready' as const, command: '/fixture/updater', workdir: cwd }))

@@ -2,7 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-skill'
 import type {} from '@deepseek-ai/dsh-commands'
 import { registerDshOpenSpecSettings } from './options.js'
-import { getOfficialCatalog, resolveEffectiveSelection } from './upstream-compat.js'
+import { getOfficialCatalog, getOfficialInitToolIds, resolveEffectiveSelection } from './upstream-compat.js'
 import { registerWorkflowCommands } from './commands.js'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
@@ -126,6 +126,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         return (await generationsProvider.get({ name: skillName }, { scope }))?.content
       },
       initInstruction: 'Initialize OpenSpec using the official CLI in this workspace.',
+      initToolIds: getOfficialInitToolIds,
       hasOpenSpecDir: async cwd => await import('node:fs/promises').then(fs => fs.stat(join(cwd, 'openspec')).then(info => info.isDirectory()).catch(() => false)),
       manageInstruction: createManagementGuidance(),
       onGeneration: refreshSurface,

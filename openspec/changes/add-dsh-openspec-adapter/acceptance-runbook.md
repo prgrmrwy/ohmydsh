@@ -1,6 +1,6 @@
 # Remaining real acceptance — add-dsh-openspec-adapter
 
-Status: WIP, not acceptance evidence. Round18 semantic audit reopened10 implementation tasks: **170/194 tasks checked,24remaining**. Repair Important findings IR18-ROUTE/DIAG/INIT in implementation-review.md before final live acceptance; the original14 live/final tasks remain. Latest implementation must be deployed before any live surface conclusions. User selected corp-mac-vm's real main profile, not an isolated/replacement server; report that override explicitly rather than editing approved design/specs to disguise it.
+Status: WIP, not acceptance evidence. Round18 semantic audit reopened10 implementation tasks: **171/194 tasks checked,23remaining**. Repair Important findings IR18-ROUTE/DIAG/INIT in implementation-review.md before final live acceptance; the original14 live/final tasks remain. Latest implementation must be deployed before any live surface conclusions. User selected corp-mac-vm's real main profile, not an isolated/replacement server; report that override explicitly rather than editing approved design/specs to disguise it.
 
 ## Prerequisites and limits
 

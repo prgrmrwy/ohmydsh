@@ -1,7 +1,7 @@
 import { renderConsumedContent, type AdapterBlockFields } from './adapter-block.js'
 import type { Context } from '@deepseek-ai/cordis'
 import type { CommandDefinition } from '@deepseek-ai/dsh-commands'
-import { buildInitCommand } from './init-command.js'
+import { buildInitCommand, InitOptionsError, parseInitArgs } from './init-command.js'
 import { checkManagedCli } from './manage-check.js'
 import { parseManageInput, type ManageIntent } from './manage-input.js'
 import type { SessionManagementPlan } from './session-management.js'
@@ -47,6 +47,8 @@ export function registerWorkflowCommands(ctx: Context, input: {
   checkCommand?: () => Promise<string>
   skillDiagnostics?: () => Promise<Array<{ name: string; source: string; provider: string }>>
   hasOpenSpecDir?: (cwd: string) => Promise<boolean>
+  /** Official init tool ids of the pinned release; absent in pure unit harnesses (falls back to the conservative set). */
+  initToolIds?: () => Promise<string[]>
   prepareManagement?: (intent: ManageIntent, cwd: string) => Promise<SessionManagementPlan>
   onGeneration?: () => Promise<void>
   generationState?: () => Promise<{ id: string; invocation: string }>
@@ -85,11 +87,19 @@ export function registerWorkflowCommands(ctx: Context, input: {
       try {
         const cwd = invocation.agent?.session?.header?.cwd
         if (typeof cwd !== 'string' || !isAbsolute(cwd)) return { kind: 'error', text: 'OpenSpec init requires an absolute caller session cwd.' }
+        // Validate every raw argument before any filesystem access or message submission.
+        const parsed = parseInitArgs(typeof invocation.rawInput === 'string' ? invocation.rawInput : '')
+        const allowedTools = input.initToolIds ? new Set(await input.initToolIds()) : undefined
+        buildInitCommand({ cwd, ...parsed, ...(allowedTools ? { allowedTools } : {}) })
         const hasOpenSpecDir = input.hasOpenSpecDir ? await input.hasOpenSpecDir(cwd) : await access(join(cwd, 'openspec')).then(() => true).catch(() => false)
-        const command = buildInitCommand({ cwd, hasOpenSpecDir })
-        await send(invocation.agent, fields(`${input.initInstruction}\n\nRun this adapter-built command in the current workspace:\n${command}`))
+        // The current generation, not the registration-time snapshot, names the CLI the block will also name.
+        const generation = await input.generationState?.()
+        const command = buildInitCommand({ cwd, ...parsed, hasOpenSpecDir, ...(allowedTools ? { allowedTools } : {}), invocation: generation?.invocation ?? input.invocation })
+        await send(invocation.agent, renderConsumedContent(`${input.initInstruction}\n\nRun this adapter-built command in the current workspace:\n${command}`, { generation: generation?.id ?? input.generation, invocation: generation?.invocation ?? input.invocation, telemetry: input.telemetry, updateCheck: input.updateCheck }))
         return { kind: 'success', text: 'OpenSpec init instructions submitted.' }
-      } catch { return { kind: 'error', text: 'OpenSpec init options were invalid.' } }
+      } catch (error) {
+        return { kind: 'error', text: error instanceof InitOptionsError ? `OpenSpec init rejected argument: ${error.argument}. Accepted: --tools <id>, --profile core|custom, --language <code>.` : 'OpenSpec init could not be prepared.' }
+      }
     },
   })
   register({

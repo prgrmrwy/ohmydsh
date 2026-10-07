@@ -86,4 +86,10 @@ export async function prepareCatalog(selection: { all?: boolean; activeGeneratio
   return result
 }
 
+export async function getOfficialInitToolIds(): Promise<string[]> {
+  const config = await importInternal('dist/core/config.js')
+  if (!Array.isArray(config.AI_TOOLS) || config.AI_TOOLS.some((tool: any) => typeof tool.value !== 'string' || !/^[a-z][a-z0-9-]*$/.test(tool.value))) throw new UpstreamIncompatibleError('invalid official tool catalog')
+  return config.AI_TOOLS.filter((tool: any) => tool.available).map((tool: any) => tool.value)
+}
+
 export const getOfficialCatalog = prepareCatalog

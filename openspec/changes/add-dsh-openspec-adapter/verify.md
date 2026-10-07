@@ -4,6 +4,12 @@ DECISION: FAIL
 
 Interim implementation report, not final acceptance. The public naming amendment is complete locally; the overall change remains incomplete. Do not merge, archive, or treat artifact approval as authorization for Host-side mutations.
 
+## Latest bounded work: real init slash validates arguments (goal round 19)
+
+IR18-INIT repaired. RED: the actual `/openspec-init` handler ignored `rawInput`, so unsafe or unknown options were silently dropped and `--force` was never rejected; it also named `$DSH_OPENSPEC_CLI` instead of the selected generation's invocation. GREEN: `parseInitArgs` accepts only `--tools|--profile|--language <value>`, each once; everything else is rejected naming the argument (never echoing the raw value), before any filesystem access or message send. Tools are validated against the pinned release's official catalog (`getOfficialInitToolIds`, read from `dist/core/config.js`; `none` stays allowed), the command uses the current generation's invocation, and the message carries the adapter block. Fallback catalog remains only for pure-builder callers.
+
+Package **33 files / 135 tests pass**; typecheck, artifact and strict validation pass. Task 4.8 re-checked; its coverage row is green again with the carrier-level test as evidence. Progress **171/194, 23 remaining**. Remaining audit findings: IR18-ROUTE, IR18-DIAG, and the live rows. No VM or model operations.
+
 ## Latest accumulated audit: FAIL + consumption integrity repair (goal round 18)
 
 Full recorded-base accumulated-range audit at c446cb5 plus current repair: see implementation-review.md. Important actual defects found in routing (second callback entry; no automatic formal token; malformed confidence accepted; external rather than official existing-change authority), slash init argument handling and caller-scoped diagnostics. Reopened10 implementation tasks instead of preserving false-positive checked claims; authoritative progress now **170/194,24remaining**. Nine misleading scenario green rows downgraded red. No approved proposal/design/spec changes or scope narrowing.
