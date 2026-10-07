@@ -4,7 +4,15 @@ DECISION: FAIL
 
 Interim implementation report, not final acceptance. The public naming amendment is complete locally; the overall change remains incomplete. Do not merge, archive, or treat artifact approval as authorization for Host-side mutations.
 
-## Latest bounded work: actual official Skill caller contract (goal round 10)
+## Latest bounded work: partial-CAS recovery and newline marker guard (goal round 11)
+
+- Actual catalog preparation accepted an upstream body with the reserved start marker on its own newline: escaped regex split matched literal backslashes instead of line breaks. New mocked-official-renderer behavioral test failed with catalog published, then passes after the one-line real CRLF/LF split repair. Official stage parity already uses includes and was not affected. Existing collision test alone did not prove marker rejection.
+- Guarded recovery required BOTH source files at after hashes, mislabeling prepared-but-no-CAS and package-only CAS windows as user edits. Two new tests failed then pass with per-file admission of exact before OR after hashes. Recovery rewrites only files proven changed; untouched source bytes retained. Added lock-only fixture covers a partial rollback window. Genuine drift still fails closed and existing staging-time edit tests remain green.
+- Sync failure after CAS returned generic failed despite pending journal/source changes. New regression RED failed/sync-failed → GREEN recovery-required/transaction-interrupted, no activation, previous active preserved, authorized recovery succeeds. Exceptions after prepared publication are now normalized as interrupted recovery. No automatic source repair or new public grammar.
+
+Final fresh package **32files/120tests pass**; pretest/build/typecheck/artifact/strict/diff checks pass. Repository **263total/261pass/0fail/2existing skips**, collected bash-41. These are deterministic source-state fixtures, NOT a genuine killed-process/lock reclamation/fsync durability or VM acceptance proof. No VM operations/model calls/install. Task totals stay180/194; existing checked recovery/compatibility rows strengthened, remaining live rows unchanged. Final acceptance FAIL, goal active.
+
+## Earlier bounded work: actual official Skill caller contract (goal round 10)
 
 Completed tasks5.28–5.30; progress **180/194**,14remaining. Test-plan scope-option scenario now green with actual caller evidence, not synthetic provider-only calls.
 

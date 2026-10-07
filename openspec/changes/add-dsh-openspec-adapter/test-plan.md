@@ -101,6 +101,10 @@ Transaction RED cross-profile stage/commit allowed, chmod readonly file replaced
 
 `tests/openspec-skill-caller.smoke.mjs` is opt-in and fails if no existing runtime anchor is supplied (never silently skips). Execute after adapter build: `DSH_SKILL_RUNTIME_ANCHOR=<existing official lib/bin.js> DSH_OPENSPEC_TEST_LIB=<current adapter lib> node tests/openspec-skill-caller.smoke.mjs`. Default asserted caller identity0.1.5-rc.2. On corp-mac-vm the real official execute+gesture listeners and real SkillRegistry/createScope pass model/gesture scope identity/cwd/signal, rendered-frame equality, independent per-agent notices, and scopeless zero-check behavior with fixture agents only (zero real sessions/model requests). Missing-scope model and gesture negative controls both fail at their intended assertions. VM actual main launcher unexpectedly resolves caller0.1.5-rc.3; JS is byte-identical to rc.2 and separate explicitly version-labeled diagnostic passes, but pin mismatch remains a deployment concern rather than silently widening acceptance. No live profile build/sync or main-process restart this round; adapter compiled code ran from /tmp fixture using existing dependencies.
 
+## Partial-CAS and marker guard (goal round 11)
+
+`upstream-incompat.test.ts` now actually supplies reserved multiline marker through mocked upstream renderer; RED published hostile catalog → GREEN real CRLF/LF split rejects. `upgrade-transaction.test.ts` RED prepared/no-CAS and package-only rejected as user edits → GREEN accepts each file at exact before/after hash, reconstructs only changed files; lock-only covers partial rollback, unchanged bytes preserved. RED post-CAS sync failure generic failed → GREEN recovery-required with old active and pending journal, authorized recovery. Package32files/120tests and repo261pass/0fail/2existing skips. Fixtures, not actual process-death/durable-write/live-runtime acceptance.
+
 ## Coverage Notes
 
 - All 59 rows are executable; none is `N/A — non-executable`. Count check: 26 session + 19 updates + 14 routing scenarios = 59.

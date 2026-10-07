@@ -78,7 +78,7 @@ export async function prepareCatalog(selection: { all?: boolean; activeGeneratio
     const commandName = `opsx-${workflowId}`
     if (customNames.has(skillName) || customNames.has(commandName)) throw new UpstreamIncompatibleError(`upstream surface collides with custom name ${skillName}/${commandName}`)
     const body = await renderOfficialBody({ workflowId, all: selection.all, workflowIds: requested, delivery })
-    if (body.split(/\\r?\\n/).some((line) => line === ADAPTER_BLOCK_START || line === ADAPTER_BLOCK_END) || body.includes('</skill_instructions>') || body.includes('</skill_content>')) {
+    if (body.split(/\r?\n/).some((line) => line === ADAPTER_BLOCK_START || line === ADAPTER_BLOCK_END) || body.includes('</skill_instructions>') || body.includes('</skill_content>')) {
       throw new UpstreamIncompatibleError(`unsafe marker or loader frame in ${workflowId}`)
     }
     result.push({ workflowId, skillName, commandName, body })

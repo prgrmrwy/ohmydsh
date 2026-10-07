@@ -53,6 +53,7 @@ export function createUpgradeTransaction(options: {
     let ownsBusy = false
     let sourceLock: Awaited<ReturnType<typeof openFile>> | undefined
     let sourceLockFile: string | undefined
+    let journalPrepared = false
     try {
       const checkout = await realpath(options.checkout).catch(() => undefined)
       const recorded = await realpath(options.recordedCheckout).catch(() => undefined)
@@ -109,6 +110,7 @@ export function createUpgradeTransaction(options: {
         addedClosure: Object.keys(expectedLock.packages).filter(key => !(key in oldLock.packages)).map(key => ({ key, hash: hash(JSON.stringify(expectedLock.packages[key])) })),
       }
       await writeAtomic(journalPath, JSON.stringify(prepared))
+      journalPrepared = true
       const stillCurrent = await readSource()
       if (hashes(stillCurrent).packageJson !== initialHashes.packageJson || hashes(stillCurrent).lockfile !== initialHashes.lockfile) return { status: 'blocked', reason: 'source-drift' }
       await writeAtomic(packagePath, JSON.stringify(expectedPackage, null, 2) + '\n')
@@ -119,7 +121,7 @@ export function createUpgradeTransaction(options: {
       await writeAtomic(journalPath, JSON.stringify({ ...prepared, phase: 'committed' }))
       return { status: 'ok', target, activation: (activated as { activation?: string } | undefined)?.activation === 'pending-reload' ? 'pending-reload' as const : 'live' as const }
     } catch (error) {
-      return { status: 'failed', reason: error instanceof Error ? error.message : 'transaction-failed' }
+      return journalPrepared ? { status: 'recovery-required', reason: 'transaction-interrupted' } : { status: 'failed', reason: error instanceof Error ? error.message : 'transaction-failed' }
     } finally {
       if (sourceLock) { await sourceLock.close().catch(() => {}); await rm(sourceLockFile!, { force: true }).catch(() => {}) }
       if (ownsBusy) busy = false
@@ -162,7 +164,16 @@ export function createUpgradeTransaction(options: {
         if (journal.phase === 'committed' || journal.phase === 'rolled-back') return { status: 'blocked', reason: 'no-recovery-needed' }
         if (!validStableTarget(journal.previousVersion) || !journal.after || !journal.before) return { status: 'recovery-required', reason: 'journal-invalid' }
         const current = await readSource(); const now = hashes(current)
-        if (now.packageJson !== journal.after.packageJson || now.lockfile !== journal.after.lockfile) return drift()
+        const packageChanged = now.packageJson !== journal.before.packageJson
+        const lockChanged = now.lockfile !== journal.before.lockfile
+        if ((packageChanged && now.packageJson !== journal.after.packageJson) || (lockChanged && now.lockfile !== journal.after.lockfile)) return drift()
+        if (!packageChanged && !lockChanged) {
+          // Prepared but no source CAS occurred: resolve only the guarded journal.
+          const fresh = hashes(await readSource())
+          if (fresh.packageJson !== now.packageJson || fresh.lockfile !== now.lockfile || await readFile(journalPath, 'utf8') !== journalBytes) return drift()
+          await writeAtomic(journalPath, JSON.stringify({ ...journal, phase: 'rolled-back' }))
+          return { status: 'ok', target: journal.previousVersion }
+        }
         // No saved source text: reconstruct the exact old dependency target using validated staging.
         const staged = await options.stage(journal.previousVersion)
         const rootEntry = staged.lockfile.packages?.['node_modules/@fission-ai/openspec']
@@ -180,15 +191,15 @@ export function createUpgradeTransaction(options: {
           if (existing && (existing.version !== entry.version || existing.integrity !== entry.integrity)) return { status: 'recovery-required', reason: 'lockfile-closure-conflict' }
           if (!existing) lockRestored.packages[key] = entry
         }
-        for (const added of journal.addedClosure ?? []) {
+        for (const added of lockChanged ? journal.addedClosure ?? [] : []) {
           if (typeof added.key !== 'string' || !added.key.startsWith('node_modules/') || added.key === 'node_modules/@fission-ai/openspec' || hash(JSON.stringify(lockRestored.packages[added.key])) !== added.hash) return { status: 'recovery-required', reason: 'journal-invalid' }
           delete lockRestored.packages[added.key]
         }
         // Staging and verification await external work: recheck both source and the exact journal before CAS.
         const fresh = hashes(await readSource())
         if (fresh.packageJson !== now.packageJson || fresh.lockfile !== now.lockfile || await readFile(journalPath, 'utf8') !== journalBytes) return drift()
-        await writeAtomic(packagePath, JSON.stringify(packageRestored, null, 2) + '\n')
-        await writeAtomic(lockPath, JSON.stringify(lockRestored, null, 2) + '\n')
+        if (packageChanged) await writeAtomic(packagePath, JSON.stringify(packageRestored, null, 2) + '\n')
+        if (lockChanged) await writeAtomic(lockPath, JSON.stringify(lockRestored, null, 2) + '\n')
         await writeAtomic(journalPath, JSON.stringify({ ...journal, phase: 'rolled-back' }))
         return { status: 'ok', target: journal.previousVersion }
       } catch { return { status: 'recovery-required', reason: 'recovery-failed' } }
