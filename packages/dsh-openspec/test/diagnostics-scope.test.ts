@@ -5,6 +5,7 @@ import { createScope } from '@deepseek-ai/dsh-scope'
 import { diagnoseSkillWinners } from '../src/manage-check.js'
 import { registerWorkflowCommands } from '../src/commands.js'
 import { createRegistryProvider } from '../src/registry-provider.js'
+import { strictAgent } from './support-agent.js'
 
 const policy = { modelInvocable: true, userInvocable: true }
 const summary = (provider: string, source: string, rank: number) => ({ name: 'openspec-apply-change', description: 'd', invocation: policy, source, provider, rank, locator: provider })
@@ -30,16 +31,17 @@ describe('caller-scoped winning-provider diagnostics', () => {
     const definitions = new Map<string, any>(), skillDiagnostics = vi.fn(async () => [])
     registerWorkflowCommands({ commands: { register: (d: any) => { definitions.set(d.name, d); return () => {} } } } as any,
       { entries: [], generation: 'g1', invocation: "env OPENSPEC_NO_UPDATE_CHECK=1 OPENSPEC_TELEMETRY=0 '/usr/bin/node' '/cli'", telemetry: 'adapter-off', updateCheck: 'disabled', initInstruction: 'i', manageInstruction: 'guide', skillDiagnostics })
-    const agent = { session: { header: { cwd: '/workspace-with-copy' } }, send: vi.fn() }
+    const { agent } = strictAgent('/workspace-with-copy')
     await definitions.get('openspec-upgrade').handler({ agent, rawInput: '' })
     expect(skillDiagnostics).toHaveBeenCalledWith({ cwd: '/workspace-with-copy', scope: agent })
   })
   it('node_support_is_probed_from_the_session_bash_path_not_the_host_process', async () => {
-    const definitions = new Map<string, any>(), send = vi.fn(), checkBashNodeVersion = vi.fn(async () => '18.0.0')
+    const definitions = new Map<string, any>(), checkBashNodeVersion = vi.fn(async () => '18.0.0')
     registerWorkflowCommands({ commands: { register: (d: any) => { definitions.set(d.name, d); return () => {} } } } as any,
       { entries: [], generation: 'g1', invocation: "env OPENSPEC_NO_UPDATE_CHECK=1 OPENSPEC_TELEMETRY=0 '/usr/bin/node' '/cli'", telemetry: 'adapter-off', updateCheck: 'disabled', initInstruction: 'i', manageInstruction: 'guide', checkBashNodeVersion })
-    await definitions.get('openspec-upgrade').handler({ agent: { session: { header: { cwd: '/w' } }, send }, rawInput: '' })
-    const text = send.mock.calls[0]![0].content[0].text as string
+    const { agent, texts } = strictAgent('/w')
+    await definitions.get('openspec-upgrade').handler({ agent, rawInput: '' })
+    const text = texts()[0]!
     expect(checkBashNodeVersion).toHaveBeenCalled()
     expect(text).toContain('"nodeSupported":false')            // 18.0.0 < required 20.19.0, even though the Host runs a newer Node
     expect(text).toContain('"bashNodeVersion":"18.0.0"')

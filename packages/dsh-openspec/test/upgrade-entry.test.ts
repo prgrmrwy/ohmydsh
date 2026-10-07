@@ -9,6 +9,7 @@ import { createManagementGuidance } from '../src/manage-flow.js'
 import { buildAdapterBlock, parseAdapterBlock } from '../src/adapter-block.js'
 import { getOfficialCatalog, resolveEffectiveSelection } from '../src/upstream-compat.js'
 import { activateGeneration, loadGeneration } from '../src/generations.js'
+import { strictAgent } from './support-agent.js'
 
 // No real timer, registry request, sync, source transaction or live Host in this naming regression.
 vi.mock('../src/catalog-invalidation.js', () => ({
@@ -45,9 +46,9 @@ describe('openspec-upgrade public entry', () => {
     const { definitions } = await startAdapter(home)
     const state = await loadGeneration(home)
     expect(state.version).toBe('1.13.2')
-    const send = vi.fn()
-    await definitions.get('openspec-upgrade').handler({ agent: { session: { header: { cwd: home } }, send }, rawInput: '' })
-    const content = send.mock.calls[0]![0].content[0].text
+    const { agent, texts } = strictAgent(home)
+    await definitions.get('openspec-upgrade').handler({ agent, rawInput: '' })
+    const content = texts()[0]!
     expect(content).toContain('\\"installed\\":\\"1.13.2\\"')
     expect(content).not.toContain('\\"installed\\":\\"1.13.1\\"')
   })
@@ -59,9 +60,9 @@ describe('openspec-upgrade public entry', () => {
     await writeFile(join(home, 'plugins/dsh-openspec/upgrade-journal.json'), JSON.stringify({ phase: 'prepared', target: '1.13.2' }))
     const { provider, definitions } = await startAdapter(home)
     expect(await readFile(activePath)).toEqual(before)
-    const send = vi.fn()
-    await definitions.get('openspec-upgrade').handler({ agent: { session: { header: { cwd: home } }, send }, rawInput: '' })
-    expect(send.mock.calls[0]![0].content[0].text).toContain('\\"installed\\":\\"1.13.1\\"')
+    const { agent, texts } = strictAgent(home)
+    await definitions.get('openspec-upgrade').handler({ agent, rawInput: '' })
+    expect(texts()[0]).toContain('\\"installed\\":\\"1.13.1\\"')
     const candidate = (await provider.list()).find((skill: any) => skill.name === 'historical-workflow')
     expect(candidate).toBeDefined()
     const loaded = await provider.get(candidate, {})
@@ -99,14 +100,14 @@ describe('openspec-upgrade public entry', () => {
   it('renamed_help_is_read_only_and_invalid_usage_names_the_new_entry', async () => {
     const definitions = new Map<string, any>()
     const mutation = vi.fn()
-    const send = vi.fn()
+    const { agent } = strictAgent('/caller')
     registerWorkflowCommands({ commands: { register: (definition: any) => { definitions.set(definition.name, definition); return () => {} } } } as any,
       { entries: [], generation: 'g1', invocation, telemetry: 'adapter-off', updateCheck: 'disabled', initInstruction: 'init', manageInstruction: createManagementGuidance(), prepareManagement: mutation })
     const handler = definitions.get('openspec-upgrade')?.handler
     expect(handler).toBeTypeOf('function')
-    await handler({ agent: { send }, rawInput: '' })
+    await handler({ agent, rawInput: '' })
     expect(mutation).not.toHaveBeenCalled()
-    const invalid = await handler({ agent: { send }, rawInput: 'upgrade latest --approve' })
+    const invalid = await handler({ agent, rawInput: 'upgrade latest --approve' })
     expect(invalid).toMatchObject({ kind: 'error', text: expect.stringContaining('/openspec-upgrade') })
     expect(mutation).not.toHaveBeenCalled()
   })

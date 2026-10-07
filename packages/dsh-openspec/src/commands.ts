@@ -1,5 +1,6 @@
 import { renderConsumedContent, type AdapterBlockFields } from './adapter-block.js'
 import type { Context } from '@deepseek-ai/cordis'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { CommandDefinition } from '@deepseek-ai/dsh-commands'
 import { buildInitCommand, InitOptionsError, parseInitArgs } from './init-command.js'
 import { checkManagedCli } from './manage-check.js'
@@ -63,7 +64,11 @@ export function registerWorkflowCommands(ctx: Context, input: {
     generation: input.generation, invocation: input.invocation,
     telemetry: input.telemetry, updateCheck: input.updateCheck,
   })
-  const send = async (agent: any, text: string) => agent.send({ role: 'user', content: [{ type: 'text', text }], source: { kind: 'adapter', id: 'dsh-openspec' } }, { kind: 'next' }, false)
+  // Official constructor: it mints the stable message id Agent.send/inbox rely on. Official commands (/goal, /plan)
+  // deliver through followup()/steer(), i.e. a real inbox target that WAKES the driver — a command that only
+  // queues a message without waking leaves the user staring at an empty transcript.
+  const adapterMessage = (text: string) => createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'plugin', plugin: 'dsh-openspec' } })
+  const send = async (agent: any, text: string) => agent.followup(adapterMessage(text))
   const register = (definition: CommandDefinition) => disposers.push(ctx.commands.register(definition))
   for (const entry of input.entries) register({
     name: entry.commandName,
@@ -78,7 +83,8 @@ export function registerWorkflowCommands(ctx: Context, input: {
         const generation = await input.generationState?.()
         const body = consumed ?? renderConsumedContent(entry.body, { generation: generation?.id ?? input.generation, invocation: generation?.invocation ?? input.invocation, telemetry: input.telemetry, updateCheck: input.updateCheck })
         await send(invocation.agent, body)
-        if (invocation.rawInput !== '') invocation.agent.send({ role: 'user', content: [{ type: 'text', text: invocation.rawInput }], source: { kind: 'user' } }, { kind: 'next' }, false)
+        // The user's own request reaches the model unmodified, after the adapter message, as a real user message.
+        if (invocation.rawInput !== '') invocation.agent.followup(createUserMessage({ content: [{ type: 'text', text: invocation.rawInput }], source: { kind: 'user' } }))
         return { kind: 'success', text: 'OpenSpec workflow submitted.' }
       } catch { return { kind: 'error', text: 'OpenSpec workflow could not be submitted.' } }
     },

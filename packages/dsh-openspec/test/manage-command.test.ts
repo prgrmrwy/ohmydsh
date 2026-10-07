@@ -1,15 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
 import { parseManageInput } from '../src/manage-input.js'
 import { registerWorkflowCommands } from '../src/commands.js'
+import { strictAgent } from './support-agent.js'
 
 const invocation = "env OPENSPEC_NO_UPDATE_CHECK=1 OPENSPEC_TELEMETRY=0 '/usr/bin/node' '/cli'"
 function harness(prepareManagement: any) {
   const handlers = new Map<string, (invocation: any) => Promise<any>>()
   const ctx = { commands: { register: (definition: any) => { handlers.set(definition.name, definition.handler); return () => {} } } }
   registerWorkflowCommands(ctx as any, { entries: [], generation: 'g1', invocation, telemetry: 'adapter-off', updateCheck: 'disabled', initInstruction: 'i', manageInstruction: 'guide', prepareManagement } as any)
-  const sent: string[] = []
-  const agent = { session: { header: { cwd: '/caller' } }, send: async (message: any) => { sent.push(message.content[0].text) } }
-  return { run: (rawInput: string) => handlers.get('openspec-upgrade')!({ agent, rawInput }), sent }
+  const { agent, texts } = strictAgent('/caller')
+  return { run: (rawInput: string) => handlers.get('openspec-upgrade')!({ agent, rawInput }), get sent() { return texts() } }
 }
 
 describe('management command', () => {
