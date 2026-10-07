@@ -45,8 +45,10 @@ export function apply(ctx: Context, config: Config = {}): void {
     const updater = fileURLToPath(new URL('./session-updater.js', import.meta.url))
     const routingRegistry = createRoutingRegistry(activeRoutingProviderId)
     const routingDispatcher = createRoutingDispatcher()
-    child.provide(RoutingRegistryServiceName, routingRegistry)
-    child.provide('openspec.routing.dispatch', (request: Parameters<typeof routingRegistry.dispatch>[0]) => routingDispatcher.dispatch(routingRegistry, request))
+    // Extensions may only register a provider. Dispatch and disposal stay private so the dispatcher
+    // (tokens, feature/candidate validation, authority) is the single route to a provider callback.
+    child.provide(RoutingRegistryServiceName, { register: routingRegistry.register })
+    child.provide('openspec.routing.dispatch', (request: Parameters<typeof routingDispatcher.dispatch>[1]) => routingDispatcher.dispatch(routingRegistry, request))
 
     const selected = await resolveEffectiveSelection({ configPath: config.officialConfigPath, workflows: config.selectedWorkflows })
     const entries = await getOfficialCatalog({ workflowIds: selected.workflows, delivery: selected.delivery })

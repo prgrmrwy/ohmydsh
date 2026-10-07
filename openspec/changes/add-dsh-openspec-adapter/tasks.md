@@ -176,19 +176,19 @@ Round history: round 1 is VOID. Round 2 was `APPROVE_WITH_CHANGES` with all 16 R
 - [x] 8.5 Implement: duplicate/unsupported/absent handling without order-based fallback
 - [x] 8.6 Refactor; full suite stays green
 - [x] 8.7 Write failing test: P/routing-dispatch.test.ts `two_stage_tokens_correlate_and_candidate_kinds_differ` (assert it fails for the right reason)
-- [ ] 8.8 Implement: bounded feature schema, typed candidates from official schema discovery and trusted external declarations
+- [x] 8.8 Implement: bounded feature schema, typed candidates from official schema discovery and trusted external declarations
 - [x] 8.9 Refactor; full suite stays green
 - [x] 8.10 Write failing test: P/routing-dispatch.test.ts `invalid_stage_tokens_refused_with_zero_callbacks` (assert it fails for the right reason)
-- [ ] 8.11 Implement: ≥128-bit single-use session-bound token with 10min TTL, injectable clock, bounded table with eviction, `invalid-stage-token`
+- [x] 8.11 Implement: ≥128-bit single-use session-bound token with 10min TTL, injectable clock, bounded table with eviction, `invalid-stage-token`
 - [x] 8.12 Refactor; full suite stays green
 - [x] 8.13 Write failing test: P/routing-dispatch.test.ts `unknown_features_or_ineligible_candidate_needs_review` (assert it fails for the right reason)
-- [ ] 8.14 Implement: input/result validation, never fabricate a candidate
+- [x] 8.14 Implement: input/result validation, never fabricate a candidate
 - [x] 8.15 Refactor; full suite stays green
 - [x] 8.16 Write failing test: P/routing-dispatch.test.ts `traversal_change_name_rejected_and_candidate_text_bounded_stripped_labeled` (assert it fails for the right reason)
-- [ ] 8.17 Implement: change-name pattern validation and root containment (no traversal/symlink escape); candidate text ≤2 KiB, control-stripped, labeled untrusted
+- [x] 8.17 Implement: change-name pattern validation and root containment (no traversal/symlink escape); candidate text ≤2 KiB, control-stripped, labeled untrusted
 - [x] 8.18 Refactor; full suite stays green
 - [x] 8.19 Write failing test: P/routing-authority.test.ts `existing_change_returns_recorded_schema_without_callback` (assert it fails for the right reason)
-- [ ] 8.20 Implement: dispatcher-resolved existing-change authority via official discovery
+- [x] 8.20 Implement: dispatcher-resolved existing-change authority via official discovery
 - [x] 8.21 Refactor; full suite stays green
 - [x] 8.22 Write failing test: P/routing-authority.test.ts `confident_result_has_authority_none_and_no_side_effects` (assert it fails for the right reason)
 - [x] 8.23 Implement: `authority: none` on every result; no side effects
@@ -197,13 +197,13 @@ Round history: round 1 is VOID. Round 2 was `APPROVE_WITH_CHANGES` with all 16 R
 - [x] 8.26 Implement: approval-record gate (test fixtures only in this change; Jev not selectable)
 - [x] 8.27 Refactor; full suite stays green
 - [x] 8.28 Write failing test: P/routing-entry.test.ts `single_entry_is_only_route_to_provider_and_no_other_export_reaches_it` (assert it fails for the right reason)
-- [ ] 8.29 Implement: one in-process dispatcher entry; no tool, no guidance, no session registration
+- [x] 8.29 Implement: one in-process dispatcher entry; no tool, no guidance, no session registration
 - [x] 8.30 Refactor; full suite stays green
 - [x] 8.31 Write failing test: P/routing-failure.test.ts `needs_review_passes_through_without_substitution` (assert it fails for the right reason)
 - [x] 8.32 Implement: pass-through of `needs-review`
 - [x] 8.33 Refactor; full suite stays green
 - [x] 8.34 Write failing test: P/routing-failure.test.ts `timeout_cancel_throw_unload_normalize_and_persist_no_text` (assert it fails for the right reason)
-- [ ] 8.35 Implement: 5s budget, cancellation forwarding, stale-result discard, normalized error class only
+- [x] 8.35 Implement: 5s budget, cancellation forwarding, stale-result discard, normalized error class only
 - [x] 8.36 Refactor; full suite stays green
 
 ## 9. Host wiring and target-runtime smoke (isolated profile only)

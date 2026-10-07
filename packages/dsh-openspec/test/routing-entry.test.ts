@@ -10,5 +10,7 @@ describe('routing API exposure', () => {
     await entry.dispatch(registry, { stage: 'change-necessity', sessionId: 's', features: {} })
     expect(calls).toBe(1)
     expect(Object.keys(entry).sort()).toEqual(['consumeToken', 'dispatch', 'issueFormalToken', 'issueToken', 'validateCandidateText', 'validateChange'])
+    // The Host-published registration service is a separate, narrower surface (see routing-surface.test.ts):
+    // it exposes only `register`, so no published symbol other than the dispatcher entry reaches a provider callback.
   })
 })

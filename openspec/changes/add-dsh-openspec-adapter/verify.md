@@ -4,6 +4,21 @@ DECISION: FAIL
 
 Interim implementation report, not final acceptance. The public naming amendment is complete locally; the overall change remains incomplete. Do not merge, archive, or treat artifact approval as authorization for Host-side mutations.
 
+## Latest bounded work: routing contract repaired (goal round 19)
+
+IR18-ROUTE repaired with 10 new tests in `routing-surface.test.ts` (9 RED against the audited source, 1 added after for the authority source). Defects reproduced then fixed:
+
+- **Second callback entry.** The Host-published `openspec.routing` service exposed the whole registry (`dispatch`, `dispose`, `register`), so any extension could call a provider with a forged token and skip the dispatcher. It now publishes only `{ register }`; the single dispatch entry stays the only route. The test drives the real `apply` startup and also asserts no model tool is registered.
+- **First stage never issued a token.** A `formal-workflow` first-stage result now gets a dispatcher-minted, session-bound, single-use token; `direct` or ineligible results get none. A provider-supplied `token` is stripped, never forwarded.
+- **Token handling.** A wrong-session attempt used to burn the legitimate owner's token; it no longer does (found by a failing lifecycle test, not by the original audit).
+- **Result validation.** `confidence` must be a finite number in [0, 1]; first-stage ids are restricted to `direct|formal-workflow`.
+- **Bounds.** Candidates are capped at 32 and description text is bounded in UTF-8 bytes (2 KiB including the untrusted label), not UTF-16 units.
+- **Authority source.** Existing-change authority is read from the change's own `.openspec.yaml` by the pinned official `readChangeMetadata`; a caller-supplied schema is ignored when a root is available. Missing metadata, unknown names and symlink escapes yield no authority.
+
+Package **34 files / 145 tests pass**; typecheck, artifact and strict validation pass; repository 263 total / 261 pass / 0 fail / 2 existing skips. Tasks 8.8, 8.11, 8.14, 8.17, 8.20, 8.29, 8.35 re-checked and seven coverage rows green again. Progress **178/194, 16 remaining**.
+
+Limits: all in-process fixtures; no model tool, session or live Host was involved, and no production provider exists (contract-only per the approved spec). Remaining: IR18-DIAG (caller-scoped winning-provider diagnostics, Bash-PATH node check) and the live rows 9.1-9.15, 10.2, 10.3.
+
 ## Latest bounded work: real init slash validates arguments (goal round 19)
 
 IR18-INIT repaired. RED: the actual `/openspec-init` handler ignored `rawInput`, so unsafe or unknown options were silently dropped and `--force` was never rejected; it also named `$DSH_OPENSPEC_CLI` instead of the selected generation's invocation. GREEN: `parseInitArgs` accepts only `--tools|--profile|--language <value>`, each once; everything else is rejected naming the argument (never echoing the raw value), before any filesystem access or message send. Tools are validated against the pinned release's official catalog (`getOfficialInitToolIds`, read from `dist/core/config.js`; `none` stays allowed), the command uses the current generation's invocation, and the message carries the adapter block. Fallback catalog remains only for pure-builder callers.
