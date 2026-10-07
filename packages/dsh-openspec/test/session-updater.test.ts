@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), 'session-updater-')); roots.push(root)
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'session-updater-'))); roots.push(root)
   const home = join(root, 'home'), checkout = join(root, "authoritative ' checkout"), project = join(root, 'project')
   await mkdir(join(home, 'plugins/dsh-openspec'), { recursive: true }); await mkdir(join(checkout, '.git'), { recursive: true }); await mkdir(project)
   await writeFile(join(home, 'plugins/dsh-openspec/source-checkout.json'), JSON.stringify({ schemaVersion: 1, checkout }))
