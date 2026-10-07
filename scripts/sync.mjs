@@ -275,6 +275,24 @@ function readJson(file) {
   try { return JSON.parse(readFileSync(file, 'utf8')) } catch { return undefined }
 }
 
+function validateDshOpenSpecPin(items, sourceRoot = REPO) {
+  const item = items.find((entry) => entry.id === 'dsh-openspec' && entry.type === 'package' && entry.enabled)
+  if (!item || item.source !== 'local') return
+  const root = item.sourceRoot ?? sourceRoot
+  const pkgPath = path.join(root, 'packages', 'dsh-openspec', 'package.json')
+  const pkg = readJson(pkgPath)
+  const declared = pkg?.dependencies?.['@fission-ai/openspec']
+  const lock = readJson(path.join(root, 'package-lock.json'))
+  const lockPackage = lock?.packages?.['node_modules/@fission-ai/openspec']
+  const workspaceLock = lock?.packages?.['packages/dsh-openspec']
+  const resolved = lockPackage?.version
+  const integrity = lockPackage?.integrity
+  const workspacePin = workspaceLock?.dependencies?.['@fission-ai/openspec']
+  if (pkg?.name !== 'dsh-openspec' || typeof declared !== 'string' || declared !== resolved || declared !== workspacePin || typeof integrity !== 'string' || !integrity.startsWith('sha512-')) {
+    throw new Error(`dsh-openspec-pin-mismatch: packages/dsh-openspec/package.json=${String(declared)}; root package-lock.json @fission-ai/openspec=${String(resolved)} (workspace ${String(workspacePin)}; integrity ${integrity ? 'present' : 'missing'})`)
+  }
+}
+
 async function writeJson(file, value) {
   await writeFile(file, JSON.stringify(value, null, 2) + '\n')
 }
@@ -1615,8 +1633,33 @@ function logVersion(manifest) {
 }
 
 // ---------- main ----------
+/**
+ * Record the authoritative source checkout for the dsh-openspec upgrade transaction.
+ * The record is the only place the adapter learns which checkout owns its pin and lockfile.
+ * An unchanged record is not a change, so repeated syncs stay no-ops.
+ */
+async function syncDshOpenSpecSourceRecord(items) {
+  const item = items.find((entry) => entry.id === 'dsh-openspec' && entry.type === 'package' && entry.enabled && entry.source === 'local')
+  const file = path.join(DSH_HOME, 'plugins', 'dsh-openspec', 'source-checkout.json')
+  if (!item) return
+  const checkout = await realpath(item.sourceRoot ?? REPO)
+  const next = JSON.stringify({ schemaVersion: 1, checkout }, null, 2) + '\n'
+  let current
+  try { current = await readFile(file, 'utf8') } catch { current = undefined }
+  if (current === next) return
+  await mkdir(path.dirname(file), { recursive: true })
+  const temp = `${file}.${process.pid}.tmp`
+  await writeFile(temp, next)
+  await rename(temp, file)
+  change(`record dsh-openspec authoritative checkout ${checkout}`)
+}
+
 async function main() {
   const manifest = loadManifest()
+  // Validate the adapter's sole official dependency pin before any profile
+  // creation or mutation; package manager installation separately verifies
+  // the lockfile integrity.
+  if (!process.argv.includes('--reset')) validateDshOpenSpecPin(manifest.items)
   // Registry identity is a precondition, not an install-time best effort. Keep
   // this before profile creation, state migration, or any other side effect.
   // Reset only removes managed state and must remain available offline.
@@ -1644,6 +1687,7 @@ async function main() {
     await syncAgentInstructions(manifest.agentInstructions)
     await syncDependencies(manifest)
     await syncPackages(manifest, manifest.items, packageNames)
+    await syncDshOpenSpecSourceRecord(manifest.items)
     await syncThirdPartyAssets(manifest.thirdPartyResources)
     await syncDirs(manifest, manifest.items, 'preset', 'presets', path.join(DSH_HOME, '.agent-presets'), 'agent.cordis.yml', 'preset')
     await syncDirs(manifest, manifest.items, 'skill', 'skills', path.join(DSH_HOME, 'skills'), 'SKILL.md', 'skill')

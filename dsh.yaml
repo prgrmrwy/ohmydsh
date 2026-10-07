@@ -100,6 +100,14 @@ customizations:
     enabled: true
     brief: Worktree Session 首发隔离(task branch/lean deps/独立 build home)
     note: '自研 Host+Web bundle；从 base 在首次普通发送时创建唯一 ws/* branch 与 .worktrees/* checkout，不切换主 checkout；npm lean/mutable、.env.local ignored-only 同步、隔离开发 DSH_HOME、安全 status/promote/clean；交互与 Git 探测概念参考 https://github.com/LaoYueHanNi/dsh-git-worktree (MIT，详见 packages/worktree-session/NOTICE)'
+  # 自研(local):适配受管、版本化的官方 OpenSpec 会话工作流。
+  - id: dsh-openspec
+    type: package
+    source: local
+    version: 0.1.0
+    enabled: true
+    brief: 官方 OpenSpec Skills 与 commands 的受管 DSH adapter
+    note: '上游为 @fission-ai/openspec 官方 CLI/templates，遵循其发布许可；仅请求无凭据 npm 官方 registry 元数据，受管 CLI 默认关闭遥测与自身更新检查，不传输会话、代码、路径或 provider 凭据。精确版本记录于 packages/dsh-openspec/package.json，根 package-lock.json 为锁定依据；升级前验证官方 renderer parity、CLI smoke 与 lockfile integrity。移除方式：禁用本条并 sync，待所有 session 结束后可手动移除运行状态目录；v1 不提供 purge。宿主层 Skill provider 会进入 Pet scope，见 BACKLOG.md D006。'
   # 自研(local):按知识域物理隔离、可跨库检索的 memex 持久记忆层 + 「记忆」设置页。
   - id: dsh-memex
     type: package

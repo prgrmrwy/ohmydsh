@@ -1,0 +1,7 @@
+This package is an original ohmydsh implementation and does not copy source code from prior art.
+
+Prior art acknowledged: @codigoconelmer/dsh-openspec@0.1.0 (gitHead
+95966d073759c56cf3a1c21ad58bf2a5309ea6a2), licensed under MIT.
+
+OpenSpec CLI and workflow templates are provided by @fission-ai/openspec;
+see its package metadata and license for the upstream license and notices.

@@ -137,9 +137,13 @@ async function npmViewPackage(name, ctx) {
     const line = String(result.stderr ?? '').split('\n').find((l) => l.trim() !== '') ?? `exit ${result.status}`
     throw new Error(`npm view: ${line.trim()}`)
   }
-  const doc = JSON.parse(result.stdout)
-  const latest = doc['dist-tags']?.latest
-  return { latest, deprecated: doc.deprecated, peers: doc.peerDependencies ?? {}, publishedAt: doc.time?.[latest] }
+  const parsed = JSON.parse(result.stdout)
+  // npm 12 may serialize a multi-field `npm view ... --json` projection as a
+  // one-element array, even when the command targets one package. Normalize
+  // that documented CLI shape before reading the selected dist-tag.
+  const doc = Array.isArray(parsed) ? parsed[0] : parsed
+  const latest = doc?.['dist-tags']?.latest
+  return { latest, deprecated: doc?.deprecated, peers: doc?.peerDependencies ?? {}, publishedAt: doc?.time?.[latest] }
 }
 
 async function packageInfo(name, registry, ctx) {

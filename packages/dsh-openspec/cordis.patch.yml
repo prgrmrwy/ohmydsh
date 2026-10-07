@@ -1,0 +1,4 @@
+# DSH OpenSpec adapter host bundle entry.
+- insert:
+    - id: dsh-openspec
+      name: dsh-openspec
