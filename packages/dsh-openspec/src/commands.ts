@@ -85,6 +85,8 @@ export function registerWorkflowCommands(ctx: Context, input: {
   })
   register({
     name: 'openspec-init', description: 'Initialize OpenSpec in the current workspace', recordInput: false,
+    // Advertise the grammar parseInitArgs accepts so clients keep the composer open for arguments.
+    input: { hint: '[--tools <id>] [--profile core|custom] [--language <code>]' },
     handler: async (invocation: any) => {
       try {
         const cwd = invocation.agent?.session?.header?.cwd
@@ -106,6 +108,8 @@ export function registerWorkflowCommands(ctx: Context, input: {
   })
   register({
     name: 'openspec-upgrade', description: 'Upgrade the managed official OpenSpec stack (adapter-defined)', recordInput: false,
+    // Mirrors parseManageInput: empty input is a read-only check; every mutation needs the literal --approve.
+    input: { hint: '[upgrade <X.Y.Z> | rollback <X.Y.Z> | refresh-project] [--approve]' },
     handler: async (invocation: any) => {
       try {
         const intent = parseManageInput(typeof invocation.rawInput === 'string' ? invocation.rawInput : '')

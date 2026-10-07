@@ -17,6 +17,21 @@ function harness(cwd: string | undefined) {
 }
 
 describe('management session execution boundary', () => {
+  it('every_published_command_advertises_an_input_hint_because_both_custom_commands_accept_arguments', () => {
+    const definitions = new Map<string, any>()
+    registerWorkflowCommands({ commands: { register: (d: any) => { definitions.set(d.name, d); return () => {} } } } as any,
+      { entries: [{ workflowId: 'propose', skillName: 'openspec-propose', commandName: 'opsx-propose', body: 'b' }], generation: 'g1', invocation, telemetry: 'adapter-off', updateCheck: 'disabled', initInstruction: 'i', manageInstruction: 'g' })
+    // Commands that parse arguments must say so: the client uses the descriptor to offer the textbox, and
+    // without it picking the command from the menu leaves the composer empty.
+    for (const name of ['opsx-propose', 'openspec-init', 'openspec-upgrade']) {
+      expect(definitions.get(name)?.input?.hint, name).toEqual(expect.any(String))
+      expect(definitions.get(name).input.hint.length).toBeGreaterThan(0)
+    }
+    expect(definitions.get('openspec-init').input.hint).toContain('--tools')
+    expect(definitions.get('openspec-upgrade').input.hint).toContain('--approve')
+    // The advertised grammar must be the one the parsers actually accept (no drift between hint and parser).
+    expect(definitions.get('openspec-upgrade').input.hint).toMatch(/upgrade .*rollback .*refresh-project/s)
+  })
   it('actual_init_slash_validates_raw_options_before_any_send_and_uses_current_managed_invocation', async () => {
     const definitions = new Map<string, any>(), hasOpenSpecDir = vi.fn(async () => false), send = vi.fn()
     const current = "env OPENSPEC_NO_UPDATE_CHECK=1 OPENSPEC_TELEMETRY=0 '/current/node' '/current/cli'"
