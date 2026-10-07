@@ -4,7 +4,15 @@ DECISION: FAIL
 
 Interim implementation report, not final acceptance. The public naming amendment is complete locally; the overall change remains incomplete. Do not merge, archive, or treat artifact approval as authorization for Host-side mutations.
 
-## Latest bounded work: slash durable caller cwd (goal round 17)
+## Latest accumulated audit: FAIL + consumption integrity repair (goal round 18)
+
+Full recorded-base accumulated-range audit at c446cb5 plus current repair: see implementation-review.md. Important actual defects found in routing (second callback entry; no automatic formal token; malformed confidence accepted; external rather than official existing-change authority), slash init argument handling and caller-scoped diagnostics. Reopened10 implementation tasks instead of preserving false-positive checked claims; authoritative progress now **170/194,24remaining**. Nine misleading scenario green rows downgraded red. No approved proposal/design/spec changes or scope narrowing.
+
+Runtime load-integrity finding repaired: sourceHashes previously checked only during materializer reuse. RED2 healthy materialized generation with deletedCLI/tamperdist still returned body+block. GREEN opt-in verification at generation provider get and project-refresh executable boundary. Initial broad all-load check caused5catalog/startup timeout failures from repeated real dependency hashing; moved validation to consumption, unchanged timeout/assertion budgets. Final package **33files/132tests pass**, build/typecheck/artifacts/strict/diff pass (bash-55); repo **263total/261pass/0fail/2existing skips** (bash-54). Legacy/test lightweight manifests without hashes still supported; no manifest-signature or hostile owner claim. VM performance unmeasured.
+
+Routing semantic probe against built JS issued2callbacks through registry/direct+dispatcher; returned selected confidence5 and no first-stage token. Exit0 is reproducer execution, NOT passed contract. Needs focused RED repair in subsequent work; do not hide behind existing tests. No VM retry/network/model/install. DNS repair and real-session/disable consent still pending, but useful local important fixes remain, goal active not blocked. Final FAIL.
+
+## Earlier bounded work: slash durable caller cwd (goal round 17)
 
 Source audit of installed official dsh-agent runtime types and dsh-commands.execute confirms agent.session.header.cwd, not agent.cwd. Adapter init previously agent.cwd??process.cwd (wrong Host fallback); approved manage agent.cwd (reject real session). RED corrected actual-shaped harness reproduces2fail. GREEN reads durable session.header.cwd in both; absent/nonabsolute init fails closed. New real installed CommandService+Cordis+createScope fixture executes slash approved refresh and passes exact callerB path; lifecycle omits approval args. This uses real command caller service with fixture agent, not actual Host/model traffic. Leftover manage-command fake cwd fixtures caused initial full-suite2fail, repaired shape only; final allpass.
 

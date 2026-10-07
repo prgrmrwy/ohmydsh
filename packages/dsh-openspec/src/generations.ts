@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
+import { generationHashes } from './generation-closure.js'
 import { dirname, join } from 'node:path'
 
 export type Generation = { id: string; [key: string]: unknown }
@@ -35,12 +36,18 @@ export async function selectGeneration(home: string, id: string): Promise<Genera
   return generation
 }
 
-export async function loadGeneration(home: string, id?: string): Promise<Generation> {
+export async function loadGeneration(home: string, id?: string, options: { verifyRuntime?: boolean } = {}): Promise<Generation> {
   try {
     const selected = id ?? JSON.parse(await readFile(join(base(home), 'active.json'), 'utf8')).id
     if (typeof selected !== 'string' || !/^[a-z0-9._-]+$/.test(selected)) throw new Error()
     const generation = JSON.parse(await readFile(join(base(home), 'generations', selected, 'generation.json'), 'utf8'))
     if (generation?.id !== selected || typeof generation !== 'object' || Array.isArray(generation)) throw new Error()
+    if (options.verifyRuntime && generation.sourceHashes !== undefined) {
+      const recorded = generation.sourceHashes
+      if (!recorded || typeof recorded !== 'object' || Array.isArray(recorded)) throw new Error()
+      const actual = await generationHashes(join(base(home), 'generations', selected))
+      if (JSON.stringify(actual) !== JSON.stringify(recorded)) throw new Error()
+    }
     return generation
   } catch {
     throw new GenerationInvalidError()

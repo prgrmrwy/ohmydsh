@@ -71,10 +71,10 @@ Round history: round 1 is VOID. Round 2 was `APPROVE_WITH_CHANGES` with all 16 R
 - [x] 3.17 Implement: official telemetry omits assignment, retains update-check disable
 - [x] 3.18 Refactor; package tests pass
 - [x] 3.19 Write failing test: P/manage-check.test.ts `check_reports_path_managed_version_mismatch` (red: missing diagnostics module)
-- [x] 3.20 Implement: management check reports path/managed version, mismatch, node engine support, recovery, and winning provider facts
+- [ ] 3.20 Implement: management check reports path/managed version, mismatch, node engine support, recovery, and winning provider facts
 - [x] 3.21 Refactor; focused package test/typecheck pass
 - [x] 3.22 Write failing test: P/precedence.test.ts `project_skill_wins_and_check_reports_winning_source_and_provider` (red: diagnoseSkillWinners missing)
-- [x] 3.23 Implement: diagnostics read winning `source`/`provider`; registry resolution means shadowed provider get is not called
+- [ ] 3.23 Implement: diagnostics read winning `source`/`provider`; registry resolution means shadowed provider get is not called
 - [x] 3.24 Refactor; focused package test/typecheck pass
 
 ## 4. Commands and init
@@ -86,7 +86,7 @@ Round history: round 1 is VOID. Round 2 was `APPROVE_WITH_CHANGES` with all 16 R
 - [x] 4.5 Implement: `/openspec-init` command builder with no-tools/no-cloud/no-animation defaults
 - [x] 4.6 Refactor; focused tests pass
 - [x] 4.7 Write failing test: P/init-command.test.ts `rejects_metacharacters_unknown_tools_and_bad_language` (covered by input validation tests)
-- [x] 4.8 Implement: tool/profile enum checks, language regex and typed invalid-options error
+- [ ] 4.8 Implement: tool/profile enum checks, language regex and typed invalid-options error
 - [x] 4.9 Refactor; package tests/typecheck pass
 - [x] 4.10 Write test: P/init-command.test.ts `never_offers_force_and_never_spawns_from_host`
 - [x] 4.11 Implement: builder omits force; Host handler returns a command rather than spawning it
@@ -176,19 +176,19 @@ Round history: round 1 is VOID. Round 2 was `APPROVE_WITH_CHANGES` with all 16 R
 - [x] 8.5 Implement: duplicate/unsupported/absent handling without order-based fallback
 - [x] 8.6 Refactor; full suite stays green
 - [x] 8.7 Write failing test: P/routing-dispatch.test.ts `two_stage_tokens_correlate_and_candidate_kinds_differ` (assert it fails for the right reason)
-- [x] 8.8 Implement: bounded feature schema, typed candidates from official schema discovery and trusted external declarations
+- [ ] 8.8 Implement: bounded feature schema, typed candidates from official schema discovery and trusted external declarations
 - [x] 8.9 Refactor; full suite stays green
 - [x] 8.10 Write failing test: P/routing-dispatch.test.ts `invalid_stage_tokens_refused_with_zero_callbacks` (assert it fails for the right reason)
-- [x] 8.11 Implement: ≥128-bit single-use session-bound token with 10min TTL, injectable clock, bounded table with eviction, `invalid-stage-token`
+- [ ] 8.11 Implement: ≥128-bit single-use session-bound token with 10min TTL, injectable clock, bounded table with eviction, `invalid-stage-token`
 - [x] 8.12 Refactor; full suite stays green
 - [x] 8.13 Write failing test: P/routing-dispatch.test.ts `unknown_features_or_ineligible_candidate_needs_review` (assert it fails for the right reason)
-- [x] 8.14 Implement: input/result validation, never fabricate a candidate
+- [ ] 8.14 Implement: input/result validation, never fabricate a candidate
 - [x] 8.15 Refactor; full suite stays green
 - [x] 8.16 Write failing test: P/routing-dispatch.test.ts `traversal_change_name_rejected_and_candidate_text_bounded_stripped_labeled` (assert it fails for the right reason)
-- [x] 8.17 Implement: change-name pattern validation and root containment (no traversal/symlink escape); candidate text ≤2 KiB, control-stripped, labeled untrusted
+- [ ] 8.17 Implement: change-name pattern validation and root containment (no traversal/symlink escape); candidate text ≤2 KiB, control-stripped, labeled untrusted
 - [x] 8.18 Refactor; full suite stays green
 - [x] 8.19 Write failing test: P/routing-authority.test.ts `existing_change_returns_recorded_schema_without_callback` (assert it fails for the right reason)
-- [x] 8.20 Implement: dispatcher-resolved existing-change authority via official discovery
+- [ ] 8.20 Implement: dispatcher-resolved existing-change authority via official discovery
 - [x] 8.21 Refactor; full suite stays green
 - [x] 8.22 Write failing test: P/routing-authority.test.ts `confident_result_has_authority_none_and_no_side_effects` (assert it fails for the right reason)
 - [x] 8.23 Implement: `authority: none` on every result; no side effects
@@ -197,13 +197,13 @@ Round history: round 1 is VOID. Round 2 was `APPROVE_WITH_CHANGES` with all 16 R
 - [x] 8.26 Implement: approval-record gate (test fixtures only in this change; Jev not selectable)
 - [x] 8.27 Refactor; full suite stays green
 - [x] 8.28 Write failing test: P/routing-entry.test.ts `single_entry_is_only_route_to_provider_and_no_other_export_reaches_it` (assert it fails for the right reason)
-- [x] 8.29 Implement: one in-process dispatcher entry; no tool, no guidance, no session registration
+- [ ] 8.29 Implement: one in-process dispatcher entry; no tool, no guidance, no session registration
 - [x] 8.30 Refactor; full suite stays green
 - [x] 8.31 Write failing test: P/routing-failure.test.ts `needs_review_passes_through_without_substitution` (assert it fails for the right reason)
 - [x] 8.32 Implement: pass-through of `needs-review`
 - [x] 8.33 Refactor; full suite stays green
 - [x] 8.34 Write failing test: P/routing-failure.test.ts `timeout_cancel_throw_unload_normalize_and_persist_no_text` (assert it fails for the right reason)
-- [x] 8.35 Implement: 5s budget, cancellation forwarding, stale-result discard, normalized error class only
+- [ ] 8.35 Implement: 5s budget, cancellation forwarding, stale-result discard, normalized error class only
 - [x] 8.36 Refactor; full suite stays green
 
 ## 9. Host wiring and target-runtime smoke (isolated profile only)

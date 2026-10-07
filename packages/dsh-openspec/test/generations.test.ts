@@ -177,6 +177,20 @@ describe('immutable generations', () => {
     expect((await provider.get({ name: 's' }))?.content).toEqual((await provider.get({ name: 's' }, { cwd: '/another' }))?.content)
   })
 
+  it.each(['missing-cli', 'tampered-runtime'])('materialized_%s_is_rejected_at_consumption_not_only_on_startup_reuse', async damage => {
+    const { materializeGeneration } = await import('../src/generation-materializer.js')
+    const fs = await import('node:fs/promises'), home = await root(), source = await root()
+    await fs.mkdir(join(source, 'bin'), { recursive: true }); await fs.mkdir(join(source, 'dist'), { recursive: true })
+    await writeFile(join(source, 'bin/openspec.js'), "console.log('1.13.2')")
+    await writeFile(join(source, 'dist/runtime.js'), 'export const healthy = true')
+    await writeFile(join(source, 'package.json'), JSON.stringify({ name: '@fission-ai/openspec', version: '1.13.2', type: 'module', bin: { openspec: 'bin/openspec.js' } }))
+    await materializeGeneration({ home, id: 'corrupt-on-load', sourceRoot: source, version: '1.13.2', skills: [{ name: 's', body: 'official body' }], invocation: await invocationFor(home, 'corrupt-on-load') })
+    const dir = join(home, 'plugins/dsh-openspec/generations/corrupt-on-load')
+    if (damage === 'missing-cli') await rm(join(dir, 'bin/openspec.js'))
+    else await writeFile(join(dir, 'dist/runtime.js'), 'export const healthy = false')
+    const provider = createGenerationBackedProvider({ home, telemetry: 'adapter-off', updateCheck: 'disabled' })
+    await expect(provider.get({ name: 's' })).rejects.toMatchObject({ code: 'generation-invalid' })
+  })
   it('missing_or_partial_generation_fails_with_typed_error_and_no_body', async () => {
     const home = await root()
     await activateGeneration(home, 'gen-a', { body: 'valid' })

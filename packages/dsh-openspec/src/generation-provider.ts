@@ -21,7 +21,7 @@ export function createGenerationBackedProvider(options: { home: string; telemetr
         if (!flight) { flight = Promise.resolve().then(() => options.check!(scope)); inFlight.set(scope, flight) }
         try { checkResult = await flight } catch { checkResult = undefined }
       }
-      const generation = await loadGeneration(options.home)
+      const generation = await loadGeneration(options.home, undefined, { verifyRuntime: true })
       if (lastGeneration !== generation.id) { lastGeneration = generation.id; options.onGeneration?.(generation.id) }
       const skill = (Array.isArray(generation.skills) ? generation.skills : []).find((item: any) => item.name === candidate.name)
       if (!skill || typeof skill.body !== 'string' || typeof generation.invocation !== 'string') return undefined

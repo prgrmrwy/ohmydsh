@@ -32,7 +32,7 @@ export async function runSessionManagement(input: SessionUpdateRequest, deps: Se
   if (!isAbsolute(input.cwd) || !isAbsolute(input.home)) return { status: 'blocked', reason: 'caller-cwd-unavailable' }
   try {
     if (input.kind === 'refresh-project') {
-      const generation = await loadGeneration(input.home)
+      const generation = await loadGeneration(input.home, undefined, { verifyRuntime: true })
       const root = await realpath(join(input.home, 'plugins/dsh-openspec/generations', generation.id))
       const cli = typeof generation.cli === 'string' ? await realpath(generation.cli) : undefined
       if (!cli || relative(root, cli).startsWith('..') || isAbsolute(relative(root, cli))) return { status: 'blocked', reason: 'generation-invalid' }
