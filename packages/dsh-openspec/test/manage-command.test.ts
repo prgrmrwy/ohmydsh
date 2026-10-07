@@ -8,7 +8,7 @@ function harness(prepareManagement: any) {
   const ctx = { commands: { register: (definition: any) => { handlers.set(definition.name, definition.handler); return () => {} } } }
   registerWorkflowCommands(ctx as any, { entries: [], generation: 'g1', invocation, telemetry: 'adapter-off', updateCheck: 'disabled', initInstruction: 'i', manageInstruction: 'guide', prepareManagement } as any)
   const sent: string[] = []
-  const agent = { cwd: '/caller', send: async (message: any) => { sent.push(message.content[0].text) } }
+  const agent = { session: { header: { cwd: '/caller' } }, send: async (message: any) => { sent.push(message.content[0].text) } }
   return { run: (rawInput: string) => handlers.get('openspec-upgrade')!({ agent, rawInput }), sent }
 }
 

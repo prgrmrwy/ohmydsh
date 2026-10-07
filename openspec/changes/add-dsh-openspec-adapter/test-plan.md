@@ -121,6 +121,10 @@ Actual apply with historical active1.13.1 then official1.13.2 materialization ex
 
 New `P/process-crash.test.ts` spawns actual built transaction in temporary checkout/home, pauses at runSync after both source atomic renames, then SIGKILLs only that test child. Journal/source/pid-bearing source lock/profile lock actually survive; old active bytes remain. Fresh transaction refuses ordinary upgrade and locked recovery. Test proves child pid gone and matching checkout/stateDir, explicitly removes only fixture abandoned locks, then runs authorized recoverRollback in a separate process. Safe case restores old pin; user-edited case retains exact source/journal and reports drift. This test was immediately green, so it is additional acceptance-strength evidence, not fabricated RED/new-production implementation. Full33files/128tests; actual Linux death but no power-loss/fsync/partial-rename death/VM main proof. README operator sequencing clarified.
 
+## Slash command durable caller cwd (goal round 17)
+
+Official Agent runtime types expose session, no cwd. Official CommandService.execute passes that exact agent; Session.header.cwd is durable metadata. RED actual-shaped harness: approved management never calls prepare; init reads misleading agent.cwd rather than header. GREEN both read agent.session.header.cwd; init rejects absent/nonabsolute instead of Host process.cwd fallback. Actual installed CommandService+Cordis+createScope test passes session header through approved refresh and logs lifecycle with no approval args. Existing upgrade/manage fixtures corrected to actual shape; initial full suite2fail were leftover fake agent.cwd fixtures, now corrected without assertion changes. Package33files/130tests pass. This is actual command service with fixture agent, NOT main-profile GUI/model evidence.
+
 ## Coverage Notes
 
 - All 59 rows are executable; none is `N/A — non-executable`. Count check: 26 session + 19 updates + 14 routing scenarios = 59.

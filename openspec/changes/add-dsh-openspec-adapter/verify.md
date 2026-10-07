@@ -4,7 +4,13 @@ DECISION: FAIL
 
 Interim implementation report, not final acceptance. The public naming amendment is complete locally; the overall change remains incomplete. Do not merge, archive, or treat artifact approval as authorization for Host-side mutations.
 
-## Latest bounded work: genuine fixture transaction process death (goal round 16)
+## Latest bounded work: slash durable caller cwd (goal round 17)
+
+Source audit of installed official dsh-agent runtime types and dsh-commands.execute confirms agent.session.header.cwd, not agent.cwd. Adapter init previously agent.cwd??process.cwd (wrong Host fallback); approved manage agent.cwd (reject real session). RED corrected actual-shaped harness reproduces2fail. GREEN reads durable session.header.cwd in both; absent/nonabsolute init fails closed. New real installed CommandService+Cordis+createScope fixture executes slash approved refresh and passes exact callerB path; lifecycle omits approval args. This uses real command caller service with fixture agent, not actual Host/model traffic. Leftover manage-command fake cwd fixtures caused initial full-suite2fail, repaired shape only; final allpass.
+
+Fresh package **33files/130tests pass**, build/typecheck/artifacts/strict/diff pass. Repo **263total/261pass/0fail/2existing skips**, collected bash-52. New acceptance-runbook.md lists actual remaining14 tasks, explicit VM main override, restore/sync/stop-start constraints and live authority prerequisites. Not a substitute for test evidence or new permission. No VM/network/model/install. Progress180/194 unchanged, whole-range final review still pending; current focused repair is not final approval. Goal active, final FAIL.
+
+## Earlier bounded work: genuine fixture transaction process death (goal round 16)
 
 Added process-crash.test.ts, actual Node child executing current built createUpgradeTransaction in temporary checkout/home. It reaches runSync after both source CAS writes then is SIGKILLed (test child ONLY, no DSH process). Actual source/profile locks and prepared journal survive; source1.13.3 but healthy active1.13.2 reference remains byte-identical. New transaction blocks ordinary upgrade before stage; recovery remains blocked by retained lock. After verifying exact dead child pid+recorded fixture checkout/stateDir, test explicitly removes only its abandoned locks, then authorized recoverRollback executes in another fresh process. It safely restores1.13.2, or preserves user's post-crash edit + journal with source-edited-after-cas. Both cases remain active-byte-identical.
 

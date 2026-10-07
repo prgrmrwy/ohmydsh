@@ -46,7 +46,7 @@ describe('openspec-upgrade public entry', () => {
     const state = await loadGeneration(home)
     expect(state.version).toBe('1.13.2')
     const send = vi.fn()
-    await definitions.get('openspec-upgrade').handler({ agent: { cwd: home, send }, rawInput: '' })
+    await definitions.get('openspec-upgrade').handler({ agent: { session: { header: { cwd: home } }, send }, rawInput: '' })
     const content = send.mock.calls[0]![0].content[0].text
     expect(content).toContain('\\"installed\\":\\"1.13.2\\"')
     expect(content).not.toContain('\\"installed\\":\\"1.13.1\\"')
@@ -60,7 +60,7 @@ describe('openspec-upgrade public entry', () => {
     const { provider, definitions } = await startAdapter(home)
     expect(await readFile(activePath)).toEqual(before)
     const send = vi.fn()
-    await definitions.get('openspec-upgrade').handler({ agent: { cwd: home, send }, rawInput: '' })
+    await definitions.get('openspec-upgrade').handler({ agent: { session: { header: { cwd: home } }, send }, rawInput: '' })
     expect(send.mock.calls[0]![0].content[0].text).toContain('\\"installed\\":\\"1.13.1\\"')
     const candidate = (await provider.list()).find((skill: any) => skill.name === 'historical-workflow')
     expect(candidate).toBeDefined()

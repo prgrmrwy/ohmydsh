@@ -83,7 +83,8 @@ export function registerWorkflowCommands(ctx: Context, input: {
     name: 'openspec-init', description: 'Initialize OpenSpec in the current workspace', recordInput: false,
     handler: async (invocation: any) => {
       try {
-        const cwd = invocation.agent.cwd ?? process.cwd()
+        const cwd = invocation.agent?.session?.header?.cwd
+        if (typeof cwd !== 'string' || !isAbsolute(cwd)) return { kind: 'error', text: 'OpenSpec init requires an absolute caller session cwd.' }
         const hasOpenSpecDir = input.hasOpenSpecDir ? await input.hasOpenSpecDir(cwd) : await access(join(cwd, 'openspec')).then(() => true).catch(() => false)
         const command = buildInitCommand({ cwd, hasOpenSpecDir })
         await send(invocation.agent, fields(`${input.initInstruction}\n\nRun this adapter-built command in the current workspace:\n${command}`))
@@ -99,7 +100,7 @@ export function registerWorkflowCommands(ctx: Context, input: {
         let outcome: SessionManagementPlan | undefined
         if (intent.kind === 'invalid') return { kind: 'error', text: 'Usage: /openspec-upgrade [upgrade|rollback <X.Y.Z> | refresh-project] [--approve]' }
         if (intent.kind !== 'help') {
-          const cwd = invocation.agent?.cwd
+          const cwd = invocation.agent?.session?.header?.cwd
           if (!intent.approved) outcome = { status: 'blocked', reason: intent.kind === 'refresh-project' ? 'explicit-project-refresh-approval-required' : 'explicit-approval-required' }
           else if (typeof cwd !== 'string' || !isAbsolute(cwd)) outcome = { status: 'blocked', reason: 'caller-cwd-unavailable' }
           else if (!input.prepareManagement) outcome = { status: 'blocked', reason: 'transaction-support-unavailable' }
