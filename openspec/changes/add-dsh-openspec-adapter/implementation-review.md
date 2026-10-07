@@ -1,4 +1,4 @@
-# Accumulated implementation review — FAIL (goal round 18)
+# Accumulated implementation review — FAIL (goal round 18; findings IR18-INIT/ROUTE/DIAG/GEN repaired in round 19, IR18-LIVE open)
 
 ## Range and method
 

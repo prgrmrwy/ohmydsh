@@ -150,7 +150,14 @@ export function apply(ctx: Context, config: Config = {}): void {
       managedVersion: version,
       checkCommand: async () => JSON.stringify(await updateChecker.check({ explicit: true })),
       prepareManagement: (intent, cwd) => prepareSessionManagement({ home: dshHome, cwd, node: process.execPath, updater, intent, telemetry: settings.telemetry }),
-      skillDiagnostics: async () => diagnoseSkillWinners(child.skills, activeSurface.entries.map(entry => entry.skillName)),
+      skillDiagnostics: caller => diagnoseSkillWinners(child.skills, [...activeSurface.entries.map(entry => entry.skillName), manageSkill.name], caller),
+      // Read-only probe of `node` as resolved by PATH from the caller's workspace; this is the node the managed
+      // invocation's Bash uses when it is not given an absolute path, and may differ from the Host's node.
+      checkBashNodeVersion: async cwd => {
+        const { spawnSync } = await import('node:child_process')
+        const result = spawnSync('node', ['--version'], { encoding: 'utf8', timeout: 2_000, ...(cwd ? { cwd } : {}), env: process.env })
+        return result.status === 0 ? result.stdout.trim().replace(/^v/, '') || null : null
+      },
     })
     commands = registerCommands()
     child.on('agent/created', ({ agent }: any) => liveScopes.add(agent))

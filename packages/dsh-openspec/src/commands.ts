@@ -45,7 +45,9 @@ export function registerWorkflowCommands(ctx: Context, input: {
   managedVersion?: string
   pathVersion?: string | null
   checkCommand?: () => Promise<string>
-  skillDiagnostics?: () => Promise<Array<{ name: string; source: string; provider: string }>>
+  skillDiagnostics?: (caller: { cwd?: string; scope?: object }) => Promise<Array<{ name: string; source: string; provider: string }>>
+  /** Version of `node` on the session Bash PATH (null when undeterminable). Never the Host process version. */
+  checkBashNodeVersion?: (cwd: string | undefined) => Promise<string | null>
   hasOpenSpecDir?: (cwd: string) => Promise<boolean>
   /** Official init tool ids of the pinned release; absent in pure unit harnesses (falls back to the conservative set). */
   initToolIds?: () => Promise<string[]>
@@ -121,8 +123,10 @@ export function registerWorkflowCommands(ctx: Context, input: {
         const actualVersion = await input.checkManagedVersion?.()
         const pathVersion = await input.checkPathVersion?.() ?? input.pathVersion ?? null
         const recovery = await input.recoveryState?.()
-        const diag = checkManagedCli({ pathVersion, managedVersion: actualVersion ?? input.managedVersion ?? input.generation, nodeVersion: process.versions.node, engine: '>=20.19.0', recovery })
-        const winners = input.skillDiagnostics ? await input.skillDiagnostics() : []
+        const callerCwd = typeof invocation.agent?.session?.header?.cwd === 'string' ? invocation.agent.session.header.cwd : undefined
+        const bashNode = input.checkBashNodeVersion ? await input.checkBashNodeVersion(callerCwd).catch(() => null) : null
+        const diag = checkManagedCli({ pathVersion, managedVersion: actualVersion ?? input.managedVersion ?? input.generation, nodeVersion: bashNode, engine: '>=20.19.0', recovery })
+        const winners = input.skillDiagnostics ? await input.skillDiagnostics({ ...(callerCwd ? { cwd: callerCwd } : {}), scope: invocation.agent }) : []
         const update = input.checkCommand ? await input.checkCommand() : 'update check is available on explicit request'
         const manageSkill = `${input.manageInstruction}\n\nAdapter check: ${JSON.stringify({ ...diag, skillWinners: winners, update, ...(outcome === undefined ? {} : { outcome: summarizeOutcome(outcome) }) })}\n\nUpgrade or rollback uses an exact stable version and requires explicit approval. Project refresh requires separate explicit approval. The helper operations are available only in a profile with recorded authoritative-source transaction support.`
         const execution = outcome?.status === 'ready' && outcome.command && outcome.workdir

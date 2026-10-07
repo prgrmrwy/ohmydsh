@@ -71,10 +71,10 @@ Round history: round 1 is VOID. Round 2 was `APPROVE_WITH_CHANGES` with all 16 R
 - [x] 3.17 Implement: official telemetry omits assignment, retains update-check disable
 - [x] 3.18 Refactor; package tests pass
 - [x] 3.19 Write failing test: P/manage-check.test.ts `check_reports_path_managed_version_mismatch` (red: missing diagnostics module)
-- [ ] 3.20 Implement: management check reports path/managed version, mismatch, node engine support, recovery, and winning provider facts
+- [x] 3.20 Implement: management check reports path/managed version, mismatch, node engine support, recovery, and winning provider facts
 - [x] 3.21 Refactor; focused package test/typecheck pass
 - [x] 3.22 Write failing test: P/precedence.test.ts `project_skill_wins_and_check_reports_winning_source_and_provider` (red: diagnoseSkillWinners missing)
-- [ ] 3.23 Implement: diagnostics read winning `source`/`provider`; registry resolution means shadowed provider get is not called
+- [x] 3.23 Implement: diagnostics read winning `source`/`provider`; registry resolution means shadowed provider get is not called
 - [x] 3.24 Refactor; focused package test/typecheck pass
 
 ## 4. Commands and init

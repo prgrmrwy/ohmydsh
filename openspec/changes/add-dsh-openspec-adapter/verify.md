@@ -4,6 +4,19 @@ DECISION: FAIL
 
 Interim implementation report, not final acceptance. The public naming amendment is complete locally; the overall change remains incomplete. Do not merge, archive, or treat artifact approval as authorization for Host-side mutations.
 
+## Latest bounded work: caller-scoped diagnostics (goal round 19)
+
+IR18-DIAG repaired with `diagnostics-scope.test.ts` (3 RED, then green).
+
+- **Winning provider is per caller.** The real `SkillRegistry` resolves precedence per workspace and scope, but the management check called `skills.list()` with no context, so a project copy that only exists in the caller's workspace was invisible. The handler now passes the session-header `cwd` and the calling agent as `scope`. The test registers a provider that lists a project copy only under one workspace and asserts the winner differs between two workspaces (project copy vs bundled adapter) against the real registry, not pre-resolved summaries.
+- **Node support is the session's, not the Host's.** `nodeSupported` was computed from `process.versions.node` of the Host. It now comes from a read-only `node --version` probe resolved by PATH from the caller's workspace, and is reported as `unknown` (not guessed) when undeterminable. The report also states `bashNodeVersion`.
+
+A test-fixture mistake worth recording: the first fixture used rank 900 for the project copy and failed because the registry sorts by ascending rank (bundled adapter is 700); corrected the fixture to the registry's documented direction rather than touching production code.
+
+Package **35 files / 148 tests pass**; typecheck, artifact and strict validation pass; repository 263 total / 261 pass / 0 fail / 2 existing skips. Tasks 3.20 and 3.23 re-checked, their coverage row green again. Progress **180/194, 14 remaining** — all remaining items are live/real-environment acceptance (9.1-9.3, 9.7-9.15, 10.2, 10.3), which need the VM DNS repair and the user's decision on the session method and the disable test.
+
+Limit: the probe and registry run in-process; it is not proof about the real Host's PATH or about a Pet/Locus scope.
+
 ## Latest bounded work: routing contract repaired (goal round 19)
 
 IR18-ROUTE repaired with 10 new tests in `routing-surface.test.ts` (9 RED against the audited source, 1 added after for the authority source). Defects reproduced then fixed:
