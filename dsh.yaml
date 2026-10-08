@@ -316,9 +316,12 @@ customizations:
   - id: dsh-cockpit-bridge
     type: package
     source: remote
-    spec: 'https://github.com/prgrmrwy/dsh-cockpit/releases/download/dsh-cockpit-bridge-v0.5.2/dsh-cockpit-bridge-0.5.2.tgz'
+    spec: 'https://github.com/prgrmrwy/dsh-cockpit/releases/download/dsh-cockpit-bridge-v0.6.1/dsh-cockpit-bridge-0.6.1.tgz'
     name: dsh-cockpit-bridge
-    version: 0.5.2
+    version: 0.6.1
+      # [2026-10-08] 正式发布 0.6.1：兼容 DSH 0.2 的 retainedBy.mainView/sessionStatus，保留旧版观测。
+      #   SHA256 097be558ec03248e27b08b6a336b91262a83f47d73039f317e1c125b105c8fbf。
+      #   继承 0.6 的 cockpitBridge.forwards；旧 portForward 消费者须独立迁移，不可回退到未适配的 0.5.2。
       # [2026-09-30] 0.5.1 -> 0.5.2(exact GitHub release dsh-cockpit-bridge-v0.5.2,HTTP 200 / 21685 B,cockpit main a18b3a4)。
       #   portForward 两类失败分型:本机设备(握手无 sshAlias)/未握手 → 同步抛 PortForwardUnavailableError{reason},零请求零续签;
       #   驾驶舱拒绝 → PortForwardRejectedError{status,code,message};仅 401 / bridge-capability-invalid 才续签(0.5.1 对任何 400 都续签,白等 5s)。
