@@ -38,10 +38,12 @@
 - 显式使用声明式runtime入口启动Host，PID `690311`，HTTP401。`/proc/<pid>/environ`验证HOME、DSH_HOME、XDG data正确隔离。SIGTERM退出0；39522无listener，生产3080仍PID656211。
 - 新Host日志未命中fetch递归/locus seam unavailable/required-service错误；未执行认证后的Web loader、设置交互或模型流程，不能外推到功能全通过。
 
-## 待确认/继续
+## 本轮收尾决定（2026-10-09）
 
-1. 用户授权仅一个专用浏览器验收agent，不启用swarm。该agent仍处于oracle整理及确认门禁，未执行浏览器trail。
-2. 真实cockpit iframe入口尚未核实；远端forward成功必须经过真实握手。直连3080的`unavailable`不证明local-device，也不允许按localhost兜底。
-3. 完整升级change还有先前未完成门禁；本报告不授权勾选全部任务或归档/current-spec同步。
+用户明确：能力完成后推送远端主干，本轮即结束；新机部署由用户另行处理。停止追加浏览器验收、隔离部署及其他设备操作。实现d1c4c15与轻量证据已受控合入/push；本轮以代码交付完成收尾，不冒充完整验收。
+
+1. 唯一专用验收agent只完成规范/SSH前置发现，没有执行浏览器trail。正式认证路径已通过SSH发现，用户不需要提供普通GUI入口；agent-browser因系统glibc不兼容无法运行，未启动替代引擎。
+2. 真实cockpit iframe入口尚未核实；远端forward成功必须经过真实握手。直连3080的`unavailable`不证明local-device，也不允许按localhost兜底。loopback请求须显式绕过出网代理，避免代理403误判Host不可达。
+3. 完整升级change的剩余门禁保留未验状态，不继续追问或自动执行；本决定不等于全量验收/current-spec同步/整个change归档授权。
 
 原始构建/启动/失败日志与隔离状态只留devbox owner-only `~/.cache/dsh-acceptance/upgrade-0.2.0-d1c4c15/`。不提交认证URL/cookie/session原文或批量截图。
