@@ -101,7 +101,7 @@
 - [x] 6e.2 真实 memex registry + 仅 forwards 服务回归证明旧 shim RED；迁移新 API 与错误分类、等待/取消/释放/单飞，package 测试和类型检查通过
 - [x] 6e.3 完成完整 diff 自审、package build、根测试、artifact 与严格 OpenSpec 校验，受控合入并推送主干（d1c4c15；见 checking/devbox-main-d1c4c15-deployment.md）
 - [ ] 6e.4 devbox 从主干拉取，正式 build×2 幂等、restart、真实功能/浏览器验收；保留私有 overlay 和历史（部署/start已过，第二build no changes，3080 PID656211；未认证401不作业务API通过；专用单agent待oracle/入口确认，浏览器验收未执行）
-- [x] 6e.5 devbox 隔离 DSH_HOME/端口的新机物化与启动实测；不得替代生产验收或覆盖现役状态（全新HOME/XDG与公开manifest；scope registry修正后sync×2/official dump通过，39522隔离PID690311启动401/SIGTERM退出0；复用toolchain/launcher cache，不代表全新OS或完整浏览器验收；见 checking/devbox-main-d1c4c15-deployment.md）
+- [ ] 6e.5 已撤销：不在devbox部署隔离新服务。用户2026-10-09明确新机验收指其他设备，devbox只验现有主干正式3080；其他设备待后续独立决定。执行者此前误解范围额外做了隔离home启动检查，临时39522已停止，该检查不计用户要求的新机验收（历史事实保留于 checking/devbox-main-d1c4c15-deployment.md）。
 
 ## 7. 收尾
 

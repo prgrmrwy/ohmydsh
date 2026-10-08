@@ -39,4 +39,4 @@ Jev 对摘要与测试说明的审查返回 escalate（correctness confidence0.2
 
 ## 尚待正式验证
 
-迁移提交d1c4c15已受控合入/push；devbox已从主干拉取并正式build×2/restart，隔离新home物化与Host启动通过，见[本轮部署报告](devbox-main-d1c4c15-deployment.md)。真实功能/浏览器验收仍待执行，目标为正式3080；独立新home检查不替代它。历史checking证据不冒充本次正式组合。Mac不重启；WSL/VM延后。
+迁移提交d1c4c15已受控合入/push；devbox已从主干拉取并正式build×2/restart，见[本轮部署报告](devbox-main-d1c4c15-deployment.md)。真实功能/浏览器验收仍待执行，目标只为正式3080。此前隔离home检查系执行者误解范围的额外操作，临时服务已停止、不计新机验收、不再继续；用户明确其他设备的“新机”验收后续另定。历史checking证据不冒充本次正式组合。Mac不重启；WSL/VM延后。
