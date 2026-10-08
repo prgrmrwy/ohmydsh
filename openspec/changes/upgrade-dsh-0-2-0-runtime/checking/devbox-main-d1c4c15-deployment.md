@@ -4,7 +4,7 @@
 
 受用户授权：清理本机失效 local repair/staging → bridge0.6.1 shim迁移 → 受控合入/推送 → devbox主干正式部署 → 隔离新home。
 
-本轮只证明正式物化、Host启动与隔离新home部署门禁，**不宣称完整浏览器/真实远端forwards验收通过**。未升级WSL/VM，未重启本机DSH，未发送新模型请求或飞书消息。
+主验收目标始终是devbox主干正式服务3080；隔离新home是用户另行要求的新状态安装检查，临时Host已停止，不替代正式验收。本轮只证明正式物化、Host启动与隔离新home部署门禁，**不宣称完整浏览器/真实远端forwards验收通过**。未升级WSL/VM，未重启本机DSH，未发送新模型请求或飞书消息。
 
 ## 代码与合入证据
 
@@ -17,6 +17,7 @@
 
 - host `n37-044-026`；仓库真实路径 `/data00/home/zhangyong.617/opensource/ohmydsh`，main从a844cdc拉取至d1c4c15。
 - `bin/dsh build`两轮成功，第二轮 `[sync] no changes — deployment already matches manifest`。
+- 正式官方dump-config成功、stderr为空；只读解析1632行/210条配置，id无重复。默认js-yaml初次拒绝`!!js`（检查器schema不认识DSH合法tag），以opaque scalar扩展schema后通过，未执行任何表达式；此检查不证明每项loader激活。
 - `bin/dsh restart --no-open`成功；原端口3080新PID `656211`，仅127.0.0.1监听。
 - Host为声明式Pet兼容runtime，DSH `0.2.0-rc.2`；fingerprint `93a014a6db04d05d3110553c3084e220895fa4a8ca3a604419331616f8501efe`。
 - 物化版本：shim0.2.0 /bridge0.6.1 /memex0.3.0 /cost-meter1.8.4 /header0.1.0。第三方源无修改。
