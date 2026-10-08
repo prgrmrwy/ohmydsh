@@ -52,6 +52,14 @@
 `.upstream/`、`lib/`、`.launcher/`
 均不是部署真相，不进入 Git。
 
+`.upstream/` 是构建缓存（约 2.3 GB，重建需要联网），复用规则由 `upstream-cache.cjs`
+决定：每次**成功**构建后在 `.upstream/.git/dsh-compat-cache.json` 记录本次的上游
+commit 与 patch 哈希；下次构建若两者一致才复用被忽略的构建产物（`node_modules`、
+`lib/`），否则（或没有记录、构建中断）先 `git clean -ffdx` 删除所有未跟踪与被忽略的
+文件再构建。因此升级 DSH 版本或修改 patch 时**不需要手工清缓存**。曾出现的事故：
+0.1.5 时期的缓存在升级 0.2 时被直接复用，已被 0.2 删除的包留下的 `lib/` 被打进
+host 构建，`MISSING_EXPORT: SettingsProvider` 导致 DSH 无法启动（2026-10-08，VM）。
+
 ## 声明式选择与作用域
 
 `dsh.yaml` 的本地 `dsh-pet` customization 声明：

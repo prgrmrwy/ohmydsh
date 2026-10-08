@@ -31,6 +31,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const requireHere = createRequire(import.meta.url)
 const compatBuildLock = requireHere('./compat-build-lock.cjs').acquireCompatBuildLock()
 const { runCompatCommand } = requireHere('./compat-run.cjs')
+const { prepareUpstreamCache, recordUpstreamCache } = requireHere('./upstream-cache.cjs')
 process.once('exit', () => compatBuildLock.release())
 const patchFile = join(here, 'settlement-notice.patch')
 
@@ -103,6 +104,11 @@ run('git', ['checkout', '--', '.'], checkout)
 const head = capture('git', ['rev-parse', 'HEAD'], checkout).trim()
 if (head !== UPSTREAM.commit) fail(`reviewed upstream commit mismatch: ${head}`)
 console.log(`[compat/subagent] base ${head}`)
+// `git checkout -- .` restores tracked files only. Reuse ignored build output
+// (node_modules, lib/) only when it was produced for exactly these inputs;
+// otherwise remove every untracked and ignored file before building.
+const cache = prepareUpstreamCache({ checkout, commit: UPSTREAM.commit, patchSha256: UPSTREAM.patchSha256, run })
+console.log(`[compat/subagent] upstream cache ${cache.reused ? 'reused (same commit and patch)' : 'scrubbed (inputs changed or unknown)'}`)
 
 try {
   run('git', ['apply', '--check', patchFile], checkout)
@@ -323,4 +329,7 @@ if (
 ) {
   fail('built artifact does not cold-restore the independent-v1 durable tool filter; refusing to publish it')
 }
+// Stamp the cache only after every capability proof passed: an interrupted or
+// failed build leaves no stamp, so the next run scrubs instead of trusting it.
+recordUpstreamCache({ checkout, commit: UPSTREAM.commit, patchSha256: UPSTREAM.patchSha256 })
 console.log(`[compat/subagent] ready: ${manifest.name}@${manifest.version}`)
