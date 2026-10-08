@@ -92,7 +92,7 @@
 - [x] 11.4 运行 `npm run check:artifacts`
 - [x] 11.5 运行 `node scripts/sync.mjs`，确认连续第二次运行不产生变化（幂等）
 - [x] 11.6 确认 `~/.dsh/profiles/web/node_modules/dsh-pet/lib/client.js` 已含新文案（仅改 `src/` 不影响当前 GUI，B043 记录过同一陷阱）
-- [ ] 11.7 真机验收：对一条真实待办点击受理，确认主会话收到带上下文的跟进任务、界面转到该会话、在途工作未被打断
-- [ ] 11.8 真机验收：子会话经新工具请求执行，确认与按钮路径产生同构正文与同样结局，且不发生界面导航
-- [ ] 11.9 真机验收失败路径：构造一个不可达目标，确认受理失败、状态仍为待处理、界面留在原地并显示原因
+- [x] 11.7 真机验收：对一条真实待办点击受理，确认主会话收到带上下文的跟进任务、界面转到该会话、在途工作未被打断
+- [x] 11.8 真机验收：子会话经新工具请求执行，确认与按钮路径产生同构正文与同样结局，且不发生界面导航
+- [x] 11.9 真机验收失败路径：构造一个不可达目标，确认受理失败、状态仍为待处理、界面留在原地并显示原因 —— **所有者决定跳过真机构造**（现无主会话已归档的待办，构造需归档一个真实会话）。该路径由单测覆盖：`resume failure maps to unreachable without dispatching`、`followup throwing maps to unreachable with a reason`、`unprovable ownership refuses before touching the port`、`unreachable target leaves the todo open`、`failed accept stays put and shows the reason`；真机验收 1 的首轮失败（写句柄冲突）也实际走过了"受理失败、状态保持 open"这条路径
 - [x] 11.10 把 1.1 的核验结论回写 design.md（design 的 Open Questions 已清空，无待确认项）

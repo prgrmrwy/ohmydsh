@@ -3055,13 +3055,23 @@ async function initialize(
    * the point is to bring it back exactly as it was — neither widened nor
    * narrowed (design D8's consequence ceiling, task 1.3).
    */
+  const liveTodoAgent = (sessionId: string): { status?: unknown; followup?: unknown } | undefined => {
+    const found = ctx.agents.get(sessionId as never) as
+      | { agent?: { status?: unknown; followup?: unknown }; status?: unknown; followup?: unknown }
+      | undefined
+    if (found === undefined) return undefined
+    return found.agent ?? found
+  }
+
   const todoDispatchPort: TodoDispatchPort = {
+    // `ctx.agents.get` returns a BARE Agent (`dsh-agent` index.d.ts:139,341),
+    // not an AgentHandle — `{ agent, dispose }` is only what `create`/`resume`
+    // hand their owner. Reading `.agent` here made every LOADED session look
+    // unloaded, which sent it to `resume` and collided with its own active
+    // write handle. Tolerate a handle too, matching the executor path.
     resolve: sessionId => {
       try {
-        const handle = ctx.agents.get(sessionId as never) as
-          | { agent?: { status?: unknown } }
-          | undefined
-        const status = handle?.agent?.status
+        const status = liveTodoAgent(sessionId)?.status
         return status === 'idle' || status === 'running' ? { status } : undefined
       } catch {
         return undefined
@@ -3077,8 +3087,7 @@ async function initialize(
       })
     },
     followup: (sessionId, text) => {
-      const handle = ctx.agents.get(sessionId as never) as { agent?: unknown } | undefined
-      const agent = handle?.agent
+      const agent = liveTodoAgent(sessionId)
       if (agent === undefined) throw new Error(`session ${sessionId} is not loaded`)
       // A real UserMessage through `followup`, exactly as a native client
       // sends one: it queues its own ordinary turn and wakes the driver,
@@ -3508,7 +3517,18 @@ async function initialize(
         }
         // Same collaborators the child tool uses — one chain, two entries.
         const result = await acceptTodo(itemId, todoAcceptDeps())
-        if (!result.ok) throw new PetError('INVALID_REQUEST', result.reason)
+        if (!result.ok) {
+          // An unreachable target is an OUTCOME the owner must see in place
+          // (spec: 目标不可达时不置已受理 — 就地说明原因), not a transport
+          // error. Only a refusal with no receipt — stale status, unknown
+          // id — is a rejected request.
+          if (result.dispatch?.outcome !== 'unreachable') {
+            throw new PetError('INVALID_REQUEST', result.reason)
+          }
+          const current = sharedFactLedgerStore.getTodoItem(itemId)
+          if (current === undefined) throw new PetError('INVALID_REQUEST', result.reason)
+          return { todo: projectTodoForOwner(current), dispatch: result.dispatch }
+        }
         return { todo: projectTodoForOwner(result.record), dispatch: result.dispatch }
       },
       // Derive owning main sessions from the locus records themselves rather
