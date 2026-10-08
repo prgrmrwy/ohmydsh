@@ -39,4 +39,4 @@ Jev 对摘要与测试说明的审查返回 escalate（correctness confidence0.2
 
 ## 尚待正式验证
 
-受控合入/push、devbox 从主干拉取后的 build×2/restart、真实功能/浏览器验收与独立新 home 尚待执行。历史 checking 证据不冒充本次正式组合。Mac 不重启；WSL/VM 延后。
+迁移提交d1c4c15已受控合入/push；devbox已从主干拉取并正式build×2/restart，隔离新home物化与Host启动通过，见[本轮部署报告](devbox-main-d1c4c15-deployment.md)。真实功能/浏览器验收仍待执行，目标为正式3080；独立新home检查不替代它。历史checking证据不冒充本次正式组合。Mac不重启；WSL/VM延后。
