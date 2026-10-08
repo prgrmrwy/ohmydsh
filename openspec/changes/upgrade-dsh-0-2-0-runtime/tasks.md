@@ -97,6 +97,8 @@
 
 ## 6e. bridge 0.6.1 消费方迁移与正式部署（2026-10-08）
 
+> 本轮收尾决定（用户2026-10-09）：能力完成后推送远端主干即结束；新机部署由用户自行另行处理。不追加浏览器验收、隔离服务或其他设备部署。下列未完成的完整验收/归档项保留事实，不算本轮交付阻塞，也不因用户结束交付而伪标验证通过。此决定不是整个历史升级change的全量验收或归档授权。
+
 - [x] 6e.1 清理已授权 .local-repair；保留在用 launcher 与未授权 staging/其他 worktree
 - [x] 6e.2 真实 memex registry + 仅 forwards 服务回归证明旧 shim RED；迁移新 API 与错误分类、等待/取消/释放/单飞，package 测试和类型检查通过
 - [x] 6e.3 完成完整 diff 自审、package build、根测试、artifact 与严格 OpenSpec 校验，受控合入并推送主干（d1c4c15；见 checking/devbox-main-d1c4c15-deployment.md）
