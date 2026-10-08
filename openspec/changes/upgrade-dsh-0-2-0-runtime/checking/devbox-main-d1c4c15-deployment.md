@@ -2,9 +2,11 @@
 
 ## 已执行与边界
 
-受用户授权：清理本机失效 local repair/staging → bridge0.6.1 shim迁移 → 受控合入/推送 → devbox主干正式部署 → 隔离新home。
+受用户授权：清理本机失效 local repair/staging → bridge0.6.1 shim迁移 → 受控合入/推送 → devbox主干正式部署及验收。
 
-主验收目标始终是devbox主干正式服务3080；隔离新home是用户另行要求的新状态安装检查，临时Host已停止，不替代正式验收。本轮只证明正式物化、Host启动与隔离新home部署门禁，**不宣称完整浏览器/真实远端forwards验收通过**。未升级WSL/VM，未重启本机DSH，未发送新模型请求或飞书消息。
+**范围更正（2026-10-09）：用户明确“新机”指其他设备，devbox完成正式验收即可，不做隔离新服务部署。**执行者此前误解范围，额外进行了下述隔离home检查；保留事实，不计为用户要求的新机验收，不再重复/扩展。临时Host已停止，未替代正式3080。其他设备待本轮完成后用户另行决定。
+
+主验收目标始终是devbox主干正式服务3080；本报告只证明正式物化/Host启动，**不宣称完整浏览器/真实远端forwards验收通过**。未升级WSL/VM，未重启本机DSH，未发送新模型请求或飞书消息。
 
 ## 代码与合入证据
 
@@ -26,7 +28,7 @@
 - 日志最近100k字符未命中历史fetch递归/loader失败/inactive required-service/locus seam unavailable字串；这是有限Host日志扫描，不能替代完整loader的浏览器证据。
 - 未修改devbox既有私有overlay/历史；tracked checkout clean，原有未跟踪local repair及org patch保留。部署后的数据内容未逐项作持久化比对。
 
-## 隔离新 home
+## 范围误解下额外执行的隔离home检查（非新机验收，不再继续）
 
 - 全新HOME、DSH_HOME、XDG_DATA_HOME、XDG_CONFIG_HOME，独立127.0.0.1:39522；`DSH_LOCAL_MANIFEST=''`，不加载私有overlay，不导入生产历史。
 - 复用已有隔离Node24.12.0与repo/launcher cache。**这是新DSH状态的冷物化，不是全新OS/空缓存/冷构建launcher证明。**
