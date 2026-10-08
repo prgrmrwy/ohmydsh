@@ -350,12 +350,12 @@ customizations:
   - id: cockpit-memex-browse-shim
     type: package
     source: local
-    version: 0.1.1
-      # [2026-09-30] 0.1.0 -> 0.1.1:bridge 抛「不可用」(PortForwardUnavailableError,no-cockpit/local-device)时回落 localhost:<port>,
-      #   其余失败仍原样上抛;修复宿主机设备上「打开卡片」报 rejected (400)。需搭配 bridge >= 0.5.2 才对本机设备生效。
-    enabled: true              # bridge 0.5.0 已发布 cockpitBridge.portForward(2026-09-24)
+    version: 0.2.0
+      # [2026-10-08] bridge 0.6.1 删除旧 portForward；迁移 forwards 的 acquire/ready/onChange/release。
+      # 仅结构化 local-device 可回落 localhost；未握手 unavailable 不能证明同机。
+    enabled: true
     brief: 驾驶舱端口发布能力接入 dsh-memex 卡片浏览(可移除 shim)
-    note: 'openspec change dsh-memex-card-browser;纯 Web client shim,无 Host 能力/网络通道/业务状态。唯一职责:运行时探测完整 dotted 服务名 cockpitBridge.portForward 与 dshMemex.browseAddress,两端齐备时把前者注册给后者,使 DSH 跑在 VM/devbox 时卡片浏览可从宿主机浏览器访问;两端无任何直接依赖或互相命名(一个约定服务名同样属于提供方,故连字符串也不放进 dsh-memex)。每库一个 channel(memex-browse-<库名>)——内核一进程一库,共用 channel 会发布错库;先 register(channelId,port) 声明可发布再 publish(channelId) 取地址。**0.1.1 区分两类失败**(bridge 0.5.2 契约):bridge 抛「不可用」(按 name===PortForwardUnavailableError 结构判定,reason no-cockpit/local-device)→ 回落 http://localhost:<port>(没有转发可言:不在驾驶舱内或本设备就是宿主机,浏览器与设备端口同机,与 shim 未装时 dsh-memex 自给地址一致);其余失败(驾驶舱在但拒绝 PortForwardRejectedError / 网络异常 / 旧 bridge 普通 Error)原样上抛由 dsh-memex 呈现——跨机器下 localhost 会解析到用户自己的机器。⚠ 2026-09-30 真机根因:宿主机(local 设备)+ shim + bridge 0.5.1 组合从未被验收覆盖——本机设备 publish 被 cockpit 以泛化 400 拒绝(local device needs no port forward),bridge 把任何 400 当 capability 过期去续签(白等 5s)后只剩 rejected (400),shim 原样上抛,dsh-memex 按设计不回落,故宿主机上「打开卡片」必报错;远端设备一直正常。无顶层 inject(任一端缺失时整体静默无效,dsh-memex 回落 localhost:<port>,本机直连场景不受影响);监听 Cordis internal/service 支持任意加载/卸载顺序;禁止 ctx.get("cockpitBridge").portForward(会被 traceable proxy 重新路由并强制 inject),只用 ctx.get("cockpitBridge.portForward");不校验/改写地址,不持状态/重试/缓存。前置:dsh-cockpit-bridge >=0.5.0 提供 portForward(cockpit 仓 change device-port-forward-seam,2026-09-24 已归档);宿主机设备回落需 bridge >= 0.5.2(本机设备判定在 bridge 本地同步完成,不发请求)。cockpit 服务端需 >= 2aaa473;拒绝码 local-device/port-not-registered/forward-limit(409)需含 2026-09-30 port-forward 稳定 code 修复。移除:删除本条 → dsh build → 重启,两端均无需迁移。'
+    note: 'openspec change upgrade-dsh-0-2-0-runtime;纯 Web client adapter,两端互不引用。完整 dotted 服务名 cockpitBridge.forwards 与 dshMemex.browseAddress;无顶层 inject,支持任意加载顺序。bridge 正式 pin 0.6.1 已删除旧 portForward,不能搭配 shim0.1.1。按设备端口单飞 acquire(port,holder),holder 含随机绑定标识;只交付 ready 的当前 address.url,starting/retrying/paused 通过 onChange 等待最多15秒,不缓存URL/不自行重试。持有直到绑定结束并 release,含迟到acquire;removed 不自动重新申请,下一次显式打开可重申请。仅 CockpitForwardsError code=local-device 回落 localhost;unavailable(包括未握手)/网络/业务错误原样传播。从未发现bridge时保持memex-only默认本机行为;已接线bridge消失保留fail-closed resolver,取消等待并释放句柄,避免远端静默误路由。package test/typecheck/build 与真实registry回归覆盖;devbox正式部署/浏览器验收仍是独立门禁。移除本条→build→重启可解耦;回滚旧shim必须同时回滚bridge到旧服务版本。'
   # 第三方(remote):dsh-web 系皮肤/主题中心(按需子插件,不安装聚合全家桶)
   - id: skin-center
     type: package

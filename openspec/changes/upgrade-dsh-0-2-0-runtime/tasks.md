@@ -95,6 +95,14 @@
 - [x] 6d.2 devbox原样安装、Cost RPC/真实Settings→Cost、原header进程内无网络注入探针、sync×2第二次no changes及官方dump各一条；sync后再启动/browser通过，干净storage候选亦通过；沿用先前acceptance-only bridge，不替代正式完整组合，见checking/header-community-options.md
 - [ ] 6d.3 现役1.7.30账本脱敏副本→1.8.4读取兼容、真实模型usage费用累加与Go/Zen实际调用（部分：devbox20天/80会话历史读取/写回/重载完全保留，合成监听器usage入账一次/固定计价正确，两种stream listener顺序并发会话独立；2026-10-08经用户授权复用主干Go凭据：候选真实opencode-go/deepseek-v4-flash一次调用成功，cost-meter1.8.4按provider/model/session计入token与calls，Go按订阅plan计0元；原header在线未触发MissingSessionID；Zen经用户确认不在范围（主干只用Go，未配置Zen））；若完整验证失败，按用户最新优先级保留OpenCode/header、显式禁用cost-meter，不修改插件/DSH源码（1.8.11已写过的候选价表有旧codec告警，不得删用户价表换取PASS）
 
+## 6e. bridge 0.6.1 消费方迁移与正式部署（2026-10-08）
+
+- [x] 6e.1 清理已授权 .local-repair；保留在用 launcher 与未授权 staging/其他 worktree
+- [x] 6e.2 真实 memex registry + 仅 forwards 服务回归证明旧 shim RED；迁移新 API 与错误分类、等待/取消/释放/单飞，package 测试和类型检查通过
+- [ ] 6e.3 完成完整 diff 自审、package build、根测试、artifact 与严格 OpenSpec 校验，受控合入并推送主干
+- [ ] 6e.4 devbox 从主干拉取，正式 build×2 幂等、restart、真实功能/浏览器验收；保留私有 overlay 和历史
+- [ ] 6e.5 devbox 隔离 DSH_HOME/端口的新机物化与启动实测；不得替代生产验收或覆盖现役状态
+
 ## 7. 收尾
 
 - [ ] 7.1 把每个第三方插件的最终 pin、审查与回滚说明写回 `dsh.yaml` note

@@ -130,4 +130,5 @@ W3–W5 进行期间，memex 与 Pet 在候选上可以处于禁用态；这只�
 
 - D3 的增强方案 B 已与 delta spec 对齐；实际 configForms 编辑与 org 键保留仍由 3.8 实测放行。
 - 0.2.0 首启导入 `settings.yaml` 时，`llm-pi-ai.providers` 等不属于本仓插件的段落是否全部被正确接收？W3 实测；有段落丢失时记录并评估是否需要手动迁移。
-- cockpit-bridge 是否要随本次升到 0.6.0？它在本仓外维护；W3 候选上验证 0.5.1 与 0.6.0，选择能通过验收的版本。
+- 已决定正式 pin bridge 0.6.1（主干已含）；旧 memex shim 0.1.1 仅读已删除的 portForward，真实 registry 静默回落 localhost。shim 0.2.0 迁移 forwards：端口/绑定 随机标识 holder、单飞 acquire、onChange ready 有界等待、当前地址读取、生命周期释放（含迟到结果）；仅结构化 local-device 降级。未握手 unavailable 不证明同机；bridge 曾出现后消失保留 fail-closed resolver。从未出现 bridge 的独立 memex 部署不受影响。该必要句柄生命周期是对 current spec 无状态约束的显式修订，delta 留在本 change；正式部署与浏览器实测仍是独立门禁。
+- 2026-10-08 用户授权由本任务按顺序清理 local repair、完成 shim 迁移、主干拉取后在 devbox build/restart/实测，再做隔离新 home；本机不重启，WSL/VM 延后。该授权替代 Migration Plan 中“用户执行 restart”的旧执行安排，但不缩减验收门禁。
