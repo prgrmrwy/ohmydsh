@@ -17,13 +17,12 @@ async function published() {
   let startup!: Promise<unknown>
   const tools: unknown[] = []
   const child = {
-    settings: { register: () => ({ get: () => ({ updateCheck: 'disabled', telemetry: 'adapter-off' }) }) },
     skills: { registerProvider: () => () => {} },
     commands: { register: () => () => {} },
     tools: { register: (...args: unknown[]) => { tools.push(args); return () => {} } },
     provide: (name: string, value: unknown) => { services.set(name, value) }, on() {}, set() {}, effect() {},
   }
-  apply({ inject: (_names: unknown, callback: any) => { startup = callback(child) } } as any, { officialConfigPath: join(home, 'absent.json') })
+  apply({ inject: (_names: unknown, callback: any) => { startup = callback(child) } } as any, { officialConfigPath: join(home, 'absent.json'), updateCheck: 'disabled' })
   await startup
   return { services, tools }
 }

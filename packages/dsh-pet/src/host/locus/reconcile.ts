@@ -98,10 +98,10 @@ export async function reconcileLocusChildren(
   const safeCandidates: LocusRecord[] = []
   for (const record of candidates) {
     if (signal.aborted) break
-    if (record.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION) {
+    if (record.childComposition !== 'safe-v1' && record.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION) {
       // This durable fact is checked before any runtime probe: probing may
       // resolve/adopt/cold-resume the child and thereby inherit the parent preset.
-      const reason = '该代际缺少 safe-v1 child composition 证明，需要所有者重新建立。'
+      const reason = '该代际缺少 safe child composition 证明，需要所有者重新建立。'
       await ports.store.invalidate(record.id, reason, now())
       invalidated.push({ locusId: record.id, reason })
       ports.log?.('child-unusable')

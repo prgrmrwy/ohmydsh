@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import yaml from 'js-yaml'
 import { homedir } from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -63,7 +64,26 @@ function inspectSession(file) {
   }
 }
 
+/**
+ * Expected exact versions come from the manifest's thirdPartyResources, so a
+ * provider bump (e.g. a DSH runtime upgrade moving dsh-mcp-client) cannot leave
+ * this probe asserting a stale literal.
+ */
+function expectedVersions() {
+  const manifest = yaml.load(readFileSync(path.join(repo, 'dsh.yaml'), 'utf8')) ?? {}
+  const resources = new Map((manifest.thirdPartyResources ?? []).map(resource => [resource.id, resource]))
+  const jev = resources.get('jev')
+  const superflow = resources.get('spec-superflow')
+  return {
+    jev: jev?.version,
+    bridge: jev?.bridge?.version,
+    specSuperflow: superflow?.version,
+    skillProvider: superflow?.provider?.version,
+  }
+}
+
 const localEnvVariables = declaredVariables(path.join(repo, '.env.local'))
+const expected = expectedVersions()
 const profilePackage = path.join(dshHome, 'profiles', profile, 'package.json')
 const patch = path.join(dshHome, 'profiles', profile, 'cordis.patch.yml')
 const packageJson = existsSync(profilePackage) ? JSON.parse(readFileSync(profilePackage, 'utf8')) : {}
@@ -81,10 +101,10 @@ const report = {
   profile: {
     profile,
     exactPackages: {
-      jev: dependencies['@jkudish/jev-mcp'] === '0.6.0',
-      bridge: dependencies['@deepseek-ai/dsh-mcp-client'] === '0.1.5-rc.2',
-      specSuperflow: dependencies['spec-superflow'] === '2.0.1',
-      skillProvider: dependencies['@deepseek-ai/dsh-skill-filesystem'] === '0.1.5-rc.2',
+      jev: expected.jev !== undefined && dependencies['@jkudish/jev-mcp'] === expected.jev,
+      bridge: expected.bridge !== undefined && dependencies['@deepseek-ai/dsh-mcp-client'] === expected.bridge,
+      specSuperflow: expected.specSuperflow !== undefined && dependencies['spec-superflow'] === expected.specSuperflow,
+      skillProvider: expected.skillProvider !== undefined && dependencies['@deepseek-ai/dsh-skill-filesystem'] === expected.skillProvider,
     },
     insertionRows: {
       jev: /- insert:\n\s+- id: "third-party-jev-bridge"/u.test(patchText),

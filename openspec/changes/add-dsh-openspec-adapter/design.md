@@ -34,7 +34,7 @@
 
 ### D2. 独立不可变 generation，通过普通 Bash 使用 CLI
 
-源码 `packages/dsh-openspec/package.json` 中 `@fission-ai/openspec` 精确依赖 + 根 lockfile 是官方版本唯一 pin，初始 1.13.2。`dsh.yaml` 条目控制 bundle 版本/启用，并按 `repo-layout` 第三方记录要求在 `note` 中以散文记录官方依赖；**C2 决定（用户选 A）**：`dsh.yaml` 记录只写**散文**（来源、许可、遥测/凭据边界、升级复核点、移除路径），**不写版本号**，因此升级/回滚事务只需改 `package.json` 与根 lockfile 两个文件，不会让 manifest 记录与 pin 失配。`dsh-openspec-pin-mismatch` 改为比对 `package.json` 的 pin 与**根 lockfile 解析出的名称/版本/integrity**，不一致即失败并同时给出两个值。插件选项 `updateCheck`、`telemetry` 不放 `dsh.yaml`（sync 不向 bundle 传递条目配置，且会引入 repo-layout 变更），改为读 DSH settings 服务命名空间 `dsh-openspec`（由用户设置文件承载，与 `dsh-memex` 同一通道），默认 `updateCheck: enabled`、`telemetry: adapter-off`。根 workspace 提升后 `node_modules/.bin/openspec` 会出现在仓库 npm scripts 中；本仓库自身的 OpenSpec 使用不依赖该 bin，实施时核对不改变仓库工具链。
+源码 `packages/dsh-openspec/package.json` 中 `@fission-ai/openspec` 精确依赖 + 根 lockfile 是官方版本唯一 pin，初始 1.13.2。`dsh.yaml` 条目控制 bundle 版本/启用，并按 `repo-layout` 第三方记录要求在 `note` 中以散文记录官方依赖；**C2 决定（用户选 A）**：`dsh.yaml` 记录只写**散文**（来源、许可、遥测/凭据边界、升级复核点、移除路径），**不写版本号**，因此升级/回滚事务只需改 `package.json` 与根 lockfile 两个文件，不会让 manifest 记录与 pin 失配。`dsh-openspec-pin-mismatch` 改为比对 `package.json` 的 pin 与**根 lockfile 解析出的名称/版本/integrity**，不一致即失败并同时给出两个值。插件选项 `updateCheck`、`telemetry` 不放 `dsh.yaml`（sync 不向 bundle 传递条目配置，且会引入 repo-layout 变更），作为适配器自身 Cordis 插件 Config 的字段（`dsh-openspec` 行的 `config`），默认 `updateCheck: enabled`、`telemetry: adapter-off`。**0.2 修订（运行体随主干升级到 0.2.0-rc.2）**：0.2 删除了 Host `settings.register` 与 `settings.yaml`，配置归插件行所有、持久化在 profile patch。`dsh-memex` 采用同样的 Config 所有权，但它的可编辑字段标为 volatile；本适配器刻意**不标 volatile**，因此 0.2 设置表单（只展示 volatile 字段）不显示这两个选项，需通过编辑 profile patch 中 `dsh-openspec` 行的 `config`（原生设置文档）修改，插件重挂载或 Host 重启后生效。generation 身份**必须覆盖 telemetry 模式**：受管调用串内嵌该选择，不同 telemetry 值不得共享身份，否则重挂载会触发 `generation-identity-collision`。已核实 VM 与本机 `settings.yaml` 均无 `dsh-openspec` 分节，无需加入 sync 的旧设置迁移表。根 workspace 提升后 `node_modules/.bin/openspec` 会出现在仓库 npm scripts 中；本仓库自身的 OpenSpec 使用不依赖该 bin，实施时核对不改变仓库工具链。
 
 遥测：官方 CLI 默认向 `edge.openspec.dev` 发送命令名与版本。受管调用串默认带 `OPENSPEC_TELEMETRY=0`；插件选项 `telemetry: official` 时不设置，尊重用户官方配置（但恒带 `OPENSPEC_NO_UPDATE_CHECK=1`，见上）。构建阶段核验 version/integrity并物化包含官方发布物、依赖闭包、模板和CLI入口的不可变 generation。部署位置 `$DSH_HOME/plugins/dsh-openspec/generations/<identity>/`，每 profile 有原子 active 引用；不能把CLI路径指到升级时会覆盖的 node_modules。
 
@@ -70,7 +70,7 @@ get/load 或command delivery触发共享check service；固定 npm metadata endp
 
 **目录失效（审查 M7）**：官方 profile/delivery 变更后，registry 对 `list` 结果按 (cwd, scope 链, revision) 缓存且无 TTL，必须由 provider 调用注册期给出的 `invalidate()`。适配器在每次消费时、以及至多每 30s 对官方全局配置文件做 stat，变化则 `invalidate()`。
 
-state写入是受管plugin状态，不包含用户正文。开关为 DSH settings 服务命名空间 `dsh-openspec` 中的插件选项 `updateCheck`（默认 `enabled`，`disabled` 时自动与显式检查都零网络请求）。显式check可绕过TTL但仍share in-flight/budget。registry latest 低于已选版本时状态为 `ahead-of-latest`，不提示。提示绝不触发升级。提示每 session×版本对至多一次、不开新轮次。
+state写入是受管plugin状态，不包含用户正文。开关为适配器插件 Config 中的选项 `updateCheck`（默认 `enabled`，`disabled` 时自动与显式检查都零网络请求）。显式check可绕过TTL但仍share in-flight/budget。registry latest 低于已选版本时状态为 `ahead-of-latest`，不提示。提示绝不触发升级。提示每 session×版本对至多一次、不开新轮次。
 
 ### D5. 升级是 source-owned staged transaction
 
@@ -129,4 +129,4 @@ state写入是受管plugin状态，不包含用户正文。开关为 DSH setting
 
 ## Open Questions
 
-无未决定的产品范围。可行性探测 0.2–0.7 已完成，结论写入 tasks.md 与上文 D1/D2/D4/D7；它们触发了对 spec 的三处收缩（调用串改为附加分隔块、更新提示只附在下次消费结果、本 change 不发布会话路由工具），并经第 2 轮 Anvil 独立审查（第 1 轮已因内容变化作废）。审查进一步发现并经用户决定的事项：宿主层 provider 进入 Pet scope 的缺口先声明不修（D1）；manifest 记录只写散文、pin 校验改对 lockfile（D2）；`updateCheck`/`telemetry` 走 settings 服务。未验证项：专用 Pet executor 与 Locus child 的真实会话头样本，列为后续 change 的前置。远端仓库托管和npm发布留给明确后续请求。
+无未决定的产品范围。可行性探测 0.2–0.7 已完成，结论写入 tasks.md 与上文 D1/D2/D4/D7；它们触发了对 spec 的三处收缩（调用串改为附加分隔块、更新提示只附在下次消费结果、本 change 不发布会话路由工具），并经第 2 轮 Anvil 独立审查（第 1 轮已因内容变化作废）。审查进一步发现并经用户决定的事项：宿主层 provider 进入 Pet scope 的缺口先声明不修（D1）；manifest 记录只写散文、pin 校验改对 lockfile（D2）；`updateCheck`/`telemetry` 走插件 Config（0.2 修订，原为 settings 服务）。未验证项：专用 Pet executor 与 Locus child 的真实会话头样本，列为后续 change 的前置。远端仓库托管和npm发布留给明确后续请求。

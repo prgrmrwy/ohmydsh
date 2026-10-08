@@ -13,21 +13,34 @@ import { registerMemexSkills } from './lifecycle/skills.js'
 import { registerMemexChannel } from './host/channel.js'
 import { createBrowseRegistry } from './run/browse-registry.js'
 import { parseOrgProfile, type OrgProfileInput } from './org.js'
+import { Config, guardConfigCandidates, parseConfig, readScopeConfig, validateMemexSettings } from './scope/settings.js'
 
 export const name = 'dsh-memex'
 // Do not export a static `inject`: optional Host services belong in the dynamic
 // ctx.inject() fiber below. A static declaration would turn them into loader
 // hard dependencies and can make this plugin silently never activate.
 
-/** Mount all settings-dependent contributions in one injected fiber. */
-export function apply(ctx: Context, config?: OrgProfileInput): void {
-  // Row config (profile patch), not live settings: which hosts are internal is
-  // a deployment fact supplied by a private overlay, never by the public repo.
-  const org = parseOrgProfile(config)
+export { Config }
+
+/**
+ * Mount the plugin. Since DSH 0.2.0 the scope table is this plugin's own
+ * Config (volatile fields, edited by the settings form into the profile patch)
+ * and the organization keys are ordinary fields of the same row.
+ */
+export function apply(ctx: Context, config: Config = parseConfig({})): void {
+  // Cross-field rules (duplicate scopes, shared libraries, bindings) are not
+  // expressible in the schema: check the mounted value, and every later candidate.
+  validateMemexSettings(readScopeConfig(config))
+  guardConfigCandidates(ctx)
+  // Ordinary row config: which hosts are internal is a deployment fact supplied
+  // by a private overlay, never by the public repo.
+  const org = parseOrgProfile(config as OrgProfileInput)
   for (const problem of org.problems) ctx.logger('dsh-memex').warn('Ignored organization config: %s', problem)
-  ctx.inject(['settings', 'tools', 'skills'], child => {
-    const runtime = createMemexRuntime(child, org)
-    // Tools keep this stable proxy while valid live settings atomically replace
+  // On the plugin's own fiber: `loader/volatile-update` is delivered only to
+  // listeners of the instance whose Config changed, not to child fibers.
+  const runtime = createMemexRuntime(ctx, config, org)
+  ctx.inject(['tools', 'skills'], child => {
+    // Tools keep this stable proxy while valid live Config edits atomically replace
     // the underlying resolver (and discard its cwd cache).
     const scopes = {
       resolve: (cwd: string) => runtime.scopes.current.resolve(cwd),

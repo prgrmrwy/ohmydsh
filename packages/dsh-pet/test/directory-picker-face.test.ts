@@ -93,9 +93,10 @@ async function composeClient(
     register: () => () => {},
   })
   ctx.provide('sessions', {
-    list: { getSnapshot: () => ({ current: undefined, byId: {} }), subscribe: () => () => {} },
-    open: () => {},
+    list: { getSnapshot: () => ({ byId: {} }), subscribe: () => () => {} },
   })
+  // DSH 0.2.0 navigation service (Pet opens Sessions through it).
+  ctx.provide('uiWorkspace', { openSession: () => {} })
   ctx.provide('workspaces', {
     list: { getSnapshot: () => ({ items: [] }), subscribe: () => () => {} },
   })

@@ -66,14 +66,20 @@ function deliveryContext(
 }
 
 describe('unified locus delivery context', () => {
-  it('renders the caller-bound locus facts and current request', () => {
-    const prompt = renderLocusDeliveryPrompt(deliveryContext())
+  it('renders shell-tier capabilities and accurately describes the mistake-prevention guard', () => {
+    const prompt = renderLocusDeliveryPrompt(deliveryContext({
+      locus: { locusId: 'locus-project-1', generation: 3, state: 'active', childComposition: 'safe-v2', toolTier: 'shell' },
+    }))
 
     for (const fact of [
+      'shell 档允许以 bot 身份读取当前入口的群消息',
+      'lark-cli 出站 guard 仅防误操作，不是安全边界',
       endpoint.chatId,
       endpoint.threadId,
       'locus-project-1',
       'generation：`3`',
+      'shell 档可执行本机命令并使用本机飞书凭据',
+      'MUST NOT 读取无关群、私聊、全局消息或其它 workspace',
       'session-main-1',
       'session-child-1',
       'workspace-1',
@@ -209,7 +215,9 @@ describe('unified locus delivery context', () => {
     expect(prompt).toContain('constraints：未确认')
     expect(prompt).toContain('project resources：未确认')
     expect(prompt).toContain('请所有者在管理面显式确认')
-    expect(prompt).toContain('不得调用 shell、lark-cli、通用 HTTP、send_message 或子委派')
+    expect(prompt).toContain('safe 档不得调用 shell、lark-cli、通用 HTTP、send_message 或子委派')
+    expect(prompt).not.toContain('shell 档允许以 bot 身份读取')
+    expect(prompt).not.toContain('出站 guard 仅防误操作，不是安全边界')
     expect(prompt).toContain('路径存在性与 sandbox 授权分离')
     expect(prompt).toContain('不自动运行 ws/sw')
     expect(prompt).not.toContain('/repo/.worktrees/project')

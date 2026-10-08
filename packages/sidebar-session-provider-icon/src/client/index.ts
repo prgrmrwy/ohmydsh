@@ -25,6 +25,7 @@ import { providerBySession, providerTitleIndex } from './provider-map.js'
 import { badgeInnerHTML, badgeTitle } from './logos.js'
 import { BADGE_MARKER, isSessionRow, sessionIdOfRow, titleNodeOf } from './row-locator.js'
 import { bindSelectionDirectory } from './selection-binding.js'
+import { mainSessionId } from './main-session.js'
 
 export const inject = ['sessions', 'modelDirectories']
 
@@ -111,7 +112,7 @@ export function apply(ctx: ClientContext): void {
 
   const reconcile = scheduleReconcile(() => reconcileList(ctx, selected))
   const syncCurrentDirectory = (): void => {
-    const id = ctx.sessions.list.getSnapshot().current
+    const id = mainSessionId(ctx.sessions.list.getSnapshot()) as SessionId | undefined
     if (id === selectedSessionId) return
     stopDirectory?.()
     stopDirectory = undefined

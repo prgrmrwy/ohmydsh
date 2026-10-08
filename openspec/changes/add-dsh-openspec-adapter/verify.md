@@ -4,6 +4,24 @@ DECISION: FAIL
 
 Interim implementation report, not final acceptance. The public naming amendment is complete locally; the overall change remains incomplete. Do not merge, archive, or treat artifact approval as authorization for Host-side mutations.
 
+## Merged main and migrated to DSH 0.2.0-rc.2 (goal round 19)
+
+The user paused VM testing because main had upgraded the runtime to 0.2.0-rc.2 and the VM checkout carried someone else's uncommitted work (`dsh.yaml` cockpit-bridge 0.5.1 to 0.6.1 and `.local-repair/`, both created 2026-10-08 06:55, not by this change). The VM was left untouched from that point.
+
+**Merge.** `origin/main` (`f44191b`, redone after main advanced from `a844cdc`) merged into the task branch. Two conflicts: `package-lock.json` resolved by taking main's 0.2 tree and re-adding only this branch's 69 new entries (the `@fission-ai/openspec` closure and the workspace), with no same-key content clash; `packages/dsh-memex/test/lifecycle.test.ts` (pre-existing branch memex work) kept the branch helper and repointed it from the removed `agent/session-start` to `agent/created`. Merged memex tests then failed 9 times: they still expected the removed bare `plugin` source and the pre-deferral turn-close injection; aligned to `plugin:dsh-memex` and deferred delivery (366 pass).
+
+**0.2 adaptation of the adapter.**
+- Peers and dev ranges `^0.2.0-rc.2` (0.2's peer check rejects `^0.1.5-rc.2` and disables the bundle).
+- Message source: 0.2 removed `{ kind: 'plugin' }` and a v4 session reader throws on it, so a session written with it could not be reopened. Now a producer-owned `plugin:dsh-openspec` kind, as main's memex does; the strict Agent double enforces the 0.2 kinds.
+- `agent/created` / `agent/disposed` listeners return `undefined` per the 0.2 signature.
+- Options: 0.2 removed `ctx.settings.register`. Options are now fields of the plugin's Cordis Config, not volatile (spec/design revised, Anvil round 4 `APPROVE_WITH_CHANGES`, both Required Changes applied). Real Cordis probe: defaults applied, invalid value rejected before mount, both fields `volatile:false`.
+- Round-4 review I-1 fixed: the generation identity now covers the telemetry mode; RED `generation-identity-collision` on a telemetry change, GREEN with a new identity, old generation byte-identical, switching back reuses it.
+- S2 evidence (2026-10-08): VM `/Users/prgrmrwy/.dsh/settings.yaml` and dev `~/.dsh/settings.yaml` have no `dsh-openspec:` section and no `.imported` file. If such a section existed elsewhere, 0.2's one-time import would log and drop it, so a lost `updateCheck: disabled` would silently re-enable registry requests; other machines must be checked by hand.
+
+**Verification on the merged tree.** dsh-openspec 158, dsh-memex 366, dsh-worktree-session 218 pass; all workspace typechecks pass; repository 329 total / 327 pass / 0 fail / 2 existing skips; artifacts, strict validation and diff checks pass. dsh-pet has 1 failure (`loader-composition` "produces a loadable module-loader bundle"); it fails identically on a clean checkout of `origin/main`, so it is pre-existing upstream, not caused by this merge, and was left alone.
+
+Not yet done: nothing has been deployed to the VM on 0.2; the live rows remain open and the VM checkout belongs to whoever left the uncommitted work.
+
 ## First real GUI evidence on the VM main process (goal round 19)
 
 The user ran the commands in the real Web GUI of corp-mac-vm's main DSH process (task branch deployed, supported `dsh stop` / `dsh --no-open` restart, sync run twice with the second reporting no changes). This is the first live evidence for the adapter and it exposed three defects that 150+ passing tests had not:

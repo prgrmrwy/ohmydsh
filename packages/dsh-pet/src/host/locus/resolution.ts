@@ -176,6 +176,7 @@ function toActive(record: LocusRecord, parentArchived: boolean): ResolvedActiveL
     // Proven by `dispositionOf`; not re-derived here on purpose.
     childSessionId: disposition.childSessionId,
     childComposition: disposition.childComposition,
+    ...(disposition.toolTier !== undefined ? { toolTier: disposition.toolTier } : {}),
     workspaceId: record.workspaceId,
     state: 'active',
     permission: record.permission,

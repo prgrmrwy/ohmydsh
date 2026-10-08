@@ -87,6 +87,7 @@ export const LOCUS_ROUTES = {
   /** Stop a locus while retaining its endpoint stop marker. */
   stop: '/dsh-pet/api/locus-stop',
   scope: '/dsh-pet/api/locus-scope',
+  tools: '/dsh-pet/api/locus-tools',
   rebuild: '/dsh-pet/api/locus-rebuild',
   // NOTE: the optional owner view/correction surface for shared facts is
   // deliberately NOT declared here yet. A declared route must be registered
@@ -309,6 +310,8 @@ export interface PetLocusView {
   readonly workspace: PetLocusWorkspaceView
   readonly contextAnchor?: PetLocusContextAnchorView
   readonly permission: PetLocusPermissionView
+  readonly toolTier: { readonly desired: 'safe' | 'shell'; readonly effective: 'safe' | 'shell'; readonly verifiedAt?: number; readonly grantedBy?: string }
+  readonly childComposition?: 'safe-v1' | 'safe-v2'
   readonly state: PetLocusStateView
   readonly source: PetLocusSource
   /** Chat-level locus that structurally owns this topic, when applicable. */
@@ -577,6 +580,13 @@ export interface PetLocusScopeAction extends PetLocusMutationFence {
    */
 }
 
+/** Change the owner-granted tool tier without changing file permission or child identity. */
+export interface PetLocusToolsAction extends PetLocusMutationFence {
+  readonly action: 'tools'
+  readonly locusId: string
+  readonly tier: 'safe' | 'shell'
+}
+
 /** Explicit owner confirmation of context facts for the exact current locus. */
 export interface PetLocusConfirmAnchorAction extends PetLocusMutationFence {
   readonly action: 'confirm-anchor'
@@ -629,6 +639,7 @@ export type PetLocusActionRequest =
   | PetLocusArchiveAction
   | PetLocusStopAction
   | PetLocusScopeAction
+  | PetLocusToolsAction
   | PetLocusConfirmAnchorAction
   | PetLocusRebuildAction
   | PetLocusReplaceParentAction

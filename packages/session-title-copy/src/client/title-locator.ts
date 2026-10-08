@@ -14,7 +14,8 @@
  *         nav[aria-label=session.hierarchy]          ← breadcrumb nav (anchored)
  *           span .crumbSeg [key=sessionId]
  *             button .crumb[.crumbSubagent][.crumbCurrent]
- *                   (disabled only on the LAST / current session title)
+ *                   (0.1.5: disabled only on the LAST / current session title;
+ *                    0.2.0: the current crumb is a `span.crumb.crumbCurrent`)
  *             span .crumbSep "/"
  *         div .headerActions ...
  *       div .headerUtilities ...
@@ -75,7 +76,9 @@ export function findCrumbNav(root: ContainerLike): ElementLike | null {
     if (header === undefined) continue
     const nav = header.querySelector?.('nav')
     if (nav === undefined || nav === null) continue
-    const buttons = nav.querySelectorAll?.('button') ?? []
+    // DSH 0.1.5 renders every crumb as a button; 0.2.0 renders the current
+    // (last) crumb as a non-interactive span. Accept both element kinds.
+    const buttons = nav.querySelectorAll?.('button, span') ?? []
     for (let j = 0; j < buttons.length; j++) {
       const button = buttons[j]
       if (button !== undefined && isCrumbButton(button)) return nav

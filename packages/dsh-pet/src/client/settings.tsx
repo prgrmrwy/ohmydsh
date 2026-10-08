@@ -977,6 +977,7 @@ export function LocusDetails(props: {
     head.state.state === 'provisioning' || head.state.state === 'active' || head.state.state === 'switching'
   const writable = head.permission.effective === 'write'
   const permissionDrift = head.permission.desired !== head.permission.effective
+  const shellTier = head.toolTier.effective === 'shell'
 
   return (
     <dl className="dshpet-locus-details">
@@ -1030,6 +1031,17 @@ export function LocusDetails(props: {
         </>
       )}
 
+      <dt>工具档位</dt>
+      <dd>
+        {head.toolTier.effective}
+        {head.toolTier.desired !== head.toolTier.effective
+          ? ` · 期望${head.toolTier.desired}，实际${head.toolTier.effective}，未生效`
+          : ''}
+        {shellTier
+          ? ' · allowlist 成员共享本机命令执行与飞书凭据能力；文件写权限仍是独立档位，读取与网络不受其约束。出站 guard 仅防误操作，不是安全边界。'
+          : ''}
+      </dd>
+
       <dt>操作</dt>
       <dd className="dshpet-locus-ops">
         {/* The permission control exists only while more than one mode does.
@@ -1037,6 +1049,27 @@ export function LocusDetails(props: {
             permanently-inert button would be the same noise this row is being
             cleared of; the current mode stays visible in the 权限 row above,
             and reappears here the moment the switch is turned back on. */}
+        <span className="dshpet-locus-perm" role="group" aria-label="工具档位">
+          <button
+            type="button"
+            aria-pressed={!shellTier}
+            disabled={blocked || !canManageCurrent || !shellTier}
+            onClick={run('tools-safe', () => petApi.locusTools({ action: 'tools', tier: 'safe', ...fence }))}
+          >
+            safe
+          </button>
+          <button
+            type="button"
+            aria-pressed={shellTier}
+            disabled={blocked || !canManageCurrent || shellTier || head.childComposition !== 'safe-v2'}
+            title={head.childComposition === 'safe-v1'
+              ? 'safe-v1 子会话需显式重建一次后才能授予 shell。'
+              : '开放 bash 与 Skill；allowlist 成员共享本机命令、飞书凭据、读取与网络能力。出站 guard 仅防误操作，不是安全边界。'}
+            onClick={run('tools-shell', () => petApi.locusTools({ action: 'tools', tier: 'shell', ...fence }))}
+          >
+            shell
+          </button>
+        </span>
         {LOCUS_WRITE_ENABLED ? (
           <span className="dshpet-locus-perm" role="group" aria-label="文件权限">
             <button
@@ -1727,6 +1760,10 @@ function requireLocusSnapshot(value: unknown): PetLocusManagementView {
         (item.contextAnchor.constraints !== undefined && (!Array.isArray(item.contextAnchor.constraints) || !item.contextAnchor.constraints.every(value => typeof value === 'string'))) ||
         (item.contextAnchor.provenance !== undefined && typeof item.contextAnchor.provenance !== 'string') ||
         (item.contextAnchor.confirmedAt !== undefined && !isFiniteNonNegative(item.contextAnchor.confirmedAt)))) return false
+    if (!isRecord(item.toolTier) || !['safe', 'shell'].includes(String(item.toolTier.desired)) || !['safe', 'shell'].includes(String(item.toolTier.effective)) ||
+        (item.toolTier.verifiedAt !== undefined && !isFiniteNonNegative(item.toolTier.verifiedAt)) ||
+        (item.toolTier.grantedBy !== undefined && !isNonEmptyString(item.toolTier.grantedBy)) ||
+        (item.childComposition !== undefined && !['safe-v1', 'safe-v2'].includes(String(item.childComposition)))) return false
     if (!isRecord(item.permission) || !['read', 'write'].includes(String(item.permission.desired)) || !['read', 'write'].includes(String(item.permission.effective)) ||
         (item.permission.verifiedAt !== undefined && !isFiniteNonNegative(item.permission.verifiedAt)) ||
         (item.permission.grantedBy !== undefined && !isNonEmptyString(item.permission.grantedBy)) ||

@@ -97,9 +97,9 @@ export interface LocusAuthorization {
 }
 
 /** A resolver supplied by the locus controller/repository. */
-export type LocusAuthorizationResolver = (
-  endpoint: LocusEndpoint,
-) => LocusAuthorizationState | LocusAuthorization
+export type LocusAuthorizationResolver = ((endpoint: LocusEndpoint) => LocusAuthorizationState | LocusAuthorization) & {
+  toolTier?: (endpoint: LocusEndpoint) => 'safe' | 'shell' | undefined
+}
 
 /** Narrow durable view needed by production admission. */
 export interface LocusAuthorizationStore {
@@ -109,6 +109,8 @@ export interface LocusAuthorizationStore {
         readonly state: 'provisioning' | 'active' | 'switching' | 'invalid' | 'retired' | 'stopped'
         /** The main session this generation serves; archived state is read from it. */
         readonly parentSessionId: string
+        readonly toolTier?: { readonly desired: 'safe' | 'shell'; readonly effective: 'safe' | 'shell' }
+        readonly childComposition?: 'safe-v1' | 'safe-v2'
       }
     | undefined
 }
@@ -182,7 +184,7 @@ export function createDurableLocusAuthorizationResolver(
     }
   }
 
-  return endpoint => {
+  const resolve: LocusAuthorizationResolver = endpoint => {
     const exact = endpoint.threadId === undefined
       ? { chatId: endpoint.chatId }
       : { chatId: endpoint.chatId, threadId: endpoint.threadId }
@@ -212,6 +214,13 @@ export function createDurableLocusAuthorizationResolver(
     }
     return unserviceableAuthorization(parent.state)
   }
+  resolve.toolTier = endpoint => {
+    const current = store.getLatestLocusByEndpoint(endpoint.threadId === undefined
+      ? { chatId: endpoint.chatId }
+      : { chatId: endpoint.chatId, threadId: endpoint.threadId })
+    return current?.state === 'active' ? current.toolTier?.effective ?? 'safe' : undefined
+  }
+  return resolve
 }
 
 /** Control operations understood by the unified locus channel. */
@@ -222,6 +231,9 @@ export type LocusControlCommand =
   | { readonly kind: 'scope'; readonly mode: 'read' | 'write' }
   | { readonly kind: 'scope-missing-mode' }
   | { readonly kind: 'scope-invalid'; readonly value: string }
+  | { readonly kind: 'tools'; readonly tier: 'safe' | 'shell' }
+  | { readonly kind: 'tools-missing-tier' }
+  | { readonly kind: 'tools-invalid'; readonly value: string }
   | { readonly kind: 'unbind' }
   | { readonly kind: 'unbind-invalid' }
 
@@ -270,6 +282,7 @@ export type LocusAdmissionRefusal =
   | 'legacy-endpoint'
   | 'authorization-unresolved'
   | 'control-not-allowed'
+  | 'owner-only-tier'
   | 'dedup-unavailable'
 
 /**
@@ -302,6 +315,8 @@ export interface LocusAdmissionContext {
   readonly authorizedEndpoints?: ReadonlySet<string> | readonly string[]
   /** Explicitly authorized chat ids; useful for group-level member-at policy. */
   readonly authorizedChats?: ReadonlySet<string> | readonly string[]
+  /** Current durable tool tier for a resolved endpoint. */
+  toolTier?: (endpoint: LocusEndpoint) => 'safe' | 'shell' | undefined
 }
 
 /** A successful admission, including the exact endpoint the controller must use. */
@@ -430,6 +445,19 @@ export function parseLocusControlCommand(text: string): LocusCommandParse {
     const value = lower.slice('--scope='.length)
     if (args.length === 0 && (value === 'read' || value === 'write')) return { kind: 'scope', mode: value }
     return { kind: 'scope-invalid', value: [value, ...args].join(' ') }
+  }
+
+  if (lower === '-t' || lower === '--tools') {
+    const value = args[0]?.toLowerCase()
+    if (value === undefined) return { kind: 'tools-missing-tier' }
+    if (args.length === 1 && (value === 'safe' || value === 'shell')) return { kind: 'tools', tier: value }
+    return { kind: 'tools-invalid', value: args.join(' ') }
+  }
+
+  if (lower.startsWith('--tools=')) {
+    const value = lower.slice('--tools='.length)
+    if (args.length === 0 && (value === 'safe' || value === 'shell')) return { kind: 'tools', tier: value }
+    return { kind: 'tools-invalid', value: [value, ...args].join(' ') }
   }
 
   if (lower.startsWith('--bind=')) {
@@ -608,7 +636,12 @@ export function admitLocusEvent(
   // Only a group with an explicitly authorized locus can grant ordinary
   // non-allowlisted member questions.  P2P conversations remain allowlist
   // scoped because there is no group membership authorization to inherit.
-  const canAskAsGroupMember = event.chat_type === 'group' && authorization === 'authorized'
+  const currentTier = context.toolTier?.(endpoint)
+  const ownerOnlyTier = currentTier === 'shell'
+  const canAskAsGroupMember = event.chat_type === 'group' && authorization === 'authorized' && !ownerOnlyTier
+  if (!allowlisted && ownerOnlyTier) {
+    return { admit: false, reason: 'owner-only-tier', endpoint, authorization }
+  }
   if (!allowlisted && !canAskAsGroupMember) {
     return { admit: false, reason: 'not-allowed-sender', endpoint, authorization }
   }

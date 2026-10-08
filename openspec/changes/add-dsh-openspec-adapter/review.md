@@ -1,89 +1,140 @@
 ## Review Metadata
 
-- **Review round**: 3
-- **Prior round**: round 2 = APPROVE_WITH_CHANGES / CHANGES_APPLIED yes; accepted invariants retained: closed and quoted adapter block, canonical-only notices, two-message command trust separation, package.json/root-lockfile source ownership, session Bash authorization, report-only recovery, declared Pet exposure gap, and contract-only/no-session-tool routing (round 1 was void).
-- **Reviewer context**: fresh-context local subagent; no authoring transcript, external provider/network probe, or further delegation. Prior review was read only as historical evidence, not as authority for this verdict.
-- **Tool restrictions**: read/grep/glob and read-only Bash with the explicitly bound worktree; only repository write is this review.md. No files archived, created as historical copies, deleted, or otherwise edited.
-- **Scope**: full proposal/design/all three delta specs; relevant current specs, manifest, integration pitfalls, source and local official 1.13.2 renderer/catalog. Existing tasks/test-plan/verify were read as downstream evidence, not rewritten or accepted as proof of implementation completion. `openspec/project.md` is absent.
-- **Trigger**: user-authorized replacement of former management Skill/slash by `openspec-upgrade`. Approval applies to the exact artifact hashes below, not to deployment/source readiness. A subsequent proposal/design/spec edit outside any listed Required Change voids this verdict.
+- **Review round**: 4
+- **Prior round**: round 3 = APPROVE (CHANGES_APPLIED n/a) for the `openspec-upgrade` naming amendment at proposal `8281b3f40283` / design `d0f87ff955f3` / session `659e7494aee8` / updates `8e9348c2a537` / routing `f23930586483`. That verdict is VOID for proposal, design, session and updates because their contents changed. Round 3's implementation-readiness notes (I1 Host mutation, I2 naming wiring) were historical evidence only and were not re-adjudicated here.
+- **Reviewer context**: fresh-context local subagent (same model family). No authoring transcript. A cross-model CLI was deliberately not used because the artifacts would leave the machine without user approval. Round 3 review.md was read as historical evidence only, not as authority.
+- **Tool restrictions**: read-only. Used read/grep/glob plus read-only Bash (`git diff`, `git show`, `git status`, `sha256sum`, `ls`, `grep`, `sed`, and `openspec instructions`/`validate`) with the bound worktree as workdir. The only file written is this review.md. No tests, builds, installs, sync, network requests or commits were run.
+- **Artifacts reviewed**: proposal.md, design.md, all three delta specs, and the round-4 amendment diff against HEAD (4 files, 9 insertions, 9 deletions). `openspec/project.md` is absent. Grounding sources and the change they come from:
+  - `openspec/changes/upgrade-dsh-0-2-0-runtime/design.md`.
+  - `scripts/lib/legacy-settings.mjs` (`7e5bc9b8774e`) and the `scripts/sync.mjs` profile-region/seed logic.
+  - `packages/dsh-openspec/src/options.ts` (`5fa06357b532`, working tree, already migrated).
+  - `packages/dsh-openspec/src/index.ts` (`71763ebee5e4`, working tree).
+  - `generation-materializer.ts` (`faad9e02b7f6`) and `managed-invocation.ts` (`8e5a074928a5`).
+  - `packages/dsh-memex/src/scope/settings.ts`.
+  - Installed `@deepseek-ai/dsh-settings@0.2.0-rc.2` (`lib/index.js` + `.d.ts`) and `@deepseek-ai/dsh-config-editor` `lib/index.js`.
+
+<!-- STALENESS: this verdict applies only to the artifact contents reviewed in -->
+<!-- this round. Any later edit to proposal.md, design.md, or specs/ (other than -->
+<!-- applying listed Required Changes) VOIDS the verdict and requires a new round. -->
 
 ### Reviewed artifact SHA-256 prefixes
 
-Paths in this table are relative to `openspec/changes/add-dsh-openspec-adapter/`.
+Paths are relative to `openspec/changes/add-dsh-openspec-adapter/`.
 
-| Artifact | SHA-256 prefix |
-|---|---|
-| proposal.md | `8281b3f40283` |
-| design.md | `d0f87ff955f3` |
-| specs/dsh-openspec-session/spec.md | `659e7494aee8` |
-| specs/dsh-openspec-updates/spec.md | `8e9348c2a537` |
-| specs/dsh-openspec-routing-extension/spec.md | `f23930586483` |
-| tasks.md (downstream evidence only) | `47c4dfc4fb8a` |
-| test-plan.md (downstream evidence only) | `82f6b4dbe1ff` |
-| verify.md (historical completion evidence only) | `ff48c2660401` |
+| Artifact | SHA-256 prefix (round 4) | Round 3 prefix | Changed |
+|---|---|---|---|
+| proposal.md | `c18adf8b9bdb` | `8281b3f40283` | yes |
+| design.md | `c8b92f3beaa5` | `d0f87ff955f3` | yes |
+| specs/dsh-openspec-session/spec.md | `2d3302d76a8c` | `659e7494aee8` | yes |
+| specs/dsh-openspec-updates/spec.md | `5474e7ff1fd6` | `8e9348c2a537` | yes |
+| specs/dsh-openspec-routing-extension/spec.md | `f23930586483` | `f23930586483` | **no (confirmed unchanged)** |
 
-Relevant source snapshots: `packages/dsh-openspec/src/index.ts` `da38fa0d02d3`; `commands.ts` `17529282bd4b`; `upstream-compat.ts` `1d018e578ef0`; `generation-materializer.ts` `aedf9d60d442`; `manage-controller.ts` `4ec3772a2cb1`; `upgrade-transaction.ts` `73cb39bd977c`; `source-record.ts` `94feae2c8463`; `adapter-block.ts` `c0ce9930fa99`; `stage-official.ts` `998c225d7293`; `update-check.ts` `a139567426a0`; `routing.ts` `e244a3191a2c`; `packages/worktree-session/src/host/guard.ts` `f8435d481499`.
+The HEAD versions of the four changed files hash exactly to the round-3 prefixes. So the git diff against HEAD is the complete amendment since the last approval.
 
 ## Findings
 
-### 🔴 Critical (blocking artifact defects)
+### 🔴 Critical (blocking)
 
-None. The naming amendment does not change the design's mutation/authorization boundary or introduce a fundamental planning contradiction. The implementation blocker below is expressly NOT approved by this artifact verdict.
+None. The amendment does not cross a trust boundary, widen authority or drop a safety invariant. The two defects below are small, unambiguous artifact corrections and are fully specified as Required Changes.
 
-### 🟡 Moderate (required artifact edits)
+### 🟡 Moderate
 
-None for this round. Existing wording advisories remain advisories; they are not silently promoted into new product/design requirements.
+**M1 — "Edits through its settings form" contradicts "SHALL NOT be declared volatile".** The session spec (Bundle-deployment requirement) says the row's `config` is something "which DSH 0.2 persists in the profile patch and edits through its settings form". Design D2 says "由 0.2 设置表单写入 profile patch" and that "`dsh-memex` 在升级中走了同一路径". The installed 0.2 settings service shows these statements are wrong:
 
-### 📌 Suggestions / existing advisories (non-blocking)
+- `dsh-settings/lib/index.js` `volatileForm()` (L118-131) projects only fields with a volatile ancestor.
+- `describe()` returns no descriptor for an entry whose form is `undefined` (L418-419).
+- `write()` throws `Plugin entry "<ns>" has no volatile fields` (L505-506) and rejects any path that is not volatile (L507, L520).
 
-**A1 — Resolve existing oracle shorthand in the next authorized artifact revision.** Session spec L4 explicitly defines every official-body assertion as `renderOfficialBody`, including its single `/opsx:` → `/opsx-` transformation. Accordingly proposal L9, design L41 and session spec L22's “unmodified official body” language is shorthand, not authorization for a second oracle. Identical-block scenarios also require equal notice/recovery state: otherwise the deliberately once-per-scope notice makes sequential loads differ. Session spec L96's “targets its own session cwd” means execution through Bash `workdir`, not embedding cwd in the block. Tests should preserve those interpretations. These are carried round-2 advisories, unchanged by naming.
+Because the amendment correctly makes both fields non-volatile, the 0.2 settings form will **never show or edit** `updateCheck`/`telemetry`. `dsh-memex` is not "the same path": it declares its live fields `.volatile()` (`dsh-memex/src/scope/settings.ts` L197-200), and only its organisation keys are ordinary.
 
-**A2 — Existing testability details remain bounded implementation notes.** Literal block markers/recovery enum values, command message order and empty-argument behavior, custom-command-vs-Skill gesture precedence, and the global-config invalidation timer must have one explicit implementation oracle. Sync's integrity wording cannot literally compare an integrity to package.json (which holds only a version): the lockfile presence/install verification and upgrade-time equality to registry `dist.integrity` provide the integrity checks. `state-unwritable` is mechanically observable through its scenario's management-check channel. These are not requests to redesign the accepted plan.
+The normative text therefore promises a user surface that cannot exist. An implementer or tester who tries to satisfy it would either add `.volatile()`, which defeats the amendment's own rationale, or ship a claim that the GUI cannot honour.
+
+The real edit path is the `dsh-openspec` row's `config` in the profile patch. That means the native document editor via `settings/openSettingsDocument` / `prepareDocument`, or a sync-preserved row outside the generated region. The change takes effect when the loader reconciles or remounts the plugin, or at Host restart.
+
+Wrong-direction risk: low but real, because the misstatement points toward the volatile design the amendment rejects.
+
+**M2 — The "identity recomputed from one consistent value" rationale is not mechanically assertable, and is false against the current derivation.** The new spec sentence says changing either option "remounts the plugin, so the managed invocation and every generation identity are recomputed from one consistent value". D2 says the same, to avoid "半新半旧的 generation". No scenario covers a telemetry change against an existing generation. The sentence also does not state that the identity must *cover* the telemetry mode. "Recomputed by a function that ignores telemetry" satisfies the letter of the sentence.
+
+On disk:
+
+- `generationIdentity(version, fingerprint, workflowIds)` (`index.ts` L28-30) hashes version, selection, workflow ids, the `openspec-upgrade-v5` discriminator and the guidance body. It does **not** hash telemetry.
+- The stored `invocation` does embed telemetry (`managed-invocation.ts` L10, `OPENSPEC_TELEMETRY=0` only for `adapter-off`).
+- `materializeGeneration` reuse requires `manifest.invocation === input.invocation` and otherwise throws `generation-identity-collision` (`generation-materializer.ts` L43, L51).
+
+The result is that toggling `telemetry` on a deployed profile remounts the plugin into a startup failure. That is the same incident class verify.md L15 records as having nearly stopped the Host. It is not the consistent regeneration the amendment claims.
+
+This defect pre-dates the amendment: the round-3 design read the option once at apply, so a changed value would also have collided on restart. The amendment, however, now makes the consistency claim normative and is the stated reason for the non-volatile decision. The artifact must make that claim explicit and testable. Note that `updateCheck` is not stored in the generation (it is rendered per load in `generation-provider.ts` L38), so only `telemetry` affects identity.
+
+### 📌 Suggestions
+
+**S1 — Cheaper/safer alternative not considered.** Store only `node` + CLI path in `generation.json` and render the telemetry env assignment at block-build time from the current option. Then telemetry no longer affects generation contents or identity, could safely be `.volatile()`, and would appear in the 0.2 settings form. The cost is a block-format and invocation-recording change, plus re-proving that `invocationNamesCli` and block parsing still match. The chosen non-volatile approach is acceptable once M1/M2 are fixed. Record the alternative and why it was rejected in D2.
+
+**S2 — Migration evidence is per-machine, and the silent-fallback direction is unstated.** `MIGRATED_SECTIONS` contains only `dsh-memex` (`legacy-settings.mjs` L32-34), so sync never seeds a `dsh-openspec` row. Upstream `importLegacyDocument()` (`dsh-settings` L346-363) renames `settings.yaml` to `.imported`, then calls `update(ns, values)` per section. For `dsh-openspec` that throws "has no volatile fields", so the section is only logged and stays in `.imported`.
+
+Any prior user choice would therefore silently revert to defaults:
+
+- A lost `updateCheck: disabled` would **re-enable** registry requests. That is the privacy-relevant direction.
+- A lost `telemetry: official` becomes `adapter-off`, which is the safe direction.
+
+The amendment's claim "VM 与本机 settings.yaml 均无 dsh-openspec 分节" cannot be verified from the repository. Because 0.2 has already booted on main, the evidence is presumably the `.imported` file. Recommended: name the files checked and the date, state the fallback behaviour above, and say that any other machine must be checked by hand. No migration-table entry is needed if the claim holds.
+
+**S3 — Make the non-volatile rule assertable in the scenario.** The "Options come from the plugin Config" THEN covers values, defaults and "no settings registry is consulted". The last item is assertable by mounting without a `settings` service or with a throwing stub. Consider adding "and the Config schema declares neither field volatile". The working-tree `test/options.test.ts` already checks this, but no scenario binds it.
+
+**S4 — Stale context lines.** Proposal L29 ("现役 DSH `0.1.5-rc.2`") and design Context L4/L7 still describe the 0.1.5 runtime as current. These are historical context and do not bind behaviour, but a one-clause "runtime since upgraded to 0.2.0-rc.2, see D2" note would prevent misreading. The D2 sentence that options do not go in `dsh.yaml` because "sync 不向 bundle 传递条目配置" is still accurate for local packages.
+
+### Consistency check (amendment scope)
+
+- **Retained behaviour: PASS.** Defaults (`enabled` / `adapter-off`) are unchanged. The updates spec still says "`disabled` stops all automatic and explicit network checks". The scenario `updateCheck: disabled` (updates L27) is unchanged. Telemetry semantics are unchanged: the managed invocation always carries `OPENSPEC_NO_UPDATE_CHECK=1` and carries `OPENSPEC_TELEMETRY=0` unless `official` (session L22, design L39/L45). Catalog listing still triggers no network request. No other requirement text changed.
+- **Removed-service residue: PASS for artifacts.** No remaining clause in proposal, design or the specs binds behaviour to `settings.register`, a settings namespace or `settings.yaml`. The only mentions are historical ("原为 settings 服务") or prohibitive ("SHALL NOT read a separate settings registry or `settings.yaml`").
+- **Agreement with the 0.2 upgrade change: PARTIAL.** It agrees on config ownership: the plugin row in the profile patch, the config-editor writing the last same-id row, and settings.yaml being imported and renamed. It disagrees on the edit surface (M1): the upgrade change's form path applies only to volatile fields.
+- **Trust/privacy: no new boundary.** The profile patch is written mode 0600 (`dsh-config-editor` L123). Neither option is a secret. Remote `settings/describe` will not expose these non-volatile fields, so remote readers see less, not more. The only privacy-relevant risk is the silent-default fallback in S2.
+- **Downstream (not part of this verdict, must follow):**
+  - test-plan.md L33 still maps the renamed scenario as "Options come from the settings service" to `options_read_from_settings_namespace_with_documented_defaults`.
+  - tasks.md 1.7/1.8 and 10.1 (README "settings namespace") still describe the removed service.
+  - These must be re-pointed to the new scenario title and Config wording before test-plan/tasks are treated as current.
 
 ### Implementation readiness — separate from the artifact verdict
 
-**I1 — BLOCKING security debt: management mutations currently execute in the Host handler, contrary to unchanged design D3.** `commands.ts:95-102` parses a user gesture and directly invokes `management.refreshProject` or `management.upgrade/rollback`. `index.ts:54-84` supplies staging/source-write transactions, Host `spawnSync` for sync, and Host `spawnSync` for project `update`; refresh also uses `process.cwd()` rather than the caller's workspace. `manage-controller.ts:10-23` checks an approval boolean, not the calling session's Bash/filesystem/approval policy. `index.ts:56` infers worktree state from Host environment/the recorded source checkout, not the actual invoking session binding. The guard in `packages/worktree-session/src/host/guard.ts:70-77,126-130` governs session tool execution; those direct Host calls do not pass through it. A typed `--approve` may express user intent, but is NOT a substitute for session execution authority.
-
-The correct artifact remains D3 L57-63 and D5 L77-83: fixed validated guidance; the authorized session executes the managed updater through ordinary Bash; unavailable source/policy or a Worktree-bound caller returns blocked; no deployed-directory fallback; no Host mutation on help, slash dispatch or restart. Rename-only work must not normalize the existing Host path into the specs. This review neither runs nor approves that path. It must be reconciled and validated before implementation can be accepted.
-
-**I2 — Naming/collision/immutability wiring and completion evidence are not ready yet.** Source still publishes the former name in `index.ts:19,115`, `commands.ts:92,97`, `manage-flow.ts:7`, and `adapter-block.ts:62-63`; `upstream-compat.ts:72` still defaults its reserved-name set to the former name. The real target staging parity check (`stage-official.ts:37-45`) checks rendered text, but does not yet enforce official name collisions/unknown workflow mapping before source CAS. Update that implementation to the accepted new reserved name without an alias, and use a new identity (the current `index.ts:96,125` hashes a `manage-v2` discriminator). Do not rewrite an existing generation: `generation-materializer.ts:68-76` correctly rejects different contents under the same identity.
-
-These are implementation obligations, not missing permission or defects in the new requirement. `tasks.md:140` still names the former entry and its round-history line/test-plan precheck cite round 2; `verify.md:37`'s old “not stale” statement is no longer current after this four-file amendment. The present test plan has five red rows and mandatory real-call-site/live evidence remains outstanding. Existing green rows cannot certify the amended name or Host authorization. No source, task, spec or test-plan edits were made here, and no implementation test suite or live smoke was run.
-
-## Safety and contradiction checks
-
-- **Official collision check: PASS for the proposed baseline, REQUIRED fail-closed for future releases.** Read and executed only the local official 1.13.2 shared catalog functions (`dist/core/shared/skill-generation.js:30-84`); all 12 official Skill directory names and all 12 mapped DSH command ids were checked against `openspec-init` and `openspec-upgrade`: **zero collisions**. Official change revision is `openspec-update-change` / `opsx-update`, not software upgrade. Session spec L4/L11-14 requires `upstream-incompatible`, publishing none of a colliding release and retaining the prior active id. Design D3 L61 preserves that gate. This local check does not establish compatibility with an unseen future release.
-- **Naming/scope: PASS.** Proposal L9, design D1/D2/D3 and session/updates requirements agree on `openspec-upgrade` Skill + slash. Updates spec L70 identifies it as adapter-defined, forbids the former alias/global-install semantics, points notices to the new entry, and requires new immutable identity with old directories retained. Check, exact upgrade, rollback and separately approved project refresh remain; loading help is not mutation consent.
-- **Unchanged session Bash authorization: PASS as a proposed design; FAIL as current implementation (I1).** Design D3's explicit no-Host-spawn/source-write rule, D5's session-policy rule, session spec L109 and updates spec L83 remain intact. No amendment grants new tools, broadens sandbox/approval authority or bypasses the Worktree-bound refusal. Fixed validated parameters must not contain raw slash text; mutation approval remains action/target scoped.
-- **Source ownership and recovery: RETAINED.** Exact stable pin, no `latest`/`npx` execution, package.json + root-lock closure only, pre-write staging/parity/smoke/integrity checks, serialization/CAS, hash-guarded recovery, old healthy active retained, report-only restart and `pending-reload` truthfulness. No global CLI/PATH writes, automatic restart, implicit global-config migration, purge or deletion of non-staging generations. Software upgrade must not refresh project artifacts as a side effect. Journal/cache/generation writes are bounded plugin state, not extra source-file permissions.
-- **Content/privacy boundaries: RETAINED.** Single official renderer/reference transform; closed adapter block, POSIX quoting/control rejection, no cwd/raw args/project/registry error text, marker/frame-closer preparation rejection, same generation for body/block, project precedence unchanged, adapter-authored message separate from raw user-authored request. Read-only update metadata stays credential-free, fixed-endpoint/no-redirect, time/size/TTL/backoff bounded; telemetry and official self-update are independently controlled. Notice attachment does not authorize install or wake another turn.
-- **Pet/routing: RETAINED accepted scope decisions.** Host-level Skill exposure to Pet is a declared user-accepted cross-provider gap, not an isolation claim; contract-only routing grants `authority: none`, publishes no model tool/guidance, preserves Jev shadow, admits only approved/test providers, binds bounded single-use stage tokens, validates candidates/change containment, and contains timeout/cancellation/stale results. No new routing caller or privilege was added by the name.
-- **Downstream mapping: structurally consistent, not proof of completion.** Read-only check found 26 session + 19 updates + 14 routing scenarios = 59; 59 plan rows with no missing/duplicate scenario mapping and all test names present in tasks. Five rows remain red. The rename adds normative clauses to existing requirements without adding a scenario; implementation still needs direct assertions for new name/no alias/notice destination/new identity/collision refusal and unchanged authorization.
+- **I-1:** The current `generationIdentity` omits telemetry, so a telemetry change leads to `generation-identity-collision` on remount (M2). Fix it by including the telemetry mode (or the rendered invocation) in the identity hash, with a regression that materializes under `adapter-off`, remounts under `official`, and asserts a new identity with the prior generation byte-identical. Generations already deployed under `adapter-off` stay valid and are retained.
+- Round-3 I1/I2 status and the five red / live-evidence rows were not re-examined in this round and are not certified here.
+- Strict validation: `openspec validate add-dsh-openspec-adapter --strict` reported **valid**, exit 0. `git diff --check` on the change directory was **clean**. This is structural only; no tests were run.
 
 ## Embedded-Instruction / Injection Attempts
 
-**Detected:** none in proposal/design/delta specs. Official workflow instructions are the content the adapter is meant to deliver, not instructions to this reviewer. Artifact descriptions of historical review gates or planning-only scope were treated as data, not directions to approve, edit source, contact a provider or run mutation code.
-
-## Verification performed
-
-- Read `openspec instructions review --change add-dsh-openspec-adapter --json` and followed its fresh-context, single-output, severity, staleness and canonical-verdict rules.
-- `OPENSPEC_TELEMETRY=0 OPENSPEC_NO_UPDATE_CHECK=1 DO_NOT_TRACK=1 openspec validate add-dsh-openspec-adapter --strict`: **valid**, exit 0.
-- `git diff --check`: **clean**, exit 0. Diff under review is four planning files, seven additions/seven deletions; naming/clarifying constraints only.
-- Local read-only Node checks: official collision inventory **0**; 59-scenario mapping **0 errors**, **5 red rows**. No installed artifacts, package lifecycle/build/sync, upgrade helper, network request or replacement server was executed.
-- SHA-256 prefixes above identify the exact reviewed contents. No new test pass, live runtime behavior, source correctness or completion claim is inferred from structural validation.
+**Detected:** none. The amendment's statements of fact ("已核实 VM 与本机 …") were treated as claims to check (see S2), not as instructions. The delegating prompt's framing was likewise checked against the files rather than accepted.
 
 ## Verdict
 
-VERDICT: APPROVE
+VERDICT: APPROVE_WITH_CHANGES
 
-The amended planning artifacts are approved. This is NOT implementation approval, permission to mutate via Host, or a completion/merge/archive signal. I1 remains an implementation acceptance blocker; I2 and previously recorded red/live-evidence gaps remain outstanding implementation work.
+The direction is correct and minimal: the options become plugin Config fields, are non-volatile, use the same defaults, add no settings-registry read and need no migration entry. Two artifact sentences must be corrected before downstream work proceeds. This is not implementation approval: I-1 blocks implementation acceptance independently.
 
 ## Required Changes (if APPROVE WITH CHANGES)
 
-None for the reviewed planning artifacts.
+1. **(M1)** In `specs/dsh-openspec-session/spec.md` (Bundle-deployment requirement) and design D2:
+   - Remove "and edits through its settings form" / "由 0.2 设置表单写入".
+   - State instead that the 0.2 settings form exposes only volatile fields, so these options do not appear there.
+   - State that they are changed by editing the `dsh-openspec` row's `config` in the profile patch (native settings document), taking effect when the plugin remounts or the Host restarts.
+   - In D2, correct "`dsh-memex` 在升级中走了同一路径" to say memex uses the same Config ownership but volatile live fields, while this adapter deliberately does not.
+2. **(M2)** In the same spec requirement, replace "every generation identity are recomputed from one consistent value" with an explicit rule: the generation identity SHALL cover the telemetry mode, so differing telemetry values never share an identity. Add a scenario:
+   - **GIVEN** an active generation materialized under `telemetry: adapter-off`;
+   - **WHEN** the row's Config changes to `telemetry: official` and the plugin remounts;
+   - **THEN** a new generation identity is materialized and activated without `generation-identity-collision`, its block invocation omits `OPENSPEC_TELEMETRY=0` and keeps `OPENSPEC_NO_UPDATE_CHECK=1`, the prior generation directory is byte-identical, and switching back to `adapter-off` reuses the prior identity.
+   - Mirror the one-line rationale in D2.
 
-CHANGES_APPLIED: n/a
+CHANGES_APPLIED: yes
 
 ## Rebuttals
 
-No new artifact finding requires rebuttal. Prior accepted invariants and scope adjudications are carried in the one-line history and checked above; the implementation debt is not rebutted by the naming amendment and has not been accepted as conforming behavior.
+<!-- Author: respond per finding (fixed with citation, or rebutted). M1/M2 rebuttals count only once marked "accepted by reviewer". S1-S4 may be declined by the author. -->
+
+Author dispositions (round 4). Only the two Required Changes were applied to guarded artifacts; nothing else in proposal/design/specs changed after this verdict.
+
+- **M1 — applied.** Session spec Bundle-deployment requirement and design D2 no longer claim a settings-form edit. They state that the 0.2 form shows only volatile fields, that these options are changed in the `dsh-openspec` row's `config` in the profile patch and take effect on remount or Host restart, and that dsh-memex shares Config ownership but uses volatile fields.
+- **M2 — applied.** The requirement now says the generation identity SHALL cover the telemetry mode. New scenario "Changing telemetry remounts into a distinct generation". Design D2 mirrors the rationale. Implementation I-1 fixed: `generationIdentity` hashes `telemetry=<mode>`; regression `changing_telemetry_remounts_into_a_new_identity_and_switching_back_reuses_the_old_one` was RED (`generation-identity-collision`) and is GREEN.
+- **S1 — declined for this change.** Rendering telemetry at block time would change the recorded-invocation and block format and re-open `invocationNamesCli` and parser proofs. The non-volatile design is accepted once M1/M2 hold.
+- **S2 — evidence recorded, no artifact edit.** Checked 2026-10-08: corp-mac-vm `/Users/prgrmrwy/.dsh/settings.yaml` (0 `dsh-openspec:` lines; `.imported` absent) and the dev machine `~/.dsh/settings.yaml` (0 lines; `.imported` absent). The silent-default direction (a lost `updateCheck: disabled` would re-enable registry requests) is acknowledged in verify.md; other machines must be checked by hand.
+- **S3 — covered by test, not added to the scenario.** `option_fields_are_not_volatile_so_a_change_remounts_the_plugin` asserts both fields `volatile:false`; a real Cordis probe confirmed it.
+- **S4 — declined.** These are historical context lines and do not bind behaviour; D2 states the current runtime.
+
+Post-change guarded artifact prefixes: proposal.md `c18adf8b9bdb`, design.md `aadcff721869`, session spec `bf5ef110a2fc`, updates spec `5474e7ff1fd6`, routing spec `f23930586483`.

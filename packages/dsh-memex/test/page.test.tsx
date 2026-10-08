@@ -109,7 +109,7 @@ const live: Harness[] = []
 
 async function render(
   settings: MemexSettingsShape,
-  options: { stores?: MemexStoreView[]; storesFail?: boolean; workspaces?: MemexWorkspacesResult; workspacesFail?: boolean } = {},
+  options: { stores?: MemexStoreView[]; storesFail?: boolean; workspaces?: MemexWorkspacesResult; workspacesFail?: boolean; mutateResult?: boolean } = {},
 ): Promise<Harness> {
   const container = document.createElement('div')
   document.body.appendChild(container)
@@ -126,7 +126,8 @@ async function render(
   const scope = {
     getSnapshot: () => snapshot,
     subscribe: () => () => undefined,
-    mutate: async (ops: unknown) => { mutations.push(ops) },
+    // DSH 0.2.0 ConfigForm: resolves true on Host acceptance, false on refusal.
+    mutate: async (ops: unknown) => { mutations.push(ops); return options.mutateResult ?? true },
     set: async () => undefined,
     unset: async () => undefined,
   }
@@ -292,6 +293,19 @@ describe('memory settings page', () => {
       { op: 'set', path: ['scopes'], value: [{ name: 'acme', pathPrefixes: ['/work/acme'], primary: true }] },
       { op: 'set', path: ['workspaces'], value: [] },
     ]])
+  })
+
+  it('reports a Host-refused save instead of claiming it was saved', async () => {
+    // dsh-memex-settings-ui「非法配置被拒绝时保留原值」on DSH 0.2.0: ConfigForm.mutate
+    // resolves false on refusal rather than throwing.
+    const h = await render({ scopes: [{ name: 'acme', pathPrefixes: ['/work/acme'], primary: true }] }, { mutateResult: false })
+    await act(async () => { h.button('save').click() })
+    expect(h.mutations).toHaveLength(1)
+    const banners = [...h.container.querySelectorAll('[role="status"].dshmx-banner-error')]
+    expect(banners.map(banner => banner.textContent)).toEqual(['saveFailed'])
+    expect(h.container.querySelector('.dshmx-banner-ok')).toBeNull()
+    // The unsaved draft is kept, so the save action stays available.
+    expect(h.button('save').disabled).toBe(false)
   })
 
   it('labels the derived primary when a fallback row sits under it', async () => {

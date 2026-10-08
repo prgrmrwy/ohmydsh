@@ -129,7 +129,7 @@ Sessions in every workspace using the enabled profile SHALL discover the adapter
 - **THEN** the result text contains the global-configuration warning; for an uninitialized workspace it does not
 
 ### Requirement: Bundle deployment is reproducible reversible and recorded
-The adapter SHALL be an ohmydsh local package written fresh, crediting `@codigoconelmer/dsh-openspec@0.1.0` as prior art in NOTICE without copying its source. The `dsh.yaml` entry's `note` SHALL record the official dependency in prose (upstream, license, telemetry and credential boundary, upgrade checkpoint, removal path) and SHALL NOT carry a machine-checked version or integrity. `packages/dsh-openspec/package.json` plus the root lockfile SHALL remain the single pin, and build/sync SHALL fail with a named diagnostic `dsh-openspec-pin-mismatch` naming both values when the package.json pin differs from the name, version or integrity the root lockfile resolves for `@fission-ai/openspec`. The plugin options `updateCheck` and `telemetry` SHALL be read from the DSH settings service under the namespace `dsh-openspec` (backed by the user's settings file), with defaults `enabled` and `adapter-off`. Peers SHALL follow the current DSH family; generated artifacts SHALL be excluded from Git. Repeated sync SHALL be a no-op. Disabling SHALL remove only its registered surface and managed deployment references, not project artifacts, global CLI or unrelated router/Jev resources.
+The adapter SHALL be an ohmydsh local package written fresh, crediting `@codigoconelmer/dsh-openspec@0.1.0` as prior art in NOTICE without copying its source. The `dsh.yaml` entry's `note` SHALL record the official dependency in prose (upstream, license, telemetry and credential boundary, upgrade checkpoint, removal path) and SHALL NOT carry a machine-checked version or integrity. `packages/dsh-openspec/package.json` plus the root lockfile SHALL remain the single pin, and build/sync SHALL fail with a named diagnostic `dsh-openspec-pin-mismatch` naming both values when the package.json pin differs from the name, version or integrity the root lockfile resolves for `@fission-ai/openspec`. The plugin options `updateCheck` and `telemetry` SHALL be fields of the adapter's own Cordis plugin Config (the `dsh-openspec` row's `config`, which DSH 0.2 persists in the profile patch), with defaults `enabled` and `adapter-off`. They SHALL NOT be declared volatile; because the 0.2 settings form exposes only volatile fields, these options do not appear there and are changed by editing the `dsh-openspec` row's `config` in the profile patch (native settings document), taking effect when the plugin remounts or the Host restarts. The generation identity SHALL cover the telemetry mode, so differing telemetry values never share an identity. The adapter SHALL NOT read a separate settings registry or `settings.yaml`. Peers SHALL follow the current DSH family; generated artifacts SHALL be excluded from Git. Repeated sync SHALL be a no-op. Disabling SHALL remove only its registered surface and managed deployment references, not project artifacts, global CLI or unrelated router/Jev resources.
 
 #### Scenario: Clean installation and repeated sync converge
 - **GIVEN** a clean checkout whose `packages/dsh-openspec/package.json` pin matches the root lockfile, and an enabled manifest entry
@@ -141,10 +141,15 @@ The adapter SHALL be an ohmydsh local package written fresh, crediting `@codigoc
 - **WHEN** build/sync runs
 - **THEN** it exits non-zero with diagnostic `dsh-openspec-pin-mismatch` naming X and Y, and the deployed profile `package.json` is byte-identical to before
 
-#### Scenario: Options come from the settings service
-- **GIVEN** the settings namespace `dsh-openspec` sets `updateCheck: disabled` and `telemetry: official`
+#### Scenario: Options come from the plugin Config
+- **GIVEN** the `dsh-openspec` row's Config sets `updateCheck: disabled` and `telemetry: official`
 - **WHEN** the adapter starts
-- **THEN** the effective options equal those values, and with no settings they equal the defaults
+- **THEN** the effective options equal those values, no settings registry is consulted, and with no Config they equal the defaults
+
+#### Scenario: Changing telemetry remounts into a distinct generation
+- **GIVEN** an active generation materialized under `telemetry: adapter-off`
+- **WHEN** the row's Config changes to `telemetry: official` and the plugin remounts
+- **THEN** a new generation identity is materialized and activated without `generation-identity-collision`, its block invocation omits `OPENSPEC_TELEMETRY=0` and keeps `OPENSPEC_NO_UPDATE_CHECK=1`, the prior generation directory is byte-identical, and switching back to `adapter-off` reuses the prior identity
 
 #### Scenario: Disable leaves unrelated state intact
 - **GIVEN** the adapter is deployed with existing project changes and Jev resources

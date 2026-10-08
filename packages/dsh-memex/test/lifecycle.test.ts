@@ -29,12 +29,12 @@ function fixture(memory = true) {
       { agent, messages: [], turn, step: 1, signal: over.signal ?? new AbortController().signal },
       async () => over.decision ?? { kind: 'enter', messages: [userInput] },
     )
-  const sessionStart = (source: 'startup' | 'clear' | 'compact') => listeners.get('agent/session-start')!({ agent, source })
+  const sessionStart = (source: 'startup' | 'clear' | 'compact') => listeners.get('agent/created')!({ agent, source })
   return { listeners, injected, session, agent, ctx, scopes, userInput, stopping, preStep, sessionStart }
 }
 
 const isReminder = (message: any) =>
-  message.source?.kind === 'plugin' && message.source.plugin === 'dsh-memex' && message.source.form === 'notice'
+  message.source?.kind === 'plugin:dsh-memex' && message.source.form === 'notice'
 const reminders = (decision: Decision) => (decision.messages ?? []).filter(isReminder)
 
 describe('memex lifecycle', () => {
@@ -44,7 +44,28 @@ describe('memex lifecycle', () => {
     f.sessionStart('startup')
     expect(f.injected).toHaveLength(1)
     expect(f.injected[0].content[0].text).toContain('Current memory scope: repo')
-    expect(f.injected[0].source).toMatchObject({ kind: 'plugin', plugin: 'dsh-memex', form: 'instructions' })
+    expect(f.injected[0].source).toEqual({ kind: 'plugin:dsh-memex', form: 'instructions' })
+  })
+
+  it('treats a sourceless agent/created (DSH 0.1.5) as a fresh start', () => {
+    const f = fixture()
+    const lifecycle = registerMemexLifecycle(f.ctx as never, f.scopes as never)
+    lifecycle.mark('recall', f.session)
+    lifecycle.mark('write', f.session)
+    f.listeners.get('agent/created')!({ agent: f.agent })
+    expect(f.injected).toHaveLength(1)
+    // A fresh start clears write state, so a later recall can earn a reminder again.
+    lifecycle.mark('recall', f.session)
+    // The reminder is deferred: closing the turn schedules it, the next turn's first step carries it.
+    f.listeners.get('agent/turn-stopping')!({ agent: f.agent, turn: 1 })
+    expect(f.injected).toHaveLength(1)
+    return f.preStep(2).then(decision => expect(reminders(decision)).toHaveLength(1))
+  })
+
+  it('does not subscribe to the removed agent/session-start event', () => {
+    const f = fixture()
+    registerMemexLifecycle(f.ctx as never, f.scopes as never)
+    expect(f.listeners.has('agent/session-start')).toBe(false)
   })
 
   describe('write reminder', () => {
@@ -69,7 +90,7 @@ describe('memex lifecycle', () => {
       expect(reminders(next)).toHaveLength(1)
       // The user's own message stays first; the reminder follows it.
       expect(next.messages![0]).toBe(f.userInput)
-      expect(next.messages![1].source).toMatchObject({ kind: 'plugin', plugin: 'dsh-memex', form: 'notice', summary: 'Memex write reminder' })
+      expect(next.messages![1].source).toMatchObject({ kind: 'plugin:dsh-memex', form: 'notice', summary: 'Memex write reminder' })
       expect(next.messages![1].content[0].text).toContain('Memex reminder')
 
       // Delivered once: neither another close nor another step brings it back.

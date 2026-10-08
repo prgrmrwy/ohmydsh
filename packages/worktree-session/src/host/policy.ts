@@ -96,10 +96,15 @@ export function installSubagentInheritance(childCtx: Context, child: Agent): () 
  */
 export function registerSubagentInheritance(ctx: Context): () => void {
   const cleanups = new WeakMap<Agent, () => void>()
+  // DSH 0.2.0 dispatches agent/created serially and a throw fails creation; on
+  // 0.1.5 a synchronous throw vetoes publication. Either way an unprovable
+  // lineage stops the child, which is the intended rollback. The explicit
+  // `undefined` return satisfies 0.2.0's `Promise<undefined> | undefined`.
   const offCreated = ctx.on('agent/created', ({ agent }) => {
     // Non-delegated agents (no bound parent lineage) install nothing.
-    if ((agent.session.header.parentSession as string | undefined) === undefined) return
+    if ((agent.session.header.parentSession as string | undefined) === undefined) return undefined
     cleanups.set(agent, installInheritanceForAgent(agent))
+    return undefined
   })
   const offDisposed = ctx.on('agent/disposed', ({ agent }) => {
     const cleanup = cleanups.get(agent)

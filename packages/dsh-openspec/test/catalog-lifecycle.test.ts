@@ -26,12 +26,11 @@ async function start(delivery = 'both', realRegistry = false) {
   const registryContext = new Context()
   if (realRegistry) await registryContext.plugin(SkillRegistry)
   const child = {
-    settings: { register: () => ({ get: () => ({ updateCheck: 'disabled', telemetry: 'adapter-off' }) }) },
     skills: { registerProvider: (factory: any) => { if (realRegistry) return registryContext.skills.registerProvider(control => { provider = factory(control); return provider }); provider = factory({ invalidate, signal: signal.signal }); return () => { signal.abort(); cached = undefined } } },
     commands: { register: (definition: any) => { definitions.set(definition.name, definition); return () => { if (definitions.get(definition.name) === definition) definitions.delete(definition.name) } } },
     provide() {}, on() {}, set: vi.fn(), effect: (factory: any) => { effects.push(factory()) },
   }
-  apply({ inject: (_names: any, callback: any) => { startup = callback(child) } } as any, { officialConfigPath: configPath })
+  apply({ inject: (_names: any, callback: any) => { startup = callback(child) } } as any, { officialConfigPath: configPath, updateCheck: 'disabled' })
   await startup!
   const list = async () => realRegistry ? registryContext.skills.list({ cwd: '/project' }) : cached ??= await provider.list()
   return { home, edit, definitions, provider, invalidate, list, dispose: () => effects.reverse().forEach(dispose => dispose?.()), monitor: monitors.at(-1) }

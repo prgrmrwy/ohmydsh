@@ -8,10 +8,12 @@ Enable the local package through `dsh.yaml`, build/sync the profile, then use an
 
 ## Settings
 
-Settings use namespace `dsh-openspec`:
+Options are fields of this plugin's own Config (the `dsh-openspec` row). DSH 0.2 persists them in the profile patch and edits them through its settings form; there is no separate settings registry or `settings.yaml` section.
 
-- `updateCheck`: `enabled` (default) or `disabled`; checks only the fixed credential-free npm latest endpoint on Skill/command consumption.
+- `updateCheck`: `enabled` (default) or `disabled`; checks only the fixed credential-free npm latest endpoint on Skill/command consumption. `disabled` makes zero network requests.
 - `telemetry`: `adapter-off` (default) or `official`; the selected policy is included in the managed invocation.
+
+Neither field is live-editable: a change remounts the plugin, so the managed invocation and generation identity are recomputed from one consistent value. Invalid values are rejected by the Host before the plugin mounts.
 
 Notices appear only in a live consumption result. They do not install packages, append messages, or start turns.
 

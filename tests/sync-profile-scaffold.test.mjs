@@ -6,6 +6,7 @@
 // DSH 运行初始化过,而全新机器上并没有这一前置。
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import yaml from 'js-yaml'
 import { chmod, mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
@@ -34,6 +35,8 @@ async function fixture({ preInitialized = false } = {}) {
   await writeFile(path.join(repo, 'scripts', 'lib', 'dsh-host-runtime.mjs'), await readFile(path.join(REPO, 'scripts', 'lib', 'dsh-host-runtime.mjs')))
   await writeFile(path.join(repo, 'scripts', 'lib', 'manifest-overlay.mjs'), await readFile(path.join(REPO, 'scripts', 'lib', 'manifest-overlay.mjs')))
   await writeFile(path.join(repo, 'scripts', 'lib', 'env-local.mjs'), await readFile(path.join(REPO, 'scripts', 'lib', 'env-local.mjs')))
+  await writeFile(path.join(repo, 'scripts', 'lib', 'profile-lock.mjs'), await readFile(path.join(REPO, 'scripts', 'lib', 'profile-lock.mjs')))
+  await writeFile(path.join(repo, 'scripts', 'lib', 'legacy-settings.mjs'), await readFile(path.join(REPO, 'scripts', 'lib', 'legacy-settings.mjs')))
   await mkdir(path.join(repo, 'node_modules'), { recursive: true })
   await writeFile(path.join(repo, 'package.json'), JSON.stringify({ name: 'fixture-root', private: true, type: 'module' }))
   await writeFile(path.join(repo, 'dsh.yaml'), `dshVersion: 0.1.0-rc.7
@@ -78,6 +81,9 @@ if [[ "\${3:-}" == "--dump-default-config" ]]; then
   "dsh": { "profile": { "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"] } }
 }
 JSON
+  fi
+  if [[ ! -f "$profile/cordis.patch.yml" ]]; then
+    printf '# Your patch layer for this dsh profile\\n[]\\n' > "$profile/cordis.patch.yml"
   fi
   echo "[]"   # 配置树:sync 应当丢弃它,不打进日志
   exit 0
@@ -138,6 +144,14 @@ test('全新 DSH_HOME:sync 先物化 profile 骨架,再完成 package 物化', a
 
   // 配置树输出被丢弃,不污染 sync 日志。
   assert.doesNotMatch(first.stdout, /^\[\]$/m)
+  const patchPath = path.join(fx.profile, 'cordis.patch.yml')
+  const patch = await readFile(patchPath, 'utf8')
+  assert.deepEqual(yaml.load(patch), [{ insert: [] }])
+  assert.match(patch, /# Your patch layer/)
+  const second = fx.run()
+  assert.equal(second.status, 0, second.stderr)
+  assert.match(second.stdout, /no changes/)
+  assert.equal(await readFile(patchPath, 'utf8'), patch)
 })
 
 test('骨架已存在时为空操作:不重复初始化,且保持幂等', async () => {

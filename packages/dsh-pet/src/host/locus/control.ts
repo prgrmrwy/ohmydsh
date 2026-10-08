@@ -125,6 +125,14 @@ export interface LocusScopeMutationPort {
   }): PromiseLike<{ readonly mode: 'read' | 'write' }> | { readonly mode: 'read' | 'write' }
 }
 
+export interface LocusToolTierMutationPort {
+  setCurrentTier?(input: {
+    readonly endpoint: LocusEndpoint
+    readonly actorId: string
+    readonly tier: 'safe' | 'shell'
+  }): PromiseLike<{ readonly tier: 'safe' | 'shell'; readonly childComposition?: 'safe-v1' | 'safe-v2' }> | { readonly tier: 'safe' | 'shell'; readonly childComposition?: 'safe-v1' | 'safe-v2' }
+}
+
 export interface CreateLocusControlDispatcherOptions {
   readonly allowOpenIds: () => readonly string[]
   readonly listSessions: () =>
@@ -133,6 +141,8 @@ export interface CreateLocusControlDispatcherOptions {
   readonly bind: LocusBindMutationPort
   readonly exit: LocusExitMutationPort
   readonly scope?: LocusScopeMutationPort
+  readonly toolTierMutation?: LocusToolTierMutationPort
+  readonly tools?: LocusToolTierMutationPort
   /** Reads the real platform chat name. Failure/absence must stay absent. */
   readonly chatName?: (chatId: string) => PromiseLike<string | undefined> | string | undefined
 }
@@ -158,6 +168,9 @@ function safeControlError(error: unknown): LocusControlDispatchResult {
   }
   if (code === 'LOCUS_STOPPED' || code === 'GROUP_UNAVAILABLE') {
     return failure('stopped', '当前入口已停止，需要所有者显式重建后才能继续。')
+  }
+  if (code === 'LOCUS_LEGACY_V1_SHELL') {
+    return failure('tools-legacy-v1', '该入口仍是 safe-v1 组合；请所有者显式重建一次后再授予 shell。入口保持 safe 且继续服务。')
   }
   // The only PARENT_NOT_ALLOWED a control command can reach is "the prefix
   // resolved to a child session", which the spec requires to read exactly like
@@ -299,10 +312,28 @@ export function createLocusControlDispatcher(
               ? { ok: true, text: `当前入口共享权限已核验为 ${command.mode}。` }
               : failure('scope-not-applied', '权限变更未核验生效，已拒绝报告成功。')
           }
+          case 'tools': {
+            if ((options.toolTierMutation ?? options.tools)?.setCurrentTier === undefined) {
+              return failure('tools-unavailable', '当前入口暂不支持工具档位变更。')
+            }
+            const result = await (options.toolTierMutation ?? options.tools)!.setCurrentTier!({ endpoint, actorId: request.senderId, tier: command.tier })
+            if (result.tier !== command.tier) return failure('tools-not-applied', '工具档位未核验生效，未报告成功。')
+            if (command.tier === 'shell' && result.childComposition !== 'safe-v2') {
+              return failure('tools-legacy-v1', '该入口仍是 safe-v1 组合；请所有者显式重建一次后再授予 shell。入口保持 safe 且继续服务。')
+            }
+            return {
+              ok: true,
+              text: command.tier === 'shell'
+                ? '工具档位已核验为 shell。当前入口转为所有者专用：仅 allowlist 成员可驱动；子会话可在本机执行命令并使用本机飞书凭据（读取与网络不受文件权限约束）。lark-cli 出站 guard 仅防误操作，不是安全边界；业务回复请用 pet_locus_finish。'
+                : '工具档位已核验恢复为 safe；bash 与 Skill 已收紧，入口恢复既有群成员提问规则。',
+            }
+          }
           case 'bind-missing-prefix':
           case 'bind-invalid':
           case 'scope-missing-mode':
           case 'scope-invalid':
+          case 'tools-missing-tier':
+          case 'tools-invalid':
           case 'unbind-invalid':
             return failure('invalid-command', '控制命令格式无效。')
         }

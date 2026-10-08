@@ -26,6 +26,7 @@ import {
   transitionLocus,
   withLocusPermission,
   withLocusBusy,
+  withLocusToolTier,
   assertLocusMutationFence,
   type LocusContextAnchor,
   type LocusEndpoint,
@@ -1391,22 +1392,119 @@ export class LocusRepository {
     })
   }
 
+  /** Persist active → switching before changing the live tool surface. */
+  async beginToolTierMutation(
+    locusId: string,
+    now = Date.now(),
+    fence?: LocusMutationFence,
+  ): Promise<LocusRecord> {
+    return this.enqueue(async () => {
+      const before = this.collectLoci()
+      const current = before.get(locusId)
+      if (current === undefined) throw new LocusError('LOCUS_NOT_FOUND', `Locus ${locusId} does not exist`)
+      assertLocusMutationFence(current, fence)
+      if (current.state !== 'active' || current.busy || this.hasPendingDelivery(current.id, current.generation)) {
+        throw new LocusError('LOCUS_BUSY', `Locus ${locusId} cannot enter tool-tier mutation`)
+      }
+      const next = transitionLocus(current, 'switching', now)
+      const after = new Map(before).set(locusId, next)
+      assertLocusSet(after)
+      await this.persistLocusSet('tool-tier-mutation-begin', before, after, { locusId })
+      return next
+    })
+  }
+
+  /** Release a tool-tier mutation fence without changing its persisted tier. */
+  async abortToolTierMutation(
+    locusId: string,
+    now = Date.now(),
+    fence?: LocusMutationFence,
+  ): Promise<LocusRecord> {
+    return this.enqueue(async () => {
+      const before = this.collectLoci()
+      const current = before.get(locusId)
+      if (current === undefined) throw new LocusError('LOCUS_NOT_FOUND', `Locus ${locusId} does not exist`)
+      assertLocusMutationFence(current, fence)
+      if (current.state !== 'switching' || current.busy || this.hasPendingDelivery(current.id, current.generation)) {
+        throw new LocusError('LOCUS_BUSY', `Locus ${locusId} cannot abort tool-tier mutation`)
+      }
+      const next = transitionLocus(current, 'active', now)
+      const after = new Map(before).set(locusId, next)
+      assertLocusSet(after)
+      await this.persistLocusSet('tool-tier-mutation-abort', before, after, { locusId })
+      return next
+    })
+  }
+
+  /** Fence a generation when its live tool surface cannot be proven safe. */
+  async invalidateToolTierMutation(
+    locusId: string,
+    reason: string,
+    now = Date.now(),
+    fence?: LocusMutationFence,
+  ): Promise<LocusRecord> {
+    return this.enqueue(async () => {
+      const before = this.collectLoci()
+      const current = before.get(locusId)
+      if (current === undefined) throw new LocusError('LOCUS_NOT_FOUND', `Locus ${locusId} does not exist`)
+      assertLocusMutationFence(current, fence)
+      if (current.state !== 'switching') {
+        throw new LocusError('LOCUS_INVALID', `Locus ${locusId} no longer holds a tool-tier mutation fence`)
+      }
+      const next = transitionLocus(current, 'invalid', Math.max(now, current.updatedAt), {
+        busy: false,
+        invalidReason: reason,
+      })
+      const after = new Map(before).set(locusId, next)
+      assertLocusSet(after)
+      await this.persistLocusSet('tool-tier-mutation-invalid', before, after, { locusId, reason })
+      return next
+    })
+  }
+
+  /** Atomically persist the verified tier/audit row and release switching. */
+  async commitToolTierMutation(
+    locusId: string,
+    toolTier: { readonly desired: 'safe' | 'shell'; readonly effective: 'safe' | 'shell'; readonly verifiedAt: number; readonly grantedBy: string },
+    now = Date.now(),
+    fence?: LocusMutationFence,
+  ): Promise<LocusRecord> {
+    return this.enqueue(async () => {
+      const before = this.collectLoci()
+      const current = before.get(locusId)
+      if (current === undefined) throw new LocusError('LOCUS_NOT_FOUND', `Locus ${locusId} does not exist`)
+      assertLocusMutationFence(current, fence)
+      if (current.state !== 'switching' || current.busy || this.hasPendingDelivery(current.id, current.generation)) {
+        throw new LocusError('LOCUS_BUSY', `Locus ${locusId} does not hold an exclusive tool-tier mutation`)
+      }
+      const tiered = withLocusToolTier(current, toolTier, now, { allowSwitching: true })
+      const next = transitionLocus(tiered, 'active', now)
+      const after = new Map(before).set(locusId, next)
+      assertLocusSet(after)
+      await this.persistLocusSet(
+        'tool-tier-mutation', before, after, { locusId, controlFenceReleased: true },
+        this.permissionAuditChanges(next, next.permission, now, toolTier),
+      )
+      return next
+    })
+  }
+
   /**
-   * Build the append-only audit row for one accepted permission change.
+   * Build one append-only audit row for a permission or tool-tier mutation.
    *
    * A refused escalation is recorded too: "asked for write, got read" is the
-   * fact an owner needs, and omitting it would make a refusal invisible.
-   * The sequence is derived from existing rows of this exact generation, so
-   * ordering never depends on a clock and a replaced generation starts fresh.
+   * fact an owner needs, and omitting it would make a refusal invisible. The
+   * sequence is derived from rows of this exact generation, never from clocks.
    */
   private permissionAuditChanges(
     record: LocusRecord,
     requested: LocusPermission,
     now: number,
+    toolTier?: { readonly desired: 'safe' | 'shell'; readonly effective: 'safe' | 'shell'; readonly verifiedAt: number; readonly grantedBy: string },
   ): readonly TableChange[] {
-    const grantedBy = requested.grantedBy ?? record.permission.grantedBy
+    const grantedBy = toolTier?.grantedBy ?? requested.grantedBy ?? record.permission.grantedBy
     // Without a Host-derived operator there is nothing auditable to record;
-    // the permission change itself has already been fenced by its caller.
+    // the mutation itself has already been fenced by its caller.
     if (grantedBy === undefined || grantedBy.trim() === '') return []
     const prefix = `${record.id}${STORAGE_KEY_SEPARATOR}${String(record.generation)}${STORAGE_KEY_SEPARATOR}`
     let sequence = 1
@@ -1427,15 +1525,20 @@ export class LocusRepository {
         desired: requested.desired,
         effective: record.permission.effective,
         grantedBy,
-        verifiedAt: record.permission.verifiedAt ?? now,
+        verifiedAt: toolTier === undefined ? record.permission.verifiedAt ?? now : toolTier.verifiedAt,
         ...(refused
           ? { refusedReason: `requested ${requested.desired}, host verified ${record.permission.effective}` }
           : {}),
+        ...(toolTier === undefined ? {} : {
+          toolTierKind: 'tool-tier' as const,
+          toolDesired: toolTier.desired,
+          toolEffective: toolTier.effective,
+        }),
       },
     }]
   }
 
-  /** Read the append-only permission history of one locus generation. */
+  /** Read the append-only permission and tool-tier audit history of one generation. */
   listPermissionAudit(locusId: string, generation: number): readonly PetLocusPermissionAudit[] {
     const prefix = `${locusId}${STORAGE_KEY_SEPARATOR}${String(generation)}${STORAGE_KEY_SEPARATOR}`
     return [...this.domain.table('locus_permission_audit').entries()]

@@ -20,7 +20,9 @@ describe('intent-triage host seam: sessionController.inspect shape (task 1.1)', 
     }) as unknown as { default: { name: string; version: string } }
     expect(pkg.default.name).toBe('@deepseek-ai/dsh-api-session-controller')
     // Target pin check: fail loudly if the reviewed dependency drifts without review.
-    expect(pkg.default.version).toBe('0.1.5-rc.2')
+    // Re-reviewed for DSH 0.2.0-rc.2 (upgrade-dsh-0-2-0-runtime W5): `inspect(sessionId,
+    // signal)` and `SessionInspection.events` are unchanged from 0.1.5-rc.2.
+    expect(pkg.default.version).toBe('0.2.0-rc.2')
   })
 
   it('GAP: dsh-session-persistence resolves at runtime (transitively) but is not a declared dsh-pet dependency', async () => {

@@ -558,7 +558,15 @@ export const petLocusRecord = z.object({
   parentSessionId: z.string().min(1),
   childSessionId: z.string().min(1).optional(),
   /** Additive Host attestation; absent legacy rows parse but cannot serve. */
-  childComposition: z.literal('safe-v1').optional(),
+  childComposition: z.enum(['safe-v1', 'safe-v2']).optional(),
+  /** Additive per-locus tool tier; absent legacy rows are treated as safe. */
+  toolTier: z.object({
+    desired: z.enum(['safe', 'shell']),
+    effective: z.enum(['safe', 'shell']),
+    verifiedAt: z.number().int().nonnegative().optional(),
+    grantedBy: z.string().min(1).optional(),
+  }).optional(),
+
   workspaceId: z.string().min(1),
   parentLocusId: z.string().min(1).optional(),
   source: z.enum(['auto', 'inherited', 'explicit', 'qa-created']),
@@ -587,6 +595,9 @@ export const petLocusRecord = z.object({
   invalidReason: z.string().optional(),
   replacesLocusId: z.string().min(1).optional(),
 }).superRefine((record, issueCtx) => {
+  if (record.toolTier?.effective === 'shell' && record.childComposition !== 'safe-v2') {
+    issueCtx.addIssue({ code: 'custom', message: 'only safe-v2 children may use shell tier' })
+  }
   if (record.endpoint.threadId !== undefined && record.parentLocusId === undefined) {
     issueCtx.addIssue({ code: 'custom', message: 'topic locus requires parentLocusId' })
   }
@@ -889,6 +900,17 @@ export const petLocusPermissionAudit = z.object({
   verifiedAt: z.number().int().nonnegative(),
   /** Present when the request was not granted as asked. */
   refusedReason: z.string().optional(),
+  /** Parallel tool-tier audit values share this append-only row shape. */
+  toolDesired: z.enum(['safe', 'shell']).optional(),
+  toolEffective: z.enum(['safe', 'shell']).optional(),
+  toolTierKind: z.literal('tool-tier').optional(),
+}).superRefine((audit, issueCtx) => {
+  if ((audit.toolDesired !== undefined && audit.toolEffective === undefined)
+      || (audit.toolEffective !== undefined && audit.toolDesired === undefined)
+      || (audit.toolTierKind === 'tool-tier'
+        && (audit.toolDesired === undefined || audit.toolEffective === undefined))) {
+    issueCtx.addIssue({ code: 'custom', message: 'tool-tier audit requires desired and effective tool values' })
+  }
 })
 
 /** A durable WAL/compensation record for multi-table locus operations. */
@@ -904,6 +926,7 @@ export const petLocusOperation = z.object({
     'retire',
     'invalidate',
     'permission',
+    'tool-tier',
     'anchor',
     'delivery',
   ]),

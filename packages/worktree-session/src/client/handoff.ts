@@ -6,6 +6,8 @@ import { post, ROUTES } from './api.ts'
 import { getStage, setStage } from './stage-store.ts'
 
 type SubmitMode = 'queue' | 'steer'
+/** DSH 0.2.0 analytics attribution of a submit; absent on 0.1.5. */
+type SubmitSource = 'click' | 'enter'
 type InputFacade = ReturnType<ClientContext['conversation']['input']['for']>
 
 interface Decoration {
@@ -51,9 +53,9 @@ async function bindSource(operationId: string, repoPath: string, sourceSessionId
   return post<BindSourceResult>(ROUTES.bindSource, { operationId, repoPath, sourceSessionId, action: 'bind-source' })
 }
 
-async function runHandoff(ctx: ClientContext, sourceSessionId: string, cwd: string, mode: SubmitMode | undefined, decoration: Decoration): Promise<void> {
+async function runHandoff(ctx: ClientContext, sourceSessionId: string, cwd: string, mode: SubmitMode | undefined, source: SubmitSource | undefined, decoration: Decoration): Promise<void> {
   const stage = getStage(sourceSessionId, cwd)
-  if (!stage.enabled || stage.baseRef === undefined) { decoration.original.call(decoration.input, mode); return }
+  if (!stage.enabled || stage.baseRef === undefined) { decoration.original.call(decoration.input, mode, source); return }
 
   let id = stage.operationId
   try {
@@ -88,7 +90,7 @@ async function runHandoff(ctx: ClientContext, sourceSessionId: string, cwd: stri
       error: undefined,
     })
     try {
-      decoration.original.call(decoration.input, mode)
+      decoration.original.call(decoration.input, mode, source)
     } catch (error) {
       // A synchronous official throw leaves the official draft untouched. Do
       // not copy or restore any plugin snapshot; only report the failure and
@@ -135,11 +137,14 @@ export function decorateSubmit(ctx: ClientContext, sessionId: string, cwd: strin
       decorations.delete(sessionId)
     },
   }
-  decoration.wrapper = function submit(mode?: SubmitMode): void {
+  // DSH 0.2.0 added an optional `source` ('click' | 'enter') that official
+  // submit forwards only into its product-analytics event. It is passed through
+  // unchanged so a Worktree first submission is attributed like a native one.
+  decoration.wrapper = function submit(mode?: SubmitMode, source?: SubmitSource): void {
     const current = getStage(sessionId, cwd)
-    if (!current.enabled) { original.call(input, mode); return }
+    if (!current.enabled) { original.call(input, mode, source); return }
     if (decoration.flight !== undefined) return
-    decoration.flight = runHandoff(ctx, sessionId, cwd, mode, decoration).finally(() => { decoration.flight = undefined })
+    decoration.flight = runHandoff(ctx, sessionId, cwd, mode, source, decoration).finally(() => { decoration.flight = undefined })
   }
   Object.defineProperty(input, 'submit', { configurable: true, enumerable: ownDescriptor?.enumerable ?? false, writable: true, value: decoration.wrapper })
   decorations.set(sessionId, decoration)

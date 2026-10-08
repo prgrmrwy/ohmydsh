@@ -53,6 +53,6 @@ describe('a write reminder that cannot be built', () => {
     f.stopping(2)
     const retried = await f.preStep(3)
     expect(retried.messages).toHaveLength(2)
-    expect(retried.messages[1].source).toMatchObject({ plugin: 'dsh-memex', form: 'notice' })
+    expect(retried.messages[1].source).toMatchObject({ kind: 'plugin:dsh-memex', form: 'notice' })
   })
 })

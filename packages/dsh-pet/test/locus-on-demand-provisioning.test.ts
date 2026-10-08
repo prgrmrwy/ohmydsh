@@ -145,7 +145,7 @@ async function composeOnDemandHost(options: { readonly failFirstCreate?: boolean
           id: `session-child-${++sequence}`,
           parentSessionId,
           workspaceId: parent.workspaceId,
-          childComposition: 'safe-v1' as const,
+          childComposition: 'safe-v2' as const, toolTier: { desired: 'safe' as const, effective: 'safe' as const },
         }
       },
     },
@@ -178,7 +178,7 @@ async function composeOnDemandHost(options: { readonly failFirstCreate?: boolean
             childSessionId: record.childSessionId,
             workspaceId: record.workspaceId,
             state: 'active' as const,
-            childComposition: 'safe-v1' as const,
+            childComposition: 'safe-v2' as const, toolTier: { desired: 'safe' as const, effective: 'safe' as const },
             permission: { desired: record.permission, effective: record.permission, verifiedAt: Date.now() },
           }
         },

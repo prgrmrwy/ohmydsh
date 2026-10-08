@@ -28,11 +28,16 @@ const ALL_STATES: readonly LocusState[] = [
 const serve = { state: 'active' as const, childSessionId: 'child-1', childComposition: 'safe-v1' as const }
 
 describe('locus serviceability policy', () => {
-  it('serves an active generation that carries the safe-v1 proof', () => {
+  it('serves active generations with either known composition proof', () => {
     expect(dispositionOf(serve)).toEqual({
       kind: 'serve',
       childSessionId: 'child-1',
       childComposition: 'safe-v1',
+    })
+    expect(dispositionOf({ ...serve, childComposition: 'safe-v2' })).toEqual({
+      kind: 'serve',
+      childSessionId: 'child-1',
+      childComposition: 'safe-v2',
     })
   })
 
@@ -41,7 +46,7 @@ describe('locus serviceability policy', () => {
   it('offers replacement, never service, for an active generation without the proof', () => {
     expect(dispositionOf({ ...serve, childComposition: undefined })).toMatchObject({
       kind: 'replace',
-      reason: expect.stringContaining('safe-v1'),
+      reason: expect.stringContaining('child composition proof'),
     })
     expect(dispositionOf({ state: 'active', childComposition: 'safe-v1' })).toMatchObject({
       kind: 'replace',

@@ -202,6 +202,7 @@ export function projectProvisioningCommit(
     parentSessionId: input.locus.parentSessionId,
     childSessionId: input.locus.childSessionId,
     ...(input.locus.childComposition === undefined ? {} : { childComposition: input.locus.childComposition }),
+    ...(input.locus.toolTier !== undefined ? { toolTier: input.locus.toolTier } : {}),
     workspaceId: input.locus.workspaceId,
     ...(input.locus.parentLocusId !== undefined
       ? { parentLocusId: input.locus.parentLocusId }
@@ -276,6 +277,7 @@ export function projectLocusRecord(record: DurableLocusRecord): ControllerLocusR
     parentSessionId: record.parentSessionId,
     childSessionId: record.childSessionId,
     ...(record.childComposition === undefined ? {} : { childComposition: record.childComposition }),
+    ...(record.toolTier !== undefined ? { toolTier: record.toolTier } : {}),
     ...(record.parentLocusId !== undefined ? { parentLocusId: record.parentLocusId } : {}),
     source: projectSource(record.source),
     state,

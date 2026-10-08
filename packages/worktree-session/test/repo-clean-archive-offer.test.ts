@@ -435,6 +435,32 @@ describe('archive and clean failures are reported per candidate', () => {
     await expect(git(root, 'rev-parse', '--verify', target.taskBranch)).resolves.toBeTruthy()
   }, 300_000)
 
+  // DSH 0.2.0 archiveSession refuses an active Session with
+  // WorkspaceActiveSessionError before writing anything. That must surface as
+  // archive-failed and leave every resource in place, never as a partial clean.
+  it('keeps everything when DSH refuses to archive an active Session', async () => {
+    const root = await fixture()
+    const target = await candidate(root, 'operation-offer-active', 'session-offer-active')
+
+    class WorkspaceActiveSessionError extends Error {
+      constructor(sessionId: string) { super(`cannot archive session '${sessionId}': the session is active (agent-running)`) }
+    }
+    const result = await wsCleanRepository(root, {
+      archivedSessionIds: [],
+      activePaths: [],
+      activeBoundSessionIds: [],
+      cwd: root,
+      confirmArchive: async () => true,
+      archiveSession: async sessionId => { throw new WorkspaceActiveSessionError(sessionId) },
+    })
+
+    expect(result.cleaned).toEqual([])
+    expect(result.refused[0]).toMatchObject({ operationId: target.operationId, kind: 'archive-failed' })
+    expect(result.refused[0]?.reason).toMatch(/the session is active/)
+    await expect(access(target.worktreePath)).resolves.toBeUndefined()
+    await expect(git(root, 'rev-parse', '--verify', target.taskBranch)).resolves.toBeTruthy()
+  }, 300_000)
+
   // 5.3 One candidate's failure must not block an independent eligible one.
   it('continues with other candidates after one fails', async () => {
     const root = await fixture()

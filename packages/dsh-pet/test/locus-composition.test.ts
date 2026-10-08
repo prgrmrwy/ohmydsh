@@ -3,7 +3,9 @@ import {
   attestLocusComposition,
   composeLocusChild,
   LOCUS_CALLER_BOUND_TOOLS,
+  LOCUS_DELEGATION_DENYLIST,
   LOCUS_SAFE_TOOL_NAMES,
+  LOCUS_SHELL_TIER_TOOL_NAMES,
   LocusCompositionError,
   type LocusChildComposition,
   type LocusCompositionPorts,
@@ -209,22 +211,43 @@ function composeLocysChildSafely(deps: LocusCompositionPorts): void {
 }
 
 describe('locus composition attestation', () => {
-  it('accepts exactly the reviewed surface', () => {
+  it('accepts the unchanged safe surface and the explicit shell surface', () => {
     expect(attestLocusComposition(SAFE_SURFACE)).toEqual({ ok: true, leaks: [] })
+    expect(attestLocusComposition([...SAFE_SURFACE, ...LOCUS_SHELL_TIER_TOOL_NAMES], 'shell'))
+      .toEqual({ ok: true, leaks: [] })
     // Order and repetition carry no meaning; only membership does.
     expect(attestLocusComposition([...SAFE_SURFACE].reverse().concat('read')).ok).toBe(true)
   })
 
-  it('names every tool the reviewed surface does not explain', () => {
+  it('names tools outside the selected tier and every delegation route', () => {
     expect(attestLocusComposition([...SAFE_SURFACE, 'subagent'])).toEqual({
       ok: false,
       reason: 'leaked',
       leaks: ['subagent'],
     })
-    expect(attestLocusComposition(['bash', 'subagent', 'bash'])).toEqual({
+    expect(attestLocusComposition([...SAFE_SURFACE, 'bash'])).toMatchObject({
       ok: false,
       reason: 'leaked',
-      leaks: ['bash', 'subagent'],
+      leaks: ['bash'],
+    })
+    expect(attestLocusComposition(['bash', 'subagent', 'bash'], 'shell')).toMatchObject({
+      ok: false,
+      reason: 'leaked',
+      leaks: ['subagent'],
+    })
+    expect(attestLocusComposition([...SAFE_SURFACE, 'workflow'])).toMatchObject({
+      ok: false,
+      leaks: ['workflow'],
+    })
+    expect(LOCUS_DELEGATION_DENYLIST).toContain('subagent')
+    expect(LOCUS_DELEGATION_DENYLIST).toContain('send_message')
+  })
+
+  it('requires bash to be visible in shell tier', () => {
+    expect(attestLocusComposition(SAFE_SURFACE, 'shell')).toMatchObject({
+      ok: false,
+      reason: 'leaked',
+      leaks: ['bash (required for shell tier)'],
     })
   })
 
@@ -238,6 +261,75 @@ describe('locus composition attestation', () => {
 })
 
 describe('unified locus child publication', () => {
+  it('requires a safe-v2 restriction installer before a safe-tier child can publish', () => {
+    const deps = ports({
+      lookup: { find: vi.fn(() => composition({
+        childComposition: 'safe-v2',
+        toolTier: { desired: 'safe', effective: 'safe' },
+      })) },
+      surface: {
+        install: vi.fn(),
+        setToolTier: vi.fn(),
+        installOutboundGuard: vi.fn(),
+        visibleTools: vi.fn(() => [...SAFE_SURFACE, 'bash']),
+      },
+    })
+
+    expect(() => composeLocusChild(agent(), deps)).toThrow(LocusCompositionError)
+  })
+
+  it('requires a per-agent guard for safe-v2 before any child may publish', () => {
+    const setToolTier = vi.fn((_agent, tier) => expect(tier).toBe('safe'))
+    const deps = ports({
+      lookup: { find: vi.fn(() => composition({ childComposition: 'safe-v2', toolTier: { desired: 'safe', effective: 'safe' } })) },
+      surface: { install: vi.fn(), setToolTier, visibleTools: vi.fn(() => SAFE_SURFACE) },
+    })
+    expect(() => composeLocusChild(agent(), deps)).toThrow(LocusCompositionError)
+    expect(setToolTier).toHaveBeenCalledOnce()
+  })
+
+  it('applies the safe restriction before reading the fresh staging surface', () => {
+    const visible = [...SAFE_SURFACE]
+    const setToolTier = vi.fn((_agent, tier) => {
+      expect(tier).toBe('safe')
+      visible.push(...LOCUS_SHELL_TIER_TOOL_NAMES)
+      // A real restriction removes the shell tools from the visible surface.
+      visible.splice(visible.indexOf('bash'), 1)
+      visible.splice(visible.indexOf('skill'), 1)
+    })
+    const deps = ports({
+      lookup: { find: vi.fn(() => composition({
+        childComposition: 'safe-v2',
+        toolTier: { desired: 'safe', effective: 'safe' },
+      })) },
+      surface: {
+        install: vi.fn(),
+        setToolTier,
+        installOutboundGuard: vi.fn(),
+        visibleTools: vi.fn(() => visible),
+      },
+    })
+
+    expect(composeLocusChild(agent(), deps)).toMatchObject({ composed: true })
+    expect(setToolTier).toHaveBeenCalledOnce()
+  })
+
+  it('does not install the v2 restriction layer for a legacy safe-v1 child', () => {
+    const setToolTier = vi.fn()
+    const deps = ports({
+      lookup: { find: vi.fn(() => composition({ childComposition: 'safe-v1' })) },
+      surface: {
+        install: vi.fn(),
+        setToolTier,
+        installOutboundGuard: vi.fn(),
+        visibleTools: vi.fn(() => SAFE_SURFACE),
+      },
+    })
+
+    expect(composeLocusChild(agent(), deps)).toMatchObject({ composed: true })
+    expect(setToolTier).not.toHaveBeenCalled()
+  })
+
   it('refuses to publish a child whose own plane escaped the safe filter', () => {
     // The tool filter restricts the inherited plane only, so a per-agent
     // registration like the standard preset's `subagent` survives it. The
@@ -254,7 +346,7 @@ describe('unified locus child publication', () => {
   })
 
   it('refuses to publish a child whose surface cannot be read', () => {
-    const deps = ports({ surface: { install: vi.fn() } })
+    const deps = ports({ surface: { install: vi.fn(), installOutboundGuard: vi.fn() } })
 
     try {
       composeLocusChild(agent(), deps)
@@ -268,6 +360,7 @@ describe('unified locus child publication', () => {
     const deps = ports({
       surface: {
         install: vi.fn(),
+        installOutboundGuard: vi.fn(),
         visibleTools: vi.fn(() => { throw new Error('tools service gone') }),
       },
     })

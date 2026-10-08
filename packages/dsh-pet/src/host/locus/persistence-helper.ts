@@ -30,6 +30,10 @@ export function operationKindOf(kind: string): PetLocusOperation['kind'] {
     case 'locus-permission':
     case 'permission-mutation-begin':
     case 'permission-mutation-abort':
+    case 'tool-tier-mutation-begin':
+    case 'tool-tier-mutation-abort':
+    case 'tool-tier-mutation-invalid':
+    case 'tool-tier-mutation':
     case 'anchor':
     case 'locus-context-anchor':
     case 'delivery':
@@ -39,9 +43,11 @@ export function operationKindOf(kind: string): PetLocusOperation['kind'] {
     case 'delivery-running':
     case 'delivery-settled':
     case 'delivery-failed':
-      return kind === 'locus-permission' || kind === 'permission' || kind.startsWith('permission-mutation-')
-        ? 'permission'
-        : kind === 'locus-context-anchor' || kind === 'anchor'
+      return kind === 'tool-tier-mutation' || kind.startsWith('tool-tier-mutation-')
+        ? 'tool-tier'
+        : kind === 'locus-permission' || kind === 'permission' || kind.startsWith('permission-mutation-')
+          ? 'permission'
+          : kind === 'locus-context-anchor' || kind === 'anchor'
           ? 'anchor'
         : kind.startsWith('delivery-')
           ? 'delivery'

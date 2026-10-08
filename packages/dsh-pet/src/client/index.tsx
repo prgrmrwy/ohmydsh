@@ -12,6 +12,8 @@
  * @module dsh-pet/client
  */
 
+// Type-only: the ctx.uiWorkspace merge (DSH 0.2.0 navigation service).
+import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import { createElement, useCallback, useSyncExternalStore } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
@@ -39,6 +41,8 @@ import {
   registerPetSettingsNavIcon,
 } from './settings-nav-icon.js'
 import { PET_CSS } from './styles.js'
+import { mainSessionId } from './main-session.js'
+import { sessionTargetOf } from './session-target.js'
 
 /**
  * Required services.
@@ -52,7 +56,7 @@ import { PET_CSS } from './styles.js'
  * is how the shipped sidebar plugin resolves the same dependency. It also
  * fixes an undeclared-access bug: `readCurrentSource` reads both services.
  */
-export const inject = ['slots', 'sessions', 'workspaces', 'connection']
+export const inject = ['slots', 'sessions', 'workspaces', 'connection', 'uiWorkspace']
 
 /**
  * Marks Pet's own mount node under `document.body`.
@@ -321,7 +325,9 @@ function PetOverlaySurface(): JSX.Element | null {
  */
 function readCurrentSource(ctx: ClientContext): SourceSelection | undefined {
   const sessionState = ctx.sessions.list.getSnapshot()
-  const currentId = sessionState.current
+  // DSH 0.2.0 removed `SessionListState.current`; the Session the main view
+  // shows is the one holding a `mainView` retain reference (see main-session.ts).
+  const currentId = mainSessionId(sessionState) as typeof sessionState.ids[number] | undefined
   if (currentId === undefined) return undefined
 
   // The list is keyed by id (`byId`), not an `items` array.
@@ -342,27 +348,19 @@ function readCurrentSource(ctx: ClientContext): SourceSelection | undefined {
 /**
  * Navigate to a native DSH session.
  *
- * Uses the typed sessions face rather than an untyped `ctx.get` lookup, so a
- * contract change fails the build instead of silently no-opping.
+ * DSH 0.2.0 moved navigation from `sessions.open`/`sessions.openSubagent` to
+ * the Workspace UI service: `uiWorkspace.openSession(target)` selects the
+ * Session and shows its Conversation as one action, and accepts either a
+ * Session id or a durable parent/child subagent address.
  *
- * A subagent child MUST go through `openSubagent`: the Host rejects a bare
- * session id for `origin === 'subagent'` with `session/agent-busy`, because
- * such a Session is owned by subagent routing. `mode` is `continuable` because
- * that is exactly what the locus child provisioner creates and records in its
- * descriptor — a locus child is never a one-shot delegation.
+ * A subagent child MUST be addressed through its parent: the Host rejects a
+ * bare session id for `origin === 'subagent'`, because such a Session is owned
+ * by subagent routing. `mode` is `continuable` because that is exactly what the
+ * locus child provisioner creates and records in its descriptor.
  *
  * @param ctx - Client context.
  * @param target - Navigation target, carrying the parent address when needed.
  */
 function openSession(ctx: ClientContext, target: PetSessionTarget): void {
-  if (target.kind === 'subagent') {
-    type SubagentAddress = Parameters<ClientContext['sessions']['openSubagent']>[0]
-    ctx.sessions.openSubagent({
-      parentSessionId: target.parentSessionId,
-      childSessionId: target.childSessionId,
-      mode: 'continuable',
-    } as unknown as SubagentAddress)
-    return
-  }
-  ctx.sessions.open(target.sessionId as Parameters<ClientContext['sessions']['open']>[0])
+  ctx.uiWorkspace.openSession(sessionTargetOf(target))
 }

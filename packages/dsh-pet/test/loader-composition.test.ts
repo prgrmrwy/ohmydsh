@@ -28,7 +28,9 @@ import { describe, expect, it, vi } from 'vitest'
 import * as petPlugin from '../src/index.js'
 import {
   LOCUS_CALLER_BOUND_TOOLS,
+  LOCUS_DELEGATION_DENYLIST,
   LOCUS_SAFE_TOOL_NAMES,
+  LOCUS_SHELL_TIER_TOOL_NAMES,
 } from '../src/host/locus/composition.js'
 import { PET_DOMAIN_NAME } from '../src/host/spec.js'
 import { LOCUS_ROUTES, ROUTES } from '../src/wire.js'
@@ -813,6 +815,8 @@ describe('Invocation state is projected from real session events', () => {
 })
 
 describe('a locus child is composed at the real creation boundary', () => {
+  const visibleToolsByContext = new WeakMap<Context, Set<string>>()
+
   /**
    * Compose Pet over a real loader with a live locus record, then emit the
    * runtime's own `agent/created` for that child.
@@ -821,7 +825,10 @@ describe('a locus child is composed at the real creation boundary', () => {
    * class of defect the integration-pitfalls note is about — a registration
    * can look correct, type-check, and still never take effect.
    */
-  async function hostWithLocusChild(options: { policy?: 'read-only' | 'workspace-write' | 'absent' } = {}) {
+  async function hostWithLocusChild(options: {
+    policy?: 'read-only' | 'workspace-write' | 'absent'
+    shellToolsInBase?: boolean
+  } = {}) {
     const home = await mkdtemp(path.join(tmpdir(), 'pet-loader-'))
     const projectRoot = await mkdtemp(path.join(tmpdir(), 'pet-project-'))
     const { mkdir } = await import('node:fs/promises')
@@ -831,6 +838,11 @@ describe('a locus child is composed at the real creation boundary', () => {
     await ctx.plugin(Storage)
     const applied: { sessionId: string; mode: string }[] = []
     const modes = new Map<string, string>()
+    const visibleToolNames = new Set([
+      ...LOCUS_SAFE_TOOL_NAMES,
+      ...(options.shellToolsInBase === true ? LOCUS_SHELL_TIER_TOOL_NAMES : []),
+      ...LOCUS_CALLER_BOUND_TOOLS,
+    ])
     const sessions = new Map<string, {
       id: string
       header: { cwd: string }
@@ -876,7 +888,8 @@ describe('a locus child is composed at the real creation boundary', () => {
       // A Host reports what that child can actually call, own plane included.
       tools: {
         register: () => () => {},
-        schemas: () => [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_CALLER_BOUND_TOOLS].map(name => ({ name })),
+        schemas: () => [...visibleToolNames].map(name => ({ name })),
+
       },
     })
     if (options.policy !== 'absent') {
@@ -922,7 +935,7 @@ describe('a locus child is composed at the real creation boundary', () => {
   }
 
   /** Insert one active locus generation through the durable repository. */
-  async function seedLocus(ctx: Context, permission: 'read' | 'write'): Promise<void> {
+  async function seedLocus(ctx: Context, permission: 'read' | 'write', composition: 'safe-v1' | 'safe-v2' = 'safe-v1'): Promise<void> {
     const { LocusRepository } = await import('../src/host/locus/persistence.js')
     const domain = ctx.storage.domain.get(PET_DOMAIN_NAME)
     expect(domain).toBeDefined()
@@ -936,7 +949,8 @@ describe('a locus child is composed at the real creation boundary', () => {
       workspaceId: 'ws-live',
       source: 'auto',
       state: 'active',
-      childComposition: 'safe-v1',
+      childComposition: composition,
+       ...(composition === 'safe-v2' ? { toolTier: { desired: 'safe' as const, effective: 'safe' as const } } : {}),
       permission: { desired: permission, effective: permission, verifiedAt: 1 },
       busy: false,
       createdAt: 1,
@@ -945,13 +959,30 @@ describe('a locus child is composed at the real creation boundary', () => {
   }
 
   /** Emit the runtime's creation event exactly as DSH does. */
-  function publish(ctx: Context, sessionId: string): { registered: string[] } {
+  function publish(ctx: Context, sessionId: string, options: {
+    readonly onRestrict?: (restriction: { deny: readonly string[] }) => () => void
+    readonly failRestrict?: boolean
+    readonly tier?: 'safe' | 'shell'
+    readonly legacy?: boolean
+  } = {}): { registered: string[] } {
+    const visible = new Set([
+      ...LOCUS_SAFE_TOOL_NAMES,
+      ...(options.shellToolsInBase === true ? LOCUS_SHELL_TIER_TOOL_NAMES : []),
+      ...LOCUS_CALLER_BOUND_TOOLS,
+    ])
     const registered: string[] = []
     const agentCtx = {
       get: (service: string) =>
         service === 'tools'
           ? {
               register: (definition: { name?: string }) => { registered.push(definition.name ?? '?'); return () => {} },
+               restrict: (restriction: { deny: readonly string[] }) => {
+                 if (options.failRestrict === true) throw new Error('injected restrict failure')
+                 for (const name of restriction.deny) visible.delete(name)
+                 return options.onRestrict?.(restriction) ?? (() => {
+                   for (const name of restriction.deny) visible.add(name)
+                 })
+               },
               guard: () => () => {},
             }
           : undefined,
@@ -960,6 +991,13 @@ describe('a locus child is composed at the real creation boundary', () => {
       on: () => () => {},
       tools: {
         register: (definition: { name?: string }) => { registered.push(definition.name ?? '?'); return () => {} },
+               restrict: (restriction: { deny: readonly string[] }) => {
+                 if (options.failRestrict === true) throw new Error('injected restrict failure')
+                 for (const name of restriction.deny) visible.delete(name)
+                 return options.onRestrict?.(restriction) ?? (() => {
+                   for (const name of restriction.deny) visible.add(name)
+                 })
+               },
         guard: () => () => {},
       },
       skills: { registerProvider: () => () => {} },
@@ -1163,6 +1201,11 @@ describe('owner-facing locus management is served by the real routes', () => {
     const ctx = new Context()
     await ctx.plugin(Storage)
     const modes = new Map<string, string>()
+    const visibleToolNames = new Set([
+      ...LOCUS_SAFE_TOOL_NAMES,
+      ...(options.shellToolsInBase === true ? LOCUS_SHELL_TIER_TOOL_NAMES : []),
+      ...LOCUS_CALLER_BOUND_TOOLS,
+    ])
     const sessions = new Map<string, {
       id: string
       title: string
@@ -1780,7 +1823,9 @@ describe('client bundle loads without Cockpit changes', () => {
     // its `apply` never runs — styles appear but no surface is ever mounted.
     // Naming the services Pet actually reads pulls in packages that do ship
     // bundles and provide the slot registry.
-    expect(exported.inject).toEqual(['slots', 'sessions', 'workspaces', 'connection'])
+    // DSH 0.2.0: navigation moved to `uiWorkspace` (dsh-client-ui-workspace),
+    // which official client plugins such as ui-sidebar inject the same way.
+    expect(exported.inject).toEqual(['slots', 'sessions', 'workspaces', 'connection', 'uiWorkspace'])
   })
 
   it('declares the web client half in package metadata', async () => {
@@ -1857,6 +1902,8 @@ describe('module-level client deps must be resolvable', () => {
     const roots = [
       path.resolve(__dirname, '..', 'node_modules'),
       path.resolve(__dirname, '..', '..', '..', 'node_modules'),
+      // Include Node's actual search roots for shared lean-worktree installs.
+      ...(require.resolve.paths('@deepseek-ai/dsh-api-session-controller') ?? []),
     ]
     for (const id of declared) {
       let exists = false
@@ -1902,6 +1949,43 @@ describe('the Pet executor preset omits local-root Skill discovery', () => {
     // The catalog and loader must stay: the executor still needs to load the
     // Skills that Pet DOES allow.
     expect(ids).toContain('tool-skill')
+  })
+
+  it('exposes only shell-tier names mounted by the pinned executor preset', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const nodePath = await import('node:path')
+    const preset = await readFile(
+      nodePath.resolve(process.cwd(), '..', '..', 'presets', 'dsh-pet-executor', 'agent.cordis.yml'),
+      'utf8',
+    )
+    const mounted = new Set<string>()
+    for (const [row, names] of [
+      ['tool-fs', ['read', 'read_image']],
+      ['tool-fs-search', ['glob', 'grep']],
+      ['tool-web', ['web_search']],
+      ['tool-bash', ['bash']],
+      ['tool-skill', ['skill']],
+    ] as const) {
+      const start = preset.indexOf(`- id: ${row}\n`)
+      expect(start, `preset row ${row} must exist`).toBeGreaterThanOrEqual(0)
+      const rest = preset.slice(start)
+      const end = rest.slice(1).search(/^\s*- id: /m)
+      const block = end < 0 ? rest : rest.slice(0, end + 1)
+      const platformRule = block.match(/disabled:\s*!!js process\.platform\s*([!=]==?)\s*['"]([^'"]+)['"]/)
+      const disabled = platformRule === null
+        ? false
+        : platformRule[1].startsWith('=')
+          ? process.platform === platformRule[2]
+          : process.platform !== platformRule[2]
+      if (!disabled) names.forEach(name => mounted.add(name))
+    }
+
+    const intended = [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_SHELL_TIER_TOOL_NAMES]
+    expect(intended.every(name => mounted.has(name))).toBe(true)
+    expect(intended.some(name => (LOCUS_DELEGATION_DENYLIST as readonly string[]).includes(name))).toBe(false)
+    // The shell tier intentionally excludes these features: dsh-pet-executor
+    // does not expose job control and disables web_fetch.
+    expect(LOCUS_SHELL_TIER_TOOL_NAMES).toEqual(['bash', 'skill'])
   })
 
   it('registers its delegation rows outside the per-agent plane', async () => {

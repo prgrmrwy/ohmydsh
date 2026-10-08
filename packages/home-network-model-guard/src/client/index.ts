@@ -39,6 +39,7 @@ import { GUARD_CHANNEL, GUARD_CHECK_ENDPOINT, type GuardCheckResult, type Networ
 import { ComposerGuardController, type ReasonBlock, type SessionGuardDeps } from './guard.js'
 import { NS, en, zh, type GuardKey } from './locales.js'
 import { GuardSettingsSection, type GuardSettingsInjected } from './settings.jsx'
+import { mainSessionId } from './main-session.js'
 
 /** Required services: slots, locale, connection RPC, sessions, composer blocks, model directories. */
 export const inject = ['slots', 'locale', 'connection', 'sessions', 'conversation', 'modelDirectories']
@@ -247,7 +248,7 @@ export function apply(ctx: ClientContext): void {
       // 只预热正在查看的会话:其目录为空时触发一次 catalog 刷新。失败无妨
       // (下次 sessions.list 变化会重试),成功后 store 发布 → evaluate。
       try {
-        const active = ctx.sessions.list.getSnapshot().current
+        const active = mainSessionId(ctx.sessions.list.getSnapshot()) as SessionId | undefined
         if (active === undefined) return
         const directory = ctx.modelDirectories.directoryFor(active)
         if (directory.store.getSnapshot().current === null) {

@@ -57,6 +57,27 @@ function toolResult(seq: number, callId: string, isError = false): SessionEvent 
   } as unknown as SessionEvent
 }
 
+/** DSH 0.2.0 shape: a tool-role message with a top-level isError and toolCallId. */
+function toolResultV4(seq: number, callId: string, isError = false): SessionEvent {
+  return {
+    type: 'tool/result',
+    seq,
+    time: seq * 1_000,
+    data: {
+      turn: 1,
+      step: 1,
+      message: {
+        id: `m${seq}`,
+        role: 'tool',
+        toolCallId: callId,
+        isError,
+        content: [{ type: 'text', text: isError ? 'failed' : 'ok' }],
+        source: { kind: 'tool', callId },
+      },
+    },
+  } as unknown as SessionEvent
+}
+
 const noView = (): undefined => undefined
 
 describe('extractSession (links)', () => {
@@ -135,6 +156,23 @@ describe('extractSession (produced)', () => {
         toolResult(2, 'c1', true),
         toolCall(3, 'c2', 'write', '{"path":"src/ok.ts"}'),
         toolResult(4, 'c2'),
+      ],
+      (name, argsRaw) => {
+        if (name !== 'write') return undefined
+        const { path } = JSON.parse(argsRaw) as { path: string }
+        return diffView([path])
+      },
+    )
+    expect(produced.map((f) => f.path)).toEqual(['src/ok.ts'])
+  })
+
+  it('withdraws mutations whose DSH 0.2.0 tool-role result failed', () => {
+    const { produced } = extractSession(
+      [
+        toolCall(1, 'c1', 'write', '{"path":"src/fail.ts"}'),
+        toolResultV4(2, 'c1', true),
+        toolCall(3, 'c2', 'write', '{"path":"src/ok.ts"}'),
+        toolResultV4(4, 'c2'),
       ],
       (name, argsRaw) => {
         if (name !== 'write') return undefined

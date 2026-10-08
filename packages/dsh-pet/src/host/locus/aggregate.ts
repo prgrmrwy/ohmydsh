@@ -22,11 +22,22 @@ export type LocusState =
 
 export type LocusPermissionMode = 'read' | 'write'
 
-/** Durable proof that this child was created with the reviewed safe composition. */
-export type LocusChildComposition = 'safe-v1'
+/** Durable proof that this child was created with a reviewed tool composition. */
+export type LocusChildComposition = 'safe-v1' | 'safe-v2'
 
-/** The only composition generation currently safe for adoption and dispatch. */
-export const LOCUS_SAFE_CHILD_COMPOSITION: LocusChildComposition = 'safe-v1'
+/** New children use the revocable per-tier composition with no delegation tools. */
+export const LOCUS_SAFE_CHILD_COMPOSITION: LocusChildComposition = 'safe-v2'
+
+/** Tool-access tier, independent from the file sandbox permission. */
+export type LocusToolTierName = 'safe' | 'shell'
+
+/** Desired and Host-verified tool tier for one locus generation. */
+export interface LocusToolTier {
+  readonly desired: LocusToolTierName
+  readonly effective: LocusToolTierName
+  readonly verifiedAt?: number
+  readonly grantedBy?: string
+}
 
 /**
  * The preset every locus CHILD composes from, on creation and on every cold
@@ -100,6 +111,8 @@ export interface LocusRecord {
   readonly childSessionId?: string
   /** Absent on legacy rows, which remain readable but are never serviceable. */
   readonly childComposition?: LocusChildComposition
+  /** Persisted tool visibility tier, independent from the file permission. */
+  readonly toolTier?: LocusToolTier
   readonly workspaceId: string
   /** Group locus that structurally owns a topic locus, when applicable. */
   readonly parentLocusId?: string
@@ -124,6 +137,8 @@ export interface NewLocusInput {
   readonly parentSessionId: string
   readonly childSessionId?: string
   readonly childComposition?: LocusChildComposition
+  /** Persisted tool visibility tier, independent from the file permission. */
+  readonly toolTier?: LocusToolTier
   readonly workspaceId: string
   readonly parentLocusId?: string
   readonly source: LocusSource
@@ -342,9 +357,29 @@ export function buildLocusRecord(input: NewLocusInput): LocusRecord {
   if (input.childSessionId !== undefined) assertString(input.childSessionId, 'childSessionId')
   if (
     input.childComposition !== undefined
-    && input.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION
+    && input.childComposition !== 'safe-v1'
+    && input.childComposition !== 'safe-v2'
   ) {
     throw new LocusError('INVALID_LOCUS', `Unknown child composition '${String(input.childComposition)}'`)
+  }
+  const toolTier = input.toolTier
+  if (toolTier !== undefined) {
+    if (!['safe', 'shell'].includes(toolTier.desired) || !['safe', 'shell'].includes(toolTier.effective)) {
+      throw new LocusError('INVALID_LOCUS', 'Unknown locus tool tier')
+    }
+    if (toolTier.effective === 'shell' && toolTier.desired !== 'shell') {
+      throw new LocusError('INVALID_LOCUS', 'Effective shell tier requires desired shell tier')
+    }
+    if (toolTier.effective === 'shell' && input.childComposition !== 'safe-v2') {
+      throw new LocusError('INVALID_LOCUS', 'Only safe-v2 children may use shell tool tier')
+    }
+    if (input.childComposition !== 'safe-v2' && toolTier.effective === 'shell') {
+      throw new LocusError('INVALID_LOCUS', 'Only safe-v2 children may use shell tool tier')
+    }
+    if (toolTier.verifiedAt !== undefined && (!Number.isSafeInteger(toolTier.verifiedAt) || toolTier.verifiedAt < 0)) {
+      throw new LocusError('INVALID_LOCUS', 'toolTier.verifiedAt must be a non-negative safe integer')
+    }
+    if (toolTier.grantedBy !== undefined) assertString(toolTier.grantedBy, 'toolTier.grantedBy')
   }
   if (input.parentLocusId !== undefined) assertString(input.parentLocusId, 'parentLocusId')
   if (input.parentLocusId !== undefined && normalized.threadId === undefined) {
@@ -421,6 +456,7 @@ export function buildLocusRecord(input: NewLocusInput): LocusRecord {
       : {}),
   }
 
+  const initialToolTier = toolTier ?? { desired: 'safe' as const, effective: 'safe' as const }
   const record: LocusRecord = {
     id: id ?? `generated-${generation}`,
     generation,
@@ -428,6 +464,7 @@ export function buildLocusRecord(input: NewLocusInput): LocusRecord {
     parentSessionId: input.parentSessionId.trim(),
     ...(input.childSessionId !== undefined ? { childSessionId: input.childSessionId.trim() } : {}),
     ...(input.childComposition !== undefined ? { childComposition: input.childComposition } : {}),
+    toolTier: Object.freeze({ ...initialToolTier }),
     workspaceId: input.workspaceId.trim(),
     ...(input.parentLocusId !== undefined ? { parentLocusId: input.parentLocusId.trim() } : {}),
     source: input.source,
@@ -548,6 +585,9 @@ export function transitionLocus(
     ...(nextChild !== undefined ? { childSessionId: nextChild } : {}),
     state,
     permission: freezePermission(nextPermission),
+    ...(unavailable && record.toolTier !== undefined
+      ? { toolTier: Object.freeze({ ...record.toolTier, effective: 'safe' as const }) }
+      : {}),
     busy: unavailable ? false : patch.busy ?? record.busy,
     revision: (record.revision ?? 0) + 1,
     updatedAt: now,
@@ -585,6 +625,30 @@ export function withLocusPermission(
   return Object.freeze({
     ...record,
     permission: freezePermission(permission),
+    revision: (record.revision ?? 0) + 1,
+    updatedAt: now,
+  })
+}
+
+/** Replace only the tool-tier projection while preserving locus identity. */
+export function withLocusToolTier(
+  record: LocusRecord,
+  toolTier: LocusToolTier,
+  now: number,
+  options: { readonly allowSwitching?: boolean } = {},
+): LocusRecord {
+  if (!Number.isSafeInteger(now) || now < 0 || now < record.updatedAt) {
+    throw new LocusError('INVALID_LOCUS', 'tool tier time must be a non-negative monotonic integer')
+  }
+  if (record.state !== 'active' && !(record.state === 'switching' && options.allowSwitching === true)) {
+    throw new LocusError('INVALID_LOCUS', 'An unavailable locus cannot change tool tier')
+  }
+  if (toolTier.effective === 'shell' && record.childComposition !== 'safe-v2') {
+    throw new LocusError('INVALID_LOCUS', 'Only safe-v2 children may use shell tool tier')
+  }
+  return Object.freeze({
+    ...record,
+    toolTier: Object.freeze({ ...toolTier }),
     revision: (record.revision ?? 0) + 1,
     updatedAt: now,
   })

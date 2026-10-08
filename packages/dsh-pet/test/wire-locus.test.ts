@@ -29,6 +29,7 @@ describe('unified locus wire contract', () => {
       archive: '/dsh-pet/api/locus-archive',
       stop: '/dsh-pet/api/locus-stop',
       scope: '/dsh-pet/api/locus-scope',
+      tools: '/dsh-pet/api/locus-tools',
       rebuild: '/dsh-pet/api/locus-rebuild',
       // Added by `pet-locus-intent-triage`. This assertion's purpose is that
       // existing routes keep their exact paths (no rename, no removal) — a

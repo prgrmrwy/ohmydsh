@@ -178,6 +178,99 @@ describe('Locus canonical project-read guard', () => {
     })).toThrow('overlaps or contains')
   })
 
+  it('composes on a fresh DSH home whose attachment store does not exist yet (DSH 0.2 creates it lazily)', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'locus-read-fresh-home-'))
+    roots.push(base)
+    const dshHome = join(base, 'dsh-home')
+    const workspace = join(base, 'project')
+    const paths = resolvePetPaths(dshHome)
+    await mkdir(workspace)
+    await ensurePetDirectories(paths) // creates dshHome + Pet state, NOT dshHome/attachments
+    ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    let bodies = 0
+    for (const name of ['read', 'read_image', 'glob', 'grep']) ctx.tools.register(probeTool(name, () => { bodies += 1 }))
+    const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/package.json'))
+    const { createScope } = await import(pathToFileURL(requireFromTools.resolve('@deepseek-ai/dsh-scope')).href) as {
+      createScope(ctx: Context, key: Agent): { ctx: Context; dispose(): Promise<void> }
+    }
+    const agent = { id: 'fresh-home-child' as SessionId } as Agent
+    const scope = createScope(ctx, agent)
+    expect(() => installLocusProjectReadGuard(scope.ctx, {
+      childCwd: workspace,
+      parentCwd: workspace,
+      workspaceRoot: workspace,
+      deniedRoots: locusDeniedRoots(paths),
+    })).not.toThrow()
+    // The store appearing later is still refused: it lives under the denied DSH home.
+    await mkdir(join(dshHome, 'attachments'))
+    await writeFile(join(dshHome, 'attachments', 'a.png'), 'x')
+    const result = await ctx.tools.execute({
+      agent, name: 'read', callId: 'late-store' as ToolCallId,
+      arguments: { file_path: join(dshHome, 'attachments', 'a.png') }, signal: new AbortController().signal,
+    })
+    expect(result.isError).toBe(true)
+    expect(bodies).toBe(0)
+    await scope.dispose()
+  })
+
+  it('fails closed when the missing attachment store is a dangling symlink into the project', async () => {
+    // Reviewer counterexample: lexically inside DSH_HOME, physically a future
+    // project path. Dropping it would let a later store be read as project data.
+    const base = await mkdtemp(join(tmpdir(), 'locus-read-dangling-'))
+    roots.push(base)
+    const dshHome = join(base, 'dsh-home')
+    const workspace = join(base, 'project')
+    const paths = resolvePetPaths(dshHome)
+    await mkdir(workspace)
+    await ensurePetDirectories(paths)
+    await symlink(join(workspace, 'future-store'), join(dshHome, 'attachments'))
+    ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    expect(() => installLocusProjectReadGuard(ctx!, {
+      childCwd: workspace,
+      parentCwd: workspace,
+      workspaceRoot: workspace,
+      deniedRoots: locusDeniedRoots(paths),
+    })).toThrow('not physically covered')
+  })
+
+  it('fails closed when a missing root sits under a symlinked ancestor that leaves the denied root', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'locus-read-ancestor-'))
+    roots.push(base)
+    const denied = join(base, 'runtime')
+    const workspace = join(base, 'project')
+    await Promise.all([mkdir(denied), mkdir(workspace)])
+    await symlink(workspace, join(denied, 'escape'))
+    ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    expect(() => installLocusProjectReadGuard(ctx!, {
+      childCwd: workspace,
+      parentCwd: workspace,
+      workspaceRoot: workspace,
+      deniedRoots: [denied, join(denied, 'escape', 'not-yet')],
+    })).toThrow('not physically covered')
+  })
+
+  it('still fails closed when a missing denied root is not covered by another denied root', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'locus-read-uncovered-'))
+    roots.push(base)
+    const workspace = join(base, 'project')
+    await mkdir(workspace)
+    ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    expect(() => installLocusProjectReadGuard(ctx, {
+      childCwd: workspace,
+      parentCwd: workspace,
+      workspaceRoot: workspace,
+      deniedRoots: [join(base, 'independent-missing-root')],
+    })).toThrow()
+  })
+
   it('fails installation closed when a Host-proven root is missing', async () => {
     const base = await mkdtemp(join(tmpdir(), 'locus-read-root-'))
     roots.push(base)

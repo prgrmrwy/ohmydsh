@@ -248,6 +248,8 @@ export const petApi = {
     call(LOCUS_ROUTES.stop, input),
   locusScope: (input: Extract<PetLocusActionRequest, { action: 'scope' }>): Promise<PetLocusActionResult> =>
     call(LOCUS_ROUTES.scope, input),
+  locusTools: (input: Extract<PetLocusActionRequest, { action: 'tools' }>): Promise<PetLocusActionResult> =>
+    call(LOCUS_ROUTES.tools, input),
   locusConfirmAnchor: (input: Extract<PetLocusActionRequest, { action: 'confirm-anchor' }>): Promise<PetLocusActionResult> =>
     call(LOCUS_ROUTES.action, input),
   locusRebuild: (input: Extract<PetLocusActionRequest, { action: 'rebuild' }>): Promise<PetLocusActionResult> =>

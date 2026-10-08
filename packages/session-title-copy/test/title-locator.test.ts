@@ -42,11 +42,12 @@ class FakeNode implements ElementLike {
     if (selector === 'header') {
       return this.children.filter((c) => c.getAttribute(TAG) === 'header')
     }
-    if (selector === 'button') {
+    if (selector === 'button' || selector === 'button, span') {
+      const tags = selector.split(/,\s*/)
       const out: FakeNode[] = []
       const walk = (nodes: FakeNode[]): void => {
         for (const n of nodes) {
-          if (n.getAttribute(TAG) === 'button') out.push(n)
+          if (tags.includes(n.getAttribute(TAG) ?? '')) out.push(n)
           walk(n.children)
         }
       }
@@ -117,6 +118,16 @@ describe('findCrumbNav', () => {
   it('returns null when the header has no breadcrumb nav', () => {
     const root = new FakeNode({}, [header([new FakeNode({ class: 'wSkVaW_titleRow' })])])
     expect(findCrumbNav(root)).toBeNull()
+  })
+
+  it('finds the DSH 0.2 nav whose current crumb is a non-interactive span', () => {
+    // 0.2.0-rc.2 live DOM: nav.crumbs > span.crumbSeg > span.crumb.crumbCurrent (no button at all).
+    const current = new FakeNode({ class: 'wSkVaW_crumb wSkVaW_crumbCurrent', [TAG]: 'span' })
+    const navNode = new FakeNode({ class: 'wSkVaW_crumbs', [TAG]: 'nav' }, [
+      new FakeNode({ class: 'wSkVaW_crumbSeg', [TAG]: 'span' }, [current]),
+    ])
+    const root = new FakeNode({}, [header([new FakeNode({ class: 'wSkVaW_titleCluster' }, [navNode])])])
+    expect(findCrumbNav(root)).toBe(navNode)
   })
 
   it('returns null when the nav has no crumb button (structure changed — safe degrade)', () => {

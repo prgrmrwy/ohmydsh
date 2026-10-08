@@ -115,12 +115,21 @@ async function step(agent: Agent, text: string): Promise<void> {
   await agent.whenIdle()
 }
 
+/**
+ * The system-prompt runtime-context snapshot as persisted by the runtime:
+ * DSH 0.1.5 used a `plugin` source owned by dsh-system-prompt; DSH 0.2.0 has a
+ * dedicated `runtime-context` source kind (format v4 removed `plugin`).
+ */
+function isRuntimeContextSource(source: unknown): boolean {
+  const value = source as { kind?: unknown; plugin?: unknown }
+  return value.kind === 'runtime-context'
+    || (value.kind === 'plugin' && value.plugin === '@deepseek-ai/dsh-system-prompt')
+}
+
 function runtimeContextEvents(agent: Agent): SessionEvent<'user/message'>[] {
   return agent.session.snapshotEvents().flatMap(event =>
-    event.type === 'user/message'
-      && event.data.source.kind === 'plugin'
-      && event.data.source.plugin === '@deepseek-ai/dsh-system-prompt'
-      ? [event]
+    event.type === 'user/message' && isRuntimeContextSource(event.data.source)
+      ? [event as SessionEvent<'user/message'>]
       : [],
   )
 }

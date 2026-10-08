@@ -85,6 +85,11 @@
 - **WHEN** 绑定 Session 创建子 Agent 或后台 Agent
 - **THEN** 系统 SHALL 使子 Agent继承相同逻辑 worktree 约束，或在无法可靠传播时拒绝委派并给出明确原因
 
+#### Scenario: Caller-bound Pet inquiry is not a filesystem target
+- **WHEN** 活动且绑定校验通过的 Worktree Session 调用 `pet_inquire`，参数严格符合已审计的 `target`、`question`、`purpose` 字符串契约
+- **THEN** Worktree guard SHALL 将 `target` 视为协作者引用而非文件路径，允许请求继续由 Pet 核验实际 caller、同圈成员与当前代际；该放行 MUST NOT 构成询问接受或目标授权
+- **THEN** 未审计工具的 `target`、契约新增字段或错误类型 SHALL 继续被拒绝；已清理或绑定校验失败的 Session MUST NOT 通过该例外发起询问
+
 ### Requirement: Dependency mode is observable without mutating conversation context
 新 Worktree Session SHALL 默认为 lean。当前 task branch、依赖模式和生命周期状态 SHALL 通过 UI 状态、持久元数据及按需 `ws` Skill 查询提供；状态变化不得要求更新稳定模型上下文。
 

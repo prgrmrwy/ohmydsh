@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-skill'
 import type {} from '@deepseek-ai/dsh-commands'
-import { registerDshOpenSpecSettings } from './options.js'
+import { OptionsSchema, readOptions, type DshOpenSpecOptions } from './options.js'
 import { getOfficialCatalog, getOfficialInitToolIds, resolveEffectiveSelection } from './upstream-compat.js'
 import { registerWorkflowCommands } from './commands.js'
 import { createRequire } from 'node:module'
@@ -25,8 +25,10 @@ const approvedRoutingProviders: string[] = []
  * reuse an identity whose stored content differs. Hashing it here makes any wording change a new generation
  * (old ones are retained untouched) instead of an `generation-identity-collision` that stops the Host.
  */
-function generationIdentity(version: string, fingerprint: string, workflowIds: string[]): string {
-  return createHash('sha256').update(`${version}:${fingerprint}:${workflowIds.join(',')}:openspec-upgrade-v5:${createHash('sha256').update(manageSkill.body).digest('hex')}`).digest('hex').slice(0, 24)
+function generationIdentity(version: string, fingerprint: string, workflowIds: string[], telemetry: DshOpenSpecOptions['telemetry']): string {
+  // The telemetry mode is part of the recorded managed invocation, so it must be part of the identity:
+  // otherwise changing it would reuse an identity whose stored invocation differs (identity collision).
+  return createHash('sha256').update(`${version}:${fingerprint}:${workflowIds.join(',')}:openspec-upgrade-v5:${createHash('sha256').update(manageSkill.body).digest('hex')}:telemetry=${telemetry}`).digest('hex').slice(0, 24)
 }
 import { createRegistryProvider } from './registry-provider.js'
 import { prepareSessionManagement } from './session-management.js'
@@ -44,10 +46,17 @@ const openspecRoot = dirname(dirname(openspecEntry))
 const openspecPackage = JSON.parse(readFileSync(join(openspecRoot, 'package.json'), 'utf8'))
 const openspecBin = join(openspecRoot, 'bin/openspec.js')
 
-export type Config = { stateDir?: string; generationId?: string; selectedWorkflows?: string[]; allWorkflows?: boolean; initialDeployment?: boolean; officialConfigPath?: string }
+/**
+ * Plugin Config. `updateCheck` and `telemetry` are the user options (DSH 0.2 persists them in the
+ * profile patch and edits them through its settings form). The remaining fields are internal seams
+ * used by tests and are never shown in a form.
+ */
+export const Config = OptionsSchema
+export type Config = Partial<DshOpenSpecOptions> & { stateDir?: string; generationId?: string; selectedWorkflows?: string[]; allWorkflows?: boolean; initialDeployment?: boolean; officialConfigPath?: string }
 export function apply(ctx: Context, config: Config = {}): void {
-  ctx.inject(['skills', 'settings', 'commands'], async child => {
-    const settings = registerDshOpenSpecSettings(child).get()
+  // DSH 0.2 has no settings registry: options come from this plugin's own Config row.
+  const settings = readOptions(config)
+  ctx.inject(['skills', 'commands'], async child => {
     const version = openspecPackage.version as string
     const dshHome = process.env.DSH_HOME ?? join(homedir(), '.dsh')
     const stateDir = config.stateDir ?? join(dshHome, 'plugins', 'dsh-openspec')
@@ -64,7 +73,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     const entries = await getOfficialCatalog({ workflowIds: selected.workflows, delivery: selected.delivery })
     const chosen = entries
     const generationSkillsData = [...chosen.map(entry => ({ name: entry.skillName, description: `Official OpenSpec ${entry.workflowId} workflow`, body: entry.body })), manageSkill]
-    const generationId = config.generationId ?? generationIdentity(version, selected.fingerprint, chosen.map(entry => entry.workflowId))
+    const generationId = config.generationId ?? generationIdentity(version, selected.fingerprint, chosen.map(entry => entry.workflowId), settings.telemetry)
     const invocation = managedInvocation({ node: process.execPath, cli: join(dshHome, 'plugins', 'dsh-openspec', 'generations', generationId, 'bin', 'openspec.js'), telemetry: settings.telemetry })
     const recoveryPending = async () => (await recoverGeneration(dshHome).catch(() => ({ state: 'recovery-required' as const }))).state === 'recovery-required'
     if (config.initialDeployment !== false && !await recoveryPending()) {
@@ -106,7 +115,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         const nextSelection = await resolveEffectiveSelection({ configPath: config.officialConfigPath, workflows: config.selectedWorkflows })
         if (disposed || nextSelection.fingerprint === fingerprint) return
         const nextEntries = await getOfficialCatalog({ workflowIds: nextSelection.workflows, delivery: nextSelection.delivery })
-        const nextId = generationIdentity(version, nextSelection.fingerprint, nextEntries.map(entry => entry.workflowId))
+        const nextId = generationIdentity(version, nextSelection.fingerprint, nextEntries.map(entry => entry.workflowId), settings.telemetry)
         const nextInvocation = managedInvocation({ node: process.execPath, cli: join(dshHome, 'plugins', 'dsh-openspec', 'generations', nextId, 'bin', 'openspec.js'), telemetry: settings.telemetry })
         if (disposed) return
         await materializeGeneration({ home: dshHome, id: nextId, sourceRoot: openspecRoot, version, skills: [...nextEntries.map(entry => ({ name: entry.skillName, description: `Official OpenSpec ${entry.workflowId} workflow`, body: entry.body })), manageSkill], invocation: nextInvocation, selectionFingerprint: nextSelection.fingerprint, delivery: nextSelection.delivery, canActivate: () => !disposed })
@@ -170,8 +179,9 @@ export function apply(ctx: Context, config: Config = {}): void {
       },
     })
     commands = registerCommands()
-    child.on('agent/created', ({ agent }: any) => liveScopes.add(agent))
-    child.on('agent/disposed', ({ agent }: any) => liveScopes.delete(agent))
+    // 0.2 listeners must return undefined; Set.add/delete return values are not part of the contract.
+    child.on('agent/created', ({ agent }) => { liveScopes.add(agent); return undefined })
+    child.on('agent/disposed', ({ agent }) => { liveScopes.delete(agent); return undefined })
     child.effect(() => () => { disposed = true; routingRegistry.dispose(); catalogMonitor.dispose(); commands(); registration() },  'dsh-openspec: contributions')
   })
 }

@@ -64,7 +64,7 @@ async function controllerFixture() {
           id: `session-child-${++sequence}`,
           parentSessionId,
           workspaceId: parent.workspaceId,
-          childComposition: 'safe-v1' as const,
+          childComposition: 'safe-v2' as const,
         }
         children.push(child)
         return child
@@ -146,13 +146,16 @@ describe('design architecture acceptance A-F focused gaps', () => {
       await durable.putLocus({
         id: 'locus-decision', generation: 1, endpoint: { chatId: 'oc-decision' },
         parentSessionId: 'session-main', childSessionId: 'session-child', workspaceId: 'workspace-main',
-        source: 'auto', state: 'active', childComposition: 'safe-v1',
-        permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
+        source: 'auto', state: 'active', childComposition: 'safe-v2',
+        permission: { desired: 'read', effective: 'read', verifiedAt: 1 }, toolTier: { desired: 'safe', effective: 'safe' },
         busy: false, createdAt: 1, updatedAt: 1,
       })
       const queued: Array<{ childSessionId: string; prompt: string }> = []
       const controller = new LocusChannelController({
         locus: createLocusResolution({ store: durable }) as never,
+         allowOpenIds: () => ['ou-owner'],
+         currentToolTier: endpoint => durable.getCurrentLocus(endpoint)?.toolTier?.effective ?? 'safe',
+         readAllowOpenIds: () => ['ou-owner'],
         deliveries: {
           findByMessageId: id => durable.findDeliveryByMessageId(id),
           getById: id => durable.getDelivery(id),
