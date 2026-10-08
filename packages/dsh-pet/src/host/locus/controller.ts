@@ -121,6 +121,7 @@ export interface LocusRecord {
   readonly childSessionId: string
   /** Missing only on legacy rows, which resolution/startup keep unavailable. */
   readonly childComposition?: LocusChildComposition
+  readonly toolTier?: { readonly desired: 'safe' | 'shell'; readonly effective: 'safe' | 'shell'; readonly verifiedAt?: number; readonly grantedBy?: string }
   /** Chat-level locus that structurally owns this topic, when applicable. */
   readonly parentLocusId?: string
   readonly source: LocusSource
@@ -507,7 +508,7 @@ function assertSessionShape(
   ) {
     throw new LocusControllerError(
       'PROVISIONING_FAILED',
-      `${operation} 未能证明 safe-v1 child composition，已拒绝发布。`,
+      `${operation} 未能证明 ${LOCUS_SAFE_CHILD_COMPOSITION} child composition，已拒绝发布。`,
     )
   }
   if (expectedWorkspace !== undefined && session.workspaceId !== expectedWorkspace) {

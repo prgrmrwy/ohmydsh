@@ -7,6 +7,9 @@
  */
 
 import path from 'node:path'
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -303,8 +306,14 @@ describe('overlay styles', () => {
     const roots = [
       path.resolve(__dirname, '..', 'node_modules', '@deepseek-ai'),
       path.resolve(__dirname, '..', '..', '..', 'node_modules', '@deepseek-ai'),
+      // Lean Worktree Sessions may resolve a shared cache/ancestor install.
+      ...((require.resolve.paths('@deepseek-ai/dsh-api-session-controller') ?? [])
+        .map(root => path.join(root, '@deepseek-ai'))),
     ]
 
+    // The design-platform tokens are defined by `@deepseek-ai/dsh-client-ui-theme`
+    // (a devDependency for exactly this reason). Under DSH 0.1.5 another bundle
+    // happened to inline them; 0.2.0 does not, so the theme must be present.
     // Build the real vocabulary from the shipped client bundles. The previous
     // assertion only echoed the names Pet itself used, so four invented tokens
     // (`bg-float`, `primary`, `danger`, `line-divider`) passed for weeks while
@@ -626,6 +635,12 @@ describe('client reads DSH contracts, not invented shapes', () => {
     expect(source).toContain('ctx.workspaces.list.getSnapshot()')
     // The list is keyed by id, not an `items` array of sessions.
     expect(source).toContain('sessionState.byId[currentId]')
+    // DSH 0.2.0: selection comes from the mainView retain reference, and
+    // navigation goes through the Workspace UI service.
+    expect(source).toContain('mainSessionId(sessionState)')
+    expect(source).toContain('ctx.uiWorkspace.openSession(')
+    expect(source).not.toContain('ctx.sessions.openSubagent(')
+    expect(source).not.toContain('sessionState.current')
     // WorkspaceView identifies itself with `workspaceId`.
     expect(source).toContain('workspace.workspaceId')
     // Untyped service lookups defeat the compiler; the typed faces are used.
@@ -1524,6 +1539,11 @@ describe('Host directory APIs are read from the right connection face', () => {
         'typert.remote-client.d.ts',
       ),
     ]
+    candidates.push(path.join(
+      path.dirname(require.resolve('@deepseek-ai/dsh-api-workspace-controller/package.json')),
+      'lib',
+      'typert.remote-client.d.ts',
+    ))
     let declared: string | undefined
     for (const candidate of candidates) {
       try {

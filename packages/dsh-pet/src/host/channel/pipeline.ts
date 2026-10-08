@@ -117,6 +117,7 @@ export interface PipelineDeps {
   readonly requireLocus?: boolean
   /** Durable authorization lookup for the exact unified endpoint. */
   readonly locusAuthorization?: LocusAuthorizationResolver
+  readonly locusToolTier?: (endpoint: import('../locus/admission.js').LocusEndpoint) => 'safe' | 'shell' | undefined
   /** Reports an outcome for diagnostics. */
   readonly onOutcome?: (outcome: IntakeOutcome, event?: LarkInboundEvent) => void
 }
@@ -231,6 +232,9 @@ export class InboundPipeline {
           watermark: this.deps.watermark(),
           isDuplicate: messageId => this.dedup.check(messageId),
           authorization,
+          ...(this.deps.locusToolTier === undefined && authorization.toolTier === undefined
+             ? {}
+             : { toolTier: this.deps.locusToolTier ?? authorization.toolTier }),
         }))
         if (
           outcome.kind === 'ignored'

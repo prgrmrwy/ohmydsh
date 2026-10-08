@@ -146,6 +146,32 @@ test('pairing guard does not affect non-target providers', () => {
   assert.equal(stripUnpairedToolBlocks(options, PROVIDERS), options);
 });
 
+/** DSH 0.2.0 request shape: a first-class tool-role message correlated by toolCallId. */
+function toolRoleMessage(id = 'call_1', isError = false) {
+  return { role: 'tool', toolCallId: id, isError, content: [{ type: 'text', text: 'ok' }] };
+}
+
+test('pairing guard keeps calls answered by DSH 0.2.0 tool-role messages', () => {
+  const messages = [assistantToolMessage('call_1'), toolRoleMessage('call_1')];
+  const options = { provider: 'codex', messages };
+  assert.equal(stripUnpairedToolBlocks(options, PROVIDERS), options, 'a fully paired 0.2.0 history must pass through unchanged');
+});
+
+test('pairing guard removes a tool-role result whose call is missing', () => {
+  const options = { provider: 'codex', messages: [assistantToolMessage('call_1'), toolRoleMessage('call_1'), toolRoleMessage('ghost')] };
+  const stripped = stripUnpairedToolBlocks(options, PROVIDERS);
+  assert.deepEqual(stripped.messages.map((message) => message.role), ['assistant', 'tool']);
+  assert.equal(stripped.messages[1].toolCallId, 'call_1');
+});
+
+test('pairing guard still drops a settlement-notice call that has no tool-role answer', () => {
+  const notice = { role: 'user', content: [{ type: 'text', text: 'stopped' }, { type: 'tool-call', id: 'call_child', name: 'bash', arguments: '{}' }] };
+  const options = { provider: 'codex', messages: [assistantToolMessage('call_1'), toolRoleMessage('call_1'), notice] };
+  const stripped = stripUnpairedToolBlocks(options, PROVIDERS);
+  assert.deepEqual(stripped.messages[2].content, [{ type: 'text', text: 'stopped' }]);
+  assert.equal(stripped.messages[1].toolCallId, 'call_1');
+});
+
 // ---------- 3.2 stripChunks / stripToolArguments ----------
 
 test('3.2 stripToolArguments removes both keys from valid JSON', () => {

@@ -204,7 +204,7 @@ function fakeHost(options: {
           id: `child-${++sequence}`,
           parentSessionId: input.parentSessionId,
           workspaceId: sessions.get(input.parentSessionId)?.workspaceId ?? 'ws-default',
-          childComposition: 'safe-v1' as const,
+          childComposition: 'safe-v2' as const,
           commit: async () => {
             if (failChildCommit) throw new Error('child finalize failed')
           },
@@ -703,12 +703,12 @@ describe('explicit rebuild', () => {
     expect(host.createdMains).toHaveLength(0)
   })
 
-  it('publishes safe-v1 only after the child returns the Host attestation', async () => {
+  it('publishes safe-v2 only after the child returns the Host attestation', async () => {
     const host = fakeHost()
     const controller = new LocusController(host.deps)
 
     const created = await controller.ensureGroup({ chatId: 'oc-safe-marker' })
-    expect(created.locus.childComposition).toBe('safe-v1')
+    expect(created.locus.childComposition).toBe('safe-v2')
 
     const unsafe = fakeHost()
     unsafe.deps.dsh.createChildSession = async input => ({

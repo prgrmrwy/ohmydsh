@@ -57,10 +57,17 @@ async function reopen(medium: MemoryMedium) {
 }
 
 describe('durable unified locus repository', () => {
-  it('keeps legacy rows readable while round-tripping the additive safe marker', async () => {
+  it('keeps legacy rows readable while round-tripping additive composition and tier facts', async () => {
     expect(petLocusRecord.safeParse({ ...record(), childComposition: undefined }).success).toBe(true)
     expect(petLocusRecord.parse({ ...record(), childComposition: 'safe-v1' }).childComposition).toBe('safe-v1')
+    expect(petLocusRecord.parse({ ...record(), childComposition: 'safe-v2' }).childComposition).toBe('safe-v2')
     expect(petLocusRecord.safeParse({ ...record(), childComposition: 'unsafe-v0' }).success).toBe(false)
+    expect(petLocusRecord.parse({ ...record(), childComposition: 'safe-v2', toolTier: { desired: 'shell', effective: 'shell', verifiedAt: 5, grantedBy: 'owner' } }).toolTier?.effective).toBe('shell')
+    expect(petLocusRecord.safeParse({ ...record(), toolTier: { desired: 'safe', effective: 'shell' } }).success).toBe(false)
+    expect(petLocusRecord.safeParse({ ...record(), childComposition: 'safe-v1', toolTier: { desired: 'shell', effective: 'shell' } }).success).toBe(false)
+    const legacy = { ...record(), toolTier: undefined }
+    expect(petLocusRecord.safeParse(legacy).success).toBe(true)
+    expect(record().toolTier).toEqual({ desired: 'safe', effective: 'safe' })
   })
 
   it('round-trips an explicit context anchor and keeps it separate from permission', async () => {
@@ -158,11 +165,60 @@ describe('durable unified locus repository', () => {
     await harness.close()
   })
 
-  it('persists loci and all reverse indexes across a domain restart', async () => {
+  it('fences, commits, aborts, and invalidates tool-tier mutations with append-only audit', async () => {
+    const harness = await openPetHarness()
+    enableAtomicTransactions(harness)
+    const repository = new DurableLocusRepository(harness.domain)
+    const current = await repository.putLocus(record({
+      childComposition: 'safe-v2',
+      toolTier: { desired: 'safe', effective: 'safe' },
+      revision: 1,
+    }))
+    const begun = await repository.beginToolTierMutation(current.id, 2, {
+      expectedGeneration: current.generation,
+      expectedUpdatedAt: current.updatedAt,
+      expectedRevision: current.revision,
+    })
+    expect(begun.state).toBe('switching')
+    expect(repository.getCurrentLocus(current.endpoint)?.state).toBe('switching')
+    const committed = await repository.commitToolTierMutation(current.id, {
+      desired: 'shell', effective: 'shell', verifiedAt: 3, grantedBy: 'owner',
+    }, 3, { expectedGeneration: begun.generation, expectedUpdatedAt: begun.updatedAt, expectedRevision: begun.revision })
+    expect(committed.state).toBe('active')
+    expect(committed.toolTier?.effective).toBe('shell')
+    expect(repository.listPermissionAudit(current.id, current.generation)).toMatchObject([
+      { toolTierKind: 'tool-tier', toolDesired: 'shell', toolEffective: 'shell', grantedBy: 'owner', verifiedAt: 3 },
+    ])
+
+    const secondBegin = await repository.beginToolTierMutation(current.id, 4, {
+      expectedGeneration: committed.generation, expectedUpdatedAt: committed.updatedAt, expectedRevision: committed.revision,
+    })
+    const aborted = await repository.abortToolTierMutation(current.id, 5, {
+      expectedGeneration: secondBegin.generation, expectedUpdatedAt: secondBegin.updatedAt, expectedRevision: secondBegin.revision,
+    })
+    expect(aborted.state).toBe('active')
+    expect(aborted.toolTier?.effective).toBe('shell')
+
+    const thirdBegin = await repository.beginToolTierMutation(current.id, 6, {
+      expectedGeneration: aborted.generation, expectedUpdatedAt: aborted.updatedAt, expectedRevision: aborted.revision,
+    })
+    const invalid = await repository.invalidateToolTierMutation(current.id, 'unverified rollback', 7, {
+      expectedGeneration: thirdBegin.generation, expectedUpdatedAt: thirdBegin.updatedAt, expectedRevision: thirdBegin.revision,
+    })
+    expect(invalid).toMatchObject({ state: 'invalid', invalidReason: 'unverified rollback' })
+    expect(repository.listPermissionAudit(current.id, current.generation)).toHaveLength(1)
+    await harness.close()
+  })
+
+  it('persists tool tier alongside loci and indexes across a domain restart', async () => {
     const medium = emptyMedium()
     const first = await openPetHarness(medium)
     const repository = new DurableLocusRepository(first.domain)
-    const group = await repository.putLocus(record({ source: 'qa-created' }))
+    const group = await repository.putLocus(record({
+      source: 'qa-created',
+      childComposition: 'safe-v2',
+      toolTier: { desired: 'shell', effective: 'shell', verifiedAt: 5, grantedBy: 'owner' },
+    }))
     const topic = await repository.putLocus(
       record({
         id: 'locus-topic',
@@ -203,7 +259,11 @@ describe('durable unified locus repository', () => {
     const second = await reopen(medium)
     const restarted = new DurableLocusRepository(second.domain)
     expect(restarted.getCurrentLocus(group.endpoint)).toEqual(group)
+    expect(restarted.getCurrentLocus(group.endpoint)?.toolTier).toEqual({
+      desired: 'shell', effective: 'shell', verifiedAt: 5, grantedBy: 'owner',
+    })
     expect(restarted.getCurrentLocus(topic.endpoint)).toEqual(topic)
+    expect(restarted.getCurrentLocus(topic.endpoint)?.toolTier).toEqual({ desired: 'safe', effective: 'safe' })
     expect(restarted.listLociByParent(group.parentSessionId).map(item => item.id)).toEqual([
       group.id,
       topic.id,

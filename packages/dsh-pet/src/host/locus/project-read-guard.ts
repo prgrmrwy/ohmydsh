@@ -1,7 +1,7 @@
 /** Caller-bound physical-path guard for the four Locus project-read tools. */
 
-import { realpathSync, statSync } from 'node:fs'
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { lstatSync, realpathSync, statSync } from 'node:fs'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ToolExecution } from '@deepseek-ai/dsh-tools'
 
@@ -58,11 +58,76 @@ function physicallyContained(root: string, target: string): boolean {
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
 }
 
+/**
+ * Physical location a not-yet-created path would occupy: the realpath of its
+ * nearest existing ancestor plus the missing suffix. Returns undefined when the
+ * path itself is present in any form (including a dangling symlink, which
+ * `lstat` sees but `realpath` cannot follow) or no ancestor resolves.
+ */
+function prospectivePhysicalPath(path: string): string | undefined {
+  try {
+    lstatSync(path)
+    return undefined // something (e.g. a dangling symlink) already occupies it
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return undefined
+  }
+  const suffix: string[] = []
+  let current = resolve(path)
+  for (;;) {
+    const parent = dirname(current)
+    suffix.unshift(basename(current))
+    if (parent === current) return undefined
+    current = parent
+    try {
+      lstatSync(current)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
+      return undefined
+    }
+    try {
+      return join(realpathSync(current), ...suffix)
+    } catch {
+      return undefined // dangling symlink or unreadable ancestor
+    }
+  }
+}
+
+/**
+ * Canonicalize the denylist. A denied root that does not exist yet is dropped
+ * only when nothing occupies its path and its prospective PHYSICAL location
+ * lies inside another denied root that does exist: that covering root then
+ * refuses everything that is later created there. DSH 0.2 creates
+ * `$DSH_HOME/attachments` lazily on first upload, so a fresh home has no store
+ * while the DSH home that contains it is always present. A dangling symlink,
+ * an unresolvable ancestor, or a location outside every existing denied root
+ * still vetoes installation.
+ */
+function canonicalDeniedRoots(roots: readonly string[]): string[] {
+  const existing: string[] = []
+  const missing: string[] = []
+  for (const root of roots) {
+    if (!isAbsolute(root)) throw new Error('project-read root must be absolute')
+    try {
+      existing.push(canonicalExistingDirectory(root))
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      missing.push(root)
+    }
+  }
+  for (const root of missing) {
+    const physical = prospectivePhysicalPath(root)
+    const covered = physical !== undefined
+      && existing.some(denied => denied !== physical && physicallyContained(denied, physical))
+    if (!covered) throw new Error(`denied runtime root is missing and not physically covered by another denied root: ${root}`)
+  }
+  return existing
+}
+
 function compilePolicy(input: LocusProjectReadGuardInput): CanonicalProjectReadPolicy {
   const childCwd = canonicalExistingDirectory(input.childCwd)
   const parentCwd = canonicalExistingDirectory(input.parentCwd)
   const workspaceRoot = canonicalExistingDirectory(input.workspaceRoot)
-  const deniedRoots = input.deniedRoots.map(canonicalExistingDirectory)
+  const deniedRoots = canonicalDeniedRoots(input.deniedRoots)
   // The current Locus contract creates the child at its exact parent's project
   // cwd and resolves that same directory as the sandbox workspace root. Treat a
   // mismatch as unavailable rather than unioning roots and accidentally making
@@ -108,7 +173,9 @@ function denial(policy: CanonicalProjectReadPolicy, exec: Readonly<ToolExecution
 /**
  * Install both the extensible early gate and the final monotonic guard on one
  * child scope. Construction canonicalizes every Host-proven root synchronously;
- * any missing root vetoes Agent publication.
+ * an allowed root that is missing, or a denied root that is missing and not
+ * proven physically covered by another existing denied root, vetoes Agent
+ * publication.
  */
 export function installLocusProjectReadGuard(scope: Context, input: LocusProjectReadGuardInput): void {
   const policy = compilePolicy(input)

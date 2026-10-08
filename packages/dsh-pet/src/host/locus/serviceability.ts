@@ -40,6 +40,8 @@
 
 import {
   LOCUS_SAFE_CHILD_COMPOSITION,
+  type LocusChildComposition,
+  type LocusToolTier,
   type LocusState,
 } from './aggregate.js'
 
@@ -62,7 +64,8 @@ export type LocusDisposition =
   | {
       readonly kind: 'serve'
       readonly childSessionId: string
-      readonly childComposition: typeof LOCUS_SAFE_CHILD_COMPOSITION
+      readonly childComposition: LocusChildComposition
+      readonly toolTier?: LocusToolTier
     }
   | { readonly kind: 'replace'; readonly reason: string }
   | { readonly kind: 'terminal'; readonly reason: string }
@@ -72,6 +75,7 @@ export interface ServiceabilitySubject {
   readonly state: LocusState
   readonly childSessionId?: string
   readonly childComposition?: string
+  readonly toolTier?: LocusToolTier
   readonly invalidReason?: string
   /**
    * Whether this endpoint's recorded main session is archived.
@@ -121,7 +125,7 @@ export function mayReplaceWithoutOwner(subject: Pick<ServiceabilitySubject, 'sta
  * Decide what may be done with one generation.
  *
  * A generation serves work only when it is `active`, has a child session, and
- * carries the durable safe-v1 composition proof. Anything else is classified
+ * carries a recognized durable composition proof (`safe-v1` or `safe-v2`). Anything else is classified
  * by WHO made it unavailable, never by which layer happens to be asking.
  * @param subject - the generation's state and composition facts.
  * @returns the disposition every delivery-path layer must agree on.
@@ -143,13 +147,18 @@ export function dispositionOf(subject: ServiceabilitySubject): LocusDisposition 
     if (childSessionId === '') {
       return { kind: 'replace', reason: 'active generation has no child session' }
     }
-    if (subject.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION) {
+    if (subject.childComposition !== 'safe-v1' && subject.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION) {
       // Refusing to SERVE this is what keeps the parent preset from being
       // inherited by a child whose composition cannot be proven. Replacing it
       // is safe: the replacement is created fresh WITH the proof.
-      return { kind: 'replace', reason: 'no durable safe-v1 child composition proof' }
+      return { kind: 'replace', reason: 'no durable safe-v1/safe-v2 child composition proof' }
     }
-    return { kind: 'serve', childSessionId, childComposition: LOCUS_SAFE_CHILD_COMPOSITION }
+    return {
+      kind: 'serve',
+      childSessionId,
+      childComposition: subject.childComposition,
+      ...(subject.toolTier !== undefined ? { toolTier: subject.toolTier } : {}),
+    }
   }
   if (isOwnerExit(subject.state)) {
     return { kind: 'terminal', reason: `endpoint was explicitly ${subject.state} by its owner` }

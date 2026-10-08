@@ -17,7 +17,7 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
-import type {} from '@deepseek-ai/dsh-agent-presets'
+import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-session-title'
 import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
@@ -114,18 +114,23 @@ import {
   LocusPrepublicationStagingRegistry,
 } from './host/locus/prepublication-staging.js'
 import { asRetiredAssociationStore } from './host/locus/retirement.js'
-import { createDurableLocusAuthorizationResolver } from './host/locus/admission.js'
+import { createDurableLocusAuthorizationResolver, type LocusAuthorizationStore } from './host/locus/admission.js'
 import { createLocusControlDispatcher } from './host/locus/control.js'
 import { createLocusPermissionMutation } from './host/locus/permission-mutation.js'
+import { createLocusToolTierMutation, type LocusLiveToolTierSurface } from './host/locus/tool-tier-mutation.js'
+import type { LocusToolTierName } from './host/locus/aggregate.js'
 import { asLocusContextRepository, type LocusContextRepository } from './host/locus/context-repository.js'
 import { renderLocusDeliveryPrompt } from './host/locus/context.js'
 import {
+  attestLocusComposition,
   composeLocusChild,
+  LOCUS_SHELL_TIER_TOOL_NAMES,
   type LocusChildPermission,
   type LocusCandidateAgent,
   type LocusCompositionPorts,
 } from './host/locus/composition.js'
 import { installLocusProjectReadGuard, locusDeniedRoots } from './host/locus/project-read-guard.js'
+import { locusLarkCliOutboundGuard } from './host/locus/lark-cli-egress-guard.js'
 import { currentAllowlist } from './host/skill-provider.js'
 import { PET_DOMAIN_NAME, petDomainSpec } from './host/spec.js'
 import { withAtomicWrites } from './host/storage/atomic-domain.js'
@@ -1096,10 +1101,43 @@ async function initialize(
         locusId: record.id,
         generation: record.generation,
         permission: record.permission.effective,
+        ...(record.childComposition !== undefined ? { childComposition: record.childComposition } : {}),
+        ...(record.toolTier !== undefined ? { toolTier: record.toolTier } : {}),
       }
     },
   }
-  const locusCompositionPorts: LocusCompositionPorts = {
+  const locusToolTierRestrictions = new WeakMap<object, () => void>()
+  const liveLocusToolTierSurface = (childSessionId: string): LocusLiveToolTierSurface | undefined => {
+    const agent = ctx.agents.get(childSessionId as never)
+    if (agent === undefined) return undefined
+    return {
+      isIdle: () => {
+        const session = ctx.sessions.get(childSessionId as never)
+        if (session === undefined) return false
+        // Read the ordinary durable turn boundaries; do not rely on AgentHandle
+        // status (registry.get returns a bare Agent). An open non-Delivery GUI
+        // or inquiry turn must also block switching.
+        let open: number | undefined
+        for (const event of session.snapshotEvents()) {
+          if (event.type === 'turn/start') {
+            if (open !== undefined) return false
+            open = event.data.turn
+          } else if (event.type === 'turn/end') {
+            if (open === undefined || open !== event.data.turn) return false
+            open = undefined
+          }
+        }
+        return open === undefined
+      },
+      setToolTier: (tier: LocusToolTierName) => {
+        const candidate = { id: childSessionId, scope: agent.ctx as never } as LocusCandidateAgent
+        locusCompositionPorts.surface?.setToolTier?.(candidate, tier)
+      },
+      visibleTools: () => ctx.tools.schemas(agent).map(schema => schema.name),
+    }
+  }
+  let locusCompositionPorts!: LocusCompositionPorts
+  locusCompositionPorts = {
     // Durable rows serve restores; the one-shot staging fallback serves the
     // fresh `agent/created` emitted before active publication.
     lookup: createPrepublicationCompositionLookup({
@@ -1191,6 +1229,55 @@ async function initialize(
         // behaves exactly as it did before this existed.
         collaborationSurface?.install(agent.scope)
       },
+      setToolTier: (agent, tier) => {
+        const scope = agent.scope as unknown as Context
+        const tools = scope.get('tools') as {
+          restrict?: (restriction: { deny: readonly string[] }) => () => void
+        } | undefined
+        if (typeof tools?.restrict !== 'function') {
+          throw new PetError('INTERNAL', 'Agent-scoped tools.restrict is unavailable')
+        }
+        const live = ctx.agents.get(agent.id as never)
+        if (live === undefined) {
+          throw new PetError('INTERNAL', `Live Agent ${agent.id} is unavailable for tier attestation`)
+        }
+        const priorRestriction = locusToolTierRestrictions.get(live)
+        let installedRestriction = priorRestriction
+        if (tier === 'safe' && installedRestriction === undefined) {
+          installedRestriction = tools.restrict({ deny: LOCUS_SHELL_TIER_TOOL_NAMES })
+          locusToolTierRestrictions.set(live, installedRestriction)
+        } else if (tier === 'shell' && installedRestriction !== undefined) {
+          installedRestriction()
+          locusToolTierRestrictions.delete(live)
+          installedRestriction = undefined
+        }
+        const names = ctx.tools.schemas(live).map(schema => schema.name)
+        const attestation = attestLocusComposition(names, tier)
+        if (!attestation.ok) {
+          // A failed shell expansion must not leave an agent wider than safe.
+          if (tier === 'shell' && priorRestriction !== undefined) {
+            const restored = tools.restrict({ deny: LOCUS_SHELL_TIER_TOOL_NAMES })
+            locusToolTierRestrictions.set(live, restored)
+          }
+          throw new PetError('INTERNAL', `Tool tier ${tier} failed live attestation: ${attestation.leaks.join(', ')}`)
+        }
+      },
+      // This guard is intentionally a mistake-prevention measure only. Shell
+      // scripts, HTTP clients, copied binaries, and alternate spellings remain
+      // outside its claim; ADR-0008 explicitly accepts that residual risk.
+      installOutboundGuard: agent => {
+        const scope = agent.scope as unknown as Context
+        const tools = scope.get('tools') as {
+          guard?: (guard: (exec: { name: string; arguments: unknown }) => string | undefined) => () => void
+        } | undefined
+        if (typeof tools?.guard !== 'function') {
+          throw new PetError('INTERNAL', 'Agent-scoped tools.guard is unavailable')
+        }
+        scope.effect(
+          () => tools.guard!(locusLarkCliOutboundGuard),
+          'dsh-pet: locus Lark CLI outbound mistake-prevention guard',
+        )
+      },
       // `safe-v1` claims this child cannot reach an execution or delegation
       // route, and only a read of what it can actually call supports that claim:
       // the tool filter restricts the inherited plane, so an own-plane
@@ -1252,7 +1339,7 @@ async function initialize(
 
   ctx.effect(
     () =>
-      ctx.on('agent/created', (payload: { agent?: unknown }) => {
+      ctx.on('agent/created', (payload: { agent?: unknown }): undefined => {
         const agent = payload?.agent as
           | { id?: unknown; ctx?: unknown }
           | undefined
@@ -1275,11 +1362,18 @@ async function initialize(
           try {
             result = composeLocusChild(candidate, locusCompositionPorts)
           } catch (error) {
-            petLog(
-              `dsh-pet: locus composition refused ${sessionId} (${
-                error instanceof Error ? error.message : String(error)
-              })`,
-            )
+            // Include the cause chain: the outer composition message names
+            // only the stage, while the cause names the failing Host seam.
+            const describe = (value: unknown): string => {
+              const parts: string[] = []
+              let current: unknown = value
+              for (let depth = 0; depth < 4 && current !== undefined; depth++) {
+                parts.push(current instanceof Error ? current.message : String(current))
+                current = current instanceof Error ? current.cause : undefined
+              }
+              return parts.join(' <- ')
+            }
+            petLog(`dsh-pet: locus composition refused ${sessionId} (${describe(error)})`)
             throw error
           }
           if (result.composed) {
@@ -1290,7 +1384,7 @@ async function initialize(
             // it from outside would record a surface that may never have been
             // installed at all — for example when no assembly composed — and
             // then permanently suppress the repair paths that would fix it.
-            return
+            return undefined
           }
           // This is the COLD RESTORE and NATIVE GUI LOAD entry point for a main
           // session, and for a locus child whose durable row was already active
@@ -1308,7 +1402,11 @@ async function initialize(
         // Cordis event listeners are observe-only here. Await the scoped
         // installation without allowing an async rejection to escape into the
         // event dispatcher; dispatch itself performs a late fail-closed check.
+        // DSH 0.2.0 awaits `agent/created` listeners serially and a rejection
+        // fails creation; returning undefined (not the promise) keeps the
+        // 0.1.5 contract that a foreign executor's composition never vetoes it.
         void composeForeignExecutor(payload?.agent)
+        return undefined
       }),
     'dsh-pet: scope externally loaded executors',
   )
@@ -1724,6 +1822,8 @@ async function initialize(
           locusId: input.locusId,
           generation: input.generation,
           permission: input.permission,
+          childComposition: 'safe-v2',
+          toolTier: { desired: 'safe', effective: 'safe' },
         })
         const adapter = createLocusChildAdapter({
           ...locusChildProbe.ports,
@@ -1891,11 +1991,24 @@ async function initialize(
     ((ctx.workspaceRegistry.archivedSessionIds ?? []) as readonly unknown[])
       .some(id => String(id) === sessionId)
 
+  const locusAuthorizationStore: LocusAuthorizationStore = {
+    getLatestLocusByEndpoint: endpoint => {
+      const record = locusRepository.getLatestLocusByEndpoint(endpoint)
+      return record === undefined ? undefined : {
+        id: record.id,
+        state: record.state,
+        parentSessionId: record.parentSessionId,
+        ...(record.toolTier === undefined ? {} : { toolTier: record.toolTier }),
+        ...(record.childComposition === undefined ? {} : { childComposition: record.childComposition }),
+      }
+    },
+  }
   const locusAuthorization = createDurableLocusAuthorizationResolver(
-    locusRepository,
+    locusAuthorizationStore,
     retiredAssociations,
     isSessionArchived,
   )
+  locusAuthorization.toolTier = endpoint => locusRepository.getCurrentLocus(endpoint)?.toolTier?.effective ?? 'safe'
   const locusResolution = createLocusResolution({
     store: locusRepository,
     retired: retiredAssociations,
@@ -1972,8 +2085,8 @@ async function initialize(
                 }))
               : await recover({ ...invalidCurrent, endpoint })
             const record = ensured.locus
-            if (record.state !== 'active' || record.childComposition !== 'safe-v1') {
-              throw new Error(`Provisioned locus is not an active safe-v1 generation`)
+            if (record.state !== 'active' || record.childComposition !== 'safe-v2') {
+              throw new Error(`Provisioned locus is not an active safe-v2 generation`)
             }
             return {
               id: record.locusId,
@@ -1982,6 +2095,7 @@ async function initialize(
               parentSessionId: record.parentSessionId,
               childSessionId: record.childSessionId,
               childComposition: record.childComposition,
+              ...(record.toolTier !== undefined ? { toolTier: record.toolTier } : {}),
               workspaceId: record.workspaceId,
               state: 'active' as const,
               permission: {
@@ -1996,6 +2110,26 @@ async function initialize(
         },
       }),
     log: reason => petLog(`dsh-pet locus resolve: ${reason}`),
+  })
+
+  const locusToolTierMutation = createLocusToolTierMutation({
+    repository: {
+      findLocus: locusId => locusRepository.getLocus(locusId),
+      findCurrentLocus: endpoint => locusRepository.getCurrentLocus(endpoint),
+      getLocusByChild: childSessionId => locusRepository.getLocusByChild(childSessionId),
+      hasPendingDeliveries: locusId => locusRepository.hasPendingDeliveries(locusId),
+      beginToolTierMutation: (locusId, now, fence) => locusRepository.beginToolTierMutation(locusId, now, fence),
+      commitToolTierMutation: (locusId, tier, now, fence) => locusRepository.commitToolTierMutation(locusId, {
+        desired: tier.desired,
+        effective: tier.effective,
+        verifiedAt: tier.verifiedAt ?? now,
+        grantedBy: tier.grantedBy ?? 'unknown',
+      }, now, fence),
+      abortToolTierMutation: (locusId, now, fence) => locusRepository.abortToolTierMutation(locusId, now, fence),
+      invalidateToolTierMutation: (locusId, reason, now, fence) => locusRepository.invalidateToolTierMutation(locusId, reason, now, fence),
+    },
+    live: { find: liveLocusToolTierSurface },
+    attest: (visible, tier) => attestLocusComposition(visible, tier).ok,
   })
 
   const locusPermissionMutation = (() => {
@@ -2073,7 +2207,7 @@ async function initialize(
     })
   })()
 
-  const locusControlDispatch = locusProvisioningController === undefined || locusDshPort === undefined || locusPermissionMutation === undefined
+  const locusControlDispatch = locusProvisioningController === undefined || locusDshPort === undefined || locusPermissionMutation === undefined || locusToolTierMutation === undefined
     ? undefined
     : createLocusControlDispatcher({
       allowOpenIds: () => repository.getChannelConfig().allowOpenIds,
@@ -2125,6 +2259,36 @@ async function initialize(
           const stopped = await locusRepository.stopLocus(current.id)
           if (stopped.state !== 'stopped') throw new Error('Locus did not reach stopped state')
           return { state: 'stopped' as const, busy: false as const }
+        },
+      },
+      toolTierMutation: {
+        setCurrentTier: async ({ endpoint, actorId, tier }) => {
+          const current = locusRepository.getCurrentLocus(endpoint)
+          if (current === undefined) throw new Error('Current locus does not exist')
+          const updated = await locusToolTierMutation.set({
+            locusId: current.id,
+            endpoint: current.endpoint,
+            actor: actorId,
+            tier,
+            fence: {
+              expectedLocusId: current.id,
+              expectedGeneration: current.generation,
+              expectedUpdatedAt: current.updatedAt,
+              ...(current.revision === undefined ? {} : { expectedRevision: current.revision }),
+            },
+          })
+          if (!updated.ok) {
+            const error = new Error(`Tool tier change refused: ${updated.reason}`) as Error & { code?: string }
+            error.code = updated.reason === 'busy' ? 'LOCUS_BUSY'
+              : updated.reason === 'not-found' ? 'LOCUS_NOT_CURRENT'
+                : updated.reason === 'legacy-v1-shell' ? 'LOCUS_LEGACY_V1_SHELL'
+                  : 'POLICY_VERIFY_FAILED'
+            throw error
+          }
+          return {
+            tier: updated.effective,
+            ...(updated.locus.childComposition === undefined ? {} : { childComposition: updated.locus.childComposition }),
+          }
         },
       },
       scope: {
@@ -2628,14 +2792,17 @@ async function initialize(
         bindQueued: input => locusRepository.bindQueued(input),
         bindTurn: input => locusRepository.bindTurn(input),
         settleByTurn: input => locusRepository.settleByTurn(input),
+        failBeforeDispatch: input => locusRepository.failBeforeDispatch(input),
         fail: input => locusRepository.fail(input),
       },
       deliveryDispatch: {
-         claimCurrent: input => locusRepository.claimCurrentDelivery(input),
-         currentFinished: input => locusChannelController?.currentFinished?.(input),
-         dispatchNext: input => locusChannelController?.dispatchNext?.(input),
-         scheduleCurrent: input => scheduleCurrentDelivery(input),
-       },
+        claimCurrent: input => locusRepository.claimCurrentDelivery(input),
+        pendingForLocus: correlation => locusRepository.listDeliveries(correlation.locusId)
+          .filter(record => record.generation === correlation.generation && record.childSessionId === correlation.childSessionId),
+        currentFinished: input => locusChannelController?.currentFinished?.(input),
+        dispatchNext: input => locusChannelController?.dispatchNext?.(input),
+        scheduleCurrent: input => scheduleCurrentDelivery(input),
+      },
       child: locusChildDelivery,
       media: locusMedia,
       resolveLivePolicy: session => {
@@ -2738,6 +2905,8 @@ async function initialize(
         }, { position })
       },
       turns: locusTurnObserver,
+      allowOpenIds: () => repository.getChannelConfig().allowOpenIds,
+      currentToolTier: endpoint => locusRepository.getCurrentLocus(endpoint)?.toolTier?.effective ?? 'safe',
       ...(locusControlDispatch === undefined ? {} : { controlDispatch: locusControlDispatch }),
       // Admission is supplied by InboundPipeline for every event so its
       // watermark belongs to the currently connected subscription generation.
@@ -2996,6 +3165,24 @@ async function initialize(
       },
     },
     ...(locusPermissionMutation === undefined ? {} : { permissionMutation: locusPermissionMutation }),
+    toolTierMutation: {
+      set: async input => {
+        const before = locusRepository.getLocus(input.locusId)
+        if (before === undefined) return { ok: false as const, reason: 'not-found' as const }
+        const result = await locusToolTierMutation.set({
+          locusId: input.locusId,
+          endpoint: before.endpoint,
+          tier: input.tier,
+          actor: input.actor,
+          fence: input.fence,
+        })
+        if (!result.ok) return result
+        const persisted = locusRepository.getLocus(input.locusId)
+        return persisted === undefined
+          ? { ok: false as const, reason: 'not-found' as const }
+          : { ok: true as const, locus: persisted }
+      },
+    },
     ...(locusProvisioningController === undefined
       ? {}
       : {
@@ -3149,6 +3336,7 @@ async function initialize(
       ? {
         locusController: locusChannel.controller,
         locusAuthorization,
+        locusToolTier: endpoint => locusRepository.getCurrentLocus(endpoint)?.toolTier?.effective ?? 'safe',
         // Bot-added produces no locus of its own: the whole tree is built on
         // demand by the first qualifying @ message, the same seam a group and
         // a topic both already use. `botLifecycleInitializer` stays

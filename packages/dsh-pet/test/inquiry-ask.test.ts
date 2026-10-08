@@ -8,6 +8,8 @@
  * ONLY source of those facts.
  */
 import { describe, expect, it, vi } from 'vitest'
+import { checkTool } from '../../worktree-session/src/host/guard.js'
+import type { OperationRecord } from '../../worktree-session/src/wire.js'
 import {
   acceptInquiryFromCaller, InquiryLimitError, InquiryRefusedError,
 } from '../src/host/inquiry/ask.js'
@@ -101,6 +103,26 @@ const childKey = (locusId: string, generation: number, sessionId: string) =>
   `child:${locusId}:${String(generation)}:${sessionId}`
 
 describe('caller-bound inquiry accept', () => {
+  it('accepts a Worktree caller without letting the Worktree exception authorize a foreign target', async () => {
+    const f = fixture()
+    const operation: OperationRecord = {
+      schemaVersion: 2, operationId: 'operation-inquiry', repoRoot: '/repo', gitCommonDir: '/repo/.git',
+      baseRef: 'main', baseCommit: 'abc', taskBranch: 'ws/inquiry', worktreePath: '/repo/.worktrees/inquiry',
+      taskHash: 'h', dependencyMode: 'lean', dshHome: '/repo/.git/ws/home', phase: 'prepared',
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+      binding: { mode: 'source-session', sourceSessionId: 'main', state: 'bound', updatedAt: '2026-01-01T00:00:00.000Z' },
+    }
+    const valid = request(childKey('b', 1, 'child-b'))
+    expect(checkTool({ name: 'pet_inquire', args: valid }, operation)).toBeUndefined()
+    expect(await ask('main', valid, f)).toMatchObject({ status: 'accepted', answered: false })
+    for (const target of [childKey('foreign', 1, 'other'), childKey('b', 2, 'child-b'), '/outside/path']) {
+      const invalid = request(target)
+      expect(checkTool({ name: 'pet_inquire', args: invalid }, operation)).toBeUndefined()
+      await expect(ask('main', invalid, f)).rejects.toBeInstanceOf(InquiryRefusedError)
+    }
+    expect(f.store.rows.size).toBe(1)
+  })
+
   it('lets a main session ask its own current child, persisting before it returns', async () => {
     const f = fixture()
     const result = await ask('main', request(childKey('b', 1, 'child-b')), f)

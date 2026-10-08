@@ -6,6 +6,7 @@ import {
   createLocusChildAdapter,
   LOCUS_CHILD_PROVIDER,
   LOCUS_DELIVER_PROMPT_SYMBOL,
+  LOCUS_BASE_TOOL_FILTER,
   LOCUS_SAFE_TOOL_FILTER,
   probeLocusChildPorts,
   resolveLocusParent,
@@ -343,7 +344,7 @@ describe('generic locus child adapter', () => {
       contextMode: 'independent-v1',
       // Pet names the child's preset; the main's own preset never reaches it.
       agentPreset: LOCUS_CHILD_PRESET,
-      toolFilter: LOCUS_SAFE_TOOL_FILTER,
+      toolFilter: LOCUS_BASE_TOOL_FILTER,
       signal: expect.any(AbortSignal),
     })
   })
@@ -371,22 +372,24 @@ describe('generic locus child adapter', () => {
     expect(createIdleContinuable).not.toHaveBeenCalled()
   })
 
-  it('safe composition is allow-based, excludes every process/delegation bypass, and keeps scoped Pet tools out of the filter', () => {
+  it('keeps the safe compatibility filter narrow and the durable base free of delegation', () => {
     expect(LOCUS_SAFE_TOOL_FILTER).toEqual({
       allow: ['read', 'read_image', 'glob', 'grep', 'web_search'],
     })
+    expect(LOCUS_BASE_TOOL_FILTER).toEqual({
+      allow: ['read', 'read_image', 'glob', 'grep', 'web_search', 'bash', 'skill'],
+    })
     for (const denied of [
-      'bash', 'pwsh', 'write', 'edit', 'skill', 'job_output', 'job_kill',
-      'create_goal', 'update_goal', 'exit_plan_mode', 'ask_user_question',
-      'todo_write', 'subagent', 'subagent_fork', 'send_message', 'list_agents',
-      'workflow', 'ralph', 'run_code', 'web_fetch',
+      'pwsh', 'write', 'edit', 'job_output', 'job_kill', 'create_goal', 'update_goal',
+      'exit_plan_mode', 'ask_user_question', 'todo_write', 'subagent', 'subagent_fork',
+      'send_message', 'list_agents', 'workflow', 'ralph', 'run_code', 'web_fetch',
     ]) {
-      expect(LOCUS_SAFE_TOOL_FILTER.allow).not.toContain(denied)
+      expect(LOCUS_BASE_TOOL_FILTER.allow).not.toContain(denied)
     }
     // ToolRuntime restrictions filter inherited globals only. Pet's own tools
     // register in the child scope after the filter and must not be named here.
-    expect(LOCUS_SAFE_TOOL_FILTER.allow).not.toContain('pet_locus_finish')
-    expect(LOCUS_SAFE_TOOL_FILTER.allow).not.toContain('pet_locus_wait')
+    expect(LOCUS_BASE_TOOL_FILTER.allow).not.toContain('pet_locus_finish')
+    expect(LOCUS_BASE_TOOL_FILTER.allow).not.toContain('pet_locus_wait')
   })
 
   it('never re-verifies independence for an explicitly named provider (D1: explicit choice stands)', async () => {
@@ -1246,6 +1249,13 @@ describe('probed host child seams', () => {
       // A runtime that reports neither field is accepted on id alone, which
       // is all the evidence it offers.
       { row: { id: CHILD_ID, kind: 'child', mode: 'continuable' }, adopted: true },
+      // DSH 0.2.0 `listChildren` returns the parent CATALOG
+      // (`SubagentCatalogEntry`: id, createdAt, mode, label) with no `kind`;
+      // diagnostics are no longer mixed into this listing. The continuable
+      // mode is the proof there.
+      { row: { id: CHILD_ID, createdAt: 1, mode: 'continuable', label: 'locus' }, adopted: true },
+      { row: { id: CHILD_ID, createdAt: 1, mode: 'one-shot' }, adopted: false },
+      { row: { id: CHILD_ID, createdAt: 1, mode: 'unknown' }, adopted: false },
     ] as const
 
     for (const { row, adopted } of cases) {

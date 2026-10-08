@@ -22,19 +22,18 @@ afterEach(async () => {
 })
 const invocation = "env OPENSPEC_NO_UPDATE_CHECK=1 OPENSPEC_TELEMETRY=0 '/usr/bin/node' '/cli'"
 
-async function startAdapter(home: string) {
+async function startAdapter(home: string, options: { telemetry?: 'adapter-off' | 'official' } = {}) {
   vi.stubEnv('DSH_HOME', home)
   const definitions = new Map<string, any>()
   let provider: any
   let startup!: Promise<unknown>
   const child = {
-    settings: { register: () => ({ get: () => ({ updateCheck: 'disabled', telemetry: 'adapter-off' }) }) },
     skills: { list: async () => provider.list(), registerProvider: (factory: any) => { provider = factory({ invalidate() {}, signal: new AbortController().signal }); return () => {} } },
     commands: { register: (definition: any) => { definitions.set(definition.name, definition); return () => {} } },
     provide() {}, on() {}, set() {}, effect() {},
   }
   apply({ inject: (_names: unknown, callback: any) => { startup = callback(child) } } as any,
-    { officialConfigPath: join(home, 'absent-official-config.json') })
+    { officialConfigPath: join(home, 'absent-official-config.json'), updateCheck: 'disabled', ...options })
   await startup
   return { definitions, provider }
 }
@@ -130,6 +129,26 @@ describe('openspec-upgrade public entry', () => {
     expect((current.skills as any[]).find(skill => skill.name === 'openspec-upgrade').body).toBe(createManagementGuidance())
     // The older generation is retained byte-for-byte, never rewritten.
     expect(await readFile(manifestPath, 'utf8')).toBe(before)
+  })
+  it('changing_telemetry_remounts_into_a_new_identity_and_switching_back_reuses_the_old_one', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-openspec-telemetry-')); homes.push(home)
+    await startAdapter(home, { telemetry: 'adapter-off' })
+    const off = await loadGeneration(home)
+    const offManifest = join(home, 'plugins/dsh-openspec/generations', off.id, 'generation.json')
+    const offBytes = await readFile(offManifest, 'utf8')
+    expect(off.invocation).toContain('OPENSPEC_TELEMETRY=0')
+    // Remount with the changed Config: must not throw generation-identity-collision.
+    await startAdapter(home, { telemetry: 'official' })
+    const official = await loadGeneration(home)
+    expect(official.id).not.toBe(off.id)
+    const block = parseAdapterBlock(buildAdapterBlock({ generation: official.id, invocation: String(official.invocation), telemetry: 'official', updateCheck: 'disabled' }))!
+    expect(block.invocation).not.toContain('OPENSPEC_TELEMETRY=0')
+    expect(block.invocation).toContain('OPENSPEC_NO_UPDATE_CHECK=1')
+    expect(await readFile(offManifest, 'utf8')).toBe(offBytes)
+    // Switching back reuses the earlier generation instead of materializing a third one.
+    await startAdapter(home, { telemetry: 'adapter-off' })
+    expect((await loadGeneration(home)).id).toBe(off.id)
+    expect(await readFile(offManifest, 'utf8')).toBe(offBytes)
   })
   it('restart_materializes_a_new_identity_without_overwriting_the_old_named_generation', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-openspec-rename-')); homes.push(home)

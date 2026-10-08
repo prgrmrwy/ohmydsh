@@ -136,6 +136,8 @@ const LOCUS_VIEW = {
   // this fixture carries the production shape rather than an empty one.
   workspace: { workspaceId: 'ws-1', title: '项目A', executionRoot: '/repo/acme' },
   permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
+  toolTier: { desired: 'safe', effective: 'safe' },
+  childComposition: 'safe-v2',
   state: { state: 'active', busy: false, createdAt: 1, updatedAt: 1 },
   source: 'explicit',
   isDefaultQa: false,
@@ -180,6 +182,38 @@ describe('Channel settings use unified onboarding only', () => {
 
     expect(enabled.disabled).toBe(true)
     expect(host.textContent).toContain('Host 未返回完整的统一子会话与默认只读核验证明')
+  })
+
+  it('renders owner-safe and shell-tier management controls for a safe-v2 entry', async () => {
+    const requests: { path: string; body?: string }[] = []
+    const shellLocus = { ...LOCUS_VIEW, toolTier: { desired: 'shell' as const, effective: 'shell' as const } }
+    vi.stubGlobal('fetch', vi.fn(async (path: string, init?: { body?: string }) => {
+      requests.push({ path, body: init?.body })
+      const payload = init?.body === undefined ? undefined : JSON.parse(init.body) as { action?: string; tier?: string }
+      const locus = payload?.action === 'tools' && payload.tier !== undefined
+        ? { ...shellLocus, toolTier: { desired: payload.tier, effective: payload.tier } }
+        : shellLocus
+      return {
+        status: 200,
+        text: async () => JSON.stringify({ ok: true, data: { generation: 2, loci: [locus], defaultQa: [], discovery: { byEndpoint: [], byParent: [], byChild: [] } } }),
+      }
+    }))
+    const host = await mountTab('locus')
+    await expandSessions(host)
+    const more = host.querySelector('.dshpet-locus-more') as HTMLButtonElement | null
+    await act(async () => { more?.click() })
+    const controls = host.querySelector('[aria-label="工具档位"]')
+    expect(controls?.textContent).toContain('safe')
+    expect(controls?.textContent).toContain('shell')
+    expect(host.textContent).toContain('出站 guard 仅防误操作，不是安全边界')
+
+    const safeButton = controls?.querySelector('button[aria-pressed="false"]') as HTMLButtonElement | null
+    await act(async () => {
+      safeButton?.click()
+      await Promise.resolve()
+    })
+    const action = requests.map(request => request.body).filter(Boolean).map(body => JSON.parse(body!) as { action?: string; tier?: string }).find(payload => payload.action === 'tools')
+    expect(action).toMatchObject({ action: 'tools', tier: 'safe' })
   })
 
   it('does not render legacy routes, workspace overrides or Invocation backlog', async () => {

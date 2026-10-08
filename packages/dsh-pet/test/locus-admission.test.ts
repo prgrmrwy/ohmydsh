@@ -321,6 +321,9 @@ describe('control command parsing', () => {
     ['@Pet -s read', { kind: 'scope', mode: 'read' }],
     ['@Pet --scope write', { kind: 'scope', mode: 'write' }],
     ['@Pet --scope=read', { kind: 'scope', mode: 'read' }],
+    ['@Pet -t safe', { kind: 'tools', tier: 'safe' }],
+    ['@Pet --tools shell', { kind: 'tools', tier: 'shell' }],
+    ['@Pet --tools=safe', { kind: 'tools', tier: 'safe' }],
     ['@Pet /unbind', { kind: 'unbind' }],
   ] as const)('recognizes %s', (text, expected) => {
     expect(parseLocusControlCommand(text)).toEqual(expected)
@@ -329,6 +332,9 @@ describe('control command parsing', () => {
   it('keeps malformed control verbs on the control surface', () => {
     expect(parseLocusControlCommand('@Pet /bind')).toEqual({ kind: 'bind-missing-prefix' })
     expect(parseLocusControlCommand('@Pet -s')).toEqual({ kind: 'scope-missing-mode' })
+    expect(parseLocusControlCommand('@Pet -t')).toEqual({ kind: 'tools-missing-tier' })
+    expect(parseLocusControlCommand('@Pet --tools=')).toEqual({ kind: 'tools-invalid', value: '' })
+    expect(parseLocusControlCommand('@Pet --tools admin')).toEqual({ kind: 'tools-invalid', value: 'admin' })
     expect(parseLocusControlCommand('@Pet --scope execute')).toEqual({
       kind: 'scope-invalid',
       value: 'execute',
@@ -371,6 +377,22 @@ describe('unified Locus admission', () => {
   it('allows non-allowlisted members to ask an authorized group locus', () => {
     const result = admitLocusEvent(groupEvent(), context({ authorizedChats: [GROUP] }))
     expect(result).toMatchObject({ admit: true, authorization: 'authorized' })
+  })
+
+  it('enforces owner-only admission for shell-tier groups and leaves allowlisted senders admitted', () => {
+    expect(admitLocusEvent(groupEvent(), context({
+      authorizedChats: [GROUP],
+      toolTier: endpoint => endpoint.chatId === GROUP ? 'shell' : 'safe',
+    }))).toMatchObject({ admit: false, reason: 'owner-only-tier', authorization: 'authorized' })
+    expect(admitLocusEvent(groupEvent({ sender_id: OWNER }), context({
+      authorizedChats: [GROUP],
+      toolTier: () => 'shell',
+    }))).toMatchObject({ admit: true, authorization: 'authorized' })
+  })
+
+  it('does not let a non-allowlisted sender run tool-tier control commands', () => {
+    expect(admitLocusEvent(groupEvent({ content: '@Pet -t shell' }), context({ authorizedChats: [GROUP] })))
+      .toMatchObject({ admit: false, reason: 'control-not-allowed' })
   })
 
   it('never lets group authorization grant control commands', () => {

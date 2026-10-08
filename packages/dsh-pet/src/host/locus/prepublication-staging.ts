@@ -37,6 +37,8 @@ export interface LocusPrepublicationIdentity {
   readonly locusId: string
   readonly generation: number
   readonly permission: LocusChildPermission
+  readonly childComposition?: 'safe-v1' | 'safe-v2'
+  readonly toolTier?: { readonly desired: 'safe' | 'shell'; readonly effective: 'safe' | 'shell' }
 }
 
 /** Opaque capability held by the provisioning operation. */
@@ -126,6 +128,12 @@ function assertIdentity(identity: LocusPrepublicationIdentity): void {
     || !Number.isSafeInteger(identity.generation)
     || identity.generation <= 0
     || (identity.permission !== 'read' && identity.permission !== 'write')
+    || (identity.childComposition !== undefined
+      && identity.childComposition !== 'safe-v1'
+      && identity.childComposition !== 'safe-v2')
+    || (identity.toolTier !== undefined
+      && (!['safe', 'shell'].includes(identity.toolTier.desired)
+        || !['safe', 'shell'].includes(identity.toolTier.effective)))
   ) {
     throw new LocusPrepublicationError(
       'invalid-identity',
@@ -226,6 +234,8 @@ export class LocusPrepublicationStagingRegistry {
       locusId: identity.locusId.trim(),
       generation: identity.generation,
       permission: identity.permission,
+      childComposition: identity.childComposition ?? 'safe-v2',
+      toolTier: identity.toolTier ?? { desired: 'safe', effective: 'safe' },
     })
     const reservation = Object.freeze<LocusPrepublicationReservation>({
       reservationId: reservationId.trim(),

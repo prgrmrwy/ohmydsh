@@ -72,11 +72,21 @@ export function stripSchema(options, providers) {
   return changed ? { ...options, tools } : options;
 }
 
+/**
+ * DSH 0.2.0 sends each tool result as a first-class `role: 'tool'` message that
+ * answers one call through its top-level `toolCallId`. DSH 0.1.5 carried the
+ * result as a `tool-result` block inside a user message. Both shapes pair.
+ */
+function isToolRoleResult(message) {
+  return message?.role === 'tool' && typeof message.toolCallId === 'string';
+}
+
 /** Collect tool call/result ids from one Harness message list. */
 function toolPairIds(messages) {
   const calls = new Set();
   const results = new Set();
   for (const message of messages) {
+    if (isToolRoleResult(message)) results.add(String(message.toolCallId));
     if (!Array.isArray(message?.content)) continue;
     for (const block of message.content) {
       if (block?.type === 'tool-call') calls.add(String(block.id));
@@ -122,7 +132,15 @@ export function stripUnpairedToolBlocks(options, providers) {
   if (!hasRoleInvalidBlocks && orphanCalls.size === 0 && orphanResults.size === 0) return options;
 
   let changed = false;
-  const messages = options.messages.map((message) => {
+  // A 0.2.0 tool-role message is one whole result: drop the message itself when
+  // it answers no call, rather than emptying it into an invalid tool message.
+  const kept = options.messages.filter((message) => {
+    if (!isToolRoleResult(message) || !orphanResults.has(String(message.toolCallId))) return true;
+    changed = true;
+    return false;
+  });
+  const messages = kept.map((message) => {
+    if (isToolRoleResult(message)) return message;
     if (!Array.isArray(message?.content)) return message;
     const content = message.content.filter((block) => {
       // Responses function_call items are assistant output only. Settlement

@@ -3,8 +3,9 @@
  *
  * Registers the "记忆 / Memory" settings section into the official
  * `settings.section` slot and paints its navigation glyph. The page reads and
- * writes the `dsh-memex` settings namespace through the official client
- * settings scope, and reads library facts from the Host's `/dsh-memex` channel.
+ * writes the `dsh-memex` plugin entry's live Config through the official client
+ * `configForms` service (DSH 0.2.0; the Host persists edits into the profile
+ * patch), and reads library facts from the Host's `/dsh-memex` channel.
  * This bundle holds no filesystem, process or network capability of its own.
  *
  * @module dsh-memex/client
@@ -16,7 +17,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 // (dsh-client-connection/client — the browser ConnectionHandle).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
-// Type-only: the `settings.section` slot declaration and ctx.settingsScope.
+// Type-only: the `settings.section` slot declaration and ctx.configForms.
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { createBrowseAddressRegistry, MEMEX_BROWSE_ADDRESS_SERVICE } from './browse-address.js'
 import { createBrowseOpenDeps } from './browse-open.js'
@@ -26,10 +27,10 @@ import { MemexSettingsSection, type MemexSectionInjected, type MemexSectionProps
 import { MEMEX_CSS } from './styles.js'
 import type { MemexSettingsShape } from './settings-model.js'
 
-/** Required services: slot registry, locale, the Connection RPC face, settings transport. */
-export const inject = ['slots', 'locale', 'connection', 'settingsScope']
+/** Required services: slot registry, locale, the Connection RPC face, config forms. */
+export const inject = ['slots', 'locale', 'connection', 'configForms']
 
-/** Settings namespace owned by the host half. */
+/** Profile entry id of the host half; DSH 0.2.0 forms address a plugin by its entry id. */
 const MEMEX_NAMESPACE = 'dsh-memex'
 
 /** Nav position: after the official pages, before the other third-party sections. */
@@ -50,7 +51,7 @@ export function apply(ctx: ClientContext): void {
     return () => style.remove()
   }, 'dsh-memex: styles')
 
-  const settingsScope = ctx.settingsScope.bind<MemexSettingsShape>({ namespace: MEMEX_NAMESPACE })
+  const settingsScope = ctx.configForms.get<MemexSettingsShape>(MEMEX_NAMESPACE)
   const t = ctx.locale.bind(NS)
   // `connection` is typed as the host handle by some Context merges; in the
   // browser shell the same key holds the full client ConnectionHandle.

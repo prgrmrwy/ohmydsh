@@ -63,10 +63,19 @@ export function apply(ctx: Context, config: Config = {}): void {
       ctx.logger.warn(`worktree-session recovery reconciliation failed: ${error instanceof Error ? error.message : String(error)}`)
     })
   }
-  // session-start is synchronously emitted before the first driver step; install
-  // restored policy before the event returns. Also rescue Agents already live if
-  // this plugin hot-loads after their publication.
-  ctx.on('agent/session-start', ({ agent }) => { recoverAgent(agent) })
+  // Install restored policy at the Agent publication boundary, before the first
+  // driver step. `agent/created` fires for fresh creations and cold resumes in
+  // both DSH 0.1.5 (emit, synchronous) and 0.2.0 (serial, awaited before queued
+  // input runs); 0.2.0 removed `agent/session-start`, so this is the one hook
+  // whose timing holds on both runtimes. A sync recovery failure must never veto
+  // publication here: recoverAgent only reads metadata and reports via the logger.
+  // Also rescue Agents already live if this plugin hot-loads after publication.
+  ctx.on('agent/created', ({ agent }) => {
+    try { recoverAgent(agent) } catch (error) {
+      ctx.logger.warn(`worktree-session recovery at agent/created failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    return undefined
+  })
   registerSubagentInheritance(ctx)
   ctx.effect(() => registerArchiveLifecycle(ctx, { recordBind }), 'worktree-session: observe durable archive lifecycle')
   for (const agent of ctx.agents.list()) recoverAgent(agent)

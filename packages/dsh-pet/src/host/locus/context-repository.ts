@@ -279,6 +279,8 @@ function projectAggregateRecord(
       locusId: record.id,
       generation: record.generation,
       ...(state !== undefined ? { state } : {}),
+      ...(record.childComposition !== undefined ? { childComposition: record.childComposition } : {}),
+      toolTier: record.toolTier?.effective ?? 'safe',
     },
     main: { sessionId: record.parentSessionId },
     child: {

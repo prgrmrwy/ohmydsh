@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url'
 import { expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Tools from '@deepseek-ai/dsh-tools'
+import { TOOL_CONTRACTS } from '../../worktree-session/src/host/guard.js'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import {
   registerInquiryAskTool, registerInquiryAnswerTool,
@@ -76,7 +77,11 @@ it('registers the ask tool scoped, with no parent, requester, audience or delive
     const declared = tool.parameters as { properties: Record<string, unknown>; required?: string[] }
     // Only a roster reference, the question and the purpose may be named. An
     // exact key set is the assertion: an extra selector cannot hide in it.
+    // Cross-plugin audit: changing this schema also requires Worktree's exact
+    // inquiry contract to be reviewed, not a broad exemption for pet_* tools.
+    expect(TOOL_CONTRACTS[INQUIRY_ASK_TOOL]).toMatchObject({ kind: 'inquiry', pathFields: [] })
     expect(Object.keys(declared.properties).sort()).toEqual(['purpose', 'question', 'target'])
+    for (const field of Object.values(declared.properties)) expect(field).toMatchObject({ type: 'string' })
     expect([...(declared.required ?? [])].sort()).toEqual(['purpose', 'question', 'target'])
     for (const name of Object.keys(declared.properties)) {
       expect(name).not.toMatch(/parentSessionId|requester|audience|origin|chat|delivery|recipient|^to$/i)

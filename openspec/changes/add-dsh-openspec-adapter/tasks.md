@@ -22,8 +22,8 @@ Round history: round 1 is VOID. Round 2 was `APPROVE_WITH_CHANGES` with all 16 R
 - [x] 1.4 Write failing test: R/sync-dsh-openspec.test.mjs `dsh_openspec_pin_mismatch_vs_lockfile_fails_without_profile_change` (red: sync succeeded despite conflicting lockfile version)
 - [x] 1.5 Implement: pre-profile sync check compares package.json pin to root lockfile workspace pin and resolved name/version, requires lockfile integrity; diagnostic `dsh-openspec-pin-mismatch` names both values
 - [x] 1.6 Refactor; full suite stays green (npm test: 255 pass, 2 skipped)
-- [x] 1.7 Write failing test: P/options.test.ts `options_read_from_settings_namespace_with_documented_defaults` (red: missing options module)
-- [x] 1.8 Implement: read `updateCheck` and `telemetry` from the DSH settings namespace `dsh-openspec` with defaults `enabled` / `adapter-off`
+- [x] 1.7 Write failing test: P/options.test.ts `options_read_from_settings_namespace_with_documented_defaults` (red: missing options module). **0.2 revision:** renamed `options_read_from_plugin_config_with_documented_defaults`; RED `readOptions is not a function` against the 0.1.5 settings-registry implementation
+- [x] 1.8 Implement: read `updateCheck` and `telemetry` from the DSH settings namespace `dsh-openspec` with defaults `enabled` / `adapter-off`. **0.2 revision:** 0.2 removed `ctx.settings.register`; options are now fields of the plugin's own Cordis Config (`OptionsSchema`, exported as the entry's `Config`), not volatile, read by `readOptions`. Real Cordis probe: defaults applied, invalid value rejected before mount, both fields `volatile:false`
 - [x] 1.9 Refactor; package test, typecheck, and build pass
 
 ## 2. Upstream compatibility, catalog and generations
@@ -226,6 +226,6 @@ Round history: round 1 is VOID. Round 2 was `APPROVE_WITH_CHANGES` with all 16 R
 
 ## 10. Documentation and repository checks
 
-- [x] 10.1 Write README (usage, settings namespace `dsh-openspec` options `updateCheck`/`telemetry`, manual removal after sessions end, no purge in v1, the known Pet exposure gap) and the prose `dsh.yaml` note; run `npm test`, `npm run check:artifacts`, package build/typecheck/test, and `openspec validate add-dsh-openspec-adapter --strict`; confirm all pass
+- [x] 10.1 Write README (usage, plugin Config options `updateCheck`/`telemetry` (0.2 revision; formerly settings namespace), manual removal after sessions end, no purge in v1, the known Pet exposure gap) and the prose `dsh.yaml` note; run `npm test`, `npm run check:artifacts`, package build/typecheck/test, and `openspec validate add-dsh-openspec-adapter --strict`; confirm all pass
 - [ ] 10.2 Run `node scripts/sync.mjs` twice in the isolated profile; confirm the second run reports no changes
 - [ ] 10.3 Flip every test-plan row to 🟢 green only after its test passes; then write verify.md

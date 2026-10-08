@@ -21,7 +21,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionId as BrandedSessionId } from '@deepseek-ai/dsh-session'
 import { LOCUS_CHILD_PRESET } from './aggregate.js'
-import { LOCUS_SAFE_TOOL_NAMES } from './composition.js'
+import { LOCUS_SAFE_TOOL_NAMES, LOCUS_SHELL_TIER_TOOL_NAMES } from './composition.js'
 
 /** A live DSH Agent, intentionally opaque apart from its session identity. */
 export type LocusLiveParent = Agent
@@ -72,6 +72,11 @@ export interface LocusToolRestriction {
  * visible — which is why the installed surface is attested separately
  * ({@link attestLocusComposition}) rather than trusted from this filter.
  */
+export const LOCUS_BASE_TOOL_FILTER: LocusToolRestriction = Object.freeze({
+  allow: Object.freeze([...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_SHELL_TIER_TOOL_NAMES]),
+})
+
+/** Compatibility alias retained for call sites/tests that assert the old safe list. */
 export const LOCUS_SAFE_TOOL_FILTER: LocusToolRestriction = Object.freeze({
   allow: LOCUS_SAFE_TOOL_NAMES,
 })
@@ -900,7 +905,7 @@ export class LocusChildAdapter {
           contextMode: 'independent-v1',
           // Pet's own preset, never the main's: see LOCUS_CHILD_PRESET.
           agentPreset: LOCUS_CHILD_PRESET,
-          toolFilter: LOCUS_SAFE_TOOL_FILTER,
+          toolFilter: LOCUS_BASE_TOOL_FILTER,
           signal,
         })
       } catch (error: unknown) {
@@ -1693,12 +1698,18 @@ export function probeLocusChildPorts(
               }
               if (row.id !== childSessionId) return false
               if (row.parentSessionId !== undefined && row.parentSessionId !== parentSessionId) return false
-              // A matching id alone is not proof of a resumable child: the same
-              // listing also carries diagnostics and one-shot runs, and
-              // adopting one of those would bind a locus to a child that can
-              // never take another turn. When the runtime reports the kind and
-              // mode, both must say this is a continuable child.
-              if (row.kind !== 'child' || row.mode !== 'continuable') return false
+              // A matching id alone is not proof of a resumable child: one-shot
+              // runs carry an id too, and adopting one would bind a locus to a
+              // child that can never take another turn.
+              //
+              // DSH 0.1.5 returned `SubagentListEntry` (kind 'child' |
+              // 'diagnostic', mixed in one listing). DSH 0.2.0 returns the
+              // parent's durable catalog, `SubagentCatalogEntry` (id, createdAt,
+              // mode, label) with no `kind` and no diagnostics. Either way the
+              // continuable mode is required; a `kind` other than 'child', when
+              // reported, still disqualifies the row.
+              if (row.mode !== 'continuable') return false
+              if (row.kind !== undefined && row.kind !== 'child') return false
               return true
             }) as { id?: unknown } | undefined
             return match !== undefined && typeof match.id === 'string'

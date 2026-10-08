@@ -46,6 +46,8 @@ export interface LocusFacts {
   readonly locusId: string
   readonly generation: number
   readonly state?: 'provisioning' | 'active' | 'switching' | 'invalid' | 'stopped' | 'retired'
+  readonly childComposition?: 'safe-v1' | 'safe-v2'
+  readonly toolTier?: 'safe' | 'shell'
 }
 
 /** The main session which owns the shared work context. */
@@ -304,6 +306,7 @@ export function renderLocusDeliveryPrompt(
     `- locus：${factValue(context.locus.locusId)}`,
     `- generation：${factValue(context.locus.generation)}`,
     `- state：${context.locus.state === undefined ? '未确认' : context.locus.state}`,
+    `- composition：${context.locus.childComposition ?? 'legacy/unconfirmed'}`,
     '',
     '### Main / child',
     `- main session：${factValue(context.main.sessionId)}` +
@@ -314,6 +317,16 @@ export function renderLocusDeliveryPrompt(
     '### Workspace',
     `- workspace：${factValue(context.workspace.workspaceId)}` +
       (context.workspace.title === undefined ? '' : `（${context.workspace.title}）`),
+    '',
+    '### Tool tier',
+    `- effective：${context.locus.toolTier ?? 'safe'}`,
+    ...(context.locus.toolTier === 'shell'
+      ? [
+        '- shell 档允许以 bot 身份读取当前入口的群消息；当前 chat_id：' + factValue(context.endpoint.chatId),
+        '- MUST NOT 读取无关群、私聊、全局消息或其它 workspace；这只是行为约束，不是授权边界。',
+        '- shell 档可执行本机命令并使用本机飞书凭据；出站 guard 仅防误操作，不是安全边界。',
+      ]
+      : ['- safe 档不提供 shell、Skill 或直接 lark-cli 能力。']),
     '',
     '### Permission',
     `- effective：${context.permission.effective}`,
@@ -375,7 +388,13 @@ export function renderLocusDeliveryPrompt(
     '',
     '### 按需读取',
     '本次 prompt 刻意不携带压平的聊天记录、项目资料、兄弟 child 历史或父会话摘要。需要的资料请通过当前已授权的读取能力按需读取原始内容；收到资料不等于已采纳。',
-    '若 execution root、project resources 或 constraints 未确认，必须如实说明缺失并请所有者在管理面显式确认；不得调用 shell、lark-cli、通用 HTTP、send_message 或子委派读取或发送飞书内容。',
+    ...(context.locus.toolTier === 'shell'
+      ? [
+        '当前是 shell 档：可用 bash/Skill 与以 bot 身份读取当前入口；只针对本 chat_id 按需读取群消息。',
+        '不得读取无关群、私聊、全局消息或其它 workspace。受管回复只能通过 pet_locus_finish；若被拒，说明原因，不要绕行。',
+        'lark-cli 出站 guard 仅防误操作，不是安全边界；有意绕过、脚本与通用 HTTP 不受它约束。',
+      ]
+      : ['若 execution root、project resources 或 constraints 未确认，必须如实说明缺失并请所有者在管理面显式确认；safe 档不得调用 shell、lark-cli、通用 HTTP、send_message 或子委派读取或发送飞书内容。']),
     '所有者确认的路径仍只表示上下文事实；路径存在性与 sandbox 授权分离，不能据此提权、改绑、创建 worktree 或切换执行目录。普通目录、ws 子目录和 sw 兄弟目录均按原值记录，不自动运行 ws/sw。',
     '不要自动把本 child 的结论、摘要或状态回传 main session；只有为补齐缺失锚点的明确询问，或所有者主动查阅/请求，才讨论跨会话内容。',
   )

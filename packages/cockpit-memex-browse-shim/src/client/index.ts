@@ -1,107 +1,175 @@
 import type { Context } from '@deepseek-ai/cordis'
 
-/** Stable contracts owned by the two independent endpoint plugins. */
-export const COCKPIT_PORT_FORWARD_SERVICE = 'cockpitBridge.portForward'
+export const COCKPIT_FORWARDS_SERVICE = 'cockpitBridge.forwards'
 export const MEMEX_BROWSE_ADDRESS_SERVICE = 'dshMemex.browseAddress'
+export const FORWARD_READY_TIMEOUT_MS = 15_000
 
-interface PortForwardHandle {
-  readonly url: string
+interface ForwardHandle {
+  readonly state: 'starting' | 'ready' | 'retrying' | 'paused' | 'removed'
+  readonly address?: { readonly url: string }
+  onChange(listener: () => void): () => void
 }
-
-interface CockpitPortForwardService {
-  register(channelId: string, devicePort: number): Promise<void>
-  publish(channelId: string): Promise<PortForwardHandle>
+interface CockpitForwardsService {
+  acquire(devicePort: number, holder: string): Promise<ForwardHandle>
+  release(handle: ForwardHandle): Promise<void>
 }
-
-interface BrowseTarget {
-  readonly scope: string
-  readonly port: number
-}
-
 interface MemexBrowseAddressRegistry {
-  register(resolver: (target: BrowseTarget) => Promise<string>): () => void
+  register(resolver: (target: { scope: string; port: number }) => Promise<string>): () => void
 }
+type ServiceContext = Context & { get(name: string): unknown }
 
-type ServiceContext = Context & {
-  get(name: string): unknown
-}
-
-/**
- * Deployment-specific coupling point. Endpoint plugins never import each
- * other; this adapter observes their public services and connects them when
- * both are live. No top-level inject is allowed because either side is
- * optional and unresolved injects make a client plugin silently not load.
- */
 export const inject: string[] = []
 
-/**
- * Channel id for one library's browse service.
- *
- * Derived from the library name so each library gets its own forward: the
- * kernel serves exactly one library per process, so sharing a channel across
- * libraries would publish the wrong one. Characters outside the cockpit's
- * accepted channel shape are replaced rather than dropped, so two distinct
- * library names cannot collapse into the same channel.
- */
-export function browseChannelId(scope: string): string {
-  const safe = scope.replace(/[^A-Za-z0-9._-]/g, '-')
-  return `memex-browse-${safe}`.slice(0, 64)
+function unavailable(): Error {
+  return new Error('cockpit forwards service unavailable or binding ended')
+}
+
+function isLocalDevice(error: unknown): boolean {
+  return typeof error === 'object' && error !== null
+    && (error as { name?: unknown }).name === 'CockpitForwardsError'
+    && (error as { code?: unknown }).code === 'local-device'
+}
+
+/** The port, not the scope label, identifies the bridge's shared forward. */
+export function browseHolder(port: number, bindingId: string): string {
+  return `memex-browse-${port}-${bindingId}`
+}
+
+/** Cancel a click immediately, even if acquire is still in flight. */
+function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(unavailable())
+    signal.addEventListener('abort', abort, { once: true })
+    if (signal.aborted) abort()
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort))
+  })
+}
+
+function readyAddress(handle: ForwardHandle, signal: AbortSignal): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let done = false
+    let stop: (() => void) | undefined
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const finish = (error?: Error, url?: string) => {
+      if (done) return
+      done = true
+      stop?.()
+      if (timer !== undefined) clearTimeout(timer)
+      signal.removeEventListener('abort', abort)
+      if (error !== undefined) reject(error)
+      else resolve(url!)
+    }
+    const abort = () => finish(unavailable())
+    const check = () => {
+      if (signal.aborted) return abort()
+      if (handle.state === 'removed') return finish(new Error('cockpit forward removed'))
+      if (handle.state === 'ready' && handle.address !== undefined) finish(undefined, handle.address.url)
+    }
+    signal.addEventListener('abort', abort, { once: true })
+    stop = handle.onChange(check)
+    // Also handle a notification during subscription itself.
+    if (done) stop()
+    else {
+      timer = setTimeout(() => finish(new Error('cockpit forward readiness timed out')), FORWARD_READY_TIMEOUT_MS)
+      check()
+    }
+  })
 }
 
 export function apply(ctx: ServiceContext): void {
+  let seenBridge = false
   let unregister: (() => void) | undefined
   let boundRegistry: MemexBrowseAddressRegistry | undefined
-  let boundForward: CockpitPortForwardService | undefined
+  let boundForward: CockpitForwardsService | undefined
+  let controller: AbortController | undefined
+  let handles = new Map<number, Promise<ForwardHandle>>()
 
-  const readRegistry = (): MemexBrowseAddressRegistry | undefined =>
-    ctx.get(MEMEX_BROWSE_ADDRESS_SERVICE) as MemexBrowseAddressRegistry | undefined
+  // Cordis dotted properties must be read in a single inject-free lookup.
+  const readRegistry = () => ctx.get(MEMEX_BROWSE_ADDRESS_SERVICE) as MemexBrowseAddressRegistry | undefined
+  const readForward = () => ctx.get(COCKPIT_FORWARDS_SERVICE) as CockpitForwardsService | undefined
 
-  const readForward = (): CockpitPortForwardService | undefined =>
-    // Keep the full dotted name in one ctx.get(). Reading the parent service
-    // first and then a child property is not equivalent: Cordis reroutes dotted
-    // properties through its context proxy and enforces inject, turning this
-    // optional seam into an uncaught "without inject" rejection.
-    ctx.get(COCKPIT_PORT_FORWARD_SERVICE) as CockpitPortForwardService | undefined
-
-  const detach = (): void => {
+  const detach = () => {
+    controller?.abort()
+    const service = boundForward
+    if (service !== undefined) {
+      for (const pending of handles.values()) {
+        // Keep the original producer for late completion; never release through its replacement.
+        void pending.then(handle => service.release(handle)).catch(() => {
+          // The bridge also reclaims holders on page-instance termination.
+        })
+      }
+    }
+    handles = new Map()
     unregister?.()
     unregister = undefined
     boundRegistry = undefined
     boundForward = undefined
+    controller = undefined
   }
 
-  const reconcile = (): void => {
+  const reconcile = () => {
     const registry = readRegistry()
-    const forward = readForward()
-    if (registry === boundRegistry && forward === boundForward) return
+    const service = readForward()
+    if (service !== undefined) seenBridge = true
+    if (registry === boundRegistry && service === boundForward) return
     detach()
-    if (registry === undefined || forward === undefined) return
-
+    // Never discovering a bridge preserves memex-only deployments. Once seen,
+    // its disappearance must not re-enable the registry's default localhost.
+    if (registry === undefined || !seenBridge) return
     boundRegistry = registry
-    boundForward = forward
-    unregister = registry.register(async ({ scope, port }) => {
-      // Resolve on every call: if the bridge fiber unloads after registration,
-      // this throws and dsh-memex reports the failure instead of handing back
-      // an address that would resolve on the wrong machine.
-      const current = readForward()
-      if (current === undefined) throw new Error('cockpit port-forward service unavailable')
-      const channelId = browseChannelId(scope)
-      // Declaring the port is what makes it publishable; the cockpit refuses
-      // anything not registered, and registering the same channel again simply
-      // reuses the existing forward.
-      await current.register(channelId, port)
-      const handle = await current.publish(channelId)
-      return handle.url
+    boundForward = service
+    const signal = (controller = new AbortController()).signal
+    const owned = handles
+    const acquired = new Map<number, ForwardHandle>()
+    // Distinct bindings cannot release a replacement's idempotent bridge record.
+    // getRandomValues also works on plain-HTTP device pages; randomUUID does not.
+    const bindingId = Array.from(crypto.getRandomValues(new Uint8Array(16)),
+      byte => byte.toString(16).padStart(2, '0')).join('')
+    unregister = registry.register(async ({ port }) => {
+      if (signal.aborted || service === undefined || readForward() !== service) throw unavailable()
+      if (acquired.get(port)?.state === 'removed') {
+        owned.delete(port)
+        acquired.delete(port)
+      }
+      let pending = owned.get(port)
+      if (pending === undefined) {
+        // Capture synchronous bridge failures too (unavailable may throw synchronously).
+        pending = Promise.resolve().then(() => {
+          if (signal.aborted) throw unavailable()
+          return service.acquire(port, browseHolder(port, bindingId))
+        })
+        owned.set(port, pending)
+        void pending.then(handle => { acquired.set(port, handle) }, () => {
+          if (owned.get(port) === pending) owned.delete(port)
+        })
+      }
+      let handle: ForwardHandle
+      try {
+        handle = await abortable(pending, signal)
+      } catch (error) {
+        if (signal.aborted || readForward() !== service) throw unavailable()
+        if (isLocalDevice(error)) return `http://localhost:${port}`
+        throw error
+      }
+      if (signal.aborted || readForward() !== service) throw unavailable()
+      try {
+        return await readyAddress(handle, signal)
+      } finally {
+        // No automatic reacquisition. A subsequent explicit click may ask anew.
+        if (handle.state === 'removed' && owned.get(port) === pending) {
+          owned.delete(port)
+          if (acquired.get(port) === handle) acquired.delete(port)
+        }
+      }
     })
   }
 
-  const stopListening = ctx.on('internal/service', (name) => {
-    if (name === MEMEX_BROWSE_ADDRESS_SERVICE || name === COCKPIT_PORT_FORWARD_SERVICE) reconcile()
+  const stopListening = ctx.on('internal/service', name => {
+    if (name === MEMEX_BROWSE_ADDRESS_SERVICE || name === COCKPIT_FORWARDS_SERVICE) reconcile()
   }, { global: true })
-
   reconcile()
   ctx.effect(() => () => {
     stopListening()
     detach()
-  }, 'cockpit-memex-browse-shim: bridge service adapter')
+  }, 'cockpit-memex-browse-shim: forwards lifecycle adapter')
 }

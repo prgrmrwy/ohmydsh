@@ -1,6 +1,20 @@
 import { renderConsumedContent, type AdapterBlockFields } from './adapter-block.js'
 import type { Context } from '@deepseek-ai/cordis'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import type { ContextFormed } from '@deepseek-ai/dsh-llm'
+
+/**
+ * The adapter's own message source kind. DSH 0.2 (session format v4) removed the shared
+ * `{ kind: 'plugin', plugin }` wrapper and a v4 reader refuses it, so a message with that
+ * shape would leave a session that cannot be reopened. Each producer declares its own
+ * kind; `plugin:<name>` is the name the v3→v4 migration gives historical plugin rows.
+ */
+export const OPENSPEC_SOURCE_KIND = 'plugin:dsh-openspec'
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'plugin:dsh-openspec': { kind: 'plugin:dsh-openspec' } & ContextFormed
+  }
+}
 import type { CommandDefinition } from '@deepseek-ai/dsh-commands'
 import { buildInitCommand, InitOptionsError, parseInitArgs } from './init-command.js'
 import { checkManagedCli } from './manage-check.js'
@@ -67,7 +81,7 @@ export function registerWorkflowCommands(ctx: Context, input: {
   // Official constructor: it mints the stable message id Agent.send/inbox rely on. Official commands (/goal, /plan)
   // deliver through followup()/steer(), i.e. a real inbox target that WAKES the driver — a command that only
   // queues a message without waking leaves the user staring at an empty transcript.
-  const adapterMessage = (text: string) => createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'plugin', plugin: 'dsh-openspec' } })
+  const adapterMessage = (text: string) => createUserMessage({ content: [{ type: 'text', text }], source: { kind: OPENSPEC_SOURCE_KIND } })
   const send = async (agent: any, text: string) => agent.followup(adapterMessage(text))
   const register = (definition: CommandDefinition) => disposers.push(ctx.commands.register(definition))
   for (const entry of input.entries) register({

@@ -76,7 +76,7 @@ describe('durable locus resolution', () => {
       current: record({ childComposition: undefined }),
     })
 
-    expect(() => port.resolveCurrent(ENDPOINT)).toThrow(/safe-v1/)
+    expect(() => port.resolveCurrent(ENDPOINT)).toThrow(/safe-v1\/safe-v2 child composition proof/)
     expect(diagnostics).toEqual(['locus-unusable'])
   })
 
@@ -197,7 +197,7 @@ describe('establishing a locus for a new endpoint', () => {
       generation: 3,
       parentSessionId: 'main-1',
       childSessionId: 'child-recovered',
-      childComposition: 'safe-v1' as const,
+      childComposition: 'safe-v2' as const,
       workspaceId: 'ws-1',
       state: 'active' as const,
     }
@@ -233,7 +233,7 @@ describe('establishing a locus for a new endpoint', () => {
       generation: 1,
       parentSessionId: 'main-new',
       childSessionId: 'child-new',
-      childComposition: 'safe-v1' as const,
+      childComposition: 'safe-v2' as const,
       workspaceId: 'ws-new',
       state: 'active' as const,
     }
@@ -312,7 +312,7 @@ describe('establishing a locus for a new endpoint', () => {
       generation: 1,
       parentSessionId: 'main-new',
       childSessionId: 'child-new',
-      childComposition: 'safe-v1' as const,
+      childComposition: 'safe-v2' as const,
       workspaceId: 'ws-new',
       state: 'active' as const,
     }
@@ -380,7 +380,7 @@ describe('an archived main session stops the endpoint', () => {
   it('still replaces a Host-judged generation whose parent is NOT archived', async () => {
     const ensureForDelivery = vi.fn(async () => ({
       id: 'locus-2', generation: 3, endpoint: ENDPOINT, parentSessionId: 'main-1',
-      childSessionId: 'child-2', childComposition: 'safe-v1', workspaceId: 'ws-1',
+      childSessionId: 'child-2', childComposition: 'safe-v2', workspaceId: 'ws-1',
       source: 'auto', state: 'active',
       permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
       busy: false, createdAt: 2, updatedAt: 2,

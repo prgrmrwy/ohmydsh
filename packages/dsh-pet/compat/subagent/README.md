@@ -2,8 +2,14 @@
 
 ## 这是什么
 
-当前 `dsh.yaml` 固定 DSH `0.1.5-rc.2`。Pet unified locus 需要该正式包尚未发布的
+当前 `dsh.yaml` 固定 DSH `0.2.0-rc.2`。Pet unified locus 需要该正式包尚未发布的
 宿主能力，因此本目录维护一份针对固定 tag 的最小 patch。
+
+**2026-10-04 按 `dsh-v0.2.0-rc.2`（`639ed015`）重新推导**（change `upgrade-dsh-0-2-0-runtime` W5）：
+四个 seam 在干净 HEAD 中仍为 0 命中（`git grep` 核对），故全部保留；`child-agent.ts` 的源码 hunk
+经三方合并后语义与 0.1.5 一致（0.2.0 的 `agentPresets.mount` 仍返回 `{ id }`）；`list-children.spec.ts`
+的 hunk 作废——上游已删除它修改的那个用例。上游 subagent 规格：未打补丁 316 通过、打补丁后 327 通过
+（多出的 11 例即 seam 用例）。
 
 **当前 overlay 只替换一个上游包：`@deepseek-ai/dsh-subagent`。**
 
@@ -53,7 +59,7 @@
 ```yaml
 hostRuntimeCompatibility:
   kind: pet-unified-locus-v1
-  supportedDshVersion: 0.1.5-rc.2
+  supportedDshVersion: 0.2.0-rc.2
 ```
 
 该声明表达“Pet 请求 Host 级兼容运行时”，技术效果是整个长期 `dsh web` Host
@@ -83,7 +89,7 @@ Host 首次准备会执行 `build-launcher.cjs`；fingerprint 命中时只做轻
 运行，超时会终止进程组。launcher 在同文件系统 sibling staging 中完成：
 
 1. 固定 tag 构建并验证 patch capability marker；
-2. 安装官方 `@deepseek-ai/dsh@0.1.5-rc.2`、一个 reviewed override（subagent）
+2. 安装官方 `@deepseek-ai/dsh@0.2.0-rc.2`、一个 reviewed override（subagent）
    与显式声明的框架版本（cordis / cordis-plugin-include，值从 reviewed 上游树读取）；
 3. 显式审批固定 install scripts；
 4. 验证依赖树唯一性、package identity/version/provenance、实际能力与 DSH
