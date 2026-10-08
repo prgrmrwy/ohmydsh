@@ -311,6 +311,9 @@ describe('overlay styles', () => {
         .map(root => path.join(root, '@deepseek-ai'))),
     ]
 
+    // The design-platform tokens are defined by `@deepseek-ai/dsh-client-ui-theme`
+    // (a devDependency for exactly this reason). Under DSH 0.1.5 another bundle
+    // happened to inline them; 0.2.0 does not, so the theme must be present.
     // Build the real vocabulary from the shipped client bundles. The previous
     // assertion only echoed the names Pet itself used, so four invented tokens
     // (`bg-float`, `primary`, `danger`, `line-divider`) passed for weeks while
@@ -632,6 +635,12 @@ describe('client reads DSH contracts, not invented shapes', () => {
     expect(source).toContain('ctx.workspaces.list.getSnapshot()')
     // The list is keyed by id, not an `items` array of sessions.
     expect(source).toContain('sessionState.byId[currentId]')
+    // DSH 0.2.0: selection comes from the mainView retain reference, and
+    // navigation goes through the Workspace UI service.
+    expect(source).toContain('mainSessionId(sessionState)')
+    expect(source).toContain('ctx.uiWorkspace.openSession(')
+    expect(source).not.toContain('ctx.sessions.openSubagent(')
+    expect(source).not.toContain('sessionState.current')
     // WorkspaceView identifies itself with `workspaceId`.
     expect(source).toContain('workspace.workspaceId')
     // Untyped service lookups defeat the compiler; the typed faces are used.

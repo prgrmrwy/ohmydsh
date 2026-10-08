@@ -17,7 +17,7 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
-import type {} from '@deepseek-ai/dsh-agent-presets'
+import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-session-title'
 import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
@@ -1339,7 +1339,7 @@ async function initialize(
 
   ctx.effect(
     () =>
-      ctx.on('agent/created', (payload: { agent?: unknown }) => {
+      ctx.on('agent/created', (payload: { agent?: unknown }): undefined => {
         const agent = payload?.agent as
           | { id?: unknown; ctx?: unknown }
           | undefined
@@ -1362,11 +1362,18 @@ async function initialize(
           try {
             result = composeLocusChild(candidate, locusCompositionPorts)
           } catch (error) {
-            petLog(
-              `dsh-pet: locus composition refused ${sessionId} (${
-                error instanceof Error ? error.message : String(error)
-              })`,
-            )
+            // Include the cause chain: the outer composition message names
+            // only the stage, while the cause names the failing Host seam.
+            const describe = (value: unknown): string => {
+              const parts: string[] = []
+              let current: unknown = value
+              for (let depth = 0; depth < 4 && current !== undefined; depth++) {
+                parts.push(current instanceof Error ? current.message : String(current))
+                current = current instanceof Error ? current.cause : undefined
+              }
+              return parts.join(' <- ')
+            }
+            petLog(`dsh-pet: locus composition refused ${sessionId} (${describe(error)})`)
             throw error
           }
           if (result.composed) {
@@ -1377,7 +1384,7 @@ async function initialize(
             // it from outside would record a surface that may never have been
             // installed at all — for example when no assembly composed — and
             // then permanently suppress the repair paths that would fix it.
-            return
+            return undefined
           }
           // This is the COLD RESTORE and NATIVE GUI LOAD entry point for a main
           // session, and for a locus child whose durable row was already active
@@ -1395,7 +1402,11 @@ async function initialize(
         // Cordis event listeners are observe-only here. Await the scoped
         // installation without allowing an async rejection to escape into the
         // event dispatcher; dispatch itself performs a late fail-closed check.
+        // DSH 0.2.0 awaits `agent/created` listeners serially and a rejection
+        // fails creation; returning undefined (not the promise) keeps the
+        // 0.1.5 contract that a foreign executor's composition never vetoes it.
         void composeForeignExecutor(payload?.agent)
+        return undefined
       }),
     'dsh-pet: scope externally loaded executors',
   )

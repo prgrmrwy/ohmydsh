@@ -23,8 +23,8 @@ interface InputState {
 function input(initial: Partial<InputState> = {}, options: { submitThrows?: boolean } = {}) {
   let state: InputState = { draft: 'do work', attachmentIds: [], draftRev: 1, phase: 'plain', occurrences: [], queue: [], ...initial }
   const calls: string[] = []
-  const originalSubmit = (mode?: string): void => {
-    calls.push(`submit:${mode ?? 'queue'}`)
+  const originalSubmit = (mode?: string, submitSource?: string): void => {
+    calls.push(`submit:${mode ?? 'queue'}${submitSource === undefined ? '' : `:${submitSource}`}`)
     if (options.submitThrows === true) throw new Error('official submit failed')
     // Model the official SessionInput transaction consuming its own draft.
     state = { ...state, draft: '', attachmentIds: [] }
@@ -125,6 +125,24 @@ describe('in-place source Session submit', () => {
     expect(getStage('source', '/repo')).toMatchObject({ lifecycle: 'bound', taskBranch: 'ws/task', dependencyMode: 'lean', phase: 'done' })
     expect(h.source.submit).not.toBe(decorated)
     restore()
+  })
+
+  it('forwards the DSH 0.2.0 submit source both when disabled and through the handoff', async () => {
+    const off = harness(input())
+    setStage('source', '/repo', { enabled: false })
+    const restoreOff = decorateSubmit(off.ctx, 'source', '/repo')
+    ;(off.source.submit as (mode?: string, source?: string) => void)('queue', 'enter')
+    expect(off.source.calls).toContain('submit:queue:enter')
+    restoreOff()
+
+    const on = harness(input({ draft: 'hello' }))
+    globalThis.fetch = okFetch() as never
+    setStage('source', '/repo', { enabled: true, baseRef: 'main' })
+    const restoreOn = decorateSubmit(on.ctx, 'source', '/repo')
+    ;(on.source.submit as (mode?: string, source?: string) => void)('queue', 'click')
+    await vi.waitFor(() => expect(getStage('source', '/repo').phase).toBe('done'))
+    expect(on.source.calls).toContain('submit:queue:click')
+    restoreOn()
   })
 
   it('allows an attachment-only draft', async () => {

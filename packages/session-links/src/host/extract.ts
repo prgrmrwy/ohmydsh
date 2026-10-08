@@ -33,6 +33,19 @@ function mutationPaths(view: NonNullable<ReturnType<PresentCall>>): string[] {
 }
 
 /**
+ * Whether a persisted tool result reports failure, on either runtime shape:
+ * DSH 0.2.0 records a tool-role message with a top-level `isError`; 0.1.5 and
+ * migrated history kept it on the first `tool-result` content block.
+ */
+function toolResultFailed(message: unknown): boolean {
+  if (typeof message !== 'object' || message === null) return false
+  const record = message as { isError?: unknown; content?: unknown }
+  if (record.isError === true) return true
+  const first = Array.isArray(record.content) ? record.content[0] as { isError?: unknown } | undefined : undefined
+  return first?.isError === true
+}
+
+/**
  * Fold a session's complete event log. Links come from user/assistant text
  * blocks; produced files come from tool/call render intents. Failed results
  * are removed (provisional entries withdrawn via the failed-call set), and
@@ -43,7 +56,7 @@ export function extractSession(events: readonly SessionEvent[], presentCall: Pre
   // Pass 1: which calls failed (so their provisional mutations are withdrawn).
   const failedCalls = new Set<string>()
   for (const event of events) {
-    if (event.type === 'tool/result' && (event.data.error !== undefined || event.data.message?.content[0]?.isError === true)) {
+    if (event.type === 'tool/result' && (event.data.error !== undefined || toolResultFailed(event.data.message))) {
       failedCalls.add(event.data.message.source.callId)
     }
   }

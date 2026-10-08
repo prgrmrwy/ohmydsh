@@ -100,7 +100,7 @@ describe('memex lifecycle with the real AgentLoop', () => {
     const { adapter, lifecycle, handle, ctx } = await harness(1)
     lifecycle.mark('recall', handle.agent.session)
     lifecycle.mark('write', handle.agent.session)
-    emitAgentEvent(ctx, handle.agent, 'agent/session-start', { agent: handle.agent, source: 'compact' })
+    emitAgentEvent(ctx, handle.agent, 'agent/created', { agent: handle.agent, source: 'compact' })
     await step(handle.agent, 'after compact')
     expect(adapter.requests).toHaveLength(1)
     expect(requestText(adapter.requests[0]!)).toContain('Memex Memory System Active')

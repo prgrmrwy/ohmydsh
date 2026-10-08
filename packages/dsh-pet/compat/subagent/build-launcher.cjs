@@ -22,10 +22,10 @@ const here = __dirname
 const launcher = join(here, '.launcher')
 const builds = join(here, '.launcher-builds')
 const root = resolve(here, '../../../..')
-const version = '0.1.5-rc.2'
+const version = '0.2.0-rc.2'
 const npmVersion = '11.19.0'
-const reviewedCommit = 'fb2c4b9e698e30edb738bca4cf0618587db7d203'
-const subagentPatchSha256 = '0929b10b6d173257829e6c76f6f6815689a9f98c0c63d15e315a8c2765ed2280'
+const reviewedCommit = '639ed015397290b3745d163aafe02ffee4aa3f84'
+const subagentPatchSha256 = '86310610709d80d540dd97b1b7fb1fbc4012a3ef1f5eadc12ba590f7905005fa'
 /**
  * Published Subagent artifact version. `build.mjs` derives it from the tracked
  * skeleton as `skeleton + 1`, so this must follow the same rule instead of

@@ -25,10 +25,29 @@ describe('memex lifecycle', () => {
   it('injects recall context at session start', () => {
     const f = fixture()
     registerMemexLifecycle(f.ctx as never, f.scopes as never)
-    f.listeners.get('agent/session-start')!({ agent: f.agent, source: 'startup' })
+    f.listeners.get('agent/created')!({ agent: f.agent, source: 'startup' })
     expect(f.injected).toHaveLength(1)
     expect(f.injected[0].content[0].text).toContain('Current memory scope: repo')
-    expect(f.injected[0].source).toMatchObject({ kind: 'plugin', plugin: 'dsh-memex', form: 'instructions' })
+    expect(f.injected[0].source).toEqual({ kind: 'plugin:dsh-memex', form: 'instructions' })
+  })
+
+  it('treats a sourceless agent/created (DSH 0.1.5) as a fresh start', () => {
+    const f = fixture()
+    const lifecycle = registerMemexLifecycle(f.ctx as never, f.scopes as never)
+    lifecycle.mark('recall', f.session)
+    lifecycle.mark('write', f.session)
+    f.listeners.get('agent/created')!({ agent: f.agent })
+    expect(f.injected).toHaveLength(1)
+    // A fresh start clears write state, so a later recall can earn a reminder again.
+    lifecycle.mark('recall', f.session)
+    f.listeners.get('agent/turn-stopping')!({ agent: f.agent })
+    expect(f.injected).toHaveLength(2)
+  })
+
+  it('does not subscribe to the removed agent/session-start event', () => {
+    const f = fixture()
+    registerMemexLifecycle(f.ctx as never, f.scopes as never)
+    expect(f.listeners.has('agent/session-start')).toBe(false)
   })
 
   it('reminds only after recall and before a write', () => {
@@ -51,7 +70,7 @@ describe('memex lifecycle', () => {
   it('injects nothing at all when the workspace has memory switched off', () => {
     const f = fixture(false)
     const lifecycle = registerMemexLifecycle(f.ctx as never, f.scopes as never)
-    f.listeners.get('agent/session-start')!({ agent: f.agent, source: 'startup' })
+    f.listeners.get('agent/created')!({ agent: f.agent, source: 'startup' })
     // No recall prompt: inviting calls the tools would then refuse is worse than
     // saying nothing.
     expect(f.injected).toHaveLength(0)
@@ -66,11 +85,11 @@ describe('memex lifecycle', () => {
     // next session without a restart.
     const f = fixture(false)
     registerMemexLifecycle(f.ctx as never, f.scopes as never)
-    f.listeners.get('agent/session-start')!({ agent: f.agent, source: 'startup' })
+    f.listeners.get('agent/created')!({ agent: f.agent, source: 'startup' })
     expect(f.injected).toHaveLength(0)
     f.scopes.resolve = () => ({ scope: 'repo', home: '/memex/repo', publish: 'internal', publishKnown: true,
       memory: true, source: 'derived', created: false, workspacePaths: [] })
-    f.listeners.get('agent/session-start')!({ agent: f.agent, source: 'startup' })
+    f.listeners.get('agent/created')!({ agent: f.agent, source: 'startup' })
     expect(f.injected).toHaveLength(1)
   })
 
@@ -79,7 +98,7 @@ describe('memex lifecycle', () => {
     const lifecycle = registerMemexLifecycle(f.ctx as never, f.scopes as never)
     lifecycle.mark('recall', f.session)
     lifecycle.mark('write', f.session)
-    f.listeners.get('agent/session-start')!({ agent: f.agent, source: 'compact' })
+    f.listeners.get('agent/created')!({ agent: f.agent, source: 'compact' })
     expect(f.injected).toHaveLength(1)
     f.listeners.get('agent/turn-stopping')!({ agent: f.agent })
     expect(f.injected).toHaveLength(1)
@@ -94,7 +113,7 @@ describe('memex lifecycle', () => {
       const f = fixture()
       f.session.header.cwd = cwd
       const lifecycle = registerMemexLifecycle(f.ctx as never, resolver)
-      f.listeners.get('agent/session-start')!({ agent: f.agent, source: 'startup' })
+      f.listeners.get('agent/created')!({ agent: f.agent, source: 'startup' })
       lifecycle.mark('recall', f.session)
       f.listeners.get('agent/turn-stopping')!({ agent: f.agent })
       // Neither the recall instructions nor the write reminder, except outside the declaration.

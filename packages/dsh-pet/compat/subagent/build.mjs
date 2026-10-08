@@ -3,7 +3,7 @@
  * Build the fixed-source `@deepseek-ai/dsh-subagent` compatibility artifact.
  *
  * Why this exists: Pet's locus children need narrow Host-owned continuable
- * runtime seams that the pinned 0.1.5-rc.2 package does not expose: silent
+ * runtime seams that the pinned 0.2.0-rc.2 package does not expose: silent
  * settlement, idle creation, independent-v1 context with a saved preset, and
  * continuation-owned child Session access. The settlement notice and a genuine
  * child-to-parent message resolve the parent through the same call, so external
@@ -37,12 +37,12 @@ const patchFile = join(here, 'settlement-notice.patch')
 /** Pinned upstream identity. A drift here must fail the build, never adapt. */
 const UPSTREAM = {
   repository: 'https://github.com/deepseek-ai/deepseek-harness.git',
-  tag: 'dsh-v0.1.5-rc.2',
+  tag: 'dsh-v0.2.0-rc.2',
   packageDir: 'packages/subagent/subagent',
-  /** Reviewed commit behind dsh-v0.1.5-rc.2; a moved tag/local checkout fails. */
-  commit: 'fb2c4b9e698e30edb738bca4cf0618587db7d203',
+  /** Reviewed commit behind dsh-v0.2.0-rc.2; a moved tag/local checkout fails. */
+  commit: '639ed015397290b3745d163aafe02ffee4aa3f84',
   /** sha256 of `settlement-notice.patch`, so a silently edited patch fails. */
-  patchSha256: '0929b10b6d173257829e6c76f6f6815689a9f98c0c63d15e315a8c2765ed2280',
+  patchSha256: '86310610709d80d540dd97b1b7fb1fbc4012a3ef1f5eadc12ba590f7905005fa',
 }
 
 const run = (command, args, cwd = here, options) => runCompatCommand(command, args, cwd, options)

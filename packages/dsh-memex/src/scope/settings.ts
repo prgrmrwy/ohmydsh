@@ -1,6 +1,5 @@
 import Schema from '@deepseek-ai/schemastery'
-import type { Context } from '@deepseek-ai/cordis'
-import type { SettingsScope } from '@deepseek-ai/dsh-settings'
+import type { Context, Fiber } from '@deepseek-ai/cordis'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { normalizePath } from './resolver.js'
@@ -170,9 +169,73 @@ export function validateMemexSettings(value: ScopeConfig): void {
   }
 }
 
-export function registerMemexSettings(ctx: Context): SettingsScope<ScopeConfig> {
-  return ctx.settings.register('dsh-memex', MemexSettingsSchema, {
-    applies: 'live',
-    validate: validateMemexSettings,
-  }) as SettingsScope<ScopeConfig>
+/**
+ * The live scope-table fields of the plugin Config, at fixed object paths.
+ *
+ * DSH 0.2.0 removed the separate settings registry (`ctx.settings.register`,
+ * `settings.yaml`): configurable values belong to the plugin's own Cordis
+ * Config, and fields that change without a remount are declared `.volatile()`.
+ * The loader commits a validated volatile-only edit into these references and
+ * emits `loader/volatile-update`; the settings form edits exactly these paths.
+ */
+export const MEMEX_CONFIG_PATHS = ['autoDerive', 'scopes', 'bindings', 'workspaces'] as const
+
+/**
+ * The plugin Config as a plain Schemastery schema — the loader recognises
+ * volatile paths only on a Schemastery schema (`~standard.vendor`), and
+ * references may not sit inside a transform, so cross-field rules are not part
+ * of the schema. They run in {@link validateScopeTable}: on mount (apply) and
+ * through the plugin's `internal/config` hook, which is what both the settings
+ * pre-check and the loader's volatile commit call before touching references.
+ */
+const fields = MemexSettingsSchema.dict as Record<(typeof MEMEX_CONFIG_PATHS)[number], Schema>
+export const Config = Schema.object({
+  // Organization keys: deployment facts from the (private) row config. Ordinary,
+  // not volatile — changing them remounts the plugin, and the form never shows them.
+  internalHosts: Schema.array(Schema.string()),
+  internalDomains: Schema.array(Schema.string()),
+  autoDerive: fields.autoDerive.volatile(),
+  scopes: fields.scopes.volatile(),
+  bindings: fields.bindings.volatile(),
+  workspaces: fields.workspaces.volatile(),
+})
+
+interface Ref<T> { get(): T }
+export interface Config {
+  readonly internalHosts?: readonly string[]
+  readonly internalDomains?: readonly string[]
+  readonly autoDerive: Ref<boolean>
+  readonly scopes: Ref<ScopeConfig['scopes']>
+  readonly bindings: Ref<ScopeConfig['bindings']>
+  readonly workspaces: Ref<NonNullable<ScopeConfig['workspaces']>>
+}
+
+/** Parse and fully validate a raw row config; throws on shape or cross-field violations. */
+export function parseConfig(raw: unknown): Config {
+  const value = Config((raw ?? {}) as never) as unknown as Config
+  validateMemexSettings(readScopeConfig(value))
+  return value
+}
+
+/**
+ * Validate every config candidate of this plugin instance before it is used:
+ * the loader parses a volatile-only edit through `internal/config` and keeps the
+ * running references (last-good) when this throws.
+ */
+export function guardConfigCandidates(ctx: Context): void {
+  ctx.on('internal/config', function (this: Fiber, _raw: unknown, next: () => unknown) {
+    const raw = next()
+    if (this === ctx.fiber) parseConfig(raw)
+    return raw
+  })
+}
+
+/** Read the current scope table out of the Config's volatile references. */
+export function readScopeConfig(config: Config): ScopeConfig {
+  return {
+    autoDerive: config.autoDerive.get(),
+    scopes: config.scopes.get(),
+    bindings: config.bindings.get(),
+    workspaces: config.workspaces.get(),
+  }
 }

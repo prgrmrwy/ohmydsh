@@ -2,7 +2,8 @@
 # 修改后运行 `dsh build`(或 `node scripts/sync.mjs`)物化到 ~/.dsh。
 # 约定:禁用(enabled: false)≠删除;手改一律回写本仓库。
 
-dshVersion: 0.1.5-rc.2     # 启动脚本 bin/dsh 运行时读取,单一版本来源
+dshVersion: 0.2.0-rc.2     # 启动脚本 bin/dsh 运行时读取,单一版本来源
+                           # [2026-10-04] upgrade-dsh-0-2-0-runtime W3:0.1.5-rc.2 -> 0.2.0-rc.2(隔离候选,未部署)
 
 autoUpdate:                # 启动/构建前自动检测并升级 DSH 版本(channel = registry dist-tag)
   enabled: false           # 关闭:完全跳过检测,钉在 dshVersion(需手动升级时改回 true;env DSH_SKIP_UPDATE=1 等效)
@@ -26,9 +27,9 @@ thirdPartyResources:
     version: 2.0.1
     integrity: sha512-G5P8ossz5R7lDuUWAO1v5aVG93qVjk3D85+tF2gkPGVhnVgdfEZ+pqllsAo+IEMsKa7/KE52ohbAhb9m+r0XtQ==
     provider:
-      spec: '@deepseek-ai/dsh-skill-filesystem@0.1.5-rc.2'
-      version: 0.1.5-rc.2
-      integrity: sha512-lEZ9KojaIc24vKCa5mp8LBHUDoXpNRSR/vlMsWONc9Tc1wwfn9kEotIjj0HD4PjIRcnc+Lma1nk4G/oNED8A9Q==
+      spec: '@deepseek-ai/dsh-skill-filesystem@0.2.0-rc.2'
+      version: 0.2.0-rc.2
+      integrity: sha512-V/88b4uEFwhCAewQhI/VE7/IvgBkDQb//3/zQjK7xieZ+D9wVpOc5AY8GCcQThZu5aGBnI1gX5ITHPlUHjKUtQ==
     providerName: spec-superflow-upstream
     skills: [bug-investigator, build-executor, code-reviewer, contract-builder, need-explorer, release-archivist, spec-merger, spec-writer, workflow-start]
   - id: jev
@@ -38,9 +39,9 @@ thirdPartyResources:
     version: 0.6.0
     integrity: sha512-AAQeZESEMatz5m5X/bojvcL3bpwTPxebFOXBSj66KKNOKznumhne2VsLQ9btxPWBS8obhbVvCInwooy7Phudtw==
     bridge:
-      spec: '@deepseek-ai/dsh-mcp-client@0.1.5-rc.2'
-      version: 0.1.5-rc.2
-      integrity: sha512-L1uhXptzs63bne3fpe8By30xUu2KzC9bbo8t1RdasnRNxhevNJA/5/Z9ZenuMRh26XZh9THF+DVuudEH8PFIsQ==
+      spec: '@deepseek-ai/dsh-mcp-client@0.2.0-rc.2'
+      version: 0.2.0-rc.2
+      integrity: sha512-UqP2sY1r6qAhBPFeuclqrXiMBBxPaCNrXlXRqKxAON7uI1wmZZ0B3/1GmBviQ3/WjjTQlOOkj0su2v4e5DMkug==
     serverName: jev
     credentialEnv: TYPESAFE_API_KEY
     toolCallTimeoutMs: 30000
@@ -75,12 +76,27 @@ customizations:
   - id: cost-meter
     type: package
     source: remote
-    spec: dsh-cost-meter@1.7.30
-    version: 1.7.30
+    spec: dsh-cost-meter@1.8.4
+    version: 1.8.4
       # [2026-09-04] staged-dsh-and-plugin-upgrade 阶段一:cost-meter 1.5.42 -> 1.7.10
       # [2026-09-21] upgrade-dsh-0-1-5-runtime 任务 2.1/7.2:1.7.10 -> 1.7.30。
       #   审查记录 checking/cost-meter-1.7.30.md;peer 已含 ^0.1.5-0(对 0.1.5-rc.2 满足)。
       #   回滚:改回 dsh-cost-meter@1.7.10 + version 1.7.10 → dsh build → 重启。
+      # [2026-10-04] upgrade-dsh-0-2-0-runtime W1(任务 1.2):1.7.30 -> 1.8.11(npm latest,
+      #   integrity sha512-3G1PgC+razTH4xWq0cn2/Kh1czGhjSfjDFauEGxy66RzeXCb5upq+mo4kXle4Kfd4DAsSGzQUVgsbG/IJOMilA==)。
+      #   peer(dsh-credentials/dsh-home-paths)= 旧范围 || >=0.2.0-rc.1 <0.3.0-0,0.1.5-rc.3 与 0.2.0-rc.2 双侧满足,
+      #   故作为前置波次在 0.1.5 上独立上线。发布物核对:运行依赖仍只有 zod(4.5.1→4.6.5),无 install 脚本;
+      #   新增 lib/cli-bridge.js 以 execFile(shell:false、固定参数、15s 超时、错误不带输出)只读调用用户自装的
+      #   qwen-cli / bailian-cli 查百炼额度,仅在用户启用对应 Provider 且本机 PATH 有该 CLI 时才执行;
+      #   新出现的 5 个域名(mimo.mi.com 等)均为价目表 sourceUrl / 文档链接常量,不是请求目标;
+      #   ledger 仍为 version 1(同一 store 格式,回滚到 1.7.30 可直接读)。新增跨进程 ledger 锁。
+      #   回滚:改回 dsh-cost-meter@1.7.30 + version 1.7.30 → dsh build → 重启。
+      # [2026-10-07] 最终候选改 pin 1.8.4：支持0.2且不含1.8.5起的全局fetch observer，
+      #   与原版header0.1.0共存；不改第三方源码、不为此打DSH patch。
+      #   integrity sha512-xtcidwjxRTchiKFTOci8z8UyNTxvabBzvWpRKCbVkOlqcl39fneEqyBPFrdVTEyioc88L45fZ8agoE509KTCAA==。
+      #   devbox原样安装/Cost RPC/设置页/原header进程内注入通过；见checking/header-community-options.md。
+      #   回滚到现役1.7.30须同时回退DSH到0.1.5并恢复备份，不可在0.2直接使用该旧pin。
+      #   用户批准的兜底：若完整验收失败，保留OpenCode/header、将cost-meter设enabled:false。
     enabled: true
     brief: 会话费用统计
     note: '会话费用统计(web client 插件);仓库 https://github.com/Han-1413141/dsh-cost-meter;1.7.10(2026-09-04 审查,npm 1.7.10 发布物核对):① 密钥治理变更——所有密钥(OpenCode Go Key、各 Coding Plan Key、火山 AK/SK、自定义余额 {{VAR}} 占位符)不再明文落盘,一律迁入 DSH 凭据库(新增运行时依赖 @deepseek-ai/dsh-credentials 0.1.0-rc.8,与 dsh-home-paths 同为精确锁版),设置页输入框改 write-only(保存后不可回显),账本 ledger.json 与下发浏览器的配置永不含明文;旧版写在请求头里的明文密钥在启动时自动导入凭据库并替换为 {{CUSTOM_BALANCE_KEY_…}} 占位符;携带凭据出站另受 customBalance.allowedHosts 白名单约束(未配置时放行并告警一次,不 fail closed)。② 网络声明面扩大——host 侧出现的域名由 1.5.42 的 18 个增至 19 个(净增 cli-chat-proxy.grok.com、chatgpt.com、cloudcode-pa.googleapis.com 及其 daily/sandbox 变体,来自新增的 CLIProxyAPI 网关额度适配器与 xAI/Codex 额度查询;另有 open.volcengineapi.com 为火山方舟 AK/SK 管控面 HMAC 签名端点);其中一部分仅为文档/价目表链接常量(api-docs.deepseek.com、opencode.ai/docs、ax.ac.sugon.com 等)而非请求目标。**隐私边界:余额/额度类端点仅在用户显式启用对应 Provider 时才出站,未启用不产生任何网络流量**;API Key 只发往各自官方域名(baseURL 指向非官方域名时余额查询直接拒绝,模型请求不受影响)。③ 版本选择——1.7.0/1.7.8/1.7.9 曾致宿主启动即崩,故直接取该功能线首个稳定版 1.7.10;升级后必须先做宿主冒烟(排查 plugin tree failed to load / Cannot access / strict codec)再推进后续阶段。仍为纯 web client 插件(dsh.client.platform=web + 自带 cordis.patch.yml),不导入 cordis/dsh 的 Service/Context 运行时类,故不受阶段四运行体迁移直接影响;engines.node >=20。历史记录:1.5.35(2026-08-21 审查):v1.5.34 为 dsh 0.1.1-rc.x 适配(修复 rc.2 下费用展示丢失),v1.5.32 内置 DeepSeek-V4-Flash-Vision-Exp 计价,v1.5.35 修正未命中模型列表口径;升级后需重启验证加载与展示'
@@ -146,17 +162,22 @@ customizations:
     type: package
     source: local
     version: 0.1.0
+    # [2026-10-04] upgrade-dsh-0-2-0-runtime W5:compat 运行时已按 dsh-v0.2.0-rc.2 重新推导
+    #   (4 个 seam 上游仍 0 命中;patch sha256 86310610…),W3–W4 期间的候选内禁用已撤销。
     enabled: true
     # 仅长期 dsh web Host 使用的 Pet Locus 兼容运行时；build/plugin 等官方
     # CLI 仍按 dshVersion 走官方精确版本。版本变化必须重新审查，不自动套补丁。
     hostRuntimeCompatibility:
       kind: pet-unified-locus-v1
-      supportedDshVersion: 0.1.5-rc.2
+      supportedDshVersion: 0.2.0-rc.2
     brief: 常驻桌宠 Agent 入口(Pet Task/Invocation/可信来源快照/受管 Skill store)
     note: 'openspec change add-dsh-pet;Host+Web bundle。Host 随 dsh web 同进程启动,自有受控生命周期(starting/ready/degraded/stopping)——Pet 初始化失败只降级自身,不阻止其余 DSH 服务加载。持久化:组合官方 @deepseek-ai/dsh-storage-sqlite 并仅把 dsh_pet 域路由到该 backend(storage-domain.routes 为覆盖式,profile 其余域保持默认 json);运行时状态一律位于 $DSH_HOME/plugins/dsh-pet/(state.sqlite / workspace / skills/store),与包安装目录和生成 profile 分离,插件升级或 profile 重建不覆盖任务数据。模型:每来源 scope 至多一个未归档 Pet Task,固定复用位于专用 DSH Pet Workspace 的一个普通 root executor session;每次调用创建新 Invocation 并固定当时 source 快照,页面切换不改写已创建 Invocation。Skill 隔离:Pet 不自带任何 Skill,也不提供让 Skill 为 Pet 适配的机制(petLabel/petIcon/petContext 解析已移除)——能力一律来自用户从 Host 绝对路径显式导入的普通 DSH Skill,登记为指向用户自有目录的 local-link 并软链投影到 workspace/.dsh/skills;授权边界是 Pet allowlist provider 而非投影,投影损坏/越界 fail-closed 并需显式重建。Pet 不按能力施加上下文门禁,来源是否够用由 Skill 自行校验。可信上下文:零参数 pet_context 工具按实际调用 executor session 反查当前 Invocation,模型无法传标识改绑目标。⚠ 该工具必须注册在 **executor 的 scoped agent 上下文**:官方 tools.register() 按调用上下文的 scope tag 决定层级,**无 scope 即静默落 global 层**——注册在 Host 上下文会让普通会话看到 pet_context 并误调用得到 NOT_A_PET_SESSION(openspec change scope-pet-context-tool-to-executor,2026-09-07 实机复现)。同一 change 覆盖 executor 加载的三条路径:Pet create、Pet resume(新 scope 必须重装 preset 与 scoped surface)及 DSH 自身从原生列表加载(agent/created 仅补 scoped surface,不重复 mount 已挂载 preset);所有 Pet Task executor 获得 pet_context,仅专用 Pet executor 获得 allowlist provider,workspace-resident executor 保留 standard preset 与 workspace Skills;WeakSet 幂等闸防重复注册,dispatch 前缺 scope 则 fail closed。[2026-09-10 真机修复]Cordis `ctx.inject()` 回调异步执行,不得注册后同步检查 WeakSet；create/resume setup 现显式等待 skills/tools 两个回调真实完成,外部加载 executor 复用同一 in-flight Promise,5s 未就绪 fail-closed；空且 failed 的 executor 创建壳会自动归档并新建 epoch,已有 Invocation 的失败历史不动。管理面为 loopback + same-origin 精确路由,严格字段校验、响应脱敏,不暴露任意 DSH RPC/prompt/文件路径(仅专用导入操作)。不读取或保存 provider 凭据。飞书入站(openspec change fix-pet-lark-onboarding):绑定使用新版 lark-cli `config init --name dsh-pet` 建专属 profile,Host-owned 订阅/身份/成员/历史/表情/回复均显式 `--profile dsh-pet --as bot`;绑定后以 `auth status --json --verify` 顶层结果核验 App ID 并原子持久化 bot open_id/name,旧 App-ID profile 不自动 rename/切换而在设置页要求显式重连。Channel onboarding 按 Bot→身份→allowlist→默认 workspace→启用/连接展示稳定步骤与 blocker;openspec change pair-pet-allowlist-member 增加允许成员单聊配对:Host 内存生成 40-bit `/pair xxxx-xxxx` bearer code(5min、单次、重启/取消/替换即失效),与正式 Channel 复用唯一受监督 consumer 且仅在 ready 后显示命令;严格限制 user+p2p+text+合法 open_id+配对水位+精确命令,首个认领者经串行配置写原子加入 allowlist,姓名仅作展示缓存;错误码/群聊/旧码静默,配对不创建 Task/Invocation/chat binding/表情,提交后才由 Host 固定回执;Settings 提供倒计时/复制/取消/重生/终态并保留手填 open_id 兜底。启用前 Host 重验全部前置;starting/reconnecting 页面做可取消有界刷新,避免错过 ready edge 后永久显示启动中。仅支持能由 `auth status --json --verify` 直接证明 bot open_id 的 lark-cli(最低已验证 1.0.93),旧版/未知版本提示升级且不启动 consumer;目标群缺 scope 仅持久化 code/scopes/官方 open.feishu.cn URL,ignored 仅节流记录低基数分类,不含正文/chat/message/sender/token。一期不含飞书入站 transport、跨设备 Pet Hub,也不改 dsh-cockpit 与 dsh-cockpit-bridge。隔离 DSH home 验收通过后启用(2026-09-01)。环境变量(openspec change pet-send-cr-and-workspace-env,2026-09-03):按 global 与来源 workspace 两个作用域配置键值,workspace 覆盖同名 global,两者皆无则变量不存在、由 Skill 停下询问;经官方 ctx.shellEnv 以 DSH_PET_<KEY> 注入 executor 每次 shell 调用,值不进 prompt/envelope,走 ShellExecRequest.dshEnv 通道;设置页第四页签「环境变量」含全局/工作区/生效结果三区,值默认打码、标示覆盖关系。⚠ shellEnv 为可选依赖:经 ctx.get 读取(写进 inject 会变必需依赖,Host 缺该服务时 Pet 永不加载),且 register 必须直接调用——包在 ctx.effect 里会因 effect 重跑重复注册抛错,中断 Pet 初始化并导致 executor 丢失 bash/fs 等官方工具(2026-09-03 实测复现并修复)。浮层:Pet 挂在 document.body 下自有宿主 + 独立 React root(非 portal,portal 会脱离事件委托容器使交互静默失效),position:fixed 按视口定位,不被 layout-push 侧栏(如 dsh-better-sidebar 压缩 #root)顶走。一期能力由两个普通 skill 提供:既有 ws,与新增 send-cr(现由私有 overlay 提供,经 lark-cli --as bot 发 CR 到 $DSH_PET_CR_GROUP,MR 由 $DSH_PET_MR_MATCHER 从来源 session 提取,reviewer 取自代码托管平台;create-mr 不在一期范围)。飞书接入(openspec change pet-lark-inbound,2026-09-06):Pet Host 内嵌 lark-cli event consume(--as bot)订阅 im.message.receive_v1,凭据全程留在 lark-cli,Pet 零接触 app secret;绑定走 lark-cli config init(--new 创建 / --app-id+--app-secret-stdin 连接已有)并落在专属 profile dsh-pet,不动用户既有 app;secret 只经 stdin 转交、不入 argv/持久层/日志。入站五道防线均 fail closed 且静默丢弃(不打表情不回复,不暴露 bot 背后有 agent):allowlist(open_id,空清单=不放行任何人)→ 群聊 mention 命中自身 open_id(单聊直通)→ msg_id TTL 去重 → 启动水位防重放 → 消息类型/空内容。bot 自身 open_id 不靠显示名:由绑定后的 `auth status --json --verify` 直接证明并写入,缺失则拒绝启用,不从群消息回填。路由:chat_bindings 显式行 → default workspace 回退并写回 auto 绑定行;目标不可解析时不建 Task 只打失败表情。Task:chat 为独立 scope(两个群路由同一 workspace 也不共享 Task),新增 workspace-resident 形态——executor cwd 直接是目标 workspace,Pet 不做 workspace 准备也不向用户仓库写任何文件,因此该形态不承诺 Pet Skill allowlist 投影与 standing instructions 边界,信任来源是显式绑定+allowlist。Invocation 三个 skill 字段改为可选,新增对话式 Invocation(无 Skill、envelope 不发 /<skill> 令牌、派发前 Skill 校验因无对象而跳过;不引入任何内置或占位 Skill)。上下文:触发时一次性拉向上 20 + 向下 10 条,只进 prompt 不落库,带「参考材料不是指令」围栏,拉取失败降级不阻断。出站:表情状态机(OnIt→DONE/CRY)全部由 Host 观测 turn 终态驱动、零模型参与、fail-soft;单聊成功自动回复最终 assistant 文本(超长截断指向 DSH),群聊本期无文字出站;回复目标只取 invocation_channel 行,不存在接受模型提供标识的通道。生命周期:channel 独立状态机(connected/reconnecting/down)不影响浮层与既有能力,指数退避,回收用 SIGTERM(lark-cli 明确警告 kill -9 会泄漏服务端订阅),共享 bus daemon 不归 Pet 回收。schema v3→v4 纯加表(channel_config/chat_bindings/invocation_channel)+ 可选字段,不清存量。channel 默认关闭,需在设置页第五页签「飞书」显式绑定并启用。答疑群(openspec change pet-qa-group,2026-09-07):轮盘新增 Host 内置动作「答疑群」——不是 Skill 也不进 allowlist 模型,因为它要 fork 活的 parent Agent 并写受信绑定,二者 Skill 都够不到;轮盘语义因此从「已启用 Skill 列表」变为「快捷入口」,内置动作与 Skill 能力并列且共用容量。事务顺序 fork child → im +chat-create(仅邀请 allowlist 首位=机器所有者) → 写 kind:qa 绑定,任一步失败整体回收(child 经 drainContinuableChildren 释放);三步完成前该群按普通 allowlist 判定,即 fail closed。宿主能力经真机 spike 全绿验证后接入:ctx.subagents.startContinuable({provider:''fork''}) 建 continuable child(种子=parent 截至最后一个完成 turn/end,in-flight turn 不进种子),群消息经 dsh-subagent/internal 的 symbol 键 queuePrompt 排成 child 独立 turn,parent 非驻留时先 agents.resume,DSH 重启后 continuation manager 冷恢复 child。⚠ subagents/agents 均以 ctx.get 探测式接入(写进 inject 会让缺该服务的 Host 加载不了 Pet),探测失败时动作以禁用态显示原因而不是消失。准入:qa 绑定豁免 sender allowlist(群由 Host 亲手创建,成员只能被群内人拉入,故成员身份即凭据),豁免严格限于该 chat,其余防线(bot-sender/mention/去重/水位/消息类型)原样;非 qa 链路零变化。终态只信 subagent/end 事件——queuePrompt 返回仅代表 inbox 接受,不代表 turn 跑完更不代表落盘;结算按 chat 内最早未 settled 行匹配(child inbox 为 FIFO)。child 继承源会话组合与工具面,Pet 不装 preset 也不装 allowlist provider,不承诺任何 Skill 边界——信任来源是「本人建群+本人拉人」,prompt 要求改动前先确认(防呆不防坏)。源会话归档或无法 resume 时绑定失效:群内明示一次后静默(qa 群里 bot 已公开发言,静默只会显得坏了),child 会话与历史保留可查。schema v4→v5 纯加字段(chat_bindings.kind 缺省 workspace + qaChild/qaParent/qaInvalidated,tasks 新增 qa-chat sourceKind),不清存量。[openspec change pet-media-official-cli-download]媒体下载不再依赖私有 lark-cli fork:删除 packages/dsh-pet/compat/lark-cli(patch + 固定 Go 工具链 + artifact,冷构建省约 1.7 GB)与本条目的 buildInputs 三条登记,`build:runtime-compat` 只剩 storage 段;改为以 $DSH_HOME/plugins/dsh-pet/media-spool(0700,已在 locus child project-read guard 的 deniedRoots 覆盖之内)为 spawn cwd,用本机 pin 的官方 lark-cli 路径模式下载,官方 binary 必须能解析且 `--version` 等于 1.0.94,否则 media port 保持 unavailable(文字 Delivery 继续);写入期每 50ms 量目标与原子写临时条目,超限即终止整个进程组,成功/失败/取消/超时一律删除本次随机前缀条目,启动清扫全部残留;隔离依据由「字节无具名路径」改为「路径位于 child 被拒 root 内」,已知退化=失去官方 CLI 的已知长度读前拒绝[2026-09-22 真机修复]升级到 0.1.5-rc.2 后 lumevm 上 Pet 启动即整体不可用:`node:sqlite` 绑定字符串参数在首个 NUL 字节处截断(C 字符串语义),而三张 Locus 表(locus_indexes/locus_switch_notices/locus_permission_audit)此前用 `\u0000` 作复合行键分隔符——话题级 endpoint、switch notice、permission audit 序号过 1 的行,主键实际全部塌缩到分隔符之前的前缀,`INSERT ... ON CONFLICT DO UPDATE` 静默保留最后写入者,索引表出现真实数据丢失;启动对账发现行键与 value.key 不一致时抛错,而调用方 `if (locusStartup === undefined) return` 让整个 Pet apply()提前退出,路由未注册、飞书通道不启动。改分隔符为 `\x1f`(`host/locus/storage-key.ts`);对账发现的是「行键为 value.key 截断前缀」这一可证明的损坏特征时改为自愈(用 value.key 计入内存索引,不再中止启动;真正无关的不一致仍 fail closed);新增离线修复脚本 `scripts/repair-truncated-keys.mjs`(比照既有 `migrate-state-version.mjs` 范式:停 Host、备份、`--dry-run`/`--yes`)重写历史损坏行键,对索引表的碰撞该脚本会标记 UNRECOVERABLE 而非猜测——但 locus_indexes 的碰撞在下次 Host 启动时通常已被 `reconcileStartup` 的全量 loci→index 重建自愈,switch_notices/permission_audit 无此重建、碰撞是真实永久丢失。顺带修了另一处独立死锁:显式重建入口若原 parent 已归档,`resolveMainParent` 与真正缺失用同一句「已停止操作」,而重建请求的 parentSessionId 固定取自被重建 locus 记录本身(GUI 无法换绑),于是唯一出口必然失败;现在归档态给出「已被归档,请先恢复」的专门措辞,恢复归档后同一重建请求即可成功。同步补 `openspec/specs/pet-locus-collaboration/spec.md` 『来源失效』一节缺失的『原 parent 已归档』场景。[openspec change shrink-pet-compat-to-minimal,2026-09-22]compat overlay 从 **7 个上游包 / 72 hunks 收敛到 1 个包 / 32 hunks**,现在只替换 `@deepseek-ai/dsh-subagent`。① 移除 `isolateQueuedTurnClaim`(8 hunks,`core/agent` + `core/agent-loop` 回到官方原版):该 seam 只服务 B035 的推送式 inquiry 派发,而该路径已被拉取式上下文工具(`pet_locus_parent_lookup` 等,读已持久化 transcript、不唤醒对方、不占 run slot)取代;实测 override 从未启用(npm arborist 崩溃)、台账 0 行。② storage 改为**注册 Pet 自有 backend**(删 `storage-atomic.patch` 32 hunks,`storage`/`storage-domain`/`storage-json`/`storage-sqlite` 四包回到官方原版,`compatDependencies` 随之退役):`@deepseek-ai/dsh-storage` 公开导出 `StorageBackend`/`KvFacet`/`KvUnit` 与 `BackendRegistry` 且明述路由归消费者,故 Pet 实现自己的 backend(`src/host/storage/`),schema 校验、域版本迁移、`domain/changed` 仍由官方 storage-domain 承担。⚠ backend 必须是**独立 Cordis 行**(`dsh-pet-storage`):storage-domain 注入 `storageBackendServiceKey(name)` 而 Pet 行注入 `storageDomain`,自 provide 会成环。⚠ SQLite 排他锁**按连接**持有:初版保留官方 backend、另开连接持锁,真机死锁;事务与锁必须是写记录的同一句柄。⚠ `locking_mode = EXCLUSIVE` 是**惰性**的,新建库时 schema 写入恰好顺带取锁掩盖了缺陷,对已存在的库则一无所写、第二个 Host 会长驱直入,故 open 时必须强制 `BEGIN IMMEDIATE`/`COMMIT`。③ 保留的 4 个 seam 及其 marker:`settlementNotice:''silent''`、`createIdleContinuable`、`contextMode:''independent-v1''`(含 durable `toolFilter`)、`withLiveContinuableChildSession`。**曾计划一并退掉前三项,实施期复核证伪**:官方 `SubagentStartRequest.prompt` 必填,而 locus 创建是两阶段的(建 child → 建群 → 提交 locus 行 → 才投递首条内容),中间那段 child 必须存在但不能开工;`composeFrom` 绑定的是**父的** standing mount 实例(保证「已存活子代不被父的后续变更污染」),而冷恢复需要的是「子代能独立于父重建自己的组合」,后者只有 `independent-v1` 提供;`toolFilter` 官方确有但与 `independent-v1` 共用 descriptor v5,拆不干净。教训已固化为 `pet-compat-minimization` 的 Requirement「判定 seam 可移除必须覆盖其全部语义」——**移除判定与新增判定适用同一举证标准**。**退役条件(诚实措辞)**:上游需同时发布这四项能力才能删除本 overlay;目前**只有 settlementNotice 报告过上游**(discussions #7508,交叉引用 #5360),其余三项上游并不知情,故本字段不应被读作「即将到期」;上游不接受外部 PR,唯一通道是 Discussions。'
   - id: dsh-pet-executor
     type: preset
     version: 0.1.0
+    # [2026-10-04] upgrade-dsh-0-2-0-runtime W5(任务 5.4):0.2.0 不再从 $DSH_HOME/.agent-presets
+    #   加载目录式 preset;sync 在 0.2+ 上把它渲染成 `@deepseek-ai/dsh-agent-preset` 声明行
+    #   (id preset-dsh-pet-executor),并经账本清理 0.1.x 留下的目录副本。
     enabled: true
     brief: Pet 执行会话专用 preset(不加载 skill-filesystem)
     note: '与官方 standard 的唯一差别是移除 skill-filesystem。Pet 规范要求只有其允许清单中显式启用的 Skill 才可对执行会话发布/加载/注入,而 dsh-skill 的 collectFresh 始终把 global 层并入合并结果——scoped 注册是加法,provider 无法减去 preset 带进来的另一个 provider,因此排除它的唯一办法是不在 preset 中加载。保留 tool-skill:执行会话仍需目录与加载器,只是目录完全来自 Pet 允许清单。理由见 packages/dsh-pet/docs/adr/0001-executor-preset.md'
@@ -209,12 +230,18 @@ customizations:
   - id: llm-subscriptions
     type: package
     source: remote
-    spec: dsh-plugin-subscriptions@0.9.6
-    version: 0.9.6
-    integrity: sha512-wxTjDtaB5dwxqTZLy2tkT/ccvefj3qFKc9il4UMPnKa2XOVgyCoYYBk9/UnI5F5nMnXJgF/OZDGx8tZ1in7eiA==
-    # provenance: upstream npm release, gitHead d8ab13e91fd6747e419a1f5e965bce42bdfc3ad8;
-    # integrity identical on registry.npmjs.org and the private-npm mirror; tarball SHA-256
-    # 9379f9765b5d9b2151502c1088740fafb5e8c3e6952d694e0f5756bedd7589ba.
+    spec: dsh-plugin-subscriptions@0.9.7
+    version: 0.9.7
+    integrity: sha512-p+rOInD3AWu6vMYIDiUnUWdU8y17NCC/NaV1JckamMc0kwwMh4wVQwZ2ycMdcWaEfbS2xsW+WwD+Dqv3NAdRSA==
+    # provenance: upstream npm release, gitHead c5cc37fe7ac431dd3dad0821857573b5ac1e7d5b.
+    # [2026-10-04] upgrade-dsh-0-2-0-runtime W1(任务 1.2):0.9.6 -> 0.9.7。peer 在既有 0.1.x 范围后
+    #   追加精确 `0.2.0-rc.2`,0.1.5-rc.3 与 0.2.0-rc.2 双侧满足,作为前置波次在 0.1.5 上独立上线。
+    #   上游 release notes:适配 0.2.0 的 request-only message / 一等 tool result / 图片 offload 占位,
+    #   同时保留旧历史翻译;账号与池成员在能力准备到派发间保持一致;provider replay 按具体账号+模型隔离;
+    #   空终止错误触发故障转移、保留 tool error 标志、提前关闭未读 SSE。发布物核对:出站域名集合与
+    #   0.9.6 完全一致(无新增/删除),child_process 使用文件数不变(3)。
+    #   回滚:spec/version/integrity 改回 0.9.6(gitHead d8ab13e9,
+    #   sha512-wxTjDtaB5dwxqTZLy2tkT/ccvefj3qFKc9il4UMPnKa2XOVgyCoYYBk9/UnI5F5nMnXJgF/OZDGx8tZ1in7eiA==)→ dsh build → 重启。
       # [2026-09-29] 0.9.2 fork → 上游 0.9.6:本机 codex 目录缺 gpt-6-sol / gpt-6-luna。
       #   同账号实测 client_version=0.153.4 只返回 gpt-6-astra,0.155.1/0.159.0 才返回
       #   sol/luna;0.9.2 从 npm 查 @openai/codex 最新版的超时只有 1.5s,而本机经 Clash
@@ -244,12 +271,16 @@ customizations:
   - id: width-tiers
     type: package
     source: remote
-    spec: dsh-width-tiers@1.0.5
-    version: 1.0.5
+    spec: dsh-width-tiers@1.0.6
+    version: 1.0.6
       # [2026-09-04] staged-dsh-and-plugin-upgrade 阶段二:width-tiers 1.0.3 -> 1.0.4,
       #   并同批删除手写 patch 条目 width-tiers-wiring(接线改由包自带 bundle patch 承载)。
       # [2026-09-21] upgrade-dsh-0-1-5-runtime 任务 7.1:1.0.4 -> 1.0.5(无 peer,engines.node >=18)。
       #   回滚:改回 dsh-width-tiers@1.0.4 + version 1.0.4 → dsh build → 重启。
+      # [2026-10-04] upgrade-dsh-0-2-0-runtime W1(任务 1.2):1.0.5 -> 1.0.6(仍无 dsh peer;
+      #   gitHead 3679abd3,integrity sha512-O9/ZyA1V+xwl/tGrxK9JgaNN97QR1484qqo3kPuwq9Ywnvnk7gBopB3yMWLQozP+79iE+0t1oMzZL2MZAjMQVg==)。
+      #   发布物只改 lib/client.js 与 README,无 fetch、无 child_process、无新增域名。
+      #   回滚:改回 dsh-width-tiers@1.0.5 + version 1.0.5 → dsh build → 重启。
     enabled: true
     brief: 对话区宽度五档切换(748px 至全宽)
     note: 'repo https://github.com/aaronlei/dsh-width-tiers(MIT);用途:Web 对话区标准/中等/宽/超宽/全宽五档切换并以 localStorage 记忆;1.0.4(2026-09-04 审查,npm 1.0.4 发布物核对):**该版本新增了自带的 cordis.patch.yml,并在 package.json 补上 dsh.bundle.patch** —— 此前本包只声明 dsh.client,`dsh plugin add` 把它装成普通依赖、不进 dsh.profile.bundles,浏览器半区要靠本仓库手写的 patches/width-tiers-wiring.yml 插一行 loader 才被发现;1.0.4 起该接线由包自身承载,故本次升级**与删除 width-tiers-wiring patch 条目在同一批次完成**。两份 patch 语义等价(均为无 id 的 insert,插入同一条 {id: dsh-width-tiers, name: dsh-width-tiers};已用 js-yaml 解析比对,结构逐字段相同),而 DSH 的 applyEntryPatches 对无 id 的 insert 一律 push 且不去重——两者并存会产生**两条同 id 的 loader 行**,因此绝不可只升 pin 而保留手写 patch。验收口径:启动清单中 dsh-width-tiers 恰好出现一次,且 [patch] 标注消失(改由 bundle 承载)。历史审查(2026-08-20 npm 1.0.2 精确包):host 入口为空操作,client 仅注入 layout/locale,通过 --dsh-chat-content-width 行内覆盖调整宽度,不依赖构建哈希类名;无网络请求、Host 文件/命令/模型能力,生命周期 disposer 会清理 DOM、监听器、定时器与样式;注意非标准档会主动关闭详情面板,全宽档会经官方 layout 服务收起侧边栏;依赖 DSH Web rc.x 客户端布局与 locale 服务,升级后需回归验证'
@@ -265,10 +296,15 @@ customizations:
   - id: better-sidebar
     type: package
     source: remote
-    spec: dsh-better-sidebar@0.19.1
-    version: 0.19.1
+    spec: dsh-better-sidebar@0.24.1
+    version: 0.24.1
       # [2026-09-21] upgrade-dsh-0-1-5-runtime 任务 7.1:0.18.0 -> 0.19.1(peer 由
       #   ^0.1.2-rc.1 升到 ^0.1.5-rc.1,与运行体 0.1.5-rc.2 对齐)。
+      # [2026-10-04] upgrade-dsh-0-2-0-runtime W3(任务 3.7):0.19.1 -> 0.24.1(peer 只满足 0.2.0,
+      #   故随运行体同批;integrity sha512-X5tdu07Ub0isxruG559o46891F7MjxM+CzR6QoGpHZtN5J8gz6FA8Dq632lLI77c4IjL2GP+N6PuWaDnoKPuPQ==)。
+      #   发布物核对:出站域名集合不变;依赖删除 node-pty 与 schemastery、新增 @deepseek-ai/schemastery 与 yaml
+      #   (终端改走 0.2.0 官方 terminal 能力,不再自带原生 pty,也就不再需要为它放行原生构建)。
+      #   回滚:随运行体一起回到 0.19.1(0.19.1 的 peer 只满足 0.1.5)。
       #   回滚:改回 dsh-better-sidebar@0.18.0 + version 0.18.0 → dsh build → 重启。
       # [2026-09-05] dsh-0-1-2-host-api-migration:0.17.1 -> 0.18.0(准入条件
       #   「运行体升到 0.1.2 线」已满足;且 0.17.1 在 0.1.2-rc.1 上启动即崩——
@@ -321,23 +357,26 @@ customizations:
   - id: skin-center
     type: package
     source: remote
-    spec: '@linxin666/dsh-client-ui-skin-center@0.3.24'
-    version: 0.3.24
+    spec: '@linxin666/dsh-client-ui-skin-center@0.4.4'
+    version: 0.4.4
       # [2026-09-21] upgrade-dsh-0-1-5-runtime 任务 7.4:0.3.16 -> 0.3.24(peer react ^18.2.0)。
       #   回滚:改回 @linxin666/dsh-client-ui-skin-center@0.3.16 + version 0.3.16 → dsh build → 重启。
+      # [2026-10-04] upgrade-dsh-0-2-0-runtime W3(任务 3.7):0.3.24 -> 0.4.4(peer 只满足 0.2.0,随运行体同批;
+      #   gitHead 540acca5,integrity sha512-5X6SHGV4bWncapW8+9jIM5F+4rQR+YZ2EMyuwnkfvw5rB1OW3eAKI9HpTsE4nEORZW9r6jxwT5FkMVr6+OB2vQ==)。
+      #   出站域名不变;schemastery 改为 @deepseek-ai/schemastery;新增 prepare 脚本只在 git/目录安装时运行,
+      #   registry tarball 安装不执行。回滚:随运行体一起回到 0.3.24。
     enabled: true
     brief: 设置→皮肤中心(主题试穿/自定义主题/壁纸;默认 blue-fantasy)
     note: 'repo https://github.com/zhu1090093659/dsh-web(Apache-2.0,活跃);2026-09-06 审查 npm 0.3.16 发布物与 README:兼容 DSH >=0.1.2-rc.1;Host+Web bundle,内置 blue-fantasy,支持原子试穿/应用、自定义明暗主题、$DSH_HOME/skins 用户皮肤及可选 Wallpaper Engine 本机媒体桥。安全面:同源 Host 路由、皮肤目录 containment、CSS 强制 scope 且拒绝 @import/远程 URL/越界路径;但用户皮肤 patches.css 具整页样式能力,hooks.mjs 属受信代码逃生口(仅内置或 provenance/字节身份核验通过的官方市场内容执行);会读取本机 Wallpaper Engine/Steam 库并提供同源媒体流。隐私:浏览器每日向 dsh-market.com 发送一次匿名安装心跳(随机 localStorage id + 包名;上游声明服务端仅存 salted hash、不存 IP);新装默认激活 blue-fantasy。未搭配 @linxin666/dsh-i18n:该包只增加俄语,与皮肤功能无关。'
-  # 第三方(remote):dsh-web 系会话归档管理(按需子插件,不安装聚合全家桶)
-  - id: session-archive
+  # 官方可选(remote):Schedule / 自动化任务。0.1.5 默认组合自带,0.2.0 移入默认关闭的官方可选包
+  - id: experimental-schedule
     type: package
     source: remote
-    spec: '@linxin666/dsh-session-archive@0.3.24'
-    version: 0.3.24
-      # [2026-09-21] upgrade-dsh-0-1-5-runtime 任务 7.4:0.3.16 -> 0.3.24(peer react ^18.2.0)。
-      #   回滚:改回 @linxin666/dsh-session-archive@0.3.16 + version 0.3.16 → dsh build → 重启。
+    spec: '@deepseek-ai/dsh-experimental-schedule-bundle@0.2.0-rc.2'
+    version: 0.2.0-rc.2
     enabled: true
-    brief: 会话归档管理(批量归档/恢复/预览/物理删除;自动维护默认关闭)
+    brief: 官方可选 Schedule(侧栏自动化任务页 + schedule_* 工具 + 时间上下文)
+    note: '官方 bundle,与 dshVersion 同版本精确 pin(npm integrity sha512-6oGDFceBMAsrKeJfFxByyvXBPE+Obfd0oMCwNYdWesPmRBueuRwj5lwp8BY+v59mQAc3Jzdkx1hZh/E6xRcMng==)。0.2.0 把 time-context / schedule / ui-schedule 三行移出出厂 Web 组合,放入本包(dsh.bundle.patch 插入三行,依赖同版本三个官方包)。用户选择默认打开以保留 0.1.5 能力(2026-10-08)。任务存于会话日志内的会话本地投影;禁用本条目只撤销三行,已存任务保留。升级 dshVersion 时须同步改本 pin。回滚:enabled: false → dsh build → 重启。'
   # 第三方(remote):OpenCode Go 400 MissingSessionID 补丁(社区插件,非官方;官方适配发布后评估移除)
   - id: dsh-opencode-session-header
     type: package

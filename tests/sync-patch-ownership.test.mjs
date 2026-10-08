@@ -1,0 +1,541 @@
+// Profile patch ownership (change upgrade-dsh-0-2-0-runtime, W2).
+//
+// From DSH 0.2.0 the runtime itself writes the profile `cordis.patch.yml`: the
+// settings forms, the default-model picker and the plugin page persist edits as
+// override rows there, and the first boot imports `$DSH_HOME/settings.yaml` into
+// it. sync used to rewrite the whole file, so the second sync after any such
+// edit silently lost it. sync now owns only its generated region and leaves the
+// rest of the document byte-for-byte alone.
+//
+// Override fragments (an `id` row with no `insert`) are applied by the loader as
+// whole-key replacement (`target.config = value`), so a fragment's `config`
+// would erase every config key written beneath it. Fragments declared with
+// `mergeConfig: true` are therefore rendered with the keys already present in
+// the user region underneath their own, and only their own keys win.
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import yaml from 'js-yaml'
+import { readFile, writeFile, rm, chmod, stat } from 'node:fs/promises'
+import path from 'node:path'
+import { overlayFixture } from './helpers/overlay-fixture.mjs'
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
+
+const BEGIN = /^# >>> ohmydsh generated region >>>/m
+const END = /^# <<< ohmydsh generated region <<<$/m
+
+async function fixture(patches, { merge = [] } = {}) {
+  const ids = Object.keys(patches)
+  const items = ids.map((id) => `  - id: ${id}\n    type: patch\n    enabled: true${merge.includes(id) ? '\n    mergeConfig: true' : ''}`)
+  const manifest = `dshVersion: 0.1.0-rc.7\ndependencies: []\ncustomizations:\n${items.join('\n')}\n`
+  const fx = await overlayFixture({ externalRoot: false, manifest })
+  for (const [id, body] of Object.entries(patches)) await fx.putPublic(`patches/${id}.yml`, body)
+  const patchPath = path.join(fx.profile, 'cordis.patch.yml')
+  return { ...fx, patchPath, run: () => fx.sync([]), readText: () => readFile(patchPath, 'utf8') }
+}
+
+/** Compose rows exactly as cordis-plugin-include applyEntryPatches does for override rows. */
+function effectiveConfig(doc, id) {
+  let config
+  for (const row of yaml.load(doc) ?? []) {
+    if (row?.insert !== undefined || row?.id !== id) continue
+    if (Object.hasOwn(row, 'config')) config = row.config
+  }
+  return config
+}
+
+const ORG = '- id: dsh-memex\n  name: dsh-memex\n  config:\n    internalHosts: [code.example]\n'
+
+for (const version of ['0.1.0-rc.7', '0.2.0-rc.2']) {
+  for (const empty of ['[]\n', '# official scaffold [not syntax]\n[] # retain inline comment []\n', '# before\n[\n # inside empty sequence\n] # after\n', '# Windows scaffold\r\n[] # retained\r\n']) {
+    test(`${version}: official empty profile stays parseable and preserves comments after two syncs: ${JSON.stringify(empty)}`, async () => {
+      const fx = await overlayFixture({ externalRoot: false, manifest: `dshVersion: ${version}\ndependencies: []\ncustomizations: []\n` })
+      const patch = path.join(fx.profile, 'cordis.patch.yml')
+      await writeFile(patch, empty)
+      const first = fx.sync([])
+      assert.equal(first.status, 0, first.stderr)
+      const text = await fx.readPatch()
+      assert.deepEqual(yaml.load(text), [{ insert: [] }])
+      for (const comment of empty.match(/#[^\n]*/g) ?? []) assert.ok(text.includes(comment), comment)
+      assert.equal(await readFile(patch + '.bak', 'utf8'), empty)
+      const second = fx.sync([])
+      assert.equal(second.status, 0, second.stderr)
+      assert.match(second.stdout, /no changes/)
+      assert.equal(await fx.readPatch(), text)
+    })
+  }
+}
+
+test('0.2+: an empty official scaffold can seed legacy settings without losing comments', async () => {
+  const fx = await fixture020({}, { settings: 'dsh-memex:\n  autoDerive: false\n' })
+  await writeFile(fx.patchPath, '# official scaffold\n[] # retained comment\n')
+  const first = fx.run()
+  assert.equal(first.status, 0, first.stderr)
+  const text = await fx.readText()
+  assert.deepEqual(effectiveConfig(text, 'dsh-memex'), { autoDerive: false })
+  assert.match(text, /# official scaffold/)
+  assert.match(text, /# retained comment/)
+  assert.match(fx.run().stdout, /no changes/)
+})
+
+test('0.2+: runtime settings can be seeded after an empty scaffold became comments-only', async () => {
+  const fx = await fixture020({})
+  await writeFile(fx.patchPath, '# preserve this scaffold comment\n[]\n')
+  assert.equal(fx.run().status, 0)
+  await writeFile(path.join(fx.dshHome, 'settings.yaml'), 'dsh-memex:\n  autoDerive: false\n')
+  const seeded = fx.run()
+  assert.equal(seeded.status, 0, seeded.stderr)
+  assert.deepEqual(effectiveConfig(await fx.readText(), 'dsh-memex'), { autoDerive: false })
+  assert.match(await fx.readText(), /# preserve this scaffold comment/)
+  assert.match(fx.run().stdout, /no changes/)
+})
+
+test('a malformed generated fragment cannot replace the last valid profile or its backup', async () => {
+  const fx = await fixture({ frag: '- insert: []\n' })
+  const original = '# keep runtime data\n- id: runtime\n  config: { value: 1 }\n'
+  await writeFile(fx.patchPath, original)
+  await writeFile(fx.patchPath + '.bak', 'previous backup\n')
+  await fx.putPublic('patches/frag.yml', '- insert: [\n')
+  const result = fx.run()
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /composed profile patch.*(YAML|parse)/i)
+  assert.equal(await fx.readText(), original)
+  assert.equal(await readFile(fx.patchPath + '.bak', 'utf8'), 'previous backup\n')
+})
+
+test('a nonempty flow sequence is refused rather than dropping runtime entries', async () => {
+  const fx = await fixture020({})
+  const original = '[{ id: runtime, config: { value: 1 } }]\n'
+  await writeFile(fx.patchPath, original)
+  const result = fx.run()
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /composed profile patch/)
+  assert.equal(await fx.readText(), original)
+  assert.equal(existsSync(fx.patchPath + '.bak'), false)
+})
+
+test('sync waits for the config-editor shared lock before snapshotting patch rows', async () => {
+  const fx = await fixture({ frag: '- insert: []\n' })
+  assert.equal(fx.run().status, 0)
+  const before = await fx.readText()
+  await fx.putPublic('patches/frag.yml', '- id: generated-new\n  config: { added: true }\n')
+  const lock = path.join(fx.profile, 'package.json.lock')
+  // Our live PID makes this an actual foreign lock, never a stale one.
+  await writeFile(lock, `${process.pid}\n`)
+  const child = spawn(process.execPath, [path.join(fx.repo, 'scripts/sync.mjs')], { cwd: fx.repo, env: fx.env(), stdio: ['ignore', 'pipe', 'pipe'] })
+  let stdout = '', stderr = '', exited = false
+  child.stdout.on('data', (data) => { stdout += data })
+  child.stderr.on('data', (data) => { stderr += data })
+  child.once('exit', () => { exited = true })
+  const done = once(child, 'close')
+  try {
+    // No package customization: this tests the patch writer, not package edits.
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    assert.equal(exited, false, `sync ignored config-editor lock: ${stdout} ${stderr}`)
+    assert.equal(await fx.readText(), before)
+    await writeFile(fx.patchPath, before + '- id: runtime-saved\n  config: { scopes: [saved] }\n')
+  } finally { await rm(lock, { force: true }) }
+  const [code] = await done
+  assert.equal(code, 0, stderr)
+  const after = await fx.readText()
+  assert.deepEqual(effectiveConfig(after, 'runtime-saved'), { scopes: ['saved'] })
+  assert.deepEqual(effectiveConfig(after, 'generated-new'), { added: true })
+  assert.equal(fx.run().status, 0)
+  assert.equal(await fx.readText(), after)
+})
+
+test('atomic patch replacement and its backup remain owner-only', async () => {
+  const fx = await fixture({ frag: '- insert: []\n' })
+  assert.equal(fx.run().status, 0)
+  assert.equal((await stat(fx.patchPath)).mode & 0o777, 0o600)
+  await chmod(fx.patchPath, 0o600)
+  await fx.putPublic('patches/frag.yml', '- id: new-row\n  config: { key: value }\n')
+  assert.equal(fx.run().status, 0)
+  assert.equal((await stat(fx.patchPath)).mode & 0o777, 0o600)
+  assert.equal((await stat(fx.patchPath + '.bak')).mode & 0o777, 0o600)
+})
+
+test('malformed enabled mergeConfig never retires keys or advances ownership ledger', async () => {
+  const fx = await fixture020({ org: ORG }, { merge: ['org'] })
+  assert.equal(fx.run().status, 0)
+  const before = await fx.readText()
+  const stateFile = path.join(fx.dshHome, '.dsh-sync-state.json')
+  const stateBefore = await readFile(stateFile, 'utf8')
+  const backupBefore = await readFile(fx.patchPath + '.bak', 'utf8').catch(() => undefined)
+  await fx.putPublic('patches/org.yml', '- insert: []\n')
+  const failed = fx.run()
+  assert.notEqual(failed.status, 0)
+  assert.match(failed.stderr, /mergeConfig/)
+  assert.equal(await fx.readText(), before)
+  assert.equal(await readFile(stateFile, 'utf8'), stateBefore)
+  assert.equal(await readFile(fx.patchPath + '.bak', 'utf8').catch(() => undefined), backupBefore)
+})
+
+test('generated content is wrapped in an explicit region', async () => {
+  const fx = await fixture({ frag: '- insert: []\n' })
+  assert.equal(fx.run().status, 0)
+  const text = await fx.readText()
+  assert.match(text, BEGIN)
+  assert.match(text, END)
+  assert.match(text, /fragment: frag/)
+  assert.doesNotThrow(() => yaml.load(text))
+})
+
+test('a runtime edit outside the region survives two syncs and the second sync is a no-op', async () => {
+  const fx = await fixture({ frag: '- insert: []\n' })
+  assert.equal(fx.run().status, 0)
+  const runtimeRow = '- id: agent-default-model\n  config:\n    provider: deepseek\n    model: chat\n'
+  await writeFile(fx.patchPath, (await fx.readText()) + runtimeRow)
+  const first = fx.run()
+  assert.equal(first.status, 0, first.stderr)
+  const afterFirst = await fx.readText()
+  assert.ok(afterFirst.endsWith(runtimeRow), 'runtime row must stay byte-for-byte')
+  const second = fx.run()
+  assert.equal(second.status, 0, second.stderr)
+  assert.match(second.stdout, /patches up-to-date/)
+  assert.equal(await fx.readText(), afterFirst)
+})
+
+test('a legacy whole-file generated patch is adopted as the region on first run', async () => {
+  const fx = await fixture({ frag: '- insert: []\n' })
+  const legacy = '# GENERATED by ohmydsh scripts/sync.mjs — do not edit by hand.\n# Source of truth: /old/dsh.yaml\n\n# --- fragment: frag ---\n- insert: []\n'
+  await writeFile(fx.patchPath, legacy)
+  assert.equal(fx.run().status, 0)
+  const text = await fx.readText()
+  assert.equal((text.match(/fragment: frag/g) ?? []).length, 1, 'legacy body must not be duplicated')
+  assert.match(text, BEGIN)
+})
+
+test('a patch file sync never generated is preserved below the region', async () => {
+  const fx = await fixture({ frag: '- insert: []\n' })
+  const foreign = '- id: some-runtime-row\n  config:\n    a: 1\n'
+  await writeFile(fx.patchPath, foreign)
+  assert.equal(fx.run().status, 0)
+  const text = await fx.readText()
+  assert.ok(text.endsWith(foreign))
+  assert.deepEqual(effectiveConfig(text, 'some-runtime-row'), { a: 1 })
+})
+
+test('a mergeConfig fragment carries config keys the runtime already wrote for the same row', async () => {
+  // The runtime row (settings import or a form save) exists before sync renders
+  // the region, e.g. after a DSH 0.2.0 first boot imported settings.yaml.
+  const fx = await fixture({ 'org-hosts': ORG }, { merge: ['org-hosts'] })
+  const imported = '- id: dsh-memex\n  name: dsh-memex\n  config:\n    scopes: [{ name: personal }]\n'
+  await writeFile(fx.patchPath, imported)
+  assert.equal(fx.run().status, 0)
+  const text = await fx.readText()
+  // The region row now holds both key sets; the preserved runtime row stays verbatim.
+  const region = text.slice(0, text.search(END))
+  assert.deepEqual(effectiveConfig(region, 'dsh-memex'), { scopes: [{ name: 'personal' }], internalHosts: ['code.example'] })
+  assert.ok(text.endsWith(imported))
+  // Stable on the next run.
+  assert.match(fx.run().stdout, /patches up-to-date/)
+})
+
+// The legacy 0.1 fixtures above retain in-region merge behavior. For 0.2+,
+// the tests below cover D3's runtime-owned row: a form save preserves composed
+// org keys in that same row. Live configForms acceptance remains task 3.8.
+
+test('mergeConfig reads the runtime rows even when the profile patch carries !!js expressions', async () => {
+  // The live profile patch always contains `!!js` scalars (connection trustedHosts,
+  // jev launcher). A parser that rejects them must not silently degrade to
+  // "nothing beneath": that would drop the runtime keys on the next render.
+  const fx = await fixture({ 'org-hosts': ORG }, { merge: ['org-hosts'] })
+  const runtime = [
+    '- id: connection',
+    '  config:',
+    '    trustedHosts: !!js ctx.webRuntime.trustedHosts',
+    '- id: dsh-memex',
+    '  name: dsh-memex',
+    '  config:',
+    '    scopes: [{ name: personal }]',
+    '    home: !!js process.env.HOME',
+    '',
+  ].join('\n')
+  await writeFile(fx.patchPath, runtime)
+  const result = fx.run()
+  assert.equal(result.status, 0, result.stderr)
+  const text = await fx.readText()
+  const region = text.slice(0, text.search(END))
+  assert.match(region, /scopes:/)
+  assert.match(region, /home: !!js process\.env\.HOME/, '!!js must round-trip as an expression, not be evaluated or dropped')
+  assert.ok(text.endsWith(runtime), 'runtime rows stay verbatim')
+  assert.match(fx.run().stdout, /patches up-to-date/)
+})
+
+test('an unparsable preserved part fails the run instead of dropping merged keys', async () => {
+  const fx = await fixture({ 'org-hosts': ORG }, { merge: ['org-hosts'] })
+  await writeFile(fx.patchPath, '- id: dsh-memex\n  config: [unclosed\n')
+  const result = fx.run()
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /cordis\.patch\.yml.*(parse|YAML)/i)
+})
+
+test('a fragment without mergeConfig keeps whole-row replacement semantics', async () => {
+  const conn = '- id: connection\n  name: conn\n  inject: [webRuntime, webServer]\n  config:\n    trustedHosts: []\n'
+  const fx = await fixture({ conn })
+  assert.equal(fx.run().status, 0)
+  const text = await fx.readText()
+  const row = (yaml.load(text) ?? []).find((r) => r?.id === 'connection')
+  assert.deepEqual(row, { id: 'connection', name: 'conn', inject: ['webRuntime', 'webServer'], config: { trustedHosts: [] } })
+})
+
+test('mergeConfig is rejected on a fragment that is not a plain override of one row', async () => {
+  const fx = await fixture({ bad: '- insert:\n    - id: x\n      name: x\n' }, { merge: ['bad'] })
+  const result = fx.run()
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr + result.stdout, /bad.*mergeConfig/)
+})
+
+// ---- bundle drift and profile package.json locking (task 2.4) ----
+
+import { existsSync } from 'node:fs'
+import { readFile as readText } from 'node:fs/promises'
+import { withProfileLock } from '../scripts/lib/profile-lock.mjs'
+
+async function profileFixture() {
+  const fx = await fixture({ frag: '- insert: []\n' })
+  const pkgPath = path.join(fx.profile, 'package.json')
+  const stateFile = path.join(fx.dshHome, '.dsh-sync-state.json')
+  return { ...fx, pkgPath, stateFile, readPkg: async () => JSON.parse(await readText(pkgPath, 'utf8')), readState: async () => JSON.parse(await readText(stateFile, 'utf8')) }
+}
+
+test('a bundle installed outside sync is kept, reported, and never recorded as shipped', async () => {
+  const fx = await profileFixture()
+  const pkg = await fx.readPkg()
+  pkg.dsh.profile.bundles = ['@deepseek-ai/dsh-base']
+  await writeFile(fx.pkgPath, JSON.stringify(pkg, null, 2))
+  assert.equal(fx.run().status, 0)
+  assert.deepEqual((await fx.readState()).shippedBundles, ['@deepseek-ai/dsh-base'])
+
+  // The Web plugin page adds a bundle sync does not manage.
+  const after = await fx.readPkg()
+  after.dsh.profile.bundles.push('dsh-ears')
+  await writeFile(fx.pkgPath, JSON.stringify(after, null, 2))
+  const result = fx.run()
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stderr, /WARN bundle dsh-ears is not declared in dsh\.yaml/)
+  assert.ok((await fx.readPkg()).dsh.profile.bundles.includes('dsh-ears'), 'drift must not be deleted silently')
+  assert.deepEqual((await fx.readState()).shippedBundles, ['@deepseek-ai/dsh-base'], 'drift must not become shipped')
+})
+
+test('sync leaves no profile lock behind after a run', async () => {
+  const fx = await profileFixture()
+  assert.equal(fx.run().status, 0)
+  assert.equal(existsSync(fx.pkgPath + '.lock'), false)
+})
+
+test('the profile lock serializes writers and is taken over only from an exited holder', async (t) => {
+  const fx = await profileFixture()
+  const lock = fx.pkgPath + '.lock'
+
+  // A live foreign holder is waited for, not deleted.
+  await writeFile(lock, `${process.ppid}\n`)
+  await assert.rejects(withProfileLock(fx.pkgPath, async () => 'ran', { waitMs: 150 }), /timed out waiting for the writer lock/)
+  assert.ok(existsSync(lock), 'a live holder lock must survive')
+
+  // A holder whose process exited is taken over.
+  const child = spawn(process.execPath, ['-e', ''])
+  const deadPid = child.pid
+  await new Promise((resolve) => child.on('exit', resolve))
+  await writeFile(lock, `${deadPid}\n`)
+  assert.equal(await withProfileLock(fx.pkgPath, async () => 'ran', { waitMs: 1000 }), 'ran')
+  assert.equal(existsSync(lock), false)
+
+  // Two in-process writers never interleave.
+  const order = []
+  const slow = (tag) => withProfileLock(fx.pkgPath, async () => { order.push(`${tag}:in`); await new Promise((r) => setTimeout(r, 40)); order.push(`${tag}:out`) })
+  await Promise.all([slow('a'), slow('b')])
+  assert.ok(order.join(',') === 'a:in,a:out,b:in,b:out' || order.join(',') === 'b:in,b:out,a:in,a:out', order.join(','))
+  t.diagnostic(order.join(','))
+})
+
+// ---- interaction with the DSH 0.2.0 config editor (design D3, task 3.8) ----
+
+import { configEditorWrite } from './helpers/config-editor-write.mjs'
+
+test('a settings-form save of a row sync generates lands inside the region and the next sync reverts it', async () => {
+  const fx = await fixture({ 'org-hosts': ORG }, { merge: ['org-hosts'] })
+  assert.equal(fx.run().status, 0)
+  const saved = configEditorWrite(await fx.readText(), { id: 'dsh-memex', name: 'dsh-memex' }, { internalHosts: ['code.example'], scopes: [{ name: 'work' }] })
+  // The config editor edits the last same-id row in place — which is the sync-owned row.
+  const end = saved.search(END)
+  assert.ok(saved.indexOf('name: work') > 0 && saved.indexOf('name: work') < end, 'the form wrote into the generated region')
+  await writeFile(fx.patchPath, saved)
+  assert.equal(fx.run().status, 0)
+  // Documented boundary: region content is sync-owned, so the form edit is lost.
+  assert.doesNotMatch(await fx.readText(), /name: work/)
+})
+
+test('a settings-form save of a row sync does not generate is appended below the region and survives', async () => {
+  const fx = await fixture({ frag: '- insert: []\n' })
+  assert.equal(fx.run().status, 0)
+  const saved = configEditorWrite(await fx.readText(), { id: 'agent-default-model', name: '@deepseek-ai/dsh-agent-default-model' }, { model: 'm' })
+  assert.ok(saved.indexOf('agent-default-model') > saved.search(END), 'a new row is appended after the region')
+  await writeFile(fx.patchPath, saved)
+  assert.equal(fx.run().status, 0)
+  assert.match(fx.run().stdout, /patches up-to-date/)
+  assert.deepEqual(effectiveConfig(await fx.readText(), 'agent-default-model'), { model: 'm' })
+})
+
+test('an empty region is still a valid entry list that composes nothing', async () => {
+  const fx = await overlayFixture({ externalRoot: false, manifest: 'dshVersion: 0.1.0-rc.7\ndependencies: []\ncustomizations: []\n' })
+  assert.equal(fx.sync([]).status, 0)
+  const rows = yaml.load(await fx.readPatch())
+  assert.deepEqual(rows, [{ insert: [] }])
+})
+
+// ---- DSH 0.2+: runtime-owned rows for live config (design D3, tasks 2.3/4.4) ----
+
+async function fixture020(patches, { merge = [], settings } = {}) {
+  const ids = Object.keys(patches)
+  const items = ids.map((id) => `  - id: ${id}\n    type: patch\n    enabled: true${merge.includes(id) ? '\n    mergeConfig: true' : ''}`)
+  const body = items.length === 0 ? 'customizations: []\n' : `customizations:\n${items.join('\n')}\n`
+  const fx = await overlayFixture({ externalRoot: false, manifest: `dshVersion: 0.2.0-rc.2\ndependencies: []\n${body}` })
+  for (const [id, text] of Object.entries(patches)) await fx.putPublic(`patches/${id}.yml`, text)
+  if (settings !== undefined) await writeFile(path.join(fx.dshHome, 'settings.yaml'), settings)
+  const patchPath = path.join(fx.profile, 'cordis.patch.yml')
+  return { ...fx, patchPath, run: () => fx.sync([]), readText: () => readFile(patchPath, 'utf8') }
+}
+
+function regionOf(text) { return text.slice(0, text.search(END)) }
+
+test('0.2+: a mergeConfig row is seeded below the region and a form save edits that row, not the region', async () => {
+  const fx = await fixture020({ 'org-hosts': ORG }, { merge: ['org-hosts'] })
+  assert.equal(fx.run().status, 0, 'first run')
+  const first = await fx.readText()
+  assert.doesNotMatch(regionOf(first), /- id: dsh-memex/, 'no copy of the row inside the region')
+  assert.deepEqual(effectiveConfig(first, 'dsh-memex'), { internalHosts: ['code.example'] })
+
+  // The settings form saves scopes: it rewrites the LAST dsh-memex row — the runtime-owned one.
+  const saved = configEditorWrite(first, { id: 'dsh-memex', name: 'dsh-memex' }, { internalHosts: ['code.example'], scopes: [{ name: 'work' }] })
+  await writeFile(fx.patchPath, saved)
+  const again = fx.run()
+  assert.equal(again.status, 0, again.stderr)
+  assert.match(again.stdout, /patches up-to-date/)
+  assert.deepEqual(effectiveConfig(await fx.readText(), 'dsh-memex'), { internalHosts: ['code.example'], scopes: [{ name: 'work' }] })
+})
+
+test('0.2+: an org-hosts change updates only its keys in the runtime-owned row', async () => {
+  const fx = await fixture020({ 'org-hosts': ORG }, { merge: ['org-hosts'] })
+  assert.equal(fx.run().status, 0)
+  await writeFile(fx.patchPath, configEditorWrite(await fx.readText(), { id: 'dsh-memex', name: 'dsh-memex' }, { internalHosts: ['code.example'], scopes: [{ name: 'work' }] }))
+  await fx.putPublic('patches/org-hosts.yml', ORG.replace('code.example', 'git.example'))
+  const result = fx.run()
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /profile runtime row: dsh-memex\.internalHosts/)
+  assert.deepEqual(effectiveConfig(await fx.readText(), 'dsh-memex'), { internalHosts: ['git.example'], scopes: [{ name: 'work' }] })
+})
+
+test('0.2+: the legacy settings.yaml memex section is carried into the seeded row together with org keys', async () => {
+  const settings = 'dsh-memex:\n  scopes:\n    - name: work\n      pathPrefixes: [~/work]\n  bindings: []\nui-settings:\n  theme: dark\n'
+  const fx = await fixture020({ 'org-hosts': ORG }, { merge: ['org-hosts'], settings })
+  assert.equal(fx.run().status, 0)
+  assert.deepEqual(effectiveConfig(await fx.readText(), 'dsh-memex'), {
+    internalHosts: ['code.example'], scopes: [{ name: 'work', pathPrefixes: ['~/work'] }], bindings: [],
+  })
+  // Seeded once: a second run does not seed again or rewrite.
+  assert.match(fx.run().stdout, /patches up-to-date/)
+  // settings.yaml is left for upstream's own import, which merges identical values.
+  assert.equal(await readFile(path.join(fx.dshHome, 'settings.yaml'), 'utf8'), settings)
+})
+
+test('0.2+: the legacy memex section is carried even without an org-hosts fragment', async () => {
+  const fx = await fixture020({}, { settings: 'dsh-memex:\n  autoDerive: false\n' })
+  assert.equal(fx.run().status, 0)
+  assert.deepEqual(effectiveConfig(await fx.readText(), 'dsh-memex'), { autoDerive: false })
+})
+
+test('0.2+: an existing runtime row is never reseeded from settings.yaml', async () => {
+  const fx = await fixture020({}, { settings: 'dsh-memex:\n  autoDerive: false\n' })
+  await writeFile(fx.patchPath, '- id: dsh-memex\n  name: dsh-memex\n  config:\n    autoDerive: true\n')
+  assert.equal(fx.run().status, 0)
+  assert.deepEqual(effectiveConfig(await fx.readText(), 'dsh-memex'), { autoDerive: true })
+})
+
+test('0.2+: an unreadable or unexpected legacy memex section fails the run without touching the patch', async () => {
+  for (const settings of ['dsh-memex: [unclosed\n', 'dsh-memex: [1, 2]\n', 'dsh-memex:\n  scopez: []\n']) {
+    const fx = await fixture020({ 'org-hosts': ORG }, { merge: ['org-hosts'], settings })
+    const result = fx.run()
+    assert.notEqual(result.status, 0, settings)
+    assert.match(result.stderr, /settings\.yaml/)
+    assert.equal(existsSync(fx.patchPath), false, 'nothing is written on failure')
+  }
+})
+
+test('0.1.x keeps rendering mergeConfig rows inside the region', async () => {
+  const fx = await fixture({ 'org-hosts': ORG }, { merge: ['org-hosts'] })
+  assert.equal(fx.run().status, 0)
+  assert.match(regionOf(await fx.readText()), /- id: dsh-memex/)
+})
+
+// ---- DSH 0.2+: presets are declared rows, not `.agent-presets` copies (task 5.4) ----
+
+const PRESET_AGENT = [
+  '- id: persona',
+  "  name: '@deepseek-ai/dsh-persona'",
+  '  config:',
+  '    prefix: You are {{model}}.',
+  '- id: tool-bash',
+  "  name: '@deepseek-ai/dsh-tool-bash'",
+  '  disabled: !!js process.platform === \'win32\'',
+  '',
+].join('\n')
+
+async function presetFixture(dshVersion) {
+  const manifest = `dshVersion: ${dshVersion}\ndependencies: []\ncustomizations:\n  - id: pet-exec\n    type: preset\n    version: 0.1.0\n    enabled: true\n`
+  const fx = await overlayFixture({ externalRoot: false, manifest })
+  await fx.putPublic('presets/pet-exec/agent.cordis.yml', PRESET_AGENT)
+  await fx.putPublic('presets/pet-exec/preset.yml', 'name: Pet 执行会话\ndescription: no skill-filesystem\n')
+  const patchPath = path.join(fx.profile, 'cordis.patch.yml')
+  return { ...fx, patchPath, run: () => fx.sync([]), readText: () => readFile(patchPath, 'utf8') }
+}
+
+function presetRow(text, id) {
+  const rows = yaml.load(text, { schema: yaml.DEFAULT_SCHEMA.extend([new yaml.Type('tag:yaml.org,2002:js', { kind: 'scalar', resolve: () => true, construct: (d) => ({ __jsExpr: d }) })]) }) ?? []
+  return rows.flatMap((row) => row?.insert ?? []).find((entry) => entry?.name === '@deepseek-ai/dsh-agent-preset' && entry?.config?.id === id)
+}
+
+test('0.2+: an enabled preset is declared in the generated region with its plugins and metadata', async () => {
+  const fx = await presetFixture('0.2.0-rc.2')
+  const result = fx.run()
+  assert.equal(result.status, 0, result.stderr)
+  const text = await fx.readText()
+  const row = presetRow(text.slice(0, text.search(END)), 'pet-exec')
+  assert.ok(row, 'declaration row present inside the region')
+  assert.equal(row.id, 'preset-pet-exec')
+  assert.equal(row.config.name, 'Pet 执行会话')
+  assert.equal(row.config.description, 'no skill-filesystem')
+  assert.deepEqual(row.config.plugins.map((p) => p.id), ['persona', 'tool-bash'])
+  // `!!js` survives as an expression for the loader to evaluate, verbatim.
+  assert.match(text, /disabled: !!js process\.platform === 'win32'/)
+  // Nothing is copied into the retired directory layout.
+  assert.equal(existsSync(path.join(fx.dshHome, '.agent-presets', 'pet-exec')), false)
+  assert.match(fx.run().stdout, /patches up-to-date/)
+})
+
+test('0.2+: a copy sync made under 0.1.x is removed and the preset is declared instead', async () => {
+  const fx = await presetFixture('0.1.0-rc.7')
+  assert.equal(fx.run().status, 0)
+  assert.ok(existsSync(path.join(fx.dshHome, '.agent-presets', 'pet-exec', 'agent.cordis.yml')), '0.1.x copies the directory')
+  await writeFile(path.join(fx.repo, 'dsh.yaml'), (await readFile(path.join(fx.repo, 'dsh.yaml'), 'utf8')).replace('0.1.0-rc.7', '0.2.0-rc.2'))
+  const result = fx.run()
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(existsSync(path.join(fx.dshHome, '.agent-presets', 'pet-exec')), false)
+  assert.ok(presetRow(await fx.readText(), 'pet-exec'))
+})
+
+test('0.2+: a disabled preset is not declared', async () => {
+  const fx = await presetFixture('0.2.0-rc.2')
+  await writeFile(path.join(fx.repo, 'dsh.yaml'), (await readFile(path.join(fx.repo, 'dsh.yaml'), 'utf8')).replace('enabled: true', 'enabled: false'))
+  assert.equal(fx.run().status, 0)
+  assert.equal(presetRow(await fx.readText(), 'pet-exec'), undefined)
+})
+
+test('0.2+: a preset whose agent.cordis.yml is not an entry list fails the run', async () => {
+  const fx = await presetFixture('0.2.0-rc.2')
+  await fx.putPublic('presets/pet-exec/agent.cordis.yml', 'persona: oops\n')
+  const result = fx.run()
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /pet-exec/)
+})

@@ -1,6 +1,29 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { createUserMessage } from '@deepseek-ai/dsh-llm/message'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { ContextFormed } from '@deepseek-ai/dsh-llm'
+
+/**
+ * dsh-memex's own message source kind.
+ *
+ * DSH 0.2.0 (session format v4) removed the shared `{ kind: 'plugin', plugin }`
+ * wrapper: every producer declares its own kind, and a v4 reader refuses a
+ * `plugin` source outright, so writing the old shape would leave a session that
+ * cannot be reopened. The v3→v4 migration renames historical memex rows to
+ * `plugin:dsh-memex` (session-format-v3-to-v4 `producerKind`), so new rows use
+ * the same kind and old and new history read as one producer. DSH 0.1.5 accepts
+ * any non-empty kind on a user message.
+ */
+export const MEMEX_SOURCE_KIND = 'plugin:dsh-memex'
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'plugin:dsh-memex': { kind: 'plugin:dsh-memex' } & ContextFormed
+  }
+}
+
+/** `SessionStartSource` as declared by dsh-agent in 0.1.5 and 0.2.0. */
+type SessionStartSource = 'startup' | 'resume' | 'clear' | 'compact'
 import type { ScopeService } from '../scope/types.js'
 
 interface SessionState {
@@ -28,8 +51,8 @@ function pluginMessage(text: string, form: 'instructions' | 'notice', summary?: 
   return createUserMessage({
     content: [{ type: 'text' as const, text }],
     source: form === 'notice'
-      ? { kind: 'plugin' as const, plugin: 'dsh-memex', form, summary: summary ?? 'Memex reminder' }
-      : { kind: 'plugin' as const, plugin: 'dsh-memex', form },
+      ? { kind: MEMEX_SOURCE_KIND, form, summary: summary ?? 'Memex reminder' }
+      : { kind: MEMEX_SOURCE_KIND, form },
   })
 }
 
@@ -47,7 +70,13 @@ export function registerMemexLifecycle(ctx: Context, scopes: ScopeService): Meme
     return created
   }
 
-  ctx.on('agent/session-start', ({ agent, source }) => {
+  // Inject at the Agent publication boundary. `agent/created` fires once per
+  // fresh creation or cold resume, after setup and before the first driver step,
+  // in both DSH 0.1.5 (emit) and 0.2.0 (serial, awaited before queued input);
+  // 0.2.0 removed `agent/session-start`. 0.1.5 carries no `source` here, so an
+  // absent source is a (re)start. Neither runtime currently emits `compact` or
+  // `clear` through this lifecycle; the compact branch is kept for when it does.
+  const seedRecall = (agent: Agent, source: SessionStartSource | undefined): void => {
     const sessionState = state(agent.session)
     if (source === 'compact') { sessionState.recalled = false; sessionState.reminded = false }
     else { sessionState.recalled = false; sessionState.wrote = false; sessionState.reminded = false; sessionState.off = false }
@@ -64,6 +93,14 @@ export function registerMemexLifecycle(ctx: Context, scopes: ScopeService): Meme
     } catch (error) {
       ctx.logger('dsh-memex').warn('Could not inject memex recall context: %s', error instanceof Error ? error.message : String(error))
     }
+  }
+
+  // The listener only seeds an inject; it never awaits. The explicit undefined
+  // return satisfies 0.2.0's serial `Promise<undefined> | undefined` contract
+  // and is harmless on 0.1.5's emit dispatch.
+  ctx.on('agent/created', (payload: { agent: Agent; source?: SessionStartSource }) => {
+    seedRecall(payload.agent, payload.source)
+    return undefined
   })
 
   ctx.on('agent/turn-stopping', ({ agent }) => {

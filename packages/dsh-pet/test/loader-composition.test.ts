@@ -1823,7 +1823,9 @@ describe('client bundle loads without Cockpit changes', () => {
     // its `apply` never runs — styles appear but no surface is ever mounted.
     // Naming the services Pet actually reads pulls in packages that do ship
     // bundles and provide the slot registry.
-    expect(exported.inject).toEqual(['slots', 'sessions', 'workspaces', 'connection'])
+    // DSH 0.2.0: navigation moved to `uiWorkspace` (dsh-client-ui-workspace),
+    // which official client plugins such as ui-sidebar inject the same way.
+    expect(exported.inject).toEqual(['slots', 'sessions', 'workspaces', 'connection', 'uiWorkspace'])
   })
 
   it('declares the web client half in package metadata', async () => {

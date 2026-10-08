@@ -24,6 +24,7 @@ import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type { BadgeElementLike, CopyContext, CopyHooks } from './wiring.js'
 import { BADGE_MARKER, sessionSnippet, showCopiedHint, styleBadge, updateBadge, wireBadge, writeClipboard } from './wiring.js'
 import { findCrumbNav } from './title-locator.js'
+import { mainSessionId } from './main-session.js'
 
 export const inject = ['sessions']
 
@@ -54,7 +55,7 @@ export function apply(ctx: ClientContext): void {
   let cleanupHint: (() => void) | null = null
 
   const copyContext: CopyContext = {
-    currentSessionId: (): string | undefined => ctx.sessions.list.getSnapshot().current,
+    currentSessionId: (): string | undefined => mainSessionId(ctx.sessions.list.getSnapshot()),
   }
   const hooks: CopyHooks = {
     writeClipboard,
