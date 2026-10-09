@@ -49,15 +49,15 @@ export function sectionAnchors(text) {
   return anchors
 }
 
-/** Level-2 headings (outside fences) whose previous non-blank line is not a section anchor. */
+/** Level-2 headings (outside fences) whose next non-blank line is not a section anchor. */
 export function h2WithoutAnchor(text) {
   const lines = blankFencedBlocks(text).split('\n')
   const missing = []
   lines.forEach((line, index) => {
     if (!/^##\s+\S/.test(line)) return
-    let prev = index - 1
-    while (prev >= 0 && lines[prev].trim() === '') prev -= 1
-    const hasAnchor = prev >= 0 && /^\s*<!--\s*section:\s*[A-Za-z0-9_-]+\s*-->\s*$/.test(lines[prev])
+    let next = index + 1
+    while (next < lines.length && lines[next].trim() === '') next += 1
+    const hasAnchor = next < lines.length && /^\s*<!--\s*section:\s*[A-Za-z0-9_-]+\s*-->\s*$/.test(lines[next])
     if (!hasAnchor) missing.push({ line: index + 1, heading: line.trim() })
   })
   return missing
@@ -149,4 +149,57 @@ export function indexEntry(file, cwd = REPO) {
   if (!staged) return null
   const [mode, hash] = staged.split(/\s+/)
   return { mode, hash, blob: git(['cat-file', 'blob', hash], cwd) }
+}
+
+/**
+ * Body of the section introduced by `<!-- section: key -->`: every line after the
+ * anchor up to (not including) the next level-2 heading outside fences, or the end
+ * of the text. Returns null when the anchor is absent.
+ */
+export function sectionBody(text, key) {
+  const lines = text.split('\n')
+  const blanked = blankFencedBlocks(text).split('\n')
+  const anchor = new RegExp(`^\\s*<!--\\s*section:\\s*${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*-->\\s*$`)
+  const start = blanked.findIndex((line) => anchor.test(line))
+  if (start === -1) return null
+  let end = blanked.findIndex((line, index) => index > start && /^##\s/.test(line))
+  if (end === -1) end = lines.length
+  return lines.slice(start + 1, end).join('\n')
+}
+
+/**
+ * The fenced code block that immediately follows `<!-- fixture: name -->`.
+ * Returns `{ line, info, content }` (1-based marker line, fence info string, block text)
+ * or null when the marker is missing, is not directly followed by a fence, or the fence never closes.
+ */
+export function fixtureBlock(text, name) {
+  const lines = text.split('\n')
+  const blanked = blankFencedBlocks(text).split('\n')
+  const marker = new RegExp(`^\\s*<!--\\s*fixture:\\s*${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*-->\\s*$`)
+  const at = blanked.findIndex((line) => marker.test(line))
+  if (at === -1) return null
+  let open = at + 1
+  while (open < lines.length && lines[open].trim() === '') open += 1
+  const opener = lines[open]?.match(FENCE_OPEN)
+  if (!opener) return null
+  const fence = opener[1]
+  const info = lines[open].trim().slice(fence.length).trim()
+  const body = []
+  for (let i = open + 1; i < lines.length; i += 1) {
+    const close = lines[i].match(FENCE_OPEN)
+    if (close && close[1][0] === fence[0] && close[1].length >= fence.length && lines[i].trim() === close[1]) {
+      return { line: at + 1, info, content: body.join('\n') }
+    }
+    body.push(lines[i])
+  }
+  return null
+}
+
+/** First position where two section-key sequences differ, `{ index, left, right }`, or null when equal. */
+export function anchorSequenceDiff(left, right) {
+  const length = Math.max(left.length, right.length)
+  for (let index = 0; index < length; index += 1) {
+    if (left[index] !== right[index]) return { index, left: left[index] ?? null, right: right[index] ?? null }
+  }
+  return null
 }

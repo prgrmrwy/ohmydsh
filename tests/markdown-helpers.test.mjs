@@ -10,6 +10,9 @@ import {
   isTrackedPathOrDir,
   cjkRatio,
   firstH1,
+  sectionBody,
+  fixtureBlock,
+  anchorSequenceDiff,
   trackedFiles,
   indexEntry,
 } from './helpers/markdown.mjs'
@@ -36,8 +39,8 @@ test('sectionAnchors extracts keys with 1-based lines, ignoring fenced examples'
   ])
 })
 
-test('h2WithoutAnchor reports an h2 not directly preceded by an anchor', () => {
-  const text = ['<!-- section: a -->', '## A', '', 'text', '## B', '```', '## in fence', '```', '', '<!-- section: c -->', '', '## C'].join('\n')
+test('h2WithoutAnchor reports an h2 not directly followed by an anchor', () => {
+  const text = ['## A', '<!-- section: a -->', '', 'text', '## B', 'text', '```', '## in fence', '```', '', '## C', '', '<!-- section: c -->'].join('\n')
   assert.deepEqual(h2WithoutAnchor(text), [{ line: 5, heading: '## B' }])
 })
 
@@ -103,4 +106,25 @@ test('trackedFiles and indexEntry read the git index', () => {
   assert.equal(entry.mode, '100644')
   assert.match(entry.blob, /^\{/)
   assert.equal(indexEntry('does/not/exist'), null)
+})
+
+test('sectionBody returns the lines between an anchor and the next level-2 heading, ignoring fenced headings', () => {
+  const text = ['## A', '<!-- section: a -->', 'one', '### sub', '```', '## not a heading', '```', 'two', '', '## B', '<!-- section: b -->', 'three'].join('\n')
+  assert.equal(sectionBody(text, 'a'), ['one', '### sub', '```', '## not a heading', '```', 'two', ''].join('\n'))
+  assert.equal(sectionBody(text, 'b'), 'three')
+  assert.equal(sectionBody(text, 'missing'), null)
+})
+
+test('fixtureBlock extracts the fence that directly follows the marker', () => {
+  const text = ['x', '<!-- fixture: demo -->', '', '```yaml', 'a: 1', 'b: [2]', '```', 'tail', '<!-- fixture: bare -->', 'not a fence'].join('\n')
+  assert.deepEqual(fixtureBlock(text, 'demo'), { line: 2, info: 'yaml', content: 'a: 1\nb: [2]' })
+  assert.equal(fixtureBlock(text, 'bare'), null)
+  assert.equal(fixtureBlock(text, 'absent'), null)
+  assert.equal(fixtureBlock('<!-- fixture: open -->\n```\nnever closed', 'open'), null)
+})
+
+test('anchorSequenceDiff reports the first differing index and both values', () => {
+  assert.equal(anchorSequenceDiff(['a', 'b'], ['a', 'b']), null)
+  assert.deepEqual(anchorSequenceDiff(['a', 'faq', 'b'], ['a', 'b']), { index: 1, left: 'faq', right: 'b' })
+  assert.deepEqual(anchorSequenceDiff(['a'], ['a', 'b']), { index: 1, left: null, right: 'b' })
 })

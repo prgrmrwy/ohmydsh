@@ -51,6 +51,24 @@ test('requires the root lock and architecture source/display allowlist', () => {
   }
 })
 
+test('requires both facade diagrams with their sources', () => {
+  for (const required of [
+    'docs/assets/ohmydsh-lifecycle.json',
+    'docs/assets/ohmydsh-lifecycle.dual.svg',
+  ]) {
+    const without = allowed.filter((file) => file !== required)
+    const violations = artifactPolicyViolations(without)
+    assert.ok(violations.some((entry) => entry.startsWith(`${required}:`)), `${required} missing must be reported`)
+    assert.ok(REQUIRED_TRACKED_PATHS.includes(required), `${required} must be a required tracked path`)
+  }
+  for (const required of [
+    'docs/assets/ohmydsh-architecture.json',
+    'docs/assets/ohmydsh-architecture.dual.svg',
+  ]) {
+    assert.ok(REQUIRED_TRACKED_PATHS.includes(required), required)
+  }
+})
+
 test('rejects root debug screenshot and generated architecture note', () => {
   const violations = artifactPolicyViolations([
     ...allowed,
