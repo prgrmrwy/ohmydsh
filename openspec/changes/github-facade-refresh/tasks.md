@@ -36,18 +36,18 @@
 
 ## 6. P2 · Facade diagrams
 
-- [ ] 6.1 Write failing test: TA `requires both facade diagrams with their sources`
-- [ ] 6.2 Implement: archify showcase architecture diagram (add private overlay + `thirdPartyResources`) and new lifecycle diagram; commit JSON + dual SVG for each; add the lifecycle pair to `REQUIRED_TRACKED_PATHS`
-- [ ] 6.3 Refactor; `archify validate --quality showcase` passes for both; suite green
+- [x] 6.1 Write failing test: TA `requires both facade diagrams with their sources`
+- [x] 6.2 Implement: archify showcase architecture diagram (add private overlay + `thirdPartyResources`) and new lifecycle diagram; commit JSON + dual SVG for each; add the lifecycle pair to `REQUIRED_TRACKED_PATHS`
+- [x] 6.3 Refactor; `archify validate --quality showcase` passes for both; suite green
 
 ## 7. P2 · Root README pair
 
-- [ ] 7.1 Write failing tests (RF): `root README pair is tracked, cross-linked, and anchor sequences match`; `anchor sequence mismatch reports first differing position`; `h2 without section anchor is reported with its line`; `both READMEs have exactly the eight anchors in order with diagrams and lifecycle vocabulary`; `missing required anchor is named`
-- [ ] 7.2 Write failing tests (RF): `minimal-manifest fixture has exact shape and black-box sync accepts it with no installs`; `minimal-manifest dshVersion equals root dsh.yaml dshVersion`; `agent-install-prompt contains all six rule tags in both READMEs`; `every dsh subcommand mentioned in READMEs exists in bin/dsh case arms`
-- [ ] 7.3 Write failing tests (RF): `multiple-machines is at most 8 lines, links dsh-cockpit, states per-machine build`; `multiple-machines over 8 lines reports the count`; `plugin index covers every enabled customization and resource with valid links and descriptions`; `unlisted enabled id is reported`; `semver in plugin index is reported with its line`
-- [ ] 7.4 Implement: write English `README.md` and `README.zh.md` (eight sections, three Quick Start paths, minimal-manifest fixture, agent install prompt with six rule tags, `dsh reset` caveat, cockpit routing, plugin index); delete `README.en.md`
-- [ ] 7.5 Lead manual gate: per-section bilingual semantic sign-off recorded in `verify.md`
-- [ ] 7.6 Refactor; full suite green → **P2 phase acceptance + commit**
+- [x] 7.1 Write failing tests (RF): `root README pair is tracked, cross-linked, and anchor sequences match`; `anchor sequence mismatch reports first differing position`; `h2 without section anchor is reported with its line`; `both READMEs have exactly the eight anchors in order with diagrams and lifecycle vocabulary`; `missing required anchor is named`
+- [x] 7.2 Write failing tests (RF): `minimal-manifest fixture has exact shape and black-box sync accepts it with no installs`; `minimal-manifest dshVersion equals root dsh.yaml dshVersion`; `agent-install-prompt contains all six rule tags in both READMEs`; `every dsh subcommand mentioned in READMEs exists in bin/dsh case arms`
+- [x] 7.3 Write failing tests (RF): `multiple-machines is at most 8 lines, links dsh-cockpit, states per-machine build`; `multiple-machines over 8 lines reports the count`; `plugin index covers every enabled customization and resource with valid links and descriptions`; `unlisted enabled id is reported`; `semver in plugin index is reported with its line`
+- [x] 7.4 Implement: write English `README.md` and `README.zh.md` (eight sections, three Quick Start paths, minimal-manifest fixture, agent install prompt with six rule tags, `dsh reset` caveat, cockpit routing, plugin index); delete `README.en.md`
+- [x] 7.5 Lead manual gate: per-section bilingual semantic sign-off recorded in `verify.md`
+- [x] 7.6 Refactor; full suite green → **P2 phase acceptance + commit**
 
 ## 8. P3 · Package tiers and README pairs
 

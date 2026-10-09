@@ -2,7 +2,7 @@
 
 # ohmydsh
 
-**DeepSeek Harness(DSH)的声明式定制仓 —— 一份 manifest 管理全部定制,幂等物化到 `~/.dsh`**
+**One repository to aggregate, review and iteratively manage your whole DeepSeek Harness (DSH) configuration — from adding a plugin to removing it.**
 
 [![CI](https://github.com/prgrmrwy/ohmydsh/actions/workflows/ci.yml/badge.svg)](https://github.com/prgrmrwy/ohmydsh/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -10,214 +10,220 @@
 [![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196.svg)](https://www.conventionalcommits.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-[English](README.en.md) · [快速开始](#使用) · [架构](#架构图) · [贡献](CONTRIBUTING.md) · [安全](SECURITY.md) · [更新日志](CHANGELOG.md)
+English · [简体中文](README.zh.md) · [Quick start](#quick-start) · [Plugins](#plugins) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
 
 </div>
 
 ---
 
-本仓库是 DSH(DeepSeek Harness)的定制仓:**总配置统一管理,各项定制可插拔、独立版本、独立维护,但都在同一仓库内**。
+## What it does
+<!-- section: what-it-does -->
 
-## 为什么需要它
+ohmydsh turns the configuration of **one person's DSH** into a single, reviewable, reproducible repository and manages it across its whole lifecycle: **add** a plugin, **review** its trust surface, **pin** an exact version, **build** it into place, **upgrade** it later, **disable** it without losing it, and finally **remove** it.
 
-手工维护 AI agent 运行时的插件、版本和配置很容易变成一堆"改过但没人记得为什么"的本地状态。ohmydsh 用一份声明式 manifest 把这些收敛成可复现、可审查、可回滚的工程资产:
+- The **repository is the source of truth.** Everything that defines your setup lives here: the manifest, self-developed packages, skills, presets, patches and environment-level agent instructions.
+- **`~/.dsh` is a generated product.** `dsh build` materializes the repository into it idempotently. Never edit it by hand; change the repository and build again.
+- **`dsh.yaml` is the single switch.** The DSH version, the auto-update policy and every customization are declared there. `enabled: false` disables an entry without deleting it.
 
-- 🎛 **单一开关面** —— `dsh.yaml` 管住 DSH 版本、第三方插件、自研 package、patch、skill 与环境级指令。
-- 🔁 **幂等物化** —— `dsh build` 把仓库状态同步到 `~/.dsh`,重复执行结果一致,失败 fail closed。
-- 🔌 **可插拔** —— 每项定制独立启用、禁用、升级、移除;`enabled: false` ≠ 删除。
-- 📌 **精确 pin,不 vendor** —— 第三方只存版本 pin、覆盖片段与审查记录,信任面清晰可查。
-- 🚀 **自动跟版** —— `autoUpdate` 检测新版 DSH 后阻塞式升级、重跑 sync 并自动提交,工作区不干净时不动手。
-- 📐 **规范驱动** —— 行为变化先过 OpenSpec(proposal → design → spec → tasks),再落实现。
+Two kinds of readers, two entry points:
 
-## 真相源约定
+- **You (or your AI) want to manage your own DSH** — start at [Quick start](#quick-start) and [Architecture](#architecture).
+- **You (or your AI) want to know what the self-developed plugins solve** — jump to the [plugin index](#plugins).
 
-- **仓库是唯一真相源**。`dsh.yaml` + 各定制目录 + `instructions/dsh-home.md` = 完整配置;`~/.dsh` 是物化产物。
-- 根 `package-lock.json` 是全部 npm workspace 的唯一依赖锁；TypeScript local package 只提交 `src/`，gitignored `lib/` 由根 build/sync 生成。
-- `cordis.patch.yml`、presets/skills 与 `$DSH_HOME/AGENTS.md` 都应从仓库修改后重新 sync。`AGENTS.md` 有 ownership/hash 漂移防护:发现未托管文件或本地改动时会报错并保留,不会静默覆盖或删除。
-- OpenSpec checking 长期只提交报告、trail、gate、复现脚本或显式审核的 test fixture；raw history/baseline 和批量截图应放外部 artifact，或在报告中声明仅临时留存。
-- 提交前运行 `npm test` 与 `npm run check:artifacts`，防止生成产物、nested lock、raw evidence 或重复架构图进入 Git。
-- **禁用 ≠ 删除**:`enabled: false` 只表示不物化,仓库内容保留,随时可重新启用。
+## Quick start
+<!-- section: quick-start -->
 
-## 目录结构
+You need Node.js 22+ and npm 10+ (see `.nvmrc`) and a bash shell (macOS, Linux, WSL or Git Bash). Pick one of three paths.
 
-```
-dsh.yaml                  # 总配置(唯一开关面)
-BACKLOG.md                # 想法池
-openspec/                 # spec-driven 变更流程
-scripts/bootstrap.sh       # clone 后初始化:检查 Node 环境 + 安装依赖(幂等)
-scripts/install.sh         # 一键安装:bin/dsh → ~/.local/bin(幂等,可卸载)
-scripts/sync.mjs          # manifest → ~/.dsh 物化
-instructions/dsh-home.md  # 工作环境级模型指令源文件
-packages/<name>/          # 自研 bundle 插件(见 packages/README.md)
-presets/<id>/             # agent preset(见 presets/README.md)
-patches/<id>.yml          # 纯 composition 片段 / 对 remote 包的覆盖(见 patches/README.md)
-skills/<name>/            # skill(见 skills/README.md)
-docs/architecture/        # 当前系统结构与机制说明
-tests/                    # sync 黑盒回归测试
-```
-
-## 架构图
-
-<img alt="ohmydsh 架构图:仓库真相源 → sync 物化 → ~/.dsh → DSH 运行时" src="docs/assets/ohmydsh-architecture.dual.svg" width="100%">
-
-> 展示资产为 `docs/assets/ohmydsh-architecture.dual.svg`(单文件,自带明暗主题适配);
-> 可编辑图源为 `docs/assets/ohmydsh-architecture.json`,架构变化时更新图源并重新导出该 SVG。
-
-## 使用
-
-**从零开始**(clone 以后到能用的完整流程;macOS / Linux / WSL / Git Bash 通用,`bin/dsh` 是 bash 脚本,Windows 原生不支持):
+### Path 1 — copy my full configuration
 
 ```bash
-git clone <仓库地址> && cd ohmydsh
-./scripts/bootstrap.sh     # ① 初始化:检查 Node 环境 + 安装依赖(只需一次,幂等)
-./scripts/install.sh       # ② 安装 dsh 命令到 ~/.local/bin
-dsh build && dsh           # ③ 物化定制配置并启动,UI 自动打开
+git clone https://github.com/prgrmrwy/ohmydsh.git && cd ohmydsh
+./scripts/bootstrap.sh     # check Node and install dependencies (idempotent)
+./scripts/install.sh       # link the launcher into ~/.local/bin
+dsh build && dsh           # materialize the configuration, then start DSH
 ```
 
-- 前置要求:**Node.js >= 22 + npm >= 10**(推荐 `.nvmrc` 中的版本);根 `package.json` 的 `engines` 声明最低版本,bootstrap 只在低于最低版本时报错,更高版本仅提示不阻塞;
-- 依赖出问题想重装:`./scripts/bootstrap.sh --force`;
-- install.sh 默认装到 `~/.local/bin/dsh`(想换目录:`DSH_BIN_DIR=/opt/bin ./scripts/install.sh`);重复执行可覆盖更新,不影响 `~/.dsh` 物化产物;
-- 装的是**相对符号链接**,仓库整体移动后命令依然可用,无需重装;
-- 若 `~/.local/bin` 不在 PATH,脚本会打印各 shell(bash/zsh)的配置提示;
-- 卸载:`./scripts/install.sh uninstall`;
-- 跳过脚本?在仓库根执行等价的原始命令也行:
-  ```bash
-  ln -s "$PWD/bin/dsh" "$HOME/.local/bin/dsh"
-  ```
+### Path 2 — pick parts
 
-**快速上手**(命令已装好;还没装?先看上面「从零开始」):
+Start from path 1, then trim `dsh.yaml`: set `enabled: false` on what you do not want (it stays in the repository and is easy to re-enable) or delete the entry for good. The `add-dsh-plugin` and `remove-dsh-plugin` skills make the edit, run `dsh build` and ask before restarting. Run `dsh build` again after every change.
 
-```bash
-dsh build   # 1. 首次:按 dsh.yaml 把定制物化到 ~/.dsh(改了配置后也要重跑)
-dsh         # 2. 启动:自动在后台拉起(是否就绪后自动打开 UI 由 web.open 决定,默认开;本仓库默认关)
-dsh stop    # 3. 停止服务
-```
+### Path 3 — start from zero
 
-- 想一步到位?"构建 + 启动"用 `dsh -b`;
-- 启动后 UI 在 **http://127.0.0.1:3080**(换端口:`dsh -p 8080`);
-- 每次启动/停止,终端都会打印**当前加载的插件清单**,一眼看清生效了哪些定制;
-- 重复执行 `dsh` 不会起第二个实例:已在运行就只是帮你把 UI 打开。
+Replace `dsh.yaml` with the minimal manifest below and run `dsh build`. No new command, script or template is involved.
 
-**日常命令**(按场景查):
-
-| 场景 | 命令 | 说明 |
-|---|---|---|
-| 启动 | `dsh` | 未运行 → 后台拉起 + 打开 UI;已运行 → 打开 UI;UI 也已打开 → 提示"已在运行"。UI 打开策略:显式 `DSH_OPEN_APP`(PWA/应用)优先;未配置时自动探测已安装的 DeepSeek Harness PWA,命中即**只开 PWA**;否则浏览器。`dsh.yaml` 置 `web.open: false`(本仓库默认)则**不自动打开**,需要时 `dsh --open` |
-| 构建 + 启动 | `dsh -b` | 改过 `dsh.yaml` 或插件后,先重新物化再启动 |
-| 只构建 | `dsh build` | 只把配置物化到 `~/.dsh`,不启动 |
-| 停止 | `dsh stop` | 按监听端口验证并停掉 DSH server,同时关闭 PWA 与 Chrome 中同端口的 DSH 标签;非 DSH 进程占端口时拒绝误杀 |
-| 重启 | `dsh restart` | 停 server → 关闭全部 UI → 确认端口释放 → 启动 server → 按 `web.open` 只打开 PWA(存在时),一步到位 |
-| 看历史 | `dsh history` | 历次启动的时间 / DSH 版本 / 端口 / 插件清单(记录在 `~/.dsh/dsh-startup.log`) |
-| 一键清空定制 | `dsh reset` | 移除自定义插件、preset、skill,并安全撤销托管的 `$DSH_HOME/AGENTS.md`(反悔了?`dsh build` 就能恢复) |
-| 统一升级插件 | `dsh plugin-update` | 检测远端插件新版本(兼容性/稳定性判定)→ 逐条确认 → 改 `dsh.yaml` + sync + 自动提交;`--dry-run` 只预览,`--yes` 跳过确认;needs-review 条目永远等人工 |
-| 调试 | `dsh --foreground` | 前台运行,日志直接打在终端 |
-| 换端口 | `dsh -p 8080` | 默认 3080 |
-| 不弹 UI | `dsh --no-open` | 启动/检测时不自动打开 UI(优先级最高;`dsh --open` 反方向强制打开) |
-
-小知识:"build" 就是按 `dsh.yaml` 物化到 `~/.dsh`(即 `node scripts/sync.mjs`,幂等可重跑);`DSH_HOME` 未设置或只含空白时默认 `~/.dsh`,也支持 `DSH_HOME=~/...`;DSH 版本单一来源是 `dsh.yaml` 的 `dshVersion`,启动时动态读取。
-
-**自动升级 DSH 运行体**(`autoUpdate`,默认开):
-
-- `dsh`(未运行)/ `dsh -b` / `dsh build` / `dsh restart` 前置会检测 `@deepseek-ai/dsh` 在 registry 目标频道(`latest` 或 `next`)的最新版本;低于最新即**阻塞式自动升级**再继续:改 `dsh.yaml` 的 `dshVersion` + 同族 `@deepseek-ai/dsh-*` pin → 重跑 sync 物化 → `git commit --no-verify`(`chore(dsh): auto-bump <旧> → <新>`)→ 再启动;
-- 只会自动改写名字匹配 `@deepseek-ai/dsh-*` 且 pin 等于旧运行体的条目,第三方插件与刻意钉住的其他版本不动;改写前留 `dsh.yaml.bak`,sync 失败即从备份回滚并报错不启动;
-- **前提是工作区干净**:仓库有未提交改动时不升级,输出会说明原因(提交后下次启动自动跟上);检测失败/离线时按当前版本继续,不阻塞;
-- **逃生门 & 频道**:想钉在旧版,`dsh.yaml` 置 `autoUpdate.enabled: false` 或临时 `DSH_SKIP_UPDATE=1 dsh`;追 `next`(前夜版)用 `DSH_UPDATE_CHANNEL=next dsh`(或改 `autoUpdate.channel`);
-- 升级/跳过/离线事件记录在 `~/.dsh/dsh-startup.log`,`dsh history` 可见。
-
-**临时 rc.2 运行体防卡死策略**（默认启用）：
-
-- `@deepseek-ai/dsh@0.1.1-rc.2` 已有精确版本的 npx 或 ohmydsh pnpm 缓存时，启动、build 和官方 CLI 都直接执行缓存入口，不重复运行 npx 计算预发布 peer 依赖；
-- 两级缓存都缺失时，rc.2 默认跳过已观察到可能长期卡死的 npm/libnpmexec 通道，改用有超时、临时 staging 和完整性校验的 pnpm 固定缓存；失败不会换用其他 DSH 版本，也不会覆盖已有可用缓存；
-- 仅用于隔离诊断或验证上游修复时，可单次运行 `DSH_ALLOW_NPX_PROVISION=1 dsh ...` 恢复 npx-first，但仍受超时保护；它与只控制版本检测的 `DSH_SKIP_UPDATE=1` 含义不同；
-- `dsh stop` 始终只做本地进程/UI 清理，不触发 npm/npx/pnpm。临时策略的删除 gate：隔离冷 npx install、连续 build、重复 restart 均能在超时内稳定通过后，删除 `scripts/lib/dsh-cli.mjs` 中唯一的 rc.2 策略项及对应测试。
-
-**UI 打开方式**(`web.open` 开关 + `DSH_OPEN_APP` 选目标,不用改 shell 配置):
-
-- 默认:就绪后自动打开,目标=系统默认浏览器打开 `http://127.0.0.1:3080`;
-- 不想自动弹任何 UI:`dsh.yaml` 置 `web.open: false`(本仓库默认关)后 `dsh build`,或临时 `dsh --no-open`;需要时 `dsh --open` 强制打开;
-- 官方 `dsh web` 自身默认也会打开浏览器;ohmydsh 启动官方进程时固定传 `--no-open`,只保留本启动器一个 UI opener,避免一次命令打开两个 tab;
-- 想用 PWA 窗口 / 指定 App 打开:仓库根 `.env.local`(gitignored,模板见 `.env.local.example`)写 `DSH_OPEN_APP=...`,启动时自动生效;也可以临时 `DSH_OPEN_APP="xxx.app" dsh`(行内优先);
-- 注意:自定义端口(`dsh -p`)时 PWA 打开的是自己的 start_url,可能对不上,这种情况用 `--no-open` 手动开。
-
-sync 行为按定制类型:
-
-| 类型 | source | 物化动作 |
-|---|---|---|
-| package | local | `dsh plugin add file:<packages/<id>>`(自动进 profile bundles) |
-| package | remote | `dsh plugin add <spec>`(自动进 profile bundles) |
-| preset | — | copy 到 `~/.dsh/.agent-presets/<id>` |
-| patch | — | 按 manifest 顺序合并生成 profile `cordis.patch.yml` |
-| skill | — | copy 到 `~/.dsh/skills/<id>` |
-
-顶层 `dependencies:` = 无 bundle 的支撑包(如 remote 定制缺失的 peer),精确版本 pin 装为 plain dependency、**不进 bundle 层**;定制条目用 `deps:` 引用其包名声明归属(安装仍以顶层列表为唯一入口,sync 校验引用,悬空引用报错)。
-
-`thirdPartyResources:` 用于精确 pin 的外部 MCP、独立 workflow 与 OpenSpec schema。Jev 只在 DSH Host 启动环境存在 `TYPESAFE_API_KEY` 时装配；key 应只写入本机 gitignored `.env.local`（模板见 `.env.local.example`），然后由用户执行 `dsh restart`。不要把 key 写进 manifest、命令参数、日志或聊天。`node scripts/jev-readiness.mjs` 只检查变量存在性、精确 package/insert row 与当前 request-header/skill-catalog 名称，不读取或打印 key 值。
-
-**定制项按需开关**(`enabledEnv`,可选字段,任意 `customizations` 条目都能声明):声明后同名 `DSH_` 环境变量覆盖该条目的 `enabled`,作用范围是单条定制而不是整个 profile——用于"仓库里默认关闭,但在有权限/有需要的机器上用环境变量按需打开"的场景,例如内部专属包:公开分享这份仓库时它不该默认安装,但在有权限的机器上不想手改 `dsh.yaml`。写法:
-
+<!-- fixture: minimal-manifest -->
 ```yaml
-- id: some-internal-plugin
-  enabled: false            # 仓库默认关闭
-  enabledEnv: DSH_SOME_PLUGIN  # 同名 env 覆盖上面的 enabled;必须是大写 DSH_ 前缀
+dshVersion: 0.2.0-rc.2
+autoUpdate:
+  enabled: false
+customizations: []
 ```
 
-`DSH_SOME_PLUGIN=1`(或 `true`/`yes`/`on`)在该机器上启用,`=0`(或 `false`/`no`/`off`)禁用;不设置或取值无法识别时回退到 `enabled` 字段。`enabledEnv` 名字不合法(不是大写 `DSH_` 前缀)时 sync 直接报错并中止,避免拼错后"开关看起来没生效"却毫无提示。改动后同样需要 `dsh build` 才生效。
+`autoUpdate.enabled` must be explicitly `false`. When it is absent, auto-update defaults to on, and the launcher would then edit `dsh.yaml` and commit the change on its own.
 
-## 环境级 instructions
+`dsh reset` is **not** the from-zero route. It only undeploys customizations from `~/.dsh`; the manifest stays unchanged and `dsh build` restores everything.
 
-顶层 `agentInstructions` 不是一种 customization type。启用时,sync 校验 `source` 是仓库内相对文件,加 GENERATED/provenance 头后原子写入 `$DSH_HOME/AGENTS.md`,并在 `.dsh-sync-state.json` 记录来源与部署哈希。连续 build 幂等;禁用、删除字段或 `dsh reset` 时,只会删除仍匹配已部署哈希的目标。目标若已有未托管内容,或托管后被修改,sync 会保留文件并报错,要求人工决定如何处理。
+### Let an AI agent do it
 
-DSH 官方 `standard` preset 会自动加载,无需复制出 `ohmydsh` preset。`$DSH_HOME/AGENTS.md` 给该 DSH 工作环境提供前馈模型指导;它不是权限授予,也不是强制安全边界,实际能力始终由最新 runtime context 与工具执行策略决定。`dsh-sandbox-notes` skill 继续保留,用于需要时查阅完整背景与恢复细节。
+Hand this prompt to your agent. It asks which path you want and then follows the guard rails.
 
-现象、迁移原因、错误恢复规则与验证步骤见 [`docs/architecture/agent-instructions.md`](docs/architecture/agent-instructions.md)。
+<!-- fixture: agent-install-prompt -->
+```text
+You are installing ohmydsh, a DSH customization repository. Follow these rules in order:
 
-## 第三方定制(remote)约定
-
-- 只存三样:**精确版本 pin**、**个人覆盖片段**(`patches/<id>.yml`)、**条目说明**(`note`/审查记录);**不 vendor 源码**。
-- 升级 = 改 pin 重跑 sync(默认由 `autoUpdate` 自动完成,见上方「自动升级」;`DSH_SKIP_UPDATE=1` 恢复纯手工改 pin 模式)。
-- **安全提醒**:插件即第三方代码(社区列表明示警告),安装前先看源码,`note` 记录来源与审查结论。
-- **不可公开的定制**(组织内部包、只对某组织有意义的 skill、组织专属域名等)不进本仓库,由本机私有 overlay 承载,见 [`docs/architecture/private-overlay.md`](docs/architecture/private-overlay.md)。自研插件需要组织专属值时,公开源码只读插件行 `config`,真值由 overlay 的 patch 按行 id 注入。
-- **`llm-subscriptions` 订阅 provider 插件**(`dsh-plugin-subscriptions`,当前 pin `0.8.0`,详见 `dsh.yaml` 条目 note):Claude 登录 = 导入本机 Claude Code 凭据(秒登录,不弹 OAuth),选型细见 change `openspec/changes/2026-08-20-llm-subscriptions-upgrade`(含 ADR-0001)。**codex 模型目录与 pin 强耦合**:ChatGPT 后端按请求里的 `client_version` 分流可见模型,旧 pin 会静默少几个新模型(如 `0.147.0` 看不到 GPT-6-Astra);`0.8.0` 起该版本号改为从公开 npm 元数据动态解析(不带凭据、失败回退内置 `0.153.4`),也可用插件配置 `codexClientVersion` 固定。**回滚**:该条目 `spec`/`version` 改回 `dsh-plugin-subscriptions@0.6.0` / `0.6.0` → `dsh build` → 重启;`auth.json` 不被升级改写,登录态与既有会话无损。
-
-## 开发流
-
-- 新想法 → `BACKLOG.md`;单项实施 → openspec change(`openspec new change <name>`);
-- 自研 package 改代码后**要 bump 版本**(manifest 同步),sync 才会重装;
-- DSH 运行体由 `autoUpdate` 自动升级并重跑 sync 恢复全部定制;手工升级同样 = 改 `dshVersion` 后重跑 sync。
-
-提交前请运行:
-
-```bash
-npm test                 # sync 黑盒回归测试
-npm run check:artifacts  # 防止产物 / nested lock / raw evidence 入库
+1. [ASK-PATH] Ask me first which path I want: (1) copy the full configuration, (2) pick parts, (3) start from zero. Do nothing before I answer.
+2. [VERIFY-IDEMPOTENT] After every change run `dsh build` twice; the second run must report no changes. If it does not, stop and report.
+3. [NO-DEPLOY-EDIT] Never hand-edit anything under ~/.dsh. Change dsh.yaml or the repository sources, then run `dsh build`.
+4. [NO-SECRETS] Never write credentials into the manifest, command arguments or this chat. Secrets belong in .env.local only.
+5. [STOP-ON-FAIL-CLOSED] If sync fails closed (for example AGENTS.md drift), stop and report the exact error. Never delete files to get around it.
+6. [ASK-RESTART] Ask me before restarting DSH.
 ```
 
-## 贡献
+### Command cheat-sheet
 
-欢迎 Issue 与 PR。动手前请先读 [CONTRIBUTING.md](CONTRIBUTING.md),它说明了阅读顺序、OpenSpec 规范驱动流程、验证要求与提交规范。
+```text
+dsh build          materialize dsh.yaml into ~/.dsh without starting DSH
+dsh stop           stop the running DSH
+dsh restart        stop, wait for the port, start again
+dsh reset          undeploy customizations (the manifest is untouched)
+dsh history        list previous startups and the plugins they loaded
+dsh plugin-update  check remote plugins, confirm, edit dsh.yaml, build, commit
+dsh doctor         check and repair host-level prerequisites
+```
 
-参与本项目需遵守[行为准则](CODE_OF_CONDUCT.md)。安全问题请勿开公开 Issue,按 [SECURITY.md](SECURITY.md) 私下报告。
+## Architecture
+<!-- section: architecture -->
 
-## 项目文档
+![ohmydsh architecture: repository as source of truth, sync, ~/.dsh, DSH runtime](docs/assets/ohmydsh-architecture.dual.svg)
 
-| 文档 | 说明 |
-|---|---|
-| [CONTRIBUTING.md](CONTRIBUTING.md) | 贡献流程、开发环境与验证要求 |
-| [SECURITY.md](SECURITY.md) | 漏洞报告渠道与本项目特有的安全考量 |
-| [CHANGELOG.md](CHANGELOG.md) | 仓库级变更记录 |
-| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | 社区行为准则 |
-| `openspec/specs/` | 系统当前应满足的行为规范 |
-| `docs/adr/` | 已接受的长期架构决策 |
-| `docs/architecture/` | 当前系统结构与机制说明(私有 overlay、环境级指令、插件集成陷阱) |
-| `BACKLOG.md` | 想法池 |
+### Mental model
 
-## 致谢
+The repository declares *what should be installed*. `scripts/sync.mjs` (run by `dsh build`) makes `~/.dsh` match it, fails closed on anything it cannot prove, and changes nothing on the second run. DSH then loads `~/.dsh` like any other deployment.
 
-- [DeepSeek Harness (DSH)](https://www.npmjs.com/package/@deepseek-ai/dsh) —— 本仓库定制的运行体本体。
-- 各第三方插件作者;来源、许可与审查结论记录在 `dsh.yaml` 对应条目的 `note` 中。
+### Where customizations come from
 
-## 许可
+| Source | Declared as | Example |
+|---|---|---|
+| Third-party npm package | `source: remote`, exact version pin | `width-tiers` |
+| Official optional bundle | `source: remote`, pinned to the DSH version | `experimental-schedule` |
+| Self-developed package in this repository | `source: local`, code in `packages/<id>/` | `dsh-memex` |
+| Self-developed package in another repository | `source: remote`, GitHub release tarball | `dsh-cockpit-bridge` |
+| Skill | `type: skill`, `skills/<id>/` | `ws` |
+| Patch | `type: patch`, `patches/<id>.yml` | `connection-webserver` |
+| Preset | `type: preset`, `presets/<id>/` | `dsh-pet-executor` |
+| Third-party resource | `thirdPartyResources`, pinned with integrity | `spec-superflow` |
 
-本项目基于 [MIT License](LICENSE) 发布。
+### Directory layout
 
-第三方定制以 pin 方式引用、不 vendor 源码,各自遵循其原始许可;`packages/worktree-session` 的交互概念参考详见该目录下的 `NOTICE`。
+```text
+dsh.yaml                 the single switch surface
+instructions/            environment-level agent instructions
+packages/<id>/           self-developed DSH packages
+skills/<id>/             skills synced to ~/.dsh/skills
+presets/<id>/            agent presets
+patches/<id>.yml         composition patches and overrides
+scripts/                 sync, build, upgrade and maintenance scripts
+openspec/                specs and changes: behavior is written down before it is built
+docs/                    adr/ decisions, architecture/ mechanisms, assets/ diagrams
+tests/                   repository-level tests
+```
+
+### Lifecycle
+
+![ohmydsh customization lifecycle: add, review, pin, build, verify, upgrade, disable, remove](docs/assets/ohmydsh-lifecycle.dual.svg)
+
+Every customization follows the same loop: add the entry, review its source and trust surface, pin an exact version, build, verify that a second build changes nothing, and upgrade by repeating the loop. Finally disable it, or remove the entry and build again to uninstall it.
+
+### Private overlay
+
+Entries that cannot be published (internal packages, machine-specific patches) go into a gitignored overlay. It is validated exactly like public entries and can only append. See [private overlay](docs/architecture/private-overlay.md).
+
+More mechanisms: [environment-level agent instructions](docs/architecture/agent-instructions.md) and [DSH plugin integration pitfalls](docs/architecture/dsh-plugin-integration-pitfalls.md) (read it before touching host capabilities).
+
+## Multiple machines
+<!-- section: multiple-machines -->
+
+Each machine does the same two things: clone this repository (plus your optional private overlay) and run `dsh build`.
+
+[dsh-cockpit](https://github.com/prgrmrwy/dsh-cockpit) lets you manage and view several machines from one place. It does not distribute configuration; the repository does.
+
+## Your configuration
+<!-- section: your-configuration -->
+
+- `dsh.yaml` is the truth. Read it, not `~/.dsh`.
+- `node scripts/plugin-list.mjs` prints what is actually loaded.
+- A private overlay (`dsh.yaml.local`, or the file named by `DSH_LOCAL_MANIFEST`) appends entries that must not be public.
+- `.env.local` (gitignored) holds local settings and every secret.
+- `thirdPartyResources` pins assets that are not plugins: the spec-superflow workflow skills, the Jev MCP server (its `TYPESAFE_API_KEY` comes from `.env.local` only, never from the manifest) and the Anvil OpenSpec schema.
+
+## Plugins
+<!-- section: plugins -->
+
+Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to their upstream; self-developed items link to their directory in this repository.
+
+### Third-party packages
+
+- [cost-meter](https://github.com/Han-1413141/dsh-cost-meter) — Shows per-session cost statistics in the web client.
+- [archify-dsh](https://github.com/tt-a1i/archify) — Generates interactive architecture, sequence and data-flow diagrams from a conversation.
+- [llm-subscriptions](https://github.com/V1ki/dsh-plugin-subscriptions) — Adds subscription-based providers (Codex, Claude, Grok, Copilot) switchable from the input box.
+- [width-tiers](https://github.com/aaronlei/dsh-width-tiers) — Switches the conversation width between five tiers.
+- [better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) — Turns the sidebar into a service-backed workbench with tabs.
+- [skin-center](https://github.com/zhu1090093659/dsh-skins) — Adds a settings page for themes, custom themes and wallpapers.
+- [dsh-opencode-session-header](https://github.com/beihzb/dsh-opencode-session-header) — Sends the session header that OpenCode Go requires, fixing missing-session errors.
+
+### Official optional
+
+- [experimental-schedule](https://www.npmjs.com/package/@deepseek-ai/dsh-experimental-schedule-bundle) — Official scheduled-automation page, schedule tools and time context.
+
+### Third-party resources
+
+- [spec-superflow](https://github.com/MageByte-Zero/spec-superflow) — State-machine workflow skills for planned, spec-driven changes.
+- [jev](https://github.com/jkudish/jev-mcp) — MCP server giving agents semantic judgment tools; the key stays in `.env.local`.
+- [anvil](https://github.com/jikkujoyce/openspec-schemas) — OpenSpec schema for test-first change workflows.
+
+### Adapted third-party skills
+
+- [i-have-adhd](skills/i-have-adhd/SKILL.md) — Answer-first, short-step output mode, used only when explicitly requested.
+- [frontend-design](skills/frontend-design/SKILL.md) — Design guidance that avoids templated, default-looking interfaces.
+- [eli5](skills/eli5/SKILL.md) — Explains any topic at the level of a chosen audience.
+
+### Self-developed packages
+
+- [worktree-session](packages/worktree-session/README.md) — Creates an isolated task branch and worktree on the first message of a session.
+- [dsh-openspec](packages/dsh-openspec/README.md) — Managed adapter exposing the official OpenSpec workflows as skills and commands.
+- [dsh-memex](packages/dsh-memex/README.md) — Native persistent memory with per-workspace scopes and a memory settings page.
+- [dsh-pet](packages/dsh-pet/README.md) — A resident desktop companion agent that runs management skills on a trusted snapshot.
+- [sidebar-session-provider-icon](packages/sidebar-session-provider-icon/README.md) — Shows the selected model's brand logo on every sidebar session row.
+- [session-title-copy](packages/session-title-copy/README.md) — Adds a short session-id badge next to the title that copies the full id.
+- [system-clock](packages/system-clock/README.md) — Shows the DSH host's clock, time zone and hostname at the bottom of settings.
+- [session-links](packages/session-links/README.md) — Collects links and produced files of the current session into a sidebar panel.
+- [home-network-model-guard](packages/home-network-model-guard/README.md) — Disables Claude models in the input box when the host egress region is restricted.
+- [subscriptions-sandbox-shim](packages/subscriptions-sandbox-shim/README.md) — Strips sandbox escalation fields and orphan tool calls for subscription providers.
+- [cockpit-worktree-open-shim](packages/cockpit-worktree-open-shim/README.md) — Connects the cockpit remote editor to Worktree Session's open action.
+- [cockpit-memex-browse-shim](packages/cockpit-memex-browse-shim/README.md) — Connects cockpit port forwarding to the memory card browser.
+
+### Self-developed skills, preset and patch
+
+- [ws](skills/ws/SKILL.md) — Inspects, promotes and cleans Worktree Session bindings.
+- [jev-workflow-router](skills/jev-workflow-router/SKILL.md) — Observation-only routing hint on whether work should use a formal workflow.
+- [memex-recall-report](skills/memex-recall-report/SKILL.md) — Reports memory recall statistics and which cards are never recalled.
+- [add-dsh-plugin](skills/add-dsh-plugin/SKILL.md) — Adds a remote plugin to the manifest, builds it and asks about a restart.
+- [remove-dsh-plugin](skills/remove-dsh-plugin/SKILL.md) — Removes a plugin from the manifest, builds and asks about a restart.
+- [dsh-sandbox-notes](skills/dsh-sandbox-notes/SKILL.md) — Notes on sandbox permissions and the "not strictly wider" error.
+- [dsh-pet-executor](presets/dsh-pet-executor) — Preset for Pet execution sessions without the global skill provider.
+- [connection-webserver](patches/connection-webserver.yml) — Composition patch that restores Connection RPC channel registration.
+
+### Self-developed, separate repository
+
+- [dsh-cockpit-bridge](https://github.com/prgrmrwy/dsh-cockpit) — Bridge between DSH and the dsh-cockpit multi-machine manager, installed from a GitHub release.
+
+## Contributing
+<!-- section: contributing -->
+
+Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first, plus [SECURITY.md](SECURITY.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Behavior changes go through an OpenSpec change. Any change to `README.md` must update `README.zh.md` in the same commit, and the other way round.
+
+## License
+<!-- section: license -->
+
+[MIT](LICENSE). Third-party plugins keep their own licenses; their upstream links are in the [plugin index](#plugins).

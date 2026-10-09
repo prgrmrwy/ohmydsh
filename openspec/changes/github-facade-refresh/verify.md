@@ -36,3 +36,23 @@
 Known out-of-scope residue (per the 2026-10-09 human scope decision), recorded for BACKLOG: identifiers elsewhere in the repository and in git history, including a truncated session prefix and an IP in older BACKLOG entries.
 
 - BACKLOG pruned (user-approved scope 2026-10-09): removed landed U001, U002, B003, B004, B005, B006, B007, B009, B010, B013, B015, B018, B031, B032, B036; moved misfiled B022, B043, B044, B047 from 已完成 to 想法; kept boundary entries B017, B019, B026, B030, B033, B035.
+
+### P2 · Facade (tasks 6.x, 7.5)
+
+- Full suite after P2 (Lead, serial): `npm test` → 408 tests, 406 pass, 0 fail, 2 skipped (pre-existing). One earlier run showed a single failure in `tests/dsh-runtime-provisioning.test.mjs` ("generated asynchronous activity after the test ended", ENOENT in a staging dir). It is a pre-existing timing flake unrelated to this change: the file passed 3/3 in isolation and the full-suite rerun was green. `npm run check:artifacts` → compliant; `openspec validate --strict` → valid.
+- Diagrams: archify showcase validation 9/9, 0 errors, 0 warnings for both (receipts in the teammate report: architecture spec `00c826bc…`, lifecycle spec `c4d49912…`). Lead rendered both dual SVGs in headless Chrome in light and dark and read them: text legible, no overlapping nodes or labels, edges clean. Caveat: the lifecycle "new pin" edge has a bend-heavy dashed route; accepted. `archify visual-check` fails containment for the lifecycle *HTML viewer* at three sizes; that HTML is not committed (only the dual SVG is), so it does not apply.
+- Upstream URLs in the plugin index were checked against `npm view` repository/homepage metadata by the Lead: all match. `skin-center` links `zhu1090093659/dsh-skins` (npm metadata); the older manifest note says `dsh-web`; the note is slated for slimming in P4.
+- Lead manual gate 7.5 — per-section bilingual semantic sign-off (README.md ↔ README.zh.md):
+
+| Section anchor | Conclusion |
+|---|---|
+| what-it-does | pass — same claims, same three bullets, same two audiences; lifecycle verbs all present in both |
+| quick-start | pass — three paths, minimal-manifest fixture identical, `dsh reset` caveat present, six rule tags identical and in the same order, cheat-sheet uses only real subcommands |
+| architecture | pass — same sub-sections, table, layout, both diagrams, overlay and doc links |
+| multiple-machines | pass — clone + `dsh build`, cockpit does not distribute configuration; 2 lines each |
+| your-configuration | pass — same five bullets |
+| plugins | pass — same grouping and items; capability sentences cross-checked against the packages' own READMEs and skill descriptions |
+| contributing | pass |
+| license | pass |
+
+- Process note: the Lead briefly ran a stash/checkout while only meaning to re-run a test; the stash was empty and the working tree was then re-verified (anchors, SVG sizes, full suite) before commit.

@@ -10,6 +10,8 @@ export const REQUIRED_TRACKED_PATHS = [
   'package-lock.json',
   'docs/assets/ohmydsh-architecture.json',
   'docs/assets/ohmydsh-architecture.dual.svg',
+  'docs/assets/ohmydsh-lifecycle.json',
+  'docs/assets/ohmydsh-lifecycle.dual.svg',
 ]
 
 export const DOCS_WHITELIST = ['docs/adr/', 'docs/architecture/', 'docs/assets/']
