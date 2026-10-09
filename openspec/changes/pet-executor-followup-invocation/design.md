@@ -66,6 +66,7 @@ Pet root executor 会话本身是一个常驻的普通 DSH session：它的 scop
 
 - **首选**：消息入队（inbox splice）时登记——此刻来源类别已知，且通常早于 turn 开始若干百毫秒。
 - **推迟**：若该 Task 的串行槽仍被占用（用户在当前 Invocation 运行中输入），不登记，由该消息自己被 claim 的那一轮重试（`agent/inbox/claimed` 精确报告该轮消费了哪条消息，比 `turn/start` 更准）；这样既不抢占当前调用，也不产生第二个 current。
+- **结算竞态**：`turn/end` 的状态投影是异步的，下一轮消息的 claim 可能先于上一个 Invocation 的结算落库到达。登记前先等待该会话已触发的投影落库，再判断槽位；仍在进行的轮次没有待落库的结算，所以 steer 仍不登记。
 - **确定性兜底**：`pet_context` 解析前先查该会话是否有“登记进行中”的 in-flight 记录，有界等待其完成后重新解析；完成则返回该 Invocation，失败则返回空闲诊断。仅靠事件顺序会留下“模型第一步先于落库”的真实窗口。
 
 ### D4：snapshot 从 Task 固定来源重建

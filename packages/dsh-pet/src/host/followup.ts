@@ -125,6 +125,19 @@ export interface FollowupDeps {
     readonly messageId: string
     readonly request?: string
   }) => Promise<FollowupOutcome>
+  /**
+   * Resolves once every Invocation-state projection already triggered for this
+   * session has been persisted.
+   *
+   * `turn/end` is projected asynchronously, so a user message claimed by the
+   * NEXT turn can be observed while the previous Invocation still reads as
+   * occupying the slot. Registering against that stale view would drop a
+   * message that really does start a new turn. Awaiting settlement first turns
+   * the race into ordering; a message that joins a turn still open (a steer)
+   * has no pending settlement, so it still finds the slot occupied and is
+   * correctly left to the Invocation that owns that turn.
+   */
+  readonly settled?: (executorSessionId: string) => Promise<void>
   /** Whether the session is a unified-locus child rather than a root executor. */
   readonly isLocusChild?: (executorSessionId: string) => boolean
   /** Diagnostics sink; never used for control flow. */
@@ -237,6 +250,7 @@ export class FollowupCoordinator {
     const request = clientMessageText(message)
     this.inFlight.add(messageId)
     const chained = this.chain(executorSessionId, async () => {
+      await this.deps.settled?.(executorSessionId)
       const outcome = await this.deps.register({
         taskId: task!.id,
         messageId,

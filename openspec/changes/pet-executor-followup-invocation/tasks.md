@@ -14,7 +14,7 @@
 - [x] 2.1 在 executor 会话观察者中实现真人直输识别：只接受满足 G1 判据、且不为 Pet 派发簿记所拥有的消息；其余（宿主注入、渠道投递、locus/qa-child 会话）一律跳过
 - [x] 2.2 实现登记触发：串行槽空闲时在消息入队后立即登记；槽被占用时不登记，由该消息自己被 claim 的那一轮重试（`agent/inbox/claimed`），不抢占当前调用
 - [x] 2.3 推迟登记改由 `agent/inbox/claimed` 承载（取代原 `turn/start` 方案）：该事件精确报告本轮消费的消息；槽仍被占用或 Task 已归档则不登记
-- [ ] 2.8 已知缺口：`turn/end` 的结算是异步的，若用户消息的 claim 先于上一个 Invocation 的结算落库，则该次登记因 `slot-occupied` 被丢弃，本轮仍会撞空闲错误。需让被拒登记在结算完成后重试（并计入 `waitForRegistration`），再用真机验收确认
+- [x] 2.8 竞态：`turn/end` 的结算异步落库，下一轮消息的 claim 可能先到。Host 为每个会话维护状态投影尾巴，登记前先等待其落库再判断槽位（`FollowupDeps.settled`）；仍在进行的轮次（steer）没有待落库的结算，因此仍被正确留给持有该轮的 Invocation。竞态测试经变异验证（去掉等待即失败）
 - [x] 2.4 实现 `PetCoordinator` 的会话内直输登记入口：追加 `capabilityId: session-message` 的 Invocation（无 Skill、无 envelope 派发），直接以 `running` 落库并写入 run 记录，同时把用户文本存为 `request`
 - [x] 2.5 幂等与去重：同一条消息不得登记两次（splice 与 claim 双路径、重放的事件、Pet 自己的派发都必须收敛到“只登记一次或零次”）
 - [x] 2.6 串行与结算复用：确认 `isSlotFree`/`findCurrentInvocation` 把会话内直输 Invocation 当作唯一 current；`turn/end` 的 succeeded/cancelled/failed 映射与 `pump` 排队行为不变
