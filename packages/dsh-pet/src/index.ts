@@ -914,6 +914,8 @@ async function initialize(
    * and that can run before the later wiring completes.
    */
   let followups: FollowupCoordinator | undefined
+  /** Resolves when pending Invocation-state projections for a session are durable. */
+  let projectionSettled: (sessionId: string) => Promise<void> = () => Promise.resolve()
 
   /** Install the Pet-owned scoped surface on one live executor Agent.
    *
@@ -1758,6 +1760,7 @@ async function initialize(
     resolveTask: executorSessionId => repository.findTaskByExecutor(executorSessionId),
     findByMessage: messageId => repository.findInvocationByFollowupMessage(messageId),
     register: input => coordinator.startFollowupInvocation(input),
+    settled: executorSessionId => projectionSettled(executorSessionId),
     isLocusChild: executorSessionId => {
       try {
         return locusContextRepository.findByChildSessionId(executorSessionId).length > 0
@@ -3464,11 +3467,38 @@ async function initialize(
     log: message => petLog(message),
   })
 
+  /**
+   * Per-session tail of in-flight Invocation-state projections.
+   *
+   * `turn/end` is projected without blocking the event bus, which leaves a
+   * window where the next turn's message is observed while the previous
+   * Invocation still looks current. Follow-up registration awaits this tail so
+   * it judges the slot AFTER settlement, never against a stale view.
+   */
+  const projectionTails = new Map<string, Promise<void>>()
+  const trackProjection = (sessionId: string, work: Promise<void>): void => {
+    const settledWork = work.then(
+      () => undefined,
+      () => undefined,
+    )
+    const previous = projectionTails.get(sessionId) ?? Promise.resolve()
+    const tail = Promise.all([previous, settledWork]).then(() => {
+      if (projectionTails.get(sessionId) === tail) projectionTails.delete(sessionId)
+    })
+    projectionTails.set(sessionId, tail)
+  }
+  projectionSettled = sessionId => projectionTails.get(sessionId) ?? Promise.resolve()
+
   ctx.effect(
     () =>
       ctx.on('session/event', (session: { id: unknown }, event: { type: string; data?: unknown }) => {
         const executorSessionId = String(session.id)
         if (repository.findTaskByExecutor(executorSessionId) === undefined) return
+        const project = (
+          next: Parameters<PetCoordinator['onAgentEvent']>[1],
+        ): void => {
+          trackProjection(executorSessionId, coordinator.onAgentEvent(executorSessionId, next))
+        }
 
         // A message entering the executor session's inbox. The durable splice
         // is appended immediately before the turn it belongs to starts, so a
@@ -3484,7 +3514,7 @@ async function initialize(
         }
 
         if (event.type === 'turn/start') {
-          void coordinator.onAgentEvent(executorSessionId, { kind: 'turn-start' })
+          project({ kind: 'turn-start' })
           return
         }
         // An approval request blocks the turn on the user. Project it so the
@@ -3492,11 +3522,11 @@ async function initialize(
         // queued Invocation is not started behind work that is actually
         // waiting. The decision resumes execution.
         if (event.type === 'approval/asked') {
-          void coordinator.onAgentEvent(executorSessionId, { kind: 'waiting-user' })
+          project({ kind: 'waiting-user' })
           return
         }
         if (event.type === 'approval/decided') {
-          void coordinator.onAgentEvent(executorSessionId, { kind: 'turn-start' })
+          project({ kind: 'turn-start' })
           return
         }
         if (event.type !== 'turn/end') return
@@ -3516,17 +3546,17 @@ async function initialize(
           ?.reason
         switch (reason?.kind) {
           case 'completed':
-            void coordinator.onAgentEvent(executorSessionId, { kind: 'turn-complete' })
+            project({ kind: 'turn-complete' })
             if (settling !== undefined) void channel?.settle(settling, 'succeeded')
             return
           case 'aborted':
-            void coordinator.onAgentEvent(executorSessionId, { kind: 'cancelled' })
+            project({ kind: 'cancelled' })
             if (settling !== undefined) void channel?.settle(settling, 'failed')
             return
           default:
             // `failed`, `blocked` and any future reason settle as a failure
             // rather than leaving the Invocation running forever.
-            void coordinator.onAgentEvent(executorSessionId, {
+            project({
               kind: 'turn-error',
               message: reason?.error?.message ?? `turn ended: ${reason?.kind ?? 'unknown'}`,
             })

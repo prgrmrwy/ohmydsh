@@ -509,3 +509,71 @@ describe('idle diagnosis', () => {
     expect(error.message).not.toContain('snap-old')
   })
 })
+
+describe('settlement racing the next message', () => {
+  it('registers a message claimed before the previous Invocation finished settling', async () => {
+    // The previous Invocation is still `running` when the user's message is
+    // observed; its `turn/end` projection is in flight. Registering against
+    // that stale view used to drop the message and strand the turn.
+    let release!: () => void
+    const gate = new Promise<void>(resolve => {
+      release = resolve
+    })
+    // Stands for the Host's projection tail: it resolves only once the
+    // previous Invocation's settlement is DURABLE, not when it merely starts.
+    let settlement: Promise<void> = Promise.resolve()
+    const created = await openPetHarness()
+    harness = created
+    const home = await mkdtemp(path.join(tmpdir(), 'pet-home-'))
+    const paths = resolvePetPaths(home)
+    await ensurePetDirectories(paths)
+    const coordinator = new PetCoordinator({
+      repository: created.repository,
+      capabilities: new CapabilityRegistry(),
+      agents: { create: vi.fn(), get: () => undefined } as unknown as AgentRegistryLike,
+      dispatcher: { dispatch: vi.fn(async () => undefined) },
+      resolver,
+      contextProviders: new SourceContextRegistry(),
+      workspacePath: paths.workspaceRoot,
+      selection: () => ({ providerId: 'anthropic', modelId: 'claude-opus-5' }),
+    })
+    await seedSettledTask(created)
+    await created.repository.appendInvocation(
+      testInvocation({ id: 'inv-live', taskId: 'task-f', snapshotId: 'snap-old', status: 'running' }),
+    )
+    const followups = new FollowupCoordinator({
+      resolveTask: id => created.repository.findTaskByExecutor(id),
+      findByMessage: id => created.repository.findInvocationByFollowupMessage(id),
+      register: input => coordinator.startFollowupInvocation(input),
+      settled: () => settlement,
+    })
+
+    // turn/end is being projected; the next turn's message arrives meanwhile.
+    settlement = gate.then(() => coordinator.onAgentEvent('exec-1', { kind: 'turn-complete' }))
+    followups.observe('exec-1', clientMessage('秒回'))
+    release()
+    await settlement
+    await followups.waitForRegistration('exec-1')
+
+    const followup = created.repository.findInvocationByFollowupMessage('msg-1')
+    expect(followup?.status).toBe('running')
+    expect(created.repository.getInvocation('inv-live')?.status).toBe('succeeded')
+    const context = resolveTrustedContext(created.repository, 'exec-1')
+    expect(context.invocationId).toBe(followup!.id)
+  })
+
+  it('still leaves a steer into an open turn to the Invocation that owns it', async () => {
+    const f = await fixture()
+    await seedSettledTask(f.harness)
+    await f.harness.repository.appendInvocation(
+      testInvocation({ id: 'inv-live', taskId: 'task-f', snapshotId: 'snap-old', status: 'running' }),
+    )
+
+    // Nothing is settling: the turn is genuinely still open.
+    f.followups.observe('exec-1', clientMessage('补一句'))
+    await f.followups.waitForRegistration('exec-1')
+
+    expect(f.harness.repository.findInvocationByFollowupMessage('msg-1')).toBeUndefined()
+    expect(f.harness.repository.getInvocation('inv-live')?.status).toBe('running')
+  })
+})
