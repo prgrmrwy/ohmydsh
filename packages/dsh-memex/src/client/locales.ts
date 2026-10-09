@@ -84,6 +84,11 @@ export type MemexKey =
   | 'conflictName'
   | 'unavailableTitle'
   | 'unavailableDetail'
+  | 'kernelTitle'
+  | 'kernelMissing'
+  | 'kernelMismatch'
+  | 'kernelTimeout'
+  | 'kernelUnknownFailure'
   | 'loading'
   | 'refresh'
   | 'libraryAbsent'
@@ -213,6 +218,11 @@ export const en: Record<MemexKey, string> = {
   conflictName: 'Every entry needs a unique name',
   unavailableTitle: 'Host facts unavailable',
   unavailableDetail: 'The settings page can still edit the configuration; library facts stay hidden rather than guessed.',
+  kernelTitle: 'Storage kernel unavailable',
+  kernelMissing: 'Sync state needs @touchskyer/memex@{expected}, and none is installed. The launcher installs it on the next `dsh` start; `dsh doctor` does it now.',
+  kernelMismatch: 'Sync state needs @touchskyer/memex@{expected}, but {installed} is installed. The launcher restores the pinned version on the next `dsh` start; `dsh doctor` does it now.',
+  kernelTimeout: 'The storage kernel did not answer in time, so sync state cannot be read right now.',
+  kernelUnknownFailure: 'Sync state could not be read ({code}).',
   loading: 'Loading…',
   refresh: 'Refresh',
   libraryAbsent: 'Not created yet; it appears on the first write.',
@@ -343,6 +353,11 @@ export const zh: Record<MemexKey, string> = {
   conflictName: '每个条目的名称必须唯一',
   unavailableTitle: 'Host 事实不可用',
   unavailableDetail: '配置仍可编辑；库的事实保持隐藏，不用推测值填充。',
+  kernelTitle: '存储内核不可用',
+  kernelMissing: '同步状态需要 @touchskyer/memex@{expected}，当前未检测到内核。启动器会在下次 dsh 启动时自动安装；现在就要装可运行 dsh doctor。',
+  kernelMismatch: '同步状态需要 @touchskyer/memex@{expected}，当前检测到的是 {installed}。启动器会在下次 dsh 启动时装回钉住的版本；现在就要装可运行 dsh doctor。',
+  kernelTimeout: '存储内核没有按时应答，因此暂时读不到同步状态。',
+  kernelUnknownFailure: '读不到同步状态（{code}）。',
   loading: '加载中…',
   refresh: '刷新',
   libraryAbsent: '尚未创建，首次写入时创建。',

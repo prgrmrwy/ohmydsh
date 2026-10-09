@@ -212,3 +212,54 @@ prefix problem exists at all.
 Repository `.npmrc` points at npmjs, but `npm install -g` ignores project config
 and falls back to `~/.npmrc` (private-npm on this machine). The mirror currently lacks
 memex 0.4.1. Use an explicit registry for the pinned global install.
+
+## The kernel is machine-local state, so it must heal itself
+
+The storage kernel is a **global npm install** (`@touchskyer/memex@<pin>`). It is not
+part of `dsh build` (which materializes the profile's dependencies), not part of the
+personal sync list (repositories and config), and not part of a memory library (cards
+and a git repo). Every environment rebuild therefore keeps the data and loses the
+tool: a second machine, a second unix account, a fresh `DSH_HOME`, a restored
+`~/.dsh-memex`.
+
+The observation that made this concrete: a whole memory tree copied onto a machine
+(`cp -a`/`rsync -a` preserves mtimes but rewrites ctime, so `find … -printf '%C+'`
+shows one identical ctime across every file) while `npm root -g` had no
+`@touchskyer` directory at all. Everything downstream failed at once:
+
+- the settings page showed `远端 不可用 / 详情 missing` for **every** library — even
+  one whose `.sync.json` had a remote configured, which is the tell that sampling
+  failed rather than the remote being unset;
+- all eight `memex_*` tools raised `ENOENT … lstat '…/@touchskyer'`, so recall **and**
+  card writes were dead while the card counts still looked healthy (the host counts
+  `cards/*.md` itself).
+
+Since 2026-10-09 the pin is declared in `dsh.yaml` as
+
+```yaml
+    hostPrerequisites:
+      - kind: npm-global
+        package: "@touchskyer/memex"
+        version: "0.4.1"
+```
+
+and `bin/dsh` provisions it before start / `-b` / `build` / `restart` via
+`scripts/host-prerequisites.mjs`. Design constraints worth remembering:
+
+- **The launcher owns this, not the plugin.** Installing is a machine-level side
+  effect; the read-only facts channel and the model-facing tools must not trigger it.
+  There is no install button and no tool for it.
+- **Health is the consumer's own criterion**: `npm root -g` → `@touchskyer/memex` →
+  `package.json.version === pin`. Version mismatch counts as unhealthy (a global
+  install of the pinned version overwrites the old one; "already present" would leave
+  the plugin permanently broken). The plugin's extra integrity checks (`bin`,
+  non-symlinked `skills/`) stay the plugin's business.
+- **Missing manifest ≠ missing kernel**: the manifest pin must equal the generated
+  `KERNEL_VERSION`, because installing a version the resolver rejects is the worst
+  outcome — installed, and still failing. A repo test enforces that equality.
+- **Failure is a warning, never a blocked start**, and it is logged to
+  `dsh-startup.log`; `DSH_SKIP_HOST_PREREQUISITES=1` skips it; `dsh doctor` (and
+  `dsh doctor --check`) is the explicit path.
+- **`enabled`/`enabledEnv` decide whether to provision**, using the same shared
+  implementation as sync (`scripts/lib/env-local.mjs`), so "this machine does not run
+  that customization" cannot mean two different things.

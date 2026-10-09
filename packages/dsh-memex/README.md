@@ -183,10 +183,42 @@ git repository remain the kernel's.
 
 ## Runtime prerequisites
 
+The storage kernel is a **global npm install**, declared in `dsh.yaml` as the
+`dsh-memex` entry's `hostPrerequisites`:
+
+```yaml
+    hostPrerequisites:
+      - kind: npm-global
+        package: "@touchskyer/memex"
+        version: "0.4.1"
+        # registry: https://registry.npmjs.org/   # optional per-entry override
+```
+
+`bin/dsh` provisions it before **start / -b / build / restart**, so a machine
+that was rebuilt, re-imaged or restored from a backup heals itself. The rules
+that matter:
+
+- Only declared, **enabled** prerequisites are touched (`enabled: false` or a
+  falsy `enabledEnv` disables provisioning too), and only the **exact** declared
+  version is installed — never a range or `latest`.
+- A failed install (offline, registry refusal, timeout) only warns and writes
+  `~/.dsh/dsh-startup.log`; it never blocks starting DSH.
+- `DSH_SKIP_HOST_PREREQUISITES=1` skips provisioning for one invocation.
+- `dsh doctor` checks and installs now; `dsh doctor --check` is read-only.
+- The manifest pin and this package's generated `KERNEL_VERSION` must match —
+  `tests/host-prerequisites.test.mjs` fails the build if they drift.
+
+Manual install (still valid, e.g. on a machine without this checkout):
+
 ```bash
 npm install -g @touchskyer/memex@0.4.1 --registry=https://registry.npmjs.org/
 ```
 
 Global npm installs may ignore the repository `.npmrc` and fall back to a user
-mirror. A user-level private mirror may lag npmjs, so the
-explicit registry argument matters for the pinned release.
+mirror. A user-level private mirror may lag npmjs, so the explicit registry
+argument matters for the pinned release — the provisioner passes it explicitly
+for the same reason.
+
+If the kernel is missing anyway, the settings page says which version is needed
+and whether none was detected or a different one was found; it never shows only
+an internal failure code.

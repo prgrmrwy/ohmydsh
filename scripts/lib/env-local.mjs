@@ -128,3 +128,59 @@ export function enabledEnvNames(doc) {
   }
   return [...names]
 }
+
+// The `enabledEnv` switch semantics: which spellings count as on/off, and what
+// "this customization is in effect on this machine" means.
+//
+// They live here because `.env.local` is where those values come from, and
+// because two consumers now ask the question — sync (which materializes) and
+// the launcher's host-prerequisite self-heal (which installs machine-local
+// prerequisites). A second copy would let them disagree: sync would install a
+// package for an entry the healer refuses to treat as enabled, or the reverse.
+//
+// Recognized spellings are `1/true/yes/on` and `0/false/no/off`, case-insensitive
+// and trimmed. Anything else (blank, misspelled, absent) is NOT an override: it
+// falls back to the manifest, so a typo can never silently flip a switch on.
+export const ENV_BOOL_TRUE = new Set(['1', 'true', 'yes', 'on'])
+export const ENV_BOOL_FALSE = new Set(['0', 'false', 'no', 'off'])
+
+/**
+ * Resolve a boolean env override.
+ * @param raw - the environment value, if any.
+ * @returns true/false for a recognized spelling, `undefined` otherwise.
+ */
+export function resolveEnabledOverride(raw) {
+  if (raw === undefined) return undefined
+  const value = raw.trim().toLowerCase()
+  if (value === '') return undefined
+  if (ENV_BOOL_TRUE.has(value)) return true
+  if (ENV_BOOL_FALSE.has(value)) return false
+  return undefined
+}
+
+/**
+ * Is this manifest entry in effect here and now?
+ *
+ * A malformed `enabledEnv` name throws: it is a manifest defect to fix, not to
+ * guess around. Sync reports it as a load error; the launcher's self-heal
+ * reports it as a diagnostic for that entry and keeps going (a manifest typo
+ * must not block starting DSH).
+ *
+ * @param item - a manifest customization entry.
+ * @param env - the environment holding the override (defaults to `process.env`).
+ * @param label - how to name the entry in an error message (defaults to its id).
+ * @returns whether the entry is enabled.
+ * @throws Error when `enabledEnv` is not an uppercase `DSH_`-prefixed name.
+ */
+export function isCustomizationEnabled(item, env = process.env, label = undefined) {
+  const name = label ?? item?.id ?? 'customization'
+  let enabled = item?.enabled !== false
+  if (item?.enabledEnv === undefined) return enabled
+  if (typeof item.enabledEnv !== 'string' || !/^DSH_[A-Z0-9_]+$/.test(item.enabledEnv)) {
+    const suggestion = String(item?.id ?? '').toUpperCase().replace(/[^A-Z0-9]+/g, '_')
+    throw new Error(`${name}: enabledEnv must be an uppercase DSH_-prefixed env var name (e.g. DSH_${suggestion})`)
+  }
+  const override = resolveEnabledOverride(env[item.enabledEnv])
+  if (override !== undefined) enabled = override
+  return enabled
+}

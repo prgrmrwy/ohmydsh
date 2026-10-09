@@ -14,6 +14,8 @@
 #   dsh history    查看历次启动清单(时间 / 版本 / 端口 / 加载的 plugins)
 #   dsh plugin-update 统一升级远端插件(检测 → 确认 → 改 dsh.yaml → sync → 自动提交;
 #                   --dry-run 只预览;--yes 跳过逐条确认)
+#   dsh doctor     检查并补齐**本机运行前提**(dsh.yaml 的 hostPrerequisites,如 memex
+#                   存储内核这类全局 npm 安装);失败以非零退出;--check 只检查不安装
 #   dsh -p 8080    指定端口(默认 3080)
 #   官方 CLI 命令自动转交,直接用即可:dsh plugin --profile web add <pkg>、
 #                   dsh --profile <name>、dsh --dump-config(插件安装仍建议走 dsh.yaml + dsh build)
@@ -21,6 +23,12 @@
 # autoUpdate(默认开启):start/-b/build/restart 前置检测 registry 最新 DSH 版本,
 #   有更新且工作区干净时阻塞式自动升级(改 dsh.yaml + 同族 pin → 重跑 sync → 自动提交)再启动;
 #   逃生门:autoUpdate.enabled:false 或 DSH_SKIP_UPDATE=1;频道:autoUpdate.channel / DSH_UPDATE_CHANNEL。
+#
+# hostPrerequisites(由 dsh.yaml 各定制声明,如 dsh-memex 的存储内核):这些是**机器本地**
+#   的全局依赖 —— dsh build 不装它们,个人同步清单也不带它们,换机器/换账号/重建 DSH home/
+#   恢复数据目录之后必然缺失,缺失时插件只会静默降级。启动/-b/build/restart 前会自愈一次:
+#   只装声明过的精确版本,失败只告警、绝不阻塞启动;逃生门 DSH_SKIP_HOST_PREREQUISITES=1,
+#   需要立刻补时用 dsh doctor。
 #
 # 本地环境:仓库根 .env.local(gitignored)可放 DSH_OPEN_APP 等;也可行内临时传入,
 # 如 DSH_OPEN_APP="xxx.app" dsh。DSH_OPEN_APP = PWA/App 路径或名称时打开该应用。
@@ -130,6 +138,8 @@ RESET=0
 FOREGROUND=0
 HISTORY=0
 PLUGIN_UPDATE=0
+DOCTOR=0
+CHECK_ONLY=0
 DRY_RUN=""
 YES_FLAG=""
 PASSTHRU=()
@@ -187,6 +197,8 @@ while [[ $# -gt 0 ]]; do
     reset) RESET=1; shift ;;
     history) HISTORY=1; shift ;;
     plugin-update) PLUGIN_UPDATE=1; shift ;;
+    doctor) DOCTOR=1; shift ;;
+    --check) CHECK_ONLY=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -y|--yes) YES_FLAG=1; shift ;;
     -b|--build) BUILD=1; shift ;;
@@ -213,6 +225,47 @@ done
 
 do_build() {
   with_repo_registry node "$REPO/scripts/sync.mjs"
+}
+
+# --check 只对 doctor 有意义;单独使用时明确报错,而不是被静默忽略。
+if [[ $CHECK_ONLY -eq 1 && $DOCTOR -ne 1 ]]; then
+  echo "error: --check 只能与 doctor 一起使用(dsh doctor --check)" >&2
+  exit 1
+fi
+
+# ---------- 本机运行前提:定制的 hostPrerequisites 自愈 ----------
+# 这些前提是机器本地状态(bin/dsh 之外的全局安装),环境重建后必然缺失,而缺失
+# 只表现为插件降级。启动前补一次;失败只告警 —— 装不上一个包不该让人起不来 DSH,
+# 但必须留下可操作的诊断与日志,免得"以为治过了"。
+record_prereq_event() {
+  # 闸口跑在 prepare_server_runtime 之前,而后者才负责建 $DSH_HOME;首次启动时
+  # 这里必须先建目录,否则重定向失败(set -e 下会直接中断启动)。
+  mkdir -p "$DSH_HOME"
+  printf '[%s] hostPrerequisites: %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$1" >>"$STARTUP_LOG"
+}
+
+ensure_host_prerequisites() {
+  local out="" status=0
+  case "$(printf '%s' "${DSH_SKIP_HOST_PREREQUISITES:-}" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on)
+      echo "本机运行前提:已按 DSH_SKIP_HOST_PREREQUISITES 跳过自愈"
+      record_prereq_event "skipped (DSH_SKIP_HOST_PREREQUISITES)"
+      return 0
+      ;;
+  esac
+  out="$(with_repo_registry node "$REPO/scripts/host-prerequisites.mjs" 2>&1)" || status=$?
+  [[ -n "$out" ]] && printf '%s\n' "$out"
+  if [[ $status -eq 0 ]]; then
+    # 只在真的装了什么时写日志,避免每次启动都留一行噪声。
+    if [[ "$out" == *"已安装"* ]]; then
+      record_prereq_event "installed: $(printf '%s\n' "$out" | grep '已安装' | tr '\n' ';')"
+    fi
+    return 0
+  fi
+  echo "warn: 本机运行前提未全部满足(见上,通常是没有网络或 registry 不可达)" >&2
+  echo "warn: 这不影响启动;恢复网络后重跑 dsh doctor 即可" >&2
+  record_prereq_event "failed (exit $status)"
+  return 0
 }
 
 # UI 对应的进程名:显式 DSH_OPEN_APP 优先,否则自动探测的 PWA;无 → 空。
@@ -588,6 +641,16 @@ if [[ $HISTORY -eq 1 ]]; then
   do_history
   exit 0
 fi
+# doctor:手动检查/补齐本机运行前提(不改仓库、不动 Host)。退出码如实反映结果,
+# 便于脚本与 CI 使用;--check 只读,不安装任何东西。
+if [[ $DOCTOR -eq 1 ]]; then
+  if [[ $CHECK_ONLY -eq 1 ]]; then
+    with_repo_registry node "$REPO/scripts/host-prerequisites.mjs" --check
+  else
+    with_repo_registry node "$REPO/scripts/host-prerequisites.mjs"
+  fi
+  exit $?
+fi
 if [[ $RESET -eq 1 ]]; then
   with_repo_registry node "$REPO/scripts/sync.mjs" --reset
   exit 0
@@ -691,6 +754,8 @@ fi
 
 if [[ $BUILD_ONLY -eq 1 || $BUILD -eq 1 || $RESTART -eq 1 ]] || ! is_server_up; then
   autoupdate
+  # 自愈读的是 manifest 声明,所以放在 autoUpdate 之后(它可能刚改写并重物化 manifest)。
+  ensure_host_prerequisites
 fi
 
 if [[ $BUILD_ONLY -eq 1 ]]; then

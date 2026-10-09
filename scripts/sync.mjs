@@ -12,7 +12,7 @@ import yaml from 'js-yaml'
 import { runDshCli } from './lib/dsh-cli.mjs'
 import { assertHostRuntimeSources, declaredHostRuntimeFromManifest } from './lib/dsh-host-runtime.mjs'
 import { assertNoReservedEntryKeys, loadOverlayCustomizations, mergeOverlayCustomizations, OVERLAY_PATH_ENV } from './lib/manifest-overlay.mjs'
-import { applyEnvLocal, enabledEnvNames } from './lib/env-local.mjs'
+import { applyEnvLocal, enabledEnvNames, isCustomizationEnabled } from './lib/env-local.mjs'
 import { withProfileLock } from './lib/profile-lock.mjs'
 import { planSeedRows, reconcileOwnedKeys, settingsLiveInProfile } from './lib/legacy-settings.mjs'
 
@@ -29,6 +29,19 @@ const validateThirdPartyResources = (value) => {
     return []
   }
   return THIRD_PARTY.validateThirdPartyResources(value)
+}
+
+// Same fixture contract for host prerequisites: a copied sync.mjs with only its
+// historical core helpers stays viable while no manifest declares
+// `hostPrerequisites`; the helper becomes required the moment one does.
+const HOST_PREREQUISITES = await import('./lib/host-prerequisites.mjs').catch((error) => {
+  if (error?.code === 'ERR_MODULE_NOT_FOUND' && String(error?.message).includes('host-prerequisites.mjs')) return undefined
+  throw error
+})
+const parseHostPrerequisites = (item, label) => {
+  if (item?.hostPrerequisites === undefined) return undefined
+  if (HOST_PREREQUISITES === undefined) throw new Error(`${label}: hostPrerequisites support module is missing`)
+  return HOST_PREREQUISITES.parseHostPrerequisites(item, label)
 }
 const resourcePackageItems = (resources) => THIRD_PARTY?.resourcePackageItems(resources) ?? []
 const preflightResourceIntegrities = (resources) => THIRD_PARTY?.preflightResourceIntegrities(resources) ?? Promise.resolve()
@@ -186,28 +199,9 @@ function renderMergedFragment(item, text, outsideRows) {
   return `# --- fragment: ${item.id} (mergeConfig: own keys over the runtime's) ---\n` + yaml.dump(merged, { schema: ENTRY_LIST_SCHEMA, lineWidth: -1, noRefs: true })
 }
 
-/**
- * Truthy/falsy spellings accepted for a boolean env override. Shared by the
- * per-customization `enabledEnv` field, so every mechanism carries the same
- * meaning for the same spellings.
- */
-const ENV_BOOL_TRUE = new Set(['1', 'true', 'yes', 'on'])
-const ENV_BOOL_FALSE = new Set(['0', 'false', 'no', 'off'])
-
-/**
- * Resolve a boolean env override: unset/blank/unrecognized returns undefined
- * so the caller falls back to its manifest-declared default; a recognized
- * truthy/falsy spelling (case-insensitive) returns true/false. Used by the
- * per-customization `enabledEnv` field (loadManifest).
- */
-function resolveEnabledOverride(raw) {
-  if (raw === undefined) return undefined
-  const v = raw.trim().toLowerCase()
-  if (v === '') return undefined
-  if (ENV_BOOL_TRUE.has(v)) return true
-  if (ENV_BOOL_FALSE.has(v)) return false
-  return undefined
-}
+// `enabled` / `enabledEnv` semantics live in one shared module: the launcher's
+// host-prerequisite self-heal asks the same question, and two copies would let
+// sync and the healer disagree about whether an entry is in effect here.
 
 const failures = []
 const changes = []
@@ -298,6 +292,10 @@ function loadManifest() {
       }
       npmScopes = [...new Set(item.npmScopes)]
     }
+    // hostPrerequisites: machine-local runtime prerequisites (e.g. a globally
+    // installed CLI). Validated here, never installed here — the launcher
+    // provisions them before start (spec: host-prerequisites).
+    const hostPrerequisites = parseHostPrerequisites(item, `${label} (${item.id})`)
     if ((item.type === 'package' || item.type === 'preset') && typeof item.version !== 'string') throw new Error(`${label} (${item.id}): package/preset requires version`)
     // deps: ownership references into the top-level dependencies list (not an install source)
     if (item.deps !== undefined) {
@@ -340,22 +338,20 @@ function loadManifest() {
     // machine-specific opt-in without touching dsh.yaml.
     // Validated eagerly (fail closed) so a typo'd env name doesn't silently
     // degrade into "the switch never seems to work" with no diagnostic.
-    let enabled = item.enabled !== false
-    if (item.enabledEnv !== undefined) {
-      if (typeof item.enabledEnv !== 'string' || !/^DSH_[A-Z0-9_]+$/.test(item.enabledEnv)) {
-        throw new Error(`${label} (${item.id}): enabledEnv must be an uppercase DSH_-prefixed env var name (e.g. DSH_${item.id.toUpperCase().replace(/[^A-Z0-9]+/g, '_')})`)
-      }
-      const override = resolveEnabledOverride(process.env[item.enabledEnv])
-      if (override !== undefined) enabled = override
-    }
+    const enabled = isCustomizationEnabled(item, process.env, `${label} (${item.id})`)
     // mergeConfig: an override fragment contributes only its own config keys and
     // keeps keys the runtime wrote beneath it for the same row (see syncPatches).
     if (item.mergeConfig !== undefined) {
       if (item.type !== 'patch') throw new Error(`${label} (${item.id}): mergeConfig is only valid on type patch`)
       if (typeof item.mergeConfig !== 'boolean') throw new Error(`${label} (${item.id}): mergeConfig must be true or false`)
     }
-    return { ...item, source, enabled, buildInputs, compatDependencies, npmScopes }
+    return { ...item, source, enabled, buildInputs, compatDependencies, npmScopes, hostPrerequisites }
   })
+  // One global package, one pin. Two owners would leave the provisioner (and a
+  // reader) choosing between versions, so the manifest is refused instead.
+  if (HOST_PREREQUISITES !== undefined) {
+    HOST_PREREQUISITES.assertUniquePrerequisites(items.flatMap((item) => HOST_PREREQUISITES.declarationsOf(item)))
+  }
   const web = doc.web ?? {}
   if (typeof web !== 'object' || web === null || Array.isArray(web)) {
     throw new Error('manifest: web must be a mapping (web.open: true|false)')

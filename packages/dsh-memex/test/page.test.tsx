@@ -2,8 +2,9 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { MemexResolveResult, MemexStoreView, MemexStoresResult, MemexWorkspacesResult } from '../src/contract.js'
+import type { MemexKernelView, MemexResolveResult, MemexStoreView, MemexStoresResult, MemexWorkspacesResult } from '../src/contract.js'
 import { MEMEX_REMOTE_ENDPOINT, MEMEX_RESOLVE_ENDPOINT, MEMEX_STORES_ENDPOINT, MEMEX_WORKSPACES_ENDPOINT } from '../src/contract.js'
+import { zh } from '../src/client/locales.js'
 import { MemexSettingsSection } from '../src/client/page.js'
 import type { MemexSettingsShape } from '../src/client/settings-model.js'
 
@@ -69,9 +70,14 @@ function routeOf(scope: string, path: string, overrides: Partial<MemexResolveRes
  * which library a notice names.
  */
 function copyOf(key: string): string {
-  return /^(note|refuse|fallbackVia|attachBecomes|switchesReadonly)/.test(key)
-    ? `${key}[{path}|{scope}|{replaced}|{split}|{list}|{binding}|{victim}|{ancestor}|{item}]`
+  return /^(note|refuse|fallbackVia|attachBecomes|switchesReadonly|kernel)/.test(key)
+    ? `${key}[{path}|{scope}|{replaced}|{split}|{list}|{binding}|{victim}|{ancestor}|{item}|{expected}|{installed}|{code}]`
     : key
+}
+
+/** Real Chinese copy, so placeholder values are visible to assertions. */
+function zhCopy(key: string): string {
+  return (zh as Record<string, string>)[key] ?? key
 }
 
 function registry(items: ReadonlyArray<{ title: string; path: string; route?: MemexResolveResult }>): MemexWorkspacesResult {
@@ -109,7 +115,15 @@ const live: Harness[] = []
 
 async function render(
   settings: MemexSettingsShape,
-  options: { stores?: MemexStoreView[]; storesFail?: boolean; workspaces?: MemexWorkspacesResult; workspacesFail?: boolean; mutateResult?: boolean } = {},
+  options: {
+    stores?: MemexStoreView[]
+    storesFail?: boolean
+    workspaces?: MemexWorkspacesResult
+    workspacesFail?: boolean
+    mutateResult?: boolean
+    kernel?: MemexKernelView
+    locale?: (key: string) => string
+  } = {},
 ): Promise<Harness> {
   const container = document.createElement('div')
   document.body.appendChild(container)
@@ -137,7 +151,7 @@ async function render(
       rpcCalls.push({ endpoint, params })
       if (endpoint === MEMEX_STORES_ENDPOINT) {
         if (mode === 'fail') return { ok: false, error: { message: 'channel down' } }
-        return { ok: true, value: { kernel: { expected: '0.4.1', version: '0.4.1', matches: true }, namespaceDir: NS, stores } }
+        return { ok: true, value: { kernel: options.kernel ?? { expected: '0.4.1', version: '0.4.1', matches: true }, namespaceDir: NS, stores } }
       }
       if (endpoint === MEMEX_WORKSPACES_ENDPOINT) {
         if (mode === 'fail' || options.workspacesFail === true) return { ok: false, error: { message: 'unknown endpoint "workspaces"' } }
@@ -203,7 +217,7 @@ async function render(
   const Page = (): JSX.Element => (
     <MemexSettingsSection
       rpc={rpc as never}
-      t={copyOf as never}
+      t={(options.locale ?? copyOf) as never}
       scope={scope as never}
       browseOpen={{
         request: async () => ({ status: 'ok', port: 3939, scope: 'x' }),
@@ -858,5 +872,77 @@ describe('memory settings page', () => {
     // Opened under the memory-off workspace too: still only the one under cockpit.
     expect([...h.container.querySelectorAll('button')].filter(button => button.textContent?.trim() === 'actionBrowse')).toHaveLength(1)
     expect(h.container.querySelectorAll('.dshmx-entry-open')).toHaveLength(2)
+  })
+})
+
+/**
+ * 内核事实的可读性(capability: dsh-memex-settings-ui)。
+ *
+ * 回归背景:内核(全局安装的 @touchskyer/memex)缺失时,通道只回一个内部失败码
+ * (`missing`),页面把码当事实值显示 —— 用户看到「远端 不可用 / 详情 missing」,
+ * 既不知道缺的是什么,也不知道谁来装、怎么装。失败码是诊断线索,不是行动依据。
+ */
+describe('storage kernel facts', () => {
+  // 只有内核相关的文案用真中文(要断言插值后的版本号),其余保持 key 形式,
+  // 否则 aria-label 也变成中文,harness 就找不到展开按钮了。
+  const kernelCopy = (key: string): string => (key.startsWith('kernel') ? zhCopy(key) : copyOf(key))
+  const missing = (): MemexKernelView => ({ expected: '0.4.1', matches: false })
+  const stale = (): MemexKernelView => ({ expected: '0.4.1', version: '0.4.0', matches: false })
+
+  it('内核未安装时说明需要的版本与恢复途径,而不是只给失败码', async () => {
+    const h = await render({ scopes: [{ name: 'acme', pathPrefixes: ['/work/acme'] }] }, {
+      kernel: missing(),
+      locale: kernelCopy,
+      stores: [store({ scope: 'acme', sync: { known: false, degraded: 'missing' } })],
+    })
+    // 页面顶部就要说清楚,不能等用户展开某个入口才发现。
+    expect(h.text()).toContain('存储内核不可用')
+    expect(h.text()).toContain('@touchskyer/memex@0.4.1')
+    expect(h.text()).toContain('未检测到')
+    expect(h.text()).toContain('dsh doctor')
+
+    await h.expand(0)
+    expect(h.text()).toContain('@touchskyer/memex@0.4.1')
+    // 内部失败码不再冒充事实值。
+    expect(h.text()).not.toContain('missing')
+  })
+
+  it('内核版本不符时同时给出期望版本与检测到的版本', async () => {
+    const h = await render({ scopes: [{ name: 'acme', pathPrefixes: ['/work/acme'] }] }, {
+      kernel: stale(),
+      locale: kernelCopy,
+      stores: [store({ scope: 'acme', sync: { known: false, degraded: 'missing' } })],
+    })
+    expect(h.text()).toContain('存储内核不可用')
+    expect(h.text()).toContain('@touchskyer/memex@0.4.1')
+    expect(h.text()).toContain('0.4.0')
+  })
+
+  it('内核无响应时说明是超时,并把未知失败码如实带出', async () => {
+    const timeout = await render({ scopes: [{ name: 'acme', pathPrefixes: ['/work/acme'] }] }, {
+      kernel: missing(),
+      locale: kernelCopy,
+      stores: [store({ scope: 'acme', sync: { known: false, degraded: 'timeout' } })],
+    })
+    await timeout.expand(0)
+    expect(timeout.text()).toContain('没有按时应答')
+
+    const unknown = await render({ scopes: [{ name: 'acme', pathPrefixes: ['/work/acme'] }] }, {
+      kernel: missing(),
+      locale: kernelCopy,
+      stores: [store({ scope: 'acme', sync: { known: false, degraded: 'unparseable' } })],
+    })
+    await unknown.expand(0)
+    // 未知码不猜:原样带出,让人能拿去查日志。
+    expect(unknown.text()).toContain('unparseable')
+  })
+
+  it('内核健康时不出现任何内核缺失说明(不制造噪声)', async () => {
+    const h = await render({ scopes: [{ name: 'acme', pathPrefixes: ['/work/acme'] }] }, {
+      locale: kernelCopy,
+      stores: [store({ scope: 'acme', sync: { known: true, configured: false } })],
+    })
+    expect(h.text()).not.toContain('存储内核不可用')
+    expect(h.text()).not.toContain('dsh doctor')
   })
 })
