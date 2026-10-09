@@ -6,6 +6,9 @@
 - **行为变化**：这一回合之后如果没有新的回合，提醒不会送达，经验也就不会被写成卡片（可接受的代价）。提醒文案本身未改。
 - 排队的提醒在送达前若已写卡、记忆被关闭、或会话因压缩/重启而重置召回状态，会被放弃；之后的新召回不继承它。
 - 对应 openspec change `dsh-memex-defer-write-reminder`。验证见该 change 的 `design.md`（真实 AgentLoop 集成测试 + 人为破坏实现的突变检查）。
+- **内核不可用时说清原因，不再把内部失败码当事实值**。此前内核（全局安装的 `@touchskyer/memex`）缺失时，页面在每个库的展开态显示「远端 不可用 / 详情 `missing`」——用户既不知道缺的是什么版本，也不知道谁来装。现在页面顶部给出「存储内核不可用」横幅，正文包含**需要的版本**与**当前状态**（未检测到 / 检测到 x.y.z），并指出启动器会在下次 `dsh` 启动时自动安装、`dsh doctor` 可立即修复；未知失败码仍原样带出（不猜）。内核健康时不显示任何提示。
+- **内核 pin 声明进 manifest**：`dsh.yaml` 的 `dsh-memex` 条目新增 `hostPrerequisites`（`kind: npm-global`, `@touchskyer/memex@0.4.1`），由启动器在启动/构建/重启前自愈（`scripts/host-prerequisites.mjs`；失败只告警不阻塞启动，`DSH_SKIP_HOST_PREREQUISITES=1` 跳过，`dsh doctor [--check]` 手动）。manifest 的 pin 必须等于本包生成物里的 `KERNEL_VERSION`，由 `tests/host-prerequisites.test.mjs` 防漂移。
+- 对应 openspec change `host-prerequisite-selfheal`。
 
 ## 0.3.0 — 2026-09-29
 

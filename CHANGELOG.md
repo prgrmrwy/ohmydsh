@@ -23,6 +23,7 @@
 - 全新机器上的 profile 骨架自动物化,避免首次部署因缺失骨架失败。
 - 部署面完整性核验:sync 按 manifest 承诺校验并自愈残缺 package。
 - Worktree Session `ws clean` 支持主仓会话的仓库级清理。
+- 定制可声明**本机运行前提**(`hostPrerequisites`,`kind: npm-global`,精确版本),由启动器在 start/`-b`/`build`/`restart` 前自愈:换机器、第二个账号、重建 DSH home、恢复数据目录后不再需要人工记得装全局 CLI(首个使用者:`@touchskyer/memex`,即 dsh-memex 的存储内核)。失败只告警并写 `dsh-startup.log`,绝不阻塞启动;`DSH_SKIP_HOST_PREREQUISITES=1` 跳过;新增 `dsh doctor [--check]` 手动检查/修复。
 
 ### Changed
 

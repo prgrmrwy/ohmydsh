@@ -441,6 +441,28 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
   }, [])
 
   /**
+   * Why the storage kernel's facts are missing, in words a reader can act on.
+   *
+   * The host reports an internal failure code (`missing`, `timeout`, …) — that
+   * is what diagnostics and tests need — but the page MUST NOT hand the code to
+   * the user as if it were the fact. `missing` covers both "no kernel" and
+   * "wrong kernel version", and the sampled kernel view tells the two apart.
+   */
+  const kernelReason = (): string => {
+    const installed = stores?.kernel.version
+    return installed === undefined
+      ? fill('kernelMissing', { expected: stores?.kernel.expected ?? '' })
+      : fill('kernelMismatch', { expected: stores?.kernel.expected ?? '', installed })
+  }
+
+  /** Translate one degraded sync sample into that reason. */
+  const degradedReason = (code: string): string => {
+    if (code === 'missing') return kernelReason()
+    if (code === 'timeout') return t('kernelTimeout')
+    return fill('kernelUnknownFailure', { code })
+  }
+
+  /**
    * The remote store, as a labelled fact list.
    *
    * Facts are stacked label/value pairs rather than one middot-joined string:
@@ -459,7 +481,7 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
           {sync.degraded !== undefined && (
             <>
               <dt>{t('factDetail')}</dt>
-              <dd>{sync.degraded}</dd>
+              <dd>{degradedReason(sync.degraded)}</dd>
             </>
           )}
         </dl>
@@ -881,6 +903,19 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
       {(workspacesFailed || workspaces?.known === false) && storesError === undefined && (
         <div className="dshmx-banner dshmx-banner-warn" role="status">
           <div className="dshmx-note">{t('degradedWorkspaces')}</div>
+        </div>
+      )}
+      {/*
+        The kernel is the one prerequisite whose absence degrades *everything*
+        (no recall, no writes, no sync facts). Say so at the top, with the
+        version it needs and where a working one comes from — an entry-level
+        "unavailable" alone leaves the reader with no way to tell whether their
+        library or their machine is at fault.
+      */}
+      {stores !== undefined && stores.kernel.matches !== true && storesError === undefined && (
+        <div className="dshmx-banner dshmx-banner-warn" role="status">
+          <div>{t('kernelTitle')}</div>
+          <div className="dshmx-note">{kernelReason()}</div>
         </div>
       )}
 
