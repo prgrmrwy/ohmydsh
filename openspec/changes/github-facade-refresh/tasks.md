@@ -2,37 +2,37 @@
 
 ## 1. P1 · Shared test helpers
 
-- [ ] 1.1 Write `tests/helpers/markdown.mjs` (section anchors, fence/inline-code stripping, link extraction + resolution, CJK ratio, `git ls-files`) together with unit tests for each helper on fixture strings
-- [ ] 1.2 Run the helper unit tests; confirm they pass
+- [x] 1.1 Write `tests/helpers/markdown.mjs` (section anchors, fence/inline-code stripping, link extraction + resolution, CJK ratio, `git ls-files`) together with unit tests for each helper on fixture strings
+- [x] 1.2 Run the helper unit tests; confirm they pass
 
 ## 2. P1 · Agent entry, root leftovers, stray dependency
 
-- [ ] 2.1 Write failing tests: RDG `AGENTS.md is a symlink whose blob is exactly CLAUDE.md`, RDG `wrong-case symlink target is reported`; TA `rejects root debug screenshot and generated architecture note` (assert they fail on the current tree for the stated reason)
-- [ ] 2.2 Implement: repoint `AGENTS.md` → `CLAUDE.md`; delete `.cdp-scratch-shot.png` and `worktree-session-architecture.md`; add both to `artifactPolicyViolations` forbidden list
-- [ ] 2.3 `ws promote`, then remove the stray `"2"` dependency from root `package.json` and `package-lock.json` (`npm uninstall 2`); confirm `npm ci` and the full suite stay green
-- [ ] 2.4 Refactor; full suite stays green
+- [x] 2.1 Write failing tests: RDG `AGENTS.md is a symlink whose blob is exactly CLAUDE.md`, RDG `wrong-case symlink target is reported`; TA `rejects root debug screenshot and generated architecture note` (assert they fail on the current tree for the stated reason)
+- [x] 2.2 Implement: repoint `AGENTS.md` → `CLAUDE.md`; delete `.cdp-scratch-shot.png` and `worktree-session-architecture.md`; add both to `artifactPolicyViolations` forbidden list
+- [x] 2.3 `ws promote`, then remove the stray `"2"` dependency from root `package.json` and `package-lock.json` (`npm uninstall 2`); confirm `npm ci` and the full suite stay green
+- [x] 2.4 Refactor; full suite stays green
 
 ## 3. P1 · docs admission whitelist
 
-- [ ] 3.1 Write failing tests: TA `rejects tracked docs outside the whitelist`; RDG `tracked docs live only in adr/architecture/assets and architecture docs are linked from entry docs`; RDG `docs/assets has no orphan files`
-- [ ] 3.2 Implement: whitelist rule in `scripts/check-tracked-artifacts.mjs` (only `docs/adr/`, `docs/architecture/`, `docs/assets/`)
-- [ ] 3.3 Refactor; tests from 3.1 stay red only because `docs/notes/` still exists (expected until group 4)
+- [x] 3.1 Write failing tests: TA `rejects tracked docs outside the whitelist`; RDG `tracked docs live only in adr/architecture/assets and architecture docs are linked from entry docs`; RDG `docs/assets has no orphan files`
+- [x] 3.2 Implement: whitelist rule in `scripts/check-tracked-artifacts.mjs` (only `docs/adr/`, `docs/architecture/`, `docs/assets/`)
+- [x] 3.3 Refactor; tests from 3.1 stay red only because `docs/notes/` still exists (expected until group 4)
 
 ## 4. P1 · docs/notes migration and redaction
 
-- [ ] 4.1 Write failing tests: RDG `notes migration matches notes-disposition.json and design table`; RDG `each migrated note h1 appears exactly once at its target`; RDG `migrated targets contain no redaction-rule matches or registered manual items`
-- [ ] 4.2 Write `scripts/maintenance/notes-migration-diff.mjs <base>` plus RDG fixture test `notes-migration-diff flags an unregistered body edit`
-- [ ] 4.3 Implement: migrate all 25 files per `notes-disposition.json`. Apply automatic redaction rules to every non-deleted file, register each additional identifiable item found during migration in `manualRedactions`, rewrite the two `move-rewrite` files as current-mechanism docs under `docs/architecture/`, and add the two BACKLOG defect entries
-- [ ] 4.4 Run `node scripts/maintenance/notes-migration-diff.mjs <base>`; confirm the only residual diffs are registered manual items; record command, `<base>`, and output in `verify.md`
-- [ ] 4.5 Lead manual gate: read through every non-deleted migrated file against the privacy checklist; record a per-file conclusion in `verify.md` (missing conclusion = P1 not passed)
-- [ ] 4.6 Refactor; groups 3–4 tests green
+- [x] 4.1 Write failing tests: RDG `notes migration matches notes-disposition.json and design table`; RDG `each migrated note h1 appears exactly once at its target`; RDG `migrated targets contain no redaction-rule matches or registered manual items`
+- [x] 4.2 Write `scripts/maintenance/notes-migration-diff.mjs <base>` plus RDG fixture test `notes-migration-diff flags an unregistered body edit`
+- [x] 4.3 Implement: migrate all 25 files per `notes-disposition.json`. Apply automatic redaction rules to every non-deleted file, register each additional identifiable item found during migration in `manualRedactions`, rewrite the two `move-rewrite` files as current-mechanism docs under `docs/architecture/`, and add the two BACKLOG defect entries
+- [x] 4.4 Run `node scripts/maintenance/notes-migration-diff.mjs <base>`; confirm the only residual diffs are registered manual items; record command, `<base>`, and output in `verify.md`
+- [x] 4.5 Lead manual gate: read through every non-deleted migrated file against the privacy checklist; record a per-file conclusion in `verify.md` (missing conclusion = P1 not passed)
+- [x] 4.6 Refactor; groups 3–4 tests green
 
 ## 5. P1 · stale references and entry docs
 
-- [ ] 5.1 Write failing tests: RDG `every repo-relative markdown link resolves to a tracked path`; RDG `broken relative link is reported with file, line, target`; RDG `no tracked text file outside archive mentions docs/notes/`
-- [ ] 5.2 Implement: update every `docs/notes/` reference (CLAUDE.md, CONTRIBUTING.md, `.gitignore` → `*.local.md`, `.env.local.example`, ADR-0006, in-progress changes, `dsh.yaml`, source comments in `packages/dsh-pet` / `packages/dsh-memex`, issue template, BACKLOG); update the CLAUDE.md reading order to point at `docs/architecture/`
-- [ ] 5.3 Implement: prune landed BACKLOG entries (Lead lists borderline entries for user confirmation first)
-- [ ] 5.4 Refactor; full suite and `npm run check:artifacts` green → **P1 phase acceptance + commit**
+- [x] 5.1 Write failing tests: RDG `every repo-relative markdown link resolves to a tracked path`; RDG `broken relative link is reported with file, line, target`; RDG `no tracked text file outside archive mentions docs/notes/`
+- [x] 5.2 Implement: update every `docs/notes/` reference (CLAUDE.md, CONTRIBUTING.md, `.gitignore` → `*.local.md`, `.env.local.example`, ADR-0006, in-progress changes, `dsh.yaml`, source comments in `packages/dsh-pet` / `packages/dsh-memex`, issue template, BACKLOG); update the CLAUDE.md reading order to point at `docs/architecture/`
+- [x] 5.3 Implement: prune landed BACKLOG entries (Lead lists borderline entries for user confirmation first)
+- [x] 5.4 Refactor; full suite and `npm run check:artifacts` green → **P1 phase acceptance + commit**
 
 ## 6. P2 · Facade diagrams
 

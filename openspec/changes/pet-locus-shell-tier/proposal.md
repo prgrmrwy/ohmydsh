@@ -26,5 +26,5 @@ Locus 子会话当前只有 `read/read_image/glob/grep/web_search` 与 caller-bo
 - Pet Host：`packages/dsh-pet/src/host/locus/{composition,child,aggregate,admission,control,context,policy-verification,permission-mutation,management}.ts`、`src/index.ts` 的 `agent/created` 组合接缝与 `visibleTools` 核验、Delivery 派发前门禁、管理面路由与 UI。
 - 持久层：Locus 行新增可选 `toolTier` 与 `safe-v2` 标记，审计记录档位变化；仅做 additive 迁移，旧行保持可读。
 - DSH runtime：依赖上游公开的 agent-scoped `tools.restrict()`（交集语义、返回 disposer）与 `tools.guard()`；不新增 compat patch。
-- 文档：新增 `docs/adr/ADR-0008-locus-shell-tier.md`；更新 `docs/notes/dsh-plugin-integration-pitfalls.md` 中「委派是一等逃逸面」相关条目的适用范围说明。
+- 文档：新增 `docs/adr/ADR-0008-locus-shell-tier.md`；更新 `docs/architecture/dsh-plugin-integration-pitfalls.md` 中「委派是一等逃逸面」相关条目的适用范围说明。
 - 安全：`shell` 档把所有者本机 shell（受文件沙箱约束的读与网络不受限）与其飞书身份交给 allowlist 驱动的模型；群内消息内容仍作为不可信输入进入上下文。

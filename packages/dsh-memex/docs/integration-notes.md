@@ -1,3 +1,4 @@
+> Migrated from docs/notes/dsh-memex-integration.md.
 # DSH × memex integration notes
 
 ## Why not use the MCP server directly
@@ -89,7 +90,7 @@ blocks with a visible explanation. An empty list would be a different claim —
 
 Registry paths are absolute while configured prefixes are usually `~/…`, so the
 same answer carries `homeDir`; without it the browser cannot tell that
-`~/mydir/dev/acme` and `/Users/me/mydir/dev/acme` are one workspace.
+`~/mydir/dev/acme` and `~/mydir/dev/acme` are one workspace.
 
 Two traps worth remembering when editing this page:
 
@@ -165,7 +166,7 @@ must agree). Do not "fix" it by pointing an internal library at a public host �
 `publish: internal` libraries are exactly the ones the guard keeps off such hosts.
 
 **本机处置（2026-09-20）**：两个 git.corp.example 仓库取消 `main` 的分支保护后，一次
-`memex sync push` 就把积压推上去了（acme `a872997→324df92`、flow-web `a15a053→4685b0b`，
+`memex sync push` 就把积压推上去了（两个私有仓库，
 两边 `rev-list --left-right --count` 均为 `0  0`，`.sync.json` 的 `lastSync` 随之刷新）。
 没有改插件、没有改本地分支——保护是**远端**策略，`push origin HEAD` 本身没问题。
 

@@ -1,3 +1,4 @@
+> Migrated from docs/notes/pet-locus-on-demand-tree-handoff.md.
 # pet-locus-on-demand-tree 真实验收记录（2026-09-15）
 
 对应 change：`openspec/changes/pet-locus-on-demand-tree/`（BACKLOG B036）。
@@ -13,7 +14,7 @@
 
 ## 步骤 1：入群零副作用
 
-群「验收-B036-拉bot零副作用」（`oc_2983702a8515d3176ae5a62c6be39bc1`）。
+群「验收-B036-拉bot零副作用」（`oc_<redacted>`）。
 
 基线（拉 bot 前）：
 
@@ -28,15 +29,15 @@ u_dsh_pet_locus_operations 该 chatId: 0 条
 
 ## 步骤 2：首个 @ 按需建树
 
-同群内所有者发送「@小小芒果 你好」，机器人正常回复（`reply_to` 精确指向该消息，附 `DONE` 表情）。
+同群内所有者发送「@<bot> 你好」，机器人正常回复（`reply_to` 精确指向该消息，附 `DONE` 表情）。
 
 建立的 locus：
 
 ```json
 {
-  "parentSessionId": "session-b2f11bae-eedd-4edf-bd27-23baa6c29936",
-  "childSessionId": "session-dfb4c72e-b8ea-47da-b08b-a93e70411074",
-  "workspaceId": "e81b1ec0-b651-41cb-ba41-108c06593305",
+  "parentSessionId": "session-<redacted>",
+  "childSessionId": "session-<redacted>",
+  "workspaceId": "session-<redacted>",
   "source": "auto",
   "state": "active",
   "createdAt": 1789485695432,
@@ -54,20 +55,20 @@ u_dsh_pet_locus_operations 该 chatId: 0 条
 
 ## 步骤 3：`/bind` 未建入口一次建对
 
-另建群「验收-B036-bind一次建对」（`oc_646eb4b031519fde4c47c41592d348ce`），拉入 bot（未 @，不建树）。
+另建群「验收-B036-bind一次建对」（`oc_<redacted>`），拉入 bot（未 @，不建树）。
 
-第一次尝试 `/bind 4629eb` 收到「没有匹配到唯一的会话」——**排查后确认是测试目标选错，不是缺陷**：`4629eb` 前缀对应的 `session-4629eb39-c996-4ff6-ad0e-b59ac54337a1` 是本次验收之前遗留的历史会话，用 `zstandard` 库解压其 `session.jsonl.zstd` 直接读到最后一条事件是 `session/end-seed`——它早已结束，`/bind` 只接受未归档主会话，拒绝一个已结束的会话是正确行为。
+第一次尝试 `/bind <prefix>` 收到「没有匹配到唯一的会话」——**排查后确认是测试目标选错，不是缺陷**：`<prefix>` 前缀对应的 `session-<redacted>` 是本次验收之前遗留的历史会话，用 `zstandard` 库解压其 `session.jsonl.zstd` 直接读到最后一条事件是 `session/end-seed`——它早已结束，`/bind` 只接受未归档主会话，拒绝一个已结束的会话是正确行为。
 
-改用 5.5 步骤中刚建立、确认存活（日志末尾是正常的 `turn/end`，无 `end-seed`）的 `session-b2f11bae-...`，发送 `/bind b2f11b`，回执：
+改用 5.5 步骤中刚建立、确认存活（日志末尾是正常的 `turn/end`，无 `end-seed`）的 `session-<redacted>-...`，发送 `/bind <prefix>`，回执：
 
-> 群「验收-B036-bind一次建对」已绑定主会话「Locus 主会话 · oc_2983702a8515d3176ae5a62c6be39bc1」（b2f11b）；已创建新的只读子会话。
+> 群「验收-B036-bind一次建对」已绑定主会话「Locus 主会话 · oc_<redacted>」（<prefix>）；已创建新的只读子会话。
 
 **回执中没有任何「S0→S1」上下文变更警告文案**。新建的 locus：
 
 ```json
 {
   "source": "explicit",
-  "parentSessionId": "session-b2f11bae-eedd-4edf-bd27-23baa6c29936",
+  "parentSessionId": "session-<redacted>",
   "generation": 1
 }
 ```

@@ -1,3 +1,4 @@
+> Migrated from docs/notes/pet-locus-host-capability-audit.md.
 # Pet unified locus host-capability audit
 
 This note records the boundary audit for OpenSpec `pet-unified-locus-collaboration`
@@ -37,8 +38,8 @@ conclusion after the reviewed runtime override and real capability probes is rec
 
 ### Task group 1 — Host seams
 
-`docs/notes/dsh-plugin-integration-pitfalls.md` and
-`docs/notes/pet-locus-spike-findings.md` establish important limits, but not an
+`docs/architecture/dsh-plugin-integration-pitfalls.md` and
+`openspec/changes/archive/2026-09-15-pet-locus-multi-binding/checking/spike-findings.md` establish important limits, but not an
 end-to-end capability: fork-in-process has no proven cwd override; sandbox roots
 were inspected as a contract rather than validated by a read/write matrix; the
 real topic-group consumer event is still missing; and parent/child acceptance is
@@ -346,7 +347,7 @@ checkout 历史值会由 `bin/dsh` 精确识别并迁移忽略；人类显式 `D
 `invocation_channel` settlement。旧表与旧 session/history 仍原样保留，但只作历史与明确
 retirement 识别，不参与新执行。命中可识别旧入口会给出有界显式重建提示，不用 default
 身份接管。`scripts/cutover-backup.mjs` 提供 SQLite online backup + integrity check，具体停流、
-快照、回滚顺序见 `docs/notes/pet-unified-locus-cutover.md`。当前仍遵守用户指定的部署顺序：
+快照、回滚顺序见 `openspec/changes/archive/2026-09-18-pet-unified-locus-collaboration/cutover-runbook.md`。当前仍遵守用户指定的部署顺序：
 先完成 worktree、合入，再在 main checkout 物化和验证现有 Web。
 
 ## Verification performed

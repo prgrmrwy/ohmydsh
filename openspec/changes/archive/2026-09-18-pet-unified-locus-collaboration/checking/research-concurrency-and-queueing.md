@@ -1,3 +1,4 @@
+> Migrated from docs/notes/2026-09-15-concurrency-and-queueing.md.
 # Pet Locus 串行队列与并发调研：auto-thread 模式与父会话争用
 
 调研日期：2026-09-15。针对两个真实问题：**（1）父会话成为争用热点**、**（2）群级 locus 独占队列导致队头阻塞**。

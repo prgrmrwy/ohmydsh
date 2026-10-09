@@ -146,7 +146,7 @@ export class ChannelSubscription {
         // makes the consumer exit with code 0 the instant it attaches — which
         // reads as a healthy subscription that immediately stops, restarts,
         // and loops forever. Holding the pipe open keeps it running.
-        // See docs/notes/dsh-plugin-integration-pitfalls.md §2.
+        // See docs/architecture/dsh-plugin-integration-pitfalls.md §2.
         spawn(command, [...commandArgs], { stdio: ['pipe', 'pipe', 'pipe'] }))
 
     let child: ChildProcess

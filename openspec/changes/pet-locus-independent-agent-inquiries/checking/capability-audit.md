@@ -1,10 +1,11 @@
+> Migrated from docs/notes/pet-independent-agent-capability-audit.md.
 # B035 独立 agent 与同源协作上下文：实施证据
 
 对应 change：`pet-locus-independent-agent-inquiries`。本文记录实际核验，不把源码阅读、单测通过或规划存在视为真实运行验收通过。
 
 ## 实施位置与安全边界
 
-所有者在 apply 阶段明确选择当前 `/Users/prgrmrwy/opensource/ohmydsh` main 主检出实施，不创建 worktree。保留未提交的 B035 提案与 BACKLOG；不自动提交，不手改部署 home，不对现有 Locus/session 执行重建或迁移。独立实验须使用临时介质；部署、实际飞书载体及生产重启另核对目标和授权。
+所有者在 apply 阶段明确选择当前 `~/opensource/ohmydsh` main 主检出实施，不创建 worktree。保留未提交的 B035 提案与 BACKLOG；不自动提交，不手改部署 home，不对现有 Locus/session 执行重建或迁移。独立实验须使用临时介质；部署、实际飞书载体及生产重启另核对目标和授权。
 
 ## 1.1 前置基线核对（已完成）
 
@@ -55,7 +56,7 @@ B035 三个 MODIFIED 标题均与前置逐字匹配：`关联具备双向发现�
 
 ## 宿主源码调查（尚不等于门槛通过）
 
-检查的是当前会话指定的自包含 launcher：`packages/dsh-pet/compat/subagent/.launcher-builds/eb586fe8ead9f58d0e54a8a2f527c2947acf1c1d685a9e78330716cb81b653d5-58844649-a3be-4ae2-b6c1-aa63ebcacbca/`。
+检查的是当前会话指定的自包含 launcher：`packages/dsh-pet/compat/subagent/.launcher-builds/eb586fe8ead9f58d0e54a8a2f527c2947acf1c1d685a9e78330716cb81b653d5-session-<redacted>/`。
 
 - G1：官方 spawn `lib/index.js:30–38` 不继承父上下文，prepare 返回空配置。compat subagent `lib/types/continuation.js:367–432` 先同步解析模型、写 descriptor，再准备 seed；仅有这个函数存在不是多轮/冷恢复证明。
 - G1 组合缺口：`continuation.js:992–1019` 在新建和恢复都调用 `applyChildComposition`；`child-agent.js:157–158` 无条件 `composeFrom(childCtx,parent.ctx)`；官方 agent-presets `lib/index.js:1533–1539` 从 parent **当前 live** standing 绑定 child。child header 虽保存 preset，恢复组合仍采样父当前组合。B035 要求恢复自身配置，不能直接换 spawn 后忽略这个分歧。应在新独立模式窄路径恢复持久 preset 配置；不改变旧 fork 语义，不额外许诺锁住所有 Skill/插件文件字节版本。

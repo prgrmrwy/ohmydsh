@@ -1,10 +1,11 @@
+> Migrated from docs/notes/upgrade-dsh-0-2-0-devbox-validation.md.
 # DSH 0.2.0-rc.2 devbox 验证：当前状态 NO-GO
 
 ## 身份范围
 
-- 基线/原候选及隔离日志：devbox `n37-044-026`、`~/.cache/dsh-acceptance/upgrade-0.2.0-c48b507/`、Node 24。候选修复序列由 `c48b507` 经 `20a498a`（profile 空序列与规范修复）推进，随后存在 `bab1a536`（验收记录更新）；历史完整报告见 `checking/devbox-profile-fix.md` 与 `checking/devbox-runtime-continuation.md`。
+- 基线/原候选及隔离日志：devbox `<devbox>`、`~/.cache/dsh-acceptance/upgrade-0.2.0-c48b507/`、Node 24。候选修复序列由 `c48b507` 经 `20a498a`（profile 空序列与规范修复）推进，随后存在 `bab1a536`（验收记录更新）；历史完整报告见 `checking/devbox-profile-fix.md` 与 `checking/devbox-runtime-continuation.md`。
 - 现有 Pet-enabled devbox 验收 checkout 是 **`83c69cf796dc59d24587becf1d3ba45f29336962`**，它是修复提交 `20a498a` 与记录提交 `bab1a536` 的后继，已经包含 profile 修复。与本地 `131d626` 的净差异仅为 OpenSpec 文档，无代码/manifest/依赖差异；二者代码等价。此前声称 `83c69cf` 未包含修复或不具备该源码身份的表述错误，现予纠正。代码等价不自动证明完整生产组合验收。
-- 远端联网 SSH 使用 `zsh -lic 'set_sh_devbox_proxy; …'`。用户恢复实施授权后，本轮已移植源码并跑 devbox 测试，非只读轮次；未运行 devbox 3080 的 build/restart，未 push 或发布源码。
+- 远端联网 SSH 使用 `zsh -lic '<proxy-helper>; …'`。用户恢复实施授权后，本轮已移植源码并跑 devbox 测试，非只读轮次；未运行 devbox 3080 的 build/restart，未 push 或发布源码。
 
 ## 已确立事实
 

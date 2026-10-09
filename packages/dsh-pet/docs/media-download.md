@@ -1,3 +1,4 @@
+> Migrated from docs/notes/pet-media-official-cli-download.md.
 # Pet 媒体下载改用官方 lark-cli + 受守卫 spool（2026-09-20）
 
 对应 OpenSpec change `pet-media-official-cli-download`（capability `pet-locus-media-access`）。

@@ -108,5 +108,5 @@
 ## 7. 收尾
 
 - [ ] 7.1 把每个第三方插件的最终 pin、审查与回滚说明写回 `dsh.yaml` note
-- [ ] 7.2 写入轻量验收报告到 `checking/`（不含原始数据、密钥和批量截图），更新相关 docs/notes
+- [ ] 7.2 写入轻量验收报告到 `checking/`（不含原始数据、密钥和批量截图），更新相关 docs/architecture
 - [ ] 7.3 请用户确认后归档本 change，同步 current specs

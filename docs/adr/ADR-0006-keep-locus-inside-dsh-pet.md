@@ -40,7 +40,7 @@
 提取插件必须处置这一层，而两条路都不可接受：
 
 - **把 persistence 一起搬走** → Pet 只剩壳，"独立插件"名不副实；
-- **定义持久化端口让 Pet 注入** → 新增一层抽象，且正是 `docs/notes/dsh-plugin-integration-pitfalls.md` 记录 11 次的那类「声明了但没接通」风险面。
+- **定义持久化端口让 Pet 注入** → 新增一层抽象，且正是 `docs/architecture/dsh-plugin-integration-pitfalls.md` 记录 11 次的那类「声明了但没接通」风险面。
 
 ### 抽象正当性检验
 

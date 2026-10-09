@@ -35,7 +35,7 @@ git clone https://github.com/prgrmrwy/ohmydsh.git && cd ohmydsh
 2. `openspec/specs/` —— 系统**当前应当满足**的行为规范。
 3. `openspec/changes/` —— 是否已有相关的进行中 change(读 `proposal.md`、`design.md`、`specs/`、`tasks.md`)。
 4. `openspec/changes/archive/` —— 设计演进与历史背景。归档 change 是历史证据,**不覆盖当前 spec**。
-5. `docs/adr/`、`docs/notes/` —— 长期架构决策、实现背景与验证方法。
+5. `docs/adr/`、`docs/architecture/` —— 长期架构决策、当前系统结构与机制说明。
 6. `packages/`、`scripts/`、`patches/`、`skills/`、`presets/` 与测试 —— 确认实现现状。
 
 若文档与实现不一致,**不要静默选择一方**:先指出差异,再根据当前 OpenSpec、已接受 ADR 和维护者意图决定该改规范还是改实现。
@@ -158,7 +158,7 @@ ohmydsh is the **source of truth for a personal DeepSeek Harness (DSH) setup** �
 
 Key rules:
 
-1. **Read first**: `dsh.yaml` → `openspec/specs/` → `openspec/changes/` → `docs/adr/` and `docs/notes/` → implementation.
+1. **Read first**: `dsh.yaml` → `openspec/specs/` → `openspec/changes/` → `docs/adr/` and `docs/architecture/` → implementation.
 2. **Spec-driven**: non-trivial changes go through an OpenSpec change (`openspec new change <name>`) before implementation.
 3. **Never edit deployed output** under `~/.dsh`; edit `dsh.yaml`, `packages/<id>/`, or `patches/` and re-run `dsh build`.
 4. **Pin exactly, never vendor** third-party sources; record provenance and review notes in the entry's `note`.

@@ -1,3 +1,4 @@
+> Migrated from docs/notes/pet-locus-independent-child-handoff.md.
 # Pet Locus 独立 child：工作上下文切换记录
 
 本文记录 2026-03-23 的一次**范围收敛**：把「让 Pet Locus 可以真正用起来」从 B035 的完整协作平台中拆出来，作为独立 change 推进；B035 剩余部分整体暂停，不删除、不静默降级、不把已写模块当成已验收能力。

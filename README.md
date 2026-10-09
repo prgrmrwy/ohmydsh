@@ -52,7 +52,7 @@ packages/<name>/          # 自研 bundle 插件(见 packages/README.md)
 presets/<id>/             # agent preset(见 presets/README.md)
 patches/<id>.yml          # 纯 composition 片段 / 对 remote 包的覆盖(见 patches/README.md)
 skills/<name>/            # skill(见 skills/README.md)
-docs/notes/               # 可长期检索的问题与决策记录
+docs/architecture/        # 当前系统结构与机制说明
 tests/                    # sync 黑盒回归测试
 ```
 
@@ -169,14 +169,14 @@ sync 行为按定制类型:
 
 DSH 官方 `standard` preset 会自动加载,无需复制出 `ohmydsh` preset。`$DSH_HOME/AGENTS.md` 给该 DSH 工作环境提供前馈模型指导;它不是权限授予,也不是强制安全边界,实际能力始终由最新 runtime context 与工具执行策略决定。`dsh-sandbox-notes` skill 继续保留,用于需要时查阅完整背景与恢复细节。
 
-现象、迁移原因、错误恢复规则与验证步骤见 [`docs/notes/dsh-home-agent-instructions.md`](docs/notes/dsh-home-agent-instructions.md)。
+现象、迁移原因、错误恢复规则与验证步骤见 [`docs/architecture/agent-instructions.md`](docs/architecture/agent-instructions.md)。
 
 ## 第三方定制(remote)约定
 
 - 只存三样:**精确版本 pin**、**个人覆盖片段**(`patches/<id>.yml`)、**条目说明**(`note`/审查记录);**不 vendor 源码**。
 - 升级 = 改 pin 重跑 sync(默认由 `autoUpdate` 自动完成,见上方「自动升级」;`DSH_SKIP_UPDATE=1` 恢复纯手工改 pin 模式)。
 - **安全提醒**:插件即第三方代码(社区列表明示警告),安装前先看源码,`note` 记录来源与审查结论。
-- **不可公开的定制**(组织内部包、只对某组织有意义的 skill、组织专属域名等)不进本仓库,由本机私有 overlay 承载,见 [`docs/notes/local-manifest-overlay.md`](docs/notes/local-manifest-overlay.md)。自研插件需要组织专属值时,公开源码只读插件行 `config`,真值由 overlay 的 patch 按行 id 注入。
+- **不可公开的定制**(组织内部包、只对某组织有意义的 skill、组织专属域名等)不进本仓库,由本机私有 overlay 承载,见 [`docs/architecture/private-overlay.md`](docs/architecture/private-overlay.md)。自研插件需要组织专属值时,公开源码只读插件行 `config`,真值由 overlay 的 patch 按行 id 注入。
 - **`llm-subscriptions` 订阅 provider 插件**(`dsh-plugin-subscriptions`,当前 pin `0.8.0`,详见 `dsh.yaml` 条目 note):Claude 登录 = 导入本机 Claude Code 凭据(秒登录,不弹 OAuth),选型细见 change `openspec/changes/2026-08-20-llm-subscriptions-upgrade`(含 ADR-0001)。**codex 模型目录与 pin 强耦合**:ChatGPT 后端按请求里的 `client_version` 分流可见模型,旧 pin 会静默少几个新模型(如 `0.147.0` 看不到 GPT-6-Astra);`0.8.0` 起该版本号改为从公开 npm 元数据动态解析(不带凭据、失败回退内置 `0.153.4`),也可用插件配置 `codexClientVersion` 固定。**回滚**:该条目 `spec`/`version` 改回 `dsh-plugin-subscriptions@0.6.0` / `0.6.0` → `dsh build` → 重启;`auth.json` 不被升级改写,登录态与既有会话无损。
 
 ## 开发流
@@ -208,7 +208,7 @@ npm run check:artifacts  # 防止产物 / nested lock / raw evidence 入库
 | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | 社区行为准则 |
 | `openspec/specs/` | 系统当前应满足的行为规范 |
 | `docs/adr/` | 已接受的长期架构决策 |
-| `docs/notes/` | 实现背景、运行约束与验证方法 |
+| `docs/architecture/` | 当前系统结构与机制说明(私有 overlay、环境级指令、插件集成陷阱) |
 | `BACKLOG.md` | 想法池 |
 
 ## 致谢
