@@ -238,14 +238,24 @@ export function resolveTrustedContext(
   if (task.archivedAt !== undefined) {
     throw new PetError(
       'TASK_ARCHIVED',
-      `Pet Task ${task.id} is archived; its previous snapshot is not a new authorization.`,
+      `Pet Task ${task.id} is archived; its previous snapshot is not a new authorization. ` +
+        'Start the work again from the source session to create a new Task.',
     )
   }
   const invocation = repository.findCurrentInvocation(task.id)
   if (invocation === undefined) {
+    // Three cases share the fail-closed rule but not the diagnosis. This one
+    // is IDLE, not broken: the Task is open and a new Invocation will appear
+    // as soon as one is raised. The message therefore states the two facts the
+    // model needs — this turn owns no authorization, and the user has a way
+    // forward — while returning no snapshot field, path or other value that
+    // could be mistaken for one.
     throw new PetError(
       'NO_CURRENT_INVOCATION',
-      `Pet Task ${task.id} has no running or waiting Invocation right now.`,
+      `Pet Task ${task.id} is idle: this turn is not part of any Invocation, so no source ` +
+        'snapshot is authorized right now. Do not reuse an earlier Invocation\'s snapshot or ' +
+        'paths for side-effecting work; tell the user to raise the work again from the source ' +
+        'session (or the Pet panel), which creates a new Invocation for this same Task.',
     )
   }
   const snapshot = repository.getSnapshot(invocation.snapshotId)

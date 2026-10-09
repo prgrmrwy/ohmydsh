@@ -72,6 +72,15 @@ export type PetContextResult = PetInvocationContextResult | PetLocusContextResul
 /** Optional integration seam for the not-yet-durable locus repository. */
 export interface PetContextDependencies {
   readonly locusRepository?: LocusContextRepository
+  /**
+   * Await an in-session registration that has not landed yet.
+   *
+   * The durable inbox splice is observed by the Host before the turn's first
+   * model step, but registering an Invocation is a few asynchronous durable
+   * writes. Waiting here turns a lost race into a short pause; when nothing is
+   * being registered it resolves immediately, and it never exceeds its bound.
+   */
+  readonly waitForRegistration?: (executorSessionId: string) => Promise<void>
 }
 
 /** Minimal execution view Pet reads; mirrors `ToolExecution`. */

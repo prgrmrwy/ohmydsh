@@ -33,6 +33,16 @@ export const PET_EXECUTOR_PRESET = 'dsh-pet-executor'
  */
 export const STANDARD_PRESET = 'standard'
 
+/**
+ * Capability id recorded on an in-session follow-up Invocation.
+ *
+ * A user message typed directly into a Pet root executor session pins no
+ * Skill: like the channel conversational form it is a request, not a
+ * capability. The distinct id keeps that ORIGIN visible in the panel and in
+ * diagnostics instead of being mistaken for a Skill name.
+ */
+export const SESSION_MESSAGE_CAPABILITY_ID = 'session-message'
+
 export const ROUTES = {
   status: '/dsh-pet/api/status',
   config: '/dsh-pet/api/config',
@@ -1197,6 +1207,16 @@ export interface PetInvocationRecord {
   readonly snapshotId: string
   /** Free-text user request, rendered into the visible envelope. */
   readonly request?: string
+  /**
+   * Client message id that raised this Invocation, for the in-session form.
+   *
+   * Set only when the Invocation was registered from a user message typed
+   * directly into the root executor session. It is the durable idempotency
+   * key for that origin — the same message must never register a second
+   * Invocation — and it is NEVER read as authority: the trusted context still
+   * resolves its caller from the executing session.
+   */
+  readonly followupMessageId?: string
   readonly status: PetInvocationStatus
   /** Durable FIFO ordering within the owning Task. */
   readonly queuePosition: number

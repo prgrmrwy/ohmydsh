@@ -296,6 +296,23 @@ export class PetRepository {
   }
 
   /**
+   * Find the Invocation already registered for one in-session client message.
+   *
+   * The idempotency probe for the follow-up origin: a splice and a claim can
+   * both observe the same message, and a replayed event must not run the
+   * user's request twice.
+   * @param messageId - Client message id that raised the Invocation.
+   * @returns the existing Invocation, or `undefined`.
+   */
+  findInvocationByFollowupMessage(messageId: string): PetInvocationRecord | undefined {
+    for (const [, value] of this.domain.table('invocations').entries()) {
+      const invocation = value as PetInvocationRecord
+      if (invocation.followupMessageId === messageId) return invocation
+    }
+    return undefined
+  }
+
+  /**
    * Whether the Task's serial slot is free for immediate dispatch.
    * @param taskId - Owning Task id.
    * @returns whether no Invocation is dispatching, running or waiting.
