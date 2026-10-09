@@ -324,9 +324,20 @@ customizations:
   - id: dsh-cockpit-bridge
     type: package
     source: remote
-    spec: 'https://github.com/prgrmrwy/dsh-cockpit/releases/download/dsh-cockpit-bridge-v0.6.2/dsh-cockpit-bridge-0.6.2.tgz'
+    spec: 'https://github.com/prgrmrwy/dsh-cockpit/releases/download/dsh-cockpit-bridge-v0.6.3/dsh-cockpit-bridge-0.6.3.tgz'
     name: dsh-cockpit-bridge
-    version: 0.6.2
+    version: 0.6.3
+      # [2026-10-09] 正式发布 0.6.3：修正 0.6.1 起的「当前会话」适配（驾驶舱「已完成未读」不再被误清）。
+      #   SHA256 b25a84d7cb1a99cc206dd34bbf8d7a0e5febb50c4e07e9009598435c6dde7076（50069 B；下载物实测一致，HTTP 200）。
+      #   0.2.0 的 retainedBy.mainView 是**保留计数**而非当前选择（同一时刻可有多个会话被保留——每个打开的
+      #   DSH 页面各保留自己的 currentId，官方 publishMain 正是为此才额外保留上一个 currentId），且 byId 按
+      #   活跃时间排序、刚完成的会话恰好排最前 → 旧实现把「刚完成的会话」当打开对象上报，驾驶舱据此把它刚亮起
+      #   的完成提醒立刻清掉（现象：DSH 侧栏有「已完成」绿点、驾驶舱没有）。现改读官方绑定
+      #   ctx.uiSession.adapter.current（快照 .key；dsh-client-ui-sidebar-right 同源用法）并订阅它；
+      #   旧形状（0.1.x 的 current、无绑定但有 retainedBy）继续回退。
+      #   需与 dsh-cockpit 服务端 88febdd 一起用（选择上报不再预授权整个运行轮次），否则运行期间打开过的会话
+      #   仍不会亮提醒。接缝 cockpitBridge.forwards / 协议版本 / 端口转发 / 服务端行为均未变，无需迁移。
+      #   回滚：spec/version 改回下方 0.6.2 → dsh build → 刷新设备页面（退回「按保留集合猜当前会话」）。
       # [2026-10-08] 正式发布 0.6.2：DSH 设置页「驾驶舱转发」区块的可读性与样式，加设置导航行字形。
       #   SHA256 99c24ff2a0b4a905ea3e335ec89fcdd585b008b1507ee0160d1fd0c11bf946a4（48718 B；下载物实测一致）。
       #   区块此前是裸 <p> + 六列 <table>（无类名、无样式、窄栏溢出、未连接时只有一句结论），现改为
