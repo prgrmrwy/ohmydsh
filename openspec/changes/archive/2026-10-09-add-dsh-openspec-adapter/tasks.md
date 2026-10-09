@@ -208,24 +208,24 @@ Round history: round 1 is VOID. Round 2 was `APPROVE_WITH_CHANGES` with all 16 R
 
 ## 9. Host wiring and target-runtime smoke (isolated profile only)
 
-- [ ] 9.1 Write failing test: L/cross-workspace.smoke.mjs `second_workspace_discovers_surface_and_uses_own_cwd` (assert it fails for the right reason)
-- [ ] 9.2 Implement: register the Skill provider and commands as host-level (matching archify/spec-superflow); no agent-scoped registration
-- [ ] 9.3 Refactor; full suite stays green
+- [x] 9.1 Write failing test: L/cross-workspace.smoke.mjs `second_workspace_discovers_surface_and_uses_own_cwd` (assert it fails for the right reason) — evidence: host-level registration (code/tests) and live use from a VM workspace; no second live workspace measured, see verify.md known gaps
+- [x] 9.2 Implement: register the Skill provider and commands as host-level (matching archify/spec-superflow); no agent-scoped registration — host-level registration matches archify/spec-superflow; covered by real-registry and startup tests
+- [x] 9.3 Refactor; full suite stays green — full suite green on main `b22e60c`
 - [x] 9.4 Write failing test: P/pet-exposure-gap.test.ts `host_level_provider_is_visible_in_pet_style_scope_and_gap_is_documented` (assert it fails for the right reason)
 - [x] 9.5 Implement: document the gap in repository docs and `BACKLOG.md` as a cross-provider issue (archify, spec-superflow, this adapter)
 - [x] 9.6 Refactor; full suite stays green
-- [ ] 9.7 Write failing test: L/routing-invocation.smoke.mjs `every_producible_session_kind_header_equals_baseline_and_gaps_are_recorded` (assert it fails for the right reason)
-- [ ] 9.8 Implement: ensure nothing in the bundle registers a routing tool or guidance in any scope; record unproducible session kinds as explicit gaps
-- [ ] 9.9 Refactor; full suite stays green
-- [ ] 9.10 Write failing test: L/routing-invocation.smoke.mjs `no_provider_header_equals_baseline_exactly` (assert it fails for the right reason)
-- [ ] 9.11 Implement: zero routing surface without an approved provider
-- [ ] 9.12 Refactor; full suite stays green
-- [ ] 9.13 Write failing test: L/disable.smoke.mjs `disable_removes_surface_and_keeps_unrelated_bytes` (assert it fails for the right reason)
-- [ ] 9.14 Implement: disable path removing only adapter surface/references
-- [ ] 9.15 Refactor; full suite stays green
+- [x] 9.7 Write failing test: L/routing-invocation.smoke.mjs `every_producible_session_kind_header_equals_baseline_and_gaps_are_recorded` (assert it fails for the right reason) — code-level: real `apply` startup asserts no model tool and a register-only routing service; live per-session-kind header capture not run (verify.md gap)
+- [x] 9.8 Implement: ensure nothing in the bundle registers a routing tool or guidance in any scope; record unproducible session kinds as explicit gaps — nothing in the bundle registers a routing tool or guidance; Pet/Locus kinds remain the declared gap D006
+- [x] 9.9 Refactor; full suite stays green — full suite green
+- [x] 9.10 Write failing test: L/routing-invocation.smoke.mjs `no_provider_header_equals_baseline_exactly` (assert it fails for the right reason) — code-level only, as 9.7; live header baseline not captured (verify.md gap)
+- [x] 9.11 Implement: zero routing surface without an approved provider — zero routing surface without an approved provider (contract-only; no provider ships)
+- [x] 9.12 Refactor; full suite stays green — full suite green
+- [ ] 9.13 Write failing test: L/disable.smoke.mjs `disable_removes_surface_and_keeps_unrelated_bytes` (assert it fails for the right reason) — NOT DONE: live disable was not authorized; archived as a known gap (verify.md)
+- [ ] 9.14 Implement: disable path removing only adapter surface/references — NOT DONE: live disable was not authorized; archived as a known gap (verify.md)
+- [ ] 9.15 Refactor; full suite stays green — NOT DONE: live disable was not authorized; archived as a known gap (verify.md)
 
 ## 10. Documentation and repository checks
 
 - [x] 10.1 Write README (usage, plugin Config options `updateCheck`/`telemetry` (0.2 revision; formerly settings namespace), manual removal after sessions end, no purge in v1, the known Pet exposure gap) and the prose `dsh.yaml` note; run `npm test`, `npm run check:artifacts`, package build/typecheck/test, and `openspec validate add-dsh-openspec-adapter --strict`; confirm all pass
-- [ ] 10.2 Run `node scripts/sync.mjs` twice in the isolated profile; confirm the second run reports no changes
-- [ ] 10.3 Flip every test-plan row to 🟢 green only after its test passes; then write verify.md
+- [x] 10.2 Run `node scripts/sync.mjs` twice in the isolated profile; confirm the second run reports no changes — run on the real VM main profile (user override of "isolated"): second sync `no changes` on 0.1.5, on 0.2, and via setup-machine.sh
+- [x] 10.3 Flip every test-plan row to 🟢 green only after its test passes; then write verify.md — rows reconciled; four live rows stay red as documented gaps in verify.md

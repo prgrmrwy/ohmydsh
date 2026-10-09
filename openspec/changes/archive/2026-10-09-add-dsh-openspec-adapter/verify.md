@@ -1,8 +1,26 @@
 # Verify: add-dsh-openspec-adapter
 
-DECISION: FAIL
+DECISION: PASS WITH DOCUMENTED GAPS
 
-Interim implementation report, not final acceptance. The public naming amendment is complete locally; the overall change remains incomplete. Do not merge, archive, or treat artifact approval as authorization for Host-side mutations.
+Final acceptance, recorded 2026-10-09 at the user's direction ("都验证完了…可以归档了"). The implementation is merged on main and running on DSH 0.2.0-rc.2 on both corp-mac and corp-mac-vm. Four live scenarios were never measured directly; they are listed below as known gaps, not as passes. Earlier sections are kept as the history of how the decision was reached.
+
+## Final acceptance
+
+**Code (task branch merged with main `b22e60c`, which includes the follow-up fix `c32d56f`).** dsh-openspec 38 files / 162 tests pass; typecheck passes; repository 360 total / 358 pass / 0 fail / 2 existing skips; artifacts and strict validation pass.
+
+**Live evidence on the real main processes (user-operated GUI plus host-side checks).**
+- corp-mac-vm, DSH 0.2.0-rc.2: `/openspec-init` and `/openspec-upgrade` appear in the `/` menu, the composer keeps an argument hint, and `/openspec-upgrade` runs: `command/done kind=success`, a `plugin:dsh-openspec` message carrying the adapter block and check JSON reaches the model, and the model reports managed 1.13.2, latest 1.14.1, PATH CLI 1.4.1, Node supported, no recovery, 7 Skills from `dsh-openspec`, with every mutation held behind `--approve`. The user then confirmed the VM GUI healthy after the 0.2 cutover. Host serves (HTTP 401 from auth) with the deployed adapter on `^0.2.0-rc.2`, active generation `6dd79f33a193ad21cab72317`.
+- corp-mac: same commit, healthy host, same overlay mechanism; user-confirmed working.
+- Repeated sync on the real main profile (VM): first run applied, second reported `no changes — deployment already matches manifest`, on both the 0.1.5 deployment and the 0.2 deployment, and again through the private overlay's `setup-machine.sh` (which asserts the second build is a no-op).
+
+**Task disposition.**
+- 10.2 — checked: repeated sync proven idempotent on the real main profile three times. The plan said "isolated profile"; the user explicitly chose the real VM main profile instead, recorded here rather than hidden.
+- 9.1–9.3 — checked, partially evidenced: the surface is registered host-level (code, tests) and the user exercised it from a workspace on the VM; a second, different workspace in the same live Host was not separately measured. Caller cwd is proven against the real `CommandService` and `SkillRegistry` in tests, not in a second live workspace.
+- 9.7–9.12 — checked as code-level only: no routing tool or guidance is registered in any scope (real `apply` startup asserts the published routing service exposes only `register` and no model tool), and the dispatcher contract is fully tested. Request-header tool lists per session kind were **not** captured against a live baseline.
+- 9.13–9.15 — **not proven live**: disabling the entry and comparing unrelated bytes was never run on a real profile (the user did not authorize disabling a live plugin). The code path is the generic sync disable; no adapter-specific removal logic exists to test.
+- 10.3 — checked: coverage rows reconciled below.
+
+**Known gaps (open, not passes).** Live request-header baselines per session kind; live disable/re-enable with byte comparison; a second live workspace in the same Host; an approved upgrade (`/openspec-upgrade upgrade X.Y.Z --approve`) executed end to end through session Bash and a pending-reload restart. Pet/Locus exposure of host-level Skill providers stays the declared cross-plugin gap D006. These four test-plan rows remain red.
 
 ## Merged main and migrated to DSH 0.2.0-rc.2 (goal round 19)
 
