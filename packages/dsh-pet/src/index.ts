@@ -31,6 +31,7 @@ import { PetChangeFeed } from './host/changes.js'
 import { CapabilityRegistry } from './host/capabilities.js'
 import { SourceContextRegistry, type SourceResolver } from './host/capture.js'
 import { PetCoordinator, type PromptDispatcher } from './host/coordinator.js'
+import { FollowupCoordinator, isClientUserMessage } from './host/followup.js'
 import {
   reconcileCreatingExecutors,
   validateModelSelection,
@@ -905,6 +906,17 @@ async function initialize(
   const scopeComplete = (key: object, includeAllowlist: boolean): boolean =>
     contextToolAgents.has(key) && (!includeAllowlist || allowlistAgents.has(key))
 
+  /**
+   * In-session follow-up registrations, published once the coordinator exists.
+   *
+   * Declared here rather than next to its construction because the scoped
+   * `pet_context` surface (installed during Agent composition) waits on it,
+   * and that can run before the later wiring completes.
+   */
+  let followups: FollowupCoordinator | undefined
+  /** Resolves when pending Invocation-state projections for a session are durable. */
+  let projectionSettled: (sessionId: string) => Promise<void> = () => Promise.resolve()
+
   /** Install the Pet-owned scoped surface on one live executor Agent.
    *
    * Every Pet Task executor receives `pet_context`. Only the dedicated Pet
@@ -958,6 +970,11 @@ async function initialize(
                 repository,
                 locusRepository: locusContextRepository,
                 intentTriage: intentTriageDeps,
+                // A user message typed into this executor registers its
+                // Invocation through the durable inbox splice, which can still
+                // be landing when the turn's first step asks for context.
+                waitForRegistration: executorSessionId =>
+                  followups?.waitForRegistration(executorSessionId) ?? Promise.resolve(),
               }),
               'dsh-pet: scoped caller-bound Agent tools',
             )
@@ -1657,6 +1674,30 @@ async function initialize(
    * workspace, where an ordinary executor belongs; resident Tasks and QA
    * children pass the workspace they actually relate to.
    */
+  /**
+   * Whether one executor session still queues client messages it will run.
+   *
+   * The durable splice log says a message was accepted; only the live inbox
+   * says it has not run yet. Dispatching a Pet Invocation behind such a
+   * message would make that other Invocation "current" while the model is
+   * still answering the user's turn, so the dispatch waits. An unloaded Agent
+   * has no queue by definition.
+   */
+  const hasPendingClientTurn = (executorSessionId: string): boolean => {
+    type InboxLike = {
+      readonly nextTurn?: readonly unknown[]
+      readonly nextStep?: readonly unknown[]
+    }
+    const handle = ctx.agents.get(executorSessionId as never) as
+      | { agent?: { inbox?: InboxLike }; inbox?: InboxLike }
+      | undefined
+    const agent = handle?.agent ?? handle
+    const inbox = (agent as { inbox?: InboxLike } | undefined)?.inbox
+    if (inbox === undefined) return false
+    const queued = [...(inbox.nextTurn ?? []), ...(inbox.nextStep ?? [])]
+    return queued.some(message => isClientUserMessage(message))
+  }
+
   const attachSessionToWorkspace = async (
     sessionId: string,
     targetWorkspaceId?: string,
@@ -1698,6 +1739,56 @@ async function initialize(
       const session = ctx.sessions.get(executorSessionId as never)
       if (session === undefined) return
       ctx.sessionTitle.rename(session, title)
+    },
+    hasPendingUserTurn: executorSessionId => hasPendingClientTurn(executorSessionId),
+    workspaceLocator: workspaceId => {
+      const match = ctx.workspaceRegistry
+        .list()
+        .find((item: { id?: unknown }) => item.id === workspaceId) as { path?: unknown } | undefined
+      return typeof match?.path === 'string' ? match.path : undefined
+    },
+  })
+
+  /**
+   * The third Invocation origin: a user message typed into the executor session.
+   *
+   * Registration is fire-and-forget from the durable event stream, so no
+   * failure here can disturb the session loop; the durable message id keeps a
+   * splice and a later claim from both registering the same request.
+   */
+  followups = new FollowupCoordinator({
+    resolveTask: executorSessionId => repository.findTaskByExecutor(executorSessionId),
+    findByMessage: messageId => repository.findInvocationByFollowupMessage(messageId),
+    register: input => coordinator.startFollowupInvocation(input),
+    settled: executorSessionId => projectionSettled(executorSessionId),
+    isLocusChild: executorSessionId => {
+      try {
+        return locusContextRepository.findByChildSessionId(executorSessionId).length > 0
+      } catch {
+        // An unreadable locus index is not proof either way; the ordinary Task
+        // lookup still gates registration, and a locus child has no Task.
+        return false
+      }
+    },
+    onOutcome: ({ executorSessionId, messageId, outcome }) => {
+      if (outcome.ok) {
+        petLog(
+          `dsh-pet: in-session Invocation ${outcome.invocationId} registered on ${executorSessionId}`,
+        )
+        return
+      }
+      if (outcome.reason === 'duplicate') return
+      petLog(
+        `dsh-pet: in-session follow-up on ${executorSessionId} (message ${messageId}) not ` +
+          `registered: ${outcome.reason}`,
+      )
+    },
+    onError: error => {
+      petLog(
+        `dsh-pet: in-session follow-up registration failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
     },
   })
 
@@ -3376,14 +3467,54 @@ async function initialize(
     log: message => petLog(message),
   })
 
+  /**
+   * Per-session tail of in-flight Invocation-state projections.
+   *
+   * `turn/end` is projected without blocking the event bus, which leaves a
+   * window where the next turn's message is observed while the previous
+   * Invocation still looks current. Follow-up registration awaits this tail so
+   * it judges the slot AFTER settlement, never against a stale view.
+   */
+  const projectionTails = new Map<string, Promise<void>>()
+  const trackProjection = (sessionId: string, work: Promise<void>): void => {
+    const settledWork = work.then(
+      () => undefined,
+      () => undefined,
+    )
+    const previous = projectionTails.get(sessionId) ?? Promise.resolve()
+    const tail = Promise.all([previous, settledWork]).then(() => {
+      if (projectionTails.get(sessionId) === tail) projectionTails.delete(sessionId)
+    })
+    projectionTails.set(sessionId, tail)
+  }
+  projectionSettled = sessionId => projectionTails.get(sessionId) ?? Promise.resolve()
+
   ctx.effect(
     () =>
       ctx.on('session/event', (session: { id: unknown }, event: { type: string; data?: unknown }) => {
         const executorSessionId = String(session.id)
         if (repository.findTaskByExecutor(executorSessionId) === undefined) return
+        const project = (
+          next: Parameters<PetCoordinator['onAgentEvent']>[1],
+        ): void => {
+          trackProjection(executorSessionId, coordinator.onAgentEvent(executorSessionId, next))
+        }
+
+        // A message entering the executor session's inbox. The durable splice
+        // is appended immediately before the turn it belongs to starts, so a
+        // client submission is registered here while the serial slot is free;
+        // when it is not, the claim below retries on that message's own turn.
+        // Only ever a read of message identity — nothing here authorizes work.
+        if (event.type === 'agent/inbox/spliced') {
+          const inserted = (event.data as { inserted?: unknown } | undefined)?.inserted
+          if (Array.isArray(inserted)) {
+            for (const message of inserted) followups?.observe(executorSessionId, message)
+          }
+          return
+        }
 
         if (event.type === 'turn/start') {
-          void coordinator.onAgentEvent(executorSessionId, { kind: 'turn-start' })
+          project({ kind: 'turn-start' })
           return
         }
         // An approval request blocks the turn on the user. Project it so the
@@ -3391,11 +3522,11 @@ async function initialize(
         // queued Invocation is not started behind work that is actually
         // waiting. The decision resumes execution.
         if (event.type === 'approval/asked') {
-          void coordinator.onAgentEvent(executorSessionId, { kind: 'waiting-user' })
+          project({ kind: 'waiting-user' })
           return
         }
         if (event.type === 'approval/decided') {
-          void coordinator.onAgentEvent(executorSessionId, { kind: 'turn-start' })
+          project({ kind: 'turn-start' })
           return
         }
         if (event.type !== 'turn/end') return
@@ -3415,17 +3546,17 @@ async function initialize(
           ?.reason
         switch (reason?.kind) {
           case 'completed':
-            void coordinator.onAgentEvent(executorSessionId, { kind: 'turn-complete' })
+            project({ kind: 'turn-complete' })
             if (settling !== undefined) void channel?.settle(settling, 'succeeded')
             return
           case 'aborted':
-            void coordinator.onAgentEvent(executorSessionId, { kind: 'cancelled' })
+            project({ kind: 'cancelled' })
             if (settling !== undefined) void channel?.settle(settling, 'failed')
             return
           default:
             // `failed`, `blocked` and any future reason settle as a failure
             // rather than leaving the Invocation running forever.
-            void coordinator.onAgentEvent(executorSessionId, {
+            project({
               kind: 'turn-error',
               message: reason?.error?.message ?? `turn ended: ${reason?.kind ?? 'unknown'}`,
             })
@@ -3433,6 +3564,24 @@ async function initialize(
         }
       }),
     'dsh-pet: project Invocation state from session events',
+  )
+
+  /**
+   * Register in-session follow-ups on the turn that actually claims them.
+   *
+   * The claim reports exactly which message a turn consumes, which is the one
+   * point where "this user turn" and "this Invocation" can be tied together
+   * without guessing. Splices handle the common case earlier; this covers a
+   * message that was spliced while the serial slot was still occupied.
+   */
+  ctx.effect(
+    () =>
+      ctx.on('agent/inbox/claimed', ((payload: { agent?: { id?: unknown }; message?: unknown }) => {
+        const executorSessionId = payload?.agent?.id
+        if (typeof executorSessionId !== 'string') return
+        followups?.observe(executorSessionId, payload?.message)
+      }) as never),
+    'dsh-pet: register in-session follow-up Invocations',
   )
 
   // Retire old Feishu Invocation work before draining ordinary Pet queues.
