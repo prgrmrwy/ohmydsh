@@ -42,7 +42,8 @@
 - [x] 5.1 更新 `executor-instructions.md`：空闲期轮次归属规则、禁止沿用旧快照执行有副作用操作、继续路径说明、以 `pet_context` 返回的新 invocation id 为当轮依据
 - [x] 5.2 更新 `executor-instructions.md`：需要用户决策时必须在调用内提问（`ask_user_question` / 等待批准），不得纯文本提问后结束调用
 - [x] 5.3 面板显示会话内直输 Invocation：能力标识 `session-message` 的展示名、状态、失败重试入口与既有 Invocation 一致；空闲 Task 的提示与“本轮无 Invocation”一致
-- [ ] 5.4 确认 standing instructions 的复制/修复路径仍生效（`$DSH_HOME/plugins/dsh-pet/workspace/AGENTS.md` 由包内文件复制，不软链）
+- [x] 5.4 确认 standing instructions 的复制/修复路径仍生效（`$DSH_HOME/plugins/dsh-pet/workspace/AGENTS.md` 由包内文件复制，不软链）
+  - 结论：sync 部署后 `lib/` 与 `executor-instructions.md` 均为新内容；复制路径未改动，沿用既有“复制而非软链”实现
   - 覆盖场景：standing instructions 覆盖空闲期与调用内提问
 
 ## 6. 测试与回归
@@ -56,7 +57,11 @@
 
 ## 7. 部署与验收
 
-- [ ] 7.1 `dsh build`（或 `node scripts/sync.mjs`）物化并验证连续第二次运行不产生变化（幂等）
-- [ ] 7.2 在真实 Host 上验收：重启后在 executor 会话直输消息，确认新 Invocation、`pet_context` 成功、面板显示、结算与归档语义正常；记录实际会话与 Invocation id 作为证据
+- [x] 7.1 `dsh build`（或 `node scripts/sync.mjs`）物化并验证连续第二次运行不产生变化（幂等）
+  - 结论：`node scripts/sync.mjs` 部署成功，第二次运行输出 `no changes — deployment already matches manifest`。首次因 profile 的 `package.json.lock` 残留死 PID 导致 `pnpm add` 空转，清锁后重跑通过（已记入记忆）
+- [x] 7.2 在真实 Host 上验收：重启后在 executor 会话直输消息，确认新 Invocation、`pet_context` 成功、面板显示、结算与归档语义正常；记录实际会话与 Invocation id 作为证据
+  - 结论：2026-10-09 真机通过。会话 `session-f757eb9a-…`（Task `task-e92bbb86-…`）：`ws` 结算后 6 秒内的直输“再看一下刚才的结果”被登记为 `inv-68fd0b08-…`（`session-message`，`followupMessageId` 已记录）；该轮 `pet_context` 成功并返回新快照，模型继续使用快照路径调用 `ws`；Invocation 结算为 succeeded、Task 回到 idle。原 bug 的三次 `NO_CURRENT_INVOCATION` 未再出现
 - [ ] 7.3 在 resident(chat) 形态的真实会话上验收（Q3）：确认普通项目工作被登记后的实际体验可接受，或按结论收窄适用范围并写回 design
-- [ ] 7.4 运行仓库级校验：`npm test`、`npm run check:artifacts`；把结论与已知限制写回本 change，供归档使用
+  - 未验证，随归档带入已知限制：需要飞书群触发 resident(chat) 形态，本次未做。该形态的快照重建与“不创建回复目标”仅有单元测试证据（`in-session-followup.test.ts`）；若实际噪音过大，由后续 change 收窄适用范围
+- [x] 7.4 运行仓库级校验：`npm test`、`npm run check:artifacts`；把结论与已知限制写回本 change，供归档使用
+  - 结论：`packages/dsh-pet` 全量 2890 通过，host/client 类型检查通过，`check:artifacts` 通过，`openspec validate --strict` 通过。仓库级 `npm test` 有 7 个 `dsh-openspec` sync 用例失败（`tsc` 退出 127，环境问题），在不含本改动的基线上同样失败，与本次无关。已知限制：①7.3 未真机验证；②“结算与下一条消息秒回”的竞态只有单元测试证据（变异验证有效），真机验收时消息在结算后约 6 秒才发出，未覆盖
