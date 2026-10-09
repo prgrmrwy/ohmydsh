@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { materializeGeneration } from '../src/generation-materializer.js'
+import { closureIdentity } from '../src/generation-closure.js'
 import { managedInvocation } from '../src/managed-invocation.js'
 import { loadGeneration } from '../src/generations.js'
 import { spawnSync } from 'node:child_process'
@@ -62,5 +63,50 @@ describe('generation dependency closure integrity', () => {
     await Promise.all([materializeGeneration(f.input), materializeGeneration(f.input)])
     expect((await loadGeneration(f.home)).id).toBe(f.input.id)
     expect(await readdir(join(f.home, 'plugins/dsh-openspec/generations'))).toEqual(['closure'])
+  })
+  it('relocated_identical_versions_reuse_generation_without_collision', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'generation-relocate-')); roots.push(home)
+    const source = join(home, 'source'); await mkdir(join(source, 'bin'), { recursive: true })
+    const pkg = async (path: string, value: string, dependencies = {}) => {
+      await mkdir(path, { recursive: true }); await writeFile(join(path, 'package.json'), JSON.stringify({ name: path.split('/').at(-1), version: '1.0.0', main: 'index.js', dependencies }))
+      await writeFile(join(path, 'index.js'), value)
+    }
+    await writeFile(join(source, 'package.json'), JSON.stringify({ name: '@fission-ai/openspec', version: '1.13.2', type: 'module', bin: { openspec: 'bin/openspec.js' }, dependencies: { a: '1' } }))
+    await writeFile(join(source, 'bin/openspec.js'), "import a from 'a'; if(a!=='v1')process.exit(3); console.log('1.13.2')")
+    await pkg(join(source, 'node_modules/a'), "module.exports=require('shared')", { shared: '1' })
+    await pkg(join(source, 'node_modules/a/node_modules/shared'), "module.exports='v1'")
+    const id = 'relocate'; const dir = join(home, 'plugins/dsh-openspec/generations', id)
+    const input = { home, id, sourceRoot: source, version: '1.13.2', skills: [], invocation: managedInvocation({ node: process.execPath, cli: join(dir, 'bin/openspec.js'), telemetry: 'adapter-off' }) }
+    await materializeGeneration(input)
+    const before = await readFile(join(dir, 'generation.json'))
+    const closureNames = await readdir(join(dir, 'node_modules/.dsh-closure'))
+    expect(closureNames.length).toBeGreaterThan(0)
+    // A generation name may never carry a host path fragment: that is what made a reinstall change the bytes.
+    for (const name of closureNames) expect(name).toMatch(/^[A-Za-z0-9@._+-]+~[0-9a-f]{8}~[0-9a-f]{8}$/)
+    // Same versions, same content: the nested copy is hoisted to the parent root, as a profile reinstall does.
+    await rename(join(source, 'node_modules/a/node_modules/shared'), join(source, 'node_modules/shared'))
+    await rm(join(source, 'node_modules/a/node_modules'), { recursive: true, force: true })
+    await expect(materializeGeneration(input)).resolves.toBeTruthy()
+    expect(await readFile(join(dir, 'generation.json'))).toEqual(before)
+    expect(await readdir(join(home, 'plugins/dsh-openspec/generations'))).toEqual(['relocate'])
+    await rm(source, { recursive: true })
+    expect(spawnSync(process.execPath, [join(dir, 'bin/openspec.js'), '--version'], { encoding: 'utf8' }).status).toBe(0)
+  })
+  it('closure_identity_is_layout_independent_and_version_sensitive', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'generation-layout-')); roots.push(home)
+    const source = join(home, 'source'); await mkdir(source, { recursive: true })
+    const pkg = async (path: string, version: string, dependencies = {}) => {
+      await mkdir(path, { recursive: true }); await writeFile(join(path, 'package.json'), JSON.stringify({ name: path.split('/').at(-1), version, main: 'index.js', dependencies }))
+      await writeFile(join(path, 'index.js'), 'module.exports=1')
+    }
+    await writeFile(join(source, 'package.json'), JSON.stringify({ name: '@fission-ai/openspec', version: '1.13.2', dependencies: { a: '1' } }))
+    await pkg(join(source, 'node_modules/a'), '1.0.0', { shared: '1' })
+    await pkg(join(source, 'node_modules/a/node_modules/shared'), '1.0.0')
+    const nested = await closureIdentity(source)
+    await rename(join(source, 'node_modules/a/node_modules/shared'), join(source, 'node_modules/shared'))
+    await rm(join(source, 'node_modules/a/node_modules'), { recursive: true, force: true })
+    expect(await closureIdentity(source)).toBe(nested)
+    await pkg(join(source, 'node_modules/shared'), '2.0.0')
+    expect(await closureIdentity(source)).not.toBe(nested)
   })
 })
