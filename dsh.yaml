@@ -334,9 +334,17 @@ customizations:
   - id: dsh-cockpit-bridge
     type: package
     source: remote
-    spec: 'https://github.com/prgrmrwy/dsh-cockpit/releases/download/dsh-cockpit-bridge-v0.6.3/dsh-cockpit-bridge-0.6.3.tgz'
+    spec: 'https://github.com/prgrmrwy/dsh-cockpit/releases/download/dsh-cockpit-bridge-v0.6.4/dsh-cockpit-bridge-0.6.4.tgz'
     name: dsh-cockpit-bridge
-    version: 0.6.3
+    version: 0.6.4
+      # [2026-10-09] 正式发布 0.6.4：新增只读上报官方完成未读状态（openspec change authoritative-completion-unread）。
+      #   SHA256 877b1312d85e5f077c318d98815dbb15f238b26e9a118d671c850a71ffb005f2（52522 B；下载物实测一致，HTTP 200）。
+      #   新增 POST /api/bridge/status-snapshot（protocolVersion 1）：官方 uiSession.sessionStatus 里每个正在运行或持有
+      #   未读完成的会话，以 { sessionId, running, completionUnread } 上报（仅标识符 + 两个布尔值）。驾驶舱据此以设备
+      #   自己的 completionUnread 为准，驾驶舱重启 / 离线 / 断连期间完成的会话也能照实显示；缺少官方来源时静默，
+      #   旧驾驶舱（404/405）下视为可选增强被拒绝，不重试、不阻塞会话打开确认。接缝 / 打开确认 / pending 快照 /
+      #   端口转发均未变，无需迁移。需与 dsh-cockpit 服务端 2f51565 及之后配合（否则该上报被忽略，行为同 0.6.3）。
+      #   回滚：spec/version 改回下方 0.6.3 → dsh build → 刷新设备页面（该设备退回运行轮次模型）。
       # [2026-10-09] 正式发布 0.6.3：修正 0.6.1 起的「当前会话」适配（驾驶舱「已完成未读」不再被误清）。
       #   SHA256 b25a84d7cb1a99cc206dd34bbf8d7a0e5febb50c4e07e9009598435c6dde7076（50069 B；下载物实测一致，HTTP 200）。
       #   0.2.0 的 retainedBy.mainView 是**保留计数**而非当前选择（同一时刻可有多个会话被保留——每个打开的
