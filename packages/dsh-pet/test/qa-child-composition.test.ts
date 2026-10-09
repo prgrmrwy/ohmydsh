@@ -78,7 +78,7 @@ describe('a QA child could never answer pet_context', () => {
     const attempt = (): unknown =>
       resolveTrustedContext(harness!.repository, 'session-qa-child')
     expect(attempt).toThrow(PetError)
-    expect(attempt).toThrow(/has no running or waiting Invocation/)
+    expect(attempt).toThrow(/not part of any Invocation/)
     try {
       attempt()
     } catch (error) {
