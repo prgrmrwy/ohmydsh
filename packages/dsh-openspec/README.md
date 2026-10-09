@@ -17,6 +17,21 @@ Neither field is live-editable: a change remounts the plugin, so the managed inv
 
 Notices appear only in a live consumption result. They do not install packages, append messages, or start turns.
 
+## Generations and the host dependency layout
+
+A generation is an immutable copy of the pinned official release plus its resolved dependency closure; `$DSH_HOME/plugins/dsh-openspec/generations/<identity>/` is what every Skill body and command block points at. Two properties keep that copy reproducible:
+
+- Closure directories are named from each dependency's own identity (name, version, own content) and its direct dependencies' identities — never from a host filesystem path. Reinstalling the same versions under a different physical layout (nested copies hoisted to the profile root, for example) therefore reproduces byte-identical content, and the existing generation is reused instead of colliding.
+- The identity covers the resolved closure, so a real dependency change materializes and activates a new generation instead of colliding with the existing one. Existing generations are retained and never rewritten.
+
+If preparing a generation or registering the adapter's Skills and commands fails, the adapter undoes whatever it had already registered — no partial surface stays visible — and writes exactly one error line through the host logger:
+
+```
+dsh-openspec: startup contributions failed (<code>); no Skills or commands were registered
+```
+
+`<code>` is an error class such as `generation-identity-collision`, `generation-invalid` or `dependency-closure-ambiguous`, never a path or upstream text. That line means the session surface is absent by design rather than silently missing; a restart re-materializes it once the recorded problem is gone.
+
 ## Upgrade and removal
 
 **WIP:** the overall change is not accepted yet; real-runtime upgrade/reload and policy-denial evidence remain outstanding. The local Host mutation bypass reported by review I1 has been removed: the handler only prepares guidance, and an explicitly requested action must execute `lib/session-updater.js` through the calling session's Bash. Existing sandbox, filesystem and Worktree Session policy applies; a denied call must not be retried through Host or a different cwd. This repair has not been deployed to the VM.
