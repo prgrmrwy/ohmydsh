@@ -311,7 +311,7 @@ describe('pet_context fails closed', () => {
 
     expect(() =>
       executePetContext(harness!.repository, { agent: { id: 'exec-1' } }),
-    ).toThrow(/no running or waiting Invocation/)
+    ).toThrow(/not part of any Invocation/)
   })
 
   it('fails closed when the current Invocation is ambiguous', async () => {

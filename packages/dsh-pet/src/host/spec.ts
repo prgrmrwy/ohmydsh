@@ -176,6 +176,10 @@ const petInvocationRecord = z.object({
   skillSetGeneration: z.number().int().nonnegative().optional(),
   snapshotId: z.string().min(1),
   request: z.string().optional(),
+  // Optional and additive: set only on an Invocation registered from a user
+  // message typed directly into the executor session. Rows written before
+  // this field existed simply omit it, so no version bump or rewrite is due.
+  followupMessageId: z.string().min(1).optional(),
   status: petInvocationStatus,
   queuePosition: z.number().int().nonnegative(),
   resultSummary: z.string().optional(),

@@ -368,7 +368,10 @@ export function registerPetTools(
           'Return trusted caller-bound Pet context for this session. For an ordinary Pet ' +
           'executor this is the current Invocation snapshot; for a unified locus child it is ' +
           'the active locus, permission, anchor, and current Delivery when present. Takes no ' +
-          'arguments: the target is resolved from the calling session and cannot be redirected.',
+          'arguments: the target is resolved from the calling session and cannot be redirected. ' +
+          'A user message typed directly into the executor session raises its own Invocation, ' +
+          'so an idle Task means this turn owns no authorization: report that instead of ' +
+          'guessing a target from earlier messages.',
         parameters: PET_CONTEXT_PARAMETERS,
         output: {
           schema: {
@@ -379,9 +382,13 @@ export function registerPetTools(
           render: (_args, value) => [{ type: 'text', text: value.json }],
         },
         async execute(_args, exec) {
+          const sessionId = callerSessionId(exec as ExecutionLike)
+          // A registration may still be in flight; waiting keeps the first
+          // step of an in-session turn from seeing a stale idle verdict.
+          await deps.waitForRegistration?.(sessionId)
           const context = executePetContext(
             deps.repository,
-            { agent: { id: callerSessionId(exec as ExecutionLike) } },
+            { agent: { id: sessionId } },
             deps,
           )
           return { json: JSON.stringify(context, null, 2) }

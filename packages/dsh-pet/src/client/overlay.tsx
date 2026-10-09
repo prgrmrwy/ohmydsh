@@ -38,7 +38,25 @@ import {
   writePosition,
   type PetPosition,
 } from './position.js'
-import { QA_GROUP_ACTION_ID, type PetCapability, type PetSourceKind } from '../wire.js'
+import {
+  QA_GROUP_ACTION_ID,
+  SESSION_MESSAGE_CAPABILITY_ID,
+  type PetCapability,
+  type PetSourceKind,
+} from '../wire.js'
+
+/**
+ * Display name for an Invocation origin that is not a Skill.
+ *
+ * `session-message` is the in-session follow-up form: the user typed into the
+ * executor session rather than clicking a capability, so there is no Skill
+ * name to show and the raw id would read as a broken capability.
+ * @param capabilityId - Recorded capability id.
+ * @returns the label to render.
+ */
+function capabilityLabel(capabilityId: string): string {
+  return capabilityId === SESSION_MESSAGE_CAPABILITY_ID ? '会话内直输' : capabilityId
+}
 
 /** Current browser source selection, captured atomically on invoke. */
 export interface SourceSelection {
@@ -1132,6 +1150,18 @@ function TaskPanel(props: {
             {task.status}
           </span>
           {/*
+            The idle window is the one state a user cannot read off the status
+            word alone: the Task is open and waiting, not finished. Saying how
+            work resumes there is the whole point — from this session (a message
+            typed into the executor is registered as its own Invocation) or from
+            the source session.
+          */}
+          {task.status === 'idle' ? (
+            <span className="dshpet-status" style={{ marginLeft: 4 }}>
+              空闲 · 在此会话发言会登记为新的会话内直输调用
+            </span>
+          ) : null}
+          {/*
             A resident ordinary Pet Task works directly inside its workspace,
             where Pet's Skill projection and standing instructions do not apply.
           */}
@@ -1160,7 +1190,7 @@ function TaskPanel(props: {
           ) : null}
           {(task.invocations ?? []).map(invocation => (
             <div key={invocation.id} className="dshpet-inv">
-              <span>{invocation.capabilityId}</span>
+              <span>{capabilityLabel(invocation.capabilityId)}</span>
               <span className="dshpet-status">{invocation.status}</span>
               {invocation.resultSummary !== undefined ? (
                 <span>{invocation.resultSummary}</span>

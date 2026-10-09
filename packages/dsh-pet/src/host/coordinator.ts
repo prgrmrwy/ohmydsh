@@ -21,6 +21,7 @@ import {
 } from './capture.js'
 import { renderEnvelope } from './envelope.js'
 import { PetError } from './errors.js'
+import type { FollowupOutcome } from './followup.js'
 import {
   createTaskWithExecutor,
   titleForTask,
@@ -29,7 +30,9 @@ import {
 } from './executor.js'
 import type { PetRepository } from './repository.js'
 import {
+  isForkChildTaskForm,
   occupiesCurrentSlot,
+  SESSION_MESSAGE_CAPABILITY_ID,
   type PetInvocationCapture,
   type PetInvocationRecord,
   type PetInvocationStatus,
@@ -97,6 +100,26 @@ export interface CoordinatorDeps {
    * rather than reaching the Agent as ordinary prose.
    */
   readonly verifySkill?: (skillName: string) => Promise<void>
+  /**
+   * Whether the executor session still holds client messages it will run
+   * before anything dispatched now.
+   *
+   * DSH's inbox is FIFO, so a queued user turn runs first. Dispatching behind
+   * it would mark this Invocation current while the model is still answering
+   * that turn — `pet_context` resolves "the current Invocation", and that
+   * would attribute one turn's authorization to another. Absent means Pet
+   * cannot prove the queue is empty and dispatches as before.
+   */
+  readonly hasPendingUserTurn?: (executorSessionId: string) => boolean
+  /**
+   * Resolve a workspace's filesystem path, for a resident Task's snapshot.
+   *
+   * A workspace-resident Task's executor works inside that workspace, and an
+   * in-session follow-up rebuilds the same chat-shaped snapshot the inbound
+   * channel path captures. Failing to resolve it refuses the registration
+   * rather than inventing a source.
+   */
+  readonly workspaceLocator?: (workspaceId: string) => string | undefined
 }
 
 /** Everything needed to admit one inbound channel message. */
@@ -403,21 +426,156 @@ export class PetCoordinator {
   }
 
   /**
+   * Register an Invocation for a user message typed into the executor session.
+   *
+   * The THIRD origin, alongside a capability gesture and an inbound channel
+   * message. It deliberately mirrors {@link acceptConversation}: no Skill is
+   * pinned and no envelope is dispatched, because the user's own message IS
+   * this turn's input. Nothing here is taken from message text — the target is
+   * the Task's already-fixed source scope, re-captured at registration time,
+   * so an in-session message cannot redirect Pet at another session or
+   * workspace.
+   *
+   * The Invocation enters `running` directly: the turn it belongs to is
+   * already executing, so there is no `queued`→dispatch step to perform. The
+   * existing `turn/end` projection settles it like any other Invocation.
+   * @param input - Task, raising message id, and the user's request text.
+   * @returns whether an Invocation now exists for that message.
+   */
+  async startFollowupInvocation(input: {
+    readonly taskId: string
+    readonly messageId: string
+    readonly request?: string
+  }): Promise<FollowupOutcome> {
+    const { repository } = this.deps
+
+    // Idempotency first: the splice observer and the claim observer can both
+    // see one message, and a replayed durable event must not run it twice.
+    const existing = repository.findInvocationByFollowupMessage(input.messageId)
+    if (existing !== undefined) return { ok: true, invocationId: existing.id }
+
+    const task = repository.getTask(input.taskId)
+    if (task === undefined || isForkChildTaskForm(task.sourceKind)) {
+      return { ok: false, reason: 'not-eligible' }
+    }
+    if (task.archivedAt !== undefined) return { ok: false, reason: 'archived' }
+    // The serial slot is the Task's, and the turn already running owns it.
+    if (!repository.isSlotFree(task.id)) return { ok: false, reason: 'slot-occupied' }
+
+    const invocationId = `inv-${randomUUID()}`
+    const snapshot = await this.followupSnapshot(task, invocationId)
+    if (snapshot === undefined) return { ok: false, reason: 'source-unavailable' }
+    await repository.putSnapshot(snapshot)
+
+    const now = Date.now()
+    try {
+      await repository.appendInvocation({
+        id: invocationId,
+        taskId: task.id,
+        capabilityId: SESSION_MESSAGE_CAPABILITY_ID,
+        // No Skill, exactly like the channel conversational form: the
+        // envelope carries no `/<name>` token and there is nothing to verify.
+        snapshotId: snapshot.id,
+        ...(input.request !== undefined ? { request: input.request } : {}),
+        followupMessageId: input.messageId,
+        status: 'running',
+        createdAt: now,
+        updatedAt: now,
+        revision: 0,
+      })
+    } catch (error) {
+      // A concurrent archive closes the Task between the checks above; that is
+      // the only expected loss here, and it stays fail closed.
+      if (error instanceof PetError && error.code === 'TASK_ARCHIVED') {
+        return { ok: false, reason: 'archived' }
+      }
+      throw error
+    }
+    await repository.putRun({
+      id: `run-${randomUUID()}`,
+      invocationId,
+      attempt: 1,
+      status: 'running',
+      startedAt: now,
+    })
+    await repository.setTaskStatus(task.id, 'running')
+    return { ok: true, invocationId }
+  }
+
+  /**
+   * Re-capture the Task's own fixed source for an in-session Invocation.
+   *
+   * `session`/`workspace`/`none` go through the ordinary Host validation and
+   * enrichment path, so the snapshot has the same provenance as a browser
+   * capture. `chat` (workspace-resident) rebuilds the shape the inbound
+   * channel path writes — deliberately WITHOUT any reply target, so the
+   * channel reply tools stay fail closed for a turn that no Lark message
+   * raised.
+   * @param task - Task whose source is fixed.
+   * @param invocationId - Invocation the snapshot belongs to.
+   * @returns the snapshot, or `undefined` when the source cannot be re-derived.
+   */
+  private async followupSnapshot(
+    task: PetTaskRecord,
+    invocationId: string,
+  ): Promise<PetSourceSnapshot | undefined> {
+    if (task.sourceKind === 'chat') {
+      const workspaceId = task.residentWorkspaceId
+      if (workspaceId === undefined) return undefined
+      const cwd = this.deps.workspaceLocator?.(workspaceId)
+      if (cwd === undefined) return undefined
+      return {
+        id: `snap-${randomUUID()}`,
+        invocationId,
+        sourceKind: 'chat',
+        sourceWorkspaceId: workspaceId,
+        ...(task.sourceTitle !== undefined ? { workspaceTitle: task.sourceTitle } : {}),
+        cwd,
+        capturedAt: Date.now(),
+      }
+    }
+
+    const capture: PetInvocationCapture = {
+      clientInvocationId: invocationId,
+      capabilityId: SESSION_MESSAGE_CAPABILITY_ID,
+      sourceKind: task.sourceKind,
+      ...(task.sourceKind === 'session' && task.sourceId !== undefined
+        ? { sourceSessionId: task.sourceId }
+        : {}),
+      ...(task.sourceKind === 'workspace' && task.sourceId !== undefined
+        ? { sourceWorkspaceId: task.sourceId }
+        : {}),
+      ...(task.sourceTitle !== undefined ? { sessionTitle: task.sourceTitle } : {}),
+    }
+    try {
+      const validated = await validateCapture(capture, this.deps.resolver, this.deps.contextProviders)
+      return { ...validated.snapshot, invocationId }
+    } catch {
+      // A vanished or unreadable source is not a new authorization to guess:
+      // refuse the registration and let the idle diagnosis explain.
+      return undefined
+    }
+  }
+
+  /**
    * Start the next queued Invocation when the serial slot is free.
    *
    * Returns without dispatching while a running or waiting-user Invocation
-   * occupies the slot, so waiting work is never implicitly preempted.
+   * occupies the slot, so waiting work is never implicitly preempted, and
+   * while the executor session still holds client messages that would run
+   * first (the slot is per-Task, but the session runs one turn at a time).
    * @param taskId - Task whose queue should advance.
    * @returns the Invocation that started, or `undefined`.
    */
   async pump(taskId: string): Promise<PetInvocationRecord | undefined> {
     const { repository } = this.deps
+    const task = repository.getTask(taskId)
+    if (task === undefined || task.archivedAt !== undefined) return undefined
+    if (this.deps.hasPendingUserTurn?.(task.executorSessionId) === true) return undefined
     if (!repository.isSlotFree(taskId)) return undefined
     const next = repository.nextQueued(taskId)
     if (next === undefined) return undefined
 
-    const task = repository.getTask(taskId)
-    if (task === undefined || task.archivedAt !== undefined) return undefined
     const snapshot = repository.getSnapshot(next.snapshotId)
     if (snapshot === undefined) {
       await repository.updateInvocation(next.id, undefined, current => ({
@@ -532,7 +690,15 @@ export class PetCoordinator {
     const invocation = repository
       .listInvocations(task.id)
       .find(item => occupiesCurrentSlot(item.status) && item.status !== 'queued')
-    if (invocation === undefined) return
+    if (invocation === undefined) {
+      // No Invocation owned this turn. That happens for a plain session turn
+      // (an in-session follow-up registers its own before the turn starts, so
+      // this is one Pet did not account for) — and it is also the only place
+      // that can restart the queue after a dispatch was held back while a
+      // user turn was pending. Advancing here keeps that work from stranding.
+      await this.pump(task.id)
+      return
+    }
 
     switch (event.kind) {
       case 'turn-start':
