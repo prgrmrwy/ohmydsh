@@ -1,0 +1,296 @@
+{
+  "version": 1,
+  "redactionRules": [
+    {
+      "category": "lark-user-id",
+      "pattern": "ou_[0-9a-f]{16,}",
+      "replace": "ou_<redacted>"
+    },
+    {
+      "category": "lark-chat-id",
+      "pattern": "oc_[0-9a-f]{16,}",
+      "replace": "oc_<redacted>"
+    },
+    {
+      "category": "lark-message-id",
+      "pattern": "om[a-z]{0,2}_[0-9a-zA-Z]{12,}",
+      "replace": "om_<redacted>"
+    },
+    {
+      "category": "uuid",
+      "pattern": "(session-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4,12}",
+      "replace": "session-<redacted>"
+    },
+    {
+      "category": "local-home-path",
+      "pattern": "/(Users|home)/[A-Za-z0-9._-]+/",
+      "replace": "~/"
+    },
+    {
+      "category": "devbox-host",
+      "pattern": "n37-[0-9-]+",
+      "replace": "<devbox>"
+    }
+  ],
+  "files": [
+    {
+      "n": 1,
+      "source": "docs/notes/2026-09-15-concurrency-and-queueing.md",
+      "action": "move",
+      "target": "openspec/changes/archive/2026-09-18-pet-unified-locus-collaboration/checking/research-concurrency-and-queueing.md",
+      "manualRedactions": [],
+      "reason": "为该 change 的串行队列设计所做的调研",
+      "autoRedact": true
+    },
+    {
+      "n": 2,
+      "source": "docs/notes/2026-09-15-concurrent-write-isolation.md",
+      "action": "move",
+      "target": "openspec/changes/archive/2026-09-18-pet-unified-locus-collaboration/checking/research-concurrent-write-isolation.md",
+      "manualRedactions": [],
+      "reason": "正文锚定该 change design.md:269",
+      "autoRedact": true
+    },
+    {
+      "n": 3,
+      "source": "docs/notes/2026-09-15-memex-commit-attribution.md",
+      "action": "move",
+      "target": "openspec/changes/archive/2026-09-20-dsh-memex-scoped-memory/commit-attribution.md",
+      "manualRedactions": [],
+      "reason": "只解释该 change 的提交归属",
+      "autoRedact": true
+    },
+    {
+      "n": 4,
+      "source": "docs/notes/2026-09-18-pet-locus-collaboration-phase2-friction-review.md",
+      "action": "delete",
+      "target": null,
+      "manualRedactions": [],
+      "reason": "含真实 session id、群 chat id 与本机组织路径，不应留在公开仓库；结论已拆入 BACKLOG（B026–B034）",
+      "autoRedact": false
+    },
+    {
+      "n": 5,
+      "source": "docs/notes/cockpit-bridge-061-deployment.md",
+      "action": "move",
+      "target": "openspec/changes/upgrade-dsh-0-2-0-runtime/checking/cockpit-bridge-061-deployment.md",
+      "manualRedactions": [],
+      "reason": "属于 0.2 升级的部署验收",
+      "autoRedact": true
+    },
+    {
+      "n": 6,
+      "source": "docs/notes/dsh-0.1.5-rc.2-extension-point-survey.md",
+      "action": "move",
+      "target": "openspec/changes/archive/2026-09-22-shrink-pet-compat-to-minimal/checking/extension-point-survey.md",
+      "manualRedactions": [],
+      "reason": "为收缩 Pet compat 所做的上游勘察",
+      "autoRedact": true
+    },
+    {
+      "n": 7,
+      "source": "docs/notes/dsh-home-agent-instructions.md",
+      "action": "move-rewrite",
+      "target": "docs/architecture/agent-instructions.md",
+      "manualRedactions": [],
+      "reason": "描述当前 `agentInstructions` 机制，被 README 链接",
+      "autoRedact": true
+    },
+    {
+      "n": 8,
+      "source": "docs/notes/dsh-memex-integration.md",
+      "action": "move",
+      "target": "packages/dsh-memex/docs/integration-notes.md",
+      "manualRedactions": [
+        {
+          "find": "（acme `a872997→324df92`、flow-web `a15a053→4685b0b`，",
+          "replace": "（两个私有仓库，"
+        }
+      ],
+      "reason": "只与 dsh-memex 当前实现相关",
+      "autoRedact": true
+    },
+    {
+      "n": 9,
+      "source": "docs/notes/dsh-openspec-generation-identity.md",
+      "action": "move",
+      "target": "packages/dsh-openspec/docs/generation-identity.md",
+      "manualRedactions": [],
+      "reason": "只与 dsh-openspec 当前实现相关",
+      "autoRedact": true
+    },
+    {
+      "n": 10,
+      "source": "docs/notes/dsh-plugin-integration-pitfalls.md",
+      "action": "move",
+      "target": "docs/architecture/dsh-plugin-integration-pitfalls.md",
+      "manualRedactions": [
+        {
+          "find": "赵鸿珂",
+          "replace": "<member>"
+        },
+        {
+          "find": "小小芒果",
+          "replace": "<bot>"
+        }
+      ],
+      "reason": "`CLAUDE.md` 强制前置阅读，跨插件通用",
+      "autoRedact": true
+    },
+    {
+      "n": 11,
+      "source": "docs/notes/federated-dsh-operations.md",
+      "action": "delete",
+      "target": null,
+      "manualRedactions": [],
+      "reason": "`dsh-federation` 已不在仓库，设计与证据保留在归档 change `2026-08-27-federated-dsh-control-plane`",
+      "autoRedact": false
+    },
+    {
+      "n": 12,
+      "source": "docs/notes/local-manifest-overlay.md",
+      "action": "move-rewrite",
+      "target": "docs/architecture/private-overlay.md",
+      "manualRedactions": [],
+      "reason": "描述当前 overlay 机制，被 README 架构章节链接",
+      "autoRedact": true
+    },
+    {
+      "n": 13,
+      "source": "docs/notes/pet-independent-agent-capability-audit.md",
+      "action": "move",
+      "target": "openspec/changes/pet-locus-independent-agent-inquiries/checking/capability-audit.md",
+      "manualRedactions": [],
+      "reason": "正文声明对应该进行中 change",
+      "autoRedact": true
+    },
+    {
+      "n": 14,
+      "source": "docs/notes/pet-locus-delivery-safety-hardening-live-acceptance.md",
+      "action": "move",
+      "target": "openspec/changes/archive/2026-09-19-pet-locus-delivery-safety-hardening/checking/live-acceptance.md",
+      "manualRedactions": [
+        {
+          "find": "张勇",
+          "replace": "<member>"
+        },
+        {
+          "find": "小小芒果",
+          "replace": "<bot>"
+        }
+      ],
+      "reason": "该 change 的真机验收清单",
+      "autoRedact": true
+    },
+    {
+      "n": 15,
+      "source": "docs/notes/pet-locus-host-capability-audit.md",
+      "action": "move",
+      "target": "openspec/changes/archive/2026-09-18-pet-unified-locus-collaboration/checking/host-capability-audit.md",
+      "manualRedactions": [],
+      "reason": "正文声明为该 change 的边界审计",
+      "autoRedact": true
+    },
+    {
+      "n": 16,
+      "source": "docs/notes/pet-locus-independent-child-handoff.md",
+      "action": "move",
+      "target": "openspec/changes/archive/2026-09-15-pet-locus-independent-child/handoff.md",
+      "manualRedactions": [],
+      "reason": "正文声明对应该 change",
+      "autoRedact": true
+    },
+    {
+      "n": 17,
+      "source": "docs/notes/pet-locus-on-demand-tree-handoff.md",
+      "action": "move",
+      "target": "openspec/changes/archive/2026-09-15-pet-locus-on-demand-tree/checking/live-acceptance.md",
+      "manualRedactions": [
+        {
+          "find": "小小芒果",
+          "replace": "<bot>"
+        }
+      ],
+      "reason": "正文声明对应该 change",
+      "autoRedact": true
+    },
+    {
+      "n": 18,
+      "source": "docs/notes/pet-locus-plan-ab-maintenance-cost-analysis.md",
+      "action": "move",
+      "target": "packages/dsh-pet/docs/locus-plan-ab-cost-analysis.md",
+      "manualRedactions": [],
+      "reason": "ADR-0006/0007 的成本依据，无单一 change 归属，只与 dsh-pet 相关",
+      "autoRedact": true
+    },
+    {
+      "n": 19,
+      "source": "docs/notes/pet-locus-spike-findings.md",
+      "action": "move",
+      "target": "openspec/changes/archive/2026-09-15-pet-locus-multi-binding/checking/spike-findings.md",
+      "manualRedactions": [],
+      "reason": "该 change proposal 引用的 spike",
+      "autoRedact": true
+    },
+    {
+      "n": 20,
+      "source": "docs/notes/pet-media-official-cli-download.md",
+      "action": "move",
+      "target": "packages/dsh-pet/docs/media-download.md",
+      "manualRedactions": [],
+      "reason": "描述 Pet 当前媒体下载实现",
+      "autoRedact": true
+    },
+    {
+      "n": 21,
+      "source": "docs/notes/pet-mention-open-id-and-asker-name.md",
+      "action": "move",
+      "target": "openspec/changes/archive/2026-09-19-pet-mention-open-id-and-asker-name/notes.md",
+      "manualRedactions": [
+        {
+          "find": "张勇",
+          "replace": "<member>"
+        }
+      ],
+      "reason": "该文件由此 change 的任务 15 创建（tasks.md:15），用于把随 `pet-locus-delivery-safety-hardening` 发布的行为补进规范；按「由哪个 change 写成」归属",
+      "autoRedact": true
+    },
+    {
+      "n": 22,
+      "source": "docs/notes/pet-unified-locus-cutover.md",
+      "action": "move",
+      "target": "openspec/changes/archive/2026-09-18-pet-unified-locus-collaboration/cutover-runbook.md",
+      "manualRedactions": [],
+      "reason": "正文声明为该 change 的 runbook",
+      "autoRedact": true
+    },
+    {
+      "n": 23,
+      "source": "docs/notes/sync-clean-first-build-breaks-deployment.md",
+      "action": "backlog",
+      "target": "BACKLOG.md",
+      "manualRedactions": [],
+      "reason": "状态「待处理」的缺陷，不是长期文档",
+      "autoRedact": true
+    },
+    {
+      "n": 24,
+      "source": "docs/notes/upgrade-dsh-0-2-0-devbox-validation.md",
+      "action": "move",
+      "target": "openspec/changes/upgrade-dsh-0-2-0-runtime/checking/devbox-validation.md",
+      "manualRedactions": [],
+      "reason": "该进行中 change 的验收记录",
+      "autoRedact": true
+    },
+    {
+      "n": 25,
+      "source": "docs/notes/ws-clean-archived-and-loaded-deadlock.md",
+      "action": "backlog",
+      "target": "BACKLOG.md",
+      "manualRedactions": [],
+      "reason": "状态「待处理」的缺陷",
+      "autoRedact": true
+    }
+  ],
+  "redactionScope": "all-non-deleted"
+}
