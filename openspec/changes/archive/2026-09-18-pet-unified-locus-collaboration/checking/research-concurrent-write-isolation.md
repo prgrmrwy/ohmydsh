@@ -1,3 +1,4 @@
+> Migrated from docs/notes/2026-09-15-concurrent-write-isolation.md.
 # 并发 Agent 写隔离与冲突协商调研
 
 > 对象：多个 AI 编码 Agent 并发写同一仓库时的写隔离与冲突协商。

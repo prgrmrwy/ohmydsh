@@ -41,7 +41,7 @@ export type FeishuJumpTarget =
  * provable from the snapshot; it does not construct a deep-link URL — that
  * requires an exact external query-parameter format (`applink.feishu.cn/
  * client/thread/open`-shaped, per the production precedent in
- * `docs/notes/pet-locus-spike-findings.md`) that this change has not
+ * `openspec/changes/archive/2026-09-15-pet-locus-multi-binding/checking/spike-findings.md`) that this change has not
  * independently verified against the live platform. Callers must supply
  * their own verified URL builder (see `resolveFeishuJumpUrl`) rather than
  * this module guessing a query-string shape.

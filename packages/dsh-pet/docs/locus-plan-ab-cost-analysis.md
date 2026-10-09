@@ -1,3 +1,4 @@
+> Migrated from docs/notes/pet-locus-plan-ab-maintenance-cost-analysis.md.
 # Pet Locus 方案 A/B 可量化维护成本对比
 
 > measured 2026-09-23 · 仓库 HEAD `6365f222` · DSH pin `0.1.5-rc.2`
@@ -397,9 +398,9 @@ grep -rl "parentSessionId\|mainSessionId" packages/dsh-pet/test/ | wc -l  → 57
 **parentSessionId 分布 [实测]**：16 条 locus 指向 **8 个不同 parent session**。
 按 source 分：`auto`→3 个、`explicit`→1 个、`inherited`→2 个、`qa-created`→4 个。
 
-**关键迁移风险 [实测]**：`session-85620d77-e1a8-4d80-b5d9-66a481bda3c5` 作为
+**关键迁移风险 [实测]**：`session-<redacted>` 作为
 parent 出现 **5 次**（4 条 inherited + 1 条 qa-created），而仓库中存在
-worktree 目录 `.worktrees/at-bot-session-85620d77-e1a8-4d80-b5d9-66a481bda/`
+worktree 目录 `.worktrees/at-bot-session-<redacted>/`
 —— **同一 id**。这直接证明「用户自己正在工作的会话被征用为 locus 主会话」
 在生产中真实发生，且是最高频的 parent。方案 B 要把这 5 条重新指向 Pet 自建
 协作主会话，属于**语义迁移而非字段搬迁**。
@@ -492,7 +493,7 @@ grep -rl "parentSessionId\|mainSessionId" test/ → 57 文件 / 23,283 行
   `git log --grep=independent -i | wc -l` → 16）
 
 **C. `pet-locus-delivery-safety-hardening`（真机验收记录最完整）**
-- 任务 35（全完成），验收文档 `docs/notes/pet-locus-delivery-safety-hardening-live-acceptance.md` **264 行**
+- 任务 35（全完成），验收文档 `openspec/changes/archive/2026-09-19-pet-locus-delivery-safety-hardening/checking/live-acceptance.md` **264 行**
 - 7 个验收用例 A–G 的实测结果 **[实测]**（该文件 L87-93）：
 
 | 用例 | 结果 |
@@ -653,7 +654,7 @@ DSH 不会再代为传播。
 
 #### 直接证据（文档明述该模式）**[实测]**
 
-`grep -rn "单测全绿\|测试全绿\|全绿却\|本地测试全绿" docs/notes/` → **3 处**：
+`grep -rn "单测全绿\|测试全绿\|全绿却\|本地测试全绿" docs/architecture/` → **3 处**：
 
 | 出处 | 原句 |
 |---|---|
@@ -894,7 +895,7 @@ commit message 明述是真机抓到的：
 | 方案 B 退役后 patch 的精确行数 | 需真实实施 `settlementNotice` 退役才能测。§3.1 的 ~700 行是按 hunk 分布[估算] |
 | `.upstream` 重建的真实耗时 | 未在本次测量中执行完整冷构建（会触发 21 个外部进程、1.7 GB clone+install）。README:75 只记录了固定的包管理器版本，无耗时记录 |
 | 用户会话被征用造成的"体验成本" | 无遥测。只能间接观察到 `d984a998` 记录的"父会话收到 4 条结算通知"这一个实例 |
-| 生产库 16 条 locus 中有多少 parent 是"用户正在工作的会话" | 只能证明 `session-85620d77`（5 条 locus 的 parent）同时是 worktree 名 ⇒ **至少 5/16 = 31.3%** 是用户工作会话。其余 7 个 parent session 无法从库内判定其是否为用户会话，需交叉查 DSH session 元数据（本次未访问） |
+| 生产库 16 条 locus 中有多少 parent 是"用户正在工作的会话" | 只能证明 `session-<redacted>`（5 条 locus 的 parent）同时是 worktree 名 ⇒ **至少 5/16 = 31.3%** 是用户工作会话。其余 7 个 parent session 无法从库内判定其是否为用户会话，需交叉查 DSH session 元数据（本次未访问） |
 | `hierarchy.ts` 特判的"精确"行数 | 分支逻辑交织，无法机械切分。§2.1 的 114 行是按函数边界[估算] |
 
 ---
@@ -959,6 +960,6 @@ wc -l host/locus/{switch-notice,retirement,reconcile,startup-recovery,expiry-sch
 grep -rn "archiv" packages/dsh-pet/src/host/locus/*.ts | wc -l                     # → 108
 
 # §4.1 风险
-grep -rn "单测全绿\|测试全绿\|全绿却" docs/notes/                                    # → 3
-grep -n '^| [A-G] ' docs/notes/pet-locus-delivery-safety-hardening-live-acceptance.md  # → 7 用例
+grep -rn "单测全绿\|测试全绿\|全绿却" docs/architecture/                                    # → 3
+grep -n '^| [A-G] ' openspec/changes/archive/2026-09-19-pet-locus-delivery-safety-hardening/checking/live-acceptance.md  # → 7 用例
 ```

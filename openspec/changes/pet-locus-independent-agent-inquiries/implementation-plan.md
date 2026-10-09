@@ -18,7 +18,7 @@
 
 **Files:**
 - Create: `packages/dsh-pet/test/independent-runtime-probe.test.ts`
-- Evidence: `docs/notes/pet-independent-agent-capability-audit.md`
+- Evidence: `openspec/changes/pet-locus-independent-agent-inquiries/checking/capability-audit.md`
 
 - [x] 从 `DSH_PET_TEST_RUNTIME` 指定目录验证官方包身份/版本和 compat provenance，缺少显式路径时清晰跳过；不得用 workspace node_modules 偷换被测 runtime。
 - [x] 实际注册 spawn provider，调用其 prepareContinuable，核验不返回父 seed；运行真实 child model resolver，确认显式选择行为，fixture 只含合成哨兵。
@@ -29,7 +29,7 @@
 
 **Files:**
 - Create: `packages/dsh-pet/test/inquiry-runtime-probe.test.ts`
-- Evidence: `docs/notes/pet-independent-agent-capability-audit.md`
+- Evidence: `openspec/changes/pet-locus-independent-agent-inquiries/checking/capability-audit.md`
 
 - [x] 同样显式解析固定 runtime；真实 Inbox 搭配仅用于存放合成事件的 Session fixture，不自行实现第二套 inbox。
 - [x] 排入 GUI next-step、Inquiry next-turn、Delivery next-turn；断言当前首 claim 含前两条且 Delivery 留队列。这证明 followup 非 steering 但不是排他来源。

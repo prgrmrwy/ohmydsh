@@ -12,8 +12,8 @@ B035 的产品选择已由所有者确认：独立历史；同一个主会话及
 - `src/host/locus/turn-observer.ts`：非 Delivery 的父子/GUI 流量不得消费飞书反馈，mixed 轮次拒发。不能为异步答案一概豁免 agent 消息。
 - 当前 manifest pin 的 Host runtime 中 `dsh-subagent-spawn-in-process` 声明 `inheritsParentContext=false`，`prepareContinuable()` 返回空初始化；这是候选接缝，不是 Pet 连续运行验收。
 - 同一 runtime 的 `dsh-tool-subagent-control`：`list_agents` 只列调用者子孙；`send_message` 只支持直接父子、工作中可能 steer、响应只是投递确认。不能通过修改 prompt 声称支持兄弟安全问答。
-- `docs/notes/dsh-plugin-integration-pitfalls.md`：preset 名称不等于装配、inbox claim 含宿主注入与发布竞态；测试替身必须服从真实接缝。
-- `docs/notes/pet-unified-locus-cutover.md` 与 `dsh.yaml`：唯一 SQLite writer、离线版本升级、精确 pin 的 Host compatibility runtime、不自动回退旧执行链。
+- `docs/architecture/dsh-plugin-integration-pitfalls.md`：preset 名称不等于装配、inbox claim 含宿主注入与发布竞态；测试替身必须服从真实接缝。
+- `openspec/changes/archive/2026-09-18-pet-unified-locus-collaboration/cutover-runbook.md` 与 `dsh.yaml`：唯一 SQLite writer、离线版本升级、精确 pin 的 Host compatibility runtime、不自动回退旧执行链。
 
 以上代码路径相对于 `packages/dsh-pet/`，宿主证据取自本会话配置的 launcher runtime 安装产物，不假设 npm 上其他版本等价。
 
@@ -181,7 +181,7 @@ Host 从实际执行来源派生 origin：Feishu Delivery、GUI 本地工作或�
 
 产品决策已明确；以下是技术可失败核验，不是让实现者自行选择不同产品语义。
 
-实施调查与基线证据见 `docs/notes/pet-independent-agent-capability-audit.md`：1.1 已核对，G1–G5 尚未通过。固定 runtime 的 spawn 空 seed 已有源码依据，但 cold composition 当前无条件重取父 live preset；独立模式须恢复 child 保存的 preset 选择（不额外要求锁住所有插件/Skill 文件字节）。G3 可复用 next-turn 加 Pet dispatcher/pre-step fail-closed，不能把 next-turn 当作排他 claim。G4 已有 scoped monotonic guard/execute 接缝，须验证异步 wrapper 后的最终效果边界。这些是原语义内的窄实现缺口，不以换 provider 或仅增加 prompt 规避。
+实施调查与基线证据见 `openspec/changes/pet-locus-independent-agent-inquiries/checking/capability-audit.md`：1.1 已核对，G1–G5 尚未通过。固定 runtime 的 spawn 空 seed 已有源码依据，但 cold composition 当前无条件重取父 live preset；独立模式须恢复 child 保存的 preset 选择（不额外要求锁住所有插件/Skill 文件字节）。G3 可复用 next-turn 加 Pet dispatcher/pre-step fail-closed，不能把 next-turn 当作排他 claim。G4 已有 scoped monotonic guard/execute 接缝，须验证异步 wrapper 后的最终效果边界。这些是原语义内的窄实现缺口，不以换 provider 或仅增加 prompt 规避。
 
 | 门槛 | 核验内容 | 放行证据 | 不满足时 |
 |---|---|---|---|

@@ -8,7 +8,8 @@ const allowed = [
   'packages/subscriptions-sandbox-shim/src/index.js',
   'openspec/changes/example/checking/report.md',
   'openspec/changes/example/checking/trails/T1.md',
-  'worktree-session-architecture.md',
+  'docs/adr/ADR-0001-example.md',
+  'docs/architecture/example.md',
 ]
 
 test('allows root lock, selected architecture assets, source, and summarized evidence', () => {
@@ -48,4 +49,28 @@ test('requires the root lock and architecture source/display allowlist', () => {
   for (const required of REQUIRED_TRACKED_PATHS) {
     assert.ok(violations.some((entry) => entry.startsWith(`${required}:`)), required)
   }
+})
+
+test('rejects root debug screenshot and generated architecture note', () => {
+  const violations = artifactPolicyViolations([
+    ...allowed,
+    '.cdp-scratch-shot.png',
+    'worktree-session-architecture.md',
+  ])
+  assert.equal(violations.length, 2)
+  assert.ok(violations.some((entry) => entry.startsWith('.cdp-scratch-shot.png:')))
+  assert.ok(violations.some((entry) => entry.startsWith('worktree-session-architecture.md:')))
+})
+
+test('rejects tracked docs outside the whitelist', () => {
+  const violations = artifactPolicyViolations([
+    ...allowed,
+    ['docs', 'notes', '2026-10-10-spike.md'].join('/'),
+    'docs/README.md',
+    'docs/architectures/typo.md',
+  ])
+  assert.equal(violations.length, 3)
+  assert.match(violations[0], /^docs\/n[o]tes\/2026-10-10-spike\.md: .*whitelist/)
+  assert.ok(violations.some((entry) => entry.startsWith('docs/README.md:')))
+  assert.ok(violations.some((entry) => entry.startsWith('docs/architectures/typo.md:')))
 })

@@ -1,3 +1,4 @@
+> Migrated from docs/notes/pet-locus-spike-findings.md.
 # Pet locus 模型 spike 结论
 
 梳理 pet 的 session↔飞书绑定模型、准备改为多对多（locus）时跑的四个 spike。
@@ -31,10 +32,10 @@ prompt 级锚定（与 `sw` 让 parent 保持在 worktree 中的机制同构）�
 - 官方 SDK `@larksuiteoapi/node-sdk@1.47.1` 的 `im.message.receive_v1` 事件
   schema 在 `message` 对象上声明 `thread_id?: string`，与 `root_id` / `parent_id`
   并列（`node_modules/@larksuiteoapi/node-sdk/types/index.d.ts` 附近 258093 行）。
-- 真机 fixture `infra-service/test/fixtures/monitor-diagnosis/alarm-im-message-real.json`
-  中 `thread_id: "omt_190cf12825ce1cbc"`，且同一话题下的 `thread_replies` 全部
+- 真机 fixture `<private-service>/test/fixtures/monitor-diagnosis/alarm-im-message-real.json`
+  中 `thread_id: "om_<redacted>"`，且同一话题下的 `thread_replies` 全部
   携带同一个 `omt_`——正是 discriminator 应有的形态。
-- `infra-service/service/ux-issue-group-dispatch.ts:127-144` 已在生产用
+- `<private-service>/service/ux-issue-group-dispatch.ts:127-144` 已在生产用
   `result.data.thread_id` 拼 `applink.feishu.cn/client/thread/open`。
 - `lark-cli` 侧能力齐备：`im +chat-create --chat-mode topic`、
   `im +threads-messages-list`（接受 `om_`/`omt_`，bot 身份可用）、
@@ -63,8 +64,8 @@ MUST NOT 猜测或伪造。
 - `sw` 的 worktree 是主 checkout 的**兄弟目录**：
   `sw.sh:450` → `wt_path = dirname(MAIN_REPO)/acme-<slug>`。
 - 真机确认（`git -C acme worktree list`）：
-  主 checkout `/Users/me/mydir/dev/acme`，
-  worktree `/Users/me/mydir/dev/acme-t581-…` 等，均为同级兄弟目录。
+  主 checkout `~/mydir/dev/acme`，
+  worktree `~/mydir/dev/acme-<ticket>-…` 等，均为同级兄弟目录。
 
 推论：child 的 cwd = 父的 cwd = acme 主 checkout，而目标 worktree 在其**之外**，
 因此 `workspace-write` 既不会误写主 checkout 下的内容到 worktree，也**根本写不进**

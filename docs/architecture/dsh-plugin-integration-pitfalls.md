@@ -1,3 +1,4 @@
+> Migrated from docs/notes/dsh-plugin-integration-pitfalls.md.
 # DSH 插件集成陷阱：声明与装配是两回事
 
 本文收录本仓在集成 DSH 时**真实踩过、且从类型签名或参数名看不出来**的坑。
@@ -386,7 +387,7 @@ effective/read，未扩大权限。」。子会话日志给出机制：
 
 ### 现象
 
-群里 bot 回复开头的「@赵鸿珂」是纯文本：对方收不到提醒、名字也不可点。而
+群里 bot 回复开头的「@<member>」是纯文本：对方收不到提醒、名字也不可点。而
 `dsh.log`、Delivery 终态、表情全部正常——发送明明成功了。
 
 ### 根因
@@ -394,7 +395,7 @@ effective/read，未扩大权限。」。子会话日志给出机制：
 `lark-cli` 对 `im.message.receive_v1` 做了预处理，把 mention **渲染成显示名**：
 
 ```
-入站：@小小芒果 hi           <- event.content 已经是给人看的文本
+入站：@<bot> hi           <- event.content 已经是给人看的文本
 出站：必须写 <at user_id="ou_…">名字</at>，否则只是纯文本
 ```
 

@@ -1,3 +1,4 @@
+> Migrated from docs/notes/pet-unified-locus-cutover.md.
 # Pet unified locus cutover
 
 对应 OpenSpec change `pet-unified-locus-collaboration`。本文是部署、破坏性变更与回滚

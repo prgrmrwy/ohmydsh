@@ -1,3 +1,4 @@
+> Migrated from docs/notes/dsh-0.1.5-rc.2-extension-point-survey.md.
 # DSH 0.1.5-rc.2 扩展点勘察报告
 
 勘察对象：`packages/dsh-pet/compat/subagent/.upstream/`（DSH 0.1.5-rc.2，HEAD `fb2c4b9`）

@@ -40,7 +40,8 @@
       "target": "openspec/changes/archive/2026-09-18-pet-unified-locus-collaboration/checking/research-concurrency-and-queueing.md",
       "manualRedactions": [],
       "reason": "为该 change 的串行队列设计所做的调研",
-      "autoRedact": true
+      "autoRedact": true,
+      "h1": "Pet Locus 串行队列与并发调研：auto-thread 模式与父会话争用"
     },
     {
       "n": 2,
@@ -49,7 +50,8 @@
       "target": "openspec/changes/archive/2026-09-18-pet-unified-locus-collaboration/checking/research-concurrent-write-isolation.md",
       "manualRedactions": [],
       "reason": "正文锚定该 change design.md:269",
-      "autoRedact": true
+      "autoRedact": true,
+      "h1": "并发 Agent 写隔离与冲突协商调研"
     },
     {
       "n": 3,
@@ -58,7 +60,8 @@
       "target": "openspec/changes/archive/2026-09-20-dsh-memex-scoped-memory/commit-attribution.md",
       "manualRedactions": [],
       "reason": "只解释该 change 的提交归属",
-      "autoRedact": true
+      "autoRedact": true,
+      "h1": "提交归属说明（2026-09-15）"
     },
     {
       "n": 4,
@@ -74,9 +77,15 @@
       "source": "docs/notes/cockpit-bridge-061-deployment.md",
       "action": "move",
       "target": "openspec/changes/upgrade-dsh-0-2-0-runtime/checking/cockpit-bridge-061-deployment.md",
-      "manualRedactions": [],
+      "manualRedactions": [
+        {
+          "find": "TraeX",
+          "replace": "<internal-bridge>"
+        }
+      ],
       "reason": "属于 0.2 升级的部署验收",
-      "autoRedact": true
+      "autoRedact": true,
+      "h1": "Bridge 0.6.1 正式发布与部署（2026-10-08）"
     },
     {
       "n": 6,
@@ -85,7 +94,8 @@
       "target": "openspec/changes/archive/2026-09-22-shrink-pet-compat-to-minimal/checking/extension-point-survey.md",
       "manualRedactions": [],
       "reason": "为收缩 Pet compat 所做的上游勘察",
-      "autoRedact": true
+      "autoRedact": true,
+      "h1": "DSH 0.1.5-rc.2 扩展点勘察报告"
     },
     {
       "n": 7,
@@ -108,7 +118,8 @@
         }
       ],
       "reason": "只与 dsh-memex 当前实现相关",
-      "autoRedact": true
+      "autoRedact": true,
+      "h1": "DSH × memex integration notes"
     },
     {
       "n": 9,
@@ -117,7 +128,8 @@
       "target": "packages/dsh-openspec/docs/generation-identity.md",
       "manualRedactions": [],
       "reason": "只与 dsh-openspec 当前实现相关",
-      "autoRedact": true
+      "autoRedact": true,
+      "h1": "dsh-openspec 的 generation 身份与宿主机依赖布局"
     },
     {
       "n": 10,
@@ -135,7 +147,8 @@
         }
       ],
       "reason": "`CLAUDE.md` 强制前置阅读，跨插件通用",
-      "autoRedact": true
+      "autoRedact": true,
+      "h1": "DSH 插件集成陷阱：声明与装配是两回事"
     },
     {
       "n": 11,
@@ -162,7 +175,8 @@
       "target": "openspec/changes/pet-locus-independent-agent-inquiries/checking/capability-audit.md",
       "manualRedactions": [],
       "reason": "正文声明对应该进行中 change",
-      "autoRedact": true
+      "autoRedact": true,
+      "h1": "B035 独立 agent 与同源协作上下文：实施证据"
     },
     {
       "n": 14,
@@ -177,10 +191,19 @@
         {
           "find": "小小芒果",
           "replace": "<bot>"
+        },
+        {
+          "find": "答疑 · 伙伴对话调整2期",
+          "replace": "<production Q&A chat>"
+        },
+        {
+          "find": "ou_322…",
+          "replace": "ou_<redacted>"
         }
       ],
       "reason": "该 change 的真机验收清单",
-      "autoRedact": true
+      "autoRedact": true,
+      "h1": "Pet Locus Delivery Safety Hardening · 真实群验收清单"
     },
     {
       "n": 15,
@@ -189,7 +212,8 @@
       "target": "openspec/changes/archive/2026-09-18-pet-unified-locus-collaboration/checking/host-capability-audit.md",
       "manualRedactions": [],
       "reason": "正文声明为该 change 的边界审计",
-      "autoRedact": true
+      "autoRedact": true,
+      "h1": "Pet unified locus host-capability audit"
     },
     {
       "n": 16,
@@ -198,7 +222,8 @@
       "target": "openspec/changes/archive/2026-09-15-pet-locus-independent-child/handoff.md",
       "manualRedactions": [],
       "reason": "正文声明对应该 change",
-      "autoRedact": true
+      "autoRedact": true,
+      "h1": "Pet Locus 独立 child：工作上下文切换记录"
     },
     {
       "n": 17,
@@ -209,28 +234,65 @@
         {
           "find": "小小芒果",
           "replace": "<bot>"
+        },
+        {
+          "find": "session-b2f11bae",
+          "replace": "session-<redacted>"
+        },
+        {
+          "find": "b2f11b",
+          "replace": "<prefix>"
+        },
+        {
+          "find": "4629eb",
+          "replace": "<prefix>"
         }
       ],
       "reason": "正文声明对应该 change",
-      "autoRedact": true
+      "autoRedact": true,
+      "h1": "pet-locus-on-demand-tree 真实验收记录（2026-09-15）"
     },
     {
       "n": 18,
       "source": "docs/notes/pet-locus-plan-ab-maintenance-cost-analysis.md",
       "action": "move",
       "target": "packages/dsh-pet/docs/locus-plan-ab-cost-analysis.md",
-      "manualRedactions": [],
+      "manualRedactions": [
+        {
+          "find": "session-85620d77",
+          "replace": "session-<redacted>"
+        },
+        {
+          "find": "本地测试全绿\" docs/notes/",
+          "replace": "本地测试全绿\" docs/architecture/"
+        },
+        {
+          "find": "全绿却\" docs/notes/",
+          "replace": "全绿却\" docs/architecture/"
+        }
+      ],
       "reason": "ADR-0006/0007 的成本依据，无单一 change 归属，只与 dsh-pet 相关",
-      "autoRedact": true
+      "autoRedact": true,
+      "h1": "Pet Locus 方案 A/B 可量化维护成本对比"
     },
     {
       "n": 19,
       "source": "docs/notes/pet-locus-spike-findings.md",
       "action": "move",
       "target": "openspec/changes/archive/2026-09-15-pet-locus-multi-binding/checking/spike-findings.md",
-      "manualRedactions": [],
+      "manualRedactions": [
+        {
+          "find": "infra-service/",
+          "replace": "<private-service>/"
+        },
+        {
+          "find": "acme-t581-…",
+          "replace": "acme-<ticket>-…"
+        }
+      ],
       "reason": "该 change proposal 引用的 spike",
-      "autoRedact": true
+      "autoRedact": true,
+      "h1": "Pet locus 模型 spike 结论"
     },
     {
       "n": 20,
@@ -239,7 +301,8 @@
       "target": "packages/dsh-pet/docs/media-download.md",
       "manualRedactions": [],
       "reason": "描述 Pet 当前媒体下载实现",
-      "autoRedact": true
+      "autoRedact": true,
+      "h1": "Pet 媒体下载改用官方 lark-cli + 受守卫 spool（2026-09-20）"
     },
     {
       "n": 21,
@@ -253,7 +316,8 @@
         }
       ],
       "reason": "该文件由此 change 的任务 15 创建（tasks.md:15），用于把随 `pet-locus-delivery-safety-hardening` 发布的行为补进规范；按「由哪个 change 写成」归属",
-      "autoRedact": true
+      "autoRedact": true,
+      "h1": "Pet mention open-id 与触发者显示名规范追平"
     },
     {
       "n": 22,
@@ -262,7 +326,8 @@
       "target": "openspec/changes/archive/2026-09-18-pet-unified-locus-collaboration/cutover-runbook.md",
       "manualRedactions": [],
       "reason": "正文声明为该 change 的 runbook",
-      "autoRedact": true
+      "autoRedact": true,
+      "h1": "Pet unified locus cutover"
     },
     {
       "n": 23,
@@ -271,25 +336,42 @@
       "target": "BACKLOG.md",
       "manualRedactions": [],
       "reason": "状态「待处理」的缺陷，不是长期文档",
-      "autoRedact": true
+      "autoRedact": true,
+      "backlogId": "D007"
     },
     {
       "n": 24,
       "source": "docs/notes/upgrade-dsh-0-2-0-devbox-validation.md",
       "action": "move",
       "target": "openspec/changes/upgrade-dsh-0-2-0-runtime/checking/devbox-validation.md",
-      "manualRedactions": [],
+      "manualRedactions": [
+        {
+          "find": "set_sh_devbox_proxy",
+          "replace": "<proxy-helper>"
+        }
+      ],
       "reason": "该进行中 change 的验收记录",
-      "autoRedact": true
+      "autoRedact": true,
+      "h1": "DSH 0.2.0-rc.2 devbox 验证：当前状态 NO-GO"
     },
     {
       "n": 25,
       "source": "docs/notes/ws-clean-archived-and-loaded-deadlock.md",
       "action": "backlog",
       "target": "BACKLOG.md",
-      "manualRedactions": [],
+      "manualRedactions": [
+        {
+          "find": "session-74d5d367",
+          "replace": "session-<redacted>"
+        },
+        {
+          "find": ".worktrees/user-001-prgrmr-163-com",
+          "replace": ".worktrees/<worktree>"
+        }
+      ],
       "reason": "状态「待处理」的缺陷",
-      "autoRedact": true
+      "autoRedact": true,
+      "backlogId": "D008"
     }
   ],
   "redactionScope": "all-non-deleted"

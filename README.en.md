@@ -103,7 +103,7 @@ presets/<id>/             # agent presets
 patches/<id>.yml          # composition fragments / overrides for remote packages
 skills/<name>/            # skills
 instructions/dsh-home.md  # environment-level agent instruction source
-docs/adr/, docs/notes/    # architecture decisions and implementation notes
+docs/adr/, docs/architecture/  # architecture decisions and mechanism docs
 tests/                    # black-box sync regression tests
 ```
 

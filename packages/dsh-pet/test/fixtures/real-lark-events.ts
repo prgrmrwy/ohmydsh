@@ -2,7 +2,7 @@
  * Redacted samples of REAL Feishu events observed during the unified-locus
  * manual acceptance (2026-09-11 .. 2026-09-13).
  *
- * Why these exist: `docs/notes/dsh-plugin-integration-pitfalls.md` §4 records
+ * Why these exist: `docs/architecture/dsh-plugin-integration-pitfalls.md` §4 records
  * that event structure must be MEASURED, never inferred — inferring it once
  * cost a whole release cycle. Hand-written placeholders such as `oc_project`
  * or `om_root` satisfy the prefix validators but do not reproduce the real
@@ -81,7 +81,7 @@ export const REAL_TOPIC_MENTION = {
 
 /**
  * A QUOTE/REPLY on a regular group's timeline — the shape measured on
- * 2026-09-16 (see `docs/notes/dsh-plugin-integration-pitfalls.md`).
+ * 2026-09-16 (see `docs/architecture/dsh-plugin-integration-pitfalls.md`).
  *
  * Structural facts, all measured on the live tenant:
  * - the group is `chat_mode: group` (NOT a topic group);

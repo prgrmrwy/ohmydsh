@@ -1,3 +1,4 @@
+> Migrated from docs/notes/2026-09-15-memex-commit-attribution.md.
 # 提交归属说明（2026-09-15）
 
 `dsh-memex-scoped-memory` 这个 change 的 7 个文件分散在两条 commit 里，且第一条的

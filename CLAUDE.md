@@ -20,13 +20,13 @@
 2. 阅读 `openspec/specs/` 下与任务相关的当前规范；这里描述系统当前应当满足的行为。
 3. 检查 `openspec/changes/` 中是否存在相关的进行中 change，并阅读其 `proposal.md`、`design.md`、`specs/` 和 `tasks.md`。
 4. 如需理解设计演进、取舍或历史背景，再查阅 `openspec/changes/archive/`。归档 change 是历史证据，不应覆盖当前 spec。
-5. 阅读 `docs/adr/` 中相关架构决策，以及 `docs/notes/` 中的实现背景、运行约束和验证方法。
+5. 阅读 `docs/adr/` 中相关架构决策，以及 `docs/architecture/` 中描述当前系统结构与机制的文档（实现背景、运行约束和验证方法）。
 6. 最后结合 `packages/`、`scripts/`、`patches/`、`skills/`、`presets/` 与测试代码确认实现现状。
 
 若文档与实现不一致，不要静默选择一方：先指出差异，再根据当前 OpenSpec、已接受 ADR 和用户意图决定应修改规范还是实现。
 
 **接入 DSH 宿主能力前（创建 session/agent、拉长驻子进程、解析会话事件、调用 lark-cli），
-先读 `docs/notes/dsh-plugin-integration-pitfalls.md`。** 那里记录的是调用成功、类型通过、
+先读 [`docs/architecture/dsh-plugin-integration-pitfalls.md`](docs/architecture/dsh-plugin-integration-pitfalls.md)。** 那里记录的是调用成功、类型通过、
 日志无异常，但实际没有生效的集成方式——已经重复踩过，不要再靠现场排查重新发现。
 
 ## 关键目录
@@ -36,7 +36,7 @@
 - `openspec/changes/`：进行中的 OpenSpec change；包含 proposal、design、delta specs 和 tasks。
 - `openspec/changes/archive/`：已完成 change 的历史设计与验收记录。
 - `docs/adr/`：已接受的长期架构决策。
-- `docs/notes/`：运行机制、问题背景和验证说明。
+- `docs/architecture/`：当前系统结构与机制说明（[私有 overlay](docs/architecture/private-overlay.md)、[环境级 Agent 指令](docs/architecture/agent-instructions.md)、[DSH 插件集成陷阱](docs/architecture/dsh-plugin-integration-pitfalls.md)）；时间点性的调研与验收记录归入所属 OpenSpec change 或 package 的 `docs/`，缺陷归入 `BACKLOG.md`。
 - `packages/`：本仓库自研的 DSH package/bundle 源码。
 - `patches/`：纯 composition patch 或远端插件的个人覆盖。
 - `skills/`：同步到 `~/.dsh/skills/` 的自定义 skill。

@@ -12,6 +12,8 @@ export const REQUIRED_TRACKED_PATHS = [
   'docs/assets/ohmydsh-architecture.dual.svg',
 ]
 
+export const DOCS_WHITELIST = ['docs/adr/', 'docs/architecture/', 'docs/assets/']
+
 export function artifactPolicyViolations(files) {
   const violations = []
   for (const original of files) {
@@ -24,6 +26,13 @@ export function artifactPolicyViolations(files) {
     // to `docs/assets/`, where a documentation asset belongs.
     if (/^archify-out\//.test(file)) violations.push(`${file}: archify output is local-only and must not be tracked`)
     if (file === 'worktree-session-architecture.html') violations.push(`${file}: generated architecture HTML must not be tracked`)
+    if (file === 'worktree-session-architecture.md') violations.push(`${file}: generated architecture note must not be tracked`)
+    // docs/ admission whitelist: point-in-time research, acceptance records and
+    // retrospectives belong to their OpenSpec change, package or BACKLOG.
+    if (file.startsWith('docs/') && !DOCS_WHITELIST.some((prefix) => file.startsWith(prefix))) {
+      violations.push(`${file}: tracked docs must live under docs/adr/, docs/architecture/ or docs/assets/ (docs whitelist)`)
+    }
+    if (file === '.cdp-scratch-shot.png') violations.push(`${file}: root debug screenshot must not be tracked`)
   }
   const set = new Set(files.map((file) => file.split(path.sep).join('/')))
   for (const required of REQUIRED_TRACKED_PATHS) {

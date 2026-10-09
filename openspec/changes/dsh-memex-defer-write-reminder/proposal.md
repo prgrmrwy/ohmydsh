@@ -25,5 +25,5 @@
 
 - 代码：`packages/dsh-memex/src/lifecycle/index.ts`（提醒的投递方式）。
 - 测试：`packages/dsh-memex/test/lifecycle.test.ts`、`packages/dsh-memex/test/lifecycle-runtime.test.ts`（原测试断言“同一回合多一次请求”，需要改为断言“提醒出现在下一回合的首个请求中”）。
-- 文档：`packages/dsh-memex/README.md`、`docs/notes/dsh-memex-integration.md` 中对提醒时机的描述。
+- 文档：`packages/dsh-memex/README.md`、`packages/dsh-memex/docs/integration-notes.md` 中对提醒时机的描述。
 - 部署：需要 `dsh build` 并重启 DSH 才能生效；不涉及 manifest pin 或第三方依赖变化。

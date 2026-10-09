@@ -1,3 +1,4 @@
+> Migrated from docs/notes/dsh-openspec-generation-identity.md.
 # dsh-openspec 的 generation 身份与宿主机依赖布局
 
 2026-10-08 本机（DSH 0.2.0-rc.2）实测记录。结论先行：**把宿主文件系统路径写进不可变身份，等于让一次

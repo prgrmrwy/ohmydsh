@@ -1,3 +1,4 @@
+> Migrated from docs/notes/pet-locus-delivery-safety-hardening-live-acceptance.md.
 # Pet Locus Delivery Safety Hardening · 真实群验收清单
 
 > 状态：**已执行完毕（2026-09-19 20:25 最后一次真机确认）**。A/B/C/D/F PASS，G 首轮 FAIL、
@@ -6,9 +7,9 @@
 >
 > （历史：2026-09-18 用户选择本轮不重启 Host、不向真实群发送验收消息。）
 >
-> 目标群：`oc_5f28c85ad7c21b9a5d0e2c83c8ada46e`（「pet locus 验收 20260919」，
-> 2026-09-19 由所有者以 user identity 新建的专用验收群，成员为张勇 + 小小芒果 +
-> 一名第二 bot 参与方）。生产群「答疑 · 伙伴对话调整2期」本轮不使用，避免打扰同事。
+> 目标群：`oc_<redacted>`（「pet locus 验收 20260919」，
+> 2026-09-19 由所有者以 user identity 新建的专用验收群，成员为<member> + <bot> +
+> 一名第二 bot 参与方）。生产群「<production Q&A chat>」本轮不使用，避免打扰同事。
 >
 > 2026-09-19 已重启 Host。新群没有任何历史 locus，首次 @bot 即由
 > `admission.ts` 的 `uninitialized → needsInitialization` 路径自动 bootstrap 全新
@@ -56,7 +57,7 @@
 其余省略以保持 fail closed）；`index.ts` 接上 child delivery 的 `log` 端口；
 新增跨层回归测试（真实 `createLocusChildDelivery` + 假 adapter + 经规范化的记录），
 并实测回退后该测试精确复现线上症状（`refused` 而非 `accepted`）。
-详见 `docs/notes/dsh-plugin-integration-pitfalls.md` 第 11 节。
+详见 `docs/architecture/dsh-plugin-integration-pitfalls.md` 第 11 节。
 
 **用例 A–G 的正式判定见下方结果表**（已在重启后的真实群执行完毕）。
 
@@ -99,7 +100,7 @@ child 从 `composedPreset(parent.ctx)` 继承该组合，而 executor preset 的
 `modelSelectionSettings`，于是 `subagent` 落 standing 层、被 `LOCUS_SAFE_TOOL_FILTER` 正确移除
 （`subagent_fork` 一直如此，这正是为什么它此前已被挡住而 `subagent` 没有）。
 
-复验证据：新群 `oc_1be25379a265177ca85165e78e1d402d` 的 child header 与 descriptor 均为
+复验证据：新群 `oc_<redacted>` 的 child header 与 descriptor 均为
 `agentPreset: dsh-pet-executor`；`request/header` 工具表 16 个，无 `subagent`；`delivery-38` replied/success。
 
 守卫测试：`packages/dsh-pet/test/loader-composition.test.ts` 新增用例断言 executor preset 的
@@ -138,16 +139,16 @@ child 从 `composedPreset(parent.ctx)` 继承该组合，而 executor preset 的
 
 ### 额外发现：出站 @ 退化成裸 open_id（2026-09-19，不属 A–G 判据）
 
-复验群里 bot 的回复以 `@ou_322ec1d3cd062f04bc2b1f4ba1eff8e9` 开头——**纯文本**，不是真实提醒，
+复验群里 bot 的回复以 `@ou_<redacted>` 开头——**纯文本**，不是真实提醒，
 且把 open_id 公开贴在群里。两层原因：
 
 1. **统一 locus 路径从不解析人类发送者显示名**。`locus/context.ts:355` 支持 `senderName`
-   （有值会渲染成 `sender：张勇 ou_322…`），但实测 `delivery-25`/`delivery-38` 的
+   （有值会渲染成 `sender：<member> ou_<redacted>`），但实测 `delivery-25`/`delivery-38` 的
    `senderName` 都是 `undefined`；`enrichAddressing`（`locus-controller.ts:993-1028`）只调
    `listChatBots` 解析 **bot**。旧 pipeline 有这一步（`pipeline.ts:403-408`，从聊天历史取
    `trigger.senderName`），统一路径没有。而提示词（`locus/context.ts:371`）却要求
    「群内 @ 人直接写 `@对方显示名`」——模型只有 id 可写。
-   Pet 其实已缓存该名字（`channel_config.knownNames = {ou_322…: 张勇}`），只是未接进 locus 投递。
+   Pet 其实已缓存该名字（`channel_config.knownNames = {ou_<redacted>: <member>}`），只是未接进 locus 投递。
 2. **出站渲染兜不住裸 id**。`mentions.ts:117` 的 `renderMentions` 只按成员显示名整词匹配，
    `@ou_…` 匹配不到任何成员 → `no-unique-match` → 原样返回（Host 日志
    `lark reply mentions: unchanged (no-unique-match)`）。于是既不通知，也不脱敏。
@@ -162,7 +163,7 @@ child 从 `composedPreset(parent.ctx)` 继承该组合，而 executor preset 的
    新增用例：成员 id 渲染、非成员 id 保持、词内 `@ou_…` 不匹配。
 2. **根因**（`channel/locus-controller.ts` + `channel/lark.ts`）：投递前用
    `resolveMemberName(chatId, openId)` 解析发送者显示名并填入 `senderName`，提示词因此渲染成
-   `sender：张勇 ou_322…`。实现复用 `lark.ts` 已有的 `memberList`（`--member-types user`，
+   `sender：<member> ou_<redacted>`。实现复用 `lark.ts` 已有的 `memberList`（`--member-types user`，
    带短 TTL 缓存），不新增调用类型；解析失败 fail-soft，保持原行为。
    新增用例：有名字时 Delivery 带 `senderName`、无名字时保留 open id。
 
@@ -170,11 +171,11 @@ child 从 `composedPreset(parent.ctx)` 继承该组合，而 executor preset 的
 
 **真机复验（2026-09-19 10:21，重启后）**：
 
-- 根因：`delivery-39` 的 `senderName = 张勇`（修复前为 `undefined`）。
+- 根因：`delivery-39` 的 `senderName = <member>`（修复前为 `undefined`）。
 - 兜底：Host 日志 `lark reply mentions: rendered 1`（修复前为 `unchanged (no-unique-match)`）。
-- 出站结果：群内消息 `@张勇 你好呀～…`，原始返回带真实 mention——
-  `mentions: [{ id: ou_322…, key: "@_user_1", name: 张勇 }]`，即对方会收到通知、名字可点。
-- 对照：同群 09:35（修复前）那条仍是裸 `@ou_322…` 且无 `mentions` 条目。
+- 出站结果：群内消息 `@<member> 你好呀～…`，原始返回带真实 mention——
+  `mentions: [{ id: ou_<redacted>, key: "@_user_1", name: <member> }]`，即对方会收到通知、名字可点。
+- 对照：同群 09:35（修复前）那条仍是裸 `@ou_<redacted>` 且无 `mentions` 条目。
 
 
 A 的补充观察：child 沿用 provisioning 阶段就创建好的同一持久会话（`turnId` 为该 child 的 `#1`），
@@ -242,7 +243,7 @@ bot scope（如 `im:message:send_as_bot`）报为 missing；判断 bot 能力应
 ```text
 验收时间：
 Host PID（前/后）：
-目标群：答疑 · 伙伴对话调整2期
+目标群：<production Q&A chat>
 A 合法回复：PASS/FAIL；Delivery 状态/出站状态：
 B reference-only：PASS/FAIL；是否零正文：
 C 澄清→新 Delivery：PASS/FAIL；A/B 是否不同 Delivery：

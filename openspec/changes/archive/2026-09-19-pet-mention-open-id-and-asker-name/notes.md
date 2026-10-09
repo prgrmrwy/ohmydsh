@@ -1,3 +1,4 @@
+> Migrated from docs/notes/pet-mention-open-id-and-asker-name.md.
 # Pet mention open-id 与触发者显示名规范追平
 
 本 note 记录已随 `pet-locus-delivery-safety-hardening` 真机验收发布、后来补入规范的两项行为。
@@ -20,6 +21,6 @@ Locus 业务回复仍优先把 `@显示名` 按当前 chat 成员的精确「显
 - `packages/dsh-pet/src/host/channel/mentions.ts`：成员 open_id 兜底渲染。
 - `packages/dsh-pet/src/host/channel/lark.ts`：复用带 TTL 的人类成员列表解析显示名。
 - `packages/dsh-pet/src/host/channel/locus-controller.ts`：投递前填充 `senderName`。
-- 真机 `delivery-39`：`senderName = 张勇`，Host 记录 `rendered 1`，飞书原始消息含
-  `mentions: [{ id, key: "@_user_1", name: 张勇 }]`。
+- 真机 `delivery-39`：`senderName = <member>`，Host 记录 `rendered 1`，飞书原始消息含
+  `mentions: [{ id, key: "@_user_1", name: <member> }]`。
 - 相关规范 delta：`pet-locus-collaboration` 与 `pet-lark-channel`。
