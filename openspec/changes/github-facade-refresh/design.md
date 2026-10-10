@@ -13,8 +13,8 @@
 **Goals:**
 
 - 一个英文默认、中文对等的根门面，按两类读者组织，并给出可直接交给 AI 的安装 prompt。
-- 可机械断言的门面约束（索引一致、双语成对与章节锚点、链接可达、旧路径清零、docs 白名单、入口文件、截图登记、note 形态）都由会失败的检查守住；无法机械断言的部分（双语语义一致、prompt 措辞、截图隐私）明确交给人工门禁，不冒充测试覆盖。
-- 自研插件 README 按 A/B/C 分级重写首屏，A/B 级配合成数据截图。
+- 可机械断言的门面约束（索引一致、双语成对与章节锚点、链接可达、旧路径清零、docs 白名单、入口文件、位图登记（七字段、`kind` 取值、示意图允许名单与理由短语、图源存在、体积）、note 形态）都由会失败的检查守住；无法机械断言的部分（双语语义一致、prompt 措辞、位图与图源的隐私、`kind` 与实际来源的一致性）明确交给人工门禁，不冒充测试覆盖。
+- 自研插件 README 按 A/B/C 分级重写首屏，A/B 级配合成数据位图：四个 package 用隔离实例截图，因隔离实例无模型凭据而拍不到会话界面的五个 package 用由同目录图源栅格化的示意图（见 D6）。
 - `docs/notes/` 清零，长期文档只有 adr / architecture / assets。
 - `dsh.yaml` 恢复人可读，且迁移前后机器可读结构等价。
 
@@ -118,13 +118,15 @@ AI prompt 以 `[ASK-PATH]` 等固定英文规则标签组织，测试只断言�
 
 ### D6 package README 分级与截图隐私门禁
 
-分级由各 package `package.json` 的 `ohmydsh.docTier` 声明（单一数据源，review S2）：A = `dsh-pet`、`dsh-memex`、`worktree-session`、`dsh-openspec`；B = `sidebar-session-provider-icon`、`session-title-copy`、`system-clock`、`session-links`、`home-network-model-guard`；C = `subscriptions-sandbox-shim`、`cockpit-worktree-open-shim`、`cockpit-memex-browse-shim`。A/B 级首屏必须有位图截图（与 proposal 的「截图」承诺一致，review M4）；A 级可再加 archify 示意图。
+分级由各 package `package.json` 的 `ohmydsh.docTier` 声明（单一数据源，review S2）：A = `dsh-pet`、`dsh-memex`、`worktree-session`、`dsh-openspec`；B = `sidebar-session-provider-icon`、`session-title-copy`、`system-clock`、`session-links`、`home-network-model-guard`；C = `subscriptions-sandbox-shim`、`cockpit-worktree-open-shim`、`cockpit-memex-browse-shim`。A/B 级首屏必须有位图，位图 `kind` 为 `screenshot`（隔离实例真实界面）或 `illustration`（仅限下文 2026-10-09 修订列出的五个 package，由同目录提交的图源栅格化）；A 级可再加 archify 示意图。
 
 截图流程：一名 teammate 用隔离 `DSH_HOME`（临时目录）与非 3080 端口启动实例，`node scripts/sync.mjs` 物化本仓库配置，只填充合成会话与数据，用 Chrome CDP 截图；截图串行完成，避免多实例争抢端口与 profile。隐私不能由测试证明（review C3），所以拆成两层：
-- 机械层：`SCREENSHOTS.md` 五字段登记行、单张 ≤ 400 KiB。
-- 人工门禁：Lead 逐张查看，按检查清单（会话标题与正文、路径与用户名、hostname、账号与邮箱、组织专属域名或链接、token/key 片段）判定，结论写入登记行与 `verify.md`。未通过的退回重拍。
+- 机械层：`SCREENSHOTS.md` 七字段登记行（`file`、`kind`、`source`、`date`、`reviewer`、`verdict`、`note`）、`kind` 取值与 illustration 允许名单、固定理由短语、同目录图源存在、单张 ≤ 400 KiB。
+- 人工门禁：Lead 逐张查看位图并（对示意图）逐个阅读其同目录图源文件，另做来源核验（见 spec），按检查清单（会话标题与正文、路径与用户名、hostname、账号与邮箱、组织专属域名或链接、token/key 片段）判定，结论写入登记行与 `verify.md`。未通过的退回重拍。
 
-若某插件的主功能在隔离实例中无法呈现（例如需要飞书绑定的 Pet 功能），截图改为该插件在隔离实例中可呈现的界面（如 Pet 设置页、管理面板的空态或合成数据态），A/B 级的位图截图要求不放宽；不得用真实实例截图替代。若连这一点也做不到，必须修订本 design 与 spec 的分级并重新评审，不允许执行期自行降级。
+若某插件的主功能在隔离实例中无法呈现（例如需要飞书绑定的 Pet 功能），截图改为该插件在隔离实例中可呈现的界面（如 Pet 设置页、管理面板的空态或合成数据态）；不得用真实实例截图替代。
+
+**2026-10-09 修订（P3 实测后，用户批准）**：隔离实例没有模型凭据，拿不到带标题与消息的会话，手写会话日志也不被侧边栏识别，因此 `worktree-session`、`dsh-openspec`、`sidebar-session-provider-icon`、`session-title-copy`、`session-links` 五个包无法拍到有意义的真实界面。A/B 级仍必须有位图，但允许该位图是 `illustration`：由 archify 或同类工具从提交在同目录的图源（JSON/SVG）栅格化得到的示意图，展示该插件解决的问题与它在界面中的位置，文案只用合成内容。是否采用示意图由 `SCREENSHOTS.md` 的 `kind` 列与 `note` 列登记，原因写明「隔离实例无模型凭据」。其余四个包（dsh-pet、dsh-memex、system-clock、home-network-model-guard）保持 `screenshot`。示意图同样过隐私门禁。这是对原先「不允许执行期降级」的有意修订，已走评审。
 
 `package.json` 新增元数据会改变 local package 的内容哈希，下次 sync 会重建并重装这些 package；运行行为不变。
 

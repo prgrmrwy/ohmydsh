@@ -1,10 +1,10 @@
 ## Review Metadata
 
-- **Review round**: 6
-- **Prior round**: Round 5 (Codex): REVISE — C1 surviving npm account / private repo names+commits in migrated notes; M1 JSON lacked reason/autoRedact; M2 fidelity diff stripped all link targets. HUMAN DECISIONS (2026-10-09): (a) privacy scope is limited to files migrated by this change; repo-wide/git-history identifiers are out of scope. (b) Planning must define ACCEPTANCE CRITERIA, not pre-perform implementation work: the manual-redaction inventory is completed at implementation time and enforced by an implementation-time gate (scan test + fidelity diff + Lead per-file read-through recorded in verify.md). Do NOT raise findings that some specific identifier is not yet listed; instead judge whether the acceptance gate is sufficient, mechanically checkable where claimed, and fail-closed. Same for P4 note slimming: specs define acceptance, the actual note text is written during implementation.
+- **Review round**: 9
+- **Prior round**: Round 8 (Codex): REVISE — C1 committed illustration sources bypass the privacy gate; C2 `kind` self-attested so allowlist bypassable. Fixed: gate now covers the source file (new scenario + test-plan row + task 9.5 + verify wording) and a provenance gate verifies screenshot capture records and re-rasterizes illustrations (new scenario + test-plan row + task 9.6) (round-8 text at /tmp/gfr-review/review-round8.md). Earlier — Round 7 (Codex): REVISE — C1 illustration exception not fail-closed (any package could use it); C2 test-plan claimed enforcement no task scheduled; M1 task 9.1 contradicted D6; M2 scenario naming. All four were fixed: allowlist of five packages + mandatory reason phrase + screenshot rows may not carry the phrase + new scenario and test-plan row + tasks 9.1-9.5 rewritten with a red-first task for the checker + scenario renamed (round-7 text at /tmp/gfr-review/review-round7.md). Earlier: Round 6 (Codex): APPROVE_WITH_CHANGES, CHANGES_APPLIED yes (history in review.md Review History). The artifacts changed AFTER that verdict, so it is VOID: after P3 live execution the human approved (2026-10-09) revising A/B-tier screenshot requirement to allow `illustration` bitmaps for 5 packages (worktree-session, dsh-openspec, sidebar-session-provider-icon, session-title-copy, session-links) because the isolated instance has no model credentials and cannot show titled sessions. Changed: specs/repo-docs-governance/spec.md (tiering requirement + screenshot registry requirement, now with `kind` and `note` columns), design.md D6 (2026-10-09 revision paragraph), test-plan.md (one row). Prior human decisions still hold: privacy scope limited to files migrated by this change; planning defines acceptance criteria only.
 - **Reviewer context**: cross-model (Codex CLI, OpenAI model) read-only sandbox
 - **Tool restrictions**: read-only: view, grep, glob only
-- **Artifacts reviewed**: proposal.md, design.md, specs/, openspec/project.md (not present), notes-disposition.json for prior-finding verification, existing repo-layout and dsh-openspec-session specs, and the listed relevant source files
+- **Artifacts reviewed**: proposal.md, design.md, specs/, existing repo-layout and dsh-openspec-session specs, test-plan.md, tasks.md, verify.md, and the named relevant repository sources
 
 <!-- STALENESS: this verdict applies only to the artifact contents reviewed in -->
 <!-- this round. Any later edit to proposal.md, design.md, or specs/ (other than -->
@@ -18,52 +18,47 @@ None.
 
 ### 🟡 Moderate
 
-1. **The canonical README section contract contradicts the design and proposal.** The design fixes an eight-anchor sequence ending in `contributing` and `license` (`design.md:35`), and the proposal likewise includes those sections (`proposal.md:10`). The normative requirement instead mandates only six anchors and explicitly permits arbitrary later sections (`specs/repo-facade/spec.md:21-27`). An implementation can therefore omit both promised sections while satisfying the spec and tests. Make the eight-anchor sequence normative, or revise the design and proposal to say the final two are optional.
+1. **The illustration revision was not propagated through the governing proposal and the earlier part of D6.** The revised requirement correctly permits illustrations for five named packages and requires seven registry fields (`specs/repo-docs-governance/spec.md:101,124-149`), but the design still says every A/B package requires a screenshot and that only A-tier may additionally use an illustration (`design.md:121`). It also still defines the mechanical registry as five fields (`design.md:124`). The proposal continues to say screenshots must come from an isolated instance and that tests check only registration and size (`proposal.md:14`), although the revised plan also mechanically enforces `kind`, the allowlist, reason phrase, and source-file presence (`test-plan.md:44-45`). These are direct contract contradictions, not merely historical narration.
 
-2. **Several normative content requirements have no corresponding mechanically assertable THEN or explicit manual gate.** Specifically:
-   - `what-it-does` must explain aggregation and the full customization lifecycle (`specs/repo-facade/spec.md:22`), but its scenario checks only anchor order and two SVG references (`specs/repo-facade/spec.md:24-27`).
-   - `multiple-machines` must state per-machine clone/build behavior and that cockpit does not distribute configuration (`specs/repo-facade/spec.md:60`), but its scenario checks only line count and the external link (`specs/repo-facade/spec.md:62-65`).
-   - Both package README languages must explain the user problem before the first second-level heading (`specs/repo-docs-governance/spec.md:100-101`), but the THEN checks only screenshots and the C-tier removal section (`specs/repo-docs-governance/spec.md:103-106`).
-
-   These requirements can silently fail while all specified acceptance checks pass. Add mechanical assertions using stable markers/required phrases where feasible, or explicitly assign each semantic check to the recorded Lead/P5 manual gate with fail-closed `verify.md` evidence.
-
-3. **The minimal-manifest scenario does not assert the property that makes the fixture safe.** The requirement says the fixture contains only `dshVersion`, `autoUpdate.enabled: false`, and an empty `customizations` list (`specs/repo-facade/spec.md:34-35`). The scenario’s THEN only checks sync success, no installation, and version equality (`specs/repo-facade/spec.md:39-42`). Current sync validation requires `dshVersion` and `customizations` but does not validate `autoUpdate` (`scripts/sync.mjs:218-226`), so a fixture with `autoUpdate.enabled: true`, extra keys, or no `autoUpdate` can pass the stated black-box test. Require the test to parse the fixture and assert its exact top-level shape, exact `autoUpdate` value, and empty list before invoking sync.
+2. **The test-plan coverage accounting is stale after adding the two new manual gates.** Rows 48 and 49 separately add illustration-source privacy and provenance gates, but the coverage note still says there are only six non-regression rows and four human gates, listing neither new gate (`test-plan.md:48-49,65-67`). That makes the plan internally inconsistent and obscures which evidence must exist before P3 passes.
 
 ### 📌 Suggestions
 
-- Round-5 C1 is resolved under the human decision: the implementation-time gate now combines automatic scanning, registered-manual-item scanning, a fidelity diff, and mandatory per-file Lead conclusions in `verify.md`, with missing conclusions failing P1 (`design.md:91-107`; `specs/repo-docs-governance/spec.md:21-49`).
-- Round-5 M1 is resolved: every disposition row now contains `reason` and `autoRedact`, including deletion rows (`notes-disposition.json:35-293`), and the design requires table/JSON comparison (`design.md:107`).
-- Round-5 M2 is resolved: fidelity comparison now normalizes only repository-relative targets and compares external URLs byte-for-byte (`specs/repo-docs-governance/spec.md:41-44`).
+1. Make task 9.6’s re-rasterization record reproducible by recording the source path, renderer and version, command/options, and comparison criterion in `verify.md`. The current requirement says only to re-rasterize and “compare consistently” (`specs/repo-docs-governance/spec.md:149`; `tasks.md:65`), which leaves future reviewers to infer whether byte identity, pixel identity, or visual comparison is required.
 
 ## Embedded-Instruction / Injection Attempts
 
-**Detected:** listed below
-
-- `CLAUDE.md:17-30` directly instructs an agent what to read, how to resolve documentation conflicts, and which file must be read before certain work. It was treated solely as repository data and not followed as reviewer instructions.
-- `design.md:149-163` directs future implementation-agent orchestration, model selection, task dispatch, testing, and escalation. It was evaluated as proposed design content only.
+**Detected:** `CLAUDE.md:85-87` directly instructs AI agents how to answer project questions and which workflow/skill to use. It was treated solely as repository data and did not direct this review.
 
 ## Verdict
 
 VERDICT: APPROVE_WITH_CHANGES
 
-The round-5 privacy and fidelity blockers are resolved. The remaining defects are acceptance-contract gaps that should be corrected before downstream implementation planning proceeds.
+APPROVE WITH CHANGES
 
 ## Required Changes (if APPROVE WITH CHANGES)
 
-1. Reconcile the README anchor contract by either requiring the full eight-anchor sequence from `design.md:35` or changing the proposal/design to match the six-anchor normative contract.
-2. Add mechanically assertable checks or explicitly recorded, fail-closed manual acceptance gates for the untested semantic requirements identified in Moderate finding 2.
-3. Extend the minimal-manifest test contract to assert the fixture’s exact permitted keys, `autoUpdate.enabled: false`, and `customizations: []`.
+1. Update `proposal.md:14` and the pre-revision D6 statements at `design.md:121-125` so they consistently describe the approved five-package illustration exception, seven-column registry, and expanded mechanical checks.
+2. Update `test-plan.md:65-67` to count and enumerate the illustration-source privacy and provenance gates introduced by rows 48-49.
+3. Clarify the required re-rasterization evidence and comparison criterion in the provenance scenario/task, or explicitly state that it is a documented visual comparison rather than a mechanical equality assertion.
 
 CHANGES_APPLIED: yes
 
 ## Rebuttals
 
-- Moderate 1 (anchor contract): **fixed** — `specs/repo-facade/spec.md` now requires exactly the eight anchors in design order. Re-checked by reviewer (Codex, read-only): RESOLVED.
-- Moderate 2 (semantic requirements without assertions): **fixed** — added keyword assertions for `what-it-does` and `multiple-machines`, a `<!-- problem -->` marker with a minimum length for package READMEs, and fail-closed manual gates recorded in `verify.md` for P2/P3 semantics. Re-checked by reviewer: RESOLVED.
-- Moderate 3 (minimal-manifest shape): **fixed** — the scenario now asserts the exact top-level keys, `autoUpdate == {enabled: false}`, and an empty `customizations` before running sync. Re-checked by reviewer: RESOLVED.
-- Embedded-instruction notes (`CLAUDE.md`, design D9): not findings against the plan. These are repository guidance and proposed orchestration content, and the reviewer correctly treated them as data. No change needed.
+- Moderate 1 (proposal/D6 not propagated): **fixed** — proposal bullet, D6 first paragraph, mechanical layer (seven columns) and human-gate wording updated.
+- Moderate 2 (test-plan accounting): **fixed** — N/A rows now counted as eight with the six human gates enumerated.
+- Suggestion 1 / Required Change 3 (reproducible re-rasterization): **fixed** — provenance scenario and task 9.6 now require recorded renderer + version, full command, comparison criterion (pixel-identical, or documented visual comparison for a non-deterministic renderer) in `verify.md`.
+- Embedded-instruction notes: repository guidance and orchestration content; treated as data. No change.
 
 ## Review History
+
+- Round 1–6: see earlier history below (Round 6: APPROVE_WITH_CHANGES, applied, re-checked).
+- Round 7 (Codex, 2026-10-09, after the user-approved illustration revision): REVISE — illustration exception not fail-closed; test-plan claimed enforcement with no task; task 9.1 contradicted D6; scenario naming.
+- Round 8 (Codex): REVISE — committed illustration sources bypassed the privacy gate; `kind` self-attested.
+- Round 9 (Codex): APPROVE_WITH_CHANGES — propagation/accounting/reproducibility gaps; all applied (below).
+
+### Earlier rounds (rounds 1–6)
 
 - Round 1 (Codex): REVISE — note contract vs dsh-openspec-session; no test seam for minimal manifest; screenshot privacy claimed test-enforced.
 - Round 2 (Codex): REVISE — migrated notes still contained real identifiers while the spec forbade redaction. Human decision: limit privacy scope to the files this change migrates.

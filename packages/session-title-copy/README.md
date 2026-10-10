@@ -1,41 +1,46 @@
 # dsh-session-title-copy
 
-在 DSH Web 对话区当前会话标题**右侧**显示 session id 前 6 位短标识徽标（去 `session-` 前缀，如 `session-9af69be9-…` → `9af69b`）；点击徽标复制**完整**当前 session id，hover 显示完整 id 的 tooltip，复制成功出现瞬态「会话 ID 已复制」提示。标题本身保持官方原样（disabled、cursor default）。
+English · [简体中文](README.zh.md)
 
-## 为什么
+<!-- problem -->
+DSH shows a conversation's title but offers no way to grab its session id, which you need for scripts, logs and bug reports. This plugin adds a small six-character badge next to the title; one click copies the full session id.
 
-开发/调试时常需要当前 session id（引用驾驶舱、脚本、日志排查），官方标题是 `disabled` 按钮且 `cursor: default`，没有取 id 的入口。**v0.1.0 曾把标题做成点击复制**，实机反馈：点击前不可感知、复制内容不可见、面包屑作为导航控件点击语义违直觉——因此改为标题旁 6 位识别徽标：看得见、点得准、复制完整 id。零配置、零网络、零 host 端能力。
+![Illustration: a short session-id badge next to the title copies the full id on click](docs/overview.png)
 
-## 行为
+**Install.** Managed through `dsh.yaml` (entry `session-title-copy`, `source: local`): set `enabled: true`, run `dsh build`, then restart DSH. Backlog item B018; designs in the OpenSpec changes `session-title-copy` and `session-title-id-badge`.
 
-- 标题面包屑右侧插入自建徽标（`data-dsh-session-title-copy-badge`）：显示当前 session id 的 6 位短标识（真相源 = 官方 sessions list 的 `current`，与 [dsh-cockpit-bridge](https://github.com/prgrmrwy/dsh-cockpit) 同一订阅 seam）。
-- 点击徽标 → 复制**完整**当前 session id；hover → pointer + 底色 + tooltip 完整 id；复制成功徽标下方出现瞬态提示，1.2s 后淡出。
-- 当前会话标题恢复官方原样：不干预（disabled、cursor default、无点击行为）。
-- 祖先面包屑（历史会话标题）行为不变：点击仍打开对应会话，不复制。
-- 会话切换/标题更新后徽标文本与复制目标跟随新当前 id；无标题（空白会话/hero）时不显示徽标。
-- 安全降级：官方 DOM 结构变化导致无法定位插入点时不注入、不报错；剪贴板 API 不可用/被拒时静默；不发起任何网络请求，不读取/上传任何会话内容。
+## How it behaves
 
-## 机制（升级后需回归）
+- A badge (`data-dsh-session-title-copy-badge`) appears to the right of the current session title. It shows the first 6 characters of the session id without its `session-` prefix, for example `session-9af69be9-…` becomes `9af69b`.
+- The source of truth is `current` in the official sessions list, the same subscription seam the cockpit bridge uses. The badge text and copy target follow session switches and title updates. With no title (a blank session or the hero view) there is no badge.
+- Click copies the **full** current session id. Hover shows a pointer cursor, a background tint and a tooltip with the full id. After a successful copy a transient hint (the Chinese string `会话 ID 已复制`, "session ID copied") appears under the badge for 1.2 s and fades out in 200 ms.
+- The title itself stays official: still `disabled`, cursor default, no click behavior. Earlier breadcrumbs (titles of ancestor sessions) keep opening their session and never copy. Version 0.1.0 made the title itself click-to-copy; that was dropped in 0.1.1 because it was not discoverable and a breadcrumb is a navigation control.
 
-标题 crumb 官方 `disabled`（抑制全部事件流），v0.1.0 曾移除此状态并拦截 click；**v0.1.1 起不再触碰标题**，交互完全落在自建徽标上：
+How it is wired (re-check after DSH upgrades):
 
-1. 定位官方 titleCluster 内面包屑 `nav`（`title-locator.ts`，结构知识单文件）；
-2. 在 `nav` 之后插入自建 `<button>` 徽标（自有标记 + 内联样式 + tooltip 完整 id）；
-3. 点击 → `sessions.list` 的 `current` → `navigator.clipboard.writeText`（完整 id）→ 瞬态提示；
-4. `MutationObserver`（子树/class 变更）+ sessions 订阅 → rAF 防抖 reconcile：存在即更新文本，缺失即重建，无标题区清除残留。
+1. `title-locator.ts` finds the breadcrumb `nav` inside the official title cluster. This is the only file holding knowledge of the official structure.
+2. A self-made `<button>` badge (own marker, inline styles, tooltip with the full id) is inserted after the `nav`.
+3. Click reads `current` from `sessions.list`, calls `navigator.clipboard.writeText`, then shows the hint.
+4. A `MutationObserver` (subtree and class changes) plus the sessions subscription drive a rAF-debounced reconcile: update the text if the badge exists, rebuild it if missing, and remove leftovers when there is no title area.
 
-官方升级改结构时只需修 `src/client/title-locator.ts`（见 openspec change `session-title-id-badge` 设计 D1/D4）。
+## Configuration
 
-## 安装
+None. The plugin row carries no `config` fields; it has no settings, no stored data and no environment variables. To remove it, set `enabled: false` in `dsh.yaml` and sync.
 
-经 ohmydsh manifest（`session-title-copy`，source: local）启用，`dsh build` 物化；重启 DSH 后生效。卸载/禁用：manifest `enabled: false` + sync，无持久化数据。
+## Boundaries & safety
 
-## 开发
+- No network requests, no host-side capability (the host half is an empty entry), and no reading or uploading of conversation content; only the current session id is used.
+- If the official DOM changes and the insertion point cannot be found, nothing is injected and no error is raised. If the clipboard API is unavailable or refused, the plugin stays silent.
+- Peer dependencies: `@deepseek-ai/cordis` and `@deepseek-ai/dsh-api-session-controller` (the web client half uses the latter).
 
-```bash
-npm run typecheck   # host + client 双项目
-npm run build       # tsc(host) + tsdown(client bundle)
-npm test            # vitest（结构桩，无浏览器）
+## Development
+
+Run from the repository root:
+
+```sh
+npm run typecheck --workspace dsh-session-title-copy   # host + client projects
+npm run build --workspace dsh-session-title-copy       # tsc (host) + tsdown (client bundle)
+npm test --workspace dsh-session-title-copy            # vitest, structural stubs, no browser
 ```
 
-peer 依赖：`@deepseek-ai/cordis`、`@deepseek-ai/dsh-client-runtime`（仅 web client half）。
+When the official structure changes, only `src/client/title-locator.ts` should need a fix.

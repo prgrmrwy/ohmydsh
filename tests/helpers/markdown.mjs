@@ -123,6 +123,14 @@ export function cjkRatio(text) {
   return total === 0 ? 0 : cjk / total
 }
 
+/** Text before the first level-two heading outside fences (the whole text when there is none). */
+export function beforeFirstH2(text) {
+  const lines = text.split('\n')
+  const blanked = blankFencedBlocks(text).split('\n')
+  const at = blanked.findIndex((line) => /^##\s/.test(line))
+  return at === -1 ? text : lines.slice(0, at).join('\n')
+}
+
 /** First level-one heading outside fences, or null. */
 export function firstH1(text) {
   for (const line of blankFencedBlocks(text).split('\n')) {

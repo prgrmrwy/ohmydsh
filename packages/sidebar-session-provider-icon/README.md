@@ -1,55 +1,57 @@
 # dsh-sidebar-session-provider-icon
 
-在 DSH Web 侧边栏每个 session 标题前显示该会话**输入框当前选中的模型品牌** logo。模型选择器切换成功后立即更新，不必先发送消息；不干扰官方任务状态点。
+English · [简体中文](README.zh.md)
 
-Backlog 条目：[B013](../../BACKLOG.md)。设计与取舍见 OpenSpec change `sidebar-session-provider-icon`。
+<!-- problem -->
+In the DSH session list every row looks alike, so you cannot tell which model a conversation uses without opening it. This plugin puts the brand logo of the model currently selected in the input box in front of each session title, and updates it the moment you switch models.
 
-## 数据优先级
+![Illustration: each sidebar session row gets a badge for the model selected in that session](docs/overview.png)
 
-1. **即时真相源**：官方 `dsh-client-ui-model-selection` 的 `ctx.modelDirectories.directoryFor(sessionId).store.current`。这是输入框 selector 与 `/model` 命令共享的唯一 per-session state，`session.selectModel` 成功后立即发布 `{ provider, model }`。
-2. **历史 fallback**：Host 的 `provider` session-projection 折叠日志 `request/header`，为尚未在本浏览器打开/加载 selector 的历史会话提供最近一次实际请求的品牌。重启不丢，不使用 localStorage。
+**Install.** Managed through `dsh.yaml` (entry `sidebar-session-provider-icon`, `source: local`): set `enabled: true`, run `dsh build`, then restart DSH. Backlog item B013; the design is in the OpenSpec change `sidebar-session-provider-icon`.
 
-因此，当前打开 session（包括尚未发送消息的空白 session）按输入框选择显示；冷历史 session 在未加载 selector 前按最后请求显示。
+## How it behaves
 
-## 架构
+The logo shown for a session comes from two sources, in this order:
 
-| 面 | 实现 |
+1. **Live selection (preferred).** The official `dsh-client-ui-model-selection` store, read as `ctx.modelDirectories.directoryFor(sessionId).store.current`. It is the single per-session state shared by the input-box selector and the `/model` command, and it publishes `{ provider, model }` as soon as `session.selectModel` succeeds. The open session, including a blank one that has not sent a message yet, therefore follows the input-box selection.
+2. **Last request (cold-history fallback).** A Host `provider` session projection folds the `request/header` events of the session log, so a history session whose selector has not been loaded in this browser still shows the provider of its most recent real request. It survives restarts and uses no `localStorage`.
+
+Brand resolution looks at the provider route first and only then at the model: for example a real selection of `opencode-go/deepseek-v4-flash` shows OpenCode, not DeepSeek. Only unknown or generic routes fall back to the model name, and a selection that matches nothing shows a neutral single-letter badge.
+
+| Layer | Implementation |
 |---|---|
-| Host | `src/provider.ts` 注册 `provider` projection，折叠 `request/header`，只承担冷历史 fallback |
-| Client 数据 | 订阅 `ctx.modelDirectories` 的 per-session store；selector 选择优先于 projection fallback |
-| Client DOM | `row-locator.ts` 收拢官方行 DOM 知识；`MutationObserver` 只在标题前维护独立 badge span |
-| 品牌图 | `src/client/assets/*.svg` 下载后随包落盘；`logos.ts` 先识别已知 provider route，未知 route 再按 model fallback |
+| Host | `src/provider.ts` registers the `provider` projection (it requires the `sessionProjections` service) and folds `request/header`; it only serves the cold-history fallback |
+| Client data | Subscribes to the per-session stores of `ctx.modelDirectories`; the selector choice wins over the projection fallback |
+| Client DOM | `row-locator.ts` holds all knowledge of the official row DOM; a `MutationObserver` maintains a separate badge `<span>` in front of the title |
+| Brand art | `src/client/assets/*.svg`, downloaded once and bundled; `logos.ts` matches known provider routes first, then the model |
 
-## 品牌资产
+## Configuration
 
-不手绘 SVG，也不在浏览器运行时访问 CDN：
+None. The plugin row carries no `config` fields and the package reads no environment variables.
 
-- DeepSeek（鲸鱼）、OpenAI/GPT（螺旋）、Anthropic、Grok、Kimi、GLM（智谱）、MiniMax、Pi、OpenClaw、Hermes Agent（兼容 `hermas` 拼写）：`@lobehub/icons-static-svg@1.94.0`，MIT；
-- OpenCode：`anomalyco/opencode` commit `5e75e5e9901f0d178f425bfb47f1bd46cbe78a59` 的官方 provider SVG，MIT。
+Brand art is pinned and vendored, never hand-drawn and never fetched from a CDN at runtime:
 
-品牌判断优先识别已知 `provider` route：例如真实选择 `opencode-go/deepseek-v4-flash` 显示 OpenCode，而不是 DeepSeek；只有未知/通用 route 才按 `model` fallback。未知选择显示中性首字母 fallback。
+- DeepSeek, OpenAI/GPT, Anthropic, Grok, Kimi, GLM (Zhipu), MiniMax, Pi, OpenClaw and Hermes Agent (the misspelling `hermas` is also accepted): `@lobehub/icons-static-svg@1.94.0`, MIT.
+- OpenCode: the official provider SVG from `anomalyco/opencode` at commit `5e75e5e9901f0d178f425bfb47f1bd46cbe78a59`, MIT.
 
-## UI 边界
+Per-file source URLs and SHA-256 checksums are listed in [`src/client/assets/README.md`](src/client/assets/README.md).
 
-- **不触碰官方 `StateDot`**：不替换、不移动、不隐藏；
-- 时间、行菜单、拖拽行为保持官方原样；
-- badge 是标题前的独立 `<span>`；
-- DOM 无法可靠定位时静默降级为不显示，不破坏页面。
+## Boundaries & safety
 
-## 开发
+- The official `StateDot` is never replaced, moved or hidden; times, row menus and drag behavior stay official.
+- The badge is a standalone `<span>` in front of the title. If the row DOM cannot be located reliably, the plugin silently shows nothing and leaves the page intact.
+- No network requests of its own: the logos ship with the bundle and the data comes from DSH's own stores and session log.
+- Code is MIT-licensed ([LICENSE](LICENSE)). Brand owners retain their trademark rights; the marks only identify the selected provider route and imply no endorsement.
 
-依赖由仓库根 workspace 统一安装，`lib/` 是 gitignored 构建产物：
+## Development
+
+Dependencies are installed once from the repository root; `lib/` is a gitignored build artifact. Run from the repository root:
 
 ```sh
-# 在仓库根执行
 npm install
 npm run typecheck --workspace dsh-sidebar-session-provider-icon
 npm test --workspace dsh-sidebar-session-provider-icon
 npm run build --workspace dsh-sidebar-session-provider-icon
 ```
 
-直接运行 `dsh build` / sync 时，也会在安装 local package 前按需生成 `lib/`。
-
-## License
-
-代码 MIT，见 [LICENSE](LICENSE)。品牌资产库/上游仓库许可见上文；各品牌方保留商标权利。
+`dsh build` / sync also builds `lib/` on demand before installing this local package.

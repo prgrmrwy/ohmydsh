@@ -56,3 +56,34 @@ Known out-of-scope residue (per the 2026-10-09 human scope decision), recorded f
 | license | pass |
 
 - Process note: the Lead briefly ran a stash/checkout while only meaning to re-run a test; the stash was empty and the working tree was then re-verified (anchors, SVG sizes, full suite) before commit.
+
+### P3 · Package READMEs, bitmaps, community docs (tasks 8–10)
+
+- Full suite after P3 (Lead, serial): `npm test` → 421 tests, 419 pass, 0 fail, 2 skipped (pre-existing). `npm run check:artifacts` → compliant. `openspec validate --strict` → valid.
+- Scope change during P3 (user-approved 2026-10-09, re-reviewed through anvil rounds 7–9, see review.md): the isolated instance has no model credentials, so five packages could not be screenshotted. The tiering and screenshot-registry requirements now allow `kind=illustration` for exactly `worktree-session`, `dsh-openspec`, `sidebar-session-provider-icon`, `session-title-copy`, `session-links`. Registry is seven columns (`file`, `kind`, `source`, `date`, `reviewer`, `verdict`, `note`).
+- **Screenshot provenance (task 9.6, `kind=screenshot`).** `dsh-pet`, `dsh-memex`, `system-clock`, `home-network-model-guard` were captured from an isolated DSH instance: temporary `HOME`/`XDG_*`/`DSH_HOME` under `/tmp`, port 3199 (never 3080), run under `unshare -Ur --uts` with hostname `demo-host` (the system-clock capture itself shows `DSH 主机 · demo-host`), `DSH_LOCAL_MANIFEST` pointed at a nonexistent file so no private overlay was read, headless Chrome over CDP at 1440×900. Cleanup confirmed by the teammate and re-checked by the Lead: the instance and Chrome jobs were killed, `/tmp/gfr-shots` removed, no scratch dir left in the worktree, port 3080 untouched. Known cosmetic caveat: the dsh-pet capture shows emoji glyphs as boxes (the machine has no color-emoji font and installing one needs sudo); accepted.
+- **Bitmap privacy gate (task 9.2), Lead viewed every bitmap.** screenshots: dsh-pet (Settings → Pet general tab) pass; dsh-memex (Settings → 记忆; paths are `/tmp/gfr-shots/...` only) pass; system-clock pass; home-network-model-guard (Settings → 出口守卫 verdict page) pass. No real hostname, user, path, email, token or session title visible in any. The home-network-model-guard capture shows the settings page, not the disabled composer; the alt text was corrected to match.
+- **Illustration source-file privacy gate and provenance (tasks 9.5, 9.6), source checked.** For each of the five illustrations the Lead read `overview.svg`: no `<metadata>`, `<image>`, `<script>`, `<foreignObject>`, `href`, hidden/`display:none`/zero-opacity elements; one leading comment each; no paths, emails, URLs, ids or tokens (grep). Text is synthetic (`demo-app`, `example.com`, `provider-a`, `session-9af69b3e-demo-0001`); no real brand logos are embedded. Re-rasterization by the Lead with the command on line 1 of each `overview.render.txt` (renderer Google Chrome 152.0.7977.64, fonts DejaVu Sans / DejaVu Sans Mono, from the repo root) was byte-identical (cmp) to the committed PNG for all five: worktree-session 126372 B, dsh-openspec 127928 B, sidebar-session-provider-icon 115253 B, session-title-copy 84773 B, session-links 117618 B. Criterion: byte identity (stricter than pixel identity). Rendering depends on the listed system fonts.
+
+| Package | Tier | Bitmap kind | Source checked | Gate verdict |
+|---|---|---|---|---|
+| dsh-pet | A | screenshot | n/a | pass |
+| dsh-memex | A | screenshot | n/a | pass |
+| worktree-session | A | illustration | yes | pass |
+| dsh-openspec | A | illustration | yes | pass |
+| system-clock | B | screenshot | n/a | pass |
+| home-network-model-guard | B | screenshot | n/a | pass |
+| sidebar-session-provider-icon | B | illustration | yes | pass |
+| session-title-copy | B | illustration | yes | pass |
+| session-links | B | illustration | yes | pass |
+
+- **Lead manual gate 10.8 — per-package problem statement and bilingual sign-off** (Lead read every `<!-- problem -->` paragraph in README.md and README.zh.md):
+
+| Package | Conclusion |
+|---|---|
+| dsh-pet, dsh-memex, worktree-session, dsh-openspec | pass — states the user problem plainly; zh matches en; alt text now describes the real image |
+| sidebar-session-provider-icon, session-title-copy, system-clock, session-links, home-network-model-guard | pass — same |
+| subscriptions-sandbox-shim, cockpit-worktree-open-shim, cockpit-memex-browse-shim | pass — problem + `Removal` section present in both languages |
+
+- Teammate-reported corrections accepted by the Lead: stale statements fixed in package READMEs (dsh-pet Lark channel now unified Locus; six settings tabs; own `pet-sqlite` backend; `LOCUS_WRITE_ENABLED=false`; worktree-session hooks `agent/created`; dsh-openspec options live in the profile patch `config`; bridge pin 0.6.4; presets README reflects DSH 0.2 declaration rows; guard config keys read once at load need a restart). One spec/implementation gap noted by a teammate and left for follow-up: `openspec/specs/session-links` mentions a tab badge that `src/client/index.tsx` does not register.
+- Contact address `prgrmr@163.com` remains in `SECURITY.md` and `CODE_OF_CONDUCT.md` (it is the maintainer's public contact carried over from the originals; to be confirmed by the user before merge).
