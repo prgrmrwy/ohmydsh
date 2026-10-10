@@ -4,7 +4,7 @@
  * No path in this file is hand-drawn. SVG sources are pinned and vendored in
  * `assets/` so the sidebar never fetches a CDN at runtime:
  * - DeepSeek/OpenAI/Anthropic/Grok/Kimi/GLM/MiniMax/Pi/OpenClaw/Hermes/Trae/
- *   Qwen/Hunyuan/LongCat/MiMo/Gemini/Nvidia/Meta/AntGroup:
+ *   Qwen/Hunyuan/LongCat/MiMo/Gemini/Nvidia/Meta/AntGroup/OpenRouter/ByteDance:
  *   @lobehub/icons-static-svg 1.94.0 (MIT)
  * - OpenCode: anomalyco/opencode commit 5e75e5e… (MIT)
  *
@@ -30,6 +30,8 @@ import geminiSvg from './assets/gemini.svg'
 import nvidiaSvg from './assets/nvidia.svg'
 import metaSvg from './assets/meta.svg'
 import antgroupSvg from './assets/antgroup.svg'
+import openrouterSvg from './assets/openrouter.svg'
+import bytedanceSvg from './assets/bytedance.svg'
 
 /** Badge side length for the injected SVG (also the composite footprint). */
 export const BADGE_SIZE = 14
@@ -40,7 +42,7 @@ const SUB_ICON_OFFSET = -4
 const UNKNOWN_FILL = '#8a9199'
 
 export type BrandKey = 'deepseek' | 'openai' | 'opencode' | 'anthropic' | 'grok' | 'kimi' | 'glm' | 'minimax' | 'pi' | 'openclaw' | 'hermes' | 'trae'
-  | 'qwen' | 'hunyuan' | 'longcat' | 'mimo' | 'gemini' | 'nvidia' | 'meta' | 'antgroup'
+  | 'qwen' | 'hunyuan' | 'longcat' | 'mimo' | 'gemini' | 'nvidia' | 'meta' | 'antgroup' | 'openrouter' | 'bytedance'
 
 /** Normalize opaque route/model ids without guessing display names. */
 export function normalizeIdentity(value: string): string {
@@ -97,6 +99,8 @@ export function modelBrandOf(model: string): BrandKey | undefined {
   if (picked.includes('mimo')) return 'mimo'
   if (picked.includes('gemini') || picked.startsWith('gemma')) return 'gemini'
   if (picked.includes('nemotron')) return 'nvidia'
+  if (picked.startsWith('openrouter-')) return 'openrouter'
+  if (picked.startsWith('seed-')) return 'bytedance'
   if (picked.startsWith('muse-spark') || picked.includes('llama')) return 'meta'
   if (/^(?:ling|ring)-/.test(picked)) return 'antgroup'
   return undefined
@@ -149,6 +153,8 @@ const LOGOS: Record<BrandKey, string> = {
   nvidia: nvidiaSvg,
   meta: metaSvg,
   antgroup: antgroupSvg,
+  openrouter: openrouterSvg,
+  bytedance: bytedanceSvg,
 }
 
 /**

@@ -17,6 +17,8 @@
 | `pi.svg` | `https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.94.0/icons/pi.svg` | `@lobehub/icons-static-svg@1.94.0` | MIT | `d82978781b824273c55473822c1f243a6ed34fc6e8c2dbfe1a90dfc66ae43ee8` |
 | `openclaw.svg` | `https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.94.0/icons/openclaw-color.svg` | `@lobehub/icons-static-svg@1.94.0` | MIT | `4123c0c75dda5b28e3e0d38075514085bf546178a620776344813c08fa41277c` |
 | `hermes.svg` | `https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.94.0/icons/hermesagent.svg` | `@lobehub/icons-static-svg@1.94.0` | MIT | `02d43c0a91fc2ee41f2684fc39613ff6687de29a4b079665bace5303671dd63b` |
+| `openrouter.svg` | `https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.94.0/icons/openrouter-color.svg` | `@lobehub/icons-static-svg@1.94.0` | MIT | `17bede1b89166f824ee06753dc526a3f5e18b769706deaab09d04a3a98de1a78` |
+| `bytedance.svg` | `https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.94.0/icons/bytedance-color.svg` | `@lobehub/icons-static-svg@1.94.0` | MIT | `3d37647be262c79b044e293bb1a4993202537e9f9ffdbd2bbe7e9fc5378d1005` |
 | `opencode.svg` | `https://raw.githubusercontent.com/anomalyco/opencode/5e75e5e9901f0d178f425bfb47f1bd46cbe78a59/packages/ui/src/assets/icons/provider/opencode.svg` | commit `5e75e5e9901f0d178f425bfb47f1bd46cbe78a59` | MIT | `018a85654f13635373dc283ecc27928fa4e001c06cde47f7efa1cbcab567b51c` |
 
 品牌所有者保留其商标权利。这些标识仅用于标明所选的 provider/model 路线，不代表任何背书。

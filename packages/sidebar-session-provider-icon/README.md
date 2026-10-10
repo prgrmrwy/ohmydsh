@@ -24,7 +24,8 @@ Brand resolution has two independent dimensions: the provider route picks the **
 |---|---|
 | `claude/claude-opus-5`, `codex/gpt-6-luna`, `deepseek-official/deepseek-v4-pro` (same vendor) | a single Anthropic / OpenAI / DeepSeek logo |
 | `opencode-go/deepseek-v4-flash`, `opencode-go/qwen3.8-flash`, `opencode-go/kimi-k2.7-code` | OpenCode, with DeepSeek / Qwen / Kimi in the corner |
-| `traex/GPT-5.6-Sol[1m]` | Trae, with OpenAI in the corner |
+| `traex/GPT-5.6-Sol[1m]`, `traex/DeepSeek-V4-Flash`, `traex/Gemini-3.1-Pro-Preview` | Trae, with OpenAI / DeepSeek / Gemini in the corner |
+| `traex/openrouter-3o[1m]`, `traex/Seed-2.1-Pro-0915` | Trae, with OpenRouter / ByteDance in the corner |
 | known route + unrecognized model (e.g. `opencode-go/omen-alpha`) | the route logo only, no corner logo |
 | unknown or generic route | a single logo from the model name; if that also fails, a neutral single-letter badge |
 
@@ -50,10 +51,10 @@ Recognized brands:
 
 | Dimension | Brands |
 |---|---|
-| provider and model | DeepSeek, OpenAI/GPT/Codex, Anthropic/Claude, Grok/xAI, Kimi/Moonshot, GLM (Zhipu), MiniMax, Pi, OpenClaw, Hermes Agent (the misspelling `hermas` is also accepted), OpenCode, Qwen, Tencent Hunyuan (`hy3`, `hy4-*`), Meituan LongCat, Xiaomi MiMo, Gemini/Gemma, NVIDIA (Nemotron), Meta (Muse Spark, Llama), Ant Group (Ling/Ring) |
+| provider and model | DeepSeek, OpenAI/GPT/Codex, Anthropic/Claude, Grok/xAI, Kimi/Moonshot, GLM (Zhipu), MiniMax, Pi, OpenClaw, Hermes Agent (the misspelling `hermas` is also accepted), OpenCode, Qwen, Tencent Hunyuan (`hy3`, `hy4-*`), Meituan LongCat, Xiaomi MiMo, Gemini/Gemma, NVIDIA (Nemotron), Meta (Muse Spark, Llama), Ant Group (Ling/Ring), OpenRouter, ByteDance Seed |
 | provider only | Trae (`trae`, `trae-ai`, `traex*`; exact name or prefix, never a substring) |
 
-The model dimension covers every model family in the OpenCode Go / Zen catalogs whose vendor can be identified (sampled from the `opencode-go.json` / `opencode.json` catalogs bundled with pi-ai).
+The model dimension covers every identifiable model family in the OpenCode Go / Zen catalogs, plus the GPT, DeepSeek, Gemini, OpenRouter and ByteDance Seed families in the current TraeX catalog.
 
 Brand art is pinned and vendored, never hand-drawn and never fetched from a CDN at runtime:
 
