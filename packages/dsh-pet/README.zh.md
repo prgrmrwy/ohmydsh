@@ -2,10 +2,12 @@
 
 [English](README.md) · 简体中文
 
+![DSH 网页界面：右下角的 Pet 小助手及其展开的 Pet tasks 面板，旁边是一个演示会话](docs/overview.png)
+
+![DSH 设置 → Pet：General 页签中的 Pet 跟随的模型、执行会话预设与外观选项](docs/settings.png)
+
 <!-- problem -->
 清理 worktree、在群里回答同事的提问这类杂事，通常要么打断你正在开发的会话，要么得手动把上下文贴进一个新会话。Pet 是 DSH 网页里一只常驻的悬浮小助手：它在另一个独立会话里替你办这些事，依据的是你当时所看内容的一份冻结快照，所以你的开发会话保持干净，每一步操作也都可追溯。
-
-![DSH 设置 → Pet：Pet 跟随的模型、执行会话预设与外观选项](docs/overview.png)
 
 **你能得到什么**
 
