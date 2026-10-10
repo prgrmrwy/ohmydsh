@@ -33,5 +33,5 @@
 - [x] 6.1 包版本 0.1.2 → 0.1.3；CHANGELOG 增加 0.1.3；README 品牌资产与「品牌判断」段落说明复合 icon 与 Trae
 - [x] 6.2 `dsh.yaml` 条目 version 0.1.3，note 补充复合 icon 与 Trae
 - [x] 6.3 运行根 `npm test`、`npm run check:artifacts`；`node scripts/sync.mjs` 连续两次，第二次无变化（根 npm test 360 例中 7 例 dsh-openspec sync 用例失败，未改动基线同样失败，与本 change 无关；合入 main ad6e99c 后从主 checkout sync：首轮重装 0.1.3，第二轮 no changes，dsh-openspec source-checkout 仍指向主 checkout）
-- [ ] 6.4 刷新 http://127.0.0.1:3080 实机核对：同品牌行单 logo；opencode-go / traex 行复合 icon；切换模型即时更新；子图标未被行容器裁剪、hover/选中与深浅主题下可辨认；StateDot/时间/菜单位置不变
-- [ ] 6.5 `openspec validate sidebar-provider-icon-composite-model-badge --strict` 通过后归档
+- [x] 6.4 刷新 http://127.0.0.1:3080 实机核对：同品牌行单 logo；opencode-go / traex 行复合 icon；切换模型即时更新；子图标未被行容器裁剪、hover/选中与深浅主题下可辨认；StateDot/时间/菜单位置不变（0.1.3 实机反馈子图标过小、OpenCode 模型品牌不全 → 第 5 组修订；0.1.4 部署后用户刷新确认通过）
+- [x] 6.5 `openspec validate sidebar-provider-icon-composite-model-badge --strict` 通过后归档
