@@ -9,7 +9,19 @@ English · [简体中文](README.zh.md)
 <!-- problem -->
 In the DSH session list every row looks alike, so you cannot tell which model a conversation uses without opening it. This plugin puts the brand logo of the model currently selected in the input box in front of each session title, and updates it the moment you switch models. When the provider and the model come from different vendors (for example `opencode-go/deepseek-v4-flash`), the provider logo carries a small model logo in its bottom-right corner.
 
-**Install.** Managed through `dsh.yaml` (entry `sidebar-session-provider-icon`, `source: local`): set `enabled: true`, run `dsh build`, then restart DSH. Current behavior is specified in [`openspec/specs/sidebar-session-provider-icon`](../../openspec/specs/sidebar-session-provider-icon/spec.md); design history lives in the archived changes [`sidebar-session-provider-icon`](../../openspec/changes/archive/2026-08-21-sidebar-session-provider-icon/) and [`sidebar-provider-icon-composite-model-badge`](../../openspec/changes/archive/2026-10-10-sidebar-provider-icon-composite-model-badge/).
+**Install.** DeepSeek Harness `0.2.0-rc.2`, Node.js `>=22.19`.
+
+```sh
+# from npm — prebuilt, no build approval
+dsh plugin --profile web add dsh-sidebar-session-provider-icon
+
+# or straight from source — builds locally, approve the build when dsh asks
+dsh plugin --profile web add prgrmrwy/dsh-sidebar-session-provider-icon
+```
+
+Restart DSH and refresh the Web page. Nothing else is needed: no configuration, no network access, and no files written outside the DSH profile that installs it.
+
+In the ohmydsh repository this plugin is wired through the `dsh.yaml` entry `sidebar-session-provider-icon` (`source: local`), so a source change there only needs `dsh build` and a restart. Current behavior is specified in [`openspec/specs/sidebar-session-provider-icon`](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/sidebar-session-provider-icon/spec.md); design history lives in the archived changes [`sidebar-session-provider-icon`](https://github.com/prgrmrwy/ohmydsh/tree/main/openspec/changes/archive/2026-08-21-sidebar-session-provider-icon) and [`sidebar-provider-icon-composite-model-badge`](https://github.com/prgrmrwy/ohmydsh/tree/main/openspec/changes/archive/2026-10-10-sidebar-provider-icon-composite-model-badge).
 
 ## How it behaves
 
@@ -70,19 +82,19 @@ To add a brand: put the SVG in `src/client/assets/`, record source, pin, license
 - The official `StateDot` is never replaced, moved or hidden; times, row menus and drag behavior stay official.
 - The badge is a standalone `<span>` in front of the title. If the row DOM cannot be located reliably, the plugin silently shows nothing and leaves the page intact.
 - No network requests of its own: the logos ship with the bundle and the data comes from DSH's own stores and session log.
-- Code is MIT-licensed ([LICENSE](LICENSE)). Brand owners retain their trademark rights; the marks only identify the selected provider route and model and imply no endorsement.
+- Code is MIT-licensed ([LICENSE](LICENSE)). The brand icons are vendored from MIT-licensed upstreams; their copyright notices, the exact rendering changes, and the trademark position are in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Brand owners retain their trademark rights; the marks only identify the selected provider route and model and imply no endorsement.
 
 ## Development
 
-Dependencies are installed once from the repository root; `lib/` is a gitignored build artifact. Run from the repository root:
+`lib/` is a gitignored build artifact. In a standalone checkout:
 
 ```sh
 npm install
-npm run typecheck --workspace dsh-sidebar-session-provider-icon
-npm test --workspace dsh-sidebar-session-provider-icon
-npm run build --workspace dsh-sidebar-session-provider-icon
+npm run typecheck
+npm test
+npm run build
 ```
 
-`dsh build` / sync also builds `lib/` on demand before installing this local package; refresh the Web page to pick up a new client bundle.
+In the ohmydsh monorepo this package is a workspace member: install once at the repository root and add `--workspace dsh-sidebar-session-provider-icon` to the last three commands. `dsh build` / sync also builds `lib/` on demand before installing the local package; refresh the Web page to pick up a new client bundle.
 
 Under vitest, small SVGs are inlined as data URLs with attribute quotes rewritten to `'`. Any regex that rewrites SVG attributes must accept both `"` and `'`.
