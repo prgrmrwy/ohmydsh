@@ -169,7 +169,6 @@ tests/                   仓库级测试
 - [llm-subscriptions](https://github.com/V1ki/dsh-plugin-subscriptions) — 增加订阅制 provider（Codex、Claude、Grok、Copilot），可在输入框切换。
 - [width-tiers](https://github.com/aaronlei/dsh-width-tiers) — 在五档之间切换对话区宽度。
 - [better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) — 把侧边栏变成服务化的多标签工作台。
-- [skin-center](https://github.com/zhu1090093659/dsh-skins) — 增加主题、自定义主题与壁纸的设置页。
 - [dsh-opencode-session-header](https://github.com/beihzb/dsh-opencode-session-header) — 发送 OpenCode Go 要求的会话头，修复缺少会话 ID 的报错。
 
 ### 官方可选

@@ -19,3 +19,22 @@
 ## 0.1.2 — 2026-08-21
 
 - 按真实 GUI 对齐反馈调整图标间距为仅左侧 4px；新增 Kimi、GLM（智谱）、MiniMax、Pi、OpenClaw、Hermes Agent 的固定品牌资产和 route/model 映射；Hermes 同时兼容用户输入的 `hermas` 别名。
+
+## 0.1.3 — 2026-10-10
+
+- 复合 icon：provider route 与 model id 分别识别出**不同**已知品牌时，主图为 provider 品牌、右下角叠加 7px model 品牌子图标（9px 圆底 + 淡描边，`Canvas` 底色随深浅主题）；同品牌、model 不可识别或 route 未知时仍为单一 logo。外框保持 14×14，行布局不变；tooltip 不变。
+- 新增 Trae 品牌资产（`@lobehub/icons-static-svg@1.94.0`，MIT），`trae` / `traex*` / `trae-ai` route 映射到 Trae；此前 `traex/GPT-*` 经 model fallback 误显示 OpenAI。
+- 子图标内 SVG 的内部 id 与 `url(#…)` 引用加后缀，避免与同页其它副本串用定义。
+- 对应 openspec change `sidebar-provider-icon-composite-model-badge`。
+
+## 0.1.4 — 2026-10-10
+
+### Real-GUI feedback revision
+
+- 子图标去掉圆底、描边与内边距，改为裸 glyph，尺寸 7px → 10px，向右下溢出 4px；14×14 外框不变，行布局不变。
+- 按 OpenCode Go / Zen 模型目录补齐 model 品牌：Qwen、混元（`hy3` / `hy4-*`）、LongCat、小米 MiMo、Gemini、NVIDIA（Nemotron）、Meta（Muse Spark / Llama）、蚂蚁（Ling/Ring）。对应 provider route（`qwen-token-plan*`、`xiaomi-token-plan*`、`google`、`nvidia`、`ant-ling` 等）同样映射。资产均为 `@lobehub/icons-static-svg@1.94.0`（MIT）。
+- 目录中没有可识别厂商的模型（如 `omen-alpha`、`big-pickle`）仍只显示 OpenCode 单 logo。
+
+## 0.1.5 — 2026-10-10
+
+- 按当前 TraeX 目录补齐 model 子图标：`openrouter-*` 使用 OpenRouter，`Seed-*` 使用 ByteDance；既有 GPT、DeepSeek、Gemini 映射继续复用。主图始终保持 Trae。
