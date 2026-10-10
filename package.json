@@ -35,7 +35,7 @@
     "test:tap": "DSH_LOCAL_MANIFEST=/nonexistent/ohmydsh-test-isolation/dsh.yaml.local node --test --test-reporter=tap tests/*.test.mjs"
   },
   "devDependencies": {
-    "js-yaml": "^4.1.0",
+    "js-yaml": "^5.4.3",
     "jsdom": "^26.1.0",
     "semver": "^7.8.5",
     "unrun": "^0.3.1",
