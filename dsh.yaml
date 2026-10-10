@@ -318,6 +318,14 @@ customizations:
     brief: OpenCode Go 注入 x-opencode-session(修复 400 MissingSessionID;仅作用于 opencode.ai)
     note: '第三方 https://github.com/beihzb/dsh-opencode-session-header(MIT;非官方社区插件,0.1.0 为目前唯一版本、新仓单提交),修 OpenCode Go 自 2026-09-05 起强制 x-opencode-session 头导致的 400 MissingSessionID;官方适配(discussions #5495)合入后移除。信任面(2026-09-09 通读 npm 0.1.0 的 lib/index.js,262 行,零运行时依赖):在 Host 进程全局 patch fetch,仅当请求 host 命中白名单(默认 opencode.ai 及子域)才注入该头,其余字节不改;无外发网络/子进程/文件写入/凭据读取。开关 $DSH_HOME/plugins/dsh-opencode-session-header.json({"enabled":false} 即关,免重启)。升级复核:逐行复读发布物。移除:enabled:false → dsh build。'
 
+  # 纯配置调优：经官方 gateway 配置放宽大历史传输时的心跳容忍。
+  - id: websocket-heartbeat
+    type: patch
+    enabled: true
+    mergeConfig: true
+    brief: DSH WebSocket 每 5 秒检查一次心跳，连续两次未响应后断开
+    note: '原厂 @deepseek-ai/dsh-api-gateway 的 typert-gateway 配置覆盖，不修改上游代码、不由 cockpit bridge 接管连接。websocketHeartbeatIntervalMs:5000，连续漏响应次数保持原厂 2，约容忍 10–15 秒；只作用于 DSH WebSocket，不改变 SSH 保活或 Cockpit 健康检查。mergeConfig 保留其他运行时配置。升级复核：确认官方行 id、字段与漏响应策略仍兼容。回滚：enabled:false → dsh build，由 sync 所有权机制恢复原值。'
+
   # 组合补丁(非包):修复 DSH 0.1.5 的 Connection RPC channel 注册缺陷
   - id: connection-webserver
     type: patch

@@ -12,4 +12,6 @@
 1. **纯调优片段**：无代码、只改 composition（如启用某工具行、调整配置）；
 2. **对 remote 包的覆盖**：个人配置覆盖片段，按 id 与 remote 定制对应（如 `cost-meter.yml` 会覆盖 cost-meter 的配置行）。
 
-sync 按 manifest 顺序把 enabled 的 patch 片段合并进 profile 的 `cordis.patch.yml`（带 generated 标记头，覆盖 `~/.dsh` 手改）。当前的片段是 `connection-webserver.yml`，用纯 composition 修复 DSH 0.1.5 的 Connection RPC channel 注册缺陷；其退休条件记录在对应的 manifest 条目中。
+sync 按 manifest 顺序将 enabled 的片段应用到 profile 的 `cordis.patch.yml`，维护自身生成区段和显式所有的键，保留其他运行时配置。`connection-webserver.yml` 用纯 composition 修复 DSH 0.1.5 的 Connection RPC channel 注册缺陷；其退休条件记录在对应的 manifest 条目中。
+
+`websocket-heartbeat.yml` 将官方 DSH gateway 的心跳间隔设为 5000ms；连续漏响应阈值仍为原厂两次，约 10–15 秒后断开。manifest 使用 `mergeConfig: true` 保留其他配置；禁用该条目后执行 `dsh build`，由 sync 撤回其所有的键。它不改变 SSH 保活或 Cockpit 健康检查。
