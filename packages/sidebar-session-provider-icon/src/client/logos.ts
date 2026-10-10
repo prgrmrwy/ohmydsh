@@ -3,7 +3,7 @@
  *
  * No path in this file is hand-drawn. SVG sources are pinned and vendored in
  * `assets/` so the sidebar never fetches a CDN at runtime:
- * - DeepSeek/OpenAI/Anthropic/Grok/Kimi/GLM/MiniMax/Pi/OpenClaw/Hermes:
+ * - DeepSeek/OpenAI/Anthropic/Grok/Kimi/GLM/MiniMax/Pi/OpenClaw/Hermes/Trae:
  *   @lobehub/icons-static-svg 1.94.0 (MIT)
  * - OpenCode: anomalyco/opencode commit 5e75e5e… (MIT)
  *
@@ -20,12 +20,18 @@ import openaiSvg from './assets/openai.svg'
 import openclawSvg from './assets/openclaw.svg'
 import opencodeSvg from './assets/opencode.svg'
 import piSvg from './assets/pi.svg'
+import traeSvg from './assets/trae.svg'
 
-/** Badge side length for the injected SVG. */
+/** Badge side length for the injected SVG (also the composite footprint). */
 export const BADGE_SIZE = 14
+/** Composite sub-icon glyph and its round backing plate. */
+export const SUB_ICON_SIZE = 7
+const SUB_PLATE_SIZE = 9
+/** How far the plate overhangs the primary logo's bottom-right corner. */
+const SUB_PLATE_OFFSET = -3
 const UNKNOWN_FILL = '#8a9199'
 
-export type BrandKey = 'deepseek' | 'openai' | 'opencode' | 'anthropic' | 'grok' | 'kimi' | 'glm' | 'minimax' | 'pi' | 'openclaw' | 'hermes'
+export type BrandKey = 'deepseek' | 'openai' | 'opencode' | 'anthropic' | 'grok' | 'kimi' | 'glm' | 'minimax' | 'pi' | 'openclaw' | 'hermes' | 'trae'
 
 /** Normalize opaque route/model ids without guessing display names. */
 export function normalizeIdentity(value: string): string {
@@ -33,17 +39,16 @@ export function normalizeIdentity(value: string): string {
 }
 
 /**
- * Resolve a brand from the exact model selection. A recognized provider route
- * wins: `opencode-go/deepseek-v4-flash` is the OpenCode provider, not the
- * DeepSeek official provider. Model identity is only a fallback for generic or
- * otherwise unknown compatible routes.
+ * Brand of the provider route alone. Routes are matched before any model
+ * hint: `opencode-go/deepseek-v4-flash` is served by OpenCode, not DeepSeek.
+ * Trae is matched exactly/by prefix because `trae` is a common substring.
  */
-export function brandKeyOf(provider: string, model: string): BrandKey | undefined {
+export function providerBrandOf(provider: string): BrandKey | undefined {
   const route = normalizeIdentity(provider)
-  const picked = normalizeIdentity(model)
   if (route.includes('openclaw')) return 'openclaw'
   if (route.includes('hermes') || route.includes('hermas') || route.includes('nousresearch') || route === 'nous') return 'hermes'
   if (route.includes('opencode')) return 'opencode'
+  if (route === 'trae' || route === 'trae-ai' || route.startsWith('traex')) return 'trae'
   if (route.includes('deepseek')) return 'deepseek'
   if (route.includes('anthropic') || route.includes('claude')) return 'anthropic'
   if (route.includes('grok') || route === 'xai') return 'grok'
@@ -52,6 +57,12 @@ export function brandKeyOf(provider: string, model: string): BrandKey | undefine
   if (route.includes('z-ai') || route.includes('zai') || route.includes('zhipu') || route === 'glm') return 'glm'
   if (route.includes('minimax')) return 'minimax'
   if (route === 'pi' || route === 'pi-ai') return 'pi'
+  return undefined
+}
+
+/** Brand of the model id alone (Trae is a provider, never a model vendor). */
+export function modelBrandOf(model: string): BrandKey | undefined {
+  const picked = normalizeIdentity(model)
   if (picked.includes('openclaw')) return 'openclaw'
   if (picked.includes('hermes') || picked.includes('hermas') || picked.includes('nousresearch')) return 'hermes'
   if (picked.includes('opencode')) return 'opencode'
@@ -66,6 +77,32 @@ export function brandKeyOf(provider: string, model: string): BrandKey | undefine
   return undefined
 }
 
+/**
+ * Primary brand of the selection: a recognized provider route wins; model
+ * identity is only a fallback for generic or otherwise unknown routes.
+ */
+export function brandKeyOf(provider: string, model: string): BrandKey | undefined {
+  return providerBrandOf(provider) ?? modelBrandOf(model)
+}
+
+/** Primary logo plus the optional bottom-right model sub-icon. */
+export interface BadgeBrands {
+  readonly primary: BrandKey | undefined
+  readonly secondary: BrandKey | undefined
+}
+
+/**
+ * Decide single vs composite. A sub-icon appears only when the route is a
+ * known brand AND the model is a different known brand; an unknown route has
+ * no second identity to show, so it stays a single model-brand logo.
+ */
+export function badgeBrands(provider: string, model: string): BadgeBrands {
+  const route = providerBrandOf(provider)
+  const picked = modelBrandOf(model)
+  if (route === undefined) return { primary: picked, secondary: undefined }
+  return { primary: route, secondary: picked !== undefined && picked !== route ? picked : undefined }
+}
+
 const LOGOS: Record<BrandKey, string> = {
   deepseek: deepseekSvg,
   openai: openaiSvg,
@@ -78,18 +115,30 @@ const LOGOS: Record<BrandKey, string> = {
   pi: piSvg,
   openclaw: openclawSvg,
   hermes: hermesSvg,
+  trae: traeSvg,
 }
 
-/** Normalize bundler text/data-url forms, then size without editing the downloaded path. */
-function sizedSvg(imported: string): string {
-  const raw = imported.startsWith('data:image/svg+xml,')
+/**
+ * Normalize bundler text/data-url forms, then size without editing the
+ * downloaded paths. `idSuffix` renames internal gradient/clip ids (and their
+ * `url(#…)` references) so a nested copy never resolves another copy's defs.
+ */
+function sizedSvg(imported: string, size: number = BADGE_SIZE, idSuffix: string = ''): string {
+  let raw = imported.startsWith('data:image/svg+xml,')
     ? decodeURIComponent(imported.slice('data:image/svg+xml,'.length))
     : imported
+  if (idSuffix !== '') {
+    // Quote style varies: the bundler's text loader keeps `"`, while Vite's
+    // inline data-url form (used under vitest) rewrites attributes to `'`.
+    raw = raw
+      .replace(/\sid=(["'])([^"']+)\1/g, (_m, q: string, id: string) => ` id=${q}${id}${idSuffix}${q}`)
+      .replace(/url\(#([^)]+)\)/g, (_m, id: string) => `url(#${id}${idSuffix})`)
+  }
   return raw.replace(/<svg\b[^>]*>/, (tag) => {
     const withoutSize = tag
       .replace(/\s(?:width|height)=(?:"[^"]*"|'[^']*')/g, '')
       .replace(/\sstyle=(?:"[^"]*"|'[^']*')/g, '')
-    return withoutSize.replace('<svg', `<svg width="${BADGE_SIZE}" height="${BADGE_SIZE}" aria-hidden="true" style="display:block;color:currentColor"`)
+    return withoutSize.replace('<svg', `<svg width="${size}" height="${size}" aria-hidden="true" style="display:block;color:currentColor"`)
   })
 }
 
@@ -100,10 +149,23 @@ function escapeHtml(text: string): string {
   }[char] ?? char))
 }
 
-/** Render downloaded brand SVG, or a neutral letter for a genuinely unknown route. */
+/**
+ * Primary logo with a shrunken model sub-icon on a round plate overhanging
+ * the bottom-right corner. The outer box stays BADGE_SIZE square so the row
+ * layout is identical to a single logo. The plate uses the `Canvas` system
+ * colour (follows color-scheme) plus a currentColor-tinted ring, so it stays
+ * distinct on hover/selected backgrounds without binding to host CSS vars.
+ */
+function compositeHTML(primary: BrandKey, secondary: BrandKey): string {
+  const plate = `position:absolute;right:${SUB_PLATE_OFFSET}px;bottom:${SUB_PLATE_OFFSET}px;width:${SUB_PLATE_SIZE}px;height:${SUB_PLATE_SIZE}px;border-radius:50%;background:Canvas;box-shadow:0 0 0 1px color-mix(in srgb,currentColor 25%,transparent);display:flex;align-items:center;justify-content:center`
+  return `<span data-composite="" style="position:relative;display:block;width:${BADGE_SIZE}px;height:${BADGE_SIZE}px">${sizedSvg(LOGOS[primary])}<span data-sub-brand="${secondary}" style="${plate}">${sizedSvg(LOGOS[secondary], SUB_ICON_SIZE, '-sub')}</span></span>`
+}
+
+/** Render downloaded brand SVG(s), or a neutral letter for a genuinely unknown route. */
 export function badgeInnerHTML(provider: string, model: string): string {
-  const key = brandKeyOf(provider, model)
-  if (key !== undefined) return sizedSvg(LOGOS[key])
+  const { primary, secondary } = badgeBrands(provider, model)
+  if (primary !== undefined && secondary !== undefined) return compositeHTML(primary, secondary)
+  if (primary !== undefined) return sizedSvg(LOGOS[primary])
   const letter = normalizeIdentity(model || provider).slice(0, 1).toUpperCase() || '?'
   return `<span style="display:inline-flex;align-items:center;justify-content:center;width:${BADGE_SIZE}px;height:${BADGE_SIZE}px;border-radius:4px;background:${UNKNOWN_FILL};color:#fff;font-size:9px;line-height:1;font-weight:600">${escapeHtml(letter)}</span>`
 }
