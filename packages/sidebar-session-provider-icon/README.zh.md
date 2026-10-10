@@ -9,7 +9,19 @@ DSH 的会话列表里每一行看起来都一样，不打开会话就分不清�
 
 ![示意图：徽标的数据来源，以及 route 如何变成徽标](docs/overview.png)
 
-**安装。** 通过 `dsh.yaml` 管理（条目 `sidebar-session-provider-icon`，`source: local`）：设为 `enabled: true`，运行 `dsh build`，然后重启 DSH。当前行为见规范 [`openspec/specs/sidebar-session-provider-icon`](../../openspec/specs/sidebar-session-provider-icon/spec.md)；设计演进见归档的 change [`sidebar-session-provider-icon`](../../openspec/changes/archive/2026-08-21-sidebar-session-provider-icon/) 和 [`sidebar-provider-icon-composite-model-badge`](../../openspec/changes/archive/2026-10-10-sidebar-provider-icon-composite-model-badge/)。
+**安装。** 需要 DeepSeek Harness `0.2.0-rc.2`、Node.js `>=22.19`。
+
+```sh
+# 从 npm 安装：预构建，无需构建授权
+dsh plugin --profile web add dsh-sidebar-session-provider-icon
+
+# 或直接从源码安装：本地构建，dsh 请求授权时确认即可
+dsh plugin --profile web add prgrmrwy/dsh-sidebar-session-provider-icon
+```
+
+重启 DSH 并刷新 Web 页面。除此之外不需要任何东西：无配置项、不访问网络、除安装它的 DSH profile 外不写任何文件。
+
+在 ohmydsh 仓库里，本插件通过 `dsh.yaml` 的条目 `sidebar-session-provider-icon`（`source: local`）接入，因此在该仓库改源码只需 `dsh build` 再重启。当前行为见规范 [`openspec/specs/sidebar-session-provider-icon`](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/sidebar-session-provider-icon/spec.md)；设计演进见归档的 change [`sidebar-session-provider-icon`](https://github.com/prgrmrwy/ohmydsh/tree/main/openspec/changes/archive/2026-08-21-sidebar-session-provider-icon) 和 [`sidebar-provider-icon-composite-model-badge`](https://github.com/prgrmrwy/ohmydsh/tree/main/openspec/changes/archive/2026-10-10-sidebar-provider-icon-composite-model-badge)。
 
 ## 行为
 
@@ -70,19 +82,19 @@ model 维度覆盖 OpenCode Go / Zen 模型目录里所有能确认厂商的模�
 - 官方 `StateDot` 不会被替换、移动或隐藏；时间、行菜单和拖拽行为保持官方原样。
 - badge 是标题前的独立 `<span>`。DOM 无法可靠定位时，插件静默不显示，不破坏页面。
 - 自身不发起网络请求：logo 随 bundle 提供，数据来自 DSH 自己的 store 与会话日志。
-- 代码为 MIT 许可（[LICENSE](LICENSE)）。品牌方保留其商标权利；这些标识只用于标明所选的 provider route 和 model，不暗示任何背书。
+- 代码为 MIT 许可（[LICENSE](LICENSE)）。品牌图标来自 MIT 许可的上游；其版权声明、渲染时的确切改动与商标立场见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。品牌方保留其商标权利；这些标识只用于标明所选的 provider route 和 model，不暗示任何背书。
 
 ## 开发
 
-依赖在仓库根目录统一安装；`lib/` 是被 git 忽略的构建产物。在仓库根目录运行：
+`lib/` 是被 git 忽略的构建产物。独立检出时：
 
 ```sh
 npm install
-npm run typecheck --workspace dsh-sidebar-session-provider-icon
-npm test --workspace dsh-sidebar-session-provider-icon
-npm run build --workspace dsh-sidebar-session-provider-icon
+npm run typecheck
+npm test
+npm run build
 ```
 
-`dsh build` / sync 也会在安装本 local package 之前按需生成 `lib/`；刷新 Web 页面即可加载新的 client bundle。
+在 ohmydsh monorepo 里本包是 workspace 成员：在仓库根目录安装一次，后三条命令加上 `--workspace dsh-sidebar-session-provider-icon`。`dsh build` / sync 也会在安装本 local package 之前按需生成 `lib/`；刷新 Web 页面即可加载新的 client bundle。
 
 vitest 下小 SVG 会被内联成 data URL，属性引号会被改成 `'`。改写 SVG 属性的正则要同时兼容 `"` 和 `'`。

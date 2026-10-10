@@ -3,6 +3,28 @@
   "version": "0.1.5",
   "description": "Show each sidebar session's currently selected model brand logo, updating immediately from the composer selector with a durable last-request fallback",
   "license": "MIT",
+  "author": "prgrmrwy",
+  "homepage": "https://github.com/prgrmrwy/dsh-sidebar-session-provider-icon#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/prgrmrwy/dsh-sidebar-session-provider-icon.git"
+  },
+  "bugs": {
+    "url": "https://github.com/prgrmrwy/dsh-sidebar-session-provider-icon/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek",
+    "plugin",
+    "sidebar",
+    "session",
+    "model",
+    "provider",
+    "icon",
+    "logo"
+  ],
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -22,7 +44,10 @@
     "lib",
     "cordis.patch.yml",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "THIRD-PARTY-NOTICES.md",
+    "docs",
+    "!docs/publishing-and-discovery.md"
   ],
   "dsh": {
     "bundle": {
