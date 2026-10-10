@@ -78,14 +78,14 @@
 
 ## 11. P4 · Manifest notes
 
-- [ ] 11.1 Write failing tests (MN): `every enabled customization has a brief ≤80 and note ≤600 code points`; `oversized note is reported with id and length`; `dsh-openspec note keeps upstream/license/telemetry/credential/upgrade/removal`
-- [ ] 11.2 Write `scripts/maintenance/manifest-structure-diff.mjs <base>` and failing test MN `structure-diff reports a changed version path and exits non-zero`; implement until it passes
-- [ ] 11.3 Merge latest `main` into the task branch first; record `<base>` = HEAD
-- [ ] 11.4 Implement: slim every `note` to source/license or change + trust surface + upgrade checkpoint + rollback; remove per-version history comments; add missing `brief`s
-- [ ] 11.5 Run `node scripts/maintenance/manifest-structure-diff.mjs <base>`; confirm `structure unchanged`; record in `verify.md`
-- [ ] 11.6 Implement: update `openspec/changes/upgrade-dsh-0-2-0-runtime/tasks.md` task 7.1 to follow the new note form
-- [ ] 11.7 Run `node scripts/sync.mjs` twice against an isolated `DSH_HOME`; confirm the second run reports no changes
-- [ ] 11.8 Refactor; full suite green → **P4 phase acceptance + commit**
+- [x] 11.1 Write failing tests (MN): `every enabled customization has a brief ≤80 and note ≤600 code points`; `oversized note is reported with id and length`; `dsh-openspec note keeps upstream/license/telemetry/credential/upgrade/removal`
+- [x] 11.2 Write `scripts/maintenance/manifest-structure-diff.mjs <base>` and failing test MN `structure-diff reports a changed version path and exits non-zero`; implement until it passes
+- [x] 11.3 Merge latest `main` into the task branch first; record `<base>` = HEAD (main has not moved; no merge needed; `<base>` = `be87a7a7a8bd75c1fa314f469e2199d030b7907f`)
+- [x] 11.4 Implement: slim every `note` to source/license or change + trust surface + upgrade checkpoint + rollback; remove per-version history comments; add missing `brief`s
+- [x] 11.5 Run `node scripts/maintenance/manifest-structure-diff.mjs <base>`; confirm `structure unchanged`; record in `verify.md`
+- [x] 11.6 Implement: update `openspec/changes/upgrade-dsh-0-2-0-runtime/tasks.md` task 7.1 to follow the new note form
+- [x] 11.7 Run `node scripts/sync.mjs` twice against an isolated `DSH_HOME`; confirm the second run reports no changes
+- [x] 11.8 Refactor; full suite green → **P4 phase acceptance + commit**
 
 ## 12. P5 · Final review and closure
 
