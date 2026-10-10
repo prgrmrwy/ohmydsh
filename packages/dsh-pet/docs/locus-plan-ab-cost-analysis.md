@@ -527,7 +527,7 @@ grep -rl "parentSessionId\|mainSessionId" test/ → 57 文件 / 23,283 行
 
 | 编号 | 标题 | 状态 | 与方案 B 的关系 |
 |---|---|---|---|
-| **B036** | 拉 bot/建群不应有任何 locus 副作用，整棵树按首个 @ 构建 | **已完成**（2026-09-15，22/22 任务） | 其"要点"明述：两阶段 provisioning 分离是为"发布失败时有可回滚的资源句柄"，**改按需创建需要重新设计失败补偿** —— 与 `createIdleContinuable` 退役是同一条（README:126） |
+| **`pet-locus-on-demand-tree`**（原 BACKLOG B036） | 拉 bot/建群不应有任何 locus 副作用，整棵树按首个 @ 构建 | **已完成**（2026-09-15，22/22 任务） | 其"要点"明述：两阶段 provisioning 分离是为"发布失败时有可回滚的资源句柄"，**改按需创建需要重新设计失败补偿** —— 与 `createIdleContinuable` 退役是同一条（README:126） |
 | **B040** | provisioning 失败补偿只在 Host 重启时跑，运行中永久阻塞同一 endpoint | 想法 / **P1** | 根因：`findBlockingProvisioningOperation`（`persistence.ts:3124`）只排除 `committed`/`compensated`，`failed` 仍阻塞；唯一转 `compensated` 的路径 `reconcileStartup`（`persistence.ts:2735`）只在启动时跑。**影响全部 provisioning kind**，含 `replaceAutomaticGroupParent`（改绑）—— 方案 B 的 `/bind` 反转必然经过这条路径 |
 | **B039** | 清理旧 QA 模型的死代码 | 想法 / P2 | `src/host/qa/`（9 文件）+ `channel/pipeline.ts` 共 **~2336 行**未被 `index.ts` 装配。其中 `qa/command.ts:16` 的 `BIND_VERB` 与 `pipeline.ts:104,305` 的 `bindCommand` 都在 `/bind` 的 grep 结果里 —— 会**虚增**方案 B 的改动面估算 |
 
@@ -654,7 +654,7 @@ DSH 不会再代为传播。
 
 #### 直接证据（文档明述该模式）**[实测]**
 
-`grep -rn "单测全绿\|测试全绿\|全绿却\|本地测试全绿" docs/architecture/` → **3 处**：
+`grep -rn "单测全绿\|测试全绿\|全绿却\|本地测试全绿" <former notes directory>/` → **3 处**：
 
 | 出处 | 原句 |
 |---|---|
@@ -960,6 +960,6 @@ wc -l host/locus/{switch-notice,retirement,reconcile,startup-recovery,expiry-sch
 grep -rn "archiv" packages/dsh-pet/src/host/locus/*.ts | wc -l                     # → 108
 
 # §4.1 风险
-grep -rn "单测全绿\|测试全绿\|全绿却" docs/architecture/                                    # → 3
+grep -rn "单测全绿\|测试全绿\|全绿却" <former notes directory>/                                    # → 3
 grep -n '^| [A-G] ' openspec/changes/archive/2026-09-19-pet-locus-delivery-safety-hardening/checking/live-acceptance.md  # → 7 用例
 ```

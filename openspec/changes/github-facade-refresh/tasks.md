@@ -89,6 +89,6 @@
 
 ## 12. P5 · Final review and closure
 
-- [ ] 12.1 Fresh-context reviewer teammate does a read-only full review of the diff against specs and design; Lead fixes every finding
-- [ ] 12.2 Run `npm test`, `npm run check:artifacts`, `openspec validate github-facade-refresh --strict`; flip every test-plan row to 🟢 or confirm its N/A check ran green
-- [ ] 12.3 Write `verify.md`; request user confirmation before `scripts/ws-merge.mjs`
+- [x] 12.1 Fresh-context reviewer teammate does a read-only full review of the diff against specs and design; Lead fixes every finding
+- [x] 12.2 Run `npm test`, `npm run check:artifacts`, `openspec validate github-facade-refresh --strict`; flip every test-plan row to 🟢 or confirm its N/A check ran green
+- [x] 12.3 Write `verify.md`; request user confirmation before `scripts/ws-merge.mjs`

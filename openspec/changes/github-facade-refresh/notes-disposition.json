@@ -79,7 +79,8 @@
       "target": "openspec/changes/upgrade-dsh-0-2-0-runtime/checking/cockpit-bridge-061-deployment.md",
       "manualRedactions": [
         {
-          "find": "TraeX",
+          "findSha256": "e7836ae011aaa4d0cfcd4bb82f86b2482d7052d19b587fe3f32c179db0806fd5",
+          "length": 5,
           "replace": "<internal-bridge>"
         }
       ],
@@ -113,7 +114,8 @@
       "target": "packages/dsh-memex/docs/integration-notes.md",
       "manualRedactions": [
         {
-          "find": "（acme `a872997→324df92`、flow-web `a15a053→4685b0b`，",
+          "findSha256": "834d0d445a2cd2c3a1599c0702b4d8f4253a50794e144fc79a9c90d4c4155574",
+          "length": 51,
           "replace": "（两个私有仓库，"
         }
       ],
@@ -138,11 +140,13 @@
       "target": "docs/architecture/dsh-plugin-integration-pitfalls.md",
       "manualRedactions": [
         {
-          "find": "赵鸿珂",
+          "findSha256": "8a923d43877117926a684d29a931cec621a8b9ef250a26368f1affb1130f5271",
+          "length": 3,
           "replace": "<member>"
         },
         {
-          "find": "小小芒果",
+          "findSha256": "a5e81ec255940759267700509fb8ca36a4c047291c490136292c37acc8ac3f2d",
+          "length": 4,
           "replace": "<bot>"
         }
       ],
@@ -185,19 +189,23 @@
       "target": "openspec/changes/archive/2026-09-19-pet-locus-delivery-safety-hardening/checking/live-acceptance.md",
       "manualRedactions": [
         {
-          "find": "张勇",
+          "findSha256": "de156ba09c762cf82e7f624ef95aeb409120a40b81ed11819dd6d8898691f256",
+          "length": 2,
           "replace": "<member>"
         },
         {
-          "find": "小小芒果",
+          "findSha256": "a5e81ec255940759267700509fb8ca36a4c047291c490136292c37acc8ac3f2d",
+          "length": 4,
           "replace": "<bot>"
         },
         {
-          "find": "答疑 · 伙伴对话调整2期",
+          "findSha256": "3fa6caa1106471570030b1bc12af116527f357141419c6d4a0c6520f8ed4af0b",
+          "length": 13,
           "replace": "<production Q&A chat>"
         },
         {
-          "find": "ou_322…",
+          "findSha256": "b3cc2dcb13bcf306b1c7e233dd74a3b1cbc47e97416db1fb0229736103f722e1",
+          "length": 7,
           "replace": "ou_<redacted>"
         }
       ],
@@ -232,19 +240,23 @@
       "target": "openspec/changes/archive/2026-09-15-pet-locus-on-demand-tree/checking/live-acceptance.md",
       "manualRedactions": [
         {
-          "find": "小小芒果",
+          "findSha256": "a5e81ec255940759267700509fb8ca36a4c047291c490136292c37acc8ac3f2d",
+          "length": 4,
           "replace": "<bot>"
         },
         {
-          "find": "session-b2f11bae",
+          "findSha256": "1fb8bdff2094d59920b566f123e5324b2c6025d39576cc1af39e5414cb2576ea",
+          "length": 16,
           "replace": "session-<redacted>"
         },
         {
-          "find": "b2f11b",
+          "findSha256": "3dcbfb555b105dcd2aa2f47feccc309e316f8bdb5778c6ed7da4d52ad94fcdd0",
+          "length": 6,
           "replace": "<prefix>"
         },
         {
-          "find": "4629eb",
+          "findSha256": "50517eb1daf6538e2957e8e91e383d14985e246d43285cd634bdc6f9540ce051",
+          "length": 6,
           "replace": "<prefix>"
         }
       ],
@@ -259,21 +271,26 @@
       "target": "packages/dsh-pet/docs/locus-plan-ab-cost-analysis.md",
       "manualRedactions": [
         {
-          "find": "session-85620d77",
+          "findSha256": "496a3d73976fe6d938b85bd0a956dcf6807d218882c382a820b498bdbc98df00",
+          "length": 16,
           "replace": "session-<redacted>"
-        },
-        {
-          "find": "本地测试全绿\" docs/notes/",
-          "replace": "本地测试全绿\" docs/architecture/"
-        },
-        {
-          "find": "全绿却\" docs/notes/",
-          "replace": "全绿却\" docs/architecture/"
         }
       ],
       "reason": "ADR-0006/0007 的成本依据，无单一 change 归属，只与 dsh-pet 相关",
       "autoRedact": true,
-      "h1": "Pet Locus 方案 A/B 可量化维护成本对比"
+      "h1": "Pet Locus 方案 A/B 可量化维护成本对比",
+      "pathRewrites": [
+        {
+          "from": "docs/notes/",
+          "to": "<former notes directory>/",
+          "where": "inside recorded grep commands only; the recorded hit counts and line numbers describe the original location"
+        },
+        {
+          "from": "| **B036** |",
+          "to": "| **`pet-locus-on-demand-tree`**（原 BACKLOG B036） |",
+          "where": "one table cell: the BACKLOG id was pruned after the change landed, so the archived change name replaces it (final-review M1)"
+        }
+      ]
     },
     {
       "n": 19,
@@ -282,11 +299,13 @@
       "target": "openspec/changes/archive/2026-09-15-pet-locus-multi-binding/checking/spike-findings.md",
       "manualRedactions": [
         {
-          "find": "infra-service/",
+          "findSha256": "4647a080bc384c4f6366578a3261b01b1edfe5c7bc2696237de41715457b867a",
+          "length": 14,
           "replace": "<private-service>/"
         },
         {
-          "find": "acme-t581-…",
+          "findSha256": "c5a9992519f6d50953d1789798bbf036fdee1007584251163aaf6055b85578f1",
+          "length": 11,
           "replace": "acme-<ticket>-…"
         }
       ],
@@ -311,7 +330,8 @@
       "target": "openspec/changes/archive/2026-09-19-pet-mention-open-id-and-asker-name/notes.md",
       "manualRedactions": [
         {
-          "find": "张勇",
+          "findSha256": "de156ba09c762cf82e7f624ef95aeb409120a40b81ed11819dd6d8898691f256",
+          "length": 2,
           "replace": "<member>"
         }
       ],
@@ -346,7 +366,8 @@
       "target": "openspec/changes/upgrade-dsh-0-2-0-runtime/checking/devbox-validation.md",
       "manualRedactions": [
         {
-          "find": "set_sh_devbox_proxy",
+          "findSha256": "4ad0d7f6ed7001444ae1926530a860ad25f9370d8f0e37c5271aa91045ac382e",
+          "length": 19,
           "replace": "<proxy-helper>"
         }
       ],
@@ -361,11 +382,13 @@
       "target": "BACKLOG.md",
       "manualRedactions": [
         {
-          "find": "session-74d5d367",
+          "findSha256": "cc23d48151e9a190c8582d572a45ef7b38086bbdb057a33c2592756547c9c43c",
+          "length": 16,
           "replace": "session-<redacted>"
         },
         {
-          "find": ".worktrees/user-001-prgrmr-163-com",
+          "findSha256": "1ad24eddc80258b564896ebe565b69b90cab488d39ffefe3f9529824fb3f30ce",
+          "length": 34,
           "replace": ".worktrees/<worktree>"
         }
       ],
@@ -374,5 +397,6 @@
       "backlogId": "D008"
     }
   ],
-  "redactionScope": "all-non-deleted"
+  "redactionScope": "all-non-deleted",
+  "manualRedactionsNote": "Literals are intentionally not stored: each item is identified by sha256(utf8) and its length in code points. Tests and notes-migration-diff.mjs find a hit by hashing every window of that length on a line (case-sensitive, exact). To register a new item, hash it (e.g. node -e \"console.log(require('crypto').createHash('sha256').update(process.argv[1]).digest('hex'))\" '<literal>') and add {findSha256, length, replace}; never commit the literal."
 }

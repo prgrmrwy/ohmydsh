@@ -7,7 +7,7 @@ DSH shows a conversation's title but offers no way to grab its session id, which
 
 ![Illustration: a short session-id badge next to the title copies the full id on click](docs/overview.png)
 
-**Install.** Managed through `dsh.yaml` (entry `session-title-copy`, `source: local`): set `enabled: true`, run `dsh build`, then restart DSH. Backlog item B018; designs in the OpenSpec changes `session-title-copy` and `session-title-id-badge`.
+**Install.** Managed through `dsh.yaml` (entry `session-title-copy`, `source: local`): set `enabled: true`, run `dsh build`, then restart DSH. Designs in the OpenSpec changes `session-title-copy` and `session-title-id-badge`.
 
 ## How it behaves
 

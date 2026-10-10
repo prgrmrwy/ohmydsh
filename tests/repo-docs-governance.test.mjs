@@ -20,7 +20,7 @@ import {
   resolveLinkTarget,
   trackedFiles,
 } from './helpers/markdown.mjs'
-import { applyAutoRedaction, applyManualRedactions } from '../scripts/maintenance/notes-migration-diff.mjs'
+import { applyAutoRedaction, applyManualRedactions, countManualMatches, sha256Hex } from '../scripts/maintenance/notes-migration-diff.mjs'
 
 const ENTRY_DOCS = ['README.md', 'CLAUDE.md', 'CONTRIBUTING.md']
 const read = (file) => readFileSync(path.join(REPO, file), 'utf8')
@@ -227,6 +227,11 @@ test('a duplicated note title is reported (fixture)', () => {
   assert.match(problems[0], /b\/copy\.md/)
 })
 
+/** A registered manual item as stored in the disposition file: hash + length, never the literal. */
+function manualItem(literal, replace = '<x>') {
+  return { findSha256: sha256Hex(literal), length: Array.from(literal).length, replace }
+}
+
 /** Auto-rule and registered-item hits in `text`, as `file:line: label`. */
 function redactionHits(file, text, rules, manual) {
   const hits = []
@@ -235,16 +240,10 @@ function redactionHits(file, text, rules, manual) {
       if (new RegExp(rule.pattern).test(line)) hits.push(`${file}:${index + 1}: ${rule.category}`)
     }
     for (const item of manual) {
-      if (line.includes(item.find)) hits.push(`${file}:${index + 1}: manual ${JSON.stringify(item.find)}`)
+      if (countManualMatches(line, item) > 0) hits.push(`${file}:${index + 1}: manual item sha256 ${item.findSha256.slice(0, 12)}…`)
     }
   })
   return hits
-}
-
-/** Text of the two defect entries appended to BACKLOG.md for the `backlog` rows. */
-function backlogEntries(text) {
-  const blocks = text.split(/^(?=### \[)/m).filter((block) => /^### \[D\d+\]/.test(block))
-  return blocks.filter((block) => /sync|ws clean|Worktree Session/.test(block.split('\n')[0]) && /migrated|迁自|docs\/notes/.test(block)).join('\n')
 }
 
 test('migrated targets contain no redaction-rule matches or registered manual items', () => {
@@ -266,8 +265,9 @@ test('migrated targets contain no redaction-rule matches or registered manual it
 
 test('redaction scan reports file, line and rule category (fixture)', () => {
   const rules = [{ category: 'lark-user-id', pattern: 'ou_[0-9a-f]{16,}' }]
-  const hits = redactionHits('t.md', 'ok\nsee ou_0123456789abcdef0123 and 张勇', rules, [{ find: '张勇' }])
-  assert.deepEqual(hits, ['t.md:2: lark-user-id', 't.md:2: manual "张勇"'])
+  const item = manualItem('Example Person')
+  const hits = redactionHits('t.md', 'ok\nsee ou_0123456789abcdef0123 and Example Person', rules, [item])
+  assert.deepEqual(hits, ['t.md:2: lark-user-id', `t.md:2: manual item sha256 ${item.findSha256.slice(0, 12)}…`])
 })
 
 test('auto and manual redaction helpers replace every occurrence', () => {
@@ -277,7 +277,9 @@ test('auto and manual redaction helpers replace every occurrence', () => {
   ]
   const out = applyAutoRedaction('/Users/x/a ou_0123456789abcdef0123 ou_0123456789abcdef0123', rules)
   assert.equal(out, '~/a ou_<redacted> ou_<redacted>')
-  assert.equal(applyManualRedactions('张勇 and 张勇', [{ find: '张勇', replace: '<member>' }]), '<member> and <member>')
+  assert.equal(applyManualRedactions('Example Person and Example Person', [manualItem('Example Person', '<member>')]), '<member> and <member>')
+  assert.equal(applyManualRedactions('no match here', [manualItem('Example Person', '<member>')]), 'no match here')
+  assert.equal(applyManualRedactions('不同的字符 张 mixed', [manualItem('不同的字符', 'X')]), 'X 张 mixed')
 })
 
 async function diffFixture({ targetBody, manual }) {
@@ -291,7 +293,7 @@ async function diffFixture({ targetBody, manual }) {
   run('config', 'user.email', 't@example.com')
   run('config', 'user.name', 't')
   await mkdir(path.join(root, 'old-notes'), { recursive: true })
-  await writeFile(path.join(root, 'old-notes/a.md'), '# Title\n\nline one 张勇\nline two\n')
+  await writeFile(path.join(root, 'old-notes/a.md'), '# Title\n\nline one Example Person\nline two\n')
   run('add', '.')
   run('commit', '-q', '-m', 'base')
   const base = run('rev-parse', 'HEAD')
@@ -312,13 +314,13 @@ async function diffFixture({ targetBody, manual }) {
 test('notes-migration-diff flags an unregistered body edit', async () => {
   const bad = await diffFixture({
     targetBody: '> Migrated from old-notes/a.md.\n# Title\n\nline one <member>\nline TWO changed\n',
-    manual: [{ find: '张勇', replace: '<member>' }],
+    manual: [manualItem('Example Person', '<member>')],
   })
   assert.notEqual(bad.status, 0)
   assert.match(bad.stdout + bad.stderr, /line TWO changed/)
   const good = await diffFixture({
     targetBody: '> Migrated from old-notes/a.md.\n# Title\n\nline one <member>\nline two\n',
-    manual: [{ find: '张勇', replace: '<member>' }],
+    manual: [manualItem('Example Person', '<member>')],
   })
   assert.equal(good.status, 0, good.stdout + good.stderr)
   assert.match(good.stdout, /registered manual/)

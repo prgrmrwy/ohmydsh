@@ -7,7 +7,7 @@ DSH 的会话列表里每一行看起来都一样，不打开会话就分不清�
 
 ![示意图：侧边栏每个会话行都有一个标识该会话所选模型的徽标](docs/overview.png)
 
-**安装。** 通过 `dsh.yaml` 管理（条目 `sidebar-session-provider-icon`，`source: local`）：设为 `enabled: true`，运行 `dsh build`，然后重启 DSH。Backlog 条目 B013；设计见 OpenSpec change `sidebar-session-provider-icon`。
+**安装。** 通过 `dsh.yaml` 管理（条目 `sidebar-session-provider-icon`，`source: local`）：设为 `enabled: true`，运行 `dsh build`，然后重启 DSH。设计见 OpenSpec change `sidebar-session-provider-icon`。
 
 ## 行为
 

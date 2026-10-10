@@ -7,7 +7,7 @@
 
 ![示意图：长对话中的链接被收集到一个按类别分组的「文档/资料」面板](docs/overview.png)
 
-**安装。** 通过 `dsh.yaml` 管理（条目 `session-links`，`source: local`）：设为 `enabled: true`，运行 `dsh build`，然后重启 DSH。它依赖第三方 `better-sidebar` 插件（`dsh-better-sidebar`，peer `>=0.16.0`，可选）：没有它时本插件完全不激活。Backlog 条目 B020；设计见 OpenSpec change `session-links-panel`。
+**安装。** 通过 `dsh.yaml` 管理（条目 `session-links`，`source: local`）：设为 `enabled: true`，运行 `dsh build`，然后重启 DSH。它依赖第三方 `better-sidebar` 插件（`dsh-better-sidebar`，peer `>=0.16.0`，可选）：没有它时本插件完全不激活。设计见 OpenSpec change `session-links-panel`。
 
 ## 行为
 

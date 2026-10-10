@@ -7,7 +7,7 @@ DSH 会显示对话标题，却没有办法取到会话 id，而脚本、日志�
 
 ![示意图：标题旁的 session id 短标识徽标，点击即复制完整 id](docs/overview.png)
 
-**安装。** 通过 `dsh.yaml` 管理（条目 `session-title-copy`，`source: local`）：设为 `enabled: true`，运行 `dsh build`，然后重启 DSH。Backlog 条目 B018；设计见 OpenSpec change `session-title-copy` 与 `session-title-id-badge`。
+**安装。** 通过 `dsh.yaml` 管理（条目 `session-title-copy`，`source: local`）：设为 `enabled: true`，运行 `dsh build`，然后重启 DSH。设计见 OpenSpec change `session-title-copy` 与 `session-title-id-badge`。
 
 ## 行为
 
