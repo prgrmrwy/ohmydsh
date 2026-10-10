@@ -107,6 +107,6 @@
 
 ## 7. 收尾
 
-- [ ] 7.1 把每个第三方插件的最终 pin、审查与回滚说明写回 `dsh.yaml` note
+- [ ] 7.1 在 `dsh.yaml` note 中记录每个第三方插件的最终 pin 与不超过 600 code point 的审查摘要（来源与许可、信任面、升级复核点、回滚），写法遵循 repo-layout spec「manifest 条目说明以人读摘要为准」；详细审查证据保留在本 change 的 `checking/` 目录或 design/verify 中
 - [ ] 7.2 写入轻量验收报告到 `checking/`（不含原始数据、密钥和批量截图），更新相关 docs/architecture
 - [ ] 7.3 请用户确认后归档本 change，同步 current specs
