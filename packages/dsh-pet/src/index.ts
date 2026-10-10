@@ -3768,7 +3768,7 @@ async function initialize(
  *
  * The shape is `assistant/message` events carrying
  * `data.message.content[]` (verified against a real log; see
- * docs/notes/dsh-plugin-integration-pitfalls.md §4), where the readable
+ * docs/architecture/dsh-plugin-integration-pitfalls.md §4), where the readable
  * answer is the `text` parts —
  * `reasoning` and `tool-call` parts sit in the same array and must not be
  * sent to a chat. Returns `undefined` rather than guessing when nothing

@@ -11,8 +11,8 @@
 
 ## 3. 文档与部署
 
-- [x] 3.1 更新 `docs/notes/dsh-memex-integration.md` 中关于 `agent/turn-stopping` 的描述，说明 `inject` 会让同一回合多跑一步，因此改为在下一回合的 pre-step 追加；如有必要，同步更新 `packages/dsh-memex/README.md`。验证：在两份文档里 grep `turn-stopping`，确认措辞与新行为一致。
-- [x] 3.2 在 `docs/notes/dsh-plugin-integration-pitfalls.md` 增加一条：在 `turn-stopping` 中 `inject`/`steer` 会延长当前回合，并抢走最终回复的位置。验证：该条目存在，并引用了本 change。
+- [x] 3.1 更新 `packages/dsh-memex/docs/integration-notes.md` 中关于 `agent/turn-stopping` 的描述，说明 `inject` 会让同一回合多跑一步，因此改为在下一回合的 pre-step 追加；如有必要，同步更新 `packages/dsh-memex/README.md`。验证：在两份文档里 grep `turn-stopping`，确认措辞与新行为一致。
+- [x] 3.2 在 `docs/architecture/dsh-plugin-integration-pitfalls.md` 增加一条：在 `turn-stopping` 中 `inject`/`steer` 会延长当前回合，并抢走最终回复的位置。验证：该条目存在，并引用了本 change。
 - [ ] 3.3 运行仓库级检查 `npm test`、`npm run check:artifacts`、`node scripts/sync.mjs`，然后再跑一次 `node scripts/sync.mjs`，确认没有新的变化。验证：各命令退出码为 0，第二次 sync 无变更。
   - 已完成：`npm run check:artifacts` 通过；dsh-memex 包内 vitest 355/355、typecheck、`check:descriptions` 通过；`npm test` 为 252 通过 / 1 失败，**同一个失败用例（`scoped package metadata goes through npm with profile auth`）在未改动代码的 main 基线上同样失败**，单独运行该文件则通过，属于既有的整套运行时问题，与本变更无关。
   - 未完成（刻意留给用户）：对真实 `~/.dsh` 执行 `node scripts/sync.mjs` 及第二次幂等验证——这会改动线上部署，需要在用户的 DSH 空闲时进行。

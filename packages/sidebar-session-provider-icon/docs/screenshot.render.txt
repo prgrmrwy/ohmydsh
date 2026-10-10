@@ -1,0 +1,3 @@
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --disable-gpu --hide-scrollbars --force-device-scale-factor=2 --window-size=780,400 --screenshot=packages/sidebar-session-provider-icon/docs/screenshot.png file://$PWD/packages/sidebar-session-provider-icon/docs/screenshot.svg
+renderer: Google Chrome 155.0.8059.39 (macOS); fonts: PingFang SC / -apple-system (system); run from the repository root
+source: screenshot.svg embeds, per row, the verbatim badgeInnerHTML(provider, model) output of src/client/logos.ts (0.1.4) inside the badge wrapper that src/client/index.ts injects; session titles and the workspace name are synthetic

@@ -1,10 +1,15 @@
-# patches/ — 纯 composition 片段与覆盖
+# patches/ — pure composition fragments and overrides
 
-文件名 `<id>.yml`,内容为 loader patch 行(patch-list YAML,`!!js` 允许)。
+English · [简体中文](README.zh.md)
 
-两种用途:
+<!-- problem -->
+Some DSH tweaks need no code at all, only a change to the composition: enabling a tool row, adjusting a setting, or working around a runtime defect. This directory holds those loader-patch fragments, so such tweaks stay declarative, reviewable and removable.
 
-1. **纯调优片段**:无代码、只改 composition(如启用某工具行、调整配置);
-2. **对 remote 包的覆盖**:个人配置覆盖片段,按 id 与 remote 定制对应(如 `cost-meter.yml` 覆盖 cost-meter 的配置行)。
+File name `<id>.yml`; the content is loader patch rows (patch-list YAML, `!!js` allowed).
 
-sync 按 manifest 顺序把 enabled 的 patch 片段合并进 profile 的 `cordis.patch.yml`(带 generated 标记头,覆盖 `~/.dsh` 手改)。
+Two uses:
+
+1. **Pure tuning fragments**: no code, only a composition change (for example enabling a tool row or adjusting configuration);
+2. **Overrides for remote packages**: personal configuration override fragments that correspond by id to a remote customization (for example a `cost-meter.yml` would override the configuration rows of cost-meter).
+
+Sync merges the enabled patch fragments, in manifest order, into the profile's `cordis.patch.yml` (with a generated-marker header, overriding manual edits under `~/.dsh`). The current fragment is `connection-webserver.yml`, a composition-only fix for the Connection RPC channel registration defect of DSH 0.1.5; its manifest entry records the retirement condition.

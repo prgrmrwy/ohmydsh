@@ -1,93 +1,87 @@
 # dsh-sidebar-session-provider-icon
 
-在 DSH Web 侧边栏每个 session 标题前，显示该会话**输入框当前选中模型**的品牌 logo。在模型选择器里切换成功后，logo 立即更新，不需要先发消息。provider 和 model 不是同一家时（例如 `opencode-go/deepseek-v4-flash`、`traex/GPT-5.6-Sol`），主图显示 provider，右下角叠加 model 的品牌小图标。
+English · [简体中文](README.zh.md)
 
-![侧边栏效果：同品牌为单一 logo，聚合 provider 为主图 + 右下角 model 小图标（浅色 / 深色主题）](docs/screenshot.png)
+<!-- problem -->
+In the DSH session list every row looks alike, so you cannot tell which model a conversation uses without opening it. This plugin puts the brand logo of the model currently selected in the input box in front of each session title, and updates it the moment you switch models. When the provider and the model come from different vendors (for example `opencode-go/deepseek-v4-flash`), the provider logo carries a small model logo in its bottom-right corner.
 
-> 截图为脱敏示意：会话标题、工作区名均为虚构；图标由本包 `logos.ts` 的真实输出渲染，行容器样式仿照官方侧边栏。
+![Sidebar rendering: same-vendor selections show one logo; aggregator routes show the provider logo with the model logo in the corner (light and dark theme)](docs/screenshot.png)
 
-- Backlog 条目：[B013](../../BACKLOG.md)
-- 当前规范：[`openspec/specs/sidebar-session-provider-icon`](../../openspec/specs/sidebar-session-provider-icon/spec.md)
-- 设计历史：[首版](../../openspec/changes/archive/2026-08-21-sidebar-session-provider-icon/)、[复合 icon](../../openspec/changes/archive/2026-10-10-sidebar-provider-icon-composite-model-badge/)
+![Illustration: where the badge comes from and how a route becomes a badge](docs/overview.png)
 
-## 显示规则
+**Install.** Managed through `dsh.yaml` (entry `sidebar-session-provider-icon`, `source: local`): set `enabled: true`, run `dsh build`, then restart DSH. Current behavior is specified in [`openspec/specs/sidebar-session-provider-icon`](../../openspec/specs/sidebar-session-provider-icon/spec.md); design history lives in the archived changes [`sidebar-session-provider-icon`](../../openspec/changes/archive/2026-08-21-sidebar-session-provider-icon/) and [`sidebar-provider-icon-composite-model-badge`](../../openspec/changes/archive/2026-10-10-sidebar-provider-icon-composite-model-badge/).
 
-provider route 决定**主图**，model id 决定**右下角小图标**。两个维度分别判定：
+## How it behaves
 
-| 选择 | 显示 |
+The logo shown for a session comes from two sources, in this order:
+
+1. **Live selection (preferred).** The official `dsh-client-ui-model-selection` store, read as `ctx.modelDirectories.directoryFor(sessionId).store.current`. It is the single per-session state shared by the input-box selector and the `/model` command, and it publishes `{ provider, model }` as soon as `session.selectModel` succeeds. The open session, including a blank one that has not sent a message yet, therefore follows the input-box selection.
+2. **Last request (cold-history fallback).** A Host `provider` session projection folds the `request/header` events of the session log, so a history session whose selector has not been loaded in this browser still shows the provider of its most recent real request. It survives restarts and uses no `localStorage`.
+
+Brand resolution has two independent dimensions: the provider route picks the **main logo**, the model id picks the **corner logo**.
+
+| Selection | Shown |
 |---|---|
-| `claude/claude-opus-5`、`codex/gpt-6-luna`、`deepseek-official/deepseek-v4-pro`（同品牌） | 单一 Anthropic / OpenAI / DeepSeek logo |
-| `opencode-go/deepseek-v4-flash`、`opencode-go/qwen3.8-flash`、`opencode-go/kimi-k2.7-code` | OpenCode 主图 + 右下角 DeepSeek / Qwen / Kimi |
-| `traex/GPT-5.6-Sol[1m]` | Trae 主图 + 右下角 OpenAI |
-| 已知 route + 认不出的 model（如 `opencode-go/omen-alpha`） | 只显示 route 品牌，不叠小图标 |
-| 未知/通用 route | 按 model 品牌显示单一 logo；仍认不出则显示中性首字母 |
+| `claude/claude-opus-5`, `codex/gpt-6-luna`, `deepseek-official/deepseek-v4-pro` (same vendor) | a single Anthropic / OpenAI / DeepSeek logo |
+| `opencode-go/deepseek-v4-flash`, `opencode-go/qwen3.8-flash`, `opencode-go/kimi-k2.7-code` | OpenCode, with DeepSeek / Qwen / Kimi in the corner |
+| `traex/GPT-5.6-Sol[1m]` | Trae, with OpenAI in the corner |
+| known route + unrecognized model (e.g. `opencode-go/omen-alpha`) | the route logo only, no corner logo |
+| unknown or generic route | a single logo from the model name; if that also fails, a neutral single-letter badge |
 
-要点：
+- **Route first.** `opencode-go/deepseek-v4-flash` shows OpenCode as the main logo; DeepSeek can only appear in the corner.
+- **No impersonation.** A model whose vendor cannot be identified gets no corner logo, and never a letter badge in the corner.
+- **Size.** The composite keeps the 14×14 footprint of a single logo, so the row layout does not move. The corner logo is the bare 10px glyph, overhanging the bottom-right by 4px, with no plate, ring or padding: at this scale any decoration eats the pixels the glyph needs.
+- **Tooltip.** Hovering always shows the exact `provider · model`.
 
-- **provider route 优先**：`opencode-go/deepseek-v4-flash` 的主图是 OpenCode，不会因为模型名被误判成 DeepSeek；DeepSeek 只出现在右下角。
-- **认不出不冒充**：查不到厂商的模型不加小图标，也不会用首字母充当小图标。
-- **尺寸**：复合 icon 外框和单一 logo 一样都是 14×14，行布局不变。小图标是 10px 的品牌图形本身，没有圆底、描边或内边距（在这个尺度下这些装饰会挤掉图形本身的像素），向右下溢出 4px。
-- **tooltip**：鼠标悬停始终显示精确的 `provider · model`。
-
-## 支持的品牌
-
-| 维度 | 品牌 |
+| Layer | Implementation |
 |---|---|
-| provider 与 model | DeepSeek、OpenAI/GPT/Codex、Anthropic/Claude、Grok/xAI、Kimi/Moonshot、GLM/智谱、MiniMax、Pi、OpenClaw、Hermes Agent（兼容 `hermas`）、OpenCode、Qwen、腾讯混元（`hy3`、`hy4-*`）、美团 LongCat、小米 MiMo、Gemini/Gemma、NVIDIA（Nemotron）、Meta（Muse Spark、Llama）、蚂蚁（Ling/Ring） |
-| 仅 provider | Trae（`trae` / `trae-ai` / `traex*`，按完整名或前缀匹配） |
+| Host | `src/provider.ts` registers the `provider` projection (it requires the `sessionProjections` service) and folds `request/header`; it only serves the cold-history fallback |
+| Client data | Subscribes to the per-session stores of `ctx.modelDirectories`; the selector choice wins over the projection fallback |
+| Client DOM | `row-locator.ts` holds all knowledge of the official row DOM; a `MutationObserver` maintains a separate badge `<span>` in front of the title |
+| Brand art | `src/client/assets/*.svg`, downloaded once and bundled; `logos.ts` resolves the provider brand and the model brand separately and renders the composite when they differ |
 
-model 维度覆盖 OpenCode Go / Zen 模型目录里所有能确认厂商的模型族（样本取自 pi-ai 内置的 `opencode-go.json` / `opencode.json`）。新增品牌时：把 SVG 放进 `src/client/assets/`，在 [assets/README.md](src/client/assets/README.md) 记录来源、pin、许可和 SHA-256，再在 `logos.ts` 的 `providerBrandOf` / `modelBrandOf` 里补规则和测试。
+The badge content is derived only from `(provider, model)`; `index.ts` rebuilds a badge only when those values or the tooltip change.
 
-## 数据优先级
+## Configuration
 
-1. **即时真相源**：官方 `dsh-client-ui-model-selection` 的 `ctx.modelDirectories.directoryFor(sessionId).store.current`。输入框 selector 和 `/model` 命令共享这份 per-session state，`session.selectModel` 成功后立即发布 `{ provider, model }`。
-2. **历史 fallback**：Host 的 `provider` session-projection 折叠日志里的 `request/header`，给还没在本浏览器打开过（selector 未加载）的历史会话提供最近一次实际请求的品牌。重启不丢，不用 localStorage。
+None. The plugin row carries no `config` fields and the package reads no environment variables.
 
-所以当前打开的 session（包括还没发消息的空白 session）按输入框选择显示；冷历史 session 在 selector 加载前按最后一次请求显示。
+Recognized brands:
 
-## 架构
-
-| 面 | 实现 |
+| Dimension | Brands |
 |---|---|
-| Host | `src/provider.ts` 注册 `provider` projection，折叠 `request/header`，只承担冷历史 fallback |
-| Client 数据 | 订阅 `ctx.modelDirectories` 的 per-session store；selector 选择优先于 projection fallback |
-| Client DOM | `row-locator.ts` 收拢官方行 DOM 知识；`MutationObserver` 只在标题前维护独立 badge span |
-| 品牌图 | `src/client/assets/*.svg` 下载后随包落盘；`logos.ts` 分别判定 provider 品牌与 model 品牌，异品牌时渲染复合 icon |
+| provider and model | DeepSeek, OpenAI/GPT/Codex, Anthropic/Claude, Grok/xAI, Kimi/Moonshot, GLM (Zhipu), MiniMax, Pi, OpenClaw, Hermes Agent (the misspelling `hermas` is also accepted), OpenCode, Qwen, Tencent Hunyuan (`hy3`, `hy4-*`), Meituan LongCat, Xiaomi MiMo, Gemini/Gemma, NVIDIA (Nemotron), Meta (Muse Spark, Llama), Ant Group (Ling/Ring) |
+| provider only | Trae (`trae`, `trae-ai`, `traex*`; exact name or prefix, never a substring) |
 
-badge 内部结构完全由 `(provider, model)` 派生，`index.ts` 只在这两个值或 tooltip 变化时重建 badge。
+The model dimension covers every model family in the OpenCode Go / Zen catalogs whose vendor can be identified (sampled from the `opencode-go.json` / `opencode.json` catalogs bundled with pi-ai).
 
-## 品牌资产
+Brand art is pinned and vendored, never hand-drawn and never fetched from a CDN at runtime:
 
-不手绘 SVG，浏览器运行时也不访问 CDN：
+- every brand except OpenCode: `@lobehub/icons-static-svg@1.94.0`, MIT; the color variant is used where one exists;
+- OpenCode: the official provider SVG from `anomalyco/opencode` at commit `5e75e5e9901f0d178f425bfb47f1bd46cbe78a59`, MIT.
 
-- 除 OpenCode 外的所有品牌：`@lobehub/icons-static-svg@1.94.0`，MIT；有彩色版时优先用彩色版；
-- OpenCode：`anomalyco/opencode` commit `5e75e5e9901f0d178f425bfb47f1bd46cbe78a59` 的官方 provider SVG，MIT。
+Per-file source URLs and SHA-256 checksums are listed in [`src/client/assets/README.md`](src/client/assets/README.md). Some color SVGs carry gradient/clip ids; the corner instance suffixes them with `-sub` so copies on the same page never resolve each other's definitions.
 
-逐个文件的来源与校验值见 [assets/README.md](src/client/assets/README.md)。部分彩色 SVG 内含渐变/裁剪 id；小图标实例里的 id 会统一加 `-sub` 后缀，避免同一页面的多份 SVG 串用定义。
+To add a brand: put the SVG in `src/client/assets/`, record source, pin, license and SHA-256 in the assets README, then add rules and tests to `providerBrandOf` / `modelBrandOf` in `logos.ts`.
 
-## UI 边界
+## Boundaries & safety
 
-- **不触碰官方 `StateDot`**：不替换、不移动、不隐藏；
-- 时间、行菜单、拖拽行为保持官方原样；
-- badge 是标题前的独立 `<span>`；
-- DOM 无法可靠定位时静默降级为不显示，不破坏页面。
+- The official `StateDot` is never replaced, moved or hidden; times, row menus and drag behavior stay official.
+- The badge is a standalone `<span>` in front of the title. If the row DOM cannot be located reliably, the plugin silently shows nothing and leaves the page intact.
+- No network requests of its own: the logos ship with the bundle and the data comes from DSH's own stores and session log.
+- Code is MIT-licensed ([LICENSE](LICENSE)). Brand owners retain their trademark rights; the marks only identify the selected provider route and model and imply no endorsement.
 
-## 开发
+## Development
 
-依赖由仓库根 workspace 统一安装，`lib/` 是 gitignored 构建产物：
+Dependencies are installed once from the repository root; `lib/` is a gitignored build artifact. Run from the repository root:
 
 ```sh
-# 在仓库根执行
 npm install
 npm run typecheck --workspace dsh-sidebar-session-provider-icon
 npm test --workspace dsh-sidebar-session-provider-icon
 npm run build --workspace dsh-sidebar-session-provider-icon
 ```
 
-直接运行 `dsh build` / sync 时，也会在安装 local package 前按需生成 `lib/`。改完刷新 Web 页面即可看到效果。
+`dsh build` / sync also builds `lib/` on demand before installing this local package; refresh the Web page to pick up a new client bundle.
 
-注意：vitest 下小 SVG 会被内联成 data URL，属性引号会变成单引号；改写 SVG 属性的正则要同时兼容 `"` 和 `'`。
-
-## License
-
-代码 MIT，见 [LICENSE](LICENSE)。品牌资产库/上游仓库许可见上文；各品牌方保留商标权利，这些标识仅用于标明所选 provider / model，不代表任何背书。
+Under vitest, small SVGs are inlined as data URLs with attribute quotes rewritten to `'`. Any regex that rewrites SVG attributes must accept both `"` and `'`.

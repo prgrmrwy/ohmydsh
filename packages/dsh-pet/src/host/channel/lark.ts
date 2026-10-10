@@ -410,7 +410,7 @@ async function createChatStrict(
  * action that happens to land on a token expiry (every ~2h). Re-read exactly
  * once in that case. The second answer must still pass the full gate on its
  * own, so a genuinely stale or unverified login keeps failing closed.
- * See docs/notes/dsh-plugin-integration-pitfalls.md §7.
+ * See docs/architecture/dsh-plugin-integration-pitfalls.md §7.
  */
 async function readUserAuthStatus(binary: string, runner: LarkCliRunner): Promise<CliJsonResult> {
   const args = ['auth', 'status', '--json', '--verify']
@@ -488,7 +488,7 @@ export function parseUserIdentity(value: unknown, expectedAppId: string): LarkUs
   // again make this gate unsatisfiable the moment the vocabulary shifts. The
   // two checks below are the ones whose accepted values are observable and
   // load-bearing; `available` additionally guards the identity being usable
-  // at all. See docs/notes/dsh-plugin-integration-pitfalls.md §4: field
+  // at all. See docs/architecture/dsh-plugin-integration-pitfalls.md §4: field
   // vocabularies must be measured, never inferred.
   if (
     identity['status'] !== 'ready' ||
@@ -725,7 +725,7 @@ export function createLarkCliClient(
     async botReady() {
       // `auth status` answers at the TOP LEVEL, not inside the usual `data`
       // envelope, so the ordinary reader would find nothing here.
-      // See docs/notes/dsh-plugin-integration-pitfalls.md §3.
+      // See docs/architecture/dsh-plugin-integration-pitfalls.md §3.
       const result = await callJson(['auth', 'status', '--json', '--verify'], binary, runner)
       const bot = (
         result.value as { identities?: { bot?: { available?: unknown; status?: unknown } } } | undefined

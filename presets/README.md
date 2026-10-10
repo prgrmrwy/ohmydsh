@@ -1,18 +1,24 @@
-# presets/ — agent preset 定制
+# presets/ — agent preset customizations
 
-当前仓库没有自定义 preset;DSH 官方 `standard` 会自动加载,环境级通用指导由顶层 `agentInstructions` 物化到 `$DSH_HOME/AGENTS.md`。通用 preset 支持仍保留,以后只有确实需要独立 roster/composition 时再新增。
+English · [简体中文](README.zh.md)
 
-每个子目录 = 一个 preset,官方 `~/.dsh/.agent-presets/<id>/` 机制的源码位置:
+<!-- problem -->
+A preset decides which tools and composition an agent session gets. This directory holds the presets this repository defines itself, for the rare case where a session needs a roster that differs from the official `standard` preset; today that is the Pet executor preset.
+
+The official `standard` preset loads automatically, and environment-level general guidance is materialized from the top-level `agentInstructions` into `$DSH_HOME/AGENTS.md`. Do not copy the official preset merely to carry model guidance; keep such singleton guidance in `instructions/` and deploy it through `agentInstructions`. Add a new preset only when a separate roster/composition is really needed.
+
+The only preset today is `dsh-pet-executor` (the Pet task executor session, which differs from `standard` only in not loading skill-filesystem).
+
+Each subdirectory is one preset:
 
 ```
 presets/<id>/
-  agent.cordis.yml     # preset composition(必须;roster 认 agent.cordis.yml)
-  preset.yml           # 显示元数据(name / description)
-  VERSION              # 独立版本
+  agent.cordis.yml     # preset composition (required; the roster recognizes agent.cordis.yml)
+  preset.yml           # display metadata (name / description)
+  VERSION              # independent version
   CHANGELOG.md
 ```
 
-- sync 把 `presets/<id>` **复制**到 `~/.dsh/.agent-presets/<id>`(symlink 不被 roster 识别,已代码级确认);
-- 修改后重跑 sync 生效;**不要直接改 `~/.dsh` 下的副本**(真相源在仓库)。
-- 新 preset 建议从 shipped preset 复制起步(shipped 位置见部署 `config/agent-presets/`,或 `agentPresets.copy()`),保证 composition 可加载。
-- 不要仅为工作环境级模型指导复制官方 preset;此类单例指导应维护在 `instructions/` 并由 `agentInstructions` 部署。
+- On DSH 0.2+ sync does not copy a directory: it renders each enabled preset as one `@deepseek-ai/dsh-agent-preset` declaration row (`id: preset-<id>`) into the profile patch, taking `plugins` from `agent.cordis.yml` and the display `name`/`description` from `preset.yml`, and removes through its ledger any directory copy left by DSH 0.1.x under `.agent-presets/`;
+- After a change, rerun sync; **do not edit anything under `~/.dsh` directly** (the source of truth is this repository);
+- Start a new preset from a shipped preset (see `config/agent-presets/` in the deployment, or `agentPresets.copy()`) so that the composition is guaranteed to load.

@@ -1,0 +1,2 @@
+google-chrome --headless=new --no-sandbox --disable-gpu --hide-scrollbars --force-device-scale-factor=1 --window-size=1200,660 --screenshot=packages/sidebar-session-provider-icon/docs/overview.png file://$PWD/packages/sidebar-session-provider-icon/docs/overview.svg
+renderer: Google Chrome 152.0.7977.64; fonts: DejaVu Sans, DejaVu Sans Mono (system); run from the repository root

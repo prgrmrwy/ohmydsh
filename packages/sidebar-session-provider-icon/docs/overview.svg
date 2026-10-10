@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Illustration source for packages/sidebar-session-provider-icon/README.md. Placeholder badges only, no real brand logos. Synthetic text only. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="660" viewBox="0 0 1200 660" role="img" aria-labelledby="t d">
+<title id="t">Sidebar session provider icon overview</title>
+<desc id="d">Each DSH sidebar session row is prefixed with a placeholder badge for the model selected in the input box.</desc>
+<defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+<marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#059669"/></marker>
+</defs>
+<rect width="1200" height="660" fill="#f8fafc"/>
+<text x="40" y="52" font-family="DejaVu Sans, Verdana, sans-serif" font-size="26" font-weight="bold" fill="#0f172a" text-anchor="start">Sidebar session icons: see which model each chat uses</text>
+<text x="40" y="80" font-family="DejaVu Sans, Verdana, sans-serif" font-size="15" font-weight="normal" fill="#475569" text-anchor="start">Every row gets a badge for the model selected in that session. It updates the moment you switch.</text>
+<rect x="40" y="110" width="420" height="500" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<text x="60" y="142" font-family="DejaVu Sans, Verdana, sans-serif" font-size="16" font-weight="bold" fill="#334155" text-anchor="start">Sessions</text>
+<line x1="60" y1="156" x2="440" y2="156" stroke="#e2e8f0" stroke-width="1.5"/>
+<rect x="54" y="172" width="392" height="62" rx="10" fill="#eff6ff" stroke="#93c5fd" stroke-width="1.5"/>
+<circle cx="72" cy="203" r="5" fill="#22c55e" stroke="none" stroke-width="0"/>
+<circle cx="104" cy="203" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+<text x="104" y="208" font-family="DejaVu Sans, Verdana, sans-serif" font-size="14" font-weight="bold" fill="#1e3a8a" text-anchor="middle">A</text>
+<text x="128" y="199" font-family="DejaVu Sans, Verdana, sans-serif" font-size="14" font-weight="bold" fill="#0f172a" text-anchor="start">Add a health-check endpoint</text>
+<text x="128" y="219" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="normal" fill="#64748b" text-anchor="start">provider-a / model-1</text>
+<rect x="54" y="246" width="392" height="62" rx="10" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+<circle cx="72" cy="277" r="5" fill="#22c55e" stroke="none" stroke-width="0"/>
+<circle cx="104" cy="277" r="15" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+<text x="104" y="282" font-family="DejaVu Sans, Verdana, sans-serif" font-size="14" font-weight="bold" fill="#14532d" text-anchor="middle">B</text>
+<text x="128" y="273" font-family="DejaVu Sans, Verdana, sans-serif" font-size="14" font-weight="bold" fill="#0f172a" text-anchor="start">Fix flaky checkout test</text>
+<text x="128" y="293" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="normal" fill="#64748b" text-anchor="start">provider-b / model-2</text>
+<rect x="54" y="320" width="392" height="62" rx="10" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+<circle cx="72" cy="351" r="5" fill="#94a3b8" stroke="none" stroke-width="0"/>
+<circle cx="104" cy="351" r="15" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>
+<text x="104" y="356" font-family="DejaVu Sans, Verdana, sans-serif" font-size="14" font-weight="bold" fill="#78350f" text-anchor="middle">C</text>
+<text x="128" y="347" font-family="DejaVu Sans, Verdana, sans-serif" font-size="14" font-weight="bold" fill="#0f172a" text-anchor="start">Summarize release notes</text>
+<text x="128" y="367" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="normal" fill="#64748b" text-anchor="start">provider-c / model-3</text>
+<rect x="54" y="394" width="392" height="62" rx="10" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+<circle cx="72" cy="425" r="5" fill="#94a3b8" stroke="none" stroke-width="0"/>
+<circle cx="104" cy="425" r="15" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+<text x="104" y="430" font-family="DejaVu Sans, Verdana, sans-serif" font-size="14" font-weight="bold" fill="#1e3a8a" text-anchor="middle">A</text>
+<text x="128" y="421" font-family="DejaVu Sans, Verdana, sans-serif" font-size="14" font-weight="bold" fill="#0f172a" text-anchor="start">Draft migration plan</text>
+<text x="128" y="441" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="normal" fill="#64748b" text-anchor="start">provider-a / model-1</text>
+<rect x="54" y="468" width="392" height="62" rx="10" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+<circle cx="72" cy="499" r="5" fill="#94a3b8" stroke="none" stroke-width="0"/>
+<circle cx="104" cy="499" r="15" fill="#f1f5f9" stroke="#64748b" stroke-width="2"/>
+<text x="104" y="504" font-family="DejaVu Sans, Verdana, sans-serif" font-size="14" font-weight="bold" fill="#334155" text-anchor="middle">?</text>
+<text x="128" y="495" font-family="DejaVu Sans, Verdana, sans-serif" font-size="14" font-weight="bold" fill="#0f172a" text-anchor="start">Quick question</text>
+<text x="128" y="515" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="normal" fill="#64748b" text-anchor="start">unknown / model-x</text>
+<text x="60" y="566" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12" font-weight="normal" fill="#64748b" text-anchor="start">Status dot, times and menus stay official.</text>
+<text x="60" y="586" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12" font-weight="normal" fill="#64748b" text-anchor="start">The badge is a separate element before the title.</text>
+<rect x="520" y="110" width="640" height="236" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="540" y="142" font-family="DejaVu Sans, Verdana, sans-serif" font-size="16" font-weight="bold" fill="#334155" text-anchor="start">Which badge is shown?</text>
+<rect x="540" y="160" width="290" height="160" rx="10" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1.5"/>
+<text x="556" y="188" font-family="DejaVu Sans, Verdana, sans-serif" font-size="14" font-weight="bold" fill="#065f46" text-anchor="start">1  Live selection</text>
+<text x="556" y="212" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="normal" fill="#475569" text-anchor="start">The model picked in the input box,</text>
+<text x="556" y="230" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="normal" fill="#475569" text-anchor="start">including a blank, unsent session.</text>
+<text x="556" y="262" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="bold" fill="#065f46" text-anchor="start">Switch model: badge updates.</text>
+<rect x="850" y="160" width="290" height="160" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="866" y="188" font-family="DejaVu Sans, Verdana, sans-serif" font-size="14" font-weight="bold" fill="#334155" text-anchor="start">2  Last request (fallback)</text>
+<text x="866" y="212" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="normal" fill="#475569" text-anchor="start">Used when there is no live selection:</text>
+<text x="866" y="230" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="normal" fill="#475569" text-anchor="start">a history session not opened here</text>
+<text x="866" y="248" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="normal" fill="#475569" text-anchor="start">shows its most recent request provider.</text>
+<rect x="520" y="366" width="640" height="244" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="540" y="398" font-family="DejaVu Sans, Verdana, sans-serif" font-size="16" font-weight="bold" fill="#334155" text-anchor="start">How a route becomes a badge</text>
+<rect x="540" y="418" width="600" height="50" rx="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+<text x="556" y="448" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="bold" fill="#334155" text-anchor="start">provider route</text>
+<text x="700" y="448" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="normal" fill="#475569" text-anchor="start">provider-a / model-1</text>
+<text x="920" y="448" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="bold" fill="#1d4ed8" text-anchor="start">badge A</text>
+<rect x="540" y="480" width="600" height="50" rx="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+<text x="556" y="510" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="bold" fill="#334155" text-anchor="start">generic route</text>
+<text x="700" y="510" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="normal" fill="#475569" text-anchor="start">gateway / model-2</text>
+<text x="920" y="510" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="bold" fill="#1d4ed8" text-anchor="start">falls back to model name</text>
+<rect x="540" y="542" width="600" height="50" rx="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+<text x="556" y="572" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="bold" fill="#334155" text-anchor="start">no match</text>
+<text x="700" y="572" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="normal" fill="#475569" text-anchor="start">unknown / model-x</text>
+<text x="920" y="572" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="bold" fill="#1d4ed8" text-anchor="start">neutral letter badge</text>
+</svg>

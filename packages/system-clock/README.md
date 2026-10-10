@@ -1,35 +1,42 @@
 # dsh-system-clock
 
-在 Web 设置面板**最底部**显示 **DSH 主机系统**的实时时钟：24 小时制、按主机时区（含 DST）渲染，并带上主机时区名、当前 UTC 偏移和主机 hostname。解决「多台设备、不同时区、经 SSH 隧道访问同一台 DSH」时，浏览器本地时间 ≠ 主机时间的问题——这里的时钟永远显示 DSH 跑在哪台机器、现在几点。
+English · [简体中文](README.zh.md)
 
-## 为什么
+<!-- problem -->
+When you reach DSH through an SSH tunnel from another machine or time zone, your browser's clock shows a different time from the machine DSH actually runs on. This plugin adds a live 24-hour clock of the DSH host, in the host's own time zone and with its hostname, at the bottom of the Settings panel.
 
-浏览器 `new Date()` 取的是**浏览器所在设备**的时间。通过 SSH 隧道从另一时区的机器访问 GUI 时，这东西毫无意义。官方设置页没有能一眼看到「DSH 主机墙钟时间」的位置。本插件让 host 半区采样主机时钟（epoch + IANA 时区 + UTC 偏移 + hostname），web 半区按主机时区渲染成走秒的 24h 时钟。
+![Settings in DSH: the host clock with date, time zone and host name](docs/overview.png)
 
-## 行为
+**Install.** Managed through `dsh.yaml` (entry `system-clock`, `source: local`): set `enabled: true`, run `dsh build`, then restart DSH. Backlog item B019; designs in the OpenSpec changes `settings-system-clock` and `dsh-0-1-2-host-api-migration`.
 
-- 设置面板 → 导航最底部「系统时钟」：粗体 `HH:MM:SS`（24h、零填充、无 AM/PM）、日期（`YYYY-MM-DD 周X`，星期随界面语言）、时区行（`Asia/Shanghai (UTC+08:00)`）、小字 `DSH 主机 · <hostname>`。
-- 时间真相源 = **host 进程**采样（`/dsh-system-clock` Connection RPC channel，`authority: loopback`），客户端只做一次采样 + skew 引擎本地每秒 tick，用 `Intl.DateTimeFormat(..., { timeZone: 主机时区, hour12: false })` 渲染——DST 切换天然正确，无需客户端理解时区规则。
-- 每 60s 与页面重新可见时重采样校准（覆盖时钟漂移与主机 DST 切换）；重采样失败保留旧值继续走时。
-- 采样不可达时显示「主机时钟不可用」降级态并周期重试，**绝不**静默回退到浏览器本地时间（那在多机场景会误导）。
-- 只读、零配置：不发起外部网络请求、不读写凭据/会话/文件、不改官方 DOM/class，channel 只返回时间/时区/hostname 这类无害主机事实。
+## How it behaves
 
-## 机制（升级后需回归）
+- Settings panel, last navigation entry **System Clock**: bold `HH:MM:SS` (24-hour, zero-padded, no AM/PM), a date line `YYYY-MM-DD` plus a weekday that follows the UI language, a time zone line such as `Asia/Shanghai (UTC+08:00)`, and a small caption `DSH host · <hostname>`.
+- The host process is the source of truth. The client takes one sample over the `/dsh-system-clock` Connection RPC channel, then ticks locally every second from the measured skew, rendering with `Intl.DateTimeFormat(..., { timeZone: <host zone>, hour12: false })`. Daylight saving changes come out right without the client knowing any time zone rules.
+- It resamples every 60 s and whenever the page becomes visible again, which corrects drift and host DST switches. A failed resample keeps the previous value and the clock keeps running.
+- If no sample has ever succeeded, the section shows "Host clock unavailable" and retries on the same 60 s cycle. It **never** falls back to the browser's local time, which would be misleading when the browser and the host are different machines.
 
-- Host：`src/index.ts` 复用 dsh-plugin-subscriptions `/subscriptions-auth` 的通道接线——`ctx.inject(['connection'])` 内 `connection.rpc.handle('/dsh-system-clock', ..., { authority: 'loopback' })`；headless 无 `connection` 时静默不注册，插件照常加载。
-- Client：`src/client/index.ts` 注册官方 `settings.section`（id `system-clock`、order 300 → 导航末尾）；`src/client/clock-engine.ts` 是纯 skew 引擎（可注入 fetch/now/locale/timers，可单测）；`src/client/section.tsx` 只做 React 接线与渲染；`src/client/clock-locales.ts` 是 zh/en 词典。
-- 构建形态与 dsh-session-title-copy 一致：tsdown 产出单文件 client bundle（`window.__ModuleLoader__.load` 手卷），host 半区 tsc 产出 ESM。
+Wiring (re-check after DSH upgrades): the host entry `src/index.ts` registers `connection.rpc.handle('/dsh-system-clock', …)` inside `ctx.inject(['connection'])`, the same channel wiring `dsh-plugin-subscriptions` uses for `/subscriptions-auth`; without a `connection` service (headless) it registers nothing and the plugin still loads. The client `src/client/index.ts` registers the official `settings.section` (id `system-clock`, order 300, the end of the navigation); `clock-engine.ts` is the pure skew engine, `section.tsx` the React wiring, and `clock-locales.ts` the zh/en dictionary.
 
-## 安装
+## Configuration
 
-经 ohmydsh manifest（`system-clock`，source: local）启用，`dsh build` 物化；重启 DSH 后生效。卸载/禁用：manifest `enabled: false` + sync，无持久化数据。
+None. The plugin row carries no `config` fields and there are no environment variables. Section copy follows the UI language (zh/en). To remove it, set `enabled: false` in `dsh.yaml` and sync; no data is persisted.
 
-## 开发
+## Boundaries & safety
 
-```bash
-npm run typecheck   # host + client 双项目
-npm run build       # tsc(host) + tsdown(client bundle)
-npm test            # vitest（formatter / engine / host-time / wiring，无浏览器）
+- Read-only: the single `now` endpoint returns only the host epoch, IANA time zone, UTC offset and hostname. Nothing is written, and no credentials, sessions or files are touched.
+- No external network requests; the only traffic is the browser-to-host RPC. The channel stays on the loopback-only Connection fence.
+- It does not modify the official DOM or class names.
+- Peer dependencies: `@deepseek-ai/cordis`, `@deepseek-ai/dsh-client-connection`, `@deepseek-ai/dsh-client-locale`, `@deepseek-ai/dsh-client-ui-settings`, `react` (plus the renderer package for the client half).
+
+## Development
+
+Run from the repository root:
+
+```sh
+npm run typecheck --workspace dsh-system-clock   # host + client projects
+npm run build --workspace dsh-system-clock       # tsc (host) + tsdown (client bundle)
+npm test --workspace dsh-system-clock            # vitest: formatter / engine / host-time / wiring, no browser
 ```
 
-peer 依赖：`@deepseek-ai/cordis`、`dsh-client-runtime`、`dsh-client-connection`、`dsh-client-locale`、`dsh-client-ui-settings`、`react`。
+The build shape matches `dsh-session-title-copy`: tsdown emits a single-file client bundle and `tsc` emits the host ESM.

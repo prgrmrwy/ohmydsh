@@ -60,7 +60,7 @@ locus 子会话（每话题一个）                locus 子会话（不变）
 |---|---|---|
 | `settlementNotice: 'silent'` | 取决于协作主是否保持 idle（见理由 3） | `continuation-activation.ts` 干净版 `:833` |
 | `contextMode: 'independent-v1'` | 不能。冷恢复需子代**独立于父**重建组合 | 归档 change `shrink-pet-compat-to-minimal` §8 的证伪记录 |
-| `createIdleContinuable` | 不能。阻塞项是两阶段建树的失败补偿顺序，与父是谁无关 | 同上；与 B036 同一条 |
+| `createIdleContinuable` | 不能。阻塞项是两阶段建树的失败补偿顺序，与父是谁无关 | 同上；与已归档 change `pet-locus-on-demand-tree` 同一条 |
 | `withLiveContinuableChildSession` | 不能。三层明确保留 main→child 的 subagent 边 | 3 个生产消费点：sandbox policy 的 apply/resolve、启动恢复的 delivery 证明 |
 
 量化结果：

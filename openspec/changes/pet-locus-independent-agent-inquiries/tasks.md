@@ -1,7 +1,7 @@
 ## 1. 基线与实施前宿主门槛
 
 - [x] 1.1 核对 `pet-unified-locus-collaboration` 的实际实现与拟发布/current specs；记录四份 delta 的新增/替代边界与前置先归档顺序，前置若变化先更新本规划，不清除其未完成任务
-  - 证据：`docs/notes/pet-independent-agent-capability-audit.md`。前置 57/64、七项未完成不变；三项 MODIFIED 标题逐字匹配，四份 delta 共 14 ADDED/3 MODIFIED；现有 unified fork 基线与 B035 预期一致。G1–G5 尚未通过，前置五份 delta 必须先合并/归档。
+  - 证据：`openspec/changes/pet-locus-independent-agent-inquiries/checking/capability-audit.md`。前置 57/64、七项未完成不变；三项 MODIFIED 标题逐字匹配，四份 delta 共 14 ADDED/3 MODIFIED；现有 unified fork 基线与 B035 预期一致。G1–G5 尚未通过，前置五份 delta 必须先合并/归档。
 - [ ] 1.2 G1：用真实固定 runtime 验证 spawn continuable 首轮与冷恢复无父历史/摘要、lineage 正确、自身历史保留；记录实际工具/Skill/模型/cwd 和 silent settlement 行为
 - [ ] 1.3 G1：核验显式保留创建模型和工作归属的官方接缝，验证 read 真正生效、父 write 不继承；普通目录/ws/sw 分别测试，不静默换模型或扩大根
 - [ ] 1.4 G2：验证已加载父新增首个 locus、child 首轮、Pet 恢复与原生加载的 scoped 装配时序；实际工具快照证明无 global 泄漏、无重复 mount、不自动唤醒父
