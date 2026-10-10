@@ -2,10 +2,10 @@
 
 English · [简体中文](README.zh.md)
 
+![Settings → Memory in DSH: each workspace with its primary and additional memory entries, undeclared libraries and the path probe](docs/settings.png)
+
 <!-- problem -->
 An AI agent forgets everything when a session ends, and one shared notebook for all your projects quickly turns into noise, or leaks one project's details into another. dsh-memex gives DSH agents a persistent Zettelkasten memory that is split by project: each workspace reads and writes its own library of cards, and writes to a library that gets published are screened before they land.
-
-![Settings → Memory in DSH: workspaces, their memory entries and library facts](docs/overview.png)
 
 **What you get**
 
