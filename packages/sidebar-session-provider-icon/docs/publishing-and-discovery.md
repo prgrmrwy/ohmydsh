@@ -8,6 +8,8 @@
 结论先行：**上架只需要一个 YAML 文件 + 一个 PR，今天就能提**；但插件现在住在 ohmydsh monorepo 的子目录里，
 这对「被别人和 AI 搜到」是最不利的一种形态。两个目标的最好解法是分开的：上架走最短路径，可发现性要求独立仓库。
 
+**要直接照做，跳到最后一节「9. 按需照做：六步清单 + 三个坑」；§1–§7 是规则与证据，需要核对时再翻。**
+
 ---
 
 ## 1. 收录规则（已逐条核对源码，不是抄文档）
@@ -317,3 +319,39 @@ GitHub 可接受使用政策 §4 明确把「rank abuse, such as automated starr
 3. **`npm login` 后发布 `dsh-sidebar-session-provider-icon`**（名字还空着；需要先补 `repository` 字段；
    注意 npm 搜索索引最多要两周才收录新包）。
 4. **决定路线 A / B，然后提商店 PR**（B 今天就能提；A 需要先建仓库、补元数据，并等满 1 天）。
+
+---
+
+## 9. 按需照做：六步清单 + 三个坑
+
+**新 session（或未来的我）不需要任何历史上下文，直接照这一节做即可；§1–§7 是依据与证据，要核对时才翻。**
+
+1. **本地准备**（合成一个 commit）：`package.json` 补 `repository`/`homepage`/`bugs`/`keywords`/`files`，
+   `repository` 指向将要建的公开仓库；vendor 了第三方图标或代码就加 `THIRD-PARTY-NOTICES.md`
+   （MIT 要求随附版权行 + 许可全文）并加进 `files`；加 `screenshots.json`；README 双语自包含
+   （不留 `../../` 相对链接，安装命令要让陌生人能照着执行）。
+2. **建公开仓库 + 推镜像**：`git subtree push --prefix=packages/<插件目录> git@github.com:prgrmrwy/<仓库名>.git main`。
+   ohmydsh 仍是唯一真源，`dsh.yaml` 不动。
+3. **仓库元数据**：topics 必带 `dsh-plugin`（§7 的索引总钥匙）；About 描述 = 与 `package.json`
+   description 逐字一致的那一句话。
+4. **上架商店**：仓库创建满 1 天后，一个 PR 只加 `data/plugins/<owner>__<repo>.yml`（规则见 §1、命令见 §3），
+   每个 PR ≤3 条。
+5. **npm**：确认包名空闲 → `npm publish`；发布后商店夜间 probe 自动关联下载量，**不需要补 PR**。
+6. **其它索引**：dsh.so 自助表单 <https://www.dsh.so/submit/>（服务端 GitHub API 会限流，重试即可）；
+   其余站点都爬 topic，不用提交。
+
+三个必须避开的坑：
+
+- **`prepare` 与 `prepack` 缺一不可。** npm/pnpm 安装 **git 依赖**时执行的是 `prepare`，而 `prepack`
+  只在 `npm pack` / `npm publish` 时运行。只写 `prepack` 的包，从 GitHub 安装后没有构建产物，
+  而 `main` 指向 `./lib/index.js` → 插件直接加载失败（dsh.so 的源码安装验证也会走这条路）。
+  两个都写 `npm run build` 即可。依据：pnpm 10.26 release notes、npm-install 文档。
+- **镜像只能推已提交内容。** `git subtree push` 走的是 commit，工作区改动不会过去；ohmydsh 侧若做过
+  rebase/amend，镜像需要一次性 `--force-with-lease`，之后恢复为普通 fast-forward。
+- **提 PR 前先本地预校验。** 用上游 `scripts/lib/entries.mjs` 的 `validateEntries()` 跑一遍
+  （文件名 slug、name 与 url 一致、category 白名单、description 单行且含 `: ` 要加引号），比等 CI 快；
+  描述必须能被源码逐句证实。
+
+monorepo 子包要各自上架时：topic 爬虫只认仓库级，子包必须手动提 PR
+（`url …/tree/main/packages/<id>`、`name owner/repo#<id>`、文件名 `owner__repo--packages-<id>.yml`），
+商店会为它生成 `dsh plugin --profile web add github:owner/repo#path:/packages/<id>` 这样的安装命令。
