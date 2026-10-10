@@ -287,6 +287,23 @@ record['verified']      !== true         // ✅
 4. 这类「判据要求的值真实系统从不产生」的缺陷，表现是**功能在任何情况下都
    失败**而非偶发。遇到「从来没成功过」的能力，优先怀疑判据而不是环境。
 
+### 续：同一报错的偶发形态——`--verify` 自己刷新 token，却报 `needs_refresh`
+
+修完上面的字面量后，同一句报错仍会**偶发**出现。用户 access token 约 2h
+过期（`expiresAt`）；过期后的第一次 `auth status --json --verify` 会**在
+这次调用里完成刷新**（lark-cli auth 日志里出现 `oauth/token` 200，二进制内
+文案为 "needs refresh (server verification succeeded after refresh)"），
+但**这一次**响应仍报 `identities.user.status: 'needs_refresh'`；紧接着再
+调一次就是 `ready`。所以凡是正好落在 token 过期后的第一次点击都会被拒，
+而用户自己手动复查时看到的永远是 `ready`。
+
+规则：用户身份读取（`userIdentity`/`defaultQaOwner`）在首个响应为
+`needs_refresh` 时**只重读一次**，第二次响应仍须独立通过完整闸门
+（`status/available/verified`），真正失效的登录依旧 fail closed。
+诊断方法：连续执行两次 `lark-cli --profile dsh-pet auth status --json
+--verify` 对比，并看 `~/.lark-cli/logs/auth-<date>.log` 是否在点击时刻
+出现 `oauth/token` 刷新。
+
 ---
 
 ## 8. 引用消息的字段形态必须实测：`root_id`/`parent_id` 不是 thread 证据

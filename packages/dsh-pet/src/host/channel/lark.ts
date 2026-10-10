@@ -400,6 +400,26 @@ async function createChatStrict(
   return requireChatId(data?.['chat_id'], 'create group')
 }
 
+/**
+ * Read `auth status --json --verify` for a current-user proof.
+ *
+ * When the user access token has expired, the `--verify` call itself performs
+ * the refresh ("server verification succeeded after refresh") yet still
+ * reports `identities.user.status: 'needs_refresh'` for that one response; the
+ * next call reports `ready`. Taking the first answer would refuse every user
+ * action that happens to land on a token expiry (every ~2h). Re-read exactly
+ * once in that case. The second answer must still pass the full gate on its
+ * own, so a genuinely stale or unverified login keeps failing closed.
+ * See docs/notes/dsh-plugin-integration-pitfalls.md §7.
+ */
+async function readUserAuthStatus(binary: string, runner: LarkCliRunner): Promise<CliJsonResult> {
+  const args = ['auth', 'status', '--json', '--verify']
+  const first = await callJson(args, binary, runner)
+  const user = recordOf(recordOf(recordOf(first.value)?.['identities'])?.['user'])
+  if (user?.['status'] !== 'needs_refresh') return first
+  return callJson(args, binary, runner)
+}
+
 /** Parse and verify the top-level `auth status` response. */
 export function parseBotIdentity(value: unknown, expectedAppId: string): LarkIdentityProbe {
   if (typeof value !== 'object' || value === null) {
@@ -725,7 +745,7 @@ export function createLarkCliClient(
     },
 
     async userIdentity(expectedAppId) {
-      const result = await callJson(['auth', 'status', '--json', '--verify'], binary, runner)
+      const result = await readUserAuthStatus(binary, runner)
       if (!result.ok) {
         return {
           kind: 'unavailable',
@@ -736,7 +756,7 @@ export function createLarkCliClient(
     },
 
     async defaultQaOwner(expectedAppId, allowOpenIds) {
-      const result = await callJson(['auth', 'status', '--json', '--verify'], binary, runner)
+      const result = await readUserAuthStatus(binary, runner)
       if (!result.ok) {
         return {
           kind: 'unavailable',
