@@ -10,6 +10,7 @@ import {
   isTrackedPathOrDir,
   cjkRatio,
   firstH1,
+  beforeFirstH2,
   sectionBody,
   fixtureBlock,
   anchorSequenceDiff,
@@ -127,4 +128,10 @@ test('anchorSequenceDiff reports the first differing index and both values', () 
   assert.equal(anchorSequenceDiff(['a', 'b'], ['a', 'b']), null)
   assert.deepEqual(anchorSequenceDiff(['a', 'faq', 'b'], ['a', 'b']), { index: 1, left: 'faq', right: 'b' })
   assert.deepEqual(anchorSequenceDiff(['a'], ['a', 'b']), { index: 1, left: null, right: 'b' })
+})
+
+test('beforeFirstH2 stops at the first level-two heading outside fences', () => {
+  const text = ['# T', '```', '## not a heading', '```', 'intro', '## Real', 'body'].join('\n')
+  assert.equal(beforeFirstH2(text), ['# T', '```', '## not a heading', '```', 'intro'].join('\n'))
+  assert.equal(beforeFirstH2('# T\nonly'), '# T\nonly')
 })

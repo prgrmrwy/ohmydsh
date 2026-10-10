@@ -1,46 +1,62 @@
-# dsh-session-links · 文档/资料面板
+# dsh-session-links
 
-better-sidebar 右侧工作台「文档/资料」tab:自动收集**当前会话**消息中的 URL 与产出的文件,按 **MR / 部署 / 工作项 / 产物制品 / 其他** 分类展示,随会话切换联动,tab 徽标显示链接计数。
+English · [简体中文](README.zh.md)
 
-纯浏览器插件:无 host 能力、无网络外呼、不读写凭据、不持久化(刷新后对当前会话重建一次采集)。
+<!-- problem -->
+In a long agent conversation the merge request, deploy page, ticket or artifact link you need is buried somewhere far up the transcript, and files the agent wrote are just as hard to find. This plugin gathers them into one side panel for the current session, grouped by kind, so you can open them in a click.
 
-## 依赖与安装
+![Illustration: links from a long conversation are collected into one Docs/Resources panel, grouped by category](docs/overview.png)
 
-- 宿主:`dsh-better-sidebar`(^0.16.0)——client 入口 `inject = ['betterSidebar', ...]`,宿主缺失/禁用时插件整体不激活。
-- 数据:`@deepseek-ai/dsh-client-runtime` 的会话列表与 conversation snapshot(`ctx.sessions.binding(id).session`)。
-- 安装:`dsh.yaml` 增加 local 条目后 `dsh build`,重启 DSH。
+**Install.** Managed through `dsh.yaml` (entry `session-links`, `source: local`): set `enabled: true`, run `dsh build`, then restart DSH. It needs the third-party `better-sidebar` plugin (`dsh-better-sidebar`, peer `>=0.16.0`, optional): without it the plugin does not activate at all. Backlog item B020; design in the OpenSpec change `session-links-panel`.
 
-## 行为
+## How it behaves
 
-- **采集范围**:user / assistant / steering / context 消息;assistant 仅正文 text 块(reasoning 与 tool-call 载荷不采集);tool-result、compaction 等节点跳过。
-- **分类规则**:集中维护于 `src/shared/links.ts` 的 `CATEGORY_RULES`(域名 + 路径/查询特征);未知 URL 进「其他」,绝不丢弃。
-- **组织专属域名走配置**:公开源码只认公开平台(GitHub/GitLab/Bitbucket/Gitee 等)。组织自己的代码评审域名与工作项域名写在插件行的 `config` 里,由私有 overlay 的 patch 覆盖本插件行:
+The panel is a `better-sidebar` workbench tab with id `session-links`, shown in the interface as **文档/资料** ("Docs/Resources"). It is single-instance, follows the current session, and groups what it finds into:
 
-  ```yaml
-  - id: session-links
-    name: dsh-session-links
-    config:
-      reviewHosts: [git.corp.example]      # 额外的 MR/PR 域名(含子域名)
-      trackerHosts: [tracker.corp.example] # 归入「工作项」的域名(含子域名)
-  ```
+- **Links**, in this fixed order: MR, deploy, work items, artifacts, other. Within a group the newest comes first, and at equal time links from the assistant outrank other sources. Each entry shows a readable title (host plus a path summary), a relative time and a repeat count; a click opens the URL in a new tab and injects no script.
+- **Produced files** (本次产出): files the session wrote or edited successfully. Reads, deletes and failed calls do not count, and a file written then edited stays one entry. A click opens it in the sidebar editor; relative paths resolve against the session's working directory.
 
-  host 在全量基线里把这份规则一并下发给浏览器端,两边分类一致。未配置时「工作项」分组为空。
-- **增量**:每会话至多一次全量扫描,之后按消息 `seq` 水位只处理新消息;`loadOlder` 追加的旧消息不重复采集。
-- **去重与排序**:同 URL 去重保留最近一次出现并计数;组内按最近出现时间倒序,同时间 assistant 优先。
-- **展示**:分类分组 + 标题(host + 路径摘要)+ 相对时间 + 重复次数;点击在新标签页打开,不注入脚本。
-- **降级**:快照结构变化、宿主缺失、无当前会话均安全降级为空态,不影响其余 tabs。
+What is collected: user, assistant, steering and context messages. From assistant messages only the visible text blocks are scanned, never reasoning or tool-call payloads; tool results, compaction nodes and the rest are skipped. Duplicate URLs are merged, keeping the latest occurrence and a count.
 
-## 开发
+How the data is built:
 
-```bash
-npm install          # 仓库根,workspaces 装依赖
-npm run typecheck    # tsc host + client
-npm test             # vitest:links/collector
-npm run build        # host(tsc)+ client(tsdown) -> lib/
+- **Whole-log baseline.** The host half registers a read-only `/dsh-session-links` Connection RPC channel (endpoint `links`). It reads the session's complete durable event log through `sessionPersistence`, so links hidden by "load more" or replaced by compaction still show up. The result is cached for 30 s per session.
+- **Increments.** After the baseline, the browser half ingests only new messages past a monotonic `seq` watermark, scanning each session fully at most once. Re-applying a baseline never double-counts.
+- **Rules.** Classification lives in one ordered table, `CATEGORY_RULES` in `src/shared/links.ts` (first match wins; unmatched URLs go to "other" and are never dropped). It matches public platforms (`gitlab`, `github`, `bitbucket`, `gitee` hosts) plus host, path and query patterns for deploy and artifact links. Extending it means editing that table and its tests.
+
+## Configuration
+
+Organization-specific hosts are configuration, not source. In the plugin row's `config`, usually via a private overlay patch that overrides this row:
+
+```yaml
+- id: session-links
+  name: dsh-session-links
+  config:
+    reviewHosts: [git.corp.example]      # extra MR/PR hosts (subdomains included)
+    trackerHosts: [tracker.corp.example] # hosts classed as work items (subdomains included)
 ```
 
-## 设计取舍
+| Key | Default | Meaning |
+|---|---|---|
+| `reviewHosts` | `[]` | Extra code-review hosts, in addition to the public platforms |
+| `trackerHosts` | `[]` | Hosts whose links are work items; with none configured the work-item group stays empty |
 
-- 刷新/重开 tab 后链接集在浏览器内存中按需重建,不持久化(会话数据本体由 DSH 持久化)。
-- compaction 后历史消息被摘要替代,面板为「当前快照所见」语义,不引 host 侧日志查询。
-- 规则表扩展只需改 `CATEGORY_RULES` 并同步测试。
+Entries are lower-cased, trimmed and validated as host names, and invalid ones are dropped. The host sends these rules to the browser together with the baseline, so both halves classify the same way.
+
+## Boundaries & safety
+
+- Read-only and local. No external network requests, no CDN, no credentials read or written. The only traffic is the browser-to-host Connection RPC, which stays on the loopback-only Connection fence.
+- Nothing is persisted. After a refresh the current session's set is rebuilt once. The panel shows what the current snapshot and log contain, not a host-side query history.
+- Fails safe to an empty state when the snapshot structure changes, the host is absent or there is no current session; if the host baseline fails, the panel still shows the links visible in the live snapshot. Other tabs are unaffected.
+- The collector does not modify the official session data and keeps only extracted entries, not message bodies.
+
+## Development
+
+Run from the repository root:
+
+```sh
+npm install
+npm run typecheck --workspace dsh-session-links   # tsc host + client
+npm test --workspace dsh-session-links            # vitest: links / collector / extraction
+npm run build --workspace dsh-session-links       # host (tsc) + client (tsdown) -> lib/
+```

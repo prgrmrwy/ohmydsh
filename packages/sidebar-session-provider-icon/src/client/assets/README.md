@@ -1,6 +1,9 @@
 # Vendored brand SVG assets
 
-These files are downloaded at development time and bundled into `lib/client.js`; the browser makes no runtime asset requests.
+English · [简体中文](README.zh.md)
+
+<!-- problem -->
+The SVGs in this directory are the brand icons the sidebar uses to mark which model route (provider) a session has selected. They are downloaded at development time and bundled into `lib/client.js`, so the browser makes no runtime asset requests.
 
 | File | Upstream source | Pin | License | SHA-256 |
 |---|---|---|---|---|

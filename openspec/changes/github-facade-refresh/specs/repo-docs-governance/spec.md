@@ -98,7 +98,7 @@ git 跟踪的 markdown 文件（排除 `openspec/changes/archive/`）中所有�
 - **THEN** 测试失败并报告实际链接目标
 
 ### Requirement: 自研 package README 按分级呈现
-每个 `packages/<id>/` 必须(SHALL)在其 `package.json` 中声明 `ohmydsh.docTier`，取值 `A`、`B` 或 `C`；未声明或取值非法时测试失败。每份 package `README.md` 与 `README.zh.md` 在首个二级标题之前必须(SHALL)有一段说明，回答「它为用户解决什么问题」；该段落紧跟 `<!-- problem -->` 注释，且至少 40 个非空白 code point。说明是否真正回答了用户问题由 P3 阶段验收人工判定。A 级与 B 级必须(SHALL)在首个二级标题之前嵌入至少一张位于该 package `docs/` 下的位图截图（png/jpg/jpeg/webp）；A 级还可以嵌入示意图。C 级不得(SHALL NOT)要求图片，但必须(SHALL)有章节锚点为 `removal` 的章节，说明它连接哪两端、何时可以移除。
+每个 `packages/<id>/` 必须(SHALL)在其 `package.json` 中声明 `ohmydsh.docTier`，取值 `A`、`B` 或 `C`；未声明或取值非法时测试失败。每份 package `README.md` 与 `README.zh.md` 在首个二级标题之前必须(SHALL)有一段说明，回答「它为用户解决什么问题」；该段落紧跟 `<!-- problem -->` 注释，且至少 40 个非空白 code point。说明是否真正回答了用户问题由 P3 阶段验收人工判定。A 级与 B 级必须(SHALL)在首个二级标题之前嵌入至少一张位于该 package `docs/` 下的位图（png/jpg/jpeg/webp）。位图的内容类型在 `SCREENSHOTS.md` 的 `kind` 列登记，取值 `screenshot`（隔离实例中的真实界面）或 `illustration`（由受审阅的图源栅格化得到的示意图，图源 JSON/SVG 同目录提交）。`illustration` 只允许用于 `worktree-session`、`dsh-openspec`、`sidebar-session-provider-icon`、`session-title-copy`、`session-links` 这五个 package（理由：隔离实例没有模型凭据，无法产生带标题与消息的会话），且其 `note` 列必须(SHALL)恰好包含短语 `isolated instance has no model credentials`。其余 A/B 级 package（`dsh-pet`、`dsh-memex`、`system-clock`、`home-network-model-guard`）必须(SHALL)使用 `screenshot`。新增或调整 `illustration` 的适用范围属于规范修订，必须经 design 与 spec 评审，不得在执行期改动测试里的允许名单。C 级不得(SHALL NOT)要求图片，但必须(SHALL)有章节锚点为 `removal` 的章节，说明它连接哪两端、何时可以移除。
 
 #### Scenario: 各级 README 满足呈现要求
 - **GIVEN** 已应用本 change 的仓库
@@ -115,23 +115,38 @@ git 跟踪的 markdown 文件（排除 `openspec/changes/archive/`）中所有�
 - **WHEN** 运行仓库测试
 - **THEN** 测试失败并要求为该 package 声明级别
 
-#### Scenario: B 级只放了示意图
-- **GIVEN** 某 B 级 package 的 README 首屏只嵌入一张 SVG
+#### Scenario: A/B 级首屏只嵌入了 SVG 而没有栅格位图
+- **GIVEN** 某 A/B 级 package 的 README 首屏只嵌入一张 SVG，没有任何位于其 `docs/` 下的 png/jpg/jpeg/webp
 - **WHEN** 运行仓库测试
-- **THEN** 测试失败，报告该 package 缺少位图截图
+- **THEN** 测试失败，报告该 package 缺少合格位图（screenshot 或 illustration 的栅格文件）
 
 ### Requirement: 入库截图经隐私门禁并登记来源
-截图必须(SHALL)只来自填充合成数据的隔离 `DSH_HOME` 实例，不得(SHALL NOT)来自日常使用的 `~/.dsh` 实例。来源与内容是否脱敏无法由测试证明，因此每张新增或修改的位图必须(SHALL)在合入前通过人工隐私门禁：Lead 逐张查看并对照检查清单（会话标题与正文、文件路径与用户名、hostname、账号与邮箱、组织专属域名或链接、token 与 key 片段）。可机械断言的部分为：被 README 嵌入的每张位图必须(SHALL)在同目录 `SCREENSHOTS.md` 中有登记行（文件名、拍摄来源、拍摄日期、隐私门禁检查人与结论），且单张不超过 400 KiB。
+截图必须(SHALL)只来自填充合成数据的隔离 `DSH_HOME` 实例，不得(SHALL NOT)来自日常使用的 `~/.dsh` 实例。来源与内容是否脱敏无法由测试证明，因此每张新增或修改的位图（含示意图）**及其同目录提交的图源文件**（`.json`/`.svg`，含元数据、注释、隐藏图层与未渲染文本）必须(SHALL)在合入前通过人工隐私门禁：Lead 逐张查看并对照检查清单（会话标题与正文、文件路径与用户名、hostname、账号与邮箱、组织专属域名或链接、token 与 key 片段）。可机械断言的部分为：被 README 嵌入的每张位图必须(SHALL)在同目录 `SCREENSHOTS.md` 中有登记行（文件名、`kind`、拍摄或生成来源、日期、隐私门禁检查人与结论、`note`），且单张不超过 400 KiB。
 
 #### Scenario: 截图已登记且体积合规
 - **GIVEN** 已应用本 change 的仓库
 - **WHEN** 测试遍历被 README 引用的位图
-- **THEN** 每张都在同目录 `SCREENSHOTS.md` 有包含五个字段的登记行，且文件不超过 400 KiB
+- **THEN** 每张都在同目录 `SCREENSHOTS.md` 有包含 `file`、`kind`、`source`、`date`、`reviewer`、`verdict`、`note` 字段的登记行，`kind` 只能是 `screenshot` 或 `illustration`；`illustration` 行只允许出现在上述五个 package 的目录下，其 `note` 含短语 `isolated instance has no model credentials`，且同目录存在同名图源（`.json` 或 `.svg`）；`screenshot` 行的 `note` 不得含该短语；文件不超过 400 KiB
+
+#### Scenario: 示意图被用于必须截图的 package 或理由不符
+- **GIVEN** `packages/dsh-pet/docs/SCREENSHOTS.md` 中有一行 `kind=illustration`，或某五个允许 package 之一的 `illustration` 行 `note` 写成 `unavailable`，或缺少同名图源，或 `kind` 为未知值，或 `screenshot` 行的 `note` 含有 `isolated instance has no model credentials`
+- **WHEN** 运行仓库测试
+- **THEN** 测试失败并点名文件、行与违规原因
 
 #### Scenario: 未登记的截图
 - **GIVEN** 某 README 新嵌入一张未在 `SCREENSHOTS.md` 登记的 png
 - **WHEN** 运行仓库测试
 - **THEN** 测试失败并点名该图片
+
+#### Scenario: 图源文件含位图中不可见的敏感信息
+- **GIVEN** 某示意图的 `.svg` 或 `.json` 图源在位图中不可见的位置（元数据、注释、隐藏图层、未渲染文本）含有真实路径、主机名、账号、URL 或 token 片段
+- **WHEN** Lead 执行隐私门禁
+- **THEN** 该示意图被退回，登记行结论不得填写为通过；门禁对图源文件按与位图相同的检查清单逐项检查，并在 `verify.md` 写明「图源已检查」
+
+#### Scenario: kind 与实际来源不符
+- **GIVEN** 某 `kind=screenshot` 的位图实际是合成的示意图，或某 `kind=illustration` 的位图不是由同目录登记的图源栅格化得到
+- **WHEN** Lead 执行来源核验
+- **THEN** Lead 对每个 `screenshot` 行确认其来自隔离 `DSH_HOME` 实例（拍摄过程记录在 `verify.md` 的 P3 小节：端口、主机名遮罩证据、清理证据），对每个 `illustration` 行把同目录图源用登记的渲染器与参数重新栅格化，并与已提交位图做像素比对（相同渲染器与参数下要求逐像素一致；若渲染器输出不确定，则退而要求目视一致并在记录中说明）；比对记录必须写入 `verify.md`，含图源路径、渲染器与版本、完整命令与选项、比对准则与结果；任一行无法核实来源即视为 P3 未通过，`verdict` 不得填写为通过
 
 #### Scenario: 截图含敏感信息
 - **GIVEN** 一张截图中可见真实 hostname

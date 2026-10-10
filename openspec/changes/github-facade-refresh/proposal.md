@@ -11,7 +11,7 @@ ohmydsh 的 GitHub 门面停留在 2026-08-28 那次「开源范」整理：READ
 - 「从零开始」不新增命令或模板文件：README 的 AI prompt 说明把 `dsh.yaml` 换成最小 manifest（`dshVersion` + `customizations: []` + `autoUpdate.enabled: false`）后 build；并明确 `dsh reset` 只撤销部署、不清空 manifest。
 - 用 archify 重新产出两张图：更新后的总架构图（含私有 overlay 与 `thirdPartyResources`）与新增的定制生命周期图，各自保留可编辑 JSON 与 dual SVG。
 - 每个仓库内被跟踪的 `README.md`（`openspec/` 除外）都配一份 `README.zh.md`，默认英文，彼此互链。12 个自研 package 的 README 按 A（主打，含首屏图）/ B（功能小件，1 张脱敏图）/ C（粘合层，无图）三级重写首屏。
-- 截图只来自合成数据的隔离 `DSH_HOME` 实例；每张图经 Lead 人工隐私门禁并在 `SCREENSHOTS.md` 登记。测试只校验登记与体积，隐私结论由人工门禁负责。
+- A/B 级 package 的位图只来自合成数据：隔离 `DSH_HOME` 实例的截图（`kind=screenshot`），或——仅限因隔离实例无模型凭据而无法拍到会话界面的五个 package（`worktree-session`、`dsh-openspec`、`sidebar-session-provider-icon`、`session-title-copy`、`session-links`）——由同目录提交的图源栅格化的示意图（`kind=illustration`）。`SCREENSHOTS.md` 为七字段登记；测试校验字段、`kind` 取值、示意图允许名单与理由短语、图源存在及体积；位图与图源的隐私结论、`kind` 与实际来源的一致性由 Lead 人工门禁负责（见 spec）。
 - 每个自研 package 在 `package.json` 声明 `ohmydsh.docTier`（A/B/C），作为 README 分级的单一数据源。
 - `docs/` 实行准入白名单：仅 `docs/adr/`、`docs/architecture/`、`docs/assets/`。`docs/notes/` 25 份文件按 design 中的逐文件处置表分流（迁入 `docs/architecture/`、迁入所属 package 或 change 的目录、转 BACKLOG 条目，或删除——其中一份复盘含真实会话与群标识，不应留在公开仓库），并更新全部引用，包括源码注释与配置样例。
 - 卫生：`AGENTS.md` 改为指向 `CLAUDE.md`；删除 `.cdp-scratch-shot.png` 与 `worktree-session-architecture.md`；删除 `package.json` 中误装的 `"2"` 依赖；`CONTRIBUTING.md` / `SECURITY.md` / `CODE_OF_CONDUCT.md` 改为英文为主；`CLAUDE.md` 阅读顺序改指 `docs/architecture/`；BACKLOG 删除已落地条目。

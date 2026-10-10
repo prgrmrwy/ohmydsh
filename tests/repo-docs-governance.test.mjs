@@ -4,12 +4,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import {
   REPO,
+  beforeFirstH2,
+  blankFencedBlocks,
+  cjkRatio,
   extractLinks,
   firstH1,
   indexEntry,
@@ -378,4 +381,383 @@ test('stale mention scan flags source comments but accepts the attribution line 
     'openspec/changes/archive/old/tasks.md': `${OLD_NOTES_DIR}/y.md\n`,
   }
   assert.deepEqual(staleMentions(Object.keys(texts), (file) => texts[file]), ['src/a.ts:1'])
+})
+
+// ---------------------------------------------------------------------------
+// README bilingual pairs, package tiers and screenshot registry (group 8)
+// ---------------------------------------------------------------------------
+
+const EN_CJK_MAX = 0.05
+const ZH_CJK_MIN = 0.2
+const PAIR_LINK_LINES = 15
+const MAX_BITMAP_BYTES = 400 * 1024
+const BITMAP = /\.(png|jpe?g|webp|gif)$/i
+const TIER_BITMAP = /\.(png|jpe?g|webp)$/i
+const readOptional = (file) => (existsSync(path.join(REPO, file)) ? readFileSync(path.join(REPO, file), 'utf8') : null)
+
+/** True when `text` links to `target` (repo-relative) within its first `PAIR_LINK_LINES` lines. */
+function linksWithinHead(file, text, target) {
+  return extractLinks(text).some((link) => link.line <= PAIR_LINK_LINES && resolveLinkTarget(file, link.target) === target)
+}
+
+/** README pairing problems: missing zh twin, missing mutual link, wrong language ratio. */
+function readmePairViolations(files, readFile) {
+  const problems = []
+  const readmes = files.filter((file) => /(^|\/)README\.md$/.test(file) && !file.startsWith('openspec/') && !file.includes('node_modules/'))
+  for (const en of readmes) {
+    const dir = path.posix.dirname(en)
+    const zh = dir === '.' ? 'README.zh.md' : `${dir}/README.zh.md`
+    if (!files.includes(zh)) {
+      problems.push(`${dir}: missing tracked README.zh.md next to ${en}`)
+      continue
+    }
+    const enText = readFile(en) ?? ''
+    const zhText = readFile(zh) ?? ''
+    if (!linksWithinHead(en, enText, zh)) problems.push(`${en}: does not link ${zh} within the first ${PAIR_LINK_LINES} lines`)
+    if (!linksWithinHead(zh, zhText, en)) problems.push(`${zh}: does not link ${en} within the first ${PAIR_LINK_LINES} lines`)
+    const enRatio = cjkRatio(enText)
+    if (!(enRatio < EN_CJK_MAX)) problems.push(`${en}: CJK ratio ${enRatio.toFixed(3)} must be below ${EN_CJK_MAX}`)
+    const zhRatio = cjkRatio(zhText)
+    if (!(zhRatio > ZH_CJK_MIN)) problems.push(`${zh}: CJK ratio ${zhRatio.toFixed(3)} must be above ${ZH_CJK_MIN}`)
+  }
+  return problems
+}
+
+test('every tracked README.md has a cross-linked README.zh.md within language thresholds', () => {
+  assert.deepEqual(readmePairViolations(trackedFiles(), readOptional), [])
+})
+
+test('README without zh pair is reported', () => {
+  const files = ['README.md', 'README.zh.md', 'packages/new-plugin/README.md', 'openspec/changes/archive/x/README.md']
+  const texts = {
+    'README.md': '[中文](README.zh.md)\nThis README is written in English and explains what the repository does.',
+    'README.zh.md': '[English](README.md)\n这是中文说明,覆盖全部内容。',
+  }
+  const problems = readmePairViolations(files, (file) => texts[file] ?? '')
+  assert.equal(problems.length, 1)
+  assert.match(problems[0], /packages\/new-plugin: missing tracked README\.zh\.md/)
+})
+
+test('a pair that does not link each other within 15 lines is reported', () => {
+  const filler = `${'line\n'.repeat(20)}`
+  const texts = {
+    'README.md': `${filler}[zh](README.zh.md)\nThis README is written in English.`,
+    'README.zh.md': '[en](README.md)\n这是中文说明,覆盖全部内容。',
+  }
+  const problems = readmePairViolations(['README.md', 'README.zh.md'], (file) => texts[file])
+  assert.equal(problems.length, 1)
+  assert.match(problems[0], /README\.md: does not link README\.zh\.md within the first 15 lines/)
+})
+
+test('cjk ratio helper flags a Chinese README.md', () => {
+  const texts = {
+    'README.md': '[中文](README.zh.md)\n这个包为使用者解决了什么问题,请阅读下面的说明文字。\n',
+    'README.zh.md': '[English](README.md)\n这个包为使用者解决了什么问题,请阅读下面的说明文字。\n',
+  }
+  const problems = readmePairViolations(['README.md', 'README.zh.md'], (file) => texts[file])
+  assert.equal(problems.length, 1)
+  assert.match(problems[0], /^README\.md: CJK ratio 0\.\d+ must be below 0\.05$/)
+  // code, inline code and link targets never count toward the ratio
+  assert.equal(cjkRatio('Plain text.\n```\n中文代码块中文代码块\n```\nsee `中文` [x](中文.md)'), 0)
+})
+
+/** Whether the paragraph right after a `<!-- problem -->` line has at least 40 non-whitespace code points. */
+function problemParagraphLength(head) {
+  const lines = head.split('\n')
+  const at = lines.findIndex((line) => /^\s*<!--\s*problem\s*-->\s*$/.test(line))
+  if (at === -1) return null
+  let start = at + 1
+  while (start < lines.length && lines[start].trim() === '') start += 1
+  const paragraph = []
+  for (let i = start; i < lines.length && lines[i].trim() !== '' && !/^#{1,6}\s/.test(lines[i]); i += 1) paragraph.push(lines[i])
+  return [...paragraph.join('')].filter((char) => !/\s/u.test(char)).length
+}
+
+/** `## ` headings immediately followed by a `<!-- section: removal -->` anchor. */
+function hasRemovalSection(text) {
+  const lines = blankFencedBlocks(text).split('\n')
+  return lines.some((line, index) => {
+    if (!/^##\s+\S/.test(line)) return false
+    let next = index + 1
+    while (next < lines.length && lines[next].trim() === '') next += 1
+    return next < lines.length && /^\s*<!--\s*section:\s*removal\s*-->\s*$/.test(lines[next])
+  })
+}
+
+/**
+ * Presentation problems of one package README pair.
+ * `exists(file)` reports whether a repo-relative file is present.
+ */
+function packageReadmeViolations({ id, tier, texts, exists }) {
+  const problems = []
+  if (!['A', 'B', 'C'].includes(tier)) {
+    problems.push(`packages/${id}/package.json: declare ohmydsh.docTier as "A", "B" or "C" (got ${JSON.stringify(tier ?? null)})`)
+    return problems
+  }
+  for (const name of ['README.md', 'README.zh.md']) {
+    const file = `packages/${id}/${name}`
+    const text = texts[name]
+    if (text == null) {
+      problems.push(`${file}: missing`)
+      continue
+    }
+    const head = beforeFirstH2(text)
+    const length = problemParagraphLength(head)
+    if (length === null) problems.push(`${file}: no <!-- problem --> line before the first "## " heading`)
+    else if (length < 40) problems.push(`${file}: problem paragraph has ${length} non-whitespace code points, need at least 40`)
+    if (tier === 'A' || tier === 'B') {
+      const docsDir = `packages/${id}/docs/`
+      const bitmaps = extractLinks(head)
+        .map((link) => resolveLinkTarget(file, link.target))
+        .filter((target) => target && target.startsWith(docsDir) && TIER_BITMAP.test(target))
+      if (bitmaps.length === 0) problems.push(`${file}: missing qualifying bitmap: tier ${tier} needs a png/jpg/jpeg/webp image under ${docsDir} above the first "## " heading`)
+      else for (const bitmap of bitmaps) if (!exists(bitmap)) problems.push(`${file}: screenshot ${bitmap} does not exist`)
+    } else if (!hasRemovalSection(text)) {
+      problems.push(`${file}: tier C needs a "## " heading immediately followed by <!-- section: removal -->`)
+    }
+  }
+  return problems
+}
+
+/** Tracked packages as `{ id, tier }`, tier read from `ohmydsh.docTier`. */
+function trackedPackages(files, readFile) {
+  return files
+    .map((file) => file.match(/^packages\/([^/]+)\/package\.json$/))
+    .filter(Boolean)
+    .map(([file, id]) => ({ id, tier: JSON.parse(readFile(file)).ohmydsh?.docTier }))
+}
+
+test('package READMEs satisfy their docTier presentation rules', () => {
+  const files = trackedFiles()
+  const exists = (file) => existsSync(path.join(REPO, file))
+  const packages = trackedPackages(files, read)
+  assert.ok(packages.length >= 12, `expected the twelve packages, found ${packages.length}`)
+  const problems = packages.flatMap(({ id, tier }) =>
+    packageReadmeViolations({
+      id,
+      tier,
+      texts: { 'README.md': readOptional(`packages/${id}/README.md`), 'README.zh.md': readOptional(`packages/${id}/README.zh.md`) },
+      exists,
+    }),
+  )
+  assert.deepEqual(problems, [])
+})
+
+test('package tiers match the design (D6)', () => {
+  const tiers = Object.fromEntries(trackedPackages(trackedFiles(), read).map(({ id, tier }) => [id, tier]))
+  assert.deepEqual(tiers, {
+    'cockpit-memex-browse-shim': 'C',
+    'cockpit-worktree-open-shim': 'C',
+    'dsh-memex': 'A',
+    'dsh-openspec': 'A',
+    'dsh-pet': 'A',
+    'home-network-model-guard': 'B',
+    'session-links': 'B',
+    'session-title-copy': 'B',
+    'sidebar-session-provider-icon': 'B',
+    'subscriptions-sandbox-shim': 'C',
+    'system-clock': 'B',
+    'worktree-session': 'A',
+  })
+})
+
+test('package without ohmydsh.docTier is reported', () => {
+  const files = ['packages/new-plugin/package.json']
+  const packages = trackedPackages(files, () => JSON.stringify({ name: 'new-plugin', version: '1.0.0' }))
+  assert.deepEqual(packages, [{ id: 'new-plugin', tier: undefined }])
+  const problems = packageReadmeViolations({ ...packages[0], texts: {}, exists: () => true })
+  assert.equal(problems.length, 1)
+  assert.match(problems[0], /packages\/new-plugin\/package\.json: declare ohmydsh\.docTier/)
+  const invalid = packageReadmeViolations({ id: 'x', tier: 'D', texts: {}, exists: () => true })
+  assert.match(invalid[0], /got "D"/)
+})
+
+const PROBLEM = 'This plugin saves you from retyping the same long path every time you reopen a session.'
+const fixtureReadme = (head) => `# pkg\n\n${head}\n\n## Usage\n`
+
+test('A/B tier with only an SVG above first h2 is reported', () => {
+  const svgOnly = fixtureReadme(`<!-- problem -->\n${PROBLEM}\n\n![diagram](docs/flow.svg)`)
+  const texts = { 'README.md': svgOnly, 'README.zh.md': svgOnly }
+  const problems = packageReadmeViolations({ id: 'p', tier: 'B', texts, exists: () => true })
+  assert.equal(problems.length, 2)
+  assert.match(problems[0], /packages\/p\/README\.md: missing qualifying bitmap: tier B needs a png\/jpg\/jpeg\/webp image under packages\/p\/docs\/ above the first "## " heading/)
+
+  const shot = fixtureReadme(`<!-- problem -->\n${PROBLEM}\n\n![shot](docs/shot.png)`)
+  const ok = { 'README.md': shot, 'README.zh.md': shot }
+  assert.deepEqual(packageReadmeViolations({ id: 'p', tier: 'A', texts: ok, exists: () => true }), [])
+  const missing = packageReadmeViolations({ id: 'p', tier: 'A', texts: ok, exists: () => false })
+  assert.equal(missing.length, 2)
+  assert.match(missing[0], /packages\/p\/docs\/shot\.png does not exist/)
+
+  const below = fixtureReadme(`<!-- problem -->\n${PROBLEM}\n\n## Usage\n![shot](docs/shot.png)`).replace('# pkg\n\n', '# pkg\n\n')
+  assert.equal(packageReadmeViolations({ id: 'p', tier: 'B', texts: { 'README.md': below, 'README.zh.md': below }, exists: () => true }).length, 2)
+})
+
+test('problem paragraph rules and C-tier removal section are enforced (fixture)', () => {
+  const short = '# pkg\n\n<!-- problem -->\nToo short.\n\n## Removal\n<!-- section: removal -->\n'
+  const none = '# pkg\n\nNo marker here at all, only prose that is long enough to be a paragraph.\n\n## Removal\n<!-- section: removal -->\n'
+  const noRemoval = `# pkg\n\n<!-- problem -->\n${PROBLEM}\n\n## Usage\n`
+  const good = `# pkg\n\n<!-- problem -->\n${PROBLEM}\n\n## Removal\n<!-- section: removal -->\nRemove it when upstream ships the fix.\n`
+  const run = (text) => packageReadmeViolations({ id: 'c', tier: 'C', texts: { 'README.md': text, 'README.zh.md': text }, exists: () => true })
+  assert.match(run(short)[0], /problem paragraph has \d+ non-whitespace code points, need at least 40/)
+  assert.match(run(none)[0], /no <!-- problem --> line/)
+  assert.match(run(noRemoval)[0], /tier C needs a "## " heading immediately followed by <!-- section: removal -->/)
+  assert.deepEqual(run(good), [])
+  assert.equal(problemParagraphLength(`<!-- problem -->\n\n${'中'.repeat(40)}`), 40)
+})
+
+const REGISTRY_COLUMNS = ['file', 'kind', 'source', 'date', 'reviewer', 'verdict', 'note']
+const KINDS = ['screenshot', 'illustration']
+/** Hard-coded on purpose: widening it is a spec revision (design D6), not an execution-time edit. */
+const ILLUSTRATION_PACKAGES = ['worktree-session', 'dsh-openspec', 'sidebar-session-provider-icon', 'session-title-copy', 'session-links']
+const ILLUSTRATION_REASON_PHRASE = 'isolated instance has no model credentials'
+const PLACEHOLDER = /^[-–—]*$/
+
+/** Bitmap files embedded by README files and the registry problems of each. */
+function screenshotViolations(files, readFile, sizeOf) {
+  const problems = []
+  const seen = new Set()
+  for (const readme of files.filter((file) => /(^|\/)README(\.zh)?\.md$/.test(file) && !file.startsWith('openspec/'))) {
+    for (const link of extractLinks(readFile(readme) ?? '')) {
+      const target = resolveLinkTarget(readme, link.target)
+      if (!target || !BITMAP.test(target) || seen.has(target)) continue
+      seen.add(target)
+      const size = sizeOf(target)
+      if (size === null) problems.push(`${target}: referenced by ${readme}:${link.line} but not found`)
+      else if (size > MAX_BITMAP_BYTES) problems.push(`${target}: ${size} bytes exceeds ${MAX_BITMAP_BYTES}`)
+      const dir = path.posix.dirname(target)
+      const registry = path.posix.join(dir, 'SCREENSHOTS.md')
+      const text = files.includes(registry) ? readFile(registry) : null
+      if (text === null) {
+        problems.push(`${target}: no ${registry} next to the image`)
+        continue
+      }
+      const name = path.posix.basename(target)
+      const row = text.split('\n').map(tableCells).find((cells) => cells && cells.length >= 1 && cellFile(cells[0]) === name)
+      if (!row) {
+        problems.push(`${target}: not registered in ${registry}`)
+        continue
+      }
+      if (row.length !== REGISTRY_COLUMNS.length) {
+        problems.push(`${target}: registry row in ${registry} has ${row.length} cells, need ${REGISTRY_COLUMNS.length} (${REGISTRY_COLUMNS.join(', ')})`)
+        continue
+      }
+      const empty = REGISTRY_COLUMNS.slice(0, 6).filter((_, index) => row[index] === '')
+      if (empty.length > 0) {
+        problems.push(`${target}: registry row in ${registry} has an empty cell (${empty.join(', ')})`)
+        continue
+      }
+      const [, kind, , , , , note] = row
+      if (!KINDS.includes(kind)) {
+        problems.push(`${target}: kind "${kind}" in ${registry} must be "screenshot" or "illustration"`)
+        continue
+      }
+      if (kind === 'screenshot') {
+        if (note.includes(ILLUSTRATION_REASON_PHRASE)) problems.push(`${target}: screenshot note in ${registry} must not contain "${ILLUSTRATION_REASON_PHRASE}"`)
+        continue
+      }
+      const owner = dir.match(/^packages\/([^/]+)\/docs(?:\/|$)/)?.[1]
+      if (!owner || !ILLUSTRATION_PACKAGES.includes(owner)) {
+        problems.push(`${target}: illustration is not allowed for package ${owner ?? dir} (allowed: ${ILLUSTRATION_PACKAGES.join(', ')})`)
+      }
+      if (PLACEHOLDER.test(note) || !note.includes(ILLUSTRATION_REASON_PHRASE)) {
+        problems.push(`${target}: illustration note in ${registry} must contain "${ILLUSTRATION_REASON_PHRASE}"`)
+      }
+      const stem = name.replace(/\.[^.]+$/, '')
+      if (!['json', 'svg'].some((extension) => files.includes(path.posix.join(dir, `${stem}.${extension}`)))) {
+        problems.push(`${target}: illustration has no same-name ${stem}.json or ${stem}.svg source in ${dir}/`)
+      }
+    }
+  }
+  return problems
+}
+
+/** Cells of a markdown table row, or null for non-rows. */
+function tableCells(line) {
+  const trimmed = line.trim()
+  if (!trimmed.startsWith('|')) return null
+  return trimmed.replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((cell) => cell.trim())
+}
+
+const cellFile = (cell) => cell.replace(/`/g, '').replace(/^\[([^\]]*)\]\(.*\)$/, '$1').trim()
+
+const REGISTRY_HEADER = ['| file | kind | source | date | reviewer | verdict | note |', '|---|---|---|---|---|---|---|']
+const ILLUSTRATION_REASON = 'isolated instance has no model credentials'
+const registry = (...rows) => [...REGISTRY_HEADER, ...rows].join('\n')
+
+/** Run the checker on one package whose README embeds `docs/<image>` and whose registry is `rows`. */
+function registryProblems({ id = 'worktree-session', image = 'overview.png', rows, extraFiles = [], size = 100 }) {
+  const dir = `packages/${id}/docs`
+  const files = [`packages/${id}/README.md`, `${dir}/SCREENSHOTS.md`, ...extraFiles]
+  const texts = { [`packages/${id}/README.md`]: `![x](docs/${image})\n`, [`${dir}/SCREENSHOTS.md`]: registry(...rows) }
+  return screenshotViolations(files, (file) => texts[file] ?? null, () => size)
+}
+
+test('every README bitmap is registered in SCREENSHOTS.md with kind, and under 400 KiB; illustration rows have a note and a committed source', () => {
+  const sizeOf = (file) => (existsSync(path.join(REPO, file)) ? statSync(path.join(REPO, file)).size : null)
+  assert.deepEqual(screenshotViolations(trackedFiles(), readOptional, sizeOf), [])
+})
+
+test('unregistered bitmap is reported', () => {
+  const files = ['packages/p/README.md', 'packages/p/docs/SCREENSHOTS.md', 'packages/q/README.md']
+  const texts = {
+    'packages/p/README.md': '![a](docs/a.png)\n![b](docs/b.png)\n![c](docs/c.webp)\n![d](docs/d.png)\n',
+    'packages/p/docs/SCREENSHOTS.md': registry(
+      '| `a.png` | screenshot | synthetic home | 2026-10-01 | lead | pass | - |',
+      '| `c.webp` | screenshot | synthetic home | 2026-10-01 | | pass | - |',
+      '| `d.png` | screenshot | synthetic home | 2026-10-01 | lead | pass |',
+    ),
+    'packages/q/README.md': '![z](docs/z.jpg)\n',
+  }
+  const sizes = { 'packages/p/docs/a.png': 100, 'packages/p/docs/b.png': 100, 'packages/p/docs/c.webp': 500 * 1024, 'packages/p/docs/d.png': 100, 'packages/q/docs/z.jpg': 10 }
+  const problems = screenshotViolations(files, (file) => texts[file] ?? null, (file) => sizes[file] ?? null)
+  assert.deepEqual(problems, [
+    'packages/p/docs/b.png: not registered in packages/p/docs/SCREENSHOTS.md',
+    `packages/p/docs/c.webp: ${500 * 1024} bytes exceeds ${MAX_BITMAP_BYTES}`,
+    'packages/p/docs/c.webp: registry row in packages/p/docs/SCREENSHOTS.md has an empty cell (reviewer)',
+    'packages/p/docs/d.png: registry row in packages/p/docs/SCREENSHOTS.md has 6 cells, need 7 (file, kind, source, date, reviewer, verdict, note)',
+    'packages/q/docs/z.jpg: no packages/q/docs/SCREENSHOTS.md next to the image',
+  ])
+})
+
+test('illustration allowlist, reason phrase, source file and kind values are enforced', () => {
+  const illustration = (note = ILLUSTRATION_REASON) => `| overview.png | illustration | rasterized from overview.json | 2026-10-09 | lead | pending | ${note} |`
+  const screenshot = (note = '-') => `| overview.png | screenshot | isolated DSH_HOME instance | 2026-10-09 | lead | pass | ${note} |`
+  const source = (id) => [`packages/${id}/docs/overview.json`]
+
+  // positive: allowlisted package, kind=illustration, exact phrase, same-name source present
+  assert.deepEqual(registryProblems({ rows: [illustration()], extraFiles: source('worktree-session') }), [])
+  assert.deepEqual(registryProblems({ rows: [illustration(`no live session: ${ILLUSTRATION_REASON}.`)], extraFiles: ['packages/worktree-session/docs/overview.svg'] }), [])
+  // every allowlisted package passes; a screenshot with `-` or free text note passes anywhere
+  for (const id of ['worktree-session', 'dsh-openspec', 'sidebar-session-provider-icon', 'session-title-copy', 'session-links']) {
+    assert.deepEqual(registryProblems({ id, rows: [illustration()], extraFiles: source(id) }), [], id)
+  }
+  assert.deepEqual(registryProblems({ id: 'dsh-pet', rows: [screenshot()] }), [])
+  assert.deepEqual(registryProblems({ id: 'dsh-pet', rows: [screenshot('Pet settings, general tab')] }), [])
+
+  // unknown kind
+  assert.deepEqual(registryProblems({ rows: [illustration().replace('| illustration |', '| diagram |')], extraFiles: source('worktree-session') }), [
+    'packages/worktree-session/docs/overview.png: kind "diagram" in packages/worktree-session/docs/SCREENSHOTS.md must be "screenshot" or "illustration"',
+  ])
+  // illustration in a package that must use screenshots
+  assert.deepEqual(registryProblems({ id: 'dsh-pet', rows: [illustration()], extraFiles: source('dsh-pet') }), [
+    'packages/dsh-pet/docs/overview.png: illustration is not allowed for package dsh-pet (allowed: worktree-session, dsh-openspec, sidebar-session-provider-icon, session-title-copy, session-links)',
+  ])
+  // allowlisted package with the wrong reason
+  assert.deepEqual(registryProblems({ rows: [illustration('unavailable')], extraFiles: source('worktree-session') }), [
+    `packages/worktree-session/docs/overview.png: illustration note in packages/worktree-session/docs/SCREENSHOTS.md must contain "${ILLUSTRATION_REASON}"`,
+  ])
+  // illustration without a placeholder-free note
+  assert.deepEqual(registryProblems({ rows: [illustration('-')], extraFiles: source('worktree-session') }), [
+    `packages/worktree-session/docs/overview.png: illustration note in packages/worktree-session/docs/SCREENSHOTS.md must contain "${ILLUSTRATION_REASON}"`,
+  ])
+  // allowlisted illustration whose same-name .json/.svg source is not committed (a different basename does not count)
+  assert.deepEqual(registryProblems({ rows: [illustration()] }), [
+    'packages/worktree-session/docs/overview.png: illustration has no same-name overview.json or overview.svg source in packages/worktree-session/docs/',
+  ])
+  assert.equal(registryProblems({ rows: [illustration()], extraFiles: ['packages/worktree-session/docs/other.json', 'packages/other/docs/overview.json'] }).length, 1)
+  // a screenshot row may not borrow the illustration reason
+  assert.deepEqual(registryProblems({ id: 'dsh-pet', rows: [screenshot(ILLUSTRATION_REASON)] }), [
+    `packages/dsh-pet/docs/overview.png: screenshot note in packages/dsh-pet/docs/SCREENSHOTS.md must not contain "${ILLUSTRATION_REASON}"`,
+  ])
 })

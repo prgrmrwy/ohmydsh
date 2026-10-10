@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Illustration source for packages/dsh-openspec/README.md. Synthetic text only. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="660" viewBox="0 0 1200 660" role="img" aria-labelledby="t d">
+<title id="t">dsh-openspec overview</title>
+<desc id="d">The official OpenSpec workflows are offered in every DSH workspace as skills and /opsx-* slash commands, all bound to one pinned managed CLI.</desc>
+<defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+<marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#059669"/></marker>
+</defs>
+<rect width="1200" height="660" fill="#f8fafc"/>
+<text x="40" y="52" font-family="DejaVu Sans, Verdana, sans-serif" font-size="26" font-weight="bold" fill="#0f172a" text-anchor="start">dsh-openspec: official OpenSpec workflows, in every workspace</text>
+<text x="40" y="80" font-family="DejaVu Sans, Verdana, sans-serif" font-size="15" font-weight="normal" fill="#475569" text-anchor="start">Skills and /opsx-* commands from one reviewed release. Nothing to install per project.</text>
+<rect x="40" y="110" width="300" height="300" rx="14" fill="#fff7ed" stroke="#fdba74" stroke-width="2"/>
+<text x="60" y="140" font-family="DejaVu Sans, Verdana, sans-serif" font-size="15" font-weight="bold" fill="#9a3412" text-anchor="start">Without it</text>
+<rect x="60" y="162" width="260" height="50" rx="8" fill="#ffffff" stroke="#fdba74" stroke-width="1.5"/>
+<text x="76" y="184" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="bold" fill="#0f172a" text-anchor="start">demo-app</text>
+<text x="76" y="202" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12" font-weight="normal" fill="#64748b" text-anchor="start">own OpenSpec copy</text>
+<rect x="250" y="175" width="48" height="24" rx="12" fill="#ffedd5" stroke="#fb923c" stroke-width="1.2"/>
+<text x="274.0" y="191.2" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12" font-weight="bold" fill="#9a3412" text-anchor="middle">v1.9</text>
+<rect x="60" y="226" width="260" height="50" rx="8" fill="#ffffff" stroke="#fdba74" stroke-width="1.5"/>
+<text x="76" y="248" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="bold" fill="#0f172a" text-anchor="start">billing-service</text>
+<text x="76" y="266" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12" font-weight="normal" fill="#64748b" text-anchor="start">own OpenSpec copy</text>
+<rect x="250" y="239" width="56" height="24" rx="12" fill="#ffedd5" stroke="#fb923c" stroke-width="1.2"/>
+<text x="278.0" y="255.2" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12" font-weight="bold" fill="#9a3412" text-anchor="middle">v1.11</text>
+<rect x="60" y="290" width="260" height="50" rx="8" fill="#ffffff" stroke="#fdba74" stroke-width="1.5"/>
+<text x="76" y="312" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="bold" fill="#0f172a" text-anchor="start">docs-site</text>
+<text x="76" y="330" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12" font-weight="normal" fill="#64748b" text-anchor="start">own OpenSpec copy</text>
+<rect x="250" y="303" width="56" height="24" rx="12" fill="#ffedd5" stroke="#fb923c" stroke-width="1.2"/>
+<text x="278.0" y="319.2" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12" font-weight="bold" fill="#9a3412" text-anchor="middle">v1.13</text>
+<text x="60" y="376" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="normal" fill="#9a3412" text-anchor="start">Each project drifts onto</text>
+<text x="60" y="394" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="normal" fill="#9a3412" text-anchor="start">a different version.</text>
+<line x1="342" y1="260" x2="400" y2="260" stroke="#059669" stroke-width="3" marker-end="url(#ag)"/>
+<rect x="402" y="110" width="380" height="300" rx="14" fill="#ecfdf5" stroke="#34d399" stroke-width="2"/>
+<text x="422" y="140" font-family="DejaVu Sans, Verdana, sans-serif" font-size="15" font-weight="bold" fill="#065f46" text-anchor="start">dsh-openspec (one managed adapter)</text>
+<rect x="422" y="160" width="340" height="64" rx="10" fill="#ffffff" stroke="#6ee7b7" stroke-width="1.5"/>
+<text x="438" y="186" font-family="DejaVu Sans, Verdana, sans-serif" font-size="14" font-weight="bold" fill="#0f172a" text-anchor="start">Pinned official release</text>
+<rect x="660" y="172" width="63" height="24" rx="12" fill="#d1fae5" stroke="#34d399" stroke-width="1.2"/>
+<text x="691.5" y="188.2" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12" font-weight="bold" fill="#065f46" text-anchor="middle">1.13.2</text>
+<text x="438" y="208" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12" font-weight="normal" fill="#64748b" text-anchor="start">Reviewed once, upgraded on purpose</text>
+<rect x="422" y="240" width="340" height="64" rx="10" fill="#ffffff" stroke="#6ee7b7" stroke-width="1.5"/>
+<text x="438" y="266" font-family="DejaVu Sans, Verdana, sans-serif" font-size="14" font-weight="bold" fill="#0f172a" text-anchor="start">Managed CLI per workspace session</text>
+<text x="438" y="288" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12" font-weight="normal" fill="#64748b" text-anchor="start">No global executable is needed or replaced</text>
+<rect x="422" y="320" width="340" height="74" rx="10" fill="#ffffff" stroke="#6ee7b7" stroke-width="1.5"/>
+<text x="438" y="346" font-family="DejaVu Sans, Verdana, sans-serif" font-size="14" font-weight="bold" fill="#0f172a" text-anchor="start">Generations</text>
+<text x="438" y="366" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12" font-weight="normal" fill="#64748b" text-anchor="start">Immutable copies of the release; old ones</text>
+<text x="438" y="382" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12" font-weight="normal" fill="#64748b" text-anchor="start">are kept, never rewritten</text>
+<line x1="784" y1="260" x2="842" y2="260" stroke="#059669" stroke-width="3" marker-end="url(#ag)"/>
+<rect x="844" y="110" width="316" height="300" rx="14" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+<text x="864" y="140" font-family="DejaVu Sans, Verdana, sans-serif" font-size="15" font-weight="bold" fill="#334155" text-anchor="start">DSH session</text>
+<rect x="864" y="158" width="276" height="34" rx="8" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="878" y="180" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="normal" fill="#334155" text-anchor="start">/opsx-</text>
+<text x="864" y="222" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="bold" fill="#1d4ed8" text-anchor="start">/opsx-explore</text>
+<text x="1010" y="222" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12" font-weight="normal" fill="#475569" text-anchor="start">Think through an idea</text>
+<text x="864" y="262" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="bold" fill="#1d4ed8" text-anchor="start">/opsx-propose</text>
+<text x="1010" y="262" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12" font-weight="normal" fill="#475569" text-anchor="start">Propose a change</text>
+<text x="864" y="302" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="bold" fill="#1d4ed8" text-anchor="start">/opsx-apply</text>
+<text x="1010" y="302" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12" font-weight="normal" fill="#475569" text-anchor="start">Implement its tasks</text>
+<text x="864" y="342" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="bold" fill="#1d4ed8" text-anchor="start">/opsx-archive</text>
+<text x="1010" y="342" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12" font-weight="normal" fill="#475569" text-anchor="start">Finish and archive</text>
+<text x="864" y="392" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12" font-weight="normal" fill="#64748b" text-anchor="start">Also available as bundled Skills</text>
+<rect x="40" y="440" width="1120" height="190" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="60" y="470" font-family="DejaVu Sans, Verdana, sans-serif" font-size="15" font-weight="bold" fill="#334155" text-anchor="start">Also built in</text>
+<rect x="60" y="490" width="255" height="120" rx="10" fill="#dbeafe" stroke="#60a5fa" stroke-width="1.5"/>
+<text x="76" y="518" font-family="DejaVu Sans Mono, monospace" font-size="14" font-weight="bold" fill="#1e3a8a" text-anchor="start">/openspec-init</text>
+<text x="76" y="542" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12.5" font-weight="normal" fill="#475569" text-anchor="start">Returns a validated official</text>
+<text x="76" y="560" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12.5" font-weight="normal" fill="#475569" text-anchor="start">init command for the current</text>
+<text x="76" y="578" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12.5" font-weight="normal" fill="#475569" text-anchor="start">workspace. It is not run for</text>
+<text x="76" y="596" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12.5" font-weight="normal" fill="#475569" text-anchor="start">you.</text>
+<rect x="335" y="490" width="255" height="120" rx="10" fill="#dbeafe" stroke="#60a5fa" stroke-width="1.5"/>
+<text x="351" y="518" font-family="DejaVu Sans Mono, monospace" font-size="14" font-weight="bold" fill="#1e3a8a" text-anchor="start">/openspec-upgrade</text>
+<text x="351" y="542" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12.5" font-weight="normal" fill="#475569" text-anchor="start">Prepares reviewed upgrade,</text>
+<text x="351" y="560" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12.5" font-weight="normal" fill="#475569" text-anchor="start">rollback and project-refresh</text>
+<text x="351" y="578" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12.5" font-weight="normal" fill="#475569" text-anchor="start">commands.</text>
+<rect x="610" y="490" width="255" height="120" rx="10" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="626" y="518" font-family="DejaVu Sans, Verdana, sans-serif" font-size="14" font-weight="bold" fill="#334155" text-anchor="start">Quiet by default</text>
+<text x="626" y="542" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12.5" font-weight="normal" fill="#475569" text-anchor="start">Only an optional version check</text>
+<text x="626" y="560" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12.5" font-weight="normal" fill="#475569" text-anchor="start">touches the network. Telemetry</text>
+<text x="626" y="578" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12.5" font-weight="normal" fill="#475569" text-anchor="start">is off.</text>
+<rect x="885" y="490" width="255" height="120" rx="10" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="901" y="518" font-family="DejaVu Sans, Verdana, sans-serif" font-size="14" font-weight="bold" fill="#334155" text-anchor="start">Reversible</text>
+<text x="901" y="542" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12.5" font-weight="normal" fill="#475569" text-anchor="start">Disable the entry in dsh.yaml</text>
+<text x="901" y="560" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12.5" font-weight="normal" fill="#475569" text-anchor="start">and run dsh build. Nothing is</text>
+<text x="901" y="578" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12.5" font-weight="normal" fill="#475569" text-anchor="start">rewritten.</text>
+</svg>
