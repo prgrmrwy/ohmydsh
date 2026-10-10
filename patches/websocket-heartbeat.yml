@@ -1,0 +1,6 @@
+# DSH 官方 gateway 心跳配置；通过 manifest + sync 物化，不手改部署副本。
+# 原厂 2000ms 对多 MB 历史与短时网络抖动容忍偏低；5000ms 约容忍 10–15 秒。
+# MAX_MISSED_HEARTBEATS 仍为原厂 2。本片段只声明其所有的键。
+- id: typert-gateway
+  config:
+    websocketHeartbeatIntervalMs: 5000

@@ -16,7 +16,7 @@
 ## 3. 版本、文档与部署
 
 - [ ] 3.1 `packages/dsh-memex/package.json` 版本 0.3.0 → 0.3.1；`dsh.yaml` 中 dsh-memex 的 version 同步，note 追加本 change 的行为说明与回滚方式。验证：`npm run check:artifacts` 通过。
-- [ ] 3.2 更新 `packages/dsh-memex/README.md` 与 `packages/dsh-memex/docs/integration-notes.md`，说明在场自写卡的判定依据（`surface.nodes`、写入锚点）与不覆盖读取的边界；在 `docs/architecture/dsh-plugin-integration-pitfalls.md` 记一条：工具执行时 `surface.nodes.at(-1)` 是发出调用的 assistant 消息，`eventAt`/`snapshotEvents` 已 deprecated。验证：两份文档含上述说明。
+- [ ] 3.2 更新 `packages/dsh-memex/README.md`、`packages/dsh-memex/README.zh.md` 与 `packages/dsh-memex/docs/integration-notes.md`，说明在场自写卡的判定依据（`surface.nodes`、写入锚点）与不覆盖读取的边界；在 `docs/architecture/dsh-plugin-integration-pitfalls.md` 记一条：工具执行时 `surface.nodes.at(-1)` 是发出调用的 assistant 消息，`eventAt`/`snapshotEvents` 已 deprecated。验证：两份文档含上述说明。
 - [ ] 3.3 运行仓库级 `npm test`、`npm run check:artifacts`、`openspec validate dsh-memex-demote-in-context-self-cards --strict`。验证：退出码为 0（若存在与本变更无关的既有失败，记录基线对比）。
 - [ ] 3.4 在用户确认 DSH 空闲后执行 `dsh build`、再跑一次确认幂等，并按 setsid 方式重启；在 Web GUI 实测：写一张卡后用相关词检索，该卡排在末尾并带标注；用该卡 slug 检索时保持原位。验证：在报告中描述观察结果（不提交截图）。
 - [ ] 3.5 部署满一段时间后，用冻结的 rubric-v3 工具对改动后的新会话做同口径测量，与基线 `aggregate.json`（hash 见 `frozen-v3/MANIFEST.sha256`）对比，结果写入仓库外的评估目录。验证：对比报告存在，且说明样本量与区间。
