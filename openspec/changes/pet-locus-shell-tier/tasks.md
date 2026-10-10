@@ -35,7 +35,7 @@
 
 - [x] 6.1 `context.ts`：按档位生成能力说明；shell 档注入当前 chat_id、允许 bot 身份读取当前入口、禁止跨群/私聊/全局检索、回复仍经 finish；safe 档文案与今天一致（快照测试）
 - [x] 6.2 管理面路由与 UI：展示并切换工具档位，沿用权限档控件形态；显示后果说明，MUST NOT 把 guard 称为安全边界
-- [x] 6.3 更新 `docs/notes/dsh-plugin-integration-pitfalls.md` 中 own-layer/委派逃逸条目，说明宽底座为何仍排除委派
+- [x] 6.3 更新 `docs/architecture/dsh-plugin-integration-pitfalls.md` 中 own-layer/委派逃逸条目，说明宽底座为何仍排除委派
 
 ## 7. 验证与收尾
 
