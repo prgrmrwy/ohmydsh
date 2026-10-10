@@ -11,6 +11,7 @@ import {
   CollaborationUnavailableError, readForCollaborationCaller,
   type CollaborationCallerPorts,
 } from './caller.js'
+import { inquiryTargetReference } from '../inquiry/ask.js'
 
 /** Whether a member can be addressed now, without claiming an unproven state. */
 export type CollaboratorReachability =
@@ -26,6 +27,8 @@ export interface CollaboratorMember {
   /** Present for Locus children; a main session has no locus of its own. */
   readonly locusId?: string
   readonly generation?: number
+  /** Canonical opaque inquiry target; possession is not authorization. */
+  readonly target: string
   readonly relation: 'parent' | 'child' | 'sibling'
   /** Traceable metadata only; never a model-generated summary of history. */
   readonly title?: string
@@ -99,6 +102,7 @@ export async function listCollaborators(
         // fixed durable parent rather than an inferred one.
         members.push({
           sessionId: caller.parentSessionId,
+          target: inquiryTargetReference({ kind: 'main', sessionId: caller.parentSessionId }),
           relation: 'parent',
           ...reachabilityOf(caller.parentSessionId, deps.describe),
         })
@@ -109,6 +113,9 @@ export async function listCollaborators(
           sessionId: child.sessionId,
           locusId: child.locusId,
           generation: child.generation,
+          target: inquiryTargetReference({
+            kind: 'child', sessionId: child.sessionId, locusId: child.locusId, generation: child.generation,
+          }),
           relation: caller.callerLocus === undefined ? 'child' : 'sibling',
           ...reachabilityOf(child.sessionId, deps.describe),
         })
