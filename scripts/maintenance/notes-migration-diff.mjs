@@ -12,6 +12,7 @@
 // one-line attribution header. Any residual difference is reported and the
 // command exits non-zero, so the only edits a `move` file can carry are the
 // registered ones. External URLs are compared byte for byte.
+import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
@@ -29,10 +30,50 @@ export function applyAutoRedaction(text, rules) {
   return out
 }
 
-/** Apply registered manual `{ find, replace }` items (literal, all occurrences). */
+/** sha256 (hex) of the UTF-8 bytes of `text`. */
+export function sha256Hex(text) {
+  return createHash('sha256').update(text, 'utf8').digest('hex')
+}
+
+/**
+ * Registered manual items never store the sensitive literal. An item is
+ * `{ findSha256, length, replace }`: the literal is identified by the SHA-256
+ * of its UTF-8 bytes and its length in code points. Matching hashes every
+ * window of that many code points, so a literal is found exactly (case
+ * sensitive) without the literal itself being committed anywhere.
+ */
+export function findManualMatches(text, item) {
+  const points = Array.from(text)
+  const hits = []
+  for (let i = 0; i + item.length <= points.length; ) {
+    const window = points.slice(i, i + item.length).join('')
+    if (sha256Hex(window) === item.findSha256) {
+      hits.push({ index: i, text: window })
+      i += item.length
+    } else i += 1
+  }
+  return hits
+}
+
+/** Count occurrences of a registered manual item in `text`. */
+export function countManualMatches(text, item) {
+  return findManualMatches(text, item).length
+}
+
+/** Apply registered manual items (all occurrences) to `text`. */
 export function applyManualRedactions(text, items) {
   let out = text
-  for (const item of items ?? []) out = out.split(item.find).join(item.replace)
+  for (const item of items ?? []) {
+    const points = Array.from(out)
+    const pieces = []
+    let last = 0
+    for (const hit of findManualMatches(out, item)) {
+      pieces.push(points.slice(last, hit.index).join(''), item.replace)
+      last = hit.index + item.length
+    }
+    pieces.push(points.slice(last).join(''))
+    out = pieces.join('')
+  }
   return out
 }
 
@@ -121,14 +162,17 @@ export function runDiff({ base, root, dispositionFile }) {
     }
     for (const item of row.manualRedactions ?? []) {
       const redactedFirst = applyAutoRedaction(source, disposition.redactionRules)
-      if (!redactedFirst.includes(item.find)) {
+      const count = countManualMatches(redactedFirst, item)
+      if (count === 0) {
         ok = false
-        lines.push(`FAIL #${row.n} ${row.source}: registered manual item not found in source: ${JSON.stringify(item.find)}`)
-      } else manualApplied += redactedFirst.split(item.find).length - 1
+        lines.push(`FAIL #${row.n} ${row.source}: registered manual item (sha256 ${item.findSha256.slice(0, 12)}…, ${item.length} code points) not found in source`)
+      } else manualApplied += count
     }
     let expected = applyAutoRedaction(source, disposition.redactionRules)
     expected = applyManualRedactions(expected, row.manualRedactions)
     expected = canonicalizePaths(expected, row.source, notesMap)
+    // Neutral placeholder for the removed notes directory inside recorded commands (not a privacy edit).
+    for (const rewrite of row.pathRewrites ?? []) expected = expected.split(rewrite.from).join(rewrite.to)
     const actual = canonicalizePaths(bodyLines.join('\n'), row.target, notesMap)
     if (expected !== actual) {
       ok = false

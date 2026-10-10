@@ -65,7 +65,7 @@ bundlesBrief:              # 出厂 bundle 的短备注(非 manifest 管理的�
   "@deepseek-ai/dsh-web-app": web 壳(浏览器 UI)
 
 customizations:
-  # 字段约定:brief = 启动清单里的短备注(优先于 note);note = 完整来源/审查记录;
+  # 字段约定:brief = 启动清单里的短备注(优先于 note);note = 人读摘要(来源/许可或 change、信任面、升级复核、回滚;≤600 code point,审查过程归 git 与 OpenSpec);
   #          name = 非 npm spec(github/tarball)时的真实包名(必填;npm spec 可省略)
   #          enabledEnv = 可选,声明后同名 DSH_ 环境变量(真值 1/true/yes/on、
   #            假值 0/false/no/off)覆盖本条目有效启用状态,未设置/无法识别时
@@ -123,22 +123,22 @@ customizations:
         package: "@touchskyer/memex"
         version: "0.4.1"
     note: '自研,spec dsh-memex-scope/-settings-ui/-card-browser(0.3.0 起工作区开关改为路径声明 workspaces)。依赖全局安装的内核 @touchskyer/memex@0.4.1(MIT,不改上游):由 hostPrerequisites 在 bin/dsh 启动前自愈(sync 只校验不安装),pin 须等于生成物 KERNEL_VERSION,全局安装需显式 --registry=https://registry.npmjs.org/。卡片浏览按需起内核 serve(配远端须 --local,注入 MEMEX_NO_OPEN,取 stdout 最后一个端口);跨机器注册方失败绝不回落本机地址。升级复核:内核 --init 的英文错误串(调用已注入 LC_ALL=C)与 serve 文本解析。回滚:enabled:false + sync(重启须脱离调用方进程);退到 0.2.0 前先把关闭开关写回条目级;紧急熔断 DSH_MEMEX_ENABLED=0。'
-  # 自研(local):B013 sidebar 会话行前动态 provider logo
+  # 自研(local):sidebar 会话行前动态 provider logo
   - id: sidebar-session-provider-icon
     type: package
     source: local
     version: 0.1.2
     enabled: true
     brief: 侧边栏会话行当前选中模型品牌 logo(选择器即时切换)
-    note: '自研,B013,spec sidebar-session-provider-icon。Web client 订阅官方 modelDirectories 的即时选择,Host provider projection 仅作冷历史 fallback;品牌 SVG 为随包落盘的固定来源(@lobehub/icons-static-svg@1.94.0 MIT;OpenCode 取自 anomalyco/opencode 固定 commit),不手绘、运行时不访问 CDN;不触碰官方 StateDot/时间/菜单/拖拽,DOM 定位失败静默降级,自身不发网络请求。升级复核:DSH 升级后回归 row-locator 对官方行 DOM 的假设。移除:enabled:false → dsh build → 重启。'
-  # 自研(local):B018 会话标题旁 session id 短标识徽标(点击复制完整 id)
+    note: '自研,spec sidebar-session-provider-icon。Web client 订阅官方 modelDirectories 的即时选择,Host provider projection 仅作冷历史 fallback;品牌 SVG 为随包落盘的固定来源(@lobehub/icons-static-svg@1.94.0 MIT;OpenCode 取自 anomalyco/opencode 固定 commit),不手绘、运行时不访问 CDN;不触碰官方 StateDot/时间/菜单/拖拽,DOM 定位失败静默降级,自身不发网络请求。升级复核:DSH 升级后回归 row-locator 对官方行 DOM 的假设。移除:enabled:false → dsh build → 重启。'
+  # 自研(local):会话标题旁 session id 短标识徽标(点击复制完整 id)
   - id: session-title-copy
     type: package
     source: local
     version: 0.1.2
     enabled: true
     brief: 标题右侧 6 位 session id 徽标(点击复制完整 id + toast;标题恢复官方)
-    note: '自研,B018,spec session-title-copy(change session-title-id-badge)。Web client 订阅官方 sessions list(current 为 id 真相源),在标题旁插入 6 位 session id 徽标,点击复制完整 id;标题保持官方 disabled 原样。无 Host 能力、无网络请求、不读取会话内容;官方 DOM 变化或剪贴板被拒时静默降级。升级复核:官方标题区结构变化时只需改 src/client/title-locator.ts。移除:enabled:false → dsh build → 重启,无持久数据。'
+    note: '自研,spec session-title-copy(change session-title-id-badge)。Web client 订阅官方 sessions list(current 为 id 真相源),在标题旁插入 6 位 session id 徽标,点击复制完整 id;标题保持官方 disabled 原样。无 Host 能力、无网络请求、不读取会话内容;官方 DOM 变化或剪贴板被拒时静默降级。升级复核:官方标题区结构变化时只需改 src/client/title-locator.ts。移除:enabled:false → dsh build → 重启,无持久数据。'
   # 自研(local):B019 设置面板底部 DSH 主机系统时钟(24 小时制 + 时区)
   - id: system-clock
     type: package
@@ -229,7 +229,7 @@ customizations:
     enabled: true
     brief: 按受众校准解释(年龄/学段/职位/亲属关系,默认 Age 5)
     note: '上游 https://github.com/DreambigOu/ELI5,commit a766623b062331fdde53467001379b4ddf3acc2f,MIT(全文随目录落在 ~/.dsh/skills/eli5/LICENSE.txt,公开仓库再分发须随附)。纯文本 skill,不新增工具、代码、Hook、网络访问或依赖;正文逐字未改,仅追加 whenToUse 收紧触发,出处与本地改动见同目录 ATTRIBUTION.md。升级复核:人工复核上游新 commit 后同步。移除:enabled:false → dsh build。'
-  # B004 扩展:订阅制主对话 provider — codex / claude / grok OAuth 登录后出现在输入框模型选择器(免 api-key)
+  # 订阅制主对话 provider — codex / claude / grok OAuth 登录后出现在输入框模型选择器(免 api-key)
   - id: llm-subscriptions
     type: package
     source: remote
@@ -256,15 +256,15 @@ customizations:
     enabled: true
     brief: 对话区宽度五档切换(748px 至全宽)
     note: '第三方 https://github.com/aaronlei/dsh-width-tiers(MIT)。Web 对话区五档宽度切换,以 localStorage 记忆;无网络请求、无 Host 文件/命令/模型能力,卸载时清理 DOM/监听/定时器/样式;非标准档会关闭详情面板,全宽档经官方 layout 服务收起侧边栏。升级复核:自 1.0.4 起接线由包自带 bundle patch 承载,绝不可再并存手写 wiring patch(对无 id 的 insert DSH 不去重,会出现两条同 id loader 行);验收为启动清单中 dsh-width-tiers 恰好出现一次;DSH 升级需回归 layout/locale 服务。回滚:改回上一 pin → dsh build → 重启。 pin 校验 sha512-O9/ZyA1V+xwl/tGrxK9JgaNN97QR1484qqo3kPuwq9Ywnvnk7gBopB3yMWLQozP+79iE+0t1oMzZL2MZAjMQVg=='
-  # 自研(local):B020 会话链接面板 — better-sidebar 右侧工作台 tab(当前会话链接分类)
+  # 自研(local):会话链接面板 — better-sidebar 右侧工作台 tab(当前会话链接分类)
   - id: session-links
     type: package
     source: local
     version: 0.1.0
     enabled: true
     brief: 文档/资料面板(当前会话 MR/部署/工作项/制品链接分类 + 本次产出文件)
-    note: '自研,B020,spec session-links。better-sidebar 右侧工作台「文档/资料」tab:收集当前会话的 URL 与产出文件并分类(MR/部署/工作项/制品/其他);Host 经只读 Connection RPC /dsh-session-links 读完整会话日志作基线,浏览器增量采集。不出网、不读写凭据、不持久化;组织专属评审/工作项域名走插件行 config(reviewHosts/trackerHosts,由私有 overlay 注入)。依赖第三方 dsh-better-sidebar(peer >=0.16.0,缺失则整体不激活)。升级复核:better-sidebar 的 tab API 与会话节点结构;通道仍仅回环。移除:enabled:false → dsh build → 重启。'
-  # 第三方(remote):B007 better-sidebar 侧边栏工作台
+    note: '自研,spec session-links。better-sidebar 右侧工作台「文档/资料」tab:收集当前会话的 URL 与产出文件并分类(MR/部署/工作项/制品/其他);Host 经只读 Connection RPC /dsh-session-links 读完整会话日志作基线,浏览器增量采集。不出网、不读写凭据、不持久化;组织专属评审/工作项域名走插件行 config(reviewHosts/trackerHosts,由私有 overlay 注入)。依赖第三方 dsh-better-sidebar(peer >=0.16.0,缺失则整体不激活)。升级复核:better-sidebar 的 tab API 与会话节点结构;通道仍仅回环。移除:enabled:false → dsh build → 重启。'
+  # 第三方(remote):better-sidebar 侧边栏工作台
   - id: better-sidebar
     type: package
     source: remote
@@ -272,8 +272,8 @@ customizations:
     version: 0.24.1
     enabled: true
     brief: 服务化侧边栏工作台
-    note: '第三方 https://github.com/omdsh-dev/DSH-better-sidebar(MIT),B007。右侧栏/底部面板工作台,开放 ctx.betterSidebar.registerTab(session-links 依赖)。信任面较重:文件管理、内嵌浏览器、终端(0.24.1 起走官方 terminal 能力,不再自带 node-pty)、Git 面板、后台任务、侧边对话(完整上下文继承,费 token,可设置关闭);可选工具 terminal_*/sidebar_open 默认关闭。升级复核:peer 须满足 dshVersion(0.24.1 仅满足 0.2.0,随运行体同批),确认 registerTab 仍在、pnpm why 仅一份实例、出站域名不变。回滚:随运行体一起回到 0.19.1(其 peer 只满足 0.1.5)。 pin 校验 sha512-X5tdu07Ub0isxruG559o46891F7MjxM+CzR6QoGpHZtN5J8gz6FA8Dq632lLI77c4IjL2GP+N6PuWaDnoKPuPQ=='
-  # 自研(remote):B015 驾驶舱桥接 — DSH web 客户端上报会话点击给本机 dsh-cockpit
+    note: '第三方 https://github.com/omdsh-dev/DSH-better-sidebar(MIT)。右侧栏/底部面板工作台,开放 ctx.betterSidebar.registerTab(session-links 依赖)。信任面较重:文件管理、内嵌浏览器、终端(0.24.1 起走官方 terminal 能力,不再自带 node-pty)、Git 面板、后台任务、侧边对话(完整上下文继承,费 token,可设置关闭);可选工具 terminal_*/sidebar_open 默认关闭。升级复核:peer 须满足 dshVersion(0.24.1 仅满足 0.2.0,随运行体同批),确认 registerTab 仍在、pnpm why 仅一份实例、出站域名不变。回滚:随运行体一起回到 0.19.1(其 peer 只满足 0.1.5)。 pin 校验 sha512-X5tdu07Ub0isxruG559o46891F7MjxM+CzR6QoGpHZtN5J8gz6FA8Dq632lLI77c4IjL2GP+N6PuWaDnoKPuPQ=='
+  # 自研(remote):驾驶舱桥接 — DSH web 客户端上报会话点击给本机 dsh-cockpit
   - id: dsh-cockpit-bridge
     type: package
     source: remote
@@ -282,7 +282,7 @@ customizations:
     version: 0.6.4
     enabled: true
     brief: 驾驶舱桥接(会话点击上报 + 0.1.2 待审批/提问观测,顶栏完成提醒自动清除)
-    note: '自研,B015,https://github.com/prgrmrwy/dsh-cockpit(MIT),GitHub release tarball。纯 web client:把会话打开确认、完成未读状态与待审批/提问快照上报本机驾驶舱,并向两个 cockpit-*-shim 提供 cockpitBridge.forwards 等服务名;只传 sessionId 等标识符与协议元数据,不碰内容/设置/凭据;驾驶舱不可达时静默降级。每台接驾驶舱的机器都装,0.6.4 须配 dsh-cockpit 服务端 2f51565 及之后,否则完成未读上报被忽略。升级复核:与驾驶舱服务端版本配对,及两个 shim 所用服务名;旧 portForward 消费者不可回退到 0.5.2。回滚:spec/version 改回上一 release tarball → dsh build → 刷新设备页面。 tarball SHA256 877b1312d85e5f077c318d98815dbb15f238b26e9a118d671c850a71ffb005f2'
+    note: '自研,https://github.com/prgrmrwy/dsh-cockpit(MIT),GitHub release tarball。纯 web client:把会话打开确认、完成未读状态与待审批/提问快照上报本机驾驶舱,并向两个 cockpit-*-shim 提供 cockpitBridge.forwards 等服务名;只传 sessionId 等标识符与协议元数据,不碰内容/设置/凭据;驾驶舱不可达时静默降级。每台接驾驶舱的机器都装,0.6.4 须配 dsh-cockpit 服务端 2f51565 及之后,否则完成未读上报被忽略。升级复核:与驾驶舱服务端版本配对,及两个 shim 所用服务名;旧 portForward 消费者不可回退到 0.5.2。回滚:spec/version 改回上一 release tarball → dsh build → 刷新设备页面。 tarball SHA256 877b1312d85e5f077c318d98815dbb15f238b26e9a118d671c850a71ffb005f2'
   # 自研(local):仅承载 cockpit bridge → Worktree Session 打开行为的部署侧耦合
   - id: cockpit-worktree-open-shim
     type: package

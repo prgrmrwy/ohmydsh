@@ -7,7 +7,7 @@ In the DSH session list every row looks alike, so you cannot tell which model a 
 
 ![Illustration: each sidebar session row gets a badge for the model selected in that session](docs/overview.png)
 
-**Install.** Managed through `dsh.yaml` (entry `sidebar-session-provider-icon`, `source: local`): set `enabled: true`, run `dsh build`, then restart DSH. Backlog item B013; the design is in the OpenSpec change `sidebar-session-provider-icon`.
+**Install.** Managed through `dsh.yaml` (entry `sidebar-session-provider-icon`, `source: local`): set `enabled: true`, run `dsh build`, then restart DSH. The design is in the OpenSpec change `sidebar-session-provider-icon`.
 
 ## How it behaves
 

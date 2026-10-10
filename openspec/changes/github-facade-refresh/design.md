@@ -101,7 +101,7 @@ AI prompt 以 `[ASK-PATH]` 等固定英文规则标签组织，测试只断言�
 | 本机路径 | `/(Users\|home)/<name>/` | `~/` |
 | devbox 主机名 | `n37-[0-9-]+` | `<devbox>` |
 
-2. 人工项：规则无法匹配的可识别信息（真实人名、bot 显示名、私有仓库名与提交号、账号、组织专属域名或链接）由 P1 执行者在迁移时逐项登记到 `notes-disposition.json` 的 `manualRedactions` 并替换。规划期评审已发现的项作为初始登记写入（人名 2 个、bot 显示名 1 个、私有仓库名与提交号 1 处），但**不声称完整**。公开第三方包名、作者 npm scope、公开文档链接与 change `externalize-org-specific-values` 引入的占位名（`git.corp.example`、`acme`）不算可识别信息。
+2. 人工项：规则无法匹配的可识别信息（真实人名、bot 显示名、私有仓库名与提交号、账号、组织专属域名或链接）由 P1 执行者在迁移时逐项登记到 `notes-disposition.json` 的 `manualRedactions` 并替换；登记只存 `{findSha256, length, replace}`（字面值的 SHA-256 与 code point 长度），**不把被脱敏的字面值本身写进仓库**（2026-10-10 终审 C1：否则该 JSON 会成为敏感项索引）。规划期评审已发现的项作为初始登记写入（人名 2 个、bot 显示名 1 个、私有仓库名与提交号 1 处），但**不声称完整**。公开第三方包名、作者 npm scope、公开文档链接与 change `externalize-org-specific-values` 引入的占位名（`git.corp.example`、`acme`）不算可识别信息。
 3. 验收：① 测试扫描迁移目标，不得命中任何自动规则或已登记人工项；② `notes-migration-diff.mjs` 的剩余差异只能是已登记的人工项；③ Lead 逐份通读全部非删除迁移产物，按上面的检查清单判定，每份文件的结论（通过 / 补登记后通过）写入 `verify.md`。三者都满足才算 P1 的 docs 迁移验收通过。
 
 处置表与脱敏规则另存为 `openspec/changes/github-facade-refresh/notes-disposition.json`（机器可读，测试与维护脚本读取）。每行含 `n`、`source`、`action`（`move`/`move-rewrite`/`delete`/`backlog`）、`target`、`reason`、`autoRedact`（非删除行恒为 true）、`manualRedactions`（实施期补全）。本节表格是其人类可读呈现，测试逐行比较两者的 `source`、`action`、`target`、`reason`。所有引用（`CLAUDE.md`、`CONTRIBUTING.md`、`.gitignore`、`.env.local.example`、ADR-0006、进行中 change、`dsh.yaml`、源码注释、issue 模板、BACKLOG）同步更新为新路径。`.gitignore` 中 `docs/notes/<topic>.local.md` 的本地笔记约定改为 `*.local.md` 通用规则。

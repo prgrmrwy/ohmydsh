@@ -685,6 +685,18 @@
 - **相关**: `openspec/changes/add-dsh-openspec-adapter/`(design D1「宿主层 provider 与 Pet 的关系」、session spec 的 Pet 暴露缺口场景);`docs/architecture/dsh-plugin-integration-pitfalls.md` §12(`toolFilter` 不覆盖 own scope,同类的「过滤只管继承层」问题)。
 - **更新**: 2026-10-01 记录(change `add-dsh-openspec-adapter` 要求登记;用户决定先声明、先用着试试,不在该 change 内修)。
 
+### [D009] 本次文档整理范围之外仍残留的真实标识
+- **状态**: 待处理(2026-10-10 由 `github-facade-refresh` 终审记录)
+- **背景**: 该 change 只对它迁出的 `docs/notes` 文件做了脱敏;全仓其它位置与 git 历史里的同类标识按用户决定不在其范围内。
+- **残留类别**(不在此重复字面值):
+  - 真实人名与 bot 显示名:出现在 `openspec/changes/archive/**`、`openspec/specs/pet-locus-collaboration/spec.md`、`packages/dsh-pet` 的测试夹具与源码注释里;
+  - 私有仓库/服务名与提交号:出现在 `BACKLOG.md` 较早条目、ADR-0002、`openspec/changes/archive/**`;
+  - 真实 session id 前缀与飞书 ID 形状的夹具值:`packages/dsh-pet/test/**`、`packages/dsh-pet/test/fixtures/**`;
+  - 个别内部 bridge 名与 devbox 辅助脚本名:`openspec/changes/upgrade-dsh-0-2-0-runtime/checking/**`(进行中的 change);
+  - git 历史对上述所有类别仍保留原文,改当前文件不能抹去。
+- **建议**: 先决定是否值得为此重写历史;若只清当前树,为夹具改用明显合成的值,并给 `redactionRules` 式扫描加一个全仓测试;进行中 change 的 checking 文件在其归档前处理。
+- **更新**: 2026-10-10 新增。
+
 ### [D007] worktree 缺依赖时,sync 的 local build 会清空 `lib/` 并连带打穿部署目录
 - **状态**: 待处理(2026-09-15 在某个 worktree 实测复现;当次故障由一次来自主 checkout 的重建自行恢复,根因未修,同一 worktree 再次 sync 会复发)
 - **现象**: 在缺依赖的 worktree 中运行 `node scripts/sync.mjs`,结束时报告 `local package dsh-worktree-session: npm run build --workspace dsh-worktree-session failed before deployment`。字面上像是「部署未被触碰」,**实际不是**:此后启动 DSH 直接崩溃,`plugin tree failed to load … client bundles not found; run \`pnpm run build\` before launch`,路径指向 `~/.dsh/profiles/web/node_modules/dsh-worktree-session/lib/client.js`。

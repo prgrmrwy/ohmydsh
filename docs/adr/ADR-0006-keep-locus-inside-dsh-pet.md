@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-09-23
-- **Relates to**: `docs/adr/ADR-0004-consolidate-locus-specs-into-pet-locus-collaboration.md`（locus 规范收敛为单一 `pet-locus-collaboration` 主 spec）；`openspec/specs/pet-locus-collaboration/spec.md`；归档 change `2026-09-22-shrink-pet-compat-to-minimal`；BACKLOG B036/B039
+- **Relates to**: `docs/adr/ADR-0004-consolidate-locus-specs-into-pet-locus-collaboration.md`（locus 规范收敛为单一 `pet-locus-collaboration` 主 spec）；`openspec/specs/pet-locus-collaboration/spec.md`；归档 change `2026-09-22-shrink-pet-compat-to-minimal`；归档 change `2026-09-15-pet-locus-on-demand-tree`；BACKLOG B039
 
 ## Context
 

@@ -21,7 +21,7 @@
 ### Requirement: docs/notes 按已批准的处置表迁出并脱敏
 `docs/notes/` 全部 25 个文件必须(SHALL)按 `openspec/changes/github-facade-refresh/notes-disposition.json` 处置（`move`、`move-rewrite`、`delete`、`backlog`），`design.md` 中的处置表是其人类可读呈现。迁移完成后 `docs/notes/` 不得(SHALL NOT)存在任何被跟踪文件。处置为 `move` 的文件，内容只允许三类修改：仓库内相对链接改写、开头增加一行以 `> Migrated from docs/notes/` 开头的归属说明、脱敏替换；处置为 `move-rewrite` 的文件可重写为当前机制说明。
 
-所有非删除的迁移产物（含写入 BACKLOG 的内容）必须(SHALL)脱敏：不得出现 `redactionRules` 能匹配的文本，也不得出现 `manualRedactions` 登记的条目。人工条目在实施期由迁移执行者登记并补全；规划不保证其完整。脱敏完整性的最终判定是人工门禁：Lead 逐份通读全部非删除迁移产物，对照检查清单（真实人名与 bot 显示名、账号、私有仓库名与提交号、组织专属域名或链接、会话与群标识、本机路径与主机名），把每份结论写入本 change 的 `verify.md`。本要求只约束本次迁移产物；仓库其它文件与 git 历史不在范围内。
+所有非删除的迁移产物（含写入 BACKLOG 的内容）必须(SHALL)脱敏：不得出现 `redactionRules` 能匹配的文本，也不得出现 `manualRedactions` 登记的条目（条目以 `{findSha256, length, replace}` 登记，即字面值的 SHA-256 与 code point 长度，**字面值本身不得提交**，匹配时对每行按该长度逐窗口求哈希）。人工条目在实施期由迁移执行者登记并补全；规划不保证其完整。脱敏完整性的最终判定是人工门禁：Lead 逐份通读全部非删除迁移产物，对照检查清单（真实人名与 bot 显示名、账号、私有仓库名与提交号、组织专属域名或链接、会话与群标识、本机路径与主机名），把每份结论写入本 change 的 `verify.md`。本要求只约束本次迁移产物；仓库其它文件与 git 历史不在范围内。
 
 #### Scenario: 迁移与处置表一致
 - **GIVEN** 处置文件与迁移后的工作树
@@ -49,7 +49,7 @@
 - **THEN** 该名字被补登记到 `manualRedactions` 并替换，测试重跑通过后该文件结论记为「补登记后通过」；`verify.md` 中任何一份文件缺少结论都视为 P1 未通过
 
 ### Requirement: 仓库内不残留失效的文档路径引用
-git 跟踪的 markdown 文件（排除 `openspec/changes/archive/`）中所有指向仓库内路径的相对链接与图片引用必须(SHALL)解析到被跟踪的文件或目录；带 `#L<n>` 行锚的链接只校验文件存在。此外，所有被跟踪的文本文件（排除 `openspec/changes/archive/` 与本 change 目录）中不得(SHALL NOT)出现字面 `docs/notes/`。外部 URL 不在此要求范围内。
+git 跟踪的 markdown 文件（排除 `openspec/changes/archive/`）中所有指向仓库内路径的相对链接与图片引用必须(SHALL)解析到被跟踪的文件或目录；带 `#L<n>` 行锚的链接只校验文件存在。此外，所有被跟踪的文本文件（排除 `openspec/changes/archive/` 与本 change 目录）中不得(SHALL NOT)出现字面 `docs/notes/`，唯一例外是迁移文件第 1 行的归属说明（`> Migrated from docs/notes/<file>.`，它必须保留旧路径以便追溯来源）。外部 URL 不在此要求范围内。
 
 #### Scenario: 链接全部可达
 - **GIVEN** 已应用本 change 的仓库

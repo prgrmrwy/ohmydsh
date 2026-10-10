@@ -99,3 +99,37 @@ Known out-of-scope residue (per the 2026-10-09 human scope decision), recorded f
 - Full suite after P4 (Lead, serial): `npm test` → 426 tests, 424 pass, 0 fail, 2 skipped (pre-existing). `npm run check:artifacts` → compliant.
 - Double sync (task 11.7), Lead, in a fully isolated environment (temporary `HOME`, `XDG_*`, `DSH_HOME` under `/tmp`, `DSH_LOCAL_MANIFEST` pointing to a nonexistent file; the real `~/.dsh` was not touched — its sync-state file kept its 07:54 timestamp): first `node scripts/sync.mjs` → exit 0, `done — 52 change(s) applied`, 0 ERROR lines; second → exit 0, `no changes — deployment already matches manifest`, 0 ERROR lines. The temporary directory was removed afterwards.
 - `upgrade-dsh-0-2-0-runtime` task 7.1 wording now follows the new note form (checkbox state unchanged).
+
+### P5 · Independent final review and fixes (tasks group 12)
+
+- Reviewer: a fresh-context teammate (`p1-hygiene`, read-only, never changed any of the content under review) reviewed `HEAD` vs `main` (5 commits, ~165 files) against the plan. Verdict: **MERGE_AFTER_FIXES** — 1 critical, 5 moderate, 5 suggestions. No broken requirement, failing test, data loss or sync/runtime behavior change. The Lead verified each finding against the tree before fixing.
+- **C1 (critical) — fixed.** `notes-disposition.json` stored the redacted literals verbatim (person and bot names, private repo names with commit ids, a production chat name, session ids, an email-derived worktree name, internal bridge/helper names), turning the file into an index of the sensitive items. Manual items are now registered as `{findSha256, length, replace}` only (SHA-256 of the UTF-8 literal and its length in code points); `notes-migration-diff.mjs` and the RDG scan match by hashing every window of that length per line. Verified: none of the literals remains in the file; `notes-migration-diff.mjs 224bd52` still reports every one of the 19 `move` rows `ok` and 35 registered occurrences; the redaction test and its fixtures were updated (fixtures use a synthetic name). The residue that exists elsewhere in the repository and in git history is out of scope by the user's decision and is now recorded as BACKLOG D009 (classes only, no literals).
+- **M1 — fixed.** References to pruned BACKLOG ids (B004, B007, B013, B015, B018, B036) and to B020 (which never had an entry) were replaced by the archived change name already next to them, or dropped: `dsh.yaml` comments and notes, three package README pairs and two CHANGELOGs, ADR-0006/0007, the dsh-pet cost-analysis note. The one table-cell rewrite inside a migrated file (row 18) is registered as a `pathRewrites` item so the migration diff stays exact.
+- **M2 — fixed.** The `dsh.yaml` field-convention comment now says `note` is a human summary of at most 600 code points with the review process in git and OpenSpec.
+- **M3 — fixed.** The governance spec now states the one exemption explicitly: the first-line attribution `> Migrated from docs/notes/<file>.` is allowed to keep the old path.
+- **M4 — fixed.** BACKLOG D009 records the out-of-scope residue.
+- **M5 — fixed.** The test-plan row now carries the real test name.
+- **S1 — fixed.** The row-18 recorded grep commands no longer pretend to have run against `docs/architecture/`: the neutral placeholder `<former notes directory>/` is used and registered as a path rewrite, and the disposition file says the recorded hit counts describe the original location. **S2 — fixed:** dead helper `backlogEntries()` removed. **S3 — noted:** besides removing the stray `"2"` dependency and its 53 now-unused packages, nine `node-addon-require-builtin-*` lockfile entries lost `"peer": true` (harmless npm re-resolution; `npm ci` in CI is the check). **S4 — accepted:** the system-clock capture shows the capture machine's time zone and the guard capture its egress country; both are low sensitivity. **S5:** the maintainer contact `prgrmr@163.com` in `SECURITY.md` and `CODE_OF_CONDUCT.md` awaits the user's confirmation.
+- Checked and clean by the reviewer, independently of the plan: all new test files pass in isolation; helpers behave correctly and every negative fixture really fails; migration fidelity (19 move rows ok, 11 files added and 0 modified under the archive, `docs/notes` empty); `dsh.yaml` structure identical to both `be87a7a` and `main` (key order and all 32 ids); root README claims verified against `bin/dsh`, `sync.mjs`, `check-update.mjs`; architecture docs verified against the code; illustration sources free of hidden content; hygiene (AGENTS.md symlink, root clean, no stale references); CI workflow unaffected.
+
+### Final evidence
+
+- Final full-suite command: `npm test` (Lead, serial, after all review fixes).
+- Result summary: 426 tests, 424 pass, 0 fail, 2 skipped (the same two skips as the baseline before this change). Baseline before P1 was 358 pass / 0 fail / 2 skipped.
+- Non-executable checks run: `node scripts/maintenance/manifest-structure-diff.mjs be87a7a7a8bd75c1fa314f469e2199d030b7907f` → `structure unchanged` (exit 0); `node scripts/maintenance/notes-migration-diff.mjs 224bd52` → `only registered manual redactions differ: 35 registered manual occurrence(s) across 19 move file(s)`; `npm run check:artifacts` → compliant; `openspec validate github-facade-refresh --strict` → valid; isolated double sync (P4) → first `done — 52 change(s) applied`, second `no changes`.
+- Test-plan ledger: every executable row is 🟢 green (40 rows flipped only after the named test appeared as passed in the logged full run); the eight non-executable rows are N/A with their evidence above.
+
+## Review Integrity
+
+- review.md `VERDICT: APPROVE_WITH_CHANGES` with `CHANGES_APPLIED: yes` (round 9, re-checked by the reviewer: ALL_RESOLVED). Planning artifacts changed after rounds 6 and 7 only through the user-approved illustration revision, which was re-reviewed in rounds 7–9; the later final-review edits touched implementation files, the disposition file, design/spec wording about how manual items are stored (an implementation detail of the redaction gate), the test-plan ledger and the spec exemption for the attribution line. These last small clarifications were not re-run through a separate cross-model round; they were reviewed by the independent P5 reviewer's findings that prompted them.
+
+## Change Delivery
+
+- Commit range: `224bd52..HEAD` on branch `ws/openspec-explore-github-0-dsh-1-quick-start-temp` (planning, P1–P4 committed; the P5 fixes are committed after this note).
+- Not merged: awaiting the user's confirmation before `scripts/ws-merge.mjs`.
+
+## Overall Decision
+
+DECISION: PASS_WITH_WARNINGS
+
+Warnings: (1) the maintainer contact address awaits the user's confirmation; (2) five A/B packages use illustrations instead of screenshots (approved scope change); (3) the dsh-pet screenshot shows emoji as boxes because the capture machine has no color-emoji font; (4) out-of-scope residual identifiers elsewhere in the repo and in git history are recorded in BACKLOG D009; (5) the final small spec/design wording fixes were not re-reviewed in a separate cross-model round.

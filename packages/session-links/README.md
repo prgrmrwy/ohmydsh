@@ -7,7 +7,7 @@ In a long agent conversation the merge request, deploy page, ticket or artifact 
 
 ![Illustration: links from a long conversation are collected into one Docs/Resources panel, grouped by category](docs/overview.png)
 
-**Install.** Managed through `dsh.yaml` (entry `session-links`, `source: local`): set `enabled: true`, run `dsh build`, then restart DSH. It needs the third-party `better-sidebar` plugin (`dsh-better-sidebar`, peer `>=0.16.0`, optional): without it the plugin does not activate at all. Backlog item B020; design in the OpenSpec change `session-links-panel`.
+**Install.** Managed through `dsh.yaml` (entry `session-links`, `source: local`): set `enabled: true`, run `dsh build`, then restart DSH. It needs the third-party `better-sidebar` plugin (`dsh-better-sidebar`, peer `>=0.16.0`, optional): without it the plugin does not activate at all. Design in the OpenSpec change `session-links-panel`.
 
 ## How it behaves
 
