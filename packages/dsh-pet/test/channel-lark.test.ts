@@ -157,6 +157,51 @@ describe('default Q&A owner proof', () => {
   })
 })
 
+describe('user token refresh during --verify', () => {
+  // Regression: after the ~2h user token expired, the first `auth status
+  // --verify` refreshed the token itself but still answered
+  // `status: 'needs_refresh'`; the immediate next call answered `ready`.
+  // The Pet wheel's Q&A click landed on that first answer and was refused
+  // with "The Pet user identity is not ready or verified" while logged in.
+  const STALE = {
+    ...READY,
+    identities: { ...READY.identities, user: { ...READY.identities.user, status: 'needs_refresh' } },
+  }
+
+  it('re-reads once when the verify call reported needs_refresh', async () => {
+    const runner = vi
+      .fn()
+      .mockResolvedValueOnce({ stdout: JSON.stringify(STALE) })
+      .mockResolvedValueOnce({ stdout: JSON.stringify(READY) }) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner)
+
+    await expect(client.defaultQaOwner?.(APP, [USER])).resolves.toEqual({ kind: 'ready', ownerId: USER })
+    expect(runner).toHaveBeenCalledTimes(2)
+  })
+
+  it('still fails closed when the re-read is stale too, and retries only once', async () => {
+    const runner = vi.fn(async () => ({ stdout: JSON.stringify(STALE) })) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner)
+
+    await expect(client.userIdentity?.(APP)).resolves.toMatchObject({ kind: 'unavailable' })
+    expect(runner).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not re-read a ready or otherwise-failing answer', async () => {
+    const ready = vi.fn(async () => ({ stdout: JSON.stringify(READY) })) as unknown as LarkCliRunner
+    await createLarkCliClient('lark-cli', ready).userIdentity?.(APP)
+    expect(ready).toHaveBeenCalledTimes(1)
+
+    const missing = vi.fn(async () => ({
+      stdout: JSON.stringify({ ...READY, identities: { ...READY.identities, user: { status: 'missing', available: false } } }),
+    })) as unknown as LarkCliRunner
+    await expect(createLarkCliClient('lark-cli', missing).userIdentity?.(APP)).resolves.toMatchObject({
+      kind: 'unavailable',
+    })
+    expect(missing).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('safe permission diagnostics', () => {
   it('keeps scopes and the official console link', () => {
     expect(
