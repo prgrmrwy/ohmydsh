@@ -1,33 +1,41 @@
 # dsh-cockpit-worktree-open-shim
 
-部署侧专用适配器：把 `dsh-cockpit-bridge` 暴露的远程编辑器打开能力注册给 `dsh-worktree-session` 的通用打开行为扩展点。
+English · [简体中文](README.zh.md)
+
+<!-- problem -->
+Without this shim, the "open in editor" action of a Worktree Session on a remote machine falls back to a local `vscode://file/` link that cannot reach the worktree. The shim hands the worktree path to dsh-cockpit's remote-editor capability so the editor opens on the right machine.
+
+A deployment-side adapter: it registers the remote-editor open capability exposed by `dsh-cockpit-bridge` into the generic open-behaviour extension point of `dsh-worktree-session`.
 
 ```text
 dsh-cockpit-bridge ──provide──▶ shim ──register──▶ dsh-worktree-session
-        不知道 ws                              不知道 cockpit
+  knows nothing about ws                     knows nothing about cockpit
 ```
 
-## 为什么独立成包
+## Why a separate package
 
-Worktree Session 是通用插件，不应知道 dsh-cockpit；dsh-cockpit-bridge 也不应知道具体消费方。两端的全部耦合只存在于本 shim，便于独立升级和彻底移除。
+Worktree Session is a generic plugin and must not know about dsh-cockpit; dsh-cockpit-bridge must not know its concrete consumers either. All coupling between the two ends lives only in this shim, which keeps independent upgrades and complete removal possible.
 
-## 行为
+## Behaviour
 
-- 无顶层 `inject`，运行时监听两端服务出现/消失，支持任意加载顺序。
-- 以完整 dotted name `ctx.get('cockpitBridge.editorOpen')` 读取 bridge 服务，禁止 `ctx.get('cockpitBridge').editorOpen`。
-- 只把 worktree 绝对路径原样转交 bridge：不校验、不改写、不持状态、不重试。
-- 任一端缺失或卸载时不生效；Worktree Session 自动回落 `vscode://file/` 默认行为。
+- No top-level `inject`; at runtime it watches both services appearing and disappearing, so any load order works.
+- It reads the bridge service by the full dotted name `ctx.get('cockpitBridge.editorOpen')`; `ctx.get('cockpitBridge').editorOpen` is forbidden.
+- It forwards only the absolute worktree path, unchanged, to the bridge: no validation, no rewriting, no state, no retries.
+- If either end is missing or unloaded, the shim is inert; Worktree Session automatically falls back to its default `vscode://file/` behaviour.
 
-## 前置条件与已知边界
+## Prerequisites and known limits
 
-- 需要 `dsh-cockpit-bridge >= 0.4.0`（本仓当前 pin 0.5.1）；旧版 bridge 不提供该服务，shim 会静默不生效。
-- 宿主机需要安装 VS Code Remote-SSH，并能用 Cockpit 设备登记的 SSH config alias 连接目标设备。
-- 未安装 Remote-SSH 时 URI 可能被静默丢弃；包含点号的目录名可能被 VS Code URI handler 判断为文件。
+- Requires `dsh-cockpit-bridge >= 0.4.0` (this repository currently pins 0.6.4); an older bridge does not provide the service and the shim silently does nothing.
+- The host machine needs VS Code Remote-SSH installed and must be able to reach the target device through the SSH config alias registered for the Cockpit device.
+- Without Remote-SSH the URI may be silently dropped; a directory name containing a dot may be treated as a file by the VS Code URI handler.
 
-## 移除路径
+## Removal
 
-从 `dsh.yaml` 删除或禁用 `cockpit-worktree-open-shim`，运行 `dsh build` 并重启 DSH web。移除后：
+<!-- section: removal -->
+This shim connects two ends: the **`cockpitBridge.editorOpen` service** of `dsh-cockpit-bridge` and the **open-behaviour extension point** (`worktreeSession.openHandler`) of `dsh-worktree-session`. Neither side references the other, so the shim is the only place the two meet.
 
-- Worktree Session 恢复默认 `vscode://file/` 行为；
-- dsh-cockpit-bridge 的会话已读确认、pending snapshot 等既有功能不受影响；
-- 两端无需任何源码或配置迁移。
+It can be removed at any time, and it should be removed once you stop using dsh-cockpit remote editors, or when either end ships the integration natively. Delete or disable `cockpit-worktree-open-shim` in `dsh.yaml`, run `dsh build`, and restart DSH web. After removal:
+
+- Worktree Session returns to the default `vscode://file/` behaviour;
+- existing dsh-cockpit-bridge features such as session read-confirmation and the pending snapshot are unaffected;
+- neither end needs any source or configuration migration.
