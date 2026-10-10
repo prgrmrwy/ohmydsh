@@ -62,3 +62,12 @@ badge 内部生成：
 ## Migration Plan
 
 纯前端呈现变化。包版本 0.1.3，`dsh.yaml` 条目版本与 note 同步，`node scripts/sync.mjs` 物化（连续两次第二次无变化），刷新 Web 页面生效。回滚：把 `dsh.yaml` 版本/源码回退到 0.1.2 后重新 sync。
+
+## Revision 1 — 实机反馈（0.1.4）
+
+0.1.3 部署后用户在真实侧边栏截图反馈：7px 子图标放在 9px 圆底 + 1px 描边上，glyph 实际只剩约 5px，部分品牌完全看不清；另外 OpenCode 的模型目录远多于当前覆盖的品牌。
+
+- **D3 修订：子图标改为裸 glyph。** 去掉圆底、描边与内边距，glyph 7px → 10px，偏移 -3px → -4px（14×14 外框不变）。对比渲染过 9/10/11px 三档，10px 在浅深两种背景下都可辨认，且仍让主图的大部分可见；11px 开始明显遮挡主图。放弃「与行背景分隔」的目标：彩色品牌 glyph 与单色主图的颜色差本身就提供了区分，而分隔元素在 14px 尺度下的代价是 glyph 尺寸。
+- **D5 新增：model 品牌按 OpenCode 目录补齐。** 以 pi-ai 0.85.1 内置的 `opencode-go.json` / `opencode.json` 模型目录为样本（本仓 dsh-pet compat 依赖里的同一份数据），把其中有可识别厂商、且 `@lobehub/icons-static-svg@1.94.0` 有对应标识的族全部补齐：Qwen（`qwen*`/`qwq*`）、混元（`hunyuan*`、`hy<数字>*`，经腾讯官方确认 Hy3 为混元系列）、LongCat（美团）、MiMo（小米，lobehub 名 `xiaomimimo`）、Gemini（含 `gemma*`）、NVIDIA（`nemotron*`）、Meta（`muse-spark*`，Meta Superintelligence Labs 的模型；`llama*`）、蚂蚁（`ling-*`/`ring-*`，lobehub 名 `antgroup`）。彩色版优先（有彩色变体时），与 deepseek/glm/minimax 一致。无法确认厂商的 `omen-alpha`、`big-pickle` 不映射，保持 OpenCode 单 logo，符合「未知不冒充」。
+- 同步给这些厂商的直连 provider route 加映射（`qwen-token-plan*`/`dashscope`/`bailian`、`tencent`/`hunyuan`、`meituan`/`longcat`、`xiaomi*`/`mimo`、`google`/`google-*`/`gemini`、`nvidia`、`meta`/`meta-llama*`、`ant-ling`/`inclusionai`），避免这些 route 下出现「主图首字母 + 子图品牌」的反常组合。`google` 只做精确或 `google-` 前缀匹配，避免误中无关名字。
+- 新增资产中 qwen/gemini/meta/antgroup 带内部 id，沿用子图 `-sub` 后缀方案。

@@ -24,7 +24,7 @@ Backlog 条目：[B013](../../BACKLOG.md)。设计与取舍见 OpenSpec change `
 
 不手绘 SVG，也不在浏览器运行时访问 CDN：
 
-- DeepSeek（鲸鱼）、OpenAI/GPT（螺旋）、Anthropic、Grok、Kimi、GLM（智谱）、MiniMax、Pi、OpenClaw、Hermes Agent（兼容 `hermas` 拼写）、Trae（`traex` route）：`@lobehub/icons-static-svg@1.94.0`，MIT；
+- DeepSeek（鲸鱼）、OpenAI/GPT（螺旋）、Anthropic、Grok、Kimi、GLM（智谱）、MiniMax、Pi、OpenClaw、Hermes Agent（兼容 `hermas` 拼写）、Trae（`traex` route）、Qwen、混元、LongCat、小米 MiMo、Gemini、NVIDIA、Meta、蚂蚁（Ling）：`@lobehub/icons-static-svg@1.94.0`，MIT；
 - OpenCode：`anomalyco/opencode` commit `5e75e5e9901f0d178f425bfb47f1bd46cbe78a59` 的官方 provider SVG，MIT。
 
 品牌判断分两个维度：provider route 决定**主图**，model id 决定**子图标**。
@@ -37,7 +37,7 @@ Backlog 条目：[B013](../../BACKLOG.md)。设计与取舍见 OpenSpec change `
 | 已知 route + 不可识别 model | 只显示 route 品牌 |
 | 未知/通用 route | 按 model 品牌显示单一 logo；仍不可识别则中性首字母 |
 
-复合 icon 外框与单 logo 同为 14×14，子图标 7px 置于溢出右下角 3px 的 9px 圆底上（`Canvas` 系统色 + `currentColor` 混色描边，深浅主题与 hover/选中态均可辨认），不推挤标题。
+复合 icon 外框与单 logo 同为 14×14，子图标为 10px 裸 glyph（无圆底/描边/内边距），向右下溢出 4px，不推挤标题。model 品牌覆盖 OpenCode Go/Zen 目录中有可识别厂商的全部模型族。
 
 ## UI 边界
 
