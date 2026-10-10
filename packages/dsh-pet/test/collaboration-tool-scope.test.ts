@@ -103,10 +103,11 @@ it('registers the collaborator list scoped and without a target selector', async
         } catch (error) { reject(error) }
       })
     })
-    const runtime = ctx.tools as unknown as { schemas(scope?: unknown): { name: string; parameters?: unknown }[] }
+    const runtime = ctx.tools as unknown as { schemas(scope?: unknown): { name: string; parameters?: unknown; description?: string }[] }
     expect(runtime.schemas(key).map(s => s.name)).toEqual([COLLABORATORS_TOOL])
     expect(runtime.schemas().map(s => s.name)).not.toContain(COLLABORATORS_TOOL)
     const listed = runtime.schemas(key).find(s => s.name === COLLABORATORS_TOOL)
     expect(JSON.stringify(listed?.parameters ?? {})).not.toMatch(/parentSessionId|sessionId|locusId/)
+    expect(listed?.description).toContain('canonical opaque `target` reference: copy it exactly into pet_inquire')
   } finally { await ctx.fiber.dispose() }
 })

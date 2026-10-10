@@ -88,6 +88,9 @@ it('registers the ask tool scoped, with no parent, requester, audience or delive
     }
     // And no identifier a model could use to aim the answer elsewhere.
     expect(JSON.stringify(declared)).not.toMatch(/chatId|deliveryId|messageId|sessionId|locusId/)
+    expect(JSON.stringify(declared.properties.target)).toContain('Do not construct it yourself')
+    expect(JSON.stringify(declared.properties.target)).toContain('copied verbatim')
+    expect(JSON.stringify(declared.properties.target)).toContain('pet_collaborators')
     // Accepted is not answered, and the description must say so.
     expect(tool.description?.toLowerCase()).toContain('not an answer')
   }, toolCtx => { registerInquiryAskTool(toolCtx, askDeps as never) })

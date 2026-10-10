@@ -20,6 +20,7 @@
   - 模块进展：`src/host/collaboration/caller.ts` 已实现纯解析器及跨 await 重验，34 项测试含真实 durable repository 重开/索引损坏；新增 `host-identity.ts` 对接真实 API 形状的冷读适配（20 tests，含 archive 竞态）；caller resolver 与 Host cold identity adapter 已接入 `query.ts`/公共只读 tool 的纯模块测试；生产 Host 尚未开启该 tool，完整装配仍保持未完成。pending switch-notice sibling 不阻断健康 caller，busy revision 变化不冒充身份变化。
 - [ ] 2.4 实现最小名单投影与分页：名称/职责入口/关系/模式/可询问状态，不读取历史生成摘要，不输出 owner 全量视图或原始跨群内部信息
 - [ ] 2.5 实现稳定目标引用及接受/派发重验，同圈当前代校验、失效/跨圈统一安全拒绝、旧引用不转交新 child
+  - 有界修复：名单成员新增由现有 `inquiryTargetReference` 生成的 opaque `target`，两侧工具说明要求原样复制；直接接受与真实 scoped ToolRuntime 回归覆盖父→子、子→父/兄弟，查询后同 session 新代际、退役、归档、跨圈统一拒绝。重点 78/78、collaboration/inquiry 629 passed/28 skipped，Pet host/client typecheck 与 `git diff --check` 通过。未验证真实 runtime 派发/答复，不将本任务整体勾选。当前严格校验受未修改的 `pet-locus-collaboration` delta 两个 MODIFIED 条文遗漏 current scenarios 阻塞；本次不扩大范围修复该规范漂移。
 - [ ] 2.6 名单测试覆盖父查子、子查父兄弟、排除自身与临时 subagent、同群异父、群改绑旧话题固定、卸载可恢复、旧 fork/unknown/retired、分页越权与状态竞态
 
 - [ ] 2.7 定义 parent 唯一公共记录、当前 revision 与修订审计，复用唯一 writer；实现并发首挂幂等空记录，未知与空已填写分开，不创建文件夹或迁移局部字段
