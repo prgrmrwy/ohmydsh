@@ -113,6 +113,15 @@ describe('composite provider + model badge', () => {
     expect(badgeBrands('opencode-go', 'minimax-m3')).toEqual({ primary: 'opencode', secondary: 'minimax' })
     expect(badgeBrands('traex', 'GPT-5.6-Sol[1m]')).toEqual({ primary: 'trae', secondary: 'openai' })
     expect(badgeBrands('traex', 'DeepSeek-V4-Flash')).toEqual({ primary: 'trae', secondary: 'deepseek' })
+    expect(badgeBrands('traex', 'Gemini-3.1-Pro-Preview')).toEqual({ primary: 'trae', secondary: 'gemini' })
+    expect(badgeBrands('traex', 'openrouter-3o[1m]')).toEqual({ primary: 'trae', secondary: 'openrouter' })
+    expect(badgeBrands('traex', 'Seed-2.1-Pro-0915')).toEqual({ primary: 'trae', secondary: 'bytedance' })
+    expect(badgeBrands('traex', 'Seed-Evolving')).toEqual({ primary: 'trae', secondary: 'bytedance' })
+  })
+
+  it('renders the newly vendored TraeX catalog marks', () => {
+    expect(badgeInnerHTML('traex', 'openrouter-3o')).toContain('<title>OpenRouter</title>')
+    expect(badgeInnerHTML('traex', 'Seed-Code')).toContain('<title>ByteDance</title>')
   })
 
   it('does not add a sub-icon for an unrecognized model under a known route', () => {

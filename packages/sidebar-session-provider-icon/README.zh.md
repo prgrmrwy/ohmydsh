@@ -24,7 +24,8 @@ DSH 的会话列表里每一行看起来都一样，不打开会话就分不清�
 |---|---|
 | `claude/claude-opus-5`、`codex/gpt-6-luna`、`deepseek-official/deepseek-v4-pro`（同品牌） | 单一 Anthropic / OpenAI / DeepSeek logo |
 | `opencode-go/deepseek-v4-flash`、`opencode-go/qwen3.8-flash`、`opencode-go/kimi-k2.7-code` | OpenCode 主图，右下角 DeepSeek / Qwen / Kimi |
-| `traex/GPT-5.6-Sol[1m]` | Trae 主图，右下角 OpenAI |
+| `traex/GPT-5.6-Sol[1m]`、`traex/DeepSeek-V4-Flash`、`traex/Gemini-3.1-Pro-Preview` | Trae 主图，右下角 OpenAI / DeepSeek / Gemini |
+| `traex/openrouter-3o[1m]`、`traex/Seed-2.1-Pro-0915` | Trae 主图，右下角 OpenRouter / ByteDance |
 | 已知 route + 认不出的 model（如 `opencode-go/omen-alpha`） | 只显示 route 品牌，不叠小图标 |
 | 未知或通用 route | 按 model 名显示单一 logo；仍匹配不上时显示中性的单字母徽标 |
 
@@ -50,10 +51,10 @@ DSH 的会话列表里每一行看起来都一样，不打开会话就分不清�
 
 | 维度 | 品牌 |
 |---|---|
-| provider 与 model | DeepSeek、OpenAI/GPT/Codex、Anthropic/Claude、Grok/xAI、Kimi/Moonshot、GLM（智谱）、MiniMax、Pi、OpenClaw、Hermes Agent（也接受 `hermas` 拼写）、OpenCode、Qwen、腾讯混元（`hy3`、`hy4-*`）、美团 LongCat、小米 MiMo、Gemini/Gemma、NVIDIA（Nemotron）、Meta（Muse Spark、Llama）、蚂蚁（Ling/Ring） |
+| provider 与 model | DeepSeek、OpenAI/GPT/Codex、Anthropic/Claude、Grok/xAI、Kimi/Moonshot、GLM（智谱）、MiniMax、Pi、OpenClaw、Hermes Agent（也接受 `hermas` 拼写）、OpenCode、Qwen、腾讯混元（`hy3`、`hy4-*`）、美团 LongCat、小米 MiMo、Gemini/Gemma、NVIDIA（Nemotron）、Meta（Muse Spark、Llama）、蚂蚁（Ling/Ring）、OpenRouter、ByteDance Seed |
 | 仅 provider | Trae（`trae`、`trae-ai`、`traex*`；按完整名或前缀匹配，不按子串） |
 
-model 维度覆盖 OpenCode Go / Zen 模型目录里所有能确认厂商的模型族（样本取自 pi-ai 内置的 `opencode-go.json` / `opencode.json`）。
+model 维度覆盖 OpenCode Go / Zen 模型目录里所有能确认厂商的模型族，并覆盖当前 TraeX 目录中的 GPT、DeepSeek、Gemini、OpenRouter 与 ByteDance Seed 系列。
 
 品牌图是固定版本并随包落盘的，不手绘，运行时也不访问 CDN：
 

@@ -37,7 +37,7 @@
 - **THEN** 该行不插入 logo
 
 ### Requirement: 使用下载落盘的真实品牌资产
-系统 SHALL 使用下载后随包保存的品牌 SVG，而不是代码中手绘的近似 path。已知映射 SHALL 至少覆盖 DeepSeek 鲸鱼、OpenAI/GPT 螺旋、OpenCode、Anthropic/Claude、Grok、Kimi、GLM/智谱、MiniMax、Pi、OpenClaw、Hermes Agent（含 `hermas` 兼容别名）与 Trae（含 `traex` route）；model 维度 SHALL 另外覆盖 Qwen、腾讯混元（含 `hy<数字>` 系列）、美团 LongCat、小米 MiMo、Google Gemini、NVIDIA（Nemotron）、Meta（Muse Spark / Llama）与蚂蚁（Ling/Ring），使 OpenCode Go/Zen 模型目录中有可识别厂商的模型族都能得到品牌子图标。品牌判定 SHALL 优先识别已知 provider route 作为主品牌；仅当 route 未知/通用时再按 model id 作为主品牌 fallback。未知选择 SHALL 使用中性 fallback，不得冒充已知品牌。浏览器运行时 SHALL 不为品牌图访问外部 CDN。
+系统 SHALL 使用下载后随包保存的品牌 SVG，而不是代码中手绘的近似 path。已知映射 SHALL 至少覆盖 DeepSeek 鲸鱼、OpenAI/GPT 螺旋、OpenCode、Anthropic/Claude、Grok、Kimi、GLM/智谱、MiniMax、Pi、OpenClaw、Hermes Agent（含 `hermas` 兼容别名）与 Trae（含 `traex` route）；model 维度 SHALL 另外覆盖 Qwen、腾讯混元（含 `hy<数字>` 系列）、美团 LongCat、小米 MiMo、Google Gemini、NVIDIA（Nemotron）、Meta（Muse Spark / Llama）、蚂蚁（Ling/Ring）、OpenRouter（`openrouter-*`）与字节跳动 Seed（`Seed-*`），使 OpenCode Go/Zen 与 TraeX 当前模型目录中有可识别厂商或平台的模型族都能得到品牌子图标。品牌判定 SHALL 优先识别已知 provider route 作为主品牌；仅当 route 未知/通用时再按 model id 作为主品牌 fallback。未知选择 SHALL 使用中性 fallback，不得冒充已知品牌。浏览器运行时 SHALL 不为品牌图访问外部 CDN。
 
 #### Scenario: DeepSeek/OpenAI/OpenCode 显示正确品牌
 - **WHEN** 当前选择分别属于 DeepSeek、GPT/Codex 或 OpenCode
@@ -58,6 +58,10 @@
 #### Scenario: Trae route 显示 Trae 品牌
 - **WHEN** 当前选择的 provider route 为 `traex` 或 `trae`
 - **THEN** 主图使用下载落盘的 Trae SVG，而不是按 model 名显示 OpenAI 或 DeepSeek
+
+#### Scenario: TraeX 目录模型族得到品牌
+- **WHEN** 当前选择为 `traex` 下的 `GPT-*`、`DeepSeek-*`、`Gemini-*`、`openrouter-*` 或 `Seed-*`
+- **THEN** 主图保持 Trae，子图标分别使用 OpenAI、DeepSeek、Gemini、OpenRouter 或 ByteDance 的下载落盘 SVG
 
 #### Scenario: OpenCode route 不被模型名误判
 - **WHEN** 当前选择为真实路由 `opencode-go/deepseek-v4-flash`
