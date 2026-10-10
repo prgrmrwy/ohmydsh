@@ -14,6 +14,9 @@ These files are downloaded at development time and bundled into `lib/client.js`;
 | `pi.svg` | `https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.94.0/icons/pi.svg` | `@lobehub/icons-static-svg@1.94.0` | MIT | `d82978781b824273c55473822c1f243a6ed34fc6e8c2dbfe1a90dfc66ae43ee8` |
 | `openclaw.svg` | `https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.94.0/icons/openclaw-color.svg` | `@lobehub/icons-static-svg@1.94.0` | MIT | `4123c0c75dda5b28e3e0d38075514085bf546178a620776344813c08fa41277c` |
 | `hermes.svg` | `https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.94.0/icons/hermesagent.svg` | `@lobehub/icons-static-svg@1.94.0` | MIT | `02d43c0a91fc2ee41f2684fc39613ff6687de29a4b079665bace5303671dd63b` |
+| `trae.svg` | `https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.94.0/icons/trae.svg` | `@lobehub/icons-static-svg@1.94.0` | MIT | `59ef6255dfce52d4b1e77aff4e1b4ee3cda71cda735b4fb45575e9874a1c11f6` |
 | `opencode.svg` | `https://raw.githubusercontent.com/anomalyco/opencode/5e75e5e9901f0d178f425bfb47f1bd46cbe78a59/packages/ui/src/assets/icons/provider/opencode.svg` | commit `5e75e5e9901f0d178f425bfb47f1bd46cbe78a59` | MIT | `018a85654f13635373dc283ecc27928fa4e001c06cde47f7efa1cbcab567b51c` |
+
+`minimax.svg` and `openclaw.svg` define gradient/clip ids referenced via `url(#…)`. The renderer leaves the primary logo's ids as downloaded (every copy carries an identical definition, so a duplicate id resolves to the same paint) and suffixes ids inside the composite sub-icon so it never depends on another element's definition.
 
 Brand owners retain their trademark rights. These marks are used only to identify the selected provider/model route and do not imply endorsement.

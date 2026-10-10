@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { badgeInnerHTML, brandKeyOf } from '../src/client/logos.js'
+import { badgeBrands, badgeInnerHTML, brandKeyOf } from '../src/client/logos.js'
 
 describe('downloaded brand logo mapping', () => {
   it('maps the expected DeepSeek/OpenAI/OpenCode brands', () => {
@@ -49,9 +49,67 @@ describe('downloaded brand logo mapping', () => {
     expect(badgeInnerHTML('openclaw', 'openclaw-agent')).toContain('<title>OpenClaw</title>')
   })
 
+  it('maps Trae routes by exact name or traex prefix, never by substring or model', () => {
+    expect(brandKeyOf('traex', 'GPT-5.6-Sol[1m]')).toBe('trae')
+    expect(brandKeyOf('trae', 'DeepSeek-V4-Flash')).toBe('trae')
+    expect(brandKeyOf('extraeval', 'private-model')).toBeUndefined()
+    expect(brandKeyOf('custom-route', 'trae-model')).toBeUndefined()
+    expect(badgeInnerHTML('traex', 'custom')).toContain('<title>TRAE</title>')
+  })
+
   it('keeps a neutral fallback for genuinely unknown selections', () => {
     expect(brandKeyOf('custom-route', 'private-model')).toBeUndefined()
     expect(badgeInnerHTML('custom-route', 'private-model')).toContain('>P</span>')
     expect(badgeInnerHTML('custom-route', '<private-model')).toContain('>&lt;</span>')
+  })
+})
+
+describe('composite provider + model badge', () => {
+  it('stays a single logo when provider and model are the same brand', () => {
+    expect(badgeBrands('claude', 'claude-opus-5')).toEqual({ primary: 'anthropic', secondary: undefined })
+    expect(badgeBrands('codex', 'gpt-6-luna')).toEqual({ primary: 'openai', secondary: undefined })
+    expect(badgeBrands('deepseek-official', 'deepseek-v4-pro')).toEqual({ primary: 'deepseek', secondary: undefined })
+  })
+
+  it('adds the model brand as a sub-icon for aggregator routes', () => {
+    expect(badgeBrands('opencode-go', 'deepseek-v4-flash')).toEqual({ primary: 'opencode', secondary: 'deepseek' })
+    expect(badgeBrands('opencode-go', 'deepseek-v4-flash-vision-exp')).toEqual({ primary: 'opencode', secondary: 'deepseek' })
+    expect(badgeBrands('opencode-go', 'minimax-m3')).toEqual({ primary: 'opencode', secondary: 'minimax' })
+    expect(badgeBrands('traex', 'GPT-5.6-Sol[1m]')).toEqual({ primary: 'trae', secondary: 'openai' })
+    expect(badgeBrands('traex', 'DeepSeek-V4-Flash')).toEqual({ primary: 'trae', secondary: 'deepseek' })
+  })
+
+  it('does not add a sub-icon for an unrecognized model under a known route', () => {
+    expect(badgeBrands('opencode-go', 'private-model')).toEqual({ primary: 'opencode', secondary: undefined })
+    expect(badgeInnerHTML('opencode-go', 'private-model')).not.toContain('data-composite')
+  })
+
+  it('keeps an unknown route as a single model-brand logo', () => {
+    expect(badgeBrands('private-proxy', 'gpt-5')).toEqual({ primary: 'openai', secondary: undefined })
+    expect(badgeBrands('custom-route', 'private-model')).toEqual({ primary: undefined, secondary: undefined })
+  })
+
+  it('renders a fixed 14px composite with a 7px sub-icon and no external URL', () => {
+    const html = badgeInnerHTML('opencode-go', 'deepseek-v4-flash')
+    expect(html).toContain('data-composite=""')
+    expect(html).toContain('width:14px;height:14px')
+    expect(html).toContain('data-sub-brand="deepseek"')
+    expect(html.match(/<svg[^>]*width="14" height="14"/g)).toHaveLength(1)
+    expect(html.match(/<svg[^>]*width="7" height="7"/g)).toHaveLength(1)
+    expect(html).toContain('<title>DeepSeek</title>')
+    expect(html).not.toMatch(/https?:\/\/(?!www\.w3\.org)/)
+    expect(badgeInnerHTML('claude', 'claude-opus-5')).not.toContain('data-composite')
+  })
+
+  it('suffixes internal SVG ids inside the sub-icon only', () => {
+    const html = badgeInnerHTML('opencode-go', 'minimax-m3')
+    const sub = html.slice(html.indexOf('data-sub-brand'))
+    const ids = [...sub.matchAll(/\sid=["']([^"']+)["']/g)].map((m) => m[1])
+    const refs = [...sub.matchAll(/url\(#([^)]+)\)/g)].map((m) => m[1])
+    expect(ids.length).toBeGreaterThan(0)
+    expect(ids.every((id) => id.endsWith('-sub'))).toBe(true)
+    expect(refs.every((ref) => ids.includes(ref))).toBe(true)
+    // The primary single logo keeps the downloaded ids untouched.
+    expect(badgeInnerHTML('minimax', 'MiniMax-M3')).toMatch(/id=["']lobe-icons-minimax-_R_0_["']/)
   })
 })
