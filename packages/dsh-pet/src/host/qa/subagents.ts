@@ -117,7 +117,7 @@ export interface HostContextLike {
  * dependencies: a declared dependency that the host lacks would stop Pet from
  * loading entirely, which is exactly the failure mode this plugin's own
  * lifecycle contract forbids (see the `shellEnv` note in
- * `docs/notes/dsh-plugin-integration-pitfalls.md`).
+ * `docs/architecture/dsh-plugin-integration-pitfalls.md`).
  * @param ctx - The DSH context.
  * @returns the bound seam, or a diagnostic naming what is missing.
  */

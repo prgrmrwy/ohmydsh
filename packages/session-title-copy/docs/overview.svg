@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Illustration source for packages/session-title-copy/README.md. Synthetic text only. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="660" viewBox="0 0 1200 660" role="img" aria-labelledby="t d">
+<title id="t">Session title copy overview</title>
+<desc id="d">A short six-character session id badge sits next to the conversation title; one click copies the full session id and shows a short confirmation.</desc>
+<defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+<marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#059669"/></marker>
+</defs>
+<rect width="1200" height="660" fill="#f8fafc"/>
+<text x="40" y="52" font-family="DejaVu Sans, Verdana, sans-serif" font-size="26" font-weight="bold" fill="#0f172a" text-anchor="start">Session title copy: grab the session id in one click</text>
+<text x="40" y="80" font-family="DejaVu Sans, Verdana, sans-serif" font-size="15" font-weight="normal" fill="#475569" text-anchor="start">A small badge next to the title shows the first six characters. Click it to copy the full id.</text>
+<rect x="40" y="110" width="520" height="200" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="60" y="140" font-family="DejaVu Sans, Verdana, sans-serif" font-size="15" font-weight="bold" fill="#64748b" text-anchor="start">Before</text>
+<rect x="60" y="158" width="480" height="52" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+<text x="80" y="191" font-family="DejaVu Sans, Verdana, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="start">demo-app  /  Health-check endpoint</text>
+<text x="60" y="246" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="normal" fill="#475569" text-anchor="start">The title is shown, but there is no way to get the</text>
+<text x="60" y="266" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="normal" fill="#475569" text-anchor="start">session id for scripts, logs or bug reports.</text>
+<rect x="640" y="110" width="520" height="200" rx="14" fill="#ffffff" stroke="#2563eb" stroke-width="2.5"/>
+<text x="660" y="140" font-family="DejaVu Sans, Verdana, sans-serif" font-size="15" font-weight="bold" fill="#1d4ed8" text-anchor="start">After</text>
+<rect x="660" y="158" width="480" height="52" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+<text x="680" y="191" font-family="DejaVu Sans, Verdana, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="start">demo-app  /  Health-check endpoint</text>
+<rect x="1000" y="170" width="76" height="28" rx="8" fill="#e0e7ff" stroke="#6366f1" stroke-width="1.5"/>
+<text x="1038" y="189" font-family="DejaVu Sans Mono, monospace" font-size="14" font-weight="bold" fill="#3730a3" text-anchor="middle">9af69b</text>
+<text x="660" y="246" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="normal" fill="#475569" text-anchor="start">The badge shows the first 6 characters of the id.</text>
+<text x="660" y="266" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="normal" fill="#475569" text-anchor="start">The title itself stays official and unchanged.</text>
+<line x1="562" y1="210" x2="638" y2="210" stroke="#059669" stroke-width="3" marker-end="url(#ag)"/>
+<rect x="40" y="340" width="1120" height="270" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="60" y="370" font-family="DejaVu Sans, Verdana, sans-serif" font-size="15" font-weight="bold" fill="#334155" text-anchor="start">What happens on click</text>
+<rect x="60" y="392" width="340" height="200" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+<circle cx="86" cy="416" r="13" fill="#2563eb" stroke="none" stroke-width="0"/>
+<text x="86" y="421" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">1</text>
+<text x="108" y="421" font-family="DejaVu Sans, Verdana, sans-serif" font-size="16" font-weight="bold" fill="#0f172a" text-anchor="start">Hover</text>
+<rect x="80" y="440" width="300" height="40" rx="8" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
+<text x="94" y="465" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12" font-weight="bold" fill="#0f172a" text-anchor="start">Health-check endpoint</text>
+<rect x="270" y="446" width="76" height="28" rx="8" fill="#c7d2fe" stroke="#6366f1" stroke-width="1.5"/>
+<text x="308" y="465" font-family="DejaVu Sans Mono, monospace" font-size="14" font-weight="bold" fill="#3730a3" text-anchor="middle">9af69b</text>
+<rect x="150" y="486" width="230" height="26" rx="6" fill="#1e293b" stroke="#1e293b" stroke-width="1.5"/>
+<text x="265" y="504" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="normal" fill="#f8fafc" text-anchor="middle">session-9af69b3e-demo-0001</text>
+<text x="80" y="540" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="normal" fill="#475569" text-anchor="start">Pointer cursor, tint and a tooltip</text>
+<text x="80" y="558" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="normal" fill="#475569" text-anchor="start">with the full session id.</text>
+<rect x="420" y="392" width="340" height="200" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+<line x1="402" y1="492" x2="418" y2="492" stroke="#475569" stroke-width="2" marker-end="url(#ah)"/>
+<circle cx="446" cy="416" r="13" fill="#2563eb" stroke="none" stroke-width="0"/>
+<text x="446" y="421" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">2</text>
+<text x="468" y="421" font-family="DejaVu Sans, Verdana, sans-serif" font-size="16" font-weight="bold" fill="#0f172a" text-anchor="start">Click</text>
+<rect x="440" y="440" width="300" height="40" rx="8" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
+<text x="454" y="465" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12" font-weight="bold" fill="#0f172a" text-anchor="start">Health-check endpoint</text>
+<rect x="630" y="446" width="76" height="28" rx="8" fill="#6366f1" stroke="#4338ca" stroke-width="2"/>
+<text x="668" y="465" font-family="DejaVu Sans Mono, monospace" font-size="14" font-weight="bold" fill="#fff" text-anchor="middle">9af69b</text>
+<rect x="444" y="498" width="296" height="34" rx="8" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="456" y="520" font-family="DejaVu Sans Mono, monospace" font-size="10.5" font-weight="normal" fill="#334155" text-anchor="start">clipboard: session-9af69b3e-demo-0001</text>
+<text x="440" y="554" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="normal" fill="#475569" text-anchor="start">The full id is written to the clipboard.</text>
+<rect x="780" y="392" width="360" height="200" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+<line x1="762" y1="492" x2="778" y2="492" stroke="#475569" stroke-width="2" marker-end="url(#ah)"/>
+<circle cx="806" cy="416" r="13" fill="#2563eb" stroke="none" stroke-width="0"/>
+<text x="806" y="421" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">3</text>
+<text x="828" y="421" font-family="DejaVu Sans, Verdana, sans-serif" font-size="16" font-weight="bold" fill="#0f172a" text-anchor="start">Confirm</text>
+<rect x="800" y="440" width="320" height="40" rx="8" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
+<text x="814" y="465" font-family="DejaVu Sans, Verdana, sans-serif" font-size="12" font-weight="bold" fill="#0f172a" text-anchor="start">Health-check endpoint</text>
+<rect x="1030" y="446" width="76" height="28" rx="8" fill="#e0e7ff" stroke="#6366f1" stroke-width="1.5"/>
+<text x="1068" y="465" font-family="DejaVu Sans Mono, monospace" font-size="14" font-weight="bold" fill="#3730a3" text-anchor="middle">9af69b</text>
+<rect x="944" y="488" width="176" height="28" rx="14" fill="#065f46" stroke="#065f46" stroke-width="1.5"/>
+<text x="1032" y="507" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">Session ID copied</text>
+<text x="800" y="540" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="normal" fill="#475569" text-anchor="start">A hint appears under the badge for</text>
+<text x="800" y="558" font-family="DejaVu Sans, Verdana, sans-serif" font-size="13" font-weight="normal" fill="#475569" text-anchor="start">about a second, then fades out.</text>
+</svg>

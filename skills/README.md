@@ -1,11 +1,16 @@
-# skills/ — skill 定制
+# skills/ — skill customizations
 
-每个子目录 = 一个 skill,DSH 分层源格式:
+English · [简体中文](README.zh.md)
+
+<!-- problem -->
+A skill is a reusable set of task-specific instructions an agent can load on demand. This directory is where the skills this repository ships live, so that one source of truth reaches every DSH session on the machine regardless of its working directory.
+
+Each subdirectory is one skill, in the DSH layered source format:
 
 ```
 skills/<name>/
-  SKILL.md            # 必须:skill 定义(带 name/description 的 markdown)
+  SKILL.md            # required: the skill definition (markdown with name/description)
 ```
 
-- sync 把 `skills/<name>` **复制**到 `~/.dsh/skills/<name>`(user-dsh 源,全局可用,不依赖会话 cwd);
-- DSH 其他可用源(备查):项目根 `.dsh/skills/`(project-dsh)、`.agents/skills/`(project-agents,openspec 技能所在)。
+- Sync **copies** `skills/<name>` to `~/.dsh/skills/<name>` (the user-dsh source: globally available, independent of the session's cwd);
+- Other DSH skill sources, for reference: the project-root `.dsh/skills/` (project-dsh) and `.agents/skills/` (project-agents, where the openspec skills live).

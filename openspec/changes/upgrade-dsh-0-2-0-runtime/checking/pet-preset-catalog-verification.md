@@ -10,7 +10,7 @@ profile patch SHA256=cc0a88d7fc49490c141c20202d04ddbbf082d1c302dfda391e7f008a595
 
 前置探针错误保留：误猜patch.cordis.yml文件名、误把insert声明当顶层row，以及误将group:true当数组；分别通过sync源码和实际profile结构修正。仅修探针oracle，没有产品代码修复或削弱字段断言。最终probe exit0。
 
-目录存在只证明Host接受声明并发布目录，不证明工具实际装配：index.ts3366的agentPresets.list不同于1001/2921的mount路径。docs/notes/dsh-plugin-integration-pitfalls.md已明确meta.agentPreset只记名不能证明工具挂载。因此actualPresetMountVerified=false，5.8仍未完成。
+目录存在只证明Host接受声明并发布目录，不证明工具实际装配：index.ts3366的agentPresets.list不同于1001/2921的mount路径。docs/architecture/dsh-plugin-integration-pitfalls.md已明确meta.agentPreset只记名不能证明工具挂载。因此actualPresetMountVerified=false，5.8仍未完成。
 
 候选PID2456818核cmdline/DSH_HOME后SIGTERM，exit0；生产3080仍PID2004366。未改本机DSH/VM、正式pin或发布。整体升级NO-GO。
 

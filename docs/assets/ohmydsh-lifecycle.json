@@ -1,0 +1,226 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "ohmydsh — life of one customization",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    {
+      "id": "main",
+      "label": "Add to deployed"
+    },
+    {
+      "id": "maintain",
+      "label": "Maintain"
+    },
+    {
+      "id": "terminal",
+      "label": "Undeploy / end"
+    }
+  ],
+  "states": [
+    {
+      "id": "add",
+      "type": "start",
+      "label": "Add",
+      "sublabel": "add-dsh-plugin / dsh.yaml",
+      "lane": "main",
+      "col": 0,
+      "step": "01",
+      "tag": "manifest"
+    },
+    {
+      "id": "review",
+      "type": "active",
+      "label": "Review",
+      "sublabel": "note + exact version pin",
+      "lane": "main",
+      "col": 1,
+      "step": "02",
+      "tag": "trust"
+    },
+    {
+      "id": "build",
+      "type": "active",
+      "label": "Build",
+      "sublabel": "dsh build",
+      "lane": "main",
+      "col": 2,
+      "step": "03",
+      "tag": "sync"
+    },
+    {
+      "id": "verify",
+      "type": "decision",
+      "label": "Verify",
+      "sublabel": "second build = no changes",
+      "lane": "main",
+      "col": 3,
+      "step": "04",
+      "tag": "idempotent"
+    },
+    {
+      "id": "deployed",
+      "type": "success",
+      "label": "Deployed",
+      "sublabel": "materialized in ~/.dsh",
+      "lane": "main",
+      "col": 4,
+      "step": "05",
+      "tag": "live"
+    },
+    {
+      "id": "upgrade",
+      "type": "waiting",
+      "label": "Upgrade",
+      "sublabel": "plugin-update / autoUpdate",
+      "lane": "maintain",
+      "col": 1,
+      "tag": "pin bump",
+      "yOffset": 0
+    },
+    {
+      "id": "disabled",
+      "type": "neutral",
+      "label": "Disabled",
+      "sublabel": "enabled: false",
+      "lane": "maintain",
+      "col": 2,
+      "tag": "kept in repo"
+    },
+    {
+      "id": "repo_only",
+      "type": "neutral",
+      "label": "Repo only",
+      "sublabel": "manifest unchanged",
+      "lane": "terminal",
+      "col": 0,
+      "tag": "undeployed"
+    },
+    {
+      "id": "removed",
+      "type": "failure",
+      "label": "Removed",
+      "sublabel": "remove-dsh-plugin skill",
+      "lane": "terminal",
+      "col": 2,
+      "tag": "terminal"
+    }
+  ],
+  "transitions": [
+    {
+      "from": "add",
+      "to": "review",
+      "route": "straight"
+    },
+    {
+      "from": "review",
+      "to": "build",
+      "route": "straight"
+    },
+    {
+      "from": "build",
+      "to": "verify",
+      "route": "straight"
+    },
+    {
+      "from": "verify",
+      "to": "deployed",
+      "route": "straight"
+    },
+    {
+      "from": "disabled",
+      "to": "removed",
+      "variant": "security",
+      "route": "straight",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "from": "deployed",
+      "to": "repo_only",
+      "variant": "security",
+      "label": "dsh reset",
+      "route": "auto",
+      "fromSide": "right",
+      "toSide": "bottom",
+      "via": [
+        [
+          810,
+          157
+        ],
+        [
+          810,
+          545
+        ],
+        [
+          402,
+          545
+        ]
+      ]
+    },
+    {
+      "from": "repo_only",
+      "to": "build",
+      "variant": "emphasis",
+      "label": "dsh build restores",
+      "route": "straight",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "from": "deployed",
+      "to": "disabled",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight"
+    },
+    {
+      "from": "deployed",
+      "to": "upgrade",
+      "variant": "dashed",
+      "label": "new pin",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "from": "upgrade",
+      "to": "verify",
+      "variant": "dashed",
+      "route": "straight",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "label": "re-verify"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Main path",
+      "items": [
+        "Add records the entry in dsh.yaml; review attaches a note and an exact version pin",
+        "dsh build materializes it; a second build must report no changes",
+        "Only then is the customization considered deployed"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Maintenance",
+      "items": [
+        "Upgrade bumps the pin through dsh plugin-update or autoUpdate, then re-enters review",
+        "Disable is enabled: false; the entry stays in the repository",
+        "Remove deletes the entry with the remove-dsh-plugin skill"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Undeploy",
+      "items": [
+        "dsh reset clears deployed customizations without touching the manifest",
+        "The state returns to repo only; dsh build restores everything"
+      ]
+    }
+  ]
+}

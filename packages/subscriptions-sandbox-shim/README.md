@@ -1,25 +1,30 @@
 # dsh-subscriptions-sandbox-shim
 
-DSH 部署侧缓解插件:把订阅 provider(默认 ChatGPT/Codex、Grok)工具面上的 sandbox 升级字段(`sandbox_permissions`/`justification`)清洗掉,解决 `dsh-plugin-subscriptions` [issue #7](https://github.com/V1ki/dsh-plugin-subscriptions/issues/7)(`sandbox escalation ... is not strictly wider`)在 `danger-full-access` + `approval: never` 部署下的反复失败。不改 DSH 源码、不改订阅插件本体。
+English · [简体中文](README.zh.md)
 
-## 作用与语义
+<!-- problem -->
+When DSH runs in `danger-full-access` with `approval: never`, ChatGPT/Codex and Grok sessions keep failing tool calls with `sandbox escalation ... is not strictly wider`, because the models fill in sandbox-escalation fields that this deployment can never honour. This plugin removes those fields at the adapter boundary so the calls simply work.
 
-两层剥离,均在适配器边界(包装 `ctx.llm` 注册的 adapter 实例的 `stream`):
+A deployment-side mitigation plugin: it cleans the sandbox-escalation fields (`sandbox_permissions` / `justification`) off the tool surface of subscription providers (by default ChatGPT/Codex and Grok). It addresses `dsh-plugin-subscriptions` [issue #7](https://github.com/V1ki/dsh-plugin-subscriptions/issues/7) (`sandbox escalation ... is not strictly wider`). It changes neither DSH source nor the subscriptions plugin itself.
 
-1. **出站(schema 层)**:发给模型的工具 `parameters` 中删除两个属性——消除 GPT/Codex 误填的诱因;
-2. **入站(返回参数层)**:模型返回的工具调用 `arguments`(block-end 收口处)JSON 解析后删除两个键——硬保证,即使模型幻觉出它们也不会导致调用失败;
-3. **Responses 历史配对保护**:发送 codex/grok 请求前,删除没有同请求 `tool-result` 的孤立 `tool-call`(以及反向孤立结果)。这专门兜住 DSH 被中断 subagent 的 settlement notice:core 会把子会话最后一条 assistant 内容原样嵌入父会话 user message,其中未执行完的工具调用不应作为父会话 `function_call` 重放。
+## What it does
 
-## 配置
+Two stripping layers plus a history guard, all at the adapter boundary (wrapping the `stream` of the adapter instance registered through `ctx.llm`):
 
-| 字段 | 默认 | 说明 |
+1. **Outbound (schema layer):** both properties are removed from the tool `parameters` sent to the model, which removes the cue that makes GPT/Codex fill them in by mistake.
+2. **Inbound (returned-arguments layer):** after JSON parsing of the tool-call `arguments` the model returns (at block end), both keys are deleted. This is the hard guarantee: even if the model hallucinates them, the call does not fail.
+3. **Responses history pairing guard:** before a codex/grok request is sent, orphaned `tool-call`s without a `tool-result` in the same request (and the reverse, orphaned results) are dropped. This specifically covers the settlement notice of an interrupted DSH subagent: core embeds the child session's last assistant content verbatim into a parent-session user message, and its unfinished tool calls must not be replayed as parent `function_call`s.
+
+## Configuration
+
+| Field | Default | Description |
 |---|---|---|
-| `providers` | `['codex', 'grok']` | 生效的 provider 路由;`claude` 可加入 |
-| `stripSchema` | `true` | 出站剥离开关 |
-| `stripOutput` | `true` | 入站剥离开关 |
-| `stripHistory` | `true` | 出站 Responses 历史角色/配对保护;若受限部署需要关闭 sandbox 两层剥离,可保留本项 |
+| `providers` | `['codex', 'grok']` | Provider routes the shim applies to; `claude` can be added |
+| `stripSchema` | `true` | Outbound stripping switch |
+| `stripOutput` | `true` | Inbound stripping switch |
+| `stripHistory` | `true` | Outbound Responses history role/pairing guard; keep it on even when a restricted deployment needs to turn off the two sandbox-stripping layers |
 
-示例(manifest 覆盖):
+Example (manifest override):
 
 ```yaml
 - id: subscriptions-sandbox-shim
@@ -29,20 +34,23 @@ DSH 部署侧缓解插件:把订阅 provider(默认 ChatGPT/Codex、Grok)工具�
     stripOutput: true
 ```
 
-## ⚠ 部署形态约束
+## ⚠ Deployment constraint
 
-本插件的语义是 **「该部署永不使用 sandbox 升级通道」**。仅在 `danger-full-access` + `approval: never`(或等价地"无合法升级路径")的部署下启用。
+The semantics of this plugin are **"this deployment never uses the sandbox-escalation channel"**. Enable it only in `danger-full-access` + `approval: never` deployments (or equivalently, where there is no legitimate escalation path).
 
-在受限部署(`read-only` / `workspace-write` + `approval: ask`)中必须关闭 `stripSchema` 与 `stripOutput`(或禁用整个插件):那里的合法升级重试会被这两层误剥,导致被 sandbox 拒绝的操作无法恢复。`stripHistory` 不涉及 sandbox 权限,可单独保持开启以防 Codex Responses 400。
+In restricted deployments (`read-only` / `workspace-write` + `approval: ask`) you must turn off `stripSchema` and `stripOutput` (or disable the whole plugin): there a legitimate escalation retry would be stripped by these two layers, and an operation denied by the sandbox could not recover. `stripHistory` does not touch sandbox permissions and can stay on by itself to prevent a Codex Responses 400.
 
-## 移除路径
+## Removal
 
-本插件是 [BACKLOG D001](https://github.com/deepseek-ai/deepseek-harness) 所述 core 缺陷(组合期静态广告升级 enum + 执行期 strict-wider 检查)的部署侧缓解。上游修复或 DSH 升级消除该缺陷后,应移除本定制(manifest 删除条目 → sync → restart)。
+<!-- section: removal -->
+This plugin connects two ends: the **model-provider tool surface** of `dsh-plugin-subscriptions` (Codex/Grok adapters that advertise and accept `sandbox_permissions`) and the **DSH core sandbox check** that rejects an escalation that is not strictly wider than the current mode.
 
-## 开发
+It is the deployment-side mitigation for the core defect recorded as [BACKLOG D001](../../BACKLOG.md) (a statically advertised escalation enum at composition time plus a strict-wider check at execution time). Remove it exactly when one of these holds: upstream fixes the defect (the tool schema becomes aware of the session mode, or the rejection text self-corrects), or a DSH upgrade eliminates it; and also before moving to a restricted deployment where escalation retries are legitimate. To remove: delete the manifest entry → sync → restart. Nothing needs migrating.
+
+## Development
 
 ```sh
-npm test          # node --test test/(纯逻辑单测,零外部依赖)
+npm test          # node --test test/ (pure-logic unit tests, zero external dependencies)
 ```
 
-`test/assembler.test.mjs` 会动态引用 `~/.dsh/profiles/web/node_modules/@deepseek-ai/dsh-llm` 验证与 BlockAssembler 的集成;未安装时该用例自动 skip。
+`test/assembler.test.mjs` dynamically imports `~/.dsh/profiles/web/node_modules/@deepseek-ai/dsh-llm` to verify integration with the BlockAssembler; that case skips itself automatically when it is not installed.

@@ -28,5 +28,5 @@
 - [x] 5.1 更新 `packages/dsh-openspec/README.md`（新增「Generations and the host dependency layout」：闭包命名/身份/失败日志）与 `dsh.yaml` 条目 `note` 的一句话记录
 - [x] 5.2 运行 package 的 build/typecheck/vitest 与仓库级 `npm test`、`npm run check:artifacts`。结果：package 38 files / 162 tests 全绿；`check:artifacts` 通过；仓库级 `npm test` = 320 pass / 7 fail / 2 skipped，**7 个失败在改动前完全相同**（fixture 把 repo 根的 `node_modules` 软链进去后跑 sync 的 `tsc -p tsconfig.json`，而 worktree 的 lean 依赖里没有 `typescript`，报 `sh: tsc: command not found`），与本 change 无关，需在 promote/主 checkout 环境复核
 - [x] 5.3 运行 `openspec validate fix-openspec-generation-closure-identity --strict`（passed）
-- [x] 5.4 记录实机取证的只读复现步骤到 `docs/notes/dsh-openspec-generation-identity.md`（不含 token/secrets，只写可复核步骤与结论）
+- [x] 5.4 记录实机取证的只读复现步骤到 `packages/dsh-openspec/docs/generation-identity.md`（不含 token/secrets，只写可复核步骤与结论）
 - [x] 5.5 新增 `packages/dsh-openspec/vitest.config.ts`（`testTimeout/hookTimeout = 30s`，与 `dsh-memex`/`session-links` 等兄弟包一致）：这些用例每个要多次物化真实官方包，vitest 默认 5s 预算在改动前就已贴边（实测 4596ms/4492ms），内容寻址后再超时；这不是放宽断言
