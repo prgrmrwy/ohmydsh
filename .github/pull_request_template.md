@@ -42,7 +42,7 @@
 
 ## 检查清单 / Checklist
 
-- [ ] 已阅读 [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md)
+- [ ] 已阅读 [CONTRIBUTING.md](https://github.com/prgrmrwy/ohmydsh/blob/main/CONTRIBUTING.md)
 - [ ] 提交信息遵循 Conventional Commits
 - [ ] 未直接修改 `~/.dsh` 部署产物,改动都回写到仓库真相源
 - [ ] remote 定制使用**精确版本 pin**,并在 `note` 中记录来源与审查结论

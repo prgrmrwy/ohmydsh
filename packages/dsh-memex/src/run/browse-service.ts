@@ -142,7 +142,7 @@ export async function startBrowseService(options: StartBrowseServiceOptions): Pr
       LC_ALL: 'C',
       LANG: 'C',
     },
-    // Constraint from docs/notes/dsh-plugin-integration-pitfalls.md §2: a
+    // Constraint from docs/architecture/dsh-plugin-integration-pitfalls.md §2: a
     // long-lived child must get a pipe it never writes to and never closes.
     // 'ignore' gives it an immediately-EOF stdin, which makes it exit 0 right
     // after start — a failure that looks like success.

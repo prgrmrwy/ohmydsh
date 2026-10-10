@@ -4,7 +4,7 @@
 
 devbox隔离候选0.2.0-rc.2，原repo83c69cf launcher；部署配置由上一轮frozen-sync-fixture生成，修复header/bridge文件与审查构建cmp一致。无插桩Chromium1600×1000，无API stub、force点击或CSS修改。
 
-本轮仅实际读取现有空任务状态，不创建Task/Invocation/Locus，不发送模型或飞书请求。开始前读过docs/notes/dsh-plugin-integration-pitfalls.md和overlay.tsx实际交互实现。
+本轮仅实际读取现有空任务状态，不创建Task/Invocation/Locus，不发送模型或飞书请求。开始前读过docs/architecture/dsh-plugin-integration-pitfalls.md和overlay.tsx实际交互实现。
 
 ## 两次真实浏览器结果
 

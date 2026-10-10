@@ -24,6 +24,6 @@
 
 ## Impact
 
-- `packages/dsh-openspec/src/generation-closure.ts`（闭包规划与命名、新增 `closureIdentity`）、`packages/dsh-openspec/src/index.ts`（身份输入 + 启动失败上报）、`packages/dsh-openspec/test/generation-closure.test.ts`、新增 `packages/dsh-openspec/test/closure-identity.test.ts` 与 `test/startup-failure.test.ts`、`packages/dsh-openspec/vitest.config.ts`（30 s 测试预算，与兄弟包一致）；README 的 generation 段、`dsh.yaml` 条目 `note` 与 `docs/notes/dsh-openspec-generation-identity.md`（实机取证与结论）。
+- `packages/dsh-openspec/src/generation-closure.ts`（闭包规划与命名、新增 `closureIdentity`）、`packages/dsh-openspec/src/index.ts`（身份输入 + 启动失败上报）、`packages/dsh-openspec/test/generation-closure.test.ts`、新增 `packages/dsh-openspec/test/closure-identity.test.ts` 与 `test/startup-failure.test.ts`、`packages/dsh-openspec/vitest.config.ts`（30 s 测试预算，与兄弟包一致）；README 的 generation 段、`dsh.yaml` 条目 `note` 与 `packages/dsh-openspec/docs/generation-identity.md`（实机取证与结论）。
 - 身份输入变化会让**已部署的旧 generation 不再被引用**（本机 `7ecafe373f934e138259d479` 即成为陈旧目录，按既有语义保守保留、不自动删除）；下一次部署启动会物化并激活新 generation，这同时就是本次线上失效的自愈路径。不涉及数据迁移。
 - 无新增出站流量、无权限面变化、无依赖变化，不改 `dsh.client`/`exports`/peer 等启动期字段。

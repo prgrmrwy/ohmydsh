@@ -1,22 +1,30 @@
 # dsh-cockpit-memex-browse-shim
 
-部署侧唯一耦合点：把 bridge 的端口转发注册给 memex 通用浏览地址扩展。两端源码与依赖互不引用，移除 shim 即解耦。
+English · [简体中文](README.zh.md)
 
-## 0.2.0 行为与前置
+<!-- problem -->
+When dsh-memex runs on another machine, its "open cards" button would point your browser at a `localhost` address that is not the memex host. This shim makes the button use the port forward that dsh-cockpit publishes, so the card browser opens at an address that really reaches the device.
 
-- 要求 bridge 提供 `cockpitBridge.forwards`（正式部署 pin 0.6.1）。不再支持旧 `portForward` / channel register / publish 契约。
-- 无顶层 inject；完整 dotted name 单次 `ctx.get()` 读取，支持两端任意加载顺序。
-- 使用 `acquire(devicePort, holder)`，按端口单飞；holder 含绑定 随机绑定标识，避免旧绑定的迟到释放影响替换绑定。
-- starting/retrying/paused 通过 `onChange` 等待 ready，最长 15 秒。只交付当前 `handle.address.url`，不缓存 URL、不自行重试。打开后保留 holder，避免标签页刚打开隧道就被回收。
-- removed 拒绝当前等待；不自动重新申请。下一次显式打开可重新 acquire，包括句柄在两次点击之间被删除的情况。
-- 只有结构化 `CockpitForwardsError` 的 `code === 'local-device'` 回落 `http://localhost:<port>`。unavailable（未握手/不在 cockpit iframe）无法证明浏览器与设备同机，和网络/业务失败一样原样上抛；用户仍可直接使用已知设备地址。
-- 从未发现 bridge 的 memex-only 部署保持默认本机行为。发现 bridge 后再卸载或替换，取消等待并释放旧句柄；bridge 消失时保留失败关闭 resolver，防止远端地址悄悄回落浏览器 localhost。
-- 记忆端卸载或 shim dispose 时注销 resolver。释放包括迟到 acquire，失败有处理；bridge 的页面实例回收提供最终保障。
+The only deployment-side coupling point: it registers the bridge's port forwarding into memex's generic browse-address extension. The sources and dependencies of the two ends never reference each other; removing the shim decouples them.
 
-## 验证
+## 0.2.0 behaviour and prerequisites
 
-独立 package test/typecheck/build；集成回归使用 memex 真实 registry（未接线默认返回 localhost），而非会隐藏误路由的假 registry。覆盖就绪等待、并发、地址变化、移除、失败分类与服务生命周期。
+- Requires the bridge to provide `cockpitBridge.forwards` (the production deployment pins 0.6.4). The old `portForward` / channel register / publish contracts are no longer supported.
+- No top-level `inject`; each service is read once with a full dotted name through `ctx.get()`, so any load order of the two ends works.
+- It uses `acquire(devicePort, holder)`, single-flight per port; the holder carries a random binding id so that a late release from an old binding cannot affect its replacement.
+- starting/retrying/paused states wait for ready through `onChange`, for at most 15 seconds. Only the current `handle.address.url` is delivered; no URL is cached and the shim does not retry by itself. After opening, the holder is kept so the tunnel is not reclaimed right after the tab opens.
+- removed rejects the current wait and is not re-acquired automatically. The next explicit open can acquire again, including when the handle was deleted between two clicks.
+- Only a structured `CockpitForwardsError` with `code === 'local-device'` falls back to `http://localhost:<port>`. unavailable (no handshake / not inside the cockpit iframe) cannot prove that the browser and the device are on the same machine, so like network or business failures it is rethrown unchanged; the user can still use the known device address directly.
+- A memex-only deployment that never discovered a bridge keeps the default local behaviour. If a bridge was discovered and is later unloaded or replaced, pending waits are cancelled and the old handle is released; while the bridge is gone, a fail-closed resolver stays in place so that a remote address never silently falls back to the browser's localhost.
+- The resolver is unregistered when the memex side is unloaded or the shim is disposed. Release includes late acquires and failures are handled; the bridge's page-instance reclamation is the final safety net.
 
-## 移除与回滚
+## Verification
 
-删除 manifest 条目 → `dsh build` → 重启，两端无需迁移。需要回滚旧 shim 时必须同时回滚 bridge 到提供旧服务的版本；不要把 0.1.1 shim 与 bridge 0.6.1 混用。
+Independent package test/typecheck/build. The integration regression uses memex's real registry (which returns localhost when nothing is wired) rather than a fake registry that would hide mis-routing. It covers ready waiting, concurrency, address changes, removal, failure classification and the service lifecycle.
+
+## Removal
+
+<!-- section: removal -->
+This shim connects two ends: the **`cockpitBridge.forwards` port-forwarding service** of `dsh-cockpit-bridge` and the **`dshMemex.browseAddress` registry** of `dsh-memex`. Their sources and dependencies do not reference each other; the shim is the only place they meet.
+
+Remove it when you no longer open memex cards across machines through dsh-cockpit, or when either end ships the integration natively: delete the manifest entry → `dsh build` → restart; neither end needs any migration. Rolling back to an older shim must also roll the bridge back to a version that provides the old service; never mix the 0.1.1 shim with bridge 0.6.x.

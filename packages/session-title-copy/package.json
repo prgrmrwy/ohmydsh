@@ -55,5 +55,8 @@
     "typescript": "^5.9.3",
     "vitest": "^5.0.1",
     "@deepseek-ai/dsh-api-session-controller": "^0.2.0-rc.2"
+  },
+  "ohmydsh": {
+    "docTier": "B"
   }
 }

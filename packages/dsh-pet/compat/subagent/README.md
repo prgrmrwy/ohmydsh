@@ -1,68 +1,76 @@
-# Pet Locus 固定源码兼容运行时
+# Pet Locus pinned-source compatibility runtime
 
-## 这是什么
+English · [简体中文](README.zh.md)
 
-当前 `dsh.yaml` 固定 DSH `0.2.0-rc.2`。Pet unified locus 需要该正式包尚未发布的
-宿主能力，因此本目录维护一份针对固定 tag 的最小 patch。
+## What this is
 
-**2026-10-04 按 `dsh-v0.2.0-rc.2`（`639ed015`）重新推导**（change `upgrade-dsh-0-2-0-runtime` W5）：
-四个 seam 在干净 HEAD 中仍为 0 命中（`git grep` 核对），故全部保留；`child-agent.ts` 的源码 hunk
-经三方合并后语义与 0.1.5 一致（0.2.0 的 `agentPresets.mount` 仍返回 `{ id }`）；`list-children.spec.ts`
-的 hunk 作废——上游已删除它修改的那个用例。上游 subagent 规格：未打补丁 316 通过、打补丁后 327 通过
-（多出的 11 例即 seam 用例）。
+The current `dsh.yaml` pins DSH `0.2.0-rc.2`. The Pet unified locus needs host
+capabilities that the official package has not released yet, so this directory
+maintains a minimal patch against the pinned tag.
 
-**当前 overlay 只替换一个上游包：`@deepseek-ai/dsh-subagent`。**
+**Re-derived on 2026-10-04 against `dsh-v0.2.0-rc.2` (`639ed015`)** (change `upgrade-dsh-0-2-0-runtime` W5):
+the four seams still have 0 hits in a clean HEAD (checked with `git grep`), so all are kept; after a
+three-way merge the source hunk in `child-agent.ts` is semantically the same as on 0.1.5 (0.2.0's
+`agentPresets.mount` still returns `{ id }`); the hunk for `list-children.spec.ts` is void, because upstream
+deleted the case it modified. Upstream subagent suite: 316 pass unpatched, 327 pass patched (the extra 11
+are the seam cases).
 
-承载的 seam（对应 5 个能力 marker）：
+**The current overlay replaces exactly one upstream package: `@deepseek-ai/dsh-subagent`.**
 
-- `settlementNotice: 'silent'` —— 抑制子代结算向父会话的自动投递。父非 idle 时
-  官方走 `steer`，会在最近一个 step 边界插入父正在进行的轮次；而 locus child 的
-  结果已通过飞书汇报给真实受众，父不是受众。官方唯一的抑制开关 `announced` 语义是
-  「该子代从未真正存在」，与此不符。已向上游报告：discussions #7508（交叉引用 #5360）。
-- `createIdleContinuable` —— 创建 durable child 但不提交首条 prompt。官方
-  `SubagentStartRequest.prompt` 必填，而 locus 创建是两阶段的（建 child → 建群 →
-  提交 locus 行 → 才投递首条真实 Delivery），中间那段 child 必须存在但不能开始工作。
-- `contextMode: 'independent-v1'` + durable `toolFilter` —— 子代从**自己持久化的
-  preset** 独立 mount 一份组合，并核验挂到的就是 header 记录的那个，挂错即 throw。
-  官方 `composeFrom` 绑定的是**父的** standing mount 实例，保证的是「已存活子代不被
-  父的后续变更污染」，而冷恢复需要的是「能独立于父重建自己的组合」。
-  调用方可用 `agentPreset` 显式指定该 preset（marker
-  `supportsIndependentChildAgentPreset`）；两条冷恢复路径都从 descriptor 读回它并
-  mount，缺失即 `NOT_RESUMABLE`。Pet 固定传 `dsh-pet-executor`，使 locus 子代的工具面
-  不取决于主会话跑的是哪个 preset——`standard` 的 `tool-subagent` 带
-  `modelSelectionSettings: true`，按 agent 注册进子代自有层，`toolFilter` 只过滤继承层，
-  删不掉它。没有这一项，要么拒绝 `/bind` 到用户的普通会话，要么产出能委派出
-  `bash`/`lark-cli` 的子代。
-- `withLiveContinuableChildSession` —— 在 continuation owner 内访问准确的 child
-  Session。官方泛化 Session 路由**有意**不解析 continuation-owned child。
+The seams it carries (matching 5 capability markers):
 
-### 已移除的 seam（不要加回来）
+- `settlementNotice: 'silent'` — suppresses the automatic delivery of a child's settlement to the parent
+  session. When the parent is not idle the official path is `steer`, which injects at the nearest step
+  boundary of the parent's running turn; but a locus child's result has already been reported to the real
+  audience through Lark, and the parent is not that audience. The only official suppression switch,
+  `announced`, means "this child never really existed", which does not fit. Reported upstream: discussions
+  #7508 (cross-referencing #5360).
+- `createIdleContinuable` — creates a durable child without submitting its first prompt. The official
+  `SubagentStartRequest.prompt` is required, whereas locus creation is two-phase (create the child → create
+  the group → commit the locus row → only then deliver the first real Delivery); in between, the child must
+  exist but must not start working.
+- `contextMode: 'independent-v1'` + a durable `toolFilter` — the child mounts a composition independently
+  from **its own persisted preset** and verifies that what it mounted is the one recorded in the header
+  (throwing on a mismatch). The official `composeFrom` binds the **parent's** standing mount instance, which
+  guarantees "an already-live child is not polluted by the parent's later changes", while cold recovery needs
+  "a child can rebuild its own composition independently of the parent". Callers can name that preset
+  explicitly with `agentPreset` (marker `supportsIndependentChildAgentPreset`); both cold-recovery paths read
+  it back from the descriptor and mount it, and a missing one is `NOT_RESUMABLE`. Pet always passes
+  `dsh-pet-executor`, so the tool surface of a locus child does not depend on which preset the main session
+  runs — `standard`'s `tool-subagent` carries `modelSelectionSettings: true`, which registers into the
+  child's own layer per agent, and `toolFilter` only filters the inherited layer and cannot remove it.
+  Without this, you either refuse `/bind` to a user's ordinary session, or produce a child that can delegate
+  `bash`/`lark-cli`.
+- `withLiveContinuableChildSession` — reaches the exact child Session inside the continuation owner. The
+  official generic Session routing **deliberately** does not resolve a continuation-owned child.
 
-- **Storage 原子 batch / SQLite 独占**（曾替换 `storage`、`storage-domain`、
-  `storage-json`、`storage-sqlite` 四个包）：`@deepseek-ai/dsh-storage` 公开导出
-  `StorageBackend` / `KvFacet` / `KvUnit` 与 `BackendRegistry`，并明述路由归消费者，
-  因此 Pet 改为**注册自己的 backend**（`src/host/storage/`），上游零改动。
-- **`isolateQueuedTurnClaim`**（曾替换 `core/agent`、`core/agent-loop`）：只服务
-  B035 的推送式 inquiry 派发，而该路径已被拉取式上下文工具取代；override 从未启用，
-  台账 0 行。
+### Removed seams (do not add them back)
 
-重新引入任一项都需要按 `pet-compat-minimization` 重新正面举证，不是 revert。
+- **Atomic storage batch / exclusive SQLite** (formerly replaced the four packages `storage`,
+  `storage-domain`, `storage-json` and `storage-sqlite`): `@deepseek-ai/dsh-storage` publicly exports
+  `StorageBackend` / `KvFacet` / `KvUnit` and `BackendRegistry`, and states that routing belongs to the
+  consumer, so Pet now **registers its own backend** (`src/host/storage/`) with zero upstream changes.
+- **`isolateQueuedTurnClaim`** (formerly replaced `core/agent` and `core/agent-loop`): it served only the
+  push-style inquiry dispatch of B035, and that path has been replaced by pull-style context tools; the
+  override was never enabled and the ledger has 0 rows.
 
-本目录保存固定 upstream tag、可审查 patch/hash 与可重建脚本。生成的
-`.upstream/`、`lib/`、`.launcher/`
-均不是部署真相，不进入 Git。
+Reintroducing either needs a fresh, direct justification under `pet-compat-minimization`; it is not a revert.
 
-`.upstream/` 是构建缓存（约 2.3 GB，重建需要联网），复用规则由 `upstream-cache.cjs`
-决定：每次**成功**构建后在 `.upstream/.git/dsh-compat-cache.json` 记录本次的上游
-commit 与 patch 哈希；下次构建若两者一致才复用被忽略的构建产物（`node_modules`、
-`lib/`），否则（或没有记录、构建中断）先 `git clean -ffdx` 删除所有未跟踪与被忽略的
-文件再构建。因此升级 DSH 版本或修改 patch 时**不需要手工清缓存**。曾出现的事故：
-0.1.5 时期的缓存在升级 0.2 时被直接复用，已被 0.2 删除的包留下的 `lib/` 被打进
-host 构建，`MISSING_EXPORT: SettingsProvider` 导致 DSH 无法启动（2026-10-08，VM）。
+This directory keeps the pinned upstream tag, a reviewable patch/hash and rebuild scripts. The generated
+`.upstream/`, `lib/` and `.launcher/` are not deployment truth and do not enter Git.
 
-## 声明式选择与作用域
+`.upstream/` is a build cache (about 2.3 GB; rebuilding needs the network). Its reuse rule is decided by
+`upstream-cache.cjs`: after each **successful** build, the upstream commit and the patch hash are recorded in
+`.upstream/.git/dsh-compat-cache.json`; the next build reuses the ignored build products (`node_modules`,
+`lib/`) only if both are unchanged — otherwise (or when there is no record, or the build was interrupted) it
+first deletes every untracked and ignored file with `git clean -ffdx` and then builds. So upgrading the DSH
+version or changing the patch **does not need a manual cache wipe**. The incident that happened: a cache from
+the 0.1.5 era was reused as-is during the 0.2 upgrade, the `lib/` left by a package that 0.2 had deleted was
+bundled into the host build, and `MISSING_EXPORT: SettingsProvider` stopped DSH from starting (2026-10-08, VM).
 
-`dsh.yaml` 的本地 `dsh-pet` customization 声明：
+## Declarative selection and scope
+
+The local `dsh-pet` customization in `dsh.yaml` declares:
 
 ```yaml
 hostRuntimeCompatibility:
@@ -70,111 +78,136 @@ hostRuntimeCompatibility:
   supportedDshVersion: 0.2.0-rc.2
 ```
 
-该声明表达“Pet 请求 Host 级兼容运行时”，技术效果是整个长期 `dsh web` Host
-使用隔离 DSH 依赖根；它不是只影响 Pet 插件内部的局部替换。
+The declaration says "Pet requests a Host-level compatibility runtime"; the technical effect is that the whole
+long-running `dsh web` Host uses an isolated DSH dependency root. It is not a local replacement that only
+affects the inside of the Pet plugin.
 
-只有 `scripts/dsh-server-bin.mjs` 解析此声明。`dsh build`、sync、plugin、
-`--dump-config` 等一次性命令在没有人类显式 `DSH_BIN` 时仍使用 `dshVersion`
-指定的官方精确 CLI，不构建、不加载该 overlay。`DSH_BIN` 仍是跨命令紧急逃生门，
-不再是 Pet 的正常持久配置。
+Only `scripts/dsh-server-bin.mjs` resolves this declaration. One-shot commands such as `dsh build`, sync,
+plugin and `--dump-config` still use the official exact CLI named by `dshVersion` when there is no explicit
+human-set `DSH_BIN`; they neither build nor load this overlay. `DSH_BIN` remains a cross-command emergency
+escape hatch and is no longer Pet's normal persistent configuration.
 
-旧机器若 `.env.local` 仍含当前 checkout 的历史 Pet launcher 路径，`bin/dsh`
-会识别由该文件新注入的精确值、打印迁移告警并忽略；调用方在 shell 中显式设置
-同一路径时仍优先，其他路径绝不猜测或删除。
+If an old machine's `.env.local` still contains the historical Pet launcher path of the current checkout,
+`bin/dsh` recognizes the exact value newly injected by that file, prints a migration warning and ignores it;
+when the caller explicitly sets the same path in the shell, that still takes precedence, and any other path is
+never guessed at or deleted.
 
-## 构建与安全边界
+## Build and safety boundary
 
-Host 首次准备会执行 `build-launcher.cjs`；fingerprint 命中时只做轻量自证，
-不 clone、build、install 或访问 registry。fingerprint 覆盖：
+First Host preparation runs `build-launcher.cjs`; when the fingerprint hits, it does only a lightweight
+self-check — no clone, build, install or registry access. The fingerprint covers:
 
-- 固定 DSH 版本与 checkout canonical path；
-- patch 及其固定 SHA；
-- Subagent/launcher/lock/timeout builders；
-- package template。
+- the pinned DSH version and the checkout canonical path;
+- the patch and its pinned SHA;
+- the Subagent/launcher/lock/timeout builders;
+- the package template.
 
-重建时使用一把跨进程、可恢复 stale owner 的共享锁，覆盖 Subagent 源码与 launcher
-整条链，并固定 `npm@11.19.0`（launcher）及上游声明的 `pnpm@11.7.0`（源码构建），以消除机器全局包管理器漂移。源码 checkout 仅在 install 子进程设置 `CI=true` 跳过无关的开发仓库 Lefthook 安装，依赖自身 install scripts 仍执行；tsc/tsdown 构建不继承该环境。reviewed DSH 源码要求 Node `^22.19.0 || >=24.0.0`，旧 Node 会在 clone/install 前明确失败。所有外部 git/corepack/npm 子进程通过有界 supervisor
-运行，超时会终止进程组。launcher 在同文件系统 sibling staging 中完成：
+A rebuild uses one cross-process shared lock that can recover from a stale owner, covering the whole chain of
+Subagent source and launcher, and pins `npm@11.19.0` (launcher) and the upstream-declared `pnpm@11.7.0`
+(source build) to eliminate drift of machine-global package managers. The source checkout sets `CI=true` only
+in the install subprocess to skip the unrelated development-repo Lefthook installation, while its own install
+scripts still run; the tsc/tsdown build does not inherit that environment. The reviewed DSH source requires
+Node `^22.19.0 || >=24.0.0`; an older Node fails clearly before clone/install. All external git/corepack/npm
+subprocesses run through a bounded supervisor, and a timeout kills the process group. The launcher completes
+in a same-filesystem sibling staging directory:
 
-1. 固定 tag 构建并验证 patch capability marker；
-2. 安装官方 `@deepseek-ai/dsh@0.2.0-rc.2`、一个 reviewed override（subagent）
-   与显式声明的框架版本（cordis / cordis-plugin-include，值从 reviewed 上游树读取）；
-3. 显式审批固定 install scripts；
-4. 验证依赖树唯一性、package identity/version/provenance、实际能力与 DSH
-   `--version`；
-5. 把 file links 转为自包含 package copies，再原子发布。
+1. build the pinned tag and verify the patch capability markers;
+2. install the official `@deepseek-ai/dsh@0.2.0-rc.2`, one reviewed override (subagent) and the explicitly
+   declared framework versions (cordis / cordis-plugin-include, with values read from the reviewed upstream
+   tree);
+3. explicitly approve the pinned install scripts;
+4. verify dependency-tree uniqueness, package identity/version/provenance, the actual capabilities and DSH
+   `--version`;
+5. turn file links into self-contained package copies, then publish atomically.
 
-锁回收只针对同一目录 inode、同一 token/PID 且已确认死亡的 owner。`mkdir` 后尚未写出 owner 的目录即便很旧，也不是进程死亡证明；缺失/损坏 owner 或遗留 `.reclaim-*` 会有界等待后报错，不自动删除。遇到这些情况须由操作人员先确认所有构建进程已停止，再清理明确的锁残留；禁止在不确定时绕过锁启动第二个构建。锁测试复制源文件到临时目录运行，不清理实际 builder 的锁。升级此锁实现后，应确认没有仍加载旧实现的 builder/waiter 进程，再开始新的并发构建；磁盘改动不会更新已运行进程。
+Lock reclamation applies only to an owner with the same directory inode, the same token/PID, and confirmed
+dead. A directory that exists after `mkdir` but has not yet written its owner is not proof of process death,
+however old it is; a missing/corrupt owner or a leftover `.reclaim-*` waits for a bounded time and then
+reports an error, with no automatic deletion. In those cases an operator must first confirm that every build
+process has stopped and then clear the explicit lock residue; never bypass the lock to start a second build
+when unsure. Lock tests copy the source files into a temp directory and run there; they do not clean the real
+builder's lock. After upgrading the lock implementation, confirm that no builder/waiter process still loads
+the old implementation before starting a new concurrent build; a change on disk does not update processes that
+are already running.
 
-任一步失败都不会删除已有 `.launcher`；本次 Host 启动 fail closed，不静默回退
-官方 runtime。启动控制台和 `dsh-startup.log` 会记录 runtime kind、owner、compat
-kind 与版本。
+If any step fails, the existing `.launcher` is not deleted; this Host start fails closed and does not
+silently fall back to the official runtime. The startup console and `dsh-startup.log` record the runtime kind,
+owner, compat kind and version.
 
-## 版本升级与移除
+## Version upgrades and removal
 
-`supportedDshVersion` 必须精确等于 `dshVersion`。sync 在任何 profile 副作用前
-校验，plain Host start 也独立复核。自动升级只改官方 pin，故新版本会有意触发
-mismatch、sync rollback 和停止启动；绝不会自动把旧 patch 套到未知新源码。
+`supportedDshVersion` must equal `dshVersion` exactly. Sync validates it before any profile side effect, and a
+plain Host start re-checks it independently. Auto-upgrade only changes the official pin, so a new version
+deliberately triggers a mismatch, a sync rollback and a halted start; it never applies the old patch to
+unknown new source automatically.
 
-升级前必须重新审查 upstream：
+Before upgrading you must re-review upstream:
 
-1. 若官方已发布全部能力，删除 `hostRuntimeCompatibility` 和本目录相关 overlay；
-2. 否则针对新固定 tag 重新推导 patch、hash、能力验证与 compatibility kind/version。
+1. if the official release already ships all capabilities, delete `hostRuntimeCompatibility` and the related
+   overlay in this directory;
+2. otherwise re-derive the patch, hash, capability verification and compatibility kind/version against the
+   newly pinned tag.
 
-不要仅修改版本字符串让构建继续。
+Do not merely edit the version string to let the build continue.
 
-**逐个 seam 复核，两个方向都要正面举证**（`pet-compat-minimization` 的要求）：
+**Review seam by seam, and justify both directions directly** (a requirement of `pet-compat-minimization`):
 
-- 判定某个 seam **仍需保留**：引用目标版本 `.d.ts` 行号或文档原文，说明官方为何
-  表达不了；
-- 判定某个 seam **可以移除**：证据必须覆盖它承担的**每一项**语义，不是其中一项。
+- to decide a seam **must still be kept**: cite the target version's `.d.ts` line numbers or the original
+  documentation, and explain why the official API cannot express it;
+- to decide a seam **can be removed**: the evidence must cover **every** semantic it carries, not just one.
 
-**举证必须用 `git grep <字符串> HEAD`，不要读 `.upstream/` 工作区，也不要按行号区间取。**
-`build.mjs` 在该目录上 `git apply` 本补丁；构建现在会在退出时还原（含失败路径），但
-构建进行中、或还原失败时，工作区里的 patch 内容与上游代码**外观完全一致**。
-2026-09-23 的评审中，三位独立读者据此把 `settlementNotice` 与
-`withLiveContinuableChildSession` 判成官方能力——两者在干净 HEAD 中均为 **0 命中**。
-最具迷惑性的是补丁自己的 marker 注释（"Literal proof that this runtime honors …"）：
-它读起来像上游承诺，实际只是让 Pet 自检补丁是否生效。
+**The evidence must come from `git grep <string> HEAD`; do not read the `.upstream/` working tree, and do not
+take line ranges.** `build.mjs` runs `git apply` of this patch on that directory; the build now restores it on
+exit (failure paths included), but while a build is in progress, or when restoring fails, the patch content in
+the working tree looks **exactly like** upstream code. In the 2026-09-23 review, three independent readers
+therefore judged `settlementNotice` and `withLiveContinuableChildSession` to be official capabilities — both
+have **0 hits** in a clean HEAD. The most misleading item is the patch's own marker comment ("Literal proof
+that this runtime honors …"): it reads like an upstream promise but is only there so that Pet can self-check
+whether the patch took effect.
 
-行号同样不可信：`notifySettlement` 在干净 HEAD 是 `:823`，打补丁后偏移到 `:855`，
-且偏移量随 hunk 变化。**`git show HEAD:<file> | sed -n '行号区间'` 取到的是别的内容**；
-验证某段代码是否存在于上游，只能按字符串搜。
+Line numbers are untrustworthy too: `notifySettlement` is at `:823` in a clean HEAD and shifts to `:855` after
+patching, and the offset varies with the hunks. **`git show HEAD:<file> | sed -n '<line range>'` returns other
+content**; to verify whether a piece of code exists upstream, search by string only.
 
-先跑 `git -C .upstream status --short`：输出为空才说明工作区可信；非空时，清单内文件
-一律按上述方式读，清单外目录（`core/`、`api/`、`workspace/`、`session/`、`preset/`）
-可直接读。
+First run `git -C .upstream status --short`: only empty output means the working tree is trustworthy; when it
+is non-empty, files on the list must be read in the way described above, while directories off the list
+(`core/`, `api/`, `workspace/`, `session/`, `preset/`) can be read directly.
 
-第二条是 2026-09 实测的教训。当时据「官方 `startContinuable` 接受 `spec.childId`」
-判定 `createIdleContinuable` 可退，却漏了它同时承担的「不提交初始内容」——而官方
-`prompt` 必填；又据 `composeFrom` 的 "bind, not a mount" 判定 `independent-v1`
-可退，但那句话保证的是「已存活子代不被父的后续变更污染」，不是「能独立于父重建
-组合」。**形近 API 常常解决的是相邻问题。**
+The second point is a lesson measured in 2026-09. At that time `createIdleContinuable` was judged removable
+because the official `startContinuable` accepts `spec.childId`, missing that it also carries "do not submit
+initial content" — while the official `prompt` is required; and `independent-v1` was judged removable from
+`composeFrom`'s "bind, not a mount", but that sentence guarantees "an already-live child is not polluted by
+the parent's later changes", not "can rebuild its composition independently of the parent". **Lookalike APIs
+often solve an adjacent problem.**
 
-### 退役还取决于 Pet 自己的架构前提（2026-09-23 补）
+### Retirement also depends on Pet's own architectural premises (added 2026-09-23)
 
-上面两条只检查**上游能不能表达**。但一个 seam 的必要性同时由 **Pet 这一侧的结构
-前提**决定，而后者可能先于上游改变。当前四个 seam 的实际阻塞项：
+The two points above check only whether **upstream can express it**. But whether a seam is necessary is also
+decided by the **structural premises on Pet's side**, which may change before upstream does. The actual
+blockers of the four current seams:
 
-| seam | 阻塞 | 说明 |
+| seam | blocker | notes |
 |---|---|---|
-| `settlementNotice: 'silent'` | **需要旁路 locus 主会话** | 其论证前提是「父 = 用户正在使用的主会话」，故 `notifySettlement` 走 `parent.steer()` 会插进用户的轮次。上游实际代码是 `parent.status === 'idle' ? 'queue' : 'steer'`——父若是 Pet 自有的 standby 主会话（几乎恒为 idle），走 `queue`，在它自己的会话里开一轮，不打断任何人。**前提由架构消除，不必等上游发布。** |
-| `contextMode: 'independent-v1'` + `agentPreset` | **只要 locus 能绑定用户自己的会话就不能退** | 子代的组合必须由 Pet 指定、且冷恢复不随父漂移。`/bind` 可指向运行 `standard` 的用户会话，官方 `composeFrom` 只能继承父的组合，无法表达「子代用另一个 preset」。 |
-| `createIdleContinuable` | 失败补偿需重新设计 | 官方 `startContinuable({ childId })` 可接受预留 id，改为「先留 id → 先提交 locus 行 → 首条真实 Delivery 作为创建 prompt」即可绕开 `prompt` 必填。但当前顺序是「child 先存在才提交行」，反转后行可能指向不存在的 child。与 BACKLOG B036 是同一条。 |
-| `withLiveContinuableChildSession` | **只要子会话仍是 subagent child 就不能退** | 泛化 Session 路由**有意**拒绝 continuation-owned child（判据即 `origin === 'subagent'`）。生产消费面 3 处：sandbox policy 的 apply/resolve、启动恢复的 delivery 证明——均需读写子会话自身的 Session 对象，无替代路径。 |
+| `settlementNotice: 'silent'` | **needs a side-channel locus main session** | Its argument assumes "parent = the main session the user is working in", so `notifySettlement` going through `parent.steer()` would cut into the user's turn. The actual upstream code is `parent.status === 'idle' ? 'queue' : 'steer'` — if the parent is Pet's own standby main session (almost always idle), it takes `queue`, opening a turn in its own session and interrupting nobody. **The premise is removed by architecture; no need to wait for an upstream release.** |
+| `contextMode: 'independent-v1'` + `agentPreset` | **cannot be retired as long as a locus can bind a user's own session** | A child's composition must be specified by Pet and must not drift with the parent on cold recovery. `/bind` can point at a user session running `standard`, and the official `composeFrom` can only inherit the parent's composition; it cannot express "the child uses another preset". |
+| `createIdleContinuable` | the failure compensation needs redesign | The official `startContinuable({ childId })` accepts a reserved id; changing the order to "reserve the id → commit the locus row first → use the first real Delivery as the creation prompt" avoids the required `prompt`. But the current order is "the child exists first, then the row is committed"; after reversing it, a row may point to a child that does not exist. This is the same item as BACKLOG B036. |
+| `withLiveContinuableChildSession` | **cannot be retired as long as the child session is still a subagent child** | The generic Session routing **deliberately** rejects a continuation-owned child (the criterion is `origin === 'subagent'`). There are 3 production consumers: the sandbox policy's apply/resolve and the delivery proof in startup recovery — all need to read and write the child session's own Session object, with no alternative path. |
 
-**因此这些 seam 都不能独立退役**：它们各自的退役入口是 Pet 的结构改造，而不是
-一次 patch 清理。判定可退时，除了引用上游 API，还必须指出**是哪次架构变更消除了
-该 seam 的前提，以及该变更是否已经落地**。
+**Hence none of these seams can be retired on its own**: the retirement entry for each is a structural
+refactor of Pet, not a patch cleanup. When judging one removable, besides citing the upstream API you must
+also point out **which architectural change removes the seam's premise, and whether that change has landed**.
 
-同一纪律的反向用法：若某次架构改造声称「顺带让某 patch 可以退役」，必须在改造
-**落地并验收之后**才移除 patch，不得在同一批改动里既建立新前提又依赖它。
+The same discipline in reverse: if an architectural refactor claims to "also let some patch be retired", the
+patch may be removed only **after the refactor has landed and been accepted**, and must not establish the new
+premise and depend on it in the same batch of changes.
 
-## Gate O2：不阻塞无进程执行基线
+## Gate O2: does not block the no-process-execution baseline
 
-当前基线不保留 `bash`、`pwsh`、`run_code` 或其它任意进程/代码执行能力。只有另行
-实现并验证独立 UID/container、Lark 凭据隔离以及到 Lark API 的网络 egress policy，
-才可评估保留通用 shell；Host 的受管 `pet_locus_finish` broker 还必须在该隔离下继续
-可用。独立 HOME、PATH 隐藏、Skill 省略、prompt 提醒和 command 字符串过滤均不能
-替代这些隔离证明，也不得作为启用 shell 的理由。Gate O2 未实现不阻塞当前
-`independent-v1` + allow-based safe composition，但禁止把基线改回带通用进程执行。
+The current baseline keeps no `bash`, `pwsh`, `run_code` or any other arbitrary process/code execution
+capability. A general shell may be evaluated for retention only after separate UID/container isolation, Lark
+credential isolation and a network egress policy to the Lark API have been implemented and verified; the
+Host's managed `pet_locus_finish` broker must also remain available under that isolation. A separate HOME,
+PATH hiding, Skill omission, prompt reminders and command-string filtering can neither replace those isolation
+proofs nor serve as a reason to enable a shell. Gate O2 not being implemented does not block the current
+`independent-v1` + allow-based safe composition, but it is forbidden to change the baseline back to one with
+general process execution.
