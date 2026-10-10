@@ -64,6 +64,42 @@ describe('downloaded brand logo mapping', () => {
   })
 })
 
+describe('OpenCode catalog model brands', () => {
+  it('recognizes every model family in the OpenCode Go/Zen catalogs that has a vendored mark', () => {
+    const cases: Array<[string, string]> = [
+      ['qwen3.8-flash', 'qwen'], ['qwen3.7-max', 'qwen'],
+      ['hy3', 'hunyuan'], ['hy4-preview', 'hunyuan'],
+      ['longcat-2.0', 'longcat'],
+      ['mimo-v2.5', 'mimo'], ['mimo-v2.5-pro', 'mimo'],
+      ['gemini-3.5-flash', 'gemini'], ['gemini-3.1-pro', 'gemini'],
+      ['nemotron-3-ultra-free', 'nvidia'],
+      ['muse-spark-1.3-contributor', 'meta'],
+      ['ling-3.0-flash-fin-free', 'antgroup'],
+      ['glm-5.3-flash', 'glm'], ['kimi-k2.7-code', 'kimi'], ['minimax-m2.7', 'minimax'],
+      ['deepseek-v4-pro', 'deepseek'], ['gpt-5.6-luna', 'openai'], ['grok-4.6', 'grok'],
+      ['grok-build-0.1', 'grok'], ['claude-opus-5', 'anthropic'],
+    ]
+    for (const [model, brand] of cases) {
+      expect(badgeBrands('opencode-go', model), model).toEqual({ primary: 'opencode', secondary: brand })
+    }
+  })
+
+  it('leaves models without a recognizable vendor as a single OpenCode logo', () => {
+    for (const model of ['omen-alpha', 'big-pickle']) {
+      expect(badgeBrands('opencode-go', model)).toEqual({ primary: 'opencode', secondary: undefined })
+    }
+  })
+
+  it('maps the matching provider routes to the new brands', () => {
+    expect(brandKeyOf('qwen-token-plan-cn', 'x')).toBe('qwen')
+    expect(brandKeyOf('xiaomi-token-plan-cn', 'x')).toBe('mimo')
+    expect(brandKeyOf('google', 'x')).toBe('gemini')
+    expect(brandKeyOf('nvidia', 'x')).toBe('nvidia')
+    expect(brandKeyOf('ant-ling', 'x')).toBe('antgroup')
+    expect(badgeBrands('qwen-token-plan', 'qwen3.7-max')).toEqual({ primary: 'qwen', secondary: undefined })
+  })
+})
+
 describe('composite provider + model badge', () => {
   it('stays a single logo when provider and model are the same brand', () => {
     expect(badgeBrands('claude', 'claude-opus-5')).toEqual({ primary: 'anthropic', secondary: undefined })
@@ -89,13 +125,15 @@ describe('composite provider + model badge', () => {
     expect(badgeBrands('custom-route', 'private-model')).toEqual({ primary: undefined, secondary: undefined })
   })
 
-  it('renders a fixed 14px composite with a 7px sub-icon and no external URL', () => {
+  it('renders a fixed 14px composite with a bare 10px sub-icon and no external URL', () => {
     const html = badgeInnerHTML('opencode-go', 'deepseek-v4-flash')
     expect(html).toContain('data-composite=""')
     expect(html).toContain('width:14px;height:14px')
     expect(html).toContain('data-sub-brand="deepseek"')
     expect(html.match(/<svg[^>]*width="14" height="14"/g)).toHaveLength(1)
-    expect(html.match(/<svg[^>]*width="7" height="7"/g)).toHaveLength(1)
+    expect(html.match(/<svg[^>]*width="10" height="10"/g)).toHaveLength(1)
+    // Bare glyph: no backing plate, ring, or padding around the sub-icon.
+    expect(html).not.toMatch(/border-radius|box-shadow|background|padding/)
     expect(html).toContain('<title>DeepSeek</title>')
     expect(html).not.toMatch(/https?:\/\/(?!www\.w3\.org)/)
     expect(badgeInnerHTML('claude', 'claude-opus-5')).not.toContain('data-composite')
