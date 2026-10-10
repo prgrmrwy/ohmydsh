@@ -169,7 +169,6 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [llm-subscriptions](https://github.com/V1ki/dsh-plugin-subscriptions) — Adds subscription-based providers (Codex, Claude, Grok, Copilot) switchable from the input box.
 - [width-tiers](https://github.com/aaronlei/dsh-width-tiers) — Switches the conversation width between five tiers.
 - [better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) — Turns the sidebar into a service-backed workbench with tabs.
-- [skin-center](https://github.com/zhu1090093659/dsh-skins) — Adds a settings page for themes, custom themes and wallpapers.
 - [dsh-opencode-session-header](https://github.com/beihzb/dsh-opencode-session-header) — Sends the session header that OpenCode Go requires, fixing missing-session errors.
 
 ### Official optional

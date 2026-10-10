@@ -299,15 +299,6 @@ customizations:
     enabled: true
     brief: 驾驶舱端口发布能力接入 dsh-memex 卡片浏览(可移除 shim)
     note: '自研,change upgrade-dsh-0-2-0-runtime(spec cockpit-memex-browse-shim)。纯 Web client adapter:把 cockpitBridge.forwards 接给 dshMemex.browseAddress,两端互不引用、无顶层 inject。按设备端口单飞 acquire,只交付 ready 的当前地址(最多等 15 秒,不缓存 URL);仅 CockpitForwardsError code=local-device 回落 localhost,unavailable/网络/业务错误原样传播;已接线的 bridge 消失时保持 fail-closed,避免远端静默误路由。须配 bridge >=0.6.1(已删旧 portForward,不能搭配 shim 0.1.1)。升级复核:bridge 的 forwards 契约。移除:删除本条即解耦;回滚旧 shim 必须同时回滚 bridge 到旧服务版本。'
-  # 第三方(remote):dsh-web 系皮肤/主题中心(按需子插件,不安装聚合全家桶)
-  - id: skin-center
-    type: package
-    source: remote
-    spec: '@linxin666/dsh-client-ui-skin-center@0.4.5'
-    version: 0.4.5
-    enabled: true
-    brief: 设置→皮肤中心(主题试穿/自定义主题/壁纸;默认 blue-fantasy)
-    note: '第三方 https://github.com/zhu1090093659/dsh-skins(Apache-2.0)。Host+Web 皮肤/主题中心(内置 blue-fantasy,自定义明暗主题,$DSH_HOME/skins)。信任面:用户皮肤 patches.css 有整页样式能力,hooks.mjs 为受信代码逃生口(仅内置或来源/字节身份核验通过的官方市场内容执行);浏览器每日向 dsh-market.com 发一次匿名安装心跳(随机 localStorage id + 包名,0.4.5 起 navigator.webdriver 时跳过)。0.4.5 把 Steam/WE 扫描与 reg.exe 移出本包(child_process 归零),改由可选插件 dsh-plugin-wallpaper-engine 承担。升级复核:peer 须满足 dshVersion;出站域名与 prepare 脚本(仅 git/目录安装时运行)。回滚:随运行体回到 0.3.24;或 enabled:false → dsh build。 pin 校验 sha512-+hGFYDAkaaxjye1xfP2N+Rnm30ugwMZoZrdDZwgxssjlGJT5mHipkpCkKkqvApr1I2t6CksxcON0YwhXVHWxIA=='
   # 官方可选(remote):Schedule / 自动化任务。0.1.5 默认组合自带,0.2.0 移入默认关闭的官方可选包
   - id: experimental-schedule
     type: package
