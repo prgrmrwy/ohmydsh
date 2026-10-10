@@ -19,3 +19,10 @@
 ## 0.1.2 — 2026-08-21
 
 - 按真实 GUI 对齐反馈调整图标间距为仅左侧 4px；新增 Kimi、GLM（智谱）、MiniMax、Pi、OpenClaw、Hermes Agent 的固定品牌资产和 route/model 映射；Hermes 同时兼容用户输入的 `hermas` 别名。
+
+## 0.1.3 — 2026-10-10
+
+- 复合 icon：provider route 与 model id 分别识别出**不同**已知品牌时，主图为 provider 品牌、右下角叠加 7px model 品牌子图标（9px 圆底 + 淡描边，`Canvas` 底色随深浅主题）；同品牌、model 不可识别或 route 未知时仍为单一 logo。外框保持 14×14，行布局不变；tooltip 不变。
+- 新增 Trae 品牌资产（`@lobehub/icons-static-svg@1.94.0`，MIT），`trae` / `traex*` / `trae-ai` route 映射到 Trae；此前 `traex/GPT-*` 经 model fallback 误显示 OpenAI。
+- 子图标内 SVG 的内部 id 与 `url(#…)` 引用加后缀，避免与同页其它副本串用定义。
+- 对应 openspec change `sidebar-provider-icon-composite-model-badge`。
