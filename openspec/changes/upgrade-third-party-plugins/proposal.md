@@ -1,6 +1,7 @@
 # 第三方插件统一升级 — 评估、计划与实施记录
 
-> 状态：**已实施并独立复验；生产物化待用户批准**（2026-10-10 更新）。
+> 状态：**已实施、独立复验、合入本地主干、生产物化并通过用户验收**（2026-10-10 更新）。
+> 验收后用户决定移除 `skin-center`（见 §0 末注），故该条目现已从 manifest 删除。
 > 评估基线：`dshVersion = 0.2.0-rc.2`（`autoUpdate.enabled: false`，本仓不自升级）、部署 cordis `4.0.4`、profile `web`。
 > 证据：远端制品均以 curl 取 npm registry tarball 静态审计（未安装、未执行包代码）；复验证据见 `checking/`。
 
@@ -16,6 +17,11 @@
 | `jev`（`thirdPartyResources`） | 0.6.0 → **0.14.1** | 通过 |
 | `cost-meter` | **保持 1.8.4（未动）** | 反向核查通过 |
 | `dsh-opencode-session-header` / `experimental-schedule` / `dsh-cockpit-bridge` / `spec-superflow` | 未动 | 反向核查通过 |
+
+> **2026-10-10 追加（用户验收后）**：`skin-center` 已**整条移除**，不是 `enabled: false`。
+> 依据 `remove-dsh-plugin` 流程：删除 `dsh.yaml` 条目 + 同步删除中英 README 的插件清单行 → `dsh build` 卸载 → 待重启生效。
+> 上表中 skin-center 那一行只记录当时那一轮升级，该条目现已不存在。
+> 移除原因：用户确认不再需要皮肤/主题中心。`$DSH_HOME/skins` 下的用户数据未删除（本仓不清理插件数据目录）。
 
 - 修订 `dsh.yaml` sha256 `a725bbdff83efeed0cc309711ee6c2edfe713e4226a5b5eef5d84c77f7650bfb`；`git diff` = 20 insertions / 20 deletions（仅这 6 个条目）。
 - 独立复验结论见 [`checking/independent-verification.md`](checking/independent-verification.md)：
