@@ -2,10 +2,10 @@
 
 [English](README.md) · 简体中文
 
+![发出第一条消息后的 Worktree Session：输入区显示已绑定的任务分支 ws/fix-the-flaky-checkout-test、依赖模式 lean · npm 和状态 active](docs/overview.png)
+
 <!-- problem -->
 让 AI Agent 直接在你的仓库里干活，它的改动会和你尚未提交的工作混在一起，两个任务也没法并行。Worktree Session 在你发出新会话的第一条消息时，自动为这次任务建一条独立的 Git 分支和一个独立的工作目录，Agent 始终在隔离环境里工作，你的主 checkout 完全不会被碰。
-
-![示意图：Git 会话的第一条消息会创建隔离的任务分支与检出，主检出保持不动](docs/overview.png)
 
 **你能得到什么**
 
