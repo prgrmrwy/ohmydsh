@@ -2,10 +2,10 @@
 
 English · [简体中文](README.zh.md)
 
+![Typing /opsx in the composer lists the bundled commands opsx-apply, opsx-archive, opsx-explore, opsx-propose, opsx-sync and opsx-update, plus the openspec-explore skill](docs/overview.png)
+
 <!-- problem -->
 OpenSpec's guided, spec-driven workflows for AI agents normally have to be installed into every project and kept up to date by hand, so different projects drift onto different versions. dsh-openspec makes the official workflows available in every DSH workspace as ready-to-use skills and `/opsx-*` commands, all pinned to one reviewed OpenSpec version that you upgrade on purpose.
-
-![Illustration: one managed, pinned OpenSpec adapter exposes the official workflows as skills and /opsx-* commands in a DSH session](docs/overview.png)
 
 **What you get**
 

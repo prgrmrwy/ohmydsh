@@ -133,3 +133,27 @@ Known out-of-scope residue (per the 2026-10-09 human scope decision), recorded f
 DECISION: PASS_WITH_WARNINGS
 
 Warnings: (1) the maintainer contact address awaits the user's confirmation; (2) five A/B packages use illustrations instead of screenshots (approved scope change); (3) the dsh-pet screenshot shows emoji as boxes because the capture machine has no color-emoji font; (4) out-of-scope residual identifiers elsewhere in the repo and in git history are recorded in BACKLOG D009; (5) the final small spec/design wording fixes were not re-reviewed in a separate cross-model round.
+
+## Supplement (2026-10-10/11): usage-scenario + settings screenshots at the top of plugin READMEs
+
+User request, treated as a supplement to the docs refresh (not a new change): every self-developed plugin with UI shows up to two screenshots at the very top of its README — a usage-scenario image and, where one exists, the settings panel.
+
+- Result: all nine A/B packages now carry real screenshots; the five packages whose usage UI could not be captured in the first run (no model credentials) now have real usage screenshots, so their illustrations were removed (`overview.svg` and `overview.render.txt` deleted, registry rows are `kind=screenshot`). The `illustration` allowance in the spec stays available but no package uses it for `overview.png` any more; `sidebar-session-provider-icon` additionally keeps its `screenshot.png` illustration (added by another session of the user, left untouched) as its second image.
+
+| Package | Top image 1 (usage, `overview.png`) | Top image 2 (settings, `settings.png`) |
+|---|---|---|
+| dsh-pet | Pet companion + Pet tasks panel beside a demo session | Settings → Pet (emoji rendered) |
+| dsh-memex | — (not captured; optional) | Settings → 记忆 |
+| worktree-session | composer after first send: bound `ws/*` chip, `lean · npm`, `active` | none (no settings section) |
+| dsh-openspec | `/opsx` typed: command list + skill | none |
+| sidebar-session-provider-icon | five sidebar rows, five brand logos (local demo routes) | (second image: existing `screenshot.png` illustration) |
+| session-title-copy | header badge `71766c` + "copied" toast | none |
+| session-links | Docs/Resources panel, links grouped by category | none |
+| system-clock | — | Settings: host clock (demo-host) |
+| home-network-model-guard | — (not captured; optional) | Settings → Egress guard |
+
+- How the usage screenshots were obtained without credentials: a throwaway local mock model server speaking the Anthropic Messages SSE protocol, pointed at by the isolated instance's DeepSeek route through `DEEPSEEK_BASE_URL`, with a fake API key set only in the isolated process environment (never written to the repository). Everything ran in a temporary `HOME`/`XDG_*`/`DSH_HOME` under `/tmp`, on port 3199, under `unshare --uts` with hostname `demo-host`; the real `~/.dsh` and port 3080 were never used. The four non-DeepSeek logos in the sidebar come from four demo model routes added to the isolated profile's pi-ai config (openai/kimi/glm/xai → the mock); sessions were really switched to those models in the model picker. A color-emoji font (extracted from the distribution package into the isolated HOME only) fixed the emoji glyphs; a symbols font fixed one chip glyph.
+- Lead privacy gate (2026-10-11): every new image was viewed by the Lead. Only demo session titles, `example.com` URLs, workspace names `demo-app` / `DSH Pet`, session ids and demo model names are visible; no hostname other than `demo-host`, no user name, real path, email, token, key or real session title. The fake key string appears nowhere in the repository (grep over tracked and untracked files) and nowhere in the PNG metadata (`strings`). Verdicts are recorded in each package's `docs/SCREENSHOTS.md`.
+- Also in this supplement: `system-clock` and `home-network-model-guard` screenshots moved to the top of their READMEs as `settings.png`; origin/main (which had moved with the user's other sessions: sidebar icon work, plugin upgrades, skin-center removal) was merged into the branch first, and two stale references to migrated notes in an in-progress change of the other session (`dsh-memex-demote-in-context-self-cards`) were repointed to their new locations.
+- Not done: optional usage shots for `dsh-memex` and `home-network-model-guard`.
+- Evidence: governance tests green (58/58 in the three README/docs test files), `npm run check:artifacts` compliant; full-suite result recorded in the commit below.

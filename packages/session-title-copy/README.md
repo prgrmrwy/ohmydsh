@@ -2,10 +2,10 @@
 
 English · [简体中文](README.zh.md)
 
+![The conversation header with the short session id badge 71766c and the "Session ID copied" toast shown right after clicking it](docs/overview.png)
+
 <!-- problem -->
 DSH shows a conversation's title but offers no way to grab its session id, which you need for scripts, logs and bug reports. This plugin adds a small six-character badge next to the title; one click copies the full session id.
-
-![Illustration: a short session-id badge next to the title copies the full id on click](docs/overview.png)
 
 **Install.** Managed through `dsh.yaml` (entry `session-title-copy`, `source: local`): set `enabled: true`, run `dsh build`, then restart DSH. Designs in the OpenSpec changes `session-title-copy` and `session-title-id-badge`.
 

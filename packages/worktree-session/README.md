@@ -2,10 +2,10 @@
 
 English · [简体中文](README.zh.md)
 
+![A Worktree Session after its first message: the composer shows the bound task branch ws/fix-the-flaky-checkout-test, dependency mode lean · npm, and status active](docs/overview.png)
+
 <!-- problem -->
 When an AI agent works on a repository it edits your checkout directly, so your own uncommitted work gets mixed with the agent's changes and two tasks cannot run side by side. Worktree Session gives every task its own Git branch and working directory, created automatically when you send the first message of a new session, so the agent stays isolated and your main checkout is never touched.
-
-![Illustration: the first message of a Git-backed session creates an isolated task branch and checkout; the main checkout stays untouched](docs/overview.png)
 
 **What you get**
 

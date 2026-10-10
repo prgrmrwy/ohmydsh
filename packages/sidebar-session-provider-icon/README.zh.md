@@ -2,12 +2,12 @@
 
 [English](README.md) · 简体中文
 
-<!-- problem -->
-DSH 的会话列表里每一行看起来都一样，不打开会话就分不清它用的是哪个模型。这个插件在每个会话标题前显示输入框当前选中的模型品牌 logo，切换模型后立刻更新。provider 和 model 不是同一家时（例如 `opencode-go/deepseek-v4-flash`），在 provider logo 的右下角叠一个缩小的 model logo。
+![DSH 会话列表，每个标题前是该会话所选模型的品牌 logo（Grok、GLM、Kimi、OpenAI、DeepSeek）；这些模型是本地演示路由](docs/overview.png)
 
 ![侧边栏效果：同品牌显示单一 logo，聚合 provider 显示主图 + 右下角 model 小图标（浅色 / 深色主题）](docs/screenshot.png)
 
-![示意图：徽标的数据来源，以及 route 如何变成徽标](docs/overview.png)
+<!-- problem -->
+DSH 的会话列表里每一行看起来都一样，不打开会话就分不清它用的是哪个模型。这个插件在每个会话标题前显示输入框当前选中的模型品牌 logo，切换模型后立刻更新。provider 和 model 不是同一家时（例如 `opencode-go/deepseek-v4-flash`），在 provider logo 的右下角叠一个缩小的 model logo。
 
 **安装。** 通过 `dsh.yaml` 管理（条目 `sidebar-session-provider-icon`，`source: local`）：设为 `enabled: true`，运行 `dsh build`，然后重启 DSH。当前行为见规范 [`openspec/specs/sidebar-session-provider-icon`](../../openspec/specs/sidebar-session-provider-icon/spec.md)；设计演进见归档的 change [`sidebar-session-provider-icon`](../../openspec/changes/archive/2026-08-21-sidebar-session-provider-icon/) 和 [`sidebar-provider-icon-composite-model-badge`](../../openspec/changes/archive/2026-10-10-sidebar-provider-icon-composite-model-badge/)。
 
