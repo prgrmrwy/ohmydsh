@@ -30,6 +30,10 @@ updates:
     ignore:
       # DSH 运行体与官方 bundle 由 dsh.yaml + autoUpdate 单独管理。
       - dependency-name: '@deepseek-ai/dsh*'
+      # 大版本升级需要单独做运行时、类型和 API 兼容性审查，不自动开 PR。
+      - dependency-name: '*'
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: github-actions
     directory: '/'
