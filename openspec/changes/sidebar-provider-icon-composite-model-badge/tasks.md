@@ -21,10 +21,17 @@
 - [x] 4.2 增加 markup 测试：复合时含 `data-composite`、主图 width/height=14、子图 width/height=7、仍不含外部 URL；非复合时不含 `data-composite`
 - [x] 4.3 运行包内 `npm run typecheck`、`npm test`、`npm run build`
 
-## 5. 文档与发布
+## 5. 实机反馈修订（0.1.4）
 
-- [x] 5.1 包版本 0.1.2 → 0.1.3；CHANGELOG 增加 0.1.3；README 品牌资产与「品牌判断」段落说明复合 icon 与 Trae
-- [x] 5.2 `dsh.yaml` 条目 version 0.1.3，note 补充复合 icon 与 Trae
-- [ ] 5.3 运行根 `npm test`、`npm run check:artifacts`；`node scripts/sync.mjs` 连续两次，第二次无变化
-- [ ] 5.4 刷新 http://127.0.0.1:3080 实机核对：同品牌行单 logo；opencode-go / traex 行复合 icon；切换模型即时更新；子图标未被行容器裁剪、hover/选中与深浅主题下可辨认；StateDot/时间/菜单位置不变
-- [ ] 5.5 `openspec validate sidebar-provider-icon-composite-model-badge --strict` 通过后归档
+- [x] 5.1 子图标去圆底/描边/内边距，改 10px 裸 glyph、偏移 -4px；渲染 9/10/11px 对比后选 10px
+- [x] 5.2 按 OpenCode Go/Zen 目录补齐 model 品牌（Qwen、混元、LongCat、MiMo、Gemini、NVIDIA、Meta、蚂蚁）与对应 provider route，下载落盘并记录出处与 SHA-256
+- [x] 5.3 测试覆盖目录内全部可识别模型族、不可识别模型保持单 logo、新 route 映射、子图标无底板样式；包 typecheck/test/build 通过
+- [x] 5.4 版本 0.1.4，CHANGELOG/README/dsh.yaml/package-lock 同步；spec delta 与 design 修订
+
+## 6. 文档与发布
+
+- [x] 6.1 包版本 0.1.2 → 0.1.3；CHANGELOG 增加 0.1.3；README 品牌资产与「品牌判断」段落说明复合 icon 与 Trae
+- [x] 6.2 `dsh.yaml` 条目 version 0.1.3，note 补充复合 icon 与 Trae
+- [x] 6.3 运行根 `npm test`、`npm run check:artifacts`；`node scripts/sync.mjs` 连续两次，第二次无变化（根 npm test 360 例中 7 例 dsh-openspec sync 用例失败，未改动基线同样失败，与本 change 无关；合入 main ad6e99c 后从主 checkout sync：首轮重装 0.1.3，第二轮 no changes，dsh-openspec source-checkout 仍指向主 checkout）
+- [ ] 6.4 刷新 http://127.0.0.1:3080 实机核对：同品牌行单 logo；opencode-go / traex 行复合 icon；切换模型即时更新；子图标未被行容器裁剪、hover/选中与深浅主题下可辨认；StateDot/时间/菜单位置不变
+- [ ] 6.5 `openspec validate sidebar-provider-icon-composite-model-badge --strict` 通过后归档

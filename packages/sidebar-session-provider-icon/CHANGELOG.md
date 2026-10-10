@@ -26,3 +26,11 @@
 - 新增 Trae 品牌资产（`@lobehub/icons-static-svg@1.94.0`，MIT），`trae` / `traex*` / `trae-ai` route 映射到 Trae；此前 `traex/GPT-*` 经 model fallback 误显示 OpenAI。
 - 子图标内 SVG 的内部 id 与 `url(#…)` 引用加后缀，避免与同页其它副本串用定义。
 - 对应 openspec change `sidebar-provider-icon-composite-model-badge`。
+
+## 0.1.4 — 2026-10-10
+
+### Real-GUI feedback revision
+
+- 子图标去掉圆底、描边与内边距，改为裸 glyph，尺寸 7px → 10px，向右下溢出 4px；14×14 外框不变，行布局不变。
+- 按 OpenCode Go / Zen 模型目录补齐 model 品牌：Qwen、混元（`hy3` / `hy4-*`）、LongCat、小米 MiMo、Gemini、NVIDIA（Nemotron）、Meta（Muse Spark / Llama）、蚂蚁（Ling/Ring）。对应 provider route（`qwen-token-plan*`、`xiaomi-token-plan*`、`google`、`nvidia`、`ant-ling` 等）同样映射。资产均为 `@lobehub/icons-static-svg@1.94.0`（MIT）。
+- 目录中没有可识别厂商的模型（如 `omen-alpha`、`big-pickle`）仍只显示 OpenCode 单 logo。
