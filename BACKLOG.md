@@ -744,6 +744,20 @@
 
 ## 待立项
 
+### [U008] locus 创建时把入口群名写进记录并在投递 prompt 呈现
+- **状态**: 待立项(2026-10-13 真机验收 `pet-locus-feishu-read-and-delivery-fixes` 7.5 时发现)
+- **优先级**: P3(可读性与可诊断性,不影响授权/投递正确性)
+- **背景 / 动机**: locus 记录只存 `chatId`,首投 prompt 的 `### Endpoint` 因此只有 `入口：chat oc_…`;child 与验收者都看不到"这是哪个群",回复措辞只能靠 id,排障也要人去反查。真实需求是"创建时顺手记下入口名字",而不是让每个消费者各自再查一次。
+- **现状(实测)**: 名字其实**已经取过一次**——`src/index.ts` 的 `ensureForDelivery` 在创建新 generation 前调用 `larkClient.chatName(chatId)`,用于**主会话标题**(实测该群主会话标题为 `Locus 主会话 · Pet Locus shell-tier test`),但**没有写入 locus 记录**:真机 locus `locus-runtime-1791825019304-1e6afb3085e438`(群 `oc_6847047be0e4310c404a8a41ed068365`)的 `endpoint` 只有 `chatId`。展示层其实已支持:`src/host/locus/context.ts` 的 `LocusEndpoint.chatName` 与 `endpointLabel()` 会渲染 `，名称「…」`;群绑定路径(`channel/route.ts` → `PetChatBinding.chatName`)也已缓存名称。
+- **建议契约(落地时逐条定稿)**:
+  1. 创建 locus 时复用同一次取名结果(零额外调用),写入该 locus 记录的**展示字段**(如 `endpoint.chatName`);名称**只用于展示**,MUST NOT 作为授权、路由、绑定向或任何相等判断的依据。
+  2. fail-soft:取名失败、无权限、机器人不在群时记录缺省,prompt 只显示 `chat_id`,**不阻塞创建与投递**(与标题路径同口径)。
+  3. 话题入口:thread 没有独立名称,MUST NOT 用消息正文或群名冒充话题名;保持 thread id。
+  4. 名称漂移:不做轮询、不追求强一致;可记录取名时刻或标注"可能过期",禁止任何逻辑依赖其相等性。
+  5. 诊断只记原因码,不把群名当标识写进日志/诊断。
+  6. 测试:可取名/取名失败两态;话题入口不误写群名;名称只出现在展示字段;fail-soft 不改变投递结果;prompt 含名称时的渲染形状。
+- **证据与设计输入**: `openspec/changes/pet-locus-feishu-read-and-delivery-fixes/verify.md`(2026-10-13 真机验收记录)、`src/index.ts`(`ensureForDelivery` 取名路径)、`src/host/locus/context.ts`(`LocusEndpoint.chatName`/`endpointLabel`)、`src/host/channel/route.ts`(绑定侧 chatName 缓存)。
+
 ### [U006] Locus 只读身份回落 user:需要"可回落主体"与正向错误分类契约
 - **状态**: 待立项(2026-10-12 由 change `pet-locus-feishu-read-and-delivery-fixes` 拆出 —— 评审 round 1 的 C4 判定其授权边界无法从当时的方案推出)
 - **来源 change 现状(2026-10-12)**: 该 change 已实现并留档 `verify.md`(bot-only 群读取已落地、能力声明改为实测三态)，本条是**有意的未实施部分**：`safe` 档 child 在 bot 被拒时如实声明不可读，不自行回落 user 身份。规范合并/归档待 `pet-locus-shell-tier` 7.4 之后
