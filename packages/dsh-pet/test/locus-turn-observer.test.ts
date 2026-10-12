@@ -550,7 +550,39 @@ describe('Non-routing context does not poison reply authority', () => {
   // `agent/inbox/claimed` feed as real traffic, so the observer used to mark
   // the turn mixed and withhold reply authority — which made the FIRST Feishu
   // message of every locus child unanswerable.
-  const HOST_KINDS = ['agent-instructions', 'plugin', 'skill-catalog'] as const
+  const HOST_KINDS = [
+    'agent-instructions',
+    'plugin',
+    'skill-catalog',
+    // DSH 0.2.0 per-producer kinds.
+    'plugin:dsh-memex',
+    'runtime-context',
+    'time-context',
+  ] as const
+
+  it('keeps reply authority when a DSH 0.2.0 first turn carries a plugin:<id> memex reminder', () => {
+    const h = harness()
+
+    // Observed production sequence on DSH 0.2.0-rc.2: the memex reminder
+    // (`plugin:dsh-memex`) is claimed into the same first turn as the Delivery.
+    h.claim({ childSessionId: CHILD, messageId: 'memex', turn: 1, sourceKind: 'plugin:dsh-memex' })
+    h.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 1, sourceKind: 'user' })
+    h.claim({ childSessionId: CHILD, messageId: 'nested-agents', turn: 1, sourceKind: 'agent-instructions' })
+
+    expect(h.observer.currentForChild?.(CHILD)).toEqual({
+      executionId: 'execution-1',
+      turnId: `${CHILD}#1`,
+    })
+  })
+
+  it.each(['plugin:', 'pluginx', 'schedule'])('keeps %s fail-closed as participant traffic', (kind) => {
+    const h = harness()
+
+    h.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 1, sourceKind: 'user' })
+    h.claim({ childSessionId: CHILD, messageId: 'other', turn: 1, sourceKind: kind })
+
+    expect(h.observer.currentForChild?.(CHILD)).toBeUndefined()
+  })
 
   it('keeps reply authority when the real first turn carries Host context', () => {
     const h = harness()
