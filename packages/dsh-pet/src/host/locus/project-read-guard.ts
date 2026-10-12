@@ -8,6 +8,26 @@ import type { ToolExecution } from '@deepseek-ai/dsh-tools'
 const PROJECT_READ_TOOLS = new Set(['read', 'read_image', 'glob', 'grep'])
 export const LOCUS_PROJECT_READ_DENIAL = 'locus-project-read-outside-confirmed-workspace'
 
+/**
+ * The model-facing denial text: stable code first, then minimum guidance.
+ *
+ * The first line stays byte-stable so machine consumers (and the tests that pin
+ * the denial) can still match on the code alone. Everything after it is for the
+ * model and local diagnosis only: the delivery prompt never tells the model to
+ * quote it, and the managed outbound never appends it to a business body.
+ *
+ * @param allowedRoot - The one root this child may read.
+ * @returns the denial reason shown to the caller.
+ */
+export function locusProjectReadDenialReason(allowedRoot: string): string {
+  return [
+    LOCUS_PROJECT_READ_DENIAL,
+    '拒绝原因：请求的路径不在已确认工作区内，本次未读取任何内容。',
+    `- 允许根：${allowedRoot}`,
+    '- 需要读取工作区外的路径时：请所有者在管理面显式确认该路径后再重试；不要改用其它工具、其它路径或未授权根绕过本限制。',
+  ].join('\n')
+}
+
 /** The Pet-owned roots that supply the guard's denylist. */
 export interface LocusDeniedRootInput {
   /** Active DSH home; also the parent of the DSH attachment store. */
@@ -181,17 +201,23 @@ function requestedPath(exec: Readonly<ToolExecution>): string | undefined {
 function denial(policy: CanonicalProjectReadPolicy, exec: Readonly<ToolExecution>): string | undefined {
   const path = requestedPath(exec)
   if (path === undefined) return undefined
-  if (path === '') return LOCUS_PROJECT_READ_DENIAL
+  // A denial is model-visible, and the model has to decide what to do next.
+  // The stable code alone left the child retrying paths it could not know were
+  // outside the confirmed workspace, so the reason now carries the allowed root
+  // and the one action that can actually change the boundary — an owner
+  // confirmation. It remains a DENIAL: nothing outside the root is allowed.
+  const reason = () => locusProjectReadDenialReason(policy.allowedRoots[0] ?? policy.base)
+  if (path === '') return reason()
   let canonical: string
   try {
     canonical = realpathSync(isAbsolute(path) ? path : resolve(policy.base, path))
   } catch {
-    return LOCUS_PROJECT_READ_DENIAL
+    return reason()
   }
-  if (policy.deniedRoots.some(root => physicallyContained(root, canonical))) return LOCUS_PROJECT_READ_DENIAL
+  if (policy.deniedRoots.some(root => physicallyContained(root, canonical))) return reason()
   return policy.allowedRoots.some(root => physicallyContained(root, canonical))
     ? undefined
-    : LOCUS_PROJECT_READ_DENIAL
+    : reason()
 }
 
 /**

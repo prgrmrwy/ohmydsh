@@ -39,10 +39,10 @@
 
 ## 5. 守卫拒绝可诊断且不额外放行（D4）
 
-- [ ] 5.1 拒绝信息补最小可执行指引（稳定原因码 + 被允许根 + 申请方式）
-- [ ] 5.2 断言：受管出站在既有 @ 提及渲染之外不改动模型正文、不附加诊断/路径；纯文本与含提及两种正文都覆盖
-- [ ] 5.3 断言：投递 prompt 不指示模型把诊断转述进飞书正文
-- [ ] 5.4 单测：工作区外读取仍全部被拒（本 change 不新增放行）
+- [x] 5.1 拒绝信息补最小可执行指引（稳定原因码 + 被允许根 + 申请方式）→ `src/host/locus/project-read-guard.ts` `locusProjectReadDenialReason`；`test/locus-project-read-guard.test.ts`（`denial carries the allowed root and how to request more paths`）
+- [x] 5.2 断言：受管出站在既有 @ 提及渲染之外不改动模型正文、不附加诊断/路径；纯文本与含提及两种正文都覆盖 → `test/channel-lark.test.ts`（`appends no diagnostics or paths to a plain-text body`、`renders a plain @display-name into a real mention before sending`）、`test/channel-mentions.test.ts`
+- [x] 5.3 断言：投递 prompt 不指示模型把诊断转述进飞书正文 → `test/locus-context.test.ts`（`never instructs the model to quote guard diagnostics into the reply body`）
+- [x] 5.4 单测：工作区外读取仍全部被拒（本 change 不新增放行）→ `test/locus-project-read-guard.test.ts`（`keeps refusing every outside path once the guidance is attached`）
 
 ## 6. 反馈类修复（D5/D6）
 

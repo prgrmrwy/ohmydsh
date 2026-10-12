@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { LOCUS_PROJECT_READ_DENIAL } from '../src/host/locus/project-read-guard.js'
 import {
   isSafeLocusReplyTarget,
   locusEndpointKey,
@@ -375,6 +376,21 @@ describe('every delivery declares the effective tool tier', () => {
     expect(next).toContain('工具档位：shell')
     expect(next).toContain('pet_locus_finish')
     expect(next).not.toContain('不提供 shell')
+  })
+
+  it('never instructs the model to quote guard diagnostics into the reply body', () => {
+    for (const position of ['first', 'subsequent'] as const) {
+      const prompt = renderLocusDeliveryPrompt(withTier('shell'), { position })
+
+      // The denial text is for the model and local diagnosis. If a prompt ever
+      // asks the model to pass it on, group members start seeing internal
+      // paths; the managed outbound cannot take that back.
+      expect(prompt, position).not.toContain('把诊断')
+      expect(prompt, position).not.toContain('守卫诊断')
+      expect(prompt, position).not.toContain('拒绝原因')
+      expect(prompt, position).not.toContain('允许根')
+      expect(prompt, position).not.toContain(LOCUS_PROJECT_READ_DENIAL)
+    }
   })
 
   it('keeps the full tier section on a first delivery', () => {

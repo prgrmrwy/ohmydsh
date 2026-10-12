@@ -10,7 +10,11 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
-import { installLocusProjectReadGuard, locusDeniedRoots } from '../src/host/locus/project-read-guard.js'
+import {
+  installLocusProjectReadGuard,
+  locusDeniedRoots,
+  LOCUS_PROJECT_READ_DENIAL,
+} from '../src/host/locus/project-read-guard.js'
 import { ensurePetDirectories, isContainedBy, resolvePetPaths } from '../src/host/paths.js'
 
 function probeTool(name: string, effect: () => void) {
@@ -81,6 +85,103 @@ describe('Locus canonical project-read guard', () => {
       ['read_image', { file_path: join(workspace, 'missing.png') }],
     ] as const) expect((await execute(name, args)).isError, name).toBe(true)
     expect(bodies).toBe(2)
+    await scope.dispose()
+  })
+
+  it('denial carries the allowed root and how to request more paths', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'locus-read-deny-'))
+    roots.push(base)
+    const workspace = join(base, 'project')
+    const outside = join(base, 'outside')
+    const dshHome = join(base, 'dsh-home')
+    await Promise.all([mkdir(workspace), mkdir(outside), mkdir(dshHome)])
+    await writeFile(join(outside, 'secret.txt'), 'secret')
+
+    ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    let bodies = 0
+    for (const name of ['read', 'read_image', 'glob', 'grep']) ctx.tools.register(probeTool(name, () => { bodies += 1 }))
+    const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/package.json'))
+    const { createScope } = await import(pathToFileURL(requireFromTools.resolve('@deepseek-ai/dsh-scope')).href) as {
+      createScope(ctx: Context, key: Agent): { ctx: Context; dispose(): Promise<void> }
+    }
+    const agent = { id: 'guarded-child' as SessionId } as Agent
+    const scope = createScope(ctx, agent)
+    installLocusProjectReadGuard(scope.ctx, {
+      childCwd: workspace,
+      parentCwd: workspace,
+      workspaceRoot: workspace,
+      deniedRoots: [dshHome],
+    })
+
+    const result = await ctx.tools.execute({
+      agent,
+      name: 'read',
+      callId: 'read-outside' as ToolCallId,
+      arguments: { file_path: join(outside, 'secret.txt') },
+      signal: new AbortController().signal,
+    })
+    const text = JSON.stringify(result)
+
+    // A stable machine-readable code FIRST, then the minimum the model needs to
+    // choose a next step instead of retrying blind.
+    expect(text).toContain(LOCUS_PROJECT_READ_DENIAL)
+    expect(text).toContain(workspace)
+    expect(text).toContain('所有者')
+    expect(text).toContain('确认')
+    // Still a denial: nothing was read, and the guidance is not an allowance.
+    expect(result.isError).toBe(true)
+    expect(bodies).toBe(0)
+    await scope.dispose()
+  })
+
+  it('keeps refusing every outside path once the guidance is attached', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'locus-read-still-denied-'))
+    roots.push(base)
+    const workspace = join(base, 'project')
+    const outside = join(base, 'outside')
+    const dshHome = join(base, 'dsh-home')
+    await Promise.all([mkdir(workspace), mkdir(outside), mkdir(dshHome)])
+    await writeFile(join(outside, 'secret.txt'), 'secret')
+    await symlink(join(outside, 'secret.txt'), join(workspace, 'escape'))
+
+    ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    let bodies = 0
+    for (const name of ['read', 'read_image', 'glob', 'grep']) ctx.tools.register(probeTool(name, () => { bodies += 1 }))
+    const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/package.json'))
+    const { createScope } = await import(pathToFileURL(requireFromTools.resolve('@deepseek-ai/dsh-scope')).href) as {
+      createScope(ctx: Context, key: Agent): { ctx: Context; dispose(): Promise<void> }
+    }
+    const agent = { id: 'guarded-child' as SessionId } as Agent
+    const scope = createScope(ctx, agent)
+    installLocusProjectReadGuard(scope.ctx, {
+      childCwd: workspace,
+      parentCwd: workspace,
+      workspaceRoot: workspace,
+      deniedRoots: [dshHome],
+    })
+    const execute = (name: string, args: unknown) => ctx!.tools.execute({
+      agent,
+      name,
+      callId: `${name}-${Math.random()}` as ToolCallId,
+      arguments: args,
+      signal: new AbortController().signal,
+    })
+
+    for (const [name, args] of [
+      ['read', { file_path: join(outside, 'secret.txt') }],
+      ['read', { file_path: '../outside/secret.txt' }],
+      ['read', { file_path: join(workspace, 'escape') }],
+      ['glob', { pattern: '*', path: outside }],
+      ['grep', { pattern: 'x', path: outside }],
+      ['read', { file_path: dshHome }],
+      ['read', { file_path: '' }],
+    ] as const) expect((await execute(name, args)).isError, name).toBe(true)
+    // No new allowance was introduced by the guidance.
+    expect(bodies).toBe(0)
     await scope.dispose()
   })
 

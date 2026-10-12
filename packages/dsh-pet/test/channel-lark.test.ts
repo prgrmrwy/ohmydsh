@@ -374,6 +374,28 @@ describe('strict Delivery-target reply', () => {
     expect(logs.join('\n')).not.toContain('ou_')
   })
 
+  it('appends no diagnostics or paths to a plain-text body', async () => {
+    const calls: string[][] = []
+    const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
+      calls.push([...args])
+      return { stdout: JSON.stringify({ ok: true, data: { message_id: 'om_reply', chat_id: 'oc_group' } }) }
+    }) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner)
+    // The body deliberately LOOKS like a guard denial: the Host must still send
+    // exactly what the model wrote, with nothing appended or stripped.
+    const body = '结论如下：/tmp/nexus 不动。locus-project-read-outside-confirmed-workspace 只是原因码。'
+
+    await expect(client.replyToTarget?.({ chatId: 'oc_group', messageId: 'om_current' }, body))
+      .resolves.toEqual({ messageId: 'om_reply' })
+
+    expect(calls).toHaveLength(1)
+    const textIndex = calls[0]!.indexOf('--text') + 1
+    expect(calls[0]![textIndex]).toBe(body)
+    // No allowed root, no guidance block, no extra flag carrying diagnostics.
+    expect(calls[0]).not.toContain('允许根')
+    expect(calls[0]).not.toContain('所有者确认')
+  })
+
   it('reads no member list at all when the reply addresses nobody', async () => {
     const calls: string[][] = []
     const runner = vi.fn(async (_binary: string, args: readonly string[]) => {

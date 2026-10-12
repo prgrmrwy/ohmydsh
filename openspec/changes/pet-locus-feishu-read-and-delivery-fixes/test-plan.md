@@ -48,11 +48,11 @@
 | 同上 | 第二次投递不重复前言但声明档位 | `test/locus-context.test.ts`、`test/locus-preamble-durability.test.ts` | `states the safe tier and its limit on a follow-up`；`switches to the compact follow-up once a prior Delivery is bound` | 🟢 green |
 | 同上 | 重启后按送达证据决定 | `test/locus-preamble-durability.test.ts` | `decides from durable proof after a restart, not from runtime state` | 🟢 green |
 | 同上 | 受既有缺陷影响的 child | `test/locus-preamble-durability.test.ts` | `switches to the compact follow-up once a prior Delivery is bound`（不自动补发；档位行由续投声明保证） | 🟢 green |
-| 读取守卫的拒绝可诊断且不额外放行 | 工作区外读取被拒且原因稳定 | `test/locus-project-read-guard.test.ts` | `outside-workspace read keeps the stable denial code` | 🟢 existing |
-| 同上 | 指引可执行 | `test/locus-project-read-guard.test.ts` | `denial carries the allowed root and how to request more paths` | 🔴 red |
-| 同上 | Host 出站不附加诊断 | `test/channel-lark.test.ts` | `managed outbound appends no diagnostics to a plain-text body` | 🔴 red |
-| 同上 | 含提及的正文只做既有受管变换 | `test/channel-mentions.test.ts` | `mention-bearing body keeps the existing managed rendering and nothing else` | 🟡 pin |
-| 同上 | prompt 不指示模型转述诊断 | `test/locus-context.test.ts` | `delivery prompt never instructs the model to quote guard diagnostics` | 🔴 red |
+| 读取守卫的拒绝可诊断且不额外放行 | 工作区外读取被拒且原因稳定 | `test/locus-project-read-guard.test.ts` | `denial carries the allowed root and how to request more paths`（原因码仍在首行）+ `allows workspace reads/globs and rejects DSH, media cache, missing paths, and symlink escapes before bodies run` | 🟢 green |
+| 同上 | 指引可执行 | `test/locus-project-read-guard.test.ts` | `denial carries the allowed root and how to request more paths` | 🟢 green |
+| 同上 | Host 出站不附加诊断 | `test/channel-lark.test.ts` | `appends no diagnostics or paths to a plain-text body` | 🟢 green |
+| 同上 | 含提及的正文只做既有受管变换 | `test/channel-mentions.test.ts`、`test/channel-lark.test.ts` | `renders a whole-word display name into a real mention`；`renders a plain @display-name into a real mention before sending` | 🟢 green |
+| 同上 | prompt 不指示模型转述诊断 | `test/locus-context.test.ts` | `never instructs the model to quote guard diagnostics into the reply body` | 🟢 green |
 | 未装配的 caller-bound 能力不得以可见但必然失败的形式暴露 | 能力未装配时不可见 | `test/locus-surface.test.ts` | `unassembled collaboration context tool is not exposed to the child` | 🔴 red |
 | 同上 | 装配后可用 | `test/locus-surface.test.ts` | `assembled capability registers and serves an authorized caller` | 🔴 red |
 | 同上 | 冷恢复后判定一致 | `test/locus-surface.test.ts` | `cold restore keeps the same capability visibility decision` | 🔴 red |
