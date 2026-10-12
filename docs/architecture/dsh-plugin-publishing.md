@@ -358,3 +358,37 @@ GitHub 可接受使用政策 §4 明确把「rank abuse, such as automated starr
 monorepo 子包要各自上架时：topic 爬虫只认仓库级，子包必须手动提 PR
 （`url …/tree/main/packages/<id>`、`name owner/repo#<id>`、文件名 `owner__repo--packages-<id>.yml`），
 商店会为它生成 `dsh plugin --profile web add github:owner/repo#path:/packages/<id>` 这样的安装命令。
+
+---
+
+## 10. 发布之后：推广位与度量
+
+**什么样的仓库才值得投。** 不要按 star 数找仓库铺链接。实测（2026-10-12 抽样头部插件
+`V1ki/dsh-plugin-subscriptions`、`omdsh-dev/DSH-better-sidebar`、`MichengAI/dsh-codex-ui`、
+`zhu1090093659/dsh-pet`、`dsh-market/dsh-market`）：**几乎全都 `has_discussions = false`**，
+但其中多数 README 里有维护者自建的 `## Related plugins` / `## 相关插件` 区块。所以真实的位是
+**"该仓库明确留出的生态位"**，不是"有讨论区的高星仓库"。
+
+按回报/风险排序的投放顺序：
+
+1. **相邻插件的 `Related plugins` 区块** —— 只投"互补"关系（例如多 provider 插件 ↔ 侧边栏模型标识），
+   每家最多提一次 PR，格式照抄该仓库既有条目（链接 + 一句相对本插件做什么 + 安装命令）。
+2. **商店条目** —— 复利渠道：站点、dsh-market、第三方 storefront 读同一份注册表，用户在那里浏览。
+3. **官方 Discussions 的 Show Your Plugins** —— 每个插件发一次，别重复。
+4. **中文社区一篇**（掘金/知乎/V2EX 任选一处，不同文同发）。
+
+**明确不做**：在别人的 issue tracker 里发推广；同一文案跨仓库复制（GitHub 可接受使用政策 §4
+"excessive or repeated promotion"）；请求维护者为你改仓库设置（例如开 Discussions）。
+
+**时机**：Related PR 要等 npm 发布成功后再提——否则条目里那句
+`dsh plugin --profile web add <name>` 是 404，比不提更伤。
+
+**度量（一周后）**：
+
+```sh
+gh api repos/prgrmrwy/<repo>/traffic/views                  # 14 天窗口
+gh api repos/prgrmrwy/<repo>/traffic/popular/referrers      # 看哪个渠道真的带量
+curl -s https://api.npmjs.org/downloads/point/last-month/<pkg>
+```
+平台侧另有现成指标：商店条目的 downloads / stars、dsh.so 的 L1–L5 验证级别。再人工问一次
+AI 助手（"DSH 侧边栏显示当前模型图标的插件"）看是否被提及——目前没有免费的官方 AI 引用查询接口。
