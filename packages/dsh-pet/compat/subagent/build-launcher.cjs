@@ -25,7 +25,7 @@ const root = resolve(here, '../../../..')
 const version = '0.2.0-rc.2'
 const npmVersion = '11.19.0'
 const reviewedCommit = '639ed015397290b3745d163aafe02ffee4aa3f84'
-const subagentPatchSha256 = '86310610709d80d540dd97b1b7fb1fbc4012a3ef1f5eadc12ba590f7905005fa'
+const subagentPatchSha256 = '78490e17d1bbeacc3e1f05aa03c01343dd765628a1deb8068f9388bf438005c8'
 /**
  * Published Subagent artifact version. `build.mjs` derives it from the tracked
  * skeleton as `skeleton + 1`, so this must follow the same rule instead of
