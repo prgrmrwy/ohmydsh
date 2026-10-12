@@ -159,6 +159,20 @@ export interface LarkClient {
    */
   readEntranceHistory?(input: LarkEntranceReadInput): Promise<LarkEntrancePage | undefined>
   /**
+   * Take one bounded read of THIS entrance to measure whether it is readable.
+   *
+   * Exists so a delivery never declares a capability nobody verified. The
+   * result is deliberately a boolean: message content must not be laundered
+   * through a capability check, which is why this is not `readEntranceHistory`
+   * with a small page size at the call site.
+   * @param input - Exact entrance (group, or the bound topic).
+   * @returns whether a real read of this entrance succeeded just now.
+   */
+  probeEntranceRead?(input: {
+    readonly chatId: string
+    readonly threadId?: string
+  }): Promise<boolean>
+  /**
    * Whether this machine's lark-cli can act as the bound bot right now.
    *
    * Checked rather than assumed: telling an agent it can read Lark when the
@@ -362,6 +376,83 @@ function normalizeEntranceTime(value: string): string {
 }
 
 /** Invoke lark-cli and retain a structured error response without raw text. */
+/**
+ * Read one page of an entrance as the bound bot.
+ *
+ * Shared by the caller-bound read and by the bounded capability probe so both
+ * hit exactly the same platform path: a probe that used a different call would
+ * prove the wrong capability.
+ *
+ * A failed call is NOT an empty page: the caller must be able to say "could not
+ * read" instead of "nothing was said", hence `undefined`.
+ *
+ * @param binary - lark-cli binary.
+ * @param runner - CLI runner.
+ * @param input - Exact entrance plus page direction/size/token.
+ * @returns the normalized page, or `undefined` when the read failed.
+ */
+async function readEntranceHistoryWith(
+  binary: string,
+  runner: LarkCliRunner,
+  input: LarkEntranceReadInput,
+): Promise<LarkEntrancePage | undefined> {
+  // The platform prints `create_time` as local wall-clock minutes, which is
+  // too coarse for a `[since, before)` window; normalizing it here keeps
+  // every consumer on one explicit representation.
+  const args = input.threadId === undefined
+    ? [
+      'im', '+chat-messages-list', '--as', 'bot', '--chat-id', input.chatId,
+      '--order', input.direction === 'older' ? 'desc' : 'asc',
+      '--page-size', String(input.pageSize), '--no-reactions',
+    ]
+    : [
+      'im', '+threads-messages-list', '--as', 'bot', '--thread', input.threadId,
+      '--order', input.direction === 'older' ? 'desc' : 'asc',
+      '--page-size', String(input.pageSize), '--no-reactions',
+    ]
+  const data = await callCli(
+    input.pageToken === undefined ? args : [...args, '--page-token', input.pageToken],
+    binary,
+    runner,
+  )
+  if (data === undefined) return undefined
+  const record = data as {
+    messages?: unknown
+    has_more?: unknown
+    page_token?: unknown
+  }
+  if (!Array.isArray(record.messages)) return undefined
+  const messages: LarkEntranceMessage[] = []
+  for (const entry of record.messages) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const message = entry as Record<string, unknown>
+    const messageId = message['message_id']
+    if (typeof messageId !== 'string') continue
+    const sender = message['sender'] as { name?: unknown } | undefined
+    const rawCreateTime = typeof message['create_time'] === 'string' ? message['create_time'] : ''
+    const threadId = message['thread_id']
+    messages.push({
+      messageId,
+      createTime: normalizeEntranceTime(rawCreateTime),
+      ...(typeof sender?.name === 'string' && sender.name !== ''
+        ? { senderName: sender.name }
+        : {}),
+      text: typeof message['content'] === 'string' ? message['content'] : '',
+      ...(typeof message['message_position'] === 'string'
+        ? { messagePosition: message['message_position'] }
+        : {}),
+      ...(typeof threadId === 'string' && threadId !== '' ? { threadId } : {}),
+    })
+  }
+  return {
+    messages,
+    hasMore: record.has_more === true,
+    ...(typeof record.page_token === 'string' && record.page_token !== ''
+      ? { pageToken: record.page_token }
+      : {}),
+  }
+}
+
 async function callJson(
   args: readonly string[],
   binary: string,
@@ -804,63 +895,19 @@ export function createLarkCliClient(
     },
 
     async readEntranceHistory(input) {
-      // The platform prints `create_time` as local wall-clock minutes, which is
-      // too coarse for a `[since, before)` window; normalizing it here keeps
-      // every consumer on one explicit representation.
-      const args = input.threadId === undefined
-        ? [
-          'im', '+chat-messages-list', '--as', 'bot', '--chat-id', input.chatId,
-          '--order', input.direction === 'older' ? 'desc' : 'asc',
-          '--page-size', String(input.pageSize), '--no-reactions',
-        ]
-        : [
-          'im', '+threads-messages-list', '--as', 'bot', '--thread', input.threadId,
-          '--order', input.direction === 'older' ? 'desc' : 'asc',
-          '--page-size', String(input.pageSize), '--no-reactions',
-        ]
-      // A failed call is NOT an empty page: the caller must be able to say
-      // "could not read" instead of "nothing was said".
-      const data = await callCli(
-        input.pageToken === undefined ? args : [...args, '--page-token', input.pageToken],
-        binary,
-        runner,
-      )
-      if (data === undefined) return undefined
-      const record = data as {
-        messages?: unknown
-        has_more?: unknown
-        page_token?: unknown
-      }
-      if (!Array.isArray(record.messages)) return undefined
-      const messages: LarkEntranceMessage[] = []
-      for (const entry of record.messages) {
-        if (typeof entry !== 'object' || entry === null) continue
-        const message = entry as Record<string, unknown>
-        const messageId = message['message_id']
-        if (typeof messageId !== 'string') continue
-        const sender = message['sender'] as { name?: unknown } | undefined
-        const rawCreateTime = typeof message['create_time'] === 'string' ? message['create_time'] : ''
-        const threadId = message['thread_id']
-        messages.push({
-          messageId,
-          createTime: normalizeEntranceTime(rawCreateTime),
-          ...(typeof sender?.name === 'string' && sender.name !== ''
-            ? { senderName: sender.name }
-            : {}),
-          text: typeof message['content'] === 'string' ? message['content'] : '',
-          ...(typeof message['message_position'] === 'string'
-            ? { messagePosition: message['message_position'] }
-            : {}),
-          ...(typeof threadId === 'string' && threadId !== '' ? { threadId } : {}),
-        })
-      }
-      return {
-        messages,
-        hasMore: record.has_more === true,
-        ...(typeof record.page_token === 'string' && record.page_token !== ''
-          ? { pageToken: record.page_token }
-          : {}),
-      }
+      return readEntranceHistoryWith(binary, runner, input)
+    },
+
+    async probeEntranceRead(input) {
+      // One real read of the exact entrance, with the smallest page the CLI
+      // accepts; only success/failure escapes, never the content.
+      const page = await readEntranceHistoryWith(binary, runner, {
+        chatId: input.chatId,
+        ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
+        pageSize: 1,
+        direction: 'older',
+      })
+      return page !== undefined
     },
 
     async botReady() {

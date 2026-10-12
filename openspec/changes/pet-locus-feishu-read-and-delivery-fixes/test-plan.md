@@ -18,15 +18,15 @@
 | 会话内容由 Agent 自取而非预先注入 | 触发者显示名随身份一并注入 | `test/channel-context.test.ts` | `sender display name from history is injected together with the open id` | 🟢 existing |
 | 会话内容由 Agent 自取而非预先注入 | 成员列表不可读时只呈现 open_id 且不阻断 | `test/channel-context.test.ts` | `member lookup failure injects the open id only and never blocks delivery` | 🟢 existing |
 | 会话内容由 Agent 自取而非预先注入 | bot 身份不可用时不虚报能力 | `test/channel-lark.test.ts` | `unavailable bot identity is declared and never advertised as readable` | 🟢 existing |
-| 会话内容由 Agent 自取而非预先注入 | bot 身份就绪但当前入口历史不可读 | `test/channel-lark.test.ts` | `identity-ready with refused entrance history declares the limit instead of an empty read` | 🔴 red |
-| 会话内容由 Agent 自取而非预先注入 | 身份就绪不改变既有注入约束 | `test/channel-context.test.ts` | `measured readable capability still uses bot identity and injects no history` | 🔴 red |
-| 对外声明的飞书群读取能力按实测判定且不虚报 | 具备群读取能力时如实声明 | `test/channel-lark.test.ts` | `successful entrance read declares bot read for this entrance only` | 🔴 red |
-| 对外声明的飞书群读取能力按实测判定且不虚报 | 不具备群读取能力时如实声明 | `test/channel-lark.test.ts` | `refused probe declares unreadable with its reason` | 🔴 red |
-| 对外声明的飞书群读取能力按实测判定且不虚报 | 探测期间入口被重建或禁用 | `test/channel-lark.test.ts` | `probe result is discarded when the entrance is rebuilt or disabled mid-flight` | 🔴 red |
-| 对外声明的飞书群读取能力按实测判定且不虚报 | 探测期间投递被中止 | `test/locus-controller.test.ts` | `late probe success after a delivery abort never renders or queues` | 🔴 red |
-| 对外声明的飞书群读取能力按实测判定且不虚报 | 超时后的迟到结果不被采用 | `test/channel-lark.test.ts` | `probe result arriving after the deadline does not rewrite the declaration` | 🔴 red |
-| 对外声明的飞书群读取能力按实测判定且不虚报 | 探测结论不被过期缓存替代 | `test/channel-lark.test.ts` | `a previous readable verdict is not reused after a refused probe` | 🔴 red |
-| 对外声明的飞书群读取能力按实测判定且不虚报 | 探测不污染持久层 | `test/channel-lark.test.ts` | `capability probe writes no message body into durable state` | 🔴 red |
+| 会话内容由 Agent 自取而非预先注入 | bot 身份就绪但当前入口历史不可读 | `test/channel-context.test.ts`、`test/entrance-capability.test.ts` | `states the limit and drops the read invitation when the entrance read failed`；`reports unreadable when the probe answers false` | 🟢 green |
+| 会话内容由 Agent 自取而非预先注入 | 身份就绪不改变既有注入约束 | `test/channel-context.test.ts`、`test/channel-pipeline.test.ts` | `declares readability only in the readable state`；`measures this exact entrance once, before rendering, and declares success` | 🟢 green |
+| 对外声明的飞书群读取能力按实测判定且不虚报 | 具备群读取能力时如实声明 | `test/channel-lark.test.ts`、`test/channel-pipeline.test.ts` | `takes one minimal real read of the exact group and returns only success`；`measures this exact entrance once, before rendering, and declares success` | 🟢 green |
+| 对外声明的飞书群读取能力按实测判定且不虚报 | 不具备群读取能力时如实声明 | `test/channel-lark.test.ts`、`test/channel-pipeline.test.ts` | `reports not-readable when the probe read fails, without throwing`；`declares the limit, not a capability, when the probe is refused` | 🟢 green |
+| 对外声明的飞书群读取能力按实测判定且不虚报 | 探测期间入口被重建或禁用 | `test/locus-settlement-integration.test.ts`、`test/client.test.ts` | `refuses the delivery when the renderer revalidation fails, as a rebuild mid-measurement makes it`；`measures this entrance before the prompt may claim it is readable` | 🟢 green |
+| 对外声明的飞书群读取能力按实测判定且不虚报 | 探测期间投递被中止 | `test/entrance-capability.test.ts`、`test/locus-settlement-integration.test.ts` | `discards the measurement when the delivery is aborted first`；`does not even start a probe for an already-aborted delivery`；`refuses the delivery when the current is retired during the awaited render` | 🟢 green |
+| 对外声明的飞书群读取能力按实测判定且不虚报 | 超时后的迟到结果不被采用 | `test/entrance-capability.test.ts` | `degrades a probe that exceeds the bounded deadline to unconfirmed`；`never adopts a late success once the deadline has expired`；`tolerates a late rejection without an unhandled rejection` | 🟢 green |
+| 对外声明的飞书群读取能力按实测判定且不虚报 | 探测结论不被过期缓存替代 | `test/entrance-capability.test.ts`、`test/channel-pipeline.test.ts` | `measures again on every call instead of reusing the previous verdict`；`re-measures on every admission instead of reusing the previous verdict` | 🟢 green |
+| 对外声明的飞书群读取能力按实测判定且不虚报 | 探测不污染持久层 | `test/channel-lark.test.ts`、`test/entrance-capability.test.ts` | `takes one minimal real read of the exact group and returns only success`（返回布尔、不返回正文）；`escapes as a bare verdict, never as the content it read` | 🟢 green |
 
 ### pet-locus-collaboration（delta：specs/pet-locus-collaboration/spec.md）
 

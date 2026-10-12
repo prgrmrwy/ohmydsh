@@ -103,6 +103,10 @@ import {
   unavailableLocusChannelCapability,
 } from './host/channel/locus-capability.js'
 import { createLocusTurnObserver } from './host/locus/turn-observer.js'
+import {
+  entranceReadProbeFor,
+  measureEntranceReadability,
+} from './host/channel/entrance-capability.js'
 import { createLocusManagementPort, createLocusSessionDescriber } from './host/locus/management.js'
 import { createLocusResolution } from './host/locus/resolution.js'
 import { createLocusController } from './host/locus/controller.js'
@@ -2978,7 +2982,7 @@ async function initialize(
             larkClient.reply(target.messageId, text),
         }
       })(),
-      renderPrompt: ({ locus, message }) => {
+      renderPrompt: async ({ locus, message, signal }) => {
         const locusId = locus.id ?? locus.locusId
         if (locusId === undefined) throw new Error('Active locus is missing its durable id')
         const record = locusRepository.getLocus(locusId)
@@ -2989,6 +2993,29 @@ async function initialize(
         ) {
           throw new Error('Active locus changed before delivery prompt rendering')
         }
+        // Measured before the prompt may claim it, within a bounded deadline and
+        // cancellable with the delivery. `larkReady` alone is a transport fact:
+        // the incident's child was told it could read the group while the read
+        // actually failed, so the read claim now comes from a real attempt.
+        const readability = await measureEntranceReadability(
+          {
+            chatId: record.endpoint.chatId,
+            ...(record.endpoint.threadId === undefined ? {} : { threadId: record.endpoint.threadId }),
+            signal,
+          },
+          { probe: entranceReadProbeFor(larkClient) },
+        )
+        // Re-prove the exact current after the measurement: a locus rebuilt,
+        // disabled, or re-bound while the probe was in flight must not get a
+        // prompt rendered from the record we just measured.
+        const revalidated = locusRepository.getLocus(locusId)
+        if (
+          revalidated === undefined || revalidated.state !== 'active' ||
+          revalidated.childSessionId !== locus.childSessionId ||
+          revalidated.generation !== locus.generation
+        ) {
+          throw new Error('Active locus changed while measuring entrance readability')
+        }
         // Send the routing preamble only while the Host cannot PROVE this child
         // already received one. Proof is a prior Delivery for this exact child
         // whose content was bound into its inbox: acceptance alone is durable
@@ -2998,18 +3025,19 @@ async function initialize(
         const current = locusRepository.findDeliveryByMessageId(message.messageId)
         return renderLocusDeliveryFor({
           record: {
-            id: record.id,
-            generation: record.generation,
-            endpoint: record.endpoint,
-            parentSessionId: record.parentSessionId,
-            childSessionId: record.childSessionId,
-            workspaceId: record.workspaceId,
-            state: record.state,
-            ...(record.childComposition === undefined ? {} : { childComposition: record.childComposition }),
-            ...(record.toolTier === undefined ? {} : { toolTier: record.toolTier }),
-            permission: record.permission,
-            contextAnchor: record.contextAnchor ?? { status: 'unknown' },
+            id: revalidated.id,
+            generation: revalidated.generation,
+            endpoint: revalidated.endpoint,
+            parentSessionId: revalidated.parentSessionId,
+            childSessionId: revalidated.childSessionId,
+            workspaceId: revalidated.workspaceId,
+            state: revalidated.state,
+            ...(revalidated.childComposition === undefined ? {} : { childComposition: revalidated.childComposition }),
+            ...(revalidated.toolTier === undefined ? {} : { toolTier: revalidated.toolTier }),
+            permission: revalidated.permission,
+            contextAnchor: revalidated.contextAnchor ?? { status: 'unknown' },
           },
+          readability,
           message: {
             messageId: message.messageId,
             senderOpenId: message.senderOpenId,

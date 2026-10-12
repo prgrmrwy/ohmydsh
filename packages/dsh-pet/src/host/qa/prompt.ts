@@ -12,6 +12,8 @@
  * control. Phase 2.1 reached the same conclusion for its own dispatch.
  */
 
+import type { EntranceReadability } from '../channel/entrance-capability.js'
+
 /**
  * Where a QA child must actually work.
  *
@@ -71,6 +73,13 @@ export interface QaTriggerFacts {
   readonly text: string
   /** Whether lark-cli can act as the bot right now. */
   readonly larkReady: boolean
+  /**
+   * Measured readability of this group, taken within a bounded deadline.
+   *
+   * `larkReady` only proves bot identity; the read invitation below is driven
+   * by this measurement and defaults to `unconfirmed`.
+   */
+  readonly entranceRead?: EntranceReadability
   /** Whether this is the first question since the group was created. */
   readonly isFirst: boolean
   /**
@@ -122,11 +131,19 @@ export function renderQaPrompt(trigger: QaTriggerFacts): string {
   lines.push(...workspaceLines(trigger.workspace))
 
   if (trigger.larkReady) {
+    // The read claim is the MEASURED one: bot identity alone never proves that
+    // this group's history can be read.
+    const readCapability = trigger.entranceRead ?? 'unconfirmed'
+    const readClaim =
+      readCapability === 'readable'
+        ? '需要更多群内上下文时自行读取（`lark-cli --profile dsh-pet skills read lark-im`）。（本群历史消息本次**已实测可读**。）'
+        : readCapability === 'unreadable'
+          ? '本群历史消息**实测不可读**（bot 读取被拒或失败），不要假设自己能翻到群内历史；确实需要时如实说明这一限制。'
+          : '本群历史消息的可读性本次**未确认**；需要时先试读一次，没读到就如实说明，不要假装读过。'
     lines.push('### 回复由你自己发出')
     lines.push('')
     lines.push(
-      '本机已安装并授权 `lark-cli`，你可以用它以 **bot 身份**读写飞书；' +
-        '需要更多群内上下文时自行读取（`lark-cli --profile dsh-pet skills read lark-im`）。',
+      '本机已安装并授权 `lark-cli`，你可以用它以 **bot 身份**读写飞书；' + readClaim,
     )
     lines.push('')
     lines.push(

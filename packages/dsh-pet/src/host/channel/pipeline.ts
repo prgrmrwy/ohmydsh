@@ -10,6 +10,11 @@
 import { randomUUID } from 'node:crypto'
 import { captureChatContext, renderChannelPrompt } from './context.js'
 import {
+  entranceReadProbeFor,
+  measureEntranceReadability,
+  type EntranceReadability,
+} from './entrance-capability.js'
+import {
   admitInboundEvent,
   MessageDedup,
   parseInboundLine,
@@ -435,12 +440,24 @@ export class InboundPipeline {
     // one message and the next, and a stale "you can read Lark" briefing is
     // worse than none.
     const larkReady = await this.deps.client.botReady()
+    // Measured, not inferred from `larkReady`: bot identity proves the
+    // transport, not that reading THIS entrance succeeds. Bounded so a slow
+    // CLI cannot hold up the admission; a timeout renders as "unconfirmed".
+    const entranceRead: EntranceReadability = larkReady
+      ? await measureEntranceReadability(
+        // The channel admission path has no cancellation source of its own:
+        // the deadline is what bounds it.
+        { chatId: event.chat_id },
+        { probe: entranceReadProbeFor(this.deps.client) },
+      )
+      : 'unconfirmed'
     const prompt = renderChannelPrompt(
       {
         chatType: event.chat_type,
         chatId: event.chat_id,
         messageId: event.message_id,
         larkReady,
+        entranceRead,
         ...(route.binding.chatName !== undefined ? { chatName: route.binding.chatName } : {}),
         senderOpenId: event.sender_id ?? '',
         ...(senderName !== undefined ? { senderName } : {}),

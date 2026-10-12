@@ -46,7 +46,12 @@ interface Fixture {
 }
 
 async function fixture(
-  options: { defaultWorkspace?: string; chatBots?: readonly LarkChatBot[] } = {},
+  options: {
+    defaultWorkspace?: string
+    chatBots?: readonly LarkChatBot[]
+    /** Omit to model a Host that cannot measure; supply to model a real probe. */
+    probe?: (input: { readonly chatId: string; readonly threadId?: string }) => Promise<boolean>
+  } = {},
 ): Promise<Fixture> {
   const chatBots = options.chatBots ?? [{ appId: 'cli_test', openId: BOT, name: '小小芒果' }]
   const created = await openPetHarness()
@@ -103,6 +108,7 @@ async function fixture(
     listChatBots: vi.fn(async () => chatBots),
     chatName: vi.fn(async () => undefined),
     botReady: vi.fn(async () => true),
+    ...(options.probe === undefined ? {} : { probeEntranceRead: vi.fn(options.probe) }),
     reply: vi.fn(async () => undefined),
   }
   const locator: WorkspaceLocator = {
@@ -194,6 +200,69 @@ describe('accepting an inbound message', () => {
 
     expect(outcome.kind).toBe('accepted')
     expect(f.harness.repository.getChatBinding(GROUP)?.boundBy).toBe('auto')
+  })
+})
+
+describe('the injected prompt declares only the measured read capability', () => {
+  it('measures this exact entrance once, before rendering, and declares success', async () => {
+    const seen: { chatId: string; threadId?: string }[] = []
+    const f = await fixture({
+      probe: async (input) => {
+        seen.push({ chatId: input.chatId, ...(input.threadId === undefined ? {} : { threadId: input.threadId }) })
+        return true
+      },
+    })
+    harness = f.harness
+
+    await f.pipeline.handleLine(p2pLine())
+
+    expect(seen).toEqual([{ chatId: P2P }])
+    expect(f.dispatched[0]?.text).toContain('已实测可读')
+  })
+
+  it('declares the limit, not a capability, when the probe is refused', async () => {
+    const f = await fixture({ probe: async () => false })
+    harness = f.harness
+
+    await f.pipeline.handleLine(p2pLine())
+
+    expect(f.dispatched[0]?.text).toContain('实测不可读')
+    expect(f.dispatched[0]?.text).not.toContain('已实测可读')
+  })
+
+  it('re-measures on every admission instead of reusing the previous verdict', async () => {
+    // A cached "readable" would keep promising a capability after the bot lost
+    // access to this chat.
+    let readable = true
+    const seen: string[] = []
+    const f = await fixture({
+      probe: async (input) => {
+        seen.push(input.chatId)
+        return readable
+      },
+    })
+    harness = f.harness
+
+    await f.pipeline.handleLine(p2pLine())
+    readable = false
+    // A second, independent scope: one chat's verdict never carries over.
+    await f.pipeline.handleLine(groupLine())
+
+    expect(seen).toEqual([P2P, GROUP])
+    expect(f.dispatched).toHaveLength(2)
+    expect(f.dispatched[0]?.text).toContain('已实测可读')
+    expect(f.dispatched[1]?.text).toContain('实测不可读')
+    expect(f.dispatched[1]?.text).not.toContain('已实测可读')
+  })
+
+  it('declares unknown rather than readable when the Host cannot measure at all', async () => {
+    const f = await fixture()
+    harness = f.harness
+
+    await f.pipeline.handleLine(p2pLine())
+
+    expect(f.dispatched[0]?.text).toContain('未确认')
+    expect(f.dispatched[0]?.text).not.toContain('已实测可读')
   })
 })
 

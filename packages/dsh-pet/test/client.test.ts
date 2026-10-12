@@ -2098,7 +2098,9 @@ describe('the delivery preamble position comes from durable history', () => {
     const { readFile } = await import('node:fs/promises')
     const index = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
 
-    const render = index.slice(index.indexOf('renderPrompt: ({ locus, message })'))
+    const start = index.indexOf('renderPrompt: async ({ locus, message, signal })')
+    expect(start).toBeGreaterThanOrEqual(0)
+    const render = index.slice(start)
     const scope = render.slice(0, render.indexOf('turns: locusTurnObserver'))
 
     // The decision itself (first vs subsequent, and the proof it needs) lives in
@@ -2108,6 +2110,24 @@ describe('the delivery preamble position comes from durable history', () => {
     expect(scope).toContain('renderLocusDeliveryFor')
     expect(scope).toContain('listDeliveries')
     expect(scope).toContain('findDeliveryByMessageId')
-    expect(scope).toContain('toolTier: record.toolTier')
+    expect(scope).toContain('toolTier: revalidated.toolTier')
+  })
+
+  it('measures this entrance before the prompt may claim it is readable', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const index = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
+
+    const start = index.indexOf('renderPrompt: async ({ locus, message, signal })')
+    expect(start).toBeGreaterThanOrEqual(0)
+    const render = index.slice(start)
+    const scope = render.slice(0, render.indexOf('turns: locusTurnObserver'))
+
+    // The read claim is measured within the delivery's own lifecycle, and the
+    // record is re-read after the await so a locus rebuilt mid-measurement
+    // cannot deliver a promptly rendered but stale prompt.
+    expect(scope).toContain('measureEntranceReadability')
+    expect(scope).toContain('entranceReadProbeFor(larkClient)')
+    expect(scope).toContain('signal')
+    expect(scope).toContain('revalidated')
   })
 })

@@ -171,3 +171,65 @@ describe('delivery prompt fact assembly', () => {
     expect(context.request.messageId).toBe('om_request-1')
   })
 })
+
+describe('the delivery states the measured entrance readability', () => {
+  it('declares readability in the preamble only for the readable state', () => {
+    const prompt = renderLocusDeliveryFor({
+      record: record(),
+      message: message(),
+      deliveries: [],
+      readability: 'readable',
+    })
+
+    expect(prompt).toContain('本入口读取能力（本次实测）')
+    expect(prompt).toContain('已实测可读')
+  })
+
+  it('states the limit in the preamble when the read failed', () => {
+    const prompt = renderLocusDeliveryFor({
+      record: record(),
+      message: message(),
+      deliveries: [],
+      readability: 'unreadable',
+    })
+
+    expect(prompt).toContain('不可读')
+    expect(prompt).not.toContain('已实测可读')
+  })
+
+  it('reports the measured state on a follow-up delivery too, not just the preamble', () => {
+    const prompt = renderLocusDeliveryFor({
+      record: record(),
+      message: message(),
+      deliveries: [delivery('delivery-1', { inboxMessageId: 'inbox-1' })],
+      readability: 'readable',
+    })
+
+    expect(prompt).toContain('工具档位：safe')
+    expect(prompt).toContain('本入口读取能力（本次实测）')
+    expect(prompt).toContain('已实测可读')
+  })
+
+  it('never claims readability when no measurement exists', () => {
+    const prompt = renderLocusDeliveryFor({
+      record: record(),
+      message: message(),
+      deliveries: [],
+    })
+
+    expect(prompt).toContain('未确认')
+    expect(prompt).not.toContain('已实测可读')
+  })
+
+  it('keeps the tier fact and the read fact separate: a shell child can face an unreadable entrance', () => {
+    const prompt = renderLocusDeliveryFor({
+      record: record({ toolTier: { effective: 'shell' } }),
+      message: message(),
+      deliveries: [delivery('delivery-1', { inboxMessageId: 'inbox-1' })],
+      readability: 'unreadable',
+    })
+
+    expect(prompt).toContain('工具档位：shell')
+    expect(prompt).toContain('不可读')
+  })
+})

@@ -37,6 +37,7 @@ const trigger = {
   senderOpenId: 'ou_322ec1d3cd062f04bc2b1f4ba1eff8e9',
   text: '看下这个话题',
   larkReady: true,
+  entranceRead: 'readable' as const,
 }
 
 describe('locating the trigger message', () => {
@@ -158,5 +159,50 @@ describe('the agent is told to read and to reply itself', () => {
     expect(prompt).toContain('lark-cli 当前不可用')
     expect(prompt).toContain('无法**回复到飞书')
     expect(prompt).not.toContain('lark-cli skills list')
+  })
+})
+
+describe('the read claim is the measured one', () => {
+  it('declares readability only in the readable state', () => {
+    const prompt = renderChannelPrompt({ ...trigger, entranceRead: 'readable' }, {})
+
+    expect(prompt).toContain('已实测可读')
+    expect(prompt).toContain('按需读取')
+  })
+
+  it('states the limit and drops the read invitation when the entrance read failed', () => {
+    const prompt = renderChannelPrompt({ ...trigger, entranceRead: 'unreadable' }, {})
+
+    expect(prompt).toContain('实测不可读')
+    expect(prompt).not.toContain('已实测可读')
+    // The old wording promised a read the system had just disproved.
+    expect(prompt).not.toContain('按需读取')
+  })
+
+  it('states the unknown state rather than promising a read it never measured', () => {
+    const prompt = renderChannelPrompt({ ...trigger, entranceRead: 'unconfirmed' }, {})
+
+    expect(prompt).toContain('未确认')
+    expect(prompt).toContain('不要假装读过')
+    expect(prompt).not.toContain('已实测可读')
+    expect(prompt).not.toContain('按需读取')
+  })
+
+  it('treats a delivery that carries no measurement as unconfirmed, not as readable', () => {
+    const { entranceRead: _omitted, ...unmeasured } = trigger
+
+    const prompt = renderChannelPrompt(unmeasured, {})
+
+    expect(prompt).toContain('未确认')
+    expect(prompt).not.toContain('已实测可读')
+  })
+
+  it('keeps the reply capability in an unreadable entrance: read and write are different facts', () => {
+    const prompt = renderChannelPrompt({ ...trigger, entranceRead: 'unreadable' }, {})
+
+    // Bot identity works, so replies are still possible; conflating the two
+    // would remove a capability the agent actually has.
+    expect(prompt).toContain('回复也由你发出')
+    expect(prompt).toContain('--as bot')
   })
 })

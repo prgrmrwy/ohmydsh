@@ -540,4 +540,46 @@ describe('caller-bound entrance read', () => {
 
     expect(result?.messages[0]?.createTime).toMatch(/^2026-10-12T10:00:00[+-]\d{2}:\d{2}$/)
   })
+
+  describe('the entrance capability probe', () => {
+    it('takes one minimal real read of the exact group and returns only success', async () => {
+      const { runner, calls } = runnerFor(envelope([{
+        message_id: 'om_1',
+        create_time: '2026-10-12 10:00',
+        content: '存在即证明可读',
+        sender: { name: '张三' },
+      }]))
+      const client = createLarkCliClient('lark-cli', runner, () => {})
+
+      const readable = await client.probeEntranceRead!({ chatId: 'oc_g' })
+
+      // Same platform path as the caller-bound read: a probe that used another
+      // call would prove a capability nobody uses.
+      expect(calls[0]).toEqual(expect.arrayContaining([
+        'im', '+chat-messages-list', '--as', 'bot', '--chat-id', 'oc_g', '--page-size', '1',
+      ]))
+      // Boolean only: message content must not be laundered through a capability
+      // check.
+      expect(readable).toBe(true)
+      expect(typeof readable).toBe('boolean')
+    })
+
+    it('probes the bound topic rather than the whole group', async () => {
+      const { runner, calls } = runnerFor(envelope([]))
+      const client = createLarkCliClient('lark-cli', runner, () => {})
+
+      expect(await client.probeEntranceRead!({ chatId: 'oc_g', threadId: 'omt_t' })).toBe(true)
+      expect(calls[0]).toEqual(expect.arrayContaining(['im', '+threads-messages-list', '--thread', 'omt_t']))
+      expect(calls[0]).not.toContain('+chat-messages-list')
+    })
+
+    it('reports not-readable when the probe read fails, without throwing', async () => {
+      const runner: LarkCliRunner = async () => {
+        throw Object.assign(new Error('failed'), { stdout: JSON.stringify({ ok: false, error: { code: 230027 } }) })
+      }
+      const client = createLarkCliClient('lark-cli', runner, () => {})
+
+      expect(await client.probeEntranceRead!({ chatId: 'oc_g' })).toBe(false)
+    })
+  })
 })

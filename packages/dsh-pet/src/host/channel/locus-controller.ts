@@ -434,10 +434,21 @@ export interface LocusControllerDeps {
    * the child sees the exact immutable reply target and locus facts instead of
    * receiving untrusted message text as its whole prompt.
    */
+  /**
+   * Render one delivery prompt.
+   *
+   * Allowed to be asynchronous: the renderer measures this entrance's read
+   * capability before it can truthfully declare it, and that measurement is
+   * bounded but not instantaneous. The controller re-proves the exact current
+   * after this resolves, so a locus rebuilt or disabled during the measurement
+   * cannot have its stale prompt delivered. The caller's signal is passed so
+   * an aborted delivery cancels the measurement instead of adopting its result.
+   */
   readonly renderPrompt?: (input: {
     readonly locus: ActiveLocus
     readonly message: NormalizedLocusMessage
-  }) => string
+    readonly signal: AbortSignal
+  }) => string | Promise<string>
   /** Required for publishing; missing/invalid means fail closed. */
   readonly turns?: LocusTurnCorrelationObserver
   readonly receipts?: LocusMechanicalReceiptPort
@@ -1668,9 +1679,18 @@ export class LocusChannelController {
 
   /** Build one typed inbox message while repeatedly fencing the exact durable current. */
   private async prepareCurrentContent(input: CurrentDeliveryInput): Promise<PreparedCurrentContent | undefined> {
-    const prompt = this.deps.renderPrompt?.({ locus: input.locus, message: input.message }) ?? input.message.text
-    const base: ContentBlock[] = [{ type: 'text', text: prompt }]
     const isExactCurrent = () => this.isExactCurrent(input)
+    const rendered = this.deps.renderPrompt?.({
+      locus: input.locus,
+      message: input.message,
+      signal: input.signal,
+    })
+    const text = rendered === undefined ? input.message.text : await rendered
+    // Re-proven AFTER the renderer's awaited work: the renderer measures this
+    // entrance's read capability, and a locus rebuilt/disabled (or an entrance
+    // rebound) while that was in flight must not receive the stale prompt.
+    if (!await isExactCurrent()) return undefined
+    const base: ContentBlock[] = [{ type: 'text', text }]
     // Exact fence immediately before platform enumeration/download starts.
     if (!await isExactCurrent()) return undefined
     const media = this.deps.media
