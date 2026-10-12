@@ -77,6 +77,21 @@ export const MAX_DELIVERY_LEASE_MS = 24 * 60 * 60 * 1000
 export const DELIVERY_DEFAULT_DEADLINE_MS = DEFAULT_DELIVERY_LEASE_MS
 export const DELIVERY_HARD_DEADLINE_MS = MAX_DELIVERY_LEASE_MS
 
+/**
+ * Minimum execution window granted when a backlog row finally becomes current.
+ *
+ * A backlog row's soft lease is counted from its own `acceptedAt`, so a row that
+ * waited in the queue can arrive at the current position with seconds left. That
+ * produced a real "promoted, then immediately deadline-expired" loop; promotion
+ * therefore floors the deadline — never beyond the 24h hard cap.
+ */
+export const MIN_PROMOTED_DELIVERY_LEASE_MS = 10 * 60 * 1000
+
+/** Model-facing reason for a Delivery settled because its child turn was interrupted. */
+export const INTERRUPTED_DELIVERY_FAILURE_REASON =
+  'The child turn bound to this Delivery ended interrupted (the Host restarted mid-turn), so no execution can ever settle it. '
+  + 'The message already reached the child inbox and is NOT resent.'
+
 /** Durable completion/outbound facts for the unified Delivery model. */
 export type DeliveryFinishState = 'reply' | 'no-reply'
 export type DeliveryOutboundState = DeliveryOutboundResult
@@ -156,7 +171,7 @@ export interface DeliveryRecord extends DeliveryCorrelation {
    * Fail-closed restart disposition when safe continuation cannot be proven.
    * This records a Host decision without fabricating execution/turn proof.
    */
-  readonly startupDisposition?: 'unqueued' | 'execution-unrecoverable'
+  readonly startupDisposition?: 'unqueued' | 'execution-unrecoverable' | 'turn-interrupted'
   /** Explicit durable debt when the old child execution could not be stopped. */
   readonly startupRecoveryDebt?: string
   /**
@@ -331,13 +346,58 @@ export function claimCurrentDelivery(
       (next.revision ?? 0) !== input.expectedRevision) {
     return unchanged(state, 'revision-mismatch', next)
   }
+  // Promotion floors the lease: a row that waited past its own soft deadline
+  // would otherwise be promoted only to fail `markFinishing` immediately.
+  const flooredDeadline = Math.min(
+    Math.max(next.deadlineAt ?? 0, input.now + MIN_PROMOTED_DELIVERY_LEASE_MS),
+    hard,
+  )
   const record = freezeRecord({
     ...next,
     status: 'current',
     queueState: 'current',
+    deadlineAt: flooredDeadline,
+    hardDeadlineAt: next.hardDeadlineAt ?? hard,
     revision: nextRevision(next),
   })
   return changed(state, record)
+}
+
+/**
+ * Settle a current Delivery whose bound child turn is PROVEN interrupted.
+ *
+ * Distinct from {@link expireDelivery} on purpose: expiry requires `now` to be
+ * past the deadline, while this case is "cannot ever finish, and the deadline
+ * has not been reached" — exactly the state a Host restart leaves behind. It is
+ * not a retry either: the message already reached the child's inbox, so the
+ * settlement acknowledges "no reply will come" instead of resending.
+ *
+ * @param state - Current ledger state.
+ * @param input - Exact correlation of the interrupted current row.
+ * @returns the terminal `failed` mutation, or an unchanged refusal.
+ */
+export function abandonInterruptedDelivery(
+  state: DeliveryLedgerState,
+  input: DeliveryLeaseInput,
+): DeliveryMutation {
+  validateLeaseInput(input)
+  const current = state.byDeliveryId[input.deliveryId]
+  if (current === undefined) return unchanged(state, 'unknown-delivery')
+  if (!correlates(current, input)) return unchanged(state, 'correlation-mismatch', current)
+  if (input.expectedRevision !== undefined && current.revision !== input.expectedRevision) {
+    return unchanged(state, 'revision-mismatch', current)
+  }
+  if (TERMINAL_STATUSES.has(current.status)) return unchanged(state, 'already-terminal', current)
+  if (current.status !== 'current') return unchanged(state, 'invalid-transition', current)
+  const { queueState: _queueState, ...withoutQueueState } = current
+  return changed(state, freezeRecord({
+    ...withoutQueueState,
+    status: 'failed',
+    startupDisposition: 'turn-interrupted',
+    failureReason: current.failureReason ?? INTERRUPTED_DELIVERY_FAILURE_REASON,
+    failedAt: input.now,
+    revision: nextRevision(current),
+  }))
 }
 
 /** Enter finishing exactly once before an external reply attempt. */

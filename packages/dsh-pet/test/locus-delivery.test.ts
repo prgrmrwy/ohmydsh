@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  abandonInterruptedDelivery,
+  MAX_DELIVERY_LEASE_MS,
+  MIN_PROMOTED_DELIVERY_LEASE_MS,
+  INTERRUPTED_DELIVERY_FAILURE_REASON,
   acceptDelivery,
   createDeliveryLedger,
   feedbackTargetForDelivery,
@@ -661,5 +665,109 @@ describe('unified locus Delivery correlation', () => {
       ...correlation(), deliveryId: unknown.record!.deliveryId, now: 204,
       outcome: 'reply', outboundResult: 'success', expectedRevision: unknown.record!.revision,
     }).changed).toBe(false)
+  })
+})
+
+describe('settling a Delivery whose bound turn was interrupted', () => {
+  function currentFor(messageId: string, acceptedAt = 10_000) {
+    const accepted = acceptDelivery(createDeliveryLedger(), {
+      ...correlation(), messageId, acceptedAt,
+    })
+    return claimCurrentDelivery(accepted.state, { ...correlation(), now: acceptedAt + 1 })
+  }
+
+  it('abandons an interrupted current Delivery with a diagnosable reason, never a resend', () => {
+    const current = currentFor('message-interrupted')
+    const before = current.record!
+
+    const settled = abandonInterruptedDelivery(current.state, {
+      ...correlation(), deliveryId: before.deliveryId, now: 20_000,
+      expectedRevision: before.revision,
+    })
+
+    expect(settled.changed).toBe(true)
+    expect(settled.record?.status).toBe('failed')
+    expect(settled.record?.startupDisposition).toBe('turn-interrupted')
+    expect(settled.record?.failedAt).toBe(20_000)
+    expect(settled.record?.failureReason).toBe(INTERRUPTED_DELIVERY_FAILURE_REASON)
+    // Not a retry: the inbox/execution proof is preserved as evidence, and the
+    // queue position is dropped with the terminal status.
+    expect(settled.record?.inboxMessageId).toBe(before.inboxMessageId)
+    expect(settled.record?.executionId).toBe(before.executionId)
+    expect(settled.record?.queueState).toBeUndefined()
+
+    // Terminal is terminal: a repeat is refused rather than rewritten.
+    const again = abandonInterruptedDelivery(settled.state, {
+      ...correlation(), deliveryId: before.deliveryId, now: 21_000,
+      expectedRevision: settled.record!.revision,
+    })
+    expect(again.changed).toBe(false)
+    expect(again.reason).toBe('already-terminal')
+  })
+
+  it('refuses every status that is not the serialized current row', () => {
+    const accepted = acceptDelivery(createDeliveryLedger(), {
+      ...correlation(), messageId: 'message-not-current', acceptedAt: 10_000,
+    })
+    const backlog = abandonInterruptedDelivery(accepted.state, {
+      ...correlation(), deliveryId: accepted.record!.deliveryId, now: 20_000,
+    })
+
+    expect(backlog.changed).toBe(false)
+    expect(backlog.reason).toBe('invalid-transition')
+  })
+})
+
+describe('a promoted backlog Delivery gets a usable lease', () => {
+  it('gives a promoted backlog Delivery a minimum lease without breaking the hard cap', () => {
+    const acceptedAt = 10_000
+    const accepted = acceptDelivery(createDeliveryLedger(), {
+      ...correlation(), messageId: 'message-promote', acceptedAt,
+    })
+
+    // Promoted long after acceptance: its own soft lease is already used up.
+    const promotedAt = acceptedAt + DEFAULT_DELIVERY_LEASE_MS + 60_000
+    const promoted = claimCurrentDelivery(accepted.state, {
+      ...correlation(), now: promotedAt,
+    })
+
+    expect(promoted.changed).toBe(true)
+    expect(promoted.record?.status).toBe('current')
+    expect(promoted.record!.deadlineAt!).toBe(promotedAt + MIN_PROMOTED_DELIVERY_LEASE_MS)
+    expect(promoted.record!.deadlineAt!).toBeLessThanOrEqual(promoted.record!.hardDeadlineAt!)
+    // And it can actually finish now instead of dying as `deadline-expired`.
+    const finishing = markFinishing(promoted.state, {
+      ...correlation(), deliveryId: promoted.record!.deliveryId,
+      now: promotedAt + 1_000, expectedRevision: promoted.record!.revision,
+    })
+    expect(finishing.changed).toBe(true)
+    expect(finishing.record?.status).toBe('finishing')
+  })
+
+  it('never extends a promotion past the 24-hour hard cap', () => {
+    const acceptedAt = 10_000
+    const accepted = acceptDelivery(createDeliveryLedger(), {
+      ...correlation(), messageId: 'message-promote-cap', acceptedAt,
+    })
+    const nearHardCap = acceptedAt + MAX_DELIVERY_LEASE_MS - 60_000
+
+    const promoted = claimCurrentDelivery(accepted.state, {
+      ...correlation(), now: nearHardCap,
+    })
+
+    expect(promoted.record!.deadlineAt!).toBeLessThanOrEqual(promoted.record!.hardDeadlineAt!)
+  })
+
+  it('leaves a fresh promotion on its own longer lease', () => {
+    const acceptedAt = 10_000
+    const accepted = acceptDelivery(createDeliveryLedger(), {
+      ...correlation(), messageId: 'message-promote-fresh', acceptedAt,
+    })
+
+    const promoted = claimCurrentDelivery(accepted.state, {
+      ...correlation(), now: acceptedAt + 1,
+    })
+
+    expect(promoted.record!.deadlineAt!).toBe(acceptedAt + DEFAULT_DELIVERY_LEASE_MS)
   })
 })

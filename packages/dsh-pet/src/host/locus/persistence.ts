@@ -44,6 +44,7 @@ import {
   MAX_DELIVERY_LEASE_MS,
   claimCurrentDelivery as applyClaimCurrentDelivery,
   completeDelivery as applyCompleteDelivery,
+  abandonInterruptedDelivery as applyAbandonInterruptedDelivery,
   expireDelivery as applyExpireDelivery,
   markFinishing as applyMarkFinishing,
   waitDelivery as applyWaitDelivery,
@@ -261,6 +262,17 @@ export type LocusStartupDeliveryProof =
       readonly executionId: string
       /** No turn ever entered the message and the child no longer queues it. */
       readonly state: 'unconsumed'
+    }
+  | {
+      readonly deliveryId: string
+      readonly executionId: string
+      readonly turnId: string
+      /**
+       * The turn that entered the message is over and ended `interrupted`, so
+       * no execution will ever settle this Delivery: settle it now instead of
+       * arming a lease that can only expire an unanswered message.
+       */
+      readonly state: 'interrupted'
     }
 
 /** External resource compensators used only for durable provisioning refs. */
@@ -2747,20 +2759,58 @@ export class LocusRepository {
           // unanswered message for expiry. Such a row is backlog and must be
           // dispatched again; `unconsumed` is the proof that re-sending cannot
           // duplicate work the child already took.
-          if (current.turnId === undefined && current.executionId !== undefined) {
-            let replayProof: LocusStartupDeliveryProof | undefined
+          // One proof request answers both questions this row can have: was the
+          // hand-off never consumed (replay it), or did the turn that consumed
+          // it already end interrupted (nothing will ever settle it)?
+          let currentProof: LocusStartupDeliveryProof | undefined
+          if (current.executionId !== undefined) {
             try {
-              replayProof = await options.deliveryProof?.(current)
+              currentProof = await options.deliveryProof?.(current)
             } catch {
-              replayProof = undefined
+              currentProof = undefined
             }
-            if (
-              replayProof !== undefined &&
-              replayProof.state === 'unconsumed' &&
-              replayProof.deliveryId === current.deliveryId &&
-              replayProof.executionId === current.executionId
-            ) {
-              replayableDeliveries.push(current)
+          }
+          if (
+            currentProof !== undefined &&
+            currentProof.state === 'unconsumed' &&
+            current.turnId === undefined &&
+            currentProof.deliveryId === current.deliveryId &&
+            currentProof.executionId === current.executionId
+          ) {
+            replayableDeliveries.push(current)
+            continue
+          }
+          if (
+            currentProof !== undefined &&
+            currentProof.state === 'interrupted' &&
+            currentProof.deliveryId === current.deliveryId &&
+            currentProof.executionId === current.executionId &&
+            (current.turnId === undefined || currentProof.turnId === current.turnId)
+          ) {
+            // Settle now, without replaying: the content already reached the
+            // child inbox (the binding was committed before the turn started),
+            // so the honest terminal is "no reply will come", not a resend.
+            const abandoned = applyAbandonInterruptedDelivery(
+              { byMessageId: { [current.messageId]: current }, byDeliveryId: { [current.deliveryId]: current }, nextDeliverySequence: current.sequence + 1 },
+              {
+                endpoint: current.endpoint,
+                locusId: current.locusId,
+                generation: current.generation,
+                childSessionId: current.childSessionId,
+                deliveryId: current.deliveryId,
+                now,
+                ...(current.revision === undefined ? {} : { expectedRevision: current.revision }),
+              },
+            )
+            if (abandoned.changed && abandoned.record !== undefined) {
+              const settled = Object.freeze({
+                ...abandoned.record,
+                ...(abandoned.record.revision === undefined ? {} : { stateRevision: abandoned.record.revision }),
+              })
+              // The locus stays active: only this turn died, and its backlog
+              // must be promoted by the ordinary drain.
+              await writeDelivery(current, settled, false)
+              failedDeliveries.push(settled)
               continue
             }
           }
@@ -4101,6 +4151,10 @@ function assertDeliveryRecord(record: DeliveryRecord): void {
     } else if (record.startupDisposition === 'execution-unrecoverable') {
       if (record.executionId === undefined || record.inboxMessageId === undefined) {
         throw new LocusError('INVALID_LOCUS', 'Execution-unrecoverable startup failure requires prior inbox/execution proof')
+      }
+    } else if (record.startupDisposition === 'turn-interrupted') {
+      if (record.executionId === undefined || record.inboxMessageId === undefined) {
+        throw new LocusError('INVALID_LOCUS', 'Turn-interrupted startup failure requires prior inbox/execution proof')
       }
     } else if (record.dispatchFailure === 'not-queued') {
       if (record.executionId !== undefined || record.inboxMessageId !== undefined || record.turnId !== undefined || record.startedAt !== undefined) {

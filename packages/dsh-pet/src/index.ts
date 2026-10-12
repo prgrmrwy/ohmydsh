@@ -91,7 +91,11 @@ import {
   type DeliveryRecord,
 } from './host/locus/delivery.js'
 import { createExpiryScheduler } from './host/locus/expiry-scheduler.js'
-import { proveLiveStartupDelivery, proveUnconsumedStartupDelivery } from './host/locus/startup-recovery.js'
+import {
+  proveInterruptedStartupDelivery,
+  proveLiveStartupDelivery,
+  proveUnconsumedStartupDelivery,
+} from './host/locus/startup-recovery.js'
 import {
   createLocusChildAdapter,
   probeLocusChildPorts,
@@ -2803,10 +2807,12 @@ async function initialize(
             identity,
             operation: session =>
               proveLiveStartupDelivery(delivery, session)
-              // Only consulted when the open-turn proof declined: a `current`
-              // row can also be one whose dispatch died before hand-off, and
-              // the child's own inbox log is the only thing that distinguishes
-              // "the child took it" from "nobody ever did".
+              // Consulted when the open-turn proof declined. A `current` row can
+              // be one whose dispatch died before hand-off (`unconsumed`), or one
+              // whose turn already ended interrupted because the Host restarted
+              // mid-turn (`interrupted`) — the child's own log is the only thing
+              // that tells those apart from a genuinely live execution.
+              ?? proveInterruptedStartupDelivery(delivery, session)
               ?? proveUnconsumedStartupDelivery(delivery, session),
           })
           return result.ok ? result.value : undefined
@@ -2822,6 +2828,16 @@ async function initialize(
     petLog(
       `dsh-pet locus recovery: ${String(locusStartup.pendingDeliveries.length)} pending Deliveries, ` +
       `${String(locusStartup.recoverableOperations.length)} recoverable operations; no side effect replayed`,
+    )
+  }
+  const interruptedSettlements = locusStartup.failedDeliveries.filter(
+    delivery => delivery.startupDisposition === 'turn-interrupted',
+  )
+  if (interruptedSettlements.length > 0) {
+    // Said out loud because the alternative was an hour of silence: this
+    // settlement is visible in the record, not in the chat.
+    petLog(
+      `dsh-pet locus recovery: ${String(interruptedSettlements.length)} interrupted Deliveries settled without replay`,
     )
   }
   /**

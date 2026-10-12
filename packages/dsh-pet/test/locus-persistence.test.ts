@@ -52,6 +52,10 @@ function record(overrides: Partial<Parameters<typeof buildLocusRecord>[0]> = {})
   })
 }
 
+function restartedDeadline(repository: DurableLocusRepository, deliveryId: string): number | undefined {
+  return repository.getDelivery(deliveryId)?.deadlineAt
+}
+
 async function reopen(medium: MemoryMedium) {
   return openPetHarness(medium)
 }
@@ -1020,6 +1024,153 @@ describe('durable unified locus repository', () => {
     })
     expect(repeated.retainedDeliveries).toHaveLength(1)
     expect(restarted.getDelivery('delivery-live')).toMatchObject({ status: 'running', turnId: 'turn-live' })
+    await second.close()
+  })
+
+  it('settles a current Delivery whose bound turn was interrupted, then frees the backlog', async () => {
+    const medium = emptyMedium()
+    const first = await openPetHarness(medium)
+    const repository = new DurableLocusRepository(first.domain)
+    const locus = await repository.putLocus(record())
+    const correlation = {
+      endpoint: locus.endpoint,
+      locusId: locus.id,
+      generation: locus.generation,
+      childSessionId: locus.childSessionId as string,
+    }
+    const current = await repository.acceptDelivery({
+      endpoint: locus.endpoint,
+      locusId: locus.id,
+      generation: locus.generation,
+      childSessionId: locus.childSessionId as string,
+      messageId: 'message-interrupted',
+      deliveryId: 'delivery-interrupted',
+      senderOpenId: 'ou_interrupted',
+      acceptedAt: 2,
+    })
+    // The production order: claim the serialized slot first, then bind the
+    // physical hand-off to it (a pre-bound `queued` row is legacy in-flight and
+    // deliberately blocks promotion).
+    const claimed = await repository.claimCurrentDelivery({ correlation, now: 3 })
+    expect(claimed?.status).toBe('current')
+    await repository.bindQueued({
+      deliveryId: current.record.deliveryId,
+      correlation,
+      executionId: 'execution-interrupted',
+      inboxMessageId: 'inbox-interrupted',
+      queuedAt: 4,
+    })
+    await repository.bindTurn({
+      deliveryId: current.record.deliveryId,
+      correlation,
+      executionId: 'execution-interrupted',
+      turnId: `${locus.childSessionId}#7`,
+      startedAt: 5,
+    })
+    const backlog = await repository.acceptDelivery({
+      endpoint: locus.endpoint,
+      locusId: locus.id,
+      generation: locus.generation,
+      childSessionId: locus.childSessionId as string,
+      messageId: 'message-behind',
+      deliveryId: 'delivery-behind',
+      senderOpenId: 'ou_behind',
+      acceptedAt: 6,
+    })
+    await first.close()
+
+    const second = await reopen(medium)
+    enableAtomicTransactions(second)
+    const restarted = new DurableLocusRepository(second.domain)
+    const report = await restarted.reconcileStartup({
+      now: 7,
+      deliveryProof: async delivery => delivery.deliveryId === 'delivery-interrupted'
+        ? {
+            deliveryId: delivery.deliveryId,
+            executionId: 'execution-interrupted',
+            turnId: `${locus.childSessionId}#7`,
+            state: 'interrupted' as const,
+          }
+        : undefined,
+    })
+
+    // Settled now, not an hour later: the row is terminal, and its reason says
+    // what happened instead of pretending the deadline passed.
+    expect(report.failedDeliveries).toEqual([
+      expect.objectContaining({
+        deliveryId: 'delivery-interrupted',
+        status: 'failed',
+        startupDisposition: 'turn-interrupted',
+      }),
+    ])
+    expect(restarted.getDelivery('delivery-interrupted')).toMatchObject({
+      status: 'failed',
+      startupDisposition: 'turn-interrupted',
+      // The inbox proof is kept as evidence; nothing is replayed.
+      inboxMessageId: 'inbox-interrupted',
+    })
+
+    // The locus itself stays healthy and its backlog is promotable immediately.
+    expect(restarted.getLocus(locus.id)?.state).toBe('active')
+    const promoted = await restarted.claimCurrentDelivery({ correlation, now: 8 })
+    expect(promoted?.deliveryId).toBe(backlog.record.deliveryId)
+    expect(promoted?.status).toBe('current')
+    await second.close()
+  })
+
+  it('keeps an unproven current Delivery waiting instead of settling it early', async () => {
+    const medium = emptyMedium()
+    const first = await openPetHarness(medium)
+    const repository = new DurableLocusRepository(first.domain)
+    const locus = await repository.putLocus(record())
+    const correlation = {
+      endpoint: locus.endpoint,
+      locusId: locus.id,
+      generation: locus.generation,
+      childSessionId: locus.childSessionId as string,
+    }
+    const accepted = await repository.acceptDelivery({
+      endpoint: locus.endpoint,
+      locusId: locus.id,
+      generation: locus.generation,
+      childSessionId: locus.childSessionId as string,
+      messageId: 'message-unproven',
+      deliveryId: 'delivery-unproven',
+      senderOpenId: 'ou_unproven',
+      acceptedAt: 2,
+    })
+    const claimed = await repository.claimCurrentDelivery({ correlation, now: 3 })
+    expect(claimed?.status).toBe('current')
+    await repository.bindQueued({
+      deliveryId: accepted.record.deliveryId,
+      correlation,
+      executionId: 'execution-unproven',
+      inboxMessageId: 'inbox-unproven',
+      queuedAt: 4,
+    })
+    await repository.bindTurn({
+      deliveryId: accepted.record.deliveryId,
+      correlation,
+      executionId: 'execution-unproven',
+      turnId: `${locus.childSessionId}#3`,
+      startedAt: 5,
+    })
+    const before = restartedDeadline(repository, 'delivery-unproven')
+    await first.close()
+
+    const second = await reopen(medium)
+    enableAtomicTransactions(second)
+    const restarted = new DurableLocusRepository(second.domain)
+    const report = await restarted.reconcileStartup({ now: 6 })
+
+    // No proof, no settlement: an open turn may still be executing, so the row
+    // keeps the existing wait-for-the-lease semantics.
+    expect(report.failedDeliveries).toEqual([])
+    expect(restarted.getDelivery('delivery-unproven')).toMatchObject({
+      status: 'current',
+      turnId: `${locus.childSessionId}#3`,
+    })
+    expect(restartedDeadline(restarted, 'delivery-unproven')).toBe(before)
     await second.close()
   })
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { DeliveryRecord } from '../src/host/locus/delivery.js'
 import {
+  proveInterruptedStartupDelivery,
   proveLiveStartupDelivery,
   proveUnconsumedStartupDelivery,
 } from '../src/host/locus/startup-recovery.js'
@@ -175,5 +176,119 @@ describe('production startup proof for a never-handed-off Delivery', () => {
       delivery({ status: 'current', inboxMessageId: undefined }),
       session(events),
     )).toBeUndefined()
+  })
+})
+
+/**
+ * The third startup proof: the turn that took the message is already over.
+ *
+ * A restart between "the child started the turn" and "the child finished the
+ * Delivery" leaves a `current` row whose owner no longer exists. Left alone it
+ * holds the serialized slot until its lease expires (measured live: one hour of
+ * silence, with the next message stuck in backlog), so the exact end reason in
+ * the child's own log is what turns "wait an hour" into a decision.
+ */
+describe('production startup proof for an interrupted bound turn', () => {
+  const interrupted = (patch: Partial<DeliveryRecord> = {}) => delivery({
+    status: 'current',
+    queueState: 'current',
+    turnId: 'child-1#7',
+    startedAt: 3,
+    ...patch,
+  })
+
+  it('proves an interrupted bound turn and never a still-open one', () => {
+    expect(proveInterruptedStartupDelivery(interrupted(), session([
+      { type: 'turn/start', data: { turn: 7 } },
+      { type: 'user/message', data: { id: 'inbox-1' } },
+      { type: 'turn/end', data: { turn: 7, reason: { kind: 'interrupted' } } },
+    ]))).toEqual({
+      deliveryId: 'delivery-1',
+      executionId: 'execution-1',
+      turnId: 'child-1#7',
+      state: 'interrupted',
+    })
+
+    // The open turn is the `running` case; a process killed without a graceful
+    // end event is indistinguishable from a live turn here, so it must refuse.
+    expect(proveInterruptedStartupDelivery(interrupted(), session([
+      { type: 'turn/start', data: { turn: 7 } },
+      { type: 'user/message', data: { id: 'inbox-1' } },
+    ]))).toBeUndefined()
+  })
+
+  it.each([
+    {
+      name: 'the turn completed normally',
+      events: [
+        { type: 'turn/start', data: { turn: 7 } },
+        { type: 'user/message', data: { id: 'inbox-1' } },
+        { type: 'turn/end', data: { turn: 7, reason: { kind: 'completed' } } },
+      ],
+    },
+    {
+      name: 'the turn ended with an error',
+      events: [
+        { type: 'turn/start', data: { turn: 7 } },
+        { type: 'user/message', data: { id: 'inbox-1' } },
+        { type: 'turn/end', data: { turn: 7, reason: { kind: 'error', error: { message: 'x' } } } },
+      ],
+    },
+    {
+      name: 'no turn ever entered the message',
+      events: [
+        { type: 'turn/start', data: { turn: 7 } },
+        { type: 'user/message', data: { id: 'inbox-other' } },
+        { type: 'turn/end', data: { turn: 7, reason: { kind: 'interrupted' } } },
+      ],
+    },
+    {
+      name: 'the message entered two turns',
+      events: [
+        { type: 'turn/start', data: { turn: 6 } },
+        { type: 'user/message', data: { id: 'inbox-1' } },
+        { type: 'turn/end', data: { turn: 6, reason: { kind: 'interrupted' } } },
+        { type: 'turn/start', data: { turn: 7 } },
+        { type: 'user/message', data: { id: 'inbox-1' } },
+        { type: 'turn/end', data: { turn: 7, reason: { kind: 'interrupted' } } },
+      ],
+    },
+    {
+      name: 'the durable turn id does not match the log',
+      events: [
+        { type: 'turn/start', data: { turn: 7 } },
+        { type: 'user/message', data: { id: 'inbox-1' } },
+        { type: 'turn/end', data: { turn: 7, reason: { kind: 'interrupted' } } },
+      ],
+      delivery: interrupted({ turnId: 'child-1#6' }),
+    },
+    {
+      name: 'the log is malformed',
+      events: [null, { type: 'turn/start', data: { turn: 7 } }],
+    },
+  ])('refuses to prove when $name', ({ events, delivery: patched }) => {
+    expect(
+      proveInterruptedStartupDelivery(patched ?? interrupted(), session(events)),
+    ).toBeUndefined()
+  })
+
+  it('refuses an empty log and a session without events', () => {
+    expect(proveInterruptedStartupDelivery(interrupted(), session([]))).toBeUndefined()
+    expect(proveInterruptedStartupDelivery(interrupted(), {})).toBeUndefined()
+  })
+
+  it('proves an interrupted turn even when the durable turn id was never bound', () => {
+    // The process can die after the child started the turn but before
+    // `bindTurn` persisted it; the child's own log still proves the outcome.
+    const proof = proveInterruptedStartupDelivery(
+      interrupted({ turnId: undefined }),
+      session([
+        { type: 'turn/start', data: { turn: 7 } },
+        { type: 'user/message', data: { id: 'inbox-1' } },
+        { type: 'turn/end', data: { turn: 7, reason: { kind: 'interrupted' } } },
+      ]),
+    )
+
+    expect(proof?.state).toBe('interrupted')
   })
 })

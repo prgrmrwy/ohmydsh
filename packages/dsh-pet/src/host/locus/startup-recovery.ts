@@ -178,6 +178,94 @@ export function proveUnconsumedStartupDelivery(
   }
 }
 
+/**
+ * Prove an interrupted Delivery's bound child turn is over and never settled it.
+ *
+ * A Host restart can land between "the child claimed the inbox message and
+ * started a turn" and "the child called `pet_locus_finish`". The durable row
+ * still looks `current`, but the process that owned that turn is gone and the
+ * child never wrote a later turn, so nothing will ever settle it — meanwhile it
+ * holds the Serialized current slot and blocks the whole entrance behind it.
+ *
+ * The evidence is exact and already persisted: the child's own log shows the
+ * turn that entered this Delivery's `inboxMessageId` closing with
+ * `turn/end { reason: { kind: 'interrupted' } }`. The fold is deliberately as
+ * conservative as the `running`/`unconsumed` proofs — any malformed event, turn
+ * overlap, missing or duplicate entry, mismatched durable `turnId`, a closed
+ * turn whose reason is NOT `interrupted`, or a still-open turn refuses.
+ *
+ * @param delivery - the `current` Delivery to prove.
+ * @param session - the exact live child Session.
+ * @returns the `interrupted` proof, or undefined when it is not proven.
+ */
+export function proveInterruptedStartupDelivery(
+  delivery: DeliveryRecord,
+  session: unknown,
+): LocusStartupDeliveryProof | undefined {
+  if (
+    delivery.executionId === undefined ||
+    delivery.inboxMessageId === undefined ||
+    session === null ||
+    typeof session !== 'object' ||
+    typeof (session as Partial<SessionLike>).snapshotEvents !== 'function'
+  ) return undefined
+
+  let events: readonly SessionEventLike[]
+  try {
+    events = (session as SessionLike).snapshotEvents()
+  } catch {
+    return undefined
+  }
+  // An unreadable/empty log proves nothing about how the turn ended.
+  if (!Array.isArray(events) || events.length === 0) return undefined
+
+  let openTurn: number | undefined
+  let enteredTurn: number | undefined
+  let entries = 0
+  let interruptedTurn: number | undefined
+  for (const event of events) {
+    if (event === null || typeof event !== 'object') return undefined
+    const data = recordOf(event.data)
+    if (event.type === 'turn/start') {
+      const turn = positiveTurn(data?.['turn'])
+      if (turn === undefined || openTurn !== undefined) return undefined
+      openTurn = turn
+      continue
+    }
+    if (event.type === 'turn/end') {
+      const turn = positiveTurn(data?.['turn'])
+      if (turn === undefined || openTurn === undefined || turn !== openTurn) return undefined
+      const reason = recordOf(data?.['reason'])
+      if (enteredTurn === openTurn && reason?.['kind'] === 'interrupted') {
+        interruptedTurn = openTurn
+      }
+      openTurn = undefined
+      continue
+    }
+    if (event.type === 'user/message' && openTurn !== undefined) {
+      if (data?.['id'] === delivery.inboxMessageId) {
+        entries += 1
+        enteredTurn = openTurn
+      }
+    }
+  }
+
+  // A still-open turn belongs to the `running` proof, not this one: it may
+  // genuinely still be executing (a killed process without a graceful end
+  // event is indistinguishable from a live one here).
+  if (openTurn !== undefined) return undefined
+  if (entries !== 1 || enteredTurn === undefined || interruptedTurn === undefined) return undefined
+
+  const turnId = `${delivery.childSessionId}#${String(interruptedTurn)}`
+  if (delivery.turnId !== undefined && delivery.turnId !== turnId) return undefined
+  return {
+    deliveryId: delivery.deliveryId,
+    executionId: delivery.executionId,
+    turnId,
+    state: 'interrupted',
+  }
+}
+
 function nonNegativeInteger(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
     ? value
