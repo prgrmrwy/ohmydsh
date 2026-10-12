@@ -110,9 +110,23 @@ export interface LocusDeliveryClaimLookup {
  */
 const HOST_INJECTED_SOURCE_KINDS: ReadonlySet<string> = new Set([
   'agent-instructions',
+  // DSH <= 0.1.5 shared wrapper for every plugin-injected context message.
   'plugin',
+  // DSH 0.2.0 split the runtime/time snapshots out of the `plugin` wrapper.
+  'runtime-context',
+  'time-context',
   'skill-catalog',
 ])
+
+/**
+ * DSH 0.2.0 (session format v4) removed the shared `plugin` source: each
+ * plugin declares its own `plugin:<id>` kind (e.g. dsh-memex injects
+ * `plugin:dsh-memex` on every session's first step). Without this family the
+ * memex reminder marked every new locus child's first Delivery turn mixed and
+ * made it unanswerable (`finish:mixed-source`). A plugin-injected message has no
+ * Feishu reply target of its own, exactly like the old `plugin` wrapper.
+ */
+const PLUGIN_SOURCE_KIND_PREFIX = 'plugin:'
 
 /**
  * Whether a claimed message was injected by the Host rather than sent by a
@@ -122,7 +136,10 @@ const HOST_INJECTED_SOURCE_KINDS: ReadonlySet<string> = new Set([
  * @returns whether the claim is Host-injected context.
  */
 export function isHostInjectedClaim(sourceKind: string | undefined): boolean {
-  return sourceKind !== undefined && HOST_INJECTED_SOURCE_KINDS.has(sourceKind)
+  if (sourceKind === undefined) return false
+  if (HOST_INJECTED_SOURCE_KINDS.has(sourceKind)) return true
+  return sourceKind.startsWith(PLUGIN_SOURCE_KIND_PREFIX) &&
+    sourceKind.length > PLUGIN_SOURCE_KIND_PREFIX.length
 }
 
 /**

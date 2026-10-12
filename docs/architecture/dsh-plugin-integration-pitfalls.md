@@ -174,6 +174,13 @@ This turn has no exact Feishu Delivery reply target; GUI and stale turns cannot 
 | `plugin` | runtime context 快照（sandbox / approval 等）|
 | `skill-catalog` | 可用 skill 目录 |
 
+**DSH 0.2.0（session v4）起来源名变了**：共享的 `plugin` 包装被取消，每个插件
+用自己的 `plugin:<id>`（如 dsh-memex 首轮注入的 `plugin:dsh-memex`），runtime /
+time 快照拆成 `runtime-context` / `time-context`。只认精确 `plugin` 的豁免名单
+会把 `plugin:dsh-memex` 当成参与者流量 → 首轮 `mixed` → `pet_locus_finish` 报
+`not authorized`（日志 `finish:mixed-source`）。豁免必须覆盖 `plugin:<id>` 整族，
+升级 DSH 时要重新核对首轮真实 claim 的 `source.kind`。
+
 turn-observer 拿到这些 claim 后去 Delivery 表里查，查不到 → 归入
 `unresolved` / `foreign` → 把该轮标记为 **`mixed`** → `currentForChild()`
 返回 `undefined` → `currentDelivery` 解析不出来 → 回复工具拒绝发送。
