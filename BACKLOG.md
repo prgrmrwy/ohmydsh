@@ -745,7 +745,7 @@
 ## 待立项
 
 ### [U009] 重启打断进行中的 turn 后,已 claim 的 current 投递要等满 1h 租约才结算,期间后续消息全被阻塞
-- **状态**: 待立项(2026-10-13 真机验收 `pet-locus-feishu-read-and-delivery-fixes` 7.5 时实测复现,尚未有 change)
+- **状态**: 已立项 → `openspec/changes/pet-locus-interrupted-delivery-recovery`(2026-10-13 真机验收 `pet-locus-feishu-read-and-delivery-fixes` 7.5 时实测复现,当日立项并实现:启动恢复新增"绑定 turn 已被证明中断"第三种证明,命中即终态结算 `failed/turn-interrupted` 且不重发;被提升的 backlog 行获得最小执行租约。真机复验见该 change 的 `verify.md`)
 - **优先级**: P2(影响用户可见的时延与可解释性:被中断后用户只看到表情、最长等 1 小时;不影响不变量正确性)
 - **真机证据(2026-10-13)**:
   - 群 `oc_6847047be0e4310c404a8a41ed068365`,同一 locus `locus-runtime-1791825019304-1e6afb3085e438`,child `session-1e2caf37-…`。
