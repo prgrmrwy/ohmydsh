@@ -15,8 +15,6 @@ class FakeWiring {
   public readonly deps: SessionGuardDeps = {
     network: () => this.network,
     read: (id) => this.readers.get(id),
-    subscribeSelection: () => () => undefined,
-    subscribeBlockStore: () => () => undefined,
     blockOf: (id) => this.blocks.get(id),
     setBlock: (id, block) => {
       this.setCalls.push({ session: id, block })
@@ -145,5 +143,43 @@ describe('ComposerGuardController', () => {
     w.blocks.set('B', { reason: 'OFFICIAL' })
     w.guard.dispose('B')
     expect(w.blocks.get('B')).toEqual({ reason: 'OFFICIAL' })
+  })
+
+  it('drops its own stale reason when it must yield to the official block', () => {
+    const w = new FakeWiring()
+    w.setNetwork('blocked')
+    w.setFacts('A', CLAUDE) // our reason is in the slot
+    expect(w.blocks.get('A')).toEqual({ reason: 'REASON' })
+
+    // The official non-routable block takes over. Nothing else in this runtime
+    // clears the slot, so yielding MUST still drop a reason we wrote — otherwise
+    // it would stay until a page reload.
+    w.readers.set('A', { selection: CLAUDE, routable: false })
+    w.guard.evaluate('A')
+    expect(w.blocks.has('A')).toBe(false)
+  })
+
+  it('never erases a foreign reason, even while yielding or dropping its claim', () => {
+    const w = new FakeWiring()
+    w.setNetwork('blocked')
+
+    // We owned the slot, then another writer replaced the value; our negative
+    // decision must clear our claim without erasing theirs.
+    w.setFacts('A', CLAUDE)
+    w.blocks.set('A', { reason: 'OFFICIAL' })
+    w.setFacts('A', DEEPSEEK)
+    expect(w.blocks.get('A')).toEqual({ reason: 'OFFICIAL' })
+
+    // Same rule while yielding to the official non-routable block.
+    w.blocks.set('B', { reason: 'OFFICIAL' })
+    w.readers.set('B', { selection: CLAUDE, routable: false })
+    w.guard.evaluate('B')
+    expect(w.blocks.get('B')).toEqual({ reason: 'OFFICIAL' })
+
+    // Same rule on teardown.
+    w.setFacts('C', CLAUDE)
+    w.blocks.set('C', { reason: 'OFFICIAL' })
+    w.guard.dispose('C')
+    expect(w.blocks.get('C')).toEqual({ reason: 'OFFICIAL' })
   })
 })

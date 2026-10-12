@@ -723,6 +723,15 @@
 - **复发条件**: 「干完活 → 先归档收拾干净 → 回头再 `ws clean`」是自然顺序,而现有设计假定先 clean 后归档;该顺序会再次触发,建议在下一次相关改动时一并处理。
 - **更新**: 2026-10-09 自长期笔记迁入 BACKLOG(已脱敏;原为长期笔记目录中的同名缺陷记录)。
 
+### [D010] 客户端会话代际替换后，按 session id 缓存的 per-session 订阅失效（出口守卫曾把禁用文案滞留到刷新）
+- **状态**: 已修复（分支 `ws/claude-sol`，待合入；侧栏 provider 图标的同类风险未修，见「残留」）
+- **现象**: 2026-10-12 实机（`~/mydir/dev/nexus` 的会话，出口判定阻断、会话为 `claude/claude-opus-5-5`）：输入框被 `home-network-model-guard` 禁用并显示原因；用户把该会话切到 `codex/gpt-6.1-sol` 后，模型选择器标签已更新为新模型，输入框**仍**显示禁用文案，必须刷新页面才恢复。
+- **根因一（订阅随会话代际失效）**: 客户端 Session scope 在有人 retain 时物化、引用归零时回收（`dsh-api-session-controller` 客户端的 `materializeScope`/`retireScope`），`ctx.modelDirectories.directoryFor(id)` 把 per-session `ModelDirectory`（含 composer 模型座位渲染所用的 store）按该 scope 的 binding 对象缓存并随 scope 释放；官方模型座位每次挂载重新解析目录，而旧守卫对每个 session id 只解析一次并永久监听那个 store（`bindings.has(id) → return`）。于是「离开会话再回来」产生的同 id 新目录，守卫仍在听已冻结的旧 store，模型切换不再触发重新判定；`reEvaluateAll` 只在 visibilitychange/启动/判定重试时运行（判定 resolved 后心跳自停），`onBlockStoreChanged` 又只在需要 block 时写，无人自愈。
+- **根因二（yield 分支滞留自己的文案）**: 旧实现假定 `routable === false` 时官方模型选择插件会写自己的 block，但在 0.2.0-rc.2 的实际部署里**只有守卫自己**使用 `conversation.blocks`（`ComposerBlockRegistry.forget` 无调用者，`routable` 也无第二个消费者）。`yield-official` 分支只把 `owns` 置 false、不清槽位，守卫先前写入的文案就永久滞留（之后的 `none`/`dispose` 都以 `owns` 为门），同样只有刷新能清。
+- **修复（本分支）**: 新增 `packages/home-network-model-guard/src/client/bindings.ts`（每次 reconcile 重新解析 store、身份变化即重订阅，并对每个 live 会话重新判定；会话列表不可读时 `reverify()`），`yield-official`/`none`/`dispose` 统一走 `dropOwn()`——只清除携带**自己** reason 的 block。回归测试 `test/bindings.test.ts`（同 id 代际替换、重订阅、自愈）与 `test/guard.test.ts`（yield 清自己、永不擦除他人文案）在旧实现下 RED、修复后 GREEN。
+- **残留（同类，未修）**: `packages/sidebar-session-provider-icon/src/client/index.ts` 的 `syncCurrentDirectory` 以 `id === selectedSessionId` 短路，配合 `src/client/selection-binding.ts` 的按 id 订阅一次：同 id 的 scope 换代后侧栏 provider/模型徽标会停留在旧值。影响面小于守卫（无放行/阻断语义），修法可复用本条的 `SessionBindings` 形态。
+- **更新**: 2026-10-12 记录。部署该修复必须**从主 checkout** 执行 sync（worktree 路径会被写进 profile、且缺依赖 worktree 的 local build 会清空产物，见 D004/D007）。
+
 ---
 
 ## 待立项
