@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { trackTodo, type TrackDeps } from '../src/host/ledger/track.js'
+import { trackFailureText, trackTodo, type TrackDeps } from '../src/host/ledger/track.js'
 import { LedgerStoreError } from '../src/host/ledger/store.js'
 import type { LocusContextRecord } from '../src/host/locus/context-repository.js'
 
@@ -141,5 +141,28 @@ describe('pet_locus_request_execution takes no target selector (design D10)', ()
     }
     // Unknown arguments are refused by the shared wrapper, not silently kept.
     expect(block.slice(0, block.indexOf('output: {') + 4000)).toContain('requireKnownArguments')
+  })
+})
+
+describe('a failed registration says what to do next', () => {
+  it('track failure returns an operation-specific next step without leaking ids', () => {
+    const reasons = ['no-current-delivery', 'invalid-evidence', 'store-error', 'track-unwired'] as const
+    const texts = reasons.map(reason => [reason, trackFailureText(reason)] as const)
+
+    for (const [reason, text] of texts) {
+      // Never a bare "failed": every branch names the missing precondition or
+      // the next action.
+      expect(text, reason).toContain('登记失败')
+      expect(text.length, reason).toBeGreaterThan(40)
+    }
+    // Operation-specific means distinguishable, not one generic sentence.
+    expect(new Set(texts.map(([, text]) => text)).size).toBe(reasons.length)
+    expect(trackFailureText('no-current-delivery')).toContain('pet_locus_finish')
+    expect(trackFailureText('invalid-evidence')).toContain('detail')
+    expect(trackFailureText('store-error')).toContain('重试')
+    // No other todo, locus, child or session identifier may appear.
+    for (const [, text] of texts) {
+      expect(text).not.toMatch(/item-|todo-|locus-|session-|oc_|ou_/)
+    }
   })
 })

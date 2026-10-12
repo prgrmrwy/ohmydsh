@@ -82,3 +82,33 @@ describe('INTENT_TRIAGE_GUIDANCE (tasks 6.1/6.3/6.5)', () => {
     )).toBe(false)
   })
 })
+
+describe('todo replies must match the durable todo state', () => {
+  it('todo reply guidance matches the durable todo status', () => {
+    // The failure this prevents: a child registers an `open` todo and tells the
+    // group the work has started, so nobody notices it was never picked up.
+    expect(INTENT_TRIAGE_GUIDANCE).toContain('DURABLE state')
+    expect(INTENT_TRIAGE_GUIDANCE).toContain('`open`')
+    expect(INTENT_TRIAGE_GUIDANCE).toContain('NOT STARTED')
+    expect(INTENT_TRIAGE_GUIDANCE).toContain('`accepted`')
+    expect(INTENT_TRIAGE_GUIDANCE).toContain('Never say the work has begun')
+    expect(INTENT_TRIAGE_GUIDANCE).toContain('never claim it')
+    expect(INTENT_TRIAGE_GUIDANCE).toContain('is done')
+  })
+
+  it('unconfirmed path is presented as a guess and asks for confirmation', () => {
+    expect(INTENT_TRIAGE_GUIDANCE).toContain('present it as a guess and ask the requester or owner to confirm it')
+    expect(INTENT_TRIAGE_GUIDANCE).toContain('never state an unconfirmed location')
+  })
+
+  it('keeps the structural coverage guard honest about the new clauses', () => {
+    // The guard is what makes a future edit that drops these phrases fail.
+    expect(intentTriageGuidanceCoversRequiredPoints(INTENT_TRIAGE_GUIDANCE)).toBe(true)
+    for (const required of ['DURABLE state', 'NOT STARTED', 'never state an unconfirmed location']) {
+      expect(
+        intentTriageGuidanceCoversRequiredPoints(INTENT_TRIAGE_GUIDANCE.replace(required, '')),
+        required,
+      ).toBe(false)
+    }
+  })
+})

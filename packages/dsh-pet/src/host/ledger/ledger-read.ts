@@ -62,3 +62,56 @@ export function readSharedLedger(
 ): readonly LedgerReadItem[] {
   return Object.freeze(deps.listForParent(caller.parentSessionId).map(project))
 }
+
+/**
+ * Why a ledger read could not produce a list.
+ *
+ * Deliberately NOT an empty list: "the ledger is empty" and "the ledger could
+ * not be read" lead a model to opposite conclusions, and rendering the second
+ * as `[]` makes it report "no todos" for work it never saw.
+ */
+export type LedgerReadUnavailableReason = 'caller-unresolvable' | 'ledger-unwired' | 'store-unreadable'
+
+/** The outcome of one ledger read. */
+export type LedgerReadOutcome =
+  | { readonly ok: true; readonly items: readonly LedgerReadItem[] }
+  | { readonly ok: false; readonly reason: LedgerReadUnavailableReason }
+
+/**
+ * Read the caller's own same-source ledger, distinguishing empty from unreadable.
+ * @param caller - Resolved caller; its parent session is the whole read scope.
+ * @param deps - The narrow same-source read.
+ * @returns the projected items, or a reason that is NOT an empty ledger.
+ */
+export function readSharedLedgerOutcome(
+  caller: LedgerCaller,
+  deps: LedgerReadDeps,
+): LedgerReadOutcome {
+  try {
+    return { ok: true, items: readSharedLedger(caller, deps) }
+  } catch {
+    // A dependency fault is never "there is nothing to do".
+    return { ok: false, reason: 'store-unreadable' }
+  }
+}
+
+/**
+ * The model-facing text for an unavailable ledger read.
+ *
+ * Actionable on purpose: it names the one thing the model cannot conclude
+ * (`[]` would mean "no todos"), and the two paths that remain open to it.
+ * @param reason - Why the read failed.
+ * @returns guidance for the model, without any other id.
+ */
+export function ledgerReadUnavailableText(reason: LedgerReadUnavailableReason): string {
+  const why = reason === 'caller-unresolvable'
+    ? '当前调用方无法解析到唯一的 locus 归属'
+    : reason === 'ledger-unwired'
+      ? '本 Host 未装配台账读取能力'
+      : '台账存储读取失败'
+  return [
+    `台账读取不可用（${reason}）：${why}。`,
+    '这不代表"没有待办"——本次无法判断台账内容，不要把结果当作空台账。',
+    '可稍后重试；若要登记本次工作请求，直接调用 `pet_locus_track` 即可，不依赖本次读取。',
+  ].join('')
+}

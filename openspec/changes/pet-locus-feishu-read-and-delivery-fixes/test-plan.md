@@ -53,19 +53,19 @@
 | 同上 | Host 出站不附加诊断 | `test/channel-lark.test.ts` | `appends no diagnostics or paths to a plain-text body` | 🟢 green |
 | 同上 | 含提及的正文只做既有受管变换 | `test/channel-mentions.test.ts`、`test/channel-lark.test.ts` | `renders a whole-word display name into a real mention`；`renders a plain @display-name into a real mention before sending` | 🟢 green |
 | 同上 | prompt 不指示模型转述诊断 | `test/locus-context.test.ts` | `never instructs the model to quote guard diagnostics into the reply body` | 🟢 green |
-| 未装配的 caller-bound 能力不得以可见但必然失败的形式暴露 | 能力未装配时不可见 | `test/locus-surface.test.ts` | `unassembled collaboration context tool is not exposed to the child` | 🔴 red |
-| 同上 | 装配后可用 | `test/locus-surface.test.ts` | `assembled capability registers and serves an authorized caller` | 🔴 red |
-| 同上 | 冷恢复后判定一致 | `test/locus-surface.test.ts` | `cold restore keeps the same capability visibility decision` | 🔴 red |
+| 未装配的 caller-bound 能力不得以可见但必然失败的形式暴露 | 能力未装配时不可见 | `test/collaboration-assembly.test.ts` | `leaves an eligible agent scope completely untouched when nothing composed`；`composes nothing without %s`（七个 seam 的 it.each） | 🟢 existing |
+| 同上 | 装配后可用 | `test/collaboration-assembly.test.ts` | `gives a main session the shared facts, roster, ask and answer`；`adds the circle surface to a locus child beside its own pet_context and reply` | 🟢 existing |
+| 同上 | 冷恢复后判定一致 | `test/collaboration-assembly.test.ts` | `treats a fresh scope for the same session as a new installation`；`reports an unreadable locus index as not eligible rather than installing on a guess` | 🟢 existing |
 
 ### pet-locus-intent-triage（delta：specs/pet-locus-intent-triage/spec.md）
 
 | Requirement | Scenario | Test File | Test Name | Initial State |
 |---|---|---|---|---|
-| 待办登记后的回复如实且待办工具失败反馈可执行 | 登记后回复与待办状态一致 | `test/ledger-prompt.test.ts` | `todo reply guidance matches the durable todo status` | 🔴 red |
-| 同上 | 未确认路径不作为事实 | `test/ledger-prompt.test.ts` | `unconfirmed path is presented as a guess and asks for confirmation` | 🔴 red |
-| 同上 | 台账不可用与台账为空可区分 | `test/ledger-read.test.ts` | `ledger dependency failure is not rendered as an empty ledger` | 🔴 red |
-| 同上 | 登记失败给出操作特定指引 | `test/ledger-track.test.ts` | `track failure returns an operation-specific next step without leaking ids` | 🔴 red |
-| 同上 | 待办标识不可解析时给出下一步 | `test/ledger-tool-scope.test.ts` | `unresolvable todo id points at the ledger read and enumerates nothing` | 🔴 red |
+| 待办登记后的回复如实且待办工具失败反馈可执行 | 登记后回复与待办状态一致 | `test/ledger-prompt.test.ts` | `todo reply guidance matches the durable todo status`；`keeps the structural coverage guard honest about the new clauses` | 🟢 green |
+| 同上 | 未确认路径不作为事实 | `test/ledger-prompt.test.ts` | `unconfirmed path is presented as a guess and asks for confirmation` | 🟢 green |
+| 同上 | 台账不可用与台账为空可区分 | `test/ledger-read.test.ts`、`test/ledger-tool-scope.test.ts` | `ledger dependency failure is not rendered as an empty ledger`；`keeps "available but empty" distinguishable from "unreadable"`；`ledger unavailable is rendered as unreadable, not as an empty ledger`；`an empty ledger still renders as an empty list, so the two are distinguishable`；`an unresolvable caller is told the read is unavailable, never that there is no work` | 🟢 green |
+| 同上 | 登记失败给出操作特定指引 | `test/ledger-track.test.ts` | `track failure returns an operation-specific next step without leaking ids` | 🟢 green |
+| 同上 | 待办标识不可解析时给出下一步 | `test/ledger-tool-scope.test.ts`、`test/todo-dispatch.test.ts` | `an unusable todo id points at the ledger read and enumerates nothing`；`a malformed todo id points at the ledger read instead of only refusing`；`an unknown id points at the ledger read instead of a bare "not found"`；`a foreign todo says whose it is and how to find a legal one`；`a todo that is no longer open says so without claiming a retry would work` | 🟢 green |
 
 ### 额外测试（下限之上，必须存在但不单独对应 scenario）
 

@@ -46,10 +46,10 @@
 
 ## 6. 反馈类修复（D5/D6）
 
-- [ ] 6.1 未装配的协作上下文工具不出现在 child 工具面；装配后可注册；cold restore 后判定一致
-- [ ] 6.2 三个待办工具按操作给出可执行下一步；**台账不可用与台账为空可区分**（不得以 `[]` 呈现不可用）；执行请求标识非法时指出先读台账；**登记失败**（参数/前置/依赖）给出操作特定指引且不泄露其它标识
-- [ ] 6.3 登记待办后的回复与持久状态一致（不得声称未开始的工作已开始）；未确认路径表述为推测
-- [ ] 6.4 单测覆盖 6.1–6.3 的对应 scenario（模型行为类用持久状态与出站文本做 oracle）
+- [x] 6.1 未装配的协作上下文工具不出现在 child 工具面；装配后可注册；cold restore 后判定一致 → `src/host/collaboration/assembly.ts`（`composeCollaborationSurface` 缺任一 seam 即返回 `undefined`）；`test/collaboration-assembly.test.ts`（`leaves an eligible agent scope completely untouched when nothing composed`、`adds the circle surface to a locus child beside its own pet_context and reply`、`treats a fresh scope for the same session as a new installation`）
+- [x] 6.2 三个待办工具按操作给出可执行下一步；**台账不可用与台账为空可区分**（不得以 `[]` 呈现不可用）；执行请求标识非法时指出先读台账；**登记失败**（参数/前置/依赖）给出操作特定指引且不泄露其它标识
+- [x] 6.3 登记待办后的回复与持久状态一致（不得声称未开始的工作已开始）；未确认路径表述为推测 → `src/host/ledger/prompt.ts`（`INTENT_TRIAGE_GUIDANCE` 新增 DURABLE state/未确认路径条款并纳入结构化守卫）；`test/ledger-prompt.test.ts`
+- [x] 6.4 单测覆盖 6.1–6.3 的对应 scenario（模型行为类用持久状态与出站文本做 oracle）→ 见 `test-plan.md` 六行映射；工具级反馈用真实 `ToolRuntime` 渲染文本做 oracle
 
 ## 7. 验证与收尾
 

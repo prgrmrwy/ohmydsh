@@ -15,10 +15,12 @@ import {
   PET_LOCUS_CHAT_HISTORY_TOOL,
   PET_LOCUS_PARENT_LOOKUP_TOOL,
   PET_LOCUS_LEDGER_READ_TOOL,
+  PET_LOCUS_REQUEST_EXECUTION_TOOL,
   PET_LOCUS_TRACK_TOOL,
   registerPetTools,
 } from '../src/host/tools.js'
 import { createLocusHistoryCursor } from '../src/host/locus/history-cursor.js'
+import { requestExecutionFailureText } from '../src/host/ledger/dispatch.js'
 import type { PetRepository } from '../src/host/repository.js'
 import { openPetHarness, type PetHarness } from './harness.js'
 
@@ -209,5 +211,133 @@ describe('model-facing tools cannot settle a todo (design D10)', () => {
     expect(params).toContain('itemId')
     expect(params).not.toContain('status')
     expect(params).not.toContain('action')
+  })
+})
+
+/**
+ * Tool-level feedback: what the model actually receives when the ledger cannot
+ * be read or an execution request names something it cannot resolve.
+ */
+describe('ledger tool feedback is actionable and never leaks ids', () => {
+  const CHILD = 'child-scope-1'
+  const LOCUS = {
+    id: 'locus-scope-1',
+    generation: 1,
+    endpoint: { chatId: 'oc_scope' },
+    parentSessionId: 'main-scope-1',
+    childSessionId: CHILD,
+    workspaceId: 'ws-scope',
+    source: 'auto' as const,
+    state: 'active' as const,
+    busy: false,
+    createdAt: 1,
+    updatedAt: 1,
+  }
+
+  async function execute(
+    intentTriage: Parameters<typeof registerPetTools>[1]['intentTriage'],
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<{ text: string; isError: boolean }> {
+    harness = await openPetHarness()
+    const ctx = await hostContext()
+    const key = { id: CHILD } as never
+    const scope = createScope(ctx, key)
+    await installOnScope(scope.ctx, harness.repository, intentTriage)
+    const result = await ctx.tools.execute({
+      agent: key,
+      name,
+      callId: `${name}-1` as never,
+      arguments: args,
+      signal: new AbortController().signal,
+    })
+    const content = (result as unknown as { content?: readonly { text?: string }[] }).content ?? []
+    return {
+      text: content.map(part => part.text ?? '').join('\n'),
+      isError: (result as unknown as { isError?: boolean }).isError === true,
+    }
+  }
+
+  it('ledger unavailable is rendered as unreadable, not as an empty ledger', async () => {
+    const wired = { loci: { findByChildSessionId: () => [LOCUS] }, ledgerRead: { listForParent: () => { throw new Error('closed') } } }
+
+    const unreadable = await execute(wired, PET_LOCUS_LEDGER_READ_TOOL, {})
+
+    expect(unreadable.isError).toBe(false)
+    expect(unreadable.text).toContain('台账读取不可用')
+    expect(unreadable.text).toContain('不代表"没有待办"')
+    expect(unreadable.text).not.toBe('[]')
+  })
+
+  it('an empty ledger still renders as an empty list, so the two are distinguishable', async () => {
+    const wired = { loci: { findByChildSessionId: () => [LOCUS] }, ledgerRead: { listForParent: () => [] } }
+
+    const empty = await execute(wired, PET_LOCUS_LEDGER_READ_TOOL, {})
+
+    expect(empty.text).toBe('[]')
+  })
+
+  it('an unresolvable caller is told the read is unavailable, never that there is no work', async () => {
+    const wired = { loci: { findByChildSessionId: () => [] }, ledgerRead: { listForParent: () => [] } }
+
+    const refused = await execute(wired, PET_LOCUS_LEDGER_READ_TOOL, {})
+
+    expect(refused.text).toContain('caller-unresolvable')
+    expect(refused.text).not.toBe('[]')
+  })
+
+  it('an unusable todo id points at the ledger read and enumerates nothing', async () => {
+    // The request-execution tool proves a current Delivery before it asks for
+    // execution, so the authorization deps are stubbed with one real record.
+    const authorized = {
+      endpoint: { chatId: 'oc_scope' },
+      locus: { locusId: 'locus-scope-1', generation: 1, state: 'active' as const, toolTier: 'safe' as const },
+      main: { sessionId: 'main-scope-1' },
+      child: { sessionId: CHILD },
+      workspace: { workspaceId: 'ws-scope' },
+      permission: { effective: 'read' as const },
+      contextAnchor: { status: 'unknown' as const },
+      currentDelivery: {
+        deliveryId: 'delivery-1',
+        messageId: 'om_scope_1',
+        endpoint: { chatId: 'oc_scope' },
+        locusId: 'locus-scope-1',
+        generation: 1,
+        childSessionId: CHILD,
+        status: 'current' as const,
+        queueState: 'current' as const,
+        executionId: 'exec-1',
+      },
+      source: 'locus' as const,
+    }
+    const wired = {
+      loci: { findByChildSessionId: () => [LOCUS] },
+      currentCapability: () => ({
+        deliveryId: 'delivery-1',
+        executionId: 'exec-1',
+        turnId: `${CHILD}#1`,
+        source: 'delivery' as const,
+      }),
+      authorizeCurrentDelivery: async () => authorized,
+      // The real dispatch refusal text, so this pins the render path the model sees.
+      requestExecution: async () => ({ ok: false as const, reason: requestExecutionFailureText('unknown-item') }),
+    }
+
+    const refused = await execute(wired, PET_LOCUS_REQUEST_EXECUTION_TOOL, { itemId: 'todo-does-not-exist' })
+
+    expect(refused.isError).toBe(false)
+    expect(refused.text).toContain('pet_locus_ledger_read')
+    expect(refused.text).toContain('重试')
+    // Nothing about the ledger's other rows may appear.
+    expect(refused.text).not.toMatch(/item-|locus-|oc_|ou_/)
+  })
+
+  it('a malformed todo id points at the ledger read instead of only refusing', async () => {
+    const wired = { loci: { findByChildSessionId: () => [LOCUS] } }
+
+    const refused = await execute(wired, PET_LOCUS_REQUEST_EXECUTION_TOOL, { itemId: '   ' })
+
+    expect(refused.isError).toBe(true)
+    expect(refused.text).toContain('pet_locus_ledger_read')
   })
 })
