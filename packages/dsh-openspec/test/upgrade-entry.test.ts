@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
+import { createRequire } from 'node:module'
 import { apply } from '../src/index.js'
 import { registerWorkflowCommands } from '../src/commands.js'
 import { createManagementGuidance } from '../src/manage-flow.js'
@@ -10,6 +11,8 @@ import { buildAdapterBlock, parseAdapterBlock } from '../src/adapter-block.js'
 import { getOfficialCatalog, resolveEffectiveSelection } from '../src/upstream-compat.js'
 import { activateGeneration, loadGeneration } from '../src/generations.js'
 import { strictAgent } from './support-agent.js'
+
+const PINNED = (createRequire(import.meta.url)('../package.json') as { dependencies: Record<string, string> }).dependencies['@fission-ai/openspec']!
 
 // No real timer, registry request, sync, source transaction or live Host in this naming regression.
 vi.mock('../src/catalog-invalidation.js', () => ({
@@ -44,11 +47,11 @@ describe('openspec-upgrade public entry', () => {
     await activateGeneration(home, 'historical', { version: '1.13.1', skills: [{ name: 'openspec-upgrade', body: 'old help' }], invocation })
     const { definitions } = await startAdapter(home)
     const state = await loadGeneration(home)
-    expect(state.version).toBe('1.13.2')
+    expect(state.version).toBe(PINNED)
     const { agent, texts } = strictAgent(home)
     await definitions.get('openspec-upgrade').handler({ agent, rawInput: '' })
     const content = texts()[0]!
-    expect(content).toContain('\\"installed\\":\\"1.13.2\\"')
+    expect(content).toContain(`\\"installed\\":\\"${PINNED}\\"`)
     expect(content).not.toContain('\\"installed\\":\\"1.13.1\\"')
   })
   it('restart_with_interrupted_transaction_serves_previous_generation_without_materializing_current_pin', async () => {
