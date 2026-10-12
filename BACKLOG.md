@@ -738,6 +738,7 @@
 
 ### [U006] Locus 只读身份回落 user:需要"可回落主体"与正向错误分类契约
 - **状态**: 待立项(2026-10-12 由 change `pet-locus-feishu-read-and-delivery-fixes` 拆出 —— 评审 round 1 的 C4 判定其授权边界无法从当时的方案推出)
+- **来源 change 现状(2026-10-12)**: 该 change 已实现并留档 `verify.md`(bot-only 群读取已落地、能力声明改为实测三态)，本条是**有意的未实施部分**：`safe` 档 child 在 bot 被拒时如实声明不可读，不自行回落 user 身份。规范合并/归档待 `pet-locus-shell-tier` 7.4 之后
 - **优先级**: P2(正常路径已可用,属兜底:bot 权限 `im:message.group_msg` 已于 2026-10-12 开通并实测可读群历史)
 - **背景 / 动机**: 事故当时(`session-82bccfbf`)bot 身份读群历史返回 `230027 user_unauthorized`,只有 `--as user` 能读;所有者口径是"bot 拿不到可以接受 as user,但最好还是 bot"。因此需要一条**有界、可标注**的只读回落路径,而不是让 child 在权限缺失时整体不可读。
 - **评审给出的落地契约(缺一不可)**:
@@ -751,6 +752,7 @@
 
 ### [U007] child 读回自己的运行时溢出文件:需要 Host 可信的 spill root
 - **状态**: 待立项(2026-10-12 由 change `pet-locus-feishu-read-and-delivery-fixes` 拆出 —— 评审 round 1 的 C1 判定"按目录形状放行"只能证明看起来像,不能证明内容是本 child 产生的)
+- **来源 change 现状(2026-10-12)**: 该 change 已实现并留档 `verify.md`；读取守卫仍只允许已确认工作区内，并新增拒绝指引(允许根 + 申请方式)。本条的 spill root 例外**未实施**，`pet_locus_parent_lookup` 触发溢出时 child 依然读不回后半段
 - **优先级**: P2(现状:DSH 把超大工具结果溢出到 `$TMPDIR/dsh-spill-<6位>/session-<sha256(sessionId) 前12位>/` 并提示模型"用 read 读取",而 locus 守卫拒绝工作区外的一切读取 —— 该提示对 locus child 不可执行;`pet_locus_parent_lookup` 的结果就是这样丢掉了后半段)
 - **评审给出的落地契约**:
   - 不得按目录形状/属主/权限放行:同 UID 进程可伪造同名树,软链、硬链与"校验后替换"竞态都能绕过外观检查。
