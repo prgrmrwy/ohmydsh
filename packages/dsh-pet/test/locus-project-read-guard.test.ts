@@ -84,6 +84,90 @@ describe('Locus canonical project-read guard', () => {
     await scope.dispose()
   })
 
+  it('authorizes an omitted grep/glob path as the exact Session cwd the tool would search', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'locus-read-default-'))
+    roots.push(base)
+    const workspace = join(base, 'project')
+    const outside = join(base, 'outside')
+    const dshHome = join(base, 'dsh-home')
+    await Promise.all([mkdir(workspace), mkdir(outside), mkdir(dshHome)])
+
+    ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    let bodies = 0
+    for (const name of ['read', 'read_image', 'glob', 'grep']) ctx.tools.register(probeTool(name, () => { bodies += 1 }))
+    const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/package.json'))
+    const { createScope } = await import(pathToFileURL(requireFromTools.resolve('@deepseek-ai/dsh-scope')).href) as {
+      createScope(ctx: Context, key: Agent): { ctx: Context; dispose(): Promise<void> }
+    }
+    // The live runtime Agent carries its Session; fs-search defaults to its cwd.
+    const withCwd = (cwd: string) =>
+      ({ id: 'default-path-child' as SessionId, session: { header: { cwd } } }) as unknown as Agent
+    const agent = withCwd(workspace)
+    const scope = createScope(ctx, agent)
+    installLocusProjectReadGuard(scope.ctx, {
+      childCwd: workspace,
+      parentCwd: workspace,
+      workspaceRoot: workspace,
+      deniedRoots: [dshHome],
+    })
+    const execute = (caller: Agent, name: string, args: unknown) => ctx!.tools.execute({
+      agent: caller,
+      name,
+      callId: `${name}-${Math.random()}` as ToolCallId,
+      arguments: args,
+      signal: new AbortController().signal,
+    })
+
+    expect((await execute(agent, 'grep', { pattern: 'x' })).isError).toBe(false)
+    expect((await execute(agent, 'glob', { pattern: '*' })).isError).toBe(false)
+    expect(bodies).toBe(2)
+    // An explicitly empty path and a read without file_path stay refused.
+    expect((await execute(agent, 'grep', { pattern: 'x', path: '' })).isError).toBe(true)
+    expect((await execute(agent, 'read', {})).isError).toBe(true)
+    expect(bodies).toBe(2)
+    await scope.dispose()
+  })
+
+  it('refuses an omitted search path when the Session cwd is outside the confirmed workspace', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'locus-read-default-out-'))
+    roots.push(base)
+    const workspace = join(base, 'project')
+    const outside = join(base, 'outside')
+    const dshHome = join(base, 'dsh-home')
+    await Promise.all([mkdir(workspace), mkdir(outside), mkdir(dshHome)])
+
+    ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    let bodies = 0
+    for (const name of ['glob', 'grep']) ctx.tools.register(probeTool(name, () => { bodies += 1 }))
+    const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/package.json'))
+    const { createScope } = await import(pathToFileURL(requireFromTools.resolve('@deepseek-ai/dsh-scope')).href) as {
+      createScope(ctx: Context, key: Agent): { ctx: Context; dispose(): Promise<void> }
+    }
+    for (const cwd of [outside, dshHome, 'relative/cwd']) {
+      const agent = ({ id: `child-${cwd}` as SessionId, session: { header: { cwd } } }) as unknown as Agent
+      const scope = createScope(ctx, agent)
+      installLocusProjectReadGuard(scope.ctx, {
+        childCwd: workspace,
+        parentCwd: workspace,
+        workspaceRoot: workspace,
+        deniedRoots: [dshHome],
+      })
+      for (const name of ['grep', 'glob']) {
+        const result = await ctx.tools.execute({
+          agent, name, callId: `${name}-${Math.random()}` as ToolCallId,
+          arguments: { pattern: 'x' }, signal: new AbortController().signal,
+        })
+        expect(result.isError, `${name} with cwd ${cwd}`).toBe(true)
+      }
+      await scope.dispose()
+    }
+    expect(bodies).toBe(0)
+  })
+
   it('refuses the media spool, so a child can never read what Pet downloaded for it', async () => {
     const base = await mkdtemp(join(tmpdir(), 'locus-read-spool-'))
     roots.push(base)

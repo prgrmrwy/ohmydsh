@@ -143,6 +143,21 @@ function compilePolicy(input: LocusProjectReadGuardInput): CanonicalProjectReadP
   return { base: childCwd, allowedRoots, deniedRoots }
 }
 
+/** Search tools whose `path` is optional and defaults to the caller Session cwd. */
+const DEFAULT_ROOTED_SEARCH_TOOLS = new Set(['glob', 'grep'])
+
+/**
+ * The cwd the search tool itself falls back to when `path` is omitted
+ * (`dsh-tool-fs-search`: `exec.agent.session.header.cwd ?? process.cwd()`).
+ * Read from the exact execution so the guard authorizes the directory that
+ * will actually be searched, not an assumption about it.
+ */
+function searchDefaultRoot(exec: Readonly<ToolExecution>): string | undefined {
+  const agent = exec.agent as { readonly session?: { readonly header?: { readonly cwd?: unknown } } } | undefined
+  const cwd = agent?.session?.header?.cwd
+  return typeof cwd === 'string' && cwd.trim() !== '' && isAbsolute(cwd) ? cwd : undefined
+}
+
 function requestedPath(exec: Readonly<ToolExecution>): string | undefined {
   if (!PROJECT_READ_TOOLS.has(exec.name)) return undefined
   const args = typeof exec.arguments === 'object' && exec.arguments !== null
@@ -151,6 +166,15 @@ function requestedPath(exec: Readonly<ToolExecution>): string | undefined {
   const value = exec.name === 'read' || exec.name === 'read_image'
     ? args?.['file_path']
     : args?.['path']
+  // An OMITTED search path is not "no path": the tool searches its Session
+  // cwd. Authorize exactly that directory through the same containment check.
+  // Without it the child's natural first `grep` was refused and it had to
+  // rediscover the absolute project root by trial. When the runtime does not
+  // expose the cwd, the tool would fall back to the Host process cwd, so stay
+  // closed. An explicitly empty path remains refused.
+  if (value === undefined && args !== undefined && DEFAULT_ROOTED_SEARCH_TOOLS.has(exec.name)) {
+    return searchDefaultRoot(exec) ?? ''
+  }
   return typeof value === 'string' && value.trim() !== '' ? value : ''
 }
 
