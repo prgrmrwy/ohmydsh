@@ -8,6 +8,10 @@
  *    the host verdict is `'blocked'`/`'unknown'` and the session selects a
  *    Claude-family model, the session's composer becomes inert with our
  *    localized reason. Fails CLOSED for Claude — only `'allowed'` permits.
+ *    Bindings are re-targeted whenever the runtime replaces a session's model
+ *    directory (client session generations) and re-decided on every session-list
+ *    change, so the gate follows a model switch without a page reload (see
+ *    bindings.ts).
  *
  * 2. **Settings page**: "Egress Guard" section showing the sanitized host
  *    verdict and editing the local configuration (blocked countries, Geo
@@ -36,6 +40,7 @@ import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import { GUARD_CHANNEL, GUARD_CHECK_ENDPOINT, type GuardCheckResult, type NetworkVerdict } from '../contract.js'
+import { SessionBindings } from './bindings.js'
 import { ComposerGuardController, type ReasonBlock, type SessionGuardDeps } from './guard.js'
 import { NS, en, zh, type GuardKey } from './locales.js'
 import { GuardSettingsSection, type GuardSettingsInjected } from './settings.jsx'
@@ -181,16 +186,6 @@ export function apply(ctx: ClientContext): void {
         return undefined
       }
     },
-    subscribeSelection: (id, onChange) => {
-      // NOTE: no `directory.load()` here. Priming every bound session at boot
-      // fans catalog refreshes out across ALL sessions (each one hits the host
-      // models API → provider catalogs), which can visibly slow down the model
-      // picker. Only the ACTIVE session is primed (see primeActive below);
-      // other sessions load lazily when their selector is opened, and their
-      // store publish then drives evaluate as usual.
-      return ctx.modelDirectories.directoryFor(id as SessionId).store.subscribe(onChange)
-    },
-    subscribeBlockStore: (id, onChange) => ctx.conversation.blocks.storeFor(id as SessionId).subscribe(onChange),
     blockOf: (id) => ctx.conversation.blocks.storeFor(id as SessionId).getSnapshot() as ReasonBlock | undefined,
     setBlock: (id, block) => ctx.conversation.blocks.set(id as SessionId, block),
     reason: () => t(guardKey),
@@ -198,49 +193,51 @@ export function apply(ctx: ClientContext): void {
   const guard = new ComposerGuardController(deps)
 
   // ---- per-session lifecycle -------------------------------------------------
-  const bindings = new Map<string, { stop: () => void }>()
-  const bind = (id: SessionId): void => {
-    if (bindings.has(id)) return
-    let stopSelection = (): void => undefined
-    let stopBlockStore = (): void => undefined
+  /**
+   * Sessions are bound through `SessionBindings`: one live store subscription
+   * per session id, re-targeted when the runtime replaces that session's model
+   * directory. Resolving a directory once and trusting it forever is the defect
+   * the module documents — a retired store never fires again, so the gate would
+   * silently stop following the session's model.
+   */
+  const bindings = new SessionBindings({
+    // NOTE: no `directory.load()` here. Priming every bound session at boot
+    // fans catalog refreshes out across ALL sessions (each one hits the host
+    // models API → provider catalogs), which can visibly slow down the model
+    // picker. Only the ACTIVE session is primed (see primeActive below);
+    // other sessions load lazily when their selector is opened, and their
+    // store publish then drives evaluate as usual.
+    storeFor: (id) => ctx.modelDirectories.directoryFor(id as SessionId).store,
+    subscribeStore: (store, onChange) => store.subscribe(onChange),
+    subscribeBlocks: (id) => ctx.conversation.blocks.storeFor(id as SessionId).subscribe(() => guard.onBlockStoreChanged(id as SessionId)),
+    evaluate: (id) => guard.evaluate(id as SessionId),
+    dispose: (id) => guard.dispose(id as SessionId),
+  })
+
+  /** Session ids in the client list, or `undefined` while that store is unreadable. */
+  const liveSessionIds = (): string[] | undefined => {
     try {
-      // The store subscription fires immediately, so the first evaluate
-      // happens through it (and the block slot subscription self-checks).
-      stopSelection = deps.subscribeSelection(id, () => guard.evaluate(id))
-      stopBlockStore = deps.subscribeBlockStore(id, () => guard.onBlockStoreChanged(id))
+      return Object.keys(ctx.sessions.list.getSnapshot().byId)
     } catch {
-      // directoryFor threw (session not materialized yet): retry on the next
-      // sessions-list change; nothing was registered.
-      stopSelection()
-      stopBlockStore()
-      return
+      // sessions.list not ready yet; the subscription retries on change.
+      return undefined
     }
-    bindings.set(id, { stop: () => { stopSelection(); stopBlockStore() } })
-    guard.evaluate(id)
   }
-  const unbind = (id: string): void => {
-    const binding = bindings.get(id)
-    if (binding === undefined) return
-    binding.stop()
-    bindings.delete(id)
-    guard.dispose(id)
+  /**
+   * Reconcile the per-session bindings and re-decide every bound session. Runs on
+   * every session-list change, on visibility, and on each verdict refresh: the
+   * guard must not depend on a single subscription staying valid across client
+   * session generations, and a cheap re-decision heals any signal it missed.
+   */
+  const refreshBindings = (): void => {
+    const ids = liveSessionIds()
+    if (ids === undefined) bindings.reverify()
+    else bindings.sync(ids)
   }
 
   ctx.effect(() => {
     const syncSessions = (): void => {
-      try {
-        const snapshot = ctx.sessions.list.getSnapshot()
-        const live = new Set<string>()
-        for (const id of Object.keys(snapshot.byId)) {
-          live.add(id)
-          if (!bindings.has(id)) bind(id as SessionId)
-        }
-        for (const id of [...bindings.keys()]) {
-          if (!live.has(id)) unbind(id)
-        }
-      } catch {
-        // sessions.list not ready yet; the subscription retries on change.
-      }
+      refreshBindings()
       // 会话切换(如点击左侧列表)后,新活跃会话的目录可能尚未加载。
       primeActive()
     }
@@ -260,12 +257,9 @@ export function apply(ctx: ClientContext): void {
         // directoryFor 尚未就绪:下次 list 变化重试
       }
     }
-    const reEvaluateAll = (): void => {
-      for (const id of bindings.keys()) guard.evaluate(id)
-    }
     const onVisibility = (): void => {
       if (document.visibilityState === 'visible') {
-        void refreshNetwork().then(reEvaluateAll)
+        void refreshNetwork().then(refreshBindings)
       }
     }
 
@@ -277,22 +271,17 @@ export function apply(ctx: ClientContext): void {
     // 未就绪,导致永久 unknown、永远不拦截,且无任何可观测迹象。
     const heartbeat = window.setInterval(() => {
       if (networkState.resolved) return
-      void refreshNetwork().then(reEvaluateAll)
+      void refreshNetwork().then(refreshBindings)
     }, 5_000)
 
-    void refreshNetwork().then(() => {
-      syncSessions()
-      primeActive()
-      reEvaluateAll()
-    })
+    void refreshNetwork().then(syncSessions)
     syncSessions()
-    primeActive()
 
     return () => {
       stopList()
       window.clearInterval(heartbeat)
       document.removeEventListener('visibilitychange', onVisibility)
-      for (const id of [...bindings.keys()]) unbind(id)
+      bindings.stop()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, 'dsh-home-network-model-guard: session guard sync')

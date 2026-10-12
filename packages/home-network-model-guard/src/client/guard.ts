@@ -4,10 +4,12 @@
  * Owns the coexistence discipline with the official `ui-model-selection`
  * blocks writer (design Decisions 4):
  *
- * - **Never unconditionally clears** the slot. `'none'` clears only when the
- *   LAST write was ours; `'yield-official'` (official `routable === false`
- *   block owns the session) drops our claim WITHOUT touching the slot, so an
- *   official block we might have raced is never erased by us.
+ * - **Never clears a foreign block**: a negative decision clears the slot only
+ *   while it still carries OUR reason (the registry keeps one reason per write).
+ *   `'yield-official'` (official `routable === false` block owns the session)
+ *   therefore drops our claim without touching an official reason we might have
+ *   raced — while still removing a stale reason of our own, which nothing else
+ *   in this runtime would clear.
  * - **Re-assert self-check**: the official plugin publishes `undefined` on
  *   every directory store change and could in principle run after ours. We
  *   subscribe the block slot itself; when our action is `'block'` but the
@@ -38,10 +40,6 @@ export interface SessionGuardDeps {
    * (yet) materialized — the caller retries on the next signal.
    */
   read(sessionId: string): { selection: SelectionFacts | null; routable: boolean } | undefined
-  /** Subscribe the session's model-directory store (fires immediately). */
-  subscribeSelection(sessionId: string, onChange: () => void): () => void
-  /** Subscribe the session's composer-block slot (fires immediately). */
-  subscribeBlockStore(sessionId: string, onChange: () => void): () => void
   /** Current composer-block value for the session. */
   blockOf(sessionId: string): ReasonBlock | undefined
   /** Write the composer-block slot. */
@@ -79,15 +77,14 @@ export class ComposerGuardController {
         state.owns = true
         return
       case 'yield-official':
-        // The official block owns the slot; our previous claim must not clear
-        // it. The official publish has already (or will) write its reason.
-        state.owns = false
+        // The official block owns the slot from here on: we must not write.
+        // We must still drop OUR OWN stale claim — a reason we wrote while the
+        // session was Claude-family would otherwise survive until a page reload,
+        // because nothing else clears the slot in this runtime.
+        this.dropOwn(sessionId, state)
         return
       case 'none':
-        if (state.owns) {
-          this.deps.setBlock(sessionId, undefined)
-          state.owns = false
-        }
+        this.dropOwn(sessionId, state)
         return
     }
   }
@@ -122,8 +119,23 @@ export class ComposerGuardController {
    */
   public dispose(sessionId: string): void {
     const state = this.states.get(sessionId)
-    if (state !== undefined && state.owns) this.deps.setBlock(sessionId, undefined)
+    if (state !== undefined) this.dropOwn(sessionId, state)
     this.states.delete(sessionId)
+  }
+
+  /**
+   * Drop our claim on the slot, clearing it only while it still carries OUR
+   * reason. A foreign value (the official writer's) is never erased, so the
+   * coexistence discipline holds even when a decision turns negative.
+   * @param sessionId - the session whose claim is dropped.
+   * @param state - that session's guard state.
+   */
+  private dropOwn(sessionId: string, state: SessionState): void {
+    if (!state.owns) return
+    state.owns = false
+    const current = this.deps.blockOf(sessionId)
+    if (current !== undefined && current.reason !== this.deps.reason()) return
+    this.deps.setBlock(sessionId, undefined)
   }
 
   private readFacts(sessionId: string): { selection: SelectionFacts | null; routable: boolean } | undefined {
