@@ -2,10 +2,10 @@
 
 [English](README.md) · 简体中文
 
+![在输入框键入 /opsx，列出内置命令 opsx-apply、opsx-archive、opsx-explore、opsx-propose、opsx-sync、opsx-update，以及 openspec-explore 技能](docs/overview.png)
+
 <!-- problem -->
 OpenSpec 为 AI Agent 提供的规范驱动工作流，通常得在每个项目里各装一份并手动保持更新，结果不同项目会停在不同的版本上。dsh-openspec 让官方工作流在每个 DSH 工作区里都以现成的 Skill 和 `/opsx-*` 命令可用，并全部固定在同一个经过审查的 OpenSpec 版本上，由你有意识地升级。
-
-![示意图：一个受管、固定版本的 OpenSpec 适配器，把官方工作流以 Skill 与 /opsx-* 命令的形式带进 DSH 会话](docs/overview.png)
 
 **你能得到什么**
 

@@ -212,6 +212,7 @@ tests/                   仓库级测试
 - [dsh-sandbox-notes](skills/dsh-sandbox-notes/SKILL.md) — 关于 sandbox 权限与「not strictly wider」报错的避坑笔记。
 - [dsh-pet-executor](presets/dsh-pet-executor) — 不加载全局 skill provider 的 Pet 执行会话 preset。
 - [connection-webserver](patches/connection-webserver.yml) — 恢复 Connection RPC 通道注册的 composition patch。
+- [websocket-heartbeat](patches/websocket-heartbeat.yml) — 配置补丁：把官方 gateway 的 WebSocket 心跳放宽到 5 秒，使大体量历史在短暂网络抖动时不被断开。
 
 ### 自研（独立仓库）
 
