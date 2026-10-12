@@ -81,3 +81,34 @@ export async function trackTodo(
     throw error
   }
 }
+
+/** Why registration could not complete, including "this Host cannot register". */
+export type TrackFailureReason = TrackResult extends { ok: false; reason: infer R }
+  ? R | 'track-unwired'
+  : never
+
+/**
+ * The model-facing text for a failed registration.
+ *
+ * Operation-specific, because "登记失败" alone leaves the model with nothing to
+ * do: each reason below names the missing precondition or the next action. No
+ * other todo, locus or child identifier is ever included — the only ids in
+ * play are the caller's own request facts.
+ *
+ * @param reason - Why registration failed.
+ * @returns actionable guidance for the model.
+ */
+export function trackFailureText(reason: TrackFailureReason): string {
+  switch (reason) {
+    case 'no-current-delivery':
+      return '登记失败：当前会话没有唯一的 current Delivery，无法确定该待办归属哪条请求。'
+        + '请先结算当前 Delivery（`pet_locus_finish`）或等这一条成为唯一 current 后重试；不要代替它猜测来源。'
+    case 'invalid-evidence':
+      return '登记失败：`summary` 必须是一句话的非空摘要，`detail` 必须是非空字符串（位置、原因、建议修法）。'
+        + '补齐这两个字段后重试。'
+    case 'store-error':
+      return '登记失败：台账存储当前不可写。可稍后重试；若仍失败，请在回复中如实说明无法登记，并请所有者处理。'
+    default:
+      return '登记失败：本 Host 未装配待办登记能力。请在回复中如实说明无法登记本次工作请求，不要声称已登记。'
+  }
+}

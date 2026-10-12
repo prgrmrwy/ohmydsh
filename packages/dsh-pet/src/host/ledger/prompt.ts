@@ -19,7 +19,12 @@ export const INTENT_TRIAGE_GUIDANCE =
   '2. WORK REQUEST: a request to change code, fix a bug, or otherwise act. Under a read-only locus, ' +
   'do not attempt the write. Investigate enough to record a useful handoff, call `pet_locus_track`, ' +
   'then finish that Delivery by calling `pet_locus_finish` with outcome `reply`. Registering a todo ' +
-  'never itself finishes a Delivery. If the work should start now rather than wait for the owner to ' +
+  'never itself finishes a Delivery. Your reply must match that todo\'s DURABLE state: a freshly ' +
+  'registered todo is `open` — NOT STARTED — and even once it is `accepted` the work has only been ' +
+  'handed over. Never say the work has begun, is in progress, or will finish soon, and never claim it ' +
+  'is done. If you could not confirm a target path, directory, or recipient, present it as a guess and ' +
+  'ask the requester or owner to confirm it — never state an unconfirmed location as the place the ' +
+  'work will happen. If the work should start now rather than wait for the owner to ' +
   'pick it up, you may additionally call `pet_locus_request_execution` with the `itemId` you just ' +
   'registered: it asks for that todo to be executed and the Host decides where the work runs. It ' +
   'marks the todo accepted only when a follow-up task was really delivered, and it can never mark a ' +
@@ -62,6 +67,11 @@ export function intentTriageGuidanceCoversRequiredPoints(guidance: string): bool
     'do not retain a current Delivery',
     '`pet_locus_request_execution`',
     'can never mark a todo done or dropped',
+    'DURABLE state',
+    'NOT STARTED',
+    'Never say the work has begun',
+    'present it as a guess and ask the requester or owner to confirm it',
+    'never state an unconfirmed location',
     'do not classify a message as reference-only merely because it also mentions another bot',
   ]
   return requiredPhrases.every(phrase => guidance.includes(phrase))

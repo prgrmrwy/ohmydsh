@@ -103,6 +103,10 @@ import {
   unavailableLocusChannelCapability,
 } from './host/channel/locus-capability.js'
 import { createLocusTurnObserver } from './host/locus/turn-observer.js'
+import {
+  entranceReadProbeFor,
+  measureEntranceReadability,
+} from './host/channel/entrance-capability.js'
 import { createLocusManagementPort, createLocusSessionDescriber } from './host/locus/management.js'
 import { createLocusResolution } from './host/locus/resolution.js'
 import { createLocusController } from './host/locus/controller.js'
@@ -121,7 +125,8 @@ import { createLocusPermissionMutation } from './host/locus/permission-mutation.
 import { createLocusToolTierMutation, type LocusLiveToolTierSurface } from './host/locus/tool-tier-mutation.js'
 import type { LocusToolTierName } from './host/locus/aggregate.js'
 import { asLocusContextRepository, type LocusContextRepository } from './host/locus/context-repository.js'
-import { renderLocusDeliveryPrompt } from './host/locus/context.js'
+import { renderLocusDeliveryFor } from './host/locus/context.js'
+import { createLocusHistoryCursor } from './host/locus/history-cursor.js'
 import {
   attestLocusComposition,
   composeLocusChild,
@@ -369,6 +374,10 @@ async function initialize(
   // degradations (mention rendering, member reads) are greppable in dsh.log
   // instead of silent.
   const larkClient = createLarkCliClient(undefined, undefined, petLog)
+  // Continuation cursors for the caller-bound entrance read. The signing key is
+  // per-process on purpose: after a restart an old cursor is refused instead of
+  // being honoured against a target binding that no longer exists.
+  const locusHistoryCursor = createLocusHistoryCursor()
   // Media is available only through the pinned official CLI writing into Pet's
   // own spool. The spool is swept first: at this moment no download can be in
   // flight, so anything left in it is debris from a crash and must never be
@@ -1231,6 +1240,16 @@ async function initialize(
             // instead of two copies that can drift (design D10).
             requestExecution: input => runTodoExecutionRequest(input),
           },
+          // The entrance read is published only when this runtime actually has
+          // a bot read port: a tool that can never succeed must not appear in
+          // the child's tool surface at all.
+          ...(larkClient.readEntranceHistory === undefined ? {} : {
+            locusHistory: {
+              loci: intentTriageDeps.loci,
+              cursor: locusHistoryCursor,
+              read: input => larkClient.readEntranceHistory!(input),
+            },
+          }),
         })
         // The circle surface rides the SAME synchronous boundary, so a locus
         // child never starts its first turn able to read shared facts but not
@@ -2963,7 +2982,7 @@ async function initialize(
             larkClient.reply(target.messageId, text),
         }
       })(),
-      renderPrompt: ({ locus, message }) => {
+      renderPrompt: async ({ locus, message, signal }) => {
         const locusId = locus.id ?? locus.locusId
         if (locusId === undefined) throw new Error('Active locus is missing its durable id')
         const record = locusRepository.getLocus(locusId)
@@ -2974,25 +2993,52 @@ async function initialize(
         ) {
           throw new Error('Active locus changed before delivery prompt rendering')
         }
-        // Send the routing preamble only on a child's FIRST delivery. The
-        // position is derived from durable Delivery history for this exact
-        // child, not from a runtime counter: after a Host restart a counter
-        // would reset and re-send the preamble mid-conversation, and a child
-        // that genuinely has no history must still receive it. Any settled or
-        // in-flight prior Delivery proves the preamble was already delivered.
-        const priorDeliveries = locusRepository
-          .listDeliveries(record.id)
-          .filter(delivery => delivery.childSessionId === record.childSessionId)
-        const position = priorDeliveries.length > 0 ? 'subsequent' : 'first'
-        return renderLocusDeliveryPrompt({
-          endpoint: record.endpoint,
-          locus: { locusId: record.id, generation: record.generation, state: record.state },
-          main: { sessionId: record.parentSessionId },
-          child: { sessionId: record.childSessionId },
-          workspace: { workspaceId: record.workspaceId },
-          permission: record.permission,
-          contextAnchor: record.contextAnchor ?? { status: 'unknown' },
-          request: {
+        // Measured before the prompt may claim it, within a bounded deadline and
+        // cancellable with the delivery. `larkReady` alone is a transport fact:
+        // the incident's child was told it could read the group while the read
+        // actually failed, so the read claim now comes from a real attempt.
+        const readability = await measureEntranceReadability(
+          {
+            chatId: record.endpoint.chatId,
+            ...(record.endpoint.threadId === undefined ? {} : { threadId: record.endpoint.threadId }),
+            signal,
+          },
+          { probe: entranceReadProbeFor(larkClient) },
+        )
+        // Re-prove the exact current after the measurement: a locus rebuilt,
+        // disabled, or re-bound while the probe was in flight must not get a
+        // prompt rendered from the record we just measured.
+        const revalidated = locusRepository.getLocus(locusId)
+        if (
+          revalidated === undefined || revalidated.state !== 'active' ||
+          revalidated.childSessionId !== locus.childSessionId ||
+          revalidated.generation !== locus.generation
+        ) {
+          throw new Error('Active locus changed while measuring entrance readability')
+        }
+        // Send the routing preamble only while the Host cannot PROVE this child
+        // already received one. Proof is a prior Delivery for this exact child
+        // whose content was bound into its inbox: acceptance alone is durable
+        // admission, not evidence that the prompt reached the model, and a
+        // runtime counter would reset across restarts. The Delivery being
+        // rendered is excluded, so rendering never consumes the first delivery.
+        const current = locusRepository.findDeliveryByMessageId(message.messageId)
+        return renderLocusDeliveryFor({
+          record: {
+            id: revalidated.id,
+            generation: revalidated.generation,
+            endpoint: revalidated.endpoint,
+            parentSessionId: revalidated.parentSessionId,
+            childSessionId: revalidated.childSessionId,
+            workspaceId: revalidated.workspaceId,
+            state: revalidated.state,
+            ...(revalidated.childComposition === undefined ? {} : { childComposition: revalidated.childComposition }),
+            ...(revalidated.toolTier === undefined ? {} : { toolTier: revalidated.toolTier }),
+            permission: revalidated.permission,
+            contextAnchor: revalidated.contextAnchor ?? { status: 'unknown' },
+          },
+          readability,
+          message: {
             messageId: message.messageId,
             senderOpenId: message.senderOpenId,
             ...(message.senderName === undefined ? {} : { senderName: message.senderName }),
@@ -3001,9 +3047,11 @@ async function initialize(
             ...(message.replyToMessageId === undefined
               ? {}
               : { replyToMessageId: message.replyToMessageId }),
-            replyTarget: message.replyTarget,
+            ...(message.replyTarget === undefined ? {} : { replyTarget: message.replyTarget }),
           },
-        }, { position })
+          deliveries: locusRepository.listDeliveries(record.id),
+          ...(current === undefined ? {} : { currentDeliveryId: current.deliveryId }),
+        })
       },
       turns: locusTurnObserver,
       allowOpenIds: () => repository.getChannelConfig().allowOpenIds,

@@ -9,7 +9,7 @@ OpenSpec's guided, spec-driven workflows for AI agents normally have to be insta
 
 **What you get**
 
-- **The full official workflow catalog** as bundled Skills and `opsx-*` slash commands, generated from one exact OpenSpec release (currently 1.13.2, pinned in `package.json`) instead of copied into each project.
+- **The full official workflow catalog** as bundled Skills and `opsx-*` slash commands, generated from one exact OpenSpec release (currently 1.14.1, pinned in `package.json`) instead of copied into each project.
 - **One managed CLI per workspace session.** Every consumed workflow carries an immutable, version-bound CLI invocation; no global `openspec` executable is intercepted or required.
 - **`/openspec-init`** returns a validated official init command for the current workspace, and **`/openspec-upgrade`** prepares reviewed upgrade, rollback and project-refresh commands.
 - **Quiet and private by default.** The only network request is an optional, credential-free version check, and telemetry of the managed CLI is off unless you turn it on.

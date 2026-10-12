@@ -374,6 +374,28 @@ describe('strict Delivery-target reply', () => {
     expect(logs.join('\n')).not.toContain('ou_')
   })
 
+  it('appends no diagnostics or paths to a plain-text body', async () => {
+    const calls: string[][] = []
+    const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
+      calls.push([...args])
+      return { stdout: JSON.stringify({ ok: true, data: { message_id: 'om_reply', chat_id: 'oc_group' } }) }
+    }) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner)
+    // The body deliberately LOOKS like a guard denial: the Host must still send
+    // exactly what the model wrote, with nothing appended or stripped.
+    const body = '结论如下：/tmp/nexus 不动。locus-project-read-outside-confirmed-workspace 只是原因码。'
+
+    await expect(client.replyToTarget?.({ chatId: 'oc_group', messageId: 'om_current' }, body))
+      .resolves.toEqual({ messageId: 'om_reply' })
+
+    expect(calls).toHaveLength(1)
+    const textIndex = calls[0]!.indexOf('--text') + 1
+    expect(calls[0]![textIndex]).toBe(body)
+    // No allowed root, no guidance block, no extra flag carrying diagnostics.
+    expect(calls[0]).not.toContain('允许根')
+    expect(calls[0]).not.toContain('所有者确认')
+  })
+
   it('reads no member list at all when the reply addresses nobody', async () => {
     const calls: string[][] = []
     const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
@@ -463,5 +485,123 @@ describe('Pet profile isolation', () => {
     for (const args of mutableCalls) {
       expect(args.slice(0, 2)).toEqual(['--profile', 'dsh-pet'])
     }
+  })
+})
+
+/**
+ * The caller-bound entrance read: group vs bound topic, bot identity, failure
+ * as `undefined` (never a fake empty page) and the wall-clock normalization
+ * the `[since, before)` window depends on.
+ */
+describe('caller-bound entrance read', () => {
+  function envelope(messages: readonly unknown[], extra: Record<string, unknown> = {}): string {
+    return JSON.stringify({ ok: true, identity: 'bot', data: { messages, has_more: false, ...extra } })
+  }
+
+  function runnerFor(stdout: string): { runner: LarkCliRunner; calls: string[][] } {
+    const calls: string[][] = []
+    const runner: LarkCliRunner = async (_binary, args) => {
+      calls.push([...args])
+      return { stdout }
+    }
+    return { runner, calls }
+  }
+
+  it('reads the bound group with the bot identity and older-first paging', async () => {
+    const { runner, calls } = runnerFor(envelope([{
+      message_id: 'om_1',
+      create_time: '2026-10-12 10:00',
+      content: '你好',
+      sender: { name: '张三' },
+      message_position: '3',
+    }]))
+    const client = createLarkCliClient('lark-cli', runner, () => {})
+    const result = await client.readEntranceHistory!({ chatId: 'oc_g', pageSize: 50, direction: 'older' })
+
+    expect(calls[0]).toEqual(expect.arrayContaining(['im', '+chat-messages-list', '--as', 'bot', '--chat-id', 'oc_g', '--order', 'desc', '--page-size', '50', '--no-reactions']))
+    expect(result?.messages[0]).toMatchObject({ messageId: 'om_1', senderName: '张三', text: '你好', messagePosition: '3' })
+    expect(result?.hasMore).toBe(false)
+  })
+
+  it('reads a topic entrance through the thread shortcut instead of the group', async () => {
+    const { runner, calls } = runnerFor(envelope([]))
+    const client = createLarkCliClient('lark-cli', runner, () => {})
+    await client.readEntranceHistory!({ chatId: 'oc_g', threadId: 'omt_t', pageSize: 20, direction: 'newer' })
+
+    expect(calls[0]).toEqual(expect.arrayContaining(['im', '+threads-messages-list', '--as', 'bot', '--thread', 'omt_t', '--order', 'asc']))
+    expect(calls[0]).not.toContain('+chat-messages-list')
+  })
+
+  it('passes the platform page token through and reports the next one', async () => {
+    const { runner, calls } = runnerFor(envelope([], { has_more: true, page_token: 'next-page' }))
+    const client = createLarkCliClient('lark-cli', runner, () => {})
+    const result = await client.readEntranceHistory!({ chatId: 'oc_g', pageSize: 10, direction: 'older', pageToken: 'page-1' })
+
+    expect(calls[0]).toContain('--page-token')
+    expect(result).toMatchObject({ hasMore: true, pageToken: 'next-page' })
+  })
+
+  it('returns undefined when the read fails instead of an empty page', async () => {
+    const runner: LarkCliRunner = async () => {
+      throw Object.assign(new Error('failed'), { stdout: JSON.stringify({ ok: false, error: { code: 230027 } }) })
+    }
+    const client = createLarkCliClient('lark-cli', runner, () => {})
+
+    expect(await client.readEntranceHistory!({ chatId: 'oc_g', pageSize: 10, direction: 'older' })).toBeUndefined()
+  })
+
+  it('normalizes the CLI wall-clock time to ISO with an offset', async () => {
+    const { runner } = runnerFor(envelope([{
+      message_id: 'om_1',
+      create_time: '2026-10-12 10:00',
+      content: 'x',
+      sender: { name: '张三' },
+    }]))
+    const client = createLarkCliClient('lark-cli', runner, () => {})
+    const result = await client.readEntranceHistory!({ chatId: 'oc_g', pageSize: 10, direction: 'older' })
+
+    expect(result?.messages[0]?.createTime).toMatch(/^2026-10-12T10:00:00[+-]\d{2}:\d{2}$/)
+  })
+
+  describe('the entrance capability probe', () => {
+    it('takes one minimal real read of the exact group and returns only success', async () => {
+      const { runner, calls } = runnerFor(envelope([{
+        message_id: 'om_1',
+        create_time: '2026-10-12 10:00',
+        content: '存在即证明可读',
+        sender: { name: '张三' },
+      }]))
+      const client = createLarkCliClient('lark-cli', runner, () => {})
+
+      const readable = await client.probeEntranceRead!({ chatId: 'oc_g' })
+
+      // Same platform path as the caller-bound read: a probe that used another
+      // call would prove a capability nobody uses.
+      expect(calls[0]).toEqual(expect.arrayContaining([
+        'im', '+chat-messages-list', '--as', 'bot', '--chat-id', 'oc_g', '--page-size', '1',
+      ]))
+      // Boolean only: message content must not be laundered through a capability
+      // check.
+      expect(readable).toBe(true)
+      expect(typeof readable).toBe('boolean')
+    })
+
+    it('probes the bound topic rather than the whole group', async () => {
+      const { runner, calls } = runnerFor(envelope([]))
+      const client = createLarkCliClient('lark-cli', runner, () => {})
+
+      expect(await client.probeEntranceRead!({ chatId: 'oc_g', threadId: 'omt_t' })).toBe(true)
+      expect(calls[0]).toEqual(expect.arrayContaining(['im', '+threads-messages-list', '--thread', 'omt_t']))
+      expect(calls[0]).not.toContain('+chat-messages-list')
+    })
+
+    it('reports not-readable when the probe read fails, without throwing', async () => {
+      const runner: LarkCliRunner = async () => {
+        throw Object.assign(new Error('failed'), { stdout: JSON.stringify({ ok: false, error: { code: 230027 } }) })
+      }
+      const client = createLarkCliClient('lark-cli', runner, () => {})
+
+      expect(await client.probeEntranceRead!({ chatId: 'oc_g' })).toBe(false)
+    })
   })
 })

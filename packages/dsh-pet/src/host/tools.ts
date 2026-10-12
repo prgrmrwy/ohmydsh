@@ -33,13 +33,28 @@ import {
   type PetContextDependencies,
 } from './context-tool.js'
 import { PetError } from './errors.js'
+import {
+  executeLocusChatHistory,
+  PET_LOCUS_CHAT_HISTORY_TOOL,
+  renderLocusChatHistory,
+  type LocusChatHistoryResult,
+  type LocusHistoryToolDeps,
+} from './locus-history-tool.js'
+
+export { PET_LOCUS_CHAT_HISTORY_TOOL }
 import type { PetRepository } from './repository.js'
 import type { LarkClient } from './channel/lark.js'
 import { resolveLedgerCaller, LedgerCallerUnavailableError, type LedgerCallerLocusLookup } from './ledger/caller.js'
 import { lookupParentTranscript, type ParentLookupDeps } from './ledger/parent-lookup.js'
-import { readSharedLedger, type LedgerReadDeps } from './ledger/ledger-read.js'
-import { trackTodo, type TrackDeps } from './ledger/track.js'
+import {
+  ledgerReadUnavailableText,
+  readSharedLedgerOutcome,
+  type LedgerReadDeps,
+  type LedgerReadUnavailableReason,
+} from './ledger/ledger-read.js'
+import { trackFailureText, trackTodo, type TrackDeps, type TrackFailureReason } from './ledger/track.js'
 import { INTENT_TRIAGE_GUIDANCE } from './ledger/prompt.js'
+import { requestExecutionFailureText } from './ledger/dispatch.js'
 import type {
   LocusContextRecord,
   LocusCurrentAuthorizationResult,
@@ -356,6 +371,12 @@ export function registerPetTools(
   deps: { readonly repository: PetRepository } & PetContextDependencies & {
     readonly locusLifecycle?: PetLocusFinishDependencies
     readonly intentTriage?: PetIntentTriageDependencies
+    /**
+     * Caller-bound read of this child's own entrance. Absent means the Host has
+     * no bot read port for this runtime, in which case the tool is simply not
+     * published (never published as a tool that always fails).
+     */
+    readonly locusHistory?: Omit<LocusHistoryToolDeps, 'callerSessionId'>
   },
 ): () => void {
   const disposers: (() => void)[] = []
@@ -517,9 +538,21 @@ export function registerPetTools(
         schema: {
           type: 'object',
           additionalProperties: false,
-          properties: { items: { type: 'string', required: true } },
+          properties: {
+            ok: { type: 'boolean', required: true },
+            items: { type: 'string' },
+            reason: { type: 'string' },
+          },
         },
-        render: (_args, value) => [{ type: 'text', text: value.items }],
+        // An unavailable read renders as an explicit failure, never as `[]`:
+        // an empty list would tell the model there is no work to avoid
+        // duplicating, which is exactly the conclusion this Host cannot support.
+        render: (_args, value) => [{
+          type: 'text',
+          text: value.ok
+            ? String(value.items)
+            : ledgerReadUnavailableText(value.reason as LedgerReadUnavailableReason),
+        }],
       },
       async execute(_args, exec) {
         const sessionId = callerSessionId(exec as ExecutionLike)
@@ -527,11 +560,16 @@ export function registerPetTools(
         try {
           caller = resolveLedgerCaller(sessionId, intentTriage.loci)
         } catch (error) {
-          if (error instanceof LedgerCallerUnavailableError) return { items: '[]' }
+          if (error instanceof LedgerCallerUnavailableError) {
+            return { ok: false, reason: 'caller-unresolvable' }
+          }
           throw error
         }
-        if (intentTriage.ledgerRead === undefined) return { items: '[]' }
-        return { items: JSON.stringify(readSharedLedger(caller, intentTriage.ledgerRead)) }
+        if (intentTriage.ledgerRead === undefined) return { ok: false, reason: 'ledger-unwired' }
+        const outcome = readSharedLedgerOutcome(caller, intentTriage.ledgerRead)
+        return outcome.ok
+          ? { ok: true, items: JSON.stringify(outcome.items) }
+          : { ok: false, reason: outcome.reason }
       },
     })))
 
@@ -554,7 +592,12 @@ export function registerPetTools(
           additionalProperties: false,
           properties: { ok: { type: 'boolean', required: true }, reason: { type: 'string' } },
         },
-        render: (_args, value) => [{ type: 'text', text: value.ok ? '已登记待办。' : `登记失败：${String(value.reason)}` }],
+        render: (_args, value) => [{
+          type: 'text',
+          // Operation-specific: "登记失败" alone leaves the model with nothing
+          // to do, and a silent claim would misreport the durable state.
+          text: value.ok ? '已登记待办（状态为待处理，尚未开始）。' : trackFailureText(value.reason as TrackFailureReason),
+        }],
       },
       async execute(args, exec) {
         const input = requireKnownArguments(args, ['summary', 'detail'], PET_LOCUS_TRACK_TOOL)
@@ -562,7 +605,7 @@ export function registerPetTools(
           throw new PetError('INVALID_REQUEST', 'summary and detail must be strings.')
         }
         const sessionId = callerSessionId(exec as ExecutionLike)
-        if (intentTriage.track === undefined) return { ok: false, reason: 'unavailable' }
+        if (intentTriage.track === undefined) return { ok: false, reason: 'track-unwired' }
         const authorized = await resolveAuthorizedCurrent(intentTriage, sessionId, 'track')
         const result = await trackTodo(authorized, { summary: input.summary, detail: input.detail }, intentTriage.track)
         return result.ok ? { ok: true } : { ok: false, reason: result.reason }
@@ -596,16 +639,24 @@ export function registerPetTools(
           type: 'text',
           text: value.ok
             ? `已请求执行（${value.outcome === 'queued' ? '目标忙碌，已排队' : '已开始'}）。`
-            : `请求执行失败：${String(value.reason)}`,
+            : String(value.reason),
         }],
       },
       async execute(args, exec) {
         const input = requireKnownArguments(args, ['itemId'], PET_LOCUS_REQUEST_EXECUTION_TOOL)
         if (typeof input.itemId !== 'string' || input.itemId.trim() === '') {
-          throw new PetError('INVALID_REQUEST', 'itemId must be a non-empty string.')
+          // Malformed is not "not found": point at the one place a legal value
+          // comes from, so a retry is possible instead of a guess.
+          throw new PetError(
+            'INVALID_REQUEST',
+            'itemId must be the exact identifier returned by pet_locus_ledger_read. '
+            + 'Call that tool first, then retry with one of its itemId values.',
+          )
         }
         const sessionId = callerSessionId(exec as ExecutionLike)
-        if (intentTriage.requestExecution === undefined) return { ok: false, reason: 'unavailable' }
+        if (intentTriage.requestExecution === undefined) {
+          return { ok: false, reason: requestExecutionFailureText('dispatch-failed') }
+        }
         // Same authorization proof `pet_locus_track` uses: a caller without a
         // unique current Delivery cannot prove which locus it speaks for.
         await resolveAuthorizedCurrent(intentTriage, sessionId, 'track')
@@ -616,6 +667,51 @@ export function registerPetTools(
         return result.ok
           ? { ok: true, outcome: result.outcome }
           : { ok: false, reason: result.reason }
+      },
+    })))
+  }
+
+  const history = deps.locusHistory
+  if (history !== undefined) {
+    disposers.push(ctx.tools.register(defineTool({
+      name: PET_LOCUS_CHAT_HISTORY_TOOL,
+      description:
+        'Read a bounded page of THIS entrance\'s own messages, with the bot identity. ' +
+        'The target is resolved from the calling child and cannot be redirected: there is no ' +
+        'chat/group/user/thread argument, and a topic-bound entrance reads that topic rather ' +
+        'than the whole group. Pass `since`/`before` (ISO 8601 with offset, window is ' +
+        '[since, before)) or the `cursor` returned by a previous call to keep reading; do not ' +
+        'rewrite the cursor. Results are truncated to a declared budget and the truncation is ' +
+        'marked. A failure is reported as a failure, never as an empty history.',
+      parameters: {
+        since: { type: 'string' },
+        before: { type: 'string' },
+        direction: { type: 'string', enum: ['older', 'newer'] },
+        cursor: { type: 'string' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', required: true },
+            reason: { type: 'string' },
+            text: { type: 'string' },
+            cursor: { type: 'string' },
+            hasMore: { type: 'boolean' },
+            count: { type: 'number' },
+          },
+        },
+        render: (_args, value) => [{
+          type: 'text',
+          text: renderLocusChatHistory(value as LocusChatHistoryResult),
+        }],
+      },
+      async execute(args, exec) {
+        return executeLocusChatHistory(args, {
+          ...history,
+          callerSessionId: callerSessionId(exec as ExecutionLike),
+        })
       },
     })))
   }

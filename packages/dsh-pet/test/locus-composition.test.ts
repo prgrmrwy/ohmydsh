@@ -373,3 +373,21 @@ describe('unified locus child publication', () => {
     }
   })
 })
+
+/**
+ * The caller-bound entrance read must be explained by the reviewed allowlist,
+ * in BOTH tiers: attestation refuses a publication whose visible surface it
+ * cannot account for, so a new own-plane tool is a publication gate, not a
+ * detail.
+ */
+describe('the caller-bound entrance read joins the reviewed allowlist', () => {
+  it('is listed in the caller-bound tools and attests in safe and shell tiers', () => {
+    expect(LOCUS_CALLER_BOUND_TOOLS).toContain('pet_locus_chat_history')
+
+    expect(attestLocusComposition(SAFE_SURFACE, 'safe')).toMatchObject({ ok: true, leaks: [] })
+    expect(attestLocusComposition(
+      [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_SHELL_TIER_TOOL_NAMES, ...LOCUS_CALLER_BOUND_TOOLS],
+      'shell',
+    )).toMatchObject({ ok: true, leaks: [] })
+  })
+})

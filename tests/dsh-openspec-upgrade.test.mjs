@@ -9,6 +9,11 @@ import { overlayFixture } from './helpers/overlay-fixture.mjs'
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const lib = (name) => import(pathToFileURL(path.join(REPO, 'packages/dsh-openspec/lib', name)).href)
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex')
+// Versions follow the repo's real pin, so bumping @fission-ai/openspec never needs a test edit.
+const CURRENT = JSON.parse(await readFile(path.join(REPO, 'packages/dsh-openspec/package.json'), 'utf8')).dependencies['@fission-ai/openspec']
+const bump = (version, n) => { const [major, minor, patch] = version.split('.'); return `${major}.${minor}.${Number(patch) + n}` }
+const NEXT = bump(CURRENT, 1)
+const NEXT2 = bump(CURRENT, 2)
 
 async function setup(t) {
   const fx = await overlayFixture({
@@ -59,15 +64,15 @@ test('sync_records_authoritative_checkout_and_second_sync_is_noop', async (t) =>
 test('approved_upgrade_persists_across_sync_without_pin_mismatch_and_keeps_old_generation', async (t) => {
   const ctx = await setup(t)
   const txn = await transaction(ctx)
-  const result = await txn.upgrade('1.13.3', { approved: true })
+  const result = await txn.upgrade(NEXT, { approved: true })
   assert.deepEqual({ status: result.status, activation: result.activation }, { status: 'ok', activation: 'live' })
-  assert.equal(await pin(ctx), '1.13.3')
+  assert.equal(await pin(ctx), NEXT)
   const lock = JSON.parse(await readFile(ctx.files.lock, 'utf8'))
-  assert.equal(lock.packages['node_modules/@fission-ai/openspec'].version, '1.13.3')
+  assert.equal(lock.packages['node_modules/@fission-ai/openspec'].version, NEXT)
   const again = ctx.fx.sync()
   assert.equal(again.status, 0, again.stderr)
   assert.doesNotMatch(again.stderr, /dsh-openspec-pin-mismatch/)
-  assert.equal(await pin(ctx), '1.13.3')
+  assert.equal(await pin(ctx), NEXT)
   const third = ctx.fx.sync()
   assert.match(third.stdout, /no changes/)
 })
@@ -75,32 +80,32 @@ test('approved_upgrade_persists_across_sync_without_pin_mismatch_and_keeps_old_g
 test('rollback_rewrites_source_and_survives_sync_without_mismatch', async (t) => {
   const ctx = await setup(t)
   const txn = await transaction(ctx)
-  assert.equal((await txn.upgrade('1.13.3', { approved: true })).status, 'ok')
-  assert.equal((await txn.rollback('1.13.2', { approved: true })).status, 'ok')
-  assert.equal(await pin(ctx), '1.13.2')
+  assert.equal((await txn.upgrade(NEXT, { approved: true })).status, 'ok')
+  assert.equal((await txn.rollback(CURRENT, { approved: true })).status, 'ok')
+  assert.equal(await pin(ctx), CURRENT)
   const sync = ctx.fx.sync()
   assert.equal(sync.status, 0, sync.stderr)
   assert.doesNotMatch(sync.stderr, /dsh-openspec-pin-mismatch/)
-  assert.equal(await pin(ctx), '1.13.2')
+  assert.equal(await pin(ctx), CURRENT)
 })
 
 test('blocked_or_failed_upgrade_keeps_hashes_and_active_id', async (t) => {
   const ctx = await setup(t)
   const before = { pkg: sha(await readFile(ctx.files.pkg)), lock: sha(await readFile(ctx.files.lock)) }
   const unchanged = async () => { assert.deepEqual({ pkg: sha(await readFile(ctx.files.pkg)), lock: sha(await readFile(ctx.files.lock)) }, before) }
-  assert.equal((await (await transaction(ctx, { isWorktreeBound: true })).upgrade('1.13.3', { approved: true })).reason, 'worktree-bound')
+  assert.equal((await (await transaction(ctx, { isWorktreeBound: true })).upgrade(NEXT, { approved: true })).reason, 'worktree-bound')
   await unchanged()
-  assert.equal((await (await transaction(ctx, { recordedCheckout: path.join(ctx.fx.root, "elsewhere") })).upgrade("1.13.3", { approved: true })).status, "blocked")
+  assert.equal((await (await transaction(ctx, { recordedCheckout: path.join(ctx.fx.root, "elsewhere") })).upgrade(NEXT, { approved: true })).status, "blocked")
   await unchanged()
-  assert.equal((await (await transaction(ctx)).upgrade('1.13.3', { approved: false })).reason, 'explicit-approval-required')
-  assert.equal((await (await transaction(ctx)).upgrade('1.13.3-beta.1', { approved: true })).reason, 'invalid-stable-version')
+  assert.equal((await (await transaction(ctx)).upgrade(NEXT, { approved: false })).reason, 'explicit-approval-required')
+  assert.equal((await (await transaction(ctx)).upgrade(`${NEXT}-beta.1`, { approved: true })).reason, 'invalid-stable-version')
   await unchanged()
-  const mismatch = await (await transaction(ctx, { verify: async () => false })).upgrade('1.13.3', { approved: true })
+  const mismatch = await (await transaction(ctx, { verify: async () => false })).upgrade(NEXT, { approved: true })
   assert.equal(mismatch.status, 'failed')
   await unchanged()
-  const drift = await (await transaction(ctx, { stage: async (target) => { await writeFile(ctx.files.lock, (await readFile(ctx.files.lock, 'utf8')).replace('"lockfileVersion"', '"lockfileVersion"')); const lock = JSON.parse(await readFile(ctx.files.lock, 'utf8')); lock.drift = true; await writeFile(ctx.files.lock, JSON.stringify(lock, null, 2)); return { target, integrity: `sha512-${target}`, packageJson: {}, lockfile: { packages: { 'packages/dsh-openspec': { dependencies: {} }, 'node_modules/@fission-ai/openspec': { version: target, integrity: `sha512-${target}` } } } } } })).upgrade('1.13.3', { approved: true })
+  const drift = await (await transaction(ctx, { stage: async (target) => { await writeFile(ctx.files.lock, (await readFile(ctx.files.lock, 'utf8')).replace('"lockfileVersion"', '"lockfileVersion"')); const lock = JSON.parse(await readFile(ctx.files.lock, 'utf8')); lock.drift = true; await writeFile(ctx.files.lock, JSON.stringify(lock, null, 2)); return { target, integrity: `sha512-${target}`, packageJson: {}, lockfile: { packages: { 'packages/dsh-openspec': { dependencies: {} }, 'node_modules/@fission-ai/openspec': { version: target, integrity: `sha512-${target}` } } } } } })).upgrade(NEXT, { approved: true })
   assert.equal(drift.reason, 'source-drift')
-  assert.equal(await pin(ctx), '1.13.2')
+  assert.equal(await pin(ctx), CURRENT)
 })
 
 test('kill_after_cas_reports_recovery_in_block_and_old_generation_serves', async (t) => {
@@ -109,8 +114,8 @@ test('kill_after_cas_reports_recovery_in_block_and_old_generation_serves', async
   const { createGenerationBackedProvider } = await lib('generation-provider.js')
   const { managedInvocation } = await lib('managed-invocation.js')
   const invocation = managedInvocation({ node: '/usr/bin/node', cli: '/gen/old/bin/openspec.js', telemetry: 'adapter-off' })
-  await activateGeneration(ctx.fx.dshHome, 'old', { version: '1.13.2', skills: [{ name: 's', body: 'old body' }], invocation })
-  const crashed = await (await transaction(ctx, { crashAfterCas: true })).upgrade('1.13.3', { approved: true })
+  await activateGeneration(ctx.fx.dshHome, 'old', { version: CURRENT, skills: [{ name: 's', body: 'old body' }], invocation })
+  const crashed = await (await transaction(ctx, { crashAfterCas: true })).upgrade(NEXT, { approved: true })
   assert.equal(crashed.status, 'recovery-required')
   // fresh process view: a new provider and new transaction against the same state
   const provider = createGenerationBackedProvider({ home: ctx.fx.dshHome, telemetry: 'adapter-off', updateCheck: 'disabled' })
@@ -118,12 +123,12 @@ test('kill_after_cas_reports_recovery_in_block_and_old_generation_serves', async
   assert.match(served.content, /old body/)
   assert.match(served.content, /recovery=recovery-required/)
   assert.equal(await (await transaction(ctx)).inspectRecovery(), 'recovery-required')
-  assert.equal((await (await transaction(ctx)).upgrade('1.13.4', { approved: true })).reason, 'recovery-required')
+  assert.equal((await (await transaction(ctx)).upgrade(NEXT2, { approved: true })).reason, 'recovery-required')
 })
 
 test('user_edit_after_cas_returns_recovery_required_untouched', async (t) => {
   const ctx = await setup(t)
-  await (await transaction(ctx, { crashAfterCas: true })).upgrade('1.13.3', { approved: true })
+  await (await transaction(ctx, { crashAfterCas: true })).upgrade(NEXT, { approved: true })
   const pkg = JSON.parse(await readFile(ctx.files.pkg, 'utf8')); pkg.description = 'user edit'
   await writeFile(ctx.files.pkg, JSON.stringify(pkg, null, 2) + '\n')
   const before = { pkg: sha(await readFile(ctx.files.pkg)), lock: sha(await readFile(ctx.files.lock)), journal: sha(await readFile(path.join(ctx.stateDir, 'upgrade-journal.json'))) }

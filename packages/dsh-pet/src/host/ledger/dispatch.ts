@@ -351,16 +351,57 @@ export async function requestTodoExecution(
   deps: RequestTodoExecutionDeps,
 ): Promise<RequestTodoExecutionResult> {
   const todo = deps.readTodo(input.itemId)
-  if (todo === undefined) return { ok: false, reason: '待办不存在。' }
+  if (todo === undefined) return { ok: false, reason: requestExecutionFailureText('unknown-item') }
 
   // Ownership: a child may only ask for work it registered itself.
   const registrarChild = deps.lookupRegistrarChild?.(todo)
     ?? deps.registrarFor(todo).childSessionId
   if (registrarChild.trim() === '' || registrarChild !== input.callerChildSessionId) {
-    return { ok: false, reason: '这条待办不是由当前子会话登记的。' }
+    return { ok: false, reason: requestExecutionFailureText('not-owned') }
   }
 
   const accepted = await acceptTodo(input.itemId, deps)
-  if (!accepted.ok) return { ok: false, reason: accepted.reason }
+  if (!accepted.ok) {
+    // The child-facing refusal names a next step; `acceptTodo` itself stays
+    // owner-facing, where "call this child tool" would be noise.
+    return {
+      ok: false,
+      reason: requestExecutionFailureText(
+        todo.status === 'open' ? 'dispatch-failed' : 'not-open',
+        todo.status,
+      ),
+    }
+  }
   return { ok: true, record: accepted.record, outcome: accepted.dispatch.outcome }
+}
+
+/** Why a child's execution request could not proceed. */
+export type RequestExecutionFailure = 'unknown-item' | 'not-owned' | 'not-open' | 'dispatch-failed'
+
+/**
+ * The model-facing text for a failed execution request.
+ *
+ * Every branch ends in something the child can DO, and none of them enumerates
+ * or echoes another todo/locus/child identifier: the only id that may appear is
+ * the one the caller itself supplied.
+ *
+ * @param failure - Which step refused.
+ * @param status - The todo's status when it was read, for the not-open branch.
+ * @returns actionable guidance for the model.
+ */
+export function requestExecutionFailureText(failure: RequestExecutionFailure, status?: string): string {
+  switch (failure) {
+    case 'unknown-item':
+      return '请求执行失败：没有找到该标识对应的待办，或该标识不是本会话可用的标识。'
+        + '请先调用 `pet_locus_ledger_read` 取得你自己的合法 `itemId`，再用台账返回的标识重试；不要猜测标识。'
+    case 'not-owned':
+      return '请求执行失败：这条待办不是由当前子会话登记的。'
+        + '你只能请求自己登记的待办；请调用 `pet_locus_ledger_read` 确认自己登记过的 `itemId` 后重试。'
+    case 'not-open':
+      return `请求执行失败：待办当前不是待处理（${status ?? 'unknown'}），本次未投递，无需重复请求执行。`
+        + '如需确认最新状态，请重新调用 `pet_locus_ledger_read`。'
+    default:
+      return '请求执行未完成：跟进任务未能投递，该待办仍为待处理、状态未改变。'
+        + '可稍后重试；如仍失败，请在回复中如实说明未开始，并请所有者处理。'
+  }
 }

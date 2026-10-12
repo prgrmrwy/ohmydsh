@@ -28,6 +28,11 @@ import { markInProgress, settleFeedback } from '../channel/feedback.js'
 import type { LarkClient } from '../channel/lark.js'
 import type { LarkInboundEvent } from '../channel/event.js'
 import { renderQaPrompt } from './prompt.js'
+import {
+  entranceReadProbeFor,
+  measureEntranceReadability,
+  type EntranceReadability,
+} from '../channel/entrance-capability.js'
 import { resolveLiveParent, type SubagentSeam } from './subagents.js'
 import type { PetRepository } from '../repository.js'
 import type { PetChatBinding } from '../spec.js'
@@ -149,6 +154,14 @@ export class QaDelivery {
 
     const senderName = await this.resolveSenderName(event)
     const larkReady = await this.deps.client.botReady()
+    // Measured rather than inferred from `larkReady`: the prompt must not
+    // invite a read of this group unless a real read of it just succeeded.
+    const entranceRead: EntranceReadability = larkReady
+      ? await measureEntranceReadability(
+        { chatId: event.chat_id },
+        { probe: entranceReadProbeFor(this.deps.client) },
+      )
+      : 'unconfirmed'
     const prompt = renderQaPrompt({
       chatId: event.chat_id,
       ...(binding.chatName !== undefined ? { chatName: binding.chatName } : {}),
@@ -157,6 +170,7 @@ export class QaDelivery {
       ...(senderName !== undefined ? { senderName } : {}),
       text,
       larkReady,
+      entranceRead,
       isFirst: false,
       // Restated on EVERY question rather than left to the seed: a standing
       // constraint mentioned once drifts out of attention exactly as the

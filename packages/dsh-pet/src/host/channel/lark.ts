@@ -37,6 +37,40 @@ export interface LarkHistoryMessage {
   readonly position: number
 }
 
+/**
+ * One message of a caller-bound entrance read.
+ *
+ * `createTime` is normalized to ISO 8601 with an offset. The CLI prints the
+ * platform time as local wall-clock minutes, which is too lossy for a
+ * `[since, before)` window, so the adapter converts it once, explicitly,
+ * instead of letting each consumer guess.
+ */
+export interface LarkEntranceMessage {
+  readonly messageId: string
+  readonly createTime: string
+  readonly senderName?: string
+  readonly text: string
+  readonly messagePosition?: string
+  readonly threadId?: string
+}
+
+/** One page of an entrance read; `pageToken` continues into the next page. */
+export interface LarkEntrancePage {
+  readonly messages: readonly LarkEntranceMessage[]
+  readonly hasMore: boolean
+  readonly pageToken?: string
+}
+
+/** The exact entrance a read is bound to, plus page direction and token. */
+export interface LarkEntranceReadInput {
+  readonly chatId: string
+  /** Set only when the entrance itself is a topic. */
+  readonly threadId?: string
+  readonly pageSize: number
+  readonly direction: 'older' | 'newer'
+  readonly pageToken?: string
+}
+
 /** One bot member of a chat, as reported by the member list. */
 export interface LarkChatBot {
   /** Owning app id — the field that proves which app a bot belongs to. */
@@ -112,6 +146,32 @@ export interface LarkClient {
    * @returns the messages, newest first; empty on failure.
    */
   listMessages(chatId: string, limit: number): Promise<readonly LarkHistoryMessage[]>
+  /**
+   * Read one page of THIS entrance's messages as the bound bot.
+   *
+   * Separate from {@link listMessages}: that one exists to resolve the trigger's
+   * sender name and returns an empty array on failure. This one must let its
+   * caller tell a FAILED read from a genuinely empty window, so it returns
+   * `undefined` on failure and carries the page facts a caller needs to
+   * continue. A topic-bound entrance reads that topic rather than the group.
+   * @param input - Exact entrance plus page direction/size/token.
+   * @returns the page, or `undefined` when the read failed.
+   */
+  readEntranceHistory?(input: LarkEntranceReadInput): Promise<LarkEntrancePage | undefined>
+  /**
+   * Take one bounded read of THIS entrance to measure whether it is readable.
+   *
+   * Exists so a delivery never declares a capability nobody verified. The
+   * result is deliberately a boolean: message content must not be laundered
+   * through a capability check, which is why this is not `readEntranceHistory`
+   * with a small page size at the call site.
+   * @param input - Exact entrance (group, or the bound topic).
+   * @returns whether a real read of this entrance succeeded just now.
+   */
+  probeEntranceRead?(input: {
+    readonly chatId: string
+    readonly threadId?: string
+  }): Promise<boolean>
   /**
    * Whether this machine's lark-cli can act as the bound bot right now.
    *
@@ -280,7 +340,119 @@ function parseCliJson(text: string): unknown {
   }
 }
 
+/**
+ * Normalize the CLI's local wall-clock `create_time` to ISO 8601 with offset.
+ *
+ * `+chat-messages-list` prints `2026-10-12 16:49` (minute precision, host local
+ * time), which cannot be compared against an offset-bearing `[since, before)`
+ * window without guessing. Converting once here keeps one explicit
+ * representation; an unrecognized value is returned unchanged rather than
+ * invented.
+ *
+ * @param value - Raw `create_time` from the CLI envelope.
+ * @returns ISO 8601 with the host offset, or the input unchanged.
+ */
+function normalizeEntranceTime(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value.trim())
+  if (match === null) return value
+  const [, year, month, day, hour, minute, second] = match
+  const date = new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second ?? '0'),
+    0,
+  )
+  if (Number.isNaN(date.getTime())) return value
+  const pad = (part: number): string => String(part).padStart(2, '0')
+  const offset = -date.getTimezoneOffset()
+  const sign = offset >= 0 ? '+' : '-'
+  const absolute = Math.abs(offset)
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+    + `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+    + `${sign}${pad(Math.floor(absolute / 60))}:${pad(absolute % 60)}`
+}
+
 /** Invoke lark-cli and retain a structured error response without raw text. */
+/**
+ * Read one page of an entrance as the bound bot.
+ *
+ * Shared by the caller-bound read and by the bounded capability probe so both
+ * hit exactly the same platform path: a probe that used a different call would
+ * prove the wrong capability.
+ *
+ * A failed call is NOT an empty page: the caller must be able to say "could not
+ * read" instead of "nothing was said", hence `undefined`.
+ *
+ * @param binary - lark-cli binary.
+ * @param runner - CLI runner.
+ * @param input - Exact entrance plus page direction/size/token.
+ * @returns the normalized page, or `undefined` when the read failed.
+ */
+async function readEntranceHistoryWith(
+  binary: string,
+  runner: LarkCliRunner,
+  input: LarkEntranceReadInput,
+): Promise<LarkEntrancePage | undefined> {
+  // The platform prints `create_time` as local wall-clock minutes, which is
+  // too coarse for a `[since, before)` window; normalizing it here keeps
+  // every consumer on one explicit representation.
+  const args = input.threadId === undefined
+    ? [
+      'im', '+chat-messages-list', '--as', 'bot', '--chat-id', input.chatId,
+      '--order', input.direction === 'older' ? 'desc' : 'asc',
+      '--page-size', String(input.pageSize), '--no-reactions',
+    ]
+    : [
+      'im', '+threads-messages-list', '--as', 'bot', '--thread', input.threadId,
+      '--order', input.direction === 'older' ? 'desc' : 'asc',
+      '--page-size', String(input.pageSize), '--no-reactions',
+    ]
+  const data = await callCli(
+    input.pageToken === undefined ? args : [...args, '--page-token', input.pageToken],
+    binary,
+    runner,
+  )
+  if (data === undefined) return undefined
+  const record = data as {
+    messages?: unknown
+    has_more?: unknown
+    page_token?: unknown
+  }
+  if (!Array.isArray(record.messages)) return undefined
+  const messages: LarkEntranceMessage[] = []
+  for (const entry of record.messages) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const message = entry as Record<string, unknown>
+    const messageId = message['message_id']
+    if (typeof messageId !== 'string') continue
+    const sender = message['sender'] as { name?: unknown } | undefined
+    const rawCreateTime = typeof message['create_time'] === 'string' ? message['create_time'] : ''
+    const threadId = message['thread_id']
+    messages.push({
+      messageId,
+      createTime: normalizeEntranceTime(rawCreateTime),
+      ...(typeof sender?.name === 'string' && sender.name !== ''
+        ? { senderName: sender.name }
+        : {}),
+      text: typeof message['content'] === 'string' ? message['content'] : '',
+      ...(typeof message['message_position'] === 'string'
+        ? { messagePosition: message['message_position'] }
+        : {}),
+      ...(typeof threadId === 'string' && threadId !== '' ? { threadId } : {}),
+    })
+  }
+  return {
+    messages,
+    hasMore: record.has_more === true,
+    ...(typeof record.page_token === 'string' && record.page_token !== ''
+      ? { pageToken: record.page_token }
+      : {}),
+  }
+}
+
 async function callJson(
   args: readonly string[],
   binary: string,
@@ -720,6 +892,22 @@ export function createLarkCliClient(
         })
       }
       return parsed
+    },
+
+    async readEntranceHistory(input) {
+      return readEntranceHistoryWith(binary, runner, input)
+    },
+
+    async probeEntranceRead(input) {
+      // One real read of the exact entrance, with the smallest page the CLI
+      // accepts; only success/failure escapes, never the content.
+      const page = await readEntranceHistoryWith(binary, runner, {
+        chatId: input.chatId,
+        ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
+        pageSize: 1,
+        direction: 'older',
+      })
+      return page !== undefined
     },
 
     async botReady() {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { LOCUS_PROJECT_READ_DENIAL } from '../src/host/locus/project-read-guard.js'
 import {
   isSafeLocusReplyTarget,
   locusEndpointKey,
@@ -350,5 +351,52 @@ describe('the routing preamble is sent once per child', () => {
     // Guards the actual goal rather than a formatting detail: a follow-up must
     // be a small fraction of the preamble-bearing delivery.
     expect(next.length).toBeLessThan(first.length / 2)
+  })
+})
+
+describe('every delivery declares the effective tool tier', () => {
+  // The tier is what tells the child whether it can read the entrance itself.
+  // A follow-up that omits it leaves the child guessing, and a renderer that
+  // defaults to `safe` misreports a shell child (the facts come from the
+  // durable record, not from this layer's fallback).
+  function withTier(tier: 'safe' | 'shell'): LocusDeliveryContext {
+    return deliveryContext({ locus: { ...deliveryContext().locus, toolTier: tier } })
+  }
+
+  it('states the safe tier and its limit on a follow-up', () => {
+    const next = renderLocusDeliveryPrompt(withTier('safe'), { position: 'subsequent' })
+
+    expect(next).toContain('工具档位：safe')
+    expect(next).toContain('不提供 shell')
+  })
+
+  it('states the shell tier and the managed reply rule on a follow-up', () => {
+    const next = renderLocusDeliveryPrompt(withTier('shell'), { position: 'subsequent' })
+
+    expect(next).toContain('工具档位：shell')
+    expect(next).toContain('pet_locus_finish')
+    expect(next).not.toContain('不提供 shell')
+  })
+
+  it('never instructs the model to quote guard diagnostics into the reply body', () => {
+    for (const position of ['first', 'subsequent'] as const) {
+      const prompt = renderLocusDeliveryPrompt(withTier('shell'), { position })
+
+      // The denial text is for the model and local diagnosis. If a prompt ever
+      // asks the model to pass it on, group members start seeing internal
+      // paths; the managed outbound cannot take that back.
+      expect(prompt, position).not.toContain('把诊断')
+      expect(prompt, position).not.toContain('守卫诊断')
+      expect(prompt, position).not.toContain('拒绝原因')
+      expect(prompt, position).not.toContain('允许根')
+      expect(prompt, position).not.toContain(LOCUS_PROJECT_READ_DENIAL)
+    }
+  })
+
+  it('keeps the full tier section on a first delivery', () => {
+    const first = renderLocusDeliveryPrompt(withTier('shell'), { position: 'first' })
+
+    expect(first).toContain('### Tool tier')
+    expect(first).toContain('- effective：shell')
   })
 })

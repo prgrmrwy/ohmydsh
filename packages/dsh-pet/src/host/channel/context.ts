@@ -12,6 +12,7 @@
  * pasted the conversation themselves.
  */
 
+import type { EntranceReadability } from './entrance-capability.js'
 import type { LarkClient, LarkHistoryMessage } from './lark.js'
 
 /**
@@ -77,6 +78,17 @@ export interface TriggerFacts {
    * fails on its first command.
    */
   readonly larkReady?: boolean
+  /**
+   * Measured readability of THIS entrance, taken within a bounded deadline
+   * before rendering.
+   *
+   * `larkReady` only says the bot identity works; it says nothing about
+   * whether a read of this chat succeeds. Declaring "you can read the history"
+   * from identity alone is exactly the defect that made the incident's agent
+   * plan around a capability it did not have, so the read claim is driven by
+   * measurement and defaults to `unconfirmed` when nobody measured.
+   */
+  readonly entranceRead?: EntranceReadability
   /** Chat the trigger arrived in; the agent needs it to read more. */
   readonly chatId: string
   /** The trigger message id, so the agent can fetch its untouched original. */
@@ -125,12 +137,21 @@ export function renderChannelPrompt(trigger: TriggerFacts, context: ChatContext)
   // cannot survive being flattened into a line, and the agent must know it
   // can — and should — read the original.
   if (trigger.larkReady === true) {
+    // The read claim is the MEASURED one; bot identity alone never implies it.
+    const readCapability = trigger.entranceRead ?? 'unconfirmed'
+    const readClaim =
+      readCapability === 'readable'
+        ? '这里刻意**不**附带聊天记录摘要——压平的文本会丢掉转发、话题、卡片、图片等结构，' +
+          '需要什么请自己按需读取，读到的是原样内容。（本入口历史消息本次**已实测可读**。）'
+        : readCapability === 'unreadable'
+          ? '本入口历史消息**实测不可读**（bot 读取被拒或失败），不要假设自己能翻到历史；' +
+            '确实需要内容时如实说明这一限制，不要靠推测作答。'
+          : '本入口历史消息的可读性本次**未确认**（探测超时或被取消）；需要时先试读一次，' +
+            '没读到就如实说明，不要假装读过。'
     lines.push('### 读取上下文与回复，都由你自己完成')
     lines.push('')
     lines.push(
-      '本机已安装并授权 `lark-cli`，你可以用它以 **bot 身份**读写飞书。' +
-        '这里刻意**不**附带聊天记录摘要——压平的文本会丢掉转发、话题、卡片、图片等结构，' +
-        '需要什么请自己按需读取，读到的是原样内容。',
+      '本机已安装并授权 `lark-cli`，你可以用它以 **bot 身份**读写飞书。' + readClaim,
     )
     lines.push('')
     lines.push('```bash')

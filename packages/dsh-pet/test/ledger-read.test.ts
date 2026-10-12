@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { readSharedLedger, type LedgerReadDeps } from '../src/host/ledger/ledger-read.js'
+import {
+  ledgerReadUnavailableText,
+  readSharedLedger,
+  readSharedLedgerOutcome,
+  type LedgerReadDeps,
+} from '../src/host/ledger/ledger-read.js'
 import type { LedgerCaller } from '../src/host/ledger/caller.js'
 import { registerTodo } from '../src/host/ledger/todo.js'
 import type { TodoRecord } from '../src/host/ledger/todo.js'
@@ -85,5 +90,41 @@ describe('readSharedLedger', () => {
       'main-1': [todo({ itemId: 'todo-1', createdAt: 1_000 }), todo({ itemId: 'todo-2', createdAt: 2_000 })],
     }))
     expect(items.map(i => i.itemId)).toEqual(['todo-1', 'todo-2'])
+  })
+})
+
+describe('an unavailable ledger read is not an empty ledger', () => {
+  it('ledger dependency failure is not rendered as an empty ledger', () => {
+    const outcome = readSharedLedgerOutcome(caller(), {
+      listForParent: () => { throw new Error('domain closed') },
+    })
+
+    // `[]` would mean "there is no work to duplicate" — the opposite of what
+    // an unreadable ledger proves.
+    expect(outcome).toEqual({ ok: false, reason: 'store-unreadable' })
+    const text = ledgerReadUnavailableText('store-unreadable')
+    expect(text).toContain('台账读取不可用')
+    expect(text).toContain('store-unreadable')
+    expect(text).not.toBe('[]')
+    expect(text).toContain('这不代表"没有待办"')
+    // Actionable: a retry path and the tool that does not depend on this read.
+    expect(text).toContain('重试')
+    expect(text).toContain('pet_locus_track')
+  })
+
+  it('keeps "available but empty" distinguishable from "unreadable"', () => {
+    const empty = readSharedLedgerOutcome(caller(), { listForParent: () => [] })
+
+    expect(empty).toEqual({ ok: true, items: [] })
+    // Only the available-and-empty case may be presented as a list.
+    expect(JSON.stringify(empty.ok ? empty.items : '')).toBe('[]')
+  })
+
+  it('names the missing wiring instead of implying an empty ledger', () => {
+    for (const reason of ['caller-unresolvable', 'ledger-unwired'] as const) {
+      const text = ledgerReadUnavailableText(reason)
+      expect(text).toContain(reason)
+      expect(text).toContain('不代表"没有待办"')
+    }
   })
 })

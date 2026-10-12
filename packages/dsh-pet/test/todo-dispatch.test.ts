@@ -12,6 +12,7 @@ import type { TodoRecord, TodoStatus } from '../src/host/ledger/todo.js'
 import {
   acceptTodo,
   dispatchFollowUp,
+  requestExecutionFailureText,
   requestTodoExecution,
   composeFollowUpBody,
   EVIDENCE_SECTION_MARKER,
@@ -498,5 +499,87 @@ describe('todoDispatchPort reads the bare Agent that agents.get returns', () => 
     const port = index.slice(index.indexOf('const liveTodoAgent'), index.indexOf('let locusManagement!'))
     expect(port).toContain('found.agent ?? found')
     expect(port).not.toMatch(/handle\?\.agent\?\.status/)
+  })
+})
+
+describe('child-facing execution refusals name a next step (task 6.2)', () => {
+  function requestDeps(overrides: Record<string, unknown> = {}) {
+    const port = fakeDispatchPort({ status: 'idle' })
+    return {
+      port,
+      deps: {
+        readTodo: (id: string) => todoFixture({ itemId: id }),
+        registrarFor: () => ({ childCanExecute: false, childSessionId: 'child-1' }),
+        contextFor: () => ({ mainWasBriefedStandby: false }),
+        port,
+        advanceStatus: vi.fn(async (id: string) => todoFixture({ itemId: id, status: 'accepted' })),
+        log: vi.fn(),
+        ...overrides,
+      },
+    }
+  }
+
+  it('an unknown id points at the ledger read instead of a bare "not found"', async () => {
+    const { deps } = requestDeps({ readTodo: () => undefined })
+
+    const result = await requestTodoExecution({ itemId: 'todo-guessed', callerChildSessionId: 'child-1' }, deps)
+
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('unreachable')
+    expect(result.reason).toContain('pet_locus_ledger_read')
+    expect(result.reason).toContain('重试')
+    expect(result.reason).not.toBe('待办不存在。')
+  })
+
+  it('a foreign todo says whose it is and how to find a legal one', async () => {
+    const { deps, port } = requestDeps({
+      readTodo: () => todoFixture({ locusId: 'locus-other' }),
+      lookupRegistrarChild: () => 'child-other',
+    })
+
+    const result = await requestTodoExecution({ itemId: 'todo-1', callerChildSessionId: 'child-1' }, deps)
+
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('unreachable')
+    expect(result.reason).toContain('pet_locus_ledger_read')
+    expect(result.reason).not.toContain('child-other')
+    expect(port.calls).toHaveLength(0)
+  })
+
+  it('a todo that is no longer open says so without claiming a retry would work', async () => {
+    const { deps, port } = requestDeps({
+      readTodo: () => todoFixture({ status: 'accepted' }),
+    })
+
+    const result = await requestTodoExecution({ itemId: 'todo-1', callerChildSessionId: 'child-1' }, deps)
+
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('unreachable')
+    expect(result.reason).toContain('accepted')
+    expect(result.reason).toContain('无需重复请求执行')
+    expect(port.calls).toHaveLength(0)
+  })
+
+  it('an unreachable target keeps the todo open and says a retry is legal', async () => {
+    const { deps } = requestDeps({ port: fakeDispatchPort({ status: undefined, resumeFails: true }) })
+
+    const result = await requestTodoExecution({ itemId: 'todo-1', callerChildSessionId: 'child-1' }, deps)
+
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('unreachable')
+    expect(result.reason).toContain('重试')
+    expect(result.reason).toContain('未改变')
+  })
+
+  it('no branch echoes another todo, locus or child identifier', () => {
+    for (const failure of ['unknown-item', 'not-owned', 'not-open', 'dispatch-failed'] as const) {
+      const text = requestExecutionFailureText(failure, 'accepted')
+      expect(text, failure).not.toMatch(/todo-\d|locus-|child-|oc_|ou_/)
+      expect(text.length, failure).toBeGreaterThan(30)
+    }
+    // The two id-shaped refusals point at the one tool that returns a legal id.
+    for (const failure of ['unknown-item', 'not-owned'] as const) {
+      expect(requestExecutionFailureText(failure)).toContain('pet_locus_ledger_read')
+    }
   })
 })

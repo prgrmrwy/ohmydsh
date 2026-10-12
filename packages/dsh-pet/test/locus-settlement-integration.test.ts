@@ -76,6 +76,19 @@ async function durableLocus(harness: PetHarness): Promise<LocusRepository> {
  */
 async function composeSettlementHost(options: {
   readonly endBeforeBind?: 'completed' | 'failed'
+  /**
+   * Override the delivery prompt renderer.
+   *
+   * The renderer is allowed to await work (the Host measures this entrance's
+   * read capability before the prompt may claim it), so the tests that pin the
+   * post-render fence need to hold rendering open and mutate the durable
+   * current underneath it.
+   */
+  readonly renderPrompt?: (input: {
+    readonly locus: { readonly id?: string; readonly locusId?: string; readonly generation: number; readonly childSessionId: string; readonly parentSessionId: string }
+    readonly message: { readonly messageId: string }
+    readonly signal: AbortSignal
+  }) => string | Promise<string>
 } = {}) {
   const harness = await openPetHarness(emptyMedium())
   const repository = await durableLocus(harness)
@@ -169,6 +182,9 @@ async function composeSettlementHost(options: {
       },
     },
     resolveLivePolicy: () => livePolicy,
+    ...(options.renderPrompt === undefined
+      ? {}
+      : { renderPrompt: options.renderPrompt as never }),
     invalidatePolicyDrift: ({ locus, reason }) => repository.invalidateLocus(
       locus.id ?? locus.locusId ?? '', reason, Date.now(), undefined,
     ),
@@ -539,6 +555,81 @@ describe('durable Delivery lifecycle against its exact child turn', () => {
 
       expect(host.repository.findDeliveryByMessageId('om_dup')?.status).toBe('replied')
       expect(host.settledReactions).toHaveLength(1)
+    } finally {
+      await host.close()
+    }
+  })
+})
+
+describe('a prompt rendered while the current changes is never delivered', () => {
+  it('refuses the delivery when the current is retired during the awaited render', async () => {
+    let renderStarted = false
+    let releaseRender: (() => void) | undefined
+    const host = await composeSettlementHost({
+      renderPrompt: async () => {
+        renderStarted = true
+        await new Promise<void>(resolve => { releaseRender = resolve })
+        return '本入口的历史消息已实测可读（bot 身份）。'
+      },
+    })
+    try {
+      const pending = host.controller.handleAdmission(admission('om_race') as never)
+      await vi.waitFor(() => { expect(renderStarted).toBe(true) })
+
+      // The durable current stops being current underneath the awaited render:
+      // the same durable fact a rebuild, a stop, or a superseding generation
+      // produces. Its measurement result must not be adopted.
+      const current = host.repository.findDeliveryByMessageId('om_race')
+      expect(current).toBeDefined()
+      expect(await host.repository.fail({
+        deliveryId: current!.deliveryId,
+        correlation: CORRELATION,
+        reason: 'retired during render',
+      })).toBe(true)
+      releaseRender?.()
+
+      const result = await pending
+      expect(result.kind).toBe('refused')
+      // Refusing means nothing reached the child: no queue, no inbox message.
+      expect(host.queued).toEqual([])
+      expect(host.repository.findDeliveryByMessageId('om_race')?.inboxMessageId).toBeUndefined()
+    } finally {
+      await host.close()
+    }
+  })
+
+  it('refuses the delivery when the renderer revalidation fails, as a rebuild mid-measurement makes it', async () => {
+    const host = await composeSettlementHost({
+      renderPrompt: async () => {
+        // Exactly what the Host renderer throws when the locus record it read
+        // before measuring is no longer the active one afterwards.
+        throw new Error('Active locus changed while measuring entrance readability')
+      },
+    })
+    try {
+      const result = await host.controller.handleAdmission(admission('om_rebuild') as never)
+
+      expect(result.kind).toBe('refused')
+      expect(host.queued).toEqual([])
+      expect(host.repository.findDeliveryByMessageId('om_rebuild')?.inboxMessageId).toBeUndefined()
+    } finally {
+      await host.close()
+    }
+  })
+
+  it('still delivers when the current is unchanged across the awaited render', async () => {
+    const host = await composeSettlementHost({
+      // The delay is the point: awaiting must not, by itself, refuse anything.
+      renderPrompt: async () => {
+        await new Promise(resolve => setTimeout(resolve, 20))
+        return 'prompt-with-measurement'
+      },
+    })
+    try {
+      const result = await host.controller.handleAdmission(admission('om_ok') as never)
+
+      expect(result.kind).toBe('accepted')
+      expect(host.queued).toHaveLength(1)
     } finally {
       await host.close()
     }

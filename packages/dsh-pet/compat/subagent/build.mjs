@@ -43,7 +43,7 @@ const UPSTREAM = {
   /** Reviewed commit behind dsh-v0.2.0-rc.2; a moved tag/local checkout fails. */
   commit: '639ed015397290b3745d163aafe02ffee4aa3f84',
   /** sha256 of `settlement-notice.patch`, so a silently edited patch fails. */
-  patchSha256: '86310610709d80d540dd97b1b7fb1fbc4012a3ef1f5eadc12ba590f7905005fa',
+  patchSha256: '78490e17d1bbeacc3e1f05aa03c01343dd765628a1deb8068f9388bf438005c8',
 }
 
 const run = (command, args, cwd = here, options) => runCompatCommand(command, args, cwd, options)
