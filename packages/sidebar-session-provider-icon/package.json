@@ -46,8 +46,7 @@
     "README.md",
     "LICENSE",
     "THIRD-PARTY-NOTICES.md",
-    "docs",
-    "!docs/publishing-and-discovery.md"
+    "docs"
   ],
   "dsh": {
     "bundle": {
