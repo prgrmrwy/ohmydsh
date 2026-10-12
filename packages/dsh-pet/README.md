@@ -2,10 +2,12 @@
 
 English · [简体中文](README.zh.md)
 
+![The DSH web interface with the Pet companion at the lower right and its Pet tasks panel open next to a demo session](docs/overview.png)
+
+![Settings → Pet in DSH: the General tab with the model Pet follows, the executor preset and the appearance options](docs/settings.png)
+
 <!-- problem -->
 Routine chores such as cleaning up a worktree or answering a teammate's question from chat usually mean interrupting the session you are developing in, or pasting context into a new one by hand. Pet is a small floating companion in the DSH web UI that runs those chores for you in a separate session, working from a frozen copy of what you were looking at, so your development session stays clean and every action stays traceable.
-
-![Settings → Pet in DSH: the model Pet follows, the execution preset and the appearance options](docs/overview.png)
 
 **What you get**
 

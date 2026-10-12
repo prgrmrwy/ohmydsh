@@ -2,12 +2,12 @@
 
 English · [简体中文](README.zh.md)
 
-<!-- problem -->
-In the DeepSeek Harness (DSH) session list every row looks alike, so you cannot tell which model a conversation uses without opening it. This plugin puts the brand logo of the model currently selected in the input box in front of each session title, and updates it the moment you switch models. When the provider and the model come from different vendors (for example `opencode-go/deepseek-v4-flash`), the provider logo carries a small model logo in its bottom-right corner.
+![The DSH session list with a different brand logo before each title (Grok, GLM, Kimi, OpenAI, DeepSeek), one per session's selected model; the models are local demo routes](docs/overview.png)
 
 ![Sidebar rendering: same-vendor selections show one logo; aggregator routes show the provider logo with the model logo in the corner (light and dark theme)](docs/screenshot.png)
 
-![Illustration: where the badge comes from and how a route becomes a badge](docs/overview.png)
+<!-- problem -->
+In the DeepSeek Harness (DSH) session list every row looks alike, so you cannot tell which model a conversation uses without opening it. This plugin puts the brand logo of the model currently selected in the input box in front of each session title, and updates it the moment you switch models. When the provider and the model come from different vendors (for example `opencode-go/deepseek-v4-flash`), the provider logo carries a small model logo in its bottom-right corner.
 
 **Install.** DeepSeek Harness `0.2.0-rc.2`, Node.js `>=22.19`.
 
