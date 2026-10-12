@@ -1,7 +1,7 @@
 {
   "name": "dsh-sidebar-session-provider-icon",
   "version": "0.1.5",
-  "description": "Show each sidebar session's currently selected model brand logo, updating immediately from the composer selector with a durable last-request fallback",
+  "description": "DeepSeek Harness plugin: show the brand logo of the model selected in each sidebar session, updated live from the composer selector, with a last-request fallback for history sessions",
   "license": "MIT",
   "author": "prgrmrwy",
   "homepage": "https://github.com/prgrmrwy/dsh-sidebar-session-provider-icon#readme",

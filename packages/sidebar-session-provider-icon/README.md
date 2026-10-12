@@ -3,7 +3,7 @@
 English · [简体中文](README.zh.md)
 
 <!-- problem -->
-In the DSH session list every row looks alike, so you cannot tell which model a conversation uses without opening it. This plugin puts the brand logo of the model currently selected in the input box in front of each session title, and updates it the moment you switch models. When the provider and the model come from different vendors (for example `opencode-go/deepseek-v4-flash`), the provider logo carries a small model logo in its bottom-right corner.
+In the DeepSeek Harness (DSH) session list every row looks alike, so you cannot tell which model a conversation uses without opening it. This plugin puts the brand logo of the model currently selected in the input box in front of each session title, and updates it the moment you switch models. When the provider and the model come from different vendors (for example `opencode-go/deepseek-v4-flash`), the provider logo carries a small model logo in its bottom-right corner.
 
 ![Sidebar rendering: same-vendor selections show one logo; aggregator routes show the provider logo with the model logo in the corner (light and dark theme)](docs/screenshot.png)
 
