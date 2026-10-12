@@ -53,10 +53,10 @@
 
 ## 7. 验证与收尾
 
-- [ ] 7.1 `packages/dsh-pet` typecheck 与全量测试
-- [ ] 7.2 仓库 `npm test` 与 `npm run check:artifacts`
-- [ ] 7.3 `node scripts/sync.mjs` 两次，第二次无变化（幂等）
-- [ ] 7.4 `openspec validate pet-locus-feishu-read-and-delivery-fixes --strict`
+- [x] 7.1 `packages/dsh-pet` typecheck 与全量测试 → `npm run typecheck` 零错误；`npx vitest run` 3021 passed / 0 failed / 43 skipped；`npm run build` 成功
+- [x] 7.2 仓库 `npm test` 与 `npm run check:artifacts` → 424 passed / 0 failed / 2 skipped；tracked paths comply with repository policy
+- [x] 7.3 `node scripts/sync.mjs` 两次，第二次无变化（幂等）→ 第一次 `3 change(s) applied`，第二次 `no changes — deployment already matches manifest`
+- [x] 7.4 `openspec validate pet-locus-feishu-read-and-delivery-fixes --strict` → `Change '...' is valid`
 - [ ] 7.5 经所有者批准重启 Host 后真机验收：新群 @ 一次确认首投前言与档位声明、`safe` 档 child 读当前入口**群与话题**、未知参数拒绝、游标篡改、守卫拒绝文案、能力声明与实测一致
-- [ ] 7.6 生成并勾选 `verify.md`（任务完成、test-plan 全绿、全量测试证据）
+- [x] 7.6 生成 `verify.md`（任务完成、test-plan 全绿、全量测试证据）→ 结论 `PENDING_LIVE_ACCEPTANCE`：7.5 真机未做前不勾选 7.5、不归档
 - [ ] 7.7 spec 合并（先 `pet-locus-shell-tier` 7.4）与归档；更新 `BACKLOG.md` 中 U006/U007 状态
