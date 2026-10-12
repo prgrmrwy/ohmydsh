@@ -25,10 +25,11 @@ In the ohmydsh repository this plugin is wired through the `dsh.yaml` entry `sid
 
 ## How it behaves
 
-The logo shown for a session comes from two sources, in this order:
+The logo shown for a session comes from three sources, in this order:
 
-1. **Live selection (preferred).** The official `dsh-client-ui-model-selection` store, read as `ctx.modelDirectories.directoryFor(sessionId).store.current`. It is the single per-session state shared by the input-box selector and the `/model` command, and it publishes `{ provider, model }` as soon as `session.selectModel` succeeds. The open session, including a blank one that has not sent a message yet, therefore follows the input-box selection.
-2. **Last request (cold-history fallback).** A Host `provider` session projection folds the `request/header` events of the session log, so a history session whose selector has not been loaded in this browser still shows the provider of its most recent real request. It survives restarts and uses no `localStorage`.
+1. **Live selection (preferred, while verifiable).** The official `dsh-client-ui-model-selection` store, read as `ctx.modelDirectories.directoryFor(sessionId).store.current`. It is the single per-session state shared by the input-box selector and the `/model` command, and it publishes `{ provider, model }` as soon as `session.selectModel` succeeds. The open session, including a blank one that has not sent a message yet, therefore follows the input-box selection. That store belongs to a client Session scope, so every session-list and DOM signal re-resolves it: when the runtime hands out a new store for the same session (leaving the session and coming back is enough) the badge re-subscribes and re-reads it, and it re-reads the snapshot even when the identity did not change. An observation is kept only while its session is the open one; once the view moves on — or the directory cannot be resolved any more — it is dropped, so a value the client can no longer verify never decides a row.
+2. **Selected model (durable).** The official `modelSelection` projection's `next`: the selection the session will use for its next request. The host maintains it and it also covers a model the user picked but has not sent with yet, which is what keeps a row right after you leave its session.
+3. **Last request (cold-history fallback).** A Host `provider` session projection folds the `request/header` events of the session log, so a history session whose selector has not been loaded in this browser still shows the provider of its most recent real request. It survives restarts and uses no `localStorage`.
 
 Brand resolution has two independent dimensions: the provider route picks the **main logo**, the model id picks the **corner logo**.
 
@@ -49,7 +50,7 @@ Brand resolution has two independent dimensions: the provider route picks the **
 | Layer | Implementation |
 |---|---|
 | Host | `src/provider.ts` registers the `provider` projection (it requires the `sessionProjections` service) and folds `request/header`; it only serves the cold-history fallback |
-| Client data | Subscribes to the per-session stores of `ctx.modelDirectories`; the selector choice wins over the projection fallback |
+| Client data | `selection-binding.ts` observes the open session's store of `ctx.modelDirectories` (re-resolved per signal); `provider-map.ts` prefers a verifiable observation, then the official `modelSelection` selection, then the `provider` fallback |
 | Client DOM | `row-locator.ts` holds all knowledge of the official row DOM; a `MutationObserver` maintains a separate badge `<span>` in front of the title |
 | Brand art | `src/client/assets/*.svg`, downloaded once and bundled; `logos.ts` resolves the provider brand and the model brand separately and renders the composite when they differ |
 

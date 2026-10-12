@@ -25,17 +25,28 @@ function rowNode(classes: string[], titleText?: string): {
   }
 }
 
-function listState(rows: Array<{ id: string; title: string; provider: string | null; model: string }>): SessionListState {
+function listState(rows: Array<{
+  id: string
+  title: string
+  provider: string | null
+  model: string
+  /** The official durable selection intent (`modelSelection.next`), when the client holds one. */
+  selection?: { provider: string; model: string } | null
+}>): SessionListState {
   const byId = {} as SessionListState['byId']
   const ids = rows.map((r) => r.id)
   for (const r of rows) {
+    const projectionValues = {
+      ...(r.provider === null ? {} : { provider: { provider: r.provider, model: r.model } }),
+      ...(r.selection === undefined ? {} : { modelSelection: { lastUsed: r.selection, next: r.selection } }),
+    }
     byId[r.id] = {
       id: r.id,
       displayTitle: r.title,
       blank: false,
       running: false,
       updatedAt: 0,
-      ...(r.provider === null ? {} : { projectionValues: { provider: { provider: r.provider, model: r.model } } }),
+      ...(Object.keys(projectionValues).length === 0 ? {} : { projectionValues }),
     } as SessionListState['byId'][string]
   }
   return { ids, byId, current: undefined, phase: 'ready', subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined }
@@ -121,5 +132,28 @@ describe('provider-map', () => {
     const map = providerBySession(list)
     expect(map.get('a')).toEqual({ provider: 'codex', model: 'gpt-5' })
     expect(map.has('b')).toBe(false)
+  })
+
+  it('prefers the durable session selection over the last-request projection', () => {
+    const list = listState([
+      // The session last requested with claude and has since been switched to codex.
+      { id: 'a', title: 'A', provider: 'claude', model: 'claude-opus-5-5', selection: { provider: 'codex', model: 'gpt-6.1-sol' } },
+      // A selection picked but not sent with yet must keep the badge honest.
+      { id: 'b', title: 'B', provider: null, model: '', selection: { provider: 'opencode-go', model: 'deepseek-v4.1-flash' } },
+      // No durable value at all: the last-request projection still answers.
+      { id: 'c', title: 'C', provider: 'claude', model: 'claude-opus-5-5', selection: null },
+    ])
+    const map = providerBySession(list)
+    expect(map.get('a')).toEqual({ provider: 'codex', model: 'gpt-6.1-sol' })
+    expect(map.get('b')).toEqual({ provider: 'opencode-go', model: 'deepseek-v4.1-flash' })
+    expect(map.get('c')).toEqual({ provider: 'claude', model: 'claude-opus-5-5' })
+  })
+
+  it('keeps a live observation ahead of both durable sources', () => {
+    const list = listState([
+      { id: 'a', title: 'A', provider: 'claude', model: 'claude-opus-5-5', selection: { provider: 'claude', model: 'claude-opus-5-5' } },
+    ])
+    const selected = new Map([['a', { provider: 'codex', model: 'gpt-6.1-sol' }]])
+    expect(providerBySession(list, selected).get('a')).toEqual({ provider: 'codex', model: 'gpt-6.1-sol' })
   })
 })

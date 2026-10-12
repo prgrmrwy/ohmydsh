@@ -27,8 +27,9 @@ dsh plugin --profile web add prgrmrwy/dsh-sidebar-session-provider-icon
 
 会话显示哪个 logo，按以下顺序取数据：
 
-1. **即时选择（优先）。** 官方 `dsh-client-ui-model-selection` 的 store，读作 `ctx.modelDirectories.directoryFor(sessionId).store.current`。它是输入框选择器与 `/model` 命令共享的唯一 per-session 状态，`session.selectModel` 成功后立即发布 `{ provider, model }`。因此当前打开的会话（包括还没发过消息的空白会话）按输入框的选择显示。
-2. **最近一次请求（冷历史 fallback）。** Host 的 `provider` session projection 折叠会话日志中的 `request/header` 事件，所以尚未在本浏览器加载选择器的历史会话，仍会显示它最近一次真实请求的 provider。重启不丢，不使用 `localStorage`。
+1. **即时选择（优先，且须可核验）。** 官方 `dsh-client-ui-model-selection` 的 store，读作 `ctx.modelDirectories.directoryFor(sessionId).store.current`。它是输入框选择器与 `/model` 命令共享的唯一 per-session 状态，`session.selectModel` 成功后立即发布 `{ provider, model }`。因此当前打开的会话（包括还没发过消息的空白会话）按输入框的选择显示。该 store 属于客户端 Session scope：每次会话列表 / DOM 信号都会重新解析，运行体给同一个 session 换了新 store（离开会话再回来就会发生）时立即重订阅并重读，身份未变时也重读快照。观测值只在其 session 仍是当前打开会话、且该目录仍可解析期间保留；视图离开或目录不再可解析时即丢弃——不再让客户端无法核验的旧值决定某一行的 logo。
+2. **已选模型（持久）。** 官方 `modelSelection` 投影的 `next`，即该 session 下一次请求将使用的选择。它由 Host 维护，也覆盖"已选但尚未发送"的选择，因此离开会话之后该行仍然正确。
+3. **最近一次请求（冷历史 fallback）。** Host 的 `provider` session projection 折叠会话日志中的 `request/header` 事件，所以尚未在本浏览器加载选择器的历史会话，仍会显示它最近一次真实请求的 provider。重启不丢，不使用 `localStorage`。
 
 品牌判断分两个独立维度：provider route 决定**主图**，model id 决定**右下角小图标**。
 
@@ -49,7 +50,7 @@ dsh plugin --profile web add prgrmrwy/dsh-sidebar-session-provider-icon
 | 层 | 实现 |
 |---|---|
 | Host | `src/provider.ts` 注册 `provider` projection（依赖 `sessionProjections` 服务），折叠 `request/header`；只承担冷历史 fallback |
-| Client 数据 | 订阅 `ctx.modelDirectories` 的 per-session store；选择器的选择优先于 projection fallback |
+| Client 数据 | `selection-binding.ts` 观测当前打开会话的 `ctx.modelDirectories` store（每次信号重新解析）；`provider-map.ts` 依次取：可核验的即时观测 → 官方 `modelSelection` 选择 → `provider` fallback |
 | Client DOM | `row-locator.ts` 收拢全部官方行 DOM 知识；`MutationObserver` 在标题前维护独立的 badge `<span>` |
 | 品牌图 | `src/client/assets/*.svg`，一次下载并随包打入；`logos.ts` 分别判定 provider 品牌与 model 品牌，不同时渲染复合图标 |
 
