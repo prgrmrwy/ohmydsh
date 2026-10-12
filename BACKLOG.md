@@ -744,6 +744,28 @@
 
 ## 待立项
 
+### [U009] 重启打断进行中的 turn 后,已 claim 的 current 投递要等满 1h 租约才结算,期间后续消息全被阻塞
+- **状态**: 待立项(2026-10-13 真机验收 `pet-locus-feishu-read-and-delivery-fixes` 7.5 时实测复现,尚未有 change)
+- **优先级**: P2(影响用户可见的时延与可解释性:被中断后用户只看到表情、最长等 1 小时;不影响不变量正确性)
+- **真机证据(2026-10-13)**:
+  - 群 `oc_6847047be0e4310c404a8a41ed068365`,同一 locus `locus-runtime-1791825019304-1e6afb3085e438`,child `session-1e2caf37-…`。
+  - `delivery-53`:`acceptedAt=01:32:44`、`queuedAt=01:32:45`、`startedAt=01:32:46`、`turnId=…#3`、`inboxMessageId` 已绑定。
+  - Host 于 **01:33:35** 重启(进程被替换)→ child 会话日志出现 `turn/end {reason: {kind: "interrupted"}}`(事件 129),此后**没有任何新 turn**,该投递永远不会被 child 结算。
+  - 重启日志:`dsh-pet locus recovery: 1 pending Deliveries, 0 recoverable operations; no side effect replayed` —— 该行按设计保留为 `current`。
+  - 后续 `delivery-54`(`acceptedAt=01:34:27`)只能停留在 `accepted`/`backlog`,`turnId` 为空;`locus.busy=true`。
+  - `delivery-53.deadlineAt = acceptedAt + 3600s = 02:32:44`;`hardDeadlineAt = +24h`。即:用户第二条消息要等到 02:32:44 才可能被派发,期间无任何解释。
+- **根因(代码定位)**: `src/host/locus/persistence.ts` `reconcileStartup` 对 `status==='current'` 的行采取"序列化 current 即物理派发栅栏,不需要 open-turn 证明即可存活重启"(仅在 `turnId === undefined && executionId !== undefined` 时才用 `unconsumed` 证据判为可重派);绑定过 turnId 的行因此只能等自己的 deadline。`src/host/locus/startup-recovery.ts` 只提供"仍是当前 open turn"(`proveLiveStartupDelivery`)与"从未被消费"(`proveUnconsumedStartupDelivery`)两种证明,**没有"该 turn 已被证明中断"这一种**,而后者的证据其实是持久且精确的(child 会话日志里该 turn 有 `turn/end {kind:'interrupted'}` 且无出站)。
+- **附带风险**: backlog 行被提升时,**租约仍从它自己的 `acceptedAt` 起算**。本例 `delivery-54` 只剩约 100s(02:32:44 提升,02:34:27 到期),一次正常回复可能来不及;若中途再被中断,又会叠一层。
+- **建议契约(待所有者定稿)**:
+  1. 启动恢复增加第三种证明:"绑定 turn 已被证明中断"——该 turn 在 child 会话中出现 `turn/end` 且 reason 为 `interrupted`、该投递无出站、无 `finishOutcome`;命中则以终态结算(`expired` 或 `failed`,`outboundResult: 'none'`,带可诊断 `failureReason`),并立即提升 backlog。
+  2. MUST NOT 因此重发该消息正文:内容已进入 child inbox(绑定已提交),按策略 A 计为已送达;结算是"承认它不会有回复",不是"重试"。
+  3. 被提升的 backlog 行 SHALL 获得最小执行租约(例如自提升时刻起不少于 N 分钟),避免"提升即到期"。
+  4. 证据不足/歧义(turnId 不匹配、日志截断、无 `turn/end`、turn 仍 open)时 fail closed,保持现有等待语义,不做任何推断。
+  5. 用户可见性:被中断结算不应静默——至少给出可诊断标记,而不是只留一个"进行中"表情。
+  6. 测试:重启打断 current → 立即结算 + 派发 backlog;证据不足 → 不结算;被提升行租约下限;不重发正文;`turn/end` 为 error(非 interrupted)时的行为单独定。
+- **临时处置(已向所有者说明)**: 等待 02:32:44 自动过期后 backlog 自动派发;或在**新话题**里重发(话题入口是独立 endpoint/locus,队列独立,不受该 current 阻塞)——后者同时覆盖 7.5 的话题入口验收。
+- **证据与设计输入**: 上述真机数据、`packages/dsh-pet/src/host/locus/persistence.ts`(`reconcileStartup`)、`packages/dsh-pet/src/host/locus/startup-recovery.ts`、`openspec/changes/pet-locus-feishu-read-and-delivery-fixes/verify.md`(2026-10-13 记录)。
+
 ### [U008] locus 创建时把入口群名写进记录并在投递 prompt 呈现
 - **状态**: 待立项(2026-10-13 真机验收 `pet-locus-feishu-read-and-delivery-fixes` 7.5 时发现)
 - **优先级**: P3(可读性与可诊断性,不影响授权/投递正确性)
