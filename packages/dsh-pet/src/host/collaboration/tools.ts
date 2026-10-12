@@ -39,7 +39,7 @@ export function registerCollaborationContextTool(ctx: Context, deps: Collaborati
 export function registerCollaboratorsTool(ctx: Context, deps: CollaboratorRosterDependencies): () => void {
   return ctx.tools.register(defineTool({
     name: COLLABORATORS_TOOL,
-    description: 'List the members of your own collaboration scope: your main session and its current Locus children, or your parent and siblings. No arguments and no target selector. Entries carry no history, credentials or paths, and being listed grants no access to a member\'s work. "needs-restore" means durable but not loaded; "unknown" means reachability could not be proven, so do not assume it is reachable. Use this only to choose whom to ask; do not republish the list into a chat.',
+    description: 'List the members of your own collaboration scope: your main session and its current Locus children, or your parent and siblings. No arguments and no target selector. Each entry includes a canonical opaque `target` reference: copy it exactly into pet_inquire; it is a name, not authorization. Entries carry no history, credentials or paths, and being listed grants no access to a member\'s work. "needs-restore" means durable but not loaded; "unknown" means reachability could not be proven, so do not assume it is reachable. Use this only to choose whom to ask; do not republish the list into a chat.',
     parameters: {},
     output: {
       schema: { type: 'object', additionalProperties: false, properties: { json: { type: 'string', required: true } } },

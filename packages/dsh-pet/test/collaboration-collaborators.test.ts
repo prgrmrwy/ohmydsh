@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { listCollaborators } from '../src/host/collaboration/collaborators.js'
+import { inquiryTargetReference, acceptInquiryFromCaller } from '../src/host/inquiry/ask.js'
+import { createInquiry } from '../src/host/inquiry/ledger.js'
 import { buildLocusRecord, type LocusRecord } from '../src/host/locus/aggregate.js'
 
 function locus(id: string, child: string, overrides: Partial<Parameters<typeof buildLocusRecord>[0]> = {}): LocusRecord {
@@ -42,19 +44,72 @@ describe('caller-bound collaborator roster', () => {
     expect(result).toEqual({
       self: { sessionId: 'main', relation: 'self-parent' },
       members: [
-        { sessionId: 'child-a', locusId: 'a', generation: 1, relation: 'child', title: 'title child-a', reachability: 'available' },
-        { sessionId: 'child-b', locusId: 'b', generation: 1, relation: 'child', title: 'title child-b', reachability: 'available' },
+        { sessionId: 'child-a', locusId: 'a', generation: 1, target: 'child:a:1:child-a', relation: 'child', title: 'title child-a', reachability: 'available' },
+        { sessionId: 'child-b', locusId: 'b', generation: 1, target: 'child:b:1:child-b', relation: 'child', title: 'title child-b', reachability: 'available' },
       ],
     })
     expect(Object.isFrozen(result.members)).toBe(true)
+  })
+
+  it.each(['main', 'child-a'])('publishes canonical targets accepted verbatim for every member seen by %s', async callerId => {
+    const f = fixture()
+    const roster = await call(callerId, f)
+    const accept = vi.fn(async (request: unknown, facts: unknown) => createInquiry(request, {
+      ...(facts as Record<string, unknown>), parent: null, rootInquiryCount: 0, pendingCount: 0,
+    }))
+    let nextId = 0
+    for (const member of roster.members) {
+      const scope = member.relation === 'parent'
+        ? { kind: 'main', sessionId: member.sessionId }
+        : { kind: 'child', sessionId: member.sessionId, locusId: member.locusId, generation: member.generation }
+      expect(member.target).toBe(inquiryTargetReference(scope))
+      const result = await acceptInquiryFromCaller(
+        { agent: { id: callerId } },
+        { target: member.target, question: 'Which evidence do you have?', purpose: 'Validate a scoped implementation' },
+        {
+          ports: f.ports, store: { accept },
+          origin: () => ({ origin: { kind: 'local' }, audience: { kind: 'local-session', sessionId: callerId } }),
+          now: () => 1, newInquiryId: () => `inquiry-${++nextId}`,
+        },
+      )
+      expect(result).toMatchObject({ status: 'accepted', answered: false, target: member.target })
+      expect((await accept.mock.results.at(-1)!.value).target).toEqual(scope)
+    }
+    expect(accept).toHaveBeenCalledTimes(roster.members.length)
+  })
+
+  it.each(['rebuilt', 'retired', 'archived', 'foreign'] as const)('refuses a previously listed target after it becomes %s', async change => {
+    const rows = [locus('a', 'child-a'), locus('b', 'child-b')]
+    const f = fixture(rows)
+    const member = (await call('child-a', f)).members.find(m => m.sessionId === 'child-b')!
+    expect(typeof member.target).toBe('string')
+    if (change === 'rebuilt') rows[1] = locus('b', 'child-b', { generation: 2 })
+    if (change === 'retired') rows[1] = locus('b', 'child-b', { state: 'retired' })
+    if (change === 'archived') f.archived.add('child-b')
+    if (change === 'foreign') {
+      rows[1] = locus('b', 'child-b', { parentSessionId: 'other' })
+      f.identities.set('child-b', { id: 'child-b', parentSessionId: 'other' })
+      f.identities.set('other', { id: 'other' })
+    }
+    const accept = vi.fn(async () => { throw new Error('must not commit') })
+    await expect(acceptInquiryFromCaller(
+      { agent: { id: 'child-a' } },
+      { target: member.target, question: 'Evidence?', purpose: 'Validate work' },
+      {
+        ports: f.ports, store: { accept },
+        origin: () => ({ origin: { kind: 'local' }, audience: { kind: 'local-session', sessionId: 'child-a' } }),
+        now: () => 1, newInquiryId: () => 'inquiry-1',
+      },
+    )).rejects.toMatchObject({ code: 'INQUIRY_REFUSED' })
+    expect(accept).not.toHaveBeenCalled()
   })
 
   it('gives a child its parent and siblings, excluding itself', async () => {
     const f = fixture()
     const result = await call('child-a', f)
     expect(result.self).toEqual({ sessionId: 'child-a', locusId: 'a', generation: 1, relation: 'self-child' })
-    expect(result.members.map(m => [m.sessionId, m.relation])).toEqual([
-      ['main', 'parent'], ['child-b', 'sibling'],
+    expect(result.members.map(m => [m.sessionId, m.target, m.relation])).toEqual([
+      ['main', 'main:main', 'parent'], ['child-b', 'child:b:1:child-b', 'sibling'],
     ])
   })
 

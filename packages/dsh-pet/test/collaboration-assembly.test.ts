@@ -643,6 +643,38 @@ describe('inquiry dispatch reports unavailable instead of throwing', () => {
     await ctx.fiber.dispose()
   })
 
+  it.each([MAIN, CHILD_A])('passes registered roster targets verbatim into registered inquiry for %s', async callerId => {
+    const { assembly, seams: built } = await composed()
+    const ctx = await hostContext()
+    try {
+      const caller = await agentScope(ctx, callerId)
+      assembly.install(caller.scope)
+      const rosterResult = await ctx.tools.execute({
+        agent: caller.key as never, name: COLLABORATORS_TOOL, callId: 'roster' as never,
+        arguments: {}, signal: new AbortController().signal,
+      })
+      expect(rosterResult.isError).toBe(false)
+      const roster = JSON.parse((rosterResult.value as { json: string }).json) as {
+        members: { sessionId: string; target: string; locusId?: string; generation?: number }[]
+      }
+      expect(roster.members).toHaveLength(2)
+      for (const member of roster.members) {
+        expect(typeof member.target).toBe('string')
+        const result = await ctx.tools.execute({
+          agent: caller.key as never, name: INQUIRY_ASK_TOOL, callId: `ask-${member.sessionId}` as never,
+          arguments: { target: member.target, question: 'Which evidence do you have?', purpose: 'Validate scoped work' },
+          signal: new AbortController().signal,
+        })
+        expect(result.isError).toBe(false)
+        const accepted = JSON.parse((result.value as { json: string }).json) as { inquiryId: string }
+        expect(accepted).toMatchObject({ status: 'accepted', answered: false, target: member.target })
+        expect(built.ledger!.get(accepted.inquiryId)?.target).toEqual(member.locusId === undefined
+          ? { kind: 'main', sessionId: member.sessionId }
+          : { kind: 'child', sessionId: member.sessionId, locusId: member.locusId, generation: member.generation })
+      }
+    } finally { await ctx.fiber.dispose() }
+  })
+
   it('reports circle members as not inquirable while dispatch is unavailable', async () => {
     const { assembly } = await composed()
     const ctx = await hostContext()

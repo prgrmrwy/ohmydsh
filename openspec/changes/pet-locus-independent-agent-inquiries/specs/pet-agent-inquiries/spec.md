@@ -4,11 +4,12 @@
 
 系统 SHALL 提供无目标参数的 scoped 协作者名单。Host SHALL 从实际调用 session 判定身份：有效主会话取得自己当前有效的 Locus children；有效 child 先反查唯一当前 locus，再取得其固定主会话及同源有效 Locus children，排除自己。主会话归属 SHALL 以持久 parentSessionId 为准，不以同 chat、workspace、标题或浏览器当前页面推断。名单 MUST NOT 纳入普通临时 subagent、其它主会话树或跨 Host agent。身份冲突或无法证明时 SHALL fail closed。
 
-名单 SHALL 返回稳定目标引用、可辨识名称、负责的入口或工作描述、关系、上下文模式和可询问状态；描述 SHALL 来自可追溯元数据，未知明示，MUST NOT 自动读取历史生成认知摘要。名单 MUST NOT 暴露完整历史、凭据、内部路径或 owner 管理面的完整数据。未加载但持久可恢复的成员 SHALL 保留并标明需恢复；忙碌 SHALL 表达可排队而非失效。状态未知时 MUST NOT 宣称可达。名单只供 agent 内部选目标，不构成把名单公开到飞书的许可。
+名单 SHALL 返回稳定的 opaque `target` 引用（可原样作为询问目标提交；引用仅用于定位成员，不构成授权）、可辨识名称、负责的入口或工作描述、关系、上下文模式和可询问状态；描述 SHALL 来自可追溯元数据，未知明示，MUST NOT 自动读取历史生成认知摘要。名单 MUST NOT 暴露完整历史、凭据、内部路径或 owner 管理面的完整数据。未加载但持久可恢复的成员 SHALL 保留并标明需恢复；忙碌 SHALL 表达可排队而非失效。状态未知时 MUST NOT 宣称可达。名单只供 agent 内部选目标，不构成把名单公开到飞书的许可。
 
 #### Scenario: 主会话发现子会话
 - **WHEN** 主会话 M 有两个有效 Locus children 和一个普通检索 subagent，并查询名单
 - **THEN** 只返回两个 Locus children 的当前成员信息，不返回普通检索 subagent
+- **AND** 每个返回成员都含可原样传给 `pet_inquire.target` 的稳定 opaque `target`，无需模型按 sessionId、locusId 或 generation 自行拼接
 
 #### Scenario: 子会话发现主会话与兄弟
 - **WHEN** M 下 child A 查询名单，M 下另有有效 B 和退役 C
