@@ -444,8 +444,142 @@ function renderSubsequentDeliveryPrompt(context: LocusDeliveryContext): string {
     '',
     '### Intent triage',
     '沿用首次投递的四类规则：info→finish(reply)，work→track 后 finish(reply)，reference-only→finish(no-reply) 静默结算，ambiguous→finish(reply) 发一次澄清并终结本 Delivery；后续回答是同一 child 的新 Delivery。不得仅因同时 at 其它 bot 判为 reference-only。',
+    '',
+    '### 本次投递的工具档位',
+    context.locus.toolTier === 'shell'
+      ? '- 工具档位：shell —— 可执行本机命令并以 bot 身份读取当前入口；业务正文仍只能经 `pet_locus_finish`。'
+      : '- 工具档位：safe —— 不提供 shell、Skill 或直接 lark-cli 能力。',
   ]
   return lines.join('\n')
+}
+
+/**
+ * The subset of a durable locus record a delivery prompt renders from.
+ *
+ * Structural on purpose: the prompt layer must not import the persistence row
+ * type. The Host passes the record it just revalidated against the active
+ * locus, including the persisted tool tier — a renderer that defaults the tier
+ * would misreport a shell child as safe.
+ */
+export interface LocusPromptRecordFacts {
+  readonly id: string
+  readonly generation: number
+  readonly endpoint: LocusEndpoint
+  readonly parentSessionId: string
+  readonly childSessionId: string
+  readonly workspaceId: string
+  readonly state?: LocusFacts['state']
+  readonly childComposition?: 'safe-v1' | 'safe-v2'
+  /** Persisted effective tier; absent means the safe composition. */
+  readonly toolTier?: { readonly effective?: 'safe' | 'shell' } | undefined
+  readonly permission: LocusPermissionFacts
+  readonly contextAnchor?: LocusContextAnchorFacts
+}
+
+/** The inbound message facts a delivery prompt renders. */
+export interface LocusPromptMessageFacts {
+  readonly messageId: string
+  readonly senderOpenId: string
+  readonly senderName?: string
+  readonly text: string
+  readonly addressing?: DeliveryAddressingProjection
+  readonly replyToMessageId?: string
+  readonly replyTarget?: LocusReplyTarget
+}
+
+/**
+ * One durable Delivery as the prompt layer needs it.
+ *
+ * `inboxMessageId` is the only fact that proves the content reached the
+ * child's inbox; acceptance alone does not.
+ */
+export interface LocusPromptDeliveryFacts {
+  readonly childSessionId: string
+  readonly deliveryId: string
+  readonly inboxMessageId?: string
+}
+
+function isBound(delivery: LocusPromptDeliveryFacts): boolean {
+  return typeof delivery.inboxMessageId === 'string' && delivery.inboxMessageId.trim() !== ''
+}
+
+/**
+ * Decide whether a delivery prompt may omit the full preamble.
+ *
+ * The preamble is sent when (and only when) the Host cannot prove the child
+ * already received it. Proof is a prior Delivery for this exact child whose
+ * content is bound into its inbox; the Delivery being rendered is excluded so
+ * that rendering alone never consumes the first delivery (`accept` happens
+ * before rendering). A render that never queued therefore leaves the next real
+ * delivery carrying the full preamble — the deliberate recovery semantics.
+ *
+ * @param input - Durable Deliveries plus the exact caller facts.
+ * @returns `subsequent` only when a prior bound Delivery proves delivery.
+ */
+export function preamblePosition(input: {
+  readonly deliveries: readonly LocusPromptDeliveryFacts[]
+  readonly childSessionId: string
+  readonly currentDeliveryId?: string
+}): 'first' | 'subsequent' {
+  const prior = input.deliveries.some(delivery =>
+    delivery.childSessionId === input.childSessionId
+    && delivery.deliveryId !== input.currentDeliveryId
+    && isBound(delivery))
+  return prior ? 'subsequent' : 'first'
+}
+
+/** Assemble the immutable prompt context from the durable record and message. */
+export function locusDeliveryPromptContext(input: {
+  readonly record: LocusPromptRecordFacts
+  readonly message: LocusPromptMessageFacts
+}): LocusDeliveryContext {
+  const { record, message } = input
+  return {
+    endpoint: record.endpoint,
+    locus: {
+      locusId: record.id,
+      generation: record.generation,
+      ...(record.state === undefined ? {} : { state: record.state }),
+      ...(record.childComposition === undefined ? {} : { childComposition: record.childComposition }),
+      toolTier: record.toolTier?.effective ?? 'safe',
+    },
+    main: { sessionId: record.parentSessionId },
+    child: { sessionId: record.childSessionId },
+    workspace: { workspaceId: record.workspaceId },
+    permission: record.permission,
+    contextAnchor: record.contextAnchor ?? { status: 'unknown' },
+    request: {
+      messageId: message.messageId,
+      senderOpenId: message.senderOpenId,
+      ...(message.senderName === undefined ? {} : { senderName: message.senderName }),
+      text: message.text,
+      ...(message.addressing === undefined ? {} : { addressing: message.addressing }),
+      ...(message.replyToMessageId === undefined ? {} : { replyToMessageId: message.replyToMessageId }),
+      ...(message.replyTarget === undefined ? {} : { replyTarget: message.replyTarget }),
+    },
+  }
+}
+
+/**
+ * Render one delivery prompt from durable facts alone.
+ *
+ * Kept as a pure function so the prompt position and the tier fact can be
+ * tested against the exact record shape the Host passes, instead of only
+ * through the plugin wiring.
+ */
+export function renderLocusDeliveryFor(input: {
+  readonly record: LocusPromptRecordFacts
+  readonly message: LocusPromptMessageFacts
+  readonly deliveries: readonly LocusPromptDeliveryFacts[]
+  readonly currentDeliveryId?: string
+}): string {
+  return renderLocusDeliveryPrompt(locusDeliveryPromptContext(input), {
+    position: preamblePosition({
+      deliveries: input.deliveries,
+      childSessionId: input.record.childSessionId,
+      ...(input.currentDeliveryId === undefined ? {} : { currentDeliveryId: input.currentDeliveryId }),
+    }),
+  })
 }
 
 /** Short alias for integrations that call this simply a locus prompt. */

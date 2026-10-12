@@ -33,6 +33,15 @@ import {
   type PetContextDependencies,
 } from './context-tool.js'
 import { PetError } from './errors.js'
+import {
+  executeLocusChatHistory,
+  PET_LOCUS_CHAT_HISTORY_TOOL,
+  renderLocusChatHistory,
+  type LocusChatHistoryResult,
+  type LocusHistoryToolDeps,
+} from './locus-history-tool.js'
+
+export { PET_LOCUS_CHAT_HISTORY_TOOL }
 import type { PetRepository } from './repository.js'
 import type { LarkClient } from './channel/lark.js'
 import { resolveLedgerCaller, LedgerCallerUnavailableError, type LedgerCallerLocusLookup } from './ledger/caller.js'
@@ -356,6 +365,12 @@ export function registerPetTools(
   deps: { readonly repository: PetRepository } & PetContextDependencies & {
     readonly locusLifecycle?: PetLocusFinishDependencies
     readonly intentTriage?: PetIntentTriageDependencies
+    /**
+     * Caller-bound read of this child's own entrance. Absent means the Host has
+     * no bot read port for this runtime, in which case the tool is simply not
+     * published (never published as a tool that always fails).
+     */
+    readonly locusHistory?: Omit<LocusHistoryToolDeps, 'callerSessionId'>
   },
 ): () => void {
   const disposers: (() => void)[] = []
@@ -616,6 +631,51 @@ export function registerPetTools(
         return result.ok
           ? { ok: true, outcome: result.outcome }
           : { ok: false, reason: result.reason }
+      },
+    })))
+  }
+
+  const history = deps.locusHistory
+  if (history !== undefined) {
+    disposers.push(ctx.tools.register(defineTool({
+      name: PET_LOCUS_CHAT_HISTORY_TOOL,
+      description:
+        'Read a bounded page of THIS entrance\'s own messages, with the bot identity. ' +
+        'The target is resolved from the calling child and cannot be redirected: there is no ' +
+        'chat/group/user/thread argument, and a topic-bound entrance reads that topic rather ' +
+        'than the whole group. Pass `since`/`before` (ISO 8601 with offset, window is ' +
+        '[since, before)) or the `cursor` returned by a previous call to keep reading; do not ' +
+        'rewrite the cursor. Results are truncated to a declared budget and the truncation is ' +
+        'marked. A failure is reported as a failure, never as an empty history.',
+      parameters: {
+        since: { type: 'string' },
+        before: { type: 'string' },
+        direction: { type: 'string', enum: ['older', 'newer'] },
+        cursor: { type: 'string' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', required: true },
+            reason: { type: 'string' },
+            text: { type: 'string' },
+            cursor: { type: 'string' },
+            hasMore: { type: 'boolean' },
+            count: { type: 'number' },
+          },
+        },
+        render: (_args, value) => [{
+          type: 'text',
+          text: renderLocusChatHistory(value as LocusChatHistoryResult),
+        }],
+      },
+      async execute(args, exec) {
+        return executeLocusChatHistory(args, {
+          ...history,
+          callerSessionId: callerSessionId(exec as ExecutionLike),
+        })
       },
     })))
   }

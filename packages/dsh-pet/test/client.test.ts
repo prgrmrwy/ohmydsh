@@ -2094,18 +2094,20 @@ describe('a locus child gets its own durable title', () => {
 })
 
 describe('the delivery preamble position comes from durable history', () => {
-  it('derives position from persisted Deliveries, not a runtime counter', async () => {
+  it('wires the durable Deliveries into the pure prompt renderer', async () => {
     const { readFile } = await import('node:fs/promises')
     const index = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
 
     const render = index.slice(index.indexOf('renderPrompt: ({ locus, message })'))
     const scope = render.slice(0, render.indexOf('turns: locusTurnObserver'))
 
-    // A runtime counter would reset on Host restart and re-send the preamble
-    // mid-conversation; durable Delivery history survives restarts.
+    // The decision itself (first vs subsequent, and the proof it needs) lives in
+    // the pure renderer and is covered by locus-delivery-prompt.test.ts; this
+    // only pins that the Host feeds it the durable record and Delivery history
+    // instead of inventing a counter or a render-order assumption.
+    expect(scope).toContain('renderLocusDeliveryFor')
     expect(scope).toContain('listDeliveries')
-    expect(scope).toContain('childSessionId === record.childSessionId')
-    expect(scope).toContain("'subsequent'")
-    expect(scope).toContain("'first'")
+    expect(scope).toContain('findDeliveryByMessageId')
+    expect(scope).toContain('toolTier: record.toolTier')
   })
 })

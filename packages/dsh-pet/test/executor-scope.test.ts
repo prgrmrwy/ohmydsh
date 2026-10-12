@@ -273,13 +273,14 @@ describe('Pet tool schemas match the real defineTool contract', () => {
       'utf8',
     )
 
-    // Pet still does not ship one tool per arbitrary capability. Seven is the
+    // Pet still does not ship one tool per arbitrary capability. Eight is the
     // full set today: `pet_context`; the security-critical Delivery lifecycle
     // pair (finish/wait), both resolved from the caller/turn proof and
-    // deliberately accepting no target selector; and the four
+    // deliberately accepting no target selector; the four
     // `pet-locus-intent-triage` tools (read-only parent lookup, ledger read,
     // `pet_locus_track`, and `pet_locus_request_execution`), each equally
-    // caller-bound with no target selector.
+    // caller-bound with no target selector; and the caller-bound entrance read
+    // `pet_locus_chat_history`.
     //
     // The count is the point: this asserts nobody adds a registration without
     // amending this list, so a new entry must be justified here in the same
@@ -287,9 +288,14 @@ describe('Pet tool schemas match the real defineTool contract', () => {
     // `pet-locus-todo-accept-starts-work` (design D10) — it takes only an
     // `itemId`, resolves where work runs Host-side, and can reach `accepted`
     // only through a real dispatch, never `done`/`dropped`.
+    // `pet_locus_chat_history` was added by
+    // `pet-locus-feishu-read-and-delivery-fixes`: it takes a window and a
+    // Host-issued cursor, never a chat/group/user/thread selector, reads only
+    // the caller's own entrance, and is published only when the runtime
+    // actually supplies a bot read port.
     // Comments are stripped so prose mentioning registration is not counted.
     const code = tools.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-    expect([...code.matchAll(/ctx\.tools\.register\(/g)]).toHaveLength(7)
+    expect([...code.matchAll(/ctx\.tools\.register\(/g)]).toHaveLength(8)
     expect(tools).toContain('PET_CONTEXT_TOOL')
     expect(tools).toContain('PET_LOCUS_FINISH_TOOL')
     expect(tools).toContain('PET_LOCUS_WAIT_TOOL')
@@ -297,6 +303,7 @@ describe('Pet tool schemas match the real defineTool contract', () => {
     expect(tools).toContain('PET_LOCUS_LEDGER_READ_TOOL')
     expect(tools).toContain('PET_LOCUS_TRACK_TOOL')
     expect(tools).toContain('PET_LOCUS_REQUEST_EXECUTION_TOOL')
+    expect(tools).toContain('PET_LOCUS_CHAT_HISTORY_TOOL')
     expect(tools).not.toContain('pet_create_mr')
     expect(tools).not.toContain('pet_send_cr')
     expect(tools).not.toContain('pet_clean_worktree')

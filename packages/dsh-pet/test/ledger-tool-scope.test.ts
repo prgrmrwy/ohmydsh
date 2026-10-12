@@ -12,11 +12,13 @@ import { Context } from '@deepseek-ai/cordis'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import {
+  PET_LOCUS_CHAT_HISTORY_TOOL,
   PET_LOCUS_PARENT_LOOKUP_TOOL,
   PET_LOCUS_LEDGER_READ_TOOL,
   PET_LOCUS_TRACK_TOOL,
   registerPetTools,
 } from '../src/host/tools.js'
+import { createLocusHistoryCursor } from '../src/host/locus/history-cursor.js'
 import type { PetRepository } from '../src/host/repository.js'
 import { openPetHarness, type PetHarness } from './harness.js'
 
@@ -55,11 +57,16 @@ async function installOnScope(
   scoped: Context,
   repository: PetRepository,
   intentTriage?: Parameters<typeof registerPetTools>[1]['intentTriage'],
+  locusHistory?: Parameters<typeof registerPetTools>[1]['locusHistory'],
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     scoped.inject(['tools'], toolCtx => {
       try {
-        registerPetTools(toolCtx, { repository, ...(intentTriage === undefined ? {} : { intentTriage }) })
+        registerPetTools(toolCtx, {
+          repository,
+          ...(intentTriage === undefined ? {} : { intentTriage }),
+          ...(locusHistory === undefined ? {} : { locusHistory }),
+        })
         resolve()
       } catch (error) {
         reject(error instanceof Error ? error : new Error(String(error)))
@@ -69,6 +76,39 @@ async function installOnScope(
 }
 
 const stubIntentTriage = { loci: { findByChildSessionId: () => [] } }
+
+/**
+ * The entrance read is published through the REAL ToolRuntime as well: it must
+ * appear exactly when the Host supplies a read port, and stay invisible when it
+ * does not — a capability that always fails must not be advertised.
+ */
+describe('the caller-bound entrance read is published only when assembled', () => {
+  const stubHistory = {
+    loci: { findByChildSessionId: () => [] },
+    cursor: createLocusHistoryCursor(Buffer.alloc(32, 3)),
+    read: async () => ({ messages: [], hasMore: false }),
+  }
+
+  it('registers when the Host supplies the bot read port', async () => {
+    harness = await openPetHarness()
+    const ctx = await hostContext()
+    const key = {} as never
+    const scope = createScope(ctx, key)
+    await installOnScope(scope.ctx, harness.repository, stubIntentTriage, stubHistory)
+
+    expect(visibleTools(ctx, key)).toContain(PET_LOCUS_CHAT_HISTORY_TOOL)
+  })
+
+  it('stays invisible when the runtime has no read port', async () => {
+    harness = await openPetHarness()
+    const ctx = await hostContext()
+    const key = {} as never
+    const scope = createScope(ctx, key)
+    await installOnScope(scope.ctx, harness.repository, stubIntentTriage)
+
+    expect(visibleTools(ctx, key)).not.toContain(PET_LOCUS_CHAT_HISTORY_TOOL)
+  })
+})
 
 describe('the three pet-locus-intent-triage tools are scoped to Pet executors', () => {
   it('all three are visible to the executor scope that installed them, when intentTriage deps are supplied', async () => {

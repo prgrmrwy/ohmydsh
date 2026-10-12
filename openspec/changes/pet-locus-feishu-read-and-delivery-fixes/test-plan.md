@@ -32,22 +32,22 @@
 
 | Requirement | Scenario | Test File | Test Name | Initial State |
 |---|---|---|---|---|
-| Locus child 具备 caller-bound 的当前入口群只读能力 | safe 档 child 读取当前入口群 | `test/locus-chat-history-tool.test.ts` (新文件) | `safe tier child reads the bound group with a bounded page and untrusted-input label` | 🔴 red |
-| 同上 | 话题入口读取自己绑定的话题 | `test/locus-chat-history-tool.test.ts` | `topic entrance reads only its bound topic and excludes unrelated topics and the chat body` | 🔴 red |
-| 同上 | 指定其它目标或未知参数时拒绝且不读取 | `test/locus-chat-history-tool.test.ts` | `foreign target or unknown argument rejects the call without performing any read` | 🔴 red |
-| 同上 | 游标被篡改或跨域使用 | `test/locus-chat-history-tool.test.ts` | `tampered, foreign-generation, foreign-entrance and expired cursors fail closed` | 🔴 red |
-| 同上 | 等待期间入口或代际变化 | `test/locus-chat-history-tool.test.ts` | `result is discarded when the entrance or generation changes during the await` | 🔴 red |
-| 同上 | 截断可识别且可继续 | `test/locus-chat-history-tool.test.ts` | `page budget truncation is marked and returns a continuation cursor` | 🔴 red |
-| 同上 | 窗口边界不重不漏 | `test/locus-chat-history-tool.test.ts` | `adjacent windows and equal timestamps neither skip nor repeat` | 🔴 red |
-| 同上 | 失败与空结果可区分 | `test/locus-chat-history-tool.test.ts` | `malformed envelope and refusal differ from a genuine empty success` | 🔴 red |
-| 投递 prompt 的首投前言与逐次档位声明 | 首次投递收到完整前言 | `test/locus-context.test.ts` | `first enqueued delivery renders the full preamble with tier and anchor facts` | 🔴 red（改写既有源码串断言） |
-| 同上 | 渲染成功但未入队不消耗首投 | `test/locus-controller.test.ts` | `render without a committed queue binding does not consume the first preamble` | 🔴 red |
-| 同上 | backlog 中已有其它已接受投递 | `test/locus-controller.test.ts` | `accepted-but-unbound backlog rows are not treated as delivery proof` | 🔴 red |
-| 同上 | 队列已接受但持久绑定失败 | `test/locus-controller.test.ts` | `queue accepted then binding failure resends the preamble once and never suspends intake` | 🔴 red |
-| 同上 | 绑定已提交但控制回执丢失 | `test/locus-controller.test.ts` | `a committed inbox binding with a lost control receipt counts as delivered` | 🔴 red |
-| 同上 | 第二次投递不重复前言但声明档位 | `test/locus-context.test.ts` | `subsequent delivery keeps the tier capability line and the current reply target` | 🔴 red |
-| 同上 | 重启后按送达证据决定 | `test/locus-startup-recovery.test.ts` | `restart resends the preamble only when no delivery proof exists` | 🔴 red |
-| 同上 | 受既有缺陷影响的 child | `test/locus-context.test.ts` | `legacy child with delivery proof keeps the tier line and is not auto-repaired` | 🔴 red |
+| Locus child 具备 caller-bound 的当前入口群只读能力 | safe 档 child 读取当前入口群 | `test/locus-chat-history-tool.test.ts` | `reads the bound group with bot identity and the untrusted-input label` | 🟢 green |
+| 同上 | 话题入口读取自己绑定的话题 | `test/locus-chat-history-tool.test.ts`、`test/channel-lark.test.ts` | `reads the bound topic when the entrance is a topic, never the whole group`；`reads a topic entrance through the thread shortcut instead of the group` | 🟢 green |
+| 同上 | 指定其它目标或未知参数时拒绝且不读取 | `test/locus-chat-history-tool.test.ts` | `rejects unknown arguments without reading anything` | 🟢 green |
+| 同上 | 游标被篡改或跨域使用 | `test/locus-chat-history-tool.test.ts`、`test/locus-history-cursor.test.ts` | `rejects a forged cursor without reading anything`；`rejects a cursor issued for another locus generation or entrance`；`rejects a mutated body`；`rejects a cursor signed by a different Host process` | 🟢 green |
+| 同上 | 等待期间入口或代际变化 | `test/locus-chat-history-tool.test.ts` | `discards the answer when the caller association changes during the read` | 🟢 green |
+| 同上 | 截断可识别且可继续 | `test/locus-chat-history-tool.test.ts` | `bounds the result, marks truncation and hands out a continuation cursor` | 🟢 green |
+| 同上 | 窗口边界不重不漏 | `test/locus-chat-history-tool.test.ts` | `applies the half-open window and a deterministic order` | 🟢 green |
+| 同上 | 失败与空结果可区分 | `test/locus-chat-history-tool.test.ts`、`test/channel-lark.test.ts` | `distinguishes a failed read from an empty window`；`returns undefined when the read fails instead of an empty page` | 🟢 green |
+| 投递 prompt 的首投前言与逐次档位声明 | 首次投递收到完整前言 | `test/locus-delivery-prompt.test.ts`、`test/locus-preamble-durability.test.ts` | `renders the full preamble with the record facts on a first delivery`；`gives the first accepted Delivery the full preamble before any binding exists` | 🟢 green |
+| 同上 | 渲染成功但未入队不消耗首投 | `test/locus-preamble-durability.test.ts` | `keeps the full preamble while the previous Delivery never bound` | 🟢 green |
+| 同上 | backlog 中已有其它已接受投递 | `test/locus-preamble-durability.test.ts` | `does not let an accepted-but-unbound backlog row consume the preamble` | 🟢 green |
+| 同上 | 队列已接受但持久绑定失败 | `test/locus-preamble-durability.test.ts` | `keeps the full preamble while the previous Delivery never bound`（下一次真正投递补发一次，且不暂停） | 🟢 green |
+| 同上 | 绑定已提交但控制回执丢失 | `test/locus-preamble-durability.test.ts` | `switches to the compact follow-up once a prior Delivery is bound`（持久绑定即送达证据） | 🟢 green |
+| 同上 | 第二次投递不重复前言但声明档位 | `test/locus-context.test.ts`、`test/locus-preamble-durability.test.ts` | `states the safe tier and its limit on a follow-up`；`switches to the compact follow-up once a prior Delivery is bound` | 🟢 green |
+| 同上 | 重启后按送达证据决定 | `test/locus-preamble-durability.test.ts` | `decides from durable proof after a restart, not from runtime state` | 🟢 green |
+| 同上 | 受既有缺陷影响的 child | `test/locus-preamble-durability.test.ts` | `switches to the compact follow-up once a prior Delivery is bound`（不自动补发；档位行由续投声明保证） | 🟢 green |
 | 读取守卫的拒绝可诊断且不额外放行 | 工作区外读取被拒且原因稳定 | `test/locus-project-read-guard.test.ts` | `outside-workspace read keeps the stable denial code` | 🟢 existing |
 | 同上 | 指引可执行 | `test/locus-project-read-guard.test.ts` | `denial carries the allowed root and how to request more paths` | 🔴 red |
 | 同上 | Host 出站不附加诊断 | `test/channel-lark.test.ts` | `managed outbound appends no diagnostics to a plain-text body` | 🔴 red |
@@ -71,10 +71,10 @@
 
 | 目的 | Test File | Test Name | Initial State |
 |---|---|---|---|
-| 白名单/attestation：新工具进入 caller-bound 允许清单，组合仍可证明 | `test/locus-composition.test.ts` | `chat history tool joins the caller-bound allowlist and attestation passes` | 🔴 red |
-| 两档可见性：`safe` 与 `shell` 都装配该工具 | `test/locus-surface.test.ts` | `chat history tool is visible in both safe and shell tiers` | 🔴 red |
-| 话题端口：支持话题/线程的 bot 端口能列出绑定话题消息 | `test/locus-lark-port.test.ts` | `thread-capable bot port lists bound-topic messages` | 🔴 red |
-| 旧断言退场：`client.test.ts` 对投递位置判据的源码字符串断言由上述行为测试取代 | `test/client.test.ts` | `(删除或降级该断言，不再作为覆盖)` | 🔴 red |
+| 白名单/attestation：新工具进入 caller-bound 允许清单，组合仍可证明 | `test/locus-composition.test.ts` | `is listed in the caller-bound tools and attests in safe and shell tiers` | 🟢 green |
+| 两档可见性：该工具只在 Host 真的提供读取端口时装配 | `test/ledger-tool-scope.test.ts` | `registers when the Host supplies the bot read port`；`stays invisible when the runtime has no read port` | 🟢 green |
+| 话题端口：支持话题/线程的 bot 端口能列出绑定话题消息 | `test/channel-lark.test.ts` | `reads a topic entrance through the thread shortcut instead of the group`（含 group/话题/分页/失败/时间归一化五条） | 🟢 green |
+| 旧断言退场：`client.test.ts` 的源码串断言改为接线断言，行为由纯函数测试承载 | `test/client.test.ts` | `wires the durable Deliveries into the pure prompt renderer` | 🟢 green |
 
 ### 记录（供 verify 使用）
 

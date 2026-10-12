@@ -465,3 +465,79 @@ describe('Pet profile isolation', () => {
     }
   })
 })
+
+/**
+ * The caller-bound entrance read: group vs bound topic, bot identity, failure
+ * as `undefined` (never a fake empty page) and the wall-clock normalization
+ * the `[since, before)` window depends on.
+ */
+describe('caller-bound entrance read', () => {
+  function envelope(messages: readonly unknown[], extra: Record<string, unknown> = {}): string {
+    return JSON.stringify({ ok: true, identity: 'bot', data: { messages, has_more: false, ...extra } })
+  }
+
+  function runnerFor(stdout: string): { runner: LarkCliRunner; calls: string[][] } {
+    const calls: string[][] = []
+    const runner: LarkCliRunner = async (_binary, args) => {
+      calls.push([...args])
+      return { stdout }
+    }
+    return { runner, calls }
+  }
+
+  it('reads the bound group with the bot identity and older-first paging', async () => {
+    const { runner, calls } = runnerFor(envelope([{
+      message_id: 'om_1',
+      create_time: '2026-10-12 10:00',
+      content: '你好',
+      sender: { name: '张三' },
+      message_position: '3',
+    }]))
+    const client = createLarkCliClient('lark-cli', runner, () => {})
+    const result = await client.readEntranceHistory!({ chatId: 'oc_g', pageSize: 50, direction: 'older' })
+
+    expect(calls[0]).toEqual(expect.arrayContaining(['im', '+chat-messages-list', '--as', 'bot', '--chat-id', 'oc_g', '--order', 'desc', '--page-size', '50', '--no-reactions']))
+    expect(result?.messages[0]).toMatchObject({ messageId: 'om_1', senderName: '张三', text: '你好', messagePosition: '3' })
+    expect(result?.hasMore).toBe(false)
+  })
+
+  it('reads a topic entrance through the thread shortcut instead of the group', async () => {
+    const { runner, calls } = runnerFor(envelope([]))
+    const client = createLarkCliClient('lark-cli', runner, () => {})
+    await client.readEntranceHistory!({ chatId: 'oc_g', threadId: 'omt_t', pageSize: 20, direction: 'newer' })
+
+    expect(calls[0]).toEqual(expect.arrayContaining(['im', '+threads-messages-list', '--as', 'bot', '--thread', 'omt_t', '--order', 'asc']))
+    expect(calls[0]).not.toContain('+chat-messages-list')
+  })
+
+  it('passes the platform page token through and reports the next one', async () => {
+    const { runner, calls } = runnerFor(envelope([], { has_more: true, page_token: 'next-page' }))
+    const client = createLarkCliClient('lark-cli', runner, () => {})
+    const result = await client.readEntranceHistory!({ chatId: 'oc_g', pageSize: 10, direction: 'older', pageToken: 'page-1' })
+
+    expect(calls[0]).toContain('--page-token')
+    expect(result).toMatchObject({ hasMore: true, pageToken: 'next-page' })
+  })
+
+  it('returns undefined when the read fails instead of an empty page', async () => {
+    const runner: LarkCliRunner = async () => {
+      throw Object.assign(new Error('failed'), { stdout: JSON.stringify({ ok: false, error: { code: 230027 } }) })
+    }
+    const client = createLarkCliClient('lark-cli', runner, () => {})
+
+    expect(await client.readEntranceHistory!({ chatId: 'oc_g', pageSize: 10, direction: 'older' })).toBeUndefined()
+  })
+
+  it('normalizes the CLI wall-clock time to ISO with an offset', async () => {
+    const { runner } = runnerFor(envelope([{
+      message_id: 'om_1',
+      create_time: '2026-10-12 10:00',
+      content: 'x',
+      sender: { name: '张三' },
+    }]))
+    const client = createLarkCliClient('lark-cli', runner, () => {})
+    const result = await client.readEntranceHistory!({ chatId: 'oc_g', pageSize: 10, direction: 'older' })
+
+    expect(result?.messages[0]?.createTime).toMatch(/^2026-10-12T10:00:00[+-]\d{2}:\d{2}$/)
+  })
+})
