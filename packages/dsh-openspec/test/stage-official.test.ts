@@ -5,6 +5,8 @@ import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { officialStageDependencies } from '../src/stage-official.js'
 const roots: string[] = []
+// The release pinned in package.json, so a version bump never needs a test edit.
+const PINNED = (createRequire(import.meta.url)('../package.json') as { dependencies: Record<string, string> }).dependencies['@fission-ai/openspec']!
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 async function stage(extra: string, version = '1.13.2') {
   const root = await mkdtemp(join(tmpdir(), 'stage-official-')); roots.push(root)
@@ -35,6 +37,6 @@ describe('official target staging contract', () => {
   it('installed_official_release_passes_full_catalog_parity', async () => {
     const require = createRequire(import.meta.url)
     const entry = require.resolve('@fission-ai/openspec')
-    expect(await officialStageDependencies('/unused').parity(join(entry, '../..'), '1.13.2')).toBe(true)
+    expect(await officialStageDependencies('/unused').parity(join(entry, '../..'), PINNED)).toBe(true)
   })
 })
