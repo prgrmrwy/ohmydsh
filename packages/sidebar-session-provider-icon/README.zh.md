@@ -3,7 +3,7 @@
 [English](README.md) · 简体中文
 
 <!-- problem -->
-DSH 的会话列表里每一行看起来都一样，不打开会话就分不清它用的是哪个模型。这个插件在每个会话标题前显示输入框当前选中的模型品牌 logo，切换模型后立刻更新。provider 和 model 不是同一家时（例如 `opencode-go/deepseek-v4-flash`），在 provider logo 的右下角叠一个缩小的 model logo。
+DeepSeek Harness（DSH）的会话列表里每一行看起来都一样，不打开会话就分不清它用的是哪个模型。这个插件在每个会话标题前显示输入框当前选中的模型品牌 logo，切换模型后立刻更新。provider 和 model 不是同一家时（例如 `opencode-go/deepseek-v4-flash`），在 provider logo 的右下角叠一个缩小的 model logo。
 
 ![侧边栏效果：同品牌显示单一 logo，聚合 provider 显示主图 + 右下角 model 小图标（浅色 / 深色主题）](docs/screenshot.png)
 
