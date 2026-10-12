@@ -29,6 +29,11 @@
 先读 [`docs/architecture/dsh-plugin-integration-pitfalls.md`](docs/architecture/dsh-plugin-integration-pitfalls.md)。** 那里记录的是调用成功、类型通过、
 日志无异常，但实际没有生效的集成方式——已经重复踩过，不要再靠现场排查重新发现。
 
+**把自研插件发布成独立仓库、上架 DSH 插件商店（awesome-dsh-plugin）或优化可搜索性前，
+先读 [`docs/architecture/dsh-plugin-publishing.md`](docs/architecture/dsh-plugin-publishing.md)。** 那里是通用流程：
+六步清单（本地准备 → 镜像仓库 → 仓库元数据 → 商店 PR → npm → 其它索引）与三个必踩的坑
+（`prepare` 与 `prepack` 缺一不可、subtree 只推已提交内容、提 PR 前先本地预校验）；照做不需要任何历史上下文。
+
 ## 关键目录
 
 - `dsh.yaml`：总 manifest；DSH 版本、自动更新、Web 配置和全部定制的单一开关面。
@@ -36,7 +41,7 @@
 - `openspec/changes/`：进行中的 OpenSpec change；包含 proposal、design、delta specs 和 tasks。
 - `openspec/changes/archive/`：已完成 change 的历史设计与验收记录。
 - `docs/adr/`：已接受的长期架构决策。
-- `docs/architecture/`：当前系统结构与机制说明（[私有 overlay](docs/architecture/private-overlay.md)、[环境级 Agent 指令](docs/architecture/agent-instructions.md)、[DSH 插件集成陷阱](docs/architecture/dsh-plugin-integration-pitfalls.md)）；时间点性的调研与验收记录归入所属 OpenSpec change 或 package 的 `docs/`，缺陷归入 `BACKLOG.md`。
+- `docs/architecture/`：当前系统结构与机制说明（[私有 overlay](docs/architecture/private-overlay.md)、[环境级 Agent 指令](docs/architecture/agent-instructions.md)、[DSH 插件集成陷阱](docs/architecture/dsh-plugin-integration-pitfalls.md)、[自研插件发布与收录](docs/architecture/dsh-plugin-publishing.md)）；时间点性的调研与验收记录归入所属 OpenSpec change 或 package 的 `docs/`，缺陷归入 `BACKLOG.md`。
 - `packages/`：本仓库自研的 DSH package/bundle 源码。
 - `patches/`：纯 composition patch 或远端插件的个人覆盖。
 - `skills/`：同步到 `~/.dsh/skills/` 的自定义 skill。

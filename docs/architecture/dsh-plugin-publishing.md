@@ -1,4 +1,7 @@
-# 上架商店与可发现性 playbook
+# 自研插件的发布与生态收录 playbook
+
+**本文是 ohmydsh 自研插件通用的发布流程，不属于某一个插件**（`sidebar-session-provider-icon` 只是它的第一个实例），
+因此放在 `docs/architecture/` 而不是任何 package 的 `docs/` 里——后者会随镜像仓库一起公开，且只被一个插件继承。
 
 调研时间：2026-10-10。事实来源：`awesome-dsh-plugin/awesome-dsh-plugin@main` 的
 [`contributing.md`](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/main/contributing.md)、
