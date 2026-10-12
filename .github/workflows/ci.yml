@@ -39,6 +39,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # dsh-openspec 的 lib/ 是 gitignore 的构建产物,tests/dsh-openspec-upgrade
+      # 直接 import 它;不先构建,干净 checkout 里这些用例会 ERR_MODULE_NOT_FOUND。
+      - name: Build dsh-openspec
+        run: npm run build --workspace dsh-openspec
+
       - name: Run tests
         run: npm test
 

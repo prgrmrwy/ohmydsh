@@ -48,6 +48,26 @@ function comparableSessionId(sessionId: string): string {
 }
 
 /**
+ * Cheap id-only prefilter for Host session enumeration.
+ *
+ * Resolving a candidate cold-inspects its whole Session log, so a Host must
+ * narrow by id BEFORE resolving. Resolving every accounted session first and
+ * filtering afterwards decompressed the entire session store in one burst and
+ * OOM-crashed the Host on a single `/bind`. Uses the same comparison as
+ * {@link resolveLocusBindPrefix}, so it can never drop a session that the
+ * authoritative resolution would have matched.
+ *
+ * @param sessionId - Raw session id from a Workspace membership list.
+ * @param prefix - The `/bind` prefix as typed.
+ * @returns whether the id can possibly satisfy the prefix.
+ */
+export function locusSessionIdMatchesPrefix(sessionId: string, prefix: string): boolean {
+  const needle = prefix.trim().toLowerCase()
+  if (needle.length < MIN_LOCUS_BIND_PREFIX_LENGTH) return false
+  return comparableSessionId(sessionId).startsWith(needle)
+}
+
+/**
  * Resolve exactly one usable main session without exposing whether zero or
  * several candidates matched.
  */
@@ -135,7 +155,13 @@ export interface LocusToolTierMutationPort {
 
 export interface CreateLocusControlDispatcherOptions {
   readonly allowOpenIds: () => readonly string[]
-  readonly listSessions: () =>
+  /**
+   * List bind candidates. `prefix` is the already length-checked `/bind`
+   * prefix; a Host whose enumeration is expensive (cold session inspection)
+   * should narrow by it before resolving. The result is still re-filtered by
+   * {@link resolveLocusBindPrefix}, so a Host may ignore it.
+   */
+  readonly listSessions: (prefix: string) =>
     | PromiseLike<readonly LocusBindableSession[]>
     | readonly LocusBindableSession[]
   readonly bind: LocusBindMutationPort
@@ -258,7 +284,12 @@ export function createLocusControlDispatcher(
       try {
         switch (command.kind) {
           case 'bind': {
-            const sessions = await Promise.resolve(options.listSessions())
+            // Reject a short prefix before enumerating anything: a short
+            // prefix can never resolve, and enumeration may be expensive.
+            if (command.prefix.trim().length < MIN_LOCUS_BIND_PREFIX_LENGTH) {
+              return failure('prefix-too-short', '会话 id 前缀太短，请至少提供 6 位。')
+            }
+            const sessions = await Promise.resolve(options.listSessions(command.prefix))
             const resolution = resolveLocusBindPrefix(command.prefix, sessions)
             if (!resolution.resolved) {
               return resolution.reason === 'too-short'

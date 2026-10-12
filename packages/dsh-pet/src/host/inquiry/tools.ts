@@ -40,7 +40,7 @@ export function registerInquiryAskTool(ctx: Context, deps: InquiryAskDependencie
     parameters: {
       target: {
         type: 'string',
-        description: 'Exact target reference from your collaborator list. Not a session id you composed yourself, and not a chat, thread or user.',
+        description: 'Canonical opaque `target` string copied verbatim from a member returned by `pet_collaborators`. Do not construct it yourself. Not a chat, thread or user.',
         required: true,
       },
       question: {

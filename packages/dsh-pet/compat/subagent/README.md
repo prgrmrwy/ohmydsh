@@ -12,8 +12,8 @@ maintains a minimal patch against the pinned tag.
 the four seams still have 0 hits in a clean HEAD (checked with `git grep`), so all are kept; after a
 three-way merge the source hunk in `child-agent.ts` is semantically the same as on 0.1.5 (0.2.0's
 `agentPresets.mount` still returns `{ id }`); the hunk for `list-children.spec.ts` is void, because upstream
-deleted the case it modified. Upstream subagent suite: 316 pass unpatched, 327 pass patched (the extra 11
-are the seam cases).
+deleted the case it modified. Upstream subagent suite: 316 pass unpatched, 328 pass patched (the extra 12
+are the seam cases, including a fresh-runtime cold-resume regression for durable silent settlement).
 
 **The current overlay replaces exactly one upstream package: `@deepseek-ai/dsh-subagent`.**
 
