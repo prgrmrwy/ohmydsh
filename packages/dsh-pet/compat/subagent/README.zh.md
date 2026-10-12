@@ -10,8 +10,8 @@
 **2026-10-04 按 `dsh-v0.2.0-rc.2`（`639ed015`）重新推导**（change `upgrade-dsh-0-2-0-runtime` W5）：
 四个 seam 在干净 HEAD 中仍为 0 命中（`git grep` 核对），故全部保留；`child-agent.ts` 的源码 hunk
 经三方合并后语义与 0.1.5 一致（0.2.0 的 `agentPresets.mount` 仍返回 `{ id }`）；`list-children.spec.ts`
-的 hunk 作废——上游已删除它修改的那个用例。上游 subagent 规格：未打补丁 316 通过、打补丁后 327 通过
-（多出的 11 例即 seam 用例）。
+的 hunk 作废——上游已删除它修改的那个用例。上游 subagent 规格：未打补丁 316 通过、打补丁后 328 通过
+（多出的 12 例即 seam 用例，包含全新 runtime 冷恢复后仍保持 silent settlement 的回归测试）。
 
 **当前 overlay 只替换一个上游包：`@deepseek-ai/dsh-subagent`。**
 
