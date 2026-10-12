@@ -37,27 +37,6 @@ channel SHALL 是显式开关能力且默认关闭。正式 Channel 未启用时
 - **WHEN** 配对成功、取消、失败或过期
 - **THEN** 若正式 Channel 已启用则 consumer 继续运行，否则 Pet 以 SIGTERM 停止 consumer
 
-
-Pet Host SHALL 以内嵌子进程方式运行 `lark-cli event consume`（bot 身份）订阅
-`im.message.receive_v1`，以流式事件作为唯一入站来源。Pet MUST NOT 读取、保存、
-回传或代理任何飞书 app secret、token 或其它凭据；凭据生命周期完全属于 lark-cli。
-所有出站飞书调用（拉取历史、表情增删、单聊回复）SHALL 统一使用 bot 身份，
-MUST NOT 使用 lark-cli 的 user 身份。
-
-channel SHALL 是显式开关能力且默认关闭；未启用时 Pet MUST NOT 启动订阅子进程。
-
-#### Scenario: 启用 channel 后启动订阅
-- **WHEN** 用户在设置中启用 channel 且 lark-cli bot 身份可用，Pet Host 达到 ready
-- **THEN** Pet 启动事件订阅子进程并在确认订阅成功后将 channel 标记为 connected
-
-#### Scenario: lark-cli bot 身份不可用
-- **WHEN** channel 已启用但 lark-cli 未登录 bot 或登录态失效
-- **THEN** channel 进入 down 状态并给出指向 lark-cli 重新登录的诊断说明，Pet 其余能力不受影响
-
-#### Scenario: 升级后默认不消费事件
-- **WHEN** 用户升级到含 channel 能力的 Pet 版本且未显式启用 channel
-- **THEN** Pet 不启动订阅子进程，不消费任何飞书事件
-
 ### Requirement: Bot 绑定经 lark-cli 专属 profile 完成且 Pet 不接触凭据
 
 系统 SHALL 提供两条 bot 绑定路径：**创建新 Bot**（经 lark-cli 发起授权流程，由用户在浏览器完成创建与授权）与**连接已有 Bot**（用户提供 App ID 与 App Secret）。两条路径 SHALL 使用 Pet 专属且稳定命名的 lark-cli profile，MUST NOT 修改或依赖用户当前默认 profile，也 MUST NOT 覆盖用户既有的 lark-cli app 配置、令牌或身份策略。Pet 发起的事件订阅、身份查询及其它 channel 命令 MUST 显式选择该专属 profile；多 profile 环境下切换默认 profile不得改变 Pet 使用的 app。
@@ -433,31 +412,6 @@ Channel 管理面 SHALL 将“绑定 Bot、确认 Bot 身份、配置至少一�
 #### Scenario: 默认 workspace 不可用
 - **WHEN** 用户已通过配对加入成员，但默认 workspace 已删除、归档或无法解析
 - **THEN** onboarding 仅将允许成员步骤标为完成，仍拒绝启用正式 Channel 并要求重新选择 workspace
-
-#### Scenario: 全部前置条件满足
-- **WHEN** Bot 身份、allowlist、默认 workspace 与订阅权限均满足且用户显式启用
-- **THEN** consumer 到达 connected，页面显示 channel 可用，allowlist 用户随后在群中 @ Bot 可进入既有路由与 Invocation 流程
-
-
-Channel 管理面 SHALL 将“绑定 Bot、确认 Bot 身份、配置至少一个 allowlist 成员、选择默认 workspace、启用订阅”展示为有序的 onboarding 状态，而不是把“绑定成功”呈现为“已经可以在群中使用”。每一步 SHALL 显示完成状态；未满足下一步前置条件时，操作 SHALL 被禁用或返回紧邻操作位置的具体诊断。
-
-系统 SHALL 在启动、显式重连及启用前验证：受支持的 lark-cli 可用、Bot 已绑定且身份可用、bot open_id 已确认、allowlist 非空、默认 workspace 可解析；异步验证完成后 SHALL 再次读取最新配置，已 disable、Host 已停止或前置已失效时不得启动 consumer。已启用时管理面 MUST NOT 允许清空 allowlist 或默认 workspace。可提前验证的版本/scope/身份错误 SHALL 在设置页暴露；目标群调用发现的权限错误 SHALL 持久为 channel 诊断并提供飞书返回的权限申请入口（若有），而不是只表现为群内沉默。系统 MUST NOT 自动授予权限或把未确认用户加入 allowlist。
-
-#### Scenario: 只完成 Bot 绑定
-- **WHEN** 用户完成 Bot 绑定但尚未配置 allowlist 或默认 workspace
-- **THEN** 页面明确显示绑定已完成但 channel 尚不可用，并指出下一项待完成步骤，不启动事件订阅
-
-#### Scenario: allowlist 为空时尝试启用
-- **WHEN** 用户在没有允许成员时启用 channel
-- **THEN** 系统拒绝启用并在开关附近说明必须先添加至少一个 `ou_...`，而不是仅留下一个没有反应的关闭状态
-
-#### Scenario: Bot 身份尚未确认时尝试启用
-- **WHEN** 绑定记录存在但 bot open_id 尚未通过受支持 CLI 的已验证身份证明
-- **THEN** 系统拒绝启用并展示身份确认诊断，不启动一个无法判定群聊 mention 的订阅
-
-#### Scenario: 默认 workspace 不可用
-- **WHEN** 用户选择的默认 workspace 已删除、归档或无法解析
-- **THEN** 系统拒绝将 channel 标为可用并要求重新选择，不在收到消息后才静默失败
 
 #### Scenario: 全部前置条件满足
 - **WHEN** Bot 身份、allowlist、默认 workspace 与订阅权限均满足且用户显式启用

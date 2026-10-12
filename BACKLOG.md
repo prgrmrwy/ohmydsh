@@ -727,6 +727,30 @@
 
 ## 待立项
 
+### [U006] Locus 只读身份回落 user:需要"可回落主体"与正向错误分类契约
+- **状态**: 待立项(2026-10-12 由 change `pet-locus-feishu-read-and-delivery-fixes` 拆出 —— 评审 round 1 的 C4 判定其授权边界无法从当时的方案推出)
+- **优先级**: P2(正常路径已可用,属兜底:bot 权限 `im:message.group_msg` 已于 2026-10-12 开通并实测可读群历史)
+- **背景 / 动机**: 事故当时(`session-82bccfbf`)bot 身份读群历史返回 `230027 user_unauthorized`,只有 `--as user` 能读;所有者口径是"bot 拿不到可以接受 as user,但最好还是 bot"。因此需要一条**有界、可标注**的只读回落路径,而不是让 child 在权限缺失时整体不可读。
+- **评审给出的落地契约(缺一不可)**:
+  - **可回落主体**:明确"以谁的身份回落"——专用 profile 当前登录的用户身份需在绑定时刻固定并校验(是谁、如何证明、变化时 fail closed);不得默认"本机 lark-cli 的 user 身份就是所有者"。
+  - **正向错误分类白名单**:只对结构化授权类拒绝(如 `230027` 且属目标读取接口)回落;**未知、畸形信封、资源不可见、歧义分类一律不回落**,即使这意味着读不到。
+  - **操作集约束**:回落仅限"读取当前入口群历史",MUST NOT 外溢到私聊/单聊/配对取名/其它读取消费者(评审 M3:共享解析器会把回落带进 `captureChatContext` 与 pairing 取名路径)。
+  - **一次回落 + 如实标注**:同一读取最多回落一次;结果与诊断标注本次身份与 bot 被拒原因;出站(回复/表情/撤回/编辑)永不回落。
+  - **规范同步**:`pet-lark-channel` 现行身份要求写明"所有出站飞书调用(拉取历史、表情增删、单聊回复)统一 bot 身份、MUST NOT 使用 user 身份",落地时必须先改该要求;ADR 侧需补一条决定记录。
+- **知情项(条件化)**:在完成主体校验前,**不得假定本机 lark-cli 的 user 身份就是所有者本人凭据**——这正是本条目要求先解决的部分。若将来核实确为所有者凭据,则其可见范围远超当前入口;safe 档因此获得读取当前入口的能力,该边界靠"工具无 chat 参数 + 游标绑定入口"而不是权限本身。
+- **证据与设计输入**:`openspec/changes/pet-locus-feishu-read-and-delivery-fixes/review.md`(C4、M3)、同 change `design.md` D7。
+
+### [U007] child 读回自己的运行时溢出文件:需要 Host 可信的 spill root
+- **状态**: 待立项(2026-10-12 由 change `pet-locus-feishu-read-and-delivery-fixes` 拆出 —— 评审 round 1 的 C1 判定"按目录形状放行"只能证明看起来像,不能证明内容是本 child 产生的)
+- **优先级**: P2(现状:DSH 把超大工具结果溢出到 `$TMPDIR/dsh-spill-<6位>/session-<sha256(sessionId) 前12位>/` 并提示模型"用 read 读取",而 locus 守卫拒绝工作区外的一切读取 —— 该提示对 locus child 不可执行;`pet_locus_parent_lookup` 的结果就是这样丢掉了后半段)
+- **评审给出的落地契约**:
+  - 不得按目录形状/属主/权限放行:同 UID 进程可伪造同名树,软链、硬链与"校验后替换"竞态都能绕过外观检查。
+  - 需 Host 可信的 root 来源:首个候选是**活着的 `spillStore` 实例**上的 root(实现里是构造时固定的公开字段:`config.root` 或进程私有 `mkdtemp`);服务缺失或无该字段时 SHALL fail closed(不安装例外),MUST NOT 退化成模式匹配。
+  - 需给出结论的边界:configured root、历史 root(前几次进程留下的 `dsh-spill-*`)、root 扫描范围、被拒绝根的优先级。
+  - 验证要求:至少一次**真实**跨越阈值的溢出(经 pinned 后端)后用受守卫工具取回全文,而不是构造文件;并补伪造同名树(通过命名/属主检查)、软链/硬链、校验后替换三类对抗用例。
+- **替代路径**:也可选择"收窄承诺"——不改守卫,改为让 Pet 自己的大结果分页/有界、永不触发溢出(覆盖面更窄但更小)。
+- **证据与设计输入**:`openspec/changes/pet-locus-feishu-read-and-delivery-fixes/review.md`(C1、M5)、同 change `design.md` D7。
+
 ### [U005] profile `.npmrc` 应由 sync 物化(全新 DSH_HOME 必然装不全)
 - **状态**: 待立项(2026-09-05 用全新 DSH_HOME 实测复现)
 - **优先级**: P2(不影响现役部署;影响换机器/重建 `~/.dsh`/新建隔离 home)
