@@ -1,10 +1,10 @@
 /**
  * Web client entry for dsh-sidebar-session-provider-icon.
  *
- * Subscribes to the official model selector's per-session store (with the
- * durable last-request projection as a cold-history fallback), and through a
- * MutationObserver keeps a brand logo badge in front of each sidebar session
- * row's title. It NEVER
+ * Subscribes to the official model selector's per-session store while its
+ * session is the open one (the durable projections answer otherwise), and
+ * through a MutationObserver keeps a brand logo badge in front of each sidebar
+ * session row's title. It NEVER
  * touches the official status `StateDot`, time, row menu, or drag cells —
  * the badge is an independent span inserted before the title, and rows
  * without a provider value get no badge at all.
@@ -24,7 +24,7 @@ import type { ProviderProjection } from '../types.ts'
 import { providerBySession, providerTitleIndex } from './provider-map.js'
 import { badgeInnerHTML, badgeTitle } from './logos.js'
 import { BADGE_MARKER, isSessionRow, sessionIdOfRow, titleNodeOf } from './row-locator.js'
-import { bindSelectionDirectory } from './selection-binding.js'
+import { SelectionObservation } from './selection-binding.js'
 import { mainSessionId } from './main-session.js'
 
 export const inject = ['sessions', 'modelDirectories']
@@ -107,43 +107,29 @@ export function apply(ctx: ClientContext): void {
   const observed = new Set<Node>()
   const selected = new Map<string, ProviderProjection>()
   let observer: MutationObserver | null = null
-  let selectedSessionId: string | undefined
-  let stopDirectory: (() => void) | undefined
 
   const reconcile = scheduleReconcile(() => reconcileList(ctx, selected))
-  const syncCurrentDirectory = (): void => {
-    const id = mainSessionId(ctx.sessions.list.getSnapshot()) as SessionId | undefined
-    if (id === selectedSessionId) return
-    stopDirectory?.()
-    stopDirectory = undefined
-    selectedSessionId = undefined
-    if (id === undefined) {
-      reconcile()
-      return
-    }
-    try {
-      stopDirectory = bindSelectionDirectory(
-        id,
-        // The seam is id-shape-agnostic (plain string) so it stays testable
-        // without minting brands; the official face takes a branded SessionId.
-        (sessionId) => ctx.modelDirectories.directoryFor(sessionId as SessionId),
-        selected,
-        reconcile,
-      )
-      // Record only after resolve + subscription succeeds. A transient startup
-      // failure remains retryable on the next list/DOM signal for the same id.
-      selectedSessionId = id
-    } catch {
-      // Addressed/temporarily unavailable sessions retain fallback and retry.
-      reconcile()
-    }
+  // The observation owns "which session's selector are we watching, and is that
+  // value still the session's current one". It re-resolves the store on every
+  // signal (client session generations replace it) and drops an observation it
+  // can no longer verify, so a stale value never outranks the durable
+  // projection (see selection-binding.ts).
+  const observation = new SelectionObservation({
+    openSessionId: () => mainSessionId(ctx.sessions.list.getSnapshot()) as SessionId | undefined,
+    // The seam is id-shape-agnostic (plain string) so it stays testable
+    // without minting brands; the official face takes a branded SessionId.
+    resolve: (sessionId) => ctx.modelDirectories.directoryFor(sessionId as SessionId),
+    observed: selected,
+    reconcile,
+  })
+  const syncObservation = (): void => {
+    observation.sync()
+    reconcile()
   }
   const stop = (): void => {
     observer?.disconnect()
     observer = null
-    stopDirectory?.()
-    stopDirectory = undefined
-    selectedSessionId = undefined
+    observation.stop()
     observed.clear()
   }
 
@@ -152,21 +138,16 @@ export function apply(ctx: ClientContext): void {
     // reconnect to a fresh DOM if the shell remounts (belt-and-suspenders).
     const root = document.body
     observer = new MutationObserver(() => {
-      syncCurrentDirectory()
-      reconcile()
+      syncObservation()
     })
     observer.observe(root, { childList: true, subtree: true })
     observed.add(root)
-    syncCurrentDirectory()
-    reconcile()
+    syncObservation()
     return () => {
       stop()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, 'sidebar-provider-icon: badge sync')
 
-  ctx.effect(() => ctx.sessions.list.subscribe(() => {
-    syncCurrentDirectory()
-    reconcile()
-  }), 'sidebar-provider-icon: list + selected model sync')
+  ctx.effect(() => ctx.sessions.list.subscribe(syncObservation), 'sidebar-provider-icon: list + selected model sync')
 }

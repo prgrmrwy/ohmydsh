@@ -38,3 +38,12 @@
 ## 0.1.5 — 2026-10-10
 
 - 按当前 TraeX 目录补齐 model 子图标：`openrouter-*` 使用 OpenRouter，`Seed-*` 使用 ByteDance；既有 GPT、DeepSeek、Gemini 映射继续复用。主图始终保持 Trae。
+
+## 0.1.6 — 2026-10-12
+
+### Real-GUI feedback revision
+
+- 修复：会话已经切到新模型（实机：`claude/claude-opus-5-5` → `codex/gpt-6.1-sol`，Host 侧 `provider` 与 `modelSelection` 投影都已是 `codex`）后，侧边栏该行仍显示 Anthropic 图标，必须刷新页面。根因是「即时选择」被当成永久事实：官方 per-session store 属于客户端 Session scope（回收再物化会给同一个 session id 换一个 store），而旧实现按 session id 只绑定一次、永不再解析；同时无法再核验的观测值一直压在持久投影之上。
+- 观测生命周期改为按 store 身份绑定：每次会话列表 / DOM 信号重新解析当前打开会话的目录，store 变化即重订阅并重读快照，身份未变时也重读（漏发、订阅曾失效都能在下一次信号自愈）。观测值只在「其 session 是当前打开会话、且目录可解析」期间保留，否则丢弃。
+- 持久取值改为两级：官方 `modelSelection` 投影的 `next`（含"已选但尚未发送"）优先，其次才是本插件的最近一次实际请求投影——避免观测值被丢弃后退回上一次请求的品牌。
+- 对应 openspec change `sidebar-provider-icon-selection-freshness`。
