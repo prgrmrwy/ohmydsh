@@ -2,4 +2,5 @@
 
 | file | kind | source | date | reviewer | verdict | note |
 | --- | --- | --- | --- | --- | --- | --- |
-| overview.png | screenshot | isolated DSH_HOME instance, synthetic data (Pet settings page, general tab, no Lark binding) | 2026-10-09 | lead | pass (no real host, user, path, email, token or title visible; emoji glyphs render as boxes because the capture machine lacks a color-emoji font, accepted for now) | - |
+| overview.png | screenshot | isolated DSH_HOME instance, synthetic data (Pet floating companion panel open over a demo session; no Lark binding) | 2026-10-10 | lead | pass (viewed 2026-10-11 as re-shot with emoji; usage + settings, demo content only) | - |
+| settings.png | screenshot | isolated DSH_HOME instance, synthetic data (Settings → Pet page, general tab, emoji rendered) | 2026-10-10 | lead | pass (viewed 2026-10-11 as re-shot with emoji; usage + settings, demo content only) | - |

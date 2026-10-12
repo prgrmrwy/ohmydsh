@@ -2,10 +2,11 @@
 
 [English](README.md) · 简体中文
 
+![DSH 设置：显示主机时钟、日期、时区与主机名](docs/settings.png)
+
 <!-- problem -->
 通过 SSH 隧道从另一台机器或另一个时区访问 DSH 时，浏览器上的时间和 DSH 实际运行的那台机器并不一致。这个插件在设置面板最底部加一个 DSH 主机的实时 24 小时制时钟，按主机自己的时区显示，并带上主机名。
 
-![DSH 设置：显示主机时钟、日期、时区与主机名](docs/overview.png)
 
 **安装。** 通过 `dsh.yaml` 管理（条目 `system-clock`，`source: local`）：设为 `enabled: true`，运行 `dsh build`，然后重启 DSH。Backlog 条目 B019；设计见 OpenSpec change `settings-system-clock` 与 `dsh-0-1-2-host-api-migration`。
 

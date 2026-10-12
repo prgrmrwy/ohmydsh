@@ -2,10 +2,11 @@
 
 English · [简体中文](README.zh.md)
 
+![Settings in DSH: the host clock with date, time zone and host name](docs/settings.png)
+
 <!-- problem -->
 When you reach DSH through an SSH tunnel from another machine or time zone, your browser's clock shows a different time from the machine DSH actually runs on. This plugin adds a live 24-hour clock of the DSH host, in the host's own time zone and with its hostname, at the bottom of the Settings panel.
 
-![Settings in DSH: the host clock with date, time zone and host name](docs/overview.png)
 
 **Install.** Managed through `dsh.yaml` (entry `system-clock`, `source: local`): set `enabled: true`, run `dsh build`, then restart DSH. Backlog item B019; designs in the OpenSpec changes `settings-system-clock` and `dsh-0-1-2-host-api-migration`.
 

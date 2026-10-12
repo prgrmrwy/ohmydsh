@@ -2,10 +2,11 @@
 
 [English](README.md) · 简体中文
 
+![DSH 设置 → 出口守卫：当前判定、国家/地区与来源，以及阻断名单配置](docs/settings.png)
+
 <!-- problem -->
 有些地区不允许使用 Claude 模型，而你的 DSH 主机可能在不知不觉中处于这样的网络里，比如家庭宽带或某个 VPN 出口。这个守卫检查 DSH 主机出口所在的国家/地区，只要该国家/地区在你的阻断清单里，或者无法判定，就在输入框和 host 两层拦截所有 Claude 系列模型的请求。
 
-![DSH 设置 → 出口守卫：当前判定、国家/地区与来源，以及阻断名单配置](docs/overview.png)
 
 **安装。** 通过 `dsh.yaml` 管理（条目 `home-network-model-guard`，`source: local`）：设为 `enabled: true`，运行 `dsh build`，然后重启 DSH。设为 `enabled: false` 并重新 build 会卸载 host 门禁和 Web 提示，也就是彻底取消这项限制。设计见 OpenSpec change `block-claude-on-home-network`、`trusted-egress-claude-guard` 与 `fix-geo-timeout-budget-starvation`；当前行为规范见 `openspec/specs/home-network-model-guard`。
 

@@ -1,8 +1,30 @@
 {
   "name": "dsh-sidebar-session-provider-icon",
   "version": "0.1.5",
-  "description": "Show each sidebar session's currently selected model brand logo, updating immediately from the composer selector with a durable last-request fallback",
+  "description": "DeepSeek Harness plugin: show the brand logo of the model selected in each sidebar session, updated live from the composer selector, with a last-request fallback for history sessions",
   "license": "MIT",
+  "author": "prgrmrwy",
+  "homepage": "https://github.com/prgrmrwy/dsh-sidebar-session-provider-icon#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/prgrmrwy/dsh-sidebar-session-provider-icon.git"
+  },
+  "bugs": {
+    "url": "https://github.com/prgrmrwy/dsh-sidebar-session-provider-icon/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek",
+    "plugin",
+    "sidebar",
+    "session",
+    "model",
+    "provider",
+    "icon",
+    "logo"
+  ],
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -22,7 +44,9 @@
     "lib",
     "cordis.patch.yml",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "THIRD-PARTY-NOTICES.md",
+    "docs"
   ],
   "dsh": {
     "bundle": {
@@ -44,6 +68,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "prepare": "npm run build",
     "prepack": "npm run build"
   },
   "engines": {

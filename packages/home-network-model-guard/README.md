@@ -2,10 +2,11 @@
 
 English · [简体中文](README.zh.md)
 
+![Settings → Egress guard in DSH: the current verdict, country and source, and the blocklist configuration](docs/settings.png)
+
 <!-- problem -->
 Some regions are not permitted to use Claude models, and your DSH host may sit on such a network without you noticing, for example behind a home connection or VPN exit. This guard checks the country of the DSH host's egress and blocks every Claude-family request, both in the input box and at the host, whenever that country is on your blocklist or cannot be determined.
 
-![Settings → Egress guard in DSH: the current verdict, country and source, and the blocklist configuration](docs/overview.png)
 
 **Install.** Managed through `dsh.yaml` (entry `home-network-model-guard`, `source: local`): set `enabled: true`, run `dsh build`, then restart DSH. Setting `enabled: false` and rebuilding unloads the host gate and the web prompt, which removes the restriction entirely. Designs: the OpenSpec changes `block-claude-on-home-network`, `trusted-egress-claude-guard` and `fix-geo-timeout-budget-starvation`; the current behavior is specified in `openspec/specs/home-network-model-guard`.
 

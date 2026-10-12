@@ -2,10 +2,10 @@
 
 [English](README.md) · 简体中文
 
+![对话旁右侧边栏的“文档/资料”面板，把该会话中的链接按“产物制品”“其他”分组列出](docs/overview.png)
+
 <!-- problem -->
 在很长的 Agent 对话里，你要找的合并请求、部署页面、工单或制品链接早已淹没在上文，Agent 写出的文件同样不好找。这个插件把它们收集到当前会话的一个侧边面板里，按类别分组，一点就能打开。
-
-![示意图：长对话中的链接被收集到一个按类别分组的「文档/资料」面板](docs/overview.png)
 
 **安装。** 通过 `dsh.yaml` 管理（条目 `session-links`，`source: local`）：设为 `enabled: true`，运行 `dsh build`，然后重启 DSH。它依赖第三方 `better-sidebar` 插件（`dsh-better-sidebar`，peer `>=0.16.0`，可选）：没有它时本插件完全不激活。设计见 OpenSpec change `session-links-panel`。
 
