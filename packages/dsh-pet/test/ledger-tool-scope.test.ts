@@ -78,6 +78,7 @@ async function installOnScope(
 }
 
 const stubIntentTriage = { loci: { findByChildSessionId: () => [] } }
+const CHILD_SESSION = 'child-history-1'
 
 /**
  * The entrance read is published through the REAL ToolRuntime as well: it must
@@ -99,6 +100,70 @@ describe('the caller-bound entrance read is published only when assembled', () =
     await installOnScope(scope.ctx, harness.repository, stubIntentTriage, stubHistory)
 
     expect(visibleTools(ctx, key)).toContain(PET_LOCUS_CHAT_HISTORY_TOOL)
+  })
+
+  it('executes through the real tool runtime: every declared field is schema-valid', async () => {
+    // The suite below asserts visibility only, and visibility does not run the
+    // runtime's output validation. The first live acceptance found the gap the
+    // hard way: `executeLocusChatHistory` returned a declared-nowhere `identity`
+    // field, and `additionalProperties: false` turned EVERY successful read into
+    // `INVALID_TOOL_OUTPUT`. Executing through the real runtime is the only way
+    // this pair is checked.
+    harness = await openPetHarness()
+    const ctx = await hostContext()
+    const key = { id: CHILD_SESSION } as never
+    const scope = createScope(ctx, key)
+    const locus = {
+      id: 'locus-history-1',
+      generation: 1,
+      endpoint: { chatId: 'oc_history' },
+      parentSessionId: 'main-history-1',
+      childSessionId: CHILD_SESSION,
+      workspaceId: 'ws-history',
+      source: 'auto' as const,
+      state: 'active' as const,
+      busy: false,
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    await installOnScope(scope.ctx, harness.repository, { loci: { findByChildSessionId: () => [] } }, {
+      loci: { findByChildSessionId: () => [locus] },
+      cursor: createLocusHistoryCursor(Buffer.alloc(32, 7)),
+      read: async () => ({
+        messages: [{
+          messageId: 'om_history_1',
+          createTime: '2026-10-13T01:00:00+08:00',
+          senderName: '张勇',
+          text: '我们在讨论验收',
+        }],
+        hasMore: false,
+      }),
+    })
+
+    const ok = await ctx.tools.execute({
+      agent: key,
+      name: PET_LOCUS_CHAT_HISTORY_TOOL,
+      callId: 'history-ok' as never,
+      arguments: {},
+      signal: new AbortController().signal,
+    }) as unknown as { content?: readonly { text?: string }[]; isError?: boolean }
+    const okText = (ok.content ?? []).map(part => part.text ?? '').join('\n')
+
+    expect(ok.isError).not.toBe(true)
+    expect(okText).toContain('读取身份：bot')
+    expect(okText).toContain('我们在讨论验收')
+
+    // And the failure path is schema-valid too: never an empty history.
+    const failing = await ctx.tools.execute({
+      agent: key,
+      name: PET_LOCUS_CHAT_HISTORY_TOOL,
+      callId: 'history-fail' as never,
+      arguments: { chatId: 'oc_other' },
+      signal: new AbortController().signal,
+    }) as unknown as { content?: readonly { text?: string }[]; isError?: boolean }
+    const failText = (failing.content ?? []).map(part => part.text ?? '').join('\n')
+
+    expect(failText).toContain('读取失败')
   })
 
   it('stays invisible when the runtime has no read port', async () => {

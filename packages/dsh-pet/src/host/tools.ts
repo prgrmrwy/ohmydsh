@@ -700,6 +700,12 @@ export function registerPetTools(
             cursor: { type: 'string' },
             hasMore: { type: 'boolean' },
             count: { type: 'number' },
+            // Declared because the reader reports it: the tool runtime validates
+            // this object against the schema with `additionalProperties: false`,
+            // so an undeclared field turns EVERY successful read into
+            // `INVALID_TOOL_OUTPUT` (found live 2026-10-13, not by unit tests —
+            // the schema/value pair is only checked through the real runtime).
+            identity: { type: 'string' },
           },
         },
         render: (_args, value) => [{
