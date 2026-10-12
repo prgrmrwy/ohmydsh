@@ -16,8 +16,11 @@ test('dsh_openspec_clean_sync_then_noop_with_notice', async (t) => {
 
   assert.ok(customization, 'dsh-openspec must be declared as a customization')
   assert.match(customization, /source: local/)
-  assert.equal(pkg.dependencies['@fission-ai/openspec'], '1.13.2')
-  assert.equal(lock.packages['packages/dsh-openspec']?.dependencies?.['@fission-ai/openspec'], '1.13.2')
+  // One exact pin shared by package.json, the workspace lock entry and the resolved lock package.
+  const pin = pkg.dependencies['@fission-ai/openspec']
+  assert.match(pin, /^\d+\.\d+\.\d+$/)
+  assert.equal(lock.packages['packages/dsh-openspec']?.dependencies?.['@fission-ai/openspec'], pin)
+  assert.equal(lock.packages['node_modules/@fission-ai/openspec']?.version, pin)
   assert.match(await readFile(path.join(REPO, 'packages/dsh-openspec/NOTICE'), 'utf8'), /@codigoconelmer\/dsh-openspec@0\.1\.0/)
 
   const fx = await overlayFixture({
@@ -48,15 +51,18 @@ test('dsh_openspec_pin_mismatch_vs_lockfile_fails_without_profile_change', async
   await cp(path.join(REPO, 'packages/dsh-openspec'), path.join(fx.repo, 'packages/dsh-openspec'), { recursive: true })
   await writeFile(path.join(fx.repo, 'package.json'), await readFile(path.join(REPO, 'package.json')))
   const lock = JSON.parse(await readFile(path.join(REPO, 'package-lock.json'), 'utf8'))
-  lock.packages['packages/dsh-openspec'].dependencies['@fission-ai/openspec'] = '1.13.1'
-  lock.packages['node_modules/@fission-ai/openspec'].version = '1.13.1'
+  const pin = JSON.parse(await readFile(path.join(REPO, 'packages/dsh-openspec/package.json'), 'utf8')).dependencies['@fission-ai/openspec']
+  const [major, minor, patch] = pin.split('.').map(Number)
+  const stale = `${major}.${minor}.${patch + 1}` // any lock version that differs from the package.json pin
+  lock.packages['packages/dsh-openspec'].dependencies['@fission-ai/openspec'] = stale
+  lock.packages['node_modules/@fission-ai/openspec'].version = stale
   await writeFile(path.join(fx.repo, 'package-lock.json'), JSON.stringify(lock, null, 2))
   const before = await readFile(path.join(fx.profile, 'package.json'))
 
   const result = fx.sync()
   assert.notEqual(result.status, 0)
   assert.match(result.stderr, /dsh-openspec-pin-mismatch/)
-  assert.match(result.stderr, /1\.13\.2/)
-  assert.match(result.stderr, /1\.13\.1/)
+  assert.ok(result.stderr.includes(pin), result.stderr)
+  assert.ok(result.stderr.includes(stale), result.stderr)
   assert.deepEqual(await readFile(path.join(fx.profile, 'package.json')), before)
 })

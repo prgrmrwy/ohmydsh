@@ -1,5 +1,5 @@
 diff --git a/packages/subagent/subagent/src/child-agent.ts b/packages/subagent/subagent/src/child-agent.ts
-index 0004567a30..35d46b2cb8 100644
+index 0004567..35d46b2 100644
 --- a/packages/subagent/subagent/src/child-agent.ts
 +++ b/packages/subagent/subagent/src/child-agent.ts
 @@ -140,9 +140,15 @@ export function childSessionMeta(
@@ -69,7 +69,7 @@ index 0004567a30..35d46b2cb8 100644
  export interface DelegatedPolicyOverrides {
    /**
 diff --git a/packages/subagent/subagent/src/continuation-activation.ts b/packages/subagent/subagent/src/continuation-activation.ts
-index d995e9f2b4..4901d8e97d 100644
+index d995e9f..4901d8e 100644
 --- a/packages/subagent/subagent/src/continuation-activation.ts
 +++ b/packages/subagent/subagent/src/continuation-activation.ts
 @@ -28,10 +28,12 @@ import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
@@ -170,7 +170,7 @@ index d995e9f2b4..4901d8e97d 100644
        const parent = this.ctx.agents.get(activation.parentSession)
        if (parent === undefined) return
 diff --git a/packages/subagent/subagent/src/continuation.ts b/packages/subagent/subagent/src/continuation.ts
-index 87fae7096a..fcba2f7aea 100644
+index 87fae70..fcba2f7 100644
 --- a/packages/subagent/subagent/src/continuation.ts
 +++ b/packages/subagent/subagent/src/continuation.ts
 @@ -20,7 +20,7 @@ import { brandString } from '@deepseek-ai/dsh-brand'
@@ -531,7 +531,7 @@ index 87fae7096a..fcba2f7aea 100644
 +  return { independentAgentPreset: descriptor.agentPreset }
 +}
 diff --git a/packages/subagent/subagent/src/descriptor.ts b/packages/subagent/subagent/src/descriptor.ts
-index de9191cc50..2ab60300b9 100644
+index de9191c..2ab6030 100644
 --- a/packages/subagent/subagent/src/descriptor.ts
 +++ b/packages/subagent/subagent/src/descriptor.ts
 @@ -45,7 +45,21 @@ declare module '@deepseek-ai/dsh-session/types' {
@@ -666,7 +666,7 @@ index de9191cc50..2ab60300b9 100644
    const snapshot = snapshotJsonValue(candidate)
    if (snapshot === undefined) {
 diff --git a/packages/subagent/subagent/src/index.ts b/packages/subagent/subagent/src/index.ts
-index 6654c1c0e5..5b20c431bd 100644
+index 6654c1c..5b20c43 100644
 --- a/packages/subagent/subagent/src/index.ts
 +++ b/packages/subagent/subagent/src/index.ts
 @@ -38,7 +38,7 @@ import type { Scoped } from '@deepseek-ai/dsh-scope'
@@ -745,7 +745,7 @@ index 6654c1c0e5..5b20c431bd 100644
     * Steer one model-authored message to the sender's direct parent or direct
     * continuable child. A running target admits it at the nearest step boundary;
 diff --git a/packages/subagent/subagent/src/types.ts b/packages/subagent/subagent/src/types.ts
-index 48ac0df1e1..87973263cc 100644
+index 48ac0df..8797326 100644
 --- a/packages/subagent/subagent/src/types.ts
 +++ b/packages/subagent/subagent/src/types.ts
 @@ -45,10 +45,43 @@ export interface ContinuableStartSpec {
@@ -793,10 +793,10 @@ index 48ac0df1e1..87973263cc 100644
  export interface ContinuableStart {
    /** The durable child session id, stable across activations. */
 diff --git a/packages/subagent/subagent/tests/continuation.spec.ts b/packages/subagent/subagent/tests/continuation.spec.ts
-index 3078d28e71..b69e6be285 100644
+index 3078d28..a6f241b 100644
 --- a/packages/subagent/subagent/tests/continuation.spec.ts
 +++ b/packages/subagent/subagent/tests/continuation.spec.ts
-@@ -2742,6 +2742,181 @@ describe('continuable adjacent-Agent delivery', () => {
+@@ -2742,6 +2742,214 @@ describe('continuable adjacent-Agent delivery', () => {
    })
  })
  
@@ -814,6 +814,39 @@ index 3078d28e71..b69e6be285 100644
 +    const loaded = await loadStoredSession(ctx.sessionPersistence, started.childId)
 +    expect(hasAssistantText(loaded.events, 'the answer')).toBe(true)
 +    expect(settlementNotices(parent)).toHaveLength(0)
++  })
++
++  it('keeps silent settlement after a fresh runtime cold-resumes the child', async () => {
++    const { ctx, parent, root } = await setup([textResponse('first answer')])
++    const started = await ctx.subagents.startContinuable({
++      ...startSpec(parent),
++      settlementNotice: 'silent' as const,
++    })
++    await waitNoActivation(ctx, started.childId)
++    await ctx.fiber.dispose()
++
++    const fresh = new Context()
++    await mountAgentLoopTestDependencies(fresh)
++    const freshPersistence = await fresh.plugin(JsonlSessionPersistence, { root: root! })
++    cleanups.push(async () => { await freshPersistence.dispose() })
++    await fresh.plugin(AgentLoop, { agents: [] })
++    await fresh.plugin(TestSessionQuery)
++    await fresh.plugin(SubagentRuntime)
++    await fresh.plugin(SubagentSpawn, { providerName: 'spawn' })
++    fresh.llm.registerAdapter(['mock'], new MockAdapter([textResponse('resumed answer')]))
++    const freshParent = (await fresh.agents.resume({
++      resumeSessionId: parent.id,
++      agentOptions: { provider: 'mock', model: 'mock' },
++    })).agent
++    parkParent(fresh, freshParent)
++
++    await queuePrompt(fresh, freshParent, started.childId, message('resume silently'))
++    await waitNoActivation(fresh, started.childId)
++
++    const resumed = await loadStoredSession(fresh.sessionPersistence, started.childId)
++    expect(hasAssistantText(resumed.events, 'resumed answer')).toBe(true)
++    expect(settlementNotices(freshParent)).toHaveLength(0)
++    await fresh.fiber.dispose()
 +  })
 +
 +  it('still notifies by default, so silence is never the accidental behavior', async () => {
@@ -979,7 +1012,7 @@ index 3078d28e71..b69e6be285 100644
    it('tells the parent what the child finished with, without being asked', async () => {
      const { ctx, parent } = await setup([textResponse('the answer'), textResponse('parent ack')])
 diff --git a/packages/subagent/subagent/tests/service.spec.ts b/packages/subagent/subagent/tests/service.spec.ts
-index 01a17cb591..09387d1a8c 100644
+index 01a17cb..09387d1 100644
 --- a/packages/subagent/subagent/tests/service.spec.ts
 +++ b/packages/subagent/subagent/tests/service.spec.ts
 @@ -444,7 +444,9 @@ describe('subagent descriptors', () => {
