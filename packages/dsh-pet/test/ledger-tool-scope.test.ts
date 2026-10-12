@@ -351,30 +351,31 @@ describe('ledger tool feedback is actionable and never leaks ids', () => {
     expect(refused.text).not.toBe('[]')
   })
 
-  it('an unusable todo id points at the ledger read and enumerates nothing', async () => {
-    // The request-execution tool proves a current Delivery before it asks for
-    // execution, so the authorization deps are stubbed with one real record.
-    const authorized = {
+  // One real authorized context record: both tools below prove a current
+  // Delivery before they act, so the fixture is shared rather than duplicated.
+  const ACTIVE_RECORD = {
+    endpoint: { chatId: 'oc_scope' },
+    locus: { locusId: 'locus-scope-1', generation: 1, state: 'active' as const, toolTier: 'safe' as const },
+    main: { sessionId: 'main-scope-1' },
+    child: { sessionId: CHILD },
+    workspace: { workspaceId: 'ws-scope' },
+    permission: { effective: 'read' as const },
+    contextAnchor: { status: 'unknown' as const },
+    currentDelivery: {
+      deliveryId: 'delivery-1',
+      messageId: 'om_scope_1',
       endpoint: { chatId: 'oc_scope' },
-      locus: { locusId: 'locus-scope-1', generation: 1, state: 'active' as const, toolTier: 'safe' as const },
-      main: { sessionId: 'main-scope-1' },
-      child: { sessionId: CHILD },
-      workspace: { workspaceId: 'ws-scope' },
-      permission: { effective: 'read' as const },
-      contextAnchor: { status: 'unknown' as const },
-      currentDelivery: {
-        deliveryId: 'delivery-1',
-        messageId: 'om_scope_1',
-        endpoint: { chatId: 'oc_scope' },
-        locusId: 'locus-scope-1',
-        generation: 1,
-        childSessionId: CHILD,
-        status: 'current' as const,
-        queueState: 'current' as const,
-        executionId: 'exec-1',
-      },
-      source: 'locus' as const,
-    }
+      locusId: 'locus-scope-1',
+      generation: 1,
+      childSessionId: CHILD,
+      status: 'current' as const,
+      queueState: 'current' as const,
+      executionId: 'exec-1',
+    },
+    source: 'locus' as const,
+  }
+
+  it('an unusable todo id points at the ledger read and enumerates nothing', async () => {
     const wired = {
       loci: { findByChildSessionId: () => [LOCUS] },
       currentCapability: () => ({
@@ -383,7 +384,7 @@ describe('ledger tool feedback is actionable and never leaks ids', () => {
         turnId: `${CHILD}#1`,
         source: 'delivery' as const,
       }),
-      authorizeCurrentDelivery: async () => authorized,
+      authorizeCurrentDelivery: async () => ACTIVE_RECORD,
       // The real dispatch refusal text, so this pins the render path the model sees.
       requestExecution: async () => ({ ok: false as const, reason: requestExecutionFailureText('unknown-item') }),
     }
@@ -395,6 +396,38 @@ describe('ledger tool feedback is actionable and never leaks ids', () => {
     expect(refused.text).toContain('重试')
     // Nothing about the ledger's other rows may appear.
     expect(refused.text).not.toMatch(/item-|locus-|oc_|ou_/)
+  })
+
+  it('track executes through the real runtime with a schema-valid result', async () => {
+    const registered: string[] = []
+    const wired = {
+      loci: { findByChildSessionId: () => [LOCUS] },
+      currentCapability: () => ({
+        deliveryId: 'delivery-1',
+        executionId: 'exec-1',
+        turnId: `${CHILD}#1`,
+        source: 'delivery' as const,
+      }),
+      authorizeCurrentDelivery: async () => ACTIVE_RECORD,
+      track: {
+        store: {
+          registerTodoItem: async (input: { readonly itemId: string }) => {
+            registered.push(input.itemId)
+            return { ...input, status: 'open' }
+          },
+        },
+        now: () => 1,
+        newItemId: () => 'todo-runtime-1',
+      },
+    }
+
+    const done = await execute(wired, PET_LOCUS_TRACK_TOOL, { summary: '一句话摘要', detail: '位置、原因、建议修法' })
+
+    // Schema validation is what failed live for the OTHER tool: an undeclared
+    // field in the returned object becomes INVALID_TOOL_OUTPUT.
+    expect(done.isError).toBe(false)
+    expect(done.text).toContain('已登记待办')
+    expect(registered).toEqual(['todo-runtime-1'])
   })
 
   it('a malformed todo id points at the ledger read instead of only refusing', async () => {
