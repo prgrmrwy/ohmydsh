@@ -2,10 +2,10 @@
 
 [English](README.md) · 简体中文
 
+![对话标题旁的 6 位 session id 徽标 71766c，以及点击后出现的“会话 ID 已复制”提示](docs/overview.png)
+
 <!-- problem -->
 DSH 会显示对话标题，却没有办法取到会话 id，而脚本、日志排查和提 bug 都要用它。这个插件在标题旁加一个 6 位的小徽标，点一下就复制完整的 session id。
-
-![示意图：标题旁的 session id 短标识徽标，点击即复制完整 id](docs/overview.png)
 
 **安装。** 通过 `dsh.yaml` 管理（条目 `session-title-copy`，`source: local`）：设为 `enabled: true`，运行 `dsh build`，然后重启 DSH。设计见 OpenSpec change `session-title-copy` 与 `session-title-id-badge`。
 

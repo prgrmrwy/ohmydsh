@@ -2,10 +2,10 @@
 
 English · [简体中文](README.zh.md)
 
+![The Docs/Resources panel in the right sidebar beside a conversation, listing the session's links grouped under artifacts and other](docs/overview.png)
+
 <!-- problem -->
 In a long agent conversation the merge request, deploy page, ticket or artifact link you need is buried somewhere far up the transcript, and files the agent wrote are just as hard to find. This plugin gathers them into one side panel for the current session, grouped by kind, so you can open them in a click.
-
-![Illustration: links from a long conversation are collected into one Docs/Resources panel, grouped by category](docs/overview.png)
 
 **Install.** Managed through `dsh.yaml` (entry `session-links`, `source: local`): set `enabled: true`, run `dsh build`, then restart DSH. It needs the third-party `better-sidebar` plugin (`dsh-better-sidebar`, peer `>=0.16.0`, optional): without it the plugin does not activate at all. Design in the OpenSpec change `session-links-panel`.
 
