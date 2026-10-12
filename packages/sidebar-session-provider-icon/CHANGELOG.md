@@ -47,3 +47,12 @@
 - 观测生命周期改为按 store 身份绑定：每次会话列表 / DOM 信号重新解析当前打开会话的目录，store 变化即重订阅并重读快照，身份未变时也重读（漏发、订阅曾失效都能在下一次信号自愈）。观测值只在「其 session 是当前打开会话、且目录可解析」期间保留，否则丢弃。
 - 持久取值改为两级：官方 `modelSelection` 投影的 `next`（含"已选但尚未发送"）优先，其次才是本插件的最近一次实际请求投影——避免观测值被丢弃后退回上一次请求的品牌。
 - 对应 openspec change `sidebar-provider-icon-selection-freshness`。
+
+## 0.1.7 — 2026-10-12
+
+### Real-GUI feedback revision
+
+- 修复：**同名会话的徽标互相串用**。实机：两个标题都是「下线豆包工作伙伴」的会话（`session-a1f7a6e8` 在用 `codex/gpt-6.1-sol`，另一个 7 小时前的会话在用 `claude/claude-opus-5-5`）显示的品牌正好互换——运行中那行显示 Anthropic，另一行显示 OpenAI；Host 侧两个会话的 `provider` 投影都正确。
+- 根因：行 → session 的映射一直靠**标题文本反查**（`providerTitleIndex` + 每轮 `used` 集合），同名会话按「DOM 行顺序 ↔ 列表顺序」逐一对号；侧栏按工作区分组后两者顺序不一致（两个同名会话分属不同 workspace），两行就把彼此的 id 拿反了。
+- 修复：官方行 DOM 本身带 `data-row-key="session:<id>"`（`dsh-client-ui-workspace` 的 `SessionNodeItem`），改为优先用它做精确身份；标题反查保留为没有该属性时的 fallback；同一 key 重复出现时宁可不显示该行徽标，也不回退到别人的标题。
+- 测试：`test/row-locator.test.ts` 新增 4 条用例（行键优先、同名不互换、无属性回退、缺失/畸形/重复键不显示），旧实现下 3 条 RED——失败信息就是互换本身（`expected 'newer' to be 'older'`）。

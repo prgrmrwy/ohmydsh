@@ -732,6 +732,14 @@
 - **同类第二处（已同批修复）**: `packages/sidebar-session-provider-icon` 的 `syncCurrentDirectory` 以 `id === selectedSessionId` 短路、`selection-binding.ts` 按 id 只订阅一次 —— 同日实机复现：会话已切到 `codex/gpt-6.1-sol`（Host 侧 `provider` 与 `modelSelection` 投影均已是 codex），侧栏该行仍显示 Anthropic。修法同族但独立实现：新增 `SelectionObservation` 按 store 身份重解析并重读快照、观测值只在「其 session 是当前打开会话且目录可解析」期间保留；持久取值改为官方 `modelSelection.next`（含已选未发送）→ 本插件 `provider` 投影。规范 delta 见 openspec change `sidebar-provider-icon-selection-freshness`。
 - **更新**: 2026-10-12 记录；同日补齐同类第二处与规范 delta。部署两处修复都必须**从主 checkout** 执行 sync（worktree 路径会被写进 profile、且缺依赖 worktree 的 local build 会清空产物，见 D004/D007）。
 
+### [D011] 侧栏会话行按标题反查 session：同名会话的徽标互相串用
+- **状态**: 已修复（分支 `ws/claude-sol`，待合入）
+- **现象**: 2026-10-12 实机：侧栏两个标题都为「下线豆包工作伙伴」的会话（`session-a1f7a6e8` 在用 `codex/gpt-6.1-sol`，另一个 7 小时前、位于 flow-web-monorepo 的会话在用 `claude/claude-opus-5-5`）**徽标正好互换**——运行中那行显示 Anthropic，另一行显示 OpenAI；两侧 Host `provider` 投影都正确。这也是当日「会话已切 sol 但图标仍是 anthropic」的真正原因（D010 的观测生命周期是同族的独立缺陷）。
+- **根因**: `row-locator` 的行 → session 映射只能靠**标题文本反查**（`providerTitleIndex` 的 id 顺序 + 每轮 `used` 集合），同名会话按「DOM 行顺序 ↔ 列表顺序」逐一对号。侧栏按 workspace 分组渲染，两个同名会话分属不同 workspace 时两种顺序不一致，于是两行各拿到对方的 id。
+- **修复**: 官方行 DOM 自身带 `data-row-key="session:<id>"`（`dsh-client-ui-workspace` 的 `SessionNodeItem`），改为优先用它做行身份；标题反查保留为没有该属性时的 fallback；同一 key 重复出现时宁可不显示该行徽标，也不回退到别的会话标题（沿用「严格失败 → 不显示」纪律）。
+- **验证**: `test/row-locator.test.ts` 新增 4 条用例（行键优先、同名不互换、无属性回退、缺失/畸形/重复 key 不显示），旧实现下 3 条 RED——失败信息即互换本身（`expected 'newer' to be 'older'`）。包内 51 tests、host/client typecheck、`npm run build` 通过；版本 0.1.7。
+- **更新**: 2026-10-12 记录。部署须从主 checkout sync 并刷新页面。
+
 ---
 
 ## 待立项

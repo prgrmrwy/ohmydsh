@@ -51,7 +51,7 @@ dsh plugin --profile web add prgrmrwy/dsh-sidebar-session-provider-icon
 |---|---|
 | Host | `src/provider.ts` 注册 `provider` projection（依赖 `sessionProjections` 服务），折叠 `request/header`；只承担冷历史 fallback |
 | Client 数据 | `selection-binding.ts` 观测当前打开会话的 `ctx.modelDirectories` store（每次信号重新解析）；`provider-map.ts` 依次取：可核验的即时观测 → 官方 `modelSelection` 选择 → `provider` fallback |
-| Client DOM | `row-locator.ts` 收拢全部官方行 DOM 知识；`MutationObserver` 在标题前维护独立的 badge `<span>` |
+| Client DOM | `row-locator.ts` 收拢全部官方行 DOM 知识：每行按官方 `data-row-key="session:<id>"` 精确定位（标题反查仅作为没有该属性时的 fallback），因此同名会话不会互相串用徽标；`MutationObserver` 在标题前维护独立的 badge `<span>` |
 | 品牌图 | `src/client/assets/*.svg`，一次下载并随包打入；`logos.ts` 分别判定 provider 品牌与 model 品牌，不同时渲染复合图标 |
 
 徽标内容只由 `(provider, model)` 决定；`index.ts` 只在这两个值或悬停提示变化时重建徽标。

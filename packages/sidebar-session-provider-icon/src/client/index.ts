@@ -23,7 +23,7 @@ import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type { ProviderProjection } from '../types.ts'
 import { providerBySession, providerTitleIndex } from './provider-map.js'
 import { badgeInnerHTML, badgeTitle } from './logos.js'
-import { BADGE_MARKER, isSessionRow, sessionIdOfRow, titleNodeOf } from './row-locator.js'
+import { BADGE_MARKER, isSessionRow, sessionIdOfNode, titleNodeOf } from './row-locator.js'
 import { SelectionObservation } from './selection-binding.js'
 import { mainSessionId } from './main-session.js'
 
@@ -70,9 +70,9 @@ function reconcileList(ctx: ClientContext, selected: ReadonlyMap<string, Provide
   for (const row of findSessionRows()) {
     try {
       const title = titleNodeOf(row)
-      const sessionId = sessionIdOfRow(title, index, used)
+      const sessionId = sessionIdOfNode(row, index, used)
       if (sessionId === undefined) {
-        // Unlocatable (no provider-bearing title match): safe no-badge.
+        // Unlocatable (no row key and no provider-bearing title match): safe no-badge.
         removeBadge(row)
         continue
       }

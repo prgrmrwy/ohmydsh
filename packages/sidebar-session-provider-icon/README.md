@@ -51,7 +51,7 @@ Brand resolution has two independent dimensions: the provider route picks the **
 |---|---|
 | Host | `src/provider.ts` registers the `provider` projection (it requires the `sessionProjections` service) and folds `request/header`; it only serves the cold-history fallback |
 | Client data | `selection-binding.ts` observes the open session's store of `ctx.modelDirectories` (re-resolved per signal); `provider-map.ts` prefers a verifiable observation, then the official `modelSelection` selection, then the `provider` fallback |
-| Client DOM | `row-locator.ts` holds all knowledge of the official row DOM; a `MutationObserver` maintains a separate badge `<span>` in front of the title |
+| Client DOM | `row-locator.ts` holds all knowledge of the official row DOM: each row is identified by its official `data-row-key="session:<id>"` (the title reverse lookup remains only as the fallback for a runtime without it), so two sessions sharing a display title never receive each other's badge; a `MutationObserver` maintains a separate badge `<span>` in front of the title |
 | Brand art | `src/client/assets/*.svg`, downloaded once and bundled; `logos.ts` resolves the provider brand and the model brand separately and renders the composite when they differ |
 
 The badge content is derived only from `(provider, model)`; `index.ts` rebuilds a badge only when those values or the tooltip change.

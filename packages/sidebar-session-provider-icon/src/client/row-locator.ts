@@ -7,11 +7,17 @@
  * Structure (official `dsh-client-ui-workspace` `SessionNodeItem`, rc.7 and
  * master rc.8 — see openspec change `sidebar-session-provider-icon` design):
  *
- *   div[role="treeitem"] .__sessionRow        ← the row we target
+ *   div[role="treeitem"][data-row-key="session:<id>"] .__sessionRow
  *     span .__slot                            ← official status StateDot (DO NOT touch)
  *     span .__title                           ← the row title text
  *     span .__time                            ← official relative time
  *     span .__rowActions                      ← official row menu
+ *
+ * Row identity comes from `data-row-key` (`session:<id>`) whenever the runtime
+ * provides it: it is the only exact mapping, so two sessions that happen to
+ * share a display title (different workspaces, forked titles) can never receive
+ * each other's badge. The title reverse lookup remains as the documented
+ * fallback for a runtime without the attribute.
  *
  * CSS Modules keep the local class name as the suffix of the emitted class
  * (`<hash>__sessionRow` in nextjs-style, `YDXeBa_sessionRow` here), so we
@@ -40,6 +46,10 @@ export interface SessionTitleNode {
 const SESSION_ROW_SUFFIX = 'sessionRow'
 /** Whether a DOM class token is the official title local class (suffix match). */
 const TITLE_SUFFIX = 'title'
+/** Official row-identity attribute on every session row. */
+const ROW_KEY_ATTRIBUTE = 'data-row-key'
+/** Prefix of a session row's key value (project rows carry their own prefix). */
+const ROW_KEY_SESSION_PREFIX = 'session:'
 /** Badge marker attribute set on inserted logo spans (self-owned, collision-free). */
 export const BADGE_MARKER = 'data-dsh-provider-logo'
 
@@ -99,4 +109,43 @@ export function sessionIdOfRow(
     }
   }
   return undefined
+}
+
+/**
+ * Resolve a row's session id from the official row-key attribute
+ * (`data-row-key="session:<id>"`). This is the exact identity — rows of
+ * different sessions that share a display title can never be confused.
+ * @param row - a node already identified as a session row.
+ * @returns the session id, or undefined when the runtime does not expose the key
+ * (callers then fall back to the title reverse lookup).
+ */
+export function sessionIdOfKey(row: SessionRowNode): string | undefined {
+  const value = row.getAttribute(ROW_KEY_ATTRIBUTE)
+  if (value === null || !value.startsWith(ROW_KEY_SESSION_PREFIX)) return undefined
+  const id = value.slice(ROW_KEY_SESSION_PREFIX.length)
+  return id === '' ? undefined : id
+}
+
+/**
+ * Resolve one row's session id: the exact row key when the runtime provides it,
+ * otherwise the title reverse lookup. Every resolution is recorded in `used`, so
+ * a repeated id can never decorate two rows; a repeated KEY yields no badge
+ * rather than falling back to a title that belongs to a different session.
+ * @param row - a node already identified as a session row.
+ * @param index - display title → candidate session ids (title-fallback path).
+ * @param used - per-pass set of already-assigned session ids (mutated).
+ * @returns the resolved session id, or undefined when the row is unlocatable.
+ */
+export function sessionIdOfNode(
+  row: SessionRowNode,
+  index: ReadonlyMap<string, readonly string[]>,
+  used: Set<string>,
+): string | undefined {
+  const keyed = sessionIdOfKey(row)
+  if (keyed !== undefined) {
+    if (used.has(keyed)) return undefined
+    used.add(keyed)
+    return keyed
+  }
+  return sessionIdOfRow(titleNodeOf(row), index, used)
 }

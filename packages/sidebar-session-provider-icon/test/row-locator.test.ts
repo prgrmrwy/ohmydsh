@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   isSessionRow,
+  sessionIdOfKey,
+  sessionIdOfNode,
   sessionIdOfRow,
   titleNodeOf,
 } from '../src/client/row-locator.js'
@@ -8,7 +10,7 @@ import { providerBySession, providerTitleIndex } from '../src/client/provider-ma
 import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
 
 /** Minimal structural fake of a session row node (role + class + one title child). */
-function rowNode(classes: string[], titleText?: string): {
+function rowNode(classes: string[], titleText?: string, rowKey?: string): {
   getAttribute(name: string): string | null
   querySelector(sel: string): { textContent: string | null } | null
 } {
@@ -16,6 +18,7 @@ function rowNode(classes: string[], titleText?: string): {
     getAttribute(name) {
       if (name === 'class') return classes.join(' ')
       if (name === 'role') return 'treeitem'
+      if (name === 'data-row-key') return rowKey ?? null
       return null
     },
     querySelector(sel) {
@@ -105,6 +108,56 @@ describe('row-locator', () => {
     const used = new Set<string>()
     const row = rowNode(['YDXeBa_sessionRow'], 'New Session')
     expect(sessionIdOfRow(titleNodeOf(row), index, used)).toBe('blank')
+  })
+
+  it('prefers the official row key over the title reverse lookup', () => {
+    // The title belongs to session `a`, but this row IS session `b`: only the
+    // row key can tell them apart.
+    const index = providerTitleIndex(listState([
+      { id: 'a', title: 'Same title', provider: 'claude', model: 'claude-opus-5-5' },
+      { id: 'b', title: 'Same title', provider: 'codex', model: 'gpt-6.1-sol' },
+    ]))
+    const used = new Set<string>()
+    const row = rowNode(['YDXeBa_sessionRow'], 'Same title', 'session:b')
+    expect(sessionIdOfKey(row)).toBe('b')
+    expect(sessionIdOfNode(row, index, used)).toBe('b')
+  })
+
+  it('keeps duplicate titles on their own rows instead of swapping them', () => {
+    const index = providerTitleIndex(listState([
+      { id: 'newer', title: '下线豆包工作伙伴', provider: 'codex', model: 'gpt-6.1-sol' },
+      { id: 'older', title: '下线豆包工作伙伴', provider: 'claude', model: 'claude-opus-5-5' },
+    ]))
+    const used = new Set<string>()
+    // DOM order (grouped by workspace) is the reverse of the list order.
+    const olderRow = rowNode(['YDXeBa_sessionRow'], '下线豆包工作伙伴', 'session:older')
+    const newerRow = rowNode(['YDXeBa_sessionRow'], '下线豆包工作伙伴', 'session:newer')
+    expect(sessionIdOfNode(olderRow, index, used)).toBe('older')
+    expect(sessionIdOfNode(newerRow, index, used)).toBe('newer')
+  })
+
+  it('falls back to the title lookup when the runtime exposes no row key', () => {
+    const index = providerTitleIndex(listState([
+      { id: 'a', title: 'Plan the migration', provider: 'codex', model: 'gpt-6.1-sol' },
+    ]))
+    const used = new Set<string>()
+    const row = rowNode(['YDXeBa_sessionRow'], 'Plan the migration')
+    expect(sessionIdOfKey(row)).toBeUndefined()
+    expect(sessionIdOfNode(row, index, used)).toBe('a')
+  })
+
+  it('gives no badge when a row key is missing, malformed or repeated', () => {
+    const index = providerTitleIndex(listState([
+      { id: 'a', title: 'Same title', provider: 'codex', model: 'gpt-6.1-sol' },
+      { id: 'b', title: 'Same title', provider: 'claude', model: 'claude-opus-5-5' },
+    ]))
+    expect(sessionIdOfKey(rowNode(['YDXeBa_sessionRow'], 'Same title', 'project:p1'))).toBeUndefined()
+    expect(sessionIdOfKey(rowNode(['YDXeBa_sessionRow'], 'Same title', 'session:'))).toBeUndefined()
+
+    const used = new Set<string>()
+    expect(sessionIdOfNode(rowNode(['YDXeBa_sessionRow'], 'Same title', 'session:a'), index, used)).toBe('a')
+    // A second row claiming the same key must not steal the other session's title.
+    expect(sessionIdOfNode(rowNode(['YDXeBa_sessionRow'], 'Same title', 'session:a'), index, used)).toBeUndefined()
   })
 })
 
