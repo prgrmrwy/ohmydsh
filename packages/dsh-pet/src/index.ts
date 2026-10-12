@@ -116,7 +116,7 @@ import {
 } from './host/locus/prepublication-staging.js'
 import { asRetiredAssociationStore } from './host/locus/retirement.js'
 import { createDurableLocusAuthorizationResolver, type LocusAuthorizationStore } from './host/locus/admission.js'
-import { createLocusControlDispatcher } from './host/locus/control.js'
+import { createLocusControlDispatcher, locusSessionIdMatchesPrefix } from './host/locus/control.js'
 import { createLocusPermissionMutation } from './host/locus/permission-mutation.js'
 import { createLocusToolTierMutation, type LocusLiveToolTierSurface } from './host/locus/tool-tier-mutation.js'
 import type { LocusToolTierName } from './host/locus/aggregate.js'
@@ -2302,13 +2302,23 @@ async function initialize(
     ? undefined
     : createLocusControlDispatcher({
       allowOpenIds: () => repository.getChannelConfig().allowOpenIds,
-      listSessions: async () => {
+      listSessions: async (prefix: string) => {
+        // Narrow by id BEFORE resolving: resolveSession cold-inspects the full
+        // Session log, and resolving every accounted session at once OOM-crashed
+        // the Host on a single `/bind`. Resolve the few survivors sequentially.
         const ids = new Set<string>()
         for (const workspace of ctx.workspaceRegistry.list()) {
-          for (const id of workspace.sessionIds ?? []) ids.add(String(id))
+          for (const id of workspace.sessionIds ?? []) {
+            const value = String(id)
+            if (locusSessionIdMatchesPrefix(value, prefix)) ids.add(value)
+          }
         }
-        const resolved = await Promise.all([...ids].map(id => locusDshPort.resolveSession(id)))
-        return resolved.filter((session): session is NonNullable<typeof session> => session !== undefined)
+        const resolved: NonNullable<Awaited<ReturnType<typeof locusDshPort.resolveSession>>>[] = []
+        for (const id of ids) {
+          const session = await locusDshPort.resolveSession(id)
+          if (session !== undefined) resolved.push(session)
+        }
+        return resolved
       },
       bind: {
         bind: ({ endpoint, parentSessionId, chatName }) =>

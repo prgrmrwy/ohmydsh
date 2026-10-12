@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   createLocusControlDispatcher,
   LOCUS_BIND_UNRESOLVED_TEXT,
+  locusSessionIdMatchesPrefix,
   locusSessionReceiptLabel,
   resolveLocusBindPrefix,
   type LocusBindableSession,
@@ -92,6 +93,33 @@ describe('unified locus bind prefix resolution', () => {
 })
 
 describe('unified locus command dispatcher', () => {
+  it('passes the prefix to enumeration and never enumerates for a too-short prefix', async () => {
+    const listSessions = vi.fn((_prefix: string) => [session('session-abcdef123456')])
+    const dispatcher = createLocusControlDispatcher({
+      allowOpenIds: () => [OWNER],
+      listSessions,
+      bind: { bind: (async ({ parentSessionId }: { parentSessionId: string }) => bindResult(parentSessionId)) as never },
+      exit: { unbindCurrent: async () => ({ state: 'stopped' }) },
+    })
+
+    await expect(dispatcher.dispatch({
+      command: { kind: 'bind', prefix: 'abc' },
+      endpoint: ENDPOINT,
+      senderId: OWNER,
+    })).resolves.toMatchObject({ ok: false, reason: 'prefix-too-short' })
+    expect(listSessions).not.toHaveBeenCalled()
+
+    await dispatcher.dispatch({ command: { kind: 'bind', prefix: 'abcdef' }, endpoint: ENDPOINT, senderId: OWNER })
+    expect(listSessions).toHaveBeenCalledWith('abcdef')
+  })
+
+  it('prefilters ids with exactly the resolution comparison', () => {
+    expect(locusSessionIdMatchesPrefix('session-ABCDEF123456', ' abcdef ')).toBe(true)
+    expect(locusSessionIdMatchesPrefix('task-abcdef123456', 'abcdef1')).toBe(true)
+    expect(locusSessionIdMatchesPrefix('session-abcdef123456', 'abcdeg')).toBe(false)
+    expect(locusSessionIdMatchesPrefix('session-abcdef123456', 'abcde')).toBe(false)
+  })
+
   it('reads the real chat name and returns a title plus short-id bind receipt', async () => {
     const bind = vi.fn(async ({ parentSessionId }: { parentSessionId: string }) => bindResult(parentSessionId))
     const dispatcher = createLocusControlDispatcher({
