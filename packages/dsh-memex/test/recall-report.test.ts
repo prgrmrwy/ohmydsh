@@ -158,6 +158,23 @@ describe('dsh-memex-recall-report', () => {
     expect(run(['--days'], {}).code).toBe(2)
   })
 
+  it('reads records carrying the reuse-evidence fields alongside old ones, and ignores write events', () => {
+    const { home, dir, lib } = fixture()
+    const rich = {
+      ...rec([{ slug: 'alive', scope: 'personal', anchored: true, rank: 1, hash: '0123456789abcdef', modified: '2026-10-01', explain: [{ t: 0, f: 'slug', w: 5 }] }]),
+      libraries: [{ scope: 'personal', commit: 'abc', dirty: false }],
+      session: 'fedcba9876543210',
+      call: 'call-1',
+      intent: 'gap',
+    }
+    writeFileSync(join(dir, 'recall-2026-09.ndjson'), `${JSON.stringify(rich)}\n`, { flag: 'a' })
+    writeFileSync(join(dir, 'writes-2026-09.ndjson'), `${JSON.stringify({ at: '2026-09-24T10:00:00Z', scope: 'personal', slug: 'dead', kind: 'created' })}\n`)
+    const { code, out } = run(['--lib', lib, '--scope', 'personal'], { DSH_HOME: home })
+    expect(code).toBe(0)
+    expect(out).toContain('recalls              3')
+    expect(out).toContain('    dead')
+  })
+
   it('fails clearly when the library has no cards directory', () => {
     const { home } = fixture()
     const { code, err } = run(['--lib', mkdtempSync(join(tmpdir(), 'no-cards-'))], { DSH_HOME: home })

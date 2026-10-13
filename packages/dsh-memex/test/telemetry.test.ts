@@ -1,9 +1,11 @@
-import { chmodSync, mkdtempSync, readFileSync, existsSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, existsSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { anchored, buildRecord, queryShape } from '../src/telemetry/record.js'
-import { appendRecord, resetFailureLatch, telemetryDir, telemetryFile } from '../src/telemetry/sink.js'
+import { anchored, buildRecord, explainHit, queryShape } from '../src/telemetry/record.js'
+import { appendRecord, appendWriteEvent, resetFailureLatch, telemetryDir, telemetryFile, writeEventFile } from '../src/telemetry/sink.js'
+import { cardFacts, librarySnapshot } from '../src/telemetry/snapshot.js'
 
 afterEach(() => { resetFailureLatch() })
 
@@ -104,5 +106,149 @@ describe('sink', () => {
     expect(onFirstFailure).toHaveBeenCalledTimes(1)
     chmodSync(dir, 0o700)
     expect(existsSync(telemetryFile(new Date(sample.at), env))).toBe(false)
+  })
+
+  it('writes card-write events to their own monthly file, never into the recall log', () => {
+    const { env } = home()
+    const at = new Date('2026-10-12T10:00:00Z')
+    appendWriteEvent({ at: at.toISOString(), scope: 'personal', slug: 'card-one', kind: 'created', hash: 'abc', session: 's', call: 'c' }, { env })
+    expect(writeEventFile(at, env)).toBe(join(telemetryDir(env), 'writes-2026-10.ndjson'))
+    expect(JSON.parse(readFileSync(writeEventFile(at, env), 'utf8').trim())).toMatchObject({ slug: 'card-one', kind: 'created' })
+    expect(existsSync(telemetryFile(at, env))).toBe(false)
+  })
+
+  it('swallows write-event failures too', () => {
+    const { env, dir } = home()
+    chmodSync(dir, 0o500)
+    expect(() => appendWriteEvent({ at: new Date().toISOString(), scope: 'p', slug: 's', kind: 'created' }, { env })).not.toThrow()
+    chmodSync(dir, 0o700)
+  })
+})
+
+describe('hit explanation', () => {
+  const card = [
+    '---',
+    'title: "DSH 出站代理模型"',
+    'tags: [proxy, network]',
+    'category: architecture',
+    'modified: 2026-10-01',
+    '---',
+    'Intro paragraph mentions subprocess.',
+    '',
+    '## Inherit rules',
+    'See [[child-env-scrub]] for 子进程 details.',
+    '',
+  ].join('\n')
+
+  it('reports, per query-token index, the highest-weight field it matched', () => {
+    const explained = explainHit(['proxy', 'inherit', 'scrub', 'subprocess', 'absent'], 'dsh-proxy-model', card)
+    expect(explained).toEqual([
+      { t: 0, f: 'slug', w: 5 },
+      { t: 1, f: 'headings', w: 3 },
+      { t: 2, f: 'wikilinks', w: 2 },
+      { t: 3, f: 'body', w: 1 },
+    ])
+  })
+
+  it('takes tags and category from the frontmatter', () => {
+    expect(explainHit(['network', 'architecture'], 'x', card)).toEqual([
+      { t: 0, f: 'tags', w: 4 },
+      { t: 1, f: 'category', w: 3 },
+    ])
+  })
+
+  it('compares Han tokens as substrings and ASCII tokens as whole segments', () => {
+    expect(explainHit(['出站', '子进'], 'x', card)).toEqual([
+      { t: 0, f: 'title', w: 5 },
+      { t: 1, f: 'body', w: 1 },
+    ])
+    expect(explainHit(['prox'], 'dsh-proxy-model', card)).toEqual([])
+  })
+
+  it('never carries the tokens themselves', () => {
+    const marker = 'zzmarkerzz'
+    expect(JSON.stringify(explainHit([marker, 'proxy'], `${marker}-card`, card))).not.toContain(marker)
+  })
+})
+
+describe('card facts', () => {
+  function library(): string {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-memex-lib-'))
+    mkdirSync(join(home, 'cards'))
+    return home
+  }
+
+  it('reads a content hash and the modified date from the card file', () => {
+    const home = library()
+    writeFileSync(join(home, 'cards', 'one.md'), '---\ntitle: One\nmodified: 2026-10-01\n---\nBody\n')
+    const facts = cardFacts(home, 'one')
+    expect(facts?.hash).toMatch(/^[0-9a-f]{16}$/)
+    expect(facts?.modified).toBe('2026-10-01')
+    expect(facts?.content).toContain('Body')
+    writeFileSync(join(home, 'cards', 'one.md'), '---\ntitle: One\nmodified: 2026-10-02\n---\nChanged\n')
+    expect(cardFacts(home, 'one')?.hash).not.toBe(facts?.hash)
+  })
+
+  it('omits modified when the frontmatter has none', () => {
+    const home = library()
+    writeFileSync(join(home, 'cards', 'two.md'), '---\ntitle: Two\n---\nBody\n')
+    expect(cardFacts(home, 'two')).not.toHaveProperty('modified')
+  })
+
+  it('returns undefined for a missing card instead of throwing', () => {
+    expect(cardFacts(library(), 'missing')).toBeUndefined()
+  })
+
+  it('refuses a slug that would escape the cards directory', () => {
+    const home = library()
+    writeFileSync(join(home, 'secret.md'), 'outside')
+    expect(cardFacts(home, '../secret')).toBeUndefined()
+  })
+})
+
+describe('library snapshot', () => {
+  function git(cwd: string, ...args: string[]): string {
+    return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } }).trim()
+  }
+
+  function repo(): string {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-memex-snap-'))
+    mkdirSync(join(home, 'cards'))
+    writeFileSync(join(home, 'cards', 'a.md'), 'a\n')
+    git(home, 'init', '-q')
+    git(home, 'add', '.')
+    git(home, 'commit', '-q', '-m', 'init')
+    return home
+  }
+
+  it('records HEAD and a clean worktree', () => {
+    const home = repo()
+    expect(librarySnapshot('personal', home)).toEqual({ scope: 'personal', commit: git(home, 'rev-parse', 'HEAD'), dirty: false })
+  })
+
+  it('reports uncommitted changes as dirty', () => {
+    const home = repo()
+    writeFileSync(join(home, 'cards', 'b.md'), 'b\n')
+    expect(librarySnapshot('personal', home)).toMatchObject({ dirty: true })
+  })
+
+  it('ignores untracked files outside cards/, such as the kernel state directory', () => {
+    const home = repo()
+    mkdirSync(join(home, '.memex'))
+    writeFileSync(join(home, '.memex', 'state'), 'x')
+    expect(librarySnapshot('personal', home)).toMatchObject({ dirty: false })
+  })
+
+  it('marks a non-git directory as unknown', () => {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-memex-nogit-'))
+    expect(librarySnapshot('personal', home)).toEqual({ scope: 'personal', commit: 'unknown' })
+  })
+
+  it('leaves the repository untouched', () => {
+    const home = repo()
+    writeFileSync(join(home, 'cards', 'b.md'), 'b\n')
+    const before = { status: git(home, 'status', '--porcelain'), files: readdirSync(join(home, '.git')).sort() }
+    librarySnapshot('personal', home)
+    expect({ status: git(home, 'status', '--porcelain'), files: readdirSync(join(home, '.git')).sort() }).toEqual(before)
   })
 })

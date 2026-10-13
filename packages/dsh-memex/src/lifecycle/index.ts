@@ -47,6 +47,11 @@ const RECALL_TEXT = [
   'Before substantive work likely related to prior decisions or debugging, call memex_recall.',
   'Read relevant cards with memex_read and use memex_search for focused lookup.',
   'After the task, save only non-obvious reusable learnings with memex_retro.',
+  // Local addition to the kernel methodology (dsh-memex-integration): search
+  // results show only the title and first paragraph, so that paragraph is what
+  // a later session actually reuses. Card format and frontmatter stay the kernel's.
+  'Search results show only the title and first paragraph, so make the first paragraph usable on its own: when it applies, the conclusion or steps, its boundaries (project, version, environment), and the minimum check before reuse. Put background after it.',
+  'When calling memex_recall or memex_search, pass intent (gap, background, by-name, dedupe or verify) to say why you are recalling.',
   'Never include actual secrets, credentials, tokens, or exact secret file contents.',
   'Recall guardrails: follow at most 3 link hops and read at most 20 cards.',
 ].join('\n')

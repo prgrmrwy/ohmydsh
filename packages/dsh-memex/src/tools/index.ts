@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -12,8 +12,9 @@ import { evaluateCrossWrite } from '../guard/index.js'
 import type { OrgProfile } from '../org.js'
 import { mapConcurrent } from '../run/concurrency.js'
 import { segmentQuery } from './query-segment.js'
-import { anchored, buildRecord, queryShape } from '../telemetry/record.js'
-import { appendRecord } from '../telemetry/sink.js'
+import { anchored, buildRecord, explainHit, normalizeIntent, queryShape, RECALL_INTENTS, type HitRecord, type LibrarySnapshot } from '../telemetry/record.js'
+import { appendRecord, appendWriteEvent } from '../telemetry/sink.js'
+import { cardFacts, librarySnapshot, sessionHash } from '../telemetry/snapshot.js'
 
 const DEFAULT_FANOUT_CONCURRENCY = 4
 const MAX_SEARCH_RESULTS = 50
@@ -31,9 +32,45 @@ export interface MemexToolOptions {
 }
 
 interface ToolExec {
-  readonly agent?: { readonly session: { readonly header: { readonly cwd?: string } } }
+  readonly agent?: {
+    readonly session: {
+      readonly id?: string
+      readonly header: { readonly cwd?: string }
+      readonly requestHeader?: () => { readonly config?: { readonly provider?: string; readonly model?: string } } | undefined
+    }
+  }
+  readonly callId?: string
   readonly signal?: AbortSignal
 }
+
+/** How a record joins the session log: a one-way session hash and the call id, never the raw session id. */
+function linkKeys(exec: ToolExec): { session?: string; call?: string } {
+  const id = exec.agent?.session.id
+  return {
+    ...(typeof id === 'string' && id !== '' ? { session: sessionHash(id) } : {}),
+    ...(typeof exec.callId === 'string' && exec.callId !== '' ? { call: exec.callId } : {}),
+  }
+}
+
+/** `provider/model` of the request the tool runs under, when the session exposes it. */
+function modelOf(exec: ToolExec): string | undefined {
+  try {
+    const config = exec.agent?.session.requestHeader?.()?.config
+    return config?.provider !== undefined && config.model !== undefined ? `${config.provider}/${config.model}` : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Deliberately a plain string, not an `enum`: a Host that enforces enums would
+ * reject an unrecognised value before the tool runs, and the spec requires an
+ * unknown intent to be recorded as `unknown`, never to fail the recall.
+ */
+const INTENT_PARAMETER = {
+  type: 'string',
+  description: `Why you are recalling, chosen BEFORE seeing results. One of: ${RECALL_INTENTS.join(', ')}. gap = a specific question you need answered; background = general context at task start; by-name = fetching a card you already know; dedupe = checking for an existing card before writing; verify = checking a write or the tool itself. Recorded for evaluation only; never changes results.`,
+} as const
 
 interface SearchSourceHit extends SearchHit {
   readonly scope: string
@@ -190,28 +227,89 @@ function recordRecall(
   query: string,
   semantic: boolean | undefined,
   hits: readonly { slug: string; title: string; scope?: string }[],
+  evidence: {
+    /** Every library searched, by scope name, so snapshots cover empty results too. */
+    readonly searched: readonly { readonly scope: string; readonly home: string }[]
+    readonly exec: ToolExec
+    readonly intent: unknown
+  },
 ): void {
-  const sent = kernelQuery(query, semantic)
-  const tokens = sent.split(/\s+/).filter(Boolean)
-  appendRecord(
-    buildRecord({
-      at: new Date(),
-      scope,
-      query: queryShape(tokens, {
-        han: HAN_QUERY_RE.test(query),
-        segmented: sent !== query,
-        semantic: semantic === true,
-      }),
+  // Bookkeeping must never be able to fail a search: anything thrown while
+  // gathering evidence leaves the record out, and the caller's result as is.
+  try {
+    const sent = kernelQuery(query, semantic)
+    const tokens = sent.split(/\s+/).filter(Boolean)
+    const homes = new Map(evidence.searched.map(target => [target.scope, target.home]))
+    const libraries: LibrarySnapshot[] = [...homes].map(([name, home]) => librarySnapshot(name, home))
+    const recorded: HitRecord[] = hits.map((hit, index) => {
       // A hit carries its own owning library: fan-out means the caller's scope
       // is routinely not the library the card came from.
-      hits: hits.map(hit => ({
+      const owner = hit.scope ?? scope
+      const home = homes.get(owner)
+      const facts = home === undefined ? undefined : cardFacts(home, hit.slug)
+      return {
         slug: hit.slug,
-        scope: hit.scope ?? scope,
+        scope: owner,
         anchored: anchored(tokens, hit.slug, hit.title),
-      })),
-    }),
-    { onFirstFailure: message => { ctx.logger('dsh-memex').warn(message) } },
-  )
+        rank: index + 1,
+        ...(facts === undefined ? {} : {
+          hash: facts.hash,
+          ...(facts.modified === undefined ? {} : { modified: facts.modified }),
+          explain: explainHit(tokens, hit.slug, facts.content),
+        }),
+      }
+    })
+    const intent = normalizeIntent(evidence.intent)
+    appendRecord(
+      buildRecord({
+        at: new Date(),
+        scope,
+        query: queryShape(tokens, {
+          han: HAN_QUERY_RE.test(query),
+          segmented: sent !== query,
+          semantic: semantic === true,
+        }),
+        hits: recorded,
+        libraries,
+        ...linkKeys(evidence.exec),
+        ...(intent === undefined ? {} : { intent }),
+      }),
+      { onFirstFailure: message => { ctx.logger('dsh-memex').warn(message) } },
+    )
+  } catch (error) {
+    ctx.logger('dsh-memex').warn('Recall telemetry skipped: %s', error instanceof Error ? error.message : String(error))
+  }
+}
+
+/**
+ * Record one successful card write, best effort, without its title or body.
+ *
+ * `existed` must be observed BEFORE the write; afterwards every card exists.
+ */
+function recordWrite(ctx: Context, target: { readonly scope: string; readonly home: string }, slug: string, existed: boolean, exec: ToolExec): void {
+  try {
+    const facts = cardFacts(target.home, slug)
+    const model = modelOf(exec)
+    appendWriteEvent(
+      {
+        at: new Date().toISOString(),
+        scope: target.scope,
+        slug,
+        kind: existed ? 'overwritten' : 'created',
+        ...(facts === undefined ? {} : { hash: facts.hash }),
+        ...linkKeys(exec),
+        ...(model === undefined ? {} : { model }),
+      },
+      { onFirstFailure: message => { ctx.logger('dsh-memex').warn(message) } },
+    )
+  } catch (error) {
+    ctx.logger('dsh-memex').warn('Write telemetry skipped: %s', error instanceof Error ? error.message : String(error))
+  }
+}
+
+/** Whether a card file is already present, judged the way the kernel lays cards out. */
+function cardExists(home: string, slug: string): boolean {
+  try { return existsSync(join(home, 'cards', `${slug}.md`)) } catch { return false }
 }
 
 /** Whether the raw query carried Han characters, for the shape record only. */
@@ -292,6 +390,7 @@ async function writeCurrentAndAdditional(
   runner: KernelRunner,
   signal: AbortSignal | undefined,
   ctx: Context,
+  exec: ToolExec,
   org?: OrgProfile,
 ) {
   const inactiveRules: string[] = []
@@ -309,7 +408,11 @@ async function writeCurrentAndAdditional(
     const warning = await syncHook(current.home, 'fetch', runner, signal)
     if (warning) primaryWarnings.push(warning)
   }
+  // Observed after the pull, right before writing: that is the state this
+  // write actually replaces.
+  const primaryExisted = cardExists(current.home, args.slug)
   const primary = requireSuccess(await runner(['write', '--', args.slug], { home: current.home, ...(signal !== undefined ? { signal } : {}), stdin: args.content }), operation, current.scope)
+  recordWrite(ctx, current, args.slug, primaryExisted, exec)
   const primarySyncWarning = await syncHook(current.home, 'sync', runner, signal)
   // The write already succeeded here, so the reader needs to know the card is not
   // lost — a failing push is not a failing save.
@@ -343,11 +446,13 @@ async function writeCurrentAndAdditional(
         continue
       }
     }
+    const existed = cardExists(target.home, args.slug)
     const result = await runner(['write', '--', args.slug], { home: target.home, ...(signal !== undefined ? { signal } : {}), stdin: args.content })
     if (!result.ok) {
       additional.push({ scope: target.scope, written: false, error: `memex ${operation} failed (exit ${result.exitCode})` })
       continue
     }
+    recordWrite(ctx, target, args.slug, existed, exec)
     const syncWarning = await syncHook(target.home, 'sync', runner, signal)
     const warning = [result.stderr.trim() ? 'memex emitted a write warning' : '', syncWarning].filter(Boolean).join('; ')
     additional.push({ scope: target.scope, written: true, ...(warning ? { warning } : {}) })
@@ -378,6 +483,7 @@ export function registerMemexTools(ctx: Context, resolver: ScopeService, options
         { type: 'string', description: '"current", "all", or one readable scope name.' },
         { type: 'array', items: { type: 'string' }, description: 'Explicit readable scope names.' },
       ] },
+      intent: INTENT_PARAMETER,
     },
     output: outputSchema(),
     async execute(args, exec) {
@@ -400,7 +506,7 @@ export function registerMemexTools(ctx: Context, resolver: ScopeService, options
       const failures = outcomes.flatMap(item => item.error === undefined ? [] : [{ scope: item.target.scope, error: item.error }])
       if (failures.length === targets.length) throw new Error(`memex search failed in every target scope: ${failures.map(item => `${item.scope}: ${item.error}`).join('; ')}`)
       // Only a real query is worth recording: --list and index reads carry none.
-      if (args.query !== undefined && args.query !== '') recordRecall(ctx, current.scope, args.query, args.semantic, hits)
+      if (args.query !== undefined && args.query !== '') recordRecall(ctx, current.scope, args.query, args.semantic, hits, { searched: targets, exec, intent: args.intent })
       return { json: JSON.stringify({ ...(kernelVersionWarning ? { kernelVersionWarning } : {}), current: route(current), targets: targets.map(route), hits, failures }, null, 2) }
     },
   })))
@@ -432,6 +538,7 @@ export function registerMemexTools(ctx: Context, resolver: ScopeService, options
       author: { type: 'string', description: 'Filter by author/source.' },
       since: { type: 'string', description: 'Only cards after YYYY-MM-DD.' },
       before: { type: 'string', description: 'Only cards before YYYY-MM-DD.' },
+      intent: INTENT_PARAMETER,
     },
     output: outputSchema(),
     async execute(args, exec) {
@@ -464,7 +571,7 @@ export function registerMemexTools(ctx: Context, resolver: ScopeService, options
         // own stdout, so recording cannot alter what the caller receives.
         let parsed: SearchHit[] = []
         try { parsed = parseSearch(result.stdout) } catch { parsed = [] }
-        recordRecall(ctx, current.scope, args.query, undefined, parsed)
+        recordRecall(ctx, current.scope, args.query, undefined, parsed, { searched: [current], exec, intent: args.intent })
       }
       if (exec.agent !== undefined) options.onToolSuccess?.('recall', exec.agent.session)
       return { json: JSON.stringify({ ...(kernelVersionWarning ? { kernelVersionWarning } : {}), current: route(current), mode, content: result.stdout || (mode === 'list' ? 'No cards yet.' : 'No cards found.') }, null, 2) }
@@ -487,7 +594,7 @@ export function registerMemexTools(ctx: Context, resolver: ScopeService, options
     async execute(args, exec) {
       const current = currentFor(exec, resolver)
       const content = enrichWriteContent(args.content, args.category)
-      const result = await writeCurrentAndAdditional('write', { slug: args.slug, content, scope: args.scope, title: undefined, body: content }, current, resolver, runner, exec.signal, ctx, options.org)
+      const result = await writeCurrentAndAdditional('write', { slug: args.slug, content, scope: args.scope, title: undefined, body: content }, current, resolver, runner, exec.signal, ctx, exec, options.org)
       if (exec.agent !== undefined) options.onToolSuccess?.('write', exec.agent.session)
       return { json: JSON.stringify({ ...(kernelVersionWarning ? { kernelVersionWarning } : {}), current: route(current), slug: args.slug, written: true, warning: [result.primary.stderr.trim() ? 'memex emitted a write warning' : '', ...result.primaryWarnings].filter(Boolean).join('; ') || undefined, ...(result.inactiveRules.length > 0 ? { guardWarnings: result.inactiveRules } : {}), additional: result.additional }, null, 2) }
     },
@@ -510,7 +617,7 @@ export function registerMemexTools(ctx: Context, resolver: ScopeService, options
     async execute(args, exec) {
       const current = currentFor(exec, resolver)
       const content = frontmatterForRetro(args)
-      const result = await writeCurrentAndAdditional('retro', { slug: args.slug, title: args.title, body: args.body, content, scope: args.scope }, current, resolver, runner, exec.signal, ctx, options.org)
+      const result = await writeCurrentAndAdditional('retro', { slug: args.slug, title: args.title, body: args.body, content, scope: args.scope }, current, resolver, runner, exec.signal, ctx, exec, options.org)
       if (exec.agent !== undefined) options.onToolSuccess?.('retro', exec.agent.session)
       return { json: JSON.stringify({ ...(kernelVersionWarning ? { kernelVersionWarning } : {}), current: route(current), slug: args.slug, written: true, warning: [result.primary.stderr.trim() ? 'memex emitted a write warning' : '', ...result.primaryWarnings].filter(Boolean).join('; ') || undefined, ...(result.inactiveRules.length > 0 ? { guardWarnings: result.inactiveRules } : {}), additional: result.additional }, null, 2) }
     },

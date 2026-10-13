@@ -48,6 +48,21 @@ therefore pins the version and centralizes parsing. Important observed contracts
 
 Never infer success from output emptiness; use exit status.
 
+The same gap means search output carries no per-field scores (only `--compact`
+prints a normalized total). Recall telemetry's per-hit explanation is therefore
+**recomputed** in this package from the card file, using the kernel's field set,
+weights and per-field comparison rules (`src/lib/scoring.ts` of 0.4.1), without
+its stopword, low-signal and code-token adjustments. It answers "why did this
+card come back", not "what exact score did it get", and it is recorded only —
+never used to order or filter results. Re-check `FIELD_WEIGHTS` in
+`src/telemetry/record.ts` against the kernel on every kernel upgrade.
+
+Library snapshots run `git --no-optional-locks` with a 1 s timeout and only look
+at `cards/` for dirtiness: the kernel keeps an untracked `.memex/` directory in
+the library root, which would otherwise mark every library dirty. A library that
+merely sits inside another repository is recorded as `unknown`, and the
+comparison resolves symlinks first (macOS `/var` is `/private/var`).
+
 ## Sync granularity forces physical isolation
 
 Both `GitAdapter.push()` and `pull()` operate at memex-home repository scope.

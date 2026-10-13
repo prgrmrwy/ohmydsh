@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { RecallRecord } from './record.js'
+import type { RecallRecord, WriteEvent } from './record.js'
 
 /** Owner-only, matching the convention other plugins use for their state roots. */
 const OWNER_ONLY_DIR_MODE = 0o700
@@ -51,11 +51,30 @@ export function resetFailureLatch(): void {
  * readers skip unparseable ones. No locking and no read-modify-write.
  */
 export function appendRecord(record: RecallRecord, options: SinkOptions = {}): void {
+  appendLine(telemetryFile(new Date(record.at), options.env ?? process.env), record, options)
+}
+
+/**
+ * Card-write events live in their own monthly file.
+ *
+ * Not in `recall-*.ndjson`: the recall report reads every line of those files
+ * as a recall, so an older report would count each write as a malformed recall.
+ */
+export function writeEventFile(at: Date, env: NodeJS.ProcessEnv = process.env): string {
+  const month = `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, '0')}`
+  return join(telemetryDir(env), `writes-${month}.ndjson`)
+}
+
+/** Append one card-write event, best effort, under the same rules as recall records. */
+export function appendWriteEvent(event: WriteEvent, options: SinkOptions = {}): void {
+  appendLine(writeEventFile(new Date(event.at), options.env ?? process.env), event, options)
+}
+
+function appendLine(file: string, value: unknown, options: SinkOptions): void {
   const env = options.env ?? process.env
   try {
-    const dir = telemetryDir(env)
-    mkdirSync(dir, { recursive: true, mode: OWNER_ONLY_DIR_MODE })
-    appendFileSync(telemetryFile(new Date(record.at), env), `${JSON.stringify(record)}\n`, 'utf8')
+    mkdirSync(telemetryDir(env), { recursive: true, mode: OWNER_ONLY_DIR_MODE })
+    appendFileSync(file, `${JSON.stringify(value)}\n`, 'utf8')
   } catch (error) {
     if (reportedFailure) return
     reportedFailure = true

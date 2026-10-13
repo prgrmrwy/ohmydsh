@@ -40,6 +40,30 @@ export interface QueryShape {
   readonly semantic: boolean
 }
 
+/** Kernel field names, in the kernel's own scoring order. */
+export type CardField = 'slug' | 'title' | 'tags' | 'category' | 'headings' | 'wikilinks' | 'body'
+
+/**
+ * Field weights of `@touchskyer/memex@0.4.1` (`src/lib/scoring.ts`
+ * `FIELD_WEIGHTS`). Copied, not imported: the kernel exports no library API.
+ */
+const FIELD_WEIGHTS: Readonly<Record<CardField, number>> = {
+  slug: 5, title: 5, tags: 4, category: 3, headings: 3, wikilinks: 2, body: 1,
+}
+const FIELD_ORDER: readonly CardField[] = ['slug', 'title', 'tags', 'category', 'headings', 'wikilinks', 'body']
+
+/**
+ * Which field one query token matched in, identified by the token's POSITION
+ * in the query the kernel received — never by the token itself.
+ */
+export interface FieldMatch {
+  /** Zero-based index into the kernel query's whitespace tokens. */
+  readonly t: number
+  readonly f: CardField
+  /** That field's kernel weight. */
+  readonly w: number
+}
+
 /** One returned card, reduced to what analysis needs. */
 export interface HitRecord {
   readonly slug: string
@@ -60,6 +84,33 @@ export interface HitRecord {
    * cleared the coverage bar through body text — the signature of noise.
    */
   readonly anchored: boolean
+  /** 1-based position in what the caller received. */
+  readonly rank?: number
+  /** First 16 hex chars of the card file's sha256 at query time: which version was seen. */
+  readonly hash?: string
+  /** The card's frontmatter `modified`, when it has one. */
+  readonly modified?: string
+  /** Per matched token, its best field — an approximation of the kernel's scoring. */
+  readonly explain?: readonly FieldMatch[]
+}
+
+/** The state of one searched library at query time, so its contents can be restored later. */
+export interface LibrarySnapshot {
+  readonly scope: string
+  /** HEAD commit, or `unknown` when the library is not a readable git repository. */
+  readonly commit: string
+  /** Whether the worktree had uncommitted changes; absent when the commit is unknown. */
+  readonly dirty?: boolean
+}
+
+/** What the caller declared the recall was for, before seeing results. */
+export type RecallIntent = 'gap' | 'background' | 'by-name' | 'dedupe' | 'verify'
+export const RECALL_INTENTS: readonly RecallIntent[] = ['gap', 'background', 'by-name', 'dedupe', 'verify']
+
+/** Normalize a caller-supplied intent: a known value verbatim, anything else `unknown`, absence stays absent. */
+export function normalizeIntent(value: unknown): RecallIntent | 'unknown' | undefined {
+  if (value === undefined) return undefined
+  return typeof value === 'string' && (RECALL_INTENTS as readonly string[]).includes(value) ? value as RecallIntent : 'unknown'
 }
 
 export interface RecallRecord {
@@ -69,6 +120,132 @@ export interface RecallRecord {
   readonly query: QueryShape
   readonly hitCount: number
   readonly hits: readonly HitRecord[]
+  readonly libraries?: readonly LibrarySnapshot[]
+  /** One-way hash of the calling session id, for joining with the session log. */
+  readonly session?: string
+  /** The tool call id, as it appears in the session log. */
+  readonly call?: string
+  readonly intent?: RecallIntent | 'unknown'
+}
+
+/** One successful card write, recorded without title or body. */
+export interface WriteEvent {
+  readonly at: string
+  /** The library actually written. */
+  readonly scope: string
+  readonly slug: string
+  readonly kind: 'created' | 'overwritten'
+  readonly hash?: string
+  readonly session?: string
+  readonly call?: string
+  /** `provider/model` of the request that wrote the card, when known. */
+  readonly model?: string
+}
+
+interface CardFields {
+  readonly slug: string
+  readonly title: string
+  readonly tags: readonly string[]
+  readonly category: string
+  readonly headings: readonly string[]
+  readonly wikilinks: readonly string[]
+  readonly body: string
+}
+
+/** Unquote a single-line YAML scalar the simple way kernels write them. */
+function scalar(value: string): string {
+  const trimmed = value.trim()
+  if (trimmed.length >= 2 && (trimmed[0] === '"' || trimmed[0] === "'") && trimmed.at(-1) === trimmed[0]) {
+    if (trimmed[0] === '"') {
+      try { return JSON.parse(trimmed) as string } catch { /* fall through */ }
+    }
+    return trimmed.slice(1, -1)
+  }
+  return trimmed
+}
+
+/**
+ * Read the frontmatter keys this module needs. Deliberately not a YAML parser:
+ * cards come from the kernel's own simple writer, and a card this misreads only
+ * costs accuracy in an analysis record, never a search result.
+ */
+export function frontmatter(content: string): { readonly data: Readonly<Record<string, string | readonly string[]>>; readonly body: string } {
+  if (!content.startsWith('---\n')) return { data: {}, body: content }
+  const end = content.indexOf('\n---', 4)
+  if (end < 0) return { data: {}, body: content }
+  const data: Record<string, string | readonly string[]> = {}
+  let listKey: string | undefined
+  for (const line of content.slice(4, end).split('\n')) {
+    const item = /^\s+-\s+(.*)$/.exec(line)
+    if (item && listKey !== undefined) {
+      const existing = data[listKey]
+      data[listKey] = [...(Array.isArray(existing) ? existing : []), scalar(item[1]!)]
+      continue
+    }
+    const pair = /^([A-Za-z_][\w-]*):\s*(.*)$/.exec(line)
+    if (!pair) { listKey = undefined; continue }
+    const key = pair[1]!
+    const raw = pair[2]!
+    if (raw === '') { listKey = key; data[key] = []; continue }
+    listKey = undefined
+    const inline = /^\[(.*)\]$/.exec(raw.trim())
+    data[key] = inline ? inline[1]!.split(',').map(scalar).filter(Boolean) : scalar(raw)
+  }
+  const afterClose = content.indexOf('\n', end + 4)
+  return { data, body: afterClose < 0 ? '' : content.slice(afterClose + 1) }
+}
+
+function cardFields(slug: string, content: string): CardFields {
+  const { data, body } = frontmatter(content)
+  const title = typeof data.title === 'string' && data.title !== '' ? data.title : slug
+  const rawTags = data.tags ?? data.tag
+  const tags = Array.isArray(rawTags) ? rawTags : typeof rawTags === 'string' ? rawTags.split(',').map(tag => tag.trim()).filter(Boolean) : []
+  const category = typeof data.category === 'string' ? data.category : ''
+  const headings = body.split('\n').filter(line => /^#{1,6}\s/.test(line)).map(line => line.replace(/^#{1,6}\s+/, '').trim())
+  const wikilinks = [...body.matchAll(/\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/g)].map(match => match[1]!.trim())
+  return { slug, title, tags, category, headings, wikilinks, body }
+}
+
+const segmentsOf = (text: string, separator: RegExp) => text.toLowerCase().split(separator).filter(Boolean)
+const wordIn = (needle: string, text: string) => new RegExp(`\\b${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text)
+
+/** Whether one lower-cased token matches one field, following the kernel's per-field comparison. */
+function fieldMatches(token: string, field: CardField, fields: CardFields): boolean {
+  const han = HAN_RE.test(token)
+  switch (field) {
+    case 'slug': return segmentsOf(fields.slug, /[-_/]/).includes(token)
+    case 'title': return segmentsOf(fields.title, /[\s\-_]/).includes(token) || (han && fields.title.toLowerCase().includes(token))
+    case 'tags': return fields.tags.some(tag => tag.toLowerCase() === token || segmentsOf(tag, /[-_]/).includes(token))
+    case 'category': return fields.category.toLowerCase() === token || segmentsOf(fields.category, /[-_]/).includes(token)
+    case 'headings': return fields.headings.some(heading => han ? heading.toLowerCase().includes(token) : wordIn(token, heading))
+    case 'wikilinks': return fields.wikilinks.some(link => segmentsOf(link, /-/).includes(token))
+    case 'body': return han ? fields.body.toLowerCase().includes(token) : wordIn(token, fields.body)
+  }
+}
+
+/**
+ * Explain one hit: for each query token, the highest-weight field it matched.
+ *
+ * Follows the kernel's field set, weights and per-field comparison rules, but
+ * not its stopword, low-signal or code-token adjustments — the result answers
+ * "why did this card come back", not "what exact score did it get". It is used
+ * only for recording and never changes what a search returns.
+ *
+ * @param tokens - the kernel query split on whitespace, in order.
+ * @param slug - the card slug.
+ * @param content - the card file content.
+ * @returns one entry per token that matched anything, identified by index.
+ */
+export function explainHit(tokens: readonly string[], slug: string, content: string): FieldMatch[] {
+  const fields = cardFields(slug, content)
+  const result: FieldMatch[] = []
+  tokens.forEach((raw, index) => {
+    const token = raw.toLowerCase()
+    if (token === '') return
+    const field = FIELD_ORDER.find(candidate => fieldMatches(token, candidate, fields))
+    if (field !== undefined) result.push({ t: index, f: field, w: FIELD_WEIGHTS[field] })
+  })
+  return result
 }
 
 /**
@@ -117,6 +294,10 @@ export function buildRecord(input: {
   readonly scope: string
   readonly query: QueryShape
   readonly hits: readonly HitRecord[]
+  readonly libraries?: readonly LibrarySnapshot[]
+  readonly session?: string
+  readonly call?: string
+  readonly intent?: RecallIntent | 'unknown'
 }): RecallRecord {
   return {
     at: input.at.toISOString(),
@@ -124,5 +305,9 @@ export function buildRecord(input: {
     query: input.query,
     hitCount: input.hits.length,
     hits: input.hits,
+    ...(input.libraries === undefined ? {} : { libraries: input.libraries }),
+    ...(input.session === undefined ? {} : { session: input.session }),
+    ...(input.call === undefined ? {} : { call: input.call }),
+    ...(input.intent === undefined ? {} : { intent: input.intent }),
   }
 }

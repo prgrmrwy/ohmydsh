@@ -546,7 +546,7 @@ describe('recall telemetry', () => {
     const env = useHome()
     const tools = capture(async () => ok('## dsh-proxy-model\nProxy model\nbody\n\n## unrelated-card\nSomething else\nbody\n'))
     await call(tools.get('memex_search')!, { query: 'proxy' })
-    expect((records(env)[0] as { hits: { slug: string; anchored: boolean }[] }).hits).toEqual([
+    expect((records(env)[0] as { hits: { slug: string; anchored: boolean }[] }).hits).toMatchObject([
       { slug: 'dsh-proxy-model', scope: 'current', anchored: true },
       { slug: 'unrelated-card', scope: 'current', anchored: false },
     ])
@@ -598,6 +598,218 @@ describe('recall telemetry', () => {
     const failing = await call(capture(async () => ok(stdout)).get('memex_search')!, { query: 'proxy' })
     chmodSync(broken, 0o700)
     expect(failing).toEqual(working)
+  })
+})
+
+describe('reuse evidence', () => {
+  /** A real on-disk library so card facts and snapshots have something to read. */
+  function realScope(name: string, memory = true): ScopeResolution {
+    const home = mkdtempSync(join(tmpdir(), `dsh-memex-reuse-${name}-`))
+    mkdirSync(join(home, 'cards'))
+    return { ...scope(name, undefined, memory), home }
+  }
+
+  function service(current: ScopeResolution, others: ScopeResolution[] = []): ScopeService {
+    const all = new Map([current, ...others].map(item => [item.scope, item]))
+    return {
+      resolve: () => current,
+      list: () => [...all.values()],
+      resolveByName: name => { const found = all.get(name); if (!found) throw new Error(`Unknown scope: ${name}`); return found },
+      ensure: value => value,
+      bindingFor: () => undefined,
+      accessFor: scopeName => ({ current: scopeName, read: [scopeName], write: [...all.keys()] }),
+    }
+  }
+
+  function useHome(): NodeJS.ProcessEnv {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-memex-reuse-home-'))
+    vi.stubEnv('DSH_HOME', dir)
+    return { DSH_HOME: dir }
+  }
+
+  function lines(file: string): Record<string, unknown>[] {
+    if (!existsSync(file)) return []
+    return readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>)
+  }
+
+  const writeFile = (env: NodeJS.ProcessEnv) => join(env.DSH_HOME!, 'plugins', 'dsh-memex', `writes-${new Date().toISOString().slice(0, 7)}.ndjson`)
+
+  const sessionExec = (id = 'session-abc', callId = 'call-1', model?: { provider: string; model: string }) => ({
+    callId,
+    agent: { session: { id, header: { cwd: '/workspace/current' }, requestHeader: () => model === undefined ? undefined : { config: model } } },
+  })
+
+  async function run(tool: ToolDefinition, args: unknown, exec: unknown = sessionExec()): Promise<string> {
+    return (await tool.execute(args, exec as never) as { json: string }).json
+  }
+
+  /** A kernel stand-in that really writes card files, so new vs overwrite is observable. */
+  function writingRunner(searchOut = ''): KernelRunner {
+    return async (args, options) => {
+      if (args[0] === 'write') {
+        writeFileSync(join(options.home, 'cards', `${args[2]}.md`), options.stdin ?? '')
+        return ok()
+      }
+      return ok(searchOut)
+    }
+  }
+
+  function toolsFor(current: ScopeResolution, runner: KernelRunner, others: ScopeResolution[] = []) {
+    return capture(runner, undefined, undefined, service(current, others))
+  }
+
+  describe('intent', () => {
+    it('never changes what the kernel receives or what the tool returns', async () => {
+      useHome()
+      for (const name of ['memex_search', 'memex_recall']) {
+        const runner = vi.fn(async () => ok('## card-one\nCard one title\nbody\n'))
+        const tools = capture(runner as never)
+        const plain = await run(tools.get(name)!, { query: 'proxy' })
+        const gap = await run(tools.get(name)!, { query: 'proxy', intent: 'gap' })
+        const odd = await run(tools.get(name)!, { query: 'proxy', intent: 'nonsense' })
+        expect(gap).toBe(plain)
+        expect(odd).toBe(plain)
+        expect(runner.mock.calls[1]).toEqual(runner.mock.calls[0])
+        expect(runner.mock.calls[2]).toEqual(runner.mock.calls[0])
+      }
+    })
+
+    it('records the declared intent, unknown for an unrecognised value, and nothing when omitted', async () => {
+      const env = useHome()
+      const tools = capture(async () => ok('## card-one\nCard one title\nbody\n'))
+      await run(tools.get('memex_search')!, { query: 'proxy', intent: 'by-name' })
+      await run(tools.get('memex_recall')!, { query: 'proxy', intent: 'nonsense' })
+      await run(tools.get('memex_recall')!, { query: 'proxy' })
+      const written = lines(telemetryFile(new Date(), env))
+      expect(written.map(record => record.intent)).toEqual(['by-name', 'unknown', undefined])
+    })
+
+    it('is described on the parameter only, leaving the kernel tool descriptions untouched', () => {
+      const tools = capture(async () => ok())
+      for (const name of ['memex_search', 'memex_recall'] as const) {
+        const tool = tools.get(name)!
+        expect(tool.parameters).toHaveProperty('properties.intent')
+        expect(tool.description).not.toMatch(/intent/i)
+        expect(tool.description.startsWith(TOOL_DESCRIPTIONS[name])).toBe(true)
+      }
+    })
+  })
+
+  describe('recall record', () => {
+    it('links to the session by hash and to the call by id, without the query or the session id', async () => {
+      const env = useHome()
+      const marker = 'QUERYMARKERXYZ'
+      const tools = capture(async () => ok('## card-one\nCard one title\nbody\n'))
+      await run(tools.get('memex_search')!, { query: `${marker} proxy` }, sessionExec('session-secret-id', 'call-42'))
+      const record = lines(telemetryFile(new Date(), env))[0]!
+      expect(record.call).toBe('call-42')
+      expect(record.session).toMatch(/^[0-9a-f]{16}$/)
+      const text = JSON.stringify(record)
+      expect(text).not.toContain('session-secret-id')
+      expect(text).not.toContain(marker)
+      expect(text).not.toContain('proxy')
+    })
+
+    it('records library snapshots, and per hit the rank, card hash, modified date and explanation', async () => {
+      const env = useHome()
+      const current = realScope('current')
+      writeFileSync(join(current.home, 'cards', 'dsh-proxy-model.md'), '---\ntitle: Proxy model\nmodified: 2026-10-01\n---\nbody text\n')
+      writeFileSync(join(current.home, 'cards', 'other-card.md'), '---\ntitle: Other\n---\nmentions proxy in body\n')
+      const tools = toolsFor(current, async () => ok('## dsh-proxy-model\nProxy model\nbody text\n\n## other-card\nOther\nmentions proxy in body\n'))
+      await run(tools.get('memex_search')!, { query: 'proxy' })
+      const record = lines(telemetryFile(new Date(), env))[0] as { libraries: unknown[]; hits: Record<string, unknown>[] }
+      expect(record.libraries).toEqual([{ scope: 'current', commit: 'unknown' }])
+      expect(record.hits[0]).toMatchObject({ slug: 'dsh-proxy-model', rank: 1, modified: '2026-10-01', explain: [{ t: 0, f: 'slug', w: 5 }] })
+      expect(record.hits[0]!.hash).toMatch(/^[0-9a-f]{16}$/)
+      expect(record.hits[1]).toMatchObject({ slug: 'other-card', rank: 2, explain: [{ t: 0, f: 'body', w: 1 }] })
+      expect(record.hits[1]).not.toHaveProperty('modified')
+    })
+
+    it('keeps hits whose card file cannot be read, without the file facts', async () => {
+      const env = useHome()
+      const tools = capture(async () => ok('## ghost\nGhost\nbody\n'))
+      await run(tools.get('memex_search')!, { query: 'ghost' })
+      const hit = (lines(telemetryFile(new Date(), env))[0] as { hits: Record<string, unknown>[] }).hits[0]!
+      expect(hit).toMatchObject({ slug: 'ghost', rank: 1, anchored: true })
+      expect(hit).not.toHaveProperty('hash')
+      expect(hit).not.toHaveProperty('explain')
+    })
+  })
+
+  describe('write events', () => {
+    it('records a create and then an overwrite with different hashes, and the model in use', async () => {
+      const env = useHome()
+      const current = realScope('personal')
+      const tools = toolsFor(current, writingRunner())
+      const exec = sessionExec('session-w', 'call-w1', { provider: 'claude', model: 'claude-opus-5-5' })
+      await run(tools.get('memex_write')!, { slug: 'card-a', content: '---\ntitle: A\n---\nfirst\n' }, exec)
+      await run(tools.get('memex_retro')!, { slug: 'card-a', title: 'A', body: 'second' }, { ...exec, callId: 'call-w2' })
+      const events = lines(writeFile(env))
+      expect(events.map(event => event.kind)).toEqual(['created', 'overwritten'])
+      expect(events.map(event => event.call)).toEqual(['call-w1', 'call-w2'])
+      expect(events[0]).toMatchObject({ scope: 'personal', slug: 'card-a', model: 'claude/claude-opus-5-5' })
+      expect(events[0]!.hash).not.toBe(events[1]!.hash)
+      expect(events[0]!.session).toMatch(/^[0-9a-f]{16}$/)
+    })
+
+    it('records each additional library that was actually written', async () => {
+      const env = useHome()
+      const extra = realScope('alpha')
+      const base = realScope('current')
+      const current = { ...base, access: { ...base.access, write: ['current', 'alpha'] } }
+      const tools = toolsFor(current, writingRunner(), [extra])
+      await run(tools.get('memex_retro')!, { slug: 'card-b', title: 'B', body: 'body', scope: ['alpha'] })
+      expect(lines(writeFile(env)).map(event => event.scope)).toEqual(['current', 'alpha'])
+    })
+
+    it('carries neither title nor body, and adds nothing to the card frontmatter', async () => {
+      const env = useHome()
+      const current = realScope('current')
+      const tools = toolsFor(current, writingRunner())
+      await run(tools.get('memex_retro')!, { slug: 'card-c', title: 'TITLEMARKER', body: 'BODYMARKER' })
+      const text = readFileSync(writeFile(env), 'utf8')
+      expect(text).not.toContain('TITLEMARKER')
+      expect(text).not.toContain('BODYMARKER')
+      const card = readFileSync(join(current.home, 'cards', 'card-c.md'), 'utf8')
+      expect(card.split('---')[1]!.trim().split('\n').map(line => line.split(':')[0])).toEqual(['title', 'created', 'source'])
+    })
+
+    it('records nothing when the kernel write fails', async () => {
+      const env = useHome()
+      const current = realScope('current')
+      const tools = toolsFor(current, async () => ({ ok: false, exitCode: 1, stdout: '', stderr: 'boom' }))
+      await expect(run(tools.get('memex_write')!, { slug: 'card-d', content: '---\ntitle: D\n---\nx\n' })).rejects.toThrow()
+      expect(lines(writeFile(env))).toHaveLength(0)
+    })
+
+    it('records nothing when the guard rejects the write', async () => {
+      const env = useHome()
+      // An external library refuses a private address (structural:private-ip).
+      const current = realScope('personal')
+      const tools = toolsFor(current, writingRunner())
+      await expect(run(tools.get('memex_write')!, { slug: 'card-e', content: '---\ntitle: E\n---\nhost 10.1.2.3\n' })).rejects.toThrow(/rejected/i)
+      expect(lines(writeFile(env))).toHaveLength(0)
+    })
+
+    it('records nothing for a workspace with memory off', async () => {
+      const env = useHome()
+      const current = realScope('current', false)
+      const tools = toolsFor(current, writingRunner())
+      await expect(run(tools.get('memex_write')!, { slug: 'card-f', content: '---\ntitle: F\n---\nx\n' })).rejects.toThrow(/Memory is off/)
+      expect(lines(writeFile(env))).toHaveLength(0)
+    })
+
+    it('still succeeds, with an identical result, when the event cannot be written', async () => {
+      const current = realScope('current')
+      useHome()
+      const working = await run(toolsFor(current, writingRunner()).get('memex_write')!, { slug: 'card-g', content: '---\ntitle: G\n---\nx\n' })
+      const broken = mkdtempSync(join(tmpdir(), 'dsh-memex-reuse-ro-'))
+      chmodSync(broken, 0o500)
+      vi.stubEnv('DSH_HOME', broken)
+      const failing = await run(toolsFor(current, writingRunner()).get('memex_write')!, { slug: 'card-g', content: '---\ntitle: G\n---\nx\n' })
+      chmodSync(broken, 0o700)
+      expect(failing).toBe(working)
+    })
   })
 })
 

@@ -130,6 +130,17 @@ describe('memex lifecycle with the real AgentLoop', () => {
     expect(requestText(adapter.requests[0]!)).toContain('Current memory scope: repo')
   })
 
+  it('asks for a self-contained first paragraph and a declared intent, keeping the existing guidance', async () => {
+    const { adapter, handle } = await harness(1)
+    await step(handle.agent, 'start')
+    const text = requestText(adapter.requests[0]!)
+    expect(text).toContain('only the title and first paragraph')
+    expect(text).toMatch(/when it applies.*conclusion or steps.*boundaries.*check before reuse/i)
+    expect(text).toContain('intent')
+    expect(text).toContain('save only non-obvious reusable learnings with memex_retro')
+    expect(text).toContain('follow at most 3 link hops and read at most 20 cards')
+  })
+
   describe('write reminder', () => {
     /** Every assistant message the session recorded, in order, with the turn it belongs to. */
     function assistantMessages(ctx: Context, agent: Agent): { turn: number; text: string }[] {

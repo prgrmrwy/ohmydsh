@@ -64,13 +64,20 @@ Names and descriptions come verbatim from the pinned memex release. Scope is imp
 
 ### Recall guidance and write reminder
 
-At session start the plugin injects a bounded recall guide (the resolved scope and library, how to recall, when to write a card) before the first turn; it is read-only and a failure only logs a warning.
+At session start the plugin injects a bounded recall guide (the resolved scope and library, how to recall, when to write a card) before the first turn; it is read-only and a failure only logs a warning. The guide adds two local requirements: search results show only each card's title and first paragraph, so that paragraph should state when it applies, the conclusion or steps, its boundaries and the minimum check before reuse; and recall calls should pass an `intent`. The card format and the upstream methodology are unchanged.
 
 After a session has recalled something and not yet written a card, the plugin nudges the model to save what it learned. The nudge is delivered with the **next** turn, never inside the one that just finished, so a turn always ends on the answer to the request it was asked for. If the conversation stops after that turn, no reminder is delivered and no card is written on its own.
 
 ### Recall telemetry
 
-Each keyword search appends one record under `$DSH_HOME/plugins/dsh-memex/` (never inside a library, never sent anywhere). A record keeps the criteria — time, scope, hit count, returned slugs, whether each hit came from `slug`/`title`/`tags` — and never the query text or card bodies. The read-only `dsh-memex-recall-report` command turns it into a report of empty results, body-only hits and cards that were never recalled:
+Each keyword search appends one record under `$DSH_HOME/plugins/dsh-memex/` (never inside a library, never sent anywhere). A record keeps the criteria — time, scope, hit count, returned slugs, whether each hit came from `slug`/`title`/`tags` — and never the query text, its tokens or card bodies. So that later analysis can tell "never written down" from "not found" from "found but not used well", 0.4.0 also records:
+
+- each searched library's git commit and whether `cards/` had uncommitted changes (`unknown` when the library directory is not a git repository root);
+- per hit: its rank, the card file's content hash, `modified`, and which query token (by position, never by text) matched which field — an approximate recomputation using the kernel's field weights;
+- a one-way hash of the session id and the tool call id, for joining with the session log;
+- the caller's declared `intent` (omitted when not passed, `unknown` when out of range; it never changes results).
+
+Every successful card write (including additional libraries) appends an event to `writes-YYYY-MM.ndjson`: library, slug, created or overwritten, content hash, session hash, call id, model — never the title or body, and nothing is added to the card. The read-only `dsh-memex-recall-report` command turns it into a report of empty results, body-only hits and cards that were never recalled:
 
 ```bash
 dsh-memex-recall-report --days 14 --scope personal

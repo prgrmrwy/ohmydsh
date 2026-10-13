@@ -108,7 +108,7 @@ customizations:
   - id: dsh-memex
     type: package
     source: local
-    version: 0.3.0
+    version: 0.4.0
     enabled: true
     enabledEnv: DSH_MEMEX_ENABLED  # 紧急熔断：设 DSH_MEMEX_ENABLED=0 即可在下次 build 时移除
     brief: memex 持久记忆原生接入(scope 隔离/跨库检索/守门 + 「记忆」设置页)
@@ -122,7 +122,7 @@ customizations:
       - kind: npm-global
         package: "@touchskyer/memex"
         version: "0.4.1"
-    note: '自研,spec dsh-memex-scope/-settings-ui/-card-browser(0.3.0 起工作区开关改为路径声明 workspaces)。依赖全局安装的内核 @touchskyer/memex@0.4.1(MIT,不改上游):由 hostPrerequisites 在 bin/dsh 启动前自愈(sync 只校验不安装),pin 须等于生成物 KERNEL_VERSION,全局安装需显式 --registry=https://registry.npmjs.org/。卡片浏览按需起内核 serve(配远端须 --local,注入 MEMEX_NO_OPEN,取 stdout 最后一个端口);跨机器注册方失败绝不回落本机地址。升级复核:内核 --init 的英文错误串(调用已注入 LC_ALL=C)与 serve 文本解析。回滚:enabled:false + sync(重启须脱离调用方进程);退到 0.2.0 前先把关闭开关写回条目级;紧急熔断 DSH_MEMEX_ENABLED=0。'
+    note: '自研,spec dsh-memex-scope/-settings-ui/-card-browser(0.3.0 起工作区开关改为路径声明 workspaces)。依赖全局安装的内核 @touchskyer/memex@0.4.1(MIT,不改上游):由 hostPrerequisites 在 bin/dsh 启动前自愈(sync 只校验不安装),pin 须等于生成物 KERNEL_VERSION,全局安装需显式 --registry=https://registry.npmjs.org/。卡片浏览按需起内核 serve(配远端须 --local,注入 MEMEX_NO_OPEN,取 stdout 最后一个端口);跨机器注册方失败绝不回落本机地址。升级复核:内核 --init 的英文错误串(调用已注入 LC_ALL=C)与 serve 文本解析。回滚:enabled:false + sync(重启须脱离调用方进程);退到 0.2.0 前先把关闭开关写回条目级;紧急熔断 DSH_MEMEX_ENABLED=0。0.4.0 起遥测补记复用证据并另存写卡事件、注入要求卡片首段可独立使用(只读、不写库、不外发,详见 CHANGELOG)。'
   # 自研(local):sidebar 会话行前动态 provider logo
   - id: sidebar-session-provider-icon
     type: package
