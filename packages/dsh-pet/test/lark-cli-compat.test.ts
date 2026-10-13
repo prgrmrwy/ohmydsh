@@ -3,8 +3,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  PET_LARK_CLI_PINNED_VERSION,
+  PET_LARK_CLI_MIN_VERSION,
   PetLarkCliCompatUnavailableError,
+  meetsPetLarkCliFloor,
   resolvePetLarkCliCompat,
 } from '../src/host/channel/lark-cli-compat.js'
 
@@ -25,21 +26,39 @@ async function fakeCli(reports: string): Promise<string> {
 }
 
 describe('Pet official lark-cli resolution', () => {
-  it('accepts the pinned version and carries the spool it may write into', async () => {
-    const binary = await fakeCli('lark-cli version 1.0.94')
+  it('accepts the minimum version and carries the spool it may write into', async () => {
+    const binary = await fakeCli(`lark-cli version ${PET_LARK_CLI_MIN_VERSION}`)
     await expect(resolvePetLarkCliCompat({ spoolRoot: '/spool', binary })).resolves.toEqual({
       binary,
-      pinnedVersion: PET_LARK_CLI_PINNED_VERSION,
+      version: PET_LARK_CLI_MIN_VERSION,
       spoolRoot: '/spool',
     })
   })
 
-  it('refuses an older or newer version rather than trusting un-reviewed output rules', async () => {
-    for (const reported of ['lark-cli version 1.0.93', 'lark-cli version 1.1.0', 'lark-cli version 1.0.100']) {
+  it('accepts newer versions without a code change', async () => {
+    for (const version of ['1.0.98', '1.0.100', '1.1.0', '2.0.0']) {
+      const binary = await fakeCli(`lark-cli version ${version}`)
+      await expect(resolvePetLarkCliCompat({ spoolRoot: '/spool', binary }))
+        .resolves.toMatchObject({ binary, version })
+    }
+  })
+
+  it('refuses versions below the verified floor', async () => {
+    for (const reported of ['lark-cli version 1.0.94', 'lark-cli version 1.0.96', 'lark-cli version 0.9.99']) {
       const binary = await fakeCli(reported)
       await expect(resolvePetLarkCliCompat({ spoolRoot: '/spool', binary }))
         .rejects.toThrow(PetLarkCliCompatUnavailableError)
     }
+  })
+
+  it('compares versions numerically per segment', () => {
+    expect(meetsPetLarkCliFloor('1.0.97')).toBe(true)
+    expect(meetsPetLarkCliFloor('1.0.100')).toBe(true)
+    expect(meetsPetLarkCliFloor('1.1.0')).toBe(true)
+    expect(meetsPetLarkCliFloor('1.0.9')).toBe(false)
+    expect(meetsPetLarkCliFloor('0.99.999')).toBe(false)
+    expect(meetsPetLarkCliFloor('1.0')).toBe(false)
+    expect(meetsPetLarkCliFloor('')).toBe(false)
   })
 
   it('refuses output that carries no version at all', async () => {
@@ -58,9 +77,9 @@ describe('Pet official lark-cli resolution', () => {
       .rejects.toThrow(/spool directory is not configured/)
   })
 
-  it('reports the observed version so an operator can act on it', async () => {
-    const binary = await fakeCli('lark-cli version 9.9.9')
+  it('reports the observed version and the floor so an operator can act on it', async () => {
+    const binary = await fakeCli('lark-cli version 1.0.94')
     await expect(resolvePetLarkCliCompat({ spoolRoot: '/spool', binary }))
-      .rejects.toThrow(/requires 1\.0\.94/)
+      .rejects.toThrow(/is 1\.0\.94, but Pet media requires >= 1\.0\.97/)
   })
 })

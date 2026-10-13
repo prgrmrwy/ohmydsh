@@ -3,8 +3,13 @@ import { promisify } from 'node:util'
 
 const run = promisify(execFile)
 
-/** The official lark-cli version whose `--output` contract Pet reviewed. */
-export const PET_LARK_CLI_PINNED_VERSION = '1.0.94' as const
+/**
+ * The oldest official lark-cli whose `--output` behaviour Pet has verified live.
+ * Newer versions are accepted: isolation rests on the per-call 0700 cwd, size
+ * polling, receipt checks and unconditional deletion, none of which depend on
+ * the CLI version.
+ */
+export const PET_LARK_CLI_MIN_VERSION = '1.0.97' as const
 
 const VERSION_TIMEOUT_MS = 10_000
 const MAX_VERSION_CHARS = 64
@@ -13,7 +18,8 @@ const VERSION_PATTERN = /\b(\d+\.\d+\.\d+)\b/
 /** The resolved official binary plus the only directory media may be written to. */
 export interface PetLarkCliCompat {
   readonly binary: string
-  readonly pinnedVersion: typeof PET_LARK_CLI_PINNED_VERSION
+  /** Version the binary reported; always at or above `PET_LARK_CLI_MIN_VERSION`. */
+  readonly version: string
   /** Pet-owned 0700 spool; the locus child's read guard refuses this tree. */
   readonly spoolRoot: string
 }
@@ -47,15 +53,38 @@ async function probeVersion(binary: string): Promise<string> {
   return typeof result.stdout === 'string' ? result.stdout : String(result.stdout ?? '')
 }
 
+function parts(version: string): number[] | undefined {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version)
+  return match === null ? undefined : match.slice(1).map(Number)
+}
+
+/**
+ * Whether a reported `x.y.z` version is at or above Pet's verified minimum.
+ * Compares numerically per segment, so `1.0.100` is newer than `1.0.97`.
+ * @param version - Bare three-segment version.
+ * @returns false for anything that is not a plain `x.y.z`.
+ */
+export function meetsPetLarkCliFloor(version: string): boolean {
+  const have = parts(version)
+  const need = parts(PET_LARK_CLI_MIN_VERSION)
+  if (have === undefined || need === undefined) return false
+  for (let index = 0; index < 3; index += 1) {
+    const a = have[index] ?? 0
+    const b = need[index] ?? 0
+    if (a !== b) return a > b
+  }
+  return true
+}
+
 /**
  * Resolve the official `lark-cli` Pet downloads media with.
  *
  * Two facts are required, and neither is inferred: the binary must run, and the
- * version it reports must be the pinned one, because that version is the
- * contract for `--output`'s allowed roots and denylist. Media stays unavailable
- * otherwise — a version Pet has not reviewed must not decide where bytes land.
+ * version it reports must be at or above the verified minimum. Media stays
+ * unavailable otherwise. The binary is the same `lark-cli` every other Pet call
+ * resolves from PATH.
  * @param input - Spool directory plus optional binary/probe overrides.
- * @returns the resolved binary, pinned version and spool root.
+ * @returns the resolved binary, reported version and spool root.
  * @throws PetLarkCliCompatUnavailableError when either fact cannot be proven.
  */
 export async function resolvePetLarkCliCompat(input: PetLarkCliCompatInput): Promise<PetLarkCliCompat> {
@@ -79,10 +108,10 @@ export async function resolvePetLarkCliCompat(input: PetLarkCliCompatInput): Pro
       `lark-cli ${binary} reported no version (${sanitize(reported) || 'empty output'})`,
     )
   }
-  if (version !== PET_LARK_CLI_PINNED_VERSION) {
+  if (!meetsPetLarkCliFloor(version)) {
     throw new PetLarkCliCompatUnavailableError(
-      `lark-cli ${binary} is ${version}, but Pet media requires ${PET_LARK_CLI_PINNED_VERSION}`,
+      `lark-cli ${binary} is ${version}, but Pet media requires >= ${PET_LARK_CLI_MIN_VERSION}`,
     )
   }
-  return { binary, pinnedVersion: PET_LARK_CLI_PINNED_VERSION, spoolRoot: input.spoolRoot }
+  return { binary, version, spoolRoot: input.spoolRoot }
 }
