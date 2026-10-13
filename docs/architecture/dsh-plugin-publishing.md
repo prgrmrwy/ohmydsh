@@ -340,6 +340,16 @@ GitHub 可接受使用政策 §4 明确把「rank abuse, such as automated starr
 4. **上架商店**：仓库创建满 1 天后，一个 PR 只加 `data/plugins/<owner>__<repo>.yml`（规则见 §1、命令见 §3），
    每个 PR ≤3 条。
 5. **npm**：确认包名空闲 → `npm publish`；发布后商店夜间 probe 自动关联下载量，**不需要补 PR**。
+   三件实测踩过的事：
+   - **npm 已永久关闭新的 TOTP 注册**（2025-10-10 起，见 GitHub Changelog），新配置只能用
+     WebAuthn/安全密钥。若账号是 `auth-and-writes`（安全密钥模式），CLI 发布会报 `EOTP`，
+     而 `--otp` 无从获取——解法是建一个 **Granular Access Token 并勾选 Bypass 2FA**
+     （限定单包 + 设到期时间；npm 现在对 token 有寿命上限），写进 `~/.npmrc`。
+     `npm trust`（CLI 配 trusted publisher）**不支持 bypass 2FA 的 token**，只能走网页配置。
+   - **新包发布后 registry 会先落一个 `0.0.0-stage` 占位版本**，真实版本约 5 分钟后才替换上去
+     （CLI 提示 "being processed"）。看到占位版不要以为发错了，更不要重复发布。
+   - **长期用 trusted publishing（OIDC）**：按 §11 在包目录里放 `.github/workflows/release.yml`，
+     在 npm 网页把该仓库 + workflow 文件名绑定为 Trusted Publisher，之后**打 tag 即发版、无需任何 token**。
 6. **其它索引**：dsh.so 自助表单 <https://www.dsh.so/submit/>（服务端 GitHub API 会限流，重试即可）；
    其余站点都爬 topic，不用提交。
 
@@ -392,3 +402,27 @@ curl -s https://api.npmjs.org/downloads/point/last-month/<pkg>
 ```
 平台侧另有现成指标：商店条目的 downloads / stars、dsh.so 的 L1–L5 验证级别。再人工问一次
 AI 助手（"DSH 侧边栏显示当前模型图标的插件"）看是否被提及——目前没有免费的官方 AI 引用查询接口。
+
+---
+
+## 11. 长期发版：trusted publishing（OIDC）release workflow
+
+**目的**：打 tag 即发版，**仓库里不存在任何长期 npm token**，provenance 由 npm 自动生成。
+
+**文件位置**：`packages/<插件目录>/.github/workflows/release.yml`。它随镜像公开；在 ohmydsh 里是惰性的
+（GitHub Actions 只读仓库根目录的 `.github/workflows`，子目录里的不生效），所以放在包目录里是安全的。
+
+**实测要求**（来自 npm 文档）：
+
+- npm CLI **≥ 11.5.1**、Node **≥ 22.14**；workflow 必须声明 `permissions: id-token: write`。
+  镜像仓库的 Node 24 自带 npm 版本可能不够，所以 workflow 里显式 `npm install -g npm@^11.15.0`。
+- 镜像仓库**没有 lockfile**（ohmydsh 用的是根 lockfile），所以用 `npm install` 而不是 `npm ci`。
+- `npm publish` 会触发 `prepare`/`prepack` 构建 `lib/`，无需额外构建步骤。
+- workflow 里有一道校验：tag 必须等于 `package.json` 的 version，否则在发布前失败。
+
+**npm 侧绑定**（网页，一次性）：package 页 → Settings → **Trusted Publisher** → GitHub Actions，填
+repository `prgrmrwy/<仓库名>`、workflow filename **`release.yml`**（必须与文件名逐字一致）、
+environment 留空。注意 `npm trust` 这条 CLI **不支持 bypass 2FA 的 token**，所以只能用网页配置。
+
+**发版流程**：改 `package.json` 的 `version`（ohmydsh 侧同时同步 `dsh.yaml` 里的 `version`）→ commit
+→ `git tag v<version> && git push origin v<version>`。绑定完成后，bypass-2FA 的 token 就可以删掉了。
