@@ -31,6 +31,9 @@
 
 ## 4. 部署与上线观察（需用户确认后执行）
 
-- [ ] 4.1 用户确认 DSH 空闲后执行 `node scripts/sync.mjs` 两次确认幂等，并以脱离调用方进程的方式重启。验证：第二次 sync 无变化，Web GUI 可访问。
+- [x] 4.1 用户确认 DSH 空闲后执行 `node scripts/sync.mjs` 两次确认幂等，并以脱离调用方进程的方式重启。验证：第二次 sync 无变化，Web GUI 可访问。
+  - 2026-10-13 19:44 用户重启后：部署产物 `profiles/web/node_modules/dsh-memex` 为 0.4.0；`node scripts/sync.mjs` 输出 no changes；新会话注入中可见首段要求与 intent 提示两行。
 - [ ] 4.2 GUI 实测：新会话的注入含新两行；带 `intent` 召回一次，遥测记录含库快照、命中 hash/名次/解释、会话 hash、调用 id、意图；写一张卡，`writes-*.ndjson` 出现对应事件。同时完成 `dsh-memex-defer-write-reminder` 的 3.3–3.4 实测。验证：在报告中描述观察结果，不提交截图与原始记录。
-- [ ] 4.3 记录观察窗起点；1 周后统计新卡第一段达标率，3–4 周后按讨论稿统计检索与消费端，并对比上线前后各两周的召回频率与成本。验证：仓库外评估目录中有报告，说明样本量与区间。
+  - 已核对（2026-10-13 19:46，本会话真实调用）：两条召回记录均含 `intent: verify`、会话 hash、调用 id，`libraries` 的 commit 等于库 HEAD 且 `dirty: false`，13 条命中全部带名次、内容 hash、`modified` 与命中解释，不含查询原文；写卡一次后 `writes-2026-10.ndjson` 出现 `kind: created`、hash、会话 hash、调用 id、模型 `claude/claude-opus-5-5`，不含标题与正文，卡片 frontmatter 只有内核字段。
+  - 未完成：写卡提醒延后修复（`dsh-memex-defer-write-reminder` 3.4）需要在一个新会话里观察“回合以回答收尾、下一回合才收到提醒”，本会话无法验证；该 change 的 3.3 sync 幂等已随本次部署满足。
+- [ ] 4.3 记录观察窗起点（2026-10-13 19:44 +08:00，即 0.4.0 生效的重启时刻）；1 周后统计新卡第一段达标率，3–4 周后按讨论稿统计检索与消费端，并对比上线前后各两周的召回频率与成本。验证：仓库外评估目录中有报告，说明样本量与区间。
