@@ -426,3 +426,19 @@ environment 留空。注意 `npm trust` 这条 CLI **不支持 bypass 2FA 的 to
 
 **发版流程**：改 `package.json` 的 `version`（ohmydsh 侧同时同步 `dsh.yaml` 里的 `version`）→ commit
 → `git tag v<version> && git push origin v<version>`。绑定完成后，bypass-2FA 的 token 就可以删掉了。
+**tag 必须推到镜像仓库**（tag 不随 subtree push 过去）：在镜像仓库打 tag，或直接
+`git push <镜像仓库> refs/tags/v<version>`。
+
+**实测踩过的五个点**（2026-10-13，第一次绑定 + 首次 OIDC 发布）：
+
+1. **绑定是两步表单，别中途退出**：`Select your publisher` → `GitHub Actions` → 填四个字段 →
+   下一屏 `Allowed actions` → **`Set up connection`**。少点最后一步等于没配，而 CI 里只会报一句
+   含糊的 `npm error code ENEEDAUTH — need auth`（环境、权限、npm 版本全对也没用）。
+   判断是否配好：该区域不再是三个按钮，而是列出连接（仓库 + workflow 文件名 + 移除入口）。
+2. **Workflow filename 填纯文件名**（`release.yml`）；写成 `.github/workflows/release.yml` 匹配不上。
+3. **`Allowed actions` 里必须勾 `Allow npm publish`**，否则该 publisher 只能 `npm stage publish`
+   （发布物进暂存区、需人工批准），workflow 里的 `npm publish` 会被拒。
+4. 绑定后状态是 **Pending validation**，页面会要求在某日期前发布一次来完成验证；首次成功发布后转正。
+5. **重跑不需要新 tag**：`gh workflow run release.yml --repo <owner>/<repo>`（workflow 里有
+   `workflow_dispatch`）。注意 npm 不允许重复发布同一版本，所以重跑前 `package.json` 的版本必须是
+   尚未发布过的。成功发布后 `npm view <pkg>@<ver> dist.attestations.url` 非空，即 provenance 生效。
