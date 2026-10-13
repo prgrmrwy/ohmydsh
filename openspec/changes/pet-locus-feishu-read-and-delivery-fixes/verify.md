@@ -34,6 +34,18 @@
 - 本 change 的改动规模（限 `packages/dsh-pet` + 本 change 目录 + `BACKLOG.md`）：41 files, +3407/−144
 - Non-executable checks run：none
 
+### 工具级真数据回放（2026-10-13 14:47，补齐模型侧无法产出的拒绝样本）
+
+child 两次被要求"故意做非法调用"都**依约拒绝**（工具契约禁止目标参数与自造游标），因此拒绝样本不可能由模型产生。改用已构建产物 + 真实入口数据回放（`node /tmp/tool-replay.mjs`，使用 `packages/dsh-pet/lib/host/locus-history-tool.js` 与真实 `locus-runtime-1791825019304-…` 记录、真实 `+chat-messages-list` 页面）：
+
+| 调用 | 结果 | 是否发生读取 |
+|---|---|---|
+| `{chat_id:'oc_somewhere_else', direction:'older'}` | `{"ok":false,"reason":"pet_locus_chat_history does not accept argument 'chat_id'."}` | **0 次**（拒绝发生在读取之前） |
+| `{cursor:'abc123'}`（伪造） | `{"ok":false,"reason":"cursor-invalid"}` | **0 次** |
+| `{direction:'older'}`（正对照） | `ok:true`、`identity:'bot'`、`count:5`，含真实消息与发送者 | 1 次 |
+
+说明：回放直接把 CLI 原始页面喂给读取端口，**绕过了适配器的 `normalizeEntranceTime`**，所以渲染里的时间戳是 `2026-10-13 14:44`（未带偏移）；真实路径（`delivery-52`）里是 ISO 8601 带偏移。这是回放脚手架与生产路径的差异，不是产品缺陷。
+
 ### 真机验收（首次执行，2026-10-13 01:10，部分通过并暴露一处缺陷）
 
 入口：群 `oc_6847047be0e4310c404a8a41ed068365`（「Pet Locus shell-tier test」，新入口无 locus）；触发消息 `om_x100b63e5094a74a0c072c7f7ef0ba0c`「@aaa金雷竹批发韩总 看下历史消息我们在讨论什么」；结果：`delivery-51` / locus `locus-runtime-1791825019304-1e6afb3085e438`（gen 1, safe, read）/ child `session-1e2caf37-54a4-4d49-8128-ceb8df47f583`。
@@ -48,9 +60,9 @@
 | 失败不伪装成"没有消息" | ✅ PASS | child 如实回复"历史读取工具返回了错误，没拿到聊天内容"，未编造讨论内容 |
 | 投递结算 | ✅ PASS | delivery-51 `status=replied`、`outboundResult=success`、`finishOutcome=reply`（01:10:35） |
 | 守卫拒绝文案（`read /etc/hosts`） | ✅ PASS | `delivery-54` 的 turn 4：`Error: locus-project-read-outside-confirmed-workspace` + 拒绝原因 + `- 允许根：/Users/bytedance/mydir/dev/nexus` + 申请方式（E 组改动真机生效） |
-| 未知参数拒绝 | 🟡 半验 | child 依据工具契约**拒绝**构造带 `chat_id` 的调用（"工具定义没有 chat_id 参数，并明确禁止提供聊天目标参数"），因此没有产生真机拒绝样本；工具级拒绝由 `test/locus-chat-history-tool.test.ts` 的 `rejects unknown arguments without reading anything` 覆盖 |
-| 游标篡改/伪造 | 🟡 半验 | 同上：child 依约拒绝自行编造 cursor；伪造/跨入口/过期由 `test/locus-history-cursor.test.ts`（8 例）与工具级用例覆盖 |
-| 话题入口读取 | ⏳ 未验 | 需要在群里新建话题后 @ 一次（独立 locus，不受群级队列影响） |
+| 未知参数拒绝 | ✅ PASS（真数据回放，模型侧未产出样本） | 见下方"工具级真数据回放"：对**已构建产物**传入 `chat_id` → `{ok:false, reason:"pet_locus_chat_history does not accept argument 'chat_id'."}` 且**读取次数 0**。模型侧两次都依约拒绝构造非法调用（14:44 与 02:33 的回复），因此没有模型产生的拒绝样本 |
+| 游标篡改/伪造 | ✅ PASS（真数据回放，模型侧未产出样本） | 同上：伪造 `cursor:"abc123"` → `{ok:false, reason:'cursor-invalid'}` 且**读取次数 0**；篡改/跨入口/过期另由 `test/locus-history-cursor.test.ts`（8 例）覆盖 |
+| 话题入口读取 | ⏳ 未验（需所有者） | 群内新建话题后 @ 一次即可（独立 locus/队列）；模型无法自造话题入口 |
 
 **2026-10-13 第二轮真机（01:21 与 01:32/01:34 两次投递，修复后运行）**：
 - `delivery-52`（"再试一下历史消息"）：`pet_locus_chat_history` **成功返回 9 条**（`读取身份：bot`、ISO 时间+发送者、不可信输入标注、预算脚注），child 据此总结并 `pet_locus_finish(reply)`；续投提示词同时带到 `工具档位：safe` 与 `本入口读取能力（本次实测）：…已实测可读` —— W6 修复真机生效，D 组两处声明（首投/续投）均真机生效。
