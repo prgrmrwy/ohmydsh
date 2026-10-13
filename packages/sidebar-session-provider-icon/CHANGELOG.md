@@ -38,3 +38,25 @@
 ## 0.1.5 — 2026-10-10
 
 - 按当前 TraeX 目录补齐 model 子图标：`openrouter-*` 使用 OpenRouter，`Seed-*` 使用 ByteDance；既有 GPT、DeepSeek、Gemini 映射继续复用。主图始终保持 Trae。
+
+## 0.1.6 — 2026-10-13
+
+插件行为不变；这一版是公开发布所需的分发与合规改动。
+
+- 新增 `prepare` 脚本（与 `prepack` 并用）：npm/pnpm 安装 **git 依赖**时执行的是 `prepare`，
+  此前只有 `prepack`，从 GitHub 源码安装装出来没有 `lib/`，插件无法加载。
+- 新增 `THIRD-PARTY-NOTICES.md`：LobeHub 图标（MIT）与 `anomalyco/opencode`（MIT）的版权行与
+  许可全文，以及渲染期技术性改动与商标立场说明。
+- `package.json` 补 `repository`（指向发布仓库，市场按它关联 npm 包与下载量）、`homepage`、
+  `bugs`、`keywords`；`files` 增加 `THIRD-PARTY-NOTICES.md` 与 `docs`。
+- 新增 `screenshots.json`（市场详情页截图顺序）与 `.github/workflows/release.yml`
+  （tag 触发、npm trusted publishing / OIDC 发版，仓库内不存长期 token）。
+- README 双语安装段改为消费者视角（npm 与源码两条命令），描述补上产品名。
+
+## 0.1.7 — 2026-10-13
+
+插件行为不变；只改用于被检索到的描述文本。
+
+- 描述统一为 **"show a provider + model icon in the sidebar for every session"**：GitHub About、
+  `package.json` 与 npm 页面用同一句（npm 的描述只在发版时刷新，所以借这一版更新）。
+  此前那句缺 `provider` 与 `icon` 两个检索词。

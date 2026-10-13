@@ -340,6 +340,16 @@ GitHub 可接受使用政策 §4 明确把「rank abuse, such as automated starr
 4. **上架商店**：仓库创建满 1 天后，一个 PR 只加 `data/plugins/<owner>__<repo>.yml`（规则见 §1、命令见 §3），
    每个 PR ≤3 条。
 5. **npm**：确认包名空闲 → `npm publish`；发布后商店夜间 probe 自动关联下载量，**不需要补 PR**。
+   三件实测踩过的事：
+   - **npm 已永久关闭新的 TOTP 注册**（2025-10-10 起，见 GitHub Changelog），新配置只能用
+     WebAuthn/安全密钥。若账号是 `auth-and-writes`（安全密钥模式），CLI 发布会报 `EOTP`，
+     而 `--otp` 无从获取——解法是建一个 **Granular Access Token 并勾选 Bypass 2FA**
+     （限定单包 + 设到期时间；npm 现在对 token 有寿命上限），写进 `~/.npmrc`。
+     `npm trust`（CLI 配 trusted publisher）**不支持 bypass 2FA 的 token**，只能走网页配置。
+   - **新包发布后 registry 会先落一个 `0.0.0-stage` 占位版本**，真实版本约 5 分钟后才替换上去
+     （CLI 提示 "being processed"）。看到占位版不要以为发错了，更不要重复发布。
+   - **长期用 trusted publishing（OIDC）**：按 §11 在包目录里放 `.github/workflows/release.yml`，
+     在 npm 网页把该仓库 + workflow 文件名绑定为 Trusted Publisher，之后**打 tag 即发版、无需任何 token**。
 6. **其它索引**：dsh.so 自助表单 <https://www.dsh.so/submit/>（服务端 GitHub API 会限流，重试即可）；
    其余站点都爬 topic，不用提交。
 
@@ -358,3 +368,77 @@ GitHub 可接受使用政策 §4 明确把「rank abuse, such as automated starr
 monorepo 子包要各自上架时：topic 爬虫只认仓库级，子包必须手动提 PR
 （`url …/tree/main/packages/<id>`、`name owner/repo#<id>`、文件名 `owner__repo--packages-<id>.yml`），
 商店会为它生成 `dsh plugin --profile web add github:owner/repo#path:/packages/<id>` 这样的安装命令。
+
+---
+
+## 10. 发布之后：推广位与度量
+
+**什么样的仓库才值得投。** 不要按 star 数找仓库铺链接。实测（2026-10-12 抽样头部插件
+`V1ki/dsh-plugin-subscriptions`、`omdsh-dev/DSH-better-sidebar`、`MichengAI/dsh-codex-ui`、
+`zhu1090093659/dsh-pet`、`dsh-market/dsh-market`）：**几乎全都 `has_discussions = false`**，
+但其中多数 README 里有维护者自建的 `## Related plugins` / `## 相关插件` 区块。所以真实的位是
+**"该仓库明确留出的生态位"**，不是"有讨论区的高星仓库"。
+
+按回报/风险排序的投放顺序：
+
+1. **相邻插件的 `Related plugins` 区块** —— 只投"互补"关系（例如多 provider 插件 ↔ 侧边栏模型标识），
+   每家最多提一次 PR，格式照抄该仓库既有条目（链接 + 一句相对本插件做什么 + 安装命令）。
+2. **商店条目** —— 复利渠道：站点、dsh-market、第三方 storefront 读同一份注册表，用户在那里浏览。
+3. **官方 Discussions 的 Show Your Plugins** —— 每个插件发一次，别重复。
+4. **中文社区一篇**（掘金/知乎/V2EX 任选一处，不同文同发）。
+
+**明确不做**：在别人的 issue tracker 里发推广；同一文案跨仓库复制（GitHub 可接受使用政策 §4
+"excessive or repeated promotion"）；请求维护者为你改仓库设置（例如开 Discussions）。
+
+**时机**：Related PR 要等 npm 发布成功后再提——否则条目里那句
+`dsh plugin --profile web add <name>` 是 404，比不提更伤。
+
+**度量（一周后）**：
+
+```sh
+gh api repos/prgrmrwy/<repo>/traffic/views                  # 14 天窗口
+gh api repos/prgrmrwy/<repo>/traffic/popular/referrers      # 看哪个渠道真的带量
+curl -s https://api.npmjs.org/downloads/point/last-month/<pkg>
+```
+平台侧另有现成指标：商店条目的 downloads / stars、dsh.so 的 L1–L5 验证级别。再人工问一次
+AI 助手（"DSH 侧边栏显示当前模型图标的插件"）看是否被提及——目前没有免费的官方 AI 引用查询接口。
+
+---
+
+## 11. 长期发版：trusted publishing（OIDC）release workflow
+
+**目的**：打 tag 即发版，**仓库里不存在任何长期 npm token**，provenance 由 npm 自动生成。
+
+**文件位置**：`packages/<插件目录>/.github/workflows/release.yml`。它随镜像公开；在 ohmydsh 里是惰性的
+（GitHub Actions 只读仓库根目录的 `.github/workflows`，子目录里的不生效），所以放在包目录里是安全的。
+
+**实测要求**（来自 npm 文档）：
+
+- npm CLI **≥ 11.5.1**、Node **≥ 22.14**；workflow 必须声明 `permissions: id-token: write`。
+  镜像仓库的 Node 24 自带 npm 版本可能不够，所以 workflow 里显式 `npm install -g npm@^11.15.0`。
+- 镜像仓库**没有 lockfile**（ohmydsh 用的是根 lockfile），所以用 `npm install` 而不是 `npm ci`。
+- `npm publish` 会触发 `prepare`/`prepack` 构建 `lib/`，无需额外构建步骤。
+- workflow 里有一道校验：tag 必须等于 `package.json` 的 version，否则在发布前失败。
+
+**npm 侧绑定**（网页，一次性）：package 页 → Settings → **Trusted Publisher** → GitHub Actions，填
+repository `prgrmrwy/<仓库名>`、workflow filename **`release.yml`**（必须与文件名逐字一致）、
+environment 留空。注意 `npm trust` 这条 CLI **不支持 bypass 2FA 的 token**，所以只能用网页配置。
+
+**发版流程**：改 `package.json` 的 `version`（ohmydsh 侧同时同步 `dsh.yaml` 里的 `version`）→ commit
+→ `git tag v<version> && git push origin v<version>`。绑定完成后，bypass-2FA 的 token 就可以删掉了。
+**tag 必须推到镜像仓库**（tag 不随 subtree push 过去）：在镜像仓库打 tag，或直接
+`git push <镜像仓库> refs/tags/v<version>`。
+
+**实测踩过的五个点**（2026-10-13，第一次绑定 + 首次 OIDC 发布）：
+
+1. **绑定是两步表单，别中途退出**：`Select your publisher` → `GitHub Actions` → 填四个字段 →
+   下一屏 `Allowed actions` → **`Set up connection`**。少点最后一步等于没配，而 CI 里只会报一句
+   含糊的 `npm error code ENEEDAUTH — need auth`（环境、权限、npm 版本全对也没用）。
+   判断是否配好：该区域不再是三个按钮，而是列出连接（仓库 + workflow 文件名 + 移除入口）。
+2. **Workflow filename 填纯文件名**（`release.yml`）；写成 `.github/workflows/release.yml` 匹配不上。
+3. **`Allowed actions` 里必须勾 `Allow npm publish`**，否则该 publisher 只能 `npm stage publish`
+   （发布物进暂存区、需人工批准），workflow 里的 `npm publish` 会被拒。
+4. 绑定后状态是 **Pending validation**，页面会要求在某日期前发布一次来完成验证；首次成功发布后转正。
+5. **重跑不需要新 tag**：`gh workflow run release.yml --repo <owner>/<repo>`（workflow 里有
+   `workflow_dispatch`）。注意 npm 不允许重复发布同一版本，所以重跑前 `package.json` 的版本必须是
+   尚未发布过的。成功发布后 `npm view <pkg>@<ver> dist.attestations.url` 非空，即 provenance 生效。
