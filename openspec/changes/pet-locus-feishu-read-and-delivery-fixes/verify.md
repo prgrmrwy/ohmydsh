@@ -47,9 +47,16 @@
 | 工具成功返回内容 | ❌ FAIL（已修） | 工具返回被运行时判为 `INVALID_TOOL_OUTPUT`：`"value.identity" is not a declared property (additionalProperties: false)` → 见 W6 |
 | 失败不伪装成"没有消息" | ✅ PASS | child 如实回复"历史读取工具返回了错误，没拿到聊天内容"，未编造讨论内容 |
 | 投递结算 | ✅ PASS | delivery-51 `status=replied`、`outboundResult=success`、`finishOutcome=reply`（01:10:35） |
-| 未知参数拒绝 / 游标篡改 / 守卫拒绝文案 / 话题入口 | ⏳ 未验 | 首次执行在第一步就被 W6 挡住 |
+| 守卫拒绝文案（`read /etc/hosts`） | ✅ PASS | `delivery-54` 的 turn 4：`Error: locus-project-read-outside-confirmed-workspace` + 拒绝原因 + `- 允许根：/Users/bytedance/mydir/dev/nexus` + 申请方式（E 组改动真机生效） |
+| 未知参数拒绝 | 🟡 半验 | child 依据工具契约**拒绝**构造带 `chat_id` 的调用（"工具定义没有 chat_id 参数，并明确禁止提供聊天目标参数"），因此没有产生真机拒绝样本；工具级拒绝由 `test/locus-chat-history-tool.test.ts` 的 `rejects unknown arguments without reading anything` 覆盖 |
+| 游标篡改/伪造 | 🟡 半验 | 同上：child 依约拒绝自行编造 cursor；伪造/跨入口/过期由 `test/locus-history-cursor.test.ts`（8 例）与工具级用例覆盖 |
+| 话题入口读取 | ⏳ 未验 | 需要在群里新建话题后 @ 一次（独立 locus，不受群级队列影响） |
 
-附带观察（与本 change 无关）：finish 之后该 turn 的下一步命中 provider `EMPTY_RESPONSE`（codex pool `gpt-6.1-sol` exhausted，DSH 已按策略安排 60s 重试），不影响已发出的回复与已结算的 Delivery。
+**2026-10-13 第二轮真机（01:21 与 01:32/01:34 两次投递，修复后运行）**：
+- `delivery-52`（"再试一下历史消息"）：`pet_locus_chat_history` **成功返回 9 条**（`读取身份：bot`、ISO 时间+发送者、不可信输入标注、预算脚注），child 据此总结并 `pet_locus_finish(reply)`；续投提示词同时带到 `工具档位：safe` 与 `本入口读取能力（本次实测）：…已实测可读` —— W6 修复真机生效，D 组两处声明（首投/续投）均真机生效。
+- `delivery-53`/`delivery-54`：处理中发生 Host 重启 → 见下方"重启打断"一段与 `pet-locus-interrupted-delivery-recovery` change（U009）。`delivery-54` 于 02:33:03 正常回复；turn 4 里 `read /etc/hosts` 返回了守卫拒绝文案（上表）。
+
+附带观察（与本 change 无关）：finish 之后多个 turn 的下一步命中 provider `EMPTY_RESPONSE`（codex pool `gpt-6.1-sol` exhausted，DSH 已按策略安排重试），不影响已发出的回复与已结算的 Delivery。
 
 **W6 缺陷（真机发现，已修复）**：`PET_LOCUS_CHAT_HISTORY_TOOL` 的 `output.schema` 声明了 `ok/reason/text/cursor/hasMore/count`，但成功路径返回的对象还带 `identity: 'bot'`；该 schema 是 `additionalProperties: false`，于是**每一次成功读取都会变成 `INVALID_TOOL_OUTPUT`**。单测没抓到，是因为它们直接调用 `executeLocusChatHistory`，从未经过 `ToolRuntime` 的返回值校验。
 
@@ -68,6 +75,7 @@
 
 ## Warnings
 
+- **W7 重启打断导致 1 小时阻塞（已由后续 change 修复，真机端到端待补验）**：2026-10-13 01:32:44 受理的 `delivery-53` 在 01:33:35 重启时被打断（child 日志 `turn/end {kind:'interrupted'}`），但它已绑定 turnId，旧代码按"序列化 current 存活重启"只等自己的 1h 租约 → 02:32:44 过期、02:32:45 才提升后续消息。已立项并实现 `pet-locus-interrupted-delivery-recovery`（启动恢复结算 + 最小执行租约 ≥10min）；该判定已用**真实记录 + 真实会话日志**回放验证（返回 `state: 'interrupted'`），但"启动即结算"的真机端到端仍待一次真实的重启打断（见该 change 的 `verify.md` W1）。
 - **W1 真机验收未完成（阻塞 7.5）**：第一次真机执行（见上）已验证首投前言/档位/实测声明/工具可见性/如实报告失败，并暴露并修复了 W6；修复后的**再次真机验收仍需重启 Host**（当前运行进程加载的是修复前的构建），因此未知参数拒绝、游标篡改、守卫拒绝文案、话题入口、以及**工具成功返回内容**这几项仍待验。重启前本 change 不得归档。
 - **W2 `pet-locus-shell-tier` task 1.2 的真机读取门仍未关闭**：design 已声明本 change 不声称关闭它；本次 `safe` 档读取能力只在单测与适配器层验证，真机沙箱内验收仍归该 change。
 - **W3 探测为每次投递一次额外 CLI 读取**：`probeEntranceRead` 每个投递/每次 QA 提问各多一次 `--page-size 1` 读取（默认 5s 上限）。这是"声明必须实测"的直接代价；若真机观察到投递延迟可感，可下调 `ENTRANCE_PROBE_DEADLINE_MS` 或改为投递内复用（两者都不改变"未确认不声明可读"的语义）。
