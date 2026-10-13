@@ -39,18 +39,42 @@
 
 - 按当前 TraeX 目录补齐 model 子图标：`openrouter-*` 使用 OpenRouter，`Seed-*` 使用 ByteDance；既有 GPT、DeepSeek、Gemini 映射继续复用。主图始终保持 Trae。
 
-## 0.1.6 — 2026-10-12
+## 0.1.6 — 2026-10-13
+
+插件行为不变；这一版是公开发布所需的分发与合规改动。
+
+- 新增 `prepare` 脚本（与 `prepack` 并用）：npm/pnpm 安装 **git 依赖**时执行的是 `prepare`，
+  此前只有 `prepack`，从 GitHub 源码安装装出来没有 `lib/`，插件无法加载。
+- 新增 `THIRD-PARTY-NOTICES.md`：LobeHub 图标（MIT）与 `anomalyco/opencode`（MIT）的版权行与
+  许可全文，以及渲染期技术性改动与商标立场说明。
+- `package.json` 补 `repository`（指向发布仓库，市场按它关联 npm 包与下载量）、`homepage`、
+  `bugs`、`keywords`；`files` 增加 `THIRD-PARTY-NOTICES.md` 与 `docs`。
+- 新增 `screenshots.json`（市场详情页截图顺序）与 `.github/workflows/release.yml`
+  （tag 触发、npm trusted publishing / OIDC 发版，仓库内不存长期 token）。
+- README 双语安装段改为消费者视角（npm 与源码两条命令），描述补上产品名。
+
+## 0.1.7 — 2026-10-13
+
+插件行为不变；只改用于被检索到的描述文本。
+
+- 描述统一为 **"show a provider + model icon in the sidebar for every session"**：GitHub About、
+  `package.json` 与 npm 页面用同一句（npm 的描述只在发版时刷新，所以借这一版更新）。
+  此前那句缺 `provider` 与 `icon` 两个检索词。
+
+## 0.1.8 — 2026-10-13
 
 ### Real-GUI feedback revision
+
+两条行为修复（本地 2026-10-12 实测发现；原在本仓库内编号为 0.1.6/0.1.7，因该编号已被公开发布的分发版本占用，合并后统一改记为 0.1.8）。
+
+#### 切模型后图标即时跟随
 
 - 修复：会话已经切到新模型（实机：`claude/claude-opus-5-5` → `codex/gpt-6.1-sol`，Host 侧 `provider` 与 `modelSelection` 投影都已是 `codex`）后，侧边栏该行仍显示 Anthropic 图标，必须刷新页面。根因是「即时选择」被当成永久事实：官方 per-session store 属于客户端 Session scope（回收再物化会给同一个 session id 换一个 store），而旧实现按 session id 只绑定一次、永不再解析；同时无法再核验的观测值一直压在持久投影之上。
 - 观测生命周期改为按 store 身份绑定：每次会话列表 / DOM 信号重新解析当前打开会话的目录，store 变化即重订阅并重读快照，身份未变时也重读（漏发、订阅曾失效都能在下一次信号自愈）。观测值只在「其 session 是当前打开会话、且目录可解析」期间保留，否则丢弃。
 - 持久取值改为两级：官方 `modelSelection` 投影的 `next`（含"已选但尚未发送"）优先，其次才是本插件的最近一次实际请求投影——避免观测值被丢弃后退回上一次请求的品牌。
 - 对应 openspec change `sidebar-provider-icon-selection-freshness`。
 
-## 0.1.7 — 2026-10-12
-
-### Real-GUI feedback revision
+#### 同名会话徽标不再互相串用
 
 - 修复：**同名会话的徽标互相串用**。实机：两个标题都是「下线豆包工作伙伴」的会话（`session-a1f7a6e8` 在用 `codex/gpt-6.1-sol`，另一个 7 小时前的会话在用 `claude/claude-opus-5-5`）显示的品牌正好互换——运行中那行显示 Anthropic，另一行显示 OpenAI；Host 侧两个会话的 `provider` 投影都正确。
 - 根因：行 → session 的映射一直靠**标题文本反查**（`providerTitleIndex` + 每轮 `used` 集合），同名会话按「DOM 行顺序 ↔ 列表顺序」逐一对号；侧栏按工作区分组后两者顺序不一致（两个同名会话分属不同 workspace），两行就把彼此的 id 拿反了。

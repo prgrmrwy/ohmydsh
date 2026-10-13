@@ -117,7 +117,7 @@ function attachments(imageLimits = limits()) {
 }
 
 function downloader(binary: string, spoolRoot: string) {
-  return { binary, pinnedVersion: '1.0.94' as const, spoolRoot }
+  return { binary, version: '1.0.97', spoolRoot }
 }
 
 describe('Host-owned locus media through the guarded spool', () => {
@@ -144,15 +144,16 @@ describe('Host-owned locus media through the guarded spool', () => {
     expect(detectImageMediaType(new Uint8Array([1, 2, 3]))).toBeUndefined()
   })
 
-  it('is unavailable with zero side effects when the pinned CLI is absent or unpinned', async () => {
+  it('is unavailable with zero side effects when the CLI is absent or below the version floor', async () => {
     const runner = vi.fn<LarkCliRunner>(async () => { throw new Error('must not run') })
     const { store, saveImages } = attachments()
     const fenceBeforeSave = vi.fn(async () => true)
     for (const download of [
       undefined,
-      { binary: '', pinnedVersion: '1.0.94' as const, spoolRoot: '/tmp/spool' },
-      { binary: 'lark-cli', pinnedVersion: '1.0.94' as const, spoolRoot: '  ' },
-      { binary: 'lark-cli', pinnedVersion: '1.0.93' as never, spoolRoot: '/tmp/spool' },
+      { binary: '', version: '1.0.97', spoolRoot: '/tmp/spool' },
+      { binary: 'lark-cli', version: '1.0.97', spoolRoot: '  ' },
+      { binary: 'lark-cli', version: '1.0.94', spoolRoot: '/tmp/spool' },
+      { binary: 'lark-cli', version: 'not-a-version', spoolRoot: '/tmp/spool' },
     ]) {
       const port = createLocusMediaPort({ attachments: store, runner, ...(download === undefined ? {} : { download }) })
       expect(port.available).toBe(false)

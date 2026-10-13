@@ -28,8 +28,10 @@ Locus child 的 project-read guard（`src/index.ts` 的 `deniedRoots` 指向 `ds
    超限立即终止整个进程组。
 4. 清理：成功/非零退出/Abort/timeout/进程错误一律在同一次调用内**递归删除该子目录**；
    Pet 启动时清空 spool 根（此刻不可能有在飞下载，里面任何东西都是崩溃残留）。
-5. 可用性：官方 binary 必须能解析且 `lark-cli --version` 等于 pin `1.0.94`，否则 media port 保持
-   unavailable、只记一条日志、文字 Delivery 继续（fail-soft 语义未变）。
+5. 可用性：官方 binary（与 Pet 其它调用同一个 PATH 上的 `lark-cli`）必须能解析且 `lark-cli --version`
+   不低于 `1.0.97`，否则 media port 保持 unavailable、只记一条日志、文字 Delivery 继续（fail-soft 语义未变）。
+   2026-10-12 起由精确 pin `1.0.94` 改为下限（change `pet-lark-cli-version-floor`）：隔离由上面 1–4 承担，
+   不依赖 CLI 版本，因此新版本无需改代码即放行。
 
 ## 明确接受的退化
 
@@ -61,4 +63,12 @@ Locus child 的 project-read guard（`src/index.ts` 的 `deniedRoots` 指向 `ds
 | 群内发图 → child 收到 typed image | PASS | delivery-43（07:02:16 接受 → 07:02:33 出站成功）；`~/.dsh/attachments` 07:02:19 新增 108,163 bytes 对象、07:02:24 生成 request-images 归一化；child 准确复述了图片内容（含引用块、正文与水印） |
 | 结算后 spool 为空 | PASS | 两次交付后 `media-spool` 均为空（目录 mtime 与交付时刻一致） |
 | child 读 spool 被拒 | PASS | delivery-44（07:19:44 结束）中 child 对同一目录执行列目录与 `read`，两次均返回 `locus-project-read-outside-confirmed-workspace` |
-| `lark-cli` 不可用 → 降级纯文本 | 仅单测 | `test/locus-media.test.ts` 覆盖 port 层（无 downloader / 空 spool / 非 pin 版本一律 unavailable 且零副作用）；`src/index.ts` 的 fail-soft catch 只有三行，未做 live（需改名 binary + 重启） |
+| `lark-cli` 不可用 → 降级纯文本 | 仅单测 | `test/locus-media.test.ts` 覆盖 port 层（无 downloader / 空 spool / 低于版本下限一律 unavailable 且零副作用）；`src/index.ts` 的 fail-soft catch 只有三行，未做 live（需改名 binary + 重启） |
+
+## 版本下限真机验收（2026-10-13，change `pet-lark-cli-version-floor`）
+
+| 检查 | 结果 | 证据 |
+|---|---|---|
+| PATH binary 与版本门 | PASS | Host/Pet consumer 及 event bus 均由当前用户 NVM 安装的 `lark-cli` 1.0.97 拉起；启动日志无 `lark media downloader unavailable` |
+| 群内发图 → child 收到 typed image | PASS | 群「pet 命名验证·20260919」16:21 的 post（message position 78）携图触发；16:21 新增 56,108 bytes content-addressed attachment；bot 回复准确复述图片中的群名和三步操作文本 |
+| 结算后 spool 为空 | PASS | `media-spool` mtime 为 16:21:41，验收后目录只有 `.` / `..`，无下载残留 |

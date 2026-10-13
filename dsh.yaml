@@ -127,7 +127,7 @@ customizations:
   - id: sidebar-session-provider-icon
     type: package
     source: local
-    version: 0.1.7
+    version: 0.1.8
     enabled: true
     brief: 侧边栏会话行当前选中模型品牌 logo(选择器即时切换)
     note: '自研,spec sidebar-session-provider-icon(change sidebar-provider-icon-selection-freshness)。Web client 按 store 身份观测官方 modelDirectories 的即时选择:每次列表/DOM 信号重新解析,换代即重订阅并重读快照,观测值仅在该 session 仍打开且目录可解析期间有效,否则改用持久投影:官方 modelSelection.next(含已选未发送)→本插件 provider projection(最近一次请求);行身份取官方 data-row-key(session:<id>),同名会话不串用徽标;provider 与 model 品牌不同时主图为 provider、右下角叠 10px 小图标,同品牌仍单 logo;品牌 SVG 随包落盘(@lobehub/icons-static-svg@1.94.0 MIT;OpenCode 取自 anomalyco/opencode),不手绘、运行时不访问 CDN;不触碰官方 StateDot/时间/菜单/拖拽,定位失败静默降级,自身不发网络请求。升级复核:DSH 升级后回归 row-locator 的行 DOM 假设。移除:enabled:false → dsh build → 重启。'
@@ -167,7 +167,7 @@ customizations:
       kind: pet-unified-locus-v1
       supportedDshVersion: 0.2.0-rc.2
     brief: 常驻桌宠 Agent 入口(Pet Task/Invocation/可信来源快照/受管 Skill store)
-    note: '自研,spec dsh-pet/pet-lark-channel/pet-locus-collaboration/pet-compat-minimization。Host+Web 双半区,状态在 $DSH_HOME/plugins/dsh-pet/(sqlite,与安装目录分离);不读取 provider 凭据,能力来自用户显式导入的 Skill。飞书入站默认关闭:凭据留在 lark-cli,allowlist 为空即不放行,入站防线均静默 fail closed;仅支持能证明 bot open_id 的 lark-cli(最低已验证 1.0.93),媒体下载要求官方 lark-cli --version 为 1.0.94,否则媒体不可用。compat overlay 只替换 @deepseek-ai/dsh-subagent(4 个 seam),dshVersion 变化必须重新审查,不自动套补丁;退役须上游发布全部四项能力(跟踪见 packages/dsh-pet/compat/subagent/README.md)。移除:enabled:false → dsh build → 重启。'
+    note: '自研,spec dsh-pet/pet-lark-channel/pet-locus-collaboration/pet-compat-minimization。Host+Web 双半区,状态在 $DSH_HOME/plugins/dsh-pet/(sqlite,与安装目录分离);不读取 provider 凭据,能力来自用户显式导入的 Skill。飞书入站默认关闭:凭据留在 lark-cli,allowlist 为空即不放行,入站防线均静默 fail closed;仅支持能证明 bot open_id 的 lark-cli(最低已验证 1.0.93),媒体下载要求官方 lark-cli --version ≥1.0.97(与 Pet 其它调用同一 PATH binary),否则媒体不可用。compat overlay 只替换 @deepseek-ai/dsh-subagent(4 个 seam),dshVersion 变化必须重新审查,不自动套补丁;退役须上游发布全部四项能力(跟踪见 packages/dsh-pet/compat/subagent/README.md)。移除:enabled:false → dsh build → 重启。'
   - id: dsh-pet-executor
     type: preset
     version: 0.1.0

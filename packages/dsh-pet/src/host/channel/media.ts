@@ -14,6 +14,7 @@ import type {
 } from '@deepseek-ai/dsh-attachment'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { petCliArgs } from './cli.js'
+import { meetsPetLarkCliFloor } from './lark-cli-compat.js'
 import type { LarkCliRunner } from './lark.js'
 
 const run = promisify(execFile) as unknown as LarkCliRunner
@@ -62,15 +63,15 @@ export interface LocusMediaPort {
 }
 
 /**
- * The pinned official CLI plus the one directory it may write into.
+ * A version-verified official CLI plus the one directory it may write into.
  *
- * A bare executable path is not enough: the version is the contract for
- * `--output`'s allowed roots and denylist, and the spool is the only place a
- * downloaded byte may exist on disk.
+ * A bare executable path is not enough: the version must meet Pet's verified
+ * floor, and the spool is the only place a downloaded byte may exist on disk.
  */
-export interface PinnedLarkDownloader {
+export interface VerifiedLarkDownloader {
   readonly binary: string
-  readonly pinnedVersion: '1.0.94'
+  /** Reported version; must satisfy `meetsPetLarkCliFloor`. */
+  readonly version: string
   /** Pet-owned 0700 directory, already inside the locus child's denied roots. */
   readonly spoolRoot: string
 }
@@ -338,8 +339,8 @@ export const LOCUS_MEDIA_UNAVAILABLE_REASON = 'pinned-cli-media-download-unavail
 
 export interface CreateLocusMediaPortInput {
   readonly attachments?: AttachmentStore
-  /** Resolved only by the pinned-official-CLI probe. */
-  readonly download?: PinnedLarkDownloader
+  /** Resolved only by the official-CLI version-floor probe. */
+  readonly download?: VerifiedLarkDownloader
   /** Ordinary runner remains sufficient for metadata-only mget. */
   readonly runner?: LarkCliRunner
   readonly timeoutMs?: number
@@ -349,7 +350,8 @@ export interface CreateLocusMediaPortInput {
 export function createLocusMediaPort(input: CreateLocusMediaPortInput): LocusMediaPort {
   if (
     input.attachments === undefined
-    || input.download?.pinnedVersion !== '1.0.94'
+    || input.download === undefined
+    || !meetsPetLarkCliFloor(input.download.version)
     || input.download.binary.trim() === ''
     || input.download.spoolRoot.trim() === ''
   ) {
