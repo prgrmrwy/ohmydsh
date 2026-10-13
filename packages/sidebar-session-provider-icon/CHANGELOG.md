@@ -52,3 +52,11 @@
 - 新增 `screenshots.json`（市场详情页截图顺序）与 `.github/workflows/release.yml`
   （tag 触发、npm trusted publishing / OIDC 发版，仓库内不存长期 token）。
 - README 双语安装段改为消费者视角（npm 与源码两条命令），描述补上产品名。
+
+## 0.1.7 — 2026-10-13
+
+插件行为不变；只改用于被检索到的描述文本。
+
+- 描述统一为 **"show a provider + model icon in the sidebar for every session"**：GitHub About、
+  `package.json` 与 npm 页面用同一句（npm 的描述只在发版时刷新，所以借这一版更新）。
+  此前那句缺 `provider` 与 `icon` 两个检索词。
