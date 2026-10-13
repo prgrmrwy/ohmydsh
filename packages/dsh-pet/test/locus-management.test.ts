@@ -546,6 +546,122 @@ describe('locus session describer', () => {
       .resolves.toEqual({ availability: 'available' })
   })
 
+  it('answers from the header + projection cache without a full log read', async () => {
+    // A full inspect decompresses and replays the whole log; doing that for
+    // every parent/child on each refresh made the management list take seconds.
+    const inspect = vi.fn(async () => ({ events: titled('slow') }))
+    const describe = createLocusSessionDescriber({
+      peek: async () => ({ exists: true, cwd: ' /repo ', titleKnown: true, title: 'Cached' }),
+      inspect,
+      archivedSessionIds: () => [],
+      foldTitle,
+    })
+
+    await expect(describe('session-cold')).resolves.toEqual({
+      availability: 'available',
+      title: 'Cached',
+      executionRoot: '/repo',
+    })
+    expect(inspect).not.toHaveBeenCalled()
+  })
+
+  it('keeps an untitled cached session available without inventing a title', async () => {
+    const inspect = vi.fn(async () => ({ events: [] }))
+    const describe = createLocusSessionDescriber({
+      peek: async () => ({ exists: true, titleKnown: true }),
+      inspect,
+      archivedSessionIds: () => [],
+      foldTitle,
+    })
+
+    await expect(describe('session-untitled')).resolves.toEqual({ availability: 'available' })
+    expect(inspect).not.toHaveBeenCalled()
+  })
+
+  it('reports missing when the persisted header does not exist or cannot be read', async () => {
+    const inspect = vi.fn(async () => ({ events: [] }))
+    const absent = createLocusSessionDescriber({
+      peek: async () => ({ exists: false }),
+      inspect,
+      archivedSessionIds: () => [],
+      foldTitle,
+    })
+    const broken = createLocusSessionDescriber({
+      peek: async () => { throw new Error('corrupt header') },
+      inspect,
+      archivedSessionIds: () => [],
+      foldTitle,
+    })
+
+    await expect(absent('session-gone')).resolves.toEqual({ availability: 'missing' })
+    await expect(broken('session-bad')).resolves.toEqual({ availability: 'missing' })
+    expect(inspect).not.toHaveBeenCalled()
+  })
+
+  it('falls back to a full inspection on a cache miss or a declined peek', async () => {
+    const inspect = vi.fn(async () => ({ events: titled('From log'), meta: { cwd: '/repo' } }))
+    const miss = createLocusSessionDescriber({
+      peek: async () => ({ exists: true, cwd: '/repo', titleKnown: false }),
+      inspect,
+      archivedSessionIds: () => [],
+      foldTitle,
+    })
+    const declined = createLocusSessionDescriber({
+      peek: async () => undefined,
+      inspect,
+      archivedSessionIds: () => [],
+      foldTitle,
+    })
+
+    const expected = { availability: 'available', title: 'From log', executionRoot: '/repo' }
+    await expect(miss('session-miss')).resolves.toEqual(expected)
+    await expect(declined('session-live')).resolves.toEqual(expected)
+    expect(inspect).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps archived ahead of the fast path', async () => {
+    const peek = vi.fn(async () => ({ exists: true as const, titleKnown: true, title: 'x' }))
+    const describe = createLocusSessionDescriber({
+      peek,
+      inspect: vi.fn(),
+      archivedSessionIds: () => ['session-archived'],
+      foldTitle,
+    })
+
+    await expect(describe('session-archived')).resolves.toEqual({ availability: 'archived' })
+    expect(peek).not.toHaveBeenCalled()
+  })
+
+  it('describes a parent shared by several loci only once per view', async () => {
+    const base = {
+      generation: 1,
+      parentSessionId: 'session-parent',
+      workspaceId: 'ws-1',
+      state: 'active',
+      source: 'inherited',
+      permission: { desired: 'read', effective: 'read' },
+      updatedAt: 5,
+      createdAt: 1,
+    }
+    const records = ['a', 'b', 'c'].map(suffix => ({
+      ...base,
+      id: `locus-${suffix}`,
+      endpoint: { chatId: `oc-${suffix}` },
+      childSessionId: `session-child-${suffix}`,
+    }))
+    const describeSession = vi.fn(async (id: string) => ({ title: id, availability: 'available' as const }))
+    const port = createLocusManagementPort({
+      repository: memory(records as never),
+      resolvers: { main: describeSession, child: describeSession },
+    })
+
+    const view = await port.view()
+    expect(view.loci).toHaveLength(3)
+    expect(view.loci.every(item => item.main.title === 'session-parent')).toBe(true)
+    // 1 shared parent + 3 distinct children.
+    expect(describeSession).toHaveBeenCalledTimes(4)
+  })
+
   it('projects the child working boundary as the locus confirm candidate', async () => {
     const record = {
       id: 'locus-topic',

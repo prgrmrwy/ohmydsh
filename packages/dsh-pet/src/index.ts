@@ -111,7 +111,7 @@ import {
   entranceReadProbeFor,
   measureEntranceReadability,
 } from './host/channel/entrance-capability.js'
-import { createLocusManagementPort, createLocusSessionDescriber } from './host/locus/management.js'
+import { createLocusManagementPort, createLocusSessionDescriber, type LocusSessionPeek } from './host/locus/management.js'
 import { createLocusResolution } from './host/locus/resolution.js'
 import { createLocusController } from './host/locus/controller.js'
 import { ControllerLocusRepositoryAdapter } from './host/locus/controller-persistence-adapter.js'
@@ -3187,6 +3187,47 @@ async function initialize(
    * `createLocusSessionDescriber` for why the live answer is the wrong question.
    */
   const describeSession = createLocusSessionDescriber({
+    // Fast path: header-only `stat` + DSH's persisted projection cache, the same
+    // sources the native session list reads. A full `inspect` decompresses and
+    // replays the whole log (measured ~840 MB of zstd output per refresh for 23
+    // loci), which is what made the Locus 管理 list take seconds to open.
+    peek: (() => {
+      const persistence = ctx.get('sessionPersistence') as
+        | { stat?: (id: unknown) => Promise<{ readonly header?: { readonly cwd?: unknown } } | undefined> }
+        | undefined
+      const cache = ctx.get('sessionProjectionCache') as
+        | {
+            cachedSnapshot?: (header: unknown, keys?: readonly string[]) => { readonly values?: Record<string, unknown> } | undefined
+            // Title-only hint for a log whose cache row predates its current
+            // format (pre-migration v0 logs); DSH's own list uses the same fallback.
+            cachedPredecessorTitle?: (header: unknown) => { readonly values?: Record<string, unknown> } | undefined
+          }
+        | undefined
+      if (typeof persistence?.stat !== 'function') return undefined
+      return async (sessionId: string): Promise<LocusSessionPeek | undefined> => {
+        // A live session's in-memory snapshot is already cheap and fresher
+        // than any cache row; let `inspect` serve it.
+        const sessions = ctx.get('sessions') as { get?: (id: never) => unknown } | undefined
+        if (sessions?.get?.(sessionId as never) !== undefined) return undefined
+        const snapshot = await persistence.stat!.call(persistence, SessionId(sessionId))
+        if (snapshot?.header === undefined) return { exists: false }
+        let values: Record<string, unknown> | undefined
+        try {
+          values = cache?.cachedSnapshot?.call(cache, snapshot.header, ['title'])?.values
+            ?? cache?.cachedPredecessorTitle?.call(cache, snapshot.header)?.values
+        } catch {
+          values = undefined
+        }
+        const titleKnown = values !== undefined && Object.hasOwn(values, 'title')
+        const title = titleKnown && typeof values!['title'] === 'string' ? values!['title'] as string : undefined
+        return {
+          exists: true,
+          cwd: snapshot.header.cwd,
+          titleKnown,
+          ...(title === undefined ? {} : { title }),
+        }
+      }
+    })(),
     inspect: (() => {
       const controller = ctx.get('sessionController') as
         | { inspect?: (id: unknown, signal?: AbortSignal) => Promise<unknown> }

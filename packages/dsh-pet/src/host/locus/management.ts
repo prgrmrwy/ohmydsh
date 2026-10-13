@@ -150,8 +150,32 @@ export interface LocusSessionDescription {
   readonly executionRoot?: string
 }
 
+/**
+ * Cheap cold facts about one session: existence and `cwd` from the persisted
+ * log HEADER, and the title from DSH's persisted projection cache — the same
+ * sources DSH's own session list uses, neither of which decompresses the body.
+ */
+export type LocusSessionPeek =
+  | { readonly exists: false }
+  | {
+    readonly exists: true
+    readonly cwd?: unknown
+    /** Whether the cache answered the title question at all (null counts). */
+    readonly titleKnown: boolean
+    readonly title?: string
+  }
+
 /** Narrow Host capabilities needed to describe a session without loading it. */
 export interface LocusSessionDescriberDeps {
+  /**
+   * Optional fast path. Resolves `undefined` when it cannot answer (service
+   * absent, session live in memory), in which case `inspect` is used. A full
+   * `inspect` decompresses and replays the whole log; for long sessions that is
+   * tens of MB per call, and the management view calls it for every parent and
+   * child on every refresh.
+   */
+  readonly peek?: ((sessionId: string) => Promise<LocusSessionPeek | undefined>) | undefined
+
   /**
    * Cold-readable session inspection. Resolves for a session whose durable log
    * exists — loaded or not — and rejects when it cannot be read.
@@ -192,6 +216,29 @@ export function createLocusSessionDescriber(
     if (deps.archivedSessionIds().some(id => id === sessionId)) {
       return { availability: 'archived' }
     }
+    if (deps.peek !== undefined) {
+      let peeked: LocusSessionPeek | undefined
+      try {
+        peeked = await deps.peek(sessionId)
+      } catch {
+        // The header itself is unreadable: the same "cannot open this" answer
+        // a failed full inspection gives.
+        return { availability: 'missing' }
+      }
+      if (peeked !== undefined) {
+        if (!peeked.exists) return { availability: 'missing' }
+        // Existence is already proven by the persisted header; only fall back to
+        // a full read when the cache cannot answer the title question.
+        if (peeked.titleKnown) {
+          const executionRoot = executionRootOf(peeked.cwd)
+          return {
+            availability: 'available',
+            ...(peeked.title === undefined || peeked.title.trim() === '' ? {} : { title: peeked.title }),
+            ...(executionRoot === undefined ? {} : { executionRoot }),
+          }
+        }
+      }
+    }
     // No cold-read capability: report nothing rather than guess. An omitted
     // availability reads as unknown, which is honest; claiming `missing` would
     // invent a fact out of a Host limitation.
@@ -219,14 +266,17 @@ export function createLocusSessionDescriber(
     // honest candidate for an owner-confirmed locus execution root. A missing
     // or unusable value stays absent: guessing one here is what the whole
     // derivation exists to prevent.
-    const cwd = inspection.meta?.cwd
-    const executionRoot = typeof cwd === 'string' && cwd.trim() !== '' ? cwd.trim() : undefined
+    const executionRoot = executionRootOf(inspection.meta?.cwd)
     return {
       availability: 'available',
       ...(title === undefined ? {} : { title }),
       ...(executionRoot === undefined ? {} : { executionRoot }),
     }
   }
+}
+
+function executionRootOf(cwd: unknown): string | undefined {
+  return typeof cwd === 'string' && cwd.trim() !== '' ? cwd.trim() : undefined
 }
 
 /** Host-authenticated context supplied to an external management action. */
@@ -691,10 +741,30 @@ export function createLocusManagementPort(
       const defaultQa = defaultFor(parentId)
       if (defaultQa !== undefined) defaultQaRecords.set(parentId, defaultQa)
     }
-    const projected = new Map<string, PetLocusView>()
-    for (const record of all) {
-      projected.set(record.id, await project(record, defaultQaRecords.get(record.parentSessionId)?.id === record.id))
+    // One snapshot describes each session once: many loci share a parent, and
+    // a session description is a cold read. Records project concurrently.
+    const memo = <T>(resolve: ((id: string) => T) | undefined): ((id: string) => T) | undefined => {
+      if (resolve === undefined) return undefined
+      const seen = new Map<string, T>()
+      return id => {
+        if (!seen.has(id)) seen.set(id, resolve(id))
+        return seen.get(id) as T
+      }
     }
+    const sessionMemo = memo(resolvers?.main === resolvers?.child ? resolvers?.main : undefined)
+    const viewResolvers: LocusManagementResolvers | undefined = resolvers === undefined ? undefined : {
+      ...(resolvers.main === undefined ? {} : { main: sessionMemo ?? memo(resolvers.main)! }),
+      ...(resolvers.child === undefined ? {} : { child: sessionMemo ?? memo(resolvers.child)! }),
+      ...(resolvers.workspace === undefined ? {} : { workspace: memo(resolvers.workspace)! }),
+    }
+    const projected = new Map<string, PetLocusView>()
+    const views = await Promise.all(all.map(record => projectRecord(
+      record,
+      defaultQaRecords.get(record.parentSessionId)?.id === record.id,
+      viewResolvers,
+      options.ownerProjection,
+    )))
+    all.forEach((record, index) => projected.set(record.id, views[index]!))
     const requireProjected = (record: LocusRecord): PetLocusView => {
       const value = projected.get(record.id)
       if (value === undefined) throw new LocusManagementError('INTEGRATION_FAILED', `locus ${record.id} projection is missing`)
