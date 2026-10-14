@@ -1,5 +1,7 @@
 # dsh-sidebar-session-provider-icon
 
+[![dsh.so risk](https://www.dsh.so/badge/dsh-sidebar-session-provider-icon.svg)](https://www.dsh.so/artifact/dsh-sidebar-session-provider-icon/)
+
 English · [简体中文](README.zh.md)
 
 ![The DSH session list with a different brand logo before each title (Grok, GLM, Kimi, OpenAI, DeepSeek), one per session's selected model; the models are local demo routes](docs/overview.png)

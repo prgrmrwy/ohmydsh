@@ -1,5 +1,7 @@
 # dsh-sidebar-session-provider-icon
 
+[![dsh.so risk](https://www.dsh.so/badge/dsh-sidebar-session-provider-icon.svg)](https://www.dsh.so/artifact/dsh-sidebar-session-provider-icon/)
+
 [English](README.md) · 简体中文
 
 ![DSH 会话列表，每个标题前是该会话所选模型的品牌 logo（Grok、GLM、Kimi、OpenAI、DeepSeek）；这些模型是本地演示路由](docs/overview.png)
