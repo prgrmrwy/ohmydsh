@@ -1,0 +1,11 @@
+# Opt-in ponytail filesystem Skill provider (package @dietrichgebert/ponytail ships no dsh.bundle).
+# The package's `exports` does not expose ./package.json, so resolve the main entry
+# (<pkg>/.opencode/plugins/ponytail.mjs) from the profile (Loader baseUrl) and walk up
+# to the package root: plugins -> .opencode -> <pkg>, then `skills`.
+- insert:
+    - id: ponytail-skill-filesystem
+      name: '@deepseek-ai/dsh-skill-filesystem'
+      config:
+        providerName: ponytail-plugin
+        includeDefaultRoots: false
+        bundledSkillDir: !!js process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:path').dirname(process.getBuiltinModule('node:module').createRequire(baseUrl).resolve('@dietrichgebert/ponytail')), '..', '..', 'skills')

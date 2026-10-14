@@ -332,3 +332,18 @@ customizations:
     enabled: true
     brief: 让 connection provider 自身等待 webServer,恢复全部 Connection RPC 通道注册
     note: '组合补丁(patches/connection-webserver.yml),修复 DSH 0.1.5 运行体缺陷(证据 change upgrade-dsh-0-1-5-runtime 的 checking/connection-rpc-devbox.md;上游讨论 deepseek-ai/deepseek-harness#5926):connection 行只声明 webRuntime,致所有 Connection RPC channel 路由静默挂载失败(通用 405,宿主无错误日志)。仅把 connection 行 inject 覆盖为 [webRuntime, webServer];整行覆盖必须原样保留 config.trustedHosts,否则丢 Host/Origin fence;不复制 RPC 协议与鉴权。仅适用 web profile(web carrier 成为硬依赖),引入无 web 的 profile 须拆分或移除。升级复核:每次 DSH 升级检查官方 connection 行 inject;官方自带 webServer 时删除本 fragment 与 patch 文件。移除:enabled:false → dsh build。'
+
+  # 第三方纯提示词 skill(无 dsh.bundle):remote 精确 pin + 专属 skill-filesystem provider。
+  - id: ponytail
+    type: package
+    source: remote
+    spec: '@dietrichgebert/ponytail@5.2.0'
+    version: 5.2.0
+    enabled: true
+    brief: ponytail skill(/ponytail 懒惰资深开发模式,抑制需求膨胀)
+    note: '第三方 https://github.com/DietrichGebert/ponytail(MIT):纯提示词 skill 包(skills/ 下 6 个 SKILL.md,另含 opencode/qoder/pi 适配,本仓不加载)。无 dsh.bundle,可见性由 ponytail-skills 补丁(patches/ponytail-skills.yml)提供。信任面:skills 内无出站调用,仅一处文档链接;hooks/ 等 Claude/Codex/Cursor 钩子文件随包落盘但 DSH 不执行。升级复核:改 pin 前复读 skills/*/SKILL.md 与 exports(须仍有主入口可解析)。移除:两条 enabled:false → dsh build → 重启。D006:host 层 provider 会进入 Pet scope。 pin 校验 sha512-7jhVaF8PjQux0NCDLRfWMm49lp332FxlkgUGMUwt4+VvJHiJeBgEsdBFuwPXxxTIerBv4pEa390eeQ88C8DMxQ=='
+  - id: ponytail-skills
+    type: patch
+    enabled: true
+    brief: 为 ponytail 包挂专属 skill-filesystem provider(不含默认根)
+    note: '组合补丁(patches/ponytail-skills.yml):插入 @deepseek-ai/dsh-skill-filesystem 行,providerName ponytail-plugin,includeDefaultRoots:false,skills 目录由 profile baseUrl 经包主入口解析(包的 exports 未导出 package.json,不能照搬 archify 写法)。升级复核:确认包主入口仍位于 .opencode/plugins/ 下两级(目录结构变化需同步改路径)。移除:enabled:false → dsh build。'
