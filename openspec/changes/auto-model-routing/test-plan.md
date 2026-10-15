@@ -4,39 +4,39 @@
 
 | Requirement | Scenario | Test File | Test Name | Initial State |
 |---|---|---|---|---|
-| S → 模式与改写规则 | MANUAL 请求原样通过 | test/router.test.ts | manual_passthrough | 🔴 red |
-| S → 模式与改写规则 | AUTO 只改 effort | test/router.test.ts | auto_effort_only | 🔴 red |
-| S → 模式与改写规则 | MANUAL 复原覆盖旧快照重试直至收敛 | test/selection.integration.test.ts | restore_survives_retry_until_convergence | 🔴 red |
-| S → 模式与改写规则 | header 前取消或准备失败保留复原 | test/selection.integration.test.ts | restore_survives_preheader_failure | 🔴 red |
-| S → 模式与改写规则 | 快速切回 AUTO 不恢复旧决定 | test/router.test.ts | rapid_mode_toggle_invalidates_auto | 🔴 red |
-| S → 模式与改写规则 | 重复同模式设置不重建过渡 | test/state.test.ts | repeated_mode_is_noop | 🔴 red |
-| S → 模式与改写规则 | 非用户回合同样完成复原 | test/router.test.ts | notification_turn_restores | 🔴 red |
-| S → 锚点由用户选择维护 | 首个请求初始化锚点 | test/state.test.ts | initialize_anchor_once | 🔴 red |
-| S → 锚点由用户选择维护 | 用户手选更新锚点 | test/state.test.ts | selection_updates_anchor | 🔴 red |
-| S → 锚点由用户选择维护 | 路由结果与重启不改锚点 | test/state.test.ts | anchor_survives_restart_without_drift | 🔴 red |
-| S → 锚点由用户选择维护 | assemble 后手选不混用模型与 effort | test/selection.integration.test.ts | selection_after_assembly_keeps_routes_legal | 🔴 red |
-| S → 用户回合与分类输入 | 首轮真实领取序列只取用户消息 | test/input.test.ts | first_claim_user_only | 🔴 red |
-| S → 用户回合与分类输入 | 多条用户消息按序拼接并截断 | test/input.test.ts | ordered_text_bounded_utf16 | 🔴 red |
-| S → 用户回合与分类输入 | 同回合与重试复用决定 | test/router.test.ts | turn_retries_reuse_decision | 🔴 red |
-| S → 用户回合与分类输入 | 非用户回合沿用上一级别 | test/router.test.ts | nonuser_turn_reuses_level | 🔴 red |
-| S → 用户回合与分类输入 | 子会话请求不被改写 | test/router.test.ts | child_passthrough | 🔴 red |
-| S → 本地规则分类器 | 典型输入的档位 | test/classifier.test.ts | classifier_fixture_tiers | 🔴 red |
-| S → 本地规则分类器 | 指令性与空白输入 | test/classifier.test.ts | classifier_closed_set_and_blank | 🔴 red |
-| S → 本地规则分类器 | 源码不含外发路径 | test/content.test.ts | source_has_no_egress_primitives | 🔴 red |
-| S → 级别规则与 effort 映射 | 分类结果映射为 effort | test/classifier.test.ts | standard_maps_medium | 🔴 red |
-| S → 级别规则与 effort 映射 | 延续、重做与显式意图 | test/classifier.test.ts | intent_precedence | 🔴 red |
-| S → 级别规则与 effort 映射 | 分类不能直接产生 escalated | test/classifier.test.ts | classifier_cannot_escalate | 🔴 red |
-| S → 级别规则与 effort 映射 | 不支持的 effort 被截断 | test/classifier.test.ts | effort_clamps_to_supported | 🔴 red |
-| S → 级别规则与 effort 映射 | 首回合未分类与不支持 effort 时不改写 | test/router.test.ts | unsupported_and_unclassified_passthrough | 🔴 red |
-| S → 子会话选模由 skill 指引 | skill 文本包含五项条目 | test/content.test.ts | skill_required_guidance | 🔴 red |
-| S → 子会话选模由 skill 指引 | skill 档位表与 design 一致 | test/content.test.ts | skill_tier_table | 🔴 red |
-| S → 状态可见且不改写其它控件 | 芯片注册在速度芯片左侧 | test/client.test.ts | chip_negative_order | 🔴 red |
-| S → 状态可见且不改写其它控件 | 面板展示状态并限 20 条 | test/client.test.ts | panel_state_and_history_bound | 🔴 red |
-| S → 状态可见且不改写其它控件 | 切换模式只调用插件接口 | test/client.test.ts | toggle_plugin_endpoint_only | 🔴 red |
-| S → Host 端点边界 | 无效会话被拒绝且无副作用 | test/endpoints.test.ts | reject_invalid_session_without_mutation | 🔴 red |
-| S → Host 端点边界 | 只修改目标会话 | test/endpoints.test.ts | mutate_target_only | 🔴 red |
-| S → 自动选路不得绕过既有模型门禁 | 门禁拒绝不引起改路由 | test/router.test.ts | guard_failure_never_changes_model | 🔴 red |
-| S → 自动选路不得绕过既有模型门禁 | 档位表家族一致 | test/content.test.ts | skill_provider_family | 🔴 red |
+| S → 模式与改写规则 | MANUAL 请求原样通过 | test/router.test.ts | manual_passthrough | 🟢 green |
+| S → 模式与改写规则 | AUTO 只改 effort | test/router.test.ts | auto_effort_only | 🟢 green |
+| S → 模式与改写规则 | MANUAL 复原覆盖旧快照重试直至收敛 | test/selection.integration.test.ts | restore_survives_retry_until_convergence | 🟢 green |
+| S → 模式与改写规则 | header 前取消或准备失败保留复原 | test/selection.integration.test.ts | restore_survives_preheader_failure | 🟢 green |
+| S → 模式与改写规则 | 快速切回 AUTO 不恢复旧决定 | test/router.test.ts | rapid_mode_toggle_invalidates_auto | 🟢 green |
+| S → 模式与改写规则 | 重复同模式设置不重建过渡 | test/state.test.ts | repeated_mode_is_noop | 🟢 green |
+| S → 模式与改写规则 | 非用户回合同样完成复原 | test/router.test.ts | notification_turn_restores | 🟢 green |
+| S → 锚点由用户选择维护 | 首个请求初始化锚点 | test/state.test.ts | initialize_anchor_once | 🟢 green |
+| S → 锚点由用户选择维护 | 用户手选更新锚点 | test/state.test.ts | selection_updates_anchor | 🟢 green |
+| S → 锚点由用户选择维护 | 路由结果与重启不改锚点 | test/state.test.ts | anchor_survives_restart_without_drift | 🟢 green |
+| S → 锚点由用户选择维护 | assemble 后手选不混用模型与 effort | test/selection.integration.test.ts | selection_after_assembly_keeps_routes_legal | 🟢 green |
+| S → 用户回合与分类输入 | 首轮真实领取序列只取用户消息 | test/input.test.ts | first_claim_user_only | 🟢 green |
+| S → 用户回合与分类输入 | 多条用户消息按序拼接并截断 | test/input.test.ts | ordered_text_bounded_utf16 | 🟢 green |
+| S → 用户回合与分类输入 | 同回合与重试复用决定 | test/router.test.ts | turn_retries_reuse_decision | 🟢 green |
+| S → 用户回合与分类输入 | 非用户回合沿用上一级别 | test/router.test.ts | nonuser_turn_reuses_level | 🟢 green |
+| S → 用户回合与分类输入 | 子会话请求不被改写 | test/router.test.ts | child_passthrough | 🟢 green |
+| S → 本地规则分类器 | 典型输入的档位 | test/classifier.test.ts | classifier_fixture_tiers | 🟢 green |
+| S → 本地规则分类器 | 指令性与空白输入 | test/classifier.test.ts | classifier_closed_set_and_blank | 🟢 green |
+| S → 本地规则分类器 | 源码不含外发路径 | test/content.test.ts | source_has_no_egress_primitives | 🟢 green |
+| S → 级别规则与 effort 映射 | 分类结果映射为 effort | test/classifier.test.ts | standard_maps_medium | 🟢 green |
+| S → 级别规则与 effort 映射 | 延续、重做与显式意图 | test/classifier.test.ts | intent_precedence | 🟢 green |
+| S → 级别规则与 effort 映射 | 分类不能直接产生 escalated | test/classifier.test.ts | classifier_cannot_escalate | 🟢 green |
+| S → 级别规则与 effort 映射 | 不支持的 effort 被截断 | test/classifier.test.ts | effort_clamps_to_supported | 🟢 green |
+| S → 级别规则与 effort 映射 | 首回合未分类与不支持 effort 时不改写 | test/router.test.ts | unsupported_and_unclassified_passthrough | 🟢 green |
+| S → 子会话选模由 skill 指引 | skill 文本包含五项条目 | test/content.test.ts | skill_required_guidance | 🟢 green |
+| S → 子会话选模由 skill 指引 | skill 档位表与 design 一致 | test/content.test.ts | skill_tier_table | 🟢 green |
+| S → 状态可见且不改写其它控件 | 芯片注册在速度芯片左侧 | test/client.test.ts | chip_negative_order | 🟢 green |
+| S → 状态可见且不改写其它控件 | 面板展示状态并限 20 条 | test/client.test.ts | panel_state_and_history_bound | 🟢 green |
+| S → 状态可见且不改写其它控件 | 切换模式只调用插件接口 | test/client.test.ts | toggle_plugin_endpoint_only | 🟢 green |
+| S → Host 端点边界 | 无效会话被拒绝且无副作用 | test/endpoints.test.ts | reject_invalid_session_without_mutation | 🟢 green |
+| S → Host 端点边界 | 只修改目标会话 | test/endpoints.test.ts | mutate_target_only | 🟢 green |
+| S → 自动选路不得绕过既有模型门禁 | 门禁拒绝不引起改路由 | test/router.test.ts | guard_failure_never_changes_model | 🟢 green |
+| S → 自动选路不得绕过既有模型门禁 | 档位表家族一致 | test/content.test.ts | skill_provider_family | 🟢 green |
 
 ## Coverage Notes
 

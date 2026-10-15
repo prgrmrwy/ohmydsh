@@ -548,6 +548,7 @@ test('package READMEs satisfy their docTier presentation rules', () => {
 test('package tiers match the design (D6)', () => {
   const tiers = Object.fromEntries(trackedPackages(trackedFiles(), read).map(({ id, tier }) => [id, tier]))
   assert.deepEqual(tiers, {
+    'auto-model-routing': 'C',
     'cockpit-memex-browse-shim': 'C',
     'cockpit-worktree-open-shim': 'C',
     'dsh-memex': 'A',
