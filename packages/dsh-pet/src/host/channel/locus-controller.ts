@@ -179,7 +179,14 @@ export type NormalizedLocusAdmission =
     }
   | {
       readonly kind: 'rejected'
-      readonly reason: LocusAdmissionRefusal | 'unsafe-reply-target' | 'invalid-event'
+      readonly reason:
+        | LocusAdmissionRefusal
+        | 'unsafe-reply-target'
+        | 'invalid-event'
+        // Doc-comment intake (D13); refused before any locus effect.
+        | 'bot-sender'
+        | 'comment-scope-unknown'
+        | 'comment-reply-missing'
       readonly endpoint?: LocusEndpoint
     }
 
@@ -535,7 +542,7 @@ export type LocusControllerDiagnostic =
    * and no external identifier, so surfacing it keeps the same privacy
    * boundary as the rest of this union.
    */
-  | `admission-rejected:${LocusAdmissionRefusal | 'unsafe-reply-target' | 'invalid-event'}`
+  | `admission-rejected:${Extract<NormalizedLocusAdmission, { kind: 'rejected' }>['reason']}`
   | 'control-command'
   | 'locus-unavailable'
   // Distinguish WHY a locus could not be resolved. Without these, a reader

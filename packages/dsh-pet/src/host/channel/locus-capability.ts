@@ -14,11 +14,17 @@ import {
   type LocusChannelEvent,
   type LocusControllerDeps,
   type LocusControllerResult,
+  type NormalizedLocusAdmission,
 } from './locus-controller.js'
 
 /** The narrow controller surface consumed by ChannelService/Pipeline. */
 export interface LocusChannelControllerPort {
   handle(input: LocusChannelEvent, context?: LocusAdmissionContext): Promise<LocusControllerResult>
+  /**
+   * Consume an admission a source already decided (doc comments, D7). Optional
+   * so a Host-adapted controller without it simply leaves comments unwired.
+   */
+  handleAdmission?(admission: NormalizedLocusAdmission): Promise<LocusControllerResult>
   /** Remove a terminal Delivery's observer/pending state. */
   currentFinished?(input: { readonly deliveryId: string; readonly correlation: import('../locus/delivery.js').DeliveryCorrelation }): void
   /** Claim and physically queue the next FIFO Delivery for this locus. */

@@ -19,6 +19,9 @@ import { ControllerLocusRepositoryAdapter } from '../src/host/locus/controller-p
 import { LocusRepository as DurableLocusRepository } from '../src/host/locus/persistence.js'
 import { createLocusResolution } from '../src/host/locus/resolution.js'
 import { openPetHarness, type PetHarness } from './harness.js'
+import { admitDocCommentEvent, parseDocCommentEvent } from '../src/host/channel/doc-comment.js'
+import type { DocCommentQuery } from '../src/host/channel/lark.js'
+import { compactCommentEvent } from './fixtures/lark-subscribe.js'
 
 const CHAT_ID = 'oc-on-demand'
 const PARENT_SESSION = 'session-owner-main'
@@ -479,3 +482,71 @@ describe('group and topic entries build on demand with structurally equivalent t
     }
   })
 })
+
+/** Admit one doc comment the way the intake driver does, then hand it to the real controller. */
+async function deliverComment(
+  host: Awaited<ReturnType<typeof composeOnDemandHost>>,
+  input: { token: string; commentId: string; replyId: string; isWhole: boolean; quote?: string },
+) {
+  const parsed = parseDocCommentEvent(compactCommentEvent({
+    fileToken: input.token, commentId: input.commentId, replyId: input.replyId,
+    fromOpenId: 'ou-owner', timestamp: '2000',
+  }))
+  if (parsed.kind !== 'event') throw new Error('fixture did not parse')
+  const query: DocCommentQuery = {
+    kind: 'ok', isWhole: input.isWhole, ...(input.quote === undefined ? {} : { quote: input.quote }),
+    replies: [], trigger: { replyId: input.replyId, text: '@ou-bot 看看这里' },
+  }
+  const durable = host.durable
+  const admission = admitDocCommentEvent(parsed.event, query, {
+    botOpenId: 'ou-bot', allowOpenIds: ['ou-owner'], watermark: 1000, isDuplicate: () => false,
+    authorization: endpoint => (durable.findCurrentLocus(endpoint)?.state === 'active' ? 'authorized' : 'uninitialized'),
+  })
+  return host.controller.handleAdmission(admission)
+}
+
+describe('document entries build on demand exactly like groups and topics', () => {
+  it('spec Scenario "文档首次评论建立文档专属主会话": two documents never share an automatic main', async () => {
+    const host = await composeOnDemandHost()
+    try {
+      const a = await deliverComment(host, { token: 'DocA00000000000000000000001', commentId: '11', replyId: '12', isWhole: true })
+      const b = await deliverComment(host, { token: 'DocB00000000000000000000001', commentId: '21', replyId: '22', isWhole: true })
+      expect(a).toMatchObject({ kind: 'accepted' })
+      expect(b).toMatchObject({ kind: 'accepted' })
+
+      const rootA = await host.adapter.findGroup('doc:docx:DocA00000000000000000000001')
+      const rootB = await host.adapter.findGroup('doc:docx:DocB00000000000000000000001')
+      expect(rootA?.mainSource).toBe('auto')
+      expect(rootA?.mainSessionId).toBeDefined()
+      expect(rootA?.mainSessionId).not.toBe(rootB?.mainSessionId)
+    } finally {
+      await host.close()
+    }
+  })
+
+  it('spec Scenario "划词评论先于文档级": an anchored first comment builds the document root first, and the whole-doc entry later shares its main', async () => {
+    const host = await composeOnDemandHost()
+    const token = 'DocC00000000000000000000001'
+    const root = `doc:docx:${token}`
+    try {
+      const anchored = await deliverComment(host, { token, commentId: '31', replyId: '32', isWhole: false, quote: '接口已有' })
+      expect(anchored).toMatchObject({ kind: 'accepted' })
+      const group = await host.adapter.findGroup(root)
+      const comment = await host.adapter.findActive({ chatId: root, threadId: '31' })
+      expect(group?.mainSource).toBe('auto')
+      expect(comment?.parentSessionId).toBe(group?.mainSessionId)
+
+      const whole = await deliverComment(host, { token, commentId: '41', replyId: '42', isWhole: true })
+      expect(whole).toMatchObject({ kind: 'accepted' })
+      const docLevel = await host.adapter.findActive({ chatId: root })
+      expect(docLevel?.parentSessionId).toBe(group?.mainSessionId)
+      // Siblings under one main, never one child.
+      expect(docLevel?.childSessionId).not.toBe(comment?.childSessionId)
+      // The anchored quote was persisted with its Delivery (D5).
+      expect(host.durable.findDeliveryByMessageId(`${root}/31/32`)?.docComment).toEqual({ quote: '接口已有' })
+    } finally {
+      await host.close()
+    }
+  })
+})
+

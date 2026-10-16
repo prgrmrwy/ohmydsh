@@ -3560,6 +3560,16 @@ async function initialize(
     ...(locusChannel.status === 'available'
       ? {
         locusController: locusChannel.controller,
+        // Doc comments enter the SAME controller after their own admission
+        // (pet-locus-doc-comments D7); the service owns the retry and stop.
+        ...(locusChannel.controller.handleAdmission === undefined
+          ? {}
+          : {
+            docCommentLocus: {
+              handleAdmission: (admission: import('./host/channel/locus-controller.js').NormalizedLocusAdmission) =>
+                locusChannel.controller.handleAdmission!(admission),
+            },
+          }),
         locusAuthorization,
         locusToolTier: endpoint => locusRepository.getCurrentLocus(endpoint)?.toolTier?.effective ?? 'safe',
         // Bot-added produces no locus of its own: the whole tree is built on

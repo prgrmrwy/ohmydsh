@@ -106,15 +106,15 @@
   - 测试覆盖重启后读回、旧行可读、超长值拒绝写入。
 ## 4. 评论入站：范围判定与建树（D6）
 
-- [ ] 4.1 写失败测试 `doc-comment-intake.test.ts`，覆盖「文档评论按全文/划词同构映射…」的 10 行（含“评论查询一次失败后重试成功”“评论查询重试期间停用 channel”“重启后再投递排队中的划词评论”，后者在 4.6）和「评论范围无法判定」
+- [x] 4.1 写失败测试 `doc-comment-intake.test.ts`，覆盖「文档评论按全文/划词同构映射…」的 10 行（含“评论查询一次失败后重试成功”“评论查询重试期间停用 channel”“重启后再投递排队中的划词评论”，后者在 4.6）和「评论范围无法判定」
 - [x] 4.2 实现 `LarkClient`（同时补齐第 6、7 组需要的 drive/docs/contact 适配器：`replyComment` `reactCommentReply` `inspectDoc` `fetchDocMarkdown` `contactName`；`docs +fetch` 实际 flag 为 `--doc-format markdown`、正文在 `data.document.content`，依据 lark-cli v1.0.97 `docs_fetch_v2.go`；→ `test/channel-lark-drive.test.ts` 8 例）：
   - `batchQueryComments`：`drive +batch-query-comments`；
   - `listReplies`：`drive +list-replies`，分页，最多 10 页；
   - `inspectDoc`：`drive +inspect --url <token> --type docx`，返回 `{title, url}`。
 
   三者都用 bot 身份，并且要区分“调用失败”和“结果为空”。评论范围查询失败时，在进程内重试最多 2 次，间隔 2 秒、5 秒，重试不持久化
-- [ ] 4.3 实现评论事件解析（compact 的 GenericProcessor 形态，`notice_meta` 是嵌套字段）、`file_type` 过滤、全文/划词判定、`comment_id` 已有 locus 时的短路，以及按“首条合格事件”建树。按文档根建立专属自动主会话；划词评论先到时，先建文档根主会话，再建评论级子会话
-- [ ] 4.4 写失败测试「文档首次评论建立文档专属主会话」（`locus-on-demand-provisioning.test.ts`），然后实现。回归行翻 🟢：Project 群先行、首次消息补齐、重复初始化、default 不可用
+- [x] 4.3 实现评论事件解析（compact 的 GenericProcessor 形态，`notice_meta` 是嵌套字段）、`file_type` 过滤、全文/划词判定、`comment_id` 已有 locus 时的短路，以及按“首条合格事件”建树。按文档根建立专属自动主会话；划词评论先到时，先建文档根主会话，再建评论级子会话
+- [x] 4.4 写失败测试「文档首次评论建立文档专属主会话」（`locus-on-demand-provisioning.test.ts`），然后实现。回归行翻 🟢：Project 群先行、首次消息补齐、重复初始化、default 不可用
 - [x] 4.6 投影点逐个带上 `docComment`，并按来源重建（R5-RC3，pitfalls §11）。实现说明：两处 `dispatchNext` 重建统一改为调用 `messageFromDeliveryRecord`，按 `sourceOf` 区分；入站接受时传入 `docComment`；render 钩子只读 `current.docComment`；`context.ts` 的两处投影已补齐；`findCurrent*` 在第 7 组用到时再检查。测试 `locus-doc-redelivery.test.ts` 做过两次变异检查，分别撤掉“按来源重建”和“持久化写入”，测试都会失败：
   - `locus-controller.ts` 的 `dispatchNext` 两处消息重建（约 :1041-1051、:1086-1098）：带上 `docComment`，写死的 `chatType: 'group'` 改为按 `sourceOf(endpoint)` 决定；
   - 入站接受输入（约 :1306-1320）：把 `docComment` 传给 `acceptDelivery`；
@@ -123,7 +123,12 @@
   - 若只读工具或管理面读取当前 Delivery，还要检查 `persistence.ts` 的 `findCurrent*` 投影（约 :2447-2461、:2485-2510）。
 
   测试：`test/locus-doc-redelivery.test.ts`。用真实 `LocusRepository` 在同一介质上重开，经真实 `dispatchNext` 投递排队中的划词评论；用计数的假 `LarkClient` 断言零次评论查询；比较重启前后渲染出的四项评论事实。
-- [ ] 4.5 重构：把评论链路与 IM 链路共用的“建树”入口合并为一个，不复制逻辑。全量测试保持绿色
+- [x] 4.5 重构：评论链路与 IM 链路共用同一个建树入口，不复制逻辑。实现方式：评论经 `admitDocCommentEvent` 准入后，直接交给控制器已有的 `handleAdmission`，和 IM 走同一套 resolveLocus / ensureForDelivery / 去重 / 队列 / 结算。模块与改动如下：
+  - 解析与准入：`channel/doc-comment.ts`。
+  - 驱动：`channel/doc-comment-intake.ts`，负责最多两次重试（2 秒、5 秒），停止时取消，迟到的结果直接丢弃。
+  - `ChannelService`：用自己的停止信号、水位、去重和授权组装驱动；`formalReady` 改为只能经 `setFormalReady` 一处写入，退出正式运行时中止所有在途查询。
+  - 已做的变异检查：成员提问、触发回复正文、迟到结果丢弃、仅对调用失败重试，这几处改坏后都有测试变红。
+  - 全量：3134 passed / 1 failed（基线）。
 
 ## 5. 评论准入与控制命令（D7）
 

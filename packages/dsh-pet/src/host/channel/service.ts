@@ -19,7 +19,9 @@ import {
 } from './lark.js'
 import { InboundPipeline, type IntakeOutcome } from './pipeline.js'
 import type { LocusChannelControllerPort } from './locus-capability.js'
-import { parseInboundLine } from './event.js'
+import { MessageDedup, parseInboundLine } from './event.js'
+import { createDocCommentIntake, type DocCommentIntakeOutcome } from './doc-comment-intake.js'
+import type { LocusControllerResult, NormalizedLocusAdmission } from './locus-controller.js'
 import { PairingController, type PairingControllerOptions } from './pairing.js'
 import type { WorkspaceLocator } from './route.js'
 import { RELOGIN_DIAGNOSTIC, runConnectionGate, type ConnectionGatePort } from './connection-gate.js'
@@ -77,8 +79,18 @@ export interface ChannelServiceDeps {
   /**
    * Doc-comment intake for `drive.notice.comment_add_v1` lines from the shared
    * `+subscribe` connection. Absent means comments are dropped silently.
+   * Tests may pass a raw handler; production composes {@link docCommentLocus}.
    */
   readonly commentIntake?: (line: string) => Promise<void>
+  /**
+   * The locus controller's pre-admitted entry. When present (and no raw
+   * `commentIntake` overrides it), the service builds the comment driver with
+   * its OWN live state: the formal-run flag, a stop signal, the watermark and
+   * the same dedup/authorization the IM pipeline uses.
+   */
+  readonly docCommentLocus?: {
+    handleAdmission(admission: NormalizedLocusAdmission): Promise<LocusControllerResult>
+  }
   readonly subscriptionSpawnProcess?: SubscriptionOptions['spawnProcess']
   readonly subscriptionSchedule?: SubscriptionOptions['schedule']
   /** Injectable pairing randomness/clock/timer seams for deterministic tests. */
@@ -102,6 +114,10 @@ export class ChannelService implements ChannelControl {
   private readonly ignoredAt = new Map<string, number>()
   /** The formal Channel reason is armed only after its latest identity probe. */
   private formalReady = false
+  /** Aborted whenever the formal channel stops; renewed on each formal start. */
+  private commentStop = new AbortController()
+  private readonly commentDedup = new MessageDedup()
+  private readonly docCommentIntake: ((line: string) => Promise<void>) | undefined
   /** Fences async identity probes after disable, teardown, or a newer request. */
   private operationGeneration = 0
   /** Fences pairing start probes independently from formal enable/binding work. */
@@ -133,6 +149,31 @@ export class ChannelService implements ChannelControl {
     // initializer), and a separate subscription would be a SECOND event
     // connection for the app, which splits events (pet-locus-doc-comments D1).
     // If it is ever needed, route it through the one `+subscribe` instead.
+    const commentLocus = deps.docCommentLocus
+    this.docCommentIntake = commentLocus === undefined || deps.locusAuthorization === undefined
+      ? undefined
+      : createDocCommentIntake({
+        client: this.client,
+        admissionContext: () => {
+          const config = deps.repository.getChannelConfig()
+          const authorization = deps.locusAuthorization
+          if (authorization === undefined) return undefined
+          return {
+            ...(config.botOpenId === undefined ? {} : { botOpenId: config.botOpenId }),
+            allowOpenIds: config.allowOpenIds,
+            watermark: this.subscription.watermark,
+            isDuplicate: messageId => this.commentDedup.check(messageId),
+            authorization,
+            ...(deps.locusToolTier === undefined && authorization.toolTier === undefined
+              ? {}
+              : { toolTier: deps.locusToolTier ?? authorization.toolTier }),
+          }
+        },
+        handleAdmission: admission => commentLocus.handleAdmission(admission),
+        active: () => this.formalReady,
+        signal: () => this.commentStop.signal,
+        onOutcome: outcome => this.onCommentOutcome(outcome),
+      })
     this.pipeline = new InboundPipeline({
       repository: deps.repository,
       coordinator: deps.coordinator,
@@ -188,7 +229,7 @@ export class ChannelService implements ChannelControl {
   stop(): void {
     this.operationGeneration += 1
     this.pairingGeneration += 1
-    this.formalReady = false
+    this.setFormalReady(false)
     this.bootstrap.cancel()
     this.pairing.stop()
     // Stop receiving new events even when a durable claim must finish.
@@ -315,13 +356,13 @@ export class ChannelService implements ChannelControl {
   async setEnabled(enabled: boolean, replace = false): Promise<void> {
     const generation = ++this.operationGeneration
     if (!enabled) {
-      this.formalReady = false
+      this.setFormalReady(false)
       this.reconcileSubscription()
       return
     }
     // Revalidation is itself fail-closed: an already-running formal consumer
     // loses that run reason until the latest identity proof succeeds.
-    this.formalReady = false
+    this.setFormalReady(false)
     this.reconcileSubscription()
     const config = this.requireReadyConfig()
     const version = await this.client.cliVersion?.()
@@ -368,7 +409,7 @@ export class ChannelService implements ChannelControl {
     })
     if (generation !== this.operationGeneration) return
     if (!this.deps.repository.getChannelConfig().enabled) return
-    this.formalReady = true
+    this.setFormalReady(true)
     if (replace && this.subscription.current.phase !== 'stopped') this.subscription.reconnect()
     else this.reconcileSubscription()
   }
@@ -437,7 +478,7 @@ export class ChannelService implements ChannelControl {
     }
     this.pairingGeneration += 1
     const resume = this.deps.repository.getChannelConfig().enabled
-    this.formalReady = false
+    this.setFormalReady(false)
     this.reconcileSubscription()
     if (resume) {
       await this.deps.repository.updateChannelConfig(current =>
@@ -532,7 +573,7 @@ export class ChannelService implements ChannelControl {
     this.permission = undefined
     this.deps.onChange?.()
     // The profile may now identify another app: always replace a live consumer.
-    this.formalReady = resume
+    this.setFormalReady(resume)
     if (resume) {
       this.subscription.reconnect()
     } else {
@@ -545,7 +586,8 @@ export class ChannelService implements ChannelControl {
     // One connection carries both event families; route by the compact `type`.
     if (isCommentLine(line)) {
       // Comments never reach the IM pipeline, pairing, or a disabled channel.
-      if (this.formalReady && this.deps.commentIntake !== undefined) await this.deps.commentIntake(line)
+      const intake = this.deps.commentIntake ?? this.docCommentIntake
+      if (this.formalReady && intake !== undefined) await intake(line)
       return
     }
     const event = parseInboundLine(line)
@@ -580,6 +622,35 @@ export class ChannelService implements ChannelControl {
           signal.addEventListener('abort', onAbort, { once: true })
         }),
     }
+  }
+
+  /** Low-cardinality comment diagnostics; never ids or content. */
+  private onCommentOutcome(outcome: DocCommentIntakeOutcome): void {
+    if (outcome.kind === 'ignored') {
+      const reason = safeIgnoredReason(outcome.reason)
+      const now = Date.now()
+      const previous = this.ignoredAt.get(`comment:${reason}`) ?? 0
+      if (now - previous >= 60_000) {
+        this.ignoredAt.set(`comment:${reason}`, now)
+        this.log(`comment ignored: ${reason}`)
+      }
+      return
+    }
+    if (outcome.kind === 'handled' && outcome.result.kind === 'refused') {
+      this.log(`comment unroutable: ${outcome.result.reason}`)
+    }
+    this.deps.onChange?.()
+  }
+
+  /**
+   * The single writer of `formalReady`. Leaving the formal run aborts every
+   * in-flight comment query/retry; entering it issues a fresh signal, so a
+   * stale retry from a previous run can never accept, reply or react.
+   */
+  private setFormalReady(ready: boolean): void {
+    if (ready && !this.formalReady) this.commentStop = new AbortController()
+    if (!ready && this.formalReady) this.commentStop.abort()
+    this.formalReady = ready
   }
 
   /** Start or stop the ONE consumer from the union of active run reasons. */

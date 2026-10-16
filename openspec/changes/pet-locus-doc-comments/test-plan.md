@@ -70,7 +70,7 @@ This table is a live ledger. During apply, flip each row from 🔴 to 🟢 when 
 | specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | 首次消息补齐 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "首次消息补齐" | 🔴 red — carried forward; regression |
 | specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | 重复初始化 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "重复初始化" | 🔴 red — carried forward; regression |
 | specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | default 不可用 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "default 不可用" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | 文档首次评论建立文档专属主会话 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "文档首次评论建立文档专属主会话" | 🔴 red |
+| specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | 文档首次评论建立文档专属主会话 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "文档首次评论建立文档专属主会话" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 出站业务回复的 @ 引用渲染为平台真实提醒 | 唯一命中的整词引用成为真实提醒 | packages/dsh-pet/test/channel-mentions.test.ts | spec Scenario "唯一命中的整词引用成为真实提醒" | 🔴 red — carried forward; regression |
 | specs/pet-locus-collaboration/spec.md → 出站业务回复的 @ 引用渲染为平台真实提醒 | 裸 open_id 引用也成为真实提醒 | packages/dsh-pet/test/channel-mentions.test.ts | spec Scenario "裸 open_id 引用也成为真实提醒" | 🔴 red — carried forward; regression |
 | specs/pet-locus-collaboration/spec.md → 出站业务回复的 @ 引用渲染为平台真实提醒 | 同名歧义不改写 | packages/dsh-pet/test/channel-mentions.test.ts | spec Scenario "同名歧义不改写" | 🔴 red — carried forward; regression |
@@ -92,26 +92,26 @@ This table is a live ledger. During apply, flip each row from 🔴 to 🟢 when 
 | specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 退役 locus 的待办仍在列表中 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "退役 locus 的待办仍在列表中" | 🔴 red — existing test, re-run after change |
 | specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 文档评论待办跳到文档 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "文档评论待办跳到文档" | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 文档 URL 不可得 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "文档 URL 不可得" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 全文评论进入文档级入口 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "全文评论进入文档级入口" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 划词评论进入评论级入口 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "划词评论进入评论级入口" | 🔴 red |
+| specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 全文评论进入文档级入口 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "全文评论进入文档级入口" | 🟢 green |
+| specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 划词评论进入评论级入口 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "划词评论进入评论级入口" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 重启后再投递排队中的划词评论 | packages/dsh-pet/test/locus-doc-redelivery.test.ts | spec Scenario "重启后再投递排队中的划词评论" | 🟢 green |
-| specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 划词评论下的后续回复留在同一入口 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "划词评论下的后续回复留在同一入口" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 划词评论先于文档级 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "划词评论先于文档级" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 知识库文档以底层 token 为根 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "知识库文档以底层 token 为根" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 评论查询一次失败后重试成功 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "评论查询一次失败后重试成功" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 评论查询重试期间停用 channel | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "评论查询重试期间停用 channel" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 无法判定全文或划词 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "无法判定全文或划词" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 非 docx 评论 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "非 docx 评论" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → 评论准入与群消息准入同构且静默 fail closed | 非 allowlist 成员在已授权文档提问 | packages/dsh-pet/test/doc-comment-admission.test.ts | spec Scenario "非 allowlist 成员在已授权文档提问" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → 评论准入与群消息准入同构且静默 fail closed | 非 allowlist 成员首次 @ 未初始化文档 | packages/dsh-pet/test/doc-comment-admission.test.ts | spec Scenario "非 allowlist 成员首次 @ 未初始化文档" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → 评论准入与群消息准入同构且静默 fail closed | shell 档文档拒绝他人 | packages/dsh-pet/test/doc-comment-admission.test.ts | spec Scenario "shell 档文档拒绝他人" | 🔴 red |
+| specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 划词评论下的后续回复留在同一入口 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "划词评论下的后续回复留在同一入口" | 🟢 green |
+| specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 划词评论先于文档级 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "划词评论先于文档级" | 🟢 green |
+| specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 知识库文档以底层 token 为根 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "知识库文档以底层 token 为根" | 🟢 green |
+| specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 评论查询一次失败后重试成功 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "评论查询一次失败后重试成功" | 🟢 green |
+| specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 评论查询重试期间停用 channel | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "评论查询重试期间停用 channel" | 🟢 green |
+| specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 无法判定全文或划词 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "无法判定全文或划词" | 🟢 green |
+| specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 非 docx 评论 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "非 docx 评论" | 🟢 green |
+| specs/pet-locus-doc-comments/spec.md → 评论准入与群消息准入同构且静默 fail closed | 非 allowlist 成员在已授权文档提问 | packages/dsh-pet/test/doc-comment-admission.test.ts | spec Scenario "非 allowlist 成员在已授权文档提问" | 🟢 green |
+| specs/pet-locus-doc-comments/spec.md → 评论准入与群消息准入同构且静默 fail closed | 非 allowlist 成员首次 @ 未初始化文档 | packages/dsh-pet/test/doc-comment-admission.test.ts | spec Scenario "非 allowlist 成员首次 @ 未初始化文档" | 🟢 green |
+| specs/pet-locus-doc-comments/spec.md → 评论准入与群消息准入同构且静默 fail closed | shell 档文档拒绝他人 | packages/dsh-pet/test/doc-comment-admission.test.ts | spec Scenario "shell 档文档拒绝他人" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → 评论准入与群消息准入同构且静默 fail closed | 划词评论先建立时也披露 | packages/dsh-pet/test/doc-comment-admission.test.ts | spec Scenario "划词评论先建立时也披露" | 🔴 red |
 | specs/pet-locus-doc-comments/spec.md → 评论准入与群消息准入同构且静默 fail closed | 建立回执披露提问范围 | packages/dsh-pet/test/doc-comment-admission.test.ts | spec Scenario "建立回执披露提问范围" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → 评论准入与群消息准入同构且静默 fail closed | 未 @bot 的评论 | packages/dsh-pet/test/doc-comment-admission.test.ts | spec Scenario "未 @bot 的评论" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → 评论准入与群消息准入同构且静默 fail closed | 来自 agent 或 bot 的评论 | packages/dsh-pet/test/doc-comment-admission.test.ts | spec Scenario "来自 agent 或 bot 的评论" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → 评论准入与群消息准入同构且静默 fail closed | 同一回复重复到达 | packages/dsh-pet/test/doc-comment-admission.test.ts | spec Scenario "同一回复重复到达" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → 评论准入与群消息准入同构且静默 fail closed | 长线程中的触发回复 | packages/dsh-pet/test/channel-lark-drive.test.ts | spec Scenario "长线程中的触发回复" | 🟢 green (adapter); admission wiring pending |
-| specs/pet-locus-doc-comments/spec.md → 评论准入与群消息准入同构且静默 fail closed | 触发回复正文不可得 | packages/dsh-pet/test/doc-comment-admission.test.ts | spec Scenario "触发回复正文不可得" | 🔴 red |
+| specs/pet-locus-doc-comments/spec.md → 评论准入与群消息准入同构且静默 fail closed | 未 @bot 的评论 | packages/dsh-pet/test/doc-comment-admission.test.ts | spec Scenario "未 @bot 的评论" | 🟢 green |
+| specs/pet-locus-doc-comments/spec.md → 评论准入与群消息准入同构且静默 fail closed | 来自 agent 或 bot 的评论 | packages/dsh-pet/test/doc-comment-admission.test.ts | spec Scenario "来自 agent 或 bot 的评论" | 🟢 green |
+| specs/pet-locus-doc-comments/spec.md → 评论准入与群消息准入同构且静默 fail closed | 同一回复重复到达 | packages/dsh-pet/test/doc-comment-admission.test.ts | spec Scenario "同一回复重复到达" | 🟢 green |
+| specs/pet-locus-doc-comments/spec.md → 评论准入与群消息准入同构且静默 fail closed | 长线程中的触发回复 | packages/dsh-pet/test/channel-lark-drive.test.ts | spec Scenario "长线程中的触发回复" | 🟢 green |
+| specs/pet-locus-doc-comments/spec.md → 评论准入与群消息准入同构且静默 fail closed | 触发回复正文不可得 | packages/dsh-pet/test/doc-comment-admission.test.ts | spec Scenario "触发回复正文不可得" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → 控制命令在评论中按所在入口生效 | 全文评论绑定已知会话 | packages/dsh-pet/test/doc-comment-control.test.ts | spec Scenario "全文评论绑定已知会话" | 🔴 red |
 | specs/pet-locus-doc-comments/spec.md → 控制命令在评论中按所在入口生效 | 文档改绑后已有划词评论不迁移 | packages/dsh-pet/test/doc-comment-control.test.ts | spec Scenario "文档改绑后已有划词评论不迁移" | 🔴 red |
 | specs/pet-locus-doc-comments/spec.md → 控制命令在评论中按所在入口生效 | 划词评论内绑定只影响该评论 | packages/dsh-pet/test/doc-comment-control.test.ts | spec Scenario "划词评论内绑定只影响该评论" | 🔴 red |
