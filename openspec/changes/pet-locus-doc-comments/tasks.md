@@ -1,0 +1,174 @@
+## 0. 前置与基线
+
+- [ ] 0.1 在途协调。确认 `pet-locus-feishu-read-and-delivery-fixes`、`pet-locus-shell-tier` 已归档，或已明确归档顺序。用 `openspec diff` 核对本 change 的三份 MODIFIED delta，确认它们的基线就是对方归档后的 current spec。与 `pet-locus-independent-agent-inquiries` 在“投递与结算关联独立于会话运行状态”上冲突时，由后归档的一方 rebase（proposal §在途协调）
+- [ ] 0.2 运行 `npm test`（仓库根）与 `npm --prefix packages/dsh-pet test`，记录全量通过的基线，包括用例数和耗时
+- [ ] 0.3 建立测试设施，见 test-plan §Test infrastructure：
+  - `test/fixtures/lark-subscribe/` 与 `test/fixtures/lark-drive/`：取自 spike 抓包，脱敏，标识替换为固定假值；
+  - 两层 shim→native 的 fake 子进程工厂；
+  - 门禁假端口与可控时钟；
+  - v15、v16 存储夹具；
+  - 泄漏哨兵。
+
+  夹具形态以 lark-cli v1.0.97 源码为准（`processor_im_message.go`、`processor_generic.go`）
+
+## 1. 传输：单条 `+subscribe --compact`（D1）
+
+- [ ] 1.1 写失败测试，对应 test-plan「飞书入站通道…凭据零接触」中 `channel-subscription.test.ts` 的以下几行：
+  - 启用 channel 后启动订阅：argv 断言为 `event +subscribe --as bot --compact --event-types im.message.receive_v1,drive.notice.comment_add_v1`，且没有 consume；
+  - 停止时回收整个进程组；
+  - stderr 原文不落盘；
+  - 内部重连不推进水位；
+  - 就绪以 `connected to wss://` 为准，不以 `Connected.` 为准。
+
+  确认失败原因是 argv 不对、或只对 shim 发了信号，而不是 import 错误
+- [ ] 1.2 实现 `ChannelSubscription`：
+  - spawn 改为 `+subscribe --compact`，`detached: true`；
+  - stop 同步对进程组发 SIGTERM，等待最多 5 秒，超时再发 SIGKILL 并记诊断。SIGKILL 只对本 Host 仍持有存活句柄的 pgid 发出，防止 pgid 被复用后误杀；Host 退出时这一步尽力而为（R4-S-2）；
+  - 就绪行判定、`readyAt` 每个子进程只锁存一次；
+  - stderr 只做三类模式匹配，原文不外泄；
+  - 不传 `--quiet`。
+
+  直到 1.1 通过
+- [ ] 1.3 写失败测试：
+  - 单连接同时承载群消息与评论（`channel-service.test.ts`）；
+  - compact 群消息与既有准入兼容（`channel-event.test.ts`）；
+  - 卡片消息静默丢弃，诊断为 `unparsable`（`channel-pipeline.test.ts`）
+- [ ] 1.4 实现按 `type` 分派：`im.message.receive_v1` 走现有 `parseInboundLine`，`drive.notice.comment_add_v1` 走评论链路（第 4 组接入前先落一个可观测的桩）。移除 bot-added 的独立订阅：生产环境本来就不启动它，保留可选构造，但不再单独 spawn
+- [ ] 1.5 回归行改名并跑通，然后翻 🟢：lark-cli bot 身份不可用、升级后默认不消费事件、Channel 关闭时为配对临时订阅、配对结束后按运行原因回收
+- [ ] 1.6 重构：把 lark-cli argv 和就绪模式集中成常量，作为唯一的契约点。全量测试保持绿色
+
+## 2. 连接门禁（D2、D3）
+
+- [ ] 2.1 写失败测试 `channel-connection-gate.test.ts`，覆盖 test-plan「事件连接独占在拉起订阅前被证明」的全部 14 行，使用门禁假端口和可控时钟驱动
+- [ ] 2.2 实现门禁，每次拉起子进程前（含监督器自动重启）执行：
+  - 先检查版本 ≥1.0.97，再检查连接计数；计数不为 0 时每 2 秒复查一次，最多等 40 秒；
+  - 失败时分两类处理：
+    - `connection-check-failed`：进入 reconnecting，计入失败上限；
+    - 版本过低、冲突：进入 down；
+  - 单实例锁被占：直接 down，不退避；
+  - 冲突诊断给出计数、`lark-cli event status` 和 `pgrep -fl "event +subscribe"` 三条线索
+  - `connection-check-failed` 若由认证或未登录引起，沿用既有的重新登录诊断（R4-RC5）
+  - 停止、停用或重连时，取消门禁等待，被取消后不再拉起（R4-RC4）
+  - 把 `channel/lark.ts` 中 `cliVersion` 的支持阈值（目前 patch≥93）以及 `service.ts` 三处 “upgrade to 1.0.93” 文案统一提升到 1.0.97，避免启用或配对时接受 1.0.93–1.0.96，而门禁随后又把 channel 判为 down（R4-RC6）
+- [ ] 2.3 IM dry-run 并入现有的启用前验证。执行时机：正式 Channel 启动（含 Host 启动时恢复已启用的 channel）、用户启用、显式重连；结果为 `blocked` 拒绝，`unknown` 放行。监督器自动重启和仅为配对拉起时不执行
+- [ ] 2.4 诊断词表（D13）：评论链路的理由（`comment-scope-unknown`、`comment-reply-missing`、`unsupported-file-type`）加入 `SAFE_IGNORED` 和 `safeIgnoredReason`；门禁理由属于 channel 状态，不属于单条消息被忽略的原因，记在 channel 诊断里，不进 `SAFE_IGNORED`（R4-S-4）。先写失败测试“评论范围无法判定”：期望记为 `comment-scope-unknown` 而不是 `other`，再实现。回归行翻 🟢：Channel 关闭时收到消息、非 allowlist 用户 @ Bot、目标群调用因权限失败
+- [ ] 2.5 重构：把门禁做成可注入的端口，不在 `service.ts` 里内联子进程调用。全量测试保持绿色
+
+## 3. 入口与持久化：带前缀的 `chatId`、v16、迁移（D4、D5、D11）
+
+- [ ] 3.1 写失败测试：
+  - 既有群入口键不变、规范化不丢失文档前缀（`locus-repository.test.ts`）；
+  - 文档与群标识不串键（`locus-admission.test.ts`）
+- [ ] 3.2 实现 `isDocEndpoint`、`parseDocChatId`、`docMessageId(token, commentId, replyId)`。逐一核查以下路径对带 `doc:docx:` 前缀的值能原样往返：`normalizeLocusEndpoint`、`endpointKeyOf`/`endpointFromKey`、admission 的 `locusEndpointKey`、授权解析器、`deliveryCorrelates`、`assertDeliveryRecord`。核查范围以 R1-M3 列出的位置为准，对缺漏的地方补测试
+- [ ] 3.3 写失败测试：
+  - 升级需离线迁移并先备份（`migrate-cli.test.ts`）；
+  - 未迁移时 v16 拒绝打开（`migration-guidance.test.ts`）；
+  - v15 拒绝打开 v16 库（`pet-storage-backend.test.ts`，用 v15 描述符打开 v16 夹具）
+- [ ] 3.4 实现：
+  - `PET_DOMAIN_VERSION` 改为 16，并在注释里写明理由；
+  - `migrate-state-version.mjs`：常量改为 16、`RESTAMPABLE` 加入 15、修正“v2..v13”文案；
+  - `migrate.ts` 接受 14 和 15；
+  - 同步更新 `migrate-cli.test.ts` 的版本范围
+- [ ] 3.5 回归行翻 🟢：同一研发主会话服务多个现场、同群话题关联不同主会话、子会话不能作为绑定源
+- [ ] 3.6 重构：IM 出口函数的签名只接受 IM 值（D4 的类型兜底）。全量测试保持绿色
+
+## 4. 评论入站：范围判定与建树（D6）
+
+- [ ] 4.1 写失败测试 `doc-comment-intake.test.ts`，覆盖「文档评论按全文/划词同构映射…」的 9 行（含“评论查询一次失败后重试成功”“评论查询重试期间停用 channel”）和「评论范围无法判定」
+- [ ] 4.2 实现 `LarkClient`：
+  - `batchQueryComments`：`drive +batch-query-comments`；
+  - `listReplies`：`drive +list-replies`，分页，最多 10 页；
+  - `inspectDoc`：`drive +inspect --url <token> --type docx`，返回 `{title, url}`。
+
+  三者都用 bot 身份，并且要区分“调用失败”和“结果为空”。评论范围查询失败时，在进程内重试最多 2 次，间隔 2 秒、5 秒，重试不持久化
+- [ ] 4.3 实现评论事件解析（compact 的 GenericProcessor 形态，`notice_meta` 是嵌套字段）、`file_type` 过滤、全文/划词判定、`comment_id` 已有 locus 时的短路，以及按“首条合格事件”建树。按文档根建立专属自动主会话；划词评论先到时，先建文档根主会话，再建评论级子会话
+- [ ] 4.4 写失败测试「文档首次评论建立文档专属主会话」（`locus-on-demand-provisioning.test.ts`），然后实现。回归行翻 🟢：Project 群先行、首次消息补齐、重复初始化、default 不可用
+- [ ] 4.5 重构：把评论链路与 IM 链路共用的“建树”入口合并为一个，不复制逻辑。全量测试保持绿色
+
+## 5. 评论准入与控制命令（D7）
+
+- [ ] 5.1 写失败测试 `doc-comment-admission.test.ts`，覆盖 10 行，包括“划词评论先建立时也披露”和“建立回执披露提问范围”
+- [ ] 5.2 实现 `admitDocCommentEvent`：
+  - 复用 allowlist、授权状态、shell 档仅所有者可用、退役/legacy 判定；
+  - 去重键为 `messageId = doc:docx:<token>/<comment_id>/<reply_id>`；
+  - 水位取顶层 `timestamp`，缺失时跳过；
+  - 回复元素渲染为文本；
+  - 披露回执用 Host 控制回执发出，同一文档只发一次，发送失败只记诊断
+- [ ] 5.3 写失败测试 `doc-comment-control.test.ts`，覆盖 4 行，然后实现：命令写在全文评论下作用于文档级入口，写在划词评论下作用于评论级入口；控制回执发到命令所在的评论；非 allowlist 用户发的命令静默丢弃
+- [ ] 5.4 重构。全量测试保持绿色
+
+## 6. 评论出站与反馈（D5、D8）
+
+- [ ] 6.1 写失败测试：
+  - `doc-comment-egress.test.ts` 的 7 行，含“文档回复不渲染 @”和“shell 档直接调用评论或文档写命令”；
+  - `locus-delivery.test.ts` 的“文档评论回复回到触发评论”和“文档回复目标与入口不符”
+- [ ] 6.2 实现：
+  - `replyComment`：`drive +add-reply`，纯文本；
+  - `reactCommentReply`：`Typing` / `DONE` / `CRY`；
+  - finish 与控制回执按 `isDocEndpoint` 分派；
+  - 发送前校验 token 与 comment_id 一致，否则返回 `association-unproven`；
+  - 结果分类沿用 IM 的三类；
+  - 表情失败只记诊断（fail-soft）
+- [ ] 6.3 egress 守卫（S2）：补齐 `drive` 评论写命令与 `docs +update` / `+create`；`api` 写调用的正则同时匹配带和不带 `/open-apis` 前缀的路径；更新 `locus-lark-cli-egress-guard.test.ts`
+- [ ] 6.4 出站 @ 渲染只对 IM 入口生效：写失败测试“文档回复不渲染 @”（已含在 6.1），然后实现。回归行翻 🟢：`channel-mentions.test.ts` 的 8 行
+- [ ] 6.5 回归行翻 🟢：`locus-delivery.test.ts` 中 13 个延续场景（群级引用触发消息 … 宿主重启无法证明关联）
+- [ ] 6.6 重构。全量测试保持绿色
+
+## 7. IM 专属能力处置与只读工具（D9、D10）
+
+- [ ] 7.1 写失败测试：
+  - `doc-comment-im-scoping.test.ts` 的 3 行；
+  - `locus-composition.test.ts` 的“文档子会话的工具面”；
+  - `locus-doc-context-tool.test.ts` 的 4 行
+- [ ] 7.2 实现：文档 Delivery 不调用媒体读取、读群探测、成员列表；触发者显示名改用 bot 身份按 open_id 查联系人，失败时降级（fail-soft）；投递 prompt 前言按 D12
+- [ ] 7.3 实现 `pet_locus_doc_context`：
+  - caller-bound，不接受任何 selector；
+  - 线程与正文合计 28 000 UTF-16 码元，线程在前；截断时标记截断位置及原始总长度；
+  - 结果以固定的不可信标签开头；
+  - 失败与空结果可区分。
+
+  composition 按入口类别装配：文档子会话有 `pet_locus_doc_context`、没有 `pet_locus_chat_history`。同步更新 attestation 白名单，以及 `ledger-tool-scope` / `executor-scope` 的可见工具断言
+- [ ] 7.4 重构。全量测试保持绿色
+
+## 8. 管理面与待办跳转（D14）
+
+- [ ] 8.1 写失败测试：
+  - `locus-view.test.ts`：文档入口短码确定且与群可区分、多个文档入口短码互不相同、同前缀的评论入口短码可区分（`cmt·5186` / `cmt·0665`）、文档标题不可得；
+  - `locus-management.test.ts`：3 行；
+  - `ledger-view.test.ts`：文档评论待办跳到文档、文档 URL 不可得、文档待办跳转
+- [ ] 8.2 实现：
+  - `handleSource` 增加 doc 与 comment 两种类别：doc 取 `doc:docx:` 之后的部分；comment 取 `comment_id` 逆序；
+  - `endpointHandleLabel` 增加 `doc·` / `cmt·`；
+  - 兜底名为 `文档 · <短码>` / `评论 · <短码>`；
+  - 标题与 URL 来自 `inspectDoc`；
+  - 提问范围标注；
+  - 不新增任何建立入口的控件；
+  - `resolveFeishuJumpTarget` 遇到文档入口返回 doc 类型，不再归为 thread
+- [ ] 8.3 回归行翻 🟢：`locus-view` 3 行、`ledger-view` 10 行（含 4 个已命名用例重跑）
+- [ ] 8.4 重构。全量测试保持绿色
+
+## 9. 文档
+
+- [ ] 9.1 `dsh.yaml` 中 Pet 的 note：lark-cli 最低版本改为 1.0.97；写明升级 lark-cli 后需重测 E1、E8、E10、E12、E13；补充飞书应用的部署前置——长连接事件、评论读写、docx 读取、联系人基本信息；写明“Pet 运行期间，同一应用的其它 profile 不能做事件订阅，建议 Pet 独占一个应用”。这条替代原 onboarding 步骤
+- [ ] 9.2 `docs/architecture/dsh-plugin-integration-pitfalls.md` 新增一节，写三条可复用的教训：
+  - 同一应用的多个事件连接会被分流，而且两侧都不报错；
+  - npm shim 不会转发信号，只杀 shim 会留下孤儿原生进程；
+  - `+subscribe` 打出 `Connected.` 时还没有完成握手
+
+## 10. 全量验证与真机验收
+
+- [ ] 10.1 运行 `npm --prefix packages/dsh-pet test`、`npm --prefix packages/dsh-pet run build`，以及 typecheck（若有独立脚本）；运行仓库根的 `npm test` 和 `npm run check:artifacts`。记录命令和通过数
+- [ ] 10.2 核对 test-plan 127 行全部为 🟢；没有 skip 或 pending，也没有弱化或删除过的测试
+- [ ] 10.3 `openspec validate pet-locus-doc-comments --strict` 通过
+- [ ] 10.4 `node scripts/sync.mjs` 连续运行两次，第二次无变化（幂等）
+- [ ] 10.5 在一次性飞书应用上做真机验收（不用生产 dsh-pet 应用），用构建产物复测：
+  - E1：一条连接同时收群 @、全文评论、划词评论、回复；
+  - E3 反向：Pet 运行时，另起一个同应用的 `+subscribe`，后者应被单实例锁拒绝；先占住连接再启动 Pet，Pet 的门禁应报 `event-connection-conflict`；
+  - E8：连接计数；
+  - E12：Host 被 SIGTERM 后没有原生孤儿进程；
+  - E15：表情反馈；
+  - 一次完整往返：全文评论 → 回复，划词评论 → 回复，`/bind`。
+
+  结果记入 `verify.md`
+- [ ] 10.6 真机升级演练（用一次性的状态目录副本）：执行 `dsh-pet-migrate-state --yes`，备份生成，v16 启动成功；再演练回滚：删除 journal、覆盖备份、v15 启动成功
+- [ ] 10.7 生成 `verify.md`，按 anvil 的 verify 指令写出 `DECISION`
