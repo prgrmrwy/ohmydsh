@@ -39,7 +39,9 @@ IM Delivery 的 `messageId` 是飞书消息标识。文档 Delivery 的 `message
 
 普通消息标识与评论回复标识 MUST NOT 成为长期 locus 身份，但业务回复 MUST 使用 current Delivery 不可变的触发目标：
 - IM 群级与话题级回复都 MUST 以触发 `messageId` 做飞书按消息回复；话题回复还 MUST 留在 Host 从入站事件确认的原话题。
-- 文档级与评论级回复都 MUST 追加在触发 `comment_id` 所在的评论下。该评论的 token MUST 与入口 `chatId` 中的 token 相同；评论级入口的 `comment_id` 还 MUST 与入口 `threadId` 相同。不一致时 SHALL 以 `association-unproven` fail closed，不发送。
+- 评论级（划词评论）回复 MUST 追加在触发 `comment_id` 所在的评论下，且该 `comment_id` MUST 与入口 `threadId` 相同。
+- 文档级（全文评论）入口的回复 SHALL 以 bot 身份在同一文档新建一条全文评论，开头以结构化提及 @ 持久 Delivery 的发送者（飞书不允许回复全文评论，详见 `pet-locus-doc-comments`）。
+- 两者的触发 token 都 MUST 与入口 `chatId` 中的 token 相同。任一不一致，或文档级入口的发送者不是可证明的 open id 时，SHALL 以 `association-unproven` fail closed，不发送。
 
 接受不等于投递，投递不等于完成，模型 `turn/end` 不等于 Delivery 终态。初始化、GUI 私聊、父子补问 MUST NOT 消耗 current。Host SHALL 保证每个 locus 至多一个 current，且完成、超时与重复调用通过原子状态竞争只终结该项一次；迟到调用 MUST NOT 消费后续 Delivery或新代际。
 

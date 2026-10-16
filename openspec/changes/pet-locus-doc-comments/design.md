@@ -188,27 +188,30 @@ dry-run 既不建 bus，也不建连接。监督器自动重启时不跑 dry-run
 
 **提问资格与群同构**：入口已授权时，任何能评论的人都可以提问（所有者已确认）。补偿措施有三项：
 
-1. **披露回执**。由 Host 以控制回执的形式发出，即一次独立的 `drive +add-reply`，与群里的控制回执走同一条路，不算业务正文。发送时机有两个：
+1. **披露回执**。由 Host 以控制回执的形式发出，投递位置与业务正文相同（划词评论：`drive +add-reply` 到该评论；全文评论：新建一条 @ 触发者的 bot 全文评论，见 D8），不算业务正文。发送时机有两个：
    - 该文档的任一入口首次建立时，包括文档级和评论级、自动建立和 `/bind` 建立，同一文档只发一次（R3-M-4）；
    - `/bind` 成功时，附在命令回执里。
 
-   内容为：“本文档的评论者均可向我提问；只有 allowlist 成员能控制”，发在触发该次建立或命令的那条评论下。
+   内容为：“本文档的评论者均可向我提问；只有 allowlist 成员能控制”，按上述规则发给触发该次建立或命令的人。
 2. 管理面在文档入口行标注同样的说明。
 3. 文档正文、评论正文和划词原文，一律以“不可信输入”标签进入 prompt 和工具结果。
+
+**残余风险**：全文评论的答复是新的顶层评论，所以已授权文档里每一个文档级提问都会多出一条 bot 评论。被 @ 的只有提问者本人，提及对象只取持久发送者，模型正文以纯文本元素发出，无法注入 `mention_user`，所以不能借此 @ 第三方。评论区噪音由文档所有者用 `/unbind` 或 `/tools` 收敛。
 
 **文本渲染**：评论回复由多个 `elements` 组成。`text_run` 取其文本；`person` 若是 bot 本身，渲染为 `@<bot 名>`，否则渲染为 `@<user_id>`；`docs_link` 取其 URL。渲染完成后，再像群侧一样解析控制命令。
 
 ### D8 出站与反馈
 
-`LarkClient` 新增三个方法：
+`LarkClient` 新增以下出站方法：
 
 | 方法 | 实现 |
 |---|---|
-| `replyComment(token, commentId, text)` | `drive +add-reply --as bot --token <t> --type docx --comment-id <c> --content '[{"type":"text","text":…}]'` |
+| `replyComment(token, commentId, text)` | `drive +add-reply --as bot --token <t> --type docx --comment-id <c> --content '[{"type":"text","text":…}]'`。只用于评论级（划词）入口 |
+| `addWholeComment(token, mentionOpenId, text)` | `drive +add-comment --as bot --doc <t> --type docx --full-comment --content '[{"type":"mention_user","text":<ou_…>},{"type":"text","text":" …"}]'`。用于文档级入口，因为飞书不允许回复全文评论（1069302）。只有返回数字 `comment_id` 才算成功 |
 | `reactCommentReply(token, replyId, emoji, action)` | `drive +react-reply` |
 | `inspectDoc(token)` | `drive +inspect --as bot --url <token> --type docx`，返回 `{title, url}`。cameo 实测返回了 `title` 和 `https://www.feishu.cn/docx/<token>` |
 
-finish 和控制回执按 `isDocEndpoint` 分派。结果分类与 IM 相同，分为明确成功、明确失败、未知三类。
+finish 和控制回执按 `isDocEndpoint` 分派，再按入口级别选择出站方式：评论级回复原评论，文档级新建全文评论并 @ 持久发送者。`/bind` 的上下文变更警告不属于任何 Delivery，在文档级入口上 @ 的是发出该 `/bind` 的人；只有无从得知发令者时（如重启后补发），才退回该入口最近一次提问的持久发送者。结果分类与 IM 相同，分为明确成功、明确失败、未知三类。
 
 表情映射（E15）：进行中用 `Typing`，完成用 `DONE`，失败、过期或未知终态用 `CRY`。表情调用失败时只记诊断，不影响 Delivery。
 

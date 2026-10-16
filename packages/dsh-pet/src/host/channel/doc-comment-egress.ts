@@ -79,7 +79,8 @@ export function proveDocReplyTarget(target: DocEgressTarget): { readonly token: 
 }
 
 /**
- * Send the business reply of a doc Delivery as a plain-text comment reply.
+ * Send the business answer of a doc Delivery: a plain-text reply under an
+ * anchored comment, or a new full comment mentioning the asker.
  * `unknown` means it may or may not have reached the platform and must NOT be
  * retried (same rule as IM).
  */
@@ -95,7 +96,7 @@ export async function sendDocBusinessReply(client: DriveClient, target: DocEgres
   }
 }
 
-/** A Host control receipt (not business text) under the triggering comment. Throws on failure. */
+/** A Host control receipt (not business text), routed like a business answer. Throws on failure. */
 export async function sendDocControlReceipt(client: DriveClient, target: DocEgressTarget, text: string): Promise<void> {
   const route = routeAnswer(target)
   if (route === undefined) throw new Error('doc control receipt: association-unproven')
@@ -198,3 +199,48 @@ export async function finishDocReply(input: {
   if (!completed.changed || completed.record === undefined) throw new Error('Delivery reply result could not be durably recorded.')
   return { kind: 'recorded', outboundResult, record: completed.record }
 }
+
+/**
+ * Host control messages for a doc entry that are NOT a reply to a Delivery:
+ * the `/bind` source-switch warning and its retries (controller notice debt).
+ *
+ * A whole-doc warning is a new full comment that @-mentions someone. It must
+ * name the issuer of the `/bind` that caused it, not whoever asked last on the
+ * entry (round-7 M2). The issuer is noted when `/bind` runs and read once by
+ * the warning. A warning with no noted issuer (a retry after a restart, or a
+ * panel action) falls back to the entry's latest asker, which is still the
+ * durable sender of a real Delivery on that entry.
+ */
+export function createDocControlMessenger(deps: {
+  readonly client: DriveClient
+  /** The entry's most recent Delivery, which anchors comment-level replies. */
+  readonly latestDelivery: (endpoint: { readonly chatId: string; readonly threadId?: string }) =>
+    { readonly endpoint: { readonly chatId: string; readonly threadId?: string }; readonly messageId: string; readonly senderOpenId?: string } | undefined
+}): {
+  noteIssuer(endpoint: { readonly chatId: string; readonly threadId?: string }, actorId: string): void
+  send(input: { readonly endpoint: { readonly chatId: string; readonly threadId?: string }; readonly text: string }): Promise<void>
+} {
+  const issuers = new Map<string, string>()
+  const keyOf = (endpoint: { readonly chatId: string; readonly threadId?: string }): string =>
+    `${endpoint.chatId}\u0000${endpoint.threadId ?? ''}`
+  return {
+    noteIssuer(endpoint, actorId) {
+      issuers.set(keyOf(endpoint), actorId)
+    },
+    async send(input) {
+      const latest = deps.latestDelivery(input.endpoint)
+      if (latest === undefined) throw new Error('doc control message: no triggering comment for this entry')
+      const key = keyOf(input.endpoint)
+      const issuer = issuers.get(key)
+      issuers.delete(key)
+      const mention = issuer ?? latest.senderOpenId
+      await sendDocControlReceipt(deps.client, {
+        chatId: latest.endpoint.chatId,
+        ...(latest.endpoint.threadId === undefined ? {} : { threadId: latest.endpoint.threadId }),
+        messageId: latest.messageId,
+        ...(mention === undefined ? {} : { senderOpenId: mention }),
+      }, input.text)
+    },
+  }
+}
+

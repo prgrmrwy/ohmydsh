@@ -1277,7 +1277,7 @@ export class LocusChannelController {
     let locus = await this.resolveLocus(endpoint, message, admission.needsInitialization, signal)
     if (locus === undefined) return this.refuse('locus-unavailable')
     if (owesDisclosure && this.deps.docDisclosureText !== undefined) {
-      // A Host control receipt under the triggering comment; never business
+      // A Host control receipt, routed like the business answer; never business
       // text and never blocking. Sent once the entry exists.
       await this.sendControlReceipt(message.replyTarget, this.deps.docDisclosureText, message.senderOpenId)
     }

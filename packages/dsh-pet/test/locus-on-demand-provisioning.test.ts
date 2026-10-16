@@ -213,7 +213,7 @@ async function composeOnDemandHost(options: { readonly failFirstCreate?: boolean
     invalidatePolicyDrift: (input: { reason: string }) => { diagnostics.push(`policy-drift-reason:${input.reason}`) },
     turns: { perTurnCorrelation: true, subscribe: () => () => {} },
     admissionContext: {
-      botOpenId: 'ou-bot', allowOpenIds: ['ou-owner'], watermark: 1000,
+      botOpenId: 'ou-bot', allowOpenIds: ['ou-owner', 'ou_owner'], watermark: 1000,
       isDuplicate: () => false,
       // Real, not fixed: this is the exact fact the whole test is about.
       // A fixed 'authorized' would force `needsInitialization: false` and
@@ -511,7 +511,7 @@ async function deliverComment(
 ) {
   const parsed = parseDocCommentEvent(compactCommentEvent({
     fileToken: input.token, commentId: input.commentId, replyId: input.replyId,
-    fromOpenId: 'ou-owner', timestamp: '2000',
+    fromOpenId: 'ou_owner', timestamp: '2000',
   }))
   if (parsed.kind !== 'event') throw new Error('fixture did not parse')
   const query: DocCommentQuery = {
@@ -520,7 +520,7 @@ async function deliverComment(
   }
   const durable = host.durable
   const admission = admitDocCommentEvent(parsed.event, query, {
-    botOpenId: 'ou-bot', allowOpenIds: ['ou-owner'], watermark: 1000, isDuplicate: () => false,
+    botOpenId: 'ou-bot', allowOpenIds: ['ou_owner'], watermark: 1000, isDuplicate: () => false,
     authorization: endpoint => (durable.findCurrentLocus(endpoint)?.state === 'active' ? 'authorized' : 'uninitialized'),
   })
   return host.controller.handleAdmission(admission)
@@ -583,7 +583,7 @@ describe('spec Requirement "评论准入与群消息准入同构且静默 fail c
         target: expect.objectContaining({ chatId: 'doc:docx:DocE00000000000000000000001', messageId: 'doc:docx:DocE00000000000000000000001/51/52' }),
         text: DISCLOSURE,
         // The asker the new full comment mentions: full comments cannot be replied to.
-        senderOpenId: 'ou-owner',
+        senderOpenId: 'ou_owner',
       }])
     } finally {
       await host.close()

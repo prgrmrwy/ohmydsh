@@ -132,7 +132,7 @@ import { createLocusToolTierMutation, type LocusLiveToolTierSurface } from './ho
 import type { LocusToolTierName } from './host/locus/aggregate.js'
 import { asLocusContextRepository, type LocusContextRepository } from './host/locus/context-repository.js'
 import { isDocEndpoint, parseDocChatId } from './host/locus/doc-endpoint.js'
-import { DOC_DISCLOSURE_TEXT, finishDocReply, reactOnDocTrigger, sendDocControlReceipt } from './host/channel/doc-comment-egress.js'
+import { createDocControlMessenger, DOC_DISCLOSURE_TEXT, finishDocReply, reactOnDocTrigger, sendDocControlReceipt } from './host/channel/doc-comment-egress.js'
 import { renderLocusDeliveryFor } from './host/locus/context.js'
 import { createLocusHistoryCursor } from './host/locus/history-cursor.js'
 import {
@@ -2072,26 +2072,24 @@ async function initialize(
       },
     }
   })()
-  // A document has no "post to the root" call; its control messages (the
-  // /bind source-switch warning) go under the entry's most recent triggering
-  // comment, recovered from durable Deliveries. IM ids never reach drive and
-  // doc ids never reach IM (pet-locus-doc-comments D8).
+  // A document has no "post to the root" call. Its control messages (the
+  // /bind source-switch warning) follow the business-answer routing: under the
+  // anchoring comment for a comment-level entry, or a new full comment that
+  // @-mentions the /bind issuer for a whole-doc entry (full comments cannot be
+  // replied to). IM ids never reach drive and doc ids never reach IM (D8).
+  const docControl = createDocControlMessenger({
+    client: larkClient,
+    latestDelivery: endpoint => [...locusRepository.listDeliveries()]
+      .filter(record =>
+        record.endpoint.chatId === endpoint.chatId &&
+        (record.endpoint.threadId ?? undefined) === (endpoint.threadId ?? undefined))
+      .sort((left, right) => right.sequence - left.sequence)[0],
+  })
   const locusLarkPort: typeof imLocusLarkPort = {
     ...imLocusLarkPort,
     sendControlMessage: async input => {
       if (!isDocEndpoint(input.endpoint)) return imLocusLarkPort.sendControlMessage(input)
-      const latest = [...locusRepository.listDeliveries()]
-        .filter(record =>
-          record.endpoint.chatId === input.endpoint.chatId &&
-          (record.endpoint.threadId ?? undefined) === (input.endpoint.threadId ?? undefined))
-        .sort((left, right) => right.sequence - left.sequence)[0]
-      if (latest === undefined) throw new Error('doc control message: no triggering comment for this entry')
-      await sendDocControlReceipt(larkClient, {
-        chatId: latest.endpoint.chatId,
-        ...(latest.endpoint.threadId === undefined ? {} : { threadId: latest.endpoint.threadId }),
-        messageId: latest.messageId,
-        ...(latest.senderOpenId === undefined ? {} : { senderOpenId: latest.senderOpenId }),
-      }, input.text)
+      await docControl.send(input)
     },
   }
   const locusProvisioning = (() => {
@@ -2409,8 +2407,12 @@ async function initialize(
         return resolved
       },
       bind: {
-        bind: ({ endpoint, parentSessionId, chatName }) =>
-          endpoint.threadId === undefined
+        bind: ({ endpoint, parentSessionId, chatName, actorId }) => {
+          // A whole-doc /bind switch warning is a NEW full comment that @-mentions
+          // someone (full comments cannot be replied to). It must name the issuer
+          // of this /bind, not whoever asked last on the entry (round-7 M2).
+          if (isDocEndpoint(endpoint)) docControl.noteIssuer(endpoint, actorId)
+          return endpoint.threadId === undefined
             ? locusProvisioningController.ensureGroup({
               chatId: endpoint.chatId,
               parentSessionId,
@@ -2421,8 +2423,10 @@ async function initialize(
               threadId: endpoint.threadId,
               parentSessionId,
               ...(chatName === undefined ? {} : { chatName }),
-            }),
-        rebuildProtected: ({ endpoint, parentSessionId, chatName, marker }) => {
+            })
+        },
+        rebuildProtected: ({ endpoint, parentSessionId, chatName, marker, actorId }) => {
+          if (isDocEndpoint(endpoint)) docControl.noteIssuer(endpoint, actorId)
           if (marker === 'legacy') {
             return locusProvisioningController.rebuildLegacyEndpoint({
               endpoint,
@@ -2695,8 +2699,9 @@ async function initialize(
       }
 
       if (isDocEndpoint(current.endpoint)) {
-        // Doc comment (D5/D8): prove → reserve → reply under the trigger comment
-        // → record. Unproven association refuses BEFORE `finishing`.
+        // Doc comment (D5/D8): prove → reserve → answer (reply under an anchored
+        // comment, or a new full comment mentioning the asker) → record.
+        // Unproven association refuses BEFORE `finishing`.
         const doc = await finishDocReply({
           repository: locusRepository as never,
           client: larkClient,

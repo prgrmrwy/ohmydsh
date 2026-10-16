@@ -116,8 +116,8 @@ This table is a live ledger. During apply, flip each row from 🔴 to 🟢 when 
 | specs/pet-locus-doc-comments/spec.md → 控制命令在评论中按所在入口生效 | 文档改绑后已有划词评论不迁移 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "文档改绑后已有划词评论不迁移" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → 控制命令在评论中按所在入口生效 | 划词评论内绑定只影响该评论 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "划词评论内绑定只影响该评论" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → 控制命令在评论中按所在入口生效 | 非 allowlist 控制命令 | packages/dsh-pet/test/doc-comment-admission.test.ts | spec Scenario "非 allowlist 控制命令" | 🟢 green |
-| specs/pet-locus-doc-comments/spec.md → 评论出站只经受管完成工具且反馈 fail-soft | 划词评论回复回到触发评论 | packages/dsh-pet/test/doc-comment-egress.test.ts | spec Scenario "文档评论回复回到触发评论" | 🟢 green |
-| specs/pet-locus-doc-comments/spec.md → 评论出站只经受管完成工具且反馈 fail-soft | 全文评论以新全文评论答复并提及提问者 | packages/dsh-pet/test/doc-comment-egress.test.ts | spec Scenario "文档评论回复回到触发评论" | 🟢 green |
+| specs/pet-locus-doc-comments/spec.md → 评论出站只经受管完成工具且反馈 fail-soft | 划词评论回复回到触发评论 | packages/dsh-pet/test/doc-comment-egress.test.ts | spec Scenario "划词评论回复回到触发评论" | 🟢 green |
+| specs/pet-locus-doc-comments/spec.md → 评论出站只经受管完成工具且反馈 fail-soft | 全文评论以新全文评论答复并提及提问者 | packages/dsh-pet/test/doc-comment-egress.test.ts | spec Scenario "全文评论以新全文评论答复并提及提问者" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → 评论出站只经受管完成工具且反馈 fail-soft | 回复目标与入口不符 | packages/dsh-pet/test/doc-comment-egress.test.ts | spec Scenario "回复目标与入口不符" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → 评论出站只经受管完成工具且反馈 fail-soft | 过期的反馈 | packages/dsh-pet/test/doc-comment-egress.test.ts | spec Scenario "过期的反馈" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → 评论出站只经受管完成工具且反馈 fail-soft | 表情接口失败 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "表情接口失败" | 🟢 green |

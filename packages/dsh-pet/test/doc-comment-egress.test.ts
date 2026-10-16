@@ -6,6 +6,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  createDocControlMessenger,
   DOC_DISCLOSURE_TEXT,
   reactOnDocTrigger,
   sendDocBusinessReply,
@@ -139,5 +140,40 @@ describe('doc reaction feedback', () => {
     await reactOnDocTrigger(h.client, `${ROOT}/1/22`, 'failed')
     expect(h.calls.map(call => call[3])).toEqual(['Typing', 'CRY'])
     expect(h.calls.some(call => call[0] === 'reply')).toBe(false)
+  })
+})
+
+describe('doc control messages that are not replies (the /bind switch warning)', () => {
+  const latest = { endpoint: { chatId: ROOT }, messageId: `${ROOT}/7/8`, senderOpenId: 'ou_lastasker' }
+
+  it('spec Scenario "文档改绑后已有划词评论不迁移" (warning): a whole-doc warning mentions the /bind issuer, not the latest asker', async () => {
+    const h = recordingClient()
+    const messenger = createDocControlMessenger({ client: h.client, latestDelivery: () => latest })
+
+    messenger.noteIssuer({ chatId: ROOT }, 'ou_binder')
+    await messenger.send({ endpoint: { chatId: ROOT }, text: '主会话已切换' })
+
+    expect(h.calls).toEqual([['whole', D, 'ou_binder', '主会话已切换']])
+  })
+
+  it('reads the issuer once: a later retry with no noted issuer falls back to the durable latest asker', async () => {
+    const h = recordingClient()
+    const messenger = createDocControlMessenger({ client: h.client, latestDelivery: () => latest })
+    messenger.noteIssuer({ chatId: ROOT }, 'ou_binder')
+    await messenger.send({ endpoint: { chatId: ROOT }, text: 'a' })
+    await messenger.send({ endpoint: { chatId: ROOT }, text: 'b' })
+
+    expect(h.calls.map(call => call[2])).toEqual(['ou_binder', 'ou_lastasker'])
+  })
+
+  it('an anchored entry still replies under its comment, and an entry with no Delivery fails closed', async () => {
+    const h = recordingClient()
+    const anchored = { endpoint: { chatId: ROOT, threadId: '7' }, messageId: `${ROOT}/7/8`, senderOpenId: 'ou_a1' }
+    await createDocControlMessenger({ client: h.client, latestDelivery: () => anchored })
+      .send({ endpoint: { chatId: ROOT, threadId: '7' }, text: 'w' })
+    expect(h.calls).toEqual([['reply', D, '7', 'w']])
+
+    await expect(createDocControlMessenger({ client: h.client, latestDelivery: () => undefined })
+      .send({ endpoint: { chatId: ROOT }, text: 'w' })).rejects.toThrow()
   })
 })
