@@ -155,8 +155,8 @@
   - 结果分类沿用 IM 的三类；
   - 表情失败只记诊断（fail-soft）
 - [x] 6.3 egress 守卫（S2）：补齐 `drive` 评论写命令与 `docs +update` / `+create`；`api` 写调用的正则同时匹配带和不带 `/open-apis` 前缀的路径；更新 `locus-lark-cli-egress-guard.test.ts`
-- [ ] 6.4 出站 @ 渲染只对 IM 入口生效：写失败测试“文档回复不渲染 @”（已含在 6.1），然后实现。回归行翻 🟢：`channel-mentions.test.ts` 的 8 行
-- [ ] 6.5 回归行翻 🟢：`locus-delivery.test.ts` 中 13 个延续场景（群级引用触发消息 … 宿主重启无法证明关联）
+- [x] 6.4 （已完成：“文档回复不渲染 @”在 doc-comment-egress.test.ts；channel-mentions 8 行均为具名测试）出站 @ 渲染只对 IM 入口生效：写失败测试“文档回复不渲染 @”（已含在 6.1），然后实现。回归行翻 🟢：`channel-mentions.test.ts` 的 8 行
+- [x] 6.5 （已完成：13 个延续场景全部有具名测试，其中 2 行如实标为 partial）回归行翻 🟢：`locus-delivery.test.ts` 中 13 个延续场景（群级引用触发消息 … 宿主重启无法证明关联）
 - [x] 6.6 重构。全量测试保持绿色。第 5、6 组完成情况：
   - 出站集中在 `channel/doc-comment-egress.ts`：
     - `finishDocReply` 先证明回复目标，再预约 `finishing`，然后发送并记录结果。生产环境的 `finishCurrentDelivery` 直接调用这一函数，所以测的就是实际运行的代码路径；
@@ -206,7 +206,7 @@
   - 提问范围标注；
   - 不新增任何建立入口的控件；
   - `resolveFeishuJumpTarget` 遇到文档入口返回 doc 类型，不再归为 thread
-- [ ] 8.3 回归行翻 🟢：`locus-view` 3 行、`ledger-view` 10 行（含 4 个已命名用例重跑）
+- [x] 8.3 （已完成）回归行翻 🟢：`locus-view` 3 行、`ledger-view` 10 行（含 4 个已命名用例重跑）
 - [x] 8.4 重构。全量测试保持绿色。第 8 组完成情况：
   - 短码：
     - 文档入口取 `doc:docx:` 之后的 token，标签为 `doc·`；
@@ -230,10 +230,10 @@
 
 ## 10. 全量验证与真机验收
 
-- [ ] 10.1 运行 `npm --prefix packages/dsh-pet test`、`npm --prefix packages/dsh-pet run build`，以及 typecheck（若有独立脚本）；运行仓库根的 `npm test` 和 `npm run check:artifacts`。记录命令和通过数
-- [ ] 10.2 核对 test-plan 128 行全部为 🟢；没有 skip 或 pending，也没有弱化或删除过的测试
-- [ ] 10.3 `openspec validate pet-locus-doc-comments --strict` 通过
-- [ ] 10.4 `node scripts/sync.mjs` 连续运行两次，第二次无变化（幂等）
+- [x] 10.1 （已完成：pet build + vitest 3210 passed / 0 failed；typecheck 通过；仓库根 416/8，8 个失败与基线完全相同；check:artifacts 通过）运行 `npm --prefix packages/dsh-pet test`、`npm --prefix packages/dsh-pet run build`，以及 typecheck（若有独立脚本）；运行仓库根的 `npm test` 和 `npm run check:artifacts`。记录命令和通过数
+- [x] 10.2 （已完成：128/128 行为绿，其中 4 行 partial；逐行机械核对具名测试 missing 0；没有新增 skip/only；被删除的测试标题均为改名或有意替换，见 verify.md）核对 test-plan 128 行全部为 🟢；没有 skip 或 pending，也没有弱化或删除过的测试
+- [x] 10.3 （已完成）`openspec validate pet-locus-doc-comments --strict` 通过
+- [ ] 10.4 （受阻：worktree 隔离的 DSH home 没有配置 `@byted` registry，`dsh-traex-bridge` 的 preflight 两次都拒绝，且没有改动任何内容；需在 main checkout 上合入后运行）`node scripts/sync.mjs` 连续运行两次，第二次无变化（幂等）
 - [ ] 10.5 在一次性飞书应用上做真机验收（不用生产 dsh-pet 应用），用构建产物复测：
   - E1：一条连接同时收群 @、全文评论、划词评论、回复；
   - E3 反向：Pet 运行时，另起一个同应用的 `+subscribe`，后者应被单实例锁拒绝；先占住连接再启动 Pet，Pet 的门禁应报 `event-connection-conflict`；
@@ -244,4 +244,4 @@
 
   结果记入 `verify.md`
 - [ ] 10.6 真机升级演练（用一次性的状态目录副本）：执行 `dsh-pet-migrate-state --yes`，备份生成，v16 启动成功；再演练回滚：删除 journal、覆盖备份、v15 启动成功
-- [ ] 10.7 生成 `verify.md`，按 anvil 的 verify 指令写出 `DECISION`
+- [x] 10.7 （已生成；DECISION: FAIL，因为第 6 轮评审、10.4–10.6 尚未完成）生成 `verify.md`，按 anvil 的 verify 指令写出 `DECISION`
