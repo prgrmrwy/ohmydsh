@@ -234,7 +234,7 @@
 - [x] 10.2 （已完成：128/128 行为绿，其中 4 行 partial；逐行机械核对具名测试 missing 0；没有新增 skip/only；被删除的测试标题均为改名或有意替换，见 verify.md）核对 test-plan 128 行全部为 🟢；没有 skip 或 pending，也没有弱化或删除过的测试
 - [x] 10.3 （已完成）`openspec validate pet-locus-doc-comments --strict` 通过
 - [x] 10.4 `node scripts/sync.mjs` 连续两次，第二次无变化。2026-10-17 在隔离环境运行：DSH_HOME 用 Worktree Session 自己的 home，为 `profiles/web/.npmrc` 补上 `@byted` registry 行，不含凭据；XDG_DATA_HOME 用临时目录，避免去覆盖本机 `~/.local/share/openspec/schemas/anvil` 这个未受管的 schema。第一次 exit 0，应用 16 处变更；第二次 exit 0，输出“no changes — deployment already matches manifest”，`dsh-pet@0.1.0 up-to-date`
-- [ ] 10.5 在一次性飞书应用上做真机验收（不用生产 dsh-pet 应用），用构建产物复测：
+- [x] 10.5 在一次性飞书应用上做真机验收（不用生产 dsh-pet 应用），用构建产物复测：
   - E1：一条连接同时收群 @、全文评论、划词评论、回复；
   - E3 反向：Pet 运行时，另起一个同应用的 `+subscribe`，后者应被单实例锁拒绝；先占住连接再启动 Pet，Pet 的门禁应报 `event-connection-conflict`；
   - E8：连接计数；
@@ -243,6 +243,16 @@
   - 一次完整往返：全文评论 → 回复，划词评论 → 回复，`/bind`。
 
   结果记入 `verify.md`
+  - 结果（2026-10-17，测试应用 cameo，期间临时停掉 session-links hub）。用 `packages/dsh-pet/scripts/live-acceptance.mts` 跑真实的 ChannelSubscription、连接门禁、`+subscribe`、评论查询、准入，以及回复和表情链路；Agent 和持久树不启动，已由单测覆盖。以 dsh-pet 应用的用户身份发评论并 @cameo，模拟真人提问：
+    - E1：同一条 `+subscribe` 连接收到评论事件。划词评论识别为评论级入口，划词原文取对；Typing → 回复成功 → DONE。
+    - 全文评论：识别为文档级入口。**发现飞书禁止回复全文评论**（1069302），按所有者选的方案 1 改为新建一条全文评论并 @ 提问者；复验通过：Typing → 新评论提及提问者 → DONE，bot 自己发的评论没有回流成新提问。
+    - 未 @ 的评论：平台不推送，Pet 也不回复。
+    - E3 反向：session-links 占着连接时启动，门禁等满 40 秒后报 `event-connection-conflict` 并进入 down，没有拉起第二条连接。
+    - E8：连接空出后才拉起订阅，计数为 1。
+    - E12：SIGTERM 后没有遗留 `+subscribe` 进程，计数约 5 秒内归零。
+    - **真机发现并修复**：连接计数解析只认 `code===0`，而 lark-cli 实际输出 `{ok,identity,data}`，导致门禁永远拉不起订阅（`7cccf4989`）。全文评论无法回复也是在这一步发现的。
+    - 未在真机上验证的两项：划词评论下的追问，以及群里 @ 走同一条连接。原因是 dsh-pet 和 cameo 两个应用里同一用户的 open_id 不同，跨应用 @ 被拒（99992361），需要真人操作。这两项都有单测覆盖。
+    - 测试评论共 6 条，已全部 resolve 折叠，没有删除。
 - [x] 10.6 真机升级演练（用一次性的状态目录副本）：执行 `dsh-pet-migrate-state --yes`，备份生成，v16 启动成功；再演练回滚：删除 journal、覆盖备份、v15 启动成功
   - 演练结果（2026-10-17）：用真实的 v14 备份副本，先经旧版脚本得到 v15 介质，loci 5 / deliveries 19；以下每一步打开都走真实 SQLite 后端和真实 storage-domain 组装，与 Host 启动路径一致，生产状态文件未被触碰：
     1. 升级：`migrate-state-version --dry-run` 显示 15→16，`--yes` 生成的 `state.sqlite.v15.bak-*` 与升级前逐字节相同；integrity_check ok；再执行一次输出“Already at the target version”，幂等。

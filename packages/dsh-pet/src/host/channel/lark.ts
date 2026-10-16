@@ -172,6 +172,12 @@ export interface LarkClient {
   queryDocComment?(token: string, commentId: string, replyId: string): Promise<DocCommentQuery>
   /** Append a plain-text bot reply under a docx comment (`drive +add-reply`). */
   replyComment?(token: string, commentId: string, text: string): Promise<'success' | 'unknown'>
+  /**
+   * Answer a whole-document comment. Feishu refuses replies to `is_whole`
+   * comments (1069302), so the bot opens a NEW full comment that first
+   * mentions the asker. `success` only on a returned `comment_id`.
+   */
+  addWholeComment?(token: string, mentionOpenId: string, text: string): Promise<'success' | 'unknown'>
   /** Add or remove a bot reaction on a comment reply (`drive +react-reply`). */
   reactCommentReply?(token: string, replyId: string, emoji: string, action: 'add' | 'delete'): Promise<void>
   /** A user's display name by open_id (`contact +get-user` as bot); undefined when unreadable. */
@@ -1107,6 +1113,27 @@ export function createLarkCliClient(
       // Success only on positive proof of a created reply; anything else may
       // or may not have reached the platform and is never retried.
       return result.ok && data?.['created'] === true ? 'success' : 'unknown'
+    },
+
+    async addWholeComment(token, mentionOpenId, text) {
+      const content = JSON.stringify([
+        { type: 'mention_user', text: requireOpenId(mentionOpenId, 'comment mention') },
+        { type: 'text', text: ` ${requireInput(text, 'comment text')}` },
+      ])
+      let result: CliJsonResult
+      try {
+        result = await callJson(
+          ['drive', '+add-comment', '--as', 'bot', '--doc', requireDocToken(token), '--type', 'docx',
+            '--full-comment', '--content', content],
+          binary,
+          runner,
+        )
+      } catch {
+        return 'unknown'
+      }
+      const data = recordOf(recordOf(result.value)?.['data'])
+      const commentId = data?.['comment_id']
+      return result.ok && typeof commentId === 'string' && /^[0-9]+$/.test(commentId) ? 'success' : 'unknown'
     },
 
     async reactCommentReply(token, replyId, emoji, action) {

@@ -354,4 +354,5 @@ capability 拒绝不新增类别，复用 `association-unproven`。
 | 项 | 处置 |
 |---|---|
 | 「自动主会话按群建立…」原文写“bot 入群 SHALL 可初始化关联结构”，场景“Project 群先行”要求入群即建主会话 | 与已归档 `pet-locus-on-demand-tree`（“入群不产生任何持久后果，首个 @ 按需建树”）及当前代码、测试（`locus-on-demand-provisioning.test.ts` “bot-added has zero repository effect”）相矛盾，属于该 change 当时漏改规范。本 change 已 MODIFY 这条 requirement，因此一并修正：段落改为“入群不产生持久后果”，场景改名为“入群不建自动主会话”（与现行 spec 中已有的同名场景“入群不产生持久后果”区分），“重复初始化”去掉入群重投的说法。只改规范文字，不改代码 |
+| 全文评论无法被回复（真机验收 2026-10-17 发现，所有者选方案 1） | 实测对 `is_whole=true` 的评论调用 `drive +add-reply` 一律返回 1069302「The comment section does not allow replies」，bot 和用户身份都一样；lark-cli 的 `lark-drive-add-reply.md` 也注明“全文评论不能回复”。spike 当时只验证了划词评论的回复，所以漏掉了。处置：文档级入口的答复与控制回执改为 bot 在同一文档**新建一条全文评论**，开头以结构化 `mention_user` 提及触发者（Delivery 持久的发送者 open_id），提问者能收到通知；表情仍打在触发回复上；关联证明增加一条：被提及者必须是持久发送者。划词评论不变。“全文评论 ↔ 群”的映射不变：全文评论下本来就不会有追问，每条全文评论都是一次独立提问。替代方案“只打表情不回文字”“只支持划词评论”均被所有者否决 |
 

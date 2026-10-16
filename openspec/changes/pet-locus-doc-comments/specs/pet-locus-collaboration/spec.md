@@ -64,9 +64,9 @@ Host SHALL 维护进行中/完成/失败等控制反馈；反馈失败不阻断�
 - **THEN** Host 引用 `om_T` 并使用平台 thread reply 语义把正文留在原话题，不回落到群主时间线
 
 #### Scenario: 文档评论回复回到触发评论
-- **GIVEN** 文档 `D` 的文档级 locus，current Delivery 的 `messageId` 为 `doc:docx:D/c1/r1`
+- **GIVEN** 评论级 locus `(doc:docx:D, c2)`，current Delivery 的 `messageId` 为 `doc:docx:D/c2/r4`
 - **WHEN** child 以 `reply` 调用 `pet_locus_finish`
-- **THEN** Host 以 bot 身份对文档 `D` 的评论 `c1` 追加一条回复，不新开评论、不发往任何群，Delivery 记录 `completed/replied`
+- **THEN** Host 以 bot 身份对文档 `D` 的评论 `c2` 追加一条回复，不新开评论、不发往任何群，Delivery 记录 `completed/replied`；文档级入口的答复方式（新全文评论并提及提问者）见 `pet-locus-doc-comments`
 
 #### Scenario: 文档回复目标与入口不符
 - **GIVEN** 评论级 locus 入口为 `(doc:docx:D, c2)`，持久 Delivery 的 `messageId` 为 `doc:docx:D/c3/r1` 或 `doc:docx:D2/c2/r1`

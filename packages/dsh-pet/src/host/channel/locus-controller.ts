@@ -431,7 +431,8 @@ export interface LocusMechanicalReceiptPort {
   markAccepted(target: DeliveryFeedbackTarget): Awaitable<void>
   markSettled(target: DeliveryFeedbackTarget, outcome: 'settled' | 'failed'): Awaitable<void>
   /** Only for control/diagnostic messages, never business transcript text. */
-  sendControl?(target: LocusReplyTarget, text: string): Awaitable<void>
+  /** `senderOpenId` lets a doc answer mention the asker (whole-doc comments cannot be replied to). */
+  sendControl?(target: LocusReplyTarget, text: string, senderOpenId?: string): Awaitable<void>
 }
 
 /**
@@ -1068,7 +1069,7 @@ export class LocusChannelController {
             }
             if (settled) {
               await this.receiptSettled(delivery.feedbackTarget, 'failed')
-              await this.sendControlReceipt(delivery.feedbackTarget, '当前入口为所有者专用，该排队请求未投递；所有者可将工具档位切回 safe。')
+              await this.sendControlReceipt(delivery.feedbackTarget, '当前入口为所有者专用，该排队请求未投递；所有者可将工具档位切回 safe。', delivery.senderOpenId)
             } else {
               // The row moved after our snapshot (for example, a durable lease
               // transition). Do not guess at its new sender/status; another
@@ -1278,7 +1279,7 @@ export class LocusChannelController {
     if (owesDisclosure && this.deps.docDisclosureText !== undefined) {
       // A Host control receipt under the triggering comment; never business
       // text and never blocking. Sent once the entry exists.
-      await this.sendControlReceipt(message.replyTarget, this.deps.docDisclosureText)
+      await this.sendControlReceipt(message.replyTarget, this.deps.docDisclosureText, message.senderOpenId)
     }
 
     // Adoption proves the exact durable child, but not that its current policy
@@ -1451,7 +1452,7 @@ export class LocusChannelController {
             })
             if (failed) {
               await this.receiptSettled(accepted.record.feedbackTarget, 'failed')
-              await this.sendControlReceipt(message.replyTarget, '当前入口为所有者专用，只有 allowlist 成员可以驱动。')
+              await this.sendControlReceipt(message.replyTarget, '当前入口为所有者专用，只有 allowlist 成员可以驱动。', message.senderOpenId)
             }
             return { kind: 'ignored', reason: 'owner-only-tier' }
           }
@@ -1476,7 +1477,7 @@ export class LocusChannelController {
             })
             if (failed) {
               await this.receiptSettled(accepted.record.feedbackTarget, 'failed')
-              await this.sendControlReceipt(message.replyTarget, '当前入口为所有者专用，只有 allowlist 成员可以驱动。工具档位可由所有者切回 safe。')
+              await this.sendControlReceipt(message.replyTarget, '当前入口为所有者专用，只有 allowlist 成员可以驱动。工具档位可由所有者切回 safe。', message.senderOpenId)
             }
             return { kind: 'ignored', reason: 'owner-only-tier' }
           }
@@ -1968,7 +1969,7 @@ export class LocusChannelController {
       command.kind === 'unbind-invalid'
     ) {
       const text = controlValidationText(command)
-      await this.sendControlReceipt(admission.message.replyTarget, text)
+      await this.sendControlReceipt(admission.message.replyTarget, text, admission.message.senderOpenId)
       return {
         kind: 'control',
         command,
@@ -1983,7 +1984,7 @@ export class LocusChannelController {
       // composed control mutations must not guess at legacy bindings or
       // create a Delivery merely because a command was recognized.
       const text = '当前入口暂不支持该控制命令。'
-      await this.sendControlReceipt(admission.message.replyTarget, text)
+      await this.sendControlReceipt(admission.message.replyTarget, text, admission.message.senderOpenId)
       return { kind: 'control', command, ok: false, reason: 'control-unavailable', text }
     }
     let result: LocusControlDispatchResult
@@ -2005,16 +2006,16 @@ export class LocusChannelController {
       })
     } catch {
       const text = '控制命令执行失败，请稍后重试。'
-      await this.sendControlReceipt(admission.message.replyTarget, text)
+      await this.sendControlReceipt(admission.message.replyTarget, text, admission.message.senderOpenId)
       return { kind: 'control', command, ok: false, reason: 'control-dispatch-failed', text }
     }
     if (!isControlDispatchResult(result)) {
       const text = '控制命令返回无效结果，未执行工作。'
-      await this.sendControlReceipt(admission.message.replyTarget, text)
+      await this.sendControlReceipt(admission.message.replyTarget, text, admission.message.senderOpenId)
       return { kind: 'control', command, ok: false, reason: 'control-dispatch-failed', text }
     }
     if ('text' in result && result.text !== undefined) {
-      await this.sendControlReceipt(admission.message.replyTarget, result.text)
+      await this.sendControlReceipt(admission.message.replyTarget, result.text, admission.message.senderOpenId)
     }
     return {
       kind: 'control',
@@ -2042,7 +2043,7 @@ export class LocusChannelController {
     if (message === undefined) return
     const allow = suppliedContext?.allowOpenIds ?? this.readAdmissionContext()?.allowOpenIds ?? this.deps.allowOpenIds?.() ?? []
     if (allow.includes(message.senderOpenId)) return
-    await this.sendControlReceipt(message.replyTarget, '当前入口为所有者专用，只有 allowlist 成员可以驱动。工具档位可由所有者切回 safe。')
+    await this.sendControlReceipt(message.replyTarget, '当前入口为所有者专用，只有 allowlist 成员可以驱动。工具档位可由所有者切回 safe。', message.senderOpenId)
   }
 
   private async firstDocEntry(chatId: string): Promise<boolean> {
@@ -2055,10 +2056,10 @@ export class LocusChannelController {
     }
   }
 
-  private async sendControlReceipt(target: LocusReplyTarget, text: string): Promise<void> {
+  private async sendControlReceipt(target: LocusReplyTarget, text: string, senderOpenId?: string): Promise<void> {
     if (!nonEmpty(text)) return
     try {
-      await this.deps.receipts?.sendControl?.(target, text)
+      await this.deps.receipts?.sendControl?.(target, text, senderOpenId)
     } catch {
       // Mechanical control feedback is fail-soft. The control mutation itself
       // remains the dispatch port's durable responsibility.

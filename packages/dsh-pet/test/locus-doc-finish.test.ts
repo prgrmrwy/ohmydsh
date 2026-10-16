@@ -37,7 +37,12 @@ function client(result: 'success' | 'unknown' | Error = 'success') {
     sent,
     client: {
       replyComment: async (token: string, commentId: string, text: string) => {
-        sent.push([token, commentId, text])
+        sent.push(['reply', token, commentId, text])
+        if (result instanceof Error) throw result
+        return result
+      },
+      addWholeComment: async (token: string, mentionOpenId: string, text: string) => {
+        sent.push(['whole', token, mentionOpenId, text])
         if (result instanceof Error) throw result
         return result
       },
@@ -46,15 +51,26 @@ function client(result: 'success' | 'unknown' | Error = 'success') {
 }
 
 describe('doc finish(reply) on the durable lifecycle', () => {
-  it('spec Scenario "文档评论回复回到触发评论": replies under c1 and records completed/replied', async () => {
+  it('spec Scenario "文档评论回复回到触发评论": an anchored entry replies under c2 and records completed/replied', async () => {
+    const h = await currentDoc({ threadId: '111', messageId: `${ROOT}/111/222` })
+    const c = client()
+    let clock = 10
+    const outcome = await finishDocReply({ repository: h.repository as never, client: c.client, correlation: h.correlation, current: h.current, text: '答案', now: () => clock++ })
+
+    expect(outcome).toMatchObject({ kind: 'recorded', outboundResult: 'success' })
+    expect(c.sent).toEqual([['reply', D, '111', '答案']])
+    expect(h.repository.getDelivery(h.current.deliveryId)).toMatchObject({ status: 'replied', outboundResult: 'success' })
+    await h.harness.close()
+  })
+
+  it('a whole-doc entry answers with a new full comment mentioning the durable asker', async () => {
     const h = await currentDoc({ messageId: `${ROOT}/111/222` })
     const c = client()
     let clock = 10
     const outcome = await finishDocReply({ repository: h.repository as never, client: c.client, correlation: h.correlation, current: h.current, text: '答案', now: () => clock++ })
 
     expect(outcome).toMatchObject({ kind: 'recorded', outboundResult: 'success' })
-    expect(c.sent).toEqual([[D, '111', '答案']])
-    expect(h.repository.getDelivery(h.current.deliveryId)).toMatchObject({ status: 'replied', outboundResult: 'success' })
+    expect(c.sent).toEqual([['whole', D, 'ou_owner', '答案']])
     await h.harness.close()
   })
 
@@ -73,7 +89,7 @@ describe('doc finish(reply) on the durable lifecycle', () => {
   })
 
   it('records unknown-terminal for an unconfirmed send and does not resend', async () => {
-    const h = await currentDoc({ messageId: `${ROOT}/111/222` })
+    const h = await currentDoc({ threadId: '111', messageId: `${ROOT}/111/222` })
     const c = client(new Error('timeout'))
     let clock = 10
     const outcome = await finishDocReply({ repository: h.repository as never, client: c.client, correlation: h.correlation, current: h.current, text: 'x', now: () => clock++ })

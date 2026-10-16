@@ -20,13 +20,45 @@ export const DOC_REACTION = { inProgress: 'Typing', done: 'DONE', failed: 'CRY' 
 /** The disclosure every first entry of a document announces (D7); one source with /bind. */
 export const DOC_DISCLOSURE_TEXT = DOC_ASK_SCOPE_DISCLOSURE
 
-type DriveClient = Pick<LarkClient, 'replyComment' | 'reactCommentReply'>
+type DriveClient = Pick<LarkClient, 'replyComment' | 'reactCommentReply' | 'addWholeComment'>
 
 /** A target as the locus layer knows it: an endpoint and the trigger message id. */
 export interface DocEgressTarget {
   readonly chatId: string
   readonly threadId?: string
   readonly messageId: string
+  /** The durable asker; a whole-doc answer mentions exactly this open id. */
+  readonly senderOpenId?: string
+}
+
+const OPEN_ID = /^ou_[A-Za-z0-9]+$/
+
+/**
+ * Where an answer goes, proven from the durable target alone (D5/D8):
+ * - an anchored entry replies under its own comment;
+ * - a whole-doc entry opens a NEW full comment mentioning the asker, because
+ *   Feishu refuses replies to `is_whole` comments (1069302).
+ */
+type DocAnswerRoute =
+  | { readonly kind: 'reply'; readonly token: string; readonly commentId: string }
+  | { readonly kind: 'whole'; readonly token: string; readonly mentionOpenId: string }
+
+function routeAnswer(target: DocEgressTarget): DocAnswerRoute | undefined {
+  const proven = proveDocReplyTarget(target)
+  if (proven === undefined) return undefined
+  if (target.threadId !== undefined) return { kind: 'reply', token: proven.token, commentId: proven.commentId }
+  const asker = target.senderOpenId
+  if (asker === undefined || !OPEN_ID.test(asker)) return undefined
+  return { kind: 'whole', token: proven.token, mentionOpenId: asker }
+}
+
+async function sendRouted(client: DriveClient, route: DocAnswerRoute, text: string): Promise<'success' | 'unknown' | 'unavailable'> {
+  if (route.kind === 'reply') {
+    if (client.replyComment === undefined) return 'unavailable'
+    return client.replyComment(route.token, route.commentId, text)
+  }
+  if (client.addWholeComment === undefined) return 'unavailable'
+  return client.addWholeComment(route.token, route.mentionOpenId, text)
 }
 
 /** Outcome of a business reply; `refused` sends nothing. */
@@ -52,12 +84,11 @@ export function proveDocReplyTarget(target: DocEgressTarget): { readonly token: 
  * retried (same rule as IM).
  */
 export async function sendDocBusinessReply(client: DriveClient, target: DocEgressTarget, text: string): Promise<DocReplyOutcome> {
-  const proven = proveDocReplyTarget(target)
-  if (proven === undefined || client.replyComment === undefined) {
-    return { kind: 'refused', reason: 'association-unproven' }
-  }
+  const route = routeAnswer(target)
+  if (route === undefined) return { kind: 'refused', reason: 'association-unproven' }
   try {
-    const result = await client.replyComment(proven.token, proven.commentId, text)
+    const result = await sendRouted(client, route, text)
+    if (result === 'unavailable') return { kind: 'refused', reason: 'association-unproven' }
     return result === 'success' ? { kind: 'sent' } : { kind: 'unknown' }
   } catch {
     return { kind: 'unknown' }
@@ -66,11 +97,10 @@ export async function sendDocBusinessReply(client: DriveClient, target: DocEgres
 
 /** A Host control receipt (not business text) under the triggering comment. Throws on failure. */
 export async function sendDocControlReceipt(client: DriveClient, target: DocEgressTarget, text: string): Promise<void> {
-  const proven = proveDocReplyTarget(target)
-  if (proven === undefined || client.replyComment === undefined) {
-    throw new Error('doc control receipt: association-unproven')
-  }
-  const result = await client.replyComment(proven.token, proven.commentId, text)
+  const route = routeAnswer(target)
+  if (route === undefined) throw new Error('doc control receipt: association-unproven')
+  const result = await sendRouted(client, route, text)
+  if (result === 'unavailable') throw new Error('doc control receipt: association-unproven')
   if (result !== 'success') throw new Error('doc control receipt: result unknown')
 }
 
@@ -119,6 +149,7 @@ export interface DocFinishRepository {
 export interface DocFinishCurrent {
   readonly deliveryId: string
   readonly messageId: string
+  readonly senderOpenId?: string
   readonly endpoint: { readonly chatId: string; readonly threadId?: string }
   readonly revision?: number
 }
@@ -141,8 +172,10 @@ export async function finishDocReply(input: {
     chatId: input.current.endpoint.chatId,
     ...(input.current.endpoint.threadId === undefined ? {} : { threadId: input.current.endpoint.threadId }),
     messageId: input.current.messageId,
+    ...(input.current.senderOpenId === undefined ? {} : { senderOpenId: input.current.senderOpenId }),
   }
-  if (proveDocReplyTarget(target) === undefined) return { kind: 'refused' }
+  // The whole route (comment, or asker to mention) is proven BEFORE reserving.
+  if (routeAnswer(target) === undefined) return { kind: 'refused' }
   const finishing = await input.repository.markDeliveryFinishing({
     ...input.correlation,
     deliveryId: input.current.deliveryId,

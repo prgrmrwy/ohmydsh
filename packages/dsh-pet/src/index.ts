@@ -2090,6 +2090,7 @@ async function initialize(
         chatId: latest.endpoint.chatId,
         ...(latest.endpoint.threadId === undefined ? {} : { threadId: latest.endpoint.threadId }),
         messageId: latest.messageId,
+        ...(latest.senderOpenId === undefined ? {} : { senderOpenId: latest.senderOpenId }),
       }, input.text)
     },
   }
@@ -3099,9 +3100,9 @@ async function initialize(
               outcome === 'settled' ? 'DONE' : 'CRY',
             )
           },
-          sendControl: (target: { chatId: string; threadId?: string; messageId: string }, text: string) =>
+          sendControl: (target: { chatId: string; threadId?: string; messageId: string }, text: string, senderOpenId?: string) =>
             isDocEndpoint(target)
-              ? sendDocControlReceipt(larkClient, target, text)
+              ? sendDocControlReceipt(larkClient, { ...target, ...(senderOpenId === undefined ? {} : { senderOpenId }) }, text)
               : larkClient.reply(target.messageId, text),
         }
       })(),

@@ -21,6 +21,11 @@ function recordingClient(options: { reply?: 'success' | 'unknown' | Error; react
   return {
     calls,
     client: {
+      addWholeComment: async (token: string, mentionOpenId: string, text: string) => {
+        calls.push(['whole', token, mentionOpenId, text])
+        if (options.reply instanceof Error) throw options.reply
+        return options.reply ?? 'success'
+      },
       replyComment: async (token: string, commentId: string, text: string) => {
         calls.push(['reply', token, commentId, text])
         if (options.reply instanceof Error) throw options.reply
@@ -35,18 +40,38 @@ function recordingClient(options: { reply?: 'success' | 'unknown' | Error; react
 }
 
 describe('doc business reply', () => {
-  it('spec Scenario "文档评论回复回到触发评论": replies under c1, never a new comment', async () => {
+  it('spec Scenario "划词评论回复回到触发评论": an anchored entry replies under its own comment, never a new comment', async () => {
     const h = recordingClient()
-    const outcome = await sendDocBusinessReply(h.client, { chatId: ROOT, messageId: `${ROOT}/111/222` }, '答案')
+    const outcome = await sendDocBusinessReply(h.client, { chatId: ROOT, threadId: '111', messageId: `${ROOT}/111/222`, senderOpenId: 'ou_asker01' }, '答案')
 
     expect(outcome).toEqual({ kind: 'sent' })
     expect(h.calls).toEqual([['reply', D, '111', '答案']])
   })
 
+  it('spec Scenario "全文评论以新全文评论答复并提及提问者": a whole-doc entry never replies to c1; it opens a new full comment mentioning the asker', async () => {
+    const h = recordingClient()
+    const outcome = await sendDocBusinessReply(h.client, { chatId: ROOT, messageId: `${ROOT}/111/222`, senderOpenId: 'ou_asker01' }, '答案')
+
+    expect(outcome).toEqual({ kind: 'sent' })
+    expect(h.calls).toEqual([['whole', D, 'ou_asker01', '答案']])
+    expect(h.calls.some(call => call[0] === 'reply')).toBe(false)
+  })
+
+  it('refuses a whole-doc answer whose asker is not a provable open id (association-unproven)', async () => {
+    const h = recordingClient()
+    for (const senderOpenId of [undefined, '', 'u_x', 'ou_x y']) {
+      const outcome = await sendDocBusinessReply(h.client, {
+        chatId: ROOT, messageId: `${ROOT}/111/222`, ...(senderOpenId === undefined ? {} : { senderOpenId }),
+      }, '答案')
+      expect(outcome).toEqual({ kind: 'refused', reason: 'association-unproven' })
+    }
+    expect(h.calls).toEqual([])
+  })
+
   it('spec Scenario "回复目标与入口不符": a different comment or token sends nothing', async () => {
     const h = recordingClient()
-    const otherComment = await sendDocBusinessReply(h.client, { chatId: ROOT, threadId: '222', messageId: `${ROOT}/333/1` }, 'x')
-    const otherToken = await sendDocBusinessReply(h.client, { chatId: ROOT, threadId: '222', messageId: 'doc:docx:Dx0000000000000000000000002/222/1' }, 'x')
+    const otherComment = await sendDocBusinessReply(h.client, { chatId: ROOT, threadId: '222', messageId: `${ROOT}/333/1`, senderOpenId: 'ou_a1' }, 'x')
+    const otherToken = await sendDocBusinessReply(h.client, { chatId: ROOT, threadId: '222', messageId: 'doc:docx:Dx0000000000000000000000002/222/1', senderOpenId: 'ou_a1' }, 'x')
 
     expect(otherComment).toEqual({ kind: 'refused', reason: 'association-unproven' })
     expect(otherToken).toEqual({ kind: 'refused', reason: 'association-unproven' })
@@ -57,8 +82,8 @@ describe('doc business reply', () => {
     const timeout = recordingClient({ reply: new Error('timeout') })
     const vague = recordingClient({ reply: 'unknown' })
 
-    await expect(sendDocBusinessReply(timeout.client, { chatId: ROOT, messageId: `${ROOT}/1/2` }, 'x')).resolves.toEqual({ kind: 'unknown' })
-    await expect(sendDocBusinessReply(vague.client, { chatId: ROOT, messageId: `${ROOT}/1/2` }, 'x')).resolves.toEqual({ kind: 'unknown' })
+    await expect(sendDocBusinessReply(timeout.client, { chatId: ROOT, threadId: '1', messageId: `${ROOT}/1/2`, senderOpenId: 'ou_a1' }, 'x')).resolves.toEqual({ kind: 'unknown' })
+    await expect(sendDocBusinessReply(vague.client, { chatId: ROOT, messageId: `${ROOT}/1/2`, senderOpenId: 'ou_a1' }, 'x')).resolves.toEqual({ kind: 'unknown' })
     expect(timeout.calls).toHaveLength(1)
     expect(vague.calls).toHaveLength(1)
   })
@@ -70,7 +95,7 @@ describe('doc business reply', () => {
       return { stdout: JSON.stringify({ ok: true, data: { created: true, comment_id: '1' } }) }
     }) as unknown as LarkCliRunner)
 
-    await sendDocBusinessReply(client, { chatId: ROOT, messageId: `${ROOT}/1/2` }, '@张三 看这里')
+    await sendDocBusinessReply(client, { chatId: ROOT, threadId: '1', messageId: `${ROOT}/1/2`, senderOpenId: 'ou_a1' }, '@张三 看这里')
 
     const content = calls[0]![calls[0]!.indexOf('--content') + 1]!
     expect(JSON.parse(content)).toEqual([{ type: 'text', text: '@张三 看这里' }])
@@ -79,13 +104,14 @@ describe('doc business reply', () => {
 })
 
 describe('doc control receipt', () => {
-  it('goes to the triggering comment and throws on an unproven or unknown send', async () => {
+  it('goes where the business answer goes: under an anchored comment, as a new mentioning full comment for a whole-doc entry', async () => {
     const h = recordingClient()
-    await sendDocControlReceipt(h.client, { chatId: ROOT, messageId: `${ROOT}/1/2` }, DOC_DISCLOSURE_TEXT)
-    expect(h.calls).toEqual([['reply', D, '1', DOC_DISCLOSURE_TEXT]])
+    await sendDocControlReceipt(h.client, { chatId: ROOT, threadId: '1', messageId: `${ROOT}/1/2`, senderOpenId: 'ou_a1' }, DOC_DISCLOSURE_TEXT)
+    await sendDocControlReceipt(h.client, { chatId: ROOT, messageId: `${ROOT}/5/6`, senderOpenId: 'ou_a1' }, DOC_DISCLOSURE_TEXT)
+    expect(h.calls).toEqual([['reply', D, '1', DOC_DISCLOSURE_TEXT], ['whole', D, 'ou_a1', DOC_DISCLOSURE_TEXT]])
 
-    await expect(sendDocControlReceipt(recordingClient({ reply: 'unknown' }).client, { chatId: ROOT, messageId: `${ROOT}/1/2` }, 'x')).rejects.toThrow()
-    await expect(sendDocControlReceipt(h.client, { chatId: ROOT, threadId: '9', messageId: `${ROOT}/1/2` }, 'x')).rejects.toThrow()
+    await expect(sendDocControlReceipt(recordingClient({ reply: 'unknown' }).client, { chatId: ROOT, threadId: '1', messageId: `${ROOT}/1/2`, senderOpenId: 'ou_a1' }, 'x')).rejects.toThrow()
+    await expect(sendDocControlReceipt(h.client, { chatId: ROOT, threadId: '9', messageId: `${ROOT}/1/2`, senderOpenId: 'ou_a1' }, 'x')).rejects.toThrow()
   })
 })
 

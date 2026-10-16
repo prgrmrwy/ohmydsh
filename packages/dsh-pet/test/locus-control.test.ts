@@ -120,7 +120,7 @@ describe('unified locus command dispatcher', () => {
     expect(listSessions).toHaveBeenCalledWith('abcdef')
   })
 
-  it('spec Scenario "全文评论绑定已知会话": a document /bind names the doc title and restates who may ask', async () => {
+  it('spec Scenario "全文评论绑定已知会话": a document /bind names the doc title and restates who may ask (delivered as a mentioning full comment by the egress)', async () => {
     const docEndpoint = { chatId: 'doc:docx:Dx1', key: 'doc:docx:Dx1' }
     const dispatcher = createLocusControlDispatcher({
       allowOpenIds: () => [OWNER],

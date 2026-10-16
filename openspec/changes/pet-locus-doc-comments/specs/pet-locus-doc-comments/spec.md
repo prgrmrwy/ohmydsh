@@ -100,7 +100,7 @@
 - 已建立且处于授权状态的文档级或评论级入口，任何能在该文档评论的人 @bot，都可作为普通问题投递。
 - 工具档位为 `shell` 时，入口为所有者专用，规则与群相同。
 
-某个文档的**任一**入口首次建立时（文档级或评论级，自动建立或 `/bind` 建立都算；同一文档只发一次），以及 `/bind` 成功时，Host SHALL 以控制回执在触发评论下发出这句话：“本文档的评论者均可向我提问；只有 allowlist 成员能控制”。控制回执是一次独立的 bot `drive +add-reply`，不属于业务正文，也不经过 `pet_locus_finish`。回执发送失败 SHALL 只记诊断，不阻断投递。
+某个文档的**任一**入口首次建立时（文档级或评论级，自动建立或 `/bind` 建立都算；同一文档只发一次），以及 `/bind` 成功时，Host SHALL 以控制回执发出这句话：“本文档的评论者均可向我提问；只有 allowlist 成员能控制”。控制回执的投递位置与业务正文相同：划词评论下为对触发评论的 bot 回复；全文评论为一条新的 bot 全文评论并提及触发者。控制回执不属于业务正文，也不经过 `pet_locus_finish`。回执发送失败 SHALL 只记诊断，不阻断投递。
 
 #### Scenario: 非 allowlist 成员在已授权文档提问
 - **GIVEN** 文档 `D` 已有授权的文档级 locus，工具档位为 `safe`
@@ -125,7 +125,7 @@
 #### Scenario: 建立回执披露提问范围
 - **GIVEN** 文档 `D` 尚无 locus
 - **WHEN** allowlist 成员的首次合格 @ 建立了文档级入口
-- **THEN** 该评论下的首条 bot 回复包含 `本文档的评论者均可向我提问；只有 allowlist 成员能控制`
+- **THEN** bot 新建一条提及该成员的全文评论，内容包含 `本文档的评论者均可向我提问；只有 allowlist 成员能控制`
 
 #### Scenario: 未 @bot 的评论
 - **GIVEN** 事件的 `is_mentioned=false`
@@ -159,12 +159,12 @@
 - 命令写在全文评论中，SHALL 作用于文档级入口。
 - 命令写在划词评论（含其回复）中，SHALL 只作用于该评论级入口。
 - 非 allowlist 成员的控制命令 SHALL 静默丢弃，MUST NOT 作为普通问题投递。
-- 控制回执 SHALL 以 bot 身份回复到发出命令的那条评论。
+- 控制回执 SHALL 按业务正文的同一规则投递：划词评论下回复到发出命令的那条评论；全文评论中的命令以一条新的、提及命令发送者的 bot 全文评论回执。
 
 #### Scenario: 全文评论绑定已知会话
 - **GIVEN** 文档 `D` 尚无 locus；用户自己的会话 S1 未归档，且不是子会话
 - **WHEN** allowlist 成员在全文评论中发送 `@bot /bind <S1 前缀>`
-- **THEN** 直接以 S1 为主会话建立 `doc:docx:D` 的 locus，`mainSource` 记为显式来源，不产生自动主会话，不发上下文变更警告；回执追加在该全文评论下，并包含提问范围披露
+- **THEN** 直接以 S1 为主会话建立 `doc:docx:D` 的 locus，`mainSource` 记为显式来源，不产生自动主会话，不发上下文变更警告；回执为一条提及该成员的新 bot 全文评论，并包含提问范围披露
 
 #### Scenario: 文档改绑后已有划词评论不迁移
 - **GIVEN** 文档 `D` 的自动主会话为 S0，已有评论级入口 `c2`
@@ -183,12 +183,17 @@
 
 ### Requirement: 评论出站只经受管完成工具且反馈 fail-soft
 
-文档 Delivery 的业务正文 SHALL 只经 `pet_locus_finish` 发出：Host 以 bot 身份对触发 `comment_id` 追加一条纯文本回复。目标由持久 Delivery 不可变地决定，工具不接受任何文档、评论或回复 selector。
+文档 Delivery 的业务正文 SHALL 只经 `pet_locus_finish` 发出，目标由持久 Delivery 不可变地决定，工具不接受任何文档、评论或回复 selector。发送方式按入口区分：
+- 评论级入口（划词评论）：Host 以 bot 身份对触发 `comment_id` 追加一条纯文本回复。
+- 文档级入口（全文评论）：飞书不允许回复全文评论（实测 1069302，lark-cli 文档亦注明），Host SHALL 以 bot 身份在同一文档新建一条全文评论作为答复，开头以结构化提及 @ 触发者（`mention_user`，值为 Delivery 的发送者 open_id），其后为纯文本正文。这条由 bot 新建的评论不是新入口：bot 自己发出的评论按准入规则丢弃（`bot-sender`），且全文评论无法被回复；有人在新的全文评论里再次 @bot，是一个新的文档级提问。
 
-发送前，Host SHALL 校验以下三点，任一不符即拒绝发送，拒绝类别为 `association-unproven`：
+发送前，Host SHALL 校验以下各点，任一不符即拒绝发送，拒绝类别为 `association-unproven`：
 - Delivery `messageId` 中的 token 与入口 `chatId` 中的 token 相同；
 - 评论级入口的 `comment_id` 与 `threadId` 相同；
-- 两个 token 都非空，且只由 `[A-Za-z0-9]` 组成；`comment_id` 和 `reply_id` 都非空，且只由数字组成。
+- 两个 token 都非空，且只由 `[A-Za-z0-9]` 组成；`comment_id` 和 `reply_id` 都非空，且只由数字组成；
+- 文档级入口的被提及者为 Delivery 持久记录中的发送者 open_id，且形如 `ou_` 加字母数字。
+
+两种发送方式都 SHALL 只在平台明确返回创建成功时记为成功：回复为 `created=true`；新建评论为返回了 `comment_id`。其余结果按“可能已发出”处理。
 
 终态记录（`completed/replied`、`failed`、`unknown-terminal`、`completed/no-reply`）以及“不自动重发”规则 SHALL 与群相同。
 
@@ -207,10 +212,15 @@ shell 档的 lark-cli 误发守卫 SHALL 额外拦截以下命令，返回与群
 
 该守卫是防误用措施，不是安全边界。
 
-#### Scenario: 文档评论回复回到触发评论
-- **GIVEN** 文档 `D` 的文档级 locus，current Delivery 由全文评论 `c1` 的回复 `r1` 触发
+#### Scenario: 划词评论回复回到触发评论
+- **GIVEN** 评论级 locus `(doc:docx:D, c2)`，current Delivery 由 `c2` 的回复 `r4` 触发
 - **WHEN** child 以 `reply` 调用 `pet_locus_finish`
-- **THEN** Host 以 bot 身份对文档 `D` 的评论 `c1` 追加一条回复，不新开评论、不发往任何群；Delivery 记 `completed/replied`；`r1` 上的 `Typing` 被移除并打上 `DONE`
+- **THEN** Host 以 bot 身份对文档 `D` 的评论 `c2` 追加一条回复，不新开评论、不发往任何群；Delivery 记 `completed/replied`；`r4` 上的 `Typing` 被移除并打上 `DONE`
+
+#### Scenario: 全文评论以新全文评论答复并提及提问者
+- **GIVEN** 文档 `D` 的文档级 locus，current Delivery 由全文评论 `c1` 的根回复 `r1` 触发，发送者为 `ou_A`
+- **WHEN** child 以 `reply` 调用 `pet_locus_finish`，正文为 `答案`
+- **THEN** Host 不对 `c1` 调用回复，而以 bot 身份在 `D` 新建一条全文评论，内容依次为对 `ou_A` 的结构化提及与纯文本 `答案`，不发往任何群；Delivery 记 `completed/replied`；`r1` 上的 `Typing` 被移除并打上 `DONE`
 
 #### Scenario: 回复目标与入口不符
 - **GIVEN** 评论级入口为 `(doc:docx:D, c2)`，持久 Delivery 的 `messageId` 为 `doc:docx:D/c3/r1` 或 `doc:docx:D2/c2/r1`

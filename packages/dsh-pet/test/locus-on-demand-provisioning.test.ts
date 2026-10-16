@@ -115,7 +115,7 @@ function topicInbound(chatId: string, threadId: string, messageId: string, text:
  * over one shared durable repository — the same repository instance
  * `index.ts` gives both `locusProvisioningController` and `locusResolution`.
  */
-async function composeOnDemandHost(options: { readonly failFirstCreate?: boolean; readonly controls?: { target: { chatId: string; messageId: string }; text: string }[]; readonly receiptsThrow?: boolean; readonly imCalls?: string[] } = {}) {
+async function composeOnDemandHost(options: { readonly failFirstCreate?: boolean; readonly controls?: { target: { chatId: string; messageId: string }; text: string; senderOpenId?: string }[]; readonly receiptsThrow?: boolean; readonly imCalls?: string[] } = {}) {
   const harness: PetHarness = await openPetHarness()
   enableAtomicTransactions(harness)
   const durable = new DurableLocusRepository(harness.domain)
@@ -244,7 +244,7 @@ async function composeOnDemandHost(options: { readonly failFirstCreate?: boolean
     receipts: {
       markAccepted: () => { if (options.receiptsThrow === true) throw new Error('reaction api down') },
       markSettled: () => { if (options.receiptsThrow === true) throw new Error('reaction api down') },
-      sendControl: (target, text) => { options.controls?.push({ target, text }) },
+      sendControl: (target, text, senderOpenId) => { options.controls?.push({ target, text, ...(senderOpenId === undefined ? {} : { senderOpenId }) }) },
     },
     log: code => diagnostics.push(code),
     // Same monotonic scale as the provisioning controller's own
@@ -574,14 +574,16 @@ describe('document entries build on demand exactly like groups and topics', () =
 describe('spec Requirement "评论准入与群消息准入同构且静默 fail closed": ask-scope disclosure', () => {
   const DISCLOSURE = '本文档的评论者均可向我提问；只有 allowlist 成员能控制'
 
-  it('spec Scenario "建立回执披露提问范围": the first entry\'s comment gets the disclosure', async () => {
-    const controls: { target: { chatId: string; messageId: string }; text: string }[] = []
+  it('spec Scenario "建立回执披露提问范围": the first whole-doc entry discloses to the asker (a new mentioning full comment)', async () => {
+    const controls: { target: { chatId: string; messageId: string }; text: string; senderOpenId?: string }[] = []
     const host = await composeOnDemandHost({ controls })
     try {
       await deliverComment(host, { token: 'DocE00000000000000000000001', commentId: '51', replyId: '52', isWhole: true })
       expect(controls).toEqual([{
         target: expect.objectContaining({ chatId: 'doc:docx:DocE00000000000000000000001', messageId: 'doc:docx:DocE00000000000000000000001/51/52' }),
         text: DISCLOSURE,
+        // The asker the new full comment mentions: full comments cannot be replied to.
+        senderOpenId: 'ou-owner',
       }])
     } finally {
       await host.close()

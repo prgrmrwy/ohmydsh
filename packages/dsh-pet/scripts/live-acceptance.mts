@@ -80,6 +80,7 @@ const intake = createDocCommentIntake({
       chatId: message.endpoint.chatId,
       ...(message.endpoint.threadId === undefined ? {} : { threadId: message.endpoint.threadId }),
       messageId: message.messageId,
+      senderOpenId: message.senderOpenId,
     }, `[pet live acceptance] 已收到（${level}）：${message.text.slice(0, 60)}`)
     console.log(`[reply] ${reply.kind}${reply.kind === 'refused' ? ` ${reply.reason}` : ''}`)
     await reactOnDocTrigger(client, message.messageId, reply.kind === 'sent' ? 'settled' : 'failed').then(

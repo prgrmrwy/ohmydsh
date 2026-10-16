@@ -119,3 +119,33 @@ describe('document metadata and body', () => {
     await expect(denied.client.fetchDocMarkdown!('Dx1')).resolves.toMatchObject({ ok: false })
   })
 })
+
+describe('addWholeComment (whole-doc answers; full comments cannot be replied to)', () => {
+  it('creates a full comment that mentions the asker first, as the bot, and succeeds only on a returned comment_id', async () => {
+    // Shape captured live from lark-cli 1.0.97 (2026-10-17).
+    const created = scripted([ok({
+      comment_id: '7697317230484147999', comment_mode: 'full', created_at: '2026-10-17 01:30:00',
+      doc_id: 'Dx1', file_token: 'Dx1', file_type: 'docx', resolved_by: 'docx',
+    })])
+    await expect(created.client.addWholeComment!('Dx1', 'ou_asker01', '答案')).resolves.toBe('success')
+    const args = created.calls[0]!
+    expect(args.slice(0, 10)).toEqual(['--profile', 'dsh-pet', 'drive', '+add-comment', '--as', 'bot', '--doc', 'Dx1', '--type', 'docx'])
+    expect(args).toContain('--full-comment')
+    expect(JSON.parse(args[args.indexOf('--content') + 1]!)).toEqual([
+      { type: 'mention_user', text: 'ou_asker01' },
+      { type: 'text', text: ' 答案' },
+    ])
+
+    const vague = scripted([ok({ comment_mode: 'full' })])
+    await expect(vague.client.addWholeComment!('Dx1', 'ou_asker01', 'x')).resolves.toBe('unknown')
+    const failed = scripted([() => new Error('timeout')])
+    await expect(failed.client.addWholeComment!('Dx1', 'ou_asker01', 'x')).resolves.toBe('unknown')
+  })
+
+  it('refuses a non-open-id mention before calling lark-cli', async () => {
+    const h = scripted([ok({ comment_id: '1' })])
+    await expect(h.client.addWholeComment!('Dx1', 'not-an-id', 'x')).rejects.toThrow()
+    expect(h.calls).toEqual([])
+  })
+})
+

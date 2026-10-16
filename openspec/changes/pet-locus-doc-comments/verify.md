@@ -1,15 +1,15 @@
 ## Verification Results
 
 ### Task Completion
-- [ ] All tasks marked `[x]` in tasks.md
-- Remaining open tasks:
-  - **10.5** live acceptance on a throwaway Feishu app. It needs the owner: a disposable app with the comment event and the scopes enabled, plus a doc and a group to act in.
+- [x] All tasks marked `[x]` in tasks.md
+- Remaining open tasks: none.
+  - 10.5 live acceptance is done (tasks 10.5). Two sub-checks could not be driven without a human in the cameo app, and are covered by tests instead: a follow-up inside an anchored comment, and an IM @ on the same connection.
 
 ### TDD Integrity
 - [x] Every test-plan.md entry exists as a real test.
-  - All 128 rows were checked mechanically: each row's test file contains a test named `spec Scenario "<scenario>"`. The script reports `missing 0`.
+  - All 129 rows were checked mechanically: each row's test file contains a test named `spec Scenario "<scenario>"`. The script reports `missing 0`.
 - [x] Every test-plan.md row flipped to 🟢 green.
-  - 128/128 are green. Four are marked **partial**, and the row says which part of the THEN is not unit-proven:
+  - 129/129 are green. Four are marked **partial**, and the row says which part of the THEN is not unit-proven:
     - "旧代际迟到结算": the pure ledger has no diagnostic channel.
     - "宿主重启无法证明关联": intake pause is the `index.ts` `blockedLoci` startup wiring.
     - "Host 重启恢复未过期 current": deadline-timer re-arm is the `index.ts` startup dispatch.
@@ -31,7 +31,7 @@
 
 ### Evidence
 - Final full-suite command: `npm --prefix packages/dsh-pet run build && npx vitest run` (run in `packages/dsh-pet`).
-- Result summary: **3210 passed, 0 failed, 43 skipped** (176 files passed, 3 skipped).
+- Result summary: **3215 passed, 0 failed, 43 skipped** (176 files passed, 3 skipped).
   - Baseline before the change was 3046 passed and 1 failed. That failure was `loader-composition`, which needs `lib/`; it passes once built.
 - Typecheck: `npm run typecheck` (`tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit`): clean.
 - Repo root: `npm test` gives **416 passed, 8 failed, 2 skipped**.
@@ -56,6 +56,14 @@
   - prove-before-`finishing`;
   - disclosure-once;
   - media guard.
+- Live acceptance (10.5) on the test app `cameo`, through Pet's real transport and doc-comment modules:
+  - The anchored comment was answered under its own comment with Typing→DONE.
+  - The whole-doc comment was answered with a new full comment mentioning the asker, with Typing→DONE.
+  - The gate refused correctly while another connection was held.
+  - No orphan process was left on stop.
+  - Two defects were found live and fixed, with tests that failed first:
+    - the connection-count envelope;
+    - whole-doc comments cannot be replied to (owner chose option 1; spec, design and egress changed; round 7 reviewed).
 - Non-executable checks run:
   - **Sync idempotence (10.4).** `node scripts/sync.mjs` was run twice into an isolated DSH home with a scratch XDG data dir. First run: exit 0, 16 changes. Second run: exit 0, "no changes — deployment already matches manifest", `dsh-pet@0.1.0 up-to-date`.
   - **Upgrade/rollback drill (10.6).** Run on a copy of a real v14 backup (5 loci / 19 deliveries), through the real SQLite backend and storage-domain composition:
