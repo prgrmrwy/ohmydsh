@@ -34,7 +34,7 @@ Pet locus 目前只有飞书群和话题两种入口。研发与 PM 的大量协
 - **出站与群同构。** `pet_locus_finish` 以 bot 身份 `drive +add-reply` 回复到触发评论。表情反馈打在触发回复上：处理中 `Typing`、成功 `DONE`、失败或过期 `CRY`。shell 档的误发守卫增加评论写命令和文档正文写命令，并修复 `/open-apis` 前缀路径漏拦的问题。
 - **IM 专属能力在文档入口逐项处置。** 媒体读取、读群探测、`pet_locus_chat_history`、显示名查询、出站 @ 渲染、待办跳转，在文档入口都有明确的规则，不会拿文档 token 去调 IM 接口。
 - **只读上下文。** 新增 caller-bound 的 `pet_locus_doc_context`，读取当前评论线程和文档正文，有预算上限并带不可信标签。
-- **持久化、升级与回滚。** domain version 升到 16，但不新增字段，升级的目的只是阻止 v15 误读文档行。升级沿用现有的离线迁移命令 `dsh-pet-migrate-state --yes`，它会先备份。回滚的做法是停 DSH、用升级前的备份覆盖、再装回旧包；**升级后产生的全部 Pet 状态都会丢失**（所有者 2026-10-16 已接受）。
+- **持久化、升级与回滚。** domain version 升到 16。入口不新增字段；Delivery 新增一个可选字段 `docComment.quote`，保存划词原文，保证排队或 Host 重启后再投递时，prompt 仍然完整。升级的主要目的是阻止 v15 误读文档行。升级沿用现有的离线迁移命令 `dsh-pet-migrate-state --yes`，它会先备份。回滚的做法是停 DSH、用升级前的备份覆盖、再装回旧包；**升级后产生的全部 Pet 状态都会丢失**（所有者 2026-10-16 已接受）。
 
 ## Capabilities
 

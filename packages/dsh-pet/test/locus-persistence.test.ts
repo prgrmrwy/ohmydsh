@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildLocusRecord, endpointKeyOf, type LocusRecord } from '../src/host/locus/aggregate.js'
-import { PET_DOMAIN_VERSION, petLocusRecord, type PetLocusOperation } from '../src/host/spec.js'
+import { PET_DOMAIN_VERSION, petLocusDelivery, petLocusRecord, type PetLocusOperation } from '../src/host/spec.js'
 import {
   childIndexKey,
   defaultQaIndexKey,
@@ -387,6 +387,75 @@ describe('durable unified locus repository', () => {
     expect(operation?.endpointKey).toBe(endpointKeyOf(locus.endpoint))
     expect(repository.getDelivery('delivery-wal')?.status).toBe('accepted')
     await first.close()
+  })
+
+  it('persists the anchored-comment quote with the Delivery and reads it back after a restart', async () => {
+    const medium = emptyMedium()
+    const first = await openPetHarness(medium)
+    const repository = new DurableLocusRepository(first.domain)
+    // Endpoint shape does not matter for this round-trip; a doc root keeps the fixture minimal.
+    const locus = await repository.putLocus(record({ endpoint: { chatId: 'doc:docx:Dx0000000000000000000000001' } }))
+    await repository.acceptDelivery({
+      endpoint: locus.endpoint,
+      locusId: locus.id,
+      generation: locus.generation,
+      childSessionId: locus.childSessionId as string,
+      messageId: 'doc:docx:Dx0000000000000000000000001/7696944560311651569/7696944560332606724',
+      deliveryId: 'delivery-doc-1',
+      senderOpenId: 'ou_sender',
+      text: '这里为什么',
+      docComment: { quote: '接口已有' },
+      acceptedAt: 2,
+    })
+    await first.close()
+
+    const second = await reopen(medium)
+    const restarted = new DurableLocusRepository(second.domain)
+    expect(restarted.getDelivery('delivery-doc-1')?.docComment).toEqual({ quote: '接口已有' })
+    await second.close()
+  })
+
+  it('refuses to persist an oversized or empty quote, so a bad row can never block the next storage open', async () => {
+    const harness = await openPetHarness()
+    const repository = new DurableLocusRepository(harness.domain)
+    const locus = await repository.putLocus(record({ endpoint: { chatId: 'doc:docx:Dx0000000000000000000000001' } }))
+    const base = {
+      endpoint: locus.endpoint,
+      locusId: locus.id,
+      generation: locus.generation,
+      childSessionId: locus.childSessionId as string,
+      senderOpenId: 'ou_sender',
+      text: 'q',
+      acceptedAt: 2,
+    }
+    const before = harness.domain.table('locus_deliveries').size
+
+    await expect(repository.acceptDelivery({
+      ...base, messageId: 'doc:docx:Dx0000000000000000000000001/1/2', docComment: { quote: 'x'.repeat(2_001) },
+    })).rejects.toThrow(/docComment\.quote/)
+    await expect(repository.acceptDelivery({
+      ...base, messageId: 'doc:docx:Dx0000000000000000000000001/1/3', docComment: { quote: '' },
+    })).rejects.toThrow(/docComment\.quote/)
+    await expect(repository.acceptDelivery({
+      ...base, messageId: 'doc:docx:Dx0000000000000000000000001/1/4', docComment: {} as never,
+    })).rejects.toThrow(/docComment\.quote/)
+
+    expect(harness.domain.table('locus_deliveries').size).toBe(before)
+    await harness.close()
+  })
+
+  it('keeps a pre-v16 Delivery row (no docComment) readable', () => {
+    const row = {
+      deliveryId: 'd', messageId: 'om_1', endpoint: { chatId: 'oc_1' }, locusId: 'l', generation: 1,
+      childSessionId: 'c', senderOpenId: 'ou_1', sequence: 1, status: 'accepted', queueState: 'backlog',
+      acceptedAt: 1, deadlineAt: 2, hardDeadlineAt: 1 + 24 * 60 * 60 * 1000, revision: 0, stateRevision: 0,
+      feedbackTarget: { chatId: 'oc_1', messageId: 'om_1' },
+    }
+    const parsed = petLocusDelivery.safeParse(row)
+    expect(parsed.success).toBe(true)
+    expect(parsed.success && parsed.data.docComment).toBeUndefined()
+    expect(petLocusDelivery.safeParse({ ...row, docComment: { quote: 'x'.repeat(2_001) } }).success).toBe(false)
+    expect(petLocusDelivery.safeParse({ ...row, docComment: {} }).success).toBe(false)
   })
 
   it('accepts overlapping same-locus messages into one durable FIFO backlog while controls stay busy', async () => {

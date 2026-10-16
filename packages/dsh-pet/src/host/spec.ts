@@ -106,11 +106,13 @@ export const PET_DOMAIN_NAME = 'dsh_pet'
 // see `ledger/todo.ts` design D6 — so no existing locus/delivery row is read
 // or interpreted differently by this bump.
 //
-// Bumped to 16 for doc-comment loci (openspec pet-locus-doc-comments D11). No
-// field or table is added: a document entry is an ordinary locus row whose
-// chatId carries the `doc:docx:` prefix. The bump only makes a v15 Host refuse
-// to open the medium instead of loading doc rows as chats (its schema does not
-// check the `oc_` prefix). Rollback = restore the pre-restamp backup.
+// Bumped to 16 for doc-comment loci (openspec pet-locus-doc-comments D11). The
+// locus endpoint gains no field: a document entry is an ordinary locus row whose
+// chatId carries the `doc:docx:` prefix. Additive: a Delivery gains one optional
+// `docComment` (the anchored-comment quote, D5); pre-v16 rows omit it. The bump
+// makes a v15 Host refuse to open the medium instead of loading doc rows as
+// chats (its schema does not check the `oc_` prefix). Rollback = restore the
+// pre-restamp backup.
 // Bumped to 16 for inquiry_answers, one answer per inquiry. Additive only;
 // runtime protocol eligibility is deliberately not represented by this table.
 // (The doc-comment line above and this inquiry line both claimed 16 on
@@ -637,6 +639,9 @@ export const petLocusIndex = z.object({
   updatedAt: z.number().int().nonnegative(),
 })
 
+/** Upper bound (UTF-16 units) of a persisted anchored-comment quote. */
+export const DOC_COMMENT_QUOTE_MAX = 2_000
+
 /** Durable association between one accepted platform message and one child turn. */
 export const petLocusDelivery = z.object({
   deliveryId: z.string().min(1),
@@ -666,6 +671,14 @@ export const petLocusDelivery = z.object({
   }).optional(),
   rootMessageId: z.string().min(1).optional(),
   replyToMessageId: z.string().min(1).optional(),
+  /**
+   * Doc-comment facts known only at intake (pet-locus-doc-comments D5, v16).
+   * Persisted so a queued or post-restart dispatch renders the same prompt.
+   * Source, token and ids are derived from chatId/threadId/messageId instead.
+   */
+  docComment: z.object({
+    quote: z.string().min(1).max(DOC_COMMENT_QUOTE_MAX),
+  }).optional(),
   sequence: z.number().int().positive(),
   status: z.enum([
     'accepted', 'queued', 'running', 'settled', 'failed',

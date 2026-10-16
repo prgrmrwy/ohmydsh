@@ -96,9 +96,17 @@
   - 3.4 也已完成：`PET_DOMAIN_VERSION` 改为 16（附理由）；迁移脚本 `RESTAMPABLE` 增加 15；`migrate.ts` 接受 14、15；更新了版本契约测试。
   - 全量：3094 passed / 1 failed（基线 loader-composition）。
 
+- [x] 3.7 修正第 3 组代码里“v16 不新增字段”的旧说法，改为“入口不新增字段；Delivery 新增可选 `docComment`”（R5-RC2），涉及三处：
+  - `src/host/spec.ts` 的版本注释；
+  - `scripts/migrate-state-version.mjs` 的头注释；
+  - `test/intent-triage-domain-contract.test.ts` 的标题与注释。
+- [x] 3.8 持久化 `docComment.quote`（D5，R5-RC1）：
+  - zod schema 中 `quote` 必填，上限 2 000；
+  - `persistence.ts` 的 `assertDeliveryInput` 和 `delivery.ts` 的状态机都拒绝缺失、空或超长的值；
+  - 测试覆盖重启后读回、旧行可读、超长值拒绝写入。
 ## 4. 评论入站：范围判定与建树（D6）
 
-- [ ] 4.1 写失败测试 `doc-comment-intake.test.ts`，覆盖「文档评论按全文/划词同构映射…」的 9 行（含“评论查询一次失败后重试成功”“评论查询重试期间停用 channel”）和「评论范围无法判定」
+- [ ] 4.1 写失败测试 `doc-comment-intake.test.ts`，覆盖「文档评论按全文/划词同构映射…」的 10 行（含“评论查询一次失败后重试成功”“评论查询重试期间停用 channel”“重启后再投递排队中的划词评论”，后者在 4.6）和「评论范围无法判定」
 - [x] 4.2 实现 `LarkClient`（同时补齐第 6、7 组需要的 drive/docs/contact 适配器：`replyComment` `reactCommentReply` `inspectDoc` `fetchDocMarkdown` `contactName`；`docs +fetch` 实际 flag 为 `--doc-format markdown`、正文在 `data.document.content`，依据 lark-cli v1.0.97 `docs_fetch_v2.go`；→ `test/channel-lark-drive.test.ts` 8 例）：
   - `batchQueryComments`：`drive +batch-query-comments`；
   - `listReplies`：`drive +list-replies`，分页，最多 10 页；
@@ -107,6 +115,14 @@
   三者都用 bot 身份，并且要区分“调用失败”和“结果为空”。评论范围查询失败时，在进程内重试最多 2 次，间隔 2 秒、5 秒，重试不持久化
 - [ ] 4.3 实现评论事件解析（compact 的 GenericProcessor 形态，`notice_meta` 是嵌套字段）、`file_type` 过滤、全文/划词判定、`comment_id` 已有 locus 时的短路，以及按“首条合格事件”建树。按文档根建立专属自动主会话；划词评论先到时，先建文档根主会话，再建评论级子会话
 - [ ] 4.4 写失败测试「文档首次评论建立文档专属主会话」（`locus-on-demand-provisioning.test.ts`），然后实现。回归行翻 🟢：Project 群先行、首次消息补齐、重复初始化、default 不可用
+- [ ] 4.6 投影点逐个带上 `docComment`，并按来源重建（R5-RC3，pitfalls §11）：
+  - `locus-controller.ts` 的 `dispatchNext` 两处消息重建（约 :1041-1051、:1086-1098）：带上 `docComment`，写死的 `chatType: 'group'` 改为按 `sourceOf(endpoint)` 决定；
+  - 入站接受输入（约 :1306-1320）：把 `docComment` 传给 `acceptDelivery`；
+  - `index.ts` 的 render 钩子（约 :3042-3066）：从 `findDeliveryByMessageId` 取 `current.docComment`，prompt 只使用持久值；
+  - `locus/context.ts` 的 `LocusPromptMessageFacts` 与 `request` 投影（约 :498-506、:568-580）；
+  - 若只读工具或管理面读取当前 Delivery，还要检查 `persistence.ts` 的 `findCurrent*` 投影（约 :2447-2461、:2485-2510）。
+
+  测试：`test/locus-doc-redelivery.test.ts`。用真实 `LocusRepository` 在同一介质上重开，经真实 `dispatchNext` 投递排队中的划词评论；用计数的假 `LarkClient` 断言零次评论查询；比较重启前后渲染出的四项评论事实。
 - [ ] 4.5 重构：把评论链路与 IM 链路共用的“建树”入口合并为一个，不复制逻辑。全量测试保持绿色
 
 ## 5. 评论准入与控制命令（D7）
@@ -182,7 +198,7 @@
 ## 10. 全量验证与真机验收
 
 - [ ] 10.1 运行 `npm --prefix packages/dsh-pet test`、`npm --prefix packages/dsh-pet run build`，以及 typecheck（若有独立脚本）；运行仓库根的 `npm test` 和 `npm run check:artifacts`。记录命令和通过数
-- [ ] 10.2 核对 test-plan 127 行全部为 🟢；没有 skip 或 pending，也没有弱化或删除过的测试
+- [ ] 10.2 核对 test-plan 128 行全部为 🟢；没有 skip 或 pending，也没有弱化或删除过的测试
 - [ ] 10.3 `openspec validate pet-locus-doc-comments --strict` 通过
 - [ ] 10.4 `node scripts/sync.mjs` 连续运行两次，第二次无变化（幂等）
 - [ ] 10.5 在一次性飞书应用上做真机验收（不用生产 dsh-pet 应用），用构建产物复测：

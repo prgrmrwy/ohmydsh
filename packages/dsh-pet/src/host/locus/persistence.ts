@@ -59,6 +59,7 @@ import {
   type DeliveryFinishInput,
   type DeliveryLeaseInput,
   type DeliveryWaitInput,
+  isValidDocCommentQuote,
 } from './delivery.js'
 import { LocusError } from './aggregate.js'
 import { STORAGE_KEY_SEPARATOR } from './storage-key.js'
@@ -1833,6 +1834,7 @@ export class LocusRepository {
             occurrences: Object.freeze(input.addressing.occurrences.map(occurrence => Object.freeze({ ...occurrence }))),
           }),
         } : {}),
+        ...(input.docComment !== undefined ? { docComment: Object.freeze({ ...input.docComment }) } : {}),
         ...(input.replyTarget !== undefined ? { replyTarget: Object.freeze({ ...input.replyTarget }) } : {}),
         ...(input.replyToMessageId !== undefined ? { replyToMessageId: input.replyToMessageId } : {}),
         sequence,
@@ -4082,6 +4084,11 @@ function assertDeliveryInput(input: DeliveryInput): void {
   }
   if (input.replyToMessageId !== undefined) assertIdentifier(input.replyToMessageId, 'replyToMessageId')
   if (input.deliveryId !== undefined) assertIdentifier(input.deliveryId, 'deliveryId')
+  // Bound BEFORE the write: storage `put` does not validate, and one invalid
+  // row would make the whole domain fail to open on the next start.
+  if (input.docComment !== undefined && !isValidDocCommentQuote(input.docComment.quote)) {
+    throw new LocusError('INVALID_LOCUS', 'docComment.quote must be a non-empty string of at most 2000 UTF-16 units')
+  }
   if (input.turnId !== undefined || input.executionId !== undefined) {
     throw new LocusError('INVALID_LOCUS', 'Accepted Delivery cannot contain execution/turn proof')
   }
@@ -4117,6 +4124,7 @@ function assertDeliveryRecord(record: DeliveryRecord): void {
     ...(record.senderName !== undefined ? { senderName: record.senderName } : {}),
     ...(record.text !== undefined ? { text: record.text } : {}),
     ...(record.addressing !== undefined ? { addressing: record.addressing } : {}),
+    ...(record.docComment !== undefined ? { docComment: record.docComment } : {}),
     ...(record.replyTarget !== undefined ? { replyTarget: record.replyTarget } : {}),
     ...(record.rootMessageId !== undefined ? { rootMessageId: record.rootMessageId } : {}),
     ...(record.replyToMessageId !== undefined ? { replyToMessageId: record.replyToMessageId } : {}),

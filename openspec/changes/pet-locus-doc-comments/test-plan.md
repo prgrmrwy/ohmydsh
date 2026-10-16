@@ -1,6 +1,6 @@
 ## Test Plan
 
-All 127 `#### Scenario:` entries across the four delta specs (`pet-lark-channel`, `pet-locus-collaboration`, `pet-locus-intent-triage`, `pet-locus-doc-comments`) map 1:1 to a named vitest test under `packages/dsh-pet/test/`. The test name is always `spec Scenario "<scenario name>"`. When the same scenario name occurs in two capabilities and the two tests share a file, the capability is appended in parentheses.
+All 128 `#### Scenario:` entries across the four delta specs (`pet-lark-channel`, `pet-locus-collaboration`, `pet-locus-intent-triage`, `pet-locus-doc-comments`) map 1:1 to a named vitest test under `packages/dsh-pet/test/`. The test name is always `spec Scenario "<scenario name>"`. When the same scenario name occurs in two capabilities and the two tests share a file, the capability is appended in parentheses.
 
 This table is a live ledger. During apply, flip each row from 🔴 to 🟢 when its test passes. verify blocks on any row still red.
 
@@ -94,6 +94,7 @@ This table is a live ledger. During apply, flip each row from 🔴 to 🟢 when 
 | specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 文档 URL 不可得 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "文档 URL 不可得" | 🔴 red |
 | specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 全文评论进入文档级入口 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "全文评论进入文档级入口" | 🔴 red |
 | specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 划词评论进入评论级入口 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "划词评论进入评论级入口" | 🔴 red |
+| specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 重启后再投递排队中的划词评论 | packages/dsh-pet/test/locus-doc-redelivery.test.ts | spec Scenario "重启后再投递排队中的划词评论" | 🔴 red |
 | specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 划词评论下的后续回复留在同一入口 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "划词评论下的后续回复留在同一入口" | 🔴 red |
 | specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 划词评论先于文档级 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "划词评论先于文档级" | 🔴 red |
 | specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 知识库文档以底层 token 为根 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "知识库文档以底层 token 为根" | 🔴 red |
@@ -176,6 +177,7 @@ This table is a live ledger. During apply, flip each row from 🔴 to 🟢 when 
 - **"文档 Delivery 不调用 IM 接口"**: record every lark-cli argv the fake client receives across accept, deliver and finish. Assert there are no `im` subcommands, IM `api` paths, or chat member/history calls.
 - **"无建立控件"**: render the management view model, enumerate its interactive controls, and assert that none accepts a URL, token or session id input.
 - **"内容中嵌入指令"**: assert that the line appears only inside the tool-result text block, after the fixed untrusted label, and is absent from the system and user messages in the composed turn.
+- **"重启后再投递排队中的划词评论"**: use the real `LocusRepository`, reopened on the same `MemoryMedium`, and the real controller `dispatchNext`. A stubbed dispatch would repeat the pitfalls §11 "both layers green" trap. A counting fake `LarkClient` must record zero `queryDocComment` calls. Compare only the four comment facts named in the scenario (scope, quote, trigger text, sender), because the routing preamble and the readability line legitimately differ after a restart.
 - **"多个文档入口短码互不相同" / "同前缀的评论入口短码可区分"**: use the literal ids from the spec. The expected comment codes are `cmt·5186` and `cmt·0665`.
 
 ### Non-executable checks

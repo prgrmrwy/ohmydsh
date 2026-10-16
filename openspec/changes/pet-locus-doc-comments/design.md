@@ -139,6 +139,34 @@ dry-run 既不建 bus，也不建连接。监督器自动重启时不跑 dry-run
 
 - 文档 Delivery 的 `messageId` 为 `doc:docx:<token>/<comment_id>/<reply_id>`，前缀与 `chatId` 一致（R2-S-b）。它同时是持久去重键和接受顺序标识，不会被当作 IM 消息 id 使用。R2 已确认它能通过 `assertIdentifier` 以及 replyTarget/feedbackTarget 的一致性校验。
 - `replyTarget` 和 `feedbackTarget` 的形状不变。
+- **入站时才有的评论事实随 Delivery 持久化**（R5，所有者 2026-10-16 指出）。积压的 Delivery 会在排队轮到时、或 Host 重启后，由 `dispatchNext` 从持久记录重建消息（`locus-controller.ts:1086`），这时手里没有入站事件，只存在内存里的事实会丢失。逐项处理如下：
+
+  | 事实 | 能否从持久数据推出 | 处理 |
+  |---|---|---|
+  | 来源（IM / 文档评论） | 能，看 `chatId` 前缀 | 不另存；由 `doc-endpoint.ts` 的 `isDocEndpoint` / `sourceOf` 推导 |
+  | token、`comment_id`、`reply_id` | 能，就是 `messageId` 本身 | 不另存 |
+  | 全文还是划词 | 能，看入口有没有 `threadId` | 不另存 |
+  | 触发回复正文、发送者姓名 | 已存在现有的 `text`、`senderName` | 不变 |
+  | 发送者是否在 allowlist（D12 “不要粘贴私密内容”） | 能，渲染时用持久的 `senderOpenId` 对照当前 allowlist | 不另存；按渲染时的 allowlist 判断，与群一致 |
+  | 表情目标 | 能，`reply_id` 就是 `messageId` 第三段 | 不另存；`drive +react-reply --action delete` 删除的是 bot 自己的表情，不需要表情 id |
+  | 是否发过披露回执 | 不需要重建：在 locus 建立时（入站路径）判断并发出 | 不另存；`dispatchNext` 从不发披露回执 |
+  | **划词原文 `quote`** | **不能** | **新增可选字段 `docComment.quote`** |
+
+  - `docComment` 是可选对象，其中 `quote` 必填。它与现有的 `addressing` 同类，都是入站事实的有界投影，接受时写入一次，此后不再修改。全文评论不写入 `docComment`。
+  - `quote` 上限 2 000 个 UTF-16 码元，**截断标记计入上限**：超长时截到 `2000 − 标记长度` 再追加标记 `…（已截断）`，所以写入值永远不超过 2 000。
+  - 上限在入站截断时保证，并由持久写入路径（`persistence.ts` 的 `assertDeliveryInput`）再校验一次，违反即拒绝写入（R5-RC1）。原因是存储层 `put` 不校验 schema；而下次打开存储时 schema 校验失败会让整个 Pet 存储打不开，因为 `petDomainSpec` 没有设置 `invalidRecords`。所以超长值绝不能落盘。
+  - 投影点（pitfalls §11）。以下几处都必须带上 `docComment`，或按来源重建：
+    - `locus-controller.ts` 的入站接受输入（约 :1306-1320）；
+    - `dispatchNext` 的两处消息重建（约 :1041-1051、:1086-1098），这两处还要去掉写死的 `chatType: 'group'`；
+    - `index.ts` 的 render 钩子（约 :3042-3066），它从 `findDeliveryByMessageId` 取 `current.docComment`；
+    - `locus/context.ts` 的 prompt 事实投影（约 :498-506、:568-580）。
+  - 不把来源本身存成字段：前缀已经决定了身份，另存一份会出现两份真相（例如 `source:'im'` 而 `chatId` 为 `doc:docx:…`），每个读取点都要校验以哪份为准。
+  - `dispatchNext` 重建消息时：读出 `docComment`；原先写死的 `chatType: 'group'` 改为按 `sourceOf(endpoint)` 决定。
+- 内存里的消息形态改为按 `source` 区分的联合类型（共有核心 + `im` / `doc-comment` 两个分支），这是所有者 2026-10-16 提出的要求：“既有消息形态更通用一点，用字段做标记”。
+  - 准入：D7 的 `admitDocCommentEvent` 是 `doc-comment` 分支的入口。它只做来源专属的前置判断（是否 @bot、`file_type`、bot 或 agent 发送者），然后调用与 IM 共用的同一组准入规则：allowlist、授权状态、shell 档仅所有者可用、退役判定、水位、去重、控制命令解析。规则本身不复制。
+  - 其余按 `source` 分支的点都穷举处理：媒体、读群探测、姓名、@ 渲染、回执与表情、prompt 前言、工具装配。新增来源时，编译器会报出所有漏掉的分支。
+  - 前缀判断集中在 `doc-endpoint.ts`（`isDocEndpoint` / `sourceOf` / `parseDocChatId`）。唯一的例外是 `lark.ts` 中 IM 出口的兜底守卫：它有意独立判断，防止有人绕过 `doc-endpoint.ts` 时守卫跟着失效。
+  - 这是实现层的类型设计，不影响持久形状。
 - 文档出口发送前做两项校验，任一不符即拒绝，capability 拒绝类别为 `association-unproven`（R2-S-a）：
   - `messageId` 中的 token 与 `chatId` 中的 token 相同；
   - 若为评论级入口，`messageId` 中的 `comment_id` 与 `threadId` 相同。
@@ -156,7 +184,7 @@ dry-run 既不建 bus，也不建连接。监督器自动重启时不跑 dry-run
 
 ### D7 准入
 
-新增 `admitDocCommentEvent`，复用以下现有逻辑：allowlist、授权状态、控制命令解析、shell 档仅所有者可用、退役/legacy 判定、启动水位、持久去重。
+新增 `admitDocCommentEvent` 作为 `doc-comment` 来源的准入入口（见 D5 末条）。它先做来源专属的前置判断，再调用与 IM 共用的准入规则：allowlist、授权状态、控制命令解析、shell 档仅所有者可用、退役/legacy 判定、启动水位、持久去重。规则不复制。
 
 **提问资格与群同构**：入口已授权时，任何能评论的人都可以提问（所有者已确认）。补偿措施有三项：
 
@@ -209,7 +237,7 @@ finish 和控制回执按 `isDocEndpoint` 分派。结果分类与 IM 相同，�
 
 ### D11 持久化、升级与回滚（R1-C2、R2-C-a、R2-M-a；所有者 2026-10-16 决定）
 
-- **版本**：`PET_DOMAIN_VERSION` 从 15 升到 16，不新增字段（见 D4）。升版本的目的只有一个：让 v15 代码在打开存储时以 `version-mismatch` 停下，而不是去误读 `doc:` 前缀的行。R2 已确认这个理由成立。
+- **版本**：`PET_DOMAIN_VERSION` 从 15 升到 16。入口不新增字段（见 D4）；Delivery 新增一个可选字段 `docComment`（见 D5）。旧记录没有这个字段，读取时视为缺省，照常可用，是纯增量变化。升版本的主要目的仍是让 v15 代码在打开存储时以 `version-mismatch` 停下，而不是把 `doc:` 前缀的行当作群入口误读。zod 会丢弃不认识的键，所以对 v15 来说 `docComment` 只会丢失，不会导致出错。R2 已确认这个理由成立。
 - **升级**：沿用现有的离线迁移。
   - `scripts/migrate-state-version.mjs`：脚本内常量 `PET_DOMAIN_VERSION` 改为 16，`RESTAMPABLE` 加入 15，过时的说明文字“v2..v13”同步修正。`src/host/migrate.ts` 接受的版本加入 14、15，与脚本一致。对应的测试范围也一并更新（R3-S-3）。
   - 脚本在改版本戳之前已经会写出备份 `state.sqlite.v15.bak-<ms>`（`migrate-state-version.mjs:189`）。
@@ -223,7 +251,7 @@ finish 和控制回执按 `isDocEndpoint` 分派。结果分类与 IM 相同，�
 
 - 这是一条飞书文档评论；
 - 它是全文评论还是划词评论；
-- 划词原文（标为不可信）；
+- 划词原文（标为不可信），取自持久 Delivery 的 `docComment.quote`，不取入站事件。这样首次投递、排队后投递、重启后再投递渲染出来的内容完全一样；
 - 回复会追加在该评论下，评论区所有人都能看到；
 - 读取上下文用 `pet_locus_doc_context`；
 - 回复里的 @ 不会产生提醒；
@@ -312,3 +340,12 @@ capability 拒绝不新增类别，复用 `association-unproven`。
 | 5 | IM dry-run 只在启用和显式重连时执行，监督器自动重启时不跑（D2） |
 | 6 | 只读工具预算合并为 28 000 码元（D10） |
 | 7 | 删除 `subscribe-unavailable`、`im-preconditions-unmet` 两个理由，以及 `+subscribe --help` 门禁（D2、D13） |
+
+## Round 4 → Round 5（所有者 2026-10-16 指出：重连或重启后内存事实丢失）
+
+| 问题 | 处置 |
+|---|---|
+| 划词原文只在入站时查询得到。积压或重启后由 `dispatchNext` 从持久记录重建消息时会丢失；该处还把 `chatType` 写死为 `'group'` | Delivery 新增可选字段 `docComment.quote`（D5）；v16 由“不新增字段”改为“新增一个可选字段”（D11）；prompt 的划词原文改为取自持久 Delivery（D12）；`dispatchNext` 改为按 `sourceOf(endpoint)` 重建 |
+| 是否把“来源”也存成字段 | 不存。可以从前缀推出，另存会出现两份真相（D5 表格） |
+| R5 评审 RC1–RC5 | 截断标记计入 2 000 上限，并由持久写入路径再校验；修正已落地代码中“v16 不新增字段”的旧说法；补 test-plan 行、tasks 条目和投影点清单；D5 表补 allowlist、表情目标、披露回执三行；准入入口与前缀读取位置的说法和 D7 对齐 |
+
