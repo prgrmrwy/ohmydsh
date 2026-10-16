@@ -4,7 +4,7 @@
 - 入口是 `chatId` 加可选的 `threadId`（`packages/dsh-pet/src/host/locus/context.ts` 中的 `LocusEndpoint`）。
 - 回复目标是 `{chatId, messageId, threadId?}`，`isSafeLocusReplyTarget` 要求它与入口同属一个 chat。
 - 入站由 `ChannelSubscription` 运行 `lark-cli event consume im.message.receive_v1 --as bot`（`channel/subscription.ts`）。`event consume` 经过 lark-cli 的每应用 bus daemon：bus 持有到飞书的唯一一条 WebSocket，并在本机向各 consume 广播。
-- 入群事件 `im.chat.member.bot.added_v1` 在 `ChannelService` 里有一条可选订阅，但生产装配刻意不启用（`src/index.ts` 约 L3546：`botLifecycleInitializer` 不设置，于是该订阅从不启动）。
+- 入群事件 `im.chat.member.bot.added_v1` 在 `ChannelService` 里有一条可选订阅，但生产装配刻意不启用（`src/index.ts`（`botLifecycleInitializer` 未接线处）：`botLifecycleInitializer` 不设置，于是该订阅从不启动）。
 
 参考实现 `~/corp/session-links`（Claude 插件）的做法：用隐藏命令 `lark-cli event +subscribe --event-types drive.notice.comment_add_v1` 接收评论事件，用 `drive +batch-query-comments` 取正文，用 `drive +add-reply` 回复。它把 `+subscribe` 与 `event consume` 混用，没有量化过丢失。
 
@@ -353,5 +353,5 @@ capability 拒绝不新增类别，复用 `association-unproven`。
 
 | 项 | 处置 |
 |---|---|
-| 「自动主会话按群建立…」原文写“bot 入群 SHALL 可初始化关联结构”，场景“Project 群先行”要求入群即建主会话 | 与已归档 `pet-locus-on-demand-tree`（“入群不产生任何持久后果，首个 @ 按需建树”）及当前代码、测试（`locus-on-demand-provisioning.test.ts` “bot-added has zero repository effect”）相矛盾，属于该 change 当时漏改规范。本 change 已 MODIFY 这条 requirement，因此一并修正：段落改为“入群不产生持久后果”，场景改名为“入群不产生持久后果”，“重复初始化”去掉入群重投的说法。只改规范文字，不改代码 |
+| 「自动主会话按群建立…」原文写“bot 入群 SHALL 可初始化关联结构”，场景“Project 群先行”要求入群即建主会话 | 与已归档 `pet-locus-on-demand-tree`（“入群不产生任何持久后果，首个 @ 按需建树”）及当前代码、测试（`locus-on-demand-provisioning.test.ts` “bot-added has zero repository effect”）相矛盾，属于该 change 当时漏改规范。本 change 已 MODIFY 这条 requirement，因此一并修正：段落改为“入群不产生持久后果”，场景改名为“入群不建自动主会话”（与现行 spec 中已有的同名场景“入群不产生持久后果”区分），“重复初始化”去掉入群重投的说法。只改规范文字，不改代码 |
 

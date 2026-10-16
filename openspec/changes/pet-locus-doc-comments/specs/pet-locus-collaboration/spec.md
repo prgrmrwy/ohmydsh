@@ -180,9 +180,9 @@ Host SHALL 维护进行中/完成/失败等控制反馈；反馈失败不阻断�
 
 系统 SHALL 为协作先行的群或文档，在已配置且可用的 default workspace 中创建一个该群或该文档专属的自动主会话，并持久复用。不同群、不同文档，或群与文档之间，MUST NOT 因 default workspace 相同而共用自动主会话。文档根由带前缀的 `chatId`（`doc:docx:<token>`）标识。本期 MUST NOT 应用旧 chat 到 workspace 覆盖路由。default 缺失/不可用时 SHALL 停止创建并诊断，不能选择其它目录。
 
-bot 入群 MUST NOT 产生任何持久后果：不建主会话、不建子会话、不写 locus 记录，也不分析历史或执行项目工作。关联结构 SHALL 由 allowlist 成员的首个合格 @ 按需建立，并在同一次准入中投递该消息。这与已归档的 `pet-locus-on-demand-tree` 决定以及当前实现一致；此前这里写的是“入群可初始化”，与之不符，本 change 一并修正。
+bot 入群 MUST NOT 产生任何持久后果：不建主会话、不建子会话、不写 locus 记录，也不分析历史或执行项目工作。关联结构 SHALL 由 allowlist 成员的首个合格 @ 按需建立，并在同一次准入中投递该消息。
 
-#### Scenario: 入群不产生持久后果
+#### Scenario: 入群不建自动主会话
 - **WHEN** bot 被拉进一个尚无关联的群
 - **THEN** 不产生群级标记、主会话、子会话或 locus 记录，直到该群出现首个合格 @
 

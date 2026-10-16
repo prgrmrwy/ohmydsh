@@ -263,7 +263,7 @@ async function composeOnDemandHost(options: { readonly failFirstCreate?: boolean
 }
 
 describe('locus tree is built on demand by the first qualifying @ message', () => {
-  it('spec Scenario "入群不产生持久后果": bot-added has zero repository effect: no group marker exists until the first @', async () => {
+  it('spec Scenario "入群不建自动主会话": bot-added has zero repository effect: no group marker exists until the first @', async () => {
     const host = await composeOnDemandHost()
     try {
       // No admission at all yet — simulating that `im.chat.member.bot.added_v1`

@@ -188,6 +188,7 @@ describe('lifecycle', () => {
     expect(children[0]?.args).toContain('+subscribe')
     expect(children[0]?.args.join(' ')).toContain('im.message.receive_v1,drive.notice.comment_add_v1')
     expect(children.some(item => item.args.includes('im.chat.member.bot.added_v1'))).toBe(false)
+    // Structural half of 入群不建自动主会话: nothing even subscribes to bot-join.
 
     // A comment line reaches the comment path and is not mistaken for a group
     // message: it creates no Task or Invocation on the IM pipeline.

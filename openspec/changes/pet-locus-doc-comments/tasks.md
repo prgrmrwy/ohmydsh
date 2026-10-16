@@ -114,7 +114,7 @@
 
   三者都用 bot 身份，并且要区分“调用失败”和“结果为空”。评论范围查询失败时，在进程内重试最多 2 次，间隔 2 秒、5 秒，重试不持久化
 - [x] 4.3 实现评论事件解析（compact 的 GenericProcessor 形态，`notice_meta` 是嵌套字段）、`file_type` 过滤、全文/划词判定、`comment_id` 已有 locus 时的短路，以及按“首条合格事件”建树。按文档根建立专属自动主会话；划词评论先到时，先建文档根主会话，再建评论级子会话
-- [x] 4.4 写失败测试「文档首次评论建立文档专属主会话」（`locus-on-demand-provisioning.test.ts`），然后实现。回归行翻 🟢：Project 群先行、首次消息补齐、重复初始化、default 不可用
+- [x] 4.4 写失败测试「文档首次评论建立文档专属主会话」（`locus-on-demand-provisioning.test.ts`），然后实现。回归行翻 🟢：Project 群先行（现名「入群不建自动主会话」）、首次消息补齐、重复初始化、default 不可用
 - [x] 4.6 投影点逐个带上 `docComment`，并按来源重建（R5-RC3，pitfalls §11）。实现说明：两处 `dispatchNext` 重建统一改为调用 `messageFromDeliveryRecord`，按 `sourceOf` 区分；入站接受时传入 `docComment`；render 钩子只读 `current.docComment`；`context.ts` 的两处投影已补齐；`findCurrent*` 在第 7 组用到时再检查。测试 `locus-doc-redelivery.test.ts` 做过两次变异检查，分别撤掉“按来源重建”和“持久化写入”，测试都会失败：
   - `locus-controller.ts` 的 `dispatchNext` 两处消息重建（约 :1041-1051、:1086-1098）：带上 `docComment`，写死的 `chatType: 'group'` 改为按 `sourceOf(endpoint)` 决定；
   - 入站接受输入（约 :1306-1320）：把 `docComment` 传给 `acceptDelivery`；

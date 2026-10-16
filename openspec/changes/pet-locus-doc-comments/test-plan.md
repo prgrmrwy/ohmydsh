@@ -66,7 +66,7 @@ This table is a live ledger. During apply, flip each row from 🔴 to 🟢 when 
 | specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 多个文档入口短码互不相同 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "多个文档入口短码互不相同" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 同前缀的评论入口短码可区分 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "同前缀的评论入口短码可区分" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 文档标题不可得 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "文档标题不可得" | 🟢 green |
-| specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | 入群不产生持久后果 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "入群不产生持久后果" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | 入群不建自动主会话 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "入群不建自动主会话" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | 首次消息补齐 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "首次消息补齐" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | 重复初始化 | packages/dsh-pet/test/locus-controller.test.ts | spec Scenario "重复初始化" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | default 不可用 | packages/dsh-pet/test/channel-service.test.ts | spec Scenario "default 不可用" | 🟢 green |
@@ -177,6 +177,7 @@ This table is a live ledger. During apply, flip each row from 🔴 to 🟢 when 
 - **"文档 Delivery 不调用 IM 接口"**: record every lark-cli argv the fake client receives across accept, deliver and finish. Assert there are no `im` subcommands, IM `api` paths, or chat member/history calls.
 - **"无建立控件"**: render the management view model, enumerate its interactive controls, and assert that none accepts a URL, token or session id input.
 - **"内容中嵌入指令"**: assert that the line appears only inside the tool-result text block, after the fixed untrusted label, and is absent from the system and user messages in the composed turn.
+- **"入群不建自动主会话"**: the named test proves an untouched repository builds nothing before the first @. The guarantee is mainly structural: no bot-join event is subscribed (`SUBSCRIBED_EVENT_TYPES`; `channel-service.test.ts` 「单连接同时承载群消息与评论」 asserts no `im.chat.member.bot.added_v1` consumer), and `botLifecycleInitializer` is never wired (round-6 S1).
 - **"重启后再投递排队中的划词评论"**: use the real `LocusRepository`, reopened on the same `MemoryMedium`, and the real controller `dispatchNext`. A stubbed dispatch would repeat the pitfalls §11 "both layers green" trap. A counting fake `LarkClient` must record zero `queryDocComment` calls. Compare only the four comment facts named in the scenario (scope, quote, trigger text, sender), because the routing preamble and the readability line legitimately differ after a restart.
 - **"多个文档入口短码互不相同" / "同前缀的评论入口短码可区分"**: use the literal ids from the spec. The expected comment codes are `cmt·5186` and `cmt·0665`.
 

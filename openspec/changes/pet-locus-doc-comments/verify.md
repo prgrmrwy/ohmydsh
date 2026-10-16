@@ -62,9 +62,7 @@
 
 ### Review Integrity
 - [x] Rounds 1–5 are recorded. Round 5 (`review-round5.md`) is APPROVE_WITH_CHANGES with CHANGES_APPLIED: yes.
-- [ ] Verdict not stale.
-  - After round 5, `specs/pet-locus-collaboration` was edited once more. This is the owner-approved bot-join reconciliation; see the design.md section "Implementation-time spec reconciliation".
-  - A scoped **round 6** review of exactly that diff is required before PASS. Its result goes into `review.md`.
+- [x] Verdict not stale. The only post-round-5 spec edit is the owner-approved bot-join reconciliation. It received a scoped **round 6** review: APPROVE_WITH_CHANGES, with RC1 applied and re-checked, `CHANGES_APPLIED: yes` (`review.md`). Nothing has changed since.
 - [x] All findings from rounds 1–5 were fixed or rebutted, and the rebuttals were accepted by the reviewer.
 
 ### Change Delivery
@@ -74,9 +72,10 @@
 
 DECISION: FAIL
 
-❌ Not yet PASS, for three concrete reasons:
-1. Round 6 (the scoped review of the bot-join reconciliation) is pending.
-2. Tasks 10.5 and 10.6, the live acceptance and the upgrade/rollback drill, need the owner.
-3. Task 10.4 (`sync` idempotence) is blocked in this worktree by the missing `@byted` registry.
+❌ Not yet PASS, for two concrete reasons:
+1. Tasks 10.5 and 10.6, the live acceptance and the upgrade/rollback drill, need the owner.
+2. Task 10.4 (`sync` idempotence) is blocked in this worktree by the missing `@byted` registry.
+
+The review is complete: round 6 closed with `CHANGES_APPLIED: yes`.
 
 The code-level evidence above is complete. Once these are resolved, this file is re-run and can reach PASS.
