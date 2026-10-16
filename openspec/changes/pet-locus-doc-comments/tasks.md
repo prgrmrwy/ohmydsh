@@ -222,8 +222,8 @@
 
 ## 9. 文档
 
-- [ ] 9.1 `dsh.yaml` 中 Pet 的 note：lark-cli 最低版本改为 1.0.97；写明升级 lark-cli 后需重测 E1、E8、E10、E12、E13；补充飞书应用的部署前置——长连接事件、评论读写、docx 读取、联系人基本信息；写明“Pet 运行期间，同一应用的其它 profile 不能做事件订阅，建议 Pet 独占一个应用”。这条替代原 onboarding 步骤
-- [ ] 9.2 `docs/architecture/dsh-plugin-integration-pitfalls.md` 新增一节，写三条可复用的教训：
+- [x] 9.1（已完成：note 有 600 码点上限，现约 540，只写最低版本、独占应用和 README 指引；部署前置与升级复测清单写入 `packages/dsh-pet/README.md`、`README.zh.md` 的“文档评论”一节。仓库根 `npm test` 回到基线的 8 个已有失败）`dsh.yaml` 中 Pet 的 note：lark-cli 最低版本改为 1.0.97；写明升级 lark-cli 后需重测 E1、E8、E10、E12、E13；补充飞书应用的部署前置——长连接事件、评论读写、docx 读取、联系人基本信息；写明“Pet 运行期间，同一应用的其它 profile 不能做事件订阅，建议 Pet 独占一个应用”。这条替代原 onboarding 步骤
+- [x] 9.2（已完成：新增 §14，覆盖分流、shim 信号与就绪行，并补充评论查询必须重试）`docs/architecture/dsh-plugin-integration-pitfalls.md` 新增一节，写三条可复用的教训：
   - 同一应用的多个事件连接会被分流，而且两侧都不报错；
   - npm shim 不会转发信号，只杀 shim 会留下孤儿原生进程；
   - `+subscribe` 打出 `Connected.` 时还没有完成握手

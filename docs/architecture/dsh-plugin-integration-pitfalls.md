@@ -795,3 +795,27 @@ inbox → 模型被拉回去再走一步（去写卡）→ 以一句写卡汇报
    401——真实 bridge 属于后者。这与第 7 节同源：替身与真实系统形态不一致时，
    测试会长期全绿而真机必挂。相关判据见记忆卡
    `verify-with-the-real-callers-shape`。
+
+---
+
+## 14. lark-cli 事件订阅：第二条连接会静默分流，`Connected.` 不代表已连上
+
+`dsh-pet` 把飞书入站从 `event consume` 迁到单条 `event +subscribe --compact`，用来同时接收群消息和文档评论（change `pet-locus-doc-comments`）。下面三条约束都只能实测得到：调用都成功、类型都通过、日志也没有报错，但结果是错的。
+
+1. **同一个应用只能有一条事件连接，否则事件会被分流，两端都不报错。** 飞书长连接是集群模式：同一应用开了两条连接时，每个事件只随机投给其中一条，另一条收不到，也没有任何报错。`event consume` 走的本机 bus daemon 算一条连接，`+subscribe` 自己再开一条 WebSocket，两者同时存在时，各自大约丢一半事件。
+   - **判据**：`lark-cli api GET /open-apis/event/v1/connection --as bot` 返回的 `data.online_instance_cnt`，正常应为 1。
+   - **做法**：每次拉起订阅进程之前，先确认计数为 0，不为 0 时最多等 40 秒，留给旧连接自然释放。
+   - 进程内的单实例锁只能拦住同一台机器上的第二个 `+subscribe`，拦不住 bus 上的 consume，也拦不住其它机器上的连接。
+
+2. **npm shim 不转发信号。只杀 shim，原生进程会成为孤儿，继续占着连接和锁。** `lark-cli` 的 npm 入口用 `execFileSync` 拉起原生二进制，SIGTERM 只会送到 shim。原生进程还忽略 SIGPIPE，Host 崩溃后它会一直存活。
+   - **做法**：以 `detached: true` 拉起，让它成为独立的进程组；停止时对整个组发信号（`process.kill(-pid, …)`）。SIGKILL 只发给本 Host 仍持有存活句柄的组，防止 pgid 被复用后杀错进程。
+   - Host 崩溃遗留的进程不要尝试自动识别：旧版本没写 pid 文件，pid 本身也可能被复用。交给连接门禁判为冲突，并在诊断里给出 `pgrep -fl "event +subscribe"`，由用户手动处理。
+
+3. **`+subscribe` 在握手之前就会打出 `Connected.`。** 拿这行当就绪信号，进程会被误判为已连接，而这时事件其实还没开始投递。真正的就绪信号是 stderr 上 SDK 打出的 `connected to wss://…` 这一行。
+   - 这一行的查询串里带着 `access_key` 和 `ticket`。stderr 只能做模式匹配，原文绝不能写入日志、持久化或诊断。
+   - 不要加 `--quiet`：它会连这一行一起吞掉。
+   - SDK 在进程内自动重连时会再打一次这一行。启动水位每个子进程只取第一次，否则重连后补投的事件会被当成历史消息丢掉。
+
+另外一条：文档评论事件的 compact 输出里没有 `is_whole`。要判断是全文评论还是划词评论，必须以 bot 身份查一次评论（`drive +batch-query-comments`）。长连接事件处理完就算确认，不会重推，所以这次查询失败时要在进程内重试，否则这条评论就永久丢失。
+
+**排查顺序**：先看连接计数；再看本机有没有遗留的 `+subscribe` 进程；最后看 bus（`lark-cli event status`）。
