@@ -122,15 +122,15 @@ This table is a live ledger. During apply, flip each row from 🔴 to 🟢 when 
 | specs/pet-locus-doc-comments/spec.md → 评论出站只经受管完成工具且反馈 fail-soft | 表情接口失败 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "表情接口失败" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → 评论出站只经受管完成工具且反馈 fail-soft | 评论回复发送结果未知 | packages/dsh-pet/test/doc-comment-egress.test.ts | spec Scenario "评论回复发送结果未知" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → 评论出站只经受管完成工具且反馈 fail-soft | shell 档直接调用评论或文档写命令 | packages/dsh-pet/test/locus-lark-cli-egress-guard.test.ts | spec Scenario "shell 档直接调用评论或文档写命令" | 🟢 green |
-| specs/pet-locus-doc-comments/spec.md → IM 专属能力在文档入口按明确规则处置 | 文档子会话的工具面 | packages/dsh-pet/test/locus-composition.test.ts | spec Scenario "文档子会话的工具面" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → IM 专属能力在文档入口按明确规则处置 | 文档 Delivery 不调用 IM 接口 | packages/dsh-pet/test/doc-comment-im-scoping.test.ts | spec Scenario "文档 Delivery 不调用 IM 接口" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → IM 专属能力在文档入口按明确规则处置 | 触发者姓名查询失败 | packages/dsh-pet/test/doc-comment-im-scoping.test.ts | spec Scenario "触发者姓名查询失败" | 🔴 red |
+| specs/pet-locus-doc-comments/spec.md → IM 专属能力在文档入口按明确规则处置 | 文档子会话的工具面 | packages/dsh-pet/test/locus-composition.test.ts | spec Scenario "文档子会话的工具面" | 🟢 green |
+| specs/pet-locus-doc-comments/spec.md → IM 专属能力在文档入口按明确规则处置 | 文档 Delivery 不调用 IM 接口 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "文档 Delivery 不调用 IM 接口" | 🟢 green |
+| specs/pet-locus-doc-comments/spec.md → IM 专属能力在文档入口按明确规则处置 | 触发者姓名查询失败 | packages/dsh-pet/test/locus-delivery-prompt.test.ts | spec Scenario "触发者姓名查询失败" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → IM 专属能力在文档入口按明确规则处置 | 文档待办跳转 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "文档待办跳转" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → IM 专属能力在文档入口按明确规则处置 | IM 入口不受影响 | packages/dsh-pet/test/doc-comment-im-scoping.test.ts | spec Scenario "IM 入口不受影响" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → 文档入口具备 caller-bound 的只读上下文 | 读取当前评论线程与文档 | packages/dsh-pet/test/locus-doc-context-tool.test.ts | spec Scenario "读取当前评论线程与文档" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → 文档入口具备 caller-bound 的只读上下文 | 内容中嵌入指令 | packages/dsh-pet/test/locus-doc-context-tool.test.ts | spec Scenario "内容中嵌入指令" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → 文档入口具备 caller-bound 的只读上下文 | 无 current Delivery 时读取 | packages/dsh-pet/test/locus-doc-context-tool.test.ts | spec Scenario "无 current Delivery 时读取" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → 文档入口具备 caller-bound 的只读上下文 | bot 失去文档读取权限 | packages/dsh-pet/test/locus-doc-context-tool.test.ts | spec Scenario "bot 失去文档读取权限" | 🔴 red |
+| specs/pet-locus-doc-comments/spec.md → IM 专属能力在文档入口按明确规则处置 | IM 入口不受影响 | packages/dsh-pet/test/locus-delivery-prompt.test.ts | spec Scenario "IM 入口不受影响" | 🟢 green |
+| specs/pet-locus-doc-comments/spec.md → 文档入口具备 caller-bound 的只读上下文 | 读取当前评论线程与文档 | packages/dsh-pet/test/locus-doc-context-tool.test.ts | spec Scenario "读取当前评论线程与文档" | 🟢 green |
+| specs/pet-locus-doc-comments/spec.md → 文档入口具备 caller-bound 的只读上下文 | 内容中嵌入指令 | packages/dsh-pet/test/locus-doc-context-tool.test.ts | spec Scenario "内容中嵌入指令" | 🟢 green |
+| specs/pet-locus-doc-comments/spec.md → 文档入口具备 caller-bound 的只读上下文 | 无 current Delivery 时读取 | packages/dsh-pet/test/locus-doc-context-tool.test.ts | spec Scenario "无 current Delivery 时读取" | 🟢 green |
+| specs/pet-locus-doc-comments/spec.md → 文档入口具备 caller-bound 的只读上下文 | bot 失去文档读取权限 | packages/dsh-pet/test/locus-doc-context-tool.test.ts | spec Scenario "bot 失去文档读取权限" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → 管理面呈现文档入口且不提供新建入口 | 文档与评论嵌套呈现 | packages/dsh-pet/test/locus-management.test.ts | spec Scenario "文档与评论嵌套呈现" | 🔴 red |
 | specs/pet-locus-doc-comments/spec.md → 管理面呈现文档入口且不提供新建入口 | 标题不可得 | packages/dsh-pet/test/locus-management.test.ts | spec Scenario "标题不可得" | 🔴 red |
 | specs/pet-locus-doc-comments/spec.md → 管理面呈现文档入口且不提供新建入口 | 无建立控件 | packages/dsh-pet/test/locus-management.test.ts | spec Scenario "无建立控件" | 🔴 red |

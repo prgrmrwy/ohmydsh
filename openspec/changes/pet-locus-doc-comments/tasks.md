@@ -172,19 +172,25 @@
 
 ## 7. IM 专属能力处置与只读工具（D9、D10）
 
-- [ ] 7.1 写失败测试：
+- [x] 7.1 写失败测试：
   - `doc-comment-im-scoping.test.ts` 的 3 行；
   - `locus-composition.test.ts` 的“文档子会话的工具面”；
   - `locus-doc-context-tool.test.ts` 的 4 行
-- [ ] 7.2 实现：文档 Delivery 不调用媒体读取、读群探测、成员列表；触发者显示名改用 bot 身份按 open_id 查联系人，失败时降级（fail-soft）；投递 prompt 前言按 D12
-- [ ] 7.3 实现 `pet_locus_doc_context`：
+- [x] 7.2 实现：文档 Delivery 不调用媒体读取、读群探测、成员列表；触发者显示名改用 bot 身份按 open_id 查联系人，失败时降级（fail-soft）；投递 prompt 前言按 D12
+- [x] 7.3 实现 `pet_locus_doc_context`：
   - caller-bound，不接受任何 selector；
   - 线程与正文合计 28 000 UTF-16 码元，线程在前；截断时标记截断位置及原始总长度；
   - 结果以固定的不可信标签开头；
   - 失败与空结果可区分。
 
   composition 按入口类别装配：文档子会话有 `pet_locus_doc_context`、没有 `pet_locus_chat_history`。同步更新 attestation 白名单，以及 `ledger-tool-scope` / `executor-scope` 的可见工具断言
-- [ ] 7.4 重构。全量测试保持绿色
+- [x] 7.4 重构。全量测试保持绿色。第 7 组完成情况：
+  - 文档 prompt：新增独立段落，写明文档评论类型、不可信的划词原文、回复在评论区公开可见、读取上下文用 `pet_locus_doc_context`、@ 不产生提醒；提问者不在 allowlist 时加一句不得粘贴私密内容的提醒。原有的群读取能力说明和 @ 渲染承诺只在 IM 入口出现。
+  - 文档 Delivery 不调用媒体读取、群读取探测和群 bot 列表；姓名改用 `contact +get-user` 查，查不到就只显示 open_id，不阻断投递。
+  - `pet_locus_doc_context`：不接受任何参数；读取目标由调用者的 locus 和当前 Delivery 推出；线程与正文合计 28 000 码元，线程在前；结果以不可信标签开头；读取失败时返回平台错误码。
+  - 装配：按入口类别二选一，文档子会话拿 doc 读取工具，IM 子会话拿群历史读取工具。attestation 白名单已加入新工具，注册数量的约束从 8 改为 9，并写明理由。
+  - 已做的变异检查：媒体守卫。
+  - 全量测试：3184 passed / 1 failed（基线）。
 
 ## 8. 管理面与待办跳转（D14）
 

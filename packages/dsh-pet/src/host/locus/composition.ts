@@ -72,6 +72,7 @@ export const LOCUS_CALLER_BOUND_TOOLS: readonly string[] = Object.freeze([
   'pet_inquire',
   'pet_inquiry_answer',
   'pet_locus_chat_history',
+  'pet_locus_doc_context',
   'pet_locus_finish',
   'pet_locus_ledger_read',
   'pet_locus_parent_lookup',

@@ -1752,6 +1752,10 @@ export class LocusChannelController {
     const base: ContentBlock[] = [{ type: 'text', text }]
     // Exact fence immediately before platform enumeration/download starts.
     if (!await isExactCurrent()) return undefined
+    // Media lives on IM messages only; a doc trigger id never reaches IM (D9).
+    if (messageSource(input.message) === 'doc-comment') {
+      return { typed: base, textFallback: base, hasImage: false }
+    }
     const media = this.deps.media
     if (media === undefined || !media.available) {
       // No selector or fallback is exposed. A Host without reliable media

@@ -1257,16 +1257,28 @@ async function initialize(
             // instead of two copies that can drift (design D10).
             requestExecution: input => runTodoExecutionRequest(input),
           },
-          // The entrance read is published only when this runtime actually has
-          // a bot read port: a tool that can never succeed must not appear in
-          // the child's tool surface at all.
-          ...(larkClient.readEntranceHistory === undefined ? {} : {
-            locusHistory: {
-              loci: intentTriageDeps.loci,
-              cursor: locusHistoryCursor,
-              read: input => larkClient.readEntranceHistory!(input),
-            },
-          }),
+          // One read tool per child, by entry kind (D9/D10): a document child
+          // gets the doc read and never the group-history read, and an IM child
+          // never sees the doc read. Each is published only when the runtime
+          // really has the port, so a tool that can never succeed never appears.
+          ...(isDocEndpoint(locusRepository.getLocus(composition.locusId)?.endpoint ?? { chatId: '' })
+            ? (larkClient.queryDocComment === undefined || larkClient.fetchDocMarkdown === undefined ? {} : {
+              locusDocContext: {
+                loci: intentTriageDeps.loci,
+                currentMessageId: caller => locusRepository.listDeliveries(caller.locusId)
+                  .find(record => record.generation === caller.generation &&
+                    (record.status === 'current' || record.status === 'finishing') &&
+                    record.queueState === 'current')?.messageId,
+                client: larkClient,
+              },
+            })
+            : (larkClient.readEntranceHistory === undefined ? {} : {
+              locusHistory: {
+                loci: intentTriageDeps.loci,
+                cursor: locusHistoryCursor,
+                read: input => larkClient.readEntranceHistory!(input),
+              },
+            })),
         })
         // The circle surface rides the SAME synchronous boundary, so a locus
         // child never starts its first turn able to read shared facts but not
@@ -3029,8 +3041,12 @@ async function initialize(
         listChatBots: chatId => larkClient.listChatBots(chatId),
         // Names the asker in the delivery prompt, so the agent addresses a
         // display name instead of echoing the open id into the chat.
+        // Documents have no chat members: name the commenter via contact (D9),
+        // fail-soft to the open id.
         resolveMemberName: async (chatId, openId) =>
-          await larkClient.resolveMemberName?.(chatId, openId),
+          isDocEndpoint({ chatId })
+            ? await larkClient.contactName?.(openId).catch(() => undefined)
+            : await larkClient.resolveMemberName?.(chatId, openId),
       },
       // Disclose ask-scope on a document's FIRST entry only (D7), proven from
       // durable loci of that document root, so no flag is stored.
@@ -3089,7 +3105,8 @@ async function initialize(
         // cancellable with the delivery. `larkReady` alone is a transport fact:
         // the incident's child was told it could read the group while the read
         // actually failed, so the read claim now comes from a real attempt.
-        const readability = await measureEntranceReadability(
+        // A document has no group history to probe; never send its id to IM.
+        const readability = isDocEndpoint(record.endpoint) ? 'unconfirmed' as const : await measureEntranceReadability(
           {
             chatId: record.endpoint.chatId,
             ...(record.endpoint.threadId === undefined ? {} : { threadId: record.endpoint.threadId }),
@@ -3143,6 +3160,8 @@ async function initialize(
             // Doc facts come from the PERSISTED Delivery only (D5/D12), so first,
             // queued and post-restart dispatch render the same comment facts.
             ...(current?.docComment === undefined ? {} : { docComment: current.docComment }),
+            // Recomputed at render against the CURRENT allowlist (D5/D12).
+            senderAllowlisted: repository.getChannelConfig().allowOpenIds.includes(message.senderOpenId),
           },
           deliveries: locusRepository.listDeliveries(record.id),
           ...(current === undefined ? {} : { currentDeliveryId: current.deliveryId }),

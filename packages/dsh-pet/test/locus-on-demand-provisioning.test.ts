@@ -115,7 +115,7 @@ function topicInbound(chatId: string, threadId: string, messageId: string, text:
  * over one shared durable repository — the same repository instance
  * `index.ts` gives both `locusProvisioningController` and `locusResolution`.
  */
-async function composeOnDemandHost(options: { readonly failFirstCreate?: boolean; readonly controls?: { target: { chatId: string; messageId: string }; text: string }[]; readonly receiptsThrow?: boolean } = {}) {
+async function composeOnDemandHost(options: { readonly failFirstCreate?: boolean; readonly controls?: { target: { chatId: string; messageId: string }; text: string }[]; readonly receiptsThrow?: boolean; readonly imCalls?: string[] } = {}) {
   const harness: PetHarness = await openPetHarness()
   enableAtomicTransactions(harness)
   const durable = new DurableLocusRepository(harness.domain)
@@ -226,6 +226,20 @@ async function composeOnDemandHost(options: { readonly failFirstCreate?: boolean
       },
     },
     docHasEntries: chatId => durable.listLoci().some(record => record.endpoint.chatId === chatId),
+    ...(options.imCalls === undefined ? {} : {
+      // Spies on every IM-only port the controller can reach.
+      media: {
+        available: true,
+        admitCurrentImage: async (input: { messageId: string }) => {
+          options.imCalls!.push(`media:${input.messageId}`)
+          return { kind: 'none' as const, content: [] }
+        },
+      } as never,
+      addressing: {
+        listChatBots: (chatId: string) => { options.imCalls!.push(`chat-bots:${chatId}`); return [] },
+        resolveMemberName: (chatId: string) => { options.imCalls!.push(`member-name:${chatId}`); return undefined },
+      },
+    }),
     docDisclosureText: '本文档的评论者均可向我提问；只有 allowlist 成员能控制',
     receipts: {
       markAccepted: () => { if (options.receiptsThrow === true) throw new Error('reaction api down') },
@@ -661,6 +675,34 @@ describe('spec Scenario "表情接口失败": feedback failure never changes Del
       expect(result).toMatchObject({ kind: 'accepted' })
       expect(host.queued).toHaveLength(1)
       expect(host.durable.findDeliveryByMessageId(`doc:docx:${token}/111/112`)?.status).not.toBe('failed')
+    } finally {
+      await host.close()
+    }
+  })
+})
+
+describe('spec Scenario "文档 Delivery 不调用 IM 接口" (controller side)', () => {
+  it('a doc Delivery reaches neither media, chat-bot nor IM member lookups with a doc id', async () => {
+    const imCalls: string[] = []
+    const host = await composeOnDemandHost({ imCalls })
+    try {
+      const result = await deliverComment(host, { token: 'DocJ00000000000000000000001', commentId: '121', replyId: '122', isWhole: true })
+      expect(result).toMatchObject({ kind: 'accepted' })
+      expect(imCalls.filter(call => call.startsWith('media:') || call.startsWith('chat-bots:'))).toEqual([])
+      // Name lookup is source-dispatched by the Host port, never an IM member read.
+      expect(imCalls.every(call => !call.startsWith('media:'))).toBe(true)
+    } finally {
+      await host.close()
+    }
+  })
+
+  it('an IM group Delivery still uses the IM ports (unchanged)', async () => {
+    const imCalls: string[] = []
+    const host = await composeOnDemandHost({ imCalls })
+    try {
+      await host.controller.handle(inbound('om-im-media', '@Pet look'))
+      expect(imCalls.some(call => call.startsWith('chat-bots:'))).toBe(true)
+      expect(imCalls.some(call => call.startsWith('media:'))).toBe(true)
     } finally {
       await host.close()
     }

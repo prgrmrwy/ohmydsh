@@ -233,3 +233,82 @@ describe('the delivery states the measured entrance readability', () => {
     expect(prompt).toContain('不可读')
   })
 })
+
+describe('doc-comment delivery prompt (pet-locus-doc-comments D12)', () => {
+  const ROOT = 'doc:docx:Dx0000000000000000000000001'
+  const docRecord = (threadId?: string) => record({
+    endpoint: threadId === undefined ? { chatId: ROOT } : { chatId: ROOT, threadId },
+  })
+  const docMessage = (threadId?: string) => message({
+    messageId: `${ROOT}/${threadId ?? '1'}/2`,
+    text: '这里为什么这样设计',
+    replyTarget: { chatId: ROOT, ...(threadId === undefined ? {} : { threadId }), messageId: `${ROOT}/${threadId ?? '1'}/2` },
+  })
+
+  it('spec Scenario "划词评论进入评论级入口": an anchored comment names its kind and carries the untrusted quote', () => {
+    const prompt = renderLocusDeliveryFor({
+      record: docRecord('7696944637407137026'),
+      message: { ...docMessage('7696944637407137026'), docComment: { quote: '接口已有' } },
+      deliveries: [],
+    })
+
+    expect(prompt).toContain('飞书文档评论')
+    expect(prompt).toContain('划词评论')
+    expect(prompt).toMatch(/不可信[\s\S]*接口已有/)
+    expect(prompt).toContain('pet_locus_doc_context')
+    expect(prompt).toContain('评论区所有人')
+  })
+
+  it('a whole-doc comment says so and has no quote', () => {
+    const prompt = renderLocusDeliveryFor({ record: docRecord(), message: docMessage(), deliveries: [] })
+
+    expect(prompt).toContain('全文评论')
+    expect(prompt).not.toContain('划词原文')
+  })
+
+  it('spec Scenario "文档 Delivery 不调用 IM 接口" (prompt side): no group-read probe text, no @ promise, no chat history tool', () => {
+    for (const position of [[], [delivery('d0', { inboxMessageId: 'inbox-0' })]]) {
+      const prompt = renderLocusDeliveryFor({
+        record: docRecord('9'), message: { ...docMessage('9'), docComment: { quote: 'q' } }, deliveries: position,
+      })
+      expect(prompt).not.toContain('本入口读取能力（本次实测）')
+      expect(prompt).not.toContain('pet_locus_chat_history')
+      expect(prompt).not.toContain('渲染成真实提醒')
+      expect(prompt).toContain('@ 不会产生提醒')
+    }
+  })
+
+  it('tells the child not to paste private project content unless the asker is allowlisted', () => {
+    const outsider = renderLocusDeliveryFor({
+      record: docRecord(), message: { ...docMessage(), senderAllowlisted: false }, deliveries: [],
+    })
+    const owner = renderLocusDeliveryFor({
+      record: docRecord(), message: { ...docMessage(), senderAllowlisted: true }, deliveries: [],
+    })
+
+    expect(outsider).toContain('提问者不在 allowlist')
+    expect(owner).not.toContain('提问者不在 allowlist')
+  })
+
+  it('spec Scenario "IM 入口不受影响": the group prompt is unchanged', () => {
+    const prompt = renderLocusDeliveryFor({ record: record(), message: message(), deliveries: [], readability: 'readable' })
+
+    expect(prompt).toContain('本入口读取能力（本次实测）')
+    expect(prompt).toContain('渲染成真实提醒')
+    expect(prompt).not.toContain('飞书文档评论')
+  })
+})
+
+describe('spec Scenario "触发者姓名查询失败"', () => {
+  it('a doc prompt with no resolved name shows only the open id and still renders', () => {
+    const ROOT = 'doc:docx:Dx0000000000000000000000001'
+    const prompt = renderLocusDeliveryFor({
+      record: record({ endpoint: { chatId: ROOT } }),
+      message: message({ messageId: `${ROOT}/1/2`, senderOpenId: 'ou_commenter', replyTarget: { chatId: ROOT, messageId: `${ROOT}/1/2` } }),
+      deliveries: [],
+    })
+    expect(prompt).toContain('ou_commenter')
+    expect(prompt).toContain('飞书文档评论')
+  })
+})
+
