@@ -26,6 +26,11 @@ export function isDocEndpoint(endpoint: { readonly chatId: string }): boolean {
   return endpoint.chatId.startsWith('doc:')
 }
 
+/** Locus source derived from the endpoint; the persisted form never stores it. */
+export function sourceOf(endpoint: { readonly chatId: string }): 'im' | 'doc-comment' {
+  return isDocEndpoint(endpoint) ? 'doc-comment' : 'im'
+}
+
 /** Build the root id for a docx token, or `undefined` when the token is not a docx token. */
 export function docChatId(token: string): string | undefined {
   return DOC_TOKEN.test(token) ? `${DOC_CHAT_PREFIX}${token}` : undefined

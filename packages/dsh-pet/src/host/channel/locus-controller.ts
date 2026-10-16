@@ -24,6 +24,8 @@
 
 import { randomUUID } from 'node:crypto'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { sourceOf } from '../locus/doc-endpoint.js'
+import type { DeliveryDocComment } from '../locus/delivery.js'
 import type { LocusMediaPort } from './media.js'
 import {
   historicalUnknownAddressing,
@@ -95,12 +97,11 @@ export interface NormalizedLocusEvent {
   }[]
 }
 
-/** A normalized message with a canonical endpoint and trusted reply target. */
-export interface NormalizedLocusMessage {
+/** Facts every source carries. */
+interface NormalizedLocusMessageCore {
   readonly kind: 'message'
   readonly messageId: string
   readonly endpoint: LocusEndpoint
-  readonly chatType: 'p2p' | 'group'
   readonly senderOpenId: string
   readonly senderName?: string
   readonly text: string
@@ -109,6 +110,53 @@ export interface NormalizedLocusMessage {
   readonly replyTarget: LocusReplyTarget
   readonly replyToMessageId?: string
   readonly createdAt?: number
+}
+
+/**
+ * A normalized message with a canonical endpoint and trusted reply target,
+ * discriminated by `source` (openspec pet-locus-doc-comments D5). `source` is
+ * optional on the IM branch so existing IM callers stay valid; every branch
+ * point uses {@link messageSource}.
+ */
+export type NormalizedLocusMessage =
+  | (NormalizedLocusMessageCore & {
+      readonly source?: 'im'
+      readonly chatType: 'p2p' | 'group'
+    })
+  | (NormalizedLocusMessageCore & {
+      readonly source: 'doc-comment'
+      /** Persisted with the Delivery; absent for a whole-doc comment. */
+      readonly docComment?: DeliveryDocComment
+    })
+
+/** The source of a message: the explicit discriminant, else the endpoint prefix. */
+export function messageSource(message: NormalizedLocusMessage): 'im' | 'doc-comment' {
+  if (message.source !== undefined) return message.source
+  return sourceOf(message.endpoint)
+}
+
+/**
+ * Rebuild a message from a durable Delivery (backlog promotion, post-restart
+ * dispatch). The source comes from the endpoint prefix and doc facts from the
+ * persisted record, never from an inbound event, which no longer exists.
+ */
+export function messageFromDeliveryRecord(record: DeliveryRecord, endpoint: LocusEndpoint): NormalizedLocusMessage {
+  const core = {
+    kind: 'message' as const,
+    messageId: record.messageId,
+    endpoint: { ...endpoint },
+    senderOpenId: record.senderOpenId ?? '',
+    ...(record.senderName === undefined ? {} : { senderName: record.senderName }),
+    text: record.text ?? '',
+    addressing: record.addressing ?? projectDeliveryAddressing({ mentions: [], orderKnown: false }),
+    replyTarget: { ...record.feedbackTarget },
+    ...(record.replyToMessageId === undefined ? {} : { replyToMessageId: record.replyToMessageId }),
+    ...(record.acceptedAt === undefined ? {} : { createdAt: record.acceptedAt }),
+  }
+  return sourceOf(endpoint) === 'doc-comment'
+    ? { ...core, source: 'doc-comment', ...(record.docComment === undefined ? {} : { docComment: record.docComment }) }
+    // Group: the only IM chat type a backlog Delivery comes from today.
+    : { ...core, source: 'im', chatType: 'group' }
 }
 
 /** A normalized admission result consumed by the controller. */
@@ -1037,18 +1085,12 @@ export class LocusChannelController {
       } catch {
         this.log('delivery-persistence-failed')
       }
-      const locus = await this.resolveLocus(correlation.endpoint, {
-        kind: 'message',
-        messageId: claimed.messageId,
-        endpoint: { ...correlation.endpoint },
-        chatType: 'group',
-        senderOpenId: claimed.senderOpenId ?? '',
-        text: claimed.text ?? '',
-        addressing: claimed.addressing ?? projectDeliveryAddressing({ mentions: [], orderKnown: false }),
-        replyTarget: { ...claimed.feedbackTarget },
-        ...(claimed.replyToMessageId === undefined ? {} : { replyToMessageId: claimed.replyToMessageId }),
-        ...(claimed.acceptedAt === undefined ? {} : { createdAt: claimed.acceptedAt }),
-      }, false, this.signal)
+      const locus = await this.resolveLocus(
+        correlation.endpoint,
+        messageFromDeliveryRecord(claimed, correlation.endpoint),
+        false,
+        this.signal,
+      )
       if (
         locus === undefined ||
         locus.childSessionId !== claimed.childSessionId ||
@@ -1083,19 +1125,7 @@ export class LocusChannelController {
         locus,
         child,
         record: claimed,
-        message: {
-          kind: 'message',
-          messageId: claimed.messageId,
-          endpoint: { ...correlation.endpoint },
-          chatType: 'group',
-          senderOpenId: claimed.senderOpenId,
-          ...(claimed.senderName === undefined ? {} : { senderName: claimed.senderName }),
-          text: claimed.text,
-          addressing: claimed.addressing ?? projectDeliveryAddressing({ mentions: [], orderKnown: false }),
-          replyTarget: { ...claimed.feedbackTarget },
-          ...(claimed.replyToMessageId === undefined ? {} : { replyToMessageId: claimed.replyToMessageId }),
-          ...(claimed.acceptedAt === undefined ? {} : { createdAt: claimed.acceptedAt }),
-        },
+        message: messageFromDeliveryRecord(claimed, correlation.endpoint),
         signal: this.signal,
       })
     })
@@ -1133,7 +1163,8 @@ export class LocusChannelController {
     const original = named.addressing ?? historicalUnknownAddressing()
     const normalized = named.addressing === undefined ? { ...named, addressing: original } : named
     const port = this.deps.addressing
-    if (port === undefined || named.chatType !== 'group') return normalized
+    // Chat bot membership only exists for IM groups.
+    if (port === undefined || named.source === 'doc-comment' || named.chatType !== 'group') return normalized
     try {
       const result = await port.listChatBots(named.endpoint.chatId)
       let bots: readonly { readonly openId: string }[] | undefined
@@ -1312,6 +1343,7 @@ export class LocusChannelController {
       ...(message.senderName !== undefined ? { senderName: message.senderName } : {}),
       text: message.text,
       ...(message.addressing === undefined ? {} : { addressing: message.addressing }),
+      ...(message.source === 'doc-comment' && message.docComment !== undefined ? { docComment: message.docComment } : {}),
       ...(message.replyTarget.rootMessageId !== undefined
         ? { rootMessageId: message.replyTarget.rootMessageId }
         : {}),

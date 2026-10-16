@@ -128,6 +128,8 @@ export interface LocusRequestFacts {
    * turn; omission explicitly means that no prior Feishu target is reusable.
    */
   readonly replyTarget?: LocusReplyTarget
+  /** Persisted doc-comment facts for a doc Delivery (D5); absent for IM. */
+  readonly docComment?: { readonly quote: string }
 }
 
 /**
@@ -503,6 +505,8 @@ export interface LocusPromptMessageFacts {
   readonly addressing?: DeliveryAddressingProjection
   readonly replyToMessageId?: string
   readonly replyTarget?: LocusReplyTarget
+  /** Persisted doc-comment facts (D5); only ever taken from the durable Delivery. */
+  readonly docComment?: { readonly quote: string }
 }
 
 /**
@@ -576,6 +580,7 @@ export function locusDeliveryPromptContext(input: {
       ...(message.addressing === undefined ? {} : { addressing: message.addressing }),
       ...(message.replyToMessageId === undefined ? {} : { replyToMessageId: message.replyToMessageId }),
       ...(message.replyTarget === undefined ? {} : { replyTarget: message.replyTarget }),
+      ...(message.docComment === undefined ? {} : { docComment: message.docComment }),
     },
   }
 }

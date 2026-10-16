@@ -589,23 +589,55 @@ export function admitLocusEvent(
     return { admit: false, reason: 'no-mention', endpoint }
   }
 
+  if (event.message_type !== 'text' && event.message_type !== 'post') {
+    return { admit: false, reason: 'unsupported-message-type', endpoint }
+  }
+  return admitCommon({
+    endpoint,
+    messageId: event.message_id,
+    senderId,
+    text: event.content ?? '',
+    ...(event.create_time === undefined ? {} : { createTime: event.create_time }),
+    // Only a group grants non-allowlisted member questions (see admitCommon).
+    memberQuestions: event.chat_type === 'group',
+  }, context)
+}
+
+/** Source-independent admission facts; each source proves its own preconditions first. */
+export interface CommonAdmissionInput {
+  readonly endpoint: LocusEndpoint
+  readonly messageId: string
+  readonly senderId: string
+  readonly text: string
+  /** Platform creation time, milliseconds as a string; absent skips the watermark. */
+  readonly createTime?: string
+  /** Whether an authorized entry here admits non-allowlisted askers (groups, docs). */
+  readonly memberQuestions: boolean
+}
+
+/**
+ * The admission rules every source shares: dedup, watermark, empty text,
+ * authorization, control-command allowlist, retired/legacy refusal, owner-only
+ * tier and the member-question rule. Written once so a group and a document
+ * cannot drift (openspec pet-locus-doc-comments D7).
+ */
+export function admitCommon(input: CommonAdmissionInput, context: LocusAdmissionContext): LocusAdmissionDecision {
+  const { endpoint, senderId } = input
+  const allowlisted = senderId !== '' && context.allowOpenIds.includes(senderId)
   let duplicate: boolean
   try {
-    duplicate = context.isDuplicate(event.message_id)
+    duplicate = context.isDuplicate(input.messageId)
   } catch {
     return { admit: false, reason: 'dedup-unavailable', endpoint }
   }
   if (duplicate) return { admit: false, reason: 'duplicate', endpoint }
 
-  const createdAt = Number(event.create_time ?? '0')
+  const createdAt = Number(input.createTime ?? '0')
   if (Number.isFinite(createdAt) && createdAt > 0 && createdAt < context.watermark) {
     return { admit: false, reason: 'before-watermark', endpoint }
   }
 
-  if (event.message_type !== 'text' && event.message_type !== 'post') {
-    return { admit: false, reason: 'unsupported-message-type', endpoint }
-  }
-  const text = (event.content ?? '').trim()
+  const text = input.text.trim()
   if (text === '') return { admit: false, reason: 'empty-content', endpoint }
 
   // Resolve after the transport/event gates.  A failing resolver is never a
@@ -638,7 +670,7 @@ export function admitLocusEvent(
   // scoped because there is no group membership authorization to inherit.
   const currentTier = context.toolTier?.(endpoint)
   const ownerOnlyTier = currentTier === 'shell'
-  const canAskAsGroupMember = event.chat_type === 'group' && authorization === 'authorized' && !ownerOnlyTier
+  const canAskAsGroupMember = input.memberQuestions && authorization === 'authorized' && !ownerOnlyTier
   if (!allowlisted && ownerOnlyTier) {
     return { admit: false, reason: 'owner-only-tier', endpoint, authorization }
   }

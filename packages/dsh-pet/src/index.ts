@@ -3075,6 +3075,9 @@ async function initialize(
               ? {}
               : { replyToMessageId: message.replyToMessageId }),
             ...(message.replyTarget === undefined ? {} : { replyTarget: message.replyTarget }),
+            // Doc facts come from the PERSISTED Delivery only (D5/D12), so first,
+            // queued and post-restart dispatch render the same comment facts.
+            ...(current?.docComment === undefined ? {} : { docComment: current.docComment }),
           },
           deliveries: locusRepository.listDeliveries(record.id),
           ...(current === undefined ? {} : { currentDeliveryId: current.deliveryId }),

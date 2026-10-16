@@ -94,7 +94,7 @@ This table is a live ledger. During apply, flip each row from 🔴 to 🟢 when 
 | specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 文档 URL 不可得 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "文档 URL 不可得" | 🔴 red |
 | specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 全文评论进入文档级入口 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "全文评论进入文档级入口" | 🔴 red |
 | specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 划词评论进入评论级入口 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "划词评论进入评论级入口" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 重启后再投递排队中的划词评论 | packages/dsh-pet/test/locus-doc-redelivery.test.ts | spec Scenario "重启后再投递排队中的划词评论" | 🔴 red |
+| specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 重启后再投递排队中的划词评论 | packages/dsh-pet/test/locus-doc-redelivery.test.ts | spec Scenario "重启后再投递排队中的划词评论" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 划词评论下的后续回复留在同一入口 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "划词评论下的后续回复留在同一入口" | 🔴 red |
 | specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 划词评论先于文档级 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "划词评论先于文档级" | 🔴 red |
 | specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 知识库文档以底层 token 为根 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "知识库文档以底层 token 为根" | 🔴 red |
