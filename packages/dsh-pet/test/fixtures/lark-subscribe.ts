@@ -197,8 +197,15 @@ export function inspectDoc(token: string, title = '技术方案'): Record<string
 }
 
 /** `GET /open-apis/event/v1/connection` response body. */
+/**
+ * `lark-cli api GET /open-apis/event/v1/connection --as bot`, exactly as the CLI
+ * prints it (captured live from 1.0.97 on 2026-10-17): the CLI wraps the
+ * OpenAPI body as `{ ok, identity, data }` and drops the raw `code`/`msg`.
+ * An earlier version of this fixture used the raw OpenAPI envelope; the live
+ * acceptance run proved no real read ever had that shape.
+ */
 export function connectionCount(count: number): Record<string, unknown> {
-  return { code: 0, msg: 'success', data: { online_instance_cnt: count } }
+  return { ok: true, identity: 'bot', data: { online_instance_cnt: count } }
 }
 
 /** `event consume <key> --dry-run` decision output, per precondition status. */

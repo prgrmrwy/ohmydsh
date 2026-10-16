@@ -1030,7 +1030,11 @@ export function createLarkCliClient(
       const value = recordOf(result.value)
       const data = recordOf(value?.['data'])
       const count = data?.['online_instance_cnt']
-      if (result.ok && value?.['code'] === 0 && typeof count === 'number' && Number.isInteger(count) && count >= 0) {
+      // lark-cli prints `{ ok: true, identity, data }` (it unwraps the OpenAPI
+      // `code`/`msg`); a raw-OpenAPI `code: 0` is accepted too. Anything else,
+      // including a missing or non-integer count, is unknown, never zero.
+      const succeeded = value?.['ok'] === true || value?.['code'] === 0
+      if (result.ok && succeeded && typeof count === 'number' && Number.isInteger(count) && count >= 0) {
         return { kind: 'count', count }
       }
       const error = recordOf(value?.['error'])
