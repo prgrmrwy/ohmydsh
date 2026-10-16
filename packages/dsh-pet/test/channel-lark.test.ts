@@ -306,7 +306,7 @@ describe('strict Delivery-target reply', () => {
       .resolves.toEqual({ messageId: 'om_reply' })
   })
 
-  it('uses explicit thread reply semantics for a topic Delivery', async () => {
+  it('spec Scenario "话题回复留在原话题": uses explicit thread reply semantics for a topic Delivery', async () => {
     const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
       expect(args).toEqual([
         '--profile', 'dsh-pet', 'im', '+messages-reply', '--as', 'bot',
@@ -349,7 +349,7 @@ describe('strict Delivery-target reply', () => {
       .rejects.toThrow('reply to target: lark-cli returned a different chat id')
   })
 
-  it('renders a plain @display-name into a real mention before sending', async () => {
+  it('spec Scenario "唯一命中的整词引用成为真实提醒": renders a plain @display-name into a real mention before sending', async () => {
     const calls: string[][] = []
     const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
       calls.push([...args])
@@ -380,7 +380,7 @@ describe('strict Delivery-target reply', () => {
     ])
   })
 
-  it('sends the original text when the member list cannot be read', async () => {
+  it('spec Scenario "成员表不可读时仍能发出": original text sent, ONE low-cardinality diagnostic, reply outcome intact', async () => {
     const calls: string[][] = []
     const logs: string[] = []
     const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
@@ -398,6 +398,8 @@ describe('strict Delivery-target reply', () => {
     // Diagnostics stay low-cardinality: no name, id or body.
     expect(logs.join('\n')).not.toContain('赵鸿珂')
     expect(logs.join('\n')).not.toContain('ou_')
+    // Exactly one diagnostic line about the mention rendering, not one per name.
+    expect(logs.filter(line => line.includes('mentions'))).toHaveLength(1)
   })
 
   it('appends no diagnostics or paths to a plain-text body', async () => {

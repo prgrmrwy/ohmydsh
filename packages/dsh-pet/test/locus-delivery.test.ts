@@ -506,7 +506,7 @@ describe('unified locus Delivery correlation', () => {
     expect(duplicateClaim.record?.messageId).toBe('message-current-a')
   })
 
-  it('uses the fixed acceptance deadline and hard 24-hour cap for repeated waits', () => {
+  it('spec Scenario "相对等待受绝对上限约束": uses the fixed acceptance deadline and hard 24-hour cap for repeated waits', () => {
     const accepted = acceptDelivery(createDeliveryLedger(), {
       ...correlation(), messageId: 'message-deadline', acceptedAt: 10_000,
     })

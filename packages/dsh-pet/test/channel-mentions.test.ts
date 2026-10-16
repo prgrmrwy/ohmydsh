@@ -59,7 +59,7 @@ describe('mention rendering', () => {
     expect(result.text).toBe('<at user_id="ou_longer_0004">张三丰</at> 请看')
   })
 
-  it('leaves an ambiguous display name untouched', () => {
+  it('spec Scenario "同名歧义不改写": leaves an ambiguous display name untouched', () => {
     const ambiguous: readonly MentionMember[] = [
       { openId: 'ou_first', name: '张伟' },
       { openId: 'ou_second', name: '张伟' },
@@ -79,7 +79,7 @@ describe('mention rendering', () => {
     expect(result.skipped).toBe('no-unique-match')
   })
 
-  it('renders a member open id the agent wrote instead of a display name', () => {
+  it('spec Scenario "裸 open_id 引用也成为真实提醒": renders a member open id the agent wrote instead of a display name', () => {
     // The unified locus delivery prompt reports the sender as `ou_…`; an agent
     // that addresses that literal string must still reach the person, not
     // publish the identifier as plain text that notifies nobody.
@@ -89,7 +89,7 @@ describe('mention rendering', () => {
     expect(result.rendered).toBe(1)
   })
 
-  it('leaves an open id that is not a member of this chat as written', () => {
+  it('spec Scenario "非成员 open_id 不改写": leaves an open id that is not a member of this chat as written', () => {
     const result = renderMentions('@ou_stranger_99 你好', MEMBERS)
 
     expect(result.text).toBe('@ou_stranger_99 你好')
@@ -104,6 +104,14 @@ describe('mention rendering', () => {
     expect(result.rendered).toBe(0)
   })
 
+  it('spec Scenario "非成员名字与词内 @ 不改写": a non-member name and an in-word @ in one reply both stay as written', () => {
+    const text = '@外部同事 请看，抄送 wang@example.com 和 foo@bar'
+    const result = renderMentions(text, MEMBERS)
+
+    expect(result.text).toBe(text)
+    expect(result.rendered).toBe(0)
+  })
+
   it('does not touch an email address or other in-word @', () => {
     const result = renderMentions('发给 wang@example.com 或者 foo@bar 都行', MEMBERS)
 
@@ -111,7 +119,7 @@ describe('mention rendering', () => {
     expect(result.rendered).toBe(0)
   })
 
-  it('does not rewrite text that already carries markup', () => {
+  it('spec Scenario "已是标记形式则不改写": does not rewrite text that already carries markup', () => {
     const text = '<at user_id="ou_reviewer_02">赵鸿珂</at> 以及 @张勇'
     const result = renderMentions(text, MEMBERS)
 

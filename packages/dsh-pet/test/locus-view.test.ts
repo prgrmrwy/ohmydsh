@@ -367,7 +367,7 @@ describe('readings', () => {
 // ---------------------------------------------------------------------------
 
 describe('names', () => {
-  it('never calls an untyped chat a group', () => {
+  it('spec Scenario "名称不可得时不猜测": never calls an untyped chat a group', () => {
     const endpoint = { chatId: 'oc_a27b5de7e6a9a57462060eb289ec70ab' }
     const display = entryDisplayName(endpoint, 'a27b')
     expect(display.name).toBe('入口 · a27b')

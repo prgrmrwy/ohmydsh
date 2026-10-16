@@ -64,6 +64,7 @@ async function fixture(
     commentIntake?: (line: string) => Promise<void>
     subscriptionSpawnProcess?: (command: string, args: readonly string[]) => ChildProcess
     imPreconditions?: () => Promise<{ readonly blocked: readonly string[] } | undefined>
+    knownWorkspaces?: readonly string[]
   } = {},
 ): Promise<Fixture> {
   const created = await openPetHarness()
@@ -119,7 +120,7 @@ async function fixture(
   const service = new ChannelService({
     repository: created.repository,
     coordinator,
-    locator: { locate: () => '/repos/acme' },
+    locator: { locate: (id: string) => (options.knownWorkspaces === undefined || options.knownWorkspaces.includes(id) ? '/repos/acme' : undefined) },
     client,
     unifiedLocusReadiness: {
       childSession: 'verified',
@@ -310,6 +311,27 @@ describe('lifecycle', () => {
 
     children[0]!.stdout.emit('data', compactImMessage({ message_id: 'om_x100b_group_1' }) + '\n')
     await vi.waitFor(() => expect(handled).toEqual(['om_x100b_group_1']))
+  })
+
+  it('spec Scenario "default 不可用": enabling is refused with the reason and no consumer starts', async () => {
+    const spawned: string[][] = []
+    const f = await fixture({
+      knownWorkspaces: ['ws-acme'],
+      subscriptionSpawnProcess: (_command, args) => { spawned.push([...args]); return fakeCli('', 0) },
+    })
+    harness = f.harness
+    await f.harness.repository.putChannelConfig({
+      enabled: true,
+      botAppId: 'cli_bound01',
+      botOpenId: 'ou_petbot00000000000000000000000',
+      allowOpenIds: ['ou_allowed0000000000000000000000'],
+      // No such workspace: the locator cannot resolve it.
+      defaultWorkspaceId: 'ws-gone',
+      updatedAt: 1,
+    })
+
+    await expect(f.service.setEnabled(true)).rejects.toThrow(/default workspace/)
+    expect(spawned).toHaveLength(0)
   })
 
   it('rejects enabling on a lark-cli older than the +subscribe floor', async () => {

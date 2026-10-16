@@ -137,6 +137,23 @@ describe('locus management projection adapter', () => {
     expect(repository.modes).toEqual([])
   })
 
+  it('spec Scenario "短码不是身份": a short code in place of the full ids changes nothing', async () => {
+    const repository = memory([record()])
+    repository.stopLocus = async (id, now) => repository.transitionLocus!(id, 'stopped', now)
+    const port = createLocusManagementPort({ repository, identity: () => ({ actorId: 'owner' }), now: () => 20 })
+
+    // What the panel shows (a 4-char code) is never an address: no record
+    // matches it, so the generation-fenced operation is refused.
+    await expect(port.stop!({
+      action: 'stop',
+      endpoint: { chatId: 'oc-p' },
+      locusId: 'locu',
+      expectedGeneration: 1,
+      expectedUpdatedAt: 10,
+    }, { actorId: 'owner' })).rejects.toThrow()
+    expect((await port.view()).loci[0]?.state.state).toBe('active')
+  })
+
   it('keeps a stop marker for panel archive and explicit stop without external actions', async () => {
     const repository = memory([record()])
     repository.stopLocus = async (id, now) => repository.transitionLocus!(id, 'stopped', now)

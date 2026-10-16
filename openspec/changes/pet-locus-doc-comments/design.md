@@ -349,3 +349,9 @@ capability 拒绝不新增类别，复用 `association-unproven`。
 | 是否把“来源”也存成字段 | 不存。可以从前缀推出，另存会出现两份真相（D5 表格） |
 | R5 评审 RC1–RC5 | 截断标记计入 2 000 上限，并由持久写入路径再校验；修正已落地代码中“v16 不新增字段”的旧说法；补 test-plan 行、tasks 条目和投影点清单；D5 表补 allowlist、表情目标、披露回执三行；准入入口与前缀读取位置的说法和 D7 对齐 |
 
+## Implementation-time spec reconciliation（所有者 2026-10-16 批准）
+
+| 项 | 处置 |
+|---|---|
+| 「自动主会话按群建立…」原文写“bot 入群 SHALL 可初始化关联结构”，场景“Project 群先行”要求入群即建主会话 | 与已归档 `pet-locus-on-demand-tree`（“入群不产生任何持久后果，首个 @ 按需建树”）及当前代码、测试（`locus-on-demand-provisioning.test.ts` “bot-added has zero repository effect”）相矛盾，属于该 change 当时漏改规范。本 change 已 MODIFY 这条 requirement，因此一并修正：段落改为“入群不产生持久后果”，场景改名为“入群不产生持久后果”，“重复初始化”去掉入群重投的说法。只改规范文字，不改代码 |
+

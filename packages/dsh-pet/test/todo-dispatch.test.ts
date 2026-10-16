@@ -432,7 +432,7 @@ describe('child request-execution (D10)', () => {
     expect(fn).not.toContain("'dropped'")
   })
 
-  it('request-execution returns no navigation instruction', async () => {
+  it('spec Scenario "请求执行不触发界面导航": request-execution returns no navigation instruction', async () => {
     const { deps } = requestDeps()
     const result = await requestTodoExecution(
       { itemId: 'todo-1', callerChildSessionId: 'child-1' },

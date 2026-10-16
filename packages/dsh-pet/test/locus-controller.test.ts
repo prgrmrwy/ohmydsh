@@ -332,7 +332,7 @@ describe('unified locus hierarchy', () => {
     expect(b.locus.endpoint).toEqual({ chatId: 'oc-project', threadId: 'omt-b' })
   })
 
-  it('keeps concurrent first topics on one automatic group main', async () => {
+  it('spec Scenario "重复初始化": keeps concurrent first topics on one automatic group main', async () => {
     const host = fakeHost()
     const locus = controller(host)
     const [left, right] = await Promise.all([

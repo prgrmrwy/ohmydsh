@@ -180,18 +180,18 @@ Host SHALL 维护进行中/完成/失败等控制反馈；反馈失败不阻断�
 
 系统 SHALL 为协作先行的群或文档，在已配置且可用的 default workspace 中创建一个该群或该文档专属的自动主会话，并持久复用。不同群、不同文档，或群与文档之间，MUST NOT 因 default workspace 相同而共用自动主会话。文档根由带前缀的 `chatId`（`doc:docx:<token>`）标识。本期 MUST NOT 应用旧 chat 到 workspace 覆盖路由。default 缺失/不可用时 SHALL 停止创建并诊断，不能选择其它目录。
 
-bot 入群 SHALL 可初始化关联结构，但 MUST NOT 因入群分析历史或执行项目工作；初始化授权无法证明时 MUST NOT 扩大群级提问资格，SHALL 等待 allowlist 的首次 at 补齐。入群事件缺失不影响首次合格 at 的幂等补齐。
+bot 入群 MUST NOT 产生任何持久后果：不建主会话、不建子会话、不写 locus 记录，也不分析历史或执行项目工作。关联结构 SHALL 由 allowlist 成员的首个合格 @ 按需建立，并在同一次准入中投递该消息。这与已归档的 `pet-locus-on-demand-tree` 决定以及当前实现一致；此前这里写的是“入群可初始化”，与之不符，本 change 一并修正。
 
-#### Scenario: Project 群先行
-- **WHEN** bot 经已验证授权进入一个尚无新模型关联的群
-- **THEN** 建立 default workspace 下的群级主会话结构，不分析 PRD/会议或自动回复业务内容
+#### Scenario: 入群不产生持久后果
+- **WHEN** bot 被拉进一个尚无关联的群
+- **THEN** 不产生群级标记、主会话、子会话或 locus 记录，直到该群出现首个合格 @
 
 #### Scenario: 首次消息补齐
-- **WHEN** 无有效入群初始化记录，allowlist 成员首次 at bot
+- **WHEN** 该群尚无关联，allowlist 成员首次 @bot
 - **THEN** 创建群专属自动主会话和 locus 子会话，再处理该消息
 
 #### Scenario: 重复初始化
-- **WHEN** 入群事件重投或同群多次首次请求并发
+- **WHEN** 同群多个首次请求并发到达
 - **THEN** 仅产生一个群级自动主会话，重复调用复用同一结构
 
 #### Scenario: default 不可用

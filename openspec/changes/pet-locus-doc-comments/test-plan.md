@@ -66,7 +66,7 @@ This table is a live ledger. During apply, flip each row from 🔴 to 🟢 when 
 | specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 多个文档入口短码互不相同 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "多个文档入口短码互不相同" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 同前缀的评论入口短码可区分 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "同前缀的评论入口短码可区分" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 文档标题不可得 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "文档标题不可得" | 🟢 green |
-| specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | Project 群先行 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "Project 群先行" | 🔴 red — carried forward; regression |
+| specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | 入群不产生持久后果 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "入群不产生持久后果" | 🔴 red — carried forward; regression |
 | specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | 首次消息补齐 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "首次消息补齐" | 🔴 red — carried forward; regression |
 | specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | 重复初始化 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "重复初始化" | 🔴 red — carried forward; regression |
 | specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | default 不可用 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "default 不可用" | 🔴 red — carried forward; regression |
