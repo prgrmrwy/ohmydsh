@@ -150,8 +150,8 @@ describe('doc control messages that are not replies (the /bind switch warning)',
     const h = recordingClient()
     const messenger = createDocControlMessenger({ client: h.client, latestDelivery: () => latest })
 
-    messenger.noteIssuer({ chatId: ROOT }, 'ou_binder')
-    await messenger.send({ endpoint: { chatId: ROOT }, text: '主会话已切换' })
+    // The bind sends its switch warning while it runs, exactly as the controller does.
+    await messenger.withIssuer({ chatId: ROOT }, 'ou_binder', () => messenger.send({ endpoint: { chatId: ROOT }, text: '主会话已切换' }))
 
     expect(h.calls).toEqual([['whole', D, 'ou_binder', '主会话已切换']])
   })
@@ -159,11 +159,21 @@ describe('doc control messages that are not replies (the /bind switch warning)',
   it('reads the issuer once: a later retry with no noted issuer falls back to the durable latest asker', async () => {
     const h = recordingClient()
     const messenger = createDocControlMessenger({ client: h.client, latestDelivery: () => latest })
-    messenger.noteIssuer({ chatId: ROOT }, 'ou_binder')
-    await messenger.send({ endpoint: { chatId: ROOT }, text: 'a' })
+    await messenger.withIssuer({ chatId: ROOT }, 'ou_binder', () => messenger.send({ endpoint: { chatId: ROOT }, text: 'a' }))
     await messenger.send({ endpoint: { chatId: ROOT }, text: 'b' })
 
     expect(h.calls.map(call => call[2])).toEqual(['ou_binder', 'ou_lastasker'])
+  })
+
+  it('never leaks an issuer: a /bind that throws or sends no warning leaves later warnings on the latest asker', async () => {
+    const h = recordingClient()
+    const messenger = createDocControlMessenger({ client: h.client, latestDelivery: () => latest })
+    await expect(messenger.withIssuer({ chatId: ROOT }, 'ou_failedbinder', async () => { throw new Error('EXPLICIT_PARENT_CONFLICT') })).rejects.toThrow()
+    await messenger.withIssuer({ chatId: ROOT }, 'ou_noopbinder', async () => 'no warning sent')
+    // A later panel action's warning carries no fresh issuer.
+    await messenger.send({ endpoint: { chatId: ROOT }, text: 'panel switch' })
+
+    expect(h.calls.map(call => call[2])).toEqual(['ou_lastasker'])
   })
 
   it('an anchored entry still replies under its comment, and an entry with no Delivery fails closed', async () => {

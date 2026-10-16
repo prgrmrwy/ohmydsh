@@ -1,6 +1,6 @@
 ## Test Plan
 
-All 128 `#### Scenario:` entries across the four delta specs (`pet-lark-channel`, `pet-locus-collaboration`, `pet-locus-intent-triage`, `pet-locus-doc-comments`) map 1:1 to a named vitest test under `packages/dsh-pet/test/`. The test name is always `spec Scenario "<scenario name>"`. When the same scenario name occurs in two capabilities and the two tests share a file, the capability is appended in parentheses.
+All 129 `#### Scenario:` entries across the four delta specs (`pet-lark-channel`, `pet-locus-collaboration`, `pet-locus-intent-triage`, `pet-locus-doc-comments`) map 1:1 to a named vitest test under `packages/dsh-pet/test/`. The test name is always `spec Scenario "<scenario name>"`. When the same scenario name occurs in two capabilities and the two tests share a file, the capability is appended in parentheses.
 
 This table is a live ledger. During apply, flip each row from 🔴 to 🟢 when its test passes. verify blocks on any row still red.
 

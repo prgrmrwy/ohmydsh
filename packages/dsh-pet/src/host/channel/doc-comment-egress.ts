@@ -217,15 +217,26 @@ export function createDocControlMessenger(deps: {
   readonly latestDelivery: (endpoint: { readonly chatId: string; readonly threadId?: string }) =>
     { readonly endpoint: { readonly chatId: string; readonly threadId?: string }; readonly messageId: string; readonly senderOpenId?: string } | undefined
 }): {
-  noteIssuer(endpoint: { readonly chatId: string; readonly threadId?: string }, actorId: string): void
+  /**
+   * Run one `/bind` with its issuer noted for any switch warning it sends.
+   * The note is cleared afterwards whether the bind warned, no-oped or threw,
+   * so a later unrelated warning never mentions a stale issuer.
+   */
+  withIssuer<T>(endpoint: { readonly chatId: string; readonly threadId?: string }, actorId: string, run: () => Promise<T>): Promise<T>
   send(input: { readonly endpoint: { readonly chatId: string; readonly threadId?: string }; readonly text: string }): Promise<void>
 } {
   const issuers = new Map<string, string>()
   const keyOf = (endpoint: { readonly chatId: string; readonly threadId?: string }): string =>
     `${endpoint.chatId}\u0000${endpoint.threadId ?? ''}`
   return {
-    noteIssuer(endpoint, actorId) {
-      issuers.set(keyOf(endpoint), actorId)
+    async withIssuer(endpoint, actorId, run) {
+      const key = keyOf(endpoint)
+      issuers.set(key, actorId)
+      try {
+        return await run()
+      } finally {
+        issuers.delete(key)
+      }
     },
     async send(input) {
       const latest = deps.latestDelivery(input.endpoint)

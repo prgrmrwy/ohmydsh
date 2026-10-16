@@ -15,7 +15,7 @@ describe('Locus shell-tier Lark CLI mistake-prevention guard', () => {
     'lark-cli api PATCH /im/v1/messages/om_x --data x',
     'lark-cli   im   +messages-send --text hi',
     'lark-cli im "+messages-send" --text hi',
-    // spec Scenario "shell 档直接调用评论或文档写命令" (pet-locus-doc-comments)
+    // Doc-comment write spellings (pet-locus-doc-comments D8)
     'lark-cli drive +add-reply --comment-id 1 --content x',
     'lark-cli drive +add-comment --url u --content x',
     'lark-cli drive +update-reply --comment-id 1 --reply-id 2 --content x',
@@ -46,6 +46,16 @@ describe('Locus shell-tier Lark CLI mistake-prevention guard', () => {
     'lark-cli api GET /open-apis/drive/v1/files/d/comments',
   ])('allows common read command: %s', command => {
     expect(locusLarkCliOutboundGuard({ name: 'bash', arguments: { command } })).toBeUndefined()
+  })
+
+  it('spec Scenario "shell 档直接调用评论或文档写命令": a comment reply, a doc body write and a raw /open-apis IM send all get the finish denial', () => {
+    for (const command of [
+      'lark-cli drive +add-reply --comment-id c1 --content x',
+      'lark-cli docs +update --doc d --markdown x',
+      'lark-cli api POST /open-apis/im/v1/messages --data x',
+    ]) {
+      expect(locusLarkCliOutboundGuard({ name: 'bash', arguments: { command } })).toBe(LOCUS_LARK_CLI_OUTBOUND_DENIAL)
+    }
   })
 
   it('does not inspect non-bash calls or malformed tool arguments', () => {

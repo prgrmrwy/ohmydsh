@@ -2408,11 +2408,7 @@ async function initialize(
       },
       bind: {
         bind: ({ endpoint, parentSessionId, chatName, actorId }) => {
-          // A whole-doc /bind switch warning is a NEW full comment that @-mentions
-          // someone (full comments cannot be replied to). It must name the issuer
-          // of this /bind, not whoever asked last on the entry (round-7 M2).
-          if (isDocEndpoint(endpoint)) docControl.noteIssuer(endpoint, actorId)
-          return endpoint.threadId === undefined
+          const run = () => endpoint.threadId === undefined
             ? locusProvisioningController.ensureGroup({
               chatId: endpoint.chatId,
               parentSessionId,
@@ -2424,25 +2420,31 @@ async function initialize(
               parentSessionId,
               ...(chatName === undefined ? {} : { chatName }),
             })
+          // A whole-doc /bind switch warning is a NEW full comment that
+          // @-mentions someone (full comments cannot be replied to). It must
+          // name this /bind's issuer, not whoever asked last (round-7 M2).
+          return isDocEndpoint(endpoint) ? docControl.withIssuer(endpoint, actorId, run) : run()
         },
         rebuildProtected: ({ endpoint, parentSessionId, chatName, marker, actorId }) => {
-          if (isDocEndpoint(endpoint)) docControl.noteIssuer(endpoint, actorId)
-          if (marker === 'legacy') {
-            return locusProvisioningController.rebuildLegacyEndpoint({
+          const run = async () => {
+            if (marker === 'legacy') {
+              return locusProvisioningController.rebuildLegacyEndpoint({
+                endpoint,
+                parentSessionId,
+                ...(chatName === undefined ? {} : { chatName }),
+              })
+            }
+            const previous = locusRepository.getLatestLocusByEndpoint(endpoint)
+            if (previous === undefined || previous.state === 'active') {
+              throw new Error('Protected unified generation is unavailable for explicit rebuild')
+            }
+            return locusProvisioningController.rebuildExplicit({
               endpoint,
+              previousLocusId: previous.id,
               parentSessionId,
-              ...(chatName === undefined ? {} : { chatName }),
             })
           }
-          const previous = locusRepository.getLatestLocusByEndpoint(endpoint)
-          if (previous === undefined || previous.state === 'active') {
-            throw new Error('Protected unified generation is unavailable for explicit rebuild')
-          }
-          return locusProvisioningController.rebuildExplicit({
-            endpoint,
-            previousLocusId: previous.id,
-            parentSessionId,
-          })
+          return isDocEndpoint(endpoint) ? docControl.withIssuer(endpoint, actorId, run) : run()
         },
       },
       exit: {

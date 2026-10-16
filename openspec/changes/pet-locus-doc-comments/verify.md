@@ -7,7 +7,7 @@
 
 ### TDD Integrity
 - [x] Every test-plan.md entry exists as a real test.
-  - All 129 rows were checked mechanically: each row's test file contains a test named `spec Scenario "<scenario>"`. The script reports `missing 0`.
+  - All 129 rows were checked mechanically: each row's test file has an `it`/`test`/`describe` TITLE line carrying `spec Scenario "<scenario>"` (comments do not count; the earlier looser check matched a comment, which round 7's re-review caught), and the Test Name column equals that title. The script reports `missing 0`.
 - [x] Every test-plan.md row flipped to 🟢 green.
   - 129/129 are green. Four are marked **partial**, and the row says which part of the THEN is not unit-proven:
     - "旧代际迟到结算": the pure ledger has no diagnostic channel.

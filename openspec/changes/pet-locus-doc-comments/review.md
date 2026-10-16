@@ -71,3 +71,38 @@ CHANGES_APPLIED: n/a
 - **S3**: the doc spec scenario now reads 「建立文档级入口时不再重复」, and tasks 5.3 carries a revision note.
 - **S4**: design D7 has a "残余风险" note. It states that each doc-level question adds one bot comment, that only the asker is ever mentioned, and that the model cannot inject a mention.
 - **Evidence**: dsh-pet full suite 3218 passed, 0 failed; `openspec validate --strict` valid.
+
+
+---
+
+## Re-review of the round-7 revisions (fresh-context subagent)
+
+| Item | Status |
+|---|---|
+| C1 | resolved: collaboration delta spec :42-44; no remaining whole-doc "reply" claim |
+| M1 | resolved for :119/:120; strict check found one more row (:125) |
+| M2 | resolved: issuer beats the latest asker, consumed once; anchored path and no-Delivery fail-closed path covered |
+| M3 | resolved: D7, D8 and the proposal |
+| S1-S4 | resolved |
+
+New findings from the re-review:
+- 🟡 Row :125 (「shell 档直接调用评论或文档写命令」) had no matching test title, only a comment. The author's parity check was matching comments.
+- 📌 Stale counts: "128" at test-plan :3 and tasks :234.
+- 📌 A stale issuer leaks when `/bind` throws or sends no warning.
+- 📌 Collaboration spec :212 says 「按纯文本」 without accounting for the Host-structured mention.
+
+**VERDICT: APPROVE_WITH_CHANGES**
+
+## Author: re-review changes applied
+- 🟡 **Row :125.** Added a titled test, `it('spec Scenario "shell 档直接调用评论或文档写命令": …')`, in `locus-lark-cli-egress-guard.test.ts`. It runs the scenario's three commands against the guard: comment reply, docs body write, and a raw `/open-apis` IM send. The old comment was reworded. Mutation check: removing the drive comment-write pattern turns this test red.
+- **Parity check fixed.** The name must now appear on an `it`/`test`/`describe` title line; comments do not count. All 129 rows report 0 issues, and the Test Name column equals `spec Scenario "<scenario>"` on every row.
+- 📌 **Counts** now read 129 in test-plan :3 and tasks 10.2.
+- 📌 **Stale issuer.** `noteIssuer` is replaced by `withIssuer(endpoint, actorId, run)`, which clears the note in a `finally` whether the bind warned, no-oped or threw. Both `bind.bind` and `bind.rebuildProtected` in `index.ts` run inside it, for doc endpoints only. Test: 「never leaks an issuer」 covers a throwing bind and a no-op bind; a later warning then mentions the latest asker. Mutation check: dropping the `finally` turns it red.
+- 📌 **Spec :212** is scoped. Model-written `@` stays plain text and is not promised as a notification. The single exception is the Host's own structured mention of the durable sender on a whole-doc answer or receipt.
+- **Evidence:**
+  - dsh-pet build and full suite: 3220 passed, 0 failed, 43 skipped (pre-existing opt-in);
+  - typecheck clean;
+  - `openspec validate --strict` valid;
+  - `check:artifacts` OK.
+
+**`CHANGES_APPLIED: yes`**: required changes applied. The re-reviewer's 🟡 and 📌 items are each fixed, with tests and mutation checks.
