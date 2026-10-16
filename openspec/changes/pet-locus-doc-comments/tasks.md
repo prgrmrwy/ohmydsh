@@ -50,8 +50,8 @@
 
 ## 2. 连接门禁（D2、D3）
 
-- [ ] 2.1 写失败测试 `channel-connection-gate.test.ts`，覆盖 test-plan「事件连接独占在拉起订阅前被证明」的全部 14 行，使用门禁假端口和可控时钟驱动
-- [ ] 2.2 实现门禁，每次拉起子进程前（含监督器自动重启）执行：
+- [x] 2.1 写失败测试 `channel-connection-gate.test.ts`，覆盖 test-plan「事件连接独占在拉起订阅前被证明」的全部 14 行，使用门禁假端口和可控时钟驱动
+- [x] 2.2 实现门禁，每次拉起子进程前（含监督器自动重启）执行：
   - 先检查版本 ≥1.0.97，再检查连接计数；计数不为 0 时每 2 秒复查一次，最多等 40 秒；
   - 失败时分两类处理：
     - `connection-check-failed`：进入 reconnecting，计入失败上限；
@@ -61,9 +61,16 @@
   - `connection-check-failed` 若由认证或未登录引起，沿用既有的重新登录诊断（R4-RC5）
   - 停止、停用或重连时，取消门禁等待，被取消后不再拉起（R4-RC4）
   - 把 `channel/lark.ts` 中 `cliVersion` 的支持阈值（目前 patch≥93）以及 `service.ts` 三处 “upgrade to 1.0.93” 文案统一提升到 1.0.97，避免启用或配对时接受 1.0.93–1.0.96，而门禁随后又把 channel 判为 down（R4-RC6）
-- [ ] 2.3 IM dry-run 并入现有的启用前验证。执行时机：正式 Channel 启动（含 Host 启动时恢复已启用的 channel）、用户启用、显式重连；结果为 `blocked` 拒绝，`unknown` 放行。监督器自动重启和仅为配对拉起时不执行
-- [ ] 2.4 诊断词表（D13）：评论链路的理由（`comment-scope-unknown`、`comment-reply-missing`、`unsupported-file-type`）加入 `SAFE_IGNORED` 和 `safeIgnoredReason`；门禁理由属于 channel 状态，不属于单条消息被忽略的原因，记在 channel 诊断里，不进 `SAFE_IGNORED`（R4-S-4）。先写失败测试“评论范围无法判定”：期望记为 `comment-scope-unknown` 而不是 `other`，再实现。回归行翻 🟢：Channel 关闭时收到消息、非 allowlist 用户 @ Bot、目标群调用因权限失败
-- [ ] 2.5 重构：把门禁做成可注入的端口，不在 `service.ts` 里内联子进程调用。全量测试保持绿色
+- [x] 2.3 IM dry-run 并入现有的启用前验证。执行时机：正式 Channel 启动（含 Host 启动时恢复已启用的 channel）、用户启用、显式重连；结果为 `blocked` 拒绝，`unknown` 放行。监督器自动重启和仅为配对拉起时不执行
+- [x] 2.4 诊断词表（D13）：评论链路的理由（`comment-scope-unknown`、`comment-reply-missing`、`unsupported-file-type`）加入 `SAFE_IGNORED` 和 `safeIgnoredReason`；门禁理由属于 channel 状态，不属于单条消息被忽略的原因，记在 channel 诊断里，不进 `SAFE_IGNORED`（R4-S-4）。先写失败测试“评论范围无法判定”：期望记为 `comment-scope-unknown` 而不是 `other`，再实现。回归行翻 🟢：Channel 关闭时收到消息、非 allowlist 用户 @ Bot、目标群调用因权限失败
+- [x] 2.5 重构：把门禁做成可注入的端口，不在 `service.ts` 里内联子进程调用。全量测试保持绿色。完成后的结构：
+  - 门禁是纯模块 `channel/connection-gate.ts`，通过 `ConnectionGatePort` 端口注入；
+  - `ChannelSubscription.gate` 在每次 spawn 前执行，由 `AbortController` 负责取消；
+  - 就绪超时（30 秒）使用独立的定时器钩子；
+  - `LarkClient` 新增 `eventConnectionCount` 和 `imPreconditions` 两个方法；
+  - 版本下限在 `cliVersion` 与门禁中统一为 1.0.97。
+
+  全量测试：3080 passed / 1 failed，失败的仍是基线中的 loader-composition。门禁核心逻辑做过变异检查：替换为空实现后有 3 条测试变红；dry-run 去掉后有 2 条测试变红。
 
 ## 3. 入口与持久化：带前缀的 `chatId`、v16、迁移（D4、D5、D11）
 

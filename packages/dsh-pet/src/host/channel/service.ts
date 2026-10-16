@@ -22,6 +22,7 @@ import type { LocusChannelControllerPort } from './locus-capability.js'
 import { parseInboundLine } from './event.js'
 import { PairingController, type PairingControllerOptions } from './pairing.js'
 import type { WorkspaceLocator } from './route.js'
+import { RELOGIN_DIAGNOSTIC, runConnectionGate, type ConnectionGatePort } from './connection-gate.js'
 import {
   ChannelSubscription,
   type ChannelStatus,
@@ -126,6 +127,7 @@ export class ChannelService implements ChannelControl {
       ...(deps.subscriptionSchedule !== undefined
         ? { schedule: deps.subscriptionSchedule }
         : {}),
+      gate: signal => runConnectionGate(this.gatePort(), signal),
     })
     // Bot-added has no consumer in production (index.ts never wires an
     // initializer), and a separate subscription would be a SECOND event
@@ -277,7 +279,7 @@ export class ChannelService implements ChannelControl {
     if (generation !== this.pairingGeneration) return
     if (version !== undefined && !version.supported) {
       const found = version.version === undefined ? 'unknown' : version.version
-      throw new Error(`lark-cli ${found} is unsupported; upgrade to 1.0.93 or later.`)
+      throw new Error(`lark-cli ${found} is unsupported; upgrade to 1.0.97 or later.`)
     }
     const probe = this.client.botIdentity
     if (probe === undefined) throw new Error('The Pet lark-cli profile cannot verify the bound bot.')
@@ -326,7 +328,7 @@ export class ChannelService implements ChannelControl {
     if (generation !== this.operationGeneration) return
     if (version !== undefined && !version.supported) {
       const found = version.version === undefined ? 'unknown' : version.version
-      this.identityDiagnostic = `lark-cli ${found} is unsupported; upgrade to 1.0.93 or later.`
+      this.identityDiagnostic = `lark-cli ${found} is unsupported; upgrade to 1.0.97 or later.`
       throw new Error(this.identityDiagnostic)
     }
     const probe = this.client.botIdentity
@@ -341,6 +343,18 @@ export class ChannelService implements ChannelControl {
         identity.kind === 'ready'
           ? 'The verified Pet bot identity does not match the configured bot.'
           : identity.diagnostic
+      this.deps.onChange?.()
+      throw new Error(this.identityDiagnostic)
+    }
+    // IM intake preconditions: formal start (incl. Host-start restore), enable
+    // and explicit reconnect all come through here; supervisor restarts and
+    // pairing-only spawns do not (pet-locus-doc-comments D2).
+    const preconditions = await this.client.imPreconditions?.()
+    if (generation !== this.operationGeneration) return
+    if (preconditions !== undefined && preconditions.blocked.length > 0) {
+      this.identityDiagnostic = preconditions.blocked.includes('credentials_available')
+        ? RELOGIN_DIAGNOSTIC
+        : `lark-cli reports blocked IM preconditions: ${preconditions.blocked.join(', ')}.`
       this.deps.onChange?.()
       throw new Error(this.identityDiagnostic)
     }
@@ -472,7 +486,7 @@ export class ChannelService implements ChannelControl {
       const found = version.version === undefined ? 'unknown' : version.version
       this.binding = {
         phase: 'failed',
-        diagnostic: `lark-cli ${found} is unsupported; upgrade to 1.0.93 or later.`,
+        diagnostic: `lark-cli ${found} is unsupported; upgrade to 1.0.97 or later.`,
       }
       this.deps.onChange?.()
       return
@@ -541,6 +555,31 @@ export class ChannelService implements ChannelControl {
     }
     if (await this.pairing.handle(event)) return
     await this.pipeline.handleEvent(event)
+  }
+
+  /** Live outside-world operations for the spawn gate. */
+  private gatePort(): ConnectionGatePort {
+    return {
+      cliVersion: async () => (await this.client.cliVersion?.())?.version,
+      connectionCount: async () =>
+        (await this.client.eventConnectionCount?.()) ?? { kind: 'error', authFailure: false },
+      sleep: (ms, signal) =>
+        new Promise((resolve, reject) => {
+          if (signal.aborted) {
+            reject(new Error('aborted'))
+            return
+          }
+          const timer = setTimeout(() => {
+            signal.removeEventListener('abort', onAbort)
+            resolve()
+          }, ms)
+          const onAbort = (): void => {
+            clearTimeout(timer)
+            reject(new Error('aborted'))
+          }
+          signal.addEventListener('abort', onAbort, { once: true })
+        }),
+    }
   }
 
   /** Start or stop the ONE consumer from the union of active run reasons. */
@@ -628,10 +667,15 @@ const SAFE_IGNORED = new Set([
   'bot-sender',
   'empty-content',
   'unparsable',
+  // Comment pipeline (pet-locus-doc-comments D13). Gate reasons are channel
+  // state, not per-event ignores, and stay out of this set.
+  'comment-scope-unknown',
+  'comment-reply-missing',
+  'unsupported-file-type',
 ])
 
 /** Map internal detail to a stable low-cardinality diagnostic vocabulary. */
-function safeIgnoredReason(reason: string): string {
+export function safeIgnoredReason(reason: string): string {
   const mapped =
     reason === 'before-watermark'
       ? 'too-old'

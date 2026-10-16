@@ -13,11 +13,11 @@ import type { ChildProcess } from 'node:child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CapabilityRegistry } from '../src/host/capabilities.js'
 import { SourceContextRegistry } from '../src/host/capture.js'
-import { ChannelService } from '../src/host/channel/service.js'
+import { ChannelService, safeIgnoredReason } from '../src/host/channel/service.js'
 import type { LarkClient } from '../src/host/channel/lark.js'
 import { PetCoordinator } from '../src/host/coordinator.js'
 import { openPetHarness, type PetHarness } from './harness.js'
-import { compactCommentEvent } from './fixtures/lark-subscribe.js'
+import { compactCommentEvent, compactImMessage, SUBSCRIBE_STDERR } from './fixtures/lark-subscribe.js'
 
 let harness: PetHarness | undefined
 
@@ -61,8 +61,9 @@ async function fixture(
     failing?: boolean
     cliOutput?: string
     cliExit?: number
-commentIntake?: (line: string) => Promise<void>
-        subscriptionSpawnProcess?: (command: string, args: readonly string[]) => ChildProcess
+    commentIntake?: (line: string) => Promise<void>
+    subscriptionSpawnProcess?: (command: string, args: readonly string[]) => ChildProcess
+    imPreconditions?: () => Promise<{ readonly blocked: readonly string[] } | undefined>
   } = {},
 ): Promise<Fixture> {
   const created = await openPetHarness()
@@ -83,7 +84,9 @@ commentIntake?: (line: string) => Promise<void>
     listMessages: vi.fn(async () => []),
     listChatBots: vi.fn(async () => []),
     chatName: vi.fn(async () => undefined),
-    cliVersion: vi.fn(async () => ({ supported: true, version: '1.0.93' })),
+    cliVersion: vi.fn(async () => ({ supported: true, version: '1.0.97' })),
+    eventConnectionCount: vi.fn(async () => ({ kind: 'count' as const, count: 0 })),
+    imPreconditions: vi.fn(options.imPreconditions ?? (async () => ({ blocked: [] }))),
     botReady: vi.fn(async () => true),
     botIdentity: vi.fn(async expectedAppId => ({
       kind: 'ready' as const,
@@ -123,8 +126,8 @@ commentIntake?: (line: string) => Promise<void>
       defaultPermission: 'read',
       readVerification: 'verified',
     },
-...(options.commentIntake === undefined ? {} : { commentIntake: options.commentIntake }),
-        ...(options.subscriptionSpawnProcess === undefined ? {} : { subscriptionSpawnProcess: options.subscriptionSpawnProcess }),
+    ...(options.commentIntake === undefined ? {} : { commentIntake: options.commentIntake }),
+    ...(options.subscriptionSpawnProcess === undefined ? {} : { subscriptionSpawnProcess: options.subscriptionSpawnProcess }),
     spawnProcess: () => fakeCli(options.cliOutput ?? 'App ID: cli_bound01\n', options.cliExit ?? 0),
     onChange: () => changes.push(Date.now()),
     log: message => logs.push(message),
@@ -180,7 +183,7 @@ describe('lifecycle', () => {
     await f.service.setEnabled(true)
 
     // A second subscription for the same app would split events (spike E3).
-    expect(children).toHaveLength(1)
+    await vi.waitFor(() => expect(children).toHaveLength(1))
     expect(children[0]?.args).toContain('+subscribe')
     expect(children[0]?.args.join(' ')).toContain('im.message.receive_v1,drive.notice.comment_add_v1')
     expect(children.some(item => item.args.includes('im.chat.member.bot.added_v1'))).toBe(false)
@@ -192,6 +195,137 @@ describe('lifecycle', () => {
     await vi.waitFor(() => expect(commentLines).toEqual([commentLine]))
     expect(f.harness.repository.listTasks()).toHaveLength(0)
     expect(f.harness.repository.listInvocations()).toHaveLength(0)
+  })
+
+  it('spec Scenario "启用时 IM 前置条件被阻断": enable is refused with lark-cli\'s reason and nothing is spawned', async () => {
+    const spawned: string[][] = []
+    const f = await fixture({
+      imPreconditions: async () => ({ blocked: ['scopes_granted'] }),
+      subscriptionSpawnProcess: (_command, args) => {
+        spawned.push([...args])
+        return fakeCli('', 0)
+      },
+    })
+    harness = f.harness
+    await f.harness.repository.putChannelConfig({
+      enabled: true,
+      botAppId: 'cli_bound01',
+      botOpenId: 'ou_petbot00000000000000000000000',
+      allowOpenIds: ['ou_allowed0000000000000000000000'],
+      defaultWorkspaceId: 'ws-acme',
+      updatedAt: 1,
+    })
+
+    await expect(f.service.setEnabled(true)).rejects.toThrow(/scopes_granted/)
+    expect(spawned).toHaveLength(0)
+  })
+
+  it('spec Scenario "dry-run 报告 unknown 时照常启用": unknown is not blocked', async () => {
+    const spawned: string[][] = []
+    const f = await fixture({
+      imPreconditions: async () => ({ blocked: [] }),
+      subscriptionSpawnProcess: (_command, args) => {
+        spawned.push([...args])
+        return fakeCli('', 0)
+      },
+    })
+    harness = f.harness
+    await f.harness.repository.putChannelConfig({
+      enabled: true,
+      botAppId: 'cli_bound01',
+      botOpenId: 'ou_petbot00000000000000000000000',
+      allowOpenIds: ['ou_allowed0000000000000000000000'],
+      defaultWorkspaceId: 'ws-acme',
+      updatedAt: 1,
+    })
+
+    await f.service.setEnabled(true)
+    await vi.waitFor(() => expect(spawned).toHaveLength(1))
+  })
+
+  it('spec Scenario "Host 启动恢复已启用 channel 时执行 dry-run": dry-run on restore, never on supervisor restarts', async () => {
+    const children: Array<EventEmitter & Record<string, unknown>> = []
+    const f = await fixture({
+      subscriptionSpawnProcess: () => {
+        const child = fakeCli('', 1) as unknown as EventEmitter & Record<string, unknown>
+        children.push(child)
+        return child as unknown as ChildProcess
+      },
+    })
+    harness = f.harness
+    await f.harness.repository.putChannelConfig({
+      enabled: true,
+      botAppId: 'cli_bound01',
+      botOpenId: 'ou_petbot00000000000000000000000',
+      allowOpenIds: ['ou_allowed0000000000000000000000'],
+      defaultWorkspaceId: 'ws-acme',
+      updatedAt: 1,
+    })
+
+    // Host start restores an already-enabled channel.
+    f.service.start()
+    await vi.waitFor(() => expect(children.length).toBeGreaterThanOrEqual(1))
+    expect(f.client.imPreconditions).toHaveBeenCalledTimes(1)
+    // The fake child exits immediately: the supervisor restarts it with backoff
+    // (real timers here), and those restarts never re-run the dry-run.
+    await vi.waitFor(() => expect(children.length).toBeGreaterThanOrEqual(2), { timeout: 3_000 })
+    expect(f.client.imPreconditions).toHaveBeenCalledTimes(1)
+  })
+
+  it('spec Scenario "评论事件未开通不影响 IM": no comment probe gates the start; group lines still reach the IM pipeline', async () => {
+    const children: Array<{ stdout: EventEmitter; stderr: EventEmitter }> = []
+    const handled: string[] = []
+    const f = await fixture({
+      subscriptionSpawnProcess: () => {
+        const child = new EventEmitter() as EventEmitter & Record<string, unknown>
+        const stdout = new EventEmitter() as EventEmitter & { setEncoding(e: string): void }
+        const stderr = new EventEmitter() as EventEmitter & { setEncoding(e: string): void }
+        stdout.setEncoding = () => undefined
+        stderr.setEncoding = () => undefined
+        Object.assign(child, { stdout, stderr, stdin: { end: () => undefined }, exitCode: null, signalCode: null, kill: () => true })
+        children.push({ stdout, stderr })
+        return child as unknown as ChildProcess
+      },
+    })
+    harness = f.harness
+    const pipeline = (f.service as unknown as { pipeline: { handleEvent(event: unknown): Promise<unknown> } }).pipeline
+    const original = pipeline.handleEvent.bind(pipeline)
+    pipeline.handleEvent = async event => {
+      handled.push((event as { message_id: string }).message_id)
+      return original(event)
+    }
+    await f.harness.repository.putChannelConfig({
+      enabled: true,
+      botAppId: 'cli_bound01',
+      botOpenId: 'ou_petbot00000000000000000000000',
+      allowOpenIds: ['ou_allowed0000000000000000000000'],
+      defaultWorkspaceId: 'ws-acme',
+      updatedAt: 1,
+    })
+
+    await f.service.setEnabled(true)
+    await vi.waitFor(() => expect(children).toHaveLength(1))
+    children[0]!.stderr.emit('data', SUBSCRIBE_STDERR.sdkConnected)
+    expect(f.service.status().phase).toBe('connected')
+
+    children[0]!.stdout.emit('data', compactImMessage({ message_id: 'om_x100b_group_1' }) + '\n')
+    await vi.waitFor(() => expect(handled).toEqual(['om_x100b_group_1']))
+  })
+
+  it('rejects enabling on a lark-cli older than the +subscribe floor', async () => {
+    const f = await fixture()
+    harness = f.harness
+    ;(f.client.cliVersion as ReturnType<typeof vi.fn>).mockResolvedValue({ supported: false, version: '1.0.96' })
+    await f.harness.repository.putChannelConfig({
+      enabled: true,
+      botAppId: 'cli_bound01',
+      botOpenId: 'ou_petbot00000000000000000000000',
+      allowOpenIds: ['ou_allowed0000000000000000000000'],
+      defaultWorkspaceId: 'ws-acme',
+      updatedAt: 1,
+    })
+
+    await expect(f.service.setEnabled(true)).rejects.toThrow(/upgrade to 1\.0\.97 or later/)
   })
 
   it('does not start after disable wins an in-flight identity probe', async () => {
@@ -366,6 +500,18 @@ describe('unified locus lifecycle seam', () => {
 })
 
 describe('safe intake diagnostics', () => {
+  it('spec Scenario "评论范围无法判定": comment reasons keep their own diagnostic instead of "other"', () => {
+    expect(safeIgnoredReason('comment-scope-unknown')).toBe('comment-scope-unknown')
+    expect(safeIgnoredReason('comment-reply-missing')).toBe('comment-reply-missing')
+    expect(safeIgnoredReason('unsupported-file-type')).toBe('unsupported-file-type')
+  })
+
+  it('keeps channel-state gate reasons out of the per-event ignore vocabulary', () => {
+    for (const gate of ['event-connection-conflict', 'subscribe-lock-held', 'lark-cli-too-old', 'connection-check-failed']) {
+      expect(safeIgnoredReason(gate)).toBe('other')
+    }
+  })
+
   it('logs a low-cardinality reason without event identifiers or content', async () => {
     const f = await fixture()
     harness = f.harness

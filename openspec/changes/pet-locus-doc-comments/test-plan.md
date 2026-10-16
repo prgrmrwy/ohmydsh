@@ -17,24 +17,24 @@ This table is a live ledger. During apply, flip each row from 🔴 to 🟢 when 
 | specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | 升级后默认不消费事件 | packages/dsh-pet/test/channel-service.test.ts | spec Scenario "升级后默认不消费事件" | 🟢 green |
 | specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | Channel 关闭时为配对临时订阅 | packages/dsh-pet/test/channel-pairing-service.test.ts | spec Scenario "Channel 关闭时为配对临时订阅" | 🟢 green |
 | specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | 配对结束后按运行原因回收 | packages/dsh-pet/test/channel-pairing-service.test.ts | spec Scenario "配对结束后按运行原因回收" | 🟢 green |
-| specs/pet-lark-channel/spec.md → 未通过准入的入站消息保持飞书侧静默但 Host 可诊断 | Channel 关闭时收到消息 | packages/dsh-pet/test/channel-service.test.ts | spec Scenario "Channel 关闭时收到消息" | 🔴 red — carried forward; regression |
-| specs/pet-lark-channel/spec.md → 未通过准入的入站消息保持飞书侧静默但 Host 可诊断 | 非 allowlist 用户 @ Bot | packages/dsh-pet/test/channel-service.test.ts | spec Scenario "非 allowlist 用户 @ Bot" | 🔴 red — carried forward; regression |
-| specs/pet-lark-channel/spec.md → 未通过准入的入站消息保持飞书侧静默但 Host 可诊断 | 评论范围无法判定 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "评论范围无法判定" | 🔴 red |
-| specs/pet-lark-channel/spec.md → 未通过准入的入站消息保持飞书侧静默但 Host 可诊断 | 目标群调用因权限失败 | packages/dsh-pet/test/channel-service.test.ts | spec Scenario "目标群调用因权限失败" | 🔴 red — carried forward; regression |
-| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | 无其它连接时启动 | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "无其它连接时启动" | 🔴 red |
-| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | 旧 bus 在空闲期内 | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "旧 bus 在空闲期内" | 🔴 red |
-| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | 他方持续占用连接 | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "他方持续占用连接" | 🔴 red |
-| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | 监督器重启时上一条连接尚未释放 | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "监督器重启时上一条连接尚未释放" | 🔴 red |
-| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | 连接计数接口暂时失败时退避重试 | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "连接计数接口暂时失败时退避重试" | 🔴 red |
-| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | 连接计数接口持续失败 | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "连接计数接口持续失败" | 🔴 red |
-| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | 启用时 IM 前置条件被阻断 | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "启用时 IM 前置条件被阻断" | 🔴 red |
-| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | dry-run 报告 unknown 时照常启用 | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "dry-run 报告 unknown 时照常启用" | 🔴 red |
-| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | 门禁等待期间停用 channel | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "门禁等待期间停用 channel" | 🔴 red |
-| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | Host 启动恢复已启用 channel 时执行 dry-run | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "Host 启动恢复已启用 channel 时执行 dry-run" | 🔴 red |
-| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | 评论事件未开通不影响 IM | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "评论事件未开通不影响 IM" | 🔴 red |
-| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | 单实例锁被占用 | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "单实例锁被占用" | 🔴 red |
-| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | lark-cli 版本过低 | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "lark-cli 版本过低" | 🔴 red |
-| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | 就绪超时 | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "就绪超时" | 🔴 red |
+| specs/pet-lark-channel/spec.md → 未通过准入的入站消息保持飞书侧静默但 Host 可诊断 | Channel 关闭时收到消息 | packages/dsh-pet/test/channel-pipeline.test.ts | spec Scenario "Channel 关闭时收到消息" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 未通过准入的入站消息保持飞书侧静默但 Host 可诊断 | 非 allowlist 用户 @ Bot | packages/dsh-pet/test/channel-pipeline.test.ts | spec Scenario "非 allowlist 用户 @ Bot" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 未通过准入的入站消息保持飞书侧静默但 Host 可诊断 | 评论范围无法判定 | packages/dsh-pet/test/channel-service.test.ts | spec Scenario "评论范围无法判定" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 未通过准入的入站消息保持飞书侧静默但 Host 可诊断 | 目标群调用因权限失败 | packages/dsh-pet/test/channel-lark.test.ts | spec Scenario "目标群调用因权限失败" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | 无其它连接时启动 | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "无其它连接时启动" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | 旧 bus 在空闲期内 | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "旧 bus 在空闲期内" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | 他方持续占用连接 | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "他方持续占用连接" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | 监督器重启时上一条连接尚未释放 | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "监督器重启时上一条连接尚未释放" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | 连接计数接口暂时失败时退避重试 | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "连接计数接口暂时失败时退避重试" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | 连接计数接口持续失败 | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "连接计数接口持续失败" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | 启用时 IM 前置条件被阻断 | packages/dsh-pet/test/channel-service.test.ts | spec Scenario "启用时 IM 前置条件被阻断" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | dry-run 报告 unknown 时照常启用 | packages/dsh-pet/test/channel-service.test.ts | spec Scenario "dry-run 报告 unknown 时照常启用" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | 门禁等待期间停用 channel | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "门禁等待期间停用 channel" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | Host 启动恢复已启用 channel 时执行 dry-run | packages/dsh-pet/test/channel-service.test.ts | spec Scenario "Host 启动恢复已启用 channel 时执行 dry-run" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | 评论事件未开通不影响 IM | packages/dsh-pet/test/channel-service.test.ts | spec Scenario "评论事件未开通不影响 IM" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | 单实例锁被占用 | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "单实例锁被占用" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | lark-cli 版本过低 | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "lark-cli 版本过低" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | 就绪超时 | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "就绪超时" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → Locus 统一关联主会话子会话与飞书入口 | 同一研发主会话服务多个现场 | packages/dsh-pet/test/locus-repository.test.ts | spec Scenario "同一研发主会话服务多个现场" | 🔴 red — carried forward; regression |
 | specs/pet-locus-collaboration/spec.md → Locus 统一关联主会话子会话与飞书入口 | 同群话题关联不同主会话 | packages/dsh-pet/test/locus-repository.test.ts | spec Scenario "同群话题关联不同主会话" | 🔴 red — carried forward; regression |
 | specs/pet-locus-collaboration/spec.md → Locus 统一关联主会话子会话与飞书入口 | 子会话不能作为绑定源 | packages/dsh-pet/test/locus-repository.test.ts | spec Scenario "子会话不能作为绑定源" | 🔴 red — carried forward; regression |

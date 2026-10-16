@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { connectionCount, consumeDryRun } from './fixtures/lark-subscribe.js'
 import {
   createLarkCliClient,
   parseBotIdentity,
@@ -39,18 +40,43 @@ const READY = {
 }
 
 describe('supported CLI version', () => {
-  it('accepts the installed identity-contract version and rejects older builds', async () => {
+  it('accepts the +subscribe floor (1.0.97) and rejects older builds, so enable, pairing and the gate agree', async () => {
     const supported = createLarkCliClient(
       'lark-cli',
-      vi.fn(async () => ({ stdout: 'lark-cli version 1.0.93\n' })) as unknown as LarkCliRunner,
+      vi.fn(async () => ({ stdout: 'lark-cli version 1.0.97\n' })) as unknown as LarkCliRunner,
     )
     const outdated = createLarkCliClient(
       'lark-cli',
-      vi.fn(async () => ({ stdout: 'lark-cli version 1.0.92\n' })) as unknown as LarkCliRunner,
+      vi.fn(async () => ({ stdout: 'lark-cli version 1.0.96\n' })) as unknown as LarkCliRunner,
     )
 
-    await expect(supported.cliVersion?.()).resolves.toEqual({ supported: true, version: '1.0.93' })
-    await expect(outdated.cliVersion?.()).resolves.toEqual({ supported: false, version: '1.0.92' })
+    await expect(supported.cliVersion?.()).resolves.toEqual({ supported: true, version: '1.0.97' })
+    await expect(outdated.cliVersion?.()).resolves.toEqual({ supported: false, version: '1.0.96' })
+  })
+
+  it('reads the event connection count as the bot and classifies auth failures', async () => {
+    const calls: string[][] = []
+    const ok = createLarkCliClient('lark-cli', vi.fn(async (_b: string, args: readonly string[]) => {
+      calls.push([...args])
+      return { stdout: JSON.stringify(connectionCount(1)) }
+    }) as unknown as LarkCliRunner)
+    const auth = createLarkCliClient('lark-cli', vi.fn(async () => {
+      throw Object.assign(new Error('exit 1'), {
+        stdout: JSON.stringify({ ok: false, error: { type: 'auth', message: 'not logged in' } }),
+      })
+    }) as unknown as LarkCliRunner)
+
+    await expect(ok.eventConnectionCount?.()).resolves.toEqual({ kind: 'count', count: 1 })
+    expect(calls[0]).toEqual(expect.arrayContaining(['api', 'GET', '/open-apis/event/v1/connection', '--as', 'bot']))
+    await expect(auth.eventConnectionCount?.()).resolves.toEqual({ kind: 'error', authFailure: true })
+  })
+
+  it('reports only blocked IM preconditions from the side-effect-free dry-run', async () => {
+    const client = createLarkCliClient('lark-cli', vi.fn(async () => ({
+      stdout: JSON.stringify(consumeDryRun({ console_event_published: 'unknown', scopes_granted: 'blocked' })),
+    })) as unknown as LarkCliRunner)
+
+    await expect(client.imPreconditions?.()).resolves.toEqual({ blocked: ['scopes_granted'] })
   })
 })
 
@@ -203,7 +229,7 @@ describe('user token refresh during --verify', () => {
 })
 
 describe('safe permission diagnostics', () => {
-  it('keeps scopes and the official console link', () => {
+  it('spec Scenario "目标群调用因权限失败": keeps scopes and the official console link', () => {
     expect(
       permissionDiagnostic({
         error: {

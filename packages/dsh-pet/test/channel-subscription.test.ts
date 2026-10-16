@@ -101,6 +101,7 @@ function harness(options: { maxFailures?: number } = {}): Harness {
     schedule: (fn, ms) => {
       timers.push({ fn, ms })
     },
+    scheduleReadyTimeout: () => undefined,
     signalGroup: (child, signal) => {
       groupSignals.push({ pid: child.pid ?? -1, signal })
     },

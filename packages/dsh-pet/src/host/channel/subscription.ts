@@ -23,6 +23,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process'
 import { PET_CLI_PROFILE, petCliArgs } from './cli.js'
+import type { GateOutcome } from './connection-gate.js'
 
 /** Event types carried on Pet's single connection. */
 export const SUBSCRIBED_EVENT_TYPES = ['im.message.receive_v1', 'drive.notice.comment_add_v1'] as const
@@ -33,6 +34,8 @@ const READY_MARKER = 'connected to wss://'
 const LOCK_HELD_MARKER = 'another event +subscribe instance is already running'
 /** How long a stopped group gets before SIGKILL. */
 const STOP_GRACE_MS = 5_000
+/** A child that has not connected by then is reclaimed and retried. */
+const READY_TIMEOUT_MS = 30_000
 
 /** Connection state, reported independently of Pet's own lifecycle. */
 export type ChannelPhase = 'stopped' | 'starting' | 'connected' | 'reconnecting' | 'down'
@@ -72,6 +75,16 @@ export interface SubscriptionOptions {
   readonly scheduleKill?: (fn: () => void, ms: number) => void
   /** Injectable clock, for tests. */
   readonly now?: () => number
+  /**
+   * Run before EVERY spawn (first start, reconnect, supervisor restart). The
+   * signal aborts when stop/disable/reconnect supersedes this attempt; a
+   * cancelled or refused gate never spawns.
+   */
+  readonly gate?: (signal: AbortSignal) => Promise<GateOutcome>
+  /** A child that never prints the SDK connection line is reclaimed after this. */
+  readonly readyTimeoutMs?: number
+  /** Injectable timer for the ready timeout, for tests. */
+  readonly scheduleReadyTimeout?: (fn: () => void, ms: number) => void
 }
 
 const DEFAULT_BACKOFF = [1_000, 2_000, 5_000, 15_000, 30_000] as const
@@ -89,6 +102,8 @@ export class ChannelSubscription {
   /** Fences late child exits and retry timers from earlier start/stop cycles. */
   private generation = 0
   private buffer = ''
+  /** Aborts the in-flight gate of the current generation. */
+  private gateAbort: AbortController | undefined
   /** Unterminated stderr tail, so markers split across chunks still match. */
   private errBuffer = ''
   /** Set when the current child reported the per-app lock refusal. */
@@ -120,7 +135,7 @@ export class ChannelSubscription {
     if (this.active) return
     this.active = true
     this.generation += 1
-    this.spawnOnce(this.generation)
+    this.attempt(this.generation)
   }
 
   /**
@@ -134,6 +149,8 @@ export class ChannelSubscription {
   stop(): void {
     this.active = false
     this.generation += 1
+    this.gateAbort?.abort()
+    this.gateAbort = undefined
     const child = this.child
     this.child = undefined
     this.buffer = ''
@@ -218,6 +235,17 @@ export class ChannelSubscription {
     child.stderr?.on('data', (chunk: string) => {
       if (generation === this.generation && child === this.child) this.classifyStderr(chunk)
     })
+
+    const scheduleReady =
+      this.options.scheduleReadyTimeout ??
+      ((fn: () => void, ms: number) => {
+        setTimeout(fn, ms).unref?.()
+      })
+    scheduleReady(() => {
+      if (generation !== this.generation || child !== this.child || this.status.readyAt !== undefined) return
+      this.terminate(child)
+      this.handleExit(generation, child, 'lark-cli did not connect within the ready timeout')
+    }, this.options.readyTimeoutMs ?? READY_TIMEOUT_MS)
 
     let settled = false
     const finish = (reason: string): void => {
@@ -320,9 +348,47 @@ export class ChannelSubscription {
       })
     schedule(() => {
       if (this.active && generation === this.generation && this.child === undefined) {
-        this.spawnOnce(generation)
+        this.attempt(generation)
       }
     }, delay)
+  }
+
+  /** Gate, then spawn; both fenced by generation. */
+  private attempt(generation: number): void {
+    const gate = this.options.gate
+    if (gate === undefined) {
+      this.spawnOnce(generation)
+      return
+    }
+    const { readyAt: _previousReady, ...rest } = this.status
+    this.setStatus({ ...rest, phase: 'starting' })
+    const controller = new AbortController()
+    this.gateAbort = controller
+    void gate(controller.signal).then(
+      outcome => this.afterGate(generation, controller, outcome),
+      error => this.afterGate(generation, controller, {
+        kind: 'refused',
+        reason: 'connection-check-failed',
+        retry: true,
+        diagnostic: `connection-check-failed: ${describe(error)}`,
+      }),
+    )
+  }
+
+  /** Apply a gate outcome if it still belongs to the live generation. */
+  private afterGate(generation: number, controller: AbortController, outcome: GateOutcome): void {
+    if (this.gateAbort === controller) this.gateAbort = undefined
+    if (controller.signal.aborted || !this.active || generation !== this.generation) return
+    if (outcome.kind === 'cancelled') return
+    if (outcome.kind === 'pass') {
+      this.spawnOnce(generation)
+      return
+    }
+    if (!outcome.retry) {
+      this.setStatus({ phase: 'down', failures: this.status.failures + 1, diagnostic: outcome.diagnostic })
+      return
+    }
+    this.handleExit(generation, undefined, outcome.diagnostic)
   }
 }
 

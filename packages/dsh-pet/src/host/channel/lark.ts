@@ -13,6 +13,8 @@
  */
 
 import { execFile } from 'node:child_process'
+import type { ConnectionCountRead } from './connection-gate.js'
+import { SUBSCRIBE_MIN_VERSION, versionAtLeast } from './connection-gate.js'
 import { promisify } from 'node:util'
 import { PET_CLI_PROFILE, petCliArgs } from './cli.js'
 import type { LocusLarkPort } from '../locus/controller.js'
@@ -126,6 +128,18 @@ export type LarkChatBotsResult =
 export interface LarkClient {
   /** Detect whether the installed CLI exposes the identity contract Pet needs. */
   cliVersion?(): Promise<{ readonly supported: boolean; readonly version?: string }>
+  /**
+   * The app's live event-connection count (`GET /open-apis/event/v1/connection`
+   * as the bot). One app supports one connection; see `connection-gate.ts`.
+   */
+  eventConnectionCount?(): Promise<ConnectionCountRead>
+  /**
+   * IM intake preconditions via `event consume im.message.receive_v1 --dry-run`
+   * (side-effect free: no bus, no connection). Returns the `blocked` ones;
+   * `unknown` is not blocked because a real run proceeds on it. `undefined`
+   * when the dry-run itself could not be read.
+   */
+  imPreconditions?(): Promise<{ readonly blocked: readonly string[] } | undefined>
   /**
    * Add a reaction to a message.
    * @param messageId - Target message.
@@ -807,13 +821,10 @@ export function createLarkCliClient(
         })
         const match = /(?:^|\s)(\d+)\.(\d+)\.(\d+)(?:\s|$)/.exec(result.stdout.trim())
         if (match === null) return { supported: false }
-        const major = Number(match[1])
-        const minor = Number(match[2])
-        const patch = Number(match[3])
-        return {
-          supported: major > 1 || (major === 1 && (minor > 0 || patch >= 93)),
-          version: `${major}.${minor}.${patch}`,
-        }
+        const version = `${Number(match[1])}.${Number(match[2])}.${Number(match[3])}`
+        // One floor for enable, pairing and the spawn gate: `+subscribe`'s
+        // contract was verified on 1.0.97 (pet-locus-doc-comments D2).
+        return { supported: versionAtLeast(version, SUBSCRIBE_MIN_VERSION), version }
       } catch {
         return { supported: false }
       }
@@ -908,6 +919,32 @@ export function createLarkCliClient(
         direction: 'older',
       })
       return page !== undefined
+    },
+
+    async eventConnectionCount(): Promise<ConnectionCountRead> {
+      const result = await callJson(['api', 'GET', '/open-apis/event/v1/connection', '--as', 'bot'], binary, runner)
+      const value = recordOf(result.value)
+      const data = recordOf(value?.['data'])
+      const count = data?.['online_instance_cnt']
+      if (result.ok && value?.['code'] === 0 && typeof count === 'number' && Number.isInteger(count) && count >= 0) {
+        return { kind: 'count', count }
+      }
+      const error = recordOf(value?.['error'])
+      const text = `${String(error?.['type'] ?? '')} ${String(error?.['subtype'] ?? '')} ${String(error?.['message'] ?? '')}`
+      return { kind: 'error', authFailure: /auth|login|token|credential|unauthori/i.test(text) }
+    },
+
+    async imPreconditions() {
+      const result = await callJson(['event', 'consume', 'im.message.receive_v1', '--as', 'bot', '--dry-run'], binary, runner)
+      if (!result.ok) return undefined
+      const decision = recordOf(recordOf(recordOf(result.value)?.['data'])?.['decision'])
+      const preconditions = decision?.['preconditions']
+      if (!Array.isArray(preconditions)) return undefined
+      const blocked = preconditions
+        .map(recordOf)
+        .filter(item => item?.['status'] === 'blocked')
+        .map(item => String(item?.['name'] ?? 'unknown'))
+      return { blocked }
     },
 
     async botReady() {
