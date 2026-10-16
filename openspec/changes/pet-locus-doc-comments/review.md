@@ -105,4 +105,26 @@ New findings from the re-review:
   - `openspec validate --strict` valid;
   - `check:artifacts` OK.
 
-**`CHANGES_APPLIED: yes`**: required changes applied. The re-reviewer's 🟡 and 📌 items are each fixed, with tests and mutation checks.
+Author's claim before the final check: all re-review items applied.
+
+## Reviewer re-check (round 7, final), first pass
+- Applied:
+  - row :125 titled test (`locus-lark-cli-egress-guard.test.ts:51-59`);
+  - strict parity 129/129, missing 0;
+  - `withIssuer` try/finally, with no remaining `noteIssuer`;
+  - spec :212 scoping.
+- **Not applied:**
+  - tasks 10.2 body still said 「128 行」;
+  - spec :212 named 「持久 Delivery 的发送者」 as the mention target for whole-doc control receipts and warnings, but those mention the command sender, or the `/bind` issuer.
+- `CHANGES_APPLIED: no`.
+
+## Author: fixes for the first pass
+- tasks 10.2 body now reads 「核对 test-plan 129 行全部为 🟢」.
+- Spec :212 now says the `mention_user` 「指向提问者或命令发送者」:
+  - a business answer mentions the durable Delivery sender;
+  - a control receipt mentions that command's sender;
+  - the `/bind` switch warning mentions the `/bind` issuer.
+- Scanned the other mentions of the durable sender:
+  - collab :43 is about business replies, so it is correct.
+  - design :199 and :214 also cover business answers, and :214 already states the `/bind` exception.
+- `openspec validate --strict`: valid.
