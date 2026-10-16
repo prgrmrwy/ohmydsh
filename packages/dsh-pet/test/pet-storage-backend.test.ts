@@ -152,6 +152,32 @@ describe('PetStorageBackend medium ownership', () => {
   })
 })
 
+describe('spec Scenario "v15 拒绝打开 v16 库"', () => {
+  it('a v15 descriptor refuses a medium stamped 16 with version-mismatch and changes nothing', async () => {
+    const s = scratch()
+    try {
+      const sixteen = new PetStorageBackend(s.file)
+      const unit = await sixteen.kv.open({ ...SPEC, tables: [...SPEC.tables], version: 16 })
+      await unit.close()
+      await sixteen.close()
+      const before = new DatabaseSync(s.file, { readOnly: true })
+      const stampedBefore = before.prepare('SELECT name, version FROM units').all()
+      before.close()
+
+      const fifteen = new PetStorageBackend(s.file)
+      try {
+        await expect(fifteen.kv.open({ ...SPEC, tables: [...SPEC.tables], version: 15 }))
+          .rejects.toMatchObject({ name: 'PetStorageError', code: 'version-mismatch' })
+      } finally { await fifteen.close() }
+
+      const after = new DatabaseSync(s.file, { readOnly: true })
+      try {
+        expect(after.prepare('SELECT name, version FROM units').all()).toEqual(stampedBefore)
+      } finally { after.close() }
+    } finally { s.dispose() }
+  })
+})
+
 describe('applyBatch', () => {
   it('persists every write in the batch', async () => {
     const s = scratch()

@@ -22,7 +22,11 @@
  * anchors are not promoted and context modes are not guessed. A todo
  * references locus identity (locusId + endpoint), never a locus instance
  * (generation), so no existing locus/delivery row is read or interpreted
- * differently by the v16 bump.
+ * differently by these bumps. v15 → v16 was claimed by two parallel, additive
+ * lines: doc-comment loci (ordinary locus rows whose chatId carries a
+ * `doc:docx:` prefix) and inquiry answers; v16 → v17 adds opaque inquiry
+ * handoff/work tables and fences a Host from either v16 line. Rollback is
+ * restoring the `.v<N>.bak-*` backup this script writes.
  *
  * Usage:
  *   node scripts/migrate-state-version.mjs [--db <path>] [--dry-run] [--yes]
@@ -144,7 +148,7 @@ try {
   if (current === 1) {
     fail(
       'Version 1 requires a separate explicit legacy cleanup (it drops rows ' +
-      'that reference a removed store layout); this CLI only restamps v2..v13.',
+      'that reference a removed store layout); this CLI only restamps v2..v15.',
     )
   }
   if (!RESTAMPABLE.includes(current)) {

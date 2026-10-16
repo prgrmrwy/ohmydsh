@@ -8,6 +8,7 @@ import {
 } from '../src/host/locus/aggregate.js'
 import { LocusRepository } from '../src/host/locus/repository.js'
 import { STORAGE_KEY_SEPARATOR } from '../src/host/locus/storage-key.js'
+import { docChatId, isDocEndpoint } from '../src/host/locus/doc-endpoint.js'
 
 const CHAT = ' oc_project '
 const THREAD_A = ' topic-a '
@@ -41,6 +42,49 @@ describe('unified locus endpoint normalization', () => {
     expect(topic.key).toBe(`oc_chat${STORAGE_KEY_SEPARATOR}omt_thread`)
     expect(endpointFromKey(topic.key)).toEqual(topic.endpoint)
     expect(endpointKeyOf(chat.endpoint)).not.toBe(endpointKeyOf(topic.endpoint))
+  })
+
+  it('spec Scenario "既有群入口键不变": IM keys are byte-identical to the pre-change form', () => {
+    const group = normalizeLocusEndpoint({ chatId: 'oc_A' })
+    const topic = normalizeLocusEndpoint({ chatId: 'oc_A', threadId: 'omt_T' })
+
+    expect(group.key).toBe('oc_A')
+    expect(topic.key).toBe(`oc_A${STORAGE_KEY_SEPARATOR}omt_T`)
+    expect(isDocEndpoint(group.endpoint)).toBe(false)
+    expect(isDocEndpoint(topic.endpoint)).toBe(false)
+  })
+
+  it('spec Scenario "规范化不丢失文档前缀": normalize → key → parse round-trips a comment entry', () => {
+    const chatId = docChatId('Dx0000000000000000000000001')!
+    const normalized = normalizeLocusEndpoint({ chatId, threadId: '7696944637407137026' })
+
+    const parsed = endpointFromKey(normalized.key)
+
+    expect(parsed).toEqual({ chatId: 'doc:docx:Dx0000000000000000000000001', threadId: '7696944637407137026' })
+    expect(isDocEndpoint(parsed)).toBe(true)
+  })
+
+  it('an IM egress handed a doc root id throws locally before any lark-cli call', async () => {
+    const { createLarkCliClient } = await import('../src/host/channel/lark.js')
+    const calls: unknown[] = []
+    const client = createLarkCliClient('lark-cli', (async (...args: unknown[]) => {
+      calls.push(args)
+      return { stdout: '{"ok":true,"data":{}}' }
+    }) as never)
+
+    await expect(client.chatName(docChatId('Dx0000000000000000000000001')!)).rejects.toThrow(/doc-comment identifier/)
+    await expect(client.reply('doc:docx:Dx0000000000000000000000001/1/2', 'hi')).rejects.toThrow()
+    expect(calls).toHaveLength(0)
+  })
+
+  it('keeps a document entry and a same-literal chat entry in different repository slots', () => {
+    const repository = new LocusRepository({ now: () => 100 })
+    const doc = repository.ensureLocus(locusInput({ id: 'doc', endpoint: { chatId: docChatId('X1')! }, childSessionId: 'child-doc' }))
+    const chat = repository.ensureLocus(locusInput({ id: 'chat', endpoint: { chatId: 'X1' }, childSessionId: 'child-chat-x' }))
+
+    expect(doc.id).not.toBe(chat.id)
+    expect(repository.getCurrent({ chatId: 'doc:docx:X1' })).toBe(doc)
+    expect(repository.getCurrent({ chatId: 'X1' })).toBe(chat)
   })
 
   it('rejects missing ids and delimiter injection', () => {
@@ -103,6 +147,24 @@ describe('LocusRepository aggregate and indexes', () => {
     expect(repository.getByChild('child-topic-b')).toBe(topicB)
     expect(repository.getCurrent({ chatId: 'oc_project', threadId: THREAD_A.trim() })).toBe(topicA)
     expect(repository.getCurrent({ chatId: 'oc_project', threadId: THREAD_B })).toBe(topicB)
+  })
+
+  it('spec Scenario "同一研发主会话服务多个现场": a dev group, an issue group and a topic each get their own child under one main', () => {
+    const repository = new LocusRepository()
+    const dev = repository.ensureLocus(locusInput({ id: 'dev', endpoint: { chatId: 'oc_dev' }, childSessionId: 'child-dev' }))
+    const issue = repository.ensureLocus(locusInput({ id: 'issue', endpoint: { chatId: 'oc_issue' }, childSessionId: 'child-issue' }))
+    const topic = repository.ensureLocus(locusInput({
+      id: 'topic',
+      endpoint: { chatId: 'oc_dev', threadId: 'omt_1' },
+      parentLocusId: dev.id,
+      childSessionId: 'child-topic',
+      source: 'inherited',
+    }))
+
+    const children = [dev, issue, topic].map(item => item.childSessionId)
+    expect(new Set(children).size).toBe(3)
+    for (const item of [dev, issue, topic]) expect(item.parentSessionId).toBe('session-main')
+    expect(repository.listByParent('session-main').map(item => item.id).sort()).toEqual(['dev', 'issue', 'topic'])
   })
 
   it('rejects a topic whose parent is another topic or another chat', () => {

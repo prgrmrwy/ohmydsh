@@ -106,8 +106,16 @@ export const PET_DOMAIN_NAME = 'dsh_pet'
 // see `ledger/todo.ts` design D6 — so no existing locus/delivery row is read
 // or interpreted differently by this bump.
 //
+// Bumped to 16 for doc-comment loci (openspec pet-locus-doc-comments D11). No
+// field or table is added: a document entry is an ordinary locus row whose
+// chatId carries the `doc:docx:` prefix. The bump only makes a v15 Host refuse
+// to open the medium instead of loading doc rows as chats (its schema does not
+// check the `oc_` prefix). Rollback = restore the pre-restamp backup.
 // Bumped to 16 for inquiry_answers, one answer per inquiry. Additive only;
 // runtime protocol eligibility is deliberately not represented by this table.
+// (The doc-comment line above and this inquiry line both claimed 16 on
+// parallel branches; both are additive and the merged domain is 17, so a
+// medium stamped 16 by either line restamps to 17 without rewriting rows.)
 // Bumped to 17 for durable inquiry handoff intents and local work proofs.
 // Additive opaque tables: migration does not infer protocol state from legacy rows.
 export const PET_DOMAIN_VERSION = 17

@@ -90,7 +90,21 @@ describe('dsh-pet-migrate-state CLI', () => {
     expect(stamped(file)).toBe(5)
   })
 
-  it.each([2, 3, 4, 5, 6, 7, 8, 9, 10, 11])('backs up v%s, restamps to the current version without changing history, and is idempotent', version => {
+  it('spec Scenario "升级需离线迁移并先备份": v15 → v16 writes a byte-identical backup first', () => {
+    const { dir, file } = database(15)
+    const before = readFileSync(file)
+
+    const out = execFileSync(process.execPath, [SCRIPT, '--db', file, '--yes'], { encoding: 'utf8' })
+
+    expect(out).toContain(`Restamped 15 → ${PET_DOMAIN_VERSION}`)
+    expect(PET_DOMAIN_VERSION).toBe(16)
+    expect(stamped(file)).toBe(16)
+    const backups = readdirSync(dir).filter(name => /\.v15\.bak-\d+$/.test(name))
+    expect(backups).toHaveLength(1)
+    expect(readFileSync(path.join(dir, backups[0]!))).toEqual(before)
+  })
+
+  it.each([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15])('backs up v%s, restamps to the current version without changing history, and is idempotent', version => {
     const { dir, file } = database(version)
     const seed = new DatabaseSync(file)
     // Include opaque malformed history and local facts: restamping is not

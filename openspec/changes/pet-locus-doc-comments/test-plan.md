@@ -35,19 +35,19 @@ This table is a live ledger. During apply, flip each row from 🔴 to 🟢 when 
 | specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | 单实例锁被占用 | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "单实例锁被占用" | 🟢 green |
 | specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | lark-cli 版本过低 | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "lark-cli 版本过低" | 🟢 green |
 | specs/pet-lark-channel/spec.md → 事件连接独占在拉起订阅前被证明 | 就绪超时 | packages/dsh-pet/test/channel-connection-gate.test.ts | spec Scenario "就绪超时" | 🟢 green |
-| specs/pet-locus-collaboration/spec.md → Locus 统一关联主会话子会话与飞书入口 | 同一研发主会话服务多个现场 | packages/dsh-pet/test/locus-repository.test.ts | spec Scenario "同一研发主会话服务多个现场" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → Locus 统一关联主会话子会话与飞书入口 | 同群话题关联不同主会话 | packages/dsh-pet/test/locus-repository.test.ts | spec Scenario "同群话题关联不同主会话" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → Locus 统一关联主会话子会话与飞书入口 | 子会话不能作为绑定源 | packages/dsh-pet/test/locus-repository.test.ts | spec Scenario "子会话不能作为绑定源" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → Locus 统一关联主会话子会话与飞书入口 | 既有群入口键不变 | packages/dsh-pet/test/locus-repository.test.ts | spec Scenario "既有群入口键不变" | 🔴 red |
-| specs/pet-locus-collaboration/spec.md → Locus 统一关联主会话子会话与飞书入口 | 文档与群标识不串键 | packages/dsh-pet/test/locus-admission.test.ts | spec Scenario "文档与群标识不串键" | 🔴 red |
-| specs/pet-locus-collaboration/spec.md → Locus 统一关联主会话子会话与飞书入口 | 规范化不丢失文档前缀 | packages/dsh-pet/test/locus-repository.test.ts | spec Scenario "规范化不丢失文档前缀" | 🔴 red |
+| specs/pet-locus-collaboration/spec.md → Locus 统一关联主会话子会话与飞书入口 | 同一研发主会话服务多个现场 | packages/dsh-pet/test/locus-repository.test.ts | spec Scenario "同一研发主会话服务多个现场" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → Locus 统一关联主会话子会话与飞书入口 | 同群话题关联不同主会话 | packages/dsh-pet/test/locus-controller.test.ts | spec Scenario "同群话题关联不同主会话" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → Locus 统一关联主会话子会话与飞书入口 | 子会话不能作为绑定源 | packages/dsh-pet/test/locus-control.test.ts | spec Scenario "子会话不能作为绑定源" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → Locus 统一关联主会话子会话与飞书入口 | 既有群入口键不变 | packages/dsh-pet/test/locus-repository.test.ts | spec Scenario "既有群入口键不变" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → Locus 统一关联主会话子会话与飞书入口 | 文档与群标识不串键 | packages/dsh-pet/test/locus-admission.test.ts | spec Scenario "文档与群标识不串键" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → Locus 统一关联主会话子会话与飞书入口 | 规范化不丢失文档前缀 | packages/dsh-pet/test/locus-repository.test.ts | spec Scenario "规范化不丢失文档前缀" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 群级引用触发消息 | packages/dsh-pet/test/locus-delivery.test.ts | spec Scenario "群级引用触发消息" | 🔴 red — carried forward; regression |
 | specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 话题回复留在原话题 | packages/dsh-pet/test/locus-delivery.test.ts | spec Scenario "话题回复留在原话题" | 🔴 red — carried forward; regression |
 | specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 文档评论回复回到触发评论 | packages/dsh-pet/test/locus-delivery.test.ts | spec Scenario "文档评论回复回到触发评论" | 🔴 red |
 | specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 文档回复目标与入口不符 | packages/dsh-pet/test/locus-delivery.test.ts | spec Scenario "文档回复目标与入口不符" | 🔴 red |
-| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 升级需离线迁移并先备份 | packages/dsh-pet/test/migrate-cli.test.ts | spec Scenario "升级需离线迁移并先备份" | 🔴 red |
-| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 未迁移时 v16 拒绝打开 | packages/dsh-pet/test/migration-guidance.test.ts | spec Scenario "未迁移时 v16 拒绝打开" | 🔴 red |
-| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | v15 拒绝打开 v16 库 | packages/dsh-pet/test/pet-storage-backend.test.ts | spec Scenario "v15 拒绝打开 v16 库" | 🔴 red |
+| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 升级需离线迁移并先备份 | packages/dsh-pet/test/migrate-cli.test.ts | spec Scenario "升级需离线迁移并先备份" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 未迁移时 v16 拒绝打开 | packages/dsh-pet/test/migration-guidance.test.ts | spec Scenario "未迁移时 v16 拒绝打开" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | v15 拒绝打开 v16 库 | packages/dsh-pet/test/pet-storage-backend.test.ts | spec Scenario "v15 拒绝打开 v16 库" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | turn 结束不完成请求 | packages/dsh-pet/test/locus-delivery.test.ts | spec Scenario "turn 结束不完成请求" | 🔴 red — carried forward; regression |
 | specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 相对等待受绝对上限约束 | packages/dsh-pet/test/locus-delivery.test.ts | spec Scenario "相对等待受绝对上限约束" | 🔴 red — carried forward; regression |
 | specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 超时自动开放下一条 | packages/dsh-pet/test/locus-delivery.test.ts | spec Scenario "超时自动开放下一条" | 🔴 red — carried forward; regression |

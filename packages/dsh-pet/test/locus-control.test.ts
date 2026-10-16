@@ -69,6 +69,13 @@ describe('unified locus bind prefix resolution', () => {
     })
   })
 
+  it('spec Scenario "子会话不能作为绑定源": a prefix that only hits a child reads exactly like no match', () => {
+    const candidates = [session('session-child000000', { parentSessionId: 'session-parent' })]
+
+    expect(resolveLocusBindPrefix('child0', candidates)).toEqual(resolveLocusBindPrefix('zzzzzz', candidates))
+    expect(resolveLocusBindPrefix('child0', candidates)).toMatchObject({ resolved: false })
+  })
+
   it('gives no match and multiple matches one indistinguishable outcome', () => {
     const candidates = [
       session('session-abcdef111111'),

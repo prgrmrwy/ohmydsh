@@ -472,6 +472,7 @@ async function callJson(
   binary: string,
   runner: LarkCliRunner,
 ): Promise<CliJsonResult> {
+  assertNoDocIdentifier(args)
   let text: string | undefined
   let ok = true
   try {
@@ -493,6 +494,22 @@ async function callJson(
   if (text === undefined) return { ok: false }
   const value = parseCliJson(text)
   return value === undefined ? { ok: false } : { ok, value }
+}
+
+/**
+ * Doc-comment loci keep their category in the id (`doc:docx:<token>`,
+ * `doc:docx:<token>/<comment>/<reply>`; pet-locus-doc-comments D4). Not every
+ * IM method validates the `oc_`/`om_` shape, so this single choke point makes
+ * the "IM egress never receives a doc id" invariant hold for all of them: any
+ * argument value carrying the doc prefix throws before lark-cli runs. Doc
+ * egress (drive commands) passes the raw token and never trips this.
+ */
+function assertNoDocIdentifier(args: readonly string[]): void {
+  for (const arg of args) {
+    if (arg.startsWith('doc:')) {
+      throw new Error('A doc-comment identifier reached an IM lark-cli call; refusing to send.')
+    }
+  }
 }
 
 /** Read the usual `{ok,data}` lark-cli envelope. */

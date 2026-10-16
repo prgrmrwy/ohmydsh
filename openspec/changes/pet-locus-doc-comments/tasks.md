@@ -74,21 +74,27 @@
 
 ## 3. 入口与持久化：带前缀的 `chatId`、v16、迁移（D4、D5、D11）
 
-- [ ] 3.1 写失败测试：
+- [x] 3.1 写失败测试：
   - 既有群入口键不变、规范化不丢失文档前缀（`locus-repository.test.ts`）；
   - 文档与群标识不串键（`locus-admission.test.ts`）
-- [ ] 3.2 实现 `isDocEndpoint`、`parseDocChatId`、`docMessageId(token, commentId, replyId)`。逐一核查以下路径对带 `doc:docx:` 前缀的值能原样往返：`normalizeLocusEndpoint`、`endpointKeyOf`/`endpointFromKey`、admission 的 `locusEndpointKey`、授权解析器、`deliveryCorrelates`、`assertDeliveryRecord`。核查范围以 R1-M3 列出的位置为准，对缺漏的地方补测试
-- [ ] 3.3 写失败测试：
+- [x] 3.2 实现 `isDocEndpoint`、`parseDocChatId`、`docMessageId(token, commentId, replyId)`。逐一核查以下路径对带 `doc:docx:` 前缀的值能原样往返：`normalizeLocusEndpoint`、`endpointKeyOf`/`endpointFromKey`、admission 的 `locusEndpointKey`、授权解析器、`deliveryCorrelates`、`assertDeliveryRecord`。核查范围以 R1-M3 列出的位置为准，对缺漏的地方补测试
+- [x] 3.3 写失败测试：
   - 升级需离线迁移并先备份（`migrate-cli.test.ts`）；
   - 未迁移时 v16 拒绝打开（`migration-guidance.test.ts`）；
   - v15 拒绝打开 v16 库（`pet-storage-backend.test.ts`，用 v15 描述符打开 v16 夹具）
-- [ ] 3.4 实现：
+- [x] 3.4 实现：
   - `PET_DOMAIN_VERSION` 改为 16，并在注释里写明理由；
   - `migrate-state-version.mjs`：常量改为 16、`RESTAMPABLE` 加入 15、修正“v2..v13”文案；
   - `migrate.ts` 接受 14 和 15；
   - 同步更新 `migrate-cli.test.ts` 的版本范围
-- [ ] 3.5 回归行翻 🟢：同一研发主会话服务多个现场、同群话题关联不同主会话、子会话不能作为绑定源
-- [ ] 3.6 重构：IM 出口函数的签名只接受 IM 值（D4 的类型兜底）。全量测试保持绿色
+- [x] 3.5 回归行翻 🟢：同一研发主会话服务多个现场、同群话题关联不同主会话、子会话不能作为绑定源
+- [x] 3.6 IM 出口的兜底防线（D4）：
+  - 没有用类型签名实现。原因是并非每个 IM 方法都校验 `oc_`/`om_` 格式：`reply`、`chatName` 等都直接透传参数。
+  - 改为在唯一的 CLI 调用汇聚点 `callJson` 里检查：任何以 `doc:` 开头的参数一律直接抛错，不调用 lark-cli。
+  - 有测试覆盖：`chatName` 和 `reply` 收到文档标识时都在本地抛错，零次调用 lark-cli。
+  - 3.2 的实际结论：键、授权查找、`deliveryCorrelates` 都对带前缀的值原样往返，不用改代码，测试已证明。
+  - 3.4 也已完成：`PET_DOMAIN_VERSION` 改为 16（附理由）；迁移脚本 `RESTAMPABLE` 增加 15；`migrate.ts` 接受 14、15；更新了版本契约测试。
+  - 全量：3094 passed / 1 failed（基线 loader-composition）。
 
 ## 4. 评论入站：范围判定与建树（D6）
 

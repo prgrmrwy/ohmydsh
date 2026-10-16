@@ -18,6 +18,16 @@ describe('offline Pet state migration guidance', () => {
     expect(guided).toContain(`${PET_STATE_MIGRATION_COMMAND} --yes && dsh`)
   })
 
+  it('spec Scenario "未迁移时 v16 拒绝打开": a v15 medium under a v16 Host gets the offline-migration guidance', () => {
+    // The exact text lifecycle.contain('Pet storage domain', …) produces from backend.ts.
+    const diagnostic = "Pet storage domain: kv unit 'dsh_pet' is stamped version 15 on the medium, incompatible with descriptor version 16"
+
+    expect(needsOfflinePetStateMigration(diagnostic)).toBe(true)
+    const guided = withOfflinePetStateMigrationGuidance(diagnostic)
+    expect(guided).toContain('dsh stop')
+    expect(guided).toContain(`${PET_STATE_MIGRATION_COMMAND} --yes`)
+  })
+
   it('does not prescribe a database operation for unrelated degradation', () => {
     const diagnostic = 'Pet channel: bot identity unavailable'
     expect(needsOfflinePetStateMigration(diagnostic)).toBe(false)

@@ -22,6 +22,8 @@ describe('intent-triage domain contract: additive schema evolution (tasks 1.4 / 
     expect(specSource).toContain('Bumped to 16 for inquiry_answers')
     expect(specSource).toContain('Bumped to 17 for durable inquiry handoff intents and local work proofs')
     expect(specSource).toContain('Additive opaque tables: migration does not infer protocol state from legacy rows.')
+    // v16 was also claimed by doc-comment loci (pet-locus-doc-comments D11).
+    expect(specSource).toContain('Bumped to 16 for doc-comment loci')
 
     // Every bump to date except v1->v2 is additive (new table and/or optional
     // field; old rows keep validating and are never rewritten or cleared).
