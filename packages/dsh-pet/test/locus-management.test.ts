@@ -724,3 +724,50 @@ describe('locus session describer', () => {
     expect(bare.loci[0]?.workspace).not.toHaveProperty('executionRoot')
   })
 })
+
+describe('spec Requirement "管理面呈现文档入口且不提供新建入口"', () => {
+  const ROOT = 'doc:docx:Dx0000000000000000000000001'
+
+  it('spec Scenario "文档与评论嵌套呈现": the doc root carries title/url, comments nest by parentLocusId with their quote', async () => {
+    const repository = memory([
+      record({ id: 'doc-root', endpoint: { chatId: ROOT }, childSessionId: 'child-root' }),
+      record({ id: 'doc-c1', endpoint: { chatId: ROOT, threadId: '11' }, childSessionId: 'child-c1', parentLocusId: 'doc-root', source: 'inherited' }),
+      record({ id: 'doc-c2', endpoint: { chatId: ROOT, threadId: '22' }, childSessionId: 'child-c2', parentLocusId: 'doc-root', source: 'inherited' }),
+    ])
+    const port = createLocusManagementPort({
+      repository,
+      resolvers: {
+        endpoint: endpoint => endpoint.threadId === undefined
+          ? { chatName: '技术方案', docUrl: 'https://www.feishu.cn/docx/Dx0000000000000000000000001' }
+          : { quote: endpoint.threadId === '11' ? '接口已有' : '为什么', docUrl: 'https://www.feishu.cn/docx/Dx0000000000000000000000001' },
+      },
+    })
+    const view = await port.view()
+
+    const root = view.loci.find(item => item.locusId === 'doc-root')!
+    expect(root.endpoint).toMatchObject({ chatId: ROOT, chatName: '技术方案', docUrl: 'https://www.feishu.cn/docx/Dx0000000000000000000000001' })
+    const comments = view.loci.filter(item => item.endpoint.threadId !== undefined)
+    expect(comments.map(item => item.endpoint.quote).sort()).toEqual(['为什么', '接口已有'])
+  })
+
+  it('spec Scenario "标题不可得": a failing resolver leaves the facts out instead of failing the view', async () => {
+    const port = createLocusManagementPort({
+      repository: memory([record({ id: 'doc-root', endpoint: { chatId: ROOT } })]),
+      resolvers: { endpoint: () => { throw new Error('inspect failed') } },
+    })
+    const view = await port.view()
+    expect(view.loci[0]?.endpoint).toEqual({ chatId: ROOT })
+  })
+
+  it('spec Scenario "无建立控件": no management action creates a document entry from input', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const path = await import('node:path')
+    const wire = await readFile(path.resolve(__dirname, '..', 'src', 'wire.ts'), 'utf8')
+    const settings = await readFile(path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'), 'utf8')
+    // The action vocabulary has no doc-creating verb, and the panel has no
+    // input that accepts a document link or token.
+    const actions = wire.slice(wire.indexOf('export type PetLocusActionRequest'), wire.indexOf('export type PetLocusActionRequest') + 2_000)
+    expect(actions).not.toMatch(/doc(Url|Token|Link)|createDoc|addDoc/i)
+    expect(settings).not.toMatch(/placeholder=["'][^"']*(文档链接|docx|token)/i)
+  })
+})

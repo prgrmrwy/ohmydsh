@@ -2057,6 +2057,21 @@ async function initialize(
     : undefined
 
   const imLocusLarkPort = createLocusLarkPort()
+  // Display-only doc metadata, cached: the management panel refreshes often,
+  // and a failed read is retried after a shorter delay than a successful one.
+  const docMetaCache = (() => {
+    const entries = new Map<string, { at: number; ok: boolean; value?: { title?: string; url?: string } }>()
+    return {
+      get: async (token: string): Promise<{ title?: string; url?: string } | undefined> => {
+        const now = Date.now()
+        const hit = entries.get(token)
+        if (hit !== undefined && now - hit.at < (hit.ok ? 10 * 60_000 : 60_000)) return hit.value
+        const value = await larkClient.inspectDoc?.(token).catch(() => undefined)
+        entries.set(token, { at: now, ok: value !== undefined, ...(value === undefined ? {} : { value }) })
+        return value
+      },
+    }
+  })()
   // A document has no "post to the root" call; its control messages (the
   // /bind source-switch warning) go under the entry's most recent triggering
   // comment, recovered from durable Deliveries. IM ids never reach drive and
@@ -3460,6 +3475,24 @@ async function initialize(
     resolvers: {
       main: describeSession,
       child: describeSession,
+      // Document entries only (D14): title/url via drive +inspect, cached so the
+      // panel does not re-inspect every refresh; a comment's summary is the
+      // earliest persisted anchored quote. IM entries keep their existing names.
+      endpoint: async endpoint => {
+        const token = parseDocChatId(endpoint.chatId)
+        if (token === undefined) return undefined
+        const meta = await docMetaCache.get(token)
+        const quote = endpoint.threadId === undefined
+          ? undefined
+          : [...locusRepository.listDeliveries()]
+            .filter(record => record.endpoint.chatId === endpoint.chatId && record.endpoint.threadId === endpoint.threadId && record.docComment !== undefined)
+            .sort((left, right) => left.sequence - right.sequence)[0]?.docComment?.quote
+        return {
+          ...(endpoint.threadId === undefined && meta?.title !== undefined ? { chatName: meta.title } : {}),
+          ...(meta?.url === undefined ? {} : { docUrl: meta.url }),
+          ...(quote === undefined ? {} : { quote }),
+        }
+      },
       workspace: (id) => {
         const workspace = ctx.workspaceRegistry.get(id as never) as
           | { title?: unknown; path?: unknown }

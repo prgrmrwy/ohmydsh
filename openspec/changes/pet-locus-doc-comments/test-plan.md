@@ -62,10 +62,10 @@ This table is a live ledger. During apply, flip each row from 🔴 to 🟢 when 
 | specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 同名入口仍可区分 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "同名入口仍可区分" | 🔴 red — carried forward; regression |
 | specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 名称不可得时不猜测 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "名称不可得时不猜测" | 🔴 red — carried forward; regression |
 | specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 短码不是身份 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "短码不是身份" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 文档入口短码确定且与群可区分 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "文档入口短码确定且与群可区分" | 🔴 red |
-| specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 多个文档入口短码互不相同 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "多个文档入口短码互不相同" | 🔴 red |
-| specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 同前缀的评论入口短码可区分 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "同前缀的评论入口短码可区分" | 🔴 red |
-| specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 文档标题不可得 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "文档标题不可得" | 🔴 red |
+| specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 文档入口短码确定且与群可区分 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "文档入口短码确定且与群可区分" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 多个文档入口短码互不相同 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "多个文档入口短码互不相同" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 同前缀的评论入口短码可区分 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "同前缀的评论入口短码可区分" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 文档标题不可得 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "文档标题不可得" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | Project 群先行 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "Project 群先行" | 🔴 red — carried forward; regression |
 | specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | 首次消息补齐 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "首次消息补齐" | 🔴 red — carried forward; regression |
 | specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | 重复初始化 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "重复初始化" | 🔴 red — carried forward; regression |
@@ -90,8 +90,8 @@ This table is a live ledger. During apply, flip each row from 🔴 to 🟢 when 
 | specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 话题身份不可证时退化 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "话题身份不可证时退化" | 🔴 red — existing test, re-run after change |
 | specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 会话已归档时不可跳转 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "会话已归档时不可跳转" | 🔴 red — existing test, re-run after change |
 | specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 退役 locus 的待办仍在列表中 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "退役 locus 的待办仍在列表中" | 🔴 red — existing test, re-run after change |
-| specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 文档评论待办跳到文档 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "文档评论待办跳到文档" | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 文档 URL 不可得 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "文档 URL 不可得" | 🔴 red |
+| specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 文档评论待办跳到文档 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "文档评论待办跳到文档" | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 文档 URL 不可得 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "文档 URL 不可得" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 全文评论进入文档级入口 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "全文评论进入文档级入口" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 划词评论进入评论级入口 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "划词评论进入评论级入口" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 重启后再投递排队中的划词评论 | packages/dsh-pet/test/locus-doc-redelivery.test.ts | spec Scenario "重启后再投递排队中的划词评论" | 🟢 green |
@@ -125,15 +125,15 @@ This table is a live ledger. During apply, flip each row from 🔴 to 🟢 when 
 | specs/pet-locus-doc-comments/spec.md → IM 专属能力在文档入口按明确规则处置 | 文档子会话的工具面 | packages/dsh-pet/test/locus-composition.test.ts | spec Scenario "文档子会话的工具面" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → IM 专属能力在文档入口按明确规则处置 | 文档 Delivery 不调用 IM 接口 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "文档 Delivery 不调用 IM 接口" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → IM 专属能力在文档入口按明确规则处置 | 触发者姓名查询失败 | packages/dsh-pet/test/locus-delivery-prompt.test.ts | spec Scenario "触发者姓名查询失败" | 🟢 green |
-| specs/pet-locus-doc-comments/spec.md → IM 专属能力在文档入口按明确规则处置 | 文档待办跳转 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "文档待办跳转" | 🔴 red |
+| specs/pet-locus-doc-comments/spec.md → IM 专属能力在文档入口按明确规则处置 | 文档待办跳转 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "文档待办跳转" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → IM 专属能力在文档入口按明确规则处置 | IM 入口不受影响 | packages/dsh-pet/test/locus-delivery-prompt.test.ts | spec Scenario "IM 入口不受影响" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → 文档入口具备 caller-bound 的只读上下文 | 读取当前评论线程与文档 | packages/dsh-pet/test/locus-doc-context-tool.test.ts | spec Scenario "读取当前评论线程与文档" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → 文档入口具备 caller-bound 的只读上下文 | 内容中嵌入指令 | packages/dsh-pet/test/locus-doc-context-tool.test.ts | spec Scenario "内容中嵌入指令" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → 文档入口具备 caller-bound 的只读上下文 | 无 current Delivery 时读取 | packages/dsh-pet/test/locus-doc-context-tool.test.ts | spec Scenario "无 current Delivery 时读取" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → 文档入口具备 caller-bound 的只读上下文 | bot 失去文档读取权限 | packages/dsh-pet/test/locus-doc-context-tool.test.ts | spec Scenario "bot 失去文档读取权限" | 🟢 green |
-| specs/pet-locus-doc-comments/spec.md → 管理面呈现文档入口且不提供新建入口 | 文档与评论嵌套呈现 | packages/dsh-pet/test/locus-management.test.ts | spec Scenario "文档与评论嵌套呈现" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → 管理面呈现文档入口且不提供新建入口 | 标题不可得 | packages/dsh-pet/test/locus-management.test.ts | spec Scenario "标题不可得" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → 管理面呈现文档入口且不提供新建入口 | 无建立控件 | packages/dsh-pet/test/locus-management.test.ts | spec Scenario "无建立控件" | 🔴 red |
+| specs/pet-locus-doc-comments/spec.md → 管理面呈现文档入口且不提供新建入口 | 文档与评论嵌套呈现 | packages/dsh-pet/test/locus-management.test.ts | spec Scenario "文档与评论嵌套呈现" | 🟢 green |
+| specs/pet-locus-doc-comments/spec.md → 管理面呈现文档入口且不提供新建入口 | 标题不可得 | packages/dsh-pet/test/locus-management.test.ts | spec Scenario "标题不可得" | 🟢 green |
+| specs/pet-locus-doc-comments/spec.md → 管理面呈现文档入口且不提供新建入口 | 无建立控件 | packages/dsh-pet/test/locus-management.test.ts | spec Scenario "无建立控件" | 🟢 green |
 
 ## Coverage Notes
 

@@ -135,6 +135,16 @@ export interface LocusManagementResolvers {
     | Promise<{ readonly title?: string; readonly path?: string; readonly executionRoot?: string } | undefined>
     | { readonly title?: string; readonly path?: string; readonly executionRoot?: string }
     | undefined
+  /**
+   * Display-only facts for an endpoint (doc title/url, comment quote). Absent
+   * or failing leaves the facts out; the client then shows its fallback name.
+   */
+  readonly endpoint?: (
+    endpoint: LocusEndpoint,
+  ) =>
+    | Promise<Pick<PetLocusEndpointView, 'chatName' | 'quote' | 'docUrl'> | undefined>
+    | Pick<PetLocusEndpointView, 'chatName' | 'quote' | 'docUrl'>
+    | undefined
 }
 
 /** One session's owner-facing metadata, as resolved from durable evidence. */
@@ -513,11 +523,13 @@ async function projectRecord(
   resolvers: LocusManagementResolvers | undefined,
   ownerProjection: CreateLocusManagementPortOptions['ownerProjection'] | undefined,
 ): Promise<PetLocusView> {
-  const [main, child, workspace, owner] = await Promise.all([
+  const [main, child, workspace, owner, display] = await Promise.all([
     resolvers?.main?.(record.parentSessionId),
     record.childSessionId === undefined ? undefined : resolvers?.child?.(record.childSessionId),
     resolvers?.workspace?.(record.workspaceId),
     ownerProjection?.({ locus: record, parentSessionId: record.parentSessionId }),
+    // Display facts are fail-soft: a sync throw or a rejection both leave them out.
+    (async () => resolvers?.endpoint?.(record.endpoint))().catch(() => undefined),
   ])
   // The child serves this endpoint, so its working boundary is the candidate;
   // the workspace resolver's own value is the last resort for integrations that
@@ -527,7 +539,12 @@ async function projectRecord(
   return {
     locusId: record.id,
     generation: record.generation,
-    endpoint: endpointView(record.endpoint),
+    endpoint: {
+      ...endpointView(record.endpoint),
+      ...(display?.chatName === undefined ? {} : { chatName: display.chatName }),
+      ...(display?.quote === undefined ? {} : { quote: display.quote }),
+      ...(display?.docUrl === undefined ? {} : { docUrl: display.docUrl }),
+    },
     main: {
       sessionId: record.parentSessionId,
       source: sourceMain(record.source),
@@ -756,6 +773,8 @@ export function createLocusManagementPort(
       ...(resolvers.main === undefined ? {} : { main: sessionMemo ?? memo(resolvers.main)! }),
       ...(resolvers.child === undefined ? {} : { child: sessionMemo ?? memo(resolvers.child)! }),
       ...(resolvers.workspace === undefined ? {} : { workspace: memo(resolvers.workspace)! }),
+      // Endpoint facts are per-endpoint and already cached Host-side; pass through.
+      ...(resolvers.endpoint === undefined ? {} : { endpoint: resolvers.endpoint }),
     }
     const projected = new Map<string, PetLocusView>()
     const views = await Promise.all(all.map(record => projectRecord(

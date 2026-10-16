@@ -194,11 +194,11 @@
 
 ## 8. 管理面与待办跳转（D14）
 
-- [ ] 8.1 写失败测试：
+- [x] 8.1 写失败测试：
   - `locus-view.test.ts`：文档入口短码确定且与群可区分、多个文档入口短码互不相同、同前缀的评论入口短码可区分（`cmt·5186` / `cmt·0665`）、文档标题不可得；
   - `locus-management.test.ts`：3 行；
   - `ledger-view.test.ts`：文档评论待办跳到文档、文档 URL 不可得、文档待办跳转
-- [ ] 8.2 实现：
+- [x] 8.2 实现：
   - `handleSource` 增加 doc 与 comment 两种类别：doc 取 `doc:docx:` 之后的部分；comment 取 `comment_id` 逆序；
   - `endpointHandleLabel` 增加 `doc·` / `cmt·`；
   - 兜底名为 `文档 · <短码>` / `评论 · <短码>`；
@@ -207,7 +207,18 @@
   - 不新增任何建立入口的控件；
   - `resolveFeishuJumpTarget` 遇到文档入口返回 doc 类型，不再归为 thread
 - [ ] 8.3 回归行翻 🟢：`locus-view` 3 行、`ledger-view` 10 行（含 4 个已命名用例重跑）
-- [ ] 8.4 重构。全量测试保持绿色
+- [x] 8.4 重构。全量测试保持绿色。第 8 组完成情况：
+  - 短码：
+    - 文档入口取 `doc:docx:` 之后的 token，标签为 `doc·`；
+    - 评论入口取 `comment_id` 的逆序，标签为 `cmt·`。代码中以内部标签 `cmt:` 作为映射键，避免与 IM 的 thread id 冲突；
+    - 兜底名为 `文档 · <码>`、`评论 · <码>`，并标明这是兜底显示；
+    - 评论入口优先用划词原文摘要命名。
+  - 管理视图：新增仅用于显示的 `endpoint` resolver，由 Host 提供文档标题、URL 和最早一条划词原文。`inspectDoc` 结果带 TTL 缓存（成功 10 分钟、失败 1 分钟）。resolver 抛错时只省略这几项事实，不影响视图本身。
+  - 面板：
+    - 文档行的跳转链接用 inspect 返回的 URL，不使用 IM applink；
+    - 文档根行标注“本文档的评论者均可提问”；
+    - 待办跳转新增 `doc` 分支：带评论 id 旁注，URL 不可得时说明原因。
+  - 全量测试：先 build 再跑，结果 3198 passed / 0 failed。基线里那条 loader-composition 失败只是缺少构建产物，build 后消失。
 
 ## 9. 文档
 

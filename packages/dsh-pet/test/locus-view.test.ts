@@ -18,6 +18,7 @@ import {
   SHOW_ALL_LOCUS_FILTER,
   applyLocusFilter,
   assignHandleCodes,
+  endpointHandleId,
   collectHandleCodes,
   entryMatchesQuery,
   entryStateFilterLabel,
@@ -643,5 +644,64 @@ describe('execution-root confirmation', () => {
 
     expect(request).not.toHaveProperty('executionRoot')
     expect(request.action).toBe('confirm-anchor')
+  })
+})
+
+describe('doc-comment entries (pet-locus-doc-comments D14)', () => {
+  it('spec Scenario "文档入口短码确定且与群可区分"', () => {
+    const doc = { chatId: 'doc:docx:AbCdEf123' }
+    const chat = { chatId: 'oc_AbCdEf123' }
+    const docCodes = assignHandleCodes([endpointHandleId(doc)], 'endpoint')
+    const again = assignHandleCodes([endpointHandleId(doc)], 'endpoint')
+    const chatCodes = assignHandleCodes([endpointHandleId(chat)], 'endpoint')
+    const docLabel = endpointHandleLabel(doc, docCodes.get(endpointHandleId(doc)) ?? '')
+    const chatLabel = endpointHandleLabel(chat, chatCodes.get(endpointHandleId(chat)) ?? '')
+
+    expect(docLabel).toBe('doc·AbCd')
+    expect(endpointHandleLabel(doc, again.get(endpointHandleId(doc)) ?? '')).toBe(docLabel)
+    expect(chatLabel).toBe('oc·AbCd')
+    expect(docLabel).not.toBe(chatLabel)
+  })
+
+  it('spec Scenario "多个文档入口短码互不相同"', () => {
+    const ids = ['doc:docx:AAAA1111', 'doc:docx:AAAA2222']
+    const codes = assignHandleCodes(ids, 'endpoint')
+    const labels = ids.map(id => endpointHandleLabel({ chatId: id }, codes.get(id) ?? ''))
+
+    expect(new Set(labels).size).toBe(2)
+    for (const label of labels) expect(label.startsWith('doc·doc')).toBe(false)
+    expect(labels).toEqual(['doc·AAAA11', 'doc·AAAA22'])
+  })
+
+  it('spec Scenario "同前缀的评论入口短码可区分": reversed comment ids', () => {
+    const root = 'doc:docx:AAAA1111'
+    const a = { chatId: root, threadId: '7696945640885996815' }
+    const b = { chatId: root, threadId: '7696945648012135660' }
+    const codes = assignHandleCodes([endpointHandleId(a), endpointHandleId(b)], 'endpoint')
+
+    expect(endpointHandleLabel(a, codes.get(endpointHandleId(a)) ?? '')).toBe('cmt·5186')
+    expect(endpointHandleLabel(b, codes.get(endpointHandleId(b)) ?? '')).toBe('cmt·0665')
+  })
+
+  it('spec Scenario "文档标题不可得": 文档 · <code> and 评论 · <code> fallbacks, marked as placeholders', () => {
+    const doc = entryDisplayName({ chatId: 'doc:docx:AbCdEf123' }, 'AbCd')
+    const comment = entryDisplayName({ chatId: 'doc:docx:AbCdEf123', threadId: '7696945640885996815' }, '5186')
+
+    expect(doc).toMatchObject({ name: '文档 · AbCd', isPlaceholder: true })
+    expect(comment).toMatchObject({ name: '评论 · 5186', isPlaceholder: true })
+    expect(doc.role.label).toBe('文档')
+    expect(comment.role).toMatchObject({ label: '评论', isTopic: true })
+  })
+
+  it('names a document by its title, and a comment by its quote summary', () => {
+    expect(entryDisplayName({ chatId: 'doc:docx:AbCdEf123', chatName: '技术方案' }, 'AbCd'))
+      .toMatchObject({ name: '技术方案', isPlaceholder: false })
+    expect(entryDisplayName({ chatId: 'doc:docx:AbCdEf123', threadId: '9', quote: '接口已有，为什么还要新增' }, '9'))
+      .toMatchObject({ name: '「接口已有，为什么还要新增」', isPlaceholder: false })
+  })
+
+  it('leaves IM rules unchanged', () => {
+    expect(endpointHandleLabel({ chatId: 'oc_x', threadId: 'omt_abc' }, 'abc')).toBe('omt·abc')
+    expect(entryDisplayName({ chatId: 'oc_x' }, 'x')).toMatchObject({ name: '入口 · x' })
   })
 })
