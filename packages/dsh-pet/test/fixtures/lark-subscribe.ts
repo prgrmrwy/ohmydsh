@@ -221,3 +221,8 @@ export function consumeDryRun(statuses: {
     },
   }
 }
+
+/** `docs +fetch --doc-format markdown` envelope (lark-cli v1.0.97 docs_fetch_v2.go). */
+export function docsFetchMarkdown(content: string): Record<string, unknown> {
+  return { ok: true, identity: 'bot', data: { document: { content } } }
+}

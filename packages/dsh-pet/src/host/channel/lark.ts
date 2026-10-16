@@ -124,6 +124,30 @@ export type LarkChatBotsResult =
   | { readonly kind: 'permission-denied'; readonly diagnostic: LarkPermissionDiagnostic }
   | { readonly kind: 'error' }
 
+/** One reply on a docx comment thread. */
+export interface DocCommentReply {
+  readonly replyId: string
+  readonly authorOpenId?: string
+  readonly createdAt?: number
+  readonly text: string
+}
+
+/** Result of reading one comment and locating its trigger reply. */
+export type DocCommentQuery =
+  | {
+      readonly kind: 'ok'
+      readonly isWhole: boolean
+      readonly quote?: string
+      readonly replies: readonly DocCommentReply[]
+      readonly trigger: DocCommentReply
+    }
+  /** The call failed (platform error, timeout, unparsable): retryable. */
+  | { readonly kind: 'error' }
+  /** The comment came back without a usable `is_whole`, or not at all. */
+  | { readonly kind: 'scope-unknown' }
+  /** The comment is known but the trigger reply is absent after paging. */
+  | { readonly kind: 'reply-missing' }
+
 /** Bot-identity Lark operations Pet depends on. */
 export interface LarkClient {
   /** Detect whether the installed CLI exposes the identity contract Pet needs. */
@@ -140,6 +164,22 @@ export interface LarkClient {
    * when the dry-run itself could not be read.
    */
   imPreconditions?(): Promise<{ readonly blocked: readonly string[] } | undefined>
+  /**
+   * Comment facts for one docx comment (`drive +batch-query-comments`), with
+   * the trigger reply's text located by paging `drive +list-replies` when the
+   * card reports `has_more` (≤10 pages). Failure and "not found" are distinct.
+   */
+  queryDocComment?(token: string, commentId: string, replyId: string): Promise<DocCommentQuery>
+  /** Append a plain-text bot reply under a docx comment (`drive +add-reply`). */
+  replyComment?(token: string, commentId: string, text: string): Promise<'success' | 'unknown'>
+  /** Add or remove a bot reaction on a comment reply (`drive +react-reply`). */
+  reactCommentReply?(token: string, replyId: string, emoji: string, action: 'add' | 'delete'): Promise<void>
+  /** A user's display name by open_id (`contact +get-user` as bot); undefined when unreadable. */
+  contactName?(openId: string): Promise<string | undefined>
+  /** Title and URL of a docx (`drive +inspect`); undefined when unreadable. */
+  inspectDoc?(token: string): Promise<{ readonly title?: string; readonly url?: string } | undefined>
+  /** The docx body as markdown (`docs +fetch`); a failure carries the platform code. */
+  fetchDocMarkdown?(token: string): Promise<{ readonly ok: true; readonly markdown: string } | { readonly ok: false; readonly code?: string }>
   /**
    * Add a reaction to a message.
    * @param messageId - Target message.
@@ -554,6 +594,53 @@ function requireOpenId(value: string, field: string): string {
   return normalized
 }
 
+function requireDocToken(value: unknown): string {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9]+$/.test(value)) {
+    throw new Error('A docx token must be non-empty alphanumerics.')
+  }
+  return value
+}
+
+function requireNumericId(value: unknown, field: string): string {
+  if (typeof value !== 'string' || !/^[0-9]+$/.test(value)) throw new Error(`A ${field} must be digits.`)
+  return value
+}
+
+/** Render a comment reply's elements as plain text; mentions become `@<open_id>`. */
+function parseCommentReplies(value: unknown): DocCommentReply[] {
+  if (!Array.isArray(value)) return []
+  const out: DocCommentReply[] = []
+  for (const raw of value) {
+    const reply = recordOf(raw)
+    const replyId = reply?.['reply_id']
+    if (reply === undefined || typeof replyId !== 'string' || replyId === '') continue
+    const elements = recordOf(reply['content'])?.['elements']
+    const text = (Array.isArray(elements) ? elements : [])
+      .map(recordOf)
+      .map(element => {
+        if (element === undefined) return ''
+        const run = recordOf(element['text_run'])
+        if (typeof run?.['text'] === 'string') return run['text']
+        const person = recordOf(element['person'])
+        if (typeof person?.['user_id'] === 'string') return `@${person['user_id']}`
+        const link = recordOf(element['docs_link'])
+        if (typeof link?.['url'] === 'string') return link['url']
+        return ''
+      })
+      .join('')
+      .trim()
+    const author = reply['user_id']
+    const created = reply['create_time']
+    out.push({
+      replyId,
+      text,
+      ...(typeof author === 'string' && author !== '' ? { authorOpenId: author } : {}),
+      ...(typeof created === 'number' && Number.isFinite(created) ? { createdAt: created * 1000 } : {}),
+    })
+  }
+  return out
+}
+
 function requireChatId(value: unknown, operation: string): string {
   if (typeof value !== 'string' || !/^oc_[A-Za-z0-9]+$/.test(value)) {
     throw new Error(`${operation}: lark-cli returned no valid chat id`)
@@ -962,6 +1049,110 @@ export function createLarkCliClient(
         .filter(item => item?.['status'] === 'blocked')
         .map(item => String(item?.['name'] ?? 'unknown'))
       return { blocked }
+    },
+
+    async queryDocComment(token, commentId, replyId): Promise<DocCommentQuery> {
+      const target = ['--token', requireDocToken(token), '--type', 'docx']
+      const result = await callJson(
+        ['drive', '+batch-query-comments', '--as', 'bot', ...target, '--comment-ids', requireNumericId(commentId, 'comment id')],
+        binary,
+        runner,
+      )
+      const envelope = recordOf(result.value)
+      if (!result.ok || envelope?.['ok'] !== true) return { kind: 'error' }
+      const items = recordOf(envelope['data'])?.['items']
+      if (!Array.isArray(items)) return { kind: 'error' }
+      const card = items.map(recordOf).find(item => item?.['comment_id'] === commentId)
+      if (card === undefined || typeof card['is_whole'] !== 'boolean') return { kind: 'scope-unknown' }
+      const replies = [...parseCommentReplies(recordOf(card['reply_list'])?.['replies'])]
+      let trigger = replies.find(reply => reply.replyId === replyId)
+      if (trigger === undefined && card['has_more'] === true) {
+        let pageToken: string | undefined
+        for (let page = 0; page < 10 && trigger === undefined; page += 1) {
+          const listed = await callJson(
+            ['drive', '+list-replies', '--as', 'bot', ...target, '--comment-id', commentId, '--page-size', '100',
+              ...(pageToken === undefined ? [] : ['--page-token', pageToken])],
+            binary,
+            runner,
+          )
+          const data = recordOf(recordOf(listed.value)?.['data'])
+          if (!listed.ok || data === undefined) return { kind: 'error' }
+          for (const reply of parseCommentReplies(data['items'] ?? data['replies'])) {
+            if (!replies.some(known => known.replyId === reply.replyId)) replies.push(reply)
+          }
+          trigger = replies.find(reply => reply.replyId === replyId)
+          const next = data['page_token']
+          if (data['has_more'] !== true || typeof next !== 'string' || next === '') break
+          pageToken = next
+        }
+      }
+      if (trigger === undefined) return { kind: 'reply-missing' }
+      const quote = typeof card['quote'] === 'string' && card['quote'] !== '' ? card['quote'] : undefined
+      return { kind: 'ok', isWhole: card['is_whole'], ...(quote === undefined ? {} : { quote }), replies, trigger }
+    },
+
+    async replyComment(token, commentId, text) {
+      const content = JSON.stringify([{ type: 'text', text: requireInput(text, 'comment reply text') }])
+      const result = await callJson(
+        ['drive', '+add-reply', '--as', 'bot', '--token', requireDocToken(token), '--type', 'docx',
+          '--comment-id', requireNumericId(commentId, 'comment id'), '--content', content],
+        binary,
+        runner,
+      )
+      const data = recordOf(recordOf(result.value)?.['data'])
+      // Success only on positive proof of a created reply; anything else may
+      // or may not have reached the platform and is never retried.
+      return result.ok && data?.['created'] === true ? 'success' : 'unknown'
+    },
+
+    async reactCommentReply(token, replyId, emoji, action) {
+      const result = await callJson(
+        ['drive', '+react-reply', '--as', 'bot', '--token', requireDocToken(token), '--type', 'docx',
+          '--reply-id', requireNumericId(replyId, 'reply id'), '--emoji', emoji, '--action', action],
+        binary,
+        runner,
+      )
+      if (!result.ok || recordOf(result.value)?.['ok'] !== true) throw new Error('comment reaction failed')
+    },
+
+    async contactName(openId) {
+      const data = await callCli(
+        ['contact', '+get-user', '--as', 'bot', '--user-id', requireOpenId(openId, 'open id'), '--user-id-type', 'open_id'],
+        binary,
+        runner,
+      )
+      const user = recordOf(recordOf(data)?.['user'])
+      const name = user?.['name']
+      return typeof name === 'string' && name.trim() !== '' ? name.trim() : undefined
+    },
+
+    async inspectDoc(token) {
+      const data = await callCli(
+        ['drive', '+inspect', '--as', 'bot', '--url', requireDocToken(token), '--type', 'docx'],
+        binary,
+        runner,
+      )
+      const record = recordOf(data)
+      if (record === undefined) return undefined
+      const title = typeof record['title'] === 'string' && record['title'].trim() !== '' ? record['title'] : undefined
+      const url = typeof record['url'] === 'string' && /^https:\/\/[^\s]+$/.test(record['url']) ? record['url'] : undefined
+      return { ...(title === undefined ? {} : { title }), ...(url === undefined ? {} : { url }) }
+    },
+
+    async fetchDocMarkdown(token) {
+      const result = await callJson(
+        // lark-cli v1.0.97 docs_fetch_v2.go: `--doc-format markdown`, body at data.document.content.
+        ['docs', '+fetch', '--as', 'bot', '--doc', requireDocToken(token), '--doc-format', 'markdown'],
+        binary,
+        runner,
+      )
+      const envelope = recordOf(result.value)
+      const data = recordOf(envelope?.['data'])
+      const markdown = recordOf(data?.['document'])?.['content']
+      if (result.ok && envelope?.['ok'] === true && typeof markdown === 'string') return { ok: true, markdown }
+      const error = recordOf(envelope?.['error'])
+      const code = error?.['code'] ?? error?.['subtype']
+      return { ok: false, ...(code === undefined ? {} : { code: String(code) }) }
     },
 
     async botReady() {

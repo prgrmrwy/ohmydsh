@@ -99,7 +99,7 @@
 ## 4. 评论入站：范围判定与建树（D6）
 
 - [ ] 4.1 写失败测试 `doc-comment-intake.test.ts`，覆盖「文档评论按全文/划词同构映射…」的 9 行（含“评论查询一次失败后重试成功”“评论查询重试期间停用 channel”）和「评论范围无法判定」
-- [ ] 4.2 实现 `LarkClient`：
+- [x] 4.2 实现 `LarkClient`（同时补齐第 6、7 组需要的 drive/docs/contact 适配器：`replyComment` `reactCommentReply` `inspectDoc` `fetchDocMarkdown` `contactName`；`docs +fetch` 实际 flag 为 `--doc-format markdown`、正文在 `data.document.content`，依据 lark-cli v1.0.97 `docs_fetch_v2.go`；→ `test/channel-lark-drive.test.ts` 8 例）：
   - `batchQueryComments`：`drive +batch-query-comments`；
   - `listReplies`：`drive +list-replies`，分页，最多 10 页；
   - `inspectDoc`：`drive +inspect --url <token> --type docx`，返回 `{title, url}`。

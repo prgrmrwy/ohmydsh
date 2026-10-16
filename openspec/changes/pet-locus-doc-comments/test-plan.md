@@ -109,7 +109,7 @@ This table is a live ledger. During apply, flip each row from 🔴 to 🟢 when 
 | specs/pet-locus-doc-comments/spec.md → 评论准入与群消息准入同构且静默 fail closed | 未 @bot 的评论 | packages/dsh-pet/test/doc-comment-admission.test.ts | spec Scenario "未 @bot 的评论" | 🔴 red |
 | specs/pet-locus-doc-comments/spec.md → 评论准入与群消息准入同构且静默 fail closed | 来自 agent 或 bot 的评论 | packages/dsh-pet/test/doc-comment-admission.test.ts | spec Scenario "来自 agent 或 bot 的评论" | 🔴 red |
 | specs/pet-locus-doc-comments/spec.md → 评论准入与群消息准入同构且静默 fail closed | 同一回复重复到达 | packages/dsh-pet/test/doc-comment-admission.test.ts | spec Scenario "同一回复重复到达" | 🔴 red |
-| specs/pet-locus-doc-comments/spec.md → 评论准入与群消息准入同构且静默 fail closed | 长线程中的触发回复 | packages/dsh-pet/test/doc-comment-admission.test.ts | spec Scenario "长线程中的触发回复" | 🔴 red |
+| specs/pet-locus-doc-comments/spec.md → 评论准入与群消息准入同构且静默 fail closed | 长线程中的触发回复 | packages/dsh-pet/test/channel-lark-drive.test.ts | spec Scenario "长线程中的触发回复" | 🟢 green (adapter); admission wiring pending |
 | specs/pet-locus-doc-comments/spec.md → 评论准入与群消息准入同构且静默 fail closed | 触发回复正文不可得 | packages/dsh-pet/test/doc-comment-admission.test.ts | spec Scenario "触发回复正文不可得" | 🔴 red |
 | specs/pet-locus-doc-comments/spec.md → 控制命令在评论中按所在入口生效 | 全文评论绑定已知会话 | packages/dsh-pet/test/doc-comment-control.test.ts | spec Scenario "全文评论绑定已知会话" | 🔴 red |
 | specs/pet-locus-doc-comments/spec.md → 控制命令在评论中按所在入口生效 | 文档改绑后已有划词评论不迁移 | packages/dsh-pet/test/doc-comment-control.test.ts | spec Scenario "文档改绑后已有划词评论不迁移" | 🔴 red |
