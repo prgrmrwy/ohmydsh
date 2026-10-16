@@ -132,32 +132,43 @@
 
 ## 5. 评论准入与控制命令（D7）
 
-- [ ] 5.1 写失败测试 `doc-comment-admission.test.ts`，覆盖 10 行，包括“划词评论先建立时也披露”和“建立回执披露提问范围”
-- [ ] 5.2 实现 `admitDocCommentEvent`：
+- [x] 5.1 写失败测试 `doc-comment-admission.test.ts`，覆盖 10 行，包括“划词评论先建立时也披露”和“建立回执披露提问范围”
+- [x] 5.2 实现 `admitDocCommentEvent`：
   - 复用 allowlist、授权状态、shell 档仅所有者可用、退役/legacy 判定；
   - 去重键为 `messageId = doc:docx:<token>/<comment_id>/<reply_id>`；
   - 水位取顶层 `timestamp`，缺失时跳过；
   - 回复元素渲染为文本；
   - 披露回执用 Host 控制回执发出，同一文档只发一次，发送失败只记诊断
-- [ ] 5.3 写失败测试 `doc-comment-control.test.ts`，覆盖 4 行，然后实现：命令写在全文评论下作用于文档级入口，写在划词评论下作用于评论级入口；控制回执发到命令所在的评论；非 allowlist 用户发的命令静默丢弃
-- [ ] 5.4 重构。全量测试保持绿色
+- [x] 5.3 写失败测试 `doc-comment-control.test.ts`，覆盖 4 行，然后实现：命令写在全文评论下作用于文档级入口，写在划词评论下作用于评论级入口；控制回执发到命令所在的评论；非 allowlist 用户发的命令静默丢弃
+- [x] 5.4 重构。全量测试保持绿色
 
 ## 6. 评论出站与反馈（D5、D8）
 
-- [ ] 6.1 写失败测试：
+- [x] 6.1 写失败测试：
   - `doc-comment-egress.test.ts` 的 7 行，含“文档回复不渲染 @”和“shell 档直接调用评论或文档写命令”；
   - `locus-delivery.test.ts` 的“文档评论回复回到触发评论”和“文档回复目标与入口不符”
-- [ ] 6.2 实现：
+- [x] 6.2 实现：
   - `replyComment`：`drive +add-reply`，纯文本；
   - `reactCommentReply`：`Typing` / `DONE` / `CRY`；
   - finish 与控制回执按 `isDocEndpoint` 分派；
   - 发送前校验 token 与 comment_id 一致，否则返回 `association-unproven`；
   - 结果分类沿用 IM 的三类；
   - 表情失败只记诊断（fail-soft）
-- [ ] 6.3 egress 守卫（S2）：补齐 `drive` 评论写命令与 `docs +update` / `+create`；`api` 写调用的正则同时匹配带和不带 `/open-apis` 前缀的路径；更新 `locus-lark-cli-egress-guard.test.ts`
+- [x] 6.3 egress 守卫（S2）：补齐 `drive` 评论写命令与 `docs +update` / `+create`；`api` 写调用的正则同时匹配带和不带 `/open-apis` 前缀的路径；更新 `locus-lark-cli-egress-guard.test.ts`
 - [ ] 6.4 出站 @ 渲染只对 IM 入口生效：写失败测试“文档回复不渲染 @”（已含在 6.1），然后实现。回归行翻 🟢：`channel-mentions.test.ts` 的 8 行
 - [ ] 6.5 回归行翻 🟢：`locus-delivery.test.ts` 中 13 个延续场景（群级引用触发消息 … 宿主重启无法证明关联）
-- [ ] 6.6 重构。全量测试保持绿色
+- [x] 6.6 重构。全量测试保持绿色。第 5、6 组完成情况：
+  - 出站集中在 `channel/doc-comment-egress.ts`：
+    - `finishDocReply` 先证明回复目标，再预约 `finishing`，然后发送并记录结果。生产环境的 `finishCurrentDelivery` 直接调用这一函数，所以测的就是实际运行的代码路径；
+    - 表情：受理时加 `Typing`；结算时删除 `Typing`，再加 `DONE` 或 `CRY`；no-reply 只删除 `Typing`；
+    - 控制回执经 `receipts.sendControl` 按来源分派。
+  - 披露回执：在建入口之前，用持久 loci 判断这是不是该文档的第一个入口，不额外存标志；`/bind` 文档时回执始终附带这句披露。
+  - 文档的“名称”取 `inspectDoc` 返回的标题，不会用文档 id 调 IM。
+  - `/bind` 切换主会话时的警告，发在该入口最近一次触发的评论下面。
+  - shell 档守卫补拦 drive 评论写命令、`docs +update`/`+create`，以及带或不带 `/open-apis` 前缀的 api 写调用。
+  - 已做过变异检查：先预约后证明、只披露一次。
+  - 全量：3168 passed / 1 failed（基线）。
+  - 6.4、6.5 留到第 8 组和 10.2 一起处理，即 @ 渲染回归行和 13 个延续场景的命名。
 
 ## 7. IM 专属能力处置与只读工具（D9、D10）
 

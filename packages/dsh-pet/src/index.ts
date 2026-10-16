@@ -131,6 +131,8 @@ import { createLocusPermissionMutation } from './host/locus/permission-mutation.
 import { createLocusToolTierMutation, type LocusLiveToolTierSurface } from './host/locus/tool-tier-mutation.js'
 import type { LocusToolTierName } from './host/locus/aggregate.js'
 import { asLocusContextRepository, type LocusContextRepository } from './host/locus/context-repository.js'
+import { isDocEndpoint, parseDocChatId } from './host/locus/doc-endpoint.js'
+import { DOC_DISCLOSURE_TEXT, finishDocReply, reactOnDocTrigger, sendDocControlReceipt } from './host/channel/doc-comment-egress.js'
 import { renderLocusDeliveryFor } from './host/locus/context.js'
 import { createLocusHistoryCursor } from './host/locus/history-cursor.js'
 import {
@@ -2042,7 +2044,28 @@ async function initialize(
     }
     : undefined
 
-  const locusLarkPort = createLocusLarkPort()
+  const imLocusLarkPort = createLocusLarkPort()
+  // A document has no "post to the root" call; its control messages (the
+  // /bind source-switch warning) go under the entry's most recent triggering
+  // comment, recovered from durable Deliveries. IM ids never reach drive and
+  // doc ids never reach IM (pet-locus-doc-comments D8).
+  const locusLarkPort: typeof imLocusLarkPort = {
+    ...imLocusLarkPort,
+    sendControlMessage: async input => {
+      if (!isDocEndpoint(input.endpoint)) return imLocusLarkPort.sendControlMessage(input)
+      const latest = [...locusRepository.listDeliveries()]
+        .filter(record =>
+          record.endpoint.chatId === input.endpoint.chatId &&
+          (record.endpoint.threadId ?? undefined) === (input.endpoint.threadId ?? undefined))
+        .sort((left, right) => right.sequence - left.sequence)[0]
+      if (latest === undefined) throw new Error('doc control message: no triggering comment for this entry')
+      await sendDocControlReceipt(larkClient, {
+        chatId: latest.endpoint.chatId,
+        ...(latest.endpoint.threadId === undefined ? {} : { threadId: latest.endpoint.threadId }),
+        messageId: latest.messageId,
+      }, input.text)
+    },
+  }
   const locusProvisioning = (() => {
     if (idleChildProvisioning === undefined || !locusRepository.supportsAtomicProvisioning()) {
       return undefined
@@ -2149,7 +2172,10 @@ async function initialize(
             // belongs to. Fail-soft: an unresolvable name keeps the id.
             let chatName: string | undefined
             try {
-              chatName = await larkClient.chatName(endpoint.chatId)
+              const docToken = parseDocChatId(endpoint.chatId)
+              chatName = docToken === undefined
+                ? await larkClient.chatName(endpoint.chatId)
+                : (await larkClient.inspectDoc?.(docToken))?.title
             } catch {
               chatName = undefined
             }
@@ -2443,7 +2469,12 @@ async function initialize(
           return { mode: updated.permission.effective }
         },
       },
-      chatName: chatId => larkClient.chatName(chatId),
+      // A document's "name" is its title (D14); never call an IM API with a doc id.
+      chatName: async chatId => {
+        const token = parseDocChatId(chatId)
+        if (token === undefined) return larkClient.chatName(chatId)
+        return (await larkClient.inspectDoc?.(token).catch(() => undefined))?.title
+      },
     })
 
   const locusTurnObserver = (() => {
@@ -2635,6 +2666,23 @@ async function initialize(
         return { sent: false, outcome: 'no-reply' }
       }
 
+      if (isDocEndpoint(current.endpoint)) {
+        // Doc comment (D5/D8): prove → reserve → reply under the trigger comment
+        // → record. Unproven association refuses BEFORE `finishing`.
+        const doc = await finishDocReply({
+          repository: locusRepository as never,
+          client: larkClient,
+          correlation,
+          current,
+          text: input.text ?? '',
+          now: () => Date.now(),
+        })
+        if (doc.kind === 'refused') {
+          throw new PetError('INVALID_REQUEST', 'Reply target refused: association-unproven')
+        }
+        await finishAndAdvance(doc.record as DeliveryRecord, correlation, doc.outboundResult === 'success' ? 'settled' : 'failed')
+        return { sent: doc.outboundResult === 'success', outcome: 'reply' }
+      }
       const finishing = await locusRepository.markDeliveryFinishing({
         ...correlation,
         deliveryId: current.deliveryId,
@@ -2984,17 +3032,32 @@ async function initialize(
         resolveMemberName: async (chatId, openId) =>
           await larkClient.resolveMemberName?.(chatId, openId),
       },
+      // Disclose ask-scope on a document's FIRST entry only (D7), proven from
+      // durable loci of that document root, so no flag is stored.
+      docHasEntries: chatId => locusRepository.listLoci().some(record => record.endpoint.chatId === chatId),
+      docDisclosureText: DOC_DISCLOSURE_TEXT,
       receipts: (() => {
         const inProgressReactions = new Map<string, string>()
         return {
-          markAccepted: async (target: { messageId: string }) => {
+          markAccepted: async (target: { chatId: string; messageId: string }) => {
+            if (isDocEndpoint(target)) {
+              await reactOnDocTrigger(larkClient, target.messageId, 'accepted')
+              return
+            }
             const reactionId = await larkClient.addReaction(target.messageId, 'OnIt')
             if (reactionId !== undefined) inProgressReactions.set(target.messageId, reactionId)
           },
           markSettled: async (
-            target: { messageId: string },
+            target: { chatId: string; messageId: string },
             outcome: 'settled' | 'failed',
           ) => {
+            if (isDocEndpoint(target)) {
+              // no-reply only clears Typing; read it from the durable outcome.
+              const finished = locusRepository.findDeliveryByMessageId(target.messageId)
+              const phase = outcome === 'failed' ? 'failed' : finished?.finishOutcome === 'no-reply' ? 'no-reply' : 'settled'
+              await reactOnDocTrigger(larkClient, target.messageId, phase)
+              return
+            }
             const reactionId = inProgressReactions.get(target.messageId)
             if (reactionId !== undefined) {
               inProgressReactions.delete(target.messageId)
@@ -3005,8 +3068,10 @@ async function initialize(
               outcome === 'settled' ? 'DONE' : 'CRY',
             )
           },
-          sendControl: (target: { messageId: string }, text: string) =>
-            larkClient.reply(target.messageId, text),
+          sendControl: (target: { chatId: string; threadId?: string; messageId: string }, text: string) =>
+            isDocEndpoint(target)
+              ? sendDocControlReceipt(larkClient, target, text)
+              : larkClient.reply(target.messageId, text),
         }
       })(),
       renderPrompt: async ({ locus, message, signal }) => {

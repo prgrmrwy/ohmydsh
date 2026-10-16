@@ -445,6 +445,16 @@ export interface LocusBusinessReplyPort {
 /** Controller dependencies. */
 export interface LocusControllerDeps {
   readonly locus: LocusResolutionPort
+  /**
+   * Whether this document has ever had ANY entry (root or comment, any state).
+   * Asked once, before a doc entry is provisioned; `false` means this is the
+   * document's first entry and the ask-scope disclosure is owed (D7). Derived
+   * from durable loci, so no extra "disclosed" flag is stored. Absent: never
+   * disclose (fail-soft, nothing is sent).
+   */
+  readonly docHasEntries?: (chatId: string) => Awaitable<boolean>
+  /** Disclosure text for a document's first entry (D7). */
+  readonly docDisclosureText?: string
   readonly deliveries: LocusDeliveryLedgerPort
   /** Required current/backlog dispatcher seam for serialized locus intake. */
   readonly deliveryDispatch: LocusDeliveryDispatchPort
@@ -1258,8 +1268,18 @@ export class LocusChannelController {
     const message = await this.enrichAddressing(admission.message)
     const endpoint = normalizeLocusEndpoint(message.endpoint).endpoint
     const signal = this.signal
+    // Decide BEFORE provisioning whether this is the document's first entry:
+    // afterwards the new entry itself would answer "yes, it has one".
+    const owesDisclosure = admission.needsInitialization && messageSource(message) === 'doc-comment'
+      ? await this.firstDocEntry(endpoint.chatId)
+      : false
     let locus = await this.resolveLocus(endpoint, message, admission.needsInitialization, signal)
     if (locus === undefined) return this.refuse('locus-unavailable')
+    if (owesDisclosure && this.deps.docDisclosureText !== undefined) {
+      // A Host control receipt under the triggering comment; never business
+      // text and never blocking. Sent once the entry exists.
+      await this.sendControlReceipt(message.replyTarget, this.deps.docDisclosureText)
+    }
 
     // Adoption proves the exact durable child, but not that its current policy
     // still matches the database. Resolve through the continuation owner at
@@ -2019,6 +2039,16 @@ export class LocusChannelController {
     const allow = suppliedContext?.allowOpenIds ?? this.readAdmissionContext()?.allowOpenIds ?? this.deps.allowOpenIds?.() ?? []
     if (allow.includes(message.senderOpenId)) return
     await this.sendControlReceipt(message.replyTarget, '当前入口为所有者专用，只有 allowlist 成员可以驱动。工具档位可由所有者切回 safe。')
+  }
+
+  private async firstDocEntry(chatId: string): Promise<boolean> {
+    if (this.deps.docHasEntries === undefined) return false
+    try {
+      return !(await this.deps.docHasEntries(chatId))
+    } catch {
+      // Unknown history: stay silent rather than risk a duplicate disclosure.
+      return false
+    }
   }
 
   private async sendControlReceipt(target: LocusReplyTarget, text: string): Promise<void> {

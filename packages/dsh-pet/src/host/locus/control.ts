@@ -24,6 +24,9 @@ import {
 import { LocusPermissionMutationError } from './permission-mutation.js'
 import { LOCUS_WRITE_ENABLED, LOCUS_WRITE_DISABLED_DIAGNOSTIC } from './policy-verification.js'
 
+/** Ask-scope disclosure for document entries (D7); kept in sync with doc egress. */
+export const DOC_ASK_SCOPE_DISCLOSURE = '本文档的评论者均可向我提问；只有 allowlist 成员能控制'
+
 export const MIN_LOCUS_BIND_PREFIX_LENGTH = 6
 export const LOCUS_BIND_UNRESOLVED_TEXT =
   '没有匹配到唯一的会话。请提供更长的会话 id 前缀后重试。'
@@ -258,10 +261,14 @@ function bindReceipt(
   result: EnsureGroupResult | EnsureTopicResult,
   chatName: string | undefined,
 ): string {
-  const place = chatName === undefined || chatName.trim() === '' ? '当前入口' : `群「${chatName.trim()}」`
+  const isDoc = result.locus.endpoint.chatId.startsWith('doc:')
+  const named = chatName !== undefined && chatName.trim() !== ''
+  const place = !named ? '当前入口' : isDoc ? `文档「${chatName.trim()}」` : `群「${chatName.trim()}」`
   const source = locusSessionReceiptLabel(session)
-  if (result.reused) return `${place}已绑定主会话 ${source}，本次未重复创建；当前共享权限为 read。`
-  return `${place}已绑定主会话 ${source}；已创建新的只读子会话。`
+  // A document's /bind always restates who may ask (pet-locus-doc-comments D7).
+  const disclosure = isDoc ? `\n${DOC_ASK_SCOPE_DISCLOSURE}` : ''
+  if (result.reused) return `${place}已绑定主会话 ${source}，本次未重复创建；当前共享权限为 read。${disclosure}`
+  return `${place}已绑定主会话 ${source}；已创建新的只读子会话。${disclosure}`
 }
 
 /**
