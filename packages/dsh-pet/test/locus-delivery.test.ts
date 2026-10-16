@@ -327,7 +327,7 @@ describe('unified locus Delivery correlation', () => {
     expect(repeated.state.byMessageId['message-explicit-first']?.status).toBe('accepted')
   })
 
-  it('does not let a late old-generation settlement consume a replacement delivery', () => {
+  it('spec Scenario "旧代际迟到结算": does not let a late old-generation settlement consume a replacement delivery', () => {
     let state = createDeliveryLedger()
     const old = accept(state, 'message-old', {
       generation: 1,

@@ -41,55 +41,55 @@ This table is a live ledger. During apply, flip each row from 🔴 to 🟢 when 
 | specs/pet-locus-collaboration/spec.md → Locus 统一关联主会话子会话与飞书入口 | 既有群入口键不变 | packages/dsh-pet/test/locus-repository.test.ts | spec Scenario "既有群入口键不变" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → Locus 统一关联主会话子会话与飞书入口 | 文档与群标识不串键 | packages/dsh-pet/test/locus-admission.test.ts | spec Scenario "文档与群标识不串键" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → Locus 统一关联主会话子会话与飞书入口 | 规范化不丢失文档前缀 | packages/dsh-pet/test/locus-repository.test.ts | spec Scenario "规范化不丢失文档前缀" | 🟢 green |
-| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 群级引用触发消息 | packages/dsh-pet/test/locus-delivery.test.ts | spec Scenario "群级引用触发消息" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 话题回复留在原话题 | packages/dsh-pet/test/locus-delivery.test.ts | spec Scenario "话题回复留在原话题" | 🔴 red — carried forward; regression |
+| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 群级引用触发消息 | packages/dsh-pet/test/locus-settlement-integration.test.ts | spec Scenario "群级引用触发消息" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 话题回复留在原话题 | packages/dsh-pet/test/channel-lark.test.ts | spec Scenario "话题回复留在原话题" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 文档评论回复回到触发评论 | packages/dsh-pet/test/locus-doc-finish.test.ts | spec Scenario "文档评论回复回到触发评论" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 文档回复目标与入口不符 | packages/dsh-pet/test/locus-doc-finish.test.ts | spec Scenario "文档回复目标与入口不符" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 升级需离线迁移并先备份 | packages/dsh-pet/test/migrate-cli.test.ts | spec Scenario "升级需离线迁移并先备份" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 未迁移时 v16 拒绝打开 | packages/dsh-pet/test/migration-guidance.test.ts | spec Scenario "未迁移时 v16 拒绝打开" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | v15 拒绝打开 v16 库 | packages/dsh-pet/test/pet-storage-backend.test.ts | spec Scenario "v15 拒绝打开 v16 库" | 🟢 green |
-| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | turn 结束不完成请求 | packages/dsh-pet/test/locus-delivery.test.ts | spec Scenario "turn 结束不完成请求" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 相对等待受绝对上限约束 | packages/dsh-pet/test/locus-delivery.test.ts | spec Scenario "相对等待受绝对上限约束" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 超时自动开放下一条 | packages/dsh-pet/test/locus-delivery.test.ts | spec Scenario "超时自动开放下一条" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 完成与超时竞争 | packages/dsh-pet/test/locus-delivery.test.ts | spec Scenario "完成与超时竞争" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 迟到 finish 不消费下一条 | packages/dsh-pet/test/locus-delivery.test.ts | spec Scenario "迟到 finish 不消费下一条" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 发送确认未知不重放 | packages/dsh-pet/test/locus-delivery.test.ts | spec Scenario "发送确认未知不重放" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | Host 重启恢复未过期 current | packages/dsh-pet/test/locus-delivery.test.ts | spec Scenario "Host 重启恢复未过期 current" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | Host 重启处理遗留 finishing | packages/dsh-pet/test/locus-delivery.test.ts | spec Scenario "Host 重启处理遗留 finishing" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 私聊与群消息交错 | packages/dsh-pet/test/locus-delivery.test.ts | spec Scenario "私聊与群消息交错" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 旧代际迟到结算 | packages/dsh-pet/test/locus-delivery.test.ts | spec Scenario "旧代际迟到结算" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 宿主重启无法证明关联 | packages/dsh-pet/test/locus-delivery.test.ts | spec Scenario "宿主重启无法证明关联" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 同名入口仍可区分 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "同名入口仍可区分" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 名称不可得时不猜测 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "名称不可得时不猜测" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 短码不是身份 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "短码不是身份" | 🔴 red — carried forward; regression |
+| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | turn 结束不完成请求 | packages/dsh-pet/test/locus-settlement-integration.test.ts | spec Scenario "turn 结束不完成请求" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 相对等待受绝对上限约束 | packages/dsh-pet/test/locus-delivery.test.ts | spec Scenario "相对等待受绝对上限约束" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 超时自动开放下一条 | packages/dsh-pet/test/locus-settlement-integration.test.ts | spec Scenario "超时自动开放下一条" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 完成与超时竞争 | packages/dsh-pet/test/locus-settlement-integration.test.ts | spec Scenario "完成与超时竞争" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 迟到 finish 不消费下一条 | packages/dsh-pet/test/locus-settlement-integration.test.ts | spec Scenario "迟到 finish 不消费下一条" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 发送确认未知不重放 | packages/dsh-pet/test/locus-settlement-integration.test.ts | spec Scenario "发送确认未知不重放" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | Host 重启恢复未过期 current | packages/dsh-pet/test/locus-persistence.test.ts | spec Scenario "Host 重启恢复未过期 current" | 🟢 green — partial: deadline timer re-arm is index.ts startup dispatch (not unit-tested) |
+| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | Host 重启处理遗留 finishing | packages/dsh-pet/test/locus-persistence.test.ts | spec Scenario "Host 重启处理遗留 finishing" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 私聊与群消息交错 | packages/dsh-pet/test/locus-reply-tool.test.ts | spec Scenario "私聊与群消息交错" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 旧代际迟到结算 | packages/dsh-pet/test/locus-delivery.test.ts | spec Scenario "旧代际迟到结算" | 🟢 green — partial: "只诊断" not asserted (no diagnostic channel on the pure ledger) |
+| specs/pet-locus-collaboration/spec.md → 投递与结算关联独立于会话运行状态 | 宿主重启无法证明关联 | packages/dsh-pet/test/locus-persistence.test.ts | spec Scenario "宿主重启无法证明关联" | 🟢 green — partial: intake pause is index.ts `blockedLoci` (startup wiring, not unit-tested) |
+| specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 同名入口仍可区分 | packages/dsh-pet/test/locus-surface.test.ts | spec Scenario "同名入口仍可区分" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 名称不可得时不猜测 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "名称不可得时不猜测" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 短码不是身份 | packages/dsh-pet/test/locus-management.test.ts | spec Scenario "短码不是身份" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 文档入口短码确定且与群可区分 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "文档入口短码确定且与群可区分" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 多个文档入口短码互不相同 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "多个文档入口短码互不相同" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 同前缀的评论入口短码可区分 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "同前缀的评论入口短码可区分" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 文档标题不可得 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "文档标题不可得" | 🟢 green |
-| specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | 入群不产生持久后果 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "入群不产生持久后果" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | 首次消息补齐 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "首次消息补齐" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | 重复初始化 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "重复初始化" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | default 不可用 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "default 不可用" | 🔴 red — carried forward; regression |
+| specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | 入群不产生持久后果 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "入群不产生持久后果" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | 首次消息补齐 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "首次消息补齐" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | 重复初始化 | packages/dsh-pet/test/locus-controller.test.ts | spec Scenario "重复初始化" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | default 不可用 | packages/dsh-pet/test/channel-service.test.ts | spec Scenario "default 不可用" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 自动主会话按群建立且只使用 default workspace | 文档首次评论建立文档专属主会话 | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | spec Scenario "文档首次评论建立文档专属主会话" | 🟢 green |
-| specs/pet-locus-collaboration/spec.md → 出站业务回复的 @ 引用渲染为平台真实提醒 | 唯一命中的整词引用成为真实提醒 | packages/dsh-pet/test/channel-mentions.test.ts | spec Scenario "唯一命中的整词引用成为真实提醒" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 出站业务回复的 @ 引用渲染为平台真实提醒 | 裸 open_id 引用也成为真实提醒 | packages/dsh-pet/test/channel-mentions.test.ts | spec Scenario "裸 open_id 引用也成为真实提醒" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 出站业务回复的 @ 引用渲染为平台真实提醒 | 同名歧义不改写 | packages/dsh-pet/test/channel-mentions.test.ts | spec Scenario "同名歧义不改写" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 出站业务回复的 @ 引用渲染为平台真实提醒 | 非成员名字与词内 @ 不改写 | packages/dsh-pet/test/channel-mentions.test.ts | spec Scenario "非成员名字与词内 @ 不改写" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 出站业务回复的 @ 引用渲染为平台真实提醒 | 非成员 open_id 不改写 | packages/dsh-pet/test/channel-mentions.test.ts | spec Scenario "非成员 open_id 不改写" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 出站业务回复的 @ 引用渲染为平台真实提醒 | 已是标记形式则不改写 | packages/dsh-pet/test/channel-mentions.test.ts | spec Scenario "已是标记形式则不改写" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 出站业务回复的 @ 引用渲染为平台真实提醒 | 成员表不可读时仍能发出 | packages/dsh-pet/test/channel-mentions.test.ts | spec Scenario "成员表不可读时仍能发出" | 🔴 red — carried forward; regression |
-| specs/pet-locus-collaboration/spec.md → 出站业务回复的 @ 引用渲染为平台真实提醒 | 注入说明平台写法 | packages/dsh-pet/test/channel-mentions.test.ts | spec Scenario "注入说明平台写法" | 🔴 red — carried forward; regression |
+| specs/pet-locus-collaboration/spec.md → 出站业务回复的 @ 引用渲染为平台真实提醒 | 唯一命中的整词引用成为真实提醒 | packages/dsh-pet/test/channel-lark.test.ts | spec Scenario "唯一命中的整词引用成为真实提醒" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 出站业务回复的 @ 引用渲染为平台真实提醒 | 裸 open_id 引用也成为真实提醒 | packages/dsh-pet/test/channel-mentions.test.ts | spec Scenario "裸 open_id 引用也成为真实提醒" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 出站业务回复的 @ 引用渲染为平台真实提醒 | 同名歧义不改写 | packages/dsh-pet/test/channel-mentions.test.ts | spec Scenario "同名歧义不改写" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 出站业务回复的 @ 引用渲染为平台真实提醒 | 非成员名字与词内 @ 不改写 | packages/dsh-pet/test/channel-mentions.test.ts | spec Scenario "非成员名字与词内 @ 不改写" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 出站业务回复的 @ 引用渲染为平台真实提醒 | 非成员 open_id 不改写 | packages/dsh-pet/test/channel-mentions.test.ts | spec Scenario "非成员 open_id 不改写" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 出站业务回复的 @ 引用渲染为平台真实提醒 | 已是标记形式则不改写 | packages/dsh-pet/test/channel-mentions.test.ts | spec Scenario "已是标记形式则不改写" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 出站业务回复的 @ 引用渲染为平台真实提醒 | 成员表不可读时仍能发出 | packages/dsh-pet/test/channel-lark.test.ts | spec Scenario "成员表不可读时仍能发出" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 出站业务回复的 @ 引用渲染为平台真实提醒 | 注入说明平台写法 | packages/dsh-pet/test/locus-context.test.ts | spec Scenario "注入说明平台写法" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 出站业务回复的 @ 引用渲染为平台真实提醒 | 文档回复不渲染 @ | packages/dsh-pet/test/doc-comment-egress.test.ts | spec Scenario "文档回复不渲染 @" | 🟢 green |
-| specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 受理动作自述会开工 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "受理动作自述会开工" | 🔴 red — carried forward; regression |
-| specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 受理成功后转到执行目标会话 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "受理成功后转到执行目标会话" | 🔴 red — carried forward; regression |
-| specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 导航后仍能分辨投递结局 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "导航后仍能分辨投递结局" | 🔴 red — carried forward; regression |
-| specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 缺少导航能力时受理照常完成 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "缺少导航能力时受理照常完成" | 🔴 red — carried forward; regression |
-| specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 受理失败不导航 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "受理失败不导航" | 🔴 red — carried forward; regression |
-| specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 请求执行不触发界面导航 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "请求执行不触发界面导航" | 🔴 red — carried forward; regression |
-| specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 话题待办跳回原话题 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "话题待办跳回原话题" | 🔴 red — existing test, re-run after change |
-| specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 话题身份不可证时退化 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "话题身份不可证时退化" | 🔴 red — existing test, re-run after change |
-| specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 会话已归档时不可跳转 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "会话已归档时不可跳转" | 🔴 red — existing test, re-run after change |
-| specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 退役 locus 的待办仍在列表中 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "退役 locus 的待办仍在列表中" | 🔴 red — existing test, re-run after change |
+| specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 受理动作自述会开工 | packages/dsh-pet/test/ledger-panel-render.test.ts | spec Scenario "受理动作自述会开工" | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 受理成功后转到执行目标会话 | packages/dsh-pet/test/ledger-panel-render.test.ts | spec Scenario "受理成功后转到执行目标会话" | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 导航后仍能分辨投递结局 | packages/dsh-pet/test/ledger-panel-render.test.ts | spec Scenario "导航后仍能分辨投递结局" | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 缺少导航能力时受理照常完成 | packages/dsh-pet/test/ledger-panel-render.test.ts | spec Scenario "缺少导航能力时受理照常完成" | 🟢 green — partial: "待办为已受理" proven separately in todo-dispatch.test.ts |
+| specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 受理失败不导航 | packages/dsh-pet/test/ledger-panel-render.test.ts | spec Scenario "受理失败不导航" | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 请求执行不触发界面导航 | packages/dsh-pet/test/todo-dispatch.test.ts | spec Scenario "请求执行不触发界面导航" | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 话题待办跳回原话题 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "话题待办跳回原话题" | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 话题身份不可证时退化 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "话题身份不可证时退化" | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 会话已归档时不可跳转 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "会话已归档时不可跳转" | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 退役 locus 的待办仍在列表中 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "退役 locus 的待办仍在列表中" | 🟢 green |
 | specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 文档评论待办跳到文档 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "文档评论待办跳到文档" | 🟢 green |
 | specs/pet-locus-intent-triage/spec.md → 管理面呈现待办并提供由固定标识派生的跳转 | 文档 URL 不可得 | packages/dsh-pet/test/ledger-view.test.ts | spec Scenario "文档 URL 不可得" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → 文档评论按全文/划词同构映射为文档级与评论级入口 | 全文评论进入文档级入口 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "全文评论进入文档级入口" | 🟢 green |

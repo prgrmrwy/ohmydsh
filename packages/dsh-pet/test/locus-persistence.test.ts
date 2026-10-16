@@ -1188,7 +1188,43 @@ describe('durable unified locus repository', () => {
     await second.close()
   })
 
-  it('keeps an unproven current Delivery waiting instead of settling it early', async () => {
+  it('spec Scenario "Host 重启处理遗留 finishing": a restart converges finishing to unknown-terminal, frees the queue, never resends', async () => {
+    const medium = emptyMedium()
+    const first = await openPetHarness(medium)
+    const repository = new DurableLocusRepository(first.domain)
+    const locus = await repository.putLocus(record())
+    const correlation = {
+      endpoint: locus.endpoint, locusId: locus.id, generation: locus.generation, childSessionId: locus.childSessionId as string,
+    }
+    for (const id of ['a', 'b']) {
+      await repository.acceptDelivery({
+        ...correlation, messageId: `message-${id}`, deliveryId: `delivery-${id}`, senderOpenId: 'ou_x', acceptedAt: 2,
+      })
+    }
+    const current = await repository.claimCurrentDelivery({ correlation, now: 3 })
+    expect(current?.deliveryId).toBe('delivery-a')
+    // The Host reserved A for its reply and then died before recording the result.
+    await repository.markDeliveryFinishing({
+      ...correlation, deliveryId: 'delivery-a', now: 4,
+      ...(current!.revision === undefined ? {} : { expectedRevision: current!.revision }),
+    })
+    expect(repository.getDelivery('delivery-a')?.status).toBe('finishing')
+    await first.close()
+
+    const second = await reopen(medium)
+    enableAtomicTransactions(second)
+    const restarted = new DurableLocusRepository(second.domain)
+    const report = await restarted.reconcileStartup({ now: 6 })
+
+    expect(restarted.getDelivery('delivery-a')).toMatchObject({ status: 'unknown-terminal', outboundResult: 'unknown' })
+    // Nothing is offered back for replay, and the next Delivery can be claimed.
+    expect(report.replayableDeliveries.map(item => item.deliveryId)).not.toContain('delivery-a')
+    const next = await restarted.claimCurrentDelivery({ correlation, now: 7 })
+    expect(next?.deliveryId).toBe('delivery-b')
+    await second.close()
+  })
+
+  it('spec Scenario "Host 重启恢复未过期 current": keeps an unproven current Delivery waiting instead of settling it early', async () => {
     const medium = emptyMedium()
     const first = await openPetHarness(medium)
     const repository = new DurableLocusRepository(first.domain)
@@ -1244,7 +1280,7 @@ describe('durable unified locus repository', () => {
     await second.close()
   })
 
-  it('keeps queued work busy as explicit manual debt when termination is unavailable', async () => {
+  it('spec Scenario "宿主重启无法证明关联": keeps queued work busy as explicit manual debt when termination is unavailable', async () => {
     const medium = emptyMedium()
     const first = await openPetHarness(medium)
     const repository = new DurableLocusRepository(first.domain)

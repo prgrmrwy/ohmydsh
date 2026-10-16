@@ -182,7 +182,7 @@ describe('admitDocCommentEvent', () => {
     expect(admitDocCommentEvent(event(), { kind: 'reply-missing' }, context())).toMatchObject({ kind: 'rejected', reason: 'comment-reply-missing' })
   })
 
-  it('treats an allowlisted /scope command as control and a non-allowlisted one as a silent drop', () => {
+  it('spec Scenario "非 allowlist 控制命令": treats an allowlisted /scope command as control and a non-allowlisted one as a silent drop', () => {
     const control = { ...whole, trigger: { replyId: DOC_IDS.wholeRootReplyId, text: `@${DOC_IDS.botOpenId} /scope write` } }
     expect(admitDocCommentEvent(event(), control, context()).kind).toBe('control')
     expect(admitDocCommentEvent(event({ fromOpenId: DOC_IDS.otherUserOpenId }), control, context()))

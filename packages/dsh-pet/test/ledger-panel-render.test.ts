@@ -330,7 +330,7 @@ describe('accept receipt and navigation (D9 + D11)', () => {
     expect(plan.inPanelNotice).toContain('目标会话已归档')
   })
 
-  it('accept succeeds without a session opener', () => {
+  it('spec Scenario "缺少导航能力时受理照常完成": accept succeeds without a session opener', () => {
     const plan = planAcceptFollowThrough({
       dispatch: {
         outcome: 'dispatched',
