@@ -128,3 +128,11 @@ Author's claim before the final check: all re-review items applied.
   - collab :43 is about business replies, so it is correct.
   - design :199 and :214 also cover business answers, and :214 already states the `/bind` exception.
 - `openspec validate --strict`: valid.
+
+## Reviewer re-check (round 7, closing)
+- (a) tasks 10.2 count: **applied** (tasks.md:234 "129/129" and "129 行"; no "128" left in tasks, test-plan or verify).
+- (b) spec :212 mention target: **applied**. It agrees with doc-comments spec :103, :162, :167, :188 and :194, with design :214, and with the code (`sendControl` passes the command sender; the switch warning goes through `withIssuer`; `issuer ?? latest.senderOpenId`).
+- **Contradictions:** none. A non-blocking note: the disclosure and the queued owner-only notice mention the asker or the durable sender, which the umbrella wording also covers.
+
+CHANGES_APPLIED: yes
+

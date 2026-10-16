@@ -31,7 +31,7 @@
 
 ### Evidence
 - Final full-suite command: `npm --prefix packages/dsh-pet run build && npx vitest run` (run in `packages/dsh-pet`).
-- Result summary: **3215 passed, 0 failed, 43 skipped** (176 files passed, 3 skipped).
+- Result summary: **3220 passed, 0 failed, 43 skipped** (176 files passed, 3 skipped).
   - Baseline before the change was 3046 passed and 1 failed. That failure was `loader-composition`, which needs `lib/`; it passes once built.
 - Typecheck: `npm run typecheck` (`tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit`): clean.
 - Repo root: `npm test` gives **416 passed, 8 failed, 2 skipped**.
@@ -75,18 +75,33 @@
 
 ### Review Integrity
 - [x] Rounds 1–5 are recorded. Round 5 (`review-round5.md`) is APPROVE_WITH_CHANGES with CHANGES_APPLIED: yes.
-- [x] Verdict not stale. The only post-round-5 spec edit is the owner-approved bot-join reconciliation. It received a scoped **round 6** review: APPROVE_WITH_CHANGES, with RC1 applied and re-checked, `CHANGES_APPLIED: yes` (`review.md`). Nothing has changed since.
+- [x] Verdict not stale. There were two post-round-5 spec edits, each scoped-reviewed:
+  - **Round 6** (bot-join reconciliation, owner-approved): APPROVE_WITH_CHANGES, `CHANGES_APPLIED: yes` (`review-round6.md`).
+  - **Round 7** (whole-doc answers as a new full comment that mentions the asker, found in live acceptance; owner chose option 1):
+    - REVISE → revisions → fresh-context re-review APPROVE_WITH_CHANGES;
+    - the closing re-check returned `CHANGES_APPLIED: yes` with no contradictions (`review.md`).
+  - proposal, design and specs are unchanged since that closing re-check.
 - [x] All findings from rounds 1–5 were fixed or rebutted, and the rebuttals were accepted by the reviewer.
 
 ### Change Delivery
-- Commit range: `1fc90c2d7..9410dbd73` on `ws/pet-locus-corp-session-links`: 14 commits on top of base `68bc1a188`. Not merged; merging needs owner approval via `scripts/ws-merge.mjs`.
+- Commit range: `1fc90c2d7..HEAD` on `ws/pet-locus-corp-session-links`, on top of base `68bc1a188`. Not merged; merging needs owner approval via `scripts/ws-merge.mjs`.
 
 ## Overall Decision
 
-DECISION: FAIL
+DECISION: PASS
 
-❌ Not yet PASS, for one concrete reason: task 10.5, the live acceptance on a throwaway Feishu app, needs the owner.
+✅ PASS:
+- All tasks are done.
+- 129/129 test-plan rows are green, each with a strictly titled test.
+- The full suite passes: 3220 passed, 0 failed.
+- Strict validate, check:artifacts, and sync idempotence (two runs) pass.
+- The upgrade/rollback drill passed on a real backup copy.
+- Live acceptance is done, and the two defects it found are fixed.
+- Reviews are closed through round 7 with `CHANGES_APPLIED: yes`.
 
-The review is complete: round 6 closed with `CHANGES_APPLIED: yes`.
+Not covered live (needs a human in the cameo app) and covered by tests instead: a follow-up inside an anchored comment, and an IM @ on the same connection.
 
-The code-level evidence above is complete. Once these are resolved, this file is re-run and can reach PASS.
+Deployment prerequisites before the first production start:
+- enable `drive.notice.comment_add_v1` and the comment, docx-read and contact scopes on the dsh-pet app;
+- stop DSH;
+- run `dsh-pet-migrate-state --yes`.
