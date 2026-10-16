@@ -1,19 +1,30 @@
 ## 0. 前置与基线
 
-- [ ] 0.1 在途协调。确认 `pet-locus-feishu-read-and-delivery-fixes`、`pet-locus-shell-tier` 已归档，或已明确归档顺序。用 `openspec diff` 核对本 change 的三份 MODIFIED delta，确认它们的基线就是对方归档后的 current spec。与 `pet-locus-independent-agent-inquiries` 在“投递与结算关联独立于会话运行状态”上冲突时，由后归档的一方 rebase（proposal §在途协调）
-- [ ] 0.2 运行 `npm test`（仓库根）与 `npm --prefix packages/dsh-pet test`，记录全量通过的基线，包括用例数和耗时
-- [ ] 0.3 建立测试设施，见 test-plan §Test infrastructure：
-  - `test/fixtures/lark-subscribe/` 与 `test/fixtures/lark-drive/`：取自 spike 抓包，脱敏，标识替换为固定假值；
-  - 两层 shim→native 的 fake 子进程工厂；
-  - 门禁假端口与可控时钟；
-  - v15、v16 存储夹具；
-  - 泄漏哨兵。
-
-  夹具形态以 lark-cli v1.0.97 源码为准（`processor_im_message.go`、`processor_generic.go`）
+- [x] 0.1 在途协调（2026-10-16 核对）：
+  - `pet-locus-feishu-read-and-delivery-fixes`：卡在 7.5 真机验收，需所有者批准重启 Host。
+  - `pet-locus-shell-tier`：卡在 1.2 bot 读群权限，以及 7.4 待确认归档。
+  - 以上两个均不能直接归档，所有者选择不等待，直接开工。
+  - 需求级重叠只有一处：本 change 与 `pet-locus-independent-agent-inquiries` 都修改了“投递与结算关联独立于会话运行状态”。按 proposal §在途协调处理：后归档的一方 rebase，本 change 只追加文档触发标识、回复目标和升级/回滚场景。
+  - 另外两个前置 change 修改的需求与本 change 互不重叠（feishu-read：会话内容自取、入口群只读等；shell-tier：工具档位、业务出站只经 finish），文本层面无冲突。
+- [x] 0.2 基线（2026-10-16，worktree lean 模式，HEAD `1fc90c2d7` 只新增本 change 的 openspec 文档，没有改任何代码）：
+  - `packages/dsh-pet` 下跑 `npx vitest run`：结果 3046 passed / 1 failed / 43 skipped，共 171 个文件，耗时 61s。唯一失败的是 `loader-composition.test.ts`，原因是还没构建 `lib/client.js`（用例自己提示“run npm run build before this suite”），属于环境前置条件，与本 change 无关。
+  - 仓库根跑 `npm test`：结果 416 pass / 8 fail / 2 skip。失败分两类，都在基线提交 `68bc1a188` 时已存在，与本 change 无关：
+    - `repo-facade` 报 README 没有列出 `ponytail` / `ponytail-skills`，来自刚接入 ponytail 的那次提交；
+    - 7 个 sync 类测试把仓库复制到临时目录后执行 `npm run build --workspace dsh-openspec` 失败。在 worktree 内直接跑 `tsc --noEmit` 是通过的，判断是 lean 模式下复制出去的临时仓库拿不到 `node_modules` 软链接。
+  - 以后每组都以这组数字为准，比较“失败数没有增加”。
+- [x] 0.3 建立测试设施：
+  - 共享夹具 `test/fixtures/lark-subscribe.ts` 已完成，取自 spike 抓包并脱敏（规则同 `real-lark-events.ts`），内容包括：
+    - compact IM 行、interactive 原始信封、评论事件；
+    - stderr 行（含凭据哨兵 `STDERR_SECRETS`）与锁冲突报错；
+    - batch-query 卡片、`+inspect`、连接计数、dry-run 决策。
+  - 下列设施依赖被测接口，随所在组一起写，不提前凭空设计：
+    - shim→native 两层 fake 子进程：第 1 组，扩展 `channel-subscription.test.ts` 的 `FakeChild`；
+    - 门禁假端口与可控时钟：第 2 组；
+    - v15/v16 存储夹具：第 3 组。
 
 ## 1. 传输：单条 `+subscribe --compact`（D1）
 
-- [ ] 1.1 写失败测试，对应 test-plan「飞书入站通道…凭据零接触」中 `channel-subscription.test.ts` 的以下几行：
+- [x] 1.1 写失败测试，对应 test-plan「飞书入站通道…凭据零接触」中 `channel-subscription.test.ts` 的以下几行：
   - 启用 channel 后启动订阅：argv 断言为 `event +subscribe --as bot --compact --event-types im.message.receive_v1,drive.notice.comment_add_v1`，且没有 consume；
   - 停止时回收整个进程组；
   - stderr 原文不落盘；
@@ -21,7 +32,7 @@
   - 就绪以 `connected to wss://` 为准，不以 `Connected.` 为准。
 
   确认失败原因是 argv 不对、或只对 shim 发了信号，而不是 import 错误
-- [ ] 1.2 实现 `ChannelSubscription`：
+- [x] 1.2 实现 `ChannelSubscription`：
   - spawn 改为 `+subscribe --compact`，`detached: true`；
   - stop 同步对进程组发 SIGTERM，等待最多 5 秒，超时再发 SIGKILL 并记诊断。SIGKILL 只对本 Host 仍持有存活句柄的 pgid 发出，防止 pgid 被复用后误杀；Host 退出时这一步尽力而为（R4-S-2）；
   - 就绪行判定、`readyAt` 每个子进程只锁存一次；
@@ -29,13 +40,13 @@
   - 不传 `--quiet`。
 
   直到 1.1 通过
-- [ ] 1.3 写失败测试：
+- [x] 1.3 写失败测试：
   - 单连接同时承载群消息与评论（`channel-service.test.ts`）；
   - compact 群消息与既有准入兼容（`channel-event.test.ts`）；
   - 卡片消息静默丢弃，诊断为 `unparsable`（`channel-pipeline.test.ts`）
-- [ ] 1.4 实现按 `type` 分派：`im.message.receive_v1` 走现有 `parseInboundLine`，`drive.notice.comment_add_v1` 走评论链路（第 4 组接入前先落一个可观测的桩）。移除 bot-added 的独立订阅：生产环境本来就不启动它，保留可选构造，但不再单独 spawn
-- [ ] 1.5 回归行改名并跑通，然后翻 🟢：lark-cli bot 身份不可用、升级后默认不消费事件、Channel 关闭时为配对临时订阅、配对结束后按运行原因回收
-- [ ] 1.6 重构：把 lark-cli argv 和就绪模式集中成常量，作为唯一的契约点。全量测试保持绿色
+- [x] 1.4 实现按 `type` 分派：`im.message.receive_v1` 走现有 `parseInboundLine`，`drive.notice.comment_add_v1` 走评论链路（第 4 组接入前先落一个可观测的桩）。移除 bot-added 的独立订阅：生产环境本来就不启动它，保留可选构造，但不再单独 spawn
+- [x] 1.5 回归行改名并跑通，然后翻 🟢：lark-cli bot 身份不可用、升级后默认不消费事件、Channel 关闭时为配对临时订阅、配对结束后按运行原因回收
+- [x] 1.6 重构：把 lark-cli argv 和就绪模式集中成常量，作为唯一的契约点（`SUBSCRIBED_EVENT_TYPES`、`READY_MARKER`、`LOCK_HELD_MARKER`）。全量测试结果为 3058 passed / 1 failed，唯一失败的是基线中已有的 `loader-composition` 用例，需先构建 lib，与本次改动无关。另外 1.4 已删除独立的 bot-added 订阅，并新增 `ChannelServiceDeps.commentIntake` 接收评论行；接收到的评论在第 4 组接入真实处理之前只占位，不做处理。
 
 ## 2. 连接门禁（D2、D3）
 

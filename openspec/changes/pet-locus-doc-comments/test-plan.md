@@ -6,17 +6,17 @@ This table is a live ledger. During apply, flip each row from 🔴 to 🟢 when 
 
 | Requirement | Scenario | Test File | Test Name | Initial State |
 |-------------|----------|-----------|-----------|---------------|
-| specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | 启用 channel 后启动订阅 | packages/dsh-pet/test/channel-subscription.test.ts | spec Scenario "启用 channel 后启动订阅" | 🔴 red |
-| specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | 单连接同时承载群消息与评论 | packages/dsh-pet/test/channel-service.test.ts | spec Scenario "单连接同时承载群消息与评论" | 🔴 red |
-| specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | compact 群消息与既有准入兼容 | packages/dsh-pet/test/channel-event.test.ts | spec Scenario "compact 群消息与既有准入兼容" | 🔴 red |
-| specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | 卡片消息静默丢弃 | packages/dsh-pet/test/channel-pipeline.test.ts | spec Scenario "卡片消息静默丢弃" | 🔴 red |
-| specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | 停止时回收整个进程组 | packages/dsh-pet/test/channel-subscription.test.ts | spec Scenario "停止时回收整个进程组" | 🔴 red |
-| specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | stderr 原文不落盘 | packages/dsh-pet/test/channel-subscription.test.ts | spec Scenario "stderr 原文不落盘" | 🔴 red |
-| specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | 内部重连不推进水位 | packages/dsh-pet/test/channel-subscription.test.ts | spec Scenario "内部重连不推进水位" | 🔴 red |
-| specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | lark-cli bot 身份不可用 | packages/dsh-pet/test/channel-subscription.test.ts | spec Scenario "lark-cli bot 身份不可用" | 🔴 red — carried forward; regression |
-| specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | 升级后默认不消费事件 | packages/dsh-pet/test/channel-subscription.test.ts | spec Scenario "升级后默认不消费事件" | 🔴 red — carried forward; regression |
-| specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | Channel 关闭时为配对临时订阅 | packages/dsh-pet/test/channel-subscription.test.ts | spec Scenario "Channel 关闭时为配对临时订阅" | 🔴 red |
-| specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | 配对结束后按运行原因回收 | packages/dsh-pet/test/channel-subscription.test.ts | spec Scenario "配对结束后按运行原因回收" | 🔴 red |
+| specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | 启用 channel 后启动订阅 | packages/dsh-pet/test/channel-subscription.test.ts | spec Scenario "启用 channel 后启动订阅" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | 单连接同时承载群消息与评论 | packages/dsh-pet/test/channel-service.test.ts | spec Scenario "单连接同时承载群消息与评论" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | compact 群消息与既有准入兼容 | packages/dsh-pet/test/channel-event.test.ts | spec Scenario "compact 群消息与既有准入兼容" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | 卡片消息静默丢弃 | packages/dsh-pet/test/channel-pipeline.test.ts | spec Scenario "卡片消息静默丢弃" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | 停止时回收整个进程组 | packages/dsh-pet/test/channel-subscription.test.ts | spec Scenario "停止时回收整个进程组" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | stderr 原文不落盘 | packages/dsh-pet/test/channel-subscription.test.ts | spec Scenario "stderr 原文不落盘" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | 内部重连不推进水位 | packages/dsh-pet/test/channel-subscription.test.ts | spec Scenario "内部重连不推进水位" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | lark-cli bot 身份不可用 | packages/dsh-pet/test/channel-subscription.test.ts | spec Scenario "lark-cli bot 身份不可用" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | 升级后默认不消费事件 | packages/dsh-pet/test/channel-service.test.ts | spec Scenario "升级后默认不消费事件" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | Channel 关闭时为配对临时订阅 | packages/dsh-pet/test/channel-pairing-service.test.ts | spec Scenario "Channel 关闭时为配对临时订阅" | 🟢 green |
+| specs/pet-lark-channel/spec.md → 飞书入站通道经本机 lark-cli bot 身份接入且凭据零接触 | 配对结束后按运行原因回收 | packages/dsh-pet/test/channel-pairing-service.test.ts | spec Scenario "配对结束后按运行原因回收" | 🟢 green |
 | specs/pet-lark-channel/spec.md → 未通过准入的入站消息保持飞书侧静默但 Host 可诊断 | Channel 关闭时收到消息 | packages/dsh-pet/test/channel-service.test.ts | spec Scenario "Channel 关闭时收到消息" | 🔴 red — carried forward; regression |
 | specs/pet-lark-channel/spec.md → 未通过准入的入站消息保持飞书侧静默但 Host 可诊断 | 非 allowlist 用户 @ Bot | packages/dsh-pet/test/channel-service.test.ts | spec Scenario "非 allowlist 用户 @ Bot" | 🔴 red — carried forward; regression |
 | specs/pet-lark-channel/spec.md → 未通过准入的入站消息保持飞书侧静默但 Host 可诊断 | 评论范围无法判定 | packages/dsh-pet/test/doc-comment-intake.test.ts | spec Scenario "评论范围无法判定" | 🔴 red |

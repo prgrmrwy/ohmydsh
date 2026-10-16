@@ -7,6 +7,7 @@
  * answer instead of queued work.
  */
 
+import { compactInteractiveEnvelope } from './fixtures/lark-subscribe.js'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -530,6 +531,16 @@ describe('refusals leave no trace', () => {
     })
 
     expect(await restarted.handleLine(p2pLine())).toEqual({ kind: 'ignored', reason: 'duplicate' })
+  })
+
+  it('spec Scenario "卡片消息静默丢弃": an interactive envelope is counted as unparsable', async () => {
+    const f = await fixture()
+    harness = f.harness
+
+    expect(await f.pipeline.handleLine(compactInteractiveEnvelope())).toEqual({
+      kind: 'ignored',
+      reason: 'unparsable',
+    })
   })
 
   it('ignores an unparsable line', async () => {

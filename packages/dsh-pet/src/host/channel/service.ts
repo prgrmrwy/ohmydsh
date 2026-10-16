@@ -27,11 +27,6 @@ import {
   type ChannelStatus,
   type SubscriptionOptions,
 } from './subscription.js'
-import {
-  BOT_ADDED_EVENT_KEY,
-  BotLifecycleIntake,
-  type BotLifecycleInitializer,
-} from './bot-lifecycle.js'
 import type { PetCoordinator } from '../coordinator.js'
 import type { PetRepository } from '../repository.js'
 import type { PetChannelConfig } from '../spec.js'
@@ -68,8 +63,6 @@ export interface ChannelServiceDeps {
    * directly without fabricating a controller.
    */
   readonly unifiedLocusReadiness?: PetUnifiedLocusReadiness
-  /** Independent chat-level initialization for verified bot-added events. */
-  readonly botLifecycleInitializer?: BotLifecycleInitializer
   /** Explicit catalog/provisioning diagnostic when lifecycle intake is unavailable. */
   readonly botLifecycleDiagnostic?: string
   /**
@@ -80,6 +73,11 @@ export interface ChannelServiceDeps {
    */
   readonly spawnProcess?: SpawnLike
   /** Injectable event-consumer process/timer seams for service integration tests. */
+  /**
+   * Doc-comment intake for `drive.notice.comment_add_v1` lines from the shared
+   * `+subscribe` connection. Absent means comments are dropped silently.
+   */
+  readonly commentIntake?: (line: string) => Promise<void>
   readonly subscriptionSpawnProcess?: SubscriptionOptions['spawnProcess']
   readonly subscriptionSchedule?: SubscriptionOptions['schedule']
   /** Injectable pairing randomness/clock/timer seams for deterministic tests. */
@@ -94,15 +92,12 @@ export interface ChannelServiceDeps {
 export class ChannelService implements ChannelControl {
   private readonly client: LarkClient
   private readonly subscription: ChannelSubscription
-  private readonly lifecycleSubscription: ChannelSubscription | undefined
-  private readonly lifecycleIntake: BotLifecycleIntake | undefined
   private readonly pipeline: InboundPipeline
   private readonly pairing: PairingController
   private readonly bootstrap: BotBootstrap
   private binding: BootstrapState | undefined
   private permission: LarkPermissionDiagnostic | undefined
   private identityDiagnostic: string | undefined
-  private lifecycleDiagnostic: string | undefined
   private readonly ignoredAt = new Map<string, number>()
   /** The formal Channel reason is armed only after its latest identity probe. */
   private formalReady = false
@@ -132,42 +127,10 @@ export class ChannelService implements ChannelControl {
         ? { schedule: deps.subscriptionSchedule }
         : {}),
     })
-    this.lifecycleIntake = deps.botLifecycleInitializer === undefined
-      ? undefined
-      : new BotLifecycleIntake({
-        allowOpenIds: () => deps.repository.getChannelConfig().allowOpenIds,
-        initializer: deps.botLifecycleInitializer,
-      })
-    this.lifecycleSubscription = this.lifecycleIntake === undefined
-      ? undefined
-      : new ChannelSubscription({
-        eventKey: BOT_ADDED_EVENT_KEY,
-        ...(deps.subscriptionSpawnProcess === undefined ? {} : { spawnProcess: deps.subscriptionSpawnProcess }),
-        onLine: line => {
-          void this.lifecycleIntake!.handleLine(line).then(outcome => {
-            if (outcome.kind === 'unverified') {
-              this.lifecycleDiagnostic =
-                'Bot 入群事件缺少 allowlist 操作者证明；该群保持待建立，首次 allowlist @ 可补齐。'
-              void deps.repository.updateChannelConfig(current => ({
-                ...current,
-                lifecycleDiagnostic: { kind: 'bot-added-unverified', updatedAt: Date.now() },
-              })).catch(() => undefined)
-              this.log('bot-added event lacked allowlisted operator proof; first allowlist @ remains required')
-              deps.onChange?.()
-            } else if (outcome.kind === 'initialized') {
-              this.lifecycleDiagnostic = undefined
-              void deps.repository.updateChannelConfig(current => {
-                const { lifecycleDiagnostic: _cleared, ...rest } = current
-                return rest
-              }).catch(() => undefined)
-              deps.onChange?.()
-            }
-          }).catch(error => {
-            this.log(`bot lifecycle intake failed: ${error instanceof Error ? error.message : String(error)}`)
-          })
-        },
-        onStatus: () => deps.onChange?.(),
-      })
+    // Bot-added has no consumer in production (index.ts never wires an
+    // initializer), and a separate subscription would be a SECOND event
+    // connection for the app, which splits events (pet-locus-doc-comments D1).
+    // If it is ever needed, route it through the one `+subscribe` instead.
     this.pipeline = new InboundPipeline({
       repository: deps.repository,
       coordinator: deps.coordinator,
@@ -228,7 +191,6 @@ export class ChannelService implements ChannelControl {
     this.pairing.stop()
     // Stop receiving new events even when a durable claim must finish.
     this.subscription.stop()
-    this.lifecycleSubscription?.stop()
     // The unified controller owns only its observer subscription/pending map;
     // disposing it never releases a locus child or sends parent/business text.
     try {
@@ -254,8 +216,6 @@ export class ChannelService implements ChannelControl {
     const diagnostic =
       this.deps.locusDiagnostic ??
       current.diagnostic ??
-      this.lifecycleSubscription?.current.diagnostic ??
-      this.lifecycleDiagnostic ??
       durableLifecycle ??
       this.deps.botLifecycleDiagnostic
     const permission =
@@ -355,7 +315,6 @@ export class ChannelService implements ChannelControl {
     if (!enabled) {
       this.formalReady = false
       this.reconcileSubscription()
-      this.lifecycleSubscription?.stop()
       return
     }
     // Revalidation is itself fail-closed: an already-running formal consumer
@@ -398,8 +357,6 @@ export class ChannelService implements ChannelControl {
     this.formalReady = true
     if (replace && this.subscription.current.phase !== 'stopped') this.subscription.reconnect()
     else this.reconcileSubscription()
-    if (replace) this.lifecycleSubscription?.reconnect()
-    else this.lifecycleSubscription?.start()
   }
 
   async reconnect(): Promise<void> {
@@ -469,7 +426,6 @@ export class ChannelService implements ChannelControl {
     this.formalReady = false
     this.reconcileSubscription()
     if (resume) {
-      this.lifecycleSubscription?.stop()
       await this.deps.repository.updateChannelConfig(current =>
         generation === this.operationGeneration
           ? { ...current, enabled: false, updatedAt: Date.now() }
@@ -565,7 +521,6 @@ export class ChannelService implements ChannelControl {
     this.formalReady = resume
     if (resume) {
       this.subscription.reconnect()
-      this.lifecycleSubscription?.reconnect()
     } else {
       this.reconcileSubscription()
     }
@@ -573,6 +528,12 @@ export class ChannelService implements ChannelControl {
 
   /** Parse once, give pairing first refusal, then preserve ordinary intake. */
   private async dispatchLine(line: string): Promise<void> {
+    // One connection carries both event families; route by the compact `type`.
+    if (isCommentLine(line)) {
+      // Comments never reach the IM pipeline, pairing, or a disabled channel.
+      if (this.formalReady && this.deps.commentIntake !== undefined) await this.deps.commentIntake(line)
+      return
+    }
     const event = parseInboundLine(line)
     if (event === undefined) {
       await this.pipeline.handleLine(line)
@@ -678,4 +639,15 @@ function safeIgnoredReason(reason: string): string {
         ? 'unsupported-type'
         : reason
   return SAFE_IGNORED.has(mapped) ? mapped : 'other'
+}
+
+/** Whether a `+subscribe --compact` line is a doc-comment event. */
+function isCommentLine(line: string): boolean {
+  if (!line.includes('drive.notice.comment_add_v1')) return false
+  try {
+    const value = JSON.parse(line) as { type?: unknown }
+    return value !== null && typeof value === 'object' && value.type === 'drive.notice.comment_add_v1'
+  } catch {
+    return false
+  }
 }

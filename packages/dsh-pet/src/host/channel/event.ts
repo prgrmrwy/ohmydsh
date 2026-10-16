@@ -8,7 +8,11 @@
  * agent stands behind it.
  */
 
-/** One inbound message as emitted by `lark-cli event consume`. */
+/**
+ * One inbound message as emitted by `lark-cli event +subscribe --compact`
+ * (the same field mapping `event consume` used: lark-cli v1.0.97
+ * `processor_im_message.go`).
+ */
 export interface LarkInboundEvent {
   readonly type: string
   /** Recommended idempotency key; `event_id` explicitly is NOT one. */

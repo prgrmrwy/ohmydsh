@@ -7,11 +7,13 @@ import { ChannelService } from '../src/host/channel/service.js'
 import type { LarkClient } from '../src/host/channel/lark.js'
 import { PetCoordinator } from '../src/host/coordinator.js'
 import { openPetHarness, type PetHarness } from './harness.js'
+import { SUBSCRIBE_STDERR } from './fixtures/lark-subscribe.js'
 
 class ConsumerChild extends EventEmitter {
   readonly stdout = new EventEmitter() as EventEmitter & { setEncoding(value: string): void }
   readonly stderr = new EventEmitter() as EventEmitter & { setEncoding(value: string): void }
   exitCode: number | null = null
+  signalCode: string | null = null
   readonly signals: string[] = []
 
   constructor() {
@@ -21,7 +23,7 @@ class ConsumerChild extends EventEmitter {
   }
 
   ready(): void {
-    this.stderr.emit('data', '[event] ready event_key=im.message.receive_v1\n')
+    this.stderr.emit('data', SUBSCRIBE_STDERR.sdkConnected)
   }
 
   line(value: unknown): void {
@@ -128,7 +130,7 @@ function pairEvent(sender = 'ou_pairing0000000000000000000000') {
 }
 
 describe('pairing owns the shared consumer', () => {
-  it('starts while formal channel is off and hides command until ready', async () => {
+  it('spec Scenario "Channel 关闭时为配对临时订阅": starts while formal channel is off and hides command until ready', async () => {
     const f = await fixture()
     await f.service.startPairing()
 
@@ -143,7 +145,7 @@ describe('pairing owns the shared consumer', () => {
     })
   })
 
-  it('uses the pre-dispatch path and stops pairing-only consumer after success', async () => {
+  it('spec Scenario "配对结束后按运行原因回收": uses the pre-dispatch path and stops pairing-only consumer after success', async () => {
     const f = await fixture()
     await f.service.startPairing()
     f.children[0]?.ready()

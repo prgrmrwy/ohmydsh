@@ -17,6 +17,7 @@ import { ChannelService } from '../src/host/channel/service.js'
 import type { LarkClient } from '../src/host/channel/lark.js'
 import { PetCoordinator } from '../src/host/coordinator.js'
 import { openPetHarness, type PetHarness } from './harness.js'
+import { compactCommentEvent } from './fixtures/lark-subscribe.js'
 
 let harness: PetHarness | undefined
 
@@ -60,8 +61,8 @@ async function fixture(
     failing?: boolean
     cliOutput?: string
     cliExit?: number
-    subscriptionSpawnProcess?: (command: string, args: readonly string[]) => ChildProcess
-    botLifecycleInitializer?: { ensureAuthorizedChat(input: { chatId: string; eventId: string; operatorOpenId: string }): Promise<void> }
+commentIntake?: (line: string) => Promise<void>
+        subscriptionSpawnProcess?: (command: string, args: readonly string[]) => ChildProcess
   } = {},
 ): Promise<Fixture> {
   const created = await openPetHarness()
@@ -122,8 +123,8 @@ async function fixture(
       defaultPermission: 'read',
       readVerification: 'verified',
     },
-    ...(options.subscriptionSpawnProcess === undefined ? {} : { subscriptionSpawnProcess: options.subscriptionSpawnProcess }),
-    ...(options.botLifecycleInitializer === undefined ? {} : { botLifecycleInitializer: options.botLifecycleInitializer }),
+...(options.commentIntake === undefined ? {} : { commentIntake: options.commentIntake }),
+        ...(options.subscriptionSpawnProcess === undefined ? {} : { subscriptionSpawnProcess: options.subscriptionSpawnProcess }),
     spawnProcess: () => fakeCli(options.cliOutput ?? 'App ID: cli_bound01\n', options.cliExit ?? 0),
     onChange: () => changes.push(Date.now()),
     log: message => logs.push(message),
@@ -132,7 +133,7 @@ async function fixture(
 }
 
 describe('lifecycle', () => {
-  it('stays stopped while the channel is disabled', async () => {
+  it('spec Scenario "升级后默认不消费事件": stays stopped while the channel is disabled', async () => {
     const f = await fixture()
     harness = f.harness
 
@@ -142,7 +143,7 @@ describe('lifecycle', () => {
     expect(f.service.status().phase).toBe('stopped')
   })
 
-  it('starts a separate bot-added consumer only while enabled and never creates business work', async () => {
+  it('spec Scenario "单连接同时承载群消息与评论": one +subscribe carries both, never a separate bot-added consumer', async () => {
     const children: Array<{ args: readonly string[]; child: EventEmitter & Record<string, unknown>; stdout: EventEmitter }> = []
     const spawnConsumer = (_command: string, args: readonly string[]): ChildProcess => {
       const child = new EventEmitter() as EventEmitter & Record<string, unknown>
@@ -154,14 +155,15 @@ describe('lifecycle', () => {
       child['stderr'] = stderr
       child['stdin'] = { end: () => undefined }
       child['exitCode'] = null
+      child['signalCode'] = null
       child['kill'] = vi.fn(() => true)
       children.push({ args, child, stdout })
       return child as unknown as ChildProcess
     }
-    const ensureAuthorizedChat = vi.fn(async () => undefined)
+    const commentLines: string[] = []
     const f = await fixture({
       subscriptionSpawnProcess: spawnConsumer,
-      botLifecycleInitializer: { ensureAuthorizedChat },
+      commentIntake: async line => { commentLines.push(line) },
     })
     harness = f.harness
     f.service.start()
@@ -176,35 +178,20 @@ describe('lifecycle', () => {
       updatedAt: 1,
     })
     await f.service.setEnabled(true)
-    expect(children).toHaveLength(2)
-    const lifecycle = children.find(item => item.args.includes('im.chat.member.bot.added_v1'))
-    expect(lifecycle).toBeDefined()
-    lifecycle!.stdout.emit('data', JSON.stringify({
-      schema: '2.0',
-      header: { event_type: 'im.chat.member.bot.added_v1', event_id: 'evt-add-1' },
-      event: {
-        chat_id: 'oc-project',
-        operator_id: { open_id: 'ou_allowed0000000000000000000000' },
-      },
-    }) + '\n')
-    await vi.waitFor(() => expect(ensureAuthorizedChat).toHaveBeenCalledTimes(1))
+
+    // A second subscription for the same app would split events (spike E3).
+    expect(children).toHaveLength(1)
+    expect(children[0]?.args).toContain('+subscribe')
+    expect(children[0]?.args.join(' ')).toContain('im.message.receive_v1,drive.notice.comment_add_v1')
+    expect(children.some(item => item.args.includes('im.chat.member.bot.added_v1'))).toBe(false)
+
+    // A comment line reaches the comment path and is not mistaken for a group
+    // message: it creates no Task or Invocation on the IM pipeline.
+    const commentLine = compactCommentEvent()
+    children[0]!.stdout.emit('data', commentLine + '\n')
+    await vi.waitFor(() => expect(commentLines).toEqual([commentLine]))
     expect(f.harness.repository.listTasks()).toHaveLength(0)
     expect(f.harness.repository.listInvocations()).toHaveLength(0)
-
-    const unverified = children.find(item => item.args.includes('im.chat.member.bot.added_v1'))!
-    unverified.stdout.emit('data', JSON.stringify({
-      schema: '2.0',
-      header: { event_type: 'im.chat.member.bot.added_v1', event_id: 'evt-add-unverified' },
-      event: { chat_id: 'oc-unverified' },
-    }) + '\n')
-    await vi.waitFor(() => {
-      expect(f.harness.repository.getChannelConfig().lifecycleDiagnostic)
-        .toMatchObject({ kind: 'bot-added-unverified' })
-    })
-    expect(f.service.status().diagnostic).toContain('首次 allowlist @ 可补齐')
-
-    await f.service.setEnabled(false)
-    for (const item of children) expect(item.child['kill']).toHaveBeenCalledWith('SIGTERM')
   })
 
   it('does not start after disable wins an in-flight identity probe', async () => {
