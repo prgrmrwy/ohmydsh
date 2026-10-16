@@ -257,6 +257,7 @@ describe('doc-comment delivery prompt (pet-locus-doc-comments D12)', () => {
     expect(prompt).toMatch(/不可信[\s\S]*接口已有/)
     expect(prompt).toContain('pet_locus_doc_context')
     expect(prompt).toContain('评论区所有人')
+    expect(prompt).toContain('回复会追加在该评论下')
   })
 
   it('a whole-doc comment says so and has no quote', () => {
@@ -264,6 +265,9 @@ describe('doc-comment delivery prompt (pet-locus-doc-comments D12)', () => {
 
     expect(prompt).toContain('全文评论')
     expect(prompt).not.toContain('划词原文')
+    // Full comments cannot be replied to: the answer is a NEW full comment that @-notifies the asker.
+    expect(prompt).toContain('新的全文评论')
+    expect(prompt).not.toContain('回复会追加在该评论下')
   })
 
   it('spec Scenario "文档 Delivery 不调用 IM 接口" (prompt side): no group-read probe text, no @ promise, no chat history tool', () => {

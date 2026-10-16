@@ -271,7 +271,9 @@ function docCommentLines(context: LocusDeliveryContext): string[] {
         '</untrusted-quote>',
       ]
       : []),
-    '- 回复会追加在该评论下，评论区所有人都能看到。',
+    anchored
+      ? '- 回复会追加在该评论下，评论区所有人都能看到。'
+      : '- 飞书不允许回复全文评论：你的答复会作为一条新的全文评论发出，开头 @ 提问者（会通知对方），文档的所有读者都能看到。',
     '- 读取当前评论线程与文档正文请调用 `pet_locus_doc_context`；不要用其它方式读取飞书。',
     '- 回复里的 @ 不会产生提醒，按纯文本发出。',
     ...(context.request.senderAllowlisted === true
