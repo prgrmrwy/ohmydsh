@@ -3,9 +3,7 @@
 ### Task Completion
 - [ ] All tasks marked `[x]` in tasks.md
 - Remaining open tasks:
-  - **10.5** live acceptance on a throwaway Feishu app, and **10.6** a live upgrade/rollback drill. Both need the owner, because they need a Feishu app, a disposable state copy, and a Host restart.
-  - **10.4** `node scripts/sync.mjs` twice. It is blocked in this Worktree Session: the isolated DSH home has no `@byted` npm registry (`dsh-traex-bridge`), so preflight refuses both runs before changing anything. Rerun it on the main checkout after merge, or with that registry configured.
-  - 6.4, 6.5, 8.3 and 10.1–10.3 are done in substance. Evidence is below, and they are ticked together with this file.
+  - **10.5** live acceptance on a throwaway Feishu app. It needs the owner: a disposable app with the comment event and the scopes enabled, plus a doc and a group to act in.
 
 ### TDD Integrity
 - [x] Every test-plan.md entry exists as a real test.
@@ -58,7 +56,14 @@
   - prove-before-`finishing`;
   - disclosure-once;
   - media guard.
-- Non-executable checks run: none.
+- Non-executable checks run:
+  - **Sync idempotence (10.4).** `node scripts/sync.mjs` was run twice into an isolated DSH home with a scratch XDG data dir. First run: exit 0, 16 changes. Second run: exit 0, "no changes — deployment already matches manifest", `dsh-pet@0.1.0 up-to-date`.
+  - **Upgrade/rollback drill (10.6).** Run on a copy of a real v14 backup (5 loci / 19 deliveries), through the real SQLite backend and storage-domain composition:
+    - v15→v16 migration writes a byte-identical backup; the second run is a no-op.
+    - v16 code opens the medium.
+    - The baseline v15 code is refused cleanly ("stamped version 16 … incompatible with descriptor version 15"). The logical content is unchanged.
+    - After restoring the backup, v15 opens it.
+    - Full details are in tasks 10.6.
 
 ### Review Integrity
 - [x] Rounds 1–5 are recorded. Round 5 (`review-round5.md`) is APPROVE_WITH_CHANGES with CHANGES_APPLIED: yes.
@@ -72,9 +77,7 @@
 
 DECISION: FAIL
 
-❌ Not yet PASS, for two concrete reasons:
-1. Tasks 10.5 and 10.6, the live acceptance and the upgrade/rollback drill, need the owner.
-2. Task 10.4 (`sync` idempotence) is blocked in this worktree by the missing `@byted` registry.
+❌ Not yet PASS, for one concrete reason: task 10.5, the live acceptance on a throwaway Feishu app, needs the owner.
 
 The review is complete: round 6 closed with `CHANGES_APPLIED: yes`.
 

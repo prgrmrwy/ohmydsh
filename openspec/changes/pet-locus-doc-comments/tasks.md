@@ -233,7 +233,7 @@
 - [x] 10.1 （已完成：pet build + vitest 3210 passed / 0 failed；typecheck 通过；仓库根 416/8，8 个失败与基线完全相同；check:artifacts 通过）运行 `npm --prefix packages/dsh-pet test`、`npm --prefix packages/dsh-pet run build`，以及 typecheck（若有独立脚本）；运行仓库根的 `npm test` 和 `npm run check:artifacts`。记录命令和通过数
 - [x] 10.2 （已完成：128/128 行为绿，其中 4 行 partial；逐行机械核对具名测试 missing 0；没有新增 skip/only；被删除的测试标题均为改名或有意替换，见 verify.md）核对 test-plan 128 行全部为 🟢；没有 skip 或 pending，也没有弱化或删除过的测试
 - [x] 10.3 （已完成）`openspec validate pet-locus-doc-comments --strict` 通过
-- [ ] 10.4 （受阻：worktree 隔离的 DSH home 没有配置 `@byted` registry，`dsh-traex-bridge` 的 preflight 两次都拒绝，且没有改动任何内容；需在 main checkout 上合入后运行）`node scripts/sync.mjs` 连续运行两次，第二次无变化（幂等）
+- [x] 10.4 `node scripts/sync.mjs` 连续两次，第二次无变化。2026-10-17 在隔离环境运行：DSH_HOME 用 Worktree Session 自己的 home，为 `profiles/web/.npmrc` 补上 `@byted` registry 行，不含凭据；XDG_DATA_HOME 用临时目录，避免去覆盖本机 `~/.local/share/openspec/schemas/anvil` 这个未受管的 schema。第一次 exit 0，应用 16 处变更；第二次 exit 0，输出“no changes — deployment already matches manifest”，`dsh-pet@0.1.0 up-to-date`
 - [ ] 10.5 在一次性飞书应用上做真机验收（不用生产 dsh-pet 应用），用构建产物复测：
   - E1：一条连接同时收群 @、全文评论、划词评论、回复；
   - E3 反向：Pet 运行时，另起一个同应用的 `+subscribe`，后者应被单实例锁拒绝；先占住连接再启动 Pet，Pet 的门禁应报 `event-connection-conflict`；
@@ -243,5 +243,12 @@
   - 一次完整往返：全文评论 → 回复，划词评论 → 回复，`/bind`。
 
   结果记入 `verify.md`
-- [ ] 10.6 真机升级演练（用一次性的状态目录副本）：执行 `dsh-pet-migrate-state --yes`，备份生成，v16 启动成功；再演练回滚：删除 journal、覆盖备份、v15 启动成功
+- [x] 10.6 真机升级演练（用一次性的状态目录副本）：执行 `dsh-pet-migrate-state --yes`，备份生成，v16 启动成功；再演练回滚：删除 journal、覆盖备份、v15 启动成功
+  - 演练结果（2026-10-17）：用真实的 v14 备份副本，先经旧版脚本得到 v15 介质，loci 5 / deliveries 19；以下每一步打开都走真实 SQLite 后端和真实 storage-domain 组装，与 Host 启动路径一致，生产状态文件未被触碰：
+    1. 升级：`migrate-state-version --dry-run` 显示 15→16，`--yes` 生成的 `state.sqlite.v15.bak-*` 与升级前逐字节相同；integrity_check ok；再执行一次输出“Already at the target version”，幂等。
+    2. v16 代码打开升级后的介质：OPENED，loci 5 / deliveries 19。
+    3. 回滚前：v15 代码（基线 `68bc1a188` 的独立 checkout）打开 v16 介质，被明确拒绝（“stamped version 16 … incompatible with descriptor version 15”），逻辑内容（iterdump）不变。
+    4. 回滚：删除 journal，用备份覆盖介质；v15 代码打开：OPENED，loci 5 / deliveries 19。
+    5. v16 代码重新打开升级后的副本：OPENED。
+  - 结论：升级可逆，回滚语义与 D 节一致，即整库恢复备份，升级后产生的状态随之丢失。
 - [x] 10.7 （已生成；DECISION: FAIL，因为第 6 轮评审、10.4–10.6 尚未完成）生成 `verify.md`，按 anvil 的 verify 指令写出 `DECISION`
