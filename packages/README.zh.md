@@ -5,7 +5,7 @@
 <!-- problem -->
 这个目录放本仓库自己开发的插件，每个都是可独立移除的单元。想知道一个 package 必须包含什么、怎样构建和安装、README 怎样分级，就读这里；要挑选某个插件，请从[根 README](../README.zh.md) 的插件索引开始。
 
-每个子目录 = 一个自研定制单元，遵循社区 `dsh.bundle` 标准：
+可部署插件遵循社区 `dsh.bundle` 标准。独立库 `collab-kernel` 不是 manifest 定制，不声明 bundle 或 composition patch；它独立构建，供后续消费者内联。
 
 ```
 packages/<name>/
@@ -31,6 +31,6 @@ packages/<name>/
 |---|---|---|
 | A | `dsh-pet`、`dsh-memex`、`worktree-session`、`dsh-openspec` | `<!-- problem -->` 段落、位于该 package `docs/` 下的位图截图（可再加示意图） |
 | B | `sidebar-session-provider-icon`、`session-title-copy`、`system-clock`、`session-links`、`home-network-model-guard` | `<!-- problem -->` 段落与位于该 package `docs/` 下的位图截图 |
-| C | `subscriptions-sandbox-shim`、`cockpit-worktree-open-shim`、`cockpit-memex-browse-shim` | `<!-- problem -->` 段落，以及以 `<!-- section: removal -->` 为锚点的「移除」章节，说明它连接哪两端、何时可以移除 |
+| C | `subscriptions-sandbox-shim`、`cockpit-worktree-open-shim`、`cockpit-memex-browse-shim`、`collab-kernel` | `<!-- problem -->` 段落，以及以 `<!-- section: removal -->` 为锚点的「移除」章节，说明它连接哪两端、何时可以移除 |
 
 截图必须来自填充合成数据的隔离 `DSH_HOME`，不得来自日常使用的实例；每张图都要在图片同目录的 `SCREENSHOTS.md` 中登记（单张 ≤ 400 KiB）。

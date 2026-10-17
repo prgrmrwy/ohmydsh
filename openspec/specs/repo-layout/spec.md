@@ -220,9 +220,9 @@ overlay 文件解析符号链接后所在的目录称为 **overlay 根**。overl
 
 overlay 根与公开仓库根具有**同等信任**:两者都由本机使用者维护。下述越界与预检约束用于在执行前拦截配置错误(路径写错、私有仓库未克隆或切错分支),不以防御恶意 overlay 为目标;源码目录内部嵌套的符号链接不在检查范围内。
 
-每条定制解析出的源码路径(上述目录或文件、每个 `buildInputs` 文件,以及 local package 每个 `compatDependencies[].path` 目录)在解析符号链接后必须(SHALL)仍位于其所属根解析符号链接后的目录之内;越界时 sync 必须(SHALL)报错并以非零退出码结束。
+每条定制解析出的源码路径(上述目录或文件、每个 `buildInputs` 文件或目录,以及 local package 每个 `compatDependencies[].path` 目录)在解析符号链接后必须(SHALL)仍位于其所属根解析符号链接后的目录之内;越界时 sync 必须(SHALL)报错并以非零退出码结束。
 
-sync 必须(SHALL)在对 `$DSH_HOME` 做任何写入(含创建 profile 目录与 profile 骨架、迁移状态账本)之前,对所有启用的定制完成源码预检:local package 的 `package.json`、其每个 `compatDependencies[].path` 下的 `package.json`、preset 的 `agent.cordis.yml`、skill 的 `SKILL.md`、patch 的 `<id>.yml`、每个 `buildInputs` 文件必须存在且满足上述越界约束。预检失败时 sync 必须(SHALL)报错并以非零退出码结束,错误信息包含缺失或越界的绝对路径,且 `$DSH_HOME` 下的文件树不发生任何变化(不存在的 profile 目录仍不存在)。
+sync 必须(SHALL)在对 `$DSH_HOME` 做任何写入(含创建 profile 目录与 profile 骨架、迁移状态账本)之前,对所有启用的定制完成源码预检:local package 的 `package.json`、其每个 `compatDependencies[].path` 下的 `package.json`、preset 的 `agent.cordis.yml`、skill 的 `SKILL.md`、patch 的 `<id>.yml`、每个 `buildInputs` 条目必须存在、类型为普通文件或目录(见「local package 的构建输入可声明文件或目录」)且满足上述越界约束。预检失败时 sync 必须(SHALL)报错并以非零退出码结束,错误信息包含缺失或越界的绝对路径,且 `$DSH_HOME` 下的文件树不发生任何变化(不存在的 profile 目录仍不存在)。
 
 加载 manifest(含 overlay 合并、逐字段校验、保留字段与 npm spec 包名一致性检查)必须(SHALL)不读取任何定制源码。需要读取源码的步骤(local package 包名解析、npm 包名唯一性检查)必须(SHALL)在源码预检通过之后、`$DSH_HOME` 写入之前执行。禁用的 local package 若其 `package.json` 不存在,sync 不得(SHALL NOT)因此报错,该条目视为不在 manifest 中:若此前已部署,按「从 manifest 删除」的既有逻辑移除;若其 `package.json` 存在,sync 必须(SHALL)先确认该文件解析符号链接后位于所属根之内再读取,越界时在任何 `$DSH_HOME` 写入之前报错并以非零退出码结束。`hostRuntimeCompatibility` 的声明校验(归属、kind、版本与 `dshVersion` 一致)属于加载阶段且不读取源码;运行体构建器等源码文件的存在性检查属于常规 sync 的源码预检。`--reset` 只依据部署状态与 profile 现状移除受管部署,必须(SHALL)不执行源码预检、不解析 local 包名,定制源码缺失不得(SHALL NOT)阻止 reset。
 
@@ -654,3 +654,73 @@ sync、插件升级检查/自动升级、启动清单三个 manifest 消费脚�
 - **WHEN** 某 skill 依赖只有该组织才有的内部 CLI
 - **THEN** 该 skill、其 manifest 条目与规范都放在私有 overlay,公开仓库不留痕迹
 
+### Requirement: local package 的构建输入可声明文件或目录
+
+local package 的 `buildInputs` SHALL 是相对其所属根的路径列表，每个条目可以是普通文件或目录。sync SHALL 在源码预检时按条目的实际类型判定：条目不存在，或既不是普通文件也不是目录（例如 FIFO、socket）时，MUST 报错并以非零退出码结束，且 `$DSH_HOME` 不发生任何变化。条目路径解析符号链接后 MUST 位于所属根之内；overlay 条目的路径相对 overlay 根解析，公开条目相对公开仓库根解析。
+
+构建输入哈希 SHALL 在 local package 自身输入之后，按条目路径字符串字典序依次计入（条目的书写顺序不影响结果，重复条目各计一次）：
+
+- 文件条目：编码与本 requirement 引入前完全相同（`repo:<条目路径>\0` 后接文件内容），local package 自身输入的选择规则与编码也保持不变，使既有部署的哈希不因本 requirement 变化；
+- 目录条目：先计入 `repo-dir:<条目路径>\0`，再按所属根下相对路径字典序计入该目录下每个被收录普通文件的 `<相对路径>\0` 与内容。遍历 SHALL 复用现有 `collectFiles` 默认行为，仅跳过名称以 `.` 开头的条目与名为 `node_modules` 的条目，不添加目录输入专用排除规则；普通的嵌套 `lib`、`test` 文件 SHALL 计入。目录内部的符号链接（不论指向何处）SHALL 不跟随、不计入。
+
+消费者 SHALL 显式选择源码目录及所需配置文件作为输入范围；sync 不自动识别测试或产物。条目范围之外或默认跳过的内容只是不改变**该目录条目**的哈希贡献；它若同时经其他途径计入（local package 自身输入或其他条目），这些途径照常生效。构建产物新鲜度的独立判定（「构建产物必须可证明与当前源码同代」）不受本 requirement 影响。
+
+#### Scenario: 目录内被收录文件变化触发重建
+- **GIVEN** local package `a` 的构建脚本读取 `packages/lib-x/src/index.ts` 并写入自身产物，`buildInputs` 含目录 `packages/lib-x/src` 及实际使用的包/构建配置文件，已完成一次 sync
+- **WHEN** 修改 `packages/lib-x/src/index.ts` 后再次运行 sync
+- **THEN** `a` 被重新构建，部署副本中的产物反映新内容
+
+#### Scenario: 目录内新增、删除或改名文件改变哈希
+- **GIVEN** 同上
+- **WHEN** 分别新增 `packages/lib-x/src/extra.ts`、删除它、把 `src/index.ts` 改名为 `src/main.ts`
+- **THEN** 每一步后计算的构建输入哈希都与上一步不同
+
+#### Scenario: 范围外与默认跳过内容不改变目录条目的哈希贡献
+- **GIVEN** `a` 的 `buildInputs` 只列源码目录 `packages/lib-x/src`，且 `packages/lib-x` 不在 `a` 自身目录内；`a` 的产物存在且与成功构建记录一致，部署副本一致，其他输入与定制均未变化
+- **WHEN** 只修改范围外的 `packages/lib-x/test/x.test.ts`、`packages/lib-x/lib/index.js`，目录内默认跳过的 `src/.cache/x`、`src/node_modules/x.js`，并在可遍历的 `src/` 下新增指向根外文件的符号链接
+- **THEN** 构建输入哈希不变，再次运行 sync 输出无变化，`a` 不被重建
+
+#### Scenario: 嵌套 lib 与 test 源码被收录
+- **GIVEN** `buildInputs` 含 `packages/lib-x/src`，其下有普通文件 `lib/core.ts` 与 `test/helper.ts`
+- **WHEN** 分别修改这两个文件并计算构建输入哈希
+- **THEN** 每次修改均改变哈希，不因目录名为 lib 或 test 而忽略
+
+#### Scenario: 空目录条目的哈希稳定且不同于无条目
+- **GIVEN** `packages/empty` 是空目录
+- **WHEN** 分别计算 `buildInputs: [packages/empty]` 与不含该条目时的构建输入哈希，并重复计算前者
+- **THEN** 前者两次相等，且与后者不同
+
+#### Scenario: 条目书写顺序不影响哈希
+- **GIVEN** 文件条目 `f.txt` 与目录条目 `packages/lib-x`
+- **WHEN** 分别以 `[f.txt, packages/lib-x]` 与 `[packages/lib-x, f.txt]` 计算构建输入哈希
+- **THEN** 两者相等
+
+#### Scenario: 目录条目不存在时预检失败
+- **GIVEN** local package `a` 的 `buildInputs` 含 `packages/missing-dir`
+- **WHEN** 运行 sync
+- **THEN** sync 以非零退出码结束，错误信息包含该绝对路径，`$DSH_HOME` 文件树不变
+
+#### Scenario: 既非文件也非目录时预检失败
+- **GIVEN** `buildInputs` 含一个 FIFO
+- **WHEN** 运行 sync
+- **THEN** sync 以非零退出码结束，错误信息包含 "regular file or directory"，`$DSH_HOME` 文件树不变
+
+#### Scenario: 原有文件条目仍通过预检
+- **GIVEN** `buildInputs` 只含普通文件条目
+- **WHEN** 运行 sync
+- **THEN** 预检通过，行为与本 requirement 引入前相同
+
+#### Scenario: 目录条目越出所属根时拒绝运行
+- **GIVEN** `buildInputs` 含一个解析符号链接后位于所属根之外的目录
+- **WHEN** 运行 sync
+- **THEN** sync 报错并以非零退出码结束，不产生任何 profile 变更
+
+#### Scenario: overlay 目录条目按 overlay 根解析
+- **GIVEN** overlay 根与公开仓库根下都存在 `packages/lib-x`，内容不同；overlay 条目 `q` 的 `buildInputs` 含 `packages/lib-x`
+- **WHEN** 只修改公开仓库根下的 `packages/lib-x/src/index.ts`
+- **THEN** `q` 的构建输入哈希不变；修改 overlay 根下的同名文件则使其改变
+
+#### Scenario: 既有文件条目的哈希保持不变
+- **GIVEN** 测试中冻结了本 requirement 引入前的构建输入哈希算法，fixture 含多个文件条目、一个重复条目，以及一个同时属于 local package 自身输入的文件条目
+- **WHEN** 在同一 Node 进程中用冻结算法与新算法分别计算
+- **THEN** 两者相等
