@@ -1,7 +1,7 @@
 import { it, expect } from 'vitest'
 import { CollabHost } from '../src/host.js'
 import { FileStore } from 'collab-kernel'
-import { mkdtemp, realpath, rm, readdir, writeFile, readFile } from 'node:fs/promises'
+import { mkdtemp, realpath, rm, readdir, writeFile, readFile, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, dirname, basename } from 'node:path'
 
@@ -39,6 +39,24 @@ it('host-claim-close: pending admitted claim is fenced without waiting for exter
     expect((await observed).code).toBeDefined()
     expect(await readdir(join(root, 'data'))).toEqual([])
   } finally { await host.close() }
+}))
+
+it('host-lock-only: orphan lock without log is not enumerated or taken over by create', () => fixture(async root => {
+  const dataDir = join(root, 'data')
+  const seed = await CollabHost.create({ dataDir }, [], [provider])
+  await seed.close()
+  const lockPath = join(dataDir, 'orphan.lock'), lockBytes = JSON.stringify({ instanceId: 'foreign', pid: process.pid })
+  await writeFile(lockPath, lockBytes)
+  const host = await CollabHost.create({ dataDir }, [], [provider])
+  try {
+    expect(host.tracked.has('orphan')).toBe(false)
+    await expect(host.command('a', 'orphan', 'create', service => service.createSpace(host.context('a', 'orphan', 'create'), { name: 'a', address: 'a', kind: 'agent' }))).rejects.toMatchObject({ code: 'COLLAB_STORE_LOCKED' })
+    expect(await readFile(lockPath, 'utf8')).toBe(lockBytes)
+    await expect(readFile(join(dataDir, 'orphan.jsonl'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await host.command('a', 'healthy', 'create', service => service.createSpace(host.context('a', 'healthy', 'create'), { name: 'a', address: 'a', kind: 'agent' }))
+    expect((await stat(join(dataDir, 'healthy.lock'))).mode & 0o777).toBe(0o600)
+  } finally { await host.close() }
+  expect(await readFile(lockPath, 'utf8')).toBe(lockBytes)
 }))
 
 it('host-isolation: corrupt and locked spaces retain diagnostics without blocking healthy state', () => fixture(async root => {

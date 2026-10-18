@@ -57,8 +57,20 @@ describe('exact session trust and delivery', () => {
     const f = fixture()
     f.headers.set('derived', header('derived', { origin: 'subagent' }))
     f.headers.set('outside', header('outside'))
+    let forbiddenReads = 0, headerReads = 0
+    const forbidden = () => { forbiddenReads++; throw new Error('content API is forbidden') }
+    f.ctx.sessionController.inspect = forbidden
+    f.ctx.sessionQuery.observeSession = forbidden
+    f.ctx.sessions.readTitleSnapshots = forbidden
+    f.ctx.sessionQuery.listSessions = async () => {
+      headerReads++
+      return [...f.headers.values()].map(header => ({ header, get events() { return forbidden() }, get messages() { return forbidden() }, get title() { return forbidden() } }))
+    }
     const list = await f.access.discover()
     expect(list.map(x => x.id)).toEqual(['a', 'b'])
+    expect(list).toEqual([{ id: 'a', cwd: '/work/a' }, { id: 'b', cwd: '/work/b' }])
+    expect(headerReads).toBeGreaterThan(0)
+    expect(forbiddenReads).toBe(0)
     expect(f.calls).toEqual([])
     expect(await f.provider.claim('b', 'agent')).not.toBeNull()
     for (const [id, kind] of [['b', 'human'], ['missing', 'agent'], ['derived', 'agent'], ['outside', 'agent'], ['b-prefix', 'agent']]) expect(await f.provider.claim(id, kind as any)).toBeNull()
@@ -141,9 +153,24 @@ describe('exact session trust and delivery', () => {
     release({ agent: f.agent('b') })
     await expect(pending).rejects.toMatchObject({ code: 'COLLAB_SERVICE_CLOSING' })
     expect(f.calls.some(x => x[0] === 'followup')).toBe(false)
+    const archived = fixture()
+    let resume!: (value: any) => void, entered!: () => void
+    const resolving = new Promise<void>(resolve => { entered = resolve })
+    archived.resolver(() => { entered(); return new Promise(resolve => { resume = resolve }) })
+    const old = archived.provider.deliver(archived.member, archived.pointer)
+    await resolving
+    archived.archived.push('b')
+    resume({ agent: archived.agent('b') })
+    await expect(old).rejects.toMatchObject({ code: 'COLLAB_SESSION_UNAVAILABLE' })
+    expect(archived.calls.some(x => x[0] === 'followup')).toBe(false)
     const g = fixture()
     g.resolver(async () => ({ agent: g.agent('wrong') }))
     await expect(g.provider.deliver(g.member, g.pointer)).rejects.toMatchObject({ code: 'COLLAB_SESSION_UNAVAILABLE' })
+    const wrongSession = fixture()
+    const mismatched = wrongSession.agent('b'); mismatched.session.id = 'different'
+    wrongSession.resolver(async () => ({ agent: mismatched }))
+    await expect(wrongSession.provider.deliver(wrongSession.member, wrongSession.pointer)).rejects.toMatchObject({ code: 'COLLAB_SESSION_UNAVAILABLE' })
+    expect(wrongSession.calls.some(x => x[0] === 'followup')).toBe(false)
     g.headers.delete('b')
     await expect(g.provider.deliver(g.member, g.pointer)).rejects.toMatchObject({ code: 'COLLAB_SESSION_UNAVAILABLE' })
     expect(g.calls.some(x => x[0] === 'followup')).toBe(false)

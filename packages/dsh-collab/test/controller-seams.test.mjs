@@ -182,8 +182,34 @@ test('controller-worktree: real recovery and guard hook is restored at cold Agen
   try {
     await presets(reader)
     assert.equal(reader.agents.get(id), undefined)
-    const { agent, error } = await reader.sessionController.resolveAgent(id)
-    assert.ok(agent, JSON.stringify(error))
+    const senderId = SessionId('worktree-sender')
+    const senderCwd = join(root, 'sender')
+    await mkdir(senderCwd)
+    await reader.sessionController.create({ sessionId: senderId, cwd: senderCwd, agentPreset: 'P1' })
+    const sender = (await reader.sessionController.resolveAgent(senderId)).agent
+    assert.ok(sender)
+    const consumer = await consumerPlugin(root)
+    const fiber = reader.plugin(consumer, { dataDir: join(home, 'worktree-ledger'), allowedSessionIds: [id, senderId] })
+    await fiber.inertia; assert.equal(fiber.state, 2)
+    const collaborate = async (name, args) => {
+      const result = await reader.tools.execute({ callId: name, name, arguments: args, agent: sender, signal: AbortSignal.timeout(5000) })
+      assert.ok(!result.isError && !result.value.error, JSON.stringify(result)); return result.value
+    }
+    await collaborate('collab_create_space', { spaceId: 'guard', cmdId: 'create', name: 'a' })
+    let deadline, off
+    const delivered = new Promise((resolve, reject) => {
+      deadline = setTimeout(() => { off(); reject(new Error('worktree consumer pointer missing')) }, 5000)
+      off = reader.on('session/event', (session, event) => {
+        if (session.id === id && event.type === 'user/message' && event.data.source.kind === 'plugin:dsh-collab') { clearTimeout(deadline); off(); resolve() }
+      })
+    })
+    try {
+      await collaborate('collab_invite', { spaceId: 'guard', cmdId: 'invite', name: 'b', recipientSessionId: id })
+      await delivered
+    } finally { clearTimeout(deadline); off?.() }
+    const agent = reader.agents.get(id)
+    assert.ok(agent)
+    await agent.whenIdle()
     assert.ok(observed.some(e => e.id === id && e.source === 'resume'))
     const call = (agent, name, args) => reader.tools.execute({ callId: `guard-${name}`, name, arguments: args, agent, signal: AbortSignal.timeout(5000) })
     const inside = await call(agent, 'read', { file_path: join(wt, 'proof.txt') })
@@ -247,7 +273,10 @@ test('consumer-integration: actual bundled tools share ledger across sessions an
     assert.deepEqual(invalidState.deliveries, {})
     const invited = await call(a, 'collab_invite', { spaceId: 'shared', cmdId: 'invite', name: 'b', recipientSessionId: ids[1] })
     assert.equal(invited.seq, 2)
-    assert.equal((await call(b, 'collab_overview', { spaceId: 'shared' })).error.code, 'COLLAB_MEMBER_INACTIVE')
+    for (const [name, extra] of [['collab_overview', {}], ['collab_read_since', { sinceSeq: 0 }], ['collab_project', {}], ['collab_read_convention', { version: '1' }]]) {
+      assert.equal((await call(b, name, { spaceId: 'shared', ...extra })).error.code, 'COLLAB_MEMBER_INACTIVE')
+    }
+    assert.equal((await call(b, 'collab_close_space', { spaceId: 'shared', cmdId: 'invited-close' })).error.code, 'COLLAB_MEMBER_INACTIVE')
     await call(b, 'collab_join', { spaceId: 'shared', cmdId: 'join' })
     const created = await call(a, 'collab_create_item', { spaceId: 'shared', cmdId: 'item', itemId: 'item', kind: 'other', title: 'Title', body: 'Body', requiredAcks: ['b'], deciders: [] })
     assert.equal(created.itemId, 'item')
@@ -255,6 +284,8 @@ test('consumer-integration: actual bundled tools share ledger across sessions an
     const conflict = await call(a, 'collab_revise_item', { spaceId: 'shared', cmdId: 'stale', itemId: 'item', expectedRevision: 99, changes: { title: 'must not change' } })
     assert.equal(conflict.error.code, 'COLLAB_STALE_REVISION')
     assert.equal(conflict.error.details.currentRevision, 1)
+    assert.equal((await call(b, 'collab_close_space', { spaceId: 'shared', cmdId: 'member-close' })).error.code, 'COLLAB_FORBIDDEN')
+    assert.equal((await call(a, 'collab_create_space', { spaceId: 'shared', cmdId: 'create', name: 'changed' })).error.code, 'COLLAB_CMD_CONFLICT')
     const state = await call(b, 'collab_overview', { spaceId: 'shared' })
     assert.equal(state.members.a.binding.address, ids[0])
     assert.equal(state.members.b.binding.address, ids[1])
@@ -382,7 +413,36 @@ test('consumer-cold-delivery: official provider resolve mounts P2 and sends exac
     const allowed = await reader.tools.execute({ callId: 'consumer-cold-read', name: 'read', arguments: { file_path: protectedFile }, agent: target, signal: AbortSignal.timeout(5000) })
     assert.equal(allowed.isError, false)
     assert.ok(JSON.stringify(allowed).includes('unchanged'))
-    assert.ok(events.filter(e => e.type === 'turn/end').every(e => e.data.reason.kind === 'completed'))
+    const shell = (callId, command) => reader.tools.execute({ callId, name: 'bash', arguments: { command, workdir: cwd, description: 'Verify consumer cold sandbox policy' }, agent: target, signal: AbortSignal.timeout(5000) })
+    const shellWrite = await shell('consumer-shell-write', 'printf forbidden > consumer-protected.txt')
+    assert.equal(shellWrite.isError, false)
+    assert.equal(shellWrite.value.sandbox.mode, 'read-only')
+    assert.equal(shellWrite.value.sandbox.denied, true)
+    assert.equal(shellWrite.value.sandbox.enforcement, 'full')
+    assert.equal(shellWrite.value.sandbox.runnerFailed, undefined)
+    assert.notEqual(shellWrite.value.exitCode, 0)
+    assert.equal(await readFile(protectedFile, 'utf8'), 'unchanged')
+    const shellRead = await shell('consumer-shell-read', 'pwd')
+    assert.equal(shellRead.value.exitCode, 0)
+    assert.equal(shellRead.value.stdout.text.trim(), cwd)
+    let answererCalls = 0
+    const outcomes = []
+    reader.on('approval/request', async () => { answererCalls++; return 'allowed-once' })
+    reader.tools.register(defineTool({
+      name: 'consumer_approval_probe', description: 'Verify persisted never after consumer restore', parameters: {},
+      output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+      async execute(_args, exec) {
+        const outcome = await reader.approval.request({ agent: exec.agent, toolName: 'consumer_approval_probe', callId: exec.callId, signal: exec.signal })
+        outcomes.push(outcome); return outcome
+      },
+    }))
+    reader.componentAdapter.nextTool = 'consumer_approval_probe'
+    target.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'verify unchanged approval' }] }))
+    await target.whenIdle()
+    assert.deepEqual(outcomes, ['rejected'])
+    assert.equal(answererCalls, 0)
+    assert.equal(target.session.snapshotEvents().filter(e => e.type === 'approval/decided' && e.data.outcome === 'rejected').length, 1)
+    assert.ok(target.session.snapshotEvents().filter(e => e.type === 'turn/end').every(e => e.data.reason.kind === 'completed'))
   } finally { await reader.fiber.dispose() }
 })
 

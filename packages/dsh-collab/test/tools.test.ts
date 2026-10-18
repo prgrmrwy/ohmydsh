@@ -13,6 +13,18 @@ it('tool-contract: exactly twenty named tools, unknown identity fields rejected 
   for (const extra of [{ actor: 'fake' }, { principal: {} }, { sessionId: 'fake' }, { providerId: 'fake' }, { unexpected: true }]) {
     await expect(create.execute({ spaceId: 's', cmdId: 'c', name: 'A', ...extra }, {})).rejects.toBeDefined()
   }
+  const values: Record<string, unknown> = { spaceId: 's', cmdId: 'c', name: 'A', recipientSessionId: 'b', member: 'b', itemId: 'i', kind: 'other', title: 'T', body: 'B', requiredAcks: [], deciders: [], assignee: 'b', expectedRevision: 1, changes: { title: 'T' }, revision: 1, to: 'b', needsReply: false, text: 'working', progress: 'open', options: ['yes', 'no'], sinceSeq: 0, version: '1' }
+  for (const tool of tools) {
+    expect(Object.keys(tool.parameters.properties).filter(key => ['actor', 'principal', 'providerId', 'sessionId'].includes(key))).toEqual([])
+    const valid = Object.fromEntries(Object.keys(tool.parameters.properties).map(key => [key, values[key]]))
+    for (const field of ['actor', 'principal', 'providerId', 'sessionId']) {
+      await expect(tool.execute({ ...valid, [field]: 'forged' }, {})).rejects.toMatchObject({ code: 'COLLAB_BAD_ARGUMENTS' })
+    }
+  }
+  for (const cmdId of ['', '   ']) {
+    await expect(create.execute({ spaceId: 's', cmdId, name: 'A' }, {})).rejects.toMatchObject({ code: 'COLLAB_BAD_CMD_ID' })
+  }
+  await expect(create.execute({ spaceId: 's', name: 'A' }, {})).rejects.toMatchObject({ code: 'INVALID_ARGS' })
   expect(calls).toBe(0)
 })
 it('tool-mapping: every named adapter invokes its exact method with actual caller principal', async () => {

@@ -126,3 +126,13 @@ sync-artifact用仓库复制installer fixture，但真实consumer+kernel源/tsdo
 focused复核47727确认上述3项已修复、无有证据剩余Important，检查stop/started/closingHost依赖无环；是静态复核，测试由Lead执行。另新consumer CAS测试最初误猜错误码REVISION_CONFLICT，实际既有kernel/convention为STALE_REVISION，纠正预期并确认currentRevision保留，不改产品码。测试typecheck扩到tsconfig.test，极窄Agent unit double在夹具工厂显式any，真实完整Agent另由controller覆盖。
 
 最新31单元+2产物/sync、基础4+Controller12均通过；Controller新增真实坏header物理日志，consumer发现不泄露、invite拒绝不冷恢复、原坏字节不动；模型actor/cwd/preset/父关系断言通过。host-late-delivery晚回调无completion、冷presence未知、无caller body读写拒绝、startup/commit race回归齐。官方consumer normal10ms/budget5004ms/kill3ms及各自官方重启；direct profile额外通过。根最终445=443pass/2既有MCP skip，artifact/strict/diffcheck通过；sync禁用物理部署移除而持久台账保留通过（后补独立复跑）。最终流程TDD历史仍不修饰，剩任务未勾部分含先写测试顺序要求，不以绿色追认。
+
+## goal round 3：最终矩阵与流程事实核验
+
+确认c5b8ad66已提交且协作实现无遗留未提交，官方apply为14/22。只读验收audit697d核对任务/30主场景/现有日志，确认log82部分真实RED不能抹掉，但later cases完整逐项先写顺序未证明；3.1/3.3/4.1/4.3/5.1/6.1不能因当前green追认。audit一度口算33场景，随后以只读实际计数纠正为30主场景/32展开叶项，未把初判写入账本。
+
+本轮只增tests/总结，不动生产代码：consumer cold实际Bash读写控制/never audit；worktree由consumer invite而非直接resolve触发恢复；4读join前全部拒绝、leader授权及同cmd不同payload错误；仅lock无log create拒绝且不动外锁、健康lock0600；blocked resolve期间archive/返回session.id错均零followup；header列表内容属性及inspect/observe/readTitleSnapshots禁止spy；维护完整unsafe PID/sameID字节变化/单probe单breakLock且不open；20工具保留字段与空白cmdId检查。首次缺cmdId预期COLLAB_BAD_CMD_ID实际由DSH required先INVALID_ARGS，只修预期，是oracle错误非产品RED。全部是现有行为回归而非重造历史RED。最后逐schema穷举首次误把defineTool返回的JSON Schema根键当参数键，导致缺required参数INVALID_ARGS；改为parameters.properties生成合法baseline，再逐一加伪造字段精确断言COLLAB_BAD_ARGUMENTS通过，亦为fixture错误非产品RED。
+
+最新consumer32单元+2产物/sync、typecheck、basic4+Controller12全通过；官方normal11ms/budget5015ms/kill3ms，各项重启及direct正常门通过；kernel38文件205tests/typecheck通过。目录六suite48通过；根445=443pass/2既有MCP skip/0fail，artifact/diffcheck通过。新verification记录完整范围、真实IO/组件/probe/direct边界、未做日常树快照而是隔离构造、历史TDD非accepted。当前executor已逐行review整个增量tests，未添加依赖或生产能力。3.4与6.4按自身执行/总结要求完成，现16/22，余6项保持未完成待人决定历史流程门处置，不能自行免除。
+
+用户已授权提交，完成本轮治理/strict后将定向提交测试与验证记录；不涉及规范同步、日常部署、合并、归档或worktree清理。

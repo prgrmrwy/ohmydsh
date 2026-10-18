@@ -1,4 +1,4 @@
-<!-- 当前状态以本文件勾选与test-plan证据分层为准；历史RED/流程偏差保留在implementation-log，不因实现补齐追认。2026-10-18同步：14/22完成；其余包括部分已实现但未完整验收的任务。 -->
+<!-- 当前状态以本文件勾选与test-plan证据分层为准；历史RED/流程偏差保留在implementation-log，不因实现补齐追认。2026-10-18同步：16/22完成；余下3.1/3.3/4.1/4.3/5.1/6.1保留完整测试先行历史未证明的流程门，不因当前行为green追认。详见verification。 -->
 
 ## 1. 独立评审与接缝先验
 
@@ -17,7 +17,7 @@
 - [ ] 3.1 先写dataDir绝对/非workspace/非部署路径、空或重复名单、名单外caller/recipient、保留参数注入、subagent/header不确定的失败用例，确认真实RED
 - [x] 3.2 实现显式配置与exec.agent身份适配、精确名单内元数据发现/claim、archive/unknown分类，既有普通fork不被parentSession误拒；拒绝human和派生受管地址
 - [ ] 3.3 先写未恢复/晚恢复/ID不一致/归档竞态、内容泄露、下一回合和不等待whenIdle断言，再实现provider.resolveAgent+generation重验+固定来源pointer followup；重复投递/flush处理不新增隐含保证
-- [ ] 3.4 执行session-01..04、identity-01..03、wake-01..03、cold-01..04；补充缺记录/损坏枚举返回unknown与deliver再次拒绝的矩阵，记录来源/请求头/turn的真实oracle
+- [x] 3.4 执行session-01..04、identity-01..03、wake-01..03、cold-01..04；补充缺记录/损坏枚举返回unknown与deliver再次拒绝的矩阵，记录来源/请求头/turn的真实oracle
 
 ## 4. 具名工具与共享生命周期
 
@@ -38,4 +38,4 @@
 - [ ] 6.1 逐行核验test-plan全部30场景与额外矩阵，用真实测试标识更新账本；只在真实行为RED/GREEN后完成任务，不追认import故障为RED
 - [x] 6.2 执行plugin全套test/typecheck/build、kernel回归、目录输入相关suite、根npm test/check:artifacts/diffcheck；报告每个skip/环境失败，不降低旧Anvil门禁
 - [x] 6.3 执行隔离真实Host全部门槛、源码变化→部署copy字节/Markdown变化→第二次幂等；日常profile文件树不变；独立完整代码评审并修复阻断
-- [ ] 6.4 官方openspec严格校验、按最终事实写验证总结。规范同步和任何日常部署、提交、合入、归档/清理仍待用户明确授权；不以本规划自动启动apply
+- [x] 6.4 官方openspec严格校验、按最终事实写验证总结。规范同步和任何日常部署、提交、合入、归档/清理仍待用户明确授权；不以本规划自动启动apply

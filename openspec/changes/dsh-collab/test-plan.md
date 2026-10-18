@@ -1,6 +1,6 @@
 # Test Plan — dsh-collab
 
-已进入实施。2026-10-18重新核验：consumer单元31/31、独立产物/隔离sync2/2（含npm pack与CLI）、基础组件4/4、真实Controller及consumer12/12通过，typecheck/build/diffcheck通过；无skip。首次复跑暴露上一轮最后新增断言把业务code误当Error.message，改为匹配code后通过，不把该夹具错误记为产品RED。下表保留原场景ID，并列真实测试标识与证据层级；“部分”不等于完成。官方CLI/kernel关闭门已通过；consumer经真实官方CLI关闭/重启门三项亦通过（normal10ms/budget5005ms/kill3ms）。三种关闭门是官方root持有probe并await真实consumer teardown；另official-composition独立验证真实官方profile sibling rows直接装配和两进程正常重启收据，不能把direct正常门扩大为direct预算/kill；pack/sync副本门已通过（sync installer用仓库复制fixture、构建/import真实）。TDD历史偏差继续保留，现有绿色不能追认先前测试顺序。
+已进入实施。2026-10-18重新核验：consumer单元32/32、独立产物/隔离sync2/2（含npm pack与CLI）、基础组件4/4、真实Controller及consumer12/12通过，typecheck/build/diffcheck通过；无skip。首次复跑暴露上一轮最后新增断言把业务code误当Error.message，改为匹配code后通过，不把该夹具错误记为产品RED。下表保留原场景ID，并列真实测试标识与证据层级；“部分”不等于完成。官方CLI/kernel关闭门已通过；consumer经真实官方CLI关闭/重启门三项亦通过（normal10ms/budget5005ms/kill3ms）。三种关闭门是官方root持有probe并await真实consumer teardown；另official-composition独立验证真实官方profile sibling rows直接装配和两进程正常重启收据，不能把direct正常门扩大为direct预算/kill；pack/sync副本门已通过（sync installer用仓库复制fixture、构建/import真实）。TDD历史偏差继续保留，现有绿色不能追认先前测试顺序。
 
 ## 30场景一一映射
 
@@ -21,22 +21,22 @@
 | wake-01 | busy下一回合 | controller-seams.test.mjs / consumer-busy | 真实consumer通过：当前request无指针、下一request一次、两turn完成 |
 | wake-02 | idle来源/白名单 | controller-seams.test.mjs / consumer-cold-delivery；session-provider.test.ts / session-delivery | 集成来源及精确指针、单元秘密正文负例通过 |
 | wake-03 | invited不授读取 | controller-seams.test.mjs / consumer-integration | 真实工具join前MEMBER_INACTIVE通过 |
-| cold-01 | 当前preset与权限 | controller-seams.test.mjs / controller-cold、controller-worktree、consumer-cold-delivery | consumer P2 request/header及真实read-only write拒绝/read允许通过；完整Bash/never audit/worktree guard由同图controller-cold/worktree组件行为覆盖，不声称完整worktree HTTP装配 |
-| cold-02 | presence不激活 | session-provider.test.ts / session-discovery | session-cold-presence精确已有cold header仍unknown且零resolve通过；consumer冷发现同样不激活 |
-| cold-03 | 枚举缺失非删除 | session-provider.test.ts / session-discovery、session-late | 单元缺失/throw/null header/错ID均unknown、不claim/restore/followup；consumer-corrupt-cold真实物理坏header枚举不泄露、不invite、不恢复且字节不动通过 |
+| cold-01 | 当前preset与权限 | controller-seams.test.mjs / controller-cold、controller-worktree、consumer-cold-delivery | consumer invite触发P2恢复后文件/Bash read-only写拒绝与读允许、never rejected audit通过；controller-worktree现也由consumer invite触发恢复并验证原guard跨根拒绝，不声称完整HTTP装配 |
+| cold-02 | presence不激活 | session-provider.test.ts / session-cold-presence | session-cold-presence精确已有cold header仍unknown且零resolve通过；consumer冷发现同样不激活 |
+| cold-03 | 枚举缺失非删除 | session-provider.test.ts / session-unknown；controller-seams.test.mjs / consumer-corrupt-cold | 单元缺失/throw/null header/错ID均unknown、不claim/restore/followup；consumer-corrupt-cold真实物理坏header枚举不泄露、不invite、不恢复且字节不动通过 |
 | cold-04 | close后晚恢复不发 | session-provider.test.ts / session-late | session-late零followup、host-late-delivery关闭后晚provider结果不追加completion的真实kernel/FileStore回归通过 |
 | lifecycle-01 | 跨workspace重启 | controller-seams.test.mjs / consumer-integration；host.test.ts / host-replay、host-pending-replay | 跨workspace/重启收据及身份稳定、pending保留不重发通过 |
 | lifecycle-02 | 待claim关闭 | host.test.ts / host-claim-close | 真实kernel/FileStore通过：dispose不等claim，晚返回无日志/锁 |
 | lifecycle-03 | 存储失败不假成功 | host.test.ts / host-fsync-failure、host-fsync-drain | 真实append handle sync失败不报成功/保持failed，重开同cmd按收据，close等在途commit通过 |
 | lock-01 | 强退残锁恢复 | released-host-seams.mjs --consumer | 官方SIGKILL残锁/默认LOCKED，部署consumer recoverLock ESRCH exact恢复，再官方重启业务收据/字节不变通过 |
 | lock-02 | live/unknown拒恢复 | maintenance.test.ts / maintenance-01 | 单元通过live/EPERM/unknown/坏JSON/错ID/非正PID/停机确认；packed CLI已过live拒绝/死亡exact恢复且日志保留；changed-during-probe替换锁字节拒绝回归通过 |
-| lock-03 | 锁冲突空间隔离 | host.test.ts / host-isolation | 真实FileStore通过：locked/corrupt原诊断、healthy可用 |
+| lock-03 | 锁冲突空间隔离 | host.test.ts / host-isolation、host-lock-only | 真实FileStore通过：locked/corrupt诊断、healthy可用；仅lock无log创建冲突不动外锁、健康新锁0600 |
 | human-gap-01 | agent-only NO_DECIDER | controller-seams.test.mjs / consumer-integration | 真实工具拒绝、业务日志不增、无请求/决定/虚拟human通过（completion异步记录不属于该命令） |
 | human-gap-02 | 历史human awaitingChannel | host.test.ts / host-human-history | 真实FileStore合法历史human无confirm provider，保持open/awaitingChannel，无dispatch/decided通过 |
 | build-01 | 当前源码进入产物 | build-artifact.test.mjs / bundle-source；sync-artifact.test.mjs / consumer-sync | 坏旧lib+改src、npm pack权限隔离import、sync源码/Markdown更新部署字节且二次无操作通过 |
 | build-02 | 漏Markdown必失败 | build-artifact.test.mjs / bundle-source | 独立产物加载负例通过，错误明确v1.md |
 | acceptance-01 | 完整隔离Host | controller-seams.test.mjs；released-host-seams.mjs --consumer | 分层闭环、官方normal/budget/kill与每项业务重启；official-composition直接profile装配/正常关闭重启通过 |
-| acceptance-02 | 未运行不冒充 | 本账本 / 发行Host子表 | 已明确保留未验证；最终交付门未关闭 |
+| acceptance-02 | 未运行不冒充 | 本账本 / 发行Host子表 / verification | 已完成事实核对；仅当前行为通过，完整测试先行历史未证明的6任务仍未完成，非accepted deviation |
 | acceptance-03 | 移除保留日志 | controller-seams.test.mjs / consumer-integration | dispose工具撤销/日志字节/重启通过；sync-artifact禁用后部署JS消失、独立持久台账保留通过 |
 
 ## 判据与夹具
@@ -70,7 +70,7 @@
 3. 快速completion的断言定位command返回seq，不把日志最后一行当命令；慢恢复不设超时且不持有服务关闭队列。
 4. 消息成功只指入队接受：记录followup返回void/不等待whenIdle/不自动重发；不声称flush或处理完成。可以故障注入flush/crash证明风险说明，而非新增durability承诺。
 5. realhost依赖缺失须未验证而非skip后全绿。测试应给expected/observed、版本、turn/seq与工具集合摘要；只用mock不满足此门。
-6. 当前执行证据：basic runner的component-identity/component-idle/component-busy/component-persistence共4项通过；用户随后授权仅补具体组件，隔离精确依赖后`node packages/dsh-collab/test/run-components.mjs --controller`的controller-assembly/controller-cold/controller-worktree共3项通过。共7tests，0fail/skip/cancelled/todo，npm ls --all exit0；冷恢复实际P2工具/相对cwd/read-only文件及Bash拒绝和允许控制/never审批audit、worktree恢复guard组件hook已验证。独立只读复核90fd590b PASS，测试由Lead执行非独立复跑。task1.2组件门完成，但不等于30个consumer主场景实现（表仍未实现）或完整worktree插件编排；task1.3官方CLI/kernel三种关闭门随后经授权独立运行体验证通过（normal4ms/budget5011ms/kill2ms）；consumer最终集成仍未验证。基础配方及复跑说明已随bbf89108提交，新Host配方/测试待后续提交。以上为当时接缝阶段历史结果；2026-10-18当前consumer证据以上表及实施日志最新同步为准，Controller suite已扩展到10项，不再把全部30场景笼统写成未实现。
+6. 当前执行证据：basic runner的component-identity/component-idle/component-busy/component-persistence共4项通过；用户随后授权仅补具体组件，隔离精确依赖后`node packages/dsh-collab/test/run-components.mjs --controller`的controller-assembly/controller-cold/controller-worktree共3项通过。共7tests，0fail/skip/cancelled/todo，npm ls --all exit0；冷恢复实际P2工具/相对cwd/read-only文件及Bash拒绝和允许控制/never审批audit、worktree恢复guard组件hook已验证。独立只读复核90fd590b PASS，测试由Lead执行非独立复跑。task1.2组件门完成，但不等于30个consumer主场景实现（表仍未实现）或完整worktree插件编排；task1.3官方CLI/kernel三种关闭门随后经授权独立运行体验证通过（normal4ms/budget5011ms/kill2ms）；consumer最终集成仍未验证。基础配方及复跑说明已随bbf89108提交，新Host配方/测试待后续提交。以上为当时接缝阶段历史结果；2026-10-18当前consumer证据以上表及实施日志最新同步为准，Controller suite已扩展到12项，不再把全部30场景笼统写成未实现。
 
 ## 计划验证命令
 
