@@ -1,9 +1,7 @@
 ## Purpose
 
 子会话按请求意图分流：信息交换当场答复，要求干活则把已查清的结论登记为待办移交所有者，避免只读权限下的改动请求无痕消失。配套一条不唤醒主会话的只读查阅路径（读写分离，缓解父会话争用），以及一本按主会话归属的共享事实台账——主会话与其 locus 之间显式登记的结构化结论，本期唯一条目类型是待办。
-
 ## Requirements
-
 ### Requirement: 子会话判定请求意图并据此选择结局
 
 子会话 SHALL 对每条 current Delivery 判定其属于**信息交换**（同步、问询、解释、定位）、**要求干活**（修改代码、修复缺陷）、**仅提示关联**（本 bot 只是被抄送、举例或告知另一方联系人，且没有要求本 bot 行动）还是**确实歧义**，并据此选择当场答复、登记待办、静默结算或澄清。判定 SHALL 由子会话结合请求文本与 Host 提供的结构化 addressing 事实做出；Host MUST NOT 对消息内容做分类，也 MUST NOT 依据关键词、其它 bot mention 或固定句式自动改写判定结果。
@@ -174,7 +172,7 @@
 
 管理面 SHALL 使每个动作自述其真实效果：受理 SHALL 自述它会投递跟进任务、开始处理并转到执行目标会话；完成与放弃 SHALL 自述它们只改变记录且为终态。MUST NOT 把会产生投递的动作描述为纯标记。
 
-每条待办 SHALL 提供两个由已固定标识派生的跳转：**跳飞书**按 `endpoint` 与触发 `messageId` 定位原始消息；话题待办指向该话题，无法证明话题身份时 SHALL 退化为所属群并如实说明，MUST NOT 伪造话题目标。**跳会话**按 `locusId` 解析当前代子会话。
+每条待办 SHALL 提供两个由已固定标识派生的跳转：**跳飞书**按 `endpoint` 与触发 `messageId` 定位原始消息；话题待办指向该话题，无法证明话题身份时 SHALL 退化为所属群并如实说明，MUST NOT 伪造话题目标。**跳飞书**的上述定位规则只适用于 IM 入口（`endpoint.chatId` 不以 `doc:` 开头）。来源为文档入口的待办，**跳飞书** SHALL 打开 Host 以 bot 身份 `drive +inspect` 得到的文档 URL。评论级待办 SHALL 在链接旁注明所属评论 id，MUST NOT 被当作话题处理，也 MUST NOT 伪造评论锚点。文档 URL 无法取得时，MUST NOT 提供可用跳转，SHALL 就地说明原因。**跳会话**按 `locusId` 解析当前代子会话。
 
 管理面 SHALL 沿用既有 fail-closed 规则：目标已归档、已失效或不可达时 MUST NOT 提供可用跳转，SHALL 就地说明原因，MUST NOT 产生一次静默导航。待办所属 locus 已退役 MUST NOT 使该行从列表消失，其飞书跳转在平台资源仍存在时 SHALL 保持可用。
 
@@ -223,6 +221,16 @@
 #### Scenario: 退役 locus 的待办仍在列表中
 - **WHEN** 某待办所属 locus 已退役
 - **THEN** 该待办仍呈现在列表中并可被处置，其状态如实标明来源已退役
+
+#### Scenario: 文档评论待办跳到文档
+- **GIVEN** 待办登记于评论级入口 `(doc:docx:D, c2)`，`drive +inspect` 返回 `url=https://www.feishu.cn/docx/D`
+- **WHEN** 管理面渲染该待办的“跳飞书”
+- **THEN** 链接为 `https://www.feishu.cn/docx/D`，旁注评论 id `c2`；链接中不含 IM 消息或话题参数，跳转类别不是话题
+
+#### Scenario: 文档 URL 不可得
+- **GIVEN** 待办来源为文档入口，`drive +inspect` 调用失败
+- **WHEN** 管理面渲染该待办
+- **THEN** 不提供可用的“跳飞书”，就地说明原因；“跳会话”不受影响
 
 ### Requirement: 受理即开工并向主会话投递带上下文的跟进任务
 
