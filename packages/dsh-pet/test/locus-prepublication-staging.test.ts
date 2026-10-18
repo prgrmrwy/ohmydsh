@@ -170,6 +170,13 @@ describe('locus child pre-publication staging', () => {
     expect(staging.inspect(reservation.childSessionId)?.state).toBe('claimed')
   })
 
+  it('carries the endpoint into the fresh composition, so a doc child is recognisable before its locus row exists', () => {
+    const staging = registry()
+    const reservation = staging.reserve({ ...identity(), endpoint: { chatId: 'doc:docx:Dx1', threadId: '77' } })
+
+    expect(reservation.composition.endpoint).toEqual({ chatId: 'doc:docx:Dx1', threadId: '77' })
+  })
+
   it.each([
     { tier: 'safe' as const, expectedTools: LOCUS_SAFE_TOOL_NAMES },
     { tier: 'shell' as const, expectedTools: [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_SHELL_TIER_TOOL_NAMES] },

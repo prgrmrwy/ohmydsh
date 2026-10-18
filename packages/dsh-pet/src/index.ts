@@ -1261,7 +1261,10 @@ async function initialize(
           // gets the doc read and never the group-history read, and an IM child
           // never sees the doc read. Each is published only when the runtime
           // really has the port, so a tool that can never succeed never appears.
-          ...(isDocEndpoint(locusRepository.getLocus(composition.locusId)?.endpoint ?? { chatId: '' })
+          // A fresh child is composed before its locus row exists, so the
+          // endpoint comes from the composition first (production E2E,
+          // 2026-10-18: the first doc child got the IM tool without this).
+          ...(isDocEndpoint(composition.endpoint ?? locusRepository.getLocus(composition.locusId)?.endpoint ?? { chatId: '' })
             ? (larkClient.queryDocComment === undefined || larkClient.fetchDocMarkdown === undefined ? {} : {
               locusDocContext: {
                 loci: intentTriageDeps.loci,
@@ -1954,6 +1957,7 @@ async function initialize(
         locusId: string
         generation: number
         label: string
+        endpoint: { readonly chatId: string; readonly threadId?: string }
         permission: 'read'
       }) => {
         const reservation = locusPrepublication.reserve({
@@ -1963,6 +1967,7 @@ async function initialize(
           permission: input.permission,
           childComposition: 'safe-v2',
           toolTier: { desired: 'safe', effective: 'safe' },
+          endpoint: input.endpoint,
         })
         const adapter = createLocusChildAdapter({
           ...locusChildProbe.ports,

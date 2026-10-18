@@ -262,3 +262,7 @@
     5. v16 代码重新打开升级后的副本：OPENED。
   - 结论：升级可逆，回滚语义与 D 节一致，即整库恢复备份，升级后产生的状态随之丢失。
 - [x] 10.7 （已生成；DECISION: FAIL，因为第 6 轮评审、10.4–10.6 尚未完成）生成 `verify.md`，按 anvil 的 verify 指令写出 `DECISION`
+
+## 11. 生产 E2E 发现（2026-10-18，合入并部署后）
+
+- [x] 11.1 修复：首个文档子会话装配成了 IM 读取工具。生产环境第一次划词评论走通了完整链路：查询、准入、建主会话与子会话、披露、Typing、回复、DONE。但子会话拿到的是 `pet_locus_chat_history`，不是 `pet_locus_doc_context`，于是它回复“读不到正文”。根因：新子会话在 locus 记录发布之前就同步装配，`getLocus(locusId)` 查不到，按 IM 装配。修复：endpoint 随 reservation 进入 `LocusChildComposition`，装配时优先读它；已持久的子会话继续回退到 `getLocus`。测试：`locus-prepublication-staging`（composition 携带 endpoint）、`locus-dsh-port`（idle 子会话创建时传入 endpoint），两者均先红后绿。单测没覆盖到这里，是因为工具选择只在 Host 装配层发生，而 Host 装配没有单测。

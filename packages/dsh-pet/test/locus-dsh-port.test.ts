@@ -579,6 +579,9 @@ describe('production LocusDshPort child capability gate', () => {
       locusId: 'locus-1',
       generation: 1,
       label: '项目子会话',
+      // The fresh child's tool surface is chosen from its endpoint BEFORE the
+      // locus row exists, so the endpoint must travel with the reservation.
+      endpoint: { chatId: 'oc-project' },
       permission: 'read',
     })
     expect(child).toMatchObject({
