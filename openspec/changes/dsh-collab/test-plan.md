@@ -1,41 +1,43 @@
 # Test Plan — dsh-collab
 
-本规划尚未实施；“未实现”不是已观察RED。新增行为须先写真实断言并观察因行为缺失失败，不以import/语法故障冒充。现有内核的绿色结果不等于宿主接入完成。
+已进入实施。2026-10-18重新核验：consumer单元31/31、独立产物/隔离sync2/2（含npm pack与CLI）、基础组件4/4、真实Controller及consumer12/12通过，typecheck/build/diffcheck通过；无skip。首次复跑暴露上一轮最后新增断言把业务code误当Error.message，改为匹配code后通过，不把该夹具错误记为产品RED。下表保留原场景ID，并列真实测试标识与证据层级；“部分”不等于完成。官方CLI/kernel关闭门已通过；consumer经真实官方CLI关闭/重启门三项亦通过（normal10ms/budget5005ms/kill3ms）。三种关闭门是官方root持有probe并await真实consumer teardown；另official-composition独立验证真实官方profile sibling rows直接装配和两进程正常重启收据，不能把direct正常门扩大为direct预算/kill；pack/sync副本门已通过（sync installer用仓库复制fixture、构建/import真实）。TDD历史偏差继续保留，现有绿色不能追认先前测试顺序。
 
 ## 30场景一一映射
 
-| Requirement | Scenario | Test File（规划） | Test ID | 状态 |
-|---|---|---|---|---|
-| 调用身份来自实际执行会话 | 跨 workspace 调用仍归属实际会话 | packages/dsh-collab/test/identity.test.ts | identity-01 | 未实现 |
-| 调用身份来自实际执行会话 | 参数伪造身份被拒绝 | packages/dsh-collab/test/identity.test.ts | identity-02 | 未实现 |
-| 调用身份来自实际执行会话 | 无调用会话不能访问 | packages/dsh-collab/test/identity.test.ts | identity-03 | 未实现 |
-| 发现与绑定只使用精确普通会话身份 | 名单外会话不可访问 | packages/dsh-collab/test/sessions.test.ts | session-01 | 未实现 |
-| 发现与绑定只使用精确普通会话身份 | 冷会话被发现但不激活 | packages/dsh-collab/test/sessions.test.ts | session-02 | 未实现 |
-| 发现与绑定只使用精确普通会话身份 | 短前缀不能邀请 | packages/dsh-collab/test/sessions.test.ts | session-03 | 未实现 |
-| 发现与绑定只使用精确普通会话身份 | 不认领人或受管子代理 | packages/dsh-collab/test/sessions.test.ts | session-04 | 未实现 |
-| 具名工具忠实适配内核 | 创建邀请加入与协商闭环 | packages/dsh-collab/test/tools.test.ts | tools-01 | 未实现 |
-| 具名工具忠实适配内核 | 相同命令结果未知后重试 | packages/dsh-collab/test/tools.test.ts | tools-02 | 未实现 |
-| 具名工具忠实适配内核 | 内部与人类能力不出现在工具面 | packages/dsh-collab/test/tools.test.ts | tools-03 | 未实现 |
-| 投递只传协作指针并使用下一回合语义 | 运行中目标下一回合收到 | packages/dsh-collab/test/host-runtime.test.ts | wake-01 | 未实现 |
-| 投递只传协作指针并使用下一回合语义 | 空闲目标收到带来源指针 | packages/dsh-collab/test/host-runtime.test.ts | wake-02 | 未实现 |
-| 投递只传协作指针并使用下一回合语义 | 邀请指针不能读取空间 | packages/dsh-collab/test/host-runtime.test.ts | wake-03 | 未实现 |
-| 冷恢复与presence不伪造可达性 | 冷恢复保留真实工具装配 | packages/dsh-collab/test/host-runtime.test.ts | cold-01 | 未实现 |
-| 冷恢复与presence不伪造可达性 | presence不触发恢复 | packages/dsh-collab/test/host-runtime.test.ts | cold-02 | 未实现 |
-| 冷恢复与presence不伪造可达性 | 枚举缺失不能证明删除 | packages/dsh-collab/test/host-runtime.test.ts | cold-03 | 未实现 |
-| 冷恢复与presence不伪造可达性 | 关闭时未结束恢复不晚发 | packages/dsh-collab/test/host-runtime.test.ts | cold-04 | 未实现 |
-| profile共享台账与生命周期封禁 | 两workspace共享并重启重放 | packages/dsh-collab/test/lifecycle.test.ts | lifecycle-01 | 未实现 |
-| profile共享台账与生命周期封禁 | 待认领创建也受dispose保护 | packages/dsh-collab/test/lifecycle.test.ts | lifecycle-02 | 未实现 |
-| profile共享台账与生命周期封禁 | 存储失败不假成功 | packages/dsh-collab/test/lifecycle.test.ts | lifecycle-03 | 未实现 |
-| 残留锁只在死亡证明后解除 | 强退锁被保留直到受信恢复 | packages/dsh-collab/test/lock-recovery.test.ts | lock-01 | 未实现 |
-| 残留锁只在死亡证明后解除 | 活进程或未知身份不能解锁 | packages/dsh-collab/test/lock-recovery.test.ts | lock-02 | 未实现 |
-| 残留锁只在死亡证明后解除 | 一个被锁空间不吞掉其他空间 | packages/dsh-collab/test/lock-recovery.test.ts | lock-03 | 未实现 |
-| 无人类通道时明确能力缺口 | agent-only请求决定明确拒绝 | packages/dsh-collab/test/human-gap.test.ts | human-gap-01 | 未实现 |
-| 无人类通道时明确能力缺口 | 历史无确认能力保留等待 | packages/dsh-collab/test/human-gap.test.ts | human-gap-02 | 未实现 |
-| 产物内联当前源码并携带约定资源 | 源码变化进入独立部署产物 | packages/dsh-collab/test/build.test.ts | build-01 | 未实现 |
-| 产物内联当前源码并携带约定资源 | 缺约定资源在验收中失败 | packages/dsh-collab/test/build.test.ts | build-02 | 未实现 |
-| 验收不触碰日常会话与部署 | 真实隔离Host验证完整接缝 | packages/dsh-collab/test/acceptance.test.ts | acceptance-01 | 未实现 |
-| 验收不触碰日常会话与部署 | 未执行真实Host实验不能宣称完成 | packages/dsh-collab/test/acceptance.test.ts | acceptance-02 | 未实现 |
-| 验收不触碰日常会话与部署 | 移除保留持久日志 | packages/dsh-collab/test/acceptance.test.ts | acceptance-03 | 未实现 |
+测试路径均在 `packages/dsh-collab/test/`；表中标识来自实际测试标题，不虚构同名规划文件已存在。
+
+| 场景ID | 场景 | 实际测试文件 / 标识 | 当前证据与剩余缺口 |
+|---|---|---|---|
+| identity-01 | 跨workspace实际身份 | controller-seams.test.mjs / consumer-integration | consumer-integration与consumer-model-identity通过：实际B绑定/actor、不同cwd、P1与父关系不变；cold权限另见cold-01 |
+| identity-02 | 参数伪造拒绝 | tools.test.ts / tool-contract；controller-seams.test.mjs / consumer-model-identity | 单元及真实模型ToolRuntime保留字段负例通过，日志无新增 |
+| identity-03 | 无调用会话拒绝 | session-provider.test.ts / session-identity、session-registry；controller-seams.test.mjs / consumer-stale-exec | 单元无exec/旧handle与真实pre-tool等待后caller dispose拒绝通过 |
+| session-01 | 名单外不可访问 | session-provider.test.ts / session-discovery；controller-seams.test.mjs / consumer-model-identity | 有效同Host C真实模型写拒绝通过，unit发现/认领名单外拒绝 |
+| session-02 | 冷发现不激活 | controller-seams.test.mjs / consumer-cold-delivery | 真实consumer通过：发现前后无B Agent；unit禁止正文路径 |
+| session-03 | 短前缀不认领 | controller-seams.test.mjs / consumer-integration | 真实prefix invite ADDRESS_UNCLAIMED，members/deliveries不增 |
+| session-04 | 不认领human/子代理 | session-provider.test.ts / session-discovery；controller-seams.test.mjs / consumer-owned | 单元human/origin/depth+真实官方ownership拒绝，普通fork不误拒通过 |
+| tools-01 | 创建邀请join协商 | controller-seams.test.mjs / consumer-integration | 真实consumer闭环通过 |
+| tools-02 | cmdId未知重试 | host.test.ts / host-replay；controller-seams.test.mjs / consumer-integration | 真实工具同invite重试原收据、业务记录不增、通知不重复通过 |
+| tools-03 | 内部能力不暴露 | tools.test.ts / tool-contract、tool-mapping；controller-seams.test.mjs / consumer-model-identity | 19方法精确映射及真实request/header恰20、无内部能力通过 |
+| wake-01 | busy下一回合 | controller-seams.test.mjs / consumer-busy | 真实consumer通过：当前request无指针、下一request一次、两turn完成 |
+| wake-02 | idle来源/白名单 | controller-seams.test.mjs / consumer-cold-delivery；session-provider.test.ts / session-delivery | 集成来源及精确指针、单元秘密正文负例通过 |
+| wake-03 | invited不授读取 | controller-seams.test.mjs / consumer-integration | 真实工具join前MEMBER_INACTIVE通过 |
+| cold-01 | 当前preset与权限 | controller-seams.test.mjs / controller-cold、controller-worktree、consumer-cold-delivery | consumer P2 request/header及真实read-only write拒绝/read允许通过；完整Bash/never audit/worktree guard由同图controller-cold/worktree组件行为覆盖，不声称完整worktree HTTP装配 |
+| cold-02 | presence不激活 | session-provider.test.ts / session-discovery | session-cold-presence精确已有cold header仍unknown且零resolve通过；consumer冷发现同样不激活 |
+| cold-03 | 枚举缺失非删除 | session-provider.test.ts / session-discovery、session-late | 单元缺失/throw/null header/错ID均unknown、不claim/restore/followup；consumer-corrupt-cold真实物理坏header枚举不泄露、不invite、不恢复且字节不动通过 |
+| cold-04 | close后晚恢复不发 | session-provider.test.ts / session-late | session-late零followup、host-late-delivery关闭后晚provider结果不追加completion的真实kernel/FileStore回归通过 |
+| lifecycle-01 | 跨workspace重启 | controller-seams.test.mjs / consumer-integration；host.test.ts / host-replay、host-pending-replay | 跨workspace/重启收据及身份稳定、pending保留不重发通过 |
+| lifecycle-02 | 待claim关闭 | host.test.ts / host-claim-close | 真实kernel/FileStore通过：dispose不等claim，晚返回无日志/锁 |
+| lifecycle-03 | 存储失败不假成功 | host.test.ts / host-fsync-failure、host-fsync-drain | 真实append handle sync失败不报成功/保持failed，重开同cmd按收据，close等在途commit通过 |
+| lock-01 | 强退残锁恢复 | released-host-seams.mjs --consumer | 官方SIGKILL残锁/默认LOCKED，部署consumer recoverLock ESRCH exact恢复，再官方重启业务收据/字节不变通过 |
+| lock-02 | live/unknown拒恢复 | maintenance.test.ts / maintenance-01 | 单元通过live/EPERM/unknown/坏JSON/错ID/非正PID/停机确认；packed CLI已过live拒绝/死亡exact恢复且日志保留；changed-during-probe替换锁字节拒绝回归通过 |
+| lock-03 | 锁冲突空间隔离 | host.test.ts / host-isolation | 真实FileStore通过：locked/corrupt原诊断、healthy可用 |
+| human-gap-01 | agent-only NO_DECIDER | controller-seams.test.mjs / consumer-integration | 真实工具拒绝、业务日志不增、无请求/决定/虚拟human通过（completion异步记录不属于该命令） |
+| human-gap-02 | 历史human awaitingChannel | host.test.ts / host-human-history | 真实FileStore合法历史human无confirm provider，保持open/awaitingChannel，无dispatch/decided通过 |
+| build-01 | 当前源码进入产物 | build-artifact.test.mjs / bundle-source；sync-artifact.test.mjs / consumer-sync | 坏旧lib+改src、npm pack权限隔离import、sync源码/Markdown更新部署字节且二次无操作通过 |
+| build-02 | 漏Markdown必失败 | build-artifact.test.mjs / bundle-source | 独立产物加载负例通过，错误明确v1.md |
+| acceptance-01 | 完整隔离Host | controller-seams.test.mjs；released-host-seams.mjs --consumer | 分层闭环、官方normal/budget/kill与每项业务重启；official-composition直接profile装配/正常关闭重启通过 |
+| acceptance-02 | 未运行不冒充 | 本账本 / 发行Host子表 | 已明确保留未验证；最终交付门未关闭 |
+| acceptance-03 | 移除保留日志 | controller-seams.test.mjs / consumer-integration | dispose工具撤销/日志字节/重启通过；sync-artifact禁用后部署JS消失、独立持久台账保留通过 |
 
 ## 判据与夹具
 
@@ -51,13 +53,13 @@
 
 ## 发行Host门的独立子判据
 
-归入主场景acceptance-01，均在acceptance.test.ts，不能以组件层自写signal handler代替。运行体为`@deepseek-ai/dsh@0.2.0-rc.2`真实bin及其同版官方host-runner；记录bin/version/hash与信号链来源。当前执行根缺少发行入口，尚未执行，1.3是明确前置阻断而非已具备实验环境；不得静默安装或使用日常profile。组件层需真实Cordis4.0.4/DSH0.2.0-rc.2全部Controller硬依赖及preset/persistence/security/worktree装配。
+主场景acceptance-01最终需consumer wrapper集成测试，不能以组件自写signal handler代替。用户已显式授权隔离准备官方运行体；task1.3的kernel/官方CLI接缝由released-host-seams.mjs实际执行，normal/budget/kill全部exit0，静态独立复核PASS。原版dsh0.2.0-rc.2 bin经profile-boot管理进程信号及5000ms总关闭预算，并非dynamicCordisRunner服务或fatal-release。bin/预算chunk hash与结果记录于实施日志。后续consumer集成已执行并逐项列于下表；与kernel先验分开记录，不将probe拥有的独立Context装配夸成直接生产profile组合。
 
 | 子ID | 输入/触发 | 通过oracle | 当前状态 |
 |---|---|---|---|
-| acceptance-01-normal | 真实发行Host已打开空间，发送其官方停止信号/入口 | 真实dispose调用close，进程退出，锁消失，重启重放字节一致 | 未实现/未验证 |
-| acceptance-01-budget | 受控存储commit barrier持续超过真实运行体的dispose预算，再触发官方停止 | 预算机制终止进程、close未完成时锁不被强删、下次打开LOCKED；预算来源/退出状态可复核 | 未实现/运行体前提缺失 |
-| acceptance-01-kill | 对自己启动且已持锁的fixture进程发送SIGKILL | 等待该进程死亡，锁仍在，默认重开LOCKED，受信停机维护exactID后恢复 | 未实现/未验证 |
+| acceptance-01-normal | 真实发行Host已打开空间，发送其官方停止信号/入口 | 真实dispose调用close，进程退出，锁消失，重启重放字节一致 | consumer/官方CLI已通过，含业务工具重启收据与字节核验 |
+| acceptance-01-budget | 受控存储commit barrier持续超过真实运行体的dispose预算，再触发官方停止 | 预算机制终止进程、close未完成时锁不被强删、下次打开LOCKED；预算来源/退出状态可复核 | consumer/官方CLI已通过，5005ms预算关闭残锁，恢复后原收据/字节不增 |
+| acceptance-01-kill | 对自己启动且已持锁的fixture进程发送SIGKILL | 等待该进程死亡，锁仍在，默认重开LOCKED，受信停机维护exactID后恢复 | consumer/官方CLI已通过，含业务工具重启收据与字节核验 |
 
 如果运行体无可验证的正常shutdown预算，则budget项保持未验证，停止1.3并回报，不把人为定时kill/app-boot fatal-release预算代替。组件层scope、coldrestore和AgentLoop回合测试仍可独立完成，但不能因此标绿发行Host门。
 
@@ -68,7 +70,7 @@
 3. 快速completion的断言定位command返回seq，不把日志最后一行当命令；慢恢复不设超时且不持有服务关闭队列。
 4. 消息成功只指入队接受：记录followup返回void/不等待whenIdle/不自动重发；不声称flush或处理完成。可以故障注入flush/crash证明风险说明，而非新增durability承诺。
 5. realhost依赖缺失须未验证而非skip后全绿。测试应给expected/observed、版本、turn/seq与工具集合摘要；只用mock不满足此门。
-6. 当前执行证据：basic runner的component-identity/component-idle/component-busy/component-persistence共4项通过；用户随后授权仅补具体组件，隔离精确依赖后`node packages/dsh-collab/test/run-components.mjs --controller`的controller-assembly/controller-cold/controller-worktree共3项通过。共7tests，0fail/skip/cancelled/todo，npm ls --all exit0；冷恢复实际P2工具/相对cwd/read-only文件及Bash拒绝和允许控制/never审批audit、worktree恢复guard组件hook已验证。独立只读复核90fd590b PASS，测试由Lead执行非独立复跑。task1.2组件门完成，但不等于30个consumer主场景实现（表仍未实现）或完整worktree插件编排；task1.3发行Host门仍未验证。配方与复跑说明位于package test目录非忽略文件，待后续授权版本收尾，不声称已commit。
+6. 当前执行证据：basic runner的component-identity/component-idle/component-busy/component-persistence共4项通过；用户随后授权仅补具体组件，隔离精确依赖后`node packages/dsh-collab/test/run-components.mjs --controller`的controller-assembly/controller-cold/controller-worktree共3项通过。共7tests，0fail/skip/cancelled/todo，npm ls --all exit0；冷恢复实际P2工具/相对cwd/read-only文件及Bash拒绝和允许控制/never审批audit、worktree恢复guard组件hook已验证。独立只读复核90fd590b PASS，测试由Lead执行非独立复跑。task1.2组件门完成，但不等于30个consumer主场景实现（表仍未实现）或完整worktree插件编排；task1.3官方CLI/kernel三种关闭门随后经授权独立运行体验证通过（normal4ms/budget5011ms/kill2ms）；consumer最终集成仍未验证。基础配方及复跑说明已随bbf89108提交，新Host配方/测试待后续提交。以上为当时接缝阶段历史结果；2026-10-18当前consumer证据以上表及实施日志最新同步为准，Controller suite已扩展到10项，不再把全部30场景笼统写成未实现。
 
 ## 计划验证命令
 

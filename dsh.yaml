@@ -96,6 +96,18 @@ customizations:
     enabled: true
     brief: Worktree Session 首发隔离(task branch/lean deps/独立 build home)
     note: '自研,spec source-workspace-worktree-session。首次普通发送时创建唯一 ws/* 分支与 .worktrees/* checkout,不切换主 checkout;npm/pnpm 默认 lean 依赖,变更依赖前须先 promote;.env.local 仅同步 Git 忽略的文件并写入隔离 DSH_HOME。已绑定会话的文件/搜索/Bash 限制在 worktree 内;ws 的显式 path 须用户一次性授权;clean 拒绝 dirty/未合入/活跃项,不删远端分支。概念参考 LaoYueHanNi/dsh-git-worktree(MIT,见 packages/worktree-session/NOTICE)。升级复核:每次 DSH 升级重做工具契约与生命周期接缝的回归审计。移除:enabled:false → dsh build。'
+  # 自研(local):已有独立会话共享协作台账，默认不部署。
+  - id: dsh-collab
+    type: package
+    source: local
+    version: 0.1.0
+    enabled: false
+    brief: 显式许可已有独立会话的共享台账与下一回合通知
+    note: '自研，spec dsh-collab。内联零运行时依赖collab-kernel当前源码；完整session ID许可名单默认空，不创建团队/子会话、不接人类确认。显式profile独占dataDir须在workspace/部署目录外且0700；只接受入队，不保证模型完成或崩溃前flush，不自动重发/破锁。升级复核官方cold preset和真实关闭预算。移除关闭工具与存储但保留台账；启用/日常部署须另行授权。'
+    buildInputs:
+      - packages/collab-kernel/src
+      - packages/collab-kernel/package.json
+      - packages/dsh-collab/tsdown.config.ts
   # 自研(local):适配受管、版本化的官方 OpenSpec 会话工作流。
   - id: dsh-openspec
     type: package

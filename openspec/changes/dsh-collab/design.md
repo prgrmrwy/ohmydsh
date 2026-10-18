@@ -27,6 +27,8 @@
 
 持久serviceId采用固定namespace加canonical dataDir的摘要，根路径不暴露给模型；同目录重启稳定，移动目录不承诺identity不变（迁移不在本期）。FileStore instanceId每次构造随机。目录必须owner-only（创建0700；既有目录若group/other可访问则拒绝启动，不悄悄改权限）；内核lock创建0600，日志沿现有FileStore默认open模式并由0700父目录保护，不虚称每个日志都是0600。数据目录不加入版本控制，也不随包移除。
 
+运行中workspace新增的围栏在每次工具准入、provider claim/deliver前后及store.open/commit准入重新核验当前canonical目录，不继续使用启动快照。已进入FileStore的在途I/O按已有关闭排空规则结束，不将其描述为可原子撤销；新增workspace与OS文件操作没有跨系统事务。调用者身份在工具body准入核验；已接纳命令可按原principal结束，但Host关闭由epoch fence封禁，不能声称单个Agent dispose可撤销所有已接纳命令。
+
 备选自动从环境拼profile路径：否决，worktree会话环境与Host环境可能不同且目前没有足够权威profile身份证据。必填配置比引入额外全局身份存储/框架更小。
 
 ### D2. 许可名单与精确会话身份
@@ -56,6 +58,8 @@ provider.deliver在通过精确检查后调用官方resolveAgent，恢复返回�
 ### D5. readiness与dispose覆盖所有已接纳空间
 
 启动先校验配置/目录，store.list后逐空间service.open；工具在恢复结束前返回SERVICE_NOT_READY。失败空间保留locked/corrupt/failed状态，其他健康空间可用。对该ID后续操作返回原诊断，不伪装不存在；只有.lock没有.jsonl的ID在未来create时由FileStore拒绝，不宣称list枚举所有锁。
+
+启动恢复未完成时也先保留可关闭wrapper，但工具readiness仍为false；Cordis的async apply卸载effect会等启动settle，因此同时监听真实internal/plugin的本fiber uid=null移除事件，同步封禁并发起close，恢复循环在后续空间准入检查closing。已经在途的存储open/commit仍按Host预算排空，不取消操作系统I/O。
 
 在接纳create/open时立即加入trackedSpaceIds；不能等open成功才登记。dispose第一步同步closing、generation++、撤销工具并关闭provider准入，再对全部tracked空间同时service.close。等待这些存储close，不等claim/coldresolve/whenIdle。利用kernel已有epoch fence，但provider也独立防晚followup。包装器不引入额外“到点强删锁”超时；以Host既有总dispose预算为上限。若Host中止/强退，允许残锁而不是冒险释放在途writer。未清理不等于关闭成功；下次显式诊断。
 

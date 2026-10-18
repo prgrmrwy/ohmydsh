@@ -31,6 +31,6 @@ packages/<name>/
 |---|---|---|
 | A | `dsh-pet`、`dsh-memex`、`worktree-session`、`dsh-openspec` | `<!-- problem -->` 段落、位于该 package `docs/` 下的位图截图（可再加示意图） |
 | B | `sidebar-session-provider-icon`、`session-title-copy`、`system-clock`、`session-links`、`home-network-model-guard` | `<!-- problem -->` 段落与位于该 package `docs/` 下的位图截图 |
-| C | `subscriptions-sandbox-shim`、`cockpit-worktree-open-shim`、`cockpit-memex-browse-shim`、`collab-kernel` | `<!-- problem -->` 段落，以及以 `<!-- section: removal -->` 为锚点的「移除」章节，说明它连接哪两端、何时可以移除 |
+| C | `subscriptions-sandbox-shim`、`cockpit-worktree-open-shim`、`cockpit-memex-browse-shim`、`collab-kernel`、`dsh-collab` | `<!-- problem -->` 段落，以及以 `<!-- section: removal -->` 为锚点的「移除」章节，说明它连接哪两端、何时可以移除 |
 
 截图必须来自填充合成数据的隔离 `DSH_HOME`，不得来自日常使用的实例；每张图都要在图片同目录的 `SCREENSHOTS.md` 中登记（单张 ≤ 400 KiB）。

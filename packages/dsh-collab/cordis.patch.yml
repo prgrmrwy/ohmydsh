@@ -1,0 +1,5 @@
+# Configure an exclusive profile-owned dataDir and exact allowlist before enabling.
+- insert:
+    - id: dsh-collab
+      name: dsh-collab
+      disabled: true

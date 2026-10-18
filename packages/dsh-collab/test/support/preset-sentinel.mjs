@@ -1,7 +1,5 @@
-import { createRequire } from 'node:module'
-import { pathToFileURL } from 'node:url'
-const deps = createRequire(new URL('../../../../spike/collab-components/package.json', import.meta.url))
-const { defineTool } = await import(pathToFileURL(deps.resolve('@deepseek-ai/dsh-tools')).href)
+import { moduleOf } from './controller-harness.mjs'
+const { defineTool } = await moduleOf('dsh-tools')
 export const name = 'collab-test-preset-sentinel'
 export const inject = ['tools']
 export function apply(ctx, config) {
