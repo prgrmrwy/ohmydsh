@@ -64,6 +64,7 @@ import {
 } from './host/collaboration/assembly.js'
 import { InquiryLedgerStore } from './host/inquiry/ledger-store.js'
 import { composeProductionInquiry } from './host/inquiry/composition.js'
+import { createInquiryAgentResolver } from './host/inquiry/agent-resolver.js'
 import { createInquiryManagedEffects } from './host/inquiry/managed-effects.js'
 import type { InquiryScope } from './host/inquiry/ledger.js'
 import { SharedFactLedgerStore } from './host/ledger/store.js'
@@ -632,19 +633,53 @@ async function initialize(
   const claimProbe = typeof (agentLoop as { probeIsolatedQueuedTurnClaim?: unknown } | undefined)?.probeIsolatedQueuedTurnClaim === 'function'
     ? (agentLoop as { probeIsolatedQueuedTurnClaim: (...args: never[]) => unknown }).probeIsolatedQueuedTurnClaim.bind(agentLoop)
     : undefined
+  const getInquiryLiveAgent = (sessionId: string) => {
+    try {
+      const candidate = ctx.agents.get(sessionId as never) as {
+        id?: unknown; session?: unknown; inbox?: unknown; followup?: unknown; ctx?: unknown
+      } | undefined
+      if (!candidate || typeof candidate.id !== 'string' || candidate.id !== sessionId || !candidate.session || !candidate.inbox
+        || typeof candidate.followup !== 'function' || !candidate.ctx) return undefined
+      return candidate as { readonly id: string }
+    } catch { return undefined }
+  }
+  const inquiryAgentResolver = createInquiryAgentResolver({
+    getLive: getInquiryLiveAgent,
+    resumeMain: async (sessionId, _signal) => {
+      const current = selection()
+      const presetId = await persistedPresetFor(sessionId)
+      await ctx.agents.resume({
+        resumeSessionId: SessionId(sessionId),
+        agentOptions: { provider: current.providerId, model: current.modelId },
+        setup: async agentCtx => { await ctx.agentPresets.mount(agentCtx, presetId) },
+      })
+    },
+    parentSessionOf: childSessionId => {
+      const rows = locusRepository.findByChildSessionId(childSessionId)
+      if (rows.length !== 1) return undefined
+      const row = rows[0]
+      return row !== undefined && row.state === 'active' && row.childSessionId === childSessionId ? row.parentSessionId : undefined
+    },
+    materializeChild: async (parent, childSessionId, signal) => {
+      const subagents = ctx.get('subagents') as {
+        supportsLiveContinuableChildSession?: unknown
+        withLiveContinuableChildSession?: (spec: { parent: unknown; childId: string; signal: AbortSignal }, operation: (session: unknown) => unknown) => Promise<unknown>
+      } | undefined
+      if (subagents?.supportsLiveContinuableChildSession !== true || typeof subagents.withLiveContinuableChildSession !== 'function') {
+        throw new Error('child-session-access-unsupported')
+      }
+      await subagents.withLiveContinuableChildSession.call(
+        subagents,
+        { parent, childId: childSessionId, signal },
+        async () => undefined,
+      )
+    },
+    log: message => petLog(`dsh-pet: ${message}`),
+  })
   const composed = composeProductionInquiry({
     domain: domain as never,
     currentScope: currentInquiryScope,
-    resolveAgent: scope => {
-      try {
-        const candidate = ctx.agents.get(scope.sessionId as never) as {
-          id?: unknown; session?: unknown; inbox?: unknown; followup?: unknown; ctx?: unknown
-        } | undefined
-        if (!candidate || typeof candidate.id !== 'string' || !candidate.session || !candidate.inbox
-          || typeof candidate.followup !== 'function' || !candidate.ctx) return undefined
-        return candidate as never
-      } catch { return undefined }
-    },
+    resolveAgent: inquiryAgentResolver as never,
     agentLoop,
     probeIsolatedClaim: claimProbe,
     tools: ctx.get('tools') as never,
