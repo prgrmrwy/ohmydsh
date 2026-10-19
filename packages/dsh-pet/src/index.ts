@@ -112,6 +112,9 @@ import {
   unavailableLocusChannelCapability,
 } from './host/channel/locus-capability.js'
 import { createLocusTurnObserver } from './host/locus/turn-observer.js'
+import { proveInquiryResultDelivery } from './host/locus/inquiry-result-proof.js'
+import { InquiryHandoffStore } from './host/inquiry/handoff-store.js'
+import { InquiryWorkStore } from './host/inquiry/work-store.js'
 import {
   entranceReadProbeFor,
   measureEntranceReadability,
@@ -412,7 +415,7 @@ async function initialize(
     readonly deliveryId: string
     readonly executionId: string
     readonly turnId: string
-    readonly source: 'delivery' | 'agent-message'
+    readonly source: 'delivery' | 'agent-message' | 'inquiry-result'
     readonly locusId?: string
     readonly generation?: number
   }
@@ -2707,6 +2710,27 @@ async function initialize(
               },
             }
           },
+        },
+        // Read-only durable proof for `pet-inquiry-result` claims. Same domain
+        // as composeProductionInquiry's stores; construction has no side effects.
+        inquiryResult: {
+          prove: (() => {
+            const resultHandoffs = new InquiryHandoffStore(domain as never)
+            const resultWorks = new InquiryWorkStore(domain as never)
+            return proveInquiryResultDelivery({
+              findResultHandoff: messageId => resultHandoffs.findByMessageId(messageId),
+              getInquiry: inquiryId => inquiryLedgerStore.get(inquiryId),
+              getWork: (sessionId, workId) => resultWorks.get(sessionId, workId),
+              findDeliveryByInboxMessageId: inboxMessageId => locusRepository.findDeliveryByInboxMessageId(inboxMessageId),
+              now: () => Date.now(),
+              currentScopeOf: childSessionId => {
+                const locus = locusRepository.getLocusByChild(childSessionId)
+                return locus === undefined || locus.state !== 'active'
+                  ? undefined
+                  : { locusId: locus.id, generation: locus.generation }
+              },
+            })
+          })(),
         },
         log: code => petLog(`dsh-pet locus turn: ${code}`),
       })

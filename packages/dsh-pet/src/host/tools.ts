@@ -117,7 +117,7 @@ interface LocusToolCapability {
   readonly deliveryId: string
   readonly executionId: string
   readonly turnId: string
-  readonly source: 'delivery' | 'agent-message'
+  readonly source: 'delivery' | 'agent-message' | 'inquiry-result'
   readonly locusId?: string
   readonly generation?: number
 }
@@ -135,7 +135,7 @@ export interface PetLocusLifecycleDependencies {
     readonly deliveryId: string
     readonly executionId: string
     readonly turnId: string
-    readonly source: 'delivery' | 'agent-message'
+    readonly source: 'delivery' | 'agent-message' | 'inquiry-result'
     readonly locusId?: string
     readonly generation?: number
   } | undefined
@@ -336,7 +336,7 @@ export interface PetIntentTriageDependencies {
     readonly deliveryId: string
     readonly executionId: string
     readonly turnId: string
-    readonly source: 'delivery' | 'agent-message'
+    readonly source: 'delivery' | 'agent-message' | 'inquiry-result'
     readonly locusId?: string
     readonly generation?: number
   } | undefined

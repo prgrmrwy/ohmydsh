@@ -112,7 +112,7 @@ export interface LocusContextRepository {
       readonly deliveryId?: string
       readonly executionId: string
       readonly turnId: string
-      readonly source: 'delivery' | 'agent-message'
+      readonly source: 'delivery' | 'agent-message' | 'inquiry-result'
       readonly locusId?: string
       readonly generation?: number
     }
@@ -125,7 +125,7 @@ export interface LocusContextRepository {
       readonly deliveryId?: string
       readonly executionId: string
       readonly turnId: string
-      readonly source: 'delivery' | 'agent-message'
+      readonly source: 'delivery' | 'agent-message' | 'inquiry-result'
       readonly locusId?: string
       readonly generation?: number
     }
@@ -186,7 +186,7 @@ export function asLocusContextRepository(
     })()
   const inspectCurrentDeliveryAuthorization = (input: Parameters<NonNullable<LocusContextRepository['inspectCurrentDeliveryAuthorization']>>[0]): LocusCurrentAuthorizationResult => {
     if (input.childSessionId.trim() === '') return { ok: false, reason: 'capability-unavailable' }
-    if (input.proof === undefined || input.proof.source !== 'delivery' && input.proof.source !== 'agent-message') {
+    if (input.proof === undefined || input.proof.source !== 'delivery' && input.proof.source !== 'agent-message' && input.proof.source !== 'inquiry-result') {
       return { ok: false, reason: 'association-unproven' }
     }
     const currentProof = currentTurnProof?.(input.childSessionId)
