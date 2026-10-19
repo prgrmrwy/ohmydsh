@@ -610,4 +610,90 @@ describe('production inquiry composition', () => {
       await h.close()
     }
   })
+
+  it.each([
+    { requesterId: 'main', targetId: 'child-b', targetRef: 'child:b:1:child-b', audience: { kind: 'local-session', sessionId: 'main' } },
+    { requesterId: 'child-b', targetId: 'main', targetRef: 'main:main', audience: { kind: 'unknown' } },
+  ])('records audience $audience.kind for a $requesterId requester (a locus child cannot claim a private local audience)', async ({ requesterId, targetId, targetRef, audience }) => {
+    const h = await openPetHarness()
+    const ctx = new Context()
+    for (const plugin of [Sessions, Agents, Llm, SystemPrompt, ToolRuntime, Projections]) await ctx.plugin(plugin)
+    const guiMessage = createUserMessage({ content: [{ type: 'text', text: 'ask the target' }], source: { kind: 'user' } })
+    const mountedGuards = new Set<string>()
+    let accepted!: (id: string) => void
+    let failed!: (error: Error) => void
+    const acceptedInquiry = new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('inquiry was not accepted within 6s')), 6000)
+      accepted = id => { clearTimeout(timer); resolve(id) }
+      failed = error => { clearTimeout(timer); reject(error) }
+    })
+    class AudienceFakeLlm extends LlmAdapter {
+      private count = 0
+      constructor(private readonly role: 'requester' | 'target') { super() }
+      async *stream() {
+        if (this.role === 'requester' && this.count++ === 0) {
+          const call = { type: 'tool-call', id: 'audience-inquire', name: 'pet_inquire', arguments: JSON.stringify({ target: targetRef, question: 'q', purpose: 'p' }) }
+          yield { type: 'block-start', index: 0, blockType: 'tool-call' }
+          yield { type: 'tool-call-delta', index: 0, id: call.id, name: call.name, argumentsDelta: call.arguments }
+          yield { type: 'block-end', index: 0, block: call }
+          yield { type: 'finish', reason: { kind: 'tool-calls' } }
+          return
+        }
+        yield { type: 'block-start', index: 0, blockType: 'text' }
+        yield { type: 'text-delta', index: 0, text: 'ok' }
+        yield { type: 'block-end', index: 0, block: { type: 'text', text: 'ok' } }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      }
+    }
+    const disposers: Array<() => void> = []
+    try {
+      ctx.llm.registerAdapter(['audienceasker'], new AudienceFakeLlm('requester'))
+      ctx.llm.registerAdapter(['audiencetarget'], new AudienceFakeLlm('target'))
+      await ctx.plugin(AgentLoop, { agents: [], maxParallelToolCalls: 1 })
+      const agentsById = new Map<string, Awaited<ReturnType<typeof ctx.agentLoop.create>>>()
+      agentsById.set('main', await ctx.agentLoop.create('main', { provider: requesterId === 'main' ? 'audienceasker' : 'audiencetarget', model: 'm' }))
+      agentsById.set('child-b', await ctx.agentLoop.create('child-b', { provider: requesterId === 'child-b' ? 'audienceasker' : 'audiencetarget', model: 'm' }))
+      const asker = agentsById.get(requesterId)!
+      const target = agentsById.get(targetId)!
+      const scopes = new Map<string, import('../src/host/inquiry/ledger.js').InquiryScope>([['main', { kind: 'main', sessionId: 'main' }], ['child-b', { kind: 'child', sessionId: 'child-b', locusId: 'b', generation: 1 }]])
+      const locus = buildLocusRecord({ id: 'b', generation: 1, parentSessionId: 'main', childSessionId: 'child-b', endpoint: { chatId: 'chat-b' }, workspaceId: 'ws', source: 'explicit', state: 'active' })
+      const identities = new Map([['main', { id: 'main' }], ['child-b', { id: 'child-b', parentSessionId: 'main' }]])
+      const collaborationPorts = { loci: {
+        findByChildSessionId: (id: string) => id === 'child-b' ? [locus] : [], getLocusByChild: (id: string) => id === 'child-b' ? locus : undefined,
+        listLociByParent: (id: string) => id === 'main' ? [locus] : [],
+        getCurrentLocus: (endpoint: { chatId: string; threadId?: string }) => endpoint.chatId === locus.endpoint.chatId && endpoint.threadId === locus.endpoint.threadId ? locus : undefined,
+      }, inspect: async (id: string) => identities.get(id), isArchived: () => false, hasPublicContext: () => true }
+      for (const [agent, id] of [[asker, requesterId], [target, targetId]] as const) { agent.ctx.tools.guard((execution: { name: string }) => execution.name === 'pet_inquire' ? undefined : `fixture denies ${id}`); mountedGuards.add(id) }
+      const composed = composeProductionInquiry({ domain: h.domain as never, currentScope: (id: string) => scopes.get(id), resolveAgent: ((scope: { sessionId: string }) => agentsById.get(scope.sessionId)) as never, agentLoop: ctx.agentLoop,
+        probeIsolatedClaim: ctx.agentLoop.probeIsolatedQueuedTurnClaim.bind(ctx.agentLoop), tools: ctx.tools, readinessManagedGuard: () => mountedGuards.size === 2,
+        log: () => undefined, onError: (error: unknown) => failed(error instanceof Error ? error : new Error(String(error))), now: () => 1_800_000_000_000,
+        newMessageId: (() => { let n = 0; return () => `audience-message-${++n}` })(), newInquiryId: () => 'audience-inquiry' })
+      expect(composed.ready).toBe(true)
+      composed.install(asker as Agent); composed.install(target as Agent)
+      disposers.push(registerInquiryAskTool(asker.ctx, { forExecution: execution => {
+        const bound = composed.forExecution(execution as never)
+        return { ports: collaborationPorts as never, store: { accept: async (request: unknown, facts: unknown) => {
+          const record = await bound.accept(request as never, facts as never)
+          accepted(record.id)
+          return record
+        } }, origin: bound.origin, ready: () => composed.ready, now: () => 1_800_000_000_000, newInquiryId: () => 'audience-inquiry' }
+      } }))
+      asker.ctx.on('tools/result', (execution: { name: string }, result: { isError: boolean; content: Array<{ type: string; text?: string }> }) => {
+        if (execution.name === 'pet_inquire' && result.isError) failed(new Error(`pet_inquire failed: ${result.content.map(block => block.text ?? '').join(' ').slice(0, 300)}`))
+      })
+      asker.followup(guiMessage)
+      const id = await acceptedInquiry
+      const row = h.domain.table('inquiries').get(id) as { origin: unknown; audience: unknown; requester: { sessionId: string } }
+      // Drain both real agents first (the target answers nothing and finishes): an assertion that
+      // throws while a turn is still running would otherwise leave teardown waiting until timeout.
+      await Promise.all([asker.whenIdle(), target.whenIdle()])
+      expect(row.requester.sessionId).toBe(requesterId)
+      expect(row.origin).toEqual({ kind: 'local' })
+      expect(row.audience).toEqual(audience)
+    } finally {
+      for (const dispose of disposers.reverse()) dispose()
+      await ctx.fiber.dispose()
+      await h.close()
+    }
+  })
 })

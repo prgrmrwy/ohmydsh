@@ -236,7 +236,9 @@ function originFromProof(proof: InquiryExecutionProof, callerSessionId: string, 
     return { origin: { kind: 'inquiry' as const, parentInquiryId: segment.inquiryId }, audience }
   }
   if (!proof.rootWork || proof.rootWork.state === 'settled' || proof.rootWork.rootClaimTurn !== proof.turn) return undefined
-  return { origin: { kind: 'local' as const }, audience: { kind: 'local-session' as const, sessionId: callerSessionId } }
+  return current.kind === 'child'
+    ? { origin: { kind: 'local' as const }, audience: { kind: 'unknown' as const } }
+    : { origin: { kind: 'local' as const }, audience: { kind: 'local-session' as const, sessionId: callerSessionId } }
 }
 
 export type ProductionInquiryAgent = InquiryAgent
