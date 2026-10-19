@@ -1,0 +1,172 @@
+diff --git a/packages/subagent/tool-subagent-control/src/index.ts b/packages/subagent/tool-subagent-control/src/index.ts
+index 2bfdf38..80ac7b1 100644
+--- a/packages/subagent/tool-subagent-control/src/index.ts
++++ b/packages/subagent/tool-subagent-control/src/index.ts
+@@ -10,6 +10,7 @@
+  */
+ 
+ import type { Context } from '@deepseek-ai/cordis'
++import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
+ import { brandString } from '@deepseek-ai/dsh-brand'
+ import { defineTool } from '@deepseek-ai/dsh-tools'
+ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+@@ -20,12 +21,17 @@ import { markAdjacentAgentSendMessageTool } from '@deepseek-ai/dsh-subagent/inte
+ export const name = 'tool-subagent-control'
+ export const inject = ['tools', 'subagents']
+ 
++function markManagedEffect<T extends ToolDefinition>(definition: T, effect: 'communication' | 'delegation'): T {
++  Object.defineProperty(definition.execute, Symbol.for('dsh.tool.managed-effect'), { value: effect })
++  return definition
++}
++
+ /**
+  * Register the `send_message` and `interrupt_agent` tools.
+  * @param ctx - context carrying the tool registry and subagent service.
+  */
+ export function apply(ctx: Context): void {
+-  ctx.tools.register(markAdjacentAgentSendMessageTool(defineTool({
++  ctx.tools.register(markManagedEffect(markAdjacentAgentSendMessageTool(defineTool({
+     name: 'send_message',
+     description:
+       'Send a message to an agent. A working agent receives it at its next step; an idle agent starts a new turn with it. '
+@@ -69,9 +75,9 @@ export function apply(ctx: Context): void {
+       )
+       return { messageId }
+     },
+-  })))
++  })), 'communication'))
+ 
+-  ctx.tools.register(defineTool({
++  ctx.tools.register(markManagedEffect(defineTool({
+     name: 'interrupt_agent',
+     description:
+       'Ask a subagent to stop its current work. This call returns without waiting for it to stop. '
+@@ -108,5 +114,5 @@ export function apply(ctx: Context): void {
+       ctx.subagents.interrupt(brandString<SessionId>(args.agent_id), { kind: 'ancestor', agent: caller })
+       return Promise.resolve({ accepted: true })
+     },
+-  }))
++  }), 'communication'))
+ }
+diff --git a/packages/subagent/tool-subagent/src/index.ts b/packages/subagent/tool-subagent/src/index.ts
+index f99dd9c..92db498 100644
+--- a/packages/subagent/tool-subagent/src/index.ts
++++ b/packages/subagent/tool-subagent/src/index.ts
+@@ -9,6 +9,7 @@
+  */
+ 
+ import type { Context } from '@deepseek-ai/cordis'
++import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
+ import z from '@deepseek-ai/schemastery'
+ import { scopeChainOf, scopeOf } from '@deepseek-ai/dsh-scope'
+ import { defineTool } from '@deepseek-ai/dsh-tools'
+@@ -44,6 +45,11 @@ import {
+ export const name = 'tool-subagent'
+ export const inject = ['tools', 'subagents', 'systemPrompt', 'sessionProjections']
+ 
++function markManagedEffect<T extends ToolDefinition>(definition: T, effect: 'communication' | 'delegation'): T {
++  Object.defineProperty(definition.execute, Symbol.for('dsh.tool.managed-effect'), { value: effect })
++  return definition
++}
++
+ /** Config: which registered provider this tool delegates to, plus child defaults. */
+ export interface Config {
+   /** The `ctx.subagents` provider name to start runs on (e.g. `spawn`, `acp`). */
+@@ -376,7 +382,7 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
+           + (subagentProvider.inheritsParentContext
+             ? ' Changing the route can prevent provider-side reuse of the inherited conversation prefix.'
+             : '')
+-      const disposeTool = runtimeCtx.tools.register(defineTool({
++      const disposeTool = runtimeCtx.tools.register(markManagedEffect(defineTool({
+         name: toolName,
+         description: wording.description + (backgroundEnabled
+           // The completion notice is the continuation service's own behavior, not
+@@ -566,7 +572,7 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
+           })
+           return settleForegroundRun(run)
+         },
+-      }))
++      }), 'delegation'))
+       mounted = { subagentProvider, disposeTool }
+     }
+ 
+diff --git a/packages/workflow/tool-ralph/src/index.ts b/packages/workflow/tool-ralph/src/index.ts
+index 48708c1..257e929 100644
+--- a/packages/workflow/tool-ralph/src/index.ts
++++ b/packages/workflow/tool-ralph/src/index.ts
+@@ -11,12 +11,17 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+ import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+ import type { SubagentProvider } from '@deepseek-ai/dsh-subagent'
+ import { defineTool } from '@deepseek-ai/dsh-tools'
+-import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools'
++import type { ToolCallView, ToolResultView, ToolDefinition } from '@deepseek-ai/dsh-tools'
+ import type { WorkflowResult, WorkflowRun } from '@deepseek-ai/dsh-workflow'
+ 
+ export const name = 'tool-ralph'
+ export const inject = ['tools', 'workflowEngine', 'subagents', 'systemPrompt']
+ 
++function markManagedEffect<T extends ToolDefinition>(definition: T, effect: 'communication' | 'delegation'): T {
++  Object.defineProperty(definition.execute, Symbol.for('dsh.tool.managed-effect'), { value: effect })
++  return definition
++}
++
+ /** Deployment policy for the fixed Ralph workflow. */
+ export interface Config {
+   /** Fresh structured-output provider used for every round (default `spawn`). */
+@@ -407,7 +412,7 @@ export function apply(ctx: Context, config: Config): void {
+     order: ctx.systemPrompt.getSectionOrder('TOOL_RALPH'),
+     text: 'Use the ralph tool ONLY when the direct human explicitly asks for a Ralph loop or fresh-agent iterative execution. Each Ralph round starts a fresh child with no conversation seed and uses the shared workspace as durable memory. Completion and blockers are worker reports, not independent evaluation. Use same-session goal tools for ordinary long-running objectives, and plain subagents or workflows for bounded delegation and fan-out.',
+   })
+-  ctx.tools.register(defineTool({
++  ctx.tools.register(markManagedEffect(defineTool({
+     name: 'ralph',
+     description: DESCRIPTION,
+     parameters: {
+@@ -473,5 +478,5 @@ export function apply(ctx: Context, config: Config): void {
+     },
+     presentCall,
+     presentResult,
+-  }))
++  }), 'delegation'))
+ }
+diff --git a/packages/workflow/tool-workflow/src/index.ts b/packages/workflow/tool-workflow/src/index.ts
+index d6ca714..fb15a71 100644
+--- a/packages/workflow/tool-workflow/src/index.ts
++++ b/packages/workflow/tool-workflow/src/index.ts
+@@ -15,7 +15,7 @@
+ import type { Context } from '@deepseek-ai/cordis'
+ import z from '@deepseek-ai/schemastery'
+ import { defineTool } from '@deepseek-ai/dsh-tools'
+-import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools'
++import type { ToolCallView, ToolResultView, ToolDefinition } from '@deepseek-ai/dsh-tools'
+ import type { Agent } from '@deepseek-ai/dsh-agent'
+ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+ import type { JobId, JobOutcome } from '@deepseek-ai/dsh-jobs'
+@@ -40,6 +40,11 @@ declare module '@deepseek-ai/dsh-jobs' {
+ export const name = 'tool-workflow'
+ export const inject = ['tools', 'workflowEngine', 'systemPrompt']
+ 
++function markManagedEffect<T extends ToolDefinition>(definition: T, effect: 'communication' | 'delegation'): T {
++  Object.defineProperty(definition.execute, Symbol.for('dsh.tool.managed-effect'), { value: effect })
++  return definition
++}
++
+ /** Config: the model-facing tool name plus result rendering caps. */
+ export interface Config {
+   /** The model-facing tool name to register (default `workflow`). */
+@@ -325,7 +330,7 @@ export function apply(ctx: Context, config: Config): void {
+     order: ctx.systemPrompt.getSectionOrder('TOOL_WORKFLOW'),
+     text: `Use the ${toolName} tool ONLY when the user explicitly asks for a workflow or for large multi-agent orchestration: you write a JavaScript script (the tool description documents the exact format) that fans work out across many subagents with phases and structured results. For one or two delegations, prefer plain subagent calls.`,
+   })
+-  ctx.tools.register(defineTool({
++  ctx.tools.register(markManagedEffect(defineTool({
+     name: toolName,
+     description: DESCRIPTION,
+     parameters: {
+@@ -480,5 +485,5 @@ export function apply(ctx: Context, config: Config): void {
+     },
+     presentCall: args => presentWorkflowCall(args),
+     presentResult: (args, result) => presentWorkflowResult(args, result),
+-  }))
++  }), 'delegation'))
+ }

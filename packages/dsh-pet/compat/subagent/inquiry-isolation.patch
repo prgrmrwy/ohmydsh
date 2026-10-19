@@ -1,0 +1,203 @@
+diff --git a/packages/core/agent-loop/src/agent.ts b/packages/core/agent-loop/src/agent.ts
+index 2f68565..3a41282 100644
+--- a/packages/core/agent-loop/src/agent.ts
++++ b/packages/core/agent-loop/src/agent.ts
+@@ -118,6 +118,7 @@ export class ReactLoopAgent implements Agent {
+   private readonly systemPrompt: SystemPromptProjection
+   /** Identities fully frozen by this loop; weak references do not retain replaced history. */
+   private readonly frozenMessages = new WeakSet<Message>()
++  private isolatedContextIds: Set<import('@deepseek-ai/dsh-llm').MessageId> | undefined
+ 
+   constructor(
+     private loopCtx: Context,
+@@ -268,7 +269,7 @@ export class ReactLoopAgent implements Agent {
+     /* v8 ignore next -- private callers establish the running phase before proposing a step */
+     if (this.phase.kind !== 'running') throw new Error(`agent "${this.id}": pre-step outside running phase`)
+     const signal = this.phase.abort.signal
+-    const claimed = this.inbox.claim(target, position.turn)
++    const claimed = this.inbox.claim(target, position.turn, this.isolatedContextIds)
+     const assembly = await this.loopCtx.systemPrompt.assemble(assembleContextFor(this, signal))
+     signal.throwIfAborted()
+     const sections = renderContextSections(assembly)
+@@ -307,6 +308,11 @@ export class ReactLoopAgent implements Agent {
+       this.throwError(error)
+     }
+     phase.turn = turn
++    const head = this.inbox.nextTurn[0]
++    this.isolatedContextIds = head !== undefined
++      && (head.source.kind === 'pet-inquiry' || head.source.kind === 'pet-inquiry-result')
++      ? new Set([head.id])
++      : undefined
+     let turnEnds: TurnEndReason | null = null
+     let target: InboxTarget = 'next-turn'
+     try {
+@@ -356,11 +362,11 @@ export class ReactLoopAgent implements Agent {
+           this.session.append('step/end', { turn, step })
+         }
+         signal.throwIfAborted()
+-        if (turnEnds && this.inbox.nextStep.length === 0) {
++        if (turnEnds && !this.hasTurnEligiblePending()) {
+           await this.dispatch.serial('agent/turn-stopping', { turn, signal })
+           signal.throwIfAborted()
+         }
+-        if (turnEnds && this.inbox.nextStep.length === 0) break
++        if (turnEnds && !this.hasTurnEligiblePending()) break
+         target = 'next-step'
+       }
+     } catch (error: unknown) {
+@@ -385,6 +391,8 @@ export class ReactLoopAgent implements Agent {
+         this.session.append('turn/end', { turn, reason: turnEnds! })
+       } catch (error: unknown) {
+         this.throwError(error)
++      } finally {
++        this.isolatedContextIds = undefined
+       }
+     }
+     if (!this.inbox.hasPending) return false
+@@ -395,6 +403,12 @@ export class ReactLoopAgent implements Agent {
+     return true
+   }
+ 
++  private hasTurnEligiblePending(): boolean {
++    return this.isolatedContextIds === undefined
++      ? this.inbox.nextStep.length > 0
++      : this.inbox.hasEligiblePending(this.isolatedContextIds)
++  }
++
+   private async step(decision: Extract<PreparedStep, { kind: 'enter' }>): Promise<StepEndReason | null> {
+     /* v8 ignore next -- private callers establish the running phase before executing a step */
+     if (this.phase.kind !== 'running') throw new Error(`agent "${this.id}": step outside running phase`)
+@@ -533,7 +547,10 @@ export class ReactLoopAgent implements Agent {
+         if (toolCalls.length === 0) return { kind: 'completed' }
+         const { concluded } = await executeToolCalls(
+           this.loopCtx, turn, step, toolCalls, signal,
+-          context => this.inbox.splice('next-step', this.inbox.nextStep.length, 0, [context]),
++          context => {
++            if (this.isolatedContextIds !== undefined) this.isolatedContextIds.add(context.id)
++            this.inbox.splice('next-step', this.inbox.nextStep.length, 0, [context])
++          },
+         )
+         return concluded ? { kind: 'completed' } : null
+       } catch (error: unknown) {
+diff --git a/packages/core/agent-loop/src/inbox.ts b/packages/core/agent-loop/src/inbox.ts
+index ef00887..14ab05d 100644
+--- a/packages/core/agent-loop/src/inbox.ts
++++ b/packages/core/agent-loop/src/inbox.ts
+@@ -75,7 +75,7 @@ export class ReactLoopInbox implements InboxContract {
+   constructor(
+     private readonly projections: SessionProjectionRegistry,
+     private readonly session: Session,
+-    private readonly dispatch: AgentEventDispatch,
++    private readonly dispatch: Pick<AgentEventDispatch, 'emit'>,
+   ) {}
+ 
+   /** Prompts awaiting individual turns. */
+@@ -94,6 +94,11 @@ export class ReactLoopInbox implements InboxContract {
+     return state['next-turn'].length > 0 || state['next-step'].length > 0
+   }
+ 
++  /** Whether next-step contains a message owned by the supplied id set. */
++  hasEligiblePending(ids: ReadonlySet<MessageId>): boolean {
++    return this.nextStep.some(message => ids.has(message.id))
++  }
++
+   /** Durably cancel all pending input, clearing next-step before next-turn. */
+   clear(): void {
+     this.splice('next-step', 0, this.nextStep.length, [])
+@@ -106,9 +111,23 @@ export class ReactLoopInbox implements InboxContract {
+    * @param turn - turn that will own the claimed batch.
+    * @returns next-step input followed by the queued turn, when requested.
+    */
+-  claim(target: InboxTarget, turn: number): UserMessage[] {
+-    const claimed = this.mutate('next-step', 0, this.nextStep.length, [], false)
+-    if (target === 'next-turn') claimed.push(...this.mutate('next-turn', 0, 1, [], false))
++  claim(target: InboxTarget, turn: number, isolatedIds?: ReadonlySet<MessageId>): UserMessage[] {
++    const claimed: UserMessage[] = []
++    const step = this.nextStep
++    if (isolatedIds === undefined) {
++      claimed.push(...this.mutate('next-step', 0, step.length, [], false))
++    } else {
++      for (const message of step) {
++        if (!isolatedIds.has(message.id)) continue
++        const index = this.nextStep.findIndex(candidate => candidate.id === message.id)
++        if (index >= 0) claimed.push(...this.mutate('next-step', index, 1, [], false))
++      }
++    }
++    const head = this.nextTurn[0]
++    if (target === 'next-turn' && head !== undefined
++      && (isolatedIds === undefined || isolatedIds.has(head.id))) {
++      claimed.push(...this.mutate('next-turn', 0, 1, [], false))
++    }
+     for (const message of claimed) this.dispatch.emit('agent/inbox/claimed', { message, turn })
+     return claimed
+   }
+diff --git a/packages/core/agent-loop/src/index.ts b/packages/core/agent-loop/src/index.ts
+index 7541a5c..9b69b1f 100644
+--- a/packages/core/agent-loop/src/index.ts
++++ b/packages/core/agent-loop/src/index.ts
+@@ -22,9 +22,9 @@ import type {
+   SessionStartSource,
+   TurnBoundaryProjection,
+ } from '@deepseek-ai/dsh-agent'
+-import { errorChain, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+-import { interruptedTurnClosers, SessionLogOffset, SessionPreparation, SessionSeq } from '@deepseek-ai/dsh-session'
+-import type { Session, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
++import { errorChain, MessageId, createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
++import { interruptedTurnClosers, Session, SessionId, SessionLogOffset, SessionPreparation, SessionSeq } from '@deepseek-ai/dsh-session'
++import type { SessionHeader } from '@deepseek-ai/dsh-session'
+ import type {} from '@deepseek-ai/dsh-system-prompt'
+ import type {} from '@deepseek-ai/dsh-tools'
+ import type {} from '@deepseek-ai/dsh-session-projection'
+@@ -32,10 +32,17 @@ import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
+ import { SessionPersistenceNotFoundError } from '@deepseek-ai/dsh-session-persistence'
+ import type { SessionHandle, SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
+ import { ReactLoopAgent } from './agent.ts'
+-import { inboxProjectionDefinition } from './inbox.ts'
++import { inboxProjectionDefinition, ReactLoopInbox } from './inbox.ts'
+ import { DEFAULT_MAX_PARALLEL_TOOL_CALLS } from './constants.ts'
+ import type {} from './runtime-context.ts'
+ 
++declare module '@deepseek-ai/dsh-llm' {
++  interface MessageSourceMap {
++    'pet-inquiry': { kind: 'pet-inquiry' }
++    'pet-inquiry-result': { kind: 'pet-inquiry-result' }
++  }
++}
++
+ /** Fiber states that cannot own or serve a new lifecycle. */
+ const INACTIVE_STATES: ReadonlySet<FiberState> = new Set([
+   FiberState.UNLOADING,
+@@ -345,6 +352,33 @@ export class AgentLoop extends Service implements AgentFactory {
+     })).default([]),
+   }) as z<{ agents?: Config['agents']; maxParallelToolCalls?: number }, Config>
+ 
++  /** Whether this runtime supports isolated queued-turn claims. */
++  readonly supportsIsolatedQueuedTurnClaim = true
++
++  /** Probe actual isolated-claim behavior against a temporary in-memory session. */
++  probeIsolatedQueuedTurnClaim(fixture: { nextStepId: string; nextTurnId: string }): {
++    claimedMessageIds: readonly string[]
++    pendingNextStepIds: readonly string[]
++  } {
++    const session = Session.create(SessionId(`pet-probe-${randomUUID()}`))
++    const gui = {
++      ...createUserMessage({ content: [{ type: 'text', text: 'GUI' }], source: { kind: 'user' } }),
++      id: MessageId(fixture.nextStepId),
++    }
++    const inquiry = {
++      ...createUserMessage({ content: [{ type: 'text', text: 'Q' }], source: { kind: 'pet-inquiry' } }),
++      id: MessageId(fixture.nextTurnId),
++    }
++    const inbox = new ReactLoopInbox(this.runtime.ctx.sessionProjections, session, { emit: () => {} })
++    inbox.append('next-step', gui)
++    inbox.append('next-turn', inquiry)
++    const claimed = inbox.claim('next-turn', 1, new Set([inquiry.id]))
++    return {
++      claimedMessageIds: claimed.map(message => message.id),
++      pendingNextStepIds: inbox.nextStep.map(message => message.id),
++    }
++  }
++
+   /** Validated configuration owned by the agent-loop service. */
+   readonly config: Config
+   private readonly ownership: FactoryOwnership

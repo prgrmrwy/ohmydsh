@@ -8,6 +8,7 @@ import { createLocusResolution } from '../src/host/locus/resolution.js'
 import { openPetHarness } from './harness.js'
 
 function enableAtomicTransactions(harness: Awaited<ReturnType<typeof openPetHarness>>): void {
+  if (harness.domain.supportsTransaction === true && typeof harness.domain.transaction === 'function') return
   type TableName = 'loci' | 'locus_indexes' | 'locus_operations' | 'locus_switch_notices' | 'locus_deliveries' | 'locus_permission_audit'
   type Write = { kind: 'put' | 'delete'; table: TableName; key: string; value?: unknown }
   const domain = harness.domain as unknown as {

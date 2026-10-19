@@ -57,7 +57,9 @@ import {
   type InquiryReconcileReport,
 } from '../inquiry/reconcile.js'
 import { InquiryScheduler } from '../inquiry/scheduler.js'
+import type { InquiryAnswerRecord } from '../inquiry/answer.js'
 import { registerInquiryAnswerTool, registerInquiryAskTool } from '../inquiry/tools.js'
+import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 
 /** Durable public-fact storage, as this assembly consumes it. */
 export interface CollaborationContextStoreLike {
@@ -102,6 +104,18 @@ export interface CollaborationAssemblySeams {
     | undefined
   readonly contextStore: CollaborationContextStoreLike | undefined
   readonly ledger: InquiryLedgerLike | undefined
+  /** Durable answer lookup and atomic answer+inquiry+result commit. */
+  readonly answerStore?: { get(inquiryId: string): unknown; commit(answer: InquiryAnswerRecord, eventId: string): Promise<InquiryAnswerRecord> }
+  /** Exact runtime lifecycle; absent means no production readiness or acceptance. */
+  readonly inquiryRuntime?: {
+    readonly ready: boolean
+    forExecution?(execution: ToolRunContext): {
+      readonly origin: (callerSessionId: string) => InquiryOriginProof | undefined
+      accept(request: unknown, facts: unknown): Promise<InquiryRecord>
+    }
+    afterAnswer(inquiryId: string): void | Promise<void>
+    answerBinding(callerSessionId: string, inquiryId: string, execution: unknown): boolean
+  }
   /**
    * Durable result outbox, used ONLY by startup reconciliation here.
    *
@@ -156,10 +170,8 @@ export interface CollaborationAssembly {
   /**
    * Whether inquiries can actually be DISPATCHED on this Host.
    *
-   * Today this resolves to unavailable: the isolated queued-turn claim seam is
-   * written as a tracked compatibility patch but is not part of the pinned
-   * runtime, so the driver carries no marker. Ask still accepts and durably
-   * queues; nothing ever runs an inquiry turn.
+   * A runtime that cannot prove readiness remains unavailable. Public facts and
+   * roster remain installed, while asks fail before writing any inquiry row.
    */
   readonly inquiryDispatch: IsolatedQueuedTurnClaimSupport
   /** The scheduler built with the REAL verdict above; it never re-probes. */
@@ -252,29 +264,24 @@ export function composeCollaborationSurface(
    * the member stays listed and identifiable while being visibly not-inquirable.
    * The title is kept: it is traceable metadata, not a reachability claim.
    */
+  const runtimeReady = () =>
+    seams.inquiryRuntime?.ready === true &&
+    typeof seams.inquiryRuntime.forExecution === 'function' &&
+    inquiryDispatch.available &&
+    typeof seams.answerStore?.commit === 'function'
   const describe = (sessionId: string): CollaboratorDescription | undefined => {
     const described = seams.describe(sessionId)
-    if (inquiryDispatch.available) return described
+    if (runtimeReady()) return described
     if (described === undefined) return undefined
     return described.title === undefined ? {} : { title: described.title }
   }
 
-  /**
-   * Answer storage.
-   *
-   * There is no durable answer table in the current Pet Domain, and adding one
-   * is a schema version change that belongs with the dispatch work rather than
-   * with this assembly. Rejecting is the honest composition: an answer that
-   * only lived in memory would strand a requester on a promise a restart
-   * erases. This path is unreachable today anyway — an answer is only accepted
-   * for a DISPATCHED inquiry, and nothing can be dispatched.
-   */
+  // Legacy answer lookup remains available to existing helper shape, but its
+  // put path is impossible in production. Commits go only through the atomic
+  // durable answerStore seam.
   const answers = {
-    get: (): undefined => undefined,
-    put: (): Promise<never> =>
-      Promise.reject(
-        new PetError('INTERNAL', 'No durable inquiry-answer medium is composed on this Host'),
-      ),
+    get: (inquiryId: string): unknown => seams.answerStore?.get(inquiryId),
+    put: (): Promise<never> => Promise.reject(new PetError('INTERNAL', 'Legacy inquiry answer writes are disabled')),
   }
 
   const eligible = (sessionId: string): boolean => {
@@ -344,11 +351,20 @@ export function composeCollaborationSurface(
       disposers.push(registerCollaboratorsTool(scoped, { ports, describe }))
       disposers.push(
         registerInquiryAskTool(scoped, {
-          ports,
-          store: ledger,
-          origin: seams.origin,
-          now,
-          newInquiryId: newId,
+          forExecution: execution => {
+            if (!runtimeReady() || typeof seams.inquiryRuntime?.forExecution !== 'function') {
+              throw new PetError('INTERNAL', 'Inquiry runtime unavailable')
+            }
+            const bound = seams.inquiryRuntime.forExecution(execution)
+            return {
+              ports,
+              store: { accept: (request, facts) => bound.accept(request, facts) },
+              ready: runtimeReady,
+              origin: bound.origin,
+              now,
+              newInquiryId: newId,
+            }
+          },
         }),
       )
       disposers.push(
@@ -356,6 +372,14 @@ export function composeCollaborationSurface(
           ports,
           ledger,
           answers,
+          commitAnswer: async (...args) => {
+            if (typeof seams.answerStore?.commit !== 'function') {
+              throw new PetError('INTERNAL', 'Inquiry runtime unavailable')
+            }
+            return seams.answerStore.commit(...args)
+          },
+          binding: (...args) => seams.inquiryRuntime?.answerBinding?.(...args) ?? false,
+          afterAnswer: (...args) => seams.inquiryRuntime?.afterAnswer?.(...args),
           now,
           newEventId: newId,
         }),

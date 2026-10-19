@@ -3,21 +3,25 @@
  * additive schema-evolution path.
  *
  * This file records the REAL, currently-committed pattern (14 pre-existing
- * additive bumps, one hand-rolled parser per non-trivial record type) AND
- * verifies that `shared_fact_ledger`/`ledger_item` (added in task 2.1) landed
- * as v15 following that exact pattern — not a re-derived assumption.
+ * additive bumps, one hand-rolled parser per non-trivial record type), verifies
+ * that `shared_fact_ledger`/`ledger_item` landed at v15 following that pattern,
+ * that v16 adds `inquiry_answers` without changing the v15 history, and that
+ * v17 adds inquiry handoff/work tables without changing earlier rationale.
  */
 import { describe, expect, it } from 'vitest'
 
 describe('intent-triage domain contract: additive schema evolution (tasks 1.4 / 2.1)', () => {
-  it('PET_DOMAIN_VERSION is 15: shared_fact_ledger/ledger_item landed at v15 with a written additive rationale, matching every prior bump', async () => {
+  it('PET_DOMAIN_VERSION is 17 while retaining the v15 ledger, v16 answer, and v17 inquiry rationale', async () => {
     const fs = await import('node:fs')
     const specSource = fs.readFileSync(
       new URL('../src/host/spec.ts', import.meta.url),
       'utf8',
     )
-    expect(specSource).toContain('export const PET_DOMAIN_VERSION = 15')
+    expect(specSource).toContain('export const PET_DOMAIN_VERSION = 17')
     expect(specSource).toContain('Bumped to 15 for the shared-fact ledger')
+    expect(specSource).toContain('Bumped to 16 for inquiry_answers')
+    expect(specSource).toContain('Bumped to 17 for durable inquiry handoff intents and local work proofs')
+    expect(specSource).toContain('Additive opaque tables: migration does not infer protocol state from legacy rows.')
 
     // Every bump to date except v1->v2 is additive (new table and/or optional
     // field; old rows keep validating and are never rewritten or cleared).
@@ -30,19 +34,16 @@ describe('intent-triage domain contract: additive schema evolution (tasks 1.4 / 
     expect(specSource).toContain('cannot be upgraded in place')
   })
 
-  it('every table (including the two new ones) follows the same domainTable<string, z.infer<typeof X>>(X) shape', async () => {
+  it('every table (including v17 inquiry tables) follows the same domainTable<string, z.infer<typeof X>>(X) shape', async () => {
     const fs = await import('node:fs')
     const specSource = fs.readFileSync(
       new URL('../src/host/spec.ts', import.meta.url),
       'utf8',
     )
     const tableDecls = [...specSource.matchAll(/(\w+):\s*domainTable<string, z\.infer<typeof (\w+)>>\((\w+)\)/g)]
-    // 22 real tables after adding shared_fact_ledger + ledger_item (verified
-    // by actually counting the matches, not by re-deriving the number from a
-    // manually-read list — an earlier version of this test undercounted by
-    // one that same way, catching an inquiry_results omission before it
-    // could mislead task 2.1).
-    expect(tableDecls.length).toBe(22)
+    // 25 real tables after the v15 ledger tables, v16 inquiry_answers, and
+    // v17 inquiry handoff/work tables (verified by declaration count).
+    expect(tableDecls.length).toBe(25)
     for (const [, , schemaTypeName, schemaValueName] of tableDecls) {
       // Every declaration's type-arg and value-arg name the SAME schema
       // symbol — there is no table with a mismatched schema/type pair today.
@@ -50,7 +51,7 @@ describe('intent-triage domain contract: additive schema evolution (tasks 1.4 / 
     }
   })
 
-  it('the two new table names land alongside, not colliding with, the 20 pre-existing tables', async () => {
+  it('v15 ledger, v16 answer, and v17 inquiry tables land alongside the 20 pre-existing tables', async () => {
     const fs = await import('node:fs')
     const specSource = fs.readFileSync(
       new URL('../src/host/spec.ts', import.meta.url),
@@ -63,7 +64,8 @@ describe('intent-triage domain contract: additive schema evolution (tasks 1.4 / 
       'invocation_channel', 'loci', 'locus_indexes', 'locus_deliveries',
       'locus_operations', 'locus_switch_notices', 'locus_permission_audit',
       'collaboration_contexts', 'collaboration_context_revisions', 'inquiries',
-      'inquiry_results', 'shared_fact_ledger', 'ledger_item',
+      'inquiry_results', 'inquiry_answers', 'inquiry_handoffs', 'inquiry_works',
+      'shared_fact_ledger', 'ledger_item',
     ])
   })
 

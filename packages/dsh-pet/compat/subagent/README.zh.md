@@ -5,7 +5,7 @@
 ## 这是什么
 
 当前 `dsh.yaml` 固定 DSH `0.2.0-rc.2`。Pet unified locus 需要该正式包尚未发布的
-宿主能力，因此本目录维护一份针对固定 tag 的最小 patch。
+宿主能力，因此本目录维护针对固定 tag 的兼容 artifacts。
 
 **2026-10-04 按 `dsh-v0.2.0-rc.2`（`639ed015`）重新推导**（change `upgrade-dsh-0-2-0-runtime` W5）：
 四个 seam 在干净 HEAD 中仍为 0 命中（`git grep` 核对），故全部保留；`child-agent.ts` 的源码 hunk
@@ -13,7 +13,7 @@
 的 hunk 作废——上游已删除它修改的那个用例。上游 subagent 规格：未打补丁 316 通过、打补丁后 328 通过
 （多出的 12 例即 seam 用例，包含全新 runtime 冷恢复后仍保持 silent settlement 的回归测试）。
 
-**当前 overlay 只替换一个上游包：`@deepseek-ai/dsh-subagent`。**
+**当前 overlay 替换三个上游包：`@deepseek-ai/dsh-subagent`、`@deepseek-ai/dsh-agent-loop` 和 `@deepseek-ai/dsh-tools`。**
 
 承载的 seam（对应 5 个能力 marker）：
 
@@ -37,6 +37,8 @@
   `bash`/`lark-cli` 的子代。
 - `withLiveContinuableChildSession` —— 在 continuation owner 内访问准确的 child
   Session。官方泛化 Session 路由**有意**不解析 continuation-owned child。
+
+- `dispatchToolBody` 最终 guard 重检——async `tools/execute` wrapper 等待期间撤销 scoped guard 时，在注册工具 body 尚未开始前拒绝调用；不取消已开始的 body，也不约束绕过 ToolRuntime 的任意副作用。
 
 ### 已移除的 seam（不要加回来）
 
@@ -90,16 +92,16 @@ Host 首次准备会执行 `build-launcher.cjs`；fingerprint 命中时只做轻
 不 clone、build、install 或访问 registry。fingerprint 覆盖：
 
 - 固定 DSH 版本与 checkout canonical path；
-- patch 及其固定 SHA；
+- 三个 patch 及其固定 SHA、tools package template；
 - Subagent/launcher/lock/timeout builders；
-- package template。
+- Subagent / agent-loop package templates。
 
 重建时使用一把跨进程、可恢复 stale owner 的共享锁，覆盖 Subagent 源码与 launcher
 整条链，并固定 `npm@11.19.0`（launcher）及上游声明的 `pnpm@11.7.0`（源码构建），以消除机器全局包管理器漂移。源码 checkout 仅在 install 子进程设置 `CI=true` 跳过无关的开发仓库 Lefthook 安装，依赖自身 install scripts 仍执行；tsc/tsdown 构建不继承该环境。reviewed DSH 源码要求 Node `^22.19.0 || >=24.0.0`，旧 Node 会在 clone/install 前明确失败。所有外部 git/corepack/npm 子进程通过有界 supervisor
 运行，超时会终止进程组。launcher 在同文件系统 sibling staging 中完成：
 
-1. 固定 tag 构建并验证 patch capability marker；
-2. 安装官方 `@deepseek-ai/dsh@0.2.0-rc.2`、一个 reviewed override（subagent）
+1. 固定 tag 构建并验证各 patch 的 capability marker 与运行时行为；
+2. 安装官方 `@deepseek-ai/dsh@0.2.0-rc.2`、三个 reviewed overrides（subagent、agent-loop、tools）
    与显式声明的框架版本（cordis / cordis-plugin-include，值从 reviewed 上游树读取）；
 3. 显式审批固定 install scripts；
 4. 验证依赖树唯一性、package identity/version/provenance、实际能力与 DSH

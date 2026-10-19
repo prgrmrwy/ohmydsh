@@ -22,18 +22,58 @@
  */
 
 import { createHash } from 'node:crypto'
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const requireHere = createRequire(import.meta.url)
-const compatBuildLock = requireHere('./compat-build-lock.cjs').acquireCompatBuildLock()
 const { runCompatCommand } = requireHere('./compat-run.cjs')
 const { prepareUpstreamCache, recordUpstreamCache } = requireHere('./upstream-cache.cjs')
-process.once('exit', () => compatBuildLock.release())
 const patchFile = join(here, 'settlement-notice.patch')
+const inquiryPatchFile = join(here, 'inquiry-isolation.patch')
+const toolsPatchFile = join(here, 'newinquiry-tools-guard.patch')
+const managedEffectsPatchFile = join(here, 'native-managed-effects.patch')
+const nativeToolsTemplateFile = join(here, 'native-tools.package.template.json')
+const nativeToolsVerifier = join(here, 'verify-native-managed-effects.mjs')
+const agentLoopPackageDir = 'packages/core/agent-loop'
+const agentLoopTemplateFile = join(here, 'agent-loop.package.template.json')
+const toolsTemplateFile = join(here, 'newtools.package.template.json')
+const toolsPackageDir = 'packages/core/tools'
+
+function parseArgs(argv) {
+  let output
+  for (let index = 0; index < argv.length; index++) {
+    const arg = argv[index]
+    if (arg !== '--isolated-output') throw new Error(`unknown argument: ${arg}`)
+    if (output !== undefined) throw new Error('duplicate --isolated-output')
+    const value = argv[++index]
+    if (!value || value.startsWith('--') || !isAbsolute(value)) throw new Error('--isolated-output requires exactly one absolute output directory')
+    output = value
+  }
+  return output
+}
+
+let isolatedOutput
+try {
+  isolatedOutput = parseArgs(process.argv.slice(2))
+} catch (error) {
+  console.error(`[compat/subagent] ${error.message}`)
+  process.exit(2)
+}
+const checkout = process.env.DSH_COMPAT_SUBAGENT_CHECKOUT ?? join(here, '.upstream')
+const outputRoot = isolatedOutput ? resolve(isolatedOutput) : resolve(here)
+const within = (child, parent) => child === parent || child.startsWith(`${parent}${sep}`)
+if (isolatedOutput && (
+  within(outputRoot, resolve(here)) || within(outputRoot, resolve(checkout))
+  || (existsSync(outputRoot) && readdirSync(outputRoot).length > 0)
+)) {
+  console.error('[compat/subagent] isolated output must be a new or empty directory outside the compat source tree')
+  process.exit(2)
+}
+const compatBuildLock = requireHere('./compat-build-lock.cjs').acquireCompatBuildLock()
+process.once('exit', () => compatBuildLock.release())
 
 /** Pinned upstream identity. A drift here must fail the build, never adapt. */
 const UPSTREAM = {
@@ -42,8 +82,14 @@ const UPSTREAM = {
   packageDir: 'packages/subagent/subagent',
   /** Reviewed commit behind dsh-v0.2.0-rc.2; a moved tag/local checkout fails. */
   commit: '639ed015397290b3745d163aafe02ffee4aa3f84',
-  /** sha256 of `settlement-notice.patch`, so a silently edited patch fails. */
+  /** SHA-256 pins for all reviewed patches; edited source changes fail closed. */
   patchSha256: '78490e17d1bbeacc3e1f05aa03c01343dd765628a1deb8068f9388bf438005c8',
+  /** SHA-256 of `inquiry-isolation.patch`. */
+  agentLoopPatchSha256: '0973da4b6af46fe514ffd15297073922e0cd6c3fd0c8c84ce087f721be233c92',
+  /** SHA-256 of the final tool-dispatch guard patch. */
+  toolsPatchSha256: '62f9c313364e4aa7a1b2ce6eb8e33f7773802ffe21bc15c40ddb04654f7b13a3',
+  /** SHA-256 of the managed-effects owner patch. */
+  managedEffectsPatchSha256: '645f55d882c346310f473437ef57950a27eb6dad1d2ccf670b8e2e453ecbad61',
 }
 
 const run = (command, args, cwd = here, options) => runCompatCommand(command, args, cwd, options)
@@ -63,6 +109,20 @@ function assertSupportedNode() {
 
 assertSupportedNode()
 const actualPatchHash = createHash('sha256').update(readFileSync(patchFile)).digest('hex')
+const actualAgentLoopPatchHash = createHash('sha256').update(readFileSync(inquiryPatchFile)).digest('hex')
+if (actualAgentLoopPatchHash !== UPSTREAM.agentLoopPatchSha256) {
+  fail(`inquiry patch hash mismatch\\n  expected ${UPSTREAM.agentLoopPatchSha256}\\n  actual   ${actualAgentLoopPatchHash}`)
+}
+const actualToolsPatchHash = createHash('sha256').update(readFileSync(toolsPatchFile)).digest('hex')
+if (actualToolsPatchHash !== UPSTREAM.toolsPatchSha256) {
+  fail(`tools patch hash mismatch\\n  expected ${UPSTREAM.toolsPatchSha256}\\n  actual   ${actualToolsPatchHash}`)
+}
+const actualManagedEffectsPatchHash = createHash('sha256').update(readFileSync(managedEffectsPatchFile)).digest('hex')
+if (actualManagedEffectsPatchHash !== UPSTREAM.managedEffectsPatchSha256) {
+  fail(`managed-effects patch hash mismatch\\n  expected ${UPSTREAM.managedEffectsPatchSha256}\\n  actual   ${actualManagedEffectsPatchHash}`)
+}
+const nativeToolsTemplate = JSON.parse(readFileSync(nativeToolsTemplateFile, 'utf8'))
+if (nativeToolsTemplate.patchSha256 !== UPSTREAM.managedEffectsPatchSha256) fail('native tool template patch hash differs from the reviewed patch pin')
 if (actualPatchHash !== UPSTREAM.patchSha256) {
   fail(
     `patch hash mismatch\n  expected ${UPSTREAM.patchSha256}\n  actual   ${actualPatchHash}\n`
@@ -70,7 +130,6 @@ if (actualPatchHash !== UPSTREAM.patchSha256) {
   )
 }
 
-const checkout = process.env.DSH_COMPAT_SUBAGENT_CHECKOUT ?? join(here, '.upstream')
 /**
  * Whether the cached checkout actually contains the reviewed commit.
  *
@@ -107,11 +166,15 @@ console.log(`[compat/subagent] base ${head}`)
 // `git checkout -- .` restores tracked files only. Reuse ignored build output
 // (node_modules, lib/) only when it was produced for exactly these inputs;
 // otherwise remove every untracked and ignored file before building.
-const cache = prepareUpstreamCache({ checkout, commit: UPSTREAM.commit, patchSha256: UPSTREAM.patchSha256, run })
+const combinedPatchHash = createHash('sha256').update(readFileSync(patchFile)).update(readFileSync(inquiryPatchFile)).update(readFileSync(toolsPatchFile)).update(readFileSync(managedEffectsPatchFile)).update(readFileSync(nativeToolsTemplateFile)).digest('hex')
+const cache = prepareUpstreamCache({ checkout, commit: UPSTREAM.commit, patchSha256: combinedPatchHash, run })
 console.log(`[compat/subagent] upstream cache ${cache.reused ? 'reused (same commit and patch)' : 'scrubbed (inputs changed or unknown)'}`)
 
 try {
   run('git', ['apply', '--check', patchFile], checkout)
+  run('git', ['apply', '--check', inquiryPatchFile], checkout)
+  run('git', ['apply', '--check', toolsPatchFile], checkout)
+  run('git', ['apply', '--check', managedEffectsPatchFile], checkout)
 } catch {
   fail(
     'the recorded patch does not apply to the pinned upstream source.\n'
@@ -120,6 +183,9 @@ try {
   )
 }
 run('git', ['apply', patchFile], checkout)
+run('git', ['apply', inquiryPatchFile], checkout)
+run('git', ['apply', toolsPatchFile], checkout)
+run('git', ['apply', managedEffectsPatchFile], checkout)
 
 // The checkout is now PATCHED, and it stays patched for the whole build below
 // (install, native build, tests, tsc, tsdown all read the patched source).
@@ -175,15 +241,28 @@ if (!existsSync(libSource)) fail('upstream build produced no lib directory')
 
 // Publish the artifact: the official package name and exports, the built
 // runtime, and a version marked so it can never be mistaken for the release.
-const target = resolve(here)
+const target = isolatedOutput ? join(outputRoot, 'subagent') : outputRoot
+const loopTarget = isolatedOutput ? join(outputRoot, 'agent-loop') : join(here, 'agent-loop')
+const toolsTarget = isolatedOutput ? join(outputRoot, 'tools') : join(here, 'tools')
+mkdirSync(target, { recursive: true })
+mkdirSync(loopTarget, { recursive: true })
+mkdirSync(toolsTarget, { recursive: true })
 rmSync(join(target, 'lib'), { recursive: true, force: true })
+rmSync(join(loopTarget, 'lib'), { recursive: true, force: true })
+rmSync(join(toolsTarget, 'lib'), { recursive: true, force: true })
 cpSync(libSource, join(target, 'lib'), { recursive: true })
+const loopBuilt = join(checkout, agentLoopPackageDir)
+if (!existsSync(join(loopBuilt, 'lib'))) fail('upstream build produced no agent-loop lib directory')
+cpSync(join(loopBuilt, 'lib'), join(loopTarget, 'lib'), { recursive: true })
+const toolsBuilt = join(checkout, toolsPackageDir)
+if (!existsSync(join(toolsBuilt, 'lib'))) fail('upstream build produced no tools lib directory')
+cpSync(join(toolsBuilt, 'lib'), join(toolsTarget, 'lib'), { recursive: true })
 for (const stale of ['lib/tsconfig.tsbuildinfo', 'lib/types/tsconfig.tsbuildinfo']) {
   rmSync(join(target, stale), { force: true })
 }
 
 const upstreamPkg = JSON.parse(readFileSync(join(built, 'package.json'), 'utf8'))
-const trackedSkeleton = JSON.parse(readFileSync(join(target, 'package.template.json'), 'utf8'))
+const trackedSkeleton = JSON.parse(readFileSync(join(here, 'package.template.json'), 'utf8'))
 const { devDependencies: _dev, publishConfig: _publish, ...rest } = upstreamPkg
 const manifest = {
   ...rest,
@@ -212,10 +291,105 @@ const manifest = {
 // skeleton in the working tree. It is gitignored, which is why a build leaves
 // no source diff behind.
 writeFileSync(join(target, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`)
+const loopUpstreamPkg = JSON.parse(readFileSync(join(loopBuilt, 'package.json'), 'utf8'))
+const loopTemplate = JSON.parse(readFileSync(agentLoopTemplateFile, 'utf8'))
+const { devDependencies: _loopDev, publishConfig: _loopPublish, ...loopSourcePackage } = loopUpstreamPkg
+const loopManifest = { ...loopSourcePackage, ...loopTemplate, version: loopTemplate.version, dependencies: loopUpstreamPkg.dependencies, peerDependencies: loopUpstreamPkg.peerDependencies, exports: loopUpstreamPkg.exports, scripts: loopTemplate.scripts, dsh_compat: {
+  replaces: `@deepseek-ai/dsh-agent-loop@${loopUpstreamPkg.version}`,
+  reason: 'isolates next-step inbox claims to Pet inquiry turns', upstreamTag: UPSTREAM.tag,
+  upstreamBase: UPSTREAM.commit, patchSha256: UPSTREAM.agentLoopPatchSha256,
+  removeWhen: 'upstream supports isolated queued-turn claim with equivalent next-step inbox isolation',
+} }
+writeFileSync(join(loopTarget, 'package.json'), `${JSON.stringify(loopManifest, null, 2)}\n`)
+const toolsUpstreamPkg = JSON.parse(readFileSync(join(toolsBuilt, 'package.json'), 'utf8'))
+const toolsTemplate = JSON.parse(readFileSync(toolsTemplateFile, 'utf8'))
+const { devDependencies: _toolsDev, publishConfig: _toolsPublish, ...toolsSourcePackage } = toolsUpstreamPkg
+const toolsManifest = {
+  ...toolsSourcePackage,
+  ...toolsTemplate,
+  dependencies: toolsUpstreamPkg.dependencies,
+  peerDependencies: toolsUpstreamPkg.peerDependencies,
+  exports: toolsUpstreamPkg.exports,
+  files: toolsUpstreamPkg.files,
+  scripts: toolsUpstreamPkg.scripts,
+  dsh_compat: { ...toolsTemplate.dsh_compat, upstreamBase: UPSTREAM.commit, patchSha256: UPSTREAM.toolsPatchSha256 },
+}
+writeFileSync(join(toolsTarget, 'package.json'), `${JSON.stringify(toolsManifest, null, 2)}\n`)
+const nativeToolsRoot = join(outputRoot, 'native-tools')
+mkdirSync(nativeToolsRoot, { recursive: true })
+for (const spec of nativeToolsTemplate.packages) {
+  const sourceDir = join(checkout, spec.sourceDir)
+  const upstreamManifest = JSON.parse(readFileSync(join(sourceDir, 'package.json'), 'utf8'))
+  if (upstreamManifest.name !== spec.name) fail(`native tool source ${spec.sourceDir} declares ${upstreamManifest.name}, expected ${spec.name}`)
+  if (!existsSync(join(sourceDir, 'lib'))) fail(`native tool build produced no lib directory for ${spec.name}`)
+  const targetDir = join(nativeToolsRoot, spec.sourceDir.split('/').at(-1))
+  rmSync(targetDir, { recursive: true, force: true })
+  mkdirSync(targetDir, { recursive: true })
+  cpSync(join(sourceDir, 'lib'), join(targetDir, 'lib'), { recursive: true })
+  const { devDependencies: _nativeDev, publishConfig: _nativePublish, ...nativePackage } = upstreamManifest
+  const scripts = { ...(nativePackage.scripts ?? {}) }
+  delete scripts.postinstall
+  const nativeDependencies = { ...(nativePackage.dependencies ?? {}) }
+  const nativePeers = { ...(nativePackage.peerDependencies ?? {}) }
+  for (const section of [nativeDependencies, nativePeers]) {
+    for (const [name, range] of Object.entries(section)) {
+      if (typeof range !== 'string' || !range.startsWith('workspace:')) continue
+      const candidate = join(checkout, 'packages', ...name.replace('@deepseek-ai/', '').split('/'))
+      if (existsSync(join(candidate, 'package.json'))) {
+        const depManifest = JSON.parse(readFileSync(join(candidate, 'package.json'), 'utf8'))
+        section[name] = `^${depManifest.version}`
+      }
+    }
+  }
+  const nativeManifest = {
+    ...nativePackage,
+    version: nativeToolsTemplate.version,
+    dependencies: nativeDependencies,
+    peerDependencies: nativePeers,
+    scripts,
+    dsh_compat: {
+      replaces: `${spec.name}@${upstreamManifest.version}`,
+      reason: 'marks tool owners for managed effect classification',
+      upstreamTag: UPSTREAM.tag,
+      upstreamBase: UPSTREAM.commit,
+      patchSha256: UPSTREAM.managedEffectsPatchSha256,
+    },
+  }
+  writeFileSync(join(targetDir, 'package.json'), `${JSON.stringify(nativeManifest, null, 2)}\n`)
+  if (!existsSync(join(targetDir, 'lib', 'index.js')) || !existsSync(join(targetDir, 'lib', 'types', 'index.d.ts'))) fail(`native tool artifact is missing runtime or declaration entry: ${spec.name}`)
+}
+if (!existsSync(join(loopTarget, 'lib', 'index.js'))) fail('agent-loop artifact has no runtime entry')
+if (!existsSync(join(toolsTarget, 'lib', 'index.js'))) fail('tools artifact has no runtime entry')
+for (const spec of nativeToolsTemplate.packages) {
+  const nativeDir = join(nativeToolsRoot, spec.sourceDir.split('/').at(-1))
+  const nativeManifest = JSON.parse(readFileSync(join(nativeDir, 'package.json'), 'utf8'))
+  if (nativeManifest.name !== spec.name || nativeManifest.version !== nativeToolsTemplate.version || nativeManifest.dsh_compat?.patchSha256 !== UPSTREAM.managedEffectsPatchSha256 || nativeManifest.dsh_compat?.upstreamBase !== UPSTREAM.commit) fail(`native package provenance mismatch: ${spec.name}`)
+  if (!existsSync(join(nativeDir, nativeManifest.main)) || !existsSync(join(nativeDir, nativeManifest.types))) fail(`native package runtime or type entry is missing: ${spec.name}`)
+  const nativeRuntime = readFileSync(join(nativeDir, nativeManifest.main), 'utf8')
+  if (!nativeRuntime.includes('dsh.tool.managed-effect')) fail(`native package omitted managed-effect owner marker: ${spec.name}`)
+}
+if (!join(toolsTarget, 'lib', 'index.js').startsWith(`${outputRoot}${sep}`)) fail('tools artifact escaped the selected output root')
+const loopRuntime = readFileSync(join(loopTarget, 'lib', 'index.js'), 'utf8')
+const toolsRuntime = readFileSync(join(toolsTarget, 'lib', 'index.js'), 'utf8')
+if (!toolsRuntime.includes('const denialReason = this.guardReason(exec)')) fail('tools artifact omitted its final guard recheck')
+if (!loopRuntime.includes('supportsIsolatedQueuedTurnClaim')) fail('agent-loop artifact omitted the isolated queued-turn capability marker')
+if (!loopRuntime.includes('supportsIsolatedQueuedTurnClaim = true')) fail('agent-loop artifact omitted the enabled isolated-claim marker')
+if (!isAbsolute(loopTarget) || !within(loopTarget, outputRoot)) fail('agent-loop artifact escaped the selected output root')
+if (!isAbsolute(toolsTarget) || !within(toolsTarget, outputRoot)) fail('tools artifact escaped the selected output root')
+
+if (isolatedOutput && !target.startsWith(`${outputRoot}/`)) fail('isolated Subagent artifact escaped the requested root')
+if (isolatedOutput) console.log(`[compat/subagent] isolated artifacts written to ${outputRoot}`)
 
 // Prove the capability is actually present, rather than trusting the build.
-const descriptor = await import(join(target, 'lib', 'index.js'))
-const runtimeSource = readFileSync(join(target, 'lib', 'index.js'), 'utf8')
+// Isolated package output is intentionally staged, not installed: its bare
+// imports resolve only after the launcher assembles the dependency graph. Probe
+// the exact built bytes from the patched upstream workspace instead, then
+// verify the copied artifact bytes below remain identical.
+const descriptor = await import(pathToFileURL(join(libSource, 'index.js')).href)
+const sourceEntryBytes = readFileSync(join(libSource, 'index.js'))
+const artifactEntryBytes = readFileSync(join(target, 'lib', 'index.js'))
+if (!sourceEntryBytes.equals(artifactEntryBytes)) fail('copied Subagent entry differs from the built source that passed capability probes')
+const runtimeSource = artifactEntryBytes.toString('utf8')
 if (!/settlementNotice\s*===\s*["']silent["']/.test(runtimeSource)) {
   fail('built artifact has no silent-settlement guard; refusing to publish it')
 }
@@ -331,5 +505,5 @@ if (
 }
 // Stamp the cache only after every capability proof passed: an interrupted or
 // failed build leaves no stamp, so the next run scrubs instead of trusting it.
-recordUpstreamCache({ checkout, commit: UPSTREAM.commit, patchSha256: UPSTREAM.patchSha256 })
+recordUpstreamCache({ checkout, commit: UPSTREAM.commit, patchSha256: combinedPatchHash })
 console.log(`[compat/subagent] ready: ${manifest.name}@${manifest.version}`)

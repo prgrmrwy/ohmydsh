@@ -1,0 +1,13 @@
+{
+  "name": "@deepseek-ai/dsh-agent-loop",
+  "version": "0.2.0-rc.2-locus-isolated-inquiry.1",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": { ".": { "types": "./lib/types/index.d.ts", "default": "./lib/index.js" }, "./*": "./lib/*" },
+  "dependencies": { "@deepseek-ai/dsh-chunked-list": "workspace:~", "@deepseek-ai/dsh-util-time": "workspace:~", "@deepseek-ai/dsh-brand": "workspace:~" },
+  "peerDependencies": { "@deepseek-ai/dsh-agent": "workspace:*", "@deepseek-ai/dsh-session": "workspace:*", "@deepseek-ai/dsh-session-query": "workspace:*", "@deepseek-ai/dsh-subagent": "workspace:*", "@deepseek-ai/dsh-scope": "workspace:*" },
+
+  "dsh_compat": { "replaces": "@deepseek-ai/dsh-agent-loop@0.2.0-rc.2", "reason": "isolated inquiry turn inbox claim", "upstreamTag": "dsh-v0.2.0-rc.2", "upstreamBase": "639ed015397290b3745d163aafe02ffee4aa3f84", "removeWhen": "upstream supports isolated queued-turn claim with equivalent next-step inbox isolation" }
+}

@@ -75,25 +75,27 @@ test('the patch carries behavior, compatibility, and a runtime capability marker
   assert.match(patch, /if \(activation\.settlementNotice === 'silent'\) return/)
 })
 
-test('the patch stays confined to one upstream package', async () => {
-  // The isolated queued-turn claim was removed. It only ever served B035's
-  // push-style inquiry dispatch, which the pull-style context tools
-  // (`pet_locus_parent_lookup` and friends) superseded: those read an
-  // already-persisted transcript without waking the target or taking its run
-  // slot, so nothing needs to claim a turn. The seam never shipped — the
-  // override stayed off behind an npm arborist crash, the ledger holds zero
-  // inquiries — while costing two extra upstream packages (`core/agent`,
-  // `core/agent-loop`) that had to be re-derived on every DSH version bump.
-  //
-  // Re-adding it requires fresh justification under `pet-compat-minimization`,
-  // not a revert of this assertion.
-  const patch = await text('settlement-notice.patch')
+test('reviewed runtime patches stay confined to the approved package sources', async () => {
+  // The inquiry-isolation capability is approved only in agent-loop; the
+  // official dsh-agent source remains untouched. Keep each patch's source
+  // ownership explicit so a future broadening cannot silently inherit approval.
+  const subagentPatch = await text('settlement-notice.patch')
+  const loopPatch = await text('inquiry-isolation.patch')
+  const toolsPatch = await text('newinquiry-tools-guard.patch')
+  const effectsPatch = await text('native-managed-effects.patch')
 
-  const packages = new Set([...patch.matchAll(/^\+\+\+ b\/(\S+)/gm)]
-    .map(([, file]) => file.match(/^packages\/([^/]+\/[^/]+)/)?.[1]))
-  assert.deepEqual([...packages], ['subagent/subagent'])
-  assert.doesNotMatch(patch, /isolateQueuedTurn/)
-  assert.doesNotMatch(patch, /supportsIsolatedQueuedTurnClaim/)
+  const packagePaths = (patch) => [...new Set([...patch.matchAll(/^\+\+\+ b\/(\S+)/gm)]
+    .map(([, file]) => file.match(/^packages\/([^/]+\/[^/]+)/)?.[1]))]
+  assert.deepEqual(packagePaths(subagentPatch), ['subagent/subagent'])
+  assert.deepEqual(packagePaths(loopPatch), ['core/agent-loop'])
+  assert.deepEqual(packagePaths(toolsPatch), ['core/tools'])
+  assert.deepEqual(packagePaths(effectsPatch).sort(), [
+    'subagent/tool-subagent',
+    'subagent/tool-subagent-control',
+    'workflow/tool-workflow',
+    'workflow/tool-ralph',
+  ].sort())
+  assert.doesNotMatch(loopPatch, /packages\/core\/agent\/|packages\/agent\/agent/)
 })
 
 test('the launcher installs reviewed overrides and atomically publishes a self-contained runtime', async () => {
@@ -119,12 +121,22 @@ test('the launcher installs reviewed overrides and atomically publishes a self-c
   // a named, reviewed fact rather than a pasted literal in the overrides.
   assert.match(launcher, /const UNDICI_COMPAT_PIN = '\d+\.\d+\.\d+'/)
   assert.match(launcher, /undici: UNDICI_COMPAT_PIN/)
-  // The dependency proof must cover EVERY overridden package. An override that
-  // is staged but never proven present would leave Pet believing a seam exists
-  // while running the unpatched registry build.
-  assert.match(launcher, /runNpm\(\['ls', '@deepseek-ai\/dsh-subagent'\]/)
-  // The agent pair is no longer overridden (see the patch-confinement test).
-  assert.doesNotMatch(launcher, /'@deepseek-ai\/dsh-agent(-loop)?': `file:/)
+  // The subagent is always overridden for its published compatibility seam;
+  // agent-loop alone gets the narrow reviewed inquiry override. There is no
+  // approved dsh-agent source override.
+  assert.match(launcher, /'@deepseek-ai\/dsh-subagent': `file:\$\{join\(compatPackages, 'subagent'\)\}`/)
+  assert.match(launcher, /'@deepseek-ai\/dsh-agent-loop': `file:\$\{join\(compatPackages, 'agent-loop'\)\}`/)
+  assert.doesNotMatch(launcher, /'@deepseek-ai\/dsh-agent': `file:/)
+  assert.match(launcher, /const expectedAgentLoopVersion = '0\.2\.0-rc\.2-locus-isolated-inquiry\.1'/)
+  assert.match(launcher, /agentLoopPatchSha256 = '0973da4b6af46fe514ffd15297073922e0cd6c3fd0c8c84ce087f721be233c92'/)
+  assert.match(launcher, /nativeToolsTemplate\.packages/)
+  for (const nativeName of [
+    '@deepseek-ai/dsh-tool-subagent',
+    '@deepseek-ai/dsh-tool-subagent-control',
+    '@deepseek-ai/dsh-tool-workflow',
+    '@deepseek-ai/dsh-tool-ralph',
+  ]) assert.ok(launcher.includes(nativeName) === false, 'native owners are enumerated in the template, not copied into the runtime agent overrides')
+  assert.match(launcher, /'@deepseek-ai\/dsh-agent-loop': `file:\$\{join\(compatPackages, 'agent-loop'\)\}`/)
   assert.doesNotMatch(launcher, /overrideRuntimeAgent/)
   assert.match(launcher, /renameSync\(staging, buildDir\)/)
   assert.match(launcher, /renameSync\(nextLink, launcher\)/)

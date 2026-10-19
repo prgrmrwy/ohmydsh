@@ -51,6 +51,7 @@ interface WritableDomain {
     delete(key: string): Promise<void>
   }
   readonly global?: { get(): unknown; set(value: unknown): Promise<void> }
+  close?(): Promise<void>
 }
 
 /** The medium-side commit this wrapper drives. */
@@ -60,10 +61,118 @@ export interface BatchCommitter {
 
 /** Raised when a staged write cannot be committed atomically. */
 export class AtomicDomainError extends Error {
-  constructor(readonly code: 'medium-unavailable' | 'commit-failed', message: string, options?: { cause?: unknown }) {
+  constructor(
+    readonly code: 'medium-unavailable' | 'commit-failed' | 'view-corrupted' | 'domain-closing',
+    message: string,
+    options?: { cause?: unknown },
+  ) {
     super(message, options)
     this.name = 'AtomicDomainError'
   }
+}
+
+/** A successful medium commit followed by failed replay leaves no safe view. */
+const domainFailures = new WeakMap<object, AtomicDomainError>()
+
+function assertDomainHealthy(domain: object): void {
+  const failure = domainFailures.get(domain)
+  if (failure !== undefined) {
+    throw new AtomicDomainError(
+      'view-corrupted',
+      'Pet Domain is fail-closed after a committed batch could not refresh its in-memory view',
+      { cause: failure },
+    )
+  }
+}
+
+function failDomainClosed(domain: object, cause: unknown): AtomicDomainError {
+  const failure = new AtomicDomainError(
+    'view-corrupted',
+    `Domain view replay failed after the medium committed: ${cause instanceof Error ? cause.message : String(cause)}`,
+    { cause },
+  )
+  domainFailures.set(domain, failure)
+  return failure
+}
+
+interface DomainLifecycle {
+  closing: boolean
+  closePromise?: Promise<void>
+  originalTable: WritableDomain['table']
+  originalGlobal: WritableDomain['global'] | undefined
+  originalClose: (() => Promise<void>) | undefined
+}
+
+const domainLifecycles = new WeakMap<object, DomainLifecycle>()
+
+function closedDomainError(domain: object): Error {
+  const error = new Error(`domain '${(domain as { name?: string }).name ?? 'unknown'}' is closed`)
+  error.name = 'DomainError'
+  Object.assign(error, { code: 'closed' })
+  return error
+}
+
+function wrapDomainWriteHandle<T extends object>(raw: T, domain: object, lifecycle: DomainLifecycle): T {
+  return new Proxy(raw, {
+    get(target, property, receiver) {
+      const method = Reflect.get(target, property, receiver)
+      if ((property !== 'put' && property !== 'delete' && property !== 'set' && property !== 'update') || typeof method !== 'function') return method
+      return (...args: unknown[]) => lifecycle.closing
+        ? Promise.reject(closedDomainError(domain))
+        : Reflect.apply(method, target, args)
+    },
+  })
+}
+
+function installDomainLifecycle<T extends WritableDomain>(domain: T): DomainLifecycle {
+  const existing = domainLifecycles.get(domain)
+  if (existing !== undefined) return existing
+
+  let originalGlobal: WritableDomain['global'] | undefined
+  try { originalGlobal = domain.global } catch { /* Domains without a global expose a throwing getter. */ }
+  const state: DomainLifecycle = {
+    closing: false,
+    originalTable: domain.table,
+    originalGlobal,
+    originalClose: domain.close,
+  }
+  domainLifecycles.set(domain, state)
+
+  const handles = new WeakMap<object, object>()
+  Object.defineProperty(domain, 'table', {
+    value: (name: string) => {
+      const raw = Reflect.apply(state.originalTable, domain, [name]) as object
+      let wrapped = handles.get(raw)
+      if (wrapped === undefined) {
+        wrapped = wrapDomainWriteHandle(raw, domain, state)
+        handles.set(raw, wrapped)
+      }
+      return wrapped
+    },
+    configurable: true,
+  })
+  if (state.originalGlobal !== undefined) {
+    Object.defineProperty(domain, 'global', {
+      value: wrapDomainWriteHandle(state.originalGlobal, domain, state),
+      configurable: true,
+    })
+  }
+  if (state.originalClose !== undefined) {
+    Object.defineProperty(domain, 'close', {
+      value: () => {
+        if (state.closePromise !== undefined) return state.closePromise
+        state.closing = true
+        const lane = domainTransactionTails.get(domain) ?? Promise.resolve()
+        state.closePromise = (async () => {
+          await lane
+          await Reflect.apply(state.originalClose!, domain, [])
+        })()
+        return state.closePromise
+      },
+      configurable: true,
+    })
+  }
+  return state
 }
 
 /**
@@ -79,6 +188,7 @@ export async function runAtomicDomain(
   unit: BatchCommitter | undefined,
   body: (tx: DomainTransactionStaging) => void,
 ): Promise<void> {
+  assertDomainHealthy(domain)
   if (unit === undefined) {
     throw new AtomicDomainError('medium-unavailable', 'Pet storage unit is unavailable; refusing a non-atomic write')
   }
@@ -103,14 +213,23 @@ export async function runAtomicDomain(
 
   await unit.applyBatch(staged)
 
-  for (const write of staged) {
-    if (write.kind === 'global') {
-      await domain.global!.set(write.value)
-      continue
+  const lifecycle = domainLifecycles.get(domain)
+  try {
+    for (const write of staged) {
+      if (write.kind === 'global') {
+        await (lifecycle?.originalGlobal ?? domain.global)!.set(write.value)
+        continue
+      }
+      const table = Reflect.apply(lifecycle?.originalTable ?? domain.table, domain, [write.table])
+      if (write.kind === 'put') await table.put(write.key, write.value)
+      else await table.delete(write.key)
     }
-    const table = domain.table(write.table)
-    if (write.kind === 'put') await table.put(write.key, write.value)
-    else await table.delete(write.key)
+  } catch (error) {
+    // The medium is already committed. A prefix of the view may have replayed,
+    // so allowing any later read-modify-write would make its decision from a
+    // state that no longer represents durable storage. Do not try to roll back
+    // or replay: the official Domain exposes no atomic view replacement API.
+    throw failDomainClosed(domain, error)
   }
 }
 
@@ -125,6 +244,24 @@ export async function runAtomicDomain(
  * @param unit - Pet's backend unit, or undefined when it could not be resolved.
  * @returns the same domain, now advertising transactional support.
  */
+const domainTransactionTails = new WeakMap<object, Promise<void>>()
+
+function serializeDomainTransaction<T>(domain: object, operation: () => Promise<T>): Promise<T> {
+  const previous = domainTransactionTails.get(domain) ?? Promise.resolve()
+  let release!: () => void
+  const current = new Promise<void>(resolve => { release = resolve })
+  domainTransactionTails.set(domain, current)
+
+  return previous.then(async () => {
+    try {
+      return await operation()
+    } finally {
+      release()
+      if (domainTransactionTails.get(domain) === current) domainTransactionTails.delete(domain)
+    }
+  })
+}
+
 export function withAtomicWrites<T extends WritableDomain>(domain: T, unit: BatchCommitter | undefined): T {
   const augmented = domain as T & {
     supportsTransaction?: boolean
@@ -135,8 +272,11 @@ export function withAtomicWrites<T extends WritableDomain>(domain: T, unit: Batc
   Object.defineProperty(augmented, 'supportsTransaction', {
     value: unit !== undefined, configurable: true, enumerable: false,
   })
+  const lifecycle = installDomainLifecycle(domain)
   Object.defineProperty(augmented, 'transaction', {
-    value: (body: (tx: DomainTransactionStaging) => void) => runAtomicDomain(domain, unit, body),
+    value: (body: (tx: DomainTransactionStaging) => void) => lifecycle.closing
+      ? Promise.reject(new AtomicDomainError('domain-closing', 'Domain is closing; refusing a new Pet transaction'))
+      : serializeDomainTransaction(domain, () => runAtomicDomain(domain, unit, body)),
     configurable: true, enumerable: false,
   })
   return augmented

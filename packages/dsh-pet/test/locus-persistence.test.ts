@@ -12,6 +12,7 @@ import { emptyMedium, openPetHarness, type MemoryMedium } from './harness.js'
 import { STORAGE_KEY_SEPARATOR } from '../src/host/locus/storage-key.js'
 
 function enableAtomicTransactions(harness: Awaited<ReturnType<typeof openPetHarness>>): void {
+  if (harness.domain.supportsTransaction === true && typeof harness.domain.transaction === 'function') return
   const domain = harness.domain as unknown as {
     supportsTransaction?: boolean
     transaction?: (body: (tx: {

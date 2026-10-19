@@ -15,6 +15,7 @@ package.json
 .storage-upstream/
 storage-artifacts
 agent-artifacts/
+agent-loop/
 .storage-artifact-builds/
 .storage-artifacts.staging-*
 .storage-artifacts.next-*

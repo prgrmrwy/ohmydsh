@@ -1,0 +1,11 @@
+{
+  "name": "@deepseek-ai/dsh-tools",
+  "version": "0.2.0-rc.2-locus-final-guard.1",
+  "dsh_compat": {
+    "replaces": "@deepseek-ai/dsh-tools@0.2.0-rc.2",
+    "reason": "rechecks the current scoped monotonic guard after async tools/execute wrappers immediately before the registered tool body",
+    "upstreamTag": "dsh-v0.2.0-rc.2",
+    "upstreamBase": "639ed015397290b3745d163aafe02ffee4aa3f84",
+    "removeWhen": "upstream rechecks its monotonic tool guard after tools/execute wrappers and immediately before registered body invocation"
+  }
+}

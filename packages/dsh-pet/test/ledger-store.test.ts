@@ -10,8 +10,6 @@ import { LedgerStoreError, SharedFactLedgerStore } from '../src/host/ledger/stor
 import type { NewTodoInput } from '../src/host/ledger/todo.js'
 import { emptyMedium, openPetHarness } from './harness.js'
 
-const atomic = process.env.DSH_PET_TEST_ATOMIC_DOMAIN === '1'
-
 function todoInput(overrides: Partial<NewTodoInput> = {}): NewTodoInput {
   return {
     itemId: 'todo-1',
@@ -40,7 +38,7 @@ describe('SharedFactLedgerStore capability boundary', () => {
   })
 })
 
-describe.skipIf(!atomic)('SharedFactLedgerStore with real reviewed atomic Domain (opt-in config)', () => {
+describe('SharedFactLedgerStore with actual atomic Domain', () => {
   it('registers a todo and idempotently ensures its owning ledger row in the SAME transaction', async () => {
     const h = await openPetHarness()
     try {

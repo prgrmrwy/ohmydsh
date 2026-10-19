@@ -293,9 +293,12 @@ describe('Pet tool schemas match the real defineTool contract', () => {
     // Host-issued cursor, never a chat/group/user/thread selector, reads only
     // the caller's own entrance, and is published only when the runtime
     // actually supplies a bot read port.
-    // Comments are stripped so prose mentioning registration is not counted.
+    // Count logical tool definitions at the shared helper call sites, not the
+    // helper's single native registration delegation (which intentionally owns
+    // every definition above).
     const code = tools.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-    expect([...code.matchAll(/ctx\.tools\.register\(/g)]).toHaveLength(8)
+    expect([...code.matchAll(/\bregister\s*\(\s*defineTool\s*\(/g)]).toHaveLength(8)
+    expect([...code.matchAll(/ctx\.tools\.register\s*\(/g)]).toHaveLength(1)
     expect(tools).toContain('PET_CONTEXT_TOOL')
     expect(tools).toContain('PET_LOCUS_FINISH_TOOL')
     expect(tools).toContain('PET_LOCUS_WAIT_TOOL')

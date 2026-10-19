@@ -1,0 +1,10 @@
+{
+  "packages": [
+    { "name": "@deepseek-ai/dsh-tool-subagent", "sourceDir": "packages/subagent/tool-subagent" },
+    { "name": "@deepseek-ai/dsh-tool-subagent-control", "sourceDir": "packages/subagent/tool-subagent-control" },
+    { "name": "@deepseek-ai/dsh-tool-workflow", "sourceDir": "packages/workflow/tool-workflow" },
+    { "name": "@deepseek-ai/dsh-tool-ralph", "sourceDir": "packages/workflow/tool-ralph" }
+  ],
+  "version": "0.2.0-rc.2-locus-managed-effects.1",
+  "patchSha256": "645f55d882c346310f473437ef57950a27eb6dad1d2ccf670b8e2e453ecbad61"
+}

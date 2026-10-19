@@ -67,6 +67,8 @@ import * as petStoragePlugin from '../src/host/storage/plugin.js'
 import { PET_BACKEND_NAME } from '../src/host/storage/backend.js'
 import { withAtomicWrites } from '../src/host/storage/atomic-domain.js'
 import { PET_DOMAIN_NAME, petDomainSpec } from '../src/host/spec.js'
+import type { RouteRegistration } from '../src/host/http.js'
+import { LOCUS_ROUTES } from '../src/wire.js'
 import { openPetHarness, type PetHarness } from './harness.js'
 import * as petPlugin from '../src/index.js'
 
@@ -254,6 +256,13 @@ async function seams(
     },
     contextStore: contexts,
     ledger: memoryLedger(),
+    answerStore: { get: () => undefined, commit: async answer => answer },
+    inquiryRuntime: {
+      ready: false,
+      forExecution: () => ({ origin: () => undefined, accept: async () => { throw new Error('runtime unavailable') } }),
+      afterAnswer: () => undefined,
+      answerBinding: () => false,
+    },
     describe: (sessionId: string) => ({ title: `title ${sessionId}`, availability: 'available' }),
     origin: () => ({ origin: { kind: 'local' }, audience: { kind: 'unknown' } }),
     installed: new WeakSet<object>(),
@@ -613,8 +622,8 @@ describe('inquiry dispatch reports unavailable instead of throwing', () => {
     expect(assembly.scheduler.occupiesRunSlot(CHILD_B)).toBe(false)
   })
 
-  it('still accepts and durably queues an inquiry, and says so without claiming an answer', async () => {
-    const { assembly } = await composed()
+  it('refuses acceptance while runtime is unavailable and performs no ledger write', async () => {
+    const { assembly, seams: built } = await composed()
     const ctx = await hostContext()
     const child = await agentScope(ctx, CHILD_A)
     assembly.install(child.scope)
@@ -631,20 +640,28 @@ describe('inquiry dispatch reports unavailable instead of throwing', () => {
       signal: new AbortController().signal,
     })
 
-    expect(result.isError).toBe(false)
-    const payload = JSON.parse((result.value as { json: string }).json) as {
-      status: string
-      answered: boolean
-    }
-    // Acceptance is not an answer, and the tool says that literally rather than
-    // leaving the model to infer it from a missing field.
-    expect(payload.status).toBe('accepted')
-    expect(payload.answered).toBe(false)
+    expect(result.isError).toBe(true)
+    expect(result.value).toBeUndefined()
+    expect(built.ledger!.rows.size).toBe(0)
     await ctx.fiber.dispose()
   })
 
-  it.each([MAIN, CHILD_A])('passes registered roster targets verbatim into registered inquiry for %s', async callerId => {
-    const { assembly, seams: built } = await composed()
+  it.each([MAIN, CHILD_A])('passes registered roster targets to the injected ready runtime for %s', async callerId => {
+    let accepts = 0
+    const { assembly, seams: built } = await composed({
+      agentLoop: { supportsIsolatedQueuedTurnClaim: true },
+      probeIsolatedClaim: fixture => ({
+        claimedMessageIds: [fixture.nextTurnId],
+        pendingNextStepIds: [fixture.nextStepId],
+      }),
+      inquiryRuntime: {
+      ready: true,
+      forExecution: () => ({ origin: built.origin, accept: async (request, facts) => { accepts++; return built.ledger!.accept(request, facts) } }),
+
+      afterAnswer: () => undefined,
+      answerBinding: () => false,
+      },
+    })
     const ctx = await hostContext()
     try {
       const caller = await agentScope(ctx, callerId)
@@ -672,8 +689,66 @@ describe('inquiry dispatch reports unavailable instead of throwing', () => {
           ? { kind: 'main', sessionId: member.sessionId }
           : { kind: 'child', sessionId: member.sessionId, locusId: member.locusId, generation: member.generation })
       }
+      expect(accepts).toBe(2)
+      expect(built.ledger!.rows.size).toBe(2)
     } finally { await ctx.fiber.dispose() }
   })
+
+  it('binds acceptance dependencies to the exact execution object', async () => {
+    let seen: unknown
+    const { assembly, seams: built } = await composed({
+      agentLoop: { supportsIsolatedQueuedTurnClaim: true },
+      probeIsolatedClaim: fixture => ({ claimedMessageIds: [fixture.nextTurnId], pendingNextStepIds: [fixture.nextStepId] }),
+      inquiryRuntime: {
+        ready: true,
+        forExecution: (execution: import('@deepseek-ai/dsh-tools').ToolRunContext) => {
+          seen = execution
+          return { origin: () => ({ origin: { kind: 'local' }, audience: { kind: 'unknown' } }), accept: (request, facts) => built.ledger!.accept(request, facts) }
+        },
+        afterAnswer: () => undefined,
+        answerBinding: () => false,
+      },
+    })
+    const ctx = await hostContext()
+    const caller = await agentScope(ctx, CHILD_A)
+    assembly.install(caller.scope)
+    const input = { agent: caller.key as never, name: INQUIRY_ASK_TOOL, callId: 'bind' as never, arguments: { target: `child:b:1:${CHILD_B}`, question: 'Q?', purpose: 'Verify binding' }, signal: new AbortController().signal }
+    await ctx.tools.execute(input)
+    expect(seen).toBeDefined()
+    expect((seen as { callId: string }).callId).toBe('bind')
+    await ctx.fiber.dispose()
+  })
+
+  it('keeps shared context and roster available when the answer store is missing', async () => {
+    const { assembly, seams: built } = await composed({ answerStore: undefined });
+    built.contexts.ensure(MAIN);
+    const ctx = await hostContext();
+    const main = await agentScope(ctx, MAIN);
+    assembly.install(main.scope);
+
+    const contextResult = await ctx.tools.execute({
+      agent: main.key as never,
+      name: COLLABORATION_CONTEXT_TOOL,
+      callId: 'context' as never,
+      arguments: {},
+      signal: new AbortController().signal,
+    });
+    const rosterResult = await ctx.tools.execute({
+      agent: main.key as never,
+      name: COLLABORATORS_TOOL,
+      callId: 'roster' as never,
+      arguments: {},
+      signal: new AbortController().signal,
+    });
+
+    expect(contextResult.isError).toBe(false);
+    expect(rosterResult.isError).toBe(false);
+    const roster = JSON.parse((rosterResult.value as { json: string }).json) as {
+      members: { sessionId: string }[]
+    };
+    expect(roster.members.map(member => member.sessionId).sort()).toEqual([CHILD_A, CHILD_B]);
+    await ctx.fiber.dispose();
+  });
 
   it('reports circle members as not inquirable while dispatch is unavailable', async () => {
     const { assembly } = await composed()
@@ -714,6 +789,7 @@ describe('inquiry dispatch reports unavailable instead of throwing', () => {
         claimedMessageIds: [fixture.nextTurnId],
         pendingNextStepIds: [fixture.nextStepId],
       }),
+      inquiryRuntime: { ready: true, forExecution: () => ({ origin: () => ({ origin: { kind: 'local' }, audience: { kind: 'unknown' } }), accept: async () => { throw new Error('unused') } }), afterAnswer: () => undefined, answerBinding: () => false },
     })
     expect(assembly.inquiryDispatch).toEqual({ available: true })
 
@@ -838,7 +914,11 @@ async function openPetDomain(ctx: Context): Promise<never> {
   return withAtomicWrites(domain as never, await backend.unitFor(PET_DOMAIN_NAME) as never) as never
 }
 
-async function loadPetHost(seed: readonly LocusRecord[] = [], existingHome?: string): Promise<LoadedHost> {
+async function loadPetHost(
+  seed: readonly LocusRecord[] = [],
+  existingHome?: string,
+  seedDomain?: (domain: Awaited<ReturnType<typeof openPetDomain>>) => Promise<void>,
+): Promise<LoadedHost> {
   const home = existingHome ?? await mkdtemp(path.join(tmpdir(), 'pet-assembly-'))
   const routes: { path: string }[] = []
   const live = new Map<string, { ctx: Context; id: string }>()
@@ -930,6 +1010,7 @@ async function loadPetHost(seed: readonly LocusRecord[] = [], existingHome?: str
     const seeded = await openPetDomain(ctx)
     const repository = new LocusRepository(seeded)
     for (const row of seed) await repository.putLocus(row)
+    await seedDomain?.(seeded)
     await seeded.close()
   }
 
@@ -953,6 +1034,7 @@ async function loadPetHost(seed: readonly LocusRecord[] = [], existingHome?: str
       (ctx.tools as unknown as { schemas(s?: unknown): { name: string }[] })
         .schemas(scope)
         .map(schema => schema.name),
+    route: routePath => routes.find(route => route.path === routePath) as RouteRegistration | undefined,
     agentScope: async sessionId => {
       const built = await agentScope(ctx, sessionId)
       live.set(sessionId, { ctx: built.scope, id: sessionId })
@@ -978,10 +1060,21 @@ describe('the real plugin entry installs the surface', () => {
       host.publish('unrelated-1', stranger.scope)
       await new Promise(resolve => setTimeout(resolve, 50))
 
+      const mainNames = host.toolNames(main.key)
+      const childNames = host.toolNames(child.key)
+      expect(mainNames.filter(name => CIRCLE_TOOLS.includes(name as typeof CIRCLE_TOOLS[number])).sort())
+        .toEqual([...CIRCLE_TOOLS].sort())
+      expect(childNames.filter(name => CIRCLE_TOOLS.includes(name as typeof CIRCLE_TOOLS[number])).sort())
+        .toEqual([...CIRCLE_TOOLS].sort())
+      // Main keeps no child-local Pet tools; the child keeps its own tools.
+      expect(mainNames).not.toContain(PET_CONTEXT_TOOL)
+      expect(mainNames).not.toContain(PET_LOCUS_FINISH_TOOL)
+      expect(mainNames).not.toContain(PET_LOCUS_WAIT_TOOL)
+      expect(childNames).toContain(PET_CONTEXT_TOOL)
+      expect(childNames).toContain(PET_LOCUS_FINISH_TOOL)
+      expect(childNames).toContain(PET_LOCUS_WAIT_TOOL)
+      // No circle surface leaks into the global layer or unrelated scopes.
       for (const name of CIRCLE_TOOLS) {
-        expect(host.toolNames(main.key)).toContain(name)
-        expect(host.toolNames(child.key)).toContain(name)
-        // The leak this whole discipline exists to prevent.
         expect(host.toolNames()).not.toContain(name)
         expect(host.toolNames(stranger.key)).not.toContain(name)
       }
@@ -1008,9 +1101,7 @@ describe('the real plugin entry installs the surface', () => {
       await new Promise(resolve => setTimeout(resolve, 50))
 
       const names = host.toolNames(main.key)
-      for (const name of CIRCLE_TOOLS) {
-        expect(names.filter(candidate => candidate === name)).toHaveLength(1)
-      }
+      expect(names.sort()).toEqual([...CIRCLE_TOOLS].sort())
     } finally {
       await host.close()
     }
@@ -1037,6 +1128,42 @@ describe('the real plugin entry installs the surface', () => {
    * down. Asserting on the reopened medium proves the startup path read the
    * durable ledger and preserved the row rather than manufacturing a timeout.
    */
+  it('projects a seeded queued inquiry through the actual plugin-mounted owner route', async () => {
+    const privateQuestion = 'PRIVATE_OWNER_INQUIRY_BODY_SENTINEL'
+    const host = await loadPetHost([locus('a', CHILD_A)], undefined, async domain => {
+      await new InquiryLedgerStore(domain as never).accept(
+        { target: { kind: 'child', sessionId: CHILD_A, locusId: 'a', generation: 1 }, question: privateQuestion, purpose: 'PRIVATE_PURPOSE_SENTINEL', declaredOrigin: null },
+        {
+          inquiryId: 'inq-plugin-owner', requester: { kind: 'main', sessionId: MAIN },
+          circleParentSessionId: MAIN, origin: { kind: 'local' }, audience: { kind: 'local-session', sessionId: MAIN },
+          createdAt: 42,
+        },
+      )
+    })
+    try {
+      const route = host.route(LOCUS_ROUTES.view)
+      expect(route).toBeDefined()
+      const req = { method: 'GET', headers: { host: '127.0.0.1:3080' } }
+      let payload: { ok: boolean; data?: { loci?: { owner?: { inquiry?: { snapshotStatus: string; dispatchCapability: string; inquiries: { inquiryId: string; status: string; createdAt: number }[] } } }[] } } | undefined
+      const res = {
+        writeHead() { return this },
+        end(text?: string) { payload = JSON.parse(text ?? 'null') },
+      }
+      await route!.handler(req as never, res as never)
+
+      expect(payload?.ok).toBe(true)
+      const ownerLocus = payload?.data?.loci?.find(item => item.owner?.inquiry?.inquiries.some(row => row.inquiryId === 'inq-plugin-owner'))
+      expect(ownerLocus?.owner?.inquiry).toMatchObject({
+        snapshotStatus: 'available', dispatchCapability: 'unavailable',
+        inquiries: [{ inquiryId: 'inq-plugin-owner', status: 'queued', createdAt: 42 }],
+      })
+      expect(JSON.stringify(payload)).not.toContain(privateQuestion)
+      expect(JSON.stringify(payload)).not.toContain('PRIVATE_PURPOSE_SENTINEL')
+    } finally {
+      await host.close()
+    }
+  })
+
   it('preserves long-waiting inquiry work left behind by a previous process', async () => {
     const home = await mkdtemp(path.join(tmpdir(), 'pet-reconcile-'))
     const statePath = path.join(home, 'plugins', 'dsh-pet', 'state.sqlite')
