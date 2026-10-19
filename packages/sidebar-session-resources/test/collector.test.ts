@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SessionLinksStore, type SnapshotSource } from '../src/client/collector.js'
+import { SessionResourcesStore, type SnapshotSource } from '../src/client/collector.js'
 import type { ConversationNode } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { ConversationNodesSnapshot } from '../src/client/collector.js'
 
@@ -38,12 +38,12 @@ function userNode(seq: number, text: string): ConversationNode {
   } as ConversationNode
 }
 
-describe('SessionLinksStore', () => {
+describe('SessionResourcesStore', () => {
   it('collects the full snapshot on first observe', () => {
     const source = new FakeSource([
       userNode(1, 'MR https://gitlab.com/a/b/merge_requests/3 部署 https://deploy.example.com/app/1'),
     ])
-    const store = new SessionLinksStore()
+    const store = new SessionResourcesStore()
     store.observe('s1', source)
     const entries = store.entriesOf('s1')
     expect(entries.map((e) => e.category)).toEqual(expect.arrayContaining(['mr', 'deploy']))
@@ -53,7 +53,7 @@ describe('SessionLinksStore', () => {
 
   it('increments on new messages without rescanning history', () => {
     const source = new FakeSource([userNode(1, 'https://example.com/one')])
-    const store = new SessionLinksStore()
+    const store = new SessionResourcesStore()
     store.observe('s1', source)
     expect(store.countOf('s1')).toBe(1)
 
@@ -70,7 +70,7 @@ describe('SessionLinksStore', () => {
 
   it('dedupes repeated URLs keeping the latest occurrence and counting', () => {
     const source = new FakeSource([userNode(1, 'https://example.com/x')])
-    const store = new SessionLinksStore()
+    const store = new SessionResourcesStore()
     store.observe('s1', source)
     source.push([userNode(1, 'https://example.com/x'), userNode(2, '又提一次 https://example.com/x')])
     const entries = store.entriesOf('s1')
@@ -82,7 +82,7 @@ describe('SessionLinksStore', () => {
 
   it('ignores older messages appended to the head (loadOlder) without losing collected state', () => {
     const source = new FakeSource([userNode(5, 'https://example.com/current')])
-    const store = new SessionLinksStore()
+    const store = new SessionResourcesStore()
     store.observe('s1', source)
     source.push([userNode(0, 'https://example.com/old'), userNode(1, 'https://example.com/older'), userNode(5, 'https://example.com/current')])
     expect(store.entriesOf('s1').map((e) => e.url)).toEqual(['https://example.com/current'])
@@ -90,7 +90,7 @@ describe('SessionLinksStore', () => {
   })
 
   it('re-observing the same session id is idempotent (no rebuild loops)', () => {
-    const store = new SessionLinksStore()
+    const store = new SessionResourcesStore()
     store.observe('s1', new FakeSource([userNode(1, 'https://example.com/a')]))
     const first = store.entriesOf('s1')
     // Effect re-runs must never rebuild the state: identity preserved,
@@ -103,7 +103,7 @@ describe('SessionLinksStore', () => {
   })
 
   it('upgrades a source-less state when a real source arrives later', () => {
-    const store = new SessionLinksStore()
+    const store = new SessionResourcesStore()
     store.observe('s1', undefined)
     expect(store.countOf('s1')).toBe(0)
     store.observe('s1', new FakeSource([userNode(1, 'https://example.com/x')]))
@@ -113,7 +113,7 @@ describe('SessionLinksStore', () => {
   })
 
   it('release then observe rebuilds (session switching)', () => {
-    const store = new SessionLinksStore()
+    const store = new SessionResourcesStore()
     store.observe('s1', new FakeSource([userNode(1, 'https://example.com/a')]))
     expect(store.countOf('s1')).toBe(1)
     store.release('s1')
@@ -125,7 +125,7 @@ describe('SessionLinksStore', () => {
 
   it('release drops the session state and its subscription', () => {
     const source = new FakeSource([userNode(1, 'https://example.com/a')])
-    const store = new SessionLinksStore()
+    const store = new SessionResourcesStore()
     store.observe('s1', source)
     expect(store.countOf('s1')).toBe(1)
     store.release('s1')
@@ -137,7 +137,7 @@ describe('SessionLinksStore', () => {
   })
 
   it('observe without a source yields an empty state (safe degradation)', () => {
-    const store = new SessionLinksStore()
+    const store = new SessionResourcesStore()
     store.observe('s1', undefined)
     expect(store.countOf('s1')).toBe(0)
     expect(store.entriesOf('s1')).toEqual([])
@@ -145,7 +145,7 @@ describe('SessionLinksStore', () => {
   })
 
   it('keeps snapshot identity stable for useSyncExternalStore (no React #185 loops)', () => {
-    const store = new SessionLinksStore()
+    const store = new SessionResourcesStore()
     const before = store.entriesOf('s1')
     expect(store.entriesOf('s1')).toBe(before) // no state -> shared EMPTY_ENTRIES
     expect(store.entriesOf('s2')).toBe(before)
@@ -160,7 +160,7 @@ describe('SessionLinksStore', () => {
 
   it('reclassifies collected links when the host baseline brings deployment rules', () => {
     const source = new FakeSource([userNode(1, 'https://tracker.corp.example/story/1')])
-    const store = new SessionLinksStore()
+    const store = new SessionResourcesStore()
     store.observe('s1', source)
     expect(store.entriesOf('s1').map((e) => e.category)).toEqual(['other'])
     store.setRules({ trackerHosts: ['tracker.corp.example'], reviewHosts: [] })
@@ -176,7 +176,7 @@ describe('SessionLinksStore', () => {
 
   it('applies the host baseline (watermark jump, dedupe merge, idempotent)', () => {
     const source = new FakeSource([userNode(30, 'https://example.com/new-after-baseline')])
-    const store = new SessionLinksStore()
+    const store = new SessionResourcesStore()
     store.observe('s1', source)
     store.applyBaseline('s1', [
       { url: 'https://example.com/old', category: 'other', time: 1, seq: 1, role: 'user', title: 't', count: 2 },
@@ -199,7 +199,7 @@ describe('SessionLinksStore', () => {
   })
 
   it('baseline arriving after release is a no-op (no state leak)', () => {
-    const store = new SessionLinksStore()
+    const store = new SessionResourcesStore()
     store.observe('s1', new FakeSource([]))
     store.release('s1')
     expect(() => store.applyBaseline('s1', [], [], 0)).not.toThrow()
@@ -243,7 +243,7 @@ describe('SessionLinksStore', () => {
         subCalls: [],
       } as unknown as ConversationNode,
     ])
-    const store = new SessionLinksStore()
+    const store = new SessionResourcesStore()
     store.observe('s1', source)
     const produced = store.producedOf('s1')
     expect(produced).toHaveLength(1)
@@ -255,7 +255,7 @@ describe('SessionLinksStore', () => {
 
   it('notifies subscribers through the debounced emit', async () => {
     const source = new FakeSource([])
-    const store = new SessionLinksStore()
+    const store = new SessionResourcesStore()
     store.observe('s1', source)
     let notified = 0
     const unsub = store.subscribe(() => {

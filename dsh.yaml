@@ -256,14 +256,14 @@ customizations:
     enabled: true
     brief: 对话区宽度五档切换(748px 至全宽)
     note: '第三方 https://github.com/aaronlei/dsh-width-tiers(MIT)。Web 对话区五档宽度切换,以 localStorage 记忆;无网络请求、无 Host 文件/命令/模型能力,卸载时清理 DOM/监听/定时器/样式;不触碰右侧面板,全宽档经官方 layout 服务收起侧边栏。1.0.7 起 medium 档 960→1120px(用户可见),档位文案复制了应用侧公式 clamp(680,列×0.64,920),公式漂移只影响文案。升级复核:自 1.0.4 起接线由包自带 bundle patch 承载,绝不可再并存手写 wiring patch(对无 id 的 insert DSH 不去重,会出现两条同 id loader 行);验收为启动清单中 dsh-width-tiers 恰好出现一次;DSH 升级需回归 layout/locale 服务。回滚:改回上一 pin → dsh build → 重启。 pin 校验 sha512-3cGoklw3tYSSXKBf9GzGduv4k9Vv4UO0IHl/FdKMQi+zdw7H9XapvSol4vuxBWqWjnhCWz3VQQc86yBjVrsHBQ=='
-  # 自研(local):会话链接面板 — better-sidebar 右侧工作台 tab(当前会话链接分类)
-  - id: session-links
+  # 自研(local):会话资源面板 — better-sidebar 右侧工作台 tab(当前会话链接分类)
+  - id: sidebar-session-resources
     type: package
     source: local
     version: 0.1.0
     enabled: true
     brief: 文档/资料面板(当前会话 MR/部署/工作项/制品链接分类 + 本次产出文件)
-    note: '自研,spec session-links。better-sidebar 右侧工作台「文档/资料」tab:收集当前会话的 URL 与产出文件并分类(MR/部署/工作项/制品/其他);Host 经只读 Connection RPC /dsh-session-links 读完整会话日志作基线,浏览器增量采集。不出网、不读写凭据、不持久化;组织专属评审/工作项域名走插件行 config(reviewHosts/trackerHosts,由私有 overlay 注入)。依赖第三方 dsh-better-sidebar(peer >=0.16.0,缺失则整体不激活)。升级复核:better-sidebar 的 tab API 与会话节点结构;通道仍仅回环。移除:enabled:false → dsh build → 重启。'
+    note: '自研,spec sidebar-session-resources(2026-10-19 由 session-links 改名,让出名字给团队版飞书 session-links)。better-sidebar 右侧工作台「文档/资料」tab:收集当前会话的 URL 与产出文件并分类(MR/部署/工作项/制品/其他);Host 经只读 Connection RPC /dsh-sidebar-session-resources 读完整会话日志作基线,浏览器增量采集。不出网、不读写凭据、不持久化;组织专属评审/工作项域名走插件行 config(reviewHosts/trackerHosts,由私有 overlay 注入)。依赖第三方 dsh-better-sidebar(peer >=0.16.0,缺失则整体不激活)。升级复核:better-sidebar 的 tab API 与会话节点结构;通道仍仅回环。移除:enabled:false → dsh build → 重启。'
   # 第三方(remote):better-sidebar 侧边栏工作台
   - id: better-sidebar
     type: package
@@ -272,7 +272,7 @@ customizations:
     version: 0.25.0
     enabled: true
     brief: 服务化侧边栏工作台
-    note: '第三方 https://github.com/omdsh-dev/DSH-better-sidebar(MIT)。右侧栏/底部面板工作台,开放 ctx.betterSidebar.registerTab(session-links 依赖)。信任面较重:文件管理、内嵌浏览器、终端(0.24.1 起走官方 terminal 能力,不再自带 node-pty;0.25.0 起为不持有 PTY 的底部终端 tab,新增 @xterm 依赖)、Git 面板、后台任务、侧边对话(完整上下文继承,费 token,可设置关闭);可选工具 terminal_*/sidebar_open 默认关闭;0.25.0 另增 wslpath/rg/fd 探针(全 argv、无 shell:true)与信任栅栏两条窄放宽。升级复核:peer 下界 ^0.2.0-rc.2 等于当前 dshVersion,随运行体同批;确认 registerTab 仍在、pnpm why 仅一份实例、出站域名不变。回滚:随运行体一起回到 0.19.1(其 peer 只满足 0.1.5)。 pin 校验 sha512-5dro5VDpkrnWBO5jNff6Kzt8UlniZEWwXFqsl+wptlqnGMC4PrdJQ4Sd3+tLU8LPKYH8dDI00Dd5IC3FtH/erA=='
+    note: '第三方 https://github.com/omdsh-dev/DSH-better-sidebar(MIT)。右侧栏/底部面板工作台,开放 ctx.betterSidebar.registerTab(sidebar-session-resources 依赖)。信任面较重:文件管理、内嵌浏览器、终端(0.24.1 起走官方 terminal 能力,不再自带 node-pty;0.25.0 起为不持有 PTY 的底部终端 tab,新增 @xterm 依赖)、Git 面板、后台任务、侧边对话(完整上下文继承,费 token,可设置关闭);可选工具 terminal_*/sidebar_open 默认关闭;0.25.0 另增 wslpath/rg/fd 探针(全 argv、无 shell:true)与信任栅栏两条窄放宽。升级复核:peer 下界 ^0.2.0-rc.2 等于当前 dshVersion,随运行体同批;确认 registerTab 仍在、pnpm why 仅一份实例、出站域名不变。回滚:随运行体一起回到 0.19.1(其 peer 只满足 0.1.5)。 pin 校验 sha512-5dro5VDpkrnWBO5jNff6Kzt8UlniZEWwXFqsl+wptlqnGMC4PrdJQ4Sd3+tLU8LPKYH8dDI00Dd5IC3FtH/erA=='
   # 自研(remote):驾驶舱桥接 — DSH web 客户端上报会话点击给本机 dsh-cockpit
   - id: dsh-cockpit-bridge
     type: package

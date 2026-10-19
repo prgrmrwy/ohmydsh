@@ -1,5 +1,5 @@
 {
-  "name": "dsh-session-links",
+  "name": "dsh-sidebar-session-resources",
   "version": "0.1.0",
   "description": "Session links panel: collect and categorize MR / deploy / work-item / artifact URLs from the current conversation into a dsh-better-sidebar tab",
   "license": "MIT",

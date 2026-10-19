@@ -1,17 +1,17 @@
-# session-links Specification
+# sidebar-session-resources Specification
 
 ## Purpose
 在 better-sidebar 右侧工作台提供「会话链接」面板:实时采集当前会话消息中的 URL,按 MR/部署/tracker/产物制品/其他分类展示,随会话切换联动,并用徽标提示链接数量。纯浏览器侧、只读、不出网。
 ## Requirements
 ### Requirement: 以 better-sidebar tab 形式提供面板入口
-系统 SHALL 通过 `ctx.betterSidebar.registerTab` 注册一个 id 为 `session-links` 的工作台 tab,出现在「+」菜单与 tab 栏中,并遵循 better-sidebar 设置页的开关语义(显式禁用后不展示、不打开)。面板 SHALL 为单实例:tabs 中已存在同类型 tab 时再次打开 SHALL 聚焦已有实例而非重复创建。
+系统 SHALL 通过 `ctx.betterSidebar.registerTab` 注册一个 id 为 `sidebar-session-resources` 的工作台 tab,出现在「+」菜单与 tab 栏中,并遵循 better-sidebar 设置页的开关语义(显式禁用后不展示、不打开)。面板 SHALL 为单实例:tabs 中已存在同类型 tab 时再次打开 SHALL 聚焦已有实例而非重复创建。
 
 #### Scenario: 通过 + 菜单打开面板
 - **WHEN** 用户在 better-sidebar 工作台的「+」菜单选择「会话链接」
 - **THEN** 右侧工作台打开该面板,展示当前会话的链接列表
 
 #### Scenario: 重复打开聚焦已有面板
-- **WHEN** 面板已打开,tabs 中存在 `session-links` 类型 tab,用户再次请求打开
+- **WHEN** 面板已打开,tabs 中存在 `sidebar-session-resources` 类型 tab,用户再次请求打开
 - **THEN** 聚焦已有面板,不创建第二个实例
 
 #### Scenario: 设置中禁用后隐藏

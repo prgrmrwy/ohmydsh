@@ -1,5 +1,5 @@
 /**
- * Client entry for dsh-session-links: registers the「文档/资料」tab in
+ * Client entry for dsh-sidebar-session-resources: registers the「文档/资料」tab in
  * the dsh-better-sidebar workbench (links + produced files of the session).
  *
  * The plugin is gated on the `betterSidebar` service (hard peer dependency):
@@ -10,11 +10,11 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { BetterSidebarService } from './better-sidebar.js'
-import { SessionLinksStore } from './collector.js'
+import { SessionResourcesStore } from './collector.js'
 import { Panel } from './Panel.jsx'
 import { openProducedInEditor } from './open-produced.js'
 
-export const name = 'session-links'
+export const name = 'sidebar-session-resources'
 
 /** Services required before mounting: the workbench host and the sessions runtime. */
 export const inject = ['betterSidebar', 'sessions', 'connection']
@@ -34,11 +34,11 @@ function LinkIcon({ size = 16 }: { size?: number }) {
 }
 
 export function apply(ctx: ClientContext & { betterSidebar: BetterSidebarService }): void {
-  const store = new SessionLinksStore()
+  const store = new SessionResourcesStore()
   ctx.effect(() => () => store.dispose())
 
   const disposeTab = ctx.betterSidebar.registerTab({
-    id: 'session-links',
+    id: 'sidebar-session-resources',
     title: () => '文档/资料',
     icon: (size: number) => <LinkIcon size={size} />,
     order: 45,
@@ -55,5 +55,5 @@ export function apply(ctx: ClientContext & { betterSidebar: BetterSidebarService
   ctx.effect(() => disposeTab)
 }
 
-export { SessionLinksStore } from './collector.js'
+export { SessionResourcesStore } from './collector.js'
 export { Panel } from './Panel.jsx'

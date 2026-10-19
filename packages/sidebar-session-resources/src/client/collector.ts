@@ -33,7 +33,7 @@ export interface SnapshotSource {
 /** Debounce window for subscriber notification (ingest is cheap; renders are not). */
 const NOTIFY_DEBOUNCE_MS = 150
 
-class SessionLinksState {
+class SessionResourcesState {
   /** Highest `seq` already ingested (monotonic watermark; loadOlder adds only older seqs). */
   private maxSeen = -1
   /** URL -> latest occurrence (dedup keeps the latest, counts repetitions). */
@@ -172,8 +172,8 @@ const EMPTY_PRODUCED: readonly ProducedFile[] = []
  * Plugin-scoped store: one state per session id. The UI observes by session
  * id; switching sessions tears the old state down (spec: clear + rebuild).
  */
-export class SessionLinksStore {
-  private readonly states = new Map<SessionId, SessionLinksState>()
+export class SessionResourcesStore {
+  private readonly states = new Map<SessionId, SessionResourcesState>()
   private readonly listeners = new Set<() => void>()
   private notifyTimer: ReturnType<typeof setTimeout> | null = null
   /** Deployment classification rules; public defaults until a host baseline supplies them. */
@@ -183,7 +183,7 @@ export class SessionLinksStore {
   observe(sessionId: SessionId, source: SnapshotSource | undefined): void {
     const existing = this.states.get(sessionId)
     if (!existing) {
-      this.states.set(sessionId, new SessionLinksState(source, () => this.scheduleNotify(), () => this.rules))
+      this.states.set(sessionId, new SessionResourcesState(source, () => this.scheduleNotify(), () => this.rules))
       this.scheduleNotify()
       return
     }
@@ -265,7 +265,7 @@ export class SessionLinksStore {
         try {
           listener()
         } catch (error) {
-          console.error('[dsh-session-links] listener error:', error)
+          console.error('[dsh-sidebar-session-resources] listener error:', error)
         }
       }
     }, NOTIFY_DEBOUNCE_MS)

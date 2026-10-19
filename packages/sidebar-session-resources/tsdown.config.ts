@@ -9,7 +9,7 @@ const external = [
 ]
 
 export default defineConfig({
-  name: 'dsh-session-links/client',
+  name: 'dsh-sidebar-session-resources/client',
   entry: { client: 'src/client/index.tsx' },
   outDir: 'lib',
   format: 'cjs',
@@ -21,7 +21,7 @@ export default defineConfig({
   noExternal: (id: string) => (external.includes(id) ? undefined : true),
   outputOptions: {
     entryFileNames: 'client.js',
-    banner: 'window.__ModuleLoader__.load({ id: "dsh-session-links", factory: (require) => {',
+    banner: 'window.__ModuleLoader__.load({ id: "dsh-sidebar-session-resources", factory: (require) => {',
     footer: 'return module.exports; } });',
     intro: 'var module = { exports: {} }; var exports = module.exports;',
   },

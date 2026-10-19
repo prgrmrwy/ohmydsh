@@ -1,5 +1,5 @@
 /**
- * Pure link extraction and classification for the session-links panel.
+ * Pure link extraction and classification for the sidebar-session-resources panel.
  *
  * Everything in this module is side-effect free and framework free so the
  * behavior is locked by unit tests. The categorization rule table lives here

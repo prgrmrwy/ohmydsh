@@ -1,5 +1,5 @@
 /**
- * The session-links panel: groups the current session's collected links by
+ * The sidebar-session-resources panel: groups the current session's collected links by
  * category, newest first (assistant-sourced ties win), opens links in a new
  * tab, and shows an empty state when there is nothing to show.
  */
@@ -12,13 +12,13 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import {
-  SESSION_LINKS_CHANNEL,
-  SESSION_LINKS_ENTRIES_ENDPOINT,
-  type SessionLinksBaseline,
+  SESSION_RESOURCES_CHANNEL,
+  SESSION_RESOURCES_ENTRIES_ENDPOINT,
+  type SessionResourcesBaseline,
 } from '../contract.js'
 import { CATEGORY_LABELS, CATEGORY_ORDER, compareEntries, type LinkEntry } from '../shared/links.js'
 import type { ProducedFile } from './produces.js'
-import type { SessionLinksStore, SnapshotSource } from './collector.js'
+import type { SessionResourcesStore, SnapshotSource } from './collector.js'
 
 /**
  * Adapt the official transcript to the store's minimal snapshot face.
@@ -59,24 +59,24 @@ export function formatLinkTime(time: number, now: number = Date.now()): string {
 }
 
 
-/** Call `/dsh-session-links` `links` and unwrap the baseline (throws on failure). */
-export async function fetchSessionLinks(
+/** Call `/dsh-sidebar-session-resources` `links` and unwrap the baseline (throws on failure). */
+export async function fetchSessionResources(
   rpc: ClientConnectionRpc,
   sessionId: string,
   signal?: AbortSignal,
-): Promise<SessionLinksBaseline> {
-  const result = (await rpc.call(SESSION_LINKS_CHANNEL, SESSION_LINKS_ENTRIES_ENDPOINT, { sessionId }, signal)) as
-    | { ok: true; value: SessionLinksBaseline }
+): Promise<SessionResourcesBaseline> {
+  const result = (await rpc.call(SESSION_RESOURCES_CHANNEL, SESSION_RESOURCES_ENTRIES_ENDPOINT, { sessionId }, signal)) as
+    | { ok: true; value: SessionResourcesBaseline }
     | { ok: false; error?: { message?: string } }
   if (!result.ok) {
-    throw new Error(result.error?.message ?? 'unknown session-links error')
+    throw new Error(result.error?.message ?? 'unknown sidebar-session-resources error')
   }
   return result.value
 }
 
 export interface PanelProps {
   ctx: ClientContext
-  store: SessionLinksStore
+  store: SessionResourcesStore
   sessionId: SessionId | undefined
   /** Open a produced file in the workbench (better-sidebar editor host); undefined = plain text. */
   onOpenFile?: ((path: string) => void) | undefined
@@ -173,12 +173,12 @@ export function Panel({ ctx, store, sessionId, onOpenFile }: PanelProps) {
     const controller = new AbortController()
     const attemptBaseline = (attempt: number): void => {
       if (!rpc) {
-        if (attempt === 0) console.warn('[dsh-session-links] baseline NOT fetched: connection RPC unavailable on tab context')
+        if (attempt === 0) console.warn('[dsh-sidebar-session-resources] baseline NOT fetched: connection RPC unavailable on tab context')
         return
       }
-      fetchSessionLinks(rpc, sessionId, controller.signal)
+      fetchSessionResources(rpc, sessionId, controller.signal)
         .then((baseline) => {
-          console.info(`[dsh-session-links] baseline applied: ${baseline.entries.length} entries, maxSeq ${baseline.maxSeq}, complete ${baseline.complete}`)
+          console.info(`[dsh-sidebar-session-resources] baseline applied: ${baseline.entries.length} entries, maxSeq ${baseline.maxSeq}, complete ${baseline.complete}`)
           store.setRules(baseline.rules)
           store.applyBaseline(sessionId, baseline.entries, baseline.produced, baseline.maxSeq)
         })
@@ -188,7 +188,7 @@ export function Panel({ ctx, store, sessionId, onOpenFile }: PanelProps) {
           if (attempt < 2 && !controller.signal.aborted) {
             setTimeout(() => attemptBaseline(attempt + 1), 1_000 * (attempt + 1))
           } else {
-            console.warn('[dsh-session-links] baseline fetch failed:', error instanceof Error ? error.message : String(error))
+            console.warn('[dsh-sidebar-session-resources] baseline fetch failed:', error instanceof Error ? error.message : String(error))
           }
         })
     }

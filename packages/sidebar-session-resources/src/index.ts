@@ -1,7 +1,7 @@
 /**
- * Host entry for dsh-session-links.
+ * Host entry for dsh-sidebar-session-resources.
  *
- * Registers one read-only Connection RPC channel, `/dsh-session-links`,
+ * Registers one read-only Connection RPC channel, `/dsh-sidebar-session-resources`,
  * whose single `links` endpoint reads a session's **complete** durable
  * event log through the official sessionPersistence service and returns its
  * deduped link set (the "whole session" baseline the browser window cannot
@@ -17,7 +17,7 @@
  * the Connection layer for every channel (403 non-loopback/untrusted Host,
  * 401 unauthenticated), and this deployment configures no trustedHosts.
  *
- * @module dsh-session-links
+ * @module dsh-sidebar-session-resources
  */
 import type { Context } from '@deepseek-ai/cordis'
 // Type-only: brings the host Context.connection merge (HostConnectionHandle).
@@ -25,11 +25,11 @@ import type {} from '@deepseek-ai/dsh-client-connection'
 // Type-only: brings the host Context.sessionPersistence merge.
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import { SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
-import { SESSION_LINKS_CHANNEL, SESSION_LINKS_ENTRIES_ENDPOINT, type SessionLinksRequest } from './contract.js'
+import { SESSION_RESOURCES_CHANNEL, SESSION_RESOURCES_ENTRIES_ENDPOINT, type SessionResourcesRequest } from './contract.js'
 import { extractSession } from './host/extract.js'
 import { parseLinkRules } from './shared/links.js'
 
-export const name = 'session-links'
+export const name = 'sidebar-session-resources'
 
 /** Headless-safe: the connection service is resolved lazily below. */
 export const inject: string[] = []
@@ -39,7 +39,7 @@ const BASELINE_CACHE_TTL_MS = 30_000
 
 type BaselineCacheEntry = { value: unknown; at: number }
 
-/** Mount the `/dsh-session-links` RPC channel when a host connection exists. */
+/** Mount the `/dsh-sidebar-session-resources` RPC channel when a host connection exists. */
 export function apply(ctx: Context, config?: unknown): void {
   // Organization hosts come from the row config (a private overlay patch), so
   // the public source never names them.
@@ -51,26 +51,26 @@ export function apply(ctx: Context, config?: unknown): void {
     if (connection === undefined) return
 
     child.effect(() => connection.rpc.handle(
-      SESSION_LINKS_CHANNEL,
+      SESSION_RESOURCES_CHANNEL,
       async (endpoint, payload) => {
-        if (endpoint !== SESSION_LINKS_ENTRIES_ENDPOINT) {
+        if (endpoint !== SESSION_RESOURCES_ENTRIES_ENDPOINT) {
           return {
             ok: false as const,
             error: {
               code: 'internal' as const,
-              message: `dsh-session-links: unknown endpoint "${endpoint}"`,
+              message: `dsh-sidebar-session-resources: unknown endpoint "${endpoint}"`,
               details: {},
             },
           }
         }
-        const request = payload as Partial<SessionLinksRequest> | undefined
+        const request = payload as Partial<SessionResourcesRequest> | undefined
         const sessionId = typeof request?.sessionId === 'string' ? request.sessionId : undefined
         if (!sessionId) {
           return {
             ok: false as const,
             error: {
               code: 'internal' as const,
-              message: 'dsh-session-links: sessionId is required',
+              message: 'dsh-sidebar-session-resources: sessionId is required',
               details: {},
             },
           }
@@ -86,7 +86,7 @@ export function apply(ctx: Context, config?: unknown): void {
               ok: false as const,
               error: {
                 code: 'internal' as const,
-                message: 'dsh-session-links: sessionPersistence service unavailable',
+                message: 'dsh-sidebar-session-resources: sessionPersistence service unavailable',
                 details: {},
               },
             }
@@ -121,6 +121,6 @@ export function apply(ctx: Context, config?: unknown): void {
           }
         }
       },
-    ), 'dsh-session-links: /dsh-session-links rpc channel')
+    ), 'dsh-sidebar-session-resources: /dsh-sidebar-session-resources rpc channel')
   })
 }
