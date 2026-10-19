@@ -193,6 +193,41 @@ export class InquiryLedgerStore {
   }
 
   /**
+   * Stage one accepted inquiry in a caller-owned Domain transaction. This is
+   * intentionally synchronous: callers composing additional acceptance rows
+   * must share this exact read/count/decision path and commit boundary.
+   */
+  stageAccept(
+    tx: { put(table: Table, key: string, value: unknown): void },
+    request: unknown,
+    facts: InquiryAcceptFacts | unknown,
+  ): InquiryRecord {
+    const supplied = detach(facts, acceptFactKeys)
+    // The ancestor is durable and visible inside the caller's active transaction.
+    const parentId = this.declaredParentId(supplied.origin)
+    const parent = parentId === undefined ? null : (this.get(parentId) ?? null)
+    const context = (rootInquiryCount: number, pendingCount: number) =>
+      ({ ...supplied, parent, rootInquiryCount, pendingCount })
+    const probe = createInquiry(request, context(0, 0))
+    const existing = this.get(probe.id)
+    if (existing !== undefined) {
+      if (identity(existing) !== identity(probe)) throw new InquiryLedgerStoreError('INQUIRY_EXISTS')
+      return existing
+    }
+    let rootInquiryCount = 0
+    let pendingCount = 0
+    for (const record of this.all()) {
+      if (record.id === probe.id) continue
+      if (record.trace.rootInquiryId === probe.trace.rootInquiryId) rootInquiryCount += 1
+      if (record.target.sessionId === probe.target.sessionId && !isTerminalInquiryStatus(record.status)) pendingCount += 1
+    }
+    const candidate = createInquiry(request, context(rootInquiryCount, pendingCount))
+    if (identity(candidate) !== identity(probe)) corrupt()
+    tx.put('inquiries', candidate.id, candidate)
+    return candidate
+  }
+
+  /**
    * Persist one accepted inquiry as a queued record.
    *
    * Everything that decides the outcome happens inside the Domain callback:
@@ -203,46 +238,8 @@ export class InquiryLedgerStore {
    * a used id is refused rather than overwriting the first one.
    */
   async accept(request: unknown, facts: InquiryAcceptFacts | unknown): Promise<InquiryRecord> {
-    const supplied = detach(facts, acceptFactKeys)
     let result: InquiryRecord | undefined
-    await this.transaction(tx => {
-      // The ancestor is a durable fact. An inquiry-origin call whose ancestor
-      // is absent gets the pure model's CHAIN_MISMATCH, not an invented root.
-      const parentId = this.declaredParentId(supplied.origin)
-      const parent = parentId === undefined ? null : (this.get(parentId) ?? null)
-      const context = (rootInquiryCount: number, pendingCount: number) =>
-        ({ ...supplied, parent, rootInquiryCount, pendingCount })
-
-      // Run the model once with empty counts purely to obtain the VALIDATED
-      // id/root/target the durable counts are keyed by. It commits nothing and
-      // is not the decision; the authoritative call below re-runs every rule
-      // against the counts actually read from storage.
-      const probe = createInquiry(request, context(0, 0))
-
-      const existing = this.get(probe.id)
-      if (existing !== undefined) {
-        if (identity(existing) !== identity(probe)) throw new InquiryLedgerStoreError('INQUIRY_EXISTS')
-        result = existing
-        return
-      }
-
-      // Count from durable rows, excluding this id so a redelivery that raced
-      // its own commit is measured exactly like the original acceptance.
-      let rootInquiryCount = 0
-      let pendingCount = 0
-      for (const record of this.all()) {
-        if (record.id === probe.id) continue
-        if (record.trace.rootInquiryId === probe.trace.rootInquiryId) rootInquiryCount += 1
-        if (record.target.sessionId === probe.target.sessionId && !isTerminalInquiryStatus(record.status)) {
-          pendingCount += 1
-        }
-      }
-
-      const candidate = createInquiry(request, context(rootInquiryCount, pendingCount))
-      if (identity(candidate) !== identity(probe)) corrupt()
-      result = candidate
-      tx.put('inquiries', candidate.id, candidate)
-    })
+    await this.transaction(tx => { result = this.stageAccept(tx, request, facts) })
     return result!
   }
 

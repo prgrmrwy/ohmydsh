@@ -63,6 +63,7 @@ import {
   type CollaborationAssembly,
 } from './host/collaboration/assembly.js'
 import { InquiryLedgerStore } from './host/inquiry/ledger-store.js'
+import { composeProductionInquiry } from './host/inquiry/composition.js'
 import { SharedFactLedgerStore } from './host/ledger/store.js'
 import {
   acceptTodo,
@@ -71,6 +72,7 @@ import {
   type TodoDispatchPort,
 } from './host/ledger/dispatch.js'
 import { InquiryOutboxStore } from './host/inquiry/outbox-store.js'
+import { createInquiryOwnerProjection } from './host/inquiry/owner-projection.js'
 import { summarizeInquiryReconciliation } from './host/inquiry/reconcile.js'
 import type { InquiryOriginProof } from './host/inquiry/ask.js'
 import type {
@@ -837,6 +839,15 @@ async function initialize(
   })
 
   const changes = new PetChangeFeed()
+
+  // Owner inquiry snapshots are read from the Pet Domain on demand. Refresh
+  // subscribed owner clients only after committed changes to their source rows;
+  // payloads are intentionally ignored.
+  ctx.effect(() => ctx.on('domain/changed', change => {
+    if (change.domain !== PET_DOMAIN_NAME) return
+    if (!['inquiries', 'inquiry_handoffs', 'inquiry_answers', 'inquiry_results', 'inquiry_works'].includes(change.table)) return
+    changes.publish()
+  }), 'dsh-pet: publish committed inquiry projection changes')
 
   // Archiving a terminal Task from Pet syncs its executor session; DSH
   // exposes archive but no unarchive, so this stays one-way by design.
@@ -3348,8 +3359,13 @@ async function initialize(
   }
 
   let locusManagement!: ReturnType<typeof createLocusManagementPort>
+  const projectInquiry = createInquiryOwnerProjection({
+    domain: domain as never,
+    capability: () => ({ available: collaborationSurface?.inquiryDispatch.available === true }),
+  })
   locusManagement = createLocusManagementPort({
     repository: locusRepository as never,
+    ownerProjection: input => ({ inquiry: projectInquiry(input) }),
     // The same live reader admission and resolution already share: the panel
     // must agree with the channel about whether this entry can still serve,
     // otherwise one of them offers a repair while the other refuses it.

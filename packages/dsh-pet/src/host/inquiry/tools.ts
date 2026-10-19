@@ -13,7 +13,7 @@
  * DSL; `oneOf` is its union vocabulary.)
  */
 import type { Context } from '@deepseek-ai/cordis'
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { acceptInquiryFromCaller, type InquiryAskDependencies } from './ask.js'
 import {
   submitInquiryAnswerFromCaller, INQUIRY_ANSWER_CONFIDENCE, INQUIRY_ANSWER_RECENCY,
@@ -33,7 +33,10 @@ export const INQUIRY_ANSWER_TOOL = 'pet_inquiry_answer'
  * reference from the collaborator list and is re-authorized against current
  * membership at accept time — holding one is not permission to use it.
  */
-export function registerInquiryAskTool(ctx: Context, deps: InquiryAskDependencies): () => void {
+export function registerInquiryAskTool(
+  ctx: Context,
+  deps: InquiryAskDependencies | { forExecution(execution: ToolRunContext): InquiryAskDependencies },
+): () => void {
   return ctx.tools.register(defineTool({
     name: INQUIRY_ASK_TOOL,
     description: 'Ask one member of your own collaboration scope a question, asynchronously. Success means ACCEPTED AND QUEUED — it is not an answer and contains no answer. End your turn afterwards; the result comes back later as a separate correlated continuation, so do not poll or wait. You choose only whom to ask, what to ask and why: your identity, your circle, the origin of your work and who may ultimately read the reply are derived from your actual session and cannot be supplied or relabelled. A stale target reference is refused rather than redirected to a rebuilt member, so refresh your collaborator list. An inquiry does not grant either member new authority or let the requester act through the target: the target keeps its own normal policy and tool ceiling, while Host still blocks reply-target transfer, ordinary cross-agent messaging, delegation and permission or binding changes.',
@@ -59,7 +62,8 @@ export function registerInquiryAskTool(ctx: Context, deps: InquiryAskDependencie
       render: (_args, value) => [{ type: 'text', text: value.json }],
     },
     async execute(args, execution) {
-      return { json: JSON.stringify(await acceptInquiryFromCaller(execution, args, deps)) }
+      const resolvedDeps = 'forExecution' in deps ? deps.forExecution(execution) : deps
+      return { json: JSON.stringify(await acceptInquiryFromCaller(execution, args, resolvedDeps)) }
     },
   }))
 }

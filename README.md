@@ -186,6 +186,8 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [i-have-adhd](skills/i-have-adhd/SKILL.md) — Answer-first, short-step output mode, used only when explicitly requested.
 - [frontend-design](skills/frontend-design/SKILL.md) — Design guidance that avoids templated, default-looking interfaces.
 - [eli5](skills/eli5/SKILL.md) — Explains any topic at the level of a chosen audience.
+- [ponytail](https://github.com/DietrichGebert/ponytail) — Smallest-complete-change coding and review guidance.
+- [ponytail-skills](patches/ponytail-skills.yml) — Makes the pinned Ponytail skills available to DSH.
 
 ### Self-developed packages
 
@@ -196,7 +198,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [sidebar-session-provider-icon](packages/sidebar-session-provider-icon/README.md) — Shows the selected model's brand logo on every sidebar session row.
 - [session-title-copy](packages/session-title-copy/README.md) — Adds a short session-id badge next to the title that copies the full id.
 - [system-clock](packages/system-clock/README.md) — Shows the DSH host's clock, time zone and hostname at the bottom of settings.
-- [session-links](packages/session-links/README.md) — Collects links and produced files of the current session into a sidebar panel.
+- [sidebar-session-resources](packages/sidebar-session-resources/README.md) — Collects links and produced files of the current session into a sidebar panel.
 - [home-network-model-guard](packages/home-network-model-guard/README.md) — Disables Claude models in the input box when the host egress region is restricted.
 - [subscriptions-sandbox-shim](packages/subscriptions-sandbox-shim/README.md) — Strips sandbox escalation fields and orphan tool calls for subscription providers.
 - [cockpit-worktree-open-shim](packages/cockpit-worktree-open-shim/README.md) — Connects the cockpit remote editor to Worktree Session's open action.

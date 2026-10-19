@@ -46,7 +46,7 @@ function lifecycleTools(current = true, overrides: {
   readonly inspectCurrentCapability?: (childSessionId: string) => unknown
   readonly inspectCurrentDeliveryAuthorization?: (input: unknown) => unknown
   readonly logAuthorizationRefusal?: (input: unknown) => void
-} = {}) {
+} = {}, managedEffects?: Parameters<typeof registerPetTools>[1]['managedEffects']) {
   const definitions: Array<{ name: string; parameters: unknown; execute(args: unknown, exec: unknown): Promise<unknown> }> = []
   const authorizeCurrentDelivery = overrides.authorizeCurrentDelivery ?? (() => current ? contextRecord(true) : undefined)
   const repository = {
@@ -74,6 +74,7 @@ function lifecycleTools(current = true, overrides: {
       ...(overrides.finishCurrentDelivery === undefined ? {} : { finishCurrentDelivery: overrides.finishCurrentDelivery }),
       ...(overrides.waitCurrentDelivery === undefined ? {} : { waitCurrentDelivery: overrides.waitCurrentDelivery }),
     },
+    managedEffects,
   })
   return {
     finish: definitions.find(item => item.name === PET_LOCUS_FINISH_TOOL)!,

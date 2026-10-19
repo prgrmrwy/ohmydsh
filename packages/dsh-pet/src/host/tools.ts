@@ -26,7 +26,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import { defineTool, type ToolDefinition, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import {
   executePetContext,
   PET_CONTEXT_TOOL,
@@ -377,13 +377,28 @@ export function registerPetTools(
      * published (never published as a tool that always fails).
      */
     readonly locusHistory?: Omit<LocusHistoryToolDeps, 'callerSessionId'>
+    readonly managedEffects?: {
+      register(definition: ToolDefinition, effect: 'delivery' | 'todo-execution'): () => void
+      assertEntry(execution: ToolRunContext): void
+    }
   },
 ): () => void {
   const disposers: (() => void)[] = []
+  const register = (definition: ToolDefinition, effect?: 'delivery' | 'todo-execution') => {
+    const disposeNative = ctx.tools.register(definition)
+    try {
+      const disposeManaged = effect === undefined ? undefined : deps.managedEffects?.register(definition, effect)
+      if (disposeManaged !== undefined) disposers.push(disposeManaged)
+      disposers.push(disposeNative)
+    } catch (error) {
+      disposeNative()
+      throw error
+    }
+  }
+  const assertManagedEntry = (execution: ToolRunContext) => deps.managedEffects?.assertEntry(execution)
 
-  disposers.push(
-    ctx.tools.register(
-      defineTool({
+  register(
+    defineTool({
         name: PET_CONTEXT_TOOL,
         description:
           'Return trusted caller-bound Pet context for this session. For an ordinary Pet ' +
@@ -414,13 +429,12 @@ export function registerPetTools(
           )
           return { json: JSON.stringify(context, null, 2) }
         },
-      }),
-    ),
+    }),
   )
 
   const lifecycle = deps.locusLifecycle
   if (lifecycle !== undefined) {
-    disposers.push(ctx.tools.register(defineTool({
+    register(defineTool({
       name: PET_LOCUS_FINISH_TOOL,
       description:
         'Finish the exact current Feishu Delivery with reply text or a no-reply reason. ' +
@@ -442,6 +456,7 @@ export function registerPetTools(
         render: (_args, value) => [{ type: 'text', text: value.sent ? '已提交当前飞书请求。' : '当前请求未发送正文。' }],
       },
       async execute(args, exec) {
+        assertManagedEntry(exec)
         const input = requireKnownArguments(args, ['outcome', 'text', 'reason'], PET_LOCUS_FINISH_TOOL)
         const outcome = input.outcome
         const text = typeof input.text === 'string' ? input.text : undefined
@@ -450,6 +465,7 @@ export function registerPetTools(
         if (outcome === 'reply' && (!hasOwnArgument(input, 'text') || text === undefined || text.trim() === '' || hasOwnArgument(input, 'reason'))) throw new PetError('INVALID_REQUEST', 'reply requires non-empty text and no reason.')
         if (outcome === 'no-reply' && (hasOwnArgument(input, 'text') || !hasOwnArgument(input, 'reason') || reason === undefined || reason.trim() === '')) throw new PetError('INVALID_REQUEST', 'no-reply requires non-empty reason and no text.')
         const locus = await resolveAuthorizedCurrent(lifecycle, callerSessionId(exec as ExecutionLike), 'finish')
+        assertManagedEntry(exec)
         const delivery = locus.currentDelivery!
         if (lifecycle.finishCurrentDelivery === undefined) {
           // A direct Lark fallback would send without the durable finishing CAS,
@@ -459,9 +475,9 @@ export function registerPetTools(
         }
         return lifecycle.finishCurrentDelivery({ childSessionId: delivery.childSessionId, locus, delivery, outcome, ...(text === undefined ? {} : { text }), ...(reason === undefined ? {} : { reason }) })
       },
-    })))
+    }), 'delivery')
 
-    disposers.push(ctx.tools.register(defineTool({
+    register(defineTool({
       name: PET_LOCUS_WAIT_TOOL,
       description: 'Extend the current Delivery lease by positive minutes from now, bounded by the acceptedAt plus 24 hour hard cap.',
       parameters: { waitMinutes: { type: 'number', required: true }, reason: { type: 'string' } },
@@ -472,21 +488,23 @@ export function registerPetTools(
         render: (_args, value) => [{ type: 'text', text: `等待期限：${String(value.deadline)}` }],
       },
       async execute(args, exec) {
+        assertManagedEntry(exec)
         const input = requireKnownArguments(args, ['waitMinutes', 'reason'], PET_LOCUS_WAIT_TOOL)
         const waitMinutes = input.waitMinutes
         if (typeof waitMinutes !== 'number' || !Number.isSafeInteger(waitMinutes) || waitMinutes < 1 || waitMinutes > 1440) throw new PetError('INVALID_REQUEST', 'waitMinutes must be an integer from 1 through 1440.')
         if (hasOwnArgument(input, 'reason') && typeof input.reason !== 'string') throw new PetError('INVALID_REQUEST', 'reason must be a string when provided.')
         const locus = await resolveAuthorizedCurrent(lifecycle, callerSessionId(exec as ExecutionLike), 'wait')
+        assertManagedEntry(exec)
         if (lifecycle.waitCurrentDelivery === undefined) throw new PetError('INTERNAL', 'The Host has no durable Delivery wait lease.')
         const reason = typeof input.reason === 'string' ? input.reason : undefined
         return lifecycle.waitCurrentDelivery({ childSessionId: locus.currentDelivery!.childSessionId, locus, delivery: locus.currentDelivery!, waitMinutes, ...(reason === undefined ? {} : { reason }) })
       },
-    })))
+    }), 'delivery')
   }
 
   const intentTriage = deps.intentTriage
   if (intentTriage !== undefined) {
-    disposers.push(ctx.tools.register(defineTool({
+    register(defineTool({
       name: PET_LOCUS_PARENT_LOOKUP_TOOL,
       description:
         INTENT_TRIAGE_GUIDANCE +
@@ -523,9 +541,9 @@ export function registerPetTools(
         if (!result.ok) return { ok: false, reason: result.reason }
         return { ok: true, transcript: JSON.stringify(result.transcript) }
       },
-    })))
+    }))
 
-    disposers.push(ctx.tools.register(defineTool({
+    register(defineTool({
       name: PET_LOCUS_LEDGER_READ_TOOL,
       description:
         'Read every todo item already registered in your same-source shared-fact ledger — the ' +
@@ -571,9 +589,9 @@ export function registerPetTools(
           ? { ok: true, items: JSON.stringify(outcome.items) }
           : { ok: false, reason: outcome.reason }
       },
-    })))
+    }))
 
-    disposers.push(ctx.tools.register(defineTool({
+    register(defineTool({
       name: PET_LOCUS_TRACK_TOOL,
       description:
         'Register the current Feishu request as a durable todo for the owner to pick up, when it ' +
@@ -610,9 +628,9 @@ export function registerPetTools(
         const result = await trackTodo(authorized, { summary: input.summary, detail: input.detail }, intentTriage.track)
         return result.ok ? { ok: true } : { ok: false, reason: result.reason }
       },
-    })))
+    }))
 
-    disposers.push(ctx.tools.register(defineTool({
+    register(defineTool({
       name: PET_LOCUS_REQUEST_EXECUTION_TOOL,
       description:
         'Ask for a todo YOU registered to be executed. Provide only `itemId` — the Host resolves ' +
@@ -643,6 +661,7 @@ export function registerPetTools(
         }],
       },
       async execute(args, exec) {
+        assertManagedEntry(exec)
         const input = requireKnownArguments(args, ['itemId'], PET_LOCUS_REQUEST_EXECUTION_TOOL)
         if (typeof input.itemId !== 'string' || input.itemId.trim() === '') {
           // Malformed is not "not found": point at the one place a legal value
@@ -660,6 +679,7 @@ export function registerPetTools(
         // Same authorization proof `pet_locus_track` uses: a caller without a
         // unique current Delivery cannot prove which locus it speaks for.
         await resolveAuthorizedCurrent(intentTriage, sessionId, 'track')
+        assertManagedEntry(exec)
         const result = await intentTriage.requestExecution({
           itemId: input.itemId.trim(),
           callerChildSessionId: sessionId,
@@ -668,12 +688,12 @@ export function registerPetTools(
           ? { ok: true, outcome: result.outcome }
           : { ok: false, reason: result.reason }
       },
-    })))
+    }), 'todo-execution')
   }
 
   const history = deps.locusHistory
   if (history !== undefined) {
-    disposers.push(ctx.tools.register(defineTool({
+    register(defineTool({
       name: PET_LOCUS_CHAT_HISTORY_TOOL,
       description:
         'Read a bounded page of THIS entrance\'s own messages, with the bot identity. ' +
@@ -719,10 +739,10 @@ export function registerPetTools(
           callerSessionId: callerSessionId(exec as ExecutionLike),
         })
       },
-    })))
+    }))
   }
 
   return () => {
-    for (const dispose of disposers.splice(0)) dispose()
+    for (const dispose of disposers.splice(0).reverse()) dispose()
   }
 }

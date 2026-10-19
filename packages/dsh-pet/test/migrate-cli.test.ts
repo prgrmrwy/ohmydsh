@@ -30,6 +30,17 @@ function stamped(file: string): number {
 }
 
 describe('dsh-pet-migrate-state CLI', () => {
+  it.each([14, 15])('checks an additive v%s migration without writing in --dry-run mode', version => {
+    const { dir, file } = database(version)
+    const before = readFileSync(file)
+    const output = execFileSync(process.execPath, [SCRIPT, '--db', file, '--dry-run'], { encoding: 'utf8' })
+
+    expect(output).toContain(`[dry-run] Would restamp ${version} → ${PET_DOMAIN_VERSION}`)
+    expect(stamped(file)).toBe(version)
+    expect(readFileSync(file)).toEqual(before)
+    expect(readdirSync(dir).filter(name => name.includes('.bak-'))).toEqual([])
+  })
+
   it('checks an additive migration without writing in --dry-run mode', () => {
     const { dir, file } = database(5)
     const output = execFileSync(process.execPath, [SCRIPT, '--db', file, '--dry-run'], { encoding: 'utf8' })
@@ -119,6 +130,30 @@ describe('dsh-pet-migrate-state CLI', () => {
     const second = execFileSync(process.execPath, [SCRIPT, '--db', file, '--yes'], { encoding: 'utf8' })
     expect(second).toContain('Already at the target version')
     expect(readdirSync(dir).filter(name => name.includes('.bak-'))).toEqual(backups)
+  })
+
+  it.each([14, 15, 16])('backs up v%s and restamps to the current version while preserving opaque inquiry/result history', version => {
+    const { dir, file } = database(version)
+    const inquiry = '{"opaque":"inquiry payload","futureField":[1,2,3]}'
+    const result = '{ "opaque": "result payload", "status": "unknown-future-status" }'
+    const seed = new DatabaseSync(file)
+    seed.exec('CREATE TABLE u_dsh_pet_inquiries (key TEXT PRIMARY KEY, value TEXT)')
+    seed.exec('CREATE TABLE u_dsh_pet_inquiry_results (key TEXT PRIMARY KEY, value TEXT)')
+    seed.prepare('INSERT INTO u_dsh_pet_inquiries VALUES (?, ?)').run('inquiry-1', inquiry)
+    seed.prepare('INSERT INTO u_dsh_pet_inquiry_results VALUES (?, ?)').run('result-1', result)
+    seed.close()
+
+    const output = execFileSync(process.execPath, [SCRIPT, '--db', file, '--yes'], { encoding: 'utf8' })
+    expect(output).toContain(`Restamped ${version} → ${PET_DOMAIN_VERSION}`)
+    expect(stamped(file)).toBe(PET_DOMAIN_VERSION)
+    const backups = readdirSync(dir).filter(name => name.includes(`.v${version}.bak-`))
+    expect(backups).toHaveLength(1)
+    const migrated = new DatabaseSync(file, { readOnly: true })
+    try {
+      expect(migrated.prepare('SELECT value FROM u_dsh_pet_inquiries WHERE key = ?').get('inquiry-1')).toEqual({ value: inquiry })
+      expect(migrated.prepare('SELECT value FROM u_dsh_pet_inquiry_results WHERE key = ?').get('result-1')).toEqual({ value: result })
+    } finally { migrated.close() }
+    expect(stamped(path.join(dir, backups[0]!))).toBe(version)
   })
 
   it.each([1, 0, -1, PET_DOMAIN_VERSION + 1, 999])('refuses unsupported v%s without backup or mutation', version => {
