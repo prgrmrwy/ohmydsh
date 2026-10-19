@@ -715,7 +715,11 @@ async function initialize(
     inquiryAdapters.set(id, adapter as { executionProof(execution: unknown): unknown })
     try {
       ;(agent.ctx as { effect: (factory: () => () => void, name: string) => unknown }).effect(
-        () => () => { disposeGuard?.(); inquiryAdapters.delete(id) },
+        () => () => {
+          try { disposeGuard?.() } catch (error) { petLog(`dsh-pet: inquiry guard dispose error (${error instanceof Error ? error.message : String(error)})`) }
+          try { composed.release(agent as never) } catch (error) { petLog(`dsh-pet: inquiry adapter release error (${error instanceof Error ? error.message : String(error)})`) }
+          try { inquiryAdapters.delete(id) } catch (error) { petLog(`dsh-pet: inquiry adapter cleanup error (${error instanceof Error ? error.message : String(error)})`) }
+        },
         'dsh-pet: inquiry managed guard',
       )
     } catch (error) {

@@ -570,4 +570,44 @@ describe('production inquiry composition', () => {
       await h.close()
     }
   })
+
+  it('releases an agent adapter for cold reload while rejecting live duplicate instances and stale releases', async () => {
+    const h = await openPetHarness()
+    const ctx = new Context()
+    for (const plugin of [Sessions, Agents, Llm, SystemPrompt, ToolRuntime, Projections]) await ctx.plugin(plugin)
+    try {
+      ctx.llm.registerAdapter(['release-test'], new (class extends LlmAdapter { async *stream() {} })())
+      await ctx.plugin(AgentLoop, { agents: [] })
+      const agentA = await ctx.agentLoop.create('release-test', { provider: 'release-test', model: 'm' })
+      const scopes = new Map([[agentA.id, { kind: 'main' as const, sessionId: agentA.id }]])
+      const mounted = new Set([agentA.id])
+      const composed = composeProductionInquiry({ domain: h.domain as never, currentScope: (id: string) => scopes.get(id), resolveAgent: (s: { sessionId: string }) => s.sessionId === agentA.id ? agentA : undefined, agentLoop: ctx.agentLoop, probeIsolatedClaim: ctx.agentLoop.probeIsolatedQueuedTurnClaim.bind(ctx.agentLoop), tools: ctx.tools, readinessManagedGuard: () => mounted.has(agentA.id), log: () => undefined, onError: vi.fn(), now: () => 1, newMessageId: () => 'm', newInquiryId: () => 'i' })
+      expect(composed.ready).toBe(true)
+      const ctxB = new Context()
+      for (const plugin of [Sessions, Agents, Llm, SystemPrompt, ToolRuntime, Projections]) await ctxB.plugin(plugin)
+      ctxB.llm.registerAdapter(['release-test'], new (class extends LlmAdapter { async *stream() {} })())
+      await ctxB.plugin(AgentLoop, { agents: [] })
+      const adapterA = composed.install(agentA as Agent)
+      const agentLiveDuplicate = await ctxB.agentLoop.create(`${agentA.id}-duplicate`, { provider: 'release-test', model: 'm' })
+      Object.defineProperty(agentLiveDuplicate, 'id', { value: agentA.id })
+      expect(agentLiveDuplicate.session).not.toBe(agentA.session)
+      expect(() => composed.install(agentLiveDuplicate as Agent)).toThrow('Inquiry agent instance changed')
+
+      composed.release(agentA as Agent)
+      await agentLiveDuplicate.ctx.fiber.dispose()
+      const agentB = await ctxB.agentLoop.create(agentA.id, { provider: 'release-test', model: 'm' })
+      expect(agentB.id).toBe(agentA.id)
+      expect(agentB.session).not.toBe(agentA.session)
+      const adapterB = composed.install(agentB as Agent)
+      expect(adapterB).not.toBe(adapterA)
+      expect(adapterB.session).toBe(agentB.session)
+
+      composed.release(agentA as Agent)
+      expect(composed.install(agentB as Agent)).toBe(adapterB)
+      await ctxB.fiber.dispose()
+    } finally {
+      await ctx.fiber.dispose()
+      await h.close()
+    }
+  })
 })

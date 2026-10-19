@@ -164,6 +164,7 @@ export function composeProductionInquiry(ports: ProductionInquiryPorts) {
     runtime,
     get ready() { return readiness() },
     install,
+    release: (agent: Agent) => { if (adapters.get(agent.id)?.session === agent.session) adapters.delete(agent.id) },
     origin,
     forExecution: (execution: ToolExecution) => Object.freeze({
       origin: (callerSessionId: string) => origin(callerSessionId, execution),
