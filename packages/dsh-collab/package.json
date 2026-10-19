@@ -31,10 +31,10 @@
     "@deepseek-ai/dsh-workspace": "^0.2.0-rc.2"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
+    "@types/node": "^24.19.2",
     "collab-kernel": "*",
-    "tsdown": "^0.23.0",
-    "vitest": "^5.0.1",
+    "tsdown": "^0.23.1",
+    "vitest": "^5.0.5",
     "typescript": "^5.9.3"
   },
   "ohmydsh": { "docTier": "C" }
