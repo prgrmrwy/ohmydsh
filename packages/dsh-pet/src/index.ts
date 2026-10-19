@@ -64,6 +64,8 @@ import {
 } from './host/collaboration/assembly.js'
 import { InquiryLedgerStore } from './host/inquiry/ledger-store.js'
 import { composeProductionInquiry } from './host/inquiry/composition.js'
+import { createInquiryManagedEffects } from './host/inquiry/managed-effects.js'
+import type { InquiryScope } from './host/inquiry/ledger.js'
 import { SharedFactLedgerStore } from './host/ledger/store.js'
 import {
   acceptTodo,
@@ -605,20 +607,88 @@ async function initialize(
   }
 
   /**
-   * The scoped collaboration + inquiry surface, or nothing.
-   *
-   * `undefined` here means a required seam is missing and Pet keeps behaving
-   * exactly as before — no tool is published and no diagnostic path changes.
-   *
-   * Inquiry DISPATCH stays unavailable on this Host by construction: the real
-   * detector reads the isolated queued-turn claim marker off the agent driver,
-   * and the pinned runtime carries no such marker (the seam exists only as a
-   * tracked compatibility patch that this Host does not load). No probe is
-   * supplied either, because a probe built from a `dsh-agent` copy other than
-   * the one the Host actually loaded proves nothing — the capability audit
-   * records exactly that failure. The verdict is therefore passed to the
-   * scheduler as-is; nothing here fakes it available.
+   * Inquiry readiness is evaluated live and remains fail-closed unless durable
+   * storage, the actually loaded AgentLoop isolation probe, ToolRuntime final
+   * guard recheck, and installed per-agent managed guards are all present.
    */
+  const managedEffects = createInquiryManagedEffects()
+  const inquiryAdapters = new Map<string, { executionProof(execution: unknown): unknown }>()
+  const currentInquiryScope = (sessionId: string): InquiryScope | undefined => {
+    try {
+      const owned = locusRepository.findByChildSessionId(sessionId)
+      if (owned.length > 1) return undefined
+      const row = owned[0]
+      if (row !== undefined) {
+        if (row.state !== 'active' || row.childSessionId !== sessionId) return undefined
+        return { kind: 'child', sessionId, locusId: row.id, generation: row.generation }
+      }
+      if (locusRepository.getLocusByChild(sessionId) !== undefined) return undefined
+      return { kind: 'main', sessionId }
+    } catch {
+      return undefined
+    }
+  }
+  const agentLoop = ctx.get('agentLoop')
+  const claimProbe = typeof (agentLoop as { probeIsolatedQueuedTurnClaim?: unknown } | undefined)?.probeIsolatedQueuedTurnClaim === 'function'
+    ? (agentLoop as { probeIsolatedQueuedTurnClaim: (...args: never[]) => unknown }).probeIsolatedQueuedTurnClaim.bind(agentLoop)
+    : undefined
+  const composed = composeProductionInquiry({
+    domain: domain as never,
+    currentScope: currentInquiryScope,
+    resolveAgent: scope => {
+      try {
+        const candidate = ctx.agents.get(scope.sessionId as never) as {
+          id?: unknown; session?: unknown; inbox?: unknown; followup?: unknown; ctx?: unknown
+        } | undefined
+        if (!candidate || typeof candidate.id !== 'string' || !candidate.session || !candidate.inbox
+          || typeof candidate.followup !== 'function' || !candidate.ctx) return undefined
+        return candidate as never
+      } catch { return undefined }
+    },
+    agentLoop,
+    probeIsolatedClaim: claimProbe,
+    tools: ctx.get('tools') as never,
+    readinessManagedGuard: () => (ctx.get('tools') as { supportsFinalToolGuardRecheck?: boolean } | undefined)?.supportsFinalToolGuardRecheck === true,
+    log: petLog,
+    onError: error => petLog(`dsh-pet: inquiry runtime error (${error instanceof Error ? error.message : String(error)})`),
+    now: Date.now,
+    newMessageId: () => randomUUID(),
+    newInquiryId: () => randomUUID(),
+  })
+  const installInquiryAgent = (candidate: unknown): void => {
+    const agent = candidate as { id?: unknown; ctx?: { effect?: (...args: never[]) => unknown } } | undefined
+    if (!agent || typeof agent.id !== 'string' || !agent.ctx) return
+    const id = agent.id
+    if (inquiryAdapters.has(id)) return
+    let disposeGuard: (() => void) | undefined
+    try {
+      const proofForExecution = (agentId: string, execution: unknown) => inquiryAdapters.get(agentId)?.executionProof(execution)
+      // ManagedExecution is structurally supplied by ToolRuntime at execution time.
+      disposeGuard = managedEffects.install(agent as never, proofForExecution as never, currentInquiryScope)
+    } catch (error) {
+      petLog(`dsh-pet: inquiry runtime error (${error instanceof Error ? error.message : String(error)})`)
+      return
+    }
+    let adapter: unknown
+    try {
+      adapter = composed.install(agent as never)
+    } catch (error) {
+      disposeGuard()
+      petLog(`dsh-pet: inquiry runtime error (${error instanceof Error ? error.message : String(error)})`)
+      return
+    }
+    inquiryAdapters.set(id, adapter as { executionProof(execution: unknown): unknown })
+    try {
+      ;(agent.ctx as { effect: (factory: () => () => void, name: string) => unknown }).effect(
+        () => () => { disposeGuard?.(); inquiryAdapters.delete(id) },
+        'dsh-pet: inquiry managed guard',
+      )
+    } catch (error) {
+      disposeGuard()
+      inquiryAdapters.delete(id)
+      petLog(`dsh-pet: inquiry runtime error (${error instanceof Error ? error.message : String(error)})`)
+    }
+  }
   const collaborationSurface: CollaborationAssembly | undefined = composeCollaborationSurface({
     atomicStorage: locusRepository.supportsAtomicProvisioning(),
     loci: locusRepository,
@@ -628,9 +698,15 @@ async function initialize(
     resultOutbox: inquiryOutboxStore,
     describe: describeCollaborator,
     origin: resolveInquiryOrigin,
-    // `ctx.get` rather than property access: `agentLoop` is not in this
-    // plugin's `inject`, and cordis throws on undeclared property access.
-    agentLoop: ctx.get('agentLoop'),
+    agentLoop,
+    probeIsolatedClaim: claimProbe,
+    answerStore: composed.answerStore,
+    inquiryRuntime: {
+      get ready() { return composed.ready },
+      forExecution: composed.forExecution,
+      afterAnswer: composed.afterAnswer,
+      answerBinding: composed.answerBinding,
+    },
     installed: collaborationAgents,
   })
   if (collaborationSurface === undefined) {
@@ -996,6 +1072,7 @@ async function initialize(
                 repository,
                 locusRepository: locusContextRepository,
                 intentTriage: intentTriageDeps,
+                managedEffects: { register: managedEffects.register, assertEntry: managedEffects.assertEntry },
                 // A user message typed into this executor registers its
                 // Invocation through the durable inbox splice, which can still
                 // be landing when the turn's first step asks for context.
@@ -1222,6 +1299,7 @@ async function initialize(
         registerPetTools(agent.scope as never, {
           repository,
           locusRepository: locusContextRepository,
+          managedEffects: { register: managedEffects.register, assertEntry: managedEffects.assertEntry },
           locusLifecycle: {
             locusRepository: locusContextRepository,
             lark: larkClient,
@@ -1418,6 +1496,7 @@ async function initialize(
         // composition fail as a duplicate publication. `composed:false` is
         // the ordinary-session answer and falls through unchanged.
         if (typeof sessionId === 'string' && agent?.ctx !== undefined) {
+          installInquiryAgent(payload.agent)
           const candidate: LocusCandidateAgent = { id: sessionId, scope: agent.ctx as never }
           // Rethrown deliberately: only a candidate that matched durable or
           // staged locus identity may veto publication. Logged first because the

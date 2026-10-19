@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import Agents, { type Agent } from '@deepseek-ai/dsh-agent'
 import Sessions from '@deepseek-ai/dsh-session'

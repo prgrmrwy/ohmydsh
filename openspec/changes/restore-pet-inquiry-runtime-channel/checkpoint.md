@@ -13,11 +13,19 @@
 
 以上数字是历史验收，不表示之后提交前所有检查均已重新执行。
 
-2026-10-19 提交前复查：类型检查、compat packaging 及两个结构/CLI 检查、OpenSpec strict validate、tracked-artifacts 和 diff whitespace 检查通过。受管守卫测试为 13 通过、1 失败：最后新增的实际原生所有者集成用例在加载阶段报 `ReferenceError: createRequire is not defined`。这是本 WIP 明确保留的待修问题，不能声称该新增用例已验收。本次未重新运行全量测试。
+2026-10-19 提交前复查（第一次检查点）：受管守卫测试曾为 13 通过、1 失败（测试文件缺 `createRequire` 等导入）。该问题已在第二次检查点修复。
+
+## 第二次检查点（2026-10-19 16:50，生产入口接线）
+
+`src/index.ts` 现在在生产入口构造 `composeProductionInquiry`，并通过 `agent/created` 对每个 agent 先安装受管守卫、再创建 inquiry adapter；缺任一能力均保持 fail closed。`answerStore`、实时 `ready`、`forExecution`、`afterAnswer`、`answerBinding` 已传入协作装配；Pet 自己的 finish/wait/request_execution 注册点已接受管入口。测试夹具 `loadPetHost` 抽到 `test/support/pet-host-fixture.ts`，并新增 `beforePet` 钩子。
+
+本次独立验证（现役 launcher 编译图 `PET_INQUIRY_LAUNCHER=$(readlink -f compat/subagent/.launcher)`）：类型检查 0 错误；接线测试 4/4；询问问答链路 7/7；受管守卫 14/14；默认全量套件 3213 通过、8 跳过、0 失败（181 文件通过）。接线测试证明：无 AgentLoop 时 owner 视图为 unavailable，执行 `pet_inquire` 返回 `Inquiry runtime unavailable` 且 inquiries 表无新行；装入真实 AgentLoop 后为 available；主会话重复发布幂等；未经 `agent/created` 的作用域没有 `pet_inquire`。
+
+已知限制：接线测试没有“守卫先于 adapter”的观察点，该顺序仅由源码审读保证；locus child 重复发布会触发一个与本改动无关的既有重复注册（`pet_collaboration_context`，接线前后行为一致），因此幂等用例用主会话。
 
 ## 必须继续完成
 
-- 生产入口尚未调用询问组合工厂；只读 owner 接线不是完整 queue consumer 接线。完整 readiness、原生及 Pet 自有受管入口覆盖仍须一起验证。
+- 询问生产工厂已接入入口，但 `resolveAgent` 只认已加载的 agent；未驻留的 child/父尚不能被冷恢复来接收询问。
 - 精确 continuation-owned child 冷恢复、Delivery 来源及 finish/wait 的原回复权证明、运行槽与 lifecycle 在途的分别处理。
 - 合法结果轮嵌套与三方完整答案闭环、证据驱动启动恢复、旧协议只读处置、迁移及故障边界验收。
 - 原生所有者真实工具与 Pet 策略的直接集成测试已在源码中，须以新编译图验证，不用旧未标记图冒充。
