@@ -10,13 +10,19 @@ import { Router, type AgentRef, type RequestConfig } from './router.js'
 import type { Effort } from './effort.js'
 import { endpoint } from './endpoints.js'
 import { selectionProjection } from './selection-projection.js'
+import { JevClient } from './jev.js'
+import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 
 export const name = 'dsh-auto-model-routing'
 export const inject = ['llm', 'agents', 'sessionProjections']
 const knownEfforts = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
 
-export function apply(ctx: Context): void {
-  const home = process.env.DSH_HOME ?? resolve(homedir(), '.dsh')
+/** Test seams only; production uses the defaults. */
+export interface Config { home?: string; jevBase?: string; jevTimeoutMs?: number }
+
+export function apply(ctx: Context, config: Config = {}): void {
+  const home = config.home ?? process.env.DSH_HOME ?? resolve(homedir(), '.dsh')
+  const jev = new JevClient(launchEnvironmentOf(ctx), config.jevBase, config.jevTimeoutMs)
   const state = new RoutingState(new FileStateStore(resolve(home, 'state/auto-model-routing/sessions')))
   const router = new Router(state)
   ctx.effect(() => ctx.sessionProjections.register(selectionProjection))
@@ -29,8 +35,17 @@ export function apply(ctx: Context): void {
   }
 
   ctx.on('agent/pre-step', async (payload, next) => {
-    if (payload.step === 1) router.begin(ref(payload.agent), payload.turn, payload.messages)
-    return next()
+    const decision = await next()
+    // Judge only steps that actually enter, using the messages that enter (a rejected step sends nothing).
+    if (payload.step !== 1 || decision.kind !== 'enter') return decision
+    const agent = ref(payload.agent)
+    const job = router.begin(agent, payload.turn, decision.messages)
+    if (!job) return decision
+    const result = await jev.judge(job.text, job.previous, payload.signal)
+    if (result.kind === 'ok') router.resolve(agent, payload.turn, result.tier)
+    else if (result.kind === 'failed') router.fail(agent, payload.turn, result.category)
+    else router.cancel(agent, payload.turn)
+    return decision
   })
   ctx.on('agent/request', async (payload, next) => {
     const config = await next()

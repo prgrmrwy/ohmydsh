@@ -18,12 +18,22 @@ import Prompt from '@deepseek-ai/dsh-system-prompt'
 import Tools from '@deepseek-ai/dsh-tools'
 import Llm, { LlmAdapter, LlmError, createUserMessage, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import Loop from '@deepseek-ai/dsh-agent-loop'
-import { Router } from '../src/router.js'
-import { RoutingState, type SessionState } from '../src/state.js'
+import { createLaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { afterEach } from 'vitest'
+import * as plugin from '../src/index.js'
+import { fakeJev, tier } from './fake-jev.js'
 
+const stops: (() => Promise<void>)[] = []
+afterEach(async () => { while (stops.length) await stops.pop()!() })
+
+// Real plugin + real AgentLoop + real official selection; Jev is a loopback fake answering `complex`.
 async function harness() {
  const ctx=new Context()
- for(const plugin of [Projections,Sessions,Agents,Prompt,Tools,Llm]) await ctx.plugin(plugin)
+ const jev=await fakeJev(tier('complex'))
+ ctx.provide('launchEnvironment',createLaunchEnvironmentSnapshot([{source:'process',values:{OPENROUTER_API_KEY:'sk-or-test'}}]) as never)
+ for(const p of [Projections,Sessions,Agents,Prompt,Tools,Llm]) await ctx.plugin(p)
  await ctx.plugin(Loop,{agents:[]})
  installModelSelectionProjection(ctx)
  const calls: GenerateOptions[]=[]
@@ -37,69 +47,72 @@ async function harness() {
   }
  }
  ctx.llm.registerAdapter(['test'],new Adapter())
- const disk=new Map<string,SessionState>()
- const state=new RoutingState({get:id=>disk.get(id),set:(id,value)=>{disk.set(id,value)}})
- const router=new Router(state)
+ const routes=new Map<string,{fetch:(r:Request)=>Promise<Response>}>()
+ let current: unknown
+ ctx.provide('connection',{fetch:{register(route:{path:string;fetch:(r:Request)=>Promise<Response>}){routes.set(route.path,route);return async()=>{routes.delete(route.path)}}}} as never)
+ ctx.provide('sessionController',{resolveAgent:async()=>({agent:current})} as never)
+ const fork=await ctx.plugin(plugin,{home:mkdtempSync(`${tmpdir()}/router-sel-`),jevBase:jev.base})
  const selection:ModelSelectionRef={current:{provider:'test',model:'claude-opus-5-5',reasoningEffort:ReasoningEffortId('medium')},assembled:undefined}
- const handle=await ctx.agents.create({sessionId:SessionId('route-test'),agentOptions:{provider:'test',model:'claude-opus-5-5'},setup(agentCtx){installModelSelection(agentCtx,selection)}})
+ const handle=await ctx.agents.create({sessionId:SessionId(`route-${Math.random()}`),agentOptions:{provider:'test',model:'claude-opus-5-5'},setup(agentCtx){installModelSelection(agentCtx,selection)}})
  const agent=handle.agent
- state.select(agent.id,{provider:'test',model:'claude-opus-5-5',reasoningEffort:'medium'})
- agent.ctx.on('agent/pre-step',async(payload,next)=>{if(payload.step===1&&router.begin(agent,payload.turn,payload.messages))router.resolve(agent,payload.turn,'complex');return next()})
- agent.ctx.on('agent/request',async(payload,next)=>{
-  const config=await next()
-  return router.request(agent,payload.turn,config as never,['low','medium','high','xhigh','max'],agent.session.requestHeader()?.config as never) as unknown as typeof config
- },{prepend:true})
+ current=agent
+ agent.session.append('model/selection',selection.current!)
  agent.ctx.on('agent/request-error',async()=>({kind:'retry'}))
+ stops.push(async()=>{await handle.dispose();await fork.dispose();await jev.close()})
+ const call=async(op:string,body:unknown)=>(await routes.get(`/api/auto-model-routing.${op}`)!.fetch(new Request('http://x/api',{method:'POST',body:JSON.stringify(body)}))).json()
  async function run(text:string){agent.followup(createUserMessage({content:[{type:'text',text}],source:{kind:'user'}}));await agent.whenIdle()}
- return {ctx,agent,router,state,selection,calls,run,handle,failNext:()=>{fail=true}}
+ const setMode=(mode:'AUTO'|'MANUAL')=>call('setMode',{sessionId:agent.id,mode})
+ const read=async()=>call('state',{sessionId:agent.id}) as Promise<{restore:boolean;anchor?:unknown}>
+ return {ctx,agent,selection,calls,run,handle,setMode,read,jev,failNext:()=>{fail=true}}
 }
 
-it('restore_survives_retry_until_convergence',async()=>{
+it('manual_restore_survives_same_step_retry',async()=>{
  const h=await harness()
  try {
- h.router.setMode(h.agent,'AUTO');await h.run('排查多个模块')
+ await h.setMode('AUTO');await h.run('排查多个模块')
  expect(h.calls.at(-1)?.reasoningEffort).toBe('xhigh')
  h.selection.current={provider:'test',model:'claude-opus-5-5',reasoningEffort:ReasoningEffortId('xhigh')}
- h.router.setMode(h.agent,'MANUAL');h.failNext();await h.run('继续')
+ await h.setMode('MANUAL');h.failNext();await h.run('继续')
  expect(h.calls.slice(-2).map(c=>c.reasoningEffort)).toEqual(['medium','medium'])
- expect(h.state.read(h.agent.id).restore).toBe(true)
+ expect((await h.read()).restore).toBe(true)
  h.selection.current={provider:'test',model:'claude-opus-5-5',reasoningEffort:ReasoningEffortId('medium')}
  await h.run('继续')
- expect(h.state.read(h.agent.id).restore).toBe(false)
- }finally{await h.handle.dispose()}
+ expect((await h.read()).restore).toBe(false)
+ }finally{}
 })
 
 it.each(['cancel','prepare-failure'] as const)('restore_survives_preheader_failure (%s)',async(failure)=>{
  const h=await harness()
  try {
- h.router.setMode(h.agent,'AUTO');await h.run('排查多个模块')
- h.router.setMode(h.agent,'MANUAL')
+ await h.setMode('AUTO');await h.run('排查多个模块')
+ await h.setMode('MANUAL')
  h.selection.current={provider:'test',model:'claude-opus-5-5',reasoningEffort:ReasoningEffortId('xhigh')}
  let first=true
  h.agent.ctx.on('agent/request',async(_payload,next)=>{const value=await next();if(first){first=false;if(failure==='cancel')h.agent.cancel({kind:'user'});else throw new Error('before prepareCall')}return value},{prepend:true})
  await h.run('继续')
- expect(h.state.read(h.agent.id).restore).toBe(true)
+ expect((await h.read()).restore).toBe(true)
  await h.run('继续')
  expect(h.calls.at(-1)?.reasoningEffort).toBe('medium')
- }finally{await h.handle.dispose()}
+ }finally{}
 })
 
 it('selection_after_assembly_keeps_routes_legal',async()=>{
  const h=await harness()
  try {
- h.router.setMode(h.agent,'AUTO')
+ await h.setMode('AUTO')
  let switched=false
  h.agent.ctx.on('agent/request',async(_payload,next)=>{
-  if(!switched){switched=true;h.selection.current={provider:'test',model:'gpt-6-astra',reasoningEffort:ReasoningEffortId('low')};h.state.select(h.agent.id,{provider:'test',model:'gpt-6-astra',reasoningEffort:'low'});h.agent.session.append('model/selection',h.selection.current)}
+  if(!switched){switched=true;h.selection.current={provider:'test',model:'gpt-6-astra',reasoningEffort:ReasoningEffortId('low')};h.agent.session.append('model/selection',h.selection.current)}
   return next()
  },{prepend:true})
  await h.run('排查多个模块')
  expect(h.calls.at(-1)?.model).toBe('claude-opus-5-5')
  expect(h.calls.at(-1)?.reasoningEffort).toBe('xhigh')
  expect(h.ctx.sessionProjections.stateOf(h.agent.session,'modelSelection')?.pending).toMatchObject({model:'gpt-6-astra'})
- h.router.setMode(h.agent,'MANUAL');await h.run('继续')
+ await h.setMode('MANUAL');await h.run('继续')
  expect(h.calls.at(-1)?.model).toBe('gpt-6-astra')
  expect(h.calls.at(-1)?.reasoningEffort).toBe('low')
  expect(h.ctx.sessionProjections.stateOf(h.agent.session,'modelSelection')?.pending).toBeNull()
- }finally{await h.handle.dispose()}
+ expect((await h.read() as {anchor?:unknown}).anchor).toMatchObject({model:'gpt-6-astra',reasoningEffort:'low',provenance:'user-selected'})
+ }finally{}
 })
