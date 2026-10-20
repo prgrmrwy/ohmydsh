@@ -28,7 +28,7 @@
 
 - [ ] 5.1 写失败测试 `host.integration.test.ts › jev_tier_drives_effort`、`rejected_step_skips_jev`、`mode_change_during_jev_discards_result`、`failure_disables_and_restores`、`auto_clears_disabled`、`cancel_is_not_failure`、`no_secret_or_body_leak`（真实 AgentLoop + 假 Jev 服务 + 注入凭据）。确认失败原因是仍未调用 Jev。
 - [ ] 5.2 实现 `index.ts`：pre-step 先 `await next()`，`enter` 时判断用户回合并 `await` Jev；返回后重读状态，模式变化则丢弃；失败调用 `disable`；取消不停用。保留 `selection-projection`、端点与仅 AUTO 时查询模型元数据。使 5.1 通过。
-- [ ] 5.3 改写并重新观察 `selection.integration.test.ts` 三条（复原收敛、header 前失败/取消、assemble 后手选）在 Jev 驱动下仍成立；`input.test.ts` 两条保持。
+- [ ] 5.3 改写并重新观察 `selection.integration.test.ts › manual_restore_survives_same_step_retry`、`restore_survives_preheader_failure`、`selection_after_assembly_keeps_routes_legal` 在 Jev 驱动下仍成立；`input.test.ts › only_user_source_contributes`、`joins_and_truncates_user_text` 保持；`state.test.ts › repeated_mode_is_noop`、`initialize_anchor_once`、`selection_updates_anchor`、`anchor_survives_restart_without_drift` 保持（其被测行为未变，若首次运行即绿须如实记录为沿用而非新红）。
 - [ ] 5.4 重构；全套保持绿。
 
 ## 6. 子会话工具与 skill
