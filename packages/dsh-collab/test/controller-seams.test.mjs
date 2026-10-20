@@ -821,7 +821,7 @@ test('tool-05：工具描述携带重试与重读规则', { timeout: 15000 }, as
   } finally { await w.ctx.fiber.dispose() }
 })
 
-test('tool-06：工具面封闭', { timeout: 15000 }, async () => {
+test('tool-06：内部与人类能力不出现在工具面', { timeout: 15000 }, async () => {
   const w = await surfaceWorld('surface-closed')
   try {
     const tools = (await w.turn(w.a)).filter(t => t.name.startsWith('collab_'))

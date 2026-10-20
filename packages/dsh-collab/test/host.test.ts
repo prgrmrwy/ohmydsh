@@ -372,7 +372,7 @@ it('lock-03：孤儿锁的进程仍存活时保留', () => lockWorld(async (host
     expect(host.logs.filter(line => line.includes('S') && line.includes('previous-host'))).toHaveLength(1)
   } finally { await started.close() }
 }))
-it('lock-04：活进程或无法判断的锁被保留', () => lockWorld(async (host, dataDir) => {
+it('lock-04：活进程或未知身份不能解锁', () => lockWorld(async (host, dataDir) => {
   for (const id of ['S1', 'S2', 'S3']) await seedSpace(host, dataDir, id)
   const locks = { S1: lockFor(1111, 'reused'), S2: lockFor(2222, 'eperm'), S3: '{not json' }
   for (const [id, bytes] of Object.entries(locks)) await writeFile(join(dataDir, `${id}.lock`), bytes)

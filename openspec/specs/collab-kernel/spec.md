@@ -25,7 +25,7 @@
 
 - `agent{channel, address}`：宿主担保的调用方 session；
 - `provider{providerId, on:{channel, address}}`：已注册 provider 代表其注册 channel 上的一个地址，`on.channel` 不等于注册 channel MUST 以 `COLLAB_FORBIDDEN` 拒绝；
-- `internal{purpose}`：宿主自身，本期 `purpose` 只有 `breaker-reset`。
+- `internal{purpose}`：宿主自身，`purpose` 只能是 `breaker-reset` 或 `host-index`；其它值在 principal 稳定校验中 MUST 以 `COLLAB_FORBIDDEN` 拒绝。`host-index` 只用于宿主读取，MUST NOT 执行任何写命令（包括 `createSpace` 与 `resetBreaker`）。
 
 actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受调用方指定 actor。
 
@@ -44,12 +44,12 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 | `confirmDecision` | provider | 成员（当前 active，否则 `COLLAB_MEMBER_INACTIVE`）且 `kind` 为 `human`（否则 `COLLAB_FORBIDDEN`）；其余见"人类决定只能由带证据的确认产生" |
 | `resetBreaker` | internal(`breaker-reset`) | 目标为 active 成员 |
 
-读取 `overview`、`readSince`、`project`、`readConvention` SHALL 允许成员（任意状态为 `active` 的成员）与 `internal`（任意 purpose）。
+读取 `overview`、`readSince`、`project`、`readConvention` SHALL 允许成员（任意状态为 `active` 的成员）与 `internal`（上述两个 purpose 均可）。
 
 处理顺序 SHALL 按命令所属的三个分支之一执行：
 
-- **普通成员命令**（除 `createSpace` 与 internal 命令外的全部写命令）：① principal 稳定校验（brand、provider 已注册且 `on.channel` 等于注册 channel）→ ② 协作空间存在（否则 `COLLAB_SPACE_NOT_FOUND`）→ ③ 按 `{channel, address}` 反查成员，不检查其状态（失败为 `COLLAB_NOT_MEMBER`）→ ④ `cmdId` 收据查找 → ⑤ 协作空间未关闭 → ⑥ 本表前置条件 → ⑦ 命令专属幂等键 → ⑧ 业务校验。
-- **`createSpace`**：① principal 稳定校验 → ② 以 principal 的 `{channel, address}` 为 scope 查找创建收据（命中则返回原结果）→ ③ 请求的 `spaceId` 不存在（已存在为 `COLLAB_SPACE_EXISTS`）→ ④ 认领首成员地址，认领结果的 `{channel, address}` MUST 等于 principal 的地址 → ⑤ 业务校验。同一 `spaceId` 的创建与该空间上的其他命令串行执行。
+- **普通成员命令**（除 `createSpace` 与 internal 命令外的全部写命令）：① principal 稳定校验（brand、provider 已注册且 `on.channel` 等于注册 channel；internal principal 在此 MUST 立即以 `COLLAB_FORBIDDEN` 拒绝，早于任何 provider 调用、presence 采样与空间状态检查）→ ② 协作空间存在（否则 `COLLAB_SPACE_NOT_FOUND`）→ ③ 按 `{channel, address}` 反查成员，不检查其状态（失败为 `COLLAB_NOT_MEMBER`）→ ④ `cmdId` 收据查找 → ⑤ 协作空间未关闭 → ⑥ 本表前置条件 → ⑦ 命令专属幂等键 → ⑧ 业务校验。
+- **`createSpace`**：① principal 稳定校验（internal principal 在此 MUST 以 `COLLAB_FORBIDDEN` 拒绝）→ ② 以 principal 的 `{channel, address}` 为 scope 查找创建收据（命中则返回原结果）→ ③ 请求的 `spaceId` 不存在（已存在为 `COLLAB_SPACE_EXISTS`）→ ④ 认领首成员地址，认领结果的 `{channel, address}` MUST 等于 principal 的地址 → ⑤ 业务校验。同一 `spaceId` 的创建与该空间上的其他命令串行执行。
 - **internal 命令**（`resetBreaker`）：① principal 稳定校验 → ② 协作空间存在 → ③ 以 `purpose` 为 scope 查找收据 → ④ 协作空间未关闭 → ⑤ `purpose` 与命令匹配（否则 `COLLAB_FORBIDDEN`）→ ⑥ 业务校验。internal 命令不做成员反查，事件的 actor 记为 `internal:<purpose>`。
 
 分支中的成员、创建者地址及 purpose scope 均采用幂等 requirement 定义的带类型标签编码。
@@ -122,6 +122,25 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 - **GIVEN** 成员 `doubao` 已为 `gone`
 - **WHEN** `doubao` 的 principal 依次发送消息、读取总览
 - **THEN** 两次都返回 `COLLAB_MEMBER_INACTIVE`
+
+#### Scenario: host-index 可以读取任意空间
+- **GIVEN** 空间 S 中没有任何与宿主相关的成员
+- **WHEN** principal `internal{purpose:'host-index'}` 调用 `readSince(0)`
+- **THEN** 返回 S 的全部提交记录，日志字节不变
+
+#### Scenario: host-index 不能执行任何写命令
+- **GIVEN** active 成员 `doubao` 与一个 open 空间
+- **WHEN** principal `internal{purpose:'host-index'}` 依次调用每一个公开写命令（含 `createSpace` 与 `resetBreaker`）
+- **THEN** 每次都返回 `COLLAB_FORBIDDEN`，日志字节不变，provider 的 claim、presence、deliver 调用次数都为 0
+
+#### Scenario: internal 在已关闭空间执行成员命令仍为 FORBIDDEN
+- **GIVEN** 空间已关闭
+- **WHEN** principal `internal{purpose:'host-index'}` 调用 `invite`
+- **THEN** 返回 `COLLAB_FORBIDDEN` 而非 `COLLAB_SPACE_CLOSED`，provider 调用次数为 0
+
+#### Scenario: 未知 internal purpose 被拒绝
+- **WHEN** principal `internal{purpose:'other'}` 调用 `overview`
+- **THEN** 返回 `COLLAB_FORBIDDEN`
 
 ### Requirement: 成员模型与地址唯一
 
@@ -710,3 +729,22 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 - **GIVEN** 包内只有版本 `1`
 - **WHEN** 调用 `readConvention('9')`
 - **THEN** 返回 `COLLAB_CONVENTION_UNKNOWN`
+
+### Requirement: 公开纯状态推导函数
+
+内核 SHALL 从公开入口导出纯函数 `reduce(previous, record)`，与内核内部加载、提交时使用的是同一实现：输入上一状态与一条提交记录，返回新状态，不读写存储、不调用 provider、不需要 principal。它不授予任何读取权：调用者必须已经通过合法读取取得提交记录。
+
+#### Scenario: 公开推导与内核状态一致
+- **GIVEN** 一个空间经历创建、邀请、加入、statusText 更新、条目修改、ack 与 Leader 转交
+- **WHEN** 以 `internal{purpose:'host-index'}` 调用 `readSince(0)`，再用公开 `reduce` 依次折叠全部记录
+- **THEN** 所得状态与同一时刻 `overview` 返回的状态在 members、items、leader、status、lastSeq 上深度相等
+
+#### Scenario: 推导不修改输入
+- **GIVEN** 一个非空的上一状态与一条成员加入记录
+- **WHEN** 调用公开 `reduce`
+- **THEN** 调用前后对上一状态与记录各做的深拷贝分别深度相等
+
+#### Scenario: 推导函数不接触外部
+- **GIVEN** 存储与 provider 的每个方法都被替换为一经调用即抛错的替身
+- **WHEN** 用公开 `reduce` 折叠一组记录
+- **THEN** 正常返回状态，替身调用次数为 0

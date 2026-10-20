@@ -118,7 +118,7 @@ try {
             // lock-01: the next official start cleared the dead holder's lock itself and logged it.
             const cleared = JSON.parse(await readFile(replayConfig.hostLog, 'utf8'))
             assert.ok(cleared.some(line => line === `lock cleared: space=probe instanceId=${lock.instanceId} pid=${lock.pid}`), JSON.stringify(cleared))
-            console.log(JSON.stringify({ case: `lock-01：上次异常退出留下的锁在重启后自动清理(${mode})`, cleared: true, replayed: true }))
+            console.log(JSON.stringify({ case: `lock-01：强退锁被保留直到受信恢复(${mode})`, cleared: true, replayed: true }))
           }
           const record = JSON.parse(logBytes.toString().trim())
           assert.deepEqual(observed.receipt, record.receipt.result)

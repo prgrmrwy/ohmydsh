@@ -285,7 +285,7 @@ describe('claim by exact identity', () => {
     const state = await op.overview('session-a', 's')
     expect(Object.keys(state.members)).toEqual(['a']); expect(state.deliveries).toEqual({})
   }))
-  it('claim-04：不认领人、排除项或受管子代理', () => world(async host => {
+  it('claim-04：不认领人或受管子代理', () => world(async host => {
     host.session('session-a', { live: true }); host.session('session-deny'); host.session('session-sub', { header: { origin: 'subagent' } })
     await start(host, { denySessionIds: ['session-deny'] }); const op = ops(host)
     await op.create('session-a', 's', 'a')
@@ -295,6 +295,25 @@ describe('claim by exact identity', () => {
     await settle()
     expect(host.counts.resolveAgent).toBe(0); expect(host.counts.followup).toBe(0)
     expect(Object.keys((await op.overview('session-a', 's')).members)).toEqual(['a'])
+  }))
+  it('claim-07：名单外会话不可访问', () => world(async host => {
+    host.session('session-a', { live: true }); host.session('session-c', { live: true })
+    await start(host, { admission: 'allowlist', allowedSessionIds: ['session-a'] }); const op = ops(host)
+    await op.create('session-a', 's', 'a'); const before = await bytes(ledger(host, 's'))
+    expect(await codeOf(op.overview('session-c', 's'))).toBe('COLLAB_CALLER_UNAVAILABLE')
+    expect(await codeOf(op.setStatus('session-c', 's', 'x'))).toBe('COLLAB_CALLER_UNAVAILABLE')
+    expect(await codeOf(op.invite('session-a', 's', 'c', 'session-c'))).toBe('COLLAB_ADDRESS_UNCLAIMED')
+    expect(await bytes(ledger(host, 's'))).toEqual(before)
+    // No tool can change the lists: every tool schema lacks list fields.
+    for (const tool of host.tools.values()) expect(JSON.stringify(tool)).not.toMatch(/allowedSessionIds|denySessionIds/)
+  }))
+  it('claim-08：冷会话被发现但不激活', () => world(async host => {
+    host.session('session-b', { live: true }); host.session('session-d-cold')
+    await start(host, { allowedSessionIds: ['session-d-cold'] })
+    const out = await ops(host).status('session-b')
+    expect(out.contacts).toEqual([{ sessionId: 'session-d-cold', cwd: host.headers.get('session-d-cold')!.cwd }])
+    expect(host.counts.resolveAgent).toBe(0); expect(host.counts.followup).toBe(0)
+    expect(host.counts.observeSession).toBe(0); expect(host.counts.inspect).toBe(0)
   }))
   it('claim-05：冷核验只读元数据', () => world(async host => {
     host.session('session-a', { live: true }); host.session('session-b-cold'); host.session('session-other', { header: { cwd: '/secret/other-cwd' } })
@@ -427,7 +446,19 @@ describe('cold restore and delivery', () => {
     await expect(pending).rejects.toMatchObject({ code: 'COLLAB_SERVICE_CLOSING' })
     expect(host.followups).toHaveLength(0)
   }))
-  it('wake-02：空闲目标收到带来源与入口提示的指针', () => world(async host => {
+  it('wake-04：邀请指针不能读取空间', () => world(async host => {
+    host.session('session-a', { live: true }); host.session('session-b', { live: true })
+    await start(host); const op = ops(host)
+    await op.create('session-a', 's', 'a'); await op.invite('session-a', 's', 'b', 'session-b'); await settle()
+    const pointer = host.followups.find(f => f.id === 'session-b')!.message.content.map((c: any) => c.text).join('')
+    expect(pointer).toContain('"invited":true')
+    expect(await op.overview('session-b', 's')).toEqual({ error: { code: 'COLLAB_MEMBER_INACTIVE' } })
+    expect(await call(host, 'session-b', 'collab_read', { view: 'since', spaceId: 's', sinceSeq: 0 })).toEqual({ error: { code: 'COLLAB_MEMBER_INACTIVE' } })
+    expect((await op.overview('session-a', 's')).members.b.status).toBe('invited')
+    const events = (await records(host, 's')).flatMap(r => r.events).map((e: any) => e.type)
+    expect(events.filter((t: string) => t === 'member/joined')).toHaveLength(1)
+  }))
+  it('wake-02：空闲目标收到带来源指针', () => world(async host => {
     host.session('session-b', { live: true })
     await provider(host).deliver(bMember, pointer)
     const [received] = host.followups

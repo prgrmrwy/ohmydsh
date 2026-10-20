@@ -1,4 +1,9 @@
-## MODIFIED Requirements
+# dsh-collab Specification
+
+## Purpose
+为同一 DSH profile 内不同 workspace 的已有普通会话提供由宿主担保身份的协作入口，将独立协作内核接入会话工具、持久台账与定向唤醒，同时保留原会话的权限、组合和生命周期边界，不以派生子会话或不可信的人类确认替代真实接入。
+
+## Requirements
 
 ### Requirement: 调用身份来自实际执行会话
 
@@ -54,9 +59,19 @@
 - **WHEN** Leader 用短前缀邀请
 - **THEN** 返回地址未认领，成员和投递意图均不新增
 
-#### Scenario: 不认领人、排除项或受管子代理
+#### Scenario: 不认领人或受管子代理
 - **WHEN** 分别尝试认领 human 地址、不存在 ID、`denySessionIds` 中的 ID、官方标记受管 subagent 的 ID
 - **THEN** 每次 provider 都返回不认领，不创建会话、不调用 followup、不绕过宿主所有权错误
+
+#### Scenario: 名单外会话不可访问
+- **GIVEN** `admission: allowlist`，C 是同 Host 的有效普通会话但不在 `allowedSessionIds`
+- **WHEN** C 调用协作工具，或 Leader 邀请 C
+- **THEN** C 的调用返回 `COLLAB_CALLER_UNAVAILABLE` 且不泄露台账；邀请返回地址未认领；agent 不能通过工具修改名单
+
+#### Scenario: 冷会话被发现但不激活
+- **GIVEN** 种子名单含一个已持久化、当前未加载的普通会话 D
+- **WHEN** 调用 `collab_status`
+- **THEN** `contacts` 含 D 的完整 ID 与 cwd；不加载 agent、不入队消息、不读取日志正文
 
 #### Scenario: 冷核验只读元数据
 - **GIVEN** 测试替身使会话正文读取、agent 恢复与全量 observation 接口一经调用即失败
@@ -67,6 +82,59 @@
 - **GIVEN** 会话元数据列表抛错
 - **WHEN** Leader 邀请冷会话 B
 - **THEN** 返回地址未认领，成员与投递意图不新增
+
+### Requirement: 具名工具忠实适配内核
+
+插件 SHALL 恰好提供 12 个常驻协作工具：`collab_status`、`collab_space`（`action: create|close`）、`collab_invite`、`collab_member`（`action: join|decline|leave|mark_gone|transfer_leader`）、`collab_read`（`view: overview|since|convention`）、`collab_create_item`、`collab_revise_item`、`collab_ack_item`、`collab_send_message`、`collab_set_status`、`collab_advance_request`、`collab_request_decision`。`action`/`view` SHALL 为封闭枚举，每个取值静态对应一个具名内核方法；取值所需字段缺失或出现不属于该取值的字段时 MUST 以 `COLLAB_BAD_ARGUMENTS` 拒绝且不调用内核。写操作 SHALL 要求非空 cmdId，创建地址固定为实际调用会话，邀请只接受 agent。`collab_create_item` 的工具描述 SHALL 说明 itemId 应使用小写字母、数字与连字符；插件 MUST NOT 在内核之前拒绝其它 itemId，以免挡住旧命令的收据重放。MUST NOT 暴露内核实例、任意事件写入、自由字符串命令分发、内部重置或人类确认工具；命令先交内核执行，内核的收据、CAS 与幂等语义 SHALL 原样保留，同一调用者以相同 cmdId 和参数重试已成功的命令 SHALL 返回原结果。读取不保存已读游标，不自动 ack/join。`collab_status` 的描述 SHALL 说明：写命令返回 `COLLAB_SPACE_UNAVAILABLE` 时结果未知，应稍后用原 cmdId 与相同参数重试；`collab_read` 的描述 SHALL 说明：空间 `lastSeq` 小于自己保存的游标时，应从 0 重读。
+
+#### Scenario: 创建邀请加入与协商闭环
+- **WHEN** A 创建空间、邀请 B，B 用 `collab_member` join，A 创建条目且 B 确认指定 revision
+- **THEN** 两会话读取同一台账，actor、revision、ack 和状态由内核规则决定
+
+#### Scenario: 相同命令结果未知后重试
+- **GIVEN** A 以 cmdId `inv-1` 邀请 B 成功，随后 A 把 Leader 转交给 C
+- **WHEN** A 以相同 cmdId 与参数重试邀请
+- **THEN** 返回原结果 seq，不产生第二个业务事件或第二次唤醒
+
+#### Scenario: 枚举取值与字段不匹配被拒绝
+- **WHEN** 调用 `collab_member` 的 `action: transfer_leader` 但缺少 `member`，或 `action: join` 却携带 `member`
+- **THEN** 返回 `COLLAB_BAD_ARGUMENTS`，内核未收到命令，日志字节不变
+
+#### Scenario: 旧命令的重试不被插件挡住
+- **GIVEN** 升级前 A 以 cmdId `c-1` 成功创建 itemId 为 `Old Item` 的条目
+- **WHEN** 升级后 A 以相同 cmdId 与参数重试 `collab_create_item`
+- **THEN** 返回原结果 seq，日志字节不变
+
+#### Scenario: 工具描述携带重试与重读规则
+- **WHEN** 从真实 agent 工具 schema 读取 `collab_status` 与 `collab_read` 的描述
+- **THEN** `collab_status` 描述包含"原 cmdId"重试提示，`collab_read` 描述包含"从 0 重读"提示
+
+#### Scenario: 内部与人类能力不出现在工具面
+- **WHEN** 从真实 agent 工具 schema 枚举协作工具
+- **THEN** 恰好 12 个上述名称；没有 confirm、reset、事件追加或通用 execute 入口；`action`/`view` 的枚举值集合与上文完全相等
+
+### Requirement: 投递只传协作指针并使用下一回合语义
+
+普通唤醒 SHALL 只包含内核白名单指针及固定来源说明，不携带条目/消息正文、标题或其它 workspace 文件。固定来源说明 SHALL 明确其为插件协作数据而非用户/系统授权，并指明先调用 `collab_status` 查看待处理事项。运行中会话通过官方 followup 进入下一回合；空闲会话可开始新回合。provider 成功 SHALL 只表示宿主接受入队，不宣称模型已处理、完成工作或取得用户同意。MUST NOT 用 steer 打断当前回合或等待模型完成才返回。
+
+#### Scenario: 运行中目标下一回合收到
+- **GIVEN** B 当前回合正在执行工具调用
+- **WHEN** A 触发 B 的普通唤醒
+- **THEN** 指针不出现在 B 当前回合输入；当前回合结束后恰在下一回合输入出现一次；投递无需等待 B 完成
+
+#### Scenario: 空闲目标收到带来源指针
+- **WHEN** 向空闲 B 投递
+- **THEN** B 新回合收到的消息来源为 `plugin:dsh-collab`，文本包含 `collab_status` 与精确指针 JSON，不含条目标题或正文
+
+#### Scenario: 邀请指针不能读取空间
+- **GIVEN** invited 的 B 收到带 `invited:true` 的指针
+- **WHEN** B 在 join 前用 `collab_read` 读取该空间
+- **THEN** 返回 `COLLAB_MEMBER_INACTIVE`，不含空间内容；provider 不替 B 自动 join 或 ack
+
+#### Scenario: 不满足准入条件的目标不投递
+- **GIVEN** B 曾被邀请，随后被加入 `denySessionIds` 并经 `dsh build` 与 `dsh restart` 生效
+- **WHEN** 新 Host 中有成员触发一次新的、需要唤醒 B 的投递
+- **THEN** provider 拒绝投递，不调用恢复或 followup，投递记为失败
 
 ### Requirement: 冷恢复与presence不伪造可达性
 
@@ -106,41 +174,28 @@
 - **WHEN** provider 关闭后恢复返回
 - **THEN** 不调用 followup，不追加成功完成记录，不重新投递
 
-### Requirement: 具名工具忠实适配内核
+### Requirement: profile共享台账与生命周期封禁
 
-插件 SHALL 恰好提供 12 个常驻协作工具：`collab_status`、`collab_space`（`action: create|close`）、`collab_invite`、`collab_member`（`action: join|decline|leave|mark_gone|transfer_leader`）、`collab_read`（`view: overview|since|convention`）、`collab_create_item`、`collab_revise_item`、`collab_ack_item`、`collab_send_message`、`collab_set_status`、`collab_advance_request`、`collab_request_decision`。`action`/`view` SHALL 为封闭枚举，每个取值静态对应一个具名内核方法；取值所需字段缺失或出现不属于该取值的字段时 MUST 以 `COLLAB_BAD_ARGUMENTS` 拒绝且不调用内核。写操作 SHALL 要求非空 cmdId，创建地址固定为实际调用会话，邀请只接受 agent。`collab_create_item` 的工具描述 SHALL 说明 itemId 应使用小写字母、数字与连字符；插件 MUST NOT 在内核之前拒绝其它 itemId，以免挡住旧命令的收据重放。MUST NOT 暴露内核实例、任意事件写入、自由字符串命令分发、内部重置或人类确认工具；命令先交内核执行，内核的收据、CAS 与幂等语义 SHALL 原样保留，同一调用者以相同 cmdId 和参数重试已成功的命令 SHALL 返回原结果。读取不保存已读游标，不自动 ack/join。`collab_status` 的描述 SHALL 说明：写命令返回 `COLLAB_SPACE_UNAVAILABLE` 时结果未知，应稍后用原 cmdId 与相同参数重试；`collab_read` 的描述 SHALL 说明：空间 `lastSeq` 小于自己保存的游标时，应从 0 重读。
+台账 SHALL 位于活动DSH profile归属的持久状态目录，与workspace和插件部署副本分离；服务身份 SHALL 在该profile内重启稳定。启动 SHALL 重放已有空间但不重投未完成意图。wrapper SHALL 在接纳create/open时即跟踪spaceId，dispose先同步关闭工具/provider准入，再关闭全部已接纳空间，等待在途存储而不等待无限期claim/恢复/投递。关闭后的旧命令或回调 MUST 不跨生命周期写入或发送。
 
-#### Scenario: 创建邀请加入与协商闭环
-- **WHEN** A 创建空间、邀请 B，B 用 `collab_member` join，A 创建条目且 B 确认指定 revision
-- **THEN** 两会话读取同一台账，actor、revision、ack 和状态由内核规则决定
+#### Scenario: 两workspace共享并重启重放
+- **WHEN** A/B跨workspace写入后重启隔离Host
+- **THEN** 空间、成员、收据和serviceId不变，未知投递只列pending，没有自动重发
 
-#### Scenario: 相同命令结果未知后重试
-- **GIVEN** A 以 cmdId `inv-1` 邀请 B 成功，随后 A 把 Leader 转交给 C
-- **WHEN** A 以相同 cmdId 与参数重试邀请
-- **THEN** 返回原结果 seq，不产生第二个业务事件或第二次唤醒
+#### Scenario: 待认领创建也受dispose保护
+- **GIVEN** 创建停在provider claim，空间尚未open
+- **WHEN** dispose完成后claim返回
+- **THEN** 旧创建拒绝，无日志新建或新锁，不阻塞dispose等待外部SPI
 
-#### Scenario: 枚举取值与字段不匹配被拒绝
-- **WHEN** 调用 `collab_member` 的 `action: transfer_leader` 但缺少 `member`，或 `action: join` 却携带 `member`
-- **THEN** 返回 `COLLAB_BAD_ARGUMENTS`，内核未收到命令，日志字节不变
-
-#### Scenario: 旧命令的重试不被插件挡住
-- **GIVEN** 升级前 A 以 cmdId `c-1` 成功创建 itemId 为 `Old Item` 的条目
-- **WHEN** 升级后 A 以相同 cmdId 与参数重试 `collab_create_item`
-- **THEN** 返回原结果 seq，日志字节不变
-
-#### Scenario: 工具描述携带重试与重读规则
-- **WHEN** 从真实 agent 工具 schema 读取 `collab_status` 与 `collab_read` 的描述
-- **THEN** `collab_status` 描述包含"原 cmdId"重试提示，`collab_read` 描述包含"从 0 重读"提示
-
-#### Scenario: 工具面封闭
-- **WHEN** 从真实 agent 工具 schema 枚举协作工具
-- **THEN** 恰好 12 个上述名称；没有 confirm、reset、事件追加或通用 execute 入口；`action`/`view` 的枚举值集合与上文完全相等
+#### Scenario: 存储失败不假成功
+- **WHEN** 已接纳提交写入或fsync失败
+- **THEN** 返回内核存储错误，后续操作不绕过failed状态；close/open后同cmdId按收据确定结果
 
 ### Requirement: 残留锁只在死亡证明后解除
 
 本规则的前提是：一个 dataDir 在其整个生命周期内只由一个 Host 进程使用，且不经网络盘、VM 共享目录或容器挂载被其它 pid 命名空间访问。宿主启动时 SHALL 扫描数据目录中的每个 `<id>.lock`，无论是否存在对应的 `<id>.jsonl`；仅当锁内容可解析、pid 为正安全整数、锁所记录的进程在本机经存活探测返回"不存在"、且删除前再次读取锁内容与首次字节相同时，宿主 SHALL 按锁内 instanceId 调用 breakLock，并在宿主日志记录被清理的 instanceId 与 pid；有对应日志的空间随后打开，孤儿锁只清理不打开。其它情况 MUST 保留锁并在宿主日志写一行含空间、instanceId、pid 与原因的诊断；此时恢复手段是改用新 spaceId，或停止 Host 后人工删除该锁文件。运行期 MUST NOT 自动清理锁；agent 工具 MUST 不提供解锁或强制接管；锁冲突 SHALL 不阻止其他空间被使用。
 
-#### Scenario: 上次异常退出留下的锁在重启后自动清理
+#### Scenario: 强退锁被保留直到受信恢复
 - **GIVEN** 上一个 Host 被 SIGKILL，空间 S 留有其锁，锁内 pid 已不存在
 - **WHEN** 新 Host 启动
 - **THEN** 宿主日志记录清理的 instanceId 与 pid；S 被打开并重放日志，成员可正常读写
@@ -155,7 +210,7 @@
 - **WHEN** 新 Host 启动
 - **THEN** `S.lock` 字节不变，breakLock 调用次数为 0，宿主日志有一行诊断
 
-#### Scenario: 活进程或无法判断的锁被保留
+#### Scenario: 活进程或未知身份不能解锁
 - **WHEN** 新 Host 启动时，S1 锁内 pid 存活（包括被无关进程复用），S2 探测返回 EPERM，S3 锁内容不是合法 JSON
 - **THEN** 三把锁字节都不变，breakLock 调用次数为 0；三个空间都不可用，宿主日志各有一行诊断
 
@@ -173,23 +228,30 @@
 - **WHEN** 锁的原持有进程退出后，成员访问 S
 - **THEN** 返回 `COLLAB_SPACE_UNAVAILABLE`，锁字节不变；下一次 Host 启动时才按上述规则处理
 
-### Requirement: 投递只传协作指针并使用下一回合语义
+### Requirement: 无人类通道时明确能力缺口
 
-普通唤醒 SHALL 只包含内核白名单指针及固定来源说明，不携带条目/消息正文、标题或其它 workspace 文件。固定来源说明 SHALL 明确其为插件协作数据而非用户/系统授权，并指明先调用 `collab_status` 查看待处理事项。运行中会话通过官方 followup 进入下一回合；空闲会话可开始新回合。provider 成功 SHALL 只表示宿主接受入队，不宣称模型已处理、完成工作或取得用户同意。MUST NOT 用 steer 打断当前回合或等待模型完成才返回。
+本期session provider SHALL 只绑定agent且不支持confirm；工具 MUST NOT 构造provider人类principal、虚拟人类成员或自动确认。agent-only空间请求决定 SHALL 保留内核COLLAB_NO_DECIDER；已有合法active人类但无可确认绑定的历史状态 SHALL 保留内核awaitingChannel状态，不能宣称已得到人类决定。
 
-#### Scenario: 运行中目标下一回合收到
-- **GIVEN** B 当前回合正在执行工具调用
-- **WHEN** A 触发 B 的普通唤醒
-- **THEN** 指针不出现在 B 当前回合输入；当前回合结束后恰在下一回合输入出现一次；投递无需等待 B 完成
+#### Scenario: agent-only请求决定明确拒绝
+- **WHEN** 仅有agent的空间调用requestDecision
+- **THEN** 返回COLLAB_NO_DECIDER且不留下决策请求或假人类成员
 
-#### Scenario: 空闲目标收到带来源与入口提示的指针
-- **WHEN** 向空闲 B 投递
-- **THEN** B 新回合收到的消息来源为 `plugin:dsh-collab`，文本包含 `collab_status` 与精确指针 JSON，不含条目标题或正文
+#### Scenario: 历史无确认能力保留等待
+- **GIVEN** 合法历史空间含active人类但所有决定人confirm能力为false
+- **WHEN** 合法成员发起决策请求
+- **THEN** 请求保持open且awaitingChannel:true，无确认投递或decided事件
 
-#### Scenario: 不满足准入条件的目标不投递
-- **GIVEN** B 曾被邀请，随后被加入 `denySessionIds` 并经 `dsh build` 与 `dsh restart` 生效
-- **WHEN** 新 Host 中有成员触发一次新的、需要唤醒 B 的投递
-- **THEN** provider 拒绝投递，不调用恢复或 followup，投递记为失败
+### Requirement: 产物内联当前源码并携带约定资源
+
+插件 SHALL 是独立社区bundle，内联当前collab-kernel源码；部署后不依赖workspace目录或内核lib。构建输入 SHALL 包含内核src目录、package.json以及实际使用配置。约定Markdown SHALL 在最终bundle的实际读取位置可用且与内核版本/摘要一致。测试 MUST 在仓库源码不可达的复制产物上加载插件，不能只断言打包命令成功。
+
+#### Scenario: 源码变化进入独立部署产物
+- **WHEN** 内核源码或约定正文变化且lib保持旧字节时重建
+- **THEN** 新部署产物体现当前源码/摘要，在无workspace包与源码目录时可加载
+
+#### Scenario: 缺约定资源在验收中失败
+- **WHEN** 复制产物漏带实际所需约定资源
+- **THEN** 产物加载验收失败而非静默空约定，不把源目录存在当作部署成功证据
 
 ### Requirement: 验收不触碰日常会话与部署
 
@@ -206,8 +268,6 @@
 #### Scenario: 移除保留持久日志
 - **WHEN** 关闭插件并移除部署副本
 - **THEN** 工具消失、存储句柄关闭，profile 持久台账字节不被删除，未触碰 workspace 文件
-
-## ADDED Requirements
 
 ### Requirement: 错误披露不泄露无权空间
 

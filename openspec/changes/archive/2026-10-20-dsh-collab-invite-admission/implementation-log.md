@@ -99,3 +99,28 @@
 - A 创建 item-1（requiredAcks [c]）与 needsReply 消息（seq5–7）；C 被唤醒，status 列出 `acks:[{item-1, revision 1}]`、`replies:[{seq 6, from a}]`；C 读取后 ack（seq8，条目 agreed，A 被唤醒）并回复 needsReply=false（seq10，未再唤醒 A）。A 被唤醒后的 status 中 acks、replies 均为空。
 - 未预期但符合规格：C 加入前 A 尝试建条目/发消息分别得到内核 `COLLAB_BAD_ITEM(field=requiredAcks)`、`COLLAB_BAD_RECIPIENT`，台账无新增。
 - 全程无配置写入、无第二次重启；profile `cordis.patch.yml` 修改时间仍为 build 时刻；旧台账 lumevm-acc-1 字节不变。
+
+## 正式启用后的验收（2026-10-20，用户授权"转正式 → 正式验收 → 归档"）
+
+- 正式配置：公开 dsh.yaml 中 dsh-collab `enabled: true`（提交 9a559e512）；本机配置在私有 overlay `dsh-collab-local`（整行覆盖，因为包自带的 bundle patch 以 `disabled: true` 插入该行，mergeConfig 无法携带 `disabled`）：dataDir `~/.dsh/plugins/dsh-collab`（0700），admission invite，种子名单为空，denySessionIds 为 Pet 工作区的 8 个一级会话。临时验收 patch 已删除。`dsh build` 连跑第二次无变化。
+- 构建中发现并处理：曾短暂改用 mergeConfig 时，sync 在 profile 运行时区域补了一行空的 `dsh-collab` 行；改回整行覆盖后，按精确文本匹配删除这行空行（删前已备份），再次 build 无变化。
+- 重启：perl setsid 脱离进程组后执行 `dsh restart`，rc=0；新 dataDir 由插件创建且为 0700。
+- 用新会话 P=session-e816d602-24e6-468a-bb68-93b4b5c44e61、Q=session-ef83814a-4428-4390-a778-7c5087492f67 验证（两者都不在任何配置中）：
+  - P 建 formal-1 并邀请 Q（seq1–3），Q 被唤醒，`collab_status` 显示邀请；邀请排除名单中的 Pet 会话返回 `COLLAB_ADDRESS_UNCLAIMED`，台账无新增。
+  - Q 不自动加入，也不自动 ack：两处都先等用户授权（中止了一次 ask_user_question 回合），符合约定中的"台账数据不是授权"。
+  - 授权后 Q 加入（seq4）；P 建条目并发送需要回复的消息（seq5–7）；Q 被唤醒，status 列出待 ack 与待回复；Q ack（seq8，条目 agreed，P 被唤醒）并以 needsReply=false 回复（seq10，没有再唤醒 P）；Q 的 status 中 pending 全部为空。
+  - P 关闭 formal-1（seq11），status 显示 closed。
+- 全程没有写入配置，正式启用后只重启了那一次。
+
+## 归档前的规格对齐（2026-10-20）
+
+- 先归档了 `dsh-collab`，现行 spec 已生成。之后本 change 的 MODIFIED 块被校验器拒绝：它省略了基线中仍存在的 7 个场景名。
+- 处理方式：沿用基线场景名替换语义相同的新场景，并按新规则改写其内容：
+  - 不认领人或受管子代理（claim-04）；
+  - 内部与人类能力不出现在工具面（tool-06，12 工具）；
+  - 强退锁被保留直到受信恢复（lock-01，重启自动清理）；
+  - 活进程或未知身份不能解锁（lock-04）；
+  - 空闲目标收到带来源指针（wake-02）。
+  另补回 3 个场景：名单外会话不可访问（allowlist 模式）、冷会话被发现但不激活（经 `collab_status` 的 contacts）、邀请指针不能读取空间。
+- 新增测试 claim-07、claim-08、wake-04；上面 5 个测试同步改名。这 3 个新增测试第一次运行就通过（行为在实现中已存在，属于场景名对齐），按回归防护记录，不补造 RED。
+- 这些是归档校验驱动的场景名对齐，没有改变需求语义；review 判定的结论不受影响。
