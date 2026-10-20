@@ -426,15 +426,15 @@ Host SHALL 维护进行中/完成/失败等控制反馈；反馈失败不阻断�
 #### Scenario: 升级需离线迁移并先备份
 - **GIVEN** 版本戳为 15 的状态库，DSH 已停止
 - **WHEN** 执行 `dsh-pet-migrate-state --yes`
-- **THEN** 同目录生成 `state.sqlite.v15.bak-<ms>`，内容与迁移前逐字节相同；版本戳变为 16；随后 v16 Host 能打开存储，原有 IM locus 照常服务
+- **THEN** 同目录生成 `state.sqlite.v15.bak-<ms>`，内容与迁移前逐字节相同；版本戳变为当前域版本（≥16，文档评论引入 16；与 inquiry 线合并后为 17）；随后当前 Host 能打开存储，原有 IM locus 照常服务
 
-#### Scenario: 未迁移时 v16 拒绝打开
+#### Scenario: 未迁移时当前版本拒绝打开
 - **GIVEN** 版本戳为 15 的状态库，且未执行迁移
-- **WHEN** 以 v16 包启动 Host
+- **WHEN** 以当前版本（≥16）包启动 Host
 - **THEN** 存储以 `version-mismatch` 拒绝打开，诊断给出可直接复制的离线迁移命令
 
-#### Scenario: v15 拒绝打开 v16 库
-- **GIVEN** 版本戳为 16、含有文档 locus 的状态库
+#### Scenario: v15 拒绝打开新版本库
+- **GIVEN** 版本戳 ≥16、含有文档 locus 的状态库
 - **WHEN** 以 v15 包启动 Host
 - **THEN** 存储以 `version-mismatch` 拒绝打开，任何以 `doc:` 为前缀的行都不会被加载；用升级时生成的备份覆盖后，v15 Host 能正常打开存储
 

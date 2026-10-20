@@ -14,19 +14,19 @@
  * while v12 inquiry rows are explicitly parser-compatible at v13, v13 → v14
  * adds only serialized Delivery lease fields/statuses, and v14 → v15 adds the
  * `shared_fact_ledger`/`ledger_item` tables (see src/host/spec.ts,
- * inquiry/ledger.ts and ledger/todo.ts). The v15 → v16 bump adds inquiry
- * answers; v16 → v17 adds opaque handoff/work tables only. No existing row or log is converted,
+ * inquiry/ledger.ts and ledger/todo.ts). v15 → v16 was claimed by two
+ * parallel, additive lines: doc-comment loci (ordinary locus rows whose chatId
+ * carries a `doc:docx:` prefix; a Delivery gains one optional `docComment`) and
+ * inquiry answers. v16 → v17 adds opaque inquiry handoff/work tables only, and
+ * fences a Host from either v16 line. No existing row or log is converted,
  * cleared, or rewritten; a legacy deadline is validated and stripped only
  * from the in-memory value. Existing Delivery rows are not guessed into a
  * current slot and no outbound send is replayed by this script. Local
  * anchors are not promoted and context modes are not guessed. A todo
  * references locus identity (locusId + endpoint), never a locus instance
  * (generation), so no existing locus/delivery row is read or interpreted
- * differently by these bumps. v15 → v16 was claimed by two parallel, additive
- * lines: doc-comment loci (ordinary locus rows whose chatId carries a
- * `doc:docx:` prefix) and inquiry answers; v16 → v17 adds opaque inquiry
- * handoff/work tables and fences a Host from either v16 line. Rollback is
- * restoring the `.v<N>.bak-*` backup this script writes.
+ * differently by these bumps. Rollback is restoring the `.v<N>.bak-*` backup
+ * this script writes.
  *
  * Usage:
  *   node scripts/migrate-state-version.mjs [--db <path>] [--dry-run] [--yes]
