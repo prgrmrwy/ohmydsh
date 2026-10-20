@@ -38,3 +38,17 @@ it('panel_state_and_history_bound',()=>{
  expect(markup.match(/<li>/g)).toHaveLength(20)
  expect(new Router(state).status(agent).history).toHaveLength(0)
 })
+it('disabled_visible_in_chip_and_panel',()=>{
+ const base={mode:'MANUAL' as const,restore:false,history:[{reason:'jev-failed',category:'insufficient-credits'}]}
+ const render=(view:object,open:boolean)=>renderToStaticMarkup(createElement(RoutingChip,{sessionId:'S',rpc:{call:async()=>({ok:true})},initialView:view as never,initiallyOpen:open}))
+ const chip=render({...base,disabled:{category:'insufficient-credits',at:Date.UTC(2026,9,20,7,0)}},false)
+ const visible=chip.replace(/<[^>]+>/g,' ')
+ expect(visible).toContain('Jev 停用')
+ expect(chip).toMatch(/title="[^"]*余额不足/)
+ expect(chip).toContain('data-disabled="true"')
+ const panel=render({...base,disabled:{category:'insufficient-credits',at:Date.UTC(2026,9,20,7,0)}},true).replace(/<[^>]+>/g,' ')
+ for(const text of ['insufficient-credits','余额不足','点击 AUTO 重试']) expect(panel).toContain(text)
+ const normal=render({mode:'MANUAL',restore:false,history:[]},false)
+ expect(normal.replace(/<[^>]+>/g,' ')).not.toContain('Jev 停用')
+ expect(normal).not.toContain('data-disabled="true"')
+})

@@ -39,9 +39,9 @@
 
 ## 7. 端点与 client
 
-- [ ] 7.1 写失败测试 `endpoints.test.ts › invalid_targets_rejected`、`set_mode_targets_one_session`（state 返回 `disabled`，setMode AUTO 清除）；`client.test.ts › chip_negative_order`、`panel_state_and_history_bound`（`reason: jev`）、`disabled_visible_in_chip_and_panel`、`toggle_plugin_endpoint_only`。确认停用显示相关断言失败。
-- [ ] 7.2 实现：state 响应带 `disabled`；芯片可见文本 `MANUAL · Jev 停用` + 警示样式、title 类别提示；面板类别/提示/时间/“点击 AUTO 重试”；历史 `jev-failed` 含类别。使 7.1 通过。
-- [ ] 7.3 重构；全套保持绿。
+- [x] 7.1 写失败测试 `endpoints.test.ts › invalid_targets_rejected`、`set_mode_targets_one_session`（state 返回 `disabled`，setMode AUTO 清除）；`client.test.ts › chip_negative_order`、`panel_state_and_history_bound`（`reason: jev`）、`disabled_visible_in_chip_and_panel`、`toggle_plugin_endpoint_only`。确认停用显示相关断言失败。
+- [x] 7.2 实现：state 响应带 `disabled`；芯片可见文本 `MANUAL · Jev 停用` + 警示样式、title 类别提示；面板类别/提示/时间/“点击 AUTO 重试”；历史 `jev-failed` 含类别。使 7.1 通过。
+- [x] 7.3 重构；全套保持绿。
 
 ## 8. 登记与验收
 
