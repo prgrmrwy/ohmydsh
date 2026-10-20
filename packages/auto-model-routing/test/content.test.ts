@@ -4,11 +4,17 @@ import { expect, it } from 'vitest'
 
 const skillPath = resolve(import.meta.dirname, '../../../skills/subagent-model-routing/SKILL.md')
 const skill = () => existsSync(skillPath) ? readFileSync(skillPath, 'utf8') : ''
-it('source_has_no_egress_primitives', () => {
+const sources = () => {
  const root=resolve(import.meta.dirname,'../src')
- for(const file of readdirSync(root,{recursive:true,encoding:'utf8'}).filter(name=>name.endsWith('.ts'))) {
-  expect(readFileSync(resolve(root,file),'utf8')).not.toMatch(/fetch\(|node:https?|node:child_process/)
+ return readdirSync(root,{recursive:true,encoding:'utf8'}).filter(name=>name.endsWith('.ts')).map(file=>[file,readFileSync(resolve(root,file),'utf8')] as const)
+}
+it('no_local_classifier_or_other_egress', () => {
+ for(const [file,text] of sources()) {
+  expect(text,file).not.toMatch(/export function (classify|resolveLevel)\b/)
+  expect(text,file).not.toMatch(/node:https?|node:child_process/)
+  for(const url of text.match(/https?:\/\/[^\s'"`]+/g) ?? []) expect(new URL(url).host,file).toBe('openrouter.ai')
  }
+ expect(sources().map(([file])=>file)).not.toContain('classifier.ts')
 })
 it('skill_required_guidance',()=>{
  for(const text of ['reasoning_effort','[model·effort]','新建','独立','list_subagent_models','允许','不可用']) expect(skill()).toContain(text)

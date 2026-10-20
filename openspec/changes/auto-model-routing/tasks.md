@@ -2,15 +2,15 @@
 
 ## 1. 移除本地分类器
 
-- [ ] 1.1 写失败测试 `content.test.ts › no_local_classifier_or_other_egress`：源码无 `classify`/词表导出，唯一出站主机为 `openrouter.ai`，无 `node:http(s)`/`node:child_process`。确认因 `classifier.ts` 仍导出 `classify` 而失败。
-- [ ] 1.2 删除 `classify`/`resolveLevel`/词表及其测试，把 `mapEffort`、档位与 effort 类型移到 `src/effort.ts`；`Reason` 改为 `jev | continued | no-effort-support | manual-restore | jev-failed`。1.1 中“无本地分类”部分通过（出站部分待第 3 组）。
-- [ ] 1.3 重构 router 对级别来源的依赖（暂以注入的档位驱动），既有 router/state/selection 测试保持绿。
+- [x] 1.1 写失败测试 `content.test.ts › no_local_classifier_or_other_egress`：源码无 `classify`/词表导出，唯一出站主机为 `openrouter.ai`，无 `node:http(s)`/`node:child_process`。确认因 `classifier.ts` 仍导出 `classify` 而失败。
+- [x] 1.2 删除 `classify`/`resolveLevel`/词表及其测试，把 `mapEffort`、档位与 effort 类型移到 `src/effort.ts`；`Reason` 改为 `jev | continued | no-effort-support | manual-restore | jev-failed`。1.1 中“无本地分类”部分通过（出站部分待第 3 组）。
+- [x] 1.3 重构 router 对级别来源的依赖（暂以注入的档位驱动），既有 router/state/selection 测试保持绿。
 
 ## 2. effort 映射与子会话表
 
-- [ ] 2.1 写失败测试 `effort.test.ts › maps_tier_to_effort`、`clamps_unsupported_effort`、`child_table_matches_design_and_family`（断言 D9 子会话常量与 Claude 家族规则）；确认子会话常量不存在而失败。
-- [ ] 2.2 在 `src/effort.ts` 增加子会话表常量 `CHILD_TABLE`，使 2.1 通过。
-- [ ] 2.3 重构；全套保持绿。
+- [x] 2.1 写失败测试 `effort.test.ts › maps_tier_to_effort`、`clamps_unsupported_effort`、`child_table_matches_design_and_family`（断言 D9 子会话常量与 Claude 家族规则）；确认子会话常量不存在而失败。
+- [x] 2.2 在 `src/effort.ts` 增加子会话表常量 `CHILD_TABLE`，使 2.1 通过。
+- [x] 2.3 重构；全套保持绿。
 
 ## 3. Jev 客户端
 

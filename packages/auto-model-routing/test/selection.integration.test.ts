@@ -44,7 +44,7 @@ async function harness() {
  const handle=await ctx.agents.create({sessionId:SessionId('route-test'),agentOptions:{provider:'test',model:'claude-opus-5-5'},setup(agentCtx){installModelSelection(agentCtx,selection)}})
  const agent=handle.agent
  state.select(agent.id,{provider:'test',model:'claude-opus-5-5',reasoningEffort:'medium'})
- agent.ctx.on('agent/pre-step',async(payload,next)=>{if(payload.step===1)router.begin(agent,payload.turn,payload.messages);return next()})
+ agent.ctx.on('agent/pre-step',async(payload,next)=>{if(payload.step===1&&router.begin(agent,payload.turn,payload.messages))router.resolve(agent,payload.turn,'complex');return next()})
  agent.ctx.on('agent/request',async(payload,next)=>{
   const config=await next()
   return router.request(agent,payload.turn,config as never,['low','medium','high','xhigh','max'],agent.session.requestHeader()?.config as never) as unknown as typeof config

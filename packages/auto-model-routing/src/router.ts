@@ -1,4 +1,4 @@
-import { mapEffort, resolveLevel, type Effort, type Level, type Reason } from './classifier.js'
+import { mapEffort, type Effort, type Reason, type Tier } from './effort.js'
 import { userInput, type ClaimedMessage } from './input.js'
 import type { Mode, RoutingState, Selection } from './state.js'
 export interface AgentRef { id: string; origin?: string }
@@ -7,8 +7,9 @@ interface Decision { effort?: Effort; reason: Reason }
 interface Runtime {
   turn: number
   active: boolean
-  previous?: Level
-  level?: Level
+  pending: boolean
+  previous?: Tier
+  tier?: Tier
   reason: Reason
   decision?: Decision
   decisionRoute?: string
@@ -25,21 +26,33 @@ export class Router {
   private readonly runtimes = new WeakMap<AgentRef, Runtime>()
   constructor(private readonly state: RoutingState) {}
 
-  begin(agent: AgentRef, turn: number, messages: readonly ClaimedMessage[]): void {
-    if (agent.origin === 'subagent') return
+  /** Open a turn. Returns the text to judge when this is an AUTO user turn; the caller then calls `resolve`. */
+  begin(agent: AgentRef, turn: number, messages: readonly ClaimedMessage[]): { text: string; previous?: Tier } | undefined {
+    if (agent.origin === 'subagent') return undefined
     const old = this.runtimes.get(agent)
-    if (old?.turn === turn) return
+    if (old?.turn === turn) return undefined
     const input = userInput(messages)
     const state = this.state.read(agent.id)
     const active = state.mode === 'AUTO' && !state.restore && (input.userTurn || old?.active === true)
-    const result = active && input.userTurn ? resolveLevel(input.text, old?.previous) : { reason: 'continued' as const, ...(old?.previous ? { level: old.previous } : {}) }
-    const previous = input.userTurn && active ? result.level : old?.previous
+    const judge = active && input.userTurn
+    const tier = judge ? undefined : old?.previous
     this.runtimes.set(agent, {
-      turn, active, reason: result.reason,
-      ...(result.level ? { level: result.level } : {}),
-      ...(previous ? { previous } : {}),
+      turn, active, pending: judge, reason: judge ? 'jev' : 'continued',
+      ...(old?.previous ? { previous: old.previous } : {}),
+      ...(tier ? { tier } : {}),
       history: old?.history ?? [],
     })
+    return judge ? { text: input.text, ...(old?.previous ? { previous: old.previous } : {}) } : undefined
+  }
+
+  /** Apply the judged tier. Discarded when the turn moved on or the mode changed while judging. */
+  resolve(agent: AgentRef, turn: number, tier: Tier): void {
+    const runtime = this.runtimes.get(agent)
+    if (!runtime || runtime.turn !== turn || !runtime.pending) return
+    runtime.pending = false
+    if (!runtime.active) return
+    runtime.tier = tier
+    runtime.previous = tier
   }
 
   setMode(agent: AgentRef, mode: Mode): void {
@@ -70,8 +83,9 @@ export class Router {
     const route = `${config.provider}\0${config.model}\0${supported.join(',')}`
     if (!runtime.decision || runtime.decisionRoute !== route) {
       runtime.decisionRoute = route
-      const effort = runtime.level ? mapEffort(config.model, runtime.level, supported) : undefined
-      const reason = !runtime.level ? 'unclassified' : effort === undefined ? 'no-effort-support' : runtime.reason
+      if (!runtime.tier) return config
+      const effort = mapEffort(config.model, runtime.tier, supported)
+      const reason = effort === undefined ? 'no-effort-support' : runtime.reason
       runtime.decision = { ...(effort ? { effort } : {}), reason }
       this.record(runtime, runtime.decision)
     }
@@ -80,7 +94,8 @@ export class Router {
 
   needsModelInfo(agent: AgentRef): boolean {
     const state = this.state.read(agent.id)
-    return agent.origin !== 'subagent' && state.mode === 'AUTO' && !state.restore && this.runtimes.get(agent)?.active === true
+    const runtime = this.runtimes.get(agent)
+    return agent.origin !== 'subagent' && state.mode === 'AUTO' && !state.restore && runtime?.active === true && runtime.tier !== undefined
   }
 
   status(agent: AgentRef): { effort?: Effort; reason?: Reason; history: readonly Decision[] } {

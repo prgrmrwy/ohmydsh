@@ -7,7 +7,7 @@ import { resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { FileStateStore, RoutingState, type Selection } from './state.js'
 import { Router, type AgentRef, type RequestConfig } from './router.js'
-import type { Effort } from './classifier.js'
+import type { Effort } from './effort.js'
 import { endpoint } from './endpoints.js'
 import { selectionProjection } from './selection-projection.js'
 

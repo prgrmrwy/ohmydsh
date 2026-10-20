@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { createHash } from 'node:crypto'
-import type { Effort } from './classifier.js'
+import type { Effort } from './effort.js'
 import { z } from 'zod'
 const stateSchema = z.object({
   mode: z.enum(['AUTO', 'MANUAL']), restore: z.boolean(),
