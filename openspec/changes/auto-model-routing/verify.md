@@ -1,3 +1,5 @@
+> **2026-10-20：以下为首版（本地规则，`13f1587b`）的实施与验收记录，范围已被修订取代，仅作历史参考。**
+
 ## Verification Results
 
 ### Task Completion

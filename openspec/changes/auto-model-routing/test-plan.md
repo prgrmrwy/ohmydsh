@@ -1,3 +1,5 @@
+> **2026-10-20：以下为首版（本地规则，`13f1587b`）的实施与验收记录，范围已被修订取代，仅作历史参考。**
+
 ## Test Plan
 
 门禁：第 5 轮 `APPROVE_WITH_CHANGES`，定点复核 `CHANGES_APPLIED: yes`。替换旧版 77 场景计划；本表对应当前 9 条要求、33 场景。S = `specs/auto-model-routing/spec.md`；测试文件均相对 `packages/auto-model-routing/`。red 表示待编写并观察正确失败，不表示测试已经执行。

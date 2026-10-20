@@ -143,3 +143,7 @@ CHANGES_APPLIED: yes
 | specs/auto-model-routing/spec.md | `de26f72236ad45fb7dfc8a21db3b9e760498123228d8317a1c0d7c879af0c041` |
 
 重新计算的 runtime agent/agent-loop/controller/session 四文件 SHA-256 与上方运行时证据表完全一致。四制品 SHA-256 与本次委派给定值完全一致。Required Changes 三项已在规划层充分落实，故将 `CHANGES_APPLIED` 设为 **yes**；`VERDICT: APPROVE_WITH_CHANGES` 保持不变。此结论不是实现测试通过：真实 Host/AgentLoop 集成、GUI、构建与部署均未执行，仍属于后续实施验收。
+
+## 2026-10-20 范围修订：本批准失效
+
+用户否决本地规则分类（不符合“AI + 快速决策”目标），要求以 Jev 或同类专用决策模型判断、失败即停用并提示、不接受本地降级、不主动查询余额、主子会话同构。proposal/design/spec 已据此修订（见 `spike-jev-openrouter.md`），上方 `VERDICT: APPROVE_WITH_CHANGES` 与 `CHANGES_APPLIED: yes` 只适用于第 5 轮 SHA 表所列输入，**对当前制品不再有效**。须对修订后的四制品进行新一轮完整独立审查，并新增审查焦点：外发任务文本的隐私面、凭据隔离、Jev 失败分类与停用状态机、pre-step await 的取消与延迟、`route_subagent` 工具与 skill 的失败处理。

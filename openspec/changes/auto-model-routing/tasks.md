@@ -1,3 +1,5 @@
+> **2026-10-20：以下为首版（本地规则，`13f1587b`）的实施与验收记录，范围已被修订取代，仅作历史参考。**
+
 门禁：第 5 轮 APPROVE_WITH_CHANGES，定点复核 CHANGES_APPLIED: yes。按 design 实现、按 test-plan 的 33 行验收；以下每组先观察正确失败，再实现，再重构。当前均未实施。测试路径相对 `packages/auto-model-routing/`。
 
 ## 1. 包骨架
