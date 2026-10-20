@@ -13,9 +13,9 @@ export async function apply(ctx, config) {
       const agent = ctx.agents.get(SessionId('direct-caller'))
       assert.ok(agent)
       const before = config.replay ? await readFile(join(config.dataDir, 's.jsonl')) : undefined
-      const r = await ctx.tools.execute({ callId: 'direct-create', name: 'collab_create_space', arguments: { spaceId: 's', cmdId: 'create', name: 'a' }, agent, signal: AbortSignal.timeout(5000) })
+      const r = await ctx.tools.execute({ callId: 'direct-create', name: 'collab_space', arguments: { action: 'create', spaceId: 's', cmdId: 'create', name: 'a' }, agent, signal: AbortSignal.timeout(5000) })
       assert.deepEqual(r.value, { seq: 1, spaceId: 's' })
-      const state = await ctx.tools.execute({ callId: 'direct-read', name: 'collab_overview', arguments: { spaceId: 's' }, agent, signal: AbortSignal.timeout(5000) })
+      const state = await ctx.tools.execute({ callId: 'direct-read', name: 'collab_read', arguments: { view: 'overview', spaceId: 's' }, agent, signal: AbortSignal.timeout(5000) })
       assert.equal(state.value.members.a.binding.address, agent.id)
       if (before) assert.deepEqual(await readFile(join(config.dataDir, 's.jsonl')), before)
       keepalive = setInterval(() => {}, 60000)

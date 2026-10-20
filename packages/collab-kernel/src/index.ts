@@ -7,3 +7,4 @@ export type { CommandContext, ReadContext, ServiceOptions } from './service/inde
 export { FileStore } from './store/file-store.js'
 export type { FileStoreFs } from './store/file-store.js'
 export { project } from './projection/index.js'
+export { reduce } from './domain/reduce.js'

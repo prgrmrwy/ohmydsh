@@ -1,11 +1,11 @@
 {
   "name": "dsh-collab",
   "version": "0.1.0",
-  "description": "Allowlisted independent DSH sessions collaborating through a Host-owned ledger",
+  "description": "Independent DSH sessions collaborating through a Host-owned ledger, admitted by invitation",
   "license": "MIT",
   "type": "module",
   "main": "./lib/index.js",
-  "bin": { "dsh-collab-unlock": "./lib/unlock.mjs" },
+  "bin": { "dsh-collab-salvage": "./lib/salvage.mjs" },
   "types": "./lib/index.d.ts",
   "exports": { ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" } },
   "files": ["lib", "cordis.patch.yml", "README.md", "README.zh.md", "LICENSE"],

@@ -178,7 +178,7 @@ test('component-idle: followup wakes idle and preserves plugin source/message id
   assertCompleted(1, 1)
 })
 
-test('component-busy: followup waits for the next turn, not the current model request', { timeout: 10000 }, async t => {
+test('wake-01：运行中目标下一回合收到', { timeout: 10000 }, async t => {
   const started = deferred(); const release = deferred()
   const { ctx, agent, adapter, assertCompleted } = await harness(t, [async () => { started.resolve(); await release.promise; return textResponse('first') }, textResponse('second')])
   const claims = []

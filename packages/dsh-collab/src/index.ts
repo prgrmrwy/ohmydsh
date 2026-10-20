@@ -4,15 +4,17 @@ import { defaultConvention } from '../../collab-kernel/src/convention/index.js'
 import { CollabHost } from './host.js'
 import { SessionAccess, SessionProvider } from './session-provider.js'
 import { collabTools } from './tools.js'
-import { checkCurrentLocation, type HostConfig } from './config.js'
+import { admissionPolicy, checkCurrentLocation, type HostConfig } from './config.js'
 
-export { recoverLock } from './maintenance.js'
+export { salvage } from './salvage.js'
 export const name = 'dsh-collab'
 export const inject = ['tools', 'agents', 'sessions', 'sessionQuery', 'sessionController', 'workspaceRegistry']
-export const Config = z.object({ dataDir: z.string().required(), allowedSessionIds: z.array(z.string()).default([]) })
+export const Config = z.object({ dataDir: z.string().required(), admission: z.union(['invite', 'allowlist']).default('invite'), allowedSessionIds: z.array(z.string()).default([]), denySessionIds: z.array(z.string()).default([]) })
 export async function apply(ctx: Context, config: HostConfig) {
   const check = () => { if (host) checkCurrentLocation(host.config.dataDir, ctx.workspaceRegistry.list().map(workspace => workspace.path)) }
-  const access = new SessionAccess(ctx, config.allowedSessionIds ?? [], check)
+  // Reject invalid admission config before registering any tool or touching dataDir.
+  const policy = admissionPolicy(config)
+  const access = new SessionAccess(ctx, policy, check)
   const provider = new SessionProvider(access)
   let host: CollabHost | undefined
   let ready = false
@@ -22,7 +24,7 @@ export async function apply(ctx: Context, config: HostConfig) {
     host = value
     host.admissionCheck = check
     if (closing) void value.close().catch(() => {})
-  }).then(async value => {
+  }, { logger: ctx.logger('dsh-collab') }).then(async value => {
     if (closing) await value.close()
     else ready = true
   })

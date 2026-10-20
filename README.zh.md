@@ -180,6 +180,7 @@ tests/                   仓库级测试
 - [spec-superflow](https://github.com/MageByte-Zero/spec-superflow) — 面向规划式、规范驱动变更的状态机工作流 skill。
 - [jev](https://github.com/jkudish/jev-mcp) — 为 agent 提供语义判断工具的 MCP 服务；密钥只放在 `.env.local`。
 - [anvil](https://github.com/jikkujoyce/openspec-schemas) — 测试先行变更流程的 OpenSpec schema。
+- [ponytail](https://github.com/DietrichGebert/ponytail) — 纯提示词 skill：最小改动、抑制膨胀的编码模式，以及配套的评审与审计命令。
 
 ### 改造自第三方的 skill
 
@@ -201,6 +202,7 @@ tests/                   仓库级测试
 - [subscriptions-sandbox-shim](packages/subscriptions-sandbox-shim/README.md) — 为订阅 provider 剥离 sandbox 升级字段并清理孤立的工具调用。
 - [cockpit-worktree-open-shim](packages/cockpit-worktree-open-shim/README.md) — 把驾驶舱的远程编辑器接入 Worktree Session 的打开动作。
 - [cockpit-memex-browse-shim](packages/cockpit-memex-browse-shim/README.md) — 把驾驶舱的端口转发接入记忆卡片浏览。
+- [dsh-collab](packages/dsh-collab/README.md) — 让已有的独立会话通过邀请共享协作台账，并在下一回合唤醒成员。
 
 ### 自研 skill、preset 与 patch
 
@@ -212,6 +214,7 @@ tests/                   仓库级测试
 - [dsh-sandbox-notes](skills/dsh-sandbox-notes/SKILL.md) — 关于 sandbox 权限与「not strictly wider」报错的避坑笔记。
 - [dsh-pet-executor](presets/dsh-pet-executor) — 不加载全局 skill provider 的 Pet 执行会话 preset。
 - [connection-webserver](patches/connection-webserver.yml) — 恢复 Connection RPC 通道注册的 composition patch。
+- [ponytail-skills](patches/ponytail-skills.yml) — 只为 ponytail 包挂载专属 skill provider 的 composition patch。
 - [websocket-heartbeat](patches/websocket-heartbeat.yml) — 配置补丁：把官方 gateway 的 WebSocket 心跳放宽到 5 秒，使大体量历史在短暂网络抖动时不被断开。
 
 ### 自研（独立仓库）

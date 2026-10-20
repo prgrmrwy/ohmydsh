@@ -79,7 +79,7 @@ export class CollabService {
   private stable(p: Principal): void {
     if (!isPrincipal(p)) fail('COLLAB_FORBIDDEN')
     if (p.kind === 'provider' && !this.options.providers.some(x => x.id === p.providerId && x.channel === p.on.channel)) fail('COLLAB_FORBIDDEN')
-    if (p.kind === 'internal' && p.purpose !== 'breaker-reset') fail('COLLAB_FORBIDDEN')
+    if (p.kind === 'internal' && p.purpose !== 'breaker-reset' && p.purpose !== 'host-index') fail('COLLAB_FORBIDDEN')
   }
   private address(p: Principal): Address { if (p.kind === 'internal') return fail('COLLAB_FORBIDDEN'); return p.kind === 'agent' ? p : p.on }
   private state(spaceId: string): SpaceState {
@@ -167,6 +167,9 @@ export class CollabService {
   }
   private async command(ctx: CommandContext, name: Exclude<CommandName, 'createSpace'>, input: unknown, decide: (s: SpaceState, actor: string, member: Member | undefined) => CollabEvent[] | Promise<CollabEvent[]>, replay?: (s: SpaceState, actor: string) => CommandResult | undefined, prepare?: () => Promise<Member[]>): Promise<CommandResult> {
     this.stable(ctx.principal)
+    // Internal principals never run member commands; reject before prepare,
+    // provider claim, presence sampling or any space-state check.
+    if (ctx.principal.kind === 'internal' && (name !== 'resetBreaker' || ctx.principal.purpose === 'host-index')) fail('COLLAB_FORBIDDEN')
     if (this.failed.has(ctx.spaceId) || this.stopped.has(ctx.spaceId)) fail('COLLAB_STORE_FAILED')
     const generation = this.generations.get(ctx.spaceId)
     const extraMembers = await prepare?.() ?? []

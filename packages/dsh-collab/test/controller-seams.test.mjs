@@ -54,9 +54,9 @@ test('controller-cold: current P2 projection mounts real tools after checkpoint 
     const pluginHandle = reader.plugin(consumer, { dataDir: join(root, 'cold-collab-data'), allowedSessionIds: [id] })
     await pluginHandle.inertia
     assert.equal(pluginHandle.state, 2)
-    const sessions = await reader.tools.execute({ callId: 'cold-discovery', name: 'collab_sessions', arguments: {}, agent, signal: AbortSignal.timeout(5000) })
-    assert.ok(!sessions.isError, JSON.stringify(sessions))
-    assert.ok(sessions.value.some(record => record.id === id))
+    const status = await reader.tools.execute({ callId: 'cold-discovery', name: 'collab_status', arguments: {}, agent, signal: AbortSignal.timeout(5000) })
+    assert.ok(!status.isError && !status.value.error, JSON.stringify(status))
+    assert.deepEqual(status.value.contacts, [], 'caller itself is never listed as a contact')
     assert.equal(reader.sandboxPolicy.resolve({ session: agent.session }).mode, 'read-only')
     assert.equal(reader.approval.effectivePolicy(agent.session), 'never')
     const target = join(cwd, 'protected.txt')
@@ -195,7 +195,7 @@ test('controller-worktree: real recovery and guard hook is restored at cold Agen
       const result = await reader.tools.execute({ callId: name, name, arguments: args, agent: sender, signal: AbortSignal.timeout(5000) })
       assert.ok(!result.isError && !result.value.error, JSON.stringify(result)); return result.value
     }
-    await collaborate('collab_create_space', { spaceId: 'guard', cmdId: 'create', name: 'a' })
+    await collaborate('collab_space', { action: 'create', spaceId: 'guard', cmdId: 'create', name: 'a' })
     let deadline, off
     const delivered = new Promise((resolve, reject) => {
       deadline = setTimeout(() => { off(); reject(new Error('worktree consumer pointer missing')) }, 5000)
@@ -265,28 +265,28 @@ test('consumer-integration: actual bundled tools share ledger across sessions an
       assert.ok(!result.isError, JSON.stringify(result))
       return result.value
     }
-    assert.deepEqual(await call(a, 'collab_create_space', { spaceId: 'shared', cmdId: 'create', name: 'a' }), { seq: 1, spaceId: 'shared' })
+    assert.deepEqual(await call(a, 'collab_space', { action: 'create', spaceId: 'shared', cmdId: 'create', name: 'a' }), { seq: 1, spaceId: 'shared' })
     const invalidInvite = await call(a, 'collab_invite', { spaceId: 'shared', cmdId: 'prefix', name: 'prefix', recipientSessionId: 'consumer-' })
     assert.equal(invalidInvite.error.code, 'COLLAB_ADDRESS_UNCLAIMED')
-    const invalidState = await call(a, 'collab_overview', { spaceId: 'shared' })
+    const invalidState = await call(a, 'collab_read', { view: 'overview', spaceId: 'shared' })
     assert.deepEqual(Object.keys(invalidState.members), ['a'])
     assert.deepEqual(invalidState.deliveries, {})
     const invited = await call(a, 'collab_invite', { spaceId: 'shared', cmdId: 'invite', name: 'b', recipientSessionId: ids[1] })
     assert.equal(invited.seq, 2)
-    for (const [name, extra] of [['collab_overview', {}], ['collab_read_since', { sinceSeq: 0 }], ['collab_project', {}], ['collab_read_convention', { version: '1' }]]) {
+    for (const [name, extra] of [['collab_read', { view: 'overview' }], ['collab_read', { view: 'since', sinceSeq: 0 }], ['collab_read', { view: 'convention', version: '1' }]]) {
       assert.equal((await call(b, name, { spaceId: 'shared', ...extra })).error.code, 'COLLAB_MEMBER_INACTIVE')
     }
-    assert.equal((await call(b, 'collab_close_space', { spaceId: 'shared', cmdId: 'invited-close' })).error.code, 'COLLAB_MEMBER_INACTIVE')
-    await call(b, 'collab_join', { spaceId: 'shared', cmdId: 'join' })
+    assert.equal((await call(b, 'collab_space', { action: 'close', spaceId: 'shared', cmdId: 'invited-close' })).error.code, 'COLLAB_MEMBER_INACTIVE')
+    await call(b, 'collab_member', { action: 'join', spaceId: 'shared', cmdId: 'join' })
     const created = await call(a, 'collab_create_item', { spaceId: 'shared', cmdId: 'item', itemId: 'item', kind: 'other', title: 'Title', body: 'Body', requiredAcks: ['b'], deciders: [] })
     assert.equal(created.itemId, 'item')
     await call(b, 'collab_ack_item', { spaceId: 'shared', cmdId: 'ack', itemId: 'item', revision: 1 })
     const conflict = await call(a, 'collab_revise_item', { spaceId: 'shared', cmdId: 'stale', itemId: 'item', expectedRevision: 99, changes: { title: 'must not change' } })
     assert.equal(conflict.error.code, 'COLLAB_STALE_REVISION')
     assert.equal(conflict.error.details.currentRevision, 1)
-    assert.equal((await call(b, 'collab_close_space', { spaceId: 'shared', cmdId: 'member-close' })).error.code, 'COLLAB_FORBIDDEN')
-    assert.equal((await call(a, 'collab_create_space', { spaceId: 'shared', cmdId: 'create', name: 'changed' })).error.code, 'COLLAB_CMD_CONFLICT')
-    const state = await call(b, 'collab_overview', { spaceId: 'shared' })
+    assert.equal((await call(b, 'collab_space', { action: 'close', spaceId: 'shared', cmdId: 'member-close' })).error.code, 'COLLAB_FORBIDDEN')
+    assert.equal((await call(a, 'collab_space', { action: 'create', spaceId: 'shared', cmdId: 'create', name: 'changed' })).error.code, 'COLLAB_CMD_CONFLICT')
+    const state = await call(b, 'collab_read', { view: 'overview', spaceId: 'shared' })
     assert.equal(state.members.a.binding.address, ids[0])
     assert.equal(state.members.b.binding.address, ids[1])
     assert.equal(state.items.item.status, 'agreed')
@@ -302,7 +302,7 @@ test('consumer-integration: actual bundled tools share ledger across sessions an
     assert.equal(b.session.snapshotEvents().filter(event => event.type === 'user/message' && event.data.source.kind === 'plugin:dsh-collab').length, received)
     assert.equal((await call(a, 'collab_request_decision', { spaceId: 'shared', cmdId: 'decision', itemId: 'item', options: ['yes', 'no'] })).error.code, 'COLLAB_NO_DECIDER')
     assert.deepEqual(await businessRecords(), beforeDecision)
-    const afterDecision = await call(a, 'collab_overview', { spaceId: 'shared' })
+    const afterDecision = await call(a, 'collab_read', { view: 'overview', spaceId: 'shared' })
     assert.deepEqual(Object.keys(afterDecision.members).sort(), ['a', 'b'])
     assert.deepEqual(afterDecision.requests, {})
     assert.deepEqual(afterDecision.decisions, [])
@@ -316,7 +316,7 @@ test('consumer-integration: actual bundled tools share ledger across sessions an
     const before = await readFile(log)
     await handle.dispose()
     assert.deepEqual(await readFile(log), before)
-    const after = await ctx.tools.execute({ callId: 'removed', name: 'collab_overview', arguments: { spaceId: 'shared' }, agent: a, signal: AbortSignal.timeout(5000) })
+    const after = await ctx.tools.execute({ callId: 'removed', name: 'collab_read', arguments: { view: 'overview', spaceId: 'shared' }, agent: a, signal: AbortSignal.timeout(5000) })
     assert.equal(after.isError, true)
     await ctx.fiber.dispose()
     ctx = await controller(root)
@@ -326,7 +326,7 @@ test('consumer-integration: actual bundled tools share ledger across sessions an
     assert.equal(restarted.state, 2)
     const restored = (await ctx.sessionController.resolveAgent(ids[1])).agent
     assert.ok(restored)
-    const reopened = await ctx.tools.execute({ callId: 'reopened', name: 'collab_overview', arguments: { spaceId: 'shared' }, agent: restored, signal: AbortSignal.timeout(5000) })
+    const reopened = await ctx.tools.execute({ callId: 'reopened', name: 'collab_read', arguments: { view: 'overview', spaceId: 'shared' }, agent: restored, signal: AbortSignal.timeout(5000) })
     assert.ok(!reopened.isError, JSON.stringify(reopened))
     assert.equal(reopened.value.serviceId, state.serviceId)
     assert.equal(reopened.value.items.item.acks.b, 1)
@@ -334,7 +334,7 @@ test('consumer-integration: actual bundled tools share ledger across sessions an
   } finally { await ctx.fiber.dispose() }
 })
 
-test('consumer-cold-delivery: official provider resolve mounts P2 and sends exact plugin pointer', { timeout: 15000 }, async () => {
+test('cold-01：冷恢复保留真实工具装配', { timeout: 15000 }, async () => {
   const root = join(home, 'consumer-cold')
   const cwd = join(root, 'workspace-b')
   await mkdir(cwd, { recursive: true })
@@ -365,10 +365,10 @@ test('consumer-cold-delivery: official provider resolve mounts P2 and sends exac
       const result = await reader.tools.execute({ callId: `cold-${name}`, name, arguments: args, agent: sender, signal: AbortSignal.timeout(5000) })
       assert.ok(!result.isError, JSON.stringify(result)); assert.ok(!result.value.error, JSON.stringify(result.value)); return result.value
     }
-    const listed = await call('collab_sessions', {})
-    assert.ok(listed.some(record => record.id === ids[1]))
+    const listed = await call('collab_status', {})
+    assert.ok(listed.contacts.some(record => record.sessionId === ids[1]))
     assert.equal(reader.agents.get(ids[1]), undefined, 'discovery must not activate cold target')
-    await call('collab_create_space', { spaceId: 'cold-space', cmdId: 'create', name: 'a' })
+    await call('collab_space', { action: 'create', spaceId: 'cold-space', cmdId: 'create', name: 'a' })
     let stopMessageWatch
     let messageDeadline
     const delivered = new Promise((resolve, reject) => {
@@ -465,7 +465,7 @@ test('consumer-busy: actual provider followup is absent from current request and
       const r = await ctx.tools.execute({ callId: `busy-${name}`, name, arguments: args, agent: sender, signal: AbortSignal.timeout(5000) })
       assert.ok(!r.isError && !r.value.error, JSON.stringify(r)); return r.value
     }
-    await call('collab_create_space', { spaceId: 'busy-space', cmdId: 'create', name: 'a' })
+    await call('collab_space', { action: 'create', spaceId: 'busy-space', cmdId: 'create', name: 'a' })
     let entered
     const current = new Promise(resolve => { entered = resolve })
     const wait = new Promise(resolve => { release = resolve })
@@ -486,7 +486,7 @@ test('consumer-busy: actual provider followup is absent from current request and
     })
     try {
       await call('collab_invite', { spaceId: 'busy-space', cmdId: 'invite', name: 'b', recipientSessionId: target.id })
-      awaitLedger = await call('collab_overview', { spaceId: 'busy-space' })
+      awaitLedger = await call('collab_read', { view: 'overview', spaceId: 'busy-space' })
       const pointer = await message
       assert.ok(pointer.id)
       assert.ok(!JSON.stringify(before).includes('busy-space'))
@@ -519,13 +519,13 @@ test('consumer-workspace: new workspace containment refuses future reads and wri
     const handle = ctx.plugin(plugin, { dataDir, allowedSessionIds: [id] })
     await handle.inertia; assert.equal(handle.state, 2)
     const call = (name, args) => ctx.tools.execute({ callId: `workspace-${name}`, name, arguments: args, agent, signal: AbortSignal.timeout(5000) })
-    const created = await call('collab_create_space', { spaceId: 's', cmdId: 'create', name: 'a' })
+    const created = await call('collab_space', { action: 'create', spaceId: 's', cmdId: 'create', name: 'a' })
     assert.ok(!created.isError && !created.value.error, JSON.stringify(created))
     await ctx.workspaceRegistry.create(cwd)
-    assert.equal((await call('collab_overview', { spaceId: 's' })).value.members.a.status, 'active')
+    assert.equal((await call('collab_read', { view: 'overview', spaceId: 's' })).value.members.a.status, 'active')
     const before = await readFile(join(dataDir, 's.jsonl'))
     await ctx.workspaceRegistry.create(root)
-    for (const [name, args] of [['collab_overview', { spaceId: 's' }], ['collab_set_status', { spaceId: 's', cmdId: 'status', text: 'must not commit' }], ['collab_create_space', { spaceId: 'new', cmdId: 'new', name: 'a' }]]) {
+    for (const [name, args] of [['collab_read', { view: 'overview', spaceId: 's' }], ['collab_set_status', { spaceId: 's', cmdId: 'status', text: 'must not commit' }], ['collab_space', { action: 'create', spaceId: 'new', cmdId: 'new', name: 'a' }]]) {
       const refused = await call(name, args)
       assert.ok(refused.value.error, JSON.stringify(refused))
     }
@@ -559,7 +559,7 @@ test('consumer-model-identity: real model tool calls retain caller and reject fo
       assert.equal(events.filter(e => e.type === 'agent/error').length, 0)
       return events.filter(e => e.type === 'tool/result').at(-1)
     }
-    await model(b, 'collab_create_space', { spaceId: 's', cmdId: 'create', name: 'b' })
+    await model(b, 'collab_space', { action: 'create', spaceId: 's', cmdId: 'create', name: 'b' })
     const log = join(dataDir, 's.jsonl')
     const records = (await readFile(log, 'utf8')).trim().split('\n').map(JSON.parse)
     assert.equal(records[0].events.find(event => event.type === 'member/joined').member.binding.address, b.id)
@@ -569,7 +569,7 @@ test('consumer-model-identity: real model tool calls retain caller and reject fo
     assert.equal(ctx.agentPresets.composedPreset(b.ctx), 'P1')
     const header = b.session.snapshotEvents().find(event => event.type === 'request/header')
     const names = header.data.header.tools.map(tool => tool.name).filter(name => name.startsWith('collab_'))
-    assert.equal(names.length, 20); assert.equal(new Set(names).size, 20)
+    assert.equal(names.length, 12); assert.equal(new Set(names).size, 12)
     assert.ok(!names.some(name => /confirm|reset|break|execute/.test(name)))
     const before = await readFile(log)
     for (const extra of [{ principal: { kind: 'human' } }, { actor: 'a' }, { sessionId: a.id }, { providerId: 'forged' }]) {
@@ -578,7 +578,7 @@ test('consumer-model-identity: real model tool calls retain caller and reject fo
     }
     await model(c, 'collab_set_status', { spaceId: 's', cmdId: 'outside', text: 'forbidden' })
     assert.deepEqual(await readFile(log), before)
-    const retry = await ctx.tools.execute({ callId: 'retry', name: 'collab_create_space', arguments: { spaceId: 's', cmdId: 'create', name: 'b' }, agent: b, signal: AbortSignal.timeout(5000) })
+    const retry = await ctx.tools.execute({ callId: 'retry', name: 'collab_space', arguments: { action: 'create', spaceId: 's', cmdId: 'create', name: 'b' }, agent: b, signal: AbortSignal.timeout(5000) })
     assert.deepEqual(retry.value, { seq: 1, spaceId: 's' }); assert.deepEqual(await readFile(log), before)
     for (const agent of [a, b, c]) assert.equal(agent.session.header.cwd, agent === a ? cwdA : cwdB)
   } finally { await ctx.fiber.dispose() }
@@ -599,8 +599,8 @@ test('consumer-stale-exec: real async pre-tool gate cannot retain a disposed cal
     let entered
     const gated = new Promise(resolve => { entered = resolve })
     const barrier = new Promise(resolve => { release = resolve })
-    stop = ctx.on('tools/pre-execute', async (exec, next) => { if (exec.name === 'collab_create_space') { entered(); await barrier }; return next() })
-    const pending = ctx.tools.execute({ callId: 'stale', name: 'collab_create_space', arguments: { spaceId: 's', cmdId: 'create', name: 'a' }, agent: owned.agent, signal: AbortSignal.timeout(5000) })
+    stop = ctx.on('tools/pre-execute', async (exec, next) => { if (exec.name === 'collab_space') { entered(); await barrier }; return next() })
+    const pending = ctx.tools.execute({ callId: 'stale', name: 'collab_space', arguments: { action: 'create', spaceId: 's', cmdId: 'create', name: 'a' }, agent: owned.agent, signal: AbortSignal.timeout(5000) })
     await gated
     await owned.dispose()
     assert.equal(ctx.agents.get(id), undefined)
@@ -628,11 +628,11 @@ test('consumer-owned: actual official child ownership is rejected without confus
     const handle = ctx.plugin(plugin, { dataDir: join(home, 'owned-ledger'), allowedSessionIds: owned.map(handle => handle.agent.id) })
     await handle.inertia; assert.equal(handle.state, 2)
     const call = (agent, name, args) => ctx.tools.execute({ callId: 'owned', name, arguments: args, agent, signal: AbortSignal.timeout(5000) })
-    assert.equal((await call(child.agent, 'collab_sessions', {})).value.error.code, 'COLLAB_CALLER_UNAVAILABLE')
-    const discovered = (await call(parent.agent, 'collab_sessions', {})).value
-    assert.ok(discovered.some(record => record.id === fork.agent.id))
-    assert.ok(!discovered.some(record => record.id === child.agent.id))
-    assert.equal((await call(fork.agent, 'collab_create_space', { spaceId: 's', cmdId: 'create', name: 'a' })).value.seq, 1)
+    assert.equal((await call(child.agent, 'collab_status', {})).value.error.code, 'COLLAB_CALLER_UNAVAILABLE')
+    const discovered = (await call(parent.agent, 'collab_status', {})).value.contacts
+    assert.ok(discovered.some(record => record.sessionId === fork.agent.id))
+    assert.ok(!discovered.some(record => record.sessionId === child.agent.id))
+    assert.equal((await call(fork.agent, 'collab_space', { action: 'create', spaceId: 's', cmdId: 'create', name: 'a' })).value.seq, 1)
     const refused = await call(fork.agent, 'collab_invite', { spaceId: 's', cmdId: 'owned', name: 'child', recipientSessionId: child.agent.id })
     assert.equal(refused.value.error.code, 'COLLAB_ADDRESS_UNCLAIMED')
   } finally { for (const handle of owned.reverse()) await handle.dispose(); await ctx.fiber.dispose() }
@@ -653,7 +653,7 @@ test('consumer-startup-dispose: real Cordis removal during async replay fences l
     let handle = ctx.plugin(plugin, config)
     await handle.inertia
     for (const spaceId of ['a', 'b']) {
-      const result = await ctx.tools.execute({ callId: spaceId, name: 'collab_create_space', arguments: { spaceId, cmdId: 'create', name: 'a' }, agent: owned.agent, signal: AbortSignal.timeout(5000) })
+      const result = await ctx.tools.execute({ callId: spaceId, name: 'collab_space', arguments: { action: 'create', spaceId, cmdId: 'create', name: 'a' }, agent: owned.agent, signal: AbortSignal.timeout(5000) })
       assert.equal(result.value.seq, 1)
     }
     await handle.dispose()
@@ -703,9 +703,9 @@ test('consumer-corrupt-cold: real persistence omission stays unknown and cannot 
     const fiber = reader.plugin(plugin, { dataDir: join(home, 'corrupt-ledger'), allowedSessionIds: [id, caller.agent.id] })
     await fiber.inertia; assert.equal(fiber.state, 2)
     const call = (name, args) => reader.tools.execute({ callId: name, name, arguments: args, agent: caller.agent, signal: AbortSignal.timeout(5000) })
-    const list = await call('collab_sessions', {})
-    assert.ok(!list.value.some(record => record.id === id))
-    assert.equal((await call('collab_create_space', { spaceId: 's', cmdId: 'create', name: 'a' })).value.seq, 1)
+    const list = await call('collab_status', {})
+    assert.ok(!list.value.contacts.some(record => record.sessionId === id))
+    assert.equal((await call('collab_space', { action: 'create', spaceId: 's', cmdId: 'create', name: 'a' })).value.seq, 1)
     const invite = await call('collab_invite', { spaceId: 's', cmdId: 'invite', name: 'b', recipientSessionId: id })
     assert.equal(invite.value.error.code, 'COLLAB_ADDRESS_UNCLAIMED')
     assert.equal(reader.agents.get(id), undefined)
@@ -721,4 +721,115 @@ test('controller-assembly: all real concrete services activate without a full DS
     for (const name of ['fs', 'attachments', 'credentials', 'sessionController', 'workspaceRegistry', 'agentPresets']) assert.ok(ctx.get(name), name)
     assert.ok(ctx.attachments.imageLimits)
   } finally { await ctx.fiber.dispose() }
+})
+
+// ---- dsh-collab-invite-admission: resident 12-tool surface on real request headers ----
+const BUDGET = 4200
+/** Measure exactly as specified: collab_ tool objects of the real header, original order. */
+export function collabToolBytes(headerTools) { return JSON.stringify(headerTools.filter(tool => tool.name.startsWith('collab_'))).length }
+export function assertBudget(headerTools) {
+  const length = collabToolBytes(headerTools)
+  assert.ok(length <= BUDGET, `collab tool schema is ${length} chars, budget ${BUDGET}`)
+  return length
+}
+const lastHeaderTools = agent => agent.session.snapshotEvents().filter(e => e.type === 'request/header').at(-1).data.header.tools
+
+async function surfaceWorld(name) {
+  const root = join(home, name)
+  await mkdir(root, { recursive: true })
+  const ctx = await controller(root)
+  await presets(ctx)
+  const ids = [SessionId(`${name}-a`), SessionId(`${name}-b`), SessionId(`${name}-c`)]
+  for (const id of ids) await ctx.sessionController.create({ sessionId: id, cwd: root, agentPreset: 'P1' })
+  const [a, b, c] = await Promise.all(ids.map(async id => (await ctx.sessionController.resolveAgent(id)).agent))
+  assert.ok(a && b && c)
+  const plugin = await consumerPlugin(root)
+  // Invite admission: no allowlist at all.
+  const handle = ctx.plugin(plugin, { dataDir: join(root, 'ledger') })
+  await handle.inertia; assert.equal(handle.state, 2)
+  const call = async (agent, toolName, args) => {
+    const result = await ctx.tools.execute({ callId: `surface-${toolName}`, name: toolName, arguments: args, agent, signal: AbortSignal.timeout(5000) })
+    assert.ok(!result.isError && !result.value?.error, JSON.stringify(result)); return result.value
+  }
+  const turn = async agent => {
+    agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'surface probe turn' }] }))
+    await agent.whenIdle()
+    return lastHeaderTools(agent)
+  }
+  const woken = async (agent, run) => {
+    let off, timer
+    const delivered = new Promise((resolve, reject) => {
+      timer = setTimeout(() => { off(); reject(new Error('pointer not delivered')) }, 5000)
+      off = ctx.on('session/event', (session, event) => { if (session.id === agent.id && event.type === 'user/message' && event.data.source.kind === 'plugin:dsh-collab') { clearTimeout(timer); off(); resolve(event) } })
+    })
+    try { await run(); return await delivered } finally { clearTimeout(timer); off?.() }
+  }
+  return { ctx, a, b, c, call, turn, woken }
+}
+
+test('surface-01：生命周期前后工具定义字节一致', { timeout: 20000 }, async () => {
+  const w = await surfaceWorld('surface-life')
+  try {
+    const snapshots = []
+    snapshots.push(JSON.stringify((await w.turn(w.b)).filter(t => t.name.startsWith('collab_'))))
+    await w.call(w.a, 'collab_space', { action: 'create', spaceId: 's1', cmdId: 'c1', name: 'a' })
+    const pointer = await w.woken(w.b, () => w.call(w.a, 'collab_invite', { spaceId: 's1', cmdId: 'i1', name: 'b', recipientSessionId: w.b.id }))
+    assert.ok(JSON.stringify(pointer.data).includes('collab_status'))
+    await w.b.whenIdle()
+    snapshots.push(JSON.stringify(lastHeaderTools(w.b).filter(t => t.name.startsWith('collab_'))))
+    await w.call(w.b, 'collab_member', { action: 'join', spaceId: 's1', cmdId: 'j1' })
+    snapshots.push(JSON.stringify((await w.turn(w.b)).filter(t => t.name.startsWith('collab_'))))
+    await w.call(w.c, 'collab_space', { action: 'create', spaceId: 's2', cmdId: 'c2', name: 'c' })
+    await w.woken(w.b, () => w.call(w.c, 'collab_invite', { spaceId: 's2', cmdId: 'i2', name: 'b', recipientSessionId: w.b.id }))
+    await w.b.whenIdle()
+    await w.call(w.b, 'collab_member', { action: 'decline', spaceId: 's2', cmdId: 'd2' })
+    snapshots.push(JSON.stringify((await w.turn(w.b)).filter(t => t.name.startsWith('collab_'))))
+    await w.call(w.b, 'collab_member', { action: 'leave', spaceId: 's1', cmdId: 'l1' })
+    snapshots.push(JSON.stringify((await w.turn(w.b)).filter(t => t.name.startsWith('collab_'))))
+    assert.equal(snapshots.length, 5)
+    assert.equal(new Set(snapshots).size, 1)
+    assert.ok(JSON.parse(snapshots[0]).length === 12)
+  } finally { await w.ctx.fiber.dispose() }
+})
+
+test('surface-02：schema 体积在预算内', { timeout: 15000 }, async () => {
+  const w = await surfaceWorld('surface-size')
+  try {
+    const length = assertBudget(await w.turn(w.a))
+    console.log(JSON.stringify({ case: 'surface-02', collabToolChars: length, budget: BUDGET }))
+  } finally { await w.ctx.fiber.dispose() }
+})
+
+test('surface-03：超预算夹具被测试拦住', { timeout: 15000 }, async () => {
+  const w = await surfaceWorld('surface-over')
+  try {
+    const tools = structuredClone(await w.turn(w.a))
+    const target = tools.find(t => t.name === 'collab_set_status')
+    target.description += 'x'.repeat(BUDGET)
+    const expected = collabToolBytes(tools)
+    assert.ok(expected > BUDGET)
+    assert.throws(() => assertBudget(tools), error => error.message.includes(String(expected)))
+  } finally { await w.ctx.fiber.dispose() }
+})
+
+test('tool-05：工具描述携带重试与重读规则', { timeout: 15000 }, async () => {
+  const w = await surfaceWorld('surface-desc')
+  try {
+    const tools = await w.turn(w.a)
+    assert.ok(tools.find(t => t.name === 'collab_status').description.includes('原 cmdId'))
+    assert.ok(tools.find(t => t.name === 'collab_read').description.includes('从 0 重读'))
+  } finally { await w.ctx.fiber.dispose() }
+})
+
+test('tool-06：工具面封闭', { timeout: 15000 }, async () => {
+  const w = await surfaceWorld('surface-closed')
+  try {
+    const tools = (await w.turn(w.a)).filter(t => t.name.startsWith('collab_'))
+    assert.deepEqual(tools.map(t => t.name).sort(), ['collab_status', 'collab_space', 'collab_invite', 'collab_member', 'collab_read', 'collab_create_item', 'collab_revise_item', 'collab_ack_item', 'collab_send_message', 'collab_set_status', 'collab_advance_request', 'collab_request_decision'].sort())
+    assert.ok(!tools.some(t => /confirm|reset|append|event|execute|dispatch|unlock|salvage/.test(t.name)))
+    const enumOf = (name, key) => [...tools.find(t => t.name === name).parameters.properties[key].enum].sort()
+    assert.deepEqual(enumOf('collab_space', 'action'), ['close', 'create'])
+    assert.deepEqual(enumOf('collab_member', 'action'), ['decline', 'join', 'leave', 'mark_gone', 'transfer_leader'])
+    assert.deepEqual(enumOf('collab_read', 'view'), ['convention', 'overview', 'since'])
+  } finally { await w.ctx.fiber.dispose() }
 })

@@ -103,7 +103,7 @@ customizations:
     version: 0.1.0
     enabled: false
     brief: 显式许可已有独立会话的共享台账与下一回合通知
-    note: '自研，spec dsh-collab。内联零运行时依赖collab-kernel当前源码；完整session ID许可名单默认空，不创建团队/子会话、不接人类确认。显式profile独占dataDir须在workspace/部署目录外且0700；只接受入队，不保证模型完成或崩溃前flush，不自动重发/破锁。升级复核官方cold preset和真实关闭预算。移除关闭工具与存储但保留台账；启用/日常部署须另行授权。'
+    note: '自研，spec dsh-collab（+change dsh-collab-invite-admission）。内联零运行时依赖collab-kernel当前源码；默认admission:invite邀请即授权（完整session ID，不限邀请与累计唤醒，靠熔断/拒绝/denySessionIds），allowlist兼容首版；改deny/准入须build+restart。12个常驻工具、collab_status为入口。dataDir须由单一Host进程独占（不跨pid命名空间）、在workspace/部署目录外且0700；启动按死亡证明自动清残锁，损坏日志停机dsh-collab-salvage或换新spaceId（抢救后seq复用）。只接受入队，不自动重发。升级复核官方cold preset和真实关闭预算。移除关闭工具与存储但保留台账；启用/日常部署须另行授权。'
     buildInputs:
       - packages/collab-kernel/src
       - packages/collab-kernel/package.json

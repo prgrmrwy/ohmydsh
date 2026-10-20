@@ -94,18 +94,18 @@ try {
         const retry = new FileStore(config.dataDir)
         await assert.rejects(retry.open('probe'), error => error.code === 'COLLAB_STORE_LOCKED')
         assert.throws(() => process.kill(lock.pid, 0), error => error.code === 'ESRCH')
-        if (consumerMode) {
-          const { recoverLock } = await import(pathToFileURL(config.consumer).href)
-          await recoverLock({ dataDir: config.dataDir, spaceId: 'probe', expectedInstanceId: lock.instanceId, stoppedHostsConfirmed: true })
-        } else await retry.breakLock('probe', lock.instanceId)
-        await retry.open('probe')
-        try {
-          assert.equal((await retry.read('probe', 1)).length, 1)
-          assert.deepEqual(await readFile(logPath), logBytes)
-        } finally { await retry.close('probe') }
+        if (!consumerMode) {
+          // Kernel-only probe: the Host-side death proof is exercised in consumer mode.
+          await retry.breakLock('probe', lock.instanceId)
+          await retry.open('probe')
+          try {
+            assert.equal((await retry.read('probe', 1)).length, 1)
+            assert.deepEqual(await readFile(logPath), logBytes)
+          } finally { await retry.close('probe') }
+        } else assert.equal(await readFile(lockPath, 'utf8'), lockBytes, 'no manual unlock before the next official start')
       }
       if (consumerMode) {
-        const replayConfig = { ...config, mode: 'normal', replay: true, ready: join(home, 'replay-ready'), disposing: join(home, 'replay-disposing'), closed: join(home, 'replay-closed'), replayed: join(home, 'replayed') }
+        const replayConfig = { ...config, mode: 'normal', replay: true, ready: join(home, 'replay-ready'), disposing: join(home, 'replay-disposing'), closed: join(home, 'replay-closed'), replayed: join(home, 'replayed'), hostLog: join(home, 'replay-host-log.json') }
         await writeFile(join(profile, 'cordis.patch.yml'), JSON.stringify([{ insert: [{ id: 'consumer-replay', name: plugin, config: replayConfig }] }]))
         const replayChild = spawn(process.execPath, [bin, '--profile', 'probe'], { cwd: home, env: { PATH: process.env.PATH, HOME: home, DSH_HOME: home, DSH_TELEMETRY_DISABLED: '1', DSH_COLLAB_DEPENDENCY_ROOT: dependencyRoot }, stdio: ['ignore', 'pipe', 'pipe'] })
         let replayOutput = ''
@@ -114,6 +114,12 @@ try {
         try {
           await marker(replayConfig.ready, replayExit).catch(error => { throw new Error(`${error.message}\n${replayOutput}`) })
           const observed = JSON.parse(await readFile(replayConfig.replayed, 'utf8'))
+          if (mode !== 'normal') {
+            // lock-01: the next official start cleared the dead holder's lock itself and logged it.
+            const cleared = JSON.parse(await readFile(replayConfig.hostLog, 'utf8'))
+            assert.ok(cleared.some(line => line === `lock cleared: space=probe instanceId=${lock.instanceId} pid=${lock.pid}`), JSON.stringify(cleared))
+            console.log(JSON.stringify({ case: `lock-01：上次异常退出留下的锁在重启后自动清理(${mode})`, cleared: true, replayed: true }))
+          }
           const record = JSON.parse(logBytes.toString().trim())
           assert.deepEqual(observed.receipt, record.receipt.result)
           assert.equal(observed.address, 'official-consumer')
@@ -127,12 +133,14 @@ try {
           assert.deepEqual(await readFile(logPath), logBytes)
         } finally { if (replayChild.exitCode === null && replayChild.signalCode === null) replayChild.kill('SIGKILL'); await replayExit }
       }
-      console.log(JSON.stringify({ case: `acceptance-01-${mode}`, ...runtime, elapsedMs, ...result, lockRemaining: mode !== 'normal', kernelProbeOnly: !consumerMode }))
+      console.log(JSON.stringify({ case: `accept-01：真实隔离Host验证完整接缝(${mode})`, ...runtime, elapsedMs, ...result, lockRemaining: mode !== 'normal', kernelProbeOnly: !consumerMode }))
     } finally {
       if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
       await exit
     }
   }
+  console.log(JSON.stringify({ case: 'accept-02：未执行真实Host实验不能宣称完成', releasedBin: pkg.version, note: 'missing released entry or budget throws instead of skipping' }))
+  console.log(JSON.stringify({ case: 'accept-03：移除保留持久日志', normalStopKeepsLedger: true }))
 } finally {
   const checked = await realpath(root)
   assert.equal(dirname(checked), parent)

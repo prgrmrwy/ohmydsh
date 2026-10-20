@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, cp, readFile, writeFile, access, realpath, rm, symlink } from 'node:fs/promises'
+import { mkdtemp, mkdir, cp, readFile, writeFile, access, realpath, rm, symlink, readdir } from 'node:fs/promises'
 import { join, dirname, basename } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -49,7 +49,7 @@ test('bundle-source: build consumes current kernel source despite deliberately s
     assert.equal(pack.status, 0, pack.stderr + pack.stdout)
     const [payload] = JSON.parse(pack.stdout)
     const names = payload.files.map(file => file.path)
-    for (const required of ['lib/index.js', 'lib/index.d.ts', 'lib/v1.md', 'lib/unlock.mjs', 'cordis.patch.yml', 'LICENSE']) assert.ok(names.includes(required), required)
+    for (const required of ['lib/index.js', 'lib/index.d.ts', 'lib/v1.md', 'lib/salvage.mjs', 'cordis.patch.yml', 'LICENSE']) assert.ok(names.includes(required), required)
     assert.ok(!names.some(name => name.startsWith('src/') || name.startsWith('test/')))
     const unpack = spawnSync('tar', ['-xzf', join(packed, payload.filename), '-C', packed], { encoding: 'utf8' })
     assert.equal(unpack.status, 0, unpack.stderr)
@@ -60,27 +60,36 @@ test('bundle-source: build consumes current kernel source despite deliberately s
     const packedLoad = spawnSync(process.execPath, ['--permission', `--allow-fs-read=${unpacked}`, `--allow-fs-read=${join(root, 'node_modules')}`, `--allow-fs-read=${await realpath(join(workspace, 'node_modules'))}`, '--input-type=module', '-e', `const m=await import(${JSON.stringify(pathToFileURL(join(unpacked, 'lib/index.js')).href)}); console.log(JSON.stringify(m.readBundledConvention()))`], { cwd: unpacked, encoding: 'utf8' })
     assert.equal(packedLoad.status, 0, packedLoad.stderr)
     assert.deepEqual(JSON.parse(packedLoad.stdout), actual)
-    const cli = (args = []) => spawnSync(process.execPath, [join(unpacked, 'lib/unlock.mjs'), ...args], { cwd: unpacked, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: root } })
+    assert.ok(!names.includes('lib/unlock.mjs'), 'unlock command removed')
+    assert.equal(manifest.bin?.['dsh-collab-unlock'], undefined)
+    assert.equal(manifest.bin?.['dsh-collab-salvage'], './lib/salvage.mjs')
+    const cli = (args = []) => spawnSync(process.execPath, [join(unpacked, 'lib/salvage.mjs'), ...args], { cwd: unpacked, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: root } })
     const help = cli(['--help'])
     assert.equal(help.status, 0, help.stderr)
-    assert.ok(help.stdout.includes('--all-hosts-stopped'))
+    assert.ok(help.stdout.includes('--space-id'))
     const state = join(root, 'maintenance-state')
     await mkdir(state, { mode: 0o700 })
-    const args = ['--data-dir', state, '--space-id', 's', '--expected-instance-id', 'exact', '--all-hosts-stopped']
-    const bytes = JSON.stringify({ instanceId: 'exact', pid: process.pid })
-    await writeFile(join(state, 's.lock'), bytes)
-    await writeFile(join(state, 's.jsonl'), 'RETAIN_LEDGER_BYTES\n')
-    assert.notEqual(cli(args).status, 0, 'live holder must not be recovered')
-    assert.equal(await readFile(join(state, 's.lock'), 'utf8'), bytes)
-    const child = spawnSync(process.execPath, ['-e', 'process.exit(0)'], { encoding: 'utf8' })
-    assert.equal(child.status, 0, child.stderr)
-    assert.ok(child.pid > 0)
-    assert.throws(() => process.kill(child.pid, 0), { code: 'ESRCH' })
-    await writeFile(join(state, 's.lock'), JSON.stringify({ instanceId: 'exact', pid: child.pid }))
-    assert.notEqual(cli(args.slice(0, -1)).status, 0, 'offline confirmation required')
-    assert.equal(cli(args).status, 0)
+    const args = ['--data-dir', state, '--space-id', 's']
+    // Build a real 3-record ledger, corrupt line 2, and salvage it with the packed bin.
+    const { FileStore } = await import(pathToFileURL(join(workspace, 'packages/collab-kernel/lib/index.js')).href)
+    const store = new FileStore(state)
+    await store.open('s')
+    for (let seq = 1; seq <= 3; seq++) await store.commit('s', { kind: 'completion', seq, events: [{ type: 'dispatch/completed', actor: 'system:dispatch', deliveryId: `d${seq}`, outcome: 'succeeded' }] }, seq - 1)
+    await store.close('s')
+    const original = (await readFile(join(state, 's.jsonl'), 'utf8')).split('\n')
+    original[1] = 'corrupt'
+    await writeFile(join(state, 's.jsonl'), original.join('\n'))
+    const corrupted = await readFile(join(state, 's.jsonl'))
+    await writeFile(join(state, 's.lock'), JSON.stringify({ instanceId: 'holder', pid: process.pid }))
+    assert.notEqual(cli(args).status, 0, 'held space must be refused')
+    assert.deepEqual(await readFile(join(state, 's.jsonl')), corrupted)
+    await rm(join(state, 's.lock'))
+    assert.notEqual(cli(args.slice(0, 2)).status, 0, 'space id required')
+    const salvaged = cli(args)
+    assert.equal(salvaged.status, 0, salvaged.stderr)
+    assert.ok(salvaged.stdout.includes('保留 1') && salvaged.stdout.includes('第 2 行'), salvaged.stdout)
     await assert.rejects(readFile(join(state, 's.lock')), { code: 'ENOENT' })
-    assert.equal(await readFile(join(state, 's.jsonl'), 'utf8'), 'RETAIN_LEDGER_BYTES\n')
+    assert.equal((await readFile(join(state, 's.jsonl'), 'utf8')).trim().split('\n').length, 1)
     // A physically separate resource-less artifact must fail to load.
     const broken = join(root, 'broken')
     await mkdir(broken)

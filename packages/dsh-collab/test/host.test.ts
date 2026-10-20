@@ -2,6 +2,7 @@ import { it, expect } from 'vitest'
 import { CollabHost } from '../src/host.js'
 import { FileStore } from 'collab-kernel'
 import { mkdtemp, realpath, rm, readdir, writeFile, readFile, stat } from 'node:fs/promises'
+import { writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname, basename } from 'node:path'
 
@@ -327,4 +328,100 @@ it('host-replay: command retry and service identity survive physical close/reope
     expect(state.members.a.binding.address).toBe('a')
     expect(state.lastSeq).toBe(1)
   } finally { await host.close() }
+}))
+
+// ---- dsh-collab-invite-admission: startup cleanup of ownerless locks ----
+import { vi } from 'vitest'
+import { hostContext, ops, direct, tempRoot, type Host } from './support/world.js'
+const dead = () => { throw Object.assign(new Error('no such process'), { code: 'ESRCH' }) }
+const alive = () => true
+const eperm = () => { throw Object.assign(new Error('not permitted'), { code: 'EPERM' }) }
+async function seedSpace(host: Host, dataDir: string, spaceId: string) {
+  const seeded = await direct(host, {}, dataDir)
+  try { const r = await ops(host).create('session-a', spaceId, 'a'); expect(r.seq).toBe(1) } finally { await seeded.close() }
+}
+const lockFor = (pid: number, instanceId = 'previous-host') => JSON.stringify({ instanceId, pid })
+const lockWorld = (run: (host: Host, dataDir: string) => Promise<void>) => tempRoot('collab-lock-', async root => {
+  const host = hostContext(root); host.session('session-a', { live: true })
+  const breakLock = vi.spyOn(FileStore.prototype, 'breakLock')
+  try { await run(host, join(root, 'data')) } finally { breakLock.mockRestore(); await host.stop() }
+})
+const breaks = () => (FileStore.prototype.breakLock as any).mock.calls.length as number
+
+it('lock-02：无日志的孤儿锁在重启后清理并允许重新创建', () => lockWorld(async (host, dataDir) => {
+  await seedSpace(host, dataDir, 'seed')
+  await writeFile(join(dataDir, 'S.lock'), lockFor(424242))
+  const started = await direct(host, { probe: dead }, dataDir)
+  try {
+    await expect(readFile(join(dataDir, 'S.lock'))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(breaks()).toBe(1)
+    expect(host.logs.some(line => line.includes('S') && line.includes('previous-host') && line.includes('424242'))).toBe(true)
+    expect(started.collab.tracked.has('S')).toBe(false)
+    expect(await ops(host).create('session-a', 'S', 'a')).toEqual({ seq: 1, spaceId: 'S' })
+    expect((await ops(host).overview('session-a', 'S')).leader).toBe('a')
+  } finally { await started.close() }
+}))
+it('lock-03：孤儿锁的进程仍存活时保留', () => lockWorld(async (host, dataDir) => {
+  await seedSpace(host, dataDir, 'seed')
+  const bytes = lockFor(process.pid)
+  await writeFile(join(dataDir, 'S.lock'), bytes)
+  const started = await direct(host, { probe: alive }, dataDir)
+  try {
+    expect(await readFile(join(dataDir, 'S.lock'), 'utf8')).toBe(bytes)
+    expect(breaks()).toBe(0)
+    expect(host.logs.filter(line => line.includes('S') && line.includes('previous-host'))).toHaveLength(1)
+  } finally { await started.close() }
+}))
+it('lock-04：活进程或无法判断的锁被保留', () => lockWorld(async (host, dataDir) => {
+  for (const id of ['S1', 'S2', 'S3']) await seedSpace(host, dataDir, id)
+  const locks = { S1: lockFor(1111, 'reused'), S2: lockFor(2222, 'eperm'), S3: '{not json' }
+  for (const [id, bytes] of Object.entries(locks)) await writeFile(join(dataDir, `${id}.lock`), bytes)
+  const probe = (pid: number) => pid === 1111 ? alive() : pid === 2222 ? eperm() : dead()
+  const started = await direct(host, { probe }, dataDir)
+  try {
+    for (const [id, bytes] of Object.entries(locks)) {
+      expect(await readFile(join(dataDir, `${id}.lock`), 'utf8')).toBe(bytes)
+      expect(await ops(host).overview('session-a', id)).toEqual({ error: { code: 'COLLAB_SPACE_UNAVAILABLE' } })
+      expect(host.logs.filter(line => line.startsWith(`lock kept: space=${id} `))).toHaveLength(1)
+    }
+    expect(breaks()).toBe(0)
+  } finally { await started.close() }
+}))
+it('lock-05：两次读取之间锁被替换时保留', () => lockWorld(async (host, dataDir) => {
+  await seedSpace(host, dataDir, 'S')
+  const path = join(dataDir, 'S.lock'), replacement = lockFor(5555, 'replacement')
+  await writeFile(path, lockFor(424242))
+  const started = await direct(host, { probe: () => { writeFileSync(path, replacement); return dead() } }, dataDir)
+  try {
+    expect(breaks()).toBe(0)
+    expect(await readFile(path, 'utf8')).toBe(replacement)
+    expect(host.logs.filter(line => line.startsWith('lock kept: space=S '))).toHaveLength(1)
+  } finally { await started.close() }
+}))
+it('lock-06：一个被锁空间不吞掉其他空间', () => lockWorld(async (host, dataDir) => {
+  await seedSpace(host, dataDir, 's1'); await seedSpace(host, dataDir, 's2')
+  const before = await readFile(join(dataDir, 's1.jsonl'))
+  await writeFile(join(dataDir, 's1.lock'), lockFor(process.pid, 'live-holder'))
+  const started = await direct(host, { probe: alive }, dataDir)
+  try {
+    expect((await ops(host).overview('session-a', 's2')).members.a.status).toBe('active')
+    expect(await ops(host).overview('session-a', 's1')).toEqual({ error: { code: 'COLLAB_SPACE_UNAVAILABLE' } })
+    expect((await ops(host).create('session-a', 's1', 'a')).error?.code).toBeDefined()
+    expect(await readFile(join(dataDir, 's1.jsonl'))).toEqual(before)
+  } finally { await started.close() }
+}))
+it('lock-07：运行期不自动解锁', () => lockWorld(async (host, dataDir) => {
+  await seedSpace(host, dataDir, 'S')
+  const bytes = lockFor(7777, 'running-holder')
+  await writeFile(join(dataDir, 'S.lock'), bytes)
+  let holderAlive = true
+  const started = await direct(host, { probe: () => holderAlive ? alive() : dead() }, dataDir)
+  try {
+    holderAlive = false
+    for (let i = 0; i < 2; i++) expect(await ops(host).overview('session-a', 'S')).toEqual({ error: { code: 'COLLAB_SPACE_UNAVAILABLE' } })
+    expect(await readFile(join(dataDir, 'S.lock'), 'utf8')).toBe(bytes)
+    expect(breaks()).toBe(0)
+  } finally { await started.close() }
+  const restarted = await direct(host, { probe: () => dead() }, dataDir)
+  try { expect((await ops(host).overview('session-a', 'S')).members.a.status).toBe('active') } finally { await restarted.close() }
 }))

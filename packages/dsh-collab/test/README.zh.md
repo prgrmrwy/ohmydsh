@@ -40,7 +40,7 @@ npm --workspace packages/collab-kernel run build
 node packages/dsh-collab/test/released-host-seams.mjs
 ```
 
-测试直接运行原版官方bin及临时空bundle profile，不起webserver。native fixture只持有真实FileStore并注册Cordis disposer，不注册signal或终止timer。SIGTERM和5000ms全树关闭预算均来自官方profile-boot。budget用例在关停前将真实commit卡在fsync，外部15秒只负责测试失败清理，绝不算预算成功。正常关闭与预算到期都可能code0，所以额外检查close标记、锁、耗时与重开日志。SIGKILL残锁先验证默认LOCKED，ESRCH且精确实例ID后才维护解锁。所有子进程收集退出，临时home核验后清理。这是任务1.3的kernel/Host接缝，不是未来dsh-collab包装器的最终集成验收。
+测试直接运行原版官方bin及临时空bundle profile，不起webserver。native fixture只持有真实FileStore并注册Cordis disposer，不注册signal或终止timer。SIGTERM和5000ms全树关闭预算均来自官方profile-boot。budget用例在关停前将真实commit卡在fsync，外部15秒只负责测试失败清理，绝不算预算成功。正常关闭与预算到期都可能code0，所以额外检查close标记、锁、耗时与重开日志。预算耗尽与SIGKILL残锁先验证默认LOCKED；kernel-only模式下按ESRCH与精确实例ID解锁，`--consumer`模式不手工解锁，由下一次官方进程启动的生产插件按死亡证明自动清锁、写日志并重放。所有子进程收集退出，临时home核验后清理。这是任务1.3的kernel/Host接缝，不是未来dsh-collab包装器的最终集成验收。
 
 实际打包consumer用`npm --workspace packages/dsh-collab run test:host`。官方root持有native probe，probe装配同一真实Controller graph并等待生产插件dispose；consumer/preset哨兵用同一官方依赖图，比较canonical模块URL。它证明官方进程关闭包裹真实生产teardown，不使用外部模型。同一命令额外执行official-composition.mjs：真实服务和consumer作为同级profile行由官方loader装配，随后重启重试原收据；能力fixture仅提供本地脚本模型和合成会话。barrier位于物理append handle的sync调用，不是操作系统挂死实测。每次停止及部署consumer受信恢复后，再用官方进程重开同consumer，重试原cmdId、核收据/serviceId/成员绑定/日志字节不变。隔离sync使用仓库复制installer fixture但真实tsdown和部署副本import，不声称真实包管理器安装验收。
 
