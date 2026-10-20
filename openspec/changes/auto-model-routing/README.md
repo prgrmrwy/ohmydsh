@@ -4,4 +4,4 @@
 
 子会话通过 Host 工具 `route_subagent` 复用同一 Jev 判断，返回显式 provider/model/reasoning_effort；工具失败时 skill 要求主 Agent 暂停委派并询问用户。
 
-状态：2026-10-20 按用户要求修订（替换本地规则分类器，见 `spike-jev-openrouter.md`）。proposal/design/spec 已更新；第 5 轮批准（review.md）针对旧范围，**已失效，须完整重审**。tasks.md、test-plan.md、implementation-review.md、verification-progress.md、verify.md 记录的是首版（`13f1587b`，本地规则）的实施与验收，仅作历史参考；重审通过后重写 tasks/test-plan，不可据其实施。
+状态：2026-10-20 按用户要求修订（替换本地规则分类器，见 `spike-jev-openrouter.md`）。第 6 轮完整审查 APPROVE_WITH_CHANGES，Required Changes 已落实，待定点复核。首版（`13f1587b`，本地规则）的 tasks/test-plan/verify 等已移至 `history/`，仅作历史参考；复核通过后按新 spec 重写 test-plan 与 tasks。

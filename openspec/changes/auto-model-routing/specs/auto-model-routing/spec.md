@@ -66,7 +66,12 @@
 - **THEN** AUTO 按实际 Opus 输出 xhigh；MANUAL 透传旧 Opus/xhigh 并保留复原义务；后续 step 官方采用 Astra/low 时，MANUAL 输出 Astra/low，持久 header 精确匹配后 pending 被消费，锚点保持 Astra/low
 
 ### Requirement: 用户回合与分类输入
-系统 SHALL 只在 step 1 的 `agent/pre-step` 中判定用户回合并请求 Jev 判断：**合格消息**为该次领取消息中 `source.kind` 严格等于 `"user"` 的消息；其它来源（含首轮 Host 注入的 `agent-instructions`、`plugin`、`plugin:<id>`、`runtime-context`、`time-context`、`skill-catalog`）与缺失 `source` 的消息 MUST NOT 贡献输入。合格消息数为 0 的回合不是用户回合，沿用上一用户回合的级别且不请求 Jev；首个用户回合之前无级别时不改写。分类输入为合格消息按领取顺序、消息内按块顺序的 `text` 块文本，以 `"\n"` 连接后取 `.slice(0, 8000)`；非文本块不贡献。决定 SHALL 按 (agent, turn) 保存，同回合后续请求（含同 turn/step 的错误重试）复用该决定。`origin = "subagent"` 会话 MUST NOT 被分类或改写。
+系统 SHALL 只在 step 1 的 `agent/pre-step` 中、先执行 `await next()` 得到 `PreStepDecision` 后判定用户回合并请求 Jev 判断：结果为 `reject` 时 MUST NOT 请求 Jev、MUST NOT 记录本回合决定；结果为 `enter` 时只使用其 `messages`。**合格消息**为该次领取消息中 `source.kind` 严格等于 `"user"` 的消息；其它来源（含首轮 Host 注入的 `agent-instructions`、`plugin`、`plugin:<id>`、`runtime-context`、`time-context`、`skill-catalog`）与缺失 `source` 的消息 MUST NOT 贡献输入。合格消息数为 0 的回合不是用户回合，沿用上一用户回合的级别且不请求 Jev；首个用户回合之前无级别时不改写。分类输入为合格消息按领取顺序、消息内按块顺序的 `text` 块文本，以 `"\n"` 连接后取 `.slice(0, 8000)`；非文本块不贡献。决定 SHALL 按 (agent, turn) 保存，同回合后续请求（含同 turn/step 的错误重试）复用该决定。`origin = "subagent"` 会话 MUST NOT 被分类或改写。
+
+#### Scenario: 步骤被拒时不请求 Jev
+- **GIVEN** 会话为 `AUTO`，下游 pre-step listener 对 step 1 返回 `{kind: reject}`
+- **WHEN** 该步骤被提交
+- **THEN** Jev 请求次数为 0，本回合无决定；之后同回合重新提交并 `enter` 时请求 Jev 1 次
 
 #### Scenario: 首轮真实领取序列只取用户消息
 - **GIVEN** step 1 领取消息依次为 `agent-instructions`（文本 A）、`plugin:dsh-memex`（文本 B）、`runtime-context`（文本 C）、`skill-catalog`（文本 D）、`user`（文本“修复登录 bug”）
@@ -94,7 +99,7 @@
 - **THEN** 输出与官方合成配置深度相等，Jev 请求次数为 0
 
 ### Requirement: Jev 判断档位
-系统 SHALL 在 AUTO、无复原义务的用户回合 step 1 中，以一次 Jev `choice` 请求得出本回合档位 `simple | standard | complex | escalated`：经 `POST https://openrouter.ai/api/alpha/decisions`，模型 `typesafe/jev-1.13`，凭据取自进程环境 `OPENROUTER_API_KEY`；请求 `state` 包含上一用户回合档位（无则 `none`）与本回合分类输入；单次请求期限 3000ms，MUST NOT 重试。成功时 SHALL 采用响应 `answers.tier.choice` 作为档位，`reason` 为 `jev`，不设置信度门槛。系统 MUST NOT 包含本地规则、关键词或通用对话模型的分类路径。请求 MUST NOT 携带锚点、会话状态、其它会话内容或凭据以外的鉴权信息；出站主机 SHALL 仅为 `openrouter.ai`。
+系统 SHALL 在 AUTO、无复原义务的用户回合 step 1 中，以一次 Jev `choice` 请求得出本回合档位 `simple | standard | complex | escalated`：经 `POST https://openrouter.ai/api/alpha/decisions`，模型 `typesafe/jev-1.13`，凭据每次调用时经官方 launch environment 读取 `OPENROUTER_API_KEY`；`questions` 为主会话与 `route_subagent` 共用的常量 `TIER_QUESTIONS`（四级 criteria 见 design D4）；请求 `state` 包含上一用户回合档位（无则 `none`）与本回合分类输入；单次请求期限 3000ms，`redirect: 'error'`，MUST NOT 重试。Jev 返回后 SHALL 重新读取会话状态，等待期间模式已变时丢弃该结果（不写决定、不写 `disabled`）。成功时 SHALL 采用响应 `answers.tier.choice` 作为档位，`reason` 为 `jev`，不设置信度门槛。系统 MUST NOT 包含本地规则、关键词或通用对话模型的分类路径。请求 MUST NOT 携带锚点、会话状态、其它会话内容或凭据以外的鉴权信息；出站主机 SHALL 仅为 `openrouter.ai`。
 
 #### Scenario: 成功判断采用 Jev 档位
 - **GIVEN** 会话为 `AUTO`，Jev 对本回合返回 `choice: complex`，实际模型为 `claude-opus-5-5`
@@ -106,23 +111,33 @@
 - **WHEN** 路由器向 Jev 发起请求
 - **THEN** 请求地址为 `https://openrouter.ai/api/alpha/decisions`，body 的 `model` 为 `typesafe/jev-1.13`，`state` 含 `standard` 与“继续”，不含锚点或其它会话字段；`Authorization` 为 Bearer 凭据；超时 3000ms 且失败后无第二次请求
 
+#### Scenario: 等待期间切换模式丢弃结果
+- **GIVEN** 会话为 `AUTO`，Jev 请求进行中
+- **WHEN** 用户在 Jev 返回前切为 `MANUAL`，随后 Jev 分别返回 `complex` 或 HTTP 402
+- **THEN** 两种情况本回合均不按 Jev 改写 effort；会话为 `MANUAL`，无 `disabled`
+
+#### Scenario: 不跟随重定向
+- **GIVEN** 假 Jev 服务返回 302 指向其它主机
+- **WHEN** AUTO 会话发起用户回合
+- **THEN** 不请求重定向目标，`disabled.category` 为 `rejected`
+
 #### Scenario: 源码不含本地分类与其它出站
 - **GIVEN** `packages/auto-model-routing/src/` 源码
 - **WHEN** 测试扫描源码文本
 - **THEN** 不存在 `classify` 导出或关键词词表；唯一出站 URL 主机为 `openrouter.ai`；不出现 `node:http`、`node:https`、`node:child_process`
 
 ### Requirement: Jev 失败即停用并提示
-Jev 调用失败时，系统 SHALL 不改写本请求 effort 之外的任何字段，并把该会话转为 `MANUAL`（与用户切 MANUAL 相同：产生复原义务、废止本回合 AUTO 决定），同时持久记录 `disabled = {category, at}`；MUST NOT 以任何本地规则或其它模型得出档位。失败类别为闭集：`missing-credential`（凭据缺失，不发请求）、`insufficient-credits`（402）、`unauthorized`（401/403）、`rate-limited`（429）、`region-blocked`（451）、`rejected`（其它 4xx）、`unavailable`（5xx 或网络错误）、`timeout`（期限到达）、`invalid-response`（非 JSON、缺 choice 或 choice 不在四级内）。调用方取消（用户取消回合）MUST NOT 视为失败：不停用、不写 `disabled`、本回合不改写。停用 SHALL 保持到用户把模式设为 `AUTO`，此时清除 `disabled`；系统 MUST NOT 轮询、主动查询余额或自动恢复 AUTO。`disabled`、错误结果与日志 MUST NOT 包含凭据或响应体。
+Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MANUAL 相同：产生复原义务、废止本回合 AUTO 决定，本回合按 MANUAL 过渡处理、可能复原锚点 effort），MUST NOT 改写 provider/model，同时持久记录 `disabled = {category, at}`，并向历史追加 `{reason: jev-failed, category}`（不含 effort）；MUST NOT 以任何本地规则或其它模型得出档位。失败类别为闭集：`missing-credential`（凭据缺失，不发请求）、`insufficient-credits`（402）、`unauthorized`（401/403）、`rate-limited`（429）、`region-blocked`（451）、`rejected`（其它 4xx）、`unavailable`（5xx 或网络错误）、`timeout`（期限到达）、`invalid-response`（非 JSON、缺 choice 或 choice 不在四级内）。HTTP 200 但 body 含数字 `error.code` 时 SHALL 按该 code 套用上述映射。调用方取消（用户取消回合）MUST NOT 视为失败：不停用、不写 `disabled`、本回合不改写。停用 SHALL 保持到用户把模式设为 `AUTO`，此时清除 `disabled`；系统 MUST NOT 轮询、主动查询余额或自动恢复 AUTO。`disabled`、错误结果与日志 MUST NOT 包含凭据或响应体。
 
 #### Scenario: 各状态码映射为闭集类别
-- **GIVEN** 假 Jev 服务分别返回 402、401、403、429、451、404、500、网络断开、超过 3000ms 无响应、200 但 body 非 JSON、200 但 choice 为 `huge`，以及进程环境缺少凭据
+- **GIVEN** 假 Jev 服务分别返回 402、401、403、429、451、404、500、网络断开、超过 3000ms 无响应、200 但 body 非 JSON、200 但 choice 为 `huge`、200 但 body 为 `{error: {code: 402}}`，以及 launch environment 中缺少凭据
 - **WHEN** 每种情况下 AUTO 会话发起一个用户回合
-- **THEN** `disabled.category` 依次为 `insufficient-credits`、`unauthorized`、`unauthorized`、`rate-limited`、`region-blocked`、`rejected`、`unavailable`、`unavailable`、`timeout`、`invalid-response`、`invalid-response`、`missing-credential`；缺凭据时假服务未收到请求
+- **THEN** `disabled.category` 依次为 `insufficient-credits`、`unauthorized`、`unauthorized`、`rate-limited`、`region-blocked`、`rejected`、`unavailable`、`unavailable`、`timeout`、`invalid-response`、`invalid-response`、`insufficient-credits`、`missing-credential`；缺凭据时假服务未收到请求
 
 #### Scenario: 停用后不再调用 Jev 且复原锚点
 - **GIVEN** 锚点为同模型 `medium`，上一回合 AUTO 已输出 `xhigh`，本回合 Jev 返回 402
 - **WHEN** 本回合首个请求及下一用户回合请求经过路由器
-- **THEN** 会话为 `MANUAL` 且 `disabled.category` 为 `insufficient-credits`；两次请求 effort 均为 `medium`（`reason: manual-restore`），下一用户回合 Jev 请求次数为 0
+- **THEN** 会话为 `MANUAL` 且 `disabled.category` 为 `insufficient-credits`；本回合首个请求 effort 为 `medium`、`reason` 为 `manual-restore`，本回合首个请求处理完毕时，历史末两条依次为 `{jev-failed, insufficient-credits}` 与 `manual-restore`；下一用户回合 effort 为 `medium`（官方合成透传），复原义务已清除，Jev 请求次数为 0，`disabled` 仍保留
 
 #### Scenario: 用户重新点 AUTO 清除停用
 - **GIVEN** 会话因 `timeout` 停用，复原已完成
@@ -163,7 +178,7 @@ Jev 调用失败时，系统 SHALL 不改写本请求 effort 之外的任何字�
 - **THEN** 输出 effort 为 `medium`，Jev 请求次数仍为 1
 
 ### Requirement: 子会话决策工具与 skill
-系统 SHALL 注册 Host 工具 `route_subagent`，参数 `{task: string, provider: "claude" | "codex"}`：以与主会话相同的 Jev 客户端与失败类别判断档位（`state` 不含上一档位），成功返回 `{tier, provider, model, reasoning_effort}`（取自 design D9 子会话表，代码常量为唯一来源）；失败返回错误结果，内容为该类别提示与“暂停委派并询问用户”。工具 MUST NOT 改写任何会话状态，不受主会话模式或 `disabled` 影响。系统 SHALL 提供 skill `subagent-model-routing`，其文本须要求：(1) 委派前调用 `route_subagent`；(2) 将返回的 `provider`、`model`、`reasoning_effort` 全部显式传给官方 `subagent`；(3) 在 `description` 末尾以 `[model·effort]` 标注；(4) 默认 provider 为当前会话 provider，用户或 lead 要求独立体系时改用另一个；(5) 工具失败时暂停委派并询问用户，MUST NOT 自行猜测档位、改由主会话完成或换用其它模型；(6) 复用已有子会话前比较其标注，更高或无法确认时新建。路由器 MUST NOT 改写子会话的创建参数或请求。
+系统 SHALL 注册 Host 工具 `route_subagent`，参数 `{task: string, provider: "claude" | "codex"}`，描述须说明会把任务文本发送给 OpenRouter/TypeSafe：以与主会话相同的 Jev 客户端、`TIER_QUESTIONS` 与失败类别判断档位（`state` 上一档位为 `none`），成功返回 `{tier, provider, model, reasoning_effort}`（取自 design D9 子会话表，代码常量为唯一来源）；失败返回错误结果，内容为该类别提示与“暂停委派并询问用户”；`exec.signal` 取消时返回“已取消”错误结果，不含余额/凭据提示。工具 MUST NOT 改写任何会话状态，不受主会话模式或 `disabled` 影响。系统 SHALL 提供 skill `subagent-model-routing`，其文本须要求：(1) 委派前调用 `route_subagent`；(2) 将返回的 `provider`、`model`、`reasoning_effort` 全部显式传给官方 `subagent`；(3) 在 `description` 末尾以 `[model·effort]` 标注；(4) 默认 provider 为当前会话 provider，用户或 lead 要求独立体系时改用另一个；当前 provider 不是 `claude`/`codex` 时暂停委派并询问用户；(5) 工具失败时暂停委派并询问用户，MUST NOT 自行猜测档位、改由主会话完成或换用其它模型；(6) 复用已有子会话前比较其标注，更高或无法确认时新建；(7) `route_subagent` 工具不存在时告知用户“子会话 Jev 选模未启用”，按官方默认委派且不传 provider/model/reasoning_effort，不得猜档位。路由器 MUST NOT 改写子会话的创建参数或请求。
 
 #### Scenario: 工具成功返回表中条目
 - **GIVEN** Jev 对任务返回 `complex`
@@ -175,18 +190,23 @@ Jev 调用失败时，系统 SHALL 不改写本请求 effort 之外的任何字�
 - **WHEN** 调用 `route_subagent`
 - **THEN** 结果为错误，内容含“余额不足”与“暂停委派并询问用户”；S1 仍为 `AUTO` 且无 `disabled`
 
+#### Scenario: 主子会话问题定义相同
+- **GIVEN** 主会话一个 AUTO 用户回合与一次 `route_subagent` 调用
+- **WHEN** 记录二者发往假 Jev 服务的 body
+- **THEN** 两个 body 的 `model` 与 `questions` 深度相等，仅 `state` 不同
+
 #### Scenario: 子会话表与家族一致
 - **GIVEN** 代码中的子会话表常量
 - **WHEN** 测试逐级断言并按 Claude 家族规则检查
 - **THEN** 每级 model/effort 等于 design D9；`claude` 条目全为 Claude 家族，`codex` 条目全非 Claude 家族
 
-#### Scenario: skill 文本包含六项规则
+#### Scenario: skill 文本包含七项规则
 - **GIVEN** `skills/subagent-model-routing/SKILL.md`
 - **WHEN** 测试读取其文本
-- **THEN** 文本包含 `route_subagent`、`reasoning_effort`、`[model·effort]`、独立体系规则、“暂停委派并询问用户”及复用“新建”规则，且不含档位表模型名
+- **THEN** 文本包含 `route_subagent`、`reasoning_effort`、`[model·effort]`、独立体系规则、非 claude/codex provider 时询问、“暂停委派并询问用户”、复用“新建”规则及“子会话 Jev 选模未启用”，且不含档位表模型名
 
 ### Requirement: 状态可见且不改写其它控件
-系统 SHALL 在 composer 的 `conversation.input.right` 列表以负的 `order` 注册 `AUTO / MANUAL` 芯片（GPT 速度芯片为 `order: 0`）。展开面板 SHALL 显示锚点（含 provenance）、本回合 effort 与 `reason`，以及最近 20 条决定（仅 Host 内存，重启后清空）。`reason` 取值为闭集 `jev | continued | no-effort-support | manual-restore | jev-failed`（`continued` 为非用户回合沿用上一级别）。会话存在 `disabled` 时，芯片 SHALL 以区别于正常状态的警示样式显示停用，并在芯片文本或 title 中给出该失败类别的人类可读提示；面板 SHALL 显示类别、提示、发生时间及“点击 AUTO 重试”。芯片 MUST NOT 调用官方模型选择接口或速度芯片的设置接口。
+系统 SHALL 在 composer 的 `conversation.input.right` 列表以负的 `order` 注册 `AUTO / MANUAL` 芯片（GPT 速度芯片为 `order: 0`）。展开面板 SHALL 显示锚点（含 provenance）、本回合 effort 与 `reason`，以及最近 20 条决定（仅 Host 内存，重启后清空）。`reason` 取值为闭集 `jev | continued | no-effort-support | manual-restore | jev-failed`（`continued` 为非用户回合沿用上一级别）。会话存在 `disabled` 时，芯片**可见文本** SHALL 为 `MANUAL · Jev 停用` 并带区别于正常状态的警示样式，title SHALL 给出该失败类别的人类可读提示；面板 SHALL 显示类别、提示、发生时间及“点击 AUTO 重试”。芯片 MUST NOT 调用官方模型选择接口或速度芯片的设置接口。
 
 #### Scenario: 芯片注册在速度芯片左侧
 - **GIVEN** client bundle 已加载
@@ -201,7 +221,7 @@ Jev 调用失败时，系统 SHALL 不改写本请求 effort 之外的任何字�
 #### Scenario: 停用状态在芯片与面板可见
 - **GIVEN** 会话 `disabled = {category: insufficient-credits}`，模式为 `MANUAL`
 - **WHEN** 渲染芯片与展开面板
-- **THEN** 芯片带停用警示样式且其文本或 title 含“余额不足”；面板含 `insufficient-credits`、“余额不足”与“点击 AUTO 重试”；无 `disabled` 时芯片不带警示样式
+- **THEN** 芯片渲染出的可见文本含“Jev 停用”且带警示样式，title 含“余额不足”；面板含 `insufficient-credits`、“余额不足”与“点击 AUTO 重试”；无 `disabled` 时芯片可见文本不含“Jev 停用”且不带警示样式
 
 #### Scenario: 切换模式只调用插件接口
 - **GIVEN** 用户点击芯片切换模式

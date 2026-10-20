@@ -6,6 +6,7 @@
 
 - Jev 是 decisions 模型：`POST https://openrouter.ai/api/v1/chat/completions` 返回 400 `is a decisions model and cannot be used with the chat/completions endpoint`。
 - 正确入口 `POST https://openrouter.ai/api/alpha/decisions`，body `{model, state, questions}`；question 为 `{type: "choice", instructions, criteria: {label: description}}`。这与 `@jkudish/jev-mcp@0.14.1` `dist/provider.js` 的 openrouter 分支一致。
+- 本次样本使用的问题（逐字）：`instructions` = `Classify how much reasoning effort this coding task needs.`；`criteria` = simple `Trivial lookup, explanation, or one-line edit.`、standard `Ordinary single-module feature or fix.`、complex `Multi-module debugging, design, or cross-cutting change.`、escalated `High-risk, security, data migration, or ambiguous architecture work.`；`state` = `User task: <样本文本>`。
 - 模型 id：`typesafe/jev-1.13`（端点 provider TypeSafe，输入 $0.042/M token，输出 0，近 30 分钟可用率 100%）。`typesafe/jev`、`typesafe/jev-latest` 为 404；浮动别名为 `~typesafe/jev-latest`；`typesafe/jev-router` 是另一种“替请求选模型”的产品，不是决策接口。
 - 响应：`{model, answers: {id: {type, choice, probabilities, confidence}}, usage: {input_tokens, output_tokens, cost}, id, provider}`；实际快照 `typesafe/jev-1.13-20260917`。
 - 上游 jev-mcp 对 408/409/429/5xx 自动重试最多 3 次、整体期限默认 60s。这与“失败即停用”不兼容，路由插件因此不经 MCP。

@@ -147,3 +147,173 @@ CHANGES_APPLIED: yes
 ## 2026-10-20 范围修订：本批准失效
 
 用户否决本地规则分类（不符合“AI + 快速决策”目标），要求以 Jev 或同类专用决策模型判断、失败即停用并提示、不接受本地降级、不主动查询余额、主子会话同构。proposal/design/spec 已据此修订（见 `spike-jev-openrouter.md`），上方 `VERDICT: APPROVE_WITH_CHANGES` 与 `CHANGES_APPLIED: yes` 只适用于第 5 轮 SHA 表所列输入，**对当前制品不再有效**。须对修订后的四制品进行新一轮完整独立审查，并新增审查焦点：外发任务文本的隐私面、凭据隔离、Jev 失败分类与停用状态机、pre-step await 的取消与延迟、`route_subagent` 工具与 skill 的失败处理。
+
+## Round 6（2026-10-20 范围修订后的完整审查）
+
+### 元数据
+
+- **审查者**：fresh-context 子代理；未参与修订稿编写。只读检查，唯一写入为本节追加。未构建、未跑测试、未联网、未提交。
+- **输入范围**：完整读取 proposal、design、README、delta spec（实际计数 **39 个 Scenario**）、spike-jev-openrouter.md 与 review.md 第 1–5 轮。tasks/test-plan/verify 等首版文件按约定不审。
+- **代码/运行时证据**（只读）：`packages/auto-model-routing/src/*.ts`；`packages/auto-model-routing/node_modules/@deepseek-ai/` 下的 `dsh-agent/lib/types/runtime-types.d.ts`、`dsh-tools/lib/types/index.d.ts`、`dsh-launch-environment/lib/types/index.d.ts`；`bin/dsh`；`.env.local`（主 checkout 与 worktree，只读变量名，不读值）；`dsh.yaml:158–169`；`skills/subagent-model-routing/SKILL.md`；`skills/jev-workflow-router/recorder.mjs:63–74`；`openspec/changes/configurable-jev-provider/proposal.md`；`docs/architecture/dsh-plugin-integration-pitfalls.md` §5、§12。
+
+### 输入 SHA-256（已用 `shasum -a 256` 重新计算，与委派给定值逐一相同）
+
+| 文件（相对本 change） | SHA-256 |
+|---|---|
+| proposal.md | `ded2eab634a4c1d5d3e938e8ff9d0d7f1e1e52e9f2dbd46dffda4a472349d11c` |
+| design.md | `0f090019a436388ef316cdc690cdeb09965bde4d2bd22c18a503929bdc06830d` |
+| README.md | `8c95876c5b35247544ec245b786e1d7989d62052828ac162ecaaa46625a9a979` |
+| specs/auto-model-routing/spec.md | `03e22a6b4e5a378242679318d3627cc5b2ba8a7b7bd3f00a6ab1652a8f30b84d` |
+| spike-jev-openrouter.md | `bc381a3494db91589040fb9e6372943ea8c07c84684417c3a3fec563d457b83c` |
+
+### 已核实成立的部分（不计为问题）
+
+- **没有残留本地规则或降级路径**：spec:97 要求系统 MUST NOT 有本地规则、关键词或通用模型分类路径，spec:109–112 用源码扫描（`classify` 导出、词表）作验收；spec:115 与 design D3:39 规定失败后只剩“复原或透传”两条路。现有 `classifier.ts:9–37` 的 `classify/resolveLevel` 已列入删除（design D4:58，proposal:29）。满足用户要求 2。
+- **停用复用 MANUAL 过渡**：现有 `state.ts:59–63` 的 `setMode` 会设 `restore: state.restore || mode === 'MANUAL'`；`router.ts:59–68` 先检查复原义务，再检查 AUTO。只要 pre-step 失败时调用同一个 `setMode(MANUAL)` 并另写 `disabled`，本回合的请求就会走既有复原路径。第 5 轮已核实的“持久请求头与官方合成都收敛才清义务”“复原完成后的下一用户回合才启用 AUTO”语义没有被破坏（spec:6–8）。状态机 AUTO → 失败 → MANUAL+复原+disabled → 用户点 AUTO 清 disabled → 复原完成后的下一用户回合才调 Jev，前后一致。
+- **pre-step 可以 await，且带取消信号**：`dsh-agent/lib/types/runtime-types.d.ts:291–310` 的 `'agent/pre-step'` 是 waterfall，返回 `Promise<PreStepDecision>`，payload 含 `signal: AbortSignal`（注释写明是“当前回合的取消信号”）；:84–90 说明 `running` 状态从“可取消的 pre-step 处理”开始。在 listener 里 await 外部请求是允许的。Jev 请求不依赖 agent 自身，不存在自锁。
+- **全局工具可以注册**：`dsh-tools/lib/types/index.d.ts:629–636` 写明 `register` 可“globally or in the calling agent scope”；:115–128 的 `execute(args, exec)` 要求遵守 `exec.signal`；:150–156 的 `timeoutMs` 由官方 timeout policy 执行。`route_subagent` 可行。实现时 `index.ts:15` 的 `inject` 需要加 `tools`。
+- **凭据确实会进入 Host 环境（仅限经 bin/dsh 启动）**：`~/.local/bin/dsh` 是指向主 checkout `bin/dsh` 的符号链接，`bin/dsh` 解析符号链接后得到 `REPO`，再执行 `set -a; source "$REPO/.env.local"`。主 checkout 的 `.env.local` 中存在 `OPENROUTER_API_KEY=` 这一行（值未读）。`start_server` 只用 `env -u` 去掉 `npm_*` 变量。`third-party-resources.mjs:348–355` 对凭据的筛减只作用于 jev-mcp 子进程的 `spawn env`，不影响 Host 进程本身。所以 design:18 对 bin/dsh 启动方式成立；适用边界见 m3。
+- **Modified Capabilities 写“无”正确**：`openspec/specs/jev-workflow-routing` 的行为在本 change 中不变；新增错误类别也不写入该 spec。跨 change 的一致性问题单列为 M6。
+- **范围克制**：没有恢复候选池、JSONL 日志、恢复按钮、全局开关或可配置映射表。`route_subagent` 只做“Jev 判档 + 查表”（design D1:31），与用户要求 6 一致。
+
+### 🔴 Critical
+
+无。
+
+### 🟡 Moderate
+
+**M1 — Jev 在 `next()` 之前调用：步骤被拒时仍会外发文本并计费，且分类用的不是最终进入步骤的消息。**
+- 证据：design D4:44 写“并 `await` 一次 Jev 请求后再 `next()`”。`runtime-types.d.ts:92–99` 的 `PreStepDecision` 可能是 `{kind:'reject'}`，也可能是 `{kind:'enter', messages}`（后者可替换消息），:295 写“Reject a proposed step or replace the messages that enter it”。按现行顺序，下游 listener 拒绝步骤时，用户文本照样发给第三方。现有 `router.ts:31` 遇到同 turn 重提时直接返回，一个被拒的提案还会占掉本回合的唯一判断。
+- Required Change：design D4 与 spec:69/97 改为先执行 `const decision = await next()`，只有 `decision.kind === 'enter'` 时才用 `decision.messages` 构造分类输入并调用 Jev；`reject` 时不调 Jev、不记录本回合决定。补一个场景：下游 listener 拒绝 step 1 时 Jev 请求次数为 0。
+
+**M2 — 场景“停用后不再调用 Jev 且复原锚点”与收敛规则矛盾。**
+- 证据：spec:122–125 断言本回合与下一用户回合的两次请求都输出 `medium` 且 `reason: manual-restore`。但按 spec:6 与现有 `router.ts:62–65`：第一次请求复原为 `medium`，请求头随之持久化为 `medium`；下一用户回合官方从请求头合成出 `medium`，此时请求头与合成配置都等于锚点，应清除义务并透传，不会再记录 `manual-restore`。
+- Required Change：把该场景的 THEN 改为“本回合首个请求 effort `medium`、reason `manual-restore`；下一用户回合 effort 为 `medium`（官方合成透传），复原义务已清除，Jev 请求次数为 0，会话仍为 MANUAL 且保留 `disabled`”。
+
+**M3 — `reason` 与历史条目的词汇不一致，`jev-failed` 只出现过一次且无定义。**
+- 证据：spec:189 给出 `reason` 闭集 `jev | continued | no-effort-support | manual-restore | jev-failed`，但整个 spec/design 没有规定何时产生 `jev-failed`；spec:115 甚至说失败后本回合走复原。design D7:91 的历史条目用的是另一个字段 `source: "jev" | "manual-restore"`，缺 `continued`、`no-effort-support`，失败条目“含类别”却没有枚举值。spec:196–199 的面板测试无法据此判定失败条目的形状。
+- Required Change：统一为一个字段（建议沿用 `reason`），并定义：Jev 失败时向历史追加一条 `{reason: 'jev-failed', category}`、不含 effort，随后的复原请求另记 `manual-restore`。design D7 删掉 `source` 改用同一闭集。spec 在“Jev 失败即停用”下加断言：失败后历史末两条依次为 `jev-failed`（含类别）和 `manual-restore`。如果决定不记失败条目，就从闭集删掉 `jev-failed`。
+
+**M4 — 只靠 title 提示达不到“人类明确感知停用”。**
+- 证据：spec:189、204 允许提示放在“芯片文本**或** title”。title 只在鼠标悬停时出现，无法满足用户要求 2；而 design D7:91 已写芯片显示短文本（如“Jev 停用”），spec 比 design 宽松。现有 `client/index.ts:40` 的芯片按钮只渲染 `view?.mode`。
+- Required Change：spec 改为芯片**可见文本** SHALL 含固定停用标记（如“Jev 停用”），title 承载完整类别提示。场景 spec:201–204 断言渲染出的可见文本含该标记，不能只靠 title 满足。
+
+**M5 — 未固定判档指令与 criteria 文本，“同构”与 spike 结果都无法复现。**
+- 证据：design D4:51 的 criteria 全写成 `"..."`。spike 的 10/10 结果（spike:15–28）依赖当时使用的 instructions/criteria，但 spike 没记录这些文本。spec:166 只要求子会话工具使用“相同的 Jev 客户端”，没要求相同的问题定义。
+- Required Change：在 design D4 写出四级 criteria 的确切文本（与 spike 一致；若不一致，需注明并重跑样本），并规定主会话与 `route_subagent` 共用同一个问题常量，只有 `state` 不同。spec 子会话需求补一个场景：两条路径发出的 `questions` 深度相等。
+
+**M6 — 与 `configurable-jev-provider` 的契约冲突，错误词汇也与 recorder 不一致。**
+- 证据：`configurable-jev-provider/proposal.md:11` 仍承诺“新增 Host 侧共享 Jev transport（pin `@jkudish/jev-agent-tools`）……复用 `jev-workflow-router` 错误枚举……供 `auto-model-routing` 使用”，:17 的能力描述还含“不可用降级”。本 change 的 design D5:61 却自建 `src/jev.ts`，proposal:34 又称 `insufficient-credits`、`region-blocked` 由该 change“修订后交付”，而对方 proposal 里并没有 `insufficient-credits`。两边的类别名也不同：`recorder.mjs:63–74` 用 `provider-5xx`、`network`、`malformed-response`，本 change 用 `unavailable`、`invalid-response`。
+- Required Change：在本 change 的 proposal Impact 中明确：本 change 自带 Jev 客户端与类别闭集，不依赖 `configurable-jev-provider` 的 transport。并在本 change 内记录对该 change 的约束：删除“供 auto-model-routing 使用”和“降级”字样，否则日后合并会引入降级路径。类别命名要么对齐 recorder（例如沿用 `malformed-response`，把 5xx/网络分为 `provider-5xx`/`network`），要么在 design D5 写明有意分开并列出映射关系。二选一，不要隐含。
+
+**M7 — skill 与插件是两个开关，组合不一致时委派会被永久卡住。**
+- 证据：`dsh.yaml:158–169` 中 `auto-model-routing`（package）与 `subagent-model-routing`（skill）是独立条目。修订后的 skill 要求“委派前调用 `route_subagent`，失败则暂停并询问用户”（design D6:84）。如果启用了 skill、但插件未加载，工具不存在，每次委派都会停下来问用户。反过来，只启用插件时，工具对所有会话可见（全局注册），模型可能在无 skill 约束的情况下调用它并外发文本。
+- Required Change：design D1/D6 规定二者的耦合方式，二选一：(a) manifest 或 sync 校验 skill 只能在插件启用时启用；(b) skill 写明“工具不存在即视为本能力停用：告知用户后按官方默认委派，不猜档位”。同时在 proposal 隐私段写明：启用插件即同意子会话判档外发，与主会话 AUTO/MANUAL 无关。
+
+### 🔵 Minor
+
+- **m1 — `cancelled` 的身份不清**：design D5:77 说客户端返回 `cancelled`，但 D5:61 的返回类型是 `{ok:false, category}`，而 :65–75 的闭集里没有 `cancelled`。Required Change：把返回类型写成三态 `{ok:true}|{ok:false,category}|{cancelled:true}`；判别方法为先检查 `callerSignal.aborted`，再看是否是超时（`AbortSignal.any` 不保留来源）。同时定义 `route_subagent` 在 `exec.signal` 被取消时的结果：取消不是 Jev 失败，提示文本不含“余额/凭据”。
+- **m2 — 出站主机约束不完整**：spec:97、112 只扫描源码中的 URL，但 `fetch` 默认会跟随重定向。Required Change：design D5 要求 `redirect: 'error'`，重定向归入 `rejected`；测试断言假服务返回 302 时不跟随。
+- **m3 — 凭据来源的适用边界**：design:18 只对经 `bin/dsh` 启动成立；worktree 的 `.env.local` 没有该变量，直接用官方 `dsh web` 启动时也不会注入。官方 `dsh-launch-environment/lib/types/index.d.ts:1–6` 建议 Harness 消费者通过 launch environment snapshot 读取，而不是直接读 `process.env`。Required Change：design 注明这一边界，并规定读取时机为“每次调用时读取”（这样换 key 后重启即可生效）；可选改为 `ctx.launchEnvironment.get('OPENROUTER_API_KEY')`，二者选定其一并写进 spec。
+- **m4 — 200 响应但内容为错误时会被错分**：OpenRouter 可能返回 HTTP 200，body 却是 `{error:{code}}`。按 D5 这会落入 `invalid-response`，提示用户“响应无效”，而真实原因可能是余额不足。Required Change：200 且 body 含数字 `error.code` 时，按该 code 套用同一张映射表。
+- **m5 — spec:115 首句有歧义**：“不改写本请求 effort 之外的任何字段”读起来像是允许失败时按档位改 effort。Required Change：改为“本回合按 MANUAL 过渡处理（可能复原锚点 effort），MUST NOT 改 provider/model”。
+- **m6 — 等待 Jev 期间的模式竞态未写入 spec**：pre-step 最长等待 3 秒，期间用户可能点击切换模式。现有 `router.ts:59、69` 的检查顺序能挡住旧结果，但 spec 没有约束。Required Change：spec:69/97 补一句“Jev 返回后重新读取会话状态；若在等待期间模式发生过变化，丢弃结果；失败时若会话已是 MANUAL 且由用户设置，不覆盖为 `disabled`”，并补一个场景。
+- **m7 — 隐私条款未记录**：`configurable-jev-provider/proposal.md:7` 要求先确认 OpenRouter 的数据保留条款再启用；spike:34 只写了“用户同意试用”。Required Change：在 dsh.yaml note 或 README 中记录已确认的保留/日志设置（或明确写“未确认”），并更新 `dsh.yaml:164` 中已失效的“不外发任务文本”。
+
+### 结论
+
+VERDICT: APPROVE_WITH_CHANGES
+
+方向正确：用 Jev 判档、失败即停用、不降级、不查余额，主子会话复用同一判断，并沿用已核实的复原机制。共 0 Critical、7 Moderate、7 Minor。M1（判断时机）、M2（自相矛盾的场景）、M3（原因词汇）、M4（可感知性）会直接影响实现与验收结果，必须先修。M5–M7 是同构性、跨 change 契约和开关耦合问题，需在重写 tasks/test-plan 之前定稿。以上修改都不需要新增组件。
+
+CHANGES_APPLIED: no
+
+### Staleness
+
+本结论只适用于上表的 SHA-256。修改范围超出 Required Changes 时，结论作废，需要另起一轮完整审查。只落实以上 Required Changes 时，可以做定点复核。
+
+### 作者回应（2026-10-20，仅落实 Required Changes）
+
+- M1 fixed：design D4 与 spec“用户回合与分类输入”改为先 `await next()`，仅 `enter` 时用 `decision.messages` 调 Jev；`reject` 不调 Jev、不记录决定；新增“步骤被拒时不请求 Jev”场景。
+- M2 fixed：停用场景改为本回合 `manual-restore`、下一用户回合官方合成透传且义务已清除、Jev 0 次、`disabled` 保留。
+- M3 fixed：统一为 `reason` 一个字段；design D7 删除 `source`；Jev 失败追加 `{reason: jev-failed, category}`（无 effort），随后的复原另记 `manual-restore`；停用场景断言历史末两条。
+- M4 fixed：芯片可见文本固定为 `MANUAL · Jev 停用` + 警示样式，title 承载类别提示；场景断言可见文本。
+- M5 fixed：design D4 写出四级 criteria 原文（与 spike 逐字一致），说明 instructions/state 相对 spike 的增量并要求实施时用最终文本重跑 10 条样本；`TIER_QUESTIONS` 常量主子共用；新增“主子会话问题定义相同”场景。
+- M6 fixed：proposal Impact 写明本 change 自带客户端、不依赖 `configurable-jev-provider`；该草案已删除“供 auto-model-routing 使用”、共享 transport 与“降级”字样；design D5 写明类别有意不对齐 recorder 并列出映射。
+- M7 fixed（选 b）：skill 规则 (7)“工具不存在→告知‘子会话 Jev 选模未启用’并按官方默认委派、不猜档位”；工具描述写明外发；proposal 写明启用插件即同意子会话判档外发。不新增 sync 跨条目校验。
+- m1 fixed：客户端三态 `{kind: ok|failed|cancelled}`，先查 `callerSignal.aborted`；`route_subagent` 取消返回“已取消”。
+- m2 fixed：`redirect: 'error'`，重定向归 `rejected`；新增 302 场景。
+- m3 fixed：选官方 `launchEnvironmentOf(ctx).get('OPENROUTER_API_KEY')`，每次调用读取；design 写明仅经 bin/dsh 启动时可用，否则 `missing-credential`。
+- m4 fixed：200 且 body 含数字 `error.code` 按 code 映射；状态码场景新增 `{error:{code:402}}`。
+- m5 fixed：失败首句改为“按 MANUAL 过渡处理、可能复原锚点 effort，MUST NOT 改 provider/model”。
+- m6 fixed：Jev 返回后重读状态，等待期间模式变化则丢弃结果且不写 `disabled`；新增场景。
+- m7 fixed：README/proposal/dsh.yaml note 写明外发对象与“保留条款未确认”（OpenRouter 端点元数据未公布），更新已失效的“不外发任务文本”。
+- 附带（来自 /ponytail-review）：skill 规则 (4) 补“当前 provider 非 claude/codex 时询问用户”；首版 tasks/test-plan/verify 等移入 `history/`，`openspec status` 如实为 4/7。未新增组件。
+
+## Round 6 定点复核（2026-10-20）
+
+- **复核者**：fresh-context 子代理；只读复核，唯一写入为本节追加。未构建、未跑测试、未联网、未提交。
+- **方法**：`git diff HEAD`（HEAD `2ef1d01`）逐行比对四制品、`dsh.yaml`；读取 `configurable-jev-provider/{proposal,README}.md`（未跟踪目录）、`skills/jev-workflow-router/recorder.mjs:63–74`；核对 `dsh-agent/lib/types/runtime-types.d.ts:92–99、291–310、327`，`dsh-launch-environment/lib/types/index.d.ts:1–40、67`。
+
+### 输入 SHA-256（`shasum -a 256` 重算，与委派给定值逐一相同）
+
+| 文件 | SHA-256 |
+|---|---|
+| proposal.md | `4fec9bf2231aa425c3219c23d4008c6a5ec8ffbfca81adefa1f09d77cc6c6aa8` |
+| design.md | `8cc0848246239620dc5e823754950c6a699eee7ab43bae705e6dbe9f6d43a0a4` |
+| README.md | `ab81ad0276ece63e1dbeb3b662746b85418a09687fc45dfbbd1526fb9e773102` |
+| specs/auto-model-routing/spec.md | `9a50ed2c3786d7a776da7cb71dfc7d0cc84ab3f2b156e9a66361b708bb04ebc4` |
+| spike-jev-openrouter.md（未改） | `bc381a3494db91589040fb9e6372943ea8c07c84684417c3a3fec563d457b83c` |
+| ../configurable-jev-provider/proposal.md | `c7a629ab59817aab8d7b4b870248961ff3acddcd43e98bcd92c698e2ffa86265` |
+| ../configurable-jev-provider/README.md | `cb1f69cb5522399aba64724eb2d3a82a7cdefae7e51dbb404704249daeb80767` |
+| /dsh.yaml | `d7c1850d1e574f40b89397e06db61930c7eda166a725b50bff6999be6fcdc4b1` |
+
+delta spec Scenario 计数 39 → **43**（新增 spec:71、114、119、193）。
+
+### 逐项结果
+
+| 项 | 结果 | 证据 |
+|---|---|---|
+| M1 | **verified** | design:47 先 `await next()`，仅 `enter` 用 `decision.messages` 调 Jev，`reject` 不调、不记录；spec:69 同义；新场景 spec:71–74（reject 时 0 次，之后 enter 时 1 次）；proposal:14 写明被拒步骤不外发。时序：`'agent/pre-step'` 是 waterfall，listener 返回的 `Promise<PreStepDecision>` 决定是否进入 step（runtime-types:295–310），`agent/request`（:327）属于已进入的 step，所以在 `next()` 之后 await Jev 仍发生在请求之前；`signal` 是回合取消信号，可传给 Jev。design:18 的新增事实与 :92–99 一致。 |
+| M2 | **verified** | spec:137–140：本回合 `medium`/`manual-restore`，下一用户回合官方合成透传，义务已清除，Jev 0 次，`disabled` 保留。与 spec:6 的收敛规则（请求头与合成都匹配锚点后清除并透传）一致。 |
+| M3 | **verified（附 n1）** | design:102 删除 `source`，改为 `{reason, tier?, effort?, category?}`，并逐一定义闭集取值；spec:130 失败时追加 `{reason: jev-failed, category}`，spec:140 断言历史末两条。闭集与 spec:209 一致。残留矛盾见 n1。 |
+| M4 | **verified** | spec:209 的可见文本 SHALL 为 `MANUAL · Jev 停用`，title 承载类别提示；场景 spec:221–224 断言可见文本含“Jev 停用”，无 `disabled` 时不含该文本。design:102 一致。 |
+| M5 | **verified（附 n4）** | design:54–58 写出四级 criteria 原文，design:61 说明 instructions/state 的增量与重跑 10 条样本的门禁，并定义共用常量 `TIER_QUESTIONS`；spec:102、181 引用该常量；新场景 spec:193–196 断言 `model` 与 `questions` 深度相等。“与 spike 逐字一致”无法从仓库核实，见 n4。 |
+| M6 | **verified（附 n3）** | proposal:36 与 design:90 写明自带客户端、不依赖对方 transport；design:88 写明有意不对齐 recorder 并给出映射，映射与 `recorder.mjs:63–74` 的实际枚举相符。`configurable-jev-provider/proposal.md:3、16` 已删除“供 auto-model-routing 使用”，改为“不提供不可用降级，也不为其它 change 提供 Host 侧 transport”；全文已无“降级”承诺。残留见 n3。 |
+| M7 | **verified** | 选 (b)：design:34、spec:181 规则 (7)、spec:203–206 测试断言“子会话 Jev 选模未启用”；工具描述须说明外发（spec:181、design:34）；proposal:32 写明“启用插件即同意子会话判档外发”，proposal:33 写明开关耦合；dsh.yaml:169 note 同步。 |
+| m1 | **verified** | design:70 定义三态返回，并要求先查 `callerSignal.aborted`；design:86 规定取消不算失败；design:93、spec:181 规定 `route_subagent` 取消时返回“已取消”，不含余额/凭据提示。 |
+| m2 | **verified** | design:70 设 `redirect: 'error'`，抛出时归为 `rejected`；spec:102 写入要求；新场景 spec:119–122（302 时不请求目标，类别为 `rejected`）。 |
+| m3 | **verified（附 n2）** | design:18、70 与 spec:102 选定 `launchEnvironmentOf(ctx).get(...)`，每次调用时读取；design:18 写明经 `bin/dsh` 启动以外的边界。层级描述不完全准确，见 n2。 |
+| m4 | **verified** | design:70、spec:130 规定 200 + 数字 `error.code` 时按 code 映射；spec:133–135 新增 `{error:{code:402}}` → `insufficient-credits`，场景序列与 13 项输入一一对应。 |
+| m5 | **verified** | spec:130 首句改为“本回合按 MANUAL 过渡处理、可能复原锚点 effort，MUST NOT 改写 provider/model”。 |
+| m6 | **verified** | design:43 与 spec:102 规定 Jev 返回后重读状态，等待期间模式变化则丢弃结果，不写决定或 `disabled`；新场景 spec:114–117 覆盖成功与 402 两种情况。与 D3 的“用户手动设 MANUAL 不写 `disabled`”一致。 |
+| m7 | **verified（措辞小差异）** | dsh.yaml:164 note 已删除失效的“不外发任务文本”，写明外发对象、“保留条款未确认”与凭据变量；proposal:32、design:132 同步。作者回应说 README 也写了，但 change README:3–7 实际没有提保留条款。Required Change 允许“note 或 README”二选一，所以仍算满足。 |
+
+### 范围检查
+
+- `git diff HEAD` 只改动四制品、`dsh.yaml` 两条 note/brief、`review.md`，外加五个首版文件的纯重命名（`R`，内容 0 行变化，移入 `history/`）。`packages/`、`skills/` 无改动；无新增组件、依赖或 manifest 规则。
+- **附带 1（skill 规则 (4)：非 claude/codex provider 时询问）**：可接受，属于最小补充。`route_subagent` 参数本来就限定为 `"claude" | "codex"`（spec:181），原规则 (4) 的“默认取当前会话 provider”在其它 provider 下没有定义；补这一句只是消除歧义，与 M7 同属“失败/不可用时询问用户”的同一策略，没有新增行为面。测试断言已同步（spec:206）。
+- **附带 2（首版 tasks/test-plan/verify 等移入 `history/`）**：可接受，属于整理而非范围扩张。Round 6 已声明这些文件不审、不可据以实施；移走后能避免被误当成当前任务清单。仓库内无引用这些旧路径的文件（已 grep）。README:7 已同步说明。
+- 结论：未超出 Required Changes 的范围，适用定点复核。
+
+### 新发现（均为 🔵 Minor，不阻塞；建议在重写 tasks/test-plan 时顺手修正）
+
+- **n1 — design:67 与 `reason` 闭集矛盾**：design:67 仍写“删除……`continued/escalated/explicit` 原因”，而 design:102 与 spec:209 都保留 `continued`（非用户回合沿用）。应改为删除 `unclassified/escalated/explicit`，保留 `continued`。
+- **n2 — 凭据来源的描述与 launch environment 语义不完全一致**：`dsh-launch-environment` 的 `get()` 按 `process → project-env（调用目录 .env）→ user-env（DSH home .env）` 依次解析（index.d.ts:1–14、33–36）。所以“仅经 bin/dsh 启动可用、否则 `missing-credential`”（design:18）不严谨：官方 `dsh web` 若在调用目录或 DSH home 的 `.env` 中有该变量，同样能读到。design:133“只从进程环境读取”与 spec:133“进程环境缺少凭据”也沿用了旧说法。建议统一为“只经 launch environment 读取；所有层均无时为 `missing-credential`”，测试的“缺凭据”应构造一个各层都没有该变量的快照。这不影响安全性，因为凭据仍然只来自本机。
+- **n3 — `configurable-jev-provider/README.md:3` 仍写“为 auto-model-routing 提供 Host 侧 Jev transport”**，与其 proposal:16 和本 change 的 proposal:36 矛盾。M6 要求删除的字样只在 proposal 中删了，README 中还有残留。建议同步删除。（该目录尚未纳入 git 跟踪。）
+- **n4 — “criteria 与 spike 逐字一致”无法复核**：`spike-jev-openrouter.md` 未记录 criteria 原文（全文只有 :8 的结构描述），所以 design:61 的说法在仓库内无法验证。design:61 已设门禁（用最终文本重跑 10 条，不一致即回到规划），风险可控。建议实施重跑时把最终 instructions/criteria 与结果补进 spike 或 test-plan，作为同构基线。
+- **n5（措辞）**：spec:203 场景标题仍为“skill 文本包含六项规则”，实际已是 7 条规则（加 provider 询问）。另外，spec:140 的“历史末两条”应注明在本回合结束时断言，或注明下一回合透传不追加历史条目，避免测试时断言的时刻产生歧义。
+
+未发现 Critical 或 Moderate 问题；新场景彼此不矛盾，也不违反 spec:6 的复原收敛规则。
+
+CHANGES_APPLIED: yes
+
+`VERDICT: APPROVE_WITH_CHANGES` 保持不变。本结论只适用于上表 SHA-256；n1–n5 可在重写 tasks/test-plan 时一并修正，修正后无需再完整重审（只要不超出 n1–n5 的范围）。这不是实现验收：实现、测试、GUI 与部署均未执行。
+
+### 作者回应（定点复核 n1–n5，均为措辞，不改行为）
+
+- n1：design D4 删除列表改为保留 `continued`（非用户回合沿用），与 spec 闭集一致。
+- n2：design/spec/proposal 改为“经官方 launch environment 读取”，写明其三层来源与本仓只用 `bin/dsh` 注入进程层的约定。
+- n3：configurable-jev-provider/README.md 删除“为 auto-model-routing 提供 Host 侧 transport”。
+- n4：spike 补记样本所用 instructions/criteria/state 原文，criteria 与 design D4 可逐字复核。
+- n5：场景标题改为“七项规则”；停用场景注明“本回合首个请求处理完毕时”断言历史末两条。
