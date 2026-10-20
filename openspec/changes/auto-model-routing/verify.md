@@ -15,7 +15,7 @@
 
 ### Evidence
 
-- Final full-suite command（package）：`npm --prefix packages/auto-model-routing test` → **11 files, 58 passed, 0 failed, 0 skipped**
+- Final full-suite command（package）：`npm --prefix packages/auto-model-routing test` → **11 files, 63 passed, 0 failed, 0 skipped**（续作修复后重新运行）
 - `npm --prefix packages/auto-model-routing run typecheck`（源码 + 全部测试严格类型）→ 通过
 - `npm --prefix packages/auto-model-routing run build` → Host tsc 与 client bundle 通过；client bundle 不含 `openrouter`/`JevClient`（仅提示文本常量）
 - Root：`npm test` → **427 tests, 425 pass, 0 fail, 2 skipped**（2 条为既有真实 MCP bridge 环境测试，与本 change 无关）
@@ -37,6 +37,18 @@
 - 规划提交：`2ef1d01`、`7d58df4`、`026595f`、`33dfe99`
 - 实现提交：`34d447d..3b5b1cf`（7 个提交，任务分支 `ws/personal-typesafe-ai-jev`）
 - 未合入、未归档、未部署；`dsh.yaml` 中插件与 skill 均 `enabled: false`；现有 GUI 与实时 DSH_HOME 未修改。
+
+### 续作复核（2026-10-20，用户明确不考虑 Magpie）
+
+- 修正原验收遗漏：旧客户端先完整读取正文，再检查字符串长度，**并未落实 64 KiB 流式字节限制**；此前 58 条通过不能证明此边界。重开任务 3.2/3.3，补三条新红测试后修复共享客户端；未修改 proposal/design/spec 或判档策略。
+- `response_limit_counts_utf8_bytes`：恰好 65536 字节成功，65537 字节（JS 字符串长度仍小于 65536）拒绝。
+- `oversized_stream_is_cancelled_before_eof`：80 KB 不结束的流立即按 `invalid-response` 拒绝并关闭，不等到 timeout。
+- `http_error_is_classified_without_waiting_for_body`：402 正文不结束仍按 `insufficient-credits` 返回，取消正文且只请求一次。
+- `response_stream_respects_abort` caller/deadline 两条首次即绿保障，核验读正文期间取消/超时类别不变、连接关闭；不是声称新红。
+- package 全套新跑 **63/63**，typecheck/build 通过；root 新跑 **425 pass / 0 fail / 2 skip**；artifact、隔离双 sync、严格 OpenSpec 校验、diff check 均通过。构建仍有既有 tsdown external 弃用与 CJS 格式建议警告，不阻塞构建。
+- fresh-context 只读子代理独立审查最终源码与测试，并运行 Jev 用例 **9/9**，结论无阻塞项。子代理未做外网或部署；完整 Host 集成由主代理全套运行覆盖。
+- 未重跑计费的真实 OpenRouter 冒烟：本次只改响应读取，问题文本、URL 与请求体未变；上述 10/10 仍是先前轮次证据，不冒充本次结果。
+- 补勾 8.5（此前报告写完成而 task 未勾）；当前 **26/27**，只有 8.4 待明确授权。未部署、未改启用开关、未合入、未归档。
 
 ## Overall Decision
 

@@ -48,6 +48,19 @@
 | specs/auto-model-routing/spec.md → Host 端点边界 | 只修改目标会话 | test/endpoints.test.ts | set_mode_targets_one_session | 🟢 green |
 | specs/auto-model-routing/spec.md → 自动选路不得绕过既有模型门禁 | 门禁拒绝不引起改路由 | test/router.test.ts | guard_failure_never_changes_model | 🟢 green |
 
+## 补充回归：既有 design D5 响应体限制（2026-10-20）
+
+不增加验收场景或变更分类策略，补足原 43 场景之外的传输边界覆盖。
+
+| 既有约束 | Test File | Test Name | 状态 |
+|---|---|---|---|
+| 64 KiB 按 UTF-8 字节计算，恰好上限有效、超出 1 字节拒绝 | test/jev.test.ts | response_limit_counts_utf8_bytes | 🟢 green |
+| 超限流未结束即拒绝并取消读取，只发一次请求 | test/jev.test.ts | oversized_stream_is_cancelled_before_eof | 🟢 green |
+| HTTP 402 不等待正文结束，保留余额不足类别并取消正文 | test/jev.test.ts | http_error_is_classified_without_waiting_for_body | 🟢 green |
+| 收到响应头后，读取正文期间的调用方取消与期限超时保持原三态语义 | test/jev.test.ts | response_stream_respects_abort (caller/deadline) | 🟢 green |
+
+红阶段：上述三条分别观测到误接收 oversized JSON、`timeout` 而非 `invalid-response`、`timeout` 而非 `insufficient-credits`。根因均为完整 `response.text()` 后才检查状态与字符串长度。绿阶段改为状态码先分类、成功响应按流累计字节至最多 65536、超限 cancel；既有取消/超时/失败分类仍通过。
+
 ## Coverage Notes
 
 - **假 Jev 服务**：`test/jev.test.ts` 与 host 集成测试使用本地 `node:http` 回环服务器（仅测试代码，源码扫描不覆盖 `test/`），按用例返回 402/401/403/429/451/404/500/302/超时/断连/非 JSON/非法 choice/200+error.code；客户端以可注入的 base URL 指向它（生产常量固定 `https://openrouter.ai`，注入点只在测试构造函数中）。

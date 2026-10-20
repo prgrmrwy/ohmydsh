@@ -63,9 +63,27 @@ export class JevClient {
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-Title': 'ohmydsh auto-model-routing' },
         body: JSON.stringify({ model: MODEL, state: `Previous user-turn tier: ${previous ?? 'none'}\nUser message:\n${text}`, questions: TIER_QUESTIONS }),
       })
-      const raw = await response.text()
-      if (!response.ok) return { kind: 'failed', category: byStatus(response.status) }
-      if (raw.length > MAX_BODY) return { kind: 'failed', category: 'invalid-response' }
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => {})
+        return { kind: 'failed', category: byStatus(response.status) }
+      }
+      if (!response.body) return { kind: 'failed', category: 'invalid-response' }
+      const reader = response.body.getReader()
+      const bytes = new Uint8Array(MAX_BODY)
+      let size = 0
+      try {
+        while (true) {
+          const chunk = await reader.read()
+          if (chunk.done) break
+          if (size + chunk.value.byteLength > MAX_BODY) {
+            await reader.cancel().catch(() => {})
+            return { kind: 'failed', category: 'invalid-response' }
+          }
+          bytes.set(chunk.value, size)
+          size += chunk.value.byteLength
+        }
+      } finally { reader.releaseLock() }
+      const raw = new TextDecoder().decode(bytes.subarray(0, size))
       let body: { error?: { code?: unknown }; answers?: { tier?: { choice?: unknown } } }
       try { body = JSON.parse(raw) } catch { return { kind: 'failed', category: 'invalid-response' } }
       if (typeof body?.error?.code === 'number') return { kind: 'failed', category: byStatus(body.error.code) }

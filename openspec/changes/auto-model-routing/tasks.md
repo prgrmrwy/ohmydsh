@@ -18,6 +18,8 @@
 - [x] 3.2 实现 `src/jev.ts`：`TIER_QUESTIONS` 常量（design D4 原文）、`fetch` + `redirect:'error'` + 3000ms + 无重试 + 64 KiB 上限、三态结果、闭集类别；凭据经注入的 launch environment 每次读取。使 3.1 与 1.1 出站部分通过。
 - [x] 3.3 重构；全套保持绿。
 
+续作复核（2026-10-20）：重开 3.2/3.3。旧实现完整 `response.text()` 后按字符串长度检查，未落实 design D5 的 64 KiB 字节上限。先补字节边界、超限流未结束即拒绝、HTTP 错误不等待响应体三组回归，再修共享客户端；不扩展判断策略。
+
 ## 4. 状态：停用记录
 
 - [x] 4.1 扩充失败测试：`state.test.ts` 增加 `disabled` 持久化与旧文件可读、schema 拒绝非法 category；`router.test.ts › no_effort_support_passthrough`、`auto_effort_only`、`turn_retries_reuse_decision`、`nonuser_turn_reuses_level`、`notification_turn_restores`、`rapid_mode_toggle_invalidates_auto`、`child_passthrough`、`guard_failure_never_changes_model`、`new_model_same_turn_remaps_effort`、`manual_passthrough` 改为新原因闭集（`jev`/`continued`）。确认按新断言失败。
@@ -49,4 +51,4 @@
 - [x] 8.2 运行 package `npm run typecheck`、`npm test`、`npm run build`；逐行核对 test-plan 43 行转绿；隔离 DSH_HOME 连续 sync 两次。
 - [x] 8.3 手动冒烟（会计费）：用最终 `TIER_QUESTIONS` 对 spike 10 条样本经真实 OpenRouter 重跑，记录档位/耗时/费用；与 spike 不一致则停下回到规划。
 - [ ] 8.4 用户授权启用后，在现有 GUI 验证芯片、模式、停用显示与一次真实子会话委派；未授权则如实保留待验收。
-- [ ] 8.5 执行 `openspec validate auto-model-routing --strict`，写 verify.md；未经授权不合入、归档或清理工作树。
+- [x] 8.5 执行 `openspec validate auto-model-routing --strict`，写 verify.md；未经授权不合入、归档或清理工作树。
