@@ -16,19 +16,8 @@ it('no_local_classifier_or_other_egress', () => {
  }
  expect(sources().map(([file])=>file)).not.toContain('classifier.ts')
 })
-it('skill_required_guidance',()=>{
- for(const text of ['reasoning_effort','[model·effort]','新建','独立','list_subagent_models','允许','不可用']) expect(skill()).toContain(text)
-})
-it('skill_tier_table',()=>{
- for(const row of [
-  '| simple | claude-haiku-5-5 / low | gpt-6-luna / medium |',
-  '| standard | claude-sonnet-5-5 / medium | gpt-6.1-sol / medium |',
-  '| complex | claude-opus-5-5 / xhigh | gpt-6.1-sol / xhigh |',
-  '| escalated | claude-fable-5-1 / high | gpt-6-astra / medium |',
- ]) expect(skill()).toContain(row)
-})
-it('skill_provider_family',()=>{
- const rows=skill().split('\n').filter(row=>/^\| (simple|standard|complex|escalated) \|/.test(row))
- expect(rows).toHaveLength(4)
- for(const row of rows){const cells=row.split('|').map(s=>s.trim()); expect(cells[2]).toMatch(/^claude-/);expect(cells[3]).not.toMatch(/^claude-/)}
+it('skill_contains_seven_rules',()=>{
+ const text=skill()
+ for(const rule of ['route_subagent','reasoning_effort','[model·effort]','独立','claude/codex','暂停委派并询问用户','新建','子会话 Jev 选模未启用']) expect(text,rule).toContain(rule)
+ expect(text).not.toMatch(/claude-haiku-5-5|claude-fable-5-1|gpt-6-luna|gpt-6-astra|claude-opus-5-5|gpt-6\.1-sol|claude-sonnet-5-5/)
 })

@@ -3,6 +3,7 @@ import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-api-session-controller'
 import type {} from '@deepseek-ai/dsh-llm'
+import type {} from '@deepseek-ai/dsh-tools'
 import { resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { FileStateStore, RoutingState, type Selection } from './state.js'
@@ -11,10 +12,11 @@ import type { Effort } from './effort.js'
 import { endpoint } from './endpoints.js'
 import { selectionProjection } from './selection-projection.js'
 import { JevClient } from './jev.js'
+import { routeSubagentTool } from './subagent-tool.js'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 
 export const name = 'dsh-auto-model-routing'
-export const inject = ['llm', 'agents', 'sessionProjections']
+export const inject = ['llm', 'agents', 'sessionProjections', 'tools']
 const knownEfforts = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
 
 /** Test seams only; production uses the defaults. */
@@ -26,6 +28,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   const state = new RoutingState(new FileStateStore(resolve(home, 'state/auto-model-routing/sessions')))
   const router = new Router(state)
   ctx.effect(() => ctx.sessionProjections.register(selectionProjection))
+  ctx.effect(() => ctx.tools.register(routeSubagentTool(jev)))
   // Agent is the WeakMap identity; origin stays on the immutable session header.
   const refs = new WeakMap<object, AgentRef>()
   const ref = (agent: { id: string; session: { header: { origin?: string } } }): AgentRef => {

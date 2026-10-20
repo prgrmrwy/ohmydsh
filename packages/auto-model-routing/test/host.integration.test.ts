@@ -158,3 +158,16 @@ it('no_secret_or_body_leak', async () => {
  for (const blob of [text, disk]) { expect(blob).not.toContain(SECRET); expect(blob).not.toContain('SECRET-BODY') }
  expect(text).toContain('unauthorized')
 })
+
+it('main_and_tool_share_questions', async () => {
+ const h = await harness(tier('standard'))
+ await h.setMode('AUTO')
+ await h.run('修复分页')
+ const def = h.ctx.tools.get('route_subagent')
+ expect(def).toBeTruthy()
+ await def!.execute({ task: '给子会话的任务', provider: 'claude' }, { signal: new AbortController().signal } as never)
+ const [main, child] = h.jev.bodies as { model: string; questions: unknown; state: string }[]
+ expect(child!.model).toBe(main!.model)
+ expect(child!.questions).toEqual(main!.questions)
+ expect(child!.state).not.toBe(main!.state)
+})

@@ -35,11 +35,11 @@
 | specs/auto-model-routing/spec.md → 级别与 effort 映射 | 不支持的 effort 被截断 | test/effort.test.ts | clamps_unsupported_effort | 🟢 green |
 | specs/auto-model-routing/spec.md → 级别与 effort 映射 | 无 effort 支持时不改写 | test/router.test.ts | no_effort_support_passthrough | 🟢 green |
 | specs/auto-model-routing/spec.md → 级别与 effort 映射 | 同回合换模型重新映射 | test/router.test.ts | new_model_same_turn_remaps_effort | 🟢 green |
-| specs/auto-model-routing/spec.md → 子会话决策工具与 skill | 工具成功返回表中条目 | test/subagent-tool.test.ts | tool_returns_table_entry | 🔴 red |
-| specs/auto-model-routing/spec.md → 子会话决策工具与 skill | 工具失败返回类别且不改状态 | test/subagent-tool.test.ts | tool_failure_reports_without_state_change | 🔴 red |
-| specs/auto-model-routing/spec.md → 子会话决策工具与 skill | 主子会话问题定义相同 | test/host.integration.test.ts | main_and_tool_share_questions | 🔴 red |
+| specs/auto-model-routing/spec.md → 子会话决策工具与 skill | 工具成功返回表中条目 | test/subagent-tool.test.ts | tool_returns_table_entry | 🟢 green |
+| specs/auto-model-routing/spec.md → 子会话决策工具与 skill | 工具失败返回类别且不改状态 | test/subagent-tool.test.ts | tool_failure_reports_without_state_change | 🟢 green |
+| specs/auto-model-routing/spec.md → 子会话决策工具与 skill | 主子会话问题定义相同 | test/host.integration.test.ts | main_and_tool_share_questions | 🟢 green |
 | specs/auto-model-routing/spec.md → 子会话决策工具与 skill | 子会话表与家族一致 | test/effort.test.ts | child_table_matches_design_and_family | 🟢 green |
-| specs/auto-model-routing/spec.md → 子会话决策工具与 skill | skill 文本包含七项规则 | test/content.test.ts | skill_contains_seven_rules | 🔴 red |
+| specs/auto-model-routing/spec.md → 子会话决策工具与 skill | skill 文本包含七项规则 | test/content.test.ts | skill_contains_seven_rules | 🟢 green |
 | specs/auto-model-routing/spec.md → 状态可见且不改写其它控件 | 芯片注册在速度芯片左侧 | test/client.test.ts | chip_negative_order | 🔴 red |
 | specs/auto-model-routing/spec.md → 状态可见且不改写其它控件 | 面板展示状态并限 20 条 | test/client.test.ts | panel_state_and_history_bound | 🔴 red |
 | specs/auto-model-routing/spec.md → 状态可见且不改写其它控件 | 停用状态在芯片与面板可见 | test/client.test.ts | disabled_visible_in_chip_and_panel | 🔴 red |

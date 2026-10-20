@@ -33,9 +33,9 @@
 
 ## 6. 子会话工具与 skill
 
-- [ ] 6.1 写失败测试 `subagent-tool.test.ts › tool_returns_table_entry`、`tool_failure_reports_without_state_change`（含取消返回“已取消”），`host.integration.test.ts › main_and_tool_share_questions`，`content.test.ts › skill_contains_seven_rules`。确认因工具未注册、skill 仍为档位表而失败。
-- [ ] 6.2 用 `defineTool` 注册 `route_subagent`（`timeoutMs` 5000，描述说明外发），复用 Jev 客户端与 `CHILD_TABLE`；改写 skill 为七项规则且不含模型名。使 6.1 通过。
-- [ ] 6.3 重构；全套保持绿。
+- [x] 6.1 写失败测试 `subagent-tool.test.ts › tool_returns_table_entry`、`tool_failure_reports_without_state_change`（含取消返回“已取消”），`host.integration.test.ts › main_and_tool_share_questions`，`content.test.ts › skill_contains_seven_rules`。确认因工具未注册、skill 仍为档位表而失败。
+- [x] 6.2 用 `defineTool` 注册 `route_subagent`（`timeoutMs` 5000，描述说明外发），复用 Jev 客户端与 `CHILD_TABLE`；改写 skill 为七项规则且不含模型名。使 6.1 通过。
+- [x] 6.3 重构；全套保持绿。
 
 ## 7. 端点与 client
 
