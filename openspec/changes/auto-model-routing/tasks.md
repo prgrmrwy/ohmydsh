@@ -14,9 +14,9 @@
 
 ## 3. Jev 客户端
 
-- [ ] 3.1 写失败测试 `jev.test.ts › request_body_and_limits`、`redirect_is_rejected`、`failure_categories`（本地回环假服务覆盖全部状态码、302、超时、断连、非 JSON、非法 choice、200+`error.code`、缺凭据不发请求；三态返回含 `cancelled`）。确认因 `src/jev.ts` 不存在而失败。
-- [ ] 3.2 实现 `src/jev.ts`：`TIER_QUESTIONS` 常量（design D4 原文）、`fetch` + `redirect:'error'` + 3000ms + 无重试 + 64 KiB 上限、三态结果、闭集类别；凭据经注入的 launch environment 每次读取。使 3.1 与 1.1 出站部分通过。
-- [ ] 3.3 重构；全套保持绿。
+- [x] 3.1 写失败测试 `jev.test.ts › request_body_and_limits`、`redirect_is_rejected`、`failure_categories`（本地回环假服务覆盖全部状态码、302、超时、断连、非 JSON、非法 choice、200+`error.code`、缺凭据不发请求；三态返回含 `cancelled`）。确认因 `src/jev.ts` 不存在而失败。
+- [x] 3.2 实现 `src/jev.ts`：`TIER_QUESTIONS` 常量（design D4 原文）、`fetch` + `redirect:'error'` + 3000ms + 无重试 + 64 KiB 上限、三态结果、闭集类别；凭据经注入的 launch environment 每次读取。使 3.1 与 1.1 出站部分通过。
+- [x] 3.3 重构；全套保持绿。
 
 ## 4. 状态：停用记录
 
