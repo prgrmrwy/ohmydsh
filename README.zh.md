@@ -186,8 +186,6 @@ tests/                   仓库级测试
 - [i-have-adhd](skills/i-have-adhd/SKILL.md) — 答案优先、短步骤的输出模式，仅在用户明确要求时使用。
 - [frontend-design](skills/frontend-design/SKILL.md) — 避免千篇一律、默认脸界面的前端设计指引。
 - [eli5](skills/eli5/SKILL.md) — 按指定受众的理解水平解释任何主题。
-- [ponytail](https://github.com/DietrichGebert/ponytail) — 用最小完整改动解决问题的编码与评审指引。
-- [ponytail-skills](patches/ponytail-skills.yml) — 把已固定版本的 Ponytail skill 暴露给 DSH。
 
 ### 自研 package
 

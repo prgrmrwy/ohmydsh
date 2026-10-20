@@ -186,8 +186,6 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [i-have-adhd](skills/i-have-adhd/SKILL.md) — Answer-first, short-step output mode, used only when explicitly requested.
 - [frontend-design](skills/frontend-design/SKILL.md) — Design guidance that avoids templated, default-looking interfaces.
 - [eli5](skills/eli5/SKILL.md) — Explains any topic at the level of a chosen audience.
-- [ponytail](https://github.com/DietrichGebert/ponytail) — Smallest-complete-change coding and review guidance.
-- [ponytail-skills](patches/ponytail-skills.yml) — Makes the pinned Ponytail skills available to DSH.
 
 ### Self-developed packages
 
