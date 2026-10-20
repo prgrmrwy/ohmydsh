@@ -45,8 +45,8 @@
 
 ## 8. 登记与验收
 
-- [ ] 8.1 更新 package README（中英）、`dsh.yaml` note：外发对象、保留条款未确认、凭据、停用语义、开关耦合；保持默认禁用。运行根 `npm test`、`npm run check:artifacts`。
-- [ ] 8.2 运行 package `npm run typecheck`、`npm test`、`npm run build`；逐行核对 test-plan 43 行转绿；隔离 DSH_HOME 连续 sync 两次。
+- [x] 8.1 更新 package README（中英）、`dsh.yaml` note：外发对象、保留条款未确认、凭据、停用语义、开关耦合；保持默认禁用。运行根 `npm test`、`npm run check:artifacts`。
+- [x] 8.2 运行 package `npm run typecheck`、`npm test`、`npm run build`；逐行核对 test-plan 43 行转绿；隔离 DSH_HOME 连续 sync 两次。
 - [ ] 8.3 手动冒烟（会计费）：用最终 `TIER_QUESTIONS` 对 spike 10 条样本经真实 OpenRouter 重跑，记录档位/耗时/费用；与 spike 不一致则停下回到规划。
 - [ ] 8.4 用户授权启用后，在现有 GUI 验证芯片、模式、停用显示与一次真实子会话委派；未授权则如实保留待验收。
 - [ ] 8.5 执行 `openspec validate auto-model-routing --strict`，写 verify.md；未经授权不合入、归档或清理工作树。
