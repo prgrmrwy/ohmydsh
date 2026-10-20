@@ -50,6 +50,37 @@
 - 未重跑计费的真实 OpenRouter 冒烟：本次只改响应读取，问题文本、URL 与请求体未变；上述 10/10 仍是先前轮次证据，不冒充本次结果。
 - 补勾 8.5（此前报告写完成而 task 未勾）；当前 **26/27**，只有 8.4 待明确授权。未部署、未改启用开关、未合入、未归档。
 
+### 修复版真实冒烟（2026-10-20 20:30，Asia/Shanghai）
+
+用户明确授权“补一轮冒烟”。从当前源码重新构建，经正式 `lib/jev.js` 调用 OpenRouter；不替换 fetch、不重试、不查询余额，凭据仅从既有本机环境注入，未打印。源码修复提交 `c193b68`。
+
+| 样本 | 预期 / 实际 | 耗时 |
+|---|---|---|
+| 变量 foo 改 userCount | simple / simple | 1.020s |
+| 解释 rebase 与 merge | simple / simple | 0.527s |
+| Cannot find module react | simple / simple | 0.578s |
+| 登录页复选框与单测 | standard / standard | 0.588s |
+| 最后一页分页空白 | standard / standard | 0.549s |
+| 函数支持超时参数 | standard / standard | 0.512s |
+| 跨模块排查与实现测试方案 | complex / complex | 0.528s |
+| 持久化读写拆分、向后兼容 | complex / complex | 0.552s |
+| MySQL → Postgres 不停机迁移 | escalated / escalated | 0.493s |
+| 认证权限绕过审查与修复 | escalated / escalated | 0.551s |
+
+- 判档 **10/10**；p50（中间两项平均）**0.550s**，最大 **1.020s**，均在正式 3 秒期限内。
+- 额外走正式 `routeSubagentTool.execute`，任务为同一跨模块排查样本：Claude 返回 `{complex, claude, claude-opus-5-5, xhigh}`（0.497s）；Codex 返回 `{complex, codex, gpt-6.1-sol, xhigh}`（0.695s）。均是工具选配置冒烟，**没有创建实际子会话**，不算 8.4 完成。
+- 共 **12 次真实调用**。客户端故意不暴露 usage/cost，本轮未实测账单；按前次单价/用量估算约 $0.0002–0.0003，不能当作实际扣款。未主动查余额。
+- 未启用插件/skill、未部署、未重启现有 GUI、未执行 GUI 验收；8.4 仍待授权。
+
+### GUI 验收执行口径（计划，尚未执行）
+
+1. **前置**：明确授权部署后，仅打开本 change 对应插件和 skill 两个 manifest 开关，用受控流程构建/物化并重载 Host，刷新现有 `http://127.0.0.1:3080`；不另起替代服务器。Host 启动须有既有 OPENROUTER_API_KEY。新建专用测试会话，选可用的 Opus 或 Sol，手选 medium；不在当前工作会话直接试。
+2. **界面与基线**：新会话默认 MANUAL；芯片在 GPT 速度芯片左侧。发一条简短问答以初始化请求；展开面板查看所选 provider/model 与 medium 锚点。允许状态轮询约 3 秒刷新。官方模型/速度控件不应被插件直接改动。
+3. **AUTO**：切 AUTO，分别发送简单问答与仅分析、不修改的跨模块任务。应出现 `reason: jev`，effort 随判档映射且 provider/model 不变；Opus/Sol 对 simple/complex 的映射目标为 low/xhigh，实际以目录支持范围裁剪。工具步骤/重试不应重复判档。面板展示是自报状态，严格验收还要对照持久请求 header 或诊断记录中的实际 provider/model/effort，不能只凭模型回答推断。
+4. **MANUAL 与会话隔离**：切 MANUAL 后再发请求，复原 medium；若仍显示正在复原，再发一条以观察官方配置与持久头收敛，完成后提示消失。另一新会话仍为 MANUAL，不能随测试会话切换。
+5. **取消与故障**：Jev 等待期间取消，仍 AUTO 且无停用原因。真实服务通常约 0.5 秒，手速可能无法稳定命中，不把取消主模型生成当作已验证 Jev 取消。失败验收须另行受控注入（仅替换该服务测试凭据/隔离启动环境并重载），不耗尽余额、不改全局其它 provider。预期 MANUAL·Jev停用、提示类别/时间、后续不再判断；恢复有效凭据后不会自动恢复，点 AUTO 才重试。真实 402 未触发仍单独列为证据限制。
+6. **真实子会话与收尾**：提示 Agent 加载配套 skill，按 route_subagent 返回参数创建一个只读子会话。核对工具调用顺序、官方创建调用的三个显式字段、description 标注、子会话实际配置；失败则停下询问，不猜档。完成后测试会话切 MANUAL 并等待复原；若撤销部署，再禁用两个开关并构建。不得直接卸载一个仍为 AUTO 的会话。
+
 ## Overall Decision
 
 DECISION: PASS_WITH_WARNINGS
