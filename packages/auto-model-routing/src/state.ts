@@ -2,15 +2,18 @@ import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { createHash } from 'node:crypto'
 import type { Effort } from './effort.js'
+import type { JevCategory } from './jev.js'
 import { z } from 'zod'
 const stateSchema = z.object({
   mode: z.enum(['AUTO', 'MANUAL']), restore: z.boolean(),
+  disabled: z.object({ category: z.enum(['missing-credential','insufficient-credits','unauthorized','rate-limited','region-blocked','rejected','unavailable','timeout','invalid-response']), at: z.number() }).strict().optional(),
   anchor: z.object({ provider: z.string().min(1), model: z.string().min(1), reasoningEffort: z.enum(['low','medium','high','xhigh','max']).optional(), provenance: z.enum(['initialized','user-selected']) }).strict().optional(),
 }).strict()
 export type Mode = 'AUTO' | 'MANUAL'
 export interface Selection { provider: string; model: string; reasoningEffort?: Effort }
 export interface Anchor extends Selection { provenance: 'initialized' | 'user-selected' }
-export interface SessionState { mode: Mode; anchor?: Anchor; restore: boolean }
+export interface Disabled { category: JevCategory; at: number }
+export interface SessionState { mode: Mode; anchor?: Anchor; restore: boolean; disabled?: Disabled }
 export interface StateStore { get(id: string): SessionState | undefined; set(id: string, value: SessionState): void }
 
 export class FileStateStore implements StateStore {
@@ -59,7 +62,15 @@ export class RoutingState {
   setMode(id: string, mode: Mode): SessionState {
     const state = this.read(id)
     if (state.mode === mode) return state
-    return this.save(id, { ...state, mode, restore: state.restore || mode === 'MANUAL' })
+    const { disabled, ...rest } = state
+    // AUTO is the user's explicit retry: it clears the last Jev failure.
+    return this.save(id, { ...(mode === 'AUTO' ? rest : state), mode, restore: state.restore || mode === 'MANUAL' })
+  }
+
+  /** Jev failed: same transition as switching to MANUAL, plus the visible reason. */
+  disable(id: string, category: JevCategory, at = Date.now()): SessionState {
+    const state = this.read(id)
+    return this.save(id, { ...state, mode: 'MANUAL', restore: state.restore || state.mode === 'AUTO', disabled: { category, at } })
   }
 
   completeRestore(id: string): void {

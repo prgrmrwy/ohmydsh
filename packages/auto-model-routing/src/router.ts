@@ -1,9 +1,10 @@
 import { mapEffort, type Effort, type Reason, type Tier } from './effort.js'
+import type { JevCategory } from './jev.js'
 import { userInput, type ClaimedMessage } from './input.js'
 import type { Mode, RoutingState, Selection } from './state.js'
 export interface AgentRef { id: string; origin?: string }
 export interface RequestConfig extends Selection { [key: string]: unknown }
-interface Decision { effort?: Effort; reason: Reason }
+interface Decision { effort?: Effort; reason: Reason; category?: JevCategory }
 interface Runtime {
   turn: number
   active: boolean
@@ -47,12 +48,32 @@ export class Router {
 
   /** Apply the judged tier. Discarded when the turn moved on or the mode changed while judging. */
   resolve(agent: AgentRef, turn: number, tier: Tier): void {
-    const runtime = this.runtimes.get(agent)
-    if (!runtime || runtime.turn !== turn || !runtime.pending) return
-    runtime.pending = false
-    if (!runtime.active) return
+    const runtime = this.settle(agent, turn)
+    if (!runtime) return
     runtime.tier = tier
     runtime.previous = tier
+  }
+
+  /** Jev failed: disable (MANUAL + restore) and record why. Discarded like `resolve`. */
+  fail(agent: AgentRef, turn: number, category: JevCategory): void {
+    const runtime = this.settle(agent, turn)
+    if (!runtime) return
+    runtime.active = false
+    this.state.disable(agent.id, category)
+    this.record(runtime, { reason: 'jev-failed', category })
+  }
+
+  /** Cancelled: this turn is not rewritten, nothing is disabled. */
+  cancel(agent: AgentRef, turn: number): void {
+    const runtime = this.settle(agent, turn)
+    if (runtime) runtime.active = false
+  }
+
+  private settle(agent: AgentRef, turn: number): Runtime | undefined {
+    const runtime = this.runtimes.get(agent)
+    if (!runtime || runtime.turn !== turn || !runtime.pending) return undefined
+    runtime.pending = false
+    return runtime.active ? runtime : undefined
   }
 
   setMode(agent: AgentRef, mode: Mode): void {

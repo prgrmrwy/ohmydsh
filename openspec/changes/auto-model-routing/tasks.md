@@ -20,9 +20,9 @@
 
 ## 4. 状态：停用记录
 
-- [ ] 4.1 扩充失败测试：`state.test.ts` 增加 `disabled` 持久化与旧文件可读、schema 拒绝非法 category；`router.test.ts › no_effort_support_passthrough`、`auto_effort_only`、`turn_retries_reuse_decision`、`nonuser_turn_reuses_level`、`notification_turn_restores`、`rapid_mode_toggle_invalidates_auto`、`child_passthrough`、`guard_failure_never_changes_model`、`new_model_same_turn_remaps_effort`、`manual_passthrough` 改为新原因闭集（`jev`/`continued`）。确认按新断言失败。
-- [ ] 4.2 实现 `SessionState.disabled`、`RoutingState.disable/setMode(AUTO 清除)`，router 以 Jev 结果（成功档位或失败类别）为输入；使 4.1 通过。
-- [ ] 4.3 重构；全套保持绿。
+- [x] 4.1 扩充失败测试：`state.test.ts` 增加 `disabled` 持久化与旧文件可读、schema 拒绝非法 category；`router.test.ts › no_effort_support_passthrough`、`auto_effort_only`、`turn_retries_reuse_decision`、`nonuser_turn_reuses_level`、`notification_turn_restores`、`rapid_mode_toggle_invalidates_auto`、`child_passthrough`、`guard_failure_never_changes_model`、`new_model_same_turn_remaps_effort`、`manual_passthrough` 改为新原因闭集（`jev`/`continued`）。确认按新断言失败。
+- [x] 4.2 实现 `SessionState.disabled`、`RoutingState.disable/setMode(AUTO 清除)`，router 以 Jev 结果（成功档位或失败类别）为输入；使 4.1 通过。
+- [x] 4.3 重构；全套保持绿。
 
 ## 5. Host 接线：pre-step 判断、停用、竞态、取消
 
