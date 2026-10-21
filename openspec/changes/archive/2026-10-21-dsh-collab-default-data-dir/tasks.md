@@ -11,4 +11,4 @@
 ## 3. 部署与回归
 
 - [x] 3.1 全量回归：dsh-collab typecheck/test/test:components/test:host，根 `npm test`，`npm run check:artifacts`，`openspec validate --strict`
-- [ ] 3.2 inner-ohmydsh 去掉 `dataDir` 与 `disabled: false`；本机 `dsh build` 两次幂等、`dsh restart`；确认实际数据目录与 serviceId 不变，collab 工具可用
+- [x] 3.2 inner-ohmydsh 去掉 `dataDir` 与 `disabled: false`；本机 `dsh build` 两次幂等、`dsh restart`；确认实际数据目录与 serviceId 不变，collab 工具可用
