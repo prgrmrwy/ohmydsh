@@ -67,3 +67,17 @@ it('toast is visible while the composer hides the chip', async () => {
  expect(el?.textContent).toContain('主会话判断')
  expect(hidden.contains(el)).toBe(false)
 })
+
+it('toast is horizontally centred on the chip', async () => {
+ const rpc = rpcFor({ S: [{ mode: 'AUTO' }, { mode: 'AUTO', decision: decision(11) }] })
+ const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ left: 200, top: 500, width: 80, height: 28, right: 280, bottom: 528, x: 200, y: 500, toJSON() {} } as DOMRect)
+ try {
+  await mount('S', rpc)
+  await poll()
+  const el = document.body.querySelector('.amr-toast') as HTMLElement
+  // Centre of the chip is 200 + 80/2 = 240; the hint is shifted by half its own width.
+  expect(el.style.left).toBe('240px')
+  expect(el.style.top).toBe('494px')
+  expect(el.className).toContain('amr-toast')
+ } finally { spy.mockRestore() }
+})

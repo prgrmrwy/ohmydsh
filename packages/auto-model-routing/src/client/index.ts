@@ -32,7 +32,7 @@ const CSS = `
 .amr-card p{margin:4px 0}
 .amr-muted{color:var(--dsw-alias-label-tertiary)}
 .amr-error{color:var(--dsw-alias-state-error-primary)}
-.amr-toast{position:fixed;z-index:1100;transform:translateY(-100%);padding:4px 8px;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg,#fff);color:var(--dsw-alias-label-secondary);box-shadow:var(--dsw-elevation-prominent);font-size:12px;line-height:18px;white-space:nowrap}
+.amr-toast{position:fixed;z-index:1100;transform:translate(-50%,-100%);padding:4px 8px;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg,#fff);color:var(--dsw-alias-label-secondary);box-shadow:var(--dsw-elevation-prominent);font-size:12px;line-height:18px;white-space:nowrap}
 `
 
 // Left-right swap arrows at the picker chevron's size; colour follows currentColor.
@@ -55,7 +55,8 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
   const anchor = useRef<{ left: number; top: number } | undefined>(undefined)
   const remember = () => {
     const rect = rootRef.current?.getBoundingClientRect()
-    if (rect && rect.width > 0) anchor.current = { left: rect.left, top: rect.top - 6 }
+    // Horizontal centre of the chip; the hint centres itself on it via translate(-50%).
+    if (rect && rect.width > 0) anchor.current = { left: rect.left + rect.width / 2, top: rect.top - 6 }
   }
   // The first poll of each session only primes `seen`: an old decision is never announced on mount or session switch.
   const seen = useRef<number | undefined>(undefined)
@@ -103,7 +104,7 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
   const off = view?.disabled
   const hint = off ? CATEGORY_HINTS[off.category] ?? off.category : undefined
   // The panel sits inside the root (padding bridges the gap), so moving onto it keeps it open.
-  const place = anchor.current ?? { left: 16, top: (typeof window === 'undefined' ? 0 : window.innerHeight) - 96 }
+  const place = anchor.current ?? { left: (typeof window === 'undefined' ? 0 : window.innerWidth / 2), top: (typeof window === 'undefined' ? 0 : window.innerHeight) - 96 }
   return h('span', { ref: (el: HTMLSpanElement | null) => { rootRef.current = el; remember() }, className: 'amr-root', onMouseEnter: on('enter'), onMouseLeave: on('leave'), onFocus: on('focus'), onBlur: on('blur') },
     h('style', null, CSS),
     h('button', {

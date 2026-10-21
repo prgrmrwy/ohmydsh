@@ -110,7 +110,7 @@ skill 规则：委派前调用 `route_subagent`；成功则把返回的三个字
 ### D10. 决策提示（2026-10-21 用户追加）
 开关放在插件自有配置 `$DSH_HOME/plugins/dsh-auto-model-routing/config.json`（与 home-network-model-guard 的 config.json 同惯例），默认关闭；Host 每次处理状态请求时读取，失败视为关闭。Jev 客户端成功结果附带 `confidence`（`answers.tier.confidence`）、`probabilities`（`answers.tier.probabilities`，只保留四个档位的有限数值）与请求耗时 `ms`。提示同时显示置信与完整分布（用户要求：只看胜出项看不出判断有多接近）；置信是 Jev 的归一化值（各档同等可能为 0，确定为 1），与胜出档的概率不同，二者都展示。Router 为主会话保存最近一次决策（单调递增 `id`），主会话在 `agent/request` 映射出 effort 时写入（`source: main`），`route_subagent` 用 `exec.agent` 找到调用会话写入（`source: subagent`；调用方本身是子会话时不写，因其无芯片）。主会话只在 Jev 新判出的档位首次映射出 effort 时写入一次：continued 回合与同回合重映射不重复；首个请求模型无 effort 支持、同回合换到支持的模型时，在该次映射时写入。置信与分布只接受 0–1 数值。不落盘、不进历史。
 
-client 沿用 3 秒轮询：开关开启时状态带 `decision`，新 `id` 触发 3 秒提示（最多约 3 秒后出现）；轮询间多次决策只显示最新。每个会话首次轮询只预热（换会话也重新预热），提示的隐藏只依赖提示本身，后续状态变化不能取消它。GUI 复验发现：官方 composer 在 Agent 运行时给右侧控件容器设 `hidden`，而 Jev 恰在此时判档，提示若放在芯片内部会随之隐藏。因此提示经 portal 挂到 `<body>`，按芯片最后一次可见位置定位（`position: fixed`）。用户随后把时长从 1 秒改为 3 秒。不另建推送通道：与停用显示同一数据路径，避免新增订阅生命周期。面板不再渲染历史列表（用户认为不优雅），Host 内存历史保留供排查。
+client 沿用 3 秒轮询：开关开启时状态带 `decision`，新 `id` 触发 3 秒提示（最多约 3 秒后出现）；轮询间多次决策只显示最新。每个会话首次轮询只预热（换会话也重新预热），提示的隐藏只依赖提示本身，后续状态变化不能取消它。GUI 复验发现：官方 composer 在 Agent 运行时给右侧控件容器设 `hidden`，而 Jev 恰在此时判档，提示若放在芯片内部会随之隐藏。因此提示经 portal 挂到 `<body>`，按芯片最后一次可见位置定位（`position: fixed`，水平中心对齐芯片中心）。用户随后把时长从 1 秒改为 3 秒。不另建推送通道：与停用显示同一数据路径，避免新增订阅生命周期。面板不再渲染历史列表（用户认为不优雅），Host 内存历史保留供排查。
 
 ### D9. 固定映射表（沿用）
 
