@@ -130,3 +130,82 @@ CHANGES_APPLIED: no
 - **S7 fixed**：旧 tasks/test-plan/verify 移入 `history/*.2026-10-21`，审查通过后重写。
 
 另按 ponytail-review 精简（未被 anvil 审查要求，作者自行采纳）：查询与标注合并为一个 `label` 端点；按钮菜单去掉每档 effort、“清除”、判高/判低文字与强调色；删除场景“子会话表与家族一致”“子会话模型均在白名单检查清单内”“物化结果携带派发规则且二次 sync 无变化”（已有 `tests/sync-agent-instructions.test.mjs`）、“记录上限”“清除标注与覆盖”；proposal 不再逐条复制表格数值。未采纳：ponytail #8 中删除“skill 文本包含八项规则”——skill 是 agent 唯一能读到的约束，文本回归有价值；#10 中大幅删减 design 历史段——本轮只删本修订新增的叙述，旧段落属于已审查历史，整体重写会让审查范围失控。
+
+
+## Round 7 定点复核（2026-10-22）
+
+### 复核上下文
+
+- **Reviewer context**: fresh-context subagent（claude-sonnet-5-5, high），不是 round-7 原审查实例；只读，唯一写入是本节追加。未联网、未构建/测试、未运行 `eval/run.mjs`（`run.mjs` 尚未存在，随实现编写）、未读 `.env.local`。
+- **复核对象**: 修复提交 `29c6498b`（对比 `df7e77f9`），逐文件通读 proposal.md、design.md、spec.md、`packages/auto-model-routing/eval/{README.md,baseline.json}`、略读 `cases.json`；运行时证据取自 `.launcher/node_modules/@deepseek-ai/` 编译包。
+- **重算输入哈希**（`sha256sum`，与任务给定值逐字一致）：
+  - proposal.md `2111c2406970e769787c9b178925853629e05b70b4780f016747a9b0b951ea1a`
+  - design.md `b35f9a32a30f27d1274b82a2c3d29ad1f529ddc8c053035e7a8afec942709560`
+  - specs/auto-model-routing/spec.md `0d93767b22deab9320c422baebfaf1e0a89c0f803a0220a69725826ac1cb702b`
+  - packages/auto-model-routing/src/rubric.json `6ca861d09a1cf1bfa4777d3418a1459d89f7ea80390c11e429b4dc663509c8d7`
+
+### M1–M8 核验
+
+| # | 结果 | 证据 |
+|---|---|---|
+| M1 | verified | design.md:29、:117 与 spec.md:212 改为 `ctx.agents.get(header.parentSession)` 逐级上溯、任一环不在 live 注册表即 MANUAL，`resolveAgent` 仅在“不能用”的说明中出现；场景 spec.md:219–227 覆盖 S1/C1 为 MANUAL、C2 父会话非 live、S1→C1→C2 的 AUTO 判档。运行时：`dsh-agent/lib/types/index.d.ts:341` `get(id): Agent \| undefined`，`dsh-session/lib/types/types.d.ts:71,81` 有 `parentSession`、`origin?: 'subagent'`。 |
+| M2 | verified | design.md:164–171 子会话表只剩模型列；spec.md:217 枚举 8 个 (provider, tier) 的 `{model, effort}`，与 design D9 起点规则逐格相符（haiku simple=low；luna simple=medium；sol medium/high/xhigh）。 |
+| M3 | **not verified（design 一半未改）** | spec.md:184、:197–204 已改为“先与 `{low,medium,high,xhigh}` 取交集、空集 `no-effort-support`”，并补了 `[max]` 场景；但 design.md:149（D9）仍写“按模型实际支持的 effort 截断（不超过目标的最高受支持值，无则最低受支持值）”，没有交集与 `no-effort-support`——按该字面实现，`{max}` 仍会输出 `max`。原 Required Change 3 明确要求 spec 与 design D9 同改。 |
+| M4 | verified | design.md:28、proposal.md:20、:44 改为“会话创建时快照、2026-10-22 已补齐”；design.md:180、:225、:230 与 proposal “Delivery/验收”改为在新建会话中验证。README 白名单清单随 ponytail #8 删除，design.md:225 把“五条路由与新会话生效”留给实现期 README，可接受。 |
+| M5 | verified（`last` 删除获接受，见 (a)） | (a) spec.md:349、design.md:187 把 `continued` 回合助手消息记到最近有判档的用户回合；(b) `last` 已删，spec.md:386 注明“官方只在每个回合的最后一条助手回复上渲染”，该论断已核实；(c) spec.md:390、design.md:187、:226 明确“重启后旧回合不显示按钮，记录不丢”，矛盾句已删。 |
+| M6 | verified | spec.md:91–98 逐字列 6 条正则，声明“先对完整文本脱敏再截断”；场景 spec.md:110–118 覆盖 JSON、大小写、全角冒号、Bearer、ghp_、URL 凭据、不误伤正文与跨截断边界。逐条实测见下 (b)。 |
+| M7 | verified | `packages/auto-model-routing/eval/baseline.json`（`runs:3`，6 条 `knownMisses`，id 均存在于 `cases.json`；`cases.json` 共 90 = t 30 + h 22 + s 38，与 eval/README、design.md:87 一致）；退出码 0/1/2 与“请求失败不计未命中”见 eval/README 与 spec.md:130–133；`state` 与 Host 逐字相等改为“run.mjs 导入生产构造 + 场景断言”，等价满足原“拆 state.mjs”意图；`h-` 组已在 eval/README、design.md:222 改称“已参与选择、非独立留出”；design.md:230 门禁改为“基线外新未命中回到规划”。注：基线本身（6 条）无法由本次复核重跑，沿用作者陈述。 |
+| M8 | verified | spec.md:5 改为“档位一经决定不再变化”；spec.md:347 与 design.md:185 写入时机统一为“成功判档后该回合首个请求，无论是否映射出 effort”；失败场景 spec.md:365–368（写入失败）、spec.md:380–383（半截 JSON 行被跳过、脚本退出 0 且不写文件）。 |
+
+### 对额外改动的专项核查
+
+**(a) 官方 Chat 只在回合收尾回复渲染 `assistant-actions`——成立。** `dsh-client-ui-chat/lib/client.js:6590–6591`：`messageId = closing.finalNode.messageId`，`closing === null` 时直接返回（:6578），只有 `closing` 才调用 `renderSlot("conversation.chat.assistant-actions", { messageId })`；`closing` 来自 `tailData`（:10413–10419），要求该回合已有 `turn/end`，并取 `findLast(hasText)`——即最后一个含文本的助手步。因此进行中的回合没有按钮、每回合至多一个，作者删除 `last` 的理由成立。同回合最后一步若无文本，则按钮落在最后一条有文本的回复上，Host 对每条 `assistant/message` 都建映射，不受影响。
+
+**(b) 正则与脱敏场景——已用 Node 实测。** 六条正则均为合法 JS，按声明顺序依次 `replace` 后：
+- `{"API_KEY": "abc123"}` → `{"API_KEY": "<redacted>"}`；`Token：xyz789` → `Token：<redacted>`（`i` 标志与全角冒号均生效）。
+- `Authorization: Bearer abcdefgh12345` → `Authorization: Bearer <redacted>`；`ghp_0123456789abcdefghijABCD` → `<redacted>`；`https://u:p@host/x` → `https://<redacted>@host/x`（不含 `u:p@`）。
+- `token 过期了怎么办` 原样保留（无分隔符）；`token=abc123def456 … 10.1.2.3:8080` → `token=<redacted> <ip>`，满足 spec.md:113。
+- 40 字符 `sk-` 密钥在末 1200 字窗口边界前 10 字符处：先脱敏再 `slice(-1200)` 后窗口内无任何密钥片段；对照“先截后脱敏”则泄漏 30 字，场景能区分两种顺序。
+- 残余（均属已声明的“尽力而为”）：值含空格的 JSON（`"password": "a b"`）只替换到第一个空白；版本号 `1.2.3.4` 会被替成 `<ip>`；以 `-` 结尾的 `sk-…-` 留下末尾 `-`。无需改规格。
+
+**(c) 过期引用扫描。** 在 proposal/design/spec/README 中未再出现：`eval/rubric.json`、`TIER_RUBRIC_VERSION`、记录保留上限 500/600、“四个端点/四个路由”、`last` 字段（design.md:197 仅在“否决的替代方案”中提及，可保留）。**例外**：design.md:124（D7）仍写“新增同一注册方式的 `.judgement` 与 `.label`”，与 spec.md:312（三个端点）和 D13 不符。
+
+**新发现（均为新增/改动引入）：**
+
+| # | 严重度 | 位置 | 问题 | 最小修复 |
+|---|---|---|---|---|
+| E1 | Moderate（即 M3 未闭合） | design.md:149 | D9 未同步“取交集 / 空集 `no-effort-support`” | 把该句改为与 spec.md:184 相同：“候选集 = 模型支持的 effort ∩ {low,medium,high,xhigh}；目标不在候选集取不超过目标的最高候选值，无则最低候选值；候选集为空则不改写（`no-effort-support`）” |
+| E2 | Minor | design.md:124 | 残留已删除的 `.judgement` 端点；“沿用两个…新增 `.judgement` 与 `.label`”与 spec 的“三个端点”不符 | 改为“沿用 `.state`、`.setMode`，新增 `.label`（见 D13），共三个端点” |
+| E3 | Minor | spec.md:50 对 spec.md:91 | :50 把分类输入定义为 `join.slice(0, 8000)`，:91 要求“先对完整文本脱敏再截断”，两处先后顺序字面矛盾；跨 8000 边界的密钥会按 :50 的读法被切坏 | :50 改为“…以 `"\n"` 连接，经 `redact` 后取 `.slice(0, 8000)`”；:62–65 场景不变 |
+| E4 | Minor | spec.md:349、design.md:187 | “`continued` 回合记到最近一个有判档的用户回合”：若其间有 MANUAL 用户回合或 Jev 失败回合（无判档），按钮会错挂到更早的 AUTO 回合并让用户标注错误的回合 | 改为“记到最近一个用户回合；该回合无判档则不建映射（按钮不显示）”，并在 spec.md:370–373 场景增加一条断言 |
+| E5 | Minor（测试缺口） | spec.md:351、:386–389 | ① 带 `label` 时追加失败，端点应返回什么未规定（客户端场景 :402 假定“错误”）；② 判档行无 `effort`（首个请求无 effort 支持）时 Tooltip 的 `→ <effort>` 如何显示未规定 | ① 追加失败返回 5xx 且不返回 `label`；② 无 `effort` 时 Tooltip 省略 `→ <effort>`；各补一个断言 |
+
+未发现 Critical。其余新增场景（`label` 无效请求、统计脚本跳过损坏行、写入失败不影响请求、回归脚本退出码、重启沿用上一档位）均有 GIVEN/WHEN/THEN，且每个新增 Requirement 都有正常与失败/边界场景；“规则版本由规则内容决定”场景顺带断言 `escalated` 封顶，略杂但可测，不要求拆分。
+
+### 反驳裁决
+
+- **M1–M3、M5–M8（含与 ponytail 合并者）**：除 M3 外均 *accepted by reviewer*（理由见上表）。M5 “删除 `last` 字段”*accepted by reviewer*：官方插槽只在回合收尾回复渲染，已由 `client.js:6590` 核实。M7 以“run.mjs 导入生产 `state`”替代“独立 state.mjs + vitest”*accepted by reviewer*：保证同一来源，且由 spec.md:133 场景断言逐字相等。M3 作者回应称已改，实际仅改了 spec，*not accepted until E1 fixed*。M4 *accepted by reviewer*。
+- **S4（注入面）作为风险接受**：*accepted*。属 Suggestion；最坏影响有界（四档内、永不 `max`），已写入 design.md:223 Risks；不现在改 rubric 以免使已标注样本与基线作废，理由合理。
+- **未采纳 ponytail #8（保留 skill 文本八项规则断言）**：*accepted*。skill 是主 Agent 唯一读到的约束，spec.md:244–247 的文本断言可机械验证；删除它反而放掉了对“失败暂停并询问用户”等关键规则的回归保护。
+- **未采纳 ponytail #10（不整体重写 design 历史段）**：*accepted*，但附带条件：被保留的历史段里必须清掉与本轮删除冲突的残留（见 E1、E2）。
+- **其余 ponytail 精简（单 `label` 端点、单 `judgements.jsonl`、去 `last`、删场景、eval 迁移与 `cases.json` 合并、rubric 单一来源与内容哈希、本回合文本脱敏加分隔符）**：均不引入新的 Critical/Moderate 矛盾；本回合文本脱敏的理由（同样外发、需分隔符防误伤）成立。
+
+### 仍需处理（按顺序）
+
+1. **（必改，M3 / E1）** design.md:149 D9 同步“取交集、空集不改写 `no-effort-support`”。
+2. （E2）design.md:124 删除 `.judgement`，写明共三个端点。
+3. （E3）spec.md:50 明确“经 `redact` 后再 `.slice(0, 8000)`”。
+4. （E4）`continued` 回合映射改为“最近一个用户回合，无判档则不建映射”并补断言。
+5. （E5）补 `label` 追加失败的返回约定与无 `effort` 时 Tooltip 的展示约定。
+
+第 1 项使 M3 闭合；第 2–5 项为 Minor，建议在同一次修订中一并处理，否则会在 test-plan 阶段重新暴露为规格歧义。
+
+CHANGES_APPLIED: no
+
+### 作者回应（定点复核 1–5）
+
+1. E1/M3：design D9 截断句改为“候选集 = 支持的 effort ∩ {low, medium, high, xhigh}；空集不改写，`no-effort-support`”，与 spec 一致。
+2. E2：design D7 改为沿用 `.state`、`.setMode`，新增 `.label`，共三个端点。
+3. E3：spec“用户回合与分类输入”改为连接后经 `redact` 再 `.slice(0, 8000)`。
+4. E4：spec 与 design D13 改为 continued 回合的消息记到最近一个用户回合，该回合无判档时不建映射；场景“按消息查询与标注”增加 MANUAL 回合后的 continued 消息 m6 → `{}`。
+5. E5：spec 规定带 `label` 追加失败返回 5xx 且不返回 `label`（新增场景“标注追加失败返回错误”）；Tooltip 在无 `effort` 时省略 ` → <effort>`（场景“Tooltip 与菜单内容”增加 m4 断言）。design D13 同步。

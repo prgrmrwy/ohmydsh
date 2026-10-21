@@ -47,7 +47,7 @@
 - **THEN** 读取成功，模式与 `disabled` 保留；读取不触发重写，旧字段在下次写入时去掉；`mode` 或 `disabled` 形状非法时仍拒绝，不回退为默认值
 
 ### Requirement: 用户回合与分类输入
-系统 SHALL 只在 step 1 的 `agent/pre-step` 中、先执行 `await next()` 得到 `PreStepDecision` 后判定用户回合并请求 Jev 判断：结果为 `reject` 时 MUST NOT 请求 Jev、MUST NOT 记录本回合决定；结果为 `enter` 时只使用其 `messages`。**合格消息**为该次领取消息中 `source.kind` 严格等于 `"user"` 的消息；其它来源（含首轮 Host 注入的 `agent-instructions`、`plugin`、`plugin:<id>`、`runtime-context`、`time-context`、`skill-catalog`）与缺失 `source` 的消息 MUST NOT 贡献输入。合格消息数为 0 的回合不是用户回合，沿用上一用户回合的级别且不请求 Jev；首个用户回合之前无级别时不改写。分类输入为合格消息按领取顺序、消息内按块顺序的 `text` 块文本，以 `"\n"` 连接后取 `.slice(0, 8000)`；非文本块不贡献。决定 SHALL 按 (agent, turn) 保存，同回合后续请求（含同 turn/step 的错误重试）复用该决定。`origin = "subagent"` 会话 MUST NOT 被分类或改写。
+系统 SHALL 只在 step 1 的 `agent/pre-step` 中、先执行 `await next()` 得到 `PreStepDecision` 后判定用户回合并请求 Jev 判断：结果为 `reject` 时 MUST NOT 请求 Jev、MUST NOT 记录本回合决定；结果为 `enter` 时只使用其 `messages`。**合格消息**为该次领取消息中 `source.kind` 严格等于 `"user"` 的消息；其它来源（含首轮 Host 注入的 `agent-instructions`、`plugin`、`plugin:<id>`、`runtime-context`、`time-context`、`skill-catalog`）与缺失 `source` 的消息 MUST NOT 贡献输入。合格消息数为 0 的回合不是用户回合，沿用上一用户回合的级别且不请求 Jev；首个用户回合之前无级别时不改写。分类输入为合格消息按领取顺序、消息内按块顺序的 `text` 块文本，以 `"\n"` 连接，经 `redact`（见“Jev 判断档位”）后取 `.slice(0, 8000)`；非文本块不贡献。决定 SHALL 按 (agent, turn) 保存，同回合后续请求（含同 turn/step 的错误重试）复用该决定。`origin = "subagent"` 会话 MUST NOT 被分类或改写。
 
 #### Scenario: 步骤被拒时不请求 Jev
 - **GIVEN** 会话为 `AUTO`，下游 pre-step listener 对 step 1 返回 `{kind: reject}`
@@ -346,9 +346,9 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 ### Requirement: 判档记录与人工标注
 系统 SHALL 把主会话 AUTO 用户回合的每次成功判档追加一行到 `$DSH_HOME/state/auto-model-routing/judgements.jsonl`：`{sessionId, turn, tier, effort?, model, rubricVersion}`，写入时机为成功判档后该回合首个请求（无论是否映射出 effort，未映射时省略 `effort`）；`route_subagent`、失败、取消、被丢弃与非用户回合不写判档行。标注也是追加一行 `{sessionId, turn, label}`。行 MUST NOT 包含消息文本、上一轮上下文、响应体或凭据。追加失败 MUST NOT 影响请求、MUST NOT 停用 AUTO，只记一条日志。读取方 SHALL 按 `(sessionId, turn)` 折叠：判档取最后一条判档行，标注取最后一条标注行；无法解析的行跳过。
 
-Host SHALL 经 `session/event` 观察 `assistant/message`，在内存中记录 `messageId → turn`（每会话一个 Map）。非用户回合（`continued`）的助手消息 SHALL 记到该会话最近一个有判档的用户回合。
+Host SHALL 经 `session/event` 观察 `assistant/message`，在内存中记录 `messageId → turn`（每会话一个 Map）。非用户回合（`continued`）的助手消息 SHALL 记到该会话最近一个用户回合；该用户回合没有判档时 MUST NOT 建立映射。
 
-系统 SHALL 提供一个与现有端点同一授权模型的端点 `auto-model-routing.label`：参数 `{sessionId, messageId, label?}`。`messageId` 对应回合有判档时，无 `label` 返回 `{tier, effort?, label?}`，带 `label`（四档之一）时先追加标注行再返回同一结构；`messageId` 不在映射中或回合无判档时返回 `{}` 且不写入。`sessionId` 缺失、非字符串、无法解析、指向子会话，`messageId` 非字符串，或 `label` 不属于四档时 SHALL 返回 4xx 且不写入。
+系统 SHALL 提供一个与现有端点同一授权模型的端点 `auto-model-routing.label`：参数 `{sessionId, messageId, label?}`。`messageId` 对应回合有判档时，无 `label` 返回 `{tier, effort?, label?}`，带 `label`（四档之一）时先追加标注行再返回同一结构，追加失败返回 5xx 且不返回 `label`；`messageId` 不在映射中或回合无判档时返回 `{}` 且不写入。`sessionId` 缺失、非字符串、无法解析、指向子会话，`messageId` 非字符串，或 `label` 不属于四档时 SHALL 返回 4xx 且不写入。
 
 仓库 SHALL 提供只读统计脚本 `packages/auto-model-routing/scripts/label-report.mjs`：读取 `judgements.jsonl`，按 `rubricVersion` 输出已标注数、一致数、判高数、判低数与不一致的 `(sessionId, turn)` 列表；不读取消息内容、不联网、不写文件。
 
@@ -368,9 +368,14 @@ Host SHALL 经 `session/event` 观察 `assistant/message`，在内存中记录 `
 - **THEN** 请求 effort 为 `medium`；会话仍为 `AUTO` 且无 `disabled`；记录一条日志
 
 #### Scenario: 按消息查询与标注
-- **GIVEN** S1 回合 3 有判档 `complex`；回合 3 有助手消息 m1、m2；回合 4 为子会话完成通知开启的回合，有助手消息m3
-- **WHEN** 以 m1 查询，以 m3 标注 `standard`，再以 m2 查询
-- **THEN** 第一次返回 `{tier: complex, effort: high}`；第二次追加一行 `{S1, 3, standard}` 并返回 `label: standard`；第三次返回 `{tier: complex, effort: high, label: standard}`
+- **GIVEN** S1 回合 3 有判档 `complex`；回合 3 有助手消息 m1、m2；回合 4 为子会话完成通知开启的回合，有助手消息 m3；回合 5 是 MANUAL 下的用户回合（无判档），回合 6 为其后的子会话完成通知回合，有助手消息 m6
+- **WHEN** 以 m1 查询，以 m3 标注 `standard`，再以 m2 查询，最后以 m6 查询
+- **THEN** 第一次返回 `{tier: complex, effort: high}`；第二次追加一行 `{S1, 3, standard}` 并返回 `label: standard`；第三次返回 `{tier: complex, effort: high, label: standard}`；第四次返回 `{}`
+
+#### Scenario: 标注追加失败返回错误
+- **GIVEN** S1 回合 3 有判档，`judgements.jsonl` 此时不可写
+- **WHEN** 以回合 3 的消息标注 `simple`
+- **THEN** 返回 5xx，响应不含 `label`；会话状态不变
 
 #### Scenario: 无效请求被拒，未知消息不写入
 - **GIVEN** S1 回合 3 有判档；`session-child` 为子会话；`m-unknown` 不在映射中
@@ -385,7 +390,7 @@ Host SHALL 经 `session/event` 观察 `assistant/message`，在内存中记录 `
 ### Requirement: 回复操作栏档位按钮
 client SHALL 向官方 `conversation.chat.assistant-actions` 插槽注册一个操作项（`order` 大于官方反馈的 10），`sessionId` 从注册时的 `inject(sessionId)` 取得，不改动官方点赞/点踩、复制或分支。官方只在每个回合的最后一条助手回复上渲染该插槽。操作项 SHALL 以 `messageId` 调用一次 `label` 端点（无 `label`）；返回 `{}` 时不渲染任何内容。否则渲染：
 - 一个图标按钮，使用官方 primitives 的 `IconGaugeOutlineRegular`、`Tooltip`（`side: bottom`）与操作栏同款按钮 class，不自定义颜色。
-- Tooltip 文本：`AUTO 判档：<档位中文> → <effort>`，已标注时追加 ` · 你标注：<档位中文>`。
+- Tooltip 文本：`AUTO 判档：<档位中文> → <effort>`（无 `effort` 时省略 ` → <effort>`），已标注时追加 ` · 你标注：<档位中文>`。
 - 点击打开官方 `Menu`，标题“这轮应该用哪档？”，四项依次为 `简单`、`标准`、`复杂`、`升级`，Jev 判出的一项带“Jev”标记，已标注项带勾选。选择即带 `label` 调用端点并关闭菜单；调用失败时不改变已显示的标注。
 档位中文：`simple` 简单、`standard` 标准、`complex` 复杂、`escalated` 升级。Host 重启后内存映射为空，此前回合的按钮不再显示；已写入的记录不受影响。
 
@@ -395,9 +400,9 @@ client SHALL 向官方 `conversation.chat.assistant-actions` 插槽注册一个�
 - **THEN** m2 渲染按钮，m3 渲染为空；每条消息只发出一次端点请求
 
 #### Scenario: Tooltip 与菜单内容
-- **GIVEN** m2 对应 `{tier: complex, effort: high, label: standard}`
-- **WHEN** 渲染按钮并打开菜单
-- **THEN** Tooltip 文本为 `AUTO 判档：复杂 → high · 你标注：标准`；菜单四项依次为 `简单`、`标准`、`复杂`、`升级`，`复杂` 带“Jev”，`标准` 带勾选
+- **GIVEN** m2 对应 `{tier: complex, effort: high, label: standard}`；m4 对应 `{tier: simple}`（无 effort）
+- **WHEN** 渲染两者的按钮并打开 m2 的菜单
+- **THEN** m4 的 Tooltip 文本为 `AUTO 判档：简单`；m2 的 Tooltip 文本为 `AUTO 判档：复杂 → high · 你标注：标准`；菜单四项依次为 `简单`、`标准`、`复杂`、`升级`，`复杂` 带“Jev”，`标准` 带勾选
 
 #### Scenario: 选择档位只调用插件标注端点，失败不改显示
 - **GIVEN** 按钮已渲染、未标注

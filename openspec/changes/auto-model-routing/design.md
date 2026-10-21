@@ -121,7 +121,7 @@ skill 规则：委派前调用 `route_subagent`；成功则把返回的三个字
 理由：工具与主会话共用判断函数和失败分类，满足同构；表放在代码中是唯一来源，测试直接断言常量。首版 skill 中的档位表删除，避免两份来源。
 
 ### D7. 端点与芯片
-沿用两个已认证 POST 端点 `/api/auto-model-routing.state` 与 `.setMode`（sessionId 解析、拒绝未知/子会话、只写目标会话）；2026-10-22 新增同一注册方式的 `.judgement` 与 `.label`（见 D13）。`state` 响应含 `mode`、`disabled?`、本回合 effort/reason 与历史。`setMode(AUTO)` 清除 `disabled`。
+沿用两个已认证 POST 端点 `/api/auto-model-routing.state` 与 `.setMode`（sessionId 解析、拒绝未知/子会话、只写目标会话）；2026-10-22 新增同一注册方式的 `.label`（见 D13），共三个端点。`state` 响应含 `mode`、`disabled?`、本回合 effort/reason 与历史。`setMode(AUTO)` 清除 `disabled`。
 
 芯片 order -10，外观与官方模型选择器触发器一致（实测其样式：无边框、透明底、高 28px、圆角 `--dsw-radius-sm`、13px、颜色 `--dsw-alias-label-secondary`、内边距 `0 4px 0 8px`、元素间距 4px，hover 底色 `--dsw-alias-interactive-bg-hover`，focus-visible 用焦点环）。芯片是单个按钮：可见文本为模式名，**图标在文字之后**（DSH 惯例），图标为左右交换箭头，颜色 `--dsw-alias-label-caption`；点击即切换。状态面板在鼠标悬停（约 150ms 延迟）或键盘聚焦时显示，指针移出芯片与面板后收起；面板材质沿用官方菜单变量（`--dsw-alias-bg`、`--dsw-elevation-prominent`）。
 
@@ -146,7 +146,7 @@ skill 规则：委派前调用 `route_subagent`；成功则把返回的三个字
 
 ### D9. effort 起点表与子会话表（2026-10-22 修订）
 
-**主会话 effort**：每个模型取一个起点，档位在其上浮动：`standard` = 起点，`simple` = 降一级（最低 `low`），`complex` = 升一级，`escalated` = 升两级；结果封顶 `xhigh`，自动路由永不输出 `max`。随后按模型实际支持的 effort 截断（不超过目标的最高受支持值，无则最低受支持值）。
+**主会话 effort**：每个模型取一个起点，档位在其上浮动：`standard` = 起点，`simple` = 降一级（最低 `low`），`complex` = 升一级，`escalated` = 升两级；结果封顶 `xhigh`，自动路由永不输出 `max`。随后截断：候选集 = 模型实际支持的 effort ∩ `{low, medium, high, xhigh}`；目标不在候选集时取不超过目标的最高候选值，无则最低候选值；候选集为空时不改写，`reason` 为 `no-effort-support`（只支持 `max` 的模型也不会被设成 `max`）。
 
 | 模型 | 起点 | 出处 | simple / standard / complex / escalated |
 |---|---|---|---|
@@ -184,9 +184,9 @@ skill 规则：委派前调用 `route_subagent`；成功则把返回的三个字
 
 **记录**：一个追加写文件 `$DSH_HOME/state/auto-model-routing/judgements.jsonl`。判档行 `{sessionId, turn, tier, effort?, model, rubricVersion}` 在 `Router.judged()` 的现有调用点写（成功判档后该回合首个请求，无论是否映射出 effort）；标注行 `{sessionId, turn, label}`。读取方按 `(sessionId, turn)` 折叠，跳过坏行。不哈希文件名（文件内本来就有 sessionId）、不做保留上限与重写（单人使用，每回合约 120 字节，一年约数 MB）、不存消息文本。追加失败只记日志，不影响请求、不停用。
 
-**messageId → turn**：标注入口只拿到 `messageId`。Host 订阅 `session/event`，遇到 `assistant/message` 时把 `messageId → turn` 记入该会话的内存 Map；非用户回合（子会话完成通知开启的 `continued` 回合）的消息记到最近一个有判档的用户回合——委派后主 Agent 的最终回复常在这种回合里，用户读到的正是它。官方只在每个回合的收尾回复上渲染插槽，所以每个回合最多一个按钮，不需要“是否最后一条”的判断。Host 重启后 Map 为空，重启前的回合不再显示按钮（记录已落盘不丢）；接受此限制，不为它持久化消息映射。
+**messageId → turn**：标注入口只拿到 `messageId`。Host 订阅 `session/event`，遇到 `assistant/message` 时把 `messageId → turn` 记入该会话的内存 Map；非用户回合（子会话完成通知开启的 `continued` 回合）的消息记到最近一个用户回合——委派后主 Agent 的最终回复常在这种回合里，用户读到的正是它；该用户回合没有判档（MANUAL、Jev 失败）时不建映射，按钮不显示，避免把标注挂到更早的回合。官方只在每个回合的收尾回复上渲染插槽，所以每个回合最多一个按钮，不需要“是否最后一条”的判断。Host 重启后 Map 为空，重启前的回合不再显示按钮（记录已落盘不丢）；接受此限制，不为它持久化消息映射。
 
-**端点**：一个 `label` 端点，`label` 省略即查询。沿用现有端点的注册、envelope 与 `sessionController.resolveAgent` 授权（目标是普通会话，可解析）。
+**端点**：一个 `label` 端点，`label` 省略即查询；带 `label` 时追加失败返回 5xx（不返回 `label`），客户端保持原显示。沿用现有端点的注册、envelope 与 `sessionController.resolveAgent` 授权（目标是普通会话，可解析）。
 
 **按钮**：注册到 `conversation.chat.assistant-actions`（order 20），sessionId 从注册时的 `inject(sessionId)` 取得（与官方反馈同法）。用官方 primitives：`Tooltip`、`Menu`、`IconGaugeOutlineRegular` 与操作栏按钮 class，不自定义样式。菜单只有四个档位名，Jev 判出的标“Jev”、已标的打勾；判高/判低由统计脚本计算，不在界面显示。选择即提交，没有自由文本。位置不能放到“分支”右侧：官方渲染顺序固定为“复制 → 插槽项 → 分支 → 用量”。
 
