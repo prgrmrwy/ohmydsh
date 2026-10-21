@@ -697,3 +697,184 @@ describe('production inquiry composition', () => {
     }
   })
 })
+
+/**
+ * Restart recovery on the compiled graph: real AgentLoop agents, a brand-new Context over the SAME durable
+ * domain, the real read-only planner and the real startup executor. Only the LLM is faked.
+ */
+describe('inquiry startup recovery on the compiled graph', () => {
+  const recoveryScopes = new Map<string, import('../src/host/inquiry/ledger.js').InquiryScope>([
+    ['main', { kind: 'main', sessionId: 'main' }], ['child-b', { kind: 'child', sessionId: 'child-b', locusId: 'b', generation: 1 }],
+  ])
+  const recoveryLocus = buildLocusRecord({ id: 'b', generation: 1, parentSessionId: 'main', childSessionId: 'child-b', endpoint: { chatId: 'chat-b' }, workspaceId: 'ws', source: 'explicit', state: 'active' })
+  const recoveryPorts = {
+    loci: {
+      findByChildSessionId: (id: string) => id === 'child-b' ? [recoveryLocus] : [], getLocusByChild: (id: string) => id === 'child-b' ? recoveryLocus : undefined,
+      listLociByParent: (id: string) => id === 'main' ? [recoveryLocus] : [],
+      getCurrentLocus: (endpoint: { chatId: string; threadId?: string }) => endpoint.chatId === recoveryLocus.endpoint.chatId && endpoint.threadId === recoveryLocus.endpoint.threadId ? recoveryLocus : undefined,
+    },
+    inspect: async (id: string) => ({ id, ...(id === 'child-b' ? { parentSessionId: 'main' } : {}) }), isArchived: () => false, hasPublicContext: () => true,
+  }
+  const textReply = async function* (text: string) {
+    yield { type: 'block-start', index: 0, blockType: 'text' }
+    yield { type: 'text-delta', index: 0, text }
+    yield { type: 'block-end', index: 0, block: { type: 'text', text } }
+    yield { type: 'finish', reason: { kind: 'stop' } }
+  }
+
+  /** Phase 1: the inquiry is accepted but the target cannot be resolved, so nothing reaches its inbox. */
+  async function acceptWithoutTarget(h: Awaited<ReturnType<typeof openPetHarness>>) {
+    const ctx = new Context()
+    for (const plugin of [Sessions, Agents, Llm, SystemPrompt, ToolRuntime, Projections]) await ctx.plugin(plugin)
+    const disposers: Array<() => void> = []
+    let calls = 0
+    class AskOnce extends LlmAdapter {
+      async *stream() {
+        if (calls++ === 0) {
+          const block = { type: 'tool-call', id: 'recovery-inquire', name: 'pet_inquire', arguments: JSON.stringify({ target: 'child:b:1:child-b', question: 'q', purpose: 'p' }) }
+          yield { type: 'block-start', index: 0, blockType: 'tool-call' }
+          yield { type: 'tool-call-delta', index: 0, id: block.id, name: block.name, argumentsDelta: block.arguments }
+          yield { type: 'block-end', index: 0, block }
+          yield { type: 'finish', reason: { kind: 'tool-calls' } }
+          return
+        }
+        yield* textReply('asked')
+      }
+    }
+    ctx.llm.registerAdapter(['recovery-asker1'], new AskOnce())
+    await ctx.plugin(AgentLoop, { agents: [], maxParallelToolCalls: 1 })
+    const asker = await ctx.agentLoop.create('main', { provider: 'recovery-asker1', model: 'm' })
+    asker.ctx.tools.guard((execution: { name: string }) => execution.name === 'pet_inquire' ? undefined : 'fixture denies main')
+    let failure: Error | undefined
+    const composed = composeProductionInquiry({
+      domain: h.domain as never, currentScope: (id: string) => recoveryScopes.get(id),
+      // The target member cannot be resolved in the first process: pumpTarget must skip it.
+      resolveAgent: ((s: { sessionId: string }) => s.sessionId === 'main' ? asker : undefined) as never,
+      agentLoop: ctx.agentLoop, probeIsolatedClaim: ctx.agentLoop.probeIsolatedQueuedTurnClaim.bind(ctx.agentLoop), tools: ctx.tools,
+      readinessManagedGuard: () => true, log: () => undefined, onError: (error: unknown) => { failure = error instanceof Error ? error : new Error(String(error)) },
+      now: () => 1_800_000_000_000, newMessageId: (() => { let n = 0; return () => `before-restart-message-${++n}` })(), newInquiryId: () => 'recovery-inquiry',
+    })
+    composed.install(asker as Agent)
+    disposers.push(registerInquiryAskTool(asker.ctx, { forExecution: execution => {
+      const bound = composed.forExecution(execution as never)
+      return { ports: recoveryPorts as never, store: { accept: bound.accept }, origin: bound.origin, ready: () => composed.ready, now: () => 1_800_000_000_000, newInquiryId: () => 'recovery-inquiry' }
+    } }))
+    asker.followup(createUserMessage({ content: [{ type: 'text', text: 'ask target' }], source: { kind: 'user' } }))
+    await asker.whenIdle()
+    for (const dispose of disposers.reverse()) dispose()
+    await ctx.fiber.dispose() // the "restart": every in-memory agent, adapter and runtime is gone
+    if (failure) throw failure
+    const handoff = h.domain.table('inquiry_handoffs').get(JSON.stringify(['recovery-inquiry', 'target'])) as { messageId: string; state: string } | undefined
+    return { handoff }
+  }
+
+  /** Phase 2: a new process over the same domain. Returns the live graph and a recovery runner. */
+  async function bootAfterRestart(h: Awaited<ReturnType<typeof openPetHarness>>, opts: { holdTarget?: Promise<void> } = {}) {
+    const ctx = new Context()
+    for (const plugin of [Sessions, Agents, Llm, SystemPrompt, ToolRuntime, Projections]) await ctx.plugin(plugin)
+    class Quiet extends LlmAdapter {
+      constructor(private readonly gate?: Promise<void>, private firstOnly = false) { super() }
+      async *stream() {
+        if (this.gate && this.firstOnly) { this.firstOnly = false; await this.gate }
+        yield* textReply('ok')
+      }
+    }
+    ctx.llm.registerAdapter(['recovery-asker2'], new Quiet())
+    ctx.llm.registerAdapter(['recovery-target2'], new Quiet(opts.holdTarget, true))
+    await ctx.plugin(AgentLoop, { agents: [], maxParallelToolCalls: 1 })
+    const agents = new Map<string, Awaited<ReturnType<typeof ctx.agentLoop.create>>>()
+    agents.set('main', await ctx.agentLoop.create('main', { provider: 'recovery-asker2', model: 'm' }))
+    agents.set('child-b', await ctx.agentLoop.create('child-b', { provider: 'recovery-target2', model: 'm' }))
+    for (const [id, agent] of agents) agent.ctx.tools.guard(() => `fixture denies ${id}`)
+    const claims: Array<{ agentId: string; turn: number; messageId: string }> = []
+    ctx.on('agent/inbox/claimed', (event: { agent: { id: string }; turn: number; message: { id: string } }) => claims.push({ agentId: event.agent.id, turn: event.turn, messageId: event.message.id }))
+    const errors: Error[] = []
+    const composed = composeProductionInquiry({
+      domain: h.domain as never, currentScope: (id: string) => recoveryScopes.get(id),
+      resolveAgent: ((s: { sessionId: string }) => agents.get(s.sessionId)) as never,
+      agentLoop: ctx.agentLoop, probeIsolatedClaim: ctx.agentLoop.probeIsolatedQueuedTurnClaim.bind(ctx.agentLoop), tools: ctx.tools,
+      readinessManagedGuard: () => true, log: () => undefined, onError: (error: unknown) => { errors.push(error instanceof Error ? error : new Error(String(error))) },
+      now: () => 1_800_000_000_001, newMessageId: (() => { let n = 0; return () => `after-restart-message-${++n}` })(), newInquiryId: () => 'unused',
+    })
+    for (const agent of agents.values()) composed.install(agent as Agent)
+    const { InquiryWorkStore } = await import('../src/host/inquiry/work-store.js')
+    const { planInquiryRecoveryForMembers, createInquirySessionEvidence, createInquiryWorkEvidence, runInquiryStartupRecovery } = await import('../src/host/inquiry/startup-recovery.js')
+    const works = new InquiryWorkStore(h.domain as never)
+    const plan = () => planInquiryRecoveryForMembers({
+      domain: h.domain as never, ready: composed.ready, currentScope: id => recoveryScopes.get(id),
+      sessionEvidence: createInquirySessionEvidence({
+        getLive: id => agents.get(id) as never,
+        // The restarted agent's own session log is the durable evidence available in this fixture.
+        readEvents: async id => agents.get(id)?.session.snapshotEvents(),
+      }),
+      workEvidence: createInquiryWorkEvidence((sessionId, workId) => works.get(sessionId, workId)),
+    })
+    const recover = () => runInquiryStartupRecovery({ plan, pumpTarget: composed.pumpTarget, pumpResults: composed.pumpResults, log: () => undefined })
+    const idle = async () => { await Promise.all([...agents.values()].map(agent => agent.whenIdle())); await Promise.all([...agents.values()].map(agent => agent.whenIdle())) }
+    return { ctx, agents, claims, errors, plan, recover, idle }
+  }
+
+  it('re-triggers an accepted-but-never-delivered target message exactly once after a restart', async () => {
+    const h = await openPetHarness()
+    let graph: Awaited<ReturnType<typeof bootAfterRestart>> | undefined
+    try {
+      const { handoff } = await acceptWithoutTarget(h)
+      expect(handoff).toMatchObject({ state: 'intent' })
+      expect(h.domain.table('inquiries').get('recovery-inquiry')).toMatchObject({ status: 'queued' })
+      graph = await bootAfterRestart(h)
+      // Control (the behaviour before this executor existed): nothing triggers the pump after a restart.
+      await graph.idle()
+      expect(graph.claims.filter(claim => claim.messageId === handoff!.messageId)).toHaveLength(0)
+      expect(h.domain.table('inquiries').get('recovery-inquiry')).toMatchObject({ status: 'queued' })
+      const planned = await graph.plan()
+      expect(planned.filter(action => action.kind === 'enqueue-existing-message')).toMatchObject([{ phase: 'target', messageId: handoff!.messageId, scope: { sessionId: 'child-b' } }])
+
+      const report = await graph.recover()
+      await graph.idle()
+      expect(report).toMatchObject({ dispatchedTarget: 1, failed: 0 })
+      const received = graph.claims.filter(claim => claim.agentId === 'child-b' && claim.messageId === handoff!.messageId)
+      expect(received).toHaveLength(1)
+      expect(h.domain.table('inquiry_handoffs').get(JSON.stringify(['recovery-inquiry', 'target']))).toMatchObject({ state: 'claimed', claimTurn: received[0]!.turn })
+      const status = (h.domain.table('inquiries').get('recovery-inquiry') as { status: string }).status
+      expect(status).not.toBe('needs-review')
+      expect(status).not.toBe('queued')
+      expect(graph.errors).toEqual([])
+
+      // A second recovery after the exchange has moved on triggers nothing new for this message.
+      await graph.recover(); await graph.idle()
+      expect(graph.claims.filter(claim => claim.messageId === handoff!.messageId)).toHaveLength(1)
+    } finally {
+      await graph?.ctx.fiber.dispose()
+      await h.close()
+    }
+  })
+
+  it('does not enqueue a second copy when the same messageId is already in the target inbox', async () => {
+    const h = await openPetHarness()
+    const gate = Promise.withResolvers<void>()
+    let graph: Awaited<ReturnType<typeof bootAfterRestart>> | undefined
+    try {
+      const { handoff } = await acceptWithoutTarget(h)
+      graph = await bootAfterRestart(h, { holdTarget: gate.promise })
+      const target = graph.agents.get('child-b')!
+      // Keep the target busy with an ordinary turn, and park the exact handoff message in its inbox.
+      target.followup(createUserMessage({ content: [{ type: 'text', text: 'ordinary work' }], source: { kind: 'user' } }))
+      await vi.waitFor(() => expect(target.status).not.toBe('idle'))
+      const parked = { ...createUserMessage({ content: [{ type: 'text', text: 'parked' }], source: { kind: 'user' } }), id: handoff!.messageId as never }
+      target.followup(parked as never)
+      const inboxIds = () => [...target.inbox.nextTurn, ...target.inbox.nextStep].map((message: { id: string }) => message.id)
+      expect(inboxIds().filter(id => id === handoff!.messageId)).toHaveLength(1)
+
+      const report = await graph.recover()
+      expect(report).toMatchObject({ dispatchedTarget: 0, dispatchedResult: 0, awaiting: 1, failed: 0 })
+      expect(inboxIds().filter(id => id === handoff!.messageId)).toHaveLength(1)
+      gate.resolve()
+      await graph.idle()
+      expect(graph.errors).toEqual([])
+    } finally {
+      gate.resolve()
+      await graph?.ctx.fiber.dispose()
+      await h.close()
+    }
+  })
+})

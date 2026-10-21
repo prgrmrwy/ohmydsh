@@ -77,6 +77,12 @@ import {
 import { InquiryOutboxStore } from './host/inquiry/outbox-store.js'
 import { createInquiryOwnerProjection } from './host/inquiry/owner-projection.js'
 import { summarizeInquiryReconciliation } from './host/inquiry/reconcile.js'
+import {
+  createInquirySessionEvidence,
+  createInquiryWorkEvidence,
+  planInquiryRecoveryForMembers,
+  runInquiryStartupRecovery,
+} from './host/inquiry/startup-recovery.js'
 import type { InquiryOriginProof } from './host/inquiry/ask.js'
 import type {
   PetLocusFinishInput,
@@ -539,6 +545,8 @@ async function initialize(
   // the pass can classify inquiries but cannot see whether a result already
   // exists, so it would report a fault instead of reconciling on a guess.
   const inquiryOutboxStore = new InquiryOutboxStore(domain as never)
+  const inquiryHandoffStore = new InquiryHandoffStore(domain as never)
+  const inquiryWorkStore = new InquiryWorkStore(domain as never)
 
   /**
    * Synchronous, cheap durable description of one circle member.
@@ -4155,6 +4163,54 @@ async function initialize(
       },
       `dsh-pet: ${route.path}`,
     )
+  }
+
+  /**
+   * Restart recovery for the NEW inquiry handoff protocol (design D6).
+   *
+   * Runs after every dependency above is initialised (cold resume needs `selection` and
+   * `persistedPresetFor`) and BEFORE the Feishu channel starts. It only triggers the existing
+   * runtime pumps for rows the read-only planner proves were never put in an inbox; anything it
+   * cannot prove is reported, never retried, and nothing durable is written. The pumps re-check
+   * readiness, identity, generation and inbox de-duplication themselves. Log lines are counts only.
+   */
+  if (!composed.ready) {
+    petLog('dsh-pet: inquiry startup recovery skipped (runtime not ready)')
+  } else {
+    const recovered = await lifecycle.contain('Pet inquiry startup recovery', () => {
+      const sessionController = ctx.get('sessionController') as
+        | { inspect?: (id: unknown, signal?: AbortSignal) => Promise<unknown> }
+        | undefined
+      return runInquiryStartupRecovery({
+        plan: () => planInquiryRecoveryForMembers({
+          domain: domain as never,
+          ready: composed.ready,
+          currentScope: currentInquiryScope,
+          sessionEvidence: createInquirySessionEvidence({
+            getLive: getInquiryLiveAgent as never,
+            readEvents: async sessionId => {
+              if (typeof sessionController?.inspect !== 'function') return undefined
+              const inspection = await sessionController.inspect(sessionId) as { readonly events?: readonly unknown[] } | undefined
+              return inspection?.events
+            },
+          }),
+          workEvidence: createInquiryWorkEvidence((sessionId, workId) => inquiryWorkStore.get(sessionId, workId)),
+        }),
+        pumpTarget: composed.pumpTarget,
+        pumpResults: composed.pumpResults,
+        log: code => petLog(`dsh-pet: ${code}`),
+      })
+    })
+    if (recovered !== undefined) {
+      petLog(
+        'dsh-pet: inquiry-startup-recovery'
+        + ` dispatched-target=${String(recovered.dispatchedTarget)}`
+        + ` dispatched-result=${String(recovered.dispatchedResult)}`
+        + ` awaiting=${String(recovered.awaiting)}`
+        + ` review=${String(recovered.review)}`
+        + ` failed=${String(recovered.failed)}`,
+      )
+    }
   }
 
   // Starts only when configuration says the channel is enabled, and stops

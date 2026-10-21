@@ -162,6 +162,10 @@ export function composeProductionInquiry(ports: ProductionInquiryPorts) {
   return Object.freeze({
     answerStore: answers,
     runtime,
+    // Restart-recovery trigger entry points: straight forwards. Readiness, identity, generation,
+    // inbox de-duplication and cold resume are all enforced inside the runtime pumps.
+    pumpTarget: (sessionId: string) => runtime.pumpTarget(sessionId),
+    pumpResults: (sessionId: string) => runtime.pumpResults(sessionId),
     get ready() { return readiness() },
     install,
     release: (agent: Agent) => { if (adapters.get(agent.id)?.session === agent.session) adapters.delete(agent.id) },
