@@ -38,10 +38,10 @@
 
 ## 6. 重启对账与可见状态
 
-- [ ] 6.1 新协议 startup recovery：可证明未交接者恢复、已有 inbox 不重复、已 claim 按证据收敛、未知 needs-review；先 readiness/成员重验
+- [x] 6.1 新协议 startup recovery：可证明未交接者恢复、已有 inbox 不重复、已 claim 按证据收敛、未知 needs-review；先 readiness/成员重验（证据：`a627aa4a` 启动恢复执行器；编译图重启用例恰好派发一次、已入箱不重复；已 claim 结果不明者仍由对账判 needs-review 并给请求方失败结果；10-21 14:21 真机日志 `inquiry-startup-recovery … review=2 failed=0`）
 - [ ] 6.2 覆盖接受、intent、入箱、claim、答案事务、outbox 交接、result claim 与终结事务各边界 crash/重投，不重复模型工作或吞输入
 - [ ] 6.3 接通 ownerProjection/wire/settings，展示真实标识/阶段/等待/能力/原因；空/未知/读取失败不同，不泄露正文或混入待办，不将 A 展示为完整外发隔离（部分：只读 owner 投影已接生产路由；设置页未展示）
-- [ ] 6.4 旧记录只读对账及显式处置，首次上线不 pump 旧 queued；覆盖重复旧问题、归属失效、Delivery 到期，不按正文自动去重
+- [x] 6.4 旧记录只读对账及显式处置，首次上线不 pump 旧 queued；覆盖重复旧问题、归属失效、Delivery 到期，不按正文自动去重（证据：旧两条只读核对自 10-19 离线备份；首次上线未 pump，日志 review=2；按所有者决定离线取消，见 8.5）
 
 ## 7. 完整验证与局部回归
 
@@ -58,5 +58,5 @@
 - [ ] 8.2 获准 owner 只读路由或停 writer 后一致介质核对历史两条存在性、状态、消息/turn 与原工作有效性；不绕锁、不把 accepted 当数据库证明
 - [x] 8.3 获准后迁移与 dsh build 物化，连续第二次无变化；启动原 Host、核对 provenance、刷新原 3080 GUI，不起替代 server（用户 2026-10-20 16:06 重建并重启本机 Host，部署 Pet 已含 `0b2910ff`）
 - [ ] 8.4 本机获准测试会话用真实模型完成双向问答并核对持久证据；飞书续进仅在另行明确入口/发送边界内验证，不实际发送来测试 shell 剩余风险
-- [ ] 8.5 用户选择后处置旧两条（恢复合法未派发项、取消或保留待核查），过期不恢复回复权，不批量执行旧工作
+- [x] 8.5 用户选择后处置旧两条（恢复合法未派发项、取消或保留待核查），过期不恢复回复权，不批量执行旧工作（10-21 14:36 所有者选择取消 inquiry-dsharaybdvo / inquiry-gysj0ji9q57：Delivery-60 已过期、二者重复；停机执行 `scripts/cancel-legacy-inquiries.mjs`，先备份；重启后 recoverable=0、review=0；记录保留）
 - [ ] 8.6 记录脱敏验收、A 有限保证及回滚边界；对齐旧 inquiry change 重叠条文/归档顺序，不宣称完整 G4 或其全部完成；规范同步和无远端变更确认后再归档
