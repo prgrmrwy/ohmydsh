@@ -171,8 +171,6 @@ tests/                   仓库级测试
 - [better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) — 把侧边栏变成服务化的多标签工作台。
 - [dsh-opencode-session-header](https://github.com/beihzb/dsh-opencode-session-header) — 发送 OpenCode Go 要求的会话头，修复缺少会话 ID 的报错。
 
-- [ponytail](https://github.com/DietrichGebert/ponytail) — 资深开发者提示词 skill，让实现保持精简、审查聚焦具体问题。
-
 ### 官方可选
 
 - [experimental-schedule](https://www.npmjs.com/package/@deepseek-ai/dsh-experimental-schedule-bundle) — 官方的定时自动化页面、schedule 工具与时间上下文。
@@ -215,7 +213,6 @@ tests/                   仓库级测试
 - [remove-dsh-plugin](skills/remove-dsh-plugin/SKILL.md) — 从 manifest 移除插件、build，并在重启前询问。
 - [dsh-sandbox-notes](skills/dsh-sandbox-notes/SKILL.md) — 关于 sandbox 权限与「not strictly wider」报错的避坑笔记。
 - [dsh-pet-executor](presets/dsh-pet-executor) — 不加载全局 skill provider 的 Pet 执行会话 preset。
-- [ponytail-skills](patches/ponytail-skills.yml) — 通过独立 skill provider 暴露已固定版本的 ponytail 技能包。
 - [connection-webserver](patches/connection-webserver.yml) — 恢复 Connection RPC 通道注册的 composition patch。
 - [ponytail-skills](patches/ponytail-skills.yml) — 只为 ponytail 包挂载专属 skill provider 的 composition patch。
 - [websocket-heartbeat](patches/websocket-heartbeat.yml) — 配置补丁：把官方 gateway 的 WebSocket 心跳放宽到 5 秒，使大体量历史在短暂网络抖动时不被断开。
