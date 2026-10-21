@@ -40,7 +40,7 @@
 
 理由：主请求改写与芯片只能由插件完成；子会话判断需要与主会话同一判断器，工具是主 Agent 能调用的唯一同步入口。首版删去的 `route_for_task` 以更窄形式恢复：只做 Jev 判断 + 查表，不做候选池或不可用模型回退。
 
-开关耦合：插件与 skill 仍是 manifest 中两个独立条目，按 (b) 处理不一致：skill 写明“`route_subagent` 工具不存在即视为本能力停用：告知用户‘子会话 Jev 选模未启用’后，按官方默认委派（不传 provider/model/reasoning_effort），不得猜档位”。启用插件即同意子会话判档外发，与主会话 AUTO/MANUAL 无关；工具描述写明“会把任务文本发送给 OpenRouter/TypeSafe”。不在 sync 增加跨条目校验（避免为一处耦合新增 manifest 规则）。
+开关耦合：插件与 skill 仍是 manifest 中两个独立条目，按 (b) 处理不一致：skill 写明“`route_subagent` 工具不存在即视为本能力停用：告知用户‘子会话 Jev 选模未启用’后，按官方默认委派（不传 provider/model/reasoning_effort），不得猜档位”。子会话判档只在所属主会话为 AUTO 时外发（2026-10-22 修订，见 D6）；工具描述写明“会把任务文本发送给 OpenRouter/TypeSafe”。不在 sync 增加跨条目校验（避免为一处耦合新增 manifest 规则）。
 
 ### D2. 官方合成后只调 effort（沿用）
 `agent/request` 外层 listener 先 `await next()`，保留官方 provider/model 与其它配置，只修改 reasoning effort；子会话请求直接透传。effort 支持范围取实际输出模型的目录；同回合模型变化时按新模型重新映射，不重新判断。
@@ -123,7 +123,7 @@ New user message:
 理由：jev-mcp 的重试与 60 秒期限违背“失败即停用”；直连只多一个约 60 行模块，无新依赖。本 change 自带 Jev 客户端与类别闭集，**不依赖** `configurable-jev-provider` 的共享 transport；该 change 的草案须删去“供 auto-model-routing 使用”与“不可用降级”字样（见 proposal Impact），避免日后合并引入降级路径。不经 OpenRouter 余额接口：用户要求只靠失败分类。替代方案“对 429/5xx 先重试一次”已被用户否决。
 
 ### D6. 子会话决策工具 `route_subagent`
-选择：注册全局工具 `route_subagent`，参数 `{task: string, provider: "claude" | "codex"}`，`timeoutMs` 5000。执行：对 `task` 脱敏（D4）并截断，调用 D5 客户端（无上一档位、不带上一轮上下文：子任务描述由主 Agent 写成自包含文本），成功返回 `{tier, provider, model, reasoning_effort}`（查 D9 子会话表；模型不受调用会话模型限制），失败返回错误结果，文本为该类别提示并注明“请暂停委派并询问用户”。工具不改写任何会话状态，不受主会话 AUTO/MANUAL 或 `disabled` 影响（主会话停用不阻止委派判断，反之亦然；每次调用独立反映 Jev 当下状态）。工具在子会话（`origin = subagent`）中调用同样可用。`exec.signal` 取消时返回错误结果“已取消”，不含余额/凭据提示，不要求询问用户。
+选择：注册全局工具 `route_subagent`，参数 `{task: string, provider: "claude" | "codex"}`，`timeoutMs` 5000。执行：对 `task` 脱敏（D4）并截断，调用 D5 客户端（无上一档位、不带上一轮上下文：子任务描述由主 Agent 写成自包含文本），成功返回 `{tier, provider, model, reasoning_effort}`（查 D9 子会话表；模型不受调用会话模型限制），失败返回错误结果，文本为该类别提示并注明“请暂停委派并询问用户”。工具不改写任何会话状态。**跟随所属主会话的模式（2026-10-22 用户决定）**：调用会话为普通会话时看它自己，为子会话时沿 `header.parentSession` 向上找到根普通会话（经 `sessionController.resolveAgent`，任一环解析失败视为 MANUAL，失败时不外发）；根会话不是 AUTO（含 Jev 停用）时不调 Jev、不外发，返回 `{routed: false, reason: 'manual'}`，skill 规定此时按官方默认委派、不询问用户。理由：MANUAL 表示用户这时不要自动调整，子会话选模也属于自动调整；同时 MANUAL 下不再外发任务文本，隐私面随开关收缩。替代方案“工具始终可用、与模式无关”（修订前）会让 MANUAL 用户仍被自动选模并外发，否决；“MANUAL 时返回错误”会触发 skill 的“暂停并询问用户”，打扰用户，否决。`exec.signal` 取消时返回错误结果“已取消”，不含余额/凭据提示，不要求询问用户。
 
 skill 规则：委派前调用 `route_subagent`；成功则把返回的三个字段显式传给官方 `subagent`，并在 description 末尾标注 `[model·effort]`；默认 provider 为当前会话 provider，用户或 lead 要求独立体系时换另一个；失败时**停止委派并询问用户**，不得自行猜测档位、不得改为主会话自己做、不得使用其它模型代替；官方报告模型不可用时如实报告，不换模型。当前会话 provider 不是 `claude`/`codex` 时，暂停委派并询问用户用哪一个。工具不存在时按 D1 开关耦合处理。
 

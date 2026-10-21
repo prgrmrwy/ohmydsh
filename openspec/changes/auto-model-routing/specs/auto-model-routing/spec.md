@@ -190,15 +190,25 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - **THEN** 输出 effort 为 `medium`，Jev 请求次数仍为 1
 
 ### Requirement: 子会话决策工具与 skill
-系统 SHALL 注册 Host 工具 `route_subagent`，参数 `{task: string, provider: "claude" | "codex"}`，描述须说明会把任务文本发送给 OpenRouter/TypeSafe：以与主会话相同的 Jev 客户端、`TIER_QUESTIONS` 与失败类别判断档位（`state` 上一档位为 `none`），成功返回 `{tier, provider, model, reasoning_effort}`。子会话模型按档位取自代码常量 `CHILD_MODELS`（唯一来源）：`claude` 依次为 `claude-haiku-5-5`、`claude-sonnet-5-5`、`claude-opus-5-5`、`claude-opus-5-5`，`codex` 依次为 `gpt-6-luna`、`gpt-6.1-sol`、`gpt-6.1-sol`、`gpt-6.1-sol`；模型选择只依赖档位与 provider，MUST NOT 受调用会话当前模型限制；MUST NOT 自动返回 `claude-fable-5-1` 或 `gpt-6-astra`。`reasoning_effort` SHALL 按“级别与 effort 映射”的同一起点规则对所选模型计算（不做受支持值截断，由官方创建参数校验）；失败返回错误结果，内容为该类别提示与“暂停委派并询问用户”；`exec.signal` 取消时返回“已取消”错误结果，不含余额/凭据提示。工具 MUST NOT 改写任何会话状态，不受主会话模式或 `disabled` 影响。系统 SHALL 提供 skill `subagent-model-routing`，其文本须要求：(1) 委派前调用 `route_subagent`；(2) 将返回的 `provider`、`model`、`reasoning_effort` 全部显式传给官方 `subagent`；(3) 在 `description` 末尾以 `[model·effort]` 标注；(4) 默认 provider 为当前会话 provider，用户或 lead 要求独立体系时改用另一个；当前 provider 不是 `claude`/`codex` 时暂停委派并询问用户；(5) 工具失败时暂停委派并询问用户，MUST NOT 自行猜测档位、改由主会话完成或换用其它模型；(6) 复用已有子会话前比较其标注，更高或无法确认时新建；(7) `route_subagent` 工具不存在时告知用户“子会话 Jev 选模未启用”，按官方默认委派且不传 provider/model/reasoning_effort，不得猜档位。路由器 MUST NOT 改写子会话的创建参数或请求。
+系统 SHALL 注册 Host 工具 `route_subagent`，参数 `{task: string, provider: "claude" | "codex"}`，描述须说明会把任务文本发送给 OpenRouter/TypeSafe：以与主会话相同的 Jev 客户端、`TIER_QUESTIONS` 与失败类别判断档位（`state` 上一档位为 `none`），成功返回 `{tier, provider, model, reasoning_effort}`。子会话模型按档位取自代码常量 `CHILD_MODELS`（唯一来源）：`claude` 依次为 `claude-haiku-5-5`、`claude-sonnet-5-5`、`claude-opus-5-5`、`claude-opus-5-5`，`codex` 依次为 `gpt-6-luna`、`gpt-6.1-sol`、`gpt-6.1-sol`、`gpt-6.1-sol`；模型选择只依赖档位与 provider，MUST NOT 受调用会话当前模型限制；MUST NOT 自动返回 `claude-fable-5-1` 或 `gpt-6-astra`。`reasoning_effort` SHALL 按“级别与 effort 映射”的同一起点规则对所选模型计算（不做受支持值截断，由官方创建参数校验）；失败返回错误结果，内容为该类别提示与“暂停委派并询问用户”；`exec.signal` 取消时返回“已取消”错误结果，不含余额/凭据提示。工具 MUST NOT 改写任何会话状态。工具 SHALL 先确定**所属主会话**：调用会话为普通会话时即其本身；为子会话时沿 `header.parentSession` 向上找到第一个非 `origin = subagent` 的会话；链上任一会话无法解析时视为 MANUAL。所属主会话模式不是 `AUTO`（含因 Jev 失败停用）时，工具 MUST NOT 请求 Jev、MUST NOT 外发任务文本，返回非错误结果 `{routed: false, reason: "manual"}`，渲染文本说明“主会话为 MANUAL：不判档，按官方默认委派，不传 provider/model/reasoning_effort”；只有所属主会话为 `AUTO` 时才判档。系统 SHALL 提供 skill `subagent-model-routing`，其文本须要求：(1) 委派前调用 `route_subagent`；(2) 将返回的 `provider`、`model`、`reasoning_effort` 全部显式传给官方 `subagent`；(3) 在 `description` 末尾以 `[model·effort]` 标注；(4) 默认 provider 为当前会话 provider，用户或 lead 要求独立体系时改用另一个；当前 provider 不是 `claude`/`codex` 时暂停委派并询问用户；(5) 工具失败时暂停委派并询问用户，MUST NOT 自行猜测档位、改由主会话完成或换用其它模型；(6) 复用已有子会话前比较其标注，更高或无法确认时新建；(7) `route_subagent` 工具不存在时告知用户“子会话 Jev 选模未启用”，按官方默认委派且不传 provider/model/reasoning_effort，不得猜档位；(8) 工具返回 `routed: false` 时按官方默认委派且不传 provider/model/reasoning_effort，不询问用户、不猜档位。路由器 MUST NOT 改写子会话的创建参数或请求。
 
 #### Scenario: 工具成功返回表中条目
-- **GIVEN** Jev 对任务返回 `complex`
+- **GIVEN** 调用会话为 `AUTO`，Jev 对任务返回 `complex`
 - **WHEN** 以 `provider: claude` 与 `provider: codex` 分别调用 `route_subagent`
 - **THEN** 分别返回 `{complex, claude, claude-opus-5-5, high}` 与 `{complex, codex, gpt-6.1-sol, high}`
 
+#### Scenario: 主会话为 MANUAL 时不判档、不外发
+- **GIVEN** 会话 S1 为 `MANUAL`（分别为用户手动设置、因 Jev 402 停用两种情况）；S1 的子会话 C1；`parentSession` 指向无法解析会话的子会话 C2
+- **WHEN** 分别在 S1、C1、C2 中调用 `route_subagent`
+- **THEN** 三次都返回非错误结果 `{routed: false, reason: manual}`，渲染文本含“按官方默认委派”；假 Jev 服务收到 0 个请求；S1 无新的 `decision`
+
+#### Scenario: 子会话中调用按根会话模式判档
+- **GIVEN** 会话 S1 为 `AUTO`，其子会话 C1 的子会话 C2，Jev 返回 `standard`
+- **WHEN** 在 C2 中以 `provider: claude` 调用 `route_subagent`
+- **THEN** 返回 `{standard, claude, claude-sonnet-5-5, medium}`；假 Jev 服务收到 1 个请求；S1 不新增 `decision`
+
 #### Scenario: 子会话模型不受调用会话模型限制
-- **GIVEN** 调用会话当前模型为 `claude-haiku-5-5`，Jev 对任务返回 `escalated`
+- **GIVEN** 调用会话为 `AUTO` 且当前模型为 `claude-haiku-5-5`，Jev 对任务返回 `escalated`
 - **WHEN** 以 `provider: claude` 调用 `route_subagent`
 - **THEN** 返回 `{escalated, claude, claude-opus-5-5, xhigh}`；对四个档位与两个 provider 的全部组合，返回值中不出现 `claude-fable-5-1`、`gpt-6-astra` 或 `max`
 
@@ -222,10 +232,10 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - **WHEN** 测试比较二者
 - **THEN** README 清单恰为 `CHILD_MODELS` 中去重后的 `provider/model` 集合
 
-#### Scenario: skill 文本包含七项规则
+#### Scenario: skill 文本包含八项规则
 - **GIVEN** `skills/subagent-model-routing/SKILL.md`
 - **WHEN** 测试读取其文本
-- **THEN** 文本包含 `route_subagent`、`reasoning_effort`、`[model·effort]`、独立体系规则、非 claude/codex provider 时询问、“暂停委派并询问用户”、复用“新建”规则及“子会话 Jev 选模未启用”，且不含档位表模型名
+- **THEN** 文本包含 `route_subagent`、`reasoning_effort`、`[model·effort]`、独立体系规则、非 claude/codex provider 时询问、“暂停委派并询问用户”、复用“新建”规则、“子会话 Jev 选模未启用”及 `routed: false` 时按官方默认委派，且不含档位表模型名
 
 ### Requirement: 状态可见且不改写其它控件
 系统 SHALL 在 composer 的 `conversation.input.right` 列表以负的 `order` 注册 `AUTO / MANUAL` 芯片（GPT 速度芯片为 `order: 0`）。芯片 SHALL 是单个按钮：可见文本为模式名，其后跟一个切换图标；无边框、无底色，hover 时显示官方交互底色；点击即切换模式。状态面板 SHALL 在鼠标悬停或键盘聚焦芯片时显示、离开芯片与面板时收起，内容为插件本回合实际输出的 effort 与 `reason`，以及该会话最近一次 Jev 决策（与决策提示同一格式的两行：谁判断、档位 → （模型）effort、耗时；非 0% 档位分布），无决策时不显示该段；面板 MUST NOT 渲染决定历史（Host 仍在内存保留最近 20 条并经状态接口返回，供排查，重启后清空、不落盘）；面板 MUST NOT 声称官方选择器总能反映 AUTO 结果（存在待生效手选时二者不同）。`reason` 取值为闭集 `jev | continued | no-effort-support | jev-failed`（`continued` 为非用户回合沿用上一级别）。会话存在 `disabled` 时，芯片**可见文本** SHALL 为 `MANUAL · Jev 停用` 并以警示色显示，title SHALL 给出该失败类别的人类可读提示；面板 SHALL 显示类别、提示、发生时间及“点击 AUTO 重试”。芯片 MUST NOT 调用官方模型选择接口或速度芯片的设置接口。
@@ -265,7 +275,7 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 
 每次 Jev **成功**判档，系统 SHALL 为发起判档的主会话记录最近一次决策 `{id, source, tier, effort, model?, confidence?, probabilities?, ms}`（仅内存，不落盘）：
 - `source = main`：主会话 AUTO 用户回合判档；`effort` 为按实际模型映射后的值（无 effort 支持时不记录），无 `model`。
-- `source = subagent`：`route_subagent` 成功返回；`model` 与 `effort` 为工具返回值；记录到调用工具的会话，与该会话模式无关。
+- `source = subagent`：`route_subagent` 成功返回（所属主会话为 AUTO 时才会发生）；`model` 与 `effort` 为工具返回值；记录到调用工具的普通会话（调用方为子会话时不记录）。
 `confidence` 取 Jev 响应 `answers.tier.confidence`（0–1，缺失或非数字时不显示）；`probabilities` 取 `answers.tier.probabilities` 中四个档位的有限数值（其余键忽略，一个都没有时不显示）；`ms` 为该次 Jev 请求耗时。判档失败、取消或被丢弃时 MUST NOT 记录。
 
 状态接口 SHALL 始终返回 `decision`（如有），供面板展示；开关只控制弹出提示。开关开启时状态接口同时返回 `decisionToast: true`；client SHALL 仅在 `decisionToast` 为 true 且发现新的决策 `id` 时于芯片上方显示提示，3 秒后自动消失，不拦截指针；提示 MUST 在 Agent 运行、官方隐藏右侧控件期间仍可见（渲染在隐藏区域之外）。提示两行：第一行 `主会话判断 · <tier> → <effort> · <s>s` 或 `子会话判断 · <tier> → <model> · <effort> · <s>s`；第二行为分布，按 simple、standard、complex、escalated 固定顺序列出四舍五入后非 0% 的档位，以 ` / ` 分隔，例如 `complex 61% / escalated 39%`；无分布时省略第二行。提示不显示置信（它由最高概率推导，不含额外信息，且易与分布混淆）。两次状态读取之间若有多次决策，只显示最新一次。开关关闭时 client MUST NOT 弹出提示。
@@ -276,7 +286,7 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - **THEN** 状态含 `decision = {source: main, tier: complex, effort: high, confidence: 0.92, probabilities}`；提示第一行为 `主会话判断 · complex → high · <耗时>s`，第二行列出非 0% 的档位
 
 #### Scenario: 子会话选模提示
-- **GIVEN** 开关开启，会话 S1 为 `MANUAL`，Jev 对 `route_subagent` 返回 `complex`、confidence 0.8
+- **GIVEN** 开关开启，会话 S1 为 `AUTO`，Jev 对 `route_subagent` 返回 `complex`、confidence 0.8
 - **WHEN** S1 调用 `route_subagent(provider: claude)` 后读取 S1 状态并渲染提示
 - **THEN** 状态含 `decision = {source: subagent, tier: complex, model: claude-opus-5-5, effort: high, confidence: 0.8, probabilities}`；提示第一行以 `子会话判断 · complex → claude-opus-5-5 · high` 开头，不含“置信”
 
