@@ -1,6 +1,6 @@
-# 实施检查点（未完成、未部署）
+# 实施检查点（已部署本机，未完成）
 
-本提交保存 `restore-pet-inquiry-runtime-channel` 的阶段性源码、兼容补丁和测试，不代表生产通道已恢复。需求为修复本机 `pet_inquire` 接受后未真实派发、无答案回送的问题，不修改远端机器或待办受理语义。
+本文件记录 `restore-pet-inquiry-runtime-channel` 的阶段性进度；通道核心已在本机真机恢复，剩余项见"必须继续完成"。需求为修复本机 `pet_inquire` 接受后未真实派发、无答案回送的问题，不修改远端机器或待办受理语义。
 
 ## 已实现及历史验收
 
@@ -23,13 +23,21 @@
 
 已知限制：接线测试没有“守卫先于 adapter”的观察点，该顺序仅由源码审读保证；locus child 重复发布会触发一个与本改动无关的既有重复注册（`pet_collaboration_context`，接线前后行为一致），因此幂等用例用主会话。
 
+## 第三次检查点（2026-10-20，部署与真机）
+
+提交 `71bacb23` 冷恢复解析器、`949e55d8` adapter 随 agent 释放、`cb819705` locus child 不得声称私有本地受众、`0b2910ff` 结果轮凭持久证明恢复原 Delivery 回复权、`a13aa67c` 真实会话重放。独立验证：Pet typecheck 0 错误，默认全量 3302 通过、8 跳过，编译图 production 10、wiring 4、managed-effects 14。
+
+真机（用户 10-20 11:10 启动的旧构建）：两个群各一次 child→main 询问，问题派发、主会话显式回答、结果轮回到 child 全部成功，证明原"accepted 但无 inbox/turn"已修复；最后一步回群均被拒（`finish:mixed-source`），即 `0b2910ff` 修复前行为。重放测试在修复前复现、修复后通过。用户 16:06 重建重启后，普通群回复正常；同群被卡住的 Delivery 会让后续消息排队到软期限（delivery-75 堵到 16:30）。
+
+2026-10-21 11:10 真机验证：「Pet Locus shell-tier test」群重建后，child 经 `pet_inquire` 问主会话，主会话 `pet_inquiry_answer` 显式回答，结果轮 `pet_locus_finish` 成功回群（inquiry-dg0kbtt6tlq）。
+
 ## 必须继续完成
 
-- 询问生产工厂已接入入口，但 `resolveAgent` 只认已加载的 agent；未驻留的 child/父尚不能被冷恢复来接收询问。
-- 精确 continuation-owned child 冷恢复、Delivery 来源及 finish/wait 的原回复权证明、运行槽与 lifecycle 在途的分别处理。
-- 合法结果轮嵌套与三方完整答案闭环、证据驱动启动恢复、旧协议只读处置、迁移及故障边界验收。
-- 原生所有者真实工具与 Pet 策略的直接集成测试已在源码中，须以新编译图验证，不用旧未标记图冒充。
-- 完整生产接线、回归、规范对齐完成前，不勾选尚未满足的整项任务、不归档。
+- 启动恢复执行器：今天重启日志 `recoverable=2` 只对账未续进（6.1/6.2）。
+- 真实 child 冷恢复运行体验证（4.2）；readiness 覆盖全部受管入口（2.4/5.3）。
+- 旧两条询问显式处置（6.4/8.5）；设置页展示（6.3）；完整 C→B→A 闭环（5.2）。
+- 回群失败时不应静默占住队列（候选新增项，未立项）。
+- 完成前不归档；根 npm test、check:artifacts、strict validate 待重跑。
 
 ## 可复现验证
 
@@ -51,4 +59,4 @@ npx --no-install vitest run
 
 A 边界只硬守 Host 管理的入口，不承诺 shell/脚本/HTTP 内部任意效果隔离。保留 parent 正常工具及 child 现行 safe composition。
 
-未切换正式 launcher、迁移正式数据库、重启 Host、推送远端或真实飞书外发。正式部署、历史两条询问处置及其副作用须另行确认。
+本机 v15→v17 迁移与 10-20 两次重建重启均由用户执行；未推送远端，未操作 lumevm/devbox。历史两条询问处置须另行确认。
