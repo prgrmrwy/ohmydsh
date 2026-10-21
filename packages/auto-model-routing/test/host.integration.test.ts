@@ -3,7 +3,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-api-session-controller'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { createLaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
-import { mkdtempSync, readdirSync, readFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -53,7 +53,8 @@ async function harness(reply: Reply, options: { reject?: () => boolean } = {}) {
  const invoke = async (op: string, body: unknown) => (await routes.get(`/api/auto-model-routing.${op}`)!.fetch(new Request('http://localhost/api', { method: 'POST', body: JSON.stringify(body) }))).json()
  const run = async (text: string) => { agent!.followup(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })); await agent!.whenIdle() }
  cleanup = async () => { await handle.dispose(); for (const f of forks.reverse()) await f.dispose(); await jev.close() }
- return { ctx, jev, calls, agent, selection, invoke, run, home, setMode: (mode: string) => invoke('setMode', { sessionId: agent!.id, mode }) }
+ const toast = (on: boolean) => { const dir = join(home, 'plugins/dsh-auto-model-routing'); mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, 'config.json'), JSON.stringify({ decisionToast: on })) }
+ return { ctx, jev, calls, agent, selection, invoke, run, home, toast, setMode: (mode: string) => invoke('setMode', { sessionId: agent!.id, mode }) }
 }
 
 it('host_routes_and_rpc_envelope', async () => {
@@ -171,4 +172,51 @@ it('main_and_tool_share_questions', async () => {
  expect(child!.model).toBe(main!.model)
  expect(child!.questions).toEqual(main!.questions)
  expect(child!.state).not.toBe(main!.state)
+})
+
+it('main_decision_toast', async () => {
+ const h = await harness(tier('complex', 0.92, { simple: 0.01, standard: 0.04, complex: 0.92, escalated: 0.03 }))
+ h.toast(true)
+ await h.setMode('AUTO')
+ await h.run('排查多个模块')
+ const state = await h.invoke('state', { sessionId: h.agent.id })
+ expect(state.decision).toEqual({ id: expect.any(Number), source: 'main', tier: 'complex', effort: 'xhigh', confidence: 0.92, probabilities: { simple: 0.01, standard: 0.04, complex: 0.92, escalated: 0.03 }, ms: expect.any(Number) })
+ const first = state.decision.id
+ await h.run('继续排查')
+ expect((await h.invoke('state', { sessionId: h.agent.id })).decision.id).toBeGreaterThan(first)
+})
+
+it('subagent_decision_toast', async () => {
+ const h = await harness(tier('complex', 0.8))
+ h.toast(true)
+ const def = h.ctx.tools.get('route_subagent')!
+ await def.execute({ task: '给子会话的任务', provider: 'claude' }, { signal: new AbortController().signal, agent: h.agent } as never)
+ const state = await h.invoke('state', { sessionId: h.agent.id })
+ expect(state.mode).toBe('MANUAL')
+ expect(state.decision).toEqual({ id: expect.any(Number), source: 'subagent', tier: 'complex', model: 'claude-opus-5-5', effort: 'xhigh', confidence: 0.8, ms: expect.any(Number) })
+})
+
+it('toast_switch_malformed_is_off', async () => {
+ const h = await harness(tier('complex', 0.9))
+ await h.setMode('AUTO')
+ await h.run('排查多个模块')
+ const dir = join(h.home, 'plugins/dsh-auto-model-routing'); mkdirSync(dir, { recursive: true })
+ for (const body of ['{not json', JSON.stringify({ decisionToast: 'yes' }), JSON.stringify(null)]) {
+  writeFileSync(join(dir, 'config.json'), body)
+  expect(await h.invoke('state', { sessionId: h.agent.id })).not.toHaveProperty('decision')
+ }
+ h.toast(true)
+ expect((await h.invoke('state', { sessionId: h.agent.id })).decision).toMatchObject({ source: 'main', confidence: 0.9 })
+})
+
+it('toast_off_or_failure_silent', async () => {
+ const h = await harness(tier('complex', 0.9))
+ await h.setMode('AUTO')
+ await h.run('排查多个模块')
+ expect(await h.invoke('state', { sessionId: h.agent.id })).not.toHaveProperty('decision')
+ h.toast(true)
+ const before = (await h.invoke('state', { sessionId: h.agent.id })).decision.id
+ h.jev.set(json(402, {}))
+ await h.run('下一个任务')
+ expect((await h.invoke('state', { sessionId: h.agent.id })).decision.id).toBe(before)
 })

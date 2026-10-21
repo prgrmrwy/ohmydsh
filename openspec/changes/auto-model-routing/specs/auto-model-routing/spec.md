@@ -182,17 +182,17 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - **THEN** 文本包含 `route_subagent`、`reasoning_effort`、`[model·effort]`、独立体系规则、非 claude/codex provider 时询问、“暂停委派并询问用户”、复用“新建”规则及“子会话 Jev 选模未启用”，且不含档位表模型名
 
 ### Requirement: 状态可见且不改写其它控件
-系统 SHALL 在 composer 的 `conversation.input.right` 列表以负的 `order` 注册 `AUTO / MANUAL` 芯片（GPT 速度芯片为 `order: 0`）。芯片 SHALL 是单个按钮：可见文本为模式名，其后跟一个切换图标；无边框、无底色，hover 时显示官方交互底色；点击即切换模式。状态面板 SHALL 在鼠标悬停或键盘聚焦芯片时显示、离开芯片与面板时收起，内容为插件本回合实际输出的 effort 与 `reason`、最近 20 条决定（仅 Host 内存，重启后清空）；面板 MUST NOT 声称官方选择器总能反映 AUTO 结果（存在待生效手选时二者不同）。`reason` 取值为闭集 `jev | continued | no-effort-support | jev-failed`（`continued` 为非用户回合沿用上一级别）。会话存在 `disabled` 时，芯片**可见文本** SHALL 为 `MANUAL · Jev 停用` 并以警示色显示，title SHALL 给出该失败类别的人类可读提示；面板 SHALL 显示类别、提示、发生时间及“点击 AUTO 重试”。芯片 MUST NOT 调用官方模型选择接口或速度芯片的设置接口。
+系统 SHALL 在 composer 的 `conversation.input.right` 列表以负的 `order` 注册 `AUTO / MANUAL` 芯片（GPT 速度芯片为 `order: 0`）。芯片 SHALL 是单个按钮：可见文本为模式名，其后跟一个切换图标；无边框、无底色，hover 时显示官方交互底色；点击即切换模式。状态面板 SHALL 在鼠标悬停或键盘聚焦芯片时显示、离开芯片与面板时收起，内容为插件本回合实际输出的 effort 与 `reason`；面板 MUST NOT 渲染决定历史（Host 仍在内存保留最近 20 条并经状态接口返回，供排查，重启后清空、不落盘）；面板 MUST NOT 声称官方选择器总能反映 AUTO 结果（存在待生效手选时二者不同）。`reason` 取值为闭集 `jev | continued | no-effort-support | jev-failed`（`continued` 为非用户回合沿用上一级别）。会话存在 `disabled` 时，芯片**可见文本** SHALL 为 `MANUAL · Jev 停用` 并以警示色显示，title SHALL 给出该失败类别的人类可读提示；面板 SHALL 显示类别、提示、发生时间及“点击 AUTO 重试”。芯片 MUST NOT 调用官方模型选择接口或速度芯片的设置接口。
 
 #### Scenario: 芯片注册在速度芯片左侧
 - **GIVEN** client bundle 已加载
 - **WHEN** 读取 `conversation.input.right` 的注册项
 - **THEN** 本芯片 `order` 小于 0
 
-#### Scenario: 面板展示状态并限 20 条
+#### Scenario: 面板展示本回合状态，历史只留在 Host
 - **GIVEN** Host 已为某会话产生 25 条决定，最新一条为 `{effort: xhigh, reason: jev}`
 - **WHEN** 读取状态接口并渲染面板
-- **THEN** 面板文本包含 `xhigh`、`jev`，历史列表恰含 20 条
+- **THEN** 状态接口历史恰含 20 条；面板文本包含 `xhigh`、`jev`，且不渲染历史列表
 
 #### Scenario: 停用状态在芯片与面板可见
 - **GIVEN** 会话 `disabled = {category: insufficient-credits}`，模式为 `MANUAL`
@@ -208,6 +208,36 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - **GIVEN** 用户点击芯片切换模式
 - **WHEN** 记录本次交互发出的 RPC
 - **THEN** 只调用本插件的设置模式接口，未调用官方模型选择或 `subscriptions-auth.setSpeed`
+
+### Requirement: 决策提示（可选）
+系统 SHALL 提供默认关闭的开关：`$DSH_HOME/plugins/dsh-auto-model-routing/config.json` 中 `decisionToast: true` 时开启；文件缺失、不可解析或值非 `true` 时视为关闭，不得影响路由。开关每次读取状态时生效，无需重启。
+
+每次 Jev **成功**判档，系统 SHALL 为发起判档的主会话记录最近一次决策 `{id, source, tier, effort, model?, confidence?, probabilities?, ms}`（仅内存，不落盘）：
+- `source = main`：主会话 AUTO 用户回合判档；`effort` 为按实际模型映射后的值（无 effort 支持时不记录），无 `model`。
+- `source = subagent`：`route_subagent` 成功返回；`model` 与 `effort` 为工具返回值；记录到调用工具的会话，与该会话模式无关。
+`confidence` 取 Jev 响应 `answers.tier.confidence`（0–1，缺失或非数字时不显示）；`probabilities` 取 `answers.tier.probabilities` 中四个档位的有限数值（其余键忽略，一个都没有时不显示）；`ms` 为该次 Jev 请求耗时。判档失败、取消或被丢弃时 MUST NOT 记录。
+
+开关开启时，状态接口 SHALL 返回 `decision`；client SHALL 在发现新的决策 `id` 时于芯片上方显示一行提示，1 秒后自动消失，不拦截指针。提示两行：第一行 `主会话判断 · <tier> → <effort> · 置信 <n>% · <s>s` 或 `子会话判断 · <tier> → <model> · <effort> · 置信 <n>% · <s>s`；第二行为分布，按 simple、standard、complex、escalated 固定顺序列出各档位百分比，以 ` / ` 分隔，例如 `simple 1% / standard 4% / complex 92% / escalated 3%`；无分布时省略第二行。两次状态读取之间若有多次决策，只显示最新一次。开关关闭时状态接口 MUST NOT 返回 `decision`，client 不显示提示。
+
+#### Scenario: 主会话判档提示
+- **GIVEN** 开关开启，会话为 `AUTO`，Jev 返回 `complex`、confidence 0.92，实际模型为 Opus
+- **WHEN** 该回合首个请求经过路由器后读取状态并渲染提示
+- **THEN** 状态含 `decision = {source: main, tier: complex, effort: xhigh, confidence: 0.92, probabilities}`；提示第一行为 `主会话判断 · complex → xhigh · 置信 92% · <耗时>s`，第二行列出四档分布
+
+#### Scenario: 子会话选模提示
+- **GIVEN** 开关开启，会话 S1 为 `MANUAL`，Jev 对 `route_subagent` 返回 `complex`、confidence 0.8
+- **WHEN** S1 调用 `route_subagent(provider: claude)` 后读取 S1 状态并渲染提示
+- **THEN** 状态含 `decision = {source: subagent, tier: complex, model: claude-opus-5-5, effort: xhigh, confidence: 0.8, probabilities}`；提示第一行以 `子会话判断 · complex → claude-opus-5-5 · xhigh · 置信 80%` 开头
+
+#### Scenario: 开关关闭或判档失败不提示
+- **GIVEN** 开关关闭，或开关开启但 Jev 返回 402
+- **WHEN** 读取状态
+- **THEN** 关闭时状态不含 `decision`；失败时不产生新的 `decision`
+
+#### Scenario: 提示只显示一次且 1 秒消失
+- **GIVEN** client 已显示 id 为 7 的决策提示
+- **WHEN** 后续状态读取仍返回 id 7，或经过 1 秒
+- **THEN** 不重复显示 id 7；1 秒后提示被移除
 
 ### Requirement: Host 端点边界
 本插件只提供两个经 `connection.fetch.register` 注册的端点：读取状态与设置模式。两者 SHALL 以请求体 `sessionId` 经官方会话控制器解析目标会话（与官方会话端点同一授权模型）；`sessionId` 缺失、非字符串、无法解析或指向 `origin = "subagent"` 会话时 SHALL 返回 4xx 且不修改任何状态；设置模式 SHALL 只修改该会话的模式与 `disabled`（设为 `AUTO` 时清除），`mode` 不属于 `AUTO | MANUAL` 时返回 4xx；读取状态 SHALL 返回 `disabled`（如有）。

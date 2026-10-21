@@ -3,7 +3,8 @@ import { tiers, type Tier } from './effort.js'
 export type JevCategory =
   | 'missing-credential' | 'insufficient-credits' | 'unauthorized' | 'rate-limited'
   | 'region-blocked' | 'rejected' | 'unavailable' | 'timeout' | 'invalid-response'
-export type JevResult = { kind: 'ok'; tier: Tier } | { kind: 'failed'; category: JevCategory } | { kind: 'cancelled' }
+export type Distribution = Partial<Record<Tier, number>>
+export type JevResult = { kind: 'ok'; tier: Tier; confidence?: number; probabilities?: Distribution; ms: number } | { kind: 'failed'; category: JevCategory } | { kind: 'cancelled' }
 export interface CredentialSource { get(name: string): { value: string } | undefined }
 
 /** Human-readable hint per category, shown on the chip, panel and tool errors. */
@@ -55,6 +56,7 @@ export class JevClient {
     const key = this.env.get('OPENROUTER_API_KEY')?.value
     if (!key) return { kind: 'failed', category: 'missing-credential' }
     const deadline = AbortSignal.timeout(this.timeoutMs)
+    const started = performance.now()
     try {
       const response = await fetch(this.url, {
         method: 'POST',
@@ -84,11 +86,23 @@ export class JevClient {
         }
       } finally { reader.releaseLock() }
       const raw = new TextDecoder().decode(bytes.subarray(0, size))
-      let body: { error?: { code?: unknown }; answers?: { tier?: { choice?: unknown } } }
+      let body: { error?: { code?: unknown }; answers?: { tier?: { choice?: unknown; confidence?: unknown; probabilities?: unknown } } }
       try { body = JSON.parse(raw) } catch { return { kind: 'failed', category: 'invalid-response' } }
       if (typeof body?.error?.code === 'number') return { kind: 'failed', category: byStatus(body.error.code) }
       const choice = body?.answers?.tier?.choice
-      return tiers.includes(choice as Tier) ? { kind: 'ok', tier: choice as Tier } : { kind: 'failed', category: 'invalid-response' }
+      if (!tiers.includes(choice as Tier)) return { kind: 'failed', category: 'invalid-response' }
+      const confidence = body.answers?.tier?.confidence
+      const spread = body.answers?.tier?.probabilities as Record<string, unknown> | undefined
+      // Keep only the four tiers' values in [0, 1]; anything else in the reply is ignored.
+      const unit = (v: unknown): v is number => typeof v === 'number' && v >= 0 && v <= 1
+      const probabilities: Distribution = {}
+      for (const t of tiers) { const v = spread?.[t]; if (unit(v)) probabilities[t] = v }
+      const ms = Math.round(performance.now() - started)
+      return {
+        kind: 'ok', tier: choice as Tier, ms,
+        ...(unit(confidence) ? { confidence } : {}),
+        ...(Object.keys(probabilities).length ? { probabilities } : {}),
+      }
     } catch (error) {
       if (signal.aborted) return { kind: 'cancelled' }
       if (deadline.aborted) return { kind: 'failed', category: 'timeout' }

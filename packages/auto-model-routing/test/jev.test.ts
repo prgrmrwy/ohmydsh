@@ -11,9 +11,10 @@ async function setup(reply: Reply, key: string | undefined = 'sk-or-test-SECRET'
 }
 
 it('request_body_and_limits', async () => {
- const { server, client } = await setup(tier('standard'))
+ const { server, client } = await setup(tier('standard', 0.73, { simple: 0.1, standard: 0.8, complex: 0.08, escalated: 0.02, bogus: 0.5, huge: 'x' }))
  const result = await client.judge('继续', 'standard', new AbortController().signal)
- expect(result).toEqual({ kind: 'ok', tier: 'standard' })
+ // Distribution keeps only the four tiers' finite numbers.
+ expect(result).toEqual({ kind: 'ok', tier: 'standard', confidence: 0.73, probabilities: { simple: 0.1, standard: 0.8, complex: 0.08, escalated: 0.02 }, ms: expect.any(Number) })
  expect(server.bodies).toHaveLength(1)
  const body = server.bodies[0] as { model: string; state: string; questions: unknown }
  expect(Object.keys(body).sort()).toEqual(['model', 'questions', 'state'])
@@ -68,7 +69,7 @@ it('response_limit_counts_utf8_bytes', async () => {
  const exact = prefix + '界'.repeat(1000) + ' '.repeat(65536 - Buffer.byteLength(prefix + suffix) - 3000) + suffix
  const { server, client } = await setup((_req, res) => { res.end(exact) })
  expect(Buffer.byteLength(exact)).toBe(65536)
- expect(await client.judge('x', undefined, new AbortController().signal)).toEqual({ kind: 'ok', tier: 'simple' })
+ expect(await client.judge('x', undefined, new AbortController().signal)).toMatchObject({ kind: 'ok', tier: 'simple' })
  const oversized = exact.replace('界', '界 ')
  server.set((_req, res) => { res.end(oversized) })
  expect(oversized.length).toBeLessThan(65536)

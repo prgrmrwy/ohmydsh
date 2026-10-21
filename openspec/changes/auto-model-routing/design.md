@@ -107,6 +107,11 @@ skill 规则：委派前调用 `route_subagent`；成功则把返回的三个字
 
 理由：用户在 GUI 验收中要求与右侧模型选择器同一视觉语言；样式值取自官方 bundle 而非自定义颜色，跟随主题。芯片不显示 effort：无待生效手选时官方选择器已展示 AUTO 结果（新回合判档前显示上一回合的值）；有手选时以面板为准。
 
+### D10. 决策提示（2026-10-21 用户追加）
+开关放在插件自有配置 `$DSH_HOME/plugins/dsh-auto-model-routing/config.json`（与 home-network-model-guard 的 config.json 同惯例），默认关闭；Host 每次处理状态请求时读取，失败视为关闭。Jev 客户端成功结果附带 `confidence`（`answers.tier.confidence`）、`probabilities`（`answers.tier.probabilities`，只保留四个档位的有限数值）与请求耗时 `ms`。提示同时显示置信与完整分布（用户要求：只看胜出项看不出判断有多接近）；置信是 Jev 的归一化值（各档同等可能为 0，确定为 1），与胜出档的概率不同，二者都展示。Router 为主会话保存最近一次决策（单调递增 `id`），主会话在 `agent/request` 映射出 effort 时写入（`source: main`），`route_subagent` 用 `exec.agent` 找到调用会话写入（`source: subagent`；调用方本身是子会话时不写，因其无芯片）。主会话只在 Jev 新判出的档位首次映射出 effort 时写入一次：continued 回合与同回合重映射不重复；首个请求模型无 effort 支持、同回合换到支持的模型时，在该次映射时写入。置信与分布只接受 0–1 数值。不落盘、不进历史。
+
+client 沿用 3 秒轮询：开关开启时状态带 `decision`，新 `id` 触发 1 秒提示（最多约 3 秒后出现）；轮询间多次决策只显示最新。每个会话首次轮询只预热（换会话也重新预热），提示的隐藏只依赖提示本身，后续状态变化不能取消它。不另建推送通道：与停用显示同一数据路径，避免新增订阅生命周期。面板不再渲染历史列表（用户认为不优雅），Host 内存历史保留供排查。
+
 ### D9. 固定映射表（沿用）
 
 主会话 effort：

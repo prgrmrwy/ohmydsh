@@ -37,10 +37,15 @@
 | specs/auto-model-routing/spec.md → 子会话决策工具与 skill | 子会话表与家族一致 | test/effort.test.ts | child_table_matches_design_and_family | 🟢 green |
 | specs/auto-model-routing/spec.md → 子会话决策工具与 skill | skill 文本包含七项规则 | test/content.test.ts | skill_contains_seven_rules | 🟢 green |
 | specs/auto-model-routing/spec.md → 状态可见且不改写其它控件 | 芯片注册在速度芯片左侧 | test/client.test.ts | chip_negative_order | 🟢 green |
-| specs/auto-model-routing/spec.md → 状态可见且不改写其它控件 | 面板展示状态并限 20 条 | test/client.test.ts | panel_state_and_history_bound | 🟢 green |
+| specs/auto-model-routing/spec.md → 状态可见且不改写其它控件 | 面板展示本回合状态，历史只留在 Host | test/client.test.ts | panel_state_and_history_bound | 🟢 green |
 | specs/auto-model-routing/spec.md → 状态可见且不改写其它控件 | 停用状态在芯片与面板可见 | test/client.test.ts | disabled_visible_in_chip_and_panel | 🟢 green |
 | specs/auto-model-routing/spec.md → 状态可见且不改写其它控件 | 芯片样式与悬停面板 | test/client.test.ts | chip_style_and_hover_panel | 🟢 green |
 | specs/auto-model-routing/spec.md → 状态可见且不改写其它控件 | 切换模式只调用插件接口 | test/client.test.ts | toggle_plugin_endpoint_only | 🟢 green |
+| specs/auto-model-routing/spec.md → 决策提示（可选） | 主会话判档提示 | test/host.integration.test.ts | main_decision_toast | 🟢 green |
+| specs/auto-model-routing/spec.md → 决策提示（可选） | 子会话选模提示 | test/host.integration.test.ts | subagent_decision_toast | 🟢 green |
+| specs/auto-model-routing/spec.md → 决策提示（可选） | 开关关闭或判档失败不提示 | test/host.integration.test.ts | toast_off_or_failure_silent | 🟢 green |
+| specs/auto-model-routing/spec.md → 决策提示（可选） | 提示只显示一次且 1 秒消失 | test/client.test.ts | toast_once_and_expires | 🟢 green |
+| specs/auto-model-routing/spec.md → 决策提示（可选） | 提示只显示一次且 1 秒消失（组件层：首轮预热、换会话不弹旧值、状态变化不阻止消失） | test/toast.dom.test.ts | first poll only primes / switching session / toast still disappears | 🟢 green |
 | specs/auto-model-routing/spec.md → Host 端点边界 | 无效会话被拒绝且无副作用 | test/endpoints.test.ts | invalid_targets_rejected | 🟢 green |
 | specs/auto-model-routing/spec.md → Host 端点边界 | 只修改目标会话 | test/endpoints.test.ts | set_mode_targets_one_session | 🟢 green |
 | specs/auto-model-routing/spec.md → 自动选路不得绕过既有模型门禁 | 门禁拒绝不引起改路由 | test/router.test.ts | guard_failure_never_changes_model | 🟢 green |

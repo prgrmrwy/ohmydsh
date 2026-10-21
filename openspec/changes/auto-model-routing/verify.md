@@ -90,6 +90,14 @@
 - package **54/54**，typecheck/build 通过；root **444 pass / 0 fail / 2 skip**；artifacts、隔离双 sync、严格校验通过。
 - 悬停面板：SSR 断言结构（单按钮、文字在前图标在后、无边框、默认不渲染面板），开关为纯函数单测；真实悬停与 150ms 延迟待 GUI 复验。
 
+### 追加：决策提示、面板去掉历史（2026-10-21）
+
+- 新需求“决策提示（可选）”与 design D10；test-plan 新增 4 行、改写 1 行。
+- 红：jev 成功结果缺 confidence/ms；host `main_decision_toast`、`subagent_decision_toast`、`toast_off_or_failure_silent` 无 `decision`；client 面板仍渲染列表、`toastText` 不存在。绿：实现后全部通过。
+- 用户追加：提示同时显示四档分布（第二行，固定顺序）与胜出档 `tier → effort`；Jev 客户端保留四档 0–1 概率，置信超范围不显示。
+- 独立复核 `APPROVE_WITH_CHANGES`：M1（换会话弹出旧决策）与 M2（状态变化取消隐藏定时器导致提示卡住）先以 jsdom 组件测试（仓库已有 jsdom，未新增依赖）复现为红，再修复为绿；M3 补组件层测试；M4 补 router/host 边界测试（无 effort、丢弃、取消、配置损坏、同回合重映射不重复）；m1 写入 D10；m2 子会话调用方不记录；m3 置信与分布限 0–1；m5 删除未用 `until`；m6 测试夹具不再绕过类型。m4（每次状态读取同步读配置）保留：单个小文件、每芯片 3 秒一次，代价可忽略。
+- package **64/64**，typecheck/build 通过；client bundle 不含出站代码。提示在真实浏览器中的显示与 1 秒消失待 GUI 复验。
+
 ## Overall Decision
 
 DECISION: PASS_WITH_WARNINGS

@@ -99,3 +99,29 @@ it('failure_after_mode_change_is_discarded', () => {
  expect(state.read(agent.id).disabled).toBeUndefined()
  expect(router.request(agent,1,config,supported)).toEqual(config)
 })
+it('decision_announced_once_per_jev_judgement', () => {
+ const {router,agent}=fixture(); router.setMode(agent,'AUTO')
+ router.begin(agent,1,message('排查多个模块')); router.resolve(agent,1,'complex',{confidence:0.9,ms:500})
+ router.request(agent,1,config,supported)
+ const first=router.judgement(agent.id)!
+ expect(first).toMatchObject({source:'main',tier:'complex',effort:'xhigh',confidence:0.9,ms:500})
+ // Same-turn model change remaps effort but is not a new judgement; a continued turn neither.
+ router.request(agent,1,{...config,provider:'codex',model:'gpt-6-astra'},['low','medium'])
+ router.begin(agent,2,[]); router.request(agent,2,config,supported)
+ expect(router.judgement(agent.id)!.id).toBe(first.id)
+})
+it('decision_not_recorded_without_effort_or_after_discard', () => {
+ const {router,agent}=fixture(); router.setMode(agent,'AUTO')
+ // No effort support: nothing to announce.
+ router.begin(agent,1,message('x')); router.resolve(agent,1,'complex',{ms:1})
+ router.request(agent,1,config,[])
+ expect(router.judgement(agent.id)).toBeUndefined()
+ // Result arriving after a mode change is discarded and never recorded.
+ router.begin(agent,2,message('y')); router.setMode(agent,'MANUAL'); router.resolve(agent,2,'complex',{ms:1})
+ router.request(agent,2,config,supported)
+ expect(router.judgement(agent.id)).toBeUndefined()
+ // Cancelled turn: no record either.
+ router.setMode(agent,'AUTO'); router.begin(agent,3,message('z')); router.cancel(agent,3)
+ router.request(agent,3,config,supported)
+ expect(router.judgement(agent.id)).toBeUndefined()
+})

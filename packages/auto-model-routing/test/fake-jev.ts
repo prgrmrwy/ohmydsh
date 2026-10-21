@@ -21,4 +21,4 @@ export async function fakeJev(initial: Reply) {
  }
 }
 export const json = (status: number, value: unknown): Reply => (_req, res) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(value)) }
-export const tier = (choice: string) => json(200, { model: 'typesafe/jev-1.13-20260917', answers: { tier: { type: 'choice', choice, probabilities: {}, confidence: 1 } }, usage: { input_tokens: 1, output_tokens: 1 } })
+export const tier = (choice: string, confidence = 1, probabilities: Record<string, unknown> = {}) => json(200, { model: 'typesafe/jev-1.13-20260917', answers: { tier: { type: 'choice', choice, probabilities, confidence } }, usage: { input_tokens: 1, output_tokens: 1 } })

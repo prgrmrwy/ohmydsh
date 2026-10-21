@@ -1,9 +1,10 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { CHILD_TABLE } from './effort.js'
 import { CATEGORY_HINTS, type JevClient } from './jev.js'
+import type { Judgement } from './router.js'
 
 /** Sub-agent decision tool: same Jev judgment as the main session, then the D9 child table. Writes no state. */
-export function routeSubagentTool(jev: JevClient) {
+export function routeSubagentTool(jev: JevClient, judged: (sessionId: string, value: Omit<Judgement, 'id'>) => void = () => {}) {
   return defineTool({
     name: 'route_subagent',
     description: 'Pick provider/model/reasoning_effort for a sub-agent before delegating, using the Jev decision model. Sends the task text (up to 8000 characters) to OpenRouter/TypeSafe. On error: pause delegation and ask the user; never guess a tier.',
@@ -31,6 +32,10 @@ export function routeSubagentTool(jev: JevClient) {
       if (result.kind === 'failed') throw new Error(`Jev 判档失败：${CATEGORY_HINTS[result.category]}（${result.category}）。请暂停委派并询问用户，不要自行猜测档位或换用其它模型。`)
       const provider = args.provider as 'claude' | 'codex'
       const [model, effort] = CHILD_TABLE[result.tier][provider]
+      // Attributed to the calling session so its chip can show the hint, whatever its mode.
+      // A child session has no chip (the status endpoint rejects it), so only ordinary callers are recorded.
+      const caller = exec.agent?.session.header.origin === 'subagent' ? undefined : exec.agent?.id
+      if (caller) { const { kind: _, ...measure } = result; judged(caller, { source: 'subagent', model, effort, ...measure }) }
       return { tier: result.tier, provider, model, reasoning_effort: effort }
     },
   })

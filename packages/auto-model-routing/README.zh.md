@@ -7,11 +7,13 @@
 
 ## 使用
 
-在主 checkout 的 `.env.local` 写入 `OPENROUTER_API_KEY=sk-or-...`，`bin/dsh` 启动时加载。芯片位于 GPT 速度芯片左侧，外观与模型选择器一致：点击切换模式，悬停查看本回合 effort、原因与最近 20 条内存历史（不含任务正文，重启清空）。AUTO 选出的 effort 在请求发出后会显示在官方模型选择器上。
+在主 checkout 的 `.env.local` 写入 `OPENROUTER_API_KEY=sk-or-...`，`bin/dsh` 启动时加载。芯片位于 GPT 速度芯片左侧，外观与模型选择器一致：点击切换模式，悬停查看插件本回合设定的 effort 与原因。AUTO 选出的 effort 在请求发出后会显示在官方模型选择器上。
 
 **外发数据**：AUTO 下每个用户回合会把你的消息（最多 8000 字符）发送给 OpenRouter 与 TypeSafe（模型 `typesafe/jev-1.13`）。每次调用 `route_subagent` 也会同样外发任务文本，与主会话模式无关。OpenRouter 对该模型的数据保留与日志条款未确认，请在 OpenRouter 后台自行设置。
 
 **Jev 失败时**（未配置 key、余额不足、key 无效、限流、地区受限、超时、响应无效），会话切到 MANUAL，芯片显示 `MANUAL · Jev 停用` 与原因；点 AUTO 重试。取消回合不算失败。不轮询、不查余额。
+
+**决策提示（可选）**：在 `$DSH_HOME/plugins/dsh-auto-model-routing/config.json` 写入 `{"decisionToast": true}`，每次 Jev 判档后在芯片上方显示 1 秒提示：谁判断的、档位 → （模型）effort、置信与耗时，第二行为四档分布，例如 `主会话判断 · complex → xhigh · 置信 92% · 0.53s` / `simple 1% / standard 4% / complex 92% / escalated 3%`。最多约 3 秒内出现，默认关闭。
 
 `route_subagent` 工具对子会话使用同一个 Jev 判断，返回 provider/model/reasoning_effort。配套 skill 要求主 Agent 显式传入，工具失败时暂停委派并询问你。
 

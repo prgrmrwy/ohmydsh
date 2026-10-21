@@ -5,6 +5,7 @@ import type {} from '@deepseek-ai/dsh-api-session-controller'
 import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-tools'
 import { resolve } from 'node:path'
+import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { FileStateStore, RoutingState } from './state.js'
 import { Router, type AgentRef, type RequestConfig } from './router.js'
@@ -26,7 +27,12 @@ export function apply(ctx: Context, config: Config = {}): void {
   const jev = new JevClient(launchEnvironmentOf(ctx), config.jevBase, config.jevTimeoutMs)
   const state = new RoutingState(new FileStateStore(resolve(home, 'state/auto-model-routing/sessions')))
   const router = new Router(state)
-  ctx.effect(() => ctx.tools.register(routeSubagentTool(jev)))
+  const configFile = resolve(home, 'plugins/dsh-auto-model-routing/config.json')
+  // Read on every status request so the switch applies without a restart; any problem means off.
+  const toastOn = (): boolean => {
+    try { return (JSON.parse(readFileSync(configFile, 'utf8')) as { decisionToast?: unknown })?.decisionToast === true } catch { return false }
+  }
+  ctx.effect(() => ctx.tools.register(routeSubagentTool(jev, (sessionId, value) => router.judged(sessionId, value))))
   // Agent is the WeakMap identity; origin stays on the immutable session header.
   const refs = new WeakMap<object, AgentRef>()
   const ref = (agent: { id: string; session: { header: { origin?: string } } }): AgentRef => {
@@ -43,7 +49,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     const job = router.begin(agent, payload.turn, decision.messages)
     if (!job) return decision
     const result = await jev.judge(job.text, job.previous, payload.signal)
-    if (result.kind === 'ok') router.resolve(agent, payload.turn, result.tier)
+    if (result.kind === 'ok') { const { kind: _, tier, ...measure } = result; router.resolve(agent, payload.turn, tier, measure) }
     else if (result.kind === 'failed') router.fail(agent, payload.turn, result.category)
     else router.cancel(agent, payload.turn)
     return decision
@@ -70,7 +76,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           const response = await endpoint(operation, enveloped ? wire.payload : body, async id => {
             const result = await child.sessionController.resolveAgent(id as never)
             return 'agent' in result ? ref(result.agent) : undefined
-          }, router, state)
+          }, router, state, toastOn)
           if (!enveloped) return response
           const value = await response.json()
           return Response.json({ type: 'server-response', rpcId: wire.rpcId, result: response.ok ? { ok: true, value } : { ok: false, error: { code: 'invalid-request', message: value.error, details: {} } } })

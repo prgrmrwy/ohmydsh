@@ -1,16 +1,20 @@
 import { mapEffort, type Effort, type Reason, type Tier } from './effort.js'
-import type { JevCategory } from './jev.js'
+import type { Distribution, JevCategory } from './jev.js'
 import { userInput, type ClaimedMessage } from './input.js'
 import type { Mode, RoutingState, Selection } from './state.js'
 export interface AgentRef { id: string; origin?: string }
 export interface RequestConfig extends Selection { [key: string]: unknown }
 interface Decision { effort?: Effort; reason: Reason; category?: JevCategory }
+/** Latest successful Jev decision for a session, for the optional on-screen hint (memory only). */
+export interface Judgement { id: number; source: 'main' | 'subagent'; tier: Tier; effort: Effort; model?: string; confidence?: number; probabilities?: Distribution; ms: number }
+export type Measure = { confidence?: number; probabilities?: Distribution; ms: number }
 interface Runtime {
   turn: number
   active: boolean
   pending: boolean
   previous?: Tier
   tier?: Tier
+  measure?: Measure
   reason: Reason
   decision?: Decision
   decisionRoute?: string
@@ -22,7 +26,22 @@ function withEffort(config: RequestConfig, effort?: Effort): RequestConfig {
 }
 export class Router {
   private readonly runtimes = new WeakMap<AgentRef, Runtime>()
+  private readonly judgements = new Map<string, Judgement>()
+  private sequence = 0
   constructor(private readonly state: RoutingState) {}
+
+  /** Remember the latest decision; the session id comes from the caller's own agent. */
+  judged(sessionId: string, value: Omit<Judgement, 'id'>): void {
+    this.judgements.delete(sessionId)
+    this.judgements.set(sessionId, { id: ++this.sequence, ...value })
+    // Bounded: drop the oldest sessions' entries (Map keeps insertion order).
+    if (this.judgements.size > 200) this.judgements.delete(this.judgements.keys().next().value!)
+  }
+
+  judgement(sessionId: string): Judgement | undefined {
+    const value = this.judgements.get(sessionId)
+    return value && { ...value }
+  }
 
   /** Open a turn. Returns the text to judge when this is an AUTO user turn; the caller then calls `resolve`. */
   begin(agent: AgentRef, turn: number, messages: readonly ClaimedMessage[]): { text: string; previous?: Tier } | undefined {
@@ -44,10 +63,11 @@ export class Router {
   }
 
   /** Apply the judged tier. Discarded when the turn moved on or the mode changed while judging. */
-  resolve(agent: AgentRef, turn: number, tier: Tier): void {
+  resolve(agent: AgentRef, turn: number, tier: Tier, measure?: Measure): void {
     const runtime = this.settle(agent, turn)
     if (!runtime) return
     runtime.tier = tier
+    if (measure) runtime.measure = measure
     runtime.previous = tier
   }
 
@@ -95,6 +115,8 @@ export class Router {
       const reason = effort === undefined ? 'no-effort-support' : runtime.reason
       runtime.decision = { ...(effort ? { effort } : {}), reason }
       this.record(runtime, runtime.decision)
+      // Only a fresh Jev judgement is announced; continued turns and remaps of it are not.
+      if (effort && runtime.measure) { this.judged(agent.id, { source: 'main', tier: runtime.tier, effort, ...runtime.measure }); delete runtime.measure }
     }
     return runtime.decision.effort ? withEffort(config, runtime.decision.effort) : config
   }

@@ -3,7 +3,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { callRouting, chipOrder, panelOpenAfter, type PanelEvent, type Rpc } from './control.js'
+import { callRouting, chipOrder, nextToast, panelOpenAfter, TOAST_MS, type Decision, type PanelEvent, type Rpc, type Toast } from './control.js'
 import { CATEGORY_HINTS, type JevCategory } from '../jev.js'
 
 interface View {
@@ -11,7 +11,7 @@ interface View {
   effort?: string
   reason?: string
   disabled?: { category: JevCategory; at: number }
-  history: readonly { effort?: string; reason: string; category?: string }[]
+  decision?: Decision
 }
 interface Props { sessionId: string; rpc: Rpc }
 export const name = 'dsh-auto-model-routing/client'
@@ -31,7 +31,7 @@ const CSS = `
 .amr-card p{margin:4px 0}
 .amr-muted{color:var(--dsw-alias-label-tertiary)}
 .amr-error{color:var(--dsw-alias-state-error-primary)}
-.amr-card ol{max-height:160px;overflow:auto;margin:6px 0 0;padding-left:18px}
+.amr-toast{position:absolute;z-index:1100;bottom:calc(100% + 6px);left:0;padding:4px 8px;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg,#fff);color:var(--dsw-alias-label-secondary);box-shadow:var(--dsw-elevation-prominent);font-size:12px;line-height:18px;white-space:nowrap}
 `
 
 // Left-right swap arrows at the picker chevron's size; colour follows currentColor.
@@ -41,15 +41,39 @@ function SwapIcon() {
     h('path', { d: 'M13 10.5H3.5M6 8l-2.5 2.5L6 13' }))
 }
 
-export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false }: Props & { initialView?: View; initiallyOpen?: boolean }) {
+export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false, initialToast }: Props & { initialView?: View; initiallyOpen?: boolean; initialToast?: Toast }) {
   const [view, setView] = useState<View | undefined>(initialView)
   const [open, setOpen] = useState(initiallyOpen)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const [toast, setToast] = useState<Toast | undefined>(initialToast)
+  // The first poll of each session only primes `seen`: an old decision is never announced on mount or session switch.
+  const seen = useRef<number | undefined>(undefined)
+  const primed = useRef(false)
+  const viewSession = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (!view || viewSession.current !== sessionId) return
+    const decision = view.decision
+    if (!primed.current) { primed.current = true; seen.current = decision?.id; return }
+    const next = nextToast(seen.current, decision)
+    if (!next) return
+    seen.current = next.id
+    setToast(next)
+  }, [view, sessionId])
+  // Hiding depends only on the toast shown, so later state changes cannot cancel it.
+  useEffect(() => {
+    if (!toast) return
+    const hide = setTimeout(() => setToast(undefined), TOAST_MS)
+    return () => clearTimeout(hide)
+  }, [toast])
   useEffect(() => {
     let active = true
-    const refresh = () => { void callRouting(rpc, sessionId).then(value => { if (active) { setView(value as View); setError('') } }, reason => { if (active) setError(String(reason)) }) }
+    primed.current = false
+    seen.current = undefined
+    viewSession.current = undefined
+    setToast(undefined)
+    const refresh = () => { void callRouting(rpc, sessionId).then(value => { if (active) { viewSession.current = sessionId; setView(value as View); setError('') } }, reason => { if (active) setError(String(reason)) }) }
     refresh()
     const poll = setInterval(refresh, 3000)
     return () => { active = false; clearInterval(poll); clearTimeout(timer.current) }
@@ -62,7 +86,7 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
   const toggle = async () => {
     if (busy || !view) return
     setBusy(true)
-    try { setView(await callRouting(rpc, sessionId, view.mode === 'AUTO' ? 'MANUAL' : 'AUTO') as View); setError('') }
+    try { const next = await callRouting(rpc, sessionId, view.mode === 'AUTO' ? 'MANUAL' : 'AUTO') as View; viewSession.current = sessionId; setView(next); setError('') }
     catch (reason) { setError(String(reason)) }
     finally { setBusy(false) }
   }
@@ -77,6 +101,7 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
       title: off ? `Jev 判档已停用：${hint}。点击 AUTO 重试` : '点击切换自动推理强度',
       'aria-label': `推理强度模式：${view?.mode ?? '加载中'}，点击切换`,
     }, h('span', null, off ? `${view?.mode} · Jev 停用` : view?.mode ?? '…'), h(SwapIcon)),
+    toast && !open && h('div', { className: 'amr-toast', role: 'status', style: { pointerEvents: 'none' } }, ...toast.lines.map((line, index) => h('div', { key: index, className: index ? 'amr-muted' : undefined }, line))),
     open && h('section', { className: 'amr-panel', 'aria-label': '自动路由状态' },
       h('div', { className: 'amr-card' },
         h('p', null, h('strong', null, view?.mode === 'AUTO' ? '自动调整推理强度' : '手动：不自动调整')),
@@ -85,7 +110,6 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
         off && h('p', { role: 'status', className: 'amr-error' }, `Jev 停用（${off.category}）：${hint}。${new Date(off.at).toLocaleString()}。点击 AUTO 重试。`),
         h('p', { className: 'amr-muted' }, 'AUTO 会把任务文本发送给 OpenRouter/TypeSafe 判档。'),
         error && h('p', { role: 'alert', className: 'amr-error' }, error),
-        view?.history.length ? h('ol', null, ...view.history.map((row, index) => h('li', { key: index }, `${row.effort ?? '—'} · ${row.reason}${row.category ? ` · ${row.category}` : ''}`))) : null,
       ),
     ),
   )
