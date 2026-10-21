@@ -63,6 +63,9 @@ function controllerRecord(
  * one callback and makes no direct writes when the transaction rejects.
  */
 function enableAtomicTransactions(harness: Awaited<ReturnType<typeof openPetHarness>>) {
+  if (harness.domain.supportsTransaction === true && typeof harness.domain.transaction === 'function') {
+    return { failNextTransactionAt: (writeNumber: number) => harness.failNextAtomicBatch(writeNumber) }
+  }
   type TableName =
     | 'loci'
     | 'locus_indexes'
@@ -408,7 +411,7 @@ describe('startup compensation recovery', () => {
 
 describe('controller to durable locus repository write boundary', () => {
   it('fails before external creation when the Domain has no transaction', async () => {
-    const harness = await openPetHarness()
+    const harness = await openPetHarness(undefined, { noTransaction: true })
     const durable = new DurableLocusRepository(harness.domain)
     const adapter = new ControllerLocusRepositoryAdapter(durable)
     const createMainSession = vi.fn(async () => ({

@@ -206,7 +206,7 @@ describe('todo rows actually navigate, not merely describe', () => {
     expect(markup).toMatch(/<button[^>]*disabled[^>]*>会话/)
   })
 
-  it('every disposition button explains what it does and that nothing is sent to Feishu', () => {
+  it('spec Scenario "受理动作自述会开工": every disposition button explains what it does and that nothing is sent to Feishu', () => {
     const markup = render()
     // `accept` no longer promises a reversible middle state: it dispatches a
     // follow-up and navigates, so its hint must say THAT. The old wording
@@ -291,7 +291,7 @@ describe('parent-session list is paged and collapsible', () => {
 })
 
 describe('accept receipt and navigation (D9 + D11)', () => {
-  it('successful accept opens the resolved execution target', () => {
+  it('spec Scenario "受理成功后转到执行目标会话": successful accept opens the resolved execution target', () => {
     const plan = planAcceptFollowThrough({
       dispatch: {
         outcome: 'dispatched',
@@ -305,7 +305,7 @@ describe('accept receipt and navigation (D9 + D11)', () => {
     expect(plan.closeSettings).toBe(true)
   })
 
-  it('queued outcome survives the navigation', () => {
+  it('spec Scenario "导航后仍能分辨投递结局": queued outcome survives the navigation', () => {
     const plan = planAcceptFollowThrough({
       dispatch: {
         outcome: 'queued',
@@ -320,7 +320,7 @@ describe('accept receipt and navigation (D9 + D11)', () => {
     expect(plan.inPanelNotice).toBeUndefined()
   })
 
-  it('failed accept stays put and shows the reason', () => {
+  it('spec Scenario "受理失败不导航": failed accept stays put and shows the reason', () => {
     const plan = planAcceptFollowThrough({
       dispatch: { outcome: 'unreachable', reason: '目标会话已归档' },
       hasSessionOpener: true,
@@ -330,7 +330,7 @@ describe('accept receipt and navigation (D9 + D11)', () => {
     expect(plan.inPanelNotice).toContain('目标会话已归档')
   })
 
-  it('accept succeeds without a session opener', () => {
+  it('spec Scenario "缺少导航能力时受理照常完成": accept succeeds without a session opener', () => {
     const plan = planAcceptFollowThrough({
       dispatch: {
         outcome: 'dispatched',

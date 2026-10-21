@@ -52,6 +52,8 @@ export interface InquiryAskDependencies {
   readonly origin: (callerSessionId: string) => InquiryOriginProof | undefined
   /** Host clock. A model or client timestamp is never accepted as provenance. */
   readonly now: () => number
+  /** Runtime readiness is checked before any acceptance write. Omitted only by legacy isolated fixtures. */
+  readonly ready?: () => boolean
   /** Host-owned id. The model cannot choose or predict an inquiry id. */
   readonly newInquiryId: () => string
 }
@@ -239,6 +241,7 @@ export async function acceptInquiryFromCaller(
   args: unknown,
   deps: InquiryAskDependencies,
 ): Promise<InquiryAcceptance> {
+  if (deps.ready !== undefined && !deps.ready()) throw new InquiryRefusedError()
   let commit: (() => Promise<InquiryRecord>) | undefined
   let reference = ''
   try {

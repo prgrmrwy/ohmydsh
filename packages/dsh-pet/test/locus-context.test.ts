@@ -145,7 +145,7 @@ describe('unified locus delivery context', () => {
     expect(renderLocusPrompt(context)).toBe(renderLocusDeliveryPrompt(context))
   })
 
-  it('states the platform mention contract in both delivery variants', () => {
+  it('spec Scenario "注入说明平台写法": states the platform mention contract in both delivery variants', () => {
     // Inbound text pre-renders mentions to display names, so an agent that
     // copies that form writes plain text and nobody is notified. The prompt has
     // to state the outbound rule (and that the Host renders whole display

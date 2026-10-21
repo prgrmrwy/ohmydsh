@@ -1,0 +1,30 @@
+diff --git a/packages/core/tools/src/index.ts b/packages/core/tools/src/index.ts
+index ca89f37..bcd9088 100644
+--- a/packages/core/tools/src/index.ts
++++ b/packages/core/tools/src/index.ts
+@@ -805,6 +805,7 @@ function resolveMaxParallelSubCalls(value: number | undefined): number {
+  * one visibility resolver feeds presentation, lookup, and dispatch.
+  */
+ export class ToolRuntime extends Service {
++  readonly supportsFinalToolGuardRecheck = true
+   static inject = ['systemPrompt']
+ 
+   static Config: z<Config> = z.object({
+@@ -1577,6 +1578,17 @@ export class ToolRuntime extends Service {
+     try {
+       const tool = this.resolveExecution(exec.name, exec.agent, exec.parent !== undefined)
+       if (!tool) throw new ToolNotFoundError(exec.name)
++      // `tools/execute` wrappers may await before delegating. Recheck the
++      // monotonic scoped guard at the final operation boundary, immediately
++      // before marking or invoking the registered body.
++      const denialReason = this.guardReason(exec)
++      if (denialReason !== undefined) {
++        return this.materializeFinalResult({
++          content: [{ type: 'text', text: `Error: ${denialReason}` }],
++          isError: true,
++          error: { message: denialReason },
++        })
++      }
+       state.bodyInvoked = true
+       const returned = await tool.execute(exec.arguments, exec)
+       const result = this.createSuccessResult(exec, tool, returned)

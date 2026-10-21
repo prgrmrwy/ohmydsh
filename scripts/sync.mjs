@@ -532,9 +532,18 @@ async function localBuildInputHash(dir, extraInputs = [], root = REPO) {
   for (const input of [...extraInputs].sort()) {
     const absolute = path.join(root, input)
     const inputStat = await stat(absolute).catch(() => undefined)
-    if (inputStat === undefined || !inputStat.isFile()) throw new Error(`local build input missing or not a regular file: ${input}`)
-    h.update(`repo:${input}\0`)
-    h.update(await readFile(absolute))
+    if (inputStat?.isDirectory()) {
+      h.update(`repo-dir:${input}\0`)
+      const files = (await collectFiles(absolute)).map((rel) => path.relative(root, path.join(absolute, rel)))
+      for (const rel of files.sort()) {
+        h.update(rel + '\0')
+        h.update(await readFile(path.join(root, rel)))
+      }
+    } else {
+      if (inputStat === undefined || !inputStat.isFile()) throw new Error(`local build input missing or not a regular file or directory: ${input}`)
+      h.update(`repo:${input}\0`)
+      h.update(await readFile(absolute))
+    }
   }
   return h.digest('hex')
 }
@@ -752,7 +761,7 @@ function requiredSourcesOf(item) {
           { path: path.join(dir, entry.path), kind: 'dir' },
           { path: path.join(dir, entry.path, 'package.json'), kind: 'file' },
         ]),
-        ...(item.buildInputs ?? []).map((input) => ({ path: path.join(root, input), kind: 'file' })),
+        ...(item.buildInputs ?? []).map((input) => ({ path: path.join(root, input), kind: 'file-or-dir' })),
       ]
     }
     case 'preset': {
@@ -794,8 +803,12 @@ function preflightSources(items, hostRuntime = null) {
         errors.push(`${item.type} ${item.id}: ${source.path} missing`)
         continue
       }
-      if (source.kind === 'file' ? !info.isFile() : !info.isDirectory()) {
-        errors.push(`${item.type} ${item.id}: ${source.path} must be a ${source.kind === 'file' ? 'regular file' : 'directory'}`)
+      const validKind = source.kind === 'file-or-dir'
+        ? info.isFile() || info.isDirectory()
+        : source.kind === 'file' ? info.isFile() : info.isDirectory()
+      if (!validKind) {
+        const expected = source.kind === 'file-or-dir' ? 'regular file or directory' : source.kind === 'file' ? 'regular file' : 'directory'
+        errors.push(`${item.type} ${item.id}: ${source.path} must be a ${expected}`)
         continue
       }
       if (!realpathInside(source.path, root)) {

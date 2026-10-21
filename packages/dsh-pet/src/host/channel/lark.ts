@@ -13,6 +13,8 @@
  */
 
 import { execFile } from 'node:child_process'
+import type { ConnectionCountRead } from './connection-gate.js'
+import { SUBSCRIBE_MIN_VERSION, versionAtLeast } from './connection-gate.js'
 import { promisify } from 'node:util'
 import { PET_CLI_PROFILE, petCliArgs } from './cli.js'
 import type { LocusLarkPort } from '../locus/controller.js'
@@ -122,10 +124,68 @@ export type LarkChatBotsResult =
   | { readonly kind: 'permission-denied'; readonly diagnostic: LarkPermissionDiagnostic }
   | { readonly kind: 'error' }
 
+/** One reply on a docx comment thread. */
+export interface DocCommentReply {
+  readonly replyId: string
+  readonly authorOpenId?: string
+  readonly createdAt?: number
+  readonly text: string
+}
+
+/** Result of reading one comment and locating its trigger reply. */
+export type DocCommentQuery =
+  | {
+      readonly kind: 'ok'
+      readonly isWhole: boolean
+      readonly quote?: string
+      readonly replies: readonly DocCommentReply[]
+      readonly trigger: DocCommentReply
+    }
+  /** The call failed (platform error, timeout, unparsable): retryable. */
+  | { readonly kind: 'error' }
+  /** The comment came back without a usable `is_whole`, or not at all. */
+  | { readonly kind: 'scope-unknown' }
+  /** The comment is known but the trigger reply is absent after paging. */
+  | { readonly kind: 'reply-missing' }
+
 /** Bot-identity Lark operations Pet depends on. */
 export interface LarkClient {
   /** Detect whether the installed CLI exposes the identity contract Pet needs. */
   cliVersion?(): Promise<{ readonly supported: boolean; readonly version?: string }>
+  /**
+   * The app's live event-connection count (`GET /open-apis/event/v1/connection`
+   * as the bot). One app supports one connection; see `connection-gate.ts`.
+   */
+  eventConnectionCount?(): Promise<ConnectionCountRead>
+  /**
+   * IM intake preconditions via `event consume im.message.receive_v1 --dry-run`
+   * (side-effect free: no bus, no connection). Returns the `blocked` ones;
+   * `unknown` is not blocked because a real run proceeds on it. `undefined`
+   * when the dry-run itself could not be read.
+   */
+  imPreconditions?(): Promise<{ readonly blocked: readonly string[] } | undefined>
+  /**
+   * Comment facts for one docx comment (`drive +batch-query-comments`), with
+   * the trigger reply's text located by paging `drive +list-replies` when the
+   * card reports `has_more` (≤10 pages). Failure and "not found" are distinct.
+   */
+  queryDocComment?(token: string, commentId: string, replyId: string): Promise<DocCommentQuery>
+  /** Append a plain-text bot reply under a docx comment (`drive +add-reply`). */
+  replyComment?(token: string, commentId: string, text: string): Promise<'success' | 'unknown'>
+  /**
+   * Answer a whole-document comment. Feishu refuses replies to `is_whole`
+   * comments (1069302), so the bot opens a NEW full comment that first
+   * mentions the asker. `success` only on a returned `comment_id`.
+   */
+  addWholeComment?(token: string, mentionOpenId: string, text: string): Promise<'success' | 'unknown'>
+  /** Add or remove a bot reaction on a comment reply (`drive +react-reply`). */
+  reactCommentReply?(token: string, replyId: string, emoji: string, action: 'add' | 'delete'): Promise<void>
+  /** A user's display name by open_id (`contact +get-user` as bot); undefined when unreadable. */
+  contactName?(openId: string): Promise<string | undefined>
+  /** Title and URL of a docx (`drive +inspect`); undefined when unreadable. */
+  inspectDoc?(token: string): Promise<{ readonly title?: string; readonly url?: string } | undefined>
+  /** The docx body as markdown (`docs +fetch`); a failure carries the platform code. */
+  fetchDocMarkdown?(token: string): Promise<{ readonly ok: true; readonly markdown: string } | { readonly ok: false; readonly code?: string }>
   /**
    * Add a reaction to a message.
    * @param messageId - Target message.
@@ -458,6 +518,7 @@ async function callJson(
   binary: string,
   runner: LarkCliRunner,
 ): Promise<CliJsonResult> {
+  assertNoDocIdentifier(args)
   let text: string | undefined
   let ok = true
   try {
@@ -479,6 +540,22 @@ async function callJson(
   if (text === undefined) return { ok: false }
   const value = parseCliJson(text)
   return value === undefined ? { ok: false } : { ok, value }
+}
+
+/**
+ * Doc-comment loci keep their category in the id (`doc:docx:<token>`,
+ * `doc:docx:<token>/<comment>/<reply>`; pet-locus-doc-comments D4). Not every
+ * IM method validates the `oc_`/`om_` shape, so this single choke point makes
+ * the "IM egress never receives a doc id" invariant hold for all of them: any
+ * argument value carrying the doc prefix throws before lark-cli runs. Doc
+ * egress (drive commands) passes the raw token and never trips this.
+ */
+function assertNoDocIdentifier(args: readonly string[]): void {
+  for (const arg of args) {
+    if (arg.startsWith('doc:')) {
+      throw new Error('A doc-comment identifier reached an IM lark-cli call; refusing to send.')
+    }
+  }
 }
 
 /** Read the usual `{ok,data}` lark-cli envelope. */
@@ -521,6 +598,53 @@ function requireOpenId(value: string, field: string): string {
   const normalized = requireInput(value, field)
   if (!/^ou_[A-Za-z0-9]+$/.test(normalized)) throw new Error(`${field} must be an open_id`)
   return normalized
+}
+
+function requireDocToken(value: unknown): string {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9]+$/.test(value)) {
+    throw new Error('A docx token must be non-empty alphanumerics.')
+  }
+  return value
+}
+
+function requireNumericId(value: unknown, field: string): string {
+  if (typeof value !== 'string' || !/^[0-9]+$/.test(value)) throw new Error(`A ${field} must be digits.`)
+  return value
+}
+
+/** Render a comment reply's elements as plain text; mentions become `@<open_id>`. */
+function parseCommentReplies(value: unknown): DocCommentReply[] {
+  if (!Array.isArray(value)) return []
+  const out: DocCommentReply[] = []
+  for (const raw of value) {
+    const reply = recordOf(raw)
+    const replyId = reply?.['reply_id']
+    if (reply === undefined || typeof replyId !== 'string' || replyId === '') continue
+    const elements = recordOf(reply['content'])?.['elements']
+    const text = (Array.isArray(elements) ? elements : [])
+      .map(recordOf)
+      .map(element => {
+        if (element === undefined) return ''
+        const run = recordOf(element['text_run'])
+        if (typeof run?.['text'] === 'string') return run['text']
+        const person = recordOf(element['person'])
+        if (typeof person?.['user_id'] === 'string') return `@${person['user_id']}`
+        const link = recordOf(element['docs_link'])
+        if (typeof link?.['url'] === 'string') return link['url']
+        return ''
+      })
+      .join('')
+      .trim()
+    const author = reply['user_id']
+    const created = reply['create_time']
+    out.push({
+      replyId,
+      text,
+      ...(typeof author === 'string' && author !== '' ? { authorOpenId: author } : {}),
+      ...(typeof created === 'number' && Number.isFinite(created) ? { createdAt: created * 1000 } : {}),
+    })
+  }
+  return out
 }
 
 function requireChatId(value: unknown, operation: string): string {
@@ -807,13 +931,10 @@ export function createLarkCliClient(
         })
         const match = /(?:^|\s)(\d+)\.(\d+)\.(\d+)(?:\s|$)/.exec(result.stdout.trim())
         if (match === null) return { supported: false }
-        const major = Number(match[1])
-        const minor = Number(match[2])
-        const patch = Number(match[3])
-        return {
-          supported: major > 1 || (major === 1 && (minor > 0 || patch >= 93)),
-          version: `${major}.${minor}.${patch}`,
-        }
+        const version = `${Number(match[1])}.${Number(match[2])}.${Number(match[3])}`
+        // One floor for enable, pairing and the spawn gate: `+subscribe`'s
+        // contract was verified on 1.0.97 (pet-locus-doc-comments D2).
+        return { supported: versionAtLeast(version, SUBSCRIBE_MIN_VERSION), version }
       } catch {
         return { supported: false }
       }
@@ -908,6 +1029,161 @@ export function createLarkCliClient(
         direction: 'older',
       })
       return page !== undefined
+    },
+
+    async eventConnectionCount(): Promise<ConnectionCountRead> {
+      const result = await callJson(['api', 'GET', '/open-apis/event/v1/connection', '--as', 'bot'], binary, runner)
+      const value = recordOf(result.value)
+      const data = recordOf(value?.['data'])
+      const count = data?.['online_instance_cnt']
+      // lark-cli prints `{ ok: true, identity, data }` (it unwraps the OpenAPI
+      // `code`/`msg`); a raw-OpenAPI `code: 0` is accepted too. Anything else,
+      // including a missing or non-integer count, is unknown, never zero.
+      const succeeded = value?.['ok'] === true || value?.['code'] === 0
+      if (result.ok && succeeded && typeof count === 'number' && Number.isInteger(count) && count >= 0) {
+        return { kind: 'count', count }
+      }
+      const error = recordOf(value?.['error'])
+      const text = `${String(error?.['type'] ?? '')} ${String(error?.['subtype'] ?? '')} ${String(error?.['message'] ?? '')}`
+      return { kind: 'error', authFailure: /auth|login|token|credential|unauthori/i.test(text) }
+    },
+
+    async imPreconditions() {
+      const result = await callJson(['event', 'consume', 'im.message.receive_v1', '--as', 'bot', '--dry-run'], binary, runner)
+      if (!result.ok) return undefined
+      const decision = recordOf(recordOf(recordOf(result.value)?.['data'])?.['decision'])
+      const preconditions = decision?.['preconditions']
+      if (!Array.isArray(preconditions)) return undefined
+      const blocked = preconditions
+        .map(recordOf)
+        .filter(item => item?.['status'] === 'blocked')
+        .map(item => String(item?.['name'] ?? 'unknown'))
+      return { blocked }
+    },
+
+    async queryDocComment(token, commentId, replyId): Promise<DocCommentQuery> {
+      const target = ['--token', requireDocToken(token), '--type', 'docx']
+      const result = await callJson(
+        ['drive', '+batch-query-comments', '--as', 'bot', ...target, '--comment-ids', requireNumericId(commentId, 'comment id')],
+        binary,
+        runner,
+      )
+      const envelope = recordOf(result.value)
+      if (!result.ok || envelope?.['ok'] !== true) return { kind: 'error' }
+      const items = recordOf(envelope['data'])?.['items']
+      if (!Array.isArray(items)) return { kind: 'error' }
+      const card = items.map(recordOf).find(item => item?.['comment_id'] === commentId)
+      if (card === undefined || typeof card['is_whole'] !== 'boolean') return { kind: 'scope-unknown' }
+      const replies = [...parseCommentReplies(recordOf(card['reply_list'])?.['replies'])]
+      let trigger = replies.find(reply => reply.replyId === replyId)
+      if (trigger === undefined && card['has_more'] === true) {
+        let pageToken: string | undefined
+        for (let page = 0; page < 10 && trigger === undefined; page += 1) {
+          const listed = await callJson(
+            ['drive', '+list-replies', '--as', 'bot', ...target, '--comment-id', commentId, '--page-size', '100',
+              ...(pageToken === undefined ? [] : ['--page-token', pageToken])],
+            binary,
+            runner,
+          )
+          const data = recordOf(recordOf(listed.value)?.['data'])
+          if (!listed.ok || data === undefined) return { kind: 'error' }
+          for (const reply of parseCommentReplies(data['items'] ?? data['replies'])) {
+            if (!replies.some(known => known.replyId === reply.replyId)) replies.push(reply)
+          }
+          trigger = replies.find(reply => reply.replyId === replyId)
+          const next = data['page_token']
+          if (data['has_more'] !== true || typeof next !== 'string' || next === '') break
+          pageToken = next
+        }
+      }
+      if (trigger === undefined) return { kind: 'reply-missing' }
+      const quote = typeof card['quote'] === 'string' && card['quote'] !== '' ? card['quote'] : undefined
+      return { kind: 'ok', isWhole: card['is_whole'], ...(quote === undefined ? {} : { quote }), replies, trigger }
+    },
+
+    async replyComment(token, commentId, text) {
+      const content = JSON.stringify([{ type: 'text', text: requireInput(text, 'comment reply text') }])
+      const result = await callJson(
+        ['drive', '+add-reply', '--as', 'bot', '--token', requireDocToken(token), '--type', 'docx',
+          '--comment-id', requireNumericId(commentId, 'comment id'), '--content', content],
+        binary,
+        runner,
+      )
+      const data = recordOf(recordOf(result.value)?.['data'])
+      // Success only on positive proof of a created reply; anything else may
+      // or may not have reached the platform and is never retried.
+      return result.ok && data?.['created'] === true ? 'success' : 'unknown'
+    },
+
+    async addWholeComment(token, mentionOpenId, text) {
+      const content = JSON.stringify([
+        { type: 'mention_user', text: requireOpenId(mentionOpenId, 'comment mention') },
+        { type: 'text', text: ` ${requireInput(text, 'comment text')}` },
+      ])
+      let result: CliJsonResult
+      try {
+        result = await callJson(
+          ['drive', '+add-comment', '--as', 'bot', '--doc', requireDocToken(token), '--type', 'docx',
+            '--full-comment', '--content', content],
+          binary,
+          runner,
+        )
+      } catch {
+        return 'unknown'
+      }
+      const data = recordOf(recordOf(result.value)?.['data'])
+      const commentId = data?.['comment_id']
+      return result.ok && typeof commentId === 'string' && /^[0-9]+$/.test(commentId) ? 'success' : 'unknown'
+    },
+
+    async reactCommentReply(token, replyId, emoji, action) {
+      const result = await callJson(
+        ['drive', '+react-reply', '--as', 'bot', '--token', requireDocToken(token), '--type', 'docx',
+          '--reply-id', requireNumericId(replyId, 'reply id'), '--emoji', emoji, '--action', action],
+        binary,
+        runner,
+      )
+      if (!result.ok || recordOf(result.value)?.['ok'] !== true) throw new Error('comment reaction failed')
+    },
+
+    async contactName(openId) {
+      const data = await callCli(
+        ['contact', '+get-user', '--as', 'bot', '--user-id', requireOpenId(openId, 'open id'), '--user-id-type', 'open_id'],
+        binary,
+        runner,
+      )
+      const user = recordOf(recordOf(data)?.['user'])
+      const name = user?.['name']
+      return typeof name === 'string' && name.trim() !== '' ? name.trim() : undefined
+    },
+
+    async inspectDoc(token) {
+      const data = await callCli(
+        ['drive', '+inspect', '--as', 'bot', '--url', requireDocToken(token), '--type', 'docx'],
+        binary,
+        runner,
+      )
+      const record = recordOf(data)
+      if (record === undefined) return undefined
+      const title = typeof record['title'] === 'string' && record['title'].trim() !== '' ? record['title'] : undefined
+      const url = typeof record['url'] === 'string' && /^https:\/\/[^\s]+$/.test(record['url']) ? record['url'] : undefined
+      return { ...(title === undefined ? {} : { title }), ...(url === undefined ? {} : { url }) }
+    },
+
+    async fetchDocMarkdown(token) {
+      const result = await callJson(
+        // lark-cli v1.0.97 docs_fetch_v2.go: `--doc-format markdown`, body at data.document.content.
+        ['docs', '+fetch', '--as', 'bot', '--doc', requireDocToken(token), '--doc-format', 'markdown'],
+        binary,
+        runner,
+      )
+      const envelope = recordOf(result.value)
+      const data = recordOf(envelope?.['data'])
+      const markdown = recordOf(data?.['document'])?.['content']
+      if (result.ok && envelope?.['ok'] === true && typeof markdown === 'string') return { ok: true, markdown }
+      const error = recordOf(envelope?.['error'])
+      const code = error?.['code'] ?? error?.['subtype']
+      return { ok: false, ...(code === undefined ? {} : { code: String(code) }) }
     },
 
     async botReady() {

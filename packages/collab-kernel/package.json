@@ -1,0 +1,29 @@
+{
+  "name": "collab-kernel",
+  "version": "0.1.0",
+  "description": "Host-independent collaboration kernel library for dsh-collab to inline at build time",
+  "license": "MIT",
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && mkdir -p lib/convention && if ls src/convention/*.md >/dev/null 2>&1; then cp src/convention/*.md lib/convention/; fi",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "mdast-util-from-markdown": "^2.0.2",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.1"
+  },
+  "ohmydsh": {
+    "docTier": "C"
+  }
+}

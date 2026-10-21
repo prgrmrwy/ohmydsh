@@ -50,6 +50,7 @@ import {
   endpointKey,
   entryDisplayName,
   endpointHandleLabel,
+  isDocEndpointView,
   entryStateFilterLabel,
   familyHead,
   handleCode,
@@ -1189,7 +1190,9 @@ function LocusRow(props: {
   const threadLink = endpoint.threadId === undefined
     ? undefined
     : `https://applink.feishu.cn/client/thread/open?threadId=${encodeURIComponent(endpoint.threadId)}`
-  const feishuLink = threadLink ?? chatLink
+  // A document entry opens the document (inspected URL); never an IM applink.
+  const isDoc = isDocEndpointView(endpoint)
+  const feishuLink = isDoc ? endpoint.docUrl : threadLink ?? chatLink
   const childSessionId = head.child.sessionId
   const childCode = childSessionId === undefined
     ? undefined
@@ -1223,6 +1226,10 @@ function LocusRow(props: {
                 </span>
               )}
             {head.isDefaultQa ? <span className="dshpet-chip" data-tone="qa">默认 Q&amp;A</span> : null}
+            {isDoc && endpoint.threadId === undefined
+              ? <span className="dshpet-meta">本文档的评论者均可提问</span>
+              : null}
+            {display.isPlaceholder && isDoc ? <span className="dshpet-meta">（兜底显示）</span> : null}
             {head.state.busy ? <span className="dshpet-chip" data-tone="busy">有在途工作</span> : null}
             {generation === undefined ? null : <span className="dshpet-meta">{generation}</span>}
             {props.inheritedFrom === undefined ? null : (
@@ -1313,10 +1320,12 @@ function LocusRow(props: {
             }}
           />
           <Jump
-            label={endpoint.threadId === undefined ? '飞书' : '话题'}
+            label={isDoc ? '文档' : endpoint.threadId === undefined ? '飞书' : '话题'}
             title={feishuLink === undefined
-              ? '这个入口没有可用的飞书链接'
-              : endpoint.threadId === undefined ? '在飞书中打开这个入口' : '在飞书中打开这个话题'}
+              ? (isDoc ? '文档元数据暂不可读，无法提供链接' : '这个入口没有可用的飞书链接')
+              : isDoc
+                ? (endpoint.threadId === undefined ? '在飞书中打开这个文档' : `在飞书中打开该文档（评论 ${endpoint.threadId}）`)
+                : endpoint.threadId === undefined ? '在飞书中打开这个入口' : '在飞书中打开这个话题'}
             disabled={feishuLink === undefined}
             {...(feishuLink === undefined ? {} : { href: feishuLink })}
           />
@@ -1666,8 +1675,9 @@ function DiscoveryCard(props: {
     ? undefined
     : handleLabel('session', props.codes.session.get(childSessionId) ?? '')
   const parentCode = handleLabel('session', props.codes.session.get(locus.main.sessionId) ?? '')
-  const chatLink = chatAppLink(locus.endpoint.chatId)
-  const threadLink = locus.endpoint.threadId === undefined
+  const isDoc = isDocEndpointView(locus.endpoint)
+  const chatLink = isDoc ? locus.endpoint.docUrl : chatAppLink(locus.endpoint.chatId)
+  const threadLink = isDoc || locus.endpoint.threadId === undefined
     ? undefined
     : `https://applink.feishu.cn/client/thread/open?threadId=${encodeURIComponent(locus.endpoint.threadId)}`
   return (
@@ -2567,7 +2577,10 @@ function WorkTodos(props: {
               locus?.child.availability,
             )
             return items.map(item => {
-              const jump = resolveFeishuJumpTarget(item)
+              // Doc todos jump to the inspected document URL carried on the loci.
+              const jump = resolveFeishuJumpTarget(item, {
+                docUrl: chatId => props.loci.find(row => row.endpoint.chatId === chatId && row.endpoint.docUrl !== undefined)?.endpoint.docUrl,
+              })
               const busy = props.disabled || props.busyId === item.itemId
               return (
                 <article key={item.itemId} className="dshpet-todo" data-status={item.status}>
@@ -2693,6 +2706,7 @@ const TODO_ACTION_HINTS: Record<PetTodoAction, string> = {
  * correlation, not a link component.
  */
 function todoFeishuLink(jump: ReturnType<typeof resolveFeishuJumpTarget>): string | undefined {
+  if (jump.kind === 'doc') return jump.url
   return jump.kind === 'thread'
     ? `https://applink.feishu.cn/client/thread/open?threadId=${encodeURIComponent(jump.threadId)}`
     : chatAppLink(jump.chatId)
@@ -2700,6 +2714,10 @@ function todoFeishuLink(jump: ReturnType<typeof resolveFeishuJumpTarget>): strin
 
 /** Says where the jump lands, and when it cannot, why. */
 function todoFeishuTitle(jump: ReturnType<typeof resolveFeishuJumpTarget>): string {
+  if (jump.kind === 'doc') {
+    if (jump.url === undefined) return '文档元数据暂不可读，无法提供链接'
+    return jump.commentId === undefined ? '打开提出这条请求的文档' : `打开提出这条请求的文档（评论 ${jump.commentId}）`
+  }
   if (todoFeishuLink(jump) === undefined) return '这条待办没有可用的飞书链接'
   return jump.kind === 'thread'
     ? '打开提出这条请求的话题'

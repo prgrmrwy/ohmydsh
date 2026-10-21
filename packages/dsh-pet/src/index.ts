@@ -63,6 +63,10 @@ import {
   type CollaborationAssembly,
 } from './host/collaboration/assembly.js'
 import { InquiryLedgerStore } from './host/inquiry/ledger-store.js'
+import { composeProductionInquiry } from './host/inquiry/composition.js'
+import { createInquiryAgentResolver } from './host/inquiry/agent-resolver.js'
+import { createInquiryManagedEffects } from './host/inquiry/managed-effects.js'
+import type { InquiryScope } from './host/inquiry/ledger.js'
 import { SharedFactLedgerStore } from './host/ledger/store.js'
 import {
   acceptTodo,
@@ -71,7 +75,14 @@ import {
   type TodoDispatchPort,
 } from './host/ledger/dispatch.js'
 import { InquiryOutboxStore } from './host/inquiry/outbox-store.js'
+import { createInquiryOwnerProjection } from './host/inquiry/owner-projection.js'
 import { summarizeInquiryReconciliation } from './host/inquiry/reconcile.js'
+import {
+  createInquirySessionEvidence,
+  createInquiryWorkEvidence,
+  planInquiryRecoveryForMembers,
+  runInquiryStartupRecovery,
+} from './host/inquiry/startup-recovery.js'
 import type { InquiryOriginProof } from './host/inquiry/ask.js'
 import type {
   PetLocusFinishInput,
@@ -107,6 +118,9 @@ import {
   unavailableLocusChannelCapability,
 } from './host/channel/locus-capability.js'
 import { createLocusTurnObserver } from './host/locus/turn-observer.js'
+import { proveInquiryResultDelivery } from './host/locus/inquiry-result-proof.js'
+import { InquiryHandoffStore } from './host/inquiry/handoff-store.js'
+import { InquiryWorkStore } from './host/inquiry/work-store.js'
 import {
   entranceReadProbeFor,
   measureEntranceReadability,
@@ -129,6 +143,8 @@ import { createLocusPermissionMutation } from './host/locus/permission-mutation.
 import { createLocusToolTierMutation, type LocusLiveToolTierSurface } from './host/locus/tool-tier-mutation.js'
 import type { LocusToolTierName } from './host/locus/aggregate.js'
 import { asLocusContextRepository, type LocusContextRepository } from './host/locus/context-repository.js'
+import { isDocEndpoint, parseDocChatId } from './host/locus/doc-endpoint.js'
+import { createDocControlMessenger, DOC_DISCLOSURE_TEXT, finishDocReply, reactOnDocTrigger, sendDocControlReceipt } from './host/channel/doc-comment-egress.js'
 import { renderLocusDeliveryFor } from './host/locus/context.js'
 import { createLocusHistoryCursor } from './host/locus/history-cursor.js'
 import {
@@ -405,7 +421,7 @@ async function initialize(
     readonly deliveryId: string
     readonly executionId: string
     readonly turnId: string
-    readonly source: 'delivery' | 'agent-message'
+    readonly source: 'delivery' | 'agent-message' | 'inquiry-result'
     readonly locusId?: string
     readonly generation?: number
   }
@@ -529,6 +545,8 @@ async function initialize(
   // the pass can classify inquiries but cannot see whether a result already
   // exists, so it would report a fault instead of reconciling on a guess.
   const inquiryOutboxStore = new InquiryOutboxStore(domain as never)
+  const inquiryHandoffStore = new InquiryHandoffStore(domain as never)
+  const inquiryWorkStore = new InquiryWorkStore(domain as never)
 
   /**
    * Synchronous, cheap durable description of one circle member.
@@ -601,20 +619,126 @@ async function initialize(
   }
 
   /**
-   * The scoped collaboration + inquiry surface, or nothing.
-   *
-   * `undefined` here means a required seam is missing and Pet keeps behaving
-   * exactly as before — no tool is published and no diagnostic path changes.
-   *
-   * Inquiry DISPATCH stays unavailable on this Host by construction: the real
-   * detector reads the isolated queued-turn claim marker off the agent driver,
-   * and the pinned runtime carries no such marker (the seam exists only as a
-   * tracked compatibility patch that this Host does not load). No probe is
-   * supplied either, because a probe built from a `dsh-agent` copy other than
-   * the one the Host actually loaded proves nothing — the capability audit
-   * records exactly that failure. The verdict is therefore passed to the
-   * scheduler as-is; nothing here fakes it available.
+   * Inquiry readiness is evaluated live and remains fail-closed unless durable
+   * storage, the actually loaded AgentLoop isolation probe, ToolRuntime final
+   * guard recheck, and installed per-agent managed guards are all present.
    */
+  const managedEffects = createInquiryManagedEffects()
+  const inquiryAdapters = new Map<string, { executionProof(execution: unknown): unknown }>()
+  const currentInquiryScope = (sessionId: string): InquiryScope | undefined => {
+    try {
+      const owned = locusRepository.findByChildSessionId(sessionId)
+      if (owned.length > 1) return undefined
+      const row = owned[0]
+      if (row !== undefined) {
+        if (row.state !== 'active' || row.childSessionId !== sessionId) return undefined
+        return { kind: 'child', sessionId, locusId: row.id, generation: row.generation }
+      }
+      if (locusRepository.getLocusByChild(sessionId) !== undefined) return undefined
+      return { kind: 'main', sessionId }
+    } catch {
+      return undefined
+    }
+  }
+  const agentLoop = ctx.get('agentLoop')
+  const claimProbe = typeof (agentLoop as { probeIsolatedQueuedTurnClaim?: unknown } | undefined)?.probeIsolatedQueuedTurnClaim === 'function'
+    ? (agentLoop as { probeIsolatedQueuedTurnClaim: (...args: never[]) => unknown }).probeIsolatedQueuedTurnClaim.bind(agentLoop)
+    : undefined
+  const getInquiryLiveAgent = (sessionId: string) => {
+    try {
+      const candidate = ctx.agents.get(sessionId as never) as {
+        id?: unknown; session?: unknown; inbox?: unknown; followup?: unknown; ctx?: unknown
+      } | undefined
+      if (!candidate || typeof candidate.id !== 'string' || candidate.id !== sessionId || !candidate.session || !candidate.inbox
+        || typeof candidate.followup !== 'function' || !candidate.ctx) return undefined
+      return candidate as { readonly id: string }
+    } catch { return undefined }
+  }
+  const inquiryAgentResolver = createInquiryAgentResolver({
+    getLive: getInquiryLiveAgent,
+    resumeMain: async (sessionId, _signal) => {
+      const current = selection()
+      const presetId = await persistedPresetFor(sessionId)
+      await ctx.agents.resume({
+        resumeSessionId: SessionId(sessionId),
+        agentOptions: { provider: current.providerId, model: current.modelId },
+        setup: async agentCtx => { await ctx.agentPresets.mount(agentCtx, presetId) },
+      })
+    },
+    parentSessionOf: childSessionId => {
+      const rows = locusRepository.findByChildSessionId(childSessionId)
+      if (rows.length !== 1) return undefined
+      const row = rows[0]
+      return row !== undefined && row.state === 'active' && row.childSessionId === childSessionId ? row.parentSessionId : undefined
+    },
+    materializeChild: async (parent, childSessionId, signal) => {
+      const subagents = ctx.get('subagents') as {
+        supportsLiveContinuableChildSession?: unknown
+        withLiveContinuableChildSession?: (spec: { parent: unknown; childId: string; signal: AbortSignal }, operation: (session: unknown) => unknown) => Promise<unknown>
+      } | undefined
+      if (subagents?.supportsLiveContinuableChildSession !== true || typeof subagents.withLiveContinuableChildSession !== 'function') {
+        throw new Error('child-session-access-unsupported')
+      }
+      await subagents.withLiveContinuableChildSession.call(
+        subagents,
+        { parent, childId: childSessionId, signal },
+        async () => undefined,
+      )
+    },
+    log: message => petLog(`dsh-pet: ${message}`),
+  })
+  const composed = composeProductionInquiry({
+    domain: domain as never,
+    currentScope: currentInquiryScope,
+    resolveAgent: inquiryAgentResolver as never,
+    agentLoop,
+    probeIsolatedClaim: claimProbe,
+    tools: ctx.get('tools') as never,
+    readinessManagedGuard: () => (ctx.get('tools') as { supportsFinalToolGuardRecheck?: boolean } | undefined)?.supportsFinalToolGuardRecheck === true,
+    log: petLog,
+    onError: error => petLog(`dsh-pet: inquiry runtime error (${error instanceof Error ? error.message : String(error)})`),
+    now: Date.now,
+    newMessageId: () => randomUUID(),
+    newInquiryId: () => randomUUID(),
+  })
+  const installInquiryAgent = (candidate: unknown): void => {
+    const agent = candidate as { id?: unknown; ctx?: { effect?: (...args: never[]) => unknown } } | undefined
+    if (!agent || typeof agent.id !== 'string' || !agent.ctx) return
+    const id = agent.id
+    if (inquiryAdapters.has(id)) return
+    let disposeGuard: (() => void) | undefined
+    try {
+      const proofForExecution = (agentId: string, execution: unknown) => inquiryAdapters.get(agentId)?.executionProof(execution)
+      // ManagedExecution is structurally supplied by ToolRuntime at execution time.
+      disposeGuard = managedEffects.install(agent as never, proofForExecution as never, currentInquiryScope)
+    } catch (error) {
+      petLog(`dsh-pet: inquiry runtime error (${error instanceof Error ? error.message : String(error)})`)
+      return
+    }
+    let adapter: unknown
+    try {
+      adapter = composed.install(agent as never)
+    } catch (error) {
+      disposeGuard()
+      petLog(`dsh-pet: inquiry runtime error (${error instanceof Error ? error.message : String(error)})`)
+      return
+    }
+    inquiryAdapters.set(id, adapter as { executionProof(execution: unknown): unknown })
+    try {
+      ;(agent.ctx as { effect: (factory: () => () => void, name: string) => unknown }).effect(
+        () => () => {
+          try { disposeGuard?.() } catch (error) { petLog(`dsh-pet: inquiry guard dispose error (${error instanceof Error ? error.message : String(error)})`) }
+          try { composed.release(agent as never) } catch (error) { petLog(`dsh-pet: inquiry adapter release error (${error instanceof Error ? error.message : String(error)})`) }
+          try { inquiryAdapters.delete(id) } catch (error) { petLog(`dsh-pet: inquiry adapter cleanup error (${error instanceof Error ? error.message : String(error)})`) }
+        },
+        'dsh-pet: inquiry managed guard',
+      )
+    } catch (error) {
+      disposeGuard()
+      inquiryAdapters.delete(id)
+      petLog(`dsh-pet: inquiry runtime error (${error instanceof Error ? error.message : String(error)})`)
+    }
+  }
   const collaborationSurface: CollaborationAssembly | undefined = composeCollaborationSurface({
     atomicStorage: locusRepository.supportsAtomicProvisioning(),
     loci: locusRepository,
@@ -624,9 +748,15 @@ async function initialize(
     resultOutbox: inquiryOutboxStore,
     describe: describeCollaborator,
     origin: resolveInquiryOrigin,
-    // `ctx.get` rather than property access: `agentLoop` is not in this
-    // plugin's `inject`, and cordis throws on undeclared property access.
-    agentLoop: ctx.get('agentLoop'),
+    agentLoop,
+    probeIsolatedClaim: claimProbe,
+    answerStore: composed.answerStore,
+    inquiryRuntime: {
+      get ready() { return composed.ready },
+      forExecution: composed.forExecution,
+      afterAnswer: composed.afterAnswer,
+      answerBinding: composed.answerBinding,
+    },
     installed: collaborationAgents,
   })
   if (collaborationSurface === undefined) {
@@ -838,6 +968,15 @@ async function initialize(
 
   const changes = new PetChangeFeed()
 
+  // Owner inquiry snapshots are read from the Pet Domain on demand. Refresh
+  // subscribed owner clients only after committed changes to their source rows;
+  // payloads are intentionally ignored.
+  ctx.effect(() => ctx.on('domain/changed', change => {
+    if (change.domain !== PET_DOMAIN_NAME) return
+    if (!['inquiries', 'inquiry_handoffs', 'inquiry_answers', 'inquiry_results', 'inquiry_works'].includes(change.table)) return
+    changes.publish()
+  }), 'dsh-pet: publish committed inquiry projection changes')
+
   // Archiving a terminal Task from Pet syncs its executor session; DSH
   // exposes archive but no unarchive, so this stays one-way by design.
   const archiveSink: ArchiveSink = {
@@ -983,6 +1122,7 @@ async function initialize(
                 repository,
                 locusRepository: locusContextRepository,
                 intentTriage: intentTriageDeps,
+                managedEffects: { register: managedEffects.register, assertEntry: managedEffects.assertEntry },
                 // A user message typed into this executor registers its
                 // Invocation through the durable inbox splice, which can still
                 // be landing when the turn's first step asks for context.
@@ -1209,6 +1349,7 @@ async function initialize(
         registerPetTools(agent.scope as never, {
           repository,
           locusRepository: locusContextRepository,
+          managedEffects: { register: managedEffects.register, assertEntry: managedEffects.assertEntry },
           locusLifecycle: {
             locusRepository: locusContextRepository,
             lark: larkClient,
@@ -1244,16 +1385,31 @@ async function initialize(
             // instead of two copies that can drift (design D10).
             requestExecution: input => runTodoExecutionRequest(input),
           },
-          // The entrance read is published only when this runtime actually has
-          // a bot read port: a tool that can never succeed must not appear in
-          // the child's tool surface at all.
-          ...(larkClient.readEntranceHistory === undefined ? {} : {
-            locusHistory: {
-              loci: intentTriageDeps.loci,
-              cursor: locusHistoryCursor,
-              read: input => larkClient.readEntranceHistory!(input),
-            },
-          }),
+          // One read tool per child, by entry kind (D9/D10): a document child
+          // gets the doc read and never the group-history read, and an IM child
+          // never sees the doc read. Each is published only when the runtime
+          // really has the port, so a tool that can never succeed never appears.
+          // A fresh child is composed before its locus row exists, so the
+          // endpoint comes from the composition first (production E2E,
+          // 2026-10-18: the first doc child got the IM tool without this).
+          ...(isDocEndpoint(composition.endpoint ?? locusRepository.getLocus(composition.locusId)?.endpoint ?? { chatId: '' })
+            ? (larkClient.queryDocComment === undefined || larkClient.fetchDocMarkdown === undefined ? {} : {
+              locusDocContext: {
+                loci: intentTriageDeps.loci,
+                currentMessageId: caller => locusRepository.listDeliveries(caller.locusId)
+                  .find(record => record.generation === caller.generation &&
+                    (record.status === 'current' || record.status === 'finishing') &&
+                    record.queueState === 'current')?.messageId,
+                client: larkClient,
+              },
+            })
+            : (larkClient.readEntranceHistory === undefined ? {} : {
+              locusHistory: {
+                loci: intentTriageDeps.loci,
+                cursor: locusHistoryCursor,
+                read: input => larkClient.readEntranceHistory!(input),
+              },
+            })),
         })
         // The circle surface rides the SAME synchronous boundary, so a locus
         // child never starts its first turn able to read shared facts but not
@@ -1390,6 +1546,7 @@ async function initialize(
         // composition fail as a duplicate publication. `composed:false` is
         // the ordinary-session answer and falls through unchanged.
         if (typeof sessionId === 'string' && agent?.ctx !== undefined) {
+          installInquiryAgent(payload.agent)
           const candidate: LocusCandidateAgent = { id: sessionId, scope: agent.ctx as never }
           // Rethrown deliberately: only a candidate that matched durable or
           // staged locus identity may veto publication. Logged first because the
@@ -1929,6 +2086,7 @@ async function initialize(
         locusId: string
         generation: number
         label: string
+        endpoint: { readonly chatId: string; readonly threadId?: string }
         permission: 'read'
       }) => {
         const reservation = locusPrepublication.reserve({
@@ -1938,6 +2096,7 @@ async function initialize(
           permission: input.permission,
           childComposition: 'safe-v2',
           toolTier: { desired: 'safe', effective: 'safe' },
+          endpoint: input.endpoint,
         })
         const adapter = createLocusChildAdapter({
           ...locusChildProbe.ports,
@@ -2031,7 +2190,42 @@ async function initialize(
     }
     : undefined
 
-  const locusLarkPort = createLocusLarkPort()
+  const imLocusLarkPort = createLocusLarkPort()
+  // Display-only doc metadata, cached: the management panel refreshes often,
+  // and a failed read is retried after a shorter delay than a successful one.
+  const docMetaCache = (() => {
+    const entries = new Map<string, { at: number; ok: boolean; value?: { title?: string; url?: string } }>()
+    return {
+      get: async (token: string): Promise<{ title?: string; url?: string } | undefined> => {
+        const now = Date.now()
+        const hit = entries.get(token)
+        if (hit !== undefined && now - hit.at < (hit.ok ? 10 * 60_000 : 60_000)) return hit.value
+        const value = await larkClient.inspectDoc?.(token).catch(() => undefined)
+        entries.set(token, { at: now, ok: value !== undefined, ...(value === undefined ? {} : { value }) })
+        return value
+      },
+    }
+  })()
+  // A document has no "post to the root" call. Its control messages (the
+  // /bind source-switch warning) follow the business-answer routing: under the
+  // anchoring comment for a comment-level entry, or a new full comment that
+  // @-mentions the /bind issuer for a whole-doc entry (full comments cannot be
+  // replied to). IM ids never reach drive and doc ids never reach IM (D8).
+  const docControl = createDocControlMessenger({
+    client: larkClient,
+    latestDelivery: endpoint => [...locusRepository.listDeliveries()]
+      .filter(record =>
+        record.endpoint.chatId === endpoint.chatId &&
+        (record.endpoint.threadId ?? undefined) === (endpoint.threadId ?? undefined))
+      .sort((left, right) => right.sequence - left.sequence)[0],
+  })
+  const locusLarkPort: typeof imLocusLarkPort = {
+    ...imLocusLarkPort,
+    sendControlMessage: async input => {
+      if (!isDocEndpoint(input.endpoint)) return imLocusLarkPort.sendControlMessage(input)
+      await docControl.send(input)
+    },
+  }
   const locusProvisioning = (() => {
     if (idleChildProvisioning === undefined || !locusRepository.supportsAtomicProvisioning()) {
       return undefined
@@ -2138,7 +2332,10 @@ async function initialize(
             // belongs to. Fail-soft: an unresolvable name keeps the id.
             let chatName: string | undefined
             try {
-              chatName = await larkClient.chatName(endpoint.chatId)
+              const docToken = parseDocChatId(endpoint.chatId)
+              chatName = docToken === undefined
+                ? await larkClient.chatName(endpoint.chatId)
+                : (await larkClient.inspectDoc?.(docToken))?.title
             } catch {
               chatName = undefined
             }
@@ -2344,8 +2541,8 @@ async function initialize(
         return resolved
       },
       bind: {
-        bind: ({ endpoint, parentSessionId, chatName }) =>
-          endpoint.threadId === undefined
+        bind: ({ endpoint, parentSessionId, chatName, actorId }) => {
+          const run = () => endpoint.threadId === undefined
             ? locusProvisioningController.ensureGroup({
               chatId: endpoint.chatId,
               parentSessionId,
@@ -2356,24 +2553,32 @@ async function initialize(
               threadId: endpoint.threadId,
               parentSessionId,
               ...(chatName === undefined ? {} : { chatName }),
-            }),
-        rebuildProtected: ({ endpoint, parentSessionId, chatName, marker }) => {
-          if (marker === 'legacy') {
-            return locusProvisioningController.rebuildLegacyEndpoint({
+            })
+          // A whole-doc /bind switch warning is a NEW full comment that
+          // @-mentions someone (full comments cannot be replied to). It must
+          // name this /bind's issuer, not whoever asked last (round-7 M2).
+          return isDocEndpoint(endpoint) ? docControl.withIssuer(endpoint, actorId, run) : run()
+        },
+        rebuildProtected: ({ endpoint, parentSessionId, chatName, marker, actorId }) => {
+          const run = async () => {
+            if (marker === 'legacy') {
+              return locusProvisioningController.rebuildLegacyEndpoint({
+                endpoint,
+                parentSessionId,
+                ...(chatName === undefined ? {} : { chatName }),
+              })
+            }
+            const previous = locusRepository.getLatestLocusByEndpoint(endpoint)
+            if (previous === undefined || previous.state === 'active') {
+              throw new Error('Protected unified generation is unavailable for explicit rebuild')
+            }
+            return locusProvisioningController.rebuildExplicit({
               endpoint,
+              previousLocusId: previous.id,
               parentSessionId,
-              ...(chatName === undefined ? {} : { chatName }),
             })
           }
-          const previous = locusRepository.getLatestLocusByEndpoint(endpoint)
-          if (previous === undefined || previous.state === 'active') {
-            throw new Error('Protected unified generation is unavailable for explicit rebuild')
-          }
-          return locusProvisioningController.rebuildExplicit({
-            endpoint,
-            previousLocusId: previous.id,
-            parentSessionId,
-          })
+          return isDocEndpoint(endpoint) ? docControl.withIssuer(endpoint, actorId, run) : run()
         },
       },
       exit: {
@@ -2432,7 +2637,12 @@ async function initialize(
           return { mode: updated.permission.effective }
         },
       },
-      chatName: chatId => larkClient.chatName(chatId),
+      // A document's "name" is its title (D14); never call an IM API with a doc id.
+      chatName: async chatId => {
+        const token = parseDocChatId(chatId)
+        if (token === undefined) return larkClient.chatName(chatId)
+        return (await larkClient.inspectDoc?.(token).catch(() => undefined))?.title
+      },
     })
 
   const locusTurnObserver = (() => {
@@ -2508,6 +2718,27 @@ async function initialize(
               },
             }
           },
+        },
+        // Read-only durable proof for `pet-inquiry-result` claims. Same domain
+        // as composeProductionInquiry's stores; construction has no side effects.
+        inquiryResult: {
+          prove: (() => {
+            const resultHandoffs = new InquiryHandoffStore(domain as never)
+            const resultWorks = new InquiryWorkStore(domain as never)
+            return proveInquiryResultDelivery({
+              findResultHandoff: messageId => resultHandoffs.findByMessageId(messageId),
+              getInquiry: inquiryId => inquiryLedgerStore.get(inquiryId),
+              getWork: (sessionId, workId) => resultWorks.get(sessionId, workId),
+              findDeliveryByInboxMessageId: inboxMessageId => locusRepository.findDeliveryByInboxMessageId(inboxMessageId),
+              now: () => Date.now(),
+              currentScopeOf: childSessionId => {
+                const locus = locusRepository.getLocusByChild(childSessionId)
+                return locus === undefined || locus.state !== 'active'
+                  ? undefined
+                  : { locusId: locus.id, generation: locus.generation }
+              },
+            })
+          })(),
         },
         log: code => petLog(`dsh-pet locus turn: ${code}`),
       })
@@ -2624,6 +2855,24 @@ async function initialize(
         return { sent: false, outcome: 'no-reply' }
       }
 
+      if (isDocEndpoint(current.endpoint)) {
+        // Doc comment (D5/D8): prove → reserve → answer (reply under an anchored
+        // comment, or a new full comment mentioning the asker) → record.
+        // Unproven association refuses BEFORE `finishing`.
+        const doc = await finishDocReply({
+          repository: locusRepository as never,
+          client: larkClient,
+          correlation,
+          current,
+          text: input.text ?? '',
+          now: () => Date.now(),
+        })
+        if (doc.kind === 'refused') {
+          throw new PetError('INVALID_REQUEST', 'Reply target refused: association-unproven')
+        }
+        await finishAndAdvance(doc.record as DeliveryRecord, correlation, doc.outboundResult === 'success' ? 'settled' : 'failed')
+        return { sent: doc.outboundResult === 'success', outcome: 'reply' }
+      }
       const finishing = await locusRepository.markDeliveryFinishing({
         ...correlation,
         deliveryId: current.deliveryId,
@@ -2970,20 +3219,39 @@ async function initialize(
         listChatBots: chatId => larkClient.listChatBots(chatId),
         // Names the asker in the delivery prompt, so the agent addresses a
         // display name instead of echoing the open id into the chat.
+        // Documents have no chat members: name the commenter via contact (D9),
+        // fail-soft to the open id.
         resolveMemberName: async (chatId, openId) =>
-          await larkClient.resolveMemberName?.(chatId, openId),
+          isDocEndpoint({ chatId })
+            ? await larkClient.contactName?.(openId).catch(() => undefined)
+            : await larkClient.resolveMemberName?.(chatId, openId),
       },
+      // Disclose ask-scope on a document's FIRST entry only (D7), proven from
+      // durable loci of that document root, so no flag is stored.
+      docHasEntries: chatId => locusRepository.listLoci().some(record => record.endpoint.chatId === chatId),
+      docDisclosureText: DOC_DISCLOSURE_TEXT,
       receipts: (() => {
         const inProgressReactions = new Map<string, string>()
         return {
-          markAccepted: async (target: { messageId: string }) => {
+          markAccepted: async (target: { chatId: string; messageId: string }) => {
+            if (isDocEndpoint(target)) {
+              await reactOnDocTrigger(larkClient, target.messageId, 'accepted')
+              return
+            }
             const reactionId = await larkClient.addReaction(target.messageId, 'OnIt')
             if (reactionId !== undefined) inProgressReactions.set(target.messageId, reactionId)
           },
           markSettled: async (
-            target: { messageId: string },
+            target: { chatId: string; messageId: string },
             outcome: 'settled' | 'failed',
           ) => {
+            if (isDocEndpoint(target)) {
+              // no-reply only clears Typing; read it from the durable outcome.
+              const finished = locusRepository.findDeliveryByMessageId(target.messageId)
+              const phase = outcome === 'failed' ? 'failed' : finished?.finishOutcome === 'no-reply' ? 'no-reply' : 'settled'
+              await reactOnDocTrigger(larkClient, target.messageId, phase)
+              return
+            }
             const reactionId = inProgressReactions.get(target.messageId)
             if (reactionId !== undefined) {
               inProgressReactions.delete(target.messageId)
@@ -2994,8 +3262,10 @@ async function initialize(
               outcome === 'settled' ? 'DONE' : 'CRY',
             )
           },
-          sendControl: (target: { messageId: string }, text: string) =>
-            larkClient.reply(target.messageId, text),
+          sendControl: (target: { chatId: string; threadId?: string; messageId: string }, text: string, senderOpenId?: string) =>
+            isDocEndpoint(target)
+              ? sendDocControlReceipt(larkClient, { ...target, ...(senderOpenId === undefined ? {} : { senderOpenId }) }, text)
+              : larkClient.reply(target.messageId, text),
         }
       })(),
       renderPrompt: async ({ locus, message, signal }) => {
@@ -3013,7 +3283,8 @@ async function initialize(
         // cancellable with the delivery. `larkReady` alone is a transport fact:
         // the incident's child was told it could read the group while the read
         // actually failed, so the read claim now comes from a real attempt.
-        const readability = await measureEntranceReadability(
+        // A document has no group history to probe; never send its id to IM.
+        const readability = isDocEndpoint(record.endpoint) ? 'unconfirmed' as const : await measureEntranceReadability(
           {
             chatId: record.endpoint.chatId,
             ...(record.endpoint.threadId === undefined ? {} : { threadId: record.endpoint.threadId }),
@@ -3064,6 +3335,11 @@ async function initialize(
               ? {}
               : { replyToMessageId: message.replyToMessageId }),
             ...(message.replyTarget === undefined ? {} : { replyTarget: message.replyTarget }),
+            // Doc facts come from the PERSISTED Delivery only (D5/D12), so first,
+            // queued and post-restart dispatch render the same comment facts.
+            ...(current?.docComment === undefined ? {} : { docComment: current.docComment }),
+            // Recomputed at render against the CURRENT allowlist (D5/D12).
+            senderAllowlisted: repository.getChannelConfig().allowOpenIds.includes(message.senderOpenId),
           },
           deliveries: locusRepository.listDeliveries(record.id),
           ...(current === undefined ? {} : { currentDeliveryId: current.deliveryId }),
@@ -3348,8 +3624,13 @@ async function initialize(
   }
 
   let locusManagement!: ReturnType<typeof createLocusManagementPort>
+  const projectInquiry = createInquiryOwnerProjection({
+    domain: domain as never,
+    capability: () => ({ available: collaborationSurface?.inquiryDispatch.available === true }),
+  })
   locusManagement = createLocusManagementPort({
     repository: locusRepository as never,
+    ownerProjection: input => ({ inquiry: projectInquiry(input) }),
     // The same live reader admission and resolution already share: the panel
     // must agree with the channel about whether this entry can still serve,
     // otherwise one of them offers a repair while the other refuses it.
@@ -3357,6 +3638,24 @@ async function initialize(
     resolvers: {
       main: describeSession,
       child: describeSession,
+      // Document entries only (D14): title/url via drive +inspect, cached so the
+      // panel does not re-inspect every refresh; a comment's summary is the
+      // earliest persisted anchored quote. IM entries keep their existing names.
+      endpoint: async endpoint => {
+        const token = parseDocChatId(endpoint.chatId)
+        if (token === undefined) return undefined
+        const meta = await docMetaCache.get(token)
+        const quote = endpoint.threadId === undefined
+          ? undefined
+          : [...locusRepository.listDeliveries()]
+            .filter(record => record.endpoint.chatId === endpoint.chatId && record.endpoint.threadId === endpoint.threadId && record.docComment !== undefined)
+            .sort((left, right) => left.sequence - right.sequence)[0]?.docComment?.quote
+        return {
+          ...(endpoint.threadId === undefined && meta?.title !== undefined ? { chatName: meta.title } : {}),
+          ...(meta?.url === undefined ? {} : { docUrl: meta.url }),
+          ...(quote === undefined ? {} : { quote }),
+        }
+      },
       workspace: (id) => {
         const workspace = ctx.workspaceRegistry.get(id as never) as
           | { title?: unknown; path?: unknown }
@@ -3541,6 +3840,16 @@ async function initialize(
     ...(locusChannel.status === 'available'
       ? {
         locusController: locusChannel.controller,
+        // Doc comments enter the SAME controller after their own admission
+        // (pet-locus-doc-comments D7); the service owns the retry and stop.
+        ...(locusChannel.controller.handleAdmission === undefined
+          ? {}
+          : {
+            docCommentLocus: {
+              handleAdmission: (admission: import('./host/channel/locus-controller.js').NormalizedLocusAdmission) =>
+                locusChannel.controller.handleAdmission!(admission),
+            },
+          }),
         locusAuthorization,
         locusToolTier: endpoint => locusRepository.getCurrentLocus(endpoint)?.toolTier?.effective ?? 'safe',
         // Bot-added produces no locus of its own: the whole tree is built on
@@ -3854,6 +4163,54 @@ async function initialize(
       },
       `dsh-pet: ${route.path}`,
     )
+  }
+
+  /**
+   * Restart recovery for the NEW inquiry handoff protocol (design D6).
+   *
+   * Runs after every dependency above is initialised (cold resume needs `selection` and
+   * `persistedPresetFor`) and BEFORE the Feishu channel starts. It only triggers the existing
+   * runtime pumps for rows the read-only planner proves were never put in an inbox; anything it
+   * cannot prove is reported, never retried, and nothing durable is written. The pumps re-check
+   * readiness, identity, generation and inbox de-duplication themselves. Log lines are counts only.
+   */
+  if (!composed.ready) {
+    petLog('dsh-pet: inquiry startup recovery skipped (runtime not ready)')
+  } else {
+    const recovered = await lifecycle.contain('Pet inquiry startup recovery', () => {
+      const sessionController = ctx.get('sessionController') as
+        | { inspect?: (id: unknown, signal?: AbortSignal) => Promise<unknown> }
+        | undefined
+      return runInquiryStartupRecovery({
+        plan: () => planInquiryRecoveryForMembers({
+          domain: domain as never,
+          ready: composed.ready,
+          currentScope: currentInquiryScope,
+          sessionEvidence: createInquirySessionEvidence({
+            getLive: getInquiryLiveAgent as never,
+            readEvents: async sessionId => {
+              if (typeof sessionController?.inspect !== 'function') return undefined
+              const inspection = await sessionController.inspect(sessionId) as { readonly events?: readonly unknown[] } | undefined
+              return inspection?.events
+            },
+          }),
+          workEvidence: createInquiryWorkEvidence((sessionId, workId) => inquiryWorkStore.get(sessionId, workId)),
+        }),
+        pumpTarget: composed.pumpTarget,
+        pumpResults: composed.pumpResults,
+        log: code => petLog(`dsh-pet: ${code}`),
+      })
+    })
+    if (recovered !== undefined) {
+      petLog(
+        'dsh-pet: inquiry-startup-recovery'
+        + ` dispatched-target=${String(recovered.dispatchedTarget)}`
+        + ` dispatched-result=${String(recovered.dispatchedResult)}`
+        + ` awaiting=${String(recovered.awaiting)}`
+        + ` review=${String(recovered.review)}`
+        + ` failed=${String(recovered.failed)}`,
+      )
+    }
   }
 
   // Starts only when configuration says the channel is enabled, and stops

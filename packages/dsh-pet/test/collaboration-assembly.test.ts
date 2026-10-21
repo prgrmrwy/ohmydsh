@@ -27,11 +27,11 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, mkdtemp } from 'node:fs/promises'
-import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
+import { MAIN, CHILD_A, CHILD_B, agentScope, locus, composePetStorage, openDomainOnly, openPetDomain, loadPetHost, type LoadedHost } from './support/pet-host-fixture.js'
 import { Context } from '@deepseek-ai/cordis'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -52,8 +52,6 @@ import {
 } from '../src/host/inquiry/tools.js'
 import { PET_CONTEXT_TOOL } from '../src/host/context-tool.js'
 import { PET_LOCUS_FINISH_TOOL, PET_LOCUS_WAIT_TOOL, registerPetTools } from '../src/host/tools.js'
-import { buildLocusRecord, type LocusRecord } from '../src/host/locus/aggregate.js'
-import { LocusRepository } from '../src/host/locus/persistence.js'
 import {
   createEmptyCollaborationContext,
   updateCollaborationContext,
@@ -63,22 +61,10 @@ import {
 import { createInquiry, type InquiryRecord } from '../src/host/inquiry/ledger.js'
 import { InquiryLedgerStore } from '../src/host/inquiry/ledger-store.js'
 import { InquiryOutboxStore } from '../src/host/inquiry/outbox-store.js'
-import * as petStoragePlugin from '../src/host/storage/plugin.js'
-import { PET_BACKEND_NAME } from '../src/host/storage/backend.js'
-import { withAtomicWrites } from '../src/host/storage/atomic-domain.js'
-import { PET_DOMAIN_NAME, petDomainSpec } from '../src/host/spec.js'
+import { LOCUS_ROUTES } from '../src/wire.js'
 import { openPetHarness, type PetHarness } from './harness.js'
-import * as petPlugin from '../src/index.js'
+import { LocusRepository } from '../src/host/locus/persistence.js'
 
-// Scope tags use a package-private Symbol, so mint from ToolRuntime's own
-// dependency root rather than the repository's second physical dsh-scope copy.
-const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/package.json'))
-const scopeEntry = requireFromTools.resolve('@deepseek-ai/dsh-scope')
-const { createScope } = await import(pathToFileURL(scopeEntry).href) as typeof import('@deepseek-ai/dsh-scope')
-
-const MAIN = 'main-1'
-const CHILD_A = 'child-a'
-const CHILD_B = 'child-b'
 
 /** The five tools this surface publishes, and nothing else. */
 const CIRCLE_TOOLS = [
@@ -114,45 +100,10 @@ async function hostContext(): Promise<Context> {
  * Reproducing that here is what makes "the composer installs at the synchronous
  * boundary" a real claim rather than an artifact of the fixture.
  */
-async function agentScope(
-  ctx: Context,
-  sessionId: string,
-): Promise<{ key: object; scope: Context; dispose: () => Promise<void> }> {
-  const loopCtx = await new Promise<Context>(resolve => {
-    ctx.inject(['tools'], injected => resolve(injected as Context))
-  })
-  const key = { id: sessionId }
-  const scope = createScope(loopCtx, key as never)
-  return {
-    key,
-    scope: scope.ctx.extend({ agent: key }) as Context,
-    dispose: () => scope.dispose(),
-  }
-}
-
 /** Tool names one scope's model would actually be offered. */
 function visibleTools(ctx: Context, scope?: unknown): string[] {
   const runtime = ctx.tools as unknown as { schemas(scope?: unknown): { name: string }[] }
   return runtime.schemas(scope).map(schema => schema.name)
-}
-
-function locus(
-  id: string,
-  child: string,
-  overrides: Partial<Parameters<typeof buildLocusRecord>[0]> = {},
-): LocusRecord {
-  return buildLocusRecord({
-    id,
-    generation: 1,
-    parentSessionId: MAIN,
-    childSessionId: child,
-    endpoint: { chatId: `chat-${id}` },
-    workspaceId: 'workspace',
-    source: 'explicit',
-    state: 'active',
-    childComposition: 'safe-v1',
-    ...overrides,
-  })
 }
 
 /**
@@ -254,6 +205,13 @@ async function seams(
     },
     contextStore: contexts,
     ledger: memoryLedger(),
+    answerStore: { get: () => undefined, commit: async answer => answer },
+    inquiryRuntime: {
+      ready: false,
+      forExecution: () => ({ origin: () => undefined, accept: async () => { throw new Error('runtime unavailable') } }),
+      afterAnswer: () => undefined,
+      answerBinding: () => false,
+    },
     describe: (sessionId: string) => ({ title: `title ${sessionId}`, availability: 'available' }),
     origin: () => ({ origin: { kind: 'local' }, audience: { kind: 'unknown' } }),
     installed: new WeakSet<object>(),
@@ -613,8 +571,8 @@ describe('inquiry dispatch reports unavailable instead of throwing', () => {
     expect(assembly.scheduler.occupiesRunSlot(CHILD_B)).toBe(false)
   })
 
-  it('still accepts and durably queues an inquiry, and says so without claiming an answer', async () => {
-    const { assembly } = await composed()
+  it('refuses acceptance while runtime is unavailable and performs no ledger write', async () => {
+    const { assembly, seams: built } = await composed()
     const ctx = await hostContext()
     const child = await agentScope(ctx, CHILD_A)
     assembly.install(child.scope)
@@ -631,20 +589,28 @@ describe('inquiry dispatch reports unavailable instead of throwing', () => {
       signal: new AbortController().signal,
     })
 
-    expect(result.isError).toBe(false)
-    const payload = JSON.parse((result.value as { json: string }).json) as {
-      status: string
-      answered: boolean
-    }
-    // Acceptance is not an answer, and the tool says that literally rather than
-    // leaving the model to infer it from a missing field.
-    expect(payload.status).toBe('accepted')
-    expect(payload.answered).toBe(false)
+    expect(result.isError).toBe(true)
+    expect(result.value).toBeUndefined()
+    expect(built.ledger!.rows.size).toBe(0)
     await ctx.fiber.dispose()
   })
 
-  it.each([MAIN, CHILD_A])('passes registered roster targets verbatim into registered inquiry for %s', async callerId => {
-    const { assembly, seams: built } = await composed()
+  it.each([MAIN, CHILD_A])('passes registered roster targets to the injected ready runtime for %s', async callerId => {
+    let accepts = 0
+    const { assembly, seams: built } = await composed({
+      agentLoop: { supportsIsolatedQueuedTurnClaim: true },
+      probeIsolatedClaim: fixture => ({
+        claimedMessageIds: [fixture.nextTurnId],
+        pendingNextStepIds: [fixture.nextStepId],
+      }),
+      inquiryRuntime: {
+      ready: true,
+      forExecution: () => ({ origin: built.origin, accept: async (request, facts) => { accepts++; return built.ledger!.accept(request, facts) } }),
+
+      afterAnswer: () => undefined,
+      answerBinding: () => false,
+      },
+    })
     const ctx = await hostContext()
     try {
       const caller = await agentScope(ctx, callerId)
@@ -672,8 +638,66 @@ describe('inquiry dispatch reports unavailable instead of throwing', () => {
           ? { kind: 'main', sessionId: member.sessionId }
           : { kind: 'child', sessionId: member.sessionId, locusId: member.locusId, generation: member.generation })
       }
+      expect(accepts).toBe(2)
+      expect(built.ledger!.rows.size).toBe(2)
     } finally { await ctx.fiber.dispose() }
   })
+
+  it('binds acceptance dependencies to the exact execution object', async () => {
+    let seen: unknown
+    const { assembly, seams: built } = await composed({
+      agentLoop: { supportsIsolatedQueuedTurnClaim: true },
+      probeIsolatedClaim: fixture => ({ claimedMessageIds: [fixture.nextTurnId], pendingNextStepIds: [fixture.nextStepId] }),
+      inquiryRuntime: {
+        ready: true,
+        forExecution: (execution: import('@deepseek-ai/dsh-tools').ToolRunContext) => {
+          seen = execution
+          return { origin: () => ({ origin: { kind: 'local' }, audience: { kind: 'unknown' } }), accept: (request, facts) => built.ledger!.accept(request, facts) }
+        },
+        afterAnswer: () => undefined,
+        answerBinding: () => false,
+      },
+    })
+    const ctx = await hostContext()
+    const caller = await agentScope(ctx, CHILD_A)
+    assembly.install(caller.scope)
+    const input = { agent: caller.key as never, name: INQUIRY_ASK_TOOL, callId: 'bind' as never, arguments: { target: `child:b:1:${CHILD_B}`, question: 'Q?', purpose: 'Verify binding' }, signal: new AbortController().signal }
+    await ctx.tools.execute(input)
+    expect(seen).toBeDefined()
+    expect((seen as { callId: string }).callId).toBe('bind')
+    await ctx.fiber.dispose()
+  })
+
+  it('keeps shared context and roster available when the answer store is missing', async () => {
+    const { assembly, seams: built } = await composed({ answerStore: undefined });
+    built.contexts.ensure(MAIN);
+    const ctx = await hostContext();
+    const main = await agentScope(ctx, MAIN);
+    assembly.install(main.scope);
+
+    const contextResult = await ctx.tools.execute({
+      agent: main.key as never,
+      name: COLLABORATION_CONTEXT_TOOL,
+      callId: 'context' as never,
+      arguments: {},
+      signal: new AbortController().signal,
+    });
+    const rosterResult = await ctx.tools.execute({
+      agent: main.key as never,
+      name: COLLABORATORS_TOOL,
+      callId: 'roster' as never,
+      arguments: {},
+      signal: new AbortController().signal,
+    });
+
+    expect(contextResult.isError).toBe(false);
+    expect(rosterResult.isError).toBe(false);
+    const roster = JSON.parse((rosterResult.value as { json: string }).json) as {
+      members: { sessionId: string }[]
+    };
+    expect(roster.members.map(member => member.sessionId).sort()).toEqual([CHILD_A, CHILD_B]);
+    await ctx.fiber.dispose();
+  });
 
   it('reports circle members as not inquirable while dispatch is unavailable', async () => {
     const { assembly } = await composed()
@@ -714,6 +738,7 @@ describe('inquiry dispatch reports unavailable instead of throwing', () => {
         claimedMessageIds: [fixture.nextTurnId],
         pendingNextStepIds: [fixture.nextStepId],
       }),
+      inquiryRuntime: { ready: true, forExecution: () => ({ origin: () => ({ origin: { kind: 'local' }, audience: { kind: 'unknown' } }), accept: async () => { throw new Error('unused') } }), afterAnswer: () => undefined, answerBinding: () => false },
     })
     expect(assembly.inquiryDispatch).toEqual({ available: true })
 
@@ -795,175 +820,6 @@ describe('every call re-authorizes, whatever the scope still shows', () => {
  * @param ctx - context to compose into.
  * @param statePath - the Pet state medium to attach to.
  */
-async function composePetStorage(ctx: Context, statePath: string): Promise<void> {
-  const [Storage, Domain] = await Promise.all([
-    import('@deepseek-ai/dsh-storage'),
-    import('@deepseek-ai/dsh-storage-domain'),
-  ])
-  await ctx.plugin(Storage.default as never)
-  // A default backend for every domain that is NOT Pet's: the route table is
-  // an override map, so `backend: 'json'` still has to resolve to something.
-  await ctx.plugin({
-    name: 'default-backend',
-    inject: ['storage'],
-    apply(inner: Context) {
-      const backend = { kv: { open: () => Promise.reject(new Error('no default unit in this suite')) }, close: () => Promise.resolve() }
-      inner.effect(() => inner.storage.backend.register('json', backend as never))
-      inner.provide(Storage.storageBackendServiceKey('json'), backend as never)
-    },
-  } as never)
-  await ctx.plugin(petStoragePlugin as never, { path: statePath })
-  await ctx.plugin(Domain as never, { backend: 'json', routes: { [PET_DOMAIN_NAME]: PET_BACKEND_NAME } })
-}
-
-async function openDomainOnly(statePath: string): Promise<Context> {
-  const ctx = new Context()
-  await composePetStorage(ctx, statePath)
-  return ctx
-}
-
-/**
- * Open Pet's domain with atomic writes attached, exactly as `src/index.ts`
- * does. A domain opened without this advertises no transaction support, and
- * every store refuses its writes — correct fail-closed behavior, but not what
- * a test seeding real records wants.
- * @param ctx - a context already carrying Pet's storage stack.
- * @returns the domain, ready for the stores.
- */
-async function openPetDomain(ctx: Context): Promise<never> {
-  const domain = await ctx.storageDomain.open(petDomainSpec)
-  const backend = ctx.storage.backend.get(PET_BACKEND_NAME) as unknown as {
-    unitFor(name: string): Promise<{ applyBatch(writes: readonly never[]): Promise<void> } | undefined>
-  }
-  return withAtomicWrites(domain as never, await backend.unitFor(PET_DOMAIN_NAME) as never) as never
-}
-
-async function loadPetHost(seed: readonly LocusRecord[] = [], existingHome?: string): Promise<LoadedHost> {
-  const home = existingHome ?? await mkdtemp(path.join(tmpdir(), 'pet-assembly-'))
-  const routes: { path: string }[] = []
-  const live = new Map<string, { ctx: Context; id: string }>()
-
-  const ctx = new Context()
-  await ctx.plugin(SystemPrompt)
-  await ctx.plugin(ToolRuntime)
-  // The storage hub is composed by `composePetStorage` below, together with
-  // Pet's backend and the domain layer, in the order the real Host uses.
-  ctx.provide('webServer', {
-    register: (route: { path: string }) => {
-      routes.push(route)
-      return () => {}
-    },
-  })
-  ctx.provide('connection', { requestRejection: () => undefined })
-  const projectRoot = await mkdtemp(path.join(tmpdir(), 'pet-project-'))
-  await mkdir(path.join(home, 'attachments'), { recursive: true })
-  ctx.provide('workspaceRegistry', {
-    create: async (p: string) => ({ id: 'ws-pet', path: p, title: 'DSH Pet' }),
-    list: () => [],
-    get: (id: string) =>
-      id === 'ws-pet' ? { id, path: '/pet', title: 'DSH Pet', sessionIds: [] } : undefined,
-    archivedSessionIds: [],
-  })
-  // A locus child's composition applies its file policy through the official
-  // free function `setSandboxMode`, which appends a `sandbox/mode` event to the
-  // exact Session, and then READS BACK what the policy service resolved. Both
-  // halves are modelled here: a session that records appended modes, and a
-  // policy service that answers from those records. A stand-in that accepted
-  // the write without reflecting it would let a child be published with a
-  // permission the Host never actually applied.
-  const appliedModes = new Map<string, string>()
-  ctx.provide('sessions', {
-    list: () => [],
-    get: (id: string) =>
-      live.has(id)
-        ? {
-          id,
-          header: { cwd: projectRoot },
-          snapshotEvents: () => [],
-          seq: 0,
-          append: (type: string, data: { mode?: string }) => {
-            if (type === 'sandbox/mode' && typeof data?.mode === 'string') {
-              appliedModes.set(id, data.mode)
-            }
-            return { type, data, seq: 0 }
-          },
-        }
-        : undefined,
-  })
-  ctx.provide('sandboxPolicy', {
-    resolve: (input: { session?: { id?: string } }) => {
-      const id = input?.session?.id
-      const mode = id === undefined ? undefined : appliedModes.get(id)
-      return mode === undefined ? undefined : { mode, workspaceRoot: projectRoot }
-    },
-  })
-  ctx.provide('sessionController', {
-    inspect: async (id: string) => {
-      // Cold identity: the main session has no parent; each child names it.
-      if (id === MAIN) return { meta: { id } }
-      if (id === CHILD_A || id === CHILD_B) return { meta: { id, parentSession: MAIN } }
-      throw new Error(`session "${id}" not found`)
-    },
-    resolveAgent: async () => undefined,
-  })
-  ctx.provide('agents', {
-    create: async () => ({ agent: { id: 'x' }, dispose: async () => {} }),
-    get: (id: string) => live.get(id),
-    resume: async () => undefined,
-    list: () => [],
-  })
-  ctx.provide('agentDefaultModel', {
-    currentSelection: () => ({ provider: 'anthropic', model: 'claude-opus-5' }),
-  })
-  ctx.provide('agentPresets', { list: async () => [], mount: async () => {} })
-  ctx.provide('llm', { listProviders: () => [{ id: 'anthropic', name: 'Anthropic' }] })
-  ctx.provide('sessionTitle', {
-    rename: () => ({}),
-    get: (session: { id?: string } | undefined) =>
-      session?.id === undefined ? undefined : { title: `title ${session.id}` },
-  })
-  ctx.provide('skills', { register: () => () => {}, registerProvider: () => () => {} })
-
-  await composePetStorage(ctx, path.join(home, 'plugins', 'dsh-pet', 'state.sqlite'))
-
-  if (seed.length > 0) {
-    const seeded = await openPetDomain(ctx)
-    const repository = new LocusRepository(seeded)
-    for (const row of seed) await repository.putLocus(row)
-    await seeded.close()
-  }
-
-  await ctx.plugin(petPlugin, { home, version: '0.1.0' })
-
-  // Pet's initialization is contained and asynchronous; poll for its observable
-  // end state rather than guessing a delay.
-  const deadline = Date.now() + 15_000
-  while (Date.now() < deadline && routes.length === 0) {
-    await new Promise(resolve => setTimeout(resolve, 25))
-  }
-  expect(routes.length).toBeGreaterThan(0)
-
-  return {
-    ctx,
-    routes,
-    publish(sessionId, scope) {
-      ctx.emit('agent/created' as never, { agent: { id: sessionId, ctx: scope } } as never)
-    },
-    toolNames: scope =>
-      (ctx.tools as unknown as { schemas(s?: unknown): { name: string }[] })
-        .schemas(scope)
-        .map(schema => schema.name),
-    agentScope: async sessionId => {
-      const built = await agentScope(ctx, sessionId)
-      live.set(sessionId, { ctx: built.scope, id: sessionId })
-      return built
-    },
-    close: async () => {
-      await ctx.fiber.dispose()
-    },
-  }
-}
-
 describe('the real plugin entry installs the surface', () => {
   it('scopes a main session and its locus child on agent/created, and nobody else', async () => {
     const host = await loadPetHost([locus('a', CHILD_A)])
@@ -978,10 +834,21 @@ describe('the real plugin entry installs the surface', () => {
       host.publish('unrelated-1', stranger.scope)
       await new Promise(resolve => setTimeout(resolve, 50))
 
+      const mainNames = host.toolNames(main.key)
+      const childNames = host.toolNames(child.key)
+      expect(mainNames.filter(name => CIRCLE_TOOLS.includes(name as typeof CIRCLE_TOOLS[number])).sort())
+        .toEqual([...CIRCLE_TOOLS].sort())
+      expect(childNames.filter(name => CIRCLE_TOOLS.includes(name as typeof CIRCLE_TOOLS[number])).sort())
+        .toEqual([...CIRCLE_TOOLS].sort())
+      // Main keeps no child-local Pet tools; the child keeps its own tools.
+      expect(mainNames).not.toContain(PET_CONTEXT_TOOL)
+      expect(mainNames).not.toContain(PET_LOCUS_FINISH_TOOL)
+      expect(mainNames).not.toContain(PET_LOCUS_WAIT_TOOL)
+      expect(childNames).toContain(PET_CONTEXT_TOOL)
+      expect(childNames).toContain(PET_LOCUS_FINISH_TOOL)
+      expect(childNames).toContain(PET_LOCUS_WAIT_TOOL)
+      // No circle surface leaks into the global layer or unrelated scopes.
       for (const name of CIRCLE_TOOLS) {
-        expect(host.toolNames(main.key)).toContain(name)
-        expect(host.toolNames(child.key)).toContain(name)
-        // The leak this whole discipline exists to prevent.
         expect(host.toolNames()).not.toContain(name)
         expect(host.toolNames(stranger.key)).not.toContain(name)
       }
@@ -1008,9 +875,7 @@ describe('the real plugin entry installs the surface', () => {
       await new Promise(resolve => setTimeout(resolve, 50))
 
       const names = host.toolNames(main.key)
-      for (const name of CIRCLE_TOOLS) {
-        expect(names.filter(candidate => candidate === name)).toHaveLength(1)
-      }
+      expect(names.sort()).toEqual([...CIRCLE_TOOLS].sort())
     } finally {
       await host.close()
     }
@@ -1037,6 +902,42 @@ describe('the real plugin entry installs the surface', () => {
    * down. Asserting on the reopened medium proves the startup path read the
    * durable ledger and preserved the row rather than manufacturing a timeout.
    */
+  it('projects a seeded queued inquiry through the actual plugin-mounted owner route', async () => {
+    const privateQuestion = 'PRIVATE_OWNER_INQUIRY_BODY_SENTINEL'
+    const host = await loadPetHost([locus('a', CHILD_A)], undefined, async domain => {
+      await new InquiryLedgerStore(domain as never).accept(
+        { target: { kind: 'child', sessionId: CHILD_A, locusId: 'a', generation: 1 }, question: privateQuestion, purpose: 'PRIVATE_PURPOSE_SENTINEL', declaredOrigin: null },
+        {
+          inquiryId: 'inq-plugin-owner', requester: { kind: 'main', sessionId: MAIN },
+          circleParentSessionId: MAIN, origin: { kind: 'local' }, audience: { kind: 'local-session', sessionId: MAIN },
+          createdAt: 42,
+        },
+      )
+    })
+    try {
+      const route = host.route(LOCUS_ROUTES.view)
+      expect(route).toBeDefined()
+      const req = { method: 'GET', headers: { host: '127.0.0.1:3080' } }
+      let payload: { ok: boolean; data?: { loci?: { owner?: { inquiry?: { snapshotStatus: string; dispatchCapability: string; inquiries: { inquiryId: string; status: string; createdAt: number }[] } } }[] } } | undefined
+      const res = {
+        writeHead() { return this },
+        end(text?: string) { payload = JSON.parse(text ?? 'null') },
+      }
+      await route!.handler(req as never, res as never)
+
+      expect(payload?.ok).toBe(true)
+      const ownerLocus = payload?.data?.loci?.find(item => item.owner?.inquiry?.inquiries.some(row => row.inquiryId === 'inq-plugin-owner'))
+      expect(ownerLocus?.owner?.inquiry).toMatchObject({
+        snapshotStatus: 'available', dispatchCapability: 'unavailable',
+        inquiries: [{ inquiryId: 'inq-plugin-owner', status: 'queued', createdAt: 42 }],
+      })
+      expect(JSON.stringify(payload)).not.toContain(privateQuestion)
+      expect(JSON.stringify(payload)).not.toContain('PRIVATE_PURPOSE_SENTINEL')
+    } finally {
+      await host.close()
+    }
+  })
+
   it('preserves long-waiting inquiry work left behind by a previous process', async () => {
     const home = await mkdtemp(path.join(tmpdir(), 'pet-reconcile-'))
     const statePath = path.join(home, 'plugins', 'dsh-pet', 'state.sqlite')

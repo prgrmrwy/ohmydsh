@@ -12,6 +12,9 @@ import { z } from 'zod'
 import { parseCollaborationContext } from './collaboration/context.js'
 import { parseInquiry } from './inquiry/ledger.js'
 import { parseInquiryOutboxRecord } from './inquiry/outbox.js'
+import { parseInquiryAnswer } from './inquiry/answer.js'
+import { parseInquiryHandoff } from './inquiry/handoff-store.js'
+import { parseInquiryWork } from './inquiry/work-store.js'
 import { parseTodoRecord } from './ledger/todo.js'
 import { STORAGE_KEY_SEPARATOR, containsStorageKeySeparator } from './locus/storage-key.js'
 
@@ -102,7 +105,22 @@ export const PET_DOMAIN_NAME = 'dsh_pet'
 // locus IDENTITY (locusId + endpoint), never a locus INSTANCE (generation) —
 // see `ledger/todo.ts` design D6 — so no existing locus/delivery row is read
 // or interpreted differently by this bump.
-export const PET_DOMAIN_VERSION = 15
+//
+// Bumped to 16 for doc-comment loci (openspec pet-locus-doc-comments D11). The
+// locus endpoint gains no field: a document entry is an ordinary locus row whose
+// chatId carries the `doc:docx:` prefix. Additive: a Delivery gains one optional
+// `docComment` (the anchored-comment quote, D5); pre-v16 rows omit it. The bump
+// makes a v15 Host refuse to open the medium instead of loading doc rows as
+// chats (its schema does not check the `oc_` prefix). Rollback = restore the
+// pre-restamp backup.
+// Bumped to 16 for inquiry_answers, one answer per inquiry. Additive only;
+// runtime protocol eligibility is deliberately not represented by this table.
+// (The doc-comment line above and this inquiry line both claimed 16 on
+// parallel branches; both are additive and the merged domain is 17, so a
+// medium stamped 16 by either line restamps to 17 without rewriting rows.)
+// Bumped to 17 for durable inquiry handoff intents and local work proofs.
+// Additive opaque tables: migration does not infer protocol state from legacy rows.
+export const PET_DOMAIN_VERSION = 17
 
 // `chat` joins the original three for Tasks created by an inbound Lark
 // message. It is a distinct scope kind rather than a flavour of `workspace`
@@ -621,6 +639,9 @@ export const petLocusIndex = z.object({
   updatedAt: z.number().int().nonnegative(),
 })
 
+/** Upper bound (UTF-16 units) of a persisted anchored-comment quote. */
+export const DOC_COMMENT_QUOTE_MAX = 2_000
+
 /** Durable association between one accepted platform message and one child turn. */
 export const petLocusDelivery = z.object({
   deliveryId: z.string().min(1),
@@ -650,6 +671,14 @@ export const petLocusDelivery = z.object({
   }).optional(),
   rootMessageId: z.string().min(1).optional(),
   replyToMessageId: z.string().min(1).optional(),
+  /**
+   * Doc-comment facts known only at intake (pet-locus-doc-comments D5, v16).
+   * Persisted so a queued or post-restart dispatch renders the same prompt.
+   * Source, token and ids are derived from chatId/threadId/messageId instead.
+   */
+  docComment: z.object({
+    quote: z.string().min(1).max(DOC_COMMENT_QUOTE_MAX),
+  }).optional(),
   sequence: z.number().int().positive(),
   status: z.enum([
     'accepted', 'queued', 'running', 'settled', 'failed',
@@ -1040,6 +1069,28 @@ export const petInquiryResultRecord = z.unknown().transform((input, issueCtx) =>
   }
 })
 
+/** Durable answer body and provenance, keyed by inquiryId. */
+export const petInquiryAnswerRecord = z.unknown().transform((input, issueCtx) => {
+  try {
+    return parseInquiryAnswer(input)
+  } catch {
+    issueCtx.addIssue({ code: 'custom', message: 'Invalid inquiry answer record.' })
+    return z.NEVER
+  }
+})
+
+// New protocol records use the same strict pure parser at the durable boundary.
+export const petInquiryHandoffRecord = z.unknown().transform((input, issueCtx) => {
+  try { return parseInquiryHandoff(input) } catch {
+    issueCtx.addIssue({ code: 'custom', message: 'Invalid inquiry handoff record.' }); return z.NEVER
+  }
+})
+export const petInquiryWorkRecord = z.unknown().transform((input, issueCtx) => {
+  try { return parseInquiryWork(input) } catch {
+    issueCtx.addIssue({ code: 'custom', message: 'Invalid inquiry work record.' }); return z.NEVER
+  }
+})
+
 /**
  * One durable shared-fact-ledger record, keyed by parentSessionId.
  *
@@ -1170,6 +1221,11 @@ export const petDomainSpec = defineDomain({
     // redelivered result collides with its own row instead of queueing a second
     // continuation for the same question.
     inquiry_results: domainTable<string, z.infer<typeof petInquiryResultRecord>>(petInquiryResultRecord),
+    // Durable first answer per inquiry. Additive at v16; does not wire the
+    // currently separate production answer path or imply runtime eligibility.
+    inquiry_answers: domainTable<string, z.infer<typeof petInquiryAnswerRecord>>(petInquiryAnswerRecord),
+    inquiry_handoffs: domainTable<string, z.infer<typeof petInquiryHandoffRecord>>(petInquiryHandoffRecord),
+    inquiry_works: domainTable<string, z.infer<typeof petInquiryWorkRecord>>(petInquiryWorkRecord),
     // Shared-fact ledger, keyed by parentSessionId. Additive at v15. One row
     // per main session that has ever registered a ledger item; ensured
     // idempotently and never deleted, including when its last item is removed.

@@ -1,0 +1,6 @@
+{
+  "name": "dsh-collab-released-host-probe",
+  "private": true,
+  "type": "module",
+  "dependencies": { "@deepseek-ai/dsh": "0.2.0-rc.2" }
+}

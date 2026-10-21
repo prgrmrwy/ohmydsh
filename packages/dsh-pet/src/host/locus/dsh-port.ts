@@ -126,6 +126,8 @@ export interface ProductionLocusDshPortDeps {
       readonly locusId: string
       readonly generation: number
       readonly label: string
+      /** The entry the child serves; decides its read tool before publication. */
+      readonly endpoint: { readonly chatId: string; readonly threadId?: string }
       readonly permission: 'read'
     }): Promise<{
       readonly childSessionId: string
@@ -423,6 +425,7 @@ export function createProductionLocusDshPort(
         locusId: input.locusId,
         generation: input.generation,
         label: input.label,
+        endpoint: input.endpoint,
         permission: input.permission,
       })
       return {

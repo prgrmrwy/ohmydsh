@@ -18,7 +18,8 @@ import Storage, {
 import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import { PetRepository } from '../src/host/repository.js'
-import { petDomainSpec } from '../src/host/spec.js'
+import { petDomainSpec, PET_DOMAIN_NAME } from '../src/host/spec.js'
+import { withAtomicWrites } from '../src/host/storage/atomic-domain.js'
 
 /** Serialized medium contents, so a "restart" can reopen the same bytes. */
 export interface MemoryMedium {
@@ -51,6 +52,7 @@ export interface MediumFaults {
 class MemoryUnit implements KvUnit {
   private closed = false
   private writes = 0
+  private failNextBatchAt: number | undefined
 
   constructor(
     private readonly medium: MemoryMedium,
@@ -105,6 +107,11 @@ class MemoryUnit implements KvUnit {
     this.medium.global = JSON.stringify(value)
   }
 
+  /** Fail a future batch at a deterministic write index, before publication. */
+  failNextBatch(writeNumber: number): void {
+    this.failNextBatchAt = writeNumber
+  }
+
   /**
    * Commit a batch atomically: staged into a copy first, so an injected
    * failure leaves the medium exactly as it was. This is what lets a test
@@ -121,7 +128,11 @@ class MemoryUnit implements KvUnit {
     const tables: Record<string, Record<string, string>> = {}
     for (const [table, bucket] of Object.entries(this.medium.tables)) tables[table] = { ...bucket }
     let global = this.medium.global
-    for (const write of writes) {
+    for (const [index, write] of writes.entries()) {
+      if (this.failNextBatchAt !== undefined && index + 1 === this.failNextBatchAt) {
+        this.failNextBatchAt = undefined
+        throw new Error(`injected atomic write failure #${String(index + 1)}`)
+      }
       this.assertWritable()
       if (write.kind === 'global') {
         global = JSON.stringify(write.value)
@@ -144,6 +155,7 @@ class MemoryUnit implements KvUnit {
 export class MemoryBackend {
   readonly kv: { open(descriptor: KvUnitDescriptor): Promise<KvUnit> }
   private readonly open = new Set<string>()
+  private readonly units = new Map<string, KvUnit>()
 
   constructor(
     private readonly medium: MemoryMedium,
@@ -162,7 +174,7 @@ export class MemoryBackend {
           // Omit the optional member exactly as such a backend would, rather
           // than leaving a method that reports being unavailable.
           const { applyBatch: _omitted, ...rest } = unit
-          return Object.assign(Object.create(Object.getPrototypeOf(unit) as object), rest, {
+          const withoutTransactions = Object.assign(Object.create(Object.getPrototypeOf(unit) as object), rest, {
             loadAll: () => unit.loadAll(),
             putRecord: (table: string, key: string, value: unknown) => unit.putRecord(table, key, value),
             deleteRecord: (table: string, key: string) => unit.deleteRecord(table, key),
@@ -170,14 +182,28 @@ export class MemoryBackend {
             close: () => unit.close(),
             applyBatch: undefined,
           }) as KvUnit
+          this.units.set(descriptor.name, withoutTransactions)
+          return withoutTransactions
         }
+        this.units.set(descriptor.name, unit)
         return unit
       },
     }
   }
 
+  unitFor(name: string): Promise<KvUnit | undefined> {
+    return Promise.resolve(this.units.get(name))
+  }
+
+  failNextBatch(name: string, writeNumber: number): void {
+    const unit = this.units.get(name) as (KvUnit & { failNextBatch?: (writeNumber: number) => void }) | undefined
+    if (unit?.failNextBatch === undefined) throw new Error(`atomic batch injection unavailable for ${name}`)
+    unit.failNextBatch(writeNumber)
+  }
+
   async close(): Promise<void> {
     this.open.clear()
+    this.units.clear()
   }
 }
 
@@ -185,7 +211,10 @@ export class MemoryBackend {
 export interface PetHarness {
   readonly repository: PetRepository
   readonly domain: Domain<typeof petDomainSpec>
+  /** Underlying DSH context that publishes domain change events. */
+  readonly ctx: Context
   readonly medium: MemoryMedium
+  failNextAtomicBatch(writeNumber: number): void
   close(): Promise<void>
 }
 
@@ -200,6 +229,7 @@ export async function openPetHarness(
   faults: MediumFaults = {},
 ): Promise<PetHarness> {
   const ctx = new Context()
+  let backend: MemoryBackend
   await ctx.plugin(Storage)
 
   // Register the medium exactly the way a real backend plugin does: on the hub
@@ -209,7 +239,7 @@ export async function openPetHarness(
     name: 'memory-backend',
     inject: ['storage'],
     apply(backendCtx: Context) {
-      const backend = new MemoryBackend(medium, faults)
+      backend = new MemoryBackend(medium, faults)
       backendCtx.effect(() => backendCtx.storage.backend.register('memory', backend))
       backendCtx.provide(storageBackendServiceKey('memory'), backend)
     },
@@ -218,10 +248,14 @@ export async function openPetHarness(
   await ctx.plugin(StorageDomain, { backend: 'memory' })
 
   const domain = await ctx.storage.domain.open(petDomainSpec)
+  const unit = await backend!.unitFor(PET_DOMAIN_NAME)
+  withAtomicWrites(domain as never, typeof unit?.applyBatch === 'function' ? unit : undefined)
   return {
     repository: new PetRepository(domain),
     domain,
+    ctx,
     medium,
+    failNextAtomicBatch: writeNumber => backend!.failNextBatch(PET_DOMAIN_NAME, writeNumber),
     close: async () => {
       await domain.close()
     },

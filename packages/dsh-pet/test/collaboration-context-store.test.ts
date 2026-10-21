@@ -6,7 +6,6 @@ import { emptyMedium, openPetHarness } from './harness.js'
 const input = () => ({ expectedRevision: 0, workDescription: 'project', resourceReferences: ['ref'], commonConstraints: ['read'], sources: ['noted while implementing'] })
 // Host-derived in-scope author facts; membership is proven by the caller resolver.
 const author = (parentSessionId = 'main') => ({ parentSessionId, authoredBy: 'child-a', authoredAt: 123, authorLocus: { kind: 'child' as const, locusId: 'locus-a', generation: 1 }, sharingScope: COLLABORATION_CONTEXT_SHARING_SCOPE })
-const atomic = process.env.DSH_PET_TEST_ATOMIC_DOMAIN === '1'
 
 describe('public context store capability boundary', () => {
   it('refuses writes without actual atomic Domain support; reads never initialize rows', async () => {
@@ -21,7 +20,7 @@ describe('public context store capability boundary', () => {
   })
 })
 
-describe.skipIf(!atomic)('public context store with real reviewed atomic Domain (opt-in config)', () => {
+describe('public context store with actual atomic Domain', () => {
   it('ensures exactly one unknown revision across concurrent store instances and reopen', async () => {
     const medium = emptyMedium()
     const h = await openPetHarness(medium)

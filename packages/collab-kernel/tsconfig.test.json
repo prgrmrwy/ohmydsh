@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true
+  },
+  "include": ["src", "test"],
+  "exclude": ["test/fixtures/bad-import", "test/fixtures/boundary-syntax", "test/fixtures/boundary-relative"]
+}

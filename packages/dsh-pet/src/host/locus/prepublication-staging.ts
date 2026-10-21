@@ -39,6 +39,8 @@ export interface LocusPrepublicationIdentity {
   readonly permission: LocusChildPermission
   readonly childComposition?: 'safe-v1' | 'safe-v2'
   readonly toolTier?: { readonly desired: 'safe' | 'shell'; readonly effective: 'safe' | 'shell' }
+  /** The entry the child serves (see {@link LocusChildComposition.endpoint}). */
+  readonly endpoint?: { readonly chatId: string; readonly threadId?: string }
 }
 
 /** Opaque capability held by the provisioning operation. */
@@ -236,6 +238,13 @@ export class LocusPrepublicationStagingRegistry {
       permission: identity.permission,
       childComposition: identity.childComposition ?? 'safe-v2',
       toolTier: identity.toolTier ?? { desired: 'safe', effective: 'safe' },
+      ...(identity.endpoint === undefined
+        ? {}
+        : {
+          endpoint: Object.freeze(identity.endpoint.threadId === undefined
+            ? { chatId: identity.endpoint.chatId }
+            : { chatId: identity.endpoint.chatId, threadId: identity.endpoint.threadId }),
+        }),
     })
     const reservation = Object.freeze<LocusPrepublicationReservation>({
       reservationId: reservationId.trim(),

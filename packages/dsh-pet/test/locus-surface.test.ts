@@ -56,6 +56,30 @@ describe('locus surface', () => {
     expect(markup).not.toMatch(/dshpet-locus-name[^>]*>\s*(oc_|omt_|session-|locus-)/)
   })
 
+  it('spec Scenario "同名入口仍可区分": two entries with the same platform name carry different codes', () => {
+    const first = locusFixture({
+      locusId: 'locus-runtime-1789394541339-2f853e76111d38',
+      chatId: 'oc_a27b5de7e6a9a57462060eb289ec70ab',
+      chatName: '答疑 · DSH',
+      parentSessionId: 'session-1',
+      parentAvailability: 'available',
+      childSessionId: 'session-2',
+    })
+    const second = locusFixture({
+      locusId: 'locus-runtime-1789394541339-9e11aa00b2c3d4',
+      chatId: 'oc_c91f00e7e6a9a57462060eb289ec70ab',
+      chatName: '答疑 · DSH',
+      parentSessionId: 'session-1',
+      parentAvailability: 'available',
+      childSessionId: 'session-3',
+    })
+    const markup = render(snapshotOf([first, second], [first.locusId, second.locusId]))
+
+    expect(markup.split('答疑 · DSH').length - 1).toBeGreaterThanOrEqual(2)
+    expect(markup).toContain('a27b')
+    expect(markup).toContain('c91f')
+  })
+
   it('names a provided platform name and keeps the code beside it', () => {
     const named = locusFixture({
       locusId: 'locus-runtime-1789394541339-2f853e76111d38',

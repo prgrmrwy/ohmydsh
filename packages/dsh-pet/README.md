@@ -155,6 +155,18 @@ Only allowlisted senders can issue these; anyone else's command is dropped silen
 - **`write` is globally disabled in the current build** (`LOCUS_WRITE_ENABLED = false`): a request is refused at the door with the real reason, and an existing `write` record is served as `read` while the durable record keeps the owner's intent. If the switch is ever turned on, `write` maps to DSH's `danger-full-access`, meaning whole-machine, unscoped file writes shared by every member of the entry. This is an explicit security decision, see [ADR-0005](../../docs/adr/ADR-0005-locus-write-grants-full-access.md).
 - **Tool tier `safe` (default) or `shell`** is independent of the file tier. `shell` additionally exposes `bash` and `skill` to the child of that one entry, never delegation tools. It is not a security isolation mode: a guard that rejects common Lark send commands only lowers the chance of accidents, and the bot's credentials are reachable by a model driven by allowlisted people. See [ADR-0008](../../docs/adr/ADR-0008-locus-shell-tier.md); its OpenSpec change `pet-locus-shell-tier` is still in progress, so treat the tier as not yet part of the current specs.
 
+### Document comments
+
+The same model works in Feishu documents. A **whole-document comment** behaves like the group, and an **anchored (selected-text) comment** behaves like a topic. The first allowlisted `@bot` in a document builds that document's own automatic main session. Once a document entry exists, anyone who can comment there may ask, and the first entry of each document says so in a reply. Commands work in comments with the same rules as in a chat: in a whole-document comment they apply to the document, and in an anchored comment they apply only to that comment. Replies are appended under the triggering comment as plain text, so `@` there does not notify anyone. Reactions use `Typing`, then `DONE` or `CRY`. Wiki documents are rooted at their underlying docx token. Only `docx` is supported.
+
+Deployment prerequisites (Feishu developer console):
+- the long-connection event `drive.notice.comment_add_v1`;
+- bot scopes for comment read/write, docx read, and basic contact info.
+
+Without them, chats keep working and document entries stay silent.
+
+Inbound events arrive on **one** `lark-cli event +subscribe` connection (lark-cli ≥ 1.0.97). A Feishu app supports one event connection, and a second one splits events silently, so while Pet runs, no other profile of the same app may subscribe to events. Give Pet its own app. After upgrading lark-cli, re-check the connection count, the `+subscribe` readiness line, and the comment and reaction commands; see the OpenSpec change `pet-locus-doc-comments`, evidence E1/E8/E10/E12/E13.
+
 ### Q&A group
 
 Click the Q&A group action on the wheel (shown as 答疑群 in the Chinese UI) while looking at a session. Pet creates the default Q&A group for that main session, with you as the group owner, and binds it to a `read` Locus with its own child session. Clicking it again opens the same group rather than creating another one. If creation fails part-way, Pet rolls back what it created and reports anything it could not reclaim.

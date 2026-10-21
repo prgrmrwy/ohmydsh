@@ -394,6 +394,133 @@ describe('durable Delivery lifecycle against its exact child turn', () => {
     }
   })
 
+  it('spec Scenario "turn 结束不完成请求": A stays current after its turn ends and B is not delivered', async () => {
+    const host = await composeSettlementHost()
+    try {
+      await host.controller.handleAdmission(admission('om_a') as never)
+      host.claim({ childSessionId: CHILD, messageId: host.queued[0]!.messageId, turn: 1, sourceKind: 'user' })
+      host.end({ childSessionId: CHILD, turn: 1, outcome: 'completed' })
+      await host.controller.handleAdmission(admission('om_b') as never)
+
+      // A plain turn end is not a finish: A keeps the lease, B waits.
+      expect(host.repository.findDeliveryByMessageId('om_a')?.status).toBe('current')
+      expect(host.repository.findDeliveryByMessageId('om_b')?.status).toBe('accepted')
+      expect(host.queued).toHaveLength(1)
+      // A later turn can still finish A, which only then releases B.
+      await host.finish(CORRELATION, 'reply')
+      await vi.waitFor(() => expect(host.repository.findDeliveryByMessageId('om_b')?.status).toBe('current'))
+    } finally {
+      await host.close()
+    }
+  })
+
+  it('spec Scenario "超时自动开放下一条": an expired A releases B onto the same child', async () => {
+    const host = await composeSettlementHost()
+    try {
+      await host.controller.handleAdmission(admission('om_a') as never)
+      await host.controller.handleAdmission(admission('om_b') as never)
+      const a = host.repository.findDeliveryByMessageId('om_a')!
+      const expired = await host.repository.expireCurrentDelivery({
+        ...CORRELATION, deliveryId: a.deliveryId, now: a.deadlineAt! + 1,
+        ...(a.revision === undefined ? {} : { expectedRevision: a.revision }),
+      })
+      expect(expired.changed).toBe(true)
+      host.controller.currentFinished({ deliveryId: a.deliveryId, correlation: CORRELATION, outcome: 'failed' })
+      await host.controller.dispatchNext(CORRELATION)
+
+      expect(host.repository.findDeliveryByMessageId('om_a')?.status).toBe('expired')
+      expect(host.repository.findDeliveryByMessageId('om_b')).toMatchObject({ status: 'current', childSessionId: CHILD })
+      expect(host.queued).toHaveLength(2)
+    } finally {
+      await host.close()
+    }
+  })
+
+  it('spec Scenario "完成与超时竞争": the losing finish neither sends nor touches the next Delivery', async () => {
+    const host = await composeSettlementHost()
+    try {
+      await host.controller.handleAdmission(admission('om_a') as never)
+      await host.controller.handleAdmission(admission('om_b') as never)
+      const a = host.repository.findDeliveryByMessageId('om_a')!
+      await host.repository.expireCurrentDelivery({
+        ...CORRELATION, deliveryId: a.deliveryId, now: a.deadlineAt! + 1,
+        ...(a.revision === undefined ? {} : { expectedRevision: a.revision }),
+      })
+      // The late finish tries to reserve A for its reply: the CAS loses, so no
+      // body may be sent and B must be untouched.
+      const finishing = await host.repository.markDeliveryFinishing({
+        ...CORRELATION, deliveryId: a.deliveryId, now: a.deadlineAt! + 2,
+        ...(a.revision === undefined ? {} : { expectedRevision: a.revision }),
+      })
+      expect(finishing.changed).toBe(false)
+      expect(host.repository.findDeliveryByMessageId('om_a')?.status).toBe('expired')
+      expect(host.repository.findDeliveryByMessageId('om_b')?.status).toBe('accepted')
+    } finally {
+      await host.close()
+    }
+  })
+
+  it('spec Scenario "发送确认未知不重放": unknown-terminal advances the queue and is never re-queued', async () => {
+    const host = await composeSettlementHost()
+    try {
+      await host.controller.handleAdmission(admission('om_a') as never)
+      await host.controller.handleAdmission(admission('om_b') as never)
+      await host.finish(CORRELATION, 'reply', { outboundResult: 'unknown' })
+
+      expect(host.repository.findDeliveryByMessageId('om_a')?.status).toBe('unknown-terminal')
+      await vi.waitFor(() => expect(host.repository.findDeliveryByMessageId('om_b')?.status).toBe('current'))
+      // A further dispatch pass must not resurrect A.
+      await host.controller.dispatchNext(CORRELATION)
+      expect(host.queued).toHaveLength(2)
+      expect(host.repository.findDeliveryByMessageId('om_a')?.status).toBe('unknown-terminal')
+    } finally {
+      await host.close()
+    }
+  })
+
+  it('spec Scenario "群级引用触发消息": the reply target is the current Delivery\'s own trigger, never a backlog message', async () => {
+    const host = await composeSettlementHost()
+    try {
+      await host.controller.handleAdmission(admission('om_A') as never)
+      await host.controller.handleAdmission(admission('om_B') as never)
+      const current = host.repository.findCurrentSerializedDelivery({
+        childSessionId: CORRELATION.childSessionId, locusId: CORRELATION.locusId, generation: CORRELATION.generation,
+      })
+      // The finish path replies to `current.replyTarget ?? current.feedbackTarget`:
+      // both are fixed to A at acceptance, so B can never be the quoted message.
+      expect(current?.messageId).toBe('om_A')
+      expect((current?.replyTarget ?? current?.feedbackTarget)?.messageId).toBe('om_A')
+    } finally {
+      await host.close()
+    }
+  })
+
+  it('spec Scenario "迟到 finish 不消费下一条": after A expires and B is current, a late finish for A cannot reserve or end B', async () => {
+    const host = await composeSettlementHost()
+    try {
+      await host.controller.handleAdmission(admission('om_a') as never)
+      await host.controller.handleAdmission(admission('om_b') as never)
+      const a = host.repository.findDeliveryByMessageId('om_a')!
+      await host.repository.expireCurrentDelivery({
+        ...CORRELATION, deliveryId: a.deliveryId, now: a.deadlineAt! + 1,
+        ...(a.revision === undefined ? {} : { expectedRevision: a.revision }),
+      })
+      host.controller.currentFinished({ deliveryId: a.deliveryId, correlation: CORRELATION, outcome: 'failed' })
+      await host.controller.dispatchNext(CORRELATION)
+      const b = host.repository.findDeliveryByMessageId('om_b')!
+      expect(b.status).toBe('current')
+
+      // A's old run calls finish naming A: the CAS refuses it.
+      const late = await host.repository.markDeliveryFinishing({
+        ...CORRELATION, deliveryId: a.deliveryId, now: a.deadlineAt! + 2,
+      })
+      expect(late.changed).toBe(false)
+      expect(host.repository.findDeliveryByMessageId('om_b')).toMatchObject({ status: 'current', revision: b.revision })
+    } finally {
+      await host.close()
+    }
+  })
+
   it('settles a reference-only Delivery with no reply body and advances the queue', async () => {
     const host = await composeSettlementHost()
     try {

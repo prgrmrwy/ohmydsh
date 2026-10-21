@@ -19,6 +19,7 @@
  */
 
 import type { DeliveryAddressingProjection } from './addressing.js'
+import { DOC_COMMENT_QUOTE_MAX } from '../spec.js'
 
 /** The endpoint a Delivery belongs to (a chat, optionally a thread). */
 export interface DeliveryEndpoint {
@@ -115,6 +116,12 @@ export type DeliveryStatus =
   | 'expired'
   | 'unknown-terminal'
 
+/** Doc-comment facts persisted with a Delivery; absent for IM and pre-v16 rows. */
+export interface DeliveryDocComment {
+  /** Anchored-comment quote, bounded at intake (marker included). Whole-doc comments omit `docComment`. */
+  readonly quote: string
+}
+
 /** A target derived from the accepted message, never supplied by settlement. */
 export interface DeliveryFeedbackTarget extends DeliveryEndpoint {
   readonly messageId: string
@@ -136,6 +143,8 @@ export interface DeliveryInput extends DeliveryCorrelation {
   readonly text?: string
   /** Additive bounded mention projection; absent on historical rows. */
   readonly addressing?: DeliveryAddressingProjection
+  /** Doc-comment intake facts that no durable id can recover (v16). */
+  readonly docComment?: DeliveryDocComment
   readonly rootMessageId?: string
   readonly replyTarget?: DeliveryFeedbackTarget
   /** The platform parent reply id, retained separately from canonical root/thread. */
@@ -158,6 +167,8 @@ export interface DeliveryRecord extends DeliveryCorrelation {
   readonly text?: string
   /** Additive bounded mention projection; absent on historical rows. */
   readonly addressing?: DeliveryAddressingProjection
+  /** Doc-comment intake facts that no durable id can recover (v16). */
+  readonly docComment?: DeliveryDocComment
   readonly replyTarget?: DeliveryFeedbackTarget
   /** The platform parent reply id, when present in the accepted event. */
   readonly replyToMessageId?: string
@@ -660,6 +671,7 @@ export function acceptDelivery(
     ...(input.senderName !== undefined ? { senderName: input.senderName } : {}),
     ...(input.text !== undefined ? { text: input.text } : {}),
     ...(input.addressing !== undefined ? { addressing: freezeAddressing(input.addressing) } : {}),
+    ...(input.docComment !== undefined ? { docComment: Object.freeze({ ...input.docComment }) } : {}),
     ...(input.replyTarget !== undefined ? { replyTarget: Object.freeze({ ...input.replyTarget }) } : {}),
     ...(input.replyToMessageId !== undefined ? { replyToMessageId: input.replyToMessageId } : {}),
     sequence,
@@ -1173,6 +1185,9 @@ function validateDeliveryInput(input: DeliveryInput): void {
   }
   if (input.senderOpenId !== undefined) assertIdentifier(input.senderOpenId, 'senderOpenId')
   if (input.addressing !== undefined) validateAddressing(input.addressing)
+  if (input.docComment !== undefined && !isValidDocCommentQuote(input.docComment.quote)) {
+    throw new TypeError('docComment.quote must be a non-empty string of at most 2000 UTF-16 units')
+  }
   if (input.rootMessageId !== undefined) assertIdentifier(input.rootMessageId, 'rootMessageId')
   if (input.replyToMessageId !== undefined) assertIdentifier(input.replyToMessageId, 'replyToMessageId')
   if (input.replyTarget !== undefined) {
@@ -1233,4 +1248,16 @@ function assertIdentifier(value: string, name: string): void {
   if (typeof value !== 'string' || value.trim() === '') {
     throw new TypeError(`${name} must be a non-empty string`)
   }
+}
+
+/**
+ * Whether a persisted anchored-comment quote is within bounds.
+ *
+ * Enforced on EVERY write path: the storage layer's `put` does not validate,
+ * and a schema-invalid row makes the whole Pet domain fail to open on the next
+ * start (`petDomainSpec` sets no `invalidRecords`). An oversized value must
+ * therefore never reach the medium.
+ */
+export function isValidDocCommentQuote(quote: unknown): quote is string {
+  return typeof quote === 'string' && quote !== '' && quote.length <= DOC_COMMENT_QUOTE_MAX
 }

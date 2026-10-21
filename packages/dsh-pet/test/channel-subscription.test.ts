@@ -12,14 +12,20 @@ import type { ChildProcess } from 'node:child_process'
 import { describe, expect, it, vi } from 'vitest'
 import {
   ChannelSubscription,
+  signalProcessGroup,
   type ChannelStatus,
 } from '../src/host/channel/subscription.js'
+import { STDERR_SECRETS, SUBSCRIBE_STDERR } from './fixtures/lark-subscribe.js'
+
+let nextPid = 4242
 
 /** A child process stand-in with controllable streams. */
 class FakeChild extends EventEmitter {
   readonly stdout = new EventEmitter() as EventEmitter & { setEncoding(encoding: string): void }
   readonly stderr = new EventEmitter() as EventEmitter & { setEncoding(encoding: string): void }
   exitCode: number | null = null
+  signalCode: string | null = null
+  readonly pid = nextPid++
   readonly signals: string[] = []
 
   constructor() {
@@ -33,9 +39,14 @@ class FakeChild extends EventEmitter {
     return true
   }
 
-  /** Emit the readiness marker lark-cli writes to stderr. */
+  /** Emit the SDK connection line `+subscribe` writes once the socket is up. */
   ready(): void {
-    this.stderr.emit('data', '[event] ready event_key=im.message.receive_v1\n')
+    this.stderr.emit('data', SUBSCRIBE_STDERR.sdkConnected)
+  }
+
+  /** Emit raw stderr text. */
+  err(text: string): void {
+    this.stderr.emit('data', text)
   }
 
   /** Emit stdout content. */
@@ -46,6 +57,7 @@ class FakeChild extends EventEmitter {
   /** End the process. */
   end(code: number | null, signal: string | null = null): void {
     this.exitCode = code
+    this.signalCode = signal
     this.emit('exit', code, signal)
   }
 }
@@ -57,6 +69,12 @@ interface Harness {
   readonly statuses: ChannelStatus[]
   readonly timers: { fn: () => void; ms: number }[]
   readonly commands: { command: string; args: readonly string[] }[]
+  /** Signals delivered to whole process groups, by child pid. */
+  readonly groupSignals: { pid: number; signal: string }[]
+  /** Kill-escalation timers (separate from restart timers). */
+  readonly killTimers: { fn: () => void; ms: number }[]
+  /** Settable clock. */
+  readonly clock: { now: number }
 }
 
 function harness(options: { maxFailures?: number } = {}): Harness {
@@ -65,6 +83,9 @@ function harness(options: { maxFailures?: number } = {}): Harness {
   const statuses: ChannelStatus[] = []
   const timers: { fn: () => void; ms: number }[] = []
   const commands: { command: string; args: readonly string[] }[] = []
+  const groupSignals: { pid: number; signal: string }[] = []
+  const killTimers: { fn: () => void; ms: number }[] = []
+  const clock = { now: 1_000 }
 
   const subscription = new ChannelSubscription({
     onLine: line => lines.push(line),
@@ -80,42 +101,98 @@ function harness(options: { maxFailures?: number } = {}): Harness {
     schedule: (fn, ms) => {
       timers.push({ fn, ms })
     },
+    scheduleReadyTimeout: () => undefined,
+    signalGroup: (child, signal) => {
+      groupSignals.push({ pid: child.pid ?? -1, signal })
+    },
+    scheduleKill: (fn, ms) => {
+      killTimers.push({ fn, ms })
+    },
+    now: () => clock.now,
   })
-  return { subscription, children, lines, statuses, timers, commands }
+  return { subscription, children, lines, statuses, timers, commands, groupSignals, killTimers, clock }
 }
 
 describe('starting the consumer', () => {
-  it('runs lark-cli with bot identity', () => {
+  it('spec Scenario "启用 channel 后启动订阅": exactly one +subscribe for IM and comments, bot identity, no consume', () => {
     const h = harness()
 
     h.subscription.start()
 
-    // Bot identity throughout: user identity would read with the operator's
-    // own visibility and reply as the person.
+    // One connection per app: a second consumer (bus `consume` or another
+    // `+subscribe`) makes Feishu split events between them silently (spike E3).
+    expect(h.commands).toHaveLength(1)
     expect(h.commands[0]?.command).toBe('lark-cli')
     expect(h.commands[0]?.args).toEqual([
       '--profile',
       'dsh-pet',
       'event',
-      'consume',
-      'im.message.receive_v1',
+      '+subscribe',
       '--as',
       'bot',
+      '--compact',
+      '--event-types',
+      'im.message.receive_v1,drive.notice.comment_add_v1',
     ])
+    expect(h.commands[0]?.args).not.toContain('consume')
+    expect(h.commands[0]?.args).not.toContain('--force')
+    expect(h.commands[0]?.args).not.toContain('--quiet')
   })
 
-  it('is not connected until the readiness marker arrives', () => {
+  it('is connected only after the SDK connection line, not the early banner', () => {
     const h = harness()
 
     h.subscription.start()
+    expect(h.subscription.current.phase).toBe('starting')
 
-    // A started process is not an attached subscription.
+    // `Connected.` is printed before the handshake (subscribe.go L283).
+    h.children[0]?.err(SUBSCRIBE_STDERR.connecting)
+    h.children[0]?.err(SUBSCRIBE_STDERR.connectedBanner)
     expect(h.subscription.current.phase).toBe('starting')
 
     h.children[0]?.ready()
 
     expect(h.subscription.current.phase).toBe('connected')
-    expect(h.subscription.watermark).toBeGreaterThan(0)
+    expect(h.subscription.watermark).toBe(1_000)
+  })
+
+  it('recognises the SDK line even when stderr splits it across chunks', () => {
+    const h = harness()
+    h.subscription.start()
+    const line = SUBSCRIBE_STDERR.sdkConnected
+
+    h.children[0]?.err(line.slice(0, 20))
+    expect(h.subscription.current.phase).toBe('starting')
+    h.children[0]?.err(line.slice(20))
+
+    expect(h.subscription.current.phase).toBe('connected')
+  })
+
+  it('spec Scenario "内部重连不推进水位": the watermark latches once per child', () => {
+    const h = harness()
+    h.subscription.start()
+    h.children[0]?.ready()
+    expect(h.subscription.watermark).toBe(1_000)
+
+    // The SDK reconnects inside the same process and prints the line again.
+    h.clock.now = 9_000
+    h.children[0]?.ready()
+
+    expect(h.subscription.watermark).toBe(1_000)
+    expect(h.subscription.current.phase).toBe('connected')
+  })
+
+  it('spec Scenario "stderr 原文不落盘": no status or diagnostic carries stderr text', () => {
+    const h = harness()
+    h.subscription.start()
+    h.children[0]?.err(SUBSCRIBE_STDERR.connecting)
+    h.children[0]?.ready()
+    h.children[0]?.err(SUBSCRIBE_STDERR.notFoundHandler)
+    h.children[0]?.end(1)
+
+    const published = JSON.stringify(h.statuses)
+    for (const secret of STDERR_SECRETS) expect(published).not.toContain(secret)
+    expect(published).not.toContain('not found handler')
   })
 
   it('keeps stdin open so an unbounded consumer is not told to shut down', async () => {
@@ -242,7 +319,7 @@ describe('restart policy', () => {
     expect(h.timers[1]?.ms).toBe(20)
   })
 
-  it('declares the channel down once attempts are exhausted', () => {
+  it('spec Scenario "lark-cli bot 身份不可用": declares the channel down with a re-login diagnostic once attempts are exhausted', () => {
     const h = harness({ maxFailures: 2 })
     h.subscription.start()
 
@@ -284,18 +361,91 @@ describe('restart policy', () => {
 })
 
 describe('stopping', () => {
-  it('terminates with SIGTERM, never SIGKILL', () => {
+  it('spec Scenario "停止时回收整个进程组": SIGTERM goes to the whole group, synchronously', () => {
     const h = harness()
     h.subscription.start()
     h.children[0]?.ready()
+    const child = h.children[0]
 
     h.subscription.stop()
 
-    // lark-cli warns that a hard kill skips cleanup and can leak the
-    // server-side subscription.
-    expect(h.children[0]?.signals).toEqual(['SIGTERM'])
-    expect(h.children[0]?.signals).not.toContain('SIGKILL')
+    // The npm shim does not forward signals: signalling only the shim leaves
+    // the native process orphaned, holding the connection and lock (spike E12).
+    expect(h.groupSignals).toEqual([{ pid: child?.pid, signal: 'SIGTERM' }])
+    expect(child?.signals).toEqual([])
     expect(h.subscription.current.phase).toBe('stopped')
+    expect(h.killTimers.map(timer => timer.ms)).toEqual([5_000])
+  })
+
+  it('the default signal targets the negative pid (the group), not the shim alone', () => {
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => true)
+    const child = new FakeChild()
+    try {
+      signalProcessGroup(child as unknown as ChildProcess, 'SIGTERM')
+      expect(kill).toHaveBeenCalledWith(-child.pid, 'SIGTERM')
+      expect(child.signals).toEqual([])
+    } finally {
+      kill.mockRestore()
+    }
+  })
+
+  it('falls back to signalling the child when the group cannot be signalled', () => {
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw new Error('ESRCH')
+    })
+    const child = new FakeChild()
+    try {
+      signalProcessGroup(child as unknown as ChildProcess, 'SIGTERM')
+      expect(child.signals).toEqual(['SIGTERM'])
+    } finally {
+      kill.mockRestore()
+    }
+  })
+
+  it('spawns detached by default so the child leads its own process group', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const nodePath = await import('node:path')
+    const source = await readFile(nodePath.resolve(__dirname, '..', 'src', 'host', 'channel', 'subscription.ts'), 'utf8')
+    expect(source).toContain("stdio: ['pipe', 'pipe', 'pipe'], detached: true")
+  })
+
+  it('escalates to SIGKILL on the group only when the child is still alive after 5s', () => {
+    const h = harness()
+    h.subscription.start()
+    const alive = h.children[0]
+    h.subscription.stop()
+
+    h.killTimers[0]?.fn()
+
+    expect(h.groupSignals).toEqual([
+      { pid: alive?.pid, signal: 'SIGTERM' },
+      { pid: alive?.pid, signal: 'SIGKILL' },
+    ])
+  })
+
+  it('does not SIGKILL a group whose child already exited', () => {
+    const h = harness()
+    h.subscription.start()
+    const child = h.children[0]
+    h.subscription.stop()
+    child?.end(null, 'SIGTERM')
+
+    h.killTimers[0]?.fn()
+
+    // The pgid may already be reused: never signal a group we no longer own.
+    expect(h.groupSignals).toEqual([{ pid: child?.pid, signal: 'SIGTERM' }])
+  })
+
+  it('goes down without retry when another +subscribe holds the app lock', () => {
+    const h = harness()
+    h.subscription.start()
+
+    h.children[0]?.err(SUBSCRIBE_STDERR.lockHeld)
+    h.children[0]?.end(2)
+
+    expect(h.subscription.current.phase).toBe('down')
+    expect(h.subscription.current.diagnostic).toMatch(/subscribe-lock-held/)
+    expect(h.timers).toHaveLength(0)
   })
 
   it('does not restart after a deliberate stop', () => {

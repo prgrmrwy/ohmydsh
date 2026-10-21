@@ -19,6 +19,9 @@ import { ControllerLocusRepositoryAdapter } from '../src/host/locus/controller-p
 import { LocusRepository as DurableLocusRepository } from '../src/host/locus/persistence.js'
 import { createLocusResolution } from '../src/host/locus/resolution.js'
 import { openPetHarness, type PetHarness } from './harness.js'
+import { admitDocCommentEvent, parseDocCommentEvent } from '../src/host/channel/doc-comment.js'
+import type { DocCommentQuery } from '../src/host/channel/lark.js'
+import { compactCommentEvent } from './fixtures/lark-subscribe.js'
 
 const CHAT_ID = 'oc-on-demand'
 const PARENT_SESSION = 'session-owner-main'
@@ -31,6 +34,7 @@ const PARENT_SESSION = 'session-owner-main'
  * state, not true cross-write atomicity.
  */
 function enableAtomicTransactions(harness: PetHarness): void {
+  if (harness.domain.supportsTransaction === true && typeof harness.domain.transaction === 'function') return
   type TableName = 'loci' | 'locus_indexes' | 'locus_operations' | 'locus_switch_notices' | 'locus_deliveries' | 'locus_permission_audit'
   type Write = { kind: 'put' | 'delete'; table: TableName; key: string; value?: unknown }
   const domain = harness.domain as unknown as {
@@ -111,7 +115,7 @@ function topicInbound(chatId: string, threadId: string, messageId: string, text:
  * over one shared durable repository — the same repository instance
  * `index.ts` gives both `locusProvisioningController` and `locusResolution`.
  */
-async function composeOnDemandHost(options: { readonly failFirstCreate?: boolean } = {}) {
+async function composeOnDemandHost(options: { readonly failFirstCreate?: boolean; readonly controls?: { target: { chatId: string; messageId: string }; text: string; senderOpenId?: string }[]; readonly receiptsThrow?: boolean; readonly imCalls?: string[] } = {}) {
   const harness: PetHarness = await openPetHarness()
   enableAtomicTransactions(harness)
   const durable = new DurableLocusRepository(harness.domain)
@@ -209,7 +213,7 @@ async function composeOnDemandHost(options: { readonly failFirstCreate?: boolean
     invalidatePolicyDrift: (input: { reason: string }) => { diagnostics.push(`policy-drift-reason:${input.reason}`) },
     turns: { perTurnCorrelation: true, subscribe: () => () => {} },
     admissionContext: {
-      botOpenId: 'ou-bot', allowOpenIds: ['ou-owner'], watermark: 1000,
+      botOpenId: 'ou-bot', allowOpenIds: ['ou-owner', 'ou_owner'], watermark: 1000,
       isDuplicate: () => false,
       // Real, not fixed: this is the exact fact the whole test is about.
       // A fixed 'authorized' would force `needsInitialization: false` and
@@ -220,6 +224,27 @@ async function composeOnDemandHost(options: { readonly failFirstCreate?: boolean
         const record = durable.findCurrentLocus(endpoint)
         return record?.state === 'active' ? 'authorized' : 'uninitialized'
       },
+    },
+    docHasEntries: chatId => durable.listLoci().some(record => record.endpoint.chatId === chatId),
+    ...(options.imCalls === undefined ? {} : {
+      // Spies on every IM-only port the controller can reach.
+      media: {
+        available: true,
+        admitCurrentImage: async (input: { messageId: string }) => {
+          options.imCalls!.push(`media:${input.messageId}`)
+          return { kind: 'none' as const, content: [] }
+        },
+      } as never,
+      addressing: {
+        listChatBots: (chatId: string) => { options.imCalls!.push(`chat-bots:${chatId}`); return [] },
+        resolveMemberName: (chatId: string) => { options.imCalls!.push(`member-name:${chatId}`); return undefined },
+      },
+    }),
+    docDisclosureText: '本文档的评论者均可向我提问；只有 allowlist 成员能控制',
+    receipts: {
+      markAccepted: () => { if (options.receiptsThrow === true) throw new Error('reaction api down') },
+      markSettled: () => { if (options.receiptsThrow === true) throw new Error('reaction api down') },
+      sendControl: (target, text, senderOpenId) => { options.controls?.push({ target, text, ...(senderOpenId === undefined ? {} : { senderOpenId }) }) },
     },
     log: code => diagnostics.push(code),
     // Same monotonic scale as the provisioning controller's own
@@ -238,7 +263,7 @@ async function composeOnDemandHost(options: { readonly failFirstCreate?: boolean
 }
 
 describe('locus tree is built on demand by the first qualifying @ message', () => {
-  it('bot-added has zero repository effect: no group marker exists until the first @', async () => {
+  it('spec Scenario "入群不建自动主会话": bot-added has zero repository effect: no group marker exists until the first @', async () => {
     const host = await composeOnDemandHost()
     try {
       // No admission at all yet — simulating that `im.chat.member.bot.added_v1`
@@ -254,7 +279,7 @@ describe('locus tree is built on demand by the first qualifying @ message', () =
     }
   })
 
-  it('the first qualifying @ builds main, child and an active locus inside one admission, then delivers it', async () => {
+  it('spec Scenario "首次消息补齐": the first qualifying @ builds main, child and an active locus inside one admission, then delivers it', async () => {
     const host = await composeOnDemandHost()
     try {
       expect(await host.adapter.findGroup(CHAT_ID)).toBeUndefined()
@@ -478,3 +503,211 @@ describe('group and topic entries build on demand with structurally equivalent t
     }
   })
 })
+
+/** Admit one doc comment the way the intake driver does, then hand it to the real controller. */
+async function deliverComment(
+  host: Awaited<ReturnType<typeof composeOnDemandHost>>,
+  input: { token: string; commentId: string; replyId: string; isWhole: boolean; quote?: string },
+) {
+  const parsed = parseDocCommentEvent(compactCommentEvent({
+    fileToken: input.token, commentId: input.commentId, replyId: input.replyId,
+    fromOpenId: 'ou_owner', timestamp: '2000',
+  }))
+  if (parsed.kind !== 'event') throw new Error('fixture did not parse')
+  const query: DocCommentQuery = {
+    kind: 'ok', isWhole: input.isWhole, ...(input.quote === undefined ? {} : { quote: input.quote }),
+    replies: [], trigger: { replyId: input.replyId, text: '@ou-bot 看看这里' },
+  }
+  const durable = host.durable
+  const admission = admitDocCommentEvent(parsed.event, query, {
+    botOpenId: 'ou-bot', allowOpenIds: ['ou_owner'], watermark: 1000, isDuplicate: () => false,
+    authorization: endpoint => (durable.findCurrentLocus(endpoint)?.state === 'active' ? 'authorized' : 'uninitialized'),
+  })
+  return host.controller.handleAdmission(admission)
+}
+
+describe('document entries build on demand exactly like groups and topics', () => {
+  it('spec Scenario "文档首次评论建立文档专属主会话": two documents never share an automatic main', async () => {
+    const host = await composeOnDemandHost()
+    try {
+      const a = await deliverComment(host, { token: 'DocA00000000000000000000001', commentId: '11', replyId: '12', isWhole: true })
+      const b = await deliverComment(host, { token: 'DocB00000000000000000000001', commentId: '21', replyId: '22', isWhole: true })
+      expect(a).toMatchObject({ kind: 'accepted' })
+      expect(b).toMatchObject({ kind: 'accepted' })
+
+      const rootA = await host.adapter.findGroup('doc:docx:DocA00000000000000000000001')
+      const rootB = await host.adapter.findGroup('doc:docx:DocB00000000000000000000001')
+      expect(rootA?.mainSource).toBe('auto')
+      expect(rootA?.mainSessionId).toBeDefined()
+      expect(rootA?.mainSessionId).not.toBe(rootB?.mainSessionId)
+    } finally {
+      await host.close()
+    }
+  })
+
+  it('spec Scenario "划词评论先于文档级": an anchored first comment builds the document root first, and the whole-doc entry later shares its main', async () => {
+    const host = await composeOnDemandHost()
+    const token = 'DocC00000000000000000000001'
+    const root = `doc:docx:${token}`
+    try {
+      const anchored = await deliverComment(host, { token, commentId: '31', replyId: '32', isWhole: false, quote: '接口已有' })
+      expect(anchored).toMatchObject({ kind: 'accepted' })
+      const group = await host.adapter.findGroup(root)
+      const comment = await host.adapter.findActive({ chatId: root, threadId: '31' })
+      expect(group?.mainSource).toBe('auto')
+      expect(comment?.parentSessionId).toBe(group?.mainSessionId)
+
+      const whole = await deliverComment(host, { token, commentId: '41', replyId: '42', isWhole: true })
+      expect(whole).toMatchObject({ kind: 'accepted' })
+      const docLevel = await host.adapter.findActive({ chatId: root })
+      expect(docLevel?.parentSessionId).toBe(group?.mainSessionId)
+      // Siblings under one main, never one child.
+      expect(docLevel?.childSessionId).not.toBe(comment?.childSessionId)
+      // The anchored quote was persisted with its Delivery (D5).
+      expect(host.durable.findDeliveryByMessageId(`${root}/31/32`)?.docComment).toEqual({ quote: '接口已有' })
+    } finally {
+      await host.close()
+    }
+  })
+})
+
+describe('spec Requirement "评论准入与群消息准入同构且静默 fail closed": ask-scope disclosure', () => {
+  const DISCLOSURE = '本文档的评论者均可向我提问；只有 allowlist 成员能控制'
+
+  it('spec Scenario "建立回执披露提问范围": the first whole-doc entry discloses to the asker (a new mentioning full comment)', async () => {
+    const controls: { target: { chatId: string; messageId: string }; text: string; senderOpenId?: string }[] = []
+    const host = await composeOnDemandHost({ controls })
+    try {
+      await deliverComment(host, { token: 'DocE00000000000000000000001', commentId: '51', replyId: '52', isWhole: true })
+      expect(controls).toEqual([{
+        target: expect.objectContaining({ chatId: 'doc:docx:DocE00000000000000000000001', messageId: 'doc:docx:DocE00000000000000000000001/51/52' }),
+        text: DISCLOSURE,
+        // The asker the new full comment mentions: full comments cannot be replied to.
+        senderOpenId: 'ou_owner',
+      }])
+    } finally {
+      await host.close()
+    }
+  })
+
+  it('spec Scenario "划词评论先建立时也披露": once per document, under the anchored comment, not again for the doc level', async () => {
+    const controls: { target: { chatId: string; messageId: string }; text: string }[] = []
+    const host = await composeOnDemandHost({ controls })
+    const token = 'DocF00000000000000000000001'
+    try {
+      await deliverComment(host, { token, commentId: '61', replyId: '62', isWhole: false, quote: 'q' })
+      await deliverComment(host, { token, commentId: '71', replyId: '72', isWhole: true })
+      await deliverComment(host, { token, commentId: '81', replyId: '82', isWhole: false, quote: 'q2' })
+
+      expect(controls.map(item => item.target.messageId)).toEqual([`doc:docx:${token}/61/62`])
+      expect(controls.every(item => item.text === DISCLOSURE)).toBe(true)
+    } finally {
+      await host.close()
+    }
+  })
+
+  it('never discloses for an IM group', async () => {
+    const controls: { target: { chatId: string; messageId: string }; text: string }[] = []
+    const host = await composeOnDemandHost({ controls })
+    try {
+      await host.controller.handle(inbound('om-im-1', '@Pet hello'))
+      expect(controls).toEqual([])
+    } finally {
+      await host.close()
+    }
+  })
+})
+
+describe('spec Requirement "控制命令在评论中按所在入口生效"', () => {
+  it('spec Scenario "文档改绑后已有划词评论不迁移": rebinding the doc moves new comments only', async () => {
+    const host = await composeOnDemandHost()
+    const token = 'DocG00000000000000000000001'
+    const root = `doc:docx:${token}`
+    try {
+      await deliverComment(host, { token, commentId: '91', replyId: '92', isWhole: true })
+      await deliverComment(host, { token, commentId: '93', replyId: '94', isWhole: false, quote: 'q' })
+      const s0 = (await host.adapter.findGroup(root))?.mainSessionId
+      const c2 = await host.adapter.findActive({ chatId: root, threadId: '93' })
+      expect(c2?.parentSessionId).toBe(s0)
+
+      // Free the doc-level current so the switch fence is not the subject.
+      const docLocus = await host.adapter.findActive({ chatId: root })
+      const current = host.durable.findDeliveryByMessageId(`${root}/91/92`)!
+      await host.durable.completeCurrentDelivery({
+        endpoint: { chatId: root }, locusId: docLocus!.locusId, generation: docLocus!.generation,
+        childSessionId: docLocus!.childSessionId, deliveryId: current.deliveryId, now: host.now(),
+        outcome: 'no-reply', outboundResult: 'none', reason: 'test setup',
+        ...(current.revision === undefined ? {} : { expectedRevision: current.revision }),
+      })
+      const rebound = await host.provisioning.ensureGroup({ chatId: root, parentSessionId: PARENT_SESSION })
+      expect('warningText' in rebound && rebound.warningText).toBeTruthy()
+
+      await deliverComment(host, { token, commentId: '95', replyId: '96', isWhole: false, quote: 'q3' })
+      const c3 = await host.adapter.findActive({ chatId: root, threadId: '95' })
+      expect((await host.adapter.findActive({ chatId: root, threadId: '93' }))?.parentSessionId).toBe(s0)
+      expect(c3?.parentSessionId).toBe(PARENT_SESSION)
+    } finally {
+      await host.close()
+    }
+  })
+
+  it('spec Scenario "划词评论内绑定只影响该评论": binding inside c4 leaves the doc level alone', async () => {
+    const host = await composeOnDemandHost()
+    const token = 'DocH00000000000000000000001'
+    const root = `doc:docx:${token}`
+    try {
+      await deliverComment(host, { token, commentId: '101', replyId: '102', isWhole: true })
+      const s0 = (await host.adapter.findActive({ chatId: root }))?.parentSessionId
+      const bound = await host.provisioning.ensureTopic({ chatId: root, threadId: '104', parentSessionId: PARENT_SESSION })
+
+      expect(bound.locus.parentSessionId).toBe(PARENT_SESSION)
+      expect((await host.adapter.findActive({ chatId: root }))?.parentSessionId).toBe(s0)
+    } finally {
+      await host.close()
+    }
+  })
+})
+
+describe('spec Scenario "表情接口失败": feedback failure never changes Delivery truth', () => {
+  it('a throwing reaction port still accepts and queues the comment Delivery', async () => {
+    const host = await composeOnDemandHost({ receiptsThrow: true })
+    const token = 'DocI00000000000000000000001'
+    try {
+      const result = await deliverComment(host, { token, commentId: '111', replyId: '112', isWhole: true })
+      expect(result).toMatchObject({ kind: 'accepted' })
+      expect(host.queued).toHaveLength(1)
+      expect(host.durable.findDeliveryByMessageId(`doc:docx:${token}/111/112`)?.status).not.toBe('failed')
+    } finally {
+      await host.close()
+    }
+  })
+})
+
+describe('spec Scenario "文档 Delivery 不调用 IM 接口" (controller side)', () => {
+  it('a doc Delivery reaches neither media, chat-bot nor IM member lookups with a doc id', async () => {
+    const imCalls: string[] = []
+    const host = await composeOnDemandHost({ imCalls })
+    try {
+      const result = await deliverComment(host, { token: 'DocJ00000000000000000000001', commentId: '121', replyId: '122', isWhole: true })
+      expect(result).toMatchObject({ kind: 'accepted' })
+      expect(imCalls.filter(call => call.startsWith('media:') || call.startsWith('chat-bots:'))).toEqual([])
+      // Name lookup is source-dispatched by the Host port, never an IM member read.
+      expect(imCalls.every(call => !call.startsWith('media:'))).toBe(true)
+    } finally {
+      await host.close()
+    }
+  })
+
+  it('an IM group Delivery still uses the IM ports (unchanged)', async () => {
+    const imCalls: string[] = []
+    const host = await composeOnDemandHost({ imCalls })
+    try {
+      await host.controller.handle(inbound('om-im-media', '@Pet look'))
+      expect(imCalls.some(call => call.startsWith('chat-bots:'))).toBe(true)
+      expect(imCalls.some(call => call.startsWith('media:'))).toBe(true)
+    } finally {
+      await host.close()
+    }
+  })
+})
+

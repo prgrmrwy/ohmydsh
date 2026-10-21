@@ -6,6 +6,7 @@
  * produces a reason for the log and nothing else.
  */
 
+import { compactImMessage, compactInteractiveEnvelope, DOC_IDS } from './fixtures/lark-subscribe.js'
 import { describe, expect, it } from 'vitest'
 import {
   admitInboundEvent,
@@ -79,6 +80,34 @@ describe('parsing NDJSON lines', () => {
     })
 
     expect(parseInboundLine(line)?.message_id).toBe('om_x100b66e0c9f0ccacc3a7b71e53ba541')
+  })
+
+  it('spec Scenario "compact 群消息与既有准入兼容": a +subscribe --compact line parses like consume output', () => {
+    const event = parseInboundLine(compactImMessage({
+      message_id: 'om_1',
+      chat_id: 'oc_1',
+      sender_id: 'ou_u',
+      reply_to: 'om_0',
+      content: '@pet hi',
+      mentions: [{ key: '@_user_1', id: 'ou_bot', name: 'pet' }],
+    }))
+
+    expect(event).toMatchObject({
+      type: 'im.message.receive_v1',
+      message_id: 'om_1',
+      chat_id: 'oc_1',
+      chat_type: 'group',
+      sender_id: 'ou_u',
+      sender_type: 'user',
+      reply_to: 'om_0',
+      content: '@pet hi',
+    })
+    expect(event?.mentions?.[0]?.id).toBe('ou_bot')
+  })
+
+  it('does not mistake an interactive raw envelope or a comment line for a group message', () => {
+    expect(parseInboundLine(compactInteractiveEnvelope())).toBeUndefined()
+    expect(parseInboundLine(JSON.stringify({ type: 'drive.notice.comment_add_v1', comment_id: DOC_IDS.wholeCommentId }))).toBeUndefined()
   })
 
   it('ignores stderr-style progress lines and blanks', () => {

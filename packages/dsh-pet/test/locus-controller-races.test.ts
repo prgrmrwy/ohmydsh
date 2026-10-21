@@ -1136,7 +1136,7 @@ describe('LocusChannelController control commands', () => {
       senderId: 'ou-owner',
       authorization: 'authorized',
     })
-    expect(receipts).toHaveBeenCalledWith({ ...REPLY_TARGET, messageId: 'message-control' }, 'scope scope applied')
+    expect(receipts).toHaveBeenCalledWith({ ...REPLY_TARGET, messageId: 'message-control' }, 'scope scope applied', expect.any(String))
     expect(harness.ledger.calls).toEqual([])
     expect(harness.queueInputs).toHaveLength(0)
     expect(harness.markAccepted).not.toHaveBeenCalled()
@@ -1343,7 +1343,7 @@ describe('LocusChannelController dispatchNext / currentFinished / scheduleCurren
       toolTier: () => 'shell' as const,
     }
     await controller.handle(event, context)
-    expect(sent).toHaveBeenCalledWith(expect.objectContaining({ messageId: 'message-stranger' }), expect.stringContaining('所有者专用'))
+    expect(sent).toHaveBeenCalledWith(expect.objectContaining({ messageId: 'message-stranger' }), expect.stringContaining('所有者专用'), expect.any(String))
     expect(harness.diagnostics).toContain('admission-rejected:owner-only-tier')
     expect(harness.ledger.listDeliveries()).toHaveLength(0)
     expect(harness.queueInputs).toHaveLength(0)
@@ -1381,7 +1381,7 @@ describe('LocusChannelController dispatchNext / currentFinished / scheduleCurren
     })
     expect(harness.queueInputs).toHaveLength(0)
     expect(harness.ledger.calls).not.toContain('claimCurrent')
-    expect(sent).toHaveBeenCalledWith(expect.objectContaining({ messageId: 'message-backlog-stranger' }), expect.stringContaining('所有者专用'))
+    expect(sent).toHaveBeenCalledWith(expect.objectContaining({ messageId: 'message-backlog-stranger' }), expect.stringContaining('所有者专用'), expect.any(String))
     controller.dispose()
   })
 

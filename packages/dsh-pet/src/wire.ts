@@ -133,6 +133,10 @@ export interface PetLocusEndpointView {
   /** Platform display facts; Host revalidates them and never uses them as authority. */
   readonly chatType?: 'p2p' | 'group'
   readonly chatName?: string
+  /** Comment entries: summary source, the earliest persisted anchored quote (display only). */
+  readonly quote?: string
+  /** Document entries: the `drive +inspect` URL, when readable (display only). */
+  readonly docUrl?: string
 }
 
 /** Endpoint fields accepted as a bind/rebuild intent (display facts excluded). */

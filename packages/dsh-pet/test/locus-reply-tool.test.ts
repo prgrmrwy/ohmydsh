@@ -46,7 +46,7 @@ function lifecycleTools(current = true, overrides: {
   readonly inspectCurrentCapability?: (childSessionId: string) => unknown
   readonly inspectCurrentDeliveryAuthorization?: (input: unknown) => unknown
   readonly logAuthorizationRefusal?: (input: unknown) => void
-} = {}) {
+} = {}, managedEffects?: Parameters<typeof registerPetTools>[1]['managedEffects']) {
   const definitions: Array<{ name: string; parameters: unknown; execute(args: unknown, exec: unknown): Promise<unknown> }> = []
   const authorizeCurrentDelivery = overrides.authorizeCurrentDelivery ?? (() => current ? contextRecord(true) : undefined)
   const repository = {
@@ -74,6 +74,7 @@ function lifecycleTools(current = true, overrides: {
       ...(overrides.finishCurrentDelivery === undefined ? {} : { finishCurrentDelivery: overrides.finishCurrentDelivery }),
       ...(overrides.waitCurrentDelivery === undefined ? {} : { waitCurrentDelivery: overrides.waitCurrentDelivery }),
     },
+    managedEffects,
   })
   return {
     finish: definitions.find(item => item.name === PET_LOCUS_FINISH_TOOL)!,
@@ -172,6 +173,20 @@ describe('caller-bound Feishu lifecycle tools', () => {
     await expect(wait.execute({ waitMinutes: 5, reason: null }, childExec)).rejects.toMatchObject({ code: expect.stringMatching(/INVALID_(REQUEST|ARGS)/) })
     expect(authorize).not.toHaveBeenCalled()
     expect(waitCurrentDelivery).not.toHaveBeenCalled()
+  })
+
+  it('spec Scenario "私聊与群消息交错": a GUI turn gets no current capability, sends nothing and leaves the Feishu Delivery to its owner', async () => {
+    // The child HAS a current Feishu Delivery, but this execution is a GUI /
+    // initialization turn: the capability check refuses it as mixed-source.
+    const finishCurrentDelivery = vi.fn(async () => ({ sent: true, outcome: 'reply' as const }))
+    const inspectCurrentCapability = vi.fn(() => ({ ok: false as const, reason: 'mixed-source' as const }))
+    const { finish, wait, replyExact } = lifecycleTools(true, { finishCurrentDelivery, inspectCurrentCapability })
+
+    await expect(finish.execute({ outcome: 'reply', text: 'must not leak' }, childExec)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await expect(wait.execute({ waitMinutes: 10 }, childExec)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    // Not consumed: the durable finish was never reached, and no body went out.
+    expect(finishCurrentDelivery).not.toHaveBeenCalled()
+    expect(replyExact).not.toHaveBeenCalled()
   })
 
   it('refuses a GUI or initialization turn instead of reusing the prior target', async () => {

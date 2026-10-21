@@ -83,6 +83,26 @@ describe('durable production authorization resolver', () => {
     expect(byState('switching')).toBe('unusable')
   })
 
+  it('spec Scenario "文档与群标识不串键": key, authorization lookup and correlation never cross categories', () => {
+    const token = 'Dx0000000000000000000000001'
+    const docRoot = `doc:docx:${token}`
+    const seen: string[] = []
+    const resolver = createDurableLocusAuthorizationResolver(
+      {
+        getLatestLocusByEndpoint: (endpoint: { chatId: string; threadId?: string }) => {
+          seen.push(endpoint.chatId)
+          return endpoint.chatId === docRoot ? { state: 'active' as const } : undefined
+        },
+      } as never,
+      { find: () => undefined },
+    )
+
+    expect(resolver({ chatId: docRoot, key: docRoot })).toMatchObject({ state: 'authorized' })
+    // A chat that happens to share the token's literal is never the document.
+    expect(resolver({ chatId: token, key: token })).toBe('uninitialized')
+    expect(seen).toEqual([docRoot, token])
+  })
+
   // Archiving the main session is an OWNER action that is NOT an owner exit:
   // the owner decided about the SESSION, never about this endpoint. Nothing in
   // the runtime enforces it — both `dsh-agent` and the session controller

@@ -96,6 +96,18 @@ customizations:
     enabled: true
     brief: Worktree Session 首发隔离(task branch/lean deps/独立 build home)
     note: '自研,spec source-workspace-worktree-session。首次普通发送时创建唯一 ws/* 分支与 .worktrees/* checkout,不切换主 checkout;npm/pnpm 默认 lean 依赖,变更依赖前须先 promote;.env.local 仅同步 Git 忽略的文件并写入隔离 DSH_HOME。已绑定会话的文件/搜索/Bash 限制在 worktree 内;ws 的显式 path 须用户一次性授权;clean 拒绝 dirty/未合入/活跃项,不删远端分支。概念参考 LaoYueHanNi/dsh-git-worktree(MIT,见 packages/worktree-session/NOTICE)。升级复核:每次 DSH 升级重做工具契约与生命周期接缝的回归审计。移除:enabled:false → dsh build。'
+  # 自研(local):已有独立会话共享协作台账，默认不部署。
+  - id: dsh-collab
+    type: package
+    source: local
+    version: 0.1.0
+    enabled: true
+    brief: 已有独立会话经邀请共享协作台账与下一回合通知
+    note: '自研，spec dsh-collab（+change dsh-collab-invite-admission）。内联零运行时依赖collab-kernel当前源码；默认admission:invite邀请即授权（完整session ID，不限邀请与累计唤醒，靠熔断/拒绝/denySessionIds），allowlist兼容首版；改deny/准入须build+restart。12个常驻工具、collab_status为入口。dataDir须由单一Host进程独占（不跨pid命名空间）、在workspace/部署目录外且0700；启动按死亡证明自动清残锁，损坏日志停机dsh-collab-salvage或换新spaceId（抢救后seq复用）。只接受入队，不自动重发。升级复核官方cold preset和真实关闭预算。移除关闭工具与存储但保留台账；本机 dataDir 等配置由私有 overlay 的 mergeConfig 补丁提供（2026-10-20 用户授权日常启用）。'
+    buildInputs:
+      - packages/collab-kernel/src
+      - packages/collab-kernel/package.json
+      - packages/dsh-collab/tsdown.config.ts
   # 自研(local):适配受管、版本化的官方 OpenSpec 会话工作流。
   - id: dsh-openspec
     type: package
@@ -179,7 +191,7 @@ customizations:
       kind: pet-unified-locus-v1
       supportedDshVersion: 0.2.0-rc.2
     brief: 常驻桌宠 Agent 入口(Pet Task/Invocation/可信来源快照/受管 Skill store)
-    note: '自研,spec dsh-pet/pet-lark-channel/pet-locus-collaboration/pet-compat-minimization。Host+Web 双半区,状态在 $DSH_HOME/plugins/dsh-pet/(sqlite,与安装目录分离);不读取 provider 凭据,能力来自用户显式导入的 Skill。飞书入站默认关闭:凭据留在 lark-cli,allowlist 为空即不放行,入站防线均静默 fail closed;仅支持能证明 bot open_id 的 lark-cli(最低已验证 1.0.93),媒体下载要求官方 lark-cli --version ≥1.0.97(与 Pet 其它调用同一 PATH binary),否则媒体不可用。compat overlay 只替换 @deepseek-ai/dsh-subagent(4 个 seam),dshVersion 变化必须重新审查,不自动套补丁;退役须上游发布全部四项能力(跟踪见 packages/dsh-pet/compat/subagent/README.md)。移除:enabled:false → dsh build → 重启。'
+    note: '自研,spec dsh-pet/pet-lark-channel/pet-locus-collaboration/pet-compat-minimization。Host+Web 双半区,状态在 $DSH_HOME/plugins/dsh-pet/(sqlite,与安装目录分离);不读取 provider 凭据,能力来自用户显式导入的 Skill。飞书入站默认关闭:凭据留在 lark-cli,allowlist 为空即不放行,入站防线均静默 fail closed;lark-cli 最低 1.0.97;入站为单条 event +subscribe(群消息+文档评论),运行期间同一飞书应用的其它 profile 不能做事件订阅,建议独占一个应用;文档评论前置与升级复测见 packages/dsh-pet/README。compat overlay 只替换 @deepseek-ai/dsh-subagent(4 个 seam),dshVersion 变化必须重新审查,不自动套补丁;退役须上游发布全部四项能力(跟踪见 packages/dsh-pet/compat/subagent/README.md)。移除:enabled:false → dsh build → 重启。'
   - id: dsh-pet-executor
     type: preset
     version: 0.1.0
@@ -268,14 +280,14 @@ customizations:
     enabled: true
     brief: 对话区宽度五档切换(748px 至全宽)
     note: '第三方 https://github.com/aaronlei/dsh-width-tiers(MIT)。Web 对话区五档宽度切换,以 localStorage 记忆;无网络请求、无 Host 文件/命令/模型能力,卸载时清理 DOM/监听/定时器/样式;不触碰右侧面板,全宽档经官方 layout 服务收起侧边栏。1.0.7 起 medium 档 960→1120px(用户可见),档位文案复制了应用侧公式 clamp(680,列×0.64,920),公式漂移只影响文案。升级复核:自 1.0.4 起接线由包自带 bundle patch 承载,绝不可再并存手写 wiring patch(对无 id 的 insert DSH 不去重,会出现两条同 id loader 行);验收为启动清单中 dsh-width-tiers 恰好出现一次;DSH 升级需回归 layout/locale 服务。回滚:改回上一 pin → dsh build → 重启。 pin 校验 sha512-3cGoklw3tYSSXKBf9GzGduv4k9Vv4UO0IHl/FdKMQi+zdw7H9XapvSol4vuxBWqWjnhCWz3VQQc86yBjVrsHBQ=='
-  # 自研(local):会话链接面板 — better-sidebar 右侧工作台 tab(当前会话链接分类)
-  - id: session-links
+  # 自研(local):会话资源面板 — better-sidebar 右侧工作台 tab(当前会话链接分类)
+  - id: sidebar-session-resources
     type: package
     source: local
     version: 0.1.0
     enabled: true
     brief: 文档/资料面板(当前会话 MR/部署/工作项/制品链接分类 + 本次产出文件)
-    note: '自研,spec session-links。better-sidebar 右侧工作台「文档/资料」tab:收集当前会话的 URL 与产出文件并分类(MR/部署/工作项/制品/其他);Host 经只读 Connection RPC /dsh-session-links 读完整会话日志作基线,浏览器增量采集。不出网、不读写凭据、不持久化;组织专属评审/工作项域名走插件行 config(reviewHosts/trackerHosts,由私有 overlay 注入)。依赖第三方 dsh-better-sidebar(peer >=0.16.0,缺失则整体不激活)。升级复核:better-sidebar 的 tab API 与会话节点结构;通道仍仅回环。移除:enabled:false → dsh build → 重启。'
+    note: '自研,spec sidebar-session-resources(2026-10-19 由 session-links 改名,让出名字给团队版飞书 session-links)。better-sidebar 右侧工作台「文档/资料」tab:收集当前会话的 URL 与产出文件并分类(MR/部署/工作项/制品/其他);Host 经只读 Connection RPC /dsh-sidebar-session-resources 读完整会话日志作基线,浏览器增量采集。不出网、不读写凭据、不持久化;组织专属评审/工作项域名走插件行 config(reviewHosts/trackerHosts,由私有 overlay 注入)。依赖第三方 dsh-better-sidebar(peer >=0.16.0,缺失则整体不激活)。升级复核:better-sidebar 的 tab API 与会话节点结构;通道仍仅回环。移除:enabled:false → dsh build → 重启。'
   # 第三方(remote):better-sidebar 侧边栏工作台
   - id: better-sidebar
     type: package
@@ -284,7 +296,7 @@ customizations:
     version: 0.25.0
     enabled: true
     brief: 服务化侧边栏工作台
-    note: '第三方 https://github.com/omdsh-dev/DSH-better-sidebar(MIT)。右侧栏/底部面板工作台,开放 ctx.betterSidebar.registerTab(session-links 依赖)。信任面较重:文件管理、内嵌浏览器、终端(0.24.1 起走官方 terminal 能力,不再自带 node-pty;0.25.0 起为不持有 PTY 的底部终端 tab,新增 @xterm 依赖)、Git 面板、后台任务、侧边对话(完整上下文继承,费 token,可设置关闭);可选工具 terminal_*/sidebar_open 默认关闭;0.25.0 另增 wslpath/rg/fd 探针(全 argv、无 shell:true)与信任栅栏两条窄放宽。升级复核:peer 下界 ^0.2.0-rc.2 等于当前 dshVersion,随运行体同批;确认 registerTab 仍在、pnpm why 仅一份实例、出站域名不变。回滚:随运行体一起回到 0.19.1(其 peer 只满足 0.1.5)。 pin 校验 sha512-5dro5VDpkrnWBO5jNff6Kzt8UlniZEWwXFqsl+wptlqnGMC4PrdJQ4Sd3+tLU8LPKYH8dDI00Dd5IC3FtH/erA=='
+    note: '第三方 https://github.com/omdsh-dev/DSH-better-sidebar(MIT)。右侧栏/底部面板工作台,开放 ctx.betterSidebar.registerTab(sidebar-session-resources 依赖)。信任面较重:文件管理、内嵌浏览器、终端(0.24.1 起走官方 terminal 能力,不再自带 node-pty;0.25.0 起为不持有 PTY 的底部终端 tab,新增 @xterm 依赖)、Git 面板、后台任务、侧边对话(完整上下文继承,费 token,可设置关闭);可选工具 terminal_*/sidebar_open 默认关闭;0.25.0 另增 wslpath/rg/fd 探针(全 argv、无 shell:true)与信任栅栏两条窄放宽。升级复核:peer 下界 ^0.2.0-rc.2 等于当前 dshVersion,随运行体同批;确认 registerTab 仍在、pnpm why 仅一份实例、出站域名不变。回滚:随运行体一起回到 0.19.1(其 peer 只满足 0.1.5)。 pin 校验 sha512-5dro5VDpkrnWBO5jNff6Kzt8UlniZEWwXFqsl+wptlqnGMC4PrdJQ4Sd3+tLU8LPKYH8dDI00Dd5IC3FtH/erA=='
   # 自研(remote):驾驶舱桥接 — DSH web 客户端上报会话点击给本机 dsh-cockpit
   - id: dsh-cockpit-bridge
     type: package

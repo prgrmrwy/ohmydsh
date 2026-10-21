@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { connectionCount, consumeDryRun } from './fixtures/lark-subscribe.js'
 import {
   createLarkCliClient,
   parseBotIdentity,
@@ -39,18 +40,43 @@ const READY = {
 }
 
 describe('supported CLI version', () => {
-  it('accepts the installed identity-contract version and rejects older builds', async () => {
+  it('accepts the +subscribe floor (1.0.97) and rejects older builds, so enable, pairing and the gate agree', async () => {
     const supported = createLarkCliClient(
       'lark-cli',
-      vi.fn(async () => ({ stdout: 'lark-cli version 1.0.93\n' })) as unknown as LarkCliRunner,
+      vi.fn(async () => ({ stdout: 'lark-cli version 1.0.97\n' })) as unknown as LarkCliRunner,
     )
     const outdated = createLarkCliClient(
       'lark-cli',
-      vi.fn(async () => ({ stdout: 'lark-cli version 1.0.92\n' })) as unknown as LarkCliRunner,
+      vi.fn(async () => ({ stdout: 'lark-cli version 1.0.96\n' })) as unknown as LarkCliRunner,
     )
 
-    await expect(supported.cliVersion?.()).resolves.toEqual({ supported: true, version: '1.0.93' })
-    await expect(outdated.cliVersion?.()).resolves.toEqual({ supported: false, version: '1.0.92' })
+    await expect(supported.cliVersion?.()).resolves.toEqual({ supported: true, version: '1.0.97' })
+    await expect(outdated.cliVersion?.()).resolves.toEqual({ supported: false, version: '1.0.96' })
+  })
+
+  it('reads the event connection count as the bot and classifies auth failures', async () => {
+    const calls: string[][] = []
+    const ok = createLarkCliClient('lark-cli', vi.fn(async (_b: string, args: readonly string[]) => {
+      calls.push([...args])
+      return { stdout: JSON.stringify(connectionCount(1)) }
+    }) as unknown as LarkCliRunner)
+    const auth = createLarkCliClient('lark-cli', vi.fn(async () => {
+      throw Object.assign(new Error('exit 1'), {
+        stdout: JSON.stringify({ ok: false, error: { type: 'auth', message: 'not logged in' } }),
+      })
+    }) as unknown as LarkCliRunner)
+
+    await expect(ok.eventConnectionCount?.()).resolves.toEqual({ kind: 'count', count: 1 })
+    expect(calls[0]).toEqual(expect.arrayContaining(['api', 'GET', '/open-apis/event/v1/connection', '--as', 'bot']))
+    await expect(auth.eventConnectionCount?.()).resolves.toEqual({ kind: 'error', authFailure: true })
+  })
+
+  it('reports only blocked IM preconditions from the side-effect-free dry-run', async () => {
+    const client = createLarkCliClient('lark-cli', vi.fn(async () => ({
+      stdout: JSON.stringify(consumeDryRun({ console_event_published: 'unknown', scopes_granted: 'blocked' })),
+    })) as unknown as LarkCliRunner)
+
+    await expect(client.imPreconditions?.()).resolves.toEqual({ blocked: ['scopes_granted'] })
   })
 })
 
@@ -203,7 +229,7 @@ describe('user token refresh during --verify', () => {
 })
 
 describe('safe permission diagnostics', () => {
-  it('keeps scopes and the official console link', () => {
+  it('spec Scenario "目标群调用因权限失败": keeps scopes and the official console link', () => {
     expect(
       permissionDiagnostic({
         error: {
@@ -280,7 +306,7 @@ describe('strict Delivery-target reply', () => {
       .resolves.toEqual({ messageId: 'om_reply' })
   })
 
-  it('uses explicit thread reply semantics for a topic Delivery', async () => {
+  it('spec Scenario "话题回复留在原话题": uses explicit thread reply semantics for a topic Delivery', async () => {
     const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
       expect(args).toEqual([
         '--profile', 'dsh-pet', 'im', '+messages-reply', '--as', 'bot',
@@ -323,7 +349,7 @@ describe('strict Delivery-target reply', () => {
       .rejects.toThrow('reply to target: lark-cli returned a different chat id')
   })
 
-  it('renders a plain @display-name into a real mention before sending', async () => {
+  it('spec Scenario "唯一命中的整词引用成为真实提醒": renders a plain @display-name into a real mention before sending', async () => {
     const calls: string[][] = []
     const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
       calls.push([...args])
@@ -354,7 +380,7 @@ describe('strict Delivery-target reply', () => {
     ])
   })
 
-  it('sends the original text when the member list cannot be read', async () => {
+  it('spec Scenario "成员表不可读时仍能发出": original text sent, ONE low-cardinality diagnostic, reply outcome intact', async () => {
     const calls: string[][] = []
     const logs: string[] = []
     const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
@@ -372,6 +398,8 @@ describe('strict Delivery-target reply', () => {
     // Diagnostics stay low-cardinality: no name, id or body.
     expect(logs.join('\n')).not.toContain('赵鸿珂')
     expect(logs.join('\n')).not.toContain('ou_')
+    // Exactly one diagnostic line about the mention rendering, not one per name.
+    expect(logs.filter(line => line.includes('mentions'))).toHaveLength(1)
   })
 
   it('appends no diagnostics or paths to a plain-text body', async () => {

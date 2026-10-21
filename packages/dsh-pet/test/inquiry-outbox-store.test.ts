@@ -1,17 +1,13 @@
 /**
  * Durable inquiry result-outbox store tests.
  *
- * Split exactly like the ledger store: the default suite proves the store
- * refuses to write on a medium without atomic transactions, and the
- * behavioural suite runs only under the opt-in reviewed runtime config, where
- * `Domain.transaction` actually exists and commits as one batch.
+ * The capability-boundary test removes the batch committer; all behavioral
+ * tests use the actual Domain layer with the same atomic wrapper as production.
  */
 import { describe, expect, it } from 'vitest'
 import { INQUIRY_OUTBOX_LIMITS, inquiryResultDedupKey } from '../src/host/inquiry/outbox.js'
 import { InquiryOutboxStore } from '../src/host/inquiry/outbox-store.js'
 import { emptyMedium, openPetHarness } from './harness.js'
-
-const atomic = process.env.DSH_PET_TEST_ATOMIC_DOMAIN === '1'
 
 const childA = { kind: 'child', sessionId: 'session-a', locusId: 'locus-a', generation: 2 } as const
 const main = { kind: 'main', sessionId: 'session-main' } as const
@@ -55,7 +51,7 @@ describe('inquiry outbox store capability boundary', () => {
   })
 })
 
-describe.skipIf(!atomic)('inquiry outbox store with real reviewed atomic Domain (opt-in config)', () => {
+describe('inquiry outbox store with actual atomic Domain', () => {
   it('queues one pending result, survives a restart and is idempotent per dedup key', async () => {
     const medium = emptyMedium()
     const h = await openPetHarness(medium)

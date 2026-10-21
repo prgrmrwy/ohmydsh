@@ -72,6 +72,7 @@ export const LOCUS_CALLER_BOUND_TOOLS: readonly string[] = Object.freeze([
   'pet_inquire',
   'pet_inquiry_answer',
   'pet_locus_chat_history',
+  'pet_locus_doc_context',
   'pet_locus_finish',
   'pet_locus_ledger_read',
   'pet_locus_parent_lookup',
@@ -200,6 +201,13 @@ export interface LocusChildComposition {
   readonly childComposition?: 'safe-v1' | 'safe-v2'
   /** Missing on legacy rows means safe. */
   readonly toolTier?: { readonly desired: LocusToolTier; readonly effective: LocusToolTier }
+  /**
+   * The entry this child serves. Fresh children are composed synchronously
+   * BEFORE their locus row is published, so a durable lookup by locusId finds
+   * nothing yet; anything that depends on the entry kind (a document child
+   * gets the doc read tool, an IM child the group history) must read it here.
+   */
+  readonly endpoint?: { readonly chatId: string; readonly threadId?: string }
 }
 
 /** Reverse lookup from a candidate session to its durable locus. */

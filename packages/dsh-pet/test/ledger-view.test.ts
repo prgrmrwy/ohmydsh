@@ -195,3 +195,35 @@ describe('owner-facing todo routes are actually wired (regression guards)', () =
     expect(settings).toContain('await load()')
   })
 })
+
+describe('doc-comment todos jump to the document (pet-locus-intent-triage MODIFIED)', () => {
+  const ROOT = 'doc:docx:Dx0000000000000000000000001'
+  const docItem = (threadId?: string) => ({
+    itemId: 'todo-doc', locusId: 'locus-doc',
+    endpoint: threadId === undefined ? { chatId: ROOT } : { chatId: ROOT, threadId },
+    triggerMessageId: `${ROOT}/${threadId ?? '1'}/2`, requestedBy: 'ou_a', summary: 's', detail: '',
+    status: 'open' as const, createdAt: 1, statusChangedAt: 1,
+  })
+
+  it('spec Scenario "文档评论待办跳到文档": the inspected url, the comment id noted, never a topic', () => {
+    const jump = resolveFeishuJumpTarget(docItem('c2'), { docUrl: () => 'https://www.feishu.cn/docx/D' })
+    expect(jump).toEqual({ kind: 'doc', url: 'https://www.feishu.cn/docx/D', commentId: 'c2' })
+    expect(JSON.stringify(jump)).not.toMatch(/threadId|messageId|applink/)
+  })
+
+  it('spec Scenario "文档待办跳转": a doc-level todo carries no comment note', () => {
+    expect(resolveFeishuJumpTarget(docItem(), { docUrl: () => 'https://www.feishu.cn/docx/D' }))
+      .toEqual({ kind: 'doc', url: 'https://www.feishu.cn/docx/D' })
+  })
+
+  it('spec Scenario "文档 URL 不可得": no usable link, and the reason is stated', () => {
+    const jump = resolveFeishuJumpTarget(docItem('c2'), { docUrl: () => undefined })
+    expect(jump).toMatchObject({ kind: 'doc', commentId: 'c2', reason: expect.stringContaining('不可读') })
+    expect('url' in jump && jump.url).toBeFalsy()
+  })
+
+  it('leaves IM todos on the existing thread / chat-degraded rules', () => {
+    const im = { ...docItem('omt_1'), endpoint: { chatId: 'oc_1', threadId: 'omt_1' }, triggerMessageId: 'om_1' }
+    expect(resolveFeishuJumpTarget(im).kind).toBe('thread')
+  })
+})

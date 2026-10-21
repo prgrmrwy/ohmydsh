@@ -7,11 +7,13 @@ import { ChannelService } from '../src/host/channel/service.js'
 import type { LarkClient } from '../src/host/channel/lark.js'
 import { PetCoordinator } from '../src/host/coordinator.js'
 import { openPetHarness, type PetHarness } from './harness.js'
+import { SUBSCRIBE_STDERR } from './fixtures/lark-subscribe.js'
 
 class ConsumerChild extends EventEmitter {
   readonly stdout = new EventEmitter() as EventEmitter & { setEncoding(value: string): void }
   readonly stderr = new EventEmitter() as EventEmitter & { setEncoding(value: string): void }
   exitCode: number | null = null
+  signalCode: string | null = null
   readonly signals: string[] = []
 
   constructor() {
@@ -21,7 +23,7 @@ class ConsumerChild extends EventEmitter {
   }
 
   ready(): void {
-    this.stderr.emit('data', '[event] ready event_key=im.message.receive_v1\n')
+    this.stderr.emit('data', SUBSCRIBE_STDERR.sdkConnected)
   }
 
   line(value: unknown): void {
@@ -53,7 +55,8 @@ async function fixture() {
   const replies: string[] = []
   const pairingTimers: { fn: () => void; ms: number }[] = []
   const client: LarkClient = {
-    cliVersion: vi.fn(async () => ({ supported: true, version: '1.0.93' })),
+    cliVersion: vi.fn(async () => ({ supported: true, version: '1.0.97' })),
+    eventConnectionCount: vi.fn(async () => ({ kind: 'count' as const, count: 0 })),
     botIdentity: vi.fn(async appId => ({
       kind: 'ready' as const,
       identity: { appId, openId: 'ou_petbot00000000000000000000000' },
@@ -128,9 +131,10 @@ function pairEvent(sender = 'ou_pairing0000000000000000000000') {
 }
 
 describe('pairing owns the shared consumer', () => {
-  it('starts while formal channel is off and hides command until ready', async () => {
+  it('spec Scenario "Channel 关闭时为配对临时订阅": starts while formal channel is off and hides command until ready', async () => {
     const f = await fixture()
     await f.service.startPairing()
+    await settle()
 
     expect(f.children).toHaveLength(1)
     expect(f.service.status().phase).toBe('starting')
@@ -143,9 +147,10 @@ describe('pairing owns the shared consumer', () => {
     })
   })
 
-  it('uses the pre-dispatch path and stops pairing-only consumer after success', async () => {
+  it('spec Scenario "配对结束后按运行原因回收": uses the pre-dispatch path and stops pairing-only consumer after success', async () => {
     const f = await fixture()
     await f.service.startPairing()
+    await settle()
     f.children[0]?.ready()
     f.children[0]?.line(pairEvent())
     await settle()
@@ -170,9 +175,11 @@ describe('pairing owns the shared consumer', () => {
       updatedAt: 2,
     }))
     await f.service.setEnabled(true)
+    await settle()
     f.children[0]?.ready()
 
     await f.service.startPairing()
+    await settle()
     expect(f.children).toHaveLength(1)
     expect(f.service.pairingState()?.phase).toBe('waiting')
 
@@ -203,8 +210,10 @@ describe('pairing owns the shared consumer', () => {
       updatedAt: 2,
     }))
     await f.service.setEnabled(true)
+    await settle()
     f.children[0]?.ready()
     await f.service.startPairing()
+    await settle()
 
     ;(f.service as unknown as { onStatus(status: { phase: 'down'; failures: number; diagnostic: string }): void })
       .onStatus({ phase: 'down', failures: 8, diagnostic: 'retry cap reached' })
@@ -216,6 +225,7 @@ describe('pairing owns the shared consumer', () => {
   it('expires and stops a pairing-only consumer', async () => {
     const f = await fixture()
     await f.service.startPairing()
+    await settle()
     f.children[0]?.ready()
 
     f.pairingTimers[0]?.fn()
@@ -227,6 +237,7 @@ describe('pairing owns the shared consumer', () => {
   it('Host stop clears pairing and terminates with SIGTERM', async () => {
     const f = await fixture()
     await f.service.startPairing()
+    await settle()
     f.children[0]?.ready()
 
     f.service.stop()
@@ -238,6 +249,7 @@ describe('pairing owns the shared consumer', () => {
   it('stops with SIGTERM on cancel when pairing is the only owner', async () => {
     const f = await fixture()
     await f.service.startPairing()
+    await settle()
     f.children[0]?.ready()
 
     f.service.cancelPairing()

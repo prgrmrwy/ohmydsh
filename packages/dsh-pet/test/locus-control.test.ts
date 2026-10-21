@@ -69,6 +69,13 @@ describe('unified locus bind prefix resolution', () => {
     })
   })
 
+  it('spec Scenario "子会话不能作为绑定源": a prefix that only hits a child reads exactly like no match', () => {
+    const candidates = [session('session-child000000', { parentSessionId: 'session-parent' })]
+
+    expect(resolveLocusBindPrefix('child0', candidates)).toEqual(resolveLocusBindPrefix('zzzzzz', candidates))
+    expect(resolveLocusBindPrefix('child0', candidates)).toMatchObject({ resolved: false })
+  })
+
   it('gives no match and multiple matches one indistinguishable outcome', () => {
     const candidates = [
       session('session-abcdef111111'),
@@ -111,6 +118,30 @@ describe('unified locus command dispatcher', () => {
 
     await dispatcher.dispatch({ command: { kind: 'bind', prefix: 'abcdef' }, endpoint: ENDPOINT, senderId: OWNER })
     expect(listSessions).toHaveBeenCalledWith('abcdef')
+  })
+
+  it('spec Scenario "全文评论绑定已知会话": a document /bind names the doc title and restates who may ask (delivered as a mentioning full comment by the egress)', async () => {
+    const docEndpoint = { chatId: 'doc:docx:Dx1', key: 'doc:docx:Dx1' }
+    const dispatcher = createLocusControlDispatcher({
+      allowOpenIds: () => [OWNER],
+      listSessions: () => [session('session-abcdef123456')],
+      bind: {
+        bind: (async ({ parentSessionId }: { parentSessionId: string }) => {
+          const result = bindResult(parentSessionId)
+          return { ...result, locus: { ...result.locus, endpoint: { chatId: 'doc:docx:Dx1' } } }
+        }) as never,
+      },
+      exit: { unbindCurrent: async () => ({ state: 'stopped' }) },
+      chatName: () => '技术方案',
+    })
+
+    const result = await dispatcher.dispatch({ command: { kind: 'bind', prefix: 'abcdef' }, endpoint: docEndpoint, senderId: OWNER })
+
+    expect(result).toMatchObject({ ok: true })
+    const text = 'text' in result ? result.text ?? '' : ''
+    expect(text).toContain('文档「技术方案」')
+    expect(text).not.toContain('群「')
+    expect(text).toContain('本文档的评论者均可向我提问；只有 allowlist 成员能控制')
   })
 
   it('prefilters ids with exactly the resolution comparison', () => {

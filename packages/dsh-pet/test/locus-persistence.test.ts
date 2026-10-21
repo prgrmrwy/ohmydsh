@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildLocusRecord, endpointKeyOf, type LocusRecord } from '../src/host/locus/aggregate.js'
-import { PET_DOMAIN_VERSION, petLocusRecord, type PetLocusOperation } from '../src/host/spec.js'
+import { PET_DOMAIN_VERSION, petLocusDelivery, petLocusRecord, type PetLocusOperation } from '../src/host/spec.js'
 import {
   childIndexKey,
   defaultQaIndexKey,
@@ -12,6 +12,7 @@ import { emptyMedium, openPetHarness, type MemoryMedium } from './harness.js'
 import { STORAGE_KEY_SEPARATOR } from '../src/host/locus/storage-key.js'
 
 function enableAtomicTransactions(harness: Awaited<ReturnType<typeof openPetHarness>>): void {
+  if (harness.domain.supportsTransaction === true && typeof harness.domain.transaction === 'function') return
   const domain = harness.domain as unknown as {
     supportsTransaction?: boolean
     transaction?: (body: (tx: {
@@ -386,6 +387,75 @@ describe('durable unified locus repository', () => {
     expect(operation?.endpointKey).toBe(endpointKeyOf(locus.endpoint))
     expect(repository.getDelivery('delivery-wal')?.status).toBe('accepted')
     await first.close()
+  })
+
+  it('persists the anchored-comment quote with the Delivery and reads it back after a restart', async () => {
+    const medium = emptyMedium()
+    const first = await openPetHarness(medium)
+    const repository = new DurableLocusRepository(first.domain)
+    // Endpoint shape does not matter for this round-trip; a doc root keeps the fixture minimal.
+    const locus = await repository.putLocus(record({ endpoint: { chatId: 'doc:docx:Dx0000000000000000000000001' } }))
+    await repository.acceptDelivery({
+      endpoint: locus.endpoint,
+      locusId: locus.id,
+      generation: locus.generation,
+      childSessionId: locus.childSessionId as string,
+      messageId: 'doc:docx:Dx0000000000000000000000001/7696944560311651569/7696944560332606724',
+      deliveryId: 'delivery-doc-1',
+      senderOpenId: 'ou_sender',
+      text: '这里为什么',
+      docComment: { quote: '接口已有' },
+      acceptedAt: 2,
+    })
+    await first.close()
+
+    const second = await reopen(medium)
+    const restarted = new DurableLocusRepository(second.domain)
+    expect(restarted.getDelivery('delivery-doc-1')?.docComment).toEqual({ quote: '接口已有' })
+    await second.close()
+  })
+
+  it('refuses to persist an oversized or empty quote, so a bad row can never block the next storage open', async () => {
+    const harness = await openPetHarness()
+    const repository = new DurableLocusRepository(harness.domain)
+    const locus = await repository.putLocus(record({ endpoint: { chatId: 'doc:docx:Dx0000000000000000000000001' } }))
+    const base = {
+      endpoint: locus.endpoint,
+      locusId: locus.id,
+      generation: locus.generation,
+      childSessionId: locus.childSessionId as string,
+      senderOpenId: 'ou_sender',
+      text: 'q',
+      acceptedAt: 2,
+    }
+    const before = harness.domain.table('locus_deliveries').size
+
+    await expect(repository.acceptDelivery({
+      ...base, messageId: 'doc:docx:Dx0000000000000000000000001/1/2', docComment: { quote: 'x'.repeat(2_001) },
+    })).rejects.toThrow(/docComment\.quote/)
+    await expect(repository.acceptDelivery({
+      ...base, messageId: 'doc:docx:Dx0000000000000000000000001/1/3', docComment: { quote: '' },
+    })).rejects.toThrow(/docComment\.quote/)
+    await expect(repository.acceptDelivery({
+      ...base, messageId: 'doc:docx:Dx0000000000000000000000001/1/4', docComment: {} as never,
+    })).rejects.toThrow(/docComment\.quote/)
+
+    expect(harness.domain.table('locus_deliveries').size).toBe(before)
+    await harness.close()
+  })
+
+  it('keeps a pre-v16 Delivery row (no docComment) readable', () => {
+    const row = {
+      deliveryId: 'd', messageId: 'om_1', endpoint: { chatId: 'oc_1' }, locusId: 'l', generation: 1,
+      childSessionId: 'c', senderOpenId: 'ou_1', sequence: 1, status: 'accepted', queueState: 'backlog',
+      acceptedAt: 1, deadlineAt: 2, hardDeadlineAt: 1 + 24 * 60 * 60 * 1000, revision: 0, stateRevision: 0,
+      feedbackTarget: { chatId: 'oc_1', messageId: 'om_1' },
+    }
+    const parsed = petLocusDelivery.safeParse(row)
+    expect(parsed.success).toBe(true)
+    expect(parsed.success && parsed.data.docComment).toBeUndefined()
+    expect(petLocusDelivery.safeParse({ ...row, docComment: { quote: 'x'.repeat(2_001) } }).success).toBe(false)
+    expect(petLocusDelivery.safeParse({ ...row, docComment: {} }).success).toBe(false)
   })
 
   it('accepts overlapping same-locus messages into one durable FIFO backlog while controls stay busy', async () => {
@@ -1118,7 +1188,43 @@ describe('durable unified locus repository', () => {
     await second.close()
   })
 
-  it('keeps an unproven current Delivery waiting instead of settling it early', async () => {
+  it('spec Scenario "Host 重启处理遗留 finishing": a restart converges finishing to unknown-terminal, frees the queue, never resends', async () => {
+    const medium = emptyMedium()
+    const first = await openPetHarness(medium)
+    const repository = new DurableLocusRepository(first.domain)
+    const locus = await repository.putLocus(record())
+    const correlation = {
+      endpoint: locus.endpoint, locusId: locus.id, generation: locus.generation, childSessionId: locus.childSessionId as string,
+    }
+    for (const id of ['a', 'b']) {
+      await repository.acceptDelivery({
+        ...correlation, messageId: `message-${id}`, deliveryId: `delivery-${id}`, senderOpenId: 'ou_x', acceptedAt: 2,
+      })
+    }
+    const current = await repository.claimCurrentDelivery({ correlation, now: 3 })
+    expect(current?.deliveryId).toBe('delivery-a')
+    // The Host reserved A for its reply and then died before recording the result.
+    await repository.markDeliveryFinishing({
+      ...correlation, deliveryId: 'delivery-a', now: 4,
+      ...(current!.revision === undefined ? {} : { expectedRevision: current!.revision }),
+    })
+    expect(repository.getDelivery('delivery-a')?.status).toBe('finishing')
+    await first.close()
+
+    const second = await reopen(medium)
+    enableAtomicTransactions(second)
+    const restarted = new DurableLocusRepository(second.domain)
+    const report = await restarted.reconcileStartup({ now: 6 })
+
+    expect(restarted.getDelivery('delivery-a')).toMatchObject({ status: 'unknown-terminal', outboundResult: 'unknown' })
+    // Nothing is offered back for replay, and the next Delivery can be claimed.
+    expect(report.replayableDeliveries.map(item => item.deliveryId)).not.toContain('delivery-a')
+    const next = await restarted.claimCurrentDelivery({ correlation, now: 7 })
+    expect(next?.deliveryId).toBe('delivery-b')
+    await second.close()
+  })
+
+  it('spec Scenario "Host 重启恢复未过期 current": keeps an unproven current Delivery waiting instead of settling it early', async () => {
     const medium = emptyMedium()
     const first = await openPetHarness(medium)
     const repository = new DurableLocusRepository(first.domain)
@@ -1174,7 +1280,7 @@ describe('durable unified locus repository', () => {
     await second.close()
   })
 
-  it('keeps queued work busy as explicit manual debt when termination is unavailable', async () => {
+  it('spec Scenario "宿主重启无法证明关联": keeps queued work busy as explicit manual debt when termination is unavailable', async () => {
     const medium = emptyMedium()
     const first = await openPetHarness(medium)
     const repository = new DurableLocusRepository(first.domain)

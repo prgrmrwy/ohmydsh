@@ -1,0 +1,5 @@
+import { expect, it } from 'vitest'
+import { world } from './support/world.js'
+import { reduce } from '../src/domain/reduce.js'
+it('log-01：增量读取纯操作且可从日志重建', async () => { const w = await world(); for (let i = 2; i <= 20; i++) await w.service.setStatus(w.ctx(), { text: `${i}` }); const before = await w.service.overview(w.read()); expect((await w.service.readSince(w.read(), 15)).map(r => r.seq)).toEqual([16, 17, 18, 19, 20]); expect(w.log()).toHaveLength(20); expect(await w.service.overview(w.read())).toEqual(before); let state; for (const r of w.log()) state = reduce(state, r); expect(state).toEqual(Object.fromEntries(Object.entries(before).filter(([k]) => !['pendingDeliveries', 'inFlightDeliveries', 'presence'].includes(k)))) })
+it('log-02：超前返回空且非法游标拒绝', async () => { const w = await world(); expect(await w.service.readSince(w.read(), 25)).toEqual([]); for (const seq of [-1, 0.5, NaN, Infinity]) await expect(w.service.readSince(w.read(), seq)).rejects.toMatchObject({ code: 'COLLAB_BAD_SEQ' }); expect(w.log()).toHaveLength(1) })

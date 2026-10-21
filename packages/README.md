@@ -5,7 +5,7 @@ English · [简体中文](README.zh.md)
 <!-- problem -->
 This directory holds the plugins this repository develops itself, each one an independent, removable unit. Read it to learn what a package must contain, how it is built and installed, and how its README is tiered; start from the plugin index in the [root README](../README.md) to pick a package.
 
-Every subdirectory is one in-house customization unit that follows the community `dsh.bundle` standard:
+Deployable plugins follow the community `dsh.bundle` standard. The standalone `collab-kernel` library is not a manifest customization: it has no bundle or composition patch and is built independently for future consumers to inline.
 
 ```
 packages/<name>/
@@ -30,7 +30,7 @@ Every package declares a documentation tier in `package.json` as `"ohmydsh": { "
 | Tier | Packages | First screen (before the first `## ` heading) |
 |---|---|---|
 | A | `dsh-pet`, `dsh-memex`, `worktree-session`, `dsh-openspec` | `<!-- problem -->` paragraph, a bitmap screenshot under the package's `docs/` (a diagram may be added) |
-| B | `sidebar-session-provider-icon`, `session-title-copy`, `system-clock`, `session-links`, `home-network-model-guard` | `<!-- problem -->` paragraph and a bitmap screenshot under the package's `docs/` |
-| C | `subscriptions-sandbox-shim`, `cockpit-worktree-open-shim`, `cockpit-memex-browse-shim` | `<!-- problem -->` paragraph and a `## Removal` section anchored with `<!-- section: removal -->` saying which two ends it connects and when it can be removed |
+| B | `sidebar-session-provider-icon`, `session-title-copy`, `system-clock`, `sidebar-session-resources`, `home-network-model-guard` | `<!-- problem -->` paragraph and a bitmap screenshot under the package's `docs/` |
+| C | `subscriptions-sandbox-shim`, `cockpit-worktree-open-shim`, `cockpit-memex-browse-shim`, `collab-kernel`, `dsh-collab` | `<!-- problem -->` paragraph and a `## Removal` section anchored with `<!-- section: removal -->` saying which two ends it connects and when it can be removed |
 
 Screenshots must come from an isolated `DSH_HOME` filled with synthetic data, never from a daily-use instance, and each one must be registered in the `SCREENSHOTS.md` next to the image (≤ 400 KiB per image).

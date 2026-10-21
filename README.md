@@ -182,6 +182,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [spec-superflow](https://github.com/MageByte-Zero/spec-superflow) — State-machine workflow skills for planned, spec-driven changes.
 - [jev](https://github.com/jkudish/jev-mcp) — MCP server giving agents semantic judgment tools; the key stays in `.env.local`.
 - [anvil](https://github.com/jikkujoyce/openspec-schemas) — OpenSpec schema for test-first change workflows.
+- [ponytail](https://github.com/DietrichGebert/ponytail) — Prompt-only skills for a minimal-change, low-bloat coding mode and its review and audit commands.
 
 ### Adapted third-party skills
 
@@ -198,11 +199,12 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [sidebar-session-provider-icon](packages/sidebar-session-provider-icon/README.md) — Shows the selected model's brand logo on every sidebar session row.
 - [session-title-copy](packages/session-title-copy/README.md) — Adds a short session-id badge next to the title that copies the full id.
 - [system-clock](packages/system-clock/README.md) — Shows the DSH host's clock, time zone and hostname at the bottom of settings.
-- [session-links](packages/session-links/README.md) — Collects links and produced files of the current session into a sidebar panel.
+- [sidebar-session-resources](packages/sidebar-session-resources/README.md) — Collects links and produced files of the current session into a sidebar panel.
 - [home-network-model-guard](packages/home-network-model-guard/README.md) — Disables Claude models in the input box when the host egress region is restricted.
 - [subscriptions-sandbox-shim](packages/subscriptions-sandbox-shim/README.md) — Strips sandbox escalation fields and orphan tool calls for subscription providers.
 - [cockpit-worktree-open-shim](packages/cockpit-worktree-open-shim/README.md) — Connects the cockpit remote editor to Worktree Session's open action.
 - [cockpit-memex-browse-shim](packages/cockpit-memex-browse-shim/README.md) — Connects cockpit port forwarding to the memory card browser.
+- [dsh-collab](packages/dsh-collab/README.md) — Lets existing independent sessions share a collaboration ledger by invitation and wakes members on their next turn.
 
 ### Self-developed skills, preset and patch
 
@@ -216,6 +218,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [ponytail-skills](patches/ponytail-skills.yml) — Exposes the pinned ponytail package through a dedicated skill provider.
 - [connection-webserver](patches/connection-webserver.yml) — Composition patch that restores Connection RPC channel registration.
 - [websocket-heartbeat](patches/websocket-heartbeat.yml) — Config patch that relaxes the official gateway's WebSocket heartbeat to 5 seconds so large histories survive short network hiccups.
+- [ponytail-skills](patches/ponytail-skills.yml) — Composition patch that mounts a dedicated skill provider for the ponytail package only.
 
 ### Self-developed, separate repository
 

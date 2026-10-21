@@ -195,6 +195,44 @@ describe('caller-bound inquiry answer', () => {
     expect(f.inquiries.get('inquiry-1')!.diagnostics.map(d => d.kind)).toEqual(['duplicate-answer'])
   })
 
+  it('requires durable duplicate commit and returns only the retained first receipt', async () => {
+    const f = fixture(undefined, [dispatch(queued('inquiry-1', childA, childB))])
+    const first = await answer('child-b', body(), f)
+    const firstBody = f.answers.get('inquiry-1')
+    const commitAnswer = vi.fn(async (_candidate: unknown, _eventId: string) => firstBody as never)
+    const afterAnswer = vi.fn()
+    const result = await submitInquiryAnswerFromCaller({ agent: { id: 'child-b' } }, body({ answer: 'wrong duplicate', confidence: 'suggested' }), {
+      ...f.deps, commitAnswer, afterAnswer,
+    })
+    expect(commitAnswer).toHaveBeenCalledTimes(1)
+    expect(commitAnswer.mock.calls[0]![0]).toMatchObject({ answer: 'wrong duplicate', confidence: 'suggested' })
+    expect(result).toEqual(first)
+    expect(f.answers.get('inquiry-1')).toBe(firstBody)
+    expect(afterAnswer).toHaveBeenCalledWith('inquiry-1')
+  })
+
+  it('refuses duplicate without durable outbox proof instead of recording a receipt', async () => {
+    const f = fixture(undefined, [dispatch(queued('inquiry-1', childA, childB))])
+    const first = await answer('child-b', body(), f)
+    f.answers.delete('inquiry-1')
+    const commitAnswer = vi.fn(async () => { throw new Error('missing correlated pending outbox') })
+    const result = await submitInquiryAnswerFromCaller({ agent: { id: 'child-b' } }, body({ answer: 'wrong duplicate' }), {
+      ...f.deps, commitAnswer,
+    }).catch((error: unknown) => error)
+    expect(commitAnswer).toHaveBeenCalledTimes(1)
+    expect(result).toBeInstanceOf(InquiryAnswerRefusedError)
+    expect(f.answers.get('inquiry-1')).toBeUndefined()
+    expect(first.answer).not.toBe('wrong duplicate')
+  })
+
+  it('passes the exact current execution object to the binding callback', async () => {
+    const f = fixture(undefined, [dispatch(queued('inquiry-1', childA, childB))])
+    const execution = { agent: { id: 'child-b' }, marker: Symbol('current-execution') }
+    const binding = vi.fn((_sessionId: string, _inquiryId: string, received: unknown) => received === execution)
+    await submitInquiryAnswerFromCaller(execution, body(), { ...f.deps, binding })
+    expect(binding).toHaveBeenCalledWith('child-b', 'inquiry-1', execution)
+  })
+
   it('refuses an answer after explicit cancellation but retains it as a diagnostic', async () => {
     const cancelled = applyInquiryEvent(
       dispatch(queued('inquiry-1', childA, childB)),
@@ -239,6 +277,9 @@ describe('caller-bound inquiry answer', () => {
     for (const broken of [
       { confidence: 'pretty sure' }, { confidence: undefined }, { recency: 'recent-ish' }, { recency: undefined },
       { sources: 'from memory' }, { sources: [] }, { sources: [''] }, { answer: '   ' }, { answer: undefined },
+      { sources: Object.defineProperty(['ok'], '0', { get() { throw new Error('getter executed') } }) },
+      { sources: Object.assign(['ok'], { extra: true }) },
+      { sources: Object.defineProperty(new Array(1), 'length', { value: 1 }) },
       { answer: 'x'.repeat(INQUIRY_ANSWER_LIMITS.answerLength + 1) },
       { sources: Array.from({ length: INQUIRY_ANSWER_LIMITS.sources + 1 }, (_, i) => `s${String(i)}`) },
     ]) {

@@ -1,17 +1,13 @@
 /**
  * Durable inquiry-ledger store tests.
  *
- * Split exactly like the public-context store: the default suite proves the
- * store refuses to write on a medium without atomic transactions, and the
- * behavioural suite runs only under the opt-in reviewed runtime config, where
- * `Domain.transaction` actually exists and commits as one batch.
+ * The capability-boundary test removes the batch committer; all behavioral
+ * tests use the actual Domain layer with the same atomic wrapper as production.
  */
 import { describe, expect, it } from 'vitest'
 import { InquiryLedgerStore } from '../src/host/inquiry/ledger-store.js'
 import { INQUIRY_LIMITS as limits, parseInquiry } from '../src/host/inquiry/ledger.js'
 import { emptyMedium, openPetHarness } from './harness.js'
-
-const atomic = process.env.DSH_PET_TEST_ATOMIC_DOMAIN === '1'
 
 const circle = 'session-main'
 const main = { kind: 'main', sessionId: circle } as const
@@ -70,7 +66,7 @@ describe('inquiry ledger store capability boundary', () => {
   })
 })
 
-describe.skipIf(!atomic)('inquiry ledger store with real reviewed atomic Domain (opt-in config)', () => {
+describe('inquiry ledger store with actual atomic Domain', () => {
   it('accepts a queued record, keeps it recoverable across a long restart and is idempotent per id', async () => {
     const medium = emptyMedium()
     const h = await openPetHarness(medium)

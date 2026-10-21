@@ -71,6 +71,12 @@ export function handleSource(id: string, kind: HandleKind): string {
   if (trimmed === '') return ''
   switch (kind) {
     case 'endpoint': {
+      // Document root `doc:docx:<token>`: the token (D14).
+      if (trimmed.startsWith(DOC_ROOT_PREFIX)) return trimmed.slice(DOC_ROOT_PREFIX.length)
+      // Comment `cmt:<comment_id>` (see endpointHandleId): comment ids are
+      // time-ordered digits sharing long prefixes, so the source is REVERSED
+      // and a short code lands on the distinguishing tail.
+      if (trimmed.startsWith(COMMENT_HANDLE_PREFIX)) return [...trimmed.slice(COMMENT_HANDLE_PREFIX.length)].reverse().join('')
       // `oc_…` / `omt_…`: everything after the type prefix is the platform id.
       const separator = trimmed.indexOf('_')
       return separator === -1 ? trimmed : trimmed.slice(separator + 1)
@@ -158,9 +164,10 @@ export function handleLabel(kind: HandleKind, code: string): string {
   return `${prefix}·${code}`
 }
 
-/** The labelled code for an endpoint, using `oc`/`omt` as the platform does. */
+/** The labelled code for an endpoint: `oc`/`omt` as the platform does, `doc`/`cmt` for documents. */
 export function endpointHandleLabel(endpoint: PetLocusEndpointView, code: string): string {
   if (code === '') return ''
+  if (isDocEndpointView(endpoint)) return `${endpoint.threadId === undefined ? 'doc' : 'cmt'}·${code}`
   return `${endpoint.threadId === undefined ? 'oc' : 'omt'}·${code}`
 }
 
@@ -178,7 +185,20 @@ export function locusHandleId(locus: PetLocusView): string {
  * @returns the thread id when present, otherwise the chat id.
  */
 export function endpointHandleId(endpoint: PetLocusEndpointView): string {
+  // A comment id is bare digits; tag it so its code is derived by the comment
+  // rule and never collides with an IM thread id's map key.
+  if (isDocEndpointView(endpoint) && endpoint.threadId !== undefined) return `${COMMENT_HANDLE_PREFIX}${endpoint.threadId}`
   return endpoint.threadId ?? endpoint.chatId
+}
+
+/** Document-root prefix, mirrored from the Host's doc-endpoint module (D4). */
+const DOC_ROOT_PREFIX = 'doc:docx:'
+/** Display-only tag for a comment id's short-code source. */
+const COMMENT_HANDLE_PREFIX = 'cmt:'
+
+/** Whether an endpoint is a document entry (root or comment). */
+export function isDocEndpointView(endpoint: Pick<PetLocusEndpointView, 'chatId'>): boolean {
+  return endpoint.chatId.startsWith('doc:')
 }
 
 // ---------------------------------------------------------------------------
@@ -331,6 +351,9 @@ export interface EndpointRole {
  * @returns the role word.
  */
 export function endpointRole(endpoint: PetLocusEndpointView): EndpointRole {
+  if (isDocEndpointView(endpoint)) {
+    return endpoint.threadId === undefined ? { label: '文档', isTopic: false } : { label: '评论', isTopic: true }
+  }
   return endpoint.threadId === undefined
     ? { label: '入口', isTopic: false }
     : { label: '话题', isTopic: true }
@@ -356,6 +379,9 @@ export interface EntryDisplayName {
  */
 export function entryDisplayName(endpoint: PetLocusEndpointView, shortCode: string): EntryDisplayName {
   const role = endpointRole(endpoint)
+  // A comment entry is named by its quote summary (D14); never a token.
+  const quote = isDocEndpointView(endpoint) && endpoint.threadId !== undefined ? endpoint.quote?.trim() ?? '' : ''
+  if (quote !== '') return { name: `「${quote.length > 24 ? `${quote.slice(0, 24)}…` : quote}」`, isPlaceholder: false, role }
   const provided = endpoint.chatName?.trim() ?? ''
   if (provided !== '') return { name: provided, isPlaceholder: false, role }
   const suffix = shortCode.trim() === '' ? endpointHandleId(endpoint) : shortCode.trim()

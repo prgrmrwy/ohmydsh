@@ -7,6 +7,7 @@
  * answer instead of queued work.
  */
 
+import { compactInteractiveEnvelope } from './fixtures/lark-subscribe.js'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -455,7 +456,7 @@ describe('unified admission production context', () => {
 })
 
 describe('refusals leave no trace', () => {
-  it('ignores a stranger without reacting or storing anything', async () => {
+  it('spec Scenario "非 allowlist 用户 @ Bot": ignores a stranger without reacting or storing anything', async () => {
     const f = await fixture()
     harness = f.harness
 
@@ -482,7 +483,7 @@ describe('refusals leave no trace', () => {
     expect(f.reactions).toEqual([])
   })
 
-  it('ignores everything while the channel is disabled', async () => {
+  it('spec Scenario "Channel 关闭时收到消息": ignores everything while the channel is disabled', async () => {
     const f = await fixture()
     harness = f.harness
     const config = f.harness.repository.getChannelConfig()
@@ -530,6 +531,16 @@ describe('refusals leave no trace', () => {
     })
 
     expect(await restarted.handleLine(p2pLine())).toEqual({ kind: 'ignored', reason: 'duplicate' })
+  })
+
+  it('spec Scenario "卡片消息静默丢弃": an interactive envelope is counted as unparsable', async () => {
+    const f = await fixture()
+    harness = f.harness
+
+    expect(await f.pipeline.handleLine(compactInteractiveEnvelope())).toEqual({
+      kind: 'ignored',
+      reason: 'unparsable',
+    })
   })
 
   it('ignores an unparsable line', async () => {

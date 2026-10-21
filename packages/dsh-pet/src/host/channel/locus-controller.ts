@@ -24,6 +24,8 @@
 
 import { randomUUID } from 'node:crypto'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { sourceOf } from '../locus/doc-endpoint.js'
+import type { DeliveryDocComment } from '../locus/delivery.js'
 import type { LocusMediaPort } from './media.js'
 import {
   historicalUnknownAddressing,
@@ -95,12 +97,11 @@ export interface NormalizedLocusEvent {
   }[]
 }
 
-/** A normalized message with a canonical endpoint and trusted reply target. */
-export interface NormalizedLocusMessage {
+/** Facts every source carries. */
+interface NormalizedLocusMessageCore {
   readonly kind: 'message'
   readonly messageId: string
   readonly endpoint: LocusEndpoint
-  readonly chatType: 'p2p' | 'group'
   readonly senderOpenId: string
   readonly senderName?: string
   readonly text: string
@@ -109,6 +110,53 @@ export interface NormalizedLocusMessage {
   readonly replyTarget: LocusReplyTarget
   readonly replyToMessageId?: string
   readonly createdAt?: number
+}
+
+/**
+ * A normalized message with a canonical endpoint and trusted reply target,
+ * discriminated by `source` (openspec pet-locus-doc-comments D5). `source` is
+ * optional on the IM branch so existing IM callers stay valid; every branch
+ * point uses {@link messageSource}.
+ */
+export type NormalizedLocusMessage =
+  | (NormalizedLocusMessageCore & {
+      readonly source?: 'im'
+      readonly chatType: 'p2p' | 'group'
+    })
+  | (NormalizedLocusMessageCore & {
+      readonly source: 'doc-comment'
+      /** Persisted with the Delivery; absent for a whole-doc comment. */
+      readonly docComment?: DeliveryDocComment
+    })
+
+/** The source of a message: the explicit discriminant, else the endpoint prefix. */
+export function messageSource(message: NormalizedLocusMessage): 'im' | 'doc-comment' {
+  if (message.source !== undefined) return message.source
+  return sourceOf(message.endpoint)
+}
+
+/**
+ * Rebuild a message from a durable Delivery (backlog promotion, post-restart
+ * dispatch). The source comes from the endpoint prefix and doc facts from the
+ * persisted record, never from an inbound event, which no longer exists.
+ */
+export function messageFromDeliveryRecord(record: DeliveryRecord, endpoint: LocusEndpoint): NormalizedLocusMessage {
+  const core = {
+    kind: 'message' as const,
+    messageId: record.messageId,
+    endpoint: { ...endpoint },
+    senderOpenId: record.senderOpenId ?? '',
+    ...(record.senderName === undefined ? {} : { senderName: record.senderName }),
+    text: record.text ?? '',
+    addressing: record.addressing ?? projectDeliveryAddressing({ mentions: [], orderKnown: false }),
+    replyTarget: { ...record.feedbackTarget },
+    ...(record.replyToMessageId === undefined ? {} : { replyToMessageId: record.replyToMessageId }),
+    ...(record.acceptedAt === undefined ? {} : { createdAt: record.acceptedAt }),
+  }
+  return sourceOf(endpoint) === 'doc-comment'
+    ? { ...core, source: 'doc-comment', ...(record.docComment === undefined ? {} : { docComment: record.docComment }) }
+    // Group: the only IM chat type a backlog Delivery comes from today.
+    : { ...core, source: 'im', chatType: 'group' }
 }
 
 /** A normalized admission result consumed by the controller. */
@@ -131,7 +179,14 @@ export type NormalizedLocusAdmission =
     }
   | {
       readonly kind: 'rejected'
-      readonly reason: LocusAdmissionRefusal | 'unsafe-reply-target' | 'invalid-event'
+      readonly reason:
+        | LocusAdmissionRefusal
+        | 'unsafe-reply-target'
+        | 'invalid-event'
+        // Doc-comment intake (D13); refused before any locus effect.
+        | 'bot-sender'
+        | 'comment-scope-unknown'
+        | 'comment-reply-missing'
       readonly endpoint?: LocusEndpoint
     }
 
@@ -376,7 +431,8 @@ export interface LocusMechanicalReceiptPort {
   markAccepted(target: DeliveryFeedbackTarget): Awaitable<void>
   markSettled(target: DeliveryFeedbackTarget, outcome: 'settled' | 'failed'): Awaitable<void>
   /** Only for control/diagnostic messages, never business transcript text. */
-  sendControl?(target: LocusReplyTarget, text: string): Awaitable<void>
+  /** `senderOpenId` lets a doc answer mention the asker (whole-doc comments cannot be replied to). */
+  sendControl?(target: LocusReplyTarget, text: string, senderOpenId?: string): Awaitable<void>
 }
 
 /**
@@ -390,6 +446,16 @@ export interface LocusBusinessReplyPort {
 /** Controller dependencies. */
 export interface LocusControllerDeps {
   readonly locus: LocusResolutionPort
+  /**
+   * Whether this document has ever had ANY entry (root or comment, any state).
+   * Asked once, before a doc entry is provisioned; `false` means this is the
+   * document's first entry and the ask-scope disclosure is owed (D7). Derived
+   * from durable loci, so no extra "disclosed" flag is stored. Absent: never
+   * disclose (fail-soft, nothing is sent).
+   */
+  readonly docHasEntries?: (chatId: string) => Awaitable<boolean>
+  /** Disclosure text for a document's first entry (D7). */
+  readonly docDisclosureText?: string
   readonly deliveries: LocusDeliveryLedgerPort
   /** Required current/backlog dispatcher seam for serialized locus intake. */
   readonly deliveryDispatch: LocusDeliveryDispatchPort
@@ -487,7 +553,7 @@ export type LocusControllerDiagnostic =
    * and no external identifier, so surfacing it keeps the same privacy
    * boundary as the rest of this union.
    */
-  | `admission-rejected:${LocusAdmissionRefusal | 'unsafe-reply-target' | 'invalid-event'}`
+  | `admission-rejected:${Extract<NormalizedLocusAdmission, { kind: 'rejected' }>['reason']}`
   | 'control-command'
   | 'locus-unavailable'
   // Distinguish WHY a locus could not be resolved. Without these, a reader
@@ -1003,7 +1069,7 @@ export class LocusChannelController {
             }
             if (settled) {
               await this.receiptSettled(delivery.feedbackTarget, 'failed')
-              await this.sendControlReceipt(delivery.feedbackTarget, '当前入口为所有者专用，该排队请求未投递；所有者可将工具档位切回 safe。')
+              await this.sendControlReceipt(delivery.feedbackTarget, '当前入口为所有者专用，该排队请求未投递；所有者可将工具档位切回 safe。', delivery.senderOpenId)
             } else {
               // The row moved after our snapshot (for example, a durable lease
               // transition). Do not guess at its new sender/status; another
@@ -1037,18 +1103,12 @@ export class LocusChannelController {
       } catch {
         this.log('delivery-persistence-failed')
       }
-      const locus = await this.resolveLocus(correlation.endpoint, {
-        kind: 'message',
-        messageId: claimed.messageId,
-        endpoint: { ...correlation.endpoint },
-        chatType: 'group',
-        senderOpenId: claimed.senderOpenId ?? '',
-        text: claimed.text ?? '',
-        addressing: claimed.addressing ?? projectDeliveryAddressing({ mentions: [], orderKnown: false }),
-        replyTarget: { ...claimed.feedbackTarget },
-        ...(claimed.replyToMessageId === undefined ? {} : { replyToMessageId: claimed.replyToMessageId }),
-        ...(claimed.acceptedAt === undefined ? {} : { createdAt: claimed.acceptedAt }),
-      }, false, this.signal)
+      const locus = await this.resolveLocus(
+        correlation.endpoint,
+        messageFromDeliveryRecord(claimed, correlation.endpoint),
+        false,
+        this.signal,
+      )
       if (
         locus === undefined ||
         locus.childSessionId !== claimed.childSessionId ||
@@ -1083,19 +1143,7 @@ export class LocusChannelController {
         locus,
         child,
         record: claimed,
-        message: {
-          kind: 'message',
-          messageId: claimed.messageId,
-          endpoint: { ...correlation.endpoint },
-          chatType: 'group',
-          senderOpenId: claimed.senderOpenId,
-          ...(claimed.senderName === undefined ? {} : { senderName: claimed.senderName }),
-          text: claimed.text,
-          addressing: claimed.addressing ?? projectDeliveryAddressing({ mentions: [], orderKnown: false }),
-          replyTarget: { ...claimed.feedbackTarget },
-          ...(claimed.replyToMessageId === undefined ? {} : { replyToMessageId: claimed.replyToMessageId }),
-          ...(claimed.acceptedAt === undefined ? {} : { createdAt: claimed.acceptedAt }),
-        },
+        message: messageFromDeliveryRecord(claimed, correlation.endpoint),
         signal: this.signal,
       })
     })
@@ -1133,7 +1181,8 @@ export class LocusChannelController {
     const original = named.addressing ?? historicalUnknownAddressing()
     const normalized = named.addressing === undefined ? { ...named, addressing: original } : named
     const port = this.deps.addressing
-    if (port === undefined || named.chatType !== 'group') return normalized
+    // Chat bot membership only exists for IM groups.
+    if (port === undefined || named.source === 'doc-comment' || named.chatType !== 'group') return normalized
     try {
       const result = await port.listChatBots(named.endpoint.chatId)
       let bots: readonly { readonly openId: string }[] | undefined
@@ -1220,8 +1269,18 @@ export class LocusChannelController {
     const message = await this.enrichAddressing(admission.message)
     const endpoint = normalizeLocusEndpoint(message.endpoint).endpoint
     const signal = this.signal
+    // Decide BEFORE provisioning whether this is the document's first entry:
+    // afterwards the new entry itself would answer "yes, it has one".
+    const owesDisclosure = admission.needsInitialization && messageSource(message) === 'doc-comment'
+      ? await this.firstDocEntry(endpoint.chatId)
+      : false
     let locus = await this.resolveLocus(endpoint, message, admission.needsInitialization, signal)
     if (locus === undefined) return this.refuse('locus-unavailable')
+    if (owesDisclosure && this.deps.docDisclosureText !== undefined) {
+      // A Host control receipt, routed like the business answer; never business
+      // text and never blocking. Sent once the entry exists.
+      await this.sendControlReceipt(message.replyTarget, this.deps.docDisclosureText, message.senderOpenId)
+    }
 
     // Adoption proves the exact durable child, but not that its current policy
     // still matches the database. Resolve through the continuation owner at
@@ -1312,6 +1371,7 @@ export class LocusChannelController {
       ...(message.senderName !== undefined ? { senderName: message.senderName } : {}),
       text: message.text,
       ...(message.addressing === undefined ? {} : { addressing: message.addressing }),
+      ...(message.source === 'doc-comment' && message.docComment !== undefined ? { docComment: message.docComment } : {}),
       ...(message.replyTarget.rootMessageId !== undefined
         ? { rootMessageId: message.replyTarget.rootMessageId }
         : {}),
@@ -1392,7 +1452,7 @@ export class LocusChannelController {
             })
             if (failed) {
               await this.receiptSettled(accepted.record.feedbackTarget, 'failed')
-              await this.sendControlReceipt(message.replyTarget, '当前入口为所有者专用，只有 allowlist 成员可以驱动。')
+              await this.sendControlReceipt(message.replyTarget, '当前入口为所有者专用，只有 allowlist 成员可以驱动。', message.senderOpenId)
             }
             return { kind: 'ignored', reason: 'owner-only-tier' }
           }
@@ -1417,7 +1477,7 @@ export class LocusChannelController {
             })
             if (failed) {
               await this.receiptSettled(accepted.record.feedbackTarget, 'failed')
-              await this.sendControlReceipt(message.replyTarget, '当前入口为所有者专用，只有 allowlist 成员可以驱动。工具档位可由所有者切回 safe。')
+              await this.sendControlReceipt(message.replyTarget, '当前入口为所有者专用，只有 allowlist 成员可以驱动。工具档位可由所有者切回 safe。', message.senderOpenId)
             }
             return { kind: 'ignored', reason: 'owner-only-tier' }
           }
@@ -1693,6 +1753,10 @@ export class LocusChannelController {
     const base: ContentBlock[] = [{ type: 'text', text }]
     // Exact fence immediately before platform enumeration/download starts.
     if (!await isExactCurrent()) return undefined
+    // Media lives on IM messages only; a doc trigger id never reaches IM (D9).
+    if (messageSource(input.message) === 'doc-comment') {
+      return { typed: base, textFallback: base, hasImage: false }
+    }
     const media = this.deps.media
     if (media === undefined || !media.available) {
       // No selector or fallback is exposed. A Host without reliable media
@@ -1905,7 +1969,7 @@ export class LocusChannelController {
       command.kind === 'unbind-invalid'
     ) {
       const text = controlValidationText(command)
-      await this.sendControlReceipt(admission.message.replyTarget, text)
+      await this.sendControlReceipt(admission.message.replyTarget, text, admission.message.senderOpenId)
       return {
         kind: 'control',
         command,
@@ -1920,7 +1984,7 @@ export class LocusChannelController {
       // composed control mutations must not guess at legacy bindings or
       // create a Delivery merely because a command was recognized.
       const text = '当前入口暂不支持该控制命令。'
-      await this.sendControlReceipt(admission.message.replyTarget, text)
+      await this.sendControlReceipt(admission.message.replyTarget, text, admission.message.senderOpenId)
       return { kind: 'control', command, ok: false, reason: 'control-unavailable', text }
     }
     let result: LocusControlDispatchResult
@@ -1942,16 +2006,16 @@ export class LocusChannelController {
       })
     } catch {
       const text = '控制命令执行失败，请稍后重试。'
-      await this.sendControlReceipt(admission.message.replyTarget, text)
+      await this.sendControlReceipt(admission.message.replyTarget, text, admission.message.senderOpenId)
       return { kind: 'control', command, ok: false, reason: 'control-dispatch-failed', text }
     }
     if (!isControlDispatchResult(result)) {
       const text = '控制命令返回无效结果，未执行工作。'
-      await this.sendControlReceipt(admission.message.replyTarget, text)
+      await this.sendControlReceipt(admission.message.replyTarget, text, admission.message.senderOpenId)
       return { kind: 'control', command, ok: false, reason: 'control-dispatch-failed', text }
     }
     if ('text' in result && result.text !== undefined) {
-      await this.sendControlReceipt(admission.message.replyTarget, result.text)
+      await this.sendControlReceipt(admission.message.replyTarget, result.text, admission.message.senderOpenId)
     }
     return {
       kind: 'control',
@@ -1979,13 +2043,23 @@ export class LocusChannelController {
     if (message === undefined) return
     const allow = suppliedContext?.allowOpenIds ?? this.readAdmissionContext()?.allowOpenIds ?? this.deps.allowOpenIds?.() ?? []
     if (allow.includes(message.senderOpenId)) return
-    await this.sendControlReceipt(message.replyTarget, '当前入口为所有者专用，只有 allowlist 成员可以驱动。工具档位可由所有者切回 safe。')
+    await this.sendControlReceipt(message.replyTarget, '当前入口为所有者专用，只有 allowlist 成员可以驱动。工具档位可由所有者切回 safe。', message.senderOpenId)
   }
 
-  private async sendControlReceipt(target: LocusReplyTarget, text: string): Promise<void> {
+  private async firstDocEntry(chatId: string): Promise<boolean> {
+    if (this.deps.docHasEntries === undefined) return false
+    try {
+      return !(await this.deps.docHasEntries(chatId))
+    } catch {
+      // Unknown history: stay silent rather than risk a duplicate disclosure.
+      return false
+    }
+  }
+
+  private async sendControlReceipt(target: LocusReplyTarget, text: string, senderOpenId?: string): Promise<void> {
     if (!nonEmpty(text)) return
     try {
-      await this.deps.receipts?.sendControl?.(target, text)
+      await this.deps.receipts?.sendControl?.(target, text, senderOpenId)
     } catch {
       // Mechanical control feedback is fail-soft. The control mutation itself
       // remains the dispatch port's durable responsibility.

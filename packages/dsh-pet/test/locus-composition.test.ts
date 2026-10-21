@@ -391,3 +391,20 @@ describe('the caller-bound entrance read joins the reviewed allowlist', () => {
     )).toMatchObject({ ok: true, leaks: [] })
   })
 })
+
+describe('spec Scenario "文档子会话的工具面"', () => {
+  it('the doc read is reviewed in both tiers, and the per-kind choice is exclusive in the Host wiring', async () => {
+    expect(LOCUS_CALLER_BOUND_TOOLS).toContain('pet_locus_doc_context')
+    const docSurface = [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_CALLER_BOUND_TOOLS.filter(name => name !== 'pet_locus_chat_history')]
+    expect(attestLocusComposition(docSurface, 'safe')).toMatchObject({ ok: true, leaks: [] })
+    expect(attestLocusComposition([...docSurface, ...LOCUS_SHELL_TIER_TOOL_NAMES], 'shell')).toMatchObject({ ok: true, leaks: [] })
+
+    // The Host publishes exactly one read tool per child by entry kind.
+    const { readFile } = await import('node:fs/promises')
+    const path = await import('node:path')
+    const index = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
+    const branch = index.slice(index.indexOf('One read tool per child, by entry kind'), index.indexOf('One read tool per child, by entry kind') + 1600)
+    expect(branch).toMatch(/isDocEndpoint\([\s\S]*locusDocContext:[\s\S]*: \(larkClient\.readEntranceHistory === undefined[\s\S]*locusHistory:/)
+  })
+})
+

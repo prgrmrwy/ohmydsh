@@ -319,7 +319,20 @@ describe('unified locus hierarchy', () => {
     ])
   })
 
-  it('keeps concurrent first topics on one automatic group main', async () => {
+  it('spec Scenario "同群话题关联不同主会话": two topics of one chat bound to different mains stay independent', async () => {
+    const host = fakeHost()
+    const ctl = controller(host)
+    const a = await ctl.ensureTopic({ chatId: 'oc-project', threadId: 'omt-a', parentSessionId: 'source-1' })
+    const b = await ctl.ensureTopic({ chatId: 'oc-project', threadId: 'omt-b', parentSessionId: 'source-2' })
+
+    expect(a.locus.parentSessionId).toBe('source-1')
+    expect(b.locus.parentSessionId).toBe('source-2')
+    expect(a.locus.childSessionId).not.toBe(b.locus.childSessionId)
+    expect(a.locus.endpoint).toEqual({ chatId: 'oc-project', threadId: 'omt-a' })
+    expect(b.locus.endpoint).toEqual({ chatId: 'oc-project', threadId: 'omt-b' })
+  })
+
+  it('spec Scenario "重复初始化": keeps concurrent first topics on one automatic group main', async () => {
     const host = fakeHost()
     const locus = controller(host)
     const [left, right] = await Promise.all([

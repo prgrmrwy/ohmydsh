@@ -32,6 +32,12 @@ function hasProvenThreadIdentity(endpoint: TodoSnapshotItem['endpoint']): boolea
 export type FeishuJumpTarget =
   | { readonly kind: 'thread'; readonly chatId: string; readonly threadId: string; readonly messageId: string }
   | { readonly kind: 'chat-degraded'; readonly chatId: string; readonly messageId: string; readonly reason: string }
+  /**
+   * A document entry (pet-locus-doc-comments): the URL `drive +inspect`
+   * returned, never a constructed tenant link. A comment-level todo notes its
+   * comment id; there is no verified comment anchor link, so none is invented.
+   */
+  | { readonly kind: 'doc'; readonly url?: string; readonly commentId?: string; readonly reason?: string }
 
 /**
  * Decide the Feishu jump TARGET (not the URL itself) for one todo.
@@ -46,7 +52,19 @@ export type FeishuJumpTarget =
  * their own verified URL builder (see `resolveFeishuJumpUrl`) rather than
  * this module guessing a query-string shape.
  */
-export function resolveFeishuJumpTarget(item: TodoSnapshotItem): FeishuJumpTarget {
+export function resolveFeishuJumpTarget(
+  item: TodoSnapshotItem,
+  facts: { readonly docUrl?: (chatId: string) => string | undefined } = {},
+): FeishuJumpTarget {
+  if (item.endpoint.chatId.startsWith('doc:')) {
+    const url = facts.docUrl?.(item.endpoint.chatId)
+    const commentId = item.endpoint.threadId
+    return {
+      kind: 'doc',
+      ...(url === undefined ? { reason: '文档元数据暂不可读，无法提供链接' } : { url }),
+      ...(commentId === undefined ? {} : { commentId }),
+    }
+  }
   if (hasProvenThreadIdentity(item.endpoint)) {
     return {
       kind: 'thread',
@@ -79,6 +97,7 @@ export function resolveFeishuJumpUrl(
     readonly chatUrl: (chatId: string, messageId: string) => string
   },
 ): string {
+  if (target.kind === 'doc') return target.url ?? ''
   return target.kind === 'thread'
     ? builder.threadUrl(target.chatId, target.threadId, target.messageId)
     : builder.chatUrl(target.chatId, target.messageId)

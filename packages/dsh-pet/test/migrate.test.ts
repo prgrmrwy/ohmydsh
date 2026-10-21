@@ -396,6 +396,44 @@ describe('migration version fence protects retained history', () => {
   })
 })
 
+describe('v14/v15 inquiry migration preserves opaque ledger evidence', () => {
+  it.each([14, 15])('restamps v%s while preserving inquiry/result bytes', async version => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'pet-migrate-inquiry-'))
+    const file = path.join(dir, 'state.sqlite')
+    const db = new DatabaseSync(file)
+    db.exec('CREATE TABLE units (name TEXT PRIMARY KEY, version INTEGER)')
+    db.prepare('INSERT INTO units VALUES (?, ?)').run('dsh_pet', version)
+    for (const table of ['inquiries', 'inquiry_results', ...(version === 15 ? ['inquiry_added_ledger'] : [])]) {
+      db.exec(`CREATE TABLE u_dsh_pet_${table} (key TEXT PRIMARY KEY, value TEXT)`)
+    }
+    // Migration is a restamp, not a decoder: preserve even data that a later
+    // domain open may reject, rather than dropping evidence opportunistically.
+    const evidence = [
+      ['inquiries', 'valid-inquiry', '{"id":"opaque-valid","status":"queued"}'],
+      ['inquiries', 'malformed-inquiry', '{not-json-but-opaque'],
+      ['inquiry_results', 'valid-result', '{"id":"opaque-result","status":"pending"}'],
+      ['inquiry_results', 'malformed-result', '\\u0000unknown bytes'],
+    ] as const
+    for (const [table, key, value] of evidence) {
+      db.prepare(`INSERT INTO u_dsh_pet_${table} VALUES (?, ?)`).run(key, value)
+    }
+    if (version === 15) db.prepare('INSERT INTO u_dsh_pet_inquiry_added_ledger VALUES (?, ?)').run('keep', 'opaque')
+    db.close()
+
+    expect(removeLegacyState(file)).toEqual({ removedRows: 0, clearedTables: [] })
+    const after = new DatabaseSync(file, { readOnly: true })
+    try {
+      expect(after.prepare('SELECT version FROM units WHERE name = ?').get('dsh_pet'))
+        .toEqual({ version: PET_DOMAIN_VERSION })
+      for (const [table, key, value] of evidence) {
+        expect(after.prepare(`SELECT value FROM u_dsh_pet_${table} WHERE key = ?`).get(key)).toEqual({ value })
+      }
+      if (version === 15) expect(after.prepare('SELECT value FROM u_dsh_pet_inquiry_added_ledger WHERE key = ?').get('keep')).toEqual({ value: 'opaque' })
+    } finally { after.close() }
+    expect(removeLegacyState(file)).toEqual({ removedRows: 0, clearedTables: [] })
+  })
+})
+
 describe('cleanup never creates the database', () => {
   it('leaves an absent file absent', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'pet-migrate-'))
