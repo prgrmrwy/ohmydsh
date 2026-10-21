@@ -76,3 +76,9 @@
 - [x] 12.1 写失败测试：`client.test.ts › panel_shows_latest_decision`；`host.integration.test.ts › toast_off_or_failure_silent`、`toast_switch_malformed_is_off`（关闭时仍返回 decision、不含 decisionToast）；DOM 测试中提示开关关闭时不弹出。
 - [x] 12.2 实现：状态接口始终返回 decision、开关开启时附 `decisionToast: true`；client 仅在 decisionToast 时弹出；面板渲染最近决策两行。
 - [ ] 12.3 全套、根测试、隔离双 sync、严格校验保持绿；合入、推送、构建后用户 GUI 复验。
+
+## 13. 上一档位持久化（2026-10-21 bad case：重启后“继续”判为 simple）
+
+- [x] 13.1 写失败测试：`host.integration.test.ts › previous_tier_survives_restart`；`state.test.ts › previous_tier_persists_and_survives_mode_changes`（持久化、setMode/disable 保留、非法档位拒绝、旧文件可读）。
+- [x] 13.2 实现 design D12。
+- [ ] 13.3 全套、根测试、隔离双 sync、严格校验保持绿；合入、推送、构建。

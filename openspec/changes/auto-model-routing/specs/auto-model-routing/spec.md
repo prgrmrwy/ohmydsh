@@ -80,7 +80,7 @@
 - **THEN** 输出与官方合成配置深度相等，Jev 请求次数为 0
 
 ### Requirement: Jev 判断档位
-系统 SHALL 在 AUTO 的用户回合 step 1 中，以一次 Jev `choice` 请求得出本回合档位 `simple | standard | complex | escalated`：经 `POST https://openrouter.ai/api/alpha/decisions`，模型 `typesafe/jev-1.13`，凭据每次调用时经官方 launch environment 读取 `OPENROUTER_API_KEY`；`questions` 为主会话与 `route_subagent` 共用的常量 `TIER_QUESTIONS`（四级 criteria 见 design D4）；请求 `state` 包含上一用户回合档位（无则 `none`）与本回合分类输入；单次请求期限 3000ms，`redirect: 'error'`，MUST NOT 重试。Jev 返回后 SHALL 重新读取会话状态，等待期间模式已变时丢弃该结果（不写决定、不写 `disabled`）。成功时 SHALL 采用响应 `answers.tier.choice` 作为档位，`reason` 为 `jev`，不设置信度门槛。系统 MUST NOT 包含本地规则、关键词或通用对话模型的分类路径。请求 MUST NOT 携带会话状态、其它会话内容或凭据以外的鉴权信息；出站主机 SHALL 仅为 `openrouter.ai`。
+系统 SHALL 在 AUTO 的用户回合 step 1 中，以一次 Jev `choice` 请求得出本回合档位 `simple | standard | complex | escalated`：经 `POST https://openrouter.ai/api/alpha/decisions`，模型 `typesafe/jev-1.13`，凭据每次调用时经官方 launch environment 读取 `OPENROUTER_API_KEY`；`questions` 为主会话与 `route_subagent` 共用的常量 `TIER_QUESTIONS`（四级 criteria 见 design D4）；请求 `state` 包含上一用户回合档位（无则 `none`）与本回合分类输入；上一用户回合档位 SHALL 按会话持久化（只存档位名，不存任务文本），Host 重启后仍随下一次判档发送，并在 MANUAL、停用与重新切 AUTO 时保留；单次请求期限 3000ms，`redirect: 'error'`，MUST NOT 重试。Jev 返回后 SHALL 重新读取会话状态，等待期间模式已变时丢弃该结果（不写决定、不写 `disabled`）。成功时 SHALL 采用响应 `answers.tier.choice` 作为档位，`reason` 为 `jev`，不设置信度门槛。系统 MUST NOT 包含本地规则、关键词或通用对话模型的分类路径。请求 MUST NOT 携带会话状态、其它会话内容或凭据以外的鉴权信息；出站主机 SHALL 仅为 `openrouter.ai`。
 
 #### Scenario: 成功判断采用 Jev 档位
 - **GIVEN** 会话为 `AUTO`，Jev 对本回合返回 `choice: complex`，实际模型为 `claude-opus-5-5`
@@ -91,6 +91,11 @@
 - **GIVEN** 上一用户回合档位为 `standard`，本回合分类输入为“继续”
 - **WHEN** 路由器向 Jev 发起请求
 - **THEN** 请求地址为 `https://openrouter.ai/api/alpha/decisions`，body 的 `model` 为 `typesafe/jev-1.13`，`state` 含 `standard` 与“继续”，不含其它会话字段；`Authorization` 为 Bearer 凭据；超时 3000ms 且失败后无第二次请求
+
+#### Scenario: 重启后仍沿用上一档位
+- **GIVEN** 会话为 `AUTO`，上一用户回合 Jev 判为 `complex`，随后 Host 重启
+- **WHEN** 用户发送“继续”
+- **THEN** 发给 Jev 的 `state` 含 `Previous user-turn tier: complex`；状态文件含 `previous: complex` 且不含任务文本
 
 #### Scenario: 等待期间切换模式丢弃结果
 - **GIVEN** 会话为 `AUTO`，Jev 请求进行中

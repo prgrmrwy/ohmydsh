@@ -111,6 +111,12 @@
 - 用户追加：悬停面板也要看到最近一次决策的分布。状态接口改为始终返回 `decision`，开关只以 `decisionToast: true` 决定是否弹出提示。
 - 红：面板无“最近决策”；关闭开关时 host 不返回 decision；DOM 关闭开关仍弹出。绿：实现后全部通过。package **70/70**，typecheck/build 通过。
 
+### 上一档位持久化（2026-10-21 bad case）
+
+- 现象：Host 在两条消息间重启（17:57:36），“继续”发给 Jev 的上一档位为 `none`，被判为 simple。真实 Jev 复测确认：带上一档位 complex/standard 时“继续”均以 98% 沿用。
+- 红：`previous_tier_survives_restart`（重启后发送 none）、`previous_tier_persists_and_survives_mode_changes`（无持久化）。绿：会话状态增加 `previous`，Jev 成功判档写入，重启后读取。`failure_disables_without_rewrite_and_records` 的精确状态断言按新规范补入 `previous`（规范要求停用保留它，不是弱化）。
+- package **72/72**，typecheck/build 通过。
+
 ## Overall Decision
 
 DECISION: PASS_WITH_WARNINGS

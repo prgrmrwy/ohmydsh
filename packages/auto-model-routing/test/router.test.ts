@@ -87,7 +87,7 @@ it('failure_disables_without_rewrite_and_records', () => {
  expect(auto.reasoningEffort).toBe('xhigh')
  expect(router.begin(agent,2,message('下一个'))).toBeDefined()
  router.fail(agent,2,'insufficient-credits')
- expect(state.read(agent.id)).toEqual({mode:'MANUAL',disabled:{category:'insufficient-credits',at:expect.any(Number)}})
+ expect(state.read(agent.id)).toEqual({mode:'MANUAL',previous:'complex',disabled:{category:'insufficient-credits',at:expect.any(Number)}})
  expect(router.request(agent,2,auto,supported)).toEqual(auto)
  expect(router.status(agent).history.at(-1)).toEqual({reason:'jev-failed',category:'insufficient-credits'})
 })

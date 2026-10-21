@@ -52,14 +52,16 @@ export class Router {
     const state = this.state.read(agent.id)
     const active = state.mode === 'AUTO' && (input.userTurn || old?.active === true)
     const judge = active && input.userTurn
-    const tier = judge ? undefined : old?.previous
+    // Memory first; after a restart the persisted tier keeps "继续" anchored to the last judgement.
+    const previous = old?.previous ?? state.previous
+    const tier = judge ? undefined : previous
     this.runtimes.set(agent, {
       turn, active, pending: judge, reason: judge ? 'jev' : 'continued',
-      ...(old?.previous ? { previous: old.previous } : {}),
+      ...(previous ? { previous } : {}),
       ...(tier ? { tier } : {}),
       history: old?.history ?? [],
     })
-    return judge ? { text: input.text, ...(old?.previous ? { previous: old.previous } : {}) } : undefined
+    return judge ? { text: input.text, ...(previous ? { previous } : {}) } : undefined
   }
 
   /** Apply the judged tier. Discarded when the turn moved on or the mode changed while judging. */
@@ -67,6 +69,7 @@ export class Router {
     const runtime = this.settle(agent, turn)
     if (!runtime) return
     runtime.tier = tier
+    this.state.remember(agent.id, tier)
     if (measure) runtime.measure = measure
     runtime.previous = tier
   }

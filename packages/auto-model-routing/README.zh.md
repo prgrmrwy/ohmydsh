@@ -17,6 +17,8 @@
 
 `route_subagent` 工具对子会话使用同一个 Jev 判断，返回 provider/model/reasoning_effort。配套 skill 要求主 Agent 显式传入，工具失败时暂停委派并询问你。
 
+每个会话会记住上一次的档位（只存档位名），所以“继续”这类后续消息在 Host 重启后也会沿用该档位。
+
 **MANUAL 只是停止自动调整**，不复原：会话保持 AUTO 最后一次的 effort，直到你在模型选择器里另选；Jev 失败后同样如此。模式与最近一次 Jev 失败保存在 `$DSH_HOME/state/auto-model-routing/sessions/`。不自行换模型，不绕过网络门禁或官方模型白名单。不保证 provider 的缓存命中。
 
 ## 开发验证

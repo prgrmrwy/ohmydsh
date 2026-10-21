@@ -17,6 +17,8 @@ Put `OPENROUTER_API_KEY=sk-or-...` in the main checkout's `.env.local`; `bin/dsh
 
 The `route_subagent` tool uses the same Jev judgment for sub-agents and returns provider/model/reasoning_effort. The `subagent-model-routing` skill tells the agent to pass them explicitly, and to stop and ask you when the tool fails.
 
+The last tier is kept per chat (the tier name only), so a follow-up such as "continue" keeps that tier even after a Host restart.
+
 **MANUAL only stops automatic changes.** It does not restore an earlier effort: the chat keeps the last effort AUTO used until you pick another one in the model picker. The same holds after a Jev failure. Mode and the last Jev failure are stored under `$DSH_HOME/state/auto-model-routing/sessions/`. It never changes the model. Network restrictions and official model allowlists stay in charge. Provider cache hits are not guaranteed.
 
 ## Development

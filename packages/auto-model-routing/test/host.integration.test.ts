@@ -43,7 +43,7 @@ async function harness(reply: Reply, options: { reject?: () => boolean; selectFa
   resolveAgent: async (id: string) => agent?.id === id ? { agent } : { error: new Error('unknown') },
   selectModel: async (request: unknown) => { selections.push(request); if (options.selectFails) throw new Error('model unavailable'); return { selected: request } },
  } as never)
- forks.push(await ctx.plugin(plugin, { home, jevBase: jev.base, jevTimeoutMs: 300 }))
+ let routing = await ctx.plugin(plugin, { home, jevBase: jev.base, jevTimeoutMs: 300 })
  await expect.poll(() => routes.size).toBe(2)
  const selection: ModelSelectionRef = { current: { provider: 'test', model: 'claude-opus-5-5', reasoningEffort: ReasoningEffortId('medium') }, assembled: undefined }
  const handle = await ctx.agents.create({
@@ -56,9 +56,11 @@ async function harness(reply: Reply, options: { reject?: () => boolean; selectFa
  agent = handle.agent
  const invoke = async (op: string, body: unknown) => (await routes.get(`/api/auto-model-routing.${op}`)!.fetch(new Request('http://localhost/api', { method: 'POST', body: JSON.stringify(body) }))).json()
  const run = async (text: string) => { agent!.followup(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })); await agent!.whenIdle() }
- cleanup = async () => { await handle.dispose(); for (const f of forks.reverse()) await f.dispose(); await jev.close() }
+ cleanup = async () => { await handle.dispose(); await routing.dispose(); for (const f of forks.reverse()) await f.dispose(); await jev.close() }
+ // Simulate a Host restart for this plugin: all its memory is dropped, only the state directory remains.
+ const restart = async () => { await routing.dispose(); routing = await ctx.plugin(plugin, { home, jevBase: jev.base, jevTimeoutMs: 300 }); await expect.poll(() => routes.size).toBe(2) }
  const toast = (on: boolean) => { const dir = join(home, 'plugins/dsh-auto-model-routing'); mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, 'config.json'), JSON.stringify({ decisionToast: on })) }
- return { ctx, jev, calls, agent, selection, invoke, run, home, toast, selections, setMode: (mode: string) => invoke('setMode', { sessionId: agent!.id, mode }) }
+ return { ctx, jev, calls, agent, selection, invoke, run, home, toast, selections, restart, setMode: (mode: string) => invoke('setMode', { sessionId: agent!.id, mode }) }
 }
 
 it('host_routes_and_rpc_envelope', async () => {
@@ -251,4 +253,19 @@ it('selection_sync_failure_does_not_block_request', async () => {
  expect(h.selections).toHaveLength(1)
  expect(h.calls.at(-1)?.reasoningEffort).toBe('xhigh')
  expect((await h.invoke('state', { sessionId: h.agent.id })).mode).toBe('AUTO')
+})
+
+it('previous_tier_survives_restart', async () => {
+ const h = await harness(tier('complex'))
+ await h.setMode('AUTO')
+ await h.run('排查多个模块')
+ await h.restart()
+ h.jev.set(tier('complex'))
+ await h.run('继续')
+ const sent = h.jev.bodies.at(-1) as { state: string }
+ expect(sent.state).toContain('Previous user-turn tier: complex')
+ const dir = join(h.home, 'state/auto-model-routing/sessions')
+ const disk = readdirSync(dir).map(f => readFileSync(join(dir, f), 'utf8')).join('\n')
+ expect(disk).toContain('"previous":"complex"')
+ expect(disk).not.toContain('排查')
 })
