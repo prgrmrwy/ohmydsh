@@ -203,6 +203,7 @@ tests/                   仓库级测试
 - [cockpit-worktree-open-shim](packages/cockpit-worktree-open-shim/README.md) — 把驾驶舱的远程编辑器接入 Worktree Session 的打开动作。
 - [cockpit-memex-browse-shim](packages/cockpit-memex-browse-shim/README.md) — 把驾驶舱的端口转发接入记忆卡片浏览。
 - [dsh-collab](packages/dsh-collab/README.md) — 让已有的独立会话通过邀请共享协作台账，并在下一回合唤醒成员。
+- [auto-model-routing](packages/auto-model-routing/README.md) — AUTO 下每回合请 Jev 决策模型判档，只调整推理强度；Jev 任何失败即停用 AUTO 并提示原因。
 
 ### 自研 skill、preset 与 patch
 
@@ -212,6 +213,7 @@ tests/                   仓库级测试
 - [add-dsh-plugin](skills/add-dsh-plugin/SKILL.md) — 把远端插件加入 manifest、build，并在重启前询问。
 - [remove-dsh-plugin](skills/remove-dsh-plugin/SKILL.md) — 从 manifest 移除插件、build，并在重启前询问。
 - [dsh-sandbox-notes](skills/dsh-sandbox-notes/SKILL.md) — 关于 sandbox 权限与「not strictly wider」报错的避坑笔记。
+- [subagent-model-routing](skills/subagent-model-routing/SKILL.md) — 委派前调用 route_subagent 并显式传入模型与 effort；失败时暂停并询问用户。
 - [dsh-pet-executor](presets/dsh-pet-executor) — 不加载全局 skill provider 的 Pet 执行会话 preset。
 - [connection-webserver](patches/connection-webserver.yml) — 恢复 Connection RPC 通道注册的 composition patch。
 - [ponytail-skills](patches/ponytail-skills.yml) — 只为 ponytail 包挂载专属 skill provider 的 composition patch。

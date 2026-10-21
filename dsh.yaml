@@ -171,14 +171,14 @@ customizations:
     type: package
     source: local
     version: 0.1.0
-    enabled: false
+    enabled: true
     brief: 主会话按任务自动调整推理强度，保留用户模型选择
-    note: '自研,change auto-model-routing。Jev(OpenRouter decisions,typesafe/jev-1.13)判档,AUTO 每用户回合及每次子会话判档会外发≤8000字任务文本至 OpenRouter/TypeSafe,保留条款未确认;凭据 OPENROUTER_API_KEY 仅本机 .env.local。Jev 失败即停用为 MANUAL 并在芯片提示,无本地降级。不换 provider/model;会话默认 MANUAL。直接停用可能残留 AUTO effort。默认禁用,未经授权不部署。停用:先切 MANUAL并完成请求,再 enabled:false → dsh build。'
+    note: '自研,change auto-model-routing。Jev(OpenRouter decisions,typesafe/jev-1.13)判档,AUTO 每用户回合及每次子会话判档会外发≤8000字任务文本至 OpenRouter/TypeSafe,保留条款未确认;凭据 OPENROUTER_API_KEY 仅本机 .env.local。Jev 失败即停用为 MANUAL 并在芯片提示,无本地降级。不换 provider/model;会话默认 MANUAL。直接停用可能残留 AUTO effort。2026-10-21 用户授权启用部署,GUI 验收待完成。停用:先切 MANUAL并完成请求,再 enabled:false → dsh build。'
   - id: subagent-model-routing
     type: skill
-    enabled: false
+    enabled: true
     brief: 子会话委派前调用 route_subagent 并显式传参与标注
-    note: '自研,change auto-model-routing。委派前调用插件工具 route_subagent(Jev 判档),显式传 provider/model/reasoning_effort;工具失败暂停委派并询问用户;插件未启用时告知用户并按官方默认委派。不绕过官方白名单。默认禁用,与主会话 AUTO/MANUAL 状态独立。'
+    note: '自研,change auto-model-routing。委派前调用插件工具 route_subagent(Jev 判档),显式传 provider/model/reasoning_effort;工具失败暂停委派并询问用户;插件未启用时告知用户并按官方默认委派。不绕过官方白名单。与插件同批启用,与主会话 AUTO/MANUAL 状态独立。'
   # 自研(local):DSH Pet 常驻桌宠 Agent 入口(Host+Web 双半区)
   - id: dsh-pet
     type: package

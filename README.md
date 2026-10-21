@@ -203,6 +203,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [cockpit-worktree-open-shim](packages/cockpit-worktree-open-shim/README.md) — Connects the cockpit remote editor to Worktree Session's open action.
 - [cockpit-memex-browse-shim](packages/cockpit-memex-browse-shim/README.md) — Connects cockpit port forwarding to the memory card browser.
 - [dsh-collab](packages/dsh-collab/README.md) — Lets existing independent sessions share a collaboration ledger by invitation and wakes members on their next turn.
+- [auto-model-routing](packages/auto-model-routing/README.md) — In AUTO, asks the Jev decision model for each turn's tier and adjusts only reasoning effort; any Jev failure turns AUTO off and says why.
 
 ### Self-developed skills, preset and patch
 
@@ -212,6 +213,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [add-dsh-plugin](skills/add-dsh-plugin/SKILL.md) — Adds a remote plugin to the manifest, builds it and asks about a restart.
 - [remove-dsh-plugin](skills/remove-dsh-plugin/SKILL.md) — Removes a plugin from the manifest, builds and asks about a restart.
 - [dsh-sandbox-notes](skills/dsh-sandbox-notes/SKILL.md) — Notes on sandbox permissions and the "not strictly wider" error.
+- [subagent-model-routing](skills/subagent-model-routing/SKILL.md) — Calls route_subagent before delegating and passes its model and effort explicitly; pauses and asks on failure.
 - [dsh-pet-executor](presets/dsh-pet-executor) — Preset for Pet execution sessions without the global skill provider.
 - [connection-webserver](patches/connection-webserver.yml) — Composition patch that restores Connection RPC channel registration.
 - [websocket-heartbeat](patches/websocket-heartbeat.yml) — Config patch that relaxes the official gateway's WebSocket heartbeat to 5 seconds so large histories survive short network hiccups.
