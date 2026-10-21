@@ -7,6 +7,7 @@ export async function endpoint(operation: 'state' | 'setMode', body: unknown, re
   const agent = await resolveAgent(sessionId)
   if (!agent || agent.origin === 'subagent') return Response.json({ error: 'unknown ordinary session' }, { status: 404 })
   if (operation === 'setMode') router.setMode(agent, mode as 'AUTO' | 'MANUAL')
-  const decision = toastOn() ? router.judgement(sessionId) : undefined
-  return Response.json({ ...state.read(sessionId), ...router.status(agent), ...(decision ? { decision } : {}) })
+  // The latest decision is always returned (the hover panel shows it); the switch only asks for the pop-up hint.
+  const decision = router.judgement(sessionId)
+  return Response.json({ ...state.read(sessionId), ...router.status(agent), ...(decision ? { decision } : {}), ...(toastOn() ? { decisionToast: true } : {}) })
 }

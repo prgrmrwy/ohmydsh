@@ -7,7 +7,7 @@ Automatically adjust the main chat's reasoning effort without changing its provi
 
 ## Use
 
-Put `OPENROUTER_API_KEY=sk-or-...` in the main checkout's `.env.local`; `bin/dsh` loads it at launch. The AUTO/MANUAL control sits before the GPT speed control and looks like the model picker. Click it to switch; hover it to see the effort the plugin set this turn and why. Each AUTO decision is also written to the official model selection, so the model picker shows the effort actually used. Note that the official selection is also saved as the default for new chats, so a new chat starts from the last AUTO effort; to set an effort by hand, switch to MANUAL first.
+Put `OPENROUTER_API_KEY=sk-or-...` in the main checkout's `.env.local`; `bin/dsh` loads it at launch. The AUTO/MANUAL control sits before the GPT speed control and looks like the model picker. Click it to switch; hover it to see the effort the plugin set this turn and why, plus the latest Jev decision and its distribution. Each AUTO decision is also written to the official model selection, so the model picker shows the effort actually used. Note that the official selection is also saved as the default for new chats, so a new chat starts from the last AUTO effort; to set an effort by hand, switch to MANUAL first.
 
 **Data sent out.** In AUTO, every user turn sends up to 8000 characters of your message to OpenRouter and TypeSafe (model `typesafe/jev-1.13`). Each `route_subagent` call sends its task text the same way, whatever the main chat mode. OpenRouter's retention and logging terms for this model are not confirmed; set them in your OpenRouter account.
 

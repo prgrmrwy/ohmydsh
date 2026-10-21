@@ -70,3 +70,9 @@
 - [x] 11.1 写失败测试：`host.integration.test.ts › auto_syncs_official_selection`（调用一次、相同不重复、失败不影响请求）；`selection.integration.test.ts › auto_overrides_pending_pick`（替换 `pending_pick_applies_after_manual`）；`client.test.ts › toast_once_and_expires`（无置信、省略 0%）。确认按新断言失败。
 - [x] 11.2 实现 design D11：`agent/request` 在 effort 与官方合成不同时调用 `sessionController.selectModel`（不等待，按会话去重，失败记日志）；面板文案改为同步说明；提示格式更新。
 - [ ] 11.3 全套、根测试、隔离双 sync、严格校验保持绿；README 写明同步与全局默认的影响；合入、推送、构建后用户 GUI 复验。
+
+## 12. 悬停面板显示最近一次决策分布（2026-10-21 用户追加）
+
+- [x] 12.1 写失败测试：`client.test.ts › panel_shows_latest_decision`；`host.integration.test.ts › toast_off_or_failure_silent`、`toast_switch_malformed_is_off`（关闭时仍返回 decision、不含 decisionToast）；DOM 测试中提示开关关闭时不弹出。
+- [x] 12.2 实现：状态接口始终返回 decision、开关开启时附 `decisionToast: true`；client 仅在 decisionToast 时弹出；面板渲染最近决策两行。
+- [ ] 12.3 全套、根测试、隔离双 sync、严格校验保持绿；合入、推送、构建后用户 GUI 复验。

@@ -187,7 +187,7 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - **THEN** 文本包含 `route_subagent`、`reasoning_effort`、`[model·effort]`、独立体系规则、非 claude/codex provider 时询问、“暂停委派并询问用户”、复用“新建”规则及“子会话 Jev 选模未启用”，且不含档位表模型名
 
 ### Requirement: 状态可见且不改写其它控件
-系统 SHALL 在 composer 的 `conversation.input.right` 列表以负的 `order` 注册 `AUTO / MANUAL` 芯片（GPT 速度芯片为 `order: 0`）。芯片 SHALL 是单个按钮：可见文本为模式名，其后跟一个切换图标；无边框、无底色，hover 时显示官方交互底色；点击即切换模式。状态面板 SHALL 在鼠标悬停或键盘聚焦芯片时显示、离开芯片与面板时收起，内容为插件本回合实际输出的 effort 与 `reason`；面板 MUST NOT 渲染决定历史（Host 仍在内存保留最近 20 条并经状态接口返回，供排查，重启后清空、不落盘）；面板 MUST NOT 声称官方选择器总能反映 AUTO 结果（存在待生效手选时二者不同）。`reason` 取值为闭集 `jev | continued | no-effort-support | jev-failed`（`continued` 为非用户回合沿用上一级别）。会话存在 `disabled` 时，芯片**可见文本** SHALL 为 `MANUAL · Jev 停用` 并以警示色显示，title SHALL 给出该失败类别的人类可读提示；面板 SHALL 显示类别、提示、发生时间及“点击 AUTO 重试”。芯片 MUST NOT 调用官方模型选择接口或速度芯片的设置接口。
+系统 SHALL 在 composer 的 `conversation.input.right` 列表以负的 `order` 注册 `AUTO / MANUAL` 芯片（GPT 速度芯片为 `order: 0`）。芯片 SHALL 是单个按钮：可见文本为模式名，其后跟一个切换图标；无边框、无底色，hover 时显示官方交互底色；点击即切换模式。状态面板 SHALL 在鼠标悬停或键盘聚焦芯片时显示、离开芯片与面板时收起，内容为插件本回合实际输出的 effort 与 `reason`，以及该会话最近一次 Jev 决策（与决策提示同一格式的两行：谁判断、档位 → （模型）effort、耗时；非 0% 档位分布），无决策时不显示该段；面板 MUST NOT 渲染决定历史（Host 仍在内存保留最近 20 条并经状态接口返回，供排查，重启后清空、不落盘）；面板 MUST NOT 声称官方选择器总能反映 AUTO 结果（存在待生效手选时二者不同）。`reason` 取值为闭集 `jev | continued | no-effort-support | jev-failed`（`continued` 为非用户回合沿用上一级别）。会话存在 `disabled` 时，芯片**可见文本** SHALL 为 `MANUAL · Jev 停用` 并以警示色显示，title SHALL 给出该失败类别的人类可读提示；面板 SHALL 显示类别、提示、发生时间及“点击 AUTO 重试”。芯片 MUST NOT 调用官方模型选择接口或速度芯片的设置接口。
 
 #### Scenario: 芯片注册在速度芯片左侧
 - **GIVEN** client bundle 已加载
@@ -203,6 +203,11 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - **GIVEN** 会话 `disabled = {category: insufficient-credits}`，模式为 `MANUAL`
 - **WHEN** 渲染芯片与面板
 - **THEN** 芯片可见文本含“Jev 停用”且带警示标记，title 含“余额不足”；面板含 `insufficient-credits`、“余额不足”与“点击 AUTO 重试”；无 `disabled` 时芯片可见文本不含“Jev 停用”且不带警示标记
+
+#### Scenario: 悬停面板显示最近一次决策分布
+- **GIVEN** 会话最近一次决策为 `{source: main, tier: complex, effort: xhigh, probabilities: {complex: 0.61, escalated: 0.39}}`，提示开关关闭
+- **WHEN** 悬停芯片打开面板
+- **THEN** 面板含 `主会话判断 · complex → xhigh` 与 `complex 61% / escalated 39%`；无决策时面板不含“最近决策”段
 
 #### Scenario: 芯片样式与悬停面板
 - **GIVEN** client bundle 已加载，会话为 `MANUAL`
@@ -222,7 +227,7 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - `source = subagent`：`route_subagent` 成功返回；`model` 与 `effort` 为工具返回值；记录到调用工具的会话，与该会话模式无关。
 `confidence` 取 Jev 响应 `answers.tier.confidence`（0–1，缺失或非数字时不显示）；`probabilities` 取 `answers.tier.probabilities` 中四个档位的有限数值（其余键忽略，一个都没有时不显示）；`ms` 为该次 Jev 请求耗时。判档失败、取消或被丢弃时 MUST NOT 记录。
 
-开关开启时，状态接口 SHALL 返回 `decision`；client SHALL 在发现新的决策 `id` 时于芯片上方显示提示，3 秒后自动消失，不拦截指针；提示 MUST 在 Agent 运行、官方隐藏右侧控件期间仍可见（渲染在隐藏区域之外）。提示两行：第一行 `主会话判断 · <tier> → <effort> · <s>s` 或 `子会话判断 · <tier> → <model> · <effort> · <s>s`；第二行为分布，按 simple、standard、complex、escalated 固定顺序列出四舍五入后非 0% 的档位，以 ` / ` 分隔，例如 `complex 61% / escalated 39%`；无分布时省略第二行。提示不显示置信（它由最高概率推导，不含额外信息，且易与分布混淆）。两次状态读取之间若有多次决策，只显示最新一次。开关关闭时状态接口 MUST NOT 返回 `decision`，client 不显示提示。
+状态接口 SHALL 始终返回 `decision`（如有），供面板展示；开关只控制弹出提示。开关开启时状态接口同时返回 `decisionToast: true`；client SHALL 仅在 `decisionToast` 为 true 且发现新的决策 `id` 时于芯片上方显示提示，3 秒后自动消失，不拦截指针；提示 MUST 在 Agent 运行、官方隐藏右侧控件期间仍可见（渲染在隐藏区域之外）。提示两行：第一行 `主会话判断 · <tier> → <effort> · <s>s` 或 `子会话判断 · <tier> → <model> · <effort> · <s>s`；第二行为分布，按 simple、standard、complex、escalated 固定顺序列出四舍五入后非 0% 的档位，以 ` / ` 分隔，例如 `complex 61% / escalated 39%`；无分布时省略第二行。提示不显示置信（它由最高概率推导，不含额外信息，且易与分布混淆）。两次状态读取之间若有多次决策，只显示最新一次。开关关闭时 client MUST NOT 弹出提示。
 
 #### Scenario: 主会话判档提示
 - **GIVEN** 开关开启，会话为 `AUTO`，Jev 返回 `complex`、confidence 0.92，实际模型为 Opus
@@ -237,7 +242,7 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 #### Scenario: 开关关闭或判档失败不提示
 - **GIVEN** 开关关闭，或开关开启但 Jev 返回 402
 - **WHEN** 读取状态
-- **THEN** 关闭时状态不含 `decision`；失败时不产生新的 `decision`
+- **THEN** 关闭时状态不含 `decisionToast`、client 不弹出提示（面板仍可显示最近决策）；失败时不产生新的 `decision`
 
 #### Scenario: 提示只显示一次且 3 秒消失
 - **GIVEN** client 已显示 id 为 7 的决策提示

@@ -207,18 +207,22 @@ it('toast_switch_malformed_is_off', async () => {
  const dir = join(h.home, 'plugins/dsh-auto-model-routing'); mkdirSync(dir, { recursive: true })
  for (const body of ['{not json', JSON.stringify({ decisionToast: 'yes' }), JSON.stringify(null)]) {
   writeFileSync(join(dir, 'config.json'), body)
-  expect(await h.invoke('state', { sessionId: h.agent.id })).not.toHaveProperty('decision')
+  expect(await h.invoke('state', { sessionId: h.agent.id })).not.toHaveProperty('decisionToast')
  }
  h.toast(true)
- expect((await h.invoke('state', { sessionId: h.agent.id })).decision).toMatchObject({ source: 'main', confidence: 0.9 })
+ expect(await h.invoke('state', { sessionId: h.agent.id })).toMatchObject({ decisionToast: true, decision: { source: 'main', confidence: 0.9 } })
 })
 
 it('toast_off_or_failure_silent', async () => {
  const h = await harness(tier('complex', 0.9))
  await h.setMode('AUTO')
  await h.run('排查多个模块')
- expect(await h.invoke('state', { sessionId: h.agent.id })).not.toHaveProperty('decision')
+ // Switch off: the latest decision is still returned (for the hover panel) but no hint is requested.
+ const off = await h.invoke('state', { sessionId: h.agent.id })
+ expect(off.decision).toMatchObject({ source: 'main', tier: 'complex' })
+ expect(off).not.toHaveProperty('decisionToast')
  h.toast(true)
+ expect((await h.invoke('state', { sessionId: h.agent.id })).decisionToast).toBe(true)
  const before = (await h.invoke('state', { sessionId: h.agent.id })).decision.id
  h.jev.set(json(402, {}))
  await h.run('下一个任务')

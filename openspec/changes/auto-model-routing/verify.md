@@ -106,6 +106,11 @@
 - 依据：官方 `[model changed]` 通知只比较 provider/model（dsh-agent `sameRoute`），只改 effort 不触发；laya 未处理该问题。
 - package **68/68**，typecheck/build 通过。
 
+### 悬停面板显示最近一次决策分布（2026-10-21）
+
+- 用户追加：悬停面板也要看到最近一次决策的分布。状态接口改为始终返回 `decision`，开关只以 `decisionToast: true` 决定是否弹出提示。
+- 红：面板无“最近决策”；关闭开关时 host 不返回 decision；DOM 关闭开关仍弹出。绿：实现后全部通过。package **70/70**，typecheck/build 通过。
+
 ## Overall Decision
 
 DECISION: PASS_WITH_WARNINGS

@@ -7,7 +7,7 @@
 
 ## 使用
 
-在主 checkout 的 `.env.local` 写入 `OPENROUTER_API_KEY=sk-or-...`，`bin/dsh` 启动时加载。芯片位于 GPT 速度芯片左侧，外观与模型选择器一致：点击切换模式，悬停查看插件本回合设定的 effort 与原因。AUTO 的每次决定都会写入官方模型选择，右侧选择器显示的就是实际使用的 effort。注意官方会同时把它保存为新会话的默认值，所以新会话会从最近一次 AUTO 的 effort 开始；想手动指定 effort，请先切到 MANUAL。
+在主 checkout 的 `.env.local` 写入 `OPENROUTER_API_KEY=sk-or-...`，`bin/dsh` 启动时加载。芯片位于 GPT 速度芯片左侧，外观与模型选择器一致：点击切换模式，悬停查看插件本回合设定的 effort 与原因，以及最近一次 Jev 决策及其分布。AUTO 的每次决定都会写入官方模型选择，右侧选择器显示的就是实际使用的 effort。注意官方会同时把它保存为新会话的默认值，所以新会话会从最近一次 AUTO 的 effort 开始；想手动指定 effort，请先切到 MANUAL。
 
 **外发数据**：AUTO 下每个用户回合会把你的消息（最多 8000 字符）发送给 OpenRouter 与 TypeSafe（模型 `typesafe/jev-1.13`）。每次调用 `route_subagent` 也会同样外发任务文本，与主会话模式无关。OpenRouter 对该模型的数据保留与日志条款未确认，请在 OpenRouter 后台自行设置。
 

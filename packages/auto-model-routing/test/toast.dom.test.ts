@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { RoutingChip } from '../src/client/index.js'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+const on = { decisionToast: true }
 const decision = (id: number) => ({ id, source: 'main', tier: 'complex', effort: 'xhigh', confidence: 0.9, probabilities: { complex: 0.9, standard: 0.1 }, ms: 500 })
 let root: Root, host: HTMLElement
 beforeEach(() => { vi.useFakeTimers(); host = document.createElement('div'); document.body.append(host); root = createRoot(host) })
@@ -23,7 +24,7 @@ const poll = async () => { await act(async () => { await vi.advanceTimersByTimeA
 const mount = async (sessionId: string, rpc: unknown) => { await act(async () => { root.render(createElement(RoutingChip, { sessionId, rpc: rpc as never })) }) }
 
 it('first poll only primes; a new id shows once and expires after 3 seconds', async () => {
- const rpc = rpcFor({ S: [{ mode: 'AUTO', decision: decision(3) }, { mode: 'AUTO', decision: decision(3) }, { mode: 'AUTO', decision: decision(4) }] })
+ const rpc = rpcFor({ S: [{ ...on, mode: 'AUTO', decision: decision(3) }, { ...on, mode: 'AUTO', decision: decision(3) }, { ...on, mode: 'AUTO', decision: decision(4) }] })
  await mount('S', rpc)
  expect(toast()).toBeNull()            // id 3 existed before mounting
  await poll(); expect(toast()).toBeNull() // same id again
@@ -38,7 +39,7 @@ it('first poll only primes; a new id shows once and expires after 3 seconds', as
 })
 
 it('switching session does not show the other session\'s old decision', async () => {
- const rpc = rpcFor({ A: [{ mode: 'AUTO', decision: decision(7) }], B: [{ mode: 'AUTO', decision: decision(3) }] })
+ const rpc = rpcFor({ A: [{ ...on, mode: 'AUTO', decision: decision(7) }], B: [{ ...on, mode: 'AUTO', decision: decision(3) }] })
  await mount('A', rpc)
  await mount('B', rpc)
  expect(toast()).toBeNull()
@@ -46,7 +47,7 @@ it('switching session does not show the other session\'s old decision', async ()
 })
 
 it('toast still disappears when the decision vanishes before it expires', async () => {
- const queue = [{ mode: 'AUTO' }, { mode: 'AUTO', decision: decision(5) }]
+ const queue = [{ mode: 'AUTO' }, { ...on, mode: 'AUTO', decision: decision(5) }]
  const rpc = { call: async (_c: string, endpoint: string) => ({ ok: true, value: endpoint.endsWith('setMode') ? { mode: 'MANUAL' } : (queue.length > 1 ? queue.shift() : queue[0]) }) }
  await mount('S', rpc)
  await poll(); expect(toast()).toContain('主会话判断')
@@ -61,7 +62,7 @@ it('toast is visible while the composer hides the chip', async () => {
  // which is exactly when Jev decides; the hint must not live inside that hidden subtree.
  const hidden = document.createElement('div'); hidden.hidden = true; host.append(hidden)
  act(() => root.unmount()); root = createRoot(hidden)
- const rpc = rpcFor({ S: [{ mode: 'AUTO' }, { mode: 'AUTO', decision: decision(9) }] })
+ const rpc = rpcFor({ S: [{ mode: 'AUTO' }, { ...on, mode: 'AUTO', decision: decision(9) }] })
  await act(async () => { root.render(createElement(RoutingChip, { sessionId: 'S', rpc: rpc as never })) })
  await poll()
  const el = document.body.querySelector('.amr-toast')
@@ -70,7 +71,7 @@ it('toast is visible while the composer hides the chip', async () => {
 })
 
 it('toast is horizontally centred on the chip', async () => {
- const rpc = rpcFor({ S: [{ mode: 'AUTO' }, { mode: 'AUTO', decision: decision(11) }] })
+ const rpc = rpcFor({ S: [{ mode: 'AUTO' }, { ...on, mode: 'AUTO', decision: decision(11) }] })
  const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ left: 200, top: 500, width: 80, height: 28, right: 280, bottom: 528, x: 200, y: 500, toJSON() {} } as DOMRect)
  try {
   await mount('S', rpc)
@@ -81,4 +82,11 @@ it('toast is horizontally centred on the chip', async () => {
   expect(el.style.top).toBe('494px')
   expect(el.className).toContain('amr-toast')
  } finally { spy.mockRestore() }
+})
+
+it('no hint when the switch is off, even for a new decision', async () => {
+ const rpc = rpcFor({ S: [{ mode: 'AUTO' }, { mode: 'AUTO', decision: decision(12) }] })
+ await mount('S', rpc)
+ await poll()
+ expect(toast()).toBeNull()
 })

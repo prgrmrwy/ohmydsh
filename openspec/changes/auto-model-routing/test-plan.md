@@ -40,6 +40,7 @@
 | specs/auto-model-routing/spec.md → 状态可见且不改写其它控件 | 芯片注册在速度芯片左侧 | test/client.test.ts | chip_negative_order | 🟢 green |
 | specs/auto-model-routing/spec.md → 状态可见且不改写其它控件 | 面板展示本回合状态，历史只留在 Host | test/client.test.ts | panel_state_and_history_bound | 🟢 green |
 | specs/auto-model-routing/spec.md → 状态可见且不改写其它控件 | 停用状态在芯片与面板可见 | test/client.test.ts | disabled_visible_in_chip_and_panel | 🟢 green |
+| specs/auto-model-routing/spec.md → 状态可见且不改写其它控件 | 悬停面板显示最近一次决策分布 | test/client.test.ts | panel_shows_latest_decision | 🟢 green |
 | specs/auto-model-routing/spec.md → 状态可见且不改写其它控件 | 芯片样式与悬停面板 | test/client.test.ts | chip_style_and_hover_panel | 🟢 green |
 | specs/auto-model-routing/spec.md → 状态可见且不改写其它控件 | 切换模式只调用插件接口 | test/client.test.ts | toggle_plugin_endpoint_only | 🟢 green |
 | specs/auto-model-routing/spec.md → 决策提示（可选） | 主会话判档提示 | test/host.integration.test.ts | main_decision_toast | 🟢 green |

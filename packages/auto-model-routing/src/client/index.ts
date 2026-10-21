@@ -4,7 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { callRouting, chipOrder, nextToast, panelOpenAfter, TOAST_MS, type Decision, type PanelEvent, type Rpc, type Toast } from './control.js'
+import { callRouting, chipOrder, nextToast, panelOpenAfter, TOAST_MS, toastText, type Decision, type PanelEvent, type Rpc, type Toast } from './control.js'
 import { CATEGORY_HINTS, type JevCategory } from '../jev.js'
 
 interface View {
@@ -13,6 +13,7 @@ interface View {
   reason?: string
   disabled?: { category: JevCategory; at: number }
   decision?: Decision
+  decisionToast?: boolean
 }
 interface Props { sessionId: string; rpc: Rpc }
 export const name = 'dsh-auto-model-routing/client'
@@ -30,6 +31,7 @@ const CSS = `
 .amr-panel{position:absolute;z-index:1100;bottom:100%;left:0;padding-bottom:6px}
 .amr-card{width:280px;padding:10px 12px;border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg,#fff);color:var(--dsw-alias-label-primary);box-shadow:var(--dsw-elevation-prominent);font-size:12px;line-height:18px}
 .amr-card p{margin:4px 0}
+.amr-latest{margin:6px 0;padding:6px 0;border-top:1px solid var(--dsw-alias-border-l1);border-bottom:1px solid var(--dsw-alias-border-l1)}
 .amr-muted{color:var(--dsw-alias-label-tertiary)}
 .amr-error{color:var(--dsw-alias-state-error-primary)}
 .amr-toast{position:fixed;z-index:1100;transform:translate(-50%,-100%);padding:4px 8px;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg,#fff);color:var(--dsw-alias-label-secondary);box-shadow:var(--dsw-elevation-prominent);font-size:12px;line-height:18px;white-space:nowrap}
@@ -69,6 +71,8 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
     const next = nextToast(seen.current, decision)
     if (!next) return
     seen.current = next.id
+    // The switch only gates the pop-up; the id is still marked seen so turning it on later shows only new decisions.
+    if (!view.decisionToast) return
     remember()
     setToast(next)
   }, [view, sessionId])
@@ -121,6 +125,9 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
       h('div', { className: 'amr-card' },
         h('p', null, h('strong', null, view?.mode === 'AUTO' ? '自动调整推理强度' : '手动：不自动调整')),
         h('p', null, `本回合插件输出：${view?.effort ?? '未改写'} · ${view?.reason ?? '尚无决定'}`),
+        view?.decision && h('div', { className: 'amr-latest' },
+          h('p', null, h('strong', null, '最近决策')),
+          ...toastText(view.decision).map((line, index) => h('p', { key: index, className: index ? 'amr-muted' : undefined }, line))),
         h('p', { className: 'amr-muted' }, 'AUTO 的决定会同步到右侧模型选择；要手动指定 effort，请先切到 MANUAL。'),
         off && h('p', { role: 'status', className: 'amr-error' }, `Jev 停用（${off.category}）：${hint}。${new Date(off.at).toLocaleString()}。点击 AUTO 重试。`),
         h('p', { className: 'amr-muted' }, 'AUTO 会把任务文本发送给 OpenRouter/TypeSafe 判档。'),
