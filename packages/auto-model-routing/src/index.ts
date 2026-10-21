@@ -28,9 +28,9 @@ export function apply(ctx: Context, config: Config = {}): void {
   const state = new RoutingState(new FileStateStore(resolve(home, 'state/auto-model-routing/sessions')))
   const router = new Router(state)
   const configFile = resolve(home, 'plugins/dsh-auto-model-routing/config.json')
-  // Read on every status request so the switch applies without a restart; any problem means off.
+  // Read on every status request so the switch applies without a restart; on unless explicitly `false`.
   const toastOn = (): boolean => {
-    try { return (JSON.parse(readFileSync(configFile, 'utf8')) as { decisionToast?: unknown })?.decisionToast === true } catch { return false }
+    try { return (JSON.parse(readFileSync(configFile, 'utf8')) as { decisionToast?: unknown })?.decisionToast !== false } catch { return true }
   }
   ctx.effect(() => ctx.tools.register(routeSubagentTool(jev, (sessionId, value) => router.judged(sessionId, value))))
   // Agent is the WeakMap identity; origin stays on the immutable session header.

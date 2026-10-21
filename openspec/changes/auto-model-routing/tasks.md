@@ -82,3 +82,9 @@
 - [x] 13.1 写失败测试：`host.integration.test.ts › previous_tier_survives_restart`；`state.test.ts › previous_tier_persists_and_survives_mode_changes`（持久化、setMode/disable 保留、非法档位拒绝、旧文件可读）。
 - [x] 13.2 实现 design D12。
 - [ ] 13.3 全套、根测试、隔离双 sync、严格校验保持绿；合入、推送、构建。
+
+## 14. 决策提示默认开启（2026-10-21 用户要求）
+
+- [x] 14.1 改测试：`host.integration.test.ts › toast_switch_default_on_only_false_is_off`（缺失/不可解析/非 false 均开启，仅 `false` 关闭）；`toast_off_or_failure_silent` 显式写 `false`。
+- [x] 14.2 实现：开关语义改为仅 `decisionToast: false` 关闭；spec、design、README 同步。
+- [ ] 14.3 全套、根测试、双 sync 保持绿；推送、构建后用户 GUI 复验。

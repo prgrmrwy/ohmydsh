@@ -202,17 +202,19 @@ it('subagent_decision_toast', async () => {
  expect(state.decision).toEqual({ id: expect.any(Number), source: 'subagent', tier: 'complex', model: 'claude-opus-5-5', effort: 'xhigh', confidence: 0.8, ms: expect.any(Number) })
 })
 
-it('toast_switch_malformed_is_off', async () => {
+it('toast_switch_default_on_only_false_is_off', async () => {
  const h = await harness(tier('complex', 0.9))
  await h.setMode('AUTO')
  await h.run('排查多个模块')
- const dir = join(h.home, 'plugins/dsh-auto-model-routing'); mkdirSync(dir, { recursive: true })
- for (const body of ['{not json', JSON.stringify({ decisionToast: 'yes' }), JSON.stringify(null)]) {
-  writeFileSync(join(dir, 'config.json'), body)
-  expect(await h.invoke('state', { sessionId: h.agent.id })).not.toHaveProperty('decisionToast')
- }
- h.toast(true)
+ // Missing file: on by default.
  expect(await h.invoke('state', { sessionId: h.agent.id })).toMatchObject({ decisionToast: true, decision: { source: 'main', confidence: 0.9 } })
+ const dir = join(h.home, 'plugins/dsh-auto-model-routing'); mkdirSync(dir, { recursive: true })
+ for (const body of ['{not json', JSON.stringify({ decisionToast: 'no' }), JSON.stringify(null), '{}']) {
+  writeFileSync(join(dir, 'config.json'), body)
+  expect((await h.invoke('state', { sessionId: h.agent.id })).decisionToast).toBe(true)
+ }
+ h.toast(false)
+ expect(await h.invoke('state', { sessionId: h.agent.id })).not.toHaveProperty('decisionToast')
 })
 
 it('toast_off_or_failure_silent', async () => {
@@ -220,6 +222,7 @@ it('toast_off_or_failure_silent', async () => {
  await h.setMode('AUTO')
  await h.run('排查多个模块')
  // Switch off: the latest decision is still returned (for the hover panel) but no hint is requested.
+ h.toast(false)
  const off = await h.invoke('state', { sessionId: h.agent.id })
  expect(off.decision).toMatchObject({ source: 'main', tier: 'complex' })
  expect(off).not.toHaveProperty('decisionToast')

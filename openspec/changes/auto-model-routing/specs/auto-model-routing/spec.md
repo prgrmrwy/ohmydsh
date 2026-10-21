@@ -224,8 +224,8 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - **WHEN** 记录本次交互发出的 RPC
 - **THEN** 只调用本插件的设置模式接口，未调用官方模型选择或 `subscriptions-auth.setSpeed`
 
-### Requirement: 决策提示（可选）
-系统 SHALL 提供默认关闭的开关：`$DSH_HOME/plugins/dsh-auto-model-routing/config.json` 中 `decisionToast: true` 时开启；文件缺失、不可解析或值非 `true` 时视为关闭，不得影响路由。开关每次读取状态时生效，无需重启。
+### Requirement: 决策提示（默认开启）
+系统 SHALL 提供默认开启的开关：`$DSH_HOME/plugins/dsh-auto-model-routing/config.json` 中 `decisionToast: false` 时关闭；文件缺失、不可解析或值非 `false` 时视为开启，不得影响路由。开关每次读取状态时生效，无需重启。
 
 每次 Jev **成功**判档，系统 SHALL 为发起判档的主会话记录最近一次决策 `{id, source, tier, effort, model?, confidence?, probabilities?, ms}`（仅内存，不落盘）：
 - `source = main`：主会话 AUTO 用户回合判档；`effort` 为按实际模型映射后的值（无 effort 支持时不记录），无 `model`。
@@ -245,7 +245,7 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - **THEN** 状态含 `decision = {source: subagent, tier: complex, model: claude-opus-5-5, effort: xhigh, confidence: 0.8, probabilities}`；提示第一行以 `子会话判断 · complex → claude-opus-5-5 · xhigh` 开头，不含“置信”
 
 #### Scenario: 开关关闭或判档失败不提示
-- **GIVEN** 开关关闭，或开关开启但 Jev 返回 402
+- **GIVEN** 开关显式关闭（`decisionToast: false`），或开关开启但 Jev 返回 402
 - **WHEN** 读取状态
 - **THEN** 关闭时状态不含 `decisionToast`、client 不弹出提示（面板仍可显示最近决策）；失败时不产生新的 `decision`
 
