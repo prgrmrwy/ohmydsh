@@ -4,7 +4,7 @@
 
 **修订（2026-10-20）**：首版实现使用本地关键词规则分类，偏离了用户“AI + 快速决策”的目标。用户明确要求：判断必须由 Jev 这类专用决策模型完成；通用对话模型太慢，不采用；不接受本地规则降级——Jev 不可用时直接停用能力并让人类看到原因。TypeSafe 直连对当前出口地区返回 HTTP 451，spike（`spike-jev-openrouter.md`）证实经 OpenRouter 调用 Jev 可行（10/10 样本符合预期，p50 约 0.81s，约 $0.000017/次）。
 
-**修订（2026-10-22，判档策略）**：上线后会话 `session-4390e037` 的一个普通运维请求（排查记忆库 git 作者身份）在 Opus 5.5 上被设为 `max`，用户预期 medium、最多 high。原因在本插件自己的策略，不是 Jev 故障：(1) 档位标准把“高风险”当成“难”，Jev 照字面判为 `escalated`；(2) 映射表按旧模型默认值设计（complex→xhigh、escalated→max），而 Anthropic 与 OpenAI 当前文档都以 medium 为 agentic coding 起点、xhigh/max 只用于实测有收益的场景（`eval/README.md` 记录出处与实测）。用本机 493 个真实用户回合重放还发现：只看本轮消息时，“继续/同意/apply”这类回合几乎全判 simple；子会话表的强档模型不在官方子会话白名单内，复杂委派会被拒。用户在讨论中确认：采用官方建议；Jev 只判难度，模型与 effort 查一张表；给 Jev 看上一轮问答；增加逐回合人工标注以便定期校准。
+**修订（2026-10-22，判档策略）**：上线后会话 `session-4390e037` 的一个普通运维请求（排查记忆库 git 作者身份）在 Opus 5.5 上被设为 `max`，用户预期 medium、最多 high。原因在本插件自己的策略，不是 Jev 故障：(1) 档位标准把“高风险”当成“难”，Jev 照字面判为 `escalated`；(2) 映射表按旧模型默认值设计（complex→xhigh、escalated→max），而 Anthropic 与 OpenAI 当前文档都以 medium 为 agentic coding 起点、xhigh/max 只用于实测有收益的场景（`packages/auto-model-routing/eval/README.md` 记录出处）。用本机 493 个真实用户回合重放还发现：只看本轮消息时，“继续/同意/apply”这类回合几乎全判 simple；子会话表的强档模型不在官方子会话白名单内，复杂委派会被拒。用户在讨论中确认：采用官方建议；Jev 只判难度，模型与 effort 查一张表；给 Jev 看上一轮问答；增加逐回合人工标注以便定期校准。
 
 ## What Changes
 
@@ -17,9 +17,9 @@
 - **Jev 看到上一轮问答（2026-10-22）**：主会话判档的 `state` 除本轮用户文本外，加入上一用户回合的用户文本（截断 500 字）与上一轮最后一条助手回复的结尾（1200 字）。外发前对常见凭据形态与 IPv4 地址脱敏。外发范围因此扩大到助手回复片段（用户已同意）。
 - **effort 按官方默认值上下浮动（2026-10-22）**：每个模型取官方推荐起点，`standard` 用起点，`simple` 降一级，`complex` 升一级，`escalated` 升两级且不超过 `xhigh`；自动路由永不选 `max`，不设下限。
 - **MANUAL 同时关闭子会话判档（2026-10-22）**：`route_subagent` 跟随所属主会话（子会话中调用时沿父链找到根会话）的模式；不是 AUTO 时不调 Jev、不外发，返回 `routed: false`，skill 规定按官方默认委派、不询问用户。
-- **子会话按难度选模型，不受主会话模型限制（2026-10-22）**：provider 跟随主会话；模型按档位查表（claude：haiku-5-5 / sonnet-5-5 / opus-5-5 / opus-5-5，codex：gpt-6-luna / gpt-6.1-sol ×3），effort 按同一张起点表；不自动选 Fable 或 Astra。官方子会话白名单须包含表中全部模型（用户在 DSH 设置中维护，不在本仓库）。
+- **子会话按难度选模型，不受主会话模型限制（2026-10-22）**：provider 跟随主会话，模型按档位从 Haiku/Luna 到 Opus/Sol，effort 用同一套起点规则；不自动选 Fable 或 Astra。官方子会话白名单须包含这些模型（DSH 设置，不在本仓库；会话创建时生效）。
 - **派发时机写入环境级指令（2026-10-22）**：何时派子会话由主 Agent 依据 `instructions/dsh-home.md` 中的规则决定（大块编码实施、独立评审、中间输出多的探索、可并行的独立工作才派；讨论、单个小修复、主上下文装得下的依赖链不派）；派出后由 `route_subagent` 判档。该文件由 ohmydsh 物化为 `$DSH_HOME/AGENTS.md`，作为会话开头的固定消息加载，不影响 prompt cache。
-- **逐回合人工标注（2026-10-22）**：在助手回复操作栏（官方 `conversation.chat.assistant-actions` 插槽，位于点踩右侧、分支左侧）加一个档位按钮：悬停显示本轮判档，点开选择“这轮应该用哪档”。Host 持久记录每个 AUTO 判档回合的档位、分布、effort、模型、规则版本与用户标注（不存消息原文），并提供统计脚本列出判档与标注不一致的回合，用于定期调整规则。
+- **逐回合人工标注（2026-10-22）**：在助手回复操作栏（官方 `conversation.chat.assistant-actions` 插槽，位于点踩右侧、分支左侧）加一个档位按钮：悬停显示本轮判档，点开选择“这轮应该用哪档”。Host 把判档与标注追加到一个本机文件（不存消息原文），统计脚本按规则版本列出不一致的回合，用于定期调整规则。
 - **Jev 承载方为 OpenRouter**：Host 直接调用 `POST https://openrouter.ai/api/alpha/decisions`，模型 `typesafe/jev-1.13`，凭据为 `OPENROUTER_API_KEY`（主 checkout `.env.local` 经 `bin/dsh` 注入，插件经官方 launch environment 读取；无此变量时为“未配置凭据”），单次请求期限 3 秒、不重试、不跟随重定向。判断在 pre-step 确认步骤进入后才发起，被拒的步骤不外发。不经 jev-mcp：其对 429/5xx 自动重试最长 60 秒，与“失败即停用”冲突。
 - **失败即停用并提示（不降级）**：Jev 调用任何失败（含缺凭据、余额不足、超时）都把该会话切为 MANUAL（不复原）并记录闭集失败类别；芯片显示停用状态与原因，例如“Jev 余额不足（402），自动路由已停用”。停用保持到用户手动再点 AUTO；不轮询、不主动查询余额、不自动重试。失败按状态码分类：402 余额不足、401/403 凭据无效、429 限流、451 地区受限、其它 4xx 请求被拒、5xx/网络 服务不可用、超时、响应无效、缺凭据。用户取消不视为 Jev 失败。
 - **子会话与主会话同构**：新增 Host 工具 `route_subagent`，与主会话共用同一 Jev 判断与失败分类，按调用方指定的 provider 返回档位及 `provider / model / reasoning_effort`；子会话档位表从 skill 移入代码，成为唯一来源。工具失败时返回失败类别，skill 要求主 Agent **暂停委派并询问用户**，不得自行猜测档位替代。
@@ -38,10 +38,10 @@
 - `packages/auto-model-routing/`：Host 插件（step-1 `agent/pre-step` 调 Jev、`agent/request` effort 改写、会话状态含停用原因、端点、`route_subagent` 工具、判档记录与标注）与 Web client（芯片与面板，含停用显示；回复操作栏档位按钮）。2026-10-22 修订改动 `jev.ts`（判档规则与 state 组装）、`effort.ts`（起点表与子会话表）、新增判档记录存储与标注端点、client 档位按钮。
 - `skills/subagent-model-routing/`：改为“委派前调用 `route_subagent` 并显式传参；失败暂停并询问用户”，移除档位表。
 - `instructions/dsh-home.md`：新增“何时派发子会话”一段（环境级指令，所有会话含子会话可见）。
-- `openspec/changes/auto-model-routing/eval/`：判档规则回归资产（合成样本、由真实回合改写的样本、运行脚本、出处与实测记录），不含真实会话原文。
+- `packages/auto-model-routing/eval/`：判档规则回归资产（90 条样本、已知未命中基线、运行脚本与 effort 出处），不含真实会话原文、会话 id 或凭据。
 - `dsh.yaml`：note 写明外部数据处理方、外发范围（含助手回复片段）与凭据变量。
 - **外部服务与隐私**：每个用户回合（AUTO）与每次子会话决策，都会把截断至 8000 字符的用户任务文本发送给 OpenRouter 及 TypeSafe；主会话判档另外发送上一轮用户文本（≤500 字）与上一轮助手回复结尾（≤1200 字），外发前脱敏常见凭据形态与 IPv4 地址（脱敏是尽力而为，不能保证移除所有敏感信息）。子会话判档只在所属主会话为 AUTO 时发生并外发（2026-10-22 修订，原为“启用插件即外发，与模式无关”）。OpenRouter 数据保留与日志条款**未确认**（端点元数据未公布），由用户在 OpenRouter 后台自行设置。凭据不写入仓库、状态文件、日志或错误信息；状态与面板只保存失败类别，不保存响应体。判档记录只存本机，不含消息原文。
-- **外部配置**：官方子会话白名单（`subagent-model-selection-settings.allowedModels`，DSH 设置）须加入 `claude/claude-opus-5-5` 与 `codex/gpt-6.1-sol`；不在本仓库管理，由用户在设置中修改，验收时核对。
+- **外部配置**：官方子会话白名单（`subagent-model-selection-settings.allowedModels`，DSH 设置）须包含子会话可能用到的模型；2026-10-22 用户已加入 `claude-opus-5-5` 与 `gpt-6.1-sol`。白名单在会话创建时生效，验收在新会话中进行。
 - **开关耦合**：插件与 skill 仍为两个 manifest 条目；只启用 skill 时，skill 指示主 Agent 告知用户“子会话 Jev 选模未启用”并按官方默认委派。
 - 新增依赖：无（使用 Node 内置 `fetch`）。
 - 不修改：官方模型选择、官方点赞/点踩反馈、`home-network-model-guard`、dsh-pet compat overlay、jev-mcp 接线与 `jev-workflow-router`。

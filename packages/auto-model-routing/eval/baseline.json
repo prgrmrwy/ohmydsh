@@ -1,0 +1,5 @@
+{
+  "rubric": "src/rubric.json as of 2026-10-22 (v6 text)",
+  "runs": 3,
+  "knownMisses": ["h-h16", "s-05", "s-22", "s-23", "s-27", "s-32"]
+}

@@ -2,7 +2,7 @@
 
 ### Requirement: 模式与改写规则
 系统 SHALL 为每个主会话提供 `AUTO` 与 `MANUAL` 两种模式，默认 `MANUAL`，按会话持久化。
-- **AUTO**：系统 SHALL 只改写主会话请求的 reasoning effort，MUST NOT 改写 provider 与 model；同一回合内一经决定即不再变化。改写出的 effort 与官方本次合成的 effort 不同时，系统 SHALL 经官方 `sessionController.selectModel` 把会话选择更新为 `{provider, model, effort}`（官方选择已为该值时不调用；同一值的调用尚未完成时不重复调用），使右侧模型选择器与实际请求一致；官方该接口同时把此选择保存为新会话的默认值（用户已接受）。调用失败 MUST NOT 影响本次请求。
+- **AUTO**：系统 SHALL 只改写主会话请求的 reasoning effort，MUST NOT 改写 provider 与 model；同一回合内档位一经决定即不再变化（同回合换模型时按新模型重新映射 effort）。改写出的 effort 与官方本次合成的 effort 不同时，系统 SHALL 经官方 `sessionController.selectModel` 把会话选择更新为 `{provider, model, effort}`（官方选择已为该值时不调用；同一值的调用尚未完成时不重复调用），使右侧模型选择器与实际请求一致；官方该接口同时把此选择保存为新会话的默认值（用户已接受）。调用失败 MUST NOT 影响本次请求。
 - **MANUAL**：系统 MUST NOT 改写任何字段，也 MUST NOT 把 effort 写回任何先前的值。切到 MANUAL 只是停止自动调整；此后请求使用官方当前选择（运行时在无待生效手选时沿用上一次实际请求的配置），由用户在官方模型选择器中自行调整。
 切 MANUAL SHALL 废止当前回合的 AUTO 决定：同回合后续请求不再改写。再次切 AUTO 只能在下一用户回合首个请求重新决定，此前 MUST NOT 恢复旧 AUTO 决定。重复设置相同模式 SHALL 为无副作用操作。插件不保存锚点、不维护复原义务；未加载时不请求 Jev、不改写。
 
@@ -80,13 +80,22 @@
 - **THEN** 输出与官方合成配置深度相等，Jev 请求次数为 0
 
 ### Requirement: Jev 判断档位
-系统 SHALL 在 AUTO 的用户回合 step 1 中，以一次 Jev `choice` 请求得出本回合档位 `simple | standard | complex | escalated`：经 `POST https://openrouter.ai/api/alpha/decisions`，模型 `typesafe/jev-1.13`，凭据每次调用时经官方 launch environment 读取 `OPENROUTER_API_KEY`；`questions` 为主会话与 `route_subagent` 共用的常量 `TIER_QUESTIONS`，其文本 SHALL 与 `eval/rubric.json` 逐字相等（规则原文见 design D4），并带规则版本号 `TIER_RUBRIC_VERSION`；单次请求期限 3000ms，`redirect: 'error'`，MUST NOT 重试。Jev 返回后 SHALL 重新读取会话状态，等待期间模式已变时丢弃该结果（不写决定、不写 `disabled`）。成功时 SHALL 采用响应 `answers.tier.choice` 作为档位，`reason` 为 `jev`，不设置信度门槛。系统 MUST NOT 包含本地规则、关键词或通用对话模型的分类路径；代码只做上一档“升一级”的计算（档位序加一，`escalated` 封顶），不读消息内容。请求 MUST NOT 携带会话状态、其它会话内容或凭据以外的鉴权信息；出站主机 SHALL 仅为 `openrouter.ai`。
+系统 SHALL 在 AUTO 的用户回合 step 1 中，以一次 Jev `choice` 请求得出本回合档位 `simple | standard | complex | escalated`：经 `POST https://openrouter.ai/api/alpha/decisions`，模型 `typesafe/jev-1.13`，凭据每次调用时经官方 launch environment 读取 `OPENROUTER_API_KEY`；`questions` 为主会话与 `route_subagent` 共用的 `TIER_QUESTIONS`，SHALL 从 package 内唯一的规则文件 `packages/auto-model-routing/src/rubric.json` 读入（源码与评估脚本都从它读，不另存副本）；规则版本 `rubricVersion` SHALL 为 `sha256(JSON.stringify(TIER_QUESTIONS))` 的前 8 个十六进制字符，由代码计算、不手工维护；单次请求期限 3000ms，`redirect: 'error'`，MUST NOT 重试。Jev 返回后 SHALL 重新读取会话状态，等待期间模式已变时丢弃该结果（不写决定、不写 `disabled`）。成功时 SHALL 采用响应 `answers.tier.choice` 作为档位，`reason` 为 `jev`，不设置信度门槛。系统 MUST NOT 包含本地规则、关键词或通用对话模型的分类路径；代码只做上一档“升一级”的计算（档位序加一，`escalated` 封顶），不读消息内容。请求 MUST NOT 携带会话状态、其它会话内容或凭据以外的鉴权信息；出站主机 SHALL 仅为 `openrouter.ai`。
 
 主会话请求的 `state` SHALL 依次包含：
 1. 档位行：有上一档时为 `Previous user-turn tier: <tier> (one tier above: <tier+1>)`，否则为 `Previous user-turn tier: none`。上一用户回合档位 SHALL 按会话持久化（只存档位名，不存任务文本），Host 重启后仍随下一次判档发送，并在 MANUAL、停用与重新切 AUTO 时保留。
 2. 上一轮上下文（存在时）：一行固定说明“上下文仅用于理解新消息，只判断新消息引出的工作”，随后 `Previous user message (truncated):` 加上一用户回合文本 `.slice(0, 500)`，以及 `Previous assistant reply (last part):` 加上一轮助手文本 `.slice(-1200)`（均为脱敏后截取）。不存在时省略对应段，两者都不存在时省略说明行。
 3. `New user message:` 加本回合分类输入（无上一轮上下文时标签为 `User message:`）。
-“上一轮”两段在 step 1 的 `agent/pre-step` 中、本回合消息进入之前，从 `agent.session.deriveMessages()` 取得：上一用户回合文本为最后一条 `source.kind === "user"` 的消息的 `text` 块按序以 `"\n"` 连接；助手段为最后一条含非空 `text` 块的 `assistant` 消息的文本块连接。上一轮两段文本外发前 SHALL 经同一脱敏函数处理：把 IPv4 地址（可带端口）替换为 `<ip>`；把 `密码|授权码|appid|password|token|api[_-]?key|secret` 后跟可选冒号/等号的值替换为 `<redacted>`；把 `sk-` 开头的长串替换为 `<redacted>`。本回合用户文本 SHALL 经同一函数处理。`route_subagent` 的 `state` 只含 `Previous user-turn tier: none` 与 `User message:` 加脱敏后的任务文本。
+“上一轮”两段在 step 1 的 `agent/pre-step` 中、本回合消息进入之前，从 `agent.session.deriveMessages()` 取得：上一用户回合文本为最后一条 `source.kind === "user"` 的消息的 `text` 块按序以 `"\n"` 连接；助手段为最后一条含非空 `text` 块的 `assistant` 消息的文本块连接。
+
+外发的每段文本（本回合用户文本、上一轮两段、`route_subagent` 任务文本）SHALL 先对**完整文本**经同一函数 `redact` 处理，再截断。`redact` 依次替换（`i` 表示不区分大小写）：
+1. `/-----BEGIN [A-Z ]+-----[\s\S]*?-----END [A-Z ]+-----/g` → `<redacted>`
+2. `/\bBearer\s+[A-Za-z0-9._~+\/=-]{8,}/gi` → `Bearer <redacted>`
+3. `/\b(sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})\b/g` → `<redacted>`
+4. `/(密码|授权码|appid|password|passwd|token|api[_-]?key|secret)(["']?\s*[:：=]\s*["']?)[^\s"',;]+/gi` → 保留关键字与分隔符，值替换为 `<redacted>`（必须有 `:`、`：` 或 `=` 分隔；“token 过期了”不被替换）
+5. `/\/\/[^\s/:@]+:[^\s/@]+@/g` → `//<redacted>@`
+6. `/\b\d{1,3}(\.\d{1,3}){3}(:\d+)?\b/g` → `<ip>`
+这是形态匹配，尽力而为，不保证移除所有敏感信息。`route_subagent` 的 `state` 只含 `Previous user-turn tier: none` 与 `User message:` 加处理后的任务文本。
 
 #### Scenario: 成功判断采用 Jev 档位
 - **GIVEN** 会话为 `AUTO`，Jev 对本回合返回 `choice: complex`，实际模型为 `claude-opus-5-5`
@@ -101,17 +110,27 @@
 #### Scenario: 上一轮上下文截断、取末段并脱敏
 - **GIVEN** 会话历史中上一条用户消息 900 字；之后有两条助手消息，第一条为“早先内容”，最后一条 3000 字且结尾含 `token=abc123def456` 与 `10.1.2.3:8080`
 - **WHEN** 路由器构造 `state`
-- **THEN** 上一轮用户段长度为 500 字且为原文前 500 字（脱敏后）；助手段为最后一条助手消息的末 1200 字（脱敏后），不含“早先内容”；`state` 不含 `abc123def456` 与 `10.1.2.3`，含 `<redacted>` 与 `<ip>`
+- **THEN** 上一轮用户段为脱敏后文本的前 500 字；助手段为最后一条助手消息脱敏后的末 1200 字，不含“早先内容”；`state` 不含 `abc123def456` 与 `10.1.2.3`，含 `token=<redacted>` 与 `<ip>`
+
+#### Scenario: 脱敏覆盖常见形态且不误伤正文
+- **GIVEN** 文本依次含 `{"API_KEY": "abc123"}`、`Token：xyz789`、`Authorization: Bearer abcdefgh12345`、`ghp_0123456789abcdefghijABCD`、`https://u:p@host/x`、`token 过期了怎么办`，以及一个 `sk-` 开头、长 40 字符且起始位置在末 1200 字边界之前 10 字符处的密钥
+- **WHEN** 对该文本执行 `redact` 后取末 1200 字
+- **THEN** 结果不含 `abc123`、`xyz789`、`abcdefgh12345`、`ghp_0123`、`u:p@` 与该密钥的任何 8 字以上片段；`token 过期了怎么办` 原样保留
 
 #### Scenario: 首个用户回合不带上一轮上下文
 - **GIVEN** 会话为 `AUTO`，没有上一用户回合
 - **WHEN** 首个用户回合发送“看下这个报错”
 - **THEN** `state` 恰为 `Previous user-turn tier: none\nUser message:\n看下这个报错`
 
-#### Scenario: 规则文本与评估资产一致
-- **GIVEN** 源码常量 `TIER_QUESTIONS`、`TIER_RUBRIC_VERSION` 与 `openspec/changes/auto-model-routing/eval/rubric.json`
-- **WHEN** 测试比较二者
-- **THEN** `questions` 深度相等，版本号相等；`escalated` 封顶时“升一级”仍为 `escalated`
+#### Scenario: 规则版本由规则内容决定
+- **GIVEN** `src/rubric.json`，以及改动其中一个字符后的副本
+- **WHEN** 分别计算 `rubricVersion`
+- **THEN** 原文件的版本为 `sha256(JSON.stringify(questions)).slice(0, 8)`；副本的版本与之不同；上一档为 `escalated` 时“升一级”仍为 `escalated`
+
+#### Scenario: 回归脚本只把基线外的新未命中视为失败
+- **GIVEN** `packages/auto-model-routing/eval/` 的 `cases.json` 与 `baseline.json`；一个假 Jev 服务，按用例 id 返回固定档位
+- **WHEN** 分别让假服务：全部按基线结果返回；让一个不在 `knownMisses` 的用例判错；让一个请求返回 HTTP 500
+- **THEN** `run.mjs --base <假服务地址>` 依次退出 0、1、2；请求失败不计入未命中；脚本构造的 `state` 与 Host 对同一用例构造的 `state` 逐字相等
 
 #### Scenario: 重启后仍沿用上一档位
 - **GIVEN** 会话为 `AUTO`，上一用户回合 Jev 判为 `complex`，随后 Host 重启
@@ -162,7 +181,7 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - **THEN** 均不含 `sk-or-test-SECRET` 或 `SECRET-BODY`
 
 ### Requirement: 级别与 effort 映射
-系统 SHALL 把档位按 `await next()` 得到的实际官方 provider/model 转为 effort，MUST NOT 套用尚未生效的手选模型的映射；同回合实际模型变化时 SHALL 按新模型重新映射，不重新请求 Jev。每个模型有一个起点 effort（代码常量，取值与出处见 design D9）：`claude-opus-5-5`、`claude-sonnet-5-5`、`claude-haiku-5-5`、`gpt-6.1-sol` 为 `medium`，`claude-fable-5-1`、`gpt-6-luna` 为 `high`，`gpt-6-astra` 为 `low`，其它模型为 `medium`。在序列 `low < medium < high < xhigh < max` 上：`standard` 取起点，`simple` 降一级（最低 `low`），`complex` 升一级，`escalated` 升两级；任一档位结果 MUST NOT 高于 `xhigh`，自动路由 MUST NOT 输出 `max`。目标 effort 不被该模型支持时取不超过目标的最高受支持值，无则取最低受支持值；模型不支持任何 effort 时不改写，`reason` 为 `no-effort-support`。
+系统 SHALL 把档位按 `await next()` 得到的实际官方 provider/model 转为 effort，MUST NOT 套用尚未生效的手选模型的映射；同回合实际模型变化时 SHALL 按新模型重新映射，不重新请求 Jev。每个模型有一个起点 effort（代码常量，取值与出处见 design D9）：`claude-opus-5-5`、`claude-sonnet-5-5`、`claude-haiku-5-5`、`gpt-6.1-sol` 为 `medium`，`claude-fable-5-1`、`gpt-6-luna` 为 `high`，`gpt-6-astra` 为 `low`，其它模型为 `medium`。在序列 `low < medium < high < xhigh < max` 上：`standard` 取起点，`simple` 降一级（最低 `low`），`complex` 升一级，`escalated` 升两级；任一档位结果 MUST NOT 高于 `xhigh`，自动路由 MUST NOT 输出 `max`。候选集为模型受支持的 effort 与 `{low, medium, high, xhigh}` 的交集；目标不在候选集时取不超过目标的最高候选值，无则取最低候选值；候选集为空时不改写，`reason` 为 `no-effort-support`。
 
 #### Scenario: 档位映射为 effort
 - **GIVEN** 实际模型 `claude-opus-5-5`，支持全部五级
@@ -180,9 +199,9 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - **THEN** 输出 effort 为 `high`，不为 `max`
 
 #### Scenario: 无 effort 支持时不改写
-- **GIVEN** 实际模型目录信息中无 reasoning efforts，档位 `complex`
+- **GIVEN** 实际模型目录信息中无 reasoning efforts，或只支持 `[max]`，档位 `complex`
 - **WHEN** 请求经过路由器
-- **THEN** 输出与官方合成配置深度相等，`reason` 为 `no-effort-support`
+- **THEN** 两种情况输出都与官方合成配置深度相等，`reason` 为 `no-effort-support`
 
 #### Scenario: 同回合换模型重新映射
 - **GIVEN** 本回合档位 `complex`，首个请求实际模型 Opus 输出 `high`
@@ -190,15 +209,15 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - **THEN** 输出 effort 为 `medium`，Jev 请求次数仍为 1
 
 ### Requirement: 子会话决策工具与 skill
-系统 SHALL 注册 Host 工具 `route_subagent`，参数 `{task: string, provider: "claude" | "codex"}`，描述须说明会把任务文本发送给 OpenRouter/TypeSafe：以与主会话相同的 Jev 客户端、`TIER_QUESTIONS` 与失败类别判断档位（`state` 上一档位为 `none`），成功返回 `{tier, provider, model, reasoning_effort}`。子会话模型按档位取自代码常量 `CHILD_MODELS`（唯一来源）：`claude` 依次为 `claude-haiku-5-5`、`claude-sonnet-5-5`、`claude-opus-5-5`、`claude-opus-5-5`，`codex` 依次为 `gpt-6-luna`、`gpt-6.1-sol`、`gpt-6.1-sol`、`gpt-6.1-sol`；模型选择只依赖档位与 provider，MUST NOT 受调用会话当前模型限制；MUST NOT 自动返回 `claude-fable-5-1` 或 `gpt-6-astra`。`reasoning_effort` SHALL 按“级别与 effort 映射”的同一起点规则对所选模型计算（不做受支持值截断，由官方创建参数校验）；失败返回错误结果，内容为该类别提示与“暂停委派并询问用户”；`exec.signal` 取消时返回“已取消”错误结果，不含余额/凭据提示。工具 MUST NOT 改写任何会话状态。工具 SHALL 先确定**所属主会话**：调用会话为普通会话时即其本身；为子会话时沿 `header.parentSession` 向上找到第一个非 `origin = subagent` 的会话；链上任一会话无法解析时视为 MANUAL。所属主会话模式不是 `AUTO`（含因 Jev 失败停用）时，工具 MUST NOT 请求 Jev、MUST NOT 外发任务文本，返回非错误结果 `{routed: false, reason: "manual"}`，渲染文本说明“主会话为 MANUAL：不判档，按官方默认委派，不传 provider/model/reasoning_effort”；只有所属主会话为 `AUTO` 时才判档。系统 SHALL 提供 skill `subagent-model-routing`，其文本须要求：(1) 委派前调用 `route_subagent`；(2) 将返回的 `provider`、`model`、`reasoning_effort` 全部显式传给官方 `subagent`；(3) 在 `description` 末尾以 `[model·effort]` 标注；(4) 默认 provider 为当前会话 provider，用户或 lead 要求独立体系时改用另一个；当前 provider 不是 `claude`/`codex` 时暂停委派并询问用户；(5) 工具失败时暂停委派并询问用户，MUST NOT 自行猜测档位、改由主会话完成或换用其它模型；(6) 复用已有子会话前比较其标注，更高或无法确认时新建；(7) `route_subagent` 工具不存在时告知用户“子会话 Jev 选模未启用”，按官方默认委派且不传 provider/model/reasoning_effort，不得猜档位；(8) 工具返回 `routed: false` 时按官方默认委派且不传 provider/model/reasoning_effort，不询问用户、不猜档位。路由器 MUST NOT 改写子会话的创建参数或请求。
+系统 SHALL 注册 Host 工具 `route_subagent`，参数 `{task: string, provider: "claude" | "codex"}`，描述须说明会把任务文本发送给 OpenRouter/TypeSafe：以与主会话相同的 Jev 客户端、`TIER_QUESTIONS` 与失败类别判断档位（`state` 上一档位为 `none`），成功返回 `{tier, provider, model, reasoning_effort}`。子会话模型按档位取自代码常量 `CHILD_MODELS`（唯一来源）：`claude` 依次为 `claude-haiku-5-5`、`claude-sonnet-5-5`、`claude-opus-5-5`、`claude-opus-5-5`，`codex` 依次为 `gpt-6-luna`、`gpt-6.1-sol`、`gpt-6.1-sol`、`gpt-6.1-sol`；模型选择只依赖档位与 provider，MUST NOT 受调用会话当前模型限制；MUST NOT 自动返回 `claude-fable-5-1` 或 `gpt-6-astra`。`reasoning_effort` SHALL 按“级别与 effort 映射”的同一起点规则对所选模型计算（不做受支持值截断，由官方创建参数校验）；失败返回错误结果，内容为该类别提示与“暂停委派并询问用户”；`exec.signal` 取消时返回“已取消”错误结果，不含余额/凭据提示。工具 MUST NOT 改写任何会话状态。工具 SHALL 先确定**所属主会话**：调用会话为普通会话时即其本身；为子会话时经 `ctx.agents.get(header.parentSession)` 逐级向上，找到第一个非 `origin = subagent` 的会话；链上任一会话不在 live 注册表中时视为 MANUAL。模式按所属主会话 id 从插件状态读取。所属主会话模式不是 `AUTO`（含因 Jev 失败停用）时，工具 MUST NOT 请求 Jev、MUST NOT 外发任务文本，返回非错误结果 `{routed: false, reason: "manual"}`，渲染文本说明“主会话为 MANUAL：不判档，按官方默认委派，不传 provider/model/reasoning_effort”；只有所属主会话为 `AUTO` 时才判档。系统 SHALL 提供 skill `subagent-model-routing`，其文本须要求：(1) 委派前调用 `route_subagent`；(2) 将返回的 `provider`、`model`、`reasoning_effort` 全部显式传给官方 `subagent`；(3) 在 `description` 末尾以 `[model·effort]` 标注；(4) 默认 provider 为当前会话 provider，用户或 lead 要求独立体系时改用另一个；当前 provider 不是 `claude`/`codex` 时暂停委派并询问用户；(5) 工具失败时暂停委派并询问用户，MUST NOT 自行猜测档位、改由主会话完成或换用其它模型；(6) 复用已有子会话前比较其标注，更高或无法确认时新建；(7) `route_subagent` 工具不存在时告知用户“子会话 Jev 选模未启用”，按官方默认委派且不传 provider/model/reasoning_effort，不得猜档位；(8) 工具返回 `routed: false` 时按官方默认委派且不传 provider/model/reasoning_effort，不询问用户、不猜档位。路由器 MUST NOT 改写子会话的创建参数或请求。
 
 #### Scenario: 工具成功返回表中条目
-- **GIVEN** 调用会话为 `AUTO`，Jev 对任务返回 `complex`
-- **WHEN** 以 `provider: claude` 与 `provider: codex` 分别调用 `route_subagent`
-- **THEN** 分别返回 `{complex, claude, claude-opus-5-5, high}` 与 `{complex, codex, gpt-6.1-sol, high}`
+- **GIVEN** 调用会话为 `AUTO`
+- **WHEN** Jev 依次返回四个档位，并分别以 `provider: claude` 与 `provider: codex` 调用 `route_subagent`
+- **THEN** 8 个结果的 `{model, reasoning_effort}` 依次为：claude `haiku-5-5/low`、`sonnet-5-5/medium`、`opus-5-5/high`、`opus-5-5/xhigh`；codex `gpt-6-luna/medium`、`gpt-6.1-sol/medium`、`gpt-6.1-sol/high`、`gpt-6.1-sol/xhigh`（Claude 模型名带 `claude-` 前缀）
 
 #### Scenario: 主会话为 MANUAL 时不判档、不外发
-- **GIVEN** 会话 S1 为 `MANUAL`（分别为用户手动设置、因 Jev 402 停用两种情况）；S1 的子会话 C1；`parentSession` 指向无法解析会话的子会话 C2
+- **GIVEN** 会话 S1 为 `MANUAL`（分别为用户手动设置、因 Jev 402 停用两种情况）；S1 的子会话 C1；另有 AUTO 会话 S2 的子会话 C2，其父会话不在 live 注册表中
 - **WHEN** 分别在 S1、C1、C2 中调用 `route_subagent`
 - **THEN** 三次都返回非错误结果 `{routed: false, reason: manual}`，渲染文本含“按官方默认委派”；假 Jev 服务收到 0 个请求；S1 无新的 `decision`
 
@@ -221,16 +240,6 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - **GIVEN** 主会话一个 AUTO 用户回合与一次 `route_subagent` 调用
 - **WHEN** 记录二者发往假 Jev 服务的 body
 - **THEN** 两个 body 的 `model` 与 `questions` 深度相等，仅 `state` 不同
-
-#### Scenario: 子会话表与家族一致
-- **GIVEN** 代码中的 `CHILD_MODELS` 常量
-- **WHEN** 测试逐级断言并按 Claude 家族规则检查
-- **THEN** 每级模型等于本 Requirement 所列；`claude` 条目全为 Claude 家族，`codex` 条目全非 Claude 家族
-
-#### Scenario: 子会话模型均在白名单检查清单内
-- **GIVEN** `CHILD_MODELS` 与 package README 中“需加入官方子会话白名单的模型”清单
-- **WHEN** 测试比较二者
-- **THEN** README 清单恰为 `CHILD_MODELS` 中去重后的 `provider/model` 集合
 
 #### Scenario: skill 文本包含八项规则
 - **GIVEN** `skills/subagent-model-routing/SKILL.md`
@@ -301,7 +310,7 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - **THEN** 不重复显示 id 7；3 秒后提示被移除；官方隐藏右侧控件时提示仍可见
 
 ### Requirement: Host 端点边界
-本插件只提供四个经 `connection.fetch.register` 注册的端点：读取状态、设置模式、按消息查询判档（`judgement`）与标注（`label`，后两者的参数与校验见“判档记录与人工标注”）。四者 SHALL 以请求体 `sessionId` 经官方会话控制器解析目标会话（与官方会话端点同一授权模型）；`sessionId` 缺失、非字符串、无法解析或指向 `origin = "subagent"` 会话时 SHALL 返回 4xx 且不修改任何状态；设置模式 SHALL 只修改该会话的模式与 `disabled`（设为 `AUTO` 时清除），`mode` 不属于 `AUTO | MANUAL` 时返回 4xx；读取状态 SHALL 返回 `disabled`（如有）。
+本插件只提供三个经 `connection.fetch.register` 注册的端点：读取状态、设置模式与标注（`label`，参数与校验见“判档记录与人工标注”）。三者 SHALL 以请求体 `sessionId` 经官方会话控制器解析目标会话（与官方会话端点同一授权模型）；`sessionId` 缺失、非字符串、无法解析或指向 `origin = "subagent"` 会话时 SHALL 返回 4xx 且不修改任何状态；设置模式 SHALL 只修改该会话的模式与 `disabled`（设为 `AUTO` 时清除），`mode` 不属于 `AUTO | MANUAL` 时返回 4xx；读取状态 SHALL 返回 `disabled`（如有）。
 
 #### Scenario: 无效会话被拒绝且无副作用
 - **GIVEN** 会话 S1 为 `AUTO`；`session-unknown` 无法解析；`session-child` 为子会话
@@ -325,82 +334,72 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 `instructions/dsh-home.md` SHALL 包含一节“子会话派发”，由主 Agent 决定是否派发，内容至少包括：
 - 派发：实施已批准计划中工作量较大的编码任务；独立评审或复核（需要新上下文）；中间输出多的探索（大范围搜索、读日志、跑测试），只带回结论；彼此独立、可并行的多块工作。
 - 不派发：与用户讨论或做决定的回合；前后依赖且主会话上下文装得下的工作；单个小修复。
+- 本身是子会话时不再向下派发，除非任务明确要求。
 - 派发前若 `route_subagent` 可用，按 `subagent-model-routing` skill 判档并显式传参。
-该节 MUST NOT 引用具体模型名或 effort 值（唯一来源为插件代码常量）。本 change MUST NOT 新增物化机制，沿用 `agentInstructions` 将其物化为 `$DSH_HOME/AGENTS.md`。
+该节 MUST NOT 引用具体模型名或 effort 值（唯一来源为插件代码）。本 change MUST NOT 新增物化机制，沿用 `agentInstructions` 将其物化为 `$DSH_HOME/AGENTS.md`（已有 `tests/sync-agent-instructions.test.mjs` 覆盖物化、幂等与撤销）。
 
 #### Scenario: 环境级指令含派发规则且不含模型名
 - **GIVEN** 仓库中的 `instructions/dsh-home.md`
 - **WHEN** 测试读取其文本
-- **THEN** 含标题“子会话派发”，含“独立评审”“并行”“route_subagent”“不派发”；不含 `CHILD_MODELS` 中任何模型名，也不含 `xhigh`、`max`
-
-#### Scenario: 物化结果携带派发规则且二次 sync 无变化
-- **GIVEN** 隔离 `DSH_HOME`，`agentInstructions.enabled: true`
-- **WHEN** 连续运行两次 `node scripts/sync.mjs`
-- **THEN** `$DSH_HOME/AGENTS.md` 含“子会话派发”节，第二次运行报告无变化；`agentInstructions.enabled: false` 时该文件被撤销
+- **THEN** 含标题“子会话派发”，含“独立评审”“并行”“route_subagent”“不派发”与“本身是子会话时不再向下派发”；不含任何 `claude-`、`gpt-` 开头的模型名，也不匹配 `\bxhigh\b`、`\bmax\b`
 
 ### Requirement: 判档记录与人工标注
-系统 SHALL 为每个主会话 AUTO 用户回合的成功判档持久化一条记录（`route_subagent`、失败、取消、被丢弃的判档不记录）：`{sessionId, turn, at, tier, probabilities?, effort?, model, provider, rubricVersion, label?}`。记录 MUST NOT 包含消息文本、上一轮上下文、响应体或凭据。记录存于 `$DSH_HOME/state/auto-model-routing/judgements/<sha256(sessionId)>.jsonl`，按会话分文件、追加写；读取时同一 `(sessionId, turn)` 以最后一条为准；单会话超过 600 行时原子重写为最近 500 个回合。`effort` 与 `model` 为该回合首个请求实际映射出的值（无 effort 支持时省略 `effort`）。
+系统 SHALL 把主会话 AUTO 用户回合的每次成功判档追加一行到 `$DSH_HOME/state/auto-model-routing/judgements.jsonl`：`{sessionId, turn, tier, effort?, model, rubricVersion}`，写入时机为成功判档后该回合首个请求（无论是否映射出 effort，未映射时省略 `effort`）；`route_subagent`、失败、取消、被丢弃与非用户回合不写判档行。标注也是追加一行 `{sessionId, turn, label}`。行 MUST NOT 包含消息文本、上一轮上下文、响应体或凭据。追加失败 MUST NOT 影响请求、MUST NOT 停用 AUTO，只记一条日志。读取方 SHALL 按 `(sessionId, turn)` 折叠：判档取最后一条判档行，标注取最后一条标注行；无法解析的行跳过。
 
-系统 SHALL 维护本会话 `assistant/message` 事件的 `message.id → turn` 对应（经 `session/event` 观察），并提供两个与现有端点同一授权模型的端点：
-- `auto-model-routing.judgement`：参数 `{sessionId, messageId}`；`messageId` 所在回合有记录时返回 `{turn, tier, effort?, model, probabilities?, label?, last: boolean}`（`last` 表示该消息是本回合最后一条助手消息），否则返回 `{}`。
-- `auto-model-routing.label`：参数 `{sessionId, messageId, label}`，`label` 为四档之一或 `null`（清除）；目标回合无记录时返回 4xx 且不写入；成功时写入该记录的 `label` 与 `labeledAt`。
-`sessionId` 缺失、非字符串、无法解析、指向子会话，或 `messageId` 非字符串、不属于该会话时 SHALL 返回 4xx 且不修改任何记录。
+Host SHALL 经 `session/event` 观察 `assistant/message`，在内存中记录 `messageId → turn`（每会话一个 Map）。非用户回合（`continued`）的助手消息 SHALL 记到该会话最近一个有判档的用户回合。
 
-仓库 SHALL 提供只读统计脚本 `packages/auto-model-routing/scripts/label-report.mjs`：读取记录目录，按 `rubricVersion` 输出已标注数、一致数、判高数、判低数与不一致回合列表（会话 id 与回合号），不读取消息内容、不联网、不写文件。
+系统 SHALL 提供一个与现有端点同一授权模型的端点 `auto-model-routing.label`：参数 `{sessionId, messageId, label?}`。`messageId` 对应回合有判档时，无 `label` 返回 `{tier, effort?, label?}`，带 `label`（四档之一）时先追加标注行再返回同一结构；`messageId` 不在映射中或回合无判档时返回 `{}` 且不写入。`sessionId` 缺失、非字符串、无法解析、指向子会话，`messageId` 非字符串，或 `label` 不属于四档时 SHALL 返回 4xx 且不写入。
 
-#### Scenario: 成功判档写入一条不含文本的记录
+仓库 SHALL 提供只读统计脚本 `packages/auto-model-routing/scripts/label-report.mjs`：读取 `judgements.jsonl`，按 `rubricVersion` 输出已标注数、一致数、判高数、判低数与不一致的 `(sessionId, turn)` 列表；不读取消息内容、不联网、不写文件。
+
+#### Scenario: 成功判档追加一行不含文本的记录
 - **GIVEN** 会话 S1 为 `AUTO`，回合 3 的用户文本含 `SECRET-TEXT`，Jev 返回 `complex`，实际模型 Opus
-- **WHEN** 回合 3 首个请求经过路由器
-- **THEN** S1 记录文件新增一行 `{sessionId: S1, turn: 3, tier: complex, effort: high, model: claude-opus-5-5, provider: claude, rubricVersion}`；文件不含 `SECRET-TEXT`
+- **WHEN** 回合 3 的首个与第二个请求经过路由器
+- **THEN** `judgements.jsonl` 恰新增一行 `{sessionId: S1, turn: 3, tier: complex, effort: high, model: claude-opus-5-5, rubricVersion}`；文件不含 `SECRET-TEXT`
 
-#### Scenario: 失败、取消与子会话判档不记录
+#### Scenario: 失败、取消、子会话判档与非用户回合不写判档行
 - **GIVEN** 会话为 `AUTO`
-- **WHEN** 分别发生 Jev 402、用户取消、等待期间切 MANUAL，以及一次成功的 `route_subagent`
-- **THEN** 记录文件无新增行
+- **WHEN** 分别发生 Jev 402、用户取消、等待期间切 MANUAL、一次成功的 `route_subagent`，以及一个子会话完成通知开启的回合
+- **THEN** `judgements.jsonl` 无新增判档行
 
-#### Scenario: 按消息查询判档并标注
-- **GIVEN** S1 回合 3 有记录，回合 3 有两条助手消息 m1、m2（m2 为最后一条）
-- **WHEN** 以 m2 查询，再以 m2 标注 `standard`，再以 m1 查询
-- **THEN** 首次查询返回 `tier: complex, last: true` 且无 `label`；标注后记录 `label` 为 `standard`；以 m1 查询返回 `last: false` 与 `label: standard`
+#### Scenario: 写入失败不影响请求
+- **GIVEN** 会话为 `AUTO`，`judgements.jsonl` 所在目录不可写，Jev 返回 `standard`
+- **WHEN** 回合首个请求经过路由器
+- **THEN** 请求 effort 为 `medium`；会话仍为 `AUTO` 且无 `disabled`；记录一条日志
 
-#### Scenario: 无效标注被拒且不写入
-- **GIVEN** S1 回合 3 有记录；回合 4 无记录；`session-child` 为子会话
-- **WHEN** 分别以 `label: huge`、回合 4 的消息、`session-child`、不属于 S1 的 `messageId` 调用标注
-- **THEN** 四次均返回 4xx；S1 回合 3 记录不变
+#### Scenario: 按消息查询与标注
+- **GIVEN** S1 回合 3 有判档 `complex`；回合 3 有助手消息 m1、m2；回合 4 为子会话完成通知开启的回合，有助手消息m3
+- **WHEN** 以 m1 查询，以 m3 标注 `standard`，再以 m2 查询
+- **THEN** 第一次返回 `{tier: complex, effort: high}`；第二次追加一行 `{S1, 3, standard}` 并返回 `label: standard`；第三次返回 `{tier: complex, effort: high, label: standard}`
 
-#### Scenario: 清除标注与覆盖
-- **GIVEN** S1 回合 3 记录 `label: standard`
-- **WHEN** 以 `label: null` 调用标注，随后再以 `simple` 调用
-- **THEN** 第一次后记录无 `label`；第二次后 `label` 为 `simple`，记录仍为一条
+#### Scenario: 无效请求被拒，未知消息不写入
+- **GIVEN** S1 回合 3 有判档；`session-child` 为子会话；`m-unknown` 不在映射中
+- **WHEN** 分别以 `label: huge`、`session-child`、`messageId: 42` 调用，以及以 `m-unknown` 标注 `simple`
+- **THEN** 前三次返回 4xx；最后一次返回 `{}`；`judgements.jsonl` 无新增行
 
-#### Scenario: 记录上限
-- **GIVEN** S1 记录文件已有 600 行，覆盖回合 1–600
-- **WHEN** 回合 601 成功判档
-- **THEN** 文件被重写为回合 102–601 共 500 行；回合 1–101 的查询返回 `{}`
-
-#### Scenario: 统计脚本按规则版本汇总
-- **GIVEN** 记录目录含：规则 v6 下 `complex` 标 `standard`、`simple` 标 `simple`、`standard` 无标注；规则 v4 下 `standard` 标 `complex`
-- **WHEN** 运行 `node scripts/label-report.mjs --dir <dir> --json`
-- **THEN** 输出 v6 `{labeled: 2, agree: 1, over: 1, under: 0}`、v4 `{labeled: 1, agree: 0, over: 0, under: 1}`，不一致列表含两条（会话 id 与回合号）；脚本对目录无写入
+#### Scenario: 统计脚本按规则版本汇总并跳过损坏行
+- **GIVEN** `judgements.jsonl` 含：版本 a 下 `complex` 标 `standard`、`simple` 标 `simple`、`standard` 无标注；版本 b 下 `standard` 先标 `simple` 后标 `complex`；一行半截 JSON
+- **WHEN** 运行 `node scripts/label-report.mjs --file <file> --json`
+- **THEN** 输出 a `{labeled: 2, agree: 1, over: 1, under: 0}`、b `{labeled: 1, agree: 0, over: 0, under: 1}`，不一致列表含两条；脚本退出 0、对文件无写入
 
 ### Requirement: 回复操作栏档位按钮
-client SHALL 向官方 `conversation.chat.assistant-actions` 插槽注册一个操作项（不改动官方点赞/点踩、复制或分支）。对给定 `messageId`，操作项 SHALL 调用 `judgement` 端点；仅当返回有记录且 `last: true` 时渲染，否则不渲染任何内容。渲染内容：
-- 一个图标按钮，使用官方 primitives 的 `IconGaugeOutlineRegular`、`Tooltip`（`side: bottom`）与操作栏同款按钮样式；已标注时带 `data-labeled` 并使用强调色。
-- Tooltip 文本：未标注为 `AUTO 判档：<档位中文> → <effort>`；已标注追加 `· 你标注：<档位中文>（判高了|判低了|一致）`。
-- 点击打开官方 `Menu`，标题“这轮应该用哪档？”，四项依次为 `简单`、`标准`、`复杂`、`升级`，每项附该档位对该回合模型映射出的 effort；Jev 判出的一项带“Jev”标记；已标注项带勾选；已标注时末尾有“清除”。选择即调用 `label` 端点并关闭菜单；失败时在按钮旁显示官方同款错误提示，不改变已显示的标注。
-档位中文：`simple` 简单、`standard` 标准、`complex` 复杂、`escalated` 升级。
+client SHALL 向官方 `conversation.chat.assistant-actions` 插槽注册一个操作项（`order` 大于官方反馈的 10），`sessionId` 从注册时的 `inject(sessionId)` 取得，不改动官方点赞/点踩、复制或分支。官方只在每个回合的最后一条助手回复上渲染该插槽。操作项 SHALL 以 `messageId` 调用一次 `label` 端点（无 `label`）；返回 `{}` 时不渲染任何内容。否则渲染：
+- 一个图标按钮，使用官方 primitives 的 `IconGaugeOutlineRegular`、`Tooltip`（`side: bottom`）与操作栏同款按钮 class，不自定义颜色。
+- Tooltip 文本：`AUTO 判档：<档位中文> → <effort>`，已标注时追加 ` · 你标注：<档位中文>`。
+- 点击打开官方 `Menu`，标题“这轮应该用哪档？”，四项依次为 `简单`、`标准`、`复杂`、`升级`，Jev 判出的一项带“Jev”标记，已标注项带勾选。选择即带 `label` 调用端点并关闭菜单；调用失败时不改变已显示的标注。
+档位中文：`simple` 简单、`standard` 标准、`complex` 复杂、`escalated` 升级。Host 重启后内存映射为空，此前回合的按钮不再显示；已写入的记录不受影响。
 
-#### Scenario: 只在有记录的回合最后一条回复显示
-- **GIVEN** 回合 3 有记录，m2 为其最后一条助手消息，m1 为较早一条；回合 4 无记录的消息 m3
-- **WHEN** 分别以 m1、m2、m3 渲染操作项
-- **THEN** 仅 m2 渲染按钮；m1、m3 渲染为空
+#### Scenario: 有判档才显示按钮
+- **GIVEN** m2 对应回合有判档；m3 的端点结果为 `{}`
+- **WHEN** 分别以 m2、m3 渲染操作项
+- **THEN** m2 渲染按钮，m3 渲染为空；每条消息只发出一次端点请求
 
 #### Scenario: Tooltip 与菜单内容
-- **GIVEN** m2 对应 `{tier: complex, effort: high, model: claude-opus-5-5, label: standard}`
+- **GIVEN** m2 对应 `{tier: complex, effort: high, label: standard}`
 - **WHEN** 渲染按钮并打开菜单
-- **THEN** Tooltip 文本为 `AUTO 判档：复杂 → high · 你标注：标准（判高了）`；菜单四项依次含 `简单 · low`、`标准 · medium`、`复杂 · high`、`升级 · xhigh`，`复杂` 带“Jev”，`标准` 带勾选，末尾含“清除”
+- **THEN** Tooltip 文本为 `AUTO 判档：复杂 → high · 你标注：标准`；菜单四项依次为 `简单`、`标准`、`复杂`、`升级`，`复杂` 带“Jev”，`标准` 带勾选
 
-#### Scenario: 选择档位只调用插件标注端点
+#### Scenario: 选择档位只调用插件标注端点，失败不改显示
 - **GIVEN** 按钮已渲染、未标注
-- **WHEN** 用户在菜单中选择 `标准`
-- **THEN** 只发出一次 `auto-model-routing.label`，参数 `{sessionId, messageId: m2, label: standard}`；未调用官方反馈接口；端点返回错误时显示错误提示且按钮仍为未标注状态
+- **WHEN** 用户在菜单中选择 `标准`，端点分别返回成功与错误
+- **THEN** 两次都只发出一次带 `label: standard` 的 `auto-model-routing.label` 请求，未调用官方反馈接口；成功时 Tooltip 追加“你标注：标准”，错误时 Tooltip 仍不含“你标注”
