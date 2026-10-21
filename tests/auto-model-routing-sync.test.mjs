@@ -25,6 +25,10 @@ customizations:
   const deployed = path.join(fx.profile, 'node_modules/dsh-auto-model-routing')
   assert.match(await readFile(path.join(deployed, 'lib/index.js'), 'utf8'), /auto-model-routing/)
   assert.match(await readFile(path.join(deployed, 'lib/client.js'), 'utf8'), /__ModuleLoader__/)
+  // The web runtime loads the declared client through the `./client` subpath; without it the chip never appears.
+  const pkg = JSON.parse(await readFile(path.join(deployed, 'package.json'), 'utf8'))
+  assert.equal(pkg.exports?.['./client'], './lib/client.js')
+  assert.equal(pkg.exports?.['.']?.default, './lib/index.js')
   assert.match(await readFile(path.join(fx.dshHome, 'skills/subagent-model-routing/SKILL.md'), 'utf8'), /reasoning_effort/)
   const second = fx.sync()
   assert.equal(second.status, 0, second.stderr)
