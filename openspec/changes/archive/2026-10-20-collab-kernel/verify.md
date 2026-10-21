@@ -62,3 +62,11 @@
 DECISION: FAIL
 
 **实现和独立代码评审已通过；严格Anvil验收不能声明PASS。** 原始TDD流程偏差无法追溯消除，且全仓零skip要求未满足。保留真实失败/偏差而非改写历史或降低门禁。真实DSH close/强退、冷恢复、人类确认通道仍属于未来消费者接入前置，不是本库已验证能力。用户可审阅当前交付后，决定是否接受流程偏差和既有环境限制，再授权后续归档/提交/合入。
+
+## 用户处置（2026-10-21）
+
+用户在审阅后明确接受上文两条偏差，并授权归档：
+1. 原始测试先行流程不完整（首版 FileStore 先实现后写测试；projection/convention 的首次 RED 来自模块缺失）。这段历史无法追补，按原样保留在 implementation-log.md。
+2. 根测试中 2 个既有 MCP bridge 探针跳过（`@deepseek-ai/dsh-mcp-client` 只安装在受管 profile 中）。
+
+本节只记录用户的接受，**不改写**上面的 `DECISION: FAIL`。归档使用 `--skip-specs`：本 change 的主规范早在实施期已同步到 `openspec/specs/collab-kernel`，之后又被 change `dsh-collab-invite-admission`（已归档）修改过，加入了 host-index 用途与公开 reduce。再合并一次这里的旧 delta，会冲掉这些后续修改。此后内核的行为由已归档的 dsh-collab、dsh-collab-invite-admission 与主干验收（main adae4b0ca）覆盖。
