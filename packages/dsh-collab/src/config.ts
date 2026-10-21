@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto'
+import { homedir } from 'node:os'
 import { realpathSync } from 'node:fs'
 import { mkdir, realpath, stat } from 'node:fs/promises'
 import { dirname, basename, isAbsolute, join, relative, sep, resolve } from 'node:path'
 
 export type Admission = 'invite' | 'allowlist'
-export interface HostConfig { dataDir: string; admission?: Admission; allowedSessionIds?: readonly string[]; denySessionIds?: readonly string[] }
+export interface HostConfig { dataDir?: string; admission?: Admission; allowedSessionIds?: readonly string[]; denySessionIds?: readonly string[] }
 export interface AdmissionPolicy { admission: Admission; allowedSessionIds: readonly string[]; denySessionIds: readonly string[] }
 function bad(): never { throw Object.assign(new Error('Invalid collaboration Host configuration'), { code: 'COLLAB_BAD_CONFIG' }) }
 function under(root: string, target: string) {
@@ -41,10 +42,19 @@ export function admissionPolicy(config: HostConfig): AdmissionPolicy {
   if (allowedSessionIds.some(id => denySessionIds.includes(id))) bad()
   return { admission, allowedSessionIds, denySessionIds }
 }
-export async function validateConfig(config: HostConfig, workspaces: readonly string[]) {
+/**
+ * Default ledger location: `<DSH home>/plugins/dsh-collab`, where DSH home follows the official
+ * rule (non-empty Host-process `DSH_HOME`, else `~/.dsh`). Never derived from session input.
+ */
+export function defaultDataDir(env: Record<string, string | undefined> = process.env) {
+  const fromEnv = env.DSH_HOME
+  const home = fromEnv !== undefined && fromEnv.trim().length > 0 ? resolve(fromEnv.startsWith('~/') ? join(homedir(), fromEnv.slice(2)) : fromEnv) : join(homedir(), '.dsh')
+  return join(home, 'plugins', 'dsh-collab')
+}
+export async function validateConfig(config: HostConfig, workspaces: readonly string[], env: Record<string, string | undefined> = process.env) {
   const policy = admissionPolicy(config)
-  if (typeof config.dataDir !== 'string' || !isAbsolute(config.dataDir)) bad()
-  const dataDir = await canonical(resolve(config.dataDir))
+  if (config.dataDir !== undefined && (typeof config.dataDir !== 'string' || !isAbsolute(config.dataDir))) bad()
+  const dataDir = await canonical(resolve(config.dataDir ?? defaultDataDir(env)))
   if (dataDir.split(sep).includes('node_modules')) bad()
   for (const cwd of workspaces) {
     if (!isAbsolute(cwd)) bad()

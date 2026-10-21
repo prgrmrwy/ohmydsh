@@ -51,6 +51,8 @@ test('bundle-source: build consumes current kernel source despite deliberately s
     const names = payload.files.map(file => file.path)
     for (const required of ['lib/index.js', 'lib/index.d.ts', 'lib/v1.md', 'lib/salvage.mjs', 'cordis.patch.yml', 'LICENSE']) assert.ok(names.includes(required), required)
     assert.ok(!names.some(name => name.startsWith('src/') || name.startsWith('test/')))
+    // data-dir-03：包不自带禁用行 — loading is decided only by the profile registering the bundle.
+    assert.ok(!/disabled:\s*true/.test(await readFile(join(pkg, 'cordis.patch.yml'), 'utf8')), 'data-dir-03：包不自带禁用行')
     const unpack = spawnSync('tar', ['-xzf', join(packed, payload.filename), '-C', packed], { encoding: 'utf8' })
     assert.equal(unpack.status, 0, unpack.stderr)
     const unpacked = join(packed, 'package')

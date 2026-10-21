@@ -18,6 +18,29 @@ describe('trusted Host config', () => {
   it('config-unknown: rejects unknown config fields before IO', async () => {
     await expect(validateConfig({ dataDir: '/unused', principal: 'forged' } as never, [])).rejects.toMatchObject({ code: 'COLLAB_BAD_CONFIG' })
   })
+  it('data-dir-01：未配置 dataDir 时使用 DSH home 下的默认目录', async () => {
+    const parent = await realpath(tmpdir())
+    const home = await mkdtemp(join(parent, 'collab-home-'))
+    try {
+      const config = await validateConfig({}, [], { DSH_HOME: home })
+      const expected = join(home, 'plugins', 'dsh-collab')
+      expect(config.dataDir).toBe(expected)
+      expect((await stat(expected)).mode & 0o777).toBe(0o700)
+      const again = await validateConfig({}, [], { DSH_HOME: home })
+      expect(again.serviceId).toBe(config.serviceId)
+    } finally { if (basename(home).startsWith('collab-home-') && dirname(home) === parent) await rm(home, { recursive: true, force: true }) }
+  })
+  it('data-dir-02：显式 dataDir 优先且仍受校验', async () => {
+    const parent = await realpath(tmpdir())
+    const home = await mkdtemp(join(parent, 'collab-home-'))
+    try {
+      const explicit = join(home, 'explicit')
+      const config = await validateConfig({ dataDir: explicit }, [], { DSH_HOME: home })
+      expect(config.dataDir).toBe(explicit)
+      await expect(stat(join(home, 'plugins', 'dsh-collab'))).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(validateConfig({ dataDir: 'relative' }, [], { DSH_HOME: home })).rejects.toMatchObject({ code: 'COLLAB_BAD_CONFIG' })
+    } finally { if (basename(home).startsWith('collab-home-') && dirname(home) === parent) await rm(home, { recursive: true, force: true }) }
+  })
   it('config-03: canonical workspace aliases denied; wide existing dirs not silently chmodded', async () => {
     const parent = await realpath(tmpdir())
     const root = await mkdtemp(join(parent, 'collab-config-'))

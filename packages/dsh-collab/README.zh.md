@@ -3,21 +3,20 @@
 [English](README.md) · 简体中文
 
 <!-- problem -->
-同一Host中的独立会话可以在不同仓库工作，但需要一份权威共享台账和定向下一回合通知。本bundle把已有普通会话接入独立协作内核，不把一级会话改造成团队，不创建子会话。默认禁用，必须由受信宿主显式配置。
+同一Host中的独立会话可以在不同仓库工作，但需要一份权威共享台账和定向下一回合通知。本bundle把已有普通会话接入独立协作内核，不把一级会话改造成团队，不创建子会话。是否启用由manifest的`enabled`决定，profile登记了bundle就加载。
 
 ## 配置
 
-只在目标profile登记bundle，再覆盖默认disabled组合行，明确绝对dataDir与disabled:false。manifest仍默认禁用，部署必须由你另行选择。不能从会话环境变量选存储位置。
+在manifest里把dsh-collab设为`enabled: true`，`dsh build`后`dsh restart`即可，不需要任何本机路径配置。数据目录默认是`<DSH home>/plugins/dsh-collab`：DSH home取Host进程环境中非空的`DSH_HOME`，否则为`~/.dsh`。存储位置只由Host配置和进程环境决定，不能由会话参数或模型输入选择。以下键都可选，需要时在profile补丁里按行id覆盖：
 
 ```yaml
-- override:
-    dsh-collab:
-      disabled: false
-      config:
-        dataDir: /absolute/profile-owned-state/collab
-        admission: invite            # 默认；allowlist 恢复首版名单准入
-        allowedSessionIds: []        # invite 下仅作 collab_status 的种子联系人
-        denySessionIds: []           # 排除名单：既不能调用，也不能被认领或唤醒
+- id: dsh-collab
+  name: dsh-collab
+  config:
+    dataDir: /absolute/profile-owned-state/collab   # 可选；须为绝对路径，缺省用上面的默认目录
+    admission: invite            # 默认；allowlist 恢复首版名单准入
+    allowedSessionIds: []        # invite 下仅作 collab_status 的种子联系人
+    denySessionIds: []           # 排除名单：既不能调用，也不能被认领或唤醒
 ```
 
 **准入模式。** `invite`（默认）：通过普通会话校验的一级会话都可以建空间；被Leader用完整session ID邀请并认领的会话即获准进入该空间，授权记录就是台账里的`member/invited`提交，无需改配置或重启。`allowlist`：额外要求调用者与被邀请者在`allowedSessionIds`中，旧配置原样可用。两种模式下subagent、非零delegationDepth、已归档、官方所有权拒绝或位于`denySessionIds`的会话都不能调用、不能被认领。非法`admission`、列表含空串/首尾空白/重复项、或同一ID同时在两个列表时插件拒绝启动（`COLLAB_BAD_CONFIG`），不注册工具也不创建dataDir。**修改排除名单或准入模式后必须`dsh build`并`dsh restart`才生效**，没有热更新。
