@@ -14,7 +14,7 @@ export interface Decision { id: number; source: 'main' | 'subagent'; tier: strin
 export interface Toast { id: number; lines: string[] }
 const TIER_ORDER = ['simple', 'standard', 'complex', 'escalated']
 const pct = (v: number) => `${Math.round(v * 100)}%`
-export const TOAST_MS = 1000
+export const TOAST_MS = 3000
 
 /** Line 1: who judged, tier → (model) effort, confidence, duration. Line 2: the whole distribution in tier order. */
 export function toastText(d: Decision): string[] {

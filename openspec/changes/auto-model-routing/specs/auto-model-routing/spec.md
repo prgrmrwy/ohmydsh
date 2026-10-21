@@ -217,7 +217,7 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - `source = subagent`：`route_subagent` 成功返回；`model` 与 `effort` 为工具返回值；记录到调用工具的会话，与该会话模式无关。
 `confidence` 取 Jev 响应 `answers.tier.confidence`（0–1，缺失或非数字时不显示）；`probabilities` 取 `answers.tier.probabilities` 中四个档位的有限数值（其余键忽略，一个都没有时不显示）；`ms` 为该次 Jev 请求耗时。判档失败、取消或被丢弃时 MUST NOT 记录。
 
-开关开启时，状态接口 SHALL 返回 `decision`；client SHALL 在发现新的决策 `id` 时于芯片上方显示一行提示，1 秒后自动消失，不拦截指针。提示两行：第一行 `主会话判断 · <tier> → <effort> · 置信 <n>% · <s>s` 或 `子会话判断 · <tier> → <model> · <effort> · 置信 <n>% · <s>s`；第二行为分布，按 simple、standard、complex、escalated 固定顺序列出各档位百分比，以 ` / ` 分隔，例如 `simple 1% / standard 4% / complex 92% / escalated 3%`；无分布时省略第二行。两次状态读取之间若有多次决策，只显示最新一次。开关关闭时状态接口 MUST NOT 返回 `decision`，client 不显示提示。
+开关开启时，状态接口 SHALL 返回 `decision`；client SHALL 在发现新的决策 `id` 时于芯片上方显示提示，3 秒后自动消失，不拦截指针；提示 MUST 在 Agent 运行、官方隐藏右侧控件期间仍可见（渲染在隐藏区域之外）。提示两行：第一行 `主会话判断 · <tier> → <effort> · 置信 <n>% · <s>s` 或 `子会话判断 · <tier> → <model> · <effort> · 置信 <n>% · <s>s`；第二行为分布，按 simple、standard、complex、escalated 固定顺序列出各档位百分比，以 ` / ` 分隔，例如 `simple 1% / standard 4% / complex 92% / escalated 3%`；无分布时省略第二行。两次状态读取之间若有多次决策，只显示最新一次。开关关闭时状态接口 MUST NOT 返回 `decision`，client 不显示提示。
 
 #### Scenario: 主会话判档提示
 - **GIVEN** 开关开启，会话为 `AUTO`，Jev 返回 `complex`、confidence 0.92，实际模型为 Opus
@@ -234,10 +234,10 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - **WHEN** 读取状态
 - **THEN** 关闭时状态不含 `decision`；失败时不产生新的 `decision`
 
-#### Scenario: 提示只显示一次且 1 秒消失
+#### Scenario: 提示只显示一次且 3 秒消失
 - **GIVEN** client 已显示 id 为 7 的决策提示
-- **WHEN** 后续状态读取仍返回 id 7，或经过 1 秒
-- **THEN** 不重复显示 id 7；1 秒后提示被移除
+- **WHEN** 后续状态读取仍返回 id 7，或经过 3 秒
+- **THEN** 不重复显示 id 7；3 秒后提示被移除；官方隐藏右侧控件时提示仍可见
 
 ### Requirement: Host 端点边界
 本插件只提供两个经 `connection.fetch.register` 注册的端点：读取状态与设置模式。两者 SHALL 以请求体 `sessionId` 经官方会话控制器解析目标会话（与官方会话端点同一授权模型）；`sessionId` 缺失、非字符串、无法解析或指向 `origin = "subagent"` 会话时 SHALL 返回 4xx 且不修改任何状态；设置模式 SHALL 只修改该会话的模式与 `disabled`（设为 `AUTO` 时清除），`mode` 不属于 `AUTO | MANUAL` 时返回 4xx；读取状态 SHALL 返回 `disabled`（如有）。

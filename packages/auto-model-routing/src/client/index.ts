@@ -1,4 +1,5 @@
 import { createElement as h, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
@@ -31,7 +32,7 @@ const CSS = `
 .amr-card p{margin:4px 0}
 .amr-muted{color:var(--dsw-alias-label-tertiary)}
 .amr-error{color:var(--dsw-alias-state-error-primary)}
-.amr-toast{position:absolute;z-index:1100;bottom:calc(100% + 6px);left:0;padding:4px 8px;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg,#fff);color:var(--dsw-alias-label-secondary);box-shadow:var(--dsw-elevation-prominent);font-size:12px;line-height:18px;white-space:nowrap}
+.amr-toast{position:fixed;z-index:1100;transform:translateY(-100%);padding:4px 8px;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg,#fff);color:var(--dsw-alias-label-secondary);box-shadow:var(--dsw-elevation-prominent);font-size:12px;line-height:18px;white-space:nowrap}
 `
 
 // Left-right swap arrows at the picker chevron's size; colour follows currentColor.
@@ -48,6 +49,14 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
   const [error, setError] = useState('')
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const [toast, setToast] = useState<Toast | undefined>(initialToast)
+  // The composer hides the right-side controls while the agent runs (when Jev decides), so the hint is
+  // portaled to <body> and placed above the chip's last visible position.
+  const rootRef = useRef<HTMLSpanElement | null>(null)
+  const anchor = useRef<{ left: number; top: number } | undefined>(undefined)
+  const remember = () => {
+    const rect = rootRef.current?.getBoundingClientRect()
+    if (rect && rect.width > 0) anchor.current = { left: rect.left, top: rect.top - 6 }
+  }
   // The first poll of each session only primes `seen`: an old decision is never announced on mount or session switch.
   const seen = useRef<number | undefined>(undefined)
   const primed = useRef(false)
@@ -59,6 +68,7 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
     const next = nextToast(seen.current, decision)
     if (!next) return
     seen.current = next.id
+    remember()
     setToast(next)
   }, [view, sessionId])
   // Hiding depends only on the toast shown, so later state changes cannot cancel it.
@@ -93,7 +103,8 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
   const off = view?.disabled
   const hint = off ? CATEGORY_HINTS[off.category] ?? off.category : undefined
   // The panel sits inside the root (padding bridges the gap), so moving onto it keeps it open.
-  return h('span', { className: 'amr-root', onMouseEnter: on('enter'), onMouseLeave: on('leave'), onFocus: on('focus'), onBlur: on('blur') },
+  const place = anchor.current ?? { left: 16, top: (typeof window === 'undefined' ? 0 : window.innerHeight) - 96 }
+  return h('span', { ref: (el: HTMLSpanElement | null) => { rootRef.current = el; remember() }, className: 'amr-root', onMouseEnter: on('enter'), onMouseLeave: on('leave'), onFocus: on('focus'), onBlur: on('blur') },
     h('style', null, CSS),
     h('button', {
       type: 'button', className: 'amr-trigger', disabled: busy || !view, onClick: () => { void toggle() },
@@ -101,7 +112,10 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
       title: off ? `Jev 判档已停用：${hint}。点击 AUTO 重试` : '点击切换自动推理强度',
       'aria-label': `推理强度模式：${view?.mode ?? '加载中'}，点击切换`,
     }, h('span', null, off ? `${view?.mode} · Jev 停用` : view?.mode ?? '…'), h(SwapIcon)),
-    toast && !open && h('div', { className: 'amr-toast', role: 'status', style: { pointerEvents: 'none' } }, ...toast.lines.map((line, index) => h('div', { key: index, className: index ? 'amr-muted' : undefined }, line))),
+    toast && !open && (typeof document === 'undefined'
+      ? h('div', { className: 'amr-toast', role: 'status', style: { pointerEvents: 'none' } }, ...toast.lines.map((line, index) => h('div', { key: index, className: index ? 'amr-muted' : undefined }, line)))
+      : createPortal(h('div', { className: 'amr-toast', role: 'status', style: { pointerEvents: 'none', left: place.left, top: place.top } },
+        h('style', null, CSS), ...toast.lines.map((line, index) => h('div', { key: index, className: index ? 'amr-muted' : undefined }, line))), document.body)),
     open && h('section', { className: 'amr-panel', 'aria-label': '自动路由状态' },
       h('div', { className: 'amr-card' },
         h('p', null, h('strong', null, view?.mode === 'AUTO' ? '自动调整推理强度' : '手动：不自动调整')),

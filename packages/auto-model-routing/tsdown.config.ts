@@ -7,7 +7,7 @@ export default defineConfig({
   platform: 'browser',
   dts: false,
   clean: false,
-  external: [/^@deepseek-ai\//, 'react', 'react/jsx-runtime'],
+  external: [/^@deepseek-ai\//, 'react', 'react/jsx-runtime', 'react-dom'],
   outputOptions: {
     entryFileNames: 'client.js',
     banner: 'window.__ModuleLoader__.load({ id: "dsh-auto-model-routing", factory: (require) => {',

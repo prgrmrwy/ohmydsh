@@ -13,7 +13,7 @@ Put `OPENROUTER_API_KEY=sk-or-...` in the main checkout's `.env.local`; `bin/dsh
 
 **When Jev fails** (no key, out of credits, bad key, rate limit, region block, timeout, bad response), the chat switches to MANUAL and the chip shows `MANUAL · Jev 停用` with the reason. Click AUTO to try again. Cancelling a turn does not count as a failure. There is no polling and no balance query.
 
-**Decision hint (optional).** Put `{"decisionToast": true}` in `$DSH_HOME/plugins/dsh-auto-model-routing/config.json` to show a one-second hint above the chip after each Jev decision: who judged, tier → (model) effort, confidence and duration, then the whole distribution, for example `主会话判断 · complex → xhigh · 置信 92% · 0.53s` / `simple 1% / standard 4% / complex 92% / escalated 3%`. It appears within about 3 seconds and is off by default.
+**Decision hint (optional).** Put `{"decisionToast": true}` in `$DSH_HOME/plugins/dsh-auto-model-routing/config.json` to show a three-second hint above the chip after each Jev decision: who judged, tier → (model) effort, confidence and duration, then the whole distribution, for example `主会话判断 · complex → xhigh · 置信 92% · 0.53s` / `simple 1% / standard 4% / complex 92% / escalated 3%`. It appears within about 3 seconds and is off by default.
 
 The `route_subagent` tool uses the same Jev judgment for sub-agents and returns provider/model/reasoning_effort. The `subagent-model-routing` skill tells the agent to pass them explicitly, and to stop and ask you when the tool fails.
 

@@ -13,7 +13,7 @@
 
 **Jev 失败时**（未配置 key、余额不足、key 无效、限流、地区受限、超时、响应无效），会话切到 MANUAL，芯片显示 `MANUAL · Jev 停用` 与原因；点 AUTO 重试。取消回合不算失败。不轮询、不查余额。
 
-**决策提示（可选）**：在 `$DSH_HOME/plugins/dsh-auto-model-routing/config.json` 写入 `{"decisionToast": true}`，每次 Jev 判档后在芯片上方显示 1 秒提示：谁判断的、档位 → （模型）effort、置信与耗时，第二行为四档分布，例如 `主会话判断 · complex → xhigh · 置信 92% · 0.53s` / `simple 1% / standard 4% / complex 92% / escalated 3%`。最多约 3 秒内出现，默认关闭。
+**决策提示（可选）**：在 `$DSH_HOME/plugins/dsh-auto-model-routing/config.json` 写入 `{"decisionToast": true}`，每次 Jev 判档后在芯片上方显示 3 秒提示：谁判断的、档位 → （模型）effort、置信与耗时，第二行为四档分布，例如 `主会话判断 · complex → xhigh · 置信 92% · 0.53s` / `simple 1% / standard 4% / complex 92% / escalated 3%`。最多约 3 秒内出现，默认关闭。
 
 `route_subagent` 工具对子会话使用同一个 Jev 判断，返回 provider/model/reasoning_effort。配套 skill 要求主 Agent 显式传入，工具失败时暂停委派并询问你。
 

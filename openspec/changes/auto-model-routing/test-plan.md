@@ -44,8 +44,8 @@
 | specs/auto-model-routing/spec.md → 决策提示（可选） | 主会话判档提示 | test/host.integration.test.ts | main_decision_toast | 🟢 green |
 | specs/auto-model-routing/spec.md → 决策提示（可选） | 子会话选模提示 | test/host.integration.test.ts | subagent_decision_toast | 🟢 green |
 | specs/auto-model-routing/spec.md → 决策提示（可选） | 开关关闭或判档失败不提示 | test/host.integration.test.ts | toast_off_or_failure_silent | 🟢 green |
-| specs/auto-model-routing/spec.md → 决策提示（可选） | 提示只显示一次且 1 秒消失 | test/client.test.ts | toast_once_and_expires | 🟢 green |
-| specs/auto-model-routing/spec.md → 决策提示（可选） | 提示只显示一次且 1 秒消失（组件层：首轮预热、换会话不弹旧值、状态变化不阻止消失） | test/toast.dom.test.ts | first poll only primes / switching session / toast still disappears | 🟢 green |
+| specs/auto-model-routing/spec.md → 决策提示（可选） | 提示只显示一次且 3 秒消失 | test/client.test.ts | toast_once_and_expires | 🟢 green |
+| specs/auto-model-routing/spec.md → 决策提示（可选） | 提示只显示一次且 3 秒消失（组件层：首轮预热、换会话不弹旧值、状态变化不阻止消失、控件隐藏时仍可见） | test/toast.dom.test.ts | first poll only primes / switching session / toast still disappears / toast is visible while the composer hides the chip | 🟢 green |
 | specs/auto-model-routing/spec.md → Host 端点边界 | 无效会话被拒绝且无副作用 | test/endpoints.test.ts | invalid_targets_rejected | 🟢 green |
 | specs/auto-model-routing/spec.md → Host 端点边界 | 只修改目标会话 | test/endpoints.test.ts | set_mode_targets_one_session | 🟢 green |
 | specs/auto-model-routing/spec.md → 自动选路不得绕过既有模型门禁 | 门禁拒绝不引起改路由 | test/router.test.ts | guard_failure_never_changes_model | 🟢 green |

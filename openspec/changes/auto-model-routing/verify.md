@@ -96,7 +96,8 @@
 - 红：jev 成功结果缺 confidence/ms；host `main_decision_toast`、`subagent_decision_toast`、`toast_off_or_failure_silent` 无 `decision`；client 面板仍渲染列表、`toastText` 不存在。绿：实现后全部通过。
 - 用户追加：提示同时显示四档分布（第二行，固定顺序）与胜出档 `tier → effort`；Jev 客户端保留四档 0–1 概率，置信超范围不显示。
 - 独立复核 `APPROVE_WITH_CHANGES`：M1（换会话弹出旧决策）与 M2（状态变化取消隐藏定时器导致提示卡住）先以 jsdom 组件测试（仓库已有 jsdom，未新增依赖）复现为红，再修复为绿；M3 补组件层测试；M4 补 router/host 边界测试（无 effort、丢弃、取消、配置损坏、同回合重映射不重复）；m1 写入 D10；m2 子会话调用方不记录；m3 置信与分布限 0–1；m5 删除未用 `until`；m6 测试夹具不再绕过类型。m4（每次状态读取同步读配置）保留：单个小文件、每芯片 3 秒一次，代价可忽略。
-- package **64/64**，typecheck/build 通过；client bundle 不含出站代码。提示在真实浏览器中的显示与 1 秒消失待 GUI 复验。
+- package **64/64**，typecheck/build 通过；client bundle 不含出站代码。
+- **GUI 复验发现提示不可见**：线上状态接口已返回正确的 `decision`（含分布），但官方 composer 在 Agent 运行时把右侧控件容器设为 `hidden`，Jev 正在此时判档，提示随芯片一起隐藏。先加 jsdom 测试复现为红（提示位于隐藏子树内），改为 portal 到 `<body>`、`position: fixed` 定位于芯片上次可见位置后转绿。用户同时要求时长改为 3 秒。package **65/65**。
 
 ## Overall Decision
 
