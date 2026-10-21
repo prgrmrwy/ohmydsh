@@ -1,6 +1,6 @@
 export type Tier = 'simple' | 'standard' | 'complex' | 'escalated'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
-export type Reason = 'jev' | 'continued' | 'no-effort-support' | 'manual-restore' | 'jev-failed'
+export type Reason = 'jev' | 'continued' | 'no-effort-support' | 'jev-failed'
 
 export const tiers: readonly Tier[] = ['simple', 'standard', 'complex', 'escalated']
 const efforts: readonly Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']

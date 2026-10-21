@@ -1,6 +1,8 @@
 ## Context
 
-目标环境是个人本机 DSH `0.2.0-rc.2`，不是多用户服务。首版（`13f1587b`，默认禁用、未上线）用本地关键词规则分类；2026-10-20 用户否决该方向：判断必须由 Jev 这类专用决策模型完成，通用模型太慢，且不接受本地降级。本修订替换判断来源与失败语义，并让子会话复用同一判断；首版已验证的锚点、复原、effort 映射、端点与 client 保留。
+目标环境是个人本机 DSH `0.2.0-rc.2`，不是多用户服务。首版（`13f1587b`，默认禁用、未上线）用本地关键词规则分类；2026-10-20 用户否决该方向：判断必须由 Jev 这类专用决策模型完成，通用模型太慢，且不接受本地降级。本修订替换判断来源与失败语义，并让子会话复用同一判断；首版已验证的 effort 映射、端点与 client 保留。
+
+**修订（2026-10-21，GUI 验收中）**：用户决定切回 MANUAL 不复原，只停止自动调整。正式运行时 `dsh-api-session-controller` 的 `selectionFor().current` 在无待生效手选时回退为上一请求头配置，官方模型选择器也显示该值（projection `next = pending ?? lastUsed`）；因此**在无待生效手选时**，AUTO 改写的 effort 会被右侧选择器显示，停止改写后官方继续沿用它。若用户在 AUTO 期间手选，该手选保持待生效（请求头与之不等，官方不消费），右侧显示手选值、实际请求为 AUTO 值；切 MANUAL 后手选生效。这是官方语义，插件不干预。锚点、复原义务、`selection-projection` 与相关场景全部删除。
 
 已核验的运行时约束（首版沿用）：
 - `agent/pre-step` 携带 `{agent, messages, turn, step, signal}`；step 1 领取消息中只接受 `source.kind === "user"`（集成陷阱文档 §5）。
@@ -20,7 +22,7 @@
 
 ## Goals / Non-Goals
 
-目标：主会话仅改 effort；判断由 Jev 完成且约 1 秒内返回；失败立即停用并在 GUI 上可见；MANUAL 可复原锚点；主子会话共用同一判断。
+目标：主会话仅改 effort；判断由 Jev 完成且约 1 秒内返回；失败立即停用并在 GUI 上可见；MANUAL 只停止自动调整、不复原；主子会话共用同一判断。
 
 不做：本地规则或通用模型降级、主动查询余额、轮询健康、自动重试、自动恢复 AUTO、主会话换模型、子会话动态改配置、jev-mcp 改造（属于 `configurable-jev-provider`）、置信度门槛、持久决定日志、全局开关。
 
@@ -36,15 +38,15 @@
 ### D2. 官方合成后只调 effort（沿用）
 `agent/request` 外层 listener 先 `await next()`，保留官方 provider/model 与其它配置，只修改 reasoning effort；子会话请求直接透传。effort 支持范围取实际输出模型的目录；同回合模型变化时按新模型重新映射，不重新判断。
 
-### D3. 持久小状态与 MANUAL 过渡（沿用并扩展）
-会话状态 `{mode, anchor?, restore, disabled?}`，`disabled = {category, at}` 记录最近一次因 Jev 失败而停用。锚点与复原义务语义与首版相同（`selection-projection` 折叠最近 `model/selection`；义务在持久请求头与当前官方合成均匹配锚点后清除；同 step 重试、header 前取消或失败均保留义务；模型不匹配透传等待）。
+### D3. 持久小状态：模式与停用
+会话状态 `{mode, disabled?}`，`disabled = {category, at}` 记录最近一次因 Jev 失败而停用。不保存锚点、无复原义务：MANUAL 下插件完全透传，effort 由官方选择决定：无待生效手选时为上一请求的配置（即 AUTO 最后一次的值）；AUTO 期间若有手选，则为该手选。用户在官方选择器中自行调整。读取旧状态文件时忽略 `restore`/`anchor` 字段（宽松解析后只取 `mode` 与 `disabled`），下次写入即为新格式。
 
-停用即 MANUAL：Jev 失败时执行与用户切 MANUAL 相同的转换（`mode = MANUAL`、产生复原义务、废止本回合 AUTO 缓存），并额外写入 `disabled`。因此停用之后的请求要么复原到锚点，要么透传，不存在第三种“降级判断”路径。用户再次把模式设为 AUTO 时清除 `disabled`；用户手动设 MANUAL 不清除也不写入 `disabled`。Jev 返回后（成功或失败）重新读取会话状态：若等待期间模式已变（用户切换过），丢弃本次结果，不写决定、不写 `disabled`。状态文件 schema 校验扩展 `disabled` 字段，旧文件（无该字段）可读。
+停用即 MANUAL：Jev 失败时 `mode = MANUAL`、废止本回合 AUTO 决定（本回合不改写），并写入 `disabled`。用户再次把模式设为 AUTO 时清除 `disabled`；用户手动设 MANUAL 不清除也不写入 `disabled`。Jev 返回后（成功或失败）重新读取会话状态：若等待期间模式已变，丢弃本次结果，不写决定、不写 `disabled`。
 
-理由：复用已验证的复原机制，避免为“停用”设计新的改写状态。替代方案“仅本回合不改写、下回合再试”需要重复撞错，每回合多等最长 3 秒，且人类不易察觉，否决。
+理由：用户明确不要复原。删除复原后 MANUAL 成为纯透传，消除了“同 step 重试仍用旧 assembled 快照”“pending 手选与持久头精确匹配”等全部边界，以及首版最复杂的约 10 个场景。代价：关闭 AUTO 后 effort 停留在最后一次 AUTO 值，直到用户手选；README 写明。
 
 ### D4. 每用户回合一次 Jev 判断
-选择：step 1 的 `agent/pre-step` 中先 `const decision = await next()`；仅当 `decision.kind === 'enter'`、会话为 AUTO、无复原义务且 `decision.messages` 中有用户消息时，聚合可信文本（领取顺序、块顺序、`"\n"` 连接、`.slice(0, 8000)`），`await` 一次 Jev 请求，然后返回 `decision`。`reject` 时不调 Jev、不记录本回合决定（被拒的提案不占用本回合判断）。请求 body：
+选择：step 1 的 `agent/pre-step` 中先 `const decision = await next()`；仅当 `decision.kind === 'enter'`、会话为 AUTO 且 `decision.messages` 中有用户消息时，聚合可信文本（领取顺序、块顺序、`"\n"` 连接、`.slice(0, 8000)`），`await` 一次 Jev 请求，然后返回 `decision`。`reject` 时不调 Jev、不记录本回合决定（被拒的提案不占用本回合判断）。请求 body：
 
 ```json
 {"model": "typesafe/jev-1.13",
@@ -96,12 +98,14 @@ skill 规则：委派前调用 `route_subagent`；成功则把返回的三个字
 
 理由：工具与主会话共用判断函数和失败分类，满足同构；表放在代码中是唯一来源，测试直接断言常量。首版 skill 中的档位表删除，避免两份来源。
 
-### D7. 两个端点与面板（扩展停用显示）
-沿用两个已认证 POST 端点 `/api/auto-model-routing.state` 与 `.setMode`（sessionId 解析、拒绝未知/子会话、只写目标会话）。`state` 响应新增 `disabled?: {category, at}`。`setMode(AUTO)` 清除 `disabled`。
+### D7. 两个端点与芯片
+沿用两个已认证 POST 端点 `/api/auto-model-routing.state` 与 `.setMode`（sessionId 解析、拒绝未知/子会话、只写目标会话）。`state` 响应含 `mode`、`disabled?`、本回合 effort/reason 与历史。`setMode(AUTO)` 清除 `disabled`。
 
-芯片 order -10。停用时芯片**可见文本**为 `MANUAL · Jev 停用`，并带警示样式；title 与面板显示完整提示、类别与时间，以及“点击 AUTO 重试”。面板历史为最近 20 条决定，每条为 `{reason, tier?, effort?, category?}`，`reason` 取自 spec 闭集：成功 `jev`，非用户回合 `continued`，无 effort 支持 `no-effort-support`，复原 `manual-restore`，Jev 失败 `jev-failed`（含 `category`，无 effort，随后的复原请求另记 `manual-restore`）；仅内存，重启清空；不保存任务文本或响应体。client 轮询沿用 3 秒（只读本插件状态端点，不是 Jev 健康检查）。
+芯片 order -10，外观与官方模型选择器触发器一致（实测其样式：无边框、透明底、高 28px、圆角 `--dsw-radius-sm`、13px、颜色 `--dsw-alias-label-secondary`、内边距 `0 4px 0 8px`、元素间距 4px，hover 底色 `--dsw-alias-interactive-bg-hover`，focus-visible 用焦点环）。芯片是单个按钮：可见文本为模式名，**图标在文字之后**（DSH 惯例），图标为左右交换箭头，颜色 `--dsw-alias-label-caption`；点击即切换。状态面板在鼠标悬停（约 150ms 延迟）或键盘聚焦时显示，指针移出芯片与面板后收起；面板材质沿用官方菜单变量（`--dsw-alias-bg`、`--dsw-elevation-prominent`）。
 
-理由：芯片是用户每次发送消息都会看到的位置，最可靠地让人类感知停用。替代方案“写入模型上下文”会干扰对话与缓存；DSH 全局通知接口未核实，本 change 不依赖它。
+停用时芯片**可见文本**为 `MANUAL · Jev 停用`，文字与图标为错误色 `--dsw-alias-state-error-primary`，title 与面板显示完整提示、类别与时间，以及“点击 AUTO 重试”。面板历史为最近 20 条决定，每条为 `{reason, effort?, category?}`，`reason` 取自 spec 闭集：成功 `jev`，非用户回合 `continued`，无 effort 支持 `no-effort-support`，Jev 失败 `jev-failed`（含 `category`，无 effort）；仅内存，重启清空；不保存任务文本或响应体。面板显示插件本回合实际输出的 effort，不声称右侧选择器总能反映它。面板开关是纯函数（进入/聚焦打开，离开/失焦收起），单测断言；真实悬停与 150ms 延迟由 GUI 复验。历史条目实现上从未携带 `tier`，此处去掉以与代码一致。client 轮询沿用 3 秒。
+
+理由：用户在 GUI 验收中要求与右侧模型选择器同一视觉语言；样式值取自官方 bundle 而非自定义颜色，跟随主题。芯片不显示 effort：无待生效手选时官方选择器已展示 AUTO 结果（新回合判档前显示上一回合的值）；有手选时以面板为准。
 
 ### D9. 固定映射表（沿用）
 
@@ -129,13 +133,13 @@ skill 规则：委派前调用 `route_subagent`；成功则把返回的三个字
 
 ## Risks / Verification
 
-- **隐私**：AUTO 每用户回合、每次子会话决策都外发任务文本（≤8000 字符）至 OpenRouter 与 TypeSafe。默认 MANUAL；README 与 manifest note 写明；源码扫描断言唯一出站主机为 `openrouter.ai`，且请求不含锚点、状态或其它会话数据。OpenRouter 端点元数据未公布该模型的数据保留策略；用户已开通并充值账户、同意试用，但**保留与日志条款未确认**，README 与 note 如实写明，由用户在 OpenRouter 后台自行设置。
+- **隐私**：AUTO 每用户回合、每次子会话决策都外发任务文本（≤8000 字符）至 OpenRouter 与 TypeSafe。默认 MANUAL；README 与 manifest note 写明；源码扫描断言唯一出站主机为 `openrouter.ai`，且请求不含会话状态或其它会话数据。OpenRouter 端点元数据未公布该模型的数据保留策略；用户已开通并充值账户、同意试用，但**保留与日志条款未确认**，README 与 note 如实写明，由用户在 OpenRouter 后台自行设置。
 - **凭据**：只经官方 launch environment 读取（其层次为进程环境 → 调用目录 `.env` → DSH home `.env`；本仓约定由 `bin/dsh` 从主 checkout `.env.local` 注入进程层，不在其它 `.env` 放置该 key）；测试断言状态文件、端点响应、错误结果、面板与日志调用均不含 key。
 - **延迟**：首请求增加约 0.8s，最坏 3s；超时即停用，人类可见。
 - **余额耗尽时的真实状态码未知**：spike 中零余额欠费仍成功；按 402 设计，其它状态码落入既有类别，均停用。真实耗尽表现须在使用中观察。
 - **Jev 误判**：采用其 choice；用户可切 MANUAL。
 - **pre-step await 的取消**：用户取消必须让 Jev 请求立即中止且不停用；以真实 AgentLoop 测试覆盖。
-- **复原与停用组合**：停用复用 MANUAL 过渡；集成测试覆盖“AUTO 已改写 → Jev 下一回合失败 → 复原到锚点”。
+- **关闭后 effort 残留**：切 MANUAL 或 Jev 停用后，无待生效手选时 effort 停在最后一次 AUTO 值，直到用户在官方选择器中手选；AUTO 期间的手选会在切 MANUAL 后生效。这是用户要求的行为，README 写明。
 - **模型 id 漂移**：固定 `typesafe/jev-1.13`；OpenRouter 下线该 id 时返回 4xx/404，落入 `rejected` 并停用，提示可见。
 - **工具遵守度**：skill 只能文本约束主 Agent；现场委派验证。
 

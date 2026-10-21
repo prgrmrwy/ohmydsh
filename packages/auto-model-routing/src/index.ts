@@ -6,17 +6,16 @@ import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-tools'
 import { resolve } from 'node:path'
 import { homedir } from 'node:os'
-import { FileStateStore, RoutingState, type Selection } from './state.js'
+import { FileStateStore, RoutingState } from './state.js'
 import { Router, type AgentRef, type RequestConfig } from './router.js'
 import type { Effort } from './effort.js'
 import { endpoint } from './endpoints.js'
-import { selectionProjection } from './selection-projection.js'
 import { JevClient } from './jev.js'
 import { routeSubagentTool } from './subagent-tool.js'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 
 export const name = 'dsh-auto-model-routing'
-export const inject = ['llm', 'agents', 'sessionProjections', 'tools']
+export const inject = ['llm', 'agents', 'tools']
 const knownEfforts = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
 
 /** Test seams only; production uses the defaults. */
@@ -27,7 +26,6 @@ export function apply(ctx: Context, config: Config = {}): void {
   const jev = new JevClient(launchEnvironmentOf(ctx), config.jevBase, config.jevTimeoutMs)
   const state = new RoutingState(new FileStateStore(resolve(home, 'state/auto-model-routing/sessions')))
   const router = new Router(state)
-  ctx.effect(() => ctx.sessionProjections.register(selectionProjection))
   ctx.effect(() => ctx.tools.register(routeSubagentTool(jev)))
   // Agent is the WeakMap identity; origin stays on the immutable session header.
   const refs = new WeakMap<object, AgentRef>()
@@ -53,15 +51,10 @@ export function apply(ctx: Context, config: Config = {}): void {
   ctx.on('agent/request', async (payload, next) => {
     const config = await next()
     if (payload.agent.session.header.origin === 'subagent') return config
-    const selection = ctx.sessionProjections.stateOf(payload.agent.session, 'autoRoutingSelection')
-    if (selection) state.select(payload.agent.id, selection)
     const model = router.needsModelInfo(ref(payload.agent)) ? await ctx.llm.resolveModelInfo(config.provider, config.model, payload.signal) : undefined
     const efforts = (model?.reasoning?.efforts ?? []).map(effort => effort.id).filter(id => knownEfforts.has(id)) as Effort[]
-    return router.request(ref(payload.agent), payload.turn, config as unknown as RequestConfig, efforts, payload.agent.session.requestHeader()?.config as Selection | undefined) as unknown as typeof config
+    return router.request(ref(payload.agent), payload.turn, config as unknown as RequestConfig, efforts) as unknown as typeof config
   }, { prepend: true })
-  ctx.on('session/event', (session, event) => {
-    if (event.type === 'model/selection' && session.header.origin !== 'subagent') state.select(session.id, event.data as Selection)
-  })
 
   ctx.inject(['connection', 'sessionController'], child => {
     for (const operation of ['state', 'setMode'] as const) {

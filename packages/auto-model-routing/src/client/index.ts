@@ -1,17 +1,15 @@
-import { createElement as h, useEffect, useState } from 'react'
+import { createElement as h, useEffect, useRef, useState } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { callRouting, chipOrder, type Rpc } from './control.js'
+import { callRouting, chipOrder, panelOpenAfter, type PanelEvent, type Rpc } from './control.js'
 import { CATEGORY_HINTS, type JevCategory } from '../jev.js'
 
 interface View {
   mode: 'AUTO' | 'MANUAL'
-  anchor?: { provider: string; model: string; reasoningEffort?: string; provenance: string }
   effort?: string
   reason?: string
-  restore: boolean
   disabled?: { category: JevCategory; at: number }
   history: readonly { effort?: string; reason: string; category?: string }[]
 }
@@ -19,18 +17,48 @@ interface Props { sessionId: string; rpc: Rpc }
 export const name = 'dsh-auto-model-routing/client'
 export const inject = ['slots', 'connection']
 
+// Same look as the official model picker trigger (dsh-client-ui-model-selection), values read from its bundle.
+const CSS = `
+.amr-root{position:relative;min-width:0;display:inline-flex}
+.amr-trigger{display:flex;align-items:center;gap:4px;height:28px;padding:0 4px 0 8px;border:none;outline:none;background:0 0;border-radius:var(--dsw-radius-sm);color:var(--dsw-alias-label-secondary);font-size:13px;font-weight:400;line-height:20px;cursor:pointer;white-space:nowrap}
+.amr-trigger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
+.amr-trigger:focus-visible{box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary))}
+.amr-trigger:disabled{color:var(--dsw-alias-label-dimmed);cursor:default}
+.amr-icon{flex:none;color:var(--dsw-alias-label-caption)}
+.amr-trigger[data-disabled=true],.amr-trigger[data-disabled=true] .amr-icon{color:var(--dsw-alias-state-error-primary)}
+.amr-panel{position:absolute;z-index:1100;bottom:100%;left:0;padding-bottom:6px}
+.amr-card{width:280px;padding:10px 12px;border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg,#fff);color:var(--dsw-alias-label-primary);box-shadow:var(--dsw-elevation-prominent);font-size:12px;line-height:18px}
+.amr-card p{margin:4px 0}
+.amr-muted{color:var(--dsw-alias-label-tertiary)}
+.amr-error{color:var(--dsw-alias-state-error-primary)}
+.amr-card ol{max-height:160px;overflow:auto;margin:6px 0 0;padding-left:18px}
+`
+
+// Left-right swap arrows at the picker chevron's size; colour follows currentColor.
+function SwapIcon() {
+  return h('svg', { className: 'amr-icon', width: 14, height: 14, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
+    h('path', { d: 'M3 5.5h9.5M10 3l2.5 2.5L10 8' }),
+    h('path', { d: 'M13 10.5H3.5M6 8l-2.5 2.5L6 13' }))
+}
+
 export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false }: Props & { initialView?: View; initiallyOpen?: boolean }) {
   const [view, setView] = useState<View | undefined>(initialView)
   const [open, setOpen] = useState(initiallyOpen)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => {
     let active = true
     const refresh = () => { void callRouting(rpc, sessionId).then(value => { if (active) { setView(value as View); setError('') } }, reason => { if (active) setError(String(reason)) }) }
     refresh()
-    const timer = setInterval(refresh, 3000)
-    return () => { active = false; clearInterval(timer) }
+    const poll = setInterval(refresh, 3000)
+    return () => { active = false; clearInterval(poll); clearTimeout(timer.current) }
   }, [rpc, sessionId])
+  const on = (event: PanelEvent) => () => {
+    clearTimeout(timer.current)
+    if (panelOpenAfter(event)) timer.current = setTimeout(() => setOpen(true), 150)
+    else setOpen(false)
+  }
   const toggle = async () => {
     if (busy || !view) return
     setBusy(true)
@@ -40,23 +68,25 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
   }
   const off = view?.disabled
   const hint = off ? CATEGORY_HINTS[off.category] ?? off.category : undefined
-  return h('span', { style: { position: 'relative', display: 'inline-flex', gap: 4, alignItems: 'center' } },
+  // The panel sits inside the root (padding bridges the gap), so moving onto it keeps it open.
+  return h('span', { className: 'amr-root', onMouseEnter: on('enter'), onMouseLeave: on('leave'), onFocus: on('focus'), onBlur: on('blur') },
+    h('style', null, CSS),
     h('button', {
-      type: 'button', disabled: busy || !view, onClick: () => { void toggle() },
-      'data-disabled': off ? 'true' : undefined,
-      title: off ? `Jev 判档已停用：${hint}。点击 AUTO 重试` : '自动调整主会话推理强度；点击切换模式',
-      style: { color: off ? '#b42318' : 'inherit', background: off ? '#fef3f2' : 'transparent', border: `1px solid ${off ? '#b42318' : 'currentColor'}`, borderRadius: 8, padding: '3px 7px', cursor: 'pointer', fontSize: 11 },
-    }, off ? `${view?.mode} · Jev 停用` : view?.mode ?? '…'),
-    h('button', { type: 'button', onClick: () => setOpen(!open), title: '查看路由状态', style: { color: 'inherit', border: 0, background: 'transparent', cursor: 'pointer' } }, '▾'),
-    open && h('section', { 'aria-label': '自动路由状态', style: { position: 'absolute', zIndex: 20, bottom: 'calc(100% + 8px)', left: 0, width: 300, padding: 12, borderRadius: 10, background: 'var(--dsw-alias-bg, #fff)', color: 'var(--dsw-alias-label-primary, #222)', boxShadow: '0 4px 20px #0003', fontSize: 12 } },
-      h('strong', null, '主会话推理强度'),
-      h('p', null, view?.anchor ? `${view.anchor.provider} / ${view.anchor.model} · ${view.anchor.reasoningEffort ?? '默认'} (${view.anchor.provenance})` : '锚点待首个请求初始化'),
-      h('p', null, `本回合：${view?.effort ?? '官方默认'} · ${view?.reason ?? '尚无决定'}`),
-      off && h('p', { role: 'status', style: { color: '#b42318' } }, `Jev 停用（${off.category}）：${hint}。${new Date(off.at).toLocaleString()}。点击 AUTO 重试。`),
-      view?.restore && h('p', null, '正在复原：等待请求及官方配置收敛。'),
-      h('p', null, 'AUTO 会把任务文本发送给 OpenRouter/TypeSafe 判档。停用插件前先切 MANUAL，并等待复原完成。'),
-      error && h('p', { role: 'alert' }, error),
-      h('ol', { style: { maxHeight: 160, overflow: 'auto', paddingLeft: 18 } }, ...(view?.history ?? []).map((row, index) => h('li', { key: index }, `${row.effort ?? '默认'} · ${row.reason}${row.category ? ` · ${row.category}` : ''}`))),
+      type: 'button', className: 'amr-trigger', disabled: busy || !view, onClick: () => { void toggle() },
+      'data-disabled': off ? 'true' : undefined, style: { border: 'none' },
+      title: off ? `Jev 判档已停用：${hint}。点击 AUTO 重试` : '点击切换自动推理强度',
+      'aria-label': `推理强度模式：${view?.mode ?? '加载中'}，点击切换`,
+    }, h('span', null, off ? `${view?.mode} · Jev 停用` : view?.mode ?? '…'), h(SwapIcon)),
+    open && h('section', { className: 'amr-panel', 'aria-label': '自动路由状态' },
+      h('div', { className: 'amr-card' },
+        h('p', null, h('strong', null, view?.mode === 'AUTO' ? '自动调整推理强度' : '手动：不自动调整')),
+        h('p', null, `本回合插件输出：${view?.effort ?? '未改写'} · ${view?.reason ?? '尚无决定'}`),
+        h('p', { className: 'amr-muted' }, 'MANUAL 不改写 effort；AUTO 期间若在右侧手选，切回 MANUAL 后生效。'),
+        off && h('p', { role: 'status', className: 'amr-error' }, `Jev 停用（${off.category}）：${hint}。${new Date(off.at).toLocaleString()}。点击 AUTO 重试。`),
+        h('p', { className: 'amr-muted' }, 'AUTO 会把任务文本发送给 OpenRouter/TypeSafe 判档。'),
+        error && h('p', { role: 'alert', className: 'amr-error' }, error),
+        view?.history.length ? h('ol', null, ...view.history.map((row, index) => h('li', { key: index }, `${row.effort ?? '—'} · ${row.reason}${row.category ? ` · ${row.category}` : ''}`))) : null,
+      ),
     ),
   )
 }

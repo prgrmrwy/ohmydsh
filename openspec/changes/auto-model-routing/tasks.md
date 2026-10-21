@@ -52,3 +52,9 @@
 - [x] 8.3 手动冒烟（会计费）：用最终 `TIER_QUESTIONS` 对 spike 10 条样本经真实 OpenRouter 重跑，记录档位/耗时/费用；与 spike 不一致则停下回到规划。
 - [ ] 8.4 用户授权启用后，在现有 GUI 验证芯片、模式、停用显示与一次真实子会话委派；未授权则如实保留待验收。
 - [x] 8.5 执行 `openspec validate auto-model-routing --strict`，写 verify.md；未经授权不合入、归档或清理工作树。
+
+## 9. 修订：切回 MANUAL 不复原、芯片对齐官方选择器（2026-10-21，GUI 验收中用户决定）
+
+- [x] 9.1 写失败测试：`selection.integration.test.ts › manual_keeps_last_auto_effort`（正式 `selectionFor` 回退语义：AUTO 后切 MANUAL，同回合与下一回合均透传上一请求 effort）；`router.test.ts › rapid_mode_toggle_invalidates_auto`（无复原：当前回合透传）；`selection.integration.test.ts › pending_pick_applies_after_manual`；`state.test.ts › repeated_mode_is_noop`（无 restore 字段）、`legacy_state_file_is_readable`；`host.integration.test.ts › failure_disables_without_rewrite`；`endpoints.test.ts › set_mode_targets_one_session`；`client.test.ts › panel_state_and_history_bound`、`disabled_visible_in_chip_and_panel`、`chip_style_and_hover_panel`。确认按新断言失败。
+- [x] 9.2 实现：删除 `selection-projection.ts`、锚点、`restore`、`completeRestore`、`manual-restore` 原因与 `session/event` 订阅；状态宽松读取旧文件；router MANUAL 纯透传；client 按 design D7 重写芯片与悬停面板。删除仅验证复原/锚点的旧测试。
+- [ ] 9.3 重构；全套、根测试、隔离双 sync、严格校验保持绿；更新 package README、change README 与 manifest note；合入、构建后由用户重载，在现有 GUI 复验芯片与 AUTO 结果在右侧选择器的显示。

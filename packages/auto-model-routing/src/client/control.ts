@@ -5,3 +5,6 @@ export async function callRouting(rpc: Rpc, sessionId: string, mode?: 'AUTO' | '
   return result.value
 }
 export const chipOrder = -10
+/** Panel visibility: entering or focusing the chip (or its panel) opens it; leaving or blurring closes it. */
+export type PanelEvent = 'enter' | 'focus' | 'leave' | 'blur'
+export const panelOpenAfter = (event: PanelEvent): boolean => event === 'enter' || event === 'focus'

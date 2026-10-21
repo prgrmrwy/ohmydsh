@@ -81,6 +81,15 @@
 5. **取消与故障**：Jev 等待期间取消，仍 AUTO 且无停用原因。真实服务通常约 0.5 秒，手速可能无法稳定命中，不把取消主模型生成当作已验证 Jev 取消。失败验收须另行受控注入（仅替换该服务测试凭据/隔离启动环境并重载），不耗尽余额、不改全局其它 provider。预期 MANUAL·Jev停用、提示类别/时间、后续不再判断；恢复有效凭据后不会自动恢复，点 AUTO 才重试。真实 402 未触发仍单独列为证据限制。
 6. **真实子会话与收尾**：提示 Agent 加载配套 skill，按 route_subagent 返回参数创建一个只读子会话。核对工具调用顺序、官方创建调用的三个显式字段、description 标注、子会话实际配置；失败则停下询问，不猜档。完成后测试会话切 MANUAL 并等待复原；若撤销部署，再禁用两个开关并构建。不得直接卸载一个仍为 AUTO 的会话。
 
+### 修订：切回 MANUAL 不复原、芯片对齐官方选择器（2026-10-21）
+
+- 规划修订：spec/design/proposal/test-plan/tasks 第 9 组；fresh-context 独立复核 `VERDICT: APPROVE_WITH_CHANGES`，M1（有待生效手选时选择器不反映 AUTO）、M2（悬停不可 SSR 测）与 m1–m6 均已落实，范围未扩张。
+- 依据：探测测试 + 正式 `dsh-api-session-controller` `selectionFor`（agent.js 约 296–343）：无待生效手选时官方沿用上一请求头 effort；有手选则在头与其相等前保持待生效。
+- 红：`manual_keeps_last_auto_effort`（旧代码复原为 medium）、`pending_pick_applies_after_manual`（旧代码 medium≠low）在 HEAD 源码上失败；router/state/endpoints/host/client 新断言均先失败。绿：实现后全部通过。
+- 删除：`selection-projection.ts`、锚点、`restore`/`completeRestore`、`manual-restore` 原因、`session/event` 订阅；随 REMOVED 需求删除仅验证复原/锚点的测试。旧状态文件宽松读取（忽略 `restore`/`anchor`），形状非法仍拒绝。
+- package **54/54**，typecheck/build 通过；root **444 pass / 0 fail / 2 skip**；artifacts、隔离双 sync、严格校验通过。
+- 悬停面板：SSR 断言结构（单按钮、文字在前图标在后、无边框、默认不渲染面板），开关为纯函数单测；真实悬停与 150ms 延迟待 GUI 复验。
+
 ## Overall Decision
 
 DECISION: PASS_WITH_WARNINGS

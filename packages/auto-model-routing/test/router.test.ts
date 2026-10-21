@@ -13,10 +13,9 @@ function fixture() {
  const disk = new Map<string, SessionState>()
  const state = new RoutingState({ get: id => disk.get(id), set: (id, value) => { disk.set(id, value) } })
  const agent = { id: 'S' }
- state.initialize(agent.id, config)
  return { state, agent, router: new Router(state) }
 }
-it('manual_and_restore_do_not_need_model_metadata',()=>{
+it('manual_does_not_need_model_metadata',()=>{
  const {router,agent}=fixture()
  expect(router.needsModelInfo(agent)).toBe(false)
  router.setMode(agent,'AUTO');start(router,agent,1,'排查多个模块')
@@ -33,24 +32,17 @@ it('auto_effort_only', () => {
  expect(router.request(agent,1,config,supported)).toEqual({...config, reasoningEffort:'xhigh'})
 })
 it('rapid_mode_toggle_invalidates_auto', () => {
- for(const restored of [true,false]) {
  const {router,agent}=fixture(); router.setMode(agent,'AUTO'); start(router,agent,1,'排查多个模块')
  const auto=router.request(agent,1,config,supported)
+ expect(auto.reasoningEffort).toBe('xhigh')
  router.setMode(agent,'MANUAL')
- if(restored) expect(router.request(agent,1,auto,supported,auto).reasoningEffort).toBe('medium')
+ // No restore: MANUAL passes the official config through, whatever effort it carries.
+ expect(router.request(agent,1,auto,supported)).toEqual(auto)
  router.setMode(agent,'AUTO')
- expect(router.request(agent,1,auto,supported,auto).reasoningEffort).toBe('medium')
- expect(router.request(agent,1,config,supported,config).reasoningEffort).toBe('medium')
+ expect(router.request(agent,1,config,supported)).toEqual(config)
  start(router,agent,2,'排查多个模块')
- expect(router.request(agent,2,config,supported,config).reasoningEffort).toBe('xhigh')
- }
-})
-it('notification_turn_restores', () => {
- const {router,agent}=fixture(); router.setMode(agent,'AUTO'); start(router,agent,1,'排查多个模块')
- const auto=router.request(agent,1,config,supported)
- router.setMode(agent,'MANUAL'); router.begin(agent,2,[])
- expect(router.request(agent,2,auto,supported,auto).reasoningEffort).toBe('medium')
- expect(router.status(agent).reason).toBe('manual-restore')
+ expect(router.request(agent,2,config,supported).reasoningEffort).toBe('xhigh')
+ expect(router.status(agent).history.map(h=>h.reason)).not.toContain('manual-restore')
 })
 it('turn_retries_reuse_decision', () => {
  const {router,agent}=fixture(); router.setMode(agent,'AUTO'); start(router,agent,1,'排查多个模块')
@@ -83,57 +75,21 @@ it('new_model_same_turn_remaps_effort', () => {
  const next={...config,model:'gpt-6-astra',provider:'codex',reasoningEffort:'low' as const}
  expect(router.request(agent,1,next,['low','medium','high']).reasoningEffort).toBe('medium')
 })
-it('restore_without_effort_removes_field_until_converged', () => {
- const {router,state,agent}=fixture()
- state.select(agent.id,{provider:config.provider,model:config.model})
- router.setMode(agent,'AUTO');start(router,agent,1,'排查多个模块')
- const auto=router.request(agent,1,config,supported)
- router.setMode(agent,'MANUAL')
- const restored=router.request(agent,1,auto,supported,auto)
- expect(restored).not.toHaveProperty('reasoningEffort')
- expect(state.read(agent.id).restore).toBe(true)
- expect(router.request(agent,1,auto,supported,restored)).not.toHaveProperty('reasoningEffort')
- router.request(agent,1,restored,supported,restored)
- expect(state.read(agent.id).restore).toBe(false)
-})
-it('unfinished_restore_blocks_auto_for_entire_new_user_turn', () => {
- const {router,state,agent}=fixture()
- router.setMode(agent,'AUTO');start(router,agent,1,'排查多个模块')
- const auto=router.request(agent,1,config,supported)
- router.setMode(agent,'MANUAL');router.setMode(agent,'AUTO')
- start(router,agent,2,'排查多个模块')
- expect(router.request(agent,2,auto,supported,auto).reasoningEffort).toBe('medium')
- router.request(agent,2,config,supported,config)
- expect(state.read(agent.id).restore).toBe(false)
- expect(router.request(agent,2,config,supported,config).reasoningEffort).toBe('medium')
- start(router,agent,3,'排查多个模块')
- expect(router.request(agent,3,config,supported,config).reasoningEffort).toBe('xhigh')
-})
-it('restore_waits_for_matching_model',()=>{
- const {router,state,agent}=fixture()
- router.setMode(agent,'AUTO');start(router,agent,1,'排查多个模块')
- router.setMode(agent,'MANUAL')
- state.select(agent.id,{provider:'codex',model:'gpt-6-astra',reasoningEffort:'low'})
- expect(router.request(agent,1,config,supported)).toEqual(config)
- expect(state.read(agent.id).restore).toBe(true)
- const next={provider:'codex',model:'gpt-6-astra',reasoningEffort:'medium' as const}
- expect(router.request(agent,1,next,['low','medium']).reasoningEffort).toBe('low')
-})
 it('guard_failure_never_changes_model', () => {
  const {router,agent}=fixture(); router.setMode(agent,'AUTO'); start(router,agent,1,'排查多个模块')
  const first=router.request(agent,1,config,supported)
  const retry=router.request(agent,1,config,supported)
  expect([first.provider,first.model]).toEqual([retry.provider,retry.model])
 })
-it('failure_disables_restores_and_records', () => {
+it('failure_disables_without_rewrite_and_records', () => {
  const {router,state,agent}=fixture(); router.setMode(agent,'AUTO'); start(router,agent,1)
  const auto=router.request(agent,1,config,supported)
  expect(auto.reasoningEffort).toBe('xhigh')
  expect(router.begin(agent,2,message('下一个'))).toBeDefined()
  router.fail(agent,2,'insufficient-credits')
- expect(state.read(agent.id)).toMatchObject({mode:'MANUAL',restore:true,disabled:{category:'insufficient-credits'}})
- expect(router.request(agent,2,auto,supported,auto).reasoningEffort).toBe('medium')
- expect(router.status(agent).history.slice(-2)).toEqual([{reason:'jev-failed',category:'insufficient-credits'},{effort:'medium',reason:'manual-restore'}])
+ expect(state.read(agent.id)).toEqual({mode:'MANUAL',disabled:{category:'insufficient-credits',at:expect.any(Number)}})
+ expect(router.request(agent,2,auto,supported)).toEqual(auto)
+ expect(router.status(agent).history.at(-1)).toEqual({reason:'jev-failed',category:'insufficient-credits'})
 })
 it('failure_after_mode_change_is_discarded', () => {
  const {router,state,agent}=fixture(); router.setMode(agent,'AUTO')
@@ -141,5 +97,5 @@ it('failure_after_mode_change_is_discarded', () => {
  router.setMode(agent,'MANUAL')
  router.fail(agent,1,'timeout'); router.resolve(agent,1,'complex')
  expect(state.read(agent.id).disabled).toBeUndefined()
- expect(router.request(agent,1,config,supported,config)).toEqual(config)
+ expect(router.request(agent,1,config,supported)).toEqual(config)
 })

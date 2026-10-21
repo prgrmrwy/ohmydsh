@@ -173,7 +173,7 @@ customizations:
     version: 0.1.0
     enabled: true
     brief: 主会话按任务自动调整推理强度，保留用户模型选择
-    note: '自研,change auto-model-routing。Jev(OpenRouter decisions,typesafe/jev-1.13)判档,AUTO 每用户回合及每次子会话判档会外发≤8000字任务文本至 OpenRouter/TypeSafe,保留条款未确认;凭据 OPENROUTER_API_KEY 仅本机 .env.local。Jev 失败即停用为 MANUAL 并在芯片提示,无本地降级。不换 provider/model;会话默认 MANUAL。直接停用可能残留 AUTO effort。2026-10-21 用户授权启用部署,GUI 验收待完成。停用:先切 MANUAL并完成请求,再 enabled:false → dsh build。'
+    note: '自研,change auto-model-routing。Jev(OpenRouter decisions,typesafe/jev-1.13)判档,AUTO 每用户回合及每次子会话判档会外发≤8000字任务文本至 OpenRouter/TypeSafe,保留条款未确认;凭据 OPENROUTER_API_KEY 仅本机 .env.local。Jev 失败即停用为 MANUAL 并在芯片提示,无本地降级。不换 provider/model;会话默认 MANUAL。切 MANUAL 或 Jev 失败只停止自动调整、不复原,effort 停在最后一次 AUTO 值,由用户在官方选择器中另选。2026-10-21 用户授权启用部署,GUI 验收中。停用:enabled:false → dsh build。'
   - id: subagent-model-routing
     type: skill
     enabled: true

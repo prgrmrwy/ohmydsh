@@ -20,7 +20,7 @@ it('invalid_targets_rejected',async()=>{
 it('set_mode_targets_one_session',async()=>{
  const {state,router,resolve}=fixture();const before=state.read('S2')
  expect((await endpoint('setMode',{sessionId:'S1',mode:'MANUAL'},resolve,router,state)).status).toBe(200)
- expect(state.read('S1')).toMatchObject({mode:'MANUAL',restore:true})
+ expect(state.read('S1')).toEqual({mode:'MANUAL'})
  expect(state.read('S2')).toEqual(before)
  const response=await endpoint('state',{sessionId:'S1'},resolve,router,state)
  expect(await response.json()).toMatchObject({mode:'MANUAL',history:[]})

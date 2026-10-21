@@ -16,9 +16,6 @@ interface Runtime {
   decisionRoute?: string
   history: Decision[]
 }
-function same(a: Selection | undefined, b: Selection): boolean {
-  return a?.provider === b.provider && a.model === b.model && a.reasoningEffort === b.reasoningEffort
-}
 function withEffort(config: RequestConfig, effort?: Effort): RequestConfig {
   const { reasoningEffort: _, ...rest } = config
   return effort === undefined ? rest : { ...rest, reasoningEffort: effort }
@@ -34,7 +31,7 @@ export class Router {
     if (old?.turn === turn) return undefined
     const input = userInput(messages)
     const state = this.state.read(agent.id)
-    const active = state.mode === 'AUTO' && !state.restore && (input.userTurn || old?.active === true)
+    const active = state.mode === 'AUTO' && (input.userTurn || old?.active === true)
     const judge = active && input.userTurn
     const tier = judge ? undefined : old?.previous
     this.runtimes.set(agent, {
@@ -54,7 +51,7 @@ export class Router {
     runtime.previous = tier
   }
 
-  /** Jev failed: disable (MANUAL + restore) and record why. Discarded like `resolve`. */
+  /** Jev failed: disable (MANUAL, no restore) and record why. Discarded like `resolve`. */
   fail(agent: AgentRef, turn: number, category: JevCategory): void {
     const runtime = this.settle(agent, turn)
     if (!runtime) return
@@ -86,21 +83,10 @@ export class Router {
     }
   }
 
-  request(agent: AgentRef, turn: number, config: RequestConfig, supported: readonly Effort[], header?: Selection): RequestConfig {
+  request(agent: AgentRef, turn: number, config: RequestConfig, supported: readonly Effort[]): RequestConfig {
     if (agent.origin === 'subagent') return config
-    const state = this.state.initialize(agent.id, config)
     const runtime = this.runtimes.get(agent)
-    if (state.restore && state.anchor) {
-      const anchor = state.anchor
-      if (config.provider !== anchor.provider || config.model !== anchor.model) return config
-      if (same(header, anchor) && same(config, anchor)) {
-        this.state.completeRestore(agent.id)
-        return config
-      }
-      this.record(runtime, { ...(anchor.reasoningEffort ? { effort: anchor.reasoningEffort } : {}), reason: 'manual-restore' })
-      return withEffort(config, anchor.reasoningEffort)
-    }
-    if (!runtime || runtime.turn !== turn || !runtime.active || state.mode !== 'AUTO') return config
+    if (!runtime || runtime.turn !== turn || !runtime.active || this.state.read(agent.id).mode !== 'AUTO') return config
     const route = `${config.provider}\0${config.model}\0${supported.join(',')}`
     if (!runtime.decision || runtime.decisionRoute !== route) {
       runtime.decisionRoute = route
@@ -116,7 +102,7 @@ export class Router {
   needsModelInfo(agent: AgentRef): boolean {
     const state = this.state.read(agent.id)
     const runtime = this.runtimes.get(agent)
-    return agent.origin !== 'subagent' && state.mode === 'AUTO' && !state.restore && runtime?.active === true && runtime.tier !== undefined
+    return agent.origin !== 'subagent' && state.mode === 'AUTO' && runtime?.active === true && runtime.tier !== undefined
   }
 
   status(agent: AgentRef): { effort?: Effort; reason?: Reason; history: readonly Decision[] } {

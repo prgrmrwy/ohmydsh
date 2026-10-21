@@ -2,7 +2,7 @@ import { expect, it } from 'vitest'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { RoutingChip, apply } from '../src/client/index.js'
-import { callRouting, chipOrder } from '../src/client/control.js'
+import { callRouting, chipOrder, panelOpenAfter } from '../src/client/control.js'
 import { Router } from '../src/router.js'
 import { RoutingState, type SessionState } from '../src/state.js'
 it('chip_negative_order',()=>{
@@ -32,14 +32,15 @@ it('panel_state_and_history_bound',()=>{
  expect(router.status(agent).history).toHaveLength(20)
  const view={...state.read(agent.id),...router.status(agent)}
  const markup=renderToStaticMarkup(createElement(RoutingChip,{sessionId:agent.id,rpc:{call:async()=>({ok:true})},initialView:view,initiallyOpen:true}))
- expect(markup).toContain('claude-opus-5-5')
  expect(markup).toContain('xhigh')
+ expect(markup).toContain('本回合插件输出')
+ expect(markup).not.toContain('锚点')
  expect(markup).toContain('jev')
  expect(markup.match(/<li>/g)).toHaveLength(20)
  expect(new Router(state).status(agent).history).toHaveLength(0)
 })
 it('disabled_visible_in_chip_and_panel',()=>{
- const base={mode:'MANUAL' as const,restore:false,history:[{reason:'jev-failed',category:'insufficient-credits'}]}
+ const base={mode:'MANUAL' as const,history:[{reason:'jev-failed',category:'insufficient-credits'}]}
  const render=(view:object,open:boolean)=>renderToStaticMarkup(createElement(RoutingChip,{sessionId:'S',rpc:{call:async()=>({ok:true})},initialView:view as never,initiallyOpen:open}))
  const chip=render({...base,disabled:{category:'insufficient-credits',at:Date.UTC(2026,9,20,7,0)}},false)
  const visible=chip.replace(/<[^>]+>/g,' ')
@@ -48,7 +49,22 @@ it('disabled_visible_in_chip_and_panel',()=>{
  expect(chip).toContain('data-disabled="true"')
  const panel=render({...base,disabled:{category:'insufficient-credits',at:Date.UTC(2026,9,20,7,0)}},true).replace(/<[^>]+>/g,' ')
  for(const text of ['insufficient-credits','余额不足','点击 AUTO 重试']) expect(panel).toContain(text)
- const normal=render({mode:'MANUAL',restore:false,history:[]},false)
+ const normal=render({mode:'MANUAL',history:[]},false)
  expect(normal.replace(/<[^>]+>/g,' ')).not.toContain('Jev 停用')
  expect(normal).not.toContain('data-disabled="true"')
+})
+it('chip_style_and_hover_panel',()=>{
+ const render=(open:boolean)=>renderToStaticMarkup(createElement(RoutingChip,{sessionId:'S',rpc:{call:async()=>({ok:true})},initialView:{mode:'MANUAL',history:[]} as never,initiallyOpen:open}))
+ const closed=render(false)
+ // One button: mode text first, the switch icon after it; no border.
+ expect(closed.match(/<button/g)).toHaveLength(1)
+ expect(closed).toMatch(/<button[^>]*>\s*<span[^>]*>MANUAL<\/span>\s*<svg/)
+ expect(closed).not.toMatch(/border:1px/)
+ expect(closed).toMatch(/border:(none|0)/)
+ expect(closed).not.toContain('▾')
+ // Panel is not rendered until hover or focus opens it.
+ expect(closed).not.toContain('aria-label="自动路由状态"')
+ expect(render(true)).toContain('aria-label="自动路由状态"')
+ // Hover/focus wiring is a pure function; real pointer timing is checked in the GUI.
+ expect((['enter','focus','leave','blur'] as const).map(panelOpenAfter)).toEqual([true,true,false,false])
 })

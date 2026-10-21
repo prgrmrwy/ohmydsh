@@ -6,15 +6,11 @@
 |-------------|----------|-----------|-----------|---------------|
 | specs/auto-model-routing/spec.md → 模式与改写规则 | MANUAL 请求原样通过 | test/router.test.ts | manual_passthrough | 🟢 green |
 | specs/auto-model-routing/spec.md → 模式与改写规则 | AUTO 只改 effort | test/router.test.ts | auto_effort_only | 🟢 green |
-| specs/auto-model-routing/spec.md → 模式与改写规则 | MANUAL 复原覆盖旧快照重试直至收敛 | test/selection.integration.test.ts | manual_restore_survives_same_step_retry | 🟢 green |
-| specs/auto-model-routing/spec.md → 模式与改写规则 | header 前取消或准备失败保留复原 | test/selection.integration.test.ts | restore_survives_preheader_failure | 🟢 green |
+| specs/auto-model-routing/spec.md → 模式与改写规则 | 切回 MANUAL 不复原 | test/selection.integration.test.ts | manual_keeps_last_auto_effort | 🟢 green |
+| specs/auto-model-routing/spec.md → 模式与改写规则 | AUTO 期间的手选在切回 MANUAL 后生效 | test/selection.integration.test.ts | pending_pick_applies_after_manual | 🟢 green |
 | specs/auto-model-routing/spec.md → 模式与改写规则 | 快速切回 AUTO 不恢复旧决定 | test/router.test.ts | rapid_mode_toggle_invalidates_auto | 🟢 green |
-| specs/auto-model-routing/spec.md → 模式与改写规则 | 重复同模式设置不重建过渡 | test/state.test.ts | repeated_mode_is_noop | 🟢 green |
-| specs/auto-model-routing/spec.md → 模式与改写规则 | 非用户回合同样完成复原 | test/router.test.ts | notification_turn_restores | 🟢 green |
-| specs/auto-model-routing/spec.md → 锚点由用户选择维护 | 首个请求初始化锚点 | test/state.test.ts | initialize_anchor_once | 🟢 green |
-| specs/auto-model-routing/spec.md → 锚点由用户选择维护 | 用户手选更新锚点 | test/state.test.ts | selection_updates_anchor | 🟢 green |
-| specs/auto-model-routing/spec.md → 锚点由用户选择维护 | 路由结果与重启不改锚点 | test/state.test.ts | anchor_survives_restart_without_drift | 🟢 green |
-| specs/auto-model-routing/spec.md → 锚点由用户选择维护 | assemble 后手选不混用模型与 effort | test/selection.integration.test.ts | selection_after_assembly_keeps_routes_legal | 🟢 green |
+| specs/auto-model-routing/spec.md → 模式与改写规则 | 重复同模式设置无副作用 | test/state.test.ts | repeated_mode_is_noop | 🟢 green |
+| specs/auto-model-routing/spec.md → 模式与改写规则 | 旧状态文件可读 | test/state.test.ts | legacy_state_file_is_readable | 🟢 green |
 | specs/auto-model-routing/spec.md → 用户回合与分类输入 | 步骤被拒时不请求 Jev | test/host.integration.test.ts | rejected_step_skips_jev | 🟢 green |
 | specs/auto-model-routing/spec.md → 用户回合与分类输入 | 首轮真实领取序列只取用户消息 | test/input.test.ts | only_user_source_contributes | 🟢 green |
 | specs/auto-model-routing/spec.md → 用户回合与分类输入 | 多条用户消息按序拼接并截断 | test/input.test.ts | joins_and_truncates_user_text | 🟢 green |
@@ -27,7 +23,7 @@
 | specs/auto-model-routing/spec.md → Jev 判断档位 | 不跟随重定向 | test/jev.test.ts | redirect_is_rejected | 🟢 green |
 | specs/auto-model-routing/spec.md → Jev 判断档位 | 源码不含本地分类与其它出站 | test/content.test.ts | no_local_classifier_or_other_egress | 🟢 green |
 | specs/auto-model-routing/spec.md → Jev 失败即停用并提示 | 各状态码映射为闭集类别 | test/jev.test.ts | failure_categories | 🟢 green |
-| specs/auto-model-routing/spec.md → Jev 失败即停用并提示 | 停用后不再调用 Jev 且复原锚点 | test/host.integration.test.ts | failure_disables_and_restores | 🟢 green |
+| specs/auto-model-routing/spec.md → Jev 失败即停用并提示 | 停用后不再调用 Jev 且不改写 | test/host.integration.test.ts | failure_disables_without_rewrite | 🟢 green |
 | specs/auto-model-routing/spec.md → Jev 失败即停用并提示 | 用户重新点 AUTO 清除停用 | test/host.integration.test.ts | auto_clears_disabled | 🟢 green |
 | specs/auto-model-routing/spec.md → Jev 失败即停用并提示 | 用户取消不是失败 | test/host.integration.test.ts | cancel_is_not_failure | 🟢 green |
 | specs/auto-model-routing/spec.md → Jev 失败即停用并提示 | 凭据与响应体不泄漏 | test/host.integration.test.ts | no_secret_or_body_leak | 🟢 green |
@@ -43,6 +39,7 @@
 | specs/auto-model-routing/spec.md → 状态可见且不改写其它控件 | 芯片注册在速度芯片左侧 | test/client.test.ts | chip_negative_order | 🟢 green |
 | specs/auto-model-routing/spec.md → 状态可见且不改写其它控件 | 面板展示状态并限 20 条 | test/client.test.ts | panel_state_and_history_bound | 🟢 green |
 | specs/auto-model-routing/spec.md → 状态可见且不改写其它控件 | 停用状态在芯片与面板可见 | test/client.test.ts | disabled_visible_in_chip_and_panel | 🟢 green |
+| specs/auto-model-routing/spec.md → 状态可见且不改写其它控件 | 芯片样式与悬停面板 | test/client.test.ts | chip_style_and_hover_panel | 🟢 green |
 | specs/auto-model-routing/spec.md → 状态可见且不改写其它控件 | 切换模式只调用插件接口 | test/client.test.ts | toggle_plugin_endpoint_only | 🟢 green |
 | specs/auto-model-routing/spec.md → Host 端点边界 | 无效会话被拒绝且无副作用 | test/endpoints.test.ts | invalid_targets_rejected | 🟢 green |
 | specs/auto-model-routing/spec.md → Host 端点边界 | 只修改目标会话 | test/endpoints.test.ts | set_mode_targets_one_session | 🟢 green |
@@ -61,7 +58,13 @@
 
 红阶段：上述三条分别观测到误接收 oversized JSON、`timeout` 而非 `invalid-response`、`timeout` 而非 `insufficient-credits`。根因均为完整 `response.text()` 后才检查状态与字符串长度。绿阶段改为状态码先分类、成功响应按流累计字节至最多 65536、超限 cancel；既有取消/超时/失败分类仍通过。
 
+## 修订（2026-10-21）：切回 MANUAL 不复原、芯片改样式
+
+用户在 GUI 验收中决定（独立复核 APPROVE_WITH_CHANGES，M1/M2 与 m1–m6 已落实）：切回 MANUAL 只停止自动调整，不复原；芯片外观对齐官方模型选择器，图标在文字后，面板悬停显示。删除锚点需求与 7 行复原/锚点场景（REMOVED 需求，非弱化）；新增/改写 9 行标为 🔴，按 TDD 重新观察。依据：探测测试与正式 `dsh-api-session-controller` `selectionFor` 源码确认无待生效手选时官方沿用上一请求头 effort，右侧选择器显示 `pending ?? lastUsed`。
+
 ## Coverage Notes
+
+- **2026-10-21 修订后**：下文关于 selection 三条、state 锚点四条的变异验证与复原相关说明已随需求删除，仅作历史。`MUST NOT 套用尚未生效的手选模型的映射表` 由 `new_model_same_turn_remaps_effort`（按实际输出模型映射）覆盖。悬停面板：SSR 断言结构，开关逻辑为纯函数单测，真实悬停/延迟由 GUI 复验。
 
 - **假 Jev 服务**：`test/jev.test.ts` 与 host 集成测试使用本地 `node:http` 回环服务器（仅测试代码，源码扫描不覆盖 `test/`），按用例返回 402/401/403/429/451/404/500/302/超时/断连/非 JSON/非法 choice/200+error.code；客户端以可注入的 base URL 指向它（生产常量固定 `https://openrouter.ai`，注入点只在测试构造函数中）。
 - **凭据**：测试经可注入的 launch environment 提供 `sk-or-test-SECRET`；泄漏检查读取状态文件、端点响应与 SSR 面板文本。

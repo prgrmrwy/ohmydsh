@@ -4,16 +4,15 @@ import { createHash } from 'node:crypto'
 import type { Effort } from './effort.js'
 import type { JevCategory } from './jev.js'
 import { z } from 'zod'
+// Legacy files also carried `restore`/`anchor`; they are ignored (non-strict) and dropped on the next write.
 const stateSchema = z.object({
-  mode: z.enum(['AUTO', 'MANUAL']), restore: z.boolean(),
+  mode: z.enum(['AUTO', 'MANUAL']),
   disabled: z.object({ category: z.enum(['missing-credential','insufficient-credits','unauthorized','rate-limited','region-blocked','rejected','unavailable','timeout','invalid-response']), at: z.number() }).strict().optional(),
-  anchor: z.object({ provider: z.string().min(1), model: z.string().min(1), reasoningEffort: z.enum(['low','medium','high','xhigh','max']).optional(), provenance: z.enum(['initialized','user-selected']) }).strict().optional(),
-}).strict()
+})
 export type Mode = 'AUTO' | 'MANUAL'
 export interface Selection { provider: string; model: string; reasoningEffort?: Effort }
-export interface Anchor extends Selection { provenance: 'initialized' | 'user-selected' }
 export interface Disabled { category: JevCategory; at: number }
-export interface SessionState { mode: Mode; anchor?: Anchor; restore: boolean; disabled?: Disabled }
+export interface SessionState { mode: Mode; disabled?: Disabled }
 export interface StateStore { get(id: string): SessionState | undefined; set(id: string, value: SessionState): void }
 
 export class FileStateStore implements StateStore {
@@ -42,40 +41,19 @@ export class RoutingState {
   constructor(private readonly store: StateStore) {}
 
   read(id: string): SessionState {
-    return structuredClone(this.store.get(id) ?? { mode: 'MANUAL', restore: false })
-  }
-
-  initialize(id: string, selection: Selection, latestPick?: Selection): SessionState {
-    if (latestPick) return this.select(id, latestPick)
-    const state = this.read(id)
-    if (state.anchor) return state
-    return this.save(id, { ...state, anchor: { ...selection, provenance: 'initialized' } })
-  }
-
-  select(id: string, selection: Selection): SessionState {
-    const state = this.read(id)
-    const anchor: Anchor = { ...selection, provenance: 'user-selected' }
-    if (state.anchor?.provenance === anchor.provenance && state.anchor.provider === anchor.provider && state.anchor.model === anchor.model && state.anchor.reasoningEffort === anchor.reasoningEffort) return state
-    return this.save(id, { ...state, anchor })
+    return structuredClone(this.store.get(id) ?? { mode: 'MANUAL' })
   }
 
   setMode(id: string, mode: Mode): SessionState {
     const state = this.read(id)
     if (state.mode === mode) return state
-    const { disabled, ...rest } = state
     // AUTO is the user's explicit retry: it clears the last Jev failure.
-    return this.save(id, { ...(mode === 'AUTO' ? rest : state), mode, restore: state.restore || mode === 'MANUAL' })
+    return this.save(id, mode === 'AUTO' ? { mode } : { ...state, mode })
   }
 
-  /** Jev failed: same transition as switching to MANUAL, plus the visible reason. */
+  /** Jev failed: switch to MANUAL (no restore) and keep the visible reason. */
   disable(id: string, category: JevCategory, at = Date.now()): SessionState {
-    const state = this.read(id)
-    return this.save(id, { ...state, mode: 'MANUAL', restore: state.restore || state.mode === 'AUTO', disabled: { category, at } })
-  }
-
-  completeRestore(id: string): void {
-    const state = this.read(id)
-    if (state.restore) this.save(id, { ...state, restore: false })
+    return this.save(id, { mode: 'MANUAL', disabled: { category, at } })
   }
 
   private save(id: string, state: SessionState): SessionState {

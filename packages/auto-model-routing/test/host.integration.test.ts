@@ -102,24 +102,25 @@ it('mode_change_during_jev_discards_result', async () => {
  }
 })
 
-it('failure_disables_and_restores', async () => {
+it('failure_disables_without_rewrite', async () => {
  const h = await harness(tier('complex'))
  await h.setMode('AUTO')
  await h.run('排查多个模块')
  expect(h.calls.at(-1)?.reasoningEffort).toBe('xhigh')
  h.jev.set(json(402, {}))
  await h.run('下一个任务')
+ // No rewrite after the failure: the request carries whatever the official selection assembled.
  expect(h.calls.at(-1)?.reasoningEffort).toBe('medium')
  const state = await h.invoke('state', { sessionId: h.agent.id })
  expect(state).toMatchObject({ mode: 'MANUAL', disabled: { category: 'insufficient-credits' } })
- expect(state.history.slice(-2)).toEqual([{ reason: 'jev-failed', category: 'insufficient-credits' }, { effort: 'medium', reason: 'manual-restore' }])
+ expect(state).not.toHaveProperty('restore')
+ expect(state.history.at(-1)).toEqual({ reason: 'jev-failed', category: 'insufficient-credits' })
+ expect(state.history.map((row: { reason: string }) => row.reason)).not.toContain('manual-restore')
  const sent = h.jev.bodies.length
  await h.run('再下一个')
  expect(h.jev.bodies.length).toBe(sent)
- expect(h.calls.at(-1)?.reasoningEffort).toBe('medium')
  expect((await h.invoke('state', { sessionId: h.agent.id })).disabled?.category).toBe('insufficient-credits')
 })
-
 it('auto_clears_disabled', async () => {
  const h = await harness(json(504, {}))
  await h.setMode('AUTO')
