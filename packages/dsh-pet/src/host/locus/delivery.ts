@@ -411,6 +411,30 @@ export function abandonInterruptedDelivery(
   }))
 }
 
+/** Terminate only the precisely correlated current whose reply was refused. */
+export function abandonRefusedDelivery(
+  state: DeliveryLedgerState,
+  input: DeliveryLeaseInput,
+): DeliveryMutation {
+  validateLeaseInput(input)
+  const current = state.byDeliveryId[input.deliveryId]
+  if (current === undefined) return unchanged(state, 'unknown-delivery')
+  if (!correlates(current, input)) return unchanged(state, 'correlation-mismatch', current)
+  if (input.expectedRevision !== undefined && current.revision !== input.expectedRevision) {
+    return unchanged(state, 'revision-mismatch', current)
+  }
+  if (TERMINAL_STATUSES.has(current.status)) return unchanged(state, 'already-terminal', current)
+  if (current.status !== 'current') return unchanged(state, 'invalid-transition', current)
+  const { queueState: _queueState, ...withoutQueueState } = current
+  return changed(state, freezeRecord({
+    ...withoutQueueState,
+    status: 'failed',
+    failureReason: 'reply-refused',
+    failedAt: input.now,
+    revision: nextRevision(current),
+  }))
+}
+
 /** Enter finishing exactly once before an external reply attempt. */
 export function markFinishing(
   state: DeliveryLedgerState,

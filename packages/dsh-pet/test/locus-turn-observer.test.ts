@@ -71,6 +71,33 @@ function harness(options: {
 }
 
 describe('per-turn Delivery correlation', () => {
+  it('keeps diagnostic association for a mixed Delivery turn without granting reply authority', () => {
+    const h = harness()
+    h.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 1 })
+    h.claim({ childSessionId: CHILD, messageId: 'gui-steer', turn: 1 })
+    expect(h.observer.inspectCurrentCapabilityForChild?.(CHILD)).toEqual({ ok: false, reason: 'claim-unbound' })
+    expect(h.observer.deliveryForTurn?.(CHILD, 1)?.deliveryId).toBe('delivery-1')
+    expect(h.observer.deliveryForTurn?.(CHILD, 2)).toBeUndefined()
+    h.end({ childSessionId: CHILD, turn: 1, outcome: 'completed' })
+    expect(h.observer.deliveryForTurn?.(CHILD, 1)).toBeUndefined()
+    h.claim({ childSessionId: CHILD, messageId: 'gui-only', turn: 2 })
+    expect(h.observer.deliveryForTurn?.(CHILD, 2)).toBeUndefined()
+  })
+
+  it('does not diagnose a unique Delivery for two claims or a revoked old A turn', () => {
+    const h = harness({ deliveries: {
+      'a': { deliveryId: 'delivery-a', executionId: 'execution-a' },
+      'b': { deliveryId: 'delivery-b', executionId: 'execution-b' },
+    } })
+    h.claim({ childSessionId: CHILD, messageId: 'a', turn: 1 })
+    h.claim({ childSessionId: CHILD, messageId: 'b', turn: 1 })
+    expect(h.observer.deliveryForTurn?.(CHILD, 1)).toBeUndefined()
+    h.observer.revokeCurrentCapability?.({ childSessionId: CHILD, deliveryId: 'delivery-a' })
+    expect(h.observer.deliveryForTurn?.(CHILD, 1)).toBeUndefined()
+    h.claim({ childSessionId: CHILD, messageId: 'b', turn: 2 })
+    expect(h.observer.deliveryForTurn?.(CHILD, 2)?.deliveryId).toBe('delivery-b')
+    expect(h.observer.deliveryForTurn?.(CHILD, 1)).toBeUndefined()
+  })
   it('binds a claimed message to its exact turn without business settlement at turn/end', () => {
     const h = harness()
 

@@ -46,6 +46,8 @@ function lifecycleTools(current = true, overrides: {
   readonly inspectCurrentCapability?: (childSessionId: string) => unknown
   readonly inspectCurrentDeliveryAuthorization?: (input: unknown) => unknown
   readonly logAuthorizationRefusal?: (input: unknown) => void
+  readonly onFinishRefused?: (execution: unknown) => void
+  readonly onDeliveryContinued?: (execution: unknown) => void
 } = {}, managedEffects?: Parameters<typeof registerPetTools>[1]['managedEffects']) {
   const definitions: Array<{ name: string; parameters: unknown; execute(args: unknown, exec: unknown): Promise<unknown> }> = []
   const authorizeCurrentDelivery = overrides.authorizeCurrentDelivery ?? (() => current ? contextRecord(true) : undefined)
@@ -68,6 +70,8 @@ function lifecycleTools(current = true, overrides: {
       authorizeCurrentDelivery,
       lark: { reply: replyExact, replyExact },
       currentCapability,
+      ...(overrides.onFinishRefused === undefined ? {} : { onFinishRefused: overrides.onFinishRefused }),
+      ...(overrides.onDeliveryContinued === undefined ? {} : { onDeliveryContinued: overrides.onDeliveryContinued }),
       ...(overrides.inspectCurrentCapability === undefined ? {} : { inspectCurrentCapability: overrides.inspectCurrentCapability as never }),
       ...(overrides.inspectCurrentDeliveryAuthorization === undefined ? {} : { inspectCurrentDeliveryAuthorization: overrides.inspectCurrentDeliveryAuthorization as never }),
       ...(overrides.logAuthorizationRefusal === undefined ? {} : { logAuthorizationRefusal: overrides.logAuthorizationRefusal }),
@@ -89,6 +93,38 @@ const childExec = {
 }
 
 describe('caller-bound Feishu lifecycle tools', () => {
+  it('reports only authorization-refused finish with its actual execution', async () => {
+    const refused = vi.fn()
+    const continued = vi.fn()
+    const { finish, wait } = lifecycleTools(true, {
+      inspectCurrentCapability: () => ({ ok: false, reason: 'mixed-source' }),
+      onFinishRefused: refused, onDeliveryContinued: continued,
+    })
+    await expect(finish.execute({ outcome: 'reply', text: 'answer' }, childExec)).rejects.toMatchObject({ fields: { reason: 'mixed-source' } })
+    expect(refused).toHaveBeenCalledExactlyOnceWith(childExec)
+    await expect(wait.execute({ waitMinutes: 5 }, childExec)).rejects.toBeDefined()
+    await expect(finish.execute({ outcome: 'reply', text: '' }, childExec)).rejects.toBeDefined()
+    expect(refused).toHaveBeenCalledTimes(1)
+    expect(continued).not.toHaveBeenCalled()
+    const guarded = lifecycleTools(true, { onFinishRefused: refused }, { register: () => {}, assertEntry: () => { throw new Error('managed denied') } })
+    await expect(guarded.finish.execute({ outcome: 'reply', text: 'answer' }, childExec)).rejects.toThrow('managed denied')
+    expect(refused).toHaveBeenCalledTimes(1)
+  })
+  it('reports successful finish and accepted wait, not failed leases', async () => {
+    const continued = vi.fn()
+    const f = lifecycleTools(true, {
+      onDeliveryContinued: continued,
+      finishCurrentDelivery: async () => ({ sent: true, outcome: 'reply' }),
+      waitCurrentDelivery: async () => ({ accepted: true, deadline: 100, remainingMinutes: 1, capped: false }),
+    })
+    await f.wait.execute({ waitMinutes: 1 }, childExec)
+    await f.finish.execute({ outcome: 'reply', text: 'answer' }, childExec)
+    expect(continued).toHaveBeenCalledTimes(2)
+    const failed = lifecycleTools(true, { onDeliveryContinued: continued, waitCurrentDelivery: async () => { throw new Error('lease changed') } })
+    await expect(failed.wait.execute({ waitMinutes: 1 }, childExec)).rejects.toThrow('lease changed')
+    expect(continued).toHaveBeenCalledTimes(2)
+  })
+
   it('tells the model that a plain @display-name becomes a real mention', () => {
     // The tool schema travels with every turn, so this is where the outbound
     // mention contract has to be visible: inbound text shows `@名字` (platform

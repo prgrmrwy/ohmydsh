@@ -23,7 +23,7 @@ import type {} from '@deepseek-ai/dsh-session-title'
 import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-skill'
 import type {} from '@deepseek-ai/dsh-storage-domain'
-import type {} from '@deepseek-ai/dsh-tools'
+import type { ToolExecution, ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-workspace'
 import { reconcileArchives, registerArchiveObserver, type ArchiveSink } from './host/archive.js'
 import { verifyBackendOwnership, verifyDatabaseLocation } from './host/backend.js'
@@ -102,6 +102,8 @@ import {
   type DeliveryRecord,
 } from './host/locus/delivery.js'
 import { createExpiryScheduler } from './host/locus/expiry-scheduler.js'
+import { createRefusedReplyTracker } from './host/locus/refused-reply.js'
+import type { InquiryExecutionProof, InquiryAgent as InquiryAgentAdapter } from './host/inquiry/agent-adapter.js'
 import {
   proveInterruptedStartupDelivery,
   proveLiveStartupDelivery,
@@ -624,7 +626,8 @@ async function initialize(
    * guard recheck, and installed per-agent managed guards are all present.
    */
   const managedEffects = createInquiryManagedEffects()
-  const inquiryAdapters = new Map<string, { executionProof(execution: unknown): unknown }>()
+  const inquiryAdapters = new Map<string, InquiryAgentAdapter>()
+  let refusedReplies: ReturnType<typeof createRefusedReplyTracker> | undefined
   const currentInquiryScope = (sessionId: string): InquiryScope | undefined => {
     try {
       const owned = locusRepository.findByChildSessionId(sessionId)
@@ -701,6 +704,13 @@ async function initialize(
     newMessageId: () => randomUUID(),
     newInquiryId: () => randomUUID(),
   })
+  const deliveryExecution = (execution: ToolRunContext): InquiryExecutionProof | undefined => {
+    const child = execution.agent?.id
+    if (typeof child !== 'string') return undefined
+    const proof = inquiryAdapters.get(child)?.executionProof(execution as ToolExecution)
+    if (!proof?.active || proof.scope.kind !== 'child' || proof.inquirySegment?.phase === 'target') return undefined
+    return proof
+  }
   const installInquiryAgent = (candidate: unknown): void => {
     const agent = candidate as { id?: unknown; ctx?: { effect?: (...args: never[]) => unknown } } | undefined
     if (!agent || typeof agent.id !== 'string' || !agent.ctx) return
@@ -708,7 +718,7 @@ async function initialize(
     if (inquiryAdapters.has(id)) return
     let disposeGuard: (() => void) | undefined
     try {
-      const proofForExecution = (agentId: string, execution: unknown) => inquiryAdapters.get(agentId)?.executionProof(execution)
+      const proofForExecution = (agentId: string, execution: unknown) => inquiryAdapters.get(agentId)?.executionProof(execution as ToolExecution)
       // ManagedExecution is structurally supplied by ToolRuntime at execution time.
       disposeGuard = managedEffects.install(agent as never, proofForExecution as never, currentInquiryScope)
     } catch (error) {
@@ -723,13 +733,18 @@ async function initialize(
       petLog(`dsh-pet: inquiry runtime error (${error instanceof Error ? error.message : String(error)})`)
       return
     }
-    inquiryAdapters.set(id, adapter as { executionProof(execution: unknown): unknown })
+    const installed = adapter as InquiryAgentAdapter
+    inquiryAdapters.set(id, installed)
+    installed.on('agent/turn-end', async ({ turn }) => {
+      try { await refusedReplies?.end(id, turn) }
+      catch { petLog('dsh-pet locus reply-refused settlement failed') }
+    })
     try {
       ;(agent.ctx as { effect: (factory: () => () => void, name: string) => unknown }).effect(
         () => () => {
           try { disposeGuard?.() } catch (error) { petLog(`dsh-pet: inquiry guard dispose error (${error instanceof Error ? error.message : String(error)})`) }
           try { composed.release(agent as never) } catch (error) { petLog(`dsh-pet: inquiry adapter release error (${error instanceof Error ? error.message : String(error)})`) }
-          try { inquiryAdapters.delete(id) } catch (error) { petLog(`dsh-pet: inquiry adapter cleanup error (${error instanceof Error ? error.message : String(error)})`) }
+          try { refusedReplies?.release(id); inquiryAdapters.delete(id) } catch (error) { petLog(`dsh-pet: inquiry adapter cleanup error (${error instanceof Error ? error.message : String(error)})`) }
         },
         'dsh-pet: inquiry managed guard',
       )
@@ -1360,6 +1375,19 @@ async function initialize(
               { ok: false as const, reason: 'capability-unavailable' as const },
             logAuthorizationRefusal: ({ operation, reason }) =>
               petLog(`dsh-pet locus authorization refused: ${operation}:${reason}`),
+            onFinishRefused: execution => {
+              const proof = deliveryExecution(execution)
+              if (!proof || proof.scope.kind !== 'child') return
+              const associated = locusTurnObserver?.deliveryForTurn?.(proof.sessionId, proof.turn)
+              if (!associated || associated.correlation.locusId !== proof.scope.locusId || associated.correlation.generation !== proof.scope.generation) return
+              const current = locusRepository.getDelivery(associated.deliveryId)
+              if (current?.status !== 'current' || current.childSessionId !== proof.sessionId || current.executionId !== associated.executionId || current.locusId !== proof.scope.locusId || current.generation !== proof.scope.generation) return
+              refusedReplies?.refused(current, proof.turn)
+            },
+            onDeliveryContinued: execution => {
+              const proof = deliveryExecution(execution)
+              if (proof) refusedReplies?.continued(proof.sessionId, proof.turn)
+            },
             // Delegate through mutable Host-owned closures. The scoped Agent
             // may be composed before the channel controller is published; the
             // wrapper must not capture the initial unavailable stub.
@@ -2822,6 +2850,23 @@ async function initialize(
     })
     await locusChannelController?.dispatchNext?.(correlation)
   }
+
+  refusedReplies = createRefusedReplyTracker({
+    getDelivery: id => locusRepository.getDelivery(id),
+    abandonRefusedDelivery: input => locusRepository.abandonRefusedDelivery(input),
+    isActive: record => {
+      const rows = locusRepository.findByChildSessionId(record.childSessionId)
+      const locus = rows.length === 1 ? rows[0] : undefined
+      const current = locusRepository.listDeliveries(record.locusId).filter(row => row.childSessionId === record.childSessionId && row.generation === record.generation && (row.status === 'current' || row.status === 'finishing'))
+      return locus?.state === 'active' && locus.id === record.locusId && locus.generation === record.generation && current.length === 1 && current[0]?.deliveryId === record.deliveryId
+    },
+    withDispatchLane: withLocusDispatchLane,
+    finishAndAdvance: async (record, correlation, outcome) => {
+      petLog('dsh-pet locus delivery released: reply-refused')
+      await finishAndAdvance(record, correlation, outcome)
+    },
+    now: Date.now,
+  })
 
   // The lease deadline is durable, but only a live timer notices the moment it
   // passes. `createExpiryScheduler` owns that timing behavior so it can be

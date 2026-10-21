@@ -62,6 +62,30 @@ async function reopen(medium: MemoryMedium) {
 }
 
 describe('durable unified locus repository', () => {
+  it('persists refused-reply failure once and releases B across reopen', async () => {
+    const medium = emptyMedium()
+    const first = await openPetHarness(medium)
+    enableAtomicTransactions(first)
+    const repository = new DurableLocusRepository(first.domain)
+    const locus = await repository.putLocus(record())
+    const scope = { endpoint: locus.endpoint, locusId: locus.id, generation: locus.generation, childSessionId: locus.childSessionId!, senderOpenId: 'ou-test' }
+    const a = await repository.acceptDelivery({ ...scope, messageId: 'refused-a', acceptedAt: 100 })
+    await repository.acceptDelivery({ ...scope, messageId: 'backlog-b', acceptedAt: 102 })
+    const current = await repository.claimCurrentDelivery({ correlation: scope, now: 103 })
+    const input = { ...scope, deliveryId: a.record.deliveryId, expectedRevision: current!.revision!, now: 104 }
+    const results = await Promise.all([repository.abandonRefusedDelivery(input), repository.abandonRefusedDelivery(input)])
+    expect(results.filter(row => row.changed)).toHaveLength(1)
+    expect(repository.getDelivery(a.record.deliveryId)).toMatchObject({ status: 'failed', failureReason: 'reply-refused' })
+    expect((await repository.claimCurrentDelivery({ correlation: scope, now: 105 }))?.messageId).toBe('backlog-b')
+    await first.close()
+    const second = await reopen(medium)
+    try {
+      const persisted = new DurableLocusRepository(second.domain)
+      expect(persisted.getDelivery(a.record.deliveryId)).toMatchObject({ status: 'failed', failureReason: 'reply-refused' })
+      expect(persisted.listDeliveries().find(row => row.messageId === 'backlog-b')?.status).toBe('current')
+    } finally { await second.close() }
+  })
+
   it('keeps legacy rows readable while round-tripping additive composition and tier facts', async () => {
     expect(petLocusRecord.safeParse({ ...record(), childComposition: undefined }).success).toBe(true)
     expect(petLocusRecord.parse({ ...record(), childComposition: 'safe-v1' }).childComposition).toBe('safe-v1')

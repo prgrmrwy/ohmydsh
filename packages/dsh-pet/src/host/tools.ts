@@ -152,6 +152,9 @@ export interface PetLocusLifecycleDependencies {
     readonly operation: LocusToolOperation
     readonly reason: LocusCurrentCapabilityReason
   }) => void
+  /** Host receives the real execution, never model-supplied routing or turn ids. */
+  readonly onFinishRefused?: (execution: ToolRunContext) => void
+  readonly onDeliveryContinued?: (execution: ToolRunContext) => void
   readonly finishCurrentDelivery?: (input: PetLocusFinishInput) => PetLocusFinishResult | Promise<PetLocusFinishResult>
   readonly waitCurrentDelivery?: (input: PetLocusWaitInput) => PetLocusWaitResult | Promise<PetLocusWaitResult>
 }
@@ -476,7 +479,15 @@ export function registerPetTools(
         if (outcome !== 'reply' && outcome !== 'no-reply') throw new PetError('INVALID_REQUEST', 'outcome must be reply or no-reply.')
         if (outcome === 'reply' && (!hasOwnArgument(input, 'text') || text === undefined || text.trim() === '' || hasOwnArgument(input, 'reason'))) throw new PetError('INVALID_REQUEST', 'reply requires non-empty text and no reason.')
         if (outcome === 'no-reply' && (hasOwnArgument(input, 'text') || !hasOwnArgument(input, 'reason') || reason === undefined || reason.trim() === '')) throw new PetError('INVALID_REQUEST', 'no-reply requires non-empty reason and no text.')
-        const locus = await resolveAuthorizedCurrent(lifecycle, callerSessionId(exec as ExecutionLike), 'finish')
+        let locus: LocusContextRecord
+        try {
+          locus = await resolveAuthorizedCurrent(lifecycle, callerSessionId(exec as ExecutionLike), 'finish')
+        } catch (error) {
+          if (error instanceof PetError && error.code === 'INVALID_REQUEST' && error.message === AUTHORIZATION_ERROR_MESSAGE) {
+            lifecycle.onFinishRefused?.(exec)
+          }
+          throw error
+        }
         assertManagedEntry(exec)
         const delivery = locus.currentDelivery!
         if (lifecycle.finishCurrentDelivery === undefined) {
@@ -485,7 +496,9 @@ export function registerPetTools(
           // at-most-once semantics during partial composition.
           throw new PetError('INTERNAL', 'The Host has no durable Delivery finish capability.')
         }
-        return lifecycle.finishCurrentDelivery({ childSessionId: delivery.childSessionId, locus, delivery, outcome, ...(text === undefined ? {} : { text }), ...(reason === undefined ? {} : { reason }) })
+        const result = await lifecycle.finishCurrentDelivery({ childSessionId: delivery.childSessionId, locus, delivery, outcome, ...(text === undefined ? {} : { text }), ...(reason === undefined ? {} : { reason }) })
+        lifecycle.onDeliveryContinued?.(exec)
+        return result
       },
     }), 'delivery')
 
@@ -509,7 +522,9 @@ export function registerPetTools(
         assertManagedEntry(exec)
         if (lifecycle.waitCurrentDelivery === undefined) throw new PetError('INTERNAL', 'The Host has no durable Delivery wait lease.')
         const reason = typeof input.reason === 'string' ? input.reason : undefined
-        return lifecycle.waitCurrentDelivery({ childSessionId: locus.currentDelivery!.childSessionId, locus, delivery: locus.currentDelivery!, waitMinutes, ...(reason === undefined ? {} : { reason }) })
+        const result = await lifecycle.waitCurrentDelivery({ childSessionId: locus.currentDelivery!.childSessionId, locus, delivery: locus.currentDelivery!, waitMinutes, ...(reason === undefined ? {} : { reason }) })
+        if (result.accepted) lifecycle.onDeliveryContinued?.(exec)
+        return result
       },
     }), 'delivery')
   }

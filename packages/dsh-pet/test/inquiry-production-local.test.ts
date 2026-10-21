@@ -11,11 +11,82 @@ import { composeProductionInquiry } from '../src/host/inquiry/composition.js'
 import { openPetHarness } from './harness.js'
 import { Context } from '@deepseek-ai/cordis'
 import { registerInquiryAskTool, registerInquiryAnswerTool } from '../src/host/inquiry/tools.js'
+import { createLocusTurnObserver } from '../src/host/locus/turn-observer.js'
+import { createRefusedReplyTracker } from '../src/host/locus/refused-reply.js'
+import { abandonRefusedDelivery, acceptDelivery, claimCurrentDelivery, createDeliveryLedger } from '../src/host/locus/delivery.js'
+import { registerPetTools } from '../src/host/tools.js'
 
 const scope = { kind: 'main' as const, sessionId: 'inquiry-test' }
 
 /** A real DSH Context tools registry, with only external host capabilities stubbed. */
 describe('production inquiry composition', () => {
+  it('ends a model-issued refused finish only after the real actor is idle', async () => {
+    const h = await openPetHarness()
+    const ctx = new Context()
+    for (const plugin of [Sessions, Agents, Llm, SystemPrompt, ToolRuntime, Projections]) await ctx.plugin(plugin)
+    const root = createUserMessage({ content: [{ type: 'text', text: 'delivery' }], source: { kind: 'user' } })
+    const scope = { endpoint: { chatId: 'test-chat' }, locusId: 'test-locus', generation: 1, childSessionId: 'test-child' }
+    const accepted = acceptDelivery(createDeliveryLedger(), { ...scope, messageId: 'a', acceptedAt: 1 })
+    const current = claimCurrentDelivery(accepted.state, { ...scope, now: 2 }).record!
+    let state = acceptDelivery({ ...accepted.state, byDeliveryId: { [current.deliveryId]: current }, byMessageId: { a: current } }, { ...scope, messageId: 'b', acceptedAt: 3 }).state
+    class FinishLlm extends LlmAdapter {
+      private calls = 0
+      async *stream() {
+        if (this.calls++ === 0) {
+          const block = { type: 'tool-call', id: 'refused-call', name: 'pet_locus_finish', arguments: JSON.stringify({ outcome: 'reply', text: 'must not send' }) }
+          yield { type: 'block-start', index: 0, blockType: 'tool-call' }
+          yield { type: 'tool-call-delta', index: 0, id: block.id, name: block.name, argumentsDelta: block.arguments }
+          yield { type: 'block-end', index: 0, block }
+          yield { type: 'finish', reason: { kind: 'tool-calls' } }
+        } else {
+          yield { type: 'block-start', index: 0, blockType: 'text' }
+          yield { type: 'text-delta', index: 0, text: 'done' }
+          yield { type: 'block-end', index: 0, block: { type: 'text', text: 'done' } }
+          yield { type: 'finish', reason: { kind: 'stop' } }
+        }
+      }
+    }
+    try {
+      ctx.llm.registerAdapter(['refused-fake'], new FinishLlm())
+      await ctx.plugin(AgentLoop, { agents: [], maxParallelToolCalls: 1 })
+      const agent = await ctx.agentLoop.create(scope.childSessionId, { provider: 'refused-fake', model: 'm' })
+      const composed = composeProductionInquiry({
+        domain: h.domain as never, currentScope: () => ({ kind: 'child', sessionId: agent.id, locusId: scope.locusId, generation: 1 }), resolveAgent: () => agent,
+        agentLoop: ctx.agentLoop, probeIsolatedClaim: ctx.agentLoop.probeIsolatedQueuedTurnClaim.bind(ctx.agentLoop),
+        tools: ctx.tools, readinessManagedGuard: () => true, log: () => {}, onError: () => {}, now: () => 4, newMessageId: () => 'unused-message', newInquiryId: () => 'unused-inquiry',
+      })
+      const adapter = composed.install(agent)
+      const observer = createLocusTurnObserver({
+        onClaimed: listener => ctx.on('agent/inbox/claimed', payload => listener({ childSessionId: payload.agent.id, messageId: payload.message.id, turn: payload.turn, sourceKind: payload.message.source.kind })),
+        onTurnEnd: listener => ctx.on('session/event', (session, event) => { if (event.type === 'turn/end') listener({ childSessionId: session.id, turn: event.data.turn, outcome: 'completed' }) }),
+        lookup: { find: ({ messageId }) => messageId === root.id ? { deliveryId: current.deliveryId, executionId: 'exec', correlation: scope, status: 'current' } : undefined },
+      })
+      const finished = Promise.withResolvers<void>()
+      const advanced = vi.fn(async () => { expect(agent.status).toBe('idle'); state = claimCurrentDelivery(state, { ...scope, now: 5 }).state; finished.resolve() })
+      const tracker = createRefusedReplyTracker({ getDelivery: id => state.byDeliveryId[id], isActive: () => true, withDispatchLane: async (_scope, operation) => operation(), now: () => 4,
+        abandonRefusedDelivery: async input => { const result = abandonRefusedDelivery(state, input); state = result.state; return result }, finishAndAdvance: advanced })
+      adapter.on('agent/turn-end', ({ turn }) => tracker.end(agent.id, turn))
+      const outbound = vi.fn()
+      const refused = vi.fn(execution => {
+        const proof = adapter.executionProof(execution)
+        expect(proof?.active).toBe(true)
+        const associated = observer.deliveryForTurn?.(agent.id, proof!.turn)
+        expect(associated?.deliveryId).toBe(current.deliveryId)
+        tracker.refused(current, proof!.turn)
+      })
+      registerPetTools(agent.ctx, { repository: {} as never, locusLifecycle: { locusRepository: {} as never,
+        inspectCurrentCapability: () => ({ ok: false, reason: 'mixed-source' }), onFinishRefused: refused, finishCurrentDelivery: outbound } })
+      agent.followup(root)
+      await agent.whenIdle()
+      await finished.promise
+      expect(refused).toHaveBeenCalledTimes(1)
+      expect(outbound).not.toHaveBeenCalled()
+      expect(state.byDeliveryId[current.deliveryId].failureReason).toBe('reply-refused')
+      expect(Object.values(state.byDeliveryId).find(row => row.messageId === 'b')?.status).toBe('current')
+      observer.dispose()
+    } finally { await ctx.fiber.dispose(); await h.close() }
+  })
+
   it('fails closed unless the live loop, probe, managed guard and tools capability exist', async () => {
     const h = await openPetHarness()
     try {

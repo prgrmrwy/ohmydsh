@@ -21,6 +21,7 @@ import { createLocusResolution } from '../src/host/locus/resolution.js'
 import { emptyMedium, openPetHarness, type PetHarness } from './harness.js'
 import type { LocusReplyTarget } from '../src/host/locus/context.js'
 import type { DeliveryCorrelation } from '../src/host/locus/delivery.js'
+import { createRefusedReplyTracker } from '../src/host/locus/refused-reply.js'
 
 const GROUP_ENDPOINT = { chatId: 'oc_settle' } as const
 const ENDPOINT = { chatId: 'oc_settle', threadId: 'omt_settle' } as const
@@ -76,6 +77,7 @@ async function durableLocus(harness: PetHarness): Promise<LocusRepository> {
  */
 async function composeSettlementHost(options: {
   readonly endBeforeBind?: 'completed' | 'failed'
+  readonly feedbackFails?: boolean
   /**
    * Override the delivery prompt renderer.
    *
@@ -191,7 +193,7 @@ async function composeSettlementHost(options: {
     turns: observer,
     receipts: {
       markAccepted: () => {},
-      markSettled: (target, outcome) => { settledReactions.push({ target, outcome }) },
+      markSettled: (target, outcome) => { settledReactions.push({ target, outcome }); if (options.feedbackFails) throw new Error('fixture feedback unavailable') },
     },
     admissionContext: {
       botOpenId: 'ou_bot',
@@ -293,6 +295,34 @@ const CORRELATION: DeliveryCorrelation = {
 }
 
 describe('durable Delivery lifecycle against its exact child turn', () => {
+  it('advances B after refused A even when the real controller failure receipt throws', async () => {
+    const host = await composeSettlementHost({ feedbackFails: true })
+    try {
+      await host.controller.handleAdmission(admission('om_refused_a') as never)
+      await host.controller.handleAdmission(admission('om_backlog_b') as never)
+      expect(host.queued).toHaveLength(1)
+      const a = host.repository.findDeliveryByMessageId('om_refused_a')!
+      host.claim({ childSessionId: CHILD, messageId: host.queued[0]!.messageId, turn: 1, sourceKind: 'user' })
+      const tracker = createRefusedReplyTracker({
+        getDelivery: id => host.repository.getDelivery(id),
+        abandonRefusedDelivery: input => host.repository.abandonRefusedDelivery(input),
+        isActive: () => true, withDispatchLane: async (_scope, operation) => operation(), now: Date.now,
+        finishAndAdvance: async (record, correlation) => {
+          host.observer.revokeCurrentCapability?.({ childSessionId: CHILD, deliveryId: record.deliveryId })
+          host.controller.currentFinished({ deliveryId: record.deliveryId, correlation, outcome: 'failed' })
+          await host.controller.dispatchNext(correlation)
+        },
+      })
+      tracker.refused(host.repository.getDelivery(a.deliveryId)!, 1)
+      host.end({ childSessionId: CHILD, turn: 1, outcome: 'completed' })
+      await tracker.end(CHILD, 1)
+      expect(host.repository.getDelivery(a.deliveryId)).toMatchObject({ status: 'failed', failureReason: 'reply-refused', outboundResult: 'none' })
+      expect(host.repository.findDeliveryByMessageId('om_backlog_b')?.status, JSON.stringify(host.diagnostics)).toBe('current')
+      expect(host.queued).toHaveLength(2)
+      expect(host.settledReactions).toEqual([{ target: expect.objectContaining({ messageId: 'om_refused_a' }), outcome: 'failed' }])
+    } finally { await host.close() }
+  })
+
   it('carries one accepted message through current, real turn proof, and a durable finish', async () => {
     const host = await composeSettlementHost()
     try {

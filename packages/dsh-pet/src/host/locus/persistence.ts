@@ -45,6 +45,7 @@ import {
   claimCurrentDelivery as applyClaimCurrentDelivery,
   completeDelivery as applyCompleteDelivery,
   abandonInterruptedDelivery as applyAbandonInterruptedDelivery,
+  abandonRefusedDelivery as applyAbandonRefusedDelivery,
   expireDelivery as applyExpireDelivery,
   markFinishing as applyMarkFinishing,
   waitDelivery as applyWaitDelivery,
@@ -2066,6 +2067,26 @@ export class LocusRepository {
         ...(applied.record.revision === undefined ? {} : { stateRevision: applied.record.revision }),
       })
       await this.persistDeliveryMutation('delivery-wait', current, next, { deliveryId: current.deliveryId, locusId: current.locusId, endpointKey: endpointKeyOf(current.endpoint) })
+      return mutation(next, true)
+    })
+  }
+
+  /** CAS-fail only the current whose refused reply was correlated by the Host. */
+  async abandonRefusedDelivery(input: DeliveryLeaseInput): Promise<LocusDeliveryMutation> {
+    return this.enqueue(async () => {
+      assertCorrelation(input)
+      assertIdentifier(input.deliveryId, 'deliveryId')
+      assertTimestamp(input.now, 'now')
+      const current = this.getDelivery(input.deliveryId)
+      if (current === undefined) return mutation(undefined, false, 'unknown-delivery')
+      const applied = applyAbandonRefusedDelivery({ byMessageId: { [current.messageId]: current }, byDeliveryId: { [current.deliveryId]: current }, nextDeliverySequence: current.sequence + 1 }, input)
+      if (!applied.changed || applied.record === undefined) return mutation(current, false, applied.reason === 'already-terminal' ? 'already-terminal' : applied.reason === 'revision-mismatch' ? 'revision-mismatch' : applied.reason === 'correlation-mismatch' ? 'correlation-mismatch' : 'invalid-transition')
+      const next = Object.freeze({ ...applied.record, ...(applied.record.revision === undefined ? {} : { stateRevision: applied.record.revision }) })
+      const locus = this.getLocus(current.locusId)
+      const afterLocus = locus !== undefined && locus.busy && !this.hasPendingDelivery(current.locusId, current.generation, current.deliveryId)
+        ? withLocusBusy(locus, false, Math.max(input.now, locus.updatedAt))
+        : undefined
+      await this.persistDeliveryMutation('delivery-finished', current, next, { deliveryId: current.deliveryId, locusId: current.locusId, endpointKey: endpointKeyOf(current.endpoint) }, locus, afterLocus)
       return mutation(next, true)
     })
   }

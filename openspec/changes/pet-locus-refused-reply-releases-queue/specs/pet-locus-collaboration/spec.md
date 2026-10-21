@@ -9,7 +9,7 @@
 - 同一轮内此后没有成功的 `pet_locus_finish`；
 - 同一轮内没有成功的 `pet_locus_wait`。
 
-收尾 MUST NOT 发送业务正文，MUST NOT 重试被拒的回复，MUST NOT 放宽或绕过被拒原因所对应的授权规则；SHALL 使用既有失败控制反馈告知触发者该请求未获回复，反馈失败不阻断收尾。该规则只由"本轮出现过 finish 授权拒绝"触发：本轮未调用 finish 而正常结束的 Delivery 仍按既有规则保持 current。收尾与 finish、超时及启动恢复竞争同一 Delivery 时，SHALL 通过既有原子状态竞争只终结一次；迟到的收尾 MUST NOT 消费后续 Delivery 或新代际。
+Host MUST 独立证明被拒调用的精确活跃轮关联该 Delivery，MUST NOT 只凭 child 有 current 推断。收尾 MUST NOT 发送或重试业务正文、放宽授权；SHALL 复用失败控制反馈且反馈失败不阻断收尾。终结 SHALL 与 finish/超时原子竞争且至多一次，MUST NOT 消费后续 Delivery 或新代际。
 
 #### Scenario: 回复被拒后本轮结束
 - **WHEN** current Delivery A 的执行轮中 `pet_locus_finish` 以 `mixed-source` 被拒，child 随后结束该轮且未成功 finish 或 wait
@@ -19,8 +19,12 @@
 - **WHEN** 执行轮中 finish 先被拒，同一轮内随后一次 finish 成功
 - **THEN** A 按成功回复终结，不再收尾为 `reply-refused`
 
+#### Scenario: 无关联或迟到旧执行不消费新请求
+- **WHEN** 纯 GUI 轮、旧 A 已到期后 B 晋升、或多个 Delivery 导致关联不唯一的执行尝试 finish 被拒
+- **THEN** Host 只保留拒绝诊断，不得终结 B 或其它 current
+
 #### Scenario: 被拒后声明继续等待
-- **WHEN** 执行轮中 finish 被拒，同一轮内随后 `pet_locus_wait` 成功
+- **WHEN** 执行轮中 finish 被拒，同一轮内 `pet_locus_wait` 成功（先于或晚于拒绝均可）
 - **THEN** 该轮结束时 A 保持 current，由期限或后续可证明续进决定其终态
 
 #### Scenario: 未调用 finish 的普通结束不受影响

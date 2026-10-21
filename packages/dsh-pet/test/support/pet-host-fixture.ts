@@ -18,7 +18,10 @@ import * as petPlugin from '../../src/index.js'
 
 // Scope tags use a package-private Symbol, so mint from ToolRuntime's own
 // dependency root rather than the repository's second physical dsh-scope copy.
-const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/package.json'))
+const graphRequire = process.env.PET_INQUIRY_LAUNCHER
+  ? createRequire(path.join(process.env.PET_INQUIRY_LAUNCHER, 'package.json'))
+  : require
+const requireFromTools = createRequire(graphRequire.resolve('@deepseek-ai/dsh-tools/package.json'))
 const scopeEntry = requireFromTools.resolve('@deepseek-ai/dsh-scope')
 export const { createScope } = await import(pathToFileURL(scopeEntry).href) as typeof import('@deepseek-ai/dsh-scope')
 

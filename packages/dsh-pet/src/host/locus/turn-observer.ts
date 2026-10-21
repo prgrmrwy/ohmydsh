@@ -248,6 +248,8 @@ export interface LocusTurnCorrelationObserver {
    * Arbitrary later turns never inherit the proof.
    */
   currentCapabilityForChild?(childSessionId: string): LocusCurrentCapability | undefined
+  /** Diagnostic association only: never a reply capability, even for a mixed turn. */
+  deliveryForTurn?(childSessionId: string, turn: number): LocusClaimedDelivery | undefined
   /** Discriminated inspection underlying `currentCapabilityForChild`. */
   inspectCurrentCapabilityForChild?(childSessionId: string): LocusCurrentCapabilityInspection
   /**
@@ -908,6 +910,20 @@ export function createLocusTurnObserver(
       const turn = Number(delivery.turnId.slice(turnPrefix.length))
       if (!Number.isSafeInteger(turn) || turn < 1) return
       retainRestoredCurrent({ ...delivery, turnId: delivery.turnId })
+    },
+    deliveryForTurn(childSessionId, turn) {
+      if (disposed) return undefined
+      const observed = turns.get(turnKey(childSessionId, turn))
+      if (observed === undefined || observed.end !== undefined || observed.saturated) return undefined
+      if (observed.deliveries.size === 1 && observed.inquiryResults.size === 0) {
+        return observed.deliveries.values().next().value
+      }
+      if (observed.deliveries.size !== 0 || observed.inquiryResults.size > 1) return undefined
+      const key = continuationByChild.get(childSessionId)
+      const current = key === undefined ? undefined : retained.get(key)
+      return current?.continuationTurnId === observed.turnId &&
+        (observed.inquiryResults.size === 1 || observed.agentMessages.size > 0)
+        ? current.delivery : undefined
     },
     inspectCurrentCapabilityForChild,
     currentCapabilityForChild(childSessionId) {
