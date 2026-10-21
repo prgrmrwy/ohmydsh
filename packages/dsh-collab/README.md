@@ -3,21 +3,20 @@
 English · [简体中文](README.zh.md)
 
 <!-- problem -->
-Independent sessions in one DSH Host can work in different repositories but need a shared authoritative ledger and directed next-turn notifications. This bundle connects existing ordinary sessions to the standalone collaboration kernel, without turning them into a team or creating child sessions. It is disabled by default and requires trusted Host configuration.
+Independent sessions in one DSH Host can work in different repositories but need a shared authoritative ledger and directed next-turn notifications. This bundle connects existing ordinary sessions to the standalone collaboration kernel, without turning them into a team or creating child sessions. Whether it runs is decided by the manifest's `enabled` flag; a profile that registers the bundle loads it.
 
 ## Configuration
 
-Register the bundle in the intended profile only, then override its disabled composition row with an explicit absolute `dataDir` and `disabled: false`. The manifest entry remains disabled until you deliberately deploy it. Never use a user session's environment to select storage.
+Set the dsh-collab manifest entry to `enabled: true`, run `dsh build`, then `dsh restart`; no machine-specific path is needed. The data directory defaults to `<DSH home>/plugins/dsh-collab`, where DSH home is the Host process's non-empty `DSH_HOME`, else `~/.dsh`. Storage is chosen only by Host configuration and process environment, never by session arguments or model input. Every key below is optional; override it by row id in a profile patch when needed:
 
 ```yaml
-- override:
-    dsh-collab:
-      disabled: false
-      config:
-        dataDir: /absolute/profile-owned-state/collab
-        admission: invite            # default; allowlist restores first-release admission
-        allowedSessionIds: []        # under invite: only seed contacts for collab_status
-        denySessionIds: []           # exclusion list: cannot call, be claimed or be woken
+- id: dsh-collab
+  name: dsh-collab
+  config:
+    dataDir: /absolute/profile-owned-state/collab   # optional; must be absolute, defaults as above
+    admission: invite            # default; allowlist restores first-release admission
+    allowedSessionIds: []        # under invite: only seed contacts for collab_status
+    denySessionIds: []           # exclusion list: cannot call, be claimed or be woken
 ```
 
 **Admission.** `invite` (default): any first-level session passing ordinary-session checks may create a space; a session that a Leader invites by its complete session ID, and that is claimed, is admitted to that space. The authorization record is the ledger's `member/invited` commit; no configuration change or restart is needed. `allowlist`: callers and invitees must additionally be in `allowedSessionIds`; old configurations keep working. In both modes subagents, nonzero delegationDepth, archived sessions, sessions refused by official ownership checks and those in `denySessionIds` can neither call nor be claimed. An invalid `admission`, a list with empty/padded/duplicate entries, or an ID in both lists makes the plugin refuse to start (`COLLAB_BAD_CONFIG`) without registering tools or creating the data directory. **Changing the exclusion list or admission mode takes effect only after `dsh build` and `dsh restart`**; there is no hot reload.

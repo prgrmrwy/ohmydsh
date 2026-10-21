@@ -1,5 +1,5 @@
-# Configure an exclusive profile-owned dataDir and exact allowlist before enabling.
+# Loaded whenever the profile registers this bundle; the manifest's enabled flag decides.
+# dataDir defaults to <DSH home>/plugins/dsh-collab; override it only if needed.
 - insert:
     - id: dsh-collab
       name: dsh-collab
-      disabled: true
