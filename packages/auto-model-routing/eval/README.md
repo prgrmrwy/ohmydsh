@@ -1,5 +1,7 @@
 # Tier rubric regression
 
+[中文](README.zh.md)
+
 `cases.json` holds 90 cases for the Jev tier rubric in `../src/rubric.json`: 30 synthetic (`t-`), 22 synthetic written after the rubric was drafted (`h-`, also used to choose between drafts, so not an independent holdout) and 38 paraphrased from real local turns (`s-`, previous-turn text included; no real session text, ids, credentials or addresses). `exp` lists the acceptable tiers; `prev`, `prevUser` and `prevAssistant` simulate the previous turn.
 
 `run.mjs` (added with the implementation) imports the rubric and the production `state` builder, asks Jev three times per case and takes the majority. It calls the real OpenRouter endpoint and costs about $0.005 per run.
