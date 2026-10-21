@@ -209,3 +209,39 @@ CHANGES_APPLIED: no
 3. E3：spec“用户回合与分类输入”改为连接后经 `redact` 再 `.slice(0, 8000)`。
 4. E4：spec 与 design D13 改为 continued 回合的消息记到最近一个用户回合，该回合无判档时不建映射；场景“按消息查询与标注”增加 MANUAL 回合后的 continued 消息 m6 → `{}`。
 5. E5：spec 规定带 `label` 追加失败返回 5xx 且不返回 `label`（新增场景“标注追加失败返回错误”）；Tooltip 在无 `effort` 时省略 ` → <effort>`（场景“Tooltip 与菜单内容”增加 m4 断言）。design D13 同步。
+
+## Round 7 最终复核（2026-10-22）
+
+### 复核上下文
+
+- **Reviewer context**: fresh-context subagent（claude-sonnet-5-5, high），不是前几轮审查实例；只读，唯一写入是本节追加。未联网、未构建/测试、未读 `.env.local`。
+- **复核对象**: 提交 `583a9932`（`git show` 逐 hunk 通读）及当前 design.md / spec.md / proposal.md。
+- **重算哈希**（`sha256sum`，与任务给定值逐字一致）：
+  - proposal.md `2111c2406970e769787c9b178925853629e05b70b4780f016747a9b0b951ea1a`
+  - design.md `1ea3f327039a3b50a6a26910a306b1923d7817a781a27c43ab07836d8bd711fd`
+  - specs/auto-model-routing/spec.md `47a2b463d4746b8adb8f88cb4f4d6250844d01e814c173ccc424cccddf386bba`
+
+### 第 1–5 项核验
+
+| # | 结果 | 证据 |
+|---|---|---|
+| 1 (E1/M3) | verified | design.md:149 现为“候选集 = 模型实际支持的 effort ∩ `{low, medium, high, xhigh}`；目标不在候选集取不超过目标的最高候选值，无则最低候选值；候选集为空不改写，`reason` 为 `no-effort-support`（只支持 `max` 的模型也不会被设成 `max`）”，与 spec.md:184 逐项一致；场景 spec.md:196–204 覆盖 `[low,medium,high,max]`→`high` 与 `[max]`/无 effort→`no-effort-support`。 |
+| 2 (E2) | verified | design.md:124 为“沿用 `.state`、`.setMode`，新增 `.label`（见 D13），共三个端点”；全文再无 `.judgement`，与 spec.md 三端点及 D13 一致。 |
+| 3 (E3) | verified | spec.md:50 改为“以 `"\n"` 连接，经 `redact` 后取 `.slice(0, 8000)`”，与 spec.md:91 及 design.md:79“先脱敏再截断”一致；场景 spec.md:62–65 不变，仍可断言。 |
+| 4 (E4) | verified | spec.md:349 与 design.md:187：`continued` 回合助手消息记到最近一个用户回合，该回合无判档时不建映射；场景 spec.md:370–373 增加回合 5（MANUAL 用户回合）与回合 6 的 m6，第四次查询 THEN 为 `{}`，可机械断言。 |
+| 5 (E5) | verified | ① spec.md:351 规定带 `label` 追加失败返回 5xx 且不返回 `label`，新增场景 spec.md:375–378（THEN：5xx、响应不含 `label`、会话状态不变）；design.md:189 同步。② spec.md:393 规定无 `effort` 时省略 ` → <effort>`，场景 spec.md:402–405 增加 m4 `{tier: simple}` → Tooltip 恰为 `AUTO 判档：简单`。 |
+
+### 对越界改动的核查
+
+`git show 583a9932 --stat` 仅改 design.md（4 处）、spec.md（6 处）、review.md（追加作者回应与上一轮复核）；proposal.md 未变。逐 hunk 核对，设计与规格的改动全部落在第 1–5 项范围内，未引入其它行为变化，也未发现新矛盾：
+
+- design.md：:124（E2）、:149（E1）、:187（E4）、:189（E5）。
+- spec.md：:50（E3）、:349（E4）、:351（E5）、:370–373（E4 场景扩展）、:375–378（E5 新场景）、:393 与 :402–405（E5 Tooltip）。
+
+被 583a9932 触及的 Requirement 均仍有正常与失败/边界场景，且 THEN 可机械断言：“用户回合与分类输入”（多条消息拼接截断、步骤被拒等）、“effort 映射”（截断到 `high`、`[max]`/无支持不改写）、“判档记录与人工标注”（查询/标注、追加失败 5xx、无效请求 4xx、写入失败不影响请求、统计脚本跳过坏行）、“回复操作栏档位按钮”（Tooltip 含无 effort、选择失败不改显示、重启不显示）。
+
+**非阻塞观察（Minor，不影响结论，可随实现期顺手处理）**：design.md:58（D-用户回合段）仍只写“`"\n"` 连接、`.slice(0, 8000)`”，未提 `redact`；与 spec.md:50 / design.md:79 不矛盾（后者已规定脱敏先于截断），但文字上未同步。建议在 design.md:58 的括号内补“经 `redact` 后”。
+
+未发现 Critical 或 Moderate。
+
+CHANGES_APPLIED: yes
