@@ -107,8 +107,15 @@ skill 规则：委派前调用 `route_subagent`；成功则把返回的三个字
 
 理由：用户在 GUI 验收中要求与右侧模型选择器同一视觉语言；样式值取自官方 bundle 而非自定义颜色，跟随主题。芯片不显示 effort：无待生效手选时官方选择器已展示 AUTO 结果（新回合判档前显示上一回合的值）；有手选时以面板为准。
 
+### D11. AUTO 结果写回官方选择（2026-10-21 GUI 验收中用户决定，方案 B）
+现象：AUTO 改写请求后，右侧选择器仍显示用户开 AUTO 前的手选（官方只在请求头与待生效手选完全一致时才清掉手选，AUTO 改写后永远不一致，手选一直挂着）。用户要求 AUTO 每次决定都更新右侧选择。
+
+官方“当前选择”有两处：会话事件 `model/selection`（选择器读取）与控制器内存中的手选缓存（下次请求使用）。只有官方 `sessionController.selectModel` 同时更新两处；插件直接追加事件只能改显示，不能改实际请求，会造成新的不一致。因此在 `agent/request` 中，路由器输出的 effort 与官方本次合成不同时，调用 `selectModel({sessionId, provider, model, reasoningEffort})`；不等待结果（失败只记日志，不影响请求）。是否调用以本次请求的官方合成配置为准：官方已是该值就不调用，所以 AUTO 期间的新手选也会在下一回合被覆盖；同一值的调用尚未完成时不重复调用。官方 `[model changed]` 通知只比较 provider/model，只改 effort 不会触发。
+
+代价（用户已接受）：`selectModel` 同时把该选择保存为新会话默认值，新会话会从最近一次 AUTO 值开始（新会话默认 MANUAL，右侧显示即实际值，不会不一致）。AUTO 期间的手选会被下一次 AUTO 决定覆盖；要手动指定须先切 MANUAL。替代方案“只追加事件不改全局默认”（A）因无法更新控制器缓存而否决；laya 未处理该问题（其只调 effort，芯片与选择器各显各的）。
+
 ### D10. 决策提示（2026-10-21 用户追加）
-开关放在插件自有配置 `$DSH_HOME/plugins/dsh-auto-model-routing/config.json`（与 home-network-model-guard 的 config.json 同惯例），默认关闭；Host 每次处理状态请求时读取，失败视为关闭。Jev 客户端成功结果附带 `confidence`（`answers.tier.confidence`）、`probabilities`（`answers.tier.probabilities`，只保留四个档位的有限数值）与请求耗时 `ms`。提示同时显示置信与完整分布（用户要求：只看胜出项看不出判断有多接近）；置信是 Jev 的归一化值（各档同等可能为 0，确定为 1），与胜出档的概率不同，二者都展示。Router 为主会话保存最近一次决策（单调递增 `id`），主会话在 `agent/request` 映射出 effort 时写入（`source: main`），`route_subagent` 用 `exec.agent` 找到调用会话写入（`source: subagent`；调用方本身是子会话时不写，因其无芯片）。主会话只在 Jev 新判出的档位首次映射出 effort 时写入一次：continued 回合与同回合重映射不重复；首个请求模型无 effort 支持、同回合换到支持的模型时，在该次映射时写入。置信与分布只接受 0–1 数值。不落盘、不进历史。
+开关放在插件自有配置 `$DSH_HOME/plugins/dsh-auto-model-routing/config.json`（与 home-network-model-guard 的 config.json 同惯例），默认关闭；Host 每次处理状态请求时读取，失败视为关闭。Jev 客户端成功结果附带 `confidence`（`answers.tier.confidence`）、`probabilities`（`answers.tier.probabilities`，只保留四个档位的有限数值）与请求耗时 `ms`。提示显示完整分布（省略 0% 档位），不显示置信：GUI 验收中用户确认置信（`(p_max − 1/4)/(1 − 1/4)`，由最高概率推导）与分布并列易误解。决策记录仍保存 confidence 以备排查。Router 为主会话保存最近一次决策（单调递增 `id`），主会话在 `agent/request` 映射出 effort 时写入（`source: main`），`route_subagent` 用 `exec.agent` 找到调用会话写入（`source: subagent`；调用方本身是子会话时不写，因其无芯片）。主会话只在 Jev 新判出的档位首次映射出 effort 时写入一次：continued 回合与同回合重映射不重复；首个请求模型无 effort 支持、同回合换到支持的模型时，在该次映射时写入。置信与分布只接受 0–1 数值。不落盘、不进历史。
 
 client 沿用 3 秒轮询：开关开启时状态带 `decision`，新 `id` 触发 3 秒提示（最多约 3 秒后出现）；轮询间多次决策只显示最新。每个会话首次轮询只预热（换会话也重新预热），提示的隐藏只依赖提示本身，后续状态变化不能取消它。GUI 复验发现：官方 composer 在 Agent 运行时给右侧控件容器设 `hidden`，而 Jev 恰在此时判档，提示若放在芯片内部会随之隐藏。因此提示经 portal 挂到 `<body>`，按芯片最后一次可见位置定位（`position: fixed`，水平中心对齐芯片中心）。用户随后把时长从 1 秒改为 3 秒。不另建推送通道：与停用显示同一数据路径，避免新增订阅生命周期。面板不再渲染历史列表（用户认为不优雅），Host 内存历史保留供排查。
 

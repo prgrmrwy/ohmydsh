@@ -21,7 +21,8 @@ const SECRET = 'sk-or-test-SECRET'
 let cleanup: (() => Promise<void>) | undefined
 afterEach(async () => { await cleanup?.(); cleanup = undefined })
 
-async function harness(reply: Reply, options: { reject?: () => boolean } = {}) {
+async function harness(reply: Reply, options: { reject?: () => boolean; selectFails?: boolean } = {}) {
+ const selections: unknown[] = []
  const home = mkdtempSync(join(tmpdir(), 'router-host-'))
  const jev = await fakeJev(reply)
  const ctx = new Context()
@@ -38,7 +39,10 @@ async function harness(reply: Reply, options: { reject?: () => boolean } = {}) {
  forks.push(await ctx.plugin(Loop, { agents: [] }))
  ctx.llm.registerAdapter(['test'], new Adapter())
  ctx.provide('connection', { fetch: { register(route: { path: string; fetch: (r: Request) => Promise<Response> }) { routes.set(route.path, route); return async () => { routes.delete(route.path) } } } } as never)
- ctx.provide('sessionController', { resolveAgent: async (id: string) => agent?.id === id ? { agent } : { error: new Error('unknown') } } as never)
+ ctx.provide('sessionController', {
+  resolveAgent: async (id: string) => agent?.id === id ? { agent } : { error: new Error('unknown') },
+  selectModel: async (request: unknown) => { selections.push(request); if (options.selectFails) throw new Error('model unavailable'); return { selected: request } },
+ } as never)
  forks.push(await ctx.plugin(plugin, { home, jevBase: jev.base, jevTimeoutMs: 300 }))
  await expect.poll(() => routes.size).toBe(2)
  const selection: ModelSelectionRef = { current: { provider: 'test', model: 'claude-opus-5-5', reasoningEffort: ReasoningEffortId('medium') }, assembled: undefined }
@@ -54,7 +58,7 @@ async function harness(reply: Reply, options: { reject?: () => boolean } = {}) {
  const run = async (text: string) => { agent!.followup(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })); await agent!.whenIdle() }
  cleanup = async () => { await handle.dispose(); for (const f of forks.reverse()) await f.dispose(); await jev.close() }
  const toast = (on: boolean) => { const dir = join(home, 'plugins/dsh-auto-model-routing'); mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, 'config.json'), JSON.stringify({ decisionToast: on })) }
- return { ctx, jev, calls, agent, selection, invoke, run, home, toast, setMode: (mode: string) => invoke('setMode', { sessionId: agent!.id, mode }) }
+ return { ctx, jev, calls, agent, selection, invoke, run, home, toast, selections, setMode: (mode: string) => invoke('setMode', { sessionId: agent!.id, mode }) }
 }
 
 it('host_routes_and_rpc_envelope', async () => {
@@ -219,4 +223,28 @@ it('toast_off_or_failure_silent', async () => {
  h.jev.set(json(402, {}))
  await h.run('下一个任务')
  expect((await h.invoke('state', { sessionId: h.agent.id })).decision.id).toBe(before)
+})
+
+it('auto_syncs_official_selection', async () => {
+ const h = await harness(tier('complex'))
+ await h.setMode('AUTO')
+ await h.run('排查多个模块')
+ expect(h.calls.at(-1)?.reasoningEffort).toBe('xhigh')
+ expect(h.selections).toEqual([{ sessionId: h.agent.id, provider: 'test', model: 'claude-opus-5-5', reasoningEffort: 'xhigh' }])
+ // The same value is not pushed again; the official selection now carries it.
+ h.selection.current = { provider: 'test', model: 'claude-opus-5-5', reasoningEffort: ReasoningEffortId('xhigh') }
+ await h.run('继续排查')
+ expect(h.selections).toHaveLength(1)
+ // MANUAL never writes the selection.
+ await h.setMode('MANUAL'); await h.run('再继续')
+ expect(h.selections).toHaveLength(1)
+})
+
+it('selection_sync_failure_does_not_block_request', async () => {
+ const h = await harness(tier('complex'), { selectFails: true })
+ await h.setMode('AUTO')
+ await h.run('排查多个模块')
+ expect(h.selections).toHaveLength(1)
+ expect(h.calls.at(-1)?.reasoningEffort).toBe('xhigh')
+ expect((await h.invoke('state', { sessionId: h.agent.id })).mode).toBe('AUTO')
 })

@@ -16,15 +16,15 @@ const TIER_ORDER = ['simple', 'standard', 'complex', 'escalated']
 const pct = (v: number) => `${Math.round(v * 100)}%`
 export const TOAST_MS = 3000
 
-/** Line 1: who judged, tier → (model) effort, confidence, duration. Line 2: the whole distribution in tier order. */
+/** Line 1: who judged, tier → (model) effort, duration. Line 2: the distribution in tier order, 0% tiers omitted. */
 export function toastText(d: Decision): string[] {
   const head = [
     d.source === 'main' ? '主会话判断' : '子会话判断',
     `${d.tier} → ${d.model ? `${d.model} · ` : ''}${d.effort}`,
-    ...(d.confidence === undefined ? [] : [`置信 ${pct(d.confidence)}`]),
     `${(d.ms / 1000).toFixed(2)}s`,
   ].join(' · ')
-  const spread = TIER_ORDER.filter(t => d.probabilities?.[t] !== undefined).map(t => `${t} ${pct(d.probabilities![t]!)}`).join(' / ')
+  const spread = TIER_ORDER.filter(t => d.probabilities?.[t] !== undefined && Math.round(d.probabilities[t]! * 100) > 0)
+    .map(t => `${t} ${pct(d.probabilities![t]!)}`).join(' / ')
   return spread ? [head, spread] : [head]
 }
 

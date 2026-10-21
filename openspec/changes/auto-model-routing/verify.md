@@ -99,6 +99,13 @@
 - package **64/64**，typecheck/build 通过；client bundle 不含出站代码。
 - **GUI 复验发现提示不可见**：线上状态接口已返回正确的 `decision`（含分布），但官方 composer 在 Agent 运行时把右侧控件容器设为 `hidden`，Jev 正在此时判档，提示随芯片一起隐藏。先加 jsdom 测试复现为红（提示位于隐藏子树内），改为 portal 到 `<body>`、`position: fixed` 定位于芯片上次可见位置后转绿。用户同时要求时长改为 3 秒。package **65/65**。
 
+### AUTO 结果写回官方选择；提示去掉置信（2026-10-21）
+
+- GUI 复验发现：芯片提示 `xhigh`，右侧选择器仍显示 `Medium`。线上状态确认 `lastUsed=xhigh`、待生效手选 `medium`：AUTO 改写后请求头与手选永不相等，官方从不清掉手选。用户选方案 B（design D11）：effort 改变时调用官方 `selectModel`，同时更新显示与下次请求，并接受其保存新会话默认值。
+- 红：`auto_syncs_official_selection`、`selection_sync_failure_does_not_block_request`（未调用）、`auto_overrides_pending_pick`（切 MANUAL 后仍为手选 low）；提示含“置信”、未省略 0%。绿：实现后全部通过。
+- 依据：官方 `[model changed]` 通知只比较 provider/model（dsh-agent `sameRoute`），只改 effort 不触发；laya 未处理该问题。
+- package **68/68**，typecheck/build 通过。
+
 ## Overall Decision
 
 DECISION: PASS_WITH_WARNINGS

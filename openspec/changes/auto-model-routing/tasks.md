@@ -64,3 +64,9 @@
 - [x] 10.1 写失败测试：`host.integration.test.ts › main_decision_toast`、`subagent_decision_toast`、`toast_off_or_failure_silent`；`client.test.ts › toast_once_and_expires`、`panel_state_and_history_bound`（面板不渲染历史）；`jev.test.ts › request_body_and_limits` 断言成功结果含 confidence 与 ms。确认按新断言失败。
 - [x] 10.2 实现 design D10：Jev 结果带 confidence/ms；Router 记录最近决策；`route_subagent` 经 `exec.agent` 写入；配置读取；状态接口按开关返回 `decision`；client 提示（1 秒、只显示新 id）；面板去掉历史列表。
 - [x] 10.3 全套、根测试、隔离双 sync、严格校验保持绿；README 写明开关；合入构建后用户在 GUI 复验。
+
+## 11. AUTO 结果写回官方选择；提示去掉置信、省略 0%（2026-10-21 用户决定）
+
+- [x] 11.1 写失败测试：`host.integration.test.ts › auto_syncs_official_selection`（调用一次、相同不重复、失败不影响请求）；`selection.integration.test.ts › auto_overrides_pending_pick`（替换 `pending_pick_applies_after_manual`）；`client.test.ts › toast_once_and_expires`（无置信、省略 0%）。确认按新断言失败。
+- [x] 11.2 实现 design D11：`agent/request` 在 effort 与官方合成不同时调用 `sessionController.selectModel`（不等待，按会话去重，失败记日志）；面板文案改为同步说明；提示格式更新。
+- [ ] 11.3 全套、根测试、隔离双 sync、严格校验保持绿；README 写明同步与全局默认的影响；合入、推送、构建后用户 GUI 复验。

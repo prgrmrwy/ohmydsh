@@ -54,13 +54,34 @@ export function apply(ctx: Context, config: Config = {}): void {
     else router.cancel(agent, payload.turn)
     return decision
   })
+  // Official selection writer, set while the session controller is available.
+  let selectModel: ((request: { sessionId: string; provider: string; model: string; reasoningEffort?: string }) => Promise<unknown>) | undefined
+  const inflight = new Map<string, string>()
   ctx.on('agent/request', async (payload, next) => {
     const config = await next()
     if (payload.agent.session.header.origin === 'subagent') return config
     const model = router.needsModelInfo(ref(payload.agent)) ? await ctx.llm.resolveModelInfo(config.provider, config.model, payload.signal) : undefined
     const efforts = (model?.reasoning?.efforts ?? []).map(effort => effort.id).filter(id => knownEfforts.has(id)) as Effort[]
-    return router.request(ref(payload.agent), payload.turn, config as unknown as RequestConfig, efforts) as unknown as typeof config
+    const routed = router.request(ref(payload.agent), payload.turn, config as unknown as RequestConfig, efforts)
+    // AUTO moved the effort away from the official selection: make that selection (and the picker) carry it.
+    // `config` is the official selection for this request, so a user pick made since the last sync is caught too.
+    // Not awaited and never fatal; `inflight` only stops repeat calls before the first one lands.
+    if (selectModel && routed.reasoningEffort && routed.reasoningEffort !== config.reasoningEffort) {
+      const key = `${routed.provider}\0${routed.model}\0${routed.reasoningEffort}`
+      if (inflight.get(payload.agent.id) !== key) {
+        inflight.set(payload.agent.id, key)
+        selectModel({ sessionId: payload.agent.id, provider: routed.provider, model: routed.model, reasoningEffort: routed.reasoningEffort })
+          .catch(error => ctx.logger.warn(`auto-model-routing: could not sync the model selection: ${String(error)}`))
+          .finally(() => { if (inflight.get(payload.agent.id) === key) inflight.delete(payload.agent.id) })
+      }
+    }
+    return routed as unknown as typeof config
   }, { prepend: true })
+
+  ctx.inject(['sessionController'], child => {
+    selectModel = request => child.sessionController.selectModel(request as never)
+    child.effect(() => () => { selectModel = undefined })
+  })
 
   ctx.inject(['connection', 'sessionController'], child => {
     for (const operation of ['state', 'setMode'] as const) {

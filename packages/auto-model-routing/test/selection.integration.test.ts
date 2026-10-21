@@ -34,11 +34,18 @@ async function harness() {
  }
  ctx.llm.registerAdapter(['test'], new Adapter())
  const routes = new Map<string, { fetch: (r: Request) => Promise<Response> }>()
+ let picked: ModelSelectionRef['current'] = { provider: 'test', model: 'claude-opus-5-5', reasoningEffort: ReasoningEffortId('medium') }
  let current: unknown
  ctx.provide('connection', { fetch: { register(route: { path: string; fetch: (r: Request) => Promise<Response> }) { routes.set(route.path, route); return async () => { routes.delete(route.path) } } } } as never)
- ctx.provide('sessionController', { resolveAgent: async () => ({ agent: current }) } as never)
+ // Like the official controller: selectModel replaces the pending pick used by the next assembly.
+ ctx.provide('sessionController', {
+  resolveAgent: async () => ({ agent: current }),
+  selectModel: async (request: { provider: string; model: string; reasoningEffort?: string }) => {
+   picked = { provider: request.provider, model: request.model, ...(request.reasoningEffort ? { reasoningEffort: ReasoningEffortId(request.reasoningEffort) } : {}) }
+   return { selected: picked }
+  },
+ } as never)
  const fork = await ctx.plugin(plugin, { home: mkdtempSync(`${tmpdir()}/router-sel-`), jevBase: jev.base })
- let picked: ModelSelectionRef['current'] = { provider: 'test', model: 'claude-opus-5-5', reasoningEffort: ReasoningEffortId('medium') }
  let agentRef: { session: { requestHeader(): { config: { provider: string; model: string; reasoningEffort?: string } } | undefined } } | undefined
  const selection: ModelSelectionRef = {
   get current() {
@@ -74,18 +81,18 @@ it('manual_keeps_last_auto_effort', async () => {
  expect(h.jev.bodies).toHaveLength(1)
 })
 
-it('pending_pick_applies_after_manual', async () => {
+it('auto_overrides_pending_pick', async () => {
  const h = await harness()
  await h.run('普通问题')
  h.consumePick()
  await h.setMode('AUTO')
  await h.run('排查多个模块')
- // A pick during AUTO stays pending: the header (xhigh) never equals it, so the controller does not consume it.
+ // A pick made during AUTO is replaced by the next AUTO decision (it is synced to the official selection).
  h.pick('low')
  await h.run('排查多个模块')
  expect(h.calls.at(-1)?.reasoningEffort).toBe('xhigh')
+ await new Promise(r => setTimeout(r, 0))
  await h.setMode('MANUAL')
  await h.run('继续')
- // MANUAL passes the official selection through; the pending pick now takes effect.
- expect(h.calls.at(-1)?.reasoningEffort).toBe('low')
+ expect(h.calls.at(-1)?.reasoningEffort).toBe('xhigh')
 })

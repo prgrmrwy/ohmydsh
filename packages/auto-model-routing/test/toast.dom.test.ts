@@ -29,6 +29,7 @@ it('first poll only primes; a new id shows once and expires after 3 seconds', as
  await poll(); expect(toast()).toBeNull() // same id again
  await poll(); expect(toast()).toContain('主会话判断 · complex → xhigh')
  expect(toast()).toContain('standard 10% / complex 90%')
+ expect(toast()).not.toContain('置信')
  await act(async () => { await vi.advanceTimersByTimeAsync(2900) })
  expect(toast()).toContain('主会话判断')
  await act(async () => { await vi.advanceTimersByTimeAsync(100) })

@@ -121,7 +121,7 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
       h('div', { className: 'amr-card' },
         h('p', null, h('strong', null, view?.mode === 'AUTO' ? '自动调整推理强度' : '手动：不自动调整')),
         h('p', null, `本回合插件输出：${view?.effort ?? '未改写'} · ${view?.reason ?? '尚无决定'}`),
-        h('p', { className: 'amr-muted' }, 'MANUAL 不改写 effort；AUTO 期间若在右侧手选，切回 MANUAL 后生效。'),
+        h('p', { className: 'amr-muted' }, 'AUTO 的决定会同步到右侧模型选择；要手动指定 effort，请先切到 MANUAL。'),
         off && h('p', { role: 'status', className: 'amr-error' }, `Jev 停用（${off.category}）：${hint}。${new Date(off.at).toLocaleString()}。点击 AUTO 重试。`),
         h('p', { className: 'amr-muted' }, 'AUTO 会把任务文本发送给 OpenRouter/TypeSafe 判档。'),
         error && h('p', { role: 'alert', className: 'amr-error' }, error),

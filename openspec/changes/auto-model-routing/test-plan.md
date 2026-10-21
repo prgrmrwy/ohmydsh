@@ -7,7 +7,8 @@
 | specs/auto-model-routing/spec.md → 模式与改写规则 | MANUAL 请求原样通过 | test/router.test.ts | manual_passthrough | 🟢 green |
 | specs/auto-model-routing/spec.md → 模式与改写规则 | AUTO 只改 effort | test/router.test.ts | auto_effort_only | 🟢 green |
 | specs/auto-model-routing/spec.md → 模式与改写规则 | 切回 MANUAL 不复原 | test/selection.integration.test.ts | manual_keeps_last_auto_effort | 🟢 green |
-| specs/auto-model-routing/spec.md → 模式与改写规则 | AUTO 期间的手选在切回 MANUAL 后生效 | test/selection.integration.test.ts | pending_pick_applies_after_manual | 🟢 green |
+| specs/auto-model-routing/spec.md → 模式与改写规则 | AUTO 结果同步到官方选择 | test/host.integration.test.ts | auto_syncs_official_selection / selection_sync_failure_does_not_block_request | 🟢 green |
+| specs/auto-model-routing/spec.md → 模式与改写规则 | AUTO 判档覆盖待生效手选 | test/selection.integration.test.ts | auto_overrides_pending_pick | 🟢 green |
 | specs/auto-model-routing/spec.md → 模式与改写规则 | 快速切回 AUTO 不恢复旧决定 | test/router.test.ts | rapid_mode_toggle_invalidates_auto | 🟢 green |
 | specs/auto-model-routing/spec.md → 模式与改写规则 | 重复同模式设置无副作用 | test/state.test.ts | repeated_mode_is_noop | 🟢 green |
 | specs/auto-model-routing/spec.md → 模式与改写规则 | 旧状态文件可读 | test/state.test.ts | legacy_state_file_is_readable | 🟢 green |

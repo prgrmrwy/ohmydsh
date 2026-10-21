@@ -2,7 +2,7 @@
 
 ### Requirement: 模式与改写规则
 系统 SHALL 为每个主会话提供 `AUTO` 与 `MANUAL` 两种模式，默认 `MANUAL`，按会话持久化。
-- **AUTO**：系统 SHALL 只改写主会话请求的 reasoning effort，MUST NOT 改写 provider 与 model；同一回合内一经决定即不再变化。
+- **AUTO**：系统 SHALL 只改写主会话请求的 reasoning effort，MUST NOT 改写 provider 与 model；同一回合内一经决定即不再变化。改写出的 effort 与官方本次合成的 effort 不同时，系统 SHALL 经官方 `sessionController.selectModel` 把会话选择更新为 `{provider, model, effort}`（官方选择已为该值时不调用；同一值的调用尚未完成时不重复调用），使右侧模型选择器与实际请求一致；官方该接口同时把此选择保存为新会话的默认值（用户已接受）。调用失败 MUST NOT 影响本次请求。
 - **MANUAL**：系统 MUST NOT 改写任何字段，也 MUST NOT 把 effort 写回任何先前的值。切到 MANUAL 只是停止自动调整；此后请求使用官方当前选择（运行时在无待生效手选时沿用上一次实际请求的配置），由用户在官方模型选择器中自行调整。
 切 MANUAL SHALL 废止当前回合的 AUTO 决定：同回合后续请求不再改写。再次切 AUTO 只能在下一用户回合首个请求重新决定，此前 MUST NOT 恢复旧 AUTO 决定。重复设置相同模式 SHALL 为无副作用操作。插件不保存锚点、不维护复原义务；未加载时不请求 Jev、不改写。
 
@@ -21,10 +21,15 @@
 - **WHEN** 切 MANUAL 后同回合与下一回合发出请求
 - **THEN** 两个请求均与官方合成配置深度相等（effort 仍为 `xhigh`），MANUAL 请求不向历史追加条目
 
-#### Scenario: AUTO 期间的手选在切回 MANUAL 后生效
-- **GIVEN** 会话为 `AUTO`，用户在 AUTO 期间手选 `medium`（官方待生效手选），AUTO 仍按判档输出 `xhigh`
-- **WHEN** 切 MANUAL 后发出请求
-- **THEN** 请求与官方合成配置深度相等（effort 为手选的 `medium`），插件不改写
+#### Scenario: AUTO 结果同步到官方选择
+- **GIVEN** 会话为 `AUTO`，官方合成 `claude/claude-opus-5-5`、`medium`，本回合判档映射为 `xhigh`
+- **WHEN** 本回合首个与第二个请求经过路由器
+- **THEN** `selectModel` 恰被调用一次，参数为 `{sessionId, provider: claude, model: claude-opus-5-5, reasoningEffort: xhigh}`；官方合成已为 `xhigh` 时不再调用；`selectModel` 抛错时请求仍输出 `xhigh`
+
+#### Scenario: AUTO 判档覆盖待生效手选
+- **GIVEN** 会话为 `AUTO`，用户在 AUTO 期间手选 `medium`（官方待生效手选）
+- **WHEN** 下一回合 AUTO 判档为 `xhigh`，随后切 MANUAL 并发出请求
+- **THEN** 官方选择被更新为 `xhigh`；切 MANUAL 后的请求与官方合成配置深度相等，effort 为 `xhigh`
 
 #### Scenario: 快速切回 AUTO 不恢复旧决定
 - **GIVEN** 当前回合 AUTO 已决定 `xhigh`；为区分是否沿用旧决定，测试注入官方合成 `medium`
@@ -217,17 +222,17 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - `source = subagent`：`route_subagent` 成功返回；`model` 与 `effort` 为工具返回值；记录到调用工具的会话，与该会话模式无关。
 `confidence` 取 Jev 响应 `answers.tier.confidence`（0–1，缺失或非数字时不显示）；`probabilities` 取 `answers.tier.probabilities` 中四个档位的有限数值（其余键忽略，一个都没有时不显示）；`ms` 为该次 Jev 请求耗时。判档失败、取消或被丢弃时 MUST NOT 记录。
 
-开关开启时，状态接口 SHALL 返回 `decision`；client SHALL 在发现新的决策 `id` 时于芯片上方显示提示，3 秒后自动消失，不拦截指针；提示 MUST 在 Agent 运行、官方隐藏右侧控件期间仍可见（渲染在隐藏区域之外）。提示两行：第一行 `主会话判断 · <tier> → <effort> · 置信 <n>% · <s>s` 或 `子会话判断 · <tier> → <model> · <effort> · 置信 <n>% · <s>s`；第二行为分布，按 simple、standard、complex、escalated 固定顺序列出各档位百分比，以 ` / ` 分隔，例如 `simple 1% / standard 4% / complex 92% / escalated 3%`；无分布时省略第二行。两次状态读取之间若有多次决策，只显示最新一次。开关关闭时状态接口 MUST NOT 返回 `decision`，client 不显示提示。
+开关开启时，状态接口 SHALL 返回 `decision`；client SHALL 在发现新的决策 `id` 时于芯片上方显示提示，3 秒后自动消失，不拦截指针；提示 MUST 在 Agent 运行、官方隐藏右侧控件期间仍可见（渲染在隐藏区域之外）。提示两行：第一行 `主会话判断 · <tier> → <effort> · <s>s` 或 `子会话判断 · <tier> → <model> · <effort> · <s>s`；第二行为分布，按 simple、standard、complex、escalated 固定顺序列出四舍五入后非 0% 的档位，以 ` / ` 分隔，例如 `complex 61% / escalated 39%`；无分布时省略第二行。提示不显示置信（它由最高概率推导，不含额外信息，且易与分布混淆）。两次状态读取之间若有多次决策，只显示最新一次。开关关闭时状态接口 MUST NOT 返回 `decision`，client 不显示提示。
 
 #### Scenario: 主会话判档提示
 - **GIVEN** 开关开启，会话为 `AUTO`，Jev 返回 `complex`、confidence 0.92，实际模型为 Opus
 - **WHEN** 该回合首个请求经过路由器后读取状态并渲染提示
-- **THEN** 状态含 `decision = {source: main, tier: complex, effort: xhigh, confidence: 0.92, probabilities}`；提示第一行为 `主会话判断 · complex → xhigh · 置信 92% · <耗时>s`，第二行列出四档分布
+- **THEN** 状态含 `decision = {source: main, tier: complex, effort: xhigh, confidence: 0.92, probabilities}`；提示第一行为 `主会话判断 · complex → xhigh · <耗时>s`，第二行列出非 0% 的档位
 
 #### Scenario: 子会话选模提示
 - **GIVEN** 开关开启，会话 S1 为 `MANUAL`，Jev 对 `route_subagent` 返回 `complex`、confidence 0.8
 - **WHEN** S1 调用 `route_subagent(provider: claude)` 后读取 S1 状态并渲染提示
-- **THEN** 状态含 `decision = {source: subagent, tier: complex, model: claude-opus-5-5, effort: xhigh, confidence: 0.8, probabilities}`；提示第一行以 `子会话判断 · complex → claude-opus-5-5 · xhigh · 置信 80%` 开头
+- **THEN** 状态含 `decision = {source: subagent, tier: complex, model: claude-opus-5-5, effort: xhigh, confidence: 0.8, probabilities}`；提示第一行以 `子会话判断 · complex → claude-opus-5-5 · xhigh` 开头，不含“置信”
 
 #### Scenario: 开关关闭或判档失败不提示
 - **GIVEN** 开关关闭，或开关开启但 Jev 返回 402

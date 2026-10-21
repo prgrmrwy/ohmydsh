@@ -70,9 +70,12 @@ it('chip_style_and_hover_panel',()=>{
 })
 it('toast_once_and_expires',()=>{
  expect(toastText({id:1,source:'main',tier:'complex',effort:'xhigh',confidence:0.92,probabilities:{escalated:0.03,simple:0.01,complex:0.92,standard:0.04},ms:530}))
-  .toEqual(['主会话判断 · complex → xhigh · 置信 92% · 0.53s','simple 1% / standard 4% / complex 92% / escalated 3%'])
+  .toEqual(['主会话判断 · complex → xhigh · 0.53s','simple 1% / standard 4% / complex 92% / escalated 3%'])
  expect(toastText({id:2,source:'subagent',tier:'complex',model:'claude-opus-5-5',effort:'xhigh',confidence:0.8,ms:1234}))
-  .toEqual(['子会话判断 · complex → claude-opus-5-5 · xhigh · 置信 80% · 1.23s'])
+  .toEqual(['子会话判断 · complex → claude-opus-5-5 · xhigh · 1.23s'])
+ // Zero-percent tiers are omitted (as in the screenshot: simple/standard 0%).
+ expect(toastText({id:4,source:'main',tier:'complex',effort:'xhigh',confidence:0.48,probabilities:{simple:0,standard:0.004,complex:0.61,escalated:0.386},ms:780}))
+  .toEqual(['主会话判断 · complex → xhigh · 0.78s','complex 61% / escalated 39%'])
  expect(toastText({id:3,source:'main',tier:'simple',effort:'low',probabilities:{simple:1},ms:400}))
   .toEqual(['主会话判断 · simple → low · 0.40s','simple 100%'])
  // Only a new id shows; the same id never re-shows; it expires after 1 second.
