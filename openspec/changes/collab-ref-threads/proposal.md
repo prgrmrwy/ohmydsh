@@ -1,36 +1,50 @@
 ## Why
 
-The wake breaker counts per member per space: every ordinary wake a member receives in a space increments one counter that never decays, and at 6 the member is paused for good. The breaker exists to stop runaway back-and-forth on one piece of work, but the counter mixes all of a member's work together.
+The collaboration kernel wakes members too often and stops them for the wrong reason.
 
-A member doing ordinary collaboration on several unrelated tasks hits the limit and goes silent. In an agent-only space nobody can reset the counter: there is no human member, and `resetBreaker` is internal only. The space is effectively dead. This was hit in real use: a member reached 6/6 and stopped receiving messages, and the sender was never told.
+- **Wake triggers.** Almost every state change wakes someone: item revisions, acks, agreement, request progress, leader changes and human decisions.
+- **Breaker scope.** The breaker that is meant to stop runaway loops counts every wake a member receives in a space. The count never decays, and at 6 the member is paused for good.
+- **Real-use failure.** Ordinary work on unrelated tasks hit the limit; the member stopped receiving messages, and the sender was never told.
+- **No recovery.** Agent-only spaces have no human and no reset entry, so a paused member never recovers.
+- **Dead human-decision path.** The path (`requestDecision` / `confirmDecision`) has never been usable in dsh-collab, because there is no human confirmation channel. Items escalated to it are stuck.
 
-The user decided:
+The user and author agreed a direction. It is recorded in `packages/dsh-collab/docs/cross-boundary-collaboration-standard.md`.
 
-- Loop protection should be per single task, measured as **chain length**. Starting a new task restarts at length 1.
-- The ledger stays a flat log. Chains come from an optional `ref`; nobody needs to know who woke whom.
-- The limit is 20.
-- Nothing silently drops a wake. An over-limit command is rejected, and the agent stops and reports to its user.
-- There is no global backstop and no human reset entry.
-- Invalid references are rejected.
+- **Scope split.** Agent Teams covers work inside one boundary. dsh-collab covers cooperation across boundaries: repositories, Pet Locus and Feishu, and later machines.
+- **Shared principles.** dsh-collab aligns with Agent Teams and DSH parent/child semantics on principles, not features:
+  1. state changes do not wake anyone;
+  2. a request's completion notifies the requester;
+  3. explicit `needsReply` messages wake the recipient;
+  4. the ledger is the single source of truth.
+- **Loops.** Loop protection is per topic of conversation, not per member.
 
 ## What Changes
 
-- `sendMessage` and `createItem` accept an optional `ref`. It is the seq of an earlier message, or the creation seq of an earlier item, in the same space. The flat log is kept; events only gain optional fields.
-- **Chain length.** Each message and each item has a chain length derived on replay:
-  - A message without `ref` has length 1. A message with `ref` has the referenced record's current length + 1.
-  - An item starts at 1, or at the referenced length + 1 when created with `ref`. It grows by 1 on each item event that wakes someone: a revision that wakes required ackers, the ack that makes it agreed, a request progress change, or a human decision.
-  - Records written before this change have no `ref`; each starts at 1. Old logs replay without migration.
-- **BREAKING (kernel).**
-  - A command whose wake-producing event would push a chain beyond 20 is rejected with `COLLAB_THREAD_LIMIT`, before anything is written.
-  - Commands that wake nobody are never limited: messages with `needsReply:false`, acks that do not complete agreement, and status updates.
-  - The per-member breaker is removed: the `wakeCount` gate, `paused` presence, `resetBreaker`, and the `breaker-reset` internal purpose. Old `breaker/reset` events and old per-member wake counts replay but no longer gate anything, so currently paused members recover on load.
-- **BREAKING (kernel).** A leader change no longer wakes the new Leader. This removes the only wake that no chain could bound. The new Leader sees the change in `collab_status`/overview. Invitations still wake the invitee: an address can be invited at most once per space, so invitations cannot loop.
-- `ref`, chain lengths and item creation seqs are integers. The overview exposes `itemSeq` and `chainLength` maps. Wake pointers carry `thread`, the chain's start seq, when the wake comes from a message or item.
-- `dsh-collab`:
+- **Optional `ref`.** `sendMessage` and `createItem` accept an optional `ref`: the seq of an earlier message, or the creation seq of an earlier item, in the same space. The log stays flat; events only gain optional fields.
+- **Topics.** A topic is derived on replay as the root reached by following `ref`: a message or item without `ref` is its own root. Records written before this change have no `ref`, so each is its own root.
+- **Topic limit.** A `needsReply` message that would push its topic past 20 waking messages is rejected with `COLLAB_THREAD_LIMIT` before anything is written. An invalid `ref` is rejected with `COLLAB_BAD_REF`.
+- **BREAKING: wake table.** Only three things wake a member:
+  - a `needsReply` message, to its recipient;
+  - an invitation, to the invitee;
+  - a request reaching `done` or `rejected`, to the request's author.
+
+  These no longer wake anyone: item revision, ack, agreement, request `accepted`, leader change (explicit or automatic), human decisions.
+- **BREAKING: removed mechanisms.** The following are removed:
+  - the per-member breaker: `wakeCount` gating, `paused`, `BREAKER_LIMIT`, `resetBreaker`, internal purpose `breaker-reset`;
+  - human decisions: `requestDecision`, `confirmDecision`, `confirm` deliveries, `requestConfirmation` on the provider interface, `awaitingChannel`, `deciders`, item status `decided`;
+  - item escalation: `escalated`, `agentEditCount`, `ESCALATE_AFTER`.
+- **Consensus kept.** `charter` items with `requiredAcks` and `agreed` stay, because peers without a referee need it. They are now silent: whoever revises sends a `needsReply` message when it wants others to ack.
+- **Self-reported progress.** No new type is added. An `other` item with no `requiredAcks`, updated by its author, serves this purpose. The convention documents the usage.
+- **Space purpose.** `createSpace` accepts an optional short `purpose`, shown in `collab_status` so a member in several spaces can tell where to write.
+- **Old spaces stay loadable.** Removed event types replay as read-only history: decided and escalated items stay as they were and accept no further changes. No storage format version is introduced, so rolling back to the previous kernel can still load new logs.
+- **Convention v3** becomes the default for new spaces. It is v2 with the breaker, escalation and human-decision text replaced by the four principles, `ref`, topic limits, self-reported progress and space routing. v1 and v2 stay frozen.
+- **`dsh-collab` changes:**
+  - `collab_request_decision` is removed: 11 tools remain.
   - `collab_send_message` and `collab_create_item` gain optional `ref`.
-  - `collab_status` request entries gain the item's `seq`.
+  - `collab_space` `create` gains optional `purpose`.
+  - `collab_status` drops `escalated`, and gains each space's `purpose` and each request's `seq`.
   - The forwarded pointer includes `thread`.
-- Collaboration convention v3 becomes the default for new spaces. It explains `ref` for continuing the same task, a new chain for new work, the limit of 20, and the rule on `COLLAB_THREAD_LIMIT`: stop and report to your user, and do not open a new chain to continue the same exchange. v1 and v2 stay frozen.
+  - The wake notice no longer mentions `requestDecision`.
 
 ## Capabilities
 
@@ -40,33 +54,29 @@ The user decided:
 
 ### Modified Capabilities
 
-- `collab-kernel`:
-  - optional `ref` with chain-length derivation, `COLLAB_BAD_REF`, and the chain limit with `COLLAB_THREAD_LIMIT`;
-  - removal of the per-member breaker, `resetBreaker` and the `breaker-reset` purpose;
-  - leader change no longer wakes;
-  - pointer whitelist gains `thread`;
-  - the projection drops `paused`;
+- **`collab-kernel`:**
+  - optional `ref` and topic limit;
+  - new wake table (three triggers);
+  - breaker, human decision and escalation removed;
+  - silent consensus;
+  - space purpose;
+  - read-only replay of removed events;
+  - pointer `thread`;
+  - projection without paused, escalated or decision sections;
   - convention v3.
-- `dsh-collab`:
-  - tool parameters gain `ref`;
-  - status request entries gain `seq`;
-  - the forwarded pointer includes `thread`.
+- **`dsh-collab`:**
+  - 11 tools, with `ref` and `purpose` parameters;
+  - status whitelist changes;
+  - wake notice text;
+  - removal of the "no human channel" requirement, now moot.
 
 ## Impact
 
 - **Code:**
-  - `packages/collab-kernel/src/{model,auth,domain/reduce,domain/decide,domain/wake,service,projection,convention}`
-  - `packages/dsh-collab/src/{tools,status,session-provider}.ts`
-  - `tsdown.config.ts`
-- **Persisted data:**
-  - New optional fields: `message.ref` on `message/sent`, `item.ref` on `item/created`, and `delivery.thread` on `dispatch/intended`.
-  - No event type is removed from the reader. No new event type is introduced.
-  - New logs remain loadable by the previous kernel. It ignores the unknown fields, and nothing new is written in a shape it rejects.
-- **Public kernel API:**
-  - `BREAKER_LIMIT` is replaced by `CHAIN_LIMIT` (20).
-  - `resetBreaker` and `InternalPurpose 'breaker-reset'` are removed.
-  - `Overview.presence` no longer contains `paused`.
-  - `Overview` gains `itemSeq` and `chainLength`.
-  - The only in-repo consumer is `dsh-collab`.
-- **Tool schema size:** currently 4002 of the 4200-character budget. The additions are kept short and measured.
-- **Docs:** dsh-collab READMEs (zh/en) and the `dsh.yaml` note (which mention "6 per member" and "约定v2") are updated.
+  - `packages/collab-kernel/src/{model,auth,domain,service,projection,convention}`;
+  - `packages/dsh-collab/src/{tools,status,session-provider}.ts`;
+  - `packages/dsh-collab/tsdown.config.ts`, which copies `v3.md`.
+- **Tests:** breaker, decision, escalation and wake-table tests are deleted or rewritten. Storage, lock, idempotency, member, lifecycle and admission tests are kept.
+- **Persisted data:** new optional fields `message.ref`, `item.ref`, `space.purpose`, `delivery.thread`. Existing logs replay. New logs remain loadable by the previous kernel, which ignores unknown fields; a rolled-back kernel resumes its old per-member counting.
+- **Docs:** dsh-collab READMEs (zh/en) and the `dsh.yaml` note, which mention the 6-per-member breaker and convention v2.
+- **Prior planning:** this change was previously planned as a narrower per-chain limit (seven review rounds, archived under `history/`). It is replanned against the standard, so earlier verdicts do not carry over.
