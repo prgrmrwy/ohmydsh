@@ -5,8 +5,9 @@ import { mkdir, realpath, stat } from 'node:fs/promises'
 import { dirname, basename, isAbsolute, join, relative, sep, resolve } from 'node:path'
 
 export type Admission = 'invite' | 'allowlist'
-export interface HostConfig { dataDir?: string; admission?: Admission; allowedSessionIds?: readonly string[]; denySessionIds?: readonly string[] }
-export interface AdmissionPolicy { admission: Admission; allowedSessionIds: readonly string[]; denySessionIds: readonly string[] }
+export interface HostConfig { dataDir?: string; admission?: Admission; allowedSessionIds?: readonly string[]; denySessionIds?: readonly string[]; memberTrust?: boolean }
+/** `memberTrust`: the operator pre-consents that invitees join and members take requests within their own permissions. */
+export interface AdmissionPolicy { admission: Admission; allowedSessionIds: readonly string[]; denySessionIds: readonly string[]; memberTrust: boolean }
 function bad(): never { throw Object.assign(new Error('Invalid collaboration Host configuration'), { code: 'COLLAB_BAD_CONFIG' }) }
 function under(root: string, target: string) {
   const rel = relative(root, target)
@@ -35,12 +36,14 @@ const ids = (value: unknown): string[] => {
 }
 /** Synchronous admission/ID-list validation; runs before any tool registration or IO. */
 export function admissionPolicy(config: HostConfig): AdmissionPolicy {
-  if (!config || typeof config !== 'object' || Object.keys(config).some(key => !['dataDir', 'admission', 'allowedSessionIds', 'denySessionIds'].includes(key))) bad()
+  if (!config || typeof config !== 'object' || Object.keys(config).some(key => !['dataDir', 'admission', 'allowedSessionIds', 'denySessionIds', 'memberTrust'].includes(key))) bad()
   const admission = config.admission ?? 'invite'
   if (admission !== 'invite' && admission !== 'allowlist') bad()
   const allowedSessionIds = ids(config.allowedSessionIds), denySessionIds = ids(config.denySessionIds)
   if (allowedSessionIds.some(id => denySessionIds.includes(id))) bad()
-  return { admission, allowedSessionIds, denySessionIds }
+  const memberTrust = config.memberTrust ?? true
+  if (typeof memberTrust !== 'boolean') bad()
+  return { admission, allowedSessionIds, denySessionIds, memberTrust }
 }
 /**
  * Default ledger location: `<DSH home>/plugins/dsh-collab`, where DSH home follows the official

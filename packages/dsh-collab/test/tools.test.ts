@@ -86,8 +86,7 @@ describe('named tools adapt the kernel faithfully', () => {
     host.session('session-a', { live: true }); host.session('session-b', { live: true })
     await start(host); const op = ops(host)
     expect(await op.create('session-a', 's', 'a')).toEqual({ seq: 1, spaceId: 's' })
-    await op.invite('session-a', 's', 'b', 'session-b'); await settle()
-    expect((await op.join('session-b', 's')).error).toBeUndefined()
+    expect(await op.invite('session-a', 's', 'b', 'session-b')).toEqual({ seq: 2, spaceId: 's', autoJoined: true }); await settle()
     expect((await op.createItem('session-a', 's', { itemId: 'item-1', requiredAcks: ['b'] })).itemId).toBe('item-1')
     expect((await op.ack('session-b', 's', 'item-1', 1)).error).toBeUndefined()
     const [viewA, viewB] = [await op.overview('session-a', 's'), await op.overview('session-b', 's')]

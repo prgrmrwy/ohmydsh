@@ -7,7 +7,7 @@ import { checkedItem, checkFields, checkRevision } from '../domain/items.js'
 import { fail, ESCALATE_AFTER, type Address, type Binding, type CollabEvent, type CommandResult, type CommitRecord, type CreateItemInput, type Item, type Member, type MemberKind, type Overview, type Progress, type ReceiptScope, type ReviseItemInput, type SpaceState } from '../model/index.js'
 import type { ChannelProvider } from '../spi/index.js'
 import type { CollabStore } from '../store/interface.js'
-import { defaultConvention } from '../convention/index.js'
+import { conventions, defaultConvention } from '../convention/index.js'
 import { project } from '../projection/index.js'
 export interface ReadContext { principal: Principal; spaceId: string }
 export interface CommandContext extends ReadContext { cmdId: string }
@@ -346,5 +346,12 @@ export class CollabService {
   }
   async readSince(ctx: ReadContext, seq: number): Promise<CommitRecord[]> { this.readState(ctx); if (!Number.isInteger(seq) || seq < 0) fail('COLLAB_BAD_SEQ'); return structuredClone((this.records.get(ctx.spaceId) ?? []).filter(r => r.seq > seq)) }
   async project(ctx: ReadContext): Promise<string> { const s = await this.overview(ctx); return this.options.project?.(s) ?? project(s, s.presence) }
-  async readConvention(ctx: ReadContext, version: string): Promise<string> { this.readState(ctx); const convention = this.options.convention ?? defaultConvention; if (convention.version !== version) fail('COLLAB_CONVENTION_UNKNOWN'); return convention.text }
+  async readConvention(ctx: ReadContext, version: string): Promise<string> {
+    this.readState(ctx)
+    const custom = this.options.convention
+    if (custom) { if (custom.version !== version) fail('COLLAB_CONVENTION_UNKNOWN'); return custom.text }
+    // Spaces keep the version recorded at creation; every published version stays readable.
+    if (!Object.hasOwn(conventions, version)) fail('COLLAB_CONVENTION_UNKNOWN')
+    return conventions[version]!.text
+  }
 }

@@ -103,7 +103,7 @@ customizations:
     version: 0.1.0
     enabled: true
     brief: 已有独立会话经邀请共享协作台账与下一回合通知
-    note: '自研，spec dsh-collab（+change dsh-collab-invite-admission）。内联零运行时依赖collab-kernel当前源码；默认admission:invite邀请即授权（完整session ID，不限邀请与累计唤醒，靠熔断/拒绝/denySessionIds），allowlist兼容首版；改deny/准入须build+restart。12个常驻工具、collab_status为入口。dataDir须由单一Host进程独占（不跨pid命名空间）、在workspace/部署目录外且0700；启动按死亡证明自动清残锁，损坏日志停机dsh-collab-salvage或换新spaceId（抢救后seq复用）。只接受入队，不自动重发。升级复核官方cold preset和真实关闭预算。移除关闭工具与存储但保留台账；本机 dataDir 等配置由私有 overlay 的 mergeConfig 补丁提供（2026-10-20 用户授权日常启用）。'
+    note: '自研，spec dsh-collab（+change dsh-collab-invite-admission）。内联零运行时依赖collab-kernel当前源码；默认admission:invite邀请即授权（完整session ID，不限邀请与累计唤醒，靠熔断/拒绝/denySessionIds），allowlist兼容首版；改deny/准入须build+restart。memberTrust默认true（+change dsh-collab-member-trust）：邀请后宿主代为join、唤醒说明为在原有权限内直接承接request的常设授权，false恢复手动join与原唤醒文本；新空间用约定v2。12个常驻工具、collab_status为入口。dataDir须由单一Host进程独占（不跨pid命名空间）、在workspace/部署目录外且0700；启动按死亡证明自动清残锁，损坏日志停机dsh-collab-salvage或换新spaceId（抢救后seq复用）。只接受入队，不自动重发。升级复核官方cold preset和真实关闭预算。移除关闭工具与存储但保留台账；本机 dataDir 等配置由私有 overlay 的 mergeConfig 补丁提供（2026-10-20 用户授权日常启用）。'
     buildInputs:
       - packages/collab-kernel/src
       - packages/collab-kernel/package.json

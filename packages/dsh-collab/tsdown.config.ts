@@ -14,7 +14,7 @@ export default defineConfig({
   deps: { neverBundle: [/^@deepseek-ai\//], alwaysBundle: ['collab-kernel'] },
   outputOptions: { codeSplitting: false, entryFileNames: '[name].js' },
   hooks: { 'build:done': async () => {
-    await copyFile(new URL('../collab-kernel/src/convention/v1.md', import.meta.url), new URL('./lib/v1.md', import.meta.url))
+    for (const name of ['v1.md', 'v2.md']) await copyFile(new URL(`../collab-kernel/src/convention/${name}`, import.meta.url), new URL(`./lib/${name}`, import.meta.url))
     await copyFile(new URL('./src/cli.mjs', import.meta.url), new URL('./lib/salvage.mjs', import.meta.url))
   } },
 })
